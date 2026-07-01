@@ -543,6 +543,83 @@ html[data-theme="dark"] .theme-toggle:hover {
 .tp-campo { margin-bottom: 10px; }
 .tp-campo label { display: block; font-size: .78rem; font-weight: 600; color: var(--text-soft); margin-bottom: 3px; }
 .tp-campo textarea { width: 100%; font-size: .84rem; line-height: 1.45; }
+
+/* === ANEXOS DO FINANCEIRO === */
+.fin-anexos-lista { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.fin-anexo-item {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  width: 110px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 6px; background: var(--surface); position: relative;
+}
+.fin-anexo-item img { width: 96px; height: 72px; object-fit: cover; border-radius: 4px; cursor: pointer; }
+.fin-anexo-info { display: flex; flex-direction: column; align-items: center; width: 100%; }
+.fin-anexo-nome { font-size: .68rem; color: var(--text); max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fin-anexo-tam { font-size: .64rem; color: var(--text-mute); }
+.fin-anexo-item .btn-rm {
+  position: absolute; top: -6px; right: -6px; width: 22px; height: 22px;
+  border-radius: 50%; border: 1px solid var(--border); background: var(--surface);
+  cursor: pointer; font-size: .7rem; color: var(--danger, #c92a52); line-height: 1;
+}
+
+/* === ADICIONAIS DE FATURAMENTO === */
+.adic-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+@media (max-width: 600px) { .adic-grid { grid-template-columns: 1fr; } }
+.adic-item {
+  display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  cursor: pointer; font-size: .88rem; transition: background .12s;
+}
+.adic-item:hover { background: var(--surface-alt); }
+.adic-item input { width: 16px; height: 16px; flex-shrink: 0; }
+
+/* === GUIA DE ASSINATURA (fluxo híbrido receita) === */
+.assinar-passos { display: flex; flex-direction: column; gap: 14px; margin: 8px 0; }
+.assinar-passo { display: flex; gap: 12px; align-items: flex-start; }
+.assinar-num {
+  flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--primary); color: #fff; font-weight: 700; font-size: .9rem;
+  display: flex; align-items: center; justify-content: center;
+}
+.assinar-passo b { font-size: .9rem; color: var(--text); }
+.assinar-desc { font-size: .82rem; color: var(--text-soft); margin-top: 3px; line-height: 1.45; }
+.assinar-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.assinar-links a { text-decoration: none; }
+
+/* === PROCEDIMENTOS EXTRAS NA PRÉ === */
+.pre-procs-lista { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+.pre-proc-row { display: flex; gap: 6px; align-items: center; }
+.pre-proc-cod { width: 130px; flex-shrink: 0; font-size: .84rem; }
+.pre-proc-desc { flex: 1; font-size: .84rem; }
+.pre-proc-row .btn-rm {
+  flex-shrink: 0; width: 30px; height: 30px; border: 1px solid var(--border);
+  background: var(--surface); border-radius: 6px; cursor: pointer; color: var(--danger, #c92a52);
+}
+.pre-proc-row .btn-rm:hover { background: var(--danger-soft, #fdeef2); }
+.pac-auto-box {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 50;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); box-shadow: 0 6px 24px rgba(0,0,0,.16);
+  margin-top: 2px; max-height: 280px; overflow-y: auto;
+}
+.pac-auto-item {
+  padding: 10px 14px; cursor: pointer; display: flex; align-items: center;
+  justify-content: space-between; gap: 8px; font-size: .9rem;
+  border-bottom: 1px solid var(--border-soft, #eee);
+}
+.pac-auto-item:hover, .pac-auto-item.pac-auto-active { background: var(--primary-soft); }
+.pac-auto-nome { color: var(--text); font-weight: 500; }
+.pac-auto-tag {
+  font-size: .68rem; text-transform: uppercase; letter-spacing: .3px;
+  background: var(--success-soft, #d1f0e0); color: var(--success, #1a7a4a);
+  padding: 2px 7px; border-radius: 10px; font-weight: 600; flex-shrink: 0;
+}
+.pac-auto-empty { padding: 12px 14px; color: var(--text-soft); font-size: .86rem; font-style: italic; }
+.pac-auto-add {
+  padding: 11px 14px; cursor: pointer; font-size: .88rem; font-weight: 600;
+  color: var(--primary); background: var(--surface-alt);
+  border-top: 1px solid var(--border);
+}
+.pac-auto-add:hover, .pac-auto-add.pac-auto-active { background: var(--primary-soft); }
 .action-divider {
   width: 1px; height: 22px;
   background: var(--border); margin: 0 4px; flex-shrink: 0;
@@ -1367,6 +1444,66 @@ canvas#signature-canvas {
 @media (max-width: 900px) {
   .dash-grid { grid-template-columns: 1fr; }
 }
+
+/* === GRÁFICOS DASHBOARD === */
+.dash-donut-wrap { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.dash-donut-svg { width: 130px; height: 130px; flex-shrink: 0; }
+.dash-donut-total { font-size: 20px; font-weight: 800; fill: var(--text); }
+.dash-donut-cap { font-size: 8px; fill: var(--text-soft); text-transform: uppercase; letter-spacing: .5px; }
+.dash-legend { flex: 1; min-width: 140px; display: flex; flex-direction: column; gap: 5px; }
+.dash-legend-item { display: flex; align-items: center; gap: 8px; font-size: .82rem; }
+.dash-legend-dot { width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; }
+.dash-legend-label { flex: 1; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-legend-val { color: var(--text-soft); font-weight: 600; font-size: .78rem; flex-shrink: 0; }
+
+.dash-bars { display: flex; flex-direction: column; gap: 8px; padding: 4px 0; }
+.dash-bar-row { display: flex; align-items: center; gap: 10px; }
+.dash-bar-label { width: 34%; font-size: .8rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-bar-track { flex: 1; height: 16px; background: var(--surface-alt); border-radius: 8px; overflow: hidden; }
+.dash-bar-fill { height: 100%; border-radius: 8px; transition: width .5s ease; min-width: 3px; }
+.dash-bar-val { width: 28px; text-align: right; font-size: .8rem; font-weight: 700; color: var(--text); flex-shrink: 0; }
+
+/* Elementos clicáveis dos gráficos */
+.dash-clickable { cursor: pointer; transition: opacity .12s, transform .12s; }
+path.dash-clickable:hover { opacity: .8; }
+.dash-legend-item.dash-clickable:hover, .dash-bar-row.dash-clickable:hover { background: var(--primary-soft); border-radius: 6px; }
+.dash-bar-row.dash-clickable { padding: 3px 4px; margin: 0 -4px; }
+
+/* Modal de detalhamento ao clicar num gráfico */
+.dash-detalhe-count { font-size: .8rem; color: var(--text-soft); font-weight: 600; margin-bottom: 8px; }
+.dash-detalhe-lista { display: flex; flex-direction: column; gap: 6px; max-height: 55vh; overflow-y: auto; }
+.dash-detalhe-item {
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  cursor: pointer; transition: background .12s, border-color .12s;
+}
+.dash-detalhe-item:hover { background: var(--primary-soft); border-color: var(--primary); }
+.dash-detalhe-main { display: flex; align-items: center; gap: 8px; }
+.dash-detalhe-nome { font-weight: 600; color: var(--text); }
+.dash-detalhe-extra { font-size: .8rem; color: var(--text-soft); margin-top: 2px; }
+.dash-detalhe-dt { font-size: .72rem; color: var(--text-mute); margin-top: 2px; }
+
+/* === BUSCA NO BANCO === */
+.dash-search-card { margin-top: 14px; }
+.dash-search-controls { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.dash-search-controls input { flex: 1; min-width: 200px; padding: 10px 14px; font-size: .92rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.dash-search-controls select { padding: 10px 12px; font-size: .88rem; border: 1px solid var(--border); border-radius: var(--radius-sm); width: auto; }
+.dash-search-results { display: flex; flex-direction: column; gap: 6px; }
+.dash-search-hint { color: var(--text-soft); font-size: .86rem; font-style: italic; padding: 8px 2px; }
+.dash-search-count { font-size: .78rem; color: var(--text-soft); font-weight: 600; margin-bottom: 4px; }
+.dash-search-item {
+  display: grid; grid-template-columns: 1fr auto; gap: 2px 12px;
+  padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  cursor: pointer; transition: background .12s, border-color .12s;
+}
+.dash-search-item:hover { background: var(--primary-soft); border-color: var(--primary); }
+.dash-search-main { display: flex; align-items: center; gap: 8px; }
+.dash-search-mod {
+  font-size: .66rem; text-transform: uppercase; letter-spacing: .3px; font-weight: 700;
+  background: var(--primary); color: #fff; padding: 2px 7px; border-radius: 4px; flex-shrink: 0;
+}
+.dash-search-nome { font-weight: 600; color: var(--text); }
+.dash-search-det { font-size: .8rem; color: var(--text-soft); grid-column: 1; }
+.dash-search-dt { font-size: .74rem; color: var(--text-soft); grid-column: 2; grid-row: 1 / span 2; align-self: center; text-align: right; white-space: nowrap; }
 
 .bar-chart { padding: 6px 0; }
 .bar-row {
@@ -2857,7 +2994,7 @@ body.dark .sig-tabs { background: var(--surface-alt); }
     <a class="nav-item" data-module="ajustes"    href="#ajustes"><span class="nav-icon">⚙️</span><span class="nav-label">Ajustes</span></a>
   </nav>
   <div class="sidebar-footer">
-    v7.0 · offline-ready · responsivo<br>
+    v7.1 · offline-ready · responsivo<br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -2926,29 +3063,57 @@ body.dark .sig-tabs { background: var(--surface-alt); }
     </div>
     <div class="page-title">
       <h1>Dashboard</h1>
-      <span class="subtitle">Visão analítica dos registros</span>
+      <span class="subtitle">Visão analítica dos registros · <span style="font-size:.7rem;color:#8a93a0">v7.1 · gráficos</span></span>
     </div>
 
     <div class="kpi-grid" id="kpi-grid"></div>
 
     <div class="dash-grid">
+      <div class="card no-collapse"><div class="card-header"><div class="card-title-wrap"><h2>Total de atendimentos</h2></div></div>
+        <div class="card-body" id="dash-total-atend"></div>
+      </div>
+      <div class="card no-collapse"><div class="card-header"><div class="card-title-wrap"><h2>Fonte pagadora</h2></div></div>
+        <div class="card-body" id="dash-pagadora"></div>
+      </div>
       <div class="card no-collapse" data-detail="tipos"><div class="card-header"><div class="card-title-wrap"><h2>Tipos de anestesia</h2></div></div>
         <div class="card-body" id="dash-tipos"></div>
       </div>
-      <div class="card no-collapse" data-detail="cirurgioes"><div class="card-header"><div class="card-title-wrap"><h2>Top cirurgiões</h2></div></div>
+      <div class="card no-collapse" data-detail="cirurgioes"><div class="card-header"><div class="card-title-wrap"><h2>Cirurgiões atendidos</h2></div></div>
         <div class="card-body" id="dash-cirurgioes"></div>
       </div>
-      <div class="card no-collapse" data-detail="hospitais"><div class="card-header"><div class="card-title-wrap"><h2>Top hospitais / clínicas</h2></div></div>
-        <div class="card-body" id="dash-hospitais"></div>
-      </div>
-      <div class="card no-collapse" data-detail="convenios"><div class="card-header"><div class="card-title-wrap"><h2>Distribuição por convênio</h2></div></div>
+      <div class="card no-collapse" data-detail="convenios"><div class="card-header"><div class="card-title-wrap"><h2>Convênios / planos</h2></div></div>
         <div class="card-body" id="dash-convenios"></div>
       </div>
-      <div class="card no-collapse" data-detail="procedimentos"><div class="card-header"><div class="card-title-wrap"><h2>Top procedimentos</h2></div></div>
+      <div class="card no-collapse" data-detail="hospitais"><div class="card-header"><div class="card-title-wrap"><h2>Hospitais / clínicas</h2></div></div>
+        <div class="card-body" id="dash-hospitais"></div>
+      </div>
+      <div class="card no-collapse" data-detail="procedimentos"><div class="card-header"><div class="card-title-wrap"><h2>Procedimentos</h2></div></div>
         <div class="card-body" id="dash-procedimentos"></div>
       </div>
       <div class="card no-collapse" data-detail="financeiro"><div class="card-header"><div class="card-title-wrap"><h2>Resumo financeiro</h2></div></div>
         <div class="card-body" id="dash-financeiro"></div>
+      </div>
+    </div>
+
+    <!-- BUSCA NO BANCO DE DADOS -->
+    <div class="card no-collapse dash-search-card no-print">
+      <div class="card-header"><div class="card-title-wrap"><span class="card-icon">🔎</span><h2>Pesquisar no banco de dados</h2></div></div>
+      <div class="card-body">
+        <div class="dash-search-controls">
+          <input type="text" id="dash-search-input" placeholder="Buscar por paciente, cirurgião, procedimento, convênio..." oninput="dashboard.buscar()" autocomplete="off">
+          <select id="dash-search-mod" onchange="dashboard.buscar()">
+            <option value="all">Todos os módulos</option>
+            <option value="anestesia">Anestesia</option>
+            <option value="pre">Pré-anestésica</option>
+            <option value="consulta">Consulta / Dor</option>
+            <option value="recuperacao">Recuperação (SRPA)</option>
+            <option value="termo">Termo</option>
+            <option value="prescricao">Prescrição</option>
+            <option value="risco">Risco</option>
+            <option value="financeiro">Financeiro</option>
+          </select>
+        </div>
+        <div id="dash-search-results" class="dash-search-results"></div>
       </div>
     </div>
 
@@ -3028,7 +3193,14 @@ body.dark .sig-tabs { background: var(--surface-alt); }
           </div>
           <div class="field col-2"><label>Peso (kg)</label><input type="number" name="peso" step="0.1"></div>
           <div class="field col-2"><label>Altura (cm)</label><input type="number" name="altura" step="0.1"></div>
-          <div class="field col-6"><label>Cirurgia proposta <small style="color:var(--text-mute);font-weight:400">(autocompleta da CBHPM)</small></label><input type="text" name="cirurgia" class="cbhpm-autocomplete" placeholder="Digite parte do procedimento ou o código TUSS..."></div>
+          <div class="field col-6">
+            <label>Cirurgia proposta <small style="color:var(--text-mute);font-weight:400">(autocompleta da CBHPM)</small></label>
+            <div style="display:flex;gap:6px;align-items:stretch">
+              <input type="text" name="cirurgia" class="cbhpm-autocomplete" placeholder="Digite parte do procedimento ou o código TUSS..." style="flex:1">
+              <button type="button" class="btn btn-primary btn-sm" style="flex-shrink:0;padding:0 12px" onclick="pre.procs.add()" title="Adicionar mais um procedimento">+</button>
+            </div>
+            <div id="pre-procs-lista" class="pre-procs-lista"></div>
+          </div>
           <div class="field col-6"><label>Cirurgião</label><input type="text" name="cirurgiao"></div>
           <div class="field col-6"><label>Hospital / clínica</label><input type="text" name="hospital"></div>
         </div>
@@ -4958,7 +5130,7 @@ body.dark .sig-tabs { background: var(--surface-alt); }
     <button class="btn" onclick="historico.abrir('prescricao')"><span class="icon">🔍</span> Buscar / Histórico</button>
     <div class="action-divider"></div>
     <button class="btn" onclick="printPreview.abrir()"><span class="icon">🖨️</span> Visualizar / Imprimir</button>
-    <button class="btn" style="background:#1c64a9;color:#fff;border-color:#1c64a9" onclick="pdfGen.assinarReceita()" title="Gerar PDF e enviar ao app de assinatura (SafeID, gov.br...)"><span class="icon">✍️</span> Assinar digitalmente</button>
+    <button class="btn" style="background:#1c64a9;color:#fff;border-color:#1c64a9" onclick="pdfGen.assinarReceita()" title="Passo a passo para assinar com validade legal (ICP-Brasil / CFM / gov.br)"><span class="icon">✍️</span> Assinar (validade legal)</button>
     <button class="btn" onclick="pdfGen.baixarReceitaPDF()" title="Gerar o PDF da receita"><span class="icon">📄</span> Gerar PDF</button>
     <button class="btn" onclick="prescricao.exportar()"><span class="icon">⬇️</span> Exportar</button>
     <button class="btn btn-ghost" onclick="actions.importarJSONPara('prescricao')"><span class="icon">⬆️</span> Importar</button>
@@ -5359,6 +5531,18 @@ body.dark .sig-tabs { background: var(--surface-alt); }
             </div>
           </div>
 
+          <!-- ANEXOS / COMPROVANTES -->
+          <h3 style="font-size:.92rem;color:var(--primary-darker);margin:18px 0 8px;border-top:1px solid var(--border);padding-top:14px">
+            📎 Anexos / comprovantes
+            <small style="color:var(--text-mute);font-weight:400;margin-left:8px">— fotos de guias, senhas, comprovantes (auxiliam a conciliação)</small>
+          </h3>
+          <div>
+            <input type="file" id="fin-anexo-input" accept="image/*" multiple style="display:none" onchange="financeiro.anexos.adicionarArquivos(this.files); this.value=''">
+            <button type="button" class="btn btn-sm" onclick="document.getElementById('fin-anexo-input').click()">📷 Adicionar foto / arquivo</button>
+            <span style="font-size:.76rem;color:var(--text-mute);margin-left:8px">Imagens até 2 MB cada (redimensionadas automaticamente)</span>
+            <div id="fin-anexos-lista" class="fin-anexos-lista"></div>
+          </div>
+
           <!-- TOTAIS AGREGADOS -->
           <h3 style="font-size:.92rem;color:var(--primary-darker);margin:18px 0 8px;border-top:1px solid var(--border);padding-top:14px">💰 Valores e status</h3>
           <div class="grid">
@@ -5643,11 +5827,20 @@ body.dark .sig-tabs { background: var(--surface-alt); }
             <div class="field col-3"><label>CPF</label><input type="text" name="cpf" placeholder="000.000.000-00"></div>
             <div class="field col-3"><label>Telefone</label><input type="text" name="telefone"></div>
             <div class="field col-6"><label>E-mail</label><input type="email" name="email"></div>
+            <div class="field col-12"><label>Endereço residencial <small style="color:var(--text-mute)">(obrigatório em receita de controle especial)</small></label><input type="text" name="endereco" placeholder="Rua, número, bairro, cidade/UF"></div>
             <div class="field col-6"><label>Plano de saúde</label>
               <input type="text" name="plano" id="paciente-plano-input" placeholder="Digite ou selecione" autocomplete="off">
             </div>
             <div class="field col-3"><label>Carteirinha</label><input type="text" name="carteirinha"></div>
           <div class="field col-3"><label>Prontuário / Registro</label><input type="text" name="prontuario"></div>
+            <div class="field col-12">
+              <label>Acomodação (faturamento)</label>
+              <label class="check-chip" style="display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:.9rem">
+                <input type="checkbox" name="apartamento" value="1" style="width:16px;height:16px">
+                🏨 Paciente internado em apartamento (adicional de apartamento)
+              </label>
+              <small style="display:block;color:var(--text-mute);margin-top:4px">Se marcado, o adicional de apartamento já vem pré-selecionado ao finalizar a anestesia e vai para a conciliação.</small>
+            </div>
             <div class="field col-12"><label>Observações</label><textarea name="observacoes" rows="2"></textarea></div>
           </div>
           <div class="table-actions" style="margin-top:14px">
@@ -6912,6 +7105,74 @@ const pre = {
   _popularAssinaturas() {},
   _previewAssinatura() {},
 
+  /* ===== Procedimentos adicionais (múltiplos códigos CBHPM na Pré) ===== */
+  procs: {
+    /* Adiciona uma linha de procedimento (código + nome) */
+    add(dados = {}) {
+      const host = document.getElementById('pre-procs-lista');
+      if (!host) return;
+      cbhpm.garantirDatalist();
+      if (!document.getElementById('cbhpm-codigo-datalist')) {
+        const dl2 = document.createElement('datalist');
+        dl2.id = 'cbhpm-codigo-datalist';
+        dl2.innerHTML = CBHPM_2018.map(c => `<option value="${utils.escapeAttr(c[0])}">${utils.escapeAttr(c[1])} (porte ${c[2]})</option>`).join('');
+        document.body.appendChild(dl2);
+      }
+      const row = document.createElement('div');
+      row.className = 'pre-proc-row';
+      row.innerHTML = `
+        <input type="text" name="pre_proc_codigo[]" list="cbhpm-codigo-datalist" value="${utils.escapeAttr(dados.codigo || '')}" placeholder="Código TUSS" class="pre-proc-cod" oninput="pre.procs._onCodigo(this)">
+        <input type="text" name="pre_proc_desc[]" list="cbhpm-datalist" value="${utils.escapeAttr(dados.descricao || '')}" placeholder="Nome do procedimento (CBHPM)" class="pre-proc-desc" oninput="pre.procs._onDesc(this)">
+        <button type="button" class="btn-rm" onclick="this.closest('.pre-proc-row').remove(); markDirty();" title="Remover">✕</button>
+      `;
+      host.appendChild(row);
+      markDirty();
+    },
+    _onCodigo(input) {
+      const cod = input.value.trim();
+      if (!cod) return;
+      const row = input.closest('.pre-proc-row');
+      const match = CBHPM_2018.find(c => c[0] === cod);
+      if (match) {
+        const descEl = row.querySelector('.pre-proc-desc');
+        if (descEl && !descEl.value) descEl.value = match[1];
+      }
+      markDirty();
+    },
+    _onDesc(input) {
+      const txt = input.value.trim().toLowerCase();
+      if (txt.length < 3) return;
+      const row = input.closest('.pre-proc-row');
+      const codEl = row.querySelector('.pre-proc-cod');
+      if (codEl && codEl.value) return;
+      const matches = CBHPM_2018.filter(c => c[1].toLowerCase().includes(txt));
+      if (matches.length === 1 && codEl && !codEl.value) codEl.value = matches[0][0];
+      markDirty();
+    },
+    /* Coleta a lista de procedimentos extras para salvar */
+    coletar() {
+      const host = document.getElementById('pre-procs-lista');
+      if (!host) return [];
+      const rows = [];
+      host.querySelectorAll('.pre-proc-row').forEach(r => {
+        const codigo = (r.querySelector('.pre-proc-cod') || {}).value || '';
+        const descricao = (r.querySelector('.pre-proc-desc') || {}).value || '';
+        if (codigo || descricao) rows.push({ codigo, descricao });
+      });
+      return rows;
+    },
+    /* Restaura a lista ao carregar um registro */
+    restaurar(lista) {
+      const host = document.getElementById('pre-procs-lista');
+      if (host) host.innerHTML = '';
+      (lista || []).forEach(p => pre.procs.add(p));
+    },
+    limpar() {
+      const host = document.getElementById('pre-procs-lista');
+      if (host) host.innerHTML = '';
+    }
+  },
+
   /* ===== Medicações em uso: busca combinada (Prescrição + condutas peri-op) ===== */
   meds: {
     _lista: [],   // [{nome, conduta}]
@@ -7058,6 +7319,7 @@ const pre = {
     if (state.dirty && !confirm('Descartar alterações não salvas?')) return;
     utils.clearForm(pre.formId);
     try { pre.meds.limpar(); } catch (e) {}
+    try { pre.procs.limpar(); } catch (e) {}
     document.querySelector(`#${pre.formId} [name="data"]`).value = utils.hojeISO();
     pre._linkPendente = null;
     ui.atualizarDocStatus('pre', null);
@@ -7072,6 +7334,7 @@ const pre = {
     if (!utils.validar(pre.formId)) { toast('Preencha os campos obrigatórios', 'warn'); return; }
     const data = utils.formData(pre.formId);
     try { data._medsLista = pre.meds._lista.slice(); } catch (e) {}
+    try { data._procsExtra = pre.procs.coletar(); } catch (e) {}
     const f = document.getElementById(pre.formId);
     const idEl = f.querySelector('[name="_id"]');
     if (idEl) data._id = idEl.value || undefined;
@@ -7169,6 +7432,7 @@ const pre = {
     ui.fecharBanner('banner-pre');
     try { assinatura.restaurar('sig-pre', 'form-pre'); } catch (e) {}
     try { pre.meds.restaurar(item); } catch (e) {}
+    try { pre.procs.restaurar(item._procsExtra); } catch (e) {}
     markClean();
     toast('Avaliação carregada'); ui.expandirTodos('pre');
   },
@@ -8810,6 +9074,203 @@ const textosPadrao = {
 };
 
 /* ============================================================================
+   AUTOCOMPLETE DE PACIENTE — ao digitar o nome em qualquer módulo, sugere
+   pacientes já cadastrados (do cadastro central + histórico de registros) e
+   oferece "+ Cadastrar novo paciente". Selecionar preenche e dispara o
+   autopreenchimento de dados existente.
+============================================================================ */
+const pacienteAutocomplete = {
+  _box: null,
+  _input: null,
+  _mod: null,
+  _idx: -1,
+  _itens: [],
+
+  /* Reúne nomes únicos de pacientes: cadastro central + todos os módulos */
+  _coletarNomes() {
+    const mapa = new Map(); /* chave normalizada -> {nome, cadastrado} */
+    try {
+      store.list('pacientes').forEach(p => {
+        if (!p.nome) return;
+        const k = linker._normNome(p.nome);
+        mapa.set(k, { nome: p.nome, cadastrado: true, dados: p });
+      });
+    } catch (e) {}
+    /* nomes vindos de registros de módulos (não cadastrados formalmente) */
+    ['anestesia', 'pre', 'consulta', 'recuperacao', 'termo', 'prescricao'].forEach(m => {
+      try {
+        store.list(m).forEach(it => {
+          const nome = it.paciente_nome || it.nome || (it.paciente && it.paciente.nome) || it.paciente;
+          if (!nome || typeof nome !== 'string') return;
+          const k = linker._normNome(nome);
+          if (!mapa.has(k)) mapa.set(k, { nome: nome, cadastrado: false });
+        });
+      } catch (e) {}
+    });
+    return Array.from(mapa.values());
+  },
+
+  /* Filtra por texto digitado */
+  _filtrar(texto) {
+    const q = linker._normNome(texto);
+    const todos = pacienteAutocomplete._coletarNomes();
+    if (!q) return todos.slice(0, 8);
+    return todos
+      .filter(x => linker._normNome(x.nome).includes(q))
+      .sort((a, b) => {
+        /* prioriza começa-com e cadastrados */
+        const aStart = linker._normNome(a.nome).startsWith(q) ? 0 : 1;
+        const bStart = linker._normNome(b.nome).startsWith(q) ? 0 : 1;
+        if (aStart !== bStart) return aStart - bStart;
+        if (a.cadastrado !== b.cadastrado) return a.cadastrado ? -1 : 1;
+        return a.nome.localeCompare(b.nome);
+      })
+      .slice(0, 8);
+  },
+
+  /* Liga o autocomplete a um input */
+  attach(input, mod) {
+    if (!input || input.dataset.pacAuto) return;
+    input.dataset.pacAuto = '1';
+    input.setAttribute('autocomplete', 'off');
+    input.addEventListener('input', () => pacienteAutocomplete._abrir(input, mod));
+    input.addEventListener('focus', () => { if (input.value.trim().length >= 1) pacienteAutocomplete._abrir(input, mod); });
+    input.addEventListener('keydown', (e) => pacienteAutocomplete._teclado(e));
+    input.addEventListener('blur', () => setTimeout(() => pacienteAutocomplete._fechar(), 200));
+  },
+
+  _abrir(input, mod) {
+    pacienteAutocomplete._input = input;
+    pacienteAutocomplete._mod = mod;
+    const texto = input.value.trim();
+    const resultados = pacienteAutocomplete._filtrar(texto);
+    pacienteAutocomplete._itens = resultados;
+    pacienteAutocomplete._idx = -1;
+    pacienteAutocomplete._render(texto);
+  },
+
+  _render(texto) {
+    pacienteAutocomplete._fechar();
+    const input = pacienteAutocomplete._input;
+    if (!input) return;
+    const box = document.createElement('div');
+    box.className = 'pac-auto-box';
+    let html = '';
+    if (pacienteAutocomplete._itens.length) {
+      pacienteAutocomplete._itens.forEach((it, i) => {
+        const tag = it.cadastrado ? '<span class="pac-auto-tag">cadastrado</span>' : '';
+        html += `<div class="pac-auto-item" data-i="${i}" onmousedown="event.preventDefault(); pacienteAutocomplete._escolher(${i})">
+          <span class="pac-auto-nome">${utils.escapeHTML(it.nome)}</span>${tag}</div>`;
+      });
+    } else {
+      html += `<div class="pac-auto-empty">Nenhum paciente encontrado</div>`;
+    }
+    /* opção de cadastrar */
+    const nomeDigitado = texto ? ` "${utils.escapeHTML(texto)}"` : '';
+    html += `<div class="pac-auto-add" onmousedown="event.preventDefault(); pacienteAutocomplete._novoPaciente()">
+      ➕ Cadastrar novo paciente${nomeDigitado}</div>`;
+    box.innerHTML = html;
+    /* posiciona logo abaixo do input */
+    const wrap = input.closest('.field') || input.parentNode;
+    wrap.style.position = wrap.style.position || 'relative';
+    wrap.appendChild(box);
+    pacienteAutocomplete._box = box;
+  },
+
+  _fechar() {
+    if (pacienteAutocomplete._box) {
+      pacienteAutocomplete._box.remove();
+      pacienteAutocomplete._box = null;
+    }
+  },
+
+  _teclado(e) {
+    const box = pacienteAutocomplete._box;
+    if (!box) return;
+    const n = pacienteAutocomplete._itens.length;
+    const total = n + 1; /* +1 pela opção cadastrar */
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      pacienteAutocomplete._idx = (pacienteAutocomplete._idx + 1) % total;
+      pacienteAutocomplete._destacar();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      pacienteAutocomplete._idx = (pacienteAutocomplete._idx - 1 + total) % total;
+      pacienteAutocomplete._destacar();
+    } else if (e.key === 'Enter') {
+      if (pacienteAutocomplete._idx >= 0) {
+        e.preventDefault();
+        if (pacienteAutocomplete._idx < n) pacienteAutocomplete._escolher(pacienteAutocomplete._idx);
+        else pacienteAutocomplete._novoPaciente();
+      }
+    } else if (e.key === 'Escape') {
+      pacienteAutocomplete._fechar();
+    }
+  },
+
+  _destacar() {
+    const box = pacienteAutocomplete._box;
+    if (!box) return;
+    box.querySelectorAll('.pac-auto-item, .pac-auto-add').forEach((el, i) => {
+      el.classList.toggle('pac-auto-active', i === pacienteAutocomplete._idx);
+    });
+  },
+
+  _escolher(i) {
+    const it = pacienteAutocomplete._itens[i];
+    const input = pacienteAutocomplete._input;
+    const mod = pacienteAutocomplete._mod;
+    if (!it || !input) return;
+    input.value = it.nome;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    pacienteAutocomplete._fechar();
+    /* dispara autopreenchimento existente */
+    try {
+      linker.autoPreencherDadosPaciente(it.nome, mod);
+      if (mod === 'anestesia') linker.importarPreParaAnestesia(it.nome);
+      if (mod === 'termo' && typeof termo !== 'undefined' && termo._reaplicarPadraoSeAtivo) termo._reaplicarPadraoSeAtivo();
+    } catch (e) {}
+    try { markDirty(); } catch (e) {}
+  },
+
+  _novoPaciente() {
+    const nome = pacienteAutocomplete._input ? pacienteAutocomplete._input.value.trim() : '';
+    pacienteAutocomplete._fechar();
+    /* abre o cadastro de paciente com o nome pré-preenchido */
+    try {
+      if (typeof pacientes !== 'undefined' && pacientes.novoComNome) {
+        pacientes.novoComNome(nome);
+      } else {
+        ui.navegar('pacientes');
+        setTimeout(() => {
+          const inp = document.querySelector('#form-pacientes [name="nome"]');
+          if (inp) { inp.value = nome; inp.dispatchEvent(new Event('input', { bubbles: true })); inp.focus(); }
+        }, 150);
+      }
+    } catch (e) { ui.navegar('pacientes'); }
+  },
+
+  /* Liga a todos os campos de nome dos módulos (chamado no load) */
+  init() {
+    const campos = [
+      { form: 'form-pre', name: 'nome', mod: 'pre' },
+      { form: 'form-consulta', name: 'nome', mod: 'consulta' },
+      { form: 'form-anestesia', name: 'paciente_nome', mod: 'anestesia' },
+      { form: 'form-recuperacao', name: 'nome', mod: 'recuperacao' },
+      { form: 'form-termo', name: 'nome', mod: 'termo' },
+      { form: 'form-prescricao', name: 'nome', mod: 'prescricao' },
+      { form: 'form-risco', name: 'nome', mod: 'risco' }
+    ];
+    campos.forEach(c => {
+      const form = document.getElementById(c.form);
+      if (!form) return;
+      const input = form.querySelector(`[name="${c.name}"]`);
+      if (input) pacienteAutocomplete.attach(input, c.mod);
+    });
+  }
+};
+
+/* ============================================================================
    sigUI — overlay "ampliar / fixar" para assinatura.
    Abre um quadro grande em tela cheia, travando a rolagem da página, para
    assinar confortavelmente sem a tela se mover junto com o dedo. Ao confirmar,
@@ -9645,7 +10106,7 @@ const pdfGen = {
 
     /* rodapé discreto */
     doc.setFontSize(7.5); doc.setTextColor(150);
-    doc.text('Documento gerado por Soft Anestesia — assine digitalmente para validade legal.', W / 2, H - 8, { align: 'center' });
+    doc.text('Documento gerado por Soft Anestesia. Válido somente com assinatura digital ICP-Brasil (QR Code do assinador oficial).', W / 2, H - 8, { align: 'center' });
     doc.setTextColor(0);
 
     const nomeArq = 'receita_' + (d.nome || 'paciente').replace(/[^\w\s-]/g, '').replace(/\s+/g, '_').slice(0, 30) + '_' + utils.hojeISO() + '.pdf';
@@ -9673,21 +10134,103 @@ const pdfGen = {
     return false;
   },
 
-  /* Handler do botão "Assinar digitalmente" da receita */
+  /* Handler do botão "Assinar digitalmente" da receita — fluxo híbrido guiado */
   async assinarReceita() {
     const itens = (typeof prescricao !== 'undefined') ? prescricao._coletarItens() : [];
     const d = utils.formData('form-prescricao');
-    if (!d.nome) { toast('Informe o nome do paciente antes de gerar a receita', 'warn'); return; }
-    if (!itens.length) { toast('Adicione ao menos um medicamento', 'warn'); return; }
+    const especial = d.tipo === 'especial';
+
+    /* ===== Validação dos requisitos legais (Lei 5.991/1973 + RDC 1.000/2025) ===== */
+    const faltando = [];
+    if (!d.nome) faltando.push('Nome do paciente');
+    if (!itens.length) faltando.push('Ao menos um medicamento');
+    /* posologia obrigatória em cada item */
+    const semPosologia = itens.filter(it => it.nome && !it.pos).map(it => it.nome);
+    if (semPosologia.length) faltando.push('Posologia/modo de usar: ' + semPosologia.join(', '));
+    if (especial && !d.endereco) faltando.push('Endereço do paciente (obrigatório em controle especial)');
+    if (!d.data) faltando.push('Data');
+
+    /* identificação do profissional */
+    let clinica = {};
+    try {
+      const ativa = store.list('cad_assinaturas').find(x => x._id === localStorage.getItem(STORAGE.cad_assinatura_ativa)) || store.list('cad_assinaturas')[0];
+      if (ativa) clinica = ativa;
+    } catch (e) {}
+    if (!(clinica.crm || d.crm)) faltando.push('CRM do médico (cadastre em Ajustes → Meu perfil profissional)');
+    if (!(clinica.endereco)) faltando.push('Endereço do consultório (Ajustes → Meu perfil profissional)');
+
+    if (faltando.length) {
+      const lista = faltando.map(f => `<li>${utils.escapeHTML(f)}</li>`).join('');
+      modal.open('⚠️ Campos obrigatórios para validade legal',
+        `<p style="font-size:.9rem;margin-bottom:10px">Para a receita ser aceita pela farmácia, a lei exige estes itens. Complete antes de assinar:</p>
+         <ul style="font-size:.88rem;line-height:1.7;padding-left:20px;color:var(--danger)">${lista}</ul>
+         <p style="font-size:.82rem;color:var(--text-soft);margin-top:12px">A identificação do médico (nome, CRM, endereço do consultório) vem do cadastro em <b>Ajustes → Meu perfil profissional</b>.</p>`,
+        `<button class="btn" onclick="modal.close()">Entendi</button>`);
+      return;
+    }
+
+    /* ===== Tudo certo — abre o guia de assinatura ICP-Brasil ===== */
+    pdfGen._guiaAssinatura(especial);
+  },
+
+  /* Modal com o passo a passo do fluxo híbrido: gerar PDF → assinar → enviar */
+  _guiaAssinatura(especial) {
+    const avisoEspecial = especial
+      ? `<div style="background:#fff4e5;border:1px solid #f0c47c;border-radius:8px;padding:10px 12px;margin:10px 0;font-size:.84rem">
+           <b>⚠️ Controle especial:</b> exige obrigatoriamente assinatura com certificado <b>ICP-Brasil</b>.
+           Assine pela plataforma do CFM ou por um assinador ICP-Brasil. Receitas de notificação A (amarela) e B (azul) ainda precisam de talonário físico.
+         </div>`
+      : '';
+    const body = `
+      <p style="font-size:.9rem;margin-bottom:6px">Seu sistema monta a receita; a <b>validade jurídica e o QR Code</b> vêm do assinador oficial. Siga os 3 passos:</p>
+      ${avisoEspecial}
+      <div class="assinar-passos">
+        <div class="assinar-passo">
+          <span class="assinar-num">1</span>
+          <div>
+            <b>Gere e salve o PDF da receita</b>
+            <div class="assinar-desc">Toque abaixo para gerar o PDF completo (com todos os campos legais) e salvá-lo no aparelho.</div>
+            <button class="btn btn-primary btn-sm" style="margin-top:6px" onclick="pdfGen._gerarParaAssinar()">📄 Gerar PDF da receita</button>
+          </div>
+        </div>
+        <div class="assinar-passo">
+          <span class="assinar-num">2</span>
+          <div>
+            <b>Assine com certificado ICP-Brasil</b>
+            <div class="assinar-desc">Abra um dos serviços abaixo, faça login, envie o PDF e assine. O serviço carimba o <b>QR Code + código de validação</b> que a farmácia reconhece.</div>
+            <div class="assinar-links">
+              <a class="btn btn-sm" href="https://prescricaoeletronica.cfm.org.br/" target="_blank" rel="noopener">🩺 Prescrição Eletrônica CFM (gratuito)</a>
+              <a class="btn btn-sm" href="https://assinador.iti.gov.br/" target="_blank" rel="noopener">🏛️ Assinador gov.br / ITI</a>
+            </div>
+            <div class="assinar-desc" style="margin-top:6px">Não tem certificado? Médicos adimplentes com o CRM têm <b>certificado gratuito</b> pelo CFM.</div>
+          </div>
+        </div>
+        <div class="assinar-passo">
+          <span class="assinar-num">3</span>
+          <div>
+            <b>Envie a receita assinada ao paciente</b>
+            <div class="assinar-desc">Baixe o PDF já assinado (com QR Code) e envie por WhatsApp, e-mail ou salve. É esse arquivo que vale na farmácia.</div>
+          </div>
+        </div>
+      </div>
+      <p style="font-size:.78rem;color:var(--text-mute);margin-top:12px">
+        ℹ️ O PDF gerado aqui, sozinho, é um rascunho sem validade jurídica. A validade só existe após a assinatura ICP-Brasil no passo 2.
+      </p>`;
+    modal.open('✍️ Assinar receita com validade legal', body, `<button class="btn" onclick="modal.close()">Fechar</button>`);
+  },
+
+  /* Gera o PDF e dispara compartilhamento/salvamento (chamado pelo passo 1 do guia) */
+  async _gerarParaAssinar() {
     const r = pdfGen.receita();
     if (!r) return;
     const compartilhou = await pdfGen._compartilhar(r.doc, r.nomeArq);
     if (compartilhou) {
-      toast('📤 Escolha o SafeID (ou app de assinatura) na folha de compartilhamento');
+      toast('📤 PDF pronto — salve no aparelho e siga para o passo 2 (assinar)');
     } else {
-      toast('📥 PDF salvo. Abra-o no SafeID para assinar.');
+      toast('📥 PDF salvo. Agora abra o assinador do passo 2 e envie este arquivo.');
     }
   },
+
   /* Apenas gerar e baixar/visualizar o PDF, sem assinar */
   async baixarReceitaPDF() {
     const r = pdfGen.receita();
@@ -13671,7 +14214,13 @@ const anestesia = {
         tipo2: v('assinatura_tipo2'),
         /* compatibilidade: signature pad antigo (deprecated mas mantém para fichas legadas) */
         imagem: (typeof anestesia.signature?.getDataURL === 'function') ? anestesia.signature.getDataURL() : ''
-      }
+      },
+      adicionais: (() => {
+        try {
+          const el = document.querySelector('#form-anestesia [name="_adicionais"]');
+          return el && el.value ? JSON.parse(el.value) : null;
+        } catch (e) { return null; }
+      })()
     };
   },
 
@@ -13895,7 +14444,108 @@ const anestesia = {
       setTimeout(() => anestesia._perguntarSRPA(docCompleto), 300);
     }
   },
-  finalizar() { anestesia.salvar({ finalizar: true }); },
+  finalizar() { anestesia.adicionais.perguntar(() => anestesia.salvar({ finalizar: true })); },
+
+  /* ===== ADICIONAIS DE FATURAMENTO (apartamento, urgência, FDS...) ===== */
+  adicionais: {
+    OPCOES: [
+      { key: 'apartamento', label: 'Adicional de apartamento' },
+      { key: 'urgencia', label: 'Urgência / emergência' },
+      { key: 'fim_semana', label: 'Fim de semana / feriado' },
+      { key: 'periodo_noturno', label: 'Período noturno' },
+      { key: 'porte_anestesico', label: 'Porte anestésico diferenciado' },
+      { key: 'via_dupla', label: 'Dupla via de acesso' },
+      { key: 'multiplos_proc', label: 'Múltiplos procedimentos' },
+      { key: 'acompanhamento', label: 'Acompanhamento prolongado' }
+    ],
+    _cb: null,
+    perguntar(callback) {
+      anestesia.adicionais._cb = callback;
+      /* pré-marca conforme dados já preenchidos, se houver */
+      const salvos = anestesia.adicionais._lidosDoForm();
+      /* pré-marca apartamento se o paciente estiver cadastrado como apartamento */
+      const autoMarcados = anestesia.adicionais._doCadastroPaciente();
+      const preMarcar = new Set([...salvos, ...autoMarcados]);
+      const avisoApto = autoMarcados.includes('apartamento')
+        ? '<div style="background:#e8f1fa;border:1px solid #9cc4e6;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:.82rem">🏨 Este paciente está cadastrado como <b>apartamento</b> — o adicional já vem marcado.</div>'
+        : '';
+      const linhas = anestesia.adicionais.OPCOES.map(o => `
+        <label class="adic-item">
+          <input type="checkbox" name="adic_${o.key}" ${preMarcar.has(o.key) ? 'checked' : ''}>
+          <span>${o.label}</span>
+        </label>`).join('');
+      const body = `
+        <p style="font-size:.88rem;color:var(--text-soft);margin-bottom:12px">
+          Selecione os adicionais aplicáveis a este procedimento. Eles serão registrados no lançamento financeiro para auxiliar a conciliação.
+        </p>
+        ${avisoApto}
+        <div class="adic-grid">${linhas}</div>
+        <div class="field" style="margin-top:12px">
+          <label>Observação sobre adicionais (opcional)</label>
+          <textarea id="adic-obs" rows="2" placeholder="Ex.: cirurgia iniciada às 23h, paciente em apartamento..."></textarea>
+        </div>`;
+      const footer = `
+        <button class="btn" onclick="anestesia.adicionais._pular()">Pular</button>
+        <button class="btn btn-primary" onclick="anestesia.adicionais._confirmar()">Confirmar e finalizar</button>`;
+      modal.open('💰 Adicionais de faturamento', body, footer);
+    },
+    _lidosDoForm() {
+      const f = document.getElementById('form-anestesia');
+      if (!f) return [];
+      const arr = [];
+      anestesia.adicionais.OPCOES.forEach(o => {
+        const el = f.querySelector(`[name="adic_${o.key}"]`);
+        if (el && el.checked) arr.push(o.key);
+      });
+      return arr;
+    },
+    /* Lê o cadastro do paciente (pelo nome no form) e retorna adicionais automáticos */
+    _doCadastroPaciente() {
+      const auto = [];
+      try {
+        const f = document.getElementById('form-anestesia');
+        const nome = f ? (f.querySelector('[name="paciente_nome"]') || {}).value : '';
+        if (!nome) return auto;
+        const alvo = linker._normNome(nome);
+        const pac = store.list('pacientes').find(p => linker._normNome(p.nome) === alvo);
+        if (pac && (pac.apartamento === true || pac.apartamento === '1' || pac.apartamento === 1)) {
+          auto.push('apartamento');
+        }
+      } catch (e) {}
+      return auto;
+    },
+    _confirmar() {
+      const marcados = [];
+      anestesia.adicionais.OPCOES.forEach(o => {
+        const el = document.querySelector(`#modal-body [name="adic_${o.key}"]`);
+        if (el && el.checked) marcados.push(o.key);
+      });
+      const obs = (document.getElementById('adic-obs') || {}).value || '';
+      /* guarda num campo hidden do form da anestesia para ser salvo junto */
+      anestesia.adicionais._persistirNoForm(marcados, obs);
+      modal.close();
+      const cb = anestesia.adicionais._cb;
+      anestesia.adicionais._cb = null;
+      if (cb) cb();
+    },
+    _pular() {
+      modal.close();
+      const cb = anestesia.adicionais._cb;
+      anestesia.adicionais._cb = null;
+      if (cb) cb();
+    },
+    _persistirNoForm(marcados, obs) {
+      const f = document.getElementById('form-anestesia');
+      if (!f) return;
+      let hid = f.querySelector('[name="_adicionais"]');
+      if (!hid) {
+        hid = document.createElement('input');
+        hid.type = 'hidden'; hid.name = '_adicionais';
+        f.appendChild(hid);
+      }
+      hid.value = JSON.stringify({ itens: marcados, obs });
+    }
+  },
   /* Modal: pergunta se deseja criar SRPA já preenchida */
   _perguntarSRPA(docAnestesia) {
     if (!docAnestesia) return;
@@ -14570,7 +15220,7 @@ const linker = {
     const dadosCad = cadPac ? {
       nome: cadPac.nome, nascimento: cadPac.nascimento, idade: cadPac.idade,
       sexo: cadPac.sexo, peso: cadPac.peso, altura: cadPac.altura,
-      cpf: cadPac.cpf, prontuario: cadPac.prontuario,
+      cpf: cadPac.cpf, prontuario: cadPac.prontuario, endereco: cadPac.endereco,
       convenio: cadPac.convenio, plano: cadPac.plano, matricula: cadPac.matricula,
       telefone: cadPac.telefone, email: cadPac.email
     } : {};
@@ -14766,6 +15416,45 @@ const linker = {
         nImp++;
       }
     });
+
+    /* Também importa procedimentos extras da Pré-anestésica do mesmo paciente */
+    try {
+      const p = linker.ultimoPorNome('pre', nomePaciente);
+      if (p && Array.isArray(p._procsExtra)) {
+        p._procsExtra.forEach(pe => {
+          if (!pe.descricao && !pe.codigo) return;
+          let match = pe.codigo ? CBHPM_2018.find(c => c[0] === pe.codigo) : null;
+          if (!match && pe.descricao) {
+            const cand = CBHPM_2018.filter(c => c[1].toLowerCase().includes(pe.descricao.toLowerCase()));
+            if (cand.length === 1) match = cand[0];
+          }
+          if (window.financeiro && financeiro.codigos) {
+            financeiro.codigos.add({
+              codigo: pe.codigo || (match ? match[0] : ''),
+              descricao: pe.descricao || (match ? match[1] : ''),
+              porte: match ? match[2] : '',
+              status: 'aguardando'
+            });
+            nImp++;
+          }
+        });
+      }
+    } catch (e) {}
+
+    /* Registra adicionais da anestesia (apartamento, urgência, FDS...) no campo observação */
+    try {
+      if (a.adicionais && a.adicionais.itens && a.adicionais.itens.length) {
+        const LABELS = { apartamento: 'Apartamento', urgencia: 'Urgência', fim_semana: 'FDS/Feriado', periodo_noturno: 'Noturno', porte_anestesico: 'Porte anestésico', via_dupla: 'Dupla via', multiplos_proc: 'Múltiplos proc.', acompanhamento: 'Acompanhamento' };
+        const nomes = a.adicionais.itens.map(k => LABELS[k] || k).join(', ');
+        const obsEl = form.querySelector('[name="observacoes"]');
+        if (obsEl) {
+          const txtAdic = 'Adicionais: ' + nomes + (a.adicionais.obs ? ' — ' + a.adicionais.obs : '');
+          if (!obsEl.value.includes('Adicionais:')) {
+            obsEl.value = (obsEl.value ? obsEl.value + '\n' : '') + txtAdic;
+          }
+        }
+      }
+    } catch (e) {}
 
     /* Marca vínculo para salvar depois */
     if (window.financeiro) {
@@ -16349,6 +17038,20 @@ const pacientes = {
       toast('Erro ao abrir: ' + (e.message || ''), 'error');
     }
   },
+  /* Abre o cadastro de novo paciente já com o nome preenchido (vindo do autocomplete) */
+  novoComNome(nome) {
+    ui.navegar('pacientes');
+    setTimeout(() => {
+      try {
+        pacientes.editar(null);
+        setTimeout(() => {
+          const inp = document.querySelector(`#${pacientes.formId} [name="nome"]`);
+          if (inp && nome) { inp.value = nome; inp.dispatchEvent(new Event('input', { bubbles: true })); }
+          if (inp) inp.focus();
+        }, 120);
+      } catch (e) { console.error(e); }
+    }, 150);
+  },
   cancelar() {
     document.getElementById(pacientes.cardId).style.display = 'none';
     utils.clearForm(pacientes.formId);
@@ -16458,7 +17161,7 @@ const pacientes = {
     }
     tbody.innerHTML = list.map(p => `
       <tr>
-        <td data-label="Nome"><strong>${utils.escapeHTML(p.nome || '')}</strong></td>
+        <td data-label="Nome"><strong>${utils.escapeHTML(p.nome || '')}</strong>${(p.apartamento === true || p.apartamento === '1' || p.apartamento === 1) ? ' <span style="font-size:.66rem;background:#e8f1fa;color:#1c64a9;padding:2px 7px;border-radius:10px;font-weight:600;white-space:nowrap">🏨 Apto</span>' : ''}</td>
         <td data-label="CPF">${utils.escapeHTML(p.cpf || '')}</td>
         <td data-label="Nascimento">${utils.formatarData(p.nascimento)}</td>
         <td data-label="Plano">${utils.escapeHTML(p.plano || '')}</td>
@@ -16569,6 +17272,17 @@ const pacientes = {
 const ajustes = {
   /* Configuração de cada categoria */
   CATEGORIAS: [
+    { key: 'cad_assinaturas', icon: '🪪', label: 'Meu perfil profissional', singular: 'Perfil profissional', hasCarimbo: true,
+      campos: [
+        { name: 'nomeProfissional', label: 'Nome do profissional', required: true, col: 8 },
+        { name: 'crm', label: 'CRM', col: 4 },
+        { name: 'rqe', label: 'RQE', col: 4 },
+        { name: 'especialidade', label: 'Especialidade', col: 8 },
+        { name: 'endereco', label: 'Endereço do consultório', col: 12 },
+        { name: 'cidade', label: 'Cidade (para o local na assinatura)', col: 6 },
+        { name: 'telefone', label: 'Telefone', col: 6 }
+      ]
+    },
     { key: 'cad_anestesistas', icon: '👨‍⚕️', label: 'Anestesistas', singular: 'Anestesista', hasCarimbo: true,
       campos: [
         { name: 'nome', label: 'Nome', required: true, col: 6 },
@@ -16662,7 +17376,7 @@ const ajustes = {
             <div class="simples-item">
               ${cat.hasCarimbo && it.carimbo ? `<div class="signature-preview" style="width:80px; height:36px; flex-shrink:0; margin-right:6px"><img src="${it.carimbo}" alt=""></div>` : ''}
               <div style="flex:1">
-                <div class="si-name">${utils.escapeHTML(it.nome || '')}${cat.hasCarimbo && it.carimbo ? ' <span style="color:var(--accent);font-size:.7rem">✓ com carimbo</span>' : ''}</div>
+                <div class="si-name">${utils.escapeHTML(it.nome || it.nomeProfissional || '')}${cat.hasCarimbo && it.carimbo ? ' <span style="color:var(--accent);font-size:.7rem">✓ com carimbo</span>' : ''}</div>
                 <div class="si-meta">${ajustes._renderMeta(cat, it)}</div>
               </div>
               <div class="si-actions">
@@ -16676,7 +17390,7 @@ const ajustes = {
   },
   _renderMeta(cat, item) {
     return cat.campos
-      .filter(c => c.name !== 'nome' && item[c.name])
+      .filter(c => c.name !== 'nome' && c.name !== 'nomeProfissional' && item[c.name])
       .map(c => `<strong>${c.label}:</strong> ${utils.escapeHTML(String(item[c.name]).slice(0, 60))}`)
       .join(' · ') || '';
   },
@@ -16771,6 +17485,14 @@ const ajustes = {
       }
     });
     store.save(catKey, data);
+    /* Se for o perfil profissional, marca como assinatura ativa automaticamente */
+    if (catKey === 'cad_assinaturas') {
+      try {
+        const salvos = store.list('cad_assinaturas');
+        const atual = data._id ? salvos.find(x => x._id === data._id) : salvos[salvos.length - 1];
+        if (atual) localStorage.setItem(STORAGE.cad_assinatura_ativa, atual._id);
+      } catch (e) {}
+    }
     toast('Cadastro salvo');
     ajustes.render();
   },
@@ -18480,6 +19202,150 @@ ${TAG_CLOSE_HTML}`;
    MÓDULO — DASHBOARD
 ============================================================================ */
 const dashboard = {
+  /* ===== GRÁFICOS SVG (offline, sem libs) ===== */
+
+  /* Paleta consistente */
+  _paleta: ['#1c64a9', '#17a2b8', '#28a745', '#f0a500', '#e8590c', '#c92a52', '#6f42c1', '#5a6472', '#20a4b8', '#8bb63e'],
+
+  /* Donut/rosca com legenda — data: {label: valor} */
+  renderDonut(elId, data, opts = {}) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    const entries = Object.entries(data).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+    const total = entries.reduce((s, [, v]) => s + v, 0);
+    if (!total) { el.innerHTML = '<div class="empty-state">Sem registros ainda — cadastre atendimentos para ver o gráfico</div>'; return; }
+
+    const cat = opts.categoria || elId;   /* identificador p/ o clique */
+    const R = 60, r = 38, cx = 70, cy = 70;
+    let acc = 0;
+    const segs = entries.map(([k, v], i) => {
+      const frac = v / total;
+      const a0 = acc * 2 * Math.PI - Math.PI / 2;
+      acc += frac;
+      const a1 = acc * 2 * Math.PI - Math.PI / 2;
+      const large = frac > 0.5 ? 1 : 0;
+      const x0 = cx + R * Math.cos(a0), y0 = cy + R * Math.sin(a0);
+      const x1 = cx + R * Math.cos(a1), y1 = cy + R * Math.sin(a1);
+      const xi1 = cx + r * Math.cos(a1), yi1 = cy + r * Math.sin(a1);
+      const xi0 = cx + r * Math.cos(a0), yi0 = cy + r * Math.sin(a0);
+      const cor = dashboard._paleta[i % dashboard._paleta.length];
+      const path = (entries.length === 1)
+        ? `M ${cx - R} ${cy} A ${R} ${R} 0 1 1 ${cx + R} ${cy} A ${R} ${R} 0 1 1 ${cx - R} ${cy} M ${cx - r} ${cy} A ${r} ${r} 0 1 0 ${cx + r} ${cy} A ${r} ${r} 0 1 0 ${cx - r} ${cy} Z`
+        : `M ${x0} ${y0} A ${R} ${R} 0 ${large} 1 ${x1} ${y1} L ${xi1} ${yi1} A ${r} ${r} 0 ${large} 0 ${xi0} ${yi0} Z`;
+      return { path, cor, k, v, pct: (frac * 100) };
+    });
+
+    const svg = `<svg viewBox="0 0 140 140" class="dash-donut-svg">
+      ${segs.map(s => `<path d="${s.path}" fill="${s.cor}" fill-rule="evenodd" class="dash-clickable" onclick="event.stopPropagation(); dashboard.detalhar('${cat}', '${utils.escapeAttr(s.k)}')"><title>${utils.escapeHTML(s.k)}: ${s.v} (${s.pct.toFixed(1)}%) — toque para detalhes</title></path>`).join('')}
+      <text x="70" y="66" text-anchor="middle" class="dash-donut-total">${total}</text>
+      <text x="70" y="80" text-anchor="middle" class="dash-donut-cap">${opts.centerLabel || 'total'}</text>
+    </svg>`;
+
+    const legenda = `<div class="dash-legend">${segs.map(s => `
+      <div class="dash-legend-item dash-clickable" onclick="event.stopPropagation(); dashboard.detalhar('${cat}', '${utils.escapeAttr(s.k)}')">
+        <span class="dash-legend-dot" style="background:${s.cor}"></span>
+        <span class="dash-legend-label">${utils.escapeHTML(s.k)}</span>
+        <span class="dash-legend-val">${s.v} · ${s.pct.toFixed(0)}%</span>
+      </div>`).join('')}</div>`;
+
+    el.innerHTML = `<div class="dash-donut-wrap">${svg}${legenda}</div>`;
+  },
+
+  /* Barras horizontais SVG coloridas — data: {label: valor} */
+  renderBarsSVG(elId, data, opts = {}) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    const entries = Object.entries(data).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, opts.limit || 8);
+    if (!entries.length) { el.innerHTML = '<div class="empty-state">Sem registros ainda — cadastre atendimentos para ver o gráfico</div>'; return; }
+    const cat = opts.categoria || elId;
+    const max = entries[0][1];
+    const rows = entries.map(([k, v], i) => {
+      const pct = max ? (v / max) * 100 : 0;
+      const cor = opts.corFixa || dashboard._paleta[i % dashboard._paleta.length];
+      return `<div class="dash-bar-row dash-clickable" onclick="event.stopPropagation(); dashboard.detalhar('${cat}', '${utils.escapeAttr(k)}')" title="Toque para ver os registros">
+        <div class="dash-bar-label">${utils.escapeHTML(k)}</div>
+        <div class="dash-bar-track"><div class="dash-bar-fill" style="width:${pct}%;background:${cor}"></div></div>
+        <div class="dash-bar-val">${v}</div>
+      </div>`;
+    }).join('');
+    el.innerHTML = `<div class="dash-bars">${rows}</div>`;
+  },
+
+  /* Abre modal com o histórico/detalhes dos registros de uma fatia/barra clicada */
+  detalhar(categoria, valor) {
+    const periodo = (document.getElementById('dash-periodo') || {}).value || 'all';
+    const filt = list => dashboard.filtrarPorPeriodo(list, periodo, '_updatedAt');
+    const anest = filt(store.list('anestesia'));
+    let registros = [];   /* {mod, item, nome, extra} */
+    let titulo = valor;
+
+    const nomeDe = it => it.paciente_nome || it.nome || (it.paciente && it.paciente.nome) || it.paciente || '(sem nome)';
+
+    if (categoria === 'dash-total-atend') {
+      /* fatia por módulo */
+      const mapMod = { 'Anestesia': 'anestesia', 'Pré-anestésica': 'pre', 'Consulta/Dor': 'consulta', 'Recuperação': 'recuperacao' };
+      const mod = mapMod[valor];
+      if (mod) {
+        filt(store.list(mod)).forEach(it => registros.push({ mod, item: it, nome: nomeDe(it) }));
+      }
+      titulo = 'Atendimentos — ' + valor;
+    } else if (categoria === 'dash-pagadora') {
+      anest.forEach(a => {
+        if (dashboard._catPagadora(a.paciente && a.paciente.convenio) === valor) {
+          registros.push({ mod: 'anestesia', item: a, nome: nomeDe(a), extra: (a.paciente && a.paciente.convenio) || '' });
+        }
+      });
+      titulo = 'Fonte pagadora — ' + valor;
+    } else if (categoria === 'dash-cirurgioes') {
+      anest.forEach(a => { if ((a.procedimento && a.procedimento.cirurgiao) === valor) registros.push({ mod: 'anestesia', item: a, nome: nomeDe(a), extra: (a.procedimento && a.procedimento.descricao) || '' }); });
+      titulo = 'Cirurgião — ' + valor;
+    } else if (categoria === 'dash-convenios') {
+      anest.forEach(a => { if (((a.paciente && a.paciente.convenio) || 'Não informado') === valor) registros.push({ mod: 'anestesia', item: a, nome: nomeDe(a), extra: (a.procedimento && a.procedimento.descricao) || '' }); });
+      titulo = 'Convênio — ' + valor;
+    } else if (categoria === 'dash-hospitais') {
+      anest.forEach(a => { if ((a.procedimento && a.procedimento.hospital) === valor) registros.push({ mod: 'anestesia', item: a, nome: nomeDe(a), extra: (a.procedimento && a.procedimento.descricao) || '' }); });
+      titulo = 'Hospital — ' + valor;
+    } else if (categoria === 'dash-procedimentos') {
+      anest.forEach(a => { if ((a.procedimento && a.procedimento.descricao) === valor) registros.push({ mod: 'anestesia', item: a, nome: nomeDe(a), extra: (a.procedimento && a.procedimento.cirurgiao) || '' }); });
+      titulo = 'Procedimento — ' + valor;
+    } else if (categoria === 'dash-tipos') {
+      anest.forEach(a => { const ts = (a.tecnica && a.tecnica.tipos) || []; if (ts.includes(valor)) registros.push({ mod: 'anestesia', item: a, nome: nomeDe(a), extra: (a.procedimento && a.procedimento.descricao) || '' }); });
+      titulo = 'Tipo de anestesia — ' + valor;
+    }
+
+    /* ordena por data desc */
+    registros.sort((a, b) => new Date(b.item._updatedAt || 0) - new Date(a.item._updatedAt || 0));
+
+    const LABELS = { anestesia: 'Anestesia', pre: 'Pré', consulta: 'Consulta', recuperacao: 'SRPA' };
+    let body;
+    if (!registros.length) {
+      body = '<div class="empty-state">Nenhum registro encontrado.</div>';
+    } else {
+      body = `<div class="dash-detalhe-count">${registros.length} registro(s)</div>
+        <div class="dash-detalhe-lista">` + registros.map(r => {
+        const dt = r.item._updatedAt ? utils.formatarDataHora(r.item._updatedAt) : '';
+        return `<div class="dash-detalhe-item" onclick="modal.close(); dashboard._abrirRegistro('${r.mod}', '${r.item._id}')">
+          <div class="dash-detalhe-main">
+            <span class="dash-search-mod">${LABELS[r.mod] || r.mod}</span>
+            <span class="dash-detalhe-nome">${utils.escapeHTML(r.nome)}</span>
+          </div>
+          ${r.extra ? `<div class="dash-detalhe-extra">${utils.escapeHTML(r.extra)}</div>` : ''}
+          <div class="dash-detalhe-dt">${dt}</div>
+        </div>`;
+      }).join('') + '</div>';
+    }
+    modal.open('📊 ' + utils.escapeHTML(titulo), body, `<button class="btn" onclick="modal.close()">Fechar</button>`);
+  },
+
+  /* Categoriza convênio em Particular / SUS / Convênio */
+  _catPagadora(conv) {
+    const c = (conv || '').toLowerCase().trim();
+    if (!c) return 'Não informado';
+    if (c.includes('particular')) return 'Particular';
+    if (c === 'sus' || c.includes('sus')) return 'SUS';
+    return 'Convênio/Plano';
+  },
+
   /* Filtra por período em dias (a partir de hoje) */
   filtrarPorPeriodo(list, periodo, dateField) {
     if (periodo === 'all') return list;
@@ -18561,13 +19427,29 @@ const dashboard = {
       </div>
     `;
 
+    /* Total de atendimentos (donut por módulo) */
+    dashboard.renderDonut('dash-total-atend', {
+      'Anestesia': allAnest.length,
+      'Pré-anestésica': allPre.length,
+      'Consulta/Dor': allCons.length,
+      'Recuperação': allRecup.length
+    }, { centerLabel: 'atend.', categoria: 'dash-total-atend' });
+
+    /* Fonte pagadora (Particular / SUS / Convênio) — donut */
+    const pagadora = {};
+    allAnest.forEach(a => {
+      const cat = dashboard._catPagadora(a.paciente && a.paciente.convenio);
+      pagadora[cat] = (pagadora[cat] || 0) + 1;
+    });
+    dashboard.renderDonut('dash-pagadora', pagadora, { centerLabel: 'pacientes', categoria: 'dash-pagadora' });
+
     /* Tipos de anestesia */
     const tipos = {};
     allAnest.forEach(a => {
       const ts = (a.tecnica && a.tecnica.tipos) || [];
       ts.forEach(t => { tipos[t] = (tipos[t] || 0) + 1; });
     });
-    dashboard.renderBars('dash-tipos', tipos, 'accent');
+    dashboard.renderBarsSVG('dash-tipos', tipos, { categoria: 'dash-tipos' });
 
     /* Cirurgiões */
     const cirurgioes = {};
@@ -18575,7 +19457,7 @@ const dashboard = {
       const c = a.procedimento && a.procedimento.cirurgiao;
       if (c) cirurgioes[c] = (cirurgioes[c] || 0) + 1;
     });
-    dashboard.renderBars('dash-cirurgioes', cirurgioes);
+    dashboard.renderBarsSVG('dash-cirurgioes', cirurgioes, { categoria: 'dash-cirurgioes' });
 
     /* Hospitais */
     const hospitais = {};
@@ -18583,15 +19465,15 @@ const dashboard = {
       const h = a.procedimento && a.procedimento.hospital;
       if (h) hospitais[h] = (hospitais[h] || 0) + 1;
     });
-    dashboard.renderBars('dash-hospitais', hospitais);
+    dashboard.renderBarsSVG('dash-hospitais', hospitais, { categoria: 'dash-hospitais' });
 
-    /* Convênios — combina anestesias + financeiro */
+    /* Convênios detalhados (todos os nomes) — barras */
     const convenios = {};
     allAnest.forEach(a => {
       const c = (a.paciente && a.paciente.convenio) || 'Não informado';
       convenios[c] = (convenios[c] || 0) + 1;
     });
-    dashboard.renderBars('dash-convenios', convenios, 'accent');
+    dashboard.renderBarsSVG('dash-convenios', convenios, { categoria: 'dash-convenios' });
 
     /* Procedimentos */
     const procs = {};
@@ -18599,14 +19481,85 @@ const dashboard = {
       const p = a.procedimento && a.procedimento.descricao;
       if (p) procs[p] = (procs[p] || 0) + 1;
     });
-    dashboard.renderBars('dash-procedimentos', procs);
+    dashboard.renderBarsSVG('dash-procedimentos', procs, { categoria: 'dash-procedimentos' });
 
     /* Financeiro */
     dashboard.renderFinanceiroResumo(allFin);
 
+    /* Busca — atualiza índice e re-renderiza resultados se houver termo */
+    dashboard.buscar();
+
     /* Liga event delegation para abrir relatórios expandidos ao clicar */
     dashboard._ligarHandlers();
   },
+
+  /* ===== BUSCA NO BANCO DE DADOS ===== */
+  buscar() {
+    const inp = document.getElementById('dash-search-input');
+    const selMod = document.getElementById('dash-search-mod');
+    const out = document.getElementById('dash-search-results');
+    if (!out) return;
+    const termo = (inp ? inp.value : '').toLowerCase().trim();
+    const filtroMod = selMod ? selMod.value : 'all';
+
+    if (!termo) {
+      out.innerHTML = '<div class="dash-search-hint">Digite acima para pesquisar em todos os registros salvos.</div>';
+      return;
+    }
+
+    const mods = filtroMod === 'all'
+      ? ['anestesia', 'pre', 'consulta', 'recuperacao', 'termo', 'prescricao', 'risco', 'financeiro']
+      : [filtroMod];
+    const LABELS = { anestesia: 'Anestesia', pre: 'Pré', consulta: 'Consulta', recuperacao: 'SRPA', termo: 'Termo', prescricao: 'Prescrição', risco: 'Risco', financeiro: 'Financeiro' };
+
+    const resultados = [];
+    mods.forEach(m => {
+      store.list(m).forEach(it => {
+        const nome = it.paciente_nome || it.nome || (it.paciente && it.paciente.nome) || it.paciente || '';
+        const cir = (it.procedimento && it.procedimento.cirurgiao) || '';
+        const proc = (it.procedimento && it.procedimento.descricao) || it.descricao || '';
+        const conv = (it.paciente && it.paciente.convenio) || it.convenio || '';
+        const blob = [nome, cir, proc, conv, it.hospital, (it.procedimento && it.procedimento.hospital)].join(' ').toLowerCase();
+        if (blob.includes(termo)) {
+          resultados.push({ mod: m, item: it, nome: nome || '(sem nome)', cir, proc, conv, data: it._updatedAt });
+        }
+      });
+    });
+    resultados.sort((a, b) => new Date(b.data || 0) - new Date(a.data || 0));
+
+    if (!resultados.length) {
+      out.innerHTML = `<div class="dash-search-hint">Nenhum registro encontrado para "${utils.escapeHTML(termo)}".</div>`;
+      return;
+    }
+
+    const linhas = resultados.slice(0, 50).map(r => {
+      const det = [r.cir && ('Cir: ' + r.cir), r.proc, r.conv].filter(Boolean).join(' · ');
+      const dt = r.data ? utils.formatarDataHora(r.data) : '';
+      return `<div class="dash-search-item" onclick="dashboard._abrirRegistro('${r.mod}', '${r.item._id}')">
+        <div class="dash-search-main">
+          <span class="dash-search-mod">${LABELS[r.mod] || r.mod}</span>
+          <span class="dash-search-nome">${utils.escapeHTML(r.nome)}</span>
+        </div>
+        <div class="dash-search-det">${utils.escapeHTML(det)}</div>
+        <div class="dash-search-dt">${dt}</div>
+      </div>`;
+    }).join('');
+    out.innerHTML = `<div class="dash-search-count">${resultados.length} registro(s) encontrado(s)${resultados.length > 50 ? ' — mostrando 50' : ''}</div>` + linhas;
+  },
+
+  _abrirRegistro(mod, id) {
+    const item = store.getById(mod, id);
+    if (!item) { toast('Registro não encontrado', 'error'); return; }
+    const handlers = { pre, consulta, anestesia, recuperacao, termo, prescricao, risco, financeiro };
+    ui.navegar(mod);
+    setTimeout(() => {
+      try {
+        if (handlers[mod] && handlers[mod].carregar) handlers[mod].carregar(item);
+        else if (mod === 'financeiro' && financeiro.editar) financeiro.editar(id);
+      } catch (e) { console.error(e); }
+    }, 150);
+  },
+
 
   _ligarHandlers() {
     const mod = document.getElementById('module-dashboard');
@@ -18953,6 +19906,95 @@ const financeiro = {
   formId: 'form-financeiro',
   cardId: 'financeiro-form-card',
 
+  /* === SUBMÓDULO: Anexos / comprovantes (fotos convertidas em base64) === */
+  anexos: {
+    _lista: [],   // [{nome, dataurl, tamanho}]
+    MAX_BYTES: 2 * 1024 * 1024,   // 2 MB por arquivo (após redimensionar)
+    MAX_DIM: 1600,                // maior dimensão após redimensionar
+
+    adicionarArquivos(fileList) {
+      const files = Array.from(fileList || []);
+      files.forEach(file => {
+        if (!file.type.startsWith('image/')) { toast('Apenas imagens são aceitas', 'warn'); return; }
+        financeiro.anexos._processar(file);
+      });
+    },
+
+    _processar(file) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          /* redimensiona mantendo proporção se exceder MAX_DIM */
+          let { width, height } = img;
+          const maior = Math.max(width, height);
+          if (maior > financeiro.anexos.MAX_DIM) {
+            const escala = financeiro.anexos.MAX_DIM / maior;
+            width = Math.round(width * escala);
+            height = Math.round(height * escala);
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width; canvas.height = height;
+          canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+          /* qualidade decrescente até caber no limite */
+          let q = 0.85, dataurl = canvas.toDataURL('image/jpeg', q);
+          while (dataurl.length * 0.75 > financeiro.anexos.MAX_BYTES && q > 0.4) {
+            q -= 0.15; dataurl = canvas.toDataURL('image/jpeg', q);
+          }
+          if (dataurl.length * 0.75 > financeiro.anexos.MAX_BYTES) {
+            toast('Imagem muito grande mesmo após compressão — tente uma menor', 'error');
+            return;
+          }
+          financeiro.anexos._lista.push({
+            nome: file.name || ('foto_' + Date.now() + '.jpg'),
+            dataurl,
+            tamanho: Math.round(dataurl.length * 0.75)
+          });
+          financeiro.anexos.render();
+          markDirty();
+          toast('📎 Anexo adicionado');
+        };
+        img.onerror = () => toast('Não foi possível ler a imagem', 'error');
+        img.src = e.target.result;
+      };
+      reader.onerror = () => toast('Erro ao ler o arquivo', 'error');
+      reader.readAsDataURL(file);
+    },
+
+    remover(idx) {
+      financeiro.anexos._lista.splice(idx, 1);
+      financeiro.anexos.render();
+      markDirty();
+    },
+
+    ver(idx) {
+      const a = financeiro.anexos._lista[idx];
+      if (!a) return;
+      modal.open('📎 ' + utils.escapeHTML(a.nome),
+        `<img src="${a.dataurl}" style="max-width:100%;height:auto;border-radius:8px">`,
+        `<button class="btn" onclick="modal.close()">Fechar</button>`);
+    },
+
+    render() {
+      const host = document.getElementById('fin-anexos-lista');
+      if (!host) return;
+      if (!financeiro.anexos._lista.length) { host.innerHTML = ''; return; }
+      host.innerHTML = financeiro.anexos._lista.map((a, i) => `
+        <div class="fin-anexo-item">
+          <img src="${a.dataurl}" onclick="financeiro.anexos.ver(${i})" title="Ver ampliado">
+          <div class="fin-anexo-info">
+            <span class="fin-anexo-nome" title="${utils.escapeAttr(a.nome)}">${utils.escapeHTML(a.nome)}</span>
+            <span class="fin-anexo-tam">${(a.tamanho / 1024).toFixed(0)} KB</span>
+          </div>
+          <button type="button" class="btn-rm" onclick="financeiro.anexos.remover(${i})" title="Remover">✕</button>
+        </div>`).join('');
+    },
+
+    coletar() { return financeiro.anexos._lista.slice(); },
+    restaurar(lista) { financeiro.anexos._lista = Array.isArray(lista) ? lista.slice() : []; financeiro.anexos.render(); },
+    limpar() { financeiro.anexos._lista = []; financeiro.anexos.render(); }
+  },
+
   /* === SUBMÓDULO: Códigos TUSS / CBHPM === */
   codigos: {
     STATUS_OPCOES: ['aguardando', 'faturado', 'pago', 'glosado', 'parcial', 'negado'],
@@ -19167,6 +20209,7 @@ const financeiro = {
     /* Limpa tabela de códigos */
     const tbody = document.getElementById('fin-codigos-body');
     if (tbody) tbody.innerHTML = '';
+    financeiro.anexos.limpar();
     if (id) {
       const item = store.getById('financeiro', id);
       if (item) {
@@ -19175,6 +20218,8 @@ const financeiro = {
         document.getElementById('financeiro-form-titulo').textContent = 'Editar registro';
         /* Restaura códigos TUSS */
         if (Array.isArray(item.codigos)) financeiro.codigos.restaurar(item.codigos);
+        /* Restaura anexos */
+        financeiro.anexos.restaurar(item.anexos);
         financeiro.calcDif();
       }
     } else {
@@ -19195,6 +20240,8 @@ const financeiro = {
     delete data.id;
     /* Coleta códigos TUSS */
     data.codigos = financeiro.codigos.coletar();
+    /* Coleta anexos (fotos) */
+    data.anexos = financeiro.anexos.coletar();
     /* Limpa campos array que vieram do formData mas vivem em data.codigos */
     delete data.fin_cod_codigo;  delete data.fin_cod_desc;  delete data.fin_cod_porte;
     delete data.fin_cod_previsto; delete data.fin_cod_recebido; delete data.fin_cod_glosa;
@@ -19990,6 +21037,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.cloud = cloud;
   window.termoPadrao = termoPadrao;
   window.textosPadrao = textosPadrao;
+  window.pacienteAutocomplete = pacienteAutocomplete;
   window.sigUI = sigUI;
   window.financeiro = financeiro; window.agenda = agenda;
   window.modal = modal; window.modelos = modelos; window.fin = fin;
@@ -20162,6 +21210,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (e) { console.error('Erro ao injetar assinatura termo/prescricao:', e); }
     try { cloud.init(); } catch (e) { console.error('Erro cloud.init:', e); }
     try { textosPadrao.init(); } catch (e) { console.error('Erro textosPadrao.init:', e); }
+    try { pacienteAutocomplete.init(); } catch (e) { console.error('Erro pacienteAutocomplete.init:', e); }
     /* Módulo de risco: recálculo automático ao mudar qualquer campo */
     try {
       const fr = document.getElementById('form-risco');
