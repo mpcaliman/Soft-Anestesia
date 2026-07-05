@@ -25683,7 +25683,7 @@ const financeiro = {
             <small style="color:var(--text-soft)">Pagamento total confirmado pelo convênio</small>
           </button>
           <button class="btn" onclick="modal.close(); financeiro.relatorioConciliacao('senhas')" style="text-align:left;padding:14px;border-left:3px solid var(--primary)">
-            <strong>🔐 Forças de senha</strong><br>
+            <strong>🔐 Trocas de senha</strong><br>
             <small style="color:var(--text-soft)">Registros com troca de senha (senha inicial → nova senha; ex.: troca de código no intra-operatório)</small>
           </button>
           <button class="btn" onclick="modal.close(); financeiro.relatorioConciliacao('porPlano')" style="text-align:left;padding:14px">
@@ -25758,7 +25758,7 @@ const financeiro = {
         break;
       case 'senhas': {
         const regsSenha = todos.filter(r => r.troca_codigo || r.forca_senha || r.senha || r.senha_nova);
-        modal.open('🔐 Forças de senha', financeiro._renderTabelaSenhas(regsSenha), '');
+        modal.open('🔐 Trocas de senha', financeiro._renderTabelaSenhas(regsSenha), '');
         return;
       }
       case 'porPlano':
@@ -25836,7 +25836,7 @@ const financeiro = {
         <div class="totalizador"><div class="lbl">Trocas de senha</div><div class="val warn">${regs.filter(r => r.troca_codigo || r.forca_senha).length}</div></div>
       </div>
       <table class="dash-detail-table">
-        <thead><tr><th>Data</th><th>Paciente</th><th>Convênio</th><th>Senha</th><th>Validade</th><th>Força?</th><th>Motivo</th></tr></thead>
+        <thead><tr><th>Data</th><th>Paciente</th><th>Convênio</th><th>Senha</th><th>Validade</th><th>Troca de senha?</th><th>Motivo</th></tr></thead>
         <tbody>${regs.map(r => `
           <tr class="dash-row-link" onclick="modal.close(); setTimeout(() => financeiro.editar('${r._id}'), 100)">
             <td>${utils.escapeHTML(r.data_proc || '')}</td>
