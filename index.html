@@ -977,6 +977,7 @@ textarea { resize: vertical; min-height: 70px; }
 .field.invalid input, .field.invalid select, .field.invalid textarea {
   border-color: var(--danger); background: #fff8f7;
 }
+.hora-grupo-titulo { font-size: .78rem; font-weight: 700; color: var(--primary); text-transform: uppercase; letter-spacing: .3px; margin: 10px 0 6px; }
 .input-group { display: flex; gap: 4px; align-items: stretch; }
 .input-group input { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
 .input-group .btn-now {
@@ -3599,6 +3600,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
         <div class="grid">
           <div class="field col-6 required"><label>Nome do paciente <span class="req">*</span></label><input type="text" name="nome" data-required onblur="linker.autoPreencherDadosPaciente(this.value, 'pre')"></div>
           <div class="field col-3 required"><label>Data da avaliação <span class="req">*</span></label><input type="date" name="data" data-required></div>
+          <div class="field col-3"><label>Senha / Autorização do plano</label><input type="text" name="senha" placeholder="Senha do convênio"></div>
           <div class="field col-3"><label>Idade</label><input type="text" name="idade"></div>
           <div class="field col-2"><label>Sexo</label>
             <select name="sexo"><option value="">—</option><option>Masculino</option><option>Feminino</option><option>Outro</option></select>
@@ -3788,7 +3790,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
 
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">5</span><h2>Assinatura<small>Carimbo / desenho / certificado digital</small></h2></div>
+        <div class="card-title-wrap"><span class="card-num">6</span><h2>Assinatura<small>Carimbo / desenho / certificado digital</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body" id="sig-pre-body">
@@ -3866,6 +3868,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
         <div class="grid">
           <div class="field col-6 required"><label>Nome do paciente <span class="req">*</span></label><input type="text" name="nome" data-required onblur="linker.autoPreencherDadosPaciente(this.value, 'consulta')"></div>
           <div class="field col-3 required"><label>Data <span class="req">*</span></label><input type="date" name="data" data-required></div>
+          <div class="field col-3"><label>Senha / Autorização do plano</label><input type="text" name="senha" placeholder="Senha do convênio"></div>
           <div class="field col-3"><label>Idade</label><input type="text" name="idade"></div>
           <div class="field col-3"><label>Sexo</label>
             <select name="sexo"><option value="">—</option><option>Masculino</option><option>Feminino</option><option>Outro</option></select>
@@ -4011,6 +4014,20 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
       </div>
     </section>
 
+    <!-- ANEXOS / SUPORTE FINANCEIRO -->
+    <section class="card">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-num">📎</span><h2>Anexos / suporte financeiro<small>Foto ou PDF da autorização, guia, comprovante — vão junto ao Financeiro</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <p style="font-size:.82rem;color:var(--text-mute);margin-bottom:8px">Anexe fotos/PDFs de suporte (autorização com senha, guia, comprovante de depósito). Aceita JPG, JPEG, PNG e PDF. Não substituem a ficha clínica — servem como documentação financeira e ficam disponíveis no módulo Financeiro quando houver vínculo.</p>
+        <input type="file" id="consulta-docs-input" accept="image/jpeg,image/png,image/*,application/pdf" multiple style="display:none" onchange="prontuario.adicionar('consulta', this.files); this.value=''">
+        <button type="button" class="btn btn-sm" onclick="document.getElementById('consulta-docs-input').click()">📷 Foto / 📄 PDF — adicionar</button>
+        <div id="consulta-docs-lista" class="fin-anexos-lista"></div>
+      </div>
+    </section>
+
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
         <div class="card-title-wrap"><span class="card-num">6</span><h2>Assinatura<small>Carimbo / desenho / certificado digital</small></h2></div>
@@ -4091,7 +4108,9 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
       </div>
       <div class="card-body">
         <div class="grid">
-          <div class="field col-6 required"><label>Nome do paciente <span class="req">*</span></label><input type="text" name="paciente_nome" data-required onblur="linker.autoPreencherDadosPaciente(this.value, 'anestesia'); linker.importarPreParaAnestesia(this.value)"></div>
+          <div class="field col-5 required"><label>Nome do paciente <span class="req">*</span></label><input type="text" name="paciente_nome" data-required onblur="linker.autoPreencherDadosPaciente(this.value, 'anestesia'); linker.importarPreParaAnestesia(this.value)"></div>
+          <div class="field col-4 required"><label>Data <span class="req">*</span></label><input type="date" name="data_anestesia" data-required></div>
+          <div class="field col-3"><label>Senha / Autorização do plano</label><input type="text" name="paciente_senha" placeholder="Senha do convênio"></div>
           <div class="field col-3"><label>Data de nascimento</label><input type="date" name="paciente_nasc" oninput="anestesia.calc.idade()"></div>
           <div class="field col-1"><label>Idade</label><input type="text" name="paciente_idade" readonly></div>
           <div class="field col-2"><label>Sexo</label>
@@ -4106,36 +4125,42 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
             <select name="paciente_convenio"><option value="">—</option><option>Particular</option><option>SUS</option><option>Unimed</option><option>Bradesco Saúde</option><option>Amil</option><option>SulAmérica</option><option>Notredame Intermédica</option><option>Hapvida</option><option>Outro</option></select>
           </div>
           <div class="field col-3"><label>Carteirinha</label><input type="text" name="paciente_carteirinha"></div>
-          <div class="field col-3"><label>Senha</label><input type="text" name="paciente_senha"></div>
           <div class="field col-3"><label>Hospital / clínica</label><input type="text" name="local_hospital"></div>
           <div class="field col-4"><label>Cirurgião</label><input type="text" name="cirurgiao"></div>
           <div class="field col-6"><label>Procedimento cirúrgico <small style="color:var(--text-mute);font-weight:400">(autocompleta da CBHPM)</small></label><input type="text" name="procedimento" class="cbhpm-autocomplete" placeholder="Digite parte do procedimento ou o código TUSS..."></div>
           <div class="field col-2"><label>Sala</label><input type="text" name="sala"></div>
-          <div class="field col-3 required"><label>Data <span class="req">*</span></label><input type="date" name="data_anestesia" data-required></div>
         </div>
 
         <h3 style="font-size:.92rem;color:var(--primary-darker);margin:14px 0 8px;border-top:1px solid var(--border);padding-top:14px">⏱️ Horários</h3>
+        <!-- Horários agrupados por etapa: primeiro todos os inícios, depois todos os términos,
+             seguindo a ordem cronológica do ato anestésico-cirúrgico. -->
+        <div class="hora-grupo-titulo">▶️ Horários de início</div>
         <div class="grid">
-          <div class="field col-3"><label>Entrada em sala</label>
+          <div class="field col-4"><label>Entrada em sala</label>
             <div class="input-group"><input type="time" name="hora_sala_entrada" oninput="anestesia.calc.duracao()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_sala_entrada'); anestesia.calc.duracao();">agora</button></div>
           </div>
-          <div class="field col-3"><label>Saída de sala</label>
-            <div class="input-group"><input type="time" name="hora_sala_saida"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_sala_saida');">agora</button></div>
-          </div>
-          <div class="field col-3"><label>Início da anestesia</label>
+          <div class="field col-4"><label>Início da anestesia</label>
             <div class="input-group"><input type="time" name="hora_inicio" oninput="anestesia.calc.duracao()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_inicio'); anestesia.calc.duracao();">agora</button></div>
           </div>
-          <div class="field col-3"><label>Fim da anestesia</label>
-            <div class="input-group"><input type="time" name="hora_fim" oninput="anestesia.calc.duracao()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_fim'); anestesia.calc.duracao();">agora</button></div>
-          </div>
-          <div class="field col-3"><label>Duração da anestesia</label><input type="text" name="duracao" readonly></div>
-          <div class="field col-3"><label>Início da cirurgia</label>
+          <div class="field col-4"><label>Início da cirurgia/procedimento</label>
             <div class="input-group"><input type="time" name="hora_cir_inicio" oninput="anestesia.calc.duracao()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_cir_inicio'); anestesia.calc.duracao();">agora</button></div>
           </div>
-          <div class="field col-3"><label>Fim da cirurgia</label>
+        </div>
+        <div class="hora-grupo-titulo">⏹️ Horários de fim</div>
+        <div class="grid">
+          <div class="field col-4"><label>Fim da cirurgia/procedimento</label>
             <div class="input-group"><input type="time" name="hora_cir_fim" oninput="anestesia.calc.duracao()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_cir_fim'); anestesia.calc.duracao();">agora</button></div>
           </div>
-          <div class="field col-3"><label>Duração da cirurgia</label><input type="text" name="duracao_cir" readonly></div>
+          <div class="field col-4"><label>Fim da anestesia</label>
+            <div class="input-group"><input type="time" name="hora_fim" oninput="anestesia.calc.duracao()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_fim'); anestesia.calc.duracao();">agora</button></div>
+          </div>
+          <div class="field col-4"><label>Saída de sala</label>
+            <div class="input-group"><input type="time" name="hora_sala_saida"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_sala_saida');">agora</button></div>
+          </div>
+        </div>
+        <div class="grid">
+          <div class="field col-4"><label>Duração da anestesia</label><input type="text" name="duracao" readonly></div>
+          <div class="field col-4"><label>Duração da cirurgia</label><input type="text" name="duracao_cir" readonly></div>
         </div>
 
         <!-- Cirurgias combinadas -->
@@ -5270,7 +5295,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
     <!-- 12. EVOLUÇÃO -->
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">12</span><h2>Descrição Final e Assinatura</h2></div>
+        <div class="card-title-wrap"><span class="card-num">12</span><h2>Descrição Final</h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
@@ -5299,7 +5324,9 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
               <button type="button" class="btn btn-xs tpl-btn" onclick="templates.aplicar('anestesia','conclusao','conclusaoComConduta')">+ Com conduta</button>
             </div>
           </div>
-          <div class="field col-12"><label>Observações finais</label><textarea name="obs_finais" rows="2"></textarea></div>
+          <!-- "Observações finais" removido: redundante com "Conclusão". O valor
+               histórico é preservado neste campo oculto (impressão/PDF intactos). -->
+          <input type="hidden" name="obs_finais">
         </div>
       </div>
     </section>
@@ -5307,7 +5334,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
     <!-- ASSINATURA -->
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">11</span><h2>Assinatura(s)<small>Carimbo / desenho / certificado digital — suporta 2 anestesistas</small></h2></div>
+        <div class="card-title-wrap"><span class="card-num">13</span><h2>Assinatura(s)<small>Carimbo / desenho / certificado digital — suporta 2 anestesistas</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
@@ -5333,11 +5360,11 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
     <!-- PRONTUÁRIO — DOCUMENTOS ANEXOS (fotos e PDFs) -->
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">📎</span><h2>Documentos do paciente<small>Prontuário — exames, laudos, pareceres, guias (foto ou PDF)</small></h2></div>
+        <div class="card-title-wrap"><span class="card-num">📎</span><h2>Documentos e suporte financeiro<small>Exames, laudos, guias, autorização com senha, comprovantes (foto ou PDF) — vão junto ao Financeiro</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
-        <input type="file" id="anestesia-docs-input" accept="image/*,application/pdf" multiple style="display:none" onchange="prontuario.adicionar('anestesia', this.files); this.value=''">
+        <input type="file" id="anestesia-docs-input" accept="image/jpeg,image/png,image/*,application/pdf" multiple style="display:none" onchange="prontuario.adicionar('anestesia', this.files); this.value=''">
         <button type="button" class="btn btn-sm" onclick="document.getElementById('anestesia-docs-input').click()">📷 Foto / 📄 PDF — adicionar documento</button>
         <span style="font-size:.74rem;color:var(--text-mute);margin-left:8px">Vão direto para a nuvem (☁️ Supabase, pasta do paciente). Imagens comprimidas; PDFs até 10 MB. Offline: guarda no aparelho e você sobe depois com um toque.</span>
         <div id="anestesia-docs-lista" class="fin-anexos-lista"></div>
@@ -5463,6 +5490,64 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
             <select name="consciencia"><option value="">—</option><option>Alerta</option><option>Sonolento</option><option>Orientado</option><option>Desorientado</option><option>Sedado</option></select>
           </div>
           <div class="field col-3"><label>Aldrete de alta</label><input type="number" name="aldrete" min="0" max="10" placeholder="0–10"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ESCALA DE ALDRETE-KROULIK (avaliação pós-anestésica / recuperação) -->
+    <section class="card">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-num">🧮</span><h2>Escala de Aldrete-Kroulik<small>Avaliação pós-anestésica de recuperação — pontuação automática (0–10)</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <div class="grid">
+          <div class="field col-6"><label>Atividade motora</label>
+            <select name="aldk_atividade" onchange="recuperacao.aldrete.calc()">
+              <option value="">—</option>
+              <option value="2">2 · Move os 4 membros voluntariamente/ao comando</option>
+              <option value="1">1 · Move 2 membros</option>
+              <option value="0">0 · Incapaz de mover os membros</option>
+            </select>
+          </div>
+          <div class="field col-6"><label>Respiração</label>
+            <select name="aldk_respiracao" onchange="recuperacao.aldrete.calc()">
+              <option value="">—</option>
+              <option value="2">2 · Respira e tosse livremente</option>
+              <option value="1">1 · Dispneia / respiração limitada</option>
+              <option value="0">0 · Apneia / necessita ventilação</option>
+            </select>
+          </div>
+          <div class="field col-6"><label>Circulação (PA)</label>
+            <select name="aldk_circulacao" onchange="recuperacao.aldrete.calc()">
+              <option value="">—</option>
+              <option value="2">2 · PA ± 20% do nível pré-anestésico</option>
+              <option value="1">1 · PA ± 20 a 50% do nível pré-anestésico</option>
+              <option value="0">0 · PA ± 50% do nível pré-anestésico</option>
+            </select>
+          </div>
+          <div class="field col-6"><label>Consciência</label>
+            <select name="aldk_consciencia" onchange="recuperacao.aldrete.calc()">
+              <option value="">—</option>
+              <option value="2">2 · Completamente acordado</option>
+              <option value="1">1 · Desperta ao ser chamado</option>
+              <option value="0">0 · Não responde</option>
+            </select>
+          </div>
+          <div class="field col-6"><label>Saturação de oxigênio</label>
+            <select name="aldk_saturacao" onchange="recuperacao.aldrete.calc()">
+              <option value="">—</option>
+              <option value="2">2 · SpO₂ &gt; 92% em ar ambiente</option>
+              <option value="1">1 · Necessita O₂ para SpO₂ &gt; 90%</option>
+              <option value="0">0 · SpO₂ &lt; 90% mesmo com O₂</option>
+            </select>
+          </div>
+          <div class="field col-3"><label>Pontuação total</label><input type="text" name="aldk_total" readonly style="font-weight:700"></div>
+          <div class="field col-3"><label>Data/hora da avaliação</label>
+            <div class="input-group"><input type="datetime-local" name="aldk_datahora"><button type="button" class="btn-now" onclick="recuperacao.aldrete.agora()">agora</button></div>
+          </div>
+          <div class="field col-12"><div id="aldk-interpretacao" style="font-size:.85rem;padding:8px 12px;border-radius:8px;background:var(--surface-alt);border:1px solid var(--border);color:var(--text-soft)">Preencha os 5 critérios para calcular a pontuação.</div></div>
+          <input type="hidden" name="aldk_interpretacao">
         </div>
       </div>
     </section>
@@ -6281,6 +6366,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
             <button type="button" class="btn btn-sm" onclick="document.getElementById('fin-anexo-input').click()">📷 Adicionar foto / arquivo</button>
             <span style="font-size:.76rem;color:var(--text-mute);margin-left:8px">Imagens até 2 MB cada (redimensionadas automaticamente)</span>
             <div id="fin-anexos-lista" class="fin-anexos-lista"></div>
+            <div id="fin-docs-origem"></div>
           </div>
 
           <!-- TOTAIS AGREGADOS -->
@@ -6386,7 +6472,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
         <div style="overflow-x:auto">
           <table class="data" id="financeiro-table">
             <thead><tr>
-              <th>Paciente</th><th>Procedimento</th><th>Cirurgião</th><th>Hospital</th>
+              <th>Paciente</th><th>Senha</th><th>Procedimento</th><th>Cirurgião</th><th>Hospital</th>
               <th>Convênio</th><th>Data proc.</th><th style="text-align:right">Previsto</th>
               <th style="text-align:right">Recebido</th><th style="text-align:right">Diferença</th>
               <th>Pago</th><th>Periciado</th><th>Status</th><th class="actions-cell"></th>
@@ -9647,6 +9733,7 @@ const consulta = {
     document.querySelector(`#${consulta.formId} [name="data"]`).value = utils.hojeISO();
     try { const c = document.getElementById('consulta-lab-extras'); if (c) c.innerHTML = ''; } catch (e) {}
     try { consulta.seguimento.restaurar([]); } catch (e) {}
+    try { prontuario.limpar('consulta'); } catch (e) {}
     consulta._linkPendente = null;
     ui.atualizarDocStatus('consulta', null);
     ui.fecharBanner('banner-consulta');
@@ -9659,6 +9746,7 @@ const consulta = {
     const data = utils.formData(consulta.formId);
     try { data._labExtras = labExtra.coletar('consulta-lab-extras'); } catch (e) {}
     try { data._seguimentos = consulta.seguimento.coletar(); } catch (e) {}
+    try { data._docs = prontuario.coletar('consulta'); } catch (e) {}
     const f = document.getElementById(consulta.formId);
     const idEl = f.querySelector('[name="_id"]');
     if (idEl) data._id = idEl.value || undefined;
@@ -9712,6 +9800,7 @@ const consulta = {
     try { assinatura.restaurar('sig-consulta', 'form-consulta'); } catch (e) {}
     try { labExtra.restaurar('consulta-lab-extras', item._labExtras); } catch (e) {}
     try { consulta.seguimento.restaurar(item._seguimentos); } catch (e) {}
+    try { prontuario.restaurar('consulta', item._docs); } catch (e) {}
     ui.atualizarDocStatus('consulta', item);
     ui.fecharBanner('banner-consulta');
     markClean();
@@ -9753,12 +9842,65 @@ const recuperacao = {
   /* Stubs vazios (obsoletos — carimbo agora vem do cadastro do profissional) */
   _popularAssinaturas() {},
   _previewAssinatura() {},
+  /* ===== ESCALA DE ALDRETE-KROULIK ===== */
+  aldrete: {
+    ITENS: ['aldk_atividade', 'aldk_respiracao', 'aldk_circulacao', 'aldk_consciencia', 'aldk_saturacao'],
+    _q(name) { return document.querySelector(`#form-recuperacao [name="${name}"]`); },
+    calc() {
+      const box = document.getElementById('aldk-interpretacao');
+      let soma = 0, preenchidos = 0;
+      recuperacao.aldrete.ITENS.forEach(n => {
+        const el = recuperacao.aldrete._q(n);
+        if (el && el.value !== '') { soma += parseInt(el.value, 10) || 0; preenchidos++; }
+      });
+      const totEl = recuperacao.aldrete._q('aldk_total');
+      const interpEl = recuperacao.aldrete._q('aldk_interpretacao');
+      if (preenchidos === 0) {
+        if (totEl) totEl.value = '';
+        if (interpEl) interpEl.value = '';
+        if (box) { box.textContent = 'Preencha os 5 critérios para calcular a pontuação.'; box.style.color = 'var(--text-soft)'; box.style.background = 'var(--surface-alt)'; }
+        return;
+      }
+      const completo = preenchidos === 5;
+      const rotulo = soma + '/10' + (completo ? '' : ' (parcial — ' + preenchidos + '/5 critérios)');
+      if (totEl) totEl.value = rotulo;
+      /* Interpretação clínica simples */
+      let texto, cor, fundo;
+      if (!completo) {
+        texto = 'Avaliação incompleta — preencha os 5 critérios.'; cor = 'var(--text-soft)'; fundo = 'var(--surface-alt)';
+      } else if (soma >= 9) {
+        texto = '✅ ' + soma + '/10 — Recuperação satisfatória. Paciente em condições de alta da SRPA (Aldrete ≥ 9).'; cor = '#1c6b3f'; fundo = '#e7f5ec';
+      } else if (soma === 8) {
+        texto = '⚠️ 8/10 — Manter em observação e reavaliar antes da alta.'; cor = '#8a5a00'; fundo = '#fdf3e0';
+      } else {
+        texto = '⛔ ' + soma + '/10 — Não apto à alta. Manter monitorização na recuperação.'; cor = '#a12a2a'; fundo = '#fdecec';
+      }
+      if (interpEl) interpEl.value = completo ? texto : '';
+      if (box) { box.textContent = texto; box.style.color = cor; box.style.background = fundo; }
+      /* Alimenta o campo "Aldrete de alta" usado no restante do sistema/impressão */
+      if (completo) {
+        const legado = recuperacao.aldrete._q('aldrete');
+        if (legado && (!legado.value || legado.dataset.aldkAuto === '1')) { legado.value = soma; legado.dataset.aldkAuto = '1'; }
+      }
+      try { markDirty(); } catch (e) {}
+    },
+    agora() {
+      const el = recuperacao.aldrete._q('aldk_datahora');
+      if (el) {
+        const d = new Date();
+        const p = n => String(n).padStart(2, '0');
+        el.value = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+        try { markDirty(); } catch (e) {}
+      }
+    }
+  },
   novo() {
     if (state.dirty && !confirm('Descartar alterações?')) return;
     utils.clearForm(recuperacao.formId);
     document.querySelector(`#${recuperacao.formId} [name="data"]`).value = utils.hojeISO();
     recuperacao._linkPendente = null;
     try { recuperacao.grafico.restaurar({}); } catch (e) {}
+    try { recuperacao.aldrete.calc(); } catch (e) {}
     ui.atualizarDocStatus('recuperacao', null);
     ui.fecharBanner('banner-recuperacao');
     markClean();
@@ -9814,6 +9956,8 @@ const recuperacao = {
     try { assinatura.restaurar('sig-recuperacao', 'form-recuperacao'); } catch (e) {}
     /* Restaura dados do gráfico */
     try { recuperacao.grafico.restaurar(item.grafico || {}); } catch (e) {}
+    /* Recalcula a interpretação da escala de Aldrete-Kroulik */
+    try { recuperacao.aldrete.calc(); } catch (e) {}
     markClean();
     toast('Recuperação carregada'); ui.expandirTodos('recuperacao');
   },
@@ -19836,7 +19980,7 @@ const fin = {
     const isNew = !item._id;
 
     /* Extrai campos por origem */
-    let paciente = '', proc = '', cirurgiao = '', hospital = '', convenio = '', dataProc = '';
+    let paciente = '', proc = '', cirurgiao = '', hospital = '', convenio = '', dataProc = '', senha = '';
     if (modOrigem === 'anestesia') {
       paciente  = (doc.paciente && doc.paciente.nome) || '';
       proc      = (doc.procedimento && doc.procedimento.descricao) || '';
@@ -19844,18 +19988,21 @@ const fin = {
       hospital  = (doc.procedimento && doc.procedimento.hospital) || '';
       convenio  = (doc.paciente && doc.paciente.convenio) || '';
       dataProc  = (doc.procedimento && doc.procedimento.data) || '';
+      senha     = (doc.paciente && doc.paciente.senha) || '';
     } else if (modOrigem === 'pre') {
       paciente  = doc.nome || '';
       proc      = doc.cirurgia || '';
       cirurgiao = doc.cirurgiao || '';
       hospital  = doc.hospital || '';
       dataProc  = doc.data || '';
+      senha     = doc.senha || '';
     } else if (modOrigem === 'consulta') {
       paciente  = doc.nome || '';
       proc      = doc.queixa ? 'Consulta — ' + doc.queixa.slice(0, 50) : 'Consulta';
       hospital  = doc.local || '';
       convenio  = doc.convenio || '';
       dataProc  = doc.data || '';
+      senha     = doc.senha || '';
     }
 
     /* Não cria se nem nome do paciente existe */
@@ -19864,9 +20011,17 @@ const fin = {
     const tipoPag = convenio ? (convenio === 'Particular' ? 'Particular' : (convenio === 'SUS' ? 'SUS' : 'Convênio')) : '';
 
     /* Mantém valores que o usuário já editou, mas atualiza identificação */
+    /* Anexos de suporte financeiro vindos do registro clínico (foto/PDF da
+       autorização, comprovantes, guia). Mantemos referência pelo ID de origem
+       para que o Financeiro exiba/baixe sem duplicar o cadastro. */
+    const docsOrigem = Array.isArray(doc._docs) ? doc._docs.slice() : [];
     const novo = {
       ...item,
       paciente, procedimento: proc, cirurgiao, hospital, convenio,
+      /* Senha/autorização do plano: o registro clínico é a fonte da verdade.
+         Se o clínico tiver senha, ela reflete no Financeiro; senão preserva a
+         que o usuário eventualmente digitou aqui. */
+      senha: senha || item.senha || '',
       tipo_pagamento: item.tipo_pagamento || tipoPag,
       data_proc: dataProc,
       status: item.status || 'pendente',
@@ -19876,6 +20031,7 @@ const fin = {
       _origemId: doc._id,
       _origemTipo: modOrigem,
       _origemDescricao: 'Auto: ' + (modOrigem === 'anestesia' ? 'Ficha de anestesia' : modOrigem === 'pre' ? 'Pré-anestésica' : 'Consulta'),
+      _docsOrigem: docsOrigem,
       _autoCriado: true
     };
     if (isNew) novo._id = utils.uid();
@@ -21447,56 +21603,120 @@ const historico = {
     }, 80);
   },
 
+  /* Estado de ordenação da tabela de histórico (data | paciente | senha) */
+  _sort: { campo: 'data', dir: -1 },
+
+  ordenar(mod, campo) {
+    if (historico._sort.campo === campo) historico._sort.dir *= -1;
+    else { historico._sort.campo = campo; historico._sort.dir = (campo === 'data' ? -1 : 1); }
+    /* Re-renderiza cabeçalho e corpo preservando o filtro atual */
+    const input = document.getElementById('hist-search-input');
+    const host = document.getElementById('hist-table-host');
+    if (host) host.innerHTML = historico._tabelaHTML(mod, input ? input.value : '');
+  },
+
+  _setaSort(campo) {
+    if (historico._sort.campo !== campo) return '';
+    return historico._sort.dir < 0 ? ' ▼' : ' ▲';
+  },
+
   _render(mod, filtro) {
     const total = store.list(mod).length;
     return `
       <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <input id="hist-search-input" type="text" class="hist-search" value="${utils.escapeAttr(filtro)}"
-               placeholder="Buscar por nome do paciente, procedimento, cirurgião..."
+               placeholder="Buscar por paciente, senha, procedimento, cirurgião..."
                style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:.9rem">
         <span style="font-size:.78rem;color:var(--text-mute);white-space:nowrap">${total} registro(s)</span>
       </div>
-      <div style="max-height:60vh;overflow-y:auto">
-        <table class="dash-detail-table" style="margin-top:0">
-          <thead><tr>
-            <th style="width:90px">Data</th>
-            <th>Paciente</th>
-            <th>Detalhe</th>
-            <th style="width:220px;text-align:center">Ações</th>
-          </tr></thead>
-          <tbody id="hist-tbody">${historico._renderLinhas(mod, filtro)}</tbody>
-        </table>
-      </div>
+      <div id="hist-table-host" style="max-height:60vh;overflow:auto">${historico._tabelaHTML(mod, filtro)}</div>
     `;
+  },
+
+  _tabelaHTML(mod, filtro) {
+    const th = (campo, rot, extra) => `<th style="cursor:pointer;user-select:none;${extra || ''}" onclick="historico.ordenar('${mod}','${campo}')" title="Ordenar por ${rot.toLowerCase()}">${rot}${historico._setaSort(campo)}</th>`;
+    return `
+      <table class="dash-detail-table" style="margin-top:0">
+        <thead><tr>
+          ${th('data', 'Data', 'width:92px')}
+          ${th('senha', 'Senha', 'width:96px')}
+          ${th('paciente', 'Paciente')}
+          <th>Tipo / procedimento</th>
+          <th style="width:104px">Status</th>
+          <th style="width:216px;text-align:center">Ações</th>
+        </tr></thead>
+        <tbody id="hist-tbody">${historico._renderLinhas(mod, filtro)}</tbody>
+      </table>`;
   },
 
   _renderLinhas(mod, filtro) {
     const list = store.list(mod);
     const q = (filtro || '').toLowerCase().trim();
-    const filtradas = q
+    const filtradas = (q
       ? list.filter(it => historico._textoLinha(mod, it).toLowerCase().includes(q))
-      : list;
-    /* Ordena por mais recente primeiro */
-    filtradas.sort((a, b) => new Date(b._updatedAt || 0) - new Date(a._updatedAt || 0));
+      : list).slice();
+    /* Ordenação clicável por data, paciente ou senha */
+    const s = historico._sort;
+    filtradas.sort((a, b) => {
+      let va, vb;
+      if (s.campo === 'paciente') { va = historico._nomeDe(mod, a).toLowerCase(); vb = historico._nomeDe(mod, b).toLowerCase(); }
+      else if (s.campo === 'senha') { va = (historico._senhaDe(mod, a) || '').toLowerCase(); vb = (historico._senhaDe(mod, b) || '').toLowerCase(); }
+      else { va = historico._dataItem(a) || (a._updatedAt || ''); vb = historico._dataItem(b) || (b._updatedAt || ''); }
+      if (va < vb) return -1 * s.dir;
+      if (va > vb) return 1 * s.dir;
+      return 0;
+    });
     if (filtradas.length === 0) {
-      return `<tr><td colspan="4" style="text-align:center;color:var(--text-mute);padding:20px">Nenhum registro ${q ? 'corresponde ao filtro' : 'salvo'}.</td></tr>`;
+      return `<tr><td colspan="6" style="text-align:center;color:var(--text-mute);padding:20px">Nenhum registro ${q ? 'corresponde ao filtro' : 'salvo'}.</td></tr>`;
     }
     return filtradas.map(it => {
-      const dt = it._updatedAt ? new Date(it._updatedAt).toLocaleDateString('pt-BR') : '—';
+      const dt = historico._fmtData(historico._dataItem(it)) || (it._updatedAt ? new Date(it._updatedAt).toLocaleDateString('pt-BR') : '—');
       const nome = utils.escapeHTML(historico._nomeDe(mod, it));
-      const det = utils.escapeHTML(historico._detalheDe(mod, it).slice(0, 80));
+      const senha = historico._senhaDe(mod, it);
+      const senhaTd = senha ? utils.escapeHTML(senha) : '<span style="color:var(--text-mute)">—</span>';
+      const det = utils.escapeHTML(historico._detalheDe(mod, it).slice(0, 70)) || '<span style="color:var(--text-mute)">—</span>';
+      const st = historico._statusDe(mod, it);
+      const stTd = st.rot ? `<span class="status-pill ${st.cls}" style="font-size:.68rem">${utils.escapeHTML(st.rot)}</span>` : '<span style="color:var(--text-mute)">—</span>';
+      const nAnexos = historico._contaAnexos(it);
+      const anexoBtn = nAnexos
+        ? `<button class="btn btn-xs" onclick="historico.abrirItem('${mod}','${it._id}')" title="${nAnexos} anexo(s)">📎${nAnexos}</button>`
+        : '';
       return `<tr>
         <td style="font-size:.82rem;color:var(--text-soft);white-space:nowrap">${dt}</td>
+        <td style="font-size:.82rem;white-space:nowrap">${senhaTd}</td>
         <td><strong>${nome}</strong></td>
         <td style="font-size:.82rem;color:var(--text-soft)">${det}</td>
+        <td>${stTd}</td>
         <td style="white-space:nowrap;text-align:right">
-          <button class="btn btn-xs btn-primary" onclick="historico.abrirItem('${mod}','${it._id}')" title="Abrir / Editar">📂 Abrir</button>
-          <button class="btn btn-xs" onclick="historico.duplicarItem('${mod}','${it._id}')" title="Duplicar">⎘</button>
+          <button class="btn btn-xs" onclick="historico.visualizarItem('${mod}','${it._id}')" title="Visualizar">👁</button>
+          <button class="btn btn-xs btn-primary" onclick="historico.abrirItem('${mod}','${it._id}')" title="Editar">✏️</button>
           <button class="btn btn-xs" onclick="historico.imprimirItem('${mod}','${it._id}')" title="Imprimir">🖨️</button>
-          <button class="btn btn-xs btn-danger" onclick="historico.excluirItem('${mod}','${it._id}')" title="Excluir">✕</button>
+          <button class="btn btn-xs" onclick="historico.pdfItem('${mod}','${it._id}')" title="Exportar PDF">📄</button>
+          ${anexoBtn}
+          <button class="btn btn-xs btn-danger" onclick="historico.excluirItem('${mod}','${it._id}')" title="Apagar">🗑</button>
         </td>
       </tr>`;
     }).join('');
+  },
+
+  _senhaDe(mod, it) {
+    if (mod === 'anestesia') return (it.paciente && it.paciente.senha) || it.paciente_senha || '';
+    return it.senha || '';
+  },
+
+  _statusDe(mod, it) {
+    if (mod === 'financeiro') {
+      const s = it.status || '';
+      return { rot: s || '', cls: s };
+    }
+    if (it._finalizado) return { rot: 'Finalizado', cls: 'pago' };
+    return { rot: 'Rascunho', cls: 'pendente' };
+  },
+
+  _contaAnexos(it) {
+    return (Array.isArray(it._docs) ? it._docs.length : 0) +
+           (Array.isArray(it.anexos) ? it.anexos.length : 0) +
+           (Array.isArray(it._docsOrigem) ? it._docsOrigem.length : 0);
   },
 
   _nomeDe(mod, it) {
@@ -21519,7 +21739,7 @@ const historico = {
   },
 
   _textoLinha(mod, it) {
-    return [historico._nomeDe(mod, it), historico._detalheDe(mod, it)].join(' ');
+    return [historico._nomeDe(mod, it), historico._detalheDe(mod, it), historico._senhaDe(mod, it)].join(' ');
   },
 
   /* ======================= PRONTUÁRIO 360° DO PACIENTE =======================
@@ -21716,7 +21936,8 @@ const historico = {
     if (tbody) tbody.innerHTML = historico._renderLinhas(mod, input ? input.value : '');
   },
 
-  imprimirItem(mod, id) {
+  /* Carrega o registro no módulo e executa uma ação (preview/impressão/PDF) */
+  _carregarEEntao(mod, id, depois) {
     modal.close();
     setTimeout(() => {
       const item = store.getById(mod, id);
@@ -21728,9 +21949,29 @@ const historico = {
         } else if (window[mod] && typeof window[mod].carregar === 'function') {
           window[mod].carregar(item);
         }
-        setTimeout(() => printPreview.abrir(), 300);
+        if (typeof depois === 'function') setTimeout(depois, 300);
       }, 200);
     }, 100);
+  },
+
+  visualizarItem(mod, id) {
+    if (mod === 'financeiro') { historico.abrirItem(mod, id); return; }
+    historico._carregarEEntao(mod, id, () => { try { printPreview.abrir(); } catch (e) {} });
+  },
+
+  imprimirItem(mod, id) {
+    if (mod === 'financeiro') { historico.abrirItem(mod, id); return; }
+    historico._carregarEEntao(mod, id, () => { try { printPreview.abrir(); } catch (e) {} });
+  },
+
+  pdfItem(mod, id) {
+    if (mod === 'financeiro') { historico.abrirItem(mod, id); return; }
+    historico._carregarEEntao(mod, id, () => {
+      try {
+        printPreview.abrir();
+        toast('Use 🖨️ Imprimir / PDF e escolha "Salvar em PDF"');
+      } catch (e) {}
+    });
   },
 
   excluirItem(mod, id) {
@@ -23500,6 +23741,7 @@ ${TAG_CLOSE_HTML}`;
           ${printPreview._field('Peso', d.peso ? d.peso + ' kg' : '')}
           ${printPreview._field('Altura', d.altura ? d.altura + ' cm' : '')}
           ${printPreview._field('Data avaliação', utils.formatarData(d.data))}
+          ${printPreview._field('Senha / Autorização', d.senha)}
         </div>
       `) +
       printPreview._section('Procedimento', `
@@ -23600,6 +23842,7 @@ ${TAG_CLOSE_HTML}`;
           ${printPreview._field('Convênio', d.convenio)}
           ${printPreview._field('Local', d.local)}
           ${printPreview._field('Data', utils.formatarData(d.data))}
+          ${printPreview._field('Senha / Autorização', d.senha)}
         </div>
       `) +
       printPreview._section('Anamnese', `
@@ -23644,6 +23887,7 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._field('Prontuário', p.prontuario)}
         ${printPreview._field('Convênio', p.convenio)}
         ${printPreview._field('Carteirinha', p.carteirinha)}
+        ${printPreview._field('Senha / Autorização', p.senha)}
       </div>
     `);
     html += printPreview._section('Procedimento', `
@@ -24105,6 +24349,19 @@ ${TAG_CLOSE_HTML}`;
           ${printPreview._field('Aldrete', d.aldrete)}
         </div>
       `) +
+      ((d.aldk_total || d.aldk_atividade || d.aldk_respiracao || d.aldk_circulacao || d.aldk_consciencia || d.aldk_saturacao) ?
+      printPreview._section('Escala de Aldrete-Kroulik', `
+        <div class="pp-grid cols-3">
+          ${printPreview._field('Atividade motora', d.aldk_atividade)}
+          ${printPreview._field('Respiração', d.aldk_respiracao)}
+          ${printPreview._field('Circulação (PA)', d.aldk_circulacao)}
+          ${printPreview._field('Consciência', d.aldk_consciencia)}
+          ${printPreview._field('Saturação O₂', d.aldk_saturacao)}
+          ${printPreview._field('Pontuação total', d.aldk_total)}
+        </div>
+        ${d.aldk_datahora ? printPreview._field('Data/hora da avaliação', String(d.aldk_datahora).replace('T', ' ')) : ''}
+        ${d.aldk_interpretacao ? printPreview._field('Interpretação', d.aldk_interpretacao, true) : ''}
+      `) : '') +
       printPreview._section('Conduta e desfecho', `
         ${printPreview._field('Complicações', d.complicacoes, true)}
         ${printPreview._field('Conduta', d.conduta, true)}
@@ -25794,6 +26051,65 @@ const financeiro = {
     }
   },
 
+  /* Exibe (somente leitura) os anexos herdados do registro clínico de origem.
+     São documentos de suporte financeiro (guia, senha, comprovante) anexados
+     na Ficha/Consulta/Pré e propagados para cá pelo vínculo por _origemId. */
+  renderDocsOrigem(item) {
+    const host = document.getElementById('fin-docs-origem');
+    if (!host) return;
+    const docs = (item && Array.isArray(item._docsOrigem)) ? item._docsOrigem : [];
+    if (!docs.length) { host.innerHTML = ''; return; }
+    const fmtKB = b => b > 900 * 1024 ? (b / 1048576).toFixed(1) + ' MB' : Math.round((b || 0) / 1024) + ' KB';
+    host.innerHTML =
+      '<div style="margin-top:10px;font-size:.78rem;color:var(--text-soft);font-weight:600">📄 Anexos do registro clínico de origem (' + docs.length + ')</div>' +
+      docs.map((d, i) => {
+        const thumb = (d.thumb || (d.tipo === 'imagem' && d.dataurl)) ?
+          '<img src="' + (d.thumb || d.dataurl) + '" style="width:100%;height:100%;object-fit:cover">' :
+          '<span style="font-size:1.4rem">' + (d.tipo === 'pdf' ? '📄' : '🖼️') + '</span>';
+        const onde = d.storage_path ? '☁️ nuvem' : '📱 local';
+        return '<div style="display:flex;gap:10px;align-items:center;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:8px;background:var(--surface-alt)">' +
+          '<div style="width:48px;height:48px;flex:0 0 48px;border-radius:6px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#fff;border:1px solid var(--border);cursor:pointer" onclick="financeiro.verDocOrigem(' + i + ')">' + thumb + '</div>' +
+          '<div style="flex:1;min-width:0">' +
+            '<div style="font-size:.82rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + utils.escapeHTML(d.nome || 'Documento') + '</div>' +
+            '<div style="font-size:.72rem;color:var(--text-mute)">' + utils.escapeHTML((d.categoria || 'Documento')) + ' · ' + (d.tipo || '').toUpperCase() + ' · ' + fmtKB(d.tamanho) + ' · ' + onde + '</div>' +
+          '</div>' +
+          '<button type="button" class="btn btn-xs" onclick="financeiro.verDocOrigem(' + i + ')">👁 Ver / baixar</button>' +
+        '</div>';
+      }).join('');
+  },
+  async verDocOrigem(i) {
+    const id = document.querySelector(`#${financeiro.formId} [name="id"]`).value;
+    const item = id ? store.getById('financeiro', id) : null;
+    const d = item && item._docsOrigem && item._docsOrigem[i];
+    if (!d) { toast('Anexo não encontrado', 'warn'); return; }
+    if (d.storage_path) {
+      toast('☁️ Abrindo…');
+      const url = await prontuario._signedUrl(d.storage_path);
+      if (!url) { toast('Não consegui gerar o link — verifique login na nuvem', 'warn'); return; }
+      if (d.tipo === 'imagem') {
+        modal.open(utils.escapeHTML((d.categoria || '') + ' — ' + d.nome),
+          '<div style="text-align:center"><img src="' + url + '" style="max-width:100%;max-height:70vh;border-radius:6px"></div>', '');
+      } else {
+        const w = window.open(url, '_blank');
+        if (!w) toast('Permita pop-ups para visualizar o PDF', 'warn');
+      }
+      return;
+    }
+    if (d.dataurl && d.tipo === 'imagem') {
+      modal.open(utils.escapeHTML((d.categoria || '') + ' — ' + d.nome),
+        '<div style="text-align:center"><img src="' + d.dataurl + '" style="max-width:100%;max-height:70vh;border-radius:6px"></div>', '');
+      return;
+    }
+    if (d.dataurl) {
+      try {
+        const url = URL.createObjectURL(prontuario._dataurlParaBlob(d.dataurl, 'application/pdf'));
+        const w = window.open(url, '_blank');
+        if (!w) toast('Permita pop-ups para visualizar o PDF', 'warn');
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } catch (e) { toast('Erro ao abrir o PDF: ' + e.message, 'error'); }
+    }
+  },
+
   editar(id) {
     const card = document.getElementById(financeiro.cardId);
     card.style.display = 'block';
@@ -25818,9 +26134,12 @@ const financeiro = {
         if (Array.isArray(item.codigos)) financeiro.codigos.restaurar(item.codigos);
         /* Restaura anexos */
         financeiro.anexos.restaurar(item.anexos);
+        /* Anexos de suporte vindos do registro clínico de origem (foto/PDF) */
+        financeiro.renderDocsOrigem(item);
         financeiro.calcDif();
       }
     } else {
+      financeiro.renderDocsOrigem(null);
       document.querySelector(`#${financeiro.formId} [name="data_proc"]`).value = utils.hojeISO();
       document.querySelector(`#${financeiro.formId} [name="status"]`).value = 'pendente';
       const fq = s => document.querySelector(`#${financeiro.formId} [name="${s}"]`);
@@ -25856,6 +26175,16 @@ const financeiro = {
     const rec  = parseFloat(data.valor_recebido) || 0;
     const glo  = parseFloat(data.glosa) || 0;
     data.diferenca_calc = prev - rec - glo;
+    /* Preserva campos que não são inputs do formulário (anexos herdados do
+       registro clínico de origem e vínculos) ao salvar manualmente. */
+    if (data._id) {
+      const previo = store.getById('financeiro', data._id);
+      if (previo) {
+        if (data._docsOrigem === undefined && previo._docsOrigem) data._docsOrigem = previo._docsOrigem;
+        if (previo._links && !data._links) data._links = previo._links;
+        if (previo._autoCriado && data._autoCriado === undefined) data._autoCriado = previo._autoCriado;
+      }
+    }
     store.save('financeiro', data);
     toast('Registro salvo');
     financeiro.cancelar();
@@ -26202,7 +26531,7 @@ const financeiro = {
     const list = financeiro.filtrar();
     const tbody = document.getElementById('financeiro-tbody');
     if (list.length === 0) {
-      tbody.innerHTML = '<tr class="empty-row"><td colspan="13">Nenhum registro encontrado</td></tr>';
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="14">Nenhum registro encontrado</td></tr>';
     } else {
       tbody.innerHTML = list.map(x => {
         const prev = parseFloat(x.valor_previsto) || 0;
@@ -26212,9 +26541,12 @@ const financeiro = {
         const pago = x.pago ? '<span title="Pago" style="color:var(--accent);font-size:1.1rem">✓</span>' : '<span style="color:var(--text-mute)">—</span>';
         const peric = x.periciado ? '<span title="Periciado" style="color:#7b3a8d;font-size:1.1rem">⚖</span>' : '<span style="color:var(--text-mute)">—</span>';
         const auto = x._autoCriado ? '<span style="font-size:.62rem;background:var(--primary-light);color:var(--primary-dark);padding:1px 5px;border-radius:8px;margin-left:4px" title="Criado automaticamente">auto</span>' : '';
+        const nAnexos = (Array.isArray(x.anexos) ? x.anexos.length : 0) + (Array.isArray(x._docsOrigem) ? x._docsOrigem.length : 0) + (Array.isArray(x._docs_troca) ? x._docs_troca.length : 0);
+        const anexoTag = nAnexos ? `<span title="${nAnexos} anexo(s) de suporte financeiro" style="margin-left:4px;cursor:default">📎${nAnexos}</span>` : '';
         return `
           <tr>
-            <td data-label="Paciente">${utils.escapeHTML(x.paciente || '')}${auto}</td>
+            <td data-label="Paciente">${utils.escapeHTML(x.paciente || '')}${auto}${anexoTag}</td>
+            <td data-label="Senha">${x.senha ? utils.escapeHTML(x.senha) : '<span style="color:var(--text-mute)">—</span>'}</td>
             <td data-label="Procedimento">${utils.escapeHTML(x.procedimento || '')}</td>
             <td data-label="Cirurgião">${utils.escapeHTML(x.cirurgiao || '')}</td>
             <td data-label="Hospital">${utils.escapeHTML(x.hospital || '')}</td>
