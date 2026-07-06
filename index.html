@@ -10821,13 +10821,109 @@ const auth = {
 
   /* Renderiza a tela de login (ou o cadastro inicial do admin) */
   _render() {
-    const primeiraVez = !auth.temUsuarios();
     const sub = document.getElementById('auth-sub');
     const foot = document.getElementById('auth-foot');
     const form = document.getElementById('auth-form');
+    sub.textContent = 'Entre com sua conta (funciona em qualquer aparelho)';
+    form.innerHTML = `
+      <div class="auth-field"><label>E-mail</label><input type="email" id="auth-email" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="seu@email.com"></div>
+      <div class="auth-field"><label>Senha</label><input type="password" id="auth-pass" autocomplete="current-password" placeholder="Sua senha"></div>
+      <div class="auth-error" id="auth-error"></div>
+      <button type="submit" class="auth-btn">Entrar</button>`;
+    form.onsubmit = (e) => { e.preventDefault(); auth.tentarLoginNuvem(); };
+    foot.innerHTML =
+      '<a href="javascript:void(0)" onclick="auth._mostrarSignup()" style="color:var(--primary);font-size:.85rem">Criar conta (novo administrador)</a> · ' +
+      '<a href="javascript:void(0)" onclick="auth._mostrarLoginLocal()" style="color:var(--primary);font-size:.85rem">Usuário local (equipe)</a><br>' +
+      '<a href="javascript:void(0)" onclick="auth._socorro()" style="color:var(--text-mute);font-size:.8rem">Problemas para entrar?</a>' +
+      '<br><small style="color:var(--text-mute)">Sua conta e seus dados são seus: cada administrador tem banco separado na nuvem.</small>';
+  },
+
+  /* ---------- LOGIN UNIFICADO PELA NUVEM ----------
+     A conta da nuvem (Supabase) é a identidade principal: funciona em
+     qualquer aparelho e os dados sincronizam. Offline, desbloqueia com
+     a última senha validada neste aparelho. */
+  async tentarLoginNuvem() {
+    const email = (document.getElementById('auth-email').value || '').trim().toLowerCase();
+    const senha = document.getElementById('auth-pass').value || '';
+    const errEl = document.getElementById('auth-error');
+    errEl.textContent = '';
+    if (!email || !senha) { errEl.textContent = 'Preencha e-mail e senha.'; return; }
+    const nuvemDisponivel = navigator.onLine && (() => { try { return cloud.estaConfigurado(); } catch (e) { return false; } })();
+    if (nuvemDisponivel) {
+      errEl.textContent = 'Verificando…';
+      let ok = false;
+      try { ok = await cloud.login(email, senha); } catch (e) { ok = false; }
+      if (ok) {
+        await auth._protegerTrocaDeConta();
+        const u = await auth._espelharUsuarioNuvem(email, senha);
+        auth._definirSessao(u);
+        document.getElementById('auth-pass').value = '';
+        auth._desbloquear();
+        setTimeout(() => { try { cloud.sincronizar({ silent: true }); } catch (e) {} }, 900);
+        return;
+      }
+      /* nuvem recusou: ainda tenta o espelho local (senha antiga trocada na nuvem não entra) */
+      errEl.textContent = 'E-mail ou senha inválidos na nuvem.';
+      return;
+    }
+    /* OFFLINE: valida contra o espelho local da última entrada */
+    const lista = auth._lerUsuarios();
+    const u = lista.find(x => x.usuario === email);
+    if (!u) { errEl.textContent = 'Sem internet e esta conta nunca entrou neste aparelho.'; return; }
+    const hash = await auth._hash(senha);
+    if (hash !== u.senhaHash) { errEl.textContent = 'Senha não confere (modo offline).'; return; }
+    auth._definirSessao(u);
+    auth._desbloquear();
+    toast('📴 Modo offline — sincroniza quando a internet voltar');
+  },
+
+  /* Mantém no aparelho um espelho da conta da nuvem p/ desbloqueio offline */
+  async _espelharUsuarioNuvem(email, senha) {
+    const usuarios = auth._lerUsuarios();
+    const hash = await auth._hash(senha);
+    let u = usuarios.find(x => x.usuario === email);
+    if (!u) {
+      u = { usuario: email, nome: email.split('@')[0], senhaHash: hash, perfil: 'admin',
+            modulos: auth.PERFIS.admin.modulos.slice(), nuvem: true };
+      usuarios.push(u);
+    } else {
+      u.senhaHash = hash; u.nuvem = true;
+      if (!Array.isArray(u.modulos) || !u.modulos.length) u.modulos = auth.PERFIS.admin.modulos.slice();
+    }
+    auth._salvarUsuarios(usuarios);
+    return u;
+  },
+
+  /* Se OUTRA conta da nuvem entrar neste aparelho, oferece limpar os dados
+     locais para não misturar (e não enviar dados de A para a nuvem de B). */
+  async _protegerTrocaDeConta() {
+    try {
+      const KEY = 'medsys.v7.cloud.last_uid';
+      const s = cloud.session();
+      const uid = s && s.user && s.user.id;
+      if (!uid) return;
+      const anterior = localStorage.getItem(KEY);
+      if (anterior && anterior !== uid) {
+        const limpar = confirm('⚠️ Este aparelho tem dados locais de OUTRA conta.\n\nLimpar os dados locais agora? (recomendado — evita misturar os bancos; os dados da outra conta continuam salvos na nuvem dela)');
+        if (limpar) {
+          try {
+            backupCompleto.CHAVES.forEach(k => { const real = STORAGE[k]; if (real) localStorage.removeItem(real); });
+          } catch (e) {}
+          toast('🧹 Dados locais limpos — puxando os desta conta da nuvem…');
+        }
+      }
+      localStorage.setItem(KEY, uid);
+    } catch (e) {}
+  },
+
+  /* ---------- Login local (equipe/secretária ou legado) ---------- */
+  _mostrarLoginLocal() {
+    const sub = document.getElementById('auth-sub');
+    const form = document.getElementById('auth-form');
+    const foot = document.getElementById('auth-foot');
+    const primeiraVez = !auth.temUsuarios();
     if (primeiraVez) {
-      sub.textContent = 'Primeiro acesso — crie o administrador';
-      /* transforma o form em cadastro do admin */
+      sub.textContent = 'Primeiro acesso — crie o administrador local';
       form.innerHTML = `
         <div class="auth-field"><label>Nome completo</label><input type="text" id="auth-new-nome" placeholder="Ex.: Dr. Marcelo"></div>
         <div class="auth-field"><label>Usuário (login)</label><input type="text" id="auth-new-user" autocapitalize="none" spellcheck="false" placeholder="Ex.: marcelo"></div>
@@ -10836,17 +10932,115 @@ const auth = {
         <div class="auth-error" id="auth-error"></div>
         <button type="submit" class="auth-btn">Criar administrador e entrar</button>`;
       form.onsubmit = (e) => { e.preventDefault(); auth._criarAdminInicial(); };
-      foot.innerHTML = 'Este primeiro usuário terá acesso total (administrador).<br>Depois você poderá criar usuários para médico e secretária em Ajustes.';
-    } else {
-      sub.textContent = 'Acesso restrito — identifique-se';
-      form.innerHTML = `
-        <div class="auth-field"><label>Usuário</label><input type="text" id="auth-user" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Seu usuário"></div>
-        <div class="auth-field"><label>Senha</label><input type="password" id="auth-pass" autocomplete="current-password" placeholder="Sua senha"></div>
-        <div class="auth-error" id="auth-error"></div>
-        <button type="submit" class="auth-btn">Entrar</button>`;
-      form.onsubmit = (e) => { e.preventDefault(); auth.tentarLogin(); };
-      foot.innerHTML = 'Bloqueia automaticamente após 5 minutos de inatividade.';
+      foot.innerHTML = 'Usuário local vale só neste aparelho. Para acesso em qualquer aparelho, use a conta da nuvem.<br>' +
+        '<a href="javascript:void(0)" onclick="auth._render()" style="color:var(--primary);font-size:.85rem">← Voltar</a>';
+      return;
     }
+    sub.textContent = 'Acesso local — identifique-se';
+    form.innerHTML = `
+      <div class="auth-field"><label>Usuário</label><input type="text" id="auth-user" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Seu usuário"></div>
+      <div class="auth-field"><label>Senha</label><input type="password" id="auth-pass" autocomplete="current-password" placeholder="Sua senha"></div>
+      <div class="auth-error" id="auth-error"></div>
+      <button type="submit" class="auth-btn">Entrar</button>`;
+    form.onsubmit = (e) => { e.preventDefault(); auth.tentarLogin(); };
+    foot.innerHTML = 'Bloqueia automaticamente após 5 minutos de inatividade.<br>' +
+      '<a href="javascript:void(0)" onclick="auth._render()" style="color:var(--primary);font-size:.85rem">← Entrar com a conta da nuvem</a> · ' +
+      '<a href="javascript:void(0)" onclick="auth._socorro()" style="color:var(--text-mute);font-size:.85rem">Problemas para entrar?</a>';
+  },
+
+  /* ---------- Criar conta na nuvem (novo administrador) ---------- */
+  _mostrarSignup() {
+    const sub = document.getElementById('auth-sub');
+    const form = document.getElementById('auth-form');
+    const foot = document.getElementById('auth-foot');
+    sub.textContent = 'Criar conta — novo administrador';
+    form.innerHTML = `
+      <div class="auth-field"><label>E-mail</label><input type="email" id="auth-su-email" autocapitalize="none" placeholder="seu@email.com"></div>
+      <div class="auth-field"><label>Senha</label><input type="password" id="auth-su-pass" placeholder="Mínimo 6 caracteres"></div>
+      <div class="auth-field"><label>Confirmar senha</label><input type="password" id="auth-su-pass2" placeholder="Repita a senha"></div>
+      <div class="auth-error" id="auth-error"></div>
+      <button type="submit" class="auth-btn">Criar conta e entrar</button>`;
+    form.onsubmit = (e) => { e.preventDefault(); auth._executarSignup(); };
+    foot.innerHTML = 'Cada conta é um banco de dados separado na nuvem — o novo administrador não vê os seus dados.<br>' +
+      '<a href="javascript:void(0)" onclick="auth._render()" style="color:var(--primary);font-size:.85rem">← Voltar ao login</a>';
+  },
+
+  async _executarSignup() {
+    const email = (document.getElementById('auth-su-email').value || '').trim().toLowerCase();
+    const s1 = document.getElementById('auth-su-pass').value || '';
+    const s2 = document.getElementById('auth-su-pass2').value || '';
+    const errEl = document.getElementById('auth-error');
+    errEl.textContent = '';
+    if (!email || !s1) { errEl.textContent = 'Preencha e-mail e senha.'; return; }
+    if (s1.length < 6) { errEl.textContent = 'A senha deve ter ao menos 6 caracteres.'; return; }
+    if (s1 !== s2) { errEl.textContent = 'As senhas não conferem.'; return; }
+    if (!navigator.onLine) { errEl.textContent = 'Criar conta exige internet.'; return; }
+    errEl.textContent = 'Criando conta na nuvem…';
+    const r = await cloud.signup(email, s1);
+    if (!r.ok) { errEl.textContent = r.erro || 'Não foi possível criar a conta.'; return; }
+    if (r.precisaConfirmar) {
+      errEl.textContent = '';
+      document.getElementById('auth-form').innerHTML =
+        '<p style="font-size:.9rem">📬 Enviamos um e-mail de confirmação para <b>' + utils.escapeHTML(email) + '</b>.<br>Confirme e depois volte aqui para entrar.</p>' +
+        '<button type="button" class="auth-btn" onclick="auth._render()">← Voltar ao login</button>';
+      return;
+    }
+    /* sessão já veio: entra direto */
+    await auth._protegerTrocaDeConta();
+    const u = await auth._espelharUsuarioNuvem(email, s1);
+    auth._definirSessao(u);
+    auth._desbloquear();
+    toast('🎉 Conta criada — bem-vindo!');
+  },
+
+  /* ---------- Recuperação de acesso local ----------
+     Mostra os logins cadastrados e permite recriar o acesso local.
+     A identidade é comprovada pela CONTA DA NUVEM (email+senha do
+     Supabase); sem nuvem configurada, exige confirmação digitada. */
+  _socorro() {
+    const form = document.getElementById('auth-form');
+    const foot = document.getElementById('auth-foot');
+    const sub = document.getElementById('auth-sub');
+    const usuarios = auth._lerUsuarios().map(u => u.usuario).join(', ') || '(nenhum)';
+    sub.textContent = 'Recuperar acesso';
+    const temNuvem = (() => { try { return cloud.estaConfigurado(); } catch (e) { return false; } })();
+    form.innerHTML = `
+      <div style="font-size:.86rem;background:var(--surface-alt, #f2f5f8);border:1px solid #d8dee6;border-radius:8px;padding:10px;margin-bottom:12px">
+        👤 Usuário(s) cadastrado(s) neste aparelho: <b>${utils.escapeHTML(usuarios)}</b><br>
+        <small>Tente entrar com um desses logins. Se não lembrar a senha, recrie o acesso abaixo — seus dados clínicos não são apagados.</small>
+      </div>
+      ${temNuvem ? `
+        <div class="auth-field"><label>E-mail da conta da nuvem</label><input type="email" id="auth-rec-email" autocapitalize="none" placeholder="seu@email.com"></div>
+        <div class="auth-field"><label>Senha da conta da nuvem</label><input type="password" id="auth-rec-pass" placeholder="Senha da nuvem (Supabase)"></div>
+      ` : `
+        <div class="auth-field"><label>Digite RECOMEÇAR para confirmar</label><input type="text" id="auth-rec-conf" autocapitalize="characters" placeholder="RECOMEÇAR"></div>
+      `}
+      <div class="auth-error" id="auth-error"></div>
+      <button type="submit" class="auth-btn">Recriar acesso local</button>`;
+    form.onsubmit = (e) => { e.preventDefault(); auth._executarSocorro(temNuvem); };
+    foot.innerHTML = '<a href="javascript:void(0)" onclick="auth._render()" style="color:var(--primary);font-size:.85rem">← Voltar ao login</a>';
+  },
+
+  async _executarSocorro(temNuvem) {
+    const errEl = document.getElementById('auth-error');
+    errEl.textContent = '';
+    if (temNuvem) {
+      const email = (document.getElementById('auth-rec-email').value || '').trim();
+      const senha = document.getElementById('auth-rec-pass').value || '';
+      if (!email || !senha) { errEl.textContent = 'Preencha e-mail e senha da nuvem.'; return; }
+      errEl.textContent = 'Verificando na nuvem…';
+      let ok = false;
+      try { ok = await cloud.login(email, senha); } catch (e) { ok = false; }
+      if (!ok) { errEl.textContent = 'A nuvem recusou essas credenciais. Confira e tente de novo.'; return; }
+    } else {
+      const conf = (document.getElementById('auth-rec-conf').value || '').trim().toUpperCase();
+      if (conf !== 'RECOMEÇAR' && conf !== 'RECOMECAR') { errEl.textContent = 'Digite RECOMEÇAR para confirmar.'; return; }
+    }
+    /* Apaga só o cadastro de usuários locais — dados clínicos ficam intactos */
+    localStorage.removeItem(auth.USERS_KEY);
+    sessionStorage.removeItem(auth.SESSION_KEY);
+    toast('🔓 Acesso local resetado — crie o novo administrador');
+    auth._render();   /* cai no fluxo "Primeiro acesso — crie o administrador" */
   },
 
   async _criarAdminInicial() {
@@ -11190,6 +11384,32 @@ const cloud = {
     /* Chave publishable sem sessão: SÓ apikey, nunca Authorization */
     return h;
   },
+  async signup(email, senha) {
+    if (!cloud.estaConfigurado()) return { ok: false, erro: 'Nuvem não configurada' };
+    const c = cloud.config();
+    try {
+      const r = await fetch(c.url + '/auth/v1/signup', {
+        method: 'POST', headers: cloud._headers(false),
+        body: JSON.stringify({ email: email.trim(), password: senha })
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const msg = d.msg || d.message || d.error_description || ('HTTP ' + r.status);
+        if (/already/i.test(msg)) return { ok: false, erro: 'Este e-mail já tem conta — use "Entrar".' };
+        return { ok: false, erro: msg };
+      }
+      /* Se o projeto exige confirmação de e-mail, não vem access_token */
+      if (d.access_token) {
+        localStorage.setItem(cloud.SESSION_KEY, JSON.stringify(d));
+        try { cloud._atualizarUI(); } catch (e) {}
+        return { ok: true, precisaConfirmar: false };
+      }
+      return { ok: true, precisaConfirmar: true };
+    } catch (e) {
+      return { ok: false, erro: 'Falha de rede: ' + e.message };
+    }
+  },
+
   async login(email, senha) {
     if (!cloud.estaConfigurado()) { toast('Configure a nuvem primeiro (URL + chave)', 'warn'); return false; }
     const c = cloud.config();
