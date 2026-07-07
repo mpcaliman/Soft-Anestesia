@@ -4679,7 +4679,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
             <div class="checks">
               <label class="check"><input type="checkbox" name="monitores[]" value="Capnografia" onchange="anestesia.disp.sincronizarVitais()"><span>Capnografia (EtCO₂)</span></label>
               <label class="check"><input type="checkbox" name="monitores[]" value="Oximetria" onchange="anestesia.disp.sincronizarVitais()"><span>Oximetria (SpO₂)</span></label>
-              <label class="check"><input type="checkbox" name="monitores[]" value="ECG"><span>ECG</span></label>
+              <label class="check"><input type="checkbox" name="monitores[]" value="ECG" onchange="anestesia.disp.sincronizarVitais()"><span>ECG</span></label>
               <label class="check"><input type="checkbox" name="monitores[]" value="PNI" onchange="anestesia.disp.sincronizarVitais()"><span>PNI</span></label>
               <label class="check"><input type="checkbox" name="monitores[]" value="PA invasiva" onchange="anestesia.disp.sincronizarVitais()"><span>PA invasiva</span></label>
               <label class="check"><input type="checkbox" name="monitores[]" value="Temperatura" onchange="anestesia.disp.sincronizarVitais()"><span>Temperatura</span></label>
@@ -8925,7 +8925,7 @@ const ui = {
         else if (modName === 'agenda') agenda.render();
         else if (modName === 'pacientes') pacientes.render();
         else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
-        else if (modName === 'anestesia') { anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} }
+        else if (modName === 'anestesia') { anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} }
         else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} }, 60); }
         else if (modName === 'termo') { setTimeout(() => { try { (termo.sig._ajustar || []).forEach(fn => fn()); assinatura.initCanvas('sig-termo'); } catch (e) {} }, 80); }
         else if (modName === 'prescricao') { setTimeout(() => { try { if (prescricao.sig._ajustar) prescricao.sig._ajustar(); assinatura.initCanvas('sig-prescricao'); } catch (e) {} }, 80); }
@@ -15793,44 +15793,10 @@ const anestesia = {
       if (valor === 'Sonda vesical') { try { anestesia.diurese.sincronizar(); } catch (e) {} }
       markDirty();
     },
-    /* Sincroniza visibilidade das colunas BIS/Glic/PVC/PIC na tabela de sinais vitais
-       conforme monitores selecionados. */
+    /* Sincroniza as TRÊS formas de registro (tabela, grade e gráfico) com os
+       parâmetros habilitados pelos monitores selecionados. */
     sincronizarVitais() {
-      const map = {
-        'BIS': 'bis',
-        'TOF': 'tof',
-        'Glicemia': 'glic',
-        'PVC': 'pvc',
-        'PIC': 'pic',
-        'Temperatura': 'temp',
-        'Capnografia': 'etco2',
-        'Oximetria': 'spo2',
-        'PNI': 'pa',
-        'PA invasiva': 'pa',
-        'Débito cardíaco': 'dc',
-        'ScvO₂/SvO₂': 'scvo2'
-      };
-      const ativados = new Set();
-      document.querySelectorAll('[name="monitores[]"]:checked').forEach(el => {
-        const k = map[el.value];
-        if (k) ativados.add(k);
-      });
-      const styleId = 'vitais-col-style';
-      let style = document.getElementById(styleId);
-      if (!style) {
-        style = document.createElement('style');
-        style.id = styleId;
-        document.head.appendChild(style);
-      }
-      /* Atenua colunas de monitores opcionais não marcados */
-      const todas = ['bis','tof','glic','pvc','pic','dc','scvo2'];
-      const regras = todas.filter(k => !ativados.has(k)).map(k => `
-        #tab-vitais th:nth-child(${anestesia.disp._colIdx(k)}),
-        #tab-vitais td:nth-child(${anestesia.disp._colIdx(k)}) {
-          opacity: .4;
-        }
-      `).join('\n');
-      style.textContent = regras;
+      try { anestesia.vitais.aplicarMonitores(); } catch (e) {}
       markDirty();
     },
     _colIdx(k) {
@@ -16632,11 +16598,11 @@ const anestesia = {
         document.querySelectorAll('[name="monitores[]"]').forEach(el => {
           el.addEventListener('change', () => {
             anestesia.graficoUI._contexto = 'anestesia';
-            anestesia.graficoUI.atualizarMonitoresToolbar();
+            anestesia.vitais.aplicarMonitores();   /* tabela + grade + gráfico */
             anestesia.vitais.atualizarGrafico();
           });
         });
-        anestesia.graficoUI.atualizarMonitoresToolbar();
+        anestesia.vitais.aplicarMonitores();
       }
       /* Pointer events (combinam mouse + touch) — seta contexto ao tocar */
       const wrapCtx = (handler) => (ev) => {
@@ -17424,27 +17390,21 @@ const anestesia = {
       const extra = document.getElementById('gt-extra-btns');
       if (!extra) return;
       const marcados = new Set();
-      document.querySelectorAll('[name="monitores[]"]:checked').forEach(el => marcados.add(el.value));
-      /* Botões fixos — atenua os que não têm monitor correspondente marcado */
-      const mapFixo = {
-        'pas': ['PNI', 'PA invasiva'],
-        'pad': ['PNI', 'PA invasiva'],
-        'fc':  ['ECG', 'PNI', 'PA invasiva'],   /* qualquer monitor de PA mede FC também */
-        'spo2': ['Oximetria'],
-        'etco2': ['Capnografia']
-      };
+      document.querySelectorAll('#form-anestesia [name="monitores[]"]:checked').forEach(el => marcados.add(el.value));
+      /* Fonte única: parâmetros ativos conforme monitores (∪ os que já têm dados) */
+      const ativos = anestesia.vitais._paramsAtivos();
+      /* Botões fixos de parâmetro — mostra só os ativos */
       document.querySelectorAll('#gt-vital-btns .gt-btn').forEach(btn => {
         const m = btn.dataset.mode;
-        const monitores = mapFixo[m] || [];
-        const algum = monitores.some(x => marcados.has(x));
-        btn.style.opacity = algum ? '1' : '.5';
-        btn.title = algum ? btn.title.replace(' (monitor não selecionado)', '') : btn.title.replace(/ \(monitor não selecionado\)$/, '') + ' (monitor não selecionado)';
+        if (anestesia.vitais._PARAMS_UNIVERSO.indexOf(m) >= 0) {
+          btn.style.display = ativos.has(m) ? '' : 'none';
+        }
       });
       let html = '';
       let legHTML = '';
       Object.keys(anestesia.graficoUI.MONITORES_EXTRAS).forEach(monitor => {
-        if (marcados.has(monitor)) {
-          const cfg = anestesia.graficoUI.MONITORES_EXTRAS[monitor];
+        const cfg = anestesia.graficoUI.MONITORES_EXTRAS[monitor];
+        if (ativos.has(cfg.campo)) {
           html += `<button type="button" class="gt-btn" data-mode="${cfg.campo}" data-color="${cfg.cor}" style="color:${cfg.cor}" title="Arraste para registrar ${cfg.label}">${cfg.label}</button>`;
           legHTML += `<span class="legend-item"><span class="legend-swatch" style="background:${cfg.cor}"></span> ${cfg.label}</span>`;
         }
@@ -17850,6 +17810,82 @@ const anestesia = {
         glic: g('glic'), pvc: g('pvc'), pic: g('pic'), dc: g('dc'), scvo2: g('scvo2') };
     },
 
+    /* Quais monitores (checkboxes "monitores[]") habilitam cada parâmetro de
+       sinal vital. Fonte única usada pela tabela, pela grade e pelo gráfico. */
+    PARAM_MONITORES: {
+      pas:  ['PNI', 'PA invasiva'],
+      pad:  ['PNI', 'PA invasiva'],
+      pam:  ['PNI', 'PA invasiva'],
+      fc:   ['ECG', 'Oximetria', 'PNI', 'PA invasiva'],
+      spo2: ['Oximetria'],
+      etco2:['Capnografia'],
+      fr:   ['FR', 'Capnografia'],
+      temp: ['Temperatura'],
+      bis:  ['BIS'],
+      tof:  ['TOF'],
+      glic: ['Glicemia'],
+      pvc:  ['PVC'],
+      pic:  ['PIC'],
+      dc:   ['Débito cardíaco'],
+      scvo2:['ScvO₂/SvO₂']
+    },
+    /* Conjunto padrão de parâmetros quando NENHUM monitor foi selecionado ainda */
+    _PARAMS_UNIVERSO: ['pas','pad','pam','fc','spo2','etco2','fr','temp','bis','tof','glic','pvc','pic','dc','scvo2'],
+    _PARAMS_PADRAO:  ['pas','pad','pam','fc','spo2','etco2'],
+
+    /* Parâmetros que já possuem algum valor registrado (nunca escondê-los) */
+    _paramsComDados() {
+      const set = new Set();
+      const tbody = document.getElementById('vitais-body');
+      if (!tbody) return set;
+      tbody.querySelectorAll('tr').forEach(tr => {
+        anestesia.vitais._PARAMS_UNIVERSO.forEach(k => {
+          const el = tr.querySelector('[name="vit_' + k + '[]"]');
+          if (el && String(el.value).trim() !== '') set.add(k);
+        });
+      });
+      return set;
+    },
+
+    /* Conjunto de parâmetros ATIVOS = monitores marcados (mapeados) ∪ os que já
+       têm dados. Sem monitor marcado → conjunto padrão ∪ os que já têm dados. */
+    _paramsAtivos() {
+      const marcados = new Set();
+      document.querySelectorAll('#form-anestesia [name="monitores[]"]:checked').forEach(el => marcados.add(el.value));
+      const ativos = new Set();
+      if (marcados.size === 0) {
+        anestesia.vitais._PARAMS_PADRAO.forEach(p => ativos.add(p));
+      } else {
+        const map = anestesia.vitais.PARAM_MONITORES;
+        anestesia.vitais._PARAMS_UNIVERSO.forEach(p => {
+          if ((map[p] || []).some(m => marcados.has(m))) ativos.add(p);
+        });
+        /* PAM acompanha a PA (calculado a partir de PAS/PAD) */
+        if (ativos.has('pas') || ativos.has('pad')) ativos.add('pam');
+      }
+      anestesia.vitais._paramsComDados().forEach(p => ativos.add(p));
+      return ativos;
+    },
+
+    /* Aplica o conjunto ativo às TRÊS formas de registro: tabela, grade e gráfico */
+    aplicarMonitores() {
+      const ativos = anestesia.vitais._paramsAtivos();
+      /* 1) Colunas da tabela #tab-vitais — esconde parâmetros inativos
+         (hora, diurese, obs e ações permanecem sempre) */
+      const styleId = 'vitais-col-style';
+      let style = document.getElementById(styleId);
+      if (!style) { style = document.createElement('style'); style.id = styleId; document.head.appendChild(style); }
+      const regras = anestesia.vitais._PARAMS_UNIVERSO.filter(k => !ativos.has(k)).map(k => {
+        const i = anestesia.disp._colIdx(k);
+        return i ? `#tab-vitais th:nth-child(${i}), #tab-vitais td:nth-child(${i}) { display: none; }` : '';
+      }).filter(Boolean).join('\n');
+      style.textContent = regras;
+      /* 2) Grade transposta — re-renderiza (filtra pelos ativos) */
+      try { anestesia.vitais._renderGrade(); } catch (e) {}
+      /* 3) Toolbar do gráfico — mostra/oculta botões por parâmetro ativo */
+      try { anestesia.graficoUI.atualizarMonitoresToolbar(); } catch (e) {}
+    },
+
     /* Parâmetros editáveis exibidos na grade transposta (na ordem de exibição) */
     _GRADE_PARAMS: [
       { label: 'PA', kind: 'pa' },
@@ -17880,7 +17916,10 @@ const anestesia = {
       if (!comHora.length) { host.innerHTML = '<div style="font-size:.78rem;color:var(--text-mute);padding:8px">Nenhum sinal vital com horário registrado ainda. Registre pelo gráfico ou pela tabela abaixo.</div>'; return; }
       /* Ordena por horário (só a exibição; o índice preserva a referência real) */
       comHora.sort((a, b) => (g(a.tr, 'hora') || '').localeCompare(g(b.tr, 'hora') || ''));
-      const params = anestesia.vitais._GRADE_PARAMS;
+      /* Mostra apenas os parâmetros ativos (conforme monitores) */
+      const ativos = anestesia.vitais._paramsAtivos();
+      const params = anestesia.vitais._GRADE_PARAMS.filter(p =>
+        p.kind === 'pa' ? (ativos.has('pas') || ativos.has('pad')) : ativos.has(p.field));
       const ea = v => utils.escapeAttr(v == null ? '' : String(v));
       let html = '<table class="vitais-grade"><thead><tr><th>Horário →</th>';
       comHora.forEach(c => {
@@ -19618,6 +19657,7 @@ const anestesia = {
     anestesia.calc.idade(); anestesia.calc.imc();
     anestesia.calc.duracao(); anestesia.calc.balanco();
     anestesia.vitais.atualizarGrafico();
+    try { anestesia.vitais.aplicarMonitores(); } catch (e) {}
     try { comorbidades.syncRapidas(); } catch (e) {}
   },
 
