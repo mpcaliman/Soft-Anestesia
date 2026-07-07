@@ -6777,6 +6777,34 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
 
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-icon">&#128137;</span><h2>Infus&otilde;es cont&iacute;nuas &mdash; dilui&ccedil;&atilde;o edit&aacute;vel<small>Bomba de seringa ou equipo (gravitacional) &mdash; calcula mL/h e gotas/min</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">&#9662;</span></div>
+      </div>
+      <div class="card-body">
+        <p style="font-size:.78rem;color:var(--text-mute);margin:0 0 10px">Edite a <strong>dilui&ccedil;&atilde;o</strong> (quantidade da droga e volume final) conforme o seu preparo &mdash; ex.: seringa de 50 mL ou bolsa/equipo de 250 mL. O sistema recalcula a velocidade em <strong>mL/h</strong> (bomba) e <strong>gotas/min</strong> (equipo, macrogotas 20&nbsp;gtt/mL). Doses por kg usam o peso do card Paciente.</p>
+        <div id="dose-inf-edit"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-icon">&#129482;</span><h2>Solu&ccedil;&atilde;o polarizante (GIK) e reposi&ccedil;&atilde;o de s&oacute;dio<small>Receita de refer&ecirc;ncia e c&aacute;lculo de d&eacute;ficit de Na&#8314;</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">&#9662;</span></div>
+      </div>
+      <div class="card-body">
+        <div id="dose-gik"></div>
+        <h3 style="font-size:.9rem;color:var(--primary-darker);margin:16px 0 8px;border-top:1px solid var(--border);padding-top:14px">Reposi&ccedil;&atilde;o de s&oacute;dio (hiponatremia)</h3>
+        <div class="grid">
+          <div class="field col-3"><label>Na&#8314; atual (mEq/L)</label><input type="number" id="sodio-atual" step="0.1" min="90" max="170" inputmode="decimal" placeholder="ex.: 122" oninput="doses.sodio()"></div>
+          <div class="field col-3"><label>Na&#8314; alvo (mEq/L)</label><input type="number" id="sodio-alvo" step="0.1" min="100" max="145" inputmode="decimal" placeholder="ex.: 130" oninput="doses.sodio()"></div>
+          <div class="field col-6"><label>Resultado</label><div id="sodio-resultado" class="ci-resultado" style="min-height:auto;padding:8px 10px">&mdash;</div></div>
+        </div>
+        <p style="font-size:.72rem;color:#8a5a10;background:#fdf3dd;border:1px solid #ecd9ae;padding:8px 10px;border-radius:7px;margin-top:8px">&#9888;&#65039; Corre&ccedil;&atilde;o segura: <strong>&le; 8&ndash;10 mEq/L em 24 h</strong> (risco de mielin&oacute;lise pontina). Usa o peso do card Paciente. Confira sempre o protocolo institucional.</p>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header" onclick="ui.toggleCard(this)">
         <div class="card-title-wrap"><span class="card-icon">&#129514;</span><h2>Anest&eacute;sicos locais &mdash; dose m&aacute;xima<small>Limite por peso em mg e no volume (mL) de cada concentra&ccedil;&atilde;o</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">&#9662;</span></div>
       </div>
@@ -27517,6 +27545,9 @@ const doses = {
     doses.render();
     doses._renderAL();
     doses.calcCustom();
+    doses._renderInfEdit();
+    doses._renderGIK();
+    doses.sodio();
   },
 
   _renderDerivados() {
@@ -27741,6 +27772,119 @@ const doses = {
     if (mlh == null) { out.textContent = (doseUn.indexOf('/kg') >= 0 && !peso) ? 'Informe o peso do paciente' : '-'; return; }
     const unRot = doseUn.indexOf('UI') >= 0 ? 'UI' : (doseUn.indexOf('mcg') >= 0 ? 'mcg' : 'mg');
     out.innerHTML = doses._fmt(mlh) + ' mL/h <span style="font-weight:400;color:var(--text-mute);font-size:.78rem">(conc.: ' + doses._fmt(concDose) + ' ' + unRot + '/mL)</span>';
+  },
+
+  /* ===== INFUSÕES CONTÍNUAS — DILUIÇÃO EDITÁVEL (seringa ou equipo) =====
+     Cada droga tem uma diluição padrão editável (qtd + volume). Calcula
+     mL/h (bomba) e gotas/min (equipo, macrogotas 20 gtt/mL). */
+  GTT_ML: 20,   /* macrogotas por mL (equipo padrão) */
+  INF: [
+    { key:'nora',    n:'Noradrenalina',    qtd:4,   un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[0.05,1],   tip:0.1 },
+    { key:'adre',    n:'Adrenalina',       qtd:4,   un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[0.01,0.5], tip:0.1 },
+    { key:'dobu',    n:'Dobutamina',       qtd:250, un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[2.5,20],   tip:5 },
+    { key:'dopa',    n:'Dopamina',         qtd:250, un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[2,20],     tip:5 },
+    { key:'fenil',   n:'Fenilefrina',      qtd:10,  un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[0.1,0.5],  tip:0.15 },
+    { key:'nitro',   n:'Nitroglicerina',   qtd:50,  un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[0.25,5],   tip:0.5 },
+    { key:'sufenta', n:'Sufentanil',       qtd:250, un:'mcg', vol:50,  doseUn:'mcg/kg/h',   faixa:[0.1,1.5],  tip:0.5 },
+    { key:'remi',    n:'Remifentanil',     qtd:2,   un:'mg',  vol:40,  doseUn:'mcg/kg/min', faixa:[0.05,0.5], tip:0.15 },
+    { key:'fenta',   n:'Fentanil',         qtd:500, un:'mcg', vol:100, doseUn:'mcg/kg/h',   faixa:[0.5,5],    tip:2 },
+    { key:'dexme',   n:'Dexmedetomidina',  qtd:200, un:'mcg', vol:50,  doseUn:'mcg/kg/h',   faixa:[0.2,1.4],  tip:0.5 },
+    { key:'ceta',    n:'Cetamina',         qtd:250, un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[2,10],     tip:5 },
+    { key:'lido',    n:'Lidocaína',        qtd:1000,un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[10,50],    tip:20 },
+    { key:'insu',    n:'Insulina regular', qtd:50,  un:'UI',  vol:50,  doseUn:'UI/h',       faixa:[0.5,10],   tip:2, semKg:true }
+  ],
+  _num(id) { const el = document.getElementById(id); const v = el ? parseFloat(el.value) : NaN; return isNaN(v) ? null : v; },
+  _concInf(qtd, un, vol) {
+    if (!qtd || !vol) return { base: null, ui: false };
+    if (un === 'UI') return { conc: qtd / vol, ui: true };
+    const mcg = un === 'mg' ? qtd * 1000 : un === 'g' ? qtd * 1e6 : qtd;   /* mcg */
+    return { conc: mcg / vol, ui: false };
+  },
+  _mlhInf(conc, ui, doseUn, dose, peso) {
+    if (conc == null || dose == null) return null;
+    const perKg = doseUn.indexOf('/kg') >= 0;
+    if (perKg && !peso) return null;
+    const base = perKg ? dose * peso : dose;   /* dose por minuto/hora, já no total */
+    if (doseUn.indexOf('/min') >= 0) return base / conc * 60;   /* mcg|UI por min → mL/h */
+    return base / conc;                                          /* por hora → mL/h */
+  },
+  _renderInfEdit() {
+    const host = document.getElementById('dose-inf-edit');
+    if (!host) return;
+    if (!host._built) {
+      host.innerHTML = doses.INF.map(d => {
+        const b = 'inf-' + d.key;
+        return '<div class="dose-card"><div class="dc-head"><span class="dc-nome">' + utils.escapeHTML(d.n) + '</span>' +
+          '<span style="display:flex;gap:4px">' +
+            '<button type="button" class="btn btn-xs" onclick="doses._infPreset(\'' + d.key + '\',50)">Seringa 50 mL</button>' +
+            '<button type="button" class="btn btn-xs" onclick="doses._infPreset(\'' + d.key + '\',250)">Equipo 250 mL</button>' +
+          '</span></div>' +
+          '<div class="dc-linha" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">Diluição: ' +
+            '<input type="number" id="' + b + '-qtd" value="' + d.qtd + '" step="0.1" min="0" style="width:80px" oninput="doses._calcInf(\'' + d.key + '\')"> ' + d.un + ' em ' +
+            '<input type="number" id="' + b + '-vol" value="' + d.vol + '" step="1" min="1" style="width:80px" oninput="doses._calcInf(\'' + d.key + '\')"> mL ' +
+            '<span id="' + b + '-conc" style="font-size:.78rem;color:var(--text-mute)"></span></div>' +
+          '<div class="dc-inf-controle">Dose: <input type="number" id="' + b + '-dose" value="' + d.tip + '" step="0.01" min="0" oninput="doses._calcInf(\'' + d.key + '\')"> ' +
+            '<span style="font-size:.78rem;color:var(--text-mute)">' + d.doseUn + '</span> ' +
+            '<span style="font-size:.72rem;color:var(--text-mute)">(usual ' + doses._fmt(d.faixa[0]) + '–' + doses._fmt(d.faixa[1]) + ')</span></div>' +
+          '<div class="dc-linha" id="' + b + '-out" style="margin-top:4px;font-weight:600"></div>' +
+        '</div>';
+      }).join('');
+      host._built = true;
+    }
+    doses.INF.forEach(d => doses._calcInf(d.key));
+  },
+  _infPreset(key, vol) {
+    const el = document.getElementById('inf-' + key + '-vol');
+    if (el) { el.value = vol; doses._calcInf(key); }
+  },
+  _calcInf(key) {
+    const d = doses.INF.find(x => x.key === key);
+    if (!d) return;
+    const b = 'inf-' + key;
+    const qtd = doses._num(b + '-qtd'), vol = doses._num(b + '-vol'), dose = doses._num(b + '-dose');
+    const peso = doses._peso();
+    const c = doses._concInf(qtd, d.un, vol);
+    const concEl = document.getElementById(b + '-conc');
+    const outEl = document.getElementById(b + '-out');
+    if (concEl) concEl.textContent = (c.conc != null) ? ('= ' + doses._fmt(c.conc) + (c.ui ? ' UI/mL' : ' mcg/mL')) : '';
+    if (!outEl) return;
+    const mlh = doses._mlhInf(c.conc, c.ui, d.doseUn, dose, peso);
+    if (mlh == null) {
+      outEl.innerHTML = (d.doseUn.indexOf('/kg') >= 0 && !peso) ? '<span style="color:var(--text-mute);font-weight:400">→ informe o peso do paciente</span>' : '<span style="color:var(--text-mute);font-weight:400">→ preencha diluição e dose</span>';
+      return;
+    }
+    const gtt = mlh * doses.GTT_ML / 60;
+    let aviso = '';
+    if (dose != null && (dose < d.faixa[0] || dose > d.faixa[1])) aviso = ' <span style="color:#b3261e;font-weight:400">(fora da faixa usual)</span>';
+    outEl.innerHTML = '→ Bomba: <b>' + doses._fmt(mlh) + ' mL/h</b> · Equipo: <b>' + doses._fmt(gtt) + ' gtt/min</b>' + aviso;
+  },
+
+  /* Solução polarizante (GIK) — receita de referência */
+  _renderGIK() {
+    const host = document.getElementById('dose-gik');
+    if (!host) return;
+    host.innerHTML =
+      '<div class="dose-card"><div class="dc-head"><span class="dc-nome">Solução polarizante (GIK) — referência</span></div>' +
+      '<div class="dc-linha"><b>Preparo usual (adulto):</b> SG 10% 500 mL + Insulina regular 10 UI + KCl 19,1% 10 mL (≈ 25 mEq de K⁺).</div>' +
+      '<div class="dc-linha"><b>Infusão:</b> tipicamente 1,5 mL/kg/h (ajustar conforme glicemia e potássio).</div>' +
+      '<div class="dc-obs">Monitorar glicemia e K⁺ seriados. Variações do protocolo existem (SG 5%/insulina/KCl) — siga o protocolo institucional.</div></div>';
+  },
+
+  /* Reposição de sódio (déficit) na hiponatremia */
+  sodio() {
+    const out = document.getElementById('sodio-resultado');
+    if (!out) return;
+    const atual = doses._num('sodio-atual'), alvo = doses._num('sodio-alvo'), peso = doses._peso();
+    if (atual == null || alvo == null || !peso) { out.textContent = (!peso ? 'Informe o peso no card Paciente.' : '—'); return; }
+    if (alvo <= atual) { out.innerHTML = '<span style="color:var(--text-mute)">Alvo deve ser maior que o Na⁺ atual.</span>'; return; }
+    const act = 0.6 * peso;                       /* água corporal total (L) */
+    const deficit = (alvo - atual) * act;         /* mEq de Na⁺ */
+    const nacl3 = deficit / 0.513;                /* NaCl 3% = 0,513 mEq/mL */
+    const nacl20 = deficit / 3.4;                 /* NaCl 20% = 3,4 mEq/mL */
+    const delta = alvo - atual;
+    const alerta = delta > 10 ? '<div style="color:#b3261e;font-size:.76rem;margin-top:4px">⚠️ Variação de ' + doses._fmt(delta) + ' mEq/L excede o limite seguro de 24 h — fracione a correção.</div>' : '';
+    out.innerHTML = 'Déficit ≈ <b>' + doses._fmt(deficit) + ' mEq</b> de Na⁺ (ACT ' + doses._fmt(act) + ' L)<br>' +
+      'NaCl 3%: <b>' + doses._fmt(nacl3) + ' mL</b> · NaCl 20%: <b>' + doses._fmt(nacl20) + ' mL</b>' + alerta;
   },
 
   /* ===== ANESTÉSICOS LOCAIS — dose máxima por kg =====
