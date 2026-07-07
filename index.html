@@ -18905,12 +18905,14 @@ const anestesia = {
         data_hora: v('data_assinatura'),
         dataurl: v('assinatura_dataurl'),
         tipo: v('assinatura_tipo'),
+        meta: v('assinatura_meta'),
         /* 2º anestesista (opcional — só se preenchido) */
         anestesiologista2: v('anestesiologista2'),
         crm2: v('crm2'),
         data_hora2: v('data_assinatura2'),
         dataurl2: v('assinatura_dataurl2'),
         tipo2: v('assinatura_tipo2'),
+        meta2: v('assinatura_meta2'),
         /* compatibilidade: signature pad antigo (deprecated mas mantém para fichas legadas) */
         imagem: (typeof anestesia.signature?.getDataURL === 'function') ? anestesia.signature.getDataURL() : ''
       },
@@ -19070,6 +19072,10 @@ const anestesia = {
     const as = d.assinatura || {};
     set('anestesiologista', as.anestesiologista);
     set('crm', as.crm); set('data_assinatura', as.data_hora);
+    set('assinatura_tipo', as.tipo); set('assinatura_meta', as.meta);
+    set('anestesiologista2', as.anestesiologista2); set('crm2', as.crm2);
+    set('data_assinatura2', as.data_hora2);
+    set('assinatura_tipo2', as.tipo2); set('assinatura_meta2', as.meta2);
     if (as.imagem) anestesia.signature.setDataURL(as.imagem);
 
     /* Guardar _id em hidden */
@@ -21590,23 +21596,30 @@ const assinatura = {
               </div>
             </div>
 
-            <!-- Aba: Certificado digital -->
+            <!-- Aba: Certificado digital ICP-Brasil (fluxo válido para o CFM) -->
             <div class="sig-pane" id="${prefixo}-pane-cert" style="display:none">
-              <div style="padding:14px;background:var(--surface-alt);border-radius:6px;font-size:.85rem">
-                <p style="margin:0 0 8px"><strong>🔐 Assinatura com certificado digital ICP-Brasil</strong></p>
-                <p style="margin:0 0 8px;color:var(--text-soft)">
-                  Para assinar com certificado A1 (.pfx/.p12) ou A3 (token/cartão), use o aplicativo
-                  externo de sua preferência (Assinador SERPRO, Adobe Acrobat, etc.) sobre o PDF exportado pelo sistema.
-                </p>
-                <p style="margin:0 0 8px;color:var(--text-soft)">
-                  Como este sistema funciona <strong>offline e sem servidor</strong>, a assinatura
-                  PAdES/CAdES com certificado ICP-Brasil deve ser feita externamente — depois você
-                  pode anexar o PDF assinado ao registro através do botão "Importar".
-                </p>
-                <button type="button" class="btn btn-sm" onclick="assinatura._gerarSeloDigital('${prefixo}')">
-                  🛡️ Gerar selo digital (hash SHA-256 do registro)
-                </button>
-                <div id="${prefixo}-selo-digital" style="margin-top:10px;font-family:monospace;font-size:.7rem;color:var(--text-soft);word-break:break-all"></div>
+              <div style="padding:14px;background:var(--surface-alt);border-radius:8px;font-size:.85rem;line-height:1.5">
+                <p style="margin:0 0 8px"><strong>🔐 Assinatura digital ICP-Brasil</strong> <span style="font-size:.74rem;color:var(--text-mute)">— padrão aceito pelo CFM (PAdES, verificável no validador oficial)</span></p>
+                <div id="${prefixo}-icp-status"></div>
+                <ol style="margin:8px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:12px">
+                  <li><strong>Gere o PDF</strong> do documento.<br>
+                    <button type="button" class="btn btn-sm" onclick="assinatura._icpGerarPDF('${prefixo}')">📄 Gerar / baixar PDF</button>
+                  </li>
+                  <li><strong>Assine no assinador oficial</strong> com seu certificado ICP-Brasil ou Certificado Digital do CFM.<br>
+                    <a class="btn btn-sm" href="https://assinador.iti.gov.br/" target="_blank" rel="noopener">🏛️ Assinador gov.br / ITI</a>
+                    <a class="btn btn-sm" href="https://assinaturadigital.cfm.org.br/" target="_blank" rel="noopener">⚕️ Certificado CFM</a>
+                    <div style="font-size:.76rem;color:var(--text-mute);margin-top:4px">Médicos adimplentes com o CRM têm certificado ICP-Brasil gratuito pelo CFM.</div>
+                  </li>
+                  <li><strong>Anexe o PDF já assinado</strong> — o sistema registra a assinatura (arquivo, assinante, data e hash SHA-256) e marca o documento como assinado.<br>
+                    <input type="file" id="${prefixo}-icp-file" accept="application/pdf" style="display:none" onchange="assinatura._icpRegistrar('${prefixo}', this)">
+                    <button type="button" class="btn btn-sm btn-primary" onclick="document.getElementById('${prefixo}-icp-file').click()">📎 Anexar PDF assinado</button>
+                    <a class="btn btn-sm" href="https://validar.iti.gov.br/" target="_blank" rel="noopener">✅ Validar assinatura</a>
+                  </li>
+                </ol>
+                <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
+                  <button type="button" class="btn btn-xs" onclick="assinatura._gerarSeloDigital('${prefixo}')">🛡️ (opcional) Gerar selo/hash do conteúdo do registro</button>
+                  <div id="${prefixo}-selo-digital" style="margin-top:8px;font-family:monospace;font-size:.7rem;color:var(--text-soft);word-break:break-all"></div>
+                </div>
               </div>
             </div>
           </div>
@@ -21762,6 +21775,81 @@ const assinatura = {
 
   /* Gera "selo digital" — SHA-256 do conteúdo do form como prova de integridade.
      É um substitutivo simples ao certificado para casos de uso internos. */
+  /* Mapa prefixo → id do formulário (usado pelas funções de assinatura) */
+  _formIdDe(prefixo) {
+    return { 'sig-pre': 'form-pre', 'sig-consulta': 'form-consulta', 'sig-recuperacao': 'form-recuperacao', 'sig-anest': 'form-anestesia', 'sig-anest2': 'form-anestesia', 'sig-termo': 'form-termo', 'sig-termo-pac': 'form-termo', 'sig-prescricao': 'form-prescricao' }[prefixo];
+  },
+  /* Módulos que possuem área de anexos (prontuario) para guardar o PDF assinado */
+  _moduloComAnexos(prefixo) {
+    return { 'sig-pre': 'pre', 'sig-anest': 'anestesia', 'sig-anest2': 'anestesia', 'sig-consulta': 'consulta' }[prefixo];
+  },
+
+  /* ===== ICP-BRASIL: fluxo guiado (válido para o CFM) ===== */
+  _icpGerarPDF(prefixo) {
+    try {
+      printPreview.abrir();
+      toast('Use 🖨️ Imprimir / PDF e escolha "Salvar em PDF"');
+    } catch (e) {
+      toast('Abra o documento e use Imprimir / PDF', 'warn');
+    }
+  },
+  async _icpRegistrar(prefixo, input) {
+    const file = input && input.files && input.files[0];
+    if (input) input.value = '';
+    if (!file) return;
+    if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) { toast('Anexe o PDF assinado (.pdf)', 'warn'); return; }
+    const sfx = (prefixo === 'sig-anest2') ? '2' : '';
+    const form = document.getElementById(assinatura._formIdDe(prefixo));
+    if (!form) return;
+    try {
+      const buf = await file.arrayBuffer();
+      const hashBuf = await crypto.subtle.digest('SHA-256', buf);
+      const hex = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      const ts = new Date().toISOString();
+      const assinante = (form.querySelector('[name="anestesiologista' + sfx + '"], [name="profissional"], [name="responsavel"]') || {}).value || '';
+      const meta = { tipo: 'icp', hash: hex, ts, arquivo: file.name, assinante };
+      const setV = (n, v) => { const el = form.querySelector('[name="' + n + '"]'); if (el) el.value = v; };
+      setV('assinatura_tipo' + sfx, 'icp');
+      setV('assinatura_meta' + sfx, JSON.stringify(meta));
+      assinatura.carimbarDataHora(prefixo);
+      /* Guarda o PDF assinado nos anexos do registro, quando o módulo suporta */
+      const mod = assinatura._moduloComAnexos(prefixo);
+      if (mod && document.getElementById(mod + '-docs-lista')) {
+        try { prontuario.adicionar(mod, [file]); } catch (e) {}
+      }
+      assinatura._icpRenderStatus(prefixo, meta);
+      markDirty();
+      toast('🔐 PDF assinado registrado (ICP-Brasil) — salve o registro');
+    } catch (e) {
+      toast('Erro ao registrar assinatura: ' + e.message, 'error');
+    }
+  },
+  _icpRenderStatus(prefixo, meta) {
+    const box = document.getElementById(prefixo + '-icp-status');
+    if (!box) return;
+    if (!meta || meta.tipo !== 'icp') { box.innerHTML = ''; return; }
+    box.innerHTML =
+      '<div style="margin:4px 0 6px;padding:8px 10px;border:1px solid #b9e0c6;background:#eaf7ef;border-radius:8px;color:#1c6b3f;font-size:.82rem;line-height:1.5">' +
+        '✅ <strong>Assinado digitalmente (ICP-Brasil)</strong><br>' +
+        'Arquivo: ' + utils.escapeHTML(meta.arquivo || '—') + '<br>' +
+        (meta.assinante ? 'Assinante: ' + utils.escapeHTML(meta.assinante) + '<br>' : '') +
+        'Registrado em: ' + utils.escapeHTML(String(meta.ts || '').replace('T', ' ').slice(0, 16)) + '<br>' +
+        '<span style="font-family:monospace;font-size:.66rem;word-break:break-all">SHA-256: ' + utils.escapeHTML(meta.hash || '') + '</span>' +
+      '</div>';
+  },
+  /* Reexibe o status ICP ao carregar um registro salvo */
+  _icpRestaurarStatus(prefixo, formId) {
+    try {
+      const form = document.getElementById(formId);
+      if (!form) return;
+      const sfx = (prefixo === 'sig-anest2') ? '2' : '';
+      const metaEl = form.querySelector('[name="assinatura_meta' + sfx + '"]');
+      if (!metaEl || !metaEl.value) return;
+      const meta = JSON.parse(metaEl.value);
+      if (meta && meta.tipo === 'icp') assinatura._icpRenderStatus(prefixo, meta);
+    } catch (e) {}
+  },
+
   async _gerarSeloDigital(prefixo) {
     const formId = { 'sig-pre': 'form-pre', 'sig-consulta': 'form-consulta', 'sig-recuperacao': 'form-recuperacao', 'sig-anest': 'form-anestesia', 'sig-anest2': 'form-anestesia', 'sig-termo': 'form-termo', 'sig-termo-pac': 'form-termo', 'sig-prescricao': 'form-prescricao' }[prefixo];
     const form = document.getElementById(formId);
@@ -21822,6 +21910,8 @@ const assinatura = {
       const prev = document.getElementById(prefixo + '-prev-carimbo');
       if (prev) prev.innerHTML = `<img src="${url}" alt="" style="max-width:160px;max-height:60px;object-fit:contain">`;
     }
+    /* Reexibe o status de assinatura ICP-Brasil, se houver */
+    try { assinatura._icpRestaurarStatus(prefixo, formId); } catch (e) {}
   }
 };
 
@@ -23965,15 +24055,30 @@ ${TAG_CLOSE_HTML}`;
       if (p && p.carimbo) imgHTML = `<img src="${p.carimbo}" alt="">`;
     }
     const linha = (nomeProf || '_____________________________') + (registro ? '\n' + registro : '');
+    const selo = dadosForm ? printPreview._icpSelo(dadosForm.assinatura_meta) : '';
     return `
       <div class="pp-signature-area">
         <div class="pp-signature pp-signature-prof">
           <div class="pp-signature-img-slot">${imgHTML}</div>
           <div style="white-space:pre-line">${utils.escapeHTML(linha)}</div>
           ${dataAssin ? `<div style="font-size:8pt;color:#666;margin-top:2px">${utils.escapeHTML(dataAssin)}</div>` : ''}
+          ${selo}
         </div>
       </div>
     `;
+  },
+  /* Selo textual de assinatura ICP-Brasil para impressão (a partir do meta salvo) */
+  _icpSelo(metaRaw) {
+    let m = metaRaw;
+    try { if (typeof metaRaw === 'string') m = metaRaw ? JSON.parse(metaRaw) : null; } catch (e) { m = null; }
+    if (!m || m.tipo !== 'icp') return '';
+    const dt = String(m.ts || '').replace('T', ' ').slice(0, 16);
+    return `<div style="margin-top:4px;font-size:7.5pt;color:#1c6b3f;border:1px solid #b9e0c6;background:#eaf7ef;border-radius:4px;padding:3px 6px;line-height:1.35;text-align:left">` +
+      `✔ Assinado digitalmente com certificado ICP-Brasil` + (m.arquivo ? ' — ' + utils.escapeHTML(m.arquivo) : '') +
+      (m.assinante ? '<br>Assinante: ' + utils.escapeHTML(m.assinante) : '') +
+      (dt ? '<br>Registro: ' + utils.escapeHTML(dt) : '') +
+      `<br>SHA-256: <span style="font-family:monospace;word-break:break-all">${utils.escapeHTML((m.hash || '').slice(0, 48))}…</span>` +
+      `<br>Verificável em validar.iti.gov.br</div>`;
   },
   _footer(label) {
     return `<div class="pp-footer">
@@ -24541,7 +24646,7 @@ ${TAG_CLOSE_HTML}`;
   /* Bloco específico de assinatura para a Anestesia (suporta 1 ou 2 anestesistas) */
   _signatureAnestesia(a) {
     if (!a) return '';
-    const renderUm = (nome, crm, dataHora, dataurl) => {
+    const renderUm = (nome, crm, dataHora, dataurl, meta) => {
       /* Se não tem dataurl, busca carimbo cadastrado pelo nome */
       let imgHTML = '';
       if (dataurl) {
@@ -24557,13 +24662,14 @@ ${TAG_CLOSE_HTML}`;
           <div class="pp-signature-img-slot">${imgHTML}</div>
           <div style="white-space:pre-line">${utils.escapeHTML(linhaNome)}${linhaCrm ? '\n' + utils.escapeHTML(linhaCrm) : ''}</div>
           ${dataHora ? `<div style="font-size:8pt;color:#666;margin-top:2px">${utils.escapeHTML(dataHora)}</div>` : ''}
+          ${printPreview._icpSelo(meta)}
         </div>
       `;
     };
-    let blocks = renderUm(a.anestesiologista, a.crm, a.data_hora, a.dataurl);
+    let blocks = renderUm(a.anestesiologista, a.crm, a.data_hora, a.dataurl, a.meta);
     /* 2º anestesista, se preenchido */
     if (a.anestesiologista2 || a.dataurl2) {
-      blocks += renderUm(a.anestesiologista2, a.crm2, a.data_hora2, a.dataurl2);
+      blocks += renderUm(a.anestesiologista2, a.crm2, a.data_hora2, a.dataurl2, a.meta2);
     }
     return `<div class="pp-signature-area">${blocks}</div>`;
   },
