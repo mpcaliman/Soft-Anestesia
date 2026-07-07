@@ -1194,6 +1194,12 @@ table.data .empty-row td {
 canvas#vitals-chart, canvas#srpa-vitals-chart {
   width: 100%; height: 320px;
   background: #fafbfc; border-radius: 4px; display: block;
+  touch-action: pan-y;   /* fora do modo Editar, a página rola sobre o gráfico */
+  cursor: default;
+}
+/* No modo Editar (ampliado) o gráfico captura o toque/arraste para edição */
+.vitals-chart-wrap.ampliado canvas#vitals-chart,
+.vitals-chart-wrap.ampliado canvas#srpa-vitals-chart {
   touch-action: none;
   cursor: crosshair;
 }
@@ -1250,6 +1256,59 @@ body[data-graph-mode="mover"] canvas#srpa-vitals-chart:active { cursor: grabbing
   font-size: .72rem; color: var(--text-soft);
   font-style: italic;
 }
+
+/* === Barra lateral direita para rolar a página (útil no celular e sobre o gráfico) === */
+#page-scroller {
+  position: fixed;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1200;
+  display: none;             /* mostrada por JS quando a página tem rolagem */
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 30px;
+}
+#page-scroller.show { display: flex; }
+#page-scroller .ps-btn {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: .9rem; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0,0,0,.18);
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  touch-action: manipulation;
+}
+#page-scroller .ps-btn:hover { background: var(--surface-alt); }
+#page-scroller .ps-btn:active { background: var(--primary); color: #fff; border-color: var(--primary); }
+#page-scroller .ps-track {
+  flex: 1 1 auto;
+  width: 8px;
+  min-height: 90px;
+  max-height: 45vh;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  position: relative;
+  cursor: pointer;
+  touch-action: none;
+}
+#page-scroller .ps-thumb {
+  position: absolute;
+  left: -2px; right: -2px;
+  height: 34px;
+  background: var(--primary);
+  border-radius: 6px;
+  opacity: .85;
+  box-shadow: 0 1px 3px rgba(0,0,0,.25);
+}
+@media print { #page-scroller { display: none !important; } }
 
 .graph-canvas-wrap {
   position: relative;
@@ -5274,7 +5333,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
                 <option value="10">10 min</option>
               </select>
             </label>
-            <button type="button" class="gt-btn gt-amp" id="gt-ampliar" title="Ampliar gráfico">⛶ Ampliar</button>
+            <button type="button" class="gt-btn gt-amp" id="gt-ampliar" title="Ampliar o gráfico para editar (arrastar curvas, marcar eventos)">✏️ Editar</button>
             <span id="gt-nav" style="display:none;align-items:center;gap:2px">
               <button type="button" class="gt-btn" id="gt-nav-prev" title="Caminhar para trás no tempo" onclick="anestesia.graficoUI._contexto='anestesia'; anestesia.graficoUI.panTempo(-1)">◀</button>
               <button type="button" class="gt-btn" id="gt-nav-zout" title="Diminuir zoom" onclick="anestesia.graficoUI._contexto='anestesia'; anestesia.graficoUI.zoomTempo(0.7)">🔍−</button>
@@ -5283,7 +5342,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
             </span>
             <button type="button" class="gt-btn" id="gt-reset-zoom" title="Resetar zoom" onclick="anestesia.graficoUI.resetZoom()" style="display:none">↻ Zoom 100%</button>
             <span id="gt-zoom-badge" style="display:none;background:#1c64a9;color:#fff;padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600;white-space:nowrap"></span>
-            <span class="gt-hint" id="gt-hint">Toque no gráfico para abrir menu. Arraste para registrar curva contínua.</span>
+            <span class="gt-hint" id="gt-hint">A página rola normalmente sobre o gráfico. Toque em ✏️ Editar para arrastar curvas e marcar eventos.</span>
           </div>
           <div class="graph-canvas-wrap">
             <canvas id="vitals-chart"></canvas>
@@ -5770,7 +5829,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
                 <option value="10">10 min</option>
               </select>
             </label>
-            <button type="button" class="gt-btn gt-amp" id="srpa-gt-ampliar" title="Ampliar gráfico">⛶ Ampliar</button>
+            <button type="button" class="gt-btn gt-amp" id="srpa-gt-ampliar" title="Ampliar o gráfico para editar (arrastar curvas, marcar eventos)">✏️ Editar</button>
             <span id="srpa-gt-nav" style="display:none;align-items:center;gap:2px">
               <button type="button" class="gt-btn" id="srpa-gt-nav-prev" title="Caminhar para trás no tempo" onclick="anestesia.graficoUI._contexto='recuperacao'; anestesia.graficoUI.panTempo(-1)">◀</button>
               <button type="button" class="gt-btn" id="srpa-gt-nav-zout" title="Diminuir zoom" onclick="anestesia.graficoUI._contexto='recuperacao'; anestesia.graficoUI.zoomTempo(0.7)">🔍−</button>
@@ -5779,7 +5838,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
             </span>
             <button type="button" class="gt-btn" id="srpa-gt-reset-zoom" title="Resetar zoom" onclick="anestesia.graficoUI._contexto='recuperacao'; anestesia.graficoUI.resetZoom()" style="display:none">↻ Zoom 100%</button>
             <span id="srpa-gt-zoom-badge" style="display:none;background:#1c64a9;color:#fff;padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600;white-space:nowrap"></span>
-            <span class="gt-hint" id="srpa-gt-hint">Toque no gráfico para abrir menu. Arraste para registrar curva contínua.</span>
+            <span class="gt-hint" id="srpa-gt-hint">A página rola normalmente sobre o gráfico. Toque em ✏️ Editar para arrastar curvas e marcar eventos.</span>
           </div>
           <div class="graph-canvas-wrap">
             <canvas id="srpa-vitals-chart"></canvas>
@@ -16536,6 +16595,11 @@ const anestesia = {
         if (!btn.dataset.mode) return;
         btn.addEventListener('click', () => {
           anestesia.graficoUI._contexto = ctx;
+          /* Selecionar uma ferramenta de edição entra automaticamente no modo
+             Editar (ampliado), já que o gráfico só é editável nesse modo. */
+          if (!anestesia.graficoUI.ampliado && btn.dataset.mode !== 'view' && btn.dataset.mode !== 'mover') {
+            anestesia.graficoUI.toggleAmpliar();
+          }
           anestesia.graficoUI.setModo(btn.dataset.mode, btn.dataset.color);
         });
       });
@@ -16887,6 +16951,9 @@ const anestesia = {
 
     _onPointerDown(ev) {
       const ui = anestesia.graficoUI;
+      /* O gráfico só é EDITÁVEL no modo "Editar" (ampliado). Fora dele, não
+         captura o toque — assim a página rola normalmente sobre o gráfico. */
+      if (!ui.ampliado) return;
       ev.preventDefault();
       const canvas = ev.currentTarget;
       try { canvas.setPointerCapture(ev.pointerId); } catch (e) {}
@@ -17391,6 +17458,9 @@ const anestesia = {
       /* Religa handlers nos novos botões */
       extra.querySelectorAll('.gt-btn').forEach(btn => {
         btn.addEventListener('click', () => {
+          if (!anestesia.graficoUI.ampliado && btn.dataset.mode !== 'view' && btn.dataset.mode !== 'mover') {
+            anestesia.graficoUI.toggleAmpliar();
+          }
           anestesia.graficoUI.setModo(btn.dataset.mode, btn.dataset.color);
         });
       });
@@ -17725,16 +17795,16 @@ const anestesia = {
       wrap.classList.toggle('ampliado', ui.ampliado);
       document.body.classList.toggle('chart-ampliado-body', ui.ampliado);
       const btn = document.getElementById(ids.ampliar);
-      if (btn) btn.innerHTML = ui.ampliado ? '⛶ Reduzir' : '⛶ Ampliar';
+      if (btn) btn.innerHTML = ui.ampliado ? '✔️ Concluir edição' : '✏️ Editar';
       /* Mostra/esconde botão de reset zoom quando ampliado */
       const resetBtn = document.getElementById(ids.resetZoom);
       if (resetBtn) resetBtn.style.display = ui.ampliado ? 'inline-flex' : 'none';
       /* Mostra dica de pinch-to-zoom no modo ampliado */
       const hint = document.getElementById(ids.hint);
       if (hint && ui.ampliado) {
-        hint.textContent = '🤏 Pinça horizontal = zoom no tempo · pinça vertical = zoom no valor · 1 dedo (modo Ver) = mover';
+        hint.textContent = '✏️ Modo edição: toque no gráfico para abrir menu · arraste para registrar curva · 🤏 pinça = zoom. Toque "Concluir edição" para voltar a rolar a página.';
       } else if (hint) {
-        hint.textContent = 'Toque no gráfico para abrir menu. Arraste para registrar curva contínua.';
+        hint.textContent = 'A página rola normalmente sobre o gráfico. Toque em ✏️ Editar para arrastar curvas e marcar eventos.';
       }
       /* Ao sair do ampliado, reseta zoom automaticamente (ambos eixos) */
       if (!ui.ampliado) {
@@ -29866,6 +29936,94 @@ document.addEventListener('DOMContentLoaded', () => {
      Deve ser a última etapa: se não houver sessão, bloqueia a tela. */
   try { auth.init(); } catch (e) { console.warn('auth.init:', e); }
 });
+</script>
+
+<!-- === Barra lateral direita para rolar a página === -->
+<div id="page-scroller" aria-hidden="true">
+  <button type="button" class="ps-btn" id="ps-top" title="Ir para o topo">⤒</button>
+  <button type="button" class="ps-btn" id="ps-up" title="Subir">▲</button>
+  <div class="ps-track" id="ps-track"><div class="ps-thumb" id="ps-thumb"></div></div>
+  <button type="button" class="ps-btn" id="ps-down" title="Descer">▼</button>
+  <button type="button" class="ps-btn" id="ps-bottom" title="Ir para o final">⤓</button>
+</div>
+<script>
+/* Controle de rolagem lateral da página (útil no celular e para rolar sobre o gráfico) */
+(function () {
+  const box   = document.getElementById('page-scroller');
+  const track = document.getElementById('ps-track');
+  const thumb = document.getElementById('ps-thumb');
+  if (!box || !track || !thumb) return;
+
+  const docEl = document.documentElement;
+  function maxScroll() { return Math.max(0, docEl.scrollHeight - window.innerHeight); }
+  function passo() { return Math.round(window.innerHeight * 0.85); }
+
+  /* Mostra/esconde a barra e posiciona o "polegar" conforme a rolagem */
+  function atualizar() {
+    const max = maxScroll();
+    if (max < 40) { box.classList.remove('show'); return; }
+    box.classList.add('show');
+    const trackH = track.clientHeight;
+    const thumbH = thumb.offsetHeight;
+    const frac = window.scrollY / max;
+    const y = Math.round(frac * (trackH - thumbH));
+    thumb.style.top = Math.max(0, Math.min(trackH - thumbH, y)) + 'px';
+  }
+
+  /* Rolagem contínua ao segurar os botões ▲/▼ */
+  let holdTimer = null, holdRaf = null;
+  function iniciarHold(dir) {
+    pararHold();
+    const step = () => { window.scrollBy(0, dir * 14); holdRaf = requestAnimationFrame(step); };
+    holdTimer = setTimeout(() => { holdRaf = requestAnimationFrame(step); }, 260);
+  }
+  function pararHold() {
+    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+    if (holdRaf) { cancelAnimationFrame(holdRaf); holdRaf = null; }
+  }
+
+  function ligarBotao(id, onClick) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('click', onClick);
+  }
+  ligarBotao('ps-top',    () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+  ligarBotao('ps-bottom', () => window.scrollTo({ top: maxScroll(), behavior: 'smooth' }));
+  ligarBotao('ps-up',     () => window.scrollBy({ top: -passo(), behavior: 'smooth' }));
+  ligarBotao('ps-down',   () => window.scrollBy({ top:  passo(), behavior: 'smooth' }));
+
+  ['ps-up', 'ps-down'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const dir = id === 'ps-up' ? -1 : 1;
+    el.addEventListener('pointerdown', () => iniciarHold(dir));
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => el.addEventListener(ev, pararHold));
+  });
+
+  /* Arrastar o "polegar" para navegar rapidamente pela página */
+  function irParaEvento(clientY) {
+    const r = track.getBoundingClientRect();
+    const thumbH = thumb.offsetHeight;
+    let frac = (clientY - r.top - thumbH / 2) / (r.height - thumbH);
+    frac = Math.max(0, Math.min(1, frac));
+    window.scrollTo(0, Math.round(frac * maxScroll()));
+  }
+  let arrastando = false;
+  track.addEventListener('pointerdown', (e) => {
+    arrastando = true;
+    try { track.setPointerCapture(e.pointerId); } catch (_) {}
+    irParaEvento(e.clientY);
+    e.preventDefault();
+  });
+  track.addEventListener('pointermove', (e) => { if (arrastando) irParaEvento(e.clientY); });
+  ['pointerup', 'pointercancel'].forEach(ev => track.addEventListener(ev, () => { arrastando = false; }));
+
+  window.addEventListener('scroll', atualizar, { passive: true });
+  window.addEventListener('resize', atualizar);
+  /* Reavalia periodicamente porque o conteúdo muda de altura conforme se navega entre abas */
+  setInterval(atualizar, 700);
+  atualizar();
+})();
 </script>
 </body>
 </html>
