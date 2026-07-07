@@ -703,6 +703,16 @@ html[data-theme="dark"] .theme-toggle:hover {
 @media (max-width: 700px) { .vitais-grid { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 420px) { .vitais-grid { grid-template-columns: repeat(2, 1fr); } }
 
+/* Grade transposta de sinais vitais (tempo em colunas, parâmetros em linhas) — estilo ficha */
+.vitais-grade-wrap { overflow-x: auto; margin: 4px 0 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff; }
+.vitais-grade-titulo { font-size: .78rem; font-weight: 700; color: var(--primary-darker); margin: 0 0 4px; }
+table.vitais-grade { border-collapse: collapse; font-size: .78rem; }
+table.vitais-grade th, table.vitais-grade td { border: 1px solid var(--border); padding: 4px 9px; text-align: center; white-space: nowrap; }
+table.vitais-grade thead th { background: #eef4fa; color: var(--primary-darker); font-weight: 700; font-size: .72rem; }
+table.vitais-grade tbody th { background: #f1f5f9; color: var(--text-soft); text-align: left; font-weight: 700; position: sticky; left: 0; z-index: 1; font-size: .72rem; }
+table.vitais-grade thead th:first-child { position: sticky; left: 0; z-index: 2; background: #e3edf6; text-align: left; }
+table.vitais-grade tbody tr:nth-child(even) td { background: var(--surface-alt); }
+
 /* === GRADE DE EXAMES LABORATORIAIS === */
 .lab-grid {
   display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px;
@@ -5139,12 +5149,20 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
       </div>
       <div class="card-body">
         <div class="quick-actions">
-          <span class="qa-label">Atalhos</span>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.addSetModelo()">⚡ Modelo T0/T15/T30/T60</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.duplicarUltima()">⎘ Duplicar última</button>
+          <span class="qa-label">Sinais vitais</span>
+          <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.vitais.add(true)">+ Linha (hora atual)</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.add()">+ Linha vazia</button>
           <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.vitais.duplicarEAjustar()">➕ Igual à anterior + ajustar</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.add(true)">+ Linha (hora atual)</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.duplicarUltima()">⎘ Duplicar última</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.addSetModelo()">⚡ Modelo T0/T15/T30/T60</button>
           <button type="button" class="btn btn-sm" style="background:#0f7b4f;color:#fff;border-color:#0f7b4f" onclick="captura.abrirMonitor('anestesia')">📷 Capturar do monitor</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.atualizarGrafico()">↻ Atualizar gráfico</button>
+          <button type="button" class="btn btn-sm btn-danger" onclick="anestesia.vitais.limparTabela()">🗑 Limpar tabela</button>
+          <span class="gt-sep" style="border-left:1px solid var(--border);margin:0 4px"></span>
+          <label class="gt-snap" title="Quando ligado, se você ficar sem lançar sinais vitais, o sistema repete automaticamente o último registro no intervalo escolhido" style="display:inline-flex;align-items:center;gap:4px;font-size:.78rem">
+            <input type="checkbox" id="vit-autorep-chk" onchange="anestesia.vitais.autoRep.toggle(this.checked)"> ⏱ Auto-repetir
+            <select id="vit-autorep-int" onchange="anestesia.vitais.autoRep.setIntervalo(this.value)" style="width:auto"><option value="5">5 min</option><option value="10">10 min</option></select>
+          </label>
         </div>
         <div class="dyn-table-wrap">
           <table class="dyn" id="tab-vitais">
@@ -5172,7 +5190,11 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
           </table>
         </div>
         <div class="table-actions">
-          <button type="button" class="btn btn-primary btn-sm" onclick="anestesia.vitais.add()">+ Adicionar linha</button>
+          <button type="button" class="btn btn-primary btn-sm" onclick="anestesia.vitais.add(true)">+ Linha (hora atual)</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.add()">+ Linha vazia</button>
+          <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.vitais.duplicarEAjustar()">➕ Igual à anterior + ajustar</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.duplicarUltima()">⎘ Duplicar última</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.addSetModelo()">⚡ Modelo T0/T15/T30/T60</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.vitais.atualizarGrafico()">↻ Atualizar gráfico</button>
           <button type="button" class="btn btn-danger btn-sm" onclick="anestesia.vitais.limparTabela()">🗑 Limpar tabela</button>
         </div>
@@ -5207,6 +5229,10 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
           <button type="button" class="btn btn-primary btn-sm" onclick="anestesia.eventos.add()">+ Adicionar evento</button>
           <button type="button" class="btn btn-danger btn-sm" onclick="anestesia.eventos.limparTabela()">🗑 Limpar eventos</button>
         </div>
+
+        <!-- GRADE POR HORÁRIO (tabela estilo ficha, acima do gráfico) -->
+        <div class="vitais-grade-titulo">📋 Sinais vitais por horário</div>
+        <div class="vitais-grade-wrap" id="vitais-grade"></div>
 
         <div class="vitals-chart-wrap">
           <div class="legend">
@@ -17689,6 +17715,98 @@ const anestesia = {
       if (!s || !d) return '';
       return Math.round((s + 2 * d) / 3);
     },
+
+    /* Lê os valores da última linha da tabela (para replicar/duplicar) */
+    _lerUltima() {
+      const tbody = document.getElementById('vitais-body');
+      if (!tbody) return null;
+      const rows = tbody.querySelectorAll('tr');
+      if (!rows.length) return null;
+      const tr = rows[rows.length - 1];
+      const g = n => (tr.querySelector('[name="vit_' + n + '[]"]') || {}).value || '';
+      return { pas: g('pas'), pad: g('pad'), pam: g('pam'), fc: g('fc'), spo2: g('spo2'),
+        etco2: g('etco2'), fr: g('fr'), temp: g('temp'), bis: g('bis'), tof: g('tof'),
+        glic: g('glic'), pvc: g('pvc'), pic: g('pic'), dc: g('dc'), scvo2: g('scvo2') };
+    },
+
+    /* Grade transposta (parâmetros nas linhas, horários nas colunas) — acima do gráfico */
+    _renderGrade() {
+      const host = document.getElementById('vitais-grade');
+      if (!host) return;
+      const tbody = document.getElementById('vitais-body');
+      const rows = tbody ? Array.from(tbody.querySelectorAll('tr')) : [];
+      const g = (tr, n) => (tr.querySelector('[name="vit_' + n + '[]"]') || {}).value || '';
+      const comHora = rows.filter(tr => g(tr, 'hora'));
+      if (!comHora.length) { host.innerHTML = '<div style="font-size:.78rem;color:var(--text-mute);padding:8px">Nenhum sinal vital com horário registrado ainda.</div>'; return; }
+      /* Ordena por horário */
+      comHora.sort((a, b) => (g(a, 'hora') || '').localeCompare(g(b, 'hora') || ''));
+      const cols = comHora.map(tr => {
+        const pas = g(tr, 'pas'), pad = g(tr, 'pad');
+        return {
+          hora: g(tr, 'hora'),
+          PA: (pas || pad) ? ((pas || '–') + '/' + (pad || '–')) : '',
+          PAM: g(tr, 'pam'), FC: g(tr, 'fc'), 'SpO₂': g(tr, 'spo2'), 'EtCO₂': g(tr, 'etco2'),
+          FR: g(tr, 'fr'), 'Temp': g(tr, 'temp'), BIS: g(tr, 'bis'), 'TOF%': g(tr, 'tof'),
+          Glic: g(tr, 'glic'), PVC: g(tr, 'pvc')
+        };
+      });
+      const params = ['PA', 'PAM', 'FC', 'SpO₂', 'EtCO₂', 'FR', 'Temp', 'BIS', 'TOF%', 'Glic', 'PVC'];
+      const usados = params.filter(p => cols.some(c => c[p] !== '' && c[p] != null));
+      let html = '<table class="vitais-grade"><thead><tr><th>Horário →</th>';
+      cols.forEach(c => html += '<th>' + utils.escapeHTML(c.hora || '—') + '</th>');
+      html += '</tr></thead><tbody>';
+      usados.forEach(p => {
+        html += '<tr><th>' + p + '</th>';
+        cols.forEach(c => html += '<td>' + utils.escapeHTML(c[p] != null ? String(c[p]) : '') + '</td>');
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      host.innerHTML = html;
+    },
+
+    /* ===== AUTO-REPETIÇÃO na ociosidade: repete o último registro a cada N min ===== */
+    autoRep: {
+      ativo: false,
+      intervalo: 5,        /* minutos */
+      _lastMs: 0,
+      _timer: null,
+      toggle(on) {
+        const ar = anestesia.vitais.autoRep;
+        ar.ativo = !!on;
+        ar._lastMs = Date.now();
+        if (on) { ar._start(); toast('⏱ Auto-repetição ligada — repete o último sinal vital a cada ' + ar.intervalo + ' min de ociosidade'); }
+        else { ar._stop(); toast('Auto-repetição de sinais vitais desligada'); }
+      },
+      setIntervalo(v) {
+        const ar = anestesia.vitais.autoRep;
+        ar.intervalo = parseInt(v, 10) || 5;
+        ar._lastMs = Date.now();
+      },
+      marcarAtividade() { anestesia.vitais.autoRep._lastMs = Date.now(); },
+      _start() {
+        const ar = anestesia.vitais.autoRep;
+        ar._stop();
+        ar._timer = setInterval(ar._tick, 30000);   /* verifica a cada 30 s */
+      },
+      _stop() {
+        const ar = anestesia.vitais.autoRep;
+        if (ar._timer) { clearInterval(ar._timer); ar._timer = null; }
+      },
+      _tick() {
+        const ar = anestesia.vitais.autoRep;
+        if (!ar.ativo) return;
+        if (typeof state !== 'undefined' && state.currentModule !== 'anestesia') return;
+        const tbody = document.getElementById('vitais-body');
+        if (!tbody || !tbody.querySelector('tr')) return;         /* precisa ter iniciado o registro */
+        if (Date.now() - ar._lastMs < ar.intervalo * 60000) return;
+        const ultima = anestesia.vitais._lerUltima();
+        if (!ultima) return;
+        anestesia.vitais.add(false, { ...ultima, hora: utils.horaAtual(), obs: '' });
+        ar._lastMs = Date.now();
+        try { markDirty(); } catch (e) {}
+        try { toast('⏱ Sinais vitais repetidos automaticamente (' + utils.horaAtual() + ')'); } catch (e) {}
+      }
+    },
     add(comHoraAtual = false, dados = {}) {
       const tbody = document.getElementById(anestesia.graficoUI._ctxIds().vitaisBody);
       if (!tbody) return null;
@@ -17903,6 +18021,11 @@ const anestesia = {
     },
     atualizarGrafico() {
       const ids = anestesia.graficoUI._ctxIds();
+      /* Grade por horário (só no contexto da ficha de anestesia) + marca atividade */
+      if (ids.vitaisBody === 'vitais-body') {
+        try { anestesia.vitais._renderGrade(); } catch (e) {}
+        try { anestesia.vitais.autoRep.marcarAtividade(); } catch (e) {}
+      }
       const canvas = document.getElementById(ids.canvas);
       if (!canvas) return;
       /* Sincroniza o badge do botão flutuante de carimbo (eventos sem tipo) */
