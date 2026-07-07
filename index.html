@@ -712,6 +712,23 @@ table.vitais-grade thead th { background: #eef4fa; color: var(--primary-darker);
 table.vitais-grade tbody th { background: #f1f5f9; color: var(--text-soft); text-align: left; font-weight: 700; position: sticky; left: 0; z-index: 1; font-size: .72rem; }
 table.vitais-grade thead th:first-child { position: sticky; left: 0; z-index: 2; background: #e3edf6; text-align: left; }
 table.vitais-grade tbody tr:nth-child(even) td { background: var(--surface-alt); }
+/* Células editáveis da grade de sinais vitais */
+table.vitais-grade td { padding: 2px 3px; }
+table.vitais-grade .vg-inp {
+  width: 58px; padding: 3px 4px; font-size: .74rem; text-align: center;
+  border: 1px solid transparent; border-radius: 4px; background: transparent;
+  color: inherit; font-family: inherit;
+}
+table.vitais-grade .vg-inp.vg-pa { width: 68px; }
+table.vitais-grade .vg-inp:hover { border-color: var(--border); background: #fff; }
+table.vitais-grade .vg-inp:focus { border-color: var(--primary); background: #fff; outline: none; box-shadow: 0 0 0 2px rgba(28,100,169,.15); }
+table.vitais-grade .vg-hora {
+  width: 76px; padding: 2px 3px; font-size: .72rem; font-weight: 700;
+  border: 1px solid transparent; border-radius: 4px; background: transparent;
+  color: var(--primary-darker); font-family: inherit;
+}
+table.vitais-grade .vg-hora:hover { border-color: var(--primary-light, #9cc4e4); background: #fff; }
+table.vitais-grade .vg-hora:focus { border-color: var(--primary); background: #fff; outline: none; }
 
 /* === GRADE DE EXAMES LABORATORIAIS === */
 .lab-grid {
@@ -5294,7 +5311,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
         </div>
 
         <!-- GRADE POR HORÁRIO (tabela estilo ficha, acima do gráfico) -->
-        <div class="vitais-grade-titulo">📋 Sinais vitais por horário</div>
+        <div class="vitais-grade-titulo">📋 Sinais vitais por horário <small style="font-weight:400;color:var(--text-mute)">— toque em qualquer célula para editar; o gráfico e a tabela se atualizam juntos</small></div>
         <div class="vitais-grade-wrap" id="vitais-grade"></div>
 
         <div class="vitals-chart-wrap">
@@ -17853,39 +17870,100 @@ const anestesia = {
         glic: g('glic'), pvc: g('pvc'), pic: g('pic'), dc: g('dc'), scvo2: g('scvo2') };
     },
 
-    /* Grade transposta (parâmetros nas linhas, horários nas colunas) — acima do gráfico */
+    /* Parâmetros editáveis exibidos na grade transposta (na ordem de exibição) */
+    _GRADE_PARAMS: [
+      { label: 'PA', kind: 'pa' },
+      { label: 'PAM', field: 'pam' },
+      { label: 'FC', field: 'fc' },
+      { label: 'SpO₂', field: 'spo2' },
+      { label: 'EtCO₂', field: 'etco2' },
+      { label: 'FR', field: 'fr' },
+      { label: 'Temp', field: 'temp', step: '0.1' },
+      { label: 'BIS', field: 'bis' },
+      { label: 'TOF%', field: 'tof' },
+      { label: 'Glic', field: 'glic' },
+      { label: 'PVC', field: 'pvc', step: '0.1' }
+    ],
+
+    /* Grade transposta (parâmetros nas linhas, horários nas colunas) — acima do gráfico.
+       Totalmente EDITÁVEL: qualquer célula grava de volta na tabela de vitais e no
+       gráfico (ambos sincronizados). */
     _renderGrade() {
+      if (anestesia.vitais._suppressGradeRender) return;
       const host = document.getElementById('vitais-grade');
       if (!host) return;
       const tbody = document.getElementById('vitais-body');
       const rows = tbody ? Array.from(tbody.querySelectorAll('tr')) : [];
       const g = (tr, n) => (tr.querySelector('[name="vit_' + n + '[]"]') || {}).value || '';
-      const comHora = rows.filter(tr => g(tr, 'hora'));
-      if (!comHora.length) { host.innerHTML = '<div style="font-size:.78rem;color:var(--text-mute);padding:8px">Nenhum sinal vital com horário registrado ainda.</div>'; return; }
-      /* Ordena por horário */
-      comHora.sort((a, b) => (g(a, 'hora') || '').localeCompare(g(b, 'hora') || ''));
-      const cols = comHora.map(tr => {
-        const pas = g(tr, 'pas'), pad = g(tr, 'pad');
-        return {
-          hora: g(tr, 'hora'),
-          PA: (pas || pad) ? ((pas || '–') + '/' + (pad || '–')) : '',
-          PAM: g(tr, 'pam'), FC: g(tr, 'fc'), 'SpO₂': g(tr, 'spo2'), 'EtCO₂': g(tr, 'etco2'),
-          FR: g(tr, 'fr'), 'Temp': g(tr, 'temp'), BIS: g(tr, 'bis'), 'TOF%': g(tr, 'tof'),
-          Glic: g(tr, 'glic'), PVC: g(tr, 'pvc')
-        };
-      });
-      const params = ['PA', 'PAM', 'FC', 'SpO₂', 'EtCO₂', 'FR', 'Temp', 'BIS', 'TOF%', 'Glic', 'PVC'];
-      const usados = params.filter(p => cols.some(c => c[p] !== '' && c[p] != null));
+      /* Cada coluna guarda o índice da linha real (na ordem do DOM) para gravar de volta */
+      const comHora = rows.map((tr, idx) => ({ tr, idx })).filter(o => g(o.tr, 'hora'));
+      if (!comHora.length) { host.innerHTML = '<div style="font-size:.78rem;color:var(--text-mute);padding:8px">Nenhum sinal vital com horário registrado ainda. Registre pelo gráfico ou pela tabela abaixo.</div>'; return; }
+      /* Ordena por horário (só a exibição; o índice preserva a referência real) */
+      comHora.sort((a, b) => (g(a.tr, 'hora') || '').localeCompare(g(b.tr, 'hora') || ''));
+      const params = anestesia.vitais._GRADE_PARAMS;
+      const ea = v => utils.escapeAttr(v == null ? '' : String(v));
       let html = '<table class="vitais-grade"><thead><tr><th>Horário →</th>';
-      cols.forEach(c => html += '<th>' + utils.escapeHTML(c.hora || '—') + '</th>');
+      comHora.forEach(c => {
+        html += '<th><input type="time" class="vg-hora" data-rowidx="' + c.idx + '" value="' + ea(g(c.tr, 'hora')) +
+          '" onchange="anestesia.vitais._gradeHora(this)"></th>';
+      });
       html += '</tr></thead><tbody>';
-      usados.forEach(p => {
-        html += '<tr><th>' + p + '</th>';
-        cols.forEach(c => html += '<td>' + utils.escapeHTML(c[p] != null ? String(c[p]) : '') + '</td>');
+      params.forEach(p => {
+        html += '<tr><th>' + p.label + '</th>';
+        comHora.forEach(c => {
+          if (p.kind === 'pa') {
+            const pas = g(c.tr, 'pas'), pad = g(c.tr, 'pad');
+            const val = (pas || pad) ? ((pas || '') + '/' + (pad || '')) : '';
+            html += '<td><input type="text" class="vg-inp vg-pa" inputmode="numeric" data-rowidx="' + c.idx +
+              '" data-kind="pa" placeholder="120/80" value="' + ea(val) + '" onchange="anestesia.vitais._gradeEdit(this)"></td>';
+          } else {
+            html += '<td><input type="number" class="vg-inp" data-rowidx="' + c.idx + '" data-field="' + p.field + '"' +
+              (p.step ? ' step="' + p.step + '"' : '') + ' value="' + ea(g(c.tr, p.field)) +
+              '" onchange="anestesia.vitais._gradeEdit(this)"></td>';
+          }
+        });
         html += '</tr>';
       });
       html += '</tbody></table>';
       host.innerHTML = html;
+    },
+
+    /* Edição de uma célula da grade → grava de volta na linha real da tabela de vitais */
+    _gradeEdit(input) {
+      const tbody = document.getElementById('vitais-body');
+      if (!tbody) return;
+      const tr = tbody.querySelectorAll('tr')[+input.dataset.rowidx];
+      if (!tr) return;
+      const setF = (n, v) => { const el = tr.querySelector('[name="vit_' + n + '[]"]'); if (el) el.value = v; };
+      if (input.dataset.kind === 'pa') {
+        const parts = String(input.value).split('/');
+        const pas = (parts[0] || '').trim(), pad = (parts[1] || '').trim();
+        setF('pas', pas); setF('pad', pad);
+        const pam = anestesia.vitais._calcPAM(pas, pad) || '';
+        setF('pam', pam);
+        /* Reflete o PAM recalculado na própria grade sem re-renderizar */
+        const tbl = input.closest('table');
+        const pamInp = tbl && tbl.querySelector('input[data-field="pam"][data-rowidx="' + input.dataset.rowidx + '"]');
+        if (pamInp) pamInp.value = pam;
+      } else {
+        setF(input.dataset.field, String(input.value).trim());
+      }
+      /* Atualiza o gráfico sem re-renderizar a grade (preserva o foco/fluxo de digitação) */
+      anestesia.vitais._suppressGradeRender = true;
+      try { anestesia.vitais.atualizarGrafico(); } catch (e) {} finally { anestesia.vitais._suppressGradeRender = false; }
+      try { markDirty(); } catch (e) {}
+    },
+
+    /* Edição do horário no cabeçalho da grade → reordena, então re-renderiza a grade */
+    _gradeHora(input) {
+      const tbody = document.getElementById('vitais-body');
+      if (!tbody) return;
+      const tr = tbody.querySelectorAll('tr')[+input.dataset.rowidx];
+      if (!tr) return;
+      const el = tr.querySelector('[name="vit_hora[]"]');
+      if (el) { el.value = input.value; try { anestesia.graficoUI.validarHoraInput(el); } catch (e) {} }
+      anestesia.vitais.atualizarGrafico();   /* re-renderiza a grade com a nova ordem */
+      try { markDirty(); } catch (e) {}
     },
 
     /* ===== AUTO-REPETIÇÃO na ociosidade: repete o último registro a cada N min ===== */
