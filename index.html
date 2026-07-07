@@ -20624,6 +20624,26 @@ const linker = {
   /* === IMPORTAÇÃO Pré → Anestesia ===
      Quando o usuário inicia/edita ficha de anestesia, verifica se há Pré
      do mesmo paciente e oferece importar o procedimento. */
+  /* Monta um resumo compacto dos exames relevantes da Pré-anestésica
+     (laboratoriais principais + ECG + ECO + outros), para preencher o campo
+     "Exames relevantes" da Ficha quando houver Pré. */
+  _resumoExamesPre(pre) {
+    if (!pre) return '';
+    const partes = [];
+    const labs = [
+      ['Hb', pre.lab_hb], ['Ht', pre.lab_ht], ['Plaq', pre.lab_plt],
+      ['INR', pre.lab_inr], ['TTPa', pre.lab_ttpa], ['Ur', pre.lab_ureia],
+      ['Creat', pre.lab_creat], ['Na', pre.lab_na], ['K', pre.lab_k],
+      ['Glic', pre.lab_glicemia], ['HbA1c', pre.lab_hba1c]
+    ].filter(([, v]) => v != null && String(v).trim() !== '')
+     .map(([k, v]) => k + ' ' + String(v).trim());
+    if (labs.length) partes.push(labs.join(', '));
+    if (pre.lab_ecg) partes.push('ECG: ' + String(pre.lab_ecg).trim());
+    if (pre.lab_eco) partes.push('ECO: ' + String(pre.lab_eco).trim());
+    if (pre.exames_compl) partes.push(String(pre.exames_compl).trim());
+    return partes.join('. ');
+  },
+
   importarPreParaAnestesia(nomePaciente, opts = {}) {
     if (!nomePaciente) return false;
     const pre = linker.ultimoPorNome('pre', nomePaciente);
@@ -20650,6 +20670,10 @@ const linker = {
     setSe('pre_asa', pre.asa);
     setSe('pre_jejum', pre.jejum);
     setSe('pre_medicacao', pre.medicacao_pre);
+    setSe('pre_via_aerea', pre.via_aerea);
+    setSe('pre_glicemia', pre.lab_glicemia);
+    setSe('pre_exames', linker._resumoExamesPre(pre));
+    setSe('pre_observacoes', pre.risco_resumo || pre.conclusao);
 
     /* Procedimento principal (respeita o já digitado, salvo force=true) */
     const procEl = form.querySelector('[name="procedimento"]');
