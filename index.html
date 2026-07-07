@@ -3658,10 +3658,10 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
           <div class="field col-6"><label>Comorbidades</label>
             <textarea name="comorbidades" rows="2"></textarea>
             <div class="comorb-rapidas" data-alvo="#form-pre [name=comorbidades]"></div>
-            <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.comorbidades.abrir('#form-pre [name=comorbidades]')">➕ Mais comorbidades…</button></div>
+            <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.comorbidades.abrir('#form-pre [name=comorbidades]')">➕ Mais comorbidades…</button><button type="button" class="btn btn-xs tpl-btn" onclick="window.comorbidades.negar('#form-pre [name=comorbidades]')">🚫 Nega comorbidades</button></div>
           </div>
           <div class="field col-6"><label>Alergias</label><textarea name="alergias" rows="2"></textarea>
-            <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.alergias.abrir('#form-pre [name=alergias]')">⚠️ Selecionar alergias</button></div>
+            <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.alergias.abrir('#form-pre [name=alergias]')">⚠️ Selecionar alergias</button><button type="button" class="btn btn-xs tpl-btn" onclick="window.alergias.negarCampo('#form-pre [name=alergias]')">🚫 Nega alergias</button></div>
           </div>
           <div class="field col-12">
             <label>Medicações em uso</label>
@@ -4237,11 +4237,11 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
           <div class="field col-2"><label>Jejum</label><input type="text" name="pre_jejum"></div>
           <div class="field col-2"><label>Glicemia capilar (mg/dL)</label><input type="number" name="pre_glicemia" min="0"></div>
           <div class="field col-6"><label>Alergias</label><input type="text" name="pre_alergias">
-            <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.alergias.abrir('#form-anestesia [name=pre_alergias]')">⚠️ Selecionar alergias</button></div>
+            <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.alergias.abrir('#form-anestesia [name=pre_alergias]')">⚠️ Selecionar alergias</button><button type="button" class="btn btn-xs tpl-btn" onclick="window.alergias.negarCampo('#form-anestesia [name=pre_alergias]')">🚫 Nega alergias</button></div>
           </div>
           <div class="field col-6"><label>Comorbidades</label><input type="text" name="pre_comorbidades">
             <div class="comorb-rapidas" data-alvo="#form-anestesia [name=pre_comorbidades]"></div>
-            <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.comorbidades.abrir('#form-anestesia [name=pre_comorbidades]')">➕ Mais comorbidades…</button></div>
+            <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.comorbidades.abrir('#form-anestesia [name=pre_comorbidades]')">➕ Mais comorbidades…</button><button type="button" class="btn btn-xs tpl-btn" onclick="window.comorbidades.negar('#form-anestesia [name=pre_comorbidades]')">🚫 Nega comorbidades</button></div>
           </div>
           <div class="field col-4"><label>Avaliação de via aérea</label>
             <select name="pre_via_aerea"><option value="">—</option><option>Mallampati I</option><option>Mallampati II</option><option>Mallampati III</option><option>Mallampati IV</option><option>Via aérea difícil prevista</option><option>Sem alterações</option></select>
@@ -13082,6 +13082,17 @@ const comorbidades = {
         btn.classList.toggle('on', !!key && txt.includes(key));
       });
     });
+  },
+
+  /* Registra "nega comorbidades" no campo (limpa chips e escreve o texto) */
+  negar(sel) {
+    const alvo = document.querySelector(sel);
+    if (!alvo) return;
+    alvo.value = 'Nega comorbidades';
+    alvo.dispatchEvent(new Event('input', { bubbles: true }));
+    try { comorbidades.syncRapidas(); } catch (e) {}
+    try { markDirty(); } catch (e) {}
+    toast('Registrado: nega comorbidades');
   }
 };
 
@@ -13137,6 +13148,15 @@ const alergias = {
     });
   },
 
+  /* Nega alergias diretamente num campo (pelo seletor) — usado nos botões do form */
+  negarCampo(sel) {
+    const alvo = document.querySelector(sel);
+    if (!alvo) return;
+    alvo.value = 'Nega alergias medicamentosa e alimentar';
+    alvo.dispatchEvent(new Event('input', { bubbles: true }));
+    try { markDirty(); } catch (e) {}
+    toast('Registrado: nega alergias');
+  },
   _negar() {
     const alvo = document.querySelector(alergias._campoAlvo);
     if (alvo) {
@@ -20262,29 +20282,46 @@ const linker = {
   importarPreParaAnestesia(nomePaciente, opts = {}) {
     if (!nomePaciente) return false;
     const pre = linker.ultimoPorNome('pre', nomePaciente);
-    if (!pre || !pre.cirurgia) return false;
+    if (!pre) return false;
 
     const form = document.getElementById('form-anestesia');
     if (!form) return false;
+
+    /* Preenche apenas campos vazios da ficha (não sobrescreve o que já há) */
+    const setSe = (name, val) => {
+      if (val == null || val === '') return;
+      const el = form.querySelector('[name="' + name + '"]');
+      if (el && !el.value) el.value = val;
+    };
+    /* Dados do paciente e clínicos vindos da Pré-anestésica */
+    setSe('paciente_nasc', pre.nasc || pre.nascimento);
+    setSe('paciente_sexo', pre.sexo);
+    setSe('paciente_peso', pre.peso);
+    setSe('paciente_altura', pre.altura);
+    setSe('pre_diagnostico', pre.cirurgia);
+    setSe('pre_comorbidades', pre.comorbidades);
+    setSe('pre_alergias', pre.alergias);
+    setSe('pre_medicacoes', pre.medicacoes);
+    setSe('pre_asa', pre.asa);
+    setSe('pre_jejum', pre.jejum);
+    setSe('pre_medicacao', pre.medicacao_pre);
+
+    /* Procedimento principal (respeita o já digitado, salvo force=true) */
     const procEl = form.querySelector('[name="procedimento"]');
-    if (!procEl) return false;
+    if (procEl && pre.cirurgia && (!procEl.value || opts.force)) procEl.value = pre.cirurgia;
 
-    /* Não sobrescreve se já tem valor (a menos que force=true) */
-    if (procEl.value && !opts.force) return false;
+    /* Recalcula IMC/idade primeiro (a idade vem do nascimento, quando houver) */
+    try { anestesia.calc.idade(); anestesia.calc.imc(); } catch (e) {}
+    /* Se não veio nascimento, usa a idade registrada na Pré */
+    setSe('paciente_idade', pre.idade);
+    try { comorbidades.syncRapidas(); } catch (e) {}
 
-    procEl.value = pre.cirurgia;
-    /* Traz a prescrição pré-anestésica, se houver e o campo estiver vazio */
-    if (pre.medicacao_pre) {
-      const medEl = form.querySelector('[name="pre_medicacao"]');
-      if (medEl && !medEl.value) medEl.value = pre.medicacao_pre;
-    }
     /* Marca o vínculo para salvar depois */
     if (window.anestesia) {
       anestesia._linkPendente = { mod: 'pre', id: pre._id };
     }
-    /* Mostra notificação não-bloqueante */
     if (!opts.silent) {
-      toast(`📋 Procedimento importado da Pré-anestésica: "${pre.cirurgia.slice(0, 50)}${pre.cirurgia.length > 50 ? '...' : ''}"`);
+      toast('📋 Dados importados da Avaliação pré-anestésica' + (pre.cirurgia ? ': ' + pre.cirurgia.slice(0, 40) : ''));
     }
     return true;
   },
