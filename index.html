@@ -597,6 +597,18 @@ html[data-theme="dark"] .theme-toggle:hover {
 .comorb-chip.on { background: var(--primary-soft); border-color: var(--primary); font-weight: 600; }
 .comorb-chip input { width: 14px; height: 14px; flex-shrink: 0; }
 
+/* Atalhos rápidos (chips inline no formulário) das comorbidades mais comuns */
+.comorb-rapidas { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+.comorb-rapidas .cr-lbl { font-size: .72rem; color: var(--text-mute); font-weight: 600; }
+.comorb-chip-rapida {
+  padding: 4px 10px; border: 1px solid var(--border); border-radius: 14px;
+  background: var(--surface); font-size: .78rem; cursor: pointer; font-family: inherit;
+  color: var(--text); transition: background .12s, border-color .12s;
+}
+.comorb-chip-rapida:hover { border-color: var(--primary); }
+.comorb-chip-rapida.on { background: var(--primary-soft); border-color: var(--primary); font-weight: 600; color: var(--primary-darker); }
+.comorb-chip-rapida.on::before { content: "✓ "; }
+
 /* === EXAMES LABORATORIAIS EXTRAS (campo livre) === */
 .lab-extras-wrap { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .lab-extra { flex-direction: row !important; align-items: center; gap: 6px; }
@@ -3645,7 +3657,8 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
         <div class="grid">
           <div class="field col-6"><label>Comorbidades</label>
             <textarea name="comorbidades" rows="2"></textarea>
-            <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.comorbidades.abrir('#form-pre [name=comorbidades]')">➕ Selecionar comorbidades</button></div>
+            <div class="comorb-rapidas" data-alvo="#form-pre [name=comorbidades]"></div>
+            <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.comorbidades.abrir('#form-pre [name=comorbidades]')">➕ Mais comorbidades…</button></div>
           </div>
           <div class="field col-6"><label>Alergias</label><textarea name="alergias" rows="2"></textarea>
             <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.alergias.abrir('#form-pre [name=alergias]')">⚠️ Selecionar alergias</button></div>
@@ -4224,7 +4237,8 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
             <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.alergias.abrir('#form-anestesia [name=pre_alergias]')">⚠️ Selecionar alergias</button></div>
           </div>
           <div class="field col-6"><label>Comorbidades</label><input type="text" name="pre_comorbidades">
-            <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.comorbidades.abrir('#form-anestesia [name=pre_comorbidades]')">➕ Selecionar comorbidades</button></div>
+            <div class="comorb-rapidas" data-alvo="#form-anestesia [name=pre_comorbidades]"></div>
+            <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.comorbidades.abrir('#form-anestesia [name=pre_comorbidades]')">➕ Mais comorbidades…</button></div>
           </div>
           <div class="field col-4"><label>Avaliação de via aérea</label>
             <select name="pre_via_aerea"><option value="">—</option><option>Mallampati I</option><option>Mallampati II</option><option>Mallampati III</option><option>Mallampati IV</option><option>Via aérea difícil prevista</option><option>Sem alterações</option></select>
@@ -9629,6 +9643,7 @@ const pre = {
     try { prontuario.restaurar('pre', item._docs); } catch (e) {}
     try { pre.jejum.restaurar(item); } catch (e) {}
     try { pre.premed.restaurar(item._premedSel); } catch (e) {}
+    try { comorbidades.syncRapidas(); } catch (e) {}
     markClean();
     toast('Avaliação carregada'); ui.expandirTodos('pre');
   },
@@ -12943,6 +12958,68 @@ const comorbidades = {
     }
     modal.close();
     toast(`${marcados.length} comorbidade(s) adicionada(s)`);
+    /* Atualiza os chips rápidos que apontam para o mesmo campo */
+    try { comorbidades.syncRapidas(); } catch (e) {}
+  },
+
+  /* ===== ATALHOS RÁPIDOS (chips inline) das comorbidades mais comuns ===== */
+  RAPIDAS: [
+    ['HAS', 'HAS (Hipertensão arterial)'],
+    ['Diabetes', 'Diabetes tipo 2'],
+    ['Dislipidemia', 'Dislipidemia'],
+    ['Obesidade', 'Obesidade'],
+    ['Tabagismo', 'Tabagismo'],
+    ['Asma', 'Asma'],
+    ['DPOC', 'DPOC'],
+    ['SAOS', 'SAOS (Apneia do sono)'],
+    ['Hipotireoidismo', 'Hipotireoidismo'],
+    ['DRGE', 'DRGE / Refluxo'],
+    ['DRC', 'Doença renal crônica'],
+    ['Coronariopatia', 'Doença arterial coronariana'],
+    ['Arritmia/FA', 'Arritmia / FA'],
+    ['Ansiedade', 'Ansiedade'],
+    ['Depressão', 'Depressão'],
+    ['Anticoagulação', 'Anticoagulação crônica']
+  ],
+  /* Preenche os containers .comorb-rapidas encontrados na página */
+  renderRapidas() {
+    document.querySelectorAll('.comorb-rapidas').forEach(wrap => {
+      if (wrap._render) return;
+      wrap.innerHTML = '<span class="cr-lbl">Comuns:</span>' +
+        comorbidades.RAPIDAS.map(([lbl, val]) =>
+          '<button type="button" class="comorb-chip-rapida" data-val="' + utils.escapeAttr(val) + '" onclick="comorbidades.toggleRapido(this)">' + utils.escapeHTML(lbl) + '</button>'
+        ).join('');
+      wrap._render = true;
+    });
+    comorbidades.syncRapidas();
+  },
+  /* Alterna uma comorbidade no campo alvo (adiciona se não houver, remove se houver) */
+  toggleRapido(btn) {
+    const wrap = btn.closest('.comorb-rapidas');
+    if (!wrap) return;
+    const alvo = document.querySelector(wrap.dataset.alvo || '');
+    if (!alvo) return;
+    const val = btn.dataset.val || btn.textContent.trim();
+    const key = val.split(' (')[0].split(' / ')[0].toLowerCase().trim();
+    let partes = (alvo.value || '').split(/[,;\n]+/).map(s => s.trim()).filter(Boolean);
+    const idx = partes.findIndex(p => p.toLowerCase().includes(key));
+    if (idx >= 0) { partes.splice(idx, 1); btn.classList.remove('on'); }
+    else { partes.push(val); btn.classList.add('on'); }
+    alvo.value = partes.join(', ');
+    alvo.dispatchEvent(new Event('input', { bubbles: true }));
+    try { markDirty(); } catch (e) {}
+  },
+  /* Sincroniza o destaque dos chips com o conteúdo atual dos campos */
+  syncRapidas() {
+    document.querySelectorAll('.comorb-rapidas').forEach(wrap => {
+      const alvo = document.querySelector(wrap.dataset.alvo || '');
+      const txt = alvo ? (alvo.value || '').toLowerCase() : '';
+      wrap.querySelectorAll('.comorb-chip-rapida').forEach(btn => {
+        const val = btn.dataset.val || '';
+        const key = val.split(' (')[0].split(' / ')[0].toLowerCase().trim();
+        btn.classList.toggle('on', !!key && txt.includes(key));
+      });
+    });
   }
 };
 
@@ -19086,6 +19163,7 @@ const anestesia = {
     anestesia.calc.idade(); anestesia.calc.imc();
     anestesia.calc.duracao(); anestesia.calc.balanco();
     anestesia.vitais.atualizarGrafico();
+    try { comorbidades.syncRapidas(); } catch (e) {}
   },
 
   /* ---- AÇÕES ---- */
@@ -28895,6 +28973,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.auth = auth;
   window.demo = demo;
   try { pre.premed.render(); } catch (e) {}
+  try { comorbidades.renderRapidas(); } catch (e) {}
   window.ajustesUsuarios = ajustesUsuarios;
   window.termoPadrao = termoPadrao;
   window.termoBiblioteca = termoBiblioteca;
