@@ -3627,7 +3627,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
       </div>
       <div class="card-body">
         <div class="grid">
-          <div class="field col-6 required"><label>Nome do paciente <span class="req">*</span></label><input type="text" name="nome" data-required onblur="linker.autoPreencherDadosPaciente(this.value, 'pre')"></div>
+          <div class="field col-6 required"><label>Nome do paciente <span class="req">*</span></label><input type="text" name="nome" data-required onblur="linker.autoPreencherDadosPaciente(this.value, 'pre'); rascunhos.renomearAba('pre')"></div>
           <div class="field col-3 required"><label>Data da avaliação <span class="req">*</span></label><input type="date" name="data" data-required></div>
           <div class="field col-3"><label>Senha / Autorização do plano</label><input type="text" name="senha" placeholder="Senha do convênio"></div>
           <div class="field col-3"><label>Idade</label><input type="text" name="idade"></div>
@@ -3799,7 +3799,10 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
           </div>
           <div class="field col-12">
             <button type="button" class="btn btn-sm" onclick="pre.abrirRisco()">🎯 Calcular risco perioperatório (escores)</button>
-            <span style="font-size:.74rem;color:var(--text-mute);margin-left:8px">Abre o módulo de risco já vinculado a esta avaliação</span>
+            <span style="font-size:.74rem;color:var(--text-mute);margin-left:8px">Abre o módulo de risco — depois use “← Voltar à Pré-anestésica” para retornar com o resultado</span>
+          </div>
+          <div class="field col-12" id="pre-risco-resumo-wrap" style="display:none"><label>Resultado dos escores de risco <small style="color:var(--text-mute);font-weight:400">— trazido do módulo de risco; editável</small></label>
+            <textarea name="risco_resumo" rows="2" placeholder="Preenchido ao voltar do módulo de escores de risco."></textarea>
           </div>
         </div>
       </div>
@@ -3913,7 +3916,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
       </div>
       <div class="card-body">
         <div class="grid">
-          <div class="field col-6 required"><label>Nome do paciente <span class="req">*</span></label><input type="text" name="nome" data-required onblur="linker.autoPreencherDadosPaciente(this.value, 'consulta')"></div>
+          <div class="field col-6 required"><label>Nome do paciente <span class="req">*</span></label><input type="text" name="nome" data-required onblur="linker.autoPreencherDadosPaciente(this.value, 'consulta'); rascunhos.renomearAba('consulta')"></div>
           <div class="field col-3 required"><label>Data <span class="req">*</span></label><input type="date" name="data" data-required></div>
           <div class="field col-3"><label>Senha / Autorização do plano</label><input type="text" name="senha" placeholder="Senha do convênio"></div>
           <div class="field col-3"><label>Idade</label><input type="text" name="idade"></div>
@@ -4155,7 +4158,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
       </div>
       <div class="card-body">
         <div class="grid">
-          <div class="field col-5 required"><label>Nome do paciente <span class="req">*</span></label><input type="text" name="paciente_nome" data-required onblur="linker.autoPreencherDadosPaciente(this.value, 'anestesia'); linker.importarPreParaAnestesia(this.value)"></div>
+          <div class="field col-5 required"><label>Nome do paciente <span class="req">*</span></label><input type="text" name="paciente_nome" data-required onblur="linker.autoPreencherDadosPaciente(this.value, 'anestesia'); linker.importarPreParaAnestesia(this.value); rascunhos.renomearAba('anestesia')"></div>
           <div class="field col-4 required"><label>Data <span class="req">*</span></label><input type="date" name="data_anestesia" data-required></div>
           <div class="field col-3"><label>Senha / Autorização do plano</label><input type="text" name="paciente_senha" placeholder="Senha do convênio"></div>
           <div class="field col-3"><label>Data de nascimento</label><input type="date" name="paciente_nasc" oninput="anestesia.calc.idade()"></div>
@@ -6060,6 +6063,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
 <div class="module" id="module-risco" data-module="risco">
   <div class="action-bar">
     <button class="btn btn-sm" id="btn-expandir-risco" onclick="ui.alternarTodos('risco')" title="Expandir ou recolher todos os campos">⊕ Expandir tudo</button>
+    <button class="btn" id="btn-risco-voltar-pre" style="display:none;background:var(--primary-light);color:var(--primary-darker);border-color:var(--primary)" onclick="risco.voltarPre()" title="Retorna à avaliação pré-anestésica trazendo o resultado dos escores"><span class="icon">←</span> Voltar à Pré-anestésica</button>
     <button class="btn btn-primary" onclick="risco.novo()"><span class="icon">📄</span> Novo</button>
     <button class="btn btn-success" onclick="risco.salvar()"><span class="icon">💾</span> Salvar</button>
     <button class="btn" onclick="risco.atualizar()"><span class="icon">🔄</span> Recalcular</button>
@@ -9503,14 +9507,19 @@ const pre = {
       altura: f.querySelector('[name="altura"]') ? f.querySelector('[name="altura"]').value : ''
     };
     const preId = f.querySelector('[name="_id"]') ? f.querySelector('[name="_id"]').value : '';
+    /* Marca de onde viemos, para permitir voltar (o Pré fica preservado, apenas oculto) */
+    const rascId = (typeof rascunhos !== 'undefined') ? rascunhos.ativo('pre') : '';
     ui.navegar('risco');
     setTimeout(() => {
       try {
         const set = (id, v) => { const el = risco._$(id); if (el && v) el.value = v; };
         set('nome', dados.nome); set('idade', dados.idade); set('peso', dados.peso); set('altura', dados.altura);
         if (preId) risco._linkPendente = { mod: 'pre', id: preId };
+        risco._origemPre = { preId: preId || '', rascId: rascId || '' };
+        const bt = document.getElementById('btn-risco-voltar-pre');
+        if (bt) bt.style.display = '';
         risco.atualizar();
-        toast('🎯 Preencha os campos para calcular os escores de risco');
+        toast('🎯 Preencha os escores e use “← Voltar à Pré-anestésica” para retornar');
       } catch (e) {}
     }, 150);
   },
@@ -9526,6 +9535,8 @@ const pre = {
     try { prontuario.limpar('pre'); } catch (e) {}
     try { pre.premed.restaurar({}); } catch (e) {}
     try { pre.jejum._mostrar(''); } catch (e) {}
+    try { comorbidades.syncRapidas(); } catch (e) {}
+    try { const w = document.getElementById('pre-risco-resumo-wrap'); if (w) w.style.display = 'none'; } catch (e) {}
     ui.fecharBanner('banner-pre');
     markClean();
     toast('Nova avaliação iniciada');
@@ -9644,6 +9655,10 @@ const pre = {
     try { pre.jejum.restaurar(item); } catch (e) {}
     try { pre.premed.restaurar(item._premedSel); } catch (e) {}
     try { comorbidades.syncRapidas(); } catch (e) {}
+    try {
+      const wrap = document.getElementById('pre-risco-resumo-wrap');
+      if (wrap) wrap.style.display = (item.risco_resumo && String(item.risco_resumo).trim()) ? '' : 'none';
+    } catch (e) {}
     markClean();
     toast('Avaliação carregada'); ui.expandirTodos('pre');
   },
@@ -12916,19 +12931,18 @@ const comorbidades = {
           ${g.itens.map(it => {
             const marcado = jaTem.includes(it.split(' (')[0].toLowerCase());
             return `<label class="comorb-chip${marcado ? ' on' : ''}">
-              <input type="checkbox" value="${utils.escapeAttr(it)}" ${marcado ? 'checked' : ''} onchange="this.closest('.comorb-chip').classList.toggle('on', this.checked)">
+              <input type="checkbox" value="${utils.escapeAttr(it)}" ${marcado ? 'checked' : ''} onchange="comorbidades._toggleLive(this)">
               <span>${utils.escapeHTML(it)}</span>
             </label>`;
           }).join('')}
         </div>
       </div>`).join('');
     const body = `
-      <p style="font-size:.85rem;color:var(--text-soft);margin-bottom:10px">Marque as comorbidades. Ao confirmar, elas serão adicionadas ao campo (sem apagar o que já estiver escrito).</p>
+      <p style="font-size:.85rem;color:var(--text-soft);margin-bottom:10px">Toque para <strong>marcar várias</strong> comorbidades — cada uma é adicionada na hora ao campo (sem apagar o que já houver). Toque de novo para remover.</p>
       <div class="comorb-busca-wrap"><input type="text" id="comorb-busca" placeholder="🔎 Filtrar..." oninput="window.comorbidades._filtrar(this.value)"></div>
       <div id="comorb-lista">${grupos}</div>`;
     const footer = `
-      <button class="btn" onclick="modal.close()">Cancelar</button>
-      <button class="btn btn-primary" onclick="window.comorbidades._confirmar()">Adicionar selecionadas</button>`;
+      <button class="btn btn-primary" onclick="modal.close()">Concluir</button>`;
     modal.open('🩺 Selecionar comorbidades', body, footer);
   },
 
@@ -12942,6 +12956,26 @@ const comorbidades = {
       const algum = Array.from(g.querySelectorAll('.comorb-chip')).some(c => c.style.display !== 'none');
       g.style.display = algum ? '' : 'none';
     });
+  },
+
+  /* Adiciona/remove a comorbidade (ou alergia) no campo imediatamente ao tocar,
+     permitindo selecionar várias sem depender de um botão de confirmar. */
+  _toggleLive(cb) {
+    const chip = cb.closest('.comorb-chip');
+    if (chip) chip.classList.toggle('on', cb.checked);
+    const obj = cb.closest('#alerg-lista') ? alergias : comorbidades;
+    const alvo = document.querySelector(obj._campoAlvo || '');
+    if (!alvo) return;
+    const val = cb.value;
+    const key = val.split(' (')[0].split(' / ')[0].toLowerCase().trim();
+    let partes = (alvo.value || '').split(/[,;\n]+/).map(s => s.trim()).filter(Boolean);
+    const idx = partes.findIndex(p => p.toLowerCase().includes(key));
+    if (cb.checked) { if (idx < 0) partes.push(val); }
+    else { if (idx >= 0) partes.splice(idx, 1); }
+    alvo.value = partes.join(', ');
+    alvo.dispatchEvent(new Event('input', { bubbles: true }));
+    try { comorbidades.syncRapidas(); } catch (e) {}
+    try { markDirty(); } catch (e) {}
   },
 
   _confirmar() {
@@ -13045,22 +13079,21 @@ const alergias = {
           ${g.itens.map(it => {
             const marcado = jaTem.includes(it.split(' (')[0].split(' /')[0].toLowerCase());
             return `<label class="comorb-chip${marcado ? ' on' : ''}">
-              <input type="checkbox" value="${utils.escapeAttr(it)}" ${marcado ? 'checked' : ''} onchange="this.closest('.comorb-chip').classList.toggle('on', this.checked)">
+              <input type="checkbox" value="${utils.escapeAttr(it)}" ${marcado ? 'checked' : ''} onchange="comorbidades._toggleLive(this)">
               <span>${utils.escapeHTML(it)}</span>
             </label>`;
           }).join('')}
         </div>
       </div>`).join('');
     const body = `
-      <p style="font-size:.85rem;color:var(--text-soft);margin-bottom:10px">Marque as alergias. Ao confirmar, elas serão adicionadas ao campo (sem apagar o que já estiver escrito).</p>
+      <p style="font-size:.85rem;color:var(--text-soft);margin-bottom:10px">Toque para <strong>marcar várias</strong> alergias — cada uma é adicionada na hora ao campo. Toque de novo para remover.</p>
       <div class="comorb-busca-wrap"><input type="text" id="alerg-busca" placeholder="🔎 Filtrar..." oninput="window.alergias._filtrar(this.value)"></div>
       <div style="margin-bottom:10px">
         <button type="button" class="btn btn-xs" onclick="window.alergias._negar()">🚫 Nega alergias</button>
       </div>
       <div id="alerg-lista">${grupos}</div>`;
     const footer = `
-      <button class="btn" onclick="modal.close()">Cancelar</button>
-      <button class="btn btn-primary" onclick="window.alergias._confirmar()">Adicionar selecionadas</button>`;
+      <button class="btn btn-primary" onclick="modal.close()">Concluir</button>`;
     modal.open('⚠️ Selecionar alergias', body, footer);
   },
 
@@ -13411,8 +13444,53 @@ const RISCO_MED = [
 const risco = {
   formId: 'form-risco',
   _linkPendente: null,
+  _origemPre: null,
   PROC: RISCO_PROC,
   MED: RISCO_MED,
+
+  /* Texto compacto com o resultado dos escores (para levar de volta ao Pré) */
+  resumoTexto() {
+    const r = risco._ultimoResumo;
+    if (!r) return '';
+    const lbl = v => Array.isArray(v) ? v[0] : v;   /* alguns escores vêm como [rótulo, %] */
+    const parts = [];
+    if (r.global != null && r.global !== '') parts.push('Risco global ≈ ' + (typeof r.global === 'number' ? r.global.toFixed(1) : r.global) + '%' + (r.globalLabel ? ' (' + r.globalLabel + ')' : ''));
+    const asaClasse = risco._val('asa');
+    if (asaClasse) parts.push('ASA ' + asaClasse);
+    if (r.rcri != null && r.rcri !== '') parts.push('RCRI ≈ ' + lbl(r.rcri) + '%');
+    if (r.ariscat) parts.push('ARISCAT: ' + lbl(r.ariscat));
+    if (r.stop) parts.push('STOP-Bang: ' + lbl(r.stop));
+    if (r.caprini) parts.push('Caprini: ' + lbl(r.caprini));
+    if (r.apfel) parts.push('Apfel: ' + lbl(r.apfel));
+    if (r.airway) parts.push('Via aérea: ' + lbl(r.airway));
+    return parts.join(' · ');
+  },
+
+  /* Volta à avaliação pré-anestésica (preservada), trazendo o resultado dos escores */
+  voltarPre() {
+    try { risco.atualizar(); } catch (e) {}
+    const resumo = risco.resumoTexto();
+    const glob = risco._ultimoResumo ? risco._ultimoResumo.globalLabel : '';
+    ui.navegar('pre');
+    setTimeout(() => {
+      try {
+        const f = document.getElementById('form-pre');
+        if (!f) return;
+        const rEl = f.querySelector('[name="risco_resumo"]');
+        if (rEl && resumo) rEl.value = resumo;
+        const wrap = document.getElementById('pre-risco-resumo-wrap');
+        if (wrap && (resumo || (rEl && rEl.value))) wrap.style.display = '';
+        /* Preenche a classificação de risco do Pré se ainda estiver vazia */
+        const sel = f.querySelector('[name="risco"]');
+        if (sel && !sel.value && glob) {
+          const map = { 'Muito baixo': 'Baixo', 'Baixo': 'Baixo', 'Moderado': 'Moderado', 'Intermediário': 'Moderado', 'Alto': 'Alto', 'Muito alto': 'Alto' };
+          if (map[glob]) sel.value = map[glob];
+        }
+        try { markDirty(); } catch (e) {}
+        toast(resumo ? '← De volta à Pré — resultado dos escores trazido' : '← De volta à avaliação pré-anestésica');
+      } catch (e) {}
+    }, 200);
+  },
 
   /* ---- utilitários ---- */
   _$(id) { return document.getElementById('risco-' + id); },
@@ -13582,6 +13660,8 @@ const risco = {
     const f = document.getElementById(risco.formId);
     const idEl = f.querySelector('[name="_id"]'); if (idEl) idEl.value = '';
     risco._linkPendente = null;
+    risco._origemPre = null;
+    { const bt = document.getElementById('btn-risco-voltar-pre'); if (bt) bt.style.display = 'none'; }
     risco.atualizar();
     ui.atualizarDocStatus('risco', null);
     ui.fecharBanner('banner-risco');
@@ -19696,6 +19776,24 @@ const rascunhos = {
     return dados.paciente_nome || dados.nome_paciente || dados.nome || '';
   },
 
+  /* Renomeia a aba do rascunho ativo com o nome do paciente, na hora
+     (chamado ao sair do campo Nome — sem esperar o auto-save). */
+  renomearAba(mod) {
+    try {
+      const id = rascunhos.ativo(mod);
+      if (!id) return;
+      const list = rascunhos.list(mod);
+      const r = list.find(x => x.id === id);
+      if (!r) return;
+      const nome = rascunhos._extrairNomePaciente(mod, rascunhos._coletar(mod));
+      if (nome && nome.trim()) {
+        r.label = nome.trim().slice(0, 32);
+        rascunhos.setList(mod, list);
+        rascunhos.renderAbas(mod);
+      }
+    } catch (e) {}
+  },
+
   /* Ativa um rascunho — salva o atual, carrega o novo */
   ativar(mod, id) {
     const atual = rascunhos.ativo(mod);
@@ -24203,6 +24301,7 @@ ${TAG_CLOSE_HTML}`;
           ${printPreview._field('Jejum', d.jejum)}
           ${printPreview._field('Risco', d.risco)}
         </div>
+        ${printPreview._field('Resultado dos escores de risco', d.risco_resumo, true)}
         ${printPreview._field('Orientação de jejum ao paciente', d.jejum_orientacao, true)}
         ${printPreview._vitaisPre(d)}
         ${printPreview._field('Exame físico', d.exame_fisico, true)}
