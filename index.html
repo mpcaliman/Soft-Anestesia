@@ -3630,7 +3630,8 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
           <div class="field col-6 required"><label>Nome do paciente <span class="req">*</span></label><input type="text" name="nome" data-required onblur="linker.autoPreencherDadosPaciente(this.value, 'pre'); rascunhos.renomearAba('pre')"></div>
           <div class="field col-3 required"><label>Data da avaliação <span class="req">*</span></label><input type="date" name="data" data-required></div>
           <div class="field col-3"><label>Senha / Autorização do plano</label><input type="text" name="senha" placeholder="Senha do convênio"></div>
-          <div class="field col-3"><label>Idade</label><input type="text" name="idade"></div>
+          <div class="field col-3"><label>Data de nascimento</label><input type="date" name="nasc" oninput="pre.calcIdade()"></div>
+          <div class="field col-2"><label>Idade</label><input type="text" name="idade"></div>
           <div class="field col-2"><label>Sexo</label>
             <select name="sexo"><option value="">—</option><option>Masculino</option><option>Feminino</option><option>Outro</option></select>
           </div>
@@ -3945,11 +3946,11 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
           <div class="field col-12"><label>Queixa principal</label><textarea name="queixa" rows="2"></textarea></div>
           <div class="field col-12"><label>História da doença atual (HDA)</label><textarea name="hda" rows="4"></textarea></div>
           <div class="field col-6"><label>Antecedentes</label><textarea name="antecedentes" rows="3"></textarea>
-            <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.comorbidades.abrir('#form-consulta [name=antecedentes]')">➕ Selecionar comorbidades</button></div>
+            <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.comorbidades.abrir('#form-consulta [name=antecedentes]')">➕ Selecionar comorbidades</button><button type="button" class="btn btn-xs tpl-btn" onclick="window.comorbidades.negar('#form-consulta [name=antecedentes]')">🚫 Nega comorbidades</button></div>
           </div>
           <div class="field col-6"><label>Medicações em uso</label><textarea name="medicacoes" rows="3"></textarea></div>
           <div class="field col-12"><label>Alergias</label><input type="text" name="alergias" placeholder="Nega / descrever">
-            <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.alergias.abrir('#form-consulta [name=alergias]')">⚠️ Selecionar alergias</button></div>
+            <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.alergias.abrir('#form-consulta [name=alergias]')">⚠️ Selecionar alergias</button><button type="button" class="btn btn-xs tpl-btn" onclick="window.alergias.negarCampo('#form-consulta [name=alergias]')">🚫 Nega alergias</button></div>
           </div>
         </div>
       </div>
@@ -9309,6 +9310,22 @@ const pre = {
   /* Stubs vazios (obsoletos — carimbo agora vem do cadastro do profissional) */
   _popularAssinaturas() {},
   _previewAssinatura() {},
+  /* Calcula a idade (em anos) a partir da data de nascimento */
+  calcIdade() {
+    const f = document.getElementById('form-pre');
+    if (!f) return;
+    const nasc = f.querySelector('[name="nasc"]');
+    const idadeEl = f.querySelector('[name="idade"]');
+    if (!nasc || !idadeEl || !nasc.value) return;
+    const d = new Date(nasc.value);
+    if (isNaN(d.getTime())) return;
+    const hoje = new Date();
+    let anos = hoje.getFullYear() - d.getFullYear();
+    const m = hoje.getMonth() - d.getMonth();
+    if (m < 0 || (m === 0 && hoje.getDate() < d.getDate())) anos--;
+    if (anos >= 0 && anos < 130) idadeEl.value = String(anos);
+    try { markDirty(); } catch (e) {}
+  },
 
   /* ===== Procedimentos adicionais (múltiplos códigos CBHPM na Pré) ===== */
   procs: {
@@ -24337,6 +24354,7 @@ ${TAG_CLOSE_HTML}`;
       printPreview._section('Identificação', `
         <div class="pp-grid cols-3">
           ${printPreview._field('Nome', d.nome)}
+          ${printPreview._field('Nascimento', utils.formatarData(d.nasc))}
           ${printPreview._field('Idade', d.idade)}
           ${printPreview._field('Sexo', d.sexo)}
           ${printPreview._field('Peso', d.peso ? d.peso + ' kg' : '')}
