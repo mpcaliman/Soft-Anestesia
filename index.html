@@ -15536,6 +15536,44 @@ const anestesia = {
       /* Outros */
       'Outro'
     ],
+    /* Descrições técnicas passo a passo por tipo de evento/procedimento */
+    DESCRICOES: {
+      'Raquianestesia': '1) Assepsia e antissepsia; 2) Colocação de campos estéreis; 3) Botão anestésico na pele; 4) Punção subaracnóidea (L3–L4) com agulha de fino calibre; 5) Refluxo de líquor cristalino; 6) Injeção do anestésico; 7) Retorno ao decúbito e checagem do nível do bloqueio.',
+      'Peridural': '1) Assepsia e antissepsia; 2) Campos estéreis; 3) Botão anestésico; 4) Punção peridural com agulha de Tuohy (perda de resistência); 5) Dose-teste; 6) Passagem de cateter, se indicado; 7) Dose fracionada e checagem do nível.',
+      'Bloqueio periférico': '1) Assepsia e antissepsia; 2) Identificação do alvo por ultrassom/neuroestimulação; 3) Punção; 4) Injeção fracionada com aspiração intermitente; 5) Checagem da dispersão e do bloqueio.',
+      'Intubação': '1) Pré-oxigenação; 2) Indução e bloqueio neuromuscular; 3) Laringoscopia; 4) Visualização da glote (Cormack–Lehane); 5) Passagem do tubo; 6) Confirmação por EtCO₂, ausculta e expansibilidade; 7) Insuflação do cuff e fixação.',
+      'Extubação': '1) Critérios de extubação (desperto, TOF adequado, ventilação eficaz); 2) Aspiração de vias aéreas; 3) Desinsuflação do cuff; 4) Extubação; 5) O₂ suplementar e observação.',
+      'Venoclise': '1) Garroteamento; 2) Assepsia; 3) Punção venosa periférica; 4) Refluxo sanguíneo; 5) Fixação e teste de fluxo.',
+      'Indução': '1) Pré-oxigenação; 2) Hipnótico + opioide; 3) Checagem de ventilação sob máscara; 4) Bloqueador neuromuscular, se indicado IOT.',
+      'Incisão cirúrgica': 'Início da incisão cirúrgica após confirmação de plano anestésico e analgesia adequados.',
+      'Início O₂': 'Início de oxigenoterapia suplementar.',
+      'Início halogenado': 'Início do agente halogenado para manutenção.',
+      'Fim da cirurgia': 'Término do tempo cirúrgico; curativo e preparo para o despertar/transferência.',
+      'Antibioticoprofilaxia': 'Antibioticoprofilaxia administrada conforme protocolo (idealmente até 60 min antes da incisão).'
+    },
+    /* Insere a descrição técnica do tipo selecionado no campo de detalhes */
+    inserirDescricao(btn) {
+      const tr = btn.closest('tr');
+      if (!tr) return;
+      const tipo = (tr.querySelector('[name="evt_tipo[]"]') || {}).value || '';
+      let desc = anestesia.eventos.DESCRICOES[tipo];
+      if (!desc) {
+        /* tenta por palavra-chave (ex.: "IOT" → Intubação) */
+        const t = tipo.toLowerCase();
+        if (/intuba|iot|tot/.test(t)) desc = anestesia.eventos.DESCRICOES['Intubação'];
+        else if (/raqui/.test(t)) desc = anestesia.eventos.DESCRICOES['Raquianestesia'];
+        else if (/peridural|epidural/.test(t)) desc = anestesia.eventos.DESCRICOES['Peridural'];
+        else if (/bloqueio/.test(t)) desc = anestesia.eventos.DESCRICOES['Bloqueio periférico'];
+        else if (/veno|acesso/.test(t)) desc = anestesia.eventos.DESCRICOES['Venoclise'];
+      }
+      if (!desc) { toast('Selecione o tipo do evento para inserir a descrição técnica.', 'warn'); return; }
+      const obs = tr.querySelector('[name="evt_obs[]"]');
+      if (obs) {
+        obs.value = obs.value.trim() ? (obs.value.trim() + ' — ' + desc) : desc;
+        obs.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      try { markDirty(); } catch (e) {}
+    },
     add(dados = {}) {
       const tbody = document.getElementById(anestesia.graficoUI._ctxIds().eventosBody);
       if (!tbody) return null;
@@ -15545,7 +15583,7 @@ const anestesia = {
       tr.innerHTML = `
         <td data-label="Horário"><input type="time" name="evt_hora[]" value="${hora}" onchange="anestesia.graficoUI.validarHoraInput(this)"></td>
         <td data-label="Evento"><select name="evt_tipo[]"><option value="">— selecione —</option>${opt(anestesia.eventos.TIPOS, dados.tipo)}</select></td>
-        <td data-label="Detalhes"><input type="text" name="evt_obs[]" value="${utils.escapeAttr(dados.obs || '')}" placeholder="Opcional"></td>
+        <td data-label="Detalhes"><div style="display:flex;gap:4px;align-items:center"><input type="text" name="evt_obs[]" value="${utils.escapeAttr(dados.obs || '')}" placeholder="Opcional" style="flex:1;min-width:0"><button type="button" class="btn-rm" title="Inserir descrição técnica do procedimento" onclick="anestesia.eventos.inserirDescricao(this)">📝</button></div></td>
         <td class="col-rm"><button type="button" class="btn-rm" onclick="this.closest('tr').remove(); anestesia.vitais.atualizarGrafico(); markDirty();">✕</button></td>
       `;
       tbody.appendChild(tr);
@@ -20739,6 +20777,43 @@ const templates = {
    PROCEDIMENTOS PADRÃO — sugestões por procedimento
 ============================================================================ */
 const PROCEDIMENTOS_PADRAO = {
+  catarata: {
+    nome: 'Catarata (facectomia) — oftálmico',
+    grupo: 'Oftálmico',
+    procedimento: 'Facectomia com implante de LIO (catarata)',
+    tipos: ['Sedação'],
+    tecnica_descricao: 'Anestesia tópica (colírio anestésico) + sedação leve consciente. Paciente colaborativo, mantém contato verbal e resposta a comando. Sem bloqueio de globo.',
+    via_aerea_uso: 'Cateter nasal',
+    ventilacao_tipo: 'Espontânea',
+    monitorizacao: 'ECG, SpO₂, PNI',
+    monitores: ['ECG', 'Oximetria', 'PNI'],
+    dispositivos: ['Acesso venoso periférico'],
+    posicao: 'Decúbito dorsal',
+    medicacoes: [
+      { nome: 'Midazolam', dose: '1', unidade: 'mg', via: 'EV' },
+      { nome: 'Fentanil', dose: '25', unidade: 'mcg', via: 'EV' },
+      { nome: 'Colírio anestésico (proximetacaína/tetracaína)', dose: '', unidade: '', via: 'Tópica ocular' }
+    ]
+  },
+  vitrectomia: {
+    nome: 'Vitrectomia — oftálmico',
+    grupo: 'Oftálmico',
+    procedimento: 'Vitrectomia via pars plana',
+    tipos: ['Sedação', 'Bloqueio periférico'],
+    tecnica_descricao: 'Sedação consciente + bloqueio oftálmico (peribulbar/retrobulbar) com anestésico local e hialuronidase, aguardando acinesia antes da incisão.',
+    via_aerea_uso: 'Cateter nasal',
+    ventilacao_tipo: 'Espontânea',
+    monitorizacao: 'ECG, SpO₂, PNI',
+    monitores: ['ECG', 'Oximetria', 'PNI'],
+    dispositivos: ['Acesso venoso periférico'],
+    posicao: 'Decúbito dorsal',
+    medicacoes: [
+      { nome: 'Midazolam', dose: '2', unidade: 'mg', via: 'EV' },
+      { nome: 'Fentanil', dose: '50', unidade: 'mcg', via: 'EV' },
+      { nome: 'Propofol', dose: '', unidade: 'mg', via: 'EV' },
+      { nome: 'Bloqueio peribulbar (lidocaína 2% + ropivacaína 0,75% + hialuronidase)', dose: '', unidade: 'mL', via: 'Perineural' }
+    ]
+  },
   cesariana: {
     nome: 'Cesariana',
     grupo: 'Bloqueios / regional',
