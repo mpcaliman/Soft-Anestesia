@@ -4263,6 +4263,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
           </div>
           <div class="field col-3"><label>Carteirinha</label><input type="text" name="paciente_carteirinha"></div>
           <div class="field col-3"><label>Hospital / clínica</label><input type="text" name="local_hospital"></div>
+          <div class="field col-3"><label>Procedência / origem</label><select name="origem"><option value="">—</option><option>Enfermaria</option><option>Apartamento</option><option>UTI</option><option>Emergência</option><option>Centro cirúrgico</option><option>Outro</option></select></div>
           <div class="field col-4"><label>Cirurgião</label><input type="text" name="cirurgiao"></div>
           <div class="field col-6"><label>Procedimento cirúrgico <small style="color:var(--text-mute);font-weight:400">(autocompleta da CBHPM)</small></label><input type="text" name="procedimento" class="cbhpm-autocomplete" placeholder="Digite parte do procedimento ou o código TUSS..."></div>
           <div class="field col-2"><label>Sala</label><input type="text" name="sala"></div>
@@ -4551,7 +4552,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
     <!-- 3B. VENTILAÇÃO DETALHADA -->
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">3b</span><h2>Ventilação<small>Espontânea / Mecânica — parâmetros detalhados</small></h2></div>
+        <div class="card-title-wrap"><span class="card-num">4</span><h2>Ventilação<small>Espontânea / Mecânica — parâmetros detalhados</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
@@ -4661,7 +4662,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
     <!-- 4. ACESSOS / DISPOSITIVOS -->
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">4</span><h2>Acessos, Dispositivos e Equipamentos</h2></div>
+        <div class="card-title-wrap"><span class="card-num">5</span><h2>Acessos, Dispositivos e Equipamentos</h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
@@ -4719,10 +4720,53 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
       </div>
     </section>
 
+    <!-- 5. POSICIONAMENTO -->
+    <section class="card">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-num">6</span><h2>Posicionamento</h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <div class="grid">
+          <div class="field col-12"><label>Posição</label>
+            <div class="radio-inline">
+              <label><input type="radio" name="posicao" value="Decúbito dorsal"><span>Decúbito dorsal</span></label>
+              <label><input type="radio" name="posicao" value="Ventral"><span>Ventral</span></label>
+              <label><input type="radio" name="posicao" value="Lateral"><span>Lateral</span></label>
+              <label><input type="radio" name="posicao" value="Litotomia"><span>Litotomia</span></label>
+              <label><input type="radio" name="posicao" value="Sentado"><span>Sentado</span></label>
+              <label><input type="radio" name="posicao" value="Trendelenburg"><span>Trendelenburg</span></label>
+              <label><input type="radio" name="posicao" value="Trendelenburg reverso"><span>Trendelenburg reverso</span></label>
+              <label><input type="radio" name="posicao" value="Canivete"><span>Canivete</span></label>
+              <label><input type="radio" name="posicao" value="Outro"><span>Outro</span></label>
+            </div>
+          </div>
+          <div class="field col-12"><label>Dispositivos de proteção, aquecimento e profilaxia <small style="color:var(--text-mute);font-weight:400">— marque os utilizados</small></label>
+            <div class="checks">
+              <label class="check"><input type="checkbox" name="protec[]" value="Colchão antiescaras"><span>Colchão antiescaras</span></label>
+              <label class="check"><input type="checkbox" name="protec[]" value="Colchão inflável"><span>Colchão inflável</span></label>
+              <label class="check"><input type="checkbox" name="protec[]" value="Coxim de gel"><span>Coxim de gel (proeminências)</span></label>
+              <label class="check"><input type="checkbox" name="protec[]" value="Proteção ocular"><span>Proteção ocular</span></label>
+              <label class="check"><input type="checkbox" name="protec[]" value="Acolchoamento plexos"><span>Acolchoamento plexos</span></label>
+              <label class="check"><input type="checkbox" name="protec[]" value="Botas pneumáticas"><span>Botas pneumáticas (CPI)</span></label>
+              <label class="check"><input type="checkbox" name="protec[]" value="Meias antitrombo"><span>Meias antitrombo</span></label>
+              <label class="check"><input type="checkbox" name="protec[]" value="Heparina profilática"><span>Heparina profilática</span></label>
+              <label class="check"><input type="checkbox" name="protec[]" value="Manta térmica ar forçado"><span>Manta térmica ar forçado</span></label>
+              <label class="check"><input type="checkbox" name="protec[]" value="Manta térmica resistiva"><span>Manta térmica resistiva</span></label>
+              <label class="check"><input type="checkbox" name="protec[]" value="Aquecedor de fluidos"><span>Aquecedor de fluidos</span></label>
+              <label class="check"><input type="checkbox" name="protec[]" value="Coxim cabeça"><span>Coxim cabeça/cervical</span></label>
+              <label class="check"><input type="checkbox" name="protec[]" value="Oclusão ocular e lubrificação ocular"><span>Oclusão ocular e lubrificação ocular</span></label>
+            </div>
+          </div>
+          <div class="field col-12"><label>Observações sobre posicionamento</label><textarea name="posicao_obs" rows="2"></textarea></div>
+        </div>
+      </div>
+    </section>
+
     <!-- 4B. CIRCULAÇÃO EXTRACORPÓREA -->
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">4b</span><h2>Circulação Extracorpórea (CEC)<small>Cirurgia cardíaca / vascular complexa</small></h2></div>
+        <div class="card-title-wrap"><span class="card-num">7</span><h2>Circulação Extracorpórea (CEC)<small>Cirurgia cardíaca / vascular complexa</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
@@ -4938,45 +4982,154 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
       </div>
     </section>
 
-    <!-- 5. POSICIONAMENTO -->
+    <!-- 8. SINAIS VITAIS -->
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">5</span><h2>Posicionamento</h2></div>
+        <div class="card-title-wrap"><span class="card-num">8</span><h2>Sinais Vitais<small>Registro temporal — gera gráfico automaticamente</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
-        <div class="grid">
-          <div class="field col-12"><label>Posição</label>
-            <div class="radio-inline">
-              <label><input type="radio" name="posicao" value="Decúbito dorsal"><span>Decúbito dorsal</span></label>
-              <label><input type="radio" name="posicao" value="Ventral"><span>Ventral</span></label>
-              <label><input type="radio" name="posicao" value="Lateral"><span>Lateral</span></label>
-              <label><input type="radio" name="posicao" value="Litotomia"><span>Litotomia</span></label>
-              <label><input type="radio" name="posicao" value="Sentado"><span>Sentado</span></label>
-              <label><input type="radio" name="posicao" value="Trendelenburg"><span>Trendelenburg</span></label>
-              <label><input type="radio" name="posicao" value="Trendelenburg reverso"><span>Trendelenburg reverso</span></label>
-              <label><input type="radio" name="posicao" value="Canivete"><span>Canivete</span></label>
-              <label><input type="radio" name="posicao" value="Outro"><span>Outro</span></label>
-            </div>
+        <div class="quick-actions">
+          <span class="qa-label">Sinais vitais</span>
+          <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.vitais.add(true)">+ Linha (hora atual)</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.add()">+ Linha vazia</button>
+          <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.vitais.duplicarEAjustar()">➕ Igual à anterior + ajustar</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.duplicarUltima()">⎘ Duplicar última</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.addSetModelo()">⚡ Modelo T0/T15/T30/T60</button>
+          <button type="button" class="btn btn-sm" style="background:#0f7b4f;color:#fff;border-color:#0f7b4f" onclick="captura.abrirMonitor('anestesia')">📷 Capturar do monitor</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.atualizarGrafico()">↻ Atualizar gráfico</button>
+          <button type="button" class="btn btn-sm btn-danger" onclick="anestesia.vitais.limparTabela()">🗑 Limpar tabela</button>
+          <span class="gt-sep" style="border-left:1px solid var(--border);margin:0 4px"></span>
+          <label class="gt-snap" title="Quando ligado, se você ficar sem lançar sinais vitais, o sistema repete automaticamente o último registro no intervalo escolhido" style="display:inline-flex;align-items:center;gap:4px;font-size:.78rem">
+            <input type="checkbox" id="vit-autorep-chk" onchange="anestesia.vitais.autoRep.toggle(this.checked)"> ⏱ Auto-repetir
+            <select id="vit-autorep-int" onchange="anestesia.vitais.autoRep.setIntervalo(this.value)" style="width:auto"><option value="5">5 min</option><option value="10">10 min</option></select>
+          </label>
+        </div>
+        <div class="dyn-table-wrap">
+          <table class="dyn" id="tab-vitais">
+            <thead><tr>
+              <th style="width:80px">Horário</th>
+              <th style="width:75px">PAS</th>
+              <th style="width:75px">PAD</th>
+              <th style="width:75px">PAM</th>
+              <th style="width:70px">FC</th>
+              <th style="width:75px">SpO₂</th>
+              <th style="width:80px">EtCO₂</th>
+              <th style="width:70px">FR</th>
+              <th style="width:80px">Temp (°C)</th>
+              <th style="width:65px">BIS</th>
+              <th style="width:70px">TOF %</th>
+              <th style="width:80px">Glic.</th>
+              <th style="width:65px">PVC</th>
+              <th style="width:65px">PIC</th>
+              <th style="width:75px">DC L/min</th>
+              <th style="width:75px">ScvO₂</th>
+              <th style="width:85px" title="Volume urinário aferido neste horário">Diurese mL</th>
+              <th>Observações</th><th class="col-rm">×</th>
+            </tr></thead>
+            <tbody id="vitais-body"></tbody>
+          </table>
+        </div>
+        <div class="table-actions">
+          <button type="button" class="btn btn-primary btn-sm" onclick="anestesia.vitais.add(true)">+ Linha (hora atual)</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.add()">+ Linha vazia</button>
+          <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.vitais.duplicarEAjustar()">➕ Igual à anterior + ajustar</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.duplicarUltima()">⎘ Duplicar última</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.addSetModelo()">⚡ Modelo T0/T15/T30/T60</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.atualizarGrafico()">↻ Atualizar gráfico</button>
+          <button type="button" class="btn btn-danger btn-sm" onclick="anestesia.vitais.limparTabela()">🗑 Limpar tabela</button>
+        </div>
+
+        <!-- EVENTOS CRONOLÓGICOS -->
+        <h3 style="font-size:.92rem;color:var(--primary-darker);margin:18px 0 8px;border-top:1px solid var(--border);padding-top:14px">📍 Eventos cronológicos<small style="color:var(--text-mute);font-weight:400; margin-left:8px">— marcados como letras no gráfico</small></h3>
+        <div class="quick-actions">
+          <span class="qa-label">Adicionar rápido</span>
+          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Venoclise'})">+ Venoclise</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Indução'})">+ Indução</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Intubação'})">+ Intubação</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Início O₂'})">+ Início O₂</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Início halogenado'})">+ Início halogenado</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Raquianestesia'})">+ Raqui</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Peridural'})">+ Peridural</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Incisão cirúrgica'})">+ Incisão</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Fim da cirurgia'})">+ Fim cirurgia</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Extubação'})">+ Extubação</button>
+        </div>
+        <div class="dyn-table-wrap">
+          <table class="dyn" id="tab-eventos">
+            <thead><tr>
+              <th style="width:80px">Horário</th>
+              <th style="width:220px">Evento</th>
+              <th>Detalhes</th>
+              <th class="col-rm">×</th>
+            </tr></thead>
+            <tbody id="eventos-body"></tbody>
+          </table>
+        </div>
+        <div class="table-actions">
+          <button type="button" class="btn btn-primary btn-sm" onclick="anestesia.eventos.add()">+ Adicionar evento</button>
+          <button type="button" class="btn btn-danger btn-sm" onclick="anestesia.eventos.limparTabela()">🗑 Limpar eventos</button>
+        </div>
+
+        <!-- GRADE POR HORÁRIO (tabela estilo ficha, acima do gráfico) -->
+        <div class="vitais-grade-titulo">📋 Sinais vitais por horário <small style="font-weight:400;color:var(--text-mute)">— toque em qualquer célula para editar; o gráfico e a tabela se atualizam juntos</small></div>
+        <div class="vitais-grade-wrap" id="vitais-grade"></div>
+
+        <div class="vitals-chart-wrap">
+          <div class="legend">
+            <span class="legend-item"><span class="legend-swatch" style="background:#b3392a"></span> PAS</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#c47c1f"></span> PAD</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#7b3a8d"></span> PAM</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#1c64a9"></span> FC</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#1f9171"></span> SpO₂</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#8a2be2"></span> EtCO₂</span>
+            <span id="legend-extras"></span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#444;color:#fff;border-radius:50%;width:14px;height:14px;line-height:14px;text-align:center;font-size:9px;font-weight:bold">M</span> Medicação</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#1f9171;color:#fff;border-radius:3px;width:14px;height:14px;line-height:14px;text-align:center;font-size:9px;font-weight:bold">E</span> Evento</span>
           </div>
-          <div class="field col-12"><label>Dispositivos de proteção, aquecimento e profilaxia <small style="color:var(--text-mute);font-weight:400">— marque os utilizados</small></label>
-            <div class="checks">
-              <label class="check"><input type="checkbox" name="protec[]" value="Colchão antiescaras"><span>Colchão antiescaras</span></label>
-              <label class="check"><input type="checkbox" name="protec[]" value="Colchão inflável"><span>Colchão inflável</span></label>
-              <label class="check"><input type="checkbox" name="protec[]" value="Coxim de gel"><span>Coxim de gel (proeminências)</span></label>
-              <label class="check"><input type="checkbox" name="protec[]" value="Proteção ocular"><span>Proteção ocular</span></label>
-              <label class="check"><input type="checkbox" name="protec[]" value="Acolchoamento plexos"><span>Acolchoamento plexos</span></label>
-              <label class="check"><input type="checkbox" name="protec[]" value="Botas pneumáticas"><span>Botas pneumáticas (CPI)</span></label>
-              <label class="check"><input type="checkbox" name="protec[]" value="Meias antitrombo"><span>Meias antitrombo</span></label>
-              <label class="check"><input type="checkbox" name="protec[]" value="Heparina profilática"><span>Heparina profilática</span></label>
-              <label class="check"><input type="checkbox" name="protec[]" value="Manta térmica ar forçado"><span>Manta térmica ar forçado</span></label>
-              <label class="check"><input type="checkbox" name="protec[]" value="Manta térmica resistiva"><span>Manta térmica resistiva</span></label>
-              <label class="check"><input type="checkbox" name="protec[]" value="Aquecedor de fluidos"><span>Aquecedor de fluidos</span></label>
-              <label class="check"><input type="checkbox" name="protec[]" value="Coxim cabeça"><span>Coxim cabeça/cervical</span></label>
-              <label class="check"><input type="checkbox" name="protec[]" value="Oclusão ocular e lubrificação ocular"><span>Oclusão ocular e lubrificação ocular</span></label>
-            </div>
+          <!-- TOOLBAR DE MODOS INTERATIVOS -->
+          <div class="graph-toolbar" id="graph-toolbar">
+            <span class="gt-label">📈 Arrastar:</span>
+            <span id="gt-vital-btns">
+              <button type="button" class="gt-btn gt-active" data-mode="pas" data-color="#b3392a" title="Arraste para registrar PAS">PAS</button>
+              <button type="button" class="gt-btn" data-mode="pad" data-color="#c47c1f" title="Arraste para registrar PAD">PAD</button>
+              <button type="button" class="gt-btn" data-mode="fc"  data-color="#1c64a9" title="Arraste para registrar FC">FC</button>
+              <button type="button" class="gt-btn" data-mode="spo2" data-color="#1f9171" title="Arraste para registrar SpO₂">SpO₂</button>
+              <button type="button" class="gt-btn" data-mode="etco2" data-color="#8a2be2" title="Arraste para registrar EtCO₂">EtCO₂</button>
+            </span>
+            <button type="button" class="gt-btn gt-btn-mover" data-mode="mover" title="Modo mover: arraste para deslizar o gráfico no tempo, sem registrar nada">✋ Mover</button>
+            <span id="gt-extra-btns"></span>
+            <span class="gt-sep"></span>
+            <button type="button" class="gt-btn gt-btn-evt" id="gt-add-evento" title="Adicionar evento ou intercorrência">📍 Evento</button>
+            <button type="button" class="gt-btn gt-btn-med" id="gt-add-medicacao" title="Adicionar medicação">💉 Medicação</button>
+            <span class="gt-sep"></span>
+            <label class="gt-snap" title="Arredonda o tempo ao registrar">
+              Snap:
+              <select id="gt-snap-sel" class="gt-snap-sel">
+                <option value="0">Off</option>
+                <option value="5" selected>5 min</option>
+                <option value="10">10 min</option>
+              </select>
+            </label>
+            <button type="button" class="gt-btn gt-amp" id="gt-ampliar" title="Ampliar o gráfico para editar (arrastar curvas, marcar eventos)">✏️ Editar</button>
+            <span id="gt-nav" style="display:none;align-items:center;gap:2px">
+              <button type="button" class="gt-btn" id="gt-nav-prev" title="Caminhar para trás no tempo" onclick="anestesia.graficoUI._contexto='anestesia'; anestesia.graficoUI.panTempo(-1)">◀</button>
+              <button type="button" class="gt-btn" id="gt-nav-zout" title="Diminuir zoom" onclick="anestesia.graficoUI._contexto='anestesia'; anestesia.graficoUI.zoomTempo(0.7)">🔍−</button>
+              <button type="button" class="gt-btn" id="gt-nav-zin" title="Aumentar zoom" onclick="anestesia.graficoUI._contexto='anestesia'; anestesia.graficoUI.zoomTempo(1.4)">🔍+</button>
+              <button type="button" class="gt-btn" id="gt-nav-next" title="Caminhar para frente no tempo" onclick="anestesia.graficoUI._contexto='anestesia'; anestesia.graficoUI.panTempo(1)">▶</button>
+            </span>
+            <button type="button" class="gt-btn" id="gt-reset-zoom" title="Resetar zoom" onclick="anestesia.graficoUI.resetZoom()" style="display:none">↻ Zoom 100%</button>
+            <span id="gt-zoom-badge" style="display:none;background:#1c64a9;color:#fff;padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600;white-space:nowrap"></span>
+            <span class="gt-hint" id="gt-hint">A página rola normalmente sobre o gráfico. Toque em ✏️ Editar para arrastar curvas e marcar eventos.</span>
           </div>
-          <div class="field col-12"><label>Observações sobre posicionamento</label><textarea name="posicao_obs" rows="2"></textarea></div>
+          <div class="graph-canvas-wrap">
+            <canvas id="vitals-chart"></canvas>
+            <div class="graph-overlay-hint" id="graph-overlay-hint"></div>
+          </div>
+          <div id="grafico-legenda-eventos" style="margin-top:10px;padding:8px;background:var(--surface-alt);border-radius:var(--radius-sm);font-size:.78rem;line-height:1.6;display:none">
+            <strong style="color:var(--primary-darker)">Legenda dos eventos:</strong>
+            <div id="grafico-legenda-eventos-list" style="margin-top:4px"></div>
+          </div>
         </div>
       </div>
     </section>
@@ -4984,7 +5137,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
     <!-- 6. MEDICAÇÕES -->
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">6</span><h2>Medicações Utilizadas<small>Tabela dinâmica de drogas administradas</small></h2></div>
+        <div class="card-title-wrap"><span class="card-num">9</span><h2>Medicações Utilizadas<small>Tabela dinâmica de drogas administradas</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
@@ -5041,7 +5194,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
     <!-- 7. FLUIDOS -->
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">7</span><h2>Fluidos, Hidratação e Balanço<small>Tabela cronológica de hidratação + totais e balanço</small></h2></div>
+        <div class="card-title-wrap"><span class="card-num">10</span><h2>Fluidos, Hidratação e Balanço<small>Tabela cronológica de hidratação + totais e balanço</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
@@ -5221,162 +5374,10 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
       </div>
     </section>
 
-    <!-- 8. SINAIS VITAIS -->
-    <section class="card">
-      <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">8</span><h2>Sinais Vitais<small>Registro temporal — gera gráfico automaticamente</small></h2></div>
-        <div class="card-actions"><span class="toggle-icon">▾</span></div>
-      </div>
-      <div class="card-body">
-        <div class="quick-actions">
-          <span class="qa-label">Sinais vitais</span>
-          <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.vitais.add(true)">+ Linha (hora atual)</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.add()">+ Linha vazia</button>
-          <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.vitais.duplicarEAjustar()">➕ Igual à anterior + ajustar</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.duplicarUltima()">⎘ Duplicar última</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.addSetModelo()">⚡ Modelo T0/T15/T30/T60</button>
-          <button type="button" class="btn btn-sm" style="background:#0f7b4f;color:#fff;border-color:#0f7b4f" onclick="captura.abrirMonitor('anestesia')">📷 Capturar do monitor</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.atualizarGrafico()">↻ Atualizar gráfico</button>
-          <button type="button" class="btn btn-sm btn-danger" onclick="anestesia.vitais.limparTabela()">🗑 Limpar tabela</button>
-          <span class="gt-sep" style="border-left:1px solid var(--border);margin:0 4px"></span>
-          <label class="gt-snap" title="Quando ligado, se você ficar sem lançar sinais vitais, o sistema repete automaticamente o último registro no intervalo escolhido" style="display:inline-flex;align-items:center;gap:4px;font-size:.78rem">
-            <input type="checkbox" id="vit-autorep-chk" onchange="anestesia.vitais.autoRep.toggle(this.checked)"> ⏱ Auto-repetir
-            <select id="vit-autorep-int" onchange="anestesia.vitais.autoRep.setIntervalo(this.value)" style="width:auto"><option value="5">5 min</option><option value="10">10 min</option></select>
-          </label>
-        </div>
-        <div class="dyn-table-wrap">
-          <table class="dyn" id="tab-vitais">
-            <thead><tr>
-              <th style="width:80px">Horário</th>
-              <th style="width:75px">PAS</th>
-              <th style="width:75px">PAD</th>
-              <th style="width:75px">PAM</th>
-              <th style="width:70px">FC</th>
-              <th style="width:75px">SpO₂</th>
-              <th style="width:80px">EtCO₂</th>
-              <th style="width:70px">FR</th>
-              <th style="width:80px">Temp (°C)</th>
-              <th style="width:65px">BIS</th>
-              <th style="width:70px">TOF %</th>
-              <th style="width:80px">Glic.</th>
-              <th style="width:65px">PVC</th>
-              <th style="width:65px">PIC</th>
-              <th style="width:75px">DC L/min</th>
-              <th style="width:75px">ScvO₂</th>
-              <th style="width:85px" title="Volume urinário aferido neste horário">Diurese mL</th>
-              <th>Observações</th><th class="col-rm">×</th>
-            </tr></thead>
-            <tbody id="vitais-body"></tbody>
-          </table>
-        </div>
-        <div class="table-actions">
-          <button type="button" class="btn btn-primary btn-sm" onclick="anestesia.vitais.add(true)">+ Linha (hora atual)</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.add()">+ Linha vazia</button>
-          <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.vitais.duplicarEAjustar()">➕ Igual à anterior + ajustar</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.duplicarUltima()">⎘ Duplicar última</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.addSetModelo()">⚡ Modelo T0/T15/T30/T60</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.atualizarGrafico()">↻ Atualizar gráfico</button>
-          <button type="button" class="btn btn-danger btn-sm" onclick="anestesia.vitais.limparTabela()">🗑 Limpar tabela</button>
-        </div>
-
-        <!-- EVENTOS CRONOLÓGICOS -->
-        <h3 style="font-size:.92rem;color:var(--primary-darker);margin:18px 0 8px;border-top:1px solid var(--border);padding-top:14px">📍 Eventos cronológicos<small style="color:var(--text-mute);font-weight:400; margin-left:8px">— marcados como letras no gráfico</small></h3>
-        <div class="quick-actions">
-          <span class="qa-label">Adicionar rápido</span>
-          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Venoclise'})">+ Venoclise</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Indução'})">+ Indução</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Intubação'})">+ Intubação</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Início O₂'})">+ Início O₂</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Início halogenado'})">+ Início halogenado</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Raquianestesia'})">+ Raqui</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Peridural'})">+ Peridural</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Incisão cirúrgica'})">+ Incisão</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Fim da cirurgia'})">+ Fim cirurgia</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Extubação'})">+ Extubação</button>
-        </div>
-        <div class="dyn-table-wrap">
-          <table class="dyn" id="tab-eventos">
-            <thead><tr>
-              <th style="width:80px">Horário</th>
-              <th style="width:220px">Evento</th>
-              <th>Detalhes</th>
-              <th class="col-rm">×</th>
-            </tr></thead>
-            <tbody id="eventos-body"></tbody>
-          </table>
-        </div>
-        <div class="table-actions">
-          <button type="button" class="btn btn-primary btn-sm" onclick="anestesia.eventos.add()">+ Adicionar evento</button>
-          <button type="button" class="btn btn-danger btn-sm" onclick="anestesia.eventos.limparTabela()">🗑 Limpar eventos</button>
-        </div>
-
-        <!-- GRADE POR HORÁRIO (tabela estilo ficha, acima do gráfico) -->
-        <div class="vitais-grade-titulo">📋 Sinais vitais por horário <small style="font-weight:400;color:var(--text-mute)">— toque em qualquer célula para editar; o gráfico e a tabela se atualizam juntos</small></div>
-        <div class="vitais-grade-wrap" id="vitais-grade"></div>
-
-        <div class="vitals-chart-wrap">
-          <div class="legend">
-            <span class="legend-item"><span class="legend-swatch" style="background:#b3392a"></span> PAS</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#c47c1f"></span> PAD</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#7b3a8d"></span> PAM</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#1c64a9"></span> FC</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#1f9171"></span> SpO₂</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#8a2be2"></span> EtCO₂</span>
-            <span id="legend-extras"></span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#444;color:#fff;border-radius:50%;width:14px;height:14px;line-height:14px;text-align:center;font-size:9px;font-weight:bold">M</span> Medicação</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#1f9171;color:#fff;border-radius:3px;width:14px;height:14px;line-height:14px;text-align:center;font-size:9px;font-weight:bold">E</span> Evento</span>
-          </div>
-          <!-- TOOLBAR DE MODOS INTERATIVOS -->
-          <div class="graph-toolbar" id="graph-toolbar">
-            <span class="gt-label">📈 Arrastar:</span>
-            <span id="gt-vital-btns">
-              <button type="button" class="gt-btn gt-active" data-mode="pas" data-color="#b3392a" title="Arraste para registrar PAS">PAS</button>
-              <button type="button" class="gt-btn" data-mode="pad" data-color="#c47c1f" title="Arraste para registrar PAD">PAD</button>
-              <button type="button" class="gt-btn" data-mode="fc"  data-color="#1c64a9" title="Arraste para registrar FC">FC</button>
-              <button type="button" class="gt-btn" data-mode="spo2" data-color="#1f9171" title="Arraste para registrar SpO₂">SpO₂</button>
-              <button type="button" class="gt-btn" data-mode="etco2" data-color="#8a2be2" title="Arraste para registrar EtCO₂">EtCO₂</button>
-            </span>
-            <button type="button" class="gt-btn gt-btn-mover" data-mode="mover" title="Modo mover: arraste para deslizar o gráfico no tempo, sem registrar nada">✋ Mover</button>
-            <span id="gt-extra-btns"></span>
-            <span class="gt-sep"></span>
-            <button type="button" class="gt-btn gt-btn-evt" id="gt-add-evento" title="Adicionar evento ou intercorrência">📍 Evento</button>
-            <button type="button" class="gt-btn gt-btn-med" id="gt-add-medicacao" title="Adicionar medicação">💉 Medicação</button>
-            <span class="gt-sep"></span>
-            <label class="gt-snap" title="Arredonda o tempo ao registrar">
-              Snap:
-              <select id="gt-snap-sel" class="gt-snap-sel">
-                <option value="0">Off</option>
-                <option value="5" selected>5 min</option>
-                <option value="10">10 min</option>
-              </select>
-            </label>
-            <button type="button" class="gt-btn gt-amp" id="gt-ampliar" title="Ampliar o gráfico para editar (arrastar curvas, marcar eventos)">✏️ Editar</button>
-            <span id="gt-nav" style="display:none;align-items:center;gap:2px">
-              <button type="button" class="gt-btn" id="gt-nav-prev" title="Caminhar para trás no tempo" onclick="anestesia.graficoUI._contexto='anestesia'; anestesia.graficoUI.panTempo(-1)">◀</button>
-              <button type="button" class="gt-btn" id="gt-nav-zout" title="Diminuir zoom" onclick="anestesia.graficoUI._contexto='anestesia'; anestesia.graficoUI.zoomTempo(0.7)">🔍−</button>
-              <button type="button" class="gt-btn" id="gt-nav-zin" title="Aumentar zoom" onclick="anestesia.graficoUI._contexto='anestesia'; anestesia.graficoUI.zoomTempo(1.4)">🔍+</button>
-              <button type="button" class="gt-btn" id="gt-nav-next" title="Caminhar para frente no tempo" onclick="anestesia.graficoUI._contexto='anestesia'; anestesia.graficoUI.panTempo(1)">▶</button>
-            </span>
-            <button type="button" class="gt-btn" id="gt-reset-zoom" title="Resetar zoom" onclick="anestesia.graficoUI.resetZoom()" style="display:none">↻ Zoom 100%</button>
-            <span id="gt-zoom-badge" style="display:none;background:#1c64a9;color:#fff;padding:2px 8px;border-radius:10px;font-size:.75rem;font-weight:600;white-space:nowrap"></span>
-            <span class="gt-hint" id="gt-hint">A página rola normalmente sobre o gráfico. Toque em ✏️ Editar para arrastar curvas e marcar eventos.</span>
-          </div>
-          <div class="graph-canvas-wrap">
-            <canvas id="vitals-chart"></canvas>
-            <div class="graph-overlay-hint" id="graph-overlay-hint"></div>
-          </div>
-          <div id="grafico-legenda-eventos" style="margin-top:10px;padding:8px;background:var(--surface-alt);border-radius:var(--radius-sm);font-size:.78rem;line-height:1.6;display:none">
-            <strong style="color:var(--primary-darker)">Legenda dos eventos:</strong>
-            <div id="grafico-legenda-eventos-list" style="margin-top:4px"></div>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <!-- 9. INTERCORRÊNCIAS -->
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">9</span><h2>Intercorrências</h2></div>
+        <div class="card-title-wrap"><span class="card-num">11</span><h2>Intercorrências</h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
@@ -5410,17 +5411,14 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
       </div>
     </section>
 
-    <!-- 10. ORIGEM/DESTINO -->
+    <!-- 12. DESTINO / TRANSFERÊNCIA -->
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">10</span><h2>Origem e Destino do Paciente</h2></div>
+        <div class="card-title-wrap"><span class="card-num">12</span><h2>Destino e transferência do paciente</h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
         <div class="grid">
-          <div class="field col-6"><label>Origem</label>
-            <select name="origem"><option value="">—</option><option>Enfermaria</option><option>Apartamento</option><option>UTI</option><option>Emergência</option><option>Centro cirúrgico</option><option>Outro</option></select>
-          </div>
           <div class="field col-6"><label>Destino</label>
             <select name="destino"><option value="">—</option><option>SRPA / RPA</option><option>UTI</option><option>Enfermaria</option><option>Apartamento</option><option>Alta</option><option>Outro</option></select>
           </div>
@@ -5437,7 +5435,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
     <!-- 11. RESUMO NARRATIVO -->
     <section class="card card-highlight">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">11</span><h2>Resumo Automático da Anestesia<small>Texto clínico gerado a partir dos dados — editável</small></h2></div>
+        <div class="card-title-wrap"><span class="card-num">13</span><h2>Resumo Automático da Anestesia<small>Texto clínico gerado a partir dos dados — editável</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
@@ -5454,7 +5452,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
     <!-- 12. EVOLUÇÃO -->
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">12</span><h2>Descrição Final</h2></div>
+        <div class="card-title-wrap"><span class="card-num">14</span><h2>Descrição Final</h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
@@ -5493,7 +5491,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
     <!-- ASSINATURA -->
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">13</span><h2>Assinatura(s)<small>Carimbo / desenho / certificado digital — suporta 2 anestesistas</small></h2></div>
+        <div class="card-title-wrap"><span class="card-num">15</span><h2>Assinatura(s)<small>Carimbo / desenho / certificado digital — suporta 2 anestesistas</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
