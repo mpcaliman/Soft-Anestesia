@@ -3797,6 +3797,10 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
       </div>
       <div class="card-body">
         <div class="grid">
+          <div class="field col-12"><label>💊 Prescrição pré-anestésica (pré-medicação) <small style="color:var(--text-mute);font-weight:400">— marque os medicamentos; a dose vem da literatura e é editável. Comunica-se com a Ficha de Anestesia.</small></label>
+            <div id="pre-premed-lista" style="margin:4px 0 8px"></div>
+            <textarea name="medicacao_pre" rows="2" placeholder="Prescrição pré-anestésica — marque os medicamentos acima (preenche automaticamente) ou digite livremente."></textarea>
+          </div>
           <div class="field col-12"><label>Orientações fornecidas</label>
             <textarea name="orientacoes" rows="3" placeholder="Jejum, suspensão de medicações, orientações pré-operatórias..."></textarea>
             <div class="field-templates">
@@ -4229,6 +4233,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
           <div class="field col-6"><label>Medicações em uso</label><textarea name="pre_medicacoes" rows="2"></textarea>
             <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.medicacoes.abrir('#form-anestesia [name=pre_medicacoes]')">💊 Selecionar medicações</button></div>
           </div>
+          <div class="field col-12"><label>💊 Medicação pré-anestésica (pré-med) <small style="color:var(--text-mute);font-weight:400">— importada da Avaliação pré-anestésica; editável</small></label><textarea name="pre_medicacao" rows="2" placeholder="Ex.: Midazolam 0,5 mg/kg VO 20–30 min antes"></textarea></div>
           <div class="field col-12"><label>Risco / observações adicionais</label><textarea name="pre_observacoes" rows="2"></textarea></div>
         </div>
       </div>
@@ -9185,6 +9190,63 @@ const pre = {
       sel.value = v;
     }
   },
+  /* ===== PRESCRIÇÃO PRÉ-ANESTÉSICA (pré-medicação) =====
+     Medicamentos com dose de referência da literatura (editável). O texto
+     composto (medicacao_pre) é salvo no registro e importado pela Ficha de
+     Anestesia. Doses de pré-medicação — sempre reavaliar caso a caso. */
+  premed: {
+    MEDS: [
+      { key: 'midazolam_xarope', nome: 'Midazolam xarope (VO)', dose: '0,5 mg/kg VO (máx 20 mg), 20–30 min antes' },
+      { key: 'dexmedetomidina',  nome: 'Dexmedetomidina',       dose: '1–2 mcg/kg intranasal (ou 0,5–1 mcg/kg IV), 30–45 min antes' },
+      { key: 'cetamina',         nome: 'Cetamina',              dose: '3–6 mg/kg VO ou 2–5 mg/kg IM' },
+      { key: 'midazolam',        nome: 'Midazolam (IV/IM)',     dose: '0,05–0,1 mg/kg IM (adulto 1–2 mg IV)' },
+      { key: 'diazepam',         nome: 'Diazepam (VO)',         dose: '0,1–0,2 mg/kg VO (adulto 5–10 mg), noite anterior/manhã' }
+    ],
+    _sel: {},
+    render() {
+      const host = document.getElementById('pre-premed-lista');
+      if (!host) return;
+      host.innerHTML = pre.premed.MEDS.map(m => {
+        const s = pre.premed._sel[m.key] || {};
+        const on = s.on ? 'checked' : '';
+        const dose = (s.dose != null ? s.dose : m.dose);
+        return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap">' +
+          '<label style="display:flex;gap:6px;align-items:center;min-width:180px;font-size:.86rem">' +
+            '<input type="checkbox" ' + on + ' onchange="pre.premed._toggle(\'' + m.key + '\', this.checked)"> ' + m.nome +
+          '</label>' +
+          '<input type="text" value="' + utils.escapeAttr(dose) + '" oninput="pre.premed._dose(\'' + m.key + '\', this.value)" ' +
+            'style="flex:1;min-width:220px;font-size:.84rem;padding:5px 8px;border:1px solid var(--border);border-radius:6px">' +
+        '</div>';
+      }).join('');
+    },
+    _toggle(key, on) {
+      const m = pre.premed.MEDS.find(x => x.key === key);
+      const s = pre.premed._sel[key] = pre.premed._sel[key] || {};
+      if (s.dose == null) s.dose = m.dose;
+      s.on = on;
+      pre.premed._compor();
+      try { markDirty(); } catch (e) {}
+    },
+    _dose(key, val) {
+      const s = pre.premed._sel[key] = pre.premed._sel[key] || { on: false };
+      s.dose = val;
+      if (s.on) pre.premed._compor();
+      try { markDirty(); } catch (e) {}
+    },
+    _compor() {
+      const ta = document.querySelector('#form-pre [name="medicacao_pre"]');
+      if (!ta) return;
+      const linhas = pre.premed.MEDS
+        .filter(m => pre.premed._sel[m.key] && pre.premed._sel[m.key].on)
+        .map(m => '• ' + m.nome + ' — ' + (pre.premed._sel[m.key].dose || m.dose));
+      ta.value = linhas.join('\n');
+    },
+    coletar() { try { return JSON.parse(JSON.stringify(pre.premed._sel)); } catch (e) { return {}; } },
+    restaurar(sel) {
+      pre.premed._sel = (sel && typeof sel === 'object') ? (function () { try { return JSON.parse(JSON.stringify(sel)); } catch (e) { return {}; } })() : {};
+      pre.premed.render();
+    }
+  },
   /* Stubs vazios (obsoletos — carimbo agora vem do cadastro do profissional) */
   _popularAssinaturas() {},
   _previewAssinatura() {},
@@ -9435,6 +9497,7 @@ const pre = {
     pre._linkPendente = null;
     ui.atualizarDocStatus('pre', null);
     try { prontuario.limpar('pre'); } catch (e) {}
+    try { pre.premed.restaurar({}); } catch (e) {}
     ui.fecharBanner('banner-pre');
     markClean();
     toast('Nova avaliação iniciada');
@@ -9449,6 +9512,7 @@ const pre = {
     try { data._procsExtra = pre.procs.coletar(); } catch (e) {}
     try { data._labExtras = labExtra.coletar('pre-lab-extras'); } catch (e) {}
     try { data._docs = prontuario.coletar('pre'); } catch (e) {}
+    try { data._premedSel = pre.premed.coletar(); } catch (e) {}
     const f = document.getElementById(pre.formId);
     const idEl = f.querySelector('[name="_id"]');
     if (idEl) data._id = idEl.value || undefined;
@@ -9550,6 +9614,7 @@ const pre = {
     try { labExtra.restaurar('pre-lab-extras', item._labExtras); } catch (e) {}
     try { prontuario.restaurar('pre', item._docs); } catch (e) {}
     try { pre.jejum.restaurar(item); } catch (e) {}
+    try { pre.premed.restaurar(item._premedSel); } catch (e) {}
     markClean();
     toast('Avaliação carregada'); ui.expandirTodos('pre');
   },
@@ -18743,6 +18808,7 @@ const anestesia = {
         comorbidades: v('pre_comorbidades'), via_aerea: v('pre_via_aerea'),
         via_aerea_obs: v('pre_via_aerea_obs'), exames: v('pre_exames'),
         medicacoes_uso: v('pre_medicacoes'),
+        medicacao_pre: v('pre_medicacao'),
         observacoes: v('pre_observacoes'),
         timeout_realizado: (function(){ const el = document.querySelector('#form-anestesia [name="timeout_realizado"]'); return el ? el.checked : false; })()
       },
@@ -18881,6 +18947,7 @@ const anestesia = {
     set('pre_comorbidades', pa.comorbidades); set('pre_via_aerea', pa.via_aerea);
     set('pre_via_aerea_obs', pa.via_aerea_obs); set('pre_exames', pa.exames);
     set('pre_medicacoes', pa.medicacoes_uso);
+    set('pre_medicacao', pa.medicacao_pre);
     set('pre_observacoes', pa.observacoes);
     { const tchk = document.querySelector('#form-anestesia [name="timeout_realizado"]'); if (tchk) tchk.checked = !!pa.timeout_realizado; }
     try { anestesia.checagem.rodar(); } catch (e) {}
@@ -19982,6 +20049,11 @@ const linker = {
     if (procEl.value && !opts.force) return false;
 
     procEl.value = pre.cirurgia;
+    /* Traz a prescrição pré-anestésica, se houver e o campo estiver vazio */
+    if (pre.medicacao_pre) {
+      const medEl = form.querySelector('[name="pre_medicacao"]');
+      if (medEl && !medEl.value) medEl.value = pre.medicacao_pre;
+    }
     /* Marca o vínculo para salvar depois */
     if (window.anestesia) {
       anestesia._linkPendente = { mod: 'pre', id: pre._id };
@@ -21156,6 +21228,7 @@ const modelos = {
       setV('pre_via_aerea', src.via_aerea);
       setV('pre_exames', src.exames_compl);
       setV('pre_medicacoes', src.medicacoes);
+      setV('pre_medicacao', src.medicacao_pre);
       setV('pre_observacoes', src.conclusao || src.antecedentes);
       /* avaliação pré realizada */
       const avEl = document.querySelector('#form-anestesia [name="pre_avaliacao"]');
@@ -23940,6 +24013,7 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._field('ECG', d.lab_ecg, true)}
         ${printPreview._field('ECO', d.lab_eco, true)}
         ${printPreview._field('Outros exames', d.exames_compl, true)}
+        ${printPreview._field('Prescrição pré-anestésica', d.medicacao_pre, true)}
         ${printPreview._field('Orientações', d.orientacoes, true)}
         ${printPreview._field('Conclusão', d.conclusao, true)}
       `) +
@@ -24082,6 +24156,7 @@ ${TAG_CLOSE_HTML}`;
       ${printPreview._field('Comorbidades', pa.comorbidades, true)}
       ${printPreview._field('Exames', pa.exames, true)}
       ${printPreview._field('Medicações em uso', pa.medicacoes_uso, true)}
+      ${printPreview._field('Medicação pré-anestésica', pa.medicacao_pre, true)}
     `);
     html += printPreview._section('Técnica anestésica', `
       <div class="pp-checks">${(tc.tipos || []).map(t => `<span class="pp-check">${utils.escapeHTML(t)}</span>`).join('')}</div>
@@ -28699,6 +28774,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.cloud = cloud;
   window.auth = auth;
   window.demo = demo;
+  try { pre.premed.render(); } catch (e) {}
   window.ajustesUsuarios = ajustesUsuarios;
   window.termoPadrao = termoPadrao;
   window.termoBiblioteca = termoBiblioteca;
