@@ -3779,8 +3779,10 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
               <option value="">—</option><option>Baixo</option><option>Moderado</option><option>Alto</option>
             </select>
           </div>
-          <div class="field col-12"><label>Orientação de jejum ao paciente <small style="color:var(--text-mute);font-weight:400">— preenchida conforme a opção; editável. Sai na impressão/PDF do paciente.</small></label>
-            <textarea name="jejum_orientacao" rows="3" placeholder="Selecione a opção de jejum acima para preencher automaticamente a orientação ao paciente."></textarea>
+          <div class="field col-12" id="pre-jejum-desc-wrap" style="display:none">
+            <label style="font-size:.78rem;color:var(--text-mute);font-weight:600">Orientação de jejum ao paciente <small style="font-weight:400">— preenchida conforme a opção; sai na impressão/PDF</small></label>
+            <div id="pre-jejum-desc" style="font-size:.85rem;white-space:pre-wrap;line-height:1.5;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface-alt);color:var(--text-soft)"></div>
+            <input type="hidden" name="jejum_orientacao">
           </div>
           <div class="field col-12">
             <button type="button" class="btn btn-sm" onclick="pre.abrirRisco()">🎯 Calcular risco perioperatório (escores)</button>
@@ -3804,7 +3806,6 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
           <div class="field col-12"><label>Orientações fornecidas</label>
             <textarea name="orientacoes" rows="3" placeholder="Jejum, suspensão de medicações, orientações pré-operatórias..."></textarea>
             <div class="field-templates">
-              <button type="button" class="btn btn-xs tpl-btn" onclick="templates.aplicar('pre','orientacoes','jejumPadrao')">+ Jejum padrão</button>
               <button type="button" class="btn btn-xs tpl-btn" onclick="templates.aplicar('pre','orientacoes','medicacoesContinuar')">+ Continuar HAS/DM</button>
               <button type="button" class="btn btn-xs tpl-btn" onclick="templates.aplicar('pre','orientacoes','suspenderAnticoag')">+ Suspender anticoag.</button>
             </div>
@@ -9170,11 +9171,19 @@ const pre = {
       'Outro': ''
     },
     aplicar(valor) {
-      const ta = document.querySelector('#form-pre [name="jejum_orientacao"]');
-      if (!ta) return;
-      const txt = pre.jejum.TEXTOS[valor];
-      if (txt !== undefined) ta.value = txt;
+      const txt = (pre.jejum.TEXTOS[valor] !== undefined) ? pre.jejum.TEXTOS[valor] : '';
+      pre.jejum._mostrar(txt);
       try { markDirty(); } catch (e) {}
+    },
+    /* Exibe a orientação como resumo somente-leitura (não editável) e guarda
+       no campo oculto que é salvo e impresso — evita duplicar caixas de texto. */
+    _mostrar(txt) {
+      const hid = document.querySelector('#form-pre [name="jejum_orientacao"]');
+      const desc = document.getElementById('pre-jejum-desc');
+      const wrap = document.getElementById('pre-jejum-desc-wrap');
+      if (hid) hid.value = txt || '';
+      if (desc) desc.textContent = txt || '';
+      if (wrap) wrap.style.display = txt ? '' : 'none';
     },
     /* Compatibilidade: registros antigos gravavam o jejum como texto livre.
        Se o valor salvo não existir na lista, cria uma opção para exibi-lo. */
@@ -9188,6 +9197,10 @@ const pre = {
         sel.appendChild(opt);
       }
       sel.value = v;
+      /* Resumo da orientação: usa o texto salvo ou o padrão da opção */
+      const txt = (item.jejum_orientacao != null && item.jejum_orientacao !== '')
+        ? item.jejum_orientacao : (pre.jejum.TEXTOS[v] || '');
+      pre.jejum._mostrar(txt);
     }
   },
   /* ===== PRESCRIÇÃO PRÉ-ANESTÉSICA (pré-medicação) =====
@@ -9498,6 +9511,7 @@ const pre = {
     ui.atualizarDocStatus('pre', null);
     try { prontuario.limpar('pre'); } catch (e) {}
     try { pre.premed.restaurar({}); } catch (e) {}
+    try { pre.jejum._mostrar(''); } catch (e) {}
     ui.fecharBanner('banner-pre');
     markClean();
     toast('Nova avaliação iniciada');
