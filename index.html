@@ -1274,57 +1274,39 @@ body[data-graph-mode="mover"] canvas#srpa-vitals-chart:active { cursor: grabbing
   font-style: italic;
 }
 
-/* === Barra lateral direita para rolar a página (útil no celular e sobre o gráfico) === */
+/* === Alça lateral direita para rolar a página — um único ícone arrastável === */
 #page-scroller {
   position: fixed;
-  right: 6px;
-  top: 50%;
-  transform: translateY(-50%);
+  right: 8px;
+  top: 0;
+  height: 100vh;             /* área de percurso da alça = altura da tela */
+  width: 44px;
   z-index: 1200;
   display: none;             /* mostrada por JS quando a página tem rolagem */
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  width: 30px;
+  pointer-events: none;      /* só a alça captura o toque; o resto passa direto */
 }
-#page-scroller.show { display: flex; }
-#page-scroller .ps-btn {
-  width: 30px; height: 30px;
-  border-radius: 50%;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text);
-  font-size: .9rem; line-height: 1;
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer;
-  box-shadow: 0 1px 4px rgba(0,0,0,.18);
-  -webkit-tap-highlight-color: transparent;
-  user-select: none;
-  touch-action: manipulation;
-}
-#page-scroller .ps-btn:hover { background: var(--surface-alt); }
-#page-scroller .ps-btn:active { background: var(--primary); color: #fff; border-color: var(--primary); }
-#page-scroller .ps-track {
-  flex: 1 1 auto;
-  width: 8px;
-  min-height: 90px;
-  max-height: 45vh;
-  background: var(--surface-alt);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  position: relative;
-  cursor: pointer;
-  touch-action: none;
-}
-#page-scroller .ps-thumb {
+#page-scroller.show { display: block; }
+#page-scroller .ps-handle {
   position: absolute;
-  left: -2px; right: -2px;
-  height: 34px;
+  right: 0;
+  top: 0;                    /* posição vertical definida pelo JS */
+  width: 44px; height: 44px;
+  border-radius: 50%;
   background: var(--primary);
-  border-radius: 6px;
-  opacity: .85;
-  box-shadow: 0 1px 3px rgba(0,0,0,.25);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.15rem; line-height: 1;
+  box-shadow: 0 2px 8px rgba(0,0,0,.30);
+  cursor: grab;
+  pointer-events: auto;      /* a alça captura o toque/arraste */
+  touch-action: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  opacity: .55;              /* discreta quando parada */
+  transition: opacity .2s ease;
 }
+#page-scroller .ps-handle:hover { opacity: 1; }
+#page-scroller.dragging .ps-handle { opacity: 1; cursor: grabbing; }
 @media print { #page-scroller { display: none !important; } }
 
 .graph-canvas-wrap {
@@ -30038,89 +30020,55 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 </script>
 
-<!-- === Barra lateral direita para rolar a página === -->
+<!-- === Alça lateral direita para rolar a página (um único ícone arrastável) === -->
 <div id="page-scroller" aria-hidden="true">
-  <button type="button" class="ps-btn" id="ps-top" title="Ir para o topo">⤒</button>
-  <button type="button" class="ps-btn" id="ps-up" title="Subir">▲</button>
-  <div class="ps-track" id="ps-track"><div class="ps-thumb" id="ps-thumb"></div></div>
-  <button type="button" class="ps-btn" id="ps-down" title="Descer">▼</button>
-  <button type="button" class="ps-btn" id="ps-bottom" title="Ir para o final">⤓</button>
+  <div class="ps-handle" id="ps-handle" title="Arraste para rolar a página">↕</div>
 </div>
 <script>
-/* Controle de rolagem lateral da página (útil no celular e para rolar sobre o gráfico) */
+/* Alça única de rolagem: o dedo segura o ícone e, ao correr, rola a página. */
 (function () {
-  const box   = document.getElementById('page-scroller');
-  const track = document.getElementById('ps-track');
-  const thumb = document.getElementById('ps-thumb');
-  if (!box || !track || !thumb) return;
+  const box    = document.getElementById('page-scroller');
+  const handle = document.getElementById('ps-handle');
+  if (!box || !handle) return;
 
+  const TOPO = 66;    /* respiro abaixo do cabeçalho */
+  const BASE = 16;    /* respiro na base da tela */
   const docEl = document.documentElement;
-  function maxScroll() { return Math.max(0, docEl.scrollHeight - window.innerHeight); }
-  function passo() { return Math.round(window.innerHeight * 0.85); }
+  const maxScroll = () => Math.max(0, docEl.scrollHeight - window.innerHeight);
+  const percurso = () => Math.max(0, window.innerHeight - handle.offsetHeight - TOPO - BASE);
 
-  /* Mostra/esconde a barra e posiciona o "polegar" conforme a rolagem */
+  let arrastando = false;
+
+  /* Reflete a posição da página na alça (quando NÃO se está arrastando) */
   function atualizar() {
-    const max = maxScroll();
-    if (max < 40) { box.classList.remove('show'); return; }
+    if (maxScroll() < 40) { box.classList.remove('show'); return; }
     box.classList.add('show');
-    const trackH = track.clientHeight;
-    const thumbH = thumb.offsetHeight;
-    const frac = window.scrollY / max;
-    const y = Math.round(frac * (trackH - thumbH));
-    thumb.style.top = Math.max(0, Math.min(trackH - thumbH, y)) + 'px';
+    if (arrastando) return;
+    const frac = window.scrollY / maxScroll();
+    handle.style.top = Math.round(TOPO + frac * percurso()) + 'px';
   }
 
-  /* Rolagem contínua ao segurar os botões ▲/▼ */
-  let holdTimer = null, holdRaf = null;
-  function iniciarHold(dir) {
-    pararHold();
-    const step = () => { window.scrollBy(0, dir * 14); holdRaf = requestAnimationFrame(step); };
-    holdTimer = setTimeout(() => { holdRaf = requestAnimationFrame(step); }, 260);
-  }
-  function pararHold() {
-    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
-    if (holdRaf) { cancelAnimationFrame(holdRaf); holdRaf = null; }
-  }
-
-  function ligarBotao(id, onClick) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.addEventListener('click', onClick);
-  }
-  ligarBotao('ps-top',    () => window.scrollTo({ top: 0, behavior: 'smooth' }));
-  ligarBotao('ps-bottom', () => window.scrollTo({ top: maxScroll(), behavior: 'smooth' }));
-  ligarBotao('ps-up',     () => window.scrollBy({ top: -passo(), behavior: 'smooth' }));
-  ligarBotao('ps-down',   () => window.scrollBy({ top:  passo(), behavior: 'smooth' }));
-
-  ['ps-up', 'ps-down'].forEach(id => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    const dir = id === 'ps-up' ? -1 : 1;
-    el.addEventListener('pointerdown', () => iniciarHold(dir));
-    ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => el.addEventListener(ev, pararHold));
-  });
-
-  /* Arrastar o "polegar" para navegar rapidamente pela página */
-  function irParaEvento(clientY) {
-    const r = track.getBoundingClientRect();
-    const thumbH = thumb.offsetHeight;
-    let frac = (clientY - r.top - thumbH / 2) / (r.height - thumbH);
+  /* Move a página conforme a posição vertical do dedo/mouse */
+  function rolarPara(clientY) {
+    let frac = (clientY - TOPO - handle.offsetHeight / 2) / percurso();
     frac = Math.max(0, Math.min(1, frac));
+    handle.style.top = Math.round(TOPO + frac * percurso()) + 'px';
     window.scrollTo(0, Math.round(frac * maxScroll()));
   }
-  let arrastando = false;
-  track.addEventListener('pointerdown', (e) => {
+
+  handle.addEventListener('pointerdown', (e) => {
     arrastando = true;
-    try { track.setPointerCapture(e.pointerId); } catch (_) {}
-    irParaEvento(e.clientY);
+    box.classList.add('dragging');
+    try { handle.setPointerCapture(e.pointerId); } catch (_) {}
     e.preventDefault();
   });
-  track.addEventListener('pointermove', (e) => { if (arrastando) irParaEvento(e.clientY); });
-  ['pointerup', 'pointercancel'].forEach(ev => track.addEventListener(ev, () => { arrastando = false; }));
+  handle.addEventListener('pointermove', (e) => { if (arrastando) rolarPara(e.clientY); });
+  const soltar = () => { arrastando = false; box.classList.remove('dragging'); atualizar(); };
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(ev => handle.addEventListener(ev, soltar));
 
   window.addEventListener('scroll', atualizar, { passive: true });
   window.addEventListener('resize', atualizar);
-  /* Reavalia periodicamente porque o conteúdo muda de altura conforme se navega entre abas */
+  /* Reavalia periodicamente porque a altura do conteúdo muda ao navegar entre abas */
   setInterval(atualizar, 700);
   atualizar();
 })();
