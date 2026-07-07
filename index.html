@@ -3764,11 +3764,23 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
               <option>Via aérea difícil prevista</option><option>Sem alterações</option>
             </select>
           </div>
-          <div class="field col-3"><label>Jejum</label><input type="text" name="jejum" placeholder="Ex.: 8h"></div>
+          <div class="field col-3"><label>Jejum</label>
+            <select name="jejum" onchange="pre.jejum.aplicar(this.value)">
+              <option value="">—</option>
+              <option value="Jejum de 8h — completo e total">Jejum de 8h — completo e total</option>
+              <option value="Jejum de 12h">Jejum de 12h</option>
+              <option value="8h para sólidos e 3h para líquidos claros">8h sólidos / 3h líquidos claros</option>
+              <option value="Jejum pediátrico">Pediátrico (criança)</option>
+              <option value="Outro">Outro (descrever)</option>
+            </select>
+          </div>
           <div class="field col-3"><label>Risco anestésico</label>
             <select name="risco">
               <option value="">—</option><option>Baixo</option><option>Moderado</option><option>Alto</option>
             </select>
+          </div>
+          <div class="field col-12"><label>Orientação de jejum ao paciente <small style="color:var(--text-mute);font-weight:400">— preenchida conforme a opção; editável. Sai na impressão/PDF do paciente.</small></label>
+            <textarea name="jejum_orientacao" rows="3" placeholder="Selecione a opção de jejum acima para preencher automaticamente a orientação ao paciente."></textarea>
           </div>
           <div class="field col-12">
             <button type="button" class="btn btn-sm" onclick="pre.abrirRisco()">🎯 Calcular risco perioperatório (escores)</button>
@@ -9135,6 +9147,44 @@ const prontuario = {
 const pre = {
   formId: 'form-pre',
   _linkPendente: null,
+  /* ===== JEJUM — opções padronizadas + orientação automática ao paciente ===== */
+  jejum: {
+    TEXTOS: {
+      'Jejum de 8h — completo e total':
+        'Jejum absoluto de 8 horas: não ingerir nenhum alimento nem líquido (incluindo água) nas 8 horas que antecedem o procedimento.',
+      'Jejum de 12h':
+        'Jejum absoluto de 12 horas: não ingerir nenhum alimento nem líquido nas 12 horas que antecedem o procedimento.',
+      '8h para sólidos e 3h para líquidos claros':
+        'Sólidos, leite e derivados: jejum de 8 horas. Líquidos claros (água, chá ou suco coado, sem resíduo/polpa e sem leite): permitidos até 3 horas antes do procedimento. Nas últimas 3 horas, jejum absoluto (nada por via oral).',
+      'Jejum pediátrico':
+        'Orientação de jejum pediátrico (seguir a orientação da equipe conforme a idade):\n' +
+        '• Líquidos claros (água, chá ou suco sem resíduo): até 2 horas antes.\n' +
+        '• Leite materno: até 4 horas antes.\n' +
+        '• Fórmula infantil ou leite não materno (vaca): até 6 horas antes.\n' +
+        '• Sólidos / refeição leve: até 6 a 8 horas antes.',
+      'Outro': ''
+    },
+    aplicar(valor) {
+      const ta = document.querySelector('#form-pre [name="jejum_orientacao"]');
+      if (!ta) return;
+      const txt = pre.jejum.TEXTOS[valor];
+      if (txt !== undefined) ta.value = txt;
+      try { markDirty(); } catch (e) {}
+    },
+    /* Compatibilidade: registros antigos gravavam o jejum como texto livre.
+       Se o valor salvo não existir na lista, cria uma opção para exibi-lo. */
+    restaurar(item) {
+      const sel = document.querySelector('#form-pre [name="jejum"]');
+      if (!sel || !item) return;
+      const v = item.jejum || '';
+      if (v && !Array.from(sel.options).some(o => o.value === v)) {
+        const opt = document.createElement('option');
+        opt.value = v; opt.textContent = v + ' (registro anterior)';
+        sel.appendChild(opt);
+      }
+      sel.value = v;
+    }
+  },
   /* Stubs vazios (obsoletos — carimbo agora vem do cadastro do profissional) */
   _popularAssinaturas() {},
   _previewAssinatura() {},
@@ -9499,6 +9549,7 @@ const pre = {
     try { pre.procs.restaurar(item._procsExtra); } catch (e) {}
     try { labExtra.restaurar('pre-lab-extras', item._labExtras); } catch (e) {}
     try { prontuario.restaurar('pre', item._docs); } catch (e) {}
+    try { pre.jejum.restaurar(item); } catch (e) {}
     markClean();
     toast('Avaliação carregada'); ui.expandirTodos('pre');
   },
@@ -23882,6 +23933,7 @@ ${TAG_CLOSE_HTML}`;
           ${printPreview._field('Jejum', d.jejum)}
           ${printPreview._field('Risco', d.risco)}
         </div>
+        ${printPreview._field('Orientação de jejum ao paciente', d.jejum_orientacao, true)}
         ${printPreview._vitaisPre(d)}
         ${printPreview._field('Exame físico', d.exame_fisico, true)}
         ${printPreview._labGrid(d)}
