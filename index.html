@@ -4634,6 +4634,10 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
               <label class="check"><input type="checkbox" name="monitores[]" value="FR" onchange="anestesia.disp.sincronizarVitais()"><span>Frequência respiratória</span></label>
             </div>
           </div>
+          <div class="field col-12"><label>🧰 Equipamentos utilizados <small style="color:var(--text-mute);font-weight:400">— toque para marcar; cadastre os seus em Ajustes → Equipamentos</small></label>
+            <div id="anest-equip-chips" class="comorb-rapidas"></div>
+            <input type="hidden" name="equipamentos_usados">
+          </div>
           <div class="field col-12"><label>Outros dispositivos / descrição livre</label><textarea name="dispositivos_obs" rows="2"></textarea></div>
         </div>
       </div>
@@ -7797,6 +7801,7 @@ const STORAGE = {
   cad_procedimentos:'medsys.v5.cad.procedimentos',
   cad_pagamentos:   'medsys.v5.cad.pagamentos',
   cad_presets_med:  'medsys.v7.cad.presets_med',
+  cad_equipamentos: 'medsys.v7.cad.equipamentos',
   cad_assinaturas:  'medsys.v5.cad.assinaturas',
   cad_assinatura_ativa: 'medsys.v5.cad.assinatura_ativa',
   termo_padrao: 'medsys.v7.termo_padrao',
@@ -8864,7 +8869,7 @@ const ui = {
         else if (modName === 'agenda') agenda.render();
         else if (modName === 'pacientes') pacientes.render();
         else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
-        else if (modName === 'anestesia') { anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} }
+        else if (modName === 'anestesia') { anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} }
         else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} }, 60); }
         else if (modName === 'termo') { setTimeout(() => { try { (termo.sig._ajustar || []).forEach(fn => fn()); assinatura.initCanvas('sig-termo'); } catch (e) {} }, 80); }
         else if (modName === 'prescricao') { setTimeout(() => { try { if (prescricao.sig._ajustar) prescricao.sig._ajustar(); assinatura.initCanvas('sig-prescricao'); } catch (e) {} }, 80); }
@@ -15664,6 +15669,46 @@ const anestesia = {
   },
 
   /* ---- DISPOSITIVOS / MONITORES ---- */
+  /* ===== EQUIPAMENTOS UTILIZADOS (cadastrados em Ajustes) ===== */
+  equip: {
+    _campo() { return document.querySelector('#form-anestesia [name="equipamentos_usados"]'); },
+    _lista() { try { return store.list('cad_equipamentos') || []; } catch (e) { return []; } },
+    _rotulo(e) { return (e.nome || '') + (e.tipo ? ' (' + e.tipo + ')' : ''); },
+    render() {
+      const host = document.getElementById('anest-equip-chips');
+      if (!host) return;
+      const eqs = anestesia.equip._lista();
+      if (!eqs.length) {
+        host.innerHTML = '<span style="font-size:.78rem;color:var(--text-mute)">Nenhum equipamento cadastrado. <a href="javascript:void(0)" onclick="ui.navegar(\'ajustes\')" style="color:var(--primary)">Cadastrar em Ajustes → Equipamentos</a></span>';
+        return;
+      }
+      host.innerHTML = eqs.map(e => {
+        const rot = anestesia.equip._rotulo(e);
+        return '<button type="button" class="comorb-chip-rapida" data-val="' + utils.escapeAttr(rot) + '" onclick="anestesia.equip.toggle(this)">' + utils.escapeHTML(rot) + '</button>';
+      }).join('');
+      anestesia.equip.sync();
+    },
+    toggle(btn) {
+      const campo = anestesia.equip._campo();
+      if (!campo) return;
+      const val = btn.dataset.val || btn.textContent.trim();
+      let partes = (campo.value || '').split(/;\s*/).map(s => s.trim()).filter(Boolean);
+      const idx = partes.indexOf(val);
+      if (idx >= 0) { partes.splice(idx, 1); btn.classList.remove('on'); }
+      else { partes.push(val); btn.classList.add('on'); }
+      campo.value = partes.join('; ');
+      try { markDirty(); } catch (e) {}
+    },
+    sync() {
+      const campo = anestesia.equip._campo();
+      const txt = campo ? (campo.value || '') : '';
+      const partes = txt.split(/;\s*/).map(s => s.trim());
+      document.querySelectorAll('#anest-equip-chips .comorb-chip-rapida').forEach(btn => {
+        btn.classList.toggle('on', partes.indexOf(btn.dataset.val) >= 0);
+      });
+    }
+  },
+
   disp: {
     /* Mostra/esconde campo de descrição para cada dispositivo marcado */
     alternar(checkbox) {
@@ -19186,6 +19231,7 @@ const anestesia = {
         tipos: arr('tipo'), descricao: v('tecnica_descricao'),
         via_aerea_uso: v('via_aerea_uso'), ventilacao_tipo: v('ventilacao_tipo'),
         monitorizacao_descricao: v('monitorizacao'),
+        equipamentos: v('equipamentos_usados'),
         bloqueio: anestesia.bloqueio.coletar()
       },
       ventilacao: anestesia.vent.coletar(),
@@ -19339,6 +19385,8 @@ const anestesia = {
     set('via_aerea_uso', tc.via_aerea_uso);
     set('ventilacao_tipo', tc.ventilacao_tipo);
     set('monitorizacao', tc.monitorizacao_descricao);
+    set('equipamentos_usados', tc.equipamentos);
+    try { anestesia.equip.render(); } catch (e) {}
     /* Bloqueio regional / USG / cateteres */
     if (tc.bloqueio) anestesia.bloqueio.restaurar(tc.bloqueio);
     /* Ventilação detalhada */
@@ -23252,6 +23300,16 @@ const ajustes = {
         { name: 'unidade', label: 'Unidade', col: 2, type: 'select', options: ['mg', 'mcg', 'g', 'mL', 'UI', 'mg/kg', 'mcg/kg'] },
         { name: 'via', label: 'Via', col: 2, type: 'select', options: ['EV', 'IM', 'SC', 'VO', 'Subaracnóideo', 'Peridural', 'Inalatória', 'Tópica'] }
       ]
+    },
+    { key: 'cad_equipamentos', icon: '🧰', label: 'Equipamentos', singular: 'Equipamento', grupo: 'Anestesia',
+      campos: [
+        { name: 'nome', label: 'Nome / identificação', required: true, col: 6 },
+        { name: 'tipo', label: 'Tipo', col: 6, type: 'select', options: ['Aparelho de anestesia', 'Ventilador', 'Monitor multiparamétrico', 'Ultrassom', 'Videolaringoscópio', 'Fibroscópio', 'Bomba de infusão', 'BIS / monitor de consciência', 'Aquecedor', 'Outro'] },
+        { name: 'marca', label: 'Marca', col: 4 },
+        { name: 'modelo', label: 'Modelo', col: 4 },
+        { name: 'patrimonio', label: 'Patrimônio / série', col: 4 },
+        { name: 'observacoes', label: 'Observações', col: 12, type: 'textarea' }
+      ]
     }
   ],
 
@@ -24718,6 +24776,7 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._field('Ventilação', tc.ventilacao_tipo)}
       </div>
       ${printPreview._field('Monitorização', tc.monitorizacao_descricao, true)}
+      ${printPreview._field('Equipamentos utilizados', tc.equipamentos, true)}
     `);
 
     /* === CIRURGIAS COMBINADAS === */
