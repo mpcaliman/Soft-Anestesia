@@ -3801,6 +3801,8 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
 
               <div class="lab-item"><span>Glicemia</span><input type="text" name="lab_glicemia" inputmode="numeric"></div>
               <div class="lab-item"><span>HbA1c</span><input type="text" name="lab_hba1c"></div>
+              <div class="lab-item"><span>TSH</span><input type="text" name="lab_tsh" inputmode="decimal"></div>
+              <div class="lab-item"><span>T4 livre</span><input type="text" name="lab_t4l" inputmode="decimal"></div>
               <div class="lab-item"><span>AST/TGO</span><input type="text" name="lab_ast" inputmode="numeric"></div>
               <div class="lab-item"><span>ALT/TGP</span><input type="text" name="lab_alt" inputmode="numeric"></div>
               <div class="lab-item"><span>Bilirr.</span><input type="text" name="lab_bilirrubinas"></div>
@@ -4077,6 +4079,8 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
 
               <div class="lab-item"><span>Glicemia</span><input type="text" name="lab_glicemia" inputmode="numeric"></div>
               <div class="lab-item"><span>HbA1c</span><input type="text" name="lab_hba1c"></div>
+              <div class="lab-item"><span>TSH</span><input type="text" name="lab_tsh" inputmode="decimal"></div>
+              <div class="lab-item"><span>T4 livre</span><input type="text" name="lab_t4l" inputmode="decimal"></div>
               <div class="lab-item"><span>AST/TGO</span><input type="text" name="lab_ast" inputmode="numeric"></div>
               <div class="lab-item"><span>ALT/TGP</span><input type="text" name="lab_alt" inputmode="numeric"></div>
               <div class="lab-item"><span>Bilirr.</span><input type="text" name="lab_bilirrubinas"></div>
@@ -24792,7 +24796,7 @@ ${TAG_CLOSE_HTML}`;
       ['Hb', d.lab_hb], ['Ht', d.lab_ht], ['Hm', d.lab_hm], ['Leuco', d.lab_leuco], ['Plt', d.lab_plt], ['Fibrin.', d.lab_fibrinogenio],
       ['TC', d.lab_tc], ['TS', d.lab_ts], ['TP', d.lab_tp], ['INR', d.lab_inr], ['TTPa', d.lab_ttpa], ['Ativ Prot', d.lab_ativprot],
       ['Uréia', d.lab_ureia], ['Creat', d.lab_creat], ['Na', d.lab_na], ['K', d.lab_k], ['Ca', d.lab_ca], ['Mg', d.lab_mg],
-      ['Glicemia', d.lab_glicemia], ['HbA1c', d.lab_hba1c], ['AST/TGO', d.lab_ast], ['ALT/TGP', d.lab_alt], ['Bilirr.', d.lab_bilirrubinas], ['Proteínas', d.lab_proteinas]
+      ['Glicemia', d.lab_glicemia], ['HbA1c', d.lab_hba1c], ['TSH', d.lab_tsh], ['T4 livre', d.lab_t4l], ['AST/TGO', d.lab_ast], ['ALT/TGP', d.lab_alt], ['Bilirr.', d.lab_bilirrubinas], ['Proteínas', d.lab_proteinas]
     ];
     /* inclui exames extras (campo livre) */
     (d._labExtras || []).forEach(x => { if (x && (x.label || x.valor)) labs.push([x.label || '—', x.valor]); });
