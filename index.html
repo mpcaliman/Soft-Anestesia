@@ -3154,7 +3154,7 @@ path.dash-clickable:hover { opacity: .8; }
   .quick-actions, .menu-toggle, .sidebar-backdrop,
   .header-status, .toast-wrap, .btn, .btn-rm,
   .card-actions, .modal-backdrop, .global-search,
-  .form-toolbar, .doc-status .ds-links, .field-templates { display: none !important; }
+  .form-toolbar, .doc-status .ds-links, .field-templates, .no-print { display: none !important; }
   .doc-status { border: none; padding: 0; margin-bottom: 6px; }
   .doc-status .ds-badge { display: none; }
   .banner { display: none; }
@@ -3859,8 +3859,8 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
               <option>ASA I-E</option><option>ASA II-E</option><option>ASA III-E</option><option>ASA IV-E</option><option>ASA V-E</option>
             </select>
           </div>
-          <div class="field col-3"><label>Avaliação de via aérea</label>
-            <select name="via_aerea">
+          <div class="field col-3"><label>Via aérea (Mallampati)</label>
+            <select name="via_aerea" onchange="pre.viaAerea.compor()">
               <option value="">—</option>
               <option>Mallampati I</option><option>Mallampati II</option><option>Mallampati III</option><option>Mallampati IV</option>
               <option>Via aérea difícil prevista</option><option>Sem alterações</option>
@@ -3870,6 +3870,53 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
             <select name="risco">
               <option value="">—</option><option>Baixo</option><option>Moderado</option><option>Alto</option>
             </select>
+          </div>
+          <div class="field col-12"><label>Resumo da via aérea <small style="color:var(--text-mute);font-weight:400">— composto por Mallampati + critérios abaixo; editável; é o único que sai na impressão</small></label>
+            <textarea name="via_aerea_resumo" rows="2" placeholder="Preenchido conforme Mallampati e os critérios marcados; edite à vontade."></textarea>
+            <input type="hidden" name="via_aerea_criterios">
+          </div>
+          <div class="field col-12 no-print">
+            <details class="va-details">
+              <summary>🫁 Avaliação detalhada da via aérea + referência (cola) — não sai na impressão</summary>
+              <div class="va-cola">
+                <svg viewBox="0 0 480 165" width="100%" style="max-width:470px;display:block;margin:0 auto" role="img" aria-label="Classificação de Mallampati">
+                  <g transform="translate(8,0)">
+                    <ellipse cx="50" cy="68" rx="42" ry="54" fill="#f7dad7" stroke="#c99" stroke-width="2"/>
+                    <path d="M26,44 Q50,28 74,44 Q70,80 50,88 Q30,80 26,44 Z" fill="#8a4040"/>
+                    <path d="M34,46 Q31,66 41,82" fill="none" stroke="#6a3030" stroke-width="3"/>
+                    <path d="M66,46 Q69,66 59,82" fill="none" stroke="#6a3030" stroke-width="3"/>
+                    <path d="M50,36 Q45,52 50,60 Q55,52 50,36 Z" fill="#c25b5b"/>
+                    <ellipse cx="50" cy="120" rx="38" ry="34" fill="#e89a92" stroke="#d88" stroke-width="1.5"/>
+                    <text x="50" y="150" text-anchor="middle" font-size="14" font-weight="700" fill="#334">Classe I</text>
+                  </g>
+                  <g transform="translate(126,0)">
+                    <ellipse cx="50" cy="68" rx="42" ry="54" fill="#f7dad7" stroke="#c99" stroke-width="2"/>
+                    <path d="M26,44 Q50,28 74,44 Q70,80 50,88 Q30,80 26,44 Z" fill="#8a4040"/>
+                    <path d="M50,36 Q46,46 50,52 Q54,46 50,36 Z" fill="#c25b5b"/>
+                    <ellipse cx="50" cy="112" rx="38" ry="42" fill="#e89a92" stroke="#d88" stroke-width="1.5"/>
+                    <text x="50" y="150" text-anchor="middle" font-size="14" font-weight="700" fill="#334">Classe II</text>
+                  </g>
+                  <g transform="translate(244,0)">
+                    <ellipse cx="50" cy="68" rx="42" ry="54" fill="#f7dad7" stroke="#c99" stroke-width="2"/>
+                    <path d="M26,44 Q50,28 74,44 Q70,80 50,88 Q30,80 26,44 Z" fill="#8a4040"/>
+                    <ellipse cx="50" cy="104" rx="38" ry="50" fill="#e89a92" stroke="#d88" stroke-width="1.5"/>
+                    <text x="50" y="150" text-anchor="middle" font-size="14" font-weight="700" fill="#334">Classe III</text>
+                  </g>
+                  <g transform="translate(362,0)">
+                    <ellipse cx="50" cy="68" rx="42" ry="54" fill="#f7dad7" stroke="#c99" stroke-width="2"/>
+                    <path d="M28,42 Q50,30 72,42 L70,50 Q50,42 30,50 Z" fill="#9a5a5a"/>
+                    <ellipse cx="50" cy="98" rx="38" ry="56" fill="#e89a92" stroke="#d88" stroke-width="1.5"/>
+                    <text x="50" y="150" text-anchor="middle" font-size="14" font-weight="700" fill="#334">Classe IV</text>
+                  </g>
+                </svg>
+                <div style="font-size:.76rem;color:var(--text-soft);line-height:1.55;margin-top:6px">
+                  <b>Mallampati</b> (sentado, boca aberta, língua para fora): <b>I</b> palato mole, úvula e pilares · <b>II</b> palato mole e úvula · <b>III</b> palato mole e base da úvula · <b>IV</b> só palato duro.<br>
+                  <b>Cola rápida:</b> abertura bucal ≥ 3 dedos (~4,5 cm) · distância tireomentoniana ≥ 6 cm · esternomentoniana ≥ 12,5 cm · protrusão mandibular (morder o lábio superior) · extensão cervical ≥ 35°. Regra <b>LEMON</b>: Look · Evaluate 3-3-2 · Mallampati · Obstruction · Neck mobility.
+                </div>
+              </div>
+              <div style="font-size:.8rem;color:var(--text-soft);margin:10px 0 4px;font-weight:600">Preditores de via aérea difícil — marque os presentes:</div>
+              <div id="pre-via-aerea-criterios" class="checks"></div>
+            </details>
           </div>
           <div class="field col-12">
             <button type="button" class="btn btn-sm" onclick="pre.abrirRisco()">🎯 Calcular risco perioperatório (escores)</button>
@@ -8955,7 +9002,7 @@ const ui = {
         else if (modName === 'agenda') agenda.render();
         else if (modName === 'pacientes') pacientes.render();
         else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
-        else if (modName === 'pre') { try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} }
+        else if (modName === 'pre') { try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} try { pre.viaAerea.render(); } catch (e) {} }
         else if (modName === 'anestesia') { anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} }
         else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} }, 60); }
         else if (modName === 'termo') { setTimeout(() => { try { (termo.sig._ajustar || []).forEach(fn => fn()); assinatura.initCanvas('sig-termo'); } catch (e) {} }, 80); }
@@ -9683,6 +9730,75 @@ const pre = {
     }
     return txt;
   },
+
+  /* ===== Avaliação detalhada da via aérea (critérios + resumo que imprime) ===== */
+  viaAerea: {
+    CRITERIOS: [
+      'Abertura bucal < 3 dedos (~4,5 cm)',
+      'Distância tireomentoniana < 6 cm',
+      'Distância esternomentoniana < 12,5 cm',
+      'Extensão/mobilidade cervical reduzida',
+      'Protrusão mandibular limitada (mordida do lábio superior classe III)',
+      'Pescoço curto / circunferência > 40 cm',
+      'Retrognatia / micrognatia',
+      'Incisivos superiores proeminentes',
+      'Macroglossia',
+      'Barba densa (dificulta ventilação)',
+      'Obesidade (IMC > 30) / SAOS',
+      'História de intubação difícil',
+      'Edêntulo (dificulta ventilação sob máscara)',
+      'Trismo / limitação da abertura bucal'
+    ],
+    render() {
+      const host = document.getElementById('pre-via-aerea-criterios');
+      if (!host) return;
+      if (!host.dataset.render) {
+        host.innerHTML = pre.viaAerea.CRITERIOS.map((c, i) =>
+          '<label class="check"><input type="checkbox" data-va="' + i + '" onchange="pre.viaAerea.compor()"><span>' + utils.escapeHTML(c) + '</span></label>'
+        ).join('');
+        host.dataset.render = '1';
+      }
+      pre.viaAerea.restaurar();
+    },
+    _selecionados() {
+      return Array.from(document.querySelectorAll('#pre-via-aerea-criterios input:checked'))
+        .map(cb => pre.viaAerea.CRITERIOS[+cb.dataset.va]).filter(Boolean);
+    },
+    compor() {
+      const f = document.getElementById('form-pre');
+      if (!f) return;
+      const mall = (f.querySelector('[name="via_aerea"]') || {}).value || '';
+      const crit = pre.viaAerea._selecionados();
+      const hid = f.querySelector('[name="via_aerea_criterios"]');
+      if (hid) hid.value = crit.join('; ');
+      const resumoEl = f.querySelector('[name="via_aerea_resumo"]');
+      if (!resumoEl) return;
+      const partes = [];
+      if (mall) partes.push(mall);
+      if (crit.length) partes.push('Preditores: ' + crit.join(', '));
+      let txt = partes.join('. ');
+      if (txt) {
+        const dificil = /III|IV|difícil/i.test(mall) || crit.length >= 2 ||
+          (crit.length === 1 && /intubação difícil/i.test(crit[0]));
+        txt += '. ' + (dificil
+          ? '⚠ Via aérea potencialmente difícil — preparar plano e dispositivos (videolaringoscópio, bougie, plano B/C).'
+          : 'Sem preditores maiores de via aérea difícil.');
+      }
+      resumoEl.value = txt;
+      try { markDirty(); } catch (e) {}
+    },
+    /* Re-marca os checkboxes a partir do campo oculto salvo (sem recompor o resumo) */
+    restaurar() {
+      const f = document.getElementById('form-pre');
+      if (!f) return;
+      const hid = f.querySelector('[name="via_aerea_criterios"]');
+      const salvos = (hid && hid.value) ? hid.value.split(';').map(s => s.trim()).filter(Boolean) : [];
+      document.querySelectorAll('#pre-via-aerea-criterios input[type="checkbox"]').forEach(cb => {
+        cb.checked = salvos.includes(pre.viaAerea.CRITERIOS[+cb.dataset.va]);
+      });
+    }
+  },
+
   abrirRisco() {
     const f = document.getElementById(pre.formId);
     const dados = {
@@ -24926,9 +25042,9 @@ ${TAG_CLOSE_HTML}`;
       printPreview._section('Classificação de risco', `
         <div class="pp-grid">
           ${printPreview._field('Classificação ASA', d.asa)}
-          ${printPreview._field('Via aérea', d.via_aerea)}
           ${printPreview._field('Risco', d.risco)}
         </div>
+        ${printPreview._field('Via aérea', d.via_aerea_resumo || d.via_aerea, true)}
         ${printPreview._field('Resultado dos escores de risco', d.risco_resumo, true)}
       `) +
       printPreview._blocoRiscoPre(d) +
@@ -29817,6 +29933,7 @@ document.addEventListener('DOMContentLoaded', () => {
   try { pre.premed.render(); } catch (e) {}
   try { comorbidades.renderRapidas(); } catch (e) {}
   try { alergias.renderRapidas(); } catch (e) {}
+  try { pre.viaAerea.render(); } catch (e) {}
   window.ajustesUsuarios = ajustesUsuarios;
   window.termoPadrao = termoPadrao;
   window.termoBiblioteca = termoBiblioteca;
