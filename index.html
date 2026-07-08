@@ -6174,6 +6174,8 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
   <div class="action-bar">
     <button class="btn btn-sm" id="btn-expandir-risco" onclick="ui.alternarTodos('risco')" title="Expandir ou recolher todos os campos">⊕ Expandir tudo</button>
     <button class="btn" id="btn-risco-voltar-pre" style="display:none;background:var(--primary-light);color:var(--primary-darker);border-color:var(--primary)" onclick="risco.voltarPre()" title="Retorna à avaliação pré-anestésica trazendo o resultado dos escores"><span class="icon">←</span> Voltar à Pré-anestésica</button>
+    <button class="btn btn-sm" onclick="risco.voltarAnest(true)" title="Vai para a Ficha de Anestesia levando o resultado dos escores">💉 Ficha (com escores)</button>
+    <button class="btn btn-sm" onclick="risco.voltarAnest(false)" title="Vai para a Ficha de Anestesia sem incluir os escores">💉 Ficha (sem escores)</button>
     <button class="btn btn-primary" onclick="risco.novo()"><span class="icon">📄</span> Novo</button>
     <button class="btn btn-success" onclick="risco.salvar()"><span class="icon">💾</span> Salvar</button>
     <button class="btn" onclick="risco.atualizar()"><span class="icon">🔄</span> Recalcular</button>
@@ -6239,6 +6241,12 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
             <div class="field col-6"><label>Duração prevista</label><select name="duracao" id="risco-duracao"><option value="lt2">&lt; 2 h</option><option value="2a4">2–4 h</option><option value="4a6">4–6 h</option><option value="gt6">&gt; 6 h</option></select><div id="risco-durHelp" class="rk-help"></div></div>
           </div>
         </div>
+      </section>
+
+      <!-- Risco cirúrgico (intrínseco do procedimento) -->
+      <section class="card">
+        <div class="card-header" onclick="ui.toggleCard(this)"><div class="card-title-wrap"><span class="card-num">🔪</span><h2>Risco cirúrgico<small>Risco intrínseco do procedimento</small></h2></div><div class="card-actions"><span class="toggle-icon">▾</span></div></div>
+        <div class="card-body"><div class="rk-help">Estratificação pelo porte do procedimento (definida pelo "Tipo de cirurgia" e pelo procedimento selecionados acima). Baixo &lt;1%, intermediário 1–5%, alto &gt;5% de evento cardiovascular maior (MACE).</div><div id="risco-surgOut" class="rk-scorebox"></div></div>
       </section>
 
       <!-- ASA -->
@@ -13672,6 +13680,7 @@ const risco = {
     const lbl = v => Array.isArray(v) ? v[0] : v;   /* alguns escores vêm como [rótulo, %] */
     const parts = [];
     if (r.global != null && r.global !== '') parts.push('Risco global ≈ ' + (typeof r.global === 'number' ? r.global.toFixed(1) : r.global) + '%' + (r.globalLabel ? ' (' + r.globalLabel + ')' : ''));
+    if (r.surg) parts.push('Risco cirúrgico ' + r.surg.risco.toLowerCase() + ' (MACE ' + r.surg.mace + ')' + (r.surg.proc ? ' — ' + r.surg.proc : ''));
     const asaClasse = risco._val('asa');
     if (asaClasse) parts.push('ASA ' + asaClasse);
     if (r.rcri != null && r.rcri !== '') parts.push('RCRI ≈ ' + lbl(r.rcri) + '%');
@@ -13705,6 +13714,28 @@ const risco = {
         }
         try { markDirty(); } catch (e) {}
         toast(resumo ? '← De volta à Pré — resultado dos escores trazido' : '← De volta à avaliação pré-anestésica');
+      } catch (e) {}
+    }, 200);
+  },
+
+  /* Vai para a Ficha de Anestesia, incluindo (ou não) o resultado dos escores
+     no campo "Risco / observações adicionais" (Dados pré-anestésicos). */
+  voltarAnest(incluir) {
+    try { risco.atualizar(); } catch (e) {}
+    const resumo = incluir ? risco.resumoTexto() : '';
+    ui.navegar('anestesia');
+    setTimeout(() => {
+      try {
+        const f = document.getElementById('form-anestesia');
+        if (!f) return;
+        if (incluir && resumo) {
+          const campo = f.querySelector('[name="pre_observacoes"]');
+          if (campo && !(campo.value || '').includes(resumo.slice(0, 24))) {
+            campo.value = (campo.value ? campo.value.trim() + '\n' : '') + 'Escores de risco: ' + resumo;
+          }
+        }
+        try { markDirty(); } catch (e) {}
+        toast(incluir ? '💉 Ficha de anestesia — escores de risco incluídos' : '💉 Ficha de anestesia');
       } catch (e) {}
     }, 200);
   },
@@ -13785,6 +13816,14 @@ const risco = {
     const out = {};
     const asa = parseInt(risco._val('asa') || 1), asaP = risco._asaRisk(asa);
     const setHTML = (id, html) => { const el = risco._$(id); if (el) el.innerHTML = html; };
+    /* Risco cirúrgico intrínseco (porte do procedimento → risco cardíaco MACE) */
+    const SURG = { baixo: ['Baixo', '< 1%', 'Procedimentos de baixo estresse (endoscopia, catarata, superficiais).'],
+      intermediario: ['Intermediário', '1–5%', 'Estresse moderado (colecistectomia, artroplastia, cabeça-pescoço).'],
+      alto: ['Alto', '> 5%', 'Alto estresse (aórtica/vascular maior, torácica, Whipple, cardíaca).'] };
+    const sv = risco._val('surgRisk') || 'baixo';
+    const sm = SURG[sv] || SURG.baixo;
+    const procNome = (risco._val('procBusca') || '').trim();
+    setHTML('surgOut', `${risco._pill(sm[0])} ${procNome ? '<b>' + risco._esc(procNome) + '</b> — ' : ''}Risco intrínseco do procedimento: evento cardiovascular maior (MACE) <b>${sm[1]}</b>. <span class="rk-note">${risco._esc(sm[2])}</span>`);
     setHTML('asaOut', `${risco._pill(asa <= 2 ? 'Baixo' : asa === 3 ? 'Intermediário' : asa === 4 ? 'Alto' : 'Muito alto')} ASA ${asa}. Risco observacional aproximado: <b>≈${asaP}%</b>. ${risco._val('mets') === 'poor' ? 'Capacidade funcional reduzida/desconhecida.' : 'Capacidade funcional ≥4 METs favorável.'}`);
     const rcri = risco._countChecked('#form-risco .rcri'), rP = risco._rcriRisk(rcri), rLab = rcri === 0 ? 'Baixo' : rcri === 1 ? 'Intermediário' : 'Alto';
     setHTML('rcriOut', `${risco._pill(rLab)} ${rcri} ponto(s). Evento cardíaco maior: <b>≈${rP}%</b>.`);
@@ -13820,6 +13859,7 @@ const risco = {
     risco._ultimoResumo = {
       asa: asaP, rcri: rP, rcriPts: rcri, ariscat: ar, ariscatPts: ari, stop: sr, stopPts: stop,
       caprini: cr, capriniPts: cap, apfel: apP, apfelPts: ap, egfr: eg, egfrRisk: er, airway: aw, airwayPts: air,
+      surg: { risco: sm[0], mace: sm[1], proc: procNome },
       global: global, globalLabel: gl
     };
   },
@@ -13963,6 +14003,7 @@ const risco = {
     const linha = (lab, val) => `<tr><td>${lab}</td><td style="text-align:right;font-weight:600">${val}</td></tr>`;
     return `<table class="rk-print-table" style="width:100%;border-collapse:collapse;font-size:10pt">
       ${linha('Risco global integrado', '≈' + r.global.toFixed(1) + '% (' + r.globalLabel + ')')}
+      ${r.surg ? linha('Risco cirúrgico (procedimento)' + (r.surg.proc ? ' — ' + risco._esc(r.surg.proc) : ''), r.surg.risco + ' · MACE ' + r.surg.mace) : ''}
       ${linha('ASA — risco observacional', '≈' + r.asa + '%')}
       ${linha('RCRI — evento cardíaco (' + r.rcriPts + ' pt)', '≈' + r.rcri + '%')}
       ${linha('ARISCAT — complicação pulmonar (' + r.ariscatPts + ' pt)', '≈' + r.ariscat[1] + '% (' + r.ariscat[0] + ')')}
