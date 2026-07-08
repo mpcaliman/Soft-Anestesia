@@ -6173,9 +6173,8 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
 <div class="module" id="module-risco" data-module="risco">
   <div class="action-bar">
     <button class="btn btn-sm" id="btn-expandir-risco" onclick="ui.alternarTodos('risco')" title="Expandir ou recolher todos os campos">⊕ Expandir tudo</button>
-    <button class="btn" id="btn-risco-voltar-pre" style="display:none;background:var(--primary-light);color:var(--primary-darker);border-color:var(--primary)" onclick="risco.voltarPre()" title="Retorna à avaliação pré-anestésica trazendo o resultado dos escores"><span class="icon">←</span> Voltar à Pré-anestésica</button>
-    <button class="btn btn-sm" onclick="risco.voltarAnest(true)" title="Vai para a Ficha de Anestesia levando o resultado dos escores">💉 Ficha (com escores)</button>
-    <button class="btn btn-sm" onclick="risco.voltarAnest(false)" title="Vai para a Ficha de Anestesia sem incluir os escores">💉 Ficha (sem escores)</button>
+    <button class="btn" style="background:var(--primary-light);color:var(--primary-darker);border-color:var(--primary)" onclick="risco.voltarPre(true)" title="Retorna à avaliação pré-anestésica levando o resultado dos escores"><span class="icon">←</span> Pré-anestésica (com escores)</button>
+    <button class="btn btn-sm" onclick="risco.voltarPre(false)" title="Retorna à avaliação pré-anestésica sem incluir os escores">← Pré-anestésica (sem escores)</button>
     <button class="btn btn-primary" onclick="risco.novo()"><span class="icon">📄</span> Novo</button>
     <button class="btn btn-success" onclick="risco.salvar()"><span class="icon">💾</span> Salvar</button>
     <button class="btn" onclick="risco.atualizar()"><span class="icon">🔄</span> Recalcular</button>
@@ -13692,50 +13691,31 @@ const risco = {
     return parts.join(' · ');
   },
 
-  /* Volta à avaliação pré-anestésica (preservada), trazendo o resultado dos escores */
-  voltarPre() {
+  /* Volta à avaliação pré-anestésica (preservada), incluindo (ou não) o
+     resultado dos escores no campo "Resultado dos escores de risco". */
+  voltarPre(incluir = true) {
     try { risco.atualizar(); } catch (e) {}
-    const resumo = risco.resumoTexto();
-    const glob = risco._ultimoResumo ? risco._ultimoResumo.globalLabel : '';
+    const resumo = incluir ? risco.resumoTexto() : '';
+    const glob = (incluir && risco._ultimoResumo) ? risco._ultimoResumo.globalLabel : '';
     ui.navegar('pre');
     setTimeout(() => {
       try {
         const f = document.getElementById('form-pre');
         if (!f) return;
-        const rEl = f.querySelector('[name="risco_resumo"]');
-        if (rEl && resumo) rEl.value = resumo;
-        const wrap = document.getElementById('pre-risco-resumo-wrap');
-        if (wrap && (resumo || (rEl && rEl.value))) wrap.style.display = '';
-        /* Preenche a classificação de risco do Pré se ainda estiver vazia */
-        const sel = f.querySelector('[name="risco"]');
-        if (sel && !sel.value && glob) {
-          const map = { 'Muito baixo': 'Baixo', 'Baixo': 'Baixo', 'Moderado': 'Moderado', 'Intermediário': 'Moderado', 'Alto': 'Alto', 'Muito alto': 'Alto' };
-          if (map[glob]) sel.value = map[glob];
-        }
-        try { markDirty(); } catch (e) {}
-        toast(resumo ? '← De volta à Pré — resultado dos escores trazido' : '← De volta à avaliação pré-anestésica');
-      } catch (e) {}
-    }, 200);
-  },
-
-  /* Vai para a Ficha de Anestesia, incluindo (ou não) o resultado dos escores
-     no campo "Risco / observações adicionais" (Dados pré-anestésicos). */
-  voltarAnest(incluir) {
-    try { risco.atualizar(); } catch (e) {}
-    const resumo = incluir ? risco.resumoTexto() : '';
-    ui.navegar('anestesia');
-    setTimeout(() => {
-      try {
-        const f = document.getElementById('form-anestesia');
-        if (!f) return;
-        if (incluir && resumo) {
-          const campo = f.querySelector('[name="pre_observacoes"]');
-          if (campo && !(campo.value || '').includes(resumo.slice(0, 24))) {
-            campo.value = (campo.value ? campo.value.trim() + '\n' : '') + 'Escores de risco: ' + resumo;
+        if (incluir) {
+          const rEl = f.querySelector('[name="risco_resumo"]');
+          if (rEl && resumo) rEl.value = resumo;
+          const wrap = document.getElementById('pre-risco-resumo-wrap');
+          if (wrap && (resumo || (rEl && rEl.value))) wrap.style.display = '';
+          /* Preenche a classificação de risco do Pré se ainda estiver vazia */
+          const sel = f.querySelector('[name="risco"]');
+          if (sel && !sel.value && glob) {
+            const map = { 'Muito baixo': 'Baixo', 'Baixo': 'Baixo', 'Moderado': 'Moderado', 'Intermediário': 'Moderado', 'Alto': 'Alto', 'Muito alto': 'Alto' };
+            if (map[glob]) sel.value = map[glob];
           }
+          try { markDirty(); } catch (e) {}
         }
-        try { markDirty(); } catch (e) {}
-        toast(incluir ? '💉 Ficha de anestesia — escores de risco incluídos' : '💉 Ficha de anestesia');
+        toast(incluir ? '← De volta à Pré — resultado dos escores trazido' : '← De volta à avaliação pré-anestésica (sem escores)');
       } catch (e) {}
     }, 200);
   },
