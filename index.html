@@ -598,8 +598,8 @@ html[data-theme="dark"] .theme-toggle:hover {
 .comorb-chip input { width: 14px; height: 14px; flex-shrink: 0; }
 
 /* Atalhos rápidos (chips inline no formulário) das comorbidades mais comuns */
-.comorb-rapidas { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
-.comorb-rapidas .cr-lbl { font-size: .72rem; color: var(--text-mute); font-weight: 600; }
+.comorb-rapidas, .alerg-rapidas { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+.comorb-rapidas .cr-lbl, .alerg-rapidas .cr-lbl { font-size: .72rem; color: var(--text-mute); font-weight: 600; }
 .comorb-chip-rapida {
   padding: 4px 10px; border: 1px solid var(--border); border-radius: 14px;
   background: var(--surface); font-size: .78rem; cursor: pointer; font-family: inherit;
@@ -3702,7 +3702,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
           <div class="field col-3"><label>Data de nascimento</label><input type="date" name="nasc" oninput="pre.calcIdade()"></div>
           <div class="field col-2"><label>Idade</label><input type="text" name="idade"></div>
           <div class="field col-2"><label>Sexo</label>
-            <select name="sexo"><option value="">—</option><option>Masculino</option><option>Feminino</option><option>Outro</option></select>
+            <select name="sexo" onchange="pre._calcIMC()"><option value="">—</option><option>Masculino</option><option>Feminino</option><option>Outro</option></select>
           </div>
           <div class="field col-6">
             <label>Cirurgia proposta <small style="color:var(--text-mute);font-weight:400">(autocompleta da CBHPM)</small></label>
@@ -3731,7 +3731,8 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
             <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.comorbidades.abrir('#form-pre [name=comorbidades]')">➕ Mais comorbidades…</button><button type="button" class="btn btn-xs tpl-btn" onclick="window.comorbidades.negar('#form-pre [name=comorbidades]')">🚫 Nega comorbidades</button></div>
           </div>
           <div class="field col-6"><label>Alergias</label><textarea name="alergias" rows="2"></textarea>
-            <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.alergias.abrir('#form-pre [name=alergias]')">⚠️ Selecionar alergias</button><button type="button" class="btn btn-xs tpl-btn" onclick="window.alergias.negarCampo('#form-pre [name=alergias]')">🚫 Nega alergias</button></div>
+            <div class="alerg-rapidas" data-alvo="#form-pre [name=alergias]"></div>
+            <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.alergias.abrir('#form-pre [name=alergias]')">⚠️ Mais alergias…</button><button type="button" class="btn btn-xs tpl-btn" onclick="window.alergias.negarCampo('#form-pre [name=alergias]')">🚫 Nega alergias</button></div>
           </div>
           <div class="field col-12">
             <label>Medicações em uso</label>
@@ -3752,7 +3753,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
 
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">3</span><h2>Exames<small>Exame físico e laboratoriais</small></h2></div>
+        <div class="card-title-wrap"><span class="card-num">3</span><h2>Sinais vitais e exames<small>Medidas, exame físico e laboratoriais</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
@@ -3763,6 +3764,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
               <div class="lab-item"><span>Peso (kg)</span><input type="number" step="0.1" name="peso" inputmode="decimal" oninput="pre._calcIMC()"></div>
               <div class="lab-item"><span>Altura (cm)</span><input type="number" step="0.1" name="altura" inputmode="decimal" oninput="pre._calcIMC()"></div>
               <div class="lab-item"><span>IMC</span><input type="text" name="imc" readonly placeholder="auto"></div>
+              <div class="lab-item"><span>Peso ideal / corrigido</span><input type="text" name="peso_ideal" readonly placeholder="auto" title="Peso ideal (Devine) e peso ajustado para obesos — informe sexo, altura e peso"></div>
               <div class="lab-item"><span>PA (mmHg)</span><input type="text" name="pa" placeholder="130/70"></div>
               <div class="lab-item"><span>FC (bpm)</span><input type="text" name="fc" inputmode="numeric"></div>
               <div class="lab-item"><span>FR (irpm)</span><input type="text" name="fr" inputmode="numeric"></div>
@@ -3826,9 +3828,24 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
       </div>
     </section>
 
+    <!-- PARECERES DE OUTRAS CLÍNICAS -->
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">4</span><h2>Classificação e risco<small>ASA, via aérea e escores</small></h2></div>
+        <div class="card-title-wrap"><span class="card-num">4</span><h2>Pareceres de outras clínicas<small>Avaliações de especialistas — cardiologia, pneumologia, etc.</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <div class="grid">
+          <div class="field col-12"><label>🫀 Parecer / risco cardiológico</label><textarea name="parecer_cardio" rows="2" placeholder="Ex.: liberado do ponto de vista cardiológico; manter betabloqueador; otimizar PA..."></textarea></div>
+          <div class="field col-12"><label>🫁 Parecer pneumológico</label><textarea name="parecer_pneumo" rows="2" placeholder="Ex.: função pulmonar adequada; otimizar broncodilatador; cessar tabagismo..."></textarea></div>
+          <div class="field col-12"><label>🩺 Outros pareceres <small style="color:var(--text-mute);font-weight:400">— endocrinologia, nefrologia, hematologia, neurologia, etc.</small></label><textarea name="parecer_outros" rows="2"></textarea></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-num">5</span><h2>Classificação de risco<small>ASA, via aérea e escores</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
@@ -3847,25 +3864,10 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
               <option>Via aérea difícil prevista</option><option>Sem alterações</option>
             </select>
           </div>
-          <div class="field col-3"><label>Jejum</label>
-            <select name="jejum" onchange="pre.jejum.aplicar(this.value)">
-              <option value="">—</option>
-              <option value="Jejum de 8h — completo e total">Jejum de 8h — completo e total</option>
-              <option value="Jejum de 12h">Jejum de 12h</option>
-              <option value="8h para sólidos e 3h para líquidos claros">8h sólidos / 3h líquidos claros</option>
-              <option value="Jejum pediátrico">Pediátrico (criança)</option>
-              <option value="Outro">Outro (descrever)</option>
-            </select>
-          </div>
           <div class="field col-3"><label>Risco anestésico</label>
             <select name="risco">
               <option value="">—</option><option>Baixo</option><option>Moderado</option><option>Alto</option>
             </select>
-          </div>
-          <div class="field col-12" id="pre-jejum-desc-wrap" style="display:none">
-            <label style="font-size:.78rem;color:var(--text-mute);font-weight:600">Orientação de jejum ao paciente <small style="font-weight:400">— preenchida conforme a opção; sai na impressão/PDF</small></label>
-            <div id="pre-jejum-desc" style="font-size:.85rem;white-space:pre-wrap;line-height:1.5;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface-alt);color:var(--text-soft)"></div>
-            <input type="hidden" name="jejum_orientacao">
           </div>
           <div class="field col-12">
             <button type="button" class="btn btn-sm" onclick="pre.abrirRisco()">🎯 Calcular risco perioperatório (escores)</button>
@@ -3880,11 +3882,26 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
 
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">5</span><h2>Conclusão e orientações<small>Aptidão e orientações ao paciente</small></h2></div>
+        <div class="card-title-wrap"><span class="card-num">6</span><h2>Conclusões e orientações<small>Jejum, medicações a suspender/manter, pré-medicação e aptidão</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
         <div class="grid">
+          <div class="field col-4"><label>Jejum</label>
+            <select name="jejum" onchange="pre.jejum.aplicar(this.value)">
+              <option value="">—</option>
+              <option value="Jejum de 8h — completo e total">Jejum de 8h — completo e total</option>
+              <option value="Jejum de 12h">Jejum de 12h</option>
+              <option value="8h para sólidos e 3h para líquidos claros">8h sólidos / 3h líquidos claros</option>
+              <option value="Jejum pediátrico">Pediátrico (criança)</option>
+              <option value="Outro">Outro (descrever)</option>
+            </select>
+          </div>
+          <div class="field col-12" id="pre-jejum-desc-wrap" style="display:none">
+            <label style="font-size:.78rem;color:var(--text-mute);font-weight:600">Orientação de jejum ao paciente <small style="font-weight:400">— preenchida conforme a opção; sai na impressão/PDF</small></label>
+            <div id="pre-jejum-desc" style="font-size:.85rem;white-space:pre-wrap;line-height:1.5;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface-alt);color:var(--text-soft)"></div>
+            <input type="hidden" name="jejum_orientacao">
+          </div>
           <div class="field col-12"><label>💊 Prescrição pré-anestésica (pré-medicação) <small style="color:var(--text-mute);font-weight:400">— marque os medicamentos; a dose vem da literatura e é editável. Comunica-se com a Ficha de Anestesia.</small></label>
             <div id="pre-premed-lista" style="margin:4px 0 8px"></div>
             <textarea name="medicacao_pre" rows="2" placeholder="Prescrição pré-anestésica — marque os medicamentos acima (preenche automaticamente) ou digite livremente."></textarea>
@@ -3910,7 +3927,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
 
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">6</span><h2>Assinatura<small>Carimbo / desenho / certificado digital</small></h2></div>
+        <div class="card-title-wrap"><span class="card-num">7</span><h2>Assinatura<small>Carimbo / desenho / certificado digital</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body" id="sig-pre-body">
@@ -8927,6 +8944,7 @@ const ui = {
         else if (modName === 'agenda') agenda.render();
         else if (modName === 'pacientes') pacientes.render();
         else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
+        else if (modName === 'pre') { try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} }
         else if (modName === 'anestesia') { anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} }
         else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} }, 60); }
         else if (modName === 'termo') { setTimeout(() => { try { (termo.sig._ajustar || []).forEach(fn => fn()); assinatura.initCanvas('sig-termo'); } catch (e) {} }, 80); }
@@ -9375,9 +9393,15 @@ const pre = {
     _compor() {
       const ta = document.querySelector('#form-pre [name="medicacao_pre"]');
       if (!ta) return;
+      /* Cada linha é uma prescrição: nome — dose/via/tempo (o texto da dose já
+         inclui via e tempo). Ao final, a ressalva de administração hospitalar. */
       const linhas = pre.premed.MEDS
         .filter(m => pre.premed._sel[m.key] && pre.premed._sel[m.key].on)
         .map(m => '• ' + m.nome + ' — ' + (pre.premed._sel[m.key].dose || m.dose));
+      if (linhas.length) {
+        linhas.push('');
+        linhas.push('Observação: pré-medicação a ser administrada somente no hospital, sob autorização e supervisão do anestesiologista.');
+      }
       ta.value = linhas.join('\n');
     },
     coletar() { try { return JSON.parse(JSON.stringify(pre.premed._sel)); } catch (e) { return {}; } },
@@ -9621,6 +9645,32 @@ const pre = {
     } else {
       out.value = '';
     }
+    /* Peso ideal (Devine) e peso ajustado/corrigido (para obesos) */
+    const outPI = f.querySelector('[name="peso_ideal"]');
+    if (outPI) {
+      const sexo = (f.querySelector('[name="sexo"]') || {}).value || '';
+      outPI.value = pre._pesoIdealTexto(peso, alt, sexo);
+    }
+  },
+  /* Peso ideal (fórmula de Devine) em kg; requer altura (cm) e sexo */
+  _pesoIdeal(altCm, sexo) {
+    const cm = altCm > 3 ? altCm : altCm * 100;
+    const polegadasAcima5pes = (cm - 152.4) / 2.54;   /* 5 pés = 152,4 cm */
+    const base = /fem/i.test(sexo) ? 45.5 : 50;
+    const pi = base + 2.3 * polegadasAcima5pes;
+    return pi > 0 ? pi : null;
+  },
+  _pesoIdealTexto(peso, altCm, sexo) {
+    if (!(altCm > 0) || !sexo) return '';
+    const pi = pre._pesoIdeal(altCm, sexo);
+    if (!pi || !isFinite(pi)) return '';
+    let txt = 'ideal ' + Math.round(pi) + ' kg';
+    /* Peso ajustado só faz sentido quando o real supera o ideal (obesidade) */
+    if (peso > 0 && peso > pi) {
+      const ajustado = pi + 0.4 * (peso - pi);
+      txt += ' · ajust. ' + Math.round(ajustado) + ' kg';
+    }
+    return txt;
   },
   abrirRisco() {
     const f = document.getElementById(pre.formId);
@@ -13145,7 +13195,7 @@ const comorbidades = {
       if (wrap._render) return;
       wrap.innerHTML = '<span class="cr-lbl">Comuns:</span>' +
         comorbidades.RAPIDAS.map(([lbl, val]) =>
-          '<button type="button" class="comorb-chip-rapida" data-val="' + utils.escapeAttr(val) + '" onclick="comorbidades.toggleRapido(this)">' + utils.escapeHTML(lbl) + '</button>'
+          '<button type="button" class="comorb-chip-rapida" data-val="' + utils.escapeAttr(val) + '" onclick="window.comorbidades.toggleRapido(this)">' + utils.escapeHTML(lbl) + '</button>'
         ).join('');
       wrap._render = true;
     });
@@ -13153,7 +13203,7 @@ const comorbidades = {
   },
   /* Alterna uma comorbidade no campo alvo (adiciona se não houver, remove se houver) */
   toggleRapido(btn) {
-    const wrap = btn.closest('.comorb-rapidas');
+    const wrap = btn.closest('.comorb-rapidas, .alerg-rapidas');
     if (!wrap) return;
     const alvo = document.querySelector(wrap.dataset.alvo || '');
     if (!alvo) return;
@@ -13169,7 +13219,7 @@ const comorbidades = {
   },
   /* Sincroniza o destaque dos chips com o conteúdo atual dos campos */
   syncRapidas() {
-    document.querySelectorAll('.comorb-rapidas').forEach(wrap => {
+    document.querySelectorAll('.comorb-rapidas, .alerg-rapidas').forEach(wrap => {
       const alvo = document.querySelector(wrap.dataset.alvo || '');
       const txt = alvo ? (alvo.value || '').toLowerCase() : '';
       wrap.querySelectorAll('.comorb-chip-rapida').forEach(btn => {
@@ -13202,6 +13252,25 @@ const alergias = {
     { cat: 'Ambientais / Outros', itens: ['Látex', 'Esparadrapo / Adesivos', 'Clorexidina', 'Iodo / PVPI', 'Ácaro / Poeira', 'Picada de inseto'] }
   ],
   _campoAlvo: null,
+
+  /* Chips rápidos das 4 alergias medicamentosas mais comuns (na tela) */
+  RAPIDAS: [
+    ['Dipirona', 'Dipirona'],
+    ['Penicilina', 'Penicilina'],
+    ['AINEs / AAS', 'AINEs / AAS'],
+    ['Contraste iodado', 'Contraste iodado']
+  ],
+  renderRapidas() {
+    document.querySelectorAll('.alerg-rapidas').forEach(wrap => {
+      if (wrap._render) return;
+      wrap.innerHTML = '<span class="cr-lbl">Comuns:</span>' +
+        alergias.RAPIDAS.map(([lbl, val]) =>
+          '<button type="button" class="comorb-chip-rapida" data-val="' + utils.escapeAttr(val) + '" onclick="window.comorbidades.toggleRapido(this)">' + utils.escapeHTML(lbl) + '</button>'
+        ).join('');
+      wrap._render = true;
+    });
+    try { comorbidades.syncRapidas(); } catch (e) {}
+  },
 
   abrir(seletorCampo) {
     alergias._campoAlvo = seletorCampo;
@@ -13878,7 +13947,9 @@ const risco = {
     return bs > 0 ? best : null;
   },
   _formatConduta(m) {
-    return `Conduta: ${m.conduta} Retorno: ${m.retorno}${m.alerta ? ' Alerta: ' + m.alerta : ''} [${m.classe} — ${m.ref}]`;
+    /* Simplificado: apenas o que suspender/manter e quando retornar — nada mais. */
+    const retorno = m.retorno ? ' Retornar: ' + m.retorno : '';
+    return `${m.conduta}${retorno}`;
   },
 
   /* ---- impressão compacta (só percentuais) ---- */
@@ -24704,6 +24775,7 @@ ${TAG_CLOSE_HTML}`;
   _vitaisPre(d) {
     const vitais = [
       ['Peso', d.peso ? d.peso + ' kg' : ''], ['Altura', d.altura ? d.altura + ' cm' : ''], ['IMC', d.imc],
+      ['Peso ideal / corrigido', d.peso_ideal],
       ['PA', d.pa], ['FC', d.fc ? d.fc + ' bpm' : ''], ['FR', d.fr ? d.fr + ' irpm' : ''],
       ['SpO₂', d.spo2 ? d.spo2 + '%' : ''], ['Temp', d.temp ? d.temp + '°C' : ''], ['Dor', d.dor]
     ];
@@ -24797,13 +24869,9 @@ ${TAG_CLOSE_HTML}`;
           ${printPreview._field('Nascimento', utils.formatarData(d.nasc))}
           ${printPreview._field('Idade', d.idade)}
           ${printPreview._field('Sexo', d.sexo)}
-          ${printPreview._field('Peso', d.peso ? d.peso + ' kg' : '')}
-          ${printPreview._field('Altura', d.altura ? d.altura + ' cm' : '')}
           ${printPreview._field('Data avaliação', utils.formatarData(d.data))}
           ${printPreview._field('Senha / Autorização', d.senha)}
         </div>
-      `) +
-      printPreview._section('Procedimento', `
         <div class="pp-grid">
           ${printPreview._field('Cirurgia', d.cirurgia)}
           ${printPreview._field('Cirurgião', d.cirurgiao)}
@@ -24817,26 +24885,35 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._field('Cirurgias prévias', d.cirurgias_previas, true)}
         ${printPreview._field('Antecedentes anestésicos', d.antecedentes, true)}
       `) +
-      printPreview._section('Avaliação', `
-        <div class="pp-grid">
-          ${printPreview._field('Classificação ASA', d.asa)}
-          ${printPreview._field('Via aérea', d.via_aerea)}
-          ${printPreview._field('Jejum', d.jejum)}
-          ${printPreview._field('Risco', d.risco)}
-        </div>
-        ${printPreview._field('Resultado dos escores de risco', d.risco_resumo, true)}
-        ${printPreview._field('Orientação de jejum ao paciente', d.jejum_orientacao, true)}
+      printPreview._section('Sinais vitais e exames', `
         ${printPreview._vitaisPre(d)}
         ${printPreview._field('Exame físico', d.exame_fisico, true)}
         ${printPreview._labGrid(d)}
         ${printPreview._field('ECG', d.lab_ecg, true)}
         ${printPreview._field('ECO', d.lab_eco, true)}
         ${printPreview._field('Outros exames', d.exames_compl, true)}
-        ${printPreview._field('Prescrição pré-anestésica', d.medicacao_pre, true)}
+      `) +
+      printPreview._section('Pareceres de outras clínicas', `
+        ${printPreview._field('Cardiológico / risco cardíaco', d.parecer_cardio, true)}
+        ${printPreview._field('Pneumológico', d.parecer_pneumo, true)}
+        ${printPreview._field('Outros pareceres', d.parecer_outros, true)}
+      `) +
+      printPreview._section('Classificação de risco', `
+        <div class="pp-grid">
+          ${printPreview._field('Classificação ASA', d.asa)}
+          ${printPreview._field('Via aérea', d.via_aerea)}
+          ${printPreview._field('Risco', d.risco)}
+        </div>
+        ${printPreview._field('Resultado dos escores de risco', d.risco_resumo, true)}
+      `) +
+      printPreview._blocoRiscoPre(d) +
+      printPreview._section('Conclusões e orientações', `
+        ${printPreview._field('Jejum', d.jejum)}
+        ${printPreview._field('Orientação de jejum ao paciente', d.jejum_orientacao, true)}
+        ${printPreview._field('Prescrição pré-anestésica (pré-medicação)', d.medicacao_pre, true)}
         ${printPreview._field('Orientações', d.orientacoes, true)}
         ${printPreview._field('Conclusão', d.conclusao, true)}
       `) +
-      printPreview._blocoRiscoPre(d) +
       printPreview._signature(d.anestesiologista, d.crm ? 'CRM ' + d.crm : '', d) +
       printPreview._footer('Avaliação pré-anestésica');
   },
@@ -29714,6 +29791,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.demo = demo;
   try { pre.premed.render(); } catch (e) {}
   try { comorbidades.renderRapidas(); } catch (e) {}
+  try { alergias.renderRapidas(); } catch (e) {}
   window.ajustesUsuarios = ajustesUsuarios;
   window.termoPadrao = termoPadrao;
   window.termoBiblioteca = termoBiblioteca;
