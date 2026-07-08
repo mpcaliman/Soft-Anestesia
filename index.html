@@ -720,6 +720,7 @@ table.vitais-grade .vg-inp {
   color: inherit; font-family: inherit;
 }
 table.vitais-grade .vg-inp.vg-pa { width: 68px; }
+table.vitais-grade .vg-inp.vg-sel { width: 116px; text-align: left; }
 table.vitais-grade .vg-inp:hover { border-color: var(--border); background: #fff; }
 table.vitais-grade .vg-inp:focus { border-color: var(--primary); background: #fff; outline: none; box-shadow: 0 0 0 2px rgba(28,100,169,.15); }
 table.vitais-grade .vg-hora {
@@ -4995,6 +4996,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
               <th style="width:75px">PAD</th>
               <th style="width:75px">PAM</th>
               <th style="width:70px">FC</th>
+              <th style="width:120px">Ritmo</th>
               <th style="width:75px">SpO₂</th>
               <th style="width:80px">EtCO₂</th>
               <th style="width:70px">FR</th>
@@ -15800,8 +15802,8 @@ const anestesia = {
       markDirty();
     },
     _colIdx(k) {
-      /* Mapeia coluna por nome: hora=1, pas=2, pad=3, pam=4, fc=5, spo2=6, etco2=7, fr=8, temp=9, bis=10, tof=11, glic=12, pvc=13, pic=14, dc=15, scvo2=16, obs=17, rm=18 */
-      const map = { hora: 1, pas: 2, pad: 3, pam: 4, fc: 5, spo2: 6, etco2: 7, fr: 8, temp: 9, bis: 10, tof: 11, glic: 12, pvc: 13, pic: 14, dc: 15, scvo2: 16 };
+      /* Mapeia coluna por nome: hora=1, pas=2, pad=3, pam=4, fc=5, ritmo=6, spo2=7, etco2=8, fr=9, temp=10, bis=11, tof=12, glic=13, pvc=14, pic=15, dc=16, scvo2=17, diurese=18, obs=19, rm=20 */
+      const map = { hora: 1, pas: 2, pad: 3, pam: 4, fc: 5, ritmo: 6, spo2: 7, etco2: 8, fr: 9, temp: 10, bis: 11, tof: 12, glic: 13, pvc: 14, pic: 15, dc: 16, scvo2: 17 };
       return map[k] || 0;
     },
     /* Coleta detalhes dos dispositivos */
@@ -17805,7 +17807,7 @@ const anestesia = {
       if (!rows.length) return null;
       const tr = rows[rows.length - 1];
       const g = n => (tr.querySelector('[name="vit_' + n + '[]"]') || {}).value || '';
-      return { pas: g('pas'), pad: g('pad'), pam: g('pam'), fc: g('fc'), spo2: g('spo2'),
+      return { pas: g('pas'), pad: g('pad'), pam: g('pam'), fc: g('fc'), ritmo: g('ritmo'), spo2: g('spo2'),
         etco2: g('etco2'), fr: g('fr'), temp: g('temp'), bis: g('bis'), tof: g('tof'),
         glic: g('glic'), pvc: g('pvc'), pic: g('pic'), dc: g('dc'), scvo2: g('scvo2') };
     },
@@ -17817,6 +17819,7 @@ const anestesia = {
       pad:  ['PNI', 'PA invasiva'],
       pam:  ['PNI', 'PA invasiva'],
       fc:   ['ECG', 'Oximetria', 'PNI', 'PA invasiva'],
+      ritmo:['ECG'],
       spo2: ['Oximetria'],
       etco2:['Capnografia'],
       fr:   ['FR', 'Capnografia'],
@@ -17830,8 +17833,15 @@ const anestesia = {
       scvo2:['ScvO₂/SvO₂']
     },
     /* Conjunto padrão de parâmetros quando NENHUM monitor foi selecionado ainda */
-    _PARAMS_UNIVERSO: ['pas','pad','pam','fc','spo2','etco2','fr','temp','bis','tof','glic','pvc','pic','dc','scvo2'],
+    _PARAMS_UNIVERSO: ['pas','pad','pam','fc','ritmo','spo2','etco2','fr','temp','bis','tof','glic','pvc','pic','dc','scvo2'],
     _PARAMS_PADRAO:  ['pas','pad','pam','fc','spo2','etco2'],
+
+    /* Opções de ritmo cardíaco (ECG) */
+    RITMO_OPCOES: ['Sinusal','Taquicardia sinusal','Bradicardia sinusal','Fibrilação atrial','Flutter atrial','Taquicardia supraventricular','Ritmo juncional','Extrassístoles','Bloqueio AV','Ritmo de marca-passo','Taquicardia ventricular','Fibrilação ventricular','Assistolia','Outro'],
+    _ritmoOptions(sel) {
+      return '<option value="">—</option>' + anestesia.vitais.RITMO_OPCOES.map(o =>
+        '<option' + (o === sel ? ' selected' : '') + '>' + utils.escapeHTML(o) + '</option>').join('');
+    },
 
     /* Parâmetros que já possuem algum valor registrado (nunca escondê-los) */
     _paramsComDados() {
@@ -17891,6 +17901,7 @@ const anestesia = {
       { label: 'PA', kind: 'pa' },
       { label: 'PAM', field: 'pam' },
       { label: 'FC', field: 'fc' },
+      { label: 'Ritmo', field: 'ritmo', kind: 'select' },
       { label: 'SpO₂', field: 'spo2' },
       { label: 'EtCO₂', field: 'etco2' },
       { label: 'FR', field: 'fr' },
@@ -17935,6 +17946,9 @@ const anestesia = {
             const val = (pas || pad) ? ((pas || '') + '/' + (pad || '')) : '';
             html += '<td><input type="text" class="vg-inp vg-pa" inputmode="numeric" data-rowidx="' + c.idx +
               '" data-kind="pa" placeholder="120/80" value="' + ea(val) + '" onchange="anestesia.vitais._gradeEdit(this)"></td>';
+          } else if (p.kind === 'select') {
+            html += '<td><select class="vg-inp vg-sel" data-rowidx="' + c.idx + '" data-field="' + p.field + '"' +
+              ' onchange="anestesia.vitais._gradeEdit(this)">' + anestesia.vitais._ritmoOptions(g(c.tr, p.field)) + '</select></td>';
           } else {
             html += '<td><input type="number" class="vg-inp" data-rowidx="' + c.idx + '" data-field="' + p.field + '"' +
               (p.step ? ' step="' + p.step + '"' : '') + ' value="' + ea(g(c.tr, p.field)) +
@@ -18041,6 +18055,7 @@ const anestesia = {
         <td data-label="PAD"><input type="number" name="vit_pad[]" value="${utils.escapeAttr(dados.pad || '')}" min="0" placeholder="80" oninput="anestesia.vitais._onPAChange(this)"></td>
         <td data-label="PAM"><input type="number" name="vit_pam[]" value="${utils.escapeAttr(dados.pam || pamCalc || '')}" min="0" placeholder="auto" title="Calculado automaticamente — pode editar"></td>
         <td data-label="FC"><input type="number" name="vit_fc[]" value="${utils.escapeAttr(dados.fc || '')}" min="0"></td>
+        <td data-label="Ritmo"><select name="vit_ritmo[]" title="Ritmo cardíaco (ECG)">${anestesia.vitais._ritmoOptions(dados.ritmo || '')}</select></td>
         <td data-label="SpO₂"><input type="number" name="vit_spo2[]" value="${utils.escapeAttr(dados.spo2 || '')}" min="0" max="100"></td>
         <td data-label="EtCO₂"><input type="number" name="vit_etco2[]" value="${utils.escapeAttr(dados.etco2 || '')}" min="0"></td>
         <td data-label="FR"><input type="number" name="vit_fr[]" value="${utils.escapeAttr(dados.fr || '')}" min="0"></td>
@@ -18060,7 +18075,7 @@ const anestesia = {
         </td>
       `;
       tbody.appendChild(tr);
-      tr.querySelectorAll('input').forEach(i => i.addEventListener('change', anestesia.vitais.atualizarGrafico));
+      tr.querySelectorAll('input, select').forEach(i => i.addEventListener('change', anestesia.vitais.atualizarGrafico));
       anestesia.vitais.atualizarGrafico();
       return tr;
     },
@@ -18147,7 +18162,7 @@ const anestesia = {
       anestesia.vitais.add(false, {
         hora: utils.horaAtual(),
         pas: q('vit_pas[]'), pad: q('vit_pad[]'), pam: q('vit_pam[]'),
-        fc: q('vit_fc[]'), spo2: q('vit_spo2[]'),
+        fc: q('vit_fc[]'), ritmo: q('vit_ritmo[]'), spo2: q('vit_spo2[]'),
         etco2: q('vit_etco2[]'), fr: q('vit_fr[]'),
         temp: q('vit_temp[]'), bis: q('vit_bis[]'), tof: q('vit_tof[]'),
         glic: q('vit_glic[]'), pvc: q('vit_pvc[]'), pic: q('vit_pic[]'),
@@ -18221,6 +18236,7 @@ const anestesia = {
           pam: tr.querySelector('[name="vit_pam[]"]').value,
           pa: (pas && pad) ? (pas + '/' + pad) : '',
           fc: tr.querySelector('[name="vit_fc[]"]').value,
+          ritmo: tr.querySelector('[name="vit_ritmo[]"]')?.value || '',
           spo2: tr.querySelector('[name="vit_spo2[]"]').value,
           etco2: tr.querySelector('[name="vit_etco2[]"]').value,
           fr: tr.querySelector('[name="vit_fr[]"]').value,
@@ -19322,6 +19338,9 @@ const anestesia = {
         if (vit.some(v => v.etco2)) partsV.push(`EtCO₂ ${min('etco2')}–${max('etco2')}`);
         if (vit.some(v => v.temp)) partsV.push(`Temp ${min('temp')}–${max('temp')}°C`);
         if (partsV.length) partes.push(`Sinais vitais variaram: ${partsV.join('; ')}.`);
+        /* Ritmo cardíaco (ECG) — lista os ritmos distintos registrados */
+        const ritmos = [...new Set(vit.map(v => (v.ritmo || '').trim()).filter(Boolean))];
+        if (ritmos.length) partes.push(`Ritmo cardíaco: ${ritmos.join(', ').toLowerCase()}.`);
       }
 
       /* 12. DURAÇÃO + TRANSFERÊNCIA */
@@ -19614,7 +19633,7 @@ const anestesia = {
     document.getElementById('vitais-body').innerHTML = '';
     if (Array.isArray(d.sinais_vitais)) {
       d.sinais_vitais.forEach(v => anestesia.vitais.add(false, {
-        hora: v.hora, pas: v.pas, pad: v.pad, pam: v.pam, fc: v.fc, spo2: v.spo2,
+        hora: v.hora, pas: v.pas, pad: v.pad, pam: v.pam, fc: v.fc, ritmo: v.ritmo, spo2: v.spo2,
         etco2: v.etco2, fr: v.fr, temp: v.temp,
         bis: v.bis, tof: v.tof, glic: v.glic,
         pvc: v.pvc, pic: v.pic, dc: v.dc, scvo2: v.scvo2, diurese: v.diurese,
@@ -25206,6 +25225,7 @@ ${TAG_CLOSE_HTML}`;
       /* Detecta colunas opcionais que têm dados */
       const has = (k) => d.sinais_vitais.some(v => v[k] != null && v[k] !== '');
       const colsOpcionais = [];
+      if (has('ritmo')) colsOpcionais.push({ k: 'ritmo', label: 'Ritmo' });
       if (has('temp'))  colsOpcionais.push({ k: 'temp',  label: 'Temp' });
       if (has('bis'))   colsOpcionais.push({ k: 'bis',   label: 'BIS' });
       if (has('tof'))   colsOpcionais.push({ k: 'tof',   label: 'TOF' });
