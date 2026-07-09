@@ -24454,11 +24454,21 @@ const quickActions = {
 ============================================================================ */
 const protocoloJejum = {
   CATS: {
-    pesada:  { icon:'🍽️', nome:'Refeição completa / carne', ex:'Arroz, feijão, legumes, salada, macarrão, carne magra, frango. Evitar frituras, gorduras, fast-food e ultraprocessados.' },
-    solidos: { icon:'🍞', nome:'Sólidos leves', ex:'Torrada, pão simples, bolacha água e sal, fruta sem gordura.' },
-    formula: { icon:'🍼', nome:'Fórmula infantil / leite não humano', ex:'Fórmula infantil, leite de vaca, compostos lácteos.' },
-    materno: { icon:'🤱', nome:'Leite materno', ex:'Leite materno exclusivo.' },
-    liquidos:{ icon:'💧', nome:'Líquidos claros', ex:'Água, água de coco sem polpa, chás claros sem leite (camomila, hortelã, erva-cidreira), café preto sem leite, suco coado, isotônico claro.' }
+    pesada:  { icon:'🍽️', nome:'Refeição completa / carne',
+      ok:[['🍚','Arroz'],['🫘','Feijão'],['🥗','Salada'],['🥦','Legumes'],['🍝','Macarrão'],['🥩','Carne magra'],['🍗','Frango']],
+      evitar:[['🍤','Frituras'],['🍔','Fast-food'],['🧈','Gorduras'],['🌭','Ultraprocessados']] },
+    solidos: { icon:'🍞', nome:'Sólidos leves',
+      ok:[['🍞','Torrada'],['🥖','Pão simples'],['🍘','Bolacha água e sal'],['🍎','Fruta sem gordura']],
+      evitar:[] },
+    formula: { icon:'🍼', nome:'Fórmula infantil / leite não humano',
+      ok:[['🍼','Fórmula infantil'],['🥛','Leite de vaca']],
+      evitar:[] },
+    materno: { icon:'🤱', nome:'Leite materno',
+      ok:[['🤱','Leite materno']],
+      evitar:[] },
+    liquidos:{ icon:'💧', nome:'Líquidos claros',
+      ok:[['💧','Água'],['🥥','Água de coco'],['🌼','Camomila'],['🌿','Hortelã'],['🍵','Erva-cidreira'],['☕','Café preto'],['🧃','Suco coado'],['🥤','Isotônico claro']],
+      evitar:[['🥛','Leite'],['🍵','Chá com leite'],['🍹','Com polpa'],['🥤','Vitamina'],['🍺','Álcool']] }
   },
   parseIdade(txt) {
     if (txt == null) return null;
@@ -24497,17 +24507,22 @@ const protocoloJejum = {
                           : (ped ? ['pesada', 'solidos', 'formula', 'materno', 'liquidos']
                                  : ['pesada', 'solidos', 'liquidos']);
     const itens = ordem.map(k => {
+      const c = protocoloJejum.CATS[k];
       const h = horas[k];
-      let ex = protocoloJejum.CATS[k].ex;
+      let ok = c.ok.slice();
+      let nota = '';
       if (k === 'liquidos' && carbo) {
-        ex += ' Bebida de carboidrato/maltodextrina (ex.: Gatorade ou similar) — conforme protocolo institucional (comumente ~400 mL até 2h antes no adulto).';
+        ok = ok.concat([['🥤', 'Carboidrato ERAS']]);
+        nota = 'Bebida de carboidrato/maltodextrina (ex.: Gatorade ou similar) — conforme protocolo institucional (comumente ~400 mL até 2h antes no adulto).';
       }
       return {
-        icon: protocoloJejum.CATS[k].icon,
-        nome: protocoloJejum.CATS[k].nome,
+        icon: c.icon,
+        nome: c.nome,
         horas: h,
         limite: data ? new Date(data.getTime() - h * 3600 * 1000) : null,
-        ex: ex
+        ok: ok,
+        evitar: c.evitar.slice(),
+        nota: nota
       };
     });
     return { ok: true, protoNome, ped, soLeite, idade: id, data, itens };
@@ -25181,6 +25196,23 @@ ${TAG_CLOSE_HTML}`;
       printPreview._buildProtocoloJejumAnexo(d);
   },
 
+  /* Cartõezinhos ilustrados de alimentos (emoji + nome) para o anexo — estilos
+     inline para funcionar tanto na pré-visualização quanto na impressão. */
+  _jejumChips(lista, tipo) {
+    if (!lista || !lista.length) return '';
+    const evit = tipo === 'evitar';
+    const bg = evit ? '#fdecea' : '#eef7f0';
+    const bd = evit ? '#f3c6c0' : '#cfe3d4';
+    const lblColor = evit ? '#c0392b' : '#2e7d52';
+    const lblTxt = evit ? '✗ Não consuma' : '✓ Permitido';
+    const chips = lista.map(it =>
+      `<span style="display:inline-flex;flex-direction:column;align-items:center;width:64px;border:1px solid ${bd};background:${bg};border-radius:8px;padding:4px 2px;text-align:center;-webkit-print-color-adjust:exact;print-color-adjust:exact">` +
+      `<span style="font-size:19px;line-height:1">${it[0]}</span>` +
+      `<span style="font-size:7.5pt;color:#333;margin-top:2px;line-height:1.1">${utils.escapeHTML(it[1])}</span></span>`
+    ).join('');
+    return `<div style="font-size:7.5pt;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:${lblColor};margin:5px 0 3px">${lblTxt}</div>` +
+      `<div style="display:flex;flex-wrap:wrap;gap:4px">${chips}</div>`;
+  },
   /* Segundo documento (anexo): protocolo de jejum pré-operatório detalhado.
      Só aparece se marcado na avaliação; usa a identificação do paciente. */
   _buildProtocoloJejumAnexo(d) {
@@ -25192,14 +25224,18 @@ ${TAG_CLOSE_HTML}`;
       `<strong>Idade:</strong> ${utils.escapeHTML(d.idade || '—')} &nbsp;·&nbsp; ` +
       `<strong>Protocolo:</strong> ${utils.escapeHTML(m.protoNome)} &nbsp;·&nbsp; ` +
       `<strong>Procedimento:</strong> ${utils.escapeHTML(dataProcTxt)}`;
-    const rows = m.itens.map(it => {
+    const tabela = m.itens.map(it => {
       const alvo = it.limite ? protocoloJejum.fmt(it.limite) : ('Até ' + it.horas + 'h antes');
-      return `<tr><td style="white-space:nowrap">${it.icon} ${utils.escapeHTML(it.nome)}</td>` +
-        `<td style="white-space:nowrap;font-weight:700">${utils.escapeHTML(alvo)}</td>` +
-        `<td>${utils.escapeHTML(it.ex)}</td></tr>`;
+      return `<div style="border:1px solid #d0d5db;border-radius:8px;padding:8px 10px;margin-bottom:7px;page-break-inside:avoid">` +
+        `<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">` +
+          `<span style="font-weight:700;font-size:10.5pt;color:#1a2332">${it.icon} ${utils.escapeHTML(it.nome)}</span>` +
+          `<span style="font-weight:700;font-size:11pt;color:#2e7d52;white-space:nowrap">${utils.escapeHTML(alvo)}</span>` +
+        `</div>` +
+        printPreview._jejumChips(it.ok, 'ok') +
+        printPreview._jejumChips(it.evitar, 'evitar') +
+        (it.nota ? `<div style="font-size:8pt;color:#666;font-style:italic;margin-top:4px">${utils.escapeHTML(it.nota)}</div>` : '') +
+      `</div>`;
     }).join('');
-    const tabela = `<table class="pp-table"><thead><tr>` +
-      `<th>Categoria</th><th>Pode consumir até</th><th>Exemplos</th></tr></thead><tbody>${rows}</tbody></table>`;
     const soLeiteMsg = m.soLeite
       ? `<div class="pp-block"><span class="pp-value">Abaixo de 6 meses: apenas leite materno ou fórmula infantil; as demais categorias não se aplicam.</span></div>`
       : '';
