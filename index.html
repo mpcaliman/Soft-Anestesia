@@ -3952,6 +3952,25 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
             <div id="pre-jejum-desc" style="font-size:.85rem;white-space:pre-wrap;line-height:1.5;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface-alt);color:var(--text-soft)"></div>
             <input type="hidden" name="jejum_orientacao">
           </div>
+          <div class="field col-12">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600">
+              <input type="checkbox" name="jejum_protocolo_incluir" style="width:auto;flex:none" onchange="pre.jejum.toggleProtocolo(this.checked)">
+              <span>🍽️ Incluir protocolo de jejum detalhado (anexo ao PDF)</span>
+            </label>
+            <div id="pre-jejum-protocolo-wrap" style="display:none;margin-top:8px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface-alt)">
+              <div class="grid">
+                <div class="field col-6"><label>Data e hora provável do procedimento</label>
+                  <input type="datetime-local" name="jejum_protocolo_datahora" oninput="pre.jejum.previewProtocolo()"></div>
+                <div class="field col-6"><label>Bebida de carboidrato (ERAS)</label>
+                  <select name="jejum_protocolo_carbo" onchange="pre.jejum.previewProtocolo()">
+                    <option value="sim">Permitir</option>
+                    <option value="nao">Não permitir</option>
+                  </select></div>
+              </div>
+              <div id="pre-jejum-protocolo-preview" style="font-size:.82rem;color:var(--text-soft);margin-top:4px;line-height:1.5"></div>
+              <p style="font-size:.74rem;color:var(--text-mute);margin:6px 0 0">A <b>idade</b> é usada da identificação do paciente. O protocolo sai como um <b>segundo documento (anexo)</b>, após a avaliação, na impressão/PDF.</p>
+            </div>
+          </div>
           <div class="field col-12"><label>💊 Prescrição pré-anestésica (pré-medicação) <small style="color:var(--text-mute);font-weight:400">— marque os medicamentos; a dose vem da literatura e é editável. Comunica-se com a Ficha de Anestesia.</small></label>
             <div id="pre-premed-lista" style="margin:4px 0 8px"></div>
             <textarea name="medicacao_pre" rows="2" placeholder="Prescrição pré-anestésica — marque os medicamentos acima (preenche automaticamente) ou digite livremente."></textarea>
@@ -9404,6 +9423,41 @@ const pre = {
       const txt = (item.jejum_orientacao != null && item.jejum_orientacao !== '')
         ? item.jejum_orientacao : (pre.jejum.TEXTOS[v] || '');
       pre.jejum._mostrar(txt);
+      /* Restaura o protocolo de jejum detalhado (anexo) */
+      try {
+        const chk = document.querySelector('#form-pre [name="jejum_protocolo_incluir"]');
+        const dh = document.querySelector('#form-pre [name="jejum_protocolo_datahora"]');
+        const cb = document.querySelector('#form-pre [name="jejum_protocolo_carbo"]');
+        if (chk) chk.checked = !!item.jejum_protocolo_incluir;
+        if (dh && item.jejum_protocolo_datahora != null) dh.value = item.jejum_protocolo_datahora;
+        if (cb && item.jejum_protocolo_carbo) cb.value = item.jejum_protocolo_carbo;
+        pre.jejum.toggleProtocolo(chk ? chk.checked : false);
+      } catch (e) {}
+    },
+    /* Mostra/oculta o painel do protocolo detalhado */
+    toggleProtocolo(checked) {
+      const wrap = document.getElementById('pre-jejum-protocolo-wrap');
+      if (wrap) wrap.style.display = checked ? '' : 'none';
+      if (checked) pre.jejum.previewProtocolo();
+      try { markDirty(); } catch (e) {}
+    },
+    /* Prévia do protocolo no próprio formulário (usa a idade da identificação) */
+    previewProtocolo() {
+      const el = document.getElementById('pre-jejum-protocolo-preview');
+      if (!el) return;
+      const f = document.getElementById('form-pre');
+      const idade = (f.querySelector('[name="idade"]') || {}).value;
+      const dh = (f.querySelector('[name="jejum_protocolo_datahora"]') || {}).value;
+      const carbo = ((f.querySelector('[name="jejum_protocolo_carbo"]') || {}).value || 'sim') === 'sim';
+      const m = protocoloJejum.calcular(idade, dh, carbo);
+      if (!m.ok) { el.innerHTML = '<span style="color:var(--danger,#c0392b);font-weight:600">' + m.motivo + '</span>'; return; }
+      const linhas = m.itens.map(it => {
+        const alvo = it.limite ? protocoloJejum.fmt(it.limite) : ('até ' + it.horas + 'h antes');
+        return it.icon + ' ' + it.nome + ': <b>' + alvo + '</b>';
+      }).join('<br>');
+      el.innerHTML = 'Protocolo aplicado: <b>' + m.protoNome + '</b><br>' + linhas +
+        (m.soLeite ? '<br><i>Abaixo de 6 meses: apenas leite materno ou fórmula.</i>' : '');
+      try { markDirty(); } catch (e) {}
     }
   },
   /* ===== PRESCRIÇÃO PRÉ-ANESTÉSICA (pré-medicação) =====
@@ -24395,6 +24449,72 @@ const quickActions = {
 };
 
 /* ============================================================================
+   PROTOCOLO DE JEJUM PRÉ-OPERATÓRIO (ERAS/ASA e ESAIC/ASA)
+   Cálculo compartilhado entre o preview do formulário e o anexo do PDF.
+============================================================================ */
+const protocoloJejum = {
+  CATS: {
+    pesada:  { icon:'🍽️', nome:'Refeição completa / carne', ex:'Arroz, feijão, legumes, salada, macarrão, carne magra, frango. Evitar frituras, gorduras, fast-food e ultraprocessados.' },
+    solidos: { icon:'🍞', nome:'Sólidos leves', ex:'Torrada, pão simples, bolacha água e sal, fruta sem gordura.' },
+    formula: { icon:'🍼', nome:'Fórmula infantil / leite não humano', ex:'Fórmula infantil, leite de vaca, compostos lácteos.' },
+    materno: { icon:'🤱', nome:'Leite materno', ex:'Leite materno exclusivo.' },
+    liquidos:{ icon:'💧', nome:'Líquidos claros', ex:'Água, água de coco sem polpa, chás claros sem leite (camomila, hortelã, erva-cidreira), café preto sem leite, suco coado, isotônico claro.' }
+  },
+  parseIdade(txt) {
+    if (txt == null) return null;
+    const s = String(txt).toLowerCase().replace(',', '.');
+    const m = s.match(/(\d+(?:\.\d+)?)/);
+    if (!m) return null;
+    let unidade = 'anos';
+    if (/mes|mês|meses/.test(s)) unidade = 'meses';
+    else if (/dia/.test(s)) unidade = 'dias';
+    return { valor: parseFloat(m[1]), unidade };
+  },
+  parseDataHora(str) {
+    if (!str) return null;
+    const m = String(str).match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})/);
+    if (!m) return null;
+    return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], 0, 0);
+  },
+  emMeses(v, u) { if (u === 'dias') return v / 30.4375; if (u === 'meses') return v; return v * 12; },
+  isPediatrico(v, u) { if (u === 'anos') return v < 18; if (u === 'meses') return v < 216; return v < 6570; },
+  fmt(d) {
+    const p = n => (n < 10 ? '0' : '') + n;
+    return p(d.getDate()) + '/' + p(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  },
+  /* Retorna o modelo do protocolo a partir da idade (texto), data/hora (datetime-local) e carboidrato (bool) */
+  calcular(idadeTxt, dataHoraStr, carbo) {
+    const id = protocoloJejum.parseIdade(idadeTxt);
+    if (!id || !(id.valor > 0)) return { ok: false, motivo: 'Informe a idade na identificação do paciente para gerar o protocolo.' };
+    const data = protocoloJejum.parseDataHora(dataHoraStr);
+    const meses = protocoloJejum.emMeses(id.valor, id.unidade);
+    const ped = protocoloJejum.isPediatrico(id.valor, id.unidade);
+    const protoNome = ped ? 'Pediátrico ESAIC (6-4-3-1)' : 'Adulto ASA/ERAS';
+    const soLeite = meses < 6;
+    const horas = ped ? { pesada: 8, solidos: 6, formula: 4, materno: 3, liquidos: 1 }
+                      : { pesada: 8, solidos: 6, liquidos: 2 };
+    const ordem = soLeite ? ['formula', 'materno']
+                          : (ped ? ['pesada', 'solidos', 'formula', 'materno', 'liquidos']
+                                 : ['pesada', 'solidos', 'liquidos']);
+    const itens = ordem.map(k => {
+      const h = horas[k];
+      let ex = protocoloJejum.CATS[k].ex;
+      if (k === 'liquidos' && carbo) {
+        ex += ' Bebida de carboidrato/maltodextrina (ex.: Gatorade ou similar) — conforme protocolo institucional (comumente ~400 mL até 2h antes no adulto).';
+      }
+      return {
+        icon: protocoloJejum.CATS[k].icon,
+        nome: protocoloJejum.CATS[k].nome,
+        horas: h,
+        limite: data ? new Date(data.getTime() - h * 3600 * 1000) : null,
+        ex: ex
+      };
+    });
+    return { ok: true, protoNome, ped, soLeite, idade: id, data, itens };
+  }
+};
+
+/* ============================================================================
    PRINT PREVIEW — pré-visualização de impressão
 ============================================================================ */
 const printPreview = {
@@ -25057,7 +25177,50 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._field('Conclusão', d.conclusao, true)}
       `) +
       printPreview._signature(d.anestesiologista, d.crm ? 'CRM ' + d.crm : '', d) +
-      printPreview._footer('Avaliação pré-anestésica');
+      printPreview._footer('Avaliação pré-anestésica') +
+      printPreview._buildProtocoloJejumAnexo(d);
+  },
+
+  /* Segundo documento (anexo): protocolo de jejum pré-operatório detalhado.
+     Só aparece se marcado na avaliação; usa a identificação do paciente. */
+  _buildProtocoloJejumAnexo(d) {
+    if (!d || !d.jejum_protocolo_incluir) return '';
+    const m = protocoloJejum.calcular(d.idade, d.jejum_protocolo_datahora, (d.jejum_protocolo_carbo || 'sim') === 'sim');
+    if (!m.ok) return '';
+    const dataProcTxt = m.data ? protocoloJejum.fmt(m.data) : '—';
+    const meta = `<strong>Paciente:</strong> ${utils.escapeHTML(d.nome || '—')} &nbsp;·&nbsp; ` +
+      `<strong>Idade:</strong> ${utils.escapeHTML(d.idade || '—')} &nbsp;·&nbsp; ` +
+      `<strong>Protocolo:</strong> ${utils.escapeHTML(m.protoNome)} &nbsp;·&nbsp; ` +
+      `<strong>Procedimento:</strong> ${utils.escapeHTML(dataProcTxt)}`;
+    const rows = m.itens.map(it => {
+      const alvo = it.limite ? protocoloJejum.fmt(it.limite) : ('Até ' + it.horas + 'h antes');
+      return `<tr><td style="white-space:nowrap">${it.icon} ${utils.escapeHTML(it.nome)}</td>` +
+        `<td style="white-space:nowrap;font-weight:700">${utils.escapeHTML(alvo)}</td>` +
+        `<td>${utils.escapeHTML(it.ex)}</td></tr>`;
+    }).join('');
+    const tabela = `<table class="pp-table"><thead><tr>` +
+      `<th>Categoria</th><th>Pode consumir até</th><th>Exemplos</th></tr></thead><tbody>${rows}</tbody></table>`;
+    const soLeiteMsg = m.soLeite
+      ? `<div class="pp-block"><span class="pp-value">Abaixo de 6 meses: apenas leite materno ou fórmula infantil; as demais categorias não se aplicam.</span></div>`
+      : '';
+    const orient = m.soLeite ? '' : printPreview._section('Orientações gerais',
+      `<div class="pp-block"><span class="pp-value" style="white-space:pre-line">${utils.escapeHTML(
+        '• Higiene oral liberada: escovar os dentes e fazer bochecho/gargarejo é permitido, desde que não engula a água ou o enxaguante.\n' +
+        '• Não consumir bebida alcoólica nos dias que antecedem o procedimento.\n' +
+        '• Preferir refeições mais leves e não inflamatórias nas 24–48h anteriores (menos gordura, fritura, açúcar e ultraprocessados).\n' +
+        '• Tabagismo: o ideal é interromper pelo menos 1 mês antes.\n' +
+        '• Drogas ilícitas não devem ser usadas.\n' +
+        '• Medicações GLP-1/GIP (ex.: Ozempic, Mounjaro): informe ao anestesista — retardam o esvaziamento gástrico e implicam diretamente no jejum.\n' +
+        '• Suplementos: whey/shake proteico — evitar no jejum; creatina — suspender no dia; ômega-3/óleo de peixe — suspender ≥ 5 dias antes; ginkgo, ginseng, alho, kava kava e pariri — suspender dias antes (coagulação).'
+      )}</span></div>`);
+    const aviso = `<div class="pp-block"><span class="pp-value" style="font-size:9pt;color:#666">Ferramenta de apoio clínico. A decisão final considera protocolo institucional, avaliação anestésica, tipo de cirurgia, risco de aspiração e sintomas gastrointestinais.</span></div>`;
+    return `<div class="pp-anexo" style="page-break-before:always">` +
+      printPreview._header('PROTOCOLO DE JEJUM PRÉ-OPERATÓRIO', meta) +
+      printPreview._section('Planejamento personalizado — até quando consumir', tabela + soLeiteMsg) +
+      orient +
+      aviso +
+      printPreview._footer('Protocolo de jejum pré-operatório') +
+      `</div>`;
   },
 
   /* Inclui o resumo de risco na impressão da Pré, se houver cálculo vinculado
