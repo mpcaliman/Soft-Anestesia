@@ -4,14 +4,66 @@
 //  e expõe utilitários compartilhados por toda a aplicação.
 // =====================================================================
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { CONFIG } from './config.js';
 
-// Verifica se a configuração do Supabase foi preenchida (Variables no
-// GitHub Actions ou config.js local). Evita que o app quebre ao carregar.
+// Carrega a biblioteca do Supabase de um CDN, com fallback entre provedores.
+// (esm.sh às vezes fica instável e deixava a página em branco; o jsDelivr é
+//  mais estável e serve como principal.)
+let createClient = null;
+export let libLoadError = null;
+{
+  const CDNS = [
+    'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm',
+    'https://esm.sh/@supabase/supabase-js@2',
+    'https://unpkg.com/@supabase/supabase-js@2/+esm',
+  ];
+  for (const url of CDNS) {
+    try {
+      const mod = await import(url);
+      if (mod && mod.createClient) { createClient = mod.createClient; break; }
+    } catch (e) {
+      libLoadError = e;
+    }
+  }
+}
+
+// Indica se a biblioteca foi carregada (para a aplicação avisar em caso de falha).
+export const libLoaded = !!createClient;
+
+// A configuração do Supabase pode vir de duas fontes, nesta ordem:
+//   1) valores digitados pelo usuário na própria tela (salvos no aparelho);
+//   2) config.js (gerado no build a partir de Variables), como padrão.
+// Assim o app funciona em qualquer hospedagem, sem depender de rebuild.
+const LS_URL = 'cc.supabase_url';
+const LS_KEY = 'cc.supabase_key';
+
+export function getConfig() {
+  let url = '';
+  let key = '';
+  try {
+    url = localStorage.getItem(LS_URL) || '';
+    key = localStorage.getItem(LS_KEY) || '';
+  } catch (e) { /* localStorage indisponível */ }
+  if (!url) url = CONFIG.SUPABASE_URL || '';
+  if (!key) key = CONFIG.SUPABASE_ANON_KEY || '';
+  return { url: url.trim(), key: key.trim() };
+}
+
+// Salva a configuração no aparelho (chave anônima é pública, seguro).
+export function saveConfig(url, key) {
+  try {
+    localStorage.setItem(LS_URL, (url || '').trim());
+    localStorage.setItem(LS_KEY, (key || '').trim());
+  } catch (e) { /* ignora */ }
+}
+
+export function clearConfig() {
+  try { localStorage.removeItem(LS_URL); localStorage.removeItem(LS_KEY); } catch (e) {}
+}
+
+// Verifica se a configuração do Supabase é válida (evita quebrar ao carregar).
 export function configIsValid() {
-  const url = CONFIG.SUPABASE_URL || '';
-  const key = CONFIG.SUPABASE_ANON_KEY || '';
+  const { url, key } = getConfig();
   return (
     url.startsWith('http') &&
     !url.includes('SEU-PROJETO') &&
@@ -20,9 +72,10 @@ export function configIsValid() {
   );
 }
 
-// Cliente único e compartilhado (null se a configuração estiver ausente).
-export const supabase = configIsValid()
-  ? createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY, {
+// Cliente único e compartilhado (null se a configuração/biblioteca faltarem).
+const _cfg = getConfig();
+export const supabase = (configIsValid() && createClient)
+  ? createClient(_cfg.url, _cfg.key, {
       auth: {
         persistSession: true,       // mantém a sessão conectada de forma segura
         autoRefreshToken: true,

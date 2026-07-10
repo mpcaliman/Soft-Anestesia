@@ -4,7 +4,7 @@
 //  entre módulos e a montagem do menu conforme o perfil do usuário.
 // =====================================================================
 
-import { supabase, configIsValid, state, escapeHtml, toast, setLoading, formatDateBR, hhmm } from './supabase-client.js';
+import { supabase, libLoaded, libLoadError, configIsValid, saveConfig, getConfig, state, escapeHtml, toast, setLoading, formatDateBR, hhmm } from './supabase-client.js';
 import { CONFIG } from './config.js';
 import { bindLoginScreen, bindRecoveryFlow, loadProfileAndPermissions, signOut } from './auth.js';
 import { initCalendar, destroyCalendar } from './calendar.js';
@@ -15,7 +15,14 @@ import { renderSettings } from './settings.js';
 const els = {};
 let currentModule = null;
 
-document.addEventListener('DOMContentLoaded', init);
+// Como supabase-client.js usa top-level await (carregamento do CDN), a
+// execução deste módulo pode terminar DEPOIS do DOMContentLoaded. Por isso,
+// chamamos init() direto se o documento já estiver pronto.
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
 
 async function init() {
   els.login = document.getElementById('login-screen');
@@ -26,7 +33,13 @@ async function init() {
   els.centerName = document.getElementById('center-name');
   els.notifBadge = document.getElementById('notif-badge');
 
-  // Sem configuração do Supabase: mostra instrução clara em vez de quebrar.
+  // Biblioteca do Supabase não carregou (CDN fora do ar / sem internet).
+  if (!libLoaded) {
+    showLibError();
+    return;
+  }
+
+  // Sem configuração do Supabase: mostra a tela para informar URL e chave.
   if (!configIsValid() || !supabase) {
     showConfigMissing();
     return;
@@ -53,29 +66,67 @@ async function init() {
   });
 }
 
-// Tela exibida quando SUPABASE_URL/SUPABASE_ANON_KEY não foram configurados.
+// Tela de erro quando a biblioteca do Supabase não pôde ser carregada.
+function showLibError() {
+  setLoading(false);
+  if (els.login) els.login.style.display = 'none';
+  if (els.app) els.app.style.display = 'none';
+  const box = document.createElement('div');
+  box.className = 'config-missing';
+  box.innerHTML = `
+    <div class="config-card">
+      <div class="config-logo">⚠️</div>
+      <h1>Falha ao carregar</h1>
+      <p>Não foi possível carregar a biblioteca do sistema (Supabase) a partir
+      da internet.</p>
+      <p>Verifique sua conexão e recarregue a página. Se estiver em uma rede
+      com restrições (hospital/empresa), tente outra rede ou dados móveis.</p>
+      <p class="config-hint">Detalhe técnico: ${escapeHtml(String(libLoadError && libLoadError.message || 'CDN indisponível'))}</p>
+      <button type="button" class="btn primary block" onclick="location.reload()">Recarregar</button>
+    </div>`;
+  document.body.appendChild(box);
+}
+
+// Tela de configuração: o usuário informa a URL e a chave anônima do
+// Supabase diretamente no app (salvas no aparelho). Não precisa de rebuild.
 function showConfigMissing() {
   setLoading(false);
   els.login.style.display = 'none';
   els.app.style.display = 'none';
+  const cfg = getConfig();
   const box = document.createElement('div');
   box.className = 'config-missing';
   box.innerHTML = `
     <div class="config-card">
       <div class="config-logo">🏥</div>
-      <h1>Configuração pendente</h1>
-      <p>O sistema foi publicado, mas ainda falta conectar ao banco de dados
-      (Supabase).</p>
-      <p>No repositório do GitHub, em <strong>Settings → Secrets and variables
-      → Actions → Variables</strong>, crie:</p>
-      <ul>
-        <li><code>SUPABASE_URL</code></li>
-        <li><code>SUPABASE_ANON_KEY</code></li>
-      </ul>
-      <p>Depois, em <strong>Actions</strong>, execute novamente o fluxo
-      "Publicar no GitHub Pages".</p>
+      <h1>Conectar ao Supabase</h1>
+      <p>Informe os dados do seu projeto Supabase para ativar o sistema.
+      Você encontra em <strong>Supabase → Settings → API</strong>. Pode ser o
+      mesmo projeto usado no app de anestesia.</p>
+      <form id="config-form">
+        <label class="field"><span>URL do projeto</span>
+          <input name="url" placeholder="https://xxxxx.supabase.co" value="${escapeHtml(cfg.url)}" required></label>
+        <label class="field"><span>Chave pública (anon / publishable)</span>
+          <input name="key" placeholder="eyJhbGciOi... (ou sb_publishable_...)" value="${escapeHtml(cfg.key)}" required></label>
+        <div class="form-error" id="config-error"></div>
+        <button type="submit" class="btn primary block">Conectar</button>
+      </form>
+      <p class="config-hint">A chave anônima é pública por natureza e fica salva
+      apenas neste aparelho. Nenhum segredo é exposto.</p>
     </div>`;
   document.body.appendChild(box);
+
+  box.querySelector('#config-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const url = e.target.url.value.trim();
+    const key = e.target.key.value.trim();
+    const err = box.querySelector('#config-error');
+    if (!url.startsWith('http')) { err.textContent = 'A URL deve começar com https://'; return; }
+    if (key.length < 20) { err.textContent = 'A chave parece incompleta.'; return; }
+    saveConfig(url, key);
+    // Recarrega para reinicializar o cliente com a nova configuração.
+    window.location.reload();
+  });
 }
 
 function showLogin() {
