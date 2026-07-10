@@ -107,6 +107,11 @@
     })();
   </script>
 
+  <!-- Biblioteca supabase-js carregada por <script> clássico (UMD), com
+       fallback de CDN. Método robusto: expõe window.supabase antes do app. -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>window.supabase||document.write('<script src="https://unpkg.com/@supabase/supabase-js@2"><\/script>')</script>
+
   <!-- A aplicação usa ES Modules. config.js é gerado a partir de
        config.example.js e NÃO deve conter segredos. -->
   <script type="module" src="app.js"></script>
