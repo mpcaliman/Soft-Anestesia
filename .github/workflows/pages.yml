@@ -1,0 +1,80 @@
+name: Publicar no GitHub Pages
+
+# Publica o site estático no GitHub Pages.
+#  - A raiz do repositório continua servindo o app de anestesia (index.html).
+#  - O sistema de agendamento fica em /centro-cirurgico/.
+#
+# O config.js do agendamento é gerado no build a partir de duas Variables
+# do repositório (Settings → Secrets and variables → Actions → Variables):
+#   SUPABASE_URL        — URL do projeto Supabase
+#   SUPABASE_ANON_KEY   — chave pública "anon" (segura para o navegador)
+#
+# Nenhuma dessas variáveis é gravada no histórico do repositório.
+
+on:
+  push:
+    branches:
+      - claude/surgical-center-scheduling-tayrqk
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Evita execuções concorrentes de deploy.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Gerar config.js do centro cirúrgico
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "::warning::Variables SUPABASE_URL/SUPABASE_ANON_KEY não definidas. O agendamento não conectará ao Supabase até que sejam configuradas."
+          fi
+          cat > centro-cirurgico/config.js <<EOF
+          // Gerado automaticamente pelo GitHub Actions (não editar manualmente).
+          // Contém apenas a chave anônima pública do Supabase.
+          export const CONFIG = {
+            SUPABASE_URL: '${SUPABASE_URL}',
+            SUPABASE_ANON_KEY: '${SUPABASE_ANON_KEY}',
+            STORAGE_BUCKET: 'appointment-files',
+            APP_NAME: 'Centro Cirúrgico',
+            TIME_ZONE: 'America/Bahia',
+            MAX_FILE_SIZE: 10 * 1024 * 1024,
+            ALLOWED_FILE_TYPES: ['image/jpeg', 'image/png', 'application/pdf'],
+            LOGIN_MAX_ATTEMPTS: 5,
+            LOGIN_LOCK_SECONDS: 60,
+          };
+          EOF
+          echo "config.js gerado."
+
+      - name: Configurar Pages
+        uses: actions/configure-pages@v5
+
+      - name: Enviar artefato do site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publicar no Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
