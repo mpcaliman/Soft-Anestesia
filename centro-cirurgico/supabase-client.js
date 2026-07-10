@@ -6,29 +6,18 @@
 
 import { CONFIG } from './config.js';
 
-// Carrega a biblioteca do Supabase de um CDN, com fallback entre provedores.
-// (esm.sh às vezes fica instável e deixava a página em branco; o jsDelivr é
-//  mais estável e serve como principal.)
-let createClient = null;
-export let libLoadError = null;
-{
-  const CDNS = [
-    'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm',
-    'https://esm.sh/@supabase/supabase-js@2',
-    'https://unpkg.com/@supabase/supabase-js@2/+esm',
-  ];
-  for (const url of CDNS) {
-    try {
-      const mod = await import(url);
-      if (mod && mod.createClient) { createClient = mod.createClient; break; }
-    } catch (e) {
-      libLoadError = e;
-    }
-  }
-}
+// A biblioteca supabase-js é carregada por uma tag <script> (UMD) no
+// index.html, que expõe window.supabase. Esse método é muito mais robusto
+// do que importar de um CDN em ESM (que às vezes travava e deixava a
+// página em branco). Aqui apenas lemos o global já disponível.
+const _lib = (typeof window !== 'undefined' && window.supabase) ? window.supabase : null;
+const createClient = _lib ? _lib.createClient : null;
 
 // Indica se a biblioteca foi carregada (para a aplicação avisar em caso de falha).
 export const libLoaded = !!createClient;
+export const libLoadError = _lib
+  ? null
+  : new Error('Não foi possível carregar a biblioteca do sistema (supabase-js).');
 
 // A configuração do Supabase pode vir de duas fontes, nesta ordem:
 //   1) valores digitados pelo usuário na própria tela (salvos no aparelho);
