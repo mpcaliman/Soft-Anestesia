@@ -60,8 +60,10 @@ jobs:
           EOF
           echo "config.js gerado."
 
-      - name: Configurar Pages
+      - name: Configurar Pages (habilita automaticamente se necessário)
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - name: Enviar artefato do site
         uses: actions/upload-pages-artifact@v3
