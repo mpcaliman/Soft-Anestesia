@@ -76,6 +76,37 @@
   <!-- Host de notificações "toast" -->
   <div id="toast-host"></div>
 
+  <!-- Rede de segurança: mostra qualquer erro na tela em vez de página em
+       branco (útil para diagnóstico em celular). -->
+  <script>
+    (function () {
+      function showFatal(msg) {
+        try {
+          var d = document.getElementById('fatal-error');
+          if (!d) {
+            d = document.createElement('div');
+            d.id = 'fatal-error';
+            d.style.cssText = 'position:fixed;inset:0;background:#fff;color:#b91c1c;font:15px system-ui,-apple-system,sans-serif;padding:24px;z-index:99999;overflow:auto;line-height:1.5';
+            document.body.appendChild(d);
+          }
+          d.innerHTML = '<h2 style="margin:.2rem 0">Erro ao carregar o sistema</h2>' +
+            '<p>' + msg + '</p>' +
+            '<p style="color:#555">Recarregue a página. Se persistir, verifique a conexão com a internet.</p>' +
+            '<button onclick="location.reload()" style="padding:.6rem 1rem;border:0;border-radius:8px;background:#2563eb;color:#fff;font-size:1rem;cursor:pointer">Recarregar</button>';
+        } catch (e) { /* ignora */ }
+      }
+      window.addEventListener('error', function (e) {
+        if (e && (e.message || e.filename)) {
+          showFatal((e.message || 'Erro') + (e.filename ? ' — ' + e.filename : ''));
+        }
+      });
+      window.addEventListener('unhandledrejection', function (e) {
+        var r = e && e.reason;
+        showFatal('Falha: ' + ((r && (r.message || r)) || 'desconhecida'));
+      });
+    })();
+  </script>
+
   <!-- A aplicação usa ES Modules. config.js é gerado a partir de
        config.example.js e NÃO deve conter segredos. -->
   <script type="module" src="app.js"></script>

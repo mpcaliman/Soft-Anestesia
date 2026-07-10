@@ -4,8 +4,31 @@
 //  e expõe utilitários compartilhados por toda a aplicação.
 // =====================================================================
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { CONFIG } from './config.js';
+
+// Carrega a biblioteca do Supabase de um CDN, com fallback entre provedores.
+// (esm.sh às vezes fica instável e deixava a página em branco; o jsDelivr é
+//  mais estável e serve como principal.)
+let createClient = null;
+export let libLoadError = null;
+{
+  const CDNS = [
+    'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm',
+    'https://esm.sh/@supabase/supabase-js@2',
+    'https://unpkg.com/@supabase/supabase-js@2/+esm',
+  ];
+  for (const url of CDNS) {
+    try {
+      const mod = await import(url);
+      if (mod && mod.createClient) { createClient = mod.createClient; break; }
+    } catch (e) {
+      libLoadError = e;
+    }
+  }
+}
+
+// Indica se a biblioteca foi carregada (para a aplicação avisar em caso de falha).
+export const libLoaded = !!createClient;
 
 // A configuração do Supabase pode vir de duas fontes, nesta ordem:
 //   1) valores digitados pelo usuário na própria tela (salvos no aparelho);
@@ -49,9 +72,9 @@ export function configIsValid() {
   );
 }
 
-// Cliente único e compartilhado (null se a configuração estiver ausente).
+// Cliente único e compartilhado (null se a configuração/biblioteca faltarem).
 const _cfg = getConfig();
-export const supabase = configIsValid()
+export const supabase = (configIsValid() && createClient)
   ? createClient(_cfg.url, _cfg.key, {
       auth: {
         persistSession: true,       // mantém a sessão conectada de forma segura
