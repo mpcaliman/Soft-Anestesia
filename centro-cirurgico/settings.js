@@ -310,9 +310,17 @@ const renderRooms = (body) => simpleCrud(body, {
 
 const renderEquipment = (body) => simpleCrud(body, {
   table: 'equipment', title: 'Equipamentos',
-  columns: [{ key: 'name', label: 'Nome' }, { key: 'active', label: 'Ativo', render: r => r.active ? 'Sim' : 'Não' }],
-  fields: [{ name: 'name', label: 'Nome', required: true }, { name: 'description', label: 'Descrição' },
-    { name: 'active', label: 'Ativo', type: 'checkbox' }],
+  columns: [
+    { key: 'name', label: 'Nome' },
+    { key: 'block_simultaneous', label: 'Uso exclusivo', render: r => r.block_simultaneous ? '🔒 Sim' : '—' },
+    { key: 'active', label: 'Ativo', render: r => r.active ? 'Sim' : 'Não' },
+  ],
+  fields: [
+    { name: 'name', label: 'Nome', required: true },
+    { name: 'description', label: 'Descrição' },
+    { name: 'block_simultaneous', label: '🔒 Bloquear agendamentos simultâneos (uso exclusivo)', type: 'checkbox' },
+    { name: 'active', label: 'Ativo', type: 'checkbox' },
+  ],
 });
 
 const renderAccommodations = (body) => simpleCrud(body, {
@@ -386,30 +394,42 @@ async function renderPermissions(body) {
 // =====================================================================
 async function renderBlocks(body) {
   setLoading(true);
-  const [{ data: blocks }, { data: rooms }] = await Promise.all([
+  const [{ data: blocks }, { data: rooms }, { data: people }] = await Promise.all([
     supabase.from('room_blocks').select('*').eq('surgical_center_id', center()).order('block_date', { ascending: false }),
     supabase.from('rooms').select('*').eq('surgical_center_id', center()).order('sort_order'),
+    supabase.from('profiles').select('id, full_name').eq('surgical_center_id', center()).eq('status', 'ativo').order('full_name'),
   ]);
   setLoading(false);
+
+  const nameOf = (id) => (people ?? []).find(p => p.id === id)?.full_name ?? '';
+  const open = hhmm(state.settings?.opening_time ?? '07:00');
+  const close = hhmm(state.settings?.closing_time ?? '19:00');
 
   body.innerHTML = `
     <div class="section-head"><h2>Bloqueios de sala</h2>
       <button class="btn primary small" id="new-block">Novo bloqueio</button></div>
+    <p class="hint">Bloqueie por hora (informe início/fim) ou o dia inteiro. Para reservar o horário a um profissional específico, escolha um usuário: só ele poderá agendar nesse período.</p>
     <form id="block-form" class="inline-form" style="display:none">
       <select name="room_id"><option value="">Todas as salas</option>${(rooms ?? []).map(r => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join('')}</select>
       <input type="date" name="block_date" required>
-      <input type="time" name="start_time" required>
-      <input type="time" name="end_time" required>
+      <label class="chk"><input type="checkbox" name="all_day"><span>Dia inteiro</span></label>
+      <input type="time" name="start_time" value="${open}" required>
+      <input type="time" name="end_time" value="${close}" required>
+      <select name="reserved_user_id">
+        <option value="">Bloqueio geral (todos)</option>
+        ${(people ?? []).map(p => `<option value="${p.id}">Reservar para: ${escapeHtml(p.full_name)}</option>`).join('')}
+      </select>
       <input name="reason" placeholder="Motivo">
       <button class="btn primary small" type="submit">Bloquear</button>
     </form>
     <table class="data-table">
-      <thead><tr><th>Data</th><th>Sala</th><th>Horário</th><th>Motivo</th><th></th></tr></thead>
+      <thead><tr><th>Data</th><th>Sala</th><th>Horário</th><th>Direcionado a</th><th>Motivo</th><th></th></tr></thead>
       <tbody>
         ${(blocks ?? []).map((b) => `<tr>
           <td>${formatDateBR(b.block_date)}</td>
           <td>${b.room_id ? escapeHtml((rooms ?? []).find(r => r.id === b.room_id)?.name ?? '') : '<em>Todas</em>'}</td>
           <td>${hhmm(b.start_time)}–${hhmm(b.end_time)}</td>
+          <td>${b.reserved_user_id ? `<span class="badge ok">${escapeHtml(nameOf(b.reserved_user_id))}</span>` : '<em>Geral</em>'}</td>
           <td>${escapeHtml(b.reason ?? '')}</td>
           <td><button class="btn-link danger" data-del="${b.id}">Remover</button></td>
         </tr>`).join('')}
@@ -418,20 +438,30 @@ async function renderBlocks(body) {
 
   const form = body.querySelector('#block-form');
   body.querySelector('#new-block').onclick = () => { form.style.display = form.style.display === 'none' ? 'flex' : 'none'; };
+
+  // "Dia inteiro" preenche e desabilita os campos de horário.
+  form.all_day.onchange = () => {
+    const on = form.all_day.checked;
+    form.start_time.disabled = on;
+    form.end_time.disabled = on;
+    if (on) { form.start_time.value = open; form.end_time.value = close; }
+  };
+
   form.onsubmit = async (e) => {
     e.preventDefault();
     const payload = {
       surgical_center_id: center(),
       room_id: form.room_id.value || null,
       block_date: form.block_date.value,
-      start_time: form.start_time.value,
-      end_time: form.end_time.value,
+      start_time: form.all_day.checked ? open : form.start_time.value,
+      end_time: form.all_day.checked ? close : form.end_time.value,
+      reserved_user_id: form.reserved_user_id.value || null,
       reason: form.reason.value.trim(),
       created_by: state.profile.id,
     };
     const { error } = await supabase.from('room_blocks').insert(payload);
     if (error) toast('Erro: ' + error.message, 'error');
-    else { toast('Sala bloqueada.', 'success'); renderBlocks(body); }
+    else { toast(payload.reserved_user_id ? 'Horário reservado ao usuário.' : 'Sala bloqueada.', 'success'); renderBlocks(body); }
   };
   body.querySelectorAll('[data-del]').forEach((b) => {
     b.onclick = async () => {

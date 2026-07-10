@@ -139,6 +139,9 @@ create table if not exists public.equipment (
   name                text not null,
   description         text,
   active              boolean not null default true,
+  -- Quando verdadeiro, o equipamento não pode ser reservado por dois
+  -- agendamentos com horários sobrepostos (exclusividade / uso único).
+  block_simultaneous  boolean not null default false,
   created_at          timestamptz not null default now(),
   updated_at          timestamptz not null default now()
 );
@@ -222,6 +225,10 @@ create table if not exists public.appointments (
   priority              public.appointment_priority not null default 'eletiva',
   needs_pediatrician    boolean not null default false,
   needs_company         boolean not null default false,
+  needs_uti             boolean not null default false,   -- requisito especial: UTI
+  needs_hemoba          boolean not null default false,   -- requisito especial: HEMOBA
+  latex_allergy         boolean not null default false,   -- requisito especial: alergia a látex
+  special_notes         text,                              -- observação livre dos requisitos especiais
   notes                 text,                              -- observações operacionais
 
   -- Cirurgião principal (também replicado em appointment_professionals)
@@ -289,6 +296,10 @@ create table if not exists public.room_blocks (
   start_time          time not null,
   end_time            time not null,
   reason              text,
+  -- Bloqueio direcionado: quando preenchido, o horário fica reservado
+  -- exclusivamente para este usuário — só ele pode agendar nele; para
+  -- os demais o horário aparece como bloqueado.
+  reserved_user_id    uuid references public.profiles(id) on delete cascade,
   created_by          uuid references public.profiles(id),
   created_at          timestamptz not null default now(),
   constraint chk_block_times check (end_time > start_time)
@@ -462,16 +473,55 @@ as $$
     and a.start_time < p_end_time
     and a.end_time   > p_start_time
   union all
-  -- Conflito com bloqueios (da sala específica ou de todas as salas)
+  -- Conflito com bloqueios (da sala específica ou de todas as salas).
+  -- Bloqueios direcionados a um usuário NÃO conflitam para o próprio
+  -- usuário reservado — apenas ele pode agendar naquele horário.
   select 'bloqueio'::text, b.id, b.start_time, b.end_time
   from public.room_blocks b
   where b.block_date = p_date
     and (b.room_id = p_room_id or b.room_id is null)
     and b.start_time < p_end_time
     and b.end_time   > p_start_time
+    and (b.reserved_user_id is null or b.reserved_user_id <> auth.uid())
     and b.surgical_center_id = (
       select surgical_center_id from public.rooms where id = p_room_id
     );
+$$;
+
+-- =====================================================================
+--  VERIFICAÇÃO DE CONFLITO DE EQUIPAMENTO
+--  Retorna os equipamentos marcados como exclusivos (block_simultaneous)
+--  que já estão reservados por outro agendamento com horário sobreposto,
+--  em qualquer sala do centro. Usado para impedir uso simultâneo.
+-- =====================================================================
+create or replace function public.check_equipment_conflict(
+  p_date          date,
+  p_start_time    time,
+  p_end_time      time,
+  p_equipment_ids uuid[],
+  p_exclude_id    uuid default null
+)
+returns table (
+  equipment_id   uuid,
+  equipment_name text,
+  start_time     time,
+  end_time       time
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select distinct e.id, e.name, a.start_time, a.end_time
+  from public.appointment_equipment ae
+  join public.appointments a on a.id = ae.appointment_id
+  join public.equipment e on e.id = ae.equipment_id
+  where e.block_simultaneous = true
+    and ae.equipment_id = any(p_equipment_ids)
+    and a.appointment_date = p_date
+    and (p_exclude_id is null or a.id <> p_exclude_id)
+    and a.start_time < p_end_time
+    and a.end_time   > p_start_time;
 $$;
 
 -- =====================================================================
@@ -517,7 +567,9 @@ as $$
     b.block_date as occ_date,
     b.start_time,
     b.end_time,
-    'bloqueado'::text as situation
+    -- Para o usuário reservado, o bloqueio direcionado aparece como
+    -- 'reservado' (ele pode agendar); para os demais, 'bloqueado'.
+    case when b.reserved_user_id = auth.uid() then 'reservado' else 'bloqueado' end as situation
   from public.room_blocks b, center c
   where b.surgical_center_id = c.id
     and b.block_date between p_date_from and p_date_to;
@@ -632,6 +684,21 @@ begin
   where u.user_id is not null
     and u.user_id <> coalesce(auth.uid(), '00000000-0000-0000-0000-000000000000');
 
+  -- Todo NOVO agendamento gera uma notificação para o(s) gestor(es) do centro.
+  if tg_op = 'INSERT' then
+    insert into public.notifications(surgical_center_id, user_id, title, body, type, related_appointment_id)
+    select new.surgical_center_id, ur.user_id, 'Novo agendamento criado',
+           'Novo procedimento em ' || to_char(new.appointment_date,'DD/MM/YYYY') ||
+           ' das ' || to_char(new.start_time,'HH24:MI') ||
+           ' às '  || to_char(new.end_time,'HH24:MI') || '.',
+           'agendamento', new.id
+    from public.user_roles ur
+    join public.profiles p on p.id = ur.user_id
+    where ur.role = 'gestor'
+      and p.surgical_center_id = new.surgical_center_id
+      and ur.user_id <> coalesce(auth.uid(), '00000000-0000-0000-0000-000000000000');
+  end if;
+
   return new;
 end;
 $$;
@@ -664,11 +731,13 @@ declare
   v_end           time := (p_payload->>'end_time')::time;
   v_center        uuid := public.current_center_id();
   v_conflict      record;
+  v_equip_ids     uuid[];
+  v_eq_conflict   record;
 begin
   -- Registra a justificativa para a trigger de auditoria.
   perform set_config('app.justification', coalesce(p_justification,''), true);
 
-  -- Verificação de conflito no servidor (fonte da verdade).
+  -- Verificação de conflito de sala/bloqueio no servidor (fonte da verdade).
   select * into v_conflict
   from public.check_appointment_conflict(v_room, v_date, v_start, v_end, v_id)
   limit 1;
@@ -679,13 +748,34 @@ begin
       using errcode = 'P0001';
   end if;
 
+  -- Verificação de conflito de equipamento exclusivo (uso simultâneo).
+  if p_payload ? 'equipment' then
+    select array_agg((e->>'equipment_id')::uuid)
+      into v_equip_ids
+      from jsonb_array_elements(p_payload->'equipment') e
+      where nullif(e->>'equipment_id','') is not null;
+  end if;
+
+  if v_equip_ids is not null and array_length(v_equip_ids, 1) > 0 then
+    select * into v_eq_conflict
+    from public.check_equipment_conflict(v_date, v_start, v_end, v_equip_ids, v_id)
+    limit 1;
+
+    if found then
+      raise exception 'EQUIP_CONFLITO: % (ocupado das % às %)',
+        v_eq_conflict.equipment_name, v_eq_conflict.start_time, v_eq_conflict.end_time
+        using errcode = 'P0001';
+    end if;
+  end if;
+
   if v_id is null then
     insert into public.appointments(
       surgical_center_id, room_id, patient_name, patient_birthdate, patient_cpf,
       patient_insurance_card, insurance_name, accommodation_type_id,
       authorization_password, authorization_not_applicable, procedure_name,
       appointment_date, start_time, end_time, status_id, priority,
-      needs_pediatrician, needs_company, notes, surgeon_id, created_by, updated_by
+      needs_pediatrician, needs_company, needs_uti, needs_hemoba, latex_allergy,
+      special_notes, notes, surgeon_id, created_by, updated_by
     ) values (
       v_center, v_room,
       p_payload->>'patient_name',
@@ -702,6 +792,10 @@ begin
       coalesce((p_payload->>'priority')::public.appointment_priority,'eletiva'),
       coalesce((p_payload->>'needs_pediatrician')::boolean,false),
       coalesce((p_payload->>'needs_company')::boolean,false),
+      coalesce((p_payload->>'needs_uti')::boolean,false),
+      coalesce((p_payload->>'needs_hemoba')::boolean,false),
+      coalesce((p_payload->>'latex_allergy')::boolean,false),
+      nullif(p_payload->>'special_notes',''),
       nullif(p_payload->>'notes',''),
       nullif(p_payload->>'surgeon_id','')::uuid,
       auth.uid(), auth.uid()
@@ -725,6 +819,10 @@ begin
       priority               = coalesce((p_payload->>'priority')::public.appointment_priority,'eletiva'),
       needs_pediatrician     = coalesce((p_payload->>'needs_pediatrician')::boolean,false),
       needs_company          = coalesce((p_payload->>'needs_company')::boolean,false),
+      needs_uti              = coalesce((p_payload->>'needs_uti')::boolean,false),
+      needs_hemoba           = coalesce((p_payload->>'needs_hemoba')::boolean,false),
+      latex_allergy          = coalesce((p_payload->>'latex_allergy')::boolean,false),
+      special_notes          = nullif(p_payload->>'special_notes',''),
       notes                  = nullif(p_payload->>'notes',''),
       surgeon_id             = nullif(p_payload->>'surgeon_id','')::uuid,
       updated_by             = auth.uid()

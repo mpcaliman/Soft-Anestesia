@@ -225,6 +225,20 @@ legend { padding: 0 .4rem; font-weight: 700; color: var(--primary-2); font-size:
 .plain { list-style: none; padding: 0; margin: 0; }
 .plain li { padding: .3rem 0; border-bottom: 1px solid var(--border); font-size: .88rem; }
 
+/* ---------- Requisitos especiais (chips) ---------- */
+.chip-group { display: flex; flex-wrap: wrap; gap: .5rem; margin: .3rem 0 .7rem; }
+.chip { display: inline-flex; align-items: center; gap: .4rem; border: 1px solid var(--border); border-radius: 999px; padding: .35rem .8rem; cursor: pointer; font-size: .88rem; background: #fff; user-select: none; }
+.chip input { width: auto; }
+.chip:has(input:checked) { background: #e0edff; border-color: var(--accent); color: var(--primary-2); font-weight: 600; }
+.excl-icon { font-size: .85rem; }
+.detail-obs { background: #f8fafc; border-left: 3px solid var(--warn); padding: .4rem .6rem; border-radius: 6px; font-size: .88rem; margin: .2rem 0; }
+
+/* ---------- Slot/card reservado ao usuário ---------- */
+.slot.reserved { background: repeating-linear-gradient(45deg, #eef7ee, #eef7ee 6px, #dcefdc 6px, #dcefdc 12px); text-align: center; font-size: .72rem; color: #166534; cursor: pointer; }
+.slot.reserved:hover { background: #d6efd6; }
+.card.reserved { border-left-color: var(--ok); background: #f0fdf4; color: #166534; cursor: default; }
+.list-table tr.reserved td { color: #166534; }
+
 /* ---------- Badges ---------- */
 .badge { display: inline-block; padding: .1rem .5rem; border-radius: 999px; font-size: .72rem; background: #e5e7eb; color: #374151; }
 .badge.ok { background: #d1fae5; color: #065f46; }

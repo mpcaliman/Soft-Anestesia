@@ -99,10 +99,20 @@ export async function saveAppointment(payload, justification) {
     p_justification: justification ?? null,
   });
   if (error) {
-    if (String(error.message).includes('CONFLITO')) {
-      throw new Error('Horário indisponível: já existe um agendamento ou bloqueio nesse período.');
+    const msg = String(error.message);
+    // Conflito de equipamento exclusivo: sinaliza e sugere outro horário/dia.
+    if (msg.includes('EQUIP_CONFLITO')) {
+      const name = msg.split('EQUIP_CONFLITO:')[1]?.trim() || 'equipamento';
+      throw new Error(
+        `Equipamento indisponível neste horário: ${name}. ` +
+        'Ele já está reservado por outro agendamento no período. ' +
+        'Escolha outro horário ou dia, ou remova o equipamento.',
+      );
     }
-    throw new Error(error.message);
+    if (msg.includes('CONFLITO')) {
+      throw new Error('Horário indisponível: já existe um agendamento ou bloqueio nesse período. Escolha outro horário ou dia.');
+    }
+    throw new Error(msg);
   }
   return data; // id do agendamento
 }
@@ -244,10 +254,14 @@ export async function openAppointmentModal({ prefill = {}, existingId = null, on
 
   const equipChecks = ref.equipment.map((e) => {
     const found = equips.find((x) => x.equipment_id === e.id);
+    // 🔒 sinaliza equipamento exclusivo (não permite uso simultâneo).
+    const lock = e.block_simultaneous
+      ? '<span class="excl-icon" title="Uso exclusivo: não permite agendamentos simultâneos">🔒</span>'
+      : '';
     return `
       <label class="chk">
         <input type="checkbox" data-equip="${e.id}" ${found ? 'checked' : ''}>
-        <span>${escapeHtml(e.name)}</span>
+        <span>${escapeHtml(e.name)} ${lock}</span>
         <input type="number" min="1" value="${found?.quantity ?? 1}" data-equip-qty="${e.id}" class="qty">
       </label>`;
   }).join('');
@@ -330,6 +344,17 @@ export async function openAppointmentModal({ prefill = {}, existingId = null, on
           </div>
           <label class="field"><span>Observações operacionais</span>
             <textarea name="notes" rows="2">${escapeHtml(a.notes ?? '')}</textarea></label>
+        </fieldset>
+
+        <fieldset>
+          <legend>Requisitos especiais</legend>
+          <div class="chip-group" role="group" aria-label="Requisitos especiais">
+            <label class="chip"><input type="checkbox" name="needs_uti" ${a.needs_uti ? 'checked' : ''}><span>UTI</span></label>
+            <label class="chip"><input type="checkbox" name="needs_hemoba" ${a.needs_hemoba ? 'checked' : ''}><span>HEMOBA</span></label>
+            <label class="chip"><input type="checkbox" name="latex_allergy" ${a.latex_allergy ? 'checked' : ''}><span>Alergia a látex</span></label>
+          </div>
+          <label class="field"><span>Observação dos requisitos especiais</span>
+            <textarea name="special_notes" rows="2" placeholder="Campo livre para observações">${escapeHtml(a.special_notes ?? '')}</textarea></label>
         </fieldset>
 
         <fieldset>
@@ -456,6 +481,10 @@ export async function openAppointmentModal({ prefill = {}, existingId = null, on
       priority: form.priority.value,
       needs_pediatrician: form.needs_pediatrician.checked,
       needs_company: form.needs_company.checked,
+      needs_uti: form.needs_uti.checked,
+      needs_hemoba: form.needs_hemoba.checked,
+      latex_allergy: form.latex_allergy.checked,
+      special_notes: form.special_notes.value.trim(),
       notes: form.notes.value.trim(),
       surgeon_id: surgeonMain,
       professionals,
@@ -546,6 +575,9 @@ export async function openAppointmentDetails(id, { onEdit } = {}) {
           <div><label>Status</label><p>${escapeHtml(statusName)}</p></div>
           <div><label>Prioridade</label><p>${escapeHtml(labelForPriority(a.priority))}</p></div>
         </div>
+        <h3>Requisitos especiais</h3>
+        <p>${[a.needs_uti ? 'UTI' : null, a.needs_hemoba ? 'HEMOBA' : null, a.latex_allergy ? 'Alergia a látex' : null].filter(Boolean).map(escapeHtml).join(' · ') || '—'}</p>
+        ${a.special_notes ? `<p class="detail-obs">${escapeHtml(a.special_notes)}</p>` : ''}
         <h3>Profissionais</h3><ul class="plain">${profsHtml}</ul>
         <h3>Equipamentos</h3><ul class="plain">${equipHtml}</ul>
         <h3>Observações</h3><p>${escapeHtml(a.notes || '—')}</p>

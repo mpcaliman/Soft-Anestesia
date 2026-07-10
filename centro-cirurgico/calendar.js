@@ -264,6 +264,9 @@ function renderGrid(body) {
         html += `<td class="slot free" data-room="${room.id}" data-time="${minutesToTime(m)}"></td>`;
       } else if (item.situation === 'bloqueado') {
         html += `<td class="slot blocked"><span>Bloqueado</span></td>`;
+      } else if (item.situation === 'reservado') {
+        // Horário reservado ao próprio usuário: ele pode agendar.
+        html += `<td class="slot free reserved" data-room="${room.id}" data-time="${minutesToTime(m)}"><span>Reservado p/ você</span></td>`;
       } else {
         const det = detailFor(item.anon_id, item);
         if (det.kind === 'appointment' && passesTextFilter(det.appt)) {
@@ -379,6 +382,7 @@ function renderList(body) {
     const room = dataset.rooms.find(r => r.id === o.room_id)?.name ?? '—';
     let detail, cls = '', apptId = '';
     if (o.situation === 'bloqueado') { detail = 'Bloqueado'; cls = 'blocked'; }
+    else if (o.situation === 'reservado') { detail = 'Reservado para você'; cls = 'reserved'; }
     else {
       const det = detailFor(o.anon_id, o);
       if (det.kind === 'appointment' && passesTextFilter(det.appt)) {
@@ -403,6 +407,10 @@ function renderCardsFor(occList) {
   return occList.map((o) => {
     if (o.situation === 'bloqueado') {
       return `<div class="card block"><span class="card-time">${hhmm(o.start_time)}–${hhmm(o.end_time)}</span><span>Bloqueado</span></div>`;
+    }
+    if (o.situation === 'reservado') {
+      const room = dataset.rooms.find(r => r.id === o.room_id)?.name ?? '';
+      return `<div class="card reserved"><span class="card-time">${hhmm(o.start_time)}–${hhmm(o.end_time)} · ${escapeHtml(room)}</span><span>Reservado para você</span></div>`;
     }
     const det = detailFor(o.anon_id, o);
     if (det.kind === 'appointment' && passesTextFilter(det.appt)) {
@@ -464,7 +472,8 @@ function findFreeSlots() {
   const free = [];
   for (const room of rooms) {
     for (let m = open; m < close; m += slot) {
-      const busy = occToday.some((o) => o.room_id === room.id &&
+      // Reservas direcionadas ao próprio usuário não contam como ocupado.
+      const busy = occToday.some((o) => o.room_id === room.id && o.situation !== 'reservado' &&
         timeToMinutes(o.start_time) < m + slot && timeToMinutes(o.end_time) > m);
       if (!busy) free.push({ room: room.name, roomId: room.id, time: minutesToTime(m) });
     }

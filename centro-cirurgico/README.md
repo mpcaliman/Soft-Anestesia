@@ -32,6 +32,7 @@ centro-cirurgico/
 ├── whatsapp.js                # Envio manual (wa.me) + Edge Function
 ├── supabase-schema.sql        # Tabelas, views, funções e triggers
 ├── supabase-rls.sql           # Políticas de RLS (tabelas + Storage)
+├── supabase-migration-002.sql # Migração p/ bancos já instalados (v2)
 ├── README.md                  # Este arquivo
 └── supabase/functions/
     ├── _shared/cors.ts
@@ -62,6 +63,13 @@ No painel do Supabase, abra **SQL Editor** e execute, **nesta ordem**:
 2. `supabase-rls.sql` — habilita RLS em todas as tabelas sensíveis, cria
    as políticas de acesso e o **bucket privado** `appointment-files` com
    suas políticas de Storage.
+
+> **Já tem a versão inicial instalada?** Rode apenas
+> `supabase-migration-002.sql` (idempotente) para adicionar os recursos da
+> v2: requisitos especiais (UTI, HEMOBA, alergia a látex + observação),
+> notificação ao gestor a cada agendamento, bloqueio de sala direcionado a
+> um usuário e exclusividade de equipamento. Instalações novas já vêm com
+> tudo no `supabase-schema.sql`.
 
 ### O que a RLS garante
 
@@ -218,7 +226,15 @@ aplicada no **banco** (RLS + função de ocupação), não apenas na interface.
 - **Novo agendamento** — formulário completo (paciente, procedimento,
   profissionais, equipamentos, arquivos, prioridade, observações). Exige
   CPF **ou** carteirinha; senha de autorização obrigatória por padrão
-  (com opção "Não se aplica" quando o gestor habilitar).
+  (com opção "Não se aplica" quando o gestor habilitar). Inclui os
+  **requisitos especiais** UTI, HEMOBA e alergia a látex (selecione um ou
+  mais) com campo livre de observação.
+  - **Notificação ao gestor:** todo novo agendamento gera uma notificação
+    interna para o(s) gestor(es) do centro.
+  - **Equipamento exclusivo:** ao marcar um equipamento configurado como
+    "uso exclusivo" (🔒) em um horário já reservado por outro agendamento,
+    o sistema **bloqueia** o agendamento e orienta a escolher outro horário
+    ou dia (verificação feita no servidor).
 - **Meus procedimentos** — lista dos agendamentos associados ao usuário.
 - **Notificações** — avisos internos, com contador em tempo real.
 - **Minha disponibilidade** — períodos de indisponibilidade e respostas a
@@ -228,6 +244,13 @@ aplicada no **banco** (RLS + função de ocupação), não apenas na interface.
   solicitações de disponibilidade e configurações gerais (intervalo da
   grade: 10/15/20/30/60 min, horário de funcionamento, autorização,
   WhatsApp).
+  - **Bloqueios de sala** podem ser por **hora** (informando início/fim)
+    ou pelo **dia inteiro**, e ainda **direcionados a um usuário**: nesse
+    caso o horário fica reservado e **apenas aquele usuário** pode agendar
+    nele (para os demais aparece como bloqueado). Na agenda, o próprio
+    usuário vê o horário como "Reservado para você" e pode agendar.
+  - Em **Equipamentos**, o botão 🔒 "Bloquear agendamentos simultâneos"
+    marca o equipamento como de **uso exclusivo**.
 - **Sair** — encerra a sessão.
 
 ---
