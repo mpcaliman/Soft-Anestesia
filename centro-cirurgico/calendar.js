@@ -488,12 +488,12 @@ function findFreeSlots() {
     ${free.length ? free.map(f => `<li><button class="btn-link" data-room="${f.roomId}" data-time="${f.time}">${escapeHtml(f.room)} — ${f.time}</button></li>`).join('') : '<li>Nenhum horário livre encontrado.</li>'}
     </ul></div></div>`;
   document.body.appendChild(modal);
-  const close = () => modal.remove();
-  modal.querySelector('.modal-close').onclick = close;
-  modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+  const closeModal = () => modal.remove();
+  modal.querySelector('.modal-close').onclick = closeModal;
+  modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
   modal.querySelectorAll('[data-room]').forEach((b) => {
     b.onclick = () => {
-      close();
+      closeModal();
       const end = minutesToTime(timeToMinutes(b.dataset.time) + slot);
       openAppointmentModal({ prefill: { room_id: b.dataset.room, date: anchorDate, start_time: b.dataset.time, end_time: end }, onSaved: () => refresh() });
     };
