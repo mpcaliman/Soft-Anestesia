@@ -7,11 +7,40 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { CONFIG } from './config.js';
 
-// Verifica se a configuração do Supabase foi preenchida (Variables no
-// GitHub Actions ou config.js local). Evita que o app quebre ao carregar.
+// A configuração do Supabase pode vir de duas fontes, nesta ordem:
+//   1) valores digitados pelo usuário na própria tela (salvos no aparelho);
+//   2) config.js (gerado no build a partir de Variables), como padrão.
+// Assim o app funciona em qualquer hospedagem, sem depender de rebuild.
+const LS_URL = 'cc.supabase_url';
+const LS_KEY = 'cc.supabase_key';
+
+export function getConfig() {
+  let url = '';
+  let key = '';
+  try {
+    url = localStorage.getItem(LS_URL) || '';
+    key = localStorage.getItem(LS_KEY) || '';
+  } catch (e) { /* localStorage indisponível */ }
+  if (!url) url = CONFIG.SUPABASE_URL || '';
+  if (!key) key = CONFIG.SUPABASE_ANON_KEY || '';
+  return { url: url.trim(), key: key.trim() };
+}
+
+// Salva a configuração no aparelho (chave anônima é pública, seguro).
+export function saveConfig(url, key) {
+  try {
+    localStorage.setItem(LS_URL, (url || '').trim());
+    localStorage.setItem(LS_KEY, (key || '').trim());
+  } catch (e) { /* ignora */ }
+}
+
+export function clearConfig() {
+  try { localStorage.removeItem(LS_URL); localStorage.removeItem(LS_KEY); } catch (e) {}
+}
+
+// Verifica se a configuração do Supabase é válida (evita quebrar ao carregar).
 export function configIsValid() {
-  const url = CONFIG.SUPABASE_URL || '';
-  const key = CONFIG.SUPABASE_ANON_KEY || '';
+  const { url, key } = getConfig();
   return (
     url.startsWith('http') &&
     !url.includes('SEU-PROJETO') &&
@@ -21,8 +50,9 @@ export function configIsValid() {
 }
 
 // Cliente único e compartilhado (null se a configuração estiver ausente).
+const _cfg = getConfig();
 export const supabase = configIsValid()
-  ? createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY, {
+  ? createClient(_cfg.url, _cfg.key, {
       auth: {
         persistSession: true,       // mantém a sessão conectada de forma segura
         autoRefreshToken: true,

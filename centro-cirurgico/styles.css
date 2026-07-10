@@ -298,6 +298,9 @@ legend { padding: 0 .4rem; font-weight: 700; color: var(--primary-2); font-size:
 .config-card p { font-size: .92rem; margin: .5rem 0; }
 .config-card ul { margin: .3rem 0 .8rem 1.2rem; }
 .config-card code { background: #eef2f7; padding: .1rem .35rem; border-radius: 5px; font-size: .88rem; }
+.config-card form { margin-top: 1rem; }
+.config-card .btn.block { margin-top: .4rem; }
+.config-hint { font-size: .78rem; color: var(--muted); margin-top: .9rem; }
 
 /* ---------- Toasts ---------- */
 #toast-host { position: fixed; bottom: 1rem; right: 1rem; z-index: 10000; display: flex; flex-direction: column; gap: .5rem; }
