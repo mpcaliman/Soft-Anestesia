@@ -4,7 +4,7 @@
 //  entre módulos e a montagem do menu conforme o perfil do usuário.
 // =====================================================================
 
-import { supabase, state, escapeHtml, toast, setLoading, formatDateBR, hhmm } from './supabase-client.js';
+import { supabase, configIsValid, state, escapeHtml, toast, setLoading, formatDateBR, hhmm } from './supabase-client.js';
 import { CONFIG } from './config.js';
 import { bindLoginScreen, bindRecoveryFlow, loadProfileAndPermissions, signOut } from './auth.js';
 import { initCalendar, destroyCalendar } from './calendar.js';
@@ -26,20 +26,56 @@ async function init() {
   els.centerName = document.getElementById('center-name');
   els.notifBadge = document.getElementById('notif-badge');
 
+  // Sem configuração do Supabase: mostra instrução clara em vez de quebrar.
+  if (!configIsValid() || !supabase) {
+    showConfigMissing();
+    return;
+  }
+
   bindRecoveryFlow();
   bindLoginScreen(showApp);
 
   // Tenta restaurar sessão existente.
   setLoading(true);
-  const ok = await loadProfileAndPermissions();
-  setLoading(false);
-  if (ok) showApp();
-  else showLogin();
+  try {
+    const ok = await loadProfileAndPermissions();
+    if (ok) showApp();
+    else showLogin();
+  } catch (e) {
+    showLogin();
+  } finally {
+    setLoading(false);
+  }
 
   // Reage a logout/expiração de sessão em outras abas.
   supabase.auth.onAuthStateChange((event) => {
     if (event === 'SIGNED_OUT') showLogin();
   });
+}
+
+// Tela exibida quando SUPABASE_URL/SUPABASE_ANON_KEY não foram configurados.
+function showConfigMissing() {
+  setLoading(false);
+  els.login.style.display = 'none';
+  els.app.style.display = 'none';
+  const box = document.createElement('div');
+  box.className = 'config-missing';
+  box.innerHTML = `
+    <div class="config-card">
+      <div class="config-logo">🏥</div>
+      <h1>Configuração pendente</h1>
+      <p>O sistema foi publicado, mas ainda falta conectar ao banco de dados
+      (Supabase).</p>
+      <p>No repositório do GitHub, em <strong>Settings → Secrets and variables
+      → Actions → Variables</strong>, crie:</p>
+      <ul>
+        <li><code>SUPABASE_URL</code></li>
+        <li><code>SUPABASE_ANON_KEY</code></li>
+      </ul>
+      <p>Depois, em <strong>Actions</strong>, execute novamente o fluxo
+      "Publicar no GitHub Pages".</p>
+    </div>`;
+  document.body.appendChild(box);
 }
 
 function showLogin() {
@@ -52,8 +88,14 @@ function showLogin() {
 async function showApp() {
   els.login.style.display = 'none';
   els.app.style.display = 'flex';
+  const centerName = state.center?.name ?? CONFIG.APP_NAME;
   els.userName.textContent = state.profile.full_name;
-  els.centerName.textContent = state.center?.name ?? CONFIG.APP_NAME;
+  els.centerName.textContent = centerName;
+  // Reflete nome/usuário na barra lateral (sem MutationObserver).
+  const sideName = document.getElementById('center-name-side');
+  const sideUser = document.getElementById('sidebar-user');
+  if (sideName) sideName.textContent = centerName;
+  if (sideUser) sideUser.textContent = state.profile.full_name;
 
   buildMenu();
   await initNotifications(els.notifBadge);
