@@ -7,14 +7,29 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { CONFIG } from './config.js';
 
-// Cliente único e compartilhado.
-export const supabase = createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY, {
-  auth: {
-    persistSession: true,       // mantém a sessão conectada de forma segura
-    autoRefreshToken: true,
-    detectSessionInUrl: true,   // necessário para recuperação de senha
-  },
-});
+// Verifica se a configuração do Supabase foi preenchida (Variables no
+// GitHub Actions ou config.js local). Evita que o app quebre ao carregar.
+export function configIsValid() {
+  const url = CONFIG.SUPABASE_URL || '';
+  const key = CONFIG.SUPABASE_ANON_KEY || '';
+  return (
+    url.startsWith('http') &&
+    !url.includes('SEU-PROJETO') &&
+    key.length > 20 &&
+    !key.includes('SUA_CHAVE')
+  );
+}
+
+// Cliente único e compartilhado (null se a configuração estiver ausente).
+export const supabase = configIsValid()
+  ? createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY, {
+      auth: {
+        persistSession: true,       // mantém a sessão conectada de forma segura
+        autoRefreshToken: true,
+        detectSessionInUrl: true,   // necessário para recuperação de senha
+      },
+    })
+  : null;
 
 // --- Estado global leve da aplicação ---------------------------------
 export const state = {

@@ -85,16 +85,6 @@
     document.getElementById('menu-backdrop')?.addEventListener('click', function () {
       document.getElementById('app-screen')?.classList.remove('menu-open');
     });
-    // Reflete o nome do centro na barra lateral.
-    var obs = new MutationObserver(function () {
-      var n = document.getElementById('center-name');
-      var side = document.getElementById('center-name-side');
-      var su = document.getElementById('sidebar-user');
-      var cu = document.getElementById('current-user-name');
-      if (n && side) side.textContent = n.textContent;
-      if (su && cu) su.textContent = cu.textContent;
-    });
-    obs.observe(document.body, { subtree: true, childList: true, characterData: true });
   </script>
 </body>
 </html>
