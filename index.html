@@ -730,6 +730,13 @@ table.vitais-grade .vg-hora {
 }
 table.vitais-grade .vg-hora:hover { border-color: var(--primary-light, #9cc4e4); background: #fff; }
 table.vitais-grade .vg-hora:focus { border-color: var(--primary); background: #fff; outline: none; }
+.vg-hora-wrap { display: flex; align-items: center; justify-content: center; gap: 2px; }
+.vg-rm {
+  border: 1px solid var(--border); background: #fff; color: #b3392a;
+  width: 17px; height: 17px; line-height: 1; border-radius: 50%;
+  font-size: .72rem; cursor: pointer; padding: 0; flex-shrink: 0;
+}
+.vg-rm:hover { background: #b3392a; color: #fff; border-color: #b3392a; }
 
 /* === GRADE DE EXAMES LABORATORIAIS === */
 .lab-grid {
@@ -5091,6 +5098,8 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
             <select id="vit-autorep-int" onchange="anestesia.vitais.autoRep.setIntervalo(this.value)" style="width:auto"><option value="5">5 min</option><option value="10">10 min</option></select>
           </label>
         </div>
+        <details class="va-details" style="margin-top:4px">
+          <summary>Tabela linha-a-linha (avançado) — mesma informação, edição campo a campo</summary>
         <div class="dyn-table-wrap">
           <table class="dyn" id="tab-vitais">
             <thead><tr>
@@ -5126,6 +5135,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
           <button type="button" class="btn btn-sm" onclick="anestesia.vitais.atualizarGrafico()">↻ Atualizar gráfico</button>
           <button type="button" class="btn btn-danger btn-sm" onclick="anestesia.vitais.limparTabela()">🗑 Limpar tabela</button>
         </div>
+        </details>
 
         <!-- EVENTOS CRONOLÓGICOS -->
         <h3 style="font-size:.92rem;color:var(--primary-darker);margin:18px 0 8px;border-top:1px solid var(--border);padding-top:14px">📍 Eventos cronológicos<small style="color:var(--text-mute);font-weight:400; margin-left:8px">— marcados como letras no gráfico</small></h3>
@@ -5158,8 +5168,14 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
           <button type="button" class="btn btn-danger btn-sm" onclick="anestesia.eventos.limparTabela()">🗑 Limpar eventos</button>
         </div>
 
-        <!-- GRADE POR HORÁRIO (tabela estilo ficha, acima do gráfico) -->
-        <div class="vitais-grade-titulo">📋 Sinais vitais por horário <small style="font-weight:400;color:var(--text-mute)">— toque em qualquer célula para editar; o gráfico e a tabela se atualizam juntos</small></div>
+        <!-- GRADE POR HORÁRIO — edição principal (estilo tabela), acima do gráfico -->
+        <div class="vitais-grade-titulo">📋 Sinais vitais por horário <small style="font-weight:400;color:var(--text-mute)">— edição principal: toque numa célula para editar; <b>＋</b> adiciona uma coluna, <b>×</b> remove. Gráfico e tabela se atualizam juntos.</small></div>
+        <div class="quick-actions" style="margin:2px 0 6px">
+          <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.vitais._gradeAddCol()">＋ Horário (agora)</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.vitais._gradeRepetir()">⎘ Repetir última</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.duplicarEAjustar()">➕ Igual à anterior + ajustar</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.atualizarGrafico()">↻ Atualizar gráfico</button>
+        </div>
         <div class="vitais-grade-wrap" id="vitais-grade"></div>
 
         <div class="vitals-chart-wrap">
@@ -18216,8 +18232,9 @@ const anestesia = {
       const ea = v => utils.escapeAttr(v == null ? '' : String(v));
       let html = '<table class="vitais-grade"><thead><tr><th>Horário →</th>';
       comHora.forEach(c => {
-        html += '<th><input type="time" class="vg-hora" data-rowidx="' + c.idx + '" value="' + ea(g(c.tr, 'hora')) +
-          '" onchange="anestesia.vitais._gradeHora(this)"></th>';
+        html += '<th><div class="vg-hora-wrap"><input type="time" class="vg-hora" data-rowidx="' + c.idx + '" value="' + ea(g(c.tr, 'hora')) +
+          '" onchange="anestesia.vitais._gradeHora(this)">' +
+          '<button type="button" class="vg-rm" title="Remover esta coluna" onclick="anestesia.vitais._gradeRemoverCol(' + c.idx + ')">×</button></div></th>';
       });
       html += '</tr></thead><tbody>';
       params.forEach(p => {
@@ -18278,6 +18295,27 @@ const anestesia = {
       const el = tr.querySelector('[name="vit_hora[]"]');
       if (el) { el.value = input.value; try { anestesia.graficoUI.validarHoraInput(el); } catch (e) {} }
       anestesia.vitais.atualizarGrafico();   /* re-renderiza a grade com a nova ordem */
+      try { markDirty(); } catch (e) {}
+    },
+
+    /* Grade (estilo tabela) autossuficiente: adiciona/repete/remove colunas de horário */
+    _gradeAddCol() {
+      anestesia.graficoUI._contexto = 'anestesia';
+      anestesia.vitais.add(true);            /* nova linha com a hora atual → vira coluna na grade */
+    },
+    _gradeRepetir() {
+      anestesia.graficoUI._contexto = 'anestesia';
+      anestesia.vitais.duplicarUltima();     /* copia a última coluna com a hora atual */
+    },
+    _gradeRemoverCol(idx) {
+      const tbody = document.getElementById('vitais-body');
+      if (!tbody) return;
+      const tr = tbody.querySelectorAll('tr')[+idx];
+      if (!tr) return;
+      const hora = (tr.querySelector('[name="vit_hora[]"]') || {}).value || 'este horário';
+      if (!confirm('Remover a coluna de ' + hora + ' e todos os seus valores?')) return;
+      tr.remove();
+      anestesia.vitais.atualizarGrafico();   /* re-renderiza grade + gráfico */
       try { markDirty(); } catch (e) {}
     },
 
