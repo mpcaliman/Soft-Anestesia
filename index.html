@@ -1310,6 +1310,9 @@ body[data-graph-mode="mover"] canvas#srpa-vitals-chart:active { cursor: grabbing
 #page-scroller .ps-handle:hover { opacity: 1; }
 #page-scroller.dragging .ps-handle { opacity: 1; cursor: grabbing; }
 @media print { #page-scroller { display: none !important; } }
+/* No computador (tela larga) a alça é desnecessária (roda do mouse + barra de
+   rolagem) e pode atrapalhar a edição à direita — some a partir de 1024px. */
+@media (min-width: 1024px) { #page-scroller { display: none !important; } }
 
 /* === Feedback de conclusão nos botões de ação (Salvar/Atualizar) === */
 .btn-acao-ok {
@@ -16927,7 +16930,7 @@ const anestesia = {
       /* Inicia no último modo usado (só uma vez, na anestesia) */
       if (ctx === 'anestesia') {
         const ultModo = localStorage.getItem('medsys.v7.grafico_modo') || 'pas';
-        anestesia.graficoUI.setModo(['pas','pad','fc','spo2','etco2','bis','tof','temp','glic','pvc','pic','dc','scvo2'].includes(ultModo) ? ultModo : 'pas');
+        anestesia.graficoUI.setModo(['pas','pad','fc','spo2','etco2','fr','temp','bis','tof','glic','pvc','pic','dc','scvo2'].includes(ultModo) ? ultModo : 'pas');
       }
     },
 
@@ -17382,7 +17385,7 @@ const anestesia = {
         ui.dragging = true;
         ui._down.didDrag = true;
         const d0 = ui._down.dInicial;
-        if (d0 && ['pas','pad','fc','spo2','etco2','bis','tof','temp','glic','pvc','pic','dc','scvo2'].includes(ui.modo)) {
+        if (d0 && ['pas','pad','fc','spo2','etco2','fr','temp','bis','tof','glic','pvc','pic','dc','scvo2'].includes(ui.modo)) {
           const lim = ui._limiteVital(ui.modo);
           ui.inserirVital(d0.t, ui.modo, Math.max(lim[0], Math.min(lim[1], d0.valor)));
           ui.ultimoT = d0.t;
@@ -17390,7 +17393,7 @@ const anestesia = {
       }
       if (!d) return;
       /* Durante drag em modo vital, insere amostra contínua */
-      if (['pas','pad','fc','spo2','etco2','bis','tof','temp','glic','pvc','pic','dc','scvo2'].includes(ui.modo)) {
+      if (['pas','pad','fc','spo2','etco2','fr','temp','bis','tof','glic','pvc','pic','dc','scvo2'].includes(ui.modo)) {
         /* Espaçamento mínimo entre amostras durante drag = valor do snap (ou 3 se off) */
         const snapSel = document.getElementById(anestesia.graficoUI._ctxIds().snapSel);
         const snapVal = snapSel ? parseInt(snapSel.value) || 0 : 5;
@@ -17531,8 +17534,8 @@ const anestesia = {
 
     _limiteVital(modo) {
       return ({
-        pas: [40, 250], pad: [20, 180], fc: [20, 220],
-        spo2: [50, 100], etco2: [10, 90],
+        pas: [40, 250], pad: [20, 180], pam: [30, 200], fc: [20, 220],
+        spo2: [50, 100], etco2: [10, 90], fr: [0, 60],
         bis: [0, 100], tof: [0, 100],
         temp: [32, 42], glic: [20, 600],
         pvc: [0, 30], pic: [0, 50],
