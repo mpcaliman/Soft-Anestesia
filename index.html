@@ -1291,24 +1291,37 @@ body[data-graph-mode="mover"] canvas#srpa-vitals-chart:active { cursor: grabbing
   position: absolute;
   right: 0;
   top: 0;                    /* posição vertical definida pelo JS */
-  width: 44px; height: 44px;
+  width: 46px; height: 46px;
   border-radius: 50%;
   background: var(--primary);
   color: #fff;
   display: flex; align-items: center; justify-content: center;
-  font-size: 1.15rem; line-height: 1;
-  box-shadow: 0 2px 8px rgba(0,0,0,.30);
+  font-size: 1.2rem; line-height: 1;
+  box-shadow: 0 2px 10px rgba(0,0,0,.35);
+  border: 2px solid rgba(255,255,255,.85);
   cursor: grab;
   pointer-events: auto;      /* a alça captura o toque/arraste */
   touch-action: none;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
-  opacity: .55;              /* discreta quando parada */
+  opacity: .72;              /* discreta quando parada, mas visível */
   transition: opacity .2s ease;
 }
 #page-scroller .ps-handle:hover { opacity: 1; }
 #page-scroller.dragging .ps-handle { opacity: 1; cursor: grabbing; }
 @media print { #page-scroller { display: none !important; } }
+
+/* === Feedback de conclusão nos botões de ação (Salvar/Atualizar) === */
+.btn-acao-ok {
+  background: #1f9171 !important;
+  color: #fff !important;
+  border-color: #14755a !important;
+  animation: btnAcaoOk .85s ease-out;
+}
+@keyframes btnAcaoOk {
+  0%   { box-shadow: 0 0 0 0 rgba(31,145,113,.55); }
+  100% { box-shadow: 0 0 0 11px rgba(31,145,113,0); }
+}
 
 .graph-canvas-wrap {
   position: relative;
@@ -30305,7 +30318,9 @@ document.addEventListener('DOMContentLoaded', () => {
   <div class="ps-handle" id="ps-handle" title="Arraste para rolar a página">↕</div>
 </div>
 <script>
-/* Alça única de rolagem: o dedo segura o ícone e, ao correr, rola a página. */
+/* Alça única de rolagem: o dedo segura o ícone e, ao correr, rola a página.
+   Arraste RELATIVO (segue o ponto onde pegou, sem "pulo") + listeners globais
+   para não perder o movimento se o dedo/cursor sair da alça. */
 (function () {
   const box    = document.getElementById('page-scroller');
   const handle = document.getElementById('ps-handle');
@@ -30314,43 +30329,98 @@ document.addEventListener('DOMContentLoaded', () => {
   const TOPO = 66;    /* respiro abaixo do cabeçalho */
   const BASE = 16;    /* respiro na base da tela */
   const docEl = document.documentElement;
-  const maxScroll = () => Math.max(0, docEl.scrollHeight - window.innerHeight);
-  const percurso = () => Math.max(0, window.innerHeight - handle.offsetHeight - TOPO - BASE);
+  const maxScroll = () => Math.max(0, (docEl.scrollHeight || 0) - window.innerHeight);
+  const percurso  = () => Math.max(1, window.innerHeight - handle.offsetHeight - TOPO - BASE);
 
   let arrastando = false;
+  let grabDelta = 0;   /* distância entre o Y do dedo e o topo da alça ao pegar */
 
-  /* Reflete a posição da página na alça (quando NÃO se está arrastando) */
-  function atualizar() {
+  function topAtual() {
+    const t = parseFloat(handle.style.top);
+    return isNaN(t) ? TOPO : t;
+  }
+
+  /* Sem arrastar: a alça reflete a posição atual da página */
+  function posicionar() {
     if (maxScroll() < 40) { box.classList.remove('show'); return; }
     box.classList.add('show');
     if (arrastando) return;
     const frac = window.scrollY / maxScroll();
-    handle.style.top = Math.round(TOPO + frac * percurso()) + 'px';
+    handle.style.top = (TOPO + frac * percurso()) + 'px';
   }
 
-  /* Move a página conforme a posição vertical do dedo/mouse */
-  function rolarPara(clientY) {
-    let frac = (clientY - TOPO - handle.offsetHeight / 2) / percurso();
-    frac = Math.max(0, Math.min(1, frac));
-    handle.style.top = Math.round(TOPO + frac * percurso()) + 'px';
+  /* Durante o arraste: move a alça junto do dedo e rola proporcionalmente */
+  function mover(clientY) {
+    let top = clientY - grabDelta;
+    top = Math.max(TOPO, Math.min(TOPO + percurso(), top));
+    handle.style.top = top + 'px';
+    const frac = (top - TOPO) / percurso();
     window.scrollTo(0, Math.round(frac * maxScroll()));
+  }
+
+  function onMove(e) { if (arrastando) { mover(e.clientY); if (e.cancelable) e.preventDefault(); } }
+  function fim() {
+    if (!arrastando) return;
+    arrastando = false;
+    box.classList.remove('dragging');
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', fim);
+    window.removeEventListener('pointercancel', fim);
+    posicionar();
   }
 
   handle.addEventListener('pointerdown', (e) => {
     arrastando = true;
     box.classList.add('dragging');
-    try { handle.setPointerCapture(e.pointerId); } catch (_) {}
-    e.preventDefault();
+    grabDelta = e.clientY - topAtual();   /* mantém o ponto exato onde pegou */
+    window.addEventListener('pointermove', onMove, { passive: false });
+    window.addEventListener('pointerup', fim);
+    window.addEventListener('pointercancel', fim);
+    if (e.cancelable) e.preventDefault();
   });
-  handle.addEventListener('pointermove', (e) => { if (arrastando) rolarPara(e.clientY); });
-  const soltar = () => { arrastando = false; box.classList.remove('dragging'); atualizar(); };
-  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(ev => handle.addEventListener(ev, soltar));
 
-  window.addEventListener('scroll', atualizar, { passive: true });
-  window.addEventListener('resize', atualizar);
+  window.addEventListener('scroll', posicionar, { passive: true });
+  window.addEventListener('resize', posicionar);
   /* Reavalia periodicamente porque a altura do conteúdo muda ao navegar entre abas */
-  setInterval(atualizar, 700);
-  atualizar();
+  setInterval(posicionar, 800);
+  posicionar();
+})();
+</script>
+
+<script>
+/* Feedback visual de conclusão nos botões de ação (Salvar/Atualizar/Recalcular)
+   em TODOS os módulos: ao concluir a ação o botão pisca em verde com "✓" e
+   volta ao normal. Delegado — funciona para qualquer botão desses tipos. */
+(function () {
+  const PADRAO_ONCLICK = /\.(salvar|salvarComoNovo|atualizar|recalcular)\s*\(/i;
+  const PADRAO_TEXTO = /\b(salvar|atualizar|recalcular)\b/i;
+
+  function flash(btn, label) {
+    if (!btn || btn._flashAtivo) return;
+    btn._flashAtivo = true;
+    const origHTML = btn.innerHTML;
+    const w = Math.ceil(btn.getBoundingClientRect().width);
+    if (w) btn.style.minWidth = w + 'px';   /* evita "pulo" de largura */
+    btn.classList.add('btn-acao-ok');
+    btn.innerHTML = '✓ ' + (label || 'Feito');
+    setTimeout(function () {
+      btn.classList.remove('btn-acao-ok');
+      btn.innerHTML = origHTML;
+      btn.style.minWidth = '';
+      btn._flashAtivo = false;
+    }, 1150);
+  }
+
+  /* Fase de bolha: roda DEPOIS do onclick do botão (ação já executada). */
+  document.addEventListener('click', function (e) {
+    const btn = e.target && e.target.closest ? e.target.closest('button') : null;
+    if (!btn || btn.disabled || btn._flashAtivo) return;
+    const oc = btn.getAttribute('onclick') || '';
+    const txt = (btn.textContent || '').toLowerCase();
+    if (!(PADRAO_ONCLICK.test(oc) || PADRAO_TEXTO.test(txt))) return;
+    const salvar = /salvar/i.test(oc) || /\bsalv/i.test(txt);
+    flash(btn, salvar ? 'Salvo' : 'Atualizado');
+  }, false);
 })();
 </script>
 </body>
