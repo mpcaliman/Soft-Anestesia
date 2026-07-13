@@ -30791,21 +30791,52 @@ const assinaturaDigital = (function () {
       async assinar() { return { modo: 'externo' }; },        /* fluxo guiado pela UI */
       status() { return 'externo'; }
     },
-    /* SafeID em nuvem (1-clique via API) — PREPARADO, inativo até configurar a
-       Edge Function + credenciais do provedor. Nunca finge assinar. */
+    /* SafeID em nuvem (1-clique via API) — chama a Edge Function do Supabase
+       (que guarda o segredo). Fica "disponível" só quando a função responde que
+       o provedor está configurado. Nunca finge assinar. */
     safeid_cloud: {
-      id: 'safeid_cloud', label: 'SafeID em nuvem — 1 clique (requer configuração)', tipo: 'nuvem',
-      _cfg: null,
-      disponivel() { return !!(this._cfg && this._cfg.endpoint); },
-      instrucoesHTML() {
-        return '<p style="font-size:.88rem;color:var(--text-soft)">Assinatura em nuvem de 1 clique (padrão Portal CFM/Certillion). '
-          + 'Exige uma <b>Edge Function</b> guardando o segredo OAuth e as credenciais de API do SafeID/Certillion — '
-          + 'um app estático não pode guardar segredo. Enquanto não configurado, use o fluxo <b>gov.br / SafeID-app</b>.</p>';
+      id: 'safeid_cloud', label: 'SafeID em nuvem — 1 clique', tipo: 'nuvem',
+      _health: null,   /* null=desconhecido, true=configurado, false=indisponível */
+      _base() {
+        try {
+          const cfg = JSON.parse(localStorage.getItem('medsys.v7.cloud.cfg') || 'null');
+          const url = (cfg && cfg.url) || '';
+          return url ? url.replace(/\/$/, '') + '/functions/v1/assinatura' : '';
+        } catch (e) { return ''; }
       },
-      _naoConfig() { const e = new Error('Provedor em nuvem ainda não configurado (Fase 2: Edge Function + API).'); e.code = 'NAO_CONFIGURADO'; return e; },
-      listarCertificados() { return Promise.reject(this._naoConfig()); },
-      infoCertificado() { return Promise.reject(this._naoConfig()); },
-      assinar() { return Promise.reject(this._naoConfig()); },
+      _anonKey() { try { return (JSON.parse(localStorage.getItem('medsys.v7.cloud.cfg') || 'null') || {}).anonKey || ''; } catch (e) { return ''; } },
+      async verificar() {
+        const base = this._base();
+        if (!base) { this._health = false; return false; }
+        try {
+          const r = await fetch(base + '?op=health', { headers: this._anonKey() ? { apikey: this._anonKey(), authorization: 'Bearer ' + this._anonKey() } : {} });
+          const j = await r.json();
+          this._health = !!(j && j.configurado);
+          return this._health;
+        } catch (e) { this._health = false; return false; }
+      },
+      disponivel() { return this._health === true; },
+      instrucoesHTML() {
+        const est = this._health === true ? '<b style="color:#14755a">✔ backend configurado — 1 clique disponível</b>'
+          : this._health === false ? '<b style="color:#b3392a">backend não configurado</b> (ver supabase/README.md)'
+          : 'verificando backend…';
+        return '<p style="font-size:.88rem;color:var(--text-soft)">Assinatura em nuvem de 1 clique (padrão Portal CFM/Certillion), via <b>Edge Function</b> do Supabase que guarda o segredo do provedor. Status: ' + est
+          + '.</p><p style="font-size:.8rem;color:var(--text-mute)">Enquanto o provedor não estiver plugado, use o fluxo <b>gov.br / SafeID-app</b>.</p>';
+      },
+      _naoConfig() { const e = new Error('Assinatura em nuvem não configurada. Publique a Edge Function e defina os secrets (supabase/README.md).'); e.code = 'NAO_CONFIGURADO'; return e; },
+      async listarCertificados() {
+        if (!this.disponivel()) throw this._naoConfig();
+        const r = await fetch(this._base() + '?op=cert-list', { method: 'POST', headers: { 'content-type': 'application/json', apikey: this._anonKey(), authorization: 'Bearer ' + this._anonKey() }, body: '{}' });
+        return await r.json();
+      },
+      async assinar() {
+        if (!this.disponivel()) throw this._naoConfig();
+        /* Fluxo 1-clique completo (OAuth do provedor + seleção de certificado +
+           SAD/OTP + signDoc) é habilitado ao conectar a doc da API do provedor.
+           Até lá, a função responde configurado apenas após os secrets CSC_*. */
+        const e = new Error('Backend pronto. Falta plugar a documentação da API do provedor para liberar o 1-clique (ver supabase/README.md).');
+        e.code = 'AGUARDANDO_API'; throw e;
+      },
       status() { return this.disponivel() ? 'nuvem' : 'nao_configurado'; }
     }
   };
@@ -30883,7 +30914,12 @@ const assinaturaDigital = (function () {
     const instr = document.getElementById('ad-instr'); if (instr) instr.innerHTML = p.instrucoesHTML();
     const passos = document.getElementById('ad-passos');
     if (passos) passos.style.display = (p.tipo === 'externo') ? 'flex' : 'none';
-    if (p.tipo === 'nuvem' && !p.disponivel()) toast('Provedor em nuvem ainda não configurado — use gov.br / SafeID-app', 'warn');
+    if (p.tipo === 'nuvem' && p.verificar) {
+      p.verificar().then(() => {
+        const i2 = document.getElementById('ad-instr'); if (i2 && (document.getElementById('ad-prov') || {}).value === id) i2.innerHTML = p.instrucoesHTML();
+        const ps = document.getElementById('ad-passos'); if (ps && (document.getElementById('ad-prov') || {}).value === id) ps.style.display = p.disponivel() ? 'flex' : 'none';
+      });
+    }
   }
 
   function gerarPDF() {
@@ -31014,19 +31050,42 @@ const assinaturaDigital = (function () {
   }
   function fecharValidacao() { const h = document.getElementById('ad-validar-overlay'); if (h) h.classList.remove('show'); if (location.hash.indexOf('validar') >= 0) { try { history.replaceState(null, '', location.pathname); } catch (e) {} } }
 
+  /* Validação central (Edge Function) — usada quando o backend estiver publicado */
+  async function _validarCentral(q) {
+    try {
+      const base = PROVIDERS.safeid_cloud._base(); if (!base) return null;
+      const key = PROVIDERS.safeid_cloud._anonKey();
+      const param = /^[0-9a-f]{64}$/i.test(q) ? 'hash=' + q.toLowerCase() : 'codigo=' + encodeURIComponent(q.toUpperCase());
+      const r = await fetch(base + '?op=validar&' + param, { headers: key ? { apikey: key, authorization: 'Bearer ' + key } : {} });
+      const j = await r.json();
+      if (j && j.encontrado && j.registro) {
+        const g = j.registro;
+        return { central: true, titulo: g.titulo, profissional: g.profissional, crm: g.crm, ts: g.assinado_em,
+          provedorLabel: g.provedor, algoritmo: g.algoritmo, versao: g.versao, codigo: g.codigo, _id: '(central)',
+          hashDoc: g.hash_doc, cadeia_icp: g.cadeia_icp, cert_emissor: g.cert_emissor, cert_serial: g.cert_serial };
+      }
+    } catch (e) {}
+    return null;
+  }
+
   async function _fazerValidacao() {
     const inp = document.getElementById('ad-validar-inp');
     const res = document.getElementById('ad-validar-res');
     if (!res) return;
-    const reg = validar(inp ? inp.value : '');
+    const q = (inp ? inp.value : '').trim();
+    res.innerHTML = '<div class="ad-res">⏳ Verificando…</div>';
+    let reg = validar(q);
+    let central = false;
+    if (!reg) { const c = await _validarCentral(q); if (c) { reg = c; central = true; } }
     if (!reg) {
-      res.innerHTML = '<div class="ad-res ad-res-erro">❌ <b>Não encontrado.</b> Nenhum documento assinado corresponde a esse código/UUID/hash neste dispositivo.<br><span style="font-size:.76rem">Obs.: nesta versão a base de validação é local/sincronizada. A validação pública central entra na Fase 2 (backend).</span></div>';
+      res.innerHTML = '<div class="ad-res ad-res-erro">❌ <b>Não encontrado.</b> Nenhum documento assinado corresponde a esse código/UUID/hash.<br><span style="font-size:.76rem">A base local vale para este dispositivo; a validação central depende da Edge Function publicada (Opção B).</span></div>';
       return;
     }
-    const ok = await _integridadeCorrente(reg);
+    const ok = central ? true : await _integridadeCorrente(reg);
+    const fonte = central ? ' <span style="font-weight:400;font-size:.78rem">(verificado na base central)</span>' : ' <span style="font-weight:400;font-size:.78rem">(base local)</span>';
     const dt = String(reg.ts || '').replace('T', ' ').slice(0, 16);
     res.innerHTML = '<div class="ad-res ' + (ok ? 'ad-res-ok' : 'ad-res-alerta') + '">'
-      + (ok ? '✅ <b>Registro de assinatura íntegro.</b>' : '⚠️ <b>Registro possivelmente adulterado</b> (o hash do registro não confere).')
+      + (ok ? '✅ <b>Registro de assinatura íntegro.</b>' + fonte : '⚠️ <b>Registro possivelmente adulterado</b> (o hash do registro não confere).')
       + '<table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:.82rem">'
       + AD._linha('Documento', reg.titulo)
       + AD._linha('Profissional', (reg.profissional || '—') + (reg.crm ? ' · CRM ' + reg.crm : ''))
