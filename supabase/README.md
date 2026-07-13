@@ -51,23 +51,34 @@ Certillion e provedores BR expõem).
   o **SHA‑256**, grava o **registro imutável** e devolve o PDF assinado + código.
 - `validar` — validação pública por `codigo` ou `hash` (lê só a view não sensível).
 
-## ⚠️ O que EU preciso de você para finalizar e testar
-A orquestração está pronta no **padrão CSC**, mas os pontos marcados
-`>>> AJUSTAR CONFORME O PROVEDOR <<<` no `index.ts` dependem da **documentação de
-API do SafeID/Certillion**. Me envie:
+## Provedor: SafeID (Safeweb)
+O certificado em uso é um **e‑CPF em nuvem da Safeweb**, operado pelo app **SafeID**
+(aprovação de cada assinatura pela aba **"Autorizar"** = SAD/push). Para o
+1‑clique programático é preciso a **API de assinatura remota da Safeweb** —
+disponibilizada pelo **programa de integração/desenvolvedor da Safeweb**
+(habilitação comercial da conta). A tela de "Detalhes" do app mostra o
+certificado, **não** as credenciais de API.
 
-1. **Base URL** da API (ex.: `https://api.safeid.com.br/csc/v1`).
+Como obter (você): abrir um chamado com a **Safeweb** (suporte/comercial ou o
+portal do desenvolvedor) pedindo **acesso à API de assinatura remota (SafeID)**
+para integração própria, e solicitar as credenciais + documentação.
+
+## ⚠️ O que EU preciso da Safeweb para finalizar e testar
+A orquestração está pronta no **padrão CSC**; ao receber a doc da Safeweb, ajusto
+os pontos `>>> AJUSTAR CONFORME O PROVEDOR <<<` no `index.ts`. Preciso de:
+
+1. **Base URL** da API de assinatura remota da Safeweb (o host/caminho reais).
 2. **Fluxo OAuth** aceito: `client_credentials` (app) ou `authorization_code`+PKCE
-   (o usuário autoriza) — e as URLs de `token`/`authorize`.
+   (o médico autoriza) — e as URLs de `token`/`authorize`.
 3. **Credenciais**: `client_id` e `client_secret` (ficam só nos secrets).
 4. **Endpoint de assinatura**: é **por documento** (envia PDF → recebe PDF assinado)
-   ou **por hash** (`signatures/signHash` + embutir PAdES no nosso lado)?
-   E o **formato exato** de request/response.
-5. Como o usuário fornece o **SAD/OTP** (push no app, OTP, etc.).
+   ou **por hash** (`signHash` + embutir PAdES no nosso lado)? E o **formato exato**
+   de request/response.
+5. Como chega o **SAD/OTP** (a aprovação na aba "Autorizar" do app SafeID).
 
-Com isso eu ajusto o driver (2–3 funções pequenas e isoladas), fazemos um teste
-com um certificado real e ligamos o 1‑clique. Até lá, o fluxo **gov.br / SafeID‑app
-(guiado)** já entrega assinatura ICP‑Brasil real e verificável.
+Com isso eu ajusto o driver (2–3 funções pequenas e isoladas), testamos com o seu
+certificado real e ligamos o 1‑clique. Até lá, o fluxo **gov.br / SafeID‑app
+(guiado)** já entrega assinatura ICP‑Brasil real e verificável com o seu e‑CPF.
 
 ## Segurança / LGPD
 - Segredo do provedor só na Edge Function (secrets).

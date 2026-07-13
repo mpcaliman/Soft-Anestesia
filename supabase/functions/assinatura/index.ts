@@ -34,8 +34,8 @@ const CORS = {
 };
 
 const env = (k: string) => Deno.env.get(k) ?? "";
-const PROVIDER = env("SIGN_PROVIDER") || "safeid";
-const CSC_BASE = env("CSC_BASE_URL");           // ex.: https://api.safeid.com.br/csc/v1  (>>> AJUSTAR <<<)
+const PROVIDER = env("SIGN_PROVIDER") || "safeid_safeweb";
+const CSC_BASE = env("CSC_BASE_URL");           // API de assinatura remota da Safeweb/SafeID (>>> host real conforme doc <<<)
 const CSC_ID = env("CSC_CLIENT_ID");
 const CSC_SECRET = env("CSC_CLIENT_SECRET");
 const CSC_SCOPE = env("CSC_SCOPE") || "service";
