@@ -18219,7 +18219,10 @@ const anestesia = {
       { label: 'BIS', field: 'bis' },
       { label: 'TOF%', field: 'tof' },
       { label: 'Glic', field: 'glic' },
-      { label: 'PVC', field: 'pvc', step: '0.1' }
+      { label: 'PVC', field: 'pvc', step: '0.1' },
+      { label: 'PIC', field: 'pic' },
+      { label: 'DC', field: 'dc', step: '0.1' },
+      { label: 'ScvO₂', field: 'scvo2' }
     ],
 
     /* Grade transposta (parâmetros nas linhas, horários nas colunas) — acima do gráfico.
@@ -18629,6 +18632,7 @@ const anestesia = {
         const fc = parseFloat(tr.querySelector('[name="vit_fc[]"]').value) || null;
         const spo2 = parseFloat(tr.querySelector('[name="vit_spo2[]"]').value) || null;
         const etco2 = parseFloat(tr.querySelector('[name="vit_etco2[]"]')?.value) || null;
+        const fr = parseFloat(tr.querySelector('[name="vit_fr[]"]')?.value) || null;
         const temp = parseFloat(tr.querySelector('[name="vit_temp[]"]')?.value) || null;
         const bis = parseFloat(tr.querySelector('[name="vit_bis[]"]')?.value) || null;
         const tof = parseFloat(tr.querySelector('[name="vit_tof[]"]')?.value) || null;
@@ -18637,7 +18641,7 @@ const anestesia = {
         const pic = parseFloat(tr.querySelector('[name="vit_pic[]"]')?.value) || null;
         const dc = parseFloat(tr.querySelector('[name="vit_dc[]"]')?.value) || null;
         const scvo2 = parseFloat(tr.querySelector('[name="vit_scvo2[]"]')?.value) || null;
-        pontos.push({ t, pas, pad, pam, fc, spo2, etco2, temp, bis, tof, glic, pvc, pic, dc, scvo2 });
+        pontos.push({ t, pas, pad, pam, fc, spo2, etco2, fr, temp, bis, tof, glic, pvc, pic, dc, scvo2 });
       });
       pontos.sort((a, b) => a.t - b.t);
 
@@ -18953,6 +18957,7 @@ const anestesia = {
       plot('fc',  '#1c64a9', 'circle');
       plot('spo2','#1f9171', 'square');
       plot('etco2','#8a2be2', 'diamond');   /* roxo escuro */
+      plot('fr',  '#7c3aed', 'cross');      /* violeta — frequência respiratória */
       /* Séries adicionais — só plotam se houver dados na coluna */
       plot('bis', '#d97706', 'circle');     /* laranja escuro */
       plot('tof', '#e11d48', 'square');     /* rosa */
