@@ -5096,24 +5096,9 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
-        <div class="quick-actions">
-          <span class="qa-label">Sinais vitais</span>
-          <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.vitais.add(true)">+ Linha (hora atual)</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.add()">+ Linha vazia</button>
-          <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.vitais.duplicarEAjustar()">➕ Igual à anterior + ajustar</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.duplicarUltima()">⎘ Duplicar última</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.addSetModelo()">⚡ Modelo T0/T15/T30/T60</button>
-          <button type="button" class="btn btn-sm" style="background:#0f7b4f;color:#fff;border-color:#0f7b4f" onclick="captura.abrirMonitor('anestesia')">📷 Capturar do monitor</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.atualizarGrafico()">↻ Atualizar gráfico</button>
-          <button type="button" class="btn btn-sm btn-danger" onclick="anestesia.vitais.limparTabela()">🗑 Limpar tabela</button>
-          <span class="gt-sep" style="border-left:1px solid var(--border);margin:0 4px"></span>
-          <label class="gt-snap" title="Quando ligado, se você ficar sem lançar sinais vitais, o sistema repete automaticamente o último registro no intervalo escolhido" style="display:inline-flex;align-items:center;gap:4px;font-size:.78rem">
-            <input type="checkbox" id="vit-autorep-chk" onchange="anestesia.vitais.autoRep.toggle(this.checked)"> ⏱ Auto-repetir
-            <select id="vit-autorep-int" onchange="anestesia.vitais.autoRep.setIntervalo(this.value)" style="width:auto"><option value="5">5 min</option><option value="10">10 min</option></select>
-          </label>
-        </div>
-        <details class="va-details" style="margin-top:4px">
-          <summary>Tabela linha-a-linha (avançado) — mesma informação, edição campo a campo</summary>
+        <p style="font-size:.82rem;color:var(--text-soft);margin:0 0 8px">Registre os sinais vitais pela <b>tabela por horário</b> (abaixo) ou <b>direto no gráfico</b> — os dois se atualizam juntos.</p>
+        <!-- Tabela de dados (oculta): modelo interno lido/gravado pela grade e pelo gráfico -->
+        <div style="display:none" aria-hidden="true">
         <div class="dyn-table-wrap">
           <table class="dyn" id="tab-vitais">
             <thead><tr>
@@ -5141,16 +5126,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
             <tbody id="vitais-body"></tbody>
           </table>
         </div>
-        <div class="table-actions">
-          <button type="button" class="btn btn-primary btn-sm" onclick="anestesia.vitais.add(true)">+ Linha (hora atual)</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.add()">+ Linha vazia</button>
-          <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.vitais.duplicarEAjustar()">➕ Igual à anterior + ajustar</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.duplicarUltima()">⎘ Duplicar última</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.addSetModelo()">⚡ Modelo T0/T15/T30/T60</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.atualizarGrafico()">↻ Atualizar gráfico</button>
-          <button type="button" class="btn btn-danger btn-sm" onclick="anestesia.vitais.limparTabela()">🗑 Limpar tabela</button>
         </div>
-        </details>
 
         <!-- EVENTOS CRONOLÓGICOS -->
         <h3 style="font-size:.92rem;color:var(--primary-darker);margin:18px 0 8px;border-top:1px solid var(--border);padding-top:14px">📍 Eventos cronológicos<small style="color:var(--text-mute);font-weight:400; margin-left:8px">— marcados como letras no gráfico</small></h3>
@@ -5184,12 +5160,20 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
         </div>
 
         <!-- GRADE POR HORÁRIO — edição principal (estilo tabela), acima do gráfico -->
-        <div class="vitais-grade-titulo">📋 Sinais vitais por horário <small style="font-weight:400;color:var(--text-mute)">— edição principal: toque numa célula para editar; <b>＋</b> adiciona uma coluna, <b>×</b> remove. Gráfico e tabela se atualizam juntos.</small></div>
+        <div class="vitais-grade-titulo">📋 Sinais vitais por horário <small style="font-weight:400;color:var(--text-mute)">— toque numa célula para editar; <b>＋</b> adiciona um horário, <b>×</b> remove. Gráfico e tabela se atualizam juntos.</small></div>
         <div class="quick-actions" style="margin:2px 0 6px">
           <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.vitais._gradeAddCol()">＋ Horário (agora)</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais._gradeRepetir()">⎘ Repetir última</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.vitais._gradeRepetir()">⎘ Copiar último registro</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.vitais.duplicarEAjustar()">➕ Igual à anterior + ajustar</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.addSetModelo()">⚡ Modelo T0/T15/T30/T60</button>
+          <button type="button" class="btn btn-sm" style="background:#0f7b4f;color:#fff;border-color:#0f7b4f" onclick="captura.abrirMonitor('anestesia')">📷 Capturar do monitor</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.vitais.atualizarGrafico()">↻ Atualizar gráfico</button>
+          <button type="button" class="btn btn-sm btn-danger" onclick="anestesia.vitais.limparTabela()">🗑 Limpar</button>
+          <span class="gt-sep" style="border-left:1px solid var(--border);margin:0 4px"></span>
+          <label class="gt-snap" title="Quando ligado, se você ficar sem lançar sinais vitais, o sistema repete automaticamente o último registro no intervalo escolhido" style="display:inline-flex;align-items:center;gap:4px;font-size:.78rem">
+            <input type="checkbox" id="vit-autorep-chk" onchange="anestesia.vitais.autoRep.toggle(this.checked)"> ⏱ Auto-repetir
+            <select id="vit-autorep-int" onchange="anestesia.vitais.autoRep.setIntervalo(this.value)" style="width:auto"><option value="5">5 min</option><option value="10">10 min</option></select>
+          </label>
         </div>
         <div class="vitais-grade-wrap" id="vitais-grade"></div>
 
@@ -5279,6 +5263,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
           <button type="button" class="btn btn-sm" onclick="anestesia.meds.addPreset('sevoflurano')" title="Sevoflurano — vapor em %, independente do O₂">+ Sevoflurano</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.meds.addPreset('isoflurano')" title="Isoflurano — vapor em %">+ Isoflurano</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.meds.addPreset('desflurano')" title="Desflurano — vapor em %">+ Desflurano</button>
+          <button type="button" class="btn btn-sm" style="background:#0d9488;color:#fff;border-color:#0d9488" onclick="anestesia.meds.calcHalogenado()" title="Calcula o consumo médio de halogenado (início, fim, fluxo de gás fresco e % vaporizado)">🧮 Consumo halogenado</button>
         </div>
         <div class="quick-actions" id="meds-presets-custom"></div>
         <div class="dyn-table-wrap">
@@ -16932,9 +16917,101 @@ const anestesia = {
           if (el) el.style.opacity = '1';
         });
       }
+      /* Halogenado (vapor em %): oferece o cálculo de consumo médio automático */
+      if (p.tipo === 'Inalatório' && p.unidade === '%') {
+        anestesia.meds.calcHalogenado(p.nome, tr);
+        markDirty();
+        return;
+      }
       const inputDose = tr.querySelector('[name="med_dose[]"]');
       if (inputDose && !p.dose) inputDose.focus();
       markDirty();
+    },
+    /* Volume de vapor (mL) produzido por 1 mL de agente líquido a 20 °C/1 atm */
+    HALOG_VAPOR: { 'Sevoflurano': 183, 'Isoflurano': 195, 'Desflurano': 210, 'Halotano': 227, 'Enflurano': 197 },
+    _calcHalogCtx: null,
+    _calcHalogResultado: null,
+    /* Calculadora de consumo de halogenado: início, fim, fluxo de gás fresco e
+       % vaporizado → consumo total (mL líquido) e média (mL/h). */
+    calcHalogenado(nomeAgente, tr) {
+      const f = document.getElementById('form-anestesia');
+      const g = (sel) => (f && f.querySelector(sel) ? f.querySelector(sel).value : '') || '';
+      anestesia.meds._calcHalogCtx = { nomeAgente: nomeAgente || 'Sevoflurano', tr: tr || null };
+      const ini = (tr && tr.querySelector('[name="med_hora[]"]')?.value) || g('[name="hora_sala_entrada"]') || g('[name="hora_inicio"]') || '';
+      const fim = g('[name="hora_sala_saida"]') || g('[name="hora_fim"]') || '';
+      const pct = (tr && tr.querySelector('[name="med_dose[]"]')?.value) || '';
+      const agentes = Object.keys(anestesia.meds.HALOG_VAPOR);
+      const optAg = agentes.map(a => `<option ${a === (nomeAgente || 'Sevoflurano') ? 'selected' : ''}>${a}</option>`).join('');
+      const body = `
+        <p style="font-size:.82rem;color:var(--text-soft);margin-bottom:8px">Consumo médio do agente por vaporização, calculado a partir do <b>fluxo de gás fresco</b> e do <b>% vaporizado</b>.</p>
+        <div class="grid">
+          <div class="field col-12"><label>Agente</label><select id="calc-halog-agente" onchange="anestesia.meds._calcHalogRecalc()">${optAg}</select></div>
+          <div class="field col-6"><label>Início</label><input type="time" id="calc-halog-ini" value="${ini}" oninput="anestesia.meds._calcHalogRecalc()"></div>
+          <div class="field col-6"><label>Fim</label><input type="time" id="calc-halog-fim" value="${fim}" oninput="anestesia.meds._calcHalogRecalc()"></div>
+          <div class="field col-6"><label>Fluxo de gás fresco (L/min)</label><input type="number" id="calc-halog-fgf" step="0.1" min="0" placeholder="ex.: 1,5" oninput="anestesia.meds._calcHalogRecalc()"></div>
+          <div class="field col-6"><label>% vaporizado</label><input type="number" id="calc-halog-pct" step="0.1" min="0" value="${utils.escapeAttr(pct)}" placeholder="ex.: 2,0" oninput="anestesia.meds._calcHalogRecalc()"></div>
+        </div>
+        <div id="calc-halog-out" style="margin-top:10px;font-size:.9rem"></div>`;
+      const footer = '<button class="btn" onclick="modal.close()">Fechar</button>' +
+        '<button class="btn btn-primary" id="calc-halog-inserir" onclick="anestesia.meds._calcHalogInserir()" disabled>Inserir na ficha</button>';
+      modal.open('🧮 Consumo de halogenado', body, footer);
+      anestesia.meds._calcHalogRecalc();
+    },
+    _calcHalogRecalc() {
+      const ctx = anestesia.meds._calcHalogCtx; if (!ctx) return;
+      const val = id => { const el = document.getElementById(id); return el ? el.value : ''; };
+      const parseT = s => { const m = String(s || '').match(/^(\d{1,2}):(\d{2})/); return m ? parseInt(m[1]) * 60 + parseInt(m[2]) : null; };
+      const nomeAgente = val('calc-halog-agente') || ctx.nomeAgente;
+      const ini = parseT(val('calc-halog-ini'));
+      let fim = parseT(val('calc-halog-fim'));
+      const fgf = parseFloat(val('calc-halog-fgf'));
+      const pct = parseFloat(val('calc-halog-pct'));
+      const out = document.getElementById('calc-halog-out');
+      const btn = document.getElementById('calc-halog-inserir');
+      if (ini != null && fim != null && fim < ini) fim += 24 * 60; /* cruza meia-noite */
+      if (ini == null || fim == null || fim <= ini || isNaN(fgf) || isNaN(pct) || fgf <= 0 || pct <= 0) {
+        if (out) out.innerHTML = '<span style="color:var(--text-mute)">Preencha início, fim, fluxo e % para calcular.</span>';
+        if (btn) btn.disabled = true;
+        anestesia.meds._calcHalogResultado = null;
+        return;
+      }
+      const dur = fim - ini;
+      const vaporPorMl = anestesia.meds.HALOG_VAPOR[nomeAgente] || 200;
+      const vaporML = fgf * 1000 * (pct / 100) * dur;   /* mL de vapor */
+      const liquidoML = vaporML / vaporPorMl;           /* mL de líquido */
+      const mlPorH = liquidoML / (dur / 60);
+      const r = { nomeAgente, dur, fgf, pct, liquidoML: Math.round(liquidoML * 10) / 10, mlPorH: Math.round(mlPorH * 10) / 10, vaporPorMl };
+      anestesia.meds._calcHalogResultado = r;
+      if (out) out.innerHTML = `<div style="background:#eef8f1;border:1px solid #b9e0c6;border-radius:6px;padding:8px 10px;color:#14532d">
+        <div style="font-size:1rem"><b>Consumo total: ${r.liquidoML} mL</b> de ${utils.escapeHTML(nomeAgente)} líquido</div>
+        <div>Média: <b>${r.mlPorH} mL/h</b> · Duração ${dur} min · FGF ${fgf} L/min · ${pct}%</div>
+        <div style="font-size:.72rem;color:#3b7a5a;margin-top:3px">Base: 1 mL líquido ≈ ${vaporPorMl} mL de vapor (${utils.escapeHTML(nomeAgente)}).</div>
+      </div>`;
+      if (btn) btn.disabled = false;
+    },
+    _calcHalogInserir() {
+      const ctx = anestesia.meds._calcHalogCtx, r = anestesia.meds._calcHalogResultado;
+      if (!ctx || !r) return;
+      let tr = ctx.tr;
+      if (!tr || !document.body.contains(tr)) {
+        tr = anestesia.meds.add({ nome: r.nomeAgente, tipo: 'Inalatório', unidade: '%', via: 'Inalatória' });
+      } else {
+        const nomeEl = tr.querySelector('[name="med_nome[]"]'); if (nomeEl && !nomeEl.value.trim()) nomeEl.value = r.nomeAgente;
+      }
+      const set = (n, v) => { const el = tr.querySelector(`[name="${n}"]`); if (el) el.value = v; };
+      set('med_hora[]', document.getElementById('calc-halog-ini').value);
+      set('med_hora_fim[]', document.getElementById('calc-halog-fim').value);
+      set('med_dose[]', document.getElementById('calc-halog-pct').value);
+      const selUn = tr.querySelector('[name="med_unidade[]"]'); if (selUn) selUn.value = '%';
+      const selTipo = tr.querySelector('[name="med_tipo[]"]'); if (selTipo) selTipo.value = 'Inalatório';
+      set('med_velocidade[]', document.getElementById('calc-halog-fgf').value);
+      const obs = tr.querySelector('[name="med_obs[]"]');
+      if (obs) obs.value = `Consumo ${r.liquidoML} mL (média ${r.mlPorH} mL/h · FGF ${r.fgf} L/min · ${r.pct}% · ${r.dur} min)`;
+      ['med_velocidade[]', 'med_hora_fim[]'].forEach(n => { const el = tr.querySelector(`[name="${n}"]`); if (el) el.style.opacity = '1'; });
+      markDirty();
+      try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
+      modal.close();
+      toast(`Consumo de ${r.nomeAgente}: ${r.liquidoML} mL (${r.mlPorH} mL/h)`);
     },
     addSetComum() {
       SET_MED_COMUM.forEach(k => {
@@ -17044,10 +17121,13 @@ const anestesia = {
           /* Se velocidade (fluxo) informada: total mL = fluxo (L/min) × dur × dose(%) × 10 */
           if (!isNaN(vel)) {
             if (un === '%') {
-              const totalML = vel * dur * (dose / 100) * 1000;
+              /* mL de vapor = fluxo(L/min)×1000 × %/100 × min; ÷ vapor/mL líquido do agente */
+              const vaporPorMl = anestesia.meds.HALOG_VAPOR[nome] || 200;
+              const vaporML = vel * 1000 * (dose / 100) * dur;
+              const totalML = vaporML / vaporPorMl;
               consumos.push({
-                nome, total: Math.round(totalML), unidade: 'mL (líq.)',
-                detalhe: `vapor ${dose}% × fluxo ${vel}L/min × ${dur} min`
+                nome, total: Math.round(totalML * 10) / 10, unidade: 'mL (líq.)',
+                detalhe: `${dose}% × FGF ${vel}L/min × ${dur} min (1 mL líq.≈${vaporPorMl} mL vapor)`
               });
             } else if (un === 'CAM') {
               consumos.push({
@@ -18576,7 +18656,7 @@ const anestesia = {
       const g = (tr, n) => (tr.querySelector('[name="vit_' + n + '[]"]') || {}).value || '';
       /* Cada coluna guarda o índice da linha real (na ordem do DOM) para gravar de volta */
       const comHora = rows.map((tr, idx) => ({ tr, idx })).filter(o => g(o.tr, 'hora'));
-      if (!comHora.length) { host.innerHTML = '<div style="font-size:.78rem;color:var(--text-mute);padding:8px">Nenhum sinal vital com horário registrado ainda. Registre pelo gráfico ou pela tabela abaixo.</div>'; return; }
+      if (!comHora.length) { host.innerHTML = '<div style="font-size:.78rem;color:var(--text-mute);padding:8px">Nenhum sinal vital registrado ainda. Toque em <b>＋ Horário (agora)</b> acima, ou arraste/toque no gráfico.</div>'; return; }
       /* Ordena por horário (só a exibição; o índice preserva a referência real) */
       comHora.sort((a, b) => (g(a.tr, 'hora') || '').localeCompare(g(b.tr, 'hora') || ''));
       /* Mostra apenas os parâmetros ativos (conforme monitores) */
