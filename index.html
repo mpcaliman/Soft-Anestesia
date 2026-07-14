@@ -16947,6 +16947,10 @@ const anestesia = {
         <div class="field" style="margin-bottom:8px"><label>Agente</label><select id="calc-halog-agente" onchange="anestesia.meds._calcHalogRecalc()">${optAg}</select></div>
         <div id="calc-halog-trechos"></div>
         <button type="button" class="btn btn-sm" style="margin-top:2px" onclick="anestesia.meds._calcHalogAddTrecho()">+ Adicionar trecho</button>
+        <div style="text-align:center;color:var(--text-mute);font-size:.78rem;margin:10px 0 6px">— ou informe o total medido —</div>
+        <label style="display:block"><span style="font-size:.68rem;font-weight:600;color:var(--text-soft);text-transform:uppercase;letter-spacing:.3px">Volume total consumido (mL)</span>
+          <input type="number" id="calc-halog-manual" step="0.1" min="0" placeholder="ex.: 30" oninput="anestesia.meds._calcHalogRecalc()" style="width:100%"></label>
+        <div style="font-size:.72rem;color:var(--text-mute);margin-top:2px">Se você mediu o consumo direto (frasco/vaporizador), informe aqui — será usado no lugar da soma dos trechos. Os horários dos trechos, se houver, dão a média em mL/h.</div>
         <div id="calc-halog-out" style="margin-top:10px;font-size:.9rem"></div>`;
       const footer = '<button class="btn" onclick="modal.close()">Fechar</button>' +
         '<button class="btn btn-primary" id="calc-halog-inserir" onclick="anestesia.meds._calcHalogInserir()" disabled>Inserir na ficha</button>';
@@ -17005,25 +17009,37 @@ const anestesia = {
       });
       const out = document.getElementById('calc-halog-out');
       const btn = document.getElementById('calc-halog-inserir');
-      if (validos === 0) {
-        if (out) out.innerHTML = '<span style="color:var(--text-mute)">Preencha ao menos um trecho completo (início, fim, fluxo e %).</span>';
+      const manual = parseFloat((document.getElementById('calc-halog-manual') || {}).value);
+      const usaManual = !isNaN(manual) && manual > 0;
+      if (!usaManual && validos === 0) {
+        if (out) out.innerHTML = '<span style="color:var(--text-mute)">Preencha ao menos um trecho completo, ou informe o volume total medido.</span>';
         if (btn) btn.disabled = true;
         anestesia.meds._calcHalogResultado = null;
         return;
       }
-      const mlPorH = totalLiquid / (totalDur / 60);
-      const r = { nomeAgente, totalLiquid: Math.round(totalLiquid * 10) / 10, totalDur, mlPorH: Math.round(mlPorH * 10) / 10, vaporPorMl, trechos };
+      const totalFinal = usaManual ? manual : totalLiquid;
+      const mlPorH = totalDur > 0 ? (totalFinal / (totalDur / 60)) : null;
+      const r = {
+        nomeAgente, totalLiquid: Math.round(totalFinal * 10) / 10, totalDur,
+        mlPorH: mlPorH != null ? Math.round(mlPorH * 10) / 10 : null,
+        vaporPorMl, trechos, fonte: usaManual ? 'informado' : 'calculado'
+      };
       anestesia.meds._calcHalogResultado = r;
+      const linhaMedia = r.mlPorH != null
+        ? `<div>Média: <b>${r.mlPorH} mL/h</b> · Tempo total ${totalDur} min</div>`
+        : (usaManual ? '<div style="font-size:.76rem;color:#3b7a5a">Informe início/fim em um trecho para obter a média em mL/h.</div>' : '');
+      const rodape = usaManual
+        ? '<div style="font-size:.72rem;color:#3b7a5a;margin-top:3px">Volume informado manualmente.</div>'
+        : `<div style="font-size:.72rem;color:#3b7a5a;margin-top:3px">Base: 1 mL líquido ≈ ${vaporPorMl} mL de vapor (${utils.escapeHTML(nomeAgente)}).</div>`;
       if (out) out.innerHTML = `<div style="background:#eef8f1;border:1px solid #b9e0c6;border-radius:6px;padding:8px 10px;color:#14532d">
-        <div style="font-size:1rem"><b>Consumo total: ${r.totalLiquid} mL</b> de ${utils.escapeHTML(nomeAgente)} líquido${validos > 1 ? ' (' + validos + ' trechos)' : ''}</div>
-        <div>Média: <b>${r.mlPorH} mL/h</b> · Tempo total ${totalDur} min</div>
-        <div style="font-size:.72rem;color:#3b7a5a;margin-top:3px">Base: 1 mL líquido ≈ ${vaporPorMl} mL de vapor (${utils.escapeHTML(nomeAgente)}).</div>
+        <div style="font-size:1rem"><b>Consumo total: ${r.totalLiquid} mL</b> de ${utils.escapeHTML(nomeAgente)}${usaManual ? ' (informado)' : (validos > 1 ? ' (' + validos + ' trechos)' : '')}</div>
+        ${linhaMedia}${rodape}
       </div>`;
       if (btn) btn.disabled = false;
     },
     _calcHalogInserir() {
       const ctx = anestesia.meds._calcHalogCtx, r = anestesia.meds._calcHalogResultado;
-      if (!ctx || !r || !r.trechos.length) return;
+      if (!ctx || !r) return;
       let tr = ctx.tr;
       if (!tr || !document.body.contains(tr)) {
         tr = anestesia.meds.add({ nome: r.nomeAgente, tipo: 'Inalatório', unidade: '%', via: 'Inalatória' });
@@ -17031,24 +17047,31 @@ const anestesia = {
         const nomeEl = tr.querySelector('[name="med_nome[]"]'); if (nomeEl && !nomeEl.value.trim()) nomeEl.value = r.nomeAgente;
       }
       const set = (n, v) => { const el = tr.querySelector(`[name="${n}"]`); if (el) el.value = v; };
-      const primeiro = r.trechos[0], ultimo = r.trechos[r.trechos.length - 1];
-      set('med_hora[]', primeiro.ini);
-      set('med_hora_fim[]', ultimo.fim);
       const selUn = tr.querySelector('[name="med_unidade[]"]'); if (selUn) selUn.value = '%';
       const selTipo = tr.querySelector('[name="med_tipo[]"]'); if (selTipo) selTipo.value = 'Inalatório';
-      /* dose: se um só trecho, o %; se vários, deixa em branco (varia por fase) */
-      set('med_dose[]', r.trechos.length === 1 ? r.trechos[0].pct : '');
-      if (r.trechos.length === 1) set('med_velocidade[]', r.trechos[0].fgf);
+      /* horários e % a partir dos trechos (se houver) */
+      if (r.trechos.length) {
+        set('med_hora[]', r.trechos[0].ini);
+        set('med_hora_fim[]', r.trechos[r.trechos.length - 1].fim);
+        set('med_dose[]', r.trechos.length === 1 ? r.trechos[0].pct : '');
+        if (r.trechos.length === 1) set('med_velocidade[]', r.trechos[0].fgf);
+      }
       const obs = tr.querySelector('[name="med_obs[]"]');
       if (obs) {
-        const det = r.trechos.map(t => `${t.ini}-${t.fim} FGF${t.fgf} ${t.pct}%`).join('; ');
-        obs.value = `Consumo ${r.totalLiquid} mL (média ${r.mlPorH} mL/h, ${r.totalDur} min) — ${det}`;
+        const media = r.mlPorH != null ? `média ${r.mlPorH} mL/h, ${r.totalDur} min` : (r.totalDur ? `${r.totalDur} min` : '');
+        if (r.fonte === 'informado') {
+          const det = r.trechos.length ? ' — ' + r.trechos.map(t => `${t.ini}-${t.fim} FGF${t.fgf} ${t.pct}%`).join('; ') : '';
+          obs.value = `Consumo ${r.totalLiquid} mL (informado${media ? ', ' + media : ''})${det}`;
+        } else {
+          const det = r.trechos.map(t => `${t.ini}-${t.fim} FGF${t.fgf} ${t.pct}%`).join('; ');
+          obs.value = `Consumo ${r.totalLiquid} mL (${media}) — ${det}`;
+        }
       }
       ['med_velocidade[]', 'med_hora_fim[]'].forEach(n => { const el = tr.querySelector(`[name="${n}"]`); if (el) el.style.opacity = '1'; });
       markDirty();
       try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
       modal.close();
-      toast(`Consumo de ${r.nomeAgente}: ${r.totalLiquid} mL (${r.mlPorH} mL/h)`);
+      toast(`Consumo de ${r.nomeAgente}: ${r.totalLiquid} mL${r.mlPorH != null ? ' (' + r.mlPorH + ' mL/h)' : ''}`);
     },
     addSetComum() {
       SET_MED_COMUM.forEach(k => {
