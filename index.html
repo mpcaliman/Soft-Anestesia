@@ -5096,24 +5096,9 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
-        <div class="quick-actions">
-          <span class="qa-label">Sinais vitais</span>
-          <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.vitais.add(true)">+ Linha (hora atual)</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.add()">+ Linha vazia</button>
-          <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.vitais.duplicarEAjustar()">➕ Igual à anterior + ajustar</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.duplicarUltima()">⎘ Duplicar última</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.addSetModelo()">⚡ Modelo T0/T15/T30/T60</button>
-          <button type="button" class="btn btn-sm" style="background:#0f7b4f;color:#fff;border-color:#0f7b4f" onclick="captura.abrirMonitor('anestesia')">📷 Capturar do monitor</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.atualizarGrafico()">↻ Atualizar gráfico</button>
-          <button type="button" class="btn btn-sm btn-danger" onclick="anestesia.vitais.limparTabela()">🗑 Limpar tabela</button>
-          <span class="gt-sep" style="border-left:1px solid var(--border);margin:0 4px"></span>
-          <label class="gt-snap" title="Quando ligado, se você ficar sem lançar sinais vitais, o sistema repete automaticamente o último registro no intervalo escolhido" style="display:inline-flex;align-items:center;gap:4px;font-size:.78rem">
-            <input type="checkbox" id="vit-autorep-chk" onchange="anestesia.vitais.autoRep.toggle(this.checked)"> ⏱ Auto-repetir
-            <select id="vit-autorep-int" onchange="anestesia.vitais.autoRep.setIntervalo(this.value)" style="width:auto"><option value="5">5 min</option><option value="10">10 min</option></select>
-          </label>
-        </div>
-        <details class="va-details" style="margin-top:4px">
-          <summary>Tabela linha-a-linha (avançado) — mesma informação, edição campo a campo</summary>
+        <p style="font-size:.82rem;color:var(--text-soft);margin:0 0 8px">Registre os sinais vitais pela <b>tabela por horário</b> (abaixo) ou <b>direto no gráfico</b> — os dois se atualizam juntos.</p>
+        <!-- Tabela de dados (oculta): modelo interno lido/gravado pela grade e pelo gráfico -->
+        <div style="display:none" aria-hidden="true">
         <div class="dyn-table-wrap">
           <table class="dyn" id="tab-vitais">
             <thead><tr>
@@ -5141,16 +5126,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
             <tbody id="vitais-body"></tbody>
           </table>
         </div>
-        <div class="table-actions">
-          <button type="button" class="btn btn-primary btn-sm" onclick="anestesia.vitais.add(true)">+ Linha (hora atual)</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.add()">+ Linha vazia</button>
-          <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.vitais.duplicarEAjustar()">➕ Igual à anterior + ajustar</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.duplicarUltima()">⎘ Duplicar última</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.addSetModelo()">⚡ Modelo T0/T15/T30/T60</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.atualizarGrafico()">↻ Atualizar gráfico</button>
-          <button type="button" class="btn btn-danger btn-sm" onclick="anestesia.vitais.limparTabela()">🗑 Limpar tabela</button>
         </div>
-        </details>
 
         <!-- EVENTOS CRONOLÓGICOS -->
         <h3 style="font-size:.92rem;color:var(--primary-darker);margin:18px 0 8px;border-top:1px solid var(--border);padding-top:14px">📍 Eventos cronológicos<small style="color:var(--text-mute);font-weight:400; margin-left:8px">— marcados como letras no gráfico</small></h3>
@@ -5184,12 +5160,20 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
         </div>
 
         <!-- GRADE POR HORÁRIO — edição principal (estilo tabela), acima do gráfico -->
-        <div class="vitais-grade-titulo">📋 Sinais vitais por horário <small style="font-weight:400;color:var(--text-mute)">— edição principal: toque numa célula para editar; <b>＋</b> adiciona uma coluna, <b>×</b> remove. Gráfico e tabela se atualizam juntos.</small></div>
+        <div class="vitais-grade-titulo">📋 Sinais vitais por horário <small style="font-weight:400;color:var(--text-mute)">— toque numa célula para editar; <b>＋</b> adiciona um horário, <b>×</b> remove. Gráfico e tabela se atualizam juntos.</small></div>
         <div class="quick-actions" style="margin:2px 0 6px">
           <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.vitais._gradeAddCol()">＋ Horário (agora)</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.vitais._gradeRepetir()">⎘ Repetir última</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.vitais._gradeRepetir()">⎘ Copiar último registro</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.vitais.duplicarEAjustar()">➕ Igual à anterior + ajustar</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.vitais.addSetModelo()">⚡ Modelo T0/T15/T30/T60</button>
+          <button type="button" class="btn btn-sm" style="background:#0f7b4f;color:#fff;border-color:#0f7b4f" onclick="captura.abrirMonitor('anestesia')">📷 Capturar do monitor</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.vitais.atualizarGrafico()">↻ Atualizar gráfico</button>
+          <button type="button" class="btn btn-sm btn-danger" onclick="anestesia.vitais.limparTabela()">🗑 Limpar</button>
+          <span class="gt-sep" style="border-left:1px solid var(--border);margin:0 4px"></span>
+          <label class="gt-snap" title="Quando ligado, se você ficar sem lançar sinais vitais, o sistema repete automaticamente o último registro no intervalo escolhido" style="display:inline-flex;align-items:center;gap:4px;font-size:.78rem">
+            <input type="checkbox" id="vit-autorep-chk" onchange="anestesia.vitais.autoRep.toggle(this.checked)"> ⏱ Auto-repetir
+            <select id="vit-autorep-int" onchange="anestesia.vitais.autoRep.setIntervalo(this.value)" style="width:auto"><option value="5">5 min</option><option value="10">10 min</option></select>
+          </label>
         </div>
         <div class="vitais-grade-wrap" id="vitais-grade"></div>
 
@@ -18672,7 +18656,7 @@ const anestesia = {
       const g = (tr, n) => (tr.querySelector('[name="vit_' + n + '[]"]') || {}).value || '';
       /* Cada coluna guarda o índice da linha real (na ordem do DOM) para gravar de volta */
       const comHora = rows.map((tr, idx) => ({ tr, idx })).filter(o => g(o.tr, 'hora'));
-      if (!comHora.length) { host.innerHTML = '<div style="font-size:.78rem;color:var(--text-mute);padding:8px">Nenhum sinal vital com horário registrado ainda. Registre pelo gráfico ou pela tabela abaixo.</div>'; return; }
+      if (!comHora.length) { host.innerHTML = '<div style="font-size:.78rem;color:var(--text-mute);padding:8px">Nenhum sinal vital registrado ainda. Toque em <b>＋ Horário (agora)</b> acima, ou arraste/toque no gráfico.</div>'; return; }
       /* Ordena por horário (só a exibição; o índice preserva a referência real) */
       comHora.sort((a, b) => (g(a.tr, 'hora') || '').localeCompare(g(b.tr, 'hora') || ''));
       /* Mostra apenas os parâmetros ativos (conforme monitores) */
