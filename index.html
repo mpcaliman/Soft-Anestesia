@@ -4697,7 +4697,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
           <h3 style="font-size:.92rem;color:var(--primary-darker);margin:14px 0 8px">🫁 Ventilação mecânica</h3>
           <div class="grid">
             <div class="field col-3"><label>Modo ventilatório</label>
-              <select name="vent_modo">
+              <select name="vent_modo" onchange="anestesia.vent.mostrarCamposModo()">
                 <option value="">—</option>
                 <option>VCV (volume controlado)</option>
                 <option>PCV (pressão controlada)</option>
@@ -4709,18 +4709,43 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
                 <option>VAPS</option>
               </select>
             </div>
-            <div class="field col-2"><label>VC (mL)</label><input type="number" name="vent_vc" min="0"></div>
+            <div class="field col-2" data-vmodo="VCV SIMV PRVC VAPS"><label>VC (mL)</label><input type="number" name="vent_vc" min="0"></div>
+            <div class="field col-2" data-vmodo="PCV BIPAP APRV SIMV"><label>P insp (cmH₂O)</label><input type="number" name="vent_pinsp" min="0"></div>
+            <div class="field col-2" data-vmodo="PSV SIMV"><label>Press. suporte (cmH₂O)</label><input type="number" name="vent_ps" min="0"></div>
             <div class="field col-2"><label>FR (irpm)</label><input type="number" name="vent_fr" min="0"></div>
             <div class="field col-2"><label>PEEP (cmH₂O)</label><input type="number" name="vent_peep" min="0" step="0.5"></div>
-            <div class="field col-2"><label>FiO₂ (%)</label><input type="number" name="vent_fio2" min="21" max="100"></div>
+            <div class="field col-2"><label>FiO₂ (%)</label><input type="number" name="vent_fio2" min="21" max="100" oninput="anestesia.vent.previewGases()"></div>
             <div class="field col-2"><label>P pico (cmH₂O)</label><input type="number" name="vent_ppico" min="0"></div>
-            <div class="field col-2"><label>P platô (cmH₂O)</label><input type="number" name="vent_pplato" min="0" oninput="anestesia.vent.calcDriving()"></div>
-            <div class="field col-2"><label>Driving P. (cmH₂O)</label><input type="number" name="vent_driving" readonly placeholder="auto"></div>
+            <div class="field col-2" data-vmodo="VCV SIMV PRVC VAPS"><label>P platô (cmH₂O)</label><input type="number" name="vent_pplato" min="0" oninput="anestesia.vent.calcDriving()"></div>
+            <div class="field col-2" data-vmodo="VCV SIMV PRVC VAPS"><label>Driving P. (cmH₂O)</label><input type="number" name="vent_driving" readonly placeholder="auto"></div>
+            <div class="field col-2" data-vmodo="VCV PRVC VAPS"><label>Pausa insp. (%)</label><input type="number" name="vent_pausa" min="0" step="1"></div>
+            <div class="field col-2" data-vmodo="PCV PRVC"><label>T insp. (s)</label><input type="number" name="vent_tinsp" min="0" step="0.1"></div>
+            <div class="field col-2" data-vmodo="PSV SIMV PCV"><label>Trigger</label><input type="text" name="vent_trigger" placeholder="fluxo/pressão"></div>
             <div class="field col-2"><label>Relação I:E</label><input type="text" name="vent_ie" placeholder="1:2"></div>
             <div class="field col-2"><label>VM (L/min)</label><input type="number" name="vent_vm" step="0.1"></div>
             <div class="field col-2"><label>EtCO₂ (mmHg)</label><input type="number" name="vent_etco2"></div>
             <div class="field col-3"><label>Complacência (mL/cmH₂O)</label><input type="number" name="vent_compl" step="0.1"></div>
             <div class="field col-9"><label>Gasometria arterial</label><input type="text" name="vent_gaso" placeholder="pH / pCO₂ / pO₂ / HCO₃ / BE / Sat"></div>
+          </div>
+
+          <!-- GASES FRESCOS a partir da FiO₂ -->
+          <div style="margin-top:12px;border:1px solid var(--border);border-radius:8px;padding:10px 12px;background:var(--surface-alt,#f8fafc)">
+            <div style="font-weight:700;font-size:.86rem;color:var(--primary-darker);margin-bottom:6px">🌬️ Gases frescos <small style="font-weight:400;color:var(--text-mute)">— calcula O₂ e diluente a partir da FiO₂ e registra em Medicações</small></div>
+            <div class="grid">
+              <div class="field col-2"><label>FiO₂ (%)</label><input type="number" name="vent_gas_fio2" min="21" max="100" placeholder="ex.: 50" oninput="anestesia.vent.previewGases()"></div>
+              <div class="field col-2"><label>Fluxo total (L/min)</label><input type="number" name="vent_gas_total" min="0" step="0.1" placeholder="ex.: 2" oninput="anestesia.vent.previewGases()"></div>
+              <div class="field col-3"><label>Diluente</label>
+                <select name="vent_gas_diluente" onchange="anestesia.vent.previewGases()">
+                  <option value="Ar">Ar comprimido (FiO₂ 21%)</option>
+                  <option value="N2O">Óxido nitroso / protóxido (FiO₂ 0%)</option>
+                  <option value="">Sem diluente (O₂ puro)</option>
+                </select>
+              </div>
+              <div class="field col-2"><label>Início</label><input type="time" name="vent_gas_ini"></div>
+              <div class="field col-2"><label>Fim</label><input type="time" name="vent_gas_fim"></div>
+            </div>
+            <div id="vent-gas-preview" style="font-size:.82rem;color:#0d9488;font-weight:600;margin:2px 0 6px">—</div>
+            <button type="button" class="btn btn-sm" style="background:#0d9488;color:#fff;border-color:#0d9488" onclick="anestesia.vent.registrarGases()">➕ Registrar O₂ e diluente em Medicações</button>
           </div>
 
           <h4 style="font-size:.85rem;color:var(--text-soft);margin:14px 0 6px">Recursos avançados</h4>
@@ -5136,7 +5161,8 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
           <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Indução'})">+ Indução</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Intubação'})">+ Intubação</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Início O₂'})">+ Início O₂</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Início halogenado'})">+ Início halogenado</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.iniciarHalogenado()" title="Marca o início e abre a calculadora para escolher agente, fluxo e %">+ Início halogenado</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.finalizarHalogenado()" title="Marca a hora do fim do halogenado">+ Fim halogenado</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Raquianestesia'})">+ Raqui</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Peridural'})">+ Peridural</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Incisão cirúrgica'})">+ Incisão</button>
@@ -15805,6 +15831,7 @@ const anestesia = {
       const mecEl = document.getElementById('vent-mecanica');
       if (espEl) espEl.style.display = r === 'espontanea' ? 'block' : 'none';
       if (mecEl) mecEl.style.display = r === 'mecanica' ? 'block' : 'none';
+      if (r === 'mecanica') { try { anestesia.vent.mostrarCamposModo(); } catch (e) {} }
       markDirty();
     },
     calcDriving() {
@@ -15816,6 +15843,74 @@ const anestesia = {
       if (driving && !isNaN(plato) && !isNaN(peep)) {
         driving.value = Math.max(0, plato - peep);
       }
+    },
+    /* Mostra apenas os parâmetros pertinentes ao modo ventilatório selecionado */
+    mostrarCamposModo() {
+      const f = document.getElementById('form-anestesia'); if (!f) return;
+      const sel = f.querySelector('[name="vent_modo"]');
+      const modo = sel ? sel.value : '';
+      const key = (modo.match(/^([A-Za-z]+)/) || [, ''])[1].toUpperCase();
+      document.querySelectorAll('#vent-mecanica [data-vmodo]').forEach(el => {
+        if (!modo) { el.style.display = ''; return; }   /* sem modo: mostra tudo */
+        const modos = el.getAttribute('data-vmodo').toUpperCase().split(/\s+/);
+        el.style.display = modos.indexOf(key) >= 0 ? '' : 'none';
+      });
+    },
+    /* Divide a FiO₂ em fluxos de O₂ e do diluente (Ar 21% ou N₂O 0%) */
+    _gasesCalc() {
+      const f = document.getElementById('form-anestesia'); if (!f) return null;
+      const g = n => f.querySelector(`[name="${n}"]`);
+      const fio2 = parseFloat((g('vent_gas_fio2') || {}).value) || parseFloat((g('vent_fio2') || {}).value);
+      const total = parseFloat((g('vent_gas_total') || {}).value);
+      const diluente = (g('vent_gas_diluente') || {}).value;
+      if (isNaN(fio2) || isNaN(total) || total <= 0 || fio2 < 0 || fio2 > 100) return null;
+      const fi = fio2 / 100;
+      let o2, dil = 0, dilNome = '';
+      if (!diluente) { o2 = total; }
+      else {
+        const dilFio2 = diluente === 'Ar' ? 0.21 : 0;      /* Ar 21% O₂, N₂O 0% */
+        dilNome = diluente === 'Ar' ? 'Ar comprimido' : 'Óxido nitroso (N₂O)';
+        o2 = total * (fi - dilFio2) / (1 - dilFio2);
+        dil = total - o2;
+      }
+      if (o2 < 0) o2 = 0; if (o2 > total) o2 = total;
+      if (dil < 0) dil = 0;
+      return {
+        fio2, total, diluente, dilNome,
+        o2: Math.round(o2 * 100) / 100, dil: Math.round(dil * 100) / 100,
+        ini: (g('vent_gas_ini') || {}).value, fim: (g('vent_gas_fim') || {}).value
+      };
+    },
+    previewGases() {
+      /* espelha a FiO₂ do parâmetro para o campo de gases, se este estiver vazio */
+      const f = document.getElementById('form-anestesia');
+      if (f) {
+        const p = f.querySelector('[name="vent_fio2"]'), gfio = f.querySelector('[name="vent_gas_fio2"]');
+        if (gfio && !gfio.value && p && p.value) gfio.value = p.value;
+      }
+      const r = anestesia.vent._gasesCalc();
+      const el = document.getElementById('vent-gas-preview');
+      if (!el) return;
+      if (!r) { el.textContent = '—'; return; }
+      el.innerHTML = `O₂: <b>${r.o2} L/min</b>` + (r.dilNome ? ` · ${r.dilNome}: <b>${r.dil} L/min</b>` : '') + ` <span style="color:var(--text-mute);font-weight:400">(total ${r.total} L/min, FiO₂ ${r.fio2}%)</span>`;
+    },
+    registrarGases() {
+      const r = anestesia.vent._gasesCalc();
+      if (!r) { toast('Informe FiO₂, fluxo total e diluente', 'warn'); return; }
+      const add = (nome, fluxo) => {
+        if (!(fluxo > 0)) return;
+        const tr = anestesia.meds.add({
+          nome, dose: String(fluxo), unidade: 'L/min', via: 'Inalatória', tipo: 'Inalatório',
+          hora: r.ini || '', horaFim: r.fim || '',
+          obs: `FiO₂ ${r.fio2}% · fluxo total ${r.total} L/min`
+        });
+        if (tr) ['med_velocidade[]', 'med_hora_fim[]'].forEach(n => { const el = tr.querySelector(`[name="${n}"]`); if (el) el.style.opacity = '1'; });
+      };
+      add('Oxigênio (O₂)', r.o2);
+      if (r.dilNome) add(r.dilNome, r.dil);
+      markDirty();
+      try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
+      toast(`Gases registrados: O₂ ${r.o2}${r.dilNome ? ' + ' + r.dilNome.split(' ')[0] + ' ' + r.dil : ''} L/min. Use "💡 Calcular consumos" para o total.`);
     },
 
     /* === TERAPIAS / MODOS VENTILATÓRIOS COM HORÁRIO ===
@@ -16266,6 +16361,29 @@ const anestesia = {
         obs.dispatchEvent(new Event('change', { bubbles: true }));
       }
       try { markDirty(); } catch (e) {}
+    },
+    /* Hora do primeiro evento de um tipo (usado para puxar início/fim do halogenado) */
+    horaDe(tipo) {
+      const body = document.getElementById(anestesia.graficoUI._ctxIds().eventosBody);
+      if (!body) return '';
+      const trs = body.querySelectorAll('tr');
+      for (const tr of trs) {
+        const t = (tr.querySelector('[name="evt_tipo[]"]') || {}).value || '';
+        if (t === tipo) return (tr.querySelector('[name="evt_hora[]"]') || {}).value || '';
+      }
+      return '';
+    },
+    /* Início do halogenado: marca o evento e abre a calculadora (agente/fluxo/%) */
+    iniciarHalogenado() {
+      anestesia.eventos.add({ tipo: 'Início halogenado', hora: utils.horaAtual() });
+      try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
+      try { anestesia.meds.calcHalogenado(); } catch (e) {}
+    },
+    /* Fim do halogenado: marca o evento (a calculadora puxa esse horário como fim) */
+    finalizarHalogenado() {
+      anestesia.eventos.add({ tipo: 'Fim halogenado', hora: utils.horaAtual() });
+      try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
+      toast('Fim do halogenado marcado. Abra a calculadora 🧮 para lançar o volume em Medicações.');
     },
     add(dados = {}) {
       const tbody = document.getElementById(anestesia.graficoUI._ctxIds().eventosBody);
@@ -16937,8 +17055,10 @@ const anestesia = {
       const f = document.getElementById('form-anestesia');
       const g = (sel) => (f && f.querySelector(sel) ? f.querySelector(sel).value : '') || '';
       anestesia.meds._calcHalogCtx = { nomeAgente: nomeAgente || 'Sevoflurano', tr: tr || null };
-      const ini = (tr && tr.querySelector('[name="med_hora[]"]')?.value) || g('[name="hora_sala_entrada"]') || g('[name="hora_inicio"]') || '';
-      const fim = g('[name="hora_sala_saida"]') || g('[name="hora_fim"]') || '';
+      let evtIni = '', evtFim = '';
+      try { evtIni = anestesia.eventos.horaDe('Início halogenado'); evtFim = anestesia.eventos.horaDe('Fim halogenado'); } catch (e) {}
+      const ini = (tr && tr.querySelector('[name="med_hora[]"]')?.value) || evtIni || g('[name="hora_sala_entrada"]') || g('[name="hora_inicio"]') || '';
+      const fim = evtFim || g('[name="hora_sala_saida"]') || g('[name="hora_fim"]') || '';
       const pct = (tr && tr.querySelector('[name="med_dose[]"]')?.value) || '';
       const agentes = Object.keys(anestesia.meds.HALOG_VAPOR);
       const optAg = agentes.map(a => `<option ${a === (nomeAgente || 'Sevoflurano') ? 'selected' : ''}>${a}</option>`).join('');
