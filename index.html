@@ -11227,16 +11227,22 @@ const prescricao = {
     show('presc-validade-group', receita);
     show('presc-orientacoes-group', modelo !== 'declaracao');
     show('presc-endereco-group', receita);
-    show('presc-doc-group', modelo === 'atestado' || modelo === 'declaracao');
+    show('presc-doc-group', true); /* CPF/RG opcional em todos os modelos */
+    /* Endereço do paciente: exigido na receita (Lei 5.991/73, art. 35). Rótulo dinâmico. */
     const endHint = document.getElementById('presc-endereco-hint');
-    if (endHint) endHint.style.display = modelo === 'especial' ? '' : 'none';
+    if (endHint) {
+      endHint.style.display = receita ? '' : 'none';
+      endHint.textContent = modelo === 'especial'
+        ? '(obrigatório — controle especial)'
+        : '(exigido para dispensação — Lei 5.991/73)';
+    }
     const validade = form && form.querySelector('[name="validade"]');
     let banner = '';
     if (modelo === 'especial') {
-      banner = '📋 Receita de Controle Especial (Portaria SVS/MS 344/98): impressa em 2 vias — 1ª via Retenção da Farmácia, 2ª via Orientação ao Paciente. Endereço do paciente obrigatório. Validade 30 dias.';
+      banner = '📋 Receita de Controle Especial (Portaria SVS/MS 344/98): impressa em 2 vias — 1ª via Retenção da Farmácia, 2ª via Orientação ao Paciente. Nome e endereço do paciente obrigatórios. Validade 30 dias.';
       if (validade && (!validade.value || validade.value === '10 dias')) validade.value = '30 dias';
     } else if (modelo === 'antimicrobiano') {
-      banner = '💊 Receita de Antimicrobiano (RDC ANVISA 471/2021): 2 vias — 1ª via Retenção da Farmácia, 2ª via Paciente. Validade de 10 dias a partir da emissão.';
+      banner = '💊 Receita de Antimicrobiano (RDC ANVISA 471/2021): 2 vias — 1ª via ao Paciente, 2ª via retida na Farmácia. Validade de 10 dias a partir da emissão.';
       if (validade) validade.value = '10 dias';
     } else if (modelo === 'atestado') {
       banner = '📝 Atestado médico: informe o período de afastamento. O CID-10 só pode constar com autorização expressa do paciente (art. 76 do Código de Ética Médica).';
@@ -11245,10 +11251,28 @@ const prescricao = {
       banner = '🕐 Declaração de comparecimento: informe a data e o horário de entrada e saída do atendimento.';
       prescricao._syncDeclTexto();
     } else {
+      banner = '📄 Receituário simples: nome e endereço do paciente exigidos para dispensação (Lei 5.991/73).';
       if (validade && (!validade.value || validade.value === '10 dias')) validade.value = validade.value || '30 dias';
+    }
+    /* Aviso: a receita exige endereço do consultório e CRM do médico (Lei 5.991/73,
+       art. 35, III). Esses dados vêm do perfil profissional (Ajustes). */
+    if (receita) {
+      const falta = prescricao._faltaPerfilReceita();
+      if (falta.length) banner += ' ⚠️ Cadastre ' + falta.join(' e ') + ' em Ajustes → perfil profissional (exigido por lei na receita).';
     }
     if (banner) ui.mostrarBanner('banner-prescricao', banner, 'info'); else ui.fecharBanner('banner-prescricao');
     prescricao._toggleCID();
+  },
+  /* Verifica se o perfil profissional tem os dados legalmente exigidos na receita */
+  _faltaPerfilReceita() {
+    let cad = {};
+    try {
+      cad = store.list('cad_assinaturas').find(x => x._id === localStorage.getItem(STORAGE.cad_assinatura_ativa)) || store.list('cad_assinaturas')[0] || {};
+    } catch (e) {}
+    const falta = [];
+    if (!(cad.crm || '').trim()) falta.push('CRM');
+    if (!(cad.endereco || '').trim()) falta.push('endereço do consultório');
+    return falta;
   },
   /* Restaura o modelo ao carregar/importar (compatível com registros antigos que
      usavam o campo "tipo"). */
@@ -14672,9 +14696,11 @@ const pdfGen = {
       doc.text('Paciente: ' + (d.nome || '_______________________________'), M, y); y += 5.5;
       const linha2 = [];
       if (d.idade) linha2.push('Idade: ' + d.idade);
+      if (d.documento) linha2.push('CPF/RG: ' + d.documento);
       if (d.data) linha2.push('Data: ' + utils.formatarData(d.data));
       if (linha2.length) { doc.text(linha2.join('     '), M, y); y += 5.5; }
-      if (especial && d.endereco) {
+      /* Endereço do paciente exigido na receita (Lei 5.991/73, art. 35). */
+      if (d.endereco) {
         const end = pdfGen._wrap(doc, 'Endereço: ' + d.endereco, contentW);
         doc.text(end, M, y); y += end.length * 5;
       }
@@ -14738,9 +14764,9 @@ const pdfGen = {
     };
 
     if (duasVias) {
-      desenhaVia(M + 4, '1ª via — Retenção da Farmácia');
+      desenhaVia(M + 4, especial ? '1ª via — Retenção da Farmácia' : '1ª via — Paciente');
       doc.addPage();
-      desenhaVia(M + 4, especial ? '2ª via — Orientação ao Paciente' : '2ª via — Paciente');
+      desenhaVia(M + 4, especial ? '2ª via — Orientação ao Paciente' : '2ª via — Retida na Farmácia');
     } else {
       desenhaVia(M + 4, '');
     }
@@ -14794,7 +14820,7 @@ const pdfGen = {
     /* posologia obrigatória em cada item */
     const semPosologia = itens.filter(it => it.nome && !it.pos).map(it => it.nome);
     if (semPosologia.length) faltando.push('Posologia/modo de usar: ' + semPosologia.join(', '));
-    if (especial && !d.endereco) faltando.push('Endereço do paciente (obrigatório em controle especial)');
+    if (!d.endereco) faltando.push('Endereço do paciente (exigido na receita — Lei 5.991/73, art. 35' + (especial ? '; obrigatório no controle especial' : '') + ')');
     if (!d.data) faltando.push('Data');
 
     /* identificação do profissional */
@@ -26468,6 +26494,7 @@ ${TAG_CLOSE_HTML}`;
       <div class="pp-grid cols-3">
         ${printPreview._fieldSempre('Paciente', d.nome)}
         ${printPreview._field('Idade', d.idade)}
+        ${printPreview._field('CPF/RG', d.documento)}
         ${printPreview._field('Data', utils.formatarData(d.data))}
       </div>
       ${especial ? printPreview._field('Endereço', d.endereco, true, true) : printPreview._field('Endereço', d.endereco, true)}`;
@@ -26489,9 +26516,12 @@ ${TAG_CLOSE_HTML}`;
       assinatura;
 
     if (duasVias) {
-      const via2 = especial ? '2ª via — Orientação ao Paciente' : '2ª via — Paciente';
+      /* Controle especial (Portaria 344/98): 1ª via retida na farmácia.
+         Antimicrobiano (RDC 471/2021): 2ª via retida na farmácia, 1ª via ao paciente. */
+      const via1 = especial ? '1ª via — Retenção da Farmácia' : '1ª via — Paciente';
+      const via2 = especial ? '2ª via — Orientação ao Paciente' : '2ª via — Retida na Farmácia';
       const rodapeLabel = especial ? 'Receituário de Controle Especial (2 vias)' : 'Receita de Antimicrobiano (2 vias)';
-      return umaVia('1ª via — Retenção da Farmácia') +
+      return umaVia(via1) +
         '<div style="page-break-before:always"></div>' +
         umaVia(via2) +
         printPreview._footer(rodapeLabel);
