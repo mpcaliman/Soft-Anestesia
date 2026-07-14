@@ -3531,7 +3531,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
     <a class="nav-item" data-module="consulta"   href="#consulta"><span class="nav-icon">🩺</span><span class="nav-label">Consulta / Dor</span></a>
     <a class="nav-item" data-module="pre"        href="#pre"><span class="nav-icon">📋</span><span class="nav-label">Pré-anestésica</span></a>
     <a class="nav-item" data-module="termo"      href="#termo"><span class="nav-icon">📝</span><span class="nav-label">Termo (TCLE)</span></a>
-    <a class="nav-item" data-module="prescricao" href="#prescricao"><span class="nav-icon">💊</span><span class="nav-label">Prescrição</span></a>
+    <a class="nav-item" data-module="prescricao" href="#prescricao"><span class="nav-icon">💊</span><span class="nav-label">Receituário</span></a>
     <a class="nav-item" data-module="risco"      href="#risco"><span class="nav-icon">🎯</span><span class="nav-label">Risco perioperatório</span></a>
     <a class="nav-item" data-module="anestesia"  href="#anestesia"><span class="nav-icon">💉</span><span class="nav-label">Ficha de anestesia</span></a>
     <a class="nav-item" data-module="recuperacao" href="#recuperacao"><span class="nav-icon">🛏️</span><span class="nav-label">Recuperação pós</span></a>
@@ -3655,7 +3655,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
             <option value="consulta">Consulta / Dor</option>
             <option value="recuperacao">Recuperação (SRPA)</option>
             <option value="termo">Termo</option>
-            <option value="prescricao">Prescrição</option>
+            <option value="prescricao">Receituário</option>
             <option value="risco">Risco</option>
             <option value="financeiro">Financeiro</option>
           </select>
@@ -6182,8 +6182,8 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
 
   <form id="form-prescricao" class="container" autocomplete="off" onsubmit="event.preventDefault(); prescricao.salvar();">
     <div class="page-title">
-      <h1>Prescrição médica</h1>
-      <span class="subtitle">Receita comum e de controle especial</span>
+      <h1>Receituário</h1>
+      <span class="subtitle">Receitas, controle especial, antimicrobiano, atestado e declaração</span>
     </div>
 
     <div class="doc-status" id="docstatus-prescricao">
@@ -6207,29 +6207,34 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
     <!-- 1. TIPO E PACIENTE -->
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">1</span><h2>Tipo de receita e paciente</h2></div>
+        <div class="card-title-wrap"><span class="card-num">1</span><h2>Modelo e paciente</h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
         <div class="grid">
-          <div class="field col-12"><label>Tipo de receituário</label>
-            <div class="radio-row">
-              <label class="radio-chip"><input type="radio" name="tipo" value="comum" checked onchange="prescricao.atualizarTipo()"> Receita comum (branca)</label>
-              <label class="radio-chip"><input type="radio" name="tipo" value="especial" onchange="prescricao.atualizarTipo()"> Controle especial (2 vias)</label>
+          <div class="field col-12"><label>Modelo de documento</label>
+            <div class="radio-row" style="flex-wrap:wrap">
+              <label class="radio-chip"><input type="radio" name="modelo" value="simples" checked onchange="prescricao.atualizarTipo()"> 📄 Receituário simples</label>
+              <label class="radio-chip"><input type="radio" name="modelo" value="especial" onchange="prescricao.atualizarTipo()"> 📋 Controle especial (2 vias)</label>
+              <label class="radio-chip"><input type="radio" name="modelo" value="antimicrobiano" onchange="prescricao.atualizarTipo()"> 💊 Antimicrobiano (2 vias)</label>
+              <label class="radio-chip"><input type="radio" name="modelo" value="atestado" onchange="prescricao.atualizarTipo()"> 📝 Atestado médico</label>
+              <label class="radio-chip"><input type="radio" name="modelo" value="declaracao" onchange="prescricao.atualizarTipo()"> 🕐 Declaração de comparecimento</label>
             </div>
           </div>
           <div class="field col-6 required"><label>Nome do paciente <span class="req">*</span></label>
             <input type="text" name="nome" data-required onblur="linker.autoPreencherDadosPaciente(this.value, 'prescricao')"></div>
           <div class="field col-3"><label>Idade</label><input type="text" name="idade"></div>
-          <div class="field col-3"><label>Data</label><input type="date" name="data"></div>
-          <div class="field col-12"><label>Endereço do paciente <small style="color:var(--text-mute)">(obrigatório no controle especial)</small></label>
-            <input type="text" name="endereco"></div>
+          <div class="field col-3"><label>Data de emissão</label><input type="date" name="data"></div>
+          <div class="field col-6" id="presc-doc-group" style="display:none"><label>Documento (RG/CPF) <small style="color:var(--text-mute)">(opcional)</small></label>
+            <input type="text" name="documento" placeholder="RG ou CPF do paciente"></div>
+          <div class="field col-12" id="presc-endereco-group"><label>Endereço do paciente <small style="color:var(--text-mute)" id="presc-endereco-hint">(obrigatório no controle especial)</small></label>
+            <input type="text" name="endereco" placeholder="Rua, número, bairro, cidade/UF"></div>
         </div>
       </div>
     </section>
 
     <!-- 2. MEDICAMENTOS -->
-    <section class="card">
+    <section class="card" id="card-presc-medicamentos">
       <div class="card-header" onclick="ui.toggleCard(this)">
         <div class="card-title-wrap"><span class="card-num">2</span><h2>Medicamentos<small>Digite o princípio ativo ou nome — sugestões automáticas</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
@@ -6257,6 +6262,54 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
       </div>
     </section>
 
+    <!-- 2b. ATESTADO MÉDICO (só no modelo Atestado) -->
+    <section class="card" id="card-presc-atestado" style="display:none">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-num">2</span><h2>Atestado médico<small>CID só com autorização expressa do paciente (art. 76 do Código de Ética Médica)</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <div class="grid">
+          <div class="field col-3"><label>Dias de afastamento</label><input type="number" name="atestado_dias" min="0" placeholder="Ex.: 3" oninput="prescricao._syncAtestadoTexto()"></div>
+          <div class="field col-3"><label>A partir de</label><input type="date" name="atestado_inicio" onchange="prescricao._syncAtestadoTexto()"></div>
+          <div class="field col-6"><label>Finalidade</label>
+            <input type="text" name="atestado_finalidade" list="atestado-finalidades" placeholder="afastamento de suas atividades habituais" oninput="prescricao._syncAtestadoTexto()">
+            <datalist id="atestado-finalidades">
+              <option value="afastamento de suas atividades habituais">
+              <option value="afastamento do trabalho">
+              <option value="afastamento das atividades escolares">
+              <option value="repouso domiciliar">
+              <option value="afastamento das atividades físicas">
+            </datalist>
+          </div>
+          <div class="field col-12">
+            <label class="radio-chip" style="display:inline-flex"><input type="checkbox" name="atestado_cid_incluir" onchange="prescricao._toggleCID(); prescricao._syncAtestadoTexto()"> Incluir CID-10 (com autorização do paciente)</label>
+          </div>
+          <div class="field col-6" id="presc-cid-group" style="display:none"><label>CID-10</label><input type="text" name="atestado_cid" placeholder="Ex.: J06.9" oninput="prescricao._syncAtestadoTexto()"></div>
+          <div class="field col-12"><label>Texto do atestado <small style="color:var(--text-mute)">(gerado automaticamente — pode editar)</small></label>
+            <textarea name="atestado_texto" rows="4" placeholder="Preencha os campos acima para gerar o texto…" oninput="this.dataset.auto=''"></textarea></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2c. DECLARAÇÃO DE COMPARECIMENTO (só no modelo Declaração) -->
+    <section class="card" id="card-presc-declaracao" style="display:none">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-num">2</span><h2>Declaração de comparecimento<small>Comprova a presença do paciente no atendimento</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <div class="grid">
+          <div class="field col-4"><label>Data do comparecimento</label><input type="date" name="decl_data" onchange="prescricao._syncDeclTexto()"></div>
+          <div class="field col-4"><label>Entrada</label><input type="time" name="decl_hora_ini" onchange="prescricao._syncDeclTexto()"></div>
+          <div class="field col-4"><label>Saída</label><input type="time" name="decl_hora_fim" onchange="prescricao._syncDeclTexto()"></div>
+          <div class="field col-12"><label>Acompanhante <small style="color:var(--text-mute)">(opcional)</small></label><input type="text" name="decl_acompanhante" placeholder="Nome do acompanhante, se houver" oninput="prescricao._syncDeclTexto()"></div>
+          <div class="field col-12"><label>Texto da declaração <small style="color:var(--text-mute)">(gerado automaticamente — pode editar)</small></label>
+            <textarea name="decl_texto" rows="4" placeholder="Preencha os campos acima para gerar o texto…" oninput="this.dataset.auto=''"></textarea></div>
+        </div>
+      </div>
+    </section>
+
     <!-- 3. ORIENTAÇÕES E ASSINATURA -->
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
@@ -6265,9 +6318,9 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
       </div>
       <div class="card-body">
         <div class="grid">
-          <div class="field col-12"><label>Orientações gerais ao paciente</label><textarea name="orientacoes" rows="3"></textarea></div>
-          <div class="field col-6"><label>Local</label><input type="text" name="local"></div>
-          <div class="field col-6"><label>Validade da receita</label><input type="text" name="validade" placeholder="Ex.: 30 dias"></div>
+          <div class="field col-12" id="presc-orientacoes-group"><label>Orientações gerais ao paciente</label><textarea name="orientacoes" rows="3"></textarea></div>
+          <div class="field col-6"><label>Local</label><input type="text" name="local" placeholder="Cidade/UF"></div>
+          <div class="field col-6" id="presc-validade-group"><label>Validade da receita</label><input type="text" name="validade" placeholder="Ex.: 30 dias"></div>
         </div>
         <div style="margin-top:8px">
           <label class="sig-pad-label">🩺 Assinatura do profissional</label>
@@ -8126,7 +8179,8 @@ const utils = {
       if (el.type === 'checkbox' && !arrCheckGroups.includes(name)) {
         data[name] = el.checked;
       } else if (el.type === 'radio') {
-        // tratado abaixo
+        /* captura o valor do radio marcado (radioFields abaixo reforça/normaliza) */
+        if (el.checked) data[name] = el.value;
       } else if (el.type === 'hidden' || el.type !== 'radio') {
         data[name] = el.value;
       }
@@ -8151,6 +8205,8 @@ const utils = {
       if (data[name] === undefined) return;
       if (el.type === 'checkbox' && !arrCheckGroups.includes(name)) {
         el.checked = !!data[name];
+      } else if (el.type === 'radio') {
+        el.checked = (el.value === data[name]);
       } else {
         el.value = data[name] || '';
       }
@@ -8752,7 +8808,7 @@ const lixeira = {
   DIAS: 30,
   LABELS: {
     pre: 'Pré-anestésica', consulta: 'Consulta / Dor', anestesia: 'Ficha de anestesia',
-    recuperacao: 'Recuperação SRPA', termo: 'Termo (TCLE)', prescricao: 'Prescrição',
+    recuperacao: 'Recuperação SRPA', termo: 'Termo (TCLE)', prescricao: 'Receituário',
     risco: 'Risco periop.', financeiro: 'Financeiro', agenda: 'Agenda',
     pacientes: 'Paciente', orcamento: 'Orçamento'
   },
@@ -9069,7 +9125,7 @@ const ui = {
         consulta: 'Consulta / Dor', anestesia: 'Ficha de Anestesia',
         recuperacao: 'Recuperação pós-anestésica',
         termo: 'Termo de Consentimento (TCLE)',
-        prescricao: 'Prescrição médica',
+        prescricao: 'Receituário',
         risco: 'Risco perioperatório',
         financeiro: 'Conciliação financeira', agenda: 'Agenda',
         orcamento: 'Orçamentos',
@@ -10223,7 +10279,7 @@ const consulta = {
         html += campo('HDA', c.hda);
         html += campo('Hipótese', c.hipotese);
         html += campo('Conduta', c.conduta);
-        html += campo('Prescrição', c.prescricao);
+        html += campo('Receituário', c.prescricao);
         (c._seguimentos || []).forEach(s => {
           const sd = s.data ? utils.formatarData(s.data) : '';
           const evaTag = (s.eva != null && s.eva !== '') ? ' <span style="background:var(--primary-soft);color:var(--primary-darker);font-weight:700;padding:0 6px;border-radius:8px;font-size:.76rem">EVA ' + utils.escapeHTML(String(s.eva)) + '</span>' : '';
@@ -11149,20 +11205,131 @@ const prescricao = {
     prescricao.addItem();
     prescricao._linkPendente = null;
     try { assinatura.limpar('sig-prescricao'); } catch(e){}
+    const rNovo = document.querySelector('#form-prescricao [name="modelo"][value="simples"]');
+    if (rNovo) rNovo.checked = true;
     prescricao.atualizarTipo();
     ui.atualizarDocStatus('prescricao', null);
     ui.fecharBanner('banner-prescricao');
     markClean();
     toast('Nova prescrição iniciada');
   },
+  /* Nome mantido por compatibilidade com chamadas existentes; agora reage ao
+     "modelo" de documento (simples, especial, antimicrobiano, atestado, declaração). */
   atualizarTipo() {
-    const tipo = document.querySelector('#form-prescricao [name="tipo"]:checked')?.value || 'comum';
-    const banner = document.getElementById('banner-prescricao');
-    if (tipo === 'especial') {
-      ui.mostrarBanner('banner-prescricao', '📋 Receita de Controle Especial: será impressa em 2 vias (1ª via Farmácia, 2ª via Paciente). Endereço do paciente é obrigatório.', 'info');
+    const modelo = document.querySelector('#form-prescricao [name="modelo"]:checked')?.value || 'simples';
+    const form = document.getElementById('form-prescricao');
+    if (form) form.dataset.modelo = modelo;
+    const receita = (modelo === 'simples' || modelo === 'especial' || modelo === 'antimicrobiano');
+    const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+    show('card-presc-medicamentos', receita);
+    show('card-presc-atestado', modelo === 'atestado');
+    show('card-presc-declaracao', modelo === 'declaracao');
+    show('presc-validade-group', receita);
+    show('presc-orientacoes-group', modelo !== 'declaracao');
+    show('presc-endereco-group', receita);
+    show('presc-doc-group', modelo === 'atestado' || modelo === 'declaracao');
+    const endHint = document.getElementById('presc-endereco-hint');
+    if (endHint) endHint.style.display = modelo === 'especial' ? '' : 'none';
+    const validade = form && form.querySelector('[name="validade"]');
+    let banner = '';
+    if (modelo === 'especial') {
+      banner = '📋 Receita de Controle Especial (Portaria SVS/MS 344/98): impressa em 2 vias — 1ª via Retenção da Farmácia, 2ª via Orientação ao Paciente. Endereço do paciente obrigatório. Validade 30 dias.';
+      if (validade && (!validade.value || validade.value === '10 dias')) validade.value = '30 dias';
+    } else if (modelo === 'antimicrobiano') {
+      banner = '💊 Receita de Antimicrobiano (RDC ANVISA 471/2021): 2 vias — 1ª via Retenção da Farmácia, 2ª via Paciente. Validade de 10 dias a partir da emissão.';
+      if (validade) validade.value = '10 dias';
+    } else if (modelo === 'atestado') {
+      banner = '📝 Atestado médico: informe o período de afastamento. O CID-10 só pode constar com autorização expressa do paciente (art. 76 do Código de Ética Médica).';
+      prescricao._syncAtestadoTexto();
+    } else if (modelo === 'declaracao') {
+      banner = '🕐 Declaração de comparecimento: informe a data e o horário de entrada e saída do atendimento.';
+      prescricao._syncDeclTexto();
     } else {
-      ui.fecharBanner('banner-prescricao');
+      if (validade && (!validade.value || validade.value === '10 dias')) validade.value = validade.value || '30 dias';
     }
+    if (banner) ui.mostrarBanner('banner-prescricao', banner, 'info'); else ui.fecharBanner('banner-prescricao');
+    prescricao._toggleCID();
+  },
+  /* Restaura o modelo ao carregar/importar (compatível com registros antigos que
+     usavam o campo "tipo"). */
+  _restaurarModelo(rec) {
+    const val = rec.modelo || (rec.tipo === 'especial' ? 'especial' : 'simples');
+    const r = document.querySelector('#form-prescricao [name="modelo"][value="' + val + '"]');
+    if (r) r.checked = true;
+    /* Preserva como manual qualquer texto de atestado/declaração já salvo */
+    ['atestado_texto', 'decl_texto'].forEach(n => {
+      const el = document.querySelector('#form-prescricao [name="' + n + '"]');
+      if (el && el.value.trim()) el.dataset.auto = '';
+    });
+  },
+  _toggleCID() {
+    const on = document.querySelector('#form-prescricao [name="atestado_cid_incluir"]')?.checked;
+    const g = document.getElementById('presc-cid-group');
+    if (g) g.style.display = on ? '' : 'none';
+  },
+  /* Número por extenso (0–99, suficiente para dias de afastamento) */
+  _extenso(n) {
+    if (isNaN(n) || n < 0) return '';
+    const u = ['zero','um','dois','três','quatro','cinco','seis','sete','oito','nove','dez','onze','doze','treze','quatorze','quinze','dezesseis','dezessete','dezoito','dezenove'];
+    const dz = ['','','vinte','trinta','quarenta','cinquenta','sessenta','setenta','oitenta','noventa'];
+    if (n < 20) return u[n];
+    if (n < 100) { const d = dz[Math.floor(n / 10)], un = n % 10; return un ? d + ' e ' + u[un] : d; }
+    return String(n);
+  },
+  _gerarTextoAtestado(d) {
+    const nome = (d.nome || '').trim() || '_____________________';
+    const dias = parseInt(d.atestado_dias);
+    const fin = (d.atestado_finalidade || '').trim() || 'afastamento de suas atividades habituais';
+    const inicio = d.atestado_inicio ? utils.formatarData(d.atestado_inicio) : '';
+    let s = 'Atesto, para os devidos fins, que o(a) Sr(a). ' + nome;
+    if (d.documento) s += ', portador(a) do documento ' + d.documento + ',';
+    s += ' esteve sob meus cuidados médicos nesta data';
+    if (!isNaN(dias) && dias > 0) {
+      const ext = prescricao._extenso(dias);
+      s += ', necessitando de ' + fin + ' pelo período de ' + dias + (ext ? ' (' + ext + ')' : '') + ' dia' + (dias === 1 ? '' : 's');
+      if (inicio) s += ', a partir de ' + inicio;
+    } else {
+      s += ', necessitando de ' + fin;
+    }
+    s += '.';
+    if (d.atestado_cid_incluir && d.atestado_cid) s += ' CID-10: ' + d.atestado_cid + ' (informado mediante autorização expressa do paciente).';
+    return s;
+  },
+  _gerarTextoDeclaracao(d) {
+    const nome = (d.nome || '').trim() || '_____________________';
+    const data = d.decl_data ? utils.formatarData(d.decl_data) : (d.data ? utils.formatarData(d.data) : '');
+    let s = 'Declaro, para os devidos fins, que o(a) Sr(a). ' + nome;
+    if (d.documento) s += ', portador(a) do documento ' + d.documento + ',';
+    s += ' compareceu a atendimento médico';
+    if (data) s += ' no dia ' + data;
+    if (d.decl_hora_ini && d.decl_hora_fim) s += ', no período das ' + d.decl_hora_ini + ' às ' + d.decl_hora_fim;
+    else if (d.decl_hora_ini) s += ', com entrada às ' + d.decl_hora_ini;
+    s += '.';
+    if (d.decl_acompanhante) s += ' Acompanhado(a) por ' + d.decl_acompanhante + '.';
+    return s;
+  },
+  _syncAtestadoTexto() {
+    const f = document.getElementById('form-prescricao'); if (!f) return;
+    const txt = f.querySelector('[name="atestado_texto"]'); if (!txt) return;
+    if (txt.value.trim() && txt.dataset.auto !== '1') return; /* preserva edição manual */
+    const g = n => (f.querySelector('[name="' + n + '"]') || {}).value || '';
+    txt.value = prescricao._gerarTextoAtestado({
+      nome: g('nome'), documento: g('documento'), atestado_dias: g('atestado_dias'),
+      atestado_finalidade: g('atestado_finalidade'), atestado_inicio: g('atestado_inicio'),
+      atestado_cid: g('atestado_cid'), atestado_cid_incluir: f.querySelector('[name="atestado_cid_incluir"]')?.checked
+    });
+    txt.dataset.auto = '1';
+  },
+  _syncDeclTexto() {
+    const f = document.getElementById('form-prescricao'); if (!f) return;
+    const txt = f.querySelector('[name="decl_texto"]'); if (!txt) return;
+    if (txt.value.trim() && txt.dataset.auto !== '1') return;
+    const g = n => (f.querySelector('[name="' + n + '"]') || {}).value || '';
+    txt.value = prescricao._gerarTextoDeclaracao({
+      nome: g('nome'), documento: g('documento'), data: g('data'), decl_data: g('decl_data'),
+      decl_hora_ini: g('decl_hora_ini'), decl_hora_fim: g('decl_hora_fim'), decl_acompanhante: g('decl_acompanhante')
+    });
+    txt.dataset.auto = '1';
   },
   addItem(dados = {}) {
     const tbody = document.getElementById('prescricao-body');
@@ -11347,6 +11514,7 @@ const prescricao = {
     h.value = item._id || '';
     (item.itens || []).forEach(it => prescricao.addItem(it));
     if ((item.itens || []).length === 0) prescricao.addItem();
+    prescricao._restaurarModelo(item);
     prescricao.atualizarTipo();
     setTimeout(() => { try { assinatura.restaurar('sig-prescricao', 'form-prescricao'); } catch (e) {} }, 60);
     ui.atualizarDocStatus('prescricao', item);
@@ -11368,6 +11536,9 @@ const prescricao = {
     document.getElementById('prescricao-body').innerHTML = '';
     prescricao.addItem();
     try { assinatura.limpar('sig-prescricao'); } catch(e){}
+    const rLimpar = document.querySelector('#form-prescricao [name="modelo"][value="simples"]');
+    if (rLimpar) rLimpar.checked = true;
+    prescricao.atualizarTipo();
     ui.atualizarDocStatus('prescricao', null);
   },
   exportar() {
@@ -11383,6 +11554,7 @@ const prescricao = {
     utils.fillForm(prescricao.formId, d);
     (d.itens || []).forEach(it => prescricao.addItem(it));
     if ((d.itens || []).length === 0) prescricao.addItem();
+    prescricao._restaurarModelo(d);
     prescricao.atualizarTipo();
     setTimeout(() => { try { assinatura.restaurar('sig-prescricao', 'form-prescricao'); } catch (e) {} }, 60);
     markClean();
@@ -11411,7 +11583,7 @@ const auth = {
     { key: 'consulta',    label: 'Consulta / Dor' },
     { key: 'pre',         label: 'Pré-anestésica' },
     { key: 'termo',       label: 'Termo (TCLE)' },
-    { key: 'prescricao',  label: 'Prescrição' },
+    { key: 'prescricao',  label: 'Receituário' },
     { key: 'risco',       label: 'Risco perioperatório' },
     { key: 'anestesia',   label: 'Ficha de anestesia' },
     { key: 'recuperacao', label: 'Recuperação pós' },
@@ -12872,7 +13044,7 @@ const textosPadrao = {
       exame_fisico: 'Exame físico',
       hipotese: 'Hipótese diagnóstica',
       conduta: 'Conduta',
-      prescricao: 'Prescrição'
+      prescricao: 'Receituário'
     },
     anestesia: {
       _label: 'Ficha de anestesia',
@@ -12901,7 +13073,7 @@ const textosPadrao = {
       observacoes: 'Observações'
     },
     prescricao: {
-      _label: 'Prescrição',
+      _label: 'Receituário',
       orientacoes: 'Orientações ao paciente'
     },
     recuperacao_alta: {
@@ -14451,7 +14623,11 @@ const pdfGen = {
     const J = pdfGen._jsPDF(); if (!J) return null;
     const d = utils.formData('form-prescricao');
     const itens = prescricao._coletarItens();
-    const especial = d.tipo === 'especial';
+    const modelo = d.modelo || (d.tipo === 'especial' ? 'especial' : 'simples');
+    const especial = modelo === 'especial';
+    const duasVias = (modelo === 'especial' || modelo === 'antimicrobiano');
+    const tituloDoc = modelo === 'especial' ? 'RECEITUÁRIO DE CONTROLE ESPECIAL'
+      : (modelo === 'antimicrobiano' ? 'RECEITA DE ANTIMICROBIANO' : 'RECEITUÁRIO');
 
     const doc = new J({ unit: 'mm', format: 'a4' });
     const W = 210, H = 297, M = 18;        // margens
@@ -14468,7 +14644,7 @@ const pdfGen = {
       let y = yStart;
       /* Cabeçalho */
       doc.setFont('helvetica', 'bold'); doc.setFontSize(12.5);
-      doc.text(clinica.nomeProfissional || d.profissional || 'Prescrição médica', M, y);
+      doc.text(clinica.nomeProfissional || d.profissional || 'Receituário', M, y);
       y += 5.4;
       doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(90);
       if (clinica.especialidade) { doc.text(clinica.especialidade, M, y); y += 4.3; }
@@ -14483,8 +14659,7 @@ const pdfGen = {
       y += 2;
       doc.setDrawColor(180); doc.line(M, y, W - M, y); y += 6.5;
       doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5);
-      const titulo = especial ? 'RECEITUÁRIO DE CONTROLE ESPECIAL' : 'PRESCRIÇÃO MÉDICA';
-      doc.text(titulo, W / 2, y, { align: 'center' });
+      doc.text(tituloDoc, W / 2, y, { align: 'center' });
       if (rotulo) {
         doc.setFontSize(8); doc.setTextColor(150, 40, 30);
         doc.text(rotulo, W - M, y, { align: 'right' });
@@ -14562,10 +14737,10 @@ const pdfGen = {
       return y;
     };
 
-    if (especial) {
-      desenhaVia(M + 4, '1ª via — Farmácia');
+    if (duasVias) {
+      desenhaVia(M + 4, '1ª via — Retenção da Farmácia');
       doc.addPage();
-      desenhaVia(M + 4, '2ª via — Paciente');
+      desenhaVia(M + 4, especial ? '2ª via — Orientação ao Paciente' : '2ª via — Paciente');
     } else {
       desenhaVia(M + 4, '');
     }
@@ -14604,7 +14779,13 @@ const pdfGen = {
   async assinarReceita() {
     const itens = (typeof prescricao !== 'undefined') ? prescricao._coletarItens() : [];
     const d = utils.formData('form-prescricao');
-    const especial = d.tipo === 'especial';
+    const modelo = d.modelo || (d.tipo === 'especial' ? 'especial' : 'simples');
+    if (modelo === 'atestado' || modelo === 'declaracao') {
+      try { printPreview.abrir(); } catch (e) {}
+      toast('Para assinar, gere o PDF em 🖨️ Visualizar / Imprimir → "Salvar em PDF" e use "🔏 Assinar digitalmente".', 'info');
+      return;
+    }
+    const especial = modelo === 'especial';
 
     /* ===== Validação dos requisitos legais (Lei 5.991/1973 + RDC 1.000/2025) ===== */
     const faltando = [];
@@ -14699,6 +14880,13 @@ const pdfGen = {
 
   /* Apenas gerar e baixar/visualizar o PDF, sem assinar */
   async baixarReceitaPDF() {
+    const d0 = utils.formData('form-prescricao');
+    const modelo0 = d0.modelo || (d0.tipo === 'especial' ? 'especial' : 'simples');
+    if (modelo0 === 'atestado' || modelo0 === 'declaracao') {
+      try { printPreview.abrir(); } catch (e) {}
+      toast('Use 🖨️ Visualizar / Imprimir e "Salvar em PDF" para ' + (modelo0 === 'atestado' ? 'o atestado' : 'a declaração') + '.', 'info');
+      return;
+    }
     const r = pdfGen.receita();
     if (!r) return;
     await pdfGen._compartilhar(r.doc, r.nomeArq);
@@ -22626,7 +22814,7 @@ ui.atualizarDocStatus = function(modKey, item) {
         html += '<span style="font-size:.72rem;color:var(--text-mute)">Vinculados:</span>';
         html += linkList.map(l => {
           const nome = l.mod === 'anestesia' ? (l.item.paciente && l.item.paciente.nome) : (l.item.nome || l.item.paciente);
-          const labels = { pre: 'Pré', consulta: 'Consulta', anestesia: 'Anestesia', recuperacao: 'SRPA', termo: 'Termo', prescricao: 'Prescrição', financeiro: 'Financeiro' };
+          const labels = { pre: 'Pré', consulta: 'Consulta', anestesia: 'Anestesia', recuperacao: 'SRPA', termo: 'Termo', prescricao: 'Receituário', financeiro: 'Financeiro' };
           return `<button class="ds-link" onclick="ui.abrirVinculo('${l.mod}','${l.item._id}')" title="${utils.escapeAttr(nome || '')}">${labels[l.mod] || l.mod}</button>`;
         }).join('');
       }
@@ -23070,7 +23258,7 @@ const historico = {
     anestesia: 'Ficha de Anestesia',
     recuperacao: 'Recuperação SRPA',
     termo: 'Termo (TCLE)',
-    prescricao: 'Prescrição',
+    prescricao: 'Receituário',
     risco: 'Risco perioperatório',
     financeiro: 'Financeiro'
   },
@@ -23236,7 +23424,7 @@ const historico = {
      prescrições, riscos, financeiro, agenda, orçamentos e anexos. */
   MODS_PRONT: {
     pre: 'Pré-anestésica', consulta: 'Consulta / Dor', anestesia: 'Ficha de Anestesia',
-    recuperacao: 'SRPA', termo: 'Termo (TCLE)', prescricao: 'Prescrição',
+    recuperacao: 'SRPA', termo: 'Termo (TCLE)', prescricao: 'Receituário',
     risco: 'Risco perioperatório', financeiro: 'Financeiro', agenda: 'Agenda', orcamento: 'Orçamento'
   },
   _nomeItem(it) { return ((it.paciente && it.paciente.nome) || it.paciente_nome || it.nome || it.paciente || '').trim(); },
@@ -23752,7 +23940,7 @@ const pacientes = {
       { k: 'anestesia', label: 'Ficha de anestesia', nomeCampo: r => (r.paciente && r.paciente.nome), dataCampo: r => (r.procedimento && r.procedimento.data) || r.data_anestesia, resumo: r => (r.procedimento && r.procedimento.descricao) || '' },
       { k: 'recuperacao', label: 'Recuperação SRPA', nomeCampo: r => r.nome, dataCampo: r => r.data, resumo: r => '' },
       { k: 'termo', label: 'Termo (TCLE)', nomeCampo: r => r.nome, dataCampo: r => r.data, resumo: r => r.procedimento || '' },
-      { k: 'prescricao', label: 'Prescrição', nomeCampo: r => r.nome, dataCampo: r => r.data, resumo: r => '' },
+      { k: 'prescricao', label: 'Receituário', nomeCampo: r => r.nome, dataCampo: r => r.data, resumo: r => '' },
       { k: 'risco', label: 'Risco perioperatório', nomeCampo: r => r.nome, dataCampo: r => r.data, resumo: r => r.classificacao || '' },
       { k: 'orcamento', label: 'Orçamento', nomeCampo: r => r.paciente, dataCampo: r => r.data, resumo: r => (r.total_paciente ? orcamento._fmt(parseFloat(r.total_paciente)) : '') },
       { k: 'financeiro', label: 'Financeiro', nomeCampo: r => r.paciente, dataCampo: r => r.data_proc, resumo: r => (r.procedimento || '') + (r.status ? ' · ' + r.status : '') }
@@ -26256,9 +26444,18 @@ ${TAG_CLOSE_HTML}`;
 
   _buildPrescricao() {
     const d = utils.formData('form-prescricao');
+    const modelo = d.modelo || (d.tipo === 'especial' ? 'especial' : 'simples');
+    if (modelo === 'atestado') return printPreview._buildAtestado(d);
+    if (modelo === 'declaracao') return printPreview._buildDeclaracao(d);
+
     const itens = prescricao._coletarItens();
-    const especial = d.tipo === 'especial';
+    const duasVias = (modelo === 'especial' || modelo === 'antimicrobiano');
+    const especial = modelo === 'especial';
     const meta = `${utils.formatarData(d.data) || new Date().toLocaleDateString('pt-BR')}`;
+    const TITULOS = { simples: 'RECEITUÁRIO', especial: 'RECEITUÁRIO DE CONTROLE ESPECIAL', antimicrobiano: 'RECEITA DE ANTIMICROBIANO' };
+    const titulo = TITULOS[modelo] || 'RECEITUÁRIO';
+    /* validade padrão por modelo se não informada */
+    const validadeTxt = d.validade || (modelo === 'antimicrobiano' ? '10 dias' : (modelo === 'especial' ? '30 dias' : ''));
 
     /* Lista de medicamentos numerada */
     const listaMeds = itens.length ? itens.map((it, i) => `
@@ -26281,24 +26478,49 @@ ${TAG_CLOSE_HTML}`;
       </div>`;
 
     const orient = d.orientacoes ? printPreview._section('Orientações', `<p style="font-size:10pt">${utils.escapeHTML(d.orientacoes)}</p>`) : '';
-    const validade = d.validade ? `<div style="font-size:9pt;color:#555;margin-top:6px">Validade: ${utils.escapeHTML(d.validade)}</div>` : '';
+    const validade = validadeTxt ? `<div style="font-size:9pt;color:#555;margin-top:6px">Validade: ${utils.escapeHTML(validadeTxt)}</div>` : '';
 
     /* Monta uma via */
-    const umaVia = (rotulo) => printPreview._header('PRESCRIÇÃO MÉDICA' + (especial ? ' — CONTROLE ESPECIAL' : ''), meta + (rotulo ? `<br><span style="font-size:8pt;font-weight:700;color:#b3392a">${rotulo}</span>` : '')) +
+    const umaVia = (rotulo) => printPreview._header(titulo, meta + (rotulo ? `<br><span style="font-size:8pt;font-weight:700;color:#b3392a">${rotulo}</span>` : '')) +
       printPreview._section('Identificação', cabecalhoPac) +
       printPreview._section('Medicamentos', listaMeds + validade) +
       orient +
       `<div class="pp-grid cols-2" style="margin-top:8px">${printPreview._field('Local', d.local)}</div>` +
       assinatura;
 
-    if (especial) {
-      /* Duas vias separadas por quebra de página */
-      return umaVia('1ª via — Farmácia') +
+    if (duasVias) {
+      const via2 = especial ? '2ª via — Orientação ao Paciente' : '2ª via — Paciente';
+      const rodapeLabel = especial ? 'Receituário de Controle Especial (2 vias)' : 'Receita de Antimicrobiano (2 vias)';
+      return umaVia('1ª via — Retenção da Farmácia') +
         '<div style="page-break-before:always"></div>' +
-        umaVia('2ª via — Paciente') +
-        printPreview._footer('Prescrição — Controle Especial (2 vias)');
+        umaVia(via2) +
+        printPreview._footer(rodapeLabel);
     }
-    return umaVia('') + printPreview._footer('Prescrição médica');
+    return umaVia('') + printPreview._footer('Receituário');
+  },
+
+  /* Atestado médico e Declaração de comparecimento — documentos declaratórios
+     (sem medicamentos), com texto corrido centralizado. */
+  _buildAtestado(d) {
+    const meta = `${utils.formatarData(d.data) || new Date().toLocaleDateString('pt-BR')}`;
+    let texto = (d.atestado_texto || '').trim();
+    if (!texto) texto = prescricao._gerarTextoAtestado(d);
+    return printPreview._docDeclaratorio('ATESTADO MÉDICO', meta, texto, d, 'Atestado médico');
+  },
+  _buildDeclaracao(d) {
+    const meta = `${utils.formatarData(d.data) || new Date().toLocaleDateString('pt-BR')}`;
+    let texto = (d.decl_texto || '').trim();
+    if (!texto) texto = prescricao._gerarTextoDeclaracao(d);
+    return printPreview._docDeclaratorio('DECLARAÇÃO DE COMPARECIMENTO', meta, texto, d, 'Declaração de comparecimento');
+  },
+  _docDeclaratorio(titulo, meta, texto, d, rodape) {
+    const corpo = `<div style="font-size:11.5pt;line-height:1.9;text-align:justify;margin:26px 4px 0;white-space:pre-wrap">${utils.escapeHTML(texto)}</div>`;
+    const localData = `<div style="margin-top:30px;font-size:10.5pt;text-align:right">${utils.escapeHTML(d.local || '')}${d.local ? ', ' : ''}${utils.formatarData(d.data) || new Date().toLocaleDateString('pt-BR')}</div>`;
+    const assinatura = `
+      <div class="pp-signature-area" style="margin-top:44px">
+        ${printPreview._assinaturaDesenhada(d.assinatura_dataurl || d.sig_dataurl, d.profissional || 'Profissional', d.crm, 'prof')}
+      </div>`;
+    return printPreview._header(titulo, meta) + corpo + localData + assinatura + printPreview._footer(rodape);
   },
 
   _buildRisco() {
@@ -26732,7 +26954,7 @@ const dashboard = {
     const mods = filtroMod === 'all'
       ? ['anestesia', 'pre', 'consulta', 'recuperacao', 'termo', 'prescricao', 'risco', 'financeiro']
       : [filtroMod];
-    const LABELS = { anestesia: 'Anestesia', pre: 'Pré', consulta: 'Consulta', recuperacao: 'SRPA', termo: 'Termo', prescricao: 'Prescrição', risco: 'Risco', financeiro: 'Financeiro' };
+    const LABELS = { anestesia: 'Anestesia', pre: 'Pré', consulta: 'Consulta', recuperacao: 'SRPA', termo: 'Termo', prescricao: 'Receituário', risco: 'Risco', financeiro: 'Financeiro' };
 
     const resultados = [];
     mods.forEach(m => {
@@ -31164,7 +31386,7 @@ const assinaturaDigital = (function () {
     anestesia:   { form: 'form-anestesia',   titulo: 'Ficha de Anestesia',         pac: ['paciente_nome'],  prof: ['anestesiologista'],                 crm: ['crm'] },
     recuperacao: { form: 'form-recuperacao', titulo: 'Recuperação Pós-anestésica', pac: ['nome', 'paciente'], prof: ['responsavel', 'anestesiologista'], crm: ['registro', 'crm'] },
     termo:       { form: 'form-termo',       titulo: 'Termo de Consentimento',     pac: ['paciente', 'nome'], prof: ['profissional'],                    crm: ['crm'] },
-    prescricao:  { form: 'form-prescricao',  titulo: 'Prescrição Médica',          pac: ['paciente', 'nome'], prof: ['profissional'],                    crm: ['crm'] },
+    prescricao:  { form: 'form-prescricao',  titulo: 'Receituário',                  pac: ['paciente', 'nome'], prof: ['profissional'],                    crm: ['crm'] },
     risco:       { form: 'form-risco',       titulo: 'Avaliação de Risco',         pac: ['nome'],           prof: ['profissional'],                     crm: ['crm'] },
     financeiro:  { form: 'form-financeiro',  titulo: 'Documento Financeiro',       pac: ['paciente'],       prof: ['profissional'],                     crm: ['crm'] }
   };
