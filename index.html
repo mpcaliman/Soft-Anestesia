@@ -4802,6 +4802,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
           <div class="field col-12"><label>Monitores <small style="color:var(--text-mute);font-weight:400">— ao marcar BIS/PVC/PIC/Glicemia, a coluna aparece na tabela de sinais vitais</small></label>
             <div class="checks">
               <label class="check"><input type="checkbox" name="monitores[]" value="Capnografia" onchange="anestesia.disp.sincronizarVitais()"><span>Capnografia (EtCO₂)</span></label>
+              <label class="check"><input type="checkbox" name="monitores[]" value="Analisador de gases" onchange="anestesia.disp.sincronizarVitais()"><span>Analisador de gases (CAM/agente)</span></label>
               <label class="check"><input type="checkbox" name="monitores[]" value="Oximetria" onchange="anestesia.disp.sincronizarVitais()"><span>Oximetria (SpO₂)</span></label>
               <label class="check"><input type="checkbox" name="monitores[]" value="ECG" onchange="anestesia.disp.sincronizarVitais()"><span>ECG</span></label>
               <label class="check"><input type="checkbox" name="monitores[]" value="PNI" onchange="anestesia.disp.sincronizarVitais()"><span>PNI</span></label>
@@ -5133,6 +5134,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
               <th style="width:65px">PIC</th>
               <th style="width:75px">DC L/min</th>
               <th style="width:75px">ScvO₂</th>
+              <th style="width:70px" title="Concentração alveolar mínima do agente (analisador de gases)">CAM</th>
               <th style="width:85px" title="Volume urinário aferido neste horário">Diurese mL</th>
               <th>Observações</th><th class="col-rm">×</th>
             </tr></thead>
@@ -16446,7 +16448,7 @@ const anestesia = {
     },
     _colIdx(k) {
       /* Mapeia coluna por nome: hora=1, pas=2, pad=3, pam=4, fc=5, ritmo=6, spo2=7, etco2=8, fr=9, temp=10, bis=11, tof=12, glic=13, pvc=14, pic=15, dc=16, scvo2=17, diurese=18, obs=19, rm=20 */
-      const map = { hora: 1, pas: 2, pad: 3, pam: 4, fc: 5, ritmo: 6, spo2: 7, etco2: 8, fr: 9, temp: 10, bis: 11, tof: 12, glic: 13, pvc: 14, pic: 15, dc: 16, scvo2: 17 };
+      const map = { hora: 1, pas: 2, pad: 3, pam: 4, fc: 5, ritmo: 6, spo2: 7, etco2: 8, fr: 9, temp: 10, bis: 11, tof: 12, glic: 13, pvc: 14, pic: 15, dc: 16, scvo2: 17, cam: 18 };
       return map[k] || 0;
     },
     /* Coleta detalhes dos dispositivos */
@@ -17291,7 +17293,7 @@ const anestesia = {
       /* Inicia no último modo usado (só uma vez, na anestesia) */
       if (ctx === 'anestesia') {
         const ultModo = localStorage.getItem('medsys.v7.grafico_modo') || 'pas';
-        anestesia.graficoUI.setModo(['pas','pad','fc','spo2','etco2','fr','temp','bis','tof','glic','pvc','pic','dc','scvo2'].includes(ultModo) ? ultModo : 'pas');
+        anestesia.graficoUI.setModo(['pas','pad','fc','spo2','etco2','fr','temp','bis','tof','glic','pvc','pic','dc','scvo2','cam'].includes(ultModo) ? ultModo : 'pas');
       }
     },
 
@@ -17746,7 +17748,7 @@ const anestesia = {
         ui.dragging = true;
         ui._down.didDrag = true;
         const d0 = ui._down.dInicial;
-        if (d0 && ['pas','pad','fc','spo2','etco2','fr','temp','bis','tof','glic','pvc','pic','dc','scvo2'].includes(ui.modo)) {
+        if (d0 && ['pas','pad','fc','spo2','etco2','fr','temp','bis','tof','glic','pvc','pic','dc','scvo2','cam'].includes(ui.modo)) {
           const lim = ui._limiteVital(ui.modo);
           ui.inserirVital(d0.t, ui.modo, Math.max(lim[0], Math.min(lim[1], d0.valor)));
           ui.ultimoT = d0.t;
@@ -17754,7 +17756,7 @@ const anestesia = {
       }
       if (!d) return;
       /* Durante drag em modo vital, insere amostra contínua */
-      if (['pas','pad','fc','spo2','etco2','fr','temp','bis','tof','glic','pvc','pic','dc','scvo2'].includes(ui.modo)) {
+      if (['pas','pad','fc','spo2','etco2','fr','temp','bis','tof','glic','pvc','pic','dc','scvo2','cam'].includes(ui.modo)) {
         /* Espaçamento mínimo entre amostras durante drag = valor do snap (ou 3 se off) */
         const snapSel = document.getElementById(anestesia.graficoUI._ctxIds().snapSel);
         const snapVal = snapSel ? parseInt(snapSel.value) || 0 : 5;
@@ -17900,7 +17902,7 @@ const anestesia = {
         bis: [0, 100], tof: [0, 100],
         temp: [32, 42], glic: [20, 600],
         pvc: [0, 30], pic: [0, 50],
-        dc: [0, 15], scvo2: [40, 100]
+        dc: [0, 15], scvo2: [40, 100], cam: [0, 3]
       })[modo] || [0, 999];
     },
 
@@ -18027,7 +18029,8 @@ const anestesia = {
       'PIC':            { campo: 'pic',   cor: '#9333ea', label: 'PIC' },
       'Débito cardíaco':{ campo: 'dc',    cor: '#0369a1', label: 'DC' },
       'ScvO₂/SvO₂':     { campo: 'scvo2', cor: '#15803d', label: 'ScvO₂' },
-      'FR':             { campo: 'fr',    cor: '#7c3aed', label: 'FR' }
+      'FR':             { campo: 'fr',    cor: '#7c3aed', label: 'FR' },
+      'Analisador de gases': { campo: 'cam', cor: '#0d9488', label: 'CAM' }
     },
 
     /* Atualiza dinamicamente os botões da toolbar com base nos monitores marcados */
@@ -18170,7 +18173,7 @@ const anestesia = {
               ui.abrirAjuste({ t: ponto.t, campo: ponto.campo, valor: ponto.valor, tr: ponto.tr });
             } else {
               const t = parseInt(b.dataset.t);
-              const campo = ['pas','pad','fc','spo2','etco2','fr','temp','bis','tof','glic','pvc','pic','dc','scvo2'].includes(ui.modo) ? ui.modo : 'pas';
+              const campo = ['pas','pad','fc','spo2','etco2','fr','temp','bis','tof','glic','pvc','pic','dc','scvo2','cam'].includes(ui.modo) ? ui.modo : 'pas';
               const d = ui.canvasToData(parseFloat(b.dataset.cx), parseFloat(b.dataset.cy));
               ui.abrirAjuste({ t, campo, valor: d ? d.valor : null });
             }
@@ -18223,6 +18226,7 @@ const anestesia = {
       pic:   { label: 'PIC',   un: 'mmHg', passo: 1,   cor: '#9333ea' },
       dc:    { label: 'DC',    un: 'L/min',passo: 0.1, cor: '#0369a1' },
       scvo2: { label: 'ScvO₂', un: '%',    passo: 1,   cor: '#15803d' },
+      cam:   { label: 'CAM',   un: '',     passo: 0.1, cor: '#0d9488' },
       dor:   { label: 'Dor',   un: 'EVA',  passo: 1,   cor: '#dc2626' }
     },
 
@@ -18360,7 +18364,7 @@ const anestesia = {
       const xOf = t => g.padL + ((t - g.tMin) / g.span) * g.w;
       const yOf = v => g.padT + g.h - ((v - g.yMin) / (g.yMax - g.yMin)) * g.h;
       /* Campos a verificar (curvas) */
-      const campos = ['pas','pad','pam','fc','spo2','etco2','fr','temp','bis','tof','glic','pvc','pic','dc','scvo2'];
+      const campos = ['pas','pad','pam','fc','spo2','etco2','fr','temp','bis','tof','glic','pvc','pic','dc','scvo2','cam'];
       let melhor = null, distMin = 22; /* raio de toque em px */
       document.querySelectorAll('#' + ids.vitaisBody + ' tr').forEach(tr => {
         const hora = tr.querySelector('[name="vit_hora[]"]')?.value;
@@ -18464,8 +18468,8 @@ const anestesia = {
       fc:   ['ECG', 'Oximetria', 'PNI', 'PA invasiva'],
       ritmo:['ECG'],
       spo2: ['Oximetria'],
-      etco2:['Capnografia'],
-      fr:   ['FR', 'Capnografia'],
+      etco2:['Capnografia', 'Analisador de gases'],
+      fr:   ['FR', 'Capnografia', 'Analisador de gases'],
       temp: ['Temperatura'],
       bis:  ['BIS'],
       tof:  ['TOF'],
@@ -18473,10 +18477,11 @@ const anestesia = {
       pvc:  ['PVC'],
       pic:  ['PIC'],
       dc:   ['Débito cardíaco'],
-      scvo2:['ScvO₂/SvO₂']
+      scvo2:['ScvO₂/SvO₂'],
+      cam:  ['Analisador de gases']
     },
     /* Conjunto padrão de parâmetros quando NENHUM monitor foi selecionado ainda */
-    _PARAMS_UNIVERSO: ['pas','pad','pam','fc','ritmo','spo2','etco2','fr','temp','bis','tof','glic','pvc','pic','dc','scvo2'],
+    _PARAMS_UNIVERSO: ['pas','pad','pam','fc','ritmo','spo2','etco2','fr','temp','bis','tof','glic','pvc','pic','dc','scvo2','cam'],
     _PARAMS_PADRAO:  ['pas','pad','pam','fc','spo2','etco2'],
 
     /* Opções de ritmo cardíaco (ECG) */
@@ -18555,7 +18560,8 @@ const anestesia = {
       { label: 'PVC', field: 'pvc', step: '0.1' },
       { label: 'PIC', field: 'pic' },
       { label: 'DC', field: 'dc', step: '0.1' },
-      { label: 'ScvO₂', field: 'scvo2' }
+      { label: 'ScvO₂', field: 'scvo2' },
+      { label: 'CAM', field: 'cam', step: '0.1' }
     ],
 
     /* Grade transposta (parâmetros nas linhas, horários nas colunas) — acima do gráfico.
@@ -18735,6 +18741,7 @@ const anestesia = {
         <td data-label="PIC"><input type="number" name="vit_pic[]" value="${utils.escapeAttr(dados.pic || '')}" min="0"></td>
         <td data-label="DC L/min"><input type="number" name="vit_dc[]" value="${utils.escapeAttr(dados.dc || '')}" step="0.1" min="0"></td>
         <td data-label="ScvO₂"><input type="number" name="vit_scvo2[]" value="${utils.escapeAttr(dados.scvo2 || '')}" min="0" max="100"></td>
+        <td data-label="CAM"><input type="number" name="vit_cam[]" value="${utils.escapeAttr(dados.cam || '')}" min="0" max="3" step="0.1" placeholder="1.0"></td>
         <td data-label="Diurese mL"><input type="number" name="vit_diurese[]" value="${utils.escapeAttr(dados.diurese || '')}" min="0" step="1" placeholder="mL" title="Volume urinário neste horário" oninput="anestesia.vitais._onDiureseChange(this)"></td>
         <td data-label="Observações"><input type="text" name="vit_obs[]" value="${utils.escapeAttr(dados.obs || dados.observacao || '')}"></td>
         <td class="col-rm" style="white-space:nowrap">
@@ -18791,7 +18798,7 @@ const anestesia = {
       /* Campos disponíveis conforme contexto (SRPA tem menos) */
       const campos = (ctx === 'recuperacao')
         ? ['pas','pad','fc','spo2','fr','temp','dor']
-        : ['pas','pad','fc','spo2','etco2','fr','temp','bis','tof','glic','pvc','pic','dc','scvo2'];
+        : ['pas','pad','fc','spo2','etco2','fr','temp','bis','tof','glic','pvc','pic','dc','scvo2','cam'];
       const info = anestesia.graficoUI._vitalInfo;
       const botoes = campos.map(c => {
         const cur = tr.querySelector(`[name="vit_${c}[]"]`)?.value || '';
@@ -18834,7 +18841,7 @@ const anestesia = {
         etco2: q('vit_etco2[]'), fr: q('vit_fr[]'),
         temp: q('vit_temp[]'), bis: q('vit_bis[]'), tof: q('vit_tof[]'),
         glic: q('vit_glic[]'), pvc: q('vit_pvc[]'), pic: q('vit_pic[]'),
-        dc: q('vit_dc[]'), scvo2: q('vit_scvo2[]'),
+        dc: q('vit_dc[]'), scvo2: q('vit_scvo2[]'), cam: q('vit_cam[]'),
         obs: q('vit_obs[]')
       });
       markDirty();
@@ -18867,7 +18874,7 @@ const anestesia = {
           etco2: q('vit_etco2[]'), fr: q('vit_fr[]'),
           temp: q('vit_temp[]'), bis: q('vit_bis[]'), tof: q('vit_tof[]'),
           glic: q('vit_glic[]'), pvc: q('vit_pvc[]'), pic: q('vit_pic[]'),
-          dc: q('vit_dc[]'), scvo2: q('vit_scvo2[]'), dor: q('vit_dor[]'),
+          dc: q('vit_dc[]'), scvo2: q('vit_scvo2[]'), cam: q('vit_cam[]'), dor: q('vit_dor[]'),
           obs: ''
         });
       }
@@ -18916,6 +18923,7 @@ const anestesia = {
           pic: tr.querySelector('[name="vit_pic[]"]')?.value || '',
           dc: tr.querySelector('[name="vit_dc[]"]')?.value || '',
           scvo2: tr.querySelector('[name="vit_scvo2[]"]')?.value || '',
+          cam: tr.querySelector('[name="vit_cam[]"]')?.value || '',
           diurese: tr.querySelector('[name="vit_diurese[]"]')?.value || '',
           observacao: tr.querySelector('[name="vit_obs[]"]').value
         });
@@ -18974,7 +18982,8 @@ const anestesia = {
         const pic = parseFloat(tr.querySelector('[name="vit_pic[]"]')?.value) || null;
         const dc = parseFloat(tr.querySelector('[name="vit_dc[]"]')?.value) || null;
         const scvo2 = parseFloat(tr.querySelector('[name="vit_scvo2[]"]')?.value) || null;
-        pontos.push({ t, pas, pad, pam, fc, spo2, etco2, fr, temp, bis, tof, glic, pvc, pic, dc, scvo2 });
+        const cam = parseFloat(tr.querySelector('[name="vit_cam[]"]')?.value) || null;
+        pontos.push({ t, pas, pad, pam, fc, spo2, etco2, fr, temp, bis, tof, glic, pvc, pic, dc, scvo2, cam });
       });
       pontos.sort((a, b) => a.t - b.t);
 
@@ -19317,6 +19326,24 @@ const anestesia = {
         });
       }
       plot('scvo2', '#15803d', 'circle');   /* verde escuro */
+      /* CAM (0-3) — multiplica por 100 para visualização (1,0 CAM = 100 unidades) */
+      const ptsCAM = pontos.filter(p => p.cam != null);
+      if (ptsCAM.length > 0) {
+        ctx.strokeStyle = '#0d9488'; ctx.fillStyle = '#0d9488';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ptsCAM.forEach((p, i) => {
+          const x = xOf(p.t), y = yOf(Math.min(yMax, p.cam * 100));
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+        ptsCAM.forEach(p => {
+          const x = xOf(p.t), y = yOf(Math.min(yMax, p.cam * 100));
+          ctx.beginPath();
+          ctx.arc(x, y, 2.8, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      }
     }
   },
 
@@ -26122,6 +26149,7 @@ ${TAG_CLOSE_HTML}`;
       if (has('pic'))   colsOpcionais.push({ k: 'pic',   label: 'PIC' });
       if (has('dc'))    colsOpcionais.push({ k: 'dc',    label: 'DC' });
       if (has('scvo2')) colsOpcionais.push({ k: 'scvo2', label: 'ScvO₂' });
+      if (has('cam'))   colsOpcionais.push({ k: 'cam',   label: 'CAM' });
       if (has('diurese')) colsOpcionais.push({ k: 'diurese', label: 'Diurese mL' });
 
       const cabec = '<table class="pp-table"><thead><tr><th>Hora</th><th>PAS</th><th>PAD</th><th>PAM</th><th>FC</th><th>SpO₂</th><th>EtCO₂</th><th>FR</th>' +
@@ -30870,7 +30898,7 @@ document.addEventListener('DOMContentLoaded', () => {
                   <p style="margin:4px 0"><strong>📍 Evento e 💉 Medicação</strong> → botões na toolbar para registro rápido</p>
                 </div>
                 <p style="font-size:.84rem;color:var(--text-soft);margin-bottom:10px">
-                  Os monitores marcados em <em>"4. Acessos, Dispositivos e Equipamentos"</em> (BIS, TOF, Glicemia, PVC, PIC, Temperatura, Débito Cardíaco, ScvO₂) automaticamente aparecem como botões no gráfico, cada um com sua cor própria.
+                  Os monitores marcados em <em>"4. Acessos, Dispositivos e Equipamentos"</em> (BIS, TOF, Glicemia, PVC, PIC, Temperatura, Débito Cardíaco, ScvO₂, Analisador de gases/CAM) automaticamente aparecem como botões no gráfico, cada um com sua cor própria.
                 </p>
                 <p style="font-size:.84rem;color:var(--text-soft);margin-bottom:14px">
                   A janela de tempo se ajusta automaticamente aos horários informados de entrada em sala, anestesia e cirurgia.
