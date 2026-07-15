@@ -704,6 +704,14 @@ html[data-theme="dark"] .theme-toggle:hover {
 @media (max-width: 420px) { .vitais-grid { grid-template-columns: repeat(2, 1fr); } }
 
 /* Grade transposta de sinais vitais (tempo em colunas, parâmetros em linhas) — estilo ficha */
+/* Painel recolhível de monitores (junto dos sinais vitais) */
+.vitais-monitores { margin: 4px 0 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-alt, #f8fafc); }
+.vitais-monitores > summary { cursor: pointer; padding: 8px 12px; font-weight: 700; font-size: .82rem; color: var(--primary-darker); list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.vitais-monitores > summary::-webkit-details-marker { display: none; }
+.vitais-monitores > summary::after { content: '▾'; color: var(--text-mute); transition: transform .2s; }
+.vitais-monitores:not([open]) > summary::after { transform: rotate(-90deg); }
+.vitais-monitores .vm-body { padding: 0 12px 10px; }
+.vitais-monitores .vm-checks { display: flex; flex-wrap: wrap; gap: 6px; }
 .vitais-grade-wrap { overflow-x: auto; margin: 4px 0 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff; }
 .vitais-grade-titulo { font-size: .78rem; font-weight: 700; color: var(--primary-darker); margin: 0 0 4px; }
 table.vitais-grade { border-collapse: collapse; font-size: .78rem; }
@@ -4809,10 +4817,9 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
       <div class="card-body">
         <div class="quick-actions">
           <span class="qa-label">Atalhos</span>
-          <button type="button" class="btn btn-sm" onclick="anestesia.quick.monitorizacaoPadrao()">⚡ Monitorização básica</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.quick.monitorizacaoCompleta()">⚡ Monitorização completa</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.quick.acessoBasico()">⚡ Acesso venoso periférico</button>
         </div>
+        <p style="font-size:.8rem;color:var(--text-soft);margin:0 0 8px">🩺 A seleção de <b>monitores</b> foi movida para junto dos <b>Sinais Vitais</b> (define quais parâmetros registrar).</p>
         <div class="grid">
           <div class="field col-12"><label>Acessos e dispositivos <small style="color:var(--text-mute);font-weight:400">— marque e detalhe (tamanho, local, calibre)</small></label>
             <div class="checks">
@@ -4832,25 +4839,6 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
             <div id="disp-detalhes" style="margin-top:8px; display:none;">
               <p style="font-size:.78rem;color:var(--text-soft);margin-bottom:6px">Detalhes (tamanho, local, calibre):</p>
               <div id="disp-detalhes-body" class="grid" style="gap:6px"></div>
-            </div>
-          </div>
-          <div class="field col-12"><label>Monitores <small style="color:var(--text-mute);font-weight:400">— ao marcar BIS/PVC/PIC/Glicemia, a coluna aparece na tabela de sinais vitais</small></label>
-            <div class="checks">
-              <label class="check"><input type="checkbox" name="monitores[]" value="Capnografia" onchange="anestesia.disp.sincronizarVitais()"><span>Capnografia (EtCO₂)</span></label>
-              <label class="check"><input type="checkbox" name="monitores[]" value="Analisador de gases" onchange="anestesia.disp.sincronizarVitais()"><span>Analisador de gases (CAM/agente)</span></label>
-              <label class="check"><input type="checkbox" name="monitores[]" value="Oximetria" onchange="anestesia.disp.sincronizarVitais()"><span>Oximetria (SpO₂)</span></label>
-              <label class="check"><input type="checkbox" name="monitores[]" value="ECG" onchange="anestesia.disp.sincronizarVitais()"><span>ECG</span></label>
-              <label class="check"><input type="checkbox" name="monitores[]" value="PNI" onchange="anestesia.disp.sincronizarVitais()"><span>PNI</span></label>
-              <label class="check"><input type="checkbox" name="monitores[]" value="PA invasiva" onchange="anestesia.disp.sincronizarVitais()"><span>PA invasiva</span></label>
-              <label class="check"><input type="checkbox" name="monitores[]" value="Temperatura" onchange="anestesia.disp.sincronizarVitais()"><span>Temperatura</span></label>
-              <label class="check"><input type="checkbox" name="monitores[]" value="BIS" onchange="anestesia.disp.sincronizarVitais()"><span>BIS</span></label>
-              <label class="check"><input type="checkbox" name="monitores[]" value="TOF" onchange="anestesia.disp.sincronizarVitais()"><span>TOF</span></label>
-              <label class="check"><input type="checkbox" name="monitores[]" value="PVC" onchange="anestesia.disp.sincronizarVitais()"><span>PVC</span></label>
-              <label class="check"><input type="checkbox" name="monitores[]" value="PIC" onchange="anestesia.disp.sincronizarVitais()"><span>PIC</span></label>
-              <label class="check"><input type="checkbox" name="monitores[]" value="Glicemia" onchange="anestesia.disp.sincronizarVitais()"><span>Glicemia capilar</span></label>
-              <label class="check"><input type="checkbox" name="monitores[]" value="Débito cardíaco" onchange="anestesia.disp.sincronizarVitais()"><span>Débito cardíaco</span></label>
-              <label class="check"><input type="checkbox" name="monitores[]" value="ScvO₂/SvO₂" onchange="anestesia.disp.sincronizarVitais()"><span>ScvO₂/SvO₂</span></label>
-              <label class="check"><input type="checkbox" name="monitores[]" value="FR" onchange="anestesia.disp.sincronizarVitais()"><span>Frequência respiratória</span></label>
             </div>
           </div>
           <div class="field col-12"><label>🧰 Equipamentos utilizados <small style="color:var(--text-mute);font-weight:400">— toque para marcar; cadastre os seus em Ajustes → Equipamentos</small></label>
@@ -5132,6 +5120,36 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
       </div>
       <div class="card-body">
         <p style="font-size:.82rem;color:var(--text-soft);margin:0 0 8px">Registre os sinais vitais pela <b>tabela por horário</b> (abaixo) ou <b>direto no gráfico</b> — os dois se atualizam juntos.</p>
+
+        <!-- MONITORES / PARÂMETROS A REGISTRAR (recolhível) -->
+        <details class="vitais-monitores" id="vitais-monitores" open>
+          <summary>🩺 Monitores — selecione os parâmetros a registrar</summary>
+          <div class="vm-body">
+            <div class="quick-actions" style="margin:6px 0">
+              <button type="button" class="btn btn-xs" onclick="anestesia.quick.monitorizacaoPadrao()">⚡ Básica</button>
+              <button type="button" class="btn btn-xs" onclick="anestesia.quick.monitorizacaoCompleta()">⚡ Completa</button>
+              <button type="button" class="btn btn-xs" onclick="anestesia.quick.limparMonitores()">Limpar</button>
+            </div>
+            <div class="checks vm-checks">
+              <label class="check"><input type="checkbox" name="monitores[]" value="PNI" onchange="anestesia.disp.sincronizarVitais()"><span>🩸 PNI</span></label>
+              <label class="check"><input type="checkbox" name="monitores[]" value="PA invasiva" onchange="anestesia.disp.sincronizarVitais()"><span>🩸 PA invasiva</span></label>
+              <label class="check"><input type="checkbox" name="monitores[]" value="ECG" onchange="anestesia.disp.sincronizarVitais()"><span>💓 ECG</span></label>
+              <label class="check"><input type="checkbox" name="monitores[]" value="Oximetria" onchange="anestesia.disp.sincronizarVitais()"><span>🫁 Oximetria (SpO₂)</span></label>
+              <label class="check"><input type="checkbox" name="monitores[]" value="Capnografia" onchange="anestesia.disp.sincronizarVitais()"><span>🌬️ Capnografia (EtCO₂)</span></label>
+              <label class="check"><input type="checkbox" name="monitores[]" value="FR" onchange="anestesia.disp.sincronizarVitais()"><span>🌬️ Frequência respiratória</span></label>
+              <label class="check"><input type="checkbox" name="monitores[]" value="Analisador de gases" onchange="anestesia.disp.sincronizarVitais()"><span>⚗️ Analisador de gases (CAM)</span></label>
+              <label class="check"><input type="checkbox" name="monitores[]" value="Temperatura" onchange="anestesia.disp.sincronizarVitais()"><span>🌡️ Temperatura</span></label>
+              <label class="check"><input type="checkbox" name="monitores[]" value="BIS" onchange="anestesia.disp.sincronizarVitais()"><span>🧠 BIS</span></label>
+              <label class="check"><input type="checkbox" name="monitores[]" value="TOF" onchange="anestesia.disp.sincronizarVitais()"><span>💪 TOF</span></label>
+              <label class="check"><input type="checkbox" name="monitores[]" value="Glicemia" onchange="anestesia.disp.sincronizarVitais()"><span>🍬 Glicemia capilar</span></label>
+              <label class="check"><input type="checkbox" name="monitores[]" value="PVC" onchange="anestesia.disp.sincronizarVitais()"><span>📉 PVC</span></label>
+              <label class="check"><input type="checkbox" name="monitores[]" value="PIC" onchange="anestesia.disp.sincronizarVitais()"><span>🧠 PIC</span></label>
+              <label class="check"><input type="checkbox" name="monitores[]" value="Débito cardíaco" onchange="anestesia.disp.sincronizarVitais()"><span>❤️ Débito cardíaco</span></label>
+              <label class="check"><input type="checkbox" name="monitores[]" value="ScvO₂/SvO₂" onchange="anestesia.disp.sincronizarVitais()"><span>🩸 ScvO₂/SvO₂</span></label>
+            </div>
+            <p style="font-size:.72rem;color:var(--text-mute);margin:6px 0 0">Só os parâmetros marcados aparecem na tabela e no gráfico para registro.</p>
+          </div>
+        </details>
         <!-- Tabela de dados (oculta): modelo interno lido/gravado pela grade e pelo gráfico -->
         <div style="display:none" aria-hidden="true">
         <div class="dyn-table-wrap">
@@ -20071,13 +20089,21 @@ const anestesia = {
       anestesia.quick.marcarSeNaoMarcado('monitores', ['ECG', 'Oximetria', 'PNI', 'Capnografia']);
       anestesia.quick.marcarSeNaoMarcado('dispositivos', ['Acesso venoso periférico']);
       anestesia.quick.preencherSeVazio('monitorizacao', 'ECG, SpO₂, PNI, EtCO₂');
+      try { anestesia.disp.sincronizarVitais(); } catch (e) {}
       toast('Monitorização básica adicionada'); markDirty();
     },
     monitorizacaoCompleta() {
       anestesia.quick.marcarSeNaoMarcado('monitores', ['ECG', 'Oximetria', 'PNI', 'Capnografia', 'Temperatura', 'BIS', 'TOF']);
       anestesia.quick.marcarSeNaoMarcado('dispositivos', ['Acesso venoso periférico']);
       anestesia.quick.preencherSeVazio('monitorizacao', 'ECG, SpO₂, PNI, EtCO₂, Temperatura, BIS, TOF');
+      try { anestesia.disp.sincronizarVitais(); } catch (e) {}
       toast('Monitorização completa adicionada'); markDirty();
+    },
+    limparMonitores() {
+      const f = document.getElementById('form-anestesia');
+      if (f) f.querySelectorAll('[name="monitores[]"]:checked').forEach(el => { el.checked = false; });
+      try { anestesia.disp.sincronizarVitais(); } catch (e) {}
+      markDirty();
     },
     acessoBasico() {
       anestesia.quick.marcarSeNaoMarcado('dispositivos', ['Acesso venoso periférico']);
