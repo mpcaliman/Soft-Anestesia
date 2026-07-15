@@ -1440,8 +1440,12 @@ body.chart-ampliado-body {
 }
 .vitals-chart-wrap.ampliado {
   position: fixed;
+  /* top/left/right/bottom explícitos + inset (fallback p/ navegadores antigos que
+     não suportam a forma abreviada `inset`) — garante tela cheia real */
+  top: 0; left: 0; right: 0; bottom: 0;
   inset: 0;
-  z-index: 250;
+  width: 100vw; height: 100vh; height: 100dvh;
+  z-index: 400;
   background: var(--surface);
   border-radius: 0;
   padding: 16px;
@@ -1452,6 +1456,12 @@ body.chart-ampliado-body {
   padding-top: max(16px, env(safe-area-inset-top));
   padding-bottom: max(16px, env(safe-area-inset-bottom));
 }
+/* Modo Editar (gráfico em tela cheia): esconde menu lateral e cabeçalho e
+   neutraliza filtros do .app, para nada sobrepor/atrapalhar o gráfico (desktop). */
+body.chart-ampliado-body .app { filter: none !important; }
+body.chart-ampliado-body .sidebar,
+body.chart-ampliado-body .app-header,
+body.chart-ampliado-body .sidebar-backdrop { display: none !important; }
 .vitals-chart-wrap.ampliado .legend {
   margin-bottom: 8px;
 }
