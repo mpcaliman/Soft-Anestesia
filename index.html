@@ -4720,7 +4720,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
                 <option>BiPAP / VNI</option>
               </select>
             </div>
-            <div class="field col-2"><label>FiO₂ (%)</label><input type="number" name="vent_esp_fio2" min="21" max="100"></div>
+            <div class="field col-2"><label>FiO₂ (%)</label><input type="number" name="vent_esp_fio2" min="21" max="100" oninput="anestesia.vent.sincronizarFiO2(this.value)"></div>
             <div class="field col-2"><label>Fluxo (L/min)</label><input type="number" name="vent_esp_fluxo" min="0" step="0.5"></div>
             <div class="field col-4"><label>Observações</label><input type="text" name="vent_esp_obs"></div>
           </div>
@@ -4746,9 +4746,9 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
             <div class="field col-2" data-vmodo="VCV SIMV PRVC VAPS"><label>VC (mL)</label><input type="number" name="vent_vc" min="0"></div>
             <div class="field col-2" data-vmodo="PCV BIPAP APRV SIMV"><label>P insp (cmH₂O)</label><input type="number" name="vent_pinsp" min="0"></div>
             <div class="field col-2" data-vmodo="PSV SIMV"><label>Press. suporte (cmH₂O)</label><input type="number" name="vent_ps" min="0"></div>
-            <div class="field col-2"><label>FR (irpm)</label><input type="number" name="vent_fr" min="0"></div>
+            <div class="field col-2"><label>FR prog. (irpm) <small style="color:var(--text-mute);font-weight:400">— do ventilador</small></label><input type="number" name="vent_fr" min="0" title="Frequência programada no ventilador (diferente da FR medida, que fica nos sinais vitais)."></div>
             <div class="field col-2"><label>PEEP (cmH₂O)</label><input type="number" name="vent_peep" min="0" step="0.5"></div>
-            <div class="field col-2"><label>FiO₂ (%)</label><input type="number" name="vent_fio2" min="21" max="100" oninput="anestesia.vent.previewGases()"></div>
+            <div class="field col-2"><label>FiO₂ (%)</label><input type="number" name="vent_fio2" min="21" max="100" oninput="anestesia.vent.sincronizarFiO2(this.value)"></div>
             <div class="field col-2"><label>P pico (cmH₂O)</label><input type="number" name="vent_ppico" min="0"></div>
             <div class="field col-2" data-vmodo="VCV SIMV PRVC VAPS"><label>P platô (cmH₂O)</label><input type="number" name="vent_pplato" min="0" oninput="anestesia.vent.calcDriving()"></div>
             <div class="field col-2" data-vmodo="VCV SIMV PRVC VAPS"><label>Driving P. (cmH₂O)</label><input type="number" name="vent_driving" readonly placeholder="auto"></div>
@@ -4757,7 +4757,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
             <div class="field col-2" data-vmodo="PSV SIMV PCV"><label>Trigger</label><input type="text" name="vent_trigger" placeholder="fluxo/pressão"></div>
             <div class="field col-2"><label>Relação I:E</label><input type="text" name="vent_ie" placeholder="1:2"></div>
             <div class="field col-2"><label>VM (L/min)</label><input type="number" name="vent_vm" step="0.1"></div>
-            <div class="field col-2"><label>EtCO₂ (mmHg)</label><input type="number" name="vent_etco2"></div>
+            <div class="field col-2"><label>EtCO₂ (mmHg) <small style="color:var(--text-mute);font-weight:400">— dos sinais vitais</small></label><input type="number" name="vent_etco2" readonly ondblclick="this.readOnly=false" title="Último EtCO₂ registrado nos sinais vitais. Dê 2 toques para editar manualmente." style="background:var(--surface-alt)"></div>
             <div class="field col-3"><label>Complacência (mL/cmH₂O)</label><input type="number" name="vent_compl" step="0.1"></div>
             <div class="field col-9"><label>Gasometria arterial</label><input type="text" name="vent_gaso" placeholder="pH / pCO₂ / pO₂ / HCO₃ / BE / Sat"></div>
           </div>
@@ -4766,7 +4766,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
           <div style="margin-top:12px;border:1px solid var(--border);border-radius:8px;padding:10px 12px;background:var(--surface-alt,#f8fafc)">
             <div style="font-weight:700;font-size:.86rem;color:var(--primary-darker);margin-bottom:6px">🌬️ Gases frescos <small style="font-weight:400;color:var(--text-mute)">— calcula O₂ e diluente a partir da FiO₂ e registra em Medicações</small></div>
             <div class="grid">
-              <div class="field col-2"><label>FiO₂ (%)</label><input type="number" name="vent_gas_fio2" min="21" max="100" placeholder="ex.: 50" oninput="anestesia.vent.previewGases()"></div>
+              <div class="field col-2"><label>FiO₂ (%)</label><input type="number" name="vent_gas_fio2" min="21" max="100" placeholder="ex.: 50" oninput="anestesia.vent.sincronizarFiO2(this.value)"></div>
               <div class="field col-2"><label>Fluxo total (L/min)</label><input type="number" name="vent_gas_total" min="0" step="0.1" placeholder="ex.: 2" oninput="anestesia.vent.previewGases()"></div>
               <div class="field col-3"><label>Diluente</label>
                 <select name="vent_gas_diluente" onchange="anestesia.vent.previewGases()">
@@ -15879,6 +15879,27 @@ const anestesia = {
       anestesia.vent._derivarTipo();
       markDirty();
     },
+    /* FiO₂ é uma só: mantém os três campos (espontânea, mecânica, gases frescos)
+       em sincronia — informa-se uma vez. */
+    sincronizarFiO2(val) {
+      const f = document.getElementById('form-anestesia'); if (!f) return;
+      ['vent_esp_fio2', 'vent_fio2', 'vent_gas_fio2'].forEach(n => {
+        const el = f.querySelector('[name="' + n + '"]');
+        if (el && el.value !== String(val)) el.value = val;
+      });
+      try { anestesia.vent.previewGases(); } catch (e) {}
+    },
+    /* EtCO₂ da ventilação = último EtCO₂ dos sinais vitais (evita dupla digitação).
+       Respeita edição manual (campo liberado por duplo-toque). */
+    _derivarEtco2() {
+      const f = document.getElementById('form-anestesia'); if (!f) return;
+      const el = f.querySelector('[name="vent_etco2"]');
+      if (!el || !el.readOnly) return;
+      const inputs = document.querySelectorAll('#vitais-body [name="vit_etco2[]"]');
+      for (let i = inputs.length - 1; i >= 0; i--) {
+        if (String(inputs[i].value).trim() !== '') { el.value = inputs[i].value; return; }
+      }
+    },
     /* Deriva o campo oculto ventilacao_tipo a partir do modo estruturado
        (evita redigitar o tipo de ventilação em dois lugares). */
     _derivarTipo() {
@@ -19335,6 +19356,7 @@ const anestesia = {
       if (ids.vitaisBody === 'vitais-body') {
         try { anestesia.vitais._renderGrade(); } catch (e) {}
         try { anestesia.vitais.autoRep.marcarAtividade(); } catch (e) {}
+        try { anestesia.vent._derivarEtco2(); } catch (e) {}
       }
       const canvas = document.getElementById(ids.canvas);
       if (!canvas) return;
