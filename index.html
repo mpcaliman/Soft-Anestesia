@@ -4405,13 +4405,13 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
             <div class="input-group"><input type="time" name="hora_inicio" oninput="anestesia.calc.duracao()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_inicio'); anestesia.calc.duracao();">agora</button></div>
           </div>
           <div class="field col-4"><label>Início da cirurgia/procedimento</label>
-            <div class="input-group"><input type="time" name="hora_cir_inicio" oninput="anestesia.calc.duracao()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_cir_inicio'); anestesia.calc.duracao();">agora</button></div>
+            <div class="input-group"><input type="time" name="hora_cir_inicio" oninput="anestesia.calc.duracao()" onchange="anestesia.eventos.sincronizarHorario('Incisão cirúrgica', this.value)"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_cir_inicio'); anestesia.calc.duracao(); anestesia.eventos.sincronizarHorario('Incisão cirúrgica', this.previousElementSibling.value);">agora</button></div>
           </div>
         </div>
         <div class="hora-grupo-titulo">⏹️ Horários de fim</div>
         <div class="grid">
           <div class="field col-4"><label>Fim da cirurgia/procedimento</label>
-            <div class="input-group"><input type="time" name="hora_cir_fim" oninput="anestesia.calc.duracao()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_cir_fim'); anestesia.calc.duracao();">agora</button></div>
+            <div class="input-group"><input type="time" name="hora_cir_fim" oninput="anestesia.calc.duracao()" onchange="anestesia.eventos.sincronizarHorario('Fim da cirurgia', this.value)"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_cir_fim'); anestesia.calc.duracao(); anestesia.eventos.sincronizarHorario('Fim da cirurgia', this.previousElementSibling.value);">agora</button></div>
           </div>
           <div class="field col-4"><label>Fim da anestesia</label>
             <div class="input-group"><input type="time" name="hora_fim" oninput="anestesia.calc.duracao()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_fim'); anestesia.calc.duracao();">agora</button></div>
@@ -4666,7 +4666,23 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
               </div>
             </div>
           </div>
-          <input type="hidden" name="via_aerea_uso">
+          <div class="grid">
+            <div class="field col-4"><label>Via aérea utilizada</label>
+              <select name="via_aerea_uso">
+                <option value="">—</option>
+                <option>Ventilação espontânea (sem dispositivo)</option>
+                <option>Cânula/cateter nasal de O₂</option>
+                <option>Máscara facial</option>
+                <option>Máscara laríngea</option>
+                <option>Intubação orotraqueal</option>
+                <option>Intubação nasotraqueal</option>
+                <option>Traqueostomia</option>
+                <option>Outro</option>
+              </select>
+            </div>
+          </div>
+          <!-- Derivados automaticamente (não redigitar): tipo de ventilação vem do
+               card Ventilação; monitorização vem dos monitores selecionados. -->
           <input type="hidden" name="ventilacao_tipo">
           <input type="hidden" name="monitorizacao">
         </div>
@@ -15680,7 +15696,7 @@ const PRESETS_MED = {
 /* Anestésicos locais e adjuvantes — usados como sugestões em bloqueio regional */
 const PRESETS_AL = ['bupi_hiperbarica','bupi_isobarica','bupi_75','ropi_05','ropi_075','ropi_02','levobupi','lido_2','lido_2_vaso','morfina','morfina_peri','sufentanil','clonidina','dexmedetomidina'];
 const SET_MED_COMUM = ['midazolam','fentanil','propofol','rocuronio','cefazolina','dexametasona','ondansetrona','dipirona'];
-const UNIDADES = ['mg', 'mcg', 'g', 'mL', 'L', 'L/min', 'UI', '%', 'cp', 'ng/dL', 'mcg/kg/min', 'mcg/min', 'mg/h', 'mcg/kg/h', 'mL/h', 'ng/mL', 'CAM'];
+const UNIDADES = ['mg', 'mcg', 'g', 'mL', 'L', 'L/min', 'UI', '%', 'cp', 'mg/kg', 'mcg/kg', 'ng/dL', 'mcg/kg/min', 'mcg/min', 'mg/h', 'mcg/kg/h', 'mL/h', 'ng/mL', 'CAM'];
 const VIAS = ['EV', 'IM', 'SC', 'VO', 'SL', 'IT', 'Peridural', 'Subaracnóideo', 'Tópica', 'Inalatória'];
 
 const anestesia = {
@@ -15860,7 +15876,21 @@ const anestesia = {
       if (espEl) espEl.style.display = r === 'espontanea' ? 'block' : 'none';
       if (mecEl) mecEl.style.display = r === 'mecanica' ? 'block' : 'none';
       if (r === 'mecanica') { try { anestesia.vent.mostrarCamposModo(); } catch (e) {} }
+      anestesia.vent._derivarTipo();
       markDirty();
+    },
+    /* Deriva o campo oculto ventilacao_tipo a partir do modo estruturado
+       (evita redigitar o tipo de ventilação em dois lugares). */
+    _derivarTipo() {
+      const f = document.getElementById('form-anestesia'); if (!f) return;
+      const geral = f.querySelector('[name="vent_modo_geral"]:checked')?.value;
+      let txt = '';
+      if (geral === 'espontanea') txt = 'Espontânea';
+      else if (geral === 'mecanica') {
+        const modo = f.querySelector('[name="vent_modo"]')?.value || '';
+        txt = 'Mecânica' + (modo ? ' — ' + modo : '');
+      } else if (geral === 'naa') txt = 'Não aplicável';
+      const h = f.querySelector('[name="ventilacao_tipo"]'); if (h) h.value = txt;
     },
     calcDriving() {
       const f = document.getElementById('form-anestesia');
@@ -15883,6 +15913,7 @@ const anestesia = {
         const modos = el.getAttribute('data-vmodo').toUpperCase().split(/\s+/);
         el.style.display = modos.indexOf(key) >= 0 ? '' : 'none';
       });
+      anestesia.vent._derivarTipo();
     },
     /* Divide a FiO₂ em fluxos de O₂ e do diluente (Ar 21% ou N₂O 0%) */
     _gasesCalc() {
@@ -16401,6 +16432,26 @@ const anestesia = {
       }
       return '';
     },
+    /* Sincroniza um horário da ficha (ex.: início/fim da cirurgia) com o evento
+       correspondente: cria o evento se não existir, ou atualiza a hora se existir.
+       Evita digitar o mesmo horário no campo e no evento. */
+    sincronizarHorario(tipoEvt, hora) {
+      if (!hora) return;
+      anestesia.graficoUI._contexto = 'anestesia';
+      const body = document.getElementById(anestesia.graficoUI._ctxIds().eventosBody);
+      if (!body) return;
+      let alvo = null;
+      body.querySelectorAll('tr').forEach(row => {
+        if ((row.querySelector('[name="evt_tipo[]"]') || {}).value === tipoEvt) alvo = row;
+      });
+      if (alvo) {
+        const h = alvo.querySelector('[name="evt_hora[]"]');
+        if (h && h.value !== hora) { h.value = hora; try { anestesia.vitais.atualizarGrafico(); } catch (e) {} }
+      } else {
+        anestesia.eventos.add({ tipo: tipoEvt, hora });
+      }
+      try { markDirty(); } catch (e) {}
+    },
     /* Existe evento desse tipo na tabela? */
     existeEvento(tipo) {
       const body = document.getElementById(anestesia.graficoUI._ctxIds().eventosBody);
@@ -16601,7 +16652,15 @@ const anestesia = {
        parâmetros habilitados pelos monitores selecionados. */
     sincronizarVitais() {
       try { anestesia.vitais.aplicarMonitores(); } catch (e) {}
+      anestesia.disp._derivarMonitorizacao();
       markDirty();
+    },
+    /* Deriva o campo oculto monitorizacao a partir dos monitores marcados
+       (evita redigitar a monitorização em texto livre). */
+    _derivarMonitorizacao() {
+      const f = document.getElementById('form-anestesia'); if (!f) return;
+      const mon = Array.from(f.querySelectorAll('[name="monitores[]"]:checked')).map(el => el.value);
+      const h = f.querySelector('[name="monitorizacao"]'); if (h) h.value = mon.join(', ');
     },
     _colIdx(k) {
       /* Mapeia coluna por nome: hora=1, pas=2, pad=3, pam=4, fc=5, ritmo=6, spo2=7, etco2=8, fr=9, temp=10, bis=11, tof=12, glic=13, pvc=14, pic=15, dc=16, scvo2=17, diurese=18, obs=19, rm=20 */
@@ -18880,6 +18939,8 @@ const anestesia = {
       try { anestesia.vitais._renderGrade(); } catch (e) {}
       /* 3) Toolbar do gráfico — mostra/oculta botões por parâmetro ativo */
       try { anestesia.graficoUI.atualizarMonitoresToolbar(); } catch (e) {}
+      /* 4) Mantém o campo derivado "monitorizacao" em sincronia */
+      try { anestesia.disp._derivarMonitorizacao(); } catch (e) {}
     },
 
     /* Parâmetros editáveis exibidos na grade transposta (na ordem de exibição) */
@@ -20116,14 +20177,12 @@ const anestesia = {
     monitorizacaoPadrao() {
       anestesia.quick.marcarSeNaoMarcado('monitores', ['ECG', 'Oximetria', 'PNI', 'Capnografia']);
       anestesia.quick.marcarSeNaoMarcado('dispositivos', ['Acesso venoso periférico']);
-      anestesia.quick.preencherSeVazio('monitorizacao', 'ECG, SpO₂, PNI, EtCO₂');
       try { anestesia.disp.sincronizarVitais(); } catch (e) {}
       toast('Monitorização básica adicionada'); markDirty();
     },
     monitorizacaoCompleta() {
       anestesia.quick.marcarSeNaoMarcado('monitores', ['ECG', 'Oximetria', 'PNI', 'Capnografia', 'Temperatura', 'BIS', 'TOF']);
       anestesia.quick.marcarSeNaoMarcado('dispositivos', ['Acesso venoso periférico']);
-      anestesia.quick.preencherSeVazio('monitorizacao', 'ECG, SpO₂, PNI, EtCO₂, Temperatura, BIS, TOF');
       try { anestesia.disp.sincronizarVitais(); } catch (e) {}
       toast('Monitorização completa adicionada'); markDirty();
     },
@@ -20146,19 +20205,49 @@ const anestesia = {
       el.dispatchEvent(new Event('input'));
       markDirty();
     },
+    /* Aplica o texto da técnica (só a conduta) E lança as drogas na TABELA de
+       Medicações (fonte única), evitando redigitar dose no texto e na tabela. */
+    _appendTecnicaComMeds(txt, meds) {
+      anestesia.quick._appendTecnica(txt);
+      (meds || []).forEach(m => {
+        const existe = Array.from(document.querySelectorAll('#medicacoes-body [name="med_nome[]"]'))
+          .some(el => (el.value || '').trim().toLowerCase() === m.nome.toLowerCase());
+        if (!existe) anestesia.meds.add(m);
+      });
+      try { toast('Conduta preenchida e medicações do modelo lançadas na tabela.'); } catch (e) {}
+      markDirty();
+    },
     tplIndGeral() {
-      anestesia.quick._appendTecnica(
-        'Indução: pré-oxigenação 100%, fentanil 3 mcg/kg, propofol 2 mg/kg, rocurônio 0,6 mg/kg. Intubação orotraqueal sob laringoscopia direta. Manutenção: sevoflurano em mistura O₂/ar (CAM ajustada conforme BIS), fentanil em bolus conforme necessidade. Reversão: sugamadex / neostigmina + atropina.'
+      anestesia.quick._appendTecnicaComMeds(
+        'Anestesia geral balanceada: pré-oxigenação, indução venosa e intubação orotraqueal sob laringoscopia direta; manutenção inalatória (sevoflurano) titulada pelo BIS; reversão do bloqueio ao término. Doses na tabela de Medicações.',
+        [
+          { nome: 'Fentanil', dose: '3', unidade: 'mcg/kg', via: 'EV', tipo: 'Bolus' },
+          { nome: 'Propofol', dose: '2', unidade: 'mg/kg', via: 'EV', tipo: 'Bolus' },
+          { nome: 'Rocurônio', dose: '0,6', unidade: 'mg/kg', via: 'EV', tipo: 'Bolus' },
+          { nome: 'Sevoflurano', unidade: '%', via: 'Inalatória', tipo: 'Inalatório' }
+        ]
       );
     },
     tplTIVA() {
-      anestesia.quick._appendTecnica(
-        'Indução: fentanil 3 mcg/kg, propofol em alvo plasmático (Marsh 4-6 mcg/mL), rocurônio 0,6 mg/kg. Manutenção em TIVA: propofol (Marsh 3-5 mcg/mL) + remifentanil 0,1-0,2 mcg/kg/min, ambos em BIS. Reversão: sugamadex.'
+      anestesia.quick._appendTecnicaComMeds(
+        'Anestesia venosa total (TIVA): indução venosa e IOT; manutenção com propofol e remifentanil em BIC, titulados pelo BIS; reversão do bloqueio. Alvos/doses na tabela de Medicações.',
+        [
+          { nome: 'Fentanil', dose: '3', unidade: 'mcg/kg', via: 'EV', tipo: 'Bolus' },
+          { nome: 'Propofol (TIVA)', via: 'EV', tipo: 'Infusão contínua (bomba)', obs: 'Alvo Marsh 3–5 mcg/mL' },
+          { nome: 'Remifentanil', dose: '0,15', unidade: 'mcg/kg/min', via: 'EV', tipo: 'Infusão contínua (bomba)' },
+          { nome: 'Rocurônio', dose: '0,6', unidade: 'mg/kg', via: 'EV', tipo: 'Bolus' }
+        ]
       );
     },
     tplRaqui() {
-      anestesia.quick._appendTecnica(
-        'Bloqueio subaracnóideo em L3-L4, paciente sentado, agulha Whitacre 27G, punção única, refluxo de líquor cristalino. Bupivacaína 0,5% hiperbárica 15 mg + morfina 80 mcg. Sedação venosa: midazolam 1-2 mg + fentanil 50-100 mcg conforme demanda.'
+      anestesia.quick._appendTecnicaComMeds(
+        'Bloqueio subaracnóideo em L3-L4, paciente sentado, agulha Whitacre 27G, punção única, refluxo de líquor cristalino; sedação venosa conforme demanda. Fármacos e doses na tabela de Medicações.',
+        [
+          { nome: 'Bupivacaína 0,5% hiperbárica', dose: '15', unidade: 'mg', via: 'Subaracnóideo', tipo: 'Bolus' },
+          { nome: 'Morfina', dose: '80', unidade: 'mcg', via: 'Subaracnóideo', tipo: 'Bolus' },
+          { nome: 'Midazolam', dose: '', unidade: 'mg', via: 'EV', tipo: 'Bolus', obs: 'Sedação, conforme demanda' },
+          { nome: 'Fentanil', dose: '', unidade: 'mcg', via: 'EV', tipo: 'Bolus', obs: 'Sedação, conforme demanda' }
+        ]
       );
     },
     tecnicaPadrao() {
@@ -20167,21 +20256,18 @@ const anestesia = {
       anestesia.quick.preencherSeVazio('inducao', 'Midazolam 2 mg + fentanil 3 mcg/kg + propofol 2 mg/kg + rocurônio 0,6 mg/kg');
       anestesia.quick.preencherSeVazio('manutencao', 'Sevoflurano 1 CAM em FiO₂ 50% + remifentanil em BIC');
       anestesia.quick.preencherSeVazio('via_aerea_uso', 'Intubação orotraqueal');
-      anestesia.quick.preencherSeVazio('ventilacao_tipo', 'Controlada (VCV)');
       toast('Técnica geral balanceada preenchida'); markDirty();
     },
     tecnicaRaqui() {
       anestesia.quick.marcarSeNaoMarcado('tipo', ['Raquianestesia']);
       anestesia.quick.preencherSeVazio('tecnica_descricao', 'Raquianestesia em L3-L4, paciente sentado, técnica asséptica, agulha Quincke 27G, refluxo de líquor cristalino.');
-      anestesia.quick.preencherSeVazio('via_aerea_uso', 'Cateter nasal');
-      anestesia.quick.preencherSeVazio('ventilacao_tipo', 'Espontânea');
+      anestesia.quick.preencherSeVazio('via_aerea_uso', 'Cânula/cateter nasal de O₂');
       toast('Raquianestesia padrão preenchida'); markDirty();
     },
     tecnicaSedacao() {
       anestesia.quick.marcarSeNaoMarcado('tipo', ['Sedação']);
       anestesia.quick.preencherSeVazio('tecnica_descricao', 'Sedação consciente com manutenção da ventilação espontânea.');
-      anestesia.quick.preencherSeVazio('via_aerea_uso', 'Cateter nasal');
-      anestesia.quick.preencherSeVazio('ventilacao_tipo', 'Espontânea');
+      anestesia.quick.preencherSeVazio('via_aerea_uso', 'Cânula/cateter nasal de O₂');
       toast('Sedação padrão preenchida'); markDirty();
     },
     semIntercorrencias() {
