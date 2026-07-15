@@ -4500,15 +4500,15 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
         <div class="grid">
           <div class="field col-12"><label>Tipo de anestesia</label>
             <div class="checks">
-              <label class="check"><input type="checkbox" name="tipo[]" value="Anestesia geral"><span>Anestesia geral</span></label>
-              <label class="check"><input type="checkbox" name="tipo[]" value="Sedação"><span>Sedação</span></label>
-              <label class="check"><input type="checkbox" name="tipo[]" value="Raquianestesia"><span>Raquianestesia</span></label>
-              <label class="check"><input type="checkbox" name="tipo[]" value="Peridural"><span>Peridural</span></label>
-              <label class="check"><input type="checkbox" name="tipo[]" value="Bloqueio periférico"><span>Bloqueio periférico</span></label>
-              <label class="check"><input type="checkbox" name="tipo[]" value="Bloqueio regional"><span>Bloqueio regional</span></label>
-              <label class="check"><input type="checkbox" name="tipo[]" value="Local assistida"><span>Local assistida</span></label>
-              <label class="check"><input type="checkbox" name="tipo[]" value="Monitoração e vigilância clínica"><span>Monitoração e vigilância clínica</span></label>
-              <label class="check"><input type="checkbox" name="tipo[]" value="Outra"><span>Outra</span></label>
+              <label class="check"><input type="checkbox" name="tipo[]" onchange="anestesia.eventos.aoSelecionarTipo(this)" value="Anestesia geral"><span>Anestesia geral</span></label>
+              <label class="check"><input type="checkbox" name="tipo[]" onchange="anestesia.eventos.aoSelecionarTipo(this)" value="Sedação"><span>Sedação</span></label>
+              <label class="check"><input type="checkbox" name="tipo[]" onchange="anestesia.eventos.aoSelecionarTipo(this)" value="Raquianestesia"><span>Raquianestesia</span></label>
+              <label class="check"><input type="checkbox" name="tipo[]" onchange="anestesia.eventos.aoSelecionarTipo(this)" value="Peridural"><span>Peridural</span></label>
+              <label class="check"><input type="checkbox" name="tipo[]" onchange="anestesia.eventos.aoSelecionarTipo(this)" value="Bloqueio periférico"><span>Bloqueio periférico</span></label>
+              <label class="check"><input type="checkbox" name="tipo[]" onchange="anestesia.eventos.aoSelecionarTipo(this)" value="Bloqueio regional"><span>Bloqueio regional</span></label>
+              <label class="check"><input type="checkbox" name="tipo[]" onchange="anestesia.eventos.aoSelecionarTipo(this)" value="Local assistida"><span>Local assistida</span></label>
+              <label class="check"><input type="checkbox" name="tipo[]" onchange="anestesia.eventos.aoSelecionarTipo(this)" value="Monitoração e vigilância clínica"><span>Monitoração e vigilância clínica</span></label>
+              <label class="check"><input type="checkbox" name="tipo[]" onchange="anestesia.eventos.aoSelecionarTipo(this)" value="Outra"><span>Outra</span></label>
             </div>
           </div>
           <div class="field col-12"><label>Técnica realizada <small style="color:var(--text-mute);font-weight:400">— descreva indução, manutenção e detalhes</small></label>
@@ -16401,6 +16401,32 @@ const anestesia = {
       }
       return '';
     },
+    /* Existe evento desse tipo na tabela? */
+    existeEvento(tipo) {
+      const body = document.getElementById(anestesia.graficoUI._ctxIds().eventosBody);
+      if (!body) return false;
+      return Array.from(body.querySelectorAll('[name="evt_tipo[]"]')).some(el => el.value === tipo);
+    },
+    /* Ao marcar um TIPO de anestesia, cria o EVENTO correspondente (com a descrição
+       técnica), evitando redigitar a mesma coisa em dois lugares. Os detalhes ficam
+       só no evento. */
+    TIPO_EVENTO: {
+      'Anestesia geral': 'Indução',
+      'Raquianestesia': 'Raquianestesia',
+      'Peridural': 'Peridural',
+      'Bloqueio periférico': 'Bloqueio periférico',
+      'Bloqueio regional': 'Bloqueio periférico'
+    },
+    aoSelecionarTipo(cb) {
+      if (!cb || !cb.checked) return;
+      const tipoEvt = anestesia.eventos.TIPO_EVENTO[cb.value];
+      if (!tipoEvt) return;
+      anestesia.graficoUI._contexto = 'anestesia';
+      if (anestesia.eventos.existeEvento(tipoEvt)) return; /* não duplica */
+      const desc = anestesia.eventos.DESCRICOES[tipoEvt] || '';
+      anestesia.eventos.add({ tipo: tipoEvt, hora: utils.horaAtual(), obs: desc });
+      try { toast('Evento "' + tipoEvt + '" adicionado — complete os detalhes em Eventos cronológicos.'); } catch (e) {}
+    },
     /* Início do halogenado: marca o evento e abre a calculadora (agente/fluxo/%) */
     iniciarHalogenado() {
       anestesia.eventos.add({ tipo: 'Início halogenado', hora: utils.horaAtual() });
@@ -20079,6 +20105,8 @@ const anestesia = {
       valores.forEach(val => {
         const el = f.querySelector(`[name="${name}[]"][value="${val}"]`);
         if (el && !el.checked) el.checked = true;
+        /* técnicas: cria o evento correspondente (mesma lógica da seleção manual) */
+        if (el && name === 'tipo') { try { anestesia.eventos.aoSelecionarTipo(el); } catch (e) {} }
       });
     },
     preencherSeVazio(name, valor) {
