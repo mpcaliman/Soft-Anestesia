@@ -4666,7 +4666,23 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
               </div>
             </div>
           </div>
-          <input type="hidden" name="via_aerea_uso">
+          <div class="grid">
+            <div class="field col-4"><label>Via aérea utilizada</label>
+              <select name="via_aerea_uso">
+                <option value="">—</option>
+                <option>Ventilação espontânea (sem dispositivo)</option>
+                <option>Cânula/cateter nasal de O₂</option>
+                <option>Máscara facial</option>
+                <option>Máscara laríngea</option>
+                <option>Intubação orotraqueal</option>
+                <option>Intubação nasotraqueal</option>
+                <option>Traqueostomia</option>
+                <option>Outro</option>
+              </select>
+            </div>
+          </div>
+          <!-- Derivados automaticamente (não redigitar): tipo de ventilação vem do
+               card Ventilação; monitorização vem dos monitores selecionados. -->
           <input type="hidden" name="ventilacao_tipo">
           <input type="hidden" name="monitorizacao">
         </div>
@@ -15860,7 +15876,21 @@ const anestesia = {
       if (espEl) espEl.style.display = r === 'espontanea' ? 'block' : 'none';
       if (mecEl) mecEl.style.display = r === 'mecanica' ? 'block' : 'none';
       if (r === 'mecanica') { try { anestesia.vent.mostrarCamposModo(); } catch (e) {} }
+      anestesia.vent._derivarTipo();
       markDirty();
+    },
+    /* Deriva o campo oculto ventilacao_tipo a partir do modo estruturado
+       (evita redigitar o tipo de ventilação em dois lugares). */
+    _derivarTipo() {
+      const f = document.getElementById('form-anestesia'); if (!f) return;
+      const geral = f.querySelector('[name="vent_modo_geral"]:checked')?.value;
+      let txt = '';
+      if (geral === 'espontanea') txt = 'Espontânea';
+      else if (geral === 'mecanica') {
+        const modo = f.querySelector('[name="vent_modo"]')?.value || '';
+        txt = 'Mecânica' + (modo ? ' — ' + modo : '');
+      } else if (geral === 'naa') txt = 'Não aplicável';
+      const h = f.querySelector('[name="ventilacao_tipo"]'); if (h) h.value = txt;
     },
     calcDriving() {
       const f = document.getElementById('form-anestesia');
@@ -15883,6 +15913,7 @@ const anestesia = {
         const modos = el.getAttribute('data-vmodo').toUpperCase().split(/\s+/);
         el.style.display = modos.indexOf(key) >= 0 ? '' : 'none';
       });
+      anestesia.vent._derivarTipo();
     },
     /* Divide a FiO₂ em fluxos de O₂ e do diluente (Ar 21% ou N₂O 0%) */
     _gasesCalc() {
@@ -16601,7 +16632,15 @@ const anestesia = {
        parâmetros habilitados pelos monitores selecionados. */
     sincronizarVitais() {
       try { anestesia.vitais.aplicarMonitores(); } catch (e) {}
+      anestesia.disp._derivarMonitorizacao();
       markDirty();
+    },
+    /* Deriva o campo oculto monitorizacao a partir dos monitores marcados
+       (evita redigitar a monitorização em texto livre). */
+    _derivarMonitorizacao() {
+      const f = document.getElementById('form-anestesia'); if (!f) return;
+      const mon = Array.from(f.querySelectorAll('[name="monitores[]"]:checked')).map(el => el.value);
+      const h = f.querySelector('[name="monitorizacao"]'); if (h) h.value = mon.join(', ');
     },
     _colIdx(k) {
       /* Mapeia coluna por nome: hora=1, pas=2, pad=3, pam=4, fc=5, ritmo=6, spo2=7, etco2=8, fr=9, temp=10, bis=11, tof=12, glic=13, pvc=14, pic=15, dc=16, scvo2=17, diurese=18, obs=19, rm=20 */
@@ -18880,6 +18919,8 @@ const anestesia = {
       try { anestesia.vitais._renderGrade(); } catch (e) {}
       /* 3) Toolbar do gráfico — mostra/oculta botões por parâmetro ativo */
       try { anestesia.graficoUI.atualizarMonitoresToolbar(); } catch (e) {}
+      /* 4) Mantém o campo derivado "monitorizacao" em sincronia */
+      try { anestesia.disp._derivarMonitorizacao(); } catch (e) {}
     },
 
     /* Parâmetros editáveis exibidos na grade transposta (na ordem de exibição) */
@@ -20116,14 +20157,12 @@ const anestesia = {
     monitorizacaoPadrao() {
       anestesia.quick.marcarSeNaoMarcado('monitores', ['ECG', 'Oximetria', 'PNI', 'Capnografia']);
       anestesia.quick.marcarSeNaoMarcado('dispositivos', ['Acesso venoso periférico']);
-      anestesia.quick.preencherSeVazio('monitorizacao', 'ECG, SpO₂, PNI, EtCO₂');
       try { anestesia.disp.sincronizarVitais(); } catch (e) {}
       toast('Monitorização básica adicionada'); markDirty();
     },
     monitorizacaoCompleta() {
       anestesia.quick.marcarSeNaoMarcado('monitores', ['ECG', 'Oximetria', 'PNI', 'Capnografia', 'Temperatura', 'BIS', 'TOF']);
       anestesia.quick.marcarSeNaoMarcado('dispositivos', ['Acesso venoso periférico']);
-      anestesia.quick.preencherSeVazio('monitorizacao', 'ECG, SpO₂, PNI, EtCO₂, Temperatura, BIS, TOF');
       try { anestesia.disp.sincronizarVitais(); } catch (e) {}
       toast('Monitorização completa adicionada'); markDirty();
     },
@@ -20167,21 +20206,18 @@ const anestesia = {
       anestesia.quick.preencherSeVazio('inducao', 'Midazolam 2 mg + fentanil 3 mcg/kg + propofol 2 mg/kg + rocurônio 0,6 mg/kg');
       anestesia.quick.preencherSeVazio('manutencao', 'Sevoflurano 1 CAM em FiO₂ 50% + remifentanil em BIC');
       anestesia.quick.preencherSeVazio('via_aerea_uso', 'Intubação orotraqueal');
-      anestesia.quick.preencherSeVazio('ventilacao_tipo', 'Controlada (VCV)');
       toast('Técnica geral balanceada preenchida'); markDirty();
     },
     tecnicaRaqui() {
       anestesia.quick.marcarSeNaoMarcado('tipo', ['Raquianestesia']);
       anestesia.quick.preencherSeVazio('tecnica_descricao', 'Raquianestesia em L3-L4, paciente sentado, técnica asséptica, agulha Quincke 27G, refluxo de líquor cristalino.');
-      anestesia.quick.preencherSeVazio('via_aerea_uso', 'Cateter nasal');
-      anestesia.quick.preencherSeVazio('ventilacao_tipo', 'Espontânea');
+      anestesia.quick.preencherSeVazio('via_aerea_uso', 'Cânula/cateter nasal de O₂');
       toast('Raquianestesia padrão preenchida'); markDirty();
     },
     tecnicaSedacao() {
       anestesia.quick.marcarSeNaoMarcado('tipo', ['Sedação']);
       anestesia.quick.preencherSeVazio('tecnica_descricao', 'Sedação consciente com manutenção da ventilação espontânea.');
-      anestesia.quick.preencherSeVazio('via_aerea_uso', 'Cateter nasal');
-      anestesia.quick.preencherSeVazio('ventilacao_tipo', 'Espontânea');
+      anestesia.quick.preencherSeVazio('via_aerea_uso', 'Cânula/cateter nasal de O₂');
       toast('Sedação padrão preenchida'); markDirty();
     },
     semIntercorrencias() {
