@@ -15696,7 +15696,7 @@ const PRESETS_MED = {
 /* Anestésicos locais e adjuvantes — usados como sugestões em bloqueio regional */
 const PRESETS_AL = ['bupi_hiperbarica','bupi_isobarica','bupi_75','ropi_05','ropi_075','ropi_02','levobupi','lido_2','lido_2_vaso','morfina','morfina_peri','sufentanil','clonidina','dexmedetomidina'];
 const SET_MED_COMUM = ['midazolam','fentanil','propofol','rocuronio','cefazolina','dexametasona','ondansetrona','dipirona'];
-const UNIDADES = ['mg', 'mcg', 'g', 'mL', 'L', 'L/min', 'UI', '%', 'cp', 'ng/dL', 'mcg/kg/min', 'mcg/min', 'mg/h', 'mcg/kg/h', 'mL/h', 'ng/mL', 'CAM'];
+const UNIDADES = ['mg', 'mcg', 'g', 'mL', 'L', 'L/min', 'UI', '%', 'cp', 'mg/kg', 'mcg/kg', 'ng/dL', 'mcg/kg/min', 'mcg/min', 'mg/h', 'mcg/kg/h', 'mL/h', 'ng/mL', 'CAM'];
 const VIAS = ['EV', 'IM', 'SC', 'VO', 'SL', 'IT', 'Peridural', 'Subaracnóideo', 'Tópica', 'Inalatória'];
 
 const anestesia = {
@@ -20185,19 +20185,49 @@ const anestesia = {
       el.dispatchEvent(new Event('input'));
       markDirty();
     },
+    /* Aplica o texto da técnica (só a conduta) E lança as drogas na TABELA de
+       Medicações (fonte única), evitando redigitar dose no texto e na tabela. */
+    _appendTecnicaComMeds(txt, meds) {
+      anestesia.quick._appendTecnica(txt);
+      (meds || []).forEach(m => {
+        const existe = Array.from(document.querySelectorAll('#medicacoes-body [name="med_nome[]"]'))
+          .some(el => (el.value || '').trim().toLowerCase() === m.nome.toLowerCase());
+        if (!existe) anestesia.meds.add(m);
+      });
+      try { toast('Conduta preenchida e medicações do modelo lançadas na tabela.'); } catch (e) {}
+      markDirty();
+    },
     tplIndGeral() {
-      anestesia.quick._appendTecnica(
-        'Indução: pré-oxigenação 100%, fentanil 3 mcg/kg, propofol 2 mg/kg, rocurônio 0,6 mg/kg. Intubação orotraqueal sob laringoscopia direta. Manutenção: sevoflurano em mistura O₂/ar (CAM ajustada conforme BIS), fentanil em bolus conforme necessidade. Reversão: sugamadex / neostigmina + atropina.'
+      anestesia.quick._appendTecnicaComMeds(
+        'Anestesia geral balanceada: pré-oxigenação, indução venosa e intubação orotraqueal sob laringoscopia direta; manutenção inalatória (sevoflurano) titulada pelo BIS; reversão do bloqueio ao término. Doses na tabela de Medicações.',
+        [
+          { nome: 'Fentanil', dose: '3', unidade: 'mcg/kg', via: 'EV', tipo: 'Bolus' },
+          { nome: 'Propofol', dose: '2', unidade: 'mg/kg', via: 'EV', tipo: 'Bolus' },
+          { nome: 'Rocurônio', dose: '0,6', unidade: 'mg/kg', via: 'EV', tipo: 'Bolus' },
+          { nome: 'Sevoflurano', unidade: '%', via: 'Inalatória', tipo: 'Inalatório' }
+        ]
       );
     },
     tplTIVA() {
-      anestesia.quick._appendTecnica(
-        'Indução: fentanil 3 mcg/kg, propofol em alvo plasmático (Marsh 4-6 mcg/mL), rocurônio 0,6 mg/kg. Manutenção em TIVA: propofol (Marsh 3-5 mcg/mL) + remifentanil 0,1-0,2 mcg/kg/min, ambos em BIS. Reversão: sugamadex.'
+      anestesia.quick._appendTecnicaComMeds(
+        'Anestesia venosa total (TIVA): indução venosa e IOT; manutenção com propofol e remifentanil em BIC, titulados pelo BIS; reversão do bloqueio. Alvos/doses na tabela de Medicações.',
+        [
+          { nome: 'Fentanil', dose: '3', unidade: 'mcg/kg', via: 'EV', tipo: 'Bolus' },
+          { nome: 'Propofol (TIVA)', via: 'EV', tipo: 'Infusão contínua (bomba)', obs: 'Alvo Marsh 3–5 mcg/mL' },
+          { nome: 'Remifentanil', dose: '0,15', unidade: 'mcg/kg/min', via: 'EV', tipo: 'Infusão contínua (bomba)' },
+          { nome: 'Rocurônio', dose: '0,6', unidade: 'mg/kg', via: 'EV', tipo: 'Bolus' }
+        ]
       );
     },
     tplRaqui() {
-      anestesia.quick._appendTecnica(
-        'Bloqueio subaracnóideo em L3-L4, paciente sentado, agulha Whitacre 27G, punção única, refluxo de líquor cristalino. Bupivacaína 0,5% hiperbárica 15 mg + morfina 80 mcg. Sedação venosa: midazolam 1-2 mg + fentanil 50-100 mcg conforme demanda.'
+      anestesia.quick._appendTecnicaComMeds(
+        'Bloqueio subaracnóideo em L3-L4, paciente sentado, agulha Whitacre 27G, punção única, refluxo de líquor cristalino; sedação venosa conforme demanda. Fármacos e doses na tabela de Medicações.',
+        [
+          { nome: 'Bupivacaína 0,5% hiperbárica', dose: '15', unidade: 'mg', via: 'Subaracnóideo', tipo: 'Bolus' },
+          { nome: 'Morfina', dose: '80', unidade: 'mcg', via: 'Subaracnóideo', tipo: 'Bolus' },
+          { nome: 'Midazolam', dose: '', unidade: 'mg', via: 'EV', tipo: 'Bolus', obs: 'Sedação, conforme demanda' },
+          { nome: 'Fentanil', dose: '', unidade: 'mcg', via: 'EV', tipo: 'Bolus', obs: 'Sedação, conforme demanda' }
+        ]
       );
     },
     tecnicaPadrao() {
