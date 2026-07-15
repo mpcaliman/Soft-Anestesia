@@ -5422,12 +5422,12 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
         <div class="grid">
           <div class="field col-3"><label>Cristaloides (mL)</label><input type="number" name="cristaloides" min="0" oninput="anestesia.calc.balanco()"></div>
           <div class="field col-3"><label>Coloides (mL)</label><input type="number" name="coloides" min="0" oninput="anestesia.calc.balanco()"></div>
-          <div class="field col-3"><label>Hemocomponentes (mL)</label><input type="number" name="hemo_vol" min="0" oninput="anestesia.calc.balanco()" placeholder="vol. total"></div>
+          <div class="field col-3"><label>Hemocomponentes (mL) <small style="color:var(--text-mute);font-weight:400">— da tabela</small></label><input type="number" name="hemo_vol" min="0" readonly ondblclick="this.readOnly=false" oninput="anestesia.calc.balanco()" placeholder="da tabela de hidratação" title="Calculado da tabela de hidratação (linhas de hemocomponente). Dê 2 toques para editar manualmente." style="background:var(--surface-alt)"></div>
           <div class="field col-3"><label>Nutrição (mL)</label><input type="number" name="nutricao" min="0" oninput="anestesia.calc.balanco()"></div>
           <div class="field col-3"><label>Drogas diluídas (mL)</label><input type="number" name="drogas_dil" min="0" oninput="anestesia.calc.balanco()"></div>
           <div class="field col-3"><label>Recuperação celular (mL)</label><input type="number" name="rec_celular" min="0" oninput="anestesia.calc.balanco()"></div>
           <div class="field col-6"><label>Outras entradas (mL)</label><input type="number" name="outras_entradas" min="0" oninput="anestesia.calc.balanco()"></div>
-          <div class="field col-12"><label>Descrição hemocomponentes</label><input type="text" name="hemocomponentes" placeholder="CHAD, plasma, plaquetas... (texto livre — calculado da tabela)"></div>
+          <div class="field col-12"><label>Descrição hemocomponentes <small style="color:var(--text-mute);font-weight:400">— da tabela de hidratação</small></label><input type="text" name="hemocomponentes" readonly ondblclick="this.readOnly=false" placeholder="CHAD, plasma, plaquetas... (calculado da tabela; 2 toques para editar)" title="Calculado da tabela de hidratação. Dê 2 toques para editar manualmente." style="background:var(--surface-alt)"></div>
         </div>
 
         <!-- SAÍDAS -->
@@ -5435,7 +5435,7 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
           <span class="qa-label" style="color:var(--danger)">🩸 SAÍDAS</span>
         </div>
         <div class="grid">
-          <div class="field col-3"><label>Diurese (mL)</label><input type="number" name="diurese" min="0" oninput="anestesia.calc.balanco()"></div>
+          <div class="field col-3"><label>Diurese (mL) <small style="color:var(--text-mute);font-weight:400">— do registro</small></label><input type="number" name="diurese" min="0" readonly ondblclick="this.readOnly=false" oninput="anestesia.calc.balanco()" placeholder="do registro de diurese" title="Calculado do registro de diurese (marque Sonda vesical). Dê 2 toques para editar manualmente." style="background:var(--surface-alt)"></div>
           <div class="field col-3"><label>Perdas sanguíneas (mL)</label><input type="number" name="perdas" min="0" oninput="anestesia.calc.balanco()" placeholder="aspirador, gazes"></div>
           <div class="field col-3"><label>Drenos (mL)</label><input type="number" name="drenos" min="0" oninput="anestesia.calc.balanco()"></div>
           <div class="field col-3"><label>SNG / aspiração gástrica (mL)</label><input type="number" name="sng" min="0" oninput="anestesia.calc.balanco()"></div>
@@ -20010,7 +20010,7 @@ const anestesia = {
     },
     /* Recalcula totais agregando por categoria e atualiza campos */
     recalc() {
-      let cris = 0, col = 0, hemoText = [];
+      let cris = 0, col = 0, hemo = 0, hemoText = [];
       let total = 0;
       const linhas = document.querySelectorAll('#hidra-body tr');
       linhas.forEach(tr => {
@@ -20021,6 +20021,7 @@ const anestesia = {
         if (cat === 'cristaloide') cris += vol;
         else if (cat === 'coloide') col += vol;
         else if (cat === 'hemocomponente' && tipo) {
+          hemo += vol;
           const v = vol ? `${vol} mL ${tipo}` : tipo;
           hemoText.push(v);
         }
@@ -20039,6 +20040,7 @@ const anestesia = {
       /* Hemocomponentes: só sobrescreve se houver itens de hemo na tabela */
       if (hemoText.length > 0) {
         f.querySelector('[name="hemocomponentes"]').value = hemoText.join(' + ');
+        const hv = f.querySelector('[name="hemo_vol"]'); if (hv) hv.value = hemo > 0 ? Math.round(hemo) : '';
       }
       /* Total infundido */
       const totEl = f.querySelector('[name="total_infundido"]');
