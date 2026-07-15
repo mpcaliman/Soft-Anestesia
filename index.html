@@ -10679,7 +10679,7 @@ const recuperacao = {
       /* Hora padrão = chegada na SRPA, se houver */
       if (!dados.hora && !comHoraAtual) {
         const lim = anestesia.graficoUI.limiteTempo();
-        if (lim) dados.hora = anestesia.graficoUI.tToHora(lim.ini);
+        if (lim && lim.ini != null) dados.hora = anestesia.graficoUI.tToHora(lim.ini);
       }
       const tr = anestesia.vitais.add(comHoraAtual, dados);
       return tr;
@@ -17487,7 +17487,7 @@ const anestesia = {
         const now = new Date();
         let t = now.getHours() * 60 + now.getMinutes();
         /* SEM limite superior: usa a hora atual (não trava no fim da janela) */
-        if (lim && t < lim.ini) t = lim.ini;
+        if (lim && lim.ini != null && t < lim.ini) t = lim.ini;
         anestesia.graficoUI.abrirPopupEvento(t);
       });
       const btnMed = document.getElementById(prefixo + 'gt-add-medicacao');
@@ -17496,8 +17496,8 @@ const anestesia = {
         const lim = anestesia.graficoUI.limiteTempo();
         const now = new Date();
         let t = now.getHours() * 60 + now.getMinutes();
-        /* SEM limite superior: usa a hora atual (não trava no fim da janela) */
-        if (lim && t < lim.ini) t = lim.ini;
+        /* usa a hora atual, respeitando o limite inferior (entrada em sala) */
+        if (lim && lim.ini != null && t < lim.ini) t = lim.ini;
         anestesia.graficoUI.abrirPopupMedicacao(t);
       });
       /* Liga listeners nos checkboxes de monitores (só na anestesia) */
@@ -18195,29 +18195,36 @@ const anestesia = {
       }
       let ini = parseHora(iniStr);
       let fim = parseHora(fimStr);
+      /* Limite só existe se houver entrada e/ou saída de sala. Cada lado é
+         independente: só entrada → limite inferior; só saída → limite superior;
+         nenhum → sem limite. */
       if (ini === null && fim === null) return null;
-      if (ini === null) ini = fim - 120;
-      if (fim === null) fim = ini + 120;
-      if (fim < ini) fim += 24 * 60;
+      if (ini !== null && fim !== null && fim < ini) fim += 24 * 60; /* cruza meia-noite */
       return { ini, fim };
     },
 
     /* Garante que um tempo t (min) está dentro do limite da ficha. */
     clampTempo(t, opts = {}) {
-      /* SEM limite de tempo: registra em qualquer horário (o gráfico expande). */
-      return { t, valido: true, ajustado: false, lim: anestesia.graficoUI.limiteTempo() };
+      const lim = anestesia.graficoUI.limiteTempo();
+      if (!lim) return { t, valido: true, ajustado: false, lim: null };
+      let tt = t, ajustado = false;
+      if (lim.ini != null && tt < lim.ini) { tt = lim.ini; ajustado = true; }
+      if (lim.fim != null && tt > lim.fim) { tt = lim.fim; ajustado = true; }
+      return { t: tt, valido: !ajustado, ajustado, lim };
     },
 
-    /* Valida uma string de horário "HH:MM" contra o limite. */
+    /* Valida uma string de horário "HH:MM" contra o limite (entrada/saída de sala). */
     horaDentroDoLimite(horaStr) {
       const m = String(horaStr || '').match(/^(\d{1,2}):(\d{2})/);
       if (!m) return true;
-      const t = parseInt(m[1]) * 60 + parseInt(m[2]);
+      let t = parseInt(m[1]) * 60 + parseInt(m[2]);
       const lim = anestesia.graficoUI.limiteTempo();
       if (!lim) return true;
-      let tt = t;
-      if (tt < lim.ini) tt += 24 * 60;
-      return tt >= lim.ini && tt <= lim.fim;
+      /* se a janela cruza a meia-noite (fim >= 24h), pontos após 00:00 valem t+24h */
+      if (lim.ini != null && lim.fim != null && lim.fim >= 24 * 60 && t < lim.ini) t += 24 * 60;
+      if (lim.ini != null && t < lim.ini) return false;
+      if (lim.fim != null && t > lim.fim) return false;
+      return true;
     },
 
     /* Contexto ativo do gráfico: 'anestesia' (default) ou 'recuperacao' */
@@ -18273,9 +18280,26 @@ const anestesia = {
     /* Valida o input de hora de uma tabela (vital/med/evento). Se fora do
        limite, mostra aviso e reverte para o limite mais próximo. */
     validarHoraInput(input) {
-      /* SEM limite de tempo: aceita qualquer horário para o registro de sinais
-         vitais, medicações e eventos. O gráfico se expande para incluí-lo. */
-      if (!input || !input.value) return;
+      /* Limita o horário ao intervalo de sala (entrada/saída). Se não houver
+         entrada nem saída, aceita qualquer horário. Fora do limite → ajusta para
+         a borda mais próxima e avisa. */
+      if (input && input.value) {
+        const ui = anestesia.graficoUI;
+        const lim = ui.limiteTempo();
+        if (lim && !ui.horaDentroDoLimite(input.value)) {
+          const m = input.value.match(/^(\d{1,2}):(\d{2})/);
+          const t = parseInt(m[1]) * 60 + parseInt(m[2]);
+          let alvo;
+          if (lim.ini != null && t < lim.ini) alvo = lim.ini;
+          else alvo = lim.fim; /* passou do limite superior */
+          alvo = ((Math.round(alvo) % (24 * 60)) + 24 * 60) % (24 * 60);
+          const novo = ui.tToHora ? ui.tToHora(alvo) : (String(Math.floor(alvo / 60)).padStart(2, '0') + ':' + String(alvo % 60).padStart(2, '0'));
+          input.value = novo;
+          const qual = (lim.ini != null && lim.fim != null) ? 'entrada/saída de sala'
+            : (lim.ini != null ? 'entrada em sala' : 'saída de sala');
+          try { toast('Horário fora do intervalo de ' + qual + '. Ajustado para ' + novo + '.', 'warn'); } catch (e) {}
+        }
+      }
       try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
     },
 
@@ -19114,7 +19138,7 @@ const anestesia = {
       if (linhas.length === 0) {
         /* Sem linha anterior: cria uma na hora atual (ou início da janela) */
         const lim = anestesia.graficoUI.limiteTempo();
-        const hora = lim ? anestesia.graficoUI.tToHora(lim.ini) : utils.horaAtual();
+        const hora = (lim && lim.ini != null) ? anestesia.graficoUI.tToHora(lim.ini) : utils.horaAtual();
         novaTr = anestesia.vitais.add(false, { hora });
       } else {
         const ult = linhas[linhas.length - 1];
@@ -19343,9 +19367,9 @@ const anestesia = {
          chegada/alta na SRPA) — define a janela e impede dados fora dela. */
       const limCtx = anestesia.graficoUI.limiteTempo();
       if (limCtx) {
-        janelaIni = limCtx.ini;
-        janelaFim = limCtx.fim;
-        if (janelaFim - janelaIni < 30) janelaFim = janelaIni + 180;
+        if (limCtx.ini != null) janelaIni = limCtx.ini;
+        if (limCtx.fim != null) janelaFim = limCtx.fim;
+        if (janelaIni != null && janelaFim != null && janelaFim - janelaIni < 30) janelaFim = janelaIni + 180;
       }
 
       if (pontos.length === 0 && medicacoes.length === 0 && eventos.length === 0) {
@@ -19354,10 +19378,11 @@ const anestesia = {
         ctx.font = '11px -apple-system, "Segoe UI", sans-serif';
         ctx.fillText('Selecione um modo na barra acima e clique/arraste no gráfico para inserir dados', padL + w / 2, padT + h / 2);
         if (legendaEventos) legendaEventos.style.display = 'none';
-        /* Mesmo vazio: usa janela da ficha se houver, senão hora atual ±60min */
+        /* Mesmo vazio: usa janela da ficha se houver (mesmo parcial), senão hora atual ±60min */
         let tIni, tFim;
-        if (janelaIni !== null) {
-          tIni = janelaIni - 10; tFim = janelaFim + 10;
+        if (janelaIni !== null || janelaFim !== null) {
+          tIni = (janelaIni !== null ? janelaIni : janelaFim - 120) - 10;
+          tFim = (janelaFim !== null ? janelaFim : janelaIni + 120) + 10;
         } else {
           const now = new Date();
           const nowT = now.getHours() * 60 + now.getMinutes();
@@ -19388,16 +19413,18 @@ const anestesia = {
         ...eventos.map(e => e.t)
       ];
       let tMin, tMax;
-      if (janelaIni !== null) {
-        /* Janela de referência (entrada–saída de sala), com margem de 5 min.
-           SEM limite de duração: se houver registros além dessa janela, ela é
-           expandida para caber TODOS os dados (o tempo não é travado). */
-        tMin = janelaIni - 5;
-        tMax = janelaFim + 5;
+      if (janelaIni !== null || janelaFim !== null) {
+        /* Janela de referência (entrada–saída de sala, mesmo parcial), com margem
+           de 5 min, expandida para caber TODOS os dados. */
+        const dMin = todosT.length ? Math.min(...todosT) : null;
+        const dMax = todosT.length ? Math.max(...todosT) : null;
+        tMin = (janelaIni !== null ? janelaIni : (dMin !== null ? dMin : janelaFim - 120)) - 5;
+        tMax = (janelaFim !== null ? janelaFim : (dMax !== null ? dMax : janelaIni + 120)) + 5;
         if (todosT.length > 0) {
-          tMin = Math.min(tMin, Math.min(...todosT) - 5);
-          tMax = Math.max(tMax, Math.max(...todosT) + 5);
+          tMin = Math.min(tMin, dMin - 5);
+          tMax = Math.max(tMax, dMax + 5);
         }
+        if (tMax - tMin < 60) tMax = tMin + 60;
       } else if (todosT.length > 0) {
         tMin = Math.min(...todosT);
         tMax = Math.max(...todosT);
