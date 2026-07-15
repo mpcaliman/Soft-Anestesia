@@ -21683,46 +21683,19 @@ const linker = {
   },
 
   /* === AUTO-PREENCHIMENTO DE DADOS DO PACIENTE ===
-     Quando o usuário começa um registro em Pré, Consulta, Anestesia ou Recuperação,
-     busca o registro MAIS RECENTE de qualquer módulo com o mesmo nome e preenche
-     os dados básicos (idade, sexo, peso, altura, convênio, telefone, etc).
+     Quando o usuário começa qualquer registro, para CADA campo do paciente
+     busca o valor MAIS RECENTE daquele paciente entre TODOS os registros de
+     TODOS os módulos + cadastro central. Cada campo é preenchido a partir da
+     fonte mais recente que tenha aquele dado (não de um único registro).
      Não sobrescreve campos que já tenham valor. */
   autoPreencherDadosPaciente(nome, modAtual) {
     if (!nome || !modAtual) return;
     const alvo = linker._normNome(nome);
     if (alvo.length < 3) return;
 
-    /* PRIMEIRA PRIORIDADE: cadastro central de pacientes (mais confiável) */
-    const cadPac = store.list('pacientes').find(p => linker._normNome(p.nome) === alvo);
-
-    /* Procura o registro mais recente em outros módulos */
-    const candidatos = [];
-    ['anestesia', 'pre', 'consulta', 'recuperacao'].forEach(m => {
-      const it = linker.ultimoPorNome(m, nome);
-      if (it) candidatos.push({ mod: m, item: it, ts: new Date(it._updatedAt || 0).getTime() });
-    });
-    if (!cadPac && candidatos.length === 0) return;
-    /* Pega o mais recente, excluindo módulo atual */
-    candidatos.sort((a, b) => b.ts - a.ts);
-    const fonte = candidatos.find(c => c.mod !== modAtual) || candidatos[0];
-
-    /* Combina dados: cadastro de paciente PREVALECE para dados básicos,
-       histórico de registros fornece dados clínicos extras */
-    const dadosHist = fonte ? linker._extrairDadosPaciente(fonte.mod, fonte.item) : {};
-    const dadosCad = cadPac ? {
-      nome: cadPac.nome, nascimento: cadPac.nascimento,
-      idade: cadPac.idade || linker._idadeDeNascimento(cadPac.nascimento),
-      sexo: cadPac.sexo, peso: cadPac.peso, altura: cadPac.altura,
-      cpf: cadPac.cpf, prontuario: cadPac.prontuario, endereco: cadPac.endereco,
-      /* paciente guarda 'plano'; módulos podem usar 'convenio' ou 'plano' — preenche ambos */
-      convenio: cadPac.convenio || cadPac.plano, plano: cadPac.plano || cadPac.convenio,
-      matricula: cadPac.matricula || cadPac.carteirinha, carteirinha: cadPac.carteirinha || cadPac.matricula,
-      telefone: cadPac.telefone, email: cadPac.email
-    } : {};
-    /* Cadastro tem prioridade sobre histórico */
-    const dados = Object.assign({}, dadosHist, dadosCad);
-    /* Remove vazios para não sobrescrever sem motivo */
-    Object.keys(dados).forEach(k => { if (dados[k] == null || dados[k] === '') delete dados[k]; });
+    /* Mapa por-campo com o valor mais recente do paciente (todos os módulos) */
+    const info = linker._dadosMaisRecentes(nome, modAtual);
+    const dados = info.dados;
     if (Object.keys(dados).length === 0) return;
 
     /* Aplica no form do módulo atual (mapeando campo certo) */
@@ -21747,17 +21720,11 @@ const linker = {
       const el = form.querySelector(`[name="${nomeCampo}"]`);
       if (!el) return;
       if (el.value && el.value.trim() !== '') return;   /* não sobrescreve */
-      el.value = valor;
-      preenchidos++;
+      if (linker._setCampo(el, valor)) preenchidos++;
     });
 
     if (preenchidos > 0) {
-      let labelFonte;
-      if (cadPac) labelFonte = 'cadastro de pacientes';
-      else {
-        labelFonte = { anestesia: 'Ficha de Anestesia', pre: 'Pré-anestésica', consulta: 'Consulta', recuperacao: 'Recuperação SRPA' }[fonte?.mod] || 'histórico';
-      }
-      toast(`👤 ${preenchidos} dado(s) do paciente preenchido(s) — fonte: ${labelFonte}`);
+      toast(`👤 ${preenchidos} dado(s) do paciente preenchido(s) — valor mais recente`);
       /* Recalcula derivados na Anestesia (IMC, idade) */
       if (modAtual === 'anestesia') {
         try { anestesia.calc.imc(); } catch (e) {}
@@ -21769,27 +21736,145 @@ const linker = {
     }
   },
 
+  /* Todos os módulos que podem conter dados de paciente */
+  _MODS_PACIENTE: ['anestesia', 'pre', 'consulta', 'recuperacao', 'termo', 'prescricao', 'risco', 'financeiro', 'orcamento'],
+
+  /* Campos de paciente rastreados no per-campo-mais-recente */
+  _CAMPOS_PACIENTE: ['nome', 'nascimento', 'idade', 'sexo', 'peso', 'altura', 'imc',
+    'cpf', 'rg', 'prontuario', 'convenio', 'plano', 'matricula', 'carteirinha',
+    'telefone', 'email', 'endereco'],
+
+  /* === PER-CAMPO MAIS RECENTE ===
+     Reúne TODOS os registros do paciente (todos os módulos + cadastro),
+     ordena por data de atualização decrescente e, para CADA campo, usa o
+     valor da fonte mais recente que o tenha preenchido.
+     Retorna { dados: {campo: valor}, fontes: {campo: rótulo} }. */
+  _dadosMaisRecentes(nome, modAtual) {
+    const alvo = linker._normNome(nome);
+    const dados = {}, fontes = {};
+    if (alvo.length < 3) return { dados, fontes };
+
+    /* 1. Reúne fontes: cada registro vira { ts, label, dados } */
+    const fontesList = [];
+
+    /* Cadastro central de pacientes */
+    store.list('pacientes').forEach(p => {
+      if (linker._normNome(p.nome) !== alvo) return;
+      fontesList.push({
+        ts: new Date(p._updatedAt || p._createdAt || 0).getTime(),
+        label: 'cadastro de pacientes',
+        dados: linker._normalizarCadastro(p)
+      });
+    });
+
+    /* Registros de cada módulo */
+    linker._MODS_PACIENTE.forEach(m => {
+      store.list(m).forEach(it => {
+        const pacNome = (it.paciente && it.paciente.nome) || it.paciente_nome || it.nome || it.paciente || '';
+        if (linker._normNome(pacNome) !== alvo) return;
+        fontesList.push({
+          ts: new Date(it._updatedAt || it._createdAt || 0).getTime(),
+          label: linker._LABEL_MOD[m] || m,
+          dados: linker._extrairDadosPaciente(m, it)
+        });
+      });
+    });
+
+    if (fontesList.length === 0) return { dados, fontes };
+
+    /* 2. Ordena da mais recente para a mais antiga */
+    fontesList.sort((a, b) => b.ts - a.ts);
+
+    /* 3. Para cada campo, pega o valor da fonte mais recente que o tenha */
+    linker._CAMPOS_PACIENTE.forEach(campo => {
+      for (const f of fontesList) {
+        const v = f.dados ? f.dados[campo] : null;
+        if (v != null && String(v).trim() !== '') {
+          dados[campo] = v;
+          fontes[campo] = f.label;
+          break;
+        }
+      }
+    });
+
+    /* Idade derivada do nascimento mais recente, se ausente */
+    if ((!dados.idade || dados.idade === '') && dados.nascimento) {
+      const id = linker._idadeDeNascimento(dados.nascimento);
+      if (id) { dados.idade = id; fontes.idade = 'derivado (nascimento)'; }
+    }
+    /* convenio/plano e matricula/carteirinha são sinônimos — espelha */
+    if (!dados.convenio && dados.plano) dados.convenio = dados.plano;
+    if (!dados.plano && dados.convenio) dados.plano = dados.convenio;
+    if (!dados.matricula && dados.carteirinha) dados.matricula = dados.carteirinha;
+    if (!dados.carteirinha && dados.matricula) dados.carteirinha = dados.matricula;
+
+    return { dados, fontes };
+  },
+
+  /* Define o valor de um campo respeitando <select> (com casamento tolerante,
+     ex.: sexo "M" ↔ "Masculino"). Retorna true se conseguiu aplicar. */
+  _setCampo(el, valor) {
+    valor = String(valor);
+    if (el.tagName === 'SELECT') {
+      const opts = Array.from(el.options);
+      const norm = s => linker._normNome(s);
+      const alvo = norm(valor);
+      /* casamento direto por value ou texto */
+      let opt = opts.find(o => norm(o.value) === alvo || norm(o.textContent) === alvo);
+      /* sexo: M/F/Masculino/Feminino/Outro — só quando o select é claramente de sexo */
+      if (!opt) {
+        const SEXO_SET = ['m', 'f', 'o', 'masculino', 'feminino', 'outro'];
+        const ehSexo = opts.every(o => {
+          const ov = norm(o.value);
+          return ov === '' || SEXO_SET.includes(ov);
+        });
+        const inicial = alvo.charAt(0);
+        if (ehSexo && (inicial === 'm' || inicial === 'f')) {
+          opt = opts.find(o => {
+            const ov = norm(o.value) || norm(o.textContent);
+            return ov && ov.charAt(0) === inicial;
+          });
+        }
+      }
+      if (!opt) return false;
+      el.value = opt.value;
+      return true;
+    }
+    el.value = valor;
+    return true;
+  },
+
+  _LABEL_MOD: {
+    anestesia: 'Ficha de Anestesia', pre: 'Pré-anestésica', consulta: 'Consulta',
+    recuperacao: 'Recuperação SRPA', termo: 'Termo de Consentimento',
+    prescricao: 'Receituário', risco: 'Risco Cirúrgico',
+    financeiro: 'Financeiro', orcamento: 'Orçamento'
+  },
+
+  /* Normaliza um registro do cadastro central para as chaves de _CAMPOS_PACIENTE */
+  _normalizarCadastro(p) {
+    return {
+      nome: p.nome, nascimento: p.nascimento, idade: p.idade, sexo: p.sexo,
+      peso: p.peso, altura: p.altura, imc: p.imc, cpf: p.cpf, rg: p.rg,
+      prontuario: p.prontuario, endereco: p.endereco,
+      convenio: p.convenio || p.plano, plano: p.plano || p.convenio,
+      matricula: p.matricula || p.carteirinha, carteirinha: p.carteirinha || p.matricula,
+      telefone: p.telefone, email: p.email
+    };
+  },
+
   /* Extrai estrutura normalizada de dados do paciente a partir de QUALQUER módulo */
   _extrairDadosPaciente(mod, item) {
     const o = {};
-    if (mod === 'anestesia' && item.paciente) {
-      const p = item.paciente;
-      Object.assign(o, {
-        nome: p.nome, nascimento: p.nascimento, idade: p.idade,
-        sexo: p.sexo, peso: p.peso, altura: p.altura, imc: p.imc,
-        cpf: p.cpf, prontuario: p.prontuario,
-        convenio: p.convenio, plano: p.plano, matricula: p.matricula,
-        telefone: p.telefone, email: p.email
-      });
-    } else if (mod === 'pre' || mod === 'consulta' || mod === 'recuperacao') {
-      Object.assign(o, {
-        nome: item.nome, nascimento: item.nascimento, idade: item.idade,
-        sexo: item.sexo, peso: item.peso, altura: item.altura, imc: item.imc,
-        cpf: item.cpf, prontuario: item.prontuario,
-        convenio: item.convenio, plano: item.plano, matricula: item.matricula,
-        telefone: item.telefone, email: item.email
-      });
-    }
+    const src = (mod === 'anestesia' && item.paciente) ? item.paciente : item;
+    Object.assign(o, {
+      nome: src.nome, nascimento: src.nascimento || src.nasc, idade: src.idade,
+      sexo: src.sexo, peso: src.peso, altura: src.altura, imc: src.imc,
+      cpf: src.cpf, rg: src.rg, prontuario: src.prontuario, endereco: src.endereco,
+      convenio: src.convenio, plano: src.plano,
+      matricula: src.matricula, carteirinha: src.carteirinha,
+      telefone: src.telefone, email: src.email
+    });
     return o;
   },
 
