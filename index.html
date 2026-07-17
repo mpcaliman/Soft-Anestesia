@@ -26181,11 +26181,15 @@ ${TAG_CLOSE_HTML}`;
   _buildPre() {
     const d = utils.formData('form-pre');
     try { d._labExtras = labExtra.coletar('pre-lab-extras'); } catch (e) {}
-    const meta = `${utils.formatarData(d.data) || new Date().toLocaleDateString('pt-BR')}`;
+    /* Nome do paciente — tolerante a chaves alternativas para nunca sair vazio */
+    const nomePac = (d.nome || d.paciente_nome || d.paciente || '').trim();
+    const dataStr = utils.formatarData(d.data) || new Date().toLocaleDateString('pt-BR');
+    /* Cabeçalho com o nome do paciente em destaque + data */
+    const meta = (nomePac ? `<strong>Paciente:</strong> ${utils.escapeHTML(nomePac)} &nbsp;·&nbsp; ` : '') + dataStr;
     return printPreview._header('AVALIAÇÃO PRÉ-ANESTÉSICA', meta) +
       printPreview._section('Identificação', `
         <div class="pp-grid cols-3">
-          ${printPreview._field('Nome', d.nome)}
+          ${printPreview._fieldSempre('Nome', nomePac)}
           ${printPreview._field('Nascimento', utils.formatarData(d.nasc))}
           ${printPreview._field('Idade', d.idade)}
           ${printPreview._field('Sexo', d.sexo)}
