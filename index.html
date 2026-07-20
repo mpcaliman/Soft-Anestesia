@@ -6014,31 +6014,21 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       </div>
     </section>
 
-    <!-- 11. RESUMO NARRATIVO -->
+    <!-- 13. RESUMO E DESCRIÇÃO FINAL (unificado: antigos 13 + 14) -->
     <section class="card card-highlight">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">13</span><h2>Resumo Automático da Anestesia<small>Texto clínico gerado a partir dos dados — editável</small></h2></div>
+        <div class="card-title-wrap"><span class="card-num">13</span><h2>Resumo e descrição final<small>Resumo clínico gerado dos dados + descrição, evolução e conclusão — editável</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
         <div class="quick-actions">
-          <span class="qa-label">Resumo</span>
+          <span class="qa-label">Resumo automático</span>
           <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.resumo.gerar()">⚡ Atualizar resumo automático</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.resumo.copiar()">📋 Copiar</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.resumo.limpar()">Limpar</button>
         </div>
         <textarea name="resumo_narrativo" id="resumo-narrativo" placeholder="Clique em 'Atualizar resumo automático' para gerar o texto a partir dos campos preenchidos."></textarea>
-      </div>
-    </section>
-
-    <!-- 12. EVOLUÇÃO -->
-    <section class="card">
-      <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">14</span><h2>Descrição Final</h2></div>
-        <div class="card-actions"><span class="toggle-icon">▾</span></div>
-      </div>
-      <div class="card-body">
-        <div class="grid">
+        <div class="grid" style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
           <div class="field col-12"><label>Descrição livre da anestesia</label>
             <textarea name="descricao_livre" rows="3"></textarea>
             <div class="field-templates">
@@ -6063,8 +6053,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
               <button type="button" class="btn btn-xs tpl-btn" onclick="templates.aplicar('anestesia','conclusao','conclusaoComConduta')">+ Com conduta</button>
             </div>
           </div>
-          <!-- "Observações finais" removido: redundante com "Conclusão". O valor
-               histórico é preservado neste campo oculto (impressão/PDF intactos). -->
+          <!-- "Observações finais" preservado como campo oculto (impressão/PDF intactos). -->
           <input type="hidden" name="obs_finais">
         </div>
       </div>
@@ -6073,7 +6062,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     <!-- ASSINATURA -->
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">15</span><h2>Assinatura(s)<small>Carimbo / desenho / certificado digital — suporta 2 anestesistas</small></h2></div>
+        <div class="card-title-wrap"><span class="card-num">14</span><h2>Assinatura(s)<small>Carimbo / desenho / certificado digital — suporta 2 anestesistas</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
