@@ -6989,7 +6989,8 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
         <div class="grid">
           <div class="field col-12"><label>Observações <small style="color:var(--text-mute)">(opcional — não sai no corpo do documento)</small></label><input type="text" name="observacoes" placeholder="Anotações internas"></div>
         </div>
-        <p style="font-size:.8rem;color:var(--text-mute);margin-top:8px">✍️ O documento impresso já traz a linha de assinatura com seu nome e CRM (do perfil profissional em Ajustes). Para validade legal, use o fluxo de assinatura digital ICP-Brasil após gerar o PDF.</p>
+        <div id="sig-documentos-host" style="margin-top:8px"><!-- assinatura.blocoHTML('sig-documentos','profissional','crm') --></div>
+        <p style="font-size:.8rem;color:var(--text-mute);margin-top:8px">✍️ Para validade legal, use o fluxo de assinatura digital ICP-Brasil após gerar o PDF.</p>
       </div>
     </section>
   </form>
@@ -9814,7 +9815,7 @@ const ui = {
         else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} }, 60); }
         else if (modName === 'termo') { setTimeout(() => { try { (termo.sig._ajustar || []).forEach(fn => fn()); assinatura.initCanvas('sig-termo'); } catch (e) {} }, 80); }
         else if (modName === 'prescricao') { setTimeout(() => { try { if (prescricao.sig._ajustar) prescricao.sig._ajustar(); assinatura.initCanvas('sig-prescricao'); } catch (e) {} }, 80); }
-        else if (modName === 'documentos') { setTimeout(() => { try { const f = document.getElementById('form-documentos'); if (f && !f.querySelector('[name="data"]').value) f.querySelector('[name="data"]').value = utils.hojeISO(); documentos.atualizarTipo(); } catch (e) {} }, 60); }
+        else if (modName === 'documentos') { setTimeout(() => { try { const f = document.getElementById('form-documentos'); if (f && !f.querySelector('[name="data"]').value) f.querySelector('[name="data"]').value = utils.hojeISO(); documentos.atualizarTipo(); assinatura.initCanvas('sig-documentos'); } catch (e) {} }, 60); }
         else if (modName === 'risco') { setTimeout(() => { try { risco.atualizar(); } catch (e) {} }, 80); }
         else if (modName === 'orcamento') { setTimeout(() => { try { orcamento.init(); } catch (e) { console.error('orcamento.init', e); } }, 60); }
         else if (modName === 'doses') { setTimeout(() => { try { doses.init(); } catch (e) { console.error('doses.init', e); } }, 60); }
@@ -15249,6 +15250,7 @@ const documentos = {
     const r = document.querySelector('#form-documentos [name="modelo"][value="atestado"]'); if (r) r.checked = true;
     documentos._linkPendente = null; documentos._origemVolta = null;
     const b = document.getElementById('btn-voltar-documentos'); if (b) b.style.display = 'none';
+    try { assinatura.limpar('sig-documentos'); } catch (e) {}
     documentos.atualizarTipo();
     try { ui.atualizarDocStatus('documentos', null); } catch (e) {}
     markClean();
@@ -15281,6 +15283,7 @@ const documentos = {
     h.value = item._id || '';
     documentos._restaurarModelo(item);
     documentos.atualizarTipo();
+    setTimeout(() => { try { assinatura.restaurar('sig-documentos', 'form-documentos'); } catch (e) {} }, 60);
     try { ui.atualizarDocStatus('documentos', item); } catch (e) {}
     markClean();
     toast('Documento carregado');
@@ -15318,6 +15321,7 @@ const documentos = {
       try {
         const f = document.getElementById('form-documentos'); if (!f) return;
         utils.clearForm('form-documentos');
+        try { assinatura.limpar('sig-documentos'); } catch (e) {}
         ['atestado_texto', 'decl_texto', 'laudo_texto'].forEach(n => {
           const el = f.querySelector('[name="' + n + '"]'); if (el) { el.value = ''; el.dataset.auto = '1'; }
         });
@@ -24807,7 +24811,7 @@ const assinatura = {
   /* Inicializa todos os canvases de assinatura em forms atualmente visíveis.
      Chamado no DOMContentLoaded e ao trocar de aba/módulo. */
   initTodos() {
-    ['sig-pre', 'sig-consulta', 'sig-recuperacao', 'sig-anest', 'sig-anest2', 'sig-termo', 'sig-termo-pac', 'sig-prescricao'].forEach(p => assinatura.initCanvas(p));
+    ['sig-pre', 'sig-consulta', 'sig-recuperacao', 'sig-anest', 'sig-anest2', 'sig-termo', 'sig-termo-pac', 'sig-prescricao', 'sig-documentos'].forEach(p => assinatura.initCanvas(p));
   },
 
   /* Aplica o carimbo PNG cadastrado de um profissional ao bloco de assinatura.
@@ -24833,7 +24837,7 @@ const assinatura = {
 
   /* Botão manual: aplica carimbo do profissional digitado */
   _aplicarCarimboManual(prefixo) {
-    const formId = { 'sig-pre': 'form-pre', 'sig-consulta': 'form-consulta', 'sig-recuperacao': 'form-recuperacao', 'sig-anest': 'form-anestesia', 'sig-anest2': 'form-anestesia', 'sig-termo': 'form-termo', 'sig-termo-pac': 'form-termo', 'sig-prescricao': 'form-prescricao' }[prefixo];
+    const formId = { 'sig-pre': 'form-pre', 'sig-consulta': 'form-consulta', 'sig-recuperacao': 'form-recuperacao', 'sig-anest': 'form-anestesia', 'sig-anest2': 'form-anestesia', 'sig-termo': 'form-termo', 'sig-termo-pac': 'form-termo', 'sig-prescricao': 'form-prescricao', 'sig-documentos': 'form-documentos' }[prefixo];
     if (!formId) return;
     const form = document.getElementById(formId);
     /* Tenta múltiplos nomes de campo de profissional */
@@ -24865,7 +24869,7 @@ const assinatura = {
 
   carimbarDataHora(prefixo) {
     const sfx = (prefixo === 'sig-anest2') ? '2' : '';
-    const formId = { 'sig-pre': 'form-pre', 'sig-consulta': 'form-consulta', 'sig-recuperacao': 'form-recuperacao', 'sig-anest': 'form-anestesia', 'sig-anest2': 'form-anestesia', 'sig-termo': 'form-termo', 'sig-termo-pac': 'form-termo', 'sig-prescricao': 'form-prescricao' }[prefixo];
+    const formId = { 'sig-pre': 'form-pre', 'sig-consulta': 'form-consulta', 'sig-recuperacao': 'form-recuperacao', 'sig-anest': 'form-anestesia', 'sig-anest2': 'form-anestesia', 'sig-termo': 'form-termo', 'sig-termo-pac': 'form-termo', 'sig-prescricao': 'form-prescricao', 'sig-documentos': 'form-documentos' }[prefixo];
     const form = document.getElementById(formId);
     if (!form) return;
     const el = form.querySelector(`[name="data_assinatura${sfx}"]`);
@@ -24899,7 +24903,7 @@ const assinatura = {
     if (!c) return;
     const sfx = (prefixo === 'sig-anest2') ? '2' : '';
     const dataUrl = c.toDataURL('image/png');
-    const formId = { 'sig-pre': 'form-pre', 'sig-consulta': 'form-consulta', 'sig-recuperacao': 'form-recuperacao', 'sig-anest': 'form-anestesia', 'sig-anest2': 'form-anestesia', 'sig-termo': 'form-termo', 'sig-termo-pac': 'form-termo', 'sig-prescricao': 'form-prescricao' }[prefixo];
+    const formId = { 'sig-pre': 'form-pre', 'sig-consulta': 'form-consulta', 'sig-recuperacao': 'form-recuperacao', 'sig-anest': 'form-anestesia', 'sig-anest2': 'form-anestesia', 'sig-termo': 'form-termo', 'sig-termo-pac': 'form-termo', 'sig-prescricao': 'form-prescricao', 'sig-documentos': 'form-documentos' }[prefixo];
     const form = document.getElementById(formId);
     if (form) {
       const dataEl = form.querySelector(`[name="assinatura_dataurl${sfx}"]`);
@@ -24919,7 +24923,7 @@ const assinatura = {
      É um substitutivo simples ao certificado para casos de uso internos. */
   /* Mapa prefixo → id do formulário (usado pelas funções de assinatura) */
   _formIdDe(prefixo) {
-    return { 'sig-pre': 'form-pre', 'sig-consulta': 'form-consulta', 'sig-recuperacao': 'form-recuperacao', 'sig-anest': 'form-anestesia', 'sig-anest2': 'form-anestesia', 'sig-termo': 'form-termo', 'sig-termo-pac': 'form-termo', 'sig-prescricao': 'form-prescricao' }[prefixo];
+    return { 'sig-pre': 'form-pre', 'sig-consulta': 'form-consulta', 'sig-recuperacao': 'form-recuperacao', 'sig-anest': 'form-anestesia', 'sig-anest2': 'form-anestesia', 'sig-termo': 'form-termo', 'sig-termo-pac': 'form-termo', 'sig-prescricao': 'form-prescricao', 'sig-documentos': 'form-documentos' }[prefixo];
   },
   /* Módulos que possuem área de anexos (prontuario) para guardar o PDF assinado */
   _moduloComAnexos(prefixo) {
@@ -24993,7 +24997,7 @@ const assinatura = {
   },
 
   async _gerarSeloDigital(prefixo) {
-    const formId = { 'sig-pre': 'form-pre', 'sig-consulta': 'form-consulta', 'sig-recuperacao': 'form-recuperacao', 'sig-anest': 'form-anestesia', 'sig-anest2': 'form-anestesia', 'sig-termo': 'form-termo', 'sig-termo-pac': 'form-termo', 'sig-prescricao': 'form-prescricao' }[prefixo];
+    const formId = { 'sig-pre': 'form-pre', 'sig-consulta': 'form-consulta', 'sig-recuperacao': 'form-recuperacao', 'sig-anest': 'form-anestesia', 'sig-anest2': 'form-anestesia', 'sig-termo': 'form-termo', 'sig-termo-pac': 'form-termo', 'sig-prescricao': 'form-prescricao', 'sig-documentos': 'form-documentos' }[prefixo];
     const form = document.getElementById(formId);
     if (!form) return;
     /* Coleta dados do form (excluindo campos de assinatura) */
@@ -25029,7 +25033,7 @@ const assinatura = {
     const sfx = (prefixo === 'sig-anest2') ? '2' : '';
     const prev = document.getElementById(prefixo + '-prev-carimbo');
     if (prev) prev.innerHTML = '<span style="color:var(--text-mute);font-size:.78rem">— sem carimbo —</span>';
-    const formId = { 'sig-pre': 'form-pre', 'sig-consulta': 'form-consulta', 'sig-recuperacao': 'form-recuperacao', 'sig-anest': 'form-anestesia', 'sig-anest2': 'form-anestesia', 'sig-termo': 'form-termo', 'sig-termo-pac': 'form-termo', 'sig-prescricao': 'form-prescricao' }[prefixo];
+    const formId = { 'sig-pre': 'form-pre', 'sig-consulta': 'form-consulta', 'sig-recuperacao': 'form-recuperacao', 'sig-anest': 'form-anestesia', 'sig-anest2': 'form-anestesia', 'sig-termo': 'form-termo', 'sig-termo-pac': 'form-termo', 'sig-prescricao': 'form-prescricao', 'sig-documentos': 'form-documentos' }[prefixo];
     const form = document.getElementById(formId);
     if (form) {
       const setV = (n, v) => { const el = form.querySelector(`[name="${n}"]`); if (el) el.value = v; };
@@ -32673,8 +32677,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const cP = hostP.querySelector('[name="profissional"]');
         if (cP) autocomplete.ligarProfissionalEm(cP);
       }
+      const hostD = document.getElementById('sig-documentos-host');
+      if (hostD) {
+        hostD.innerHTML = assinatura.blocoHTML('sig-documentos', 'profissional', 'crm');
+        const cD = hostD.querySelector('[name="profissional"]');
+        if (cD) autocomplete.ligarProfissionalEm(cD);
+      }
       assinatura.initCanvas('sig-termo');
       assinatura.initCanvas('sig-prescricao');
+      assinatura.initCanvas('sig-documentos');
     } catch (e) { console.error('Erro ao injetar assinatura termo/prescricao:', e); }
     try { cloud.init(); } catch (e) { console.error('Erro cloud.init:', e); }
     try { textosPadrao.init(); } catch (e) { console.error('Erro textosPadrao.init:', e); }
