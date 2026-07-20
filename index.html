@@ -4411,6 +4411,15 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
               <button type="button" class="btn btn-xs tpl-btn" onclick="templates.aplicar('pre','conclusao','aguardarExames')">+ Aguardar exames</button>
             </div>
           </div>
+          <div class="field col-12">
+            <label>Documentos do paciente <small style="color:var(--text-mute);font-weight:400">(abre já preenchido — use "Voltar" para retornar à pré)</small></label>
+            <div class="quick-actions">
+              <button type="button" class="btn btn-sm" onclick="prescricao.abrirDocumento('simples','pre')">🧾 Receituário</button>
+              <button type="button" class="btn btn-sm" onclick="prescricao.abrirDocumento('atestado','pre')">📝 Atestado</button>
+              <button type="button" class="btn btn-sm" onclick="prescricao.abrirDocumento('declaracao','pre')">🕐 Declaração de comparecimento</button>
+              <button type="button" class="btn btn-sm" onclick="prescricao.abrirDocumento('laudo','pre')">🧾 Laudo (INSS/empresa/plano)</button>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -4620,7 +4629,18 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
               <button type="button" class="btn btn-xs tpl-btn" onclick="consulta._setRetornoTexto('6 meses')">6 meses</button>
             </div>
           </div>
-          <div class="field col-6"><label>Observações</label><input type="text" name="observacoes"></div>
+          <div class="field col-3"><label>Agendar retorno</label>
+            <button type="button" class="btn btn-sm" style="width:100%" onclick="consulta.agendarRetorno()" title="Cria um lembrete de retorno na Agenda">📅 Agendar retorno</button></div>
+          <div class="field col-3"><label>Observações</label><input type="text" name="observacoes"></div>
+          <div class="field col-12">
+            <label>Documentos do paciente <small style="color:var(--text-mute);font-weight:400">(abre já preenchido — use "Voltar" para retornar à consulta)</small></label>
+            <div class="quick-actions">
+              <button type="button" class="btn btn-sm" onclick="prescricao.abrirDocumento('simples','consulta')">🧾 Receituário</button>
+              <button type="button" class="btn btn-sm" onclick="prescricao.abrirDocumento('atestado','consulta')">📝 Atestado</button>
+              <button type="button" class="btn btn-sm" onclick="prescricao.abrirDocumento('declaracao','consulta')">🕐 Declaração de comparecimento</button>
+              <button type="button" class="btn btn-sm" onclick="prescricao.abrirDocumento('laudo','consulta')">🧾 Laudo (INSS/empresa/plano)</button>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -6586,6 +6606,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
   <div class="rascunho-tabs" id="rasc-tabs-prescricao"></div>
   <div class="action-bar">
     <button class="btn btn-sm" id="btn-expandir-prescricao" onclick="ui.alternarTodos('prescricao')" title="Expandir ou recolher todos os campos">⊕ Expandir tudo</button>
+    <button class="btn" id="btn-voltar-prescricao" style="display:none;background:var(--primary-light);color:var(--primary-darker);border-color:var(--primary)" onclick="prescricao.voltar()" title="Voltar ao atendimento de origem"><span class="icon">←</span> Voltar ao atendimento</button>
     <button class="btn btn-primary" onclick="prescricao.novo()"><span class="icon">📄</span> Nova</button>
     <button class="btn btn-success" onclick="prescricao.salvar()" title="Salvar dados sem finalizar"><span class="icon">💾</span> Salvar</button>
     <button class="btn btn-finalizar" onclick="prescricao.finalizar()" title="Finalizar prescrição"><span class="icon">✅</span> Finalizar</button>
@@ -6644,6 +6665,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
               <label class="radio-chip"><input type="radio" name="modelo" value="antimicrobiano" onchange="prescricao.atualizarTipo()"> 💊 Antimicrobiano (2 vias)</label>
               <label class="radio-chip"><input type="radio" name="modelo" value="atestado" onchange="prescricao.atualizarTipo()"> 📝 Atestado médico</label>
               <label class="radio-chip"><input type="radio" name="modelo" value="declaracao" onchange="prescricao.atualizarTipo()"> 🕐 Declaração de comparecimento</label>
+              <label class="radio-chip"><input type="radio" name="modelo" value="laudo" onchange="prescricao.atualizarTipo()"> 🧾 Laudo médico</label>
             </div>
           </div>
           <div class="field col-6 required"><label>Nome do paciente <span class="req">*</span></label>
@@ -6731,6 +6753,37 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <div class="field col-12"><label>Acompanhante <small style="color:var(--text-mute)">(opcional)</small></label><input type="text" name="decl_acompanhante" placeholder="Nome do acompanhante, se houver" oninput="prescricao._syncDeclTexto()"></div>
           <div class="field col-12"><label>Texto da declaração <small style="color:var(--text-mute)">(gerado automaticamente — pode editar)</small></label>
             <textarea name="decl_texto" rows="4" placeholder="Preencha os campos acima para gerar o texto…" oninput="this.dataset.auto=''"></textarea></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2d. LAUDO MÉDICO (só no modelo Laudo) -->
+    <section class="card" id="card-presc-laudo" style="display:none">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-num">2</span><h2>Laudo médico<small>INSS, empresa, plano de saúde e outros fins — CID só com autorização do paciente</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <div class="grid">
+          <div class="field col-4"><label>Finalidade / destinatário</label>
+            <select name="laudo_tipo" onchange="prescricao._syncLaudoTexto()">
+              <option value="INSS">INSS / Perícia previdenciária</option>
+              <option value="Empresa">Empresa / empregador</option>
+              <option value="Plano de saúde">Plano de saúde / operadora</option>
+              <option value="Perícia judicial">Perícia judicial</option>
+              <option value="Outros">Outros fins</option>
+            </select>
+          </div>
+          <div class="field col-8"><label>Destinatário específico <small style="color:var(--text-mute)">(opcional)</small></label>
+            <input type="text" name="laudo_destinatario" placeholder="Ex.: À Perícia Médica do INSS / Ao Departamento de RH" oninput="prescricao._syncLaudoTexto()"></div>
+          <div class="field col-12">
+            <label class="radio-chip" style="display:inline-flex"><input type="checkbox" name="laudo_cid_incluir" onchange="prescricao._toggleLaudoCID(); prescricao._syncLaudoTexto()"> Incluir CID-10 (com autorização do paciente)</label>
+          </div>
+          <div class="field col-6" id="presc-laudo-cid-group" style="display:none"><label>CID-10</label><input type="text" name="laudo_cid" placeholder="Ex.: M54.5" oninput="prescricao._syncLaudoTexto()"></div>
+          <div class="field col-12"><label>Quadro clínico / justificativa</label>
+            <textarea name="laudo_quadro" rows="3" placeholder="Descreva o quadro clínico, tratamento e a repercussão funcional que justifica o laudo…" oninput="prescricao._syncLaudoTexto()"></textarea></div>
+          <div class="field col-12"><label>Texto do laudo <small style="color:var(--text-mute)">(gerado automaticamente — pode editar)</small></label>
+            <textarea name="laudo_texto" rows="5" placeholder="Preencha os campos acima para gerar o texto…" oninput="this.dataset.auto=''"></textarea></div>
         </div>
       </div>
     </section>
@@ -10621,6 +10674,61 @@ const consulta = {
     const el = document.querySelector(`#${consulta.formId} [name="retorno_texto"]`);
     if (el) { el.value = txt; el.dispatchEvent(new Event('input')); markDirty(); }
   },
+  /* Converte um período ("15 dias", "2 meses", "6 semanas") em data ISO futura */
+  _dataDePeriodo(txt) {
+    if (!txt) return '';
+    const m = String(txt).toLowerCase().match(/(\d+)\s*(dia|semana|m[eê]s|mes|ano)/);
+    if (!m) return '';
+    const n = parseInt(m[1], 10);
+    const d = new Date();
+    if (/dia/.test(m[2])) d.setDate(d.getDate() + n);
+    else if (/semana/.test(m[2])) d.setDate(d.getDate() + n * 7);
+    else if (/m[eê]s|mes/.test(m[2])) d.setMonth(d.getMonth() + n);
+    else if (/ano/.test(m[2])) d.setFullYear(d.getFullYear() + n);
+    const p = x => String(x).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  },
+  /* Cria um lembrete de retorno na Agenda a partir dos campos de retorno */
+  agendarRetorno() {
+    const f = document.getElementById(consulta.formId);
+    if (!f) return;
+    const g = n => (f.querySelector('[name="' + n + '"]') || {}).value || '';
+    const nome = g('nome').trim();
+    if (!nome) { toast('Informe o nome do paciente primeiro', 'warn'); return; }
+    const tipo = g('retorno_tipo');
+    let data = '';
+    let obsPeriodo = '';
+    if (tipo === 'data') {
+      data = g('retorno');
+    } else if (tipo === 'texto') {
+      obsPeriodo = g('retorno_texto').trim();
+      data = consulta._dataDePeriodo(obsPeriodo);
+    }
+    if (!data) {
+      toast('Defina a data (ou um período válido, ex.: "15 dias") para o retorno', 'warn');
+      return;
+    }
+    const detalhe = g('procedimento_sugerido').trim();
+    const obs = ['Retorno' + (obsPeriodo ? ' (' + obsPeriodo + ')' : ''), detalhe].filter(Boolean).join(' — ');
+    const reg = {
+      tipo: 'Consulta', data: data, hora: '',
+      paciente: nome, procedimento: obs || 'Retorno',
+      status: 'agendado'
+    };
+    try {
+      const saved = store.save('agenda', reg);
+      try { agenda.render(); } catch (e) {}
+      const dataBR = utils.formatarData(data);
+      toast('📅 Retorno agendado para ' + dataBR);
+      if (confirm('Retorno de ' + nome + ' agendado para ' + dataBR + '.\n\nAbrir a Agenda agora?')) {
+        ui.navegar('agenda');
+      }
+      return saved;
+    } catch (e) {
+      console.error(e);
+      toast('Não foi possível agendar o retorno', 'error');
+    }
+  },
 
   /* ===== SEGUIMENTO — consultas de retorno / acompanhamento =====
      Cada seguimento é uma nota datada com "o que há de novo". Ficam guardados
@@ -11629,6 +11737,9 @@ const prescricao = {
     if (hoje) hoje.value = utils.hojeISO();
     prescricao.addItem();
     prescricao._linkPendente = null;
+    prescricao._origemVolta = null;
+    const btnV = document.getElementById('btn-voltar-prescricao');
+    if (btnV) btnV.style.display = 'none';
     try { assinatura.limpar('sig-prescricao'); } catch(e){}
     const rNovo = document.querySelector('#form-prescricao [name="modelo"][value="simples"]');
     if (rNovo) rNovo.checked = true;
@@ -11649,8 +11760,9 @@ const prescricao = {
     show('card-presc-medicamentos', receita);
     show('card-presc-atestado', modelo === 'atestado');
     show('card-presc-declaracao', modelo === 'declaracao');
+    show('card-presc-laudo', modelo === 'laudo');
     show('presc-validade-group', receita);
-    show('presc-orientacoes-group', modelo !== 'declaracao');
+    show('presc-orientacoes-group', modelo !== 'declaracao' && modelo !== 'laudo');
     show('presc-endereco-group', receita);
     show('presc-doc-group', true); /* CPF/RG opcional em todos os modelos */
     /* Endereço do paciente: exigido na receita (Lei 5.991/73, art. 35). Rótulo dinâmico. */
@@ -11675,6 +11787,10 @@ const prescricao = {
     } else if (modelo === 'declaracao') {
       banner = '🕐 Declaração de comparecimento: informe a data e o horário de entrada e saída do atendimento.';
       prescricao._syncDeclTexto();
+    } else if (modelo === 'laudo') {
+      banner = '🧾 Laudo médico: descreva o quadro clínico e a finalidade (INSS, empresa, plano de saúde). O CID-10 só pode constar com autorização expressa do paciente (art. 76 do Código de Ética Médica).';
+      prescricao._toggleLaudoCID();
+      prescricao._syncLaudoTexto();
     } else {
       banner = '📄 Receituário simples: nome e endereço do paciente exigidos para dispensação (Lei 5.991/73).';
       if (validade && (!validade.value || validade.value === '10 dias')) validade.value = validade.value || '30 dias';
@@ -11705,8 +11821,8 @@ const prescricao = {
     const val = rec.modelo || (rec.tipo === 'especial' ? 'especial' : 'simples');
     const r = document.querySelector('#form-prescricao [name="modelo"][value="' + val + '"]');
     if (r) r.checked = true;
-    /* Preserva como manual qualquer texto de atestado/declaração já salvo */
-    ['atestado_texto', 'decl_texto'].forEach(n => {
+    /* Preserva como manual qualquer texto de atestado/declaração/laudo já salvo */
+    ['atestado_texto', 'decl_texto', 'laudo_texto'].forEach(n => {
       const el = document.querySelector('#form-prescricao [name="' + n + '"]');
       if (el && el.value.trim()) el.dataset.auto = '';
     });
@@ -11779,6 +11895,98 @@ const prescricao = {
       decl_hora_ini: g('decl_hora_ini'), decl_hora_fim: g('decl_hora_fim'), decl_acompanhante: g('decl_acompanhante')
     });
     txt.dataset.auto = '1';
+  },
+  _toggleLaudoCID() {
+    const on = document.querySelector('#form-prescricao [name="laudo_cid_incluir"]')?.checked;
+    const g = document.getElementById('presc-laudo-cid-group');
+    if (g) g.style.display = on ? '' : 'none';
+  },
+  _gerarTextoLaudo(d) {
+    const nome = (d.nome || '').trim() || '_____________________';
+    const destinatario = (d.laudo_destinatario || '').trim();
+    const finalidadeMap = {
+      'INSS': 'para fins de perícia médica junto ao INSS',
+      'Empresa': 'para apresentação ao empregador',
+      'Plano de saúde': 'para apresentação à operadora de plano de saúde',
+      'Perícia judicial': 'para fins de perícia judicial',
+      'Outros': 'para os devidos fins'
+    };
+    const finalidade = finalidadeMap[d.laudo_tipo] || 'para os devidos fins';
+    const quadro = (d.laudo_quadro || '').trim();
+    let s = '';
+    if (destinatario) s += destinatario + '\n\n';
+    s += 'Atesto, ' + finalidade + ', que o(a) Sr(a). ' + nome;
+    if (d.documento) s += ', portador(a) do documento ' + d.documento + ',';
+    s += ' encontra-se sob meus cuidados médicos';
+    if (quadro) s += ', apresentando o seguinte quadro clínico: ' + quadro;
+    s += '.';
+    if (d.laudo_cid_incluir && d.laudo_cid) s += ' CID-10: ' + d.laudo_cid + ' (informado mediante autorização expressa do paciente).';
+    return s;
+  },
+  _syncLaudoTexto() {
+    const f = document.getElementById('form-prescricao'); if (!f) return;
+    const txt = f.querySelector('[name="laudo_texto"]'); if (!txt) return;
+    if (txt.value.trim() && txt.dataset.auto !== '1') return; /* preserva edição manual */
+    const g = n => (f.querySelector('[name="' + n + '"]') || {}).value || '';
+    txt.value = prescricao._gerarTextoLaudo({
+      nome: g('nome'), documento: g('documento'), laudo_tipo: g('laudo_tipo'),
+      laudo_destinatario: g('laudo_destinatario'), laudo_quadro: g('laudo_quadro'),
+      laudo_cid: g('laudo_cid'), laudo_cid_incluir: f.querySelector('[name="laudo_cid_incluir"]')?.checked
+    });
+    txt.dataset.auto = '1';
+  },
+
+  /* === IDA E VOLTA: abre o Receituário já pré-preenchido a partir de outro módulo
+     (Consulta, Pré) num modelo específico, e permite voltar ao atendimento. === */
+  abrirDocumento(modelo, origemMod) {
+    modelo = modelo || 'simples';
+    const formOrigem = document.getElementById('form-' + origemMod);
+    const nome = formOrigem ? (formOrigem.querySelector('[name="nome"]') || formOrigem.querySelector('[name="paciente_nome"]') || {}).value || '' : '';
+    const origemId = formOrigem ? (formOrigem.querySelector('[name="_id"]') || {}).value || '' : '';
+    ui.navegar('prescricao');
+    setTimeout(() => {
+      try {
+        const f = document.getElementById('form-prescricao');
+        if (!f) return;
+        /* começa um documento NOVO para este paciente (não reaproveita o anterior) */
+        utils.clearForm('form-prescricao');
+        const body = document.getElementById('prescricao-body');
+        if (body) body.innerHTML = '';
+        prescricao.addItem();
+        try { assinatura.limpar('sig-prescricao'); } catch (e) {}
+        ['atestado_texto', 'decl_texto', 'laudo_texto'].forEach(n => {
+          const el = f.querySelector('[name="' + n + '"]'); if (el) { el.value = ''; el.dataset.auto = '1'; }
+        });
+        /* marca o modelo escolhido */
+        const r = f.querySelector('[name="modelo"][value="' + modelo + '"]');
+        if (r) { r.checked = true; }
+        /* nome do paciente da origem (autoritativo) + data */
+        const nomeEl = f.querySelector('[name="nome"]');
+        if (nomeEl && nome) nomeEl.value = nome;
+        const dataEl = f.querySelector('[name="data"]');
+        if (dataEl && !dataEl.value) dataEl.value = utils.hojeISO();
+        /* puxa idade/endereço/documento mais recentes do paciente */
+        try { if (nome) linker.autoPreencherDadosPaciente(nome, 'prescricao'); } catch (e) {}
+        prescricao.atualizarTipo();
+        /* registra vínculo de volta */
+        prescricao._linkPendente = (origemId ? { mod: origemMod, id: origemId } : null);
+        prescricao._origemVolta = origemMod;
+        const btn = document.getElementById('btn-voltar-prescricao');
+        if (btn) {
+          const rot = { consulta: 'consulta', pre: 'pré-anestésica', recuperacao: 'recuperação', anestesia: 'ficha' }[origemMod] || 'atendimento';
+          btn.textContent = '← Voltar à ' + rot;
+          btn.style.display = '';
+        }
+        toast('🧾 Documento aberto a partir do atendimento — preencha e imprima; use "Voltar" para retornar.');
+      } catch (e) { console.error(e); }
+    }, 260);
+  },
+  voltar() {
+    const destino = prescricao._origemVolta || (prescricao._linkPendente && prescricao._linkPendente.mod) || 'consulta';
+    const btn = document.getElementById('btn-voltar-prescricao');
+    if (btn) btn.style.display = 'none';
+    prescricao._origemVolta = null;
+    ui.navegar(destino);
   },
   addItem(dados = {}) {
     const tbody = document.getElementById('prescricao-body');
@@ -27419,6 +27627,7 @@ ${TAG_CLOSE_HTML}`;
     const modelo = d.modelo || (d.tipo === 'especial' ? 'especial' : 'simples');
     if (modelo === 'atestado') return printPreview._buildAtestado(d);
     if (modelo === 'declaracao') return printPreview._buildDeclaracao(d);
+    if (modelo === 'laudo') return printPreview._buildLaudo(d);
 
     const itens = prescricao._coletarItens();
     const duasVias = (modelo === 'especial' || modelo === 'antimicrobiano');
@@ -27488,6 +27697,12 @@ ${TAG_CLOSE_HTML}`;
     let texto = (d.decl_texto || '').trim();
     if (!texto) texto = prescricao._gerarTextoDeclaracao(d);
     return printPreview._docDeclaratorio('DECLARAÇÃO DE COMPARECIMENTO', meta, texto, d, 'Declaração de comparecimento');
+  },
+  _buildLaudo(d) {
+    const meta = `${utils.formatarData(d.data) || new Date().toLocaleDateString('pt-BR')}`;
+    let texto = (d.laudo_texto || '').trim();
+    if (!texto) texto = prescricao._gerarTextoLaudo(d);
+    return printPreview._docDeclaratorio('LAUDO MÉDICO', meta, texto, d, 'Laudo médico');
   },
   _docDeclaratorio(titulo, meta, texto, d, rodape) {
     const corpo = `<div style="font-size:11.5pt;line-height:1.9;text-align:justify;margin:26px 4px 0;white-space:pre-wrap">${utils.escapeHTML(texto)}</div>`;
