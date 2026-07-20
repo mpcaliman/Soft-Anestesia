@@ -12795,7 +12795,7 @@ const auth = {
     const form = document.getElementById('auth-form');
     sub.textContent = 'Entre com sua conta (funciona em qualquer aparelho)';
     form.innerHTML = `
-      <div class="auth-field"><label>E-mail</label><input type="email" id="auth-email" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="seu@email.com"></div>
+      <div class="auth-field"><label>E-mail ou usuário</label><input type="text" id="auth-email" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="seu@email.com ou usuário da equipe"></div>
       <div class="auth-field"><label>Senha</label><input type="password" id="auth-pass" autocomplete="current-password" placeholder="Sua senha"></div>
       <div class="auth-error" id="auth-error"></div>
       <button type="submit" class="auth-btn">Entrar</button>`;
@@ -12818,38 +12818,55 @@ const auth = {
      qualquer aparelho e os dados sincronizam. Offline, desbloqueia com
      a última senha validada neste aparelho. */
   async tentarLoginNuvem() {
-    const email = (document.getElementById('auth-email').value || '').trim().toLowerCase();
+    const id = (document.getElementById('auth-email').value || '').trim().toLowerCase();
     const senha = document.getElementById('auth-pass').value || '';
     const errEl = document.getElementById('auth-error');
     errEl.textContent = '';
-    if (!email || !senha) { errEl.textContent = 'Preencha e-mail e senha.'; return; }
-    const nuvemDisponivel = navigator.onLine && (() => { try { return cloud.estaConfigurado(); } catch (e) { return false; } })();
-    if (nuvemDisponivel) {
-      errEl.textContent = 'Verificando…';
-      let ok = false;
-      try { ok = await cloud.login(email, senha); } catch (e) { ok = false; }
-      if (ok) {
-        await auth._protegerTrocaDeConta();
-        const u = await auth._espelharUsuarioNuvem(email, senha);
-        auth._definirSessao(u);
+    if (!id || !senha) { errEl.textContent = 'Preencha e-mail/usuário e senha.'; return; }
+
+    /* 1) USUÁRIO LOCAL (equipe) cadastrado neste aparelho — aceita usuário OU e-mail,
+       online ou offline. É o caso dos usuários criados em Ajustes → Usuários. */
+    const local = auth._lerUsuarios().find(x => x.usuario === id);
+    if (local) {
+      const hash = await auth._hash(senha);
+      if (hash === local.senhaHash) {
+        auth._definirSessao(local);
         document.getElementById('auth-pass').value = '';
         auth._desbloquear();
-        setTimeout(() => { try { cloud.sincronizar({ silent: true }); } catch (e) {} }, 900);
         return;
       }
-      /* nuvem recusou: ainda tenta o espelho local (senha antiga trocada na nuvem não entra) */
-      errEl.textContent = 'E-mail ou senha inválidos na nuvem.';
+      /* existe usuário local com esse login, mas a senha não confere;
+         se NÃO for e-mail, não há nuvem a tentar → encerra */
+      if (!id.includes('@')) { errEl.textContent = 'Usuário ou senha inválidos.'; return; }
+      /* se for e-mail, ainda tenta a nuvem (a senha pode ter mudado lá) */
+    }
+
+    /* 2) É E-MAIL → tenta a conta da nuvem */
+    if (id.includes('@')) {
+      const nuvemDisponivel = navigator.onLine && (() => { try { return cloud.estaConfigurado(); } catch (e) { return false; } })();
+      if (nuvemDisponivel) {
+        errEl.textContent = 'Verificando…';
+        let ok = false;
+        try { ok = await cloud.login(id, senha); } catch (e) { ok = false; }
+        if (ok) {
+          await auth._protegerTrocaDeConta();
+          const u = await auth._espelharUsuarioNuvem(id, senha);
+          auth._definirSessao(u);
+          document.getElementById('auth-pass').value = '';
+          auth._desbloquear();
+          setTimeout(() => { try { cloud.sincronizar({ silent: true }); } catch (e) {} }, 900);
+          return;
+        }
+        errEl.textContent = 'E-mail ou senha inválidos.';
+        return;
+      }
+      /* e-mail, mas sem internet/nuvem e sem espelho local desta conta */
+      errEl.textContent = 'Sem internet e esta conta nunca entrou neste aparelho.';
       return;
     }
-    /* OFFLINE: valida contra o espelho local da última entrada */
-    const lista = auth._lerUsuarios();
-    const u = lista.find(x => x.usuario === email);
-    if (!u) { errEl.textContent = 'Sem internet e esta conta nunca entrou neste aparelho.'; return; }
-    const hash = await auth._hash(senha);
-    if (hash !== u.senhaHash) { errEl.textContent = 'Senha não confere (modo offline).'; return; }
-    auth._definirSessao(u);
-    auth._desbloquear();
-    toast('📴 Modo offline — sincroniza quando a internet voltar');
+
+    /* 3) não é e-mail e não há usuário local com esse login */
+    errEl.textContent = 'Usuário ou senha inválidos.';
   },
 
   /* Mantém no aparelho um espelho da conta da nuvem p/ desbloqueio offline */
