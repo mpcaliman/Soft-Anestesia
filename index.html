@@ -17729,7 +17729,7 @@ const anestesia = {
       const tbody = document.getElementById(anestesia.graficoUI._ctxIds().eventosBody);
       if (!tbody) return null;
       const tr = document.createElement('tr');
-      const hora = dados.hora || utils.horaAtual();
+      const hora = anestesia.graficoUI.clampHora(dados.hora || utils.horaAtual());
       const opt = (arr, sel) => arr.map(v => `<option ${v === sel ? 'selected' : ''}>${v}</option>`).join('');
       tr.innerHTML = `
         <td data-label="Horário"><input type="time" name="evt_hora[]" value="${hora}" onchange="anestesia.graficoUI.validarHoraInput(this)"></td>
@@ -18342,8 +18342,9 @@ const anestesia = {
       const tr = document.createElement('tr');
       const opt = (arr, sel) => arr.map(v => `<option ${v === sel ? 'selected' : ''}>${v}</option>`).join('');
       const tipos = ['Bolus', 'Infusão contínua (bomba)', 'Infusão contínua (gravitacional)', 'Inalatório', 'Outro'];
+      const medHora = anestesia.graficoUI.clampHora(dados.hora || '');
       tr.innerHTML = `
-        <td data-label="Horário"><input type="time" name="med_hora[]" value="${dados.hora || ''}" onchange="anestesia.graficoUI.validarHoraInput(this)"></td>
+        <td data-label="Horário"><input type="time" name="med_hora[]" value="${medHora}" onchange="anestesia.graficoUI.validarHoraInput(this)"></td>
         <td data-label="Medicação"><input type="text" name="med_nome[]" value="${utils.escapeAttr(dados.nome || '')}" placeholder="Medicação"></td>
         <td data-label="Dose"><input type="text" name="med_dose[]" value="${utils.escapeAttr(dados.dose || '')}" placeholder="Dose"></td>
         <td data-label="Unidade"><select name="med_unidade[]"><option value="">—</option>${opt(UNIDADES, dados.unidade)}</select></td>
@@ -19575,6 +19576,24 @@ const anestesia = {
       return true;
     },
 
+    /* Ajusta um horário "HH:MM" para dentro do intervalo de sala (entrada/saída).
+       Se não houver limite ou já estiver dentro, retorna o próprio valor. Usado
+       ao ADICIONAR linhas (vital/evento/medicação) para que nenhum registro caia
+       fora da janela — a borda mais próxima é usada. */
+    clampHora(horaStr) {
+      if (!horaStr) return horaStr;
+      const ui = anestesia.graficoUI;
+      const lim = ui.limiteTempo();
+      if (!lim || ui.horaDentroDoLimite(horaStr)) return horaStr;
+      const m = String(horaStr).match(/^(\d{1,2}):(\d{2})/);
+      if (!m) return horaStr;
+      const t = parseInt(m[1]) * 60 + parseInt(m[2]);
+      let alvo = (lim.ini != null && t < lim.ini) ? lim.ini : lim.fim;
+      if (alvo == null) return horaStr;
+      alvo = ((Math.round(alvo) % (24 * 60)) + 24 * 60) % (24 * 60);
+      return ui.tToHora ? ui.tToHora(alvo) : (String(Math.floor(alvo / 60)).padStart(2, '0') + ':' + String(alvo % 60).padStart(2, '0'));
+    },
+
     /* Contexto ativo do gráfico: 'anestesia' (default) ou 'recuperacao' */
     _contexto: 'anestesia',
 
@@ -20354,7 +20373,7 @@ const anestesia = {
       const tbody = document.getElementById(anestesia.graficoUI._ctxIds().vitaisBody);
       if (!tbody) return null;
       const tr = document.createElement('tr');
-      const hora = dados.hora || (comHoraAtual ? utils.horaAtual() : '');
+      const hora = anestesia.graficoUI.clampHora(dados.hora || (comHoraAtual ? utils.horaAtual() : ''));
       dados = anestesia.vitais._migrarPA({ ...dados });
       const pamCalc = anestesia.vitais._calcPAM(dados.pas, dados.pad);
       tr.innerHTML = `
