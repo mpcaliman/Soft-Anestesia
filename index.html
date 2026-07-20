@@ -14657,8 +14657,24 @@ const medicacoes = {
       alvo.dispatchEvent(new Event('input', { bubbles: true }));
       try { markDirty(); } catch (e) {}
     }
+    /* Se o alvo é a descrição da técnica anestésica, também lança as
+       medicações na TABELA de Medicações (fonte do gráfico/consumo),
+       evitando registrar a mesma droga em dois lugares. */
+    let naTabela = 0;
+    if (/tecnica_descricao/.test(medicacoes._campoAlvo || '') && typeof anestesia !== 'undefined') {
+      try {
+        anestesia.graficoUI._contexto = 'anestesia';
+        chips.forEach(c => {
+          const nome = c.getAttribute('data-nome');
+          if (!nome) return;
+          const existe = Array.from(document.querySelectorAll('#medicacoes-body [name="med_nome[]"]'))
+            .some(el => (el.value || '').trim().toLowerCase() === nome.trim().toLowerCase());
+          if (!existe) { anestesia.meds.add({ nome }); naTabela++; }
+        });
+      } catch (e) {}
+    }
     modal.close();
-    toast(`${textos.length} medicação(ões) adicionada(s)`);
+    toast(`${textos.length} medicação(ões) adicionada(s)` + (naTabela ? ` · ${naTabela} na tabela de Medicações` : ''));
   }
 };
 
