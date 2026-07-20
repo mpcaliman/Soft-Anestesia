@@ -11419,7 +11419,137 @@ const MED_BASE = [
   { p:'Nistatina', n:['Micostatin'], apres:['Suspensão oral 100.000 UI/mL'], via:'VO/Tópica', pos:'Bochechar 6/6h por 7–14 dias', ctrl:'comum' },
   { p:'Fluconazol', n:['Zoltec'], apres:['Cápsula 150 mg'], via:'VO', pos:'150 mg dose única (vaginal) ou conforme', ctrl:'comum' },
   { p:'Aciclovir', n:['Zovirax'], apres:['Comprimido 200 mg','400 mg'], via:'VO', pos:'400 mg 8/8h por 7 dias', ctrl:'comum' },
-  { p:'Naltrexona', n:['Revia'], apres:['Comprimido 50 mg'], via:'VO', pos:'Conforme indicação especializada', ctrl:'comum' }
+  { p:'Naltrexona', n:['Revia'], apres:['Comprimido 50 mg'], via:'VO', pos:'Conforme indicação especializada', ctrl:'comum' },
+
+  /* ===== Anti-hipertensivos (adicionais) ===== */
+  { p:'Ramipril', n:['Triatec'], apres:['Comprimido 2,5 mg','5 mg','10 mg'], via:'VO', pos:'2,5–10 mg 1x/dia', ctrl:'comum' },
+  { p:'Lisinopril', n:['Zestril','Prinivil'], apres:['Comprimido 5 mg','10 mg','20 mg'], via:'VO', pos:'10–20 mg 1x/dia', ctrl:'comum' },
+  { p:'Perindopril', n:['Coversyl'], apres:['Comprimido 4 mg','5 mg','10 mg'], via:'VO', pos:'4–10 mg 1x/dia', ctrl:'comum' },
+  { p:'Valsartana', n:['Diovan','Tareg'], apres:['Comprimido 80 mg','160 mg','320 mg'], via:'VO', pos:'80–160 mg 1x/dia', ctrl:'comum' },
+  { p:'Olmesartana', n:['Benicar'], apres:['Comprimido 20 mg','40 mg'], via:'VO', pos:'20–40 mg 1x/dia', ctrl:'comum' },
+  { p:'Telmisartana', n:['Micardis','Pritor'], apres:['Comprimido 40 mg','80 mg'], via:'VO', pos:'40–80 mg 1x/dia', ctrl:'comum' },
+  { p:'Candesartana', n:['Atacand','Blopress'], apres:['Comprimido 8 mg','16 mg'], via:'VO', pos:'8–16 mg 1x/dia', ctrl:'comum' },
+  { p:'Irbesartana', n:['Aprovel','Avapro'], apres:['Comprimido 150 mg','300 mg'], via:'VO', pos:'150–300 mg 1x/dia', ctrl:'comum' },
+  { p:'Nebivolol', n:['Nebilet'], apres:['Comprimido 5 mg'], via:'VO', pos:'5 mg 1x/dia', ctrl:'comum' },
+  { p:'Bisoprolol', n:['Concardio','Concor'], apres:['Comprimido 2,5 mg','5 mg','10 mg'], via:'VO', pos:'2,5–10 mg 1x/dia', ctrl:'comum' },
+  { p:'Nifedipino', n:['Adalat','Oxcord'], apres:['Comprimido Retard 20 mg','Oros 30/60 mg'], via:'VO', pos:'20 mg 12/12h (retard)', ctrl:'comum' },
+  { p:'Nitrendipino', n:['Caltren'], apres:['Comprimido 10 mg','20 mg'], via:'VO', pos:'10–20 mg 1x/dia', ctrl:'comum' },
+  { p:'Manidipino', n:['Manivasc'], apres:['Comprimido 10 mg','20 mg'], via:'VO', pos:'10–20 mg 1x/dia', ctrl:'comum' },
+  { p:'Diltiazem', n:['Balcor','Cardizem'], apres:['Comprimido 30/60 mg','SR/CD 90/120/180/240 mg'], via:'VO', pos:'Conforme apresentação', ctrl:'comum' },
+  { p:'Verapamil', n:['Dilacoron'], apres:['Comprimido 80 mg','Retard 120/240 mg'], via:'VO', pos:'80 mg 8/8h ou retard 1x/dia', ctrl:'comum' },
+  { p:'Clonidina', n:['Atensina'], apres:['Comprimido 0,100 mg','0,150 mg','0,200 mg'], via:'VO', pos:'0,1–0,2 mg 12/12h', ctrl:'comum' },
+  { p:'Metildopa', n:['Aldomet'], apres:['Comprimido 250 mg','500 mg'], via:'VO', pos:'250–500 mg 12/12h (gestação)', ctrl:'comum' },
+  { p:'Hidralazina', n:['Apresolina'], apres:['Comprimido 25 mg','50 mg'], via:'VO', pos:'25–50 mg 6/6h', ctrl:'comum' },
+  { p:'Indapamida', n:['Natrilix'], apres:['Comprimido SR 1,5 mg'], via:'VO', pos:'1,5 mg pela manhã', ctrl:'comum' },
+  { p:'Clortalidona', n:['Higroton'], apres:['Comprimido 12,5 mg','25 mg'], via:'VO', pos:'12,5–25 mg pela manhã', ctrl:'comum' },
+  { p:'Doxazosina', n:['Carduran'], apres:['Comprimido 2 mg','4 mg'], via:'VO', pos:'2–4 mg 1x/dia', ctrl:'comum' },
+
+  /* ===== Cardiovascular: antiarrítmicos, nitratos, IC ===== */
+  { p:'Digoxina', n:['Digoxina','Lanoxin'], apres:['Comprimido 0,25 mg','Elixir'], via:'VO', pos:'0,125–0,25 mg/dia', ctrl:'comum' },
+  { p:'Amiodarona', n:['Ancoron','Atlansil'], apres:['Comprimido 200 mg','Injetável 50 mg/mL'], via:'VO/EV', pos:'200 mg 1x/dia (manutenção)', ctrl:'comum' },
+  { p:'Propafenona', n:['Ritmonorm'], apres:['Comprimido 300 mg'], via:'VO', pos:'150–300 mg 8/8h', ctrl:'comum' },
+  { p:'Sotalol', n:['Sotacor'], apres:['Comprimido 120 mg','160 mg'], via:'VO', pos:'80–160 mg 12/12h', ctrl:'comum' },
+  { p:'Mononitrato de isossorbida', n:['Monocordil','Cincordil'], apres:['Comprimido 20 mg','40 mg','SR 50 mg'], via:'VO', pos:'20 mg 12/12h', ctrl:'comum' },
+  { p:'Dinitrato de isossorbida', n:['Isordil'], apres:['Comprimido SL 5 mg','Comprimido 10 mg'], via:'SL/VO', pos:'5 mg SL se angina', ctrl:'comum' },
+  { p:'Ivabradina', n:['Procoralan'], apres:['Comprimido 5 mg','7,5 mg'], via:'VO', pos:'5 mg 12/12h', ctrl:'comum' },
+  { p:'Sacubitril + Valsartana', n:['Entresto'], apres:['Comprimido 24/26 mg','49/51 mg','97/103 mg'], via:'VO', pos:'12/12h conforme titulação', ctrl:'comum' },
+  { p:'Trimetazidina', n:['Vastarel'], apres:['Comprimido MR 35 mg'], via:'VO', pos:'35 mg 12/12h', ctrl:'comum' },
+
+  /* ===== Antiagregantes e anticoagulantes (relevantes na anestesia) ===== */
+  { p:'Ticagrelor', n:['Brilinta'], apres:['Comprimido 60 mg','90 mg'], via:'VO', pos:'90 mg 12/12h (suspender pré-op conforme cardiologia)', ctrl:'comum' },
+  { p:'Prasugrel', n:['Effient'], apres:['Comprimido 5 mg','10 mg'], via:'VO', pos:'10 mg 1x/dia', ctrl:'comum' },
+  { p:'Apixabana', n:['Eliquis'], apres:['Comprimido 2,5 mg','5 mg'], via:'VO', pos:'5 mg 12/12h (suspender pré-op conforme clearance)', ctrl:'comum' },
+  { p:'Dabigatrana', n:['Pradaxa'], apres:['Cápsula 110 mg','150 mg'], via:'VO', pos:'150 mg 12/12h', ctrl:'comum' },
+  { p:'Edoxabana', n:['Lixiana'], apres:['Comprimido 30 mg','60 mg'], via:'VO', pos:'60 mg 1x/dia', ctrl:'comum' },
+  { p:'Heparina sódica', n:['Liquemine'], apres:['Frasco 5.000 UI/mL'], via:'EV/SC', pos:'Conforme protocolo', ctrl:'comum' },
+  { p:'Fondaparinux', n:['Arixtra'], apres:['Seringa 2,5 mg'], via:'SC', pos:'2,5 mg SC 1x/dia', ctrl:'comum' },
+
+  /* ===== Hipolipemiantes (adicionais) ===== */
+  { p:'Pravastatina', n:['Pravacol'], apres:['Comprimido 20 mg','40 mg'], via:'VO', pos:'20–40 mg à noite', ctrl:'comum' },
+  { p:'Pitavastatina', n:['Livalo'], apres:['Comprimido 2 mg','4 mg'], via:'VO', pos:'2–4 mg à noite', ctrl:'comum' },
+  { p:'Ezetimiba', n:['Zetia','Ezetrol'], apres:['Comprimido 10 mg'], via:'VO', pos:'10 mg 1x/dia', ctrl:'comum' },
+  { p:'Fenofibrato', n:['Lipidil'], apres:['Cápsula 200 mg','Comprimido 160 mg'], via:'VO', pos:'160–200 mg 1x/dia', ctrl:'comum' },
+  { p:'Ciprofibrato', n:['Lipless','Oroxadin'], apres:['Comprimido 100 mg'], via:'VO', pos:'100 mg 1x/dia', ctrl:'comum' },
+
+  /* ===== Antidiabéticos (adicionais) e insulinas ===== */
+  { p:'Dapagliflozina', n:['Forxiga'], apres:['Comprimido 10 mg'], via:'VO', pos:'10 mg 1x/dia (suspender 3 dias antes de cirurgia)', ctrl:'comum' },
+  { p:'Empagliflozina + Metformina', n:['Glyxambi','Synjardy'], apres:['Comprimido associação'], via:'VO', pos:'12/12h com refeições', ctrl:'comum' },
+  { p:'Sitagliptina', n:['Januvia'], apres:['Comprimido 50 mg','100 mg'], via:'VO', pos:'100 mg 1x/dia', ctrl:'comum' },
+  { p:'Linagliptina', n:['Trayenta'], apres:['Comprimido 5 mg'], via:'VO', pos:'5 mg 1x/dia', ctrl:'comum' },
+  { p:'Vildagliptina', n:['Galvus'], apres:['Comprimido 50 mg'], via:'VO', pos:'50 mg 1–2x/dia', ctrl:'comum' },
+  { p:'Semaglutida', n:['Ozempic','Rybelsus','Wegovy'], apres:['Caneta 0,25/0,5/1 mg','Comprimido 3/7/14 mg'], via:'SC/VO', pos:'Semanal (SC) — risco de aspiração; avaliar jejum estendido', ctrl:'comum' },
+  { p:'Liraglutida', n:['Victoza','Saxenda'], apres:['Caneta 6 mg/mL'], via:'SC', pos:'1x/dia — risco de retardo do esvaziamento gástrico', ctrl:'comum' },
+  { p:'Dulaglutida', n:['Trulicity'], apres:['Caneta 0,75/1,5 mg'], via:'SC', pos:'Semanal', ctrl:'comum' },
+  { p:'Tirzepatida', n:['Mounjaro'], apres:['Caneta 2,5–15 mg'], via:'SC', pos:'Semanal', ctrl:'comum' },
+  { p:'Pioglitazona', n:['Actos','Piotaz'], apres:['Comprimido 15 mg','30 mg','45 mg'], via:'VO', pos:'15–45 mg 1x/dia', ctrl:'comum' },
+  { p:'Insulina Glargina', n:['Lantus','Basaglar','Toujeo'], apres:['Caneta/refil 100 UI/mL','300 UI/mL'], via:'SC', pos:'1x/dia, dose conforme esquema', ctrl:'comum' },
+  { p:'Insulina Degludeca', n:['Tresiba'], apres:['Caneta 100 UI/mL'], via:'SC', pos:'1x/dia', ctrl:'comum' },
+  { p:'Insulina Asparte', n:['NovoRapid','Fiasp'], apres:['Caneta/refil 100 UI/mL'], via:'SC', pos:'Pré-prandial', ctrl:'comum' },
+  { p:'Insulina Lispro', n:['Humalog'], apres:['Caneta/refil 100 UI/mL'], via:'SC', pos:'Pré-prandial', ctrl:'comum' },
+
+  /* ===== Respiratório (adicionais) ===== */
+  { p:'Tiotrópio', n:['Spiriva'], apres:['Respimat 2,5 mcg','Cápsula 18 mcg'], via:'Inalatória', pos:'1x/dia', ctrl:'comum' },
+  { p:'Salmeterol + Fluticasona', n:['Seretide'], apres:['Diskus/Spray 25/50/125/250'], via:'Inalatória', pos:'12/12h', ctrl:'comum' },
+  { p:'Formoterol + Budesonida', n:['Foraseq','Vannair'], apres:['Cápsula/Spray 6/12/100/200/400'], via:'Inalatória', pos:'12/12h', ctrl:'comum' },
+  { p:'Ipratrópio', n:['Atrovent'], apres:['Solução para nebulização','Spray'], via:'Inalatória', pos:'2 jatos 6/6h', ctrl:'comum' },
+  { p:'Montelucaste', n:['Singulair','Piemonte'], apres:['Comprimido 10 mg','Mastigável 4/5 mg'], via:'VO', pos:'10 mg à noite', ctrl:'comum' },
+
+  /* ===== Gastro (adicionais) ===== */
+  { p:'Lansoprazol', n:['Prazol','Ogastro'], apres:['Cápsula 15 mg','30 mg'], via:'VO', pos:'30 mg em jejum 1x/dia', ctrl:'comum' },
+  { p:'Domperidona', n:['Motilium','Peridal'], apres:['Comprimido 10 mg','Suspensão'], via:'VO', pos:'10 mg antes das refeições', ctrl:'comum' },
+  { p:'Ácido ursodesoxicólico', n:['Ursacol'], apres:['Comprimido 50/150/300 mg'], via:'VO', pos:'Conforme peso', ctrl:'comum' },
+
+  /* ===== Neuro / Psiquiatria (adicionais) ===== */
+  { p:'Levodopa + Carbidopa', n:['Prolopa','Sinemet'], apres:['Comprimido 250/25 mg','BE/HBS'], via:'VO', pos:'Conforme esquema (não suspender abruptamente)', ctrl:'comum' },
+  { p:'Pramipexol', n:['Sifrol','Stabil'], apres:['Comprimido 0,125/0,25/1 mg','ER'], via:'VO', pos:'Titular conforme neurologia', ctrl:'comum' },
+  { p:'Quetiapina', n:['Seroquel','Quetros'], apres:['Comprimido 25/50/100/200/300 mg','XRO'], via:'VO', pos:'Conforme indicação', ctrl:'comum' },
+  { p:'Risperidona', n:['Risperdal','Respidon'], apres:['Comprimido 1/2/3 mg','Solução'], via:'VO', pos:'Conforme indicação', ctrl:'comum' },
+  { p:'Olanzapina', n:['Zyprexa'], apres:['Comprimido 5/10 mg'], via:'VO', pos:'5–10 mg à noite', ctrl:'comum' },
+  { p:'Aripiprazol', n:['Abilify','Aristab'], apres:['Comprimido 10/15/20/30 mg'], via:'VO', pos:'Conforme indicação', ctrl:'comum' },
+  { p:'Haloperidol', n:['Haldol'], apres:['Comprimido 1/5 mg','Gotas','Injetável','Decanoato'], via:'VO/IM', pos:'Conforme indicação', ctrl:'comum' },
+  { p:'Lítio (carbonato)', n:['Carbolitium'], apres:['Comprimido 300 mg','CR 450 mg'], via:'VO', pos:'Conforme litemia', ctrl:'comum' },
+  { p:'Ácido valproico / Valproato', n:['Depakene','Depakote'], apres:['Comprimido/cápsula 250/500 mg','Xarope'], via:'VO', pos:'Conforme peso/nível sérico', ctrl:'comum' },
+  { p:'Lamotrigina', n:['Lamictal'], apres:['Comprimido 25/50/100 mg'], via:'VO', pos:'Titular lentamente', ctrl:'comum' },
+  { p:'Topiramato', n:['Topamax','Amato'], apres:['Comprimido 25/50/100 mg'], via:'VO', pos:'Titular conforme indicação', ctrl:'comum' },
+  { p:'Levetiracetam', n:['Keppra'], apres:['Comprimido 250/500/750 mg','Solução'], via:'VO', pos:'500 mg 12/12h', ctrl:'comum' },
+  { p:'Fenitoína', n:['Hidantal'], apres:['Comprimido 100 mg','Injetável 50 mg/mL'], via:'VO/EV', pos:'Conforme nível sérico', ctrl:'comum' },
+  { p:'Fenobarbital', n:['Gardenal'], apres:['Comprimido 100 mg','Gotas','Injetável'], via:'VO', pos:'Conforme indicação', ctrl:'B1' },
+  { p:'Paroxetina', n:['Aropax','Pondera'], apres:['Comprimido 20 mg'], via:'VO', pos:'20 mg 1x/dia', ctrl:'comum' },
+  { p:'Citalopram', n:['Cipramil'], apres:['Comprimido 20 mg'], via:'VO', pos:'20 mg 1x/dia', ctrl:'comum' },
+  { p:'Desvenlafaxina', n:['Pristiq'], apres:['Comprimido 50 mg','100 mg'], via:'VO', pos:'50 mg 1x/dia', ctrl:'comum' },
+  { p:'Bupropiona', n:['Wellbutrin','Zyban','Bup'], apres:['Comprimido SR/XL 150 mg','300 mg'], via:'VO', pos:'150 mg 1x/dia', ctrl:'comum' },
+  { p:'Mirtazapina', n:['Remeron'], apres:['Comprimido 15/30/45 mg'], via:'VO', pos:'15–30 mg à noite', ctrl:'comum' },
+  { p:'Trazodona', n:['Donaren'], apres:['Comprimido 50/100 mg'], via:'VO', pos:'50–100 mg à noite', ctrl:'comum' },
+  { p:'Desogestrel', n:['Cerazette','Nactali'], apres:['Comprimido 0,075 mg'], via:'VO', pos:'1x/dia contínuo', ctrl:'comum' },
+
+  /* ===== Urologia / HPB ===== */
+  { p:'Tansulosina', n:['Secotex','Tamsulon'], apres:['Cápsula 0,4 mg'], via:'VO', pos:'0,4 mg 1x/dia (risco de íris flácida)', ctrl:'comum' },
+  { p:'Finasterida', n:['Proscar','Finasterida'], apres:['Comprimido 1 mg','5 mg'], via:'VO', pos:'5 mg 1x/dia (HPB)', ctrl:'comum' },
+  { p:'Dutasterida', n:['Avodart','Combodart (assoc.)'], apres:['Cápsula 0,5 mg'], via:'VO', pos:'0,5 mg 1x/dia', ctrl:'comum' },
+  { p:'Oxibutinina', n:['Retemic'], apres:['Comprimido 5 mg'], via:'VO', pos:'5 mg 8/8h–12/12h', ctrl:'comum' },
+  { p:'Solifenacina', n:['Vesicare'], apres:['Comprimido 5 mg','10 mg'], via:'VO', pos:'5–10 mg 1x/dia', ctrl:'comum' },
+  { p:'Tadalafila', n:['Cialis'], apres:['Comprimido 5 mg','20 mg'], via:'VO', pos:'5 mg 1x/dia ou sob demanda', ctrl:'comum' },
+  { p:'Sildenafila', n:['Viagra','Revatio'], apres:['Comprimido 25/50/100 mg'], via:'VO', pos:'Sob demanda (evitar com nitratos)', ctrl:'comum' },
+
+  /* ===== Reumatologia / imunossupressores ===== */
+  { p:'Alopurinol', n:['Zyloric'], apres:['Comprimido 100 mg','300 mg'], via:'VO', pos:'100–300 mg 1x/dia', ctrl:'comum' },
+  { p:'Colchicina', n:['Colchis'], apres:['Comprimido 0,5 mg'], via:'VO', pos:'0,5 mg 1–2x/dia', ctrl:'comum' },
+  { p:'Metotrexato', n:['Metotrexato','Reumatrex'], apres:['Comprimido 2,5 mg','Injetável'], via:'VO/SC', pos:'Dose SEMANAL conforme reumatologia', ctrl:'comum' },
+  { p:'Leflunomida', n:['Arava'], apres:['Comprimido 20 mg'], via:'VO', pos:'20 mg 1x/dia', ctrl:'comum' },
+  { p:'Hidroxicloroquina', n:['Reuquinol','Plaquinol'], apres:['Comprimido 400 mg'], via:'VO', pos:'Conforme peso', ctrl:'comum' },
+  { p:'Azatioprina', n:['Imuran'], apres:['Comprimido 50 mg'], via:'VO', pos:'Conforme peso', ctrl:'comum' },
+  { p:'Sulfassalazina', n:['Azulfin'], apres:['Comprimido 500 mg'], via:'VO', pos:'Conforme indicação', ctrl:'comum' },
+  { p:'Ciclosporina', n:['Sandimmun Neoral'], apres:['Cápsula 25/50/100 mg','Solução'], via:'VO', pos:'Conforme nível sérico', ctrl:'comum' },
+  { p:'Prednisolona (colírio/oral)', n:['Predsim'], apres:['Solução oral 3 mg/mL'], via:'VO', pos:'Conforme indicação', ctrl:'comum' },
+
+  /* ===== Endócrino / ossos / tireoide ===== */
+  { p:'Metimazol (Tiamazol)', n:['Tapazol'], apres:['Comprimido 5 mg','10 mg'], via:'VO', pos:'Conforme função tireoidiana', ctrl:'comum' },
+  { p:'Propiltiouracila', n:['Propiltiouracil'], apres:['Comprimido 100 mg'], via:'VO', pos:'Conforme função tireoidiana', ctrl:'comum' },
+  { p:'Alendronato', n:['Fosamax'], apres:['Comprimido 70 mg'], via:'VO', pos:'70 mg 1x/semana em jejum', ctrl:'comum' },
+  { p:'Risedronato', n:['Actonel'], apres:['Comprimido 35 mg'], via:'VO', pos:'35 mg 1x/semana', ctrl:'comum' },
+  { p:'Carbonato de cálcio + Vit D', n:['Caltrate','Os-Cal'], apres:['Comprimido 500/600 mg + D3'], via:'VO', pos:'1x/dia com refeição', ctrl:'comum' },
+  { p:'Estradiol', n:['Estreva','Systen'], apres:['Gel/adesivo/comprimido'], via:'VO/Transdérmica', pos:'Conforme reposição', ctrl:'comum' },
+  { p:'Tibolona', n:['Livial'], apres:['Comprimido 2,5 mg'], via:'VO', pos:'2,5 mg 1x/dia', ctrl:'comum' }
 ];
 
 /* ============================================================================
@@ -30363,19 +30493,19 @@ const doses = {
      mL/h (bomba) e gotas/min (equipo, macrogotas 20 gtt/mL). */
   GTT_ML: 20,   /* macrogotas por mL (equipo padrão) */
   INF: [
-    { key:'nora',    n:'Noradrenalina',    qtd:4,   un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[0.05,1],   tip:0.1 },
-    { key:'adre',    n:'Adrenalina',       qtd:4,   un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[0.01,0.5], tip:0.1 },
-    { key:'dobu',    n:'Dobutamina',       qtd:250, un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[2.5,20],   tip:5 },
-    { key:'dopa',    n:'Dopamina',         qtd:250, un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[2,20],     tip:5 },
-    { key:'fenil',   n:'Fenilefrina',      qtd:10,  un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[0.1,0.5],  tip:0.15 },
-    { key:'nitro',   n:'Nitroglicerina',   qtd:50,  un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[0.25,5],   tip:0.5 },
-    { key:'sufenta', n:'Sufentanil',       qtd:250, un:'mcg', vol:50,  doseUn:'mcg/kg/h',   faixa:[0.1,1.5],  tip:0.5 },
-    { key:'remi',    n:'Remifentanil',     qtd:2,   un:'mg',  vol:40,  doseUn:'mcg/kg/min', faixa:[0.05,0.5], tip:0.15 },
-    { key:'fenta',   n:'Fentanil',         qtd:500, un:'mcg', vol:100, doseUn:'mcg/kg/h',   faixa:[0.5,5],    tip:2 },
-    { key:'dexme',   n:'Dexmedetomidina',  qtd:200, un:'mcg', vol:50,  doseUn:'mcg/kg/h',   faixa:[0.2,1.4],  tip:0.5 },
-    { key:'ceta',    n:'Cetamina',         qtd:250, un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[2,10],     tip:5 },
-    { key:'lido',    n:'Lidocaína',        qtd:1000,un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[10,50],    tip:20 },
-    { key:'insu',    n:'Insulina regular', qtd:50,  un:'UI',  vol:50,  doseUn:'UI/h',       faixa:[0.5,10],   tip:2, semKg:true }
+    { key:'nora',    n:'Noradrenalina',    qtd:4,   un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[0.05,1],   tip:0.1,  a:'Ampola 4 mg/4 mL (1 mg/mL) — hemitartarato' },
+    { key:'adre',    n:'Adrenalina',       qtd:4,   un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[0.01,0.5], tip:0.1,  a:'Ampola 1 mg/mL (1 mL)' },
+    { key:'dobu',    n:'Dobutamina',       qtd:250, un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[2.5,20],   tip:5,    a:'Ampola 250 mg/20 mL (12,5 mg/mL)' },
+    { key:'dopa',    n:'Dopamina',         qtd:250, un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[2,20],     tip:5,    a:'Ampola 50 mg/10 mL (5 mg/mL)' },
+    { key:'fenil',   n:'Fenilefrina',      qtd:10,  un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[0.1,0.5],  tip:0.15, a:'Ampola 10 mg/mL (1 mL)' },
+    { key:'nitro',   n:'Nitroglicerina',   qtd:50,  un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[0.25,5],   tip:0.5,  a:'Ampola 25 mg/5 mL ou 50 mg/10 mL (5 mg/mL)' },
+    { key:'sufenta', n:'Sufentanil',       qtd:250, un:'mcg', vol:50,  doseUn:'mcg/kg/h',   faixa:[0.1,1.5],  tip:0.5,  a:'Ampola 50 mcg/mL (1 mL e 5 mL)' },
+    { key:'remi',    n:'Remifentanil',     qtd:2,   un:'mg',  vol:40,  doseUn:'mcg/kg/min', faixa:[0.05,0.5], tip:0.15, a:'Frasco 2 mg e 5 mg (pó liofilizado)' },
+    { key:'fenta',   n:'Fentanil',         qtd:500, un:'mcg', vol:100, doseUn:'mcg/kg/h',   faixa:[0.5,5],    tip:2,    a:'Ampola 50 mcg/mL (2, 5 e 10 mL)' },
+    { key:'dexme',   n:'Dexmedetomidina',  qtd:200, un:'mcg', vol:50,  doseUn:'mcg/kg/h',   faixa:[0.2,1.4],  tip:0.5,  a:'Ampola 100 mcg/mL (2 mL) ou 200 mcg/2 mL' },
+    { key:'ceta',    n:'Cetamina',         qtd:250, un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[2,10],     tip:5,    a:'Frasco 50 mg/mL (10 mL) e 100 mg/mL' },
+    { key:'lido',    n:'Lidocaína',        qtd:1000,un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[10,50],    tip:20,   a:'Frasco 1% (10 mg/mL) e 2% (20 mg/mL) sem vasoconstritor' },
+    { key:'insu',    n:'Insulina regular', qtd:50,  un:'UI',  vol:50,  doseUn:'UI/h',       faixa:[0.5,10],   tip:2, semKg:true, a:'Frasco 100 UI/mL (10 mL)' }
   ],
   _num(id) { const el = document.getElementById(id); const v = el ? parseFloat(el.value) : NaN; return isNaN(v) ? null : v; },
   _concInf(qtd, un, vol) {
@@ -30403,6 +30533,7 @@ const doses = {
             '<button type="button" class="btn btn-xs" onclick="doses._infPreset(\'' + d.key + '\',50)">Seringa 50 mL</button>' +
             '<button type="button" class="btn btn-xs" onclick="doses._infPreset(\'' + d.key + '\',250)">Equipo 250 mL</button>' +
           '</span></div>' +
+          (d.a ? '<div class="dc-linha"><b>Apresentação:</b> ' + utils.escapeHTML(d.a) + '</div>' : '') +
           '<div class="dc-linha" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">Diluição: ' +
             '<input type="number" id="' + b + '-qtd" value="' + d.qtd + '" step="0.1" min="0" style="width:80px" oninput="doses._calcInf(\'' + d.key + '\')"> ' + d.un + ' em ' +
             '<input type="number" id="' + b + '-vol" value="' + d.vol + '" step="1" min="1" style="width:80px" oninput="doses._calcInf(\'' + d.key + '\')"> mL ' +
