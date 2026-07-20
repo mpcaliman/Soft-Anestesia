@@ -3469,6 +3469,21 @@ body.tem-demo-banner { padding-bottom: 46px; }
   background: linear-gradient(135deg, #1a4d5c 0%, #0f3540 100%);
   padding: 20px;
 }
+/* Modo somente impressão (permissão de grupo): bloqueia edição do formulário */
+.module.somente-impressao form input,
+.module.somente-impressao form select,
+.module.somente-impressao form textarea,
+.module.somente-impressao form button,
+.module.somente-impressao form .btn,
+.module.somente-impressao form canvas { pointer-events: none !important; }
+.module.somente-impressao form { opacity: .97; }
+.ro-banner { background: #fff4e5; border: 1px solid #f0c987; color: #8a5a00; padding: 8px 12px; border-radius: 8px; font-size: .82rem; margin: 0 0 10px; }
+@media print { .ro-banner { display: none !important; } }
+.perm-grid-nivel { display: flex; flex-direction: column; gap: 4px; max-height: 46vh; overflow-y: auto; padding: 4px; border: 1px solid var(--border); border-radius: 8px; }
+.perm-nivel-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 8px; border-radius: 6px; }
+.perm-nivel-row:hover { background: var(--surface-alt); }
+.perm-nivel-label { font-size: .84rem; }
+.perm-nivel-sel { width: auto; flex: 0 0 auto; font-size: .82rem; padding: 4px 8px; }
 .auth-box {
   background: #fff; border-radius: 16px; padding: 32px 28px;
   width: 100%; max-width: 380px; box-shadow: 0 20px 60px rgba(0,0,0,.35);
@@ -9775,6 +9790,9 @@ const ui = {
       document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.module === modName));
       state.currentModule = modName;
 
+      /* PERMISSÃO: se o grupo só pode imprimir este módulo, entra em modo leitura */
+      try { if (typeof auth !== 'undefined' && auth._aplicarLeitura) auth._aplicarLeitura(modName); } catch (e) {}
+
       /* breadcrumb */
       const crumbs = {
         dashboard: 'Dashboard', pre: 'Avaliação pré-anestésica',
@@ -12588,6 +12606,7 @@ const auth = {
     { key: 'pre',         label: 'Pré-anestésica' },
     { key: 'termo',       label: 'Termo (TCLE)' },
     { key: 'prescricao',  label: 'Receituário' },
+    { key: 'documentos',  label: 'Documentos (atestados/laudos)' },
     { key: 'risco',       label: 'Risco perioperatório' },
     { key: 'anestesia',   label: 'Ficha de anestesia' },
     { key: 'recuperacao', label: 'Recuperação pós' },
@@ -12597,19 +12616,23 @@ const auth = {
     { key: 'ajustes',     label: 'Ajustes' }
   ],
 
-  /* Perfis pré-definidos com permissões sugeridas */
+  /* Perfis pré-definidos com permissões sugeridas.
+     modulos = módulos acessíveis; soImpressao = subconjunto liberado só p/ imprimir. */
   PERFIS: {
     admin: {
       label: 'Administrador',
-      modulos: ['dashboard','pacientes','agenda','consulta','pre','termo','prescricao','risco','anestesia','recuperacao','financeiro','orcamento','ajustes']
+      modulos: ['dashboard','pacientes','agenda','consulta','pre','termo','prescricao','documentos','risco','anestesia','recuperacao','financeiro','orcamento','doses','ajustes'],
+      soImpressao: []
     },
     medico: {
       label: 'Médico',
-      modulos: ['dashboard','pacientes','agenda','consulta','pre','termo','prescricao','risco','anestesia','recuperacao','financeiro','orcamento']
+      modulos: ['dashboard','pacientes','agenda','consulta','pre','termo','prescricao','documentos','risco','anestesia','recuperacao','financeiro','orcamento','doses'],
+      soImpressao: []
     },
     secretaria: {
       label: 'Secretária / Auxiliar',
-      modulos: ['dashboard','pacientes','agenda','financeiro']
+      modulos: ['dashboard','pacientes','agenda','prescricao','documentos','financeiro'],
+      soImpressao: ['prescricao','documentos']
     }
   },
 
@@ -12636,7 +12659,7 @@ const auth = {
   },
   temUsuarios() { return auth._lerUsuarios().length > 0; },
 
-  async criarUsuario({ usuario, nome, senha, perfil, modulos }) {
+  async criarUsuario({ usuario, nome, senha, perfil, modulos, soImpressao }) {
     usuario = (usuario || '').trim().toLowerCase();
     nome = (nome || '').trim();
     if (!usuario || !senha) return { ok: false, erro: 'Usuário e senha são obrigatórios.' };
@@ -12645,7 +12668,9 @@ const auth = {
     const hash = await auth._hash(senha);
     const mods = (Array.isArray(modulos) && modulos.length) ? modulos
       : (auth.PERFIS[perfil] ? auth.PERFIS[perfil].modulos.slice() : []);
-    lista.push({ id: 'u' + Date.now().toString(36), usuario, nome: nome || usuario, senhaHash: hash, perfil: perfil || 'medico', modulos: mods, criadoEm: new Date().toISOString() });
+    const so = Array.isArray(soImpressao) ? soImpressao
+      : (auth.PERFIS[perfil] ? (auth.PERFIS[perfil].soImpressao || []).slice() : []);
+    lista.push({ id: 'u' + Date.now().toString(36), usuario, nome: nome || usuario, senhaHash: hash, perfil: perfil || 'medico', modulos: mods, soImpressao: so, criadoEm: new Date().toISOString() });
     auth._salvarUsuarios(lista);
     return { ok: true };
   },
@@ -12659,12 +12684,13 @@ const auth = {
     return true;
   },
 
-  atualizarPermissoes(id, { perfil, modulos, nome }) {
+  atualizarPermissoes(id, { perfil, modulos, soImpressao, nome }) {
     const lista = auth._lerUsuarios();
     const u = lista.find(x => x.id === id);
     if (!u) return false;
     if (perfil) u.perfil = perfil;
     if (Array.isArray(modulos)) u.modulos = modulos;
+    if (Array.isArray(soImpressao)) u.soImpressao = soImpressao;
     if (nome != null) u.nome = nome;
     auth._salvarUsuarios(lista);
     return true;
@@ -12691,7 +12717,7 @@ const auth = {
     catch { return null; }
   },
   _definirSessao(u) {
-    const sess = { id: u.id, usuario: u.usuario, nome: u.nome, perfil: u.perfil, modulos: u.modulos, entrouEm: Date.now() };
+    const sess = { id: u.id, usuario: u.usuario, nome: u.nome, perfil: u.perfil, modulos: u.modulos, soImpressao: u.soImpressao || [], entrouEm: Date.now() };
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify(sess));
   },
   estaLogado() { return !!auth.usuarioAtual(); },
@@ -12701,6 +12727,16 @@ const auth = {
     if (!u) return false;
     if (u.perfil === 'admin') return true;
     return Array.isArray(u.modulos) && u.modulos.includes(modKey);
+  },
+
+  /* Pode editar (não só imprimir) o módulo? admin sempre; senão precisa ter
+     acesso e o módulo NÃO estar na lista "só impressão". */
+  podeEditar(modKey) {
+    const u = auth.usuarioAtual();
+    if (!u) return true;                 /* sem login = app aberto (edita) */
+    if (u.perfil === 'admin') return true;
+    if (!auth.podeAcessar(modKey)) return false;
+    return !(Array.isArray(u.soImpressao) && u.soImpressao.includes(modKey));
   },
 
   /* ---------- Fluxo de login ---------- */
@@ -13022,6 +13058,32 @@ const auth = {
     }
   },
 
+  /* Aplica o modo "somente impressão" a um módulo: bloqueia edição do formulário
+     e esconde os botões que gravam/alteram; mantém visualizar/imprimir/exportar. */
+  _aplicarLeitura(mod) {
+    const el = document.getElementById('module-' + mod);
+    if (!el) return;
+    const leitura = auth.estaLogado() && !auth.podeEditar(mod);
+    el.classList.toggle('somente-impressao', leitura);
+    el.querySelectorAll('.action-bar .btn').forEach(b => {
+      const oc = (b.getAttribute('onclick') || '').toLowerCase();
+      const muta = /\.salvar|\.finalizar|\.novo\(|\.nova\(|\.excluir|\.limpar\(|\.duplicar|\.salvarcomonovo|importarjson|actions\.importar|abrirnovo|assinar/.test(oc);
+      if (muta) b.style.display = leitura ? 'none' : '';
+    });
+    let ban = document.getElementById('ro-banner-' + mod);
+    if (leitura) {
+      if (!ban) {
+        ban = document.createElement('div');
+        ban.id = 'ro-banner-' + mod;
+        ban.className = 'ro-banner';
+        ban.innerHTML = '🔒 Modo <strong>somente impressão</strong> — você pode visualizar e imprimir, mas não editar ou salvar neste módulo.';
+        const form = el.querySelector('form');
+        if (form && form.parentNode) form.parentNode.insertBefore(ban, form); else el.prepend(ban);
+      }
+      ban.style.display = '';
+    } else if (ban) { ban.style.display = 'none'; }
+  },
+
   /* ---------- Timeout de inatividade (5 min) ---------- */
   _iniciarTimer() {
     auth._pararTimer();
@@ -13040,8 +13102,29 @@ const auth = {
   },
   _pararTimer() { clearTimeout(auth._timer); auth._timer = null; },
 
+  /* Migração: usuários antigos com acesso ao Receituário ganham também o novo
+     módulo Documentos (mesmo nível), para não perder o fluxo de atestados. */
+  _migrarDocumentos() {
+    try {
+      const lista = auth._lerUsuarios();
+      let mudou = false;
+      lista.forEach(u => {
+        if (u.perfil === 'admin') return;
+        if (Array.isArray(u.modulos) && u.modulos.includes('prescricao') && !u.modulos.includes('documentos')) {
+          u.modulos.push('documentos');
+          if (Array.isArray(u.soImpressao) && u.soImpressao.includes('prescricao') && !u.soImpressao.includes('documentos')) {
+            u.soImpressao.push('documentos');
+          }
+          mudou = true;
+        }
+      });
+      if (mudou) auth._salvarUsuarios(lista);
+    } catch (e) {}
+  },
+
   /* ---------- Init: chamado no carregamento ---------- */
   init() {
+    auth._migrarDocumentos();
     /* logo na tela de login */
     try {
       const img = document.querySelector('#sidebar-logo img');
@@ -13150,11 +13233,13 @@ const ajustesUsuarios = {
       const perfilLabel = (auth.PERFIS[u.perfil] || {}).label || u.perfil;
       const ehVoce = logado && logado.id === u.id;
       const nMods = u.perfil === 'admin' ? auth.MODULOS.length : (u.modulos ? u.modulos.length : 0);
+      const nSo = u.perfil === 'admin' ? 0 : ((u.soImpressao || []).length);
+      const soTxt = nSo ? ` · ${nSo} só impressão` : '';
       return `
         <div class="user-item">
           <div class="ui-info">
             <div class="ui-nome">${utils.escapeHTML(u.nome || u.usuario)}${ehVoce ? ' <span style="font-size:.72rem;color:var(--text-mute)">(você)</span>' : ''}<span class="ui-badge ${u.perfil}">${utils.escapeHTML(perfilLabel)}</span></div>
-            <div class="ui-perfil">@${utils.escapeHTML(u.usuario)} · ${nMods} módulo(s)</div>
+            <div class="ui-perfil">@${utils.escapeHTML(u.usuario)} · ${nMods} módulo(s)${soTxt}</div>
           </div>
           <div style="display:flex;gap:6px;flex-shrink:0">
             <button type="button" class="btn btn-xs" onclick="ajustesUsuarios.editar('${u.id}')" title="Editar">✏️</button>
@@ -13164,14 +13249,29 @@ const ajustesUsuarios = {
     }).join('');
   },
 
-  /* Monta a grade de checkboxes de módulos */
-  _gradePermissoes(marcados) {
-    const set = new Set(marcados || []);
-    return '<div class="perm-grid">' + auth.MODULOS.map(m => `
-      <label class="perm-check">
-        <input type="checkbox" name="perm-mod" value="${m.key}" ${set.has(m.key) ? 'checked' : ''}>
-        <span>${utils.escapeHTML(m.label)}</span>
-      </label>`).join('') + '</div>';
+  /* Monta a grade de permissões por módulo: Sem acesso / Editar / Só impressão */
+  _gradePermissoes(marcados, soImpressao) {
+    const acesso = new Set(marcados || []);
+    const so = new Set(soImpressao || []);
+    return '<div class="perm-grid perm-grid-nivel">' + auth.MODULOS.map(m => {
+      const nivel = !acesso.has(m.key) ? 'nenhum' : (so.has(m.key) ? 'print' : 'edit');
+      return `
+      <div class="perm-nivel-row">
+        <span class="perm-nivel-label">${utils.escapeHTML(m.label)}</span>
+        <select name="perm-mod" data-mod="${m.key}" class="perm-nivel-sel">
+          <option value="nenhum" ${nivel === 'nenhum' ? 'selected' : ''}>Sem acesso</option>
+          <option value="edit" ${nivel === 'edit' ? 'selected' : ''}>✏️ Editar</option>
+          <option value="print" ${nivel === 'print' ? 'selected' : ''}>🖨️ Só impressão</option>
+        </select>
+      </div>`;
+    }).join('') + '</div>';
+  },
+  /* Lê a grade de permissões do modal → { modulos, soImpressao } */
+  _lerGradePermissoes() {
+    const sels = Array.from(document.querySelectorAll('#modal-body select[name="perm-mod"]'));
+    const modulos = sels.filter(s => s.value !== 'nenhum').map(s => s.dataset.mod);
+    const soImpressao = sels.filter(s => s.value === 'print').map(s => s.dataset.mod);
+    return { modulos, soImpressao };
   },
 
   /* Ao trocar o perfil no select, MARCA os módulos sugeridos daquele perfil,
@@ -13182,17 +13282,18 @@ const ajustesUsuarios = {
     if (!sel) return;
     const perfil = sel.value;
     const ehAdmin = (perfil === 'admin');
-    const sugeridos = new Set((auth.PERFIS[perfil] || {}).modulos || []);
-    document.querySelectorAll('#modal-body input[name="perm-mod"]').forEach(chk => {
-      if (ehAdmin) {
-        /* administrador acessa tudo — marca e trava */
-        chk.checked = true;
-        chk.disabled = true;
-      } else {
-        chk.disabled = false;
-        /* marca os do perfil; preserva marcações manuais se preservar=true */
-        if (sugeridos.has(chk.value)) chk.checked = true;
-        else if (!preservar) chk.checked = false;
+    const P = auth.PERFIS[perfil] || {};
+    const sugeridos = new Set(P.modulos || []);
+    const soSug = new Set(P.soImpressao || []);
+    document.querySelectorAll('#modal-body select[name="perm-mod"]').forEach(s => {
+      const mod = s.dataset.mod;
+      if (ehAdmin) { s.value = 'edit'; s.disabled = true; return; }
+      s.disabled = false;
+      const jaTem = s.value !== 'nenhum';
+      if (sugeridos.has(mod)) {
+        if (!preservar || !jaTem) s.value = soSug.has(mod) ? 'print' : 'edit';
+      } else if (!preservar) {
+        s.value = 'nenhum';
       }
     });
   },
@@ -13213,9 +13314,9 @@ const ajustesUsuarios = {
         <div class="field col-6"><label>Senha</label><input type="password" id="user-senha" placeholder="Senha do usuário"></div>
         <div class="field col-6"><label>Confirmar senha</label><input type="password" id="user-senha2" placeholder="Repita a senha"></div>
       </div>
-      <label style="display:block;font-size:.8rem;font-weight:600;margin:14px 0 2px">Módulos que este usuário pode acessar</label>
-      <p style="font-size:.74rem;color:var(--text-mute);margin:0 0 8px">O perfil já marca os módulos padrão, mas você pode marcar ou desmarcar livremente — inclusive dar funções que não são padrão desse perfil.</p>
-      ${ajustesUsuarios._gradePermissoes((auth.PERFIS.medico || {}).modulos)}
+      <label style="display:block;font-size:.8rem;font-weight:600;margin:14px 0 2px">Funções deste usuário — por módulo, escolha o nível de acesso</label>
+      <p style="font-size:.74rem;color:var(--text-mute);margin:0 0 8px">O perfil já sugere os módulos padrão. Para cada um, escolha <strong>Sem acesso</strong>, <strong>✏️ Editar</strong> ou <strong>🖨️ Só impressão</strong> (pode ver e imprimir, mas não altera nem salva).</p>
+      ${ajustesUsuarios._gradePermissoes((auth.PERFIS.medico || {}).modulos, (auth.PERFIS.medico || {}).soImpressao)}
       <div class="auth-error" id="user-erro" style="color:#c92a52;font-size:.82rem;min-height:16px"></div>`;
     const footer = `
       <button class="btn" onclick="modal.close()">Cancelar</button>
@@ -13235,8 +13336,8 @@ const ajustesUsuarios = {
     if (!usuario || !s1) { err.textContent = 'Preencha usuário e senha.'; return; }
     if (s1.length < 4) { err.textContent = 'A senha deve ter ao menos 4 caracteres.'; return; }
     if (s1 !== s2) { err.textContent = 'As senhas não conferem.'; return; }
-    const modulos = Array.from(document.querySelectorAll('#modal-body input[name="perm-mod"]:checked')).map(c => c.value);
-    const r = await auth.criarUsuario({ usuario, nome, senha: s1, perfil, modulos });
+    const { modulos, soImpressao } = ajustesUsuarios._lerGradePermissoes();
+    const r = await auth.criarUsuario({ usuario, nome, senha: s1, perfil, modulos, soImpressao });
     if (!r.ok) { err.textContent = r.erro; return; }
     modal.close();
     toast('✅ Usuário criado');
@@ -13260,9 +13361,9 @@ const ajustesUsuarios = {
         </div>
         <div class="field col-12"><label>Nova senha <span style="font-weight:400;color:var(--text-mute)">(deixe em branco para manter a atual)</span></label><input type="password" id="user-senha" placeholder="••••••"></div>
       </div>
-      <label style="display:block;font-size:.8rem;font-weight:600;margin:14px 0 2px">Módulos que este usuário pode acessar</label>
-      <p style="font-size:.74rem;color:var(--text-mute);margin:0 0 8px">Marque ou desmarque livremente — você pode conceder funções além do padrão do perfil.</p>
-      ${ajustesUsuarios._gradePermissoes(u.perfil === 'admin' ? auth.MODULOS.map(m => m.key) : u.modulos)}
+      <label style="display:block;font-size:.8rem;font-weight:600;margin:14px 0 2px">Funções deste usuário — por módulo, escolha o nível de acesso</label>
+      <p style="font-size:.74rem;color:var(--text-mute);margin:0 0 8px">Para cada módulo: <strong>Sem acesso</strong>, <strong>✏️ Editar</strong> ou <strong>🖨️ Só impressão</strong>.</p>
+      ${ajustesUsuarios._gradePermissoes(u.perfil === 'admin' ? auth.MODULOS.map(m => m.key) : u.modulos, u.perfil === 'admin' ? [] : (u.soImpressao || []))}
       <div class="auth-error" id="user-erro" style="color:#c92a52;font-size:.82rem;min-height:16px"></div>`;
     const footer = `
       <button class="btn" onclick="modal.close()">Cancelar</button>
@@ -13279,10 +13380,10 @@ const ajustesUsuarios = {
     const err = document.getElementById('user-erro');
     err.textContent = '';
     if (novaSenha && novaSenha.length < 4) { err.textContent = 'A nova senha deve ter ao menos 4 caracteres.'; return; }
-    const modulos = perfil === 'admin'
-      ? auth.MODULOS.map(m => m.key)
-      : Array.from(document.querySelectorAll('#modal-body input[name="perm-mod"]:checked')).map(c => c.value);
-    auth.atualizarPermissoes(id, { perfil, modulos, nome });
+    let modulos, soImpressao;
+    if (perfil === 'admin') { modulos = auth.MODULOS.map(m => m.key); soImpressao = []; }
+    else { ({ modulos, soImpressao } = ajustesUsuarios._lerGradePermissoes()); }
+    auth.atualizarPermissoes(id, { perfil, modulos, soImpressao, nome });
     if (novaSenha) await auth.atualizarSenha(id, novaSenha);
     modal.close();
     toast('✅ Usuário atualizado');
@@ -13291,7 +13392,7 @@ const ajustesUsuarios = {
     const logado = auth.usuarioAtual();
     if (logado && logado.id === id) {
       const atualizado = auth._lerUsuarios().find(x => x.id === id);
-      if (atualizado) { auth._definirSessao(atualizado); auth._aplicarPermissoesUI(); }
+      if (atualizado) { auth._definirSessao(atualizado); auth._aplicarPermissoesUI(); try { auth._aplicarLeitura(state.currentModule); } catch (e) {} }
     }
   },
 
