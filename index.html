@@ -3500,6 +3500,353 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
 .perm-check { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; font-size: .84rem; cursor: pointer; }
 .perm-check input { flex-shrink: 0; }
 </style>
+
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style id="redesign-2026">
+/* ============ REDESIGN 2026 — Cockpit + Uma Mão ============ */
+:root {
+  --accent: #128a7d;
+  --accent-dark: #0f7268;
+  --bg: #eef1f5;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-lg: 16px;
+}
+html[data-theme="dark"] {
+  --bg: #0c1622;
+  --surface: #111f2e;
+  --surface-alt: #16283c;
+  --border: #1c2a3a;
+  --border-strong: #2a3c50;
+  --accent: #1a7f72;
+  --accent-dark: #4fd8c5;
+  --text: #e8eef5;
+  --text-soft: #a9bacb;
+  --text-mute: #7d92a8;
+}
+body {
+  font-family: "Archivo", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  font-variant-numeric: tabular-nums;
+}
+/* Botões — pill, alvo >=44px */
+.btn {
+  border-radius: 999px !important;
+  min-height: 44px;
+  padding: 10px 18px;
+  font-weight: 700;
+}
+.btn-sm { min-height: 38px; padding: 8px 14px; font-size: .8rem; }
+.btn-xs { min-height: 32px; padding: 5px 12px; font-size: .74rem; }
+.btn-primary { box-shadow: 0 2px 8px rgba(28,100,169,.25); }
+.btn-success, .btn-finalizar { background: var(--accent) !important; border-color: var(--accent) !important; box-shadow: 0 2px 8px rgba(18,138,125,.25); }
+.btn-success:hover, .btn-finalizar:hover { background: var(--accent-dark) !important; border-color: var(--accent-dark) !important; }
+/* Inputs — alvo >=44px */
+input[type="text"], input[type="number"], input[type="date"], input[type="time"],
+input[type="tel"], input[type="email"], input[type="search"], select {
+  min-height: 44px;
+  border-radius: 10px;
+}
+textarea { border-radius: 10px; }
+/* Sidebar / nav */
+.nav-item { border-radius: 10px; margin: 1px 8px; min-height: 44px; font-weight: 600; }
+.sidebar-brand strong { font-weight: 800; letter-spacing: -.2px; }
+/* Header */
+.app-header { backdrop-filter: blur(8px); }
+/* ===== Bottom nav (mobile) ===== */
+.bottom-nav { display: none; }
+@media (max-width: 768px) {
+  .bottom-nav {
+    display: flex;
+    position: fixed;
+    left: 10px; right: 10px; bottom: 10px;
+    z-index: 900;
+    background: var(--sidebar-bg);
+    border-radius: 999px;
+    padding: 6px;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 8px 24px rgba(15,37,64,.4);
+  }
+  .bottom-nav a {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1px;
+    padding: 8px 2px;
+    border-radius: 999px;
+    text-decoration: none;
+    color: #9db8c0;
+    font-size: .62rem;
+    font-weight: 800;
+    min-height: 48px;
+    justify-content: center;
+  }
+  .bottom-nav a .bn-icon { font-size: 1.15rem; line-height: 1.1; }
+  .bottom-nav a.active { background: var(--primary); color: #fff; }
+  .bottom-nav .bn-menu { flex: 0 0 52px; }
+  .main { padding-bottom: 84px !important; }
+  .fab-carimbo { bottom: 92px !important; }
+}
+@media print { .bottom-nav { display: none !important; } }
+
+/* ===== FASE 2 — Ficha anestésica ===== */
+.ficha-topbar {
+  position: sticky; top: 0; z-index: 40;
+  display: none; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: var(--sidebar-bg); color: #fff;
+  padding: 9px 14px; border-radius: 0 0 14px 14px;
+  margin: -8px -8px 10px; box-shadow: 0 4px 14px rgba(15,37,64,.25);
+}
+.ficha-topbar.on { display: flex; }
+.ficha-topbar .ft-nome { font-weight: 800; font-size: .95rem; }
+.ficha-topbar .ft-sub { font-size: .74rem; opacity: .75; font-weight: 600; }
+.ficha-topbar .ft-badge {
+  font-size: .66rem; font-weight: 800; border-radius: 5px; padding: 3px 8px;
+  letter-spacing: .3px; white-space: nowrap;
+}
+.ficha-topbar .ft-asa { background: #12433a; color: #4fd8c5; }
+.ficha-topbar .ft-alergia { background: #b3392a; color: #fff; }
+.ficha-topbar .ft-alergia-nega { background: rgba(255,255,255,.14); color: #cfe0ee; }
+/* Barra de dose rápida */
+.dose-quickbar {
+  display: none; position: fixed; z-index: 899;
+  left: 10px; right: 10px; bottom: 76px;
+  justify-content: center;
+}
+.dose-quickbar button {
+  background: var(--accent); color: #fff; border: none; cursor: pointer;
+  border-radius: 999px; min-height: 52px; padding: 12px 26px;
+  font-family: inherit; font-size: .95rem; font-weight: 800;
+  box-shadow: 0 8px 20px rgba(18,138,125,.4);
+}
+.dose-quickbar button:active { transform: scale(.97); }
+body[data-mod="anestesia"] .dose-quickbar { display: flex; }
+@media (min-width: 769px) {
+  .dose-quickbar { left: auto; right: 24px; bottom: 24px; }
+}
+/* Bottom sheet de dose */
+.dose-overlay {
+  display: none; position: fixed; inset: 0; z-index: 950;
+  background: rgba(6,13,24,.55);
+}
+.dose-overlay.on { display: block; }
+.dose-sheet {
+  position: fixed; z-index: 951; left: 0; right: 0; bottom: 0;
+  background: var(--sidebar-bg); color: #e8eef5;
+  border-radius: 24px 24px 0 0; padding: 10px 18px 18px;
+  box-shadow: 0 -12px 40px rgba(0,0,0,.5);
+  transform: translateY(105%); transition: transform .22s ease;
+  max-width: 560px; margin: 0 auto;
+}
+.dose-sheet.on { transform: translateY(0); }
+.dose-sheet .ds-handle { width: 44px; height: 5px; background: rgba(255,255,255,.22); border-radius: 3px; margin: 0 auto 12px; }
+.dose-sheet h3 { margin: 0 0 4px; font-size: 1.05rem; font-weight: 800; }
+.dose-sheet .ds-sub { font-size: .74rem; color: #9db3c8; font-weight: 700; margin-bottom: 10px; }
+.dose-sheet .ds-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.dose-sheet .ds-chip {
+  background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.16);
+  color: #e8eef5; border-radius: 999px; min-height: 48px; padding: 11px 17px;
+  font-family: inherit; font-size: .9rem; font-weight: 800; cursor: pointer;
+}
+.dose-sheet .ds-chip.sel { background: var(--accent); border-color: var(--accent); }
+.dose-sheet .ds-doses { display: flex; gap: 8px; margin-top: 12px; }
+.dose-sheet .ds-dose {
+  flex: 1; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.16);
+  color: #e8eef5; border-radius: 14px; min-height: 56px;
+  font-family: inherit; font-size: 1.1rem; font-weight: 800; cursor: pointer;
+}
+.dose-sheet .ds-dose.sel { background: var(--accent); border-color: var(--accent); }
+.dose-sheet .ds-actions { display: flex; gap: 8px; margin-top: 14px; }
+.dose-sheet .ds-cancel {
+  width: 56px; background: transparent; border: 1px solid rgba(255,255,255,.25);
+  color: #9db3c8; border-radius: 999px; font-size: 1rem; font-weight: 800; cursor: pointer; font-family: inherit;
+}
+.dose-sheet .ds-go {
+  flex: 1; background: var(--accent); color: #fff; border: none;
+  border-radius: 999px; min-height: 56px; font-family: inherit;
+  font-size: 1.02rem; font-weight: 800; cursor: pointer;
+}
+.dose-sheet .ds-go[disabled] { opacity: .45; }
+@media print { .dose-quickbar, .dose-sheet, .dose-overlay, .ficha-topbar { display: none !important; } }
+
+
+
+
+
+
+/* ===== FASE 8 — Busca global ===== */
+.gs-trigger {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--surface-alt); border: 1px solid var(--border);
+  border-radius: 999px; min-height: 40px; padding: 6px 16px;
+  color: var(--text-mute); font-size: .8rem; font-weight: 600;
+  cursor: pointer; font-family: inherit; margin-left: auto;
+}
+.gs-trigger:hover { border-color: var(--primary); color: var(--primary); }
+.gs-trigger kbd { font-family: inherit; font-size: .64rem; font-weight: 800; border: 1px solid var(--border-strong); border-radius: 5px; padding: 2px 6px; }
+@media (max-width: 768px) { .gs-trigger .gs-txt, .gs-trigger kbd { display: none; } .gs-trigger { padding: 6px 12px; } }
+.gs-overlay { display: none; position: fixed; inset: 0; z-index: 990; background: rgba(6,13,24,.6); }
+.gs-overlay.on { display: flex; align-items: flex-start; justify-content: center; padding: 8vh 14px 14px; }
+.gs-box {
+  width: 100%; max-width: 620px; background: var(--surface);
+  border-radius: 18px; box-shadow: 0 24px 60px rgba(0,0,0,.4); overflow: hidden;
+  display: flex; flex-direction: column; max-height: 74vh;
+}
+.gs-inputwrap { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.gs-input {
+  flex: 1; border: none !important; outline: none; background: transparent;
+  font-family: inherit; font-size: 1.05rem; font-weight: 600; color: var(--text);
+  min-height: 40px;
+}
+.gs-close { border: none; background: transparent; color: var(--text-mute); font-size: 1rem; cursor: pointer; font-family: inherit; font-weight: 800; padding: 8px; }
+.gs-results { overflow: auto; padding: 8px; }
+.gs-h { font-size: .66rem; font-weight: 800; color: var(--text-mute); letter-spacing: .6px; padding: 10px 12px 4px; }
+.gs-item {
+  display: flex; align-items: center; gap: 12px; padding: 11px 12px;
+  border-radius: 10px; cursor: pointer;
+}
+.gs-item:hover { background: var(--primary-light); }
+.gs-item .gs-mod {
+  font-size: .6rem; font-weight: 800; border-radius: 5px; padding: 3px 7px;
+  background: var(--primary-light); color: var(--primary); white-space: nowrap;
+}
+.gs-item .gs-nome { font-size: .88rem; font-weight: 700; color: var(--text); }
+.gs-item .gs-det { font-size: .72rem; color: var(--text-soft); font-weight: 600; }
+.gs-item .gs-ic { font-size: 1rem; width: 26px; text-align: center; flex: 0 0 auto; }
+.gs-vazio { padding: 18px 14px; font-size: .84rem; color: var(--text-mute); font-weight: 600; }
+@media print { .gs-overlay, .gs-trigger { display: none !important; } }
+
+/* ===== FASE 7 — Vitais rápidos ===== */
+.dose-quickbar { gap: 8px; }
+.dose-quickbar .qb-vit { background: var(--primary); box-shadow: 0 8px 20px rgba(28,100,169,.4); }
+.vit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 10px; }
+.vit-item { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.14); border-radius: 14px; padding: 8px 10px; }
+.vit-item .vi-lbl { font-size: .66rem; font-weight: 800; color: #9db3c8; letter-spacing: .4px; }
+.vit-item .vi-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.vit-item .vi-btn {
+  width: 44px; height: 44px; border-radius: 10px; border: 1px solid rgba(255,255,255,.2);
+  background: rgba(255,255,255,.07); color: #e8eef5; font-size: 1.15rem; font-weight: 800;
+  cursor: pointer; font-family: inherit; flex: 0 0 auto;
+}
+.vit-item .vi-btn:active { background: var(--accent); }
+.vit-item .vi-val {
+  flex: 1; text-align: center; font-size: 1.35rem; font-weight: 800;
+  font-variant-numeric: tabular-nums; color: #fff;
+}
+.vit-ritmo { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+@media print { .vit-grid, .vit-ritmo { display: none !important; } }
+
+/* ===== FASE 6 — Steppers de 1 toque (ASA / Mallampati) ===== */
+.stepper-wrap { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.stepper-wrap .stp {
+  border: 1.5px solid var(--border-strong); background: var(--surface);
+  color: var(--text); border-radius: 10px; cursor: pointer; font-family: inherit;
+  min-height: 44px; min-width: 46px; padding: 8px 12px;
+  font-size: .88rem; font-weight: 800; flex: 0 0 auto;
+}
+.stepper-wrap .stp:hover { border-color: var(--primary); }
+.stepper-wrap .stp.sel { background: var(--primary); border-color: var(--primary); color: #fff; }
+.stepper-wrap .stp-e.sel { background: var(--warning); border-color: var(--warning); }
+.stepper-wrap .stp-txt { font-size: .76rem; font-weight: 800; }
+.stepper-select-hidden { display: none !important; }
+@media print { .stepper-wrap { display: none !important; } .stepper-select-hidden { display: block !important; } }
+
+/* ===== Ícones SVG ===== */
+.nav-icon { display: inline-flex; align-items: center; justify-content: center; }
+.nav-icon svg { display: block; }
+.bn-icon svg { display: block; margin: 0 auto; }
+
+/* ===== Subitens de navegação ===== */
+.nav-item.nav-sub {
+  margin-left: 26px; margin-right: 8px;
+  min-height: 38px; font-size: .82rem; font-weight: 600;
+  position: relative; opacity: .92;
+}
+.nav-item.nav-sub::before {
+  content: ''; position: absolute; left: -12px; top: 0; bottom: 0;
+  width: 2px; background: rgba(255,255,255,.14); border-radius: 1px;
+}
+.nav-item.nav-sub .nav-icon { font-size: .85rem; }
+.nav-item.nav-sub.active::before, .nav-item.nav-sub:hover::before { background: var(--primary); }
+
+
+/* ===== FASE 4 — Agenda: timeline do dia ===== */
+.ag-timeline-card { margin-bottom: 14px; }
+.ag-tl-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ag-tl-head .ag-tl-nav { display: flex; gap: 6px; align-items: center; }
+.ag-tl-head .ag-tl-dia { font-weight: 800; font-size: .95rem; min-width: 150px; text-align: center; }
+.ag-tl { position: relative; display: flex; gap: 10px; padding: 8px 0 4px; }
+.ag-tl-horas { display: flex; flex-direction: column; font-size: .68rem; font-weight: 700; color: var(--text-mute); font-variant-numeric: tabular-nums; }
+.ag-tl-horas span { height: 56px; }
+.ag-tl-track { flex: 1; position: relative; border-left: 1px solid var(--border); min-height: 0; }
+.ag-tl-gridline { position: absolute; left: 0; right: 0; height: 1px; background: var(--border); opacity: .55; }
+.ag-tl-bloco {
+  position: absolute; left: 10px; right: 2px;
+  border-radius: 10px; padding: 7px 11px; overflow: hidden; cursor: pointer;
+  border-left: 4px solid var(--primary); background: var(--primary-light);
+  min-height: 42px; box-sizing: border-box;
+}
+.ag-tl-bloco:hover { filter: brightness(.97); }
+.ag-tl-bloco .tlb-pac { font-size: .8rem; font-weight: 800; color: var(--text); }
+.ag-tl-bloco .tlb-det { font-size: .7rem; color: var(--text-soft); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ag-tl-bloco .tlb-tag { position: absolute; top: 6px; right: 8px; font-size: .58rem; font-weight: 800; border-radius: 4px; padding: 2px 6px; color: #fff; background: var(--primary); }
+.ag-tl-bloco.st-confirmado { border-left-color: var(--accent); background: var(--accent-soft); }
+.ag-tl-bloco.st-confirmado .tlb-tag { background: var(--accent); }
+.ag-tl-bloco.st-agendado { border-left-color: var(--warning); background: var(--warning-soft); }
+.ag-tl-bloco.st-agendado .tlb-tag { background: var(--warning); }
+.ag-tl-bloco.st-realizado { border-left-color: var(--text-mute); background: var(--surface-alt); opacity: .8; }
+.ag-tl-bloco.st-realizado .tlb-tag { background: var(--text-mute); }
+.ag-tl-bloco.st-cancelado { border-left-color: var(--danger); background: var(--danger-soft); opacity: .65; }
+.ag-tl-bloco.st-cancelado .tlb-tag { background: var(--danger); }
+.ag-tl-bloco.st-cancelado .tlb-pac { text-decoration: line-through; }
+.ag-tl-agora { position: absolute; left: -4px; right: 0; height: 2px; background: var(--danger); z-index: 5; }
+.ag-tl-agora::before { content: ''; position: absolute; left: 0; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); }
+.ag-tl-vazio { font-size: .82rem; color: var(--text-mute); font-weight: 600; padding: 14px 4px; }
+@media print { .ag-timeline-card { display: none !important; } }
+
+/* ===== FASE 3 — Centro de comando (dashboard) ===== */
+.hoje-hero {
+  background: var(--sidebar-bg); color: #fff;
+  border-radius: 16px; padding: 16px 18px; margin-bottom: 16px;
+  box-shadow: 0 8px 24px rgba(15,37,64,.18);
+}
+.hoje-hero .hh-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.hoje-hero .hh-title { font-size: 1.15rem; font-weight: 800; letter-spacing: -.2px; }
+.hoje-hero .hh-date { font-size: .78rem; color: #9db3c8; font-weight: 700; }
+.hoje-hero .hh-count {
+  margin-left: auto; background: rgba(255,255,255,.1); border-radius: 999px;
+  padding: 6px 14px; font-size: .78rem; font-weight: 800;
+}
+.hoje-hero .hh-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.hoje-hero .hh-item {
+  display: flex; align-items: center; gap: 12px;
+  background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.1);
+  border-radius: 12px; padding: 10px 14px; cursor: pointer;
+  text-decoration: none; color: #fff;
+}
+.hoje-hero .hh-item:hover { background: rgba(255,255,255,.12); }
+.hoje-hero .hh-hora { font-size: 1rem; font-weight: 800; min-width: 52px; font-variant-numeric: tabular-nums; }
+.hoje-hero .hh-pac { font-size: .9rem; font-weight: 800; }
+.hoje-hero .hh-det { font-size: .74rem; color: #9db3c8; font-weight: 600; }
+.hoje-hero .hh-tag {
+  margin-left: auto; font-size: .64rem; font-weight: 800; border-radius: 5px;
+  padding: 3px 8px; background: rgba(255,255,255,.14); white-space: nowrap;
+}
+.hoje-hero .hh-vazio { font-size: .84rem; color: #9db3c8; font-weight: 600; margin-top: 10px; }
+.hoje-hero .hh-actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+.hoje-hero .hh-btn {
+  border: none; cursor: pointer; font-family: inherit;
+  border-radius: 999px; min-height: 44px; padding: 10px 20px;
+  font-size: .84rem; font-weight: 800; text-decoration: none;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.hoje-hero .hh-btn-teal { background: var(--accent); color: #fff; }
+.hoje-hero .hh-btn-line { background: transparent; color: #cfe0ee; border: 1px solid rgba(255,255,255,.3); }
+@media print { .hoje-hero { display: none !important; } }
+
+
+</style>
 </head>
 <body>
 
@@ -3543,20 +3890,20 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
   </div>
   <div class="sidebar-section">Módulos</div>
   <nav class="sidebar-nav" id="sidebar-nav">
-    <a class="nav-item" data-module="dashboard"  href="#dashboard"><span class="nav-icon">📊</span><span class="nav-label">Dashboard</span></a>
-    <a class="nav-item" data-module="pacientes"  href="#pacientes"><span class="nav-icon">👤</span><span class="nav-label">Pacientes</span></a>
-    <a class="nav-item" data-module="agenda"     href="#agenda"><span class="nav-icon">📅</span><span class="nav-label">Agenda</span></a>
-    <a class="nav-item" data-module="consulta"   href="#consulta"><span class="nav-icon">🩺</span><span class="nav-label">Consulta / Dor</span></a>
-    <a class="nav-item" data-module="pre"        href="#pre"><span class="nav-icon">📋</span><span class="nav-label">Pré-anestésica</span></a>
-    <a class="nav-item" data-module="termo"      href="#termo"><span class="nav-icon">📝</span><span class="nav-label">Termo (TCLE)</span></a>
-    <a class="nav-item" data-module="prescricao" href="#prescricao"><span class="nav-icon">💊</span><span class="nav-label">Receituário</span></a>
-    <a class="nav-item" data-module="risco"      href="#risco"><span class="nav-icon">🎯</span><span class="nav-label">Risco perioperatório</span></a>
-    <a class="nav-item" data-module="anestesia"  href="#anestesia"><span class="nav-icon">💉</span><span class="nav-label">Ficha de anestesia</span></a>
-    <a class="nav-item" data-module="recuperacao" href="#recuperacao"><span class="nav-icon">🛏️</span><span class="nav-label">Recuperação pós</span></a>
-    <a class="nav-item" data-module="financeiro" href="#financeiro"><span class="nav-icon">💰</span><span class="nav-label">Financeiro</span></a>
-    <a class="nav-item" data-module="orcamento"  href="#orcamento"><span class="nav-icon">💵</span><span class="nav-label">Orçamentos</span></a>
-    <a class="nav-item" data-module="doses"      href="#doses"><span class="nav-icon">🧮</span><span class="nav-label">Doses &amp; Infusões</span></a>
-    <a class="nav-item" data-module="ajustes"    href="#ajustes"><span class="nav-icon">⚙️</span><span class="nav-label">Ajustes</span></a>
+    <a class="nav-item" data-module="dashboard"  href="#dashboard"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17l5-6 4 4 7-9"></path><path d="M4 21h16"></path></svg></span><span class="nav-label">Dashboard</span></a>
+    <a class="nav-item" data-module="pacientes"  href="#pacientes"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c0-4 3.5-6 8-6s8 2 8 6"></path></svg></span><span class="nav-label">Pacientes</span></a>
+    <a class="nav-item" data-module="agenda"     href="#agenda"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="3"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="16" y1="2" x2="16" y2="6"></line></svg></span><span class="nav-label">Agenda</span></a>
+    <a class="nav-item" data-module="consulta"   href="#consulta"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3v6a5 5 0 0 0 10 0V3"></path><path d="M10 14v2a5 5 0 0 0 10 0v-1"></path><circle cx="20" cy="12" r="2"></circle></svg></span><span class="nav-label">Consulta / Dor</span></a>
+    <a class="nav-item" data-module="pre"        href="#pre"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="3"></rect><line x1="9" y1="8" x2="15" y2="8"></line><line x1="9" y1="12" x2="15" y2="12"></line><line x1="9" y1="16" x2="13" y2="16"></line></svg></span><span class="nav-label">Pré-anestésica</span></a>
+    <a class="nav-item nav-sub" data-module="termo"      href="#termo"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"></path><path d="M9 13l2 2 4-4"></path></svg></span><span class="nav-label">Termo (TCLE)</span></a>
+    <a class="nav-item nav-sub" data-module="risco"      href="#risco"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="5"></circle><circle cx="12" cy="12" r="1"></circle></svg></span><span class="nav-label">Risco perioperatório</span></a>
+    <a class="nav-item" data-module="anestesia"  href="#anestesia"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 2l4 4"></path><path d="M17 7l-1.5-1.5"></path><path d="M19 5L8 16l-4 1 1-4L16 2"></path><path d="M8 16l-3 3"></path></svg></span><span class="nav-label">Ficha de anestesia</span></a>
+    <a class="nav-item nav-sub" data-module="recuperacao" href="#recuperacao"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7v11"></path><path d="M3 14h18v4"></path><path d="M3 11h8v3"></path><circle cx="7" cy="9" r="2"></circle></svg></span><span class="nav-label">Recuperação pós (RPA)</span></a>
+    <a class="nav-item" data-module="prescricao" href="#prescricao"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="9" width="16" height="7" rx="3.5" transform="rotate(-45 12 12.5)"></rect><line x1="8.5" y1="8.5" x2="15.5" y2="15.5"></line></svg></span><span class="nav-label">Receituário</span></a>
+    <a class="nav-item" data-module="financeiro" href="#financeiro"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"></rect><path d="M3 10h18"></path><path d="M7 15h4"></path></svg></span><span class="nav-label">Financeiro</span></a>
+    <a class="nav-item" data-module="orcamento"  href="#orcamento"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v20"></path><path d="M17 6H9.5a3 3 0 0 0 0 6h5a3 3 0 0 1 0 6H6"></path></svg></span><span class="nav-label">Orçamentos</span></a>
+    <a class="nav-item" data-module="doses"      href="#doses"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="3"></rect><line x1="9" y1="7" x2="15" y2="7"></line><circle cx="9" cy="12" r=".8"></circle><circle cx="15" cy="12" r=".8"></circle><circle cx="9" cy="17" r=".8"></circle><circle cx="15" cy="17" r=".8"></circle></svg></span><span class="nav-label">Doses &amp; Infusões</span></a>
+    <a class="nav-item" data-module="ajustes"    href="#ajustes"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.2 2.2M16.9 16.9l2.2 2.2M19.1 4.9l-2.2 2.2M7.1 16.9l-2.2 2.2"></path></svg></span><span class="nav-label">Ajustes</span></a>
   </nav>
   <div class="sidebar-footer">
     v7.1 · offline-ready · responsivo<br>
@@ -3564,6 +3911,27 @@ body.dark .auth-field input { background: #141b21; border-color: #33414d; color:
   </div>
 </aside>
 <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="ui.toggleSidebar()"></div>
+<nav class="bottom-nav" id="bottom-nav">
+  <a href="#dashboard" data-bn="dashboard"><span class="bn-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17l5-6 4 4 7-9"></path><path d="M4 21h16"></path></svg></span>Início</a>
+  <a href="#agenda" data-bn="agenda"><span class="bn-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="3"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="16" y1="2" x2="16" y2="6"></line></svg></span>Agenda</a>
+  <a href="#anestesia" data-bn="anestesia"><span class="bn-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 2l4 4"></path><path d="M17 7l-1.5-1.5"></path><path d="M19 5L8 16l-4 1 1-4L16 2"></path><path d="M8 16l-3 3"></path></svg></span>Ficha</a>
+  <a href="#financeiro" data-bn="financeiro"><span class="bn-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"></rect><path d="M3 10h18"></path><path d="M7 15h4"></path></svg></span>Financeiro</a>
+  <a href="javascript:ui.toggleSidebar()" class="bn-menu"><span class="bn-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="17" x2="20" y2="17"></line></svg></span>Menu</a>
+</nav>
+<script>
+(function(){
+  function syncBn(){
+    var mod=(location.hash||'#dashboard').replace('#','').split('/')[0];
+    document.querySelectorAll('#bottom-nav a[data-bn]').forEach(function(a){
+      a.classList.toggle('active', a.getAttribute('data-bn')===mod);
+    });
+  }
+  window.addEventListener('hashchange', syncBn);
+  document.addEventListener('DOMContentLoaded', syncBn);
+  syncBn();
+})();
+</script>
+
 
 <!-- ===========================================================================
      MAIN
@@ -32293,6 +32661,549 @@ const assinaturaDigital = (function () {
   /* reinjeta ao trocar de módulo (barras podem ser recriadas) */
   setInterval(() => { try { injetarBotoes(); } catch (e) {} }, 1500);
   return AD;
+})();
+</script>
+
+<div class="dose-quickbar"><button type="button" class="qb-vit" onclick="vitaisRapidos.abrir()">🩺 Vitais</button><button type="button" onclick="doseRapida.abrir()">💉 Dose rápida</button></div>
+<div class="dose-overlay" id="dose-overlay" onclick="doseRapida.fechar()"></div>
+<div class="dose-sheet" id="dose-sheet">
+  <div class="ds-handle"></div>
+  <h3 id="ds-titulo">Dose rápida</h3>
+  <div class="ds-sub" id="ds-sub">Escolha o fármaco — registra com a hora atual</div>
+  <div class="ds-chips" id="ds-meds"></div>
+  <div class="ds-doses" id="ds-doses" style="display:none"></div>
+  <div class="ds-actions">
+    <button type="button" class="ds-cancel" onclick="doseRapida.fechar()">✕</button>
+    <button type="button" class="ds-go" id="ds-go" disabled onclick="doseRapida.registrar()">Registrar</button>
+  </div>
+</div>
+<script>
+(function(){
+  /* ===== Barra fixa do paciente na ficha ===== */
+  var bar;
+  function ensureBar(){
+    if (bar) return bar;
+    var mod = document.getElementById('module-anestesia');
+    if (!mod) return null;
+    bar = document.createElement('div');
+    bar.className = 'ficha-topbar';
+    bar.id = 'ficha-topbar';
+    mod.insertBefore(bar, mod.firstChild);
+    return bar;
+  }
+  function esc(s){ return String(s||'').replace(/[<>&"]/g, function(c){ return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]; }); }
+  function atualizarBar(){
+    var b = ensureBar(); if (!b) return;
+    var f = document.getElementById('form-anestesia'); if (!f) return;
+    var v = function(n){ var el = f.querySelector('[name="'+n+'"]'); return el ? el.value.trim() : ''; };
+    var nome = v('paciente_nome');
+    var mod = (location.hash||'').replace('#','').split('/')[0];
+    if (!nome || mod !== 'anestesia') { b.classList.remove('on'); return; }
+    var idade = v('paciente_idade'), peso = v('paciente_peso'), imc = v('paciente_imc');
+    var asa = v('pre_asa') || v('asa'), alerg = v('pre_alergias');
+    var nega = /^\s*(nega|não|nao|sem|nda|-|—)/i.test(alerg);
+    var html = '<span class="ft-nome">'+esc(nome)+'</span>'
+      + '<span class="ft-sub">'+[idade?idade+'a':null, peso?peso+' kg':null, imc?'IMC '+imc:null].filter(Boolean).join(' · ')+'</span>';
+    if (asa) html += '<span class="ft-badge ft-asa">'+esc(asa)+'</span>';
+    if (alerg) html += nega
+      ? '<span class="ft-badge ft-alergia-nega">ALERGIAS: NEGA</span>'
+      : '<span class="ft-badge ft-alergia">⚠ ALERGIA: '+esc(alerg.toUpperCase().slice(0,40))+'</span>';
+    b.innerHTML = html;
+    b.classList.add('on');
+  }
+  function syncMod(){
+    var mod = (location.hash||'#dashboard').replace('#','').split('/')[0];
+    document.body.setAttribute('data-mod', mod);
+    atualizarBar();
+  }
+  window.addEventListener('hashchange', syncMod);
+  document.addEventListener('input', function(e){
+    if (e.target && e.target.form && e.target.form.id === 'form-anestesia') atualizarBar();
+  });
+  setInterval(atualizarBar, 3000);
+  if (document.readyState !== 'loading') syncMod(); else document.addEventListener('DOMContentLoaded', syncMod);
+
+  /* ===== Dose rápida — bottom sheet ===== */
+  var MEDS = [
+    { nome:'Fentanil',     unidade:'mcg', doses:[25,50,100,150] },
+    { nome:'Propofol',     unidade:'mg',  doses:[20,50,100,150] },
+    { nome:'Rocurônio',    unidade:'mg',  doses:[10,30,40,50] },
+    { nome:'Midazolam',    unidade:'mg',  doses:[1,2,3,5] },
+    { nome:'Efedrina',     unidade:'mg',  doses:[5,10,15] },
+    { nome:'Metaraminol',  unidade:'mg',  doses:[0.5,1,2] },
+    { nome:'Dipirona',     unidade:'g',   doses:[1,2] },
+    { nome:'Ondansetrona', unidade:'mg',  doses:[4,8] },
+    { nome:'Dexametasona', unidade:'mg',  doses:[4,8,10] },
+    { nome:'Cefazolina',   unidade:'g',   doses:[1,2] }
+  ];
+  var sel = { med:null, dose:null };
+  window.doseRapida = {
+    abrir: function(){
+      sel = { med:null, dose:null };
+      var box = document.getElementById('ds-meds');
+      box.innerHTML = MEDS.map(function(m,i){
+        return '<button type="button" class="ds-chip" onclick="doseRapida.med('+i+')">'+m.nome+'</button>';
+      }).join('');
+      document.getElementById('ds-doses').style.display = 'none';
+      document.getElementById('ds-titulo').textContent = 'Dose rápida';
+      document.getElementById('ds-sub').textContent = 'Escolha o fármaco — registra com a hora atual';
+      document.getElementById('ds-go').disabled = true;
+      document.getElementById('ds-go').textContent = 'Registrar';
+      document.getElementById('dose-overlay').classList.add('on');
+      document.getElementById('dose-sheet').classList.add('on');
+    },
+    med: function(i){
+      sel.med = MEDS[i]; sel.dose = null;
+      var chips = document.querySelectorAll('#ds-meds .ds-chip');
+      chips.forEach(function(c,j){ c.classList.toggle('sel', j===i); });
+      var dd = document.getElementById('ds-doses');
+      dd.style.display = 'flex';
+      dd.innerHTML = sel.med.doses.map(function(d){
+        return '<button type="button" class="ds-dose" onclick="doseRapida.dose('+d+')">'+d+'</button>';
+      }).join('');
+      document.getElementById('ds-sub').textContent = sel.med.nome+' · '+sel.med.unidade+' · EV · agora';
+      document.getElementById('ds-go').disabled = true;
+    },
+    dose: function(d){
+      sel.dose = d;
+      document.querySelectorAll('#ds-doses .ds-dose').forEach(function(b){
+        b.classList.toggle('sel', parseFloat(b.textContent)===d);
+      });
+      var go = document.getElementById('ds-go');
+      go.disabled = false;
+      go.textContent = 'Registrar '+sel.med.nome+' '+d+' '+sel.med.unidade+' ✓';
+    },
+    registrar: function(){
+      if (!sel.med || sel.dose==null) return;
+      try {
+        anestesia.meds.add({ hora: utils.horaAtual(), nome: sel.med.nome, dose: String(sel.dose), unidade: sel.med.unidade, via: 'EV' });
+        if (typeof markDirty === 'function') markDirty();
+      } catch(e) { alert('Abra uma ficha de anestesia primeiro.'); }
+      doseRapida.fechar();
+    },
+    fechar: function(){
+      document.getElementById('dose-overlay').classList.remove('on');
+      document.getElementById('dose-sheet').classList.remove('on');
+    }
+  };
+})();
+</script>
+
+<script>
+(function(){
+  function esc(s){ return String(s||'').replace(/[<>&"]/g, function(c){ return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]; }); }
+  var hero;
+  function ensureHero(){
+    if (hero) return hero;
+    var kpi = document.getElementById('kpi-grid');
+    if (!kpi) return null;
+    hero = document.createElement('div');
+    hero.className = 'hoje-hero';
+    hero.id = 'hoje-hero';
+    kpi.parentNode.insertBefore(hero, kpi);
+    return hero;
+  }
+  function renderHero(){
+    var h = ensureHero(); if (!h) return;
+    var hojeISO;
+    try { hojeISO = utils.hojeISO(); } catch(e){ var d=new Date(); hojeISO=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+    var itens = [];
+    try {
+      itens = (store.list('agenda')||[]).filter(function(a){ return a.data === hojeISO; })
+        .sort(function(a,b){ return String(a.hora||'99').localeCompare(String(b.hora||'99')); });
+    } catch(e){}
+    var dataFmt = new Date().toLocaleDateString('pt-BR', { weekday:'long', day:'numeric', month:'long' });
+    var html = '<div class="hh-top">'
+      + '<div><div class="hh-title">Hoje</div><div class="hh-date">'+esc(dataFmt)+'</div></div>'
+      + '<span class="hh-count">'+itens.length+' compromisso'+(itens.length===1?'':'s')+'</span></div>';
+    if (itens.length) {
+      html += '<div class="hh-list">' + itens.slice(0,6).map(function(a){
+        var det = [a.procedimento, a.cirurgiao, a.local].filter(Boolean).join(' · ');
+        return '<a class="hh-item" href="#agenda">'
+          + '<span class="hh-hora">'+esc(a.hora||'—')+'</span>'
+          + '<span><div class="hh-pac">'+esc(a.paciente||a.tipo||'Compromisso')+'</div>'
+          + (det?'<div class="hh-det">'+esc(det)+'</div>':'') + '</span>'
+          + (a.status?'<span class="hh-tag">'+esc(String(a.status).toUpperCase())+'</span>':'')
+          + '</a>';
+      }).join('') + '</div>';
+    } else {
+      html += '<div class="hh-vazio">Nenhum compromisso agendado para hoje.</div>';
+    }
+    html += '<div class="hh-actions">'
+      + '<a class="hh-btn hh-btn-teal" href="#anestesia">💉 Nova ficha</a>'
+      + '<a class="hh-btn hh-btn-line" href="#pre">📋 Nova pré-anestésica</a>'
+      + '<a class="hh-btn hh-btn-line" href="#agenda">📅 Agenda completa</a>'
+      + '<a class="hh-btn hh-btn-line" href="javascript:void(0)" onclick="var i=document.getElementById(\'dash-search-input\'); if(i){ i.focus(); }">🔎 Buscar</a>'
+      + '</div>';
+    h.innerHTML = html;
+  }
+  window.addEventListener('hashchange', function(){
+    var mod = (location.hash||'#dashboard').replace('#','').split('/')[0];
+    if (mod === 'dashboard') setTimeout(renderHero, 60);
+  });
+  if (document.readyState !== 'loading') setTimeout(renderHero, 300);
+  else document.addEventListener('DOMContentLoaded', function(){ setTimeout(renderHero, 300); });
+})();
+</script>
+
+<script>
+(function(){
+  function esc(s){ return String(s||'').replace(/[<>&"]/g, function(c){ return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]; }); }
+  var card, diaAtual;
+  function hojeISO(){
+    try { return utils.hojeISO(); } catch(e){ var d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+  }
+  function ensureCard(){
+    if (card) return card;
+    var contador = document.getElementById('ag-contador');
+    if (!contador) return null;
+    card = document.createElement('div');
+    card.className = 'card no-collapse ag-timeline-card';
+    card.innerHTML = '<div class="card-header no-collapse"><div class="ag-tl-head">'
+      + '<div class="card-title-wrap"><h2>Linha do dia</h2></div>'
+      + '<div class="ag-tl-nav">'
+      + '<button type="button" class="btn btn-sm" onclick="agTimeline.mudarDia(-1)">‹</button>'
+      + '<span class="ag-tl-dia" id="ag-tl-dia">—</span>'
+      + '<button type="button" class="btn btn-sm" onclick="agTimeline.mudarDia(1)">›</button>'
+      + '<button type="button" class="btn btn-sm" onclick="agTimeline.hoje()">Hoje</button>'
+      + '</div></div></div>'
+      + '<div class="card-body" id="ag-tl-body"></div>';
+    contador.parentNode.insertBefore(card, contador.nextSibling);
+    return card;
+  }
+  function render(){
+    var c = ensureCard(); if (!c) return;
+    if (!diaAtual) diaAtual = hojeISO();
+    var lbl = document.getElementById('ag-tl-dia');
+    var dParts = diaAtual.split('-');
+    var dObj = new Date(+dParts[0], +dParts[1]-1, +dParts[2]);
+    lbl.textContent = dObj.toLocaleDateString('pt-BR', { weekday:'short', day:'2-digit', month:'short' });
+    var itens = [];
+    try {
+      itens = (store.list('agenda')||[]).filter(function(a){ return a.data === diaAtual && a.hora; });
+    } catch(e){}
+    var body = document.getElementById('ag-tl-body');
+    if (!itens.length) {
+      body.innerHTML = '<div class="ag-tl-vazio">Sem compromissos com horário neste dia. Os compromissos sem hora aparecem no calendário abaixo.</div>';
+      return;
+    }
+    var horas = itens.map(function(a){ return parseInt(a.hora.split(':')[0],10); });
+    var hIni = Math.min(7, Math.min.apply(null, horas));
+    var hFim = Math.max(19, Math.max.apply(null, horas)+2);
+    var pxHora = 56;
+    var altura = (hFim - hIni) * pxHora;
+    var colHoras = '';
+    for (var h = hIni; h < hFim; h++) colHoras += '<span>'+String(h).padStart(2,'0')+':00</span>';
+    var gridlines = '';
+    for (var g = 1; g < (hFim - hIni); g++) gridlines += '<div class="ag-tl-gridline" style="top:'+(g*pxHora)+'px"></div>';
+    var blocos = itens.map(function(a){
+      var p = a.hora.split(':');
+      var top = ((+p[0] - hIni) + (+p[1]||0)/60) * pxHora;
+      var st = String(a.status||'agendado').toLowerCase();
+      var det = [a.procedimento, a.cirurgiao, a.local].filter(Boolean).join(' · ');
+      return '<div class="ag-tl-bloco st-'+esc(st)+'" style="top:'+top.toFixed(1)+'px" '
+        + 'onclick="agenda.editar(\''+esc(a._id||'')+'\')" title="Editar compromisso">'
+        + '<div class="tlb-pac">'+esc(a.hora)+' · '+esc(a.paciente||a.tipo||'Compromisso')+'</div>'
+        + (det?'<div class="tlb-det">'+esc(det)+'</div>':'')
+        + '<span class="tlb-tag">'+esc(st.toUpperCase())+'</span></div>';
+    }).join('');
+    var agora = '';
+    if (diaAtual === hojeISO()) {
+      var n = new Date();
+      var topN = ((n.getHours() - hIni) + n.getMinutes()/60) * pxHora;
+      if (topN >= 0 && topN <= altura) agora = '<div class="ag-tl-agora" style="top:'+topN.toFixed(1)+'px"></div>';
+    }
+    body.innerHTML = '<div class="ag-tl" style="height:'+altura+'px">'
+      + '<div class="ag-tl-horas">'+colHoras+'</div>'
+      + '<div class="ag-tl-track">'+gridlines+blocos+agora+'</div></div>';
+  }
+  window.agTimeline = {
+    mudarDia: function(delta){
+      var p = diaAtual.split('-');
+      var d = new Date(+p[0], +p[1]-1, +p[2]+delta);
+      diaAtual = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+      render();
+    },
+    hoje: function(){ diaAtual = hojeISO(); render(); },
+    render: render
+  };
+  window.addEventListener('hashchange', function(){
+    var mod = (location.hash||'').replace('#','').split('/')[0];
+    if (mod === 'agenda') setTimeout(render, 80);
+  });
+  if (document.readyState !== 'loading') setTimeout(render, 400);
+  else document.addEventListener('DOMContentLoaded', function(){ setTimeout(render, 400); });
+  /* re-renderiza quando um compromisso é salvo (formulário da agenda) */
+  document.addEventListener('submit', function(e){
+    if (e.target && e.target.id === 'form-agenda') setTimeout(render, 300);
+  }, true);
+})();
+</script>
+
+<script>
+(function(){
+  function build(select, cfg){
+    if (!select || select.dataset.stepper) return;
+    select.dataset.stepper = '1';
+    var wrap = document.createElement('div');
+    wrap.className = 'stepper-wrap';
+    select.classList.add('stepper-select-hidden');
+    select.parentNode.insertBefore(wrap, select.nextSibling);
+    function setVal(v){
+      select.value = v;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      select.dispatchEvent(new Event('input', { bubbles: true }));
+      sync();
+    }
+    function sync(){
+      var v = select.value;
+      wrap.querySelectorAll('.stp').forEach(function(b){
+        var bv = b.dataset.v;
+        if (b.classList.contains('stp-e')) {
+          b.classList.toggle('sel', /-E$/.test(v));
+        } else {
+          b.classList.toggle('sel', v === bv || v === bv + '-E');
+        }
+      });
+    }
+    cfg.chips.forEach(function(ch){
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'stp' + (ch.cls ? ' ' + ch.cls : '');
+      b.dataset.v = ch.v;
+      b.innerHTML = ch.label;
+      b.onclick = function(){
+        var cur = select.value;
+        if (ch.cls === 'stp-e') {
+          /* alterna sufixo -E mantendo a classe atual */
+          if (!cur) return;
+          setVal(/-E$/.test(cur) ? cur.replace(/-E$/,'') : (cur === 'ASA VI' ? cur : cur + '-E'));
+        } else {
+          /* mantém -E se já estava marcado e o alvo permite */
+          var manterE = /-E$/.test(cur) && ch.e !== false;
+          setVal(manterE ? ch.v + '-E' : ch.v);
+        }
+      };
+      wrap.appendChild(b);
+    });
+    select.addEventListener('change', sync);
+    sync();
+  }
+  function init(){
+    var asaChips = [
+      { v:'ASA I', label:'I' }, { v:'ASA II', label:'II' }, { v:'ASA III', label:'III' },
+      { v:'ASA IV', label:'IV' }, { v:'ASA V', label:'V' }, { v:'ASA VI', label:'VI', e:false },
+      { v:'', label:'E', cls:'stp-e' }
+    ];
+    var maChips = [
+      { v:'Mallampati I', label:'I' }, { v:'Mallampati II', label:'II' },
+      { v:'Mallampati III', label:'III' }, { v:'Mallampati IV', label:'IV' },
+      { v:'Via aérea difícil prevista', label:'<span class="stp-txt">VA difícil</span>' },
+      { v:'Sem alterações', label:'<span class="stp-txt">Sem alt.</span>' }
+    ];
+    ['asa','pre_asa'].forEach(function(n){
+      document.querySelectorAll('select[name="'+n+'"]').forEach(function(s){
+        if (/ASA I/.test(s.innerHTML)) build(s, { chips: asaChips });
+      });
+    });
+    ['via_aerea','pre_via_aerea'].forEach(function(n){
+      document.querySelectorAll('select[name="'+n+'"]').forEach(function(s){
+        if (/Mallampati I/.test(s.innerHTML)) build(s, { chips: maChips });
+      });
+    });
+  }
+  if (document.readyState !== 'loading') setTimeout(init, 400);
+  else document.addEventListener('DOMContentLoaded', function(){ setTimeout(init, 400); });
+})();
+</script>
+
+<div class="dose-overlay" id="vit-overlay" onclick="vitaisRapidos.fechar()"></div>
+<div class="dose-sheet" id="vit-sheet">
+  <div class="ds-handle"></div>
+  <h3>Sinais vitais — agora</h3>
+  <div class="ds-sub" id="vit-sub">Ajuste e registre; parte do último registro</div>
+  <div class="vit-grid" id="vit-grid"></div>
+  <div class="vit-ritmo" id="vit-ritmo"></div>
+  <div class="ds-actions">
+    <button type="button" class="ds-cancel" onclick="vitaisRapidos.fechar()">✕</button>
+    <button type="button" class="ds-go" id="vit-go" onclick="vitaisRapidos.registrar()">Registrar vitais ✓</button>
+  </div>
+</div>
+<script>
+(function(){
+  var CAMPOS = [
+    { k:'pas',  lbl:'PAS mmHg', def:120, passo:5,  min:30,  max:280 },
+    { k:'pad',  lbl:'PAD mmHg', def:80,  passo:5,  min:15,  max:160 },
+    { k:'fc',   lbl:'FC bpm',   def:70,  passo:5,  min:20,  max:220 },
+    { k:'fr',   lbl:'FR irpm',  def:12,  passo:1,  min:4,   max:60 },
+    { k:'spo2', lbl:'SpO₂ %',   def:98,  passo:1,  min:50,  max:100 }
+  ];
+  var RITMOS = ['Sinusal','Taquicardia sinusal','Bradicardia sinusal','FA','Ritmo de marca-passo'];
+  var vals = {}, ritmo = 'Sinusal';
+  function renderVals(){
+    CAMPOS.forEach(function(c){
+      var el = document.getElementById('vit-val-'+c.k);
+      if (el) el.textContent = vals[c.k];
+    });
+  }
+  window.vitaisRapidos = {
+    abrir: function(){
+      var ult = null;
+      try { ult = anestesia.vitais._lerUltima(); } catch(e){}
+      CAMPOS.forEach(function(c){
+        var v = ult && parseFloat(ult[c.k]);
+        vals[c.k] = (v && !isNaN(v)) ? v : c.def;
+      });
+      ritmo = (ult && ult.ritmo) || 'Sinusal';
+      document.getElementById('vit-sub').textContent = ult
+        ? 'Partindo do último registro — ajuste e registre'
+        : 'Valores típicos — ajuste e registre';
+      document.getElementById('vit-grid').innerHTML = CAMPOS.map(function(c){
+        return '<div class="vit-item"><div class="vi-lbl">'+c.lbl+'</div><div class="vi-row">'
+          + '<button type="button" class="vi-btn" onclick="vitaisRapidos.aj(\''+c.k+'\',-1)">−</button>'
+          + '<span class="vi-val" id="vit-val-'+c.k+'">'+vals[c.k]+'</span>'
+          + '<button type="button" class="vi-btn" onclick="vitaisRapidos.aj(\''+c.k+'\',1)">+</button>'
+          + '</div></div>';
+      }).join('');
+      document.getElementById('vit-ritmo').innerHTML = RITMOS.map(function(r){
+        return '<button type="button" class="ds-chip'+(r===ritmo?' sel':'')+'" onclick="vitaisRapidos.rit(this,\''+r+'\')">'+r+'</button>';
+      }).join('');
+      document.getElementById('vit-overlay').classList.add('on');
+      document.getElementById('vit-sheet').classList.add('on');
+    },
+    aj: function(k, dir){
+      var c = CAMPOS.find(function(x){ return x.k===k; });
+      vals[k] = Math.min(c.max, Math.max(c.min, vals[k] + dir*c.passo));
+      renderVals();
+    },
+    rit: function(btn, r){
+      ritmo = r;
+      document.querySelectorAll('#vit-ritmo .ds-chip').forEach(function(b){ b.classList.toggle('sel', b===btn); });
+    },
+    registrar: function(){
+      try {
+        var pam = '';
+        try { pam = anestesia.vitais._calcPAM(vals.pas, vals.pad); } catch(e){}
+        anestesia.vitais.add(false, {
+          hora: utils.horaAtual(),
+          pas: String(vals.pas), pad: String(vals.pad), pam: String(pam||''),
+          fc: String(vals.fc), fr: String(vals.fr), spo2: String(vals.spo2), ritmo: ritmo
+        });
+        if (typeof markDirty === 'function') markDirty();
+        try { anestesia.grafico.render(); } catch(e){}
+      } catch(e) { alert('Abra uma ficha de anestesia primeiro.'); }
+      vitaisRapidos.fechar();
+    },
+    fechar: function(){
+      document.getElementById('vit-overlay').classList.remove('on');
+      document.getElementById('vit-sheet').classList.remove('on');
+    }
+  };
+})();
+</script>
+
+<div class="gs-overlay" id="gs-overlay">
+  <div class="gs-box" onclick="event.stopPropagation()">
+    <div class="gs-inputwrap">
+      <span>🔎</span>
+      <input class="gs-input" id="gs-input" placeholder="Paciente, procedimento, convênio, módulo…" autocomplete="off" oninput="buscaGlobal.buscar()">
+      <button type="button" class="gs-close" onclick="buscaGlobal.fechar()">ESC</button>
+    </div>
+    <div class="gs-results" id="gs-results"></div>
+  </div>
+</div>
+<script>
+(function(){
+  function esc(s){ return String(s||'').replace(/[<>&"]/g, function(c){ return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]; }); }
+  var MODS = ['anestesia','pre','consulta','recuperacao','termo','prescricao','risco','financeiro'];
+  var LABELS = { anestesia:'Anestesia', pre:'Pré', consulta:'Consulta', recuperacao:'SRPA', termo:'Termo', prescricao:'Receituário', risco:'Risco', financeiro:'Financeiro', agenda:'Agenda' };
+  var ACOES = [
+    { t:'Nova ficha de anestesia', ic:'💉', go:function(){ location.hash='#anestesia'; setTimeout(function(){ try{ anestesia.novo(); }catch(e){} }, 200); } },
+    { t:'Nova pré-anestésica', ic:'📋', go:function(){ location.hash='#pre'; } },
+    { t:'Novo compromisso na agenda', ic:'📅', go:function(){ location.hash='#agenda'; setTimeout(function(){ try{ agenda.editar(null); }catch(e){} }, 200); } },
+    { t:'Dashboard', ic:'📊', go:function(){ location.hash='#dashboard'; } },
+    { t:'Financeiro', ic:'💰', go:function(){ location.hash='#financeiro'; } },
+    { t:'Ajustes', ic:'⚙️', go:function(){ location.hash='#ajustes'; } }
+  ];
+  var acaoAtual = [];
+  window.buscaGlobal = {
+    abrir: function(){
+      document.getElementById('gs-overlay').classList.add('on');
+      var i = document.getElementById('gs-input');
+      i.value = ''; buscaGlobal.buscar();
+      setTimeout(function(){ i.focus(); }, 60);
+    },
+    fechar: function(){ document.getElementById('gs-overlay').classList.remove('on'); },
+    acao: function(i){ buscaGlobal.fechar(); acaoAtual[i].go(); },
+    abrirReg: function(mod, id){
+      buscaGlobal.fechar();
+      try { dashboard._abrirRegistro(mod, id); } catch(e){ location.hash = '#'+mod; }
+    },
+    buscar: function(){
+      var termo = document.getElementById('gs-input').value.toLowerCase().trim();
+      var out = document.getElementById('gs-results');
+      var html = '';
+      /* ações */
+      acaoAtual = termo ? ACOES.filter(function(a){ return a.t.toLowerCase().includes(termo); }) : ACOES.slice(0,4);
+      if (acaoAtual.length) {
+        html += '<div class="gs-h">AÇÕES</div>' + acaoAtual.map(function(a,i){
+          return '<div class="gs-item" onclick="buscaGlobal.acao('+i+')"><span class="gs-ic">'+a.ic+'</span><span class="gs-nome">'+esc(a.t)+'</span></div>';
+        }).join('');
+      }
+      if (termo && termo.length >= 2) {
+        var res = [];
+        MODS.forEach(function(m){
+          var lista = [];
+          try { lista = store.list(m) || []; } catch(e){}
+          lista.forEach(function(it){
+            var nome = it.paciente_nome || it.nome || (it.paciente && it.paciente.nome) || it.paciente || '';
+            var proc = (it.procedimento && it.procedimento.descricao) || it.descricao || '';
+            var cir = (it.procedimento && it.procedimento.cirurgiao) || '';
+            var conv = (it.paciente && it.paciente.convenio) || it.convenio || '';
+            var blob = [nome, proc, cir, conv].join(' ').toLowerCase();
+            if (blob.includes(termo)) res.push({ mod:m, id:it._id, nome:nome||'(sem nome)', det:[proc,cir,conv].filter(Boolean).join(' · '), data:it._updatedAt });
+          });
+        });
+        try {
+          (store.list('agenda')||[]).forEach(function(a){
+            var blob = [a.paciente,a.procedimento,a.cirurgiao,a.convenio,a.local].join(' ').toLowerCase();
+            if (blob.includes(termo)) res.push({ mod:'agenda', id:a._id, nome:a.paciente||a.tipo||'Compromisso', det:[a.data,a.hora,a.procedimento].filter(Boolean).join(' · '), data:a.data });
+          });
+        } catch(e){}
+        res.sort(function(x,y){ return new Date(y.data||0) - new Date(x.data||0); });
+        if (res.length) {
+          html += '<div class="gs-h">REGISTROS · '+res.length+'</div>' + res.slice(0,30).map(function(r){
+            return '<div class="gs-item" onclick="buscaGlobal.abrirReg(\''+r.mod+'\',\''+esc(r.id)+'\')">'
+              + '<span class="gs-mod">'+(LABELS[r.mod]||r.mod)+'</span>'
+              + '<span><div class="gs-nome">'+esc(r.nome)+'</div>'
+              + (r.det?'<div class="gs-det">'+esc(r.det)+'</div>':'') + '</span></div>';
+          }).join('');
+        } else {
+          html += '<div class="gs-vazio">Nenhum registro para "'+esc(termo)+'".</div>';
+        }
+      } else if (!termo) {
+        html += '<div class="gs-vazio">Digite 2+ letras para buscar em todos os módulos — pacientes, procedimentos, convênios, agenda.</div>';
+      }
+      out.innerHTML = html;
+    }
+  };
+  /* botão no header */
+  function initBtn(){
+    var hdr = document.querySelector('.app-header');
+    if (!hdr || document.getElementById('gs-trigger')) return;
+    var b = document.createElement('button');
+    b.type = 'button'; b.id = 'gs-trigger'; b.className = 'gs-trigger';
+    b.innerHTML = '🔎 <span class="gs-txt">Buscar em tudo</span> <kbd>Ctrl K</kbd>';
+    b.onclick = buscaGlobal.abrir;
+    hdr.appendChild(b);
+  }
+  document.getElementById('gs-overlay').addEventListener('click', buscaGlobal.fechar);
+  document.addEventListener('keydown', function(e){
+    if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='k') { e.preventDefault(); buscaGlobal.abrir(); }
+    if (e.key==='Escape') buscaGlobal.fechar();
+  });
+  if (document.readyState !== 'loading') setTimeout(initBtn, 300);
+  else document.addEventListener('DOMContentLoaded', function(){ setTimeout(initBtn, 300); });
 })();
 </script>
 </body>
