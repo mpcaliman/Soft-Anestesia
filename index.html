@@ -4543,7 +4543,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
 
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">3</span><h2>Exame e conduta</h2></div>
+        <div class="card-title-wrap"><span class="card-num">3</span><h2>Exame físico e complementar<small>Achados objetivos e exames</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
@@ -4591,10 +4591,20 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
               <div class="field col-12"><label style="font-size:.78rem">Outros exames / observações</label><textarea name="exames_compl" rows="2"></textarea></div>
             </div>
           </div>
+        </div>
+      </div>
+    </section>
 
-          <div class="field col-6"><label>Hipótese diagnóstica</label><textarea name="hipotese" rows="3"></textarea></div>
-          <div class="field col-6"><label>Conduta</label>
-            <textarea name="conduta" rows="3"></textarea>
+    <section class="card">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-num">4</span><h2>Conduta<small>Hipótese, conduta específica, prescrição e retorno</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <div class="grid">
+          <div class="field col-12"><label>Hipótese diagnóstica</label><textarea name="hipotese" rows="2"></textarea></div>
+          <div class="field col-12"><label>Conduta específica <small style="color:var(--text-mute);font-weight:400">— plano terapêutico deste atendimento</small></label>
+            <textarea name="conduta" rows="4" placeholder="Conduta específica: diagnóstico de trabalho, medida terapêutica, bloqueio/procedimento indicado, ajuste de medicação, encaminhamentos..."></textarea>
             <div class="field-templates">
               <button type="button" class="btn btn-xs tpl-btn" onclick="templates.aplicar('consulta','conduta','dorAguda')">+ Dor aguda</button>
               <button type="button" class="btn btn-xs tpl-btn" onclick="templates.aplicar('consulta','conduta','dorCronica')">+ Dor crônica</button>
