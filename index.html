@@ -5056,7 +5056,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           </div>
           <div class="grid">
             <div class="field col-4"><label>Via aérea utilizada</label>
-              <select name="via_aerea_uso">
+              <select name="via_aerea_uso" onchange="anestesia.eventos.aoSelecionarViaAerea(this)">
                 <option value="">—</option>
                 <option>Ventilação espontânea (sem dispositivo)</option>
                 <option>Cânula/cateter nasal de O₂</option>
@@ -6186,19 +6186,19 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       </div>
       <div class="card-body">
         <div class="grid">
-          <div class="field col-2"><label>PA chegada</label><input type="text" name="pa_inicial" placeholder="120/80"></div>
-          <div class="field col-2"><label>FC chegada</label><input type="number" name="fc_inicial"></div>
-          <div class="field col-2"><label>SpO₂ chegada</label><input type="number" name="spo2_inicial"></div>
-          <div class="field col-2"><label>FR chegada</label><input type="number" name="fr_inicial"></div>
-          <div class="field col-2"><label>Temp chegada</label><input type="number" name="temp_inicial" step="0.1"></div>
+          <div class="field col-2"><label>PA chegada <small style="color:var(--text-mute);font-weight:400">— 1ª linha</small></label><input type="text" name="pa_inicial" placeholder="da tabela" readonly ondblclick="this.readOnly=false" title="1ª linha da tabela de sinais vitais da SRPA. Dê 2 toques para editar." style="background:var(--surface-alt)"></div>
+          <div class="field col-2"><label>FC chegada</label><input type="number" name="fc_inicial" readonly ondblclick="this.readOnly=false" title="1ª linha da tabela. Dê 2 toques para editar." style="background:var(--surface-alt)"></div>
+          <div class="field col-2"><label>SpO₂ chegada</label><input type="number" name="spo2_inicial" readonly ondblclick="this.readOnly=false" title="1ª linha da tabela. Dê 2 toques para editar." style="background:var(--surface-alt)"></div>
+          <div class="field col-2"><label>FR chegada</label><input type="number" name="fr_inicial" readonly ondblclick="this.readOnly=false" title="1ª linha da tabela. Dê 2 toques para editar." style="background:var(--surface-alt)"></div>
+          <div class="field col-2"><label>Temp chegada</label><input type="number" name="temp_inicial" step="0.1" readonly ondblclick="this.readOnly=false" title="1ª linha da tabela. Dê 2 toques para editar." style="background:var(--surface-alt)"></div>
           <div class="field col-2"><label>O₂ em uso?</label>
             <select name="oxigenio"><option value="">—</option><option>Não</option><option>Cateter nasal</option><option>Máscara facial</option><option>Venturi</option><option>Outro</option></select>
           </div>
-          <div class="field col-2"><label>PA alta</label><input type="text" name="pa_alta" placeholder="120/80"></div>
-          <div class="field col-2"><label>FC alta</label><input type="number" name="fc_alta"></div>
-          <div class="field col-2"><label>SpO₂ alta</label><input type="number" name="spo2_alta"></div>
-          <div class="field col-2"><label>FR alta</label><input type="number" name="fr_alta"></div>
-          <div class="field col-2"><label>Temp alta</label><input type="number" name="temp_alta" step="0.1"></div>
+          <div class="field col-2"><label>PA alta <small style="color:var(--text-mute);font-weight:400">— última linha</small></label><input type="text" name="pa_alta" placeholder="da tabela" readonly ondblclick="this.readOnly=false" title="Última linha da tabela de sinais vitais da SRPA. Dê 2 toques para editar." style="background:var(--surface-alt)"></div>
+          <div class="field col-2"><label>FC alta</label><input type="number" name="fc_alta" readonly ondblclick="this.readOnly=false" title="Última linha da tabela. Dê 2 toques para editar." style="background:var(--surface-alt)"></div>
+          <div class="field col-2"><label>SpO₂ alta</label><input type="number" name="spo2_alta" readonly ondblclick="this.readOnly=false" title="Última linha da tabela. Dê 2 toques para editar." style="background:var(--surface-alt)"></div>
+          <div class="field col-2"><label>FR alta</label><input type="number" name="fr_alta" readonly ondblclick="this.readOnly=false" title="Última linha da tabela. Dê 2 toques para editar." style="background:var(--surface-alt)"></div>
+          <div class="field col-2"><label>Temp alta</label><input type="number" name="temp_alta" step="0.1" readonly ondblclick="this.readOnly=false" title="Última linha da tabela. Dê 2 toques para editar." style="background:var(--surface-alt)"></div>
 
           <div class="field col-3"><label>Dor (EVA 0-10)</label><input type="number" name="dor" min="0" max="10"></div>
           <div class="field col-3"><label>Náusea/Vômito</label>
@@ -7467,6 +7467,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     <section class="card">
       <div class="card-header no-collapse">
         <div class="card-title-wrap"><span class="card-icon">&#129485;</span><h2>Paciente</h2></div>
+        <div class="card-actions"><button type="button" class="btn btn-xs" onclick="doses.puxarPaciente(false)" title="Preenche peso, altura, idade e sexo a partir da Ficha de Anestesia ativa">👤 Puxar da ficha</button></div>
       </div>
       <div class="card-body">
         <div class="grid">
@@ -11251,6 +11252,35 @@ const recuperacao = {
     atualizar() {
       recuperacao.grafico._ctx();
       anestesia.vitais.atualizarGrafico();
+      /* garante que editar a tabela reflita nos campos de chegada/alta */
+      const tb = document.getElementById('srpa-vitais-body');
+      if (tb && !tb._snapHook) {
+        tb._snapHook = 1;
+        tb.addEventListener('input', () => { try { recuperacao.grafico._derivarSnapshots(); } catch (e) {} });
+      }
+      try { recuperacao.grafico._derivarSnapshots(); } catch (e) {}
+    },
+    /* Deriva os campos de sinais vitais de CHEGADA (1ª linha) e ALTA (última
+       linha) a partir da tabela de sinais vitais da SRPA. Só preenche campos
+       ainda em modo automático (readOnly); respeita edição manual. */
+    _derivarSnapshots() {
+      const linhas = Array.from(document.querySelectorAll('#srpa-vitais-body tr'));
+      if (!linhas.length) return;
+      const f = document.getElementById('form-recuperacao');
+      if (!f) return;
+      const q = (tr, n) => (tr.querySelector(`[name="${n}"]`) || {}).value || '';
+      const pa = tr => { const pas = q(tr, 'vit_pas[]'), pad = q(tr, 'vit_pad[]'); return (pas && pad) ? (pas + '/' + pad) : (pas || ''); };
+      const set = (name, val) => {
+        const el = f.querySelector(`[name="${name}"]`);
+        if (el && el.readOnly) el.value = val;   /* não sobrescreve se destravado */
+      };
+      const primeira = linhas[0], ultima = linhas[linhas.length - 1];
+      set('pa_inicial', pa(primeira)); set('fc_inicial', q(primeira, 'vit_fc[]'));
+      set('spo2_inicial', q(primeira, 'vit_spo2[]')); set('fr_inicial', q(primeira, 'vit_fr[]'));
+      set('temp_inicial', q(primeira, 'vit_temp[]'));
+      set('pa_alta', pa(ultima)); set('fc_alta', q(ultima, 'vit_fc[]'));
+      set('spo2_alta', q(ultima, 'vit_spo2[]')); set('fr_alta', q(ultima, 'vit_fr[]'));
+      set('temp_alta', q(ultima, 'vit_temp[]'));
     },
     /* Coleta dados do gráfico SRPA para salvar */
     coletar() {
@@ -14627,8 +14657,24 @@ const medicacoes = {
       alvo.dispatchEvent(new Event('input', { bubbles: true }));
       try { markDirty(); } catch (e) {}
     }
+    /* Se o alvo é a descrição da técnica anestésica, também lança as
+       medicações na TABELA de Medicações (fonte do gráfico/consumo),
+       evitando registrar a mesma droga em dois lugares. */
+    let naTabela = 0;
+    if (/tecnica_descricao/.test(medicacoes._campoAlvo || '') && typeof anestesia !== 'undefined') {
+      try {
+        anestesia.graficoUI._contexto = 'anestesia';
+        chips.forEach(c => {
+          const nome = c.getAttribute('data-nome');
+          if (!nome) return;
+          const existe = Array.from(document.querySelectorAll('#medicacoes-body [name="med_nome[]"]'))
+            .some(el => (el.value || '').trim().toLowerCase() === nome.trim().toLowerCase());
+          if (!existe) { anestesia.meds.add({ nome }); naTabela++; }
+        });
+      } catch (e) {}
+    }
     modal.close();
-    toast(`${textos.length} medicação(ões) adicionada(s)`);
+    toast(`${textos.length} medicação(ões) adicionada(s)` + (naTabela ? ` · ${naTabela} na tabela de Medicações` : ''));
   }
 };
 
@@ -17209,6 +17255,23 @@ const anestesia = {
       const desc = anestesia.eventos.DESCRICOES[tipoEvt] || '';
       anestesia.eventos.add({ tipo: tipoEvt, hora: utils.horaAtual(), obs: desc });
       try { toast('Evento "' + tipoEvt + '" adicionado — complete os detalhes em Eventos cronológicos.'); } catch (e) {}
+    },
+    /* Ao escolher a via aérea utilizada (card Acessos), cria o evento de manejo
+       correspondente na linha do tempo — evita registrar a intubação em 2 lugares. */
+    VIA_AEREA_EVENTO: {
+      'Máscara laríngea': 'Máscara laríngea',
+      'Intubação orotraqueal': 'Intubação',
+      'Intubação nasotraqueal': 'Intubação'
+    },
+    aoSelecionarViaAerea(sel) {
+      if (!sel || !sel.value) return;
+      const tipoEvt = anestesia.eventos.VIA_AEREA_EVENTO[sel.value];
+      if (!tipoEvt) return;
+      anestesia.graficoUI._contexto = 'anestesia';
+      if (anestesia.eventos.existeEvento(tipoEvt)) return; /* não duplica */
+      const desc = anestesia.eventos.DESCRICOES[tipoEvt] || '';
+      anestesia.eventos.add({ tipo: tipoEvt, hora: utils.horaAtual(), obs: desc });
+      try { toast('Evento "' + tipoEvt + '" adicionado à linha do tempo.'); } catch (e) {}
     },
     /* Início do halogenado: marca o evento e abre a calculadora (agente/fluxo/%) */
     iniciarHalogenado() {
@@ -30214,7 +30277,33 @@ const DOSES_DB = [
 
 const doses = {
   _cat: 'todas',
-  init() { doses._renderChips(); doses.recalcular(); },
+  init() { doses._renderChips(); try { doses.puxarPaciente(true); } catch (e) {} doses.recalcular(); },
+  /* Puxa peso/altura/idade/sexo do paciente da Ficha de Anestesia ativa,
+     evitando redigitar. soSeVazio=true só preenche campos ainda em branco. */
+  puxarPaciente(soSeVazio) {
+    const fa = document.getElementById('form-anestesia');
+    if (!fa) return;
+    const g = n => (fa.querySelector(`[name="${n}"]`) || {}).value || '';
+    const peso = g('paciente_peso'), altura = g('paciente_altura');
+    const idadeTxt = g('paciente_idade'); /* ex.: "45 anos" */
+    const idadeNum = (idadeTxt.match(/\d+/) || [''])[0];
+    const sexoTxt = g('paciente_sexo');
+    const sexo = /^m/i.test(sexoTxt) ? 'M' : (/^f/i.test(sexoTxt) ? 'F' : '');
+    const set = (id, val) => {
+      const el = document.getElementById(id);
+      if (!el || val === '' || val == null) return;
+      if (soSeVazio && el.value && el.value.trim() !== '') return;
+      el.value = val;
+    };
+    set('dose-peso', peso); set('dose-altura', altura);
+    if (idadeNum) { const un = document.getElementById('dose-idade-un'); if (un && (!soSeVazio || !document.getElementById('dose-idade').value)) un.value = 'anos'; set('dose-idade', idadeNum); }
+    set('dose-sexo', sexo);
+    doses.recalcular();
+    if (!soSeVazio) {
+      if (peso || altura) toast('👤 Peso/altura puxados da Ficha de Anestesia');
+      else toast('Nenhum peso/altura na Ficha de Anestesia ativa', 'warn');
+    }
+  },
   _val(id) { const el = document.getElementById(id); const v = el ? parseFloat(el.value) : NaN; return isNaN(v) ? null : v; },
   _peso() { return doses._val('dose-peso'); },
   /* Unidade da idade selecionada: 'anos' | 'meses' | 'dias' */
