@@ -10455,11 +10455,18 @@ const pre = {
 
   abrirRisco() {
     const f = document.getElementById(pre.formId);
+    const gv = n => { const el = f.querySelector('[name="' + n + '"]'); return el ? el.value : ''; };
+    /* Idade em anos (o campo do Pré pode ter texto tipo "54 anos") */
+    const idadeNum = (gv('idade').match(/\d+/) || [''])[0];
+    /* Sexo: Pré usa "Masculino/Feminino"; Risco usa M/F */
+    const sexoTxt = gv('sexo'); const sexo = /^m/i.test(sexoTxt) ? 'M' : (/^f/i.test(sexoTxt) ? 'F' : '');
+    /* ASA: Pré usa "ASA III(-E)"; Risco usa 1–5 */
+    const asaMap = { i: '1', ii: '2', iii: '3', iv: '4', v: '5', vi: '5' };
+    const asaM = gv('asa').match(/ASA\s+(IV|III|II|VI|V|I)\b/i);
+    const asa = asaM ? (asaMap[asaM[1].toLowerCase()] || '') : '';
     const dados = {
-      nome: f.querySelector('[name="nome"]') ? f.querySelector('[name="nome"]').value : '',
-      idade: f.querySelector('[name="idade"]') ? f.querySelector('[name="idade"]').value : '',
-      peso: f.querySelector('[name="peso"]') ? f.querySelector('[name="peso"]').value : '',
-      altura: f.querySelector('[name="altura"]') ? f.querySelector('[name="altura"]').value : ''
+      nome: gv('nome'), idade: idadeNum, sexo: sexo, peso: gv('peso'), altura: gv('altura'),
+      creat: gv('lab_creat'), hb: gv('lab_hb'), spo2: gv('spo2'), asa: asa
     };
     const preId = f.querySelector('[name="_id"]') ? f.querySelector('[name="_id"]').value : '';
     /* Marca de onde viemos, para permitir voltar (o Pré fica preservado, apenas oculto) */
@@ -10469,6 +10476,7 @@ const pre = {
       try {
         const set = (id, v) => { const el = risco._$(id); if (el && v) el.value = v; };
         set('nome', dados.nome); set('idade', dados.idade); set('peso', dados.peso); set('altura', dados.altura);
+        set('sexo', dados.sexo); set('creat', dados.creat); set('hb', dados.hb); set('spo2', dados.spo2); set('asa', dados.asa);
         if (preId) risco._linkPendente = { mod: 'pre', id: preId };
         risco._origemPre = { preId: preId || '', rascId: rascId || '' };
         const bt = document.getElementById('btn-risco-voltar-pre');
