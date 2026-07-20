@@ -439,6 +439,16 @@ html[data-theme="dark"] .theme-toggle:hover {
 .presc-sug-item { padding: 8px 10px; cursor: pointer; border-bottom: 1px solid var(--surface-alt); }
 .presc-sug-item:last-child { border-bottom: none; }
 .presc-sug-item:hover { background: var(--primary-soft); }
+.cid-wrap { position: relative; }
+.cid-suggest {
+  position: absolute; z-index: 60; left: 0; right: 0; top: 100%;
+  background: #fff; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  box-shadow: 0 6px 20px rgba(0,0,0,.16); max-height: 260px; overflow-y: auto; margin-top: 2px;
+}
+.cid-item { padding: 8px 10px; cursor: pointer; border-bottom: 1px solid var(--surface-alt); font-size: .86rem; }
+.cid-item:last-child { border-bottom: none; }
+.cid-item:hover, .cid-item.on { background: var(--primary-soft); }
+.cid-item b { color: var(--primary-darker); }
 
 /* === NUVEM / BACKUP === */
 .cloud-status-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 6px; }
@@ -3900,6 +3910,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     <a class="nav-item" data-module="anestesia"  href="#anestesia"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 2l4 4"></path><path d="M17 7l-1.5-1.5"></path><path d="M19 5L8 16l-4 1 1-4L16 2"></path><path d="M8 16l-3 3"></path></svg></span><span class="nav-label">Ficha de anestesia</span></a>
     <a class="nav-item nav-sub" data-module="recuperacao" href="#recuperacao"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7v11"></path><path d="M3 14h18v4"></path><path d="M3 11h8v3"></path><circle cx="7" cy="9" r="2"></circle></svg></span><span class="nav-label">Recuperação pós (RPA)</span></a>
     <a class="nav-item" data-module="prescricao" href="#prescricao"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="9" width="16" height="7" rx="3.5" transform="rotate(-45 12 12.5)"></rect><line x1="8.5" y1="8.5" x2="15.5" y2="15.5"></line></svg></span><span class="nav-label">Receituário</span></a>
+    <a class="nav-item" data-module="documentos" href="#documentos"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"></path><path d="M14 3v5h5"></path><line x1="8.5" y1="13" x2="15.5" y2="13"></line><line x1="8.5" y1="17" x2="13" y2="17"></line></svg></span><span class="nav-label">Documentos</span></a>
     <a class="nav-item" data-module="financeiro" href="#financeiro"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"></rect><path d="M3 10h18"></path><path d="M7 15h4"></path></svg></span><span class="nav-label">Financeiro</span></a>
     <a class="nav-item" data-module="orcamento"  href="#orcamento"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v20"></path><path d="M17 6H9.5a3 3 0 0 0 0 6h5a3 3 0 0 1 0 6H6"></path></svg></span><span class="nav-label">Orçamentos</span></a>
     <a class="nav-item" data-module="doses"      href="#doses"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="3"></rect><line x1="9" y1="7" x2="15" y2="7"></line><circle cx="9" cy="12" r=".8"></circle><circle cx="15" cy="12" r=".8"></circle><circle cx="9" cy="17" r=".8"></circle><circle cx="15" cy="17" r=".8"></circle></svg></span><span class="nav-label">Doses &amp; Infusões</span></a>
@@ -4415,9 +4426,9 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
             <label>Documentos do paciente <small style="color:var(--text-mute);font-weight:400">(abre já preenchido — use "Voltar" para retornar à pré)</small></label>
             <div class="quick-actions">
               <button type="button" class="btn btn-sm" onclick="prescricao.abrirDocumento('simples','pre')">🧾 Receituário</button>
-              <button type="button" class="btn btn-sm" onclick="prescricao.abrirDocumento('atestado','pre')">📝 Atestado</button>
-              <button type="button" class="btn btn-sm" onclick="prescricao.abrirDocumento('declaracao','pre')">🕐 Declaração de comparecimento</button>
-              <button type="button" class="btn btn-sm" onclick="prescricao.abrirDocumento('laudo','pre')">🧾 Laudo (INSS/empresa/plano)</button>
+              <button type="button" class="btn btn-sm" onclick="documentos.abrir('atestado','pre')">📝 Atestado</button>
+              <button type="button" class="btn btn-sm" onclick="documentos.abrir('declaracao','pre')">🕐 Declaração de comparecimento</button>
+              <button type="button" class="btn btn-sm" onclick="documentos.abrir('laudo','pre')">🧾 Laudo (INSS/empresa/plano)</button>
             </div>
           </div>
         </div>
@@ -4646,9 +4657,9 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
             <label>Documentos do paciente <small style="color:var(--text-mute);font-weight:400">(abre já preenchido — use "Voltar" para retornar à consulta)</small></label>
             <div class="quick-actions">
               <button type="button" class="btn btn-sm" onclick="prescricao.abrirDocumento('simples','consulta')">🧾 Receituário</button>
-              <button type="button" class="btn btn-sm" onclick="prescricao.abrirDocumento('atestado','consulta')">📝 Atestado</button>
-              <button type="button" class="btn btn-sm" onclick="prescricao.abrirDocumento('declaracao','consulta')">🕐 Declaração de comparecimento</button>
-              <button type="button" class="btn btn-sm" onclick="prescricao.abrirDocumento('laudo','consulta')">🧾 Laudo (INSS/empresa/plano)</button>
+              <button type="button" class="btn btn-sm" onclick="documentos.abrir('atestado','consulta')">📝 Atestado</button>
+              <button type="button" class="btn btn-sm" onclick="documentos.abrir('declaracao','consulta')">🕐 Declaração de comparecimento</button>
+              <button type="button" class="btn btn-sm" onclick="documentos.abrir('laudo','consulta')">🧾 Laudo (INSS/empresa/plano)</button>
             </div>
           </div>
         </div>
@@ -6820,6 +6831,171 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
 </div>
 
 <!-- ===========================================================================
+     MÓDULO — DOCUMENTOS (atestados, declarações e laudos)
+=========================================================================== -->
+<div class="module" id="module-documentos" data-module="documentos">
+  <div class="action-bar">
+    <button class="btn btn-sm" onclick="ui.alternarTodos('documentos')" title="Expandir ou recolher todos os campos">⊕ Expandir tudo</button>
+    <button class="btn" id="btn-voltar-documentos" style="display:none;background:var(--primary-light);color:var(--primary-darker);border-color:var(--primary)" onclick="documentos.voltar()" title="Voltar ao atendimento de origem"><span class="icon">←</span> Voltar ao atendimento</button>
+    <button class="btn btn-primary" onclick="documentos.novo()"><span class="icon">📄</span> Novo</button>
+    <button class="btn btn-success" onclick="documentos.salvar()" title="Salvar documento"><span class="icon">💾</span> Salvar</button>
+    <button class="btn" onclick="historico.abrir('documentos')"><span class="icon">🔍</span> Buscar / Histórico</button>
+    <div class="action-divider"></div>
+    <button class="btn" onclick="printPreview.abrir()"><span class="icon">🖨️</span> Visualizar / Imprimir</button>
+    <button class="btn" onclick="documentos.exportar()"><span class="icon">⬇️</span> Exportar</button>
+    <div class="action-divider"></div>
+    <button class="btn btn-danger" onclick="documentos.limpar()"><span class="icon">🗑️</span> Limpar</button>
+  </div>
+
+  <form id="form-documentos" class="container" autocomplete="off" onsubmit="event.preventDefault(); documentos.salvar();">
+    <div class="page-title">
+      <h1>Documentos</h1>
+      <span class="subtitle">Atestados, declarações de comparecimento e laudos médicos</span>
+    </div>
+
+    <div class="doc-status" id="docstatus-documentos">
+      <span class="ds-badge novo" id="dsbadge-documentos">📄 Novo documento</span>
+      <span class="ds-meta" id="dsmeta-documentos"></span>
+    </div>
+
+    <div class="banner" id="banner-documentos" style="display:none">
+      <span class="banner-icon">ℹ️</span>
+      <span id="banner-documentos-text"></span>
+      <button class="banner-close" onclick="ui.fecharBanner('banner-documentos')">×</button>
+    </div>
+
+    <!-- 1. TIPO E PACIENTE -->
+    <section class="card">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-num">1</span><h2>Tipo e paciente</h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <div class="grid">
+          <div class="field col-12"><label>Tipo de documento</label>
+            <div class="radio-row" style="flex-wrap:wrap">
+              <label class="radio-chip"><input type="radio" name="modelo" value="atestado" checked onchange="documentos.atualizarTipo()"> 📝 Atestado médico</label>
+              <label class="radio-chip"><input type="radio" name="modelo" value="declaracao" onchange="documentos.atualizarTipo()"> 🕐 Declaração de comparecimento</label>
+              <label class="radio-chip"><input type="radio" name="modelo" value="laudo" onchange="documentos.atualizarTipo()"> 🧾 Laudo médico</label>
+            </div>
+          </div>
+          <div class="field col-6 required"><label>Nome do paciente <span class="req">*</span></label>
+            <input type="text" name="nome" data-required onblur="linker.autoPreencherDadosPaciente(this.value, 'documentos')"></div>
+          <div class="field col-3"><label>Idade</label><input type="text" name="idade"></div>
+          <div class="field col-3"><label>Data de emissão</label><input type="date" name="data"></div>
+          <div class="field col-6"><label>Documento (RG/CPF) <small style="color:var(--text-mute)">(opcional)</small></label>
+            <input type="text" name="documento" placeholder="RG ou CPF do paciente"></div>
+          <div class="field col-6"><label>Local</label><input type="text" name="local" placeholder="Cidade/UF"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ATESTADO -->
+    <section class="card" id="card-doc-atestado">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-num">2</span><h2>Atestado médico<small>CID só com autorização expressa do paciente (art. 76 do Código de Ética Médica)</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <div class="grid">
+          <div class="field col-3"><label>Dias de afastamento</label><input type="number" name="atestado_dias" min="0" placeholder="Ex.: 3" oninput="documentos._syncAtestadoTexto()"></div>
+          <div class="field col-3"><label>A partir de</label><input type="date" name="atestado_inicio" onchange="documentos._syncAtestadoTexto()"></div>
+          <div class="field col-6"><label>Finalidade</label>
+            <input type="text" name="atestado_finalidade" list="doc-atestado-finalidades" placeholder="afastamento de suas atividades habituais" oninput="documentos._syncAtestadoTexto()">
+            <datalist id="doc-atestado-finalidades">
+              <option value="afastamento de suas atividades habituais">
+              <option value="afastamento do trabalho">
+              <option value="afastamento das atividades escolares">
+              <option value="repouso domiciliar">
+              <option value="afastamento das atividades físicas">
+            </datalist>
+          </div>
+          <div class="field col-12">
+            <label class="radio-chip" style="display:inline-flex"><input type="checkbox" name="atestado_cid_incluir" onchange="documentos._toggleCID('atestado'); documentos._syncAtestadoTexto()"> Incluir CID-10 (com autorização do paciente)</label>
+          </div>
+          <div class="field col-6" id="doc-atestado-cid-group" style="display:none"><label>CID-10 <small style="color:var(--text-mute)">(digite código ou doença)</small></label>
+            <div class="cid-wrap">
+              <input type="text" name="atestado_cid" autocomplete="off" placeholder="Ex.: J06.9 ou faringite" oninput="documentos._cidBuscar(this,'atestado_cid'); documentos._syncAtestadoTexto()" onfocus="documentos._cidBuscar(this,'atestado_cid')" onblur="documentos._cidBlur('atestado_cid')">
+              <div class="cid-suggest" id="cid-sug-atestado_cid" style="display:none"></div>
+            </div>
+          </div>
+          <div class="field col-12"><label>Texto do atestado <small style="color:var(--text-mute)">(gerado automaticamente — pode editar)</small></label>
+            <textarea name="atestado_texto" rows="4" placeholder="Preencha os campos acima para gerar o texto…" oninput="this.dataset.auto=''"></textarea></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- DECLARAÇÃO -->
+    <section class="card" id="card-doc-declaracao" style="display:none">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-num">2</span><h2>Declaração de comparecimento<small>Comprova a presença do paciente no atendimento</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <div class="grid">
+          <div class="field col-4"><label>Data do comparecimento</label><input type="date" name="decl_data" onchange="documentos._syncDeclTexto()"></div>
+          <div class="field col-4"><label>Entrada</label><input type="time" name="decl_hora_ini" onchange="documentos._syncDeclTexto()"></div>
+          <div class="field col-4"><label>Saída</label><input type="time" name="decl_hora_fim" onchange="documentos._syncDeclTexto()"></div>
+          <div class="field col-12"><label>Acompanhante <small style="color:var(--text-mute)">(opcional)</small></label><input type="text" name="decl_acompanhante" placeholder="Nome do acompanhante, se houver" oninput="documentos._syncDeclTexto()"></div>
+          <div class="field col-12"><label>Texto da declaração <small style="color:var(--text-mute)">(gerado automaticamente — pode editar)</small></label>
+            <textarea name="decl_texto" rows="4" placeholder="Preencha os campos acima para gerar o texto…" oninput="this.dataset.auto=''"></textarea></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- LAUDO -->
+    <section class="card" id="card-doc-laudo" style="display:none">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-num">2</span><h2>Laudo médico<small>INSS, empresa, plano de saúde e outros fins — CID só com autorização do paciente</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <div class="grid">
+          <div class="field col-4"><label>Finalidade / destinatário</label>
+            <select name="laudo_tipo" onchange="documentos._syncLaudoTexto()">
+              <option value="INSS">INSS / Perícia previdenciária</option>
+              <option value="Empresa">Empresa / empregador</option>
+              <option value="Plano de saúde">Plano de saúde / operadora</option>
+              <option value="Perícia judicial">Perícia judicial</option>
+              <option value="Outros">Outros fins</option>
+            </select>
+          </div>
+          <div class="field col-8"><label>Destinatário específico <small style="color:var(--text-mute)">(opcional)</small></label>
+            <input type="text" name="laudo_destinatario" placeholder="Ex.: À Perícia Médica do INSS / Ao Departamento de RH" oninput="documentos._syncLaudoTexto()"></div>
+          <div class="field col-12">
+            <label class="radio-chip" style="display:inline-flex"><input type="checkbox" name="laudo_cid_incluir" onchange="documentos._toggleCID('laudo'); documentos._syncLaudoTexto()"> Incluir CID-10 (com autorização do paciente)</label>
+          </div>
+          <div class="field col-6" id="doc-laudo-cid-group" style="display:none"><label>CID-10 <small style="color:var(--text-mute)">(digite código ou doença)</small></label>
+            <div class="cid-wrap">
+              <input type="text" name="laudo_cid" autocomplete="off" placeholder="Ex.: M54.5 ou lombalgia" oninput="documentos._cidBuscar(this,'laudo_cid'); documentos._syncLaudoTexto()" onfocus="documentos._cidBuscar(this,'laudo_cid')" onblur="documentos._cidBlur('laudo_cid')">
+              <div class="cid-suggest" id="cid-sug-laudo_cid" style="display:none"></div>
+            </div>
+          </div>
+          <div class="field col-12"><label>Quadro clínico / justificativa</label>
+            <textarea name="laudo_quadro" rows="3" placeholder="Descreva o quadro clínico, tratamento e a repercussão funcional que justifica o laudo…" oninput="documentos._syncLaudoTexto()"></textarea></div>
+          <div class="field col-12"><label>Texto do laudo <small style="color:var(--text-mute)">(gerado automaticamente — pode editar)</small></label>
+            <textarea name="laudo_texto" rows="5" placeholder="Preencha os campos acima para gerar o texto…" oninput="this.dataset.auto=''"></textarea></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ORIENTAÇÕES / ASSINATURA -->
+    <section class="card">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-num">3</span><h2>Observações e assinatura</h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <div class="grid">
+          <div class="field col-12"><label>Observações <small style="color:var(--text-mute)">(opcional — não sai no corpo do documento)</small></label><input type="text" name="observacoes" placeholder="Anotações internas"></div>
+        </div>
+        <p style="font-size:.8rem;color:var(--text-mute);margin-top:8px">✍️ O documento impresso já traz a linha de assinatura com seu nome e CRM (do perfil profissional em Ajustes). Para validade legal, use o fluxo de assinatura digital ICP-Brasil após gerar o PDF.</p>
+      </div>
+    </section>
+  </form>
+</div>
+
+<!-- ===========================================================================
      MÓDULO — CÁLCULO DE RISCO PERIOPERATÓRIO
 =========================================================================== -->
 <div class="module" id="module-risco" data-module="risco">
@@ -8548,6 +8724,7 @@ const STORAGE = {
   recuperacao: 'medsys.v3.recuperacao',
   termo:       'medsys.v3.termo',
   prescricao:  'medsys.v3.prescricao',
+  documentos:  'medsys.v7.documentos',
   risco:       'medsys.v3.risco',
   financeiro:  'medsys.v3.financeiro',
   agenda:      'medsys.v3.agenda',
@@ -9615,6 +9792,7 @@ const ui = {
         recuperacao: 'Recuperação pós-anestésica',
         termo: 'Termo de Consentimento (TCLE)',
         prescricao: 'Receituário',
+        documentos: 'Documentos (atestados, declarações e laudos)',
         risco: 'Risco perioperatório',
         financeiro: 'Conciliação financeira', agenda: 'Agenda',
         orcamento: 'Orçamentos',
@@ -9636,6 +9814,7 @@ const ui = {
         else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} }, 60); }
         else if (modName === 'termo') { setTimeout(() => { try { (termo.sig._ajustar || []).forEach(fn => fn()); assinatura.initCanvas('sig-termo'); } catch (e) {} }, 80); }
         else if (modName === 'prescricao') { setTimeout(() => { try { if (prescricao.sig._ajustar) prescricao.sig._ajustar(); assinatura.initCanvas('sig-prescricao'); } catch (e) {} }, 80); }
+        else if (modName === 'documentos') { setTimeout(() => { try { const f = document.getElementById('form-documentos'); if (f && !f.querySelector('[name="data"]').value) f.querySelector('[name="data"]').value = utils.hojeISO(); documentos.atualizarTipo(); } catch (e) {} }, 60); }
         else if (modName === 'risco') { setTimeout(() => { try { risco.atualizar(); } catch (e) {} }, 80); }
         else if (modName === 'orcamento') { setTimeout(() => { try { orcamento.init(); } catch (e) { console.error('orcamento.init', e); } }, 60); }
         else if (modName === 'doses') { setTimeout(() => { try { doses.init(); } catch (e) { console.error('doses.init', e); } }, 60); }
@@ -14927,6 +15106,245 @@ const RISCO_MED = [
 {cat:'Cardiovascular',classe:'Inibidor de PDE5',principio:'sildenafila; tadalafila; vardenafila',nomes:'Viagra, Cialis, Levitra, Revatio, Adcirca',conduta:'Suspender antes de cirurgia eletiva: sildenafila/vardenafila ~24 h, tadalafila ~48 h. Em hipertensão pulmonar (uso contínuo), manter e discutir com a equipe.',retorno:'Retornar conforme indicação.',alerta:'Hipotensão grave se associado a nitratos; cautela com vasodilatadores.',ref:'Protocolos anestesia'},
 {cat:'Fitoterápico/suplemento',classe:'Fitoterápicos e suplementos',principio:'ginkgo biloba; alho; ginseng; kava; valeriana; erva-de-são-joão; hipérico; óleo de peixe; ômega-3; vitamina E; efedra',nomes:'Ginkgo, Alho, Ginseng, Kava, Valeriana, Erva-de-São-João',conduta:'Suspender idealmente 1–2 semanas antes da cirurgia.',retorno:'Retornar após liberação, sem risco de sangramento.',alerta:'Ginkgo/alho/ginseng/ômega-3/vit. E aumentam sangramento; kava/valeriana potencializam sedação; erva-de-são-joão induz enzimas (interações); efedra causa instabilidade hemodinâmica.',ref:'ASA — medicina complementar periop'}
 ];
+
+/* ============================================================================
+   CID-10 — lista curada de diagnósticos comuns (código + descrição) para o
+   autocomplete dos documentos. Extensível.
+============================================================================ */
+const CID10 = [
+  ['J00','Nasofaringite aguda (resfriado comum)'],['J02.9','Faringite aguda não especificada'],
+  ['J03.9','Amigdalite aguda não especificada'],['J06.9','Infecção aguda das vias aéreas superiores'],
+  ['J11.1','Influenza (gripe) com outras manifestações respiratórias'],['J20.9','Bronquite aguda'],
+  ['J18.9','Pneumonia não especificada'],['J45.9','Asma não especificada'],['J44.9','DPOC não especificada'],
+  ['A09','Diarreia e gastroenterite de origem infecciosa presumível'],['K52.9','Gastroenterite e colite não infecciosa'],
+  ['K29.7','Gastrite não especificada'],['K21.9','Doença do refluxo gastroesofágico'],['K30','Dispepsia funcional'],
+  ['K59.0','Constipação'],['R10.4','Dor abdominal não especificada'],['N39.0','Infecção do trato urinário'],
+  ['N23','Cólica nefrética não especificada'],['B34.9','Infecção viral não especificada'],['A90','Dengue clássico'],
+  ['U07.1','COVID-19, vírus identificado'],['R50.9','Febre não especificada'],
+  ['M54.5','Dor lombar baixa (lombalgia)'],['M54.4','Lumbago com ciática'],['M54.2','Cervicalgia'],
+  ['M54.6','Dor na coluna torácica'],['M54.9','Dorsalgia não especificada'],['M51.1','Radiculopatia por hérnia discal lombar'],
+  ['M79.7','Fibromialgia'],['M79.1','Mialgia'],['M25.5','Dor articular'],['M17.9','Gonartrose (artrose do joelho)'],
+  ['M16.9','Coxartrose (artrose do quadril)'],['M75.1','Síndrome do manguito rotador'],['M77.1','Epicondilite lateral'],
+  ['M65.9','Sinovite e tenossinovite não especificada'],['M62.6','Distensão muscular'],['M53.9','Dorsopatia não especificada'],
+  ['G43.9','Enxaqueca não especificada'],['G44.2','Cefaleia tensional'],['R51','Cefaleia'],['M79.2','Neuralgia e neurite'],
+  ['G62.9','Polineuropatia não especificada'],['G50.0','Neuralgia do trigêmeo'],['B02.2','Neuralgia pós-herpética'],
+  ['I10','Hipertensão essencial (primária)'],['I20.9','Angina pectoris'],['I25.1','Doença aterosclerótica do coração'],
+  ['I48','Fibrilação e flutter atrial'],['I50.9','Insuficiência cardíaca não especificada'],['I73.9','Doença vascular periférica'],
+  ['E11.9','Diabetes mellitus tipo 2 sem complicações'],['E10.9','Diabetes mellitus tipo 1 sem complicações'],
+  ['E78.5','Hiperlipidemia não especificada'],['E03.9','Hipotireoidismo não especificado'],['E05.9','Tireotoxicose (hipertireoidismo)'],
+  ['E66.9','Obesidade não especificada'],['E86','Depleção de volume (desidratação)'],['D64.9','Anemia não especificada'],
+  ['F41.1','Ansiedade generalizada'],['F41.0','Transtorno de pânico'],['F32.9','Episódio depressivo não especificado'],
+  ['F33.9','Transtorno depressivo recorrente'],['F43.2','Transtorno de ajustamento'],['F51.0','Insônia não orgânica'],
+  ['F17.2','Dependência de tabaco'],['G47.3','Apneia do sono'],
+  ['H10.9','Conjuntivite não especificada'],['H66.9','Otite média não especificada'],['H81.1','Vertigem posicional paroxística'],
+  ['R42','Tontura e instabilidade'],['H93.1','Zumbido (tinnitus)'],
+  ['L03.9','Celulite não especificada'],['L23.9','Dermatite alérgica de contato'],['L50.9','Urticária não especificada'],
+  ['L20.9','Dermatite atópica'],['B00.9','Infecção pelo herpes vírus'],['B35.9','Dermatofitose (micose)'],
+  ['S93.4','Entorse do tornozelo'],['S83.6','Entorse do joelho'],['S63.5','Entorse do punho'],
+  ['S52.5','Fratura da extremidade distal do rádio'],['T14.9','Traumatismo não especificado'],['S06.0','Concussão'],
+  ['R11','Náusea e vômito'],['R05','Tosse'],['R07.4','Dor torácica não especificada'],['R53','Mal-estar e fadiga'],
+  ['R60.9','Edema não especificado'],['R52.9','Dor não especificada'],['R52.2','Dor crônica'],
+  ['N94.6','Dismenorreia não especificada'],['N95.1','Estados da menopausa'],['O26.9','Complicação da gravidez'],
+  ['Z00.0','Exame médico geral'],['Z01.6','Exame radiológico'],['Z04.9','Exame e observação por motivo não especificado'],
+  ['Z76.3','Pessoa sadia acompanhando pessoa doente'],['Z71.9','Aconselhamento não especificado'],
+  ['M75.0','Capsulite adesiva do ombro'],['M23.2','Lesão do menisco'],['G56.0','Síndrome do túnel do carpo'],
+  ['K80.2','Cálculo da vesícula biliar (colelitíase)'],['K40.9','Hérnia inguinal'],['K57.3','Doença diverticular do cólon'],
+  ['N40','Hiperplasia da próstata'],['C50.9','Neoplasia maligna da mama'],['D25.9','Leiomioma do útero']
+];
+
+const documentos = {
+  formId: 'form-documentos',
+  _linkPendente: null,
+  _origemVolta: null,
+
+  atualizarTipo() {
+    const modelo = document.querySelector('#form-documentos [name="modelo"]:checked')?.value || 'atestado';
+    const f = document.getElementById('form-documentos');
+    if (f) f.dataset.modelo = modelo;
+    const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+    show('card-doc-atestado', modelo === 'atestado');
+    show('card-doc-declaracao', modelo === 'declaracao');
+    show('card-doc-laudo', modelo === 'laudo');
+    let banner = '';
+    if (modelo === 'atestado') {
+      banner = '📝 Atestado médico: informe o período de afastamento. O CID-10 só pode constar com autorização expressa do paciente (art. 76 do Código de Ética Médica).';
+      documentos._toggleCID('atestado'); documentos._syncAtestadoTexto();
+    } else if (modelo === 'declaracao') {
+      banner = '🕐 Declaração de comparecimento: informe a data e o horário de entrada e saída do atendimento.';
+      documentos._syncDeclTexto();
+    } else if (modelo === 'laudo') {
+      banner = '🧾 Laudo médico: descreva o quadro clínico e a finalidade (INSS, empresa, plano de saúde). O CID-10 só pode constar com autorização do paciente.';
+      documentos._toggleCID('laudo'); documentos._syncLaudoTexto();
+    }
+    if (banner) ui.mostrarBanner('banner-documentos', banner, 'info'); else ui.fecharBanner('banner-documentos');
+  },
+  _toggleCID(qual) {
+    const on = document.querySelector('#form-documentos [name="' + qual + '_cid_incluir"]')?.checked;
+    const g = document.getElementById('doc-' + qual + '-cid-group');
+    if (g) g.style.display = on ? '' : 'none';
+  },
+  _syncAtestadoTexto() {
+    const f = document.getElementById('form-documentos'); if (!f) return;
+    const txt = f.querySelector('[name="atestado_texto"]'); if (!txt) return;
+    if (txt.value.trim() && txt.dataset.auto !== '1') return;
+    const g = n => (f.querySelector('[name="' + n + '"]') || {}).value || '';
+    txt.value = prescricao._gerarTextoAtestado({
+      nome: g('nome'), documento: g('documento'), atestado_dias: g('atestado_dias'),
+      atestado_finalidade: g('atestado_finalidade'), atestado_inicio: g('atestado_inicio'),
+      atestado_cid: g('atestado_cid'), atestado_cid_incluir: f.querySelector('[name="atestado_cid_incluir"]')?.checked
+    });
+    txt.dataset.auto = '1';
+  },
+  _syncDeclTexto() {
+    const f = document.getElementById('form-documentos'); if (!f) return;
+    const txt = f.querySelector('[name="decl_texto"]'); if (!txt) return;
+    if (txt.value.trim() && txt.dataset.auto !== '1') return;
+    const g = n => (f.querySelector('[name="' + n + '"]') || {}).value || '';
+    txt.value = prescricao._gerarTextoDeclaracao({
+      nome: g('nome'), documento: g('documento'), data: g('data'), decl_data: g('decl_data'),
+      decl_hora_ini: g('decl_hora_ini'), decl_hora_fim: g('decl_hora_fim'), decl_acompanhante: g('decl_acompanhante')
+    });
+    txt.dataset.auto = '1';
+  },
+  _syncLaudoTexto() {
+    const f = document.getElementById('form-documentos'); if (!f) return;
+    const txt = f.querySelector('[name="laudo_texto"]'); if (!txt) return;
+    if (txt.value.trim() && txt.dataset.auto !== '1') return;
+    const g = n => (f.querySelector('[name="' + n + '"]') || {}).value || '';
+    txt.value = prescricao._gerarTextoLaudo({
+      nome: g('nome'), documento: g('documento'), laudo_tipo: g('laudo_tipo'),
+      laudo_destinatario: g('laudo_destinatario'), laudo_quadro: g('laudo_quadro'),
+      laudo_cid: g('laudo_cid'), laudo_cid_incluir: f.querySelector('[name="laudo_cid_incluir"]')?.checked
+    });
+    txt.dataset.auto = '1';
+  },
+  /* === CID-10 autocomplete (dropdown suspenso) === */
+  _cidBuscar(input, campo) {
+    const box = document.getElementById('cid-sug-' + campo); if (!box) return;
+    const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const q = norm(input.value).trim();
+    if (q.length < 2) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    const res = CID10.filter(c => norm(c[0] + ' ' + c[1]).includes(q)).slice(0, 12);
+    if (!res.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    box.innerHTML = res.map(c => `<div class="cid-item" onmousedown="documentos._cidEscolher('${campo}','${c[0]}')"><b>${utils.escapeHTML(c[0])}</b> — ${utils.escapeHTML(c[1])}</div>`).join('');
+    box.style.display = 'block';
+  },
+  _cidEscolher(campo, codigo) {
+    const c = CID10.find(x => x[0] === codigo);
+    const f = document.getElementById('form-documentos');
+    const el = f && f.querySelector('[name="' + campo + '"]');
+    if (el && c) el.value = c[0] + ' — ' + c[1];
+    const box = document.getElementById('cid-sug-' + campo); if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+    if (campo === 'atestado_cid') documentos._syncAtestadoTexto(); else documentos._syncLaudoTexto();
+    try { markDirty(); } catch (e) {}
+  },
+  _cidBlur(campo) {
+    setTimeout(() => { const box = document.getElementById('cid-sug-' + campo); if (box) box.style.display = 'none'; }, 160);
+  },
+
+  novo() {
+    if (state.dirty && !confirm('Descartar alterações?')) return;
+    utils.clearForm('form-documentos');
+    const d = document.querySelector('#form-documentos [name="data"]'); if (d) d.value = utils.hojeISO();
+    const r = document.querySelector('#form-documentos [name="modelo"][value="atestado"]'); if (r) r.checked = true;
+    documentos._linkPendente = null; documentos._origemVolta = null;
+    const b = document.getElementById('btn-voltar-documentos'); if (b) b.style.display = 'none';
+    documentos.atualizarTipo();
+    try { ui.atualizarDocStatus('documentos', null); } catch (e) {}
+    markClean();
+    toast('Novo documento iniciado');
+  },
+  salvar() {
+    const f = document.getElementById('form-documentos');
+    if (!utils.validar('form-documentos')) { toast('Informe o nome do paciente', 'warn'); return; }
+    const data = utils.formData('form-documentos');
+    const saved = store.save('documentos', data);
+    let h = f.querySelector('[name="_id"]');
+    if (!h) { h = document.createElement('input'); h.type = 'hidden'; h.name = '_id'; f.appendChild(h); }
+    h.value = saved._id || '';
+    try { ui.atualizarDocStatus('documentos', saved); } catch (e) {}
+    if (documentos._linkPendente && saved._id) {
+      try { linker.link('documentos', saved._id, documentos._linkPendente.mod, documentos._linkPendente.id); } catch (e) {}
+    }
+    markClean();
+    toast('✓ Documento salvo');
+    return saved;
+  },
+  carregar(item) {
+    if (!item) item = store.last('documentos');
+    if (!item) { toast('Nenhum documento salvo', 'warn'); return; }
+    utils.clearForm('form-documentos');
+    utils.fillForm('form-documentos', item);
+    const f = document.getElementById('form-documentos');
+    let h = f.querySelector('[name="_id"]');
+    if (!h) { h = document.createElement('input'); h.type = 'hidden'; h.name = '_id'; f.appendChild(h); }
+    h.value = item._id || '';
+    documentos._restaurarModelo(item);
+    documentos.atualizarTipo();
+    try { ui.atualizarDocStatus('documentos', item); } catch (e) {}
+    markClean();
+    toast('Documento carregado');
+    try { ui.expandirTodos('documentos'); } catch (e) {}
+  },
+  _restaurarModelo(rec) {
+    const val = rec.modelo || 'atestado';
+    const r = document.querySelector('#form-documentos [name="modelo"][value="' + val + '"]');
+    if (r) r.checked = true;
+    ['atestado_texto', 'decl_texto', 'laudo_texto'].forEach(n => {
+      const el = document.querySelector('#form-documentos [name="' + n + '"]');
+      if (el && el.value.trim()) el.dataset.auto = '';
+    });
+  },
+  limpar() {
+    if (!confirm('Limpar todos os campos?')) return;
+    utils.clearForm('form-documentos');
+    try { ui.atualizarDocStatus('documentos', null); } catch (e) {}
+    documentos.atualizarTipo();
+  },
+  exportar() {
+    const data = utils.formData('form-documentos');
+    const nome = (data.nome || 'paciente').replace(/[^\w\s-]/g, '').replace(/\s+/g, '_').slice(0, 30);
+    utils.download('documento_' + nome + '_' + utils.hojeISO() + '.json', JSON.stringify(data, null, 2));
+    toast('JSON exportado');
+  },
+  /* === IDA E VOLTA a partir da Consulta/Pré === */
+  abrir(modelo, origemMod) {
+    modelo = modelo || 'atestado';
+    const fo = document.getElementById('form-' + origemMod);
+    const nome = fo ? ((fo.querySelector('[name="nome"]') || fo.querySelector('[name="paciente_nome"]') || {}).value || '') : '';
+    const origemId = fo ? ((fo.querySelector('[name="_id"]') || {}).value || '') : '';
+    ui.navegar('documentos');
+    setTimeout(() => {
+      try {
+        const f = document.getElementById('form-documentos'); if (!f) return;
+        utils.clearForm('form-documentos');
+        ['atestado_texto', 'decl_texto', 'laudo_texto'].forEach(n => {
+          const el = f.querySelector('[name="' + n + '"]'); if (el) { el.value = ''; el.dataset.auto = '1'; }
+        });
+        const r = f.querySelector('[name="modelo"][value="' + modelo + '"]'); if (r) r.checked = true;
+        const nomeEl = f.querySelector('[name="nome"]'); if (nomeEl && nome) nomeEl.value = nome;
+        const dataEl = f.querySelector('[name="data"]'); if (dataEl && !dataEl.value) dataEl.value = utils.hojeISO();
+        try { if (nome) linker.autoPreencherDadosPaciente(nome, 'documentos'); } catch (e) {}
+        documentos.atualizarTipo();
+        documentos._linkPendente = origemId ? { mod: origemMod, id: origemId } : null;
+        documentos._origemVolta = origemMod;
+        const btn = document.getElementById('btn-voltar-documentos');
+        if (btn) {
+          const rot = { consulta: 'consulta', pre: 'pré-anestésica', recuperacao: 'recuperação', anestesia: 'ficha' }[origemMod] || 'atendimento';
+          btn.textContent = '← Voltar à ' + rot;
+          btn.style.display = '';
+        }
+        toast('📄 Documento aberto a partir do atendimento — preencha e imprima; use "Voltar" para retornar.');
+      } catch (e) { console.error(e); }
+    }, 260);
+  },
+  voltar() {
+    const destino = documentos._origemVolta || (documentos._linkPendente && documentos._linkPendente.mod) || 'consulta';
+    const b = document.getElementById('btn-voltar-documentos'); if (b) b.style.display = 'none';
+    documentos._origemVolta = null;
+    ui.navegar(destino);
+  }
+};
 
 const risco = {
   formId: 'form-risco',
@@ -22498,6 +22916,7 @@ const linker = {
       recuperacao: 'form-recuperacao',
       termo: 'form-termo',
       prescricao: 'form-prescricao',
+      documentos: 'form-documentos',
       risco: 'form-risco'
     }[modAtual];
     if (!formId) return;
@@ -22639,7 +23058,7 @@ const linker = {
   _LABEL_MOD: {
     anestesia: 'Ficha de Anestesia', pre: 'Pré-anestésica', consulta: 'Consulta',
     recuperacao: 'Recuperação SRPA', termo: 'Termo de Consentimento',
-    prescricao: 'Receituário', risco: 'Risco Cirúrgico',
+    prescricao: 'Receituário', documentos: 'Documentos', risco: 'Risco Cirúrgico',
     financeiro: 'Financeiro', orcamento: 'Orçamento'
   },
 
@@ -24803,6 +25222,7 @@ const historico = {
     if (mod === 'consulta') return [it.queixa, it.profissional].filter(Boolean).join(' · ');
     if (mod === 'recuperacao') return [it.procedimento, it.tipo_anestesia].filter(Boolean).join(' · ');
     if (mod === 'financeiro') return [it.procedimento, it.convenio, it.status].filter(Boolean).join(' · ');
+    if (mod === 'documentos') { const t = { atestado: 'Atestado', declaracao: 'Declaração', laudo: 'Laudo' }[it.modelo] || 'Documento'; return t; }
     return '';
   },
 
@@ -24815,7 +25235,7 @@ const historico = {
      prescrições, riscos, financeiro, agenda, orçamentos e anexos. */
   MODS_PRONT: {
     pre: 'Pré-anestésica', consulta: 'Consulta / Dor', anestesia: 'Ficha de Anestesia',
-    recuperacao: 'SRPA', termo: 'Termo (TCLE)', prescricao: 'Receituário',
+    recuperacao: 'SRPA', termo: 'Termo (TCLE)', prescricao: 'Receituário', documentos: 'Documentos',
     risco: 'Risco perioperatório', financeiro: 'Financeiro', agenda: 'Agenda', orcamento: 'Orçamento'
   },
   _nomeItem(it) { return ((it.paciente && it.paciente.nome) || it.paciente_nome || it.nome || it.paciente || '').trim(); },
@@ -26366,6 +26786,7 @@ const printPreview = {
         recuperacao: printPreview._buildRecuperacao,
         termo: printPreview._buildTermo,
         prescricao: printPreview._buildPrescricao,
+        documentos: printPreview._buildDocumento,
         risco: printPreview._buildRisco,
         financeiro: printPreview._buildFinanceiro,
         agenda: printPreview._buildAgenda,
@@ -26706,6 +27127,7 @@ ${TAG_CLOSE_HTML}`;
       consulta: 'Consulta',
       anestesia: 'Ficha-Anestesia',
       recuperacao: 'SRPA',
+      documentos: 'Documento',
       financeiro: 'Financeiro',
       agenda: 'Agenda',
       dashboard: 'Dashboard'
@@ -26717,7 +27139,7 @@ ${TAG_CLOSE_HTML}`;
       const d = anestesia.coletarEstruturado();
       paciente = (d.paciente && d.paciente.nome) || '';
       data = (d.procedimento && d.procedimento.data) || '';
-    } else if (mod === 'pre' || mod === 'consulta' || mod === 'recuperacao') {
+    } else if (mod === 'pre' || mod === 'consulta' || mod === 'recuperacao' || mod === 'documentos') {
       const f = document.getElementById('form-' + mod);
       if (f) {
         paciente = f.querySelector('[name="nome"]')?.value || '';
@@ -26788,6 +27210,7 @@ ${TAG_CLOSE_HTML}`;
       consulta: 'Consulta / Dor',
       anestesia: 'Ficha de Anestesia',
       recuperacao: 'Recuperação pós-anestésica',
+      documentos: 'Documento médico',
       financeiro: 'Conciliação financeira',
       agenda: 'Agenda',
       dashboard: 'Dashboard'
@@ -27919,6 +28342,22 @@ ${TAG_CLOSE_HTML}`;
     let texto = (d.laudo_texto || '').trim();
     if (!texto) texto = prescricao._gerarTextoLaudo(d);
     return printPreview._docDeclaratorio('LAUDO MÉDICO', meta, texto, d, 'Laudo médico');
+  },
+  /* Módulo Documentos (atestado/declaração/laudo) — usa os mesmos geradores */
+  _buildDocumento() {
+    const d = utils.formData('form-documentos');
+    const modelo = d.modelo || 'atestado';
+    const meta = `${utils.formatarData(d.data) || new Date().toLocaleDateString('pt-BR')}`;
+    if (modelo === 'declaracao') {
+      const texto = (d.decl_texto || '').trim() || prescricao._gerarTextoDeclaracao(d);
+      return printPreview._docDeclaratorio('DECLARAÇÃO DE COMPARECIMENTO', meta, texto, d, 'Declaração de comparecimento');
+    }
+    if (modelo === 'laudo') {
+      const texto = (d.laudo_texto || '').trim() || prescricao._gerarTextoLaudo(d);
+      return printPreview._docDeclaratorio('LAUDO MÉDICO', meta, texto, d, 'Laudo médico');
+    }
+    const texto = (d.atestado_texto || '').trim() || prescricao._gerarTextoAtestado(d);
+    return printPreview._docDeclaratorio('ATESTADO MÉDICO', meta, texto, d, 'Atestado médico');
   },
   _docDeclaratorio(titulo, meta, texto, d, rodape) {
     const corpo = `<div style="font-size:11.5pt;line-height:1.9;text-align:justify;margin:26px 4px 0;white-space:pre-wrap">${utils.escapeHTML(texto)}</div>`;
