@@ -23,6 +23,11 @@
 
 begin;
 
+-- Permite criar funções SQL que referenciam tabelas criadas mais adiante nesta
+-- mesma migração (forward references). Sem isso, funções `language sql` falham
+-- na criação porque o Postgres valida o corpo imediatamente.
+set local check_function_bodies = off;
+
 create extension if not exists pgcrypto;      -- gen_random_uuid()
 
 -- schema para funções auxiliares (não polui o public)

@@ -30,6 +30,11 @@
 
 begin;
 
+-- Permite criar funções SQL que referenciam tabelas criadas mais adiante nesta
+-- mesma migração (forward references). Sem isso, funções `language sql` falham
+-- na criação porque o Postgres valida o corpo imediatamente.
+set local check_function_bodies = off;
+
 create extension if not exists pgcrypto;      -- gen_random_uuid()
 
 -- schema para funções auxiliares (não polui o public)
@@ -977,7 +982,6 @@ begin
     raise exception 'Nenhum usuário no Auth com o e-mail %. Crie/entre com essa conta primeiro (Authentication > Users) e rode o seed de novo.', v_email;
   end if;
 
-  -- usa a organização que você já tiver; senão, cria uma
   select organization_id into v_org from public.organization_users where user_id = v_uid limit 1;
   if v_org is null then
     insert into public.organizations(nome, ativo)
