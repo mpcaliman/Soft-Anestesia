@@ -14568,6 +14568,25 @@ const cloudRel = {
     } catch (e) { return false; }
   },
 
+  /* Reconstrói o item local a partir de uma linha relacional de patients.
+     Usa o item completo salvo em data, ou as colunas (linhas migradas). */
+  _rowParaItem(row) {
+    const d = row.data;
+    const base = (d && typeof d === 'object' && (d._id || d.nome)) ? Object.assign({}, d) : {};
+    base.nome = base.nome || row.nome || '';
+    if (!base.cpf && row.cpf) base.cpf = row.cpf;
+    if (!base.nascimento && row.nascimento) base.nascimento = row.nascimento;
+    if (!base.prontuario && row.prontuario) base.prontuario = row.prontuario;
+    if (!base.plano && !base.convenio && row.convenio) base.plano = row.convenio;
+    if (!base.telefone && row.telefone) base.telefone = row.telefone;
+    if (!base.email && row.email) base.email = row.email;
+    if (!base.sexo && row.sexo) base.sexo = row.sexo;
+    if (!base._id) base._id = 'rel_' + (row.id || '').toString().slice(0, 8) + utils.uid().slice(-4);
+    if (row.updated_at) base._relUpdatedAt = row.updated_at;   // token de concorrência
+    return base;
+  },
+  _SELECT: 'id,nome,cpf,nascimento,prontuario,convenio,telefone,email,sexo,data,legacy_id,updated_at',
+
   /* Puxa os pacientes da org (tabela relacional). Retorna [{_patKey,item}] ou null. */
   async puxarPacientes() {
     if (!cloudRel.disponivel()) return null;
@@ -14577,39 +14596,49 @@ const cloudRel = {
     const c = cloud.config();
     try {
       const r = await fetch(c.url + '/rest/v1/patients?organization_id=eq.' + org +
-        '&deleted_at=is.null&select=id,nome,cpf,nascimento,prontuario,convenio,telefone,email,sexo,data,legacy_id&order=nome.asc',
+        '&deleted_at=is.null&select=' + cloudRel._SELECT + '&order=nome.asc',
         { headers: cloud._headers(true) });
       if (!r.ok) return null;
       const rows = await r.json();
       return rows.map(row => {
-        /* Se a linha guardou o item local completo em data, usa-o; senão
-           reconstrói a partir das colunas (caso das linhas migradas). */
-        const d = row.data;
-        const base = (d && typeof d === 'object' && (d._id || d.nome)) ? Object.assign({}, d) : {};
-        base.nome = base.nome || row.nome || '';
-        if (!base.cpf && row.cpf) base.cpf = row.cpf;
-        if (!base.nascimento && row.nascimento) base.nascimento = row.nascimento;
-        if (!base.prontuario && row.prontuario) base.prontuario = row.prontuario;
-        if (!base.plano && !base.convenio && row.convenio) base.plano = row.convenio;
-        if (!base.telefone && row.telefone) base.telefone = row.telefone;
-        if (!base.email && row.email) base.email = row.email;
-        if (!base.sexo && row.sexo) base.sexo = row.sexo;
-        if (!base._id) base._id = 'rel_' + (row.id || '').toString().slice(0, 8) + utils.uid().slice(-4);
-        const key = migracaoFase4._patKey(migracaoFase4._ident(base));
-        return { _patKey: key, item: base };
+        const item = cloudRel._rowParaItem(row);
+        return { _patKey: migracaoFase4._patKey(migracaoFase4._ident(item)), item };
       });
     } catch (e) { return null; }
   },
 
-  /* Envia (upsert idempotente por patKey) um paciente para a tabela relacional. */
-  async enviarPaciente(item) {
-    if (!cloudRel.disponivel() || !item) return false;
-    if (!(await cloud._garantirToken())) return false;
+  /* Lê o estado atual de um paciente na nuvem (por chave de nome) ou null. */
+  async _lerAtual(org, key) {
+    const c = cloud.config();
+    try {
+      const r = await fetch(c.url + '/rest/v1/patients?organization_id=eq.' + org +
+        '&legacy_id=eq.' + encodeURIComponent(key) + '&select=' + cloudRel._SELECT,
+        { headers: cloud._headers(true) });
+      if (!r.ok) return null;
+      const arr = await r.json();
+      return arr[0] || null;
+    } catch (e) { return null; }
+  },
+
+  /* Envia (upsert idempotente por patKey) um paciente para a tabela relacional,
+     COM detecção de conflito (concorrência otimista via updated_at).
+     Retorna { ok } | { conflict, cloud, cloudUpdatedAt } | { ok:false, motivo }. */
+  async enviarPaciente(item, opts = {}) {
+    if (!cloudRel.disponivel() || !item) return { ok: false, motivo: 'offline' };
+    if (!(await cloud._garantirToken())) return { ok: false, motivo: 'token' };
     const org = await cloudRel._orgAsync();
-    if (!org) return false;
+    if (!org) return { ok: false, motivo: 'org' };
     const id = migracaoFase4._ident(item);
     const key = migracaoFase4._patKey(id);
-    if (!key) return false;
+    if (!key) return { ok: false, motivo: 'sem_nome' };
+
+    /* 1) estado atual na nuvem para detectar edição concorrente */
+    const atual = await cloudRel._lerAtual(org, key);
+    if (atual && !opts.force && item._relUpdatedAt && atual.updated_at && atual.updated_at !== item._relUpdatedAt) {
+      return { ok: false, conflict: true, cloud: cloudRel._rowParaItem(atual), cloudUpdatedAt: atual.updated_at };
+    }
+
+    /* 2) grava (upsert) e captura o novo updated_at como base */
     const row = {
       organization_id: org, legacy_id: key,
       nome: item.nome || id.nome || 'Sem nome',
@@ -14620,7 +14649,18 @@ const cloudRel = {
       telefone: item.telefone || null, email: item.email || null, sexo: item.sexo || null,
       data: item
     };
-    try { await migracaoFase4._upsert('patients', [row], false); return true; } catch (e) { return false; }
+    try {
+      const ret = await migracaoFase4._upsert('patients', [row], true);
+      const novo = ret && ret[0];
+      if (novo && novo.updated_at) {
+        /* persiste o token de concorrência no item local */
+        const lst = store.list('pacientes');
+        const ix = lst.findIndex(x => x._id === item._id);
+        if (ix >= 0) { lst[ix]._relUpdatedAt = novo.updated_at; store.setList('pacientes', lst); }
+        item._relUpdatedAt = novo.updated_at;
+      }
+      return { ok: true };
+    } catch (e) { return { ok: false, motivo: e.message }; }
   }
 };
 
@@ -26466,8 +26506,15 @@ const pacientes = {
       toast('Paciente "' + nome + '" salvo com sucesso');
 
       /* Fase 6: espelha no banco relacional (patients) — idempotente por nome.
-         Best-effort em segundo plano; o localStorage continua sendo o cache. */
-      try { if (typeof cloudRel !== 'undefined') cloudRel.enviarPaciente(saved); } catch (e) {}
+         Fase 5: se a nuvem mudou desde que carregamos, abre resolução de
+         conflito em vez de sobrescrever cegamente. Em segundo plano. */
+      try {
+        if (typeof cloudRel !== 'undefined') {
+          cloudRel.enviarPaciente(saved).then(res => {
+            if (res && res.conflict) pacientes._resolverConflito(saved, res.cloud, res.cloudUpdatedAt);
+          }).catch(() => {});
+        }
+      } catch (e) {}
 
       /* Fecha o card e re-renderiza */
       const card = document.getElementById(pacientes.cardId);
@@ -26492,6 +26539,59 @@ const pacientes = {
     store.delete('pacientes', id);
     pacientes.render();
     toast('Paciente excluído');
+  },
+
+  /* Fase 5: resolução de conflito — a nuvem foi alterada por outra pessoa
+     desde que este paciente foi carregado. Mostra os dois lados e deixa
+     escolher, sem sobrescrever cegamente. */
+  _resolverConflito(local, nuvem, cloudUpdatedAt) {
+    const campos = [
+      ['nome', 'Nome'], ['cpf', 'CPF'], ['nascimento', 'Nascimento'],
+      ['telefone', 'Telefone'], ['plano', 'Plano'], ['convenio', 'Convênio'],
+      ['carteirinha', 'Carteirinha'], ['email', 'E-mail']
+    ];
+    const val = (o, k) => (o && o[k] != null ? String(o[k]) : '');
+    const linhas = campos.filter(([k]) => val(local, k) !== val(nuvem, k))
+      .map(([k, lbl]) =>
+        '<tr><td>' + lbl + '</td><td>' + utils.escapeHTML(val(local, k) || '—') +
+        '</td><td>' + utils.escapeHTML(val(nuvem, k) || '—') + '</td></tr>').join('');
+    const corpo =
+      '<p style="margin:0 0 10px;font-size:.88rem">Este paciente foi <strong>alterado na nuvem por outra pessoa</strong> (ou noutro aparelho) enquanto você editava. Escolha qual versão manter — nada foi sobrescrito ainda.</p>' +
+      (linhas
+        ? '<table class="fase4-tab"><thead><tr><th>Campo</th><th>O seu</th><th>Da nuvem</th></tr></thead><tbody>' + linhas + '</tbody></table>'
+        : '<p style="font-size:.82rem;color:var(--text-mute)">As diferenças estão em campos internos.</p>');
+    /* guarda temporariamente os lados para os botões */
+    pacientes._conflito = { local, nuvem, cloudUpdatedAt };
+    modal.open('⚠️ Conflito de edição', corpo,
+      '<button class="btn btn-primary" onclick="pacientes._conflitoManterMeu()">Manter o meu</button>' +
+      '<button class="btn" onclick="pacientes._conflitoUsarNuvem()">Usar o da nuvem</button>' +
+      '<button class="btn btn-ghost" onclick="modal.close()">Decidir depois</button>');
+  },
+  _conflitoManterMeu() {
+    const cf = pacientes._conflito; if (!cf) { modal.close(); return; }
+    modal.close();
+    /* adota o updated_at da nuvem como base e força a gravação */
+    cf.local._relUpdatedAt = cf.cloudUpdatedAt;
+    const lst = store.list('pacientes');
+    const ix = lst.findIndex(x => x._id === cf.local._id);
+    if (ix >= 0) { lst[ix]._relUpdatedAt = cf.cloudUpdatedAt; store.setList('pacientes', lst); }
+    cloudRel.enviarPaciente(cf.local, { force: true }).then(r => {
+      if (r && r.ok) toast('✅ Sua versão foi mantida na nuvem');
+      else toast('Não foi possível gravar agora — tentará depois', 'warn');
+    });
+    pacientes._conflito = null;
+  },
+  _conflitoUsarNuvem() {
+    const cf = pacientes._conflito; if (!cf) { modal.close(); return; }
+    modal.close();
+    const lst = store.list('pacientes');
+    const ix = lst.findIndex(x => x._id === cf.local._id);
+    const item = Object.assign({}, cf.nuvem, { _id: cf.local._id, _relUpdatedAt: cf.cloudUpdatedAt });
+    if (ix >= 0) lst[ix] = item; else lst.unshift(item);
+    store.setList('pacientes', lst);
+    pacientes.render();
+    toast('Versão da nuvem adotada neste aparelho');
+    pacientes._conflito = null;
   },
   filtrar() {
     const q = (document.getElementById('pac-f-busca')?.value || '').toLowerCase().trim();
@@ -26567,6 +26667,8 @@ const pacientes = {
           ['cpf', 'nascimento', 'telefone', 'email', 'sexo', 'prontuario', 'plano', 'convenio', 'carteirinha'].forEach(f => {
             if ((!loc[f] || loc[f] === '') && r.item[f]) { loc[f] = r.item[f]; mudou = true; }
           });
+          /* guarda o token de concorrência da nuvem (base p/ detectar conflito) */
+          if (r.item._relUpdatedAt) loc._relUpdatedAt = r.item._relUpdatedAt;
           if (mudou) enriquecidos++;
         }
       });
