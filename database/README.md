@@ -125,7 +125,11 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   espelhado (upsert idempotente por nome) na tabela relacional — cross-device,
   com o localStorage como cache/offline. Próximos módulos seguem o mesmo padrão
   via `cloudRel`.
-- **Fase 5 — Conflitos + Realtime** ("fulano está editando", comparar versões).
+- **Fase 5 — Conflitos + Realtime (em andamento):** ✅ concorrência otimista no
+  piloto Pacientes — ao salvar, o app confere se a linha mudou na nuvem
+  (`updated_at`) desde que foi carregada; se mudou, abre resolução de conflito
+  (comparar *meu* × *nuvem*, manter/usar/adiar) em vez de sobrescrever cego.
+  Falta a presença ao vivo via Realtime ("fulano está editando").
 - **Fase 6+ — Pré reorganizada, Ficha/linha do tempo unificada, SRPA,
   Financeiro (rascunho/conciliação), anexos no Storage, PDF versionado, tela de
   diagnóstico da nuvem, testes.**
