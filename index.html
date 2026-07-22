@@ -7953,6 +7953,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       </div>
       <div class="filter-actions">
         <button class="btn btn-sm" onclick="agenda.limparFiltros()">Limpar filtros</button>
+        <button class="btn btn-sm" onclick="agenda.sincronizarNuvem()" title="Puxa os compromissos do banco relacional (nuvem) e junta com os deste aparelho">☁️ Sincronizar agenda</button>
       </div>
     </div>
 
@@ -9872,7 +9873,7 @@ const ui = {
       try {
         if (modName === 'dashboard') dashboard.atualizar();
         else if (modName === 'financeiro') financeiro.render();
-        else if (modName === 'agenda') agenda.render();
+        else if (modName === 'agenda') { agenda.render(); if (!agenda._puxouNestaSessao) { setTimeout(() => { try { agenda.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); logoUsuario.renderAjustes(); const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
         else if (modName === 'pre') { try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} try { pre.viaAerea.render(); } catch (e) {} }
@@ -14607,17 +14608,32 @@ const cloudRel = {
     } catch (e) { return null; }
   },
 
-  /* Lê o estado atual de um paciente na nuvem (por chave de nome) ou null. */
-  async _lerAtual(org, key) {
+  /* Lê o estado atual de uma linha (por legacy_id) numa tabela, ou null. */
+  async _lerAtualTab(tabela, org, key, select) {
     const c = cloud.config();
     try {
-      const r = await fetch(c.url + '/rest/v1/patients?organization_id=eq.' + org +
-        '&legacy_id=eq.' + encodeURIComponent(key) + '&select=' + cloudRel._SELECT,
+      const r = await fetch(c.url + '/rest/v1/' + tabela + '?organization_id=eq.' + org +
+        '&legacy_id=eq.' + encodeURIComponent(key) + '&select=' + select,
         { headers: cloud._headers(true) });
       if (!r.ok) return null;
       const arr = await r.json();
       return arr[0] || null;
     } catch (e) { return null; }
+  },
+  _lerAtual(org, key) { return cloudRel._lerAtualTab('patients', org, key, cloudRel._SELECT); },
+
+  /* id (uuid) de um paciente na nuvem pela chave de nome; cria minimamente se
+     ainda não existir (para o agendamento poder referenciá-lo). */
+  async _garantirPaciente(org, item) {
+    const id = migracaoFase4._ident(item);
+    const key = migracaoFase4._patKey(id);
+    if (!key) return null;
+    const existente = await cloudRel._lerAtualTab('patients', org, key, 'id');
+    if (existente && existente.id) return existente.id;
+    const row = { organization_id: org, legacy_id: key, nome: item.paciente || id.nome || 'Sem nome',
+      cpf: id.cpf || null, convenio: item.convenio || null, data: { origem: 'agenda' } };
+    try { const ret = await migracaoFase4._upsert('patients', [row], true); return (ret && ret[0]) ? ret[0].id : null; }
+    catch (e) { return null; }
   },
 
   /* Envia (upsert idempotente por patKey) um paciente para a tabela relacional,
@@ -14657,6 +14673,62 @@ const cloudRel = {
         const lst = store.list('pacientes');
         const ix = lst.findIndex(x => x._id === item._id);
         if (ix >= 0) { lst[ix]._relUpdatedAt = novo.updated_at; store.setList('pacientes', lst); }
+        item._relUpdatedAt = novo.updated_at;
+      }
+      return { ok: true };
+    } catch (e) { return { ok: false, motivo: e.message }; }
+  },
+
+  /* ---- AGENDA (appointments) — mesmo padrão, legacy_id = _id do compromisso ---- */
+  _AG_SELECT: 'id,legacy_id,status,scheduled_at,data,updated_at',
+  _rowParaAgenda(row) {
+    const d = row.data;
+    const base = (d && typeof d === 'object' && (d._id || d.paciente)) ? Object.assign({}, d) : {};
+    if (!base._id) base._id = row.legacy_id || ('rel_ag_' + (row.id || '').toString().slice(0, 8));
+    if (!base.status && row.status) base.status = row.status;
+    if (!base.data && row.scheduled_at) base.data = String(row.scheduled_at).slice(0, 10);
+    if (!base.hora && row.scheduled_at && String(row.scheduled_at).length >= 16) base.hora = String(row.scheduled_at).slice(11, 16);
+    if (row.updated_at) base._relUpdatedAt = row.updated_at;
+    return base;
+  },
+  async puxarAgenda() {
+    if (!cloudRel.disponivel()) return null;
+    if (!(await cloud._garantirToken())) return null;
+    const org = await cloudRel._orgAsync(); if (!org) return null;
+    const c = cloud.config();
+    try {
+      const r = await fetch(c.url + '/rest/v1/appointments?organization_id=eq.' + org +
+        '&deleted_at=is.null&select=' + cloudRel._AG_SELECT + '&order=scheduled_at.desc.nullslast',
+        { headers: cloud._headers(true) });
+      if (!r.ok) return null;
+      const rows = await r.json();
+      return rows.map(row => cloudRel._rowParaAgenda(row));
+    } catch (e) { return null; }
+  },
+  async enviarAgenda(item, opts = {}) {
+    if (!cloudRel.disponivel() || !item || !item._id) return { ok: false, motivo: 'offline' };
+    if (!(await cloud._garantirToken())) return { ok: false, motivo: 'token' };
+    const org = await cloudRel._orgAsync(); if (!org) return { ok: false, motivo: 'org' };
+    const legacy = item._id;
+    /* conflito por updated_at */
+    const atual = await cloudRel._lerAtualTab('appointments', org, legacy, cloudRel._AG_SELECT);
+    if (atual && !opts.force && item._relUpdatedAt && atual.updated_at && atual.updated_at !== item._relUpdatedAt) {
+      return { ok: false, conflict: true, cloud: cloudRel._rowParaAgenda(atual), cloudUpdatedAt: atual.updated_at };
+    }
+    const patientId = await cloudRel._garantirPaciente(org, item);
+    const hora = (item.hora && /^\d{1,2}:\d{2}/.test(item.hora)) ? item.hora : '09:00';
+    const sched = migracaoFase4._dataISO(item.data) ? (item.data + 'T' + hora + ':00') : null;
+    const row = {
+      organization_id: org, legacy_id: legacy, patient_id: patientId,
+      scheduled_at: sched, status: item.status || 'agendado', data: item
+    };
+    try {
+      const ret = await migracaoFase4._upsert('appointments', [row], true);
+      const novo = ret && ret[0];
+      if (novo && novo.updated_at) {
+        const lst = store.list('agenda');
+        const ix = lst.findIndex(x => x._id === item._id);
+        if (ix >= 0) { lst[ix]._relUpdatedAt = novo.updated_at; store.setList('agenda', lst); }
         item._relUpdatedAt = novo.updated_at;
       }
       return { ok: true };
@@ -33093,10 +33165,57 @@ const agenda = {
     const data = utils.formData(agenda.formId);
     if (data.id) data._id = data.id;
     delete data.id;
-    store.save('agenda', data);
+    const saved = store.save('agenda', data);
     toast('Compromisso salvo');
     agenda.cancelar();
     agenda.render();
+    agenda._espelhar(saved);
+  },
+  /* Fase 6: espelha um compromisso no banco relacional (appointments). */
+  _espelhar(item) {
+    try {
+      if (typeof cloudRel === 'undefined' || !item) return;
+      cloudRel.enviarAgenda(item).then(res => {
+        if (res && res.conflict) agenda._resolverConflito(item, res.cloud, res.cloudUpdatedAt);
+      }).catch(() => {});
+    } catch (e) {}
+  },
+  _resolverConflito(local, nuvem, cloudUpdatedAt) {
+    const usar = confirm('⚠️ Este compromisso foi alterado na nuvem por outra pessoa (ou noutro aparelho).\n\nOK = usar a versão da NUVEM neste aparelho.\nCancelar = manter a SUA versão (grava por cima).');
+    if (usar) {
+      const lst = store.list('agenda');
+      const ix = lst.findIndex(x => x._id === local._id);
+      const item = Object.assign({}, nuvem, { _id: local._id, _relUpdatedAt: cloudUpdatedAt });
+      if (ix >= 0) lst[ix] = item; else lst.unshift(item);
+      store.setList('agenda', lst);
+      agenda.render();
+      toast('Versão da nuvem adotada');
+    } else {
+      local._relUpdatedAt = cloudUpdatedAt;
+      cloudRel.enviarAgenda(local, { force: true }).then(r => {
+        if (r && r.ok) toast('✅ Sua versão foi mantida na nuvem');
+      });
+    }
+  },
+  /* Fase 6: puxa os compromissos do banco relacional e junta com os locais. */
+  _puxouNestaSessao: false,
+  async sincronizarNuvem(opts = {}) {
+    if (!cloudRel.disponivel()) { if (!opts.silent) toast('Conecte-se à nuvem para sincronizar a agenda', 'warn'); return; }
+    const remotos = await cloudRel.puxarAgenda();
+    if (remotos === null) { if (!opts.silent) toast('Não foi possível puxar a agenda agora', 'warn'); return; }
+    const locais = store.list('agenda');
+    const porId = new Map(); locais.forEach(a => { if (a._id) porId.set(a._id, a); });
+    let novos = 0;
+    remotos.forEach(r => {
+      if (!r._id) return;
+      const loc = porId.get(r._id);
+      if (!loc) { locais.unshift(r); porId.set(r._id, r); novos++; }
+      else if (r._relUpdatedAt) loc._relUpdatedAt = r._relUpdatedAt;
+    });
+    store.setList('agenda', locais);
+    agenda._puxouNestaSessao = true;
+    try { agenda.render(); } catch (e) {}
+    if (!opts.silent) toast('☁️ Agenda sincronizada — ' + novos + ' novo(s)');
   },
   excluir(id) {
     if (!confirm('Excluir este compromisso?')) return;
@@ -33111,9 +33230,10 @@ const agenda = {
     const ag = store.getById('agenda', id);
     if (!ag) { toast('Agendamento não encontrado', 'warn'); return; }
     ag.status = 'confirmado';
-    store.save('agenda', ag);
+    const saved = store.save('agenda', ag);
     toast(`✓ ${ag.paciente} confirmado(a)`);
     agenda.render();
+    agenda._espelhar(saved);
   },
 
   /* Atualiza o card de contadores do dia (chamado sempre que render rola) */
