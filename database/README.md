@@ -103,8 +103,12 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   cache/fila. Status reais (Salvando / Salvo localmente / Sincronizando /
   Sincronizado / Offline / Pendente / Erro / Conflito). Fila idempotente com
   `operation_id` (UUID) + `base_version` + `retry_count`.
-- **Fase 3 — Auth unificada:** login único no Supabase Auth ligado a `profiles`;
-  migração dos usuários locais.
+- **Fase 3 — Auth unificada (em andamento):** ✅ o login já é único (Supabase
+  Auth, com fallback local offline) e, ao entrar, o app **puxa o papel do
+  servidor** (`organization_users.role` + `profiles`) e deriva as permissões da
+  UI a partir dele (gestor/anestesiologista/cirurgião/auxiliar/financeiro/
+  empresa). Contas inativas no banco são barradas. Falta ainda a migração
+  assistida dos usuários locais antigos para contas do Auth.
 - **Fase 4 — Paciente/Encounter central + migração dos dados atuais** (com
   relatório: migrados / ignorados / duplicados / sem correspondência).
 - **Fase 5 — Conflitos + Realtime** ("fulano está editando", comparar versões).

@@ -12716,6 +12716,38 @@ const auth = {
     }
   },
 
+  /* Mapa: papel no banco (organization_users.role) → permissões no app.
+     A RLS do banco é a barreira de segurança de verdade; isto só alinha a
+     UI (o que cada um vê/edita/imprime) ao papel definido no servidor. */
+  ROLE_PERMS: {
+    gestor: { perfil: 'admin',
+      modulos: ['dashboard','pacientes','agenda','consulta','pre','termo','prescricao','documentos','risco','anestesia','recuperacao','financeiro','orcamento','doses','ajustes'],
+      soImpressao: [] },
+    anestesiologista: { perfil: 'medico',
+      modulos: ['dashboard','pacientes','agenda','consulta','pre','termo','prescricao','documentos','risco','anestesia','recuperacao','financeiro','orcamento','doses'],
+      soImpressao: [] },
+    cirurgiao: { perfil: 'medico',
+      modulos: ['dashboard','pacientes','agenda','consulta','pre','termo','documentos','risco'],
+      soImpressao: ['consulta','pre','risco','documentos'] },
+    auxiliar: { perfil: 'secretaria',
+      modulos: ['dashboard','pacientes','agenda','prescricao','documentos','financeiro'],
+      soImpressao: ['prescricao','documentos'] },
+    financeiro: { perfil: 'secretaria',
+      modulos: ['dashboard','pacientes','agenda','financeiro','orcamento'],
+      soImpressao: ['pacientes','agenda'] },
+    empresa: { perfil: 'secretaria',
+      modulos: ['dashboard','financeiro','orcamento'],
+      soImpressao: ['financeiro','orcamento'] }
+  },
+  _permsDoPapel(role) {
+    return (role && auth.ROLE_PERMS[role]) ? auth.ROLE_PERMS[role] : null;
+  },
+  _rotuloPapel(role) {
+    const m = { gestor: 'Gestor', anestesiologista: 'Anestesiologista', cirurgiao: 'Cirurgião',
+                auxiliar: 'Auxiliar / Secretária', financeiro: 'Financeiro', empresa: 'Empresa' };
+    return (role && m[role]) || '';
+  },
+
   /* ---------- Hash SHA-256 (via SubtleCrypto, com fallback simples) ---------- */
   async _hash(texto) {
     try {
@@ -12797,7 +12829,8 @@ const auth = {
     catch { return null; }
   },
   _definirSessao(u) {
-    const sess = { id: u.id, usuario: u.usuario, nome: u.nome, perfil: u.perfil, modulos: u.modulos, soImpressao: u.soImpressao || [], entrouEm: Date.now() };
+    const sess = { id: u.id, usuario: u.usuario, nome: u.nome, perfil: u.perfil, modulos: u.modulos, soImpressao: u.soImpressao || [], entrouEm: Date.now(),
+      role: u.role || null, organization_id: u.organization_id || null, uid: u.uid || null };
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify(sess));
   },
   estaLogado() { return !!auth.usuarioAtual(); },
@@ -12865,7 +12898,7 @@ const auth = {
       const primeiro = auth.MODULOS.find(m => auth.podeAcessar(m.key));
       if (primeiro) location.hash = primeiro.key;
     }
-    try { const u = auth.usuarioAtual(); if (u) toast('Bem-vindo, ' + (u.nome || u.usuario)); } catch (e) {}
+    try { const u = auth.usuarioAtual(); if (u) { const rl = auth._rotuloPapel(u.role); toast('Bem-vindo, ' + (u.nome || u.usuario) + (rl ? ' · ' + rl : '')); } } catch (e) {}
   },
 
   /* Renderiza a tela de login (ou o cadastro inicial do admin) */
@@ -12930,7 +12963,15 @@ const auth = {
         try { ok = await cloud.login(id, senha); } catch (e) { ok = false; }
         if (ok) {
           await auth._protegerTrocaDeConta();
-          const u = await auth._espelharUsuarioNuvem(id, senha);
+          /* Fase 3: puxa papel/organização do servidor e deriva as permissões */
+          let perfilNuvem = null;
+          try { perfilNuvem = await cloud.buscarPerfil(); } catch (e) {}
+          if (perfilNuvem && perfilNuvem.ativo === false) {
+            try { cloud.logout(); } catch (e) {}
+            errEl.textContent = 'Sua conta está inativa. Fale com o gestor da clínica.';
+            return;
+          }
+          const u = await auth._espelharUsuarioNuvem(id, senha, perfilNuvem);
           auth._definirSessao(u);
           document.getElementById('auth-pass').value = '';
           auth._desbloquear();
@@ -12949,21 +12990,42 @@ const auth = {
     errEl.textContent = 'Usuário ou senha inválidos.';
   },
 
-  /* Mantém no aparelho um espelho da conta da nuvem p/ desbloqueio offline */
-  async _espelharUsuarioNuvem(email, senha) {
+  /* Mantém no aparelho um espelho da conta da nuvem p/ desbloqueio offline.
+     perfilNuvem (opcional) = { role, organization_id, uid, nome } vindo do
+     servidor; quando presente, as permissões saem do PAPEL definido no banco. */
+  async _espelharUsuarioNuvem(email, senha, perfilNuvem) {
     const usuarios = auth._lerUsuarios();
     const hash = await auth._hash(senha);
-    let u = usuarios.find(x => x.usuario === email);
-    if (!u) {
-      u = { usuario: email, nome: email.split('@')[0], senhaHash: hash, perfil: 'admin',
-            modulos: auth.PERFIS.admin.modulos.slice(), nuvem: true };
-      usuarios.push(u);
+    const u = usuarios.find(x => x.usuario === email);
+    /* Decide as permissões:
+       1) papel do servidor conhecido → usa o mapa ROLE_PERMS;
+       2) sem papel, mas já havia espelho → preserva o que estava valendo;
+       3) 1º acesso sem vínculo no banco → dono/legado (admin). */
+    let perms;
+    if (perfilNuvem && auth._permsDoPapel(perfilNuvem.role)) {
+      perms = auth._permsDoPapel(perfilNuvem.role);
+    } else if (u && Array.isArray(u.modulos) && u.modulos.length) {
+      perms = { perfil: u.perfil, modulos: u.modulos, soImpressao: u.soImpressao || [] };
     } else {
-      u.senhaHash = hash; u.nuvem = true;
-      if (!Array.isArray(u.modulos) || !u.modulos.length) u.modulos = auth.PERFIS.admin.modulos.slice();
+      perms = { perfil: 'admin', modulos: auth.PERFIS.admin.modulos.slice(), soImpressao: [] };
     }
+    const dados = {
+      usuario: email,
+      nome: (perfilNuvem && perfilNuvem.nome) || (u && u.nome) || email.split('@')[0],
+      senhaHash: hash,
+      perfil: perms.perfil,
+      modulos: (perms.modulos || []).slice(),
+      soImpressao: (perms.soImpressao || []).slice(),
+      nuvem: true,
+      role: (perfilNuvem && perfilNuvem.role) || (u && u.role) || null,
+      organization_id: (perfilNuvem && perfilNuvem.organization_id) || (u && u.organization_id) || null,
+      uid: (perfilNuvem && perfilNuvem.uid) || (u && u.uid) || null
+    };
+    let alvo = u;
+    if (!alvo) { alvo = {}; usuarios.push(alvo); }
+    Object.assign(alvo, dados);
     auth._salvarUsuarios(usuarios);
-    return u;
+    return alvo;
   },
 
   /* Se OUTRA conta da nuvem entrar neste aparelho, oferece limpar os dados
@@ -13150,7 +13212,8 @@ const auth = {
         badge.style.cssText = 'margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.12);font-size:.72rem';
         foot.appendChild(badge);
       }
-      const perfilLabel = (auth.PERFIS[u.perfil] || {}).label || u.perfil;
+      /* Prefere o papel real do servidor (Fase 3); cai no perfil local se não houver */
+      const perfilLabel = auth._rotuloPapel(u.role) || (auth.PERFIS[u.perfil] || {}).label || u.perfil;
       badge.innerHTML = `👤 <strong>${utils.escapeHTML(u.nome || u.usuario)}</strong><br><span style="opacity:.6">${utils.escapeHTML(perfilLabel)}</span> · <a href="#" onclick="event.preventDefault(); auth.logout()" style="color:#7fd3e8">Sair</a>`;
     }
   },
@@ -13653,6 +13716,36 @@ const cloud = {
       return false;
     }
   },
+  /* Busca o perfil + vínculo de organização do usuário logado (Fase 3).
+     Retorna { uid, email, nome, role, organization_id, ativo } ou null.
+     A RLS deixa o usuário ler o PRÓPRIO profile e os PRÓPRIOS vínculos. */
+  async buscarPerfil() {
+    if (!cloud.estaConfigurado() || !cloud.estaLogado()) return null;
+    if (!(await cloud._garantirToken())) return null;
+    const c = cloud.config(); const s = cloud.session();
+    if (!s || !s.user) return null;
+    const uid = s.user.id;
+    try {
+      const [rp, ro] = await Promise.all([
+        fetch(c.url + '/rest/v1/profiles?id=eq.' + uid + '&select=id,nome,email,funcao,ativo', { headers: cloud._headers(true) }),
+        fetch(c.url + '/rest/v1/organization_users?user_id=eq.' + uid + '&ativo=eq.true&select=organization_id,role,ativo&order=created_at.asc', { headers: cloud._headers(true) })
+      ]);
+      const perfilRows = rp.ok ? await rp.json().catch(() => []) : [];
+      const orgRows = ro.ok ? await ro.json().catch(() => []) : [];
+      const perfil = perfilRows[0] || null;
+      const vinc = orgRows[0] || null;
+      if (!perfil && !vinc) return null;   // conta ainda não vinculada no banco
+      return {
+        uid,
+        email: (perfil && perfil.email) || (s.user && s.user.email) || '',
+        nome: (perfil && perfil.nome) || '',
+        role: (vinc && vinc.role) || (perfil && perfil.funcao) || null,
+        organization_id: (vinc && vinc.organization_id) || null,
+        ativo: perfil ? perfil.ativo !== false : true
+      };
+    } catch (e) { return null; }
+  },
+
   async _renovarToken() {
     const c = cloud.config(); const s = cloud.session();
     if (!s || !s.refresh_token) return false;
