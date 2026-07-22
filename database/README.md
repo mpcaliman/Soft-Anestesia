@@ -119,6 +119,12 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   **idempotente** (`legacy_id`) e **aditiva**. Sempre há **pré-visualização**
   (dry-run) antes de qualquer escrita. Próximo: relatório persistido e
   reconciliação de anexos no Storage.
+- **Fase 6 — Módulos lendo/gravando do relacional (em andamento):** ✅ piloto no
+  módulo **Pacientes**: puxa os pacientes da tabela `patients` (nuvem) e junta
+  com os locais (dedup pelo nome, igual à migração), e cada paciente salvo é
+  espelhado (upsert idempotente por nome) na tabela relacional — cross-device,
+  com o localStorage como cache/offline. Próximos módulos seguem o mesmo padrão
+  via `cloudRel`.
 - **Fase 5 — Conflitos + Realtime** ("fulano está editando", comparar versões).
 - **Fase 6+ — Pré reorganizada, Ficha/linha do tempo unificada, SRPA,
   Financeiro (rascunho/conciliação), anexos no Storage, PDF versionado, tela de
