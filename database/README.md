@@ -109,8 +109,16 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   UI a partir dele (gestor/anestesiologista/cirurgião/auxiliar/financeiro/
   empresa). Contas inativas no banco são barradas. Falta ainda a migração
   assistida dos usuários locais antigos para contas do Auth.
-- **Fase 4 — Paciente/Encounter central + migração dos dados atuais** (com
-  relatório: migrados / ignorados / duplicados / sem correspondência).
+- **Fase 4 — Paciente/Encounter central + migração dos dados atuais (em
+  andamento):** ✅ `0003_migration_targets.sql` adiciona `legacy_id`
+  (idempotência) às tabelas e cria `consultations`, `quotes` e `appointments`.
+  ✅ No app (Ajustes → *Migração para o banco relacional*) há um motor que lê
+  os dados locais, **deduplica pacientes** (pelo nome normalizado, enriquecido
+  com CPF/nascimento — a mesma identidade que o app já usa), **forma
+  encounters** (paciente + data + procedimento) e escreve nas tabelas de forma
+  **idempotente** (`legacy_id`) e **aditiva**. Sempre há **pré-visualização**
+  (dry-run) antes de qualquer escrita. Próximo: relatório persistido e
+  reconciliação de anexos no Storage.
 - **Fase 5 — Conflitos + Realtime** ("fulano está editando", comparar versões).
 - **Fase 6+ — Pré reorganizada, Ficha/linha do tempo unificada, SRPA,
   Financeiro (rascunho/conciliação), anexos no Storage, PDF versionado, tela de

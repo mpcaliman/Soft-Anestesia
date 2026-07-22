@@ -474,6 +474,12 @@ html[data-theme="dark"] .theme-toggle:hover {
 .diag-box { margin: 8px 0 4px; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 12px; background: var(--surface-alt); font-size: .82rem; line-height: 1.45; }
 .diag-linha { padding: 3px 0; }
 .diag-linha + .diag-linha { border-top: 1px dashed var(--border); }
+/* Migração Fase 4 */
+.fase4-tab { width: 100%; border-collapse: collapse; font-size: .8rem; margin-top: 4px; }
+.fase4-tab th, .fase4-tab td { border: 1px solid var(--border); padding: 4px 8px; }
+.fase4-tab th { background: var(--surface-alt); text-align: left; }
+.fase4-bar { height: 10px; background: var(--surface-alt); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.fase4-bar > div { height: 100%; background: var(--accent); transition: width .25s; }
 .diag-ok { color: #0f7b4f; }
 .diag-erro { color: #b3392a; font-weight: 600; }
 .diag-aviso { color: #9a6a00; }
@@ -8129,6 +8135,29 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       </div>
     </section>
 
+    <!-- ☁️ MIGRAÇÃO FASE 4 — dados atuais → banco relacional -->
+    <section class="card" id="fase4-card">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-icon">🗄️</span><h2>Migração para o banco relacional<small>Leva seus dados atuais para as novas tabelas (pacientes, atendimentos, fichas…)</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <p style="font-size:.84rem;color:var(--text-soft);margin:0 0 10px;line-height:1.6">
+          Organiza os registros em <strong>pacientes únicos</strong> e <strong>atendimentos (encounters)</strong> no
+          banco relacional criado nas fases anteriores. É <strong>seguro</strong>: sempre há
+          pré-visualização, é <strong>idempotente</strong> (rodar de novo não duplica) e <strong>não apaga</strong> nada
+          — seus dados locais e a sincronização atual continuam intactos.
+        </p>
+        <ol style="font-size:.8rem;color:var(--text-mute);margin:0 0 12px;padding-left:18px;line-height:1.7">
+          <li>No Supabase → SQL Editor, rode <code>database/migrations/0003_migration_targets.sql</code> (uma vez).</li>
+          <li>Esteja <strong>conectado à nuvem</strong> (logado) aqui no app.</li>
+          <li>Clique em <strong>Pré-visualizar</strong> e confira os números; depois <strong>Migrar</strong>.</li>
+        </ol>
+        <button type="button" class="btn btn-sm" onclick="migracaoFase4.uiPreVisualizar()">🔍 Pré-visualizar migração</button>
+        <div id="fase4-resultado" class="diag-box" style="display:none;margin-top:12px"></div>
+      </div>
+    </section>
+
     <!-- 💾 BACKUP COMPLETO (todos os dados) -->
     <section class="card" id="backup-completo-card">
       <div class="card-header" onclick="ui.toggleCard(this)">
@@ -14240,6 +14269,280 @@ const cloud = {
       }, 20000);
     } catch (e) {}
     try { syncStatus.refresh(); } catch (e) {}
+  }
+};
+
+/* ============================================================================
+   MIGRAÇÃO FASE 4 — dados atuais → banco relacional (patients/encounters/…)
+   Lê os registros locais, deduplica pacientes (CPF; senão nome+nascimento),
+   forma encounters (paciente + data + procedimento) e escreve nas tabelas
+   relacionais de forma IDEMPOTENTE (legacy_id = _id local / chave do paciente).
+   Sempre há PRÉ-VISUALIZAÇÃO (dry-run, só leitura) antes de qualquer escrita.
+============================================================================ */
+const migracaoFase4 = {
+  /* módulo local → tabela relacional */
+  MAP: [
+    { mod: 'pacientes',   tabela: 'patients',                  tipo: 'paciente'   },
+    { mod: 'pre',         tabela: 'preanesthetic_assessments', tipo: 'clinico'    },
+    { mod: 'consulta',    tabela: 'consultations',             tipo: 'clinico'    },
+    { mod: 'anestesia',   tabela: 'anesthesia_records',        tipo: 'clinico'    },
+    { mod: 'recuperacao', tabela: 'recovery_records',          tipo: 'clinico'    },
+    { mod: 'risco',       tabela: 'risk_assessments',          tipo: 'clinico'    },
+    { mod: 'termo',       tabela: 'consents',                  tipo: 'clinico'    },
+    { mod: 'prescricao',  tabela: 'prescriptions',             tipo: 'clinico'    },
+    { mod: 'documentos',  tabela: 'documents',                 tipo: 'clinico'    },
+    { mod: 'financeiro',  tabela: 'finance_entries',           tipo: 'financeiro' },
+    { mod: 'orcamento',   tabela: 'quotes',                    tipo: 'financeiro' },
+    { mod: 'agenda',      tabela: 'appointments',              tipo: 'agenda'     }
+  ],
+
+  _digs(s) { return (s || '').toString().replace(/\D+/g, ''); },
+  _dataISO(s) {
+    const d = (s || '').toString().slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
+  },
+
+  /* Extrai a identidade do paciente de um item de qualquer módulo */
+  _ident(it) {
+    const pac = (it.paciente && typeof it.paciente === 'object') ? it.paciente : {};
+    const nome = it.paciente_nome || it.nome || pac.nome || (typeof it.paciente === 'string' ? it.paciente : '') || '';
+    const nasc = this._dataISO(it.paciente_nasc || it.nascimento || pac.nascimento || '');
+    const cpf  = this._digs(it.cpf || it.paciente_cpf || pac.cpf || '');
+    return {
+      nome: (nome || '').toString().trim(),
+      nasc: nasc || '',
+      cpf: (cpf.length >= 11 ? cpf : ''),
+      convenio: it.convenio || it.paciente_convenio || pac.convenio || '',
+      prontuario: it.prontuario || pac.prontuario || '',
+      telefone: it.telefone || pac.telefone || '',
+      sexo: it.sexo || pac.sexo || ''
+    };
+  },
+  _norm(s) { return (typeof linker !== 'undefined' && linker._normNome) ? linker._normNome(s) : (s || '').toLowerCase().trim(); },
+  /* Chave determinística do paciente (idempotente).
+     Segue a mesma noção de identidade que o app já usa: o NOME normalizado
+     (é assim que o autocomplete/linker reconhecem o mesmo paciente entre os
+     módulos). CPF/nascimento entram como enriquecimento, não como chave — do
+     contrário o mesmo paciente se divide quando um registro tem só o nome. */
+  _patKey(id) {
+    const n = this._norm(id.nome);
+    if (n && n.length >= 3) return 'nome:' + n;
+    return id.cpf ? 'cpf:' + id.cpf : null;   // sem nome utilizável, usa CPF
+  },
+  /* Chave do encounter (paciente + data + procedimento). Só forma encounter
+     quando há PROCEDIMENTO — um episódio cirúrgico/clínico. */
+  _encKey(patKey, it) {
+    if (!patKey) return null;
+    const proc = this._norm(it.procedimento || it.cirurgia || '');
+    if (!proc) return null;
+    const data = this._dataISO(it.data) || '';
+    return patKey + '|' + data + '|' + proc;
+  },
+  _mergePac(mapa, key, id) {
+    const cur = mapa.get(key) || { nome: '', nasc: '', cpf: '', convenio: '', prontuario: '', telefone: '', sexo: '' };
+    /* preenche campos vazios; prefere nome mais completo */
+    if (id.nome && id.nome.length > (cur.nome || '').length) cur.nome = id.nome;
+    ['nasc', 'cpf', 'convenio', 'prontuario', 'telefone', 'sexo'].forEach(f => { if (!cur[f] && id[f]) cur[f] = id[f]; });
+    mapa.set(key, cur);
+  },
+
+  /* Lê tudo local e monta {pacientes, encounters, registros} */
+  extrair() {
+    const pacientes = new Map();   // patKey -> ident
+    const encounters = new Map();  // encKey -> {patKey, procedimento, data, cirurgiao, convenio}
+    const registros = [];          // {tabela, mod, legacy_id, patKey, encKey, data}
+    let semPaciente = 0;
+    this.MAP.forEach(m => {
+      let lista = [];
+      try { lista = store.list(m.mod) || []; } catch (e) {}
+      lista.forEach(it => {
+        if (!it || !it._id) return;
+        const id = this._ident(it);
+        const patKey = this._patKey(id);
+        if (m.tipo === 'paciente') {
+          if (patKey) this._mergePac(pacientes, patKey, id);
+          return;   // o cadastro de paciente não vira "registro" clínico
+        }
+        if (!patKey) { semPaciente++; return; }   // sem nome/CPF → não migra (reporta)
+        this._mergePac(pacientes, patKey, id);
+        const encKey = this._encKey(patKey, it);
+        /* Só registros CLÍNICOS com procedimento FORMAM encounter. Financeiro/
+           agenda apenas se ligam a um encounter já existente (não criam). */
+        if (encKey && m.tipo === 'clinico' && !encounters.has(encKey)) {
+          encounters.set(encKey, {
+            patKey, procedimento: it.procedimento || it.cirurgia || '',
+            data: this._dataISO(it.data) || '', cirurgiao: it.cirurgiao || '', convenio: id.convenio || ''
+          });
+        }
+        registros.push({ tabela: m.tabela, mod: m.mod, legacy_id: it._id, patKey, _encKeyRaw: encKey || null, data: it });
+      });
+    });
+    /* 2ª passada: liga cada registro a um encounter só se ele foi formado */
+    registros.forEach(r => { r.encKey = (r._encKeyRaw && encounters.has(r._encKeyRaw)) ? r._encKeyRaw : null; delete r._encKeyRaw; });
+    return { pacientes, encounters, registros, semPaciente };
+  },
+
+  /* Dry-run: relatório do que seria migrado (só leitura) */
+  previsualizar() {
+    const x = this.extrair();
+    const porModulo = {};
+    x.registros.forEach(r => { porModulo[r.mod] = (porModulo[r.mod] || 0) + 1; });
+    const pacs = Array.from(x.pacientes.values());
+    return {
+      pacientes: x.pacientes.size,
+      comCpf: pacs.filter(p => p.cpf).length,
+      semCpfNemNasc: pacs.filter(p => !p.cpf && !p.nasc).length,
+      encounters: x.encounters.size,
+      registros: x.registros.length,
+      porModulo,
+      semPaciente: x.semPaciente
+    };
+  },
+
+  /* ---- Escrita relacional (REST, mesmo padrão do cloud._enviarOp) ---- */
+  async _upsert(tabela, rows, retornar) {
+    if (!rows.length) return [];
+    const c = cloud.config();
+    const headers = Object.assign({}, cloud._headers(true), {
+      'Prefer': 'resolution=merge-duplicates,return=' + (retornar ? 'representation' : 'minimal')
+    });
+    const r = await fetch(c.url + '/rest/v1/' + tabela + '?on_conflict=organization_id,legacy_id', {
+      method: 'POST', headers, body: JSON.stringify(rows)
+    });
+    if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(tabela + ' HTTP ' + r.status + ' — ' + t.slice(0, 240)); }
+    return retornar ? await r.json().catch(() => []) : [];
+  },
+  _chunk(arr, n) { const out = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out; },
+
+  /* Executa a migração de verdade. onProgress(pct, msg) opcional. */
+  async executar(onProgress) {
+    const prog = (p, m) => { try { onProgress && onProgress(p, m); } catch (e) {} };
+    if (!cloud.estaConfigurado() || !cloud.estaLogado()) return { ok: false, erro: 'Faça login na nuvem primeiro.' };
+    if (!(await cloud._garantirToken())) return { ok: false, erro: 'Sessão expirada — entre novamente.' };
+    let perfil = null;
+    try { perfil = await cloud.buscarPerfil(); } catch (e) {}
+    const org = perfil && perfil.organization_id;
+    if (!org) return { ok: false, erro: 'Sua conta não está vinculada a uma organização. Rode o apply_all.sql (seed) e confira o vínculo como gestor.' };
+
+    const x = this.extrair();
+    const relatorio = { org, pacientes: 0, encounters: 0, porTabela: {}, erros: [] };
+    const idPorPatKey = {};   // patKey -> uuid
+    const idPorEncKey = {};   // encKey -> uuid
+
+    try {
+      /* 1) PACIENTES */
+      prog(5, 'Migrando pacientes…');
+      const patRows = Array.from(x.pacientes.entries()).map(([k, p]) => ({
+        organization_id: org, legacy_id: k,
+        nome: p.nome || 'Sem nome', cpf: p.cpf || null, nascimento: this._dataISO(p.nasc),
+        prontuario: p.prontuario || null, convenio: p.convenio || null,
+        telefone: p.telefone || null, sexo: p.sexo || null,
+        data: { origem: 'migracao_fase4' }
+      }));
+      for (const lote of this._chunk(patRows, 200)) {
+        const ret = await this._upsert('patients', lote, true);
+        ret.forEach(row => { if (row.legacy_id) idPorPatKey[row.legacy_id] = row.id; });
+        relatorio.pacientes += ret.length;
+      }
+
+      /* 2) ENCOUNTERS */
+      prog(30, 'Formando encounters…');
+      const encEntries = Array.from(x.encounters.entries());
+      const encRows = encEntries.map(([k, e]) => ({
+        organization_id: org, legacy_id: k,
+        patient_id: idPorPatKey[e.patKey] || null,
+        procedimento: e.procedimento || null, convenio: e.convenio || null,
+        data_prevista: this._dataISO(e.data), status: 'migrado',
+        data: { cirurgiao: e.cirurgiao || '', origem: 'migracao_fase4' }
+      })).filter(r => r.patient_id);   // só encounters com paciente resolvido
+      for (const lote of this._chunk(encRows, 200)) {
+        const ret = await this._upsert('encounters', lote, true);
+        ret.forEach(row => { if (row.legacy_id) idPorEncKey[row.legacy_id] = row.id; });
+        relatorio.encounters += ret.length;
+      }
+
+      /* 3) REGISTROS por tabela */
+      prog(55, 'Migrando registros clínicos e financeiros…');
+      const porTabela = {};
+      x.registros.forEach(r => { (porTabela[r.tabela] = porTabela[r.tabela] || []).push(r); });
+      const tabelas = Object.keys(porTabela);
+      let ti = 0;
+      for (const tabela of tabelas) {
+        const rows = porTabela[tabela].map(r => {
+          const base = {
+            organization_id: org, legacy_id: r.legacy_id,
+            patient_id: idPorPatKey[r.patKey] || null,
+            data: r.data
+          };
+          /* encounter_id só nas tabelas que têm a coluna */
+          if (tabela !== 'quotes') base.encounter_id = r.encKey ? (idPorEncKey[r.encKey] || null) : null;
+          if (tabela === 'appointments') base.scheduled_at = null;
+          return base;
+        });
+        let migr = 0;
+        for (const lote of this._chunk(rows, 200)) { await this._upsert(tabela, lote, false); migr += lote.length; }
+        relatorio.porTabela[tabela] = migr;
+        ti++; prog(55 + Math.round((ti / tabelas.length) * 40), 'Migrando ' + tabela + '…');
+      }
+
+      prog(100, 'Concluído.');
+      relatorio.ok = true;
+      try { localStorage.setItem('medsys.v7.fase4.ultima_migracao', new Date().toISOString()); } catch (e) {}
+      return relatorio;
+    } catch (e) {
+      relatorio.ok = false; relatorio.erro = e.message; relatorio.erros.push(e.message);
+      return relatorio;
+    }
+  },
+
+  /* ---- UI (tela de Ajustes) ---- */
+  _box() { return document.getElementById('fase4-resultado'); },
+  uiPreVisualizar() {
+    const box = this._box(); if (!box) return;
+    let rep;
+    try { rep = this.previsualizar(); } catch (e) { box.innerHTML = '<div class="diag-linha diag-erro">❌ Erro ao ler dados locais: ' + utils.escapeHTML(e.message) + '</div>'; box.style.display = 'block'; return; }
+    const linhasMod = Object.entries(rep.porModulo).map(([m, n]) => '<tr><td>' + m + '</td><td style="text-align:right">' + n + '</td></tr>').join('');
+    box.innerHTML =
+      '<div class="fase4-report">' +
+      '<h4 style="margin:0 0 8px">Pré-visualização (nada foi enviado ainda)</h4>' +
+      '<ul style="margin:0 0 10px;padding-left:18px;line-height:1.7">' +
+        '<li><strong>' + rep.pacientes + '</strong> paciente(s) após deduplicação — ' + rep.comCpf + ' com CPF, ' + rep.semCpfNemNasc + ' sem CPF nem nascimento (juntados por nome).</li>' +
+        '<li><strong>' + rep.encounters + '</strong> atendimento(s)/encounter(s) formados (paciente + data + procedimento).</li>' +
+        '<li><strong>' + rep.registros + '</strong> registro(s) de módulos a migrar.</li>' +
+        (rep.semPaciente ? '<li style="color:var(--warning)">' + rep.semPaciente + ' registro(s) <strong>sem nome/CPF</strong> — serão ignorados (aparecem como rascunhos).</li>' : '') +
+      '</ul>' +
+      '<table class="fase4-tab"><thead><tr><th>Módulo</th><th style="text-align:right">Registros</th></tr></thead><tbody>' + linhasMod + '</tbody></table>' +
+      '<div style="margin-top:12px">' +
+        '<button type="button" class="btn btn-primary btn-sm" onclick="migracaoFase4.uiExecutar()">☁️ Migrar agora para o banco relacional</button>' +
+        '<p style="font-size:.74rem;color:var(--text-mute);margin-top:8px">A migração é <strong>idempotente</strong> (pode rodar de novo sem duplicar) e <strong>aditiva</strong> — não apaga nada do que já existe, nem o localStorage. Rode o <code>0003_migration_targets.sql</code> no Supabase antes.</p>' +
+      '</div></div>';
+    box.style.display = 'block';
+  },
+  async uiExecutar() {
+    if (!confirm('Migrar seus dados atuais para o novo banco relacional?\n\nÉ seguro: idempotente (não duplica) e aditivo (não apaga nada). Requer o 0003_migration_targets.sql já aplicado no Supabase.')) return;
+    const box = this._box(); if (!box) return;
+    box.innerHTML = '<div class="fase4-prog"><div class="fase4-bar"><div id="fase4-bar-fill" style="width:0%"></div></div><div id="fase4-prog-msg" style="font-size:.8rem;color:var(--text-mute);margin-top:6px">Iniciando…</div></div>';
+    box.style.display = 'block';
+    const rep = await this.executar((pct, msg) => {
+      const fill = document.getElementById('fase4-bar-fill'); const m = document.getElementById('fase4-prog-msg');
+      if (fill) fill.style.width = pct + '%'; if (m) m.textContent = msg;
+    });
+    if (!rep.ok) {
+      box.innerHTML = '<div class="diag-linha diag-erro">❌ ' + utils.escapeHTML(rep.erro || 'Falha na migração') + '</div>';
+      return;
+    }
+    const linhas = Object.entries(rep.porTabela).map(([t, n]) => '<tr><td>' + t + '</td><td style="text-align:right">' + n + '</td></tr>').join('');
+    box.innerHTML =
+      '<div class="fase4-report">' +
+      '<h4 style="margin:0 0 8px;color:var(--success,#16a34a)">✅ Migração concluída</h4>' +
+      '<ul style="margin:0 0 10px;padding-left:18px;line-height:1.7">' +
+        '<li><strong>' + rep.pacientes + '</strong> paciente(s) gravados/atualizados.</li>' +
+        '<li><strong>' + rep.encounters + '</strong> encounter(s) gravados/atualizados.</li>' +
+      '</ul>' +
+      '<table class="fase4-tab"><thead><tr><th>Tabela</th><th style="text-align:right">Registros</th></tr></thead><tbody>' + linhas + '</tbody></table>' +
+      '<p style="font-size:.74rem;color:var(--text-mute);margin-top:8px">Pode rodar de novo quando quiser — só atualiza, não duplica.</p>' +
+      '</div>';
+    try { toast('✅ Migração para o banco relacional concluída'); } catch (e) {}
   }
 };
 
@@ -32893,6 +33196,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.pdfGen = pdfGen;
   window.pdfBackup = pdfBackup;
   window.cloud = cloud;
+  window.migracaoFase4 = migracaoFase4;
   window.auth = auth;
   window.demo = demo;
   try { pre.premed.render(); } catch (e) {}
