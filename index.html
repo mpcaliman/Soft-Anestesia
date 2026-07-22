@@ -8042,11 +8042,12 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       </div>
       <div class="filter-actions">
         <button class="btn btn-sm" onclick="document.getElementById('pac-f-busca').value=''; pacientes.render();">Limpar</button>
+        <button class="btn btn-sm" id="pac-sync-btn" onclick="pacientes.sincronizarNuvem()" title="Puxa os pacientes do banco relacional (nuvem) e junta com os deste aparelho">☁️ Sincronizar pacientes</button>
       </div>
     </div>
 
     <div class="card no-collapse">
-      <div class="card-header"><div class="card-title-wrap"><h2>Pacientes cadastrados</h2></div></div>
+      <div class="card-header"><div class="card-title-wrap"><h2>Pacientes cadastrados <small id="pac-sync-info" style="color:var(--text-mute);font-weight:400"></small></h2></div></div>
       <div class="card-body" style="padding:0">
         <div style="overflow-x:auto">
           <table class="data" id="pacientes-table">
@@ -9872,7 +9873,7 @@ const ui = {
         if (modName === 'dashboard') dashboard.atualizar();
         else if (modName === 'financeiro') financeiro.render();
         else if (modName === 'agenda') agenda.render();
-        else if (modName === 'pacientes') pacientes.render();
+        else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); logoUsuario.renderAjustes(); const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
         else if (modName === 'pre') { try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} try { pre.viaAerea.render(); } catch (e) {} }
         else if (modName === 'anestesia') { anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} }
@@ -14543,6 +14544,83 @@ const migracaoFase4 = {
       '<p style="font-size:.74rem;color:var(--text-mute);margin-top:8px">Pode rodar de novo quando quiser — só atualiza, não duplica.</p>' +
       '</div>';
     try { toast('✅ Migração para o banco relacional concluída'); } catch (e) {}
+  }
+};
+
+/* ============================================================================
+   CLOUD RELACIONAL (Fase 6) — leitura/escrita direta nas tabelas relacionais.
+   Piloto: módulo Pacientes. Usa a MESMA identidade (patKey por nome) da
+   migração, então salvar um paciente ATUALIZA a linha migrada em vez de
+   duplicar. Offline/sem org → no-op honesto; o localStorage segue como cache.
+============================================================================ */
+const cloudRel = {
+  _org() { try { const u = auth.usuarioAtual(); return (u && u.organization_id) || null; } catch (e) { return null; } },
+  async _orgAsync() {
+    let org = cloudRel._org();
+    if (org) return org;
+    try { const p = await cloud.buscarPerfil(); if (p && p.organization_id) return p.organization_id; } catch (e) {}
+    return null;
+  },
+  disponivel() {
+    try {
+      return cloud.estaConfigurado() && cloud.estaLogado()
+        && (typeof navigator === 'undefined' || navigator.onLine !== false);
+    } catch (e) { return false; }
+  },
+
+  /* Puxa os pacientes da org (tabela relacional). Retorna [{_patKey,item}] ou null. */
+  async puxarPacientes() {
+    if (!cloudRel.disponivel()) return null;
+    if (!(await cloud._garantirToken())) return null;
+    const org = await cloudRel._orgAsync();
+    if (!org) return null;
+    const c = cloud.config();
+    try {
+      const r = await fetch(c.url + '/rest/v1/patients?organization_id=eq.' + org +
+        '&deleted_at=is.null&select=id,nome,cpf,nascimento,prontuario,convenio,telefone,email,sexo,data,legacy_id&order=nome.asc',
+        { headers: cloud._headers(true) });
+      if (!r.ok) return null;
+      const rows = await r.json();
+      return rows.map(row => {
+        /* Se a linha guardou o item local completo em data, usa-o; senão
+           reconstrói a partir das colunas (caso das linhas migradas). */
+        const d = row.data;
+        const base = (d && typeof d === 'object' && (d._id || d.nome)) ? Object.assign({}, d) : {};
+        base.nome = base.nome || row.nome || '';
+        if (!base.cpf && row.cpf) base.cpf = row.cpf;
+        if (!base.nascimento && row.nascimento) base.nascimento = row.nascimento;
+        if (!base.prontuario && row.prontuario) base.prontuario = row.prontuario;
+        if (!base.plano && !base.convenio && row.convenio) base.plano = row.convenio;
+        if (!base.telefone && row.telefone) base.telefone = row.telefone;
+        if (!base.email && row.email) base.email = row.email;
+        if (!base.sexo && row.sexo) base.sexo = row.sexo;
+        if (!base._id) base._id = 'rel_' + (row.id || '').toString().slice(0, 8) + utils.uid().slice(-4);
+        const key = migracaoFase4._patKey(migracaoFase4._ident(base));
+        return { _patKey: key, item: base };
+      });
+    } catch (e) { return null; }
+  },
+
+  /* Envia (upsert idempotente por patKey) um paciente para a tabela relacional. */
+  async enviarPaciente(item) {
+    if (!cloudRel.disponivel() || !item) return false;
+    if (!(await cloud._garantirToken())) return false;
+    const org = await cloudRel._orgAsync();
+    if (!org) return false;
+    const id = migracaoFase4._ident(item);
+    const key = migracaoFase4._patKey(id);
+    if (!key) return false;
+    const row = {
+      organization_id: org, legacy_id: key,
+      nome: item.nome || id.nome || 'Sem nome',
+      cpf: id.cpf || item.cpf || null,
+      nascimento: migracaoFase4._dataISO(item.nascimento),
+      prontuario: item.prontuario || null,
+      convenio: item.plano || item.convenio || null,
+      telefone: item.telefone || null, email: item.email || null, sexo: item.sexo || null,
+      data: item
+    };
+    try { await migracaoFase4._upsert('patients', [row], false); return true; } catch (e) { return false; }
   }
 };
 
@@ -26387,6 +26465,10 @@ const pacientes = {
 
       toast('Paciente "' + nome + '" salvo com sucesso');
 
+      /* Fase 6: espelha no banco relacional (patients) — idempotente por nome.
+         Best-effort em segundo plano; o localStorage continua sendo o cache. */
+      try { if (typeof cloudRel !== 'undefined') cloudRel.enviarPaciente(saved); } catch (e) {}
+
       /* Fecha o card e re-renderiza */
       const card = document.getElementById(pacientes.cardId);
       if (card) card.style.display = 'none';
@@ -26455,6 +26537,48 @@ const pacientes = {
     const list = pacientes.list();
     utils.download(`pacientes_${utils.hojeISO()}.json`, JSON.stringify(list, null, 2));
     toast('JSON exportado');
+  },
+
+  /* Fase 6: puxa os pacientes do banco relacional e junta com os locais.
+     Deduplica pela mesma identidade da migração (nome normalizado). Não
+     apaga nada local; só adiciona novos e enriquece campos vazios. */
+  _puxouNestaSessao: false,
+  async sincronizarNuvem(opts = {}) {
+    const btn = document.getElementById('pac-sync-btn');
+    const info = document.getElementById('pac-sync-info');
+    if (!cloudRel.disponivel()) {
+      if (!opts.silent) toast('Conecte-se à nuvem (Ajustes) para sincronizar pacientes', 'warn');
+      return;
+    }
+    if (btn && !opts.silent) { btn.disabled = true; btn.textContent = '⏳ Sincronizando…'; }
+    try {
+      const remotos = await cloudRel.puxarPacientes();
+      if (remotos === null) { if (!opts.silent) toast('Não foi possível puxar os pacientes agora', 'warn'); return; }
+      const locais = store.list('pacientes');
+      const idxPorKey = new Map();
+      locais.forEach(p => { const k = migracaoFase4._patKey(migracaoFase4._ident(p)); if (k) idxPorKey.set(k, p); });
+      let novos = 0, enriquecidos = 0;
+      remotos.forEach(r => {
+        if (!r._patKey) return;
+        const loc = idxPorKey.get(r._patKey);
+        if (!loc) { locais.unshift(r.item); idxPorKey.set(r._patKey, r.item); novos++; }
+        else {
+          let mudou = false;
+          ['cpf', 'nascimento', 'telefone', 'email', 'sexo', 'prontuario', 'plano', 'convenio', 'carteirinha'].forEach(f => {
+            if ((!loc[f] || loc[f] === '') && r.item[f]) { loc[f] = r.item[f]; mudou = true; }
+          });
+          if (mudou) enriquecidos++;
+        }
+      });
+      store.setList('pacientes', locais);
+      pacientes._puxouNestaSessao = true;
+      try { pacientes.render(); } catch (e) {}
+      const msg = novos + ' novo(s), ' + enriquecidos + ' atualizado(s)';
+      if (info) info.textContent = '· ☁️ ' + msg;
+      if (!opts.silent) toast('☁️ Pacientes sincronizados — ' + msg);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '☁️ Sincronizar pacientes'; }
+    }
   },
   /* Resumo consolidado: reúne todos os registros do paciente por nome */
   resumo(nome) {
@@ -33197,6 +33321,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.pdfBackup = pdfBackup;
   window.cloud = cloud;
   window.migracaoFase4 = migracaoFase4;
+  window.cloudRel = cloudRel;
   window.auth = auth;
   window.demo = demo;
   try { pre.premed.render(); } catch (e) {}
