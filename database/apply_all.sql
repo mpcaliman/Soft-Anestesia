@@ -1,7 +1,8 @@
 -- ############################################################################
 -- Soft Anestesia — APLICAR TUDO (0001 + 0002 + SEED) — copie e cole no SQL Editor
 -- Rode uma vez. É idempotente (pode rodar de novo sem estragar nada).
--- No fim, TROQUE o e-mail no bloco SEED.
+-- O SEED (no fim) já está com o e-mail do gestor: mpcaliman@hotmail.com
+-- (a conta precisa existir em Authentication > Users).
 -- ############################################################################
 
 -- =============================================================================
@@ -961,7 +962,7 @@ end $$;
 
 
 -- =============================================================================
--- SEED INICIAL  ⚠️ EDITE O E-MAIL NA LINHA ABAIXO (v_email) ANTES DE RODAR
+-- SEED INICIAL — já preenchido com o e-mail do gestor.
 -- Requisito: essa conta já precisa existir no Supabase Auth
 -- (Authentication → Users). É a conta de e-mail com que você entra no app.
 -- =============================================================================
@@ -969,7 +970,7 @@ do $$
 declare
   v_uid   uuid;
   v_org   uuid;
-  v_email text := 'SEU_EMAIL_AQUI@exemplo.com';   -- <<<<<< TROQUE AQUI
+  v_email text := 'mpcaliman@hotmail.com';
 begin
   select id into v_uid from auth.users where lower(email) = lower(v_email);
   if v_uid is null then
