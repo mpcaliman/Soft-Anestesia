@@ -364,7 +364,17 @@ html[data-theme="dark"] .theme-toggle:hover {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: .75rem; color: var(--text-mute);
 }
-.saved-badge .dot { width: 7px; height: 7px; background: var(--accent); border-radius: 50%; }
+.saved-badge .dot { width: 7px; height: 7px; background: var(--accent); border-radius: 50%; transition: background .2s; }
+/* Estados honestos de sincronização (data-state no #saved-badge) */
+.saved-badge[data-state="local"] .dot   { background: var(--warning); }
+.saved-badge[data-state="syncing"] .dot { background: #3b82f6; animation: pulse 1.2s infinite; }
+.saved-badge[data-state="synced"] .dot  { background: var(--success, #16a34a); }
+.saved-badge[data-state="offline"] .dot { background: var(--text-mute); }
+.saved-badge[data-state="queued"] .dot  { background: var(--warning); }
+.saved-badge[data-state="error"] .dot   { background: var(--danger, #dc2626); animation: pulse 1.2s infinite; }
+.saved-badge[data-state="local"]   { color: var(--warning); }
+.saved-badge[data-state="synced"]  { color: var(--success, #16a34a); }
+.saved-badge[data-state="error"]   { color: var(--danger, #dc2626); }
 .autosave-toggle {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: .75rem; color: var(--text-soft);
@@ -9905,8 +9915,78 @@ function markClean() {
   state.dirty = false;
   document.getElementById('dirty-badge').classList.remove('show');
 }
+/* ============================================================================
+   STATUS DE SINCRONIZAÇÃO HONESTO (Fase 2)
+   O cabeçalho não mente mais: "Salvo" antes significava só localStorage,
+   mesmo sem nada ter chegado à nuvem. Agora o selo mostra o estado REAL:
+   Salvo no aparelho → Sincronizando → Sincronizado, ou Offline/Pendente/Erro,
+   ou "só neste aparelho" quando a nuvem não está configurada/conectada.
+============================================================================ */
+const syncStatus = {
+  _localTxt: 'Pronto',   // último rótulo de save local (ex.: "Salvo às 14:30")
+  _cloud: 'idle',        // idle | syncing | synced | queued | offline | error | off
+  _cloudAt: null,        // horário da última confirmação da nuvem
+  _inflight: 0,          // pushes em andamento
+
+  /* Chamado após um save local (via setSavedStatus). É a verdade base: o dado
+     ESTÁ no aparelho. A nuvem, se houver, atualiza por cima. */
+  setLocal(txt) {
+    this._localTxt = txt || 'Salvo';
+    this._render();
+  },
+  _cloudDisponivel() {
+    try { return cloud.estaConfigurado() && cloud.estaLogado(); } catch (e) { return false; }
+  },
+  cloudSyncing() { this._inflight++; this._cloud = 'syncing'; this._render(); },
+  cloudDone(ok) {
+    this._inflight = Math.max(0, this._inflight - 1);
+    if (this._inflight === 0) {
+      if (ok) { this._cloud = 'synced'; this._cloudAt = new Date(); }
+      else    { this._cloud = (typeof navigator !== 'undefined' && navigator.onLine === false) ? 'offline' : 'queued'; }
+    }
+    this._render();
+  },
+  cloudState(s) { this._cloud = s; if (s === 'synced') this._cloudAt = new Date(); this._render(); },
+  refresh() { this._render(); },
+
+  _hhmm(d) { try { return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } },
+
+  _render() {
+    const el = document.getElementById('saved-text');
+    const badge = document.getElementById('saved-badge');
+    if (!el) return;
+    let txt = this._localTxt, state = 'idle';
+    const filaN = (() => { try { return cloud._fila().length; } catch (e) { return 0; } })();
+
+    if (!this._cloudDisponivel()) {
+      /* Sem nuvem: honesto que o dado vive só aqui. */
+      txt = (this._localTxt && this._localTxt !== 'Pronto')
+        ? this._localTxt + ' · só neste aparelho'
+        : 'Pronto — dados só neste aparelho';
+      state = 'local';
+    } else if (this._cloud === 'syncing') {
+      txt = 'Sincronizando…'; state = 'syncing';
+    } else if (this._cloud === 'error') {
+      txt = 'Erro ao sincronizar — dados salvos no aparelho'; state = 'error';
+    } else if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      txt = 'Salvo no aparelho · sem internet' + (filaN ? ' (' + filaN + ' na fila)' : ''); state = 'offline';
+    } else if (filaN > 0 || this._cloud === 'queued') {
+      txt = 'Salvo no aparelho · ' + (filaN || 1) + ' aguardando envio'; state = 'queued';
+    } else if (this._cloud === 'synced') {
+      txt = 'Sincronizado' + (this._cloudAt ? ' às ' + this._hhmm(this._cloudAt) : ''); state = 'synced';
+    } else {
+      /* nuvem disponível, nada pendente, ainda sem push nesta sessão */
+      txt = this._localTxt || 'Pronto'; state = 'idle';
+    }
+    el.textContent = txt;
+    if (badge) badge.setAttribute('data-state', state);
+  }
+};
+
 function setSavedStatus(txt) {
-  document.getElementById('saved-text').textContent = txt;
+  /* Mantém a compatibilidade com todos os chamadores, mas agora passa pelo
+     controlador honesto: o texto vira o rótulo de save LOCAL. */
+  syncStatus.setLocal(txt);
 }
 
 /* ============================================================================
@@ -13621,14 +13701,29 @@ const cloud = {
   },
   _limparFila() { localStorage.removeItem(cloud.QUEUE_KEY); },
 
+  /* ---- Monta uma operação idempotente para a fila/envio ---- */
+  _novaOp(modulo, item, operacao) {
+    return {
+      operation_id: (typeof utils !== 'undefined' && utils.uid) ? utils.uid()
+                    : (String(Date.now()) + Math.random().toString(16).slice(2)),
+      modulo, doc_id: item._id, operacao,
+      dados: item,
+      base_version: item._updatedAt || null,  // versão em que a operação nasceu
+      retry_count: 0,
+      ts: Date.now()
+    };
+  },
+
   /* ---- Push: envia uma gravação para a nuvem (chamado pelo store) ---- */
   async pushDoc(modulo, item, operacao) {
     if (typeof demo !== 'undefined' && demo.ativo()) return;   /* modo teste não sobe nada */
-    if (!cloud.estaConfigurado() || !cloud.estaLogado()) return;
+    if (!cloud.estaConfigurado() || !cloud.estaLogado()) { try { syncStatus.refresh(); } catch (e) {} return; }
     if (cloud.MODS.indexOf(modulo) < 0) return;
-    const op = { modulo, doc_id: item._id, operacao: operacao || 'upsert', dados: item, ts: Date.now() };
+    const op = cloud._novaOp(modulo, item, operacao || 'upsert');
+    try { syncStatus.cloudSyncing(); } catch (e) {}
     const ok = await cloud._enviarOp(op);
     if (!ok) cloud._enfileirar(op);   // guarda para reenviar depois
+    try { syncStatus.cloudDone(ok); } catch (e) {}
   },
   async _enviarOp(op) {
     if (!(await cloud._garantirToken())) return false;
@@ -13671,7 +13766,7 @@ const cloud = {
         const aindaFalha = [];
         for (const op of fila) {
           const ok = await cloud._enviarOp(op);
-          if (!ok) aindaFalha.push(op);
+          if (!ok) { op.retry_count = (op.retry_count || 0) + 1; aindaFalha.push(op); }
         }
         if (aindaFalha.length) localStorage.setItem(cloud.QUEUE_KEY, JSON.stringify(aindaFalha));
         else cloud._limparFila();
@@ -13745,6 +13840,13 @@ const cloud = {
 
   /* ---- Atualiza a interface (status na tela de Ajustes) ---- */
   _atualizarUI(estado) {
+    /* Reflete o estado no selo honesto do cabeçalho também */
+    try {
+      if (estado === 'sincronizando') { syncStatus._cloud = 'syncing'; syncStatus._render(); }
+      else if (estado === 'ok') syncStatus.cloudState('synced');
+      else if (estado === 'erro') syncStatus.cloudState('error');
+      else syncStatus.refresh();
+    } catch (e) {}
     const badge = document.getElementById('cloud-status-badge');
     const info = document.getElementById('cloud-status-info');
     if (badge) {
@@ -13951,12 +14053,24 @@ const cloud = {
     if (cloud.estaConfigurado() && cloud.estaLogado()) {
       setTimeout(() => cloud.sincronizar({ silent: true }), 1500);
     }
-    /* Reenvia fila quando a conexão voltar */
+    /* Reenvia fila quando a conexão voltar; atualiza o selo ao cair/voltar */
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => {
+        try { syncStatus.refresh(); } catch (e) {}
         if (cloud.estaLogado()) cloud.sincronizar({ silent: true });
       });
+      window.addEventListener('offline', () => { try { syncStatus.refresh(); } catch (e) {} });
     }
+    /* Dreno periódico: se houver fila e estivermos online/logados, tenta enviar */
+    try {
+      setInterval(() => {
+        if (cloud._syncing) return;
+        if (!cloud.estaConfigurado() || !cloud.estaLogado()) return;
+        if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+        if (cloud._fila().length) cloud.sincronizar({ silent: true });
+      }, 20000);
+    } catch (e) {}
+    try { syncStatus.refresh(); } catch (e) {}
   }
 };
 
