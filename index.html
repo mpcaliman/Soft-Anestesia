@@ -2064,6 +2064,39 @@ path.dash-clickable:hover { opacity: .8; }
 }
 .fab-vitais:hover { box-shadow: 0 6px 20px rgba(5,122,85,.55); }
 .fab-vitais:active { transform: scale(.9); }
+
+/* FABs menores do modo cirurgia: medicação e tempos (só na ficha) */
+.fab-mini {
+  position: fixed; right: 26px;
+  width: 48px; height: 48px; border-radius: 50%;
+  color: #fff; border: none; cursor: pointer;
+  display: none; align-items: center; justify-content: center;
+  z-index: 1200; padding: 0; font-size: 1.3rem; line-height: 1;
+  box-shadow: 0 4px 12px rgba(0,0,0,.3);
+  transition: transform .12s ease, box-shadow .12s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.fab-mini:active { transform: scale(.9); }
+#fab-med    { bottom: 228px; background: linear-gradient(135deg, #7c3aed, #5b21b6); }
+#fab-tempos { bottom: 286px; background: linear-gradient(135deg, #d97706, #b45309); }
+@media (max-width: 640px) {
+  .fab-mini { width: 44px; height: 44px; right: 22px; font-size: 1.2rem; }
+  #fab-med    { bottom: 206px; }
+  #fab-tempos { bottom: 258px; }
+}
+
+/* Modal de tempos: linhas grandes, um toque por etapa */
+.tempos-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px; border: 1px solid var(--border); border-radius: 10px;
+  margin-bottom: 7px; background: var(--surface);
+}
+.tempos-row.tp-proximo { border-color: var(--primary); background: var(--primary-soft); }
+.tempos-row.tp-feito { background: var(--surface-alt); }
+.tempos-row .tp-rot { flex: 1; font-size: .88rem; font-weight: 600; }
+.tempos-row .tp-val { font-size: .95rem; font-variant-numeric: tabular-nums; font-weight: 700; color: var(--primary-darker); min-width: 52px; text-align: center; }
+.tempos-row .tp-val.vazio { color: var(--text-mute); font-weight: 400; }
+.tempos-row .btn-now { flex-shrink: 0; }
 .fab-vitais.carimbou { animation: fab-pulse .45s ease; }
 .fab-vitais-icon { font-size: 1.6rem; line-height: 1; }
 @media (max-width: 700px) {
@@ -2776,6 +2809,12 @@ path.dash-clickable:hover { opacity: .8; }
 .pre-nav-chip.pn-completo { border-color: #1a7f42; color: #1a7f42; background: #e6f4ea; }
 .pre-nav-chip.pn-completo .pn-dot { color: #1a7f42; }
 @media (max-width: 640px){ .pre-nav-chip .pn-rot { display:none; } .pre-nav-chip { padding:6px 9px; } }
+/* Na ficha, o .pn-num é um CONTADOR de linhas (vitais/meds/fluidos) */
+#ficha-nav .pn-num {
+  background: var(--primary); color: #fff; border-radius: 999px;
+  font-size: .68rem; font-weight: 800; padding: 1px 6px; line-height: 1.4;
+}
+@media (max-width: 640px){ #ficha-nav .pn-num { display: inline-block; } #ficha-nav .pre-nav-chip .pn-rot { display: inline; font-size: .7rem; } }
 
 .field-templates { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .tpl-btn {
@@ -4904,6 +4943,9 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       <span class="subtitle">Registro completo do ato anestésico</span>
     </div>
     <div class="ficha-resumo no-print" id="anestesia-resumo" style="display:none"></div>
+
+    <!-- NAVEGAÇÃO POR SEÇÕES DA FICHA (toque para ir; contadores ao vivo) -->
+    <nav class="pre-nav no-print" id="ficha-nav" aria-label="Seções da ficha"></nav>
 
     <div class="doc-status" id="docstatus-anestesia">
       <span class="ds-badge novo" id="dsbadge-anestesia">📄 Novo documento</span>
@@ -8628,6 +8670,16 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
   <span class="fab-carimbo-badge" id="fab-carimbo-badge" style="display:none">0</span>
 </button>
 
+<!-- Botão flutuante: catálogo de medicações (só na ficha de anestesia) -->
+<button type="button" id="fab-med" class="fab-mini"
+        onclick="anestesia.meds.abrirCatalogo()"
+        title="Abre o catálogo de medicações (multiseleção) sem rolar até a seção 9.">💉</button>
+
+<!-- Botão flutuante: carimbar tempos do caso (só na ficha de anestesia) -->
+<button type="button" id="fab-tempos" class="fab-mini"
+        onclick="anestesia.tempos.abrir()"
+        title="Carimbar os horários do caso (entrada em sala, início/fim de anestesia e cirurgia, saída) sem rolar ao topo.">⏱️</button>
+
 <!-- Cronômetros flutuantes empilhados (criados por toque longo no relógio) -->
 <div id="cronometros-wrap" class="cronometros-wrap" style="display:none"></div>
 
@@ -9481,6 +9533,12 @@ const carimboHora = {
     /* FAB de sinais vitais acompanha o mesmo escopo */
     const fabV = document.getElementById('fab-vitais');
     if (fabV) fabV.style.display = visivel ? 'flex' : 'none';
+    /* FABs de medicação e tempos: só na ficha de anestesia */
+    const soFicha = (mod === 'anestesia');
+    ['fab-med', 'fab-tempos'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = soFicha ? 'flex' : 'none';
+    });
     if (visivel) carimboHora.atualizarBadge();
     /* Cronômetros acompanham o mesmo escopo de módulo */
     try { cronometros.atualizarVisibilidade(); } catch (e) {}
@@ -10191,7 +10249,7 @@ const ui = {
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); try { equipeNuvem.render(); } catch (e) {} try { auditoria.render(''); } catch (e) {} logoUsuario.renderAjustes(); const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
         else if (modName === 'pre') { try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} try { pre.viaAerea.render(); } catch (e) {} }
-        else if (modName === 'anestesia') { anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} try { anestesia.calc.resumoTopo(); } catch (e) {} try { adendos.renderInline('anestesia'); } catch (e) {} }
+        else if (modName === 'anestesia') { anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} try { anestesia.calc.resumoTopo(); } catch (e) {} try { adendos.renderInline('anestesia'); } catch (e) {} try { anestesia.nav._wire(); anestesia.nav.render(); } catch (e) {} }
         else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} try { recuperacao.resumoTopo(); } catch (e) {} }, 60); }
         else if (modName === 'termo') { setTimeout(() => { try { (termo.sig._ajustar || []).forEach(fn => fn()); assinatura.initCanvas('sig-termo'); } catch (e) {} }, 80); }
         else if (modName === 'prescricao') { setTimeout(() => { try { if (prescricao.sig._ajustar) prescricao.sig._ajustar(); assinatura.initCanvas('sig-prescricao'); } catch (e) {} }, 80); }
@@ -24789,6 +24847,142 @@ const anestesia = {
     anestesia._finalizarConfirmado();
   },
   _finalizarConfirmado() { anestesia.adicionais.perguntar(() => anestesia.salvar({ finalizar: true })); },
+
+  /* ---------- Navegação por seções da ficha (chips com contadores) ----------
+     A ficha tem 14 seções; durante o caso o anestesista salta entre elas o
+     tempo todo. Cada chip mostra o estado (○ vazio / ● tem dados / ✓ ok) ou o
+     Nº de linhas nas tabelas (vitais, meds, fluidos). Tocar rola e abre. */
+  nav: {
+    SECOES: [
+      { num: '1',  rot: 'Ident.',    campos: ['paciente_nome', 'data_anestesia', 'procedimento'] },
+      { num: '3',  rot: 'Técnica',   check: () => document.querySelectorAll('#form-anestesia [name="tipo[]"]:checked').length ? 'completo' : 'vazio' },
+      { num: '4',  rot: 'Vent.',     card: true },
+      { num: '8',  rot: 'Vitais',    tbody: 'vitais-body' },
+      { num: '9',  rot: 'Meds',      tbody: 'medicacoes-body' },
+      { num: '10', rot: 'Fluidos',   tbody: 'hidra-body' },
+      { num: '11', rot: 'Interc.',   card: true },
+      { num: '13', rot: 'Resumo',    card: true },
+      { num: '14', rot: 'Assin.',    check: () => Array.from(document.querySelectorAll('#form-anestesia [name^="assinatura_dataurl"]')).some(el => (el.value || '').length > 50) ? 'completo' : 'vazio' }
+    ],
+    /* Mapa card-num → <section>, montado uma vez por sessão de DOM */
+    _cards: null,
+    _mapa() {
+      if (anestesia.nav._cards) return anestesia.nav._cards;
+      const m = {};
+      document.querySelectorAll('#module-anestesia section.card').forEach(sec => {
+        const n = sec.querySelector('.card-num');
+        if (n) m[n.textContent.trim()] = sec;
+      });
+      anestesia.nav._cards = m;
+      return m;
+    },
+    _estado(sec) {
+      const f = document.getElementById('form-anestesia'); if (!f) return { st: 'vazio' };
+      if (sec.tbody) {
+        const n = document.querySelectorAll('#' + sec.tbody + ' tr').length;
+        return { st: n > 0 ? 'completo' : 'vazio', n };
+      }
+      if (sec.check) { try { return { st: sec.check() }; } catch (e) { return { st: 'vazio' }; } }
+      if (sec.campos) {
+        let n = 0;
+        sec.campos.forEach(nm => { const el = f.querySelector('[name="' + nm + '"]'); if (el && String(el.value || '').trim()) n++; });
+        return { st: n === 0 ? 'vazio' : (n >= sec.campos.length ? 'completo' : 'parcial') };
+      }
+      /* card genérico: algum campo preenchido dentro da seção? */
+      const card = anestesia.nav._mapa()[sec.num];
+      if (!card) return { st: 'vazio' };
+      const cheio = Array.from(card.querySelectorAll('input[name]:not([type=hidden]):not([type=checkbox]), select[name], textarea[name]'))
+        .some(el => String(el.value || '').trim() !== '');
+      const marcado = Array.from(card.querySelectorAll('input[type=checkbox][name]')).some(el => el.checked);
+      return { st: (cheio || marcado) ? 'parcial' : 'vazio' };
+    },
+    render() {
+      const host = document.getElementById('ficha-nav'); if (!host) return;
+      host.innerHTML = anestesia.nav.SECOES.map(sec => {
+        const e = anestesia.nav._estado(sec);
+        const dot = e.st === 'completo' ? '✓' : (e.st === 'parcial' ? '●' : '○');
+        const cont = (e.n != null && e.n > 0) ? ' <span class="pn-num">' + e.n + '</span>' : '';
+        return '<button type="button" class="pre-nav-chip pn-' + e.st + '" onclick="anestesia.nav.ir(\'' + sec.num + '\')" title="Ir para a seção ' + sec.num + '">' +
+          '<span class="pn-dot">' + dot + '</span><span class="pn-rot">' + sec.rot + '</span>' + cont + '</button>';
+      }).join('');
+    },
+    ir(num) {
+      const card = anestesia.nav._mapa()[num]; if (!card) return;
+      if (card.classList.contains('collapsed')) { const h = card.querySelector('.card-header'); if (h) ui.toggleCard(h); }
+      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    },
+    _t: null,
+    atualizar() { clearTimeout(anestesia.nav._t); anestesia.nav._t = setTimeout(() => { try { anestesia.nav.render(); } catch (e) {} }, 180); },
+    _wired: false,
+    _wire() {
+      if (anestesia.nav._wired) return;
+      const f = document.getElementById('form-anestesia'); if (!f) return;
+      f.addEventListener('input', anestesia.nav.atualizar);
+      f.addEventListener('change', anestesia.nav.atualizar);
+      /* Linhas inseridas por presets/FABs não disparam input — embrulha os adds */
+      [['vitais', 'add'], ['meds', 'add'], ['eventos', 'add'], ['hidra', 'add']].forEach(([obj, fn]) => {
+        try {
+          const alvo = anestesia[obj]; const orig = alvo[fn];
+          if (typeof orig === 'function' && !orig._navWrap) {
+            alvo[fn] = function () { const r = orig.apply(this, arguments); anestesia.nav.atualizar(); return r; };
+            alvo[fn]._navWrap = true;
+          }
+        } catch (e) {}
+      });
+      anestesia.nav._wired = true;
+    }
+  },
+
+  /* ---------- Tempos do caso — carimbo sem rolar ao topo (FAB ⏱️) ----------
+     Os 6 horários ficam na seção 1; durante o caso o usuário está nas seções
+     8-10. Este modal traz os carimbos para um toque, na ordem do ato, e
+     destaca o próximo esperado. Reusa os mesmos campos/sincronizações. */
+  tempos: {
+    CAMPOS: [
+      ['hora_sala_entrada', '🚪 Entrada em sala', null],
+      ['hora_inicio',       '💉 Início da anestesia', null],
+      ['hora_cir_inicio',   '🔪 Início da cirurgia', 'Incisão cirúrgica'],
+      ['hora_cir_fim',      '🧵 Fim da cirurgia', 'Fim da cirurgia'],
+      ['hora_fim',          '🌤️ Fim da anestesia', null],
+      ['hora_sala_saida',   '🚶 Saída de sala', null]
+    ],
+    abrir() {
+      modal.open('⏱️ Tempos do caso',
+        '<p style="font-size:.78rem;color:var(--text-mute);margin:0 0 10px">Toque em <b>agora</b> para carimbar a hora atual. O próximo horário esperado fica destacado. Os campos são os mesmos da seção 1.</p>' +
+        '<div id="tempos-modal-body"></div>',
+        '<button class="btn" onclick="modal.close()">Fechar</button>');
+      anestesia.tempos._render();
+    },
+    _render() {
+      const host = document.getElementById('tempos-modal-body'); if (!host) return;
+      const f = document.getElementById('form-anestesia'); if (!f) return;
+      let proximoMarcado = false;
+      host.innerHTML = anestesia.tempos.CAMPOS.map(([name, rot]) => {
+        const v = (f.querySelector('[name="' + name + '"]') || {}).value || '';
+        const ehProximo = !v && !proximoMarcado; if (ehProximo) proximoMarcado = true;
+        const cls = v ? 'tp-feito' : (ehProximo ? 'tp-proximo' : '');
+        return '<div class="tempos-row ' + cls + '">' +
+          '<span class="tp-rot">' + rot + (ehProximo ? ' <small style="color:var(--primary);font-weight:700">→ próximo</small>' : '') + '</span>' +
+          '<span class="tp-val' + (v ? '' : ' vazio') + '">' + (v || '—') + '</span>' +
+          '<button type="button" class="btn-now" onclick="anestesia.tempos.marcar(\'' + name + '\')">agora</button>' +
+          '</div>';
+      }).join('');
+    },
+    marcar(name) {
+      const f = document.getElementById('form-anestesia'); if (!f) return;
+      const el = f.querySelector('[name="' + name + '"]'); if (!el) return;
+      if (el.value && !confirm('Este horário já está marcado como ' + el.value + '. Substituir pela hora atual?')) return;
+      ui.setNow('form-anestesia', name);
+      try { anestesia.calc.duracao(); } catch (e) {}
+      const sync = (anestesia.tempos.CAMPOS.find(c => c[0] === name) || [])[2];
+      if (sync) { try { anestesia.eventos.sincronizarHorario(sync, el.value); } catch (e) {} }
+      try { markDirty(); } catch (e) {}
+      if (navigator.vibrate) { try { navigator.vibrate(20); } catch (e) {} }
+      try { anestesia.calc.resumoTopo(); } catch (e) {}
+      try { anestesia.nav.atualizar(); } catch (e) {}
+      anestesia.tempos._render();
+    }
+  },
 
   /* Linha do tempo unificada: junta sinais vitais, medicações, eventos e
      fluidos numa única lista cronológica (visão de revisão do caso). Lê os

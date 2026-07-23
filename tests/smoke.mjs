@@ -410,6 +410,48 @@ await test('Sync: push offline enfileira, sincronização drena a fila e conta r
   await page.close();
 });
 
+/* 15) Ficha — modo cirurgia: nav de seções + FAB de tempos + FAB de medicação */
+await test('Ficha: nav de seções com contadores, FAB tempos carimba e FAB med existe', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    location.hash = '#anestesia';
+    await new Promise(r => setTimeout(r, 400));
+    anestesia.nav._wire(); anestesia.nav.render();
+    out.nChips = document.querySelectorAll('#ficha-nav .pre-nav-chip').length;   // 9
+    // FABs visíveis na ficha
+    out.fabMed = (document.getElementById('fab-med') || {}).style.display;
+    out.fabTempos = (document.getElementById('fab-tempos') || {}).style.display;
+    // adicionar uma linha de vitais → contador aparece
+    anestesia.vitais.add(true);
+    await new Promise(r => setTimeout(r, 300));
+    out.navTemContador = document.getElementById('ficha-nav').innerHTML.includes('pn-num');
+    // tempos: abrir modal, próximo destacado, carimbar entrada em sala
+    anestesia.tempos.abrir();
+    out.modalLinhas = document.querySelectorAll('#tempos-modal-body .tempos-row').length; // 6
+    out.temProximo = !!document.querySelector('#tempos-modal-body .tp-proximo');
+    anestesia.tempos.marcar('hora_sala_entrada');
+    const f = document.getElementById('form-anestesia');
+    out.horaMarcada = /^\d{2}:\d{2}/.test((f.querySelector('[name=hora_sala_entrada]') || {}).value || '');
+    // depois de marcar, a linha vira feita e o próximo avança
+    out.temFeito = !!document.querySelector('#tempos-modal-body .tp-feito');
+    // nav.ir expande card recolhido
+    const card = anestesia.nav._mapa()['8'];
+    if (card) card.classList.add('collapsed');
+    anestesia.nav.ir('8');
+    out.irExpandiu = card ? !card.classList.contains('collapsed') : false;
+    return out;
+  });
+  assert(r.nChips === 9, 'deveria haver 9 chips na ficha-nav, veio ' + r.nChips);
+  assert(r.fabMed === 'flex' && r.fabTempos === 'flex', 'FABs de med/tempos deveriam estar visíveis na ficha');
+  assert(r.navTemContador, 'chip de vitais deveria mostrar contador de linhas');
+  assert(r.modalLinhas === 6 && r.temProximo, 'modal de tempos deveria ter 6 linhas com próximo destacado');
+  assert(r.horaMarcada, 'marcar() deveria carimbar HH:MM na entrada em sala');
+  assert(r.temFeito, 'linha carimbada deveria ficar como feita');
+  assert(r.irExpandiu, 'nav.ir deveria expandir o card recolhido');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
