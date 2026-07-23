@@ -8325,6 +8325,36 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       </div>
     </section>
 
+    <!-- ☁️ EQUIPE DA NUVEM (organização) -->
+    <section class="card" id="equipe-nuvem-card">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-icon">☁️</span><h2>Equipe da nuvem<small>Membros da organização, papéis e acesso — só o gestor gerencia</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <p style="font-size:.8rem;color:var(--text-soft);margin:0 0 12px">
+          Aqui o <strong>gestor</strong> gerencia quem acessa os dados da clínica na nuvem: define o <strong>papel</strong> de cada pessoa (que determina o que ela vê/edita), ativa/desativa e adiciona novos membros. A pessoa precisa ter criado a conta na nuvem primeiro.
+        </p>
+        <div id="equipe-nuvem-lista"></div>
+        <div id="equipe-nuvem-add" style="display:none;margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+          <label style="font-size:.8rem;font-weight:600;display:block;margin-bottom:6px">Adicionar membro por e-mail</label>
+          <div class="grid">
+            <div class="field col-6"><input type="email" id="equipe-add-email" placeholder="email@da-pessoa.com" autocapitalize="none"></div>
+            <div class="field col-3"><select id="equipe-add-role">
+              <option value="anestesiologista">Anestesiologista</option>
+              <option value="cirurgiao">Cirurgião</option>
+              <option value="auxiliar" selected>Auxiliar / Secretária</option>
+              <option value="financeiro">Financeiro</option>
+              <option value="empresa">Empresa</option>
+              <option value="gestor">Gestor</option>
+            </select></div>
+            <div class="field col-3"><button type="button" class="btn btn-primary btn-sm" onclick="equipeNuvem.adicionar()">➕ Adicionar</button></div>
+          </div>
+          <div style="font-size:.72rem;color:var(--text-mute)">A pessoa deve ter criado a conta na nuvem (Entrar → Criar conta) com esse mesmo e-mail.</div>
+        </div>
+      </div>
+    </section>
+
     <!-- 📝 TERMO DE CONSENTIMENTO PADRÃO -->
     <section class="card" id="termo-padrao-card">
       <div class="card-header" onclick="ui.toggleCard(this)">
@@ -10016,7 +10046,7 @@ const ui = {
         else if (modName === 'financeiro') financeiro.render();
         else if (modName === 'agenda') { agenda.render(); if (!agenda._puxouNestaSessao) { setTimeout(() => { try { agenda.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
-        else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); logoUsuario.renderAjustes(); const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
+        else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); try { equipeNuvem.render(); } catch (e) {} logoUsuario.renderAjustes(); const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
         else if (modName === 'pre') { try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} try { pre.viaAerea.render(); } catch (e) {} }
         else if (modName === 'anestesia') { anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} try { anestesia.calc.resumoTopo(); } catch (e) {} try { adendos.renderInline('anestesia'); } catch (e) {} }
         else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} try { recuperacao.resumoTopo(); } catch (e) {} }, 60); }
@@ -15337,6 +15367,109 @@ const adendos = {
       '<h3 style="font-size:8pt;margin:0 0 4px">ADENDOS / CORREÇÕES</h3>' +
       lista.map(ad => '<div style="font-size:7.5pt;margin-bottom:3px"><b>' + utils.escapeHTML(adendos._fmtData(ad.data)) + ' — ' + utils.escapeHTML(ad.autor || '') + ':</b> ' + utils.escapeHTML(ad.texto || '') + '</div>').join('') +
       '</div>';
+  }
+};
+
+/* ============================================================================
+   EQUIPE DA NUVEM — gestor gerencia os membros da organização (papéis, acesso).
+   Só o gestor. Usa organization_users + profiles; add por e-mail via RPC segura.
+============================================================================ */
+const equipeNuvem = {
+  PAPEIS: [['gestor', 'Gestor'], ['anestesiologista', 'Anestesiologista'], ['cirurgiao', 'Cirurgião'], ['auxiliar', 'Auxiliar / Secretária'], ['financeiro', 'Financeiro'], ['empresa', 'Empresa']],
+  _rot(role) { const p = equipeNuvem.PAPEIS.find(x => x[0] === role); return p ? p[1] : role; },
+  ehGestor() { try { const u = auth.usuarioAtual(); return !!(u && u.role === 'gestor'); } catch (e) { return false; } },
+
+  async listar() {
+    if (!cloud.estaConfigurado() || !cloud.estaLogado()) return null;
+    if (!(await cloud._garantirToken())) return null;
+    const org = await cloudRel._orgAsync(); if (!org) return null;
+    const c = cloud.config();
+    try {
+      const [ro, rp] = await Promise.all([
+        fetch(c.url + '/rest/v1/organization_users?organization_id=eq.' + org + '&select=user_id,role,ativo&order=created_at.asc', { headers: cloud._headers(true) }),
+        fetch(c.url + '/rest/v1/profiles?select=id,nome,email,funcao,ativo', { headers: cloud._headers(true) })
+      ]);
+      const ous = ro.ok ? await ro.json() : [];
+      const profs = rp.ok ? await rp.json() : [];
+      const pById = {}; profs.forEach(p => { pById[p.id] = p; });
+      const byUser = {};
+      ous.forEach(o => { (byUser[o.user_id] = byUser[o.user_id] || []).push(o); });
+      return Object.entries(byUser).map(([uid, rows]) => {
+        const efetivo = rows.find(r => r.ativo) || rows[0];
+        const p = pById[uid] || {};
+        return { uid, role: efetivo.role, ativo: !!efetivo.ativo, nome: p.nome || '', email: p.email || '' };
+      });
+    } catch (e) { return null; }
+  },
+
+  async render() {
+    const host = document.getElementById('equipe-nuvem-lista');
+    const addBox = document.getElementById('equipe-nuvem-add');
+    if (!host) return;
+    if (!equipeNuvem.ehGestor()) {
+      host.innerHTML = '<p style="font-size:.82rem;color:var(--text-mute)">Só o <strong>gestor</strong> da clínica gerencia a equipe da nuvem. Entre com a conta de gestor para ver e editar os membros.</p>';
+      if (addBox) addBox.style.display = 'none';
+      return;
+    }
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) { host.innerHTML = '<p style="font-size:.82rem;color:var(--text-mute)">Sem internet — reabra quando estiver online.</p>'; if (addBox) addBox.style.display = 'none'; return; }
+    host.innerHTML = '<p style="font-size:.82rem;color:var(--text-mute)">⏳ Carregando membros…</p>';
+    const lista = await equipeNuvem.listar();
+    if (lista === null) { host.innerHTML = '<p style="font-size:.82rem;color:var(--danger,#b3392a)">Não foi possível carregar a equipe agora.</p>'; if (addBox) addBox.style.display = 'none'; return; }
+    if (addBox) addBox.style.display = '';
+    const meuUid = (auth.usuarioAtual() || {}).uid;
+    host.innerHTML = lista.length ? lista.map(m => {
+      const eu = m.uid && m.uid === meuUid;
+      const opts = equipeNuvem.PAPEIS.map(([v, l]) => '<option value="' + v + '"' + (v === m.role ? ' selected' : '') + '>' + l + '</option>').join('');
+      return '<div class="user-item">' +
+        '<div class="ui-info"><div class="ui-nome">' + utils.escapeHTML(m.nome || m.email || m.uid.slice(0, 8)) + (eu ? ' <span style="font-size:.72rem;color:var(--text-mute)">(você)</span>' : '') + (m.ativo ? '' : ' <span style="font-size:.72rem;color:var(--danger,#b3392a)">· inativo</span>') + '</div>' +
+        '<div class="ui-perfil">' + utils.escapeHTML(m.email || '') + '</div></div>' +
+        '<div style="display:flex;gap:6px;align-items:center;flex-shrink:0">' +
+        '<select style="font-size:.78rem" onchange="equipeNuvem.mudarPapel(\'' + m.uid + '\', this.value)"' + (eu ? ' disabled title="Você não pode mudar o próprio papel"' : '') + '>' + opts + '</select>' +
+        '<button type="button" class="btn btn-xs' + (m.ativo ? ' btn-danger' : '') + '" onclick="equipeNuvem.ativar(\'' + m.uid + '\', ' + (m.ativo ? 'false' : 'true') + ')"' + (eu ? ' disabled' : '') + '>' + (m.ativo ? 'Desativar' : 'Ativar') + '</button>' +
+        '</div></div>';
+    }).join('') : '<p style="font-size:.82rem;color:var(--text-mute)">Só você por enquanto. Use “Adicionar membro por e-mail” abaixo.</p>';
+  },
+
+  async _org() { return await cloudRel._orgAsync(); },
+  async mudarPapel(uid, role) {
+    const org = await equipeNuvem._org(); if (!org) return;
+    if (!(await cloud._garantirToken())) { toast('Sessão expirada', 'warn'); return; }
+    const c = cloud.config(); const H = cloud._headers(true);
+    try {
+      await fetch(c.url + '/rest/v1/organization_users?on_conflict=organization_id,user_id,role', { method: 'POST', headers: Object.assign({}, H, { 'Prefer': 'resolution=merge-duplicates,return=minimal' }), body: JSON.stringify([{ organization_id: org, user_id: uid, role: role, ativo: true }]) });
+      await fetch(c.url + '/rest/v1/organization_users?organization_id=eq.' + org + '&user_id=eq.' + uid + '&role=neq.' + role, { method: 'PATCH', headers: Object.assign({}, H, { 'Prefer': 'return=minimal' }), body: JSON.stringify({ ativo: false }) });
+      await fetch(c.url + '/rest/v1/profiles?id=eq.' + uid, { method: 'PATCH', headers: Object.assign({}, H, { 'Prefer': 'return=minimal' }), body: JSON.stringify({ funcao: role }) });
+      toast('✅ Papel atualizado para ' + equipeNuvem._rot(role));
+      equipeNuvem.render();
+    } catch (e) { toast('Falha ao atualizar o papel', 'error'); }
+  },
+  async ativar(uid, ativo) {
+    const org = await equipeNuvem._org(); if (!org) return;
+    if (!ativo && !confirm('Desativar este membro? Ele perde o acesso aos dados da clínica na nuvem (pode ser reativado depois).')) return;
+    if (!(await cloud._garantirToken())) { toast('Sessão expirada', 'warn'); return; }
+    const c = cloud.config(); const H = cloud._headers(true);
+    try {
+      await fetch(c.url + '/rest/v1/organization_users?organization_id=eq.' + org + '&user_id=eq.' + uid, { method: 'PATCH', headers: Object.assign({}, H, { 'Prefer': 'return=minimal' }), body: JSON.stringify({ ativo: ativo }) });
+      await fetch(c.url + '/rest/v1/profiles?id=eq.' + uid, { method: 'PATCH', headers: Object.assign({}, H, { 'Prefer': 'return=minimal' }), body: JSON.stringify({ ativo: ativo }) });
+      toast(ativo ? '✅ Membro ativado' : 'Membro desativado');
+      equipeNuvem.render();
+    } catch (e) { toast('Falha', 'error'); }
+  },
+  async adicionar() {
+    const emailEl = document.getElementById('equipe-add-email');
+    const email = (emailEl && emailEl.value || '').trim();
+    const role = (document.getElementById('equipe-add-role') || {}).value || 'auxiliar';
+    if (!email || email.indexOf('@') < 0) { toast('Informe um e-mail válido', 'warn'); return; }
+    const org = await equipeNuvem._org(); if (!org) { toast('Organização não encontrada', 'warn'); return; }
+    if (!(await cloud._garantirToken())) { toast('Sessão expirada', 'warn'); return; }
+    const c = cloud.config();
+    try {
+      const r = await fetch(c.url + '/rest/v1/rpc/add_member', { method: 'POST', headers: Object.assign({}, cloud._headers(true), { 'Content-Type': 'application/json' }), body: JSON.stringify({ p_org: org, p_email: email, p_role: role }) });
+      if (!r.ok) { const t = await r.json().catch(() => ({})); toast('Erro: ' + (t.message || t.hint || ('HTTP ' + r.status)), 'error'); return; }
+      toast('✅ ' + email + ' adicionado como ' + equipeNuvem._rot(role));
+      if (emailEl) emailEl.value = '';
+      equipeNuvem.render();
+    } catch (e) { toast('Falha de rede ao adicionar', 'error'); }
   }
 };
 
@@ -34768,6 +34901,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.cloudDiag = cloudDiag;
   window.cloudRealtime = cloudRealtime;
   window.adendos = adendos;
+  window.equipeNuvem = equipeNuvem;
   window.auth = auth;
   window.demo = demo;
   try { pre.premed.render(); } catch (e) {}

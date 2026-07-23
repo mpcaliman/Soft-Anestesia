@@ -107,8 +107,12 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   Auth, com fallback local offline) e, ao entrar, o app **puxa o papel do
   servidor** (`organization_users.role` + `profiles`) e deriva as permissões da
   UI a partir dele (gestor/anestesiologista/cirurgião/auxiliar/financeiro/
-  empresa). Contas inativas no banco são barradas. Falta ainda a migração
-  assistida dos usuários locais antigos para contas do Auth.
+  empresa). Contas inativas no banco são barradas. ✅ **Gestão da equipe no app
+  (Ajustes → Equipe da nuvem):** o gestor lista os membros da organização, muda
+  o papel, ativa/desativa e **adiciona por e-mail** via a função segura
+  `public.add_member` (`0006`, SECURITY DEFINER, só o gestor chama). A pessoa
+  precisa ter criado a conta na nuvem antes. Falta só migrar usuários locais
+  antigos que ainda não têm conta no Auth.
 - **Fase 4 — Paciente/Encounter central + migração dos dados atuais (em
   andamento):** ✅ `0003_migration_targets.sql` adiciona `legacy_id`
   (idempotência) às tabelas e cria `consultations`, `quotes` e `appointments`.
