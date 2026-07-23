@@ -13820,18 +13820,64 @@ const ajustesUsuarios = {
       const nMods = u.perfil === 'admin' ? auth.MODULOS.length : (u.modulos ? u.modulos.length : 0);
       const nSo = u.perfil === 'admin' ? 0 : ((u.soImpressao || []).length);
       const soTxt = nSo ? ` · ${nSo} só impressão` : '';
+      /* Nuvem x local: o espelho da conta da nuvem tem u.nuvem === true.
+         Os demais valem só neste aparelho — o gestor pode convidá-los. */
+      const naNuvem = !!u.nuvem;
+      const alcance = naNuvem
+        ? '<span class="ui-badge" style="background:#e6f4ea;color:#1a7f42" title="Acessa de qualquer aparelho pela nuvem">☁️ nuvem</span>'
+        : '<span class="ui-badge" style="background:var(--surface-alt);color:var(--text-mute)" title="Login válido só neste aparelho">🔒 local</span>';
+      const btnConvidar = naNuvem ? '' :
+        `<button type="button" class="btn btn-xs" onclick="ajustesUsuarios.convidarNuvem('${u.id}')" title="Levar esta pessoa para a nuvem (acesso em qualquer aparelho)">☁️</button>`;
       return `
         <div class="user-item">
           <div class="ui-info">
-            <div class="ui-nome">${utils.escapeHTML(u.nome || u.usuario)}${ehVoce ? ' <span style="font-size:.72rem;color:var(--text-mute)">(você)</span>' : ''}<span class="ui-badge ${u.perfil}">${utils.escapeHTML(perfilLabel)}</span></div>
+            <div class="ui-nome">${utils.escapeHTML(u.nome || u.usuario)}${ehVoce ? ' <span style="font-size:.72rem;color:var(--text-mute)">(você)</span>' : ''}<span class="ui-badge ${u.perfil}">${utils.escapeHTML(perfilLabel)}</span>${alcance}</div>
             <div class="ui-perfil">@${utils.escapeHTML(u.usuario)} · ${nMods} módulo(s)${soTxt}</div>
           </div>
           <div style="display:flex;gap:6px;flex-shrink:0">
+            ${btnConvidar}
             <button type="button" class="btn btn-xs" onclick="ajustesUsuarios.editar('${u.id}')" title="Editar">✏️</button>
             <button type="button" class="btn btn-xs btn-danger" onclick="ajustesUsuarios.excluir('${u.id}')" title="Excluir">🗑️</button>
           </div>
         </div>`;
     }).join('');
+  },
+
+  /* Perfil local → papel sugerido na nuvem (o gestor pode trocar no fluxo). */
+  _papelNuvemSugerido(perfil) {
+    return ({ admin: 'gestor', medico: 'anestesiologista', secretaria: 'auxiliar' })[perfil] || 'auxiliar';
+  },
+
+  /* Convida um usuário LOCAL para a nuvem. Não cria a conta automaticamente
+     (isso depende da senha da própria pessoa); leva o gestor ao fluxo honesto
+     de vincular por e-mail (add_member), já pré-preenchido com o papel certo.
+     A pessoa precisa ter criado a conta na nuvem antes (Entrar → Criar conta). */
+  convidarNuvem(id) {
+    const u = auth._lerUsuarios().find(x => x.id === id);
+    if (!u) return;
+    /* Só o gestor logado na nuvem consegue vincular. */
+    if (!(typeof equipeNuvem !== 'undefined' && equipeNuvem.ehGestor && equipeNuvem.ehGestor())) {
+      alert('Para convidar alguém para a nuvem, entre com a conta de GESTOR da clínica (a que tem acesso à nuvem).\n\nDepois: peça para a pessoa criar a conta dela na nuvem (Entrar → Criar conta) usando o e-mail dela, e então use “Equipe da nuvem → Adicionar membro por e-mail”.');
+      return;
+    }
+    const papel = ajustesUsuarios._papelNuvemSugerido(u.perfil);
+    const rot = (auth._rotuloPapel && auth._rotuloPapel(papel)) || papel;
+    const emailProvavel = (u.usuario && u.usuario.indexOf('@') >= 0) ? u.usuario : '';
+    alert('Convidar ' + (u.nome || u.usuario) + ' para a nuvem:\n\n' +
+      '1) A pessoa precisa ter uma conta na nuvem — se ainda não tem, peça para ela abrir o app e usar “Entrar → Criar conta” com o e-mail dela.\n' +
+      '2) Confirme o e-mail e o papel abaixo e clique em “Adicionar”.\n\n' +
+      'Papel sugerido (a partir do perfil local “' + ((auth.PERFIS[u.perfil] || {}).label || u.perfil) + '”): ' + rot + '.');
+    /* Abre e pré-preenche o card Equipe da nuvem. */
+    const card = document.getElementById('equipe-nuvem-card');
+    if (card && card.classList.contains('collapsed')) { const h = card.querySelector('.card-header'); if (h) ui.toggleCard(h); }
+    try { equipeNuvem.render(); } catch (e) {}
+    setTimeout(() => {
+      const emailEl = document.getElementById('equipe-add-email');
+      const roleEl = document.getElementById('equipe-add-role');
+      if (roleEl) roleEl.value = papel;
+      if (emailEl) { emailEl.value = emailProvavel; emailEl.focus(); }
+      if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 250);
   },
 
   /* Monta a grade de permissões por módulo: Sem acesso / Editar / Só impressão */
