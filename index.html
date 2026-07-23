@@ -2021,6 +2021,27 @@ path.dash-clickable:hover { opacity: .8; }
   .fab-carimbo-icon { font-size: 1.55rem; }
 }
 @media print { .fab-carimbo { display: none !important; } }
+/* FAB dedicado: registrar sinais vitais AGORA (acima do relógio) */
+.fab-vitais {
+  position: fixed; bottom: 158px; right: 20px;
+  width: 60px; height: 60px; border-radius: 50%;
+  background: linear-gradient(135deg, #0e9f6e, #057a55);
+  color: #fff; border: none; cursor: pointer;
+  box-shadow: 0 4px 14px rgba(5,122,85,.45);
+  display: none; align-items: center; justify-content: center;
+  z-index: 1200; padding: 0;
+  transition: transform .12s ease, box-shadow .12s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.fab-vitais:hover { box-shadow: 0 6px 20px rgba(5,122,85,.55); }
+.fab-vitais:active { transform: scale(.9); }
+.fab-vitais.carimbou { animation: fab-pulse .45s ease; }
+.fab-vitais-icon { font-size: 1.6rem; line-height: 1; }
+@media (max-width: 700px) {
+  .fab-vitais { bottom: 142px; right: 16px; width: 56px; height: 56px; }
+  .fab-vitais-icon { font-size: 1.45rem; }
+}
+@media print { .fab-vitais { display: none !important; } }
 
 /* Cronômetros flutuantes empilhados acima do FAB do relógio */
 .cronometros-wrap {
@@ -8342,6 +8363,13 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
 
 <div class="toast-wrap" id="toast-wrap"></div>
 
+<!-- Botão flutuante: registrar sinais vitais AGORA (só na anestesia/SRPA) -->
+<button type="button" id="fab-vitais" class="fab-vitais" style="display:none"
+        onclick="anestesia.vitais.registrarAgora()"
+        title="Registra os sinais vitais na hora atual, copiando os anteriores para você só ajustar o que mudou.">
+  <span class="fab-vitais-icon">🩺</span>
+</button>
+
 <!-- Botão flutuante: carimbar hora de evento (só aparece na anestesia/SRPA) -->
 <button type="button" id="fab-carimbo" class="fab-carimbo" style="display:none"
         title="Toque curto: carimba a hora atual. Segure ~0,6s: inicia um cronômetro flutuante.">
@@ -9194,6 +9222,9 @@ const carimboHora = {
     const mod = state.currentModule;
     const visivel = (mod === 'anestesia' || mod === 'recuperacao');
     fab.style.display = visivel ? 'flex' : 'none';
+    /* FAB de sinais vitais acompanha o mesmo escopo */
+    const fabV = document.getElementById('fab-vitais');
+    if (fabV) fabV.style.display = visivel ? 'flex' : 'none';
     if (visivel) carimboHora.atualizarBadge();
     /* Cronômetros acompanham o mesmo escopo de módulo */
     try { cronometros.atualizarVisibilidade(); } catch (e) {}
@@ -21799,6 +21830,45 @@ const anestesia = {
       markDirty();
     },
     /* Cria linha igual à última registrada e abre o seletor de ajuste (+/−) */
+    /* Registra sinais vitais na HORA ATUAL, copiando os últimos valores para o
+       usuário só ajustar o que mudou. Pensado para o FAB (sem rolar a tela). */
+    registrarAgora() {
+      /* Garante o contexto certo conforme o módulo aberto */
+      anestesia.graficoUI._contexto = (state.currentModule === 'recuperacao') ? 'recuperacao' : 'anestesia';
+      const bodyId = anestesia.graficoUI._ctxIds().vitaisBody;
+      const linhas = document.querySelectorAll('#' + bodyId + ' tr');
+      const hora = utils.horaAtual();
+      let novaTr;
+      if (linhas.length === 0) {
+        novaTr = anestesia.vitais.add(false, { hora });
+      } else {
+        const ult = linhas[linhas.length - 1];
+        const q = n => ult.querySelector(`[name="${n}"]`)?.value || '';
+        novaTr = anestesia.vitais.add(false, {
+          hora,
+          pas: q('vit_pas[]'), pad: q('vit_pad[]'), pam: q('vit_pam[]'),
+          fc: q('vit_fc[]'), spo2: q('vit_spo2[]'),
+          etco2: q('vit_etco2[]'), fr: q('vit_fr[]'),
+          temp: q('vit_temp[]'), bis: q('vit_bis[]'), tof: q('vit_tof[]'),
+          glic: q('vit_glic[]'), pvc: q('vit_pvc[]'), pic: q('vit_pic[]'),
+          dc: q('vit_dc[]'), scvo2: q('vit_scvo2[]'), cam: q('vit_cam[]'), dor: q('vit_dor[]'),
+          obs: ''
+        });
+      }
+      markDirty();
+      try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
+      /* feedback tátil/visual e abertura do ajuste da nova linha */
+      const fabV = document.getElementById('fab-vitais');
+      if (fabV) { fabV.classList.remove('carimbou'); void fabV.offsetWidth; fabV.classList.add('carimbou'); }
+      if (navigator.vibrate) { try { navigator.vibrate(20); } catch (e) {} }
+      if (novaTr) {
+        anestesia.vitais._linhaAjuste = novaTr;
+        const btnFake = novaTr.querySelector('.btn-rm');
+        anestesia.vitais.ajustarLinha(btnFake || { closest: () => novaTr });
+      }
+      toast('🩺 Sinais vitais às ' + hora + ' — ajuste o que mudou');
+    },
+
     duplicarEAjustar() {
       const bodyId = anestesia.graficoUI._ctxIds().vitaisBody;
       const linhas = document.querySelectorAll('#' + bodyId + ' tr');
