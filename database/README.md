@@ -145,6 +145,11 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
 - **Diagnóstico da nuvem:** ✅ tela em Ajustes compara, tabela a tabela, o que
   está no aparelho × no banco relacional, com fila pendente, última sync e
   saúde da conexão.
+- **Auditoria (Ajustes → Registro de auditoria):** ✅ tela read-only lê a
+  `audit_logs` (populada pelos triggers) e mostra **quem** criou/editou/
+  finalizou/excluiu **o quê** e **quando**, com filtro por módulo. Gestor vê a
+  organização inteira; os demais veem os próprios eventos (RLS `audit_sel`).
+  Não requer SQL novo — a tabela já vem da fundação.
 - **Adendos / correções (medicina-legal):** ✅ correções após finalizar vão para
   a tabela `addenda` (append-only, idempotente por `legacy_id` — `0005`), sem
   alterar o registro original. Datadas e assinadas, aparecem na ficha e no PDF,
