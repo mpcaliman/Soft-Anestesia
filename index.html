@@ -4524,6 +4524,18 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       </div>
     </section>
 
+    <!-- ADENDOS / CORREÇÕES -->
+    <section class="card sec-adendos sem-adendos" id="sec-adendos-pre">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-icon">📝</span><h2>Adendos / correções<small>Correções após finalizar — o registro original é preservado</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <div id="pre-adendos-lista" style="margin-bottom:10px"></div>
+        <button type="button" class="btn btn-sm no-print" onclick="adendos.abrir('pre')">📝 Adicionar adendo/correção</button>
+      </div>
+    </section>
+
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
         <div class="card-title-wrap"><span class="card-num">7</span><h2>Assinatura<small>Carimbo / desenho / certificado digital</small></h2></div>
@@ -4784,6 +4796,18 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
         <input type="file" id="consulta-docs-input" accept="image/jpeg,image/png,image/*,application/pdf" multiple style="display:none" onchange="prontuario.adicionar('consulta', this.files); this.value=''">
         <button type="button" class="btn btn-sm" onclick="document.getElementById('consulta-docs-input').click()">📷 Foto / 📄 PDF — adicionar</button>
         <div id="consulta-docs-lista" class="fin-anexos-lista"></div>
+      </div>
+    </section>
+
+    <!-- ADENDOS / CORREÇÕES -->
+    <section class="card sec-adendos sem-adendos" id="sec-adendos-consulta">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-icon">📝</span><h2>Adendos / correções<small>Correções após finalizar — o registro original é preservado</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <div id="consulta-adendos-lista" style="margin-bottom:10px"></div>
+        <button type="button" class="btn btn-sm no-print" onclick="adendos.abrir('consulta')">📝 Adicionar adendo/correção</button>
       </div>
     </section>
 
@@ -6541,6 +6565,18 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
             <div id="srpa-grafico-legenda-eventos-list" style="margin-top:4px"></div>
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- ADENDOS / CORREÇÕES -->
+    <section class="card sec-adendos sem-adendos" id="sec-adendos-recuperacao">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-icon">📝</span><h2>Adendos / correções<small>Correções após finalizar — o registro original é preservado</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <div id="recuperacao-adendos-lista" style="margin-bottom:10px"></div>
+        <button type="button" class="btn btn-sm no-print" onclick="adendos.abrir('recuperacao')">📝 Adicionar adendo/correção</button>
       </div>
     </section>
 
@@ -9992,6 +10028,8 @@ const ui = {
           }, 500);
         }
       } catch (e) {}
+      /* Adendos: renderiza a lista do módulo aberto (no-op onde não há card) */
+      try { if (typeof adendos !== 'undefined') adendos.renderInline(modName); } catch (e) {}
       /* Botão flutuante de carimbo de hora: só aparece na anestesia/SRPA */
       try { carimboHora.atualizarVisibilidade(); } catch (e) {}
       /* Religa autocompletes (CBHPM + histórico) no módulo recém-aberto */
@@ -11053,6 +11091,7 @@ const pre = {
       if (wrap) wrap.style.display = (item.risco_resumo && String(item.risco_resumo).trim()) ? '' : 'none';
     } catch (e) {}
     markClean();
+    try { adendos.renderInline('pre'); } catch (e) {}
     toast('Avaliação carregada'); ui.expandirTodos('pre');
   },
   duplicar() {
@@ -11445,6 +11484,7 @@ const consulta = {
     ui.atualizarDocStatus('consulta', item);
     ui.fecharBanner('banner-consulta');
     markClean();
+    try { adendos.renderInline('consulta'); } catch (e) {}
     toast('Consulta carregada'); ui.expandirTodos('consulta');
   },
   duplicar() {
@@ -11652,6 +11692,7 @@ const recuperacao = {
     /* Recalcula a interpretação da escala de Aldrete-Kroulik */
     try { recuperacao.aldrete.calc(); } catch (e) {}
     markClean();
+    try { adendos.renderInline('recuperacao'); } catch (e) {}
     toast('Recuperação carregada'); ui.expandirTodos('recuperacao');
   },
   duplicar() {
