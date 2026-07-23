@@ -179,6 +179,14 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   da ficha, com o próximo esperado destacado — sem rolar ao topo. (3) **FAB 💉
   Medicação**: abre o catálogo multiseleção direto. Com os FABs já existentes
   (🩺 vitais, 🕐 evento), as 4 ações mais frequentes do caso ficam a um toque.
+  ✅ **Auto-avanço na digitação de vitais**: na grade da ficha, a PA ganha a
+  barra sozinha ("120" → "120/") e, ao completar cada valor plausível (PAD, FC,
+  SpO₂…), o foco **desce a coluna automaticamente** (pulando a PAM, que é
+  calculada); na tabela da SRPA o foco pula para o próximo campo da linha.
+  Campos decimais/abertos (temp, DC, CAM, glicemia) ficam de fora da regra.
+  Um toque a menos por campo — centenas por dia. Modelos de ficha completa por
+  cirurgia e o encadeamento ficha→SRPA ao finalizar já existiam (auditoria
+  confirmou).
 - **Pré-anestésica reorganizada:** ✅ uma **barra de navegação por seções** no
   topo da avaliação (Identificação · Anamnese · Exames · Pareceres · Risco ·
   Conclusões) mostra o **status de preenchimento** de cada bloco (vazio ○ /

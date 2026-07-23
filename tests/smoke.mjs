@@ -452,6 +452,56 @@ await test('Ficha: nav de seções com contadores, FAB tempos carimba e FAB med 
   await page.close();
 });
 
+/* 16) Vitais — auto-avanço na GRADE da ficha (superfície real de digitação) */
+await test('Vitais: grade auto-insere a barra da PA e desce a coluna ao completar valores', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    location.hash = '#anestesia';
+    await new Promise(r => setTimeout(r, 400));
+    ui.expandirTodos('anestesia');   /* cards recolhidos não recebem foco */
+    anestesia.vitais.autoAvanco.wire();
+    anestesia.vitais._gradeAddCol();  /* cria a coluna do horário atual */
+    await new Promise(r => setTimeout(r, 200));
+    const grade = document.getElementById('vitais-grade');
+    const cel = (sel) => grade.querySelector(sel);
+    const digita = (el, v) => { el.focus(); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); };
+
+    const pa = cel('input[data-kind="pa"]');
+    // PAS "12" ainda pode virar 120 → nada acontece
+    digita(pa, '12');
+    out.pa12 = pa.value;                                   // '12'
+    // PAS "120" completa → barra entra sozinha
+    digita(pa, '120');
+    out.pa120 = pa.value;                                  // '120/'
+    // PAD "80" completa → grava e desce a coluna (pulando a PAM automática)
+    digita(pa, '120/80');
+    out.focoAposPA = (document.activeElement.dataset || {}).field;   // 'fc'
+    // valores gravados no modelo interno
+    const tr0 = document.querySelector('#vitais-body tr');
+    out.modeloPas = tr0.querySelector('[name="vit_pas[]"]').value;   // '120'
+    out.modeloPad = tr0.querySelector('[name="vit_pad[]"]').value;   // '80'
+    out.modeloPam = tr0.querySelector('[name="vit_pam[]"]').value;   // calculada
+    // FC "68" completa → desce para o próximo campo numérico da coluna (SpO₂; Ritmo é select)
+    digita(document.activeElement, '68');
+    out.focoAposFC = (document.activeElement.dataset || {}).field;   // 'spo2'
+    // SpO₂ "10" pode virar 100 → fica
+    digita(document.activeElement, '10');
+    out.foco10 = (document.activeElement.dataset || {}).field;       // 'spo2'
+    digita(document.activeElement, '100');
+    out.foco100 = (document.activeElement.dataset || {}).field;      // 'etco2'
+    return out;
+  });
+  assert(r.pa12 === '12', 'PAS 12 ainda pode crescer — não deveria ganhar barra, veio ' + r.pa12);
+  assert(r.pa120 === '120/', 'PAS 120 deveria ganhar a barra sozinha, veio ' + r.pa120);
+  assert(r.focoAposPA === 'fc', 'PAD completa deveria descer para a FC (pulando PAM), foco em ' + r.focoAposPA);
+  assert(r.modeloPas === '120' && r.modeloPad === '80' && r.modeloPam !== '', 'PA deveria gravar no modelo com PAM calculada');
+  assert(r.focoAposFC === 'spo2', 'FC completa deveria descer para a SpO₂, foco em ' + r.focoAposFC);
+  assert(r.foco10 === 'spo2', 'SpO₂ 10 pode virar 100 — não deveria avançar');
+  assert(r.foco100 === 'etco2', 'SpO₂ 100 deveria descer para o EtCO₂, foco em ' + r.foco100);
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

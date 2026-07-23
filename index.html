@@ -10249,8 +10249,8 @@ const ui = {
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); try { equipeNuvem.render(); } catch (e) {} try { auditoria.render(''); } catch (e) {} logoUsuario.renderAjustes(); const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
         else if (modName === 'pre') { try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} try { pre.viaAerea.render(); } catch (e) {} }
-        else if (modName === 'anestesia') { anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} try { anestesia.calc.resumoTopo(); } catch (e) {} try { adendos.renderInline('anestesia'); } catch (e) {} try { anestesia.nav._wire(); anestesia.nav.render(); } catch (e) {} }
-        else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} try { recuperacao.resumoTopo(); } catch (e) {} }, 60); }
+        else if (modName === 'anestesia') { anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} try { anestesia.calc.resumoTopo(); } catch (e) {} try { adendos.renderInline('anestesia'); } catch (e) {} try { anestesia.nav._wire(); anestesia.nav.render(); } catch (e) {} try { anestesia.vitais.autoAvanco.wire(); } catch (e) {} }
+        else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} try { recuperacao.resumoTopo(); } catch (e) {} try { anestesia.vitais.autoAvanco.wire(); } catch (e) {} }, 60); }
         else if (modName === 'termo') { setTimeout(() => { try { (termo.sig._ajustar || []).forEach(fn => fn()); assinatura.initCanvas('sig-termo'); } catch (e) {} }, 80); }
         else if (modName === 'prescricao') { setTimeout(() => { try { if (prescricao.sig._ajustar) prescricao.sig._ajustar(); assinatura.initCanvas('sig-prescricao'); } catch (e) {} }, 80); }
         else if (modName === 'documentos') { setTimeout(() => { try { const f = document.getElementById('form-documentos'); if (f && !f.querySelector('[name="data"]').value) f.querySelector('[name="data"]').value = utils.hojeISO(); documentos.atualizarTipo(); assinatura.initCanvas('sig-documentos'); } catch (e) {} }, 60); }
@@ -22424,6 +22424,71 @@ const anestesia = {
 
   /* ---- SINAIS VITAIS + GRÁFICO ---- */
   vitais: {
+    /* ---------- Auto-avanço na digitação ----------
+       Quando o valor digitado não pode receber mais um dígito e continuar
+       plausível (ex.: PAS 120 → 1200 seria implausível), o app age sozinho:
+       na PA da GRADE insere a barra ("120" → "120/") e, ao completar a PAD,
+       pula para o próximo parâmetro do MESMO horário (descendo a coluna).
+       Nos demais campos numéricos, pula direto. Um toque a menos por campo —
+       num dia de 10 casos, centenas de toques. Vale para a grade da ficha e
+       para a tabela da SRPA (delegação nos containers). */
+    autoAvanco: {
+      /* Máximo plausível por campo — regra: avança quando v*10 > MAX.
+         Campos decimais/abertos (temp, dc, cam, pvc, glic) ficam de fora. */
+      GRADE_MAX: { fc: 250, spo2: 100, etco2: 99, fr: 80, bis: 100, tof: 100, pic: 80, scvo2: 100 },
+      SRPA_MAX: { 'vit_pas[]': 300, 'vit_pad[]': 200, 'vit_fc[]': 250, 'vit_spo2[]': 100, 'vit_etco2[]': 99, 'vit_fr[]': 80 },
+      _wired: false,
+      wire() {
+        if (anestesia.vitais.autoAvanco._wired) return;
+        const grade = document.getElementById('vitais-grade');
+        if (grade) grade.addEventListener('input', anestesia.vitais.autoAvanco._onGrade);
+        const srpa = document.getElementById('srpa-vitais-body');
+        if (srpa) srpa.addEventListener('input', anestesia.vitais.autoAvanco._onSrpa);
+        anestesia.vitais.autoAvanco._wired = true;
+      },
+      _completo(v, max) { const n = parseInt(v, 10); return !isNaN(n) && n > 0 && n * 10 > max; },
+      /* Grade da ficha (transposta): PA "120/80" num campo só; avanço desce a coluna */
+      _onGrade(e) {
+        const el = e.target;
+        if (!el.classList || !el.classList.contains('vg-inp')) return;
+        const aa = anestesia.vitais.autoAvanco;
+        if (el.dataset.kind === 'pa') {
+          const v = String(el.value);
+          if (v.indexOf('/') < 0) {
+            /* PAS pronta → insere a barra sozinho ("120" vira "120/") */
+            if (aa._completo(v, 300)) el.value = v + '/';
+            return;
+          }
+          const pad = v.split('/')[1] || '';
+          if (aa._completo(pad, 200)) aa._proximoNaColuna(el);
+          return;
+        }
+        const max = aa.GRADE_MAX[el.dataset.field];
+        if (max && aa._completo(el.value, max)) aa._proximoNaColuna(el);
+      },
+      _proximoNaColuna(el) {
+        /* grava já (o onchange nativo só dispara ao perder o foco) */
+        try { el.dispatchEvent(new Event('change')); } catch (e) {}
+        const tbl = el.closest('table'); if (!tbl) return;
+        const col = Array.from(tbl.querySelectorAll('input.vg-inp[data-rowidx="' + el.dataset.rowidx + '"]'))
+          .filter(x => x.dataset.field !== 'pam');   /* PAM é automática */
+        const prox = col[col.indexOf(el) + 1];
+        if (prox) { try { prox.focus(); if (prox.select) prox.select(); } catch (e) {} }
+      },
+      /* Tabela da SRPA (linhas visíveis, campos separados) */
+      _onSrpa(e) {
+        const el = e.target;
+        const aa = anestesia.vitais.autoAvanco;
+        const max = aa.SRPA_MAX[el.name];
+        if (!max || !aa._completo(el.value, max)) return;
+        const tr = el.closest('tr'); if (!tr) return;
+        const campos = Array.from(tr.querySelectorAll('input[type=number]:not([readonly])'))
+          .filter(x => x.name !== 'vit_pam[]');
+        const prox = campos[campos.indexOf(el) + 1];
+        if (prox) { try { prox.focus(); if (prox.select) prox.select(); } catch (e) {} }
+      }
+    },
+
     /* Migra valor antigo "120/80" para sistólica/diastólica separadas */
     _migrarPA(dados) {
       if (!dados.pas && !dados.pad && dados.pa) {
