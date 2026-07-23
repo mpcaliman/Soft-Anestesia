@@ -342,6 +342,74 @@ await test('RBAC: papel governa podeAcessar/podeEditar (admin, secretária só-i
   await page.close();
 });
 
+/* 13) Fila offline — operações idempotentes com dedup por documento */
+await test('Sync: fila offline dedupa por documento e carimba operation_id/base_version', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    cloud._limparFila();
+    const op1 = cloud._novaOp('pre', { _id: 'x', _updatedAt: 't1' }, 'upsert');
+    cloud._enfileirar(op1);
+    const op1b = cloud._novaOp('pre', { _id: 'x', _updatedAt: 't2' }, 'upsert'); // mesmo doc
+    cloud._enfileirar(op1b);
+    const op2 = cloud._novaOp('pre', { _id: 'y', _updatedAt: 't3' }, 'delete');  // outro doc
+    cloud._enfileirar(op2);
+    const fila = cloud._fila();
+    const xOp = fila.find(o => o.doc_id === 'x');
+    const out = {
+      len: fila.length,
+      xBaseVersion: xOp && xOp.base_version,          // 't2' — última vence
+      retryZero: fila.every(o => o.retry_count === 0),
+      temOpId: fila.every(o => !!o.operation_id),
+      idsUnicos: new Set(fila.map(o => o.operation_id)).size === fila.length
+    };
+    cloud._limparFila();
+    out.aposLimpar = cloud._fila().length;
+    return out;
+  });
+  assert(r.len === 2, 'fila deveria ter 2 ops (x deduplicada, y à parte), veio ' + r.len);
+  assert(r.xBaseVersion === 't2', 'dedup deveria manter a última versão de x (t2), veio ' + r.xBaseVersion);
+  assert(r.retryZero, 'ops nascem com retry_count 0');
+  assert(r.temOpId && r.idsUnicos, 'cada op deveria ter operation_id único');
+  assert(r.aposLimpar === 0, '_limparFila deveria esvaziar a fila');
+  await page.close();
+});
+
+/* 14) Sync — push falho enfileira; sincronizar reenvia; retry incrementa */
+await test('Sync: push offline enfileira, sincronização drena a fila e conta retry', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    /* Isola do ambiente real: força "configurado + logado" e intercepta o
+       envio de rede (que normalmente falaria com o Supabase). */
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud._baixarTudo = async () => ({});   // nada a baixar
+    let online = false;
+    cloud._enviarOp = async () => online;   // false = "offline"
+    cloud._limparFila();
+
+    // 1) push com rede falhando → operação vai para a fila
+    await cloud.pushDoc('pre', { _id: 'd1', _updatedAt: 't1' }, 'upsert');
+    const aposPush = cloud._fila().length;
+
+    // 2) rede volta → sincronizar drena a fila
+    online = true;
+    await cloud.sincronizar({ silent: true });
+    const aposSyncOk = cloud._fila().length;
+
+    // 3) rede cai de novo → op permanece e retry_count incrementa
+    online = false;
+    cloud._enfileirar(cloud._novaOp('pre', { _id: 'd2', _updatedAt: 't2' }, 'upsert'));
+    await cloud.sincronizar({ silent: true });
+    const fila = cloud._fila();
+    return { aposPush, aposSyncOk, aindaNaFila: fila.length, retry: fila[0] && fila[0].retry_count };
+  });
+  assert(r.aposPush === 1, 'push com rede falhando deveria enfileirar (1), veio ' + r.aposPush);
+  assert(r.aposSyncOk === 0, 'sincronização com rede OK deveria drenar a fila, sobrou ' + r.aposSyncOk);
+  assert(r.aindaNaFila === 1, 'op não enviada deveria permanecer na fila');
+  assert(r.retry === 1, 'retry_count deveria incrementar para 1, veio ' + r.retry);
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
