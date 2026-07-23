@@ -202,6 +202,95 @@ await test('Versionamento: _rev incrementa a cada save e o carimbo entra no roda
   await page.close();
 });
 
+/* 7) Risco — escores clínicos (funções puras do protocolo) */
+await test('Risco: escores (ARISCAT, RCRI, STOP-Bang, Caprini, ASA) calculam certo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => ({
+    ariscatBaixo: risco._ariscatRisk(20),        // ['Baixo', 1.6]
+    ariscatInter: risco._ariscatRisk(30)[0],     // 'Intermediário'
+    ariscatAlto: risco._ariscatRisk(50)[0],      // 'Alto'
+    rcri0: risco._rcriRisk(0),                    // 3.9
+    rcri2: risco._rcriRisk(2),                    // 10.1
+    stopBaixo: risco._stopRisk(1)[0],             // 'Baixo'
+    stopAlto: risco._stopRisk(5)[0],              // 'Alto'
+    capMuitoBaixo: risco._capRisk(0)[0],          // 'Muito baixo'
+    asa3: risco._asaRisk(3)                       // 3.5
+  }));
+  assert(r.ariscatBaixo[0] === 'Baixo' && r.ariscatBaixo[1] === 1.6, 'ARISCAT baixo errado');
+  assert(r.ariscatInter === 'Intermediário' && r.ariscatAlto === 'Alto', 'ARISCAT faixas erradas');
+  assert(r.rcri0 === 3.9 && r.rcri2 === 10.1, 'RCRI errado');
+  assert(r.stopBaixo === 'Baixo' && r.stopAlto === 'Alto', 'STOP-Bang errado');
+  assert(r.capMuitoBaixo === 'Muito baixo', 'Caprini errado');
+  assert(r.asa3 === 3.5, 'ASA errado');
+  await page.close();
+});
+
+/* 8) Impressão — todos os construtores de PDF geram HTML sem lançar erro */
+await test('Impressão: todos os builders de documento geram HTML válido', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const nomes = ['Pre', 'Consulta', 'Anestesia', 'Recuperacao', 'Termo', 'Prescricao', 'Documento', 'Risco', 'Financeiro', 'Agenda'];
+    const out = {};
+    nomes.forEach(n => {
+      const fn = printPreview['_build' + n];
+      try {
+        const html = fn ? fn() : null;
+        out[n] = (typeof html === 'string' && html.length > 100) ? 'ok' : 'vazio';
+      } catch (e) { out[n] = 'ERRO: ' + e.message; }
+    });
+    return out;
+  });
+  const falhas = Object.entries(r).filter(([, v]) => v !== 'ok');
+  assert(falhas.length === 0, 'builders com problema: ' + JSON.stringify(r));
+  await page.close();
+});
+
+/* 9) Store — persistência: salvar, buscar por id e excluir */
+await test('Store: salvar, buscar por id e excluir mantêm a consistência', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const antes = store.list('agenda').length;
+    const saved = store.save('agenda', { paciente: 'Teste Store', data: utils.hojeISO() });
+    const temId = !!saved._id && saved._rev === 1;
+    const achado = store.getById('agenda', saved._id);
+    const depoisSalvar = store.list('agenda').length;
+    store.delete('agenda', saved._id);
+    const removido = !store.getById('agenda', saved._id);
+    return { temId, achado: !!achado && achado.paciente === 'Teste Store', cresceu: depoisSalvar === antes + 1, removido };
+  });
+  assert(r.temId, 'save deveria gerar _id e _rev=1');
+  assert(r.achado, 'getById deveria retornar o registro salvo');
+  assert(r.cresceu, 'a lista deveria crescer em 1 após salvar');
+  assert(r.removido, 'delete deveria remover o registro');
+  await page.close();
+});
+
+/* 10) Adendos — correção anexada a um registro finalizado, sem alterar o original */
+await test('Adendos: correção é anexada ao registro finalizado (append-only)', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    store.setList('anestesia', [{ _id: 'a1', _finalizado: true, paciente: 'X', procedimento: 'Colecistectomia' }]);
+    const f = document.getElementById('form-anestesia');
+    let h = f.querySelector('[name="_id"]');
+    if (!h) { h = document.createElement('input'); h.type = 'hidden'; h.name = '_id'; f.appendChild(h); }
+    h.value = 'a1';
+    adendos.abrir('anestesia');
+    const ta = document.getElementById('adendo-texto');
+    if (ta) ta.value = 'Onde se lê X, leia-se Y.';
+    adendos.salvar('anestesia', 'a1');
+    const rec = store.getById('anestesia', 'a1');
+    return {
+      n: (rec._adendos || []).length,
+      texto: rec._adendos && rec._adendos[0] && rec._adendos[0].texto,
+      originalIntacto: rec.procedimento === 'Colecistectomia'
+    };
+  });
+  assert(r.n === 1, 'deveria haver 1 adendo, veio ' + r.n);
+  assert(/leia-se Y/.test(r.texto || ''), 'texto do adendo não persistiu');
+  assert(r.originalIntacto, 'o registro original deveria permanecer intacto');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
