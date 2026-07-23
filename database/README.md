@@ -145,6 +145,11 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
 - **Diagnóstico da nuvem:** ✅ tela em Ajustes compara, tabela a tabela, o que
   está no aparelho × no banco relacional, com fila pendente, última sync e
   saúde da conexão.
+- **Segurança do login (Ajustes → Usuários e segurança):** ✅ bloqueio de tela
+  por inatividade **configurável** (2/5/10/15/30 min ou *Nunca*, padrão 5),
+  botão **Bloquear agora** e **anti-força-bruta**: após 5 senhas erradas o
+  login trava por 30 s (nos dois fluxos — nuvem e local). Tudo no aparelho, sem
+  SQL novo.
 - **Auditoria (Ajustes → Registro de auditoria):** ✅ tela read-only lê a
   `audit_logs` (populada pelos triggers) e mostra **quem** criou/editou/
   finalizou/excluiu **o quê** e **quando**, com filtro por módulo. Gestor vê a
