@@ -111,8 +111,13 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   (Ajustes → Equipe da nuvem):** o gestor lista os membros da organização, muda
   o papel, ativa/desativa e **adiciona por e-mail** via a função segura
   `public.add_member` (`0006`, SECURITY DEFINER, só o gestor chama). A pessoa
-  precisa ter criado a conta na nuvem antes. Falta só migrar usuários locais
-  antigos que ainda não têm conta no Auth.
+  precisa ter criado a conta na nuvem antes. ✅ **Ponte local → nuvem:** no card
+  *Usuários e segurança* cada usuário mostra se é **🔒 local** (só neste
+  aparelho) ou **☁️ nuvem** (cross-device); os locais ganham um botão
+  **☁️ Convidar** que mapeia o perfil local ao papel da nuvem
+  (admin→gestor, médico→anestesiologista, secretária→auxiliar) e leva o gestor,
+  já pré-preenchido, ao fluxo `add_member`. Não cria a conta automaticamente
+  (isso depende da senha da própria pessoa) — orienta o passo a passo honesto.
 - **Fase 4 — Paciente/Encounter central + migração dos dados atuais (em
   andamento):** ✅ `0003_migration_targets.sql` adiciona `legacy_id`
   (idempotência) às tabelas e cria `consultations`, `quotes` e `appointments`.
