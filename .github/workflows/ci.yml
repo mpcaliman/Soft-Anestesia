@@ -1,0 +1,26 @@
+name: Testes (smoke)
+
+# Roda os testes de fumaça do app a cada push e pull request, para proteger os
+# fluxos essenciais (pré, SRPA, financeiro, versionamento) contra regressões.
+
+on:
+  push:
+    branches: [ main, 'claude/**' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Instalar dependências
+        run: npm install
+      - name: Instalar navegador do Playwright (Chromium)
+        run: npx playwright install --with-deps chromium
+      - name: Rodar smoke tests
+        run: npm test

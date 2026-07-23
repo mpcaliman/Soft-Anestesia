@@ -1,0 +1,12 @@
+{
+  "name": "soft-anestesia",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Soft Anestesia — sistema médico de anestesiologia (SPA single-file). Testes de fumaça com Playwright.",
+  "scripts": {
+    "test": "node tests/smoke.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  }
+}
