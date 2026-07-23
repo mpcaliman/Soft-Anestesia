@@ -213,7 +213,10 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   (salvar/buscar/excluir) e os **adendos append-only** (correção anexa sem
   alterar o original). Também cobre o **cálculo de infusão** (dose → mL/h por
   unidade, incluindo o caso "sem peso → não calcula") e o **RBAC** por papel
-  (podeAcessar/podeEditar: admin, secretária só-impressão). **12 testes no total.**
+  (podeAcessar/podeEditar: admin, secretária só-impressão). Cobre ainda a
+  **sincronização / fila offline**: fila idempotente (dedup por documento,
+  `operation_id`/`base_version`) e o fluxo *push falha → enfileira → sincronizar
+  drena → retry incrementa* (com a rede mockada). **14 testes no total.**
 
 ## Rollback
 
