@@ -502,6 +502,56 @@ await test('Vitais: grade auto-insere a barra da PA e desce a coluna ao completa
   await page.close();
 });
 
+/* 17) Meu dia — cruza agenda × ficha × SRPA × financeiro de hoje por paciente */
+await test('Meu dia: casos de hoje cruzados por paciente com estados de cada etapa', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const hoje = utils.hojeISO();
+    store.setList('agenda', [
+      { _id: 'ag1', paciente: 'Ana Souza', data: hoje, hora: '07:30', tipo: 'Cirurgia', procedimento: 'Cesárea' },
+      { _id: 'ag2', paciente: 'Bruno Lima', data: hoje, hora: '10:00', tipo: 'Cirurgia', procedimento: 'Hernioplastia' }
+    ]);
+    store.setList('anestesia', [
+      { _id: 'an1', paciente_nome: 'ANA SOUZA', data_anestesia: hoje, _finalizado: true, procedimento: 'Cesárea', hora_sala_entrada: '07:35' },
+      { _id: 'an2', paciente_nome: 'Carla Nunes', data_anestesia: hoje, procedimento: 'Colecistectomia' }
+    ]);
+    store.setList('recuperacao', [{ _id: 'sr1', nome: 'Ana Souza', data: hoje }]);
+    store.setList('financeiro', [{ _id: 'f1', paciente: 'ana souza', data_proc: hoje, status: 'pendente' }]);
+
+    const casos = meuDia.coletar();
+    const ana = casos.find(c => meuDia._norm(c.nome) === 'ana souza');
+    const bruno = casos.find(c => meuDia._norm(c.nome) === 'bruno lima');
+    const carla = casos.find(c => meuDia._norm(c.nome) === 'carla nunes');
+
+    location.hash = '#dashboard';
+    await new Promise(r => setTimeout(r, 400));
+    meuDia.render();
+    const html = document.getElementById('meu-dia-lista').innerHTML;
+    const resumo = document.getElementById('meu-dia-resumo').innerHTML;
+    return {
+      nCasos: casos.length,                                    // 3 (Ana unificada apesar de caixa/caixa-baixa)
+      anaCompleta: !!(ana && ana.agenda && ana.ficha && ana.srpa && ana.fin),
+      anaFichaFinal: !!(ana && ana.ficha && ana.ficha._finalizado),
+      brunoSoAgenda: !!(bruno && bruno.agenda && !bruno.ficha),
+      carlaSoFicha: !!(carla && !carla.agenda && carla.ficha && !carla.ficha._finalizado),
+      ordemHora: casos[0] && casos[0].hora === '07:30',
+      temIniciar: html.includes('▶ Iniciar'),                  // Bruno
+      temFichaOk: html.includes('Ficha ✓'),                    // Ana
+      temFichaRasc: html.includes('Ficha…'),                   // Carla
+      temFinPend: html.includes('Fin…'),                       // Ana (pendente)
+      resumoTemCasos: resumo.includes('Casos hoje')
+    };
+  });
+  assert(r.nCasos === 3, 'deveriam ser 3 casos (Ana unificada), veio ' + r.nCasos);
+  assert(r.anaCompleta && r.anaFichaFinal, 'Ana deveria ter as 4 etapas com ficha finalizada');
+  assert(r.brunoSoAgenda, 'Bruno deveria estar só na agenda');
+  assert(r.carlaSoFicha, 'Carla deveria ter só a ficha em rascunho');
+  assert(r.ordemHora, 'casos deveriam ordenar por hora (07:30 primeiro)');
+  assert(r.temIniciar && r.temFichaOk && r.temFichaRasc && r.temFinPend, 'chips de estado deveriam refletir cada situação');
+  assert(r.resumoTemCasos, 'resumo do plantão deveria aparecer');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

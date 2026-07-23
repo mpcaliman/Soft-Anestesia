@@ -187,6 +187,15 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   Um toque a menos por campo — centenas por dia. Modelos de ficha completa por
   cirurgia e o encadeamento ficha→SRPA ao finalizar já existiam (auditoria
   confirmou).
+- **Painel "Meu dia" (dashboard):** ✅ fecha o backlog da auditoria de fluidez.
+  Cruza **agenda × ficha de anestesia × SRPA × financeiro de HOJE** por
+  paciente (nome normalizado, mesma identidade do linker) e mostra uma linha
+  por caso, ordenada por hora, com **chips de estado por etapa**: Ficha ✓ /
+  Ficha… (rascunho) / ▶ Iniciar (só agendado), SRPA e Financeiro idem. Tocar
+  no chip abre o registro (ou inicia pelo `agenda.atender`). No topo, o
+  **resumo do plantão**: casos, fichas finalizadas, rascunhos, sem ficha,
+  financeiro pendente e o alerta "finalizada sem financeiro". Read-only —
+  não cria nada sozinho.
 - **Pré-anestésica reorganizada:** ✅ uma **barra de navegação por seções** no
   topo da avaliação (Identificação · Anamnese · Exames · Pareceres · Risco ·
   Conclusões) mostra o **status de preenchimento** de cada bloco (vazio ○ /

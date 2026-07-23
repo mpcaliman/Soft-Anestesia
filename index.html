@@ -2097,6 +2097,29 @@ path.dash-clickable:hover { opacity: .8; }
 .tempos-row .tp-val { font-size: .95rem; font-variant-numeric: tabular-nums; font-weight: 700; color: var(--primary-darker); min-width: 52px; text-align: center; }
 .tempos-row .tp-val.vazio { color: var(--text-mute); font-weight: 400; }
 .tempos-row .btn-now { flex-shrink: 0; }
+
+/* Painel "Meu dia" (dashboard): uma linha por caso, chips de etapa */
+.md-linha {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px;
+  margin-bottom: 6px; background: var(--surface); flex-wrap: wrap;
+}
+.md-info { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex: 1; }
+.md-hora { font-size: .82rem; font-weight: 800; color: var(--primary-darker); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.md-nome { font-size: .88rem; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.md-proc { font-size: .74rem; color: var(--text-mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.md-chips { display: flex; gap: 5px; flex-shrink: 0; }
+.md-chip {
+  font-size: .74rem; font-weight: 700; line-height: 1;
+  padding: 6px 9px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface-alt); color: var(--text-soft); cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.md-chip.md-ok    { background: #e6f4ea; color: #1a7f42; border-color: #bfe3cc; }
+.md-chip.md-meio  { background: var(--warning-soft, #fdf3e0); color: #8a5a00; border-color: #ecd9ae; }
+.md-chip.md-falta { background: var(--primary-soft); color: var(--primary-dark); border-color: var(--primary-light); }
+span.md-chip.md-nada { cursor: default; opacity: .6; font-weight: 500; }
+@media (max-width: 640px) { .md-chips { width: 100%; justify-content: flex-end; } }
 .fab-vitais.carimbou { animation: fab-pulse .45s ease; }
 .fab-vitais-icon { font-size: 1.6rem; line-height: 1; }
 @media (max-width: 700px) {
@@ -4176,6 +4199,18 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </div>
 
     <div class="kpi-grid" id="kpi-grid"></div>
+
+    <!-- 📅 MEU DIA — casos de hoje com o estado de cada etapa (fechamento do plantão) -->
+    <div class="card no-collapse no-print" id="meu-dia-card">
+      <div class="card-header">
+        <div class="card-title-wrap"><span class="card-icon">📅</span><h2>Meu dia<small>Casos de hoje: agenda × ficha × SRPA × financeiro — confira o plantão de relance</small></h2></div>
+        <div class="card-actions"><button type="button" class="btn btn-xs" onclick="meuDia.render()" title="Atualizar">🔄</button></div>
+      </div>
+      <div class="card-body">
+        <div class="ficha-resumo" id="meu-dia-resumo" style="display:none;margin-bottom:10px"></div>
+        <div id="meu-dia-lista"></div>
+      </div>
+    </div>
 
     <div class="dash-grid">
       <div class="card no-collapse"><div class="card-header"><div class="card-title-wrap"><h2>Total de atendimentos</h2></div></div>
@@ -10243,7 +10278,7 @@ const ui = {
 
       /* Refresh por módulo — cada um em try/catch independente para não bloquear navegação */
       try {
-        if (modName === 'dashboard') dashboard.atualizar();
+        if (modName === 'dashboard') { dashboard.atualizar(); try { meuDia.render(); } catch (e) {} }
         else if (modName === 'financeiro') financeiro.render();
         else if (modName === 'agenda') { agenda.render(); if (!agenda._puxouNestaSessao) { setTimeout(() => { try { agenda.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
@@ -31615,6 +31650,109 @@ ${TAG_CLOSE_HTML}`;
 /* ============================================================================
    MÓDULO — DASHBOARD
 ============================================================================ */
+/* ============================================================================
+   MEU DIA — visão do plantão: cruza agenda, fichas de anestesia, SRPA e
+   financeiro DE HOJE por paciente (nome normalizado, mesma identidade do
+   linker). Cada linha mostra o estado das etapas e abre com um toque.
+   Read-only sobre os dados — não cria nem altera nada sozinho.
+============================================================================ */
+const meuDia = {
+  _norm(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim(); },
+
+  coletar() {
+    const hoje = utils.hojeISO();
+    const casos = {};   /* nomeNorm → caso */
+    const caso = (nome) => {
+      const k = meuDia._norm(nome);
+      if (!k) return null;
+      if (!casos[k]) casos[k] = { nome, hora: '', procedimento: '', agenda: null, ficha: null, srpa: null, fin: null };
+      return casos[k];
+    };
+    store.list('agenda').filter(x => x.data === hoje).forEach(x => {
+      const c = caso(x.paciente); if (!c) return;
+      c.agenda = x;
+      if (!c.hora) c.hora = x.hora || '';
+      if (!c.procedimento) c.procedimento = x.procedimento || x.tipo || '';
+    });
+    store.list('anestesia').filter(x => x.data_anestesia === hoje).forEach(x => {
+      const c = caso(x.paciente_nome); if (!c) return;
+      c.ficha = x;
+      if (!c.hora) c.hora = x.hora_sala_entrada || x.hora_inicio || '';
+      if (!c.procedimento) c.procedimento = x.procedimento || '';
+    });
+    store.list('recuperacao').filter(x => x.data === hoje).forEach(x => {
+      const c = caso(x.nome); if (!c) return;
+      c.srpa = x;
+      if (!c.procedimento) c.procedimento = x.procedimento || '';
+    });
+    store.list('financeiro').filter(x => x.data_proc === hoje).forEach(x => {
+      const c = caso(x.paciente); if (!c) return;
+      c.fin = x;
+      if (!c.procedimento) c.procedimento = x.procedimento || '';
+    });
+    return Object.values(casos).sort((a, b) => (a.hora || '99:99').localeCompare(b.hora || '99:99'));
+  },
+
+  /* Chips de etapa: cor/ação conforme o estado */
+  _chipFicha(c) {
+    if (c.ficha) {
+      const ok = !!c.ficha._finalizado;
+      return '<button type="button" class="md-chip ' + (ok ? 'md-ok' : 'md-meio') + '" onclick="dashboard._abrirFicha(\'anestesia\',\'' + c.ficha._id + '\')" title="' + (ok ? 'Ficha finalizada — abrir' : 'Ficha em rascunho — continuar') + '">📋 ' + (ok ? 'Ficha ✓' : 'Ficha…') + '</button>';
+    }
+    if (c.agenda) return '<button type="button" class="md-chip md-falta" onclick="agenda.atender(\'' + c.agenda._id + '\')" title="Iniciar atendimento pré-preenchido da agenda">▶ Iniciar</button>';
+    return '<span class="md-chip md-nada">— ficha</span>';
+  },
+  _chipSrpa(c) {
+    if (!c.srpa) return '<span class="md-chip md-nada">— SRPA</span>';
+    const ok = !!c.srpa._finalizado;
+    return '<button type="button" class="md-chip ' + (ok ? 'md-ok' : 'md-meio') + '" onclick="dashboard._abrirFicha(\'recuperacao\',\'' + c.srpa._id + '\')" title="' + (ok ? 'SRPA finalizada — abrir' : 'SRPA em andamento — continuar') + '">🏥 ' + (ok ? 'SRPA ✓' : 'SRPA…') + '</button>';
+  },
+  _chipFin(c) {
+    if (!c.fin) return '<span class="md-chip md-nada" title="Nenhum lançamento financeiro hoje — o Finalizar da ficha cria automaticamente">— financeiro</span>';
+    const ok = !!c.fin.pago || c.fin.status === 'recebido' || c.fin.status === 'finalizado';
+    return '<button type="button" class="md-chip ' + (ok ? 'md-ok' : 'md-meio') + '" onclick="dashboard._abrirFicha(\'financeiro\',\'' + c.fin._id + '\')" title="' + (ok ? 'Financeiro ok — abrir' : 'Financeiro pendente — abrir') + '">💰 ' + (ok ? 'Fin ✓' : 'Fin…') + '</button>';
+  },
+
+  render() {
+    const host = document.getElementById('meu-dia-lista');
+    const res = document.getElementById('meu-dia-resumo');
+    if (!host) return;
+    const casos = meuDia.coletar();
+    if (!casos.length) {
+      host.innerHTML = '<p style="font-size:.84rem;color:var(--text-mute);margin:0">Nenhum caso registrado para hoje ainda. Os compromissos da Agenda e as fichas de hoje aparecem aqui automaticamente.</p>';
+      if (res) res.style.display = 'none';
+      return;
+    }
+    host.innerHTML = casos.map(c => `
+      <div class="md-linha">
+        <div class="md-info">
+          <span class="md-hora">${utils.escapeHTML(c.hora || '—')}</span>
+          <span class="md-nome">${utils.escapeHTML(c.nome)}</span>
+          <span class="md-proc">${utils.escapeHTML(c.procedimento || '')}</span>
+        </div>
+        <div class="md-chips">${meuDia._chipFicha(c)}${meuDia._chipSrpa(c)}${meuDia._chipFin(c)}</div>
+      </div>`).join('');
+    if (res) {
+      const fichasOk = casos.filter(c => c.ficha && c.ficha._finalizado).length;
+      const fichasRasc = casos.filter(c => c.ficha && !c.ficha._finalizado).length;
+      const semFicha = casos.filter(c => !c.ficha).length;
+      const finPend = casos.filter(c => c.fin && !(c.fin.pago || c.fin.status === 'recebido' || c.fin.status === 'finalizado')).length;
+      const semFin = casos.filter(c => c.ficha && c.ficha._finalizado && !c.fin).length;
+      const chips = [
+        { i: '🗓', l: 'Casos hoje', v: casos.length },
+        { i: '✅', l: 'Fichas finalizadas', v: fichasOk },
+        { i: '✏️', l: 'Em rascunho', v: fichasRasc, neg: fichasRasc > 0 },
+        { i: '⚠️', l: 'Sem ficha', v: semFicha, neg: semFicha > 0 },
+        { i: '💰', l: 'Fin. pendente', v: finPend, neg: finPend > 0 }
+      ];
+      if (semFin) chips.push({ i: '❗', l: 'Finalizada sem financeiro', v: semFin, neg: true });
+      res.innerHTML = chips.map(ch =>
+        '<span class="fr-chip' + (ch.neg ? ' fr-neg' : '') + '"><span>' + ch.i + '</span><span class="fr-l">' + ch.l + '</span><b>' + ch.v + '</b></span>').join('');
+      res.style.display = 'flex';
+    }
+  }
+};
+
 const dashboard = {
   /* ===== GRÁFICOS SVG (offline, sem libs) ===== */
 
@@ -35779,6 +35917,7 @@ document.addEventListener('DOMContentLoaded', () => {
   try { pre.viaAerea.render(); } catch (e) {}
   try { pre.nav._wire(); pre.nav.render(); } catch (e) {}
   window.ajustesUsuarios = ajustesUsuarios;
+  window.meuDia = meuDia;
   window.termoPadrao = termoPadrao;
   window.termoBiblioteca = termoBiblioteca;
   window.textosPadrao = textosPadrao;
