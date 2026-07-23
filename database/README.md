@@ -119,13 +119,16 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   **idempotente** (`legacy_id`) e **aditiva**. Sempre há **pré-visualização**
   (dry-run) antes de qualquer escrita. Próximo: relatório persistido e
   reconciliação de anexos no Storage.
-- **Fase 6 — Módulos lendo/gravando do relacional (em andamento):** ✅ **Pacientes**
-  e ✅ **Agenda** já usam as tabelas relacionais (`patients`, `appointments`) como
-  registro central cross-device via `cloudRel`: puxam da nuvem e juntam com os
-  locais, e cada gravação é espelhada (upsert idempotente) com detecção de
-  conflito (Fase 5). Ao salvar um compromisso, o paciente é criado/vinculado
-  automaticamente. localStorage segue como cache/offline. Próximos módulos
-  seguem o mesmo padrão.
+- **Fase 6 — Módulos lendo/gravando do relacional:** ✅ **Pacientes**, ✅ **Agenda**
+  e ✅ **todos os módulos de registro** (pré, consulta, ficha de anestesia,
+  recuperação, risco, termo, receituário, documentos, financeiro, orçamento) já
+  usam as tabelas relacionais como registro central cross-device via `cloudRel`.
+  Um **motor genérico** espelha cada gravação (hook central no `store.save`),
+  criando/vinculando **paciente e encounter** automaticamente pela mesma
+  identidade da migração (idempotente, atualiza as linhas migradas). Pull
+  automático 1×/sessão ao abrir cada módulo. Detecção de conflito (Fase 5) em
+  todos, com diálogo genérico. Cache de ids na sessão evita GETs repetidos.
+  localStorage segue como cache/offline.
 - **Fase 5 — Conflitos + Realtime (em andamento):** ✅ concorrência otimista no
   piloto Pacientes — ao salvar, o app confere se a linha mudou na nuvem
   (`updated_at`) desde que foi carregada; se mudou, abre resolução de conflito
