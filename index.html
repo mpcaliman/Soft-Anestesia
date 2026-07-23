@@ -9131,7 +9131,15 @@ const store = {
     } else {
       /* Salva versão anterior antes de sobrescrever */
       const prev = list.find(x => x._id === item._id);
-      if (prev) store._saveVersion(modKey, prev);
+      if (prev) {
+        store._saveVersion(modKey, prev);
+        /* Preserva metadados internos que o formulário não carrega, mas que
+           devem sobreviver ao save. Sem isto, o token de concorrência da nuvem
+           (_relUpdatedAt) some a cada gravação e a detecção de conflito (Fase 5)
+           nunca dispara. _links preserva os vínculos entre módulos. */
+        if (prev._relUpdatedAt && !item._relUpdatedAt) item._relUpdatedAt = prev._relUpdatedAt;
+        if (prev._links && !item._links) item._links = prev._links;
+      }
     }
     item._updatedAt = new Date().toISOString();
     item._updatedBy = localStorage.getItem('medsys.v7.usuario') || 'local';
