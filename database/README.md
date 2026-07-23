@@ -170,6 +170,15 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   cronológica** (revisão do caso). Lê os dados que já estão na ficha — não muda
   o modelo. A tabela `anesthesia_timeline_events` fica para uma futura fonte
   única relacional, se/quando valer o refactor.
+- **Ficha de anestesia — modo cirurgia (fluidez p/ alto volume):** ✅ auditoria
+  de fluxo apontou 3 fricções principais no intra-op e todas foram resolvidas:
+  (1) **navegação por seções** na ficha (a mais longa do app, 14 seções): chips
+  fixos no topo com estado (○/●/✓) e **contadores ao vivo** de vitais/meds/
+  fluidos; tocar rola e abre a seção. (2) **FAB ⏱️ Tempos**: os 6 horários do
+  caso (entrada em sala → saída) carimbáveis com **um toque de qualquer lugar**
+  da ficha, com o próximo esperado destacado — sem rolar ao topo. (3) **FAB 💉
+  Medicação**: abre o catálogo multiseleção direto. Com os FABs já existentes
+  (🩺 vitais, 🕐 evento), as 4 ações mais frequentes do caso ficam a um toque.
 - **Pré-anestésica reorganizada:** ✅ uma **barra de navegação por seções** no
   topo da avaliação (Identificação · Anamnese · Exames · Pareceres · Risco ·
   Conclusões) mostra o **status de preenchimento** de cada bloco (vazio ○ /
