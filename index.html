@@ -729,6 +729,18 @@ html[data-theme="dark"] .theme-toggle:hover {
 /* Valor de sinal vital implausível (provável erro de digitação) */
 input.vit-fora { outline: 2px solid var(--warning) !important; background: #fff7ed !important; }
 @media print { input.vit-fora { outline: none !important; background: none !important; } }
+/* Faixa de totais no topo da ficha */
+.ficha-resumo {
+  display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 14px;
+}
+.ficha-resumo .fr-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--surface-alt, #f1f5f9); border: 1px solid var(--border);
+  border-radius: 20px; padding: 5px 12px; font-size: .82rem; color: var(--text-soft);
+}
+.ficha-resumo .fr-chip b { color: var(--primary-darker); font-size: .9rem; }
+.ficha-resumo .fr-l { color: var(--text-mute); font-size: .74rem; text-transform: uppercase; letter-spacing: .3px; }
+.ficha-resumo .fr-chip.fr-neg b { color: var(--danger, #b3392a); }
 @media (max-width: 700px) { .vitais-grid { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 420px) { .vitais-grid { grid-template-columns: repeat(2, 1fr); } }
 
@@ -4821,6 +4833,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       <h1>Ficha de Anestesia</h1>
       <span class="subtitle">Registro completo do ato anestésico</span>
     </div>
+    <div class="ficha-resumo no-print" id="anestesia-resumo" style="display:none"></div>
 
     <div class="doc-status" id="docstatus-anestesia">
       <span class="ds-badge novo" id="dsbadge-anestesia">📄 Novo documento</span>
@@ -9940,7 +9953,7 @@ const ui = {
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); logoUsuario.renderAjustes(); const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
         else if (modName === 'pre') { try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} try { pre.viaAerea.render(); } catch (e) {} }
-        else if (modName === 'anestesia') { anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} }
+        else if (modName === 'anestesia') { anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} try { anestesia.calc.resumoTopo(); } catch (e) {} }
         else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} }, 60); }
         else if (modName === 'termo') { setTimeout(() => { try { (termo.sig._ajustar || []).forEach(fn => fn()); assinatura.initCanvas('sig-termo'); } catch (e) {} }, 80); }
         else if (modName === 'prescricao') { setTimeout(() => { try { if (prescricao.sig._ajustar) prescricao.sig._ajustar(); assinatura.initCanvas('sig-prescricao'); } catch (e) {} }, 80); }
@@ -18351,6 +18364,33 @@ const anestesia = {
       calcDur('hora_inicio', 'hora_fim', 'duracao');
       calcDur('hora_cir_inicio', 'hora_cir_fim', 'duracao_cir');
       try { anestesia.diurese.recalcular(); } catch (e) {}
+      try { anestesia.calc.resumoTopo(); } catch (e) {}
+    },
+    /* Faixa de totais no topo (tempos + balanço), atualizada ao vivo. */
+    resumoTopo() {
+      const f = document.getElementById('form-anestesia');
+      const box = document.getElementById('anestesia-resumo');
+      if (!f || !box) return;
+      const g = (n) => (f.querySelector('[name="' + n + '"]') || {}).value || '';
+      const durEntre = (ini, fim) => {
+        if (!ini || !fim) return '';
+        const [h1, m1] = ini.split(':').map(Number), [h2, m2] = fim.split(':').map(Number);
+        let mm = (h2 * 60 + m2) - (h1 * 60 + m1); if (mm < 0) mm += 1440;
+        return Math.floor(mm / 60) + 'h ' + String(mm % 60).padStart(2, '0') + 'min';
+      };
+      const chips = [];
+      const tAnest = g('duracao') || durEntre(g('hora_inicio'), g('hora_fim'));
+      if (tAnest) chips.push({ i: '💉', l: 'Anestesia', v: tAnest });
+      const tSala = durEntre(g('hora_sala_entrada'), g('hora_sala_saida'));
+      if (tSala) chips.push({ i: '🚪', l: 'Sala', v: tSala });
+      const tCir = g('duracao_cir') || durEntre(g('hora_cir_inicio'), g('hora_cir_fim'));
+      if (tCir) chips.push({ i: '🔪', l: 'Cirurgia', v: tCir });
+      const bal = g('balanco');
+      if (bal) chips.push({ i: '⚖️', l: 'Balanço', v: bal, neg: /^-|[-]\d/.test(bal) || bal.indexOf('-') === 0 });
+      if (!chips.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+      box.innerHTML = chips.map(c =>
+        '<span class="fr-chip' + (c.neg ? ' fr-neg' : '') + '"><span>' + c.i + '</span><span class="fr-l">' + c.l + '</span><b>' + utils.escapeHTML(String(c.v)) + '</b></span>').join('');
+      box.style.display = 'flex';
     },
     balanco() {
       const f = document.getElementById('form-anestesia');
@@ -18411,6 +18451,7 @@ const anestesia = {
       } else {
         set('reposicao_sug', 'sem déficit relevante');
       }
+      try { anestesia.calc.resumoTopo(); } catch (e) {}
     },
     /* Sugere taxa de perdas insensíveis com base em porte+via */
     sugerirInsensiveis() {
@@ -23880,7 +23921,39 @@ const anestesia = {
       setTimeout(() => anestesia._perguntarSRPA(docCompleto), 300);
     }
   },
-  finalizar() { anestesia.adicionais.perguntar(() => anestesia.salvar({ finalizar: true })); },
+  /* Confere itens clínicos importantes antes de finalizar; retorna avisos. */
+  _checarCompletude() {
+    const f = document.getElementById('form-anestesia');
+    if (!f) return [];
+    const g = (n) => ((f.querySelector('[name="' + n + '"]') || {}).value || '').trim();
+    const avisos = [];
+    if (!g('procedimento')) avisos.push('Procedimento cirúrgico não preenchido');
+    if (f.querySelectorAll('[name="tipo[]"]:checked').length === 0) avisos.push('Técnica anestésica não marcada');
+    if (!g('hora_sala_entrada') && !g('hora_inicio')) avisos.push('Horário de início (entrada em sala/início) não informado');
+    const nVit = document.querySelectorAll('#vitais-body tr').length;
+    if (nVit === 0) avisos.push('Nenhum sinal vital registrado');
+    else if (!Array.from(document.querySelectorAll('#vitais-body [name="vit_spo2[]"]')).some(el => String(el.value).trim() !== ''))
+      avisos.push('Nenhuma SpO₂ registrada nos sinais vitais');
+    if (document.querySelectorAll('#medicacoes-body tr').length === 0) avisos.push('Nenhuma medicação registrada');
+    const assinado = Array.from(f.querySelectorAll('[name^="assinatura_dataurl"]')).some(el => (el.value || '').length > 50);
+    if (!assinado) avisos.push('Sem assinatura do anestesista');
+    return avisos;
+  },
+  finalizar() {
+    const avisos = anestesia._checarCompletude();
+    if (avisos.length) {
+      modal.open('⚠️ Conferir antes de finalizar',
+        '<p style="font-size:.88rem;margin:0 0 8px">Alguns itens importantes parecem faltar nesta ficha:</p>' +
+        '<ul style="margin:0 0 10px;padding-left:20px;line-height:1.7;color:var(--danger,#b3392a)">' +
+        avisos.map(a => '<li>' + utils.escapeHTML(a) + '</li>').join('') + '</ul>' +
+        '<p style="font-size:.82rem;color:var(--text-mute);margin:0">Você pode voltar e completar, ou finalizar assim mesmo.</p>',
+        '<button class="btn" onclick="modal.close()">Voltar e completar</button>' +
+        '<button class="btn btn-finalizar" onclick="modal.close(); anestesia._finalizarConfirmado()">Finalizar mesmo assim</button>');
+      return;
+    }
+    anestesia._finalizarConfirmado();
+  },
+  _finalizarConfirmado() { anestesia.adicionais.perguntar(() => anestesia.salvar({ finalizar: true })); },
 
   /* ===== ADICIONAIS DE FATURAMENTO (apartamento, urgência, FDS...) ===== */
   adicionais: {
