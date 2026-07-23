@@ -199,7 +199,13 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   fechou) e lista os fechamentos anteriores. Entra no backup completo
   (`fin_fechamentos`). Conciliação por código TUSS, status por lançamento,
   regras por convênio e relatório mensal em PDF já existiam.
-- **Fase 6+ — Testes.** (itens remanescentes)
+- **Testes automatizados + CI:** ✅ uma suíte de **smoke tests** (Playwright,
+  `tests/smoke.mjs`) roda o app num Chromium headless e verifica os fluxos
+  essenciais — boot sem erros de JS, modo demonstração, pré (navegação +
+  completude), SRPA (PADSS + resumo de alta), financeiro (fechamento de caixa)
+  e versionamento de documentos. Um **workflow de CI** (`.github/workflows/
+  ci.yml`) roda `npm test` a cada push/PR, protegendo o que foi construído.
+  Rodar localmente: `npm install && npx playwright install chromium && npm test`.
 
 ## Rollback
 
