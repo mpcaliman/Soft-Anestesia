@@ -185,8 +185,13 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   SRPA, sinais vitais chegada→alta, escalas, conduta, destino), editável. O topo
   mostra chip do PADSS; ao finalizar com destino *alta hospitalar*, avisa se o
   PADSS falta/está abaixo de 9. Tudo entra na impressão/PDF.
-- **Fase 6+ — Financeiro (rascunho/conciliação), PDF versionado, testes.**
-  (itens remanescentes)
+- **PDF versionado:** ✅ cada gravação incrementa uma **revisão** (`_rev`) no
+  registro. Na impressão/PDF dos documentos clínicos (pré, consulta, ficha,
+  SRPA, termo, risco) o **rodapé** carimba **código do documento** (6 dígitos do
+  id), **número da revisão**, **status** (Rascunho/Finalizado) e **data/hora da
+  última edição** — rastreabilidade médico-legal, sem SQL novo. Documento não
+  salvo aparece como *Rascunho não salvo*.
+- **Fase 6+ — Financeiro (rascunho/conciliação), testes.** (itens remanescentes)
 
 ## Rollback
 

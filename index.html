@@ -9406,6 +9406,7 @@ const store = {
     if (isNew) {
       item._id = utils.uid();
       item._createdAt = new Date().toISOString();
+      item._rev = 1;
     } else {
       /* Salva versão anterior antes de sobrescrever */
       const prev = list.find(x => x._id === item._id);
@@ -9417,7 +9418,10 @@ const store = {
            nunca dispara. _links preserva os vínculos entre módulos. */
         if (prev._relUpdatedAt && !item._relUpdatedAt) item._relUpdatedAt = prev._relUpdatedAt;
         if (prev._links && !item._links) item._links = prev._links;
-      }
+        /* Revisão: número que incrementa a cada gravação (rastreabilidade). */
+        item._rev = ((prev._rev || 1) + 1);
+        if (prev._createdAt && !item._createdAt) item._createdAt = prev._createdAt;
+      } else if (!item._rev) { item._rev = 1; }
     }
     item._updatedAt = new Date().toISOString();
     item._updatedBy = localStorage.getItem('medsys.v7.usuario') || 'local';
@@ -29617,6 +29621,10 @@ const printPreview = {
       const builder = builders[mod];
       if (!builder) { toast('Pré-visualização não disponível neste módulo', 'warn'); return; }
 
+      /* Contexto de versão p/ o carimbo do rodapé (só módulos de documento). */
+      const formMapVer = { pre: 'form-pre', consulta: 'form-consulta', anestesia: 'form-anestesia', recuperacao: 'form-recuperacao', termo: 'form-termo', prescricao: 'form-prescricao', risco: 'form-risco' };
+      printPreview._verCtx = formMapVer[mod] ? { mod, formId: formMapVer[mod] } : null;
+
       const html = builder();
       const ppp = document.getElementById('ppp');
       if (!ppp) { toast('Erro: container de preview não encontrado', 'error'); return; }
@@ -30209,9 +30217,29 @@ ${TAG_CLOSE_HTML}`;
   },
   _footer(label) {
     return `<div class="pp-footer">
-      <span>${utils.escapeHTML(label)} · Impresso em ${new Date().toLocaleString('pt-BR')}</span>
+      <span>${utils.escapeHTML(label)} · Impresso em ${new Date().toLocaleString('pt-BR')}${printPreview._versaoStamp()}</span>
       <span class="pp-footer-credit">Soft Anestesia · desenvolvido por Marcelo Pandolfi Caliman</span>
     </div>`;
+  },
+  /* Carimbo de versão do documento no rodapé (rastreabilidade médico-legal).
+     Lê o registro salvo pelo _id do formulário atual (definido em abrir()). */
+  _verCtx: null,
+  _versaoStamp() {
+    try {
+      const ctx = printPreview._verCtx;
+      if (!ctx || !ctx.mod || !ctx.formId) return '';
+      const f = document.getElementById(ctx.formId);
+      if (!f) return '';
+      const id = (f.querySelector('[name="_id"]') || {}).value || '';
+      if (!id) return ' · <strong>Rascunho não salvo</strong>';
+      const rec = store.getById(ctx.mod, id);
+      if (!rec) return '';
+      const rev = rec._rev || 1;
+      const status = rec._finalizado ? 'Finalizado' : 'Rascunho';
+      const quando = rec._updatedAt ? new Date(rec._updatedAt).toLocaleString('pt-BR') : '';
+      const cod = String(id).slice(-6).toUpperCase();
+      return ' · Doc ' + cod + ' · Rev. ' + rev + ' · ' + status + (quando ? ' em ' + quando : '');
+    } catch (e) { return ''; }
   },
 
   /* === Builders por módulo === */
