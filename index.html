@@ -731,6 +731,8 @@ input.vit-fora { outline: 2px solid var(--warning) !important; background: #fff7
 /* Alerta CLÍNICO discreto (valor preocupante, mas legítimo) — mais suave */
 input.vit-alerta { box-shadow: inset 3px 0 0 #f59e0b; background: #fffdf5 !important; }
 @media print { input.vit-fora, input.vit-alerta { outline: none !important; box-shadow: none !important; background: none !important; } }
+/* Seção de adendos só imprime quando há adendos */
+@media print { .sec-adendos.sem-adendos { display: none !important; } }
 /* Faixa de totais no topo da ficha */
 .ficha-resumo {
   display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 14px;
@@ -4810,6 +4812,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     <button class="btn btn-success" onclick="anestesia.salvar()" title="Salvar dados sem finalizar (Ctrl+S)"><span class="icon">💾</span> Salvar</button>
     <button class="btn btn-finalizar" onclick="anestesia.finalizar()" title="Finalizar ficha — gera lançamento financeiro"><span class="icon">✅</span> Finalizar</button>
     <button class="btn" onclick="anestesia.salvarComoNovo()" title="Salvar como novo registro"><span class="icon">📋</span> Salvar como novo</button>
+    <button class="btn" onclick="adendos.abrir('anestesia')" title="Adicionar correção/complemento sem alterar o registro original"><span class="icon">📝</span> Adendo/correção</button>
     <div class="dropdown" id="dd-anestesia">
       <button class="btn" onclick="ui.toggleDropdown('dd-anestesia')"><span class="icon">📂</span> Carregar ▾</button>
       <div class="dropdown-menu" id="dd-anestesia-menu"></div>
@@ -6146,6 +6149,18 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <!-- "Observações finais" preservado como campo oculto (impressão/PDF intactos). -->
           <input type="hidden" name="obs_finais">
         </div>
+      </div>
+    </section>
+
+    <!-- ADENDOS / CORREÇÕES -->
+    <section class="card sec-adendos sem-adendos" id="sec-adendos-anestesia">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-icon">📝</span><h2>Adendos / correções<small>Correções após finalizar — o registro original é preservado</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <div id="anestesia-adendos-lista" style="margin-bottom:10px"></div>
+        <button type="button" class="btn btn-sm no-print" onclick="adendos.abrir('anestesia')">📝 Adicionar adendo/correção</button>
       </div>
     </section>
 
@@ -9956,7 +9971,7 @@ const ui = {
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); logoUsuario.renderAjustes(); const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
         else if (modName === 'pre') { try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} try { pre.viaAerea.render(); } catch (e) {} }
-        else if (modName === 'anestesia') { anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} try { anestesia.calc.resumoTopo(); } catch (e) {} }
+        else if (modName === 'anestesia') { anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} try { anestesia.calc.resumoTopo(); } catch (e) {} try { adendos.renderInline('anestesia'); } catch (e) {} }
         else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} try { recuperacao.resumoTopo(); } catch (e) {} }, 60); }
         else if (modName === 'termo') { setTimeout(() => { try { (termo.sig._ajustar || []).forEach(fn => fn()); assinatura.initCanvas('sig-termo'); } catch (e) {} }, 80); }
         else if (modName === 'prescricao') { setTimeout(() => { try { if (prescricao.sig._ajustar) prescricao.sig._ajustar(); assinatura.initCanvas('sig-prescricao'); } catch (e) {} }, 80); }
@@ -14543,11 +14558,11 @@ const migracaoFase4 = {
   },
 
   /* ---- Escrita relacional (REST, mesmo padrão do cloud._enviarOp) ---- */
-  async _upsert(tabela, rows, retornar, onConflict) {
+  async _upsert(tabela, rows, retornar, onConflict, resolution) {
     if (!rows.length) return [];
     const c = cloud.config();
     const headers = Object.assign({}, cloud._headers(true), {
-      'Prefer': 'resolution=merge-duplicates,return=' + (retornar ? 'representation' : 'minimal')
+      'Prefer': 'resolution=' + (resolution || 'merge-duplicates') + ',return=' + (retornar ? 'representation' : 'minimal')
     });
     const r = await fetch(c.url + '/rest/v1/' + tabela + '?on_conflict=' + (onConflict || 'organization_id,legacy_id'), {
       method: 'POST', headers, body: JSON.stringify(rows)
@@ -15178,6 +15193,98 @@ const cloudDiag = {
       if (btn) { btn.disabled = false; btn.textContent = '☁️ Puxar tudo da nuvem'; }
     }
     try { await cloudDiag.rodar(); } catch (e) {}
+  }
+};
+
+/* ============================================================================
+   ADENDOS / CORREÇÕES — anexa correções datadas e assinadas a um registro
+   clínico já salvo/finalizado, SEM alterar o original (medicina-legal). Fica
+   local (_adendos, para offline/impressão) e sobe para a tabela `addenda`
+   (append-only, idempotente por legacy_id). Aparece na tela e no PDF.
+============================================================================ */
+const adendos = {
+  MODS: { anestesia: 'anesthesia_records', pre: 'preanesthetic_assessments', recuperacao: 'recovery_records', consulta: 'consultations', risco: 'risk_assessments' },
+  _idAtual(mod) {
+    const f = document.getElementById('form-' + mod);
+    if (!f) return '';
+    return (f.querySelector('[name="_id"]') || {}).value || (f.querySelector('[name="id"]') || {}).value || '';
+  },
+  _rec(mod) { const id = adendos._idAtual(mod); return id ? store.getById(mod, id) : null; },
+  _fmtData(iso) { try { return new Date(iso).toLocaleString('pt-BR'); } catch (e) { return ''; } },
+  _render(ad) {
+    return '<div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:6px;background:var(--surface-alt)">' +
+      '<div style="font-size:.72rem;color:var(--text-mute)">' + (ad._pushed ? '☁️' : '📱') + ' ' + utils.escapeHTML(ad.autor || '—') + ' · ' + adendos._fmtData(ad.data) + '</div>' +
+      '<div style="font-size:.86rem;white-space:pre-wrap;margin-top:2px">' + utils.escapeHTML(ad.texto || '') + '</div></div>';
+  },
+  abrir(mod) {
+    const id = adendos._idAtual(mod);
+    if (!id) { toast('Salve o registro antes de adicionar um adendo.', 'warn'); return; }
+    const rec = store.getById(mod, id) || {};
+    const lista = rec._adendos || [];
+    const corpo =
+      '<p style="font-size:.82rem;color:var(--text-mute);margin:0 0 10px">O registro original é <b>preservado</b>. O adendo é datado e assinado com o seu nome, e aparece na ficha e no PDF.</p>' +
+      (lista.length ? '<div style="max-height:32vh;overflow:auto;margin-bottom:10px">' + lista.map(adendos._render).join('') + '</div>' : '<p style="font-size:.82rem;color:var(--text-mute)">Nenhum adendo ainda.</p>') +
+      '<div class="field"><label>Novo adendo / correção</label><textarea id="adendo-texto" rows="4" placeholder="Ex.: onde se lê X, leia-se Y; ou complementação do registro…"></textarea></div>';
+    modal.open('📝 Adendos e correções', corpo,
+      '<button class="btn btn-primary" onclick="adendos.salvar(\'' + mod + '\',\'' + id + '\')">Adicionar adendo</button>' +
+      '<button class="btn" onclick="modal.close()">Fechar</button>');
+  },
+  salvar(mod, id) {
+    const ta = document.getElementById('adendo-texto');
+    const texto = (ta && ta.value || '').trim();
+    if (!texto) { toast('Escreva o texto do adendo.', 'warn'); return; }
+    const lista = store.list(mod);
+    const rec = lista.find(x => x._id === id);
+    if (!rec) { toast('Registro não encontrado.', 'error'); return; }
+    rec._adendos = rec._adendos || [];
+    const u = (typeof auth !== 'undefined' && auth.usuarioAtual) ? auth.usuarioAtual() : null;
+    const ad = { id: utils.uid(), texto, autor: (u && (u.nome || u.usuario)) || '', data: new Date().toISOString(), _pushed: false };
+    rec._adendos.push(ad);
+    store.setList(mod, lista);
+    try { markDirty(); } catch (e) {}
+    adendos._push(mod, rec, ad);
+    modal.close();
+    toast('📝 Adendo adicionado');
+    try { adendos.renderInline(mod); } catch (e) {}
+  },
+  async _push(mod, rec, ad) {
+    const tabela = adendos.MODS[mod]; if (!tabela) return;
+    try {
+      if (!cloudRel.disponivel()) return;
+      if (!(await cloud._garantirToken())) return;
+      const org = await cloudRel._orgAsync(); if (!org) return;
+      /* garante o registro pai no relacional (com os _adendos) */
+      try { await cloudRel.enviarRegistro(mod, rec, { force: true }); } catch (e) {}
+      const parent = await cloudRel._lerAtualTab(tabela, org, rec._id, 'id');
+      if (!parent || !parent.id) return;
+      const patientId = await cloudRel._garantirPaciente(org, rec);
+      const row = {
+        organization_id: org, parent_table: tabela, parent_id: parent.id,
+        patient_id: patientId, legacy_id: ad.id, texto: ad.texto,
+        data: { autor: ad.autor, criado_em: ad.data }
+      };
+      await migracaoFase4._upsert('addenda', [row], false, 'organization_id,legacy_id', 'ignore-duplicates');
+      const lst = store.list(mod); const r = lst.find(x => x._id === rec._id);
+      if (r && r._adendos) { const a = r._adendos.find(x => x.id === ad.id); if (a) { a._pushed = true; store.setList(mod, lst); } }
+    } catch (e) {}
+  },
+  renderInline(mod) {
+    const host = document.getElementById(mod + '-adendos-lista');
+    if (!host) return;
+    const rec = adendos._rec(mod);
+    const lista = (rec && rec._adendos) || [];
+    host.innerHTML = lista.length ? lista.map(adendos._render).join('') : '<span class="no-print" style="font-size:.8rem;color:var(--text-mute)">Nenhum adendo. Use “Adicionar adendo/correção” para incluir uma correção sem alterar o registro original.</span>';
+    const sec = document.getElementById('sec-adendos-' + mod);
+    if (sec) sec.classList.toggle('sem-adendos', lista.length === 0);
+  },
+  /* HTML dos adendos para o PDF/impressão (ou '' se não houver) */
+  htmlParaImpressao(rec) {
+    const lista = (rec && rec._adendos) || [];
+    if (!lista.length) return '';
+    return '<div class="print-adendos" style="margin-top:10px;border-top:1px solid #999;padding-top:6px">' +
+      '<h3 style="font-size:8pt;margin:0 0 4px">ADENDOS / CORREÇÕES</h3>' +
+      lista.map(ad => '<div style="font-size:7.5pt;margin-bottom:3px"><b>' + utils.escapeHTML(adendos._fmtData(ad.data)) + ' — ' + utils.escapeHTML(ad.autor || '') + ':</b> ' + utils.escapeHTML(ad.texto || '') + '</div>').join('') +
+      '</div>';
   }
 };
 
@@ -24212,6 +24319,7 @@ const anestesia = {
     }
     ui.atualizarDocStatus('anestesia', item);
     ui.fecharBanner('banner-anestesia');
+    try { adendos.renderInline('anestesia'); } catch (e) {}
     markClean();
     toast('Ficha carregada'); ui.expandirTodos('anestesia');
   },
@@ -34562,6 +34670,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.cloudRel = cloudRel;
   window.cloudDiag = cloudDiag;
   window.cloudRealtime = cloudRealtime;
+  window.adendos = adendos;
   window.auth = auth;
   window.demo = demo;
   try { pre.premed.render(); } catch (e) {}
