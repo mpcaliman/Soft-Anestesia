@@ -206,6 +206,12 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   e versionamento de documentos. Um **workflow de CI** (`.github/workflows/
   ci.yml`) roda `npm test` a cada push/PR, protegendo o que foi construído.
   Rodar localmente: `npm install && npx playwright install chromium && npm test`.
+  **Cobertura ampliada (10 testes):** além dos fluxos acima, valida os **escores
+  de risco** (ARISCAT/RCRI/STOP-Bang/Caprini/ASA), um **sweep dos construtores
+  de impressão** (pré, consulta, ficha, SRPA, termo, receituário, documentos,
+  risco, financeiro, agenda geram HTML sem erro), o **roundtrip do store**
+  (salvar/buscar/excluir) e os **adendos append-only** (correção anexa sem
+  alterar o original).
 
 ## Rollback
 
