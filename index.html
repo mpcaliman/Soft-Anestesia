@@ -8168,6 +8168,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       </div>
       <div class="card-body">
         <button type="button" class="btn btn-sm" onclick="cloudDiag.rodar()">🩺 Rodar diagnóstico</button>
+        <button type="button" class="btn btn-sm" id="clouddiag-puxar-btn" onclick="cloudDiag.puxarTudo()" title="Traz para este aparelho tudo o que está no banco relacional (pacientes, agenda, fichas…)">☁️ Puxar tudo da nuvem</button>
         <label class="autosave-toggle" style="margin-left:12px" title="Recebe atualizações ao vivo de outros aparelhos (experimental)">
           <input type="checkbox" id="realtime-chk" onchange="cloudRealtime.toggle(this.checked)"> Tempo real (beta)
           <span id="realtime-status" style="margin-left:6px;font-size:.72rem;color:var(--text-mute)"></span>
@@ -15044,6 +15045,27 @@ const cloudDiag = {
     const linhas = cloudDiag.LINHAS.filter(L => L.mod).map(L =>
       '<tr><td>' + L.rot + '</td><td style="text-align:right">' + cloudDiag._localCount(L.mod) + '</td></tr>').join('');
     return '<table class="fase4-tab"><thead><tr><th>Módulo</th><th style="text-align:right">No aparelho</th></tr></thead><tbody>' + linhas + '</tbody></table>';
+  },
+
+  /* Puxa TUDO do banco relacional (pacientes, agenda e todos os registros)
+     num toque só, e re-roda o diagnóstico. Fecha o fluxo cross-device. */
+  async puxarTudo() {
+    const btn = document.getElementById('clouddiag-puxar-btn');
+    if (!cloudRel.disponivel()) { toast('Conecte-se à nuvem primeiro (Ajustes)', 'warn'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Puxando…'; }
+    try {
+      try { pacientes._puxouNestaSessao = false; await pacientes.sincronizarNuvem({ silent: true }); } catch (e) {}
+      try { agenda._puxouNestaSessao = false; await agenda.sincronizarNuvem({ silent: true }); } catch (e) {}
+      for (const mod of Object.keys(cloudRel.MODOS)) {
+        try { cloudRel._puxados[mod] = false; await cloudRel.autoPullModulo(mod); } catch (e) {}
+      }
+      /* re-renderiza listas visíveis */
+      try { if (state.currentModule === 'financeiro') financeiro.render(); } catch (e) {}
+      toast('☁️ Tudo sincronizado com o banco relacional');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '☁️ Puxar tudo da nuvem'; }
+    }
+    try { await cloudDiag.rodar(); } catch (e) {}
   }
 };
 
