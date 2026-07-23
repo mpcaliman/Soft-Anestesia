@@ -21980,10 +21980,13 @@ const anestesia = {
        base = valor normal; decl = queda proporcional ao longo da anestesia
        (BP/FC caem um pouco); jit = variação aleatória (±); min/max = limites;
        dec = casas decimais. Params sem modelo confiável ficam de fora. */
+    /* bmin/bmax = faixa NORMAL para a base (vinda de um registro já lançado):
+       garante que, mesmo partindo de uma medida abnormal, o gerado seja normal.
+       min/max = limite absoluto aplicado após a variação. */
     _BASE_PADRAO: {
-      pas:  { base: 122, decl: 0.14, jit: 0.08, min: 82,  dec: 0 },
-      pad:  { base: 76,  decl: 0.14, jit: 0.08, min: 48,  dec: 0 },
-      fc:   { base: 80,  decl: 0.12, jit: 0.08, min: 52,  dec: 0 },
+      pas:  { base: 122, decl: 0.14, jit: 0.08, min: 82,  bmin: 108, bmax: 140, dec: 0 },
+      pad:  { base: 76,  decl: 0.14, jit: 0.08, min: 48,  bmin: 64,  bmax: 88,  dec: 0 },
+      fc:   { base: 80,  decl: 0.12, jit: 0.08, min: 52,  bmin: 60,  bmax: 92,  dec: 0 },
       spo2: { base: 99,  decl: 0,    jit: 0.015, min: 95, max: 100, dec: 0 },
       etco2:{ base: 34,  decl: 0,    jit: 0.08, min: 29,  max: 41, dec: 0 },
       fr:   { base: 13,  decl: 0,    jit: 0.10, min: 10,  max: 16, dec: 0 },
@@ -21994,25 +21997,52 @@ const anestesia = {
       scvo2:{ base: 72,  decl: 0,    jit: 0.06, min: 60,  max: 85, dec: 0 },
       cam:  { base: 1.0, decl: 0,    jit: 0.12, min: 0.7, max: 1.3, dec: 1 }
     },
-    _valorPadrao(param, prog) {
+    /* Gera um valor para o parâmetro. base = valor de partida (de um registro
+       já lançado, já limitado ao normal); prog = progresso 0→1.
+       Só PA/FC variam de leve (e caem um pouco); o resto fica quase constante. */
+    _valorPadrao(param, prog, base) {
       const s = anestesia.vitais._BASE_PADRAO[param];
       if (!s) return null;   /* param sem modelo → deixa em branco */
-      let v = s.base * (1 - (s.decl || 0) * prog);
-      v = v * (1 + (Math.random() * 2 - 1) * (s.jit || 0.1));
+      const b = (base != null && !isNaN(base)) ? base : s.base;
+      const variavel = (param === 'pas' || param === 'pad' || param === 'fc');
+      const decl = variavel ? (s.decl || 0) : 0;          /* só PA/FC caem */
+      const jit  = variavel ? (s.jit || 0.08) : 0.015;    /* resto: quase constante */
+      let v = b * (1 - decl * prog);
+      v = v * (1 + (Math.random() * 2 - 1) * jit);
       if (s.min != null) v = Math.max(s.min, v);
       if (s.max != null) v = Math.min(s.max, v);
       return s.dec ? v.toFixed(s.dec) : String(Math.round(v));
     },
 
-    /* Gera sinais vitais nos parâmetros ATIVOS, dentro da faixa normal com
-       variação e leve queda ao longo da anestesia, distribuídos entre a
-       entrada e a saída de sala (pede os horários se ainda não houver). */
+    /* Ordena as linhas da tabela de vitais pelo horário (crescente). */
+    _ordenarPorHora(bodyId) {
+      const tbody = document.getElementById(bodyId);
+      if (!tbody) return;
+      const toMin = (s) => { const m = /^(\d{1,2}):(\d{2})/.exec(s || ''); return m ? (+m[1]) * 60 + (+m[2]) : 1e9; };
+      Array.from(tbody.querySelectorAll('tr'))
+        .sort((a, b) => toMin((a.querySelector('[name="vit_hora[]"]') || {}).value) - toMin((b.querySelector('[name="vit_hora[]"]') || {}).value))
+        .forEach(tr => tbody.appendChild(tr));
+    },
+
+    /* Abre a escolha de intervalo (5/5 ou 10/10) e gera. */
     preencherPadrao() {
+      modal.open('🧪 Preencher sinais vitais',
+        '<p style="font-size:.86rem;color:var(--text-soft);margin:0 0 6px">Gera valores <b>normais</b> entre a <b>entrada</b> e a <b>saída de sala</b>, com <b>leve variação em PA e FC</b> (o resto quase não muda).</p>' +
+        '<p style="font-size:.82rem;color:var(--text-mute);margin:0 0 10px">Os registros que você já lançou são <b>mantidos</b> e usados como <b>base</b> (ex.: a medida da entrada vira o ponto de partida). O sistema só preenche os horários vazios.</p>' +
+        '<p style="font-weight:600;margin:0">Intervalo entre as medidas:</p>',
+        '<button class="btn btn-primary" onclick="anestesia.vitais._gerarPadrao(5)">A cada 5 min</button>' +
+        '<button class="btn btn-primary" onclick="anestesia.vitais._gerarPadrao(10)">A cada 10 min</button>' +
+        '<button class="btn" onclick="modal.close()">Cancelar</button>');
+    },
+
+    _gerarPadrao(passo) {
+      try { modal.close(); } catch (e) {}
       anestesia.graficoUI._contexto = (state.currentModule === 'recuperacao') ? 'recuperacao' : 'anestesia';
       const f = document.getElementById('form-anestesia');
       const campo = (n) => f && f.querySelector('[name="' + n + '"]');
       const valOf = (n) => { const el = campo(n); return el ? (el.value || '').trim() : ''; };
       const okHora = (s) => /^\d{1,2}:\d{2}$/.test(s);
+      const toMin = (s) => { const [h, m] = s.split(':').map(Number); return h * 60 + m; };
 
       let entrada = valOf('hora_sala_entrada') || valOf('hora_inicio');
       let saida   = valOf('hora_sala_saida')   || valOf('hora_fim');
@@ -22026,38 +22056,62 @@ const anestesia = {
         if (!okHora(saida)) { toast('Hora de saída inválida', 'warn'); return; }
         const el = campo('hora_sala_saida'); if (el) { el.value = saida; try { anestesia.calc.duracao(); } catch (e) {} }
       }
-      const toMin = (s) => { const [h, m] = s.split(':').map(Number); return h * 60 + m; };
       let ini = toMin(entrada), fim = toMin(saida);
-      if (fim <= ini) fim += 24 * 60;   /* cruzou meia-noite */
+      if (fim <= ini) fim += 24 * 60;
       const dur = fim - ini;
       if (dur < 5) { toast('Intervalo entrada–saída muito curto', 'warn'); return; }
 
       const bodyId = anestesia.graficoUI._ctxIds().vitaisBody;
       const tbody = document.getElementById(bodyId);
-      const existentes = tbody ? tbody.querySelectorAll('tr').length : 0;
-      if (existentes > 0) {
-        if (!confirm('Já há ' + existentes + ' registro(s) de sinais vitais. Substituir por um conjunto padrão gerado (' + entrada + '–' + saida + ')?')) return;
-        tbody.innerHTML = '';
-      }
-
-      const passo = dur > 120 ? 15 : 10;   /* a cada 10 min (15 se muito longo) */
       const ativos = anestesia.vitais._paramsAtivos();
-      const n = Math.max(2, Math.floor(dur / passo));
+
+      /* Registros já lançados: minutos ocupados + BASE por parâmetro (do
+         registro mais antigo com valor, limitado à faixa normal). */
+      const rowsExist = tbody ? Array.from(tbody.querySelectorAll('tr')) : [];
+      const q = (tr, n) => (tr.querySelector('[name="' + n + '"]') || {}).value || '';
+      const minutosOcupados = [];
+      const ordenadas = rowsExist
+        .filter(tr => okHora(q(tr, 'vit_hora[]')))
+        .map(tr => ({ tr, min: toMin(q(tr, 'vit_hora[]')) }))
+        .sort((a, b) => a.min - b.min);
+      ordenadas.forEach(o => minutosOcupados.push(o.min));
+
+      const base = {};
+      ativos.forEach(p => {
+        if (p === 'pam' || p === 'ritmo') return;
+        const s = anestesia.vitais._BASE_PADRAO[p]; if (!s) return;
+        let b = null;
+        for (const o of ordenadas) { const val = parseFloat(q(o.tr, 'vit_' + p + '[]')); if (!isNaN(val)) { b = val; break; } }
+        if (b == null) b = s.base;
+        /* limita a base à faixa NORMAL (bmin/bmax, ou min/max) → gerado normal */
+        const lo = (s.bmin != null) ? s.bmin : s.min;
+        const hi = (s.bmax != null) ? s.bmax : s.max;
+        if (lo != null) b = Math.max(lo, b);
+        if (hi != null) b = Math.min(hi, b);
+        base[p] = b;
+      });
+
+      /* Gera SÓ nos horários vazios (>2 min de qualquer registro existente) */
+      let criadas = 0;
+      const n = Math.max(1, Math.round(dur / passo));
       for (let i = 0; i <= n; i++) {
         const t = ini + i * passo;
         if (t > fim) break;
+        if (minutosOcupados.some(m => Math.abs(m - t) <= 2)) continue;   /* já tem registro perto */
         const prog = n ? i / n : 0;
         const dados = { hora: anestesia.graficoUI.tToHora(t % (24 * 60)) };
         ativos.forEach(p => {
-          if (p === 'pam' || p === 'ritmo') return;   /* PAM é calculada; ritmo é texto */
-          const v = anestesia.vitais._valorPadrao(p, prog);
+          if (p === 'pam' || p === 'ritmo') return;
+          const v = anestesia.vitais._valorPadrao(p, prog, base[p]);
           if (v != null) dados[p] = v;
         });
         anestesia.vitais.add(false, dados);
+        criadas++;
       }
+      anestesia.vitais._ordenarPorHora(bodyId);
       markDirty();
       try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
-      toast('🧪 Sinais vitais padrão gerados (' + entrada + '–' + saida + ')');
+      toast('🧪 ' + criadas + ' medida(s) padrão a cada ' + passo + ' min (' + entrada + '–' + saida + ')');
     },
 
     duplicarEAjustar() {
