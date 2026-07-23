@@ -291,6 +291,57 @@ await test('Adendos: correção é anexada ao registro finalizado (append-only)'
   await page.close();
 });
 
+/* 11) Doses — cálculo de infusão contínua (mL/h) por unidade */
+await test('Doses: conversão de dose para mL/h (mcg/kg/min, mcg/min, mg/h) está correta', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => ({
+    // 0,1 mcg/kg/min · 70 kg · conc 50 mcg/mL = 0,1*70*60/50 = 8,4 mL/h
+    mcgKgMin: doses._mlh(0.1, 'mcg/kg/min', 50, 70),
+    // 5 mcg/min · conc 50 = 5*60/50 = 6 mL/h
+    mcgMin: doses._mlh(5, 'mcg/min', 50, null),
+    // 2 mg/h · conc 1000 mcg/mL = 2*1000/1000 = 2 mL/h
+    mgH: doses._mlh(2, 'mg/h', 1000, null),
+    // 1 UI/h · conc 100 UI/mL = 0,01 mL/h
+    uiH: doses._mlh(1, 'UI/h', 100, null),
+    // sem peso numa dose /kg → null (não calcula às cegas)
+    semPeso: doses._mlh(0.1, 'mcg/kg/min', 50, null)
+  }));
+  const perto = (a, b) => Math.abs(a - b) < 1e-6;
+  assert(perto(r.mcgKgMin, 8.4), 'mcg/kg/min deveria dar 8.4, veio ' + r.mcgKgMin);
+  assert(perto(r.mcgMin, 6), 'mcg/min deveria dar 6, veio ' + r.mcgMin);
+  assert(perto(r.mgH, 2), 'mg/h deveria dar 2, veio ' + r.mgH);
+  assert(perto(r.uiH, 0.01), 'UI/h deveria dar 0.01, veio ' + r.uiH);
+  assert(r.semPeso === null, 'dose /kg sem peso deveria retornar null');
+  await page.close();
+});
+
+/* 12) RBAC — permissões por papel governam acesso e edição */
+await test('RBAC: papel governa podeAcessar/podeEditar (admin, secretária só-impressão)', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    // Admin enxerga e edita tudo
+    auth._definirSessao({ id: 'adm', usuario: 'adm', nome: 'Admin', perfil: 'admin', modulos: [], soImpressao: [] });
+    out.admAcessa = auth.podeAcessar('financeiro');
+    out.admEdita = auth.podeEditar('anestesia');
+    // Secretária: acessa pré e agenda; pré é só-impressão; não acessa anestesia
+    auth._definirSessao({ id: 'sec', usuario: 'sec', nome: 'Bete', perfil: 'secretaria', modulos: ['pre', 'agenda'], soImpressao: ['pre'] });
+    out.secAcessaPre = auth.podeAcessar('pre');
+    out.secEditaPre = auth.podeEditar('pre');        // false — só impressão
+    out.secEditaAgenda = auth.podeEditar('agenda');  // true
+    out.secAcessaAnest = auth.podeAcessar('anestesia'); // false
+    // limpa a sessão de teste
+    try { sessionStorage.removeItem(auth.SESSION_KEY); } catch (e) {}
+    return out;
+  });
+  assert(r.admAcessa && r.admEdita, 'admin deveria acessar e editar tudo');
+  assert(r.secAcessaPre === true, 'secretária deveria acessar a pré');
+  assert(r.secEditaPre === false, 'secretária não deveria editar a pré (só impressão)');
+  assert(r.secEditaAgenda === true, 'secretária deveria editar a agenda');
+  assert(r.secAcessaAnest === false, 'secretária não deveria acessar a anestesia');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

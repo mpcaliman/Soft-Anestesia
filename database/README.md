@@ -211,7 +211,9 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   de impressão** (pré, consulta, ficha, SRPA, termo, receituário, documentos,
   risco, financeiro, agenda geram HTML sem erro), o **roundtrip do store**
   (salvar/buscar/excluir) e os **adendos append-only** (correção anexa sem
-  alterar o original).
+  alterar o original). Também cobre o **cálculo de infusão** (dose → mL/h por
+  unidade, incluindo o caso "sem peso → não calcula") e o **RBAC** por papel
+  (podeAcessar/podeEditar: admin, secretária só-impressão). **12 testes no total.**
 
 ## Rollback
 
