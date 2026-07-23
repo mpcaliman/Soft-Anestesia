@@ -733,6 +733,16 @@ input.vit-alerta { box-shadow: inset 3px 0 0 #f59e0b; background: #fffdf5 !impor
 @media print { input.vit-fora, input.vit-alerta { outline: none !important; box-shadow: none !important; background: none !important; } }
 /* Seção de adendos só imprime quando há adendos */
 @media print { .sec-adendos.sem-adendos { display: none !important; } }
+/* Linha do tempo unificada (modal) */
+.tl-wrap { display: flex; flex-direction: column; gap: 2px; max-height: 60vh; overflow: auto; }
+.tl-item { display: flex; align-items: baseline; gap: 8px; padding: 5px 8px; border-left: 3px solid var(--border); border-radius: 0 6px 6px 0; background: var(--surface-alt); font-size: .84rem; }
+.tl-item .tl-hora { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--text-soft); min-width: 42px; }
+.tl-item .tl-ic { flex: 0 0 auto; }
+.tl-item .tl-tx { flex: 1; }
+.tl-item.tl-vital { border-left-color: #1c64a9; }
+.tl-item.tl-med { border-left-color: #0d9488; }
+.tl-item.tl-evt { border-left-color: #b3392a; }
+.tl-item.tl-fluido { border-left-color: #7c3aed; }
 /* Faixa de totais no topo da ficha */
 .ficha-resumo {
   display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 14px;
@@ -4837,6 +4847,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     <button class="btn btn-finalizar" onclick="anestesia.finalizar()" title="Finalizar ficha — gera lançamento financeiro"><span class="icon">✅</span> Finalizar</button>
     <button class="btn" onclick="anestesia.salvarComoNovo()" title="Salvar como novo registro"><span class="icon">📋</span> Salvar como novo</button>
     <button class="btn" onclick="adendos.abrir('anestesia')" title="Adicionar correção/complemento sem alterar o registro original"><span class="icon">📝</span> Adendo/correção</button>
+    <button class="btn" onclick="anestesia.linhaTempo()" title="Ver sinais vitais, medicações, eventos e fluidos em ordem cronológica"><span class="icon">🕒</span> Linha do tempo</button>
     <div class="dropdown" id="dd-anestesia">
       <button class="btn" onclick="ui.toggleDropdown('dd-anestesia')"><span class="icon">📂</span> Carregar ▾</button>
       <div class="dropdown-menu" id="dd-anestesia-menu"></div>
@@ -24185,6 +24196,51 @@ const anestesia = {
     anestesia._finalizarConfirmado();
   },
   _finalizarConfirmado() { anestesia.adicionais.perguntar(() => anestesia.salvar({ finalizar: true })); },
+
+  /* Linha do tempo unificada: junta sinais vitais, medicações, eventos e
+     fluidos numa única lista cronológica (visão de revisão do caso). Lê os
+     dados que já estão na ficha — não muda o modelo. */
+  linhaTempo() {
+    const toMin = (s) => { const m = /^(\d{1,2}):(\d{2})/.exec(s || ''); return m ? (+m[1]) * 60 + (+m[2]) : null; };
+    const itens = [];
+    const add = (hora, icon, cls, texto) => { const mn = toMin(hora); if (mn == null || !texto) return; itens.push({ mn, hora: hora.slice(0, 5), icon, cls, texto }); };
+    const Q = (tr) => (n) => (tr.querySelector('[name="' + n + '"]') || {}).value || '';
+
+    document.querySelectorAll('#vitais-body tr').forEach(tr => {
+      const q = Q(tr); const hora = q('vit_hora[]'); if (!hora) return;
+      const parts = [];
+      const pas = q('vit_pas[]'), pad = q('vit_pad[]'); if (pas || pad) parts.push('PA ' + (pas || '?') + '/' + (pad || '?'));
+      if (q('vit_fc[]')) parts.push('FC ' + q('vit_fc[]'));
+      if (q('vit_spo2[]')) parts.push('SpO₂ ' + q('vit_spo2[]') + '%');
+      if (q('vit_etco2[]')) parts.push('EtCO₂ ' + q('vit_etco2[]'));
+      if (q('vit_temp[]')) parts.push('T ' + q('vit_temp[]') + '°');
+      if (q('vit_bis[]')) parts.push('BIS ' + q('vit_bis[]'));
+      if (parts.length) add(hora, '📈', 'tl-vital', parts.join(' · '));
+    });
+    document.querySelectorAll('#medicacoes-body tr').forEach(tr => {
+      const q = Q(tr); const nome = q('med_nome[]'); if (!nome) return;
+      const txt = nome + (q('med_dose[]') ? ' ' + q('med_dose[]') : '') + (q('med_unidade[]') ? ' ' + q('med_unidade[]') : '') + (q('med_via[]') ? ' · ' + q('med_via[]') : '');
+      add(q('med_hora[]'), '💉', 'tl-med', txt);
+    });
+    document.querySelectorAll('#eventos-body tr').forEach(tr => {
+      const q = Q(tr); const tipo = q('evt_tipo[]'), obs = q('evt_obs[]');
+      if (tipo || obs) add(q('evt_hora[]'), '📍', 'tl-evt', (tipo || 'Evento') + (obs ? ' — ' + obs : ''));
+    });
+    document.querySelectorAll('#hidra-body tr').forEach(tr => {
+      const q = Q(tr); const tipo = q('hidra_tipo[]'); if (!tipo) return;
+      const txt = tipo + (q('hidra_volume[]') ? ' ' + q('hidra_volume[]') + ' mL' : '') + (q('hidra_via[]') ? ' · ' + q('hidra_via[]') : '');
+      add(q('hidra_hora[]'), '💧', 'tl-fluido', txt);
+    });
+
+    itens.sort((a, b) => a.mn - b.mn || 0);
+    const corpo = itens.length
+      ? '<div class="tl-wrap">' + itens.map(i =>
+          '<div class="tl-item ' + i.cls + '"><span class="tl-hora">' + utils.escapeHTML(i.hora) + '</span><span class="tl-ic">' + i.icon + '</span><span class="tl-tx">' + utils.escapeHTML(i.texto) + '</span></div>').join('') + '</div>'
+      : '<p style="color:var(--text-mute);font-size:.86rem">Ainda não há registros com horário na ficha.</p>';
+    modal.open('🕒 Linha do tempo do ato anestésico',
+      '<p style="font-size:.8rem;color:var(--text-mute);margin:0 0 8px">' + itens.length + ' registro(s) em ordem cronológica.</p>' + corpo,
+      '<button class="btn" onclick="modal.close()">Fechar</button>');
+  },
 
   /* ===== ADICIONAIS DE FATURAMENTO (apartamento, urgência, FDS...) ===== */
   adicionais: {
