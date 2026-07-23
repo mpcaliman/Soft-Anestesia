@@ -6451,6 +6451,62 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       </div>
     </section>
 
+    <!-- ESCALA DE ALTA — PADSS modificado (aptidão para alta domiciliar) -->
+    <section class="card">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-num">🏠</span><h2>Escala de alta domiciliar (PADSS)<small>Aptidão para alta para casa — complementa o Aldrete. Pontuação automática (0–10)</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <p style="font-size:.78rem;color:var(--text-mute);margin:0 0 10px">O <strong>Aldrete</strong> avalia a alta da SRPA (sala de recuperação); o <strong>PADSS</strong> avalia a aptidão para <strong>alta para casa</strong> (cirurgia ambulatorial/day-clinic). Use quando houver alta domiciliar. Alta indicada com <strong>≥ 9</strong> e nenhum critério zerado.</p>
+        <div class="grid">
+          <div class="field col-6"><label>Sinais vitais (PA e FC)</label>
+            <select name="pad_vitais" onchange="recuperacao.padss.calc()">
+              <option value="">—</option>
+              <option value="2">2 · Variação &lt; 20% do valor pré-operatório</option>
+              <option value="1">1 · Variação de 20 a 40%</option>
+              <option value="0">0 · Variação &gt; 40%</option>
+            </select>
+          </div>
+          <div class="field col-6"><label>Deambulação</label>
+            <select name="pad_deambulacao" onchange="recuperacao.padss.calc()">
+              <option value="">—</option>
+              <option value="2">2 · Marcha firme, sem tontura / nível pré-op</option>
+              <option value="1">1 · Necessita auxílio</option>
+              <option value="0">0 · Incapaz de deambular / tontura</option>
+            </select>
+          </div>
+          <div class="field col-6"><label>Náusea / vômito</label>
+            <select name="pad_nausea" onchange="recuperacao.padss.calc()">
+              <option value="">—</option>
+              <option value="2">2 · Mínima / ausente</option>
+              <option value="1">1 · Moderada, cede com medicação</option>
+              <option value="0">0 · Intensa, persistente</option>
+            </select>
+          </div>
+          <div class="field col-6"><label>Dor</label>
+            <select name="pad_dor" onchange="recuperacao.padss.calc()">
+              <option value="">—</option>
+              <option value="2">2 · Mínima / controlada por VO</option>
+              <option value="1">1 · Moderada</option>
+              <option value="0">0 · Intensa</option>
+            </select>
+          </div>
+          <div class="field col-6"><label>Sangramento cirúrgico</label>
+            <select name="pad_sangramento" onchange="recuperacao.padss.calc()">
+              <option value="">—</option>
+              <option value="2">2 · Mínimo / sem troca de curativo</option>
+              <option value="1">1 · Moderado / até 2 trocas</option>
+              <option value="0">0 · Intenso</option>
+            </select>
+          </div>
+          <div class="field col-3"><label>Pontuação total</label><input type="text" name="pad_total" readonly style="font-weight:700"></div>
+          <div class="field col-12"><div id="padss-interpretacao" style="font-size:.85rem;padding:8px 12px;border-radius:8px;background:var(--surface-alt);border:1px solid var(--border);color:var(--text-soft)">Preencha os 5 critérios para calcular a pontuação.</div></div>
+          <input type="hidden" name="pad_interpretacao">
+        </div>
+      </div>
+    </section>
+
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
         <div class="card-title-wrap"><span class="card-num">3</span><h2>Conduta e desfecho</h2></div>
@@ -6467,6 +6523,10 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           </div>
           <div class="field col-6"><label>Destino</label>
             <select name="destino"><option value="">—</option><option>Enfermaria</option><option>Apartamento</option><option>UTI</option><option>Alta hospitalar</option><option>Outro</option></select>
+          </div>
+          <div class="field col-12"><label>Resumo de alta <small style="color:var(--text-mute);font-weight:400">— gere um texto padronizado a partir dos campos preenchidos; editável</small></label>
+            <textarea name="resumo_alta" rows="4" placeholder="Clique em “Gerar resumo de alta” para compor automaticamente a partir do tempo de SRPA, Aldrete/PADSS, sinais vitais, conduta e destino."></textarea>
+            <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="recuperacao.resumoAlta.gerar()">📋 Gerar resumo de alta</button></div>
           </div>
           <div class="field col-12"><label>Observações</label><textarea name="observacoes" rows="2"></textarea></div>
         </div>
@@ -11764,6 +11824,104 @@ const recuperacao = {
       }
     }
   },
+  /* ===== ESCALA PADSS (aptidão para alta domiciliar) ===== */
+  padss: {
+    ITENS: ['pad_vitais', 'pad_deambulacao', 'pad_nausea', 'pad_dor', 'pad_sangramento'],
+    _q(name) { return document.querySelector(`#form-recuperacao [name="${name}"]`); },
+    calc() {
+      const box = document.getElementById('padss-interpretacao');
+      let soma = 0, preenchidos = 0, algumZero = false;
+      recuperacao.padss.ITENS.forEach(n => {
+        const el = recuperacao.padss._q(n);
+        if (el && el.value !== '') { const v = parseInt(el.value, 10) || 0; soma += v; preenchidos++; if (v === 0) algumZero = true; }
+      });
+      const totEl = recuperacao.padss._q('pad_total');
+      const interpEl = recuperacao.padss._q('pad_interpretacao');
+      if (preenchidos === 0) {
+        if (totEl) totEl.value = '';
+        if (interpEl) interpEl.value = '';
+        if (box) { box.textContent = 'Preencha os 5 critérios para calcular a pontuação.'; box.style.color = 'var(--text-soft)'; box.style.background = 'var(--surface-alt)'; }
+        return;
+      }
+      const completo = preenchidos === 5;
+      if (totEl) totEl.value = soma + '/10' + (completo ? '' : ' (parcial — ' + preenchidos + '/5 critérios)');
+      let texto, cor, fundo;
+      if (!completo) {
+        texto = 'Avaliação incompleta — preencha os 5 critérios.'; cor = 'var(--text-soft)'; fundo = 'var(--surface-alt)';
+      } else if (soma >= 9 && !algumZero) {
+        texto = '✅ ' + soma + '/10 — Apto para alta domiciliar (PADSS ≥ 9, nenhum critério zerado).'; cor = '#1c6b3f'; fundo = '#e7f5ec';
+      } else if (algumZero) {
+        texto = '⛔ ' + soma + '/10 — Há critério pontuado 0. Não liberar para casa até corrigir.'; cor = '#a12a2a'; fundo = '#fdecec';
+      } else {
+        texto = '⚠️ ' + soma + '/10 — Abaixo de 9. Manter em observação e reavaliar antes da alta domiciliar.'; cor = '#8a5a00'; fundo = '#fdf3e0';
+      }
+      if (interpEl) interpEl.value = completo ? texto : '';
+      if (box) { box.textContent = texto; box.style.color = cor; box.style.background = fundo; }
+      try { markDirty(); } catch (e) {}
+    }
+  },
+  /* ===== RESUMO DE ALTA padronizado ===== */
+  resumoAlta: {
+    gerar() {
+      const f = document.getElementById('form-recuperacao');
+      if (!f) return;
+      const g = (n) => ((f.querySelector('[name="' + n + '"]') || {}).value || '').trim();
+      const L = [];
+      const nome = g('nome');
+      L.push('Paciente' + (nome ? ' ' + nome : '') + ' proveniente' + (g('procedencia') ? ' de ' + g('procedencia').toLowerCase() : ' do centro cirúrgico') +
+        (g('procedimento') ? ', submetido a ' + g('procedimento') : '') +
+        (g('tipo_anestesia') ? ', sob ' + g('tipo_anestesia').toLowerCase() : '') + '.');
+      /* Tempo de SRPA */
+      const ent = g('entrada'), alta = g('alta');
+      if (ent && alta) {
+        const [h1, m1] = ent.split(':').map(Number), [h2, m2] = alta.split(':').map(Number);
+        let mm = (h2 * 60 + m2) - (h1 * 60 + m1); if (mm < 0) mm += 1440;
+        L.push('Permaneceu na SRPA das ' + ent + ' às ' + alta + ' (' + Math.floor(mm / 60) + 'h' + String(mm % 60).padStart(2, '0') + ').');
+      } else if (ent) { L.push('Entrada na SRPA às ' + ent + '.'); }
+      /* Evolução dos sinais vitais chegada→alta */
+      const vc = [];
+      if (g('pa_inicial')) vc.push('PA ' + g('pa_inicial'));
+      if (g('fc_inicial')) vc.push('FC ' + g('fc_inicial'));
+      if (g('spo2_inicial')) vc.push('SpO₂ ' + g('spo2_inicial') + '%');
+      const va = [];
+      if (g('pa_alta')) va.push('PA ' + g('pa_alta'));
+      if (g('fc_alta')) va.push('FC ' + g('fc_alta'));
+      if (g('spo2_alta')) va.push('SpO₂ ' + g('spo2_alta') + '%');
+      if (vc.length || va.length) {
+        L.push('Sinais vitais' + (vc.length ? ' à chegada: ' + vc.join(', ') : '') +
+          (va.length ? (vc.length ? '; ' : ': ') + 'à alta: ' + va.join(', ') : '') + '.');
+      }
+      /* Estado clínico */
+      const clin = [];
+      if (g('consciencia')) clin.push(g('consciencia').toLowerCase());
+      if (g('dor') !== '') clin.push('dor ' + g('dor') + '/10');
+      if (g('nausea')) clin.push('náusea/vômito: ' + g('nausea').toLowerCase());
+      if (g('oxigenio') && g('oxigenio') !== 'Não') clin.push('em O₂ por ' + g('oxigenio').toLowerCase());
+      if (clin.length) L.push('À alta: ' + clin.join(', ') + '.');
+      /* Escalas */
+      const esc = [];
+      if (g('aldk_total')) esc.push('Aldrete ' + g('aldk_total'));
+      if (g('pad_total')) esc.push('PADSS ' + g('pad_total'));
+      if (esc.length) L.push('Escalas de recuperação: ' + esc.join(', ') + '.');
+      /* Complicações / conduta */
+      if (g('complicacoes')) L.push('Intercorrências: ' + g('complicacoes') + '.');
+      else L.push('Sem intercorrências durante a permanência na SRPA.');
+      if (g('conduta')) L.push('Conduta: ' + g('conduta') + '.');
+      /* Desfecho */
+      const desf = [];
+      if (g('criterios_alta')) desf.push('critérios de alta: ' + g('criterios_alta'));
+      if (g('destino')) desf.push('encaminhado para ' + g('destino').toLowerCase());
+      if (desf.length) L.push('Desfecho: ' + desf.join('; ') + '.');
+      const texto = L.join(' ');
+      const alvo = f.querySelector('[name="resumo_alta"]');
+      if (alvo) {
+        if (alvo.value.trim() && !confirm('Já existe um resumo de alta. Substituir pelo texto gerado?')) return;
+        alvo.value = texto;
+        try { markDirty(); } catch (e) {}
+        toast('📋 Resumo de alta gerado — revise e edite se necessário');
+      }
+    }
+  },
   novo() {
     if (state.dirty && !confirm('Descartar alterações?')) return;
     utils.clearForm(recuperacao.formId);
@@ -11771,6 +11929,7 @@ const recuperacao = {
     recuperacao._linkPendente = null;
     try { recuperacao.grafico.restaurar({}); } catch (e) {}
     try { recuperacao.aldrete.calc(); } catch (e) {}
+    try { recuperacao.padss.calc(); } catch (e) {}
     ui.atualizarDocStatus('recuperacao', null);
     ui.fecharBanner('banner-recuperacao');
     markClean();
@@ -11822,6 +11981,8 @@ const recuperacao = {
     }
     const ald = g('aldk_total');
     if (ald) { const nota = parseInt(ald, 10); chips.push({ i: '🧮', l: 'Aldrete', v: ald, neg: !isNaN(nota) && nota < 9 }); }
+    const pad = g('pad_total');
+    if (pad) { const nota = parseInt(pad, 10); chips.push({ i: '🏠', l: 'PADSS', v: pad, neg: !isNaN(nota) && nota < 9 }); }
     const nV = document.querySelectorAll('#srpa-vitais-body tr').length;
     if (nV) chips.push({ i: '📈', l: 'Sinais', v: nV });
     if (!chips.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
@@ -11839,6 +12000,12 @@ const recuperacao = {
     const ald = parseInt(g('aldk_total'), 10);
     if (!g('aldk_total')) avisos.push('Escala de Aldrete não preenchida');
     else if (!isNaN(ald) && ald < 9) avisos.push('Aldrete ' + g('aldk_total') + ' — paciente pode não estar apto à alta');
+    /* Alta domiciliar: confere o PADSS (aptidão para casa) */
+    if (g('destino') === 'Alta hospitalar') {
+      const pad = parseInt(g('pad_total'), 10);
+      if (!g('pad_total')) avisos.push('Alta domiciliar sem escala PADSS preenchida');
+      else if (!isNaN(pad) && pad < 9) avisos.push('PADSS ' + g('pad_total') + ' — pode não estar apto à alta para casa');
+    }
     const assinado = Array.from(f.querySelectorAll('[name^="assinatura_dataurl"]')).some(el => (el.value || '').length > 50);
     if (!assinado) avisos.push('Sem assinatura do responsável');
     return avisos;
@@ -11877,8 +12044,9 @@ const recuperacao = {
     try { assinatura.restaurar('sig-recuperacao', 'form-recuperacao'); } catch (e) {}
     /* Restaura dados do gráfico */
     try { recuperacao.grafico.restaurar(item.grafico || {}); } catch (e) {}
-    /* Recalcula a interpretação da escala de Aldrete-Kroulik */
+    /* Recalcula a interpretação das escalas de recuperação */
     try { recuperacao.aldrete.calc(); } catch (e) {}
+    try { recuperacao.padss.calc(); } catch (e) {}
     markClean();
     try { adendos.renderInline('recuperacao'); } catch (e) {}
     toast('Recuperação carregada'); ui.expandirTodos('recuperacao');
@@ -30763,6 +30931,18 @@ ${TAG_CLOSE_HTML}`;
         ${d.aldk_datahora ? printPreview._field('Data/hora da avaliação', String(d.aldk_datahora).replace('T', ' ')) : ''}
         ${d.aldk_interpretacao ? printPreview._field('Interpretação', d.aldk_interpretacao, true) : ''}
       `) : '') +
+      ((d.pad_total || d.pad_vitais || d.pad_deambulacao || d.pad_nausea || d.pad_dor || d.pad_sangramento) ?
+      printPreview._section('Escala de alta domiciliar (PADSS)', `
+        <div class="pp-grid cols-3">
+          ${printPreview._field('Sinais vitais', d.pad_vitais)}
+          ${printPreview._field('Deambulação', d.pad_deambulacao)}
+          ${printPreview._field('Náusea/vômito', d.pad_nausea)}
+          ${printPreview._field('Dor', d.pad_dor)}
+          ${printPreview._field('Sangramento', d.pad_sangramento)}
+          ${printPreview._field('Pontuação total', d.pad_total)}
+        </div>
+        ${d.pad_interpretacao ? printPreview._field('Interpretação', d.pad_interpretacao, true) : ''}
+      `) : '') +
       printPreview._section('Conduta e desfecho', `
         ${printPreview._field('Complicações', d.complicacoes, true)}
         ${printPreview._field('Conduta', d.conduta, true)}
@@ -30770,6 +30950,7 @@ ${TAG_CLOSE_HTML}`;
           ${printPreview._field('Critérios de alta', d.criterios_alta)}
           ${printPreview._field('Destino', d.destino)}
         </div>
+        ${printPreview._field('Resumo de alta', d.resumo_alta, true)}
         ${printPreview._field('Observações', d.observacoes, true)}
       `) +
       printPreview._buildGraficoSRPA() +
