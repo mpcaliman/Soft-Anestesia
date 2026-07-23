@@ -21997,11 +21997,82 @@ const anestesia = {
       scvo2:{ base: 72,  decl: 0,    jit: 0.06, min: 60,  max: 85, dec: 0 },
       cam:  { base: 1.0, decl: 0,    jit: 0.12, min: 0.7, max: 1.3, dec: 1 }
     },
+    /* Perfis por faixa etária: sobrescrevem base/faixa dos parâmetros que
+       mudam com a idade (PA, FC, FR, Temp). O restante (SpO₂, EtCO₂, BIS…)
+       vem do adulto. As faixas seguem valores pediátricos usuais. */
+    _PERFIS_VITAIS: {
+      rn:          { rot: 'Recém-nascido (0–1 mês)',
+        pas: { base: 70, bmin: 55, bmax: 90, min: 45 }, pad: { base: 45, bmin: 32, bmax: 58, min: 25 },
+        fc: { base: 140, bmin: 110, bmax: 175, min: 90, max: 190 }, fr: { base: 45, bmin: 35, bmax: 60, min: 30, max: 70 },
+        temp: { base: 36.8, bmin: 36.3, bmax: 37.4, min: 35.8, max: 37.8 } },
+      lactente:    { rot: 'Lactente (1–12 meses)',
+        pas: { base: 88, bmin: 72, bmax: 104, min: 55 }, pad: { base: 54, bmin: 42, bmax: 68, min: 32 },
+        fc: { base: 125, bmin: 100, bmax: 160, min: 85, max: 175 }, fr: { base: 30, bmin: 24, bmax: 40, min: 20, max: 50 },
+        temp: { base: 36.8, bmin: 36.2, bmax: 37.3, min: 35.6, max: 37.6 } },
+      crianca_p:   { rot: 'Criança (1–3 anos)',
+        pas: { base: 96, bmin: 82, bmax: 110, min: 62 }, pad: { base: 58, bmin: 46, bmax: 72, min: 34 },
+        fc: { base: 110, bmin: 90, bmax: 140, min: 78, max: 155 }, fr: { base: 26, bmin: 22, bmax: 34, min: 18, max: 44 },
+        temp: { base: 36.6, bmin: 36.1, bmax: 37.2, min: 35.5, max: 37.5 } },
+      crianca:     { rot: 'Criança (3–6 anos)',
+        pas: { base: 100, bmin: 88, bmax: 114, min: 66 }, pad: { base: 62, bmin: 50, bmax: 76, min: 38 },
+        fc: { base: 100, bmin: 82, bmax: 125, min: 70, max: 140 }, fr: { base: 22, bmin: 18, bmax: 28, min: 16, max: 34 },
+        temp: { base: 36.5, bmin: 36, bmax: 37.1, min: 35.4, max: 37.4 } },
+      escolar:     { rot: 'Escolar (6–12 anos)',
+        pas: { base: 106, bmin: 94, bmax: 120, min: 70 }, pad: { base: 66, bmin: 54, bmax: 80, min: 42 },
+        fc: { base: 88, bmin: 72, bmax: 110, min: 62, max: 125 }, fr: { base: 20, bmin: 16, bmax: 24, min: 14, max: 28 },
+        temp: { base: 36.4, bmin: 36, bmax: 37, min: 35.3, max: 37.3 } },
+      adolescente: { rot: 'Adolescente (12–18 anos)',
+        pas: { base: 112, bmin: 100, bmax: 128, min: 76 }, pad: { base: 70, bmin: 58, bmax: 84, min: 46 },
+        fc: { base: 75, bmin: 62, bmax: 98, min: 54, max: 110 }, fr: { base: 16, bmin: 13, bmax: 20, min: 11, max: 24 },
+        temp: { base: 36.4, bmin: 36, bmax: 37, min: 35.3, max: 37.2 } },
+      adulto:      { rot: 'Adulto (18–65 anos)' },   /* = _BASE_PADRAO (template) */
+      idoso:       { rot: 'Idoso (> 65 anos)',
+        pas: { base: 130, bmin: 115, bmax: 148, min: 88 }, pad: { base: 78, bmin: 65, bmax: 90, min: 50 },
+        fc: { base: 76, bmin: 58, bmax: 90, min: 50 }, fr: { base: 14, bmin: 11, bmax: 18, min: 10, max: 22 },
+        temp: { base: 36.2, bmin: 35.8, bmax: 37, min: 35.2, max: 37.2 } }
+    },
+    /* Idade do paciente em meses (da data de nascimento; senão do campo idade). */
+    _idadeMesesDoForm() {
+      const f = document.getElementById('form-anestesia'); if (!f) return null;
+      const nasc = (f.querySelector('[name="paciente_nasc"]') || {}).value || '';
+      if (nasc) {
+        const d = new Date(nasc);
+        if (!isNaN(d)) {
+          const hoje = new Date();
+          let meses = (hoje.getFullYear() - d.getFullYear()) * 12 + (hoje.getMonth() - d.getMonth());
+          if (hoje.getDate() < d.getDate()) meses--;
+          return Math.max(0, meses);
+        }
+      }
+      const idadeTxt = (f.querySelector('[name="paciente_idade"]') || {}).value || '';
+      const m = /(\d+)/.exec(idadeTxt);
+      return m ? parseInt(m[1], 10) * 12 : null;
+    },
+    _categoriaIdade(meses) {
+      if (meses == null) return null;
+      if (meses < 1)   return 'rn';
+      if (meses < 12)  return 'lactente';
+      if (meses < 36)  return 'crianca_p';
+      if (meses < 72)  return 'crianca';
+      if (meses < 144) return 'escolar';
+      if (meses < 216) return 'adolescente';
+      if (meses < 780) return 'adulto';
+      return 'idoso';
+    },
+    /* Tabela de faixas efetiva para o perfil (adulto como base + overrides). */
+    _baseParaPaciente(catKey) {
+      const adulto = anestesia.vitais._BASE_PADRAO;
+      const perfil = anestesia.vitais._PERFIS_VITAIS[catKey];
+      if (!perfil || catKey === 'adulto') return adulto;
+      const out = {};
+      Object.keys(adulto).forEach(k => { out[k] = Object.assign({}, adulto[k], perfil[k] || {}); });
+      return out;
+    },
     /* Gera um valor para o parâmetro. base = valor de partida (de um registro
        já lançado, já limitado ao normal); prog = progresso 0→1.
        Só PA/FC variam de leve (e caem um pouco); o resto fica quase constante. */
-    _valorPadrao(param, prog, base) {
-      const s = anestesia.vitais._BASE_PADRAO[param];
+    _valorPadrao(param, prog, base, tabela) {
+      const s = (tabela || anestesia.vitais._BASE_PADRAO)[param];
       if (!s) return null;   /* param sem modelo → deixa em branco */
       const b = (base != null && !isNaN(base)) ? base : s.base;
       const variavel = (param === 'pas' || param === 'pad' || param === 'fc');
@@ -22024,18 +22095,31 @@ const anestesia = {
         .forEach(tr => tbody.appendChild(tr));
     },
 
-    /* Abre a escolha de intervalo (5/5 ou 10/10) e gera. */
+    /* Abre a escolha de intervalo (5/5 ou 10/10) e do perfil, e gera. */
     preencherPadrao() {
+      const meses = anestesia.vitais._idadeMesesDoForm();
+      const catDet = anestesia.vitais._categoriaIdade(meses) || 'adulto';
+      const opts = Object.entries(anestesia.vitais._PERFIS_VITAIS)
+        .map(([k, v]) => '<option value="' + k + '"' + (k === catDet ? ' selected' : '') + '>' + v.rot + '</option>').join('');
+      const detTxt = (meses == null)
+        ? 'Idade não informada — confirme o <b>perfil</b> abaixo.'
+        : 'Perfil detectado pela idade: <b>' + anestesia.vitais._PERFIS_VITAIS[catDet].rot + '</b> (ajuste se precisar).';
       modal.open('🧪 Preencher sinais vitais',
-        '<p style="font-size:.86rem;color:var(--text-soft);margin:0 0 6px">Gera valores <b>normais</b> entre a <b>entrada</b> e a <b>saída de sala</b>, com <b>leve variação em PA e FC</b> (o resto quase não muda).</p>' +
-        '<p style="font-size:.82rem;color:var(--text-mute);margin:0 0 10px">Os registros que você já lançou são <b>mantidos</b> e usados como <b>base</b> (ex.: a medida da entrada vira o ponto de partida). O sistema só preenche os horários vazios.</p>' +
-        '<p style="font-weight:600;margin:0">Intervalo entre as medidas:</p>',
+        '<p style="font-size:.86rem;color:var(--text-soft);margin:0 0 6px">Gera valores <b>normais para o perfil do paciente</b> entre a <b>entrada</b> e a <b>saída de sala</b>, com <b>leve variação em PA e FC</b> (o resto quase não muda).</p>' +
+        '<p style="font-size:.82rem;color:var(--text-mute);margin:0 0 8px">Os registros que você já lançou são <b>mantidos</b> e usados como base; o sistema só preenche os horários vazios.</p>' +
+        '<div class="field" style="margin:0 0 8px"><label>Perfil do paciente (faixa normal)</label><select id="vp-perfil">' + opts + '</select><div style="font-size:.74rem;color:var(--text-mute);margin-top:3px">' + detTxt + '</div></div>' +
+        '<p style="font-weight:600;margin:6px 0 0">Intervalo entre as medidas:</p>',
         '<button class="btn btn-primary" onclick="anestesia.vitais._gerarPadrao(5)">A cada 5 min</button>' +
         '<button class="btn btn-primary" onclick="anestesia.vitais._gerarPadrao(10)">A cada 10 min</button>' +
         '<button class="btn" onclick="modal.close()">Cancelar</button>');
     },
 
     _gerarPadrao(passo) {
+      /* Lê o perfil escolhido ANTES de fechar o diálogo */
+      const selEl = document.getElementById('vp-perfil');
+      const catKey = (selEl && selEl.value) || anestesia.vitais._categoriaIdade(anestesia.vitais._idadeMesesDoForm()) || 'adulto';
+      const TAB = anestesia.vitais._baseParaPaciente(catKey);
+      const rotPerfil = (anestesia.vitais._PERFIS_VITAIS[catKey] || {}).rot || 'Adulto';
       try { modal.close(); } catch (e) {}
       anestesia.graficoUI._contexto = (state.currentModule === 'recuperacao') ? 'recuperacao' : 'anestesia';
       const f = document.getElementById('form-anestesia');
@@ -22079,11 +22163,11 @@ const anestesia = {
       const base = {};
       ativos.forEach(p => {
         if (p === 'pam' || p === 'ritmo') return;
-        const s = anestesia.vitais._BASE_PADRAO[p]; if (!s) return;
+        const s = TAB[p]; if (!s) return;
         let b = null;
         for (const o of ordenadas) { const val = parseFloat(q(o.tr, 'vit_' + p + '[]')); if (!isNaN(val)) { b = val; break; } }
         if (b == null) b = s.base;
-        /* limita a base à faixa NORMAL (bmin/bmax, ou min/max) → gerado normal */
+        /* limita a base à faixa NORMAL do perfil (bmin/bmax, ou min/max) */
         const lo = (s.bmin != null) ? s.bmin : s.min;
         const hi = (s.bmax != null) ? s.bmax : s.max;
         if (lo != null) b = Math.max(lo, b);
@@ -22102,7 +22186,7 @@ const anestesia = {
         const dados = { hora: anestesia.graficoUI.tToHora(t % (24 * 60)) };
         ativos.forEach(p => {
           if (p === 'pam' || p === 'ritmo') return;
-          const v = anestesia.vitais._valorPadrao(p, prog, base[p]);
+          const v = anestesia.vitais._valorPadrao(p, prog, base[p], TAB);
           if (v != null) dados[p] = v;
         });
         anestesia.vitais.add(false, dados);
@@ -22111,7 +22195,7 @@ const anestesia = {
       anestesia.vitais._ordenarPorHora(bodyId);
       markDirty();
       try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
-      toast('🧪 ' + criadas + ' medida(s) padrão a cada ' + passo + ' min (' + entrada + '–' + saida + ')');
+      toast('🧪 ' + criadas + ' medida(s) a cada ' + passo + ' min · ' + rotPerfil + ' (' + entrada + '–' + saida + ')');
     },
 
     duplicarEAjustar() {
