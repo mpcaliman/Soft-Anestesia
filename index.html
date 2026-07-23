@@ -2750,6 +2750,33 @@ path.dash-clickable:hover { opacity: .8; }
   color: var(--primary-dark); align-self: center; margin-right: 4px;
 }
 
+/* Navegação por seções da pré (chips com status de preenchimento) */
+.pre-nav {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  margin: -4px 0 14px; padding: 8px 10px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  position: sticky; top: 0; z-index: 5;
+}
+.pre-nav-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: .78rem; font-weight: 600; line-height: 1;
+  padding: 6px 10px; border-radius: 999px; cursor: pointer;
+  background: var(--surface); color: var(--text-soft);
+  border: 1px solid var(--border);
+  transition: background .12s, border-color .12s, color .12s;
+}
+.pre-nav-chip:hover { border-color: var(--primary); color: var(--primary-dark); }
+.pre-nav-chip .pn-dot { font-size: .62rem; line-height: 1; }
+.pre-nav-chip.pn-vazio   { }
+.pre-nav-chip.pn-vazio   .pn-dot { color: var(--border); }
+.pre-nav-chip.pn-parcial { border-color: var(--warn, #c98a1a); color: var(--text); }
+.pre-nav-chip.pn-parcial .pn-dot { color: var(--warn, #c98a1a); }
+.pre-nav-chip.pn-completo { border-color: #1a7f42; color: #1a7f42; background: #e6f4ea; }
+.pre-nav-chip.pn-completo .pn-dot { color: #1a7f42; }
+@media (max-width: 640px){ .pre-nav-chip .pn-rot { display:none; } .pre-nav-chip { padding:6px 9px; } }
+
 .field-templates { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .tpl-btn {
   font-size: .72rem !important;
@@ -4221,7 +4248,10 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       <button type="button" class="btn btn-sm" onclick="pre.duplicar()">⎘ Duplicar atual</button>
     </div>
 
-    <section class="card">
+    <!-- NAVEGAÇÃO POR SEÇÕES + COMPLETUDE (toque para ir à seção) -->
+    <nav class="pre-nav no-print" id="pre-nav" aria-label="Seções da avaliação"></nav>
+
+    <section class="card" id="pre-sec-ident">
       <div class="card-header" onclick="ui.toggleCard(this)">
         <div class="card-title-wrap"><span class="card-num">1</span><h2>Identificação<small>Paciente, cirurgia e profissional</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
@@ -4250,7 +4280,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       </div>
     </section>
 
-    <section class="card">
+    <section class="card" id="pre-sec-anamnese">
       <div class="card-header" onclick="ui.toggleCard(this)">
         <div class="card-title-wrap"><span class="card-num">2</span><h2>Anamnese<small>Histórico clínico e antecedentes</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
@@ -4283,7 +4313,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       </div>
     </section>
 
-    <section class="card">
+    <section class="card" id="pre-sec-exames">
       <div class="card-header" onclick="ui.toggleCard(this)">
         <div class="card-title-wrap"><span class="card-num">3</span><h2>Sinais vitais e exames<small>Medidas, exame físico e laboratoriais</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
@@ -4363,7 +4393,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </section>
 
     <!-- PARECERES DE OUTRAS CLÍNICAS -->
-    <section class="card">
+    <section class="card" id="pre-sec-pareceres">
       <div class="card-header" onclick="ui.toggleCard(this)">
         <div class="card-title-wrap"><span class="card-num">4</span><h2>Pareceres de outras clínicas<small>Avaliações de especialistas — cardiologia, pneumologia, etc.</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
@@ -4377,7 +4407,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       </div>
     </section>
 
-    <section class="card">
+    <section class="card" id="pre-sec-risco">
       <div class="card-header" onclick="ui.toggleCard(this)">
         <div class="card-title-wrap"><span class="card-num">5</span><h2>Classificação de risco<small>ASA, via aérea e escores</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
@@ -4461,7 +4491,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       </div>
     </section>
 
-    <section class="card">
+    <section class="card" id="pre-sec-conclusao">
       <div class="card-header" onclick="ui.toggleCard(this)">
         <div class="card-title-wrap"><span class="card-num">6</span><h2>Conclusões e orientações<small>Jejum, medicações a suspender/manter, pré-medicação e aptidão</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
@@ -11058,6 +11088,7 @@ const pre = {
     try { const w = document.getElementById('pre-risco-resumo-wrap'); if (w) w.style.display = 'none'; } catch (e) {}
     ui.fecharBanner('banner-pre');
     markClean();
+    try { pre.nav._wire(); pre.nav.render(); } catch (e) {}
     toast('Nova avaliação iniciada');
   },
   /* salvar(): por padrão grava os dados (segurança contra perda), SEM gerar
@@ -11109,7 +11140,75 @@ const pre = {
       setTimeout(() => pre._perguntarTermo(saved), 300);
     }
   },
-  finalizar() { pre.salvar({ finalizar: true }); },
+  /* ---------- Navegação por seções + status de completude ---------- */
+  nav: {
+    SECOES: [
+      { id: 'ident',     num: 1, rot: 'Identificação', campos: ['nome', 'data', 'cirurgia'] },
+      { id: 'anamnese',  num: 2, rot: 'Anamnese',      campos: ['comorbidades', 'medicacoes', 'alergias'] },
+      { id: 'exames',    num: 3, rot: 'Exames',        campos: ['peso', 'altura', 'pa', 'exame_fisico'] },
+      { id: 'pareceres', num: 4, rot: 'Pareceres',     campos: ['parecer_cardio', 'parecer_pneumo', 'parecer_outros'] },
+      { id: 'risco',     num: 5, rot: 'Risco',         campos: ['asa', 'via_aerea_resumo', 'risco'] },
+      { id: 'conclusao', num: 6, rot: 'Conclusões',    campos: ['jejum', 'conclusao', 'orientacoes'] }
+    ],
+    _estado(sec) {
+      const f = document.getElementById(pre.formId); if (!f) return 'vazio';
+      let n = 0;
+      sec.campos.forEach(nm => { const el = f.querySelector('[name="' + nm + '"]'); if (el && String(el.value || '').trim()) n++; });
+      if (n === 0) return 'vazio';
+      return (n >= sec.campos.length) ? 'completo' : 'parcial';
+    },
+    render() {
+      const host = document.getElementById('pre-nav'); if (!host) return;
+      host.innerHTML = pre.nav.SECOES.map(sec => {
+        const st = pre.nav._estado(sec);
+        const dot = st === 'completo' ? '✓' : (st === 'parcial' ? '●' : '○');
+        return '<button type="button" class="pre-nav-chip pn-' + st + '" onclick="pre.nav.ir(\'' + sec.id + '\')" title="Ir para ' + sec.rot + '">' +
+          '<span class="pn-dot">' + dot + '</span><span class="pn-num">' + sec.num + '.</span> <span class="pn-rot">' + sec.rot + '</span></button>';
+      }).join('');
+    },
+    atualizar() { try { pre.nav.render(); } catch (e) {} },
+    ir(id) {
+      const card = document.getElementById('pre-sec-' + id); if (!card) return;
+      if (card.classList.contains('collapsed')) { const h = card.querySelector('.card-header'); if (h) ui.toggleCard(h); }
+      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const focavel = card.querySelector('input:not([type=hidden]):not([readonly]), textarea, select');
+      if (focavel) setTimeout(() => { try { focavel.focus({ preventScroll: true }); } catch (e) {} }, 350);
+    },
+    _wired: false,
+    _wire() {
+      if (pre.nav._wired) return;
+      const f = document.getElementById(pre.formId); if (!f) return;
+      f.addEventListener('input', pre.nav.atualizar);
+      f.addEventListener('change', pre.nav.atualizar);
+      pre.nav._wired = true;
+    }
+  },
+  /* Itens clínicos essenciais para uma pré completa (aviso gentil, não trava). */
+  _checarCompletude() {
+    const f = document.getElementById(pre.formId); if (!f) return [];
+    const g = (n) => ((f.querySelector('[name="' + n + '"]') || {}).value || '').trim();
+    const avisos = [];
+    if (!g('nome')) avisos.push('Nome do paciente não preenchido');
+    if (!g('asa')) avisos.push('Classificação ASA não informada');
+    if (!g('via_aerea_resumo') && !g('via_aerea')) avisos.push('Via aérea (Mallampati) não avaliada');
+    if (!g('jejum')) avisos.push('Orientação de jejum não definida');
+    if (!g('conclusao')) avisos.push('Conclusão / aptidão não preenchida');
+    return avisos;
+  },
+  finalizar() {
+    const avisos = pre._checarCompletude();
+    if (avisos.length) {
+      modal.open('⚠️ Conferir antes de finalizar',
+        '<p style="font-size:.88rem;margin:0 0 8px">Alguns itens importantes da avaliação parecem faltar:</p>' +
+        '<ul style="margin:0 0 10px;padding-left:20px;line-height:1.7;color:var(--danger,#b3392a)">' +
+        avisos.map(a => '<li>' + utils.escapeHTML(a) + '</li>').join('') + '</ul>' +
+        '<p style="font-size:.82rem;color:var(--text-mute);margin:0">Você pode voltar e completar, ou finalizar assim mesmo.</p>',
+        '<button class="btn" onclick="modal.close()">Voltar e completar</button>' +
+        '<button class="btn btn-finalizar" onclick="modal.close(); pre.salvar({ finalizar: true })">Finalizar mesmo assim</button>');
+      return;
+    }
+    pre.salvar({ finalizar: true });
+  },
   /* Pergunta se deseja preencher o Termo de Consentimento com os dados do paciente */
   _perguntarTermo(docPre) {
     const html = `
@@ -11180,6 +11279,7 @@ const pre = {
     } catch (e) {}
     markClean();
     try { adendos.renderInline('pre'); } catch (e) {}
+    try { pre.nav._wire(); pre.nav.render(); } catch (e) {}
     toast('Avaliação carregada'); ui.expandirTodos('pre');
   },
   duplicar() {
@@ -35095,6 +35195,7 @@ document.addEventListener('DOMContentLoaded', () => {
   try { comorbidades.renderRapidas(); } catch (e) {}
   try { alergias.renderRapidas(); } catch (e) {}
   try { pre.viaAerea.render(); } catch (e) {}
+  try { pre.nav._wire(); pre.nav.render(); } catch (e) {}
   window.ajustesUsuarios = ajustesUsuarios;
   window.termoPadrao = termoPadrao;
   window.termoBiblioteca = termoBiblioteca;
