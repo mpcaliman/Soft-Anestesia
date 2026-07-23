@@ -141,6 +141,11 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
 - **Diagnóstico da nuvem:** ✅ tela em Ajustes compara, tabela a tabela, o que
   está no aparelho × no banco relacional, com fila pendente, última sync e
   saúde da conexão.
+- **Adendos / correções (medicina-legal):** ✅ correções após finalizar vão para
+  a tabela `addenda` (append-only, idempotente por `legacy_id` — `0005`), sem
+  alterar o registro original. Datadas e assinadas, aparecem na ficha e no PDF,
+  e ficam locais (`_adendos`) para offline. Piloto na ficha de anestesia
+  (`adendos.*`); o helper já suporta pré/consulta/recuperação/risco.
 - **Fase 6+ — Pré reorganizada, Ficha/linha do tempo unificada, SRPA,
   Financeiro (rascunho/conciliação), anexos no Storage, PDF versionado, tela de
   diagnóstico da nuvem, testes.**
