@@ -728,7 +728,9 @@ html[data-theme="dark"] .theme-toggle:hover {
 .vitais-grid .lab-item input[readonly] { background: #eef1f5; color: var(--text-soft); }
 /* Valor de sinal vital implausível (provável erro de digitação) */
 input.vit-fora { outline: 2px solid var(--warning) !important; background: #fff7ed !important; }
-@media print { input.vit-fora { outline: none !important; background: none !important; } }
+/* Alerta CLÍNICO discreto (valor preocupante, mas legítimo) — mais suave */
+input.vit-alerta { box-shadow: inset 3px 0 0 #f59e0b; background: #fffdf5 !important; }
+@media print { input.vit-fora, input.vit-alerta { outline: none !important; box-shadow: none !important; background: none !important; } }
 /* Faixa de totais no topo da ficha */
 .ficha-resumo {
   display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 14px;
@@ -6227,6 +6229,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       <h1>Recuperação pós-anestésica</h1>
       <span class="subtitle">Ficha de SRPA</span>
     </div>
+    <div class="ficha-resumo no-print" id="recuperacao-resumo" style="display:none"></div>
 
     <div class="doc-status" id="docstatus-recuperacao">
       <span class="ds-badge novo" id="dsbadge-recuperacao">📄 Novo documento</span>
@@ -6263,10 +6266,10 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <div class="field col-3 required"><label>Data <span class="req">*</span></label><input type="date" name="data" data-required></div>
           <div class="field col-3"><label>Idade</label><input type="text" name="idade"></div>
           <div class="field col-3"><label>Hora de entrada na SRPA</label>
-            <div class="input-group"><input type="time" name="entrada"><button type="button" class="btn-now" onclick="ui.setNow('form-recuperacao','entrada')">agora</button></div>
+            <div class="input-group"><input type="time" name="entrada" oninput="recuperacao.resumoTopo()"><button type="button" class="btn-now" onclick="ui.setNow('form-recuperacao','entrada'); recuperacao.resumoTopo()">agora</button></div>
           </div>
           <div class="field col-3"><label>Hora de alta da SRPA</label>
-            <div class="input-group"><input type="time" name="alta"><button type="button" class="btn-now" onclick="ui.setNow('form-recuperacao','alta')">agora</button></div>
+            <div class="input-group"><input type="time" name="alta" oninput="recuperacao.resumoTopo()"><button type="button" class="btn-now" onclick="ui.setNow('form-recuperacao','alta'); recuperacao.resumoTopo()">agora</button></div>
           </div>
           <div class="field col-6"><label>Procedência</label>
             <select name="procedencia"><option value="">—</option><option>Centro cirúrgico</option><option>Hemodinâmica</option><option>Endoscopia</option><option>Outro</option></select>
@@ -9954,7 +9957,7 @@ const ui = {
         else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); logoUsuario.renderAjustes(); const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
         else if (modName === 'pre') { try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} try { pre.viaAerea.render(); } catch (e) {} }
         else if (modName === 'anestesia') { anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} try { anestesia.calc.resumoTopo(); } catch (e) {} }
-        else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} }, 60); }
+        else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} try { recuperacao.resumoTopo(); } catch (e) {} }, 60); }
         else if (modName === 'termo') { setTimeout(() => { try { (termo.sig._ajustar || []).forEach(fn => fn()); assinatura.initCanvas('sig-termo'); } catch (e) {} }, 80); }
         else if (modName === 'prescricao') { setTimeout(() => { try { if (prescricao.sig._ajustar) prescricao.sig._ajustar(); assinatura.initCanvas('sig-prescricao'); } catch (e) {} }, 80); }
         else if (modName === 'documentos') { setTimeout(() => { try { const f = document.getElementById('form-documentos'); if (f && !f.querySelector('[name="data"]').value) f.querySelector('[name="data"]').value = utils.hojeISO(); documentos.atualizarTipo(); assinatura.initCanvas('sig-documentos'); } catch (e) {} }, 60); }
@@ -11506,6 +11509,7 @@ const recuperacao = {
         if (legado && (!legado.value || legado.dataset.aldkAuto === '1')) { legado.value = soma; legado.dataset.aldkAuto = '1'; }
       }
       try { markDirty(); } catch (e) {}
+      try { recuperacao.resumoTopo(); } catch (e) {}
     },
     agora() {
       const el = recuperacao.aldrete._q('aldk_datahora');
@@ -11558,7 +11562,58 @@ const recuperacao = {
     if (finalizar) { try { rascunhos.removerAtivo('recuperacao'); } catch (e) {} }
     toast(finalizar ? '✅ Recuperação finalizada' : '💾 Recuperação salva (dados preservados)');
   },
-  finalizar() { recuperacao.salvar({ finalizar: true }); },
+  /* Faixa de totais no topo da SRPA (tempo, Aldrete). */
+  resumoTopo() {
+    const f = document.getElementById('form-recuperacao');
+    const box = document.getElementById('recuperacao-resumo');
+    if (!f || !box) return;
+    const g = (n) => ((f.querySelector('[name="' + n + '"]') || {}).value || '').trim();
+    const chips = [];
+    const ent = g('entrada'), alta = g('alta');
+    if (ent && alta) {
+      const [h1, m1] = ent.split(':').map(Number), [h2, m2] = alta.split(':').map(Number);
+      let mm = (h2 * 60 + m2) - (h1 * 60 + m1); if (mm < 0) mm += 1440;
+      chips.push({ i: '⏱', l: 'Tempo SRPA', v: Math.floor(mm / 60) + 'h ' + String(mm % 60).padStart(2, '0') + 'min' });
+    } else if (ent) {
+      chips.push({ i: '🚪', l: 'Entrada', v: ent });
+    }
+    const ald = g('aldk_total');
+    if (ald) { const nota = parseInt(ald, 10); chips.push({ i: '🧮', l: 'Aldrete', v: ald, neg: !isNaN(nota) && nota < 9 }); }
+    const nV = document.querySelectorAll('#srpa-vitais-body tr').length;
+    if (nV) chips.push({ i: '📈', l: 'Sinais', v: nV });
+    if (!chips.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    box.innerHTML = chips.map(c =>
+      '<span class="fr-chip' + (c.neg ? ' fr-neg' : '') + '"><span>' + c.i + '</span><span class="fr-l">' + c.l + '</span><b>' + utils.escapeHTML(String(c.v)) + '</b></span>').join('');
+    box.style.display = 'flex';
+  },
+  _checarCompletude() {
+    const f = document.getElementById('form-recuperacao');
+    if (!f) return [];
+    const g = (n) => ((f.querySelector('[name="' + n + '"]') || {}).value || '').trim();
+    const avisos = [];
+    if (!g('entrada')) avisos.push('Hora de entrada na SRPA não informada');
+    if (document.querySelectorAll('#srpa-vitais-body tr').length === 0) avisos.push('Nenhum sinal vital registrado');
+    const ald = parseInt(g('aldk_total'), 10);
+    if (!g('aldk_total')) avisos.push('Escala de Aldrete não preenchida');
+    else if (!isNaN(ald) && ald < 9) avisos.push('Aldrete ' + g('aldk_total') + ' — paciente pode não estar apto à alta');
+    const assinado = Array.from(f.querySelectorAll('[name^="assinatura_dataurl"]')).some(el => (el.value || '').length > 50);
+    if (!assinado) avisos.push('Sem assinatura do responsável');
+    return avisos;
+  },
+  finalizar() {
+    const avisos = recuperacao._checarCompletude();
+    if (avisos.length) {
+      modal.open('⚠️ Conferir antes de finalizar',
+        '<p style="font-size:.88rem;margin:0 0 8px">Alguns itens importantes parecem faltar nesta SRPA:</p>' +
+        '<ul style="margin:0 0 10px;padding-left:20px;line-height:1.7;color:var(--danger,#b3392a)">' +
+        avisos.map(a => '<li>' + utils.escapeHTML(a) + '</li>').join('') + '</ul>' +
+        '<p style="font-size:.82rem;color:var(--text-mute);margin:0">Você pode voltar e completar, ou finalizar assim mesmo.</p>',
+        '<button class="btn" onclick="modal.close()">Voltar e completar</button>' +
+        '<button class="btn btn-finalizar" onclick="modal.close(); recuperacao.salvar({ finalizar: true })">Finalizar mesmo assim</button>');
+      return;
+    }
+    recuperacao.salvar({ finalizar: true });
+  },
   salvarComoNovo() {
     const f = document.getElementById(recuperacao.formId);
     const idEl = f.querySelector('[name="_id"]');
@@ -21901,20 +21956,48 @@ const anestesia = {
       bis: [0, 100], tof: [0, 100], glic: [20, 800], pvc: [-5, 40],
       pic: [0, 80], dc: [1, 15], scvo2: [30, 95], cam: [0, 4], dor: [0, 10], diurese: [0, 5000]
     },
+    /* Alerta CLÍNICO discreto (não é erro de digitação): valores realmente
+       preocupantes durante o caso. PA/FC usam a faixa normal do PERFIL do
+       paciente com margem; SpO₂/Temp/EtCO₂/BIS usam limiares fixos. */
+    _alertaClinico(param, raw) {
+      if (raw === '' || raw == null) return null;
+      const v = parseFloat(raw); if (isNaN(v)) return null;
+      switch (param) {
+        case 'spo2': if (v < 92) return 'SpO₂ baixa (hipoxemia)'; break;
+        case 'temp': if (v < 35.5) return 'Hipotermia'; if (v > 38) return 'Hipertermia'; break;
+        case 'etco2': if (v < 28) return 'EtCO₂ baixo'; if (v > 48) return 'EtCO₂ alto'; break;
+        case 'bis': if (v > 65) return 'BIS alto (plano superficial?)'; if (v < 35) return 'BIS baixo (plano profundo?)'; break;
+        case 'pas': case 'pad': case 'fc': {
+          const cat = anestesia.vitais._categoriaIdade(anestesia.vitais._idadeMesesDoForm());
+          const TAB = anestesia.vitais._baseParaPaciente(cat || 'adulto');
+          const s = TAB[param]; if (!s) break;
+          const lo = (s.bmin != null ? s.bmin : s.min), hi = (s.bmax != null ? s.bmax : s.max);
+          const rot = { pas: 'PA sistólica', pad: 'PA diastólica', fc: 'FC' }[param];
+          if (lo != null && v < lo * 0.85) return rot + ' baixa p/ o perfil';
+          if (hi != null && v > hi * 1.15) return rot + ' alta p/ o perfil';
+          break;
+        }
+      }
+      return null;
+    },
     _validarCelula(input) {
       if (!input || !input.name) return;
       const m = /^vit_([a-z0-9]+)\[\]$/.exec(input.name);
       if (!m) return;
-      const lim = anestesia.vitais._LIMITES_PLAUSIVEL[m[1]];
+      const param = m[1];
+      const lim = anestesia.vitais._LIMITES_PLAUSIVEL[param];
       const raw = (input.value || '').trim();
       let fora = false;
       if (lim && raw !== '') {
         const v = parseFloat(raw);
         if (!isNaN(v) && (v < lim[0] || v > lim[1])) fora = true;
       }
+      const alerta = fora ? null : anestesia.vitais._alertaClinico(param, raw);
       input.classList.toggle('vit-fora', fora);
+      input.classList.toggle('vit-alerta', !!alerta);
       if (fora) input.title = 'Valor fora da faixa fisiológica (' + lim[0] + '–' + lim[1] + ') — confira se não houve erro de digitação.';
-      else if (input.title && input.title.indexOf('erro de digitação') >= 0) input.removeAttribute('title');
+      else if (alerta) input.title = '⚠️ ' + alerta + ' — confira o paciente.';
+      else if (input.title && (input.title.indexOf('erro de digitação') >= 0 || input.title.indexOf('confira o paciente') >= 0)) input.removeAttribute('title');
     },
     /* Quando PAS ou PAD muda, recalcula PAM automaticamente */
     _onPAChange(input) {
