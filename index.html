@@ -22031,6 +22031,10 @@ const anestesia = {
         fc: { base: 76, bmin: 58, bmax: 90, min: 50 }, fr: { base: 14, bmin: 11, bmax: 18, min: 10, max: 22 },
         temp: { base: 36.2, bmin: 35.8, bmax: 37, min: 35.2, max: 37.2 } }
     },
+    /* Débito urinário normal por faixa etária (mL/kg/h) — usado na geração
+       de diurese quando o peso é conhecido e a UO já está sendo registrada. */
+    _DIURESE_ML_KG_H: { rn: 2.5, lactente: 2.0, crianca_p: 1.5, crianca: 1.3, escolar: 1.1, adolescente: 0.9, adulto: 0.8, idoso: 0.7 },
+
     /* Idade do paciente em meses (da data de nascimento; senão do campo idade). */
     _idadeMesesDoForm() {
       const f = document.getElementById('form-anestesia'); if (!f) return null;
@@ -22153,6 +22157,10 @@ const anestesia = {
          registro mais antigo com valor, limitado à faixa normal). */
       const rowsExist = tbody ? Array.from(tbody.querySelectorAll('tr')) : [];
       const q = (tr, n) => (tr.querySelector('[name="' + n + '"]') || {}).value || '';
+      /* Diurese: só gera se o peso é conhecido E a UO já vem sendo registrada */
+      const peso = parseFloat((f.querySelector('[name="paciente_peso"]') || {}).value) || 0;
+      const rastreiaDiurese = rowsExist.some(tr => !isNaN(parseFloat(q(tr, 'vit_diurese[]'))));
+      const alvoUO = anestesia.vitais._DIURESE_ML_KG_H[catKey] || 0.8;
       const minutosOcupados = [];
       const ordenadas = rowsExist
         .filter(tr => okHora(q(tr, 'vit_hora[]')))
@@ -22189,6 +22197,12 @@ const anestesia = {
           const v = anestesia.vitais._valorPadrao(p, prog, base[p], TAB);
           if (v != null) dados[p] = v;
         });
+        /* Diurese normal por peso/idade (só se já registrada e peso conhecido) */
+        if (rastreiaDiurese && peso > 0) {
+          let du = alvoUO * peso * (passo / 60);
+          du = du * (1 + (Math.random() * 2 - 1) * 0.15);
+          dados.diurese = String(Math.max(0, Math.round(du)));
+        }
         anestesia.vitais.add(false, dados);
         criadas++;
       }
