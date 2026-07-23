@@ -8160,6 +8160,22 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       </div>
     </section>
 
+    <!-- 🩺 DIAGNÓSTICO DA NUVEM -->
+    <section class="card" id="clouddiag-card">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-icon">🩺</span><h2>Diagnóstico da nuvem<small>Compara o que está neste aparelho com o banco relacional, tabela a tabela</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <button type="button" class="btn btn-sm" onclick="cloudDiag.rodar()">🩺 Rodar diagnóstico</button>
+        <label class="autosave-toggle" style="margin-left:12px" title="Recebe atualizações ao vivo de outros aparelhos (experimental)">
+          <input type="checkbox" id="realtime-chk" onchange="cloudRealtime.toggle(this.checked)"> Tempo real (beta)
+          <span id="realtime-status" style="margin-left:6px;font-size:.72rem;color:var(--text-mute)"></span>
+        </label>
+        <div id="clouddiag-resultado" class="diag-box" style="display:none;margin-top:12px"></div>
+      </div>
+    </section>
+
     <!-- 💾 BACKUP COMPLETO (todos os dados) -->
     <section class="card" id="backup-completo-card">
       <div class="card-header" onclick="ui.toggleCard(this)">
@@ -14414,16 +14430,17 @@ const migracaoFase4 = {
   },
 
   /* ---- Escrita relacional (REST, mesmo padrão do cloud._enviarOp) ---- */
-  async _upsert(tabela, rows, retornar) {
+  async _upsert(tabela, rows, retornar, onConflict) {
     if (!rows.length) return [];
     const c = cloud.config();
     const headers = Object.assign({}, cloud._headers(true), {
       'Prefer': 'resolution=merge-duplicates,return=' + (retornar ? 'representation' : 'minimal')
     });
-    const r = await fetch(c.url + '/rest/v1/' + tabela + '?on_conflict=organization_id,legacy_id', {
+    const r = await fetch(c.url + '/rest/v1/' + tabela + '?on_conflict=' + (onConflict || 'organization_id,legacy_id'), {
       method: 'POST', headers, body: JSON.stringify(rows)
     });
     if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(tabela + ' HTTP ' + r.status + ' — ' + t.slice(0, 240)); }
+    try { if (typeof cloudRel !== 'undefined') cloudRel._ultimoEnvioTs = Date.now(); } catch (e) {}
     return retornar ? await r.json().catch(() => []) : [];
   },
   _chunk(arr, n) { const out = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out; },
@@ -14858,7 +14875,34 @@ const cloudRel = {
     try {
       cloudRel.enviarRegistro(mod, item).then(res => {
         if (res && res.conflict) cloudRel._resolverConflitoRegistro(mod, item, res.cloud, res.cloudUpdatedAt);
+        else if (res && res.ok) cloudRel.registrarAnexos(mod, item);
       }).catch(() => {});
+    } catch (e) {}
+  },
+
+  /* Registra os metadados dos anexos (já enviados ao Storage) na tabela
+     attachments — idempotente por storage_path. Best-effort. */
+  async registrarAnexos(mod, item) {
+    try {
+      if (typeof prontuario === 'undefined') return;
+      const docs = (prontuario._docs && prontuario._docs[mod]) ? prontuario._docs[mod] : [];
+      const comPath = docs.filter(d => d && d.storage_path);
+      if (!comPath.length) return;
+      if (!cloudRel.disponivel()) return;
+      if (!(await cloud._garantirToken())) return;
+      const org = await cloudRel._orgAsync(); if (!org) return;
+      const patientId = await cloudRel._garantirPaciente(org, item);
+      let encId = null;
+      const cfg = cloudRel.MODOS[mod];
+      if (cfg && cfg.enc) { try { encId = await cloudRel._garantirEncounter(org, patientId, item); } catch (e) {} }
+      const rows = comPath.map(d => ({
+        organization_id: org, patient_id: patientId, encounter_id: encId,
+        module: mod, storage_path: d.storage_path,
+        filename: d.nome || null,
+        mime_type: (d.tipo === 'pdf' ? 'application/pdf' : 'image/jpeg'),
+        size: d.tamanho || null
+      }));
+      await migracaoFase4._upsert('attachments', rows, false, 'organization_id,storage_path');
     } catch (e) {}
   },
 
@@ -14916,6 +14960,165 @@ const cloudRel = {
     try { if (state.currentModule === cf.mod) ui.navegar(cf.mod); } catch (e) {}
     toast('Versão da nuvem adotada neste aparelho');
     cloudRel._conflito = null;
+  }
+};
+
+/* ============================================================================
+   DIAGNÓSTICO DA NUVEM — o que está no aparelho x na nuvem, por tabela.
+============================================================================ */
+const cloudDiag = {
+  LINHAS: [
+    { rot: 'Pacientes',        mod: 'pacientes',   tabela: 'patients' },
+    { rot: 'Atendimentos',     mod: null,          tabela: 'encounters' },
+    { rot: 'Pré-anestésica',   mod: 'pre',         tabela: 'preanesthetic_assessments' },
+    { rot: 'Consulta / Dor',   mod: 'consulta',    tabela: 'consultations' },
+    { rot: 'Ficha de anestesia', mod: 'anestesia', tabela: 'anesthesia_records' },
+    { rot: 'Recuperação',      mod: 'recuperacao', tabela: 'recovery_records' },
+    { rot: 'Risco',            mod: 'risco',       tabela: 'risk_assessments' },
+    { rot: 'Termo (TCLE)',     mod: 'termo',       tabela: 'consents' },
+    { rot: 'Receituário',      mod: 'prescricao',  tabela: 'prescriptions' },
+    { rot: 'Documentos',       mod: 'documentos',  tabela: 'documents' },
+    { rot: 'Financeiro',       mod: 'financeiro',  tabela: 'finance_entries' },
+    { rot: 'Orçamentos',       mod: 'orcamento',   tabela: 'quotes' },
+    { rot: 'Agenda',           mod: 'agenda',      tabela: 'appointments' },
+    { rot: 'Anexos',           mod: null,          tabela: 'attachments' }
+  ],
+  async _count(tabela, org) {
+    const c = cloud.config();
+    try {
+      const r = await fetch(c.url + '/rest/v1/' + tabela + '?organization_id=eq.' + org + '&deleted_at=is.null&select=id',
+        { method: 'GET', headers: Object.assign({}, cloud._headers(true), { 'Range-Unit': 'items', 'Range': '0-0', 'Prefer': 'count=exact' }) });
+      const cr = r.headers.get('content-range') || '';
+      const m = cr.match(/\/(\d+)\s*$/);
+      if (m) return parseInt(m[1], 10);
+      return r.ok ? 0 : null;
+    } catch (e) { return null; }
+  },
+  _localCount(mod) { try { return mod ? store.list(mod).length : null; } catch (e) { return null; } },
+
+  async rodar() {
+    const box = document.getElementById('clouddiag-resultado');
+    if (!box) return;
+    box.style.display = 'block';
+    const online = (typeof navigator === 'undefined' || navigator.onLine !== false);
+    const configurado = (() => { try { return cloud.estaConfigurado(); } catch (e) { return false; } })();
+    const logado = (() => { try { return cloud.estaLogado(); } catch (e) { return false; } })();
+    const fila = (() => { try { return cloud._fila().length; } catch (e) { return 0; } })();
+    const ultimo = localStorage.getItem('medsys.v7.cloud.ultimo_sync');
+    const u = (() => { try { return auth.usuarioAtual(); } catch (e) { return null; } })();
+
+    const cab = [];
+    cab.push((online ? '🟢' : '⚪') + ' ' + (online ? 'Online' : 'Offline'));
+    cab.push((configurado ? '🟢' : '🔴') + ' ' + (configurado ? 'Nuvem configurada' : 'Sem configuração'));
+    cab.push((logado ? '🟢' : '🔴') + ' ' + (logado ? 'Conectado (' + (cloud.emailLogado() || '') + ')' : 'Não conectado'));
+    if (u && u.role) cab.push('👤 ' + (auth._rotuloPapel(u.role) || u.role));
+    if (fila) cab.push('⏳ ' + fila + ' na fila');
+    if (ultimo) cab.push('🕐 última sync ' + new Date(ultimo).toLocaleString('pt-BR'));
+
+    box.innerHTML = '<div style="font-size:.82rem;margin-bottom:8px">' + cab.map(x => '<span style="display:inline-block;margin:2px 8px 2px 0">' + x + '</span>').join('') + '</div>' +
+      '<div id="clouddiag-tab">⏳ Consultando a nuvem…</div>';
+
+    if (!configurado || !logado || !online) {
+      document.getElementById('clouddiag-tab').innerHTML = '<p style="font-size:.82rem;color:var(--text-mute)">Conecte-se à nuvem (logado + online) para comparar com o banco relacional. Abaixo, o que existe neste aparelho:</p>' + cloudDiag._tabelaLocalSo();
+      return;
+    }
+    const org = await cloudRel._orgAsync();
+    if (!org) { document.getElementById('clouddiag-tab').innerHTML = '<p class="diag-linha diag-erro">Sua conta não está vinculada a uma organização no banco.</p>'; return; }
+
+    const linhas = [];
+    for (const L of cloudDiag.LINHAS) {
+      const loc = cloudDiag._localCount(L.mod);
+      const nuv = await cloudDiag._count(L.tabela, org);
+      let sit;
+      if (nuv === null) sit = '<span style="color:var(--danger,#b3392a)">sem resposta</span>';
+      else if (loc === null) sit = '☁️ ' + nuv;
+      else if (nuv >= loc) sit = '<span style="color:var(--success,#16a34a)">✓ em dia</span>';
+      else sit = '<span style="color:var(--warning)">⚠️ ' + (loc - nuv) + ' a subir</span>';
+      linhas.push('<tr><td>' + L.rot + '</td><td style="text-align:right">' + (loc == null ? '—' : loc) + '</td><td style="text-align:right">' + (nuv == null ? '—' : nuv) + '</td><td>' + sit + '</td></tr>');
+    }
+    document.getElementById('clouddiag-tab').innerHTML =
+      '<table class="fase4-tab"><thead><tr><th>Módulo</th><th style="text-align:right">No aparelho</th><th style="text-align:right">Na nuvem</th><th>Situação</th></tr></thead><tbody>' + linhas.join('') + '</tbody></table>' +
+      '<p style="font-size:.72rem;color:var(--text-mute);margin-top:8px">"A subir" = registros que ainda não chegaram ao banco relacional (abra o módulo para o envio automático, ou use Sincronizar).</p>';
+  },
+  _tabelaLocalSo() {
+    const linhas = cloudDiag.LINHAS.filter(L => L.mod).map(L =>
+      '<tr><td>' + L.rot + '</td><td style="text-align:right">' + cloudDiag._localCount(L.mod) + '</td></tr>').join('');
+    return '<table class="fase4-tab"><thead><tr><th>Módulo</th><th style="text-align:right">No aparelho</th></tr></thead><tbody>' + linhas + '</tbody></table>';
+  }
+};
+
+/* ============================================================================
+   TEMPO REAL (Supabase Realtime) — BETA, opt-in, best-effort/silent-fail.
+   Se ligado, escuta mudanças no banco e atualiza o módulo aberto. Se o
+   WebSocket falhar, apenas mostra status e não afeta o resto do app.
+============================================================================ */
+const cloudRealtime = {
+  PREF_KEY: 'medsys.v7.realtime.on',
+  _ws: null, _hb: null, _ref: 0, _tentativas: 0, _debounce: null,
+  ativo() { try { return localStorage.getItem(cloudRealtime.PREF_KEY) === '1'; } catch (e) { return false; } },
+  _setStatus(txt, cor) { const el = document.getElementById('realtime-status'); if (el) { el.textContent = txt; el.style.color = cor || 'var(--text-mute)'; } },
+  toggle(on) {
+    try { localStorage.setItem(cloudRealtime.PREF_KEY, on ? '1' : '0'); } catch (e) {}
+    if (on) cloudRealtime.conectar(); else { cloudRealtime.desconectar(); cloudRealtime._setStatus('— desligado', ''); }
+  },
+  _cfg() {
+    const c = cloud.config(); if (!c) return null;
+    const s = cloud.session();
+    const m = (c.url || '').match(/^https:\/\/([^.]+)\.supabase\.co/);
+    if (!m) return null;
+    return { ref: m[1], anon: c.anonKey, token: s && s.access_token };
+  },
+  conectar() {
+    try {
+      if (!cloud.estaConfigurado() || !cloud.estaLogado()) { cloudRealtime._setStatus('— conecte-se à nuvem', ''); return; }
+      if (typeof WebSocket === 'undefined') { cloudRealtime._setStatus('— indisponível', ''); return; }
+      cloudRealtime.desconectar();
+      const cfg = cloudRealtime._cfg(); if (!cfg) { cloudRealtime._setStatus('— configuração inválida', ''); return; }
+      const url = 'wss://' + cfg.ref + '.supabase.co/realtime/v1/websocket?apikey=' + encodeURIComponent(cfg.anon) + '&vsn=1.0.0';
+      cloudRealtime._setStatus('⏳ conectando…', '');
+      const ws = new WebSocket(url); cloudRealtime._ws = ws;
+      ws.onopen = () => {
+        cloudRealtime._tentativas = 0;
+        cloudRealtime._enviar({ topic: 'realtime:public', event: 'phx_join', ref: String(++cloudRealtime._ref),
+          payload: { config: { postgres_changes: [{ event: '*', schema: 'public' }] }, access_token: cfg.token } });
+        clearInterval(cloudRealtime._hb);
+        cloudRealtime._hb = setInterval(() => cloudRealtime._enviar({ topic: 'phoenix', event: 'heartbeat', ref: String(++cloudRealtime._ref), payload: {} }), 25000);
+        cloudRealtime._setStatus('🟢 tempo real ativo', 'var(--success,#16a34a)');
+      };
+      ws.onmessage = (ev) => { try { const msg = JSON.parse(ev.data); if (msg && msg.event === 'postgres_changes') cloudRealtime._onChange(msg); } catch (e) {} };
+      ws.onerror = () => cloudRealtime._setStatus('🔴 erro de conexão', 'var(--danger,#b3392a)');
+      ws.onclose = () => {
+        clearInterval(cloudRealtime._hb);
+        if (cloudRealtime.ativo()) {
+          if (cloudRealtime._tentativas < 5) {
+            cloudRealtime._tentativas++;
+            cloudRealtime._setStatus('🔴 reconectando…', 'var(--danger,#b3392a)');
+            setTimeout(() => { if (cloudRealtime.ativo()) cloudRealtime.conectar(); }, Math.min(30000, 2000 * Math.pow(2, cloudRealtime._tentativas)));
+          } else cloudRealtime._setStatus('🔴 sem conexão (tempo real pausado)', 'var(--danger,#b3392a)');
+        } else cloudRealtime._setStatus('— desligado', '');
+      };
+    } catch (e) { cloudRealtime._setStatus('🔴 falhou', 'var(--danger,#b3392a)'); }
+  },
+  _enviar(obj) { try { if (cloudRealtime._ws && cloudRealtime._ws.readyState === 1) cloudRealtime._ws.send(JSON.stringify(obj)); } catch (e) {} },
+  desconectar() { try { clearInterval(cloudRealtime._hb); if (cloudRealtime._ws) { cloudRealtime._ws.onclose = null; cloudRealtime._ws.close(); } } catch (e) {} cloudRealtime._ws = null; },
+  _onChange() {
+    /* ignora o eco das nossas próprias gravações recentes */
+    try { if (cloudRel._ultimoEnvioTs && (Date.now() - cloudRel._ultimoEnvioTs) < 4000) return; } catch (e) {}
+    clearTimeout(cloudRealtime._debounce);
+    cloudRealtime._debounce = setTimeout(() => {
+      try {
+        const mod = (typeof state !== 'undefined') ? state.currentModule : null;
+        if (mod && cloudRel.MODOS[mod]) { cloudRel._puxados[mod] = false; cloudRel.autoPullModulo(mod); }
+        else if (mod === 'pacientes') { pacientes._puxouNestaSessao = false; pacientes.sincronizarNuvem({ silent: true }); }
+        else if (mod === 'agenda') { agenda._puxouNestaSessao = false; agenda.sincronizarNuvem({ silent: true }); }
+        toast('🔄 Dados atualizados na nuvem');
+      } catch (e) {}
+    }, 1500);
+  },
+  init() {
+    if (!cloudRealtime.ativo()) return;
+    const chk = document.getElementById('realtime-chk'); if (chk) chk.checked = true;
+    setTimeout(() => { if (cloudRealtime.ativo()) cloudRealtime.conectar(); }, 2500);
   }
 };
 
@@ -33727,6 +33930,8 @@ document.addEventListener('DOMContentLoaded', () => {
   window.cloud = cloud;
   window.migracaoFase4 = migracaoFase4;
   window.cloudRel = cloudRel;
+  window.cloudDiag = cloudDiag;
+  window.cloudRealtime = cloudRealtime;
   window.auth = auth;
   window.demo = demo;
   try { pre.premed.render(); } catch (e) {}
@@ -33931,6 +34136,7 @@ document.addEventListener('DOMContentLoaded', () => {
       assinatura.initCanvas('sig-documentos');
     } catch (e) { console.error('Erro ao injetar assinatura termo/prescricao:', e); }
     try { cloud.init(); } catch (e) { console.error('Erro cloud.init:', e); }
+    try { cloudRealtime.init(); } catch (e) { console.error('Erro cloudRealtime.init:', e); }
     try { textosPadrao.init(); } catch (e) { console.error('Erro textosPadrao.init:', e); }
     try { pacienteAutocomplete.init(); } catch (e) { console.error('Erro pacienteAutocomplete.init:', e); }
     try { backupCompleto.migrarOrcamentosPresos(); } catch (e) {}

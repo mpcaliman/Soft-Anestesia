@@ -129,11 +129,18 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   automático 1×/sessão ao abrir cada módulo. Detecção de conflito (Fase 5) em
   todos, com diálogo genérico. Cache de ids na sessão evita GETs repetidos.
   localStorage segue como cache/offline.
-- **Fase 5 — Conflitos + Realtime (em andamento):** ✅ concorrência otimista no
-  piloto Pacientes — ao salvar, o app confere se a linha mudou na nuvem
-  (`updated_at`) desde que foi carregada; se mudou, abre resolução de conflito
-  (comparar *meu* × *nuvem*, manter/usar/adiar) em vez de sobrescrever cego.
-  Falta a presença ao vivo via Realtime ("fulano está editando").
+- **Fase 5 — Conflitos + Realtime:** ✅ concorrência otimista em todos os
+  módulos — ao salvar, o app confere se a linha mudou na nuvem (`updated_at`)
+  desde que foi carregada; se mudou, abre resolução de conflito (comparar *meu*
+  × *nuvem*, manter/usar/adiar) em vez de sobrescrever cego. ✅ **Tempo real
+  (beta, opt-in)** via Supabase Realtime: escuta mudanças no banco e atualiza o
+  módulo aberto; best-effort/silent-fail, com status visível no Diagnóstico.
+- **Anexos no Storage:** ✅ os anexos já sobem ao Storage; agora seus **metadados
+  são registrados na tabela `attachments`** (idempotente por `storage_path`,
+  índice em `0004_attachments_index.sql`), vinculados a paciente/encounter.
+- **Diagnóstico da nuvem:** ✅ tela em Ajustes compara, tabela a tabela, o que
+  está no aparelho × no banco relacional, com fila pendente, última sync e
+  saúde da conexão.
 - **Fase 6+ — Pré reorganizada, Ficha/linha do tempo unificada, SRPA,
   Financeiro (rascunho/conciliação), anexos no Storage, PDF versionado, tela de
   diagnóstico da nuvem, testes.**
