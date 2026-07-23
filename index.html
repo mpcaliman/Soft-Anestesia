@@ -7447,6 +7447,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     <button class="btn btn-primary" onclick="financeiro.editar(null)"><span class="icon">+</span> Novo registro</button>
     <button class="btn btn-primary" onclick="financeiro.conciliar()" title="Buscar evento por paciente, conferir previsto × recebido × glosa e classificar"><span class="icon">🔄</span> Conciliação</button>
     <button class="btn btn-success" onclick="financeiro.relatorios()" title="Relatórios de conciliação detalhada por código TUSS"><span class="icon">📊</span> Relatórios</button>
+    <button class="btn" onclick="financeiro.caixa.abrir()" title="Fechamento de caixa do dia: recebido, realizado e a receber, por convênio e forma de pagamento"><span class="icon">🧾</span> Fechar caixa</button>
     <button class="btn btn-success" onclick="financeiro.relatorioMensal()" title="Relatório mensal consolidado em PDF"><span class="icon">📄</span> Relatório mensal (PDF)</button>
     <button class="btn" onclick="historico.abrir('financeiro')"><span class="icon">🔍</span> Buscar / Histórico</button>
     <button class="btn" onclick="printPreview.abrir()"><span class="icon">🖨️</span> Visualizar / Imprimir</button>
@@ -9086,6 +9087,7 @@ const STORAGE = {
   documentos:  'medsys.v7.documentos',
   risco:       'medsys.v3.risco',
   financeiro:  'medsys.v3.financeiro',
+  fin_fechamentos: 'medsys.v7.fin_fechamentos',
   agenda:      'medsys.v3.agenda',
   pacientes:   'medsys.v5.pacientes',
   cad_anestesistas: 'medsys.v5.cad.anestesistas',
@@ -9740,7 +9742,7 @@ const backupCompleto = {
   /* Todas as chaves de localStorage que compõem os dados do usuário */
   CHAVES: [
     'pre','consulta','anestesia','recuperacao','termo','prescricao','risco',
-    'financeiro','agenda','pacientes','orcamento','orcamento_cfg',
+    'financeiro','fin_fechamentos','agenda','pacientes','orcamento','orcamento_cfg',
     'cad_anestesistas','cad_cirurgioes','cad_clinicas','cad_convenios',
     'cad_procedimentos','cad_pagamentos','cad_presets_med','cad_assinaturas',
     'cad_assinatura_ativa','termo_padrao'
@@ -33198,6 +33200,118 @@ const financeiro = {
       return true;
     });
   },
+
+  /* ============ FECHAMENTO DE CAIXA DO DIA ============
+     Consolida, para uma data: o que foi REALIZADO (por data_proc) e o que foi
+     RECEBIDO (por data de pagamento/recebimento), com quebra por convênio e
+     forma de pagamento, e o "a receber". Pode salvar um snapshot persistente. */
+  caixa: {
+    _num(v) { return parseFloat(v) || 0; },
+    _dataRec(x) { return x.data_recebimento || x.data_pagamento || ''; },
+    _valorRec(x) { const n = financeiro.caixa._num; return n(x.valor_recebido) || n(x.valor_pago); },
+    _resumo(dataISO) {
+      const num = financeiro.caixa._num;
+      const lista = store.list('financeiro');
+      const realizados = lista.filter(x => (x.data_proc || '') === dataISO);
+      const recebidos = lista.filter(x => financeiro.caixa._dataRec(x) === dataISO && financeiro.caixa._valorRec(x) > 0);
+      const somaPrev = realizados.reduce((s, x) => s + num(x.valor_previsto), 0);
+      const somaGlo = realizados.reduce((s, x) => s + num(x.glosa), 0);
+      const somaRec = recebidos.reduce((s, x) => s + financeiro.caixa._valorRec(x), 0);
+      const aReceber = realizados.reduce((s, x) => s + (num(x.valor_previsto) - num(x.valor_recebido) - num(x.glosa)), 0);
+      const porForma = {}, porConvenio = {};
+      recebidos.forEach(x => {
+        const vf = financeiro.caixa._valorRec(x);
+        const kf = x.tipo_pagamento || '—'; porForma[kf] = (porForma[kf] || 0) + vf;
+        const kc = x.convenio || x.tipo_pagamento || '—'; porConvenio[kc] = (porConvenio[kc] || 0) + vf;
+      });
+      return { dataISO, realizados, recebidos, somaPrev, somaGlo, somaRec, aReceber, porForma, porConvenio };
+    },
+    abrir(dataISO) { financeiro.caixa._render(dataISO || utils.hojeISO()); },
+    onData(v) { if (v) financeiro.caixa._render(v); },
+    _render(dataISO) {
+      const r = financeiro.caixa._resumo(dataISO);
+      const fmt = n => 'R$ ' + utils.formatarBR(n);
+      const rows = (obj) => {
+        const es = Object.entries(obj).sort((a, b) => b[1] - a[1]);
+        return es.length ? es.map(([k, v]) => `<tr><td>${utils.escapeHTML(k)}</td><td style="text-align:right;font-variant-numeric:tabular-nums">${fmt(v)}</td></tr>`).join('')
+          : '<tr><td colspan="2" style="color:var(--text-mute)">Nenhum recebimento nesta data</td></tr>';
+      };
+      const fechs = financeiro.caixa._listar();
+      const listaFechs = fechs.length ? fechs.map(f => `
+        <tr>
+          <td>${utils.formatarData(f.data)}</td>
+          <td style="text-align:right;font-variant-numeric:tabular-nums">${fmt(f.somaRec)}</td>
+          <td style="text-align:right;font-variant-numeric:tabular-nums">${fmt(f.aReceber)}</td>
+          <td style="font-size:.78rem;color:var(--text-mute)">${utils.escapeHTML(f.nota || '')}</td>
+          <td style="text-align:right"><button class="btn btn-xs" onclick="financeiro.caixa.abrir('${f.data}')" title="Abrir esta data">↗</button>
+            <button class="btn btn-xs btn-danger" onclick="financeiro.caixa.excluir('${f._id}','${dataISO}')">×</button></td>
+        </tr>`).join('') : '<tr><td colspan="5" style="color:var(--text-mute)">Nenhum fechamento salvo ainda</td></tr>';
+      const html = `
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+          <label style="font-size:.82rem;font-weight:600">Data do caixa</label>
+          <input type="date" id="caixa-data" value="${dataISO}" onchange="financeiro.caixa.onData(this.value)" style="font-size:.9rem;padding:6px 8px">
+        </div>
+        <div class="totalizadores" style="margin-bottom:14px">
+          <div class="totalizador"><div class="lbl">Recebido no dia</div><div class="val accent">${fmt(r.somaRec)}</div></div>
+          <div class="totalizador"><div class="lbl">Realizado (previsto)</div><div class="val">${fmt(r.somaPrev)}</div></div>
+          <div class="totalizador"><div class="lbl">Glosa</div><div class="val danger">${fmt(r.somaGlo)}</div></div>
+          <div class="totalizador"><div class="lbl">A receber (realizados)</div><div class="val ${r.aReceber > 0 ? 'warn' : 'accent'}">${fmt(r.aReceber)}</div></div>
+          <div class="totalizador"><div class="lbl">Nº realizados</div><div class="val">${r.realizados.length}</div></div>
+          <div class="totalizador"><div class="lbl">Nº recebimentos</div><div class="val">${r.recebidos.length}</div></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+          <div>
+            <h3 style="font-size:.85rem;color:var(--primary-darker);margin:0 0 6px">Recebido por forma de pagamento</h3>
+            <table class="data" style="width:100%"><tbody>${rows(r.porForma)}</tbody></table>
+          </div>
+          <div>
+            <h3 style="font-size:.85rem;color:var(--primary-darker);margin:0 0 6px">Recebido por convênio</h3>
+            <table class="data" style="width:100%"><tbody>${rows(r.porConvenio)}</tbody></table>
+          </div>
+        </div>
+        <div style="margin-bottom:14px">
+          <label style="font-size:.82rem;font-weight:600;display:block;margin-bottom:4px">Observação do fechamento</label>
+          <input type="text" id="caixa-nota" placeholder="Ex.: caixa conferido, depósito nº..., pendências..." style="width:100%;padding:7px 9px;font-size:.88rem">
+        </div>
+        <div style="border-top:1px solid var(--border);padding-top:10px">
+          <h3 style="font-size:.85rem;color:var(--primary-darker);margin:0 0 6px">Fechamentos salvos</h3>
+          <table class="data" style="width:100%">
+            <thead><tr><th>Data</th><th style="text-align:right">Recebido</th><th style="text-align:right">A receber</th><th>Obs.</th><th></th></tr></thead>
+            <tbody>${listaFechs}</tbody>
+          </table>
+        </div>`;
+      modal.open('🧾 Fechamento de caixa', html,
+        '<button class="btn" onclick="modal.close()">Fechar</button>' +
+        '<button class="btn btn-success" onclick="financeiro.caixa.salvar(document.getElementById(\'caixa-data\').value)">💾 Salvar fechamento do dia</button>');
+    },
+    salvar(dataISO) {
+      if (!dataISO) return;
+      const r = financeiro.caixa._resumo(dataISO);
+      const nota = (document.getElementById('caixa-nota') || {}).value || '';
+      let por = '';
+      try { const u = auth.usuarioAtual(); por = (u && (u.nome || u.usuario)) || ''; } catch (e) {}
+      const list = store.list('fin_fechamentos');
+      /* Um fechamento por data: substitui se já existe */
+      const semData = list.filter(x => x.data !== dataISO);
+      semData.unshift({
+        _id: utils.uid(), data: dataISO, fechadoEm: new Date().toISOString(), por, nota,
+        somaPrev: r.somaPrev, somaRec: r.somaRec, somaGlo: r.somaGlo, aReceber: r.aReceber,
+        nRealizados: r.realizados.length, nRecebidos: r.recebidos.length,
+        porForma: r.porForma, porConvenio: r.porConvenio
+      });
+      store.setList('fin_fechamentos', semData);
+      toast('🧾 Caixa de ' + utils.formatarData(dataISO) + ' fechado e salvo');
+      financeiro.caixa._render(dataISO);
+    },
+    _listar() { try { return store.list('fin_fechamentos').slice().sort((a, b) => (b.data || '').localeCompare(a.data || '')); } catch (e) { return []; } },
+    excluir(id, dataISO) {
+      if (!confirm('Excluir este fechamento salvo? (não altera os lançamentos)')) return;
+      const list = store.list('fin_fechamentos').filter(x => x._id !== id);
+      store.setList('fin_fechamentos', list);
+      financeiro.caixa._render(dataISO || utils.hojeISO());
+    }
+  },
+
   render() {
     const list = financeiro.filtrar();
     const tbody = document.getElementById('financeiro-tbody');

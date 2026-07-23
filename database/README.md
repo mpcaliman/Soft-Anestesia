@@ -191,7 +191,15 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   id), **número da revisão**, **status** (Rascunho/Finalizado) e **data/hora da
   última edição** — rastreabilidade médico-legal, sem SQL novo. Documento não
   salvo aparece como *Rascunho não salvo*.
-- **Fase 6+ — Financeiro (rascunho/conciliação), testes.** (itens remanescentes)
+- **Financeiro — fechamento de caixa do dia:** ✅ botão *Fechar caixa* abre um
+  resumo por data (padrão hoje): **recebido no dia** (por data de
+  pagamento/recebimento), **realizado** (por data do procedimento), **glosa** e
+  **a receber**, com quebra por **forma de pagamento** e por **convênio**.
+  Permite **salvar um snapshot** persistente (um por data, com observação e quem
+  fechou) e lista os fechamentos anteriores. Entra no backup completo
+  (`fin_fechamentos`). Conciliação por código TUSS, status por lançamento,
+  regras por convênio e relatório mensal em PDF já existiam.
+- **Fase 6+ — Testes.** (itens remanescentes)
 
 ## Rollback
 
