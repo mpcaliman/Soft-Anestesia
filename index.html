@@ -2046,8 +2046,10 @@ path.dash-clickable:hover { opacity: .8; }
   border: 2px solid #fff; box-sizing: border-box;
 }
 @media (max-width: 700px) {
-  .fab-carimbo { bottom: 78px; right: 16px; width: 56px; height: 56px; }
+  /* Pilha acima da dose-quickbar (bottom 76 + ~52px de altura) */
+  .fab-carimbo { bottom: 140px; right: 16px; width: 56px; height: 56px; }
   .fab-carimbo-icon { font-size: 1.55rem; }
+  .fab-vitais { bottom: 204px; right: 16px; width: 56px; height: 56px; }
 }
 @media print { .fab-carimbo { display: none !important; } }
 /* FAB dedicado: registrar sinais vitais AGORA (acima do relógio) */
@@ -2079,10 +2081,10 @@ path.dash-clickable:hover { opacity: .8; }
 .fab-mini:active { transform: scale(.9); }
 #fab-med    { bottom: 228px; background: linear-gradient(135deg, #7c3aed, #5b21b6); }
 #fab-tempos { bottom: 286px; background: linear-gradient(135deg, #d97706, #b45309); }
-@media (max-width: 640px) {
+@media (max-width: 700px) {
   .fab-mini { width: 44px; height: 44px; right: 22px; font-size: 1.2rem; }
-  #fab-med    { bottom: 206px; }
-  #fab-tempos { bottom: 258px; }
+  #fab-med    { bottom: 268px; }
+  #fab-tempos { bottom: 318px; }
 }
 
 /* Modal de tempos: linhas grandes, um toque por etapa */
@@ -2607,11 +2609,14 @@ span.md-chip.md-nada { cursor: default; opacity: .6; font-weight: 500; }
 .modal-backdrop {
   position: fixed; inset: 0;
   background: rgba(15, 37, 64, .55);
-  z-index: 500;
+  z-index: 1290;   /* acima dos FABs (1200) e da dose-quickbar (899) */
   display: none;
   align-items: center; justify-content: center;
   padding: 20px;
 }
+/* Com um modal aberto, nada flutua por cima dele */
+body.tem-modal .fab-carimbo, body.tem-modal .fab-vitais, body.tem-modal .fab-mini,
+body.tem-modal .dose-quickbar, body.tem-modal .cronometros-wrap { display: none !important; }
 .modal-backdrop.show { display: flex; }
 .modal {
   background: #fff;
@@ -27090,9 +27095,12 @@ const modal = {
     document.getElementById('modal-body').innerHTML = bodyHTML;
     document.getElementById('modal-footer').innerHTML = footerHTML;
     document.getElementById('modal-backdrop').classList.add('show');
+    /* esconde FABs/barras flutuantes enquanto o modal está aberto */
+    document.body.classList.add('tem-modal');
   },
   close() {
     document.getElementById('modal-backdrop').classList.remove('show');
+    document.body.classList.remove('tem-modal');
   }
 };
 /* Fechar com clique fora */
