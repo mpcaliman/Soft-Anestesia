@@ -170,8 +170,15 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   cronológica** (revisão do caso). Lê os dados que já estão na ficha — não muda
   o modelo. A tabela `anesthesia_timeline_events` fica para uma futura fonte
   única relacional, se/quando valer o refactor.
-- **Fase 6+ — Pré reorganizada, SRPA, Financeiro (rascunho/conciliação), PDF
-  versionado, testes.** (itens remanescentes)
+- **Pré-anestésica reorganizada:** ✅ uma **barra de navegação por seções** no
+  topo da avaliação (Identificação · Anamnese · Exames · Pareceres · Risco ·
+  Conclusões) mostra o **status de preenchimento** de cada bloco (vazio ○ /
+  parcial ● / completo ✓) e, ao tocar, **rola e abre** a seção. Ao **finalizar**,
+  um **checklist gentil** avisa se faltam itens essenciais (ASA, via aérea,
+  jejum, conclusão/aptidão) — sem travar (dá para finalizar mesmo assim). A barra
+  não sai na impressão.
+- **Fase 6+ — SRPA, Financeiro (rascunho/conciliação), PDF versionado, testes.**
+  (itens remanescentes)
 
 ## Rollback
 
