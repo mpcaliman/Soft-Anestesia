@@ -8312,11 +8312,28 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       </div>
       <div class="card-body">
         <p style="font-size:.8rem;color:var(--text-soft);margin-bottom:12px">
-          O sistema pede usuário e senha ao abrir e bloqueia após 5 minutos de inatividade.
+          O sistema pede usuário e senha ao abrir e bloqueia automaticamente por inatividade.
           Cada usuário tem um perfil (Administrador, Médico ou Secretária/Auxiliar) que define quais módulos pode acessar.
         </p>
         <div style="font-size:.74rem;color:var(--text-mute);background:var(--surface-alt);padding:9px 12px;border-radius:7px;margin-bottom:14px">
           ⚠️ Esta é uma trava de acesso local (as senhas ficam guardadas em hash neste aparelho). Para segurança real dos dados, mantenha a senha/biometria do próprio dispositivo ativada.
+        </div>
+
+        <!-- 🔐 Bloqueio de tela -->
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:14px;padding:11px 12px;background:var(--surface-alt);border-radius:8px">
+          <div style="flex:1;min-width:180px">
+            <label for="seg-timeout" style="font-size:.8rem;font-weight:600;display:block;margin-bottom:3px">🔒 Bloqueio automático por inatividade</label>
+            <small style="font-size:.72rem;color:var(--text-mute)">Após esse tempo sem uso, pede a senha de novo.</small>
+          </div>
+          <select id="seg-timeout" onchange="auth.definirTimeout(parseInt(this.value,10))" style="font-size:.85rem;padding:6px 8px">
+            <option value="2">2 minutos</option>
+            <option value="5">5 minutos</option>
+            <option value="10">10 minutos</option>
+            <option value="15">15 minutos</option>
+            <option value="30">30 minutos</option>
+            <option value="0">Nunca</option>
+          </select>
+          <button type="button" class="btn btn-sm" onclick="auth.bloquearAgora()" title="Sair e pedir a senha imediatamente">🔒 Bloquear agora</button>
         </div>
 
         <div id="usuarios-lista"></div>
@@ -13179,11 +13196,14 @@ const auth = {
     const senha = document.getElementById('auth-pass').value || '';
     const errEl = document.getElementById('auth-error');
     errEl.textContent = '';
+    const espera = auth._throttleRestante();
+    if (espera > 0) { errEl.textContent = 'Muitas tentativas. Aguarde ' + espera + 's e tente de novo.'; return; }
     const lista = auth._lerUsuarios();
     const u = lista.find(x => x.usuario === usuario);
-    if (!u) { errEl.textContent = 'Usuário ou senha inválidos.'; return; }
+    if (!u) { auth._registrarFalha(); errEl.textContent = 'Usuário ou senha inválidos.'; return; }
     const hash = await auth._hash(senha);
-    if (hash !== u.senhaHash) { errEl.textContent = 'Usuário ou senha inválidos.'; return; }
+    if (hash !== u.senhaHash) { auth._registrarFalha(); errEl.textContent = 'Usuário ou senha inválidos.'; return; }
+    auth._limparFalhas();
     auth._definirSessao(u);
     document.getElementById('auth-pass').value = '';
     auth._desbloquear();
@@ -13257,6 +13277,8 @@ const auth = {
     const errEl = document.getElementById('auth-error');
     errEl.textContent = '';
     if (!id || !senha) { errEl.textContent = 'Preencha e-mail/usuário e senha.'; return; }
+    const espera = auth._throttleRestante();
+    if (espera > 0) { errEl.textContent = 'Muitas tentativas. Aguarde ' + espera + 's e tente de novo.'; return; }
 
     /* 1) USUÁRIO LOCAL (equipe) cadastrado neste aparelho — aceita usuário OU e-mail,
        online ou offline. É o caso dos usuários criados em Ajustes → Usuários. */
@@ -13264,6 +13286,7 @@ const auth = {
     if (local) {
       const hash = await auth._hash(senha);
       if (hash === local.senhaHash) {
+        auth._limparFalhas();
         auth._definirSessao(local);
         document.getElementById('auth-pass').value = '';
         auth._desbloquear();
@@ -13271,7 +13294,7 @@ const auth = {
       }
       /* existe usuário local com esse login, mas a senha não confere;
          se NÃO for e-mail, não há nuvem a tentar → encerra */
-      if (!id.includes('@')) { errEl.textContent = 'Usuário ou senha inválidos.'; return; }
+      if (!id.includes('@')) { auth._registrarFalha(); errEl.textContent = 'Usuário ou senha inválidos.'; return; }
       /* se for e-mail, ainda tenta a nuvem (a senha pode ter mudado lá) */
     }
 
@@ -13296,9 +13319,11 @@ const auth = {
           auth._definirSessao(u);
           document.getElementById('auth-pass').value = '';
           auth._desbloquear();
+          auth._limparFalhas();
           setTimeout(() => { try { cloud.sincronizar({ silent: true }); } catch (e) {} }, 900);
           return;
         }
+        auth._registrarFalha();
         errEl.textContent = 'E-mail ou senha inválidos.';
         return;
       }
@@ -13308,6 +13333,7 @@ const auth = {
     }
 
     /* 3) não é e-mail e não há usuário local com esse login */
+    auth._registrarFalha();
     errEl.textContent = 'Usuário ou senha inválidos.';
   },
 
@@ -13398,7 +13424,7 @@ const auth = {
       <div class="auth-error" id="auth-error"></div>
       <button type="submit" class="auth-btn">Entrar</button>`;
     form.onsubmit = (e) => { e.preventDefault(); auth.tentarLogin(); };
-    foot.innerHTML = 'Bloqueia automaticamente após 5 minutos de inatividade.<br>' +
+    foot.innerHTML = (auth._timeoutMin() > 0 ? ('Bloqueia automaticamente após ' + auth._timeoutMin() + ' minutos de inatividade.<br>') : '') +
       '<a href="javascript:void(0)" onclick="auth._render()" style="color:var(--primary);font-size:.85rem">← Entrar com a conta da nuvem</a> · ' +
       '<a href="javascript:void(0)" onclick="auth._socorro()" style="color:var(--text-mute);font-size:.85rem">Problemas para entrar?</a>';
   },
@@ -13599,6 +13625,17 @@ const auth = {
   },
 
   /* ---------- Timeout de inatividade (5 min) ---------- */
+  /* Tempo de bloqueio por inatividade — configurável (minutos; 0 = nunca). */
+  TIMEOUT_KEY: 'medsys.v7.auth.timeout_min',
+  _timeoutMin() { const v = parseInt(localStorage.getItem(auth.TIMEOUT_KEY), 10); return isNaN(v) ? 5 : v; },
+  _timeoutMs() { const m = auth._timeoutMin(); return m > 0 ? m * 60 * 1000 : 0; },
+  definirTimeout(min) {
+    localStorage.setItem(auth.TIMEOUT_KEY, String(min));
+    if (auth.estaLogado()) auth._resetTimer();
+    toast(min > 0 ? '🔒 Bloqueio automático: ' + min + ' min' : '🔓 Bloqueio automático desativado');
+  },
+  bloquearAgora() { if (auth.estaLogado()) auth.logout(); },
+
   _iniciarTimer() {
     auth._pararTimer();
     const reset = () => auth._resetTimer();
@@ -13609,12 +13646,23 @@ const auth = {
   _resetTimer() {
     if (!auth.estaLogado()) return;
     clearTimeout(auth._timer);
+    const ms = auth._timeoutMs();
+    if (!ms) return;   /* 0 = nunca bloqueia por inatividade */
     auth._timer = setTimeout(() => {
       toast('Sessão bloqueada por inatividade');
       auth.logout();
-    }, auth.TIMEOUT_MS);
+    }, ms);
   },
   _pararTimer() { clearTimeout(auth._timer); auth._timer = null; },
+
+  /* Anti-força-bruta: após 5 senhas erradas, bloqueia por 30 s. */
+  _falhas: 0, _bloqueioAte: 0,
+  _throttleRestante() { const r = Math.ceil((auth._bloqueioAte - Date.now()) / 1000); return r > 0 ? r : 0; },
+  _registrarFalha() {
+    auth._falhas++;
+    if (auth._falhas >= 5) { auth._bloqueioAte = Date.now() + 30000; auth._falhas = 0; }
+  },
+  _limparFalhas() { auth._falhas = 0; auth._bloqueioAte = 0; },
 
   /* Migração: usuários antigos com acesso ao Receituário ganham também o novo
      módulo Documentos (mesmo nível), para não perder o fluxo de atestados. */
@@ -13756,6 +13804,8 @@ const demo = {
 const ajustesUsuarios = {
   /* Renderiza a lista de usuários no card de Ajustes */
   render() {
+    const sel = document.getElementById('seg-timeout');
+    if (sel) sel.value = String(auth._timeoutMin());
     const cont = document.getElementById('usuarios-lista');
     if (!cont) return;
     const lista = auth._lerUsuarios();
