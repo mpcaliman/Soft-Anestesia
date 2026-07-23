@@ -430,11 +430,18 @@ await test('Ficha: nav de seções com contadores, FAB tempos carimba e FAB med 
     anestesia.tempos.abrir();
     out.modalLinhas = document.querySelectorAll('#tempos-modal-body .tempos-row').length; // 6
     out.temProximo = !!document.querySelector('#tempos-modal-body .tp-proximo');
+    // com modal aberto, os flutuantes somem (não podem cobrir o modal)
+    out.bodyTemModal = document.body.classList.contains('tem-modal');
+    out.fabEscondido = getComputedStyle(document.getElementById('fab-med')).display === 'none';
     anestesia.tempos.marcar('hora_sala_entrada');
     const f = document.getElementById('form-anestesia');
     out.horaMarcada = /^\d{2}:\d{2}/.test((f.querySelector('[name=hora_sala_entrada]') || {}).value || '');
     // depois de marcar, a linha vira feita e o próximo avança
     out.temFeito = !!document.querySelector('#tempos-modal-body .tp-feito');
+    // fechar o modal devolve os flutuantes
+    modal.close();
+    out.fabVoltou = getComputedStyle(document.getElementById('fab-med')).display !== 'none' &&
+      !document.body.classList.contains('tem-modal');
     // nav.ir expande card recolhido
     const card = anestesia.nav._mapa()['8'];
     if (card) card.classList.add('collapsed');
@@ -446,6 +453,8 @@ await test('Ficha: nav de seções com contadores, FAB tempos carimba e FAB med 
   assert(r.fabMed === 'flex' && r.fabTempos === 'flex', 'FABs de med/tempos deveriam estar visíveis na ficha');
   assert(r.navTemContador, 'chip de vitais deveria mostrar contador de linhas');
   assert(r.modalLinhas === 6 && r.temProximo, 'modal de tempos deveria ter 6 linhas com próximo destacado');
+  assert(r.bodyTemModal && r.fabEscondido, 'com modal aberto, os FABs deveriam sumir (não cobrir o modal)');
+  assert(r.fabVoltou, 'ao fechar o modal, os FABs deveriam voltar');
   assert(r.horaMarcada, 'marcar() deveria carimbar HH:MM na entrada em sala');
   assert(r.temFeito, 'linha carimbada deveria ficar como feita');
   assert(r.irExpandiu, 'nav.ir deveria expandir o card recolhido');
