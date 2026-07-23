@@ -5715,6 +5715,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <button type="button" class="btn btn-sm" onclick="anestesia.vitais._gradeRepetir()">⎘ Copiar último registro</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.vitais.duplicarEAjustar()">➕ Igual à anterior + ajustar</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.vitais.addSetModelo()">⚡ Modelo T0/T15/T30/T60</button>
+          <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.vitais.preencherPadrao()" title="Gera sinais vitais na faixa normal (±10%, com leve queda) entre a entrada e a saída de sala">🧪 Preencher padrão (entrada→saída)</button>
           <button type="button" class="btn btn-sm" style="background:#0f7b4f;color:#fff;border-color:#0f7b4f" onclick="captura.abrirMonitor('anestesia')">📷 Capturar do monitor</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.vitais.atualizarGrafico()">↻ Atualizar gráfico</button>
           <button type="button" class="btn btn-sm btn-danger" onclick="anestesia.vitais.limparTabela()">🗑 Limpar</button>
@@ -5794,6 +5795,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       <div class="card-body">
         <div class="quick-actions">
           <span class="qa-label">Pré-sets</span>
+          <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.meds.abrirCatalogo()">📋 Catálogo (multiseleção)</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.meds.addSetComum()">⚡ Set padrão (geral)</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.meds.addPreset('propofol')">+ Propofol</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.meds.addPreset('fentanil')">+ Fentanil</button>
@@ -18223,6 +18225,68 @@ const PRESETS_MED = {
 /* Anestésicos locais e adjuvantes — usados como sugestões em bloqueio regional */
 const PRESETS_AL = ['bupi_hiperbarica','bupi_isobarica','bupi_75','ropi_05','ropi_075','ropi_02','levobupi','lido_2','lido_2_vaso','morfina','morfina_peri','sufentanil','clonidina','dexmedetomidina'];
 const SET_MED_COMUM = ['midazolam','fentanil','propofol','rocuronio','cefazolina','dexametasona','ondansetrona','dipirona'];
+/* Catálogo das medicações mais usadas em anestesia, agrupadas por classe.
+   Multiseleção → entram na tabela para detalhar dose/hora/via. Doses fixas
+   comuns já vêm preenchidas; as por peso ficam em branco. */
+const CATALOGO_MED = [
+  { grupo: 'Hipnóticos / indução', itens: [
+    { nome: 'Propofol', unidade: 'mg', via: 'EV' },
+    { nome: 'Etomidato', unidade: 'mg', via: 'EV' },
+    { nome: 'Cetamina', unidade: 'mg', via: 'EV' },
+    { nome: 'Midazolam', unidade: 'mg', via: 'EV' },
+    { nome: 'Tiopental', unidade: 'mg', via: 'EV' }
+  ]},
+  { grupo: 'Opioides', itens: [
+    { nome: 'Fentanil', unidade: 'mcg', via: 'EV' },
+    { nome: 'Sufentanil', unidade: 'mcg', via: 'EV' },
+    { nome: 'Remifentanil', unidade: 'mcg', via: 'EV' },
+    { nome: 'Alfentanil', unidade: 'mcg', via: 'EV' },
+    { nome: 'Morfina', unidade: 'mg', via: 'EV' },
+    { nome: 'Tramadol', dose: '100', unidade: 'mg', via: 'EV' }
+  ]},
+  { grupo: 'Bloqueadores neuromusculares', itens: [
+    { nome: 'Succinilcolina', unidade: 'mg', via: 'EV' },
+    { nome: 'Rocurônio', unidade: 'mg', via: 'EV' },
+    { nome: 'Cisatracúrio', unidade: 'mg', via: 'EV' },
+    { nome: 'Atracúrio', unidade: 'mg', via: 'EV' }
+  ]},
+  { grupo: 'Reversores / anticolinérgicos', itens: [
+    { nome: 'Sugammadex', unidade: 'mg', via: 'EV' },
+    { nome: 'Neostigmina', unidade: 'mg', via: 'EV' },
+    { nome: 'Atropina', unidade: 'mg', via: 'EV' }
+  ]},
+  { grupo: 'Vasoativos', itens: [
+    { nome: 'Efedrina', unidade: 'mg', via: 'EV' },
+    { nome: 'Fenilefrina', unidade: 'mcg', via: 'EV' },
+    { nome: 'Metaraminol', unidade: 'mg', via: 'EV' },
+    { nome: 'Noradrenalina', unidade: 'mcg/kg/min', via: 'EV' },
+    { nome: 'Adrenalina', unidade: 'mcg', via: 'EV' },
+    { nome: 'Dobutamina', unidade: 'mcg/kg/min', via: 'EV' }
+  ]},
+  { grupo: 'Antieméticos / corticoide', itens: [
+    { nome: 'Ondansetrona', dose: '4', unidade: 'mg', via: 'EV' },
+    { nome: 'Metoclopramida', dose: '10', unidade: 'mg', via: 'EV' },
+    { nome: 'Dexametasona', dose: '10', unidade: 'mg', via: 'EV' }
+  ]},
+  { grupo: 'Analgésicos / AINE', itens: [
+    { nome: 'Dipirona', dose: '2', unidade: 'g', via: 'EV' },
+    { nome: 'Cetoprofeno', dose: '100', unidade: 'mg', via: 'EV' },
+    { nome: 'Tenoxicam', dose: '40', unidade: 'mg', via: 'EV' },
+    { nome: 'Lidocaína', unidade: 'mg', via: 'EV' }
+  ]},
+  { grupo: 'Antibióticos', itens: [
+    { nome: 'Cefazolina', dose: '2', unidade: 'g', via: 'EV' },
+    { nome: 'Cefuroxima', dose: '1.5', unidade: 'g', via: 'EV' },
+    { nome: 'Clindamicina', dose: '600', unidade: 'mg', via: 'EV' }
+  ]},
+  { grupo: 'Outros', itens: [
+    { nome: 'Sulfato de magnésio', unidade: 'g', via: 'EV' },
+    { nome: 'Ácido tranexâmico', dose: '1', unidade: 'g', via: 'EV' },
+    { nome: 'Hidrocortisona', dose: '100', unidade: 'mg', via: 'EV' },
+    { nome: 'Omeprazol', dose: '40', unidade: 'mg', via: 'EV' },
+    { nome: 'Dexmedetomidina', unidade: 'mcg', via: 'EV' }
+  ]}
+];
 const UNIDADES = ['mg', 'mcg', 'g', 'mL', 'L', 'L/min', 'UI', '%', 'cp', 'mg/kg', 'mcg/kg', 'ng/dL', 'mcg/kg/min', 'mcg/min', 'mg/h', 'mcg/kg/h', 'mL/h', 'ng/mL', 'CAM'];
 const VIAS = ['EV', 'IM', 'SC', 'VO', 'SL', 'IT', 'Peridural', 'Subaracnóideo', 'Tópica', 'Inalatória'];
 
@@ -19702,6 +19766,49 @@ const anestesia = {
         if (el) el.style.opacity = isInf ? '1' : '.5';
       });
       markDirty();
+    },
+    /* Catálogo de medicações (multiseleção). Abre um diálogo com as mais
+       usadas, agrupadas; as marcadas entram na tabela para detalhar. */
+    abrirCatalogo() {
+      const corpo =
+        '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">Marque as medicações usadas. Elas entram na tabela para você detalhar <b>dose, hora e via</b>.</p>' +
+        '<div style="margin-bottom:10px"><input type="text" id="cat-med-busca" placeholder="🔎 filtrar medicação…" style="width:100%;padding:8px" oninput="anestesia.meds._catalogoFiltrar(this.value)"></div>' +
+        '<div id="cat-med-lista" style="max-height:52vh;overflow:auto">' +
+        CATALOGO_MED.map((g, gi) =>
+          '<div class="cat-med-grupo"><div style="font-size:.74rem;font-weight:700;color:var(--primary-darker);text-transform:uppercase;letter-spacing:.3px;margin:10px 0 4px">' + utils.escapeHTML(g.grupo) + '</div>' +
+          '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
+          g.itens.map((m, mi) =>
+            '<label class="cat-med-item" data-nome="' + utils.escapeAttr(m.nome.toLowerCase()) + '" style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:16px;padding:6px 12px;font-size:.84rem;cursor:pointer;background:var(--surface-alt)">' +
+            '<input type="checkbox" data-g="' + gi + '" data-m="' + mi + '" style="width:16px;height:16px">' + utils.escapeHTML(m.nome) +
+            (m.dose ? ' <small style="color:var(--text-mute)">' + m.dose + ' ' + (m.unidade || '') + '</small>' : '') +
+            '</label>').join('') +
+          '</div></div>').join('') +
+        '</div>';
+      modal.open('📋 Catálogo de medicações', corpo,
+        '<button class="btn btn-primary" onclick="anestesia.meds._catalogoConfirmar()">Adicionar selecionadas</button>' +
+        '<button class="btn" onclick="modal.close()">Cancelar</button>');
+    },
+    _catalogoFiltrar(txt) {
+      const q = (txt || '').toLowerCase().trim();
+      document.querySelectorAll('#cat-med-lista .cat-med-item').forEach(el => {
+        el.style.display = (!q || (el.dataset.nome || '').includes(q)) ? '' : 'none';
+      });
+      document.querySelectorAll('#cat-med-lista .cat-med-grupo').forEach(g => {
+        const algum = Array.from(g.querySelectorAll('.cat-med-item')).some(el => el.style.display !== 'none');
+        g.style.display = algum ? '' : 'none';
+      });
+    },
+    _catalogoConfirmar() {
+      const marcados = Array.from(document.querySelectorAll('#cat-med-lista input[type="checkbox"]:checked'));
+      if (!marcados.length) { toast('Nenhuma medicação marcada', 'warn'); return; }
+      marcados.forEach(chk => {
+        const g = CATALOGO_MED[+chk.dataset.g]; if (!g) return;
+        const m = g.itens[+chk.dataset.m]; if (!m) return;
+        anestesia.meds.add({ nome: m.nome, dose: m.dose || '', unidade: m.unidade || 'mg', via: m.via || 'EV' });
+      });
+      markDirty();
+      modal.close();
+      toast('✅ ' + marcados.length + ' medicação(ões) adicionada(s) — detalhe dose/hora/via');
     },
     addPreset(chave) {
       const p = PRESETS_MED[chave]; if (!p) return;
@@ -21867,6 +21974,90 @@ const anestesia = {
         anestesia.vitais.ajustarLinha(btnFake || { closest: () => novaTr });
       }
       toast('🩺 Sinais vitais às ' + hora + ' — ajuste o que mudou');
+    },
+
+    /* Faixas fisiológicas normais para geração de dados-modelo.
+       base = valor normal; decl = queda proporcional ao longo da anestesia
+       (BP/FC caem um pouco); jit = variação aleatória (±); min/max = limites;
+       dec = casas decimais. Params sem modelo confiável ficam de fora. */
+    _BASE_PADRAO: {
+      pas:  { base: 122, decl: 0.14, jit: 0.08, min: 82,  dec: 0 },
+      pad:  { base: 76,  decl: 0.14, jit: 0.08, min: 48,  dec: 0 },
+      fc:   { base: 80,  decl: 0.12, jit: 0.08, min: 52,  dec: 0 },
+      spo2: { base: 99,  decl: 0,    jit: 0.015, min: 95, max: 100, dec: 0 },
+      etco2:{ base: 34,  decl: 0,    jit: 0.08, min: 29,  max: 41, dec: 0 },
+      fr:   { base: 13,  decl: 0,    jit: 0.10, min: 10,  max: 16, dec: 0 },
+      temp: { base: 36.3,decl: 0.02, jit: 0.008,min: 35.3,max: 37, dec: 1 },
+      bis:  { base: 45,  decl: 0,    jit: 0.14, min: 38,  max: 58, dec: 0 },
+      glic: { base: 108, decl: 0,    jit: 0.10, min: 80,  dec: 0 },
+      pvc:  { base: 8,   decl: 0,    jit: 0.18, min: 3,   dec: 0 },
+      scvo2:{ base: 72,  decl: 0,    jit: 0.06, min: 60,  max: 85, dec: 0 },
+      cam:  { base: 1.0, decl: 0,    jit: 0.12, min: 0.7, max: 1.3, dec: 1 }
+    },
+    _valorPadrao(param, prog) {
+      const s = anestesia.vitais._BASE_PADRAO[param];
+      if (!s) return null;   /* param sem modelo → deixa em branco */
+      let v = s.base * (1 - (s.decl || 0) * prog);
+      v = v * (1 + (Math.random() * 2 - 1) * (s.jit || 0.1));
+      if (s.min != null) v = Math.max(s.min, v);
+      if (s.max != null) v = Math.min(s.max, v);
+      return s.dec ? v.toFixed(s.dec) : String(Math.round(v));
+    },
+
+    /* Gera sinais vitais nos parâmetros ATIVOS, dentro da faixa normal com
+       variação e leve queda ao longo da anestesia, distribuídos entre a
+       entrada e a saída de sala (pede os horários se ainda não houver). */
+    preencherPadrao() {
+      anestesia.graficoUI._contexto = (state.currentModule === 'recuperacao') ? 'recuperacao' : 'anestesia';
+      const f = document.getElementById('form-anestesia');
+      const campo = (n) => f && f.querySelector('[name="' + n + '"]');
+      const valOf = (n) => { const el = campo(n); return el ? (el.value || '').trim() : ''; };
+      const okHora = (s) => /^\d{1,2}:\d{2}$/.test(s);
+
+      let entrada = valOf('hora_sala_entrada') || valOf('hora_inicio');
+      let saida   = valOf('hora_sala_saida')   || valOf('hora_fim');
+      if (!okHora(entrada)) {
+        entrada = (prompt('Informe a hora de ENTRADA em sala (HH:MM):', '') || '').trim();
+        if (!okHora(entrada)) { toast('Hora de entrada inválida', 'warn'); return; }
+        const el = campo('hora_sala_entrada'); if (el) { el.value = entrada; try { anestesia.calc.duracao(); } catch (e) {} }
+      }
+      if (!okHora(saida)) {
+        saida = (prompt('Informe a hora de SAÍDA de sala (HH:MM):', '') || '').trim();
+        if (!okHora(saida)) { toast('Hora de saída inválida', 'warn'); return; }
+        const el = campo('hora_sala_saida'); if (el) { el.value = saida; try { anestesia.calc.duracao(); } catch (e) {} }
+      }
+      const toMin = (s) => { const [h, m] = s.split(':').map(Number); return h * 60 + m; };
+      let ini = toMin(entrada), fim = toMin(saida);
+      if (fim <= ini) fim += 24 * 60;   /* cruzou meia-noite */
+      const dur = fim - ini;
+      if (dur < 5) { toast('Intervalo entrada–saída muito curto', 'warn'); return; }
+
+      const bodyId = anestesia.graficoUI._ctxIds().vitaisBody;
+      const tbody = document.getElementById(bodyId);
+      const existentes = tbody ? tbody.querySelectorAll('tr').length : 0;
+      if (existentes > 0) {
+        if (!confirm('Já há ' + existentes + ' registro(s) de sinais vitais. Substituir por um conjunto padrão gerado (' + entrada + '–' + saida + ')?')) return;
+        tbody.innerHTML = '';
+      }
+
+      const passo = dur > 120 ? 15 : 10;   /* a cada 10 min (15 se muito longo) */
+      const ativos = anestesia.vitais._paramsAtivos();
+      const n = Math.max(2, Math.floor(dur / passo));
+      for (let i = 0; i <= n; i++) {
+        const t = ini + i * passo;
+        if (t > fim) break;
+        const prog = n ? i / n : 0;
+        const dados = { hora: anestesia.graficoUI.tToHora(t % (24 * 60)) };
+        ativos.forEach(p => {
+          if (p === 'pam' || p === 'ritmo') return;   /* PAM é calculada; ritmo é texto */
+          const v = anestesia.vitais._valorPadrao(p, prog);
+          if (v != null) dados[p] = v;
+        });
+        anestesia.vitais.add(false, dados);
+      }
+      markDirty();
+      try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
+      toast('🧪 Sinais vitais padrão gerados (' + entrada + '–' + saida + ')');
     },
 
     duplicarEAjustar() {
