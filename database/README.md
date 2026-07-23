@@ -146,9 +146,13 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   alterar o registro original. Datadas e assinadas, aparecem na ficha e no PDF,
   e ficam locais (`_adendos`) para offline. Piloto na ficha de anestesia
   (`adendos.*`); o helper já suporta pré/consulta/recuperação/risco.
-- **Fase 6+ — Pré reorganizada, Ficha/linha do tempo unificada, SRPA,
-  Financeiro (rascunho/conciliação), anexos no Storage, PDF versionado, tela de
-  diagnóstico da nuvem, testes.**
+- **Linha do tempo unificada (visão):** ✅ botão na ficha de anestesia mostra
+  sinais vitais + medicações + eventos + fluidos numa **única lista
+  cronológica** (revisão do caso). Lê os dados que já estão na ficha — não muda
+  o modelo. A tabela `anesthesia_timeline_events` fica para uma futura fonte
+  única relacional, se/quando valer o refactor.
+- **Fase 6+ — Pré reorganizada, SRPA, Financeiro (rascunho/conciliação), PDF
+  versionado, testes.** (itens remanescentes)
 
 ## Rollback
 
