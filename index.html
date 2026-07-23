@@ -9126,6 +9126,8 @@ const store = {
     store._audit(isNew ? 'create' : 'update', modKey, item);
     /* Sincronização em background (não bloqueia; falha silenciosa vai pra fila) */
     try { if (typeof cloud !== 'undefined') cloud.pushDoc(modKey, item, 'upsert'); } catch (e) {}
+    /* Fase 6: espelho relacional dos módulos de registro (pré, ficha, etc.) */
+    try { if (typeof cloudRel !== 'undefined' && cloudRel.ehModuloRegistro && cloudRel.ehModuloRegistro(modKey)) cloudRel.mirrorRegistro(modKey, item); } catch (e) {}
     return item;
   },
   delete(modKey, id) {
@@ -9888,6 +9890,16 @@ const ui = {
       } catch (e) {
         console.error('Erro ao renderizar módulo ' + modName + ':', e);
       }
+      /* Fase 6: pull relacional automático (1x/sessão) do módulo recém-aberto */
+      try {
+        if (typeof cloudRel !== 'undefined' && cloudRel.autoPullModulo) {
+          setTimeout(() => {
+            cloudRel.autoPullModulo(modName).then(() => {
+              try { if (modName === 'financeiro' && financeiro.render) financeiro.render(); } catch (e) {}
+            }).catch(() => {});
+          }, 500);
+        }
+      } catch (e) {}
       /* Botão flutuante de carimbo de hora: só aparece na anestesia/SRPA */
       try { carimboHora.atualizarVisibilidade(); } catch (e) {}
       /* Religa autocompletes (CBHPM + histórico) no módulo recém-aberto */
@@ -14622,18 +14634,26 @@ const cloudRel = {
   },
   _lerAtual(org, key) { return cloudRel._lerAtualTab('patients', org, key, cloudRel._SELECT); },
 
+  /* Cache de ids resolvidos nesta sessão (evita GETs repetidos em auto-saves) */
+  _cachePac: {}, _cacheEnc: {},
+
   /* id (uuid) de um paciente na nuvem pela chave de nome; cria minimamente se
-     ainda não existir (para o agendamento poder referenciá-lo). */
+     ainda não existir (para o agendamento/registro poder referenciá-lo). */
   async _garantirPaciente(org, item) {
     const id = migracaoFase4._ident(item);
     const key = migracaoFase4._patKey(id);
     if (!key) return null;
+    if (cloudRel._cachePac[key]) return cloudRel._cachePac[key];
     const existente = await cloudRel._lerAtualTab('patients', org, key, 'id');
-    if (existente && existente.id) return existente.id;
+    if (existente && existente.id) { cloudRel._cachePac[key] = existente.id; return existente.id; }
     const row = { organization_id: org, legacy_id: key, nome: item.paciente || id.nome || 'Sem nome',
-      cpf: id.cpf || null, convenio: item.convenio || null, data: { origem: 'agenda' } };
-    try { const ret = await migracaoFase4._upsert('patients', [row], true); return (ret && ret[0]) ? ret[0].id : null; }
-    catch (e) { return null; }
+      cpf: id.cpf || null, convenio: item.convenio || null, data: { origem: 'auto' } };
+    try {
+      const ret = await migracaoFase4._upsert('patients', [row], true);
+      const pid = (ret && ret[0]) ? ret[0].id : null;
+      if (pid) cloudRel._cachePac[key] = pid;
+      return pid;
+    } catch (e) { return null; }
   },
 
   /* Envia (upsert idempotente por patKey) um paciente para a tabela relacional,
@@ -14733,6 +14753,169 @@ const cloudRel = {
       }
       return { ok: true };
     } catch (e) { return { ok: false, motivo: e.message }; }
+  },
+
+  /* ===========================================================================
+     MOTOR GENÉRICO DE REGISTROS (Fase 6) — demais módulos.
+     legacy_id = _id do registro; identidade de paciente/encounter reaproveita
+     EXATAMENTE a extração da migração, então um save ATUALIZA a mesma linha
+     que a migração criou (idempotente, sem duplicar).
+  =========================================================================== */
+  MODOS: {
+    pre:         { tabela: 'preanesthetic_assessments', enc: true },
+    consulta:    { tabela: 'consultations',             enc: true },
+    anestesia:   { tabela: 'anesthesia_records',        enc: true },
+    recuperacao: { tabela: 'recovery_records',          enc: true },
+    risco:       { tabela: 'risk_assessments',          enc: true },
+    termo:       { tabela: 'consents',                  enc: true },
+    prescricao:  { tabela: 'prescriptions',             enc: false },
+    documentos:  { tabela: 'documents',                 enc: false },
+    financeiro:  { tabela: 'finance_entries',           enc: true },
+    orcamento:   { tabela: 'quotes',                    enc: false }
+  },
+  ehModuloRegistro(mod) { return !!cloudRel.MODOS[mod]; },
+  _REG_SELECT: 'id,legacy_id,data,updated_at',
+
+  /* Garante o encounter (paciente + data + procedimento) e devolve o uuid. */
+  async _garantirEncounter(org, patientId, item) {
+    const id = migracaoFase4._ident(item);
+    const patKey = migracaoFase4._patKey(id);
+    const encKey = migracaoFase4._encKey(patKey, item);
+    if (!encKey) return null;
+    if (cloudRel._cacheEnc[encKey]) return cloudRel._cacheEnc[encKey];
+    const ex = await cloudRel._lerAtualTab('encounters', org, encKey, 'id');
+    if (ex && ex.id) { cloudRel._cacheEnc[encKey] = ex.id; return ex.id; }
+    const row = {
+      organization_id: org, legacy_id: encKey, patient_id: patientId || null,
+      procedimento: (typeof item.procedimento === 'string' ? item.procedimento : (item.cirurgia || null)) || null,
+      convenio: item.convenio || id.convenio || null,
+      data_prevista: migracaoFase4._dataISO(item.data),
+      status: 'ativo', data: { origem: 'fase6' }
+    };
+    try {
+      const ret = await migracaoFase4._upsert('encounters', [row], true);
+      const eid = (ret && ret[0]) ? ret[0].id : null;
+      if (eid) cloudRel._cacheEnc[encKey] = eid;
+      return eid;
+    } catch (e) { return null; }
+  },
+
+  _rowParaRegistro(row) {
+    const d = row.data;
+    const base = (d && typeof d === 'object' && (d._id || d.nome || d.paciente || d.paciente_nome)) ? Object.assign({}, d) : {};
+    if (!base._id) base._id = row.legacy_id || ('rel_' + (row.id || '').toString().slice(0, 8));
+    if (row.updated_at) base._relUpdatedAt = row.updated_at;
+    return base;
+  },
+
+  async puxarModulo(mod) {
+    const cfg = cloudRel.MODOS[mod]; if (!cfg) return null;
+    if (!cloudRel.disponivel()) return null;
+    if (!(await cloud._garantirToken())) return null;
+    const org = await cloudRel._orgAsync(); if (!org) return null;
+    const c = cloud.config();
+    try {
+      const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
+        '&deleted_at=is.null&select=' + cloudRel._REG_SELECT + '&order=updated_at.desc',
+        { headers: cloud._headers(true) });
+      if (!r.ok) return null;
+      const rows = await r.json();
+      return rows.map(row => cloudRel._rowParaRegistro(row));
+    } catch (e) { return null; }
+  },
+
+  async enviarRegistro(mod, item, opts = {}) {
+    const cfg = cloudRel.MODOS[mod];
+    if (!cfg) return { ok: false, motivo: 'mod' };
+    if (!cloudRel.disponivel() || !item || !item._id) return { ok: false, motivo: 'offline' };
+    if (!(await cloud._garantirToken())) return { ok: false, motivo: 'token' };
+    const org = await cloudRel._orgAsync(); if (!org) return { ok: false, motivo: 'org' };
+    const legacy = item._id;
+    const atual = await cloudRel._lerAtualTab(cfg.tabela, org, legacy, cloudRel._REG_SELECT);
+    if (atual && !opts.force && item._relUpdatedAt && atual.updated_at && atual.updated_at !== item._relUpdatedAt) {
+      return { ok: false, conflict: true, cloud: cloudRel._rowParaRegistro(atual), cloudUpdatedAt: atual.updated_at };
+    }
+    const patientId = await cloudRel._garantirPaciente(org, item);
+    let encounterId = null;
+    if (cfg.enc) { try { encounterId = await cloudRel._garantirEncounter(org, patientId, item); } catch (e) {} }
+    const row = { organization_id: org, legacy_id: legacy, patient_id: patientId, data: item };
+    if (cfg.tabela !== 'quotes') row.encounter_id = encounterId;   // quotes não usa encounter aqui
+    try {
+      const ret = await migracaoFase4._upsert(cfg.tabela, [row], true);
+      const novo = ret && ret[0];
+      if (novo && novo.updated_at) {
+        const lst = store.list(mod);
+        const ix = lst.findIndex(x => x._id === item._id);
+        if (ix >= 0) { lst[ix]._relUpdatedAt = novo.updated_at; store.setList(mod, lst); }
+        item._relUpdatedAt = novo.updated_at;
+      }
+      return { ok: true };
+    } catch (e) { return { ok: false, motivo: e.message }; }
+  },
+
+  /* Espelho chamado pelo store.save (best-effort, em segundo plano) */
+  mirrorRegistro(mod, item) {
+    try {
+      cloudRel.enviarRegistro(mod, item).then(res => {
+        if (res && res.conflict) cloudRel._resolverConflitoRegistro(mod, item, res.cloud, res.cloudUpdatedAt);
+      }).catch(() => {});
+    } catch (e) {}
+  },
+
+  /* Pull automático 1x/sessão por módulo, ao abrir */
+  _puxados: {},
+  async autoPullModulo(mod) {
+    if (!cloudRel.MODOS[mod] || cloudRel._puxados[mod]) return;
+    if (!cloudRel.disponivel()) return;
+    cloudRel._puxados[mod] = true;
+    const remotos = await cloudRel.puxarModulo(mod);
+    if (!remotos) return;
+    const locais = store.list(mod);
+    const porId = new Map(); locais.forEach(x => { if (x._id) porId.set(x._id, x); });
+    let novos = 0;
+    remotos.forEach(r => {
+      if (!r._id) return;
+      const loc = porId.get(r._id);
+      if (!loc) { locais.push(r); porId.set(r._id, r); novos++; }
+      else if (r._relUpdatedAt && !loc._relUpdatedAt) loc._relUpdatedAt = r._relUpdatedAt;
+    });
+    if (novos) store.setList(mod, locais);
+  },
+
+  /* Conflito genérico de registro (modal comparando campos simples) */
+  _resolverConflitoRegistro(mod, local, nuvem, cloudUpdatedAt) {
+    const simples = (o) => Object.keys(o || {}).filter(k => k[0] !== '_' && (o[k] == null || typeof o[k] !== 'object'));
+    const chaves = Array.from(new Set(simples(local).concat(simples(nuvem))));
+    const val = (o, k) => (o && o[k] != null ? String(o[k]) : '');
+    const linhas = chaves.filter(k => val(local, k) !== val(nuvem, k)).slice(0, 12)
+      .map(k => '<tr><td>' + utils.escapeHTML(k) + '</td><td>' + utils.escapeHTML(val(local, k) || '—') +
+        '</td><td>' + utils.escapeHTML(val(nuvem, k) || '—') + '</td></tr>').join('');
+    cloudRel._conflito = { mod, local, nuvem, cloudUpdatedAt };
+    modal.open('⚠️ Conflito de edição — ' + mod,
+      '<p style="margin:0 0 10px;font-size:.88rem">Este registro foi <strong>alterado na nuvem</strong> por outra pessoa/aparelho enquanto você editava. Nada foi sobrescrito ainda.</p>' +
+      (linhas ? '<table class="fase4-tab"><thead><tr><th>Campo</th><th>O seu</th><th>Da nuvem</th></tr></thead><tbody>' + linhas + '</tbody></table>'
+              : '<p style="font-size:.82rem;color:var(--text-mute)">As diferenças estão em campos internos.</p>'),
+      '<button class="btn btn-primary" onclick="cloudRel._conflitoManter()">Manter o meu</button>' +
+      '<button class="btn" onclick="cloudRel._conflitoUsarNuvem()">Usar o da nuvem</button>' +
+      '<button class="btn btn-ghost" onclick="modal.close()">Decidir depois</button>');
+  },
+  _conflitoManter() {
+    const cf = cloudRel._conflito; if (!cf) { modal.close(); return; } modal.close();
+    cf.local._relUpdatedAt = cf.cloudUpdatedAt;
+    const lst = store.list(cf.mod); const ix = lst.findIndex(x => x._id === cf.local._id);
+    if (ix >= 0) { lst[ix]._relUpdatedAt = cf.cloudUpdatedAt; store.setList(cf.mod, lst); }
+    cloudRel.enviarRegistro(cf.mod, cf.local, { force: true }).then(r => { if (r && r.ok) toast('✅ Sua versão foi mantida na nuvem'); });
+    cloudRel._conflito = null;
+  },
+  _conflitoUsarNuvem() {
+    const cf = cloudRel._conflito; if (!cf) { modal.close(); return; } modal.close();
+    const lst = store.list(cf.mod); const ix = lst.findIndex(x => x._id === cf.local._id);
+    const item = Object.assign({}, cf.nuvem, { _id: cf.local._id, _relUpdatedAt: cf.cloudUpdatedAt });
+    if (ix >= 0) lst[ix] = item; else lst.unshift(item);
+    store.setList(cf.mod, lst);
+    try { if (state.currentModule === cf.mod) ui.navegar(cf.mod); } catch (e) {}
+    toast('Versão da nuvem adotada neste aparelho');
+    cloudRel._conflito = null;
   }
 };
 
