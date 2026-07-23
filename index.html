@@ -8355,6 +8355,36 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       </div>
     </section>
 
+    <!-- 🕵️ AUDITORIA -->
+    <section class="card" id="auditoria-card">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-icon">🕵️</span><h2>Registro de auditoria<small>Quem criou, editou, finalizou ou excluiu cada registro — e quando</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <label style="font-size:.8rem">Módulo:
+            <select id="auditoria-filtro" onchange="auditoria.render(this.value)" style="font-size:.8rem">
+              <option value="">Todos</option>
+              <option value="anesthesia_records">Ficha de anestesia</option>
+              <option value="preanesthetic_assessments">Pré-anestésica</option>
+              <option value="consultations">Consulta / Dor</option>
+              <option value="recovery_records">Recuperação (SRPA)</option>
+              <option value="risk_assessments">Risco</option>
+              <option value="consents">Termo (TCLE)</option>
+              <option value="prescriptions">Receituário</option>
+              <option value="documents">Documentos</option>
+              <option value="finance_entries">Financeiro</option>
+              <option value="patients">Pacientes</option>
+              <option value="appointments">Agenda</option>
+            </select>
+          </label>
+          <button type="button" class="btn btn-sm" onclick="auditoria.render(document.getElementById('auditoria-filtro').value)">🔄 Atualizar</button>
+        </div>
+        <div id="auditoria-lista"></div>
+      </div>
+    </section>
+
     <!-- 📝 TERMO DE CONSENTIMENTO PADRÃO -->
     <section class="card" id="termo-padrao-card">
       <div class="card-header" onclick="ui.toggleCard(this)">
@@ -10046,7 +10076,7 @@ const ui = {
         else if (modName === 'financeiro') financeiro.render();
         else if (modName === 'agenda') { agenda.render(); if (!agenda._puxouNestaSessao) { setTimeout(() => { try { agenda.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
-        else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); try { equipeNuvem.render(); } catch (e) {} logoUsuario.renderAjustes(); const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
+        else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); try { equipeNuvem.render(); } catch (e) {} try { auditoria.render(''); } catch (e) {} logoUsuario.renderAjustes(); const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
         else if (modName === 'pre') { try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} try { pre.viaAerea.render(); } catch (e) {} }
         else if (modName === 'anestesia') { anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} try { anestesia.calc.resumoTopo(); } catch (e) {} try { adendos.renderInline('anestesia'); } catch (e) {} }
         else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} try { recuperacao.resumoTopo(); } catch (e) {} }, 60); }
@@ -15470,6 +15500,66 @@ const equipeNuvem = {
       if (emailEl) emailEl.value = '';
       equipeNuvem.render();
     } catch (e) { toast('Falha de rede ao adicionar', 'error'); }
+  }
+};
+
+/* ============================================================================
+   AUDITORIA — registro de quem fez o quê (tabela audit_logs, populada pelos
+   triggers). Read-only. Gestor vê a organização; demais veem os próprios.
+============================================================================ */
+const auditoria = {
+  MODS: {
+    anesthesia_records: 'Ficha de anestesia', preanesthetic_assessments: 'Pré-anestésica',
+    recovery_records: 'Recuperação (SRPA)', risk_assessments: 'Risco', consents: 'Termo (TCLE)',
+    prescriptions: 'Receituário', documents: 'Documentos', finance_entries: 'Financeiro',
+    consultations: 'Consulta / Dor', quotes: 'Orçamento', appointments: 'Agenda',
+    patients: 'Paciente', encounters: 'Atendimento'
+  },
+  ACOES: {
+    insert: ['🆕', 'Criou'], update: ['✏️', 'Editou'], delete: ['🗑️', 'Excluiu'],
+    restore: ['♻️', 'Restaurou'], finalize: ['✅', 'Finalizou'], sign: ['🖊️', 'Assinou'],
+    addendum: ['📝', 'Adendo'], access: ['👁️', 'Acessou'], export: ['⬇️', 'Exportou']
+  },
+  async carregar(mod) {
+    if (!cloud.estaConfigurado() || !cloud.estaLogado()) return null;
+    if (!(await cloud._garantirToken())) return null;
+    const org = await cloudRel._orgAsync(); if (!org) return null;
+    const c = cloud.config();
+    let url = c.url + '/rest/v1/audit_logs?organization_id=eq.' + org +
+      '&select=id,user_id,patient_id,module,action,created_at&order=created_at.desc&limit=150';
+    if (mod) url += '&module=eq.' + encodeURIComponent(mod);
+    try {
+      const r = await fetch(url, { headers: cloud._headers(true) });
+      if (!r.ok) return null;
+      const rows = await r.json();
+      const uids = Array.from(new Set(rows.map(x => x.user_id).filter(Boolean)));
+      const pids = Array.from(new Set(rows.map(x => x.patient_id).filter(Boolean)));
+      const grab = (tab, ids, sel) => ids.length
+        ? fetch(c.url + '/rest/v1/' + tab + '?id=in.(' + ids.join(',') + ')&select=' + sel, { headers: cloud._headers(true) }).then(x => x.ok ? x.json() : []).catch(() => [])
+        : Promise.resolve([]);
+      const [profs, pats] = await Promise.all([grab('profiles', uids, 'id,nome,email'), grab('patients', pids, 'id,nome')]);
+      const pn = {}; profs.forEach(p => { pn[p.id] = p.nome || p.email || ''; });
+      const ptn = {}; pats.forEach(p => { ptn[p.id] = p.nome || ''; });
+      return rows.map(x => ({ id: x.id, created_at: x.created_at, module: x.module, action: x.action, quem: pn[x.user_id] || '—', paciente: ptn[x.patient_id] || '' }));
+    } catch (e) { return null; }
+  },
+  async render(mod) {
+    const host = document.getElementById('auditoria-lista');
+    if (!host) return;
+    if (!cloud.estaConfigurado() || !cloud.estaLogado()) { host.innerHTML = '<p style="font-size:.82rem;color:var(--text-mute)">Conecte-se à nuvem (Ajustes → Backup) para ver o histórico de auditoria.</p>'; return; }
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) { host.innerHTML = '<p style="font-size:.82rem;color:var(--text-mute)">Sem internet — reabra quando estiver online.</p>'; return; }
+    host.innerHTML = '<p style="font-size:.82rem;color:var(--text-mute)">⏳ Carregando…</p>';
+    const rows = await auditoria.carregar(mod);
+    if (rows === null) { host.innerHTML = '<p style="font-size:.82rem;color:var(--danger,#b3392a)">Não foi possível carregar o histórico agora.</p>'; return; }
+    if (!rows.length) { host.innerHTML = '<p style="font-size:.82rem;color:var(--text-mute)">Nenhum registro de auditoria ainda.</p>'; return; }
+    host.innerHTML = '<div style="overflow-x:auto"><table class="fase4-tab"><thead><tr><th>Quando</th><th>Quem</th><th>Ação</th><th>Onde</th><th>Paciente</th></tr></thead><tbody>' +
+      rows.map(x => {
+        const a = auditoria.ACOES[x.action] || ['•', x.action];
+        const m = auditoria.MODS[x.module] || x.module;
+        let quando = ''; try { quando = new Date(x.created_at).toLocaleString('pt-BR'); } catch (e) { quando = x.created_at; }
+        return '<tr><td style="white-space:nowrap">' + utils.escapeHTML(quando) + '</td><td>' + utils.escapeHTML(x.quem) + '</td><td style="white-space:nowrap">' + a[0] + ' ' + a[1] + '</td><td>' + utils.escapeHTML(m) + '</td><td>' + utils.escapeHTML(x.paciente) + '</td></tr>';
+      }).join('') + '</tbody></table></div>' +
+      '<p style="font-size:.72rem;color:var(--text-mute);margin-top:6px">Mostrando os ' + rows.length + ' eventos mais recentes.</p>';
   }
 };
 
@@ -34902,6 +34992,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.cloudRealtime = cloudRealtime;
   window.adendos = adendos;
   window.equipeNuvem = equipeNuvem;
+  window.auditoria = auditoria;
   window.auth = auth;
   window.demo = demo;
   try { pre.premed.render(); } catch (e) {}
