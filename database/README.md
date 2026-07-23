@@ -177,7 +177,15 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   um **checklist gentil** avisa se faltam itens essenciais (ASA, via aérea,
   jejum, conclusão/aptidão) — sem travar (dá para finalizar mesmo assim). A barra
   não sai na impressão.
-- **Fase 6+ — SRPA, Financeiro (rascunho/conciliação), PDF versionado, testes.**
+- **SRPA mais completa:** ✅ além do **Aldrete** (alta da sala de recuperação),
+  a ficha agora tem a **escala PADSS** (aptidão para **alta domiciliar**): 5
+  critérios (sinais vitais, deambulação, náusea/vômito, dor, sangramento) com
+  soma automática 0–10 e leitura clínica (**apto ≥ 9 e nenhum critério zerado**).
+  Um botão **gera um resumo de alta padronizado** a partir dos campos (tempo de
+  SRPA, sinais vitais chegada→alta, escalas, conduta, destino), editável. O topo
+  mostra chip do PADSS; ao finalizar com destino *alta hospitalar*, avisa se o
+  PADSS falta/está abaixo de 9. Tudo entra na impressão/PDF.
+- **Fase 6+ — Financeiro (rascunho/conciliação), PDF versionado, testes.**
   (itens remanescentes)
 
 ## Rollback
