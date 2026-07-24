@@ -35967,6 +35967,15 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   window.addEventListener('hashchange', navegarPorHash);
 
+  /* Service worker: abertura instantânea e offline (network-first — online o
+     app sempre vem da rede; o cache só entra quando a rede falha). Só em
+     http/https; em file:// (testes locais) não se aplica. */
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    });
+  }
+
   /* 3. Inicializa Anestesia (assinatura, linhas iniciais, data) */
   anestesia.signature.init();
   document.querySelector('#form-anestesia [name="data_anestesia"]').value = utils.hojeISO();
