@@ -187,6 +187,16 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   Um toque a menos por campo — centenas por dia. Modelos de ficha completa por
   cirurgia e o encadeamento ficha→SRPA ao finalizar já existiam (auditoria
   confirmou).
+- **Armazenamento do aparelho (limpeza):** ✅ o aviso "armazenamento cheio"
+  (localStorage ~5 MB no iPhone) tinha 3 causas: histórico de versões com até
+  10 cópias completas **incluindo assinaturas em base64**, lixeira de 30 dias
+  e anexos antigos duplicados. Correção: (1) `_saveVersion` agora **sanitiza
+  base64** dos snapshots (o histórico compara campos, não binários) e guarda
+  no máx. 5; (2) novo card **Ajustes → Armazenamento do aparelho** mostra o
+  uso por área (barras) e limpa com um toque: compactar histórico, liberar
+  anexos que já estão na nuvem, esvaziar lixeira, remover dados de
+  demonstração; (3) o aviso de cheio leva direto à limpeza. Nada que esteja
+  na nuvem se perde.
 - **Abertura offline (service worker):** ✅ fecha o achado de robustez da
   auditoria: os dados eram offline-first, mas o **HTML (2,7 MB) dependia da
   rede a cada carga**. O `sw.js` usa **network-first**: online, o app SEMPRE
