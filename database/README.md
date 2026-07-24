@@ -196,7 +196,10 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   uso por área (barras) e limpa com um toque: compactar histórico, liberar
   anexos que já estão na nuvem, esvaziar lixeira, remover dados de
   demonstração; (3) o aviso de cheio leva direto à limpeza. Nada que esteja
-  na nuvem se perde.
+  na nuvem se perde. **Auto-manutenção:** na inicialização o app compacta o
+  histórico antigo sozinho (uma única vez, com flag) e, se o uso passar de
+  ~4 MB, avisa ANTES de estourar; o teto do fallback local de anexos caiu de
+  6 → 3 MB (compatível com os ~5 MB do celular).
 - **Abertura offline (service worker):** ✅ fecha o achado de robustez da
   auditoria: os dados eram offline-first, mas o **HTML (2,7 MB) dependia da
   rede a cada carga**. O `sw.js` usa **network-first**: online, o app SEMPRE

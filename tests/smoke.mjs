@@ -666,6 +666,51 @@ await test('Armazenamento: histórico sem base64, compactação e liberação de
   await page.close();
 });
 
+/* 20) Armazenamento — auto-manutenção na inicialização */
+await test('Armazenamento: auto-manutenção compacta o histórico antigo uma única vez e avisa antes de encher', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const GORDO = 'data:image/png;base64,' + 'B'.repeat(50000);
+
+    // histórico antigo gordo + sem flag → autoManutencao sanitiza e limita a 5
+    localStorage.removeItem(armazenamento.FLAG_COMPACT);
+    const all = {};
+    all['anestesia:legado'] = Array.from({ length: 8 }, (_, i) => ({ ts: 't' + i, snapshot: { nome: 'v' + i, assinatura_dataurl: GORDO } }));
+    localStorage.setItem('medsys.v7.versions', JSON.stringify(all));
+    armazenamento.autoManutencao();
+    const depois = JSON.parse(localStorage.getItem('medsys.v7.versions'));
+    out.limitou = depois['anestesia:legado'].length === 5;
+    out.saneou = depois['anestesia:legado'].every(v => v.snapshot.assinatura_dataurl !== GORDO);
+    out.flag = localStorage.getItem(armazenamento.FLAG_COMPACT) === '1';
+
+    // idempotente: com a flag, uma nova versão gorda inserida à mão NÃO é tocada
+    const all2 = JSON.parse(localStorage.getItem('medsys.v7.versions'));
+    all2['anestesia:legado'].unshift({ ts: 'novo', snapshot: { foto: GORDO } });
+    localStorage.setItem('medsys.v7.versions', JSON.stringify(all2));
+    armazenamento.autoManutencao();
+    const depois2 = JSON.parse(localStorage.getItem('medsys.v7.versions'));
+    out.idempotente = depois2['anestesia:legado'][0].snapshot.foto === GORDO;
+
+    // aviso preventivo: uso > 4 MB → toast aparece
+    localStorage.setItem('teste.gordura', 'X'.repeat(2200000));   // ~4,4 MB em UTF-16
+    armazenamento.autoManutencao();
+    await new Promise(r => setTimeout(r, 200));
+    out.avisou = document.body.textContent.includes('libere espaço em Ajustes');
+    localStorage.removeItem('teste.gordura');
+
+    // teto local de anexos compatível com o celular
+    out.tetoLocal = prontuario.MAX_LOCAL_TOTAL === 3 * 1024 * 1024;
+    return out;
+  });
+  assert(r.limitou && r.saneou, 'auto-manutenção deveria limitar a 5 e sanear o histórico antigo');
+  assert(r.flag, 'flag de compactação deveria ser gravada');
+  assert(r.idempotente, 'com a flag presente, não deveria mexer de novo no histórico');
+  assert(r.avisou, 'acima de ~4 MB deveria avisar antes de encher');
+  assert(r.tetoLocal, 'teto local de anexos deveria ser 3 MB');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
