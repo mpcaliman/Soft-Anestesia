@@ -8478,6 +8478,25 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </section>
 
     <!-- 🔒 USUÁRIOS E SEGURANÇA -->
+    <!-- 🧹 ARMAZENAMENTO DO APARELHO -->
+    <section class="card" id="armazenamento-card">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-icon">🧹</span><h2>Armazenamento do aparelho<small>Quanto cada área ocupa + limpeza com um toque (nada que esteja na nuvem se perde)</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <p id="armazenamento-resumo" style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px"></p>
+        <div id="armazenamento-lista" style="margin-bottom:14px"></div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <button type="button" class="btn btn-sm btn-primary" onclick="armazenamento.compactarVersoes()" title="Reduz o histórico de versões a 3 por documento e remove assinaturas/fotos em base64 do histórico (os documentos atuais não mudam)">🕓 Compactar histórico de versões</button>
+          <button type="button" class="btn btn-sm" onclick="armazenamento.liberarAnexos()" title="Remove do aparelho cópias locais de anexos que JÁ estão na nuvem (continuam abríveis pela nuvem)">☁️ Liberar anexos já na nuvem</button>
+          <button type="button" class="btn btn-sm" onclick="armazenamento.esvaziarLixeira()" title="Esvazia a lixeira de 30 dias">🗑 Esvaziar lixeira</button>
+          <button type="button" class="btn btn-sm" onclick="armazenamento.limparDemo()" title="Remove os dados isolados do modo demonstração">🧪 Remover dados de demonstração</button>
+          <button type="button" class="btn btn-sm btn-ghost" onclick="armazenamento.render()">🔄 Atualizar</button>
+        </div>
+      </div>
+    </section>
+
     <section class="card" id="usuarios-card">
       <div class="card-header" onclick="ui.toggleCard(this)">
         <div class="card-title-wrap"><span class="card-icon">🔒</span><h2>Usuários e segurança<small>Login por usuário/senha, perfis e permissões de acesso</small></h2></div>
@@ -9433,6 +9452,24 @@ const store = {
   /* ===== VERSIONAMENTO (módulo 8) =====
      Antes de sobrescrever, salva snapshot da versão anterior em
      medsys.v7.versions[modKey:_id] = [{ts, snapshot}, ...] */
+  /* O histórico de versões serve para comparar CAMPOS, não binários.
+     Assinaturas/fotos em base64 (dezenas/centenas de KB) multiplicadas por
+     N versões estouram o localStorage do celular (~5 MB no iPhone). */
+  _sanitizarSnapshot(obj) {
+    const LIM = 2048;
+    const walk = (o) => {
+      if (Array.isArray(o)) { o.forEach(walk); return; }
+      if (o && typeof o === 'object') {
+        Object.keys(o).forEach(k => {
+          const v = o[k];
+          if (typeof v === 'string' && v.length > LIM && v.slice(0, 5) === 'data:') o[k] = '[binário removido do histórico de versões]';
+          else if (v && typeof v === 'object') walk(v);
+        });
+      }
+    };
+    try { const clone = JSON.parse(JSON.stringify(obj)); walk(clone); return clone; }
+    catch (e) { return obj; }
+  },
   _saveVersion(modKey, prev) {
     if (!prev || !prev._id) return;
     try {
@@ -9442,10 +9479,10 @@ const store = {
       all[k] = all[k] || [];
       all[k].unshift({
         ts: new Date().toISOString(),
-        snapshot: prev
+        snapshot: store._sanitizarSnapshot(prev)
       });
-      /* Mantém só as 10 versões mais recentes por documento */
-      if (all[k].length > 10) all[k].length = 10;
+      /* Mantém só as 5 versões mais recentes por documento */
+      if (all[k].length > 5) all[k].length = 5;
       localStorage.setItem(key, JSON.stringify(all));
     } catch (e) { /* silent */ }
   },
@@ -9485,11 +9522,11 @@ const store = {
           `<p style="font-size:.9rem;line-height:1.6">O espaço de armazenamento deste aparelho atingiu o limite e novos dados podem não ser salvos.</p>
            <p style="font-size:.9rem;line-height:1.6;margin-top:8px"><strong>O que fazer agora:</strong></p>
            <ol style="font-size:.88rem;line-height:1.7;padding-left:20px">
-             <li>Faça um <strong>backup completo</strong> (Ajustes → Backup completo → Exportar) e guarde o arquivo em local seguro.</li>
+             <li>Use <strong>Ajustes → Armazenamento do aparelho</strong>: mostra o que ocupa espaço e libera com um toque (histórico de versões, lixeira, anexos que já estão na nuvem).</li>
              <li>Confirme que a <strong>sincronização com a nuvem</strong> está ativa e concluída.</li>
-             <li>Depois, apague documentos antigos que já estejam na nuvem para liberar espaço.</li>
+             <li>Se precisar, faça um <strong>backup completo</strong> (Ajustes → Backup completo → Exportar).</li>
            </ol>`,
-          '<button class="btn btn-primary" onclick="modal.close(); location.hash=\'#ajustes\'">Ir para Ajustes</button><button class="btn" onclick="modal.close()">Fechar</button>');
+          '<button class="btn btn-primary" onclick="modal.close(); location.hash=\'#ajustes\'; setTimeout(function(){ try { var c = document.getElementById(\'armazenamento-card\'); if (c) { c.classList.remove(\'collapsed\'); c.scrollIntoView({behavior:\'smooth\'}); armazenamento.render(); } } catch (e) {} }, 500);">🧹 Ir para a limpeza</button><button class="btn" onclick="modal.close()">Fechar</button>');
       }
     } catch (e) {}
   },
@@ -9945,6 +9982,100 @@ const backupCompleto = {
    LIXEIRA — registros excluídos ficam recuperáveis por 30 dias.
    Protege contra exclusão acidental (toque errado no celular).
 ============================================================================ */
+/* ============================================================================
+   ARMAZENAMENTO DO APARELHO — diagnóstico de uso do localStorage + limpezas
+   de um toque. Nada que já esteja na nuvem se perde: só removemos cópias
+   locais redundantes (histórico inchado, anexos duplicados, lixeira, demo).
+============================================================================ */
+const armazenamento = {
+  _fmt(b) { return b > 900 * 1024 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB'; },
+  uso() {
+    const itens = []; let total = 0;
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      const v = localStorage.getItem(k) || '';
+      const bytes = (k.length + v.length) * 2;   /* UTF-16 */
+      total += bytes; itens.push({ k, bytes });
+    }
+    itens.sort((a, b) => b.bytes - a.bytes);
+    return { total, itens };
+  },
+  _rotulo(k) {
+    if (k === 'medsys.v7.versions') return '🕓 Histórico de versões';
+    if (k === 'medsys.v7.lixeira') return '🗑 Lixeira (30 dias)';
+    if (k.indexOf('demo:') === 0) return '🧪 Modo demonstração';
+    if (k.indexOf('autosave') >= 0) return '💾 Auto-save';
+    if (k === 'medsys.v7.cloud.queue') return '📤 Fila de sincronização';
+    const nomes = { pre: 'Pré-anestésicas', consulta: 'Consultas', anestesia: 'Fichas de anestesia', recuperacao: 'SRPA', termo: 'Termos', prescricao: 'Receitas', documentos: 'Documentos', risco: 'Riscos', financeiro: 'Financeiro', agenda: 'Agenda', pacientes: 'Pacientes', orcamentos: 'Orçamentos', fin_fechamentos: 'Fechamentos de caixa' };
+    for (const mk in STORAGE) { if (STORAGE[mk] === k && nomes[mk]) return '📋 ' + nomes[mk]; }
+    return '⚙️ Configurações e outros';
+  },
+  render() {
+    const host = document.getElementById('armazenamento-lista');
+    const res = document.getElementById('armazenamento-resumo');
+    if (!host) return;
+    const u = armazenamento.uso();
+    const porRotulo = {};
+    u.itens.forEach(it => { const r = armazenamento._rotulo(it.k); porRotulo[r] = (porRotulo[r] || 0) + it.bytes; });
+    const tops = Object.entries(porRotulo).sort((a, b) => b[1] - a[1]).slice(0, 9);
+    if (res) res.textContent = 'Em uso neste aparelho: ' + armazenamento._fmt(u.total) + '. No celular, o navegador costuma dar ~5 MB — acima disso aparece o aviso de armazenamento cheio.';
+    host.innerHTML = tops.map(([r, b]) => {
+      const pct = u.total ? Math.max(2, Math.round(b / u.total * 100)) : 0;
+      return '<div style="margin-bottom:7px">' +
+        '<div style="display:flex;justify-content:space-between;font-size:.8rem"><span>' + r + '</span><b>' + armazenamento._fmt(b) + '</b></div>' +
+        '<div style="height:6px;background:var(--surface-alt);border-radius:4px;overflow:hidden"><div style="height:100%;width:' + pct + '%;background:var(--primary)"></div></div></div>';
+    }).join('');
+  },
+  compactarVersoes() {
+    try {
+      const key = 'medsys.v7.versions';
+      const antes = (localStorage.getItem(key) || '').length * 2;
+      const all = JSON.parse(localStorage.getItem(key) || '{}');
+      Object.keys(all).forEach(k => {
+        all[k] = (all[k] || []).slice(0, 3);
+        all[k].forEach(v => { v.snapshot = store._sanitizarSnapshot(v.snapshot); });
+      });
+      localStorage.setItem(key, JSON.stringify(all));
+      const depois = (localStorage.getItem(key) || '').length * 2;
+      toast('🕓 Histórico compactado — ' + armazenamento._fmt(Math.max(0, antes - depois)) + ' liberados');
+    } catch (e) { toast('Falha ao compactar: ' + e.message, 'error'); }
+    armazenamento.render();
+  },
+  liberarAnexos() {
+    let liberto = 0;
+    ['pre', 'consulta', 'anestesia', 'recuperacao', 'financeiro', 'documentos', 'termo', 'prescricao', 'risco'].forEach(mod => {
+      try {
+        const lista = store.list(mod); let mudou = false;
+        lista.forEach(rec => {
+          ['_docs', '_docs_troca', 'anexos'].forEach(campo => {
+            (Array.isArray(rec[campo]) ? rec[campo] : []).forEach(d => {
+              if (d && d.storage_path && d.dataurl) { liberto += d.dataurl.length * 2; delete d.dataurl; mudou = true; }
+            });
+          });
+        });
+        if (mudou) store.setList(mod, lista);
+      } catch (e) {}
+    });
+    toast(liberto ? '☁️ ' + armazenamento._fmt(liberto) + ' liberados — os anexos continuam na nuvem' : 'Nenhum anexo duplicado — tudo certo');
+    armazenamento.render();
+  },
+  esvaziarLixeira() {
+    if (!confirm('Esvaziar a lixeira agora? Itens excluídos há menos de 30 dias serão perdidos definitivamente neste aparelho (os sincronizados continuam na nuvem).')) return;
+    try { localStorage.setItem(lixeira.KEY, '[]'); toast('🗑 Lixeira esvaziada'); } catch (e) {}
+    armazenamento.render();
+  },
+  limparDemo() {
+    if (typeof demo !== 'undefined' && demo.ativo()) { toast('Saia do modo demonstração primeiro', 'warn'); return; }
+    let n = 0;
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && k.indexOf('demo:') === 0) { localStorage.removeItem(k); n++; }
+    }
+    toast(n ? '🧪 Dados de demonstração removidos (' + n + ' itens)' : 'Nenhum dado de demonstração neste aparelho');
+    armazenamento.render();
+  }
+};
+
 const lixeira = {
   KEY: 'medsys.v7.lixeira',
   DIAS: 30,
@@ -10287,7 +10418,7 @@ const ui = {
         else if (modName === 'financeiro') financeiro.render();
         else if (modName === 'agenda') { agenda.render(); if (!agenda._puxouNestaSessao) { setTimeout(() => { try { agenda.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
-        else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); try { equipeNuvem.render(); } catch (e) {} try { auditoria.render(''); } catch (e) {} logoUsuario.renderAjustes(); const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
+        else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); try { equipeNuvem.render(); } catch (e) {} try { auditoria.render(''); } catch (e) {} try { armazenamento.render(); } catch (e) {} logoUsuario.renderAjustes(); const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
         else if (modName === 'pre') { try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} try { pre.viaAerea.render(); } catch (e) {} }
         else if (modName === 'anestesia') { anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} try { anestesia.calc.resumoTopo(); } catch (e) {} try { adendos.renderInline('anestesia'); } catch (e) {} try { anestesia.nav._wire(); anestesia.nav.render(); } catch (e) {} try { anestesia.vitais.autoAvanco.wire(); } catch (e) {} }
         else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} try { recuperacao.resumoTopo(); } catch (e) {} try { anestesia.vitais.autoAvanco.wire(); } catch (e) {} }, 60); }
@@ -35926,6 +36057,7 @@ document.addEventListener('DOMContentLoaded', () => {
   try { pre.nav._wire(); pre.nav.render(); } catch (e) {}
   window.ajustesUsuarios = ajustesUsuarios;
   window.meuDia = meuDia;
+  window.armazenamento = armazenamento;
   window.termoPadrao = termoPadrao;
   window.termoBiblioteca = termoBiblioteca;
   window.textosPadrao = textosPadrao;

@@ -615,6 +615,57 @@ await test('Offline: service worker cacheia o app e o reload sem rede funciona',
   }
 });
 
+/* 19) Armazenamento — versões saneadas + limpezas de um toque */
+await test('Armazenamento: histórico sem base64, compactação e liberação de anexos duplicados', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const GORDO = 'data:image/png;base64,' + 'A'.repeat(60000);
+
+    // 1) salvar 2x um doc com assinatura pesada → snapshot da versão é saneado
+    const doc = store.save('pre', { nome: 'Pac Storage', assinatura_dataurl: GORDO });
+    store.save('pre', { _id: doc._id, nome: 'Pac Storage v2', assinatura_dataurl: GORDO });
+    const vers = store.listVersions('pre', doc._id);
+    out.temVersao = vers.length === 1;
+    out.versaoSaneada = vers[0] && vers[0].snapshot.assinatura_dataurl === '[binário removido do histórico de versões]';
+    out.docIntacto = store.getById('pre', doc._id).assinatura_dataurl === GORDO;   // o documento REAL não muda
+
+    // 2) compactar: semeia 6 versões gordas antigas → fica ≤3, todas saneadas, tamanho cai
+    const all = JSON.parse(localStorage.getItem('medsys.v7.versions') || '{}');
+    all['pre:velho'] = Array.from({ length: 6 }, (_, i) => ({ ts: 't' + i, snapshot: { nome: 'v' + i, foto: GORDO } }));
+    localStorage.setItem('medsys.v7.versions', JSON.stringify(all));
+    const antes = localStorage.getItem('medsys.v7.versions').length;
+    armazenamento.compactarVersoes();
+    const depoisAll = JSON.parse(localStorage.getItem('medsys.v7.versions'));
+    out.compactou = depoisAll['pre:velho'].length === 3 &&
+      depoisAll['pre:velho'].every(v => v.snapshot.foto !== GORDO) &&
+      localStorage.getItem('medsys.v7.versions').length < antes;
+
+    // 3) liberar anexos: doc com dataurl + storage_path perde o dataurl; pendente (sem path) fica
+    store.setList('anestesia', [{ _id: 'ax', paciente_nome: 'X', _docs: [
+      { nome: 'exame.jpg', storage_path: 'uid/anexos/exame.jpg', dataurl: GORDO },
+      { nome: 'pendente.jpg', dataurl: GORDO }
+    ] }]);
+    armazenamento.liberarAnexos();
+    const rec = store.getById('anestesia', 'ax');
+    out.liberou = !rec._docs[0].dataurl && rec._docs[0].storage_path === 'uid/anexos/exame.jpg';
+    out.pendenteFicou = rec._docs[1].dataurl === GORDO;
+
+    // 4) uso() responde com total e rótulos amigáveis
+    const u = armazenamento.uso();
+    out.usoOk = u.total > 0 && u.itens.length > 0;
+    out.rotuloVersoes = armazenamento._rotulo('medsys.v7.versions').includes('versões');
+    return out;
+  });
+  assert(r.temVersao && r.versaoSaneada, 'snapshot de versão deveria ser saneado (sem base64)');
+  assert(r.docIntacto, 'o documento atual NÃO deveria ser alterado pelo saneamento');
+  assert(r.compactou, 'compactarVersoes deveria limitar a 3 e remover base64, reduzindo o tamanho');
+  assert(r.liberou, 'anexo já na nuvem deveria perder a cópia local');
+  assert(r.pendenteFicou, 'anexo pendente (sem storage_path) deveria ser preservado');
+  assert(r.usoOk && r.rotuloVersoes, 'uso() e rótulos deveriam funcionar');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
