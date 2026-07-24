@@ -9989,6 +9989,33 @@ const backupCompleto = {
 ============================================================================ */
 const armazenamento = {
   _fmt(b) { return b > 900 * 1024 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB'; },
+
+  /* Auto-manutenção na inicialização:
+     1) compacta UMA VEZ o histórico antigo (versões gordas criadas antes do
+        saneamento entrar no ar) — com flag para não repetir;
+     2) se o uso já passou de ~4 MB, avisa ANTES de estourar o limite (~5 MB
+        no celular), apontando a tela de limpeza. */
+  FLAG_COMPACT: 'medsys.v7.versions.compactado_v1',
+  autoManutencao() {
+    try {
+      if (!localStorage.getItem(armazenamento.FLAG_COMPACT)) {
+        const key = 'medsys.v7.versions';
+        const all = JSON.parse(localStorage.getItem(key) || '{}');
+        Object.keys(all).forEach(k => {
+          all[k] = (all[k] || []).slice(0, 5);
+          all[k].forEach(v => { v.snapshot = store._sanitizarSnapshot(v.snapshot); });
+        });
+        localStorage.setItem(key, JSON.stringify(all));
+        localStorage.setItem(armazenamento.FLAG_COMPACT, '1');
+      }
+    } catch (e) {}
+    try {
+      const u = armazenamento.uso();
+      if (u.total > 4 * 1024 * 1024) {
+        toast('⚠️ Armazenamento do aparelho em ' + armazenamento._fmt(u.total) + ' — libere espaço em Ajustes → Armazenamento do aparelho antes de encher.', 'warn');
+      }
+    } catch (e) {}
+  },
   uso() {
     const itens = []; let total = 0;
     for (let i = 0; i < localStorage.length; i++) {
@@ -10644,7 +10671,7 @@ const prontuario = {
   BUCKET: 'documentos-pdf',
   MAX_PDF_NUVEM: 10 * 1024 * 1024,    // 10 MB por PDF na nuvem
   MAX_PDF_LOCAL: 2.5 * 1024 * 1024,   // 2,5 MB por PDF no modo offline
-  MAX_LOCAL_TOTAL: 6 * 1024 * 1024,   // teto do fallback local por registro
+  MAX_LOCAL_TOTAL: 3 * 1024 * 1024,   // teto do fallback local por registro (o celular dá ~5 MB no total)
   MAX_DIM: 1600,
 
   _lista(mod) { if (!prontuario._docs[mod]) prontuario._docs[mod] = []; return prontuario._docs[mod]; },
@@ -10747,7 +10774,7 @@ const prontuario = {
     }
     /* Fallback local */
     if (prontuario._bytesLocais(mod) + bytes > prontuario.MAX_LOCAL_TOTAL) {
-      toast('Limite local (~6 MB) atingido. Conecte-se à nuvem ou remova anexos.', 'warn'); return;
+      toast('Limite local (~3 MB) atingido. Conecte-se à nuvem ou remova anexos.', 'warn'); return;
     }
     doc.dataurl = dataurl;
     prontuario._lista(mod).push(doc);
@@ -36269,6 +36296,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try { pacienteAutocomplete.init(); } catch (e) { console.error('Erro pacienteAutocomplete.init:', e); }
     try { backupCompleto.migrarOrcamentosPresos(); } catch (e) {}
     try { lixeira.purgarExpirados(); } catch (e) {}
+    try { armazenamento.autoManutencao(); } catch (e) {}
     /* Módulo de risco: recálculo automático ao mudar qualquer campo */
     try {
       const fr = document.getElementById('form-risco');
