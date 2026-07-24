@@ -14,13 +14,17 @@
 import { chromium } from 'playwright';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import { createServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const APP_URL = 'file://' + resolve(__dirname, '..', 'index.html');
 
-/* Erros de rede são esperados offline (Supabase, Google Fonts) e não contam. */
+/* Erros de rede são esperados offline (Supabase, Google Fonts) e não contam.
+   O aviso de 'beforeunload' bloqueado é o guard de alterações não salvas
+   reagindo a um reload programático — benigno. */
 const isNetworkNoise = (t) =>
-  /ERR_CONNECTION|Failed to load resource|ERR_NAME_NOT_RESOLVED|net::|favicon/i.test(t || '');
+  /ERR_CONNECTION|Failed to load resource|ERR_NAME_NOT_RESOLVED|net::|favicon|beforeunload/i.test(t || '');
 
 const results = [];
 let currentErrors = [];
@@ -559,6 +563,56 @@ await test('Meu dia: casos de hoje cruzados por paciente com estados de cada eta
   assert(r.temIniciar && r.temFichaOk && r.temFichaRasc && r.temFinPend, 'chips de estado deveriam refletir cada situação');
   assert(r.resumoTemCasos, 'resumo do plantão deveria aparecer');
   await page.close();
+});
+
+/* 18) Service worker — o app abre OFFLINE depois da primeira visita (http) */
+await test('Offline: service worker cacheia o app e o reload sem rede funciona', async () => {
+  /* servidor estático mínimo do repositório (index.html + sw.js) */
+  const raiz = resolve(__dirname, '..');
+  const server = createServer(async (req, res) => {
+    const p = req.url.split('?')[0];
+    const arquivo = p === '/' ? '/index.html' : p;
+    try {
+      const data = await readFile(resolve(raiz, '.' + arquivo));
+      const ct = arquivo.endsWith('.js') ? 'text/javascript; charset=utf-8'
+        : arquivo.endsWith('.html') ? 'text/html; charset=utf-8' : 'application/octet-stream';
+      res.writeHead(200, { 'Content-Type': ct });
+      res.end(data);
+    } catch { res.writeHead(404); res.end(); }
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const porta = server.address().port;
+  const ctx = await browser.newContext();
+  try {
+    const page = await ctx.newPage();
+    page.on('console', m => { if (m.type() === 'error') currentErrors.push(m.text()); });
+    page.on('pageerror', e => currentErrors.push('PAGEERROR: ' + e.message));
+    page.on('dialog', d => d.accept());
+
+    await page.goto('http://127.0.0.1:' + porta + '/index.html');
+    await page.waitForTimeout(800);
+    const swAtivo = await page.evaluate(() =>
+      navigator.serviceWorker.ready.then(r => !!r.active).catch(() => false));
+    assert(swAtivo, 'service worker deveria registrar e ativar em http');
+
+    /* 1º reload ONLINE: agora a navegação passa pelo SW e o index entra no cache */
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForTimeout(1200);
+
+    /* derruba a rede e recarrega — o app deve abrir do cache */
+    await ctx.setOffline(true);
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForTimeout(800);
+    const r = await page.evaluate(() => ({
+      temApp: !!document.getElementById('auth-overlay'),
+      temStore: typeof window.store !== 'undefined'
+    }));
+    assert(r.temApp && r.temStore, 'app deveria abrir OFFLINE a partir do cache do service worker');
+    await ctx.setOffline(false);
+  } finally {
+    await ctx.close();
+    await new Promise(r => server.close(r));
+  }
 });
 
 await browser.close();

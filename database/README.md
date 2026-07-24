@@ -187,6 +187,14 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   Um toque a menos por campo — centenas por dia. Modelos de ficha completa por
   cirurgia e o encadeamento ficha→SRPA ao finalizar já existiam (auditoria
   confirmou).
+- **Abertura offline (service worker):** ✅ fecha o achado de robustez da
+  auditoria: os dados eram offline-first, mas o **HTML (2,7 MB) dependia da
+  rede a cada carga**. O `sw.js` usa **network-first**: online, o app SEMPRE
+  vem da rede (nunca fica preso numa versão antiga); cada resposta boa entra
+  no cache e é usada como **fallback quando a rede falha** (wifi de hospital,
+  sem sinal). Só intercepta GET do próprio domínio — Supabase passa direto.
+  Testado no CI: sobe um servidor http, registra o SW, derruba a rede e o
+  reload abre o app do cache.
 - **Painel "Meu dia" (dashboard):** ✅ fecha o backlog da auditoria de fluidez.
   Cruza **agenda × ficha de anestesia × SRPA × financeiro de HOJE** por
   paciente (nome normalizado, mesma identidade do linker) e mostra uma linha
