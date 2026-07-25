@@ -6215,6 +6215,9 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
               <label class="check"><input type="checkbox" name="intercorrencias[]" value="Reação alérgica"><span>Reação alérgica</span></label>
               <label class="check"><input type="checkbox" name="intercorrencias[]" value="Sangramento"><span>Sangramento</span></label>
               <label class="check"><input type="checkbox" name="intercorrencias[]" value="Dificuldade de via aérea"><span>Dificuldade de via aérea</span></label>
+              <label class="check"><input type="checkbox" name="intercorrencias[]" value="Embolia gasosa (CO₂)"><span>Embolia gasosa (CO₂)</span></label>
+              <label class="check"><input type="checkbox" name="intercorrencias[]" value="Enfisema subcutâneo"><span>Enfisema subcutâneo</span></label>
+              <label class="check"><input type="checkbox" name="intercorrencias[]" value="Pneumotórax"><span>Pneumotórax</span></label>
               <label class="check"><input type="checkbox" name="intercorrencias[]" value="Outro"><span>Outro</span></label>
             </div>
           </div>
@@ -20478,6 +20481,8 @@ const anestesia = {
       'Raquianestesia', 'Peridural', 'Bloqueio periférico',
       /* Cirurgia */
       'Incisão cirúrgica', 'Início da cirurgia', 'Hemostasia', 'Fim da cirurgia',
+      /* Laparoscopia */
+      'Início do pneumoperitônio', 'Fim do pneumoperitônio',
       /* Obstétrico */
       'Nascimento / extração fetal', 'Clampeamento do cordão', 'Dequitação (saída placenta)',
       /* CEC */
@@ -20494,6 +20499,7 @@ const anestesia = {
       'Sangramento importante', 'Hipotermia',
       'Hipertermia maligna', 'Convulsão',
       'Despertar intraoperatório',
+      'Embolia gasosa (CO₂)', 'Enfisema subcutâneo', 'Pneumotórax',
       /* Procedimentos terapêuticos */
       'Transfusão', 'Manobra de recrutamento',
       'Reversão BNM', 'Cardioversão / RCP',
@@ -20514,7 +20520,12 @@ const anestesia = {
       'Início O₂': 'Início de oxigenoterapia suplementar.',
       'Início halogenado': 'Início do agente halogenado para manutenção.',
       'Fim da cirurgia': 'Término do tempo cirúrgico; curativo e preparo para o despertar/transferência.',
-      'Antibioticoprofilaxia': 'Antibioticoprofilaxia administrada conforme protocolo (idealmente até 60 min antes da incisão).'
+      'Antibioticoprofilaxia': 'Antibioticoprofilaxia administrada conforme protocolo (idealmente até 60 min antes da incisão).',
+      'Início do pneumoperitônio': 'Insuflação de CO₂ para pneumoperitônio; pressão intra-abdominal alvo 12–15 mmHg. Vigiar: EtCO₂ (hipercapnia), aumento das pressões de via aérea, bradicardia vagal na insuflação e repercussão hemodinâmica do posicionamento.',
+      'Fim do pneumoperitônio': 'Desinsuflação do pneumoperitônio com exsuflação o mais completa possível; observar normalização das pressões de via aérea, do EtCO₂ e da hemodinâmica; analgesia para dor referida no ombro, se necessário.',
+      'Embolia gasosa (CO₂)': 'CRISE — suspeitar com queda súbita do EtCO₂ + hipotensão/dessaturação na insuflação: 1) Avisar a equipe e INTERROMPER a insuflação / desfazer o pneumoperitônio; 2) FiO₂ 100% e suspender N₂O; 3) Posição de Durant (Trendelenburg + decúbito lateral esquerdo); 4) Volume + vasopressor conforme hemodinâmica; 5) Aspirar pelo cateter central, se disponível; 6) RCP imediata se colapso.',
+      'Enfisema subcutâneo': '1) Comunicar a equipe e reduzir a pressão de insuflação (ou pausar); 2) Checar hipercapnia (EtCO₂) e ajustar ventilação-minuto; 3) Palpar a extensão da crepitação — atenção a pescoço/tórax (via aérea) e a pneumotórax/capnotórax associados; 4) Costuma regredir após a desinsuflação; considerar manter intubado até regressão se extenso em face/pescoço.',
+      'Pneumotórax': 'CRISE — suspeitar com aumento de pressão de pico + dessaturação + murmúrio abolido unilateral (na laparoscopia, considerar capnotórax): 1) Avisar a equipe; FiO₂ 100%; 2) Reduzir/desfazer o pneumoperitônio; 3) Se hipertensivo: descompressão imediata (agulha no 2º EIC linha hemiclavicular) seguida de dreno torácico; 4) Capnotórax sem tensão pode responder a desinsuflação + PEEP e observação; 5) Suporte hemodinâmico conforme necessário.'
     },
     /* Insere a descrição técnica do tipo selecionado no campo de detalhes */
     inserirDescricao(btn) {
