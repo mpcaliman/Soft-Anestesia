@@ -62,7 +62,7 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
 | **gestor** | ler/editar | ler/editar | ler/editar | editar | ler tudo |
 | **anestesiologista** | ler/editar | ler/editar | ler/editar (rascunho) | ler | próprios logs |
 | **cirurgião** | só os dele | só os dele | — | ler | próprios logs |
-| **auxiliar** | ler/editar | — | — | ler | próprios logs |
+| **auxiliar** | ler/editar | pré, termo e documentos (`0007`) | — | ler | próprios logs |
 | **financeiro** | — | — | ler/editar | ler | próprios logs |
 | **empresa** | — | — | (a definir) | ler | próprios logs |
 
@@ -71,7 +71,10 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
 >   grupo). Se você quiser "cada um vê só os seus", dá para restringir por
 >   `anesthesiologist_id` numa próxima migração — é uma linha de policy.
 > - **cirurgião** só vê encounters/clínico onde `surgeon_id = ele`.
-> - **financeiro/auxiliar não leem dado clínico** (evita exposição).
+> - **financeiro não lê dado clínico**; o **auxiliar** só alcança as 3 tabelas
+>   do fluxo da secretária — `preanesthetic_assessments`, `consents` e
+>   `documents` (`0007_secretaria_clinico.sql`). Ficha de anestesia, SRPA,
+>   risco e receituário continuam fora do alcance dele.
 > - Registros **finalizados/assinados** ficam **imutáveis** no `data` (trigger
 >   `guard_finalized`); correções vão para `addenda`.
 > - Toda alteração clínica gera linha em `audit_logs` (trigger `audit_row`).
@@ -263,7 +266,23 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   (podeAcessar/podeEditar: admin, secretária só-impressão). Cobre ainda a
   **sincronização / fila offline**: fila idempotente (dedup por documento,
   `operation_id`/`base_version`) e o fluxo *push falha → enfileira → sincronizar
-  drena → retry incrementa* (com a rede mockada). **14 testes no total.**
+  drena → retry incrementa* (com a rede mockada). **A suíte cresce junto com o
+  app** (modo cirurgia, auto-avanço, Meu dia, service worker, armazenamento,
+  cadastros na nuvem — 22 testes hoje).
+- **Cadastros/carimbo cross-device:** ✅ os módulos de cadastro
+  (`cad_assinaturas` — perfil profissional/carimbo —, anestesistas, cirurgiões,
+  clínicas, convênios, procedimentos, pagamentos, presets de medicação e
+  equipamentos) **entraram na sincronização** (`cloud.MODS`): salvar num
+  aparelho sobe para a nuvem e aparece nos outros no próximo sync. Um **envio
+  único inicial** (flag `medsys.v7.cads_sync_v1`) sobe os cadastros criados
+  antes da mudança; falhas de rede vão para a fila offline normal.
+- **Secretária no fluxo clínico dela (`0007_secretaria_clinico.sql`):** ✅ a
+  RLS restringia TODA escrita clínica a gestor/anestesiologista, então a pré,
+  o termo e os documentos que a secretária (papel `auxiliar`) preenchia num
+  aparelho não chegavam aos outros. A migração adiciona policies permissivas
+  dando ao `auxiliar` leitura/escrita **apenas** em `preanesthetic_assessments`,
+  `consents` e `documents`. Registros finalizados continuam imutáveis
+  (trigger `guard_finalized`) e o resto do clínico continua fora do alcance.
 
 ## Rollback
 

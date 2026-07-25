@@ -1318,3 +1318,24 @@ do $$ begin
 end $$;
 
 commit;
+
+-- ============================================================================
+-- 0007_secretaria_clinico.sql
+-- ============================================================================
+
+do $$
+declare t text;
+begin
+  foreach t in array array['preanesthetic_assessments','consents','documents'] loop
+    execute format('drop policy if exists %I_aux_sel on public.%I', t, t);
+    execute format($f$create policy %I_aux_sel on public.%I for select
+      using (app.has_role(organization_id, array['auxiliar']))$f$, t, t);
+
+    execute format('drop policy if exists %I_aux_wr on public.%I', t, t);
+    execute format($f$create policy %I_aux_wr on public.%I for all
+      using (app.has_role(organization_id, array['auxiliar']))
+      with check (app.has_role(organization_id, array['auxiliar']))$f$, t, t);
+  end loop;
+end $$;
+
+commit;
