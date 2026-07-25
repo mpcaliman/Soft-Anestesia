@@ -919,6 +919,61 @@ await test('Ficha: horário fora do intervalo de sala é mantido como digitado (
   await page.close();
 });
 
+/* 25) Paciente — nome nunca vira JSON (gravador, pull, reparo e busca) */
+await test('Pacientes: objeto serializado não vaza como nome — grava certo, repara o antigo e a busca fica limpa', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const PAC_JSON = JSON.stringify({ nome: 'Mariana Teste Silva', nascimento: '1996-12-13', idade: '29', sexo: 'Feminino' });
+
+    // helper: reconhece objeto serializado e rejeita o resto
+    out.parseOk = (utils.pacienteDeJSON(PAC_JSON) || {}).nome === 'Mariana Teste Silva';
+    out.parseNomeNormal = utils.pacienteDeJSON('Maria Andressa') === null;
+    out.parseInvalido = utils.pacienteDeJSON('{quebrado') === null && utils.pacienteDeJSON('{}') === null;
+
+    // GRAVADOR (causa raiz): ficha espelhada NÃO manda mais o objeto para a coluna nome
+    let capturado = null;
+    const origLer = cloudRel._lerAtualTab, origUpsert = migracaoFase4._upsert;
+    cloudRel._lerAtualTab = async () => null;
+    migracaoFase4._upsert = async (tab, rows) => { capturado = rows[0]; return [{ id: 'p1' }]; };
+    cloudRel._cachePac = {};
+    await cloudRel._garantirPaciente('org-teste', { paciente: { nome: 'Mariana Teste Silva', nascimento: '1996-12-13' }, convenio: 'Uni' });
+    out.gravaNomeTexto = capturado && capturado.nome === 'Mariana Teste Silva';
+    cloudRel._lerAtualTab = origLer; migracaoFase4._upsert = origUpsert;
+
+    // PULL: linha antiga com nome-JSON volta saneada
+    const item = cloudRel._rowParaItem({ id: 'abc123', nome: PAC_JSON, data: { origem: 'auto' }, updated_at: 't1' });
+    out.pullSaneia = item.nome === 'Mariana Teste Silva' && item.sexo === 'Feminino';
+
+    // REPARO no boot: cadastro + SRPA + ficha (paciente string) são consertados
+    store.setList('pacientes', [{ _id: 'pj', nome: PAC_JSON }]);
+    store.setList('recuperacao', [{ _id: 'rj', nome: PAC_JSON }]);
+    store.setList('anestesia', [{ _id: 'aj', paciente: PAC_JSON }]);
+    const n = armazenamento.repararNomesJSON();
+    out.reparou3 = n === 3;
+    out.cadastroOk = store.list('pacientes')[0].nome === 'Mariana Teste Silva';
+    out.srpaOk = store.list('recuperacao')[0].nome === 'Mariana Teste Silva';
+    out.fichaObjOk = (store.list('anestesia')[0].paciente || {}).nome === 'Mariana Teste Silva';
+
+    // BUSCA: mesmo se um dado ruim sobrar, o autocomplete repara/descarta
+    store.setList('pre', [{ _id: 'pj2', nome: PAC_JSON }]);
+    const nomes = pacienteAutocomplete._coletarNomes().map(x => x.nome);
+    out.buscaLimpa = nomes.includes('Mariana Teste Silva') && !nomes.some(x => x.charAt(0) === '{');
+
+    store.setList('pacientes', []); store.setList('recuperacao', []);
+    store.setList('anestesia', []); store.setList('pre', []);
+    return out;
+  });
+  assert(r.parseOk, 'pacienteDeJSON deveria extrair o objeto do JSON');
+  assert(r.parseNomeNormal && r.parseInvalido, 'nome normal e JSON inválido não deveriam ser tratados como objeto');
+  assert(r.gravaNomeTexto, 'a ficha espelhada deveria gravar o NOME (texto) na coluna nome, não o objeto');
+  assert(r.pullSaneia, 'o pull deveria sanear linha antiga com nome-JSON (e aproveitar sexo/nascimento)');
+  assert(r.reparou3, 'o reparo do boot deveria consertar os 3 registros, consertou ' + r.reparou3);
+  assert(r.cadastroOk && r.srpaOk && r.fichaObjOk, 'cadastro, SRPA e ficha deveriam ficar com o nome/objeto certos');
+  assert(r.buscaLimpa, 'a busca nunca deveria exibir JSON como nome de paciente');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

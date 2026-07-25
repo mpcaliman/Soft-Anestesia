@@ -9243,6 +9243,17 @@ const state = {
 ============================================================================ */
 const utils = {
   uid() { return 'id_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8); },
+  /* Detecta um "nome" que na verdade é o objeto do paciente serializado
+     (bug antigo: a ficha espelhada gravava o objeto na coluna nome do banco).
+     Retorna o objeto {nome, nascimento, ...} se for o caso, senão null. */
+  pacienteDeJSON(s) {
+    if (typeof s !== 'string' || s.charAt(0) !== '{') return null;
+    try {
+      const o = JSON.parse(s);
+      if (o && typeof o === 'object' && typeof o.nome === 'string' && o.nome.trim()) return o;
+    } catch (e) {}
+    return null;
+  },
   horaAtual() {
     const d = new Date();
     return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
@@ -10048,6 +10059,54 @@ const armazenamento = {
         toast('⚠️ Armazenamento do aparelho em ' + armazenamento._fmt(u.total) + ' — libere espaço em Ajustes → Armazenamento do aparelho antes de encher.', 'warn');
       }
     } catch (e) {}
+    try { armazenamento.repararNomesJSON(); } catch (e) {}
+  },
+
+  /* Repara registros em que o NOME do paciente foi gravado como JSON
+     serializado (bug antigo: a ficha espelhada mandava o objeto do paciente
+     para a coluna nome de patients; o pull trazia isso de volta como nome).
+     Roda a cada boot — barato (só checa o 1º caractere) e idempotente. */
+  repararNomesJSON() {
+    let consertados = 0;
+    /* cadastro central: nome JSON → nome real (+ enriquece campos vazios) */
+    try {
+      const lst = store.list('pacientes'); let mudou = false;
+      lst.forEach(p => {
+        const rep = utils.pacienteDeJSON(p.nome);
+        if (!rep) return;
+        p.nome = rep.nome.trim();
+        if (!p.nascimento && rep.nascimento) p.nascimento = rep.nascimento;
+        if (!p.sexo && rep.sexo) p.sexo = rep.sexo;
+        if (!p.prontuario && rep.prontuario) p.prontuario = rep.prontuario;
+        mudou = true; consertados++;
+      });
+      if (mudou) store.setList('pacientes', lst);
+    } catch (e) {}
+    /* módulos de ficha simples: campo nome JSON → nome real */
+    ['pre', 'consulta', 'recuperacao', 'termo', 'prescricao', 'documentos', 'risco'].forEach(m => {
+      try {
+        const lst = store.list(m); let mudou = false;
+        lst.forEach(it => {
+          const rep = utils.pacienteDeJSON(it.nome);
+          if (!rep) return;
+          it.nome = rep.nome.trim();
+          mudou = true; consertados++;
+        });
+        if (mudou) store.setList(m, lst);
+      } catch (e) {}
+    });
+    /* ficha de anestesia: paciente serializado como string → volta a objeto */
+    try {
+      const lst = store.list('anestesia'); let mudou = false;
+      lst.forEach(it => {
+        const rep = utils.pacienteDeJSON(it.paciente);
+        if (!rep) return;
+        it.paciente = rep;
+        mudou = true; consertados++;
+      });
+      if (mudou) store.setList('anestesia', lst);
+    } catch (e) {}
+    return consertados;
   },
   uso() {
     const itens = []; let total = 0;
@@ -15524,6 +15583,14 @@ const cloudRel = {
     const d = row.data;
     const base = (d && typeof d === 'object' && (d._id || d.nome)) ? Object.assign({}, d) : {};
     base.nome = base.nome || row.nome || '';
+    /* Saneia linhas antigas em que a coluna nome recebeu o objeto serializado */
+    const rep = utils.pacienteDeJSON(base.nome);
+    if (rep) {
+      base.nome = rep.nome.trim();
+      if (!base.nascimento && rep.nascimento) base.nascimento = rep.nascimento;
+      if (!base.sexo && rep.sexo) base.sexo = rep.sexo;
+      if (!base.prontuario && rep.prontuario) base.prontuario = rep.prontuario;
+    }
     if (!base.cpf && row.cpf) base.cpf = row.cpf;
     if (!base.nascimento && row.nascimento) base.nascimento = row.nascimento;
     if (!base.prontuario && row.prontuario) base.prontuario = row.prontuario;
@@ -15583,8 +15650,10 @@ const cloudRel = {
     if (cloudRel._cachePac[key]) return cloudRel._cachePac[key];
     const existente = await cloudRel._lerAtualTab('patients', org, key, 'id');
     if (existente && existente.id) { cloudRel._cachePac[key] = existente.id; return existente.id; }
-    const row = { organization_id: org, legacy_id: key, nome: item.paciente || id.nome || 'Sem nome',
-      cpf: id.cpf || null, convenio: item.convenio || null, data: { origem: 'auto' } };
+    /* id.nome extrai o NOME (texto) de qualquer módulo — na ficha de anestesia
+       item.paciente é o OBJETO inteiro e não pode ir para a coluna nome. */
+    const row = { organization_id: org, legacy_id: key, nome: id.nome || 'Sem nome',
+      cpf: id.cpf || null, convenio: id.convenio || item.convenio || null, data: { origem: 'auto' } };
     try {
       const ret = await migracaoFase4._upsert('patients', [row], true);
       const pid = (ret && ret[0]) ? ret[0].id : null;
@@ -16781,22 +16850,33 @@ const pacienteAutocomplete = {
   _idx: -1,
   _itens: [],
 
-  /* Reúne nomes únicos de pacientes: cadastro central + todos os módulos */
+  /* Reúne nomes únicos de pacientes: cadastro central + todos os módulos.
+     Nunca deixa passar um "nome" que na verdade é JSON serializado (dado
+     antigo corrompido) — repara quando dá, descarta quando não dá. */
+  _nomeLimpo(nome) {
+    if (!nome || typeof nome !== 'string') return null;
+    const rep = utils.pacienteDeJSON(nome);
+    if (rep) return rep.nome.trim();
+    if (nome.charAt(0) === '{' || nome.charAt(0) === '[') return null;
+    return nome;
+  },
   _coletarNomes() {
     const mapa = new Map(); /* chave normalizada -> {nome, cadastrado} */
     try {
       store.list('pacientes').forEach(p => {
-        if (!p.nome) return;
-        const k = linker._normNome(p.nome);
-        mapa.set(k, { nome: p.nome, cadastrado: true, dados: p });
+        const nome = pacienteAutocomplete._nomeLimpo(p.nome);
+        if (!nome) return;
+        const k = linker._normNome(nome);
+        mapa.set(k, { nome: nome, cadastrado: true, dados: p });
       });
     } catch (e) {}
     /* nomes vindos de registros de módulos (não cadastrados formalmente) */
     ['anestesia', 'pre', 'consulta', 'recuperacao', 'termo', 'prescricao'].forEach(m => {
       try {
         store.list(m).forEach(it => {
-          const nome = it.paciente_nome || it.nome || (it.paciente && it.paciente.nome) || it.paciente;
-          if (!nome || typeof nome !== 'string') return;
+          const bruto = it.paciente_nome || it.nome || (it.paciente && it.paciente.nome) || it.paciente;
+          const nome = pacienteAutocomplete._nomeLimpo(bruto);
+          if (!nome) return;
           const k = linker._normNome(nome);
           if (!mapa.has(k)) mapa.set(k, { nome: nome, cadastrado: false });
         });
