@@ -1063,6 +1063,39 @@ await test('Arquivamento: antigos+sincronizados saem, prazos por módulo, pull n
   await page.close();
 });
 
+/* 28) Eventos — laparoscopia: pneumoperitônio + crises com conduta passo a passo */
+await test('Eventos: pneumoperitônio (início/fim) e crises da laparoscopia com conduta técnica', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const T = anestesia.eventos.TIPOS;
+    out.temInicio = T.includes('Início do pneumoperitônio');
+    out.temFim = T.includes('Fim do pneumoperitônio');
+    out.temCrises = T.includes('Embolia gasosa (CO₂)') && T.includes('Enfisema subcutâneo') && T.includes('Pneumotórax');
+    const D = anestesia.eventos.DESCRICOES;
+    out.descInsuflacao = /12–15 mmHg/.test(D['Início do pneumoperitônio'] || '');
+    out.condutaEmbolia = /Durant/.test(D['Embolia gasosa (CO₂)'] || '') && /INTERROMPER/.test(D['Embolia gasosa (CO₂)'] || '');
+    out.condutaPntx = /descompress/i.test(D['Pneumotórax'] || '');
+    // o select de evento da ficha é gerado de TIPOS → novo evento aparece
+    location.hash = '#anestesia';
+    await new Promise(r => setTimeout(r, 400));
+    anestesia.eventos.add();
+    const sel = document.querySelector('#eventos-body [name="evt_tipo[]"]');
+    out.noSelect = !!sel && sel.innerHTML.includes('Início do pneumoperitônio');
+    // e o checklist de intercorrências (seção 11) também tem as crises
+    out.noChecklist = !!document.querySelector('#form-anestesia [name="intercorrencias[]"][value="Embolia gasosa (CO₂)"]');
+    return out;
+  });
+  assert(r.temInicio && r.temFim, 'TIPOS deveria ter início e fim do pneumoperitônio');
+  assert(r.temCrises, 'TIPOS deveria ter embolia gasosa, enfisema subcutâneo e pneumotórax');
+  assert(r.descInsuflacao, 'descrição da insuflação deveria citar a pressão alvo (12–15 mmHg)');
+  assert(r.condutaEmbolia, 'conduta da embolia gasosa deveria incluir interromper insuflação e posição de Durant');
+  assert(r.condutaPntx, 'conduta do pneumotórax deveria incluir descompressão');
+  assert(r.noSelect, 'o select de eventos da ficha deveria listar o pneumoperitônio');
+  assert(r.noChecklist, 'o checklist de intercorrências deveria ter as crises da laparoscopia');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
