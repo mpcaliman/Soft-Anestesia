@@ -1012,6 +1012,57 @@ await test('Carimbo: busca acha o perfil profissional por nome exato, parcial e 
   await page.close();
 });
 
+/* 27) Arquivamento — antigos sincronizados saem do aparelho e voltam sob demanda */
+await test('Arquivamento: antigos+sincronizados saem, prazos por módulo, pull não traz de volta, restaurar funciona', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    localStorage.removeItem(arquivo.INDEX_KEY);
+    const D = n => new Date(Date.now() - n * 86400000).toISOString();
+    store.setList('anestesia', [
+      { _id: 'velho_sync',  _relUpdatedAt: 't', _updatedAt: D(120), paciente: { nome: 'Antigo Sincronizado' } },
+      { _id: 'velho_local',                     _updatedAt: D(120), paciente: { nome: 'Antigo Só Local' } },
+      { _id: 'recente',     _relUpdatedAt: 't', _updatedAt: D(10),  paciente: { nome: 'Recente' } }
+    ]);
+    store.setList('financeiro', [
+      { _id: 'fin_meio_ano', _relUpdatedAt: 't', _updatedAt: D(200), paciente: 'Fin Meio Ano' },
+      { _id: 'fin_2anos',    _relUpdatedAt: 't', _updatedAt: D(400), paciente: 'Fin Dois Anos' }
+    ]);
+    out.arquivou = arquivo.arquivarAntigos();      // velho_sync + fin_2anos = 2
+    const idsA = store.list('anestesia').map(x => x._id);
+    out.soSaiuOCerto = !idsA.includes('velho_sync') && idsA.includes('velho_local') && idsA.includes('recente');
+    out.finRespeitaPrazo = store.list('financeiro').map(x => x._id).join(',') === 'fin_meio_ano';
+    out.indexado = arquivo.estaArquivado('anestesia', 'velho_sync') && arquivo.total() === 2;
+
+    // pull relacional NÃO traz o arquivado de volta
+    cloudRel.disponivel = () => true;
+    cloudRel.puxarModulo = async () => ([{ _id: 'velho_sync', _relUpdatedAt: 't2', paciente: { nome: 'Antigo Sincronizado' } }]);
+    delete cloudRel._puxados['anestesia'];
+    await cloudRel.autoPullModulo('anestesia');
+    out.pullNaoVolta = !store.list('anestesia').some(x => x._id === 'velho_sync');
+
+    // restaurar (nuvem mockada) → volta ao aparelho e sai do índice
+    cloud._garantirToken = async () => true;
+    cloudRel._orgAsync = async () => 'org1';
+    cloudRel._lerAtualTab = async () => ({ id: 'u1', legacy_id: 'velho_sync',
+      data: { _id: 'velho_sync', paciente: { nome: 'Antigo Sincronizado' } }, updated_at: 't3' });
+    const ok = await arquivo.restaurar('anestesia', 'velho_sync');
+    out.restaurou = ok && store.list('anestesia').some(x => x._id === 'velho_sync')
+      && !arquivo.estaArquivado('anestesia', 'velho_sync');
+
+    store.setList('anestesia', []); store.setList('financeiro', []);
+    localStorage.removeItem(arquivo.INDEX_KEY);
+    return out;
+  });
+  assert(r.arquivou === 2, 'deveriam sair exatamente 2 registros (ficha 120d + financeiro 400d), saiu ' + r.arquivou);
+  assert(r.soSaiuOCerto, 'rascunho só-local e registro recente deveriam FICAR no aparelho');
+  assert(r.finRespeitaPrazo, 'financeiro com 200 dias deveria ficar (prazo do financeiro é 1 ano)');
+  assert(r.indexado, 'os arquivados deveriam entrar no índice');
+  assert(r.pullNaoVolta, 'o pull não deveria trazer de volta um registro arquivado');
+  assert(r.restaurou, 'restaurar deveria trazer o registro da nuvem e tirá-lo do índice');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
