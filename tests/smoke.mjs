@@ -1096,6 +1096,84 @@ await test('Eventos: pneumoperitônio (início/fim) e crises da laparoscopia com
   await page.close();
 });
 
+/* 29) Finalizar ficha → SRPA automática (só entrada/saída) + impressão conjunta */
+await test('SRPA automática: gera finalizada e vinculada a partir da ficha; impressão sai num arquivo único', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('anestesia', []); store.setList('recuperacao', []);
+    location.hash = '#anestesia';
+    await new Promise(r => setTimeout(r, 400));
+    const f = document.getElementById('form-anestesia');
+    const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el) el.value = v; };
+    set('paciente_nome', 'Paciente Conjunto'); set('data_anestesia', '2026-07-25');
+    set('procedimento', 'Colecistectomia videolaparoscópica');
+    set('hora_sala_saida', '12:00'); set('anestesiologista', 'Dr. Fluxo');
+    anestesia.vitais.add(false, { hora: '11:50', pas: '120', pad: '80', fc: '72', spo2: '98' });
+
+    // finalizar → o modal oferece a SRPA automática (agora em TODA finalização sem SRPA)
+    anestesia.salvar({ finalizar: true });
+    await new Promise(r => setTimeout(r, 600));
+    out.modalOferece = document.body.textContent.includes('SRPA automática s/ intercorrências');
+    /* ao finalizar o rascunho fecha e o form é limpo — o id vive no registro */
+    const fichaId = store.list('anestesia')[0]._id;
+    modal.close();
+
+    // abre o mini-modal (entrada pré-preenchida com a saída de sala) e gera
+    anestesia._srpaAutomatica(fichaId);
+    await new Promise(r => setTimeout(r, 100));
+    out.entradaPrefill = (document.getElementById('srpa-auto-entrada') || {}).value === '12:00';
+    document.getElementById('srpa-auto-alta').value = '13:00';
+    document.getElementById('srpa-auto-imprimir').checked = false;   // imprime manualmente depois
+    anestesia._gerarSrpaAutomatica(fichaId);
+    await new Promise(r => setTimeout(r, 1300));
+
+    const srpa = store.list('recuperacao')[0];
+    out.srpaFinalizada = !!(srpa && srpa._finalizado);
+    out.dadosCertos = !!(srpa && srpa.nome === 'Paciente Conjunto' && srpa.entrada === '12:00' && srpa.alta === '13:00'
+      && srpa.procedencia === 'Centro cirúrgico' && String(srpa.aldk_total).startsWith('10'));
+    out.textoPadrao = !!(srpa && /sem intercorrências/i.test(srpa.observacoes || ''));
+    out.vitais2 = !!(srpa && srpa.grafico && (srpa.grafico.vitais || []).length === 2);
+    const ficha = store.getById('anestesia', fichaId);
+    out.vinculada = !!(ficha && ficha._links && ficha._links.recuperacao_id === srpa._id
+      && srpa._links && srpa._links.anestesia_id === fichaId);
+
+    // impressão conjunta: um único arquivo com as DUAS fichas e quebra de página
+    // (como no fluxo real: a ficha é recarregada no form antes do preview)
+    anestesia.carregar(store.getById('anestesia', fichaId));
+    printPreview.abrirConjunto();
+    await new Promise(r => setTimeout(r, 200));
+    const ppp = document.getElementById('ppp').innerHTML;
+    out.conjuntoTemAmbas = ppp.includes('page-break-before') &&
+      (ppp.match(/Paciente Conjunto/g) || []).length >= 2;
+    out.nomeArquivo = printPreview._gerarNomeArquivo().startsWith('Ficha-Anestesia+SRPA');
+    printPreview.fechar();
+
+    // botão "+ SRPA" na ficha reabre o conjunto (SRPA vinculada é carregada)
+    location.hash = '#anestesia';
+    await new Promise(r => setTimeout(r, 300));
+    anestesia.carregar(store.getById('anestesia', fichaId));   /* reabre a ficha */
+    anestesia.imprimirComSrpa();
+    await new Promise(r => setTimeout(r, 500));
+    out.botaoConjunto = document.getElementById('print-preview-overlay').classList.contains('show');
+    printPreview.fechar();
+
+    store.setList('anestesia', []); store.setList('recuperacao', []);
+    return out;
+  });
+  assert(r.modalOferece, 'ao finalizar deveria oferecer a SRPA automática');
+  assert(r.entradaPrefill, 'entrada da SRPA deveria vir pré-preenchida com a saída de sala');
+  assert(r.srpaFinalizada, 'a SRPA automática deveria nascer FINALIZADA');
+  assert(r.dadosCertos, 'nome/horários/procedência/Aldrete 10 deveriam estar preenchidos');
+  assert(r.textoPadrao, 'observações deveriam ter o texto padrão sem intercorrências');
+  assert(r.vitais2, 'deveriam existir 2 sinais vitais (chegada e alta) vindos do fim do caso');
+  assert(r.vinculada, 'ficha e SRPA deveriam ficar vinculadas nos dois sentidos');
+  assert(r.conjuntoTemAmbas, 'o arquivo único deveria conter as duas fichas com quebra de página');
+  assert(r.nomeArquivo, 'o nome do arquivo deveria ser Ficha-Anestesia+SRPA - paciente - data');
+  assert(r.botaoConjunto, 'o botão "+ SRPA" da ficha deveria abrir a impressão conjunta');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
