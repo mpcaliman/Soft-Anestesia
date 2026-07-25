@@ -8554,6 +8554,17 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           </div>
           <div style="font-size:.72rem;color:var(--text-mute)">A pessoa deve ter criado a conta na nuvem (Entrar → Criar conta) com esse mesmo e-mail.</div>
         </div>
+        <div id="visibilidade-registros" style="display:none;margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+          <label style="font-size:.8rem;font-weight:600;display:block;margin-bottom:6px">Visibilidade dos registros entre anestesistas</label>
+          <label class="radio-chip"><input type="radio" name="vis-reg" value="equipe" onchange="orgSettings.mudarVisibilidade('equipe')"> 👥 Todos veem os registros da equipe (padrão)</label>
+          <label class="radio-chip"><input type="radio" name="vis-reg" value="proprios" onchange="orgSettings.mudarVisibilidade('proprios')"> 🔒 Cada anestesista vê só os seus</label>
+          <div style="font-size:.72rem;color:var(--text-mute);margin-top:6px">
+            Vale para <strong>ficha de anestesia, SRPA, pré-anestésico, escore de risco e financeiro</strong>.
+            O gestor continua vendo tudo; a secretária mantém o acesso dela, e o que ela cria (ex.: pré iniciada
+            na secretaria) fica visível aos anestesistas. A regra é aplicada <strong>no servidor</strong> (requer a
+            migração <code>0008</code> no banco) e vale em cada aparelho na próxima sincronização.
+          </div>
+        </div>
       </div>
     </section>
 
@@ -14936,6 +14947,9 @@ const cloud = {
         store.setList(mod, mesclada);
       }
       localStorage.setItem('medsys.v7.cloud.ultimo_sync', new Date().toISOString());
+      /* 4) Atualiza as configurações da organização (ex.: visibilidade dos
+         registros) — best-effort, não bloqueia o sync */
+      try { if (typeof orgSettings !== 'undefined') orgSettings.puxar(); } catch (e) {}
       if (!opts.silent) toast('☁️ Sincronizado' + (novos ? ' — ' + novos + ' registro(s) baixado(s)' : ''));
       cloud._atualizarUI('ok');
     } catch (e) {
@@ -15829,7 +15843,24 @@ const cloudRel = {
       if (!loc) { locais.push(r); porId.set(r._id, r); novos++; }
       else if (r._relUpdatedAt && !loc._relUpdatedAt) loc._relUpdatedAt = r._relUpdatedAt;
     });
-    if (novos) store.setList(mod, locais);
+    /* Visibilidade 'proprios' (migração 0008): a RLS já devolve só o que este
+       usuário pode ver — então o que veio da nuvem um dia (_relUpdatedAt) e
+       NÃO voltou agora deixou de ser visível (registro de outro anestesista
+       puxado antes da mudança). Remove do aparelho para convergir. Itens
+       criados aqui e ainda não espelhados (sem _relUpdatedAt) ficam. */
+    let removidos = 0;
+    try {
+      const u = auth.usuarioAtual();
+      if (typeof orgSettings !== 'undefined' && orgSettings.visibilidade() === 'proprios'
+          && u && u.role === 'anestesiologista') {
+        const idsRemotos = new Set(remotos.map(r => r._id));
+        for (let i = locais.length - 1; i >= 0; i--) {
+          const x = locais[i];
+          if (x && x._relUpdatedAt && x._id && !idsRemotos.has(x._id)) { locais.splice(i, 1); removidos++; }
+        }
+      }
+    } catch (e) {}
+    if (novos || removidos) store.setList(mod, locais);
   },
 
   /* Conflito genérico de registro (modal comparando campos simples) */
@@ -16067,6 +16098,73 @@ const adendos = {
 };
 
 /* ============================================================================
+   CONFIGURAÇÕES DA ORGANIZAÇÃO (organizations.settings, jsonb) — o gestor
+   define e todos os aparelhos leem. Hoje: visibilidade dos registros entre
+   anestesistas ('equipe' = todos veem tudo | 'proprios' = cada um só os seus).
+   A regra de verdade é a RLS (migração 0008); aqui o app lê/edita a escolha
+   e converge o aparelho no pull (autoPullModulo).
+============================================================================ */
+const orgSettings = {
+  CACHE_KEY: 'medsys.v7.org.settings',
+  local() { try { return JSON.parse(localStorage.getItem(orgSettings.CACHE_KEY) || '{}') || {}; } catch (e) { return {}; } },
+  _gravarCache(s) { try { localStorage.setItem(orgSettings.CACHE_KEY, JSON.stringify(s || {})); } catch (e) {} },
+  visibilidade() { return orgSettings.local().visibilidade_registros === 'proprios' ? 'proprios' : 'equipe'; },
+
+  /* Lê da nuvem e atualiza o cache local (chamado no sync e ao abrir a Equipe) */
+  async puxar() {
+    try {
+      if (!cloudRel.disponivel()) return null;
+      if (!(await cloud._garantirToken())) return null;
+      const org = await cloudRel._orgAsync(); if (!org) return null;
+      const c = cloud.config();
+      const r = await fetch(c.url + '/rest/v1/organizations?id=eq.' + org + '&select=settings',
+        { headers: cloud._headers(true) });
+      if (!r.ok) return null;
+      const rows = await r.json();
+      const s = (rows[0] && rows[0].settings) || {};
+      orgSettings._gravarCache(s);
+      return s;
+    } catch (e) { return null; }
+  },
+
+  /* Grava na nuvem (merge) — a RLS org_upd garante que só o gestor consegue */
+  async salvar(patch) {
+    const s = Object.assign({}, orgSettings.local(), patch || {});
+    if (!cloudRel.disponivel()) { toast('Sem internet — tente de novo online', 'warn'); return false; }
+    if (!(await cloud._garantirToken())) { toast('Sessão expirada — entre de novo', 'warn'); return false; }
+    const org = await cloudRel._orgAsync(); if (!org) { toast('Organização não encontrada', 'warn'); return false; }
+    const c = cloud.config();
+    try {
+      const r = await fetch(c.url + '/rest/v1/organizations?id=eq.' + org, {
+        method: 'PATCH',
+        headers: Object.assign({}, cloud._headers(true), { 'Prefer': 'return=minimal' }),
+        body: JSON.stringify({ settings: s })
+      });
+      if (!r.ok) { toast('Não foi possível salvar (só o gestor pode)', 'error'); return false; }
+      orgSettings._gravarCache(s);
+      return true;
+    } catch (e) { toast('Falha de rede ao salvar', 'error'); return false; }
+  },
+
+  async mudarVisibilidade(v) {
+    const ok = await orgSettings.salvar({ visibilidade_registros: v === 'proprios' ? 'proprios' : 'equipe' });
+    if (ok) toast(v === 'proprios'
+      ? '🔒 Cada anestesista passa a ver só os próprios registros (vale no próximo sync de cada aparelho)'
+      : '👥 A equipe volta a ver todos os registros');
+    orgSettings.renderVisibilidade();
+  },
+
+  renderVisibilidade() {
+    const box = document.getElementById('visibilidade-registros');
+    if (!box) return;
+    if (!equipeNuvem.ehGestor()) { box.style.display = 'none'; return; }
+    box.style.display = '';
+    const v = orgSettings.visibilidade();
+    box.querySelectorAll('input[name=vis-reg]').forEach(i => { i.checked = (i.value === v); });
+  }
+};
+
+/* ============================================================================
    EQUIPE DA NUVEM — gestor gerencia os membros da organização (papéis, acesso).
    Só o gestor. Usa organization_users + profiles; add por e-mail via RPC segura.
 ============================================================================ */
@@ -16102,11 +16200,14 @@ const equipeNuvem = {
     const host = document.getElementById('equipe-nuvem-lista');
     const addBox = document.getElementById('equipe-nuvem-add');
     if (!host) return;
+    orgSettings.renderVisibilidade();   /* mostra a opção (gestor) com o valor em cache */
     if (!equipeNuvem.ehGestor()) {
       host.innerHTML = '<p style="font-size:.82rem;color:var(--text-mute)">Só o <strong>gestor</strong> da clínica gerencia a equipe da nuvem. Entre com a conta de gestor para ver e editar os membros.</p>';
       if (addBox) addBox.style.display = 'none';
       return;
     }
+    /* atualiza a escolha a partir da nuvem (pode ter mudado noutro aparelho) */
+    orgSettings.puxar().then(() => orgSettings.renderVisibilidade());
     if (typeof navigator !== 'undefined' && navigator.onLine === false) { host.innerHTML = '<p style="font-size:.82rem;color:var(--text-mute)">Sem internet — reabra quando estiver online.</p>'; if (addBox) addBox.style.display = 'none'; return; }
     host.innerHTML = '<p style="font-size:.82rem;color:var(--text-mute)">⏳ Carregando membros…</p>';
     const lista = await equipeNuvem.listar();
