@@ -22329,27 +22329,27 @@ const anestesia = {
       };
     },
 
-    /* Valida o input de hora de uma tabela (vital/med/evento). Se fora do
-       limite, mostra aviso e reverte para o limite mais próximo. */
+    /* Valida o input de hora de uma tabela (vital/med/evento). Fora do
+       intervalo de sala → AVISA, mas MANTÉM o que foi digitado (não trava,
+       não sobrescreve). Antes o valor era ajustado à força para a borda, o
+       que impedia correções legítimas (ex.: consertar os horários de uma
+       ficha cuja janela de sala ainda estava com valores antigos). O gráfico
+       expande o eixo do tempo para caber pontos fora da janela, então manter
+       o valor digitado é seguro. */
     validarHoraInput(input) {
-      /* Limita o horário ao intervalo de sala (entrada/saída). Se não houver
-         entrada nem saída, aceita qualquer horário. Fora do limite → ajusta para
-         a borda mais próxima e avisa. */
       if (input && input.value) {
         const ui = anestesia.graficoUI;
         const lim = ui.limiteTempo();
         if (lim && !ui.horaDentroDoLimite(input.value)) {
-          const m = input.value.match(/^(\d{1,2}):(\d{2})/);
-          const t = parseInt(m[1]) * 60 + parseInt(m[2]);
-          let alvo;
-          if (lim.ini != null && t < lim.ini) alvo = lim.ini;
-          else alvo = lim.fim; /* passou do limite superior */
-          alvo = ((Math.round(alvo) % (24 * 60)) + 24 * 60) % (24 * 60);
-          const novo = ui.tToHora ? ui.tToHora(alvo) : (String(Math.floor(alvo / 60)).padStart(2, '0') + ':' + String(alvo % 60).padStart(2, '0'));
-          input.value = novo;
-          const qual = (lim.ini != null && lim.fim != null) ? 'entrada/saída de sala'
-            : (lim.ini != null ? 'entrada em sala' : 'saída de sala');
-          try { toast('Horário fora do intervalo de ' + qual + '. Ajustado para ' + novo + '.', 'warn'); } catch (e) {}
+          const fmt = t => {
+            t = ((Math.round(t) % (24 * 60)) + 24 * 60) % (24 * 60);
+            return ui.tToHora ? ui.tToHora(t) : (String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'));
+          };
+          const faixa = (lim.ini != null && lim.fim != null) ? (fmt(lim.ini) + '–' + fmt(lim.fim))
+            : (lim.ini != null ? 'a partir de ' + fmt(lim.ini) : 'até ' + fmt(lim.fim));
+          try {
+            toast('⏱️ ' + input.value + ' está fora do intervalo de sala (' + faixa + '). Mantido como digitado — se os horários do caso mudaram, ajuste a entrada/saída de sala no topo da ficha.', 'warn');
+          } catch (e) {}
         }
       }
       try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
