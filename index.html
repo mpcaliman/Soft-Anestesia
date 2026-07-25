@@ -4957,6 +4957,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     <button class="btn" onclick="historico.abrir('anestesia')"><span class="icon">🔍</span> Buscar / Histórico</button>
     <div class="action-divider"></div>
     <button class="btn" onclick="printPreview.abrir()" title="Visualizar e imprimir (Ctrl+P)"><span class="icon">🖨️</span> Imprimir</button>
+    <button class="btn" onclick="anestesia.imprimirComSrpa()" title="Imprime a ficha de anestesia e a SRPA vinculada num único arquivo/PDF"><span class="icon">🖨️</span> + SRPA</button>
     <button class="btn" onclick="anestesia.exportar()" title="Exportar JSON (Ctrl+E)"><span class="icon">⬇️</span> Exportar</button>
     <button class="btn btn-ghost" onclick="actions.importarJSONPara('anestesia')"><span class="icon">⬆️</span> Importar</button>
     <div class="action-divider"></div>
@@ -6369,6 +6370,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     <button class="btn" onclick="historico.abrir('recuperacao')"><span class="icon">🔍</span> Buscar / Histórico</button>
     <div class="action-divider"></div>
     <button class="btn" onclick="printPreview.abrir()"><span class="icon">🖨️</span> Visualizar / Imprimir</button>
+    <button class="btn" onclick="recuperacao.imprimirComFicha()" title="Imprime a SRPA e a ficha de anestesia vinculada num único arquivo/PDF"><span class="icon">🖨️</span> + Ficha</button>
     <button class="btn" onclick="recuperacao.exportar()"><span class="icon">⬇️</span> Exportar</button>
     <button class="btn btn-ghost" onclick="actions.importarJSONPara('recuperacao')"><span class="icon">⬆️</span> Importar</button>
     <div class="action-divider"></div>
@@ -12554,6 +12556,18 @@ const recuperacao = {
       return;
     }
     recuperacao.salvar({ finalizar: true });
+  },
+  /* Imprime a SRPA junto com a ficha de anestesia vinculada (arquivo único) */
+  imprimirComFicha() {
+    const f = document.getElementById(recuperacao.formId);
+    const id = (f.querySelector('[name="_id"]') || {}).value;
+    if (!id) { toast('Salve a SRPA primeiro', 'warn'); return; }
+    const doc = store.getById('recuperacao', id);
+    const fichaId = doc && doc._links && doc._links.anestesia_id;
+    const ficha = fichaId ? store.getById('anestesia', fichaId) : null;
+    if (!ficha) { toast('Esta SRPA não tem ficha de anestesia vinculada.', 'warn'); return; }
+    try { anestesia.carregar(ficha); } catch (e) {}
+    setTimeout(() => printPreview.abrirConjunto(), 250);
   },
   salvarComoNovo() {
     const f = document.getElementById(recuperacao.formId);
@@ -25481,9 +25495,11 @@ const anestesia = {
     if (finalizar) { try { rascunhos.removerAtivo('anestesia'); } catch (e) {} }
     toast(finalizar ? '✅ Ficha finalizada' : '💾 Ficha salva (dados preservados)');
 
-    /* Pergunta sobre SRPA — somente ao FINALIZAR ficha nova sem SRPA vinculada */
+    /* Pergunta sobre SRPA — em TODA finalização sem SRPA vinculada
+       (antes só em ficha nova; quem salvava rascunho e finalizava depois
+       nunca via a pergunta) */
     const jaTemSrpa = docCompleto && docCompleto._links && docCompleto._links.recuperacao_id;
-    if (finalizar && isNew && !jaTemSrpa) {
+    if (finalizar && !jaTemSrpa) {
       setTimeout(() => anestesia._perguntarSRPA(docCompleto), 300);
     }
   },
@@ -25815,9 +25831,14 @@ const anestesia = {
         Os dados de identificação, procedimento e técnica serão importados automaticamente — você só precisa completar o que é específico da SRPA.
       </p>
       <div class="quick-action-grid" style="grid-template-columns: repeat(2, 1fr)">
+        <div class="quick-action-card" onclick="modal.close(); anestesia._srpaAutomatica('${docAnestesia._id}');" style="border-color:var(--primary)">
+          <span class="qa-icon">⚡</span>
+          <div class="qa-label">SRPA automática s/ intercorrências</div>
+          <div class="qa-desc">Só entrada e saída — o resto preenche sozinho</div>
+        </div>
         <div class="quick-action-card" onclick="anestesia._iniciarSRPA('${docAnestesia._id}'); modal.close();">
           <span class="qa-icon">🛏️</span>
-          <div class="qa-label">Sim, fazer SRPA agora</div>
+          <div class="qa-label">Preencher SRPA (editável)</div>
           <div class="qa-desc">Pré-preenche com dados desta anestesia</div>
         </div>
         <div class="quick-action-card" onclick="modal.close();" style="border-style:dashed">
@@ -25828,6 +25849,87 @@ const anestesia = {
       </div>
     `;
     modal.open('🛏️ Fazer SRPA junto?', html, '');
+  },
+
+  /* ---------- SRPA AUTOMÁTICA sem intercorrências ----------
+     Pede só ENTRADA e SAÍDA da SRPA; todo o resto vem da ficha recém
+     finalizada + padrões de normalidade (vitais estáveis do fim do caso,
+     Aldrete 10, PADSS 10, textos padrão, carimbo do anestesista). Gera a
+     ficha de SRPA FINALIZADA e vinculada, e oferece a impressão conjunta
+     (ficha + SRPA num único arquivo). Tudo revisável depois. */
+  _srpaAutomatica(anestesiaId) {
+    const docA = store.getById('anestesia', anestesiaId);
+    if (!docA) { toast('Ficha de anestesia não encontrada', 'error'); return; }
+    const saidaSala = (docA.procedimento && (docA.procedimento.hora_sala_saida || docA.procedimento.hora_fim)) || utils.horaAtual();
+    const somar = (h, min) => {
+      const m = /^(\d{1,2}):(\d{2})/.exec(h || ''); if (!m) return '';
+      const t = ((+m[1]) * 60 + (+m[2]) + min) % 1440;
+      return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0');
+    };
+    modal.open('⚡ SRPA automática — sem intercorrências',
+      '<p style="font-size:.85rem;color:var(--text-soft);margin:0 0 12px">Informe só os horários. A ficha de SRPA será gerada completa (dados do paciente, sinais vitais estáveis do fim do caso, Aldrete 10, textos padrão) e <strong>finalizada</strong> — dá para revisar/editar depois.</p>' +
+      '<div class="grid">' +
+      '<div class="field col-6"><label>🚪 Entrada na SRPA</label><input type="time" id="srpa-auto-entrada" value="' + saidaSala + '"></div>' +
+      '<div class="field col-6"><label>🚶 Saída / alta da SRPA</label><input type="time" id="srpa-auto-alta" value="' + somar(saidaSala, 60) + '"></div>' +
+      '<div class="field col-12"><label class="check"><input type="checkbox" id="srpa-auto-imprimir" checked><span>🖨️ Ao concluir, abrir a impressão da <b>ficha + SRPA num único arquivo</b></span></label></div>' +
+      '</div>',
+      '<button class="btn" onclick="modal.close()">Cancelar</button>' +
+      '<button class="btn btn-primary" onclick="anestesia._gerarSrpaAutomatica(\'' + anestesiaId + '\')">⚡ Gerar SRPA</button>');
+  },
+  _gerarSrpaAutomatica(anestesiaId) {
+    const entrada = (document.getElementById('srpa-auto-entrada') || {}).value || utils.horaAtual();
+    const alta = (document.getElementById('srpa-auto-alta') || {}).value || '';
+    const imprimir = !!(document.getElementById('srpa-auto-imprimir') || {}).checked;
+    modal.close();
+    const docA = store.getById('anestesia', anestesiaId);
+    if (!docA) { toast('Ficha de anestesia não encontrada', 'error'); return; }
+    /* Lê do REGISTRO salvo (ao finalizar, o formulário da ficha é limpo):
+       último vital = estado do paciente ao sair de sala */
+    const ultVit = (Array.isArray(docA.sinais_vitais) ? docA.sinais_vitais : []).slice(-1)[0] || {};
+    const vq = n => (ultVit[n] != null ? String(ultVit[n]) : '');
+    const nomeProf = (docA.equipe && docA.equipe.anestesiologista) || '';
+    window.location.hash = 'recuperacao';
+    setTimeout(() => {
+      recuperacao.novo();
+      modelos.importarRegistro('recuperacao', 'anestesia', anestesiaId);   /* nome, procedimento, técnica + vínculo */
+      const f = document.getElementById('form-recuperacao');
+      const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el && v != null && v !== '') el.value = v; };
+      set('data', (docA.procedimento && docA.procedimento.data) || utils.hojeISO());
+      set('entrada', entrada); set('alta', alta);
+      set('procedencia', 'Centro cirúrgico');
+      if (docA.paciente && docA.paciente.idade) set('idade', String(docA.paciente.idade).replace(/\s*anos?$/i, '') + ' anos');
+      /* sinais vitais estáveis: chegada e alta com o último vital do caso */
+      try {
+        anestesia.graficoUI._contexto = 'recuperacao';
+        const base = { pas: vq('pas'), pad: vq('pad'), fc: vq('fc'), spo2: vq('spo2') || '98' };
+        anestesia.vitais.add(false, Object.assign({ hora: entrada }, base));
+        if (alta) anestesia.vitais.add(false, Object.assign({ hora: alta }, base));
+      } catch (e) {}
+      /* Aldrete 10 + PADSS 10 (paciente estável, sem intercorrências) */
+      ['aldk_atividade', 'aldk_respiracao', 'aldk_circulacao', 'aldk_consciencia', 'aldk_saturacao'].forEach(n => set(n, '2'));
+      set('aldk_datahora', ((docA.procedimento && docA.procedimento.data) || utils.hojeISO()) + 'T' + (alta || entrada));
+      try { recuperacao.aldrete.calc(); } catch (e) {}
+      set('aldrete', '10');
+      ['pad_vitais', 'pad_deambulacao', 'pad_nausea', 'pad_dor', 'pad_sangramento'].forEach(n => set(n, '2'));
+      try { recuperacao.padss.calc(); } catch (e) {}
+      /* textos padrão de normalidade */
+      try { templates.aplicar('recuperacao', 'observacoes', 'semIntercorrencias'); } catch (e) {}
+      try { templates.aplicar('recuperacao', 'conduta', 'condutaPadraoSRPA'); } catch (e) {}
+      /* responsável + carimbo (mesmo anestesista da ficha) */
+      if (nomeProf) {
+        set('responsavel', nomeProf);
+        try { assinatura.aplicarCarimboPorNome('sig-recuperacao', nomeProf, 'form-recuperacao'); } catch (e) {}
+      }
+      try { recuperacao.resumoTopo(); } catch (e) {}
+      recuperacao.salvar({ finalizar: true });
+      toast('⚡ SRPA sem intercorrências gerada e finalizada — revise se quiser');
+      if (imprimir) {
+        /* recarrega a ficha no formulário (foi limpa ao finalizar) para o
+           preview conjunto ler as DUAS de uma vez */
+        try { anestesia.carregar(store.getById('anestesia', anestesiaId)); } catch (e) {}
+        setTimeout(() => printPreview.abrirConjunto(), 500);
+      }
+    }, 350);
   },
   /* Inicia SRPA pré-preenchida com dados da anestesia */
   _iniciarSRPA(anestesiaId) {
@@ -25848,6 +25950,20 @@ const anestesia = {
         }
       }, 200);
     }, 250);
+  },
+  /* Imprime ficha + SRPA vinculada num ÚNICO arquivo (carrega a SRPA no
+     form dela e monta o preview conjunto). Vale para SRPA editada OU
+     automática — o que estiver vinculado à ficha aberta. */
+  imprimirComSrpa() {
+    const f = document.getElementById('form-anestesia');
+    const id = (f.querySelector('[name="_id"]') || {}).value;
+    if (!id) { toast('Salve a ficha primeiro', 'warn'); return; }
+    const doc = store.getById('anestesia', id);
+    const srpaId = doc && doc._links && doc._links.recuperacao_id;
+    const srpa = srpaId ? store.getById('recuperacao', srpaId) : null;
+    if (!srpa) { toast('Esta ficha ainda não tem SRPA vinculada — finalize a ficha e escolha uma das opções de SRPA, ou use ⚡ SRPA automática.', 'warn'); return; }
+    try { recuperacao.carregar(srpa); } catch (e) {}
+    setTimeout(() => printPreview.abrirConjunto(), 250);
   },
   salvarComoNovo() {
     const f = document.getElementById('form-anestesia');
@@ -30511,6 +30627,7 @@ const protocoloJejum = {
 const printPreview = {
   abrir() {
     try {
+      printPreview._nomeArquivoOverride = null;
       const mod = state.currentModule;
       const builders = {
         pre: printPreview._buildPre,
@@ -30582,6 +30699,53 @@ const printPreview = {
   fechar() {
     document.getElementById('print-preview-overlay').classList.remove('show');
     document.body.classList.remove('printing-preview');
+  },
+
+  /* ARQUIVO ÚNICO: ficha de anestesia + SRPA (quebra de página entre elas).
+     Lê os dois formulários — quem chama garante que ambos estão carregados. */
+  abrirConjunto() {
+    try {
+      const htmlFicha = printPreview._buildAnestesia();
+      const htmlSrpa = printPreview._buildRecuperacao();
+      printPreview._verCtx = { mod: 'anestesia', formId: 'form-anestesia' };
+      const ppp = document.getElementById('ppp');
+      if (!ppp) { toast('Erro: container de preview não encontrado', 'error'); return; }
+      ppp.innerHTML = htmlFicha + '<div style="page-break-before:always;break-before:page"></div>' + htmlSrpa;
+      /* Nome do arquivo: Ficha-Anestesia+SRPA - paciente - data */
+      let paciente = '', data = '';
+      try {
+        const d = anestesia.coletarEstruturado();
+        paciente = (d.paciente && d.paciente.nome) || '';
+        data = (d.procedimento && d.procedimento.data) || '';
+      } catch (e) {}
+      paciente = (paciente || 'sem-paciente').normalize('NFD').replace(/[̀-ͯ]/g, '')
+        .replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '-').slice(0, 40);
+      let dataStr = '';
+      if (data) { const dd = new Date(data); if (!isNaN(dd)) dataStr = String(dd.getDate()).padStart(2, '0') + String(dd.getMonth() + 1).padStart(2, '0') + dd.getFullYear(); }
+      printPreview._nomeArquivoOverride = 'Ficha-Anestesia+SRPA - ' + paciente + (dataStr ? ' - ' + dataStr : '');
+      /* Dropdown de carimbos (mesma lógica do abrir normal) */
+      const sel = document.getElementById('ppt-signature-select');
+      if (sel) {
+        const profissionais = [
+          ...ajustes.list('cad_anestesistas').filter(p => p.carimbo).map(p => ({ ...p, _tipo: 'Anestesista' })),
+          ...ajustes.list('cad_cirurgioes').filter(p => p.carimbo).map(p => ({ ...p, _tipo: 'Cirurgião' }))
+        ];
+        const nomeProf = (document.querySelector('#form-anestesia [name="anestesiologista"]') || {}).value || '';
+        const key = nomeProf.trim().toLowerCase();
+        const atual = profissionais.find(p => (p.nome || '').trim().toLowerCase() === key);
+        sel.innerHTML = '<option value="">— sem carimbo —</option>' +
+          profissionais.map(p => `<option value="${p._id}" ${atual && atual._id === p._id ? 'selected' : ''}>${utils.escapeHTML(p.nome)} (${p._tipo})</option>`).join('');
+      }
+      const info = document.getElementById('ppt-info');
+      if (info) info.textContent = 'Ficha de anestesia + SRPA (arquivo único)';
+      const filenameEl = document.getElementById('ppt-filename');
+      if (filenameEl) filenameEl.textContent = '📁 ' + printPreview._gerarNomeArquivo();
+      document.getElementById('print-preview-overlay').classList.add('show');
+      printPreview.refreshSignature();
+    } catch (e) {
+      console.error('Erro no preview conjunto:', e);
+      toast('Erro ao montar ficha + SRPA: ' + (e.message || ''), 'error');
+    }
   },
   imprimir() {
     try {
@@ -30858,6 +31022,7 @@ ${TAG_CLOSE_HTML}`;
   },
   /* Gera nome sugerido do arquivo: paciente_tipo_ddmmaaaa */
   _gerarNomeArquivo() {
+    if (printPreview._nomeArquivoOverride) return printPreview._nomeArquivoOverride;
     const mod = state.currentModule;
     const tipos = {
       pre: 'APA',
