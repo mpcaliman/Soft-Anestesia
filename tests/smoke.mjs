@@ -711,6 +711,51 @@ await test('Armazenamento: auto-manutenção compacta o histórico antigo uma ú
   await page.close();
 });
 
+/* 21) Cadastros — grupos do menu recolhíveis com preferência lembrada */
+await test('Cadastros: grupos recolhíveis — só o ativo aberto, toggle persiste, selecionar reabre', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    localStorage.removeItem(ajustes.GRUPOS_KEY);
+    location.hash = '#ajustes';
+    await new Promise(r => setTimeout(r, 500));
+    ajustes._activeCat = 'cad_assinaturas';   /* grupo Perfil e equipe */
+    ajustes.render();
+    const cats = () => document.getElementById('ajustes-cats');
+    const visiveis = () => cats().querySelectorAll('.cadastro-cat').length;
+    const cabecalhos = () => cats().querySelectorAll('.cg-toggle').length;
+
+    // padrão: 3 cabeçalhos, só o grupo ativo expandido (3 categorias de Perfil e equipe)
+    out.cabecalhos = cabecalhos();          // 3
+    out.soAtivoAberto = visiveis() === 3;
+    out.htmlTemTotal = cats().innerHTML.includes('cg-total');
+
+    // expandir outro grupo → soma as categorias dele (4 de Locais e faturamento)
+    ajustes.alternarGrupo('Locais e faturamento');
+    out.aposAbrir = visiveis();             // 7
+    // recolher o grupo ativo → some
+    ajustes.alternarGrupo('Perfil e equipe');
+    out.aposRecolher = visiveis();          // 4
+    // preferência persiste na chave
+    const salvos = JSON.parse(localStorage.getItem(ajustes.GRUPOS_KEY));
+    out.persistiu = salvos['Locais e faturamento'] === true && salvos['Perfil e equipe'] === false;
+
+    // selecionar categoria de grupo fechado reabre o grupo
+    ajustes.selecionar('cad_anestesistas');  /* Perfil e equipe, que está fechado */
+    out.reabriu = !!cats().querySelector('.cadastro-cat.active') &&
+      JSON.parse(localStorage.getItem(ajustes.GRUPOS_KEY))['Perfil e equipe'] === true;
+    return out;
+  });
+  assert(r.cabecalhos === 3, 'deveriam ser 3 cabeçalhos de grupo, veio ' + r.cabecalhos);
+  assert(r.soAtivoAberto, 'por padrão só o grupo ativo deveria estar expandido (3 itens)');
+  assert(r.htmlTemTotal, 'cabeçalho deveria mostrar o total do grupo');
+  assert(r.aposAbrir === 7, 'abrir Locais e faturamento deveria mostrar 7 itens, veio ' + r.aposAbrir);
+  assert(r.aposRecolher === 4, 'recolher Perfil e equipe deveria deixar 4, veio ' + r.aposRecolher);
+  assert(r.persistiu, 'preferência de grupos deveria persistir no localStorage');
+  assert(r.reabriu, 'selecionar categoria de grupo fechado deveria reabri-lo');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
