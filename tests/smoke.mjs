@@ -423,9 +423,15 @@ await test('Ficha: nav de seções com contadores, FAB tempos carimba e FAB med 
     await new Promise(r => setTimeout(r, 400));
     anestesia.nav._wire(); anestesia.nav.render();
     out.nChips = document.querySelectorAll('#ficha-nav .pre-nav-chip').length;   // 9
-    // FABs visíveis na ficha
-    out.fabMed = (document.getElementById('fab-med') || {}).style.display;
-    out.fabTempos = (document.getElementById('fab-tempos') || {}).style.display;
+    // Speed dial único visível na ficha; alça de rolagem removida
+    out.dialVisivel = (document.getElementById('fab-dial') || {}).style.display;
+    out.alcaSumiu = !document.getElementById('page-scroller');
+    // abrir o dial lista as 7 ações da ficha (inclui calculadora)
+    fabDial.abrir();
+    out.dialItens = document.querySelectorAll('#fab-dial-itens .fab-dial-item').length;   // 7
+    out.dialTemCalc = document.getElementById('fab-dial-itens').innerHTML.includes('Calculadora');
+    fabDial.fechar();
+    out.dialFechou = !document.getElementById('fab-dial').classList.contains('aberto');
     // adicionar uma linha de vitais → contador aparece
     anestesia.vitais.add(true);
     await new Promise(r => setTimeout(r, 300));
@@ -436,7 +442,7 @@ await test('Ficha: nav de seções com contadores, FAB tempos carimba e FAB med 
     out.temProximo = !!document.querySelector('#tempos-modal-body .tp-proximo');
     // com modal aberto, os flutuantes somem (não podem cobrir o modal)
     out.bodyTemModal = document.body.classList.contains('tem-modal');
-    out.fabEscondido = getComputedStyle(document.getElementById('fab-med')).display === 'none';
+    out.fabEscondido = getComputedStyle(document.getElementById('fab-dial')).display === 'none';
     anestesia.tempos.marcar('hora_sala_entrada');
     const f = document.getElementById('form-anestesia');
     out.horaMarcada = /^\d{2}:\d{2}/.test((f.querySelector('[name=hora_sala_entrada]') || {}).value || '');
@@ -444,7 +450,7 @@ await test('Ficha: nav de seções com contadores, FAB tempos carimba e FAB med 
     out.temFeito = !!document.querySelector('#tempos-modal-body .tp-feito');
     // fechar o modal devolve os flutuantes
     modal.close();
-    out.fabVoltou = getComputedStyle(document.getElementById('fab-med')).display !== 'none' &&
+    out.fabVoltou = getComputedStyle(document.getElementById('fab-dial')).display !== 'none' &&
       !document.body.classList.contains('tem-modal');
     // nav.ir expande card recolhido
     const card = anestesia.nav._mapa()['8'];
@@ -454,7 +460,10 @@ await test('Ficha: nav de seções com contadores, FAB tempos carimba e FAB med 
     return out;
   });
   assert(r.nChips === 9, 'deveria haver 9 chips na ficha-nav, veio ' + r.nChips);
-  assert(r.fabMed === 'flex' && r.fabTempos === 'flex', 'FABs de med/tempos deveriam estar visíveis na ficha');
+  assert(r.dialVisivel === 'flex', 'speed dial deveria estar visível na ficha, veio ' + r.dialVisivel);
+  assert(r.alcaSumiu, 'a alça de rolagem (page-scroller) deveria ter sido removida');
+  assert(r.dialItens === 7 && r.dialTemCalc, 'dial aberto deveria listar 7 ações incluindo a calculadora, veio ' + r.dialItens);
+  assert(r.dialFechou, 'fechar() deveria recolher o dial');
   assert(r.navTemContador, 'chip de vitais deveria mostrar contador de linhas');
   assert(r.modalLinhas === 6 && r.temProximo, 'modal de tempos deveria ter 6 linhas com próximo destacado');
   assert(r.bodyTemModal && r.fabEscondido, 'com modal aberto, os FABs deveriam sumir (não cobrir o modal)');

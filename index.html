@@ -1345,44 +1345,6 @@ body[data-graph-mode="mover"] canvas#srpa-vitals-chart:active { cursor: grabbing
   font-style: italic;
 }
 
-/* === Alça lateral direita para rolar a página — um único ícone arrastável === */
-#page-scroller {
-  position: fixed;
-  right: 8px;
-  top: 0;
-  height: 100vh;             /* área de percurso da alça = altura da tela */
-  width: 44px;
-  z-index: 1200;
-  display: none;             /* mostrada por JS quando a página tem rolagem */
-  pointer-events: none;      /* só a alça captura o toque; o resto passa direto */
-}
-#page-scroller.show { display: block; }
-#page-scroller .ps-handle {
-  position: absolute;
-  right: 0;
-  top: 0;                    /* posição vertical definida pelo JS */
-  width: 46px; height: 46px;
-  border-radius: 50%;
-  background: var(--primary);
-  color: #fff;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 1.2rem; line-height: 1;
-  box-shadow: 0 2px 10px rgba(0,0,0,.35);
-  border: 2px solid rgba(255,255,255,.85);
-  cursor: grab;
-  pointer-events: auto;      /* a alça captura o toque/arraste */
-  touch-action: none;
-  user-select: none;
-  -webkit-tap-highlight-color: transparent;
-  opacity: .72;              /* discreta quando parada, mas visível */
-  transition: opacity .2s ease;
-}
-#page-scroller .ps-handle:hover { opacity: 1; }
-#page-scroller.dragging .ps-handle { opacity: 1; cursor: grabbing; }
-@media print { #page-scroller { display: none !important; } }
-/* No computador (tela larga) a alça é desnecessária (roda do mouse + barra de
-   rolagem) e pode atrapalhar a edição à direita — some a partir de 1024px. */
-@media (min-width: 1024px) { #page-scroller { display: none !important; } }
 
 /* === Validação pública de documento assinado === */
 .ad-validar-overlay { position: fixed; inset: 0; z-index: 3000; display: none; background: rgba(15,23,42,.55); overflow: auto; padding: 20px; }
@@ -2030,7 +1992,7 @@ path.dash-clickable:hover { opacity: .8; }
 }
 .fab-carimbo:hover { box-shadow: 0 6px 20px rgba(20,71,126,.55); }
 .fab-carimbo:active { transform: scale(.9); }
-.fab-carimbo.carimbou { animation: fab-pulse .45s ease; }
+.fab-carimbo.carimbou, .fab-dial-main.carimbou { animation: fab-pulse .45s ease; }
 @keyframes fab-pulse {
   0% { transform: scale(1); }
   40% { transform: scale(1.22); box-shadow: 0 0 0 10px rgba(28,100,169,.25); }
@@ -2067,25 +2029,44 @@ path.dash-clickable:hover { opacity: .8; }
 .fab-vitais:hover { box-shadow: 0 6px 20px rgba(5,122,85,.55); }
 .fab-vitais:active { transform: scale(.9); }
 
-/* FABs menores do modo cirurgia: medicação e tempos (só na ficha) */
-.fab-mini {
-  position: fixed; right: 26px;
-  width: 48px; height: 48px; border-radius: 50%;
-  color: #fff; border: none; cursor: pointer;
-  display: none; align-items: center; justify-content: center;
-  z-index: 1200; padding: 0; font-size: 1.3rem; line-height: 1;
-  box-shadow: 0 4px 12px rgba(0,0,0,.3);
-  transition: transform .12s ease, box-shadow .12s ease;
+/* ⚡ SPEED DIAL — um único botão flutuante que expande os atalhos do caso */
+.fab-dial {
+  position: fixed; right: 20px; bottom: 88px;
+  display: none; flex-direction: column; align-items: flex-end; gap: 10px;
+  z-index: 1200;
+}
+@media (max-width: 700px) { .fab-dial { right: 16px; bottom: 100px; } }
+.fab-dial-main {
+  width: 60px; height: 60px; border-radius: 50%;
+  background: linear-gradient(135deg, #1c64a9, #14477e);
+  color: #fff; border: none; cursor: pointer; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.6rem; line-height: 1; position: relative;
+  box-shadow: 0 4px 14px rgba(20,71,126,.45);
+  transition: transform .15s ease, box-shadow .12s ease;
   -webkit-tap-highlight-color: transparent;
 }
-.fab-mini:active { transform: scale(.9); }
-#fab-med    { bottom: 228px; background: linear-gradient(135deg, #7c3aed, #5b21b6); }
-#fab-tempos { bottom: 286px; background: linear-gradient(135deg, #d97706, #b45309); }
-@media (max-width: 700px) {
-  .fab-mini { width: 44px; height: 44px; right: 22px; font-size: 1.2rem; }
-  #fab-med    { bottom: 268px; }
-  #fab-tempos { bottom: 318px; }
+.fab-dial-main:active { transform: scale(.92); }
+.fab-dial.aberto .fab-dial-main { transform: rotate(45deg); background: linear-gradient(135deg, #64748b, #475569); }
+.fab-dial-itens { display: none; flex-direction: column; align-items: flex-end; gap: 8px; }
+.fab-dial.aberto .fab-dial-itens { display: flex; }
+.fab-dial-item {
+  display: flex; align-items: center; gap: 8px;
+  border: none; cursor: pointer; padding: 0; background: none;
+  -webkit-tap-highlight-color: transparent;
 }
+.fab-dial-item .fd-rot {
+  background: rgba(15,23,42,.88); color: #fff;
+  font-size: .8rem; font-weight: 700; padding: 6px 11px; border-radius: 999px;
+  white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,.25);
+}
+.fab-dial-item .fd-ico {
+  width: 46px; height: 46px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.25rem; line-height: 1; color: #fff;
+  box-shadow: 0 3px 10px rgba(0,0,0,.3);
+}
+.fab-dial-item:active .fd-ico { transform: scale(.92); }
 
 /* Modal de tempos: linhas grandes, um toque por etapa */
 .tempos-row {
@@ -2615,8 +2596,7 @@ span.md-chip.md-nada { cursor: default; opacity: .6; font-weight: 500; }
   padding: 20px;
 }
 /* Com um modal aberto, nada flutua por cima dele */
-body.tem-modal .fab-carimbo, body.tem-modal .fab-vitais, body.tem-modal .fab-mini,
-body.tem-modal .dose-quickbar, body.tem-modal .cronometros-wrap { display: none !important; }
+body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !important; }
 .modal-backdrop.show { display: flex; }
 .modal {
   background: #fff;
@@ -8728,29 +8708,16 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
 
 <div class="toast-wrap" id="toast-wrap"></div>
 
-<!-- Botão flutuante: registrar sinais vitais AGORA (só na anestesia/SRPA) -->
-<button type="button" id="fab-vitais" class="fab-vitais" style="display:none"
-        onclick="anestesia.vitais.registrarAgora()"
-        title="Registra os sinais vitais na hora atual, copiando os anteriores para você só ajustar o que mudou.">
-  <span class="fab-vitais-icon">🩺</span>
-</button>
-
-<!-- Botão flutuante: carimbar hora de evento (só aparece na anestesia/SRPA) -->
-<button type="button" id="fab-carimbo" class="fab-carimbo" style="display:none"
-        title="Toque curto: carimba a hora atual. Segure ~0,6s: inicia um cronômetro flutuante.">
-  <span class="fab-carimbo-icon">🕐</span>
-  <span class="fab-carimbo-badge" id="fab-carimbo-badge" style="display:none">0</span>
-</button>
-
-<!-- Botão flutuante: catálogo de medicações (só na ficha de anestesia) -->
-<button type="button" id="fab-med" class="fab-mini"
-        onclick="anestesia.meds.abrirCatalogo()"
-        title="Abre o catálogo de medicações (multiseleção) sem rolar até a seção 9.">💉</button>
-
-<!-- Botão flutuante: carimbar tempos do caso (só na ficha de anestesia) -->
-<button type="button" id="fab-tempos" class="fab-mini"
-        onclick="anestesia.tempos.abrir()"
-        title="Carimbar os horários do caso (entrada em sala, início/fim de anestesia e cirurgia, saída) sem rolar ao topo.">⏱️</button>
+<!-- ⚡ SPEED DIAL — botão flutuante ÚNICO da ficha/SRPA. Toque expande os
+     atalhos (vitais, dose rápida, catálogo, evento, tempos, cronômetro,
+     calculadora); toque de novo (ou em qualquer ação) recolhe. -->
+<div id="fab-dial" class="fab-dial" style="display:none">
+  <div class="fab-dial-itens" id="fab-dial-itens"></div>
+  <button type="button" id="fab-dial-main" class="fab-dial-main" onclick="fabDial.alternar()" title="Atalhos rápidos do caso">
+    <span id="fab-dial-icone">⚡</span>
+    <span class="fab-carimbo-badge" id="fab-carimbo-badge" style="display:none">0</span>
+  </button>
+</div>
 
 <!-- Cronômetros flutuantes empilhados (criados por toque longo no relógio) -->
 <div id="cronometros-wrap" class="cronometros-wrap" style="display:none"></div>
@@ -9611,24 +9578,14 @@ const carimboHora = {
   /* Contador de carimbos pendentes (eventos sem tipo) para o badge */
   _pendentes: 0,
 
-  /* Mostra/esconde o botão conforme o módulo ativo */
+  /* Mostra/esconde o speed dial conforme o módulo ativo */
   atualizarVisibilidade() {
-    const fab = document.getElementById('fab-carimbo');
-    if (!fab) return;
-    /* Liga os handlers de toque curto/longo na primeira vez que o FAB existe */
-    try { carimboHora.initFab(); } catch (e) {}
+    const dial = document.getElementById('fab-dial');
+    if (!dial) return;
     const mod = state.currentModule;
     const visivel = (mod === 'anestesia' || mod === 'recuperacao');
-    fab.style.display = visivel ? 'flex' : 'none';
-    /* FAB de sinais vitais acompanha o mesmo escopo */
-    const fabV = document.getElementById('fab-vitais');
-    if (fabV) fabV.style.display = visivel ? 'flex' : 'none';
-    /* FABs de medicação e tempos: só na ficha de anestesia */
-    const soFicha = (mod === 'anestesia');
-    ['fab-med', 'fab-tempos'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.style.display = soFicha ? 'flex' : 'none';
-    });
+    dial.style.display = visivel ? 'flex' : 'none';
+    if (!visivel) { try { fabDial.fechar(); } catch (e) {} }
     if (visivel) carimboHora.atualizarBadge();
     /* Cronômetros acompanham o mesmo escopo de módulo */
     try { cronometros.atualizarVisibilidade(); } catch (e) {}
@@ -9672,8 +9629,8 @@ const carimboHora = {
       tr = anestesia.eventos.add({ hora });
     }
 
-    /* Feedback: pulso no botão + toast + rola até o evento e foca o tipo */
-    const fab = document.getElementById('fab-carimbo');
+    /* Feedback: pulso no botão do dial + toast + rola até o evento e foca o tipo */
+    const fab = document.getElementById('fab-dial-main');
     if (fab) { fab.classList.remove('carimbou'); void fab.offsetWidth; fab.classList.add('carimbou'); }
     if (navigator.vibrate) { try { navigator.vibrate(25); } catch (e) {} }
     toast('🕐 Hora ' + hora + ' carimbada — toque no evento para escolher o tipo (intubação, incisão, etc.)');
@@ -9745,6 +9702,58 @@ const carimboHora = {
    Vários independentes, empilhados. Cada um: correr/pausar, zerar, apagar,
    e nome editável. Rodam sem impedir novos toques no FAB.
    ============================================================================ */
+/* ============================================================================
+   ⚡ SPEED DIAL — botão flutuante único da ficha/SRPA. Concentra os atalhos
+   que antes eram 6 botões soltos (vitais, dose rápida, catálogo, evento,
+   tempos, cronômetro) + a calculadora de doses. Toque abre/fecha; qualquer
+   ação fecha; toque fora fecha.
+============================================================================ */
+const fabDial = {
+  ITENS: [
+    { ico: '🩺', rot: 'Vitais', cor: '#0e9f6e', mods: ['anestesia', 'recuperacao'],
+      acao: function () { if (state.currentModule === 'anestesia' && window.vitaisRapidos) vitaisRapidos.abrir(); else anestesia.vitais.registrarAgora(); } },
+    { ico: '💉', rot: 'Dose rápida', cor: '#128a7d', mods: ['anestesia'], acao: function () { doseRapida.abrir(); } },
+    { ico: '📋', rot: 'Catálogo de meds', cor: '#7c3aed', mods: ['anestesia'], acao: function () { anestesia.meds.abrirCatalogo(); } },
+    { ico: '🕐', rot: 'Carimbar evento', cor: '#1c64a9', mods: ['anestesia', 'recuperacao'], acao: function () { carimboHora.carimbar(); } },
+    { ico: '⏱️', rot: 'Tempos do caso', cor: '#d97706', mods: ['anestesia'], acao: function () { anestesia.tempos.abrir(); } },
+    { ico: '⏲️', rot: 'Cronômetro', cor: '#64748b', mods: ['anestesia', 'recuperacao'], acao: function () { cronometros.criar(); } },
+    { ico: '🧮', rot: 'Calculadora de doses', cor: '#0f2540', mods: ['anestesia', 'recuperacao'], acao: function () { ui.navegar('doses'); } }
+  ],
+  _aberto: false,
+  alternar() { fabDial._aberto ? fabDial.fechar() : fabDial.abrir(); },
+  abrir() {
+    const host = document.getElementById('fab-dial-itens');
+    const dial = document.getElementById('fab-dial');
+    if (!host || !dial) return;
+    const mod = state.currentModule;
+    host.innerHTML = fabDial.ITENS
+      .map((it, i) => ({ it, i }))
+      .filter(x => x.it.mods.indexOf(mod) >= 0)
+      .map(x => '<button type="button" class="fab-dial-item" onclick="fabDial.executar(' + x.i + ')">' +
+        '<span class="fd-rot">' + x.it.rot + '</span>' +
+        '<span class="fd-ico" style="background:' + x.it.cor + '">' + x.it.ico + '</span>' +
+        '</button>').join('');
+    dial.classList.add('aberto');
+    fabDial._aberto = true;
+    if (navigator.vibrate) { try { navigator.vibrate(15); } catch (e) {} }
+  },
+  fechar() {
+    const dial = document.getElementById('fab-dial');
+    if (dial) dial.classList.remove('aberto');
+    fabDial._aberto = false;
+  },
+  executar(i) {
+    fabDial.fechar();
+    const it = fabDial.ITENS[i];
+    if (!it) return;
+    try { it.acao(); } catch (e) { toast('Não consegui abrir: ' + (e.message || e), 'warn'); }
+  }
+};
+/* Toque fora do dial fecha */
+document.addEventListener('click', function (e) {
+  if (fabDial._aberto && !(e.target.closest && e.target.closest('#fab-dial'))) fabDial.fechar();
+});
+
 const cronometros = {
   _lista: [],        /* { id, nome, elapsedMs, running, startTs, el, elTempo } */
   _seq: 0,
@@ -36133,6 +36142,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.ajustesUsuarios = ajustesUsuarios;
   window.meuDia = meuDia;
   window.armazenamento = armazenamento;
+  window.fabDial = fabDial;
   window.termoPadrao = termoPadrao;
   window.termoBiblioteca = termoBiblioteca;
   window.textosPadrao = textosPadrao;
@@ -36511,79 +36521,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 </script>
 
-<!-- === Alça lateral direita para rolar a página (um único ícone arrastável) === -->
-<div id="page-scroller" aria-hidden="true">
-  <div class="ps-handle" id="ps-handle" title="Arraste para rolar a página">↕</div>
-</div>
-<script>
-/* Alça única de rolagem: o dedo segura o ícone e, ao correr, rola a página.
-   Arraste RELATIVO (segue o ponto onde pegou, sem "pulo") + listeners globais
-   para não perder o movimento se o dedo/cursor sair da alça. */
-(function () {
-  const box    = document.getElementById('page-scroller');
-  const handle = document.getElementById('ps-handle');
-  if (!box || !handle) return;
 
-  const TOPO = 66;    /* respiro abaixo do cabeçalho */
-  const BASE = 16;    /* respiro na base da tela */
-  const docEl = document.documentElement;
-  const maxScroll = () => Math.max(0, (docEl.scrollHeight || 0) - window.innerHeight);
-  const percurso  = () => Math.max(1, window.innerHeight - handle.offsetHeight - TOPO - BASE);
-
-  let arrastando = false;
-  let grabDelta = 0;   /* distância entre o Y do dedo e o topo da alça ao pegar */
-
-  function topAtual() {
-    const t = parseFloat(handle.style.top);
-    return isNaN(t) ? TOPO : t;
-  }
-
-  /* Sem arrastar: a alça reflete a posição atual da página */
-  function posicionar() {
-    if (maxScroll() < 40) { box.classList.remove('show'); return; }
-    box.classList.add('show');
-    if (arrastando) return;
-    const frac = window.scrollY / maxScroll();
-    handle.style.top = (TOPO + frac * percurso()) + 'px';
-  }
-
-  /* Durante o arraste: move a alça junto do dedo e rola proporcionalmente */
-  function mover(clientY) {
-    let top = clientY - grabDelta;
-    top = Math.max(TOPO, Math.min(TOPO + percurso(), top));
-    handle.style.top = top + 'px';
-    const frac = (top - TOPO) / percurso();
-    window.scrollTo(0, Math.round(frac * maxScroll()));
-  }
-
-  function onMove(e) { if (arrastando) { mover(e.clientY); if (e.cancelable) e.preventDefault(); } }
-  function fim() {
-    if (!arrastando) return;
-    arrastando = false;
-    box.classList.remove('dragging');
-    window.removeEventListener('pointermove', onMove);
-    window.removeEventListener('pointerup', fim);
-    window.removeEventListener('pointercancel', fim);
-    posicionar();
-  }
-
-  handle.addEventListener('pointerdown', (e) => {
-    arrastando = true;
-    box.classList.add('dragging');
-    grabDelta = e.clientY - topAtual();   /* mantém o ponto exato onde pegou */
-    window.addEventListener('pointermove', onMove, { passive: false });
-    window.addEventListener('pointerup', fim);
-    window.addEventListener('pointercancel', fim);
-    if (e.cancelable) e.preventDefault();
-  });
-
-  window.addEventListener('scroll', posicionar, { passive: true });
-  window.addEventListener('resize', posicionar);
-  /* Reavalia periodicamente porque a altura do conteúdo muda ao navegar entre abas */
-  setInterval(posicionar, 800);
-  posicionar();
-})();
-</script>
 
 <script>
 /* Feedback visual de conclusão nos botões de ação (Salvar/Atualizar/Recalcular)
@@ -37225,7 +37163,7 @@ const assinaturaDigital = (function () {
 })();
 </script>
 
-<div class="dose-quickbar"><button type="button" class="qb-vit" onclick="vitaisRapidos.abrir()">🩺 Vitais</button><button type="button" onclick="doseRapida.abrir()">💉 Dose rápida</button></div>
+<!-- (a barra Vitais/Dose rápida foi absorvida pelo speed dial ⚡) -->
 <div class="dose-overlay" id="dose-overlay" onclick="doseRapida.fechar()"></div>
 <div class="dose-sheet" id="dose-sheet">
   <div class="ds-handle"></div>
