@@ -877,6 +877,48 @@ await test('Visibilidade: opção do gestor, e no modo próprios o pull converge
   await page.close();
 });
 
+/* 24) Ficha — editar horário fora do intervalo de sala AVISA mas não sobrescreve */
+await test('Ficha: horário fora do intervalo de sala é mantido como digitado (avisa, não trava)', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    location.hash = '#anestesia';
+    await new Promise(r => setTimeout(r, 400));
+    const f = document.getElementById('form-anestesia');
+    f.querySelector('[name=hora_sala_entrada]').value = '08:30';
+    f.querySelector('[name=hora_sala_saida]').value = '12:00';
+    anestesia.graficoUI._contexto = 'anestesia';
+
+    // fora do intervalo (antes da entrada) → valor PERMANECE + aviso aparece
+    const inp = document.createElement('input');
+    inp.type = 'time'; inp.value = '07:50';
+    anestesia.graficoUI.validarHoraInput(inp);
+    out.manteve = inp.value === '07:50';
+    await new Promise(r => setTimeout(r, 200));
+    out.avisou = document.body.textContent.includes('fora do intervalo de sala');
+    out.mostraFaixa = document.body.textContent.includes('08:30–12:00');
+
+    // dentro do intervalo → nada muda e nenhum aviso novo
+    const inp2 = document.createElement('input');
+    inp2.type = 'time'; inp2.value = '09:15';
+    anestesia.graficoUI.validarHoraInput(inp2);
+    out.dentroOk = inp2.value === '09:15';
+
+    // ao ADICIONAR linha o padrão continua entrando na janela (clampHora)
+    out.clampAdd = anestesia.graficoUI.clampHora('07:50') === '08:30';
+
+    f.querySelector('[name=hora_sala_entrada]').value = '';
+    f.querySelector('[name=hora_sala_saida]').value = '';
+    return out;
+  });
+  assert(r.manteve, 'o horário digitado fora do intervalo deveria ser MANTIDO (não sobrescrito)');
+  assert(r.avisou, 'deveria avisar que o horário está fora do intervalo de sala');
+  assert(r.mostraFaixa, 'o aviso deveria mostrar a janela da sala (08:30–12:00)');
+  assert(r.dentroOk, 'horário dentro do intervalo não deveria ser alterado');
+  assert(r.clampAdd, 'clampHora (linhas novas automáticas) deveria continuar ajustando para a borda');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
