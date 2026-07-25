@@ -67,9 +67,10 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
 | **empresa** | — | — | (a definir) | ler | próprios logs |
 
 > Observações honestas sobre esta v1 de RLS:
-> - **anestesiologista** vê o clínico da **organização inteira** (prático em
->   grupo). Se você quiser "cada um vê só os seus", dá para restringir por
->   `anesthesiologist_id` numa próxima migração — é uma linha de policy.
+> - **anestesiologista** vê o clínico da **organização inteira** por padrão
+>   (prático em grupo). Desde a `0008`, o **gestor escolhe no app** (Ajustes →
+>   Equipe da nuvem) entre esse modo e **"cada anestesista vê só os seus"**
+>   (ficha, SRPA, pré, risco e financeiro, por `created_by`).
 > - **cirurgião** só vê encounters/clínico onde `surgeon_id = ele`.
 > - **financeiro não lê dado clínico**; o **auxiliar** só alcança as 3 tabelas
 >   do fluxo da secretária — `preanesthetic_assessments`, `consents` e
@@ -268,7 +269,7 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   `operation_id`/`base_version`) e o fluxo *push falha → enfileira → sincronizar
   drena → retry incrementa* (com a rede mockada). **A suíte cresce junto com o
   app** (modo cirurgia, auto-avanço, Meu dia, service worker, armazenamento,
-  cadastros na nuvem — 22 testes hoje).
+  cadastros na nuvem, visibilidade por anestesista — 23 testes hoje).
 - **Cadastros/carimbo cross-device:** ✅ os módulos de cadastro
   (`cad_assinaturas` — perfil profissional/carimbo —, anestesistas, cirurgiões,
   clínicas, convênios, procedimentos, pagamentos, presets de medicação e
@@ -276,6 +277,17 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   aparelho sobe para a nuvem e aparece nos outros no próximo sync. Um **envio
   único inicial** (flag `medsys.v7.cads_sync_v1`) sobe os cadastros criados
   antes da mudança; falhas de rede vão para a fila offline normal.
+- **Visibilidade dos registros entre anestesistas (`0008_visibilidade_registros.sql`):**
+  ✅ o gestor escolhe em Ajustes → Equipe da nuvem entre **'equipe'** (padrão,
+  todos os anestesiologistas veem os registros da organização) e **'proprios'**
+  (cada um vê só os que criou). A escolha fica em `organizations.settings`
+  (jsonb, editável só pelo gestor via `org_upd`) e é aplicada **no servidor**:
+  as policies de leitura de pré, ficha, SRPA, risco e financeiro consultam
+  `app.pode_ver_registro(org, created_by)`. Gestor vê tudo sempre; cirurgião
+  segue vendo só os casos dele; o que a **secretária** cria permanece visível
+  aos anestesistas (senão o médico do caso não continuaria a pré). No app, o
+  pull converge o aparelho: o que veio da nuvem e a RLS deixou de devolver é
+  removido localmente (registros só-locais nunca são tocados).
 - **Secretária no fluxo clínico dela (`0007_secretaria_clinico.sql`):** ✅ a
   RLS restringia TODA escrita clínica a gestor/anestesiologista, então a pré,
   o termo e os documentos que a secretária (papel `auxiliar`) preenchia num

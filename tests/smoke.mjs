@@ -816,6 +816,67 @@ await test('Cadastros: entram na sincronização (fila offline) e sobem uma úni
   await page.close();
 });
 
+/* 23) Visibilidade dos registros — gestor escolhe 'equipe' × 'proprios' */
+await test('Visibilidade: opção do gestor, e no modo próprios o pull converge o aparelho', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    // padrão: sem configuração → 'equipe' (comportamento atual)
+    localStorage.removeItem(orgSettings.CACHE_KEY);
+    out.padrao = orgSettings.visibilidade();
+
+    // UI: a opção existe e só aparece para o gestor
+    out.temBox = !!document.getElementById('visibilidade-registros');
+    const origUsuario = auth.usuarioAtual;
+    auth.usuarioAtual = () => ({ usuario: 'dr', role: 'anestesiologista' });
+    orgSettings.renderVisibilidade();
+    out.escondeNaoGestor = document.getElementById('visibilidade-registros').style.display === 'none';
+    auth.usuarioAtual = () => ({ usuario: 'chefe', role: 'gestor' });
+    orgSettings._gravarCache({ visibilidade_registros: 'proprios' });
+    orgSettings.renderVisibilidade();
+    const box = document.getElementById('visibilidade-registros');
+    out.mostraGestor = box.style.display !== 'none';
+    out.radioCerto = !!box.querySelector('input[value=proprios]').checked;
+
+    // convergência no pull: modo 'proprios' + papel anestesiologista →
+    // o que veio da nuvem (_relUpdatedAt) e a RLS não devolveu mais é removido
+    auth.usuarioAtual = () => ({ usuario: 'dr', role: 'anestesiologista' });
+    store.setList('anestesia', [
+      { _id: 'meu',       _relUpdatedAt: 't1', paciente: 'A' },
+      { _id: 'do_colega', _relUpdatedAt: 't1', paciente: 'B' },
+      { _id: 'so_local',  paciente: 'C' }
+    ]);
+    cloudRel.disponivel = () => true;
+    cloudRel.puxarModulo = async () => ([{ _id: 'meu', _relUpdatedAt: 't2', paciente: 'A' }]);
+    delete cloudRel._puxados['anestesia'];
+    await cloudRel.autoPullModulo('anestesia');
+    const ids = store.list('anestesia').map(x => x._id);
+    out.manteveMeu = ids.includes('meu');
+    out.removeuColega = !ids.includes('do_colega');
+    out.manteveLocal = ids.includes('so_local');
+
+    // modo 'equipe' → pull nunca remove nada (comportamento de sempre)
+    orgSettings._gravarCache({});
+    store.setList('anestesia', [{ _id: 'do_colega', _relUpdatedAt: 't1', paciente: 'B' }]);
+    delete cloudRel._puxados['anestesia'];
+    await cloudRel.autoPullModulo('anestesia');
+    out.equipeNaoRemove = store.list('anestesia').some(x => x._id === 'do_colega');
+
+    auth.usuarioAtual = origUsuario;
+    store.setList('anestesia', []);
+    return out;
+  });
+  assert(r.padrao === 'equipe', "sem configuração o padrão deveria ser 'equipe', veio " + r.padrao);
+  assert(r.temBox, 'a seção de visibilidade deveria existir em Ajustes → Equipe da nuvem');
+  assert(r.escondeNaoGestor, 'a opção deveria ficar oculta para quem não é gestor');
+  assert(r.mostraGestor && r.radioCerto, 'para o gestor deveria aparecer com o modo atual marcado');
+  assert(r.manteveMeu, 'o registro do próprio anestesista deveria permanecer');
+  assert(r.removeuColega, 'o registro do colega (não devolvido pela RLS) deveria sair do aparelho');
+  assert(r.manteveLocal, 'registro criado localmente e ainda não espelhado deveria permanecer');
+  assert(r.equipeNaoRemove, "no modo 'equipe' o pull não deveria remover nada");
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
