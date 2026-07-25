@@ -8481,7 +8481,9 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
         <p id="armazenamento-resumo" style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px"></p>
         <div id="armazenamento-lista" style="margin-bottom:14px"></div>
         <div style="display:flex;flex-wrap:wrap;gap:8px">
-          <button type="button" class="btn btn-sm btn-primary" onclick="armazenamento.compactarVersoes()" title="Reduz o histórico de versões a 3 por documento e remove assinaturas/fotos em base64 do histórico (os documentos atuais não mudam)">🕓 Compactar histórico de versões</button>
+          <button type="button" class="btn btn-sm btn-primary" onclick="arquivo.arquivarAgora()" title="Move para a nuvem os registros antigos (90+ dias; financeiro 1 ano) que já estão confirmados lá. Podem ser trazidos de volta a qualquer momento.">🗄 Arquivar casos antigos</button>
+          <button type="button" class="btn btn-sm" onclick="arquivo.abrir()" title="Lista os registros arquivados e permite trazê-los de volta ao aparelho">☁️ Ver arquivados</button>
+          <button type="button" class="btn btn-sm" onclick="armazenamento.compactarVersoes()" title="Reduz o histórico de versões a 3 por documento e remove assinaturas/fotos em base64 do histórico (os documentos atuais não mudam)">🕓 Compactar histórico de versões</button>
           <button type="button" class="btn btn-sm" onclick="armazenamento.liberarAnexos()" title="Remove do aparelho cópias locais de anexos que JÁ estão na nuvem (continuam abríveis pela nuvem)">☁️ Liberar anexos já na nuvem</button>
           <button type="button" class="btn btn-sm" onclick="armazenamento.esvaziarLixeira()" title="Esvazia a lixeira de 30 dias">🗑 Esvaziar lixeira</button>
           <button type="button" class="btn btn-sm" onclick="armazenamento.limparDemo()" title="Remove os dados isolados do modo demonstração">🧪 Remover dados de demonstração</button>
@@ -10079,9 +10081,17 @@ const armazenamento = {
       }
     } catch (e) {}
     try {
-      const u = armazenamento.uso();
+      let u = armazenamento.uso();
       if (u.total > 4 * 1024 * 1024) {
-        toast('⚠️ Armazenamento do aparelho em ' + armazenamento._fmt(u.total) + ' — libere espaço em Ajustes → Armazenamento do aparelho antes de encher.', 'warn');
+        /* 1º tenta se resolver sozinho: arquiva casos antigos já na nuvem */
+        try { if (arquivo.arquivarAntigos() > 0) u = armazenamento.uso(); } catch (e) {}
+        /* Só avisa se AINDA está alto, e no máximo 1x/24h (senão vira ruído) */
+        const AVISO_KEY = 'medsys.v7.aviso_armazenamento_em';
+        const ultimo = parseInt(localStorage.getItem(AVISO_KEY) || '0');
+        if (u.total > 4 * 1024 * 1024 && Date.now() - ultimo > 24 * 3600000) {
+          localStorage.setItem(AVISO_KEY, String(Date.now()));
+          toast('⚠️ Armazenamento do aparelho em ' + armazenamento._fmt(u.total) + ' — libere espaço em Ajustes → Armazenamento do aparelho antes de encher.', 'warn');
+        }
       }
     } catch (e) {}
     try { armazenamento.repararNomesJSON(); } catch (e) {}
@@ -10217,6 +10227,145 @@ const armazenamento = {
     }
     toast(n ? '🧪 Dados de demonstração removidos (' + n + ' itens)' : 'Nenhum dado de demonstração neste aparelho');
     armazenamento.render();
+  }
+};
+
+/* ============================================================================
+   ARQUIVAMENTO — casos ANTIGOS e JÁ CONFIRMADOS na nuvem saem do aparelho
+   (o localStorage do celular dá ~5 MB; o histórico inteiro não precisa morar
+   nele). Critérios de segurança: só registros com _relUpdatedAt (confirmados
+   no banco relacional) e mais antigos que o prazo do módulo. Rascunhos
+   recentes e registros só-locais NUNCA são tocados. Um índice local lembra o
+   que foi arquivado (para a sincronização não trazer de volta) e qualquer
+   registro pode ser restaurado da nuvem com um toque.
+============================================================================ */
+const arquivo = {
+  INDEX_KEY: 'medsys.v7.arquivo.indice',
+  /* prazo (dias) por módulo — financeiro/orçamento ficam 1 ano no aparelho
+     para não afetar relatórios do exercício corrente */
+  PRAZOS: { anestesia: 90, pre: 90, consulta: 90, recuperacao: 90, termo: 90,
+            prescricao: 90, documentos: 90, risco: 90, financeiro: 365, orcamento: 365 },
+
+  _indice() { try { return JSON.parse(localStorage.getItem(arquivo.INDEX_KEY) || '{}') || {}; } catch (e) { return {}; } },
+  _gravarIndice(ix) { try { localStorage.setItem(arquivo.INDEX_KEY, JSON.stringify(ix)); } catch (e) {} },
+  estaArquivado(mod, id) {
+    const ix = arquivo._indice();
+    return !!(ix[mod] && ix[mod].some(e => e.id === id));
+  },
+  total() {
+    const ix = arquivo._indice();
+    return Object.keys(ix).reduce((s, m) => s + (ix[m] || []).length, 0);
+  },
+  _nomeDe(it) {
+    const bruto = it.paciente_nome || it.nome || (it.paciente && it.paciente.nome) ||
+      (typeof it.paciente === 'string' ? it.paciente : '') || '';
+    const rep = utils.pacienteDeJSON(bruto);
+    return (rep ? rep.nome : bruto) || '(sem nome)';
+  },
+
+  /* Arquiva o que é antigo + sincronizado. Retorna quantos saíram. */
+  arquivarAntigos() {
+    let n = 0;
+    const ix = arquivo._indice();
+    const agora = Date.now();
+    Object.keys(arquivo.PRAZOS).forEach(mod => {
+      try {
+        const corte = agora - arquivo.PRAZOS[mod] * 86400000;
+        const lst = store.list(mod);
+        const ficam = [], saem = [];
+        lst.forEach(it => {
+          const ts = new Date(it._updatedAt || it._createdAt || 0).getTime();
+          if (it && it._id && it._relUpdatedAt && ts > 0 && ts < corte) saem.push(it);
+          else ficam.push(it);
+        });
+        if (!saem.length) return;
+        ix[mod] = ix[mod] || [];
+        saem.forEach(it => {
+          if (!ix[mod].some(e => e.id === it._id)) {
+            ix[mod].push({ id: it._id, nome: arquivo._nomeDe(it),
+              data: (it.data || it.data_proc || String(it._updatedAt || '').slice(0, 10) || '') });
+          }
+          n++;
+        });
+        store.setList(mod, ficam);
+      } catch (e) {}
+    });
+    if (n) arquivo._gravarIndice(ix);
+    return n;
+  },
+
+  arquivarAgora() {
+    const antes = armazenamento.uso().total;
+    const n = arquivo.arquivarAntigos();
+    const depois = armazenamento.uso().total;
+    toast(n ? '🗄 ' + n + ' registro(s) antigo(s) arquivados na nuvem — ' + armazenamento._fmt(Math.max(0, antes - depois)) + ' liberados'
+            : 'Nada a arquivar — todos os registros são recentes ou ainda não confirmados na nuvem');
+    try { armazenamento.render(); } catch (e) {}
+  },
+
+  _removerDoIndice(mod, id) {
+    const ix = arquivo._indice();
+    if (ix[mod]) { ix[mod] = ix[mod].filter(e => e.id !== id); if (!ix[mod].length) delete ix[mod]; }
+    arquivo._gravarIndice(ix);
+  },
+
+  /* Traz um registro arquivado de volta da nuvem (relacional; legado como plano B) */
+  async restaurar(mod, id) {
+    if (!cloudRel.disponivel()) { toast('Sem internet para trazer da nuvem — tente online', 'warn'); return false; }
+    if (!(await cloud._garantirToken())) { toast('Sessão expirada — entre de novo', 'warn'); return false; }
+    let item = null;
+    try {
+      const cfg = cloudRel.MODOS[mod];
+      const org = await cloudRel._orgAsync();
+      if (cfg && org) {
+        const row = await cloudRel._lerAtualTab(cfg.tabela, org, id, cloudRel._REG_SELECT);
+        if (row) item = cloudRel._rowParaRegistro(row);
+      }
+    } catch (e) {}
+    if (!item || !item._id) {
+      try {
+        const c = cloud.config(); const s = cloud.session();
+        const r = await fetch(c.url + '/rest/v1/documentos?user_id=eq.' + s.user.id +
+          '&modulo=eq.' + mod + '&doc_id=eq.' + encodeURIComponent(id) + '&select=dados',
+          { headers: cloud._headers(true) });
+        if (r.ok) { const rows = await r.json(); if (rows[0] && rows[0].dados && rows[0].dados._id) item = rows[0].dados; }
+      } catch (e) {}
+    }
+    if (!item || !item._id) { toast('Não encontrei este registro na nuvem', 'error'); return false; }
+    const lst = store.list(mod);
+    if (!lst.some(x => x._id === item._id)) { lst.push(item); store.setList(mod, lst); }
+    arquivo._removerDoIndice(mod, id);
+    toast('✅ Registro de volta no aparelho');
+    return true;
+  },
+
+  /* Modal: lista os arquivados (busca por nome) com restaurar por item */
+  ROTULOS: { anestesia: 'Ficha', pre: 'Pré', consulta: 'Consulta', recuperacao: 'SRPA',
+             termo: 'Termo', prescricao: 'Receita', documentos: 'Documento', risco: 'Risco',
+             financeiro: 'Financeiro', orcamento: 'Orçamento' },
+  abrir(filtro) {
+    const ix = arquivo._indice();
+    const q = (typeof linker !== 'undefined' && linker._normNome) ? linker._normNome(filtro || '') : (filtro || '').toLowerCase();
+    const linhas = [];
+    Object.keys(ix).forEach(mod => (ix[mod] || []).forEach(e => {
+      const nomeN = (typeof linker !== 'undefined' && linker._normNome) ? linker._normNome(e.nome) : (e.nome || '').toLowerCase();
+      if (q && !nomeN.includes(q)) return;
+      linhas.push({ mod, ...e });
+    }));
+    linhas.sort((a, b) => (b.data || '').localeCompare(a.data || ''));
+    const corpo =
+      '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 8px">Registros antigos que saíram do aparelho mas continuam <strong>na nuvem</strong>. Toque em <em>Trazer de volta</em> para abrir/editar/imprimir.</p>' +
+      '<input type="text" placeholder="Filtrar por nome do paciente…" value="' + utils.escapeAttr(filtro || '') + '" ' +
+      'oninput="clearTimeout(arquivo._t); arquivo._t = setTimeout(() => arquivo.abrir(this.value), 300)" ' +
+      'style="width:100%;padding:8px 10px;margin-bottom:10px">' +
+      (linhas.length ? '<div style="max-height:48vh;overflow-y:auto">' + linhas.slice(0, 60).map(l =>
+        '<div style="display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:1px solid var(--border)">' +
+          '<div style="flex:1;min-width:0"><b style="font-size:.85rem">' + utils.escapeHTML(l.nome) + '</b>' +
+          '<div style="font-size:.74rem;color:var(--text-mute)">' + (arquivo.ROTULOS[l.mod] || l.mod) + (l.data ? ' · ' + utils.formatarData(l.data) : '') + '</div></div>' +
+          '<button type="button" class="btn btn-xs btn-primary" onclick="arquivo.restaurar(\'' + l.mod + '\',\'' + utils.escapeAttr(l.id) + '\').then(ok => { if (ok) arquivo.abrir(); })">☁️ Trazer de volta</button>' +
+        '</div>').join('') + (linhas.length > 60 ? '<div style="font-size:.76rem;color:var(--text-mute);padding:6px">…e mais ' + (linhas.length - 60) + ' — use o filtro</div>' : '') + '</div>'
+      : '<p style="font-size:.84rem;color:var(--text-mute)">' + (q ? 'Nenhum arquivado com esse nome.' : 'Nenhum registro arquivado ainda.') + '</p>');
+    modal.open('🗄 Arquivados na nuvem (' + arquivo.total() + ')', corpo, '<button class="btn" onclick="modal.close()">Fechar</button>');
   }
 };
 
@@ -15018,6 +15167,8 @@ const cloud = {
         const locais = store.list(mod);
         const porId = {}; locais.forEach(x => { if (x._id) porId[x._id] = x; });
         remotos.forEach(rem => {
+          /* registros ARQUIVADOS neste aparelho não voltam pelo sync legado */
+          try { if (typeof arquivo !== 'undefined' && arquivo.estaArquivado(mod, rem._id)) return; } catch (e) {}
           const loc = porId[rem._id];
           if (!loc) { porId[rem._id] = rem; novos++; }
           else {
@@ -15926,8 +16077,10 @@ const cloudRel = {
     if (!cloudRel.MODOS[mod] || cloudRel._puxados[mod]) return;
     if (!cloudRel.disponivel()) return;
     cloudRel._puxados[mod] = true;
-    const remotos = await cloudRel.puxarModulo(mod);
+    let remotos = await cloudRel.puxarModulo(mod);
     if (!remotos) return;
+    /* registros ARQUIVADOS neste aparelho não voltam pelo pull */
+    try { if (typeof arquivo !== 'undefined') remotos = remotos.filter(r => !arquivo.estaArquivado(mod, r._id)); } catch (e) {}
     const locais = store.list(mod);
     const porId = new Map(); locais.forEach(x => { if (x._id) porId.set(x._id, x); });
     let novos = 0;
