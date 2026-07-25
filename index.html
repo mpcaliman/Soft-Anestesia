@@ -9260,22 +9260,47 @@ const utils = {
   },
   hojeISO() { return new Date().toISOString().slice(0, 10); },
   /* Procura o carimbo PNG associado a um profissional pelo nome OU id.
-     Busca primeiro em cad_anestesistas, depois em cad_cirurgioes.
-     Retorna { imagem, nome, crm } ou null. */
+     Busca no "Meu perfil profissional" (cad_assinaturas — onde o carimbo
+     costuma ser cadastrado), em cad_anestesistas e em cad_cirurgioes.
+     O nome é comparado sem acentos/caixa, e um nome PARCIAL (ex.: só o
+     primeiro nome) vale quando aponta para um único profissional.
+     Retorna o cadastro ({nome, crm, carimbo, ...}) ou null. */
   getCarimboDoProfissional(nomeOuId) {
     if (!nomeOuId) return null;
-    const key = String(nomeOuId).trim().toLowerCase();
-    const procurar = (catKey) => {
-      const list = store.list(catKey);
-      /* Primeiro por _id */
-      let found = list.find(p => p._id === nomeOuId);
-      if (!found) {
-        /* Depois por nome (case-insensitive) */
-        found = list.find(p => (p.nome || '').trim().toLowerCase() === key);
-      }
-      return found && found.carimbo ? found : (found || null);
+    const norm = s => {
+      try { return linker._normNome(s); }
+      catch (e) { return String(s || '').trim().toLowerCase(); }
     };
-    return procurar('cad_anestesistas') || procurar('cad_cirurgioes') || null;
+    const key = norm(nomeOuId);
+    const candidatos = [];
+    ['cad_assinaturas', 'cad_anestesistas', 'cad_cirurgioes'].forEach(catKey => {
+      store.list(catKey).forEach(p => {
+        const nome = p.nomeProfissional || p.nome || '';
+        if (!nome && p._id !== nomeOuId) return;
+        candidatos.push(Object.assign({}, p, { nome }));
+      });
+    });
+    /* 1) por _id */
+    let found = candidatos.find(p => p._id === nomeOuId);
+    /* 2) nome exato (sem acento/caixa) */
+    if (!found && key) found = candidatos.find(p => norm(p.nome) === key);
+    /* 3) parcial (começa-com ou sobrenome), se apontar para UM único nome */
+    if (!found && key && key.length >= 3) {
+      const parciais = candidatos.filter(p => {
+        const n = norm(p.nome);
+        return n.startsWith(key) || n.includes(' ' + key);
+      });
+      if (new Set(parciais.map(p => norm(p.nome))).size === 1) {
+        found = parciais.find(p => p.carimbo) || parciais[0];
+      }
+    }
+    if (!found) return null;
+    /* entre cadastros homônimos (perfil × anestesista), prefere o com carimbo */
+    if (!found.carimbo) {
+      const alt = candidatos.find(p => norm(p.nome) === norm(found.nome) && p.carimbo);
+      if (alt) found = alt;
+    }
+    return found;
   },
   escapeHTML(s) {
     return String(s == null ? '' : s)
