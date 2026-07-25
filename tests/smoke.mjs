@@ -974,6 +974,44 @@ await test('Pacientes: objeto serializado não vaza como nome — grava certo, r
   await page.close();
 });
 
+/* 26) Assinatura — carimbo do "Meu perfil" é achado pelo nome (parcial, sem acento) */
+await test('Carimbo: busca acha o perfil profissional por nome exato, parcial e sem acento', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const PNG = 'data:image/png;base64,iVBORw0KGgo=';
+    store.setList('cad_assinaturas', [{ _id: 'perfil1', nomeProfissional: 'Marcelo Pândolfi Caliman', crm: '12345', carimbo: PNG }]);
+    store.setList('cad_anestesistas', []);
+    store.setList('cad_cirurgioes', []);
+
+    // ANTES o perfil (cad_assinaturas) nem era pesquisado — agora é a 1ª fonte
+    const exato = utils.getCarimboDoProfissional('Marcelo Pândolfi Caliman');
+    out.achouPerfil = !!(exato && exato.carimbo === PNG && exato.crm === '12345');
+    // sem acento e caixa diferente
+    out.semAcento = !!(utils.getCarimboDoProfissional('marcelo pandolfi caliman') || {}).carimbo;
+    // parcial: só o primeiro nome, único candidato → acha
+    out.parcial = !!(utils.getCarimboDoProfissional('Marcelo') || {}).carimbo;
+    // por _id
+    out.porId = !!(utils.getCarimboDoProfissional('perfil1') || {}).carimbo;
+
+    // ambiguidade: outro "Marcelo" no cadastro → parcial deixa de valer…
+    store.setList('cad_anestesistas', [{ _id: 'an1', nome: 'Marcelo Silva' }]);
+    out.ambiguoNull = utils.getCarimboDoProfissional('Marcelo') === null;
+    // …mas o nome completo continua achando o certo (e prefere quem tem carimbo)
+    out.exatoComAmbiguo = !!(utils.getCarimboDoProfissional('Marcelo Pandolfi Caliman') || {}).carimbo;
+
+    store.setList('cad_assinaturas', []); store.setList('cad_anestesistas', []);
+    return out;
+  });
+  assert(r.achouPerfil, 'o carimbo do Meu perfil profissional deveria ser achado pelo nome');
+  assert(r.semAcento, 'a busca deveria ignorar acentos e caixa');
+  assert(r.parcial, 'nome parcial único (ex.: primeiro nome) deveria achar o profissional');
+  assert(r.porId, 'busca por _id deveria continuar funcionando');
+  assert(r.ambiguoNull, 'nome parcial ambíguo não deveria escolher sozinho');
+  assert(r.exatoComAmbiguo, 'nome completo deveria achar mesmo com homônimo parcial');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
