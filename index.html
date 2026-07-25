@@ -3301,6 +3301,19 @@ body.tem-modal .dose-quickbar, body.tem-modal .cronometros-wrap { display: none 
   color: var(--text-mute); padding: 10px 12px 4px; margin-top: 4px;
 }
 .cadastro-grupo-label:first-child { margin-top: 0; }
+/* Grupos recolhíveis do menu de cadastros */
+.cadastro-grupo-label.cg-toggle {
+  display: flex; align-items: center; gap: 6px; cursor: pointer;
+  padding: 10px 12px; border-radius: 8px; user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.cadastro-grupo-label.cg-toggle:hover { background: var(--surface-alt); color: var(--text-soft); }
+.cadastro-grupo-label.cg-toggle .cg-seta { font-size: .72rem; width: 12px; flex-shrink: 0; }
+.cadastro-grupo-label.cg-toggle .cg-total {
+  margin-left: auto; background: var(--surface-alt); color: var(--text-soft);
+  border-radius: 999px; padding: 1px 8px; font-size: .68rem; font-weight: 800;
+}
+.cadastro-grupo-label.cg-toggle.aberto .cg-total { background: var(--primary-soft); color: var(--primary-dark); }
 .proc-grupo-label {
   font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .5px;
   color: var(--primary); padding: 12px 4px 6px; margin-top: 6px;
@@ -29273,6 +29286,27 @@ const ajustes = {
 
   list(catKey) { return store.list(catKey); },
 
+  /* ---------- Grupos recolhíveis do menu ----------
+     Padrão: só o grupo da categoria ativa fica aberto (menu compacto no
+     celular). O toque no cabeçalho abre/recolhe e a escolha é lembrada. */
+  GRUPOS_KEY: 'medsys.v7.ajustes.grupos_abertos',
+  _gruposSalvos() {
+    try { return JSON.parse(localStorage.getItem(ajustes.GRUPOS_KEY) || '{}'); }
+    catch (e) { return {}; }
+  },
+  _grupoAberto(grupo) {
+    const salvos = ajustes._gruposSalvos();
+    if (Object.prototype.hasOwnProperty.call(salvos, grupo)) return !!salvos[grupo];
+    const cat = ajustes.CATEGORIAS.find(c => c.key === ajustes._activeCat);
+    return cat ? cat.grupo === grupo : grupo === ajustes.GRUPOS_ORDEM[0];
+  },
+  alternarGrupo(grupo) {
+    const salvos = ajustes._gruposSalvos();
+    salvos[grupo] = !ajustes._grupoAberto(grupo);
+    try { localStorage.setItem(ajustes.GRUPOS_KEY, JSON.stringify(salvos)); } catch (e) {}
+    ajustes.render();
+  },
+
   render() {
     const cats = document.getElementById('ajustes-cats');
     if (!cats) return;
@@ -29280,7 +29314,13 @@ const ajustes = {
     const html = ajustes.GRUPOS_ORDEM.map(grupo => {
       const doGrupo = ajustes.CATEGORIAS.filter(c => c.grupo === grupo);
       if (!doGrupo.length) return '';
-      return `<div class="cadastro-grupo-label">${grupo}</div>` + doGrupo.map(c => `
+      const aberto = ajustes._grupoAberto(grupo);
+      const total = doGrupo.reduce((s, c) => s + ajustes.list(c.key).length, 0);
+      const cab = `<div class="cadastro-grupo-label cg-toggle ${aberto ? 'aberto' : ''}" onclick="ajustes.alternarGrupo('${grupo}')" title="${aberto ? 'Recolher' : 'Expandir'} ${grupo}">
+          <span class="cg-seta">${aberto ? '▾' : '▸'}</span><span>${grupo}</span><span class="cg-total">${total}</span>
+        </div>`;
+      if (!aberto) return cab;
+      return cab + doGrupo.map(c => `
         <div class="cadastro-cat ${c.key === ajustes._activeCat ? 'active' : ''}" onclick="ajustes.selecionar('${c.key}')">
           <span class="cc-icon">${c.icon}</span>
           <span>${c.label}</span>
@@ -29293,6 +29333,14 @@ const ajustes = {
   },
   selecionar(catKey) {
     ajustes._activeCat = catKey;
+    /* garante o grupo da categoria escolhida aberto */
+    try {
+      const cat = ajustes.CATEGORIAS.find(c => c.key === catKey);
+      if (cat) {
+        const salvos = ajustes._gruposSalvos();
+        if (salvos[cat.grupo] === false) { salvos[cat.grupo] = true; localStorage.setItem(ajustes.GRUPOS_KEY, JSON.stringify(salvos)); }
+      }
+    } catch (e) {}
     document.querySelectorAll('.cadastro-cat').forEach(el => el.classList.remove('active'));
     /* re-renderiza pra atualizar */
     ajustes.render();
