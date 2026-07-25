@@ -14603,7 +14603,12 @@ const cloud = {
   CFG_KEY: 'medsys.v7.cloud.cfg',          // {url, anonKey}
   SESSION_KEY: 'medsys.v7.cloud.session',  // {access_token, refresh_token, user, expires_at}
   QUEUE_KEY: 'medsys.v7.cloud.queue',      // fila de operações pendentes (offline)
-  MODS: ['pre','consulta','anestesia','recuperacao','termo','prescricao','documentos','risco','financeiro','orcamento','agenda','pacientes'],
+  MODS: ['pre','consulta','anestesia','recuperacao','termo','prescricao','documentos','risco','financeiro','orcamento','agenda','pacientes',
+         /* cadastros (perfil profissional/carimbo, equipe, locais, tabelas) —
+            sincronizam entre aparelhos como qualquer registro */
+         'cad_assinaturas','cad_anestesistas','cad_cirurgioes','cad_clinicas','cad_convenios','cad_procedimentos','cad_pagamentos','cad_presets_med','cad_equipamentos'],
+  /* Módulos de cadastro (subconjunto de MODS) — usados no envio único inicial */
+  CAD_MODS: ['cad_assinaturas','cad_anestesistas','cad_cirurgioes','cad_clinicas','cad_convenios','cad_procedimentos','cad_pagamentos','cad_presets_med','cad_equipamentos'],
   _syncing: false,
 
   /* ---- Configuração (URL + anon key) ---- */
@@ -14886,6 +14891,19 @@ const cloud = {
         }
         if (aindaFalha.length) localStorage.setItem(cloud.QUEUE_KEY, JSON.stringify(aindaFalha));
         else cloud._limparFila();
+      }
+      /* 1b) MIGRAÇÃO ÚNICA: cadastros criados antes de entrarem na sincronização
+         (perfil profissional/carimbo etc.) sobem uma vez; falhas vão à fila. */
+      if (!localStorage.getItem('medsys.v7.cads_sync_v1')) {
+        for (const mod of cloud.CAD_MODS) {
+          for (const item of store.list(mod)) {
+            if (!item || !item._id) continue;
+            const op = cloud._novaOp(mod, item, 'upsert');
+            const ok = await cloud._enviarOp(op);
+            if (!ok) cloud._enfileirar(op);
+          }
+        }
+        localStorage.setItem('medsys.v7.cads_sync_v1', '1');
       }
       /* 2) Envia tudo que está local mas pode não ter subido (push em massa) */
       if (opts.enviarTudo) {

@@ -765,6 +765,57 @@ await test('Cadastros: grupos recolhíveis — só o ativo aberto, toggle persis
   await page.close();
 });
 
+/* 22) Cadastros na nuvem — perfil/carimbo sincronizam; envio único inicial */
+await test('Cadastros: entram na sincronização (fila offline) e sobem uma única vez no primeiro sync', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    // todos os módulos de cadastro fazem parte da sincronização
+    out.cadsNoMods = cloud.CAD_MODS.every(m => cloud.MODS.includes(m));
+    out.temAssinaturas = cloud.MODS.includes('cad_assinaturas');   // perfil/carimbo
+
+    /* Isola do ambiente real (mesma técnica do teste 14) */
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud._baixarTudo = async () => ({});
+    let online = false;
+    const enviados = [];
+    cloud._enviarOp = async (op) => { if (online) { enviados.push(op.modulo); return true; } return false; };
+    cloud._limparFila();
+
+    // 1) salvar um cadastro com rede falhando → op vai para a fila (como registro clínico)
+    store.save('cad_anestesistas', { _id: 'an-teste', nome: 'Dr. Teste', crm: '12345' });
+    await new Promise(r => setTimeout(r, 100));
+    const fila = cloud._fila();
+    out.enfileirou = fila.some(o => o.modulo === 'cad_anestesistas' && o.doc_id === 'an-teste');
+
+    // 2) primeiro sync online → envio único dos cadastros pré-existentes + flag gravada
+    localStorage.removeItem('medsys.v7.cads_sync_v1');
+    online = true;
+    await cloud.sincronizar({ silent: true });
+    out.flagGravada = localStorage.getItem('medsys.v7.cads_sync_v1') === '1';
+    out.subiuCad = enviados.includes('cad_anestesistas');
+    out.filaVazia = cloud._fila().length === 0;
+
+    // 3) segundo sync → migração NÃO roda de novo (envio único de verdade)
+    const antes = enviados.length;
+    await cloud.sincronizar({ silent: true });
+    out.naoRepetiu = enviados.length === antes;
+
+    store.delete('cad_anestesistas', 'an-teste');
+    cloud._limparFila();
+    return out;
+  });
+  assert(r.cadsNoMods, 'todos os CAD_MODS deveriam estar em cloud.MODS');
+  assert(r.temAssinaturas, 'cad_assinaturas (perfil/carimbo) deveria sincronizar');
+  assert(r.enfileirou, 'salvar cadastro offline deveria enfileirar a operação');
+  assert(r.flagGravada, 'primeiro sync deveria gravar a flag do envio único');
+  assert(r.subiuCad, 'primeiro sync deveria subir os cadastros pré-existentes');
+  assert(r.filaVazia, 'após sync online a fila deveria estar vazia');
+  assert(r.naoRepetiu, 'segundo sync não deveria reenviar os cadastros (envio único)');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
