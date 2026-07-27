@@ -23891,6 +23891,8 @@ const anestesia = {
           const v = anestesia.vitais._valorPadrao(p, prog, base[p], TAB);
           if (v != null) dados[p] = v;
         });
+        /* No preenchimento padrão, o ritmo é sempre SINUSAL (perfil normal) */
+        if (ativos.has('ritmo')) dados.ritmo = 'Sinusal';
         /* Diurese normal por peso/idade (só se já registrada e peso conhecido) */
         if (rastreiaDiurese && peso > 0) {
           let du = alvoUO * peso * (passo / 60);
@@ -27360,17 +27362,22 @@ const PROCEDIMENTOS_PADRAO = {
     grupo: 'Ambulatorial / exames',
     procedimento: 'Colonoscopia',
     tipos: ['Sedação'],
-    tecnica_descricao: 'Sedação venosa com propofol em bolus. Pré-medicação com midazolam e fentanil.',
+    tecnica_descricao: 'Sedação venosa com propofol em bolus titulado, associado a midazolam, fentanil, lidocaína e escetamina em doses baixas. Escopolamina para conforto/antiespasmódico. O₂ por cateter nasal, ventilação espontânea.',
     via_aerea_uso: 'Cateter nasal',
     ventilacao_tipo: 'Espontânea',
-    monitorizacao: 'ECG, SpO₂, PNI, EtCO₂',
-    monitores: ['ECG', 'Oximetria', 'PNI', 'Capnografia'],
+    monitorizacao: 'ECG, SpO₂, PNI',
+    monitores: ['ECG', 'Oximetria', 'PNI'],
     dispositivos: ['Acesso venoso periférico'],
     posicao: 'Lateral',
     medicacoes: [
-      { nome: 'Midazolam', dose: '2', unidade: 'mg', via: 'EV' },
-      { nome: 'Fentanil', dose: '50', unidade: 'mcg', via: 'EV' },
-      { nome: 'Propofol', dose: '', unidade: 'mg', via: 'EV' }
+      { nome: 'Propofol', dose: '', unidade: 'mg', via: 'EV' },
+      { nome: 'Midazolam', dose: '', unidade: 'mg', via: 'EV' },
+      { nome: 'Fentanil', dose: '', unidade: 'mcg', via: 'EV' },
+      { nome: 'Lidocaína', dose: '', unidade: 'mg', via: 'EV' },
+      { nome: 'Escopolamina (hioscina)', dose: '20', unidade: 'mg', via: 'EV' },
+      { nome: 'Escetamina', dose: '', unidade: 'mg', via: 'EV' },
+      { nome: 'Oxigênio (cateter nasal)', dose: '2', unidade: 'L/min', via: 'Inalatória' },
+      { nome: 'Soro fisiológico 0,9%', dose: '', unidade: 'mL', via: 'EV' }
     ]
   },
   eda: {
@@ -27378,17 +27385,22 @@ const PROCEDIMENTOS_PADRAO = {
     grupo: 'Ambulatorial / exames',
     procedimento: 'Endoscopia digestiva alta',
     tipos: ['Sedação'],
-    tecnica_descricao: 'Sedação venosa com propofol em bolus titulado. Manutenção da ventilação espontânea.',
+    tecnica_descricao: 'Sedação venosa com propofol em bolus titulado, associado a midazolam, fentanil, lidocaína e escetamina em doses baixas. Escopolamina para conforto/antiespasmódico. O₂ por cateter nasal, ventilação espontânea.',
     via_aerea_uso: 'Cateter nasal',
     ventilacao_tipo: 'Espontânea',
-    monitorizacao: 'ECG, SpO₂, PNI, EtCO₂',
-    monitores: ['ECG', 'Oximetria', 'PNI', 'Capnografia'],
+    monitorizacao: 'ECG, SpO₂, PNI',
+    monitores: ['ECG', 'Oximetria', 'PNI'],
     dispositivos: ['Acesso venoso periférico'],
     posicao: 'Lateral',
     medicacoes: [
-      { nome: 'Fentanil', dose: '50', unidade: 'mcg', via: 'EV' },
       { nome: 'Propofol', dose: '', unidade: 'mg', via: 'EV' },
-      { nome: 'Lidocaína spray', dose: '', unidade: '%', via: 'Tópica' }
+      { nome: 'Midazolam', dose: '', unidade: 'mg', via: 'EV' },
+      { nome: 'Fentanil', dose: '', unidade: 'mcg', via: 'EV' },
+      { nome: 'Lidocaína', dose: '', unidade: 'mg', via: 'EV' },
+      { nome: 'Escopolamina (hioscina)', dose: '20', unidade: 'mg', via: 'EV' },
+      { nome: 'Escetamina', dose: '', unidade: 'mg', via: 'EV' },
+      { nome: 'Oxigênio (cateter nasal)', dose: '2', unidade: 'L/min', via: 'Inalatória' },
+      { nome: 'Soro fisiológico 0,9%', dose: '', unidade: 'mL', via: 'EV' }
     ]
   },
   artroscopia: {

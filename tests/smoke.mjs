@@ -1229,6 +1229,51 @@ await test('Login diário: sessão do dia sobrevive ao fechar, expira ao virar o
   await page.close();
 });
 
+/* 31) Padrão endoscopia/colonoscopia + ritmo Sinusal no preenchimento padrão */
+await test('Endo/colono: medicações padrão com O₂ e SF, sem capnografia; padrão de vitais gera ritmo Sinusal', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const MEDS = ['Propofol', 'Midazolam', 'Fentanil', 'Lidocaína', 'Escopolamina (hioscina)',
+                  'Escetamina', 'Oxigênio (cateter nasal)', 'Soro fisiológico 0,9%'];
+    const eda = PROCEDIMENTOS_PADRAO.eda, col = PROCEDIMENTOS_PADRAO.colonoscopia;
+    out.medsCertas = MEDS.every(n => eda.medicacoes.some(m => m.nome === n) && col.medicacoes.some(m => m.nome === n));
+    out.semCapno = !eda.monitores.includes('Capnografia') && !col.monitores.includes('Capnografia')
+      && !/EtCO/.test(eda.monitorizacao) && !/EtCO/.test(col.monitorizacao);
+
+    // aplicar o padrão numa ficha limpa
+    location.hash = '#anestesia';
+    await new Promise(r => setTimeout(r, 400));
+    modelos.aplicarProcedimento('eda');
+    await new Promise(r => setTimeout(r, 200));
+    out.medsNaTabela = document.querySelectorAll('#medicacoes-body tr').length >= 8;
+    out.capnoDesmarcada = !document.querySelector('#form-anestesia [name="monitores[]"][value="Capnografia"]').checked;
+    out.ecgMarcado = document.querySelector('#form-anestesia [name="monitores[]"][value="ECG"]').checked;
+
+    // preencher padrão de vitais → toda linha gerada tem ritmo SINUSAL e sem EtCO₂
+    const f = document.getElementById('form-anestesia');
+    f.querySelector('[name=hora_sala_entrada]').value = '08:00';
+    f.querySelector('[name=hora_sala_saida]').value = '08:30';
+    anestesia.graficoUI._contexto = 'anestesia';
+    anestesia.vitais._gerarPadrao(10);
+    await new Promise(r => setTimeout(r, 300));
+    const linhas = Array.from(document.querySelectorAll('#vitais-body tr'));
+    out.gerou = linhas.length >= 3;
+    out.ritmoSinusal = linhas.every(tr => (tr.querySelector('[name="vit_ritmo[]"]') || {}).value === 'Sinusal');
+    out.semEtco2 = linhas.every(tr => !((tr.querySelector('[name="vit_etco2[]"]') || {}).value || '').trim());
+
+    return out;
+  });
+  assert(r.medsCertas, 'endo e colono deveriam ter as 8 medicações padrão (incl. O₂ e SF)');
+  assert(r.semCapno, 'capnografia não deveria estar nos monitores/monitorização de endo/colono');
+  assert(r.medsNaTabela, 'aplicar o padrão deveria lançar as medicações na tabela');
+  assert(r.capnoDesmarcada && r.ecgMarcado, 'ECG marcado e capnografia desmarcada após aplicar o padrão');
+  assert(r.gerou, 'o preenchimento padrão deveria gerar as linhas de vitais');
+  assert(r.ritmoSinusal, 'todas as linhas geradas deveriam ter ritmo Sinusal');
+  assert(r.semEtco2, 'nenhuma linha gerada deveria ter EtCO₂ (capnografia fora do padrão)');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
