@@ -1174,6 +1174,61 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
   await page.close();
 });
 
+/* 30) Login 1× por dia (aparelho individual) — senha só na primeira entrada do dia */
+await test('Login diário: sessão do dia sobrevive ao fechar, expira ao virar o dia e Bloquear agora derruba', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const sessDemo = auth.usuarioAtual();
+    const origAtivo = demo.ativo; demo.ativo = () => false;   /* sai da exceção do demo */
+
+    // a opção existe no seletor de bloqueio
+    out.temOpcao = !!document.querySelector('#seg-timeout option[value="-1"]');
+
+    // modo diário: sem timer de inatividade + login grava a sessão do dia
+    localStorage.setItem(auth.TIMEOUT_KEY, '-1');
+    out.modo = auth._modoDiario() === true && auth._timeoutMs() === 0;
+    auth._definirSessao({ id: 'u1', usuario: 'dr', nome: 'Dr', perfil: 'admin', modulos: [] });
+    const d = JSON.parse(localStorage.getItem(auth.DIA_KEY) || 'null');
+    out.gravouDia = !!(d && d.dia === utils.hojeISO() && d.sess.usuario === 'dr');
+
+    // "fechar o app" (sessionStorage some) → reabre sem senha no mesmo dia
+    sessionStorage.removeItem(auth.SESSION_KEY);
+    out.restaurou = auth._restaurarSessaoDiaria() === true && auth.estaLogado();
+
+    // virou o dia → sessão expira e o carimbo é apagado
+    sessionStorage.removeItem(auth.SESSION_KEY);
+    localStorage.setItem(auth.DIA_KEY, JSON.stringify({ dia: '2000-01-01', sess: d.sess }));
+    out.expirou = auth._restaurarSessaoDiaria() === false && !auth.estaLogado()
+      && !localStorage.getItem(auth.DIA_KEY);
+
+    // Bloquear agora / sair derruba a sessão do dia (pede senha de novo)
+    auth._definirSessao({ id: 'u1', usuario: 'dr', nome: 'Dr', perfil: 'admin', modulos: [] });
+    out.regravou = !!localStorage.getItem(auth.DIA_KEY);
+    auth.logout();
+    out.logoutLimpa = !localStorage.getItem(auth.DIA_KEY) && !auth.estaLogado();
+
+    // no modo normal (5 min) o login NÃO persiste sessão diária
+    localStorage.setItem(auth.TIMEOUT_KEY, '5');
+    auth._definirSessao({ id: 'u1', usuario: 'dr', nome: 'Dr', perfil: 'admin', modulos: [] });
+    out.normalNaoGrava = !localStorage.getItem(auth.DIA_KEY);
+
+    /* restaura o ambiente do teste */
+    demo.ativo = origAtivo;
+    if (sessDemo) sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify(sessDemo));
+    auth._desbloquear();
+    return out;
+  });
+  assert(r.temOpcao, 'o seletor de bloqueio deveria ter a opção "1× por dia"');
+  assert(r.modo, 'modo diário deveria desligar o timer de inatividade');
+  assert(r.gravouDia, 'o login no modo diário deveria carimbar a sessão do dia');
+  assert(r.restaurou, 'reabrir no mesmo dia deveria entrar SEM pedir senha');
+  assert(r.expirou, 'ao virar o dia a sessão deveria expirar e o carimbo sumir');
+  assert(r.regravou && r.logoutLimpa, 'Bloquear agora/sair deveria derrubar a sessão do dia');
+  assert(r.normalNaoGrava, 'nos modos por minutos nada deveria ser persistido');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

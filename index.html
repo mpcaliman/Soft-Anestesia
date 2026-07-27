@@ -8515,7 +8515,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:14px;padding:11px 12px;background:var(--surface-alt);border-radius:8px">
           <div style="flex:1;min-width:180px">
             <label for="seg-timeout" style="font-size:.8rem;font-weight:600;display:block;margin-bottom:3px">🔒 Bloqueio automático por inatividade</label>
-            <small style="font-size:.72rem;color:var(--text-mute)">Após esse tempo sem uso, pede a senha de novo.</small>
+            <small style="font-size:.72rem;color:var(--text-mute)">Após esse tempo sem uso, pede a senha de novo. No modo <b>1× por dia</b> (celular/iPad de uso individual), a senha é pedida só na primeira entrada do dia — "Bloquear agora" tranca na hora mesmo assim.</small>
           </div>
           <select id="seg-timeout" onchange="auth.definirTimeout(parseInt(this.value,10))" style="font-size:.85rem;padding:6px 8px">
             <option value="2">2 minutos</option>
@@ -8524,6 +8524,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
             <option value="15">15 minutos</option>
             <option value="30">30 minutos</option>
             <option value="0">Nunca</option>
+            <option value="-1">🔓 Login 1× por dia (aparelho individual)</option>
           </select>
           <button type="button" class="btn btn-sm" onclick="auth.bloquearAgora()" title="Sair e pedir a senha imediatamente">🔒 Bloquear agora</button>
         </div>
@@ -13983,6 +13984,9 @@ const auth = {
     const sess = { id: u.id, usuario: u.usuario, nome: u.nome, perfil: u.perfil, modulos: u.modulos, soImpressao: u.soImpressao || [], entrouEm: Date.now(),
       role: u.role || null, organization_id: u.organization_id || null, uid: u.uid || null };
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify(sess));
+    /* Modo "1x por dia": guarda a sessão do dia para as próximas aberturas
+       não pedirem senha (aparelho de uso individual). */
+    try { if (auth._modoDiario()) auth._salvarSessaoDiaria(sess); } catch (e) {}
   },
   estaLogado() { return !!auth.usuarioAtual(); },
 
@@ -14024,6 +14028,9 @@ const auth = {
 
   logout() {
     sessionStorage.removeItem(auth.SESSION_KEY);
+    /* Sair/Bloquear agora SEMPRE derruba também a sessão do dia — a próxima
+       entrada pede senha mesmo no modo "1x por dia". */
+    try { localStorage.removeItem(auth.DIA_KEY); } catch (e) {}
     auth._pararTimer();
     auth._bloquear();
   },
@@ -14237,7 +14244,8 @@ const auth = {
       <div class="auth-error" id="auth-error"></div>
       <button type="submit" class="auth-btn">Entrar</button>`;
     form.onsubmit = (e) => { e.preventDefault(); auth.tentarLogin(); };
-    foot.innerHTML = (auth._timeoutMin() > 0 ? ('Bloqueia automaticamente após ' + auth._timeoutMin() + ' minutos de inatividade.<br>') : '') +
+    foot.innerHTML = (auth._modoDiario() ? 'Login 1× por dia ativo — depois desta entrada, a senha só será pedida de novo amanhã.<br>'
+        : (auth._timeoutMin() > 0 ? ('Bloqueia automaticamente após ' + auth._timeoutMin() + ' minutos de inatividade.<br>') : '')) +
       '<a href="javascript:void(0)" onclick="auth._render()" style="color:var(--primary);font-size:.85rem">← Entrar com a conta da nuvem</a> · ' +
       '<a href="javascript:void(0)" onclick="auth._socorro()" style="color:var(--text-mute);font-size:.85rem">Problemas para entrar?</a>';
   },
@@ -14438,14 +14446,44 @@ const auth = {
   },
 
   /* ---------- Timeout de inatividade (5 min) ---------- */
-  /* Tempo de bloqueio por inatividade — configurável (minutos; 0 = nunca). */
+  /* Tempo de bloqueio por inatividade — configurável (minutos; 0 = nunca;
+     -1 = modo "1x por dia": senha só na primeira entrada do dia, para
+     celular/iPad de uso individual). */
   TIMEOUT_KEY: 'medsys.v7.auth.timeout_min',
+  DIA_KEY: 'medsys.v7.auth.sessao_dia',
   _timeoutMin() { const v = parseInt(localStorage.getItem(auth.TIMEOUT_KEY), 10); return isNaN(v) ? 5 : v; },
   _timeoutMs() { const m = auth._timeoutMin(); return m > 0 ? m * 60 * 1000 : 0; },
+  _modoDiario() { return auth._timeoutMin() === -1; },
+  _salvarSessaoDiaria(sess) {
+    try {
+      if (typeof demo !== 'undefined' && demo.ativo()) return;   /* demo não persiste */
+      localStorage.setItem(auth.DIA_KEY, JSON.stringify({ dia: utils.hojeISO(), sess }));
+    } catch (e) {}
+  },
+  /* Reabre a sessão do dia (se ainda for o mesmo dia). Retorna true se entrou. */
+  _restaurarSessaoDiaria() {
+    if (!auth._modoDiario()) return false;
+    try {
+      const d = JSON.parse(localStorage.getItem(auth.DIA_KEY) || 'null');
+      if (d && d.dia === utils.hojeISO() && d.sess) {
+        sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify(d.sess));
+        return true;
+      }
+    } catch (e) {}
+    try { localStorage.removeItem(auth.DIA_KEY); } catch (e) {}   /* virou o dia */
+    return false;
+  },
   definirTimeout(min) {
     localStorage.setItem(auth.TIMEOUT_KEY, String(min));
+    if (min === -1) {
+      /* ativa o modo diário já com a sessão atual valendo por hoje */
+      try { const u = auth.usuarioAtual(); if (u) auth._salvarSessaoDiaria(u); } catch (e) {}
+      toast('🔓 Login 1× por dia ativado — a senha será pedida só na primeira entrada de cada dia neste aparelho');
+    } else {
+      try { localStorage.removeItem(auth.DIA_KEY); } catch (e) {}
+      toast(min > 0 ? '🔒 Bloqueio automático: ' + min + ' min' : '🔓 Bloqueio automático desativado');
+    }
     if (auth.estaLogado()) auth._resetTimer();
-    toast(min > 0 ? '🔒 Bloqueio automático: ' + min + ' min' : '🔓 Bloqueio automático desativado');
   },
   bloquearAgora() { if (auth.estaLogado()) auth.logout(); },
 
@@ -14534,6 +14572,10 @@ const auth = {
       demo._mostrarBanner();
       return;
     }
+    /* Modo "1x por dia": se já houve login hoje neste aparelho, reabre a
+       sessão sem pedir senha (a aba/navegador fechado apaga o sessionStorage,
+       mas a sessão do dia fica no localStorage até virar o dia). */
+    if (!auth.estaLogado()) { try { auth._restaurarSessaoDiaria(); } catch (e) {} }
     if (auth.estaLogado()) {
       auth._desbloquear();
     } else {
