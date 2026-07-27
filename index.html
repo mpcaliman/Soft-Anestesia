@@ -7524,6 +7524,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
 <div class="module" id="module-financeiro" data-module="financeiro">
   <div class="action-bar">
     <button class="btn btn-sm" id="btn-expandir-financeiro" onclick="ui.alternarTodos('financeiro')" title="Expandir ou recolher todos os campos">⊕ Expandir tudo</button>
+    <button class="btn btn-primary" onclick="financeiro.lancamentoRapido()" title="Lançar um procedimento feito SEM consulta/ficha no sistema — entra direto no controle de cobrança"><span class="icon">⚡</span> Lançamento rápido</button>
     <button class="btn btn-primary" onclick="financeiro.editar(null)"><span class="icon">+</span> Novo registro</button>
     <button class="btn btn-primary" onclick="financeiro.conciliar()" title="Buscar evento por paciente, conferir previsto × recebido × glosa e classificar"><span class="icon">🔄</span> Conciliação</button>
     <button class="btn btn-success" onclick="financeiro.relatorios()" title="Relatórios de conciliação detalhada por código TUSS"><span class="icon">📊</span> Relatórios</button>
@@ -34008,6 +34009,58 @@ const financeiro = {
         setTimeout(() => URL.revokeObjectURL(url), 60000);
       } catch (e) { toast('Erro ao abrir o PDF: ' + e.message, 'error'); }
     }
+  },
+
+  /* ---------- LANÇAMENTO RÁPIDO (avulso) ----------
+     Para procedimentos feitos SEM consulta/ficha no sistema: lança direto
+     na planilha de controle e cobrança, com o essencial. O registro nasce
+     'pendente' e pode ser completado depois na conciliação normal. */
+  lancamentoRapido() {
+    modal.open('⚡ Lançamento rápido — caso sem ficha no sistema',
+      '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">Para procedimento realizado <b>sem consulta/ficha no Soft</b>: entra direto no controle de cobrança dos convênios. Dá para completar valores/senha depois, na conciliação.</p>' +
+      '<div class="grid">' +
+      '<div class="field col-7"><label>Paciente <span class="req">*</span></label><input type="text" id="fin-rap-paciente" autocomplete="off"></div>' +
+      '<div class="field col-5"><label>Data do procedimento <span class="req">*</span></label><input type="date" id="fin-rap-data" value="' + utils.hojeISO() + '"></div>' +
+      '<div class="field col-12"><label>Procedimento <small style="color:var(--text-mute);font-weight:400">(CBHPM)</small></label><input type="text" id="fin-rap-proc" data-cbhpm="1" placeholder="Digite parte do procedimento ou o código TUSS..."></div>' +
+      '<div class="field col-6"><label>Convênio</label><input type="text" id="fin-rap-conv"></div>' +
+      '<div class="field col-6"><label>Hospital / clínica</label><input type="text" id="fin-rap-hosp"></div>' +
+      '<div class="field col-4"><label>Tipo</label><select id="fin-rap-tipo"><option>Convênio</option><option>Particular</option><option>SUS</option></select></div>' +
+      '<div class="field col-4"><label>Valor previsto (R$)</label><input type="number" id="fin-rap-valor" step="0.01" min="0" inputmode="decimal"></div>' +
+      '<div class="field col-4"><label>Senha / autorização</label><input type="text" id="fin-rap-senha"></div>' +
+      '</div>',
+      '<button class="btn" onclick="modal.close()">Cancelar</button>' +
+      '<button class="btn btn-primary" onclick="financeiro._salvarRapido()">💾 Lançar</button>');
+    /* liga os autocompletes nos campos do modal */
+    try { pacienteAutocomplete.attach(document.getElementById('fin-rap-paciente'), 'financeiro'); } catch (e) {}
+    try { cbhpm.aplicarTodos(document.getElementById('modal-body')); } catch (e) {}
+    try { autocomplete.attachSimples(document.getElementById('fin-rap-conv'), 'cad_convenios'); } catch (e) {}
+    try { autocomplete.attachSimples(document.getElementById('fin-rap-hosp'), 'cad_clinicas'); } catch (e) {}
+    setTimeout(() => { try { document.getElementById('fin-rap-paciente').focus(); } catch (e) {} }, 100);
+  },
+  _salvarRapido() {
+    const v = id => ((document.getElementById(id) || {}).value || '').trim();
+    if (!v('fin-rap-paciente')) { toast('Informe o nome do paciente', 'warn'); return; }
+    if (!v('fin-rap-data')) { toast('Informe a data do procedimento', 'warn'); return; }
+    const data = {
+      paciente: v('fin-rap-paciente'),
+      data_proc: v('fin-rap-data'),
+      tipo_atendimento: 'procedimento',
+      procedimento: v('fin-rap-proc'),
+      convenio: v('fin-rap-conv'),
+      hospital: v('fin-rap-hosp'),
+      tipo_pagamento: v('fin-rap-tipo') || 'Convênio',
+      valor_previsto: v('fin-rap-valor'),
+      senha: v('fin-rap-senha'),
+      senha_data: v('fin-rap-senha') ? utils.hojeISO() : '',
+      status: 'pendente',
+      _origemTipo: 'avulso'
+    };
+    const saved = store.save('financeiro', data);
+    modal.close();
+    try { financeiro.render(); } catch (e) {}
+    toast('⚡ Lançamento de ' + data.paciente + ' criado — status Pendente' +
+      (data.valor_previsto ? '' : ' (complete o valor na conciliação quando tiver)'));
+    return saved;
   },
 
   editar(id) {
