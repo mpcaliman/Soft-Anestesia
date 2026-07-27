@@ -7592,7 +7592,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
                 <th style="min-width:240px">Procedimento (CBHPM)</th>
                 <th style="width:60px">Porte</th>
                 <th style="width:58px" title="Número de vezes que o código foi executado">Qtd ×</th>
-                <th style="width:70px" title="Grau de cobrança para procedimentos múltiplos: o principal entra 100%; os demais, 70% ou 50% conforme o contrato do convênio">Grau</th>
+                <th style="width:70px" title="Hierarquia: o código de MAIOR PORTE é o principal (100%); os demais da MESMA VIA entram 50%; VIA DIFERENTE entra 70% (ajuste manual). Use ⚖️ Classificar graus para aplicar automaticamente.">Grau</th>
                 <th style="width:105px" title="Valor unitário do código">Vlr unit. (R$)</th>
                 <th style="width:110px">Previsto (R$)</th>
                 <th style="width:110px">Recebido (R$)</th>
@@ -7607,6 +7607,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <div class="table-actions">
             <button type="button" class="btn btn-primary btn-sm" onclick="financeiro.codigos.add()">+ Adicionar código TUSS</button>
             <button type="button" class="btn btn-sm" onclick="financeiro.codigos.importarPorNome()" title="Buscar códigos da ficha de anestesia do mesmo paciente">📥 Importar da anestesia</button>
+            <button type="button" class="btn btn-sm" onclick="financeiro.codigos.classificarGrau()" title="Maior porte → 100%; demais → 50% (mesma via). Linhas marcadas 70% (via diferente) são preservadas.">⚖️ Classificar graus</button>
             <button type="button" class="btn btn-sm" onclick="financeiro.codigos.recalcular()" title="Recalcular totais com base nos códigos">↻ Recalcular totais</button>
           </div>
 
@@ -20745,11 +20746,11 @@ const anestesia = {
       const div = document.createElement('div');
       div.className = 'grid';
       div.style.cssText = 'background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius);padding:10px;margin-bottom:8px';
-      const grauSel = String(dados.grau || '70');
+      const grauSel = String(dados.grau || '50');
       div.innerHTML = `
         <div class="field col-4"><label>Procedimento adicional <small style="color:var(--text-mute);font-weight:400">(CBHPM)</small></label><input type="text" name="cir_extra_proc[]" class="cbhpm-autocomplete" placeholder="Digite parte do procedimento..." value="${utils.escapeAttr(dados.procedimento || '')}"></div>
         <div class="field col-3"><label>Cirurgião</label><input type="text" name="cir_extra_cir[]" value="${utils.escapeAttr(dados.cirurgiao || '')}"></div>
-        <div class="field col-2"><label>Grau <small style="color:var(--text-mute);font-weight:400" title="Grau de cobrança para procedimentos múltiplos: o principal entra 100%; os demais, 70% ou 50% conforme o contrato do convênio">%</small></label>
+        <div class="field col-2"><label>Grau <small style="color:var(--text-mute);font-weight:400" title="Hierarquia de cobrança: o procedimento de MAIOR PORTE é o principal (100%); os demais da MESMA VIA entram 50%; VIA DIFERENTE entra 70% (ajuste manual)">%</small></label>
           <select name="cir_extra_grau[]">${['100', '70', '50'].map(g => `<option value="${g}" ${g === grauSel ? 'selected' : ''}>${g}%</option>`).join('')}</select></div>
         <div class="field col-2"><label>Início</label><input type="time" name="cir_extra_inicio[]" value="${utils.escapeAttr(dados.inicio || '')}"></div>
         <div class="field col-1" style="align-self:end"><button type="button" class="btn btn-xs btn-danger" onclick="this.closest('.grid').remove(); markDirty();">✕</button></div>
@@ -20771,7 +20772,7 @@ const anestesia = {
           linhas.push({
             procedimento: el.value,
             cirurgiao: $('cir_extra_cir'),
-            grau: $('cir_extra_grau') || '70',
+            grau: $('cir_extra_grau') || '50',
             inicio: $('cir_extra_inicio'),
             fim: $('cir_extra_fim'),
             obs: $('cir_extra_obs')
@@ -26981,7 +26982,7 @@ const linker = {
     const extras = (a.procedimento && a.procedimento.cirurgias_extra) || a.cirurgias_extra || [];
     extras.forEach(c => {
       const d = c.procedimento || c.descricao;
-      if (d) procs.push({ desc: d, grau: String(c.grau || '70') });
+      if (d) procs.push({ desc: d, grau: String(c.grau || '50') });
     });
 
     /* Limpa tabela de códigos antes de importar (apenas se vazia) */
@@ -27014,6 +27015,8 @@ const linker = {
         nImp++;
       }
     });
+    /* Hierarquia automática: maior porte 100%, demais 50% (70% manual preservado) */
+    if (nImp > 1) { try { financeiro.codigos.classificarGrau({ silent: true }); } catch (e) {} }
 
     /* Também importa procedimentos extras da Pré-anestésica do mesmo paciente */
     try {
@@ -33742,7 +33745,7 @@ const financeiro = {
         </td>
         <td data-label="Porte"><input type="text" name="fin_cod_porte[]" value="${utils.escapeAttr(dados.porte || '')}" placeholder="—" style="width:50px"></td>
         <td data-label="Qtd ×"><input type="number" name="fin_cod_qtd[]" step="1" min="1" value="${utils.escapeAttr(dados.qtd || 1)}" style="width:48px" oninput="financeiro.codigos._onQtdUnit(this)"></td>
-        <td data-label="Grau"><select name="fin_cod_grau[]" title="Grau de cobrança (procedimentos múltiplos): 1º 100%; demais 70% ou 50% conforme o convênio" onchange="financeiro.codigos._onQtdUnit(this)">${['100', '70', '50'].map(g => `<option value="${g}" ${g === String(dados.grau || '100') ? 'selected' : ''}>${g}%</option>`).join('')}</select></td>
+        <td data-label="Grau"><select name="fin_cod_grau[]" title="Maior porte 100%; mesma via 50%; via diferente 70% (manual)" onchange="financeiro.codigos._onQtdUnit(this)">${['100', '70', '50'].map(g => `<option value="${g}" ${g === String(dados.grau || '100') ? 'selected' : ''}>${g}%</option>`).join('')}</select></td>
         <td data-label="Vlr unit."><input type="number" name="fin_cod_unit[]" step="0.01" min="0" value="${utils.escapeAttr(dados.valor_unit || '')}" oninput="financeiro.codigos._onQtdUnit(this)"></td>
         <td data-label="Previsto"><input type="number" name="fin_cod_previsto[]" step="0.01" min="0" value="${utils.escapeAttr(dados.valor_previsto || '')}" oninput="financeiro.codigos._onPrevisto(this)"></td>
         <td data-label="Recebido"><input type="number" name="fin_cod_recebido[]" step="0.01" min="0" value="${utils.escapeAttr(dados.valor_recebido || '')}" oninput="financeiro.codigos.recalcular()"></td>
@@ -33871,6 +33874,44 @@ const financeiro = {
       financeiro.calcDif();
     },
 
+    /* ---------- CLASSIFICAÇÃO AUTOMÁTICA DOS GRAUS ----------
+       Hierarquia de cobrança em procedimentos múltiplos:
+       - o código de MAIOR PORTE é o principal → 100%;
+       - os demais entram 50% (pressupõe MESMA via de acesso — o caso comum);
+       - VIA DIFERENTE (70%) é decisão manual: linhas já marcadas 70% são
+         PRESERVADAS pela classificação. Tudo continua editável. */
+    _parsePorte(p) {
+      const m = /^(\d+)\s*([A-C]?)/i.exec(String(p || '').trim());
+      return m ? [parseInt(m[1], 10), (m[2] || '').toUpperCase()] : [0, ''];
+    },
+    classificarGrau(opts = {}) {
+      const rows = Array.from(document.querySelectorAll('#fin-codigos-body tr'));
+      if (rows.length < 2) {
+        if (rows.length === 1) { const s = rows[0].querySelector('[name="fin_cod_grau[]"]'); if (s) s.value = '100'; financeiro.codigos.recalcular(); }
+        if (!opts.silent) toast('Com um único código, o grau é 100%');
+        return;
+      }
+      let best = null, bv = [-1, ''];
+      rows.forEach(tr => {
+        const [n, l] = financeiro.codigos._parsePorte(tr.querySelector('[name="fin_cod_porte[]"]')?.value);
+        if (n > bv[0] || (n === bv[0] && l > bv[1])) { best = tr; bv = [n, l]; }
+      });
+      rows.forEach(tr => {
+        const sel = tr.querySelector('[name="fin_cod_grau[]"]');
+        if (!sel) return;
+        if (tr === best) sel.value = '100';
+        else if (sel.value !== '70') sel.value = '50';   /* 70 = via diferente marcada à mão */
+        /* re-deriva o previsto da linha a partir do unitário, se houver */
+        const unit = parseFloat(tr.querySelector('[name="fin_cod_unit[]"]')?.value);
+        const qtd = Math.max(1, parseFloat(tr.querySelector('[name="fin_cod_qtd[]"]')?.value) || 1);
+        const prevEl = tr.querySelector('[name="fin_cod_previsto[]"]');
+        if (!isNaN(unit) && prevEl) prevEl.value = (unit * qtd * financeiro.codigos._grauDe(tr)).toFixed(2);
+      });
+      financeiro.codigos.recalcular();
+      markDirty();
+      if (!opts.silent) toast('⚖️ Maior porte → 100%; demais → 50% (mesma via). Via diferente? Mude a linha para 70%.');
+    },
+
     /* Coleta dados serializáveis das linhas */
     coletar() {
       const linhas = [];
@@ -33948,7 +33989,7 @@ const financeiro = {
       extras.forEach(c => {
         const d = c.procedimento || c.descricao;
         if (!d) return;
-        const grau = String(c.grau || '70');
+        const grau = String(c.grau || '50');
         const match = CBHPM_2018.find(x => x[1].toLowerCase() === d.toLowerCase());
         if (match && !jaExistentes.has(match[0])) {
           financeiro.codigos.add({ codigo: match[0], descricao: match[1], porte: match[2], grau });
@@ -33960,6 +34001,7 @@ const financeiro = {
       });
       if (n > 0) {
         toast(n + ' código(s) importado(s) da anestesia');
+        try { financeiro.codigos.classificarGrau({ silent: true }); } catch (e) {}
         financeiro.codigos.recalcular();
       } else {
         toast('Nada novo para importar', 'warn');
@@ -34036,7 +34078,7 @@ const financeiro = {
       '<div class="grid">' +
       '<div class="field col-7"><label>Paciente <span class="req">*</span></label><input type="text" id="fin-rap-paciente" autocomplete="off"></div>' +
       '<div class="field col-5"><label>Data do procedimento <span class="req">*</span></label><input type="date" id="fin-rap-data" value="' + utils.hojeISO() + '"></div>' +
-      '<div class="field col-12"><label>Procedimentos <small style="color:var(--text-mute);font-weight:400">(CBHPM — o 1º entra 100%; os demais, 70%/50% conforme o convênio)</small></label>' +
+      '<div class="field col-12"><label>Procedimentos <small style="color:var(--text-mute);font-weight:400">(CBHPM — o de maior porte entra 100%; os demais 50% [mesma via]; mude para 70% se via diferente)</small></label>' +
       '<div id="fin-rap-procs"></div>' +
       '<button type="button" class="btn btn-xs" onclick="financeiro._rapAddProc()">+ adicionar procedimento</button></div>' +
       '<div class="field col-6"><label>Convênio</label><input type="text" id="fin-rap-conv"></div>' +
@@ -34059,7 +34101,7 @@ const financeiro = {
     const host = document.getElementById('fin-rap-procs');
     if (!host) return;
     const primeira = host.children.length === 0;
-    const grauSel = String(dados.grau || (primeira ? '100' : '70'));
+    const grauSel = String(dados.grau || (primeira ? '100' : '50'));
     const div = document.createElement('div');
     div.style.cssText = 'display:flex;gap:6px;margin-bottom:6px;align-items:center';
     div.innerHTML =
@@ -34093,6 +34135,16 @@ const financeiro = {
         status: 'aguardando'
       });
     });
+    /* Hierarquia automática pelo PORTE: o maior é o principal (100%); os
+       demais 50% (mesma via). Linhas marcadas 70% (via diferente) ficam. */
+    if (codigos.length > 1) {
+      let bi = 0, bv = [-1, ''];
+      codigos.forEach((c, i) => {
+        const [n, l] = financeiro.codigos._parsePorte(c.porte);
+        if (n > bv[0] || (n === bv[0] && l > bv[1])) { bi = i; bv = [n, l]; }
+      });
+      codigos.forEach((c, i) => { c.grau = (i === bi) ? 100 : (c.grau === 70 ? 70 : 50); });
+    }
     const data = {
       paciente: v('fin-rap-paciente'),
       data_proc: v('fin-rap-data'),
