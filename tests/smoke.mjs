@@ -1286,16 +1286,20 @@ await test('Financeiro: lançamento rápido cria registro pendente sem precisar 
     // botão na barra do módulo
     out.temBotao = document.querySelector('#module-financeiro .action-bar').textContent.includes('Lançamento rápido');
 
-    // modal com os campos essenciais
+    // modal com os campos essenciais (procedimentos agora são linhas múltiplas)
     financeiro.lancamentoRapido();
     await new Promise(r => setTimeout(r, 100));
-    out.camposOk = ['fin-rap-paciente', 'fin-rap-data', 'fin-rap-proc', 'fin-rap-conv', 'fin-rap-valor', 'fin-rap-senha']
-      .every(id => !!document.getElementById(id));
+    out.camposOk = ['fin-rap-paciente', 'fin-rap-data', 'fin-rap-conv', 'fin-rap-valor', 'fin-rap-senha']
+      .every(id => !!document.getElementById(id)) && !!document.querySelector('#fin-rap-procs .fin-rap-proc');
     out.dataHoje = document.getElementById('fin-rap-data').value === utils.hojeISO();
 
-    // preencher e lançar
+    // preencher (2 procedimentos: 1º 100%, 2º com grau 50%) e lançar
     document.getElementById('fin-rap-paciente').value = 'Paciente Avulso';
-    document.getElementById('fin-rap-proc').value = 'Colonoscopia';
+    document.querySelector('#fin-rap-procs .fin-rap-proc').value = 'Colonoscopia';
+    financeiro._rapAddProc();
+    const linhas2 = document.querySelectorAll('#fin-rap-procs > div');
+    linhas2[1].querySelector('.fin-rap-proc').value = 'Endoscopia digestiva alta';
+    linhas2[1].querySelector('.fin-rap-grau').value = '50';
     document.getElementById('fin-rap-conv').value = 'Unimed';
     document.getElementById('fin-rap-valor').value = '800';
     document.getElementById('fin-rap-senha').value = 'AUT123';
@@ -1304,8 +1308,10 @@ await test('Financeiro: lançamento rápido cria registro pendente sem precisar 
 
     const reg = store.list('financeiro')[0];
     out.criou = !!(reg && reg.paciente === 'Paciente Avulso' && reg.status === 'pendente'
-      && reg._origemTipo === 'avulso' && reg.procedimento === 'Colonoscopia'
+      && reg._origemTipo === 'avulso' && /Colonoscopia/i.test(reg.procedimento)
       && reg.valor_previsto === '800' && reg.senha === 'AUT123' && reg.senha_data === utils.hojeISO());
+    out.codigosComGrau = !!(reg && Array.isArray(reg.codigos) && reg.codigos.length === 2
+      && reg.codigos[0].grau === 100 && reg.codigos[1].grau === 50);
     out.fechouModal = !document.getElementById('modal-backdrop').classList.contains('show');
 
     // sem paciente → não lança (avisa)
@@ -1323,8 +1329,69 @@ await test('Financeiro: lançamento rápido cria registro pendente sem precisar 
   assert(r.camposOk, 'o modal deveria ter paciente, data, procedimento, convênio, valor e senha');
   assert(r.dataHoje, 'a data deveria vir pré-preenchida com hoje');
   assert(r.criou, 'o lançamento deveria criar registro pendente/avulso com os dados informados');
+  assert(r.codigosComGrau, 'os 2 procedimentos deveriam virar códigos com grau 100% e 50%');
   assert(r.fechouModal, 'lançar deveria fechar o modal');
   assert(r.validaPaciente, 'sem paciente não deveria lançar');
+  await page.close();
+});
+
+/* 33) Grau 100/70/50% por código — ficha, financeiro e importação */
+await test('Grau: cirurgias da ficha têm grau, previsto = unit × qtd × grau, e a importação traz as combinadas', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('anestesia', []); store.setList('financeiro', []);
+
+    // FICHA: cirurgia combinada com grau (padrão 70%, editável para 50/100)
+    location.hash = '#anestesia';
+    await new Promise(r => setTimeout(r, 400));
+    document.getElementById('cir-combo-body').innerHTML = '';
+    anestesia.cirurgias.add({ procedimento: 'Endoscopia digestiva alta', grau: '50' });
+    anestesia.cirurgias.add({ procedimento: 'Outro procedimento' });      // sem grau → 70
+    const cirs = anestesia.cirurgias.coletar();
+    out.grauFicha = cirs[0].grau === '50' && cirs[1].grau === '70';
+
+    // FINANCEIRO: previsto respeita o grau (1000 × 1 × 70% = 700)
+    location.hash = '#financeiro';
+    await new Promise(r => setTimeout(r, 300));
+    financeiro.editar(null);
+    const tr = financeiro.codigos.add({ descricao: 'Proc teste', grau: '70' });
+    tr.querySelector('[name="fin_cod_unit[]"]').value = '1000';
+    financeiro.codigos._onQtdUnit(tr.querySelector('[name="fin_cod_unit[]"]'));
+    out.previstoComGrau = tr.querySelector('[name="fin_cod_previsto[]"]').value === '700.00';
+    // previsto digitado → deduz o unitário considerando o grau (350 ÷ 1 ÷ 70% = 500)
+    tr.querySelector('[name="fin_cod_previsto[]"]').value = '350';
+    financeiro.codigos._onPrevisto(tr.querySelector('[name="fin_cod_previsto[]"]'));
+    out.unitComGrau = tr.querySelector('[name="fin_cod_unit[]"]').value === '500.00';
+    out.coletaGrau = financeiro.codigos.coletar()[0].grau === 70;
+
+    // IMPORTAÇÃO da ficha: principal 100% + combinada com o grau dela
+    // (antes as combinadas nem eram importadas — a ficha salva c.procedimento)
+    store.setList('anestesia', [{
+      _id: 'fx', paciente: { nome: 'Grau Teste' },
+      procedimento: { descricao: 'Colonoscopia', data: '2026-07-25',
+        cirurgias_extra: [{ procedimento: 'Endoscopia digestiva alta', grau: '50' }] }
+    }]);
+    financeiro.editar(null);
+    document.querySelector('#form-financeiro [name="paciente"]').value = 'Grau Teste';
+    linker.importarAnestesiaParaFinanceiro('Grau Teste', { force: true, silent: true });
+    await new Promise(r => setTimeout(r, 200));
+    const rows = Array.from(document.querySelectorAll('#fin-codigos-body tr'));
+    out.importou2 = rows.length === 2;
+    const graus = rows.map(x => x.querySelector('[name="fin_cod_grau[]"]').value);
+    out.grausImportados = graus[0] === '100' && graus[1] === '50';
+
+    financeiro.cancelar();
+    document.getElementById('cir-combo-body').innerHTML = '';
+    store.setList('anestesia', []); store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.grauFicha, 'as cirurgias combinadas da ficha deveriam guardar o grau (padrão 70%)');
+  assert(r.previstoComGrau, 'previsto deveria ser unit × qtd × grau (1000 × 70% = 700)');
+  assert(r.unitComGrau, 'previsto digitado deveria deduzir o unitário considerando o grau');
+  assert(r.coletaGrau, 'o grau deveria ser salvo com o código');
+  assert(r.importou2, 'a importação deveria trazer principal + combinada (bug do c.descricao corrigido)');
+  assert(r.grausImportados, 'principal deveria entrar 100% e a combinada com o grau da ficha (50%)');
   await page.close();
 });
 

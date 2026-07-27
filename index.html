@@ -7592,6 +7592,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
                 <th style="min-width:240px">Procedimento (CBHPM)</th>
                 <th style="width:60px">Porte</th>
                 <th style="width:58px" title="Número de vezes que o código foi executado">Qtd ×</th>
+                <th style="width:70px" title="Grau de cobrança para procedimentos múltiplos: o principal entra 100%; os demais, 70% ou 50% conforme o contrato do convênio">Grau</th>
                 <th style="width:105px" title="Valor unitário do código">Vlr unit. (R$)</th>
                 <th style="width:110px">Previsto (R$)</th>
                 <th style="width:110px">Recebido (R$)</th>
@@ -20744,9 +20745,12 @@ const anestesia = {
       const div = document.createElement('div');
       div.className = 'grid';
       div.style.cssText = 'background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius);padding:10px;margin-bottom:8px';
+      const grauSel = String(dados.grau || '70');
       div.innerHTML = `
-        <div class="field col-5"><label>Procedimento adicional <small style="color:var(--text-mute);font-weight:400">(CBHPM)</small></label><input type="text" name="cir_extra_proc[]" class="cbhpm-autocomplete" placeholder="Digite parte do procedimento..." value="${utils.escapeAttr(dados.procedimento || '')}"></div>
-        <div class="field col-4"><label>Cirurgião</label><input type="text" name="cir_extra_cir[]" value="${utils.escapeAttr(dados.cirurgiao || '')}"></div>
+        <div class="field col-4"><label>Procedimento adicional <small style="color:var(--text-mute);font-weight:400">(CBHPM)</small></label><input type="text" name="cir_extra_proc[]" class="cbhpm-autocomplete" placeholder="Digite parte do procedimento..." value="${utils.escapeAttr(dados.procedimento || '')}"></div>
+        <div class="field col-3"><label>Cirurgião</label><input type="text" name="cir_extra_cir[]" value="${utils.escapeAttr(dados.cirurgiao || '')}"></div>
+        <div class="field col-2"><label>Grau <small style="color:var(--text-mute);font-weight:400" title="Grau de cobrança para procedimentos múltiplos: o principal entra 100%; os demais, 70% ou 50% conforme o contrato do convênio">%</small></label>
+          <select name="cir_extra_grau[]">${['100', '70', '50'].map(g => `<option value="${g}" ${g === grauSel ? 'selected' : ''}>${g}%</option>`).join('')}</select></div>
         <div class="field col-2"><label>Início</label><input type="time" name="cir_extra_inicio[]" value="${utils.escapeAttr(dados.inicio || '')}"></div>
         <div class="field col-1" style="align-self:end"><button type="button" class="btn btn-xs btn-danger" onclick="this.closest('.grid').remove(); markDirty();">✕</button></div>
         <div class="field col-3"><label>Fim</label><input type="time" name="cir_extra_fim[]" value="${utils.escapeAttr(dados.fim || '')}"></div>
@@ -20767,6 +20771,7 @@ const anestesia = {
           linhas.push({
             procedimento: el.value,
             cirurgiao: $('cir_extra_cir'),
+            grau: $('cir_extra_grau') || '70',
             inicio: $('cir_extra_inicio'),
             fim: $('cir_extra_fim'),
             obs: $('cir_extra_obs')
@@ -24973,7 +24978,7 @@ const anestesia = {
       s = '';
       if (d.procedimento.descricao) s += `Submetido a ${d.procedimento.descricao}`;
       if (Array.isArray(d.procedimento.cirurgias_extra) && d.procedimento.cirurgias_extra.length) {
-        const extras = d.procedimento.cirurgias_extra.filter(c => c.descricao).map(c => c.descricao);
+        const extras = d.procedimento.cirurgias_extra.map(c => c.procedimento || c.descricao).filter(Boolean);
         if (extras.length) s += ` (combinada com: ${extras.join(', ')})`;
       }
       if (d.procedimento.cirurgiao) s += ` por ${d.procedimento.cirurgiao}`;
@@ -26967,13 +26972,16 @@ const linker = {
     setIfEmpty('convenio',  (a.paciente && a.paciente.convenio) || a.convenio);
     setIfEmpty('data_proc', (a.procedimento && a.procedimento.data) || a.data_anestesia || a.data);
 
-    /* Coleta TODOS os procedimentos: principal + cirurgias combinadas */
+    /* Coleta TODOS os procedimentos: principal (100%) + cirurgias combinadas
+       (com o GRAU marcado na ficha; padrão 70%). Obs.: a ficha salva a
+       descrição em c.procedimento — c.descricao é só legado. */
     const procs = [];
     const principal = (a.procedimento && a.procedimento.descricao) || a.procedimento;
-    if (principal) procs.push(principal);
+    if (principal && typeof principal === 'string') procs.push({ desc: principal, grau: '100' });
     const extras = (a.procedimento && a.procedimento.cirurgias_extra) || a.cirurgias_extra || [];
     extras.forEach(c => {
-      if (c.descricao) procs.push(c.descricao);
+      const d = c.procedimento || c.descricao;
+      if (d) procs.push({ desc: d, grau: String(c.grau || '70') });
     });
 
     /* Limpa tabela de códigos antes de importar (apenas se vazia) */
@@ -26987,7 +26995,8 @@ const linker = {
 
     /* Para cada procedimento, busca código TUSS na CBHPM e adiciona linha */
     let nImp = 0;
-    procs.forEach(desc => {
+    procs.forEach(p => {
+      const desc = p.desc;
       /* Busca match exato primeiro, depois parcial */
       let match = CBHPM_2018.find(c => c[1].toLowerCase() === desc.toLowerCase());
       if (!match) {
@@ -26999,6 +27008,7 @@ const linker = {
           codigo: match ? match[0] : '',
           descricao: match ? match[1] : desc,
           porte:    match ? match[2] : '',
+          grau:     p.grau,
           status: 'aguardando'
         });
         nImp++;
@@ -33732,6 +33742,7 @@ const financeiro = {
         </td>
         <td data-label="Porte"><input type="text" name="fin_cod_porte[]" value="${utils.escapeAttr(dados.porte || '')}" placeholder="—" style="width:50px"></td>
         <td data-label="Qtd ×"><input type="number" name="fin_cod_qtd[]" step="1" min="1" value="${utils.escapeAttr(dados.qtd || 1)}" style="width:48px" oninput="financeiro.codigos._onQtdUnit(this)"></td>
+        <td data-label="Grau"><select name="fin_cod_grau[]" title="Grau de cobrança (procedimentos múltiplos): 1º 100%; demais 70% ou 50% conforme o convênio" onchange="financeiro.codigos._onQtdUnit(this)">${['100', '70', '50'].map(g => `<option value="${g}" ${g === String(dados.grau || '100') ? 'selected' : ''}>${g}%</option>`).join('')}</select></td>
         <td data-label="Vlr unit."><input type="number" name="fin_cod_unit[]" step="0.01" min="0" value="${utils.escapeAttr(dados.valor_unit || '')}" oninput="financeiro.codigos._onQtdUnit(this)"></td>
         <td data-label="Previsto"><input type="number" name="fin_cod_previsto[]" step="0.01" min="0" value="${utils.escapeAttr(dados.valor_previsto || '')}" oninput="financeiro.codigos._onPrevisto(this)"></td>
         <td data-label="Recebido"><input type="number" name="fin_cod_recebido[]" step="0.01" min="0" value="${utils.escapeAttr(dados.valor_recebido || '')}" oninput="financeiro.codigos.recalcular()"></td>
@@ -33793,22 +33804,23 @@ const financeiro = {
       markDirty();
     },
 
-    /* Qtd ou valor unitário alterados → previsto = unit × qtd */
+    /* Qtd, grau ou valor unitário alterados → previsto = unit × qtd × grau% */
+    _grauDe(tr) { return (parseFloat(tr.querySelector('[name="fin_cod_grau[]"]')?.value) || 100) / 100; },
     _onQtdUnit(input) {
       const tr = input.closest('tr');
       const qtd  = Math.max(1, parseFloat(tr.querySelector('[name="fin_cod_qtd[]"]')?.value) || 1);
       const unit = parseFloat(tr.querySelector('[name="fin_cod_unit[]"]')?.value);
       const prevEl = tr.querySelector('[name="fin_cod_previsto[]"]');
-      if (!isNaN(unit) && prevEl) prevEl.value = (unit * qtd).toFixed(2);
+      if (!isNaN(unit) && prevEl) prevEl.value = (unit * qtd * financeiro.codigos._grauDe(tr)).toFixed(2);
       financeiro.codigos.recalcular();
     },
-    /* Previsto digitado direto → deduz o unitário (previsto ÷ qtd) */
+    /* Previsto digitado direto → deduz o unitário (previsto ÷ qtd ÷ grau%) */
     _onPrevisto(input) {
       const tr = input.closest('tr');
       const qtd = Math.max(1, parseFloat(tr.querySelector('[name="fin_cod_qtd[]"]')?.value) || 1);
       const prev = parseFloat(input.value);
       const unitEl = tr.querySelector('[name="fin_cod_unit[]"]');
-      if (!isNaN(prev) && unitEl) unitEl.value = (prev / qtd).toFixed(2);
+      if (!isNaN(prev) && unitEl) unitEl.value = (prev / qtd / financeiro.codigos._grauDe(tr)).toFixed(2);
       financeiro.codigos.recalcular();
     },
 
@@ -33869,6 +33881,7 @@ const financeiro = {
           descricao:     q('fin_cod_desc'),
           porte:         q('fin_cod_porte'),
           qtd:           Math.max(1, parseFloat(q('fin_cod_qtd')) || 1),
+          grau:          parseFloat(q('fin_cod_grau')) || 100,
           valor_unit:    parseFloat(q('fin_cod_unit')) || 0,
           valor_previsto: parseFloat(q('fin_cod_previsto')) || 0,
           valor_recebido: parseFloat(q('fin_cod_recebido')) || 0,
@@ -33923,23 +33936,25 @@ const financeiro = {
       if (principalDesc) {
         const match = CBHPM_2018.find(c => c[1].toLowerCase() === principalDesc.toLowerCase());
         if (match && !jaExistentes.has(match[0])) {
-          financeiro.codigos.add({ codigo: match[0], descricao: match[1], porte: match[2] });
+          financeiro.codigos.add({ codigo: match[0], descricao: match[1], porte: match[2], grau: '100' });
           n++;
         } else if (!match) {
-          financeiro.codigos.add({ descricao: principalDesc });
+          financeiro.codigos.add({ descricao: principalDesc, grau: '100' });
           n++;
         }
       }
-      /* Cirurgias combinadas */
+      /* Cirurgias combinadas (a ficha salva a descrição em c.procedimento) */
       const extras = (a.procedimento && a.procedimento.cirurgias_extra) || [];
       extras.forEach(c => {
-        if (!c.descricao) return;
-        const match = CBHPM_2018.find(x => x[1].toLowerCase() === c.descricao.toLowerCase());
+        const d = c.procedimento || c.descricao;
+        if (!d) return;
+        const grau = String(c.grau || '70');
+        const match = CBHPM_2018.find(x => x[1].toLowerCase() === d.toLowerCase());
         if (match && !jaExistentes.has(match[0])) {
-          financeiro.codigos.add({ codigo: match[0], descricao: match[1], porte: match[2] });
+          financeiro.codigos.add({ codigo: match[0], descricao: match[1], porte: match[2], grau });
           n++;
         } else if (!match) {
-          financeiro.codigos.add({ descricao: c.descricao });
+          financeiro.codigos.add({ descricao: d, grau });
           n++;
         }
       });
@@ -34021,7 +34036,9 @@ const financeiro = {
       '<div class="grid">' +
       '<div class="field col-7"><label>Paciente <span class="req">*</span></label><input type="text" id="fin-rap-paciente" autocomplete="off"></div>' +
       '<div class="field col-5"><label>Data do procedimento <span class="req">*</span></label><input type="date" id="fin-rap-data" value="' + utils.hojeISO() + '"></div>' +
-      '<div class="field col-12"><label>Procedimento <small style="color:var(--text-mute);font-weight:400">(CBHPM)</small></label><input type="text" id="fin-rap-proc" data-cbhpm="1" placeholder="Digite parte do procedimento ou o código TUSS..."></div>' +
+      '<div class="field col-12"><label>Procedimentos <small style="color:var(--text-mute);font-weight:400">(CBHPM — o 1º entra 100%; os demais, 70%/50% conforme o convênio)</small></label>' +
+      '<div id="fin-rap-procs"></div>' +
+      '<button type="button" class="btn btn-xs" onclick="financeiro._rapAddProc()">+ adicionar procedimento</button></div>' +
       '<div class="field col-6"><label>Convênio</label><input type="text" id="fin-rap-conv"></div>' +
       '<div class="field col-6"><label>Hospital / clínica</label><input type="text" id="fin-rap-hosp"></div>' +
       '<div class="field col-4"><label>Tipo</label><select id="fin-rap-tipo"><option>Convênio</option><option>Particular</option><option>SUS</option></select></div>' +
@@ -34030,22 +34047,57 @@ const financeiro = {
       '</div>',
       '<button class="btn" onclick="modal.close()">Cancelar</button>' +
       '<button class="btn btn-primary" onclick="financeiro._salvarRapido()">💾 Lançar</button>');
-    /* liga os autocompletes nos campos do modal */
+    /* liga os autocompletes nos campos do modal + 1ª linha de procedimento */
+    financeiro._rapAddProc();
     try { pacienteAutocomplete.attach(document.getElementById('fin-rap-paciente'), 'financeiro'); } catch (e) {}
-    try { cbhpm.aplicarTodos(document.getElementById('modal-body')); } catch (e) {}
     try { autocomplete.attachSimples(document.getElementById('fin-rap-conv'), 'cad_convenios'); } catch (e) {}
     try { autocomplete.attachSimples(document.getElementById('fin-rap-hosp'), 'cad_clinicas'); } catch (e) {}
     setTimeout(() => { try { document.getElementById('fin-rap-paciente').focus(); } catch (e) {} }, 100);
+  },
+  /* Linha de procedimento no lançamento rápido: CBHPM + grau (1ª = 100%, demais 70%) */
+  _rapAddProc(dados = {}) {
+    const host = document.getElementById('fin-rap-procs');
+    if (!host) return;
+    const primeira = host.children.length === 0;
+    const grauSel = String(dados.grau || (primeira ? '100' : '70'));
+    const div = document.createElement('div');
+    div.style.cssText = 'display:flex;gap:6px;margin-bottom:6px;align-items:center';
+    div.innerHTML =
+      '<input type="text" class="fin-rap-proc" data-cbhpm="1" placeholder="Digite parte do procedimento ou o código TUSS..." style="flex:1" value="' + utils.escapeAttr(dados.descricao || '') + '">' +
+      '<select class="fin-rap-grau" title="Grau de cobrança (procedimentos múltiplos)" style="width:78px">' +
+        ['100', '70', '50'].map(g => '<option value="' + g + '"' + (g === grauSel ? ' selected' : '') + '>' + g + '%</option>').join('') + '</select>' +
+      (primeira ? '' : '<button type="button" class="btn btn-xs btn-danger" onclick="this.parentNode.remove()">✕</button>');
+    host.appendChild(div);
+    try { cbhpm.aplicarTodos(div); } catch (e) {}
   },
   _salvarRapido() {
     const v = id => ((document.getElementById(id) || {}).value || '').trim();
     if (!v('fin-rap-paciente')) { toast('Informe o nome do paciente', 'warn'); return; }
     if (!v('fin-rap-data')) { toast('Informe a data do procedimento', 'warn'); return; }
+    /* Procedimentos: cada linha vira um CÓDIGO com o seu grau */
+    const codigos = [];
+    document.querySelectorAll('#fin-rap-procs > div').forEach(div => {
+      const desc = ((div.querySelector('.fin-rap-proc') || {}).value || '').trim();
+      if (!desc) return;
+      const grau = (div.querySelector('.fin-rap-grau') || {}).value || '100';
+      let match = CBHPM_2018.find(c => c[1].toLowerCase() === desc.toLowerCase() || c[0] === desc);
+      if (!match) {
+        const cand = CBHPM_2018.filter(c => c[1].toLowerCase().includes(desc.toLowerCase()));
+        if (cand.length === 1) match = cand[0];
+      }
+      codigos.push({
+        codigo: match ? match[0] : '',
+        descricao: match ? match[1] : desc,
+        porte: match ? match[2] : '',
+        grau: parseFloat(grau) || 100,
+        status: 'aguardando'
+      });
+    });
     const data = {
       paciente: v('fin-rap-paciente'),
       data_proc: v('fin-rap-data'),
       tipo_atendimento: 'procedimento',
-      procedimento: v('fin-rap-proc'),
+      procedimento: codigos.map(c => c.descricao).join(' + '),
       convenio: v('fin-rap-conv'),
       hospital: v('fin-rap-hosp'),
       tipo_pagamento: v('fin-rap-tipo') || 'Convênio',
@@ -34055,11 +34107,13 @@ const financeiro = {
       status: 'pendente',
       _origemTipo: 'avulso'
     };
+    if (codigos.length) data.codigos = codigos;
     const saved = store.save('financeiro', data);
     modal.close();
     try { financeiro.render(); } catch (e) {}
     toast('⚡ Lançamento de ' + data.paciente + ' criado — status Pendente' +
-      (data.valor_previsto ? '' : ' (complete o valor na conciliação quando tiver)'));
+      (codigos.length > 1 ? ' · ' + codigos.length + ' códigos' : '') +
+      (data.valor_previsto ? '' : ' (complete valores na conciliação)'));
     return saved;
   },
 
