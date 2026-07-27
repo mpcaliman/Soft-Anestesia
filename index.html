@@ -8646,8 +8646,18 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       </div>
       <div class="card-body">
         <p style="font-size:.84rem;color:var(--text-soft);margin-bottom:12px">
-          Quando você gera um PDF de receita, ele pode ser gravado automaticamente na nuvem. Você tem duas opções (pode usar as duas ao mesmo tempo):
+          PDFs gerados pelo app podem ser gravados automaticamente na nuvem. Você tem duas opções de destino (pode usar as duas ao mesmo tempo):
         </p>
+
+        <div class="pdfbk-opcao" style="margin-bottom:14px;padding:10px 12px;background:var(--surface-alt);border-radius:8px">
+          <label class="pdfbk-check">
+            <input type="checkbox" id="pdfbk-auto-finalizar" checked onchange="pdfBackup.salvarCfg({autoFinalizar:this.checked}); toast(this.checked?'📄 Ao FINALIZAR um documento, o PDF será salvo na nuvem automaticamente':'Backup automático ao finalizar desligado')">
+            <span><strong>🪄 Salvar PDF automaticamente ao FINALIZAR</strong> (ficha de anestesia, pré, SRPA, consulta e termo)</span>
+          </label>
+          <p style="font-size:.78rem;color:var(--text-mute);margin:4px 0 0 26px">
+            Sem nenhum toque extra: ao finalizar o documento, o PDF é gerado e enviado aos destinos marcados abaixo.
+          </p>
+        </div>
 
         <div class="pdfbk-opcao">
           <label class="pdfbk-check">
@@ -11730,6 +11740,7 @@ const pre = {
     setSavedStatus((finalizar ? 'Finalizado às ' : 'Salvo às ') + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
     markClean();
     /* Rascunho só é descartado quando finaliza; salvar normal mantém o rascunho ativo */
+    if (finalizar) { try { pdfBackup.autoAoFinalizar('pre'); } catch (e) {} }
     if (finalizar) { try { rascunhos.removerAtivo('pre'); } catch (e) {} }
     toast(finalizar ? '✅ Avaliação finalizada' : '💾 Avaliação salva (dados preservados)');
     /* Ao finalizar, oferece avançar para o Termo de Consentimento */
@@ -12238,6 +12249,7 @@ const consulta = {
     ui.atualizarDocStatus('consulta', saved);
     setSavedStatus((finalizar ? 'Finalizado às ' : 'Salvo às ') + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
     markClean();
+    if (finalizar) { try { pdfBackup.autoAoFinalizar('consulta'); } catch (e) {} }
     if (finalizar) { try { rascunhos.removerAtivo('consulta'); } catch (e) {} }
     toast(finalizar ? '✅ Consulta finalizada' : '💾 Consulta salva (dados preservados)');
   },
@@ -12498,6 +12510,7 @@ const recuperacao = {
     ui.atualizarDocStatus('recuperacao', saved);
     setSavedStatus((finalizar ? 'Finalizado às ' : 'Salvo às ') + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
     markClean();
+    if (finalizar) { try { pdfBackup.autoAoFinalizar('recuperacao'); } catch (e) {} }
     if (finalizar) { try { rascunhos.removerAtivo('recuperacao'); } catch (e) {} }
     toast(finalizar ? '✅ Recuperação finalizada' : '💾 Recuperação salva (dados preservados)');
   },
@@ -13220,6 +13233,7 @@ const termo = {
     ui.atualizarDocStatus('termo', saved);
     setSavedStatus((finalizar ? 'Finalizado às ' : 'Salvo às ') + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
     markClean();
+    if (finalizar) { try { pdfBackup.autoAoFinalizar('termo'); } catch (e) {} }
     if (finalizar) { try { rascunhos.removerAtivo('termo'); } catch (e) {} }
     toast(finalizar ? '✅ Termo finalizado' : '💾 Termo salvo (dados preservados)');
   },
@@ -19457,6 +19471,48 @@ const pdfBackup = {
     if (cfg) cfg.style.display = c.drive === true ? 'block' : 'none';
     const cid = document.getElementById('pdfbk-client-id');
     if (cid) cid.value = c.driveClientId || '';
+    const af = document.getElementById('pdfbk-auto-finalizar');
+    if (af) af.checked = c.autoFinalizar !== false;
+  },
+
+  /* ---------- BACKUP AUTOMÁTICO AO FINALIZAR ----------
+     Chamado pelos módulos ao FINALIZAR um documento (ficha, pré, SRPA,
+     consulta, termo): gera o PDF do documento (mesmo motor da impressão)
+     e envia para os destinos configurados (Drive e/ou Supabase), sem
+     nenhum toque extra. A leitura do formulário é SÍNCRONA (acontece
+     antes de o rascunho ser limpo); só o envio é assíncrono. */
+  autoAoFinalizar(mod) {
+    try {
+      const c = pdfBackup.cfg();
+      if (c.autoFinalizar === false) return;
+      const temDrive = c.drive === true && !!c.driveClientId;
+      const temSupa = c.supabase !== false &&
+        (typeof cloud !== 'undefined' && cloud.estaConfigurado() && cloud.estaLogado());
+      if (!temDrive && !temSupa) return;
+      const J = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+      if (!J) return;
+      const builders = {
+        pre: printPreview._buildPre, consulta: printPreview._buildConsulta,
+        anestesia: printPreview._buildAnestesia, recuperacao: printPreview._buildRecuperacao,
+        termo: printPreview._buildTermo
+      };
+      const builder = builders[mod]; if (!builder) return;
+      const ppp = document.getElementById('ppp'); if (!ppp) return;
+      const overlay = document.getElementById('print-preview-overlay');
+      if (overlay && overlay.classList.contains('show')) return;   /* preview em uso */
+      printPreview._nomeArquivoOverride = null;
+      printPreview._verCtx = { mod, formId: 'form-' + mod };
+      const guardado = ppp.innerHTML;
+      let doc, nomeArq;
+      try {
+        ppp.innerHTML = builder();
+        doc = printPreview._gerarDocDeTexto(J, ppp);
+        nomeArq = printPreview._gerarNomeArquivo().replace(/[^\w.\-]+/g, '_') + '.pdf';
+      } finally { ppp.innerHTML = guardado; }
+      pdfBackup.enviarTodos(doc, nomeArq)
+        .then(() => toast('☁️ PDF do documento finalizado salvo na nuvem' + (temDrive ? ' (Drive)' : '')))
+        .catch(e => console.warn('auto pdf finalizar', e));
+    } catch (e) { console.warn('autoAoFinalizar', e); }
   }
 };
 
@@ -25543,6 +25599,7 @@ const anestesia = {
     setSavedStatus((finalizar ? 'Finalizado às ' : 'Salvo às ') + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
     if (finalizar) localStorage.removeItem(STORAGE.autosave);
     markClean();
+    if (finalizar) { try { pdfBackup.autoAoFinalizar('anestesia'); } catch (e) {} }
     if (finalizar) { try { rascunhos.removerAtivo('anestesia'); } catch (e) {} }
     toast(finalizar ? '✅ Ficha finalizada' : '💾 Ficha salva (dados preservados)');
 

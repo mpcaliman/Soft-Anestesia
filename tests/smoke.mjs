@@ -1408,6 +1408,53 @@ await test('Grau: cirurgias da ficha têm grau, previsto = unit × qtd × grau, 
   await page.close();
 });
 
+/* 34) Backup automático ao FINALIZAR — PDF vai para a nuvem (Drive/Supabase) sozinho */
+await test('Finalizar salva PDF na nuvem automaticamente (com destino configurado; desligável)', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('pre', []);
+    // opção existe em Ajustes e vem LIGADA por padrão
+    out.temCheckbox = !!document.getElementById('pdfbk-auto-finalizar');
+    out.padraoLigado = pdfBackup.cfg().autoFinalizar !== false;
+
+    // destino mockado (Drive configurado) + captura do envio
+    const enviados = [];
+    pdfBackup.cfg = () => ({ drive: true, driveClientId: 'cid-teste', autoFinalizar: true });
+    pdfBackup.enviarTodos = async (doc, nomeArq) => { enviados.push({ nomeArq, temDoc: !!doc && typeof doc.output === 'function' }); };
+
+    // finalizar uma pré → PDF gerado e enviado sem nenhum toque extra
+    location.hash = '#pre';
+    await new Promise(r => setTimeout(r, 400));
+    const f = document.getElementById('form-pre');
+    f.querySelector('[name=nome]').value = 'Paciente Drive';
+    const dEl = f.querySelector('[name=data]'); if (dEl) dEl.value = utils.hojeISO();
+    pre.salvar({ finalizar: true });
+    await new Promise(r => setTimeout(r, 500));
+    out.enviou = enviados.length === 1;
+    out.nomePdf = enviados.length === 1 && /\.pdf$/.test(enviados[0].nomeArq) && /Paciente.Drive/i.test(enviados[0].nomeArq);
+    out.docReal = enviados.length === 1 && enviados[0].temDoc;
+
+    // desligado → não envia
+    pdfBackup.cfg = () => ({ drive: true, driveClientId: 'cid-teste', autoFinalizar: false });
+    pre.novo();
+    f.querySelector('[name=nome]').value = 'Paciente Sem Backup';
+    if (dEl) dEl.value = utils.hojeISO();
+    pre.salvar({ finalizar: true });
+    await new Promise(r => setTimeout(r, 300));
+    out.desligadoNaoEnvia = enviados.length === 1;
+
+    store.setList('pre', []);
+    return out;
+  });
+  assert(r.temCheckbox && r.padraoLigado, 'a opção deveria existir em Ajustes e vir ligada por padrão');
+  assert(r.enviou, 'finalizar deveria enviar exatamente 1 PDF para a nuvem');
+  assert(r.nomePdf, 'o arquivo deveria ser um .pdf com o nome do paciente');
+  assert(r.docReal, 'o documento enviado deveria ser um PDF de verdade (jsPDF)');
+  assert(r.desligadoNaoEnvia, 'com a opção desligada, nada deveria ser enviado');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
