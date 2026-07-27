@@ -1310,8 +1310,11 @@ await test('Financeiro: lançamento rápido cria registro pendente sem precisar 
     out.criou = !!(reg && reg.paciente === 'Paciente Avulso' && reg.status === 'pendente'
       && reg._origemTipo === 'avulso' && /Colonoscopia/i.test(reg.procedimento)
       && reg.valor_previsto === '800' && reg.senha === 'AUT123' && reg.senha_data === utils.hojeISO());
+    /* a hierarquia automática escolhe o 100% pelo MAIOR PORTE — o que importa
+       é sair exatamente um código 100% e um 50% */
     out.codigosComGrau = !!(reg && Array.isArray(reg.codigos) && reg.codigos.length === 2
-      && reg.codigos[0].grau === 100 && reg.codigos[1].grau === 50);
+      && reg.codigos.filter(c => c.grau === 100).length === 1
+      && reg.codigos.filter(c => c.grau === 50).length === 1);
     out.fechouModal = !document.getElementById('modal-backdrop').classList.contains('show');
 
     // sem paciente → não lança (avisa)
@@ -1346,10 +1349,10 @@ await test('Grau: cirurgias da ficha têm grau, previsto = unit × qtd × grau, 
     location.hash = '#anestesia';
     await new Promise(r => setTimeout(r, 400));
     document.getElementById('cir-combo-body').innerHTML = '';
-    anestesia.cirurgias.add({ procedimento: 'Endoscopia digestiva alta', grau: '50' });
-    anestesia.cirurgias.add({ procedimento: 'Outro procedimento' });      // sem grau → 70
+    anestesia.cirurgias.add({ procedimento: 'Endoscopia digestiva alta', grau: '70' });
+    anestesia.cirurgias.add({ procedimento: 'Outro procedimento' });      // sem grau → 50 (mesma via)
     const cirs = anestesia.cirurgias.coletar();
-    out.grauFicha = cirs[0].grau === '50' && cirs[1].grau === '70';
+    out.grauFicha = cirs[0].grau === '70' && cirs[1].grau === '50';
 
     // FINANCEIRO: previsto respeita o grau (1000 × 1 × 70% = 700)
     location.hash = '#financeiro';
@@ -1364,6 +1367,15 @@ await test('Grau: cirurgias da ficha têm grau, previsto = unit × qtd × grau, 
     financeiro.codigos._onPrevisto(tr.querySelector('[name="fin_cod_previsto[]"]'));
     out.unitComGrau = tr.querySelector('[name="fin_cod_unit[]"]').value === '500.00';
     out.coletaGrau = financeiro.codigos.coletar()[0].grau === 70;
+
+    // CLASSIFICAR: maior porte vira 100%, demais 50%; linha 70% é preservada
+    document.getElementById('fin-codigos-body').innerHTML = '';
+    financeiro.codigos.add({ descricao: 'Menor', porte: '3C', grau: '100' });
+    financeiro.codigos.add({ descricao: 'Maior', porte: '10A', grau: '50' });
+    financeiro.codigos.add({ descricao: 'Via diferente', porte: '2B', grau: '70' });
+    financeiro.codigos.classificarGrau({ silent: true });
+    const g = financeiro.codigos.coletar().map(c => c.grau);
+    out.classificou = g[0] === 50 && g[1] === 100 && g[2] === 70;
 
     // IMPORTAÇÃO da ficha: principal 100% + combinada com o grau dela
     // (antes as combinadas nem eram importadas — a ficha salva c.procedimento)
@@ -1386,10 +1398,11 @@ await test('Grau: cirurgias da ficha têm grau, previsto = unit × qtd × grau, 
     store.setList('anestesia', []); store.setList('financeiro', []);
     return out;
   });
-  assert(r.grauFicha, 'as cirurgias combinadas da ficha deveriam guardar o grau (padrão 70%)');
+  assert(r.grauFicha, 'as cirurgias combinadas da ficha deveriam guardar o grau (padrão 50% = mesma via)');
   assert(r.previstoComGrau, 'previsto deveria ser unit × qtd × grau (1000 × 70% = 700)');
   assert(r.unitComGrau, 'previsto digitado deveria deduzir o unitário considerando o grau');
   assert(r.coletaGrau, 'o grau deveria ser salvo com o código');
+  assert(r.classificou, 'classificar: maior porte → 100%, demais → 50%, e o 70% manual preservado');
   assert(r.importou2, 'a importação deveria trazer principal + combinada (bug do c.descricao corrigido)');
   assert(r.grausImportados, 'principal deveria entrar 100% e a combinada com o grau da ficha (50%)');
   await page.close();
