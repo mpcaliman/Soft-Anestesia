@@ -1274,6 +1274,60 @@ await test('Endo/colono: medicações padrão com O₂ e SF, sem capnografia; pa
   await page.close();
 });
 
+/* 32) Financeiro — lançamento rápido avulso (caso sem consulta/ficha no sistema) */
+await test('Financeiro: lançamento rápido cria registro pendente sem precisar de ficha', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('financeiro', []);
+    location.hash = '#financeiro';
+    await new Promise(r => setTimeout(r, 400));
+
+    // botão na barra do módulo
+    out.temBotao = document.querySelector('#module-financeiro .action-bar').textContent.includes('Lançamento rápido');
+
+    // modal com os campos essenciais
+    financeiro.lancamentoRapido();
+    await new Promise(r => setTimeout(r, 100));
+    out.camposOk = ['fin-rap-paciente', 'fin-rap-data', 'fin-rap-proc', 'fin-rap-conv', 'fin-rap-valor', 'fin-rap-senha']
+      .every(id => !!document.getElementById(id));
+    out.dataHoje = document.getElementById('fin-rap-data').value === utils.hojeISO();
+
+    // preencher e lançar
+    document.getElementById('fin-rap-paciente').value = 'Paciente Avulso';
+    document.getElementById('fin-rap-proc').value = 'Colonoscopia';
+    document.getElementById('fin-rap-conv').value = 'Unimed';
+    document.getElementById('fin-rap-valor').value = '800';
+    document.getElementById('fin-rap-senha').value = 'AUT123';
+    financeiro._salvarRapido();
+    await new Promise(r => setTimeout(r, 200));
+
+    const reg = store.list('financeiro')[0];
+    out.criou = !!(reg && reg.paciente === 'Paciente Avulso' && reg.status === 'pendente'
+      && reg._origemTipo === 'avulso' && reg.procedimento === 'Colonoscopia'
+      && reg.valor_previsto === '800' && reg.senha === 'AUT123' && reg.senha_data === utils.hojeISO());
+    out.fechouModal = !document.getElementById('modal-backdrop').classList.contains('show');
+
+    // sem paciente → não lança (avisa)
+    financeiro.lancamentoRapido();
+    await new Promise(r => setTimeout(r, 100));
+    document.getElementById('fin-rap-paciente').value = '';
+    financeiro._salvarRapido();
+    out.validaPaciente = store.list('financeiro').length === 1;
+    modal.close();
+
+    store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.temBotao, 'a barra do Financeiro deveria ter o botão Lançamento rápido');
+  assert(r.camposOk, 'o modal deveria ter paciente, data, procedimento, convênio, valor e senha');
+  assert(r.dataHoje, 'a data deveria vir pré-preenchida com hoje');
+  assert(r.criou, 'o lançamento deveria criar registro pendente/avulso com os dados informados');
+  assert(r.fechouModal, 'lançar deveria fechar o modal');
+  assert(r.validaPaciente, 'sem paciente não deveria lançar');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
