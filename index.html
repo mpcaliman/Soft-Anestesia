@@ -25376,6 +25376,11 @@ const anestesia = {
   },
 
   restaurarEstruturado(d) {
+    /* CONTEXTO: as linhas de vitais/meds/eventos são inseridas no contexto
+       ativo do motor de gráfico. Se ele ficou em 'recuperacao' (ex.: após
+       gerar/carregar uma SRPA), os dados da FICHA cairiam nas tabelas da
+       SRPA. Força o contexto da ficha antes de restaurar. */
+    anestesia.graficoUI._contexto = 'anestesia';
     const f = document.getElementById('form-anestesia');
     const set = (name, val) => { const el = f.querySelector(`[name="${name}"]`); if (el && val !== undefined) el.value = val || ''; };
     const setArr = (name, valArr) => {
@@ -26006,12 +26011,34 @@ const anestesia = {
       set('entrada', entrada); set('alta', alta);
       set('procedencia', 'Centro cirúrgico');
       if (docA.paciente && docA.paciente.idade) set('idade', String(docA.paciente.idade).replace(/\s*anos?$/i, '') + ' anos');
-      /* sinais vitais estáveis: chegada e alta com o último vital do caso */
+      /* SINAIS VITAIS PADRÃO NORMAL na janela informada (entrada → alta):
+         uma medida a cada 15 min, partindo do último vital REAL do caso
+         (base do paciente) com leve variação fisiológica; SpO2 97–99 em ar
+         ambiente e ritmo sinusal. Tudo editável depois. */
       try {
         anestesia.graficoUI._contexto = 'recuperacao';
-        const base = { pas: vq('pas'), pad: vq('pad'), fc: vq('fc'), spo2: vq('spo2') || '98' };
-        anestesia.vitais.add(false, Object.assign({ hora: entrada }, base));
-        if (alta) anestesia.vitais.add(false, Object.assign({ hora: alta }, base));
+        const toMin = s => { const m = /^(\d{1,2}):(\d{2})/.exec(s || ''); return m ? (+m[1]) * 60 + (+m[2]) : null; };
+        const tIni = toMin(entrada);
+        let tFim = alta ? toMin(alta) : tIni;
+        if (tFim == null) tFim = tIni;
+        if (tFim < tIni) tFim += 1440;   /* cruza meia-noite */
+        const basePas = parseFloat(vq('pas')) || 120;
+        const basePad = parseFloat(vq('pad')) || 80;
+        const baseFc = parseFloat(vq('fc')) || 72;
+        const varia = (v, pct) => String(Math.max(1, Math.round(v * (1 + (Math.random() * 2 - 1) * pct))));
+        const PASSO = 15;
+        const tempos = [];
+        for (let t = tIni; t < tFim; t += PASSO) tempos.push(t);
+        if (!tempos.length || tempos[tempos.length - 1] !== tFim) tempos.push(tFim);
+        tempos.forEach(t => {
+          anestesia.vitais.add(false, {
+            hora: anestesia.graficoUI.tToHora(t % 1440),
+            pas: varia(basePas, 0.05), pad: varia(basePad, 0.05),
+            fc: varia(baseFc, 0.06),
+            spo2: String(97 + Math.floor(Math.random() * 3)),
+            ritmo: 'Sinusal'
+          });
+        });
       } catch (e) {}
       /* Aldrete 10 + PADSS 10 (paciente estável, sem intercorrências) */
       ['aldk_atividade', 'aldk_respiracao', 'aldk_circulacao', 'aldk_consciencia', 'aldk_saturacao'].forEach(n => set(n, '2'));
@@ -26130,6 +26157,7 @@ const anestesia = {
     toast('Campos limpos');
   },
   limparSilencioso() {
+    anestesia.graficoUI._contexto = 'anestesia';   /* garante o contexto da ficha */
     utils.clearForm('form-anestesia');
     try { prontuario.limpar('anestesia'); } catch (e) {}
     document.getElementById('medicacoes-body').innerHTML = '';

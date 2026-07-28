@@ -1133,7 +1133,10 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
     out.dadosCertos = !!(srpa && srpa.nome === 'Paciente Conjunto' && srpa.entrada === '12:00' && srpa.alta === '13:00'
       && srpa.procedencia === 'Centro cirúrgico' && String(srpa.aldk_total).startsWith('10'));
     out.textoPadrao = !!(srpa && /sem intercorrências/i.test(srpa.observacoes || ''));
-    out.vitais2 = !!(srpa && srpa.grafico && (srpa.grafico.vitais || []).length === 2);
+    /* vitais padrão-normal preenchendo a JANELA inteira (12:00→13:00, 15/15min) */
+    const vit = (srpa && srpa.grafico && srpa.grafico.vitais) || [];
+    out.vitaisJanela = vit.length >= 4 && vit[0].hora === '12:00' && vit[vit.length - 1].hora === '13:00'
+      && vit.every(v => v.pas && v.fc && v.spo2);
     const ficha = store.getById('anestesia', fichaId);
     out.vinculada = !!(ficha && ficha._links && ficha._links.recuperacao_id === srpa._id
       && srpa._links && srpa._links.anestesia_id === fichaId);
@@ -1156,6 +1159,11 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
     const nPag = docPdf.getNumberOfPages ? docPdf.getNumberOfPages() : docPdf.internal.getNumberOfPages();
     out.pdfDuasPaginas = nPag >= 2;
     out.nomeArquivo = printPreview._gerarNomeArquivo().startsWith('Ficha-Anestesia+SRPA');
+    /* REGRESSÃO (bug do contexto): recarregar a ficha NÃO pode despejar os
+       vitais/meds dela nas tabelas da SRPA nem apagar os vitais da SRPA */
+    out.fichaNaFicha = document.querySelectorAll('#vitais-body tr').length === 1;
+    out.srpaSoDela = document.querySelectorAll('#srpa-vitais-body tr').length === vit.length
+      && document.querySelectorAll('#srpa-medicacoes-body tr').length === 0;
     printPreview.fechar();
 
     // botão "+ SRPA" na ficha reabre o conjunto (SRPA vinculada é carregada)
@@ -1175,7 +1183,9 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
   assert(r.srpaFinalizada, 'a SRPA automática deveria nascer FINALIZADA');
   assert(r.dadosCertos, 'nome/horários/procedência/Aldrete 10 deveriam estar preenchidos');
   assert(r.textoPadrao, 'observações deveriam ter o texto padrão sem intercorrências');
-  assert(r.vitais2, 'deveriam existir 2 sinais vitais (chegada e alta) vindos do fim do caso');
+  assert(r.vitaisJanela, 'os vitais padrão-normal deveriam cobrir a janela inteira (entrada→alta, 15/15min)');
+  assert(r.fichaNaFicha, 'os vitais da FICHA deveriam estar na tabela da ficha (bug de contexto)');
+  assert(r.srpaSoDela, 'a SRPA deveria manter SÓ os vitais dela, sem meds/vitais da ficha');
   assert(r.vinculada, 'ficha e SRPA deveriam ficar vinculadas nos dois sentidos');
   assert(r.conjuntoTemAmbas, 'o arquivo único deveria conter as duas fichas com quebra de página');
   assert(r.capituloSrpa, 'a SRPA deveria abrir como capítulo ("2ª parte — Recuperação pós-anestésica")');
