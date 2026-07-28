@@ -6632,6 +6632,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <button type="button" class="btn btn-sm" style="background:#0f7b4f;color:#fff;border-color:#0f7b4f" onclick="captura.abrirMonitor('recuperacao')">📷 Capturar do monitor</button>
           <button type="button" class="btn btn-sm" onclick="recuperacao.grafico.duplicarVital()">⎘ Duplicar última</button>
           <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.graficoUI._contexto='recuperacao'; anestesia.vitais.duplicarEAjustar()">➕ Igual à anterior + ajustar</button>
+          <button type="button" class="btn btn-sm btn-primary" onclick="recuperacao.preencherPadrao()" title="Gera sinais vitais normais (15/15 min) entre a ENTRADA e a ALTA informadas, com Aldrete 10/10, PADSS 10/10 e textos padrão onde estiver vazio">🧪 Preencher padrão (entrada→alta)</button>
         </div>
         <div class="dyn-table-wrap">
           <table class="dyn" id="tab-srpa-vitais">
@@ -12471,6 +12472,68 @@ const recuperacao = {
       }
     }
   },
+  /* ---------- SINAIS VITAIS PADRÃO NORMAL na SRPA (mesma ideia da ficha) ----
+     Preenche a janela entrada→alta com medidas normais a cada 15 min (base no
+     último vital disponível, SpO2 97–99, ritmo sinusal) e, onde estiver vazio,
+     Aldrete 10/10, PADSS 10/10 e os textos "sem intercorrências". Nunca
+     sobrescreve o que já foi preenchido; horários já registrados são pulados. */
+  gerarPadraoNormal(opts = {}) {
+    const f = document.getElementById('form-recuperacao'); if (!f) return 0;
+    const g = n => ((f.querySelector('[name="' + n + '"]') || {}).value || '').trim();
+    const setVazio = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el && !el.value && v != null && v !== '') el.value = v; };
+    const entrada = opts.entrada || g('entrada');
+    const alta = opts.alta || g('alta');
+    const toMin = s => { const m = /^(\d{1,2}):(\d{2})/.exec(s || ''); return m ? (+m[1]) * 60 + (+m[2]) : null; };
+    const tIni = toMin(entrada);
+    if (tIni == null) { if (!opts.silent) toast('Informe a hora de ENTRADA na SRPA primeiro', 'warn'); return 0; }
+    let tFim = toMin(alta); if (tFim == null) tFim = tIni; if (tFim < tIni) tFim += 1440;
+    /* base: opts.base → última linha da própria SRPA → adulto normal */
+    let base = opts.base;
+    if (!base || !parseFloat(base.pas)) {
+      const ult = Array.from(document.querySelectorAll('#srpa-vitais-body tr')).pop();
+      if (ult) { const q = n => (ult.querySelector('[name="' + n + '"]') || {}).value || ''; base = { pas: q('vit_pas[]'), pad: q('vit_pad[]'), fc: q('vit_fc[]') }; }
+    }
+    if (!base || !parseFloat(base.pas)) base = { pas: '120', pad: '80', fc: '72' };
+    const basePas = parseFloat(base.pas) || 120, basePad = parseFloat(base.pad) || 80, baseFc = parseFloat(base.fc) || 72;
+    const varia = (v, p) => String(Math.max(1, Math.round(v * (1 + (Math.random() * 2 - 1) * p))));
+    anestesia.graficoUI._contexto = 'recuperacao';
+    const ocupados = Array.from(document.querySelectorAll('#srpa-vitais-body [name="vit_hora[]"]'))
+      .map(el => toMin(el.value)).filter(x => x != null);
+    const PASSO = 15; const tempos = [];
+    for (let t = tIni; t < tFim; t += PASSO) tempos.push(t);
+    if (!tempos.length || tempos[tempos.length - 1] !== tFim) tempos.push(tFim);
+    let criadas = 0;
+    tempos.forEach(t => {
+      if (ocupados.some(m => Math.abs(m - t) <= 2)) return;   /* já tem medida perto */
+      anestesia.vitais.add(false, {
+        hora: anestesia.graficoUI.tToHora(t % 1440),
+        pas: varia(basePas, 0.05), pad: varia(basePad, 0.05), fc: varia(baseFc, 0.06),
+        spo2: String(97 + Math.floor(Math.random() * 3)), ritmo: 'Sinusal'
+      });
+      criadas++;
+    });
+    /* escalas e textos de normalidade — só onde está vazio */
+    if (!g('aldk_total')) {
+      ['aldk_atividade', 'aldk_respiracao', 'aldk_circulacao', 'aldk_consciencia', 'aldk_saturacao'].forEach(n => setVazio(n, '2'));
+      setVazio('aldk_datahora', utils.hojeISO() + 'T' + (alta || entrada));
+      try { recuperacao.aldrete.calc(); } catch (e) {}
+      setVazio('aldrete', '10');
+    }
+    if (!g('pad_total')) {
+      ['pad_vitais', 'pad_deambulacao', 'pad_nausea', 'pad_dor', 'pad_sangramento'].forEach(n => setVazio(n, '2'));
+      try { recuperacao.padss.calc(); } catch (e) {}
+    }
+    if (!g('observacoes')) { try { templates.aplicar('recuperacao', 'observacoes', 'semIntercorrencias'); } catch (e) {} }
+    if (!g('conduta')) { try { templates.aplicar('recuperacao', 'conduta', 'condutaPadraoSRPA'); } catch (e) {} }
+    try { anestesia.vitais._ordenarPorHora('srpa-vitais-body'); } catch (e) {}
+    try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
+    try { recuperacao.resumoTopo(); } catch (e) {}
+    markDirty();
+    if (!opts.silent) toast('🧪 ' + criadas + ' medida(s) normais (' + entrada + (alta ? '–' + alta : '') + ') · Aldrete 10/10 · sem intercorrências');
+    return criadas;
+  },
+  preencherPadrao() { recuperacao.gerarPadraoNormal({}); },
+
   novo() {
     if (state.dirty && !confirm('Descartar alterações?')) return;
     utils.clearForm(recuperacao.formId);
@@ -26011,45 +26074,15 @@ const anestesia = {
       set('entrada', entrada); set('alta', alta);
       set('procedencia', 'Centro cirúrgico');
       if (docA.paciente && docA.paciente.idade) set('idade', String(docA.paciente.idade).replace(/\s*anos?$/i, '') + ' anos');
-      /* SINAIS VITAIS PADRÃO NORMAL na janela informada (entrada → alta):
-         uma medida a cada 15 min, partindo do último vital REAL do caso
-         (base do paciente) com leve variação fisiológica; SpO2 97–99 em ar
-         ambiente e ritmo sinusal. Tudo editável depois. */
+      /* SINAIS VITAIS PADRÃO NORMAL na janela informada + Aldrete 10/10 +
+         PADSS 10/10 + textos "sem intercorrências" — mesma função disponível
+         no botão 🧪 da SRPA; base = último vital REAL do caso. */
       try {
-        anestesia.graficoUI._contexto = 'recuperacao';
-        const toMin = s => { const m = /^(\d{1,2}):(\d{2})/.exec(s || ''); return m ? (+m[1]) * 60 + (+m[2]) : null; };
-        const tIni = toMin(entrada);
-        let tFim = alta ? toMin(alta) : tIni;
-        if (tFim == null) tFim = tIni;
-        if (tFim < tIni) tFim += 1440;   /* cruza meia-noite */
-        const basePas = parseFloat(vq('pas')) || 120;
-        const basePad = parseFloat(vq('pad')) || 80;
-        const baseFc = parseFloat(vq('fc')) || 72;
-        const varia = (v, pct) => String(Math.max(1, Math.round(v * (1 + (Math.random() * 2 - 1) * pct))));
-        const PASSO = 15;
-        const tempos = [];
-        for (let t = tIni; t < tFim; t += PASSO) tempos.push(t);
-        if (!tempos.length || tempos[tempos.length - 1] !== tFim) tempos.push(tFim);
-        tempos.forEach(t => {
-          anestesia.vitais.add(false, {
-            hora: anestesia.graficoUI.tToHora(t % 1440),
-            pas: varia(basePas, 0.05), pad: varia(basePad, 0.05),
-            fc: varia(baseFc, 0.06),
-            spo2: String(97 + Math.floor(Math.random() * 3)),
-            ritmo: 'Sinusal'
-          });
+        recuperacao.gerarPadraoNormal({
+          entrada, alta, silent: true,
+          base: { pas: vq('pas'), pad: vq('pad'), fc: vq('fc') }
         });
       } catch (e) {}
-      /* Aldrete 10 + PADSS 10 (paciente estável, sem intercorrências) */
-      ['aldk_atividade', 'aldk_respiracao', 'aldk_circulacao', 'aldk_consciencia', 'aldk_saturacao'].forEach(n => set(n, '2'));
-      set('aldk_datahora', ((docA.procedimento && docA.procedimento.data) || utils.hojeISO()) + 'T' + (alta || entrada));
-      try { recuperacao.aldrete.calc(); } catch (e) {}
-      set('aldrete', '10');
-      ['pad_vitais', 'pad_deambulacao', 'pad_nausea', 'pad_dor', 'pad_sangramento'].forEach(n => set(n, '2'));
-      try { recuperacao.padss.calc(); } catch (e) {}
-      /* textos padrão de normalidade */
-      try { templates.aplicar('recuperacao', 'observacoes', 'semIntercorrencias'); } catch (e) {}
-      try { templates.aplicar('recuperacao', 'conduta', 'condutaPadraoSRPA'); } catch (e) {}
       /* responsável + carimbo (mesmo anestesista da ficha) */
       if (nomeProf) {
         set('responsavel', nomeProf);
@@ -26059,9 +26092,15 @@ const anestesia = {
       recuperacao.salvar({ finalizar: true });
       toast('⚡ SRPA sem intercorrências gerada e finalizada — revise se quiser');
       if (imprimir) {
-        /* recarrega a ficha no formulário (foi limpa ao finalizar) para o
-           preview conjunto ler as DUAS de uma vez */
+        /* Ao finalizar, os formulários podem ser LIMPOS (fechamento do
+           rascunho). Recarrega os DOIS registros salvos — ficha e SRPA —
+           para o arquivo único sair completo. */
         try { anestesia.carregar(store.getById('anestesia', anestesiaId)); } catch (e) {}
+        try {
+          const fx = store.getById('anestesia', anestesiaId);
+          const sid = fx && fx._links && fx._links.recuperacao_id;
+          if (sid) recuperacao.carregar(store.getById('recuperacao', sid));
+        } catch (e) {}
         setTimeout(() => printPreview.abrirConjunto(), 500);
       }
     }, 350);

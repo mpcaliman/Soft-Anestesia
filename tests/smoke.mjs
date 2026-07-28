@@ -1141,9 +1141,13 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
     out.vinculada = !!(ficha && ficha._links && ficha._links.recuperacao_id === srpa._id
       && srpa._links && srpa._links.anestesia_id === fichaId);
 
-    // impressão conjunta: um único arquivo com as DUAS fichas e quebra de página
-    // (como no fluxo real: a ficha é recarregada no form antes do preview)
+    // impressão conjunta: um único arquivo com as DUAS fichas e quebra de página.
+    // Reproduz o cenário real do bug: ao finalizar, os formulários são LIMPOS
+    // (fechamento do rascunho) — o fluxo recarrega os DOIS registros salvos.
+    utils.clearForm('form-recuperacao');
+    document.getElementById('srpa-vitais-body').innerHTML = '';
     anestesia.carregar(store.getById('anestesia', fichaId));
+    recuperacao.carregar(store.getById('recuperacao', srpa._id));
     printPreview.abrirConjunto();
     await new Promise(r => setTimeout(r, 200));
     const pppEl = document.getElementById('ppp');
@@ -1164,7 +1168,22 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
     out.fichaNaFicha = document.querySelectorAll('#vitais-body tr').length === 1;
     out.srpaSoDela = document.querySelectorAll('#srpa-vitais-body tr').length === vit.length
       && document.querySelectorAll('#srpa-medicacoes-body tr').length === 0;
+    /* o capítulo da SRPA no arquivo único tem CONTEÚDO (vitais da janela) */
+    const posCapitulo = ppp.indexOf('pp-capitulo');
+    out.srpaComDados = posCapitulo > -1 && ppp.slice(posCapitulo).includes('12:15');
     printPreview.fechar();
+
+    // botão 🧪 da SRPA: preenche padrão numa SRPA vazia (entrada→alta)
+    recuperacao.novo();
+    const fr = document.getElementById('form-recuperacao');
+    fr.querySelector('[name=nome]').value = 'Paciente Botao';
+    fr.querySelector('[name=entrada]').value = '14:00';
+    fr.querySelector('[name=alta]').value = '14:30';
+    const criadas = recuperacao.gerarPadraoNormal({});
+    out.botaoPadrao = criadas >= 2
+      && document.querySelectorAll('#srpa-vitais-body tr').length >= 3
+      && /10/.test(fr.querySelector('[name=aldk_total]').value || '')
+      && /sem intercorrências/i.test(fr.querySelector('[name=observacoes]').value || '');
 
     // botão "+ SRPA" na ficha reabre o conjunto (SRPA vinculada é carregada)
     location.hash = '#anestesia';
@@ -1186,6 +1205,8 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
   assert(r.vitaisJanela, 'os vitais padrão-normal deveriam cobrir a janela inteira (entrada→alta, 15/15min)');
   assert(r.fichaNaFicha, 'os vitais da FICHA deveriam estar na tabela da ficha (bug de contexto)');
   assert(r.srpaSoDela, 'a SRPA deveria manter SÓ os vitais dela, sem meds/vitais da ficha');
+  assert(r.srpaComDados, 'o capítulo da SRPA no arquivo único deveria ter os vitais da janela (não sair vazio)');
+  assert(r.botaoPadrao, 'o botão 🧪 da SRPA deveria gerar vitais normais + Aldrete 10/10 + sem intercorrências');
   assert(r.vinculada, 'ficha e SRPA deveriam ficar vinculadas nos dois sentidos');
   assert(r.conjuntoTemAmbas, 'o arquivo único deveria conter as duas fichas com quebra de página');
   assert(r.capituloSrpa, 'a SRPA deveria abrir como capítulo ("2ª parte — Recuperação pós-anestésica")');
