@@ -5030,7 +5030,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <div class="field col-3"><label>Hospital / clínica</label><input type="text" name="local_hospital"></div>
           <div class="field col-3"><label>Procedência / origem</label><select name="origem"><option value="">—</option><option>Enfermaria</option><option>Apartamento</option><option>UTI</option><option>Emergência</option><option>Centro cirúrgico</option><option>Outro</option></select></div>
           <div class="field col-4"><label>Cirurgião</label><input type="text" name="cirurgiao"></div>
-          <div class="field col-6"><label>Procedimento cirúrgico <small style="color:var(--text-mute);font-weight:400">(autocompleta da CBHPM)</small></label><input type="text" name="procedimento" class="cbhpm-autocomplete" placeholder="Digite parte do procedimento ou o código TUSS..."></div>
+          <div class="field col-6"><label>Procedimento cirúrgico <small style="color:var(--text-mute);font-weight:400">(CBHPM — principal, entra 100%; mais códigos logo abaixo)</small></label><input type="text" name="procedimento" class="cbhpm-autocomplete" placeholder="Digite parte do procedimento ou o código TUSS..."></div>
           <div class="field col-2"><label>Sala</label><input type="text" name="sala"></div>
         </div>
 
@@ -5066,11 +5066,11 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <div class="field col-4"><label>Duração da cirurgia</label><input type="text" name="duracao_cir" readonly></div>
         </div>
 
-        <!-- Cirurgias combinadas -->
-        <h4 style="font-size:.85rem;color:var(--text-soft);margin:14px 0 6px">Cirurgias combinadas <small style="color:var(--text-mute);font-weight:400">(opcional — se houver mais de um procedimento no mesmo ato anestésico)</small></h4>
+        <!-- Procedimentos adicionais (cirurgia combinada OU vários códigos do mesmo ato) -->
+        <h4 style="font-size:.85rem;color:var(--text-soft);margin:14px 0 6px">Procedimentos / códigos adicionais <small style="color:var(--text-mute);font-weight:400">(CBHPM — cirurgia combinada OU vários códigos do mesmo ato. O campo acima é o principal; cada linha aqui tem o seu grau. Cirurgião/horários só se for outra cirurgia.)</small></h4>
         <div id="cir-combo-wrap">
           <div id="cir-combo-body"></div>
-          <button type="button" class="btn btn-sm" onclick="anestesia.cirurgias.add()">+ Adicionar cirurgia</button>
+          <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.cirurgias.add()" title="Adiciona mais um procedimento/código CBHPM ao ato — todos vão para o financeiro com o grau (o maior porte é reclassificado como principal 100%)">+ Adicionar procedimento (código)</button>
         </div>
       </div>
     </section>
@@ -20877,8 +20877,9 @@ const anestesia = {
         <div class="field col-9"><label>Observações</label><input type="text" name="cir_extra_obs[]" value="${utils.escapeAttr(dados.obs || '')}"></div>
       `;
       body.appendChild(div);
-      /* Aplica autocomplete CBHPM ao novo input */
+      /* Aplica autocomplete CBHPM ao novo input e já foca nele (fluidez) */
       cbhpm.aplicarTodos(div);
+      if (!dados.procedimento) { try { div.querySelector('[name="cir_extra_proc[]"]').focus(); } catch (e) {} }
       markDirty();
       return div;
     },

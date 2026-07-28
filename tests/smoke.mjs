@@ -1395,6 +1395,9 @@ await test('Grau: cirurgias da ficha têm grau, previsto = unit × qtd × grau, 
     anestesia.cirurgias.add({ procedimento: 'Outro procedimento' });      // sem grau → 50 (mesma via)
     const cirs = anestesia.cirurgias.coletar();
     out.grauFicha = cirs[0].grau === '70' && cirs[1].grau === '50';
+    // bloco reposicionado: comunica "vários códigos do mesmo ato" e botão claro
+    out.blocoCodigos = document.body.innerHTML.includes('Procedimentos / códigos adicionais')
+      && document.getElementById('cir-combo-wrap').innerHTML.includes('Adicionar procedimento');
 
     // FINANCEIRO: previsto respeita o grau (1000 × 1 × 70% = 700)
     location.hash = '#financeiro';
@@ -1441,6 +1444,7 @@ await test('Grau: cirurgias da ficha têm grau, previsto = unit × qtd × grau, 
     return out;
   });
   assert(r.grauFicha, 'as cirurgias combinadas da ficha deveriam guardar o grau (padrão 50% = mesma via)');
+  assert(r.blocoCodigos, 'o bloco de múltiplos códigos deveria estar rotulado e com botão claro');
   assert(r.previstoComGrau, 'previsto deveria ser unit × qtd × grau (1000 × 70% = 700)');
   assert(r.unitComGrau, 'previsto digitado deveria deduzir o unitário considerando o grau');
   assert(r.coletaGrau, 'o grau deveria ser salvo com o código');
