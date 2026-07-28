@@ -1143,9 +1143,18 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
     anestesia.carregar(store.getById('anestesia', fichaId));
     printPreview.abrirConjunto();
     await new Promise(r => setTimeout(r, 200));
-    const ppp = document.getElementById('ppp').innerHTML;
-    out.conjuntoTemAmbas = ppp.includes('page-break-before') &&
+    const pppEl = document.getElementById('ppp');
+    const ppp = pppEl.innerHTML;
+    out.conjuntoTemAmbas = ppp.includes('pp-quebra') &&
       (ppp.match(/Paciente Conjunto/g) || []).length >= 2;
+    /* capítulos: a SRPA vem DEPOIS da ficha completa, com capa de capítulo */
+    out.capituloSrpa = ppp.includes('pp-capitulo') && ppp.includes('2ª parte — Recuperação pós-anestésica');
+    out.fichaAntesDaSrpa = ppp.indexOf('pp-capitulo') > ppp.indexOf('RELATÓRIO') || ppp.indexOf('pp-capitulo') > 100;
+    /* no PDF gerado (nuvem/backup), a quebra vira página nova de verdade */
+    const J = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+    const docPdf = printPreview._gerarDocDeTexto(J, pppEl);
+    const nPag = docPdf.getNumberOfPages ? docPdf.getNumberOfPages() : docPdf.internal.getNumberOfPages();
+    out.pdfDuasPaginas = nPag >= 2;
     out.nomeArquivo = printPreview._gerarNomeArquivo().startsWith('Ficha-Anestesia+SRPA');
     printPreview.fechar();
 
@@ -1169,6 +1178,8 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
   assert(r.vitais2, 'deveriam existir 2 sinais vitais (chegada e alta) vindos do fim do caso');
   assert(r.vinculada, 'ficha e SRPA deveriam ficar vinculadas nos dois sentidos');
   assert(r.conjuntoTemAmbas, 'o arquivo único deveria conter as duas fichas com quebra de página');
+  assert(r.capituloSrpa, 'a SRPA deveria abrir como capítulo ("2ª parte — Recuperação pós-anestésica")');
+  assert(r.pdfDuasPaginas, 'no PDF gerado, a SRPA deveria começar em página nova (>= 2 páginas)');
   assert(r.nomeArquivo, 'o nome do arquivo deveria ser Ficha-Anestesia+SRPA - paciente - data');
   assert(r.botaoConjunto, 'o botão "+ SRPA" da ficha deveria abrir a impressão conjunta');
   await page.close();
