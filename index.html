@@ -30835,7 +30835,13 @@ const printPreview = {
       printPreview._verCtx = { mod: 'anestesia', formId: 'form-anestesia' };
       const ppp = document.getElementById('ppp');
       if (!ppp) { toast('Erro: container de preview não encontrado', 'error'); return; }
-      ppp.innerHTML = htmlFicha + '<div style="page-break-before:always;break-before:page"></div>' + htmlSrpa;
+      /* Capítulos: 1º a ficha COMPLETA; a SRPA começa em PÁGINA NOVA com capa
+         de capítulo (a quebra vale na impressão do navegador e no PDF gerado —
+         o _gerarDocDeTexto reconhece .pp-quebra e .pp-capitulo). */
+      ppp.innerHTML = htmlFicha +
+        '<div class="pp-quebra" style="page-break-before:always;break-before:page"></div>' +
+        '<div class="pp-capitulo" style="margin:0 0 12px;padding:9px 14px;background:#eef2f7;border-left:5px solid #3b5b7e;font-weight:700;font-size:13pt;color:#22384f">2ª parte — Recuperação pós-anestésica (SRPA)</div>' +
+        htmlSrpa;
       /* Nome do arquivo: Ficha-Anestesia+SRPA - paciente - data */
       let paciente = '', data = '';
       try {
@@ -30893,6 +30899,9 @@ const printPreview = {
         * { box-sizing: border-box; }
         body { margin: 0; padding: 12mm 0 12mm 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; font-size: 11pt; color: #000; line-height: 1.35; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
         img { max-width: 100%; height: auto; }
+        /* Arquivo único ficha + SRPA: capítulo novo em página nova */
+        .pp-quebra { page-break-before: always; break-before: page; }
+        .pp-capitulo { margin: 0 0 12px; padding: 9px 14px; background: #eef2f7; border-left: 5px solid #3b5b7e; font-weight: 700; font-size: 13pt; color: #22384f; }
         .pp-header { margin-bottom: 10px; }
         .pp-header-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 5px; border-bottom: 1px solid #d0d4da; }
         .pp-logo { height: 96px; width: auto; max-width: 440px; object-fit: contain; flex-shrink: 0; }
@@ -31111,12 +31120,19 @@ ${TAG_CLOSE_HTML}`;
     linha();
 
     /* Percorre os nós relevantes do preview em ordem */
-    const nodes = ppp.querySelectorAll('h1, h2, h3, .pp-doc-title, .pp-field, .pp-block, .pp-lab-item, .pp-check, .pp-table, p, .pp-prof-nome, .pp-prof-reg');
+    const nodes = ppp.querySelectorAll('h1, h2, h3, .pp-doc-title, .pp-field, .pp-block, .pp-lab-item, .pp-check, .pp-table, p, .pp-prof-nome, .pp-prof-reg, .pp-quebra, .pp-capitulo');
     nodes.forEach(node => {
       const cls = node.className || '';
       const tag = node.tagName;
       const txt = (node.innerText || node.textContent || '').trim();
+      /* Quebra de capítulo (arquivo único ficha + SRPA): página nova SEMPRE */
+      if (cls.includes('pp-quebra')) { doc.addPage(); y = M; return; }
       if (!txt) return;
+      if (cls.includes('pp-capitulo')) {
+        escreve(txt, { size: 13, style: 'bold', cor: [34, 56, 79], gap: 7 });
+        linha();
+        return;
+      }
       if (tag === 'H1' || cls.includes('pp-doc-title')) {
         y += 2; escreve(txt, { size: 12, style: 'bold', gap: 6 });
       } else if (tag === 'H2' || tag === 'H3') {
