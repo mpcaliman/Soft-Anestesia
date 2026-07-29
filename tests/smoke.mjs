@@ -1162,7 +1162,14 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
     const docPdf = printPreview._gerarDocDeTexto(J, pppEl);
     const nPag = docPdf.getNumberOfPages ? docPdf.getNumberOfPages() : docPdf.internal.getNumberOfPages();
     out.pdfDuasPaginas = nPag >= 2;
-    out.nomeArquivo = printPreview._gerarNomeArquivo().startsWith('Ficha-Anestesia+SRPA');
+    /* Convenção: Paciente primeiro, depois o tipo, e a data é SEMPRE a de criação (hoje) */
+    const hoje = new Date();
+    const hojeStr = String(hoje.getDate()).padStart(2, '0') + String(hoje.getMonth() + 1).padStart(2, '0') + hoje.getFullYear();
+    const nomeGerado = printPreview._gerarNomeArquivo();
+    out.nomeArquivo = nomeGerado.startsWith('Paciente-Conjunto')
+      && nomeGerado.includes('Ficha-Anestesia+SRPA')
+      && nomeGerado.indexOf('Paciente-Conjunto') < nomeGerado.indexOf('Ficha-Anestesia+SRPA')
+      && nomeGerado.endsWith(hojeStr);
     /* REGRESSÃO (bug do contexto): recarregar a ficha NÃO pode despejar os
        vitais/meds dela nas tabelas da SRPA nem apagar os vitais da SRPA */
     out.fichaNaFicha = document.querySelectorAll('#vitais-body tr').length === 1;
@@ -1211,7 +1218,7 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
   assert(r.conjuntoTemAmbas, 'o arquivo único deveria conter as duas fichas com quebra de página');
   assert(r.capituloSrpa, 'a SRPA deveria abrir como capítulo ("2ª parte — Recuperação pós-anestésica")');
   assert(r.pdfDuasPaginas, 'no PDF gerado, a SRPA deveria começar em página nova (>= 2 páginas)');
-  assert(r.nomeArquivo, 'o nome do arquivo deveria ser Ficha-Anestesia+SRPA - paciente - data');
+  assert(r.nomeArquivo, 'o nome do arquivo deveria ser Paciente_Ficha-Anestesia+SRPA_data-de-criação (hoje)');
   assert(r.botaoConjunto, 'o botão "+ SRPA" da ficha deveria abrir a impressão conjunta');
   await page.close();
 });
@@ -1478,7 +1485,10 @@ await test('Finalizar salva PDF na nuvem automaticamente (com destino configurad
     pre.salvar({ finalizar: true });
     await new Promise(r => setTimeout(r, 500));
     out.enviou = enviados.length === 1;
-    out.nomePdf = enviados.length === 1 && /\.pdf$/.test(enviados[0].nomeArq) && /Paciente.Drive/i.test(enviados[0].nomeArq);
+    /* Convenção: começa pelo PACIENTE, depois o tipo, e termina na data de CRIAÇÃO (hoje) */
+    const hj = new Date();
+    const hjStr = String(hj.getDate()).padStart(2, '0') + String(hj.getMonth() + 1).padStart(2, '0') + hj.getFullYear();
+    out.nomePdf = enviados.length === 1 && /^Paciente.Drive_APA_/i.test(enviados[0].nomeArq) && enviados[0].nomeArq.endsWith(hjStr + '.pdf');
     out.docReal = enviados.length === 1 && enviados[0].temDoc;
 
     // desligado → não envia
@@ -1495,7 +1505,7 @@ await test('Finalizar salva PDF na nuvem automaticamente (com destino configurad
   });
   assert(r.temCheckbox && r.padraoLigado, 'a opção deveria existir em Ajustes e vir ligada por padrão');
   assert(r.enviou, 'finalizar deveria enviar exatamente 1 PDF para a nuvem');
-  assert(r.nomePdf, 'o arquivo deveria ser um .pdf com o nome do paciente');
+  assert(r.nomePdf, 'o .pdf deveria começar pelo paciente, depois o tipo, e terminar na data de criação (hoje)');
   assert(r.docReal, 'o documento enviado deveria ser um PDF de verdade (jsPDF)');
   assert(r.desligadoNaoEnvia, 'com a opção desligada, nada deveria ser enviado');
   await page.close();
