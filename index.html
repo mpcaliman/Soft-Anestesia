@@ -18979,7 +18979,7 @@ const pdfGen = {
     doc.text('Documento gerado por Soft Anestesia. Válido somente com assinatura digital ICP-Brasil (QR Code do assinador oficial).', W / 2, H - 8, { align: 'center' });
     doc.setTextColor(0);
 
-    const nomeArq = 'receita_' + (d.nome || 'paciente').replace(/[^\w\s-]/g, '').replace(/\s+/g, '_').slice(0, 30) + '_' + utils.hojeISO() + '.pdf';
+    const nomeArq = printPreview._sanitizarPaciente(d.nome) + '_Receita_' + printPreview._dataCriacao() + '.pdf';
     return { doc, nomeArq };
   },
 
@@ -30910,18 +30910,13 @@ const printPreview = {
         '<div class="pp-quebra" style="page-break-before:always;break-before:page"></div>' +
         '<div class="pp-capitulo" style="margin:0 0 12px;padding:9px 14px;background:#eef2f7;border-left:5px solid #3b5b7e;font-weight:700;font-size:13pt;color:#22384f">2ª parte — Recuperação pós-anestésica (SRPA)</div>' +
         htmlSrpa;
-      /* Nome do arquivo: Ficha-Anestesia+SRPA - paciente - data */
-      let paciente = '', data = '';
+      /* Nome do arquivo: Paciente_Ficha-Anestesia+SRPA_data de criação (hoje) */
+      let paciente = '';
       try {
         const d = anestesia.coletarEstruturado();
         paciente = (d.paciente && d.paciente.nome) || '';
-        data = (d.procedimento && d.procedimento.data) || '';
       } catch (e) {}
-      paciente = (paciente || 'sem-paciente').normalize('NFD').replace(/[̀-ͯ]/g, '')
-        .replace(/[^a-zA-Z0-9\s]/g, '').trim().replace(/\s+/g, '-').slice(0, 40);
-      let dataStr = '';
-      if (data) { const dd = new Date(data); if (!isNaN(dd)) dataStr = String(dd.getDate()).padStart(2, '0') + String(dd.getMonth() + 1).padStart(2, '0') + dd.getFullYear(); }
-      printPreview._nomeArquivoOverride = 'Ficha-Anestesia+SRPA - ' + paciente + (dataStr ? ' - ' + dataStr : '');
+      printPreview._nomeArquivoOverride = printPreview._sanitizarPaciente(paciente) + '_Ficha-Anestesia+SRPA_' + printPreview._dataCriacao();
       /* Dropdown de carimbos (mesma lógica do abrir normal) */
       const sel = document.getElementById('ppt-signature-select');
       if (sel) {
@@ -31245,17 +31240,12 @@ ${TAG_CLOSE_HTML}`;
     };
     const tipo = tipos[mod] || 'Documento';
     let paciente = '';
-    let data = '';
     if (mod === 'anestesia') {
       const d = anestesia.coletarEstruturado();
       paciente = (d.paciente && d.paciente.nome) || '';
-      data = (d.procedimento && d.procedimento.data) || '';
     } else if (mod === 'pre' || mod === 'consulta' || mod === 'recuperacao' || mod === 'documentos') {
       const f = document.getElementById('form-' + mod);
-      if (f) {
-        paciente = f.querySelector('[name="nome"]')?.value || '';
-        data = f.querySelector('[name="data"]')?.value || '';
-      }
+      if (f) paciente = f.querySelector('[name="nome"]')?.value || '';
     }
     /* Sanitiza nome do paciente — só letras/números/espaço */
     paciente = (paciente || 'sem-paciente')
@@ -31264,25 +31254,22 @@ ${TAG_CLOSE_HTML}`;
       .trim()
       .replace(/\s+/g, '-')
       .slice(0, 40);
-    /* Data no formato ddmmaaaa */
-    let dataStr = '';
-    if (data) {
-      const d = new Date(data);
-      if (!isNaN(d)) {
-        const dd = String(d.getDate()).padStart(2, '0');
-        const mm = String(d.getMonth() + 1).padStart(2, '0');
-        const aaaa = d.getFullYear();
-        dataStr = dd + mm + aaaa;
-      }
-    }
-    if (!dataStr) {
-      const hoje = new Date();
-      const dd = String(hoje.getDate()).padStart(2, '0');
-      const mm = String(hoje.getMonth() + 1).padStart(2, '0');
-      const aaaa = hoje.getFullYear();
-      dataStr = dd + mm + aaaa;
-    }
-    return `${paciente}_${tipo}_${dataStr}`;
+    /* Ordem fixa: Paciente_Tipo_Data — a data é SEMPRE a de criação do arquivo (hoje) */
+    return `${paciente}_${tipo}_${printPreview._dataCriacao()}`;
+  },
+  /* Data de criação do arquivo (hoje), formato ddmmaaaa */
+  _dataCriacao() {
+    const hoje = new Date();
+    return String(hoje.getDate()).padStart(2, '0') + String(hoje.getMonth() + 1).padStart(2, '0') + hoje.getFullYear();
+  },
+  /* Sanitiza nome do paciente para uso em nome de arquivo */
+  _sanitizarPaciente(nome) {
+    return (nome || 'sem-paciente')
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-zA-Z0-9\s]/g, '')
+      .trim()
+      .replace(/\s+/g, '-')
+      .slice(0, 40);
   },
   refreshSignature(acionadoPeloUsuario) {
     const sel = document.getElementById('ppt-signature-select');
@@ -36396,7 +36383,7 @@ const orcamento = {
     if (contato.length) { const cl = doc.splitTextToSize(contato.join('  |  '), cw); doc.text(cl, M, y); y += cl.length * 4.4; }
     doc.setTextColor(0);
 
-    const nomeArq = 'Orcamento_' + (d.paciente || 'paciente').replace(/[^\w]+/g, '_') + '.pdf';
+    const nomeArq = printPreview._sanitizarPaciente(d.paciente) + '_Orcamento_' + printPreview._dataCriacao() + '.pdf';
     try {
       if (typeof pdfGen !== 'undefined' && pdfGen._compartilhar) await pdfGen._compartilhar(doc, nomeArq);
       else doc.save(nomeArq);
