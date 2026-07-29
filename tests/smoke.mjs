@@ -1511,6 +1511,67 @@ await test('Finalizar salva PDF na nuvem automaticamente (com destino configurad
   await page.close();
 });
 
+/* 35) Importação do Drive ano a ano — pastas navegáveis + convenção nova de nomes */
+await test('Drive: importador navega pastas (ano a ano) e entende os nomes novos e antigos', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const it = n => driveImport._interpretar(n);
+
+    /* Convenção NOVA (Paciente_Tipo_Data) */
+    let a = it('Eduarda-Carvalho-Araujo_Ficha-Anestesia_24072026.pdf');
+    out.novaFicha = a.nome === 'Eduarda Carvalho Araujo' && a.dataISO === '2026-07-24' && !a.ehAPA;
+    a = it('Benildes-Pandolfi-Caliman_APA_06072026.pdf');
+    out.novaApa = a.nome === 'Benildes Pandolfi Caliman' && a.dataISO === '2026-07-06' && a.ehAPA;
+    a = it('MAILLY-DE-OLIVEIRA-SILVA - Ficha-Anestesia+SRPA - 29072026.pdf');
+    out.novaConjunto = a.nome === 'MAILLY DE OLIVEIRA SILVA' && a.dataISO === '2026-07-29' && !a.ehAPA && /SRPA/i.test(a.tipo);
+    a = it('JOAO PEDRO ESCARLATE PIANCA guia internacao 26072026.pdf');
+    out.novaGuia = a.nome === 'JOAO PEDRO ESCARLATE PIANCA' && a.dataISO === '2026-07-26';
+
+    /* Convenção ANTIGA continua funcionando */
+    a = it('Maria Silva APA 03052024 Unimed.pdf');
+    out.antigaApa = a.nome === 'Maria Silva' && a.dataISO === '2024-05-03' && a.ehAPA && a.convenio === 'Unimed';
+    a = it('Luzinete de Jesus Aguiar 22072026.pdf');
+    out.antigaFicha = a.nome === 'Luzinete de Jesus Aguiar' && a.dataISO === '2026-07-22' && !a.ehAPA;
+
+    /* UI: modal tem o botão de pastas; navegação lista pastas e os PDFs da pasta */
+    pdfBackup.clientId = () => 'cid-teste';
+    cloud.estaLogado = () => true;
+    driveImport._tokenLeitura = async () => 'tk-teste';
+    driveImport.abrir();
+    await new Promise(r => setTimeout(r, 100));
+    out.temBotaoPastas = (document.getElementById('modal-body').innerHTML || '').includes('Pastas (ano a ano)');
+
+    const chamadas = [];
+    window.fetch = async (url) => {
+      chamadas.push(decodeURIComponent(String(url)));
+      const corpo = String(url).includes('vnd.google-apps.folder')
+        ? { files: [{ id: 'p2025', name: 'AA Prontuário Eletrônico - 2025' }] }
+        : { files: [{ id: 'f1', name: 'Abraao-Santiago-Nascimento_Ficha-Anestesia_20072026.pdf', size: '1000' }] };
+      return { ok: true, json: async () => corpo };
+    };
+    await driveImport.pastas();
+    out.listouPastas = (document.getElementById('dimp-lista').innerHTML || '').includes('2025')
+      && chamadas.some(u => u.includes("vnd.google-apps.folder") && u.includes('Prontuário'));
+    await driveImport.buscarPastaIdx(0);
+    out.listouPdfsDaPasta = chamadas.some(u => u.includes("'p2025' in parents") && u.includes('application/pdf'))
+      && driveImport._arquivos.length === 1
+      && driveImport._arquivos[0].nome === 'Abraao Santiago Nascimento'
+      && (document.getElementById('dimp-lista').innerHTML || '').includes('voltar às pastas');
+    modal.close();
+    return out;
+  });
+  assert(r.novaFicha, 'Paciente_Ficha-Anestesia_data deveria separar nome, tipo e data');
+  assert(r.novaApa, 'Paciente_APA_data deveria virar pré-anestésica');
+  assert(r.novaConjunto, 'o arquivo único ficha+SRPA deveria ser reconhecido sem sujar o nome');
+  assert(r.novaGuia, 'guia de internação deveria manter o nome do paciente limpo');
+  assert(r.antigaApa && r.antigaFicha, 'a convenção antiga (Nome [APA] ddmmaaaa [convênio]) deveria continuar valendo');
+  assert(r.temBotaoPastas, 'o importador deveria oferecer navegação por pastas (ano a ano)');
+  assert(r.listouPastas, 'buscar pastas por nome deveria listar as pastas do Drive');
+  assert(r.listouPdfsDaPasta, 'listar uma pasta deveria trazer só os PDFs dela, interpretados');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

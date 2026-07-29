@@ -8264,7 +8264,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     <button class="btn btn-sm" id="btn-expandir-pacientes" onclick="ui.alternarTodos('pacientes')" title="Expandir ou recolher todos os campos">⊕ Expandir tudo</button>
     <button class="btn btn-primary" onclick="pacientes.editar(null)"><span class="icon">+</span> Novo paciente</button>
     <button class="btn" onclick="historico.prontuario()" title="Reúne tudo do paciente: consultas, cirurgias, termos, orçamentos, financeiro e anexos"><span class="icon">📚</span> Prontuário do paciente</button>
-    <button class="btn" onclick="driveImport.abrir()" title="Importa em lote PDFs do seu Google Drive (ex.: 'Paciente APA ddmmaaaa') criando as avaliações automaticamente"><span class="icon">📥</span> Importar PDFs do Drive</button>
+    <button class="btn" onclick="driveImport.abrir()" title="Importa em lote PDFs do seu Google Drive — por busca ou pasta por pasta (ano a ano) — criando os registros automaticamente"><span class="icon">📥</span> Importar PDFs do Drive</button>
     <button class="btn" onclick="pacientes.exportar()"><span class="icon">⬇️</span> Exportar JSON</button>
     <button class="btn btn-ghost" onclick="actions.importarJSONPara('pacientes')"><span class="icon">⬆️</span> Importar</button>
   </div>
@@ -19161,19 +19161,27 @@ const driveImport = {
   },
 
   /* Padrões:
-     "Maria Silva APA 03052024[ Unimed]" → Pré-anestésica (+ convênio)
-     "Maria Silva 03052024[ Unimed]"     → Ficha de Anestesia (+ convênio)
-     Sem APA = ficha de anestesia. Convênio = o que vier depois da data. */
+     "Maria Silva APA 03052024[ Unimed]"            → Pré-anestésica (+ convênio)
+     "Maria Silva 03052024[ Unimed]"                → Ficha de Anestesia (+ convênio)
+     "Maria-Silva_Ficha-Anestesia_03052024"         → convenção nova (Paciente_Tipo_Data)
+     "Maria-Silva_Ficha-Anestesia+SRPA_03052024"    → arquivo único ficha+SRPA
+     Sem APA = ficha de anestesia. Convênio = o que vier depois da data (padrão antigo). */
   _interpretar(nomeArq) {
     const semExt = nomeArq.replace(/\.pdf$/i, '').trim();
-    const limpa = s => (s || '').replace(/[_\-]+/g, ' ').trim();
-    let m = semExt.match(/^(.+?)[\s_\-]+APA[\s_\-]*(\d{2})[\/\-. ]?(\d{2})[\/\-. ]?(\d{4})(?:[\s_\-]+(.+?))?\s*$/i);
-    if (m) return { nome: limpa(m[1]), dataISO: m[4] + '-' + m[3] + '-' + m[2], ehAPA: true, convenio: limpa(m[5]) };
-    m = semExt.match(/^(.+?)[\s_\-]+APA\s*$/i);
-    if (m) return { nome: limpa(m[1]), dataISO: '', ehAPA: true, convenio: '' };
-    m = semExt.match(/^(.+?)[\s_\-]+(\d{2})[\/\-. ]?(\d{2})[\/\-. ]?(\d{4})(?:[\s_\-]+(.+?))?\s*$/);
-    if (m) return { nome: limpa(m[1]), dataISO: m[4] + '-' + m[3] + '-' + m[2], ehAPA: false, convenio: limpa(m[5]) };
-    return { nome: limpa(semExt), dataISO: '', ehAPA: false, convenio: '' };
+    const limpa = s => (s || '').replace(/[_\-]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+    /* Convenção nova: reconhece o TIPO no meio do nome e o separa do paciente */
+    let tipo = '';
+    const semTipo = semExt.replace(
+      /[\s_\-]+(Ficha-?Anestesia\+SRPA|Ficha-?Anestesia|SRPA|Consulta|Documento|Receita|Or[cç]amento|Guia[\s_\-]*(?:de[\s_\-]*)?interna[cç][aã]o)(?=[\s_\-]|$)/i,
+      (m0, t) => { tipo = limpa(t); return ' '; });
+    const alvo = tipo ? semTipo : semExt;
+    let m = alvo.match(/^(.+?)[\s_\-]+APA[\s_\-]*(\d{2})[\/\-. ]?(\d{2})[\/\-. ]?(\d{4})(?:[\s_\-]+(.+?))?\s*$/i);
+    if (m) return { nome: limpa(m[1]), dataISO: m[4] + '-' + m[3] + '-' + m[2], ehAPA: true, tipo: 'APA', convenio: limpa(m[5]) };
+    m = alvo.match(/^(.+?)[\s_\-]+APA\s*$/i);
+    if (m) return { nome: limpa(m[1]), dataISO: '', ehAPA: true, tipo: 'APA', convenio: '' };
+    m = alvo.match(/^(.+?)[\s_\-]+(\d{2})[\/\-. ]?(\d{2})[\/\-. ]?(\d{4})(?:[\s_\-]+(.+?))?\s*$/);
+    if (m) return { nome: limpa(m[1]), dataISO: m[4] + '-' + m[3] + '-' + m[2], ehAPA: false, tipo: tipo || 'Ficha', convenio: tipo ? '' : limpa(m[5]) };
+    return { nome: limpa(tipo ? semTipo : semExt), dataISO: '', ehAPA: false, tipo: tipo || 'Ficha', convenio: '' };
   },
 
   abrir() {
@@ -19191,25 +19199,83 @@ const driveImport = {
       return;
     }
     if (!cloud.estaLogado()) { toast('Conecte-se à nuvem primeiro (Ajustes → Backup) — os PDFs importados são salvos lá', 'warn'); return; }
-    driveImport._arquivos = []; driveImport._nextPage = null;
+    driveImport._arquivos = []; driveImport._nextPage = null; driveImport._modo = null;
     const html = `
       <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
-        <div style="flex:1;min-width:170px"><label style="font-size:.72rem;color:var(--text-mute)">Buscar no Drive (nome contém)</label>
-          <input id="dimp-q" type="text" value="APA" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px"></div>
+        <div style="flex:1;min-width:170px"><label style="font-size:.72rem;color:var(--text-mute)">Buscar no Drive (nome do PDF ou da pasta)</label>
+          <input id="dimp-q" type="text" value="Prontuário" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px"></div>
+        <button class="btn btn-sm" onclick="driveImport.pastas()">📁 Pastas (ano a ano)</button>
         <button class="btn btn-sm btn-primary" onclick="driveImport.buscar(false)">🔍 Buscar PDFs</button>
       </div>
-      <div id="dimp-lista" style="max-height:46vh;overflow-y:auto;font-size:.8rem"></div>
+      <div id="dimp-lista" style="max-height:46vh;overflow-y:auto;font-size:.8rem">
+        <p style="color:var(--text-mute)">Dica: toque em <b>📁 Pastas</b> para achar suas pastas por ano (ex.: "AA Prontuário Eletrônico - 2025") e importar uma de cada vez.</p>
+      </div>
       <div id="dimp-acoes" style="margin-top:10px"></div>
       <div id="dimp-prog" style="margin-top:8px;font-size:.8rem"></div>`;
     modal.open('📥 Importar PDFs do Google Drive', html, '');
   },
 
-  async buscar(mais) {
+  /* ---------- Navegação de pastas (importação ano a ano) ---------- */
+  _pastasCache: [],
+  async pastas(parentId, nomePasta) {
     const tk = await driveImport._tokenLeitura();
     if (!tk) { toast('Não foi possível autorizar o Google Drive', 'warn'); return; }
-    const q = (document.getElementById('dimp-q')?.value || 'APA').replace(/'/g, "\\'");
-    const query = encodeURIComponent(`name contains '${q}' and mimeType='application/pdf' and trashed=false`);
-    let url = `https://www.googleapis.com/drive/v3/files?q=${query}&pageSize=100&orderBy=name&fields=nextPageToken,files(id,name,size)`;
+    const box = document.getElementById('dimp-lista');
+    if (box) box.innerHTML = '<p style="color:var(--text-mute)">Carregando pastas…</p>';
+    const qNome = (document.getElementById('dimp-q')?.value || '').trim();
+    const cond = parentId
+      ? `'${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`
+      : `mimeType='application/vnd.google-apps.folder' and trashed=false and name contains '${(qNome || 'Prontuário').replace(/'/g, "\\'")}'`;
+    const url = 'https://www.googleapis.com/drive/v3/files?q=' + encodeURIComponent(cond) + '&pageSize=100&orderBy=name&fields=files(id,name)';
+    try {
+      const r = await fetch(url, { headers: { Authorization: 'Bearer ' + tk } });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      driveImport._renderPastas(d.files || [], parentId ? (nomePasta || '') : '');
+    } catch (e) {
+      if (box) box.innerHTML = '<p style="color:#b3261e">Erro ao listar pastas: ' + utils.escapeHTML(e.message) + '</p>';
+    }
+  },
+  _renderPastas(pastas, nomeAtual) {
+    const box = document.getElementById('dimp-lista');
+    if (!box) return;
+    const acoes = document.getElementById('dimp-acoes');
+    if (acoes) acoes.innerHTML = '';
+    driveImport._pastasCache = pastas;
+    box.innerHTML =
+      '<p style="font-size:.78rem;color:var(--text-mute);margin:0 0 6px">' +
+      (nomeAtual ? '📂 Subpastas de <b>' + utils.escapeHTML(nomeAtual) + '</b>' : 'Pastas encontradas — toque em <b>📥 Listar PDFs</b> na pasta do ano que quer importar') + '</p>' +
+      (!pastas.length
+        ? '<p style="color:var(--text-mute)">Nenhuma pasta encontrada. Tente outro termo na busca (ex.: "Prontuário", "2025").</p>'
+        : pastas.map((p, i) =>
+          '<div style="display:flex;gap:6px;align-items:center;padding:6px 4px;border-bottom:1px solid var(--border)">' +
+          '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">📁 ' + utils.escapeHTML(p.name) + '</span>' +
+          '<button class="btn btn-xs btn-primary" onclick="driveImport.buscarPastaIdx(' + i + ')">📥 Listar PDFs</button>' +
+          '<button class="btn btn-xs" onclick="driveImport.pastasIdx(' + i + ')">Abrir ▸</button>' +
+          '</div>').join(''));
+  },
+  buscarPastaIdx(i) { const p = driveImport._pastasCache[i]; return p ? driveImport.buscarPasta(p.id, p.name) : null; },
+  pastasIdx(i) { const p = driveImport._pastasCache[i]; return p ? driveImport.pastas(p.id, p.name) : null; },
+
+  async buscar(mais) {
+    if (!mais) {
+      const q = (document.getElementById('dimp-q')?.value || '').trim() || 'APA';
+      driveImport._modo = { tipo: 'nome', q };
+    }
+    return driveImport._buscarExec(!!mais);
+  },
+  async buscarPasta(id, nome) {
+    driveImport._modo = { tipo: 'pasta', id, nome: nome || '' };
+    return driveImport._buscarExec(false);
+  },
+  async _buscarExec(mais) {
+    const tk = await driveImport._tokenLeitura();
+    if (!tk) { toast('Não foi possível autorizar o Google Drive', 'warn'); return; }
+    const mo = driveImport._modo || { tipo: 'nome', q: 'APA' };
+    const cond = mo.tipo === 'pasta'
+      ? `'${mo.id}' in parents and mimeType='application/pdf' and trashed=false`
+      : `name contains '${(mo.q || '').replace(/'/g, "\\'")}' and mimeType='application/pdf' and trashed=false`;
+    let url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(cond)}&pageSize=100&orderBy=name&fields=nextPageToken,files(id,name,size)`;
     if (mais && driveImport._nextPage) url += '&pageToken=' + driveImport._nextPage;
     const box = document.getElementById('dimp-lista');
     if (box && !mais) box.innerHTML = '<p style="color:var(--text-mute)">Buscando…</p>';
@@ -19218,7 +19284,16 @@ const driveImport = {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const d = await r.json();
       if (!mais) driveImport._arquivos = [];
-      (d.files || []).forEach(f => driveImport._arquivos.push(Object.assign({ sel: true }, f, driveImport._interpretar(f.name))));
+      (d.files || []).forEach(f => {
+        const x = Object.assign({ sel: true }, f, driveImport._interpretar(f.name));
+        /* já existe paciente+data no Soft? (o PDF será ANEXADO ao registro, não duplicado) */
+        const mod = x.ehAPA ? 'pre' : 'anestesia';
+        const campoNome = x.ehAPA ? 'nome' : 'paciente_nome';
+        const campoData = x.ehAPA ? 'data' : 'data_anestesia';
+        x.jaExiste = !!(store.list(mod) || []).find(p =>
+          (p[campoNome] || '').toLowerCase() === (x.nome || '').toLowerCase() && (p[campoData] || '') === (x.dataISO || ''));
+        driveImport._arquivos.push(x);
+      });
       driveImport._nextPage = d.nextPageToken || null;
       driveImport._renderLista();
     } catch (e) {
@@ -19231,23 +19306,27 @@ const driveImport = {
     const acoes = document.getElementById('dimp-acoes');
     if (!box) return;
     const arr = driveImport._arquivos;
-    if (!arr.length) { box.innerHTML = '<p style="color:var(--text-mute)">Nenhum PDF encontrado.</p>'; if (acoes) acoes.innerHTML = ''; return; }
-    box.innerHTML =
+    const mo = driveImport._modo || {};
+    const cab = mo.tipo === 'pasta' && mo.nome
+      ? '<p style="font-size:.78rem;margin:0 0 6px">📂 PDFs da pasta <b>' + utils.escapeHTML(mo.nome) + '</b> <button class="btn btn-xs" style="margin-left:6px" onclick="driveImport.pastas()">⬅ voltar às pastas</button></p>'
+      : '';
+    if (!arr.length) { box.innerHTML = cab + '<p style="color:var(--text-mute)">Nenhum PDF encontrado.</p>'; if (acoes) acoes.innerHTML = ''; return; }
+    box.innerHTML = cab +
       '<label style="display:block;margin-bottom:6px"><input type="checkbox" checked onchange="driveImport._arquivos.forEach(a=>a.sel=this.checked); driveImport._renderLista()"> selecionar todos (' + arr.length + ')</label>' +
       '<table class="dash-detail-table" style="margin:0"><thead><tr><th></th><th>Paciente (interpretado)</th><th>Data</th><th>Tipo</th><th>Convênio</th><th>Arquivo</th></tr></thead><tbody>' +
       arr.map((a, i) =>
         '<tr>' +
         '<td><input type="checkbox" ' + (a.sel ? 'checked' : '') + ' onchange="driveImport._arquivos[' + i + '].sel=this.checked"></td>' +
-        '<td><b>' + utils.escapeHTML(a.nome || '?') + '</b></td>' +
+        '<td><b>' + utils.escapeHTML(a.nome || '?') + '</b>' + (a.jaExiste ? ' <span title="Paciente+data já existem no Soft — o PDF será anexado ao registro existente">🔗</span>' : '') + '</td>' +
         '<td>' + (a.dataISO ? historico._fmtData(a.dataISO) : '<span style="color:#b3261e">sem data</span>') + '</td>' +
-        '<td>' + (a.ehAPA ? '📋 APA' : '💉 Ficha') + '</td>' +
+        '<td>' + (a.ehAPA ? '📋 APA' : '💉 ' + utils.escapeHTML(a.tipo || 'Ficha')) + '</td>' +
         '<td>' + utils.escapeHTML(a.convenio || '—') + '</td>' +
         '<td style="font-size:.72rem;color:var(--text-mute)">' + utils.escapeHTML(a.name) + '</td>' +
         '</tr>').join('') + '</tbody></table>' +
       (driveImport._nextPage ? '<button class="btn btn-xs" style="margin-top:6px" onclick="driveImport.buscar(true)">⤵ Carregar mais</button>' : '');
     if (acoes) acoes.innerHTML =
       '<button class="btn btn-success" onclick="driveImport.importar()">📥 Importar selecionados para o Soft</button>' +
-      '<span style="font-size:.74rem;color:var(--text-mute);margin-left:8px">Cria 1 pré-anestésica por paciente+data e anexa o PDF na nuvem</span>';
+      '<span style="font-size:.74rem;color:var(--text-mute);margin-left:8px">APA → pré-anestésica; demais → ficha. 1 registro por paciente+data, com o PDF anexado na nuvem (🔗 = anexa ao já existente)</span>';
   },
 
   async importar() {
