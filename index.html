@@ -8551,7 +8551,10 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
 
         <div id="usuarios-lista"></div>
 
-        <button type="button" class="btn btn-primary btn-sm" style="margin-top:12px" onclick="ajustesUsuarios.abrirNovo()">➕ Criar novo usuário</button>
+        <!-- Criação de usuário LOCAL desativada (por enquanto): as contas agora são
+             da NUVEM — crie/convide em "Equipe da nuvem", assim tudo sincroniza e
+             fica igual em qualquer aparelho. -->
+        <p style="font-size:.76rem;color:var(--text-mute);margin-top:12px">➕ Para adicionar alguém, use <b>Equipe da nuvem</b> (logo abaixo) — contas da nuvem funcionam em qualquer aparelho e sincronizam tudo. A criação de usuário <i>apenas local</i> foi desativada.</p>
       </div>
     </section>
 
@@ -14172,16 +14175,14 @@ const auth = {
       <button type="submit" class="auth-btn">Entrar</button>`;
     form.onsubmit = (e) => { e.preventDefault(); auth.tentarLoginNuvem(); };
     foot.innerHTML =
-      '<a href="javascript:void(0)" onclick="auth._mostrarSignup()" style="color:var(--primary);font-size:.85rem">Criar conta (novo administrador)</a> · ' +
-      '<a href="javascript:void(0)" onclick="auth._mostrarLoginLocal()" style="color:var(--primary);font-size:.85rem">Usuário local (equipe)</a><br>' +
+      '<a href="javascript:void(0)" onclick="auth._mostrarSignup()" style="color:var(--primary);font-size:.85rem">Criar conta (novo administrador)</a><br>' +
       '<a href="javascript:void(0)" onclick="auth._socorro()" style="color:var(--text-mute);font-size:.8rem">Problemas para entrar?</a>' +
       '<div style="margin-top:12px;font-size:.72rem;color:var(--text-mute);line-height:1.55;text-align:center">' +
         '🔒 Acesso restrito a profissionais de saúde autorizados. As informações de pacientes são <strong>confidenciais</strong>, armazenadas de forma criptografada e individual por profissional, em conformidade com a <strong>LGPD</strong> e o sigilo médico.' +
-      '</div>' +
-      '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">' +
-        '<a href="javascript:void(0)" onclick="demo.entrar()" style="color:var(--primary);font-size:.88rem;font-weight:600">🧪 Entrar em modo demonstração</a>' +
-        '<br><small style="color:var(--text-mute)">Banco de teste vazio, só neste aparelho. Não usa seus dados nem a nuvem — ideal para um colega experimentar.</small>' +
       '</div>';
+      /* “Usuário local (equipe)” e “Modo demonstração” foram tirados da tela de
+         login (por enquanto): a conta da nuvem é a identidade única — tudo
+         sincronizado e igual em qualquer aparelho. O código segue no app. */
   },
 
   /* ---------- LOGIN UNIFICADO PELA NUVEM ----------
@@ -15347,6 +15348,9 @@ const cloud = {
       /* 4) Atualiza as configurações da organização (ex.: visibilidade dos
          registros) — best-effort, não bloqueia o sync */
       try { if (typeof orgSettings !== 'undefined') orgSettings.puxar(); } catch (e) {}
+      /* 5) Configurações do app (termo/textos/logo/tema…) — sobe mudanças e
+         baixa o que estiver mais novo na nuvem, por chave */
+      try { if (typeof configSync !== 'undefined') { configSync.checarMudancas(); configSync.puxarAplicar(); } } catch (e) {}
       if (!opts.silent) toast('☁️ Sincronizado' + (novos ? ' — ' + novos + ' registro(s) baixado(s)' : ''));
       cloud._atualizarUI('ok');
     } catch (e) {
@@ -15451,6 +15455,8 @@ const cloud = {
       if (!cloud.estaConfigurado() || !cloud.estaLogado()) return;
       if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
       setTimeout(() => { try { cloud.sincronizar({ silent: true }); } catch (e) {} }, 900);
+      /* configurações (termo/textos/logomarca/tema/preferências) descem também */
+      setTimeout(() => { try { if (typeof configSync !== 'undefined') configSync.puxarAplicar(); } catch (e) {} }, 1200);
       setTimeout(() => {
         try {
           if (typeof cloudRel !== 'undefined' && cloudRel.autoPullModulo) {
@@ -15641,6 +15647,117 @@ const cloud = {
       }, 20000);
     } catch (e) {}
     try { syncStatus.refresh(); } catch (e) {}
+  }
+};
+
+/* ============================================================================
+   CONFIGURAÇÕES NA NUVEM (configSync)
+   Espelha as CONFIGURAÇÕES do app (termo padrão, textos padrão, logomarca,
+   backup de PDFs, orçamento, medicações do usuário, tema, preferências…)
+   num documento único da nuvem (modulo 'config_sync' — fora do sync normal).
+   Ao entrar em QUALQUER aparelho, as configurações descem e tudo fica igual.
+   Merge por chave: vence quem tem o carimbo de data mais novo.
+============================================================================ */
+const configSync = {
+  CHAVES: [
+    'medsys.v7.termo_padrao',
+    'medsys.v7.textos_padrao',
+    'medsys.v7.pdfbackup.cfg',
+    'medsys.v7.orcamento_cfg',
+    'medsys.v7.orcamento_modelos',
+    'medsys.v7.meds_usuario',
+    'medsys.v7.logoCustom',
+    'medsys.v7.theme',
+    'medsys.v7.grafico_modo',
+    'medsys.v7.auth.timeout_min',
+    'medsys.v7.realtime.on'
+  ],
+  META_KEY: 'medsys.v7.configsync.meta',
+  _meta() { try { return JSON.parse(localStorage.getItem(configSync.META_KEY) || '{}'); } catch (e) { return {}; } },
+  _salvarMeta(m) { try { localStorage.setItem(configSync.META_KEY, JSON.stringify(m)); } catch (e) {} },
+  _hash(s) { let h = 0; const t = String(s); for (let i = 0; i < t.length; i++) h = ((h * 31) + t.charCodeAt(i)) | 0; return String(h); },
+  _podeSync() {
+    try {
+      if (typeof demo !== 'undefined' && demo.ativo()) return false;
+      return cloud.estaConfigurado() && cloud.estaLogado();
+    } catch (e) { return false; }
+  },
+
+  /* Vigia local: qualquer mudança numa chave ganha carimbo de data e sobe */
+  vigiar() {
+    try { setInterval(() => { try { configSync.checarMudancas(); } catch (e) {} }, 8000); } catch (e) {}
+  },
+  checarMudancas() {
+    const meta = configSync._meta();
+    let mudou = false;
+    configSync.CHAVES.forEach(k => {
+      const v = localStorage.getItem(k);
+      const h = v == null ? '' : configSync._hash(v);
+      if (!meta[k] || meta[k].h !== h) { meta[k] = { h, t: new Date().toISOString() }; mudou = true; }
+    });
+    if (mudou) { configSync._salvarMeta(meta); configSync.enviar(); }
+    return mudou;
+  },
+
+  /* Sobe o pacote de configurações (valores + carimbo por chave) */
+  async enviar() {
+    if (!configSync._podeSync()) return false;
+    const meta = configSync._meta();
+    const agora = new Date().toISOString();
+    const chaves = {};
+    configSync.CHAVES.forEach(k => {
+      chaves[k] = { v: localStorage.getItem(k), t: (meta[k] || {}).t || agora };
+    });
+    const op = cloud._novaOp('config_sync', { _id: 'cfg', chaves }, 'upsert');
+    const ok = await cloud._enviarOp(op);
+    if (!ok) cloud._enfileirar(op);
+    return ok;
+  },
+
+  /* Baixa e aplica: por chave, vence o carimbo mais novo (nuvem × aparelho) */
+  async puxarAplicar() {
+    if (!configSync._podeSync()) return 0;
+    let remoto = null;
+    try {
+      if (!(await cloud._garantirToken())) return 0;
+      const c = cloud.config(); const s = cloud.session();
+      const r = await fetch(c.url + '/rest/v1/documentos?user_id=eq.' + s.user.id +
+        '&modulo=eq.config_sync&doc_id=eq.cfg&select=dados', { headers: cloud._headers(true) });
+      if (!r.ok) return 0;
+      const rows = await r.json();
+      remoto = rows[0] && rows[0].dados && rows[0].dados.chaves ? rows[0].dados.chaves : null;
+    } catch (e) { return 0; }
+    if (!remoto) { configSync.checarMudancas() || configSync.enviar(); return 0; }   /* 1ª vez: só sobe */
+    const meta = configSync._meta();
+    let aplicadas = 0, temLocalNovo = false;
+    configSync.CHAVES.forEach(k => {
+      const r = remoto[k];
+      const vLoc = localStorage.getItem(k);
+      if (!r) { if (vLoc != null) temLocalNovo = true; return; }
+      const hRem = r.v == null ? '' : configSync._hash(r.v);
+      const hLoc = vLoc == null ? '' : configSync._hash(vLoc);
+      if (hRem === hLoc) { meta[k] = { h: hLoc, t: r.t }; return; }
+      const tRem = new Date(r.t || 0).getTime();
+      const tLoc = new Date((meta[k] || {}).t || 0).getTime();
+      if (tRem > tLoc) {
+        if (r.v == null) localStorage.removeItem(k); else localStorage.setItem(k, r.v);
+        meta[k] = { h: hRem, t: r.t };
+        aplicadas++;
+      } else temLocalNovo = true;
+    });
+    configSync._salvarMeta(meta);
+    if (aplicadas) configSync._reaplicar();
+    if (temLocalNovo) configSync.enviar();
+    return aplicadas;
+  },
+
+  /* Depois de aplicar valores da nuvem, re-renderiza o que aparece na tela */
+  _reaplicar() {
+    try { ui._aplicarTemaSalvo(); } catch (e) {}
+    try { logoUsuario.carregar(); } catch (e) {}
+    try { if (typeof termoPadrao !== 'undefined' && termoPadrao.render) termoPadrao.render(); } catch (e) {}
+    try { if (typeof textosPadrao !== 'undefined' && textosPadrao.render) textosPadrao.render(); } catch (e) {}
+    try { if (typeof pdfBackup !== 'undefined' && pdfBackup.renderCard) pdfBackup.renderCard(); } catch (e) {}
   }
 };
 
@@ -37288,6 +37405,8 @@ document.addEventListener('DOMContentLoaded', () => {
   window.ajustes = ajustes; window.autocomplete = autocomplete;
   window.ajustesGrupos = ajustesGrupos;
   try { ajustesGrupos.montar(); } catch (e) {}
+  window.configSync = configSync;
+  try { configSync.vigiar(); } catch (e) {}
   window.quickActions = quickActions; window.printPreview = printPreview;
   window.actions = actions; window.toast = toast;
   window.cbhpm = cbhpm; window.CBHPM_2018 = CBHPM_2018;
