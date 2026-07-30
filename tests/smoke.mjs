@@ -1925,6 +1925,72 @@ await test('Programador: aba só para a conta dele; ambientes, membros e acesso 
   await page.close();
 });
 
+/* 41) Impressão: gráfico da ficha sai mesmo com o módulo oculto + ordenar por horário */
+await test('Impressão: gráfico de vitais sai no conjunto (módulo oculto) e Horário ordena meds/eventos', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    location.hash = '#anestesia';
+    await new Promise(r => setTimeout(r, 400));
+    const f = document.getElementById('form-anestesia');
+    f.querySelector('[name="paciente_nome"]').value = 'Paciente Grafico';
+    anestesia.graficoUI._contexto = 'anestesia';
+    document.getElementById('vitais-body').innerHTML = '';
+    anestesia.vitais.add(false, { hora: '10:00', pas: '120', pad: '80', fc: '70', spo2: '98' });
+    anestesia.vitais.add(false, { hora: '10:15', pas: '118', pad: '78', fc: '72', spo2: '98' });
+
+    /* sai da ficha — o módulo fica OCULTO (o cenário do bug: imprimir ficha+SRPA
+       estando na SRPA fazia o canvas ter largura 0 e o gráfico sumia) */
+    location.hash = '#recuperacao';
+    await new Promise(r => setTimeout(r, 400));
+    out.moduloOculto = getComputedStyle(document.getElementById('module-anestesia')).display === 'none';
+    const html = printPreview._buildAnestesia();
+    out.temGrafico = html.includes('pp-grafico-img') && html.includes('data:image');
+
+    /* o conversor de PDF (nuvem/backup) agora inclui a imagem sem quebrar */
+    const ppp = document.getElementById('ppp');
+    ppp.innerHTML = html;
+    const J = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+    let doc = null;
+    try { doc = printPreview._gerarDocDeTexto(J, ppp); } catch (e) { doc = null; }
+    out.pdfOk = !!doc;
+    ppp.innerHTML = '';
+
+    /* — clicar em "Horário" ordena eventos e medicações (crescente; sem hora vai pro fim) — */
+    location.hash = '#anestesia';
+    await new Promise(r => setTimeout(r, 300));
+    out.thClicavel = !!document.querySelector('#tab-eventos th[onclick*="ordenarPorHorario"]')
+      && !!document.querySelector('#tab-medicacoes th[onclick*="ordenarPorHorario"]');
+    document.getElementById('eventos-body').innerHTML = '';
+    anestesia.eventos.add({ tipo: 'Extubação', hora: '12:30' });
+    anestesia.eventos.add({ tipo: 'Indução', hora: '09:10' });
+    anestesia.eventos.add({ tipo: 'Intubação', hora: '10:05' });
+    anestesia.ordenarPorHorario('eventos-body');
+    const horasEvt = Array.from(document.querySelectorAll('#eventos-body [name="evt_hora[]"]')).map(i => i.value);
+    out.evtOrdenado = JSON.stringify(horasEvt) === JSON.stringify(['09:10', '10:05', '12:30']);
+
+    document.getElementById('medicacoes-body').innerHTML = '';
+    anestesia.meds.add({ hora: '11:00', nome: 'Propofol' });
+    anestesia.meds.add({ hora: '', nome: 'SemHora' });
+    anestesia.meds.add({ hora: '08:30', nome: 'Midazolam' });
+    anestesia.ordenarPorHorario('medicacoes-body');
+    const nomes = Array.from(document.querySelectorAll('#medicacoes-body [name="med_nome[]"]')).map(i => i.value);
+    out.medOrdenado = nomes[0] === 'Midazolam' && nomes[1] === 'Propofol' && nomes[2] === 'SemHora';
+
+    document.getElementById('eventos-body').innerHTML = '';
+    document.getElementById('medicacoes-body').innerHTML = '';
+    document.getElementById('vitais-body').innerHTML = '';
+    return out;
+  });
+  assert(r.moduloOculto, 'o cenário exige o módulo da ficha oculto');
+  assert(r.temGrafico, 'o gráfico de vitais deveria sair na impressão mesmo com o módulo oculto');
+  assert(r.pdfOk, 'o PDF gerado (nuvem/backup) deveria incluir o gráfico sem quebrar');
+  assert(r.thClicavel, 'os cabeçalhos "Horário" de eventos e medicações deveriam ser clicáveis');
+  assert(r.evtOrdenado, 'os eventos deveriam ficar em ordem crescente de horário');
+  assert(r.medOrdenado, 'as medicações deveriam ordenar por horário, sem-hora por último');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
