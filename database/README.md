@@ -296,6 +296,21 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   `consents` e `documents`. Registros finalizados continuam imutáveis
   (trigger `guard_finalized`) e o resto do clínico continua fora do alcance.
 
+- **Programador e múltiplos ambientes (`0009_programador_ambientes.sql`):**
+  estrutura multi-ambientes: 1 usuário **programador** (semente:
+  `mpcaliman@hotmail.com` em `app_programmers`; `app.eh_programador()`), que
+  vê/cria **organizações (ambientes)** e senta o médico **gestor** de cada uma
+  (`prog_criar_ambiente`), além de adicionar membros em qualquer ambiente
+  (`prog_add_member`). Cada ambiente segue 100% independente (RLS por
+  organização, como sempre). Novidade: `org_shares` (origem → destino, lista de
+  módulos; vazio = todos) libera **leitura** dos dados da origem para os
+  membros do destino — via policies `_share_sel` **adicionais** (OR) em
+  pacientes, pré, consulta, ficha, SRPA, risco, termo, receituário,
+  documentos, financeiro, orçamentos e agenda. A escrita nunca cruza
+  ambientes. Só o programador grava em `org_shares` (e nas RPCs); os demais
+  usuários nem enxergam essas estruturas — no app, a aba 👨‍💻 Programador só
+  aparece para a conta dele.
+
 ## Rollback
 
 Como é aditivo, para reverter basta remover os objetos criados (as tabelas novas

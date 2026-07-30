@@ -4116,6 +4116,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     <a class="nav-item" data-module="orcamento"  href="#orcamento"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v20"></path><path d="M17 6H9.5a3 3 0 0 0 0 6h5a3 3 0 0 1 0 6H6"></path></svg></span><span class="nav-label">Orçamentos</span></a>
     <a class="nav-item" data-module="doses"      href="#doses"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="3"></rect><line x1="9" y1="7" x2="15" y2="7"></line><circle cx="9" cy="12" r=".8"></circle><circle cx="15" cy="12" r=".8"></circle><circle cx="9" cy="17" r=".8"></circle><circle cx="15" cy="17" r=".8"></circle></svg></span><span class="nav-label">Doses &amp; Infusões</span></a>
     <a class="nav-item" data-module="ajustes"    href="#ajustes"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.2 2.2M16.9 16.9l2.2 2.2M19.1 4.9l-2.2 2.2M7.1 16.9l-2.2 2.2"></path></svg></span><span class="nav-label">Ajustes</span></a>
+    <a class="nav-item" data-module="programador" id="nav-programador" href="#programador" style="display:none" title="Área exclusiva do programador"><span class="nav-icon" style="font-size:17px;line-height:1">👨‍💻</span><span class="nav-label">Programador</span></a>
   </nav>
   <div class="sidebar-footer">
     v7.1 · offline-ready · responsivo<br>
@@ -8369,6 +8370,17 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
 <!-- ===========================================================================
      MÓDULO 9 — AJUSTES / CONFIGURAÇÕES
 =========================================================================== -->
+<!-- 👨‍💻 ÁREA DO PROGRAMADOR — exclusiva; os demais usuários não veem esta aba -->
+<div class="module" id="module-programador" data-module="programador">
+  <div class="container">
+    <div class="page-title">
+      <h1>👨‍💻 Programador</h1>
+      <span class="subtitle">Ambientes de trabalho independentes, equipes e liberação de acesso entre ambientes</span>
+    </div>
+    <div id="prog-conteudo"></div>
+  </div>
+</div>
+
 <div class="module" id="module-ajustes" data-module="ajustes">
   <div class="action-bar">
     <button class="btn btn-sm" id="btn-expandir-ajustes" onclick="ui.alternarTodos('ajustes')" title="Expandir ou recolher todas as seções">⊕ Expandir tudo</button>
@@ -10746,7 +10758,8 @@ const ui = {
         financeiro: 'Conciliação financeira', agenda: 'Agenda',
         orcamento: 'Orçamentos',
         doses: 'Doses & Infusões',
-        pacientes: 'Pacientes', ajustes: 'Ajustes'
+        pacientes: 'Pacientes', ajustes: 'Ajustes',
+        programador: 'Programador'
       };
       const bc = document.getElementById('breadcrumb-current');
       if (bc) bc.textContent = crumbs[modName] || modName;
@@ -10767,6 +10780,7 @@ const ui = {
         else if (modName === 'risco') { setTimeout(() => { try { risco.atualizar(); } catch (e) {} }, 80); }
         else if (modName === 'orcamento') { setTimeout(() => { try { orcamento.init(); } catch (e) { console.error('orcamento.init', e); } }, 60); }
         else if (modName === 'doses') { setTimeout(() => { try { doses.init(); } catch (e) { console.error('doses.init', e); } }, 60); }
+        else if (modName === 'programador') { setTimeout(() => { try { programador.render(); } catch (e) { console.error('programador.render', e); } }, 60); }
       } catch (e) {
         console.error('Erro ao renderizar módulo ' + modName + ':', e);
       }
@@ -14097,6 +14111,11 @@ const auth = {
   estaLogado() { return !!auth.usuarioAtual(); },
 
   podeAcessar(modKey) {
+    /* aba do PROGRAMADOR: só a conta do programador (nem outros admins) */
+    if (modKey === 'programador') {
+      try { return typeof programador !== 'undefined' && programador.souProgramador(); }
+      catch (e) { return false; }
+    }
     const u = auth.usuarioAtual();
     if (!u) return false;
     if (u.perfil === 'admin') return true;
@@ -15395,6 +15414,8 @@ const cloud = {
 
   /* ---- Atualiza a interface (status na tela de Ajustes) ---- */
   _atualizarUI(estado) {
+    /* aba do programador aparece/some conforme a conta logada na nuvem */
+    try { if (typeof programador !== 'undefined') programador.atualizarVisibilidade(); } catch (e) {}
     /* Reflete o estado no selo honesto do cabeçalho também */
     try {
       if (estado === 'sincronizando') { syncStatus._cloud = 'syncing'; syncStatus._render(); }
@@ -15764,6 +15785,176 @@ const configSync = {
     try { if (typeof termoPadrao !== 'undefined' && termoPadrao.render) termoPadrao.render(); } catch (e) {}
     try { if (typeof textosPadrao !== 'undefined' && textosPadrao.render) textosPadrao.render(); } catch (e) {}
     try { if (typeof pdfBackup !== 'undefined' && pdfBackup.renderCard) pdfBackup.renderCard(); } catch (e) {}
+  }
+};
+
+/* ============================================================================
+   👨‍💻 PROGRAMADOR — aba exclusiva (multi-ambientes)
+   Só a conta do programador vê esta área (a segurança real é a RLS da
+   migração 0009: policies e RPCs exigem app.eh_programador() no servidor).
+   Aqui ele: cria AMBIENTES (organizações independentes), senta o médico
+   gestor de cada um, adiciona membros em qualquer ambiente e LIBERA ACESSO
+   de leitura entre ambientes escolhidos (org_shares, por módulo).
+============================================================================ */
+const programador = {
+  EMAIL: 'mpcaliman@hotmail.com',
+  PAPEIS: [['gestor', 'Gestor'], ['anestesiologista', 'Anestesiologista'], ['cirurgiao', 'Cirurgião'], ['auxiliar', 'Auxiliar / Secretária'], ['financeiro', 'Financeiro'], ['empresa', 'Empresa']],
+  MODULOS_SHARE: [['pacientes', 'Pacientes'], ['pre', 'Pré-anestésica'], ['consulta', 'Consulta'], ['anestesia', 'Ficha de anestesia'], ['recuperacao', 'SRPA'], ['risco', 'Risco'], ['termo', 'Termo'], ['prescricao', 'Receituário'], ['documentos', 'Documentos'], ['financeiro', 'Financeiro'], ['orcamento', 'Orçamentos'], ['agenda', 'Agenda']],
+
+  souProgramador() {
+    try {
+      const s = cloud.session();
+      return !!(s && s.user && String(s.user.email || '').toLowerCase() === programador.EMAIL);
+    } catch (e) { return false; }
+  },
+  atualizarVisibilidade() {
+    const el = document.getElementById('nav-programador');
+    if (el) el.style.display = programador.souProgramador() ? '' : 'none';
+  },
+
+  /* ---- REST direto (as policies/RPCs do servidor validam o programador) ---- */
+  async _req(path, opts = {}) {
+    if (!(await cloud._garantirToken())) throw new Error('Entre na nuvem primeiro (Ajustes → Nuvem e backups)');
+    const c = cloud.config();
+    const headers = Object.assign({}, cloud._headers(true));
+    if (opts.body) { headers['Content-Type'] = 'application/json'; headers['Prefer'] = opts.prefer || 'return=minimal'; }
+    const r = await fetch(c.url + '/rest/v1/' + path, {
+      method: opts.method || 'GET',
+      headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined
+    });
+    if (!r.ok) {
+      let msg = 'HTTP ' + r.status;
+      try { const j = await r.json(); msg = j.message || j.hint || msg; } catch (e) {}
+      throw new Error(msg);
+    }
+    try { return await r.json(); } catch (e) { return null; }
+  },
+  _rpc(nome, body) { return programador._req('rpc/' + nome, { method: 'POST', body }); },
+
+  _orgs: [], _membros: [], _perfis: [], _shares: [],
+  _nomeOrg(id) { const o = programador._orgs.find(x => x.id === id); return o ? o.nome : (id || '').slice(0, 8); },
+  _emailDe(uid) { const p = programador._perfis.find(x => x.id === uid); return p ? (p.email || p.nome || uid.slice(0, 8)) : uid.slice(0, 8); },
+
+  async render() {
+    const box = document.getElementById('prog-conteudo');
+    if (!box) return;
+    if (!programador.souProgramador()) { box.innerHTML = '<p style="color:var(--text-mute)">Acesso restrito ao programador.</p>'; return; }
+    box.innerHTML = '<p style="color:var(--text-mute)">Carregando ambientes…</p>';
+    try {
+      const [orgs, membros, perfis, shares] = await Promise.all([
+        programador._req('organizations?select=id,nome&order=nome'),
+        programador._req('organization_users?select=organization_id,user_id,role,ativo'),
+        programador._req('profiles?select=id,nome,email').catch(() => []),
+        programador._req('org_shares?select=id,org_origem,org_destino,modulos').catch(() => [])
+      ]);
+      programador._orgs = orgs || []; programador._membros = membros || [];
+      programador._perfis = perfis || []; programador._shares = shares || [];
+      programador._renderConteudo(box);
+    } catch (e) {
+      box.innerHTML = '<p style="color:#b3261e">Erro ao carregar: ' + utils.escapeHTML(e.message) +
+        '</p><p style="font-size:.8rem;color:var(--text-mute)">Confira se a migração <b>0009_programador_ambientes.sql</b> já foi executada no Supabase e se você está logado na nuvem como ' + programador.EMAIL + '.</p>';
+    }
+  },
+  _renderConteudo(box) {
+    const esc = utils.escapeHTML;
+    const opcoesOrg = programador._orgs.map(o => '<option value="' + o.id + '">' + esc(o.nome) + '</option>').join('');
+    const linhasOrgs = programador._orgs.map(o => {
+      const ativos = programador._membros.filter(m => m.organization_id === o.id && m.ativo);
+      const gestores = ativos.filter(m => m.role === 'gestor').map(m => programador._emailDe(m.user_id)).join(', ');
+      return '<tr><td><b>' + esc(o.nome) + '</b></td><td>' + esc(gestores || '—') + '</td><td>' + ativos.length + '</td>' +
+        '<td style="font-size:.7rem;color:var(--text-mute)">' + o.id.slice(0, 8) + '…</td></tr>';
+    }).join('');
+    const linhasShares = programador._shares.map(s =>
+      '<tr><td>' + esc(programador._nomeOrg(s.org_origem)) + '</td><td>→ ' + esc(programador._nomeOrg(s.org_destino)) + '</td>' +
+      '<td>' + ((s.modulos || []).length ? esc(s.modulos.join(', ')) : '<i>todos</i>') + '</td>' +
+      '<td><button class="btn btn-xs btn-danger" onclick="programador.removerShare(\'' + s.id + '\')">✕</button></td></tr>').join('');
+    const chipsModulos = programador.MODULOS_SHARE.map(([k, rot]) =>
+      '<label style="display:inline-flex;align-items:center;gap:5px;border:1px solid var(--border);border-radius:14px;padding:4px 10px;font-size:.78rem;cursor:pointer"><input type="checkbox" class="prog-share-mod" value="' + k + '">' + rot + '</label>').join(' ');
+    box.innerHTML = `
+      <section class="card">
+        <div class="card-header"><div class="card-title-wrap"><span class="card-icon">🏢</span><h2>Ambientes de trabalho<small>Cada ambiente é uma organização com banco, equipe e configurações independentes</small></h2></div></div>
+        <div class="card-body">
+          <table class="dash-detail-table" style="margin:0 0 14px"><thead><tr><th>Ambiente</th><th>Gestor(es)</th><th>Membros ativos</th><th>ID</th></tr></thead>
+          <tbody>${linhasOrgs || '<tr><td colspan="4" style="color:var(--text-mute)">Nenhum ambiente ainda.</td></tr>'}</tbody></table>
+          <div class="grid">
+            <div class="field col-5"><label>Nome do novo ambiente</label><input type="text" id="prog-amb-nome" placeholder="Ex.: Clínica Santa Casa"></div>
+            <div class="field col-5"><label>E-mail do médico gestor <small style="color:var(--text-mute);font-weight:400">(precisa já ter conta na nuvem)</small></label><input type="email" id="prog-amb-email" autocapitalize="none"></div>
+            <div class="field col-2" style="align-self:end"><button class="btn btn-primary btn-sm" onclick="programador.criarAmbiente()">➕ Criar ambiente</button></div>
+          </div>
+        </div>
+      </section>
+      <section class="card">
+        <div class="card-header"><div class="card-title-wrap"><span class="card-icon">👥</span><h2>Adicionar usuário a um ambiente<small>Você define o papel e os limites de acesso (a RLS do servidor obedece)</small></h2></div></div>
+        <div class="card-body">
+          <div class="grid">
+            <div class="field col-4"><label>Ambiente</label><select id="prog-mem-org">${opcoesOrg}</select></div>
+            <div class="field col-4"><label>E-mail da pessoa</label><input type="email" id="prog-mem-email" autocapitalize="none"></div>
+            <div class="field col-2"><label>Papel</label><select id="prog-mem-role">${programador.PAPEIS.map(([v, r]) => '<option value="' + v + '">' + r + '</option>').join('')}</select></div>
+            <div class="field col-2" style="align-self:end"><button class="btn btn-primary btn-sm" onclick="programador.addMembro()">➕ Adicionar</button></div>
+          </div>
+        </div>
+      </section>
+      <section class="card">
+        <div class="card-header"><div class="card-title-wrap"><span class="card-icon">🔗</span><h2>Acesso entre ambientes<small>O ambiente de DESTINO passa a LER os dados do de ORIGEM (só leitura, módulos à sua escolha)</small></h2></div></div>
+        <div class="card-body">
+          <table class="dash-detail-table" style="margin:0 0 14px"><thead><tr><th>Origem (dona dos dados)</th><th>Destino (passa a ver)</th><th>Módulos</th><th></th></tr></thead>
+          <tbody>${linhasShares || '<tr><td colspan="4" style="color:var(--text-mute)">Nenhum acesso liberado entre ambientes.</td></tr>'}</tbody></table>
+          <div class="grid">
+            <div class="field col-4"><label>Origem (dona dos dados)</label><select id="prog-share-origem">${opcoesOrg}</select></div>
+            <div class="field col-4"><label>Destino (passa a ver)</label><select id="prog-share-destino">${opcoesOrg}</select></div>
+            <div class="field col-12"><label>Módulos liberados <small style="color:var(--text-mute);font-weight:400">(nenhum marcado = todos)</small></label>
+              <div style="display:flex;flex-wrap:wrap;gap:6px">${chipsModulos}</div></div>
+            <div class="field col-3"><button class="btn btn-primary btn-sm" onclick="programador.criarShare()">🔗 Liberar acesso</button></div>
+          </div>
+        </div>
+      </section>`;
+  },
+
+  async criarAmbiente() {
+    const nome = (document.getElementById('prog-amb-nome') || {}).value || '';
+    const email = ((document.getElementById('prog-amb-email') || {}).value || '').trim();
+    if (!nome.trim() || !email) { toast('Informe o nome do ambiente e o e-mail do médico gestor', 'warn'); return; }
+    try {
+      await programador._rpc('prog_criar_ambiente', { p_nome: nome.trim(), p_email_gestor: email });
+      toast('🏢 Ambiente "' + nome.trim() + '" criado com ' + email + ' como gestor');
+      programador.render();
+    } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  },
+  async addMembro() {
+    const org = (document.getElementById('prog-mem-org') || {}).value;
+    const email = ((document.getElementById('prog-mem-email') || {}).value || '').trim();
+    const role = (document.getElementById('prog-mem-role') || {}).value;
+    if (!org || !email) { toast('Escolha o ambiente e informe o e-mail', 'warn'); return; }
+    try {
+      await programador._rpc('prog_add_member', { p_org: org, p_email: email, p_role: role });
+      toast('👥 ' + email + ' adicionado como ' + role + ' em ' + programador._nomeOrg(org));
+      programador.render();
+    } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  },
+  async criarShare() {
+    const origem = (document.getElementById('prog-share-origem') || {}).value;
+    const destino = (document.getElementById('prog-share-destino') || {}).value;
+    if (!origem || !destino) return;
+    if (origem === destino) { toast('Origem e destino precisam ser ambientes diferentes', 'warn'); return; }
+    const modulos = Array.from(document.querySelectorAll('.prog-share-mod:checked')).map(c => c.value);
+    try {
+      await programador._req('org_shares?on_conflict=org_origem,org_destino', {
+        method: 'POST',
+        prefer: 'resolution=merge-duplicates,return=minimal',
+        body: [{ org_origem: origem, org_destino: destino, modulos }]
+      });
+      toast('🔗 ' + programador._nomeOrg(destino) + ' agora LÊ ' + (modulos.length ? modulos.join(', ') : 'todos os módulos') + ' de ' + programador._nomeOrg(origem));
+      programador.render();
+    } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  },
+  async removerShare(id) {
+    if (!confirm('Remover este acesso entre ambientes?')) return;
+    try {
+      await programador._req('org_shares?id=eq.' + encodeURIComponent(id), { method: 'DELETE' });
+      toast('Acesso removido');
+      programador.render();
+    } catch (e) { toast('Erro: ' + e.message, 'error'); }
   }
 };
 
@@ -37516,6 +37707,8 @@ document.addEventListener('DOMContentLoaded', () => {
   try { ajustesGrupos.montar(); } catch (e) {}
   window.configSync = configSync;
   try { configSync.vigiar(); } catch (e) {}
+  window.programador = programador;
+  try { programador.atualizarVisibilidade(); } catch (e) {}
   window.quickActions = quickActions; window.printPreview = printPreview;
   window.actions = actions; window.toast = toast;
   window.cbhpm = cbhpm; window.CBHPM_2018 = CBHPM_2018;
