@@ -5842,6 +5842,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
         <h3 style="font-size:.92rem;color:var(--primary-darker);margin:18px 0 8px;border-top:1px solid var(--border);padding-top:14px">📍 Eventos cronológicos<small style="color:var(--text-mute);font-weight:400; margin-left:8px">— marcados como letras no gráfico</small></h3>
         <div class="quick-actions">
           <span class="qa-label">Adicionar rápido</span>
+          <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.eventos.abrirCatalogo()" title="Marque vários eventos de uma vez, agrupados por categoria">📋 Catálogo (multiseleção)</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Venoclise'})">+ Venoclise</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Indução'})">+ Indução</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Intubação'})">+ Intubação</button>
@@ -9783,6 +9784,7 @@ const fabDial = {
       acao: function () { if (state.currentModule === 'anestesia' && window.vitaisRapidos) vitaisRapidos.abrir(); else anestesia.vitais.registrarAgora(); } },
     { ico: '💉', rot: 'Dose rápida', cor: '#128a7d', mods: ['anestesia'], acao: function () { doseRapida.abrir(); } },
     { ico: '📋', rot: 'Catálogo de meds', cor: '#7c3aed', mods: ['anestesia'], acao: function () { anestesia.meds.abrirCatalogo(); } },
+    { ico: '📍', rot: 'Catálogo de eventos', cor: '#b45309', mods: ['anestesia'], acao: function () { anestesia.eventos.abrirCatalogo(); } },
     { ico: '🕐', rot: 'Carimbar evento', cor: '#1c64a9', mods: ['anestesia', 'recuperacao'], acao: function () { carimboHora.carimbar(); } },
     { ico: '⏱️', rot: 'Tempos do caso', cor: '#d97706', mods: ['anestesia'], acao: function () { anestesia.tempos.abrir(); } },
     { ico: '⏲️', rot: 'Cronômetro', cor: '#64748b', mods: ['anestesia', 'recuperacao'], acao: function () { cronometros.criar(); } },
@@ -20726,44 +20728,22 @@ const anestesia = {
 
   /* ---- EVENTOS CRONOLÓGICOS ---- */
   eventos: {
-    TIPOS: [
-      /* Procedimentos / acessos */
-      'Venoclise', 'Punção arterial', 'Acesso venoso central',
-      /* Via aérea / anestesia */
-      'Indução', 'Intubação', 'Extubação', 'Máscara laríngea',
-      'Início O₂', 'Fim O₂',
-      'Início halogenado', 'Fim halogenado',
-      'Início infusão contínua', 'Fim infusão contínua',
-      /* Bloqueios */
-      'Raquianestesia', 'Peridural', 'Bloqueio periférico',
-      /* Cirurgia */
-      'Incisão cirúrgica', 'Início da cirurgia', 'Hemostasia', 'Fim da cirurgia',
-      /* Laparoscopia */
-      'Início do pneumoperitônio', 'Fim do pneumoperitônio',
-      /* Obstétrico */
-      'Nascimento / extração fetal', 'Clampeamento do cordão', 'Dequitação (saída placenta)',
-      /* CEC */
-      'Início CEC', 'Fim CEC', 'Clampeamento aórtico', 'Desclampeamento',
-      /* Hemodinâmicas */
-      'Hipotensão importante', 'Hipertensão importante',
-      'Bradicardia', 'Taquicardia', 'Arritmia',
-      /* Respiratórias */
-      'Dessaturação', 'Broncoespasmo', 'Laringoespasmo',
-      'Apneia', 'Disritmia ventilatória',
-      /* Intercorrências */
-      'Reação alérgica', 'Anafilaxia',
-      'Náusea', 'Vômito',
-      'Sangramento importante', 'Hipotermia',
-      'Hipertermia maligna', 'Convulsão',
-      'Despertar intraoperatório',
-      'Embolia gasosa (CO₂)', 'Enfisema subcutâneo', 'Pneumotórax',
-      /* Procedimentos terapêuticos */
-      'Transfusão', 'Manobra de recrutamento',
-      'Reversão BNM', 'Cardioversão / RCP',
-      'Antibioticoprofilaxia',
-      /* Outros */
-      'Outro'
+    /* Catálogo agrupado (fonte única) — TIPOS é derivado daqui */
+    GRUPOS: [
+      { grupo: 'Procedimentos / acessos', itens: ['Venoclise', 'Punção arterial', 'Acesso venoso central'] },
+      { grupo: 'Via aérea / anestesia', itens: ['Indução', 'Intubação', 'Extubação', 'Máscara laríngea', 'Início O₂', 'Fim O₂', 'Início halogenado', 'Fim halogenado', 'Início infusão contínua', 'Fim infusão contínua'] },
+      { grupo: 'Bloqueios', itens: ['Raquianestesia', 'Peridural', 'Bloqueio periférico'] },
+      { grupo: 'Cirurgia', itens: ['Incisão cirúrgica', 'Início da cirurgia', 'Hemostasia', 'Fim da cirurgia'] },
+      { grupo: 'Laparoscopia', itens: ['Início do pneumoperitônio', 'Fim do pneumoperitônio'] },
+      { grupo: 'Obstétrico', itens: ['Nascimento / extração fetal', 'Clampeamento do cordão', 'Dequitação (saída placenta)'] },
+      { grupo: 'CEC', itens: ['Início CEC', 'Fim CEC', 'Clampeamento aórtico', 'Desclampeamento'] },
+      { grupo: 'Hemodinâmicas', itens: ['Hipotensão importante', 'Hipertensão importante', 'Bradicardia', 'Taquicardia', 'Arritmia'] },
+      { grupo: 'Respiratórias', itens: ['Dessaturação', 'Broncoespasmo', 'Laringoespasmo', 'Apneia', 'Disritmia ventilatória'] },
+      { grupo: 'Intercorrências', itens: ['Reação alérgica', 'Anafilaxia', 'Náusea', 'Vômito', 'Sangramento importante', 'Hipotermia', 'Hipertermia maligna', 'Convulsão', 'Despertar intraoperatório', 'Embolia gasosa (CO₂)', 'Enfisema subcutâneo', 'Pneumotórax'] },
+      { grupo: 'Procedimentos terapêuticos', itens: ['Transfusão', 'Manobra de recrutamento', 'Reversão BNM', 'Cardioversão / RCP', 'Antibioticoprofilaxia'] },
+      { grupo: 'Outros', itens: ['Outro'] }
     ],
+    get TIPOS() { return [].concat(...anestesia.eventos.GRUPOS.map(g => g.itens)); },
     /* Descrições técnicas passo a passo por tipo de evento/procedimento */
     DESCRICOES: {
       'Raquianestesia': '1) Assepsia e antissepsia; 2) Colocação de campos estéreis; 3) Botão anestésico na pele; 4) Punção subaracnóidea (L3–L4) com agulha de fino calibre; 5) Refluxo de líquor cristalino; 6) Injeção do anestésico; 7) Retorno ao decúbito e checagem do nível do bloqueio.',
@@ -20892,6 +20872,52 @@ const anestesia = {
       anestesia.eventos.add({ tipo: 'Fim halogenado', hora: utils.horaAtual() });
       try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
       toast('Fim do halogenado marcado. Abra a calculadora 🧮 para lançar o volume em Medicações.');
+    },
+    /* Catálogo de eventos (multiseleção) — mesmo padrão do catálogo de medicações.
+       Marca vários de uma vez; cada um entra na tabela com a hora atual e a
+       descrição técnica (quando houver), para ajustar horário/detalhes depois. */
+    abrirCatalogo(ctx) {
+      anestesia.eventos._catalogoCtx = ctx || 'anestesia';
+      const corpo =
+        '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">Marque os eventos ocorridos. Eles entram na tabela com a <b>hora atual</b> e a descrição técnica (quando houver) — ajuste o horário e os detalhes depois.</p>' +
+        '<div style="margin-bottom:10px"><input type="text" id="cat-evt-busca" placeholder="🔎 filtrar evento…" style="width:100%;padding:8px" oninput="anestesia.eventos._catalogoFiltrar(this.value)"></div>' +
+        '<div id="cat-evt-lista" style="max-height:52vh;overflow:auto">' +
+        anestesia.eventos.GRUPOS.map((g, gi) =>
+          '<div class="cat-evt-grupo"><div style="font-size:.74rem;font-weight:700;color:var(--primary-darker);text-transform:uppercase;letter-spacing:.3px;margin:10px 0 4px">' + utils.escapeHTML(g.grupo) + '</div>' +
+          '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
+          g.itens.map((t, ti) =>
+            '<label class="cat-evt-item" data-nome="' + utils.escapeAttr(t.toLowerCase()) + '" style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:16px;padding:6px 12px;font-size:.84rem;cursor:pointer;background:var(--surface-alt)">' +
+            '<input type="checkbox" data-g="' + gi + '" data-i="' + ti + '" style="width:16px;height:16px">' + utils.escapeHTML(t) +
+            (anestesia.eventos.DESCRICOES[t] ? ' <small title="Tem descrição técnica — entra nos detalhes automaticamente">📝</small>' : '') +
+            '</label>').join('') +
+          '</div></div>').join('') +
+        '</div>';
+      modal.open('📍 Catálogo de eventos', corpo,
+        '<button class="btn btn-primary" onclick="anestesia.eventos._catalogoConfirmar()">Adicionar selecionados</button>' +
+        '<button class="btn" onclick="modal.close()">Cancelar</button>');
+    },
+    _catalogoFiltrar(txt) {
+      const q = (txt || '').toLowerCase().trim();
+      document.querySelectorAll('#cat-evt-lista .cat-evt-item').forEach(el => {
+        el.style.display = (!q || (el.dataset.nome || '').includes(q)) ? '' : 'none';
+      });
+      document.querySelectorAll('#cat-evt-lista .cat-evt-grupo').forEach(g => {
+        const algum = Array.from(g.querySelectorAll('.cat-evt-item')).some(el => el.style.display !== 'none');
+        g.style.display = algum ? '' : 'none';
+      });
+    },
+    _catalogoConfirmar() {
+      const marcados = Array.from(document.querySelectorAll('#cat-evt-lista input[type="checkbox"]:checked'));
+      if (!marcados.length) { toast('Nenhum evento marcado', 'warn'); return; }
+      anestesia.graficoUI._contexto = anestesia.eventos._catalogoCtx || 'anestesia';
+      marcados.forEach(chk => {
+        const g = anestesia.eventos.GRUPOS[+chk.dataset.g]; if (!g) return;
+        const t = g.itens[+chk.dataset.i]; if (!t) return;
+        anestesia.eventos.add({ tipo: t, hora: utils.horaAtual(), obs: anestesia.eventos.DESCRICOES[t] || '' });
+      });
+      markDirty();
+      modal.close();
+      toast('✅ ' + marcados.length + ' evento(s) adicionado(s) — ajuste horário e detalhes');
     },
     add(dados = {}) {
       const tbody = document.getElementById(anestesia.graficoUI._ctxIds().eventosBody);
