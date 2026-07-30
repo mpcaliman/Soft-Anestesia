@@ -1758,6 +1758,97 @@ await test('Configurações sobem para a nuvem, descem ao entrar (vence a mais n
   await page.close();
 });
 
+/* 39) CBHPM em todo campo: segmentos com ➕, multiplicador xN e auxiliares do cirurgião */
+await test('CBHPM: vários códigos no mesmo campo (➕/x2) em todo o app e auxiliares do cirurgião na ficha', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    /* — helpers de segmento e multiplicador — */
+    out.parseMult = cbhpm.parseMult('Apendicectomia x2').mult === 2
+      && cbhpm.parseMult('Apendicectomia x2').texto === 'Apendicectomia'
+      && cbhpm.parseMult('3.01.01.01-8 ×3').mult === 3
+      && cbhpm.parseMult('Colecistectomia').mult === 1;
+    out.segmento = cbhpm._segmento('A + Bx').seg === 'Bx' && cbhpm._segmento('A + Bx').prefixo === 'A +'
+      && cbhpm._segmento('Só um').prefixo === '';
+
+    /* — todo campo CBHPM estático ganhou o botão ➕ — */
+    const camposComMais = document.querySelectorAll('.cbhpm-linha .cbhpm-mais').length;
+    out.temBotoesMais = camposComMais >= 5;   /* pré, consulta, ficha, SRPA, termo, financeiro, agenda */
+
+    /* — busca por segmento: só o trecho após o último ' + ' é pesquisado — */
+    location.hash = '#recuperacao';
+    await new Promise(r => setTimeout(r, 400));
+    const inp = document.querySelector('#form-recuperacao [name="procedimento"]');
+    inp.value = 'Colecistectomia + apendicectomia';
+    cbhpm._abrir(inp);
+    const itens = inp._cbhpmItens || [];
+    out.buscaSegmento = itens.length >= 1 && /apendicectomia/i.test(itens[0].descricao);
+    /* escolher preserva o que já estava antes do ' + ' */
+    const el0 = inp._cbhpmBox && inp._cbhpmBox.querySelector('.cbhpm-item');
+    if (el0) cbhpm._escolher(el0);
+    out.escolhaPreserva = inp.value.startsWith('Colecistectomia +') && new RegExp(itens[0].descricao.slice(0, 12)).test(inp.value);
+    /* botão ➕ acrescenta ' + ' no fim */
+    const btnMais = inp.closest('.cbhpm-linha').querySelector('.cbhpm-mais');
+    btnMais.click();
+    out.maisAcrescenta = /\+\s$/.test(inp.value);
+    inp.value = '';
+
+    /* — na ficha, o ➕ do procedimento principal cria linha no bloco de códigos — */
+    location.hash = '#anestesia';
+    await new Promise(r => setTimeout(r, 400));
+    document.getElementById('cir-combo-body').innerHTML = '';
+    const inpFicha = document.querySelector('#form-anestesia [name="procedimento"]');
+    const btnFicha = inpFicha.closest('.cbhpm-linha').querySelector('.cbhpm-mais');
+    btnFicha.click();
+    out.fichaCriaLinha = document.querySelectorAll('#cir-combo-body [name="cir_extra_proc[]"]').length === 1;
+    document.getElementById('cir-combo-body').innerHTML = '';
+
+    /* — auxiliares do cirurgião: ➕ ao lado do campo, coleta, impressão — */
+    const f = document.getElementById('form-anestesia');
+    f.querySelector('[name="cirurgiao"]').value = 'Dr. Principal';
+    anestesia.equipeAux.add('Dr. Aux Um');
+    anestesia.equipeAux.add('Dra. Aux Dois');
+    const estr = anestesia.coletarEstruturado();
+    out.auxColeta = JSON.stringify(estr.procedimento.auxiliares) === JSON.stringify(['Dr. Aux Um', 'Dra. Aux Dois']);
+    f.querySelector('[name="paciente_nome"]').value = 'Paciente Aux';
+    const htmlFicha = printPreview._buildAnestesia();
+    out.auxImpressao = htmlFicha.includes('Auxiliares') && htmlFicha.includes('Dr. Aux Um') && htmlFicha.includes('Dra. Aux Dois');
+    anestesia.equipeAux.restaurar([]);
+    out.auxLimpa = anestesia.equipeAux.coletar().length === 0;
+
+    /* — lançamento rápido entende "código + código x2" no mesmo campo — */
+    store.setList('financeiro', []);
+    financeiro.lancamentoRapido();
+    await new Promise(r => setTimeout(r, 150));
+    document.getElementById('fin-rap-paciente').value = 'Paciente Mult';
+    document.getElementById('fin-rap-data').value = '2026-07-30';
+    document.querySelector('#fin-rap-procs .fin-rap-proc').value = '3.01.01.97-2 + 3.01.01.01-8 x2';
+    financeiro._salvarRapido();
+    await new Promise(r => setTimeout(r, 150));
+    const fin = store.list('financeiro')[0] || {};
+    const cods = fin.codigos || [];
+    const c97 = cods.find(c => c.codigo === '3.01.01.97-2');
+    const c01 = cods.find(c => c.codigo === '3.01.01.01-8');
+    out.multQtd = cods.length === 2 && !!c97 && !!c01 && c01.qtd === 2
+      && c97.grau === 100 && c01.grau === 50;   /* maior porte (10A) principal */
+    store.setList('financeiro', []);
+    modal.close();
+    return out;
+  });
+  assert(r.parseMult, 'parseMult deveria entender x2/×3 e devolver o texto limpo');
+  assert(r.segmento, '_segmento deveria separar o trecho após o último " + "');
+  assert(r.temBotoesMais, 'os campos CBHPM deveriam ganhar o botão ➕ automaticamente');
+  assert(r.buscaSegmento, 'a busca deveria valer só para o segmento sendo digitado');
+  assert(r.escolhaPreserva, 'escolher uma sugestão deveria preservar os procedimentos anteriores');
+  assert(r.maisAcrescenta, 'o ➕ deveria acrescentar " + " e focar o campo');
+  assert(r.fichaCriaLinha, 'na ficha, o ➕ do principal deveria criar linha no bloco de códigos');
+  assert(r.auxColeta, 'os auxiliares deveriam ser coletados com a ficha');
+  assert(r.auxImpressao, 'os auxiliares deveriam sair na impressão da ficha');
+  assert(r.auxLimpa, 'restaurar([]) deveria limpar os auxiliares');
+  assert(r.multQtd, 'lançamento rápido deveria virar 2 códigos, com x2 → Qtd 2 e hierarquia de grau');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
