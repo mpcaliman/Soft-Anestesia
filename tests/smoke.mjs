@@ -426,10 +426,11 @@ await test('Ficha: nav de seções com contadores, FAB tempos carimba e FAB med 
     // Speed dial único visível na ficha; alça de rolagem removida
     out.dialVisivel = (document.getElementById('fab-dial') || {}).style.display;
     out.alcaSumiu = !document.getElementById('page-scroller');
-    // abrir o dial lista as 7 ações da ficha (inclui calculadora)
+    // abrir o dial lista as 8 ações da ficha (inclui calculadora e catálogo de eventos)
     fabDial.abrir();
-    out.dialItens = document.querySelectorAll('#fab-dial-itens .fab-dial-item').length;   // 7
+    out.dialItens = document.querySelectorAll('#fab-dial-itens .fab-dial-item').length;   // 8
     out.dialTemCalc = document.getElementById('fab-dial-itens').innerHTML.includes('Calculadora');
+    out.dialTemEvt = document.getElementById('fab-dial-itens').innerHTML.includes('Catálogo de eventos');
     fabDial.fechar();
     out.dialFechou = !document.getElementById('fab-dial').classList.contains('aberto');
     // adicionar uma linha de vitais → contador aparece
@@ -462,7 +463,7 @@ await test('Ficha: nav de seções com contadores, FAB tempos carimba e FAB med 
   assert(r.nChips === 9, 'deveria haver 9 chips na ficha-nav, veio ' + r.nChips);
   assert(r.dialVisivel === 'flex', 'speed dial deveria estar visível na ficha, veio ' + r.dialVisivel);
   assert(r.alcaSumiu, 'a alça de rolagem (page-scroller) deveria ter sido removida');
-  assert(r.dialItens === 7 && r.dialTemCalc, 'dial aberto deveria listar 7 ações incluindo a calculadora, veio ' + r.dialItens);
+  assert(r.dialItens === 8 && r.dialTemCalc && r.dialTemEvt, 'dial aberto deveria listar 8 ações incluindo calculadora e catálogo de eventos, veio ' + r.dialItens);
   assert(r.dialFechou, 'fechar() deveria recolher o dial');
   assert(r.navTemContador, 'chip de vitais deveria mostrar contador de linhas');
   assert(r.modalLinhas === 6 && r.temProximo, 'modal de tempos deveria ter 6 linhas com próximo destacado');
@@ -1569,6 +1570,64 @@ await test('Drive: importador navega pastas (ano a ano) e entende os nomes novos
   assert(r.temBotaoPastas, 'o importador deveria oferecer navegação por pastas (ano a ano)');
   assert(r.listouPastas, 'buscar pastas por nome deveria listar as pastas do Drive');
   assert(r.listouPdfsDaPasta, 'listar uma pasta deveria trazer só os PDFs dela, interpretados');
+  await page.close();
+});
+
+/* 36) Eventos da ficha: catálogo multiseleção (como o de medicações) */
+await test('Eventos: catálogo agrupado com multiseleção adiciona à tabela com descrição técnica', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    location.hash = '#anestesia';
+    await new Promise(r => setTimeout(r, 400));
+
+    /* TIPOS continua completo (derivado dos GRUPOS) — nada sumiu do select */
+    const tipos = anestesia.eventos.TIPOS;
+    out.tiposOk = Array.isArray(tipos) && tipos.includes('Início do pneumoperitônio')
+      && tipos.includes('Intubação') && tipos.includes('Outro') && tipos.length >= 50;
+
+    /* botão existe na seção de eventos */
+    out.temBotao = !!document.querySelector('button[onclick="anestesia.eventos.abrirCatalogo()"]');
+
+    /* abre o catálogo, filtra e confirma uma multiseleção */
+    document.getElementById('eventos-body').innerHTML = '';
+    anestesia.eventos.abrirCatalogo();
+    await new Promise(r => setTimeout(r, 100));
+    const lista = document.getElementById('cat-evt-lista');
+    out.abriu = !!lista && lista.querySelectorAll('.cat-evt-item').length >= 50
+      && lista.querySelectorAll('.cat-evt-grupo').length >= 10;
+
+    anestesia.eventos._catalogoFiltrar('intuba');
+    const visiveis = Array.from(lista.querySelectorAll('.cat-evt-item')).filter(el => el.style.display !== 'none');
+    out.filtrou = visiveis.length >= 1 && visiveis.every(el => (el.dataset.nome || '').includes('intuba'));
+    anestesia.eventos._catalogoFiltrar('');
+
+    const marcar = ['Intubação', 'Início do pneumoperitônio', 'Antibioticoprofilaxia'];
+    lista.querySelectorAll('.cat-evt-item').forEach(el => {
+      const gi = +el.querySelector('input').dataset.g, ti = +el.querySelector('input').dataset.i;
+      if (marcar.includes(anestesia.eventos.GRUPOS[gi].itens[ti])) el.querySelector('input').checked = true;
+    });
+    anestesia.eventos._catalogoConfirmar();
+    await new Promise(r => setTimeout(r, 100));
+
+    const linhas = Array.from(document.querySelectorAll('#eventos-body tr'));
+    const tiposAdicionados = linhas.map(tr => tr.querySelector('[name="evt_tipo[]"]').value);
+    out.adicionou = linhas.length === 3 && marcar.every(t => tiposAdicionados.includes(t));
+    out.comHora = linhas.every(tr => /\d{2}:\d{2}/.test(tr.querySelector('[name="evt_hora[]"]').value || ''));
+    const obsIntub = linhas.find(tr => tr.querySelector('[name="evt_tipo[]"]').value === 'Intubação')
+      ?.querySelector('[name="evt_obs[]"]').value || '';
+    out.comDescricao = /laringoscopia/i.test(obsIntub);
+
+    document.getElementById('eventos-body').innerHTML = '';
+    return out;
+  });
+  assert(r.tiposOk, 'TIPOS deveria continuar completo, derivado dos grupos do catálogo');
+  assert(r.temBotao, 'a seção de eventos deveria ter o botão 📋 Catálogo (multiseleção)');
+  assert(r.abriu, 'o catálogo deveria abrir com os eventos agrupados por categoria');
+  assert(r.filtrou, 'o filtro deveria esconder o que não bate com a busca');
+  assert(r.adicionou, 'confirmar deveria adicionar os 3 eventos marcados à tabela');
+  assert(r.comHora, 'cada evento adicionado deveria entrar com a hora atual');
+  assert(r.comDescricao, 'eventos com descrição técnica deveriam entrar com ela nos detalhes');
   await page.close();
 });
 
