@@ -5044,8 +5044,14 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <div class="field col-3"><label>Carteirinha</label><input type="text" name="paciente_carteirinha"></div>
           <div class="field col-3"><label>Hospital / clínica</label><input type="text" name="local_hospital"></div>
           <div class="field col-3"><label>Procedência / origem</label><select name="origem"><option value="">—</option><option>Enfermaria</option><option>Apartamento</option><option>UTI</option><option>Emergência</option><option>Centro cirúrgico</option><option>Outro</option></select></div>
-          <div class="field col-4"><label>Cirurgião</label><input type="text" name="cirurgiao"></div>
-          <div class="field col-6"><label>Procedimento cirúrgico <small style="color:var(--text-mute);font-weight:400">(CBHPM — principal, entra 100%; mais códigos logo abaixo)</small></label><input type="text" name="procedimento" class="cbhpm-autocomplete" placeholder="Digite parte do procedimento ou o código TUSS..."></div>
+          <div class="field col-4"><label>Cirurgião</label>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input type="text" name="cirurgiao" style="flex:1;min-width:0">
+              <button type="button" class="btn btn-xs" title="Adicionar auxiliares da equipe cirúrgica" onclick="anestesia.equipeAux.add()">➕</button>
+            </div>
+            <div id="equipe-aux-lista"></div>
+          </div>
+          <div class="field col-6"><label>Procedimento cirúrgico <small style="color:var(--text-mute);font-weight:400">(CBHPM — principal, entra 100%; mais códigos logo abaixo)</small></label><input type="text" name="procedimento" class="cbhpm-autocomplete" data-mais-acao="ficha" placeholder="Digite parte do procedimento ou o código TUSS..."></div>
           <div class="field col-2"><label>Sala</label><input type="text" name="sala"></div>
         </div>
 
@@ -8188,7 +8194,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
               <select name="status"><option value="agendado">Agendado</option><option value="confirmado">Confirmado</option><option value="realizado">Realizado</option><option value="cancelado">Cancelado</option></select>
             </div>
             <div class="field col-6 required"><label>Paciente <span class="req">*</span></label><input type="text" name="paciente" data-required></div>
-            <div class="field col-6"><label>Procedimento / motivo</label><input type="text" name="procedimento"></div>
+            <div class="field col-6"><label>Procedimento / motivo <small style="color:var(--text-mute);font-weight:400">(CBHPM — opcional)</small></label><input type="text" name="procedimento" class="cbhpm-autocomplete"></div>
             <div class="field col-6"><label>Cirurgião / profissional</label><input type="text" name="cirurgiao"></div>
             <div class="field col-6"><label>Local</label><input type="text" name="local"></div>
             <div class="field col-6"><label>Convênio</label>
@@ -19974,8 +19980,23 @@ const cbhpm = {
     input.addEventListener('blur', () => setTimeout(() => cbhpm._fechar(input), 200));
   },
 
+  /* Vários procedimentos no MESMO campo, separados por ' + ' — a busca vale
+     só para o ÚLTIMO segmento (o que está sendo digitado) */
+  _segmento(valor) {
+    const v = String(valor || '');
+    const idx = v.lastIndexOf('+');
+    if (idx < 0) return { prefixo: '', seg: v.trim() };
+    return { prefixo: v.slice(0, idx + 1).trim(), seg: v.slice(idx + 1).trim() };
+  },
+  /* "Procedimento x2" / "×2" → { texto, mult } (multiplicador de execuções) */
+  parseMult(texto) {
+    const m = String(texto || '').match(/^(.*\S)\s*[x×]\s*(\d+)\s*$/i);
+    if (m) return { texto: m[1].trim(), mult: parseInt(m[2], 10) || 1 };
+    return { texto: String(texto || '').trim(), mult: 1 };
+  },
+
   _abrir(input) {
-    const texto = (input.value || '').trim();
+    const texto = cbhpm.parseMult(cbhpm._segmento(input.value).seg).texto;
     cbhpm._fechar(input);
     if (texto.length < 2) return;
     const itens = cbhpm.buscar(texto, 30);
@@ -20050,12 +20071,21 @@ const cbhpm = {
     const i = parseInt(el.getAttribute('data-i'), 10);
     const it = (input._cbhpmItens || [])[i];
     if (!it) return;
-    input.value = it.descricao;
+    const opts = input._cbhpmOpts || {};
+    const row = opts.row || input.closest('tr') || (input.closest('.field') && input.closest('.field').parentElement);
+    /* preserva os procedimentos anteriores (' + ') e o multiplicador xN do segmento */
+    const seg = cbhpm._segmento(input.value);
+    const mult = cbhpm.parseMult(seg.seg).mult;
+    let sufixo = '';
+    if (mult > 1) {
+      const qtdEl = row && opts.qtdFieldName ? row.querySelector(`[name="${opts.qtdFieldName}"]`) : null;
+      if (qtdEl) { qtdEl.value = mult; qtdEl.dispatchEvent(new Event('input', { bubbles: true })); }
+      else sufixo = ' x' + mult;
+    }
+    input.value = (seg.prefixo ? seg.prefixo + ' ' : '') + it.descricao + sufixo;
     cbhpm._fechar(input);
     /* recompõe um match no formato do array [cod, nome, porteCir, porteAnest, aux] */
     const match = CBHPM_2018.find(c => c[0] === it.codigo) || [it.codigo, it.descricao, it.porte, it.porte_anest, it.aux];
-    const opts = input._cbhpmOpts || {};
-    const row = opts.row || input.closest('tr') || (input.closest('.field') && input.closest('.field').parentElement);
     if (row && opts.codigoFieldName) {
       const codEl = row.querySelector(`[name="${opts.codigoFieldName}"]`);
       if (codEl) codEl.value = match[0];
@@ -20074,7 +20104,50 @@ const cbhpm = {
   aplicarTodos(root = document) {
     root.querySelectorAll('.cbhpm-autocomplete, [data-cbhpm="1"]').forEach(input => {
       if (!input._cbhpmLigado) cbhpm.ligar(input);
+      cbhpm._garantirMais(input);
     });
+  },
+
+  /* Botão ➕ ao lado de TODO campo CBHPM: acrescenta ' + ' para digitar mais um
+     código no mesmo campo (cirurgias com vários códigos). Na ficha, o campo
+     principal usa data-mais-acao="ficha" → o ➕ cria uma linha no bloco de
+     códigos adicionais (cada um com o seu grau). data-sem-mais="1" desliga. */
+  _garantirMais(input) {
+    if (!input || input._cbhpmMais) return;
+    if (input.dataset && input.dataset.semMais === '1') return;
+    input._cbhpmMais = true;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-xs cbhpm-mais';
+    btn.textContent = '➕';
+    btn.title = (input.dataset && input.dataset.maisAcao === 'ficha')
+      ? 'Adicionar mais um código no bloco de procedimentos adicionais (cada linha com o seu grau %)'
+      : 'Adicionar mais um procedimento/código neste campo (use também "x2" para repetições)';
+    btn.addEventListener('mousedown', e => e.preventDefault());
+    btn.addEventListener('click', () => {
+      if (input.dataset && input.dataset.maisAcao === 'ficha') {
+        try {
+          const linha = anestesia.cirurgias.add();
+          if (linha) { const i2 = linha.querySelector('[name="cir_extra_proc[]"]'); if (i2) i2.focus(); }
+          toast('Código adicional criado no bloco abaixo — cada linha tem o seu grau (%)');
+        } catch (e) {}
+        return;
+      }
+      const v = (input.value || '').trim();
+      input.value = v ? v.replace(/\s*\+\s*$/, '') + ' + ' : '';
+      input.focus();
+      try { input.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {}
+      try { markDirty(); } catch (e) {}
+    });
+    const wrap = document.createElement('span');
+    wrap.className = 'cbhpm-linha';
+    wrap.style.cssText = 'display:flex;gap:6px;align-items:center;position:relative;width:100%';
+    if (input.style.flex) wrap.style.flex = input.style.flex;
+    input.parentNode.insertBefore(wrap, input);
+    wrap.appendChild(input);
+    input.style.flex = '1';
+    input.style.minWidth = '0';
+    wrap.appendChild(btn);
   },
 
   /* Busca por descrição parcial (para uso futuro em autocomplete custom) */
@@ -21125,6 +21198,33 @@ const anestesia = {
     }
   },
 
+  /* ---- AUXILIARES DO CIRURGIÃO (equipe cirúrgica) ---- */
+  equipeAux: {
+    add(nome) {
+      const box = document.getElementById('equipe-aux-lista');
+      if (!box) return null;
+      const div = document.createElement('div');
+      div.style.cssText = 'display:flex;gap:6px;align-items:center;margin-top:6px';
+      div.innerHTML = '<input type="text" name="equipe_aux[]" placeholder="Auxiliar (nome)" style="flex:1;min-width:0" value="' + utils.escapeAttr(nome || '') + '">' +
+        '<button type="button" class="btn btn-xs btn-danger" title="Remover auxiliar" onclick="this.parentElement.remove(); markDirty();">✕</button>';
+      box.appendChild(div);
+      const inp = div.querySelector('input');
+      try { autocomplete.attachSimples(inp, 'cad_cirurgioes'); } catch (e) {}
+      if (!nome && inp) inp.focus();
+      try { markDirty(); } catch (e) {}
+      return div;
+    },
+    coletar() {
+      return Array.from(document.querySelectorAll('#equipe-aux-lista [name="equipe_aux[]"]'))
+        .map(i => (i.value || '').trim()).filter(Boolean);
+    },
+    restaurar(arr) {
+      const box = document.getElementById('equipe-aux-lista');
+      if (box) box.innerHTML = '';
+      (Array.isArray(arr) ? arr : []).forEach(n => anestesia.equipeAux.add(n));
+    }
+  },
+
   /* ---- CIRURGIAS COMBINADAS ---- */
   cirurgias: {
     add(dados = {}) {
@@ -21135,7 +21235,7 @@ const anestesia = {
       div.style.cssText = 'background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius);padding:10px;margin-bottom:8px';
       const grauSel = String(dados.grau || '50');
       div.innerHTML = `
-        <div class="field col-4"><label>Procedimento adicional <small style="color:var(--text-mute);font-weight:400">(CBHPM)</small></label><input type="text" name="cir_extra_proc[]" class="cbhpm-autocomplete" placeholder="Digite parte do procedimento..." value="${utils.escapeAttr(dados.procedimento || '')}"></div>
+        <div class="field col-4"><label>Procedimento adicional <small style="color:var(--text-mute);font-weight:400">(CBHPM)</small></label><input type="text" name="cir_extra_proc[]" class="cbhpm-autocomplete" data-sem-mais="1" placeholder="Digite parte do procedimento..." value="${utils.escapeAttr(dados.procedimento || '')}"></div>
         <div class="field col-3"><label>Cirurgião</label><input type="text" name="cir_extra_cir[]" value="${utils.escapeAttr(dados.cirurgiao || '')}"></div>
         <div class="field col-2"><label>Grau <small style="color:var(--text-mute);font-weight:400" title="Hierarquia de cobrança: o procedimento de MAIOR PORTE é o principal (100%); os demais da MESMA VIA entram 50%; VIA DIFERENTE entra 70% (ajuste manual)">%</small></label>
           <select name="cir_extra_grau[]">${['100', '70', '50'].map(g => `<option value="${g}" ${g === grauSel ? 'selected' : ''}>${g}%</option>`).join('')}</select></div>
@@ -25587,6 +25687,7 @@ const anestesia = {
       },
       procedimento: {
         descricao: v('procedimento'), cirurgiao: v('cirurgiao'),
+        auxiliares: anestesia.equipeAux.coletar(),
         hospital: v('local_hospital'), sala: v('sala'),
         data: v('data_anestesia'),
         hora_sala_entrada: v('hora_sala_entrada'),
@@ -25735,6 +25836,7 @@ const anestesia = {
 
     const pr = d.procedimento || {};
     set('procedimento', pr.descricao); set('cirurgiao', pr.cirurgiao);
+    try { anestesia.equipeAux.restaurar(pr.auxiliares); } catch (e) {}
     set('local_hospital', pr.hospital); set('sala', pr.sala);
     set('data_anestesia', pr.data);
     set('hora_sala_entrada', pr.hora_sala_entrada);
@@ -26478,6 +26580,8 @@ const anestesia = {
     if (eb) eb.innerHTML = '';
     const cco = document.getElementById('cir-combo-body');
     if (cco) cco.innerHTML = '';
+    const eax = document.getElementById('equipe-aux-lista');
+    if (eax) eax.innerHTML = '';
     const dd = document.getElementById('disp-detalhes-body');
     if (dd) dd.innerHTML = '';
     const ddw = document.getElementById('disp-detalhes');
@@ -32021,6 +32125,7 @@ ${TAG_CLOSE_HTML}`;
     html += printPreview._section('Procedimento', `
       <div class="pp-grid cols-3">
         ${printPreview._field('Cirurgião', pr.cirurgiao)}
+        ${printPreview._field('Auxiliares', (pr.auxiliares || []).join(', '))}
         ${printPreview._field('Hospital', pr.hospital)}
         ${printPreview._field('Sala', pr.sala)}
         ${printPreview._field('Data', utils.formatarData(pr.data))}
@@ -34156,8 +34261,10 @@ const financeiro = {
       /* Dropdown CBHPM customizado no campo descrição — preenche código e porte */
       try {
         const descEl = tr.querySelector('[name="fin_cod_desc[]"]');
+        if (descEl) descEl.dataset.semMais = '1';   /* cada código tem a sua linha */
         cbhpm.ligar(descEl, {
           row: tr,
+          qtdFieldName: 'fin_cod_qtd[]',   /* "x2" digitado vira Qtd × 2 */
           onMatch: (match) => {
             const codEl = tr.querySelector('[name="fin_cod_codigo[]"]');
             const porteEl = tr.querySelector('[name="fin_cod_porte[]"]');
@@ -34368,33 +34475,28 @@ const financeiro = {
       const jaExistentes = new Set();
       document.querySelectorAll('[name="fin_cod_codigo[]"]').forEach(el => { if (el.value) jaExistentes.add(el.value); });
       let n = 0;
-      /* Procedimento principal */
-      const principalDesc = a.procedimento && a.procedimento.descricao;
-      if (principalDesc) {
-        const match = CBHPM_2018.find(c => c[1].toLowerCase() === principalDesc.toLowerCase());
-        if (match && !jaExistentes.has(match[0])) {
-          financeiro.codigos.add({ codigo: match[0], descricao: match[1], porte: match[2], grau: '100' });
-          n++;
-        } else if (!match) {
-          financeiro.codigos.add({ descricao: principalDesc, grau: '100' });
-          n++;
-        }
-      }
+      /* Importa uma descrição que pode conter VÁRIOS procedimentos no mesmo
+         campo ("A + B x2"): cada segmento vira um código; "xN" vira Qtd. */
+      const importarTexto = (texto, grau) => {
+        String(texto || '').split(/\s+\+\s+/).forEach((segTxt, i) => {
+          const pm = cbhpm.parseMult(segTxt);
+          if (!pm.texto) return;
+          const g = (i === 0) ? grau : '50';
+          const match = CBHPM_2018.find(c => c[1].toLowerCase() === pm.texto.toLowerCase() || c[0] === pm.texto);
+          if (match && !jaExistentes.has(match[0])) {
+            financeiro.codigos.add({ codigo: match[0], descricao: match[1], porte: match[2], grau: g, qtd: pm.mult });
+            jaExistentes.add(match[0]); n++;
+          } else if (!match) {
+            financeiro.codigos.add({ descricao: pm.texto, grau: g, qtd: pm.mult });
+            n++;
+          }
+        });
+      };
+      /* Procedimento principal (pode ter segmentos ' + ') */
+      importarTexto(a.procedimento && a.procedimento.descricao, '100');
       /* Cirurgias combinadas (a ficha salva a descrição em c.procedimento) */
       const extras = (a.procedimento && a.procedimento.cirurgias_extra) || [];
-      extras.forEach(c => {
-        const d = c.procedimento || c.descricao;
-        if (!d) return;
-        const grau = String(c.grau || '50');
-        const match = CBHPM_2018.find(x => x[1].toLowerCase() === d.toLowerCase());
-        if (match && !jaExistentes.has(match[0])) {
-          financeiro.codigos.add({ codigo: match[0], descricao: match[1], porte: match[2], grau });
-          n++;
-        } else if (!match) {
-          financeiro.codigos.add({ descricao: d, grau });
-          n++;
-        }
-      });
+      extras.forEach(c => importarTexto(c.procedimento || c.descricao, String(c.grau || '50')));
       if (n > 0) {
         toast(n + ' código(s) importado(s) da anestesia');
         try { financeiro.codigos.classificarGrau({ silent: true }); } catch (e) {}
@@ -34501,7 +34603,7 @@ const financeiro = {
     const div = document.createElement('div');
     div.style.cssText = 'display:flex;gap:6px;margin-bottom:6px;align-items:center';
     div.innerHTML =
-      '<input type="text" class="fin-rap-proc" data-cbhpm="1" placeholder="Digite parte do procedimento ou o código TUSS..." style="flex:1" value="' + utils.escapeAttr(dados.descricao || '') + '">' +
+      '<input type="text" class="fin-rap-proc" data-cbhpm="1" data-sem-mais="1" placeholder="Digite parte do procedimento ou o código TUSS... (aceita x2)" style="flex:1" value="' + utils.escapeAttr(dados.descricao || '') + '">' +
       '<select class="fin-rap-grau" title="Grau de cobrança (procedimentos múltiplos)" style="width:78px">' +
         ['100', '70', '50'].map(g => '<option value="' + g + '"' + (g === grauSel ? ' selected' : '') + '>' + g + '%</option>').join('') + '</select>' +
       (primeira ? '' : '<button type="button" class="btn btn-xs btn-danger" onclick="this.parentNode.remove()">✕</button>');
@@ -34515,20 +34617,27 @@ const financeiro = {
     /* Procedimentos: cada linha vira um CÓDIGO com o seu grau */
     const codigos = [];
     document.querySelectorAll('#fin-rap-procs > div').forEach(div => {
-      const desc = ((div.querySelector('.fin-rap-proc') || {}).value || '').trim();
-      if (!desc) return;
+      const descCampo = ((div.querySelector('.fin-rap-proc') || {}).value || '').trim();
+      if (!descCampo) return;
       const grau = (div.querySelector('.fin-rap-grau') || {}).value || '100';
-      let match = CBHPM_2018.find(c => c[1].toLowerCase() === desc.toLowerCase() || c[0] === desc);
-      if (!match) {
-        const cand = CBHPM_2018.filter(c => c[1].toLowerCase().includes(desc.toLowerCase()));
-        if (cand.length === 1) match = cand[0];
-      }
-      codigos.push({
-        codigo: match ? match[0] : '',
-        descricao: match ? match[1] : desc,
-        porte: match ? match[2] : '',
-        grau: parseFloat(grau) || 100,
-        status: 'aguardando'
+      /* o campo pode conter vários procedimentos ("A + B x2") — cada segmento
+         vira um código; "xN" vira quantidade */
+      descCampo.split(/\s+\+\s+/).forEach((segTxt, i) => {
+        const pm = cbhpm.parseMult(segTxt);
+        if (!pm.texto) return;
+        let match = CBHPM_2018.find(c => c[1].toLowerCase() === pm.texto.toLowerCase() || c[0] === pm.texto);
+        if (!match) {
+          const cand = CBHPM_2018.filter(c => c[1].toLowerCase().includes(pm.texto.toLowerCase()));
+          if (cand.length === 1) match = cand[0];
+        }
+        codigos.push({
+          codigo: match ? match[0] : '',
+          descricao: match ? match[1] : pm.texto,
+          porte: match ? match[2] : '',
+          qtd: pm.mult,
+          grau: (i === 0 ? parseFloat(grau) || 100 : 50),
+          status: 'aguardando'
+        });
       });
     });
     /* Hierarquia automática pelo PORTE: o maior é o principal (100%); os
