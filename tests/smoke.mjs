@@ -1631,6 +1631,62 @@ await test('Eventos: catálogo agrupado com multiseleção adiciona à tabela co
   await page.close();
 });
 
+/* 37) Ajustes prático: cards do sistema em 3 grupos recolhíveis + sync automática ao entrar */
+await test('Ajustes: 12 cards viram 3 grupos recolhíveis e a sincronização roda sozinha ao entrar', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    /* — grupos montados: cabeçalhos + cards movidos para dentro dos wrappers — */
+    ajustesGrupos.montar();   /* idempotente (já montou no boot) */
+    out.grupos = ['nuvem', 'equipe', 'modelos'].every(id =>
+      document.getElementById('ajg-cab-' + id) && document.getElementById('ajg-' + id));
+    out.cardsDentro = document.getElementById('ajg-nuvem').contains(document.getElementById('cloud-card'))
+      && document.getElementById('ajg-nuvem').contains(document.getElementById('armazenamento-card'))
+      && document.getElementById('ajg-equipe').contains(document.getElementById('equipe-nuvem-card'))
+      && document.getElementById('ajg-modelos').contains(document.getElementById('logo-usuario-card'));
+    /* fechados por padrão (tela compacta) */
+    localStorage.removeItem(ajustesGrupos.KEY);
+    ajustesGrupos._aplicar();
+    out.fechadoPadrao = document.getElementById('ajg-nuvem').style.display === 'none';
+    /* abrir/fechar com toque, lembrado */
+    ajustesGrupos.alternar('nuvem');
+    out.abriu = document.getElementById('ajg-nuvem').style.display !== 'none'
+      && JSON.parse(localStorage.getItem(ajustesGrupos.KEY)).nuvem === true;
+    ajustesGrupos.alternar('nuvem');
+    out.fechou = document.getElementById('ajg-nuvem').style.display === 'none';
+    /* atalho abrirPara abre o grupo certo e devolve o card */
+    const c = ajustesGrupos.abrirPara('armazenamento-card');
+    out.abrirPara = c && c.id === 'armazenamento-card'
+      && document.getElementById('ajg-nuvem').style.display !== 'none';
+
+    /* — sync automática ao entrar — */
+    const chamadas = { legado: 0, mods: [], pacientes: 0 };
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud.sincronizar = (o) => { if (o && o.silent) chamadas.legado++; };
+    cloudRel._puxados = { anestesia: true, pre: true };   /* já puxados nesta sessão */
+    cloudRel.autoPullModulo = async (m) => { chamadas.mods.push(m); };
+    pacientes._puxouNestaSessao = true;
+    pacientes.sincronizarNuvem = (o) => { if (o && o.silent) chamadas.pacientes++; };
+    cloud.autoSyncAoEntrar();
+    await new Promise(r => setTimeout(r, 2200));
+    out.syncLegado = chamadas.legado >= 1;
+    out.pullNovo = Object.keys(cloudRel._puxados).length === 0
+      && ['pre', 'anestesia', 'recuperacao', 'financeiro'].every(m => chamadas.mods.includes(m));
+    out.syncPacientes = chamadas.pacientes >= 1 && pacientes._puxouNestaSessao === false;
+    return out;
+  });
+  assert(r.grupos, 'os 3 grupos (nuvem/equipe/modelos) deveriam existir em Ajustes');
+  assert(r.cardsDentro, 'os cards do sistema deveriam estar DENTRO dos grupos');
+  assert(r.fechadoPadrao, 'os grupos deveriam vir fechados por padrão (tela compacta)');
+  assert(r.abriu && r.fechou, 'o toque no cabeçalho deveria abrir/fechar e lembrar a escolha');
+  assert(r.abrirPara, 'abrirPara deveria abrir o grupo que contém o card e devolvê-lo');
+  assert(r.syncLegado, 'entrar deveria disparar a sincronização silenciosa do canal legado');
+  assert(r.pullNovo, 'entrar deveria zerar os pulls da sessão e puxar os módulos principais');
+  assert(r.syncPacientes, 'entrar deveria sincronizar os pacientes sem nenhum toque');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

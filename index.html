@@ -3294,6 +3294,21 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
   border-radius: 999px; padding: 1px 8px; font-size: .68rem; font-weight: 800;
 }
 .cadastro-grupo-label.cg-toggle.aberto .cg-total { background: var(--primary-soft); color: var(--primary-dark); }
+/* Grupos do sistema em Ajustes (Nuvem / Equipe / Modelos) — cabeçalho com cara de card */
+.ajg-header {
+  display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px 16px; margin: 0 0 10px;
+  -webkit-tap-highlight-color: transparent;
+}
+.ajg-header:hover { background: var(--surface-alt); }
+.ajg-header .cg-seta { font-size: .8rem; width: 14px; flex-shrink: 0; color: var(--text-mute); }
+.ajg-header b { color: var(--primary-darker); font-size: .95rem; }
+.ajg-header .cg-total {
+  margin-left: auto; flex-shrink: 0; background: var(--surface-alt); color: var(--text-soft);
+  border-radius: 999px; padding: 2px 9px; font-size: .7rem; font-weight: 800;
+}
+.ajg-header.aberto .cg-total { background: var(--primary-soft); color: var(--primary-dark); }
 .proc-grupo-label {
   font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .5px;
   color: var(--primary); padding: 12px 4px 6px; margin-top: 6px;
@@ -9576,7 +9591,7 @@ const store = {
              <li>Confirme que a <strong>sincronização com a nuvem</strong> está ativa e concluída.</li>
              <li>Se precisar, faça um <strong>backup completo</strong> (Ajustes → Backup completo → Exportar).</li>
            </ol>`,
-          '<button class="btn btn-primary" onclick="modal.close(); location.hash=\'#ajustes\'; setTimeout(function(){ try { var c = document.getElementById(\'armazenamento-card\'); if (c) { c.classList.remove(\'collapsed\'); c.scrollIntoView({behavior:\'smooth\'}); armazenamento.render(); } } catch (e) {} }, 500);">🧹 Ir para a limpeza</button><button class="btn" onclick="modal.close()">Fechar</button>');
+          '<button class="btn btn-primary" onclick="modal.close(); location.hash=\'#ajustes\'; setTimeout(function(){ try { ajustesGrupos.abrirPara(\'armazenamento-card\'); armazenamento.render(); } catch (e) {} }, 500);">🧹 Ir para a limpeza</button><button class="btn" onclick="modal.close()">Fechar</button>');
       }
     } catch (e) {}
   },
@@ -14192,6 +14207,7 @@ const auth = {
         auth._definirSessao(local);
         document.getElementById('auth-pass').value = '';
         auth._desbloquear();
+        try { cloud.autoSyncAoEntrar(); } catch (e) {}
         return;
       }
       /* existe usuário local com esse login, mas a senha não confere;
@@ -14222,7 +14238,7 @@ const auth = {
           document.getElementById('auth-pass').value = '';
           auth._desbloquear();
           auth._limparFalhas();
-          setTimeout(() => { try { cloud.sincronizar({ silent: true }); } catch (e) {} }, 900);
+          try { cloud.autoSyncAoEntrar(); } catch (e) {}
           return;
         }
         auth._registrarFalha();
@@ -14657,7 +14673,12 @@ const auth = {
     /* Modo "1x por dia": se já houve login hoje neste aparelho, reabre a
        sessão sem pedir senha (a aba/navegador fechado apaga o sessionStorage,
        mas a sessão do dia fica no localStorage até virar o dia). */
-    if (!auth.estaLogado()) { try { auth._restaurarSessaoDiaria(); } catch (e) {} }
+    if (!auth.estaLogado()) {
+      try {
+        /* sessão diária restaurada também conta como "entrar": sincroniza sozinha */
+        if (auth._restaurarSessaoDiaria()) setTimeout(() => { try { cloud.autoSyncAoEntrar(); } catch (e) {} }, 400);
+      } catch (e) {}
+    }
     if (auth.estaLogado()) {
       auth._desbloquear();
     } else {
@@ -14804,8 +14825,8 @@ const ajustesUsuarios = {
       '1) A pessoa precisa ter uma conta na nuvem — se ainda não tem, peça para ela abrir o app e usar “Entrar → Criar conta” com o e-mail dela.\n' +
       '2) Confirme o e-mail e o papel abaixo e clique em “Adicionar”.\n\n' +
       'Papel sugerido (a partir do perfil local “' + ((auth.PERFIS[u.perfil] || {}).label || u.perfil) + '”): ' + rot + '.');
-    /* Abre e pré-preenche o card Equipe da nuvem. */
-    const card = document.getElementById('equipe-nuvem-card');
+    /* Abre e pré-preenche o card Equipe da nuvem (abrindo o grupo, se preciso). */
+    const card = (typeof ajustesGrupos !== 'undefined' ? ajustesGrupos.abrirPara('equipe-nuvem-card') : null) || document.getElementById('equipe-nuvem-card');
     if (card && card.classList.contains('collapsed')) { const h = card.querySelector('.card-header'); if (h) ui.toggleCard(h); }
     try { equipeNuvem.render(); } catch (e) {}
     setTimeout(() => {
@@ -15420,6 +15441,31 @@ const cloud = {
   },
   uiLogout() { if (confirm('Desconectar da nuvem? Seus dados continuam no aparelho.')) cloud.logout(); },
   uiSincronizar() { cloud.sincronizar({ enviarTudo: true }); },
+
+  /* Sincronização COMPLETA e silenciosa ao ENTRAR (login ou sessão diária
+     restaurada): drena a fila, sincroniza o canal legado e força um pull
+     relacional novo (pacientes + módulos clínicos/financeiro). O usuário
+     não precisa tocar em nada — o botão "Sincronizar agora" vira exceção. */
+  autoSyncAoEntrar() {
+    try {
+      if (!cloud.estaConfigurado() || !cloud.estaLogado()) return;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+      setTimeout(() => { try { cloud.sincronizar({ silent: true }); } catch (e) {} }, 900);
+      setTimeout(() => {
+        try {
+          if (typeof cloudRel !== 'undefined' && cloudRel.autoPullModulo) {
+            cloudRel._puxados = {};   /* qualquer módulo visitado puxa de novo nesta sessão */
+            ['pre', 'anestesia', 'recuperacao', 'financeiro'].forEach(m => {
+              try { cloudRel.autoPullModulo(m); } catch (e) {}
+            });
+          }
+          if (typeof pacientes !== 'undefined' && pacientes.sincronizarNuvem) {
+            try { pacientes._puxouNestaSessao = false; pacientes.sincronizarNuvem({ silent: true }); } catch (e) {}
+          }
+        } catch (e) {}
+      }, 1600);
+    } catch (e) {}
+  },
   uiEnviarTudo() {
     if (confirm('Enviar TODOS os registros do aparelho para a nuvem? Útil na primeira vez.')) {
       cloud.sincronizar({ enviarTudo: true });
@@ -37106,6 +37152,87 @@ window.addEventListener('beforeprint', atualizarMetaImpressao);
 /* ============================================================================
    INICIALIZAÇÃO
 ============================================================================ */
+/* ============================================================================
+   AJUSTES — GRUPOS DO SISTEMA (tela prática)
+   Os 12 cards técnicos de Ajustes viram 3 seções recolhíveis. Os cards não
+   mudam por dentro — só são MOVIDOS (via DOM) para dentro do grupo certo.
+   Fechados por padrão; a escolha de abrir/fechar é lembrada por aparelho.
+============================================================================ */
+const ajustesGrupos = {
+  KEY: 'medsys.v7.ajustes.sysgrupos',
+  GRUPOS: [
+    { id: 'nuvem', titulo: '☁️ Nuvem e backups',
+      desc: 'A sincronização é automática ao entrar. Aqui: cópias de segurança, PDFs na nuvem e espaço do aparelho',
+      cards: ['cloud-card', 'clouddiag-card', 'backup-completo-card', 'pdf-backup-card', 'armazenamento-card', 'fase4-card'] },
+    { id: 'equipe', titulo: '🔐 Usuários, equipe e auditoria',
+      desc: 'Login e permissões, membros da nuvem e registro de quem fez o quê',
+      cards: ['usuarios-card', 'equipe-nuvem-card', 'auditoria-card'] },
+    { id: 'modelos', titulo: '📄 Modelos e aparência',
+      desc: 'Termo de consentimento padrão, textos padrão por campo e logomarca',
+      cards: ['termo-padrao-card', 'textos-padrao-card', 'logo-usuario-card'] }
+  ],
+  _salvos() { try { return JSON.parse(localStorage.getItem(ajustesGrupos.KEY) || '{}'); } catch (e) { return {}; } },
+  _aberto(id) { return !!ajustesGrupos._salvos()[id]; },   /* fechado por padrão */
+  alternar(id) {
+    const s = ajustesGrupos._salvos();
+    s[id] = !ajustesGrupos._aberto(id);
+    try { localStorage.setItem(ajustesGrupos.KEY, JSON.stringify(s)); } catch (e) {}
+    ajustesGrupos._aplicar();
+  },
+  montar() {
+    const primeiro = document.getElementById('cloud-card');
+    if (!primeiro || document.getElementById('ajg-nuvem')) return;
+    const container = primeiro.parentElement;
+    /* marcador na posição original do 1º card — os grupos entram exatamente ali */
+    const marcador = document.createElement('div');
+    container.insertBefore(marcador, primeiro);
+    const frag = document.createDocumentFragment();
+    ajustesGrupos.GRUPOS.forEach(g => {
+      const cab = document.createElement('div');
+      cab.className = 'ajg-header';
+      cab.id = 'ajg-cab-' + g.id;
+      cab.setAttribute('onclick', "ajustesGrupos.alternar('" + g.id + "')");
+      const wrap = document.createElement('div');
+      wrap.id = 'ajg-' + g.id;
+      frag.appendChild(cab); frag.appendChild(wrap);
+      g.cards.forEach(cid => { const c = document.getElementById(cid); if (c) wrap.appendChild(c); });
+    });
+    container.insertBefore(frag, marcador);
+    marcador.remove();
+    ajustesGrupos._aplicar();
+  },
+  _aplicar() {
+    ajustesGrupos.GRUPOS.forEach(g => {
+      const cab = document.getElementById('ajg-cab-' + g.id);
+      const wrap = document.getElementById('ajg-' + g.id);
+      if (!cab || !wrap) return;
+      const aberto = ajustesGrupos._aberto(g.id);
+      cab.classList.toggle('aberto', aberto);
+      cab.innerHTML = '<span class="cg-seta">' + (aberto ? '▾' : '▸') + '</span>' +
+        '<span style="flex:1;min-width:0"><b>' + g.titulo + '</b>' +
+        '<small style="display:block;font-weight:400;color:var(--text-mute);white-space:normal;line-height:1.4">' + g.desc + '</small></span>' +
+        '<span class="cg-total">' + g.cards.length + '</span>';
+      wrap.style.display = aberto ? '' : 'none';
+    });
+  },
+  /* Abre o grupo que contém o card e leva até ele (usado por atalhos do app) */
+  abrirPara(cardId) {
+    try { ajustesGrupos.montar(); } catch (e) {}
+    const g = ajustesGrupos.GRUPOS.find(x => x.cards.includes(cardId));
+    if (g && !ajustesGrupos._aberto(g.id)) {
+      const s = ajustesGrupos._salvos(); s[g.id] = true;
+      try { localStorage.setItem(ajustesGrupos.KEY, JSON.stringify(s)); } catch (e) {}
+      ajustesGrupos._aplicar();
+    }
+    const c = document.getElementById(cardId);
+    if (c) {
+      if (c.classList.contains('collapsed')) { const h = c.querySelector('.card-header'); if (h) try { ui.toggleCard(h); } catch (e) {} }
+      try { c.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+    }
+    return c;
+  }
+};
+
 document.addEventListener('DOMContentLoaded', () => {
   /* 0a. Aplica tema salvo (claro/escuro) */
   ui._aplicarTemaSalvo();
@@ -37159,6 +37286,8 @@ document.addEventListener('DOMContentLoaded', () => {
   window.rascunhos = rascunhos;
   window.globalSearch = globalSearch; window.pacientes = pacientes;
   window.ajustes = ajustes; window.autocomplete = autocomplete;
+  window.ajustesGrupos = ajustesGrupos;
+  try { ajustesGrupos.montar(); } catch (e) {}
   window.quickActions = quickActions; window.printPreview = printPreview;
   window.actions = actions; window.toast = toast;
   window.cbhpm = cbhpm; window.CBHPM_2018 = CBHPM_2018;
