@@ -5880,7 +5880,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
         <div class="dyn-table-wrap">
           <table class="dyn" id="tab-eventos">
             <thead><tr>
-              <th style="width:80px">Horário</th>
+              <th style="width:80px;cursor:pointer" onclick="anestesia.ordenarPorHorario('eventos-body')" title="Toque para ordenar os eventos por horário (crescente)">Horário ↕</th>
               <th style="width:220px">Evento</th>
               <th>Detalhes</th>
               <th class="col-rm">×</th>
@@ -6005,7 +6005,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
         <div class="dyn-table-wrap">
           <table class="dyn" id="tab-medicacoes">
             <thead><tr>
-              <th style="width:80px">Horário</th>
+              <th style="width:80px;cursor:pointer" onclick="anestesia.ordenarPorHorario('medicacoes-body')" title="Toque para ordenar as medicações por horário (crescente)">Horário ↕</th>
               <th style="min-width:140px">Medicação</th>
               <th style="width:80px">Dose</th>
               <th style="width:95px">Unidade</th>
@@ -21389,6 +21389,21 @@ const anestesia = {
     }
   },
 
+  /* Ordena as linhas de uma tabela dinâmica pelo horário (crescente).
+     Acionado pelo clique no cabeçalho "Horário" (medicações e eventos).
+     Linhas sem horário vão para o fim. */
+  ordenarPorHorario(tbodyId) {
+    const tb = document.getElementById(tbodyId);
+    if (!tb) return;
+    const horaDe = tr => { const el = tr.querySelector('input[type="time"]'); return (el && el.value) ? el.value : '99:99'; };
+    Array.from(tb.children)
+      .sort((a, b) => horaDe(a).localeCompare(horaDe(b)))
+      .forEach(tr => tb.appendChild(tr));
+    try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
+    try { markDirty(); } catch (e) {}
+    toast('↕ Linhas ordenadas por horário');
+  },
+
   /* ---- AUXILIARES DO CIRURGIÃO (equipe cirúrgica) ---- */
   equipeAux: {
     add(nome) {
@@ -24690,8 +24705,11 @@ const anestesia = {
       /* Sincroniza o badge do botão flutuante de carimbo (eventos sem tipo) */
       try { if (typeof carimboHora !== 'undefined') carimboHora.atualizarBadge(); } catch (e) {}
       const dpr = window.devicePixelRatio || 1;
-      const cssW = canvas.clientWidth;
+      /* Sem layout (módulo/card oculto — ex.: impressão conjunta ficha+SRPA),
+         clientWidth é 0: usa a largura forçada pela captura de impressão. */
+      const cssW = canvas.clientWidth || ((typeof printPreview !== 'undefined' && printPreview._larguraForcada) || 0);
       const cssH = canvas.clientHeight || 220;
+      if (!cssW) return;
       canvas.width = cssW * dpr;
       canvas.height = cssH * dpr;
       const ctx = canvas.getContext('2d');
@@ -31746,13 +31764,28 @@ ${TAG_CLOSE_HTML}`;
     linha();
 
     /* Percorre os nós relevantes do preview em ordem */
-    const nodes = ppp.querySelectorAll('h1, h2, h3, .pp-doc-title, .pp-field, .pp-block, .pp-lab-item, .pp-check, .pp-table, p, .pp-prof-nome, .pp-prof-reg, .pp-quebra, .pp-capitulo');
+    const nodes = ppp.querySelectorAll('h1, h2, h3, .pp-doc-title, .pp-field, .pp-block, .pp-lab-item, .pp-check, .pp-table, p, .pp-prof-nome, .pp-prof-reg, .pp-quebra, .pp-capitulo, img.pp-grafico-img');
     nodes.forEach(node => {
       const cls = node.className || '';
       const tag = node.tagName;
       const txt = (node.innerText || node.textContent || '').trim();
       /* Quebra de capítulo (arquivo único ficha + SRPA): página nova SEMPRE */
       if (cls.includes('pp-quebra')) { doc.addPage(); y = M; return; }
+      /* Gráfico de sinais vitais (imagem do canvas) — entra como figura no PDF */
+      if (cls.includes('pp-grafico-img')) {
+        try {
+          const src = node.getAttribute('src') || '';
+          if (src.startsWith('data:image')) {
+            const nw = node.naturalWidth || 1000, nh = node.naturalHeight || 300;
+            const w = contentW;
+            const h = Math.max(30, Math.min(110, w * nh / Math.max(1, nw)));
+            novaPaginaSePreciso(h + 4);
+            doc.addImage(src, 'PNG', M, y, w, h);
+            y += h + 4;
+          }
+        } catch (e) { /* imagem inválida — segue só com as tabelas */ }
+        return;
+      }
       if (!txt) return;
       if (cls.includes('pp-capitulo')) {
         escreve(txt, { size: 13, style: 'bold', cor: [34, 56, 79], gap: 7 });
@@ -31787,6 +31820,25 @@ ${TAG_CLOSE_HTML}`;
     });
     return doc;
   },
+  /* Captura a imagem de um gráfico (canvas) mesmo com o módulo OCULTO.
+     Quando o módulo está display:none (ex.: imprimindo ficha+SRPA a partir da
+     SRPA), o canvas fica com largura 0 e o toDataURL sai em branco — por isso
+     o gráfico "sumia" no arquivo único. Aqui o módulo vira mensurável fora da
+     tela, o gráfico é redesenhado, capturado e tudo é restaurado. */
+  _larguraForcada: 0,
+  _capturarGrafico(canvasId, moduleId, redesenhar) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return '';
+    /* módulo/card oculto → sem layout → clientWidth 0; a largura forçada faz o
+       desenho acontecer no buffer do canvas mesmo assim */
+    printPreview._larguraForcada = 960;
+    try { if (typeof redesenhar === 'function') redesenhar(); } catch (e) {}
+    printPreview._larguraForcada = 0;
+    let dataURL = '';
+    try { if (canvas.width > 10 && canvas.height > 10) dataURL = canvas.toDataURL('image/png'); } catch (e) {}
+    return (dataURL && dataURL.length > 100) ? dataURL : '';
+  },
+
   /* Gera nome sugerido do arquivo: paciente_tipo_ddmmaaaa */
   _gerarNomeArquivo() {
     if (printPreview._nomeArquivoOverride) return printPreview._nomeArquivoOverride;
@@ -32551,15 +32603,18 @@ ${TAG_CLOSE_HTML}`;
       );
     }
     if ((d.sinais_vitais || []).filter(v => v.hora).length > 0) {
-      /* Captura do gráfico de sinais vitais para incluir no print */
+      /* Captura do gráfico de sinais vitais para incluir no print — com
+         redesenho forçado no contexto da ficha (funciona mesmo com o módulo
+         oculto, ex.: impressão conjunta ficha+SRPA a partir da SRPA) */
       let graficoHTML = '';
       try {
-        const canvas = document.getElementById('vitals-chart');
-        if (canvas) {
-          const dataURL = canvas.toDataURL('image/png');
-          if (dataURL && dataURL.length > 100) {
-            graficoHTML = `<div style="margin-bottom:8px; text-align:center"><img src="${dataURL}" style="max-width:100%; max-height:280px; border:1px solid #888"></div>`;
-          }
+        const ctxAnterior = anestesia.graficoUI._contexto;
+        anestesia.graficoUI._contexto = 'anestesia';
+        const dataURL = printPreview._capturarGrafico('vitals-chart', 'module-anestesia',
+          () => anestesia.vitais.atualizarGrafico());
+        anestesia.graficoUI._contexto = ctxAnterior;
+        if (dataURL) {
+          graficoHTML = `<div style="margin-bottom:8px; text-align:center"><img class="pp-grafico-img" src="${dataURL}" style="max-width:100%; max-height:280px; border:1px solid #888"></div>`;
         }
       } catch (e) { /* canvas vazio ou sem suporte — ignora */ }
 
@@ -32828,14 +32883,16 @@ ${TAG_CLOSE_HTML}`;
     if (!temVitais && !temEventos && !temMeds) return '';
 
     let html = '';
-    /* Captura a imagem do gráfico (canvas) */
+    /* Captura a imagem do gráfico (canvas) — com redesenho forçado no contexto
+       da SRPA e restauração (funciona mesmo com o módulo oculto) */
     try {
-      anestesia.graficoUI._contexto = 'recuperacao';
-      anestesia.vitais.atualizarGrafico();
-      const canvas = document.getElementById('srpa-vitals-chart');
-      if (canvas && (temVitais || temEventos || temMeds)) {
-        const dataUrl = canvas.toDataURL('image/png');
-        html += `<div style="text-align:center;margin:8px 0"><img src="${dataUrl}" style="max-width:100%;border:1px solid #ccc" alt="Gráfico SRPA"></div>`;
+      if (temVitais || temEventos || temMeds) {
+        const ctxAnterior = anestesia.graficoUI._contexto;
+        anestesia.graficoUI._contexto = 'recuperacao';
+        const dataUrl = printPreview._capturarGrafico('srpa-vitals-chart', 'module-recuperacao',
+          () => anestesia.vitais.atualizarGrafico());
+        anestesia.graficoUI._contexto = ctxAnterior;
+        if (dataUrl) html += `<div style="text-align:center;margin:8px 0"><img class="pp-grafico-img" src="${dataUrl}" style="max-width:100%;border:1px solid #ccc" alt="Gráfico SRPA"></div>`;
       }
     } catch (e) {}
 
