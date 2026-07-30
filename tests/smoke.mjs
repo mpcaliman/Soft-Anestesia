@@ -1849,6 +1849,82 @@ await test('CBHPM: vários códigos no mesmo campo (➕/x2) em todo o app e auxi
   await page.close();
 });
 
+/* 40) Programador: aba exclusiva + ambientes + compartilhamento entre ambientes */
+await test('Programador: aba só para a conta dele; ambientes, membros e acesso entre ambientes', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    /* — escondida por padrão (sessão demo/admin comum não é o programador) — */
+    out.escondidaPadrao = document.getElementById('nav-programador').style.display === 'none';
+    out.bloqueadoComum = auth.podeAcessar('programador') === false;   /* mesmo sendo admin */
+
+    /* — vira o programador (conta da nuvem dele) — */
+    cloud.session = () => ({ user: { id: 'u-prog', email: 'mpcaliman@hotmail.com' } });
+    out.souProg = programador.souProgramador() === true;
+    programador.atualizarVisibilidade();
+    out.navAparece = document.getElementById('nav-programador').style.display !== 'none';
+    out.podeAcessar = auth.podeAcessar('programador') === true;
+
+    /* — render com nuvem simulada — */
+    const chamadas = [];
+    programador._req = async (path, opts) => {
+      chamadas.push({ path, opts });
+      if (path.startsWith('organizations')) return [{ id: 'org-a', nome: 'Ambiente A' }, { id: 'org-b', nome: 'Ambiente B' }];
+      if (path.startsWith('organization_users')) return [
+        { organization_id: 'org-a', user_id: 'u-med', role: 'gestor', ativo: true },
+        { organization_id: 'org-b', user_id: 'u-prog', role: 'gestor', ativo: true }];
+      if (path.startsWith('profiles')) return [{ id: 'u-med', nome: 'Medico', email: 'medico@ex.com' }, { id: 'u-prog', email: 'mpcaliman@hotmail.com' }];
+      if (path.startsWith('org_shares')) return [{ id: 'sh1', org_origem: 'org-a', org_destino: 'org-b', modulos: ['anestesia'] }];
+      return [];
+    };
+    location.hash = '#programador';
+    /* espera ativa: sob carga, o render (navegar → setTimeout → awaits) pode
+       demorar mais que um sleep fixo */
+    for (let t = 0; t < 40 && !document.getElementById('prog-amb-nome'); t++) {
+      await new Promise(r => setTimeout(r, 150));
+      if (t === 20) { try { await programador.render(); } catch (e) {} }
+    }
+    const html = document.getElementById('prog-conteudo').innerHTML;
+    out.moduloAtivo = document.getElementById('module-programador').classList.contains('active');
+    out.listouAmbientes = html.includes('Ambiente A') && html.includes('Ambiente B') && html.includes('medico@ex.com');
+    out.listouShare = html.includes('anestesia') && html.includes('Liberar acesso');
+    out.temFormularios = !!document.getElementById('prog-amb-nome') && !!document.getElementById('prog-mem-org') && !!document.getElementById('prog-share-origem');
+
+    /* — criar ambiente chama a RPC certa — */
+    programador._rpc = async (nome, body) => { chamadas.push({ rpc: nome, body }); return null; };
+    document.getElementById('prog-amb-nome').value = 'Clinica Nova';
+    document.getElementById('prog-amb-email').value = 'novo.gestor@ex.com';
+    await programador.criarAmbiente();
+    const rpc = chamadas.find(c => c.rpc === 'prog_criar_ambiente');
+    out.rpcCriar = !!rpc && rpc.body.p_nome === 'Clinica Nova' && rpc.body.p_email_gestor === 'novo.gestor@ex.com';
+
+    /* — origem = destino é bloqueado no share —
+       (criarAmbiente dispara um re-render assíncrono; espera a tela voltar) */
+    for (let t = 0; t < 40 && !document.getElementById('prog-share-origem'); t++) {
+      await new Promise(r => setTimeout(r, 150));
+    }
+    document.getElementById('prog-share-origem').value = 'org-a';
+    document.getElementById('prog-share-destino').value = 'org-a';
+    const antes = chamadas.length;
+    await programador.criarShare();
+    out.bloqueiaMesmoAmbiente = chamadas.length === antes;   /* nenhuma chamada feita */
+
+    /* — a migração 0009 existe no repositório (canal do SQL) — */
+    location.hash = '#dashboard';
+    return out;
+  });
+  assert(r.escondidaPadrao, 'a aba Programador deveria vir escondida');
+  assert(r.bloqueadoComum, 'nem um admin comum deveria acessar o módulo programador');
+  assert(r.souProg && r.navAparece && r.podeAcessar, 'a conta do programador deveria ver e acessar a aba');
+  assert(r.moduloAtivo, 'navegar para #programador deveria abrir o módulo');
+  assert(r.listouAmbientes, 'a tela deveria listar os ambientes com seus gestores');
+  assert(r.listouShare, 'a tela deveria listar os acessos entre ambientes');
+  assert(r.temFormularios, 'deveria haver formulários de ambiente, membro e compartilhamento');
+  assert(r.rpcCriar, 'criar ambiente deveria chamar a RPC prog_criar_ambiente');
+  assert(r.bloqueiaMesmoAmbiente, 'origem = destino não deveria gerar chamada');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
