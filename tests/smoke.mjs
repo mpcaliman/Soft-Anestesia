@@ -1687,6 +1687,77 @@ await test('Ajustes: 12 cards viram 3 grupos recolhíveis e a sincronização ro
   await page.close();
 });
 
+/* 38) Configurações na nuvem (configSync) + login sem demo/usuário local */
+await test('Configurações sobem para a nuvem, descem ao entrar (vence a mais nova) e o login fica só com a conta da nuvem', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    /* ambiente: nuvem "logada" e fora do modo demo (o teste roda dentro dele) */
+    demo.ativo = () => false;
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud._garantirToken = async () => true;
+    cloud.config = () => ({ url: 'http://nuvem.teste', anonKey: 'k' });
+    cloud.session = () => ({ user: { id: 'u-cfg' } });
+    cloud._headers = () => ({});
+    const envios = [];
+    cloud._enviarOp = async (op) => { envios.push(op); return true; };
+
+    /* 1) mudança local é detectada e sobe num doc modulo=config_sync */
+    localStorage.removeItem(configSync.META_KEY);
+    localStorage.setItem('medsys.v7.termo_padrao', 'TERMO LOCAL A');
+    configSync.checarMudancas();
+    await new Promise(r => setTimeout(r, 120));
+    const op = envios[envios.length - 1];
+    out.subiu = !!op && op.modulo === 'config_sync' && op.doc_id === 'cfg'
+      && op.dados.chaves['medsys.v7.termo_padrao'].v === 'TERMO LOCAL A';
+
+    /* 2) nuvem MAIS NOVA vence: valor remoto com carimbo no futuro é aplicado */
+    const tFuturo = new Date(Date.now() + 60000).toISOString();
+    window.fetch = async () => ({ ok: true, json: async () => ([{ dados: { chaves: {
+      'medsys.v7.termo_padrao': { v: 'TERMO DA NUVEM', t: tFuturo },
+      'medsys.v7.theme': { v: 'dark', t: tFuturo }
+    } } }]) });
+    const aplicadas = await configSync.puxarAplicar();
+    out.aplicou = aplicadas === 2
+      && localStorage.getItem('medsys.v7.termo_padrao') === 'TERMO DA NUVEM'
+      && localStorage.getItem('medsys.v7.theme') === 'dark';
+
+    /* 3) local MAIS NOVO vence e é reenviado para a nuvem */
+    localStorage.setItem('medsys.v7.termo_padrao', 'TERMO LOCAL NOVO');
+    configSync.checarMudancas();
+    const tPassado = new Date(Date.now() - 3600000).toISOString();
+    window.fetch = async () => ({ ok: true, json: async () => ([{ dados: { chaves: {
+      'medsys.v7.termo_padrao': { v: 'TERMO VELHO DA NUVEM', t: tPassado }
+    } } }]) });
+    const nEnvios = envios.length;
+    await configSync.puxarAplicar();
+    await new Promise(r => setTimeout(r, 120));
+    out.localVence = localStorage.getItem('medsys.v7.termo_padrao') === 'TERMO LOCAL NOVO'
+      && envios.length > nEnvios;
+
+    /* 4) o pull normal (legado) ignora o doc de config (não vira "módulo") */
+    out.foraDoSyncNormal = cloud.MODS.indexOf('config_sync') < 0;
+
+    /* 5) tela de login: sem modo demonstração e sem usuário local */
+    auth._render();
+    const foot = (document.getElementById('auth-foot') || {}).innerHTML || '';
+    out.loginLimpo = !/demonstra/i.test(foot) && !/usuário local/i.test(foot)
+      && /Criar conta/i.test(foot);
+
+    /* 6) criação de usuário local desativada na tela de Usuários */
+    out.semCriarLocal = !document.querySelector('#usuarios-card button[onclick="ajustesUsuarios.abrirNovo()"]');
+    return out;
+  });
+  assert(r.subiu, 'mudar uma configuração deveria subir o doc config_sync para a nuvem');
+  assert(r.aplicou, 'ao entrar, configurações mais novas da nuvem deveriam ser aplicadas no aparelho');
+  assert(r.localVence, 'configuração local mais nova deveria vencer e ser reenviada para a nuvem');
+  assert(r.foraDoSyncNormal, 'config_sync não deve entrar no pull normal de módulos');
+  assert(r.loginLimpo, 'a tela de login não deveria mais oferecer demonstração nem usuário local');
+  assert(r.semCriarLocal, 'o botão de criar usuário local deveria ter saído de Usuários e segurança');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
