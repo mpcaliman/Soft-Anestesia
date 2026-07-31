@@ -10707,7 +10707,14 @@ const ui = {
     list.forEach(item => {
       const div = document.createElement('div');
       div.className = 'dropdown-item';
-      const nome = item.paciente_nome || item.nome || item.paciente || '(sem nome)';
+      /* nome do paciente pode estar aninhado (ficha estruturada: item.paciente é
+         um OBJETO — sem isto o menu mostrava "[object Object]") */
+      let nome = item.paciente_nome
+        || (item.paciente && typeof item.paciente === 'object' && item.paciente.nome)
+        || (typeof item.nome === 'string' && item.nome)
+        || (typeof item.paciente === 'string' && item.paciente)
+        || '(sem nome)';
+      if (typeof nome !== 'string') nome = '(sem nome)';
       const dt = item._updatedAt ? utils.formatarDataHora(item._updatedAt) : '';
       div.innerHTML = `<strong>${utils.escapeHTML(nome)}</strong><span class="meta">${dt}</span>`;
       div.onclick = () => {
@@ -10715,9 +10722,25 @@ const ui = {
         if (handlers[modKey] && handlers[modKey].carregar) {
           handlers[modKey].carregar(item);
         }
-        document.getElementById(id).classList.remove('open');
+        ui.fecharDropdowns();   /* fecha de verdade (menu flutuante incluso) */
       };
       menu.appendChild(div);
+    });
+  },
+
+  /* Fecha TODOS os dropdowns abertos, devolvendo os menus flutuantes ao lugar.
+     (Antes, escolher um item só tirava a classe do wrapper e o menu — movido
+     para o body — ficava aberto na tela até clicar de novo no botão.) */
+  fecharDropdowns() {
+    document.querySelectorAll('.dropdown.open').forEach(d => {
+      d.classList.remove('open');
+      const m = d.querySelector('.dropdown-menu') || document.getElementById(d.id + '-menu');
+      if (m) { m.classList.remove('open'); ui._desanexarMenu(m); }
+    });
+    /* menus órfãos que ficaram flutuando no body */
+    document.querySelectorAll('body > .dropdown-menu.open').forEach(m => {
+      m.classList.remove('open');
+      ui._desanexarMenu(m);
     });
   },
   /* Navegação entre módulos */
@@ -32773,14 +32796,14 @@ ${TAG_CLOSE_HTML}`;
     }
     if ((d.medicacoes || []).filter(m => m.nome).length > 0) {
       const medsImp = d.medicacoes.filter(m => m.nome);
-      /* Colunas opcionais entram quando alguma linha tem conteúdo — gases,
-         halogenados e infusões precisam de Tipo, Diluição, Fluxo/Veloc. e FIM */
+      /* Colunas opcionais entram quando alguma linha tem conteúdo; o FIM
+         (gases, halogenados, infusões) é FIXO — sai sempre na impressão */
       const temCol = k => medsImp.some(m => String(m[k] || '').trim() !== '');
       const colsMed = [];
       if (temCol('tipo'))       colsMed.push({ k: 'tipo',       label: 'Tipo' });
       if (temCol('diluicao'))   colsMed.push({ k: 'diluicao',   label: 'Diluição / Solução' });
       if (temCol('velocidade')) colsMed.push({ k: 'velocidade', label: 'Fluxo / Veloc.' });
-      if (temCol('horaFim'))    colsMed.push({ k: 'horaFim',    label: 'Fim' });
+      colsMed.push({ k: 'horaFim', label: 'Fim' });
       html += printPreview._section('Medicações',
         '<table class="pp-table"><thead><tr><th>Hora</th><th>Medicação</th><th>Dose</th><th>Un.</th><th>Via</th>' +
         colsMed.map(c => '<th>' + c.label + '</th>').join('') +
@@ -37978,6 +38001,14 @@ document.addEventListener('DOMContentLoaded', () => {
   window.historico = historico; window.assinatura = assinatura;
   window.markDirty = markDirty; window.markClean = markClean;
   window.setSavedStatus = setSavedStatus;
+
+  /* 0b. Dropdowns ("Carregar ▾"): clicar FORA fecha — o menu não fica preso na tela */
+  document.addEventListener('click', (e) => {
+    try {
+      if (e.target.closest('.dropdown') || e.target.closest('.dropdown-menu')) return;
+      ui.fecharDropdowns();
+    } catch (err) {}
+  });
 
   /* 1. Sidebar — clique nos itens (links via #hash) */
   document.querySelectorAll('#sidebar-nav .nav-item').forEach(item => {
