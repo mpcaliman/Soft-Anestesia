@@ -7604,6 +7604,9 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
             <div class="field col-6"><label>Convênio / plano</label><input type="text" name="convenio" onblur="financeiro.regras.aplicarDoConvenio(this.value)"></div>
           </div>
 
+          <!-- 🔄 FLUXO DE FATURAMENTO (checklist — dá baixa nas pendências de convênio) -->
+          <div id="fat-status-box" style="display:none"></div>
+
           <!-- CÓDIGOS TUSS / CBHPM — múltiplos códigos por registro -->
           <h3 style="font-size:.92rem;color:var(--primary-darker);margin:18px 0 8px;border-top:1px solid var(--border);padding-top:14px">
             📋 Códigos / Procedimentos (CBHPM-TUSS)
@@ -10766,7 +10769,7 @@ const ui = {
 
       /* Refresh por módulo — cada um em try/catch independente para não bloquear navegação */
       try {
-        if (modName === 'dashboard') { dashboard.atualizar(); try { meuDia.render(); } catch (e) {} }
+        if (modName === 'dashboard') { dashboard.atualizar(); try { meuDia.render(); } catch (e) {} try { pendencias.renderDashboard(); } catch (e) {} }
         else if (modName === 'financeiro') financeiro.render();
         else if (modName === 'agenda') { agenda.render(); if (!agenda._puxouNestaSessao) { setTimeout(() => { try { agenda.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
@@ -15484,6 +15487,8 @@ const cloud = {
       setTimeout(() => { try { cloud.sincronizar({ silent: true }); } catch (e) {} }, 900);
       /* configurações (termo/textos/logomarca/tema/preferências) descem também */
       setTimeout(() => { try { if (typeof configSync !== 'undefined') configSync.puxarAplicar(); } catch (e) {} }, 1200);
+      /* pendências de convênio: a janela aparece ao entrar (após os pulls) */
+      setTimeout(() => { try { if (typeof pendencias !== 'undefined') pendencias.checarAoEntrar(); } catch (e) {} }, 3200);
       setTimeout(() => {
         try {
           if (typeof cloudRel !== 'undefined' && cloudRel.autoPullModulo) {
@@ -15955,6 +15960,185 @@ const programador = {
       toast('Acesso removido');
       programador.render();
     } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  }
+};
+
+/* ============================================================================
+   🔔 PENDÊNCIAS DE CONVÊNIO (faturamento)
+   Toda consulta, pré-anestésica, ficha de anestesia ou registro financeiro de
+   um PLANO DE SAÚDE que não seja Unimed vira uma PENDÊNCIA para a secretária
+   (e para o médico acompanhar): janela com data, paciente, guia e plano — ao
+   entrar e a cada 30 minutos, até resolver. No Dashboard aparece como card.
+   O fluxo de faturamento é um checklist por registro: enviar p/ faturamento,
+   faturado, cobrado, recorrido, em pagamento, pago, glosa, recurso de glosa.
+   Marcar qualquer etapa (ou ✔ Resolver) dá baixa na pendência.
+============================================================================ */
+const pendencias = {
+  MODS: ['consulta', 'pre', 'anestesia', 'financeiro'],
+  MOD_ROT: { consulta: 'Consulta', pre: 'Pré-anestésica', anestesia: 'Ficha de anestesia', financeiro: 'Financeiro' },
+  STATUS: [
+    ['enviar_faturamento', 'Enviar p/ faturamento'],
+    ['faturado', 'Faturado'],
+    ['cobrado', 'Cobrado'],
+    ['recorrido', 'Recorrido'],
+    ['em_pagamento', 'Em pagamento'],
+    ['pago', 'Pago'],
+    ['glosa', 'Glosa'],
+    ['recurso_glosa', 'Recurso de glosa']
+  ],
+  JANELA_DIAS: 90,
+
+  /* é plano de saúde que gera pendência? (todos, EXCETO Unimed; particular e
+     SUS não são plano) */
+  ehPlanoPendente(conv) {
+    const c = String(conv || '').trim().toLowerCase();
+    if (!c) return false;
+    return !(c.includes('unimed') || c === 'particular' || c === 'sus');
+  },
+  _info(mod, r) {
+    if (mod === 'anestesia') {
+      const p = r.paciente || {}, pr = r.procedimento || {};
+      return { nome: p.nome || '', data: pr.data || '', convenio: p.convenio || '', guia: p.senha || '' };
+    }
+    if (mod === 'financeiro') {
+      return { nome: r.paciente || '', data: r.data_proc || r.data || '', convenio: r.convenio || '', guia: r.senha || '' };
+    }
+    return { nome: r.nome || '', data: r.data || '', convenio: r.convenio || '', guia: r.senha || r.paciente_senha || r.guia || '' };
+  },
+  temStatus(r) { const f = r && r._faturamento; return !!f && Object.keys(f).some(k => f[k]); },
+
+  listar() {
+    const corte = Date.now() - pendencias.JANELA_DIAS * 86400000;
+    const out = [];
+    pendencias.MODS.forEach(mod => {
+      (store.list(mod) || []).forEach(r => {
+        if (!r || !r._id || r._pendResolvida) return;
+        if (pendencias.temStatus(r)) return;
+        const i = pendencias._info(mod, r);
+        if (!pendencias.ehPlanoPendente(i.convenio)) return;
+        const t = new Date(i.data || r._updatedAt || 0).getTime();
+        if (!t || t < corte) return;
+        out.push({ mod, id: r._id, nome: i.nome, data: i.data, convenio: i.convenio, guia: i.guia });
+      });
+    });
+    out.sort((a, b) => String(a.data).localeCompare(String(b.data)));
+    return out;
+  },
+  podeVer() {
+    try { return auth.estaLogado() && auth.podeAcessar('financeiro'); } catch (e) { return false; }
+  },
+
+  /* ---- Janela de alerta ---- */
+  abrir(auto) {
+    const lista = pendencias.listar();
+    if (auto && !lista.length) return;
+    const linhas = lista.map(p =>
+      '<tr>' +
+      '<td style="white-space:nowrap">' + utils.formatarData(p.data) + '</td>' +
+      '<td><b>' + utils.escapeHTML(p.nome || '—') + '</b><br><small style="color:var(--text-mute)">' + pendencias.MOD_ROT[p.mod] + '</small></td>' +
+      '<td>' + utils.escapeHTML(p.convenio) + '</td>' +
+      '<td>' + (p.guia ? utils.escapeHTML(p.guia) : '<span style="color:#b3261e">sem guia</span>') + '</td>' +
+      '<td style="white-space:nowrap">' +
+        '<select style="font-size:.74rem;max-width:160px" onchange="pendencias.marcarStatusSel(\'' + p.mod + '\',\'' + p.id + '\', this.value)">' +
+          '<option value="">— fluxo de faturamento —</option>' +
+          pendencias.STATUS.map(([k, rot]) => '<option value="' + k + '">' + rot + '</option>').join('') +
+        '</select> ' +
+        '<button class="btn btn-xs" onclick="pendencias.resolver(\'' + p.mod + '\',\'' + p.id + '\')" title="Dar baixa nesta pendência">✔ Resolver</button>' +
+      '</td></tr>').join('');
+    const corpo = !lista.length
+      ? '<p style="color:var(--text-mute)">🎉 Nenhuma pendência de convênio.</p>'
+      : '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">Guias de <b>planos de saúde (exceto Unimed)</b> aguardando processamento. Marque uma etapa do fluxo (ou ✔ Resolver) para dar baixa — enquanto houver pendência, esta janela volta ao entrar e a cada 30 minutos.</p>' +
+        '<div style="max-height:52vh;overflow:auto"><table class="dash-detail-table" style="margin:0"><thead><tr><th>Data</th><th>Paciente</th><th>Plano</th><th>Guia</th><th>Ação</th></tr></thead><tbody>' + linhas + '</tbody></table></div>';
+    modal.open('🔔 Pendências de convênio (' + lista.length + ')', corpo,
+      '<button class="btn" onclick="modal.close()">Fechar</button>');
+  },
+  resolver(mod, id) {
+    const r = store.getById(mod, id);
+    if (!r) return;
+    r._pendResolvida = new Date().toISOString();
+    store.save(mod, r);
+    toast('✔ Pendência resolvida');
+    pendencias.abrir(false);
+    try { pendencias.renderDashboard(); } catch (e) {}
+  },
+  marcarStatusSel(mod, id, statusKey) {
+    if (!statusKey) return;
+    pendencias.marcarStatus(mod, id, statusKey, true);
+    pendencias.abrir(false);
+  },
+  marcarStatus(mod, id, statusKey, marcado) {
+    const r = store.getById(mod, id);
+    if (!r) return;
+    r._faturamento = r._faturamento || {};
+    if (marcado) r._faturamento[statusKey] = new Date().toISOString();
+    else delete r._faturamento[statusKey];
+    /* marcar qualquer etapa resolve a pendência */
+    if (pendencias.temStatus(r) && !r._pendResolvida) r._pendResolvida = new Date().toISOString();
+    store.save(mod, r);
+    try { pendencias.renderDashboard(); } catch (e) {}
+    const rot = (pendencias.STATUS.find(s => s[0] === statusKey) || ['', statusKey])[1];
+    toast('🔄 Fluxo de faturamento: ' + rot + (marcado ? ' ✓' : ' removido'));
+  },
+
+  /* ---- Checklist do fluxo no formulário do FINANCEIRO ---- */
+  renderFinanceiro(item) {
+    const box = document.getElementById('fat-status-box');
+    if (!box) return;
+    if (!item || !item._id) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    const f = item._faturamento || {};
+    box.style.display = '';
+    box.innerHTML =
+      '<h3 style="font-size:.92rem;color:var(--primary-darker);margin:18px 0 8px;border-top:1px solid var(--border);padding-top:14px">🔄 Fluxo de faturamento' +
+      '<small style="color:var(--text-mute);font-weight:400;margin-left:8px">— marque as etapas conforme a guia avança no convênio (marcar dá baixa na pendência)</small></h3>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px">' +
+      pendencias.STATUS.map(([k, rot]) =>
+        '<label style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:14px;padding:6px 12px;font-size:.82rem;cursor:pointer;background:' + (f[k] ? 'var(--primary-soft)' : 'var(--surface-alt)') + '"' + (f[k] ? ' title="Marcado em ' + utils.formatarDataHora(f[k]) + '"' : '') + '>' +
+        '<input type="checkbox" ' + (f[k] ? 'checked' : '') + ' onchange="pendencias.marcarStatus(\'financeiro\',\'' + item._id + '\', \'' + k + '\', this.checked); pendencias.renderFinanceiro(store.getById(\'financeiro\',\'' + item._id + '\'))">' +
+        rot + '</label>').join('') +
+      '</div>';
+  },
+
+  /* ---- Card no Dashboard ---- */
+  renderDashboard() {
+    if (!pendencias.podeVer()) return;
+    const lista = pendencias.listar();
+    let card = document.getElementById('pendencias-card');
+    if (!card) {
+      const ancora = document.getElementById('meu-dia-card');
+      if (!ancora) return;
+      card = document.createElement('div');
+      card.className = 'card no-collapse no-print';
+      card.id = 'pendencias-card';
+      ancora.parentNode.insertBefore(card, ancora);
+    }
+    card.style.display = lista.length ? '' : 'none';
+    card.innerHTML =
+      '<div class="card-header"><div class="card-title-wrap"><span class="card-icon">🔔</span><h2>Pendências de convênio<small>Guias de planos (exceto Unimed) aguardando o fluxo de faturamento</small></h2></div>' +
+      '<div class="card-actions"><span style="background:#fde8e8;color:#b3261e;border-radius:999px;padding:2px 10px;font-weight:800;font-size:.78rem">' + lista.length + '</span></div></div>' +
+      '<div class="card-body"><button class="btn btn-primary btn-sm" onclick="pendencias.abrir(false)">🔔 Ver pendências (' + lista.length + ')</button></div>';
+  },
+
+  /* ---- Gatilhos: ao entrar + a cada 30 minutos ---- */
+  checarAoEntrar() {
+    if (!pendencias.podeVer()) return;
+    try { pendencias.renderDashboard(); } catch (e) {}
+    /* não interrompe um modal já aberto */
+    const bd = document.getElementById('modal-backdrop');
+    if (bd && bd.classList.contains('show')) return;
+    pendencias.abrir(true);
+  },
+  iniciarTimer() {
+    try {
+      setInterval(() => {
+        try {
+          if (!pendencias.podeVer()) return;
+          pendencias.renderDashboard();
+          const bd = document.getElementById('modal-backdrop');
+          if (bd && bd.classList.contains('show')) return;
+          pendencias.abrir(true);
+        } catch (e) {}
+      }, 30 * 60 * 1000);
+    } catch (e) {}
   }
 };
 
@@ -34948,10 +35132,13 @@ const financeiro = {
         financeiro.anexos.restaurar(item.anexos);
         /* Anexos de suporte vindos do registro clínico de origem (foto/PDF) */
         financeiro.renderDocsOrigem(item);
+        /* Fluxo de faturamento (pendências de convênio) */
+        try { pendencias.renderFinanceiro(item); } catch (e) {}
         financeiro.calcDif();
       }
     } else {
       financeiro.renderDocsOrigem(null);
+      try { pendencias.renderFinanceiro(null); } catch (e) {}
       document.querySelector(`#${financeiro.formId} [name="data_proc"]`).value = utils.hojeISO();
       document.querySelector(`#${financeiro.formId} [name="status"]`).value = 'pendente';
       const fq = s => document.querySelector(`#${financeiro.formId} [name="${s}"]`);
@@ -37766,6 +37953,10 @@ document.addEventListener('DOMContentLoaded', () => {
   try { configSync.vigiar(); } catch (e) {}
   window.programador = programador;
   try { programador.atualizarVisibilidade(); } catch (e) {}
+  window.pendencias = pendencias;
+  try { pendencias.iniciarTimer(); } catch (e) {}
+  /* sessão já aberta (ex.: login diário sem nuvem): checa as pendências também */
+  setTimeout(() => { try { pendencias.checarAoEntrar(); } catch (e) {} }, 3500);
   window.quickActions = quickActions; window.printPreview = printPreview;
   window.actions = actions; window.toast = toast;
   window.cbhpm = cbhpm; window.CBHPM_2018 = CBHPM_2018;

@@ -1991,6 +1991,92 @@ await test('Impressão: gráfico de vitais sai no conjunto (módulo oculto) e Ho
   await page.close();
 });
 
+/* 42) Pendências de convênio (≠ Unimed): janela, fluxo de faturamento e card no Dashboard */
+await test('Pendências: plano ≠ Unimed vira alerta com guia/plano; fluxo de faturamento dá baixa; card no Dashboard', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const hoje = (typeof utils !== 'undefined' && utils.hojeISO) ? utils.hojeISO() : new Date().toISOString().slice(0, 10);
+
+    /* — regra do plano: tudo exceto Unimed (particular/SUS não são plano) — */
+    out.regra = pendencias.ehPlanoPendente('Bradesco Saúde') === true
+      && pendencias.ehPlanoPendente('Amil') === true
+      && pendencias.ehPlanoPendente('Unimed') === false
+      && pendencias.ehPlanoPendente('UNIMED Vitória') === false
+      && pendencias.ehPlanoPendente('Particular') === false
+      && pendencias.ehPlanoPendente('SUS') === false
+      && pendencias.ehPlanoPendente('') === false;
+
+    /* — registros dos 4 módulos (Unimed NÃO entra) — */
+    ['consulta', 'pre', 'anestesia', 'financeiro'].forEach(m => store.setList(m, []));
+    store.save('pre', { nome: 'Paciente Pre', data: hoje, convenio: 'Bradesco Saúde', senha: 'G-111' });
+    store.save('consulta', { nome: 'Paciente Unimed', data: hoje, convenio: 'Unimed' });
+    store.save('anestesia', { paciente: { nome: 'Paciente Ficha', convenio: 'Amil', senha: 'G-222' }, procedimento: { data: hoje } });
+    const fin = store.save('financeiro', { paciente: 'Paciente Fin', data_proc: hoje, convenio: 'SulAmérica', senha: 'G-333' });
+
+    const lista = pendencias.listar();
+    out.lista = lista.length === 3
+      && !lista.some(p => /unimed/i.test(p.convenio))
+      && lista.some(p => p.nome === 'Paciente Ficha' && p.guia === 'G-222' && p.convenio === 'Amil');
+
+    /* — janela: dados + Fechar — */
+    pendencias.abrir(false);
+    await new Promise(r => setTimeout(r, 100));
+    const corpo = document.getElementById('modal-body').innerHTML;
+    const rodape = document.getElementById('modal-footer') ? document.getElementById('modal-footer').innerHTML : document.querySelector('#modal-backdrop').innerHTML;
+    out.janela = corpo.includes('Paciente Pre') && corpo.includes('G-111') && corpo.includes('SulAmérica')
+      && /Fechar/.test(rodape);
+
+    /* — ✔ Resolver dá baixa — */
+    const pPre = lista.find(p => p.mod === 'pre');
+    pendencias.resolver('pre', pPre.id);
+    await new Promise(r => setTimeout(r, 100));
+    out.resolveu = pendencias.listar().length === 2;
+
+    /* — marcar etapa do fluxo dá baixa e fica gravada com carimbo — */
+    pendencias.marcarStatus('financeiro', fin._id, 'faturado', true);
+    const finDepois = store.getById('financeiro', fin._id);
+    out.fluxo = pendencias.listar().length === 1
+      && !!(finDepois._faturamento && finDepois._faturamento.faturado)
+      && !!finDepois._pendResolvida;
+
+    /* — checklist no formulário do financeiro (8 etapas) — */
+    pendencias.renderFinanceiro(finDepois);
+    const boxFat = document.getElementById('fat-status-box');
+    out.checklist = boxFat.style.display !== 'none'
+      && boxFat.querySelectorAll('input[type="checkbox"]').length === 8
+      && /Recurso de glosa/.test(boxFat.innerHTML)
+      && boxFat.querySelectorAll('input:checked').length === 1;
+
+    /* — card no Dashboard com o total (visível p/ quem acessa o financeiro) — */
+    auth.estaLogado = () => true;
+    auth.podeAcessar = (m) => true;
+    pendencias.renderDashboard();
+    const card = document.getElementById('pendencias-card');
+    out.dashboard = !!card && card.style.display !== 'none' && card.innerHTML.includes('Ver pendências (1)');
+
+    /* — resolvida a última, o card some — */
+    const resta = pendencias.listar()[0];
+    pendencias.resolver(resta.mod, resta.id);
+    await new Promise(r => setTimeout(r, 100));
+    pendencias.renderDashboard();
+    out.cardSome = document.getElementById('pendencias-card').style.display === 'none';
+
+    modal.close();
+    ['consulta', 'pre', 'anestesia', 'financeiro'].forEach(m => store.setList(m, []));
+    return out;
+  });
+  assert(r.regra, 'a regra deveria pegar todo plano exceto Unimed (particular/SUS fora)');
+  assert(r.lista, 'consulta/pré/ficha/financeiro de plano ≠ Unimed deveriam virar pendência com guia e plano');
+  assert(r.janela, 'a janela deveria mostrar data/paciente/plano/guia e ter o botão Fechar');
+  assert(r.resolveu, '✔ Resolver deveria dar baixa na pendência');
+  assert(r.fluxo, 'marcar uma etapa do fluxo deveria dar baixa e gravar o carimbo');
+  assert(r.checklist, 'o financeiro deveria mostrar o checklist com as 8 etapas do fluxo');
+  assert(r.dashboard, 'o Dashboard deveria mostrar o card de pendências com o total');
+  assert(r.cardSome, 'sem pendências, o card do Dashboard deveria sumir');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
