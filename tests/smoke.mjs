@@ -2100,15 +2100,36 @@ await test('Impressão: medicações saem completas (Tipo, Diluição, Fluxo, FI
     out.temTipo = html.includes('<th>Tipo</th>') && html.includes('Inalatório');
     out.temObs = html.includes('TCI 3,0') && html.includes('lento, diluído');
 
-    /* sem infusões/gases, as colunas extras NÃO aparecem (impressão limpa) */
+    /* sem infusões/gases: fluxo/diluição/tipo não poluem, mas FIM é fixo */
     document.getElementById('medicacoes-body').innerHTML = '';
     anestesia.meds.add({ hora: '10:10', nome: 'Dipirona', dose: '2', unidade: 'g', via: 'EV' });
     const html2 = printPreview._buildAnestesia();
-    out.limpaSemExtras = !html2.includes('<th>Fim</th>') && !/Fluxo \/ Veloc\./.test(html2);
+    out.limpaSemExtras = html2.includes('<th>Fim</th>') && !/Fluxo \/ Veloc\./.test(html2) && !html2.includes('<th>Tipo</th>');
 
     document.getElementById('medicacoes-body').innerHTML = '';
+
+    /* — menu "Carregar ▾": nome certo (sem [object Object]), fecha ao escolher e ao clicar fora — */
+    store.setList('anestesia', []);
+    store.save('anestesia', { paciente: { nome: 'Fulano Objeto' }, procedimento: { data: '2026-07-30' } });
+    ui.toggleDropdown('dd-anestesia');
+    await new Promise(r => setTimeout(r, 120));
+    const menu = document.getElementById('dd-anestesia-menu');
+    out.ddNome = menu.innerHTML.includes('Fulano Objeto') && !menu.innerHTML.includes('object Object');
+    menu.querySelector('.dropdown-item').onclick();
+    await new Promise(r => setTimeout(r, 200));
+    out.ddFechaAoEscolher = !document.querySelector('.dropdown-menu.open');
+    ui.toggleDropdown('dd-anestesia');
+    await new Promise(r => setTimeout(r, 120));
+    const abriuDeNovo = !!document.querySelector('.dropdown-menu.open');
+    document.body.click();   /* clique FORA */
+    await new Promise(r => setTimeout(r, 120));
+    out.ddFechaForaClique = abriuDeNovo && !document.querySelector('.dropdown-menu.open');
+    store.setList('anestesia', []);
     return out;
   });
+  assert(r.ddNome, 'o menu Carregar deveria mostrar o nome do paciente (não [object Object])');
+  assert(r.ddFechaAoEscolher, 'escolher um item deveria fechar o menu de verdade');
+  assert(r.ddFechaForaClique, 'clicar fora deveria fechar o menu');
   assert(r.temFim, 'o horário de FIM (gases/halogenados/infusões) deveria sair na impressão');
   assert(r.temFluxo, 'o fluxo/velocidade deveria sair na impressão');
   assert(r.temDiluicao, 'a diluição/solução deveria sair na impressão');
