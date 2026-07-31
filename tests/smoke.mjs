@@ -2139,6 +2139,72 @@ await test('Impressão: medicações saem completas (Tipo, Diluição, Fluxo, FI
   await page.close();
 });
 
+/* 44) Nada de um paciente vaza para o próximo: zera após finalizar+imprimir; rascunho não captura finalizado */
+await test('Rascunhos: zera após finalizar+imprimir e nunca capturam registro finalizado', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('anestesia', []); store.setList('recuperacao', []);
+    localStorage.removeItem('medsys.v7.rascunhos.anestesia');
+    localStorage.removeItem('medsys.v7.rascunho_ativo.anestesia');
+    location.hash = '#anestesia';
+    await new Promise(r => setTimeout(r, 400));
+
+    /* caso completo finalizado com SRPA automática + IMPRESSÃO conjunta */
+    const f = document.getElementById('form-anestesia');
+    const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el) el.value = v; };
+    set('paciente_nome', 'Paciente Antigo'); set('data_anestesia', '2026-07-30');
+    set('procedimento', 'Colecistectomia videolaparoscópica');
+    set('hora_sala_saida', '12:00'); set('anestesiologista', 'Dr. Vazamento');
+    anestesia.vitais.add(false, { hora: '11:50', pas: '120', pad: '80', fc: '72', spo2: '98' });
+    anestesia.salvar({ finalizar: true });
+    await new Promise(r => setTimeout(r, 600));
+    const fichaId = store.list('anestesia')[0]._id;
+    modal.close();
+    anestesia._srpaAutomatica(fichaId);
+    await new Promise(r => setTimeout(r, 150));
+    document.getElementById('srpa-auto-alta').value = '13:00';
+    document.getElementById('srpa-auto-imprimir').checked = true;   /* COM impressão */
+    anestesia._gerarSrpaAutomatica(fichaId);
+    await new Promise(r => setTimeout(r, 1800));
+    /* o preview conjunto abriu com a ficha recarregada no form */
+    out.previewAberto = document.getElementById('print-preview-overlay').classList.contains('show');
+    out.formComCaso = (f.querySelector('[name="paciente_nome"]') || {}).value === 'Paciente Antigo';
+
+    /* enquanto o finalizado está no form, auto-save e rascunho NÃO capturam */
+    state.dirty = true; state.autosaveEnabled = true; state.currentModule = 'anestesia';
+    localStorage.removeItem('medsys.v3.autosave.anestesia');
+    autoSaveAnestesia();
+    out.autosaveNaoCaptura = !localStorage.getItem('medsys.v3.autosave.anestesia');
+    rascunhos.garantirAtivo('anestesia');
+    rascunhos.salvarAtual('anestesia');
+    const rasc1 = rascunhos.list('anestesia')[0] || {};
+    out.rascunhoNaoCaptura = !(rasc1.dados && rasc1.dados.paciente && rasc1.dados.paciente.nome === 'Paciente Antigo')
+      && (rasc1.label || '').indexOf('Paciente Antigo') < 0;
+
+    /* FECHAR o preview zera a ficha e a SRPA — nada sobra para o próximo */
+    printPreview.fechar();
+    await new Promise(r => setTimeout(r, 200));
+    out.fichaZerada = (f.querySelector('[name="paciente_nome"]') || {}).value === ''
+      && document.querySelectorAll('#vitais-body tr').length === 0
+      && document.querySelectorAll('#medicacoes-body tr').length === 0;
+    const fr = document.getElementById('form-recuperacao');
+    out.srpaZerada = ((fr.querySelector('[name="nome"]') || {}).value || '') === ''
+      && document.querySelectorAll('#srpa-vitais-body tr').length === 0;
+
+    store.setList('anestesia', []); store.setList('recuperacao', []);
+    localStorage.removeItem('medsys.v7.rascunhos.anestesia');
+    localStorage.removeItem('medsys.v7.rascunho_ativo.anestesia');
+    return out;
+  });
+  assert(r.previewAberto && r.formComCaso, 'o cenário exige o preview conjunto aberto com a ficha recarregada');
+  assert(r.autosaveNaoCaptura, 'o auto-save não deveria fotografar um registro finalizado');
+  assert(r.rascunhoNaoCaptura, 'o Rascunho 1 não deveria receber dados do caso finalizado');
+  assert(r.fichaZerada, 'fechar o preview deveria ZERAR a ficha (nada do paciente anterior)');
+  assert(r.srpaZerada, 'fechar o preview deveria ZERAR também a SRPA');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

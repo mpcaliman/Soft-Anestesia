@@ -26888,6 +26888,9 @@ const anestesia = {
           const sid = fx && fx._links && fx._links.recuperacao_id;
           if (sid) recuperacao.carregar(store.getById('recuperacao', sid));
         } catch (e) {}
+        /* Ao FECHAR o preview, os formulários são ZERADOS — o caso é
+           finalizado e nada dele pode sobrar para o próximo paciente. */
+        printPreview._zerarFichaAoFechar = true;
         setTimeout(() => printPreview.abrirConjunto(), 500);
       }
     }, 350);
@@ -27067,6 +27070,8 @@ const anestesia = {
 /* Auto-save da Ficha de Anestesia */
 function autoSaveAnestesia() {
   if (!state.autosaveEnabled || state.currentModule !== 'anestesia' || !state.dirty) return;
+  /* registro FINALIZADO reaberto (ver/imprimir) não gera auto-save nem rascunho */
+  try { if (rascunhos._formEhFinalizado('anestesia')) return; } catch (e) {}
   try {
     const data = anestesia.coletarEstruturado();
     data._meta = { salvoEm: new Date().toISOString() };
@@ -27084,6 +27089,8 @@ function autoSaveUniversal() {
   const map = { pre: 'form-pre', consulta: 'form-consulta', recuperacao: 'form-recuperacao' };
   const formId = map[mod];
   if (!formId) return;
+  /* registro FINALIZADO reaberto (ver/imprimir) não gera auto-save nem rascunho */
+  try { if (rascunhos._formEhFinalizado(mod)) return; } catch (e) {}
   try {
     const f = document.getElementById(formId);
     if (!f) return;
@@ -27222,10 +27229,25 @@ const rascunhos = {
     return id;
   },
 
+  /* O formulário atual corresponde a um registro FINALIZADO? (reaberto só
+     para ver/imprimir — não pode virar rascunho nem auto-save: era assim que
+     dados de um paciente vazavam para o "Rascunho 1" do próximo) */
+  _formEhFinalizado(mod) {
+    try {
+      const f = document.getElementById(rascunhos.FORMS[mod]);
+      const el = f && f.querySelector('[name="_id"]');
+      const idReg = el ? el.value : '';
+      if (!idReg) return false;
+      const reg = store.getById(mod, idReg);
+      return !!(reg && reg._finalizado);
+    } catch (e) { return false; }
+  },
+
   /* Coleta dados atuais do form e salva no rascunho ativo */
   salvarAtual(mod) {
     const id = rascunhos.ativo(mod);
     if (!id) return;
+    if (rascunhos._formEhFinalizado(mod)) return;   /* finalizado NÃO vira rascunho */
     const list = rascunhos.list(mod);
     const r = list.find(x => x.id === id);
     if (!r) return;
@@ -31680,6 +31702,21 @@ const printPreview = {
   fechar() {
     document.getElementById('print-preview-overlay').classList.remove('show');
     document.body.classList.remove('printing-preview');
+    /* Impressão pós-finalização: a ficha foi RECARREGADA no formulário só para
+       montar o arquivo único — ao fechar o preview, ZERA tudo. Nada de um
+       paciente pode sobrar para o próximo. */
+    if (printPreview._zerarFichaAoFechar) {
+      printPreview._zerarFichaAoFechar = false;
+      try { anestesia.limparSilencioso(); } catch (e) {}
+      try {
+        utils.clearForm('form-recuperacao');
+        ['srpa-vitais-body', 'srpa-eventos-body', 'srpa-medicacoes-body'].forEach(i => {
+          const el = document.getElementById(i); if (el) el.innerHTML = '';
+        });
+      } catch (e) {}
+      try { markClean(); } catch (e) {}
+      try { rascunhos.renderAbas('anestesia'); } catch (e) {}
+    }
   },
 
   /* ARQUIVO ÚNICO: ficha de anestesia + SRPA (quebra de página entre elas).
