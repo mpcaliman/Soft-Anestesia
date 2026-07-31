@@ -2077,6 +2077,47 @@ await test('Pendências: plano ≠ Unimed vira alerta com guia/plano; fluxo de f
   await page.close();
 });
 
+/* 43) Impressão da ficha: medicações COMPLETAS (fim de gases/halogenados, fluxo, diluição, obs) */
+await test('Impressão: medicações saem completas (Tipo, Diluição, Fluxo, FIM e Observação)', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    location.hash = '#anestesia';
+    await new Promise(r => setTimeout(r, 400));
+    const f = document.getElementById('form-anestesia');
+    f.querySelector('[name="paciente_nome"]').value = 'Paciente Meds';
+    anestesia.graficoUI._contexto = 'anestesia';
+    document.getElementById('medicacoes-body').innerHTML = '';
+    anestesia.meds.add({ hora: '10:00', nome: 'Sevoflurano', dose: '2', unidade: '%', via: 'Inalatória', tipo: 'Inalatório', velocidade: '2 L/min', horaFim: '11:30' });
+    anestesia.meds.add({ hora: '10:05', nome: 'Propofol', dose: '200', unidade: 'mg', via: 'EV', tipo: 'Infusão contínua', diluicao: '500mg/50mL', velocidade: '20 mL/h', horaFim: '11:20', obs: 'TCI 3,0' });
+    anestesia.meds.add({ hora: '10:10', nome: 'Dipirona', dose: '2', unidade: 'g', via: 'EV', obs: 'lento, diluído' });
+
+    const html = printPreview._buildAnestesia();
+    /* colunas opcionais aparecem porque há conteúdo */
+    out.temFim = html.includes('<th>Fim</th>') && html.includes('11:30') && html.includes('11:20');
+    out.temFluxo = /Fluxo \/ Veloc\./.test(html) && html.includes('2 L/min') && html.includes('20 mL/h');
+    out.temDiluicao = /Diluição \/ Solução/.test(html) && html.includes('500mg/50mL');
+    out.temTipo = html.includes('<th>Tipo</th>') && html.includes('Inalatório');
+    out.temObs = html.includes('TCI 3,0') && html.includes('lento, diluído');
+
+    /* sem infusões/gases, as colunas extras NÃO aparecem (impressão limpa) */
+    document.getElementById('medicacoes-body').innerHTML = '';
+    anestesia.meds.add({ hora: '10:10', nome: 'Dipirona', dose: '2', unidade: 'g', via: 'EV' });
+    const html2 = printPreview._buildAnestesia();
+    out.limpaSemExtras = !html2.includes('<th>Fim</th>') && !/Fluxo \/ Veloc\./.test(html2);
+
+    document.getElementById('medicacoes-body').innerHTML = '';
+    return out;
+  });
+  assert(r.temFim, 'o horário de FIM (gases/halogenados/infusões) deveria sair na impressão');
+  assert(r.temFluxo, 'o fluxo/velocidade deveria sair na impressão');
+  assert(r.temDiluicao, 'a diluição/solução deveria sair na impressão');
+  assert(r.temTipo, 'o tipo da medicação deveria sair na impressão');
+  assert(r.temObs, 'as observações das medicações deveriam sair na impressão');
+  assert(r.limpaSemExtras, 'sem infusões/gases, as colunas extras não deveriam poluir a impressão');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
