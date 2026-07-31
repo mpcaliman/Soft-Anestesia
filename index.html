@@ -32772,16 +32772,28 @@ ${TAG_CLOSE_HTML}`;
       );
     }
     if ((d.medicacoes || []).filter(m => m.nome).length > 0) {
+      const medsImp = d.medicacoes.filter(m => m.nome);
+      /* Colunas opcionais entram quando alguma linha tem conteúdo — gases,
+         halogenados e infusões precisam de Tipo, Diluição, Fluxo/Veloc. e FIM */
+      const temCol = k => medsImp.some(m => String(m[k] || '').trim() !== '');
+      const colsMed = [];
+      if (temCol('tipo'))       colsMed.push({ k: 'tipo',       label: 'Tipo' });
+      if (temCol('diluicao'))   colsMed.push({ k: 'diluicao',   label: 'Diluição / Solução' });
+      if (temCol('velocidade')) colsMed.push({ k: 'velocidade', label: 'Fluxo / Veloc.' });
+      if (temCol('horaFim'))    colsMed.push({ k: 'horaFim',    label: 'Fim' });
       html += printPreview._section('Medicações',
-        '<table class="pp-table"><thead><tr><th>Hora</th><th>Medicação</th><th>Dose</th><th>Un.</th><th>Via</th><th>Obs</th></tr></thead><tbody>' +
-        d.medicacoes.filter(m => m.nome).map(m => `
+        '<table class="pp-table"><thead><tr><th>Hora</th><th>Medicação</th><th>Dose</th><th>Un.</th><th>Via</th>' +
+        colsMed.map(c => '<th>' + c.label + '</th>').join('') +
+        '<th>Obs</th></tr></thead><tbody>' +
+        medsImp.map(m => `
           <tr>
             <td>${utils.escapeHTML(m.hora || '')}</td>
             <td>${utils.escapeHTML(m.nome)}</td>
             <td>${utils.escapeHTML(m.dose || '')}</td>
             <td>${utils.escapeHTML(m.unidade || '')}</td>
-            <td>${utils.escapeHTML(m.via || '')}</td>
-            <td>${utils.escapeHTML(m.observacao || '')}</td>
+            <td>${utils.escapeHTML(m.via || '')}</td>` +
+            colsMed.map(c => `<td>${utils.escapeHTML(m[c.k] || '')}</td>`).join('') + `
+            <td>${utils.escapeHTML(m.observacao || m.obs || '')}</td>
           </tr>
         `).join('') + '</tbody></table>'
       );
@@ -32812,8 +32824,10 @@ ${TAG_CLOSE_HTML}`;
           legendaPrint += '<strong style="font-size:9pt">Legenda do gráfico:</strong><br>';
           meds.forEach((m, i) => {
             const dose = m.dose ? ' ' + m.dose + (m.unidade || '') : '';
-            const tipo = m.tipo && m.tipo.includes('Infusão') ? ' (inf.)' : '';
-            legendaPrint += `<span style="display:inline-block;margin-right:10px;margin-bottom:2px"><span style="display:inline-block;background:#333;color:#fff;border-radius:50%;width:14px;height:14px;line-height:14px;text-align:center;font-size:8pt;font-weight:bold;margin-right:3px">M${i+1}</span>${m.hora} · ${utils.escapeHTML(m.nome)}${utils.escapeHTML(dose)}${tipo}</span>`;
+            const tipo = m.tipo && m.tipo.includes('Infusão') ? ' (inf.)' : (m.tipo && m.tipo.includes('Inalat') ? ' (inal.)' : '');
+            const fim = m.horaFim ? ' até ' + m.horaFim : '';
+            const obs = m.observacao || m.obs ? ' — ' + (m.observacao || m.obs) : '';
+            legendaPrint += `<span style="display:inline-block;margin-right:10px;margin-bottom:2px"><span style="display:inline-block;background:#333;color:#fff;border-radius:50%;width:14px;height:14px;line-height:14px;text-align:center;font-size:8pt;font-weight:bold;margin-right:3px">M${i+1}</span>${m.hora} · ${utils.escapeHTML(m.nome)}${utils.escapeHTML(dose)}${tipo}${utils.escapeHTML(fim)}${utils.escapeHTML(obs)}</span>`;
           });
           if (meds.length > 0 && evts.length > 0) legendaPrint += '<br>';
           evts.forEach((e, i) => {
@@ -33116,7 +33130,7 @@ ${TAG_CLOSE_HTML}`;
           <td>${utils.escapeHTML(m.dose || '')}</td>
           <td>${utils.escapeHTML(m.unidade || '')}</td>
           <td>${utils.escapeHTML(m.via || '')}</td>
-          <td>${utils.escapeHTML(m.obs || '')}</td>
+          <td>${utils.escapeHTML(m.obs || m.observacao || '')}</td>
         </tr>`).join('') + '</tbody></table>';
     }
     return printPreview._section('Monitorização gráfica', html);
