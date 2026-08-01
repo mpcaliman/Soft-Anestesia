@@ -2205,6 +2205,70 @@ await test('Rascunhos: zera após finalizar+imprimir e nunca capturam registro f
   await page.close();
 });
 
+/* 45) Editar registro FINALIZADO → salva como CORREÇÃO (só o diff), original intacto */
+await test('Correção: editar e salvar um registro finalizado gera adendo com o diff; original não muda', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('pre', []); store.setList('anestesia', []); store.setList('recuperacao', []);
+
+    /* — motor de diff: só o que mudou, com antes → depois — */
+    const reg = store.save('pre', { nome: 'Paciente Original', alergias: 'Nega', convenio: 'Unimed', _finalizado: true });
+    const linhas = adendos.diffRegistro(reg, { nome: 'Paciente Original', alergias: 'Dipirona', convenio: 'Unimed', campo_novo: 'apareceu' });
+    out.diff = linhas.some(l => l.includes('alergias') && l.includes('"Nega"') && l.includes('"Dipirona"'))
+      && linhas.some(l => l.includes('campo novo') && l.includes('—') && l.includes('"apareceu"'))
+      && !linhas.some(l => l.includes('• nome:'));
+
+    /* — salvarComoCorrecao: original intacto + adendo CORREÇÃO — */
+    adendos.salvarComoCorrecao('pre', reg, Object.assign({}, JSON.parse(JSON.stringify(reg)), { alergias: 'Dipirona' }));
+    const depois = store.getById('pre', reg._id);
+    out.originalIntacto = depois.alergias === 'Nega' && depois._finalizado === true;
+    out.adendoCorrecao = (depois._adendos || []).length === 1
+      && /CORREÇÃO/.test(depois._adendos[0].texto)
+      && depois._adendos[0].texto.includes('Dipirona');
+
+    /* — fluxo real na FICHA: finaliza, reabre, edita e clica Salvar — */
+    location.hash = '#anestesia';
+    await new Promise(r => setTimeout(r, 400));
+    const f = document.getElementById('form-anestesia');
+    const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el) el.value = v; };
+    set('paciente_nome', 'Paciente Corrigivel'); set('data_anestesia', '2026-07-30');
+    set('procedimento', 'Colecistectomia videolaparoscópica');
+    anestesia.salvar({ finalizar: true });
+    await new Promise(r => setTimeout(r, 500));
+    modal.close();
+    const fichaId = store.list('anestesia')[0]._id;
+    anestesia.carregar(store.getById('anestesia', fichaId));
+    await new Promise(r => setTimeout(r, 300));
+    set('procedimento', 'Colecistectomia + biópsia hepática');
+    anestesia.salvar();
+    await new Promise(r => setTimeout(r, 300));
+    const ficha = store.getById('anestesia', fichaId);
+    out.fichaOriginalIntacta = ficha.procedimento.descricao === 'Colecistectomia videolaparoscópica';
+    out.fichaCorrecao = (ficha._adendos || []).some(a => /CORREÇÃO/.test(a.texto)
+      && a.texto.includes('biópsia hepática') && a.texto.includes('descricao'));
+
+    /* — salvar SEM mudar nada não cria correção — */
+    anestesia.carregar(store.getById('anestesia', fichaId));
+    await new Promise(r => setTimeout(r, 300));
+    const nAntes = (store.getById('anestesia', fichaId)._adendos || []).length;
+    anestesia.salvar();
+    await new Promise(r => setTimeout(r, 200));
+    out.semMudancaSemCorrecao = (store.getById('anestesia', fichaId)._adendos || []).length === nAntes;
+
+    store.setList('pre', []); store.setList('anestesia', []); store.setList('recuperacao', []);
+    modal.close();
+    return out;
+  });
+  assert(r.diff, 'o diff deveria listar só os campos alterados, com antes → depois');
+  assert(r.originalIntacto, 'o registro original deveria permanecer intacto');
+  assert(r.adendoCorrecao, 'as mudanças deveriam virar um adendo CORREÇÃO');
+  assert(r.fichaOriginalIntacta, 'no fluxo real, salvar uma ficha finalizada editada não pode sobrescrevê-la');
+  assert(r.fichaCorrecao, 'a edição da ficha deveria virar CORREÇÃO com o campo alterado');
+  assert(r.semMudancaSemCorrecao, 'salvar sem mudar nada não deveria criar correção');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

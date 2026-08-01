@@ -11782,7 +11782,8 @@ const pre = {
     /* Preserva estado de finalização anterior, ou marca como finalizado agora */
     if (data._id) {
       const previo = store.getById('pre', data._id);
-      if (previo && previo._finalizado) data._finalizado = true;
+      /* FINALIZADO editado direto: original preservado, mudanças viram CORREÇÃO */
+      if (previo && previo._finalizado) { adendos.salvarComoCorrecao('pre', previo, data); return; }
     }
     if (finalizar) data._finalizado = true;
     const saved = store.save('pre', data);
@@ -12295,7 +12296,8 @@ const consulta = {
     if (idEl) data._id = idEl.value || undefined;
     if (data._id) {
       const previo = store.getById('consulta', data._id);
-      if (previo && previo._finalizado) data._finalizado = true;
+      /* FINALIZADO editado direto: original preservado, mudanças viram CORREÇÃO */
+      if (previo && previo._finalizado) { adendos.salvarComoCorrecao('consulta', previo, data); return; }
     }
     if (finalizar) data._finalizado = true;
     const saved = store.save('consulta', data);
@@ -12624,7 +12626,8 @@ const recuperacao = {
     if (idEl) data._id = idEl.value || undefined;
     if (data._id) {
       const previo = store.getById('recuperacao', data._id);
-      if (previo && previo._finalizado) data._finalizado = true;
+      /* FINALIZADO editado direto: original preservado, mudanças viram CORREÇÃO */
+      if (previo && previo._finalizado) { adendos.salvarComoCorrecao('recuperacao', previo, data); return; }
     }
     if (finalizar) data._finalizado = true;
     const saved = store.save('recuperacao', data);
@@ -16997,19 +17000,86 @@ const adendos = {
     const ta = document.getElementById('adendo-texto');
     const texto = (ta && ta.value || '').trim();
     if (!texto) { toast('Escreva o texto do adendo.', 'warn'); return; }
+    if (!adendos.registrarTexto(mod, id, texto)) { toast('Registro não encontrado.', 'error'); return; }
+    modal.close();
+    toast('📝 Adendo adicionado');
+  },
+
+  /* Anexa um adendo por código (usado pelo modal e pela CORREÇÃO automática) */
+  registrarTexto(mod, id, texto) {
     const lista = store.list(mod);
     const rec = lista.find(x => x._id === id);
-    if (!rec) { toast('Registro não encontrado.', 'error'); return; }
+    if (!rec) return null;
     rec._adendos = rec._adendos || [];
     const u = (typeof auth !== 'undefined' && auth.usuarioAtual) ? auth.usuarioAtual() : null;
     const ad = { id: utils.uid(), texto, autor: (u && (u.nome || u.usuario)) || '', data: new Date().toISOString(), _pushed: false };
     rec._adendos.push(ad);
     store.setList(mod, lista);
-    try { markDirty(); } catch (e) {}
     adendos._push(mod, rec, ad);
-    modal.close();
-    toast('📝 Adendo adicionado');
     try { adendos.renderInline(mod); } catch (e) {}
+    return ad;
+  },
+
+  /* ---- CORREÇÃO por edição direta de um registro FINALIZADO ----
+     Abrir um registro finalizado, editar e salvar NÃO sobrescreve o original:
+     o que mudou vira um adendo "CORREÇÃO" abaixo dele, listando apenas os
+     campos alterados (antes → depois). */
+  _flatten(obj, prefixo, out) {
+    if (obj == null || typeof obj !== 'object') return;
+    Object.keys(obj).forEach(k => {
+      /* pula técnicos, assinaturas e DERIVADOS recalculados na coleta (fluidos) */
+      if (k.startsWith('_') || k === 'assinatura' || k === 'dataurl' || k === 'carimbo' || k === 'fluidos') return;
+      const v = obj[k];
+      const rotulo = (prefixo ? prefixo + ' · ' : '') + k.replace(/_/g, ' ');
+      if (Array.isArray(v)) {
+        /* linhas novas/removidas aparecem pelos próprios campos (— → valor);
+           linha VAZIA criada pela restauração não é mudança clínica */
+        v.forEach((item, i) => {
+          if (item && typeof item === 'object') adendos._flatten(item, rotulo + ' ' + (i + 1), out);
+          else out[rotulo + ' ' + (i + 1)] = String(item == null ? '' : item);
+        });
+      } else if (v && typeof v === 'object') {
+        adendos._flatten(v, rotulo, out);
+      } else {
+        out[rotulo] = v == null ? '' : String(v);
+      }
+    });
+  },
+  diffRegistro(orig, novo) {
+    const a = {}, b = {};
+    try { adendos._flatten(orig, '', a); adendos._flatten(novo, '', b); } catch (e) {}
+    const linhas = [];
+    Array.from(new Set([...Object.keys(a), ...Object.keys(b)])).sort().forEach(k => {
+      const va = a[k] != null ? String(a[k]) : '';
+      const vb = b[k] != null ? String(b[k]) : '';
+      if (va === vb) return;
+      if (!va.trim() && !vb.trim()) return;
+      const fmt = s => {
+        if (!s.trim()) return '—';
+        if (s.length > 120 || s.startsWith('data:')) return '(conteúdo atualizado)';
+        return '"' + s + '"';
+      };
+      const la = fmt(va), lb = fmt(vb);
+      if (la === lb) return;
+      linhas.push('• ' + k + ': ' + la + ' → ' + lb);
+    });
+    return linhas;
+  },
+  salvarComoCorrecao(mod, previo, dataNovo) {
+    const linhas = adendos.diffRegistro(previo, dataNovo);
+    try { markClean(); } catch (e) {}
+    if (!linhas.length) {
+      toast('Nenhuma alteração em relação ao registro original — nada a corrigir.', 'warn');
+      return true;
+    }
+    const MAX = 40;
+    const corpo = linhas.slice(0, MAX).join('\n') +
+      (linhas.length > MAX ? '\n… e mais ' + (linhas.length - MAX) + ' alteração(ões).' : '');
+    adendos.registrarTexto(mod, previo._id,
+      'CORREÇÃO (edição direta sobre o registro finalizado — o original permanece como estava):\n' + corpo);
+    toast('📝 Original preservado — as alterações foram salvas como CORREÇÃO abaixo do registro');
+    try { setSavedStatus('Correção registrada às ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })); } catch (e) {}
+    return true;
   },
   async _push(mod, rec, ad) {
     const tabela = adendos.MODS[mod]; if (!tabela) return;
@@ -26428,7 +26498,8 @@ const anestesia = {
     if (data._id) {
       const previo = store.getById('anestesia', data._id);
       if (previo && previo._links) data._links = previo._links;
-      if (previo && previo._finalizado) data._finalizado = true;
+      /* FINALIZADO editado direto: original preservado, mudanças viram CORREÇÃO */
+      if (previo && previo._finalizado) { adendos.salvarComoCorrecao('anestesia', previo, data); return; }
     }
     if (finalizar) data._finalizado = true;
     const saved = store.save('anestesia', data);
