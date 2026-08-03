@@ -2418,6 +2418,126 @@ await test('Recuperação: restaurar todos os arquivados, enviar tudo p/ a clín
   await page.close();
 });
 
+/* 48) Restauração completa da nuvem: backup legado + clínica, com relatório */
+await test('Restaurar tudo da nuvem: traz do backup da conta e da clínica, sem duplicar', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    ['anestesia', 'pre', 'consulta'].forEach(m => store.setList(m, []));
+    /* já existe 1 ficha no aparelho — não pode duplicar */
+    store.setList('anestesia', [{ _id: 'fx-1', paciente: { nome: 'Já tinha' } }]);
+
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud._garantirToken = async () => true;
+    cloud.config = () => ({ url: 'http://nuvem.teste', anonKey: 'k' });
+    cloud.session = () => ({ user: { id: 'u1', email: 'mpcaliman@hotmail.com' } });
+    cloud._headers = () => ({});
+
+    /* canal LEGADO devolve 3 docs (1 repetido) */
+    let pagina = 0;
+    window.fetch = async (url) => {
+      const u = String(url);
+      if (u.includes('/documentos?')) {
+        pagina++;
+        if (pagina > 1) return { ok: true, json: async () => [] };
+        return { ok: true, json: async () => ([
+          { modulo: 'anestesia', doc_id: 'fx-1', dados: { _id: 'fx-1', paciente: { nome: 'Já tinha' } }, atualizado_em: '2026-01-01' },
+          { modulo: 'anestesia', doc_id: 'fx-2', dados: { _id: 'fx-2', paciente: { nome: 'Voltou da nuvem' } }, atualizado_em: '2026-01-02' },
+          { modulo: 'pre', doc_id: 'pre-1', dados: { _id: 'pre-1', nome: 'Pre da nuvem' }, atualizado_em: '2026-01-03' }
+        ]) };
+      }
+      return { ok: true, json: async () => [] };
+    };
+    /* canal RELACIONAL devolve 1 consulta */
+    cloudRel.disponivel = () => true;
+    cloudRel._orgAsync = async () => 'org-1';
+    cloudRel.puxarModulo = async (mod) => (mod === 'consulta' ? [{ _id: 'c-1', nome: 'Consulta da clínica' }] : []);
+    pacientes.sincronizarNuvem = async () => {};
+
+    const rel = await cloud.restaurarTudoDaNuvem({ silent: true });
+    out.novos = rel.novos === 3 && rel.jaTinha === 1;
+    out.semDuplicar = store.list('anestesia').length === 2
+      && store.list('anestesia').filter(x => x._id === 'fx-1').length === 1;
+    out.trouxeLegado = !!store.getById('anestesia', 'fx-2') && !!store.getById('pre', 'pre-1');
+    out.trouxeRelacional = !!store.getById('consulta', 'c-1');
+    out.contagemPorModulo = rel.legado.anestesia === 2 && rel.legado.pre === 1 && rel.relacional.consulta === 1;
+
+    /* relatório na tela */
+    cloud._mostrarRelatorioRestauracao(rel);
+    await new Promise(r => setTimeout(r, 120));
+    const corpo = document.getElementById('modal-body').innerHTML;
+    out.relatorio = corpo.includes('3') && /Fichas de anestesia/.test(corpo) && /Backup \(nuvem\)/.test(corpo);
+    modal.close();
+
+    /* botão na tela de armazenamento */
+    out.temBotao = !!document.querySelector('button[onclick="cloud.restaurarTudoDaNuvem()"]');
+
+    ['anestesia', 'pre', 'consulta'].forEach(m => store.setList(m, []));
+    return out;
+  });
+  assert(r.novos, 'deveria trazer 3 registros novos e reconhecer 1 que já existia');
+  assert(r.semDuplicar, 'não deveria duplicar o registro que já estava no aparelho');
+  assert(r.trouxeLegado, 'deveria trazer os registros do backup da conta (canal legado)');
+  assert(r.trouxeRelacional, 'deveria trazer os registros da clínica (canal relacional)');
+  assert(r.contagemPorModulo, 'o relatório deveria contar por módulo e por canal');
+  assert(r.relatorio, 'o relatório na tela deveria mostrar os números por módulo');
+  assert(r.temBotao, 'a tela de Armazenamento deveria ter o botão de restaurar tudo da nuvem');
+  await page.close();
+});
+
+/* 49) Conta da nuvem SEM clínica entra restrita (e o gestor mantém o papel dela) */
+await test('Sem clínica vinculada = acesso restrito; o papel do gestor rebaixa o espelho antigo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+
+    /* espelho ANTIGO da secretária, criado como Administrador */
+    auth._salvarUsuarios([
+      { id: 'u_1', usuario: 'mpcaliman@hotmail.com', nome: 'dono', perfil: 'admin', senhaHash: 'x', nuvem: true, role: 'gestor' },
+      { id: 'u_2', usuario: 'mpcanestesiologia@gmail.com', nome: 'secre', perfil: 'admin', senhaHash: 'x', nuvem: true,
+        modulos: auth.MODULOS.map(m => m.key), soImpressao: [] }
+    ]);
+    auth._definirSessao(auth._lerUsuarios()[1]);
+    out.antesAdmin = auth.usuarioAtual().perfil === 'admin' && auth.podeAcessar('anestesia') === true;
+
+    /* a nuvem responde: conta existe, mas NÃO pertence a nenhuma clínica */
+    cloud.buscarPerfil = async () => ({ semVinculo: true, uid: 'u2', email: 'mpcanestesiologia@gmail.com', role: null, organization_id: null, ativo: true });
+    const u = await auth.atualizarPapelDaNuvem();
+    out.rebaixou = u && u.perfil === 'secretaria' && !u.modulos.includes('anestesia')
+      && !u.modulos.includes('ajustes') && u.role === null;
+    out.uiRestrita = auth.podeAcessar('anestesia') === false && auth.podeAcessar('ajustes') === false
+      && auth.podeAcessar('pre') === true;   /* a secretária mantém o fluxo dela */
+
+    /* login novo dessa conta também entra restrito */
+    const esp = await auth._espelharUsuarioNuvem('mpcanestesiologia@gmail.com', 'senha', { semVinculo: true, uid: 'u2', role: null });
+    out.loginRestrito = esp.perfil === 'secretaria' && !esp.modulos.includes('financeiro') === false;
+
+    /* quando o gestor vincula como auxiliar, o papel do servidor manda */
+    cloud.buscarPerfil = async () => ({ uid: 'u2', email: 'mpcanestesiologia@gmail.com', role: 'auxiliar', organization_id: 'org-1', ativo: true });
+    const u2 = await auth.atualizarPapelDaNuvem();
+    out.viraAuxiliar = u2 && u2.role === 'auxiliar' && u2.perfil === 'secretaria';
+
+    /* o PROGRAMADOR nunca é rebaixado por falta de vínculo */
+    auth._definirSessao(auth._lerUsuarios()[0]);
+    cloud.buscarPerfil = async () => ({ semVinculo: true, uid: 'u1', email: 'mpcaliman@hotmail.com', role: null, organization_id: null, ativo: true });
+    const dono = await auth.atualizarPapelDaNuvem();
+    out.programadorIntacto = dono && dono.perfil === 'admin';
+
+    auth._salvarUsuarios([]);
+    return out;
+  });
+  assert(r.antesAdmin, 'o cenário parte do espelho antigo com acesso total');
+  assert(r.rebaixou, 'conta sem clínica deveria cair para acesso restrito');
+  assert(r.uiRestrita, 'a UI deveria bloquear ficha/ajustes e manter o fluxo da secretária');
+  assert(r.loginRestrito, 'um login novo sem vínculo também deveria entrar restrito');
+  assert(r.viraAuxiliar, 'vinculada como auxiliar, o papel do servidor deveria mandar');
+  assert(r.programadorIntacto, 'o programador não pode ser rebaixado por falta de vínculo');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

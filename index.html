@@ -8528,13 +8528,15 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       <div class="card-body">
         <p id="armazenamento-resumo" style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px"></p>
         <div id="armazenamento-lista" style="margin-bottom:14px"></div>
-        <!-- 🚑 RECUPERAÇÃO: traz de volta tudo que foi arquivado (em lote) -->
+        <!-- 🚑 RECUPERAÇÃO: restaura da nuvem (backup + clínica) e desarquiva -->
         <div style="background:#eef7ff;border:1px solid #bcd9f2;border-radius:8px;padding:11px 13px;margin-bottom:12px">
-          <div style="font-size:.86rem;font-weight:700;color:#1c4f7c;margin-bottom:4px">🚑 Recuperar registros arquivados</div>
-          <p style="font-size:.78rem;color:var(--text-soft);margin:0 0 8px">Casos antigos que saíram do aparelho continuam <b>na nuvem</b>. Traga todos de volta com um toque.</p>
+          <div style="font-size:.86rem;font-weight:700;color:#1c4f7c;margin-bottom:4px">🚑 Recuperar meus dados</div>
+          <p style="font-size:.78rem;color:var(--text-soft);margin:0 0 8px">Se este aparelho ficou sem os registros, traga tudo de volta da nuvem — <b>o backup da sua conta</b> e a <b>clínica</b>. Nada é apagado.</p>
           <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-            <button type="button" class="btn btn-sm btn-primary" onclick="arquivo.restaurarTodos()">🚑 Trazer TODOS de volta</button>
-            <button type="button" class="btn btn-sm" onclick="arquivo.abrir()">🗄 Ver lista</button>
+            <button type="button" class="btn btn-sm btn-primary" onclick="cloud.restaurarTudoDaNuvem()">🚑 Restaurar tudo da nuvem</button>
+            <button type="button" class="btn btn-sm" onclick="arquivo.restaurarTodos()" title="Traz de volta apenas os registros que foram arquivados">🗄 Desarquivar todos</button>
+            <button type="button" class="btn btn-sm" onclick="arquivo.abrir()">📋 Ver arquivados</button>
+            <span id="restaura-nuvem-prog" style="font-size:.78rem;color:var(--text-mute)"></span>
             <span id="arq-restaura-prog" style="font-size:.78rem;color:var(--text-mute)"></span>
           </div>
           <label class="check" style="display:flex;align-items:center;gap:7px;margin-top:10px;font-size:.78rem">
@@ -10066,7 +10068,7 @@ const backupCompleto = {
     } catch (e) { console.warn('migrarOrcamentosPresos:', e); }
   },
 
-  exportar() {
+  exportar(opts = {}) {
     const out = { _tipo: 'soft-anestesia-backup', _versao: 'v7', _data: new Date().toISOString(), dados: {} };
     /* módulos e cadastros mapeados em STORAGE */
     backupCompleto.CHAVES.forEach(k => {
@@ -10082,7 +10084,8 @@ const backupCompleto = {
     });
     const nChaves = Object.keys(out.dados).length;
     utils.download(`backup_completo_soft_anestesia_${utils.hojeISO()}.json`, JSON.stringify(out));
-    toast(`✅ Backup completo exportado (${nChaves} conjuntos de dados)`);
+    if (!opts.silent) toast(`✅ Backup completo exportado (${nChaves} conjuntos de dados)`);
+    return nChaves;
   },
 
   importarUI() {
@@ -14384,6 +14387,11 @@ const auth = {
       /* 1) papel definido no servidor MANDA — sempre (mesmo que o aparelho
          tenha um espelho antigo mais permissivo) */
       perms = auth._permsDoPapel(perfilNuvem.role);
+    } else if (perfilNuvem && perfilNuvem.semVinculo && !auth._ehProgramador(email)) {
+      /* 1b) conta da nuvem SEM clínica: acesso restrito até o gestor vincular
+         (antes ela mantinha/ganhava permissões de administrador) */
+      const base = auth.PERFIS.secretaria;
+      perms = { perfil: 'secretaria', modulos: base.modulos.slice(), soImpressao: (base.soImpressao || []).slice() };
     } else if (u && Array.isArray(u.modulos) && u.modulos.length) {
       /* 2) sem papel no servidor: preserva o que o gestor definiu aqui */
       perms = { perfil: u.perfil, modulos: u.modulos, soImpressao: u.soImpressao || [] };
@@ -14420,6 +14428,12 @@ const auth = {
     if (!alvo.id) alvo.id = 'u_' + (typeof utils !== 'undefined' && utils.uid ? utils.uid() : String(Date.now()) + Math.random().toString(16).slice(2));
     auth._salvarUsuarios(usuarios);
     return alvo;
+  },
+
+  /* O e-mail é o do programador? (nunca é rebaixado por falta de vínculo) */
+  _ehProgramador(email) {
+    try { return String(email || '').toLowerCase() === (typeof programador !== 'undefined' ? programador.EMAIL : 'mpcaliman@hotmail.com'); }
+    catch (e) { return false; }
   },
 
   /* Repara espelhos antigos sem id (uma vez, na inicialização) */
@@ -14465,6 +14479,16 @@ const auth = {
         u.perfil = perms.perfil;
         u.modulos = (perms.modulos || []).slice();
         u.soImpressao = (perms.soImpressao || []).slice();
+      } else if (perfil.semVinculo && !auth._ehProgramador(email)) {
+        /* Conta da nuvem que NÃO pertence a nenhuma clínica entra em acesso
+           RESTRITO — no desenho multi-clínicas, quem não foi vinculado ainda
+           não tem função definida. O gestor libera em Equipe da nuvem.
+           (O programador nunca é rebaixado.) */
+        const base = auth.PERFIS.secretaria;
+        u.perfil = 'secretaria';
+        u.modulos = base.modulos.slice();
+        u.soImpressao = (base.soImpressao || []).slice();
+        u.role = null;
       }
       u.role = perfil.role || u.role || null;
       u.organization_id = perfil.organization_id || u.organization_id || null;
@@ -14488,12 +14512,21 @@ const auth = {
       if (!uid) return;
       const anterior = localStorage.getItem(KEY);
       if (anterior && anterior !== uid) {
-        const limpar = confirm('⚠️ Este aparelho tem dados locais de OUTRA conta.\n\nLimpar os dados locais agora? (recomendado — evita misturar os bancos; os dados da outra conta continuam salvos na nuvem dela)');
+        /* Contar o que está em jogo — nunca limpar "às cegas" */
+        let nRegs = 0;
+        try { (backupCompleto.CHAVES || []).forEach(k => { if (STORAGE[k]) nRegs += (store.list(k) || []).length; }); } catch (e) {}
+        const limpar = confirm(
+          '⚠️ Este aparelho tem ' + nRegs + ' registro(s) de OUTRA conta.\n\n' +
+          'Limpar agora?\n\n' +
+          '• OK = apaga do APARELHO (continuam na nuvem da outra conta; um backup .json é baixado antes)\n' +
+          '• Cancelar = mantém tudo (recomendado se você tem só uma clínica)');
         if (limpar) {
+          /* rede de segurança: baixa um backup completo ANTES de apagar */
+          try { backupCompleto.exportar({ silent: true }); } catch (e) {}
           try {
             backupCompleto.CHAVES.forEach(k => { const real = STORAGE[k]; if (real) localStorage.removeItem(real); });
           } catch (e) {}
-          toast('🧹 Dados locais limpos — puxando os desta conta da nuvem…');
+          toast('🧹 Dados locais limpos (backup .json baixado) — para trazer os desta conta use Ajustes → Armazenamento → 🚑 Restaurar tudo da nuvem', 'warn');
         }
       }
       localStorage.setItem(KEY, uid);
@@ -15369,7 +15402,10 @@ const cloud = {
       const orgRows = ro.ok ? await ro.json().catch(() => []) : [];
       const perfil = perfilRows[0] || null;
       const vinc = orgRows[0] || null;
-      if (!perfil && !vinc) return null;   // conta ainda não vinculada no banco
+      /* Consultas OK, mas a conta não pertence a nenhuma clínica: isso é um
+         RESULTADO (não um erro de rede) — quem chama precisa distinguir para
+         aplicar acesso restrito em vez de manter permissões antigas. */
+      if (!perfil && !vinc) return { semVinculo: true, uid, email: (s.user && s.user.email) || '', role: null, organization_id: null, ativo: true };
       return {
         uid,
         email: (perfil && perfil.email) || (s.user && s.user.email) || '',
@@ -15428,6 +15464,117 @@ const cloud = {
     try { localStorage.setItem(cloud.QUEUE_KEY, JSON.stringify(filtrada.slice(-500))); } catch (e) {}
   },
   _limparFila() { localStorage.removeItem(cloud.QUEUE_KEY); },
+
+  /* ============================================================
+     🚑 RESTAURAÇÃO COMPLETA DA NUVEM
+     Varre os DOIS canais e traz tudo de volta para o aparelho:
+       • legado  → tabela `documentos` (por user_id) — é onde está o
+         histórico de quem usa o app desde antes das organizações;
+       • relacional → tabelas por organização (quando há clínica).
+     Não apaga nada: só acrescenta o que falta e devolve um relatório
+     honesto (achou / baixou / já tinha), por módulo.
+  ============================================================ */
+  async restaurarTudoDaNuvem(opts = {}) {
+    const rel = { legado: {}, relacional: {}, novos: 0, jaTinha: 0, erro: null };
+    if (!cloud.estaConfigurado()) { rel.erro = 'A nuvem não está configurada neste aparelho.'; return rel; }
+    if (!cloud.estaLogado()) { rel.erro = 'Entre na nuvem para restaurar (Ajustes → Backup e sincronização).'; return rel; }
+    if (!(await cloud._garantirToken())) { rel.erro = 'Sessão da nuvem expirada — saia e entre de novo.'; return rel; }
+    const prog = (t) => { const el = document.getElementById('restaura-nuvem-prog'); if (el) el.textContent = t; };
+
+    /* 1) CANAL LEGADO — documentos do usuário (paginado) */
+    try {
+      const c = cloud.config(); const s = cloud.session();
+      let de = 0; const passo = 500; let seguir = true;
+      const porMod = {};
+      while (seguir) {
+        prog('⏳ Lendo o backup da nuvem… (' + de + ')');
+        const r = await fetch(c.url + '/rest/v1/documentos?user_id=eq.' + s.user.id +
+          '&select=modulo,doc_id,dados,atualizado_em&order=atualizado_em.desc' +
+          '&limit=' + passo + '&offset=' + de, { headers: cloud._headers(true) });
+        if (!r.ok) { rel.erro = 'Não consegui ler o backup (HTTP ' + r.status + ').'; break; }
+        const rows = await r.json();
+        rows.forEach(row => {
+          const mod = row.modulo;
+          if (!mod) return;
+          (porMod[mod] = porMod[mod] || []).push(Object.assign({ _id: row.doc_id }, row.dados || {}));
+        });
+        seguir = rows.length === passo;
+        de += passo;
+      }
+      Object.keys(porMod).forEach(mod => {
+        rel.legado[mod] = porMod[mod].length;
+        if (!STORAGE[mod]) return;   /* módulo desconhecido nesta versão */
+        const locais = store.list(mod) || [];
+        const ids = new Set(locais.map(x => x && x._id).filter(Boolean));
+        let add = 0;
+        porMod[mod].forEach(item => {
+          if (!item || !item._id) return;
+          if (ids.has(item._id)) { rel.jaTinha++; return; }
+          locais.push(item); ids.add(item._id); add++; rel.novos++;
+        });
+        if (add) store.setList(mod, locais);
+      });
+    } catch (e) { rel.erro = rel.erro || ('Falha ao ler o backup: ' + e.message); }
+
+    /* 2) CANAL RELACIONAL — por organização (se houver clínica) */
+    try {
+      if (cloudRel.disponivel()) {
+        const org = await cloudRel._orgAsync();
+        if (org) {
+          for (const mod of Object.keys(cloudRel.MODOS)) {
+            prog('⏳ Lendo a clínica… ' + mod);
+            let remotos = null;
+            try { remotos = await cloudRel.puxarModulo(mod); } catch (e) {}
+            if (!Array.isArray(remotos)) continue;
+            rel.relacional[mod] = remotos.length;
+            const locais = store.list(mod) || [];
+            const ids = new Set(locais.map(x => x && x._id).filter(Boolean));
+            let add = 0;
+            remotos.forEach(item => {
+              if (!item || !item._id) return;
+              if (ids.has(item._id)) { rel.jaTinha++; return; }
+              locais.push(item); ids.add(item._id); add++; rel.novos++;
+            });
+            if (add) store.setList(mod, locais);
+          }
+          try { await pacientes.sincronizarNuvem({ silent: true }); } catch (e) {}
+        }
+      }
+    } catch (e) {}
+    prog('');
+    if (!opts.silent) cloud._mostrarRelatorioRestauracao(rel);
+    try { armazenamento.render(); } catch (e) {}
+    try { if (state.currentModule === 'dashboard') dashboard.atualizar(); } catch (e) {}
+    return rel;
+  },
+  _mostrarRelatorioRestauracao(rel) {
+    const linhas = [];
+    const rot = { pre: 'Pré-anestésicas', consulta: 'Consultas', anestesia: 'Fichas de anestesia',
+      recuperacao: 'SRPA', termo: 'Termos', prescricao: 'Receitas', documentos: 'Documentos',
+      risco: 'Riscos', financeiro: 'Financeiro', orcamento: 'Orçamentos', agenda: 'Agenda', pacientes: 'Pacientes' };
+    const mods = Array.from(new Set([...Object.keys(rel.legado), ...Object.keys(rel.relacional)])).sort();
+    mods.forEach(m => {
+      const a = rel.legado[m] || 0, b = rel.relacional[m] || 0;
+      if (!a && !b) return;
+      linhas.push('<tr><td>' + (rot[m] || m) + '</td><td style="text-align:right">' + a + '</td><td style="text-align:right">' + b + '</td></tr>');
+    });
+    const corpo =
+      (rel.erro ? '<p style="color:#b3261e;font-size:.86rem"><b>' + utils.escapeHTML(rel.erro) + '</b></p>' : '') +
+      '<p style="font-size:.88rem;margin:0 0 10px">Trouxe <b>' + rel.novos + '</b> registro(s) de volta para este aparelho' +
+      (rel.jaTinha ? ' · ' + rel.jaTinha + ' já estavam aqui' : '') + '.</p>' +
+      (linhas.length
+        ? '<table class="dash-detail-table" style="margin:0"><thead><tr><th>Módulo</th><th style="text-align:right">Backup (nuvem)</th><th style="text-align:right">Clínica</th></tr></thead><tbody>' + linhas.join('') + '</tbody></table>'
+        : '<p style="font-size:.86rem;color:var(--text-mute)">Não encontrei registros seus na nuvem por esta conta.</p>') +
+      (!rel.novos && !linhas.length
+        ? '<div style="margin-top:12px;font-size:.82rem;background:var(--surface-alt);padding:10px;border-radius:7px">' +
+          'Próximos caminhos, nesta ordem:<br>' +
+          '1) Confira se está logado com <b>a mesma conta</b> de antes (o backup é por conta);<br>' +
+          '2) Se você tem um arquivo de <b>Backup completo</b> (.json), use <b>Ajustes → Backup completo → Importar</b>;<br>' +
+          '3) Os <b>PDFs</b> finalizados continuam no seu Google Drive (Ajustes → Importar PDFs do Drive).' +
+          '</div>'
+        : '');
+    modal.open('🚑 Restauração da nuvem', corpo, '<button class="btn" onclick="modal.close()">Fechar</button>');
+  },
 
   /* ---- Monta uma operação idempotente para a fila/envio ---- */
   _novaOp(modulo, item, operacao) {
@@ -17416,7 +17563,11 @@ const equipeNuvem = {
   async atualizarMeuPapel() {
     const u = await auth.atualizarPapelDaNuvem();
     if (!u) { toast('Não foi possível ler o seu papel agora — confira a conexão com a nuvem.', 'warn'); return; }
-    toast(u.role ? '🔄 Papel atualizado: ' + equipeNuvem._rot(u.role) : 'Sua conta ainda não foi vinculada a uma clínica na nuvem.', u.role ? 'success' : 'warn');
+    toast(u.role
+      ? '🔄 Papel atualizado: ' + equipeNuvem._rot(u.role)
+      : '🔒 Sua conta não está vinculada a nenhuma clínica — acesso restrito até o gestor adicionar o seu e-mail em Equipe da nuvem.',
+      u.role ? 'success' : 'warn');
+    try { auth._aplicarPermissoesUI(); } catch (e) {}
     equipeNuvem.render();
     try { ajustesUsuarios.render(); } catch (e) {}
   },
