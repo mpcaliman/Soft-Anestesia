@@ -311,6 +311,19 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   usuários nem enxergam essas estruturas — no app, a aba 👨‍💻 Programador só
   aparece para a conta dele.
 
+- **Criar/assumir a própria organização (`0010_minha_organizacao.sql`):** ✅ o
+  app tinha um impasse de ovo e galinha — `organizations` não tem policy de
+  INSERT para usuário comum e `organization_users` só aceita escrita de quem
+  **já** é gestor (`ou_all`), então nenhuma conta conseguia virar gestora e a
+  tela "Equipe da nuvem" ficava travada no aviso *"entre com a conta de
+  gestor"*. A RPC `criar_minha_organizacao(nome)` (SECURITY DEFINER) resolve
+  em dois casos, ambos restritos ao próprio chamador: **(A)** conta sem nenhum
+  vínculo ativo cria a organização dela e vira `gestor`; **(B)** membro de uma
+  organização que ficou **sem gestor ativo** assume a gestão (recupera org
+  órfã). Se a organização já tem gestor, a chamada é recusada — ninguém se
+  promove sozinho. No app: botões *🏢 Criar minha clínica (virar gestor)* e
+  *🔄 Atualizar meu papel* dentro de Equipe da nuvem.
+
 ## Rollback
 
 Como é aditivo, para reverter basta remover os objetos criados (as tabelas novas

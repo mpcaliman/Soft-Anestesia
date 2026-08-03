@@ -2269,6 +2269,82 @@ await test('Correção: editar e salvar um registro finalizado gera adendo com o
   await page.close();
 });
 
+/* 46) Usuários: espelho da nuvem com id (✏️/🗑️ funcionam), "(você)" certo e caminho para virar gestor */
+await test('Usuários: editar funciona nos espelhos da nuvem, só um "(você)", e há caminho para virar gestor', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    /* cenário do print: dois espelhos da nuvem criados SEM id (versão antiga) */
+    auth._salvarUsuarios([
+      { usuario: 'mpcaliman@hotmail.com', nome: 'mpcaliman', perfil: 'admin', senhaHash: 'x', nuvem: true },
+      { usuario: 'mpcanestesiologia@gmail.com', nome: 'mpcanestesiologia', perfil: 'admin', senhaHash: 'x', nuvem: true }
+    ]);
+    out.reparou = auth._repararIds() === true
+      && auth._lerUsuarios().every(u => !!u.id)
+      && new Set(auth._lerUsuarios().map(u => u.id)).size === 2;
+
+    /* sessão = primeiro usuário → só ele é "(você)" */
+    auth._definirSessao(auth._lerUsuarios()[0]);
+    location.hash = '#ajustes';
+    await new Promise(r => setTimeout(r, 500));
+    ajustesUsuarios.render();
+    const html = document.getElementById('usuarios-lista').innerHTML;
+    out.umVoce = (html.match(/\(você\)/g) || []).length === 1;
+
+    /* ✏️ abre o modal do usuário CERTO (era o bug: id undefined → sem ação) */
+    const users = auth._lerUsuarios();
+    modal.close();
+    ajustesUsuarios.editar(users[1].id);
+    await new Promise(r => setTimeout(r, 150));
+    out.editarAbre = document.getElementById('modal-backdrop').classList.contains('show')
+      && (document.getElementById('modal-body').innerHTML || '').includes('mpcanestesiologia@gmail.com');
+    out.avisoNuvem = (document.getElementById('modal-body').innerHTML || '').includes('conta da nuvem');
+    /* trocar para Secretária/Auxiliar aplica as permissões restritas */
+    document.getElementById('user-perfil').value = 'secretaria';
+    ajustesUsuarios._sincronizarPerfil(false);
+    await ajustesUsuarios.salvarEdicao(users[1].id);
+    await new Promise(r => setTimeout(r, 200));
+    const dep = auth._lerUsuarios().find(u => u.usuario === 'mpcanestesiologia@gmail.com');
+    out.virouSecretaria = dep.perfil === 'secretaria' && !dep.modulos.includes('anestesia') && !dep.modulos.includes('ajustes');
+
+    /* Equipe da nuvem sem gestor: em vez de aviso morto, botões de ação */
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud.session = () => ({ user: { id: 'u1', email: 'mpcaliman@hotmail.com' } });
+    auth._definirSessao(Object.assign({}, auth._lerUsuarios()[0], { role: null }));
+    await equipeNuvem.render();
+    const eq = document.getElementById('equipe-nuvem-lista').innerHTML;
+    out.temCaminho = eq.includes('criarMinhaClinica') && eq.includes('atualizarMeuPapel');
+
+    /* criar clínica chama a RPC certa e o papel vira gestor no aparelho */
+    const chamadas = [];   /* acumula: o render seguinte também usa fetch */
+    cloud._garantirToken = async () => true;
+    cloud.config = () => ({ url: 'http://nuvem.teste', anonKey: 'k' });
+    cloud._headers = () => ({});
+    window.prompt = () => 'Clinica Teste';
+    window.fetch = async (url, opts) => { chamadas.push({ url: String(url), body: (opts && opts.body) || '' }); return { ok: true, json: async () => 'org-1' }; };
+    cloud.buscarPerfil = async () => ({ uid: 'u1', email: 'mpcaliman@hotmail.com', role: 'gestor', organization_id: 'org-1', ativo: true });
+    await equipeNuvem.criarMinhaClinica();
+    await new Promise(r => setTimeout(r, 200));
+    out.rpcCerta = chamadas.some(c => c.url.includes('rpc/criar_minha_organizacao') && c.body.includes('Clinica Teste'));
+    out.virouGestor = equipeNuvem.ehGestor() === true
+      && (auth._lerUsuarios().find(u => u.usuario === 'mpcaliman@hotmail.com') || {}).role === 'gestor';
+
+    auth._salvarUsuarios([]);
+    modal.close();
+    return out;
+  });
+  assert(r.reparou, 'espelhos antigos sem id deveriam ganhar ids únicos');
+  assert(r.umVoce, 'apenas o usuário logado deveria aparecer como "(você)"');
+  assert(r.editarAbre, 'o ✏️ deveria abrir o modal do usuário certo');
+  assert(r.avisoNuvem, 'editar conta da nuvem deveria avisar que o papel definitivo é o da nuvem');
+  assert(r.virouSecretaria, 'mudar para Secretária deveria restringir os módulos');
+  assert(r.temCaminho, 'sem gestor, a Equipe da nuvem deveria oferecer criar clínica / atualizar papel');
+  assert(r.rpcCerta, 'criar clínica deveria chamar a RPC criar_minha_organizacao');
+  assert(r.virouGestor, 'após criar a clínica, o usuário deveria virar gestor no aparelho');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
