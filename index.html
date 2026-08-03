@@ -14323,6 +14323,9 @@ const auth = {
         auth._definirSessao(local);
         document.getElementById('auth-pass').value = '';
         auth._desbloquear();
+        /* o login LOCAL não mexe na nuvem — se ela estiver conectada em OUTRA
+           conta, realinha antes de sincronizar qualquer coisa */
+        try { await auth._alinharNuvem(id, senha); } catch (e) {}
         try { cloud.autoSyncAoEntrar(); } catch (e) {}
         return;
       }
@@ -14369,6 +14372,29 @@ const auth = {
     /* 3) não é e-mail e não há usuário local com esse login */
     auth._registrarFalha();
     errEl.textContent = 'Usuário ou senha inválidos.';
+  },
+
+  /* Depois de um login pelo ESPELHO local, a sessão da nuvem pode ter ficado
+     na conta de outra pessoa (ex.: a secretária entrou antes neste aparelho).
+     Nesse estado tudo o que se grava sobe para a conta errada e "puxar da
+     nuvem" não acha nada. Aqui a nuvem é realinhada com a conta do app:
+     entra com a mesma senha que acabou de ser digitada e, se não conseguir,
+     desconecta a nuvem em vez de deixar os dados irem para o lugar errado. */
+  async _alinharNuvem(id, senha) {
+    if (!id || id.indexOf('@') < 0) return;
+    let configurado = false;
+    try { configurado = cloud.estaConfigurado(); } catch (e) { return; }
+    if (!configurado) return;
+    const div = cloud.divergencia();
+    if (!div) return;
+    let ok = false;
+    if (navigator.onLine) {
+      try { cloud.logout({ silent: true }); } catch (e) {}
+      try { ok = await cloud.login(id, senha); } catch (e) { ok = false; }
+    }
+    if (ok) return;
+    try { cloud.logout({ silent: true }); } catch (e) {}
+    toast('A nuvem estava conectada como ' + div.nuvem + '. Desconectei para não gravar nada na conta errada — entre na nuvem como ' + div.app + ' em Ajustes.', 'warn');
   },
 
   /* Mantém no aparelho um espelho da conta da nuvem p/ desbloqueio offline.
@@ -15445,9 +15471,9 @@ const cloud = {
     }
     return true;
   },
-  logout() {
+  logout(opts) {
     localStorage.removeItem(cloud.SESSION_KEY);
-    toast('Desconectado da nuvem');
+    if (!(opts && opts.silent)) toast('Desconectado da nuvem');
     cloud._atualizarUI();
   },
 
@@ -15593,6 +15619,8 @@ const cloud = {
   async pushDoc(modulo, item, operacao) {
     if (typeof demo !== 'undefined' && demo.ativo()) return;   /* modo teste não sobe nada */
     if (!cloud.estaConfigurado() || !cloud.estaLogado()) { try { syncStatus.refresh(); } catch (e) {} return; }
+    /* contas diferentes (app × nuvem): NÃO grava na conta errada */
+    if (cloud.divergencia()) { try { cloud._renderAvisoDivergencia(); } catch (e) {} return; }
     if (cloud.MODS.indexOf(modulo) < 0) return;
     const op = cloud._novaOp(modulo, item, operacao || 'upsert');
     try { syncStatus.cloudSyncing(); } catch (e) {}
@@ -15631,6 +15659,14 @@ const cloud = {
     if (typeof demo !== 'undefined' && demo.ativo()) { if (!opts.silent) toast('🧪 Modo demonstração não sincroniza com a nuvem', 'warn'); return; }
     if (!cloud.estaConfigurado()) { if (!opts.silent) toast('Configure a nuvem primeiro', 'warn'); return; }
     if (!cloud.estaLogado()) { if (!opts.silent) toast('Faça login na nuvem primeiro', 'warn'); return; }
+    /* contas diferentes (app × nuvem): sincronizar aqui gravaria/leria na conta
+       errada — para tudo e chama a correção */
+    const div = cloud.divergencia();
+    if (div) {
+      try { cloud._renderAvisoDivergencia(); } catch (e) {}
+      if (!opts.silent) cloud.resolverDivergencia();
+      return;
+    }
     if (cloud._syncing) return;
     cloud._syncing = true;
     cloud._atualizarUI('sincronizando');
@@ -15738,6 +15774,8 @@ const cloud = {
   _atualizarUI(estado) {
     /* aba do programador aparece/some conforme a conta logada na nuvem */
     try { if (typeof programador !== 'undefined') programador.atualizarVisibilidade(); } catch (e) {}
+    /* aviso de contas diferentes (app × nuvem) */
+    try { cloud._renderAvisoDivergencia(); } catch (e) {}
     /* Reflete o estado no selo honesto do cabeçalho também */
     try {
       if (estado === 'sincronizando') { syncStatus._cloud = 'syncing'; syncStatus._render(); }
@@ -15794,6 +15832,76 @@ const cloud = {
   },
   uiLogout() { if (confirm('Desconectar da nuvem? Seus dados continuam no aparelho.')) cloud.logout(); },
   uiSincronizar() { cloud.sincronizar({ enviarTudo: true }); },
+
+  /* ============================================================
+     ⚠️ CONTA DIVERGENTE (app × nuvem)
+     O app tem DUAS identidades: o login da tela (auth) e a sessão da
+     nuvem (Supabase). Se ficarem em contas diferentes — ex.: entrar
+     como mpcaliman enquanto a nuvem segue conectada como a conta da
+     secretária — as gravações sobem para a conta ERRADA e "puxar da
+     nuvem" não acha nada. Aqui isso é detectado, a sincronização é
+     BLOQUEADA e o app oferece a correção em um toque.
+  ============================================================ */
+  divergencia() {
+    try {
+      const s = cloud.session();
+      const u = (typeof auth !== 'undefined' && auth.usuarioAtual) ? auth.usuarioAtual() : null;
+      const emailNuvem = String((s && s.user && s.user.email) || '').toLowerCase();
+      const emailApp = String((u && u.usuario) || '').toLowerCase();
+      if (!emailNuvem || !emailApp || emailApp.indexOf('@') < 0) return null;
+      if (emailNuvem === emailApp) return null;
+      return { app: emailApp, nuvem: emailNuvem };
+    } catch (e) { return null; }
+  },
+  /* Modal de correção — reconectar como a conta do app, ou desconectar */
+  resolverDivergencia() {
+    const d = cloud.divergencia();
+    if (!d) { toast('As contas estão iguais — nada a corrigir.'); return; }
+    modal.open('⚠️ Contas diferentes',
+      '<p style="font-size:.88rem;margin:0 0 10px">Você entrou no app como <b>' + utils.escapeHTML(d.app) + '</b>, mas a <b>nuvem</b> está conectada como <b>' + utils.escapeHTML(d.nuvem) + '</b>.</p>' +
+      '<p style="font-size:.84rem;color:var(--text-soft);margin:0 0 12px">Enquanto estiver assim, a <b>sincronização fica parada</b> — para não gravar os seus dados na conta errada nem misturar bancos.</p>' +
+      '<div class="grid">' +
+        '<div class="field col-12"><label>Senha da nuvem de <b>' + utils.escapeHTML(d.app) + '</b></label>' +
+        '<input type="password" id="div-senha" placeholder="••••••" autocomplete="current-password"></div>' +
+      '</div>' +
+      '<div id="div-erro" style="color:#b3261e;font-size:.82rem;min-height:16px"></div>',
+      '<button class="btn btn-primary" onclick="cloud._reconectarComoApp()">🔓 Conectar como ' + utils.escapeHTML(d.app) + '</button>' +
+      '<button class="btn" onclick="cloud.logout(); modal.close(); toast(\'Nuvem desconectada — entre com a conta certa em Ajustes\', \'warn\');">🚪 Só desconectar</button>');
+  },
+  async _reconectarComoApp() {
+    const d = cloud.divergencia();
+    if (!d) { modal.close(); return; }
+    const senha = (document.getElementById('div-senha') || {}).value || '';
+    const err = document.getElementById('div-erro');
+    if (!senha) { if (err) err.textContent = 'Informe a senha da nuvem.'; return; }
+    if (err) err.textContent = 'Conectando…';
+    try { cloud.logout(); } catch (e) {}
+    let ok = false;
+    try { ok = await cloud.login(d.app, senha); } catch (e) { ok = false; }
+    if (!ok) { if (err) err.textContent = 'Não consegui entrar com essa senha.'; return; }
+    modal.close();
+    toast('✅ Nuvem reconectada como ' + d.app + ' — sincronizando…');
+    try { cloud.autoSyncAoEntrar(); } catch (e) {}
+    try { cloud._atualizarUI(); } catch (e) {}
+  },
+  /* Aviso fixo no card da nuvem enquanto as contas estiverem diferentes */
+  _renderAvisoDivergencia() {
+    const host = document.getElementById('cloud-status-info');
+    const d = cloud.divergencia();
+    let box = document.getElementById('cloud-divergencia');
+    if (!d) { if (box) box.remove(); return; }
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'cloud-divergencia';
+      box.style.cssText = 'background:#fff4e5;border:1px solid #f0c890;color:#7a4b12;border-radius:8px;padding:10px 12px;margin:10px 0;font-size:.83rem';
+      const card = document.getElementById('cloud-card');
+      const body = card && card.querySelector('.card-body');
+      if (body) body.insertBefore(box, body.firstChild); else if (host) host.parentNode.insertBefore(box, host);
+    }
+    box.innerHTML = '⚠️ <b>Contas diferentes:</b> o app está com <b>' + utils.escapeHTML(d.app) +
+      '</b> e a nuvem com <b>' + utils.escapeHTML(d.nuvem) + '</b>. A sincronização está <b>parada</b>. ' +
+      '<button class="btn btn-xs btn-primary" style="margin-left:6px" onclick="cloud.resolverDivergencia()">Corrigir agora</button>';
+  },
 
   /* Sincronização COMPLETA e silenciosa ao ENTRAR (login ou sessão diária
      restaurada): drena a fila, sincroniza o canal legado e força um pull
@@ -16755,6 +16863,9 @@ const cloudRel = {
   },
   disponivel() {
     try {
+      /* app e nuvem em contas diferentes → nada entra nem sai (senão os dados
+         iriam para a clínica da outra conta) */
+      if (cloud.divergencia()) return false;
       return cloud.estaConfigurado() && cloud.estaLogado()
         && (typeof navigator === 'undefined' || navigator.onLine !== false);
     } catch (e) { return false; }
