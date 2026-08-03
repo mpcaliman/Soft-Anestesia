@@ -3659,6 +3659,13 @@ body.tem-demo-banner { padding-bottom: 46px; }
 .module.edicao-parcial .campo-liberado textarea,
 .module.edicao-parcial .campo-liberado button,
 .module.edicao-parcial .campo-liberado .btn { pointer-events: auto !important; opacity: 1; }
+/* exceção dentro de uma área liberada: campo que continua sendo do médico */
+.module.edicao-parcial .campo-travado input,
+.module.edicao-parcial .campo-travado select,
+.module.edicao-parcial .campo-travado textarea,
+.module.edicao-parcial .campo-travado button,
+.module.edicao-parcial .campo-travado .btn { pointer-events: none !important; opacity: .96; }
+.module.edicao-parcial .campo-travado { background: transparent !important; box-shadow: none !important; }
 .module.edicao-parcial .campo-liberado {
   outline: 2px solid var(--primary); outline-offset: 4px;
   border-radius: 8px; opacity: 1 !important;
@@ -4344,7 +4351,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
         <div class="card-title-wrap"><span class="card-num">1</span><h2>Identificação<small>Paciente, cirurgia e profissional</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
-      <div class="card-body">
+      <div class="card-body" data-sec-edit>
         <div class="grid">
           <div class="field col-6 required"><label>Nome do paciente <span class="req">*</span></label><input type="text" name="nome" data-required onblur="linker.autoPreencherDadosPaciente(this.value, 'pre'); rascunhos.renomearAba('pre')"></div>
           <div class="field col-3 required"><label>Data da avaliação <span class="req">*</span></label><input type="date" name="data" data-required></div>
@@ -4373,7 +4380,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
         <div class="card-title-wrap"><span class="card-num">2</span><h2>Anamnese<small>Histórico clínico e antecedentes</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
-      <div class="card-body">
+      <div class="card-body" data-sec-edit>
         <div class="grid">
           <div class="field col-6" data-sec-edit><label>Comorbidades</label>
             <textarea name="comorbidades" rows="2"></textarea>
@@ -4406,7 +4413,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
         <div class="card-title-wrap"><span class="card-num">3</span><h2>Sinais vitais e exames<small>Medidas, exame físico e laboratoriais</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
-      <div class="card-body">
+      <div class="card-body" data-sec-edit>
         <div class="grid">
           <div class="field col-12">
             <label>Sinais vitais e medidas</label>
@@ -4423,7 +4430,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
               <div class="lab-item"><span>Dor (0-10)</span><input type="text" name="dor" inputmode="numeric"></div>
             </div>
           </div>
-          <div class="field col-12"><label>Exame físico resumido</label><textarea name="exame_fisico" rows="3"></textarea></div>
+          <div class="field col-12 campo-travado"><label>Exame físico resumido</label><textarea name="exame_fisico" rows="3"></textarea></div>
 
           <div class="field col-12" data-sec-edit>
             <label>Exames laboratoriais</label>
@@ -4486,7 +4493,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
         <div class="card-title-wrap"><span class="card-num">4</span><h2>Pareceres de outras clínicas<small>Avaliações de especialistas — cardiologia, pneumologia, etc.</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
-      <div class="card-body">
+      <div class="card-body" data-sec-edit>
         <div class="grid">
           <div class="field col-12"><label>🫀 Parecer / risco cardiológico</label><textarea name="parecer_cardio" rows="2" placeholder="Ex.: liberado do ponto de vista cardiológico; manter betabloqueador; otimizar PA..."></textarea></div>
           <div class="field col-12"><label>🫁 Parecer pneumológico</label><textarea name="parecer_pneumo" rows="2" placeholder="Ex.: função pulmonar adequada; otimizar broncodilatador; cessar tabagismo..."></textarea></div>
@@ -14825,7 +14832,7 @@ const auth = {
     setBanner('ro-banner-' + mod, 'ro-banner',
       '🔒 Modo <strong>somente impressão</strong> — você pode visualizar e imprimir, mas não editar ou salvar neste módulo.', leitura);
     setBanner('pp-banner-' + mod, 'parcial-banner',
-      '✏️ <strong>Edição parcial</strong> — você pode preencher os campos destacados (comorbidades, medicações em uso e exames). O restante é preenchido pelo anestesiologista.', !!parcialSel);
+      '✏️ <strong>Edição parcial</strong> — você preenche as seções destacadas: <b>identificação</b>, <b>anamnese</b>, <b>sinais vitais e exames</b> e <b>pareceres de outras clínicas</b>. Exame físico, classificação de risco e conclusão são do anestesiologista.', !!parcialSel);
   },
 
   /* ---------- Timeout de inatividade (5 min) ---------- */
