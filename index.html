@@ -8485,6 +8485,8 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       <div class="card-body">
         <button type="button" class="btn btn-sm" onclick="cloudDiag.rodar()">🩺 Rodar diagnóstico</button>
         <button type="button" class="btn btn-sm" id="clouddiag-puxar-btn" onclick="cloudDiag.puxarTudo()" title="Traz para este aparelho tudo o que está no banco relacional (pacientes, agenda, fichas…)">☁️ Puxar tudo da nuvem</button>
+        <button type="button" class="btn btn-sm" onclick="cloudRel.enviarTudoParaClinica()" title="Envia todos os registros deste aparelho para a clínica (organização) atual — use ao criar/entrar numa clínica para levar o histórico junto">🏥 Enviar tudo para a minha clínica</button>
+        <span id="clinica-envio-prog" style="font-size:.78rem;color:var(--text-mute);margin-left:8px"></span>
         <label class="autosave-toggle" style="margin-left:12px" title="Recebe atualizações ao vivo de outros aparelhos (experimental)">
           <input type="checkbox" id="realtime-chk" onchange="cloudRealtime.toggle(this.checked)"> Tempo real (beta)
           <span id="realtime-status" style="margin-left:6px;font-size:.72rem;color:var(--text-mute)"></span>
@@ -8526,9 +8528,22 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       <div class="card-body">
         <p id="armazenamento-resumo" style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px"></p>
         <div id="armazenamento-lista" style="margin-bottom:14px"></div>
+        <!-- 🚑 RECUPERAÇÃO: traz de volta tudo que foi arquivado (em lote) -->
+        <div style="background:#eef7ff;border:1px solid #bcd9f2;border-radius:8px;padding:11px 13px;margin-bottom:12px">
+          <div style="font-size:.86rem;font-weight:700;color:#1c4f7c;margin-bottom:4px">🚑 Recuperar registros arquivados</div>
+          <p style="font-size:.78rem;color:var(--text-soft);margin:0 0 8px">Casos antigos que saíram do aparelho continuam <b>na nuvem</b>. Traga todos de volta com um toque.</p>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+            <button type="button" class="btn btn-sm btn-primary" onclick="arquivo.restaurarTodos()">🚑 Trazer TODOS de volta</button>
+            <button type="button" class="btn btn-sm" onclick="arquivo.abrir()">🗄 Ver lista</button>
+            <span id="arq-restaura-prog" style="font-size:.78rem;color:var(--text-mute)"></span>
+          </div>
+          <label class="check" style="display:flex;align-items:center;gap:7px;margin-top:10px;font-size:.78rem">
+            <input type="checkbox" id="arq-auto-chk" onchange="arquivo.alternarAuto(this.checked)">
+            <span>Arquivar casos antigos <b>automaticamente</b> quando o aparelho encher <i>(desligado por padrão — nada sai sem você mandar)</i></span>
+          </label>
+        </div>
         <div style="display:flex;flex-wrap:wrap;gap:8px">
-          <button type="button" class="btn btn-sm btn-primary" onclick="arquivo.arquivarAgora()" title="Move para a nuvem os registros antigos (90+ dias; financeiro 1 ano) que já estão confirmados lá. Podem ser trazidos de volta a qualquer momento.">🗄 Arquivar casos antigos</button>
-          <button type="button" class="btn btn-sm" onclick="arquivo.abrir()" title="Lista os registros arquivados e permite trazê-los de volta ao aparelho">☁️ Ver arquivados</button>
+          <button type="button" class="btn btn-sm" onclick="arquivo.arquivarAgora()" title="Move para a nuvem os registros antigos (90+ dias; financeiro 1 ano) que já estão confirmados lá. Podem ser trazidos de volta a qualquer momento.">🗄 Arquivar casos antigos</button>
           <button type="button" class="btn btn-sm" onclick="armazenamento.compactarVersoes()" title="Reduz o histórico de versões a 3 por documento e remove assinaturas/fotos em base64 do histórico (os documentos atuais não mudam)">🕓 Compactar histórico de versões</button>
           <button type="button" class="btn btn-sm" onclick="armazenamento.liberarAnexos()" title="Remove do aparelho cópias locais de anexos que JÁ estão na nuvem (continuam abríveis pela nuvem)">☁️ Liberar anexos já na nuvem</button>
           <button type="button" class="btn btn-sm" onclick="armazenamento.esvaziarLixeira()" title="Esvazia a lixeira de 30 dias">🗑 Esvaziar lixeira</button>
@@ -10144,8 +10159,11 @@ const armazenamento = {
     try {
       let u = armazenamento.uso();
       if (u.total > 4 * 1024 * 1024) {
-        /* 1º tenta se resolver sozinho: arquiva casos antigos já na nuvem */
-        try { if (arquivo.arquivarAntigos() > 0) u = armazenamento.uso(); } catch (e) {}
+        /* Arquivamento automático é OPT-IN (padrão DESLIGADO). Ele já levou
+           casos demais de uma vez quando o espelho da nuvem carimbou muitos
+           registros ao mesmo tempo — num prontuário, sumiço em massa não pode
+           acontecer sozinho. Ligue em Ajustes → Armazenamento do aparelho. */
+        try { if (arquivo.autoLigado() && arquivo.arquivarAntigos() > 0) u = armazenamento.uso(); } catch (e) {}
         /* Só avisa se AINDA está alto, e no máximo 1x/24h (senão vira ruído) */
         const AVISO_KEY = 'medsys.v7.aviso_armazenamento_em';
         const ultimo = parseInt(localStorage.getItem(AVISO_KEY) || '0');
@@ -10233,7 +10251,10 @@ const armazenamento = {
     const porRotulo = {};
     u.itens.forEach(it => { const r = armazenamento._rotulo(it.k); porRotulo[r] = (porRotulo[r] || 0) + it.bytes; });
     const tops = Object.entries(porRotulo).sort((a, b) => b[1] - a[1]).slice(0, 9);
-    if (res) res.textContent = 'Em uso neste aparelho: ' + armazenamento._fmt(u.total) + '. No celular, o navegador costuma dar ~5 MB — acima disso aparece o aviso de armazenamento cheio.';
+    const nArq = (() => { try { return arquivo.total(); } catch (e) { return 0; } })();
+    if (res) res.innerHTML = 'Em uso neste aparelho: <b>' + armazenamento._fmt(u.total) + '</b>. No celular, o navegador costuma dar ~5 MB — acima disso aparece o aviso de armazenamento cheio.' +
+      (nArq ? '<br><span style="color:#1c4f7c"><b>🚑 ' + nArq + ' registro(s) estão arquivados na nuvem</b> (fora deste aparelho) — use "Trazer TODOS de volta" abaixo.</span>' : '');
+    try { const chk = document.getElementById('arq-auto-chk'); if (chk) chk.checked = arquivo.autoLigado(); } catch (e) {}
     host.innerHTML = tops.map(([r, b]) => {
       const pct = u.total ? Math.max(2, Math.round(b / u.total * 100)) : 0;
       return '<div style="margin-bottom:7px">' +
@@ -10307,6 +10328,15 @@ const arquivo = {
   PRAZOS: { anestesia: 90, pre: 90, consulta: 90, recuperacao: 90, termo: 90,
             prescricao: 90, documentos: 90, risco: 90, financeiro: 365, orcamento: 365 },
 
+  /* Arquivamento AUTOMÁTICO: opt-in, desligado por padrão (ver autoManutencao) */
+  AUTO_KEY: 'medsys.v7.arquivo.auto',
+  autoLigado() { return localStorage.getItem(arquivo.AUTO_KEY) === '1'; },
+  alternarAuto(lig) {
+    localStorage.setItem(arquivo.AUTO_KEY, lig ? '1' : '0');
+    toast(lig ? '🗄 Arquivamento automático LIGADO — casos antigos já confirmados na nuvem sairão do aparelho sozinhos'
+              : '🔒 Arquivamento automático DESLIGADO — nada sai do aparelho sem você mandar');
+  },
+
   _indice() { try { return JSON.parse(localStorage.getItem(arquivo.INDEX_KEY) || '{}') || {}; } catch (e) { return {}; } },
   _gravarIndice(ix) { try { localStorage.setItem(arquivo.INDEX_KEY, JSON.stringify(ix)); } catch (e) {} },
   estaArquivado(mod, id) {
@@ -10371,9 +10401,10 @@ const arquivo = {
   },
 
   /* Traz um registro arquivado de volta da nuvem (relacional; legado como plano B) */
-  async restaurar(mod, id) {
-    if (!cloudRel.disponivel()) { toast('Sem internet para trazer da nuvem — tente online', 'warn'); return false; }
-    if (!(await cloud._garantirToken())) { toast('Sessão expirada — entre de novo', 'warn'); return false; }
+  async restaurar(mod, id, opts = {}) {
+    const aviso = (m, t) => { if (!opts.silent) toast(m, t); };
+    if (!cloudRel.disponivel()) { aviso('Sem internet para trazer da nuvem — tente online', 'warn'); return false; }
+    if (!(await cloud._garantirToken())) { aviso('Sessão expirada — entre de novo', 'warn'); return false; }
     let item = null;
     try {
       const cfg = cloudRel.MODOS[mod];
@@ -10392,12 +10423,39 @@ const arquivo = {
         if (r.ok) { const rows = await r.json(); if (rows[0] && rows[0].dados && rows[0].dados._id) item = rows[0].dados; }
       } catch (e) {}
     }
-    if (!item || !item._id) { toast('Não encontrei este registro na nuvem', 'error'); return false; }
+    if (!item || !item._id) { aviso('Não encontrei este registro na nuvem', 'error'); return false; }
     const lst = store.list(mod);
     if (!lst.some(x => x._id === item._id)) { lst.push(item); store.setList(mod, lst); }
     arquivo._removerDoIndice(mod, id);
-    toast('✅ Registro de volta no aparelho');
+    aviso('✅ Registro de volta no aparelho');
     return true;
+  },
+
+  /* Traz TODOS os arquivados de volta ao aparelho, em lote. Usado quando o
+     arquivamento automático levou casos demais de uma vez. Não apaga nada:
+     só copia da nuvem de volta para cá. */
+  async restaurarTodos(opts = {}) {
+    const ix = arquivo._indice();
+    const itens = [];
+    Object.keys(ix).forEach(mod => (ix[mod] || []).forEach(e => itens.push({ mod, id: e.id, nome: e.nome })));
+    if (!itens.length) { toast('Não há registros arquivados.', 'warn'); return { ok: 0, falhou: 0 }; }
+    if (!opts.silent && !confirm('Trazer de volta ' + itens.length + ' registro(s) arquivado(s) da nuvem para este aparelho?')) return { ok: 0, falhou: 0 };
+    const prog = (txt) => { const el = document.getElementById('arq-restaura-prog'); if (el) el.textContent = txt; };
+    let ok = 0, falhou = 0;
+    for (let i = 0; i < itens.length; i++) {
+      const it = itens[i];
+      prog('⏳ ' + (i + 1) + '/' + itens.length + ' — ' + (it.nome || it.id));
+      try {
+        const r = await arquivo.restaurar(it.mod, it.id, { silent: true });
+        if (r) ok++; else falhou++;
+      } catch (e) { falhou++; }
+    }
+    prog('');
+    toast(ok ? '✅ ' + ok + ' registro(s) de volta no aparelho' + (falhou ? ' · ' + falhou + ' não encontrado(s) na nuvem' : '')
+             : '⚠️ Nenhum registro pôde ser trazido — confira a conexão com a nuvem', ok ? 'success' : 'warn');
+    try { armazenamento.render(); } catch (e) {}
+    try { if (state.currentModule === 'dashboard') dashboard.atualizar(); } catch (e) {}
+    return { ok, falhou };
   },
 
   /* Modal: lista os arquivados (busca por nome) com restaurar por item */
@@ -14323,11 +14381,23 @@ const auth = {
        3) 1º acesso sem vínculo no banco → dono/legado (admin). */
     let perms;
     if (perfilNuvem && auth._permsDoPapel(perfilNuvem.role)) {
+      /* 1) papel definido no servidor MANDA — sempre (mesmo que o aparelho
+         tenha um espelho antigo mais permissivo) */
       perms = auth._permsDoPapel(perfilNuvem.role);
     } else if (u && Array.isArray(u.modulos) && u.modulos.length) {
+      /* 2) sem papel no servidor: preserva o que o gestor definiu aqui */
       perms = { perfil: u.perfil, modulos: u.modulos, soImpressao: u.soImpressao || [] };
-    } else {
+    } else if (!usuarios.length) {
+      /* 3) PRIMEIRA conta deste aparelho e sem vínculo na nuvem → é o dono */
       perms = { perfil: 'admin', modulos: auth.PERFIS.admin.modulos.slice(), soImpressao: [] };
+    } else {
+      /* 4) conta NOVA num aparelho que já tem gente e sem papel definido na
+         nuvem → entra RESTRITA (secretária). Antes virava administradora
+         automaticamente — a secretária ficava com acesso total. O gestor
+         define o papel real em Ajustes → Equipe da nuvem. */
+      const base = auth.PERFIS.secretaria;
+      perms = { perfil: 'secretaria', modulos: base.modulos.slice(), soImpressao: (base.soImpressao || []).slice() };
+      try { toast('Sua conta ainda não tem papel definido nesta clínica — acesso restrito até o gestor liberar.', 'warn'); } catch (e) {}
     }
     const dados = {
       usuario: email,
@@ -15589,6 +15659,9 @@ const cloud = {
       setTimeout(() => { try { cloud.sincronizar({ silent: true }); } catch (e) {} }, 900);
       /* configurações (termo/textos/logomarca/tema/preferências) descem também */
       setTimeout(() => { try { if (typeof configSync !== 'undefined') configSync.puxarAplicar(); } catch (e) {} }, 1200);
+      /* PAPEL do servidor reaplicado a cada entrada: se o gestor mudou o papel
+         de alguém, o aparelho dessa pessoa obedece sem depender de botão */
+      setTimeout(() => { try { auth.atualizarPapelDaNuvem(); } catch (e) {} }, 1400);
       /* pendências de convênio: a janela aparece ao entrar (após os pulls) */
       setTimeout(() => { try { if (typeof pendencias !== 'undefined') pendencias.checarAoEntrar(); } catch (e) {} }, 3200);
       setTimeout(() => {
@@ -16791,6 +16864,40 @@ const cloudRel = {
       const rows = await r.json();
       return rows.map(row => cloudRel._rowParaRegistro(row));
     } catch (e) { return null; }
+  },
+
+  /* ---- TRANSFERIR TUDO PARA A CLÍNICA (organização) ----
+     Envia todos os registros deste aparelho para a organização atual, em
+     lote. Serve para "mudar o banco de casa": ao criar/entrar numa clínica,
+     leva o histórico junto. É idempotente (upsert por legacy_id) e não apaga
+     nada — o que já estiver lá é atualizado. */
+  async enviarTudoParaClinica(opts = {}) {
+    if (!cloudRel.disponivel()) { toast('Conecte-se à nuvem primeiro', 'warn'); return null; }
+    if (!(await cloud._garantirToken())) { toast('Sessão da nuvem expirada — entre de novo', 'warn'); return null; }
+    const org = await cloudRel._orgAsync();
+    if (!org) { toast('Esta conta ainda não tem clínica na nuvem — crie em Ajustes → Equipe da nuvem', 'warn'); return null; }
+    const mods = Object.keys(cloudRel.MODOS);
+    const total = mods.reduce((s, m) => s + (store.list(m) || []).length, 0) + (store.list('pacientes') || []).length;
+    if (!total) { toast('Não há registros neste aparelho para enviar.', 'warn'); return null; }
+    if (!opts.silent && !confirm('Enviar ' + total + ' registro(s) deste aparelho para a sua clínica na nuvem?\n\nNada é apagado: o que já estiver lá é apenas atualizado.')) return null;
+    const prog = (t) => { const el = document.getElementById('clinica-envio-prog'); if (el) el.textContent = t; };
+    let ok = 0, falhou = 0, feitos = 0;
+    /* pacientes primeiro (os registros se penduram neles) */
+    for (const p of (store.list('pacientes') || [])) {
+      feitos++; prog('⏳ ' + feitos + '/' + total + ' — pacientes');
+      try { const r = await cloudRel.enviarPaciente(p, { force: true }); (r && r.ok) ? ok++ : falhou++; } catch (e) { falhou++; }
+    }
+    for (const mod of mods) {
+      const lst = store.list(mod) || [];
+      for (const item of lst) {
+        feitos++; prog('⏳ ' + feitos + '/' + total + ' — ' + mod);
+        if (!item || !item._id) { falhou++; continue; }
+        try { const r = await cloudRel.enviarRegistro(mod, item, { force: true }); (r && r.ok) ? ok++ : falhou++; } catch (e) { falhou++; }
+      }
+    }
+    prog('');
+    toast('🏥 Transferência concluída — ' + ok + ' registro(s) na clínica' + (falhou ? ' · ' + falhou + ' falhou(aram)' : ''), falhou ? 'warn' : 'success');
+    return { ok, falhou };
   },
 
   async enviarRegistro(mod, item, opts = {}) {
