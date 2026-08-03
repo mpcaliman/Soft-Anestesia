@@ -2345,6 +2345,79 @@ await test('Usuários: editar funciona nos espelhos da nuvem, só um "(você)", 
   await page.close();
 });
 
+/* 47) Recuperação em lote, transferir para a clínica e conta nova SEM acesso total */
+await test('Recuperação: restaurar todos os arquivados, enviar tudo p/ a clínica e conta nova entra restrita', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+
+    /* — arquivamento automático agora é OPT-IN (padrão desligado) — */
+    localStorage.removeItem(arquivo.AUTO_KEY);
+    out.autoDesligado = arquivo.autoLigado() === false;
+    store.setList('anestesia', []);
+    const antigo = store.save('anestesia', {
+      paciente: { nome: 'Caso Antigo' }, procedimento: { data: '2020-01-10' },
+      _relUpdatedAt: '2020-01-10T10:00:00Z'
+    });
+    const lst = store.list('anestesia');
+    lst[0]._updatedAt = '2020-01-10T10:00:00Z';
+    store.setList('anestesia', lst);
+    armazenamento.autoManutencao();
+    out.naoArquivouSozinho = store.list('anestesia').length === 1 && arquivo.total() === 0;
+
+    /* manual continua funcionando */
+    arquivo.arquivarAntigos();
+    out.arquivouManual = store.list('anestesia').length === 0 && arquivo.total() === 1;
+
+    /* — restaurarTodos traz de volta em lote (da nuvem) — */
+    cloudRel.disponivel = () => true;
+    cloud._garantirToken = async () => true;
+    cloud.config = () => ({ url: 'http://nuvem.teste', anonKey: 'k' });
+    cloud.session = () => ({ user: { id: 'u1', email: 'mpcaliman@hotmail.com' } });
+    cloud._headers = () => ({});
+    cloudRel._orgAsync = async () => 'org-1';
+    cloudRel._lerAtualTab = async () => ({ legacy_id: antigo._id, data: { _id: antigo._id, paciente: { nome: 'Caso Antigo' } }, updated_at: '2020-01-10T10:00:00Z' });
+    cloudRel._rowParaRegistro = (row) => Object.assign({}, row.data, { _relUpdatedAt: row.updated_at });
+    const res = await arquivo.restaurarTodos({ silent: true });
+    out.restaurouTodos = res.ok === 1 && store.list('anestesia').length === 1 && arquivo.total() === 0;
+
+    /* — enviarTudoParaClinica manda cada registro para a organização — */
+    const enviados = [];
+    cloudRel.enviarRegistro = async (mod, item) => { enviados.push(mod + ':' + item._id); return { ok: true }; };
+    cloudRel.enviarPaciente = async () => ({ ok: true });
+    store.setList('pacientes', [{ _id: 'p1', nome: 'Paciente Um' }]);
+    const env = await cloudRel.enviarTudoParaClinica({ silent: true });
+    out.enviouTudo = env && env.ok >= 2 && enviados.some(e => e.startsWith('anestesia:'));
+
+    /* — SEGURANÇA: conta NOVA num aparelho que já tem usuário NÃO vira admin — */
+    auth._salvarUsuarios([{ id: 'u_1', usuario: 'mpcaliman@hotmail.com', nome: 'dono', perfil: 'admin', senhaHash: 'x', nuvem: true, role: 'gestor' }]);
+    const nova = await auth._espelharUsuarioNuvem('mpcanestesiologia@gmail.com', 'senha123', null);
+    out.novaRestrita = nova.perfil === 'secretaria'
+      && !nova.modulos.includes('anestesia') && !nova.modulos.includes('ajustes') && !nova.modulos.includes('financeiro') === false;
+    /* e o papel do SERVIDOR sempre manda (mesmo com espelho antigo permissivo) */
+    const comPapel = await auth._espelharUsuarioNuvem('mpcanestesiologia@gmail.com', 'senha123', { role: 'auxiliar', uid: 'u2', organization_id: 'org-1' });
+    out.papelDoServidorManda = comPapel.perfil === 'secretaria' && comPapel.role === 'auxiliar'
+      && !comPapel.modulos.includes('anestesia');
+    /* primeira conta do aparelho continua sendo o dono (admin) */
+    auth._salvarUsuarios([]);
+    const dono = await auth._espelharUsuarioNuvem('mpcaliman@hotmail.com', 'senha123', null);
+    out.donoAdmin = dono.perfil === 'admin';
+
+    auth._salvarUsuarios([]);
+    store.setList('anestesia', []); store.setList('pacientes', []);
+    return out;
+  });
+  assert(r.autoDesligado, 'o arquivamento automático deveria vir DESLIGADO');
+  assert(r.naoArquivouSozinho, 'a manutenção automática não pode arquivar registros sozinha');
+  assert(r.arquivouManual, 'o arquivamento manual deveria continuar funcionando');
+  assert(r.restaurouTodos, '"Trazer TODOS de volta" deveria restaurar os arquivados em lote');
+  assert(r.enviouTudo, '"Enviar tudo para a minha clínica" deveria espelhar os registros na organização');
+  assert(r.novaRestrita, 'conta nova em aparelho com usuários deveria entrar RESTRITA (não admin)');
+  assert(r.papelDoServidorManda, 'o papel definido na nuvem deveria mandar sempre');
+  assert(r.donoAdmin, 'a primeira conta do aparelho continua sendo o dono (admin)');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
