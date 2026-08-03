@@ -8349,6 +8349,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       <div class="filter-actions">
         <button class="btn btn-sm" onclick="document.getElementById('pac-f-busca').value=''; pacientes.render();">Limpar</button>
         <button class="btn btn-sm" id="pac-sync-btn" onclick="pacientes.sincronizarNuvem()" title="Puxa os pacientes do banco relacional (nuvem) e junta com os deste aparelho">☁️ Sincronizar pacientes</button>
+        <button class="btn btn-sm" onclick="pacientes.mesclarDuplicados()" title="Junta num só os cadastros repetidos do mesmo paciente (o histórico continua completo)">👥 Juntar cadastros repetidos</button>
       </div>
     </div>
 
@@ -17362,18 +17363,33 @@ const cloudDiag = {
     if (!org) { document.getElementById('clouddiag-tab').innerHTML = '<p class="diag-linha diag-erro">Sua conta não está vinculada a uma organização no banco.</p>'; return; }
 
     const linhas = [];
+    let dupPac = 0;
     for (const L of cloudDiag.LINHAS) {
       const loc = cloudDiag._localCount(L.mod);
       const nuv = await cloudDiag._count(L.tabela, org);
+      /* Pacientes: na nuvem a identidade é o NOME — dois cadastros iguais viram
+         UMA linha lá. Comparar cru marcaria "a subir" para sempre; a comparação
+         justa é pelo número de pacientes DISTINTOS. */
+      let comp = loc;
+      if (L.mod === 'pacientes' && loc !== null) {
+        try { comp = pacientes.contarUnicos(); dupPac = loc - comp; } catch (e) { comp = loc; }
+      }
       let sit;
       if (nuv === null) sit = '<span style="color:var(--danger,#b3392a)">sem resposta</span>';
       else if (loc === null) sit = '☁️ ' + nuv;
-      else if (nuv >= loc) sit = '<span style="color:var(--success,#16a34a)">✓ em dia</span>';
-      else sit = '<span style="color:var(--warning)">⚠️ ' + (loc - nuv) + ' a subir</span>';
+      else if (nuv >= comp) sit = '<span style="color:var(--success,#16a34a)">✓ em dia</span>' +
+        (dupPac && L.mod === 'pacientes' ? ' <span style="color:var(--text-mute)">· ' + dupPac + ' cadastro(s) repetido(s) aqui</span>' : '');
+      else sit = '<span style="color:var(--warning)">⚠️ ' + (comp - nuv) + ' a subir</span>';
       linhas.push('<tr><td>' + L.rot + '</td><td style="text-align:right">' + (loc == null ? '—' : loc) + '</td><td style="text-align:right">' + (nuv == null ? '—' : nuv) + '</td><td>' + sit + '</td></tr>');
     }
+    const avisoDup = dupPac
+      ? '<div style="background:#fff4e5;border:1px solid #f0c890;color:#7a4b12;border-radius:8px;padding:9px 12px;margin-top:10px;font-size:.8rem">' +
+        '👥 <b>' + dupPac + ' paciente(s) cadastrado(s) mais de uma vez</b> neste aparelho. Na nuvem eles são a mesma pessoa — por isso a contagem daqui fica maior. ' +
+        '<button class="btn btn-xs btn-primary" style="margin-left:6px" onclick="pacientes.mesclarDuplicados()">Juntar cadastros iguais</button></div>'
+      : '';
     document.getElementById('clouddiag-tab').innerHTML =
       '<table class="fase4-tab"><thead><tr><th>Módulo</th><th style="text-align:right">No aparelho</th><th style="text-align:right">Na nuvem</th><th>Situação</th></tr></thead><tbody>' + linhas.join('') + '</tbody></table>' +
+      avisoDup +
       '<p style="font-size:.72rem;color:var(--text-mute);margin-top:8px">"A subir" = registros que ainda não chegaram ao banco relacional (abra o módulo para o envio automático, ou use Sincronizar).</p>';
   },
   _tabelaLocalSo() {
@@ -30840,6 +30856,102 @@ const pacientes = {
   _onSaveCallback: null,
 
   list() { return store.list('pacientes'); },
+
+  /* ============================================================
+     👥 PACIENTES DUPLICADOS
+     Na nuvem o paciente é identificado pelo NOME (legacy_id
+     "nome:<normalizado>"). Dois cadastros com o mesmo nome viram UMA
+     linha só lá — por isso o diagnóstico mostrava "N a subir" para
+     sempre: eram cópias do mesmo paciente neste aparelho, não
+     registros faltando. Aqui elas são detectadas e fundidas.
+  ============================================================ */
+  _chave(p) {
+    try { return migracaoFase4._patKey(migracaoFase4._ident(p)); } catch (e) { return null; }
+  },
+  /* Quanto do cadastro está preenchido — decide qual cópia fica */
+  _riqueza(p) {
+    const campos = ['nome', 'cpf', 'nascimento', 'prontuario', 'plano', 'convenio', 'telefone', 'email', 'sexo', 'endereco', 'observacoes'];
+    let n = 0;
+    campos.forEach(c => { const v = p && p[c]; if (v !== undefined && v !== null && String(v).trim() !== '') n++; });
+    if (p && p._relUpdatedAt) n += 2;   /* já conhecido pela nuvem: preferir */
+    return n;
+  },
+  /* Grupos com mais de um cadastro para a mesma chave */
+  duplicados() {
+    const mapa = new Map();
+    (store.list('pacientes') || []).forEach(p => {
+      const k = pacientes._chave(p);
+      if (!k) return;
+      if (!mapa.has(k)) mapa.set(k, []);
+      mapa.get(k).push(p);
+    });
+    const grupos = [];
+    mapa.forEach((lst, k) => { if (lst.length > 1) grupos.push({ chave: k, itens: lst }); });
+    return grupos;
+  },
+  /* Quantos cadastros SOBRAM se as cópias forem fundidas */
+  contarUnicos() {
+    const lst = store.list('pacientes') || [];
+    const chaves = new Set();
+    let semChave = 0;
+    lst.forEach(p => { const k = pacientes._chave(p); if (k) chaves.add(k); else semChave++; });
+    return chaves.size + semChave;
+  },
+  /* Funde as cópias: fica a mais completa, que herda os campos vazios das
+     outras; os registros presos às cópias passam a apontar para ela. */
+  mesclarDuplicados(opts = {}) {
+    const grupos = pacientes.duplicados();
+    if (!grupos.length) {
+      if (!opts.silent) toast('Nenhum paciente duplicado neste aparelho 👍');
+      return { grupos: 0, removidos: 0 };
+    }
+    if (!opts.silent) {
+      const tot = grupos.reduce((s, g) => s + g.itens.length - 1, 0);
+      if (!confirm('Encontrei ' + grupos.length + ' paciente(s) cadastrado(s) mais de uma vez (' + tot + ' cópia(s) a mais).\n\nJuntar tudo num cadastro só? As fichas e consultas continuam onde estão — nada é apagado do histórico.')) return null;
+    }
+    const CAMPOS = ['cpf', 'nascimento', 'prontuario', 'plano', 'convenio', 'telefone', 'email', 'sexo', 'endereco', 'observacoes'];
+    const trocas = new Map();   /* id da cópia → id do que fica */
+    let removidos = 0;
+
+    grupos.forEach(g => {
+      const ordem = g.itens.slice().sort((a, b) => pacientes._riqueza(b) - pacientes._riqueza(a));
+      const fica = ordem[0];
+      let mudou = false;
+      ordem.slice(1).forEach(copia => {
+        CAMPOS.forEach(c => {
+          const atual = fica[c];
+          const novo = copia[c];
+          if ((atual === undefined || atual === null || String(atual).trim() === '') &&
+              novo !== undefined && novo !== null && String(novo).trim() !== '') { fica[c] = novo; mudou = true; }
+        });
+        trocas.set(copia._id, fica._id);
+      });
+      if (mudou) { try { store.save('pacientes', fica); } catch (e) {} }
+    });
+
+    /* religa os registros que apontavam para uma cópia */
+    if (trocas.size) {
+      Object.keys(STORAGE).forEach(mod => {
+        if (mod === 'pacientes') return;
+        let lst;
+        try { lst = store.list(mod); } catch (e) { return; }
+        if (!Array.isArray(lst) || !lst.length) return;
+        let mudou = false;
+        lst.forEach(it => {
+          if (it && it._paciente_id && trocas.has(it._paciente_id)) { it._paciente_id = trocas.get(it._paciente_id); mudou = true; }
+        });
+        if (mudou) { try { store.setList(mod, lst); } catch (e) {} }
+      });
+      trocas.forEach((_fica, copiaId) => { try { store.delete('pacientes', copiaId); removidos++; } catch (e) {} });
+    }
+
+    if (!opts.silent) {
+      toast('👥 ' + removidos + ' cadastro(s) duplicado(s) unificado(s) — o histórico continua completo', 'success');
+      try { pacientes.render(); } catch (e) {}
+      try { cloudDiag.rodar(); } catch (e) {}
+    }
+    return { grupos: grupos.length, removidos };
+  },
 
   editar(id, onSaveCb = null) {
     try {

@@ -2627,6 +2627,55 @@ await test('App em uma conta e nuvem em outra: sincronização travada + correç
   await page.close();
 });
 
+/* 51) Pacientes repetidos: a nuvem identifica pelo nome — contagem justa + fusão */
+await test('Pacientes duplicados: diagnóstico não acusa pendência falsa e a fusão junta os cadastros', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('pacientes', []);
+    store.setList('anestesia', []);
+
+    const a = store.save('pacientes', { nome: 'Andrea Soares Santos', telefone: '27999990000' });
+    const b = store.save('pacientes', { nome: 'ANDREA SOARES SANTOS', cpf: '12345678901', plano: 'Unimed' });
+    const c = store.save('pacientes', { nome: 'Joao da Silva' });
+    const ficha = store.save('anestesia', { paciente: { nome: 'Andrea Soares Santos' }, _paciente_id: b._id });
+
+    out.tresCadastros = store.list('pacientes').length === 3;
+    out.doisDistintos = pacientes.contarUnicos() === 2;         /* a nuvem verá 2 */
+    out.achaGrupo = pacientes.duplicados().length === 1;
+
+    const res = pacientes.mesclarDuplicados({ silent: true });
+    out.fundiu = res && res.grupos === 1 && res.removidos === 1;
+
+    const lst = store.list('pacientes');
+    out.sobraramDois = lst.length === 2;
+    const andrea = lst.find(p => /andrea/i.test(p.nome || ''));
+    /* o cadastro que fica herda o que faltava no outro */
+    out.herdouCampos = !!andrea && andrea.cpf === '12345678901' && andrea.plano === 'Unimed' && andrea.telefone === '27999990000';
+    /* a ficha continua ligada a um cadastro que existe */
+    const f2 = store.getById('anestesia', ficha._id);
+    out.fichaReligada = !!f2 && f2._paciente_id === andrea._id && !!store.getById('pacientes', f2._paciente_id);
+    /* nada some do histórico clínico */
+    out.fichaIntacta = store.list('anestesia').length === 1;
+    /* rodar de novo não faz nada */
+    const res2 = pacientes.mesclarDuplicados({ silent: true });
+    out.idempotente = res2 && res2.grupos === 0 && res2.removidos === 0;
+
+    store.setList('pacientes', []); store.setList('anestesia', []);
+    return out;
+  });
+  assert(r.tresCadastros, 'o cenário parte de 3 cadastros com 1 repetido');
+  assert(r.doisDistintos, 'a contagem justa (como a nuvem vê) deveria ser 2');
+  assert(r.achaGrupo, 'deveria achar exatamente 1 grupo de duplicados');
+  assert(r.fundiu, 'a fusão deveria juntar 1 grupo removendo 1 cópia');
+  assert(r.sobraramDois, 'deveriam sobrar 2 cadastros');
+  assert(r.herdouCampos, 'o cadastro que fica deveria herdar os campos vazios da cópia');
+  assert(r.fichaReligada, 'a ficha deveria passar a apontar para o cadastro que ficou');
+  assert(r.fichaIntacta, 'nenhuma ficha pode sumir na fusão');
+  assert(r.idempotente, 'rodar a fusão de novo não deveria mexer em nada');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
