@@ -2538,6 +2538,95 @@ await test('Sem clínica vinculada = acesso restrito; o papel do gestor rebaixa 
   await page.close();
 });
 
+/* 50) Contas diferentes (app × nuvem): detecta, bloqueia a sync e corrige em um toque */
+await test('App em uma conta e nuvem em outra: sincronização travada + correção em um toque', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+
+    /* app logado como mpcaliman, nuvem conectada como a conta da secretária */
+    auth._salvarUsuarios([{ id: 'u_1', usuario: 'mpcaliman@hotmail.com', nome: 'dono', perfil: 'admin', senhaHash: 'x', nuvem: true }]);
+    auth._definirSessao(auth._lerUsuarios()[0]);
+    cloud.session = () => ({ user: { id: 'u2', email: 'mpcanestesiologia@gmail.com' } });
+
+    const d = cloud.divergencia();
+    out.detecta = !!d && d.app === 'mpcaliman@hotmail.com' && d.nuvem === 'mpcanestesiologia@gmail.com';
+
+    /* nada sobe para a conta errada */
+    let subiu = false;
+    const fetchOrig = window.fetch;
+    window.fetch = async (...a) => { subiu = true; return fetchOrig(...a); };
+    await cloud.pushDoc('anestesia', { id: 'x1', paciente: { nome: 'Teste' } }, 'upsert');
+    out.naoSobe = subiu === false;
+
+    /* sincronizar para e chama a correção */
+    let abriuModal = false;
+    const resolverOrig = cloud.resolverDivergencia;
+    cloud.resolverDivergencia = () => { abriuModal = true; };
+    await cloud.sincronizar({ enviarTudo: true });
+    out.syncTravada = abriuModal === true && subiu === false;
+    cloud.resolverDivergencia = resolverOrig;
+    window.fetch = fetchOrig;
+
+    /* aviso visível com o botão de correção */
+    cloud._renderAvisoDivergencia();
+    const box = document.getElementById('cloud-divergencia');
+    out.avisoVisivel = !!box && box.innerHTML.indexOf('Corrigir agora') >= 0
+      && box.innerHTML.indexOf('mpcanestesiologia@gmail.com') >= 0;
+
+    /* correção: reconecta a nuvem na conta do app */
+    let deslogou = false, entrouCom = null;
+    cloud.logout = () => { deslogou = true; };
+    cloud.login = async (email) => { entrouCom = email; cloud.session = () => ({ user: { id: 'u1', email } }); return true; };
+    cloud.autoSyncAoEntrar = () => {};
+    cloud.resolverDivergencia();
+    const inp = document.getElementById('div-senha');
+    if (inp) inp.value = 'senha123';
+    await cloud._reconectarComoApp();
+    out.reconectou = deslogou && entrouCom === 'mpcaliman@hotmail.com';
+
+    /* contas iguais → sem divergência e o aviso some */
+    out.semDivergencia = cloud.divergencia() === null;
+    cloud._renderAvisoDivergencia();
+    out.avisoSumiu = !document.getElementById('cloud-divergencia');
+
+    /* login pelo espelho local realinha a nuvem sozinho (causa raiz) */
+    cloud.session = () => ({ user: { id: 'u2', email: 'mpcanestesiologia@gmail.com' } });
+    entrouCom = null; deslogou = false;
+    await auth._alinharNuvem('mpcaliman@hotmail.com', 'senha123');
+    out.alinhaNoLogin = entrouCom === 'mpcaliman@hotmail.com';
+
+    /* se não conseguir entrar, desconecta em vez de gravar na conta errada */
+    cloud.session = () => ({ user: { id: 'u2', email: 'mpcanestesiologia@gmail.com' } });
+    cloud.login = async () => false;
+    deslogou = false;
+    await auth._alinharNuvem('mpcaliman@hotmail.com', 'errada');
+    out.desconectaSeFalhar = deslogou === true;
+
+    /* login local antigo (sem e-mail) não conta como divergência */
+    auth._salvarUsuarios([{ id: 'u_9', usuario: 'admin', nome: 'local', perfil: 'admin', senhaHash: 'x' }]);
+    auth._definirSessao(auth._lerUsuarios()[0]);
+    cloud.session = () => ({ user: { id: 'u2', email: 'qualquer@ex.com' } });
+    out.ignoraLocal = cloud.divergencia() === null;
+
+    auth._salvarUsuarios([]);
+    return out;
+  });
+  assert(r.detecta, 'deveria detectar app e nuvem em contas diferentes');
+  assert(r.naoSobe, 'nada pode subir para a nuvem enquanto as contas estiverem diferentes');
+  assert(r.syncTravada, 'sincronizar deveria parar e abrir a correção');
+  assert(r.avisoVisivel, 'o card da nuvem deveria mostrar o aviso com "Corrigir agora"');
+  assert(r.reconectou, 'a correção deveria desconectar e entrar com a conta do app');
+  assert(r.semDivergencia, 'com as contas iguais não há divergência');
+  assert(r.avisoSumiu, 'resolvido o problema, o aviso deveria sumir');
+  assert(r.alinhaNoLogin, 'entrar pelo espelho local deveria realinhar a nuvem com a conta do app');
+  assert(r.desconectaSeFalhar, 'sem conseguir realinhar, a nuvem deveria ser desconectada');
+  assert(r.ignoraLocal, 'login local sem e-mail não deveria virar alarme falso');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
