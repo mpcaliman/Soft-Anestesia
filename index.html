@@ -14344,8 +14344,68 @@ const auth = {
     let alvo = u;
     if (!alvo) { alvo = {}; usuarios.push(alvo); }
     Object.assign(alvo, dados);
+    /* Todo usuário PRECISA de id: é por ele que a lista de Ajustes identifica
+       "(você)" e que os botões ✏️/🗑️ acham a pessoa. Espelhos antigos foram
+       criados sem id — sem isto, os botões não tinham ação. */
+    if (!alvo.id) alvo.id = 'u_' + (typeof utils !== 'undefined' && utils.uid ? utils.uid() : String(Date.now()) + Math.random().toString(16).slice(2));
     auth._salvarUsuarios(usuarios);
     return alvo;
+  },
+
+  /* Repara espelhos antigos sem id (uma vez, na inicialização) */
+  _repararIds() {
+    try {
+      const lista = auth._lerUsuarios();
+      let mudou = false;
+      lista.forEach(u => {
+        if (u && !u.id) {
+          u.id = 'u_' + (utils.uid ? utils.uid() : String(Date.now()) + Math.random().toString(16).slice(2));
+          mudou = true;
+        }
+      });
+      if (mudou) {
+        auth._salvarUsuarios(lista);
+        /* a sessão em curso também precisa do id certo */
+        const s = auth.usuarioAtual();
+        if (s && !s.id && s.usuario) {
+          const eu = lista.find(x => x.usuario === s.usuario);
+          if (eu) auth._definirSessao(eu);
+        }
+      }
+      return mudou;
+    } catch (e) { return false; }
+  },
+
+  /* Rebusca o papel na nuvem e re-espelha (sem pedir senha de novo).
+     Usado quando o gestor acabou de mudar o papel de alguém — ou quando o
+     próprio usuário virou gestor da clínica. */
+  async atualizarPapelDaNuvem() {
+    try {
+      if (!cloud.estaConfigurado() || !cloud.estaLogado()) return null;
+      const perfil = await cloud.buscarPerfil();
+      if (!perfil) return null;
+      const atual = auth.usuarioAtual();
+      const email = (perfil.email || (atual && atual.usuario) || '').toLowerCase();
+      if (!email) return null;
+      const lista = auth._lerUsuarios();
+      const u = lista.find(x => x.usuario === email);
+      if (!u) return null;
+      const perms = auth._permsDoPapel(perfil.role);
+      if (perms) {
+        u.perfil = perms.perfil;
+        u.modulos = (perms.modulos || []).slice();
+        u.soImpressao = (perms.soImpressao || []).slice();
+      }
+      u.role = perfil.role || u.role || null;
+      u.organization_id = perfil.organization_id || u.organization_id || null;
+      u.uid = perfil.uid || u.uid || null;
+      auth._salvarUsuarios(lista);
+      if (atual && atual.usuario === email) {
+        auth._definirSessao(u);
+        try { auth._aplicarPermissoesUI(); } catch (e) {}
+      }
+      return u;
+    } catch (e) { return null; }
   },
 
   /* Se OUTRA conta da nuvem entrar neste aparelho, oferece limpar os dados
@@ -14829,7 +14889,14 @@ const ajustesUsuarios = {
     }
     cont.innerHTML = lista.map(u => {
       const perfilLabel = (auth.PERFIS[u.perfil] || {}).label || u.perfil;
-      const ehVoce = logado && logado.id === u.id;
+      /* compara por id E por login — espelhos antigos podiam ficar sem id e
+         TODOS apareciam como "(você)" */
+      const ehVoce = !!(logado && ((logado.id && u.id && logado.id === u.id) ||
+                                   (logado.usuario && u.usuario && logado.usuario === u.usuario)));
+      /* papel da NUVEM (quando houver) — é ele que manda em qualquer aparelho */
+      const papelNuvem = u.nuvem && u.role
+        ? '<span class="ui-badge" style="background:#eef2f7;color:#22384f" title="Papel definido na nuvem — vale em qualquer aparelho">☁️ ' + utils.escapeHTML((auth._rotuloPapel && auth._rotuloPapel(u.role)) || u.role) + '</span>'
+        : '';
       const nMods = u.perfil === 'admin' ? auth.MODULOS.length : (u.modulos ? u.modulos.length : 0);
       const nSo = u.perfil === 'admin' ? 0 : ((u.soImpressao || []).length);
       const soTxt = nSo ? ` · ${nSo} só impressão` : '';
@@ -14844,7 +14911,7 @@ const ajustesUsuarios = {
       return `
         <div class="user-item">
           <div class="ui-info">
-            <div class="ui-nome">${utils.escapeHTML(u.nome || u.usuario)}${ehVoce ? ' <span style="font-size:.72rem;color:var(--text-mute)">(você)</span>' : ''}<span class="ui-badge ${u.perfil}">${utils.escapeHTML(perfilLabel)}</span>${alcance}</div>
+            <div class="ui-nome">${utils.escapeHTML(u.nome || u.usuario)}${ehVoce ? ' <span style="font-size:.72rem;color:var(--text-mute)">(você)</span>' : ''}<span class="ui-badge ${u.perfil}">${utils.escapeHTML(perfilLabel)}</span>${papelNuvem}${alcance}</div>
             <div class="ui-perfil">@${utils.escapeHTML(u.usuario)} · ${nMods} módulo(s)${soTxt}</div>
           </div>
           <div style="display:flex;gap:6px;flex-shrink:0">
@@ -14990,9 +15057,18 @@ const ajustesUsuarios = {
 
   /* Modal: editar usuário existente */
   editar(id) {
-    const u = auth._lerUsuarios().find(x => x.id === id);
-    if (!u) return;
-    const body = `
+    const u = auth._lerUsuarios().find(x => x.id === id) ||
+              auth._lerUsuarios().find(x => x.usuario === id);   /* espelhos antigos sem id */
+    if (!u) { toast('Usuário não encontrado neste aparelho.', 'warn'); return; }
+    /* Conta da NUVEM: o papel real vem do servidor — editar aqui vale só neste
+       aparelho até o próximo login. O caminho definitivo é Equipe da nuvem. */
+    const avisoNuvem = u.nuvem
+      ? '<div style="font-size:.76rem;background:#fff8e6;border:1px solid #f0d9a0;color:#7a5b12;padding:9px 11px;border-radius:7px;margin-bottom:10px">' +
+        '☁️ Esta é uma <b>conta da nuvem</b>' + (u.role ? ' (papel atual: <b>' + utils.escapeHTML((auth._rotuloPapel && auth._rotuloPapel(u.role)) || u.role) + '</b>)' : '') +
+        '. O que você mudar aqui vale <b>só neste aparelho</b> e é substituído pelo papel da nuvem no próximo login. ' +
+        'Para valer em todos os aparelhos, defina o papel em <b>Equipe da nuvem</b>.</div>'
+      : '';
+    const body = avisoNuvem + `
       <div class="grid" style="gap:12px">
         <div class="field col-12"><label>Nome completo</label><input type="text" id="user-nome" value="${utils.escapeHTML(u.nome || '')}"></div>
         <div class="field col-6"><label>Usuário (login)</label><input type="text" value="@${utils.escapeHTML(u.usuario)}" disabled></div>
@@ -17198,6 +17274,46 @@ const equipeNuvem = {
   _rot(role) { const p = equipeNuvem.PAPEIS.find(x => x[0] === role); return p ? p[1] : role; },
   ehGestor() { try { const u = auth.usuarioAtual(); return !!(u && u.role === 'gestor'); } catch (e) { return false; } },
 
+  /* Cria a clínica desta conta na nuvem e registra o usuário como GESTOR.
+     (RPC criar_minha_organizacao — migração 0010; o servidor só permite se a
+     conta não tem clínica, ou se a clínica ficou sem gestor.) */
+  async criarMinhaClinica() {
+    if (!cloud.estaConfigurado() || !cloud.estaLogado()) { toast('Conecte-se à nuvem primeiro (Ajustes → Nuvem e backups)', 'warn'); return; }
+    const sug = (() => { try { const s = cloud.session(); return 'Clínica de ' + String((s.user.email || '').split('@')[0]); } catch (e) { return 'Minha clínica'; } })();
+    const nome = prompt('Nome da sua clínica na nuvem:', sug);
+    if (nome === null) return;
+    try {
+      if (!(await cloud._garantirToken())) throw new Error('Sessão da nuvem expirada — entre de novo.');
+      const c = cloud.config();
+      const r = await fetch(c.url + '/rest/v1/rpc/criar_minha_organizacao', {
+        method: 'POST',
+        headers: Object.assign({}, cloud._headers(true), { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ p_nome: (nome || '').trim() })
+      });
+      if (!r.ok) {
+        let msg = 'HTTP ' + r.status;
+        try { const j = await r.json(); msg = j.message || j.hint || msg; } catch (e) {}
+        if (/function .*criar_minha_organizacao/i.test(msg) || r.status === 404) {
+          msg = 'Rode a migração database/migrations/0010_minha_organizacao.sql no Supabase e tente de novo.';
+        }
+        throw new Error(msg);
+      }
+      await auth.atualizarPapelDaNuvem();
+      toast('🏢 Clínica criada — você agora é o GESTOR');
+      equipeNuvem.render();
+      try { ajustesUsuarios.render(); } catch (e) {}
+    } catch (e) { toast('Erro: ' + e.message, 'error'); }
+  },
+
+  /* Rebusca o papel definido pelo gestor e aplica neste aparelho */
+  async atualizarMeuPapel() {
+    const u = await auth.atualizarPapelDaNuvem();
+    if (!u) { toast('Não foi possível ler o seu papel agora — confira a conexão com a nuvem.', 'warn'); return; }
+    toast(u.role ? '🔄 Papel atualizado: ' + equipeNuvem._rot(u.role) : 'Sua conta ainda não foi vinculada a uma clínica na nuvem.', u.role ? 'success' : 'warn');
+    equipeNuvem.render();
+    try { ajustesUsuarios.render(); } catch (e) {}
+  },
+
   async listar() {
     if (!cloud.estaConfigurado() || !cloud.estaLogado()) return null;
     if (!(await cloud._garantirToken())) return null;
@@ -17227,7 +17343,23 @@ const equipeNuvem = {
     if (!host) return;
     orgSettings.renderVisibilidade();   /* mostra a opção (gestor) com o valor em cache */
     if (!equipeNuvem.ehGestor()) {
-      host.innerHTML = '<p style="font-size:.82rem;color:var(--text-mute)">Só o <strong>gestor</strong> da clínica gerencia a equipe da nuvem. Entre com a conta de gestor para ver e editar os membros.</p>';
+      /* Em vez de um aviso morto: dá o caminho. Quem ainda não tem clínica na
+         nuvem cria a dele (vira gestor); quem já foi vinculado por um gestor
+         atualiza o papel neste aparelho. */
+      const u = auth.usuarioAtual() || {};
+      const logadoNuvem = (() => { try { return cloud.estaConfigurado() && cloud.estaLogado(); } catch (e) { return false; } })();
+      host.innerHTML =
+        '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">Só o <strong>gestor</strong> da clínica gerencia a equipe na nuvem.' +
+        (u.role ? ' O seu papel atual é <strong>' + utils.escapeHTML(equipeNuvem._rot(u.role)) + '</strong>.' :
+                  ' Esta conta ainda <strong>não está vinculada</strong> a nenhuma clínica na nuvem.') + '</p>' +
+        (logadoNuvem
+          ? '<div style="display:flex;flex-wrap:wrap;gap:8px">' +
+            (u.role === 'gestor' ? '' :
+              '<button type="button" class="btn btn-primary btn-sm" onclick="equipeNuvem.criarMinhaClinica()" title="Cria a sua clínica na nuvem e registra você como gestor">🏢 Criar minha clínica (virar gestor)</button>') +
+            '<button type="button" class="btn btn-sm" onclick="equipeNuvem.atualizarMeuPapel()" title="Rebusca na nuvem o papel que o gestor definiu para você">🔄 Atualizar meu papel</button>' +
+            '</div>' +
+            '<p style="font-size:.74rem;color:var(--text-mute);margin:8px 0 0">Se outra pessoa já é a gestora da sua clínica, peça para ela adicionar o seu e-mail em <strong>Equipe da nuvem</strong> e depois toque em <em>Atualizar meu papel</em>.</p>'
+          : '<p style="font-size:.78rem;color:var(--text-mute)">Conecte-se à nuvem em <strong>Backup e sincronização</strong> para gerenciar a equipe.</p>');
       if (addBox) addBox.style.display = 'none';
       return;
     }
@@ -38100,6 +38232,8 @@ document.addEventListener('DOMContentLoaded', () => {
   try { programador.atualizarVisibilidade(); } catch (e) {}
   window.pendencias = pendencias;
   try { pendencias.iniciarTimer(); } catch (e) {}
+  /* Repara espelhos de conta da nuvem criados sem id (✏️/🗑️ sem ação) */
+  try { auth._repararIds(); } catch (e) {}
   /* sessão já aberta (ex.: login diário sem nuvem): checa as pendências também */
   setTimeout(() => { try { pendencias.checarAoEntrar(); } catch (e) {} }, 3500);
   window.quickActions = quickActions; window.printPreview = printPreview;
