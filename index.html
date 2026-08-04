@@ -3659,6 +3659,13 @@ body.tem-demo-banner { padding-bottom: 46px; }
 .module.edicao-parcial .campo-liberado textarea,
 .module.edicao-parcial .campo-liberado button,
 .module.edicao-parcial .campo-liberado .btn { pointer-events: auto !important; opacity: 1; }
+/* exceção dentro de uma área liberada: campo que continua sendo do médico */
+.module.edicao-parcial .campo-travado input,
+.module.edicao-parcial .campo-travado select,
+.module.edicao-parcial .campo-travado textarea,
+.module.edicao-parcial .campo-travado button,
+.module.edicao-parcial .campo-travado .btn { pointer-events: none !important; opacity: .96; }
+.module.edicao-parcial .campo-travado { background: transparent !important; box-shadow: none !important; }
 .module.edicao-parcial .campo-liberado {
   outline: 2px solid var(--primary); outline-offset: 4px;
   border-radius: 8px; opacity: 1 !important;
@@ -4344,7 +4351,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
         <div class="card-title-wrap"><span class="card-num">1</span><h2>Identificação<small>Paciente, cirurgia e profissional</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
-      <div class="card-body">
+      <div class="card-body" data-sec-edit>
         <div class="grid">
           <div class="field col-6 required"><label>Nome do paciente <span class="req">*</span></label><input type="text" name="nome" data-required onblur="linker.autoPreencherDadosPaciente(this.value, 'pre'); rascunhos.renomearAba('pre')"></div>
           <div class="field col-3 required"><label>Data da avaliação <span class="req">*</span></label><input type="date" name="data" data-required></div>
@@ -4373,7 +4380,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
         <div class="card-title-wrap"><span class="card-num">2</span><h2>Anamnese<small>Histórico clínico e antecedentes</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
-      <div class="card-body">
+      <div class="card-body" data-sec-edit>
         <div class="grid">
           <div class="field col-6" data-sec-edit><label>Comorbidades</label>
             <textarea name="comorbidades" rows="2"></textarea>
@@ -4406,7 +4413,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
         <div class="card-title-wrap"><span class="card-num">3</span><h2>Sinais vitais e exames<small>Medidas, exame físico e laboratoriais</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
-      <div class="card-body">
+      <div class="card-body" data-sec-edit>
         <div class="grid">
           <div class="field col-12">
             <label>Sinais vitais e medidas</label>
@@ -4423,7 +4430,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
               <div class="lab-item"><span>Dor (0-10)</span><input type="text" name="dor" inputmode="numeric"></div>
             </div>
           </div>
-          <div class="field col-12"><label>Exame físico resumido</label><textarea name="exame_fisico" rows="3"></textarea></div>
+          <div class="field col-12 campo-travado"><label>Exame físico resumido</label><textarea name="exame_fisico" rows="3"></textarea></div>
 
           <div class="field col-12" data-sec-edit>
             <label>Exames laboratoriais</label>
@@ -4486,7 +4493,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
         <div class="card-title-wrap"><span class="card-num">4</span><h2>Pareceres de outras clínicas<small>Avaliações de especialistas — cardiologia, pneumologia, etc.</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
-      <div class="card-body">
+      <div class="card-body" data-sec-edit>
         <div class="grid">
           <div class="field col-12"><label>🫀 Parecer / risco cardiológico</label><textarea name="parecer_cardio" rows="2" placeholder="Ex.: liberado do ponto de vista cardiológico; manter betabloqueador; otimizar PA..."></textarea></div>
           <div class="field col-12"><label>🫁 Parecer pneumológico</label><textarea name="parecer_pneumo" rows="2" placeholder="Ex.: função pulmonar adequada; otimizar broncodilatador; cessar tabagismo..."></textarea></div>
@@ -14105,6 +14112,42 @@ const auth = {
   _permsDoPapel(role) {
     return (role && auth.ROLE_PERMS[role]) ? auth.ROLE_PERMS[role] : null;
   },
+  /* Personalização de acesso feita pelo gestor e guardada NA NUVEM
+     (organization_users.permissoes — migração 0011). Vale mais que o padrão do
+     papel: é o que o gestor definiu para aquela pessoa, e vale em qualquer
+     aparelho. Sem isso, a mudança ficava só no aparelho de quem editou. */
+  _permsPersonalizadas(perfilNuvem) {
+    const p = perfilNuvem && perfilNuvem.permissoes;
+    if (!p || typeof p !== 'object' || !Array.isArray(p.modulos)) return null;
+    return {
+      perfil: p.perfil || 'secretaria',
+      modulos: p.modulos.slice(),
+      soImpressao: Array.isArray(p.soImpressao) ? p.soImpressao.slice() : []
+    };
+  },
+  /* Grava na nuvem o acesso personalizado de um membro da clínica.
+     Só o gestor consegue (policy ou_all). Retorna true/false. */
+  async salvarPermissoesNaNuvem(uid, orgId, perms) {
+    try {
+      if (!uid || !orgId) return false;
+      if (!cloud.estaConfigurado() || !cloud.estaLogado()) return false;
+      if (!(await cloud._garantirToken())) return false;
+      const c = cloud.config();
+      const corpo = {
+        permissoes: {
+          perfil: perms.perfil,
+          modulos: (perms.modulos || []).slice(),
+          soImpressao: (perms.soImpressao || []).slice(),
+          atualizadoEm: new Date().toISOString()
+        }
+      };
+      const r = await fetch(c.url + '/rest/v1/organization_users?user_id=eq.' + encodeURIComponent(uid) +
+        '&organization_id=eq.' + encodeURIComponent(orgId),
+        { method: 'PATCH', headers: Object.assign({}, cloud._headers(true), { 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }),
+          body: JSON.stringify(corpo) });
+      return r.ok;
+    } catch (e) { return false; }
+  },
   _rotuloPapel(role) {
     const m = { gestor: 'Gestor', anestesiologista: 'Anestesiologista', cirurgiao: 'Cirurgião',
                 auxiliar: 'Auxiliar / Secretária', financeiro: 'Financeiro', empresa: 'Empresa' };
@@ -14410,7 +14453,11 @@ const auth = {
        2) sem papel, mas já havia espelho → preserva o que estava valendo;
        3) 1º acesso sem vínculo no banco → dono/legado (admin). */
     let perms;
-    if (perfilNuvem && auth._permsDoPapel(perfilNuvem.role)) {
+    if (perfilNuvem && auth._permsPersonalizadas(perfilNuvem)) {
+      /* 0) o gestor personalizou o acesso desta pessoa (guardado na nuvem) —
+         isso vence até o padrão do papel, em qualquer aparelho */
+      perms = auth._permsPersonalizadas(perfilNuvem);
+    } else if (perfilNuvem && auth._permsDoPapel(perfilNuvem.role)) {
       /* 1) papel definido no servidor MANDA — sempre (mesmo que o aparelho
          tenha um espelho antigo mais permissivo) */
       perms = auth._permsDoPapel(perfilNuvem.role);
@@ -14501,7 +14548,7 @@ const auth = {
       const lista = auth._lerUsuarios();
       const u = lista.find(x => x.usuario === email);
       if (!u) return null;
-      const perms = auth._permsDoPapel(perfil.role);
+      const perms = auth._permsPersonalizadas(perfil) || auth._permsDoPapel(perfil.role);
       if (perms) {
         u.perfil = perms.perfil;
         u.modulos = (perms.modulos || []).slice();
@@ -14785,7 +14832,7 @@ const auth = {
     setBanner('ro-banner-' + mod, 'ro-banner',
       '🔒 Modo <strong>somente impressão</strong> — você pode visualizar e imprimir, mas não editar ou salvar neste módulo.', leitura);
     setBanner('pp-banner-' + mod, 'parcial-banner',
-      '✏️ <strong>Edição parcial</strong> — você pode preencher os campos destacados (comorbidades, medicações em uso e exames). O restante é preenchido pelo anestesiologista.', !!parcialSel);
+      '✏️ <strong>Edição parcial</strong> — você preenche as seções destacadas: <b>identificação</b>, <b>anamnese</b>, <b>sinais vitais e exames</b> e <b>pareceres de outras clínicas</b>. Exame físico, classificação de risco e conclusão são do anestesiologista.', !!parcialSel);
   },
 
   /* ---------- Timeout de inatividade (5 min) ---------- */
@@ -15192,12 +15239,15 @@ const ajustesUsuarios = {
     if (!u) { toast('Usuário não encontrado neste aparelho.', 'warn'); return; }
     /* Conta da NUVEM: o papel real vem do servidor — editar aqui vale só neste
        aparelho até o próximo login. O caminho definitivo é Equipe da nuvem. */
-    const avisoNuvem = u.nuvem
-      ? '<div style="font-size:.76rem;background:#fff8e6;border:1px solid #f0d9a0;color:#7a5b12;padding:9px 11px;border-radius:7px;margin-bottom:10px">' +
-        '☁️ Esta é uma <b>conta da nuvem</b>' + (u.role ? ' (papel atual: <b>' + utils.escapeHTML((auth._rotuloPapel && auth._rotuloPapel(u.role)) || u.role) + '</b>)' : '') +
-        '. O que você mudar aqui vale <b>só neste aparelho</b> e é substituído pelo papel da nuvem no próximo login. ' +
-        'Para valer em todos os aparelhos, defina o papel em <b>Equipe da nuvem</b>.</div>'
-      : '';
+    const podeNaNuvem = !!(u.nuvem && u.uid && u.organization_id);
+    const avisoNuvem = !u.nuvem ? ''
+      : (podeNaNuvem
+        ? '<div style="font-size:.76rem;background:#eaf7ee;border:1px solid #b6e0c2;color:#1c5c33;padding:9px 11px;border-radius:7px;margin-bottom:10px">' +
+          '☁️ Conta da nuvem' + (u.role ? ' (papel: <b>' + utils.escapeHTML((auth._rotuloPapel && auth._rotuloPapel(u.role)) || u.role) + '</b>)' : '') +
+          '. O acesso que você marcar aqui é <b>gravado na nuvem</b> e passa a valer <b>em todos os aparelhos</b> desta pessoa, por cima do padrão do papel.</div>'
+        : '<div style="font-size:.76rem;background:#fff8e6;border:1px solid #f0d9a0;color:#7a5b12;padding:9px 11px;border-radius:7px;margin-bottom:10px">' +
+          '☁️ Esta é uma <b>conta da nuvem</b> ainda sem vínculo com a sua clínica neste aparelho. ' +
+          'Vincule-a em <b>Equipe da nuvem</b> — só assim o acesso personalizado sobe e vale em todos os aparelhos.</div>');
     const body = avisoNuvem + `
       <div class="grid" style="gap:12px">
         <div class="field col-12"><label>Nome completo</label><input type="text" id="user-nome" value="${utils.escapeHTML(u.nome || '')}"></div>
@@ -15235,8 +15285,17 @@ const ajustesUsuarios = {
     else { ({ modulos, soImpressao } = ajustesUsuarios._lerGradePermissoes()); }
     auth.atualizarPermissoes(id, { perfil, modulos, soImpressao, nome });
     if (novaSenha) await auth.atualizarSenha(id, novaSenha);
+    /* Conta da NUVEM: o acesso personalizado tem que subir, senão vale só
+       neste aparelho e o outro aparelho recalcula tudo pelo papel. */
+    const alvo = auth._lerUsuarios().find(x => x.id === id);
+    let naNuvem = null;
+    if (alvo && alvo.nuvem && alvo.uid && alvo.organization_id) {
+      naNuvem = await auth.salvarPermissoesNaNuvem(alvo.uid, alvo.organization_id, { perfil, modulos, soImpressao });
+    }
     modal.close();
-    toast('✅ Usuário atualizado');
+    if (naNuvem === true) toast('✅ Acesso atualizado na nuvem — vale em todos os aparelhos');
+    else if (naNuvem === false) toast('⚠️ Salvei neste aparelho, mas não consegui gravar na nuvem (só o gestor da clínica pode). Rode a migração 0011 se ainda não rodou.', 'warn');
+    else toast('✅ Usuário atualizado');
     ajustesUsuarios.render();
     /* se editou o próprio usuário logado, atualiza a sessão e a UI */
     const logado = auth.usuarioAtual();
@@ -15423,7 +15482,7 @@ const cloud = {
     try {
       const [rp, ro] = await Promise.all([
         fetch(c.url + '/rest/v1/profiles?id=eq.' + uid + '&select=id,nome,email,funcao,ativo', { headers: cloud._headers(true) }),
-        fetch(c.url + '/rest/v1/organization_users?user_id=eq.' + uid + '&ativo=eq.true&select=organization_id,role,ativo&order=created_at.asc', { headers: cloud._headers(true) })
+        fetch(c.url + '/rest/v1/organization_users?user_id=eq.' + uid + '&ativo=eq.true&select=organization_id,role,ativo,permissoes&order=created_at.asc', { headers: cloud._headers(true) })
       ]);
       const perfilRows = rp.ok ? await rp.json().catch(() => []) : [];
       const orgRows = ro.ok ? await ro.json().catch(() => []) : [];
@@ -15439,6 +15498,8 @@ const cloud = {
         nome: (perfil && perfil.nome) || '',
         role: (vinc && vinc.role) || (perfil && perfil.funcao) || null,
         organization_id: (vinc && vinc.organization_id) || null,
+        /* personalização feita pelo gestor (0011) — vence o padrão do papel */
+        permissoes: (vinc && vinc.permissoes) || null,
         ativo: perfil ? perfil.ativo !== false : true
       };
     } catch (e) { return null; }
@@ -20653,17 +20714,26 @@ const pdfBackup = {
           scope: 'https://www.googleapis.com/auth/drive.file',
           callback: (resp) => {
             if (resp && resp.access_token) {
+              pdfBackup._ultimoErro = null;
               pdfBackup._accessToken = resp.access_token;
               pdfBackup._tokenExpira = Date.now() + (resp.expires_in ? resp.expires_in * 1000 : 3600000);
               resolve(resp.access_token);
             } else {
+              pdfBackup._ultimoErro = (resp && (resp.error || resp.type)) || 'sem_token';
               resolve(null);
             }
+          },
+          /* O Google devolve aqui o "acesso bloqueado / app não verificado" —
+             sem isto o erro ficava só no popup e o app não sabia de nada. */
+          error_callback: (err) => {
+            pdfBackup._ultimoErro = (err && (err.type || err.message)) || 'erro';
+            resolve(null);
           }
         });
         pdfBackup._tokenClient.requestAccessToken({ prompt: interactive ? 'consent' : '' });
       } catch (e) {
         console.warn('_obterToken', e);
+        pdfBackup._ultimoErro = e && e.message;
         resolve(null);
       }
     });
@@ -20701,7 +20771,20 @@ const pdfBackup = {
 
   async enviarDrive(blob, nomeArq, interactive) {
     const token = await pdfBackup._obterToken(interactive === true);
-    if (!token) return false;
+    if (!token) {
+      /* falhou sozinho (ao finalizar um caso): não insiste para sempre —
+         depois de 2 tentativas o Drive se desliga e avisa uma vez só */
+      if (interactive !== true) {
+        pdfBackup._falhasDrive = (pdfBackup._falhasDrive || 0) + 1;
+        if (pdfBackup._falhasDrive >= 2) {
+          pdfBackup.salvarCfg({ drive: false });
+          pdfBackup._falhasDrive = 0;
+          toast('📁 O Google Drive não está autorizando o app — desliguei essa opção. Os PDFs continuam indo para a nuvem.', 'warn');
+        }
+      }
+      return false;
+    }
+    pdfBackup._falhasDrive = 0;
     const pastaId = await pdfBackup._pastaId(token);
     const metadata = { name: nomeArq, mimeType: 'application/pdf' };
     if (pastaId) metadata.parents = [pastaId];
@@ -20725,11 +20808,50 @@ const pdfBackup = {
 
   /* Botão de teste em Ajustes: conecta o Drive e sobe um arquivo de teste */
   async conectarDrive() {
+    pdfBackup._ultimoErro = null;
     const token = await pdfBackup._obterToken(true);
-    if (!token) { toast('Conexão com o Drive cancelada ou sem Client ID', 'warn'); return; }
+    if (!token) { pdfBackup._explicarFalhaDrive(); return; }
     pdfBackup.salvarCfg({ drive: true });
     toast('✅ Google Drive conectado. Os próximos PDFs serão salvos lá.');
     try { const cb = document.getElementById('pdfbk-drive'); if (cb) cb.checked = true; } catch (e) {}
+  },
+
+  /* O Drive é CONVENIÊNCIA, não necessidade: o Supabase Storage já guarda todo
+     PDF na nuvem. Quando o Google barra o acesso (app em teste / não
+     verificado / projeto errado), o app explica em português e oferece
+     desligar o Drive — para o erro não voltar a cada PDF gerado. */
+  _explicarFalhaDrive() {
+    const err = String(pdfBackup._ultimoErro || '');
+    const bloqueado = /access_denied|403|popup_closed|verific/i.test(err);
+    const temSupa = (() => { try { return pdfBackup.cfg().supabase !== false && cloud.estaLogado(); } catch (e) { return false; } })();
+    modal.open('📁 Google Drive não conectou',
+      '<p style="font-size:.88rem;margin:0 0 10px">' +
+        (bloqueado
+          ? 'O Google recusou o acesso porque o seu projeto OAuth ainda está <b>em modo de teste</b> (ou você entrou com uma conta que não é testadora dele).'
+          : 'Não consegui obter a autorização do Google' + (err ? ' (<code>' + utils.escapeHTML(err) + '</code>)' : '') + '.') +
+      '</p>' +
+      (temSupa
+        ? '<div style="background:#eaf7ee;border:1px solid #b6e0c2;color:#1c5c33;border-radius:8px;padding:10px 12px;font-size:.84rem;margin-bottom:10px">' +
+          '✅ <b>Seus PDFs continuam sendo salvos na nuvem</b> pelo Supabase Storage — nada se perde sem o Drive. Ele só serviria para ter uma cópia dentro da sua pasta do Google.</div>'
+        : '<div style="background:#fff4e5;border:1px solid #f0c890;color:#7a4b12;border-radius:8px;padding:10px 12px;font-size:.84rem;margin-bottom:10px">' +
+          '⚠️ Nenhum backup de PDF está ativo. Marque a opção <b>☁️ Supabase Storage</b> — ela usa a conta da nuvem que você já tem e não precisa de configuração no Google.</div>') +
+      '<details style="font-size:.83rem"><summary style="cursor:pointer;font-weight:600">Se quiser mesmo liberar o Drive</summary>' +
+      '<ol style="padding-left:18px;margin:8px 0;line-height:1.65">' +
+      '<li>Abra <b>console.cloud.google.com</b> e confira, no seletor do topo, se está no <b>mesmo projeto</b> onde criou o Client ID (não em "My First Project").</li>' +
+      '<li>Confirme também a <b>conta Google</b> no canto superior direito — precisa ser a dona do projeto.</li>' +
+      '<li>Menu esquerdo → <b>Google Auth Platform → Público-alvo</b>.</li>' +
+      '<li>Clique em <b>PUBLICAR APP</b> (o escopo usado é o <code>drive.file</code>, que não exige verificação) — ou adicione a sua conta em <b>Usuários de teste</b>.</li>' +
+      '<li>Volte aqui e toque em <b>Conectar Google Drive</b> outra vez.</li>' +
+      '</ol></details>',
+      '<button class="btn btn-primary" onclick="pdfBackup.desligarDrive()">👍 Deixar o Drive de lado</button>' +
+      '<button class="btn" onclick="modal.close()">Tentar de novo depois</button>');
+  },
+  desligarDrive() {
+    pdfBackup.salvarCfg({ drive: false });
+    try { const cb = document.getElementById('pdfbk-drive'); if (cb) cb.checked = false; } catch (e) {}
+    try { const cfg = document.getElementById('pdfbk-drive-cfg'); if (cfg) cfg.style.display = 'none'; } catch (e) {}
+    modal.close();
+    toast('Backup no Drive desligado — os PDFs continuam indo para a nuvem');
   },
 
   /* Liga/desliga a opção de Drive e mostra/esconde a config */

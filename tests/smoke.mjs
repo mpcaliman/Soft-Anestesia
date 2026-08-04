@@ -2676,6 +2676,136 @@ await test('Pacientes duplicados: diagnóstico não acusa pendência falsa e a f
   await page.close();
 });
 
+/* 52) Acesso personalizado pelo gestor vale em QUALQUER aparelho (nuvem) */
+await test('Permissões personalizadas sobem para a nuvem e vencem o padrão do papel', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud._garantirToken = async () => true;
+
+    /* --- no aparelho do GESTOR: tira o Dashboard da secretária --- */
+    let patch = null;
+    const fetchOrig = window.fetch;
+    window.fetch = async (url, opts) => {
+      if (String(url).indexOf('organization_users') >= 0 && opts && opts.method === 'PATCH') {
+        patch = { url: String(url), body: JSON.parse(opts.body) };
+        return { ok: true, json: async () => ([]) };
+      }
+      return fetchOrig(url, opts);
+    };
+    auth._salvarUsuarios([
+      { id: 'u_1', usuario: 'mpcaliman@hotmail.com', nome: 'gestor', perfil: 'admin', senhaHash: 'x', nuvem: true, role: 'gestor' },
+      { id: 'u_2', usuario: 'secretaria@ex.com', nome: 'secre', perfil: 'secretaria', senhaHash: 'x', nuvem: true,
+        role: 'auxiliar', uid: 'uid-2', organization_id: 'org-1',
+        modulos: ['dashboard', 'pacientes', 'agenda'], soImpressao: [] }
+    ]);
+    const ok = await auth.salvarPermissoesNaNuvem('uid-2', 'org-1', { perfil: 'secretaria', modulos: ['pacientes', 'agenda'], soImpressao: ['pre'] });
+    out.gravouNaNuvem = ok === true && !!patch
+      && patch.url.indexOf('user_id=eq.uid-2') >= 0 && patch.url.indexOf('organization_id=eq.org-1') >= 0
+      && patch.body.permissoes.modulos.join(',') === 'pacientes,agenda'
+      && patch.body.permissoes.soImpressao.join(',') === 'pre';
+    window.fetch = fetchOrig;
+
+    /* --- no aparelho DELA: o login lê a personalização e o Dashboard some --- */
+    const perfilNuvem = {
+      uid: 'uid-2', email: 'secretaria@ex.com', role: 'auxiliar', organization_id: 'org-1', ativo: true,
+      permissoes: { perfil: 'secretaria', modulos: ['pacientes', 'agenda'], soImpressao: ['pre'] }
+    };
+    auth._salvarUsuarios([]);
+    const esp = await auth._espelharUsuarioNuvem('secretaria@ex.com', 'senha', perfilNuvem);
+    out.loginRespeita = esp && !esp.modulos.includes('dashboard') && esp.modulos.includes('pacientes')
+      && esp.soImpressao.includes('pre');
+    auth._definirSessao(esp);
+    out.uiBloqueia = auth.podeAcessar('dashboard') === false && auth.podeAcessar('pacientes') === true;
+
+    /* o papel sozinho daria Dashboard — a personalização é que manda */
+    out.papelDariaDashboard = auth._permsDoPapel('auxiliar').modulos.includes('dashboard');
+
+    /* atualizar o papel na sessão também respeita a personalização */
+    cloud.buscarPerfil = async () => perfilNuvem;
+    const u2 = await auth.atualizarPapelDaNuvem();
+    out.atualizarRespeita = u2 && !u2.modulos.includes('dashboard');
+
+    /* sem personalização, volta a valer o padrão do papel */
+    cloud.buscarPerfil = async () => ({ uid: 'uid-2', email: 'secretaria@ex.com', role: 'auxiliar', organization_id: 'org-1', ativo: true, permissoes: null });
+    const u3 = await auth.atualizarPapelDaNuvem();
+    out.semPersonalizacao = u3 && u3.modulos.includes('dashboard');
+
+    auth._salvarUsuarios([]);
+    return out;
+  });
+  assert(r.gravouNaNuvem, 'o gestor deveria gravar o acesso personalizado na nuvem');
+  assert(r.papelDariaDashboard, 'o papel auxiliar sozinho daria acesso ao Dashboard');
+  assert(r.loginRespeita, 'o login no aparelho dela deveria aplicar a personalização');
+  assert(r.uiBloqueia, 'a UI deveria bloquear o Dashboard e manter Pacientes');
+  assert(r.atualizarRespeita, 'atualizar o papel não pode devolver o Dashboard');
+  assert(r.semPersonalizacao, 'sem personalização, o padrão do papel volta a valer');
+  await page.close();
+});
+
+/* 53) Pré: o que a secretária pode preencher (edição parcial por seção) */
+await test('Pré: secretária edita identificação, anamnese, sinais vitais/exames e pareceres — o resto é do médico', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    auth._salvarUsuarios([{
+      id: 'u_s', usuario: 'secretaria@ex.com', nome: 'secre', perfil: 'secretaria', senhaHash: 'x',
+      nuvem: true, role: 'auxiliar', modulos: auth._permsDoPapel('auxiliar').modulos.slice(), soImpressao: []
+    }]);
+    auth._definirSessao(auth._lerUsuarios()[0]);
+
+    out.podeEditarPre = auth.podeEditar('pre') === true;
+    out.temParcial = auth.edicaoParcialDe('pre') === '[data-sec-edit]';
+
+    auth._aplicarLeitura('pre');
+    const mod = document.getElementById('module-pre');
+    out.modoParcial = mod.classList.contains('edicao-parcial') && !mod.classList.contains('somente-impressao');
+
+    const liberada = (secId) => {
+      const body = document.querySelector('#' + secId + ' .card-body');
+      return !!body && body.classList.contains('campo-liberado');
+    };
+    out.ident = liberada('pre-sec-ident');
+    out.anamnese = liberada('pre-sec-anamnese');
+    out.exames = liberada('pre-sec-exames');
+    out.pareceres = liberada('pre-sec-pareceres');
+    /* risco e conclusão continuam travados */
+    out.riscoTravado = !liberada('pre-sec-risco');
+    out.conclusaoTravada = !liberada('pre-sec-conclusao');
+    /* exame físico é ato médico, mesmo dentro da seção liberada */
+    const ef = document.querySelector('#form-pre [name="exame_fisico"]');
+    out.exameFisicoTravado = !!ef && !!ef.closest('.campo-travado');
+    /* aviso na tela explica o que ela pode preencher */
+    const banner = document.getElementById('pp-banner-pre');
+    out.avisoCerto = !!banner && /identifica/i.test(banner.textContent) && /pareceres/i.test(banner.textContent);
+
+    /* o médico não entra em modo parcial */
+    auth._salvarUsuarios([{ id: 'u_m', usuario: 'medico@ex.com', nome: 'med', perfil: 'medico', senhaHash: 'x',
+      nuvem: true, role: 'anestesiologista', modulos: auth._permsDoPapel('anestesiologista').modulos.slice(), soImpressao: [] }]);
+    auth._definirSessao(auth._lerUsuarios()[0]);
+    auth._aplicarLeitura('pre');
+    out.medicoLivre = !document.getElementById('module-pre').classList.contains('edicao-parcial');
+
+    auth._salvarUsuarios([]);
+    return out;
+  });
+  assert(r.podeEditarPre, 'a secretária precisa poder editar a pré (modo parcial)');
+  assert(r.temParcial, 'o papel auxiliar deveria ter edição parcial na pré');
+  assert(r.modoParcial, 'o módulo deveria entrar em edição parcial, não em só-impressão');
+  assert(r.ident, 'identificação deveria estar liberada');
+  assert(r.anamnese, 'anamnese deveria estar liberada');
+  assert(r.exames, 'sinais vitais e exames deveriam estar liberados');
+  assert(r.pareceres, 'pareceres de outras clínicas deveriam estar liberados');
+  assert(r.riscoTravado, 'classificação de risco continua sendo do anestesiologista');
+  assert(r.conclusaoTravada, 'a conclusão continua sendo do anestesiologista');
+  assert(r.exameFisicoTravado, 'o exame físico não pode ser liberado para a secretária');
+  assert(r.avisoCerto, 'o aviso deveria listar as seções liberadas');
+  assert(r.medicoLivre, 'o anestesiologista não entra em edição parcial');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

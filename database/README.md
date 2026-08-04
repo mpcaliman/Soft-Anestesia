@@ -324,6 +324,17 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   promove sozinho. No app: botões *🏢 Criar minha clínica (virar gestor)* e
   *🔄 Atualizar meu papel* dentro de Equipe da nuvem.
 
+- **Permissões personalizadas por usuário (`0011_permissoes_por_usuario.sql`):**
+  ✅ o papel define um conjunto **padrão** de módulos; quando o gestor ajustava
+  esse conjunto para uma pessoa (ex.: tirar o Dashboard da secretária), a
+  mudança ficava só no `localStorage` do aparelho do gestor — no aparelho dela
+  o app recalculava tudo pelo papel e devolvia o acesso. Agora a
+  personalização mora em `organization_users.permissoes` (jsonb
+  `{perfil, modulos[], soImpressao[]}`): **escreve** só o gestor da
+  organização (policy `ou_all`, já existente), **lê** o próprio usuário e o
+  gestor (`ou_sel`). Nulo = padrão do papel. No app, salvar em *Ajustes →
+  Usuários → ✏️* grava na nuvem e vale em todos os aparelhos daquela pessoa.
+
 ## Rollback
 
 Como é aditivo, para reverter basta remover os objetos criados (as tabelas novas
