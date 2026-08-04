@@ -2806,6 +2806,61 @@ await test('Pré: secretária edita identificação, anamnese, sinais vitais/exa
   await page.close();
 });
 
+/* 54) A logomarca sai no PDF (orçamento, documentos e receituário) */
+await test('Logomarca aparece no PDF do orçamento, nos documentos e no receituário', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    /* jsPDF falso: registra o que foi desenhado */
+    const imagens = [];
+    const docFake = {
+      addImage: (src, fmt, x, y, w, h) => imagens.push({ src: String(src).slice(0, 30), fmt, x, y, w, h }),
+      getImageProperties: () => ({ width: 900, height: 300 })
+    };
+
+    /* helper desenha e devolve y avançado */
+    const y1 = printPreview._logoPDF(docFake, 20, 16, 62, 22);
+    out.desenhou = imagens.length === 1 && imagens[0].src.indexOf('data:image') === 0;
+    out.proporcao = imagens.length === 1 && Math.abs(imagens[0].w / imagens[0].h - 3) < 0.05;   /* 900x300 */
+    out.respeitaLargura = imagens.length === 1 && imagens[0].w <= 62 && imagens[0].h <= 22;
+    out.avancouY = y1 > 16;
+
+    /* teto de altura obedecido mesmo com logo alta */
+    imagens.length = 0;
+    docFake.getImageProperties = () => ({ width: 300, height: 900 });
+    printPreview._logoPDF(docFake, 20, 16, 62, 22);
+    out.respeitaAltura = imagens.length === 1 && imagens[0].h <= 22;
+
+    /* sem logo utilizável, não quebra nem avança */
+    imagens.length = 0;
+    const orig = LOGOS.horizontal;
+    LOGOS.horizontal = '';
+    const y2 = printPreview._logoPDF(docFake, 20, 16, 62, 22);
+    out.semLogoSeguro = imagens.length === 0 && y2 === 16;
+    LOGOS.horizontal = orig;
+
+    /* o PDF do orçamento chama o helper */
+    let chamou = 0;
+    const logoOrig = printPreview._logoPDF;
+    printPreview._logoPDF = (doc, x, y) => { chamou++; return y; };
+    try {
+      document.querySelector('#form-orcamento [name="paciente"]').value = 'Fulano de Tal';
+      await orcamento.gerarPDF();
+    } catch (e) { out.erroPDF = String(e && e.message); }
+    out.orcamentoUsaLogo = chamou >= 1;
+    printPreview._logoPDF = logoOrig;
+    return out;
+  });
+  assert(r.desenhou, 'o helper deveria desenhar a logo no PDF');
+  assert(r.proporcao, 'a logo deveria manter a proporção original');
+  assert(r.respeitaLargura, 'a logo não pode ultrapassar a área reservada');
+  assert(r.respeitaAltura, 'logo alta deveria ser limitada pela altura máxima');
+  assert(r.avancouY, 'o cursor vertical deveria avançar depois da logo');
+  assert(r.semLogoSeguro, 'sem logo configurada, o PDF segue normalmente');
+  assert(r.orcamentoUsaLogo, 'o PDF do orçamento deveria desenhar a logomarca');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

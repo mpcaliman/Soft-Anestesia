@@ -20086,7 +20086,8 @@ const pdfGen = {
 
     const desenhaVia = (yStart, rotulo) => {
       let y = yStart;
-      /* Cabeçalho */
+      /* Cabeçalho — logomarca e, abaixo, os dados do profissional */
+      try { y = printPreview._logoPDF(doc, M, y, 52, 16); } catch (e) {}
       doc.setFont('helvetica', 'bold'); doc.setFontSize(12.5);
       doc.text(clinica.nomeProfissional || d.profissional || 'Receituário', M, y);
       y += 5.4;
@@ -32808,7 +32809,8 @@ ${TAG_CLOSE_HTML}`;
     };
     const linha = () => { novaPaginaSePreciso(4); doc.setDrawColor(200); doc.line(M, y, W - M, y); y += 4; };
 
-    /* Cabeçalho do documento */
+    /* Cabeçalho do documento — logomarca primeiro (como na pré-visualização) */
+    y = printPreview._logoPDF(doc, M, y, 58, 20);
     escreve(printPreview._infoLabel(state.currentModule) || 'Documento', { size: 14, style: 'bold', gap: 7 });
     escreve('Gerado em ' + utils.formatarDataHora(new Date().toISOString()), { size: 8, cor: 120, gap: 5 });
     linha();
@@ -32921,6 +32923,26 @@ ${TAG_CLOSE_HTML}`;
       .slice(0, 40);
     /* Ordem fixa: Paciente_Tipo_Data — a data é SEMPRE a de criação do arquivo (hoje) */
     return `${paciente}_${tipo}_${printPreview._dataCriacao()}`;
+  },
+  /* ------------------------------------------------------------------
+     LOGOMARCA NO PDF
+     A pré-visualização (HTML) sempre mostrou a logo; o PDF gerado pelo
+     jsPDF não a desenhava — todo documento saía sem identidade visual.
+     Desenha a logo no topo e devolve o novo "y" (ou o mesmo, se não der).
+  ------------------------------------------------------------------ */
+  _logoPDF(doc, x, y, maxW, maxH) {
+    try {
+      const src = (typeof LOGOS !== 'undefined' && LOGOS.horizontal) || '';
+      if (!src || src.indexOf('data:image') !== 0) return y;
+      let prop = null;
+      try { prop = doc.getImageProperties ? doc.getImageProperties(src) : null; } catch (e) { prop = null; }
+      const nw = (prop && prop.width) || 3, nh = (prop && prop.height) || 1;
+      let w = maxW, h = w * nh / nw;
+      if (h > maxH) { h = maxH; w = h * nw / nh; }
+      const fmt = /^data:image\/jpe?g/i.test(src) ? 'JPEG' : 'PNG';
+      doc.addImage(src, fmt, x, y, w, h);
+      return y + h + 3;
+    } catch (e) { return y; }
   },
   /* Data de criação do arquivo (hoje), formato ddmmaaaa */
   _dataCriacao() {
@@ -37997,7 +38019,11 @@ const orcamento = {
     const cab = cfg.cabecalho || {};
     const doc = new J({ unit: 'mm', format: 'a4' });
     const W = 210, M = 20, cw = W - M * 2;
-    let y = 22;
+    let y = 16;
+
+    /* logomarca do topo — a mesma da pré-visualização e da impressão */
+    y = printPreview._logoPDF(doc, M, y, 62, 22);
+    y += 4;
 
     doc.setFont('helvetica', 'bold'); doc.setFontSize(12.5);
     doc.text(cab.profissional || 'Honorários anestésicos', M, y); y += 5.4;
