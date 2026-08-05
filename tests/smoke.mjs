@@ -2861,6 +2861,84 @@ await test('Logomarca aparece no PDF do orçamento, nos documentos e no receitu�
   await page.close();
 });
 
+/* 55) Ficha: tempo do procedimento = sala; ➕ abre linha da MESMA equipe */
+await test('Ficha: procedimento começa na entrada e termina na saída de sala; ➕ é da mesma equipe', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const f = document.getElementById('form-anestesia');
+    const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el) { el.value = v; return true; } return false; };
+
+    /* duração entre horários, inclusive virando o dia */
+    out.dur = printPreview._durEntre('07:30', '09:05') === '1h 35min';
+    out.durVirada = printPreview._durEntre('23:40', '00:20') === '0h 40min';
+    out.durVazia = printPreview._durEntre('', '09:00') === '';
+
+    set('paciente_nome', 'Teste Impressão');
+    set('procedimento', 'Colecistectomia videolaparoscópica');
+    set('cirurgiao', 'Dr. Fulano');
+    set('hora_sala_entrada', '07:30');
+    set('hora_inicio', '07:45');
+    set('hora_cir_inicio', '08:00');
+    set('hora_cir_fim', '08:50');
+    set('hora_fim', '09:00');
+    set('hora_sala_saida', '09:10');
+
+    const html = printPreview._buildAnestesia();
+    out.temEntrada = /Início \(entrada em sala\)/.test(html) && html.indexOf('07:30') >= 0;
+    out.temSaida = /Término \(saída de sala\)/.test(html) && html.indexOf('09:10') >= 0;
+    out.temDuracaoProc = /Duração do procedimento/.test(html) && html.indexOf('1h 40min') >= 0;
+    out.temAnestesia = /Início da anestesia/.test(html) && /Fim da anestesia/.test(html);
+    out.temCirurgia = /Início da cirurgia/.test(html) && /Fim da cirurgia/.test(html);
+
+    /* ➕ do campo principal: linha enxuta, da mesma equipe */
+    document.getElementById('cir-combo-body').innerHTML = '';
+    const linha = anestesia.cirurgias.add({}, { mesmaEquipe: true });
+    out.linhaCriada = !!linha && linha.classList.contains('cir-mesma-equipe');
+    out.temCodigo = !!linha.querySelector('[name="cir_extra_proc[]"]') && !!linha.querySelector('[name="cir_extra_grau[]"]');
+    /* os campos de outra equipe existem (o financeiro depende deles) mas ficam escondidos */
+    const cir = linha.querySelector('[name="cir_extra_cir[]"]');
+    out.cirurgiaoExiste = !!cir;
+    out.cirurgiaoOculto = !!cir && !!cir.closest('.cir-extra-detalhe');
+    out.avisoMesmaEquipe = /Mesma equipe/i.test(linha.textContent);
+
+    /* dá para abrir os detalhes quando for outra equipe mesmo */
+    anestesia.cirurgias.abrirDetalhes(linha.querySelector('.cir-abrir-detalhe'));
+    out.abriuDetalhes = !linha.classList.contains('cir-mesma-equipe');
+
+    /* linha vinda de registro salvo com cirurgião continua completa */
+    document.getElementById('cir-combo-body').innerHTML = '';
+    const l2 = anestesia.cirurgias.add({ procedimento: 'Hernioplastia', cirurgiao: 'Dr. Beltrano', grau: '70' }, { mesmaEquipe: true });
+    out.comCirurgiaoCompleta = !l2.classList.contains('cir-mesma-equipe');
+
+    /* na impressão, linha sem cirurgião sai como "mesma equipe" */
+    document.getElementById('cir-combo-body').innerHTML = '';
+    anestesia.cirurgias.add({ procedimento: 'Apendicectomia', grau: '50' }, { mesmaEquipe: true });
+    const html2 = printPreview._buildAnestesia();
+    out.imprimeMesmaEquipe = /mesma equipe/i.test(html2) && html2.indexOf('Dr. Fulano') >= 0 && html2.indexOf('50%') >= 0;
+
+    /* campo CBHPM não deixa o navegador abrir a lista dele por cima */
+    const inp = f.querySelector('[name="procedimento"]');
+    const ac = inp.getAttribute('autocomplete') || '';
+    out.semAutofill = ac !== 'on' && ac !== '' && !inp.hasAttribute('list');
+    return out;
+  });
+  assert(r.dur && r.durVirada && r.durVazia, 'o cálculo de duração deveria cobrir virada de dia e campo vazio');
+  assert(r.temEntrada, 'a impressão deveria mostrar a entrada em sala como início');
+  assert(r.temSaida, 'a impressão deveria mostrar a saída de sala como término');
+  assert(r.temDuracaoProc, 'a duração do procedimento deveria ser calculada pela sala (1h 40min)');
+  assert(r.temAnestesia && r.temCirurgia, 'os tempos de anestesia e cirurgia continuam na impressão');
+  assert(r.linhaCriada, 'o ➕ deveria criar uma linha marcada como mesma equipe');
+  assert(r.temCodigo, 'a linha deveria ter procedimento e grau');
+  assert(r.cirurgiaoExiste && r.cirurgiaoOculto, 'o campo cirurgião existe, mas fica recolhido');
+  assert(r.avisoMesmaEquipe, 'a linha deveria avisar que é da mesma equipe');
+  assert(r.abriuDetalhes, 'deveria dar para abrir os detalhes de outra equipe');
+  assert(r.comCirurgiaoCompleta, 'linha restaurada com cirurgião deve vir completa');
+  assert(r.imprimeMesmaEquipe, 'na impressão, a linha sem cirurgião sai com a equipe principal e o grau');
+  assert(r.semAutofill, 'o campo CBHPM não pode aceitar a lista do navegador por cima');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
