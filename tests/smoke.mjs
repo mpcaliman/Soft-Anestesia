@@ -3052,6 +3052,79 @@ await test('CBHPM: procedimentos próprios entram na busca e no financeiro; paci
   await page.close();
 });
 
+/* 57) Pré → Termo: avançar ao finalizar e imprimir os dois num arquivo só */
+await test('Pré finalizada oferece o Termo; pré + termo saem num arquivo único', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('pre', []); store.setList('termo', []);
+
+    /* ---- ao finalizar a pré, a janela oferece avançar/imprimir junto ---- */
+    const docPre = store.save('pre', { nome: 'Maria das Dores', cirurgia: 'Colecistectomia', data: utils.hojeISO() });
+    pre._perguntarTermo(docPre);
+    const corpo = document.getElementById('modal-body');
+    out.ofereceTermo = /Avançar para o Termo/i.test(corpo.textContent);
+    out.ofereceConjunto = /Imprimir pré \+ termo juntos/i.test(corpo.textContent);
+    out.ofereceSair = /Agora não/i.test(corpo.textContent);
+    modal.close();
+
+    /* se outra janela estiver aberta, espera a vez em vez de sumir */
+    modal.open('Outra coisa', 'ocupado');
+    pre._perguntarTermo(docPre);
+    out.esperaAVez = document.getElementById('modal-title').textContent === 'Outra coisa';
+    modal.close();
+
+    /* ---- conjunto: pré no formulário + termo buscado pelo nome ---- */
+    document.querySelector('#form-pre [name="nome"]').value = 'Maria das Dores';
+    document.querySelector('#form-pre [name="cirurgia"]').value = 'Colecistectomia';
+    store.save('termo', { nome: 'Maria das Dores', procedimento: 'Colecistectomia', data: utils.hojeISO() });
+    document.querySelector('#form-termo [name="nome"]').value = '';
+
+    printPreview.abrirPreTermo();
+    const ppp = document.getElementById('ppp');
+    out.abriu = document.getElementById('print-preview-overlay').classList.contains('show');
+    out.temPre = ppp.innerHTML.indexOf('AVALIAÇÃO PRÉ-ANESTÉSICA') >= 0 || /pr[ée]-anest/i.test(ppp.innerHTML);
+    out.temTermo = /TERMO/i.test(ppp.innerHTML);
+    out.temQuebra = ppp.innerHTML.indexOf('pp-quebra') >= 0 && /2ª parte — Termo/.test(ppp.innerHTML);
+    out.nomeArquivo = printPreview._gerarNomeArquivo().indexOf('Pre-Anestesica+Termo') >= 0;
+    printPreview.fechar();
+
+    /* só o termo cadastrado (sem pré) → imprime só o termo, sem quebrar */
+    store.setList('pre', []);
+    document.querySelector('#form-pre [name="nome"]').value = '';
+    document.querySelector('#form-termo [name="nome"]').value = 'Maria das Dores';
+    printPreview.abrirPreTermo();
+    out.soTermo = /TERMO/i.test(ppp.innerHTML) && ppp.innerHTML.indexOf('pp-quebra') < 0;
+    out.nomeSoTermo = printPreview._gerarNomeArquivo().indexOf('_Termo_') >= 0;
+    printPreview.fechar();
+
+    /* sem nome nenhum, avisa e não abre */
+    document.querySelector('#form-termo [name="nome"]').value = '';
+    document.getElementById('print-preview-overlay').classList.remove('show');
+    printPreview.abrirPreTermo();
+    out.semNomeNaoAbre = !document.getElementById('print-preview-overlay').classList.contains('show');
+
+    /* o botão está nas duas barras de ação */
+    out.botaoPre = !!document.querySelector('#module-pre [onclick="printPreview.abrirPreTermo()"]');
+    out.botaoTermo = !!document.querySelector('#module-termo [onclick="printPreview.abrirPreTermo()"]');
+
+    store.setList('pre', []); store.setList('termo', []);
+    return out;
+  });
+  assert(r.ofereceTermo, 'ao finalizar a pré deveria oferecer avançar para o termo');
+  assert(r.ofereceConjunto, 'a mesma janela deveria oferecer imprimir os dois juntos');
+  assert(r.ofereceSair, 'deveria dar para dispensar');
+  assert(r.esperaAVez, 'com outra janela aberta, o convite espera a vez');
+  assert(r.abriu, 'a pré-visualização do conjunto deveria abrir');
+  assert(r.temPre && r.temTermo, 'o conjunto deveria trazer a pré e o termo');
+  assert(r.temQuebra, 'o termo deveria começar em página nova, com capa de capítulo');
+  assert(r.nomeArquivo, 'o arquivo deveria se chamar Paciente_Pre-Anestesica+Termo_data');
+  assert(r.soTermo && r.nomeSoTermo, 'sem pré, imprime só o termo e nomeia certo');
+  assert(r.semNomeNaoAbre, 'sem paciente identificado, não abre');
+  assert(r.botaoPre && r.botaoTermo, 'o botão deveria estar na pré e no termo');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

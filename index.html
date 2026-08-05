@@ -4307,6 +4307,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     <button class="btn" onclick="historico.abrir('pre')"><span class="icon">🔍</span> Buscar / Histórico</button>
     <div class="action-divider"></div>
     <button class="btn" onclick="printPreview.abrir()"><span class="icon">🖨️</span> Visualizar / Imprimir</button>
+    <button class="btn" onclick="printPreview.abrirPreTermo()" title="Imprime a avaliação pré-anestésica e o termo de consentimento num arquivo único"><span class="icon">📑</span> Pré + Termo juntos</button>
     <button class="btn" onclick="pre.exportar()"><span class="icon">⬇️</span> Exportar</button>
     <button class="btn btn-ghost" onclick="actions.importarJSONPara('pre')"><span class="icon">⬆️</span> Importar</button>
     <div class="action-divider"></div>
@@ -6827,6 +6828,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     <button class="btn" onclick="historico.abrir('termo')"><span class="icon">🔍</span> Buscar / Histórico</button>
     <div class="action-divider"></div>
     <button class="btn" onclick="printPreview.abrir()"><span class="icon">🖨️</span> Visualizar / Imprimir</button>
+    <button class="btn" onclick="printPreview.abrirPreTermo()" title="Imprime a avaliação pré-anestésica e o termo num arquivo único"><span class="icon">📑</span> Pré + Termo juntos</button>
     <button class="btn" onclick="termo.exportar()"><span class="icon">⬇️</span> Exportar</button>
     <button class="btn btn-ghost" onclick="actions.importarJSONPara('termo')"><span class="icon">⬆️</span> Importar</button>
     <div class="action-divider"></div>
@@ -12001,14 +12003,29 @@ const pre = {
     }
     pre.salvar({ finalizar: true });
   },
-  /* Pergunta se deseja preencher o Termo de Consentimento com os dados do paciente */
-  _perguntarTermo(docPre) {
+  /* Pergunta se deseja preencher o Termo de Consentimento com os dados do
+     paciente. Se outra janela (ex.: pendências do convênio) estiver aberta
+     na hora, espera a vez em vez de sumir sem o usuário ver. */
+  _perguntarTermo(docPre, tentativa) {
+    const bd = document.getElementById('modal-backdrop');
+    const overlayImpressao = document.getElementById('print-preview-overlay');
+    const ocupado = (bd && bd.classList.contains('show')) ||
+                    (overlayImpressao && overlayImpressao.classList.contains('show'));
+    if (ocupado) {
+      const n = (tentativa || 0) + 1;
+      if (n <= 40) { setTimeout(() => pre._perguntarTermo(docPre, n), 1500); return; }
+    }
     const html = `
       <div class="quick-action-grid">
         <div class="quick-action-card" onclick="modal.close(); pre._iniciarTermo('${docPre._id}')">
           <span class="qa-icon">📝</span>
-          <div class="qa-label">Sim, preencher o Termo (TCLE)</div>
-          <div class="qa-desc">Leva nome, nascimento e procedimento automaticamente</div>
+          <div class="qa-label">Avançar para o Termo (TCLE)</div>
+          <div class="qa-desc">Abre o termo já com nome, nascimento e procedimento</div>
+        </div>
+        <div class="quick-action-card" onclick="modal.close(); printPreview.abrirPreTermo()">
+          <span class="qa-icon">📑</span>
+          <div class="qa-label">Imprimir pré + termo juntos</div>
+          <div class="qa-desc">Um arquivo só, com o termo em página nova</div>
         </div>
         <div class="quick-action-card" onclick="modal.close();" style="border-style:dashed">
           <span class="qa-icon">✓</span>
@@ -12016,7 +12033,7 @@ const pre = {
           <div class="qa-desc">Posso fazer o termo depois pelo menu</div>
         </div>
       </div>`;
-    modal.open('📝 Aplicar Termo de Consentimento?', html, '');
+    modal.open('📝 Avaliação finalizada — e o Termo de Consentimento?', html, '');
   },
   /* Inicia o Termo pré-preenchido com dados da Pré-anestésica */
   _iniciarTermo(preId) {
@@ -32791,6 +32808,64 @@ const printPreview = {
 
   /* ARQUIVO ÚNICO: ficha de anestesia + SRPA (quebra de página entre elas).
      Lê os dois formulários — quem chama garante que ambos estão carregados. */
+  /* ARQUIVO ÚNICO: avaliação pré-anestésica + termo de consentimento.
+     São dois papéis que andam juntos na consulta — o paciente leva um só
+     documento e a secretária imprime uma vez. O termo começa em página nova.
+     Vale a partir da PRÉ ou do TERMO: o que não estiver no formulário aberto
+     é buscado no registro mais recente do mesmo paciente. */
+  abrirPreTermo() {
+    try {
+      const ppp = document.getElementById('ppp');
+      if (!ppp) { toast('Erro: container de preview não encontrado', 'error'); return; }
+      const fPre = document.getElementById('form-pre');
+      const fTermo = document.getElementById('form-termo');
+      const nomeDe = (f) => (f && f.querySelector('[name="nome"]') || {}).value || '';
+      let nome = nomeDe(fPre) || nomeDe(fTermo);
+      if (!nome) { toast('Preencha o nome do paciente antes de imprimir o conjunto', 'warn'); return; }
+
+      /* completa o formulário vazio com o registro mais recente do paciente */
+      const carregarSePreciso = (mod, form) => {
+        if (nomeDe(form)) return true;
+        try {
+          const alvo = linker._normNome(nome);
+          const doc = (store.list(mod) || []).find(x => linker._normNome(x.nome) === alvo);
+          if (!doc) return false;
+          utils.fillForm(form.id, doc);
+          return true;
+        } catch (e) { return false; }
+      };
+      const temPre = carregarSePreciso('pre', fPre);
+      const temTermo = carregarSePreciso('termo', fTermo);
+      if (!temPre && !temTermo) { toast('Nada para imprimir', 'warn'); return; }
+
+      const partes = [];
+      if (temPre) partes.push(printPreview._buildPre());
+      if (temTermo) {
+        if (partes.length) {
+          partes.push('<div class="pp-quebra" style="page-break-before:always;break-before:page"></div>');
+          partes.push('<div class="pp-capitulo" style="margin:0 0 12px;padding:9px 14px;background:#eef2f7;border-left:5px solid #3b5b7e;font-weight:700;font-size:13pt;color:#22384f">2ª parte — Termo de consentimento (TCLE)</div>');
+        }
+        partes.push(printPreview._buildTermo());
+      }
+      ppp.innerHTML = partes.join('');
+      printPreview._verCtx = { mod: temPre ? 'pre' : 'termo', formId: temPre ? 'form-pre' : 'form-termo' };
+      printPreview._nomeArquivoOverride = printPreview._sanitizarPaciente(nome) +
+        (temPre && temTermo ? '_Pre-Anestesica+Termo_' : (temPre ? '_Pre-Anestesica_' : '_Termo_')) +
+        printPreview._dataCriacao();
+      const info = document.getElementById('ppt-info');
+      if (info) info.textContent = temPre && temTermo ? 'Pré-anestésica + Termo (arquivo único)' : (temPre ? 'Pré-anestésica' : 'Termo de consentimento');
+      const filenameEl = document.getElementById('ppt-filename');
+      if (filenameEl) filenameEl.textContent = '📁 ' + printPreview._gerarNomeArquivo();
+      document.getElementById('print-preview-overlay').classList.add('show');
+      printPreview.refreshSignature();
+      if (!temTermo) toast('Não achei termo deste paciente — imprimindo só a pré', 'warn');
+      else if (!temPre) toast('Não achei pré-anestésica deste paciente — imprimindo só o termo', 'warn');
+    } catch (e) {
+      console.error('Erro no preview pré+termo:', e);
+      toast('Erro ao montar pré + termo: ' + (e.message || ''), 'error');
+    }
+  },
+
   abrirConjunto() {
     try {
       const htmlFicha = printPreview._buildAnestesia();
