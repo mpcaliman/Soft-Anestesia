@@ -30956,7 +30956,11 @@ const historico = {
   },
   _nomeItem(it) { return ((it.paciente && it.paciente.nome) || it.paciente_nome || it.nome || it.paciente || '').trim(); },
   _dataItem(it) {
-    return it.data_proc || it.data_avaliacao || it.data_anestesia || it.data_consulta || it.data_cirurgia || it.data ||
+    /* A ficha de anestesia é salva ESTRUTURADA (procedimento.data). Sem esta
+       linha, ela caía no _updatedAt e aparecia com a data da gravação — ou
+       fora de ordem — no prontuário. */
+    return (it.procedimento && typeof it.procedimento === 'object' && it.procedimento.data) ||
+           it.data_proc || it.data_avaliacao || it.data_anestesia || it.data_consulta || it.data_cirurgia || it.data ||
            (it._updatedAt || it._createdAt || '').slice(0, 10) || '';
   },
   _fmtData(d) {
@@ -30977,6 +30981,15 @@ const historico = {
       return e(procs) + (it.total_paciente ? ' · ' + historico._fmtRS(it.total_paciente) : '');
     }
     if (mod === 'agenda') return e(it.titulo || it.procedimento || '') + (it.hora ? ' · ' + e(it.hora) : '');
+    /* Ficha de anestesia: procedimento é um OBJETO — sem tratar, a linha do
+       prontuário saía "[object Object]" e o caso parecia não existir. */
+    if (it.procedimento && typeof it.procedimento === 'object') {
+      const pr = it.procedimento;
+      const partes = [pr.descricao || '', pr.cirurgiao ? 'Cir.: ' + pr.cirurgiao : ''].filter(Boolean);
+      const extras = (pr.cirurgias_extra || []).map(c => c && c.procedimento).filter(Boolean);
+      if (extras.length) partes.push('+ ' + extras.join(' + '));
+      return e(partes.join(' · '));
+    }
     return e(it.cirurgia || it.procedimento || it.queixa_principal || it.diagnostico || '');
   },
 
@@ -34748,11 +34761,18 @@ const meuDia = {
       if (!c.hora) c.hora = x.hora || '';
       if (!c.procedimento) c.procedimento = x.procedimento || x.tipo || '';
     });
-    store.list('anestesia').filter(x => x.data_anestesia === hoje).forEach(x => {
-      const c = caso(x.paciente_nome); if (!c) return;
+    /* A ficha é salva ESTRUTURADA ({paciente:{nome}, procedimento:{data,…}}).
+       Ler os campos rasos aqui fazia a ficha NUNCA aparecer no Meu dia: o caso
+       constava só pela SRPA (que é rasa) e o chip ficava em "— ficha". */
+    store.list('anestesia').forEach(x => {
+      const pr = (x.procedimento && typeof x.procedimento === 'object') ? x.procedimento : {};
+      const data = pr.data || x.data_anestesia || '';
+      if (data !== hoje) return;
+      const nome = (x.paciente && x.paciente.nome) || x.paciente_nome || '';
+      const c = caso(nome); if (!c) return;
       c.ficha = x;
-      if (!c.hora) c.hora = x.hora_sala_entrada || x.hora_inicio || '';
-      if (!c.procedimento) c.procedimento = x.procedimento || '';
+      if (!c.hora) c.hora = pr.hora_sala_entrada || pr.hora_inicio || x.hora_sala_entrada || x.hora_inicio || '';
+      if (!c.procedimento) c.procedimento = pr.descricao || (typeof x.procedimento === 'string' ? x.procedimento : '') || '';
     });
     store.list('recuperacao').filter(x => x.data === hoje).forEach(x => {
       const c = caso(x.nome); if (!c) return;

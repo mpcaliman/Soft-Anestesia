@@ -3186,6 +3186,73 @@ await test('Pré: datas dos exames são digitáveis, salvam e saem na impressão
   await page.close();
 });
 
+/* 59) Ficha de anestesia aparece no Meu dia e no prontuário (não só a SRPA) */
+await test('Dashboard e prontuário mostram a ficha de anestesia junto da SRPA', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('anestesia', []); store.setList('recuperacao', []); store.setList('financeiro', []);
+    const hoje = utils.hojeISO();
+    const f = document.getElementById('form-anestesia');
+    const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el) el.value = v; };
+    set('paciente_nome', 'João Teste'); set('data_anestesia', hoje);
+    set('procedimento', 'Colecistectomia'); set('cirurgiao', 'Dr. Fulano');
+    set('hora_sala_entrada', '08:00'); set('hora_sala_saida', '09:30');
+    anestesia.salvar({ finalizar: true });
+    store.save('recuperacao', { nome: 'João Teste', data: hoje, procedimento: 'Colecistectomia', _finalizado: true });
+
+    /* a ficha é gravada estruturada — é isso que quebrava as duas telas */
+    const a = store.list('anestesia')[0];
+    out.estruturada = !!(a.paciente && a.paciente.nome) && !a.paciente_nome && !a.data_anestesia;
+
+    /* --- Meu dia: um caso só, com ficha E SRPA --- */
+    const casos = meuDia.coletar();
+    out.umCaso = casos.length === 1;
+    out.temFicha = !!(casos[0] && casos[0].ficha);
+    out.temSrpa = !!(casos[0] && casos[0].srpa);
+    out.horaDaSala = casos[0] && casos[0].hora === '08:00';
+    out.procedimentoTexto = casos[0] && casos[0].procedimento === 'Colecistectomia';
+    meuDia.render();
+    const lista = document.getElementById('meu-dia-lista').innerHTML;
+    out.chipFicha = lista.indexOf('Ficha ✓') >= 0 && lista.indexOf('— ficha') < 0;
+    out.chipSrpa = lista.indexOf('SRPA ✓') >= 0;
+
+    /* ficha de OUTRO dia não entra no dia de hoje */
+    store.save('anestesia', { paciente: { nome: 'Outro Paciente' }, procedimento: { data: '2020-01-02', descricao: 'X' } });
+    out.filtraData = meuDia.coletar().length === 1;
+
+    /* --- Prontuário: linha da ficha com data e procedimento certos --- */
+    const html = historico._prontRender('João');
+    out.prontTemFicha = html.indexOf('Ficha de Anestesia') >= 0;
+    out.prontSemObjeto = html.indexOf('[object Object]') < 0;
+    out.prontDetalhe = /Colecistectomia/.test(html) && /Dr\. Fulano/.test(html);
+    out.prontData = historico._dataItem(a) === hoje;
+    out.detalheFicha = historico._detalheItem('anestesia', a).indexOf('Colecistectomia') === 0;
+
+    /* códigos combinados também entram no detalhe */
+    const comExtras = { paciente: { nome: 'Z' }, procedimento: { data: hoje, descricao: 'Principal', cirurgias_extra: [{ procedimento: 'Extra 1' }] } };
+    out.detalheExtras = historico._detalheItem('anestesia', comExtras).indexOf('Extra 1') >= 0;
+
+    store.setList('anestesia', []); store.setList('recuperacao', []); store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.estruturada, 'o cenário parte da ficha salva no formato estruturado');
+  assert(r.umCaso, 'ficha e SRPA do mesmo paciente deveriam formar UM caso');
+  assert(r.temFicha, 'o caso deveria constar a ficha de anestesia');
+  assert(r.temSrpa, 'e também a SRPA');
+  assert(r.horaDaSala && r.procedimentoTexto, 'hora e procedimento deveriam vir da ficha');
+  assert(r.chipFicha, 'o Meu dia deveria mostrar "Ficha ✓", não "— ficha"');
+  assert(r.chipSrpa, 'e continuar mostrando a SRPA');
+  assert(r.filtraData, 'ficha de outro dia não pode entrar no Meu dia de hoje');
+  assert(r.prontTemFicha, 'o prontuário deveria listar a ficha de anestesia');
+  assert(r.prontSemObjeto, 'o prontuário não pode mostrar "[object Object]"');
+  assert(r.prontDetalhe, 'a linha deveria trazer procedimento e cirurgião');
+  assert(r.prontData, 'a data da ficha deveria ser a do procedimento, não a da gravação');
+  assert(r.detalheFicha, 'o detalhe começa pela descrição do procedimento');
+  assert(r.detalheExtras, 'os códigos combinados também aparecem no detalhe');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
