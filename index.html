@@ -33275,15 +33275,18 @@ ${TAG_CLOSE_HTML}`;
     return labels[mod] || '';
   },
 
-  /* Helpers de construção HTML */
-  _header(titulo, subtitulo) {
+  /* Helpers de construção HTML
+     opts.semProfissional = não repete nome/CRM no topo. Usado na ficha de
+     anestesia e na SRPA: a logo já identifica o serviço e a assinatura no
+     rodapé traz o profissional — no topo era repetição. */
+  _header(titulo, subtitulo, opts = {}) {
     /* Identidade do profissional a partir do carimbo/cadastro ativo, se houver */
     let prof = {};
     try {
       const ativa = store.list('cad_assinaturas').find(x => x._id === localStorage.getItem(STORAGE.cad_assinatura_ativa)) || store.list('cad_assinaturas')[0];
       if (ativa) prof = ativa;
     } catch (e) {}
-    const nomeProf = prof.nomeProfissional || '';
+    const nomeProf = opts.semProfissional ? '' : (prof.nomeProfissional || '');
     const linhaReg = [];
     if (prof.especialidade) linhaReg.push(prof.especialidade);
     if (prof.crm) linhaReg.push('CRM ' + prof.crm);
@@ -33693,8 +33696,10 @@ ${TAG_CLOSE_HTML}`;
   _buildAnestesia() {
     const d = anestesia.coletarEstruturado();
     const p = d.paciente, pr = d.procedimento, pa = d.pre_anestesico, tc = d.tecnica, mn = d.monitorizacao;
-    const meta = `<strong>${utils.escapeHTML(p.nome || '—')}</strong><br>${utils.formatarData(pr.data) || new Date().toLocaleDateString('pt-BR')}<br>${utils.escapeHTML(pr.descricao || '')}`;
-    let html = printPreview._header('FICHA DE ANESTESIA', meta);
+    /* Topo enxuto: logo à esquerda e, centralizado, só o título. Paciente,
+       data e procedimento ficam nas seções de identificação/procedimento —
+       repetir tudo no cabeçalho só ocupava a primeira página. */
+    let html = printPreview._header('FICHA DE ANESTESIA', '', { semProfissional: true });
     html += printPreview._section('Identificação do paciente', `
       <div class="pp-grid cols-3">
         ${printPreview._field('Nome', p.nome)}
@@ -34170,8 +34175,9 @@ ${TAG_CLOSE_HTML}`;
 
   _buildRecuperacao() {
     const d = utils.formData('form-recuperacao');
-    const meta = `${utils.formatarData(d.data) || new Date().toLocaleDateString('pt-BR')}`;
-    return printPreview._header('RECUPERAÇÃO PÓS-ANESTÉSICA', meta) +
+    /* mesmo padrão da ficha: topo só com logo e título (a data está logo
+       abaixo, na identificação) */
+    return printPreview._header('RECUPERAÇÃO PÓS-ANESTÉSICA', '', { semProfissional: true }) +
       printPreview._section('Identificação e procedência', `
         <div class="pp-grid cols-3">
           ${printPreview._field('Nome', d.nome)}

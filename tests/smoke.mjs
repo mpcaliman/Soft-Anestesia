@@ -2884,6 +2884,23 @@ await test('Ficha: procedimento começa na entrada e termina na saída de sala; 
     set('hora_fim', '09:00');
     set('hora_sala_saida', '09:10');
 
+    /* cabeçalho enxuto: logo + só o título centralizado */
+    store.setList('cad_assinaturas', [{ _id: 'a1', nomeProfissional: 'Dr. Marcelo Caliman', crm: '1234', especialidade: 'Anestesiologia' }]);
+    const htmlH = printPreview._buildAnestesia();
+    out.temLogo = htmlH.indexOf('pp-logo') >= 0;
+    out.temTitulo = htmlH.indexOf('FICHA DE ANESTESIA') >= 0;
+    out.semProfNoTopo = htmlH.indexOf('pp-prof-nome') < 0 && htmlH.indexOf('pp-prof-reg') < 0;
+    out.semMetaNoTopo = htmlH.indexOf('pp-doc-meta') < 0;
+    /* mas o nome do paciente continua na identificação */
+    out.nomeNaIdentificacao = htmlH.indexOf('Identificação do paciente') >= 0 && htmlH.indexOf('Teste Impressão') >= 0;
+    /* a SRPA segue o mesmo padrão */
+    const htmlS = printPreview._buildRecuperacao();
+    out.srpaEnxuta = htmlS.indexOf('pp-prof-nome') < 0 && htmlS.indexOf('pp-doc-meta') < 0 && htmlS.indexOf('RECUPERAÇÃO PÓS-ANESTÉSICA') >= 0;
+    /* outros documentos mantêm o timbre com nome e CRM */
+    const htmlPre = printPreview._buildPre();
+    out.preMantemTimbre = htmlPre.indexOf('Dr. Marcelo Caliman') >= 0;
+    store.setList('cad_assinaturas', []);
+
     const html = printPreview._buildAnestesia();
     out.temEntrada = /Início \(entrada em sala\)/.test(html) && html.indexOf('07:30') >= 0;
     out.temSaida = /Término \(saída de sala\)/.test(html) && html.indexOf('09:10') >= 0;
@@ -2924,6 +2941,12 @@ await test('Ficha: procedimento começa na entrada e termina na saída de sala; 
     return out;
   });
   assert(r.dur && r.durVirada && r.durVazia, 'o cálculo de duração deveria cobrir virada de dia e campo vazio');
+  assert(r.temLogo && r.temTitulo, 'o topo deveria ter a logo e o título da ficha');
+  assert(r.semProfNoTopo, 'nome e CRM não devem se repetir no topo da ficha');
+  assert(r.semMetaNoTopo, 'o topo deveria ter apenas o título centralizado');
+  assert(r.nomeNaIdentificacao, 'o nome do paciente continua na identificação');
+  assert(r.srpaEnxuta, 'a SRPA deveria seguir o mesmo cabeçalho enxuto');
+  assert(r.preMantemTimbre, 'os demais documentos mantêm o timbre com nome e CRM');
   assert(r.temEntrada, 'a impressão deveria mostrar a entrada em sala como início');
   assert(r.temSaida, 'a impressão deveria mostrar a saída de sala como término');
   assert(r.temDuracaoProc, 'a duração do procedimento deveria ser calculada pela sala (1h 40min)');
