@@ -2939,6 +2939,96 @@ await test('Ficha: procedimento começa na entrada e termina na saída de sala; 
   await page.close();
 });
 
+/* 56) CBHPM ampliável (ambulatoriais) + enfermaria no cadastro do paciente */
+await test('CBHPM: procedimentos próprios entram na busca e no financeiro; paciente tem enfermaria', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    localStorage.removeItem(cbhpm.EXTRA_KEY); cbhpm._cache = null;
+
+    /* a tabela embutida só tem os capítulos 3 e 4 (cirúrgico/invasivo) */
+    out.semAmbulatorial = !cbhpm.tabela().some(c => String(c[0]).startsWith('1.') || String(c[0]).startsWith('2.'));
+    const totalAntes = cbhpm.tabela().length;
+
+    /* importação em lote, em formatos diferentes */
+    const res = cbhpm.importarTexto(
+      '1.01.01.01-2;Consulta em consultório;;;\n' +
+      '2.01.03.15-8\tAtendimento ambulatorial de urgência\t2A\t0\t\n' +
+      '4.01.02.03-7 Eletrocardiograma convencional\n' +
+      'linha sem código nenhum\n'
+    );
+    out.importou = res.novos === 3 && res.ignorados === 1;
+    out.cresceu = cbhpm.tabela().length === totalAntes + 3;
+
+    /* busca por DESCRIÇÃO e por CÓDIGO */
+    out.achaPorDescricao = cbhpm.buscar('consulta em consult').some(i => i.codigo === '1.01.01.01-2');
+    out.achaPorCodigo = cbhpm.buscar('2.01.03').some(i => i.codigo === '2.01.03.15-8');
+    out.achaPorCodigoParcial = cbhpm.buscar('4.01.02.03-7').some(i => i.descricao === 'Eletrocardiograma convencional');
+    /* separa código e descrição corretamente no formato "código espaço descrição" */
+    const ecg = cbhpm.achar('4.01.02.03-7');
+    out.parseCodigoEspaco = !!ecg && ecg[1] === 'Eletrocardiograma convencional';
+
+    /* o financeiro reconhece o código cadastrado (é o mesmo achar()) */
+    out.financeiroAcha = !!cbhpm.achar('Consulta em consultório') && cbhpm.achar('Consulta em consultório')[0] === '1.01.01.01-2';
+
+    /* não sobrescreve a tabela oficial embutida */
+    const oficial = CBHPM_2018[0][0];
+    const res2 = cbhpm.importarTexto(oficial + ';Descrição inventada;;;');
+    out.protegeOficial = res2.ignorados === 1 && res2.novos === 0 && cbhpm.achar(oficial)[1] === CBHPM_2018[0][1];
+
+    /* sobe junto das configurações (mesma nuvem dos ajustes) */
+    out.vaiParaNuvem = configSync.CHAVES.indexOf(cbhpm.EXTRA_KEY) >= 0;
+
+    /* a tela lista e remove */
+    ajustesGrupos.abrirPara && ajustesGrupos.abrirPara('cbhpm-card');
+    cbhpmUI.render();
+    const lista = document.getElementById('cbhpm-lista');
+    out.telaLista = !!lista && lista.textContent.indexOf('Consulta em consultório') >= 0;
+    out.telaResumo = (document.getElementById('cbhpm-resumo') || {}).textContent.indexOf('3') >= 0;
+
+    /* ---- paciente: enfermaria ---- */
+    const fp = document.getElementById('form-pacientes');
+    const apt = fp.querySelector('[name="apartamento"]');
+    const enf = fp.querySelector('[name="enfermaria"]');
+    out.temEnfermaria = !!enf && !!apt;
+    /* marcar um desmarca o outro */
+    apt.checked = true; enf.checked = true; enf.dispatchEvent(new Event('change', { bubbles: true }));
+    out.exclusivos = enf.checked && !apt.checked;
+
+    store.setList('pacientes', []);
+    store.save('pacientes', { nome: 'Paciente Enfermaria', enfermaria: '1' });
+    store.save('pacientes', { nome: 'Paciente Apartamento', apartamento: '1' });
+    out.acomEnf = anestesia.adicionais.acomodacaoDoPaciente('Paciente Enfermaria') === 'enfermaria';
+    out.acomApt = anestesia.adicionais.acomodacaoDoPaciente('Paciente Apartamento') === 'apartamento';
+    out.acomVazia = anestesia.adicionais.acomodacaoDoPaciente('Nao Cadastrado') === '';
+    /* enfermaria NÃO vira adicional de faturamento */
+    const f = document.getElementById('form-anestesia');
+    f.querySelector('[name="paciente_nome"]').value = 'Paciente Enfermaria';
+    out.enfSemAdicional = anestesia.adicionais._doCadastroPaciente().length === 0;
+    f.querySelector('[name="paciente_nome"]').value = 'Paciente Apartamento';
+    out.aptComAdicional = anestesia.adicionais._doCadastroPaciente().includes('apartamento');
+
+    localStorage.removeItem(cbhpm.EXTRA_KEY); cbhpm._cache = null;
+    store.setList('pacientes', []);
+    return out;
+  });
+  assert(r.semAmbulatorial, 'o cenário parte sem os códigos ambulatoriais');
+  assert(r.importou && r.cresceu, 'a importação deveria aceitar os três formatos e ignorar lixo');
+  assert(r.achaPorDescricao, 'deveria achar pelo texto da descrição');
+  assert(r.achaPorCodigo && r.achaPorCodigoParcial, 'deveria achar pelo número do código');
+  assert(r.parseCodigoEspaco, 'formato "código espaço descrição" deveria ser separado direito');
+  assert(r.financeiroAcha, 'o financeiro deveria reconhecer o código cadastrado');
+  assert(r.protegeOficial, 'a tabela oficial embutida não pode ser sobrescrita');
+  assert(r.vaiParaNuvem, 'os procedimentos próprios devem subir para a nuvem');
+  assert(r.telaLista && r.telaResumo, 'a tela de ajustes deveria listar e contar');
+  assert(r.temEnfermaria, 'o cadastro do paciente deveria ter enfermaria além de apartamento');
+  assert(r.exclusivos, 'marcar enfermaria deveria desmarcar apartamento');
+  assert(r.acomEnf && r.acomApt && r.acomVazia, 'a acomodação deveria vir do cadastro do paciente');
+  assert(r.enfSemAdicional, 'enfermaria não gera adicional de faturamento');
+  assert(r.aptComAdicional, 'apartamento continua gerando o adicional');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
