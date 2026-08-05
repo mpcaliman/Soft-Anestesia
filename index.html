@@ -3670,6 +3670,9 @@ body.tem-demo-banner { padding-bottom: 46px; }
   outline: 2px solid var(--primary); outline-offset: 4px;
   border-radius: 8px; opacity: 1 !important;
 }
+/* linha de código adicional da MESMA equipe: só procedimento + grau */
+.cir-mesma-equipe .cir-extra-detalhe { display: none !important; }
+.cir-abrir-detalhe { background: transparent; border: 1px dashed var(--border); color: var(--text-mute); }
 .parcial-banner { background: #e8f5ee; border: 1px solid #9bd6b4; color: #1b6b43; padding: 8px 12px; border-radius: 8px; font-size: .82rem; margin: 0 0 10px; }
 @media print { .parcial-banner { display: none !important; } }
 .perm-grid-nivel { display: flex; flex-direction: column; gap: 4px; max-height: 46vh; overflow-y: auto; padding: 4px; border: 1px solid var(--border); border-radius: 8px; }
@@ -21076,9 +21079,17 @@ const cbhpm = {
     cbhpm.garantirDatalist();
     /* Remove o datalist nativo se houver — usaremos o dropdown próprio */
     input.removeAttribute('list');
-    input.setAttribute('autocomplete', 'off');
+    /* O Chrome ignora autocomplete="off" e mostra o histórico do próprio
+       navegador POR CIMA do nosso dropdown da CBHPM — duas listas brigando
+       na mesma área. Um valor que o navegador não reconhece desliga o
+       histórico de verdade e deixa só a sugestão da tabela. */
+    input.setAttribute('autocomplete', 'cbhpm-nope-' + Math.random().toString(36).slice(2, 8));
     input.setAttribute('autocorrect', 'off');
     input.setAttribute('autocapitalize', 'off');
+    input.setAttribute('spellcheck', 'false');
+    /* alguns navegadores só respeitam quando o campo não tem "name" comum */
+    if (!input.getAttribute('data-lpignore')) input.setAttribute('data-lpignore', 'true');
+    input.setAttribute('data-form-type', 'other');
     input._cbhpmLigado = true;
     input._cbhpmOpts = opts;
 
@@ -21229,15 +21240,17 @@ const cbhpm = {
     btn.className = 'btn btn-xs cbhpm-mais';
     btn.textContent = '➕';
     btn.title = (input.dataset && input.dataset.maisAcao === 'ficha')
-      ? 'Adicionar mais um código no bloco de procedimentos adicionais (cada linha com o seu grau %)'
+      ? 'Mais um código para a MESMA equipe cirúrgica — abre uma linha logo abaixo (com o seu grau %)'
       : 'Adicionar mais um procedimento/código neste campo (use também "x2" para repetições)';
     btn.addEventListener('mousedown', e => e.preventDefault());
     btn.addEventListener('click', () => {
       if (input.dataset && input.dataset.maisAcao === 'ficha') {
         try {
-          const linha = anestesia.cirurgias.add();
+          /* MESMA equipe: a linha nasce enxuta (só código + grau). Quem for de
+             OUTRA equipe usa "➕ Cirurgia combinada", que já pede o cirurgião. */
+          const linha = anestesia.cirurgias.add({}, { mesmaEquipe: true });
           if (linha) { const i2 = linha.querySelector('[name="cir_extra_proc[]"]'); if (i2) i2.focus(); }
-          toast('Código adicional criado no bloco abaixo — cada linha tem o seu grau (%)');
+          toast('Mais um código para a mesma equipe — preencha na linha abaixo');
         } catch (e) {}
         return;
       }
@@ -22350,22 +22363,31 @@ const anestesia = {
 
   /* ---- CIRURGIAS COMBINADAS ---- */
   cirurgias: {
-    add(dados = {}) {
+    /* opts.mesmaEquipe = linha enxuta criada pelo ➕ do campo principal:
+       é outro CÓDIGO do mesmo ato, com a mesma equipe cirúrgica. Os campos de
+       cirurgião/horários/observações continuam existindo (o financeiro e a
+       impressão dependem deles), mas ficam recolhidos atrás de "outra equipe /
+       mais detalhes" para a linha não parecer uma segunda cirurgia. */
+    add(dados = {}, opts = {}) {
       const body = document.getElementById('cir-combo-body');
       if (!body) return null;
       const div = document.createElement('div');
       div.className = 'grid';
+      const enxuta = !!opts.mesmaEquipe && !dados.cirurgiao && !dados.inicio && !dados.fim && !dados.obs;
+      if (enxuta) div.classList.add('cir-mesma-equipe');
       div.style.cssText = 'background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius);padding:10px;margin-bottom:8px';
       const grauSel = String(dados.grau || '50');
       div.innerHTML = `
+        ${enxuta ? '<div class="field col-12" style="margin-bottom:-4px"><small style="color:var(--text-mute)">👥 Mesma equipe cirúrgica — só mais um código deste mesmo ato</small></div>' : ''}
         <div class="field col-4"><label>Procedimento adicional <small style="color:var(--text-mute);font-weight:400">(CBHPM)</small></label><input type="text" name="cir_extra_proc[]" class="cbhpm-autocomplete" data-sem-mais="1" placeholder="Digite parte do procedimento..." value="${utils.escapeAttr(dados.procedimento || '')}"></div>
-        <div class="field col-3"><label>Cirurgião</label><input type="text" name="cir_extra_cir[]" value="${utils.escapeAttr(dados.cirurgiao || '')}"></div>
+        <div class="field col-3 cir-extra-detalhe"><label>Cirurgião <small style="color:var(--text-mute);font-weight:400">(vazio = mesma equipe)</small></label><input type="text" name="cir_extra_cir[]" value="${utils.escapeAttr(dados.cirurgiao || '')}"></div>
         <div class="field col-2"><label>Grau <small style="color:var(--text-mute);font-weight:400" title="Hierarquia de cobrança: o procedimento de MAIOR PORTE é o principal (100%); os demais da MESMA VIA entram 50%; VIA DIFERENTE entra 70% (ajuste manual)">%</small></label>
           <select name="cir_extra_grau[]">${['100', '70', '50'].map(g => `<option value="${g}" ${g === grauSel ? 'selected' : ''}>${g}%</option>`).join('')}</select></div>
-        <div class="field col-2"><label>Início</label><input type="time" name="cir_extra_inicio[]" value="${utils.escapeAttr(dados.inicio || '')}"></div>
-        <div class="field col-1" style="align-self:end"><button type="button" class="btn btn-xs btn-danger" onclick="this.closest('.grid').remove(); markDirty();">✕</button></div>
-        <div class="field col-3"><label>Fim</label><input type="time" name="cir_extra_fim[]" value="${utils.escapeAttr(dados.fim || '')}"></div>
-        <div class="field col-9"><label>Observações</label><input type="text" name="cir_extra_obs[]" value="${utils.escapeAttr(dados.obs || '')}"></div>
+        <div class="field col-2 cir-extra-detalhe"><label>Início</label><input type="time" name="cir_extra_inicio[]" value="${utils.escapeAttr(dados.inicio || '')}"></div>
+        <div class="field col-1" style="align-self:end"><button type="button" class="btn btn-xs btn-danger" onclick="this.closest('.grid').remove(); markDirty();" title="Remover esta linha">✕</button></div>
+        <div class="field col-3 cir-extra-detalhe"><label>Fim</label><input type="time" name="cir_extra_fim[]" value="${utils.escapeAttr(dados.fim || '')}"></div>
+        <div class="field col-9 cir-extra-detalhe"><label>Observações</label><input type="text" name="cir_extra_obs[]" value="${utils.escapeAttr(dados.obs || '')}"></div>
+        ${enxuta ? '<div class="field col-12"><button type="button" class="btn btn-xs cir-abrir-detalhe" onclick="anestesia.cirurgias.abrirDetalhes(this)">➕ Outra equipe / horários e observações</button></div>' : ''}
       `;
       body.appendChild(div);
       /* Aplica autocomplete CBHPM ao novo input e já foca nele (fluidez) */
@@ -22373,6 +22395,16 @@ const anestesia = {
       if (!dados.procedimento) { try { div.querySelector('[name="cir_extra_proc[]"]').focus(); } catch (e) {} }
       markDirty();
       return div;
+    },
+    /* Abre os campos escondidos de uma linha "mesma equipe" */
+    abrirDetalhes(btn) {
+      const div = btn && btn.closest('.grid');
+      if (!div) return;
+      div.classList.remove('cir-mesma-equipe');
+      const aviso = div.querySelector('small');
+      if (aviso && /Mesma equipe/i.test(aviso.textContent)) { const p = aviso.closest('.field'); if (p) p.remove(); }
+      const b = btn.closest('.field'); if (b) b.remove();
+      try { div.querySelector('[name="cir_extra_cir[]"]').focus(); } catch (e) {}
     },
     coletar() {
       const linhas = [];
@@ -32944,6 +32976,15 @@ ${TAG_CLOSE_HTML}`;
       return y + h + 3;
     } catch (e) { return y; }
   },
+  /* Duração entre dois horários HH:MM (vira o dia se o fim for menor) */
+  _durEntre(ini, fim) {
+    if (!ini || !fim) return '';
+    const a = String(ini).split(':').map(Number), b = String(fim).split(':').map(Number);
+    if (a.length < 2 || b.length < 2 || isNaN(a[0]) || isNaN(b[0])) return '';
+    let mm = (b[0] * 60 + b[1]) - (a[0] * 60 + a[1]);
+    if (mm < 0) mm += 1440;
+    return Math.floor(mm / 60) + 'h ' + String(mm % 60).padStart(2, '0') + 'min';
+  },
   /* Data de criação do arquivo (hoje), formato ddmmaaaa */
   _dataCriacao() {
     const hoje = new Date();
@@ -33437,6 +33478,13 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._field('Senha / Autorização', p.senha)}
       </div>
     `);
+    /* O procedimento começa quando o paciente ENTRA na sala e termina quando
+       SAI dela — é esse o tempo que vale para o convênio e para o hospital.
+       Anestesia e cirurgia entram logo abaixo, como detalhamento. */
+    const durEntre = printPreview._durEntre;
+    const tSala = durEntre(pr.hora_sala_entrada, pr.hora_sala_saida);
+    const tAnest = pr.duracao || durEntre(pr.hora_inicio, pr.hora_fim);
+    const tCir = pr.duracao_cir || durEntre(pr.hora_cir_inicio, pr.hora_cir_fim);
     html += printPreview._section('Procedimento', `
       <div class="pp-grid cols-3">
         ${printPreview._field('Cirurgião', pr.cirurgiao)}
@@ -33444,11 +33492,19 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._field('Hospital', pr.hospital)}
         ${printPreview._field('Sala', pr.sala)}
         ${printPreview._field('Data', utils.formatarData(pr.data))}
-        ${printPreview._field('Início', pr.hora_inicio)}
-        ${printPreview._field('Término', pr.hora_fim)}
       </div>
       ${printPreview._field('Procedimento', pr.descricao, true)}
-      <div class="pp-field"><span class="pp-label">Duração:</span><span class="pp-value">${utils.escapeHTML(pr.duracao || '—')}</span></div>
+      <div class="pp-grid cols-3">
+        ${printPreview._field('Início (entrada em sala)', pr.hora_sala_entrada, false, true)}
+        ${printPreview._field('Término (saída de sala)', pr.hora_sala_saida, false, true)}
+        ${printPreview._field('Duração do procedimento', tSala, false, true)}
+        ${printPreview._field('Início da anestesia', pr.hora_inicio)}
+        ${printPreview._field('Fim da anestesia', pr.hora_fim)}
+        ${printPreview._field('Duração da anestesia', tAnest)}
+        ${printPreview._field('Início da cirurgia', pr.hora_cir_inicio)}
+        ${printPreview._field('Fim da cirurgia', pr.hora_cir_fim)}
+        ${printPreview._field('Duração da cirurgia', tCir)}
+      </div>
     `);
     html += printPreview._section('Pré-anestésico', `
       <div class="pp-grid">
@@ -33480,11 +33536,12 @@ ${TAG_CLOSE_HTML}`;
     const cirsExtras = (pr.cirurgias_extra || []).filter(c => c.procedimento || c.cirurgiao);
     if (cirsExtras.length > 0) {
       html += printPreview._section('Cirurgias combinadas / procedimentos adicionais',
-        '<table class="pp-table"><thead><tr><th>Procedimento</th><th>Cirurgião</th><th>Início</th><th>Fim</th><th>Observação</th></tr></thead><tbody>' +
+        '<table class="pp-table"><thead><tr><th>Procedimento</th><th>Cirurgião</th><th>Grau</th><th>Início</th><th>Fim</th><th>Observação</th></tr></thead><tbody>' +
         cirsExtras.map(c => `
           <tr>
             <td>${utils.escapeHTML(c.procedimento || '')}</td>
-            <td>${utils.escapeHTML(c.cirurgiao || '')}</td>
+            <td>${utils.escapeHTML(c.cirurgiao || pr.cirurgiao || '')}${(!c.cirurgiao && pr.cirurgiao) ? ' <small>(mesma equipe)</small>' : ''}</td>
+            <td>${utils.escapeHTML((c.grau || '') ? c.grau + '%' : '')}</td>
             <td>${utils.escapeHTML(c.inicio || '')}</td>
             <td>${utils.escapeHTML(c.fim || '')}</td>
             <td>${utils.escapeHTML(c.obs || '')}</td>
