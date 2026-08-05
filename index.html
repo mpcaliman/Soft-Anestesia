@@ -4437,7 +4437,12 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <div class="field col-12 campo-travado"><label>Exame físico resumido</label><textarea name="exame_fisico" rows="3"></textarea></div>
 
           <div class="field col-12" data-sec-edit>
-            <label>Exames laboratoriais</label>
+            <label style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+              <span>Exames laboratoriais</span>
+              <span style="display:inline-flex;align-items:center;gap:5px;font-weight:400;font-size:.78rem;color:var(--text-mute)">
+                📅 realizados em <input type="date" name="lab_data" style="width:auto;padding:3px 6px;font-size:.78rem" title="Data em que os exames laboratoriais foram realizados">
+              </span>
+            </label>
             <div class="lab-grid">
               <div class="lab-item"><span>Hb</span><input type="text" name="lab_hb" inputmode="decimal"></div>
               <div class="lab-item"><span>Ht</span><input type="text" name="lab_ht" inputmode="decimal"></div>
@@ -4472,9 +4477,12 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
             <div class="lab-extras-wrap" id="pre-lab-extras"></div>
             <button type="button" class="btn btn-xs" style="margin-top:6px" onclick="labExtra.add('pre-lab-extras')">➕ Adicionar exame</button>
             <div class="grid" style="margin-top:8px">
-              <div class="field col-12"><label style="font-size:.78rem">ECG</label><input type="text" name="lab_ecg" placeholder="Ex.: Ritmo sinusal, sem outros achados"></div>
-              <div class="field col-12"><label style="font-size:.78rem">ECO</label><input type="text" name="lab_eco" placeholder="Ex.: FEVE 72%, disfunção diastólica grau 1..."></div>
-              <div class="field col-12"><label style="font-size:.78rem">Outros exames / observações</label><textarea name="exames_compl" rows="2"></textarea></div>
+              <div class="field col-9"><label style="font-size:.78rem">ECG</label><input type="text" name="lab_ecg" placeholder="Ex.: Ritmo sinusal, sem outros achados"></div>
+              <div class="field col-3"><label style="font-size:.78rem">📅 Data do ECG</label><input type="date" name="lab_ecg_data"></div>
+              <div class="field col-9"><label style="font-size:.78rem">ECO</label><input type="text" name="lab_eco" placeholder="Ex.: FEVE 72%, disfunção diastólica grau 1..."></div>
+              <div class="field col-3"><label style="font-size:.78rem">📅 Data do ECO</label><input type="date" name="lab_eco_data"></div>
+              <div class="field col-9"><label style="font-size:.78rem">Outros exames / observações</label><textarea name="exames_compl" rows="2"></textarea></div>
+              <div class="field col-3"><label style="font-size:.78rem">📅 Data destes exames</label><input type="date" name="exames_compl_data"></div>
             </div>
 
             <!-- ANEXOS DE EXAMES (fotos e PDFs) -->
@@ -4802,7 +4810,12 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <div class="field col-12"><label>Exame físico</label><textarea name="exame_fisico" rows="3"></textarea></div>
 
           <div class="field col-12">
-            <label>Exames laboratoriais</label>
+            <label style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+              <span>Exames laboratoriais</span>
+              <span style="display:inline-flex;align-items:center;gap:5px;font-weight:400;font-size:.78rem;color:var(--text-mute)">
+                📅 realizados em <input type="date" name="lab_data" style="width:auto;padding:3px 6px;font-size:.78rem" title="Data em que os exames laboratoriais foram realizados">
+              </span>
+            </label>
             <div class="lab-grid">
               <div class="lab-item"><span>Hb</span><input type="text" name="lab_hb" inputmode="decimal"></div>
               <div class="lab-item"><span>Ht</span><input type="text" name="lab_ht" inputmode="decimal"></div>
@@ -4837,9 +4850,12 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
             <div class="lab-extras-wrap" id="consulta-lab-extras"></div>
             <button type="button" class="btn btn-xs" style="margin-top:6px" onclick="labExtra.add('consulta-lab-extras')">➕ Adicionar exame</button>
             <div class="grid" style="margin-top:8px">
-              <div class="field col-12"><label style="font-size:.78rem">ECG</label><input type="text" name="lab_ecg" placeholder="Ex.: Ritmo sinusal, sem outros achados"></div>
-              <div class="field col-12"><label style="font-size:.78rem">ECO</label><input type="text" name="lab_eco" placeholder="Ex.: FEVE 72%..."></div>
-              <div class="field col-12"><label style="font-size:.78rem">Outros exames / observações</label><textarea name="exames_compl" rows="2"></textarea></div>
+              <div class="field col-9"><label style="font-size:.78rem">ECG</label><input type="text" name="lab_ecg" placeholder="Ex.: Ritmo sinusal, sem outros achados"></div>
+              <div class="field col-3"><label style="font-size:.78rem">📅 Data do ECG</label><input type="date" name="lab_ecg_data"></div>
+              <div class="field col-9"><label style="font-size:.78rem">ECO</label><input type="text" name="lab_eco" placeholder="Ex.: FEVE 72%..."></div>
+              <div class="field col-3"><label style="font-size:.78rem">📅 Data do ECO</label><input type="date" name="lab_eco_data"></div>
+              <div class="field col-9"><label style="font-size:.78rem">Outros exames / observações</label><textarea name="exames_compl" rows="2"></textarea></div>
+              <div class="field col-3"><label style="font-size:.78rem">📅 Data destes exames</label><input type="date" name="exames_compl_data"></div>
             </div>
           </div>
         </div>
@@ -33447,6 +33463,14 @@ ${TAG_CLOSE_HTML}`;
     ).join('');
     return `<div class="pp-block"><span class="pp-label">Sinais vitais e medidas</span><div class="pp-lab-grid">${cells}</div></div>`;
   },
+  /* "Resultado — realizado em dd/mm/aaaa": a data do exame importa tanto
+     quanto o resultado (um exame de 8 meses atrás não vale o de ontem). */
+  _comData(texto, data) {
+    const t = String(texto || '').trim();
+    const dt = data ? utils.formatarData(data) : '';
+    if (!t) return dt ? '(realizado em ' + dt + ')' : '';
+    return dt ? t + '  —  realizado em ' + dt : t;
+  },
   /* Grade de exames laboratoriais (estilo ficha de referência) — só imprime os preenchidos */
   _labGrid(d) {
     const labs = [
@@ -33583,9 +33607,10 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._vitaisPre(d)}
         ${printPreview._field('Exame físico', d.exame_fisico, true)}
         ${printPreview._labGrid(d)}
-        ${printPreview._field('ECG', d.lab_ecg, true)}
-        ${printPreview._field('ECO', d.lab_eco, true)}
-        ${printPreview._field('Outros exames', d.exames_compl, true)}
+        ${printPreview._field('Data dos exames laboratoriais', utils.formatarData(d.lab_data))}
+        ${printPreview._field('ECG', printPreview._comData(d.lab_ecg, d.lab_ecg_data), true)}
+        ${printPreview._field('ECO', printPreview._comData(d.lab_eco, d.lab_eco_data), true)}
+        ${printPreview._field('Outros exames', printPreview._comData(d.exames_compl, d.exames_compl_data), true)}
       `) +
       printPreview._section('Pareceres de outras clínicas', `
         ${printPreview._field('Cardiológico / risco cardíaco', d.parecer_cardio, true)}
@@ -33752,9 +33777,10 @@ ${TAG_CLOSE_HTML}`;
       printPreview._section('Exame e conduta', `
         ${printPreview._field('Exame físico', d.exame_fisico, true)}
         ${printPreview._labGrid(d)}
-        ${printPreview._field('ECG', d.lab_ecg, true)}
-        ${printPreview._field('ECO', d.lab_eco, true)}
-        ${printPreview._field('Outros exames', d.exames_compl, true)}
+        ${printPreview._field('Data dos exames laboratoriais', utils.formatarData(d.lab_data))}
+        ${printPreview._field('ECG', printPreview._comData(d.lab_ecg, d.lab_ecg_data), true)}
+        ${printPreview._field('ECO', printPreview._comData(d.lab_eco, d.lab_eco_data), true)}
+        ${printPreview._field('Outros exames', printPreview._comData(d.exames_compl, d.exames_compl_data), true)}
         ${printPreview._field('Hipótese diagnóstica', d.hipotese, true)}
         ${printPreview._field('Conduta', d.conduta, true)}
         ${printPreview._field('Prescrição / orientações', d.prescricao, true)}

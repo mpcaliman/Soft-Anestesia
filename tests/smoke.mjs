@@ -3125,6 +3125,67 @@ await test('Pré finalizada oferece o Termo; pré + termo saem num arquivo únic
   await page.close();
 });
 
+/* 58) Pré: data de realização dos exames (laboratoriais, ECG, ECO e outros) */
+await test('Pré: datas dos exames são digitáveis, salvam e saem na impressão', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('pre', []);
+    const f = document.getElementById('form-pre');
+    const campo = (n) => f.querySelector('[name="' + n + '"]');
+
+    /* os quatro campos de data existem e são do tipo date */
+    const nomes = ['lab_data', 'lab_ecg_data', 'lab_eco_data', 'exames_compl_data'];
+    out.existem = nomes.every(n => { const el = campo(n); return !!el && el.type === 'date'; });
+    /* também na consulta, que tem o mesmo bloco de exames */
+    out.naConsulta = !!document.querySelector('#form-consulta [name="lab_data"]');
+
+    campo('nome').value = 'Paciente Exames';
+    campo('lab_hb').value = '13,2';
+    campo('lab_data').value = '2026-07-15';
+    campo('lab_ecg').value = 'Ritmo sinusal';
+    campo('lab_ecg_data').value = '2026-07-10';
+    campo('lab_eco').value = 'FEVE 65%';
+    campo('lab_eco_data').value = '2026-06-02';
+    campo('exames_compl').value = 'Rx de tórax normal';
+    campo('exames_compl_data').value = '2026-07-12';
+
+    /* salvam e voltam ao carregar */
+    pre.salvar();
+    const salvo = store.list('pre')[0];
+    out.salvou = salvo.lab_data === '2026-07-15' && salvo.lab_ecg_data === '2026-07-10' &&
+                 salvo.lab_eco_data === '2026-06-02' && salvo.exames_compl_data === '2026-07-12';
+    utils.clearForm('form-pre');
+    pre.carregar(salvo);
+    out.recarregou = campo('lab_data').value === '2026-07-15' && campo('lab_eco_data').value === '2026-06-02';
+
+    /* saem na impressão, junto do resultado */
+    const html = printPreview._buildPre();
+    out.imprimeLab = /Data dos exames laboratoriais/.test(html) && html.indexOf('15/07/2026') >= 0;
+    out.imprimeEcg = html.indexOf('Ritmo sinusal') >= 0 && html.indexOf('realizado em 10/07/2026') >= 0;
+    out.imprimeEco = html.indexOf('02/06/2026') >= 0;
+    out.imprimeOutros = html.indexOf('12/07/2026') >= 0;
+
+    /* helper: sem data mostra só o resultado; sem resultado mostra só a data */
+    out.soTexto = printPreview._comData('FEVE 65%', '') === 'FEVE 65%';
+    out.soData = printPreview._comData('', '2026-06-02') === '(realizado em 02/06/2026)';
+    out.vazio = printPreview._comData('', '') === '';
+
+    store.setList('pre', []);
+    utils.clearForm('form-pre');
+    return out;
+  });
+  assert(r.existem, 'a pré deveria ter data para laboratoriais, ECG, ECO e outros exames');
+  assert(r.naConsulta, 'a consulta, que tem o mesmo bloco, também deveria ter a data');
+  assert(r.salvou, 'as datas deveriam ser gravadas no registro');
+  assert(r.recarregou, 'as datas deveriam voltar ao carregar o registro');
+  assert(r.imprimeLab, 'a data dos laboratoriais deveria sair na impressão');
+  assert(r.imprimeEcg, 'o ECG deveria sair com o resultado e a data');
+  assert(r.imprimeEco && r.imprimeOutros, 'ECO e outros exames deveriam sair com a data');
+  assert(r.soTexto && r.soData && r.vazio, 'o helper deveria lidar com resultado sem data e data sem resultado');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
