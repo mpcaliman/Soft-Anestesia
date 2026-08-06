@@ -3321,6 +3321,77 @@ await test('Voltar para o app baixa o que foi feito em outro aparelho (com inter
   await page.close();
 });
 
+/* 61) Falha de rede não pode virar "conta sem clínica" (celular perdia a sync) */
+await test('Consulta falha ≠ conta sem clínica: o aparelho lembra a clínica e não rebaixa ninguém', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud._garantirToken = async () => true;
+    cloud.session = () => ({ user: { id: 'uid-1', email: 'mpcaliman@hotmail.com' }, access_token: 't' });
+    localStorage.removeItem(cloudRel.ORG_KEY);
+
+    const fetchOrig = window.fetch;
+    const respostaOk = (rows) => ({ ok: true, json: async () => rows });
+    const respostaErro = () => ({ ok: false, status: 401, json: async () => ({}) });
+
+    /* 1) servidor responde: a conta É gestora da clínica org-1 */
+    window.fetch = async (url) => {
+      const u = String(url);
+      if (u.indexOf('/profiles?') >= 0) return respostaOk([{ id: 'uid-1', email: 'mpcaliman@hotmail.com', funcao: 'gestor', ativo: true }]);
+      if (u.indexOf('organization_users?') >= 0) return respostaOk([{ organization_id: 'org-1', role: 'gestor', ativo: true }]);
+      return fetchOrig(url);
+    };
+    const p1 = await cloud.buscarPerfil();
+    out.achouOrg = p1 && p1.organization_id === 'org-1' && p1.role === 'gestor';
+    auth._salvarUsuarios([{ id: 'u1', usuario: 'mpcaliman@hotmail.com', nome: 'dono', perfil: 'admin', senhaHash: 'x', nuvem: true }]);
+    auth._definirSessao(auth._lerUsuarios()[0]);
+    await auth.atualizarPapelDaNuvem();
+    out.lembrouOrg = cloudRel._orgLembrada() === 'org-1';
+
+    /* 2) agora a rede falha (4G ruim / token vencido) */
+    window.fetch = async (url) => {
+      const u = String(url);
+      if (u.indexOf('/profiles?') >= 0 || u.indexOf('organization_users?') >= 0) return respostaErro();
+      return fetchOrig(url);
+    };
+    const p2 = await cloud.buscarPerfil();
+    out.falhaEhNull = p2 === null;                       /* não inventa "semVinculo" */
+    /* a clínica continua conhecida → o aparelho segue sincronizando */
+    out.orgSobrevive = (await cloudRel._orgAsync()) === 'org-1';
+    /* e o usuário NÃO é rebaixado por causa da falha */
+    const antes = JSON.stringify(auth.usuarioAtual().modulos);
+    await auth.atualizarPapelDaNuvem();
+    out.naoRebaixa = JSON.stringify(auth.usuarioAtual().modulos) === antes &&
+                     auth.usuarioAtual().perfil === 'admin';
+
+    /* 3) resposta clara de que não há clínica: aí sim esquece */
+    window.fetch = async (url) => {
+      const u = String(url);
+      if (u.indexOf('/profiles?') >= 0 || u.indexOf('organization_users?') >= 0) return respostaOk([]);
+      return fetchOrig(url);
+    };
+    const p3 = await cloud.buscarPerfil();
+    out.semVinculoReal = !!(p3 && p3.semVinculo);
+    await auth.atualizarPapelDaNuvem();   /* resposta clara → esquece a clínica */
+    out.esqueceOrg = cloudRel._orgLembrada() === null && (await cloudRel._orgAsync()) === null;
+
+    window.fetch = fetchOrig;
+    auth._salvarUsuarios([]);
+    localStorage.removeItem(cloudRel.ORG_KEY);
+    return out;
+  });
+  assert(r.achouOrg, 'com o servidor respondendo, a clínica deveria ser encontrada');
+  assert(r.lembrouOrg, 'a clínica deveria ficar lembrada no aparelho');
+  assert(r.falhaEhNull, 'consulta que falha deve devolver "não sei", não "sem clínica"');
+  assert(r.orgSobrevive, 'com a rede ruim, o aparelho continua sabendo a clínica');
+  assert(r.naoRebaixa, 'falha de rede não pode rebaixar o acesso do usuário');
+  assert(r.semVinculoReal, 'resposta vazia de verdade continua sendo "sem clínica"');
+  assert(r.esqueceOrg, 'aí sim o aparelho esquece a clínica lembrada');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

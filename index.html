@@ -14645,8 +14645,18 @@ const auth = {
         u.role = null;
       }
       u.role = perfil.role || u.role || null;
-      u.organization_id = perfil.organization_id || u.organization_id || null;
+      /* Resposta CLARA de que a conta não tem clínica: o aparelho esquece a
+         que guardou. (Falha de rede devolve null e nem chega aqui.) */
+      if (perfil.semVinculo) {
+        u.organization_id = null;
+        try { cloudRel._lembrarOrg(null); } catch (e) {}
+      } else {
+        u.organization_id = perfil.organization_id || u.organization_id || null;
+      }
       u.uid = perfil.uid || u.uid || null;
+      /* guarda a clínica no aparelho: se a próxima consulta falhar, ele ainda
+         sabe de onde baixar (em vez de se declarar "sem organização") */
+      try { if (u.organization_id) cloudRel._lembrarOrg(u.organization_id); } catch (e) {}
       auth._salvarUsuarios(lista);
       if (atual && atual.usuario === email) {
         auth._definirSessao(u);
@@ -15564,8 +15574,14 @@ const cloud = {
         fetch(c.url + '/rest/v1/profiles?id=eq.' + uid + '&select=id,nome,email,funcao,ativo', { headers: cloud._headers(true) }),
         fetch(c.url + '/rest/v1/organization_users?user_id=eq.' + uid + '&ativo=eq.true&select=organization_id,role,ativo,permissoes&order=created_at.asc', { headers: cloud._headers(true) })
       ]);
-      const perfilRows = rp.ok ? await rp.json().catch(() => []) : [];
-      const orgRows = ro.ok ? await ro.json().catch(() => []) : [];
+      /* CONSULTA QUE FALHOU ≠ CONTA SEM CLÍNICA. Antes, um 401/timeout no 4G
+         devolvia "semVinculo" — e o aparelho concluía que a conta não pertence
+         a clínica nenhuma: parava de sincronizar e ainda rebaixava o usuário.
+         Falha de rede agora devolve null (situação desconhecida, nada muda). */
+      if (!rp.ok || !ro.ok) return null;
+      const perfilRows = await rp.json().catch(() => null);
+      const orgRows = await ro.json().catch(() => null);
+      if (!Array.isArray(perfilRows) || !Array.isArray(orgRows)) return null;
       const perfil = perfilRows[0] || null;
       const vinc = orgRows[0] || null;
       /* Consultas OK, mas a conta não pertence a nenhuma clínica: isso é um
@@ -17049,11 +17065,33 @@ const migracaoFase4 = {
    duplicar. Offline/sem org → no-op honesto; o localStorage segue como cache.
 ============================================================================ */
 const cloudRel = {
-  _org() { try { const u = auth.usuarioAtual(); return (u && u.organization_id) || null; } catch (e) { return null; } },
+  /* A clínica (organização) fica LEMBRADA no aparelho. Sem isto, bastava uma
+     consulta falhar — 4G ruim, token vencido — para o aparelho "esquecer" a
+     que clínica pertence: parava de baixar pacientes e fichas e o diagnóstico
+     acusava "conta não vinculada a uma organização". */
+  ORG_KEY: 'medsys.v7.cloud.org_id',
+  _orgLembrada() { try { return localStorage.getItem(cloudRel.ORG_KEY) || null; } catch (e) { return null; } },
+  _lembrarOrg(org) {
+    try {
+      if (org) localStorage.setItem(cloudRel.ORG_KEY, org);
+      else localStorage.removeItem(cloudRel.ORG_KEY);
+    } catch (e) {}
+  },
+  _org() {
+    try {
+      const u = auth.usuarioAtual();
+      return (u && u.organization_id) || cloudRel._orgLembrada() || null;
+    } catch (e) { return cloudRel._orgLembrada(); }
+  },
   async _orgAsync() {
     let org = cloudRel._org();
     if (org) return org;
-    try { const p = await cloud.buscarPerfil(); if (p && p.organization_id) return p.organization_id; } catch (e) {}
+    try {
+      const p = await cloud.buscarPerfil();
+      if (p && p.organization_id) { cloudRel._lembrarOrg(p.organization_id); return p.organization_id; }
+      /* resposta clara do servidor: a conta realmente não tem clínica */
+      if (p && p.semVinculo) cloudRel._lembrarOrg(null);
+    } catch (e) {}
     return null;
   },
   disponivel() {
@@ -17554,7 +17592,23 @@ const cloudDiag = {
       return;
     }
     const org = await cloudRel._orgAsync();
-    if (!org) { document.getElementById('clouddiag-tab').innerHTML = '<p class="diag-linha diag-erro">Sua conta não está vinculada a uma organização no banco.</p>'; return; }
+    if (!org) {
+      /* Distingue "não consegui perguntar" (rede/sessão) de "realmente não tem
+         clínica" — a mensagem antiga acusava falta de vínculo em qualquer
+         falha, e o usuário achava que tinha perdido o acesso à clínica. */
+      let perfil = null;
+      try { perfil = await cloud.buscarPerfil(); } catch (e) { perfil = null; }
+      const semVinculoDeVerdade = !!(perfil && perfil.semVinculo);
+      document.getElementById('clouddiag-tab').innerHTML = semVinculoDeVerdade
+        ? '<p class="diag-linha diag-erro">Sua conta não está vinculada a nenhuma clínica no banco. Abra <b>Equipe da nuvem</b> e crie ou entre numa clínica.</p>' +
+          '<p style="font-size:.82rem;color:var(--text-mute)">Abaixo, o que existe neste aparelho:</p>' + cloudDiag._tabelaLocalSo()
+        : '<p class="diag-linha diag-erro">Não consegui confirmar a sua clínica agora (internet instável ou sessão da nuvem vencida). ' +
+          '<b>Seus dados continuam no aparelho</b> e a sincronização volta sozinha assim que a conexão firmar.</p>' +
+          '<p style="font-size:.82rem;color:var(--text-mute);margin:6px 0">Se insistir: saia e entre de novo na nuvem em <b>Backup e sincronização</b>.</p>' +
+          '<button class="btn btn-sm btn-primary" onclick="cloudDiag.rodar()">🔄 Tentar de novo</button>' +
+          '<p style="font-size:.82rem;color:var(--text-mute);margin-top:10px">Abaixo, o que existe neste aparelho:</p>' + cloudDiag._tabelaLocalSo();
+      return;
+    }
 
     const linhas = [];
     let dupPac = 0;
