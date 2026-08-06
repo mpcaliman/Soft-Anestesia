@@ -17858,6 +17858,43 @@ const adendos = {
     });
     return linhas;
   },
+  /* ---- IDENTIFICAÇÃO: erro de digitação se CORRIGE, não se "adenda" ----
+     O conteúdo clínico de um registro finalizado é imutável (a correção vira
+     adendo). Mas nome, nascimento, CPF, prontuário e convênio são a etiqueta
+     do documento: se o nome saiu "Maria dajida" em vez de "Maria dajuda",
+     manter o erro no original espalha o engano — o cadastro fica errado, a
+     ficha carrega errada e o histórico da paciente se divide em duas pessoas.
+     Estes campos são corrigidos no próprio registro, e a mudança fica
+     registrada no adendo do mesmo jeito. */
+  CAMPOS_IDENT: ['nome', 'paciente_nome', 'nascimento', 'paciente_nasc', 'cpf', 'paciente_cpf',
+                 'prontuario', 'convenio', 'plano', 'carteirinha', 'nome_mae', 'sexo', 'paciente_sexo'],
+  _ehIdent(chave) { return adendos.CAMPOS_IDENT.indexOf(String(chave)) >= 0; },
+  /* Copia para `orig` os campos de identificação que mudaram em `novo`.
+     Devolve as linhas "campo: antes → depois" do que foi corrigido. */
+  _aplicarIdentificacao(orig, novo, prefixo) {
+    const aplicadas = [];
+    if (!orig || !novo || typeof orig !== 'object' || typeof novo !== 'object') return aplicadas;
+    Object.keys(novo).forEach(k => {
+      if (k.startsWith('_')) return;
+      const vn = novo[k], vo = orig[k];
+      const rot = (prefixo ? prefixo + ' · ' : '') + k.replace(/_/g, ' ');
+      if (vn && typeof vn === 'object' && !Array.isArray(vn)) {
+        if (vo && typeof vo === 'object') aplicadas.push(...adendos._aplicarIdentificacao(vo, vn, rot));
+        return;
+      }
+      if (!adendos._ehIdent(k)) return;
+      const a = vo == null ? '' : String(vo), b = vn == null ? '' : String(vn);
+      if (a === b || !b.trim()) return;
+      orig[k] = vn;
+      aplicadas.push('• ' + rot + ': "' + (a || '—') + '" → "' + b + '"');
+    });
+    return aplicadas;
+  },
+  _nomeDoRegistro(rec) {
+    if (!rec) return '';
+    return (rec.paciente && rec.paciente.nome) || rec.paciente_nome || rec.nome || '';
+  },
+
   salvarComoCorrecao(mod, previo, dataNovo) {
     const linhas = adendos.diffRegistro(previo, dataNovo);
     try { markClean(); } catch (e) {}
@@ -17865,12 +17902,36 @@ const adendos = {
       toast('Nenhuma alteração em relação ao registro original — nada a corrigir.', 'warn');
       return true;
     }
+    /* 1) identificação: corrige no próprio registro (e propaga o nome) */
+    const nomeAntes = adendos._nomeDoRegistro(previo);
+    const lista = store.list(mod);
+    const rec = lista.find(x => x._id === previo._id) || previo;
+    const aplicadas = adendos._aplicarIdentificacao(rec, dataNovo, '');
+    let propagou = null;
+    if (aplicadas.length) {
+      store.setList(mod, lista);
+      try { store.save(mod, rec); } catch (e) {}            /* sobe para a nuvem */
+      const nomeDepois = adendos._nomeDoRegistro(rec);
+      if (nomeAntes && nomeDepois && nomeAntes !== nomeDepois) {
+        try { propagou = pacientes.renomear(nomeAntes, nomeDepois, { exceto: { mod, id: rec._id } }); } catch (e) {}
+      }
+    }
+    /* 2) o resto vira adendo, com o original preservado */
     const MAX = 40;
     const corpo = linhas.slice(0, MAX).join('\n') +
       (linhas.length > MAX ? '\n… e mais ' + (linhas.length - MAX) + ' alteração(ões).' : '');
-    adendos.registrarTexto(mod, previo._id,
-      'CORREÇÃO (edição direta sobre o registro finalizado — o original permanece como estava):\n' + corpo);
-    toast('📝 Original preservado — as alterações foram salvas como CORREÇÃO abaixo do registro');
+    const cabecalho = aplicadas.length
+      ? 'CORREÇÃO (o conteúdo clínico original permanece como estava; os dados de identificação abaixo foram corrigidos no registro):\n' +
+        aplicadas.join('\n') + '\n— demais alterações registradas:\n'
+      : 'CORREÇÃO (edição direta sobre o registro finalizado — o original permanece como estava):\n';
+    adendos.registrarTexto(mod, previo._id, cabecalho + corpo);
+    if (aplicadas.length) {
+      const extra = (propagou && (propagou.registros || propagou.cadastro))
+        ? ' (nome atualizado também no cadastro e em ' + (propagou.registros || 0) + ' registro(s))' : '';
+      toast('✅ Identificação corrigida' + extra + ' — o conteúdo clínico virou CORREÇÃO abaixo do original');
+    } else {
+      toast('📝 Original preservado — as alterações foram salvas como CORREÇÃO abaixo do registro');
+    }
     try { setSavedStatus('Correção registrada às ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })); } catch (e) {}
     return true;
   },
@@ -31494,6 +31555,74 @@ const pacientes = {
   list() { return store.list('pacientes'); },
 
   /* ============================================================
+     ✏️ CORRIGIR O NOME EM TODO LUGAR
+     Nome digitado errado não é "mais um registro": é a MESMA pessoa com a
+     etiqueta trocada. Corrigir só numa ficha deixa o cadastro errado e parte
+     o histórico em dois pacientes. Aqui o nome novo vale no cadastro e em
+     todos os registros que traziam o antigo.
+  ============================================================ */
+  CAMPO_NOME: { anestesia: null, pacientes: 'nome' },   /* anestesia = paciente.nome (aninhado) */
+  _setNomeEm(mod, item, novo) {
+    if (!item) return false;
+    if (item.paciente && typeof item.paciente === 'object' && item.paciente.nome !== undefined) { item.paciente.nome = novo; return true; }
+    if (item.paciente_nome !== undefined) { item.paciente_nome = novo; return true; }
+    if (typeof item.paciente === 'string') { item.paciente = novo; return true; }
+    if (item.nome !== undefined) { item.nome = novo; return true; }
+    return false;
+  },
+  _getNomeEm(item) {
+    if (!item) return '';
+    if (item.paciente && typeof item.paciente === 'object') return item.paciente.nome || '';
+    if (item.paciente_nome) return item.paciente_nome;
+    if (typeof item.paciente === 'string') return item.paciente;
+    return item.nome || '';
+  },
+  renomear(antigo, novo, opts = {}) {
+    const norm = (s) => (typeof linker !== 'undefined' && linker._normNome) ? linker._normNome(s || '') : String(s || '').toLowerCase().trim();
+    const alvo = norm(antigo);
+    const res = { cadastro: 0, registros: 0 };
+    if (!alvo || !String(novo || '').trim() || alvo === norm(novo)) return res;
+
+    /* cadastro do paciente */
+    const pacs = store.list('pacientes') || [];
+    pacs.forEach(p => {
+      if (norm(p.nome) !== alvo) return;
+      p.nome = novo;
+      res.cadastro++;
+      try { store.save('pacientes', p); } catch (e) {}
+    });
+
+    /* demais registros que carregavam o nome antigo */
+    Object.keys(STORAGE).forEach(mod => {
+      if (mod === 'pacientes') return;
+      let lst;
+      try { lst = store.list(mod); } catch (e) { return; }
+      if (!Array.isArray(lst) || !lst.length) return;
+      lst.forEach(it => {
+        if (!it || !it._id) return;
+        if (opts.exceto && opts.exceto.mod === mod && opts.exceto.id === it._id) return;
+        if (norm(pacientes._getNomeEm(it)) !== alvo) return;
+        if (pacientes._setNomeEm(mod, it, novo)) {
+          res.registros++;
+          try { store.save(mod, it); } catch (e) {}
+        }
+      });
+    });
+    return res;
+  },
+  /* Corrigir o nome pela tela de Pacientes (sem precisar abrir uma ficha) */
+  corrigirNome(id) {
+    const p = store.getById('pacientes', id);
+    if (!p) { toast('Paciente não encontrado', 'warn'); return; }
+    const novo = prompt('Corrigir o nome do paciente em TODOS os registros:', p.nome || '');
+    if (novo == null) return;
+    if (!novo.trim()) { toast('O nome não pode ficar vazio', 'warn'); return; }
+    const r = pacientes.renomear(p.nome, novo.trim());
+    toast('✅ Nome corrigido no cadastro e em ' + r.registros + ' registro(s)');
+    try { pacientes.render(); } catch (e) {}
+  },
+
+  /* ============================================================
      👥 PACIENTES DUPLICADOS
      Na nuvem o paciente é identificado pelo NOME (legacy_id
      "nome:<normalizado>"). Dois cadastros com o mesmo nome viram UMA
@@ -31820,6 +31949,7 @@ const pacientes = {
         <td data-label="Telefone">${utils.escapeHTML(p.telefone || '')}</td>
         <td class="actions-cell">
           <button class="btn btn-xs" onclick="pacientes.editar('${p._id}')">Editar</button>
+          <button class="btn btn-xs" onclick="pacientes.corrigirNome('${p._id}')" title="Corrige o nome no cadastro E em todos os registros deste paciente">✏️ Nome</button>
           <button class="btn btn-xs" onclick="pacientes.resumo('${utils.escapeAttr(p.nome || '')}')" title="Histórico consolidado do paciente">📋 Resumo</button>
           <button class="btn btn-xs" onclick="quickActions.abrir('${p._id}')">⚡ Ações</button>
           <button class="btn btn-xs btn-danger" onclick="pacientes.excluir('${p._id}')">×</button>

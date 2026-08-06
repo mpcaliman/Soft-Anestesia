@@ -51,6 +51,13 @@ const browser = await chromium.launch();
 
 async function novaPagina() {
   const page = await browser.newPage();
+  /* NENHUM teste fala com a internet: salvar um registro dispara espelho na
+     nuvem, e no CI essas chamadas ficavam pendentes até estourar o tempo do
+     job. Cortadas na origem, falham na hora — que é o que o app espera de um
+     aparelho offline. */
+  await page.route('**://*.supabase.co/**', route => route.abort());
+  await page.route('**://accounts.google.com/**', route => route.abort());
+  await page.route('**://*.googleapis.com/**', route => route.abort());
   page.on('console', m => { if (m.type() === 'error') currentErrors.push(m.text()); });
   page.on('pageerror', e => currentErrors.push('PAGEERROR: ' + e.message));
   page.on('dialog', d => d.accept());
@@ -3511,6 +3518,78 @@ await test('Sessão vencida: o app diz a verdade e oferece entrar de novo', asyn
   assert(r.modalComEmail, 'a janela de reentrada deveria vir com o e-mail em uso');
   assert(r.recupera, 'com a renovação funcionando, o estado de expirada some');
   assert(r.semVinculoAindaFala, 'conta realmente sem clínica continua com a mensagem de vínculo');
+  await page.close();
+});
+
+/* 64) Corrigir nome errado numa ficha finalizada conserta de verdade */
+await test('Correção de identificação vale no registro, no cadastro e nas outras fichas', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('pacientes', []); store.setList('anestesia', []); store.setList('pre', []);
+
+    /* cenário: nome digitado errado em toda parte */
+    const errado = 'Maria dajida Machado', certo = 'Maria dajuda Machado';
+    store.save('pacientes', { nome: errado, convenio: 'Unimed' });
+    const outraFicha = store.save('pre', { nome: errado, data: utils.hojeISO(), cirurgia: 'Colecistectomia' });
+    const ficha = store.save('anestesia', {
+      paciente: { nome: errado, prontuario: '' },
+      procedimento: { data: utils.hojeISO(), descricao: 'Colecistectomia' },
+      pre_anestesico: { asa: 'II' },
+      _finalizado: true
+    });
+
+    /* o usuário abre a ficha finalizada, corrige o nome E muda algo clínico */
+    const novo = JSON.parse(JSON.stringify(ficha));
+    novo.paciente.nome = certo;
+    novo.paciente.prontuario = '12345';
+    novo.pre_anestesico.asa = 'III';
+    adendos.salvarComoCorrecao('anestesia', ficha, novo);
+
+    const salvo = store.getById('anestesia', ficha._id);
+    /* identificação: corrigida no próprio registro */
+    out.nomeCorrigido = salvo.paciente.nome === certo;
+    out.prontuarioCorrigido = salvo.paciente.prontuario === '12345';
+    /* conteúdo clínico: original preservado */
+    out.clinicoPreservado = salvo.pre_anestesico.asa === 'II';
+    /* tudo fica registrado no adendo */
+    const ad = (salvo._adendos || [])[0];
+    out.adendoRegistra = !!ad && /CORREÇÃO/.test(ad.texto) &&
+      ad.texto.indexOf(certo) >= 0 && /asa/i.test(ad.texto);
+    out.adendoExplica = !!ad && /identifica/i.test(ad.texto);
+
+    /* cadastro e as outras fichas passam a usar o nome certo */
+    out.cadastroCorrigido = (store.list('pacientes')[0] || {}).nome === certo;
+    out.outraFichaCorrigida = (store.getById('pre', outraFicha._id) || {}).nome === certo;
+    /* e o paciente deixa de aparecer duplicado no histórico */
+    out.umPacienteSo = store.list('pacientes').length === 1;
+
+    /* correção direta pela tela de Pacientes */
+    store.setList('pacientes', []); store.setList('pre', []);
+    store.save('pacientes', { nome: 'Joao Errado' });
+    store.save('pre', { nome: 'Joao Errado', data: utils.hojeISO() });
+    const res = pacientes.renomear('Joao Errado', 'João Certo');
+    out.renomeouTudo = res.cadastro === 1 && res.registros === 1 &&
+      store.list('pacientes')[0].nome === 'João Certo' &&
+      store.list('pre')[0].nome === 'João Certo';
+    /* nome vazio ou igual não mexe em nada */
+    const nada = pacientes.renomear('João Certo', '   ');
+    out.ignoraVazio = nada.cadastro === 0 && nada.registros === 0 &&
+      store.list('pacientes')[0].nome === 'João Certo';
+
+    store.setList('pacientes', []); store.setList('anestesia', []); store.setList('pre', []);
+    return out;
+  });
+  assert(r.nomeCorrigido, 'o nome deveria ser corrigido no próprio registro');
+  assert(r.prontuarioCorrigido, 'os demais dados de identificação também');
+  assert(r.clinicoPreservado, 'o conteúdo clínico original deve permanecer intacto');
+  assert(r.adendoRegistra, 'o adendo deveria registrar a correção e a mudança clínica');
+  assert(r.adendoExplica, 'o adendo deveria explicar que a identificação foi corrigida no registro');
+  assert(r.cadastroCorrigido, 'o cadastro do paciente deveria passar a ter o nome certo');
+  assert(r.outraFichaCorrigida, 'as outras fichas do paciente também');
+  assert(r.umPacienteSo, 'a correção não pode criar um segundo paciente');
+  assert(r.renomeouTudo, 'renomear pela tela de Pacientes deveria valer em tudo');
+  assert(r.ignoraVazio, 'nome vazio não pode apagar o cadastro');
   await page.close();
 });
 
