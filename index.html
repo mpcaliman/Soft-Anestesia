@@ -33810,6 +33810,20 @@ ${TAG_CLOSE_HTML}`;
     ).join('');
     return `<div class="pp-block"><span class="pp-label">Sinais vitais e medidas</span><div class="pp-lab-grid">${cells}</div></div>`;
   },
+  /* VIA AÉREA NA IMPRESSÃO
+     Na tela o resumo é detalhado (Mallampati, preditores e a conduta a
+     preparar). No papel o que importa é a ADVERTÊNCIA: quem lê precisa saber
+     que a via aérea pode ser difícil — o preparo (videolaringoscópio, bougie,
+     plano B/C) é decisão do anestesista na hora, não informação do documento. */
+  _viaAereaImpressa(texto) {
+    const t = String(texto || '').trim();
+    if (!t) return '';
+    /* só o alerta conta: "Sem preditores maiores de via aérea difícil" também
+       contém a expressão, e é o contrário do aviso */
+    if (t.indexOf('⚠') >= 0 || /potencialmente\s+dif[íi]cil/i.test(t)) return '⚠ Possível via aérea difícil';
+    /* via aérea favorável: mantém o texto, sem a parte de preparo */
+    return t.replace(/\s*[—-]\s*preparar\s+plano[^.]*\.?/i, '').trim();
+  },
   /* "Resultado — realizado em dd/mm/aaaa": a data do exame importa tanto
      quanto o resultado (um exame de 8 meses atrás não vale o de ontem). */
   _comData(texto, data) {
@@ -33924,13 +33938,15 @@ ${TAG_CLOSE_HTML}`;
     try { d._labExtras = labExtra.coletar('pre-lab-extras'); } catch (e) {}
     /* Nome do paciente — tolerante a chaves alternativas para nunca sair vazio */
     const nomePac = (d.nome || d.paciente_nome || d.paciente || '').trim();
-    const dataStr = utils.formatarData(d.data) || new Date().toLocaleDateString('pt-BR');
-    /* Cabeçalho com o nome do paciente em destaque + data */
-    const meta = (nomePac ? `<strong>Paciente:</strong> ${utils.escapeHTML(nomePac)} &nbsp;·&nbsp; ` : '') + dataStr;
-    return printPreview._header('AVALIAÇÃO PRÉ-ANESTÉSICA', meta) +
+    /* Topo: só o título. O nome do paciente aparece uma vez, na identificação
+       (antes vinha também sob o título) — e ganha a linha inteira, para nome
+       comprido não quebrar em duas. */
+    return printPreview._header('AVALIAÇÃO PRÉ-ANESTÉSICA', '') +
       printPreview._section('Identificação', `
-        <div class="pp-grid cols-3">
+        <div class="pp-grid cols-1">
           ${printPreview._fieldSempre('Nome', nomePac)}
+        </div>
+        <div class="pp-grid cols-3">
           ${printPreview._field('Nascimento', utils.formatarData(d.nasc))}
           ${printPreview._field('Idade', d.idade)}
           ${printPreview._field('Sexo', d.sexo)}
@@ -33969,7 +33985,7 @@ ${TAG_CLOSE_HTML}`;
           ${printPreview._field('Classificação ASA', d.asa)}
           ${printPreview._field('Risco', d.risco)}
         </div>
-        ${printPreview._field('Via aérea', d.via_aerea_resumo || d.via_aerea, true)}
+        ${printPreview._field('Via aérea', printPreview._viaAereaImpressa(d.via_aerea_resumo || d.via_aerea), true)}
         ${printPreview._field('Resultado dos escores de risco', d.risco_resumo, true)}
       `) +
       printPreview._blocoRiscoPre(d) +
