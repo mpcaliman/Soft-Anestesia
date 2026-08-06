@@ -3593,6 +3593,60 @@ await test('Correção de identificação vale no registro, no cadastro e nas ou
   await page.close();
 });
 
+/* 65) Impressão da pré: nome uma vez só, em uma linha; via aérea só a advertência */
+await test('Pré impressa: sem nome duplicado, nome inteiro numa linha e via aérea resumida', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('cad_assinaturas', [{ _id: 'a1', nomeProfissional: 'Dr. Marcelo Caliman', crm: '30801', especialidade: 'Anestesiologia' }]);
+    const f = document.getElementById('form-pre');
+    const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el) el.value = v; };
+    const nome = 'POLLYANNA MAGALHAES DE SOUZA FERNANDES';
+    set('nome', nome); set('data', utils.hojeISO()); set('nasc', '1979-08-13');
+    set('sexo', 'Feminino'); set('cirurgia', 'Síndrome do túnel do carpo');
+    set('via_aerea_resumo', 'Mallampati III. Preditores: Abertura bucal reduzida, Pescoço curto. ⚠ Via aérea potencialmente difícil — preparar plano e dispositivos (videolaringoscópio, bougie, plano B/C).');
+
+    const html = printPreview._buildPre();
+
+    /* o nome aparece UMA vez (na identificação), não no topo */
+    const vezes = (html.match(new RegExp(nome, 'g')) || []).length;
+    out.nomeUmaVez = vezes === 1;
+    out.semMetaNoTopo = html.indexOf('pp-doc-meta') < 0 && html.indexOf('<strong>Paciente:</strong>') < 0;
+    out.temIdentificacao = html.indexOf('Identificação') >= 0 && html.indexOf(nome) >= 0;
+    /* nome ocupa a linha inteira (grid de 1 coluna) */
+    out.nomeLinhaInteira = /pp-grid cols-1[\s\S]{0,200}POLLYANNA/.test(html);
+    /* o timbre do profissional continua (a pré sai sozinha para o paciente) */
+    out.mantemTimbre = html.indexOf('Dr. Marcelo Caliman') >= 0;
+
+    /* via aérea desfavorável: só a advertência */
+    out.soAdvertencia = html.indexOf('Possível via aérea difícil') >= 0 &&
+      html.indexOf('preparar plano') < 0 &&
+      html.indexOf('videolaringoscópio') < 0 &&
+      html.indexOf('Mallampati III') < 0;
+
+    /* helper isolado */
+    out.favoravelMantem = printPreview._viaAereaImpressa('Mallampati I. Sem preditores maiores de via aérea difícil.')
+      === 'Mallampati I. Sem preditores maiores de via aérea difícil.';
+    out.tiraPreparo = printPreview._viaAereaImpressa('Mallampati II. Preditores: X — preparar plano e dispositivos (bougie).')
+      .indexOf('preparar plano') < 0;
+    out.vazioSegueVazio = printPreview._viaAereaImpressa('') === '';
+
+    store.setList('cad_assinaturas', []);
+    utils.clearForm('form-pre');
+    return out;
+  });
+  assert(r.nomeUmaVez, 'o nome do paciente deveria aparecer uma única vez');
+  assert(r.semMetaNoTopo, 'o topo não deveria repetir paciente e data');
+  assert(r.temIdentificacao, 'o nome fica na seção de identificação');
+  assert(r.nomeLinhaInteira, 'o nome deveria ocupar a linha inteira, sem quebrar');
+  assert(r.mantemTimbre, 'a pré mantém o timbre com nome e CRM');
+  assert(r.soAdvertencia, 'via aérea desfavorável deveria imprimir só a advertência');
+  assert(r.favoravelMantem, 'via aérea favorável mantém o texto');
+  assert(r.tiraPreparo, 'a parte de preparo/dispositivos sai da impressão');
+  assert(r.vazioSegueVazio, 'campo vazio continua vazio');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
