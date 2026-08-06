@@ -51,6 +51,13 @@ const browser = await chromium.launch();
 
 async function novaPagina() {
   const page = await browser.newPage();
+  /* NENHUM teste fala com a internet: salvar um registro dispara espelho na
+     nuvem, e no CI essas chamadas ficavam pendentes até estourar o tempo do
+     job. Cortadas na origem, falham na hora — que é o que o app espera de um
+     aparelho offline. */
+  await page.route('**://*.supabase.co/**', route => route.abort());
+  await page.route('**://accounts.google.com/**', route => route.abort());
+  await page.route('**://*.googleapis.com/**', route => route.abort());
   page.on('console', m => { if (m.type() === 'error') currentErrors.push(m.text()); });
   page.on('pageerror', e => currentErrors.push('PAGEERROR: ' + e.message));
   page.on('dialog', d => d.accept());
