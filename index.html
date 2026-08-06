@@ -15621,12 +15621,22 @@ const cloud = {
       return true;
     } catch (e) { return false; }
   },
+  /* Quando a renovação do token falha (sessão velha demais), TODA consulta à
+     nuvem passa a voltar 401 e o app parecia "sem clínica". Guardamos esse
+     estado para dizer a verdade na tela: é sessão expirada, resolve entrando
+     de novo — não é perda de vínculo nem de dados. */
+  _tokenFalhou: false,
+  sessaoExpirada() { return !!(cloud.session() && cloud._tokenFalhou); },
   async _garantirToken() {
     const s = cloud.session();
     if (!s) return false;
     if (s.expires_at && Date.now() > s.expires_at - 60000) {
-      return await cloud._renovarToken();
+      const ok = await cloud._renovarToken();
+      cloud._tokenFalhou = !ok;
+      if (!ok) { try { cloud._atualizarUI(); } catch (e) {} }
+      return ok;
     }
+    cloud._tokenFalhou = false;
     return true;
   },
   logout(opts) {
@@ -15990,6 +16000,39 @@ const cloud = {
   },
   uiLogout() { if (confirm('Desconectar da nuvem? Seus dados continuam no aparelho.')) cloud.logout(); },
   uiSincronizar() { cloud.sincronizar({ enviarTudo: true }); },
+
+  /* ENTRAR DE NOVO NA NUVEM (sessão expirada) — pede só a senha, já com o
+     e-mail que está em uso, e volta a sincronizar. Nada é apagado. */
+  reentrar() {
+    const s = cloud.session();
+    const email = (s && s.user && s.user.email) ||
+                  (() => { try { const u = auth.usuarioAtual(); return (u && u.usuario) || ''; } catch (e) { return ''; } })();
+    modal.open('🔑 Entrar de novo na nuvem',
+      '<p style="font-size:.86rem;margin:0 0 10px">A sessão deste aparelho venceu. Entrar de novo <b>não apaga nada</b> — só reabre a conversa com a clínica.</p>' +
+      '<div class="grid">' +
+      '<div class="field col-12"><label>E-mail</label><input type="email" id="reent-email" value="' + utils.escapeAttr(email) + '" autocomplete="username"></div>' +
+      '<div class="field col-12"><label>Senha da nuvem</label><input type="password" id="reent-senha" placeholder="••••••" autocomplete="current-password"></div>' +
+      '</div><div id="reent-erro" style="color:#b3261e;font-size:.82rem;min-height:16px"></div>',
+      '<button class="btn btn-primary" onclick="cloud._reentrarConfirmar()">Entrar</button>' +
+      '<button class="btn" onclick="modal.close()">Agora não</button>');
+    setTimeout(() => { const el = document.getElementById('reent-senha'); if (el) el.focus(); }, 80);
+  },
+  async _reentrarConfirmar() {
+    const email = (document.getElementById('reent-email') || {}).value || '';
+    const senha = (document.getElementById('reent-senha') || {}).value || '';
+    const err = document.getElementById('reent-erro');
+    if (!email || !senha) { if (err) err.textContent = 'Informe e-mail e senha.'; return; }
+    if (err) err.textContent = 'Entrando…';
+    let ok = false;
+    try { cloud.logout({ silent: true }); } catch (e) {}
+    try { ok = await cloud.login(email, senha); } catch (e) { ok = false; }
+    if (!ok) { if (err) err.textContent = 'E-mail ou senha não conferem.'; return; }
+    cloud._tokenFalhou = false;
+    modal.close();
+    toast('✅ Nuvem reconectada — atualizando…');
+    try { cloud.autoSyncAoVoltar({ forcar: true }); } catch (e) {}
+    setTimeout(() => { try { cloudDiag.rodar(); } catch (e) {} }, 3000);
+  },
 
   /* ============================================================
      ⚠️ CONTA DIVERGENTE (app × nuvem)
@@ -17636,14 +17679,22 @@ const cloudDiag = {
       let perfil = null;
       try { perfil = await cloud.buscarPerfil(); } catch (e) { perfil = null; }
       const semVinculoDeVerdade = !!(perfil && perfil.semVinculo);
-      document.getElementById('clouddiag-tab').innerHTML = semVinculoDeVerdade
-        ? '<p class="diag-linha diag-erro">Sua conta não está vinculada a nenhuma clínica no banco. Abra <b>Equipe da nuvem</b> e crie ou entre numa clínica.</p>' +
-          '<p style="font-size:.82rem;color:var(--text-mute)">Abaixo, o que existe neste aparelho:</p>' + cloudDiag._tabelaLocalSo()
-        : '<p class="diag-linha diag-erro">Não consegui confirmar a sua clínica agora (internet instável ou sessão da nuvem vencida). ' +
+      const expirada = cloud.sessaoExpirada();
+      let msg;
+      if (semVinculoDeVerdade) {
+        msg = '<p class="diag-linha diag-erro">Sua conta não está vinculada a nenhuma clínica no banco. Abra <b>Equipe da nuvem</b> e crie ou entre numa clínica.</p>';
+      } else if (expirada) {
+        msg = '<p class="diag-linha diag-erro">🔑 <b>A sua sessão da nuvem expirou.</b> Nada foi perdido — o aparelho só precisa entrar de novo para voltar a conversar com a clínica.</p>' +
+          '<button class="btn btn-sm btn-primary" onclick="cloud.reentrar()">🔑 Entrar de novo na nuvem</button> ' +
+          '<button class="btn btn-sm" onclick="cloudDiag.rodar()">🔄 Tentar de novo</button>';
+      } else {
+        msg = '<p class="diag-linha diag-erro">Não consegui confirmar a sua clínica agora (internet instável). ' +
           '<b>Seus dados continuam no aparelho</b> e a sincronização volta sozinha assim que a conexão firmar.</p>' +
-          '<p style="font-size:.82rem;color:var(--text-mute);margin:6px 0">Se insistir: saia e entre de novo na nuvem em <b>Backup e sincronização</b>.</p>' +
-          '<button class="btn btn-sm btn-primary" onclick="cloudDiag.rodar()">🔄 Tentar de novo</button>' +
-          '<p style="font-size:.82rem;color:var(--text-mute);margin-top:10px">Abaixo, o que existe neste aparelho:</p>' + cloudDiag._tabelaLocalSo();
+          '<button class="btn btn-sm btn-primary" onclick="cloudDiag.rodar()">🔄 Tentar de novo</button> ' +
+          '<button class="btn btn-sm" onclick="cloud.reentrar()">🔑 Entrar de novo na nuvem</button>';
+      }
+      document.getElementById('clouddiag-tab').innerHTML = msg +
+        '<p style="font-size:.82rem;color:var(--text-mute);margin-top:10px">Abaixo, o que existe neste aparelho:</p>' + cloudDiag._tabelaLocalSo();
       return;
     }
 
@@ -18018,6 +18069,16 @@ const equipeNuvem = {
          atualiza o papel neste aparelho. */
       const u = auth.usuarioAtual() || {};
       const logadoNuvem = (() => { try { return cloud.estaConfigurado() && cloud.estaLogado(); } catch (e) { return false; } })();
+      /* Sessão vencida ≠ conta sem clínica: com o token velho, TODA consulta
+         volta 401 e a tela acusava falta de vínculo que não existe. */
+      const expirada = (() => { try { return cloud.sessaoExpirada(); } catch (e) { return false; } })();
+      if (expirada) {
+        host.innerHTML =
+          '<p style="font-size:.86rem;margin:0 0 10px">🔑 <b>A sua sessão da nuvem expirou neste aparelho.</b> Por isso não dá para confirmar a sua clínica agora — <b>nada foi perdido</b>.</p>' +
+          '<button type="button" class="btn btn-primary btn-sm" onclick="cloud.reentrar()">🔑 Entrar de novo na nuvem</button>';
+        if (addBox) addBox.style.display = 'none';
+        return;
+      }
       host.innerHTML =
         '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">Só o <strong>gestor</strong> da clínica gerencia a equipe na nuvem.' +
         (u.role ? ' O seu papel atual é <strong>' + utils.escapeHTML(equipeNuvem._rot(u.role)) + '</strong>.' :
