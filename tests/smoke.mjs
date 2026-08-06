@@ -3455,6 +3455,65 @@ await test('Registros pendentes sobem para a clínica sozinhos (o que a secretá
   await page.close();
 });
 
+/* 63) Sessão da nuvem vencida é dita como tal (e não como "sem clínica") */
+await test('Sessão vencida: o app diz a verdade e oferece entrar de novo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud._tokenFalhou = false;
+
+    /* token velho + renovação que falha → sessão expirada */
+    cloud.session = () => ({ user: { id: 'u1', email: 'mpcaliman@hotmail.com' }, expires_at: Date.now() - 60000, refresh_token: 'r' });
+    cloud._renovarToken = async () => false;
+    const ok = await cloud._garantirToken();
+    out.tokenFalhou = ok === false && cloud.sessaoExpirada() === true;
+
+    /* Equipe da nuvem: não acusa falta de vínculo — mostra o caminho certo */
+    equipeNuvem.ehGestor = () => false;
+    await equipeNuvem.render();
+    const lista = document.getElementById('equipe-nuvem-lista').innerHTML;
+    out.equipeFala = /sess[aã]o da nuvem expirou/i.test(lista) && lista.indexOf('cloud.reentrar()') >= 0;
+    out.equipeNaoAcusa = lista.indexOf('não está vinculada') < 0;
+
+    /* Diagnóstico: idem, com botão de entrar de novo */
+    cloudRel._lembrarOrg(null);
+    const sess = auth.usuarioAtual(); if (sess) { sess.organization_id = null; auth._definirSessao(sess); }
+    cloud.buscarPerfil = async () => null;   /* consulta falhou */
+    await cloudDiag.rodar();
+    const diag = document.getElementById('clouddiag-tab').innerHTML;
+    out.diagFala = /sess[aã]o da nuvem expirou/i.test(diag) && diag.indexOf('cloud.reentrar()') >= 0;
+    out.diagMostraLocal = diag.indexOf('o que existe neste aparelho') >= 0 || diag.indexOf('Módulo') >= 0;
+
+    /* a janela de reentrada já vem com o e-mail em uso */
+    cloud.reentrar();
+    out.modalComEmail = (document.getElementById('reent-email') || {}).value === 'mpcaliman@hotmail.com';
+    modal.close();
+
+    /* renovação voltando a funcionar → deixa de acusar sessão vencida */
+    cloud._renovarToken = async () => true;
+    const ok2 = await cloud._garantirToken();
+    out.recupera = ok2 === true && cloud.sessaoExpirada() === false;
+
+    /* conta REALMENTE sem clínica continua com a mensagem de vínculo */
+    cloud.buscarPerfil = async () => ({ semVinculo: true, uid: 'u1', email: 'x@y.com', role: null, organization_id: null, ativo: true });
+    await cloudDiag.rodar();
+    const diag2 = document.getElementById('clouddiag-tab').innerHTML;
+    out.semVinculoAindaFala = diag2.indexOf('não está vinculada a nenhuma clínica') >= 0;
+    return out;
+  });
+  assert(r.tokenFalhou, 'renovação que falha deveria marcar a sessão como expirada');
+  assert(r.equipeFala, 'Equipe da nuvem deveria falar em sessão expirada e oferecer entrar de novo');
+  assert(r.equipeNaoAcusa, 'e NÃO deveria acusar falta de vínculo');
+  assert(r.diagFala, 'o diagnóstico deveria dizer que a sessão expirou, com o botão de entrar');
+  assert(r.diagMostraLocal, 'e continuar mostrando o que existe no aparelho');
+  assert(r.modalComEmail, 'a janela de reentrada deveria vir com o e-mail em uso');
+  assert(r.recupera, 'com a renovação funcionando, o estado de expirada some');
+  assert(r.semVinculoAindaFala, 'conta realmente sem clínica continua com a mensagem de vínculo');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
