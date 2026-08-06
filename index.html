@@ -16101,6 +16101,9 @@ const cloud = {
           }
         } catch (e) {}
       }, 1600);
+      /* O que foi salvo enquanto a clínica não era conhecida sobe agora — sem
+         isso, o registro de um usuário nunca chegava aos outros do consultório */
+      setTimeout(() => { try { cloudRel.empurrarPendentes({ silent: true }); } catch (e) {} }, 2600);
       /* O que acabou de descer precisa aparecer na tela aberta — senão o
          Dashboard segue com os números velhos até trocar de módulo. */
       setTimeout(() => { try { cloud._repintarTelaAtual(); } catch (e) {} }, 4200);
@@ -17355,6 +17358,40 @@ const cloudRel = {
       const rows = await r.json();
       return rows.map(row => cloudRel._rowParaRegistro(row));
     } catch (e) { return null; }
+  },
+
+  /* ---- EMPURRÃO AUTOMÁTICO DOS PENDENTES ----
+     Registro criado enquanto o aparelho NÃO conhecia a clínica (conta ainda
+     não vinculada, rede fora, sessão vencida) fica só no aparelho: o espelho
+     relacional só acontece no momento do salvar. Era por isso que o que a
+     secretária salvava não aparecia para o gestor em outro computador — os
+     dados nunca chegaram na clínica.
+     Aqui, a cada entrada, o que nunca subiu é enviado em lotes pequenos,
+     em silêncio. `_relUpdatedAt` é a marca de "já está na clínica". */
+  async empurrarPendentes(opts = {}) {
+    if (!cloudRel.disponivel()) return null;
+    if (!(await cloud._garantirToken())) return null;
+    const org = await cloudRel._orgAsync();
+    if (!org) return null;
+    const limite = opts.limite || 25;
+    let enviados = 0, falhas = 0, restantes = 0;
+
+    const pendentesDe = (lista) => (lista || []).filter(x => x && x._id && !x._relUpdatedAt);
+
+    for (const p of pendentesDe(store.list('pacientes'))) {
+      if (enviados + falhas >= limite) { restantes++; continue; }
+      try { const r = await cloudRel.enviarPaciente(p, { force: true }); (r && r.ok) ? enviados++ : falhas++; }
+      catch (e) { falhas++; }
+    }
+    for (const mod of Object.keys(cloudRel.MODOS)) {
+      for (const it of pendentesDe(store.list(mod))) {
+        if (enviados + falhas >= limite) { restantes++; continue; }
+        try { const r = await cloudRel.enviarRegistro(mod, it, { force: true }); (r && r.ok) ? enviados++ : falhas++; }
+        catch (e) { falhas++; }
+      }
+    }
+    if (enviados && !opts.silent) toast('☁️ ' + enviados + ' registro(s) que faltavam foram para a clínica');
+    return { enviados, falhas, restantes };
   },
 
   /* ---- TRANSFERIR TUDO PARA A CLÍNICA (organização) ----

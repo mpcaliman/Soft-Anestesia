@@ -3392,6 +3392,69 @@ await test('Consulta falha ≠ conta sem clínica: o aparelho lembra a clínica 
   await page.close();
 });
 
+/* 62) O que foi salvo sem clínica conhecida sobe sozinho na próxima entrada */
+await test('Registros pendentes sobem para a clínica sozinhos (o que a secretária salvou aparece para o gestor)', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('pacientes', []); store.setList('pre', []); store.setList('anestesia', []);
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud._garantirToken = async () => true;
+    cloud.divergencia = () => null;
+    cloudRel._lembrarOrg('org-1');
+
+    /* salvos enquanto o aparelho não conhecia a clínica → sem _relUpdatedAt */
+    store.save('pacientes', { nome: 'Paciente da Secretária' });
+    store.save('pre', { nome: 'Paciente da Secretária', data: utils.hojeISO(), cirurgia: 'Hérnia' });
+    /* este já está na clínica — não deve ser reenviado */
+    const jaEnviado = store.save('pre', { nome: 'Outro', data: utils.hojeISO() });
+    jaEnviado._relUpdatedAt = '2026-08-01T10:00:00Z';
+    const lst = store.list('pre'); const ix = lst.findIndex(x => x._id === jaEnviado._id);
+    lst[ix] = jaEnviado; store.setList('pre', lst);
+
+    /* os stubs marcam _relUpdatedAt, como as funções reais fazem ao ter êxito */
+    const marcar = (mod, item) => {
+      const l = store.list(mod); const i = l.findIndex(x => x._id === item._id);
+      if (i >= 0) { l[i]._relUpdatedAt = '2026-08-06T00:00:00Z'; store.setList(mod, l); }
+    };
+    const enviadosPac = [], enviadosReg = [];
+    cloudRel.enviarPaciente = async (p) => { enviadosPac.push(p.nome); marcar('pacientes', p); return { ok: true }; };
+    cloudRel.enviarRegistro = async (mod, it) => { enviadosReg.push(mod + ':' + (it.nome || '')); marcar(mod, it); return { ok: true }; };
+
+    const res = await cloudRel.empurrarPendentes({ silent: true });
+    out.enviouTudo = res && res.enviados === 2 && res.restantes === 0;
+    out.mandouPaciente = enviadosPac.length === 1 && enviadosPac[0] === 'Paciente da Secretária';
+    out.mandouPre = enviadosReg.length === 1 && enviadosReg[0] === 'pre:Paciente da Secretária';
+    out.naoReenvia = enviadosReg.indexOf('pre:Outro') < 0;
+
+    /* lote limitado: o resto fica para a próxima entrada (não trava o 4G).
+       (grava direto na lista: store.save já dispara o espelho relacional) */
+    const pend = store.list('anestesia');
+    for (let i = 0; i < 5; i++) pend.push({ _id: 'anest-' + i, paciente: { nome: 'P' + i }, procedimento: { data: utils.hojeISO() } });
+    store.setList('anestesia', pend);
+    enviadosReg.length = 0;
+    const res2 = await cloudRel.empurrarPendentes({ silent: true, limite: 3 });
+    out.respeitaLimite = res2 && res2.enviados === 3 && res2.restantes === 2;
+
+    /* sem clínica conhecida, não tenta nada */
+    cloudRel._lembrarOrg(null);
+    const sess = auth.usuarioAtual(); if (sess) { sess.organization_id = null; auth._definirSessao(sess); }
+    cloud.buscarPerfil = async () => null;
+    out.semOrgNaoTenta = (await cloudRel.empurrarPendentes({ silent: true })) === null;
+
+    store.setList('pacientes', []); store.setList('pre', []); store.setList('anestesia', []);
+    return out;
+  });
+  assert(r.enviouTudo, 'os pendentes deveriam subir para a clínica');
+  assert(r.mandouPaciente, 'o paciente pendente deveria ser enviado');
+  assert(r.mandouPre, 'a pré pendente deveria ser enviada');
+  assert(r.naoReenvia, 'o que já está na clínica não deve ser reenviado');
+  assert(r.respeitaLimite, 'o envio deveria ir em lotes, deixando o resto para depois');
+  assert(r.semOrgNaoTenta, 'sem clínica conhecida, não tenta enviar nada');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
