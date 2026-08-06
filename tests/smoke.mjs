@@ -3253,6 +3253,74 @@ await test('Dashboard e prontuário mostram a ficha de anestesia junto da SRPA',
   await page.close();
 });
 
+/* 60) O app atualiza ao voltar para a frente (celular ficava com dados velhos) */
+await test('Voltar para o app baixa o que foi feito em outro aparelho (com intervalo mínimo)', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud.divergencia = () => null;
+
+    let pulls = 0;
+    const original = cloud.autoSyncAoEntrar;
+    cloud.autoSyncAoEntrar = () => { pulls++; cloud._ultimoPull = Date.now(); };
+
+    /* primeira volta: puxa */
+    cloud._ultimoPull = 0;
+    out.puxouNaVolta = cloud.autoSyncAoVoltar() === true && pulls === 1;
+    /* logo em seguida: NÃO repete (poupa dados no 4G) */
+    out.naoRepete = cloud.autoSyncAoVoltar() === false && pulls === 1;
+    /* forçando (reconexão, abertura do app): puxa mesmo assim */
+    out.forcaFunciona = cloud.autoSyncAoVoltar({ forcar: true }) === true && pulls === 2;
+    /* passado o intervalo, volta a puxar sozinho */
+    cloud._ultimoPull = Date.now() - (cloud.INTERVALO_PULL + 1000);
+    out.depoisDoIntervalo = cloud.autoSyncAoVoltar() === true && pulls === 3;
+
+    /* trava de segurança: contas diferentes não puxam nada */
+    cloud.divergencia = () => ({ app: 'a@x.com', nuvem: 'b@x.com' });
+    out.divergenciaBloqueia = cloud.autoSyncAoVoltar({ forcar: true }) === false && pulls === 3;
+    cloud.divergencia = () => null;
+    /* deslogado também não */
+    cloud.estaLogado = () => false;
+    out.deslogadoNaoPuxa = cloud.autoSyncAoVoltar({ forcar: true }) === false && pulls === 3;
+    cloud.estaLogado = () => true;
+    cloud.autoSyncAoEntrar = original;
+
+    /* o pull marca a hora, para o gatilho seguinte respeitar o intervalo */
+    cloud._ultimoPull = 0;
+    cloud.sincronizar = async () => {};
+    cloud.autoSyncAoEntrar();
+    out.marcaHora = cloud._ultimoPull > 0;
+
+    /* a tela aberta é redesenhada depois do pull */
+    state.currentModule = 'dashboard';
+    let repintou = 0;
+    const dOrig = dashboard.atualizar, mOrig = meuDia.render;
+    dashboard.atualizar = () => { repintou++; };
+    meuDia.render = () => { repintou++; };
+    cloud._repintarTelaAtual();
+    out.repintaDashboard = repintou >= 2;
+    dashboard.atualizar = dOrig; meuDia.render = mOrig;
+
+    /* e os gatilhos ficam ligados uma vez só */
+    cloud._vigiandoRetorno = false;
+    cloud.vigiarRetorno(); cloud.vigiarRetorno();
+    out.vigiaUmaVez = cloud._vigiandoRetorno === true;
+    return out;
+  });
+  assert(r.puxouNaVolta, 'ao voltar para o app, deveria baixar o que há de novo');
+  assert(r.naoRepete, 'não deveria repetir o pull a cada troca de aba');
+  assert(r.forcaFunciona, 'abertura do app e reconexão deveriam forçar o pull');
+  assert(r.depoisDoIntervalo, 'passado o intervalo, volta a atualizar sozinho');
+  assert(r.divergenciaBloqueia, 'com contas diferentes, nada é baixado');
+  assert(r.deslogadoNaoPuxa, 'sem sessão na nuvem, nada é baixado');
+  assert(r.marcaHora, 'o pull deveria marcar a hora para o próximo gatilho');
+  assert(r.repintaDashboard, 'o Dashboard aberto deveria ser redesenhado após o pull');
+  assert(r.vigiaUmaVez, 'os gatilhos deveriam ser registrados uma única vez');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

@@ -16049,10 +16049,21 @@ const cloud = {
      restaurada): drena a fila, sincroniza o canal legado e força um pull
      relacional novo (pacientes + módulos clínicos/financeiro). O usuário
      não precisa tocar em nada — o botão "Sincronizar agora" vira exceção. */
+  /* Redesenha a tela aberta depois de um pull (Dashboard, Pacientes, Agenda) */
+  _repintarTelaAtual() {
+    const mod = (typeof state !== 'undefined' && state.currentModule) || '';
+    if (mod === 'dashboard') {
+      try { dashboard.atualizar(); } catch (e) {}
+      try { meuDia.render(); } catch (e) {}
+      try { pendencias.renderDashboard(); } catch (e) {}
+    } else if (mod === 'pacientes') { try { pacientes.render(); } catch (e) {} }
+    else if (mod === 'agenda') { try { agenda.render(); } catch (e) {} }
+  },
   autoSyncAoEntrar() {
     try {
       if (!cloud.estaConfigurado() || !cloud.estaLogado()) return;
       if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+      cloud._ultimoPull = Date.now();
       setTimeout(() => { try { cloud.sincronizar({ silent: true }); } catch (e) {} }, 900);
       /* configurações (termo/textos/logomarca/tema/preferências) descem também */
       setTimeout(() => { try { if (typeof configSync !== 'undefined') configSync.puxarAplicar(); } catch (e) {} }, 1200);
@@ -16074,7 +16085,45 @@ const cloud = {
           }
         } catch (e) {}
       }, 1600);
+      /* O que acabou de descer precisa aparecer na tela aberta — senão o
+         Dashboard segue com os números velhos até trocar de módulo. */
+      setTimeout(() => { try { cloud._repintarTelaAtual(); } catch (e) {} }, 4200);
     } catch (e) {}
+  },
+  /* ------------------------------------------------------------------
+     ATUALIZAR AO VOLTAR PARA O APP
+     Antes, o pull completo (pacientes + módulos + configurações) só
+     acontecia no LOGIN. No celular a sessão fica aberta o dia inteiro: o
+     aparelho drenava a fila de envio, mas nunca BAIXAVA o que tinha sido
+     feito no PC — daí a lista de pacientes curta e o Dashboard velho.
+     Agora ele também atualiza ao trazer o app de volta à frente e ao
+     reconectar, com um intervalo mínimo para não pesar no 4G.
+  ------------------------------------------------------------------ */
+  _ultimoPull: 0,
+  INTERVALO_PULL: 3 * 60 * 1000,
+  autoSyncAoVoltar(opts = {}) {
+    try {
+      if (!cloud.estaConfigurado() || !cloud.estaLogado()) return false;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+      if (cloud.divergencia()) return false;
+      const agora = Date.now();
+      if (!opts.forcar && (agora - cloud._ultimoPull) < cloud.INTERVALO_PULL) return false;
+      cloud._ultimoPull = agora;
+      cloud.autoSyncAoEntrar();
+      return true;
+    } catch (e) { return false; }
+  },
+  /* Liga os gatilhos (chamado uma vez na inicialização) */
+  vigiarRetorno() {
+    if (typeof document === 'undefined' || cloud._vigiandoRetorno) return;
+    cloud._vigiandoRetorno = true;
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') cloud.autoSyncAoVoltar();
+    });
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', () => cloud.autoSyncAoVoltar());
+      window.addEventListener('online', () => cloud.autoSyncAoVoltar({ forcar: true }));
+    }
   },
   uiEnviarTudo() {
     if (confirm('Enviar TODOS os registros do aparelho para a nuvem? Útil na primeira vez.')) {
@@ -16229,10 +16278,13 @@ const cloud = {
       }
     } catch (e) {}
     cloud._atualizarUI();
-    /* Sincronização automática leve ao abrir, se logado */
+    /* Ao abrir com sessão já ativa, ATUALIZA de verdade: além de drenar a
+       fila de envio, baixa pacientes, módulos e configurações. Antes só
+       enviava — quem abria o app no celular ficava com a lista velha. */
     if (cloud.estaConfigurado() && cloud.estaLogado()) {
-      setTimeout(() => cloud.sincronizar({ silent: true }), 1500);
+      setTimeout(() => { try { cloud.autoSyncAoVoltar({ forcar: true }); } catch (e) { cloud.sincronizar({ silent: true }); } }, 1500);
     }
+    try { cloud.vigiarRetorno(); } catch (e) {}
     /* Reenvia fila quando a conexão voltar; atualiza o selo ao cair/voltar */
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => {
