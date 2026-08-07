@@ -16147,6 +16147,11 @@ const cloud = {
       /* O que foi salvo enquanto a clínica não era conhecida sobe agora — sem
          isso, o registro de um usuário nunca chegava aos outros do consultório */
       setTimeout(() => { try { cloudRel.empurrarPendentes({ silent: true }); } catch (e) {} }, 2600);
+      /* rascunhos: ficha começada no celular aparece no computador */
+      setTimeout(() => {
+        try { rascunhosSync.enviarTodos(); } catch (e) {}
+        try { rascunhosSync.puxarTodos({ silent: true }); } catch (e) {}
+      }, 3000);
       /* O que acabou de descer precisa aparecer na tela aberta — senão o
          Dashboard segue com os números velhos até trocar de módulo. */
       setTimeout(() => { try { cloud._repintarTelaAtual(); } catch (e) {} }, 4200);
@@ -28443,6 +28448,100 @@ window.descartarAutosave = function(mod) {
    abertos. O usuário alterna entre eles via abas. O auto-save guarda o estado
    do rascunho ativo. Salvar como ficha real remove o rascunho.
 ============================================================================ */
+/* ============================================================================
+   RASCUNHOS NA NUVEM
+   Ficha começada no celular e terminada no computador: o rascunho precisa
+   viajar. Ele NÃO é um registro salvo (não entra no histórico nem no
+   financeiro), então usa o canal pessoal (tabela `documentos`, por usuário) —
+   rascunho é de quem está preenchendo, não da clínica.
+   A junção é por rascunho, pelo `updatedAt`: cada aparelho fica com a versão
+   mais nova de cada um, e nenhum apaga o rascunho do outro.
+============================================================================ */
+const rascunhosSync = {
+  _modulo(mod) { return 'rascunho_' + mod; },
+  async enviar(mod) {
+    try {
+      if (!cloud.estaConfigurado() || !cloud.estaLogado()) return 0;
+      if (cloud.divergencia()) return 0;
+      if (!(await cloud._garantirToken())) return 0;
+      const c = cloud.config(); const s = cloud.session();
+      if (!s || !s.user) return 0;
+      const lista = (rascunhos.list(mod) || []).filter(r => r && r.id && r.dados);
+      if (!lista.length) return 0;
+      const body = lista.map(r => ({
+        user_id: s.user.id, modulo: rascunhosSync._modulo(mod), doc_id: r.id,
+        dados: r, atualizado_em: r.updatedAt || new Date().toISOString()
+      }));
+      const rq = await fetch(c.url + '/rest/v1/documentos?on_conflict=user_id,modulo,doc_id', {
+        method: 'POST',
+        headers: Object.assign({}, cloud._headers(true), { 'Prefer': 'resolution=merge-duplicates,return=minimal' }),
+        body: JSON.stringify(body)
+      });
+      return rq.ok ? lista.length : 0;
+    } catch (e) { return 0; }
+  },
+  async puxar(mod) {
+    try {
+      if (!cloud.estaConfigurado() || !cloud.estaLogado()) return 0;
+      if (cloud.divergencia()) return 0;
+      if (!(await cloud._garantirToken())) return 0;
+      const c = cloud.config(); const s = cloud.session();
+      if (!s || !s.user) return 0;
+      const rq = await fetch(c.url + '/rest/v1/documentos?user_id=eq.' + s.user.id +
+        '&modulo=eq.' + encodeURIComponent(rascunhosSync._modulo(mod)) + '&select=doc_id,dados',
+        { headers: cloud._headers(true) });
+      if (!rq.ok) return 0;
+      const linhas = await rq.json().catch(() => []);
+      if (!Array.isArray(linhas) || !linhas.length) return 0;
+      const locais = rascunhos.list(mod) || [];
+      const porId = new Map(locais.map(r => [r.id, r]));
+      let novos = 0, atualizados = 0;
+      linhas.forEach(l => {
+        const r = l && l.dados;
+        if (!r || !r.id || !r.dados) return;
+        const local = porId.get(r.id);
+        if (!local) { locais.push(r); porId.set(r.id, r); novos++; return; }
+        /* o mais recente vence — sem apagar o que o outro aparelho fez */
+        if (String(r.updatedAt || '') > String(local.updatedAt || '')) {
+          Object.assign(local, r); atualizados++;
+        }
+      });
+      if (novos || atualizados) {
+        rascunhos.setList(mod, locais);
+        try { rascunhos.renderAbas(mod); } catch (e) {}
+      }
+      return novos + atualizados;
+    } catch (e) { return 0; }
+  },
+  /* Rascunho fechado some da nuvem também — senão o pull seguinte o traria
+     de volta e o usuário teria que fechar duas vezes. */
+  async apagar(mod, id) {
+    try {
+      if (!id || !cloud.estaConfigurado() || !cloud.estaLogado()) return false;
+      if (!(await cloud._garantirToken())) return false;
+      const c = cloud.config(); const s = cloud.session();
+      if (!s || !s.user) return false;
+      const rq = await fetch(c.url + '/rest/v1/documentos?user_id=eq.' + s.user.id +
+        '&modulo=eq.' + encodeURIComponent(rascunhosSync._modulo(mod)) +
+        '&doc_id=eq.' + encodeURIComponent(id),
+        { method: 'DELETE', headers: cloud._headers(true) });
+      return rq.ok;
+    } catch (e) { return false; }
+  },
+  /* Sobe os rascunhos de todos os módulos (ao sair da tela/entrar em outra) */
+  async enviarTodos() {
+    let n = 0;
+    for (const mod of rascunhos.MODS) n += await rascunhosSync.enviar(mod);
+    return n;
+  },
+  async puxarTodos(opts = {}) {
+    let n = 0;
+    for (const mod of rascunhos.MODS) n += await rascunhosSync.puxar(mod);
+    if (n && !opts.silent) toast('📝 ' + n + ' rascunho(s) trazido(s) de outro aparelho');
+    return n;
+  }
+};
+
 const rascunhos = {
   KEY_LIST: 'medsys.v7.rascunhos.',
   KEY_ATIVO: 'medsys.v7.rascunho_ativo.',
@@ -28517,6 +28616,19 @@ const rascunhos = {
     const pacNome = rascunhos._extrairNomePaciente(mod, r.dados);
     if (pacNome) r.label = pacNome.slice(0, 32);
     rascunhos.setList(mod, list);
+    /* sobe para a nuvem sem pressa (o rascunho precisa alcançar o outro
+       aparelho — começar no celular e terminar no computador) */
+    rascunhos._agendarEnvio(mod);
+  },
+  /* Junta as gravações seguidas num envio só, alguns segundos depois */
+  _agendarEnvio(mod) {
+    try {
+      rascunhos._timers = rascunhos._timers || {};
+      clearTimeout(rascunhos._timers[mod]);
+      rascunhos._timers[mod] = setTimeout(() => {
+        try { rascunhosSync.enviar(mod); } catch (e) {}
+      }, 4000);
+    } catch (e) {}
   },
 
   _extrairNomePaciente(mod, dados) {
@@ -28572,6 +28684,8 @@ const rascunhos = {
       /* Remove da lista */
       const list = rascunhos.list(mod).filter(x => x.id !== id);
       rascunhos.setList(mod, list);
+      /* apaga também na nuvem — senão o próximo pull ressuscitaria o rascunho */
+      try { rascunhosSync.apagar(mod, id); } catch (e) {}
       if (eraAtivo) {
         /* IMPORTANTE: limpa o ativo ANTES de chamar ativar() — senão o early-return
            em ativar() (if atual===id) impede de carregar dados do próximo */
@@ -28628,6 +28742,7 @@ const rascunhos = {
     if (!id) return;
     const list = rascunhos.list(mod).filter(x => x.id !== id);
     rascunhos.setList(mod, list);
+    try { rascunhosSync.apagar(mod, id); } catch (e) {}
     /* IMPORTANTE: limpa o ativo antes de chamar ativar() */
     rascunhos.setAtivo(mod, null);
     if (list.length > 0) {
@@ -28636,6 +28751,15 @@ const rascunhos = {
       rascunhos._limpar(mod);
     }
     rascunhos.renderAbas(mod);
+  },
+
+  /* Buscar rascunhos de outro aparelho, sob demanda (botão da barra) */
+  async buscarNaNuvem(mod) {
+    if (!cloud.estaConfigurado() || !cloud.estaLogado()) { toast('Conecte-se à nuvem primeiro (Ajustes)', 'warn'); return; }
+    try { rascunhos.salvarAtual(mod); } catch (e) {}
+    await rascunhosSync.enviar(mod);                 /* leva o daqui antes */
+    const n = await rascunhosSync.puxar(mod);        /* e traz o de lá */
+    toast(n ? '📝 ' + n + ' rascunho(s) trazido(s) de outro aparelho' : 'Nenhum rascunho novo em outro aparelho');
   },
 
   /* Garante que ao entrar no módulo, existe ao menos um rascunho ativo */
@@ -28671,6 +28795,7 @@ const rascunhos = {
       html += `</span>`;
     });
     html += `<button type="button" class="rasc-tab-new" data-action="novo" title="Criar novo rascunho em paralelo">+ Novo rascunho</button>`;
+    html += `<button type="button" class="rasc-tab-new" data-action="nuvem" title="Traz os rascunhos começados em outro aparelho (celular ↔ computador)">☁️ Buscar de outro aparelho</button>`;
     if (list.length > 1) {
       html += `<span class="rasc-tab-count">${list.length} fichas em paralelo</span>`;
     }
@@ -28690,6 +28815,12 @@ const rascunhos = {
         if (btnNovo) {
           ev.preventDefault(); ev.stopPropagation();
           rascunhos.novo(mod);
+          return;
+        }
+        const btnNuvem = ev.target.closest('[data-action="nuvem"]');
+        if (btnNuvem) {
+          ev.preventDefault(); ev.stopPropagation();
+          rascunhos.buscarNaNuvem(mod);
           return;
         }
         const tabAtivar = ev.target.closest('[data-action="ativar"]');
@@ -39615,7 +39746,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.doses = doses;
   window.modal = modal; window.modelos = modelos; window.fin = fin;
   window.linker = linker; window.templates = templates;
-  window.rascunhos = rascunhos;
+  window.rascunhos = rascunhos; window.rascunhosSync = rascunhosSync;
   window.globalSearch = globalSearch; window.pacientes = pacientes;
   window.ajustes = ajustes; window.autocomplete = autocomplete;
   window.ajustesGrupos = ajustesGrupos;
