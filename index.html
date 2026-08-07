@@ -28496,16 +28496,25 @@ const rascunhosSync = {
       const locais = rascunhos.list(mod) || [];
       const porId = new Map(locais.map(r => [r.id, r]));
       let novos = 0, atualizados = 0;
+      /* guarda o que chegou, para a tela poder ABRIR o rascunho trazido —
+         antes ele entrava na lista em silêncio e o usuário não via */
+      rascunhosSync._chegaram = [];
       linhas.forEach(l => {
         const r = l && l.dados;
         if (!r || !r.id || !r.dados) return;
         const local = porId.get(r.id);
-        if (!local) { locais.push(r); porId.set(r.id, r); novos++; return; }
+        if (!local) {
+          locais.push(r); porId.set(r.id, r); novos++;
+          rascunhosSync._chegaram.push({ id: r.id, label: r.label || '', updatedAt: r.updatedAt || '' });
+          return;
+        }
         /* o mais recente vence — sem apagar o que o outro aparelho fez */
         if (String(r.updatedAt || '') > String(local.updatedAt || '')) {
           Object.assign(local, r); atualizados++;
+          rascunhosSync._chegaram.push({ id: r.id, label: r.label || '', updatedAt: r.updatedAt || '' });
         }
       });
+      rascunhosSync._chegaram.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
       if (novos || atualizados) {
         rascunhos.setList(mod, locais);
         try { rascunhos.renderAbas(mod); } catch (e) {}
@@ -28753,13 +28762,28 @@ const rascunhos = {
     rascunhos.renderAbas(mod);
   },
 
-  /* Buscar rascunhos de outro aparelho, sob demanda (botão da barra) */
+  /* Buscar rascunhos de outro aparelho, sob demanda (botão da barra).
+     Além de trazer, ABRE o rascunho na tela: trazer em silêncio dava a
+     impressão de que nada tinha acontecido. */
   async buscarNaNuvem(mod) {
     if (!cloud.estaConfigurado() || !cloud.estaLogado()) { toast('Conecte-se à nuvem primeiro (Ajustes)', 'warn'); return; }
     try { rascunhos.salvarAtual(mod); } catch (e) {}
     await rascunhosSync.enviar(mod);                 /* leva o daqui antes */
     const n = await rascunhosSync.puxar(mod);        /* e traz o de lá */
-    toast(n ? '📝 ' + n + ' rascunho(s) trazido(s) de outro aparelho' : 'Nenhum rascunho novo em outro aparelho');
+    if (!n) { toast('Nenhum rascunho novo em outro aparelho'); return; }
+    rascunhos.renderAbas(mod);
+    const chegou = (rascunhosSync._chegaram || [])[0];
+    if (chegou) {
+      rascunhos.ativar(mod, chegou.id);
+      const nome = chegou.label || 'rascunho';
+      toast('📝 "' + nome + '" aberto — veio do outro aparelho' + (n > 1 ? ' (e mais ' + (n - 1) + ')' : ''));
+      try {
+        const wrap = document.getElementById('rasc-tabs-' + mod);
+        if (wrap && wrap.scrollIntoView) wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } catch (e) {}
+    } else {
+      toast('📝 ' + n + ' rascunho(s) trazido(s) de outro aparelho');
+    }
   },
 
   /* Garante que ao entrar no módulo, existe ao menos um rascunho ativo */

@@ -3717,6 +3717,17 @@ await test('Rascunhos viajam entre aparelhos, juntando pelo mais recente', async
     await rascunhosSync.apagar('anestesia', 'rasc_1');
     out.apagouNaNuvem = naNuvem.every(x => x.doc_id !== 'rasc_1');
 
+    /* o botão da barra ABRE o rascunho que chegou (não basta trazer calado) */
+    rascunhos.setList('anestesia', []);
+    rascunhos.setAtivo('anestesia', null);
+    naNuvem = [{ doc_id: 'rasc_9', dados: { id: 'rasc_9', label: 'Ana Vinda do Celular', updatedAt: '2026-08-07T20:00:00Z',
+      dados: { paciente: { nome: 'Ana Vinda do Celular' }, procedimento: { descricao: 'Hernioplastia' } } } }];
+    await rascunhos.buscarNaNuvem('anestesia');
+    out.abriuNaTela = rascunhos.ativo('anestesia') === 'rasc_9';
+    out.formPreenchido = (document.querySelector('#form-anestesia [name="paciente_nome"]') || {}).value === 'Ana Vinda do Celular';
+    const barra = document.getElementById('rasc-tabs-anestesia');
+    out.abaVisivel = !!barra && barra.textContent.indexOf('Ana Vinda do Celular') >= 0;
+
     /* contas diferentes travam o envio */
     cloud.divergencia = () => ({ app: 'a@x.com', nuvem: 'b@x.com' });
     out.divergenciaBloqueia = (await rascunhosSync.enviar('anestesia')) === 0;
@@ -3732,6 +3743,9 @@ await test('Rascunhos viajam entre aparelhos, juntando pelo mais recente', async
   assert(r.aceitaMaisNovo, 'versão mais nova do outro aparelho deveria entrar');
   assert(r.preservaLocal, 'o rascunho só deste aparelho não pode sumir');
   assert(r.apagouNaNuvem, 'fechar o rascunho deveria apagá-lo na nuvem');
+  assert(r.abaVisivel, 'a aba do rascunho trazido deveria aparecer na barra');
+  assert(r.abriuNaTela, 'o rascunho trazido deveria ser ABERTO, não só listado');
+  assert(r.formPreenchido, 'e o formulário deveria vir preenchido com os dados dele');
   assert(r.divergenciaBloqueia, 'com contas diferentes, nada sobe');
   await page.close();
 });
