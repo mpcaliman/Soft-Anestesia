@@ -8705,6 +8705,17 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
             na secretaria) fica visível aos anestesistas. A regra é aplicada <strong>no servidor</strong> (requer a
             migração <code>0008</code> no banco) e vale em cada aparelho na próxima sincronização.
           </div>
+
+          <label style="font-size:.8rem;font-weight:600;display:block;margin:16px 0 6px">PDF automático ao finalizar</label>
+          <label class="check" style="display:flex;align-items:center;gap:8px;font-size:.86rem">
+            <input type="checkbox" id="org-pdf-auto" onchange="orgSettings.mudarPdfAuto(this.checked)">
+            <span>📄 <strong>Obrigatório para toda a clínica</strong> — todo documento finalizado gera PDF e vai para a nuvem, em qualquer aparelho e para qualquer usuário</span>
+          </label>
+          <div style="font-size:.72rem;color:var(--text-mute);margin-top:6px">
+            Vale para ficha, pré, SRPA, consulta, termo e receituário. Ligado assim, ninguém desliga no próprio aparelho.
+            O destino é o <strong>Supabase Storage</strong> (a mesma nuvem do sistema); o Google Drive é opcional e
+            exige que <em>cada usuário</em> autorize a conta Google dele uma vez.
+          </div>
         </div>
       </div>
     </section>
@@ -8782,8 +8793,9 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
         <div class="pdfbk-opcao" style="margin-bottom:14px;padding:10px 12px;background:var(--surface-alt);border-radius:8px">
           <label class="pdfbk-check">
             <input type="checkbox" id="pdfbk-auto-finalizar" checked onchange="pdfBackup.salvarCfg({autoFinalizar:this.checked}); toast(this.checked?'📄 Ao FINALIZAR um documento, o PDF será salvo na nuvem automaticamente':'Backup automático ao finalizar desligado')">
-            <span><strong>🪄 Salvar PDF automaticamente ao FINALIZAR</strong> (ficha de anestesia, pré, SRPA, consulta e termo)</span>
+            <span><strong>🪄 Salvar PDF automaticamente ao FINALIZAR</strong> (ficha de anestesia, pré, SRPA, consulta, termo e receituário)</span>
           </label>
+          <div id="pdfbk-estado" style="font-size:.78rem;margin:6px 0 0 26px"></div>
           <p style="font-size:.78rem;color:var(--text-mute);margin:4px 0 0 26px">
             Sem nenhum toque extra: ao finalizar o documento, o PDF é gerado e enviado aos destinos marcados abaixo.
           </p>
@@ -14041,6 +14053,7 @@ const prescricao = {
     setSavedStatus((finalizar ? 'Finalizado às ' : 'Salvo às ') + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
     markClean();
     if (finalizar) { try { rascunhos.removerAtivo('prescricao'); } catch (e) {} }
+    if (finalizar) { try { pdfBackup.autoAoFinalizar('prescricao'); } catch (e) {} }
     toast(finalizar ? '✅ Prescrição finalizada' : '💾 Prescrição salva (dados preservados)');
   },
   finalizar() { prescricao.salvar({ finalizar: true }); },
@@ -18045,6 +18058,17 @@ const orgSettings = {
     box.style.display = '';
     const v = orgSettings.visibilidade();
     box.querySelectorAll('input[name=vis-reg]').forEach(i => { i.checked = (i.value === v); });
+    const pdf = document.getElementById('org-pdf-auto');
+    if (pdf) pdf.checked = orgSettings.local().pdf_auto_finalizar === true;
+  },
+
+  /* Política da clínica: PDF automático ao finalizar, para todos os usuários */
+  async mudarPdfAuto(on) {
+    const ok = await orgSettings.salvar({ pdf_auto_finalizar: !!on });
+    if (!ok) { orgSettings.renderVisibilidade(); return; }
+    toast(on ? '📄 PDF automático agora é obrigatório em toda a clínica'
+             : 'PDF automático deixou de ser obrigatório — cada usuário decide no aparelho dele');
+    try { pdfBackup.render(); } catch (e) {}
   }
 };
 
@@ -21244,7 +21268,28 @@ const pdfBackup = {
     const cid = document.getElementById('pdfbk-client-id');
     if (cid) cid.value = c.driveClientId || '';
     const af = document.getElementById('pdfbk-auto-finalizar');
-    if (af) af.checked = c.autoFinalizar !== false;
+    const obrig = pdfBackup.autoObrigatorioNaClinica();
+    if (af) { af.checked = pdfBackup.autoLigado(); af.disabled = obrig; }
+    /* Estado HONESTO: dizer onde o PDF está sendo guardado — e quando não
+       está em lugar nenhum, que era o caso de quem só configurou o Drive. */
+    const est = document.getElementById('pdfbk-estado');
+    if (est) {
+      const supaOn = c.supabase !== false &&
+        (typeof cloud !== 'undefined' && cloud.estaConfigurado() && cloud.estaLogado());
+      const driveOn = c.drive === true && !!c.driveClientId;
+      const destinos = [];
+      if (supaOn) destinos.push('☁️ Supabase Storage');
+      if (driveOn) destinos.push('📁 Google Drive');
+      if (!pdfBackup.autoLigado()) {
+        est.innerHTML = '<span style="color:var(--text-mute)">Desligado — nenhum PDF é guardado ao finalizar.</span>';
+      } else if (destinos.length) {
+        est.innerHTML = '<span style="color:#1f7a4d">✅ Guardando em: <b>' + destinos.join('</b> e <b>') + '</b>.</span>' +
+          (obrig ? ' <span style="color:var(--text-mute)">(obrigatório pela clínica)</span>' : '');
+      } else {
+        est.innerHTML = '<span style="color:#b3392a">⚠️ Ligado, mas <b>sem destino ativo</b> — o PDF não está sendo guardado. ' +
+          'Marque o Supabase Storage abaixo (usa a conta da nuvem que você já tem).</span>';
+      }
+    }
   },
 
   /* ---------- BACKUP AUTOMÁTICO AO FINALIZAR ----------
@@ -21253,20 +21298,36 @@ const pdfBackup = {
      e envia para os destinos configurados (Drive e/ou Supabase), sem
      nenhum toque extra. A leitura do formulário é SÍNCRONA (acontece
      antes de o rascunho ser limpo); só o envio é assíncrono. */
+  /* Regra da CLÍNICA: o gestor pode tornar o PDF automático obrigatório para
+     todo mundo (orgSettings.pdf_auto_finalizar). Nesse caso a preferência
+     individual não desliga — é política do consultório, não gosto pessoal. */
+  autoObrigatorioNaClinica() {
+    try { return orgSettings.local().pdf_auto_finalizar === true; } catch (e) { return false; }
+  },
+  autoLigado() {
+    if (pdfBackup.autoObrigatorioNaClinica()) return true;
+    return pdfBackup.cfg().autoFinalizar !== false;
+  },
   autoAoFinalizar(mod) {
     try {
       const c = pdfBackup.cfg();
-      if (c.autoFinalizar === false) return;
+      if (!pdfBackup.autoLigado()) return;
       const temDrive = c.drive === true && !!c.driveClientId;
       const temSupa = c.supabase !== false &&
         (typeof cloud !== 'undefined' && cloud.estaConfigurado() && cloud.estaLogado());
-      if (!temDrive && !temSupa) return;
+      if (!temDrive && !temSupa) {
+        /* antes saía calado: o usuário achava que o PDF estava sendo guardado */
+        try { toast('⚠️ Nenhum destino de PDF ativo — ligue o Supabase Storage ou o Drive em Ajustes → Backup automático de PDFs', 'warn'); } catch (e) {}
+        return;
+      }
       const J = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
       if (!J) return;
       const builders = {
         pre: printPreview._buildPre, consulta: printPreview._buildConsulta,
         anestesia: printPreview._buildAnestesia, recuperacao: printPreview._buildRecuperacao,
-        termo: printPreview._buildTermo
+        termo: printPreview._buildTermo, risco: printPreview._buildRisco,
+        prescricao: printPreview._buildPrescricao, documentos: printPreview._buildDocumento,
+        financeiro: printPreview._buildFinanceiro
       };
       const builder = builders[mod]; if (!builder) return;
       const ppp = document.getElementById('ppp'); if (!ppp) return;
