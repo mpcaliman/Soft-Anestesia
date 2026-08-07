@@ -3750,6 +3750,69 @@ await test('Rascunhos viajam entre aparelhos, juntando pelo mais recente', async
   await page.close();
 });
 
+/* 67) PDF ao finalizar: todos os módulos, regra da clínica e estado honesto */
+await test('PDF automático ao finalizar cobre todos os módulos e pode ser exigido pela clínica', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    /* módulos que chamam o backup ao finalizar (o "em qualquer módulo") */
+    const fonte = document.documentElement.innerHTML;
+    out.modulosLigados = ['pre', 'consulta', 'recuperacao', 'termo', 'anestesia', 'prescricao']
+      .every(m => fonte.indexOf("pdfBackup.autoAoFinalizar('" + m + "')") >= 0);
+
+    /* preferência individual manda quando a clínica não exige */
+    localStorage.setItem(orgSettings.CACHE_KEY, JSON.stringify({}));
+    pdfBackup.salvarCfg({ autoFinalizar: false });
+    out.desligadoIndividual = pdfBackup.autoLigado() === false;
+    pdfBackup.salvarCfg({ autoFinalizar: true });
+    out.ligadoIndividual = pdfBackup.autoLigado() === true;
+    /* padrão de fábrica: ligado */
+    localStorage.removeItem(pdfBackup.CFG_KEY);
+    out.ligadoPorPadrao = pdfBackup.autoLigado() === true;
+
+    /* regra da clínica vence a preferência individual */
+    localStorage.setItem(orgSettings.CACHE_KEY, JSON.stringify({ pdf_auto_finalizar: true }));
+    pdfBackup.salvarCfg({ autoFinalizar: false });
+    out.clinicaObriga = pdfBackup.autoObrigatorioNaClinica() === true && pdfBackup.autoLigado() === true;
+
+    /* sem destino ativo, avisa em vez de sair calado */
+    cloud.estaConfigurado = () => false;
+    cloud.estaLogado = () => false;
+    pdfBackup.salvarCfg({ autoFinalizar: true, supabase: true, drive: false, driveClientId: '' });
+    let avisou = '';
+    const toastOrig = window.toast;
+    window.toast = (m) => { avisou += String(m); };
+    pdfBackup.autoAoFinalizar('pre');
+    window.toast = toastOrig;
+    out.avisaSemDestino = /nenhum destino/i.test(avisou);
+
+    /* o card mostra o estado de verdade */
+    pdfBackup.carregarUI();
+    const est = document.getElementById('pdfbk-estado');
+    out.cardAvisa = !!est && /sem destino ativo/i.test(est.textContent);
+    /* com a nuvem ligada, mostra onde está guardando */
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    pdfBackup.carregarUI();
+    out.cardConfirma = /Supabase Storage/.test(document.getElementById('pdfbk-estado').textContent);
+    /* e o gestor não consegue desligar no aparelho quando a clínica exige */
+    out.travadoNaTela = document.getElementById('pdfbk-auto-finalizar').disabled === true;
+
+    localStorage.setItem(orgSettings.CACHE_KEY, JSON.stringify({}));
+    localStorage.removeItem(pdfBackup.CFG_KEY);
+    return out;
+  });
+  assert(r.modulosLigados, 'todos os módulos deveriam disparar o PDF ao finalizar');
+  assert(r.desligadoIndividual && r.ligadoIndividual, 'a preferência individual deveria valer sem regra da clínica');
+  assert(r.ligadoPorPadrao, 'sem configuração nenhuma, o padrão é guardar o PDF');
+  assert(r.clinicaObriga, 'a regra da clínica deveria vencer a preferência individual');
+  assert(r.avisaSemDestino, 'sem destino ativo, o app deveria avisar em vez de não guardar calado');
+  assert(r.cardAvisa, 'o card deveria mostrar que não há destino ativo');
+  assert(r.cardConfirma, 'e mostrar onde está guardando quando há');
+  assert(r.travadoNaTela, 'com a clínica exigindo, a caixa fica travada no aparelho');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
