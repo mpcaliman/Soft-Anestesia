@@ -3647,6 +3647,95 @@ await test('Pré impressa: sem nome duplicado, nome inteiro numa linha e via aé
   await page.close();
 });
 
+/* 66) Rascunho começado no celular aparece no computador */
+await test('Rascunhos viajam entre aparelhos, juntando pelo mais recente', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud._garantirToken = async () => true;
+    cloud.divergencia = () => null;
+    cloud.session = () => ({ user: { id: 'u1', email: 'mpcaliman@hotmail.com' }, access_token: 't' });
+
+    /* nuvem de mentira: guarda o que sobe e devolve no pull */
+    let naNuvem = [];
+    const fetchOrig = window.fetch;
+    window.fetch = async (url, opts) => {
+      const u = String(url);
+      if (u.indexOf('/documentos') < 0) return fetchOrig(url, opts);
+      if (opts && opts.method === 'DELETE') {
+        const m = u.match(/doc_id=eq\.([^&]+)/);
+        if (m) naNuvem = naNuvem.filter(x => x.doc_id !== decodeURIComponent(m[1]));
+        return { ok: true, json: async () => [] };
+      }
+      if (opts && opts.method === 'POST') {
+        JSON.parse(opts.body).forEach(row => {
+          naNuvem = naNuvem.filter(x => x.doc_id !== row.doc_id);
+          naNuvem.push(row);
+        });
+        return { ok: true, json: async () => [] };
+      }
+      return { ok: true, json: async () => naNuvem.map(x => ({ doc_id: x.doc_id, dados: x.dados })) };
+    };
+
+    /* ---- "celular": um rascunho pela metade ---- */
+    rascunhos.setList('anestesia', [
+      { id: 'rasc_1', label: 'Maria', createdAt: '2026-08-07T10:00:00Z', updatedAt: '2026-08-07T10:00:00Z',
+        dados: { paciente: { nome: 'Maria' }, procedimento: { descricao: 'Colecistectomia' } } }
+    ]);
+    const enviados = await rascunhosSync.enviar('anestesia');
+    out.subiu = enviados === 1 && naNuvem.length === 1;
+
+    /* ---- "computador": não tem nada, puxa e recebe ---- */
+    rascunhos.setList('anestesia', []);
+    const veio = await rascunhosSync.puxar('anestesia');
+    const lista = rascunhos.list('anestesia');
+    out.desceu = veio === 1 && lista.length === 1 && lista[0].dados.paciente.nome === 'Maria';
+
+    /* o mais recente vence; o antigo não sobrescreve o novo */
+    lista[0].updatedAt = '2026-08-07T12:00:00Z';
+    lista[0].dados.procedimento.descricao = 'Colecistectomia videolaparoscópica';
+    rascunhos.setList('anestesia', lista);
+    await rascunhosSync.puxar('anestesia');   /* nuvem tem a versão das 10h */
+    out.naoRegride = rascunhos.list('anestesia')[0].dados.procedimento.descricao === 'Colecistectomia videolaparoscópica';
+
+    /* versão mais nova na nuvem entra no lugar */
+    naNuvem = [{ doc_id: 'rasc_1', dados: { id: 'rasc_1', label: 'Maria', updatedAt: '2026-08-07T18:00:00Z',
+      dados: { paciente: { nome: 'Maria' }, procedimento: { descricao: 'Versão do outro aparelho' } } } }];
+    await rascunhosSync.puxar('anestesia');
+    out.aceitaMaisNovo = rascunhos.list('anestesia')[0].dados.procedimento.descricao === 'Versão do outro aparelho';
+
+    /* rascunho de outro aparelho não apaga o daqui */
+    rascunhos.setList('anestesia', rascunhos.list('anestesia').concat([
+      { id: 'rasc_2', label: 'Só daqui', updatedAt: '2026-08-07T19:00:00Z', dados: { paciente: { nome: 'João' } } }
+    ]));
+    await rascunhosSync.puxar('anestesia');
+    out.preservaLocal = rascunhos.list('anestesia').length === 2;
+
+    /* fechar apaga na nuvem também (senão o pull o ressuscitaria) */
+    await rascunhosSync.apagar('anestesia', 'rasc_1');
+    out.apagouNaNuvem = naNuvem.every(x => x.doc_id !== 'rasc_1');
+
+    /* contas diferentes travam o envio */
+    cloud.divergencia = () => ({ app: 'a@x.com', nuvem: 'b@x.com' });
+    out.divergenciaBloqueia = (await rascunhosSync.enviar('anestesia')) === 0;
+    cloud.divergencia = () => null;
+
+    window.fetch = fetchOrig;
+    rascunhos.setList('anestesia', []);
+    return out;
+  });
+  assert(r.subiu, 'o rascunho do celular deveria subir para a nuvem');
+  assert(r.desceu, 'e descer no outro aparelho, com os dados preenchidos');
+  assert(r.naoRegride, 'versão antiga da nuvem não pode sobrescrever a mais nova daqui');
+  assert(r.aceitaMaisNovo, 'versão mais nova do outro aparelho deveria entrar');
+  assert(r.preservaLocal, 'o rascunho só deste aparelho não pode sumir');
+  assert(r.apagouNaNuvem, 'fechar o rascunho deveria apagá-lo na nuvem');
+  assert(r.divergenciaBloqueia, 'com contas diferentes, nada sobe');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
