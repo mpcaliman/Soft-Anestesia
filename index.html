@@ -8433,6 +8433,18 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       <span class="subtitle">Cadastros do sistema, modelos e assinaturas</span>
     </div>
 
+    <!-- ☁️ ESTADO DA NUVEM — uma linha, sem rodeios: o que está guardado,
+         onde, e quando foi a última atualização. -->
+    <section class="card no-collapse" id="nuvem-estado-card" style="margin-bottom:14px">
+      <div class="card-body" style="padding:12px 14px">
+        <div id="nuvem-estado-linha" style="font-size:.88rem">Verificando…</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
+          <button type="button" class="btn btn-sm btn-primary" onclick="nuvemEstado.atualizarTudo()" title="Envia o que falta e busca tudo o que os outros aparelhos fizeram">🔄 Atualizar tudo agora</button>
+          <span id="nuvem-estado-prog" style="font-size:.78rem;color:var(--text-mute);align-self:center"></span>
+        </div>
+      </div>
+    </section>
+
     <!-- ☁️ NUVEM / BACKUP (Supabase) -->
     <section class="card" id="cloud-card">
       <div class="card-header" onclick="ui.toggleCard(this)">
@@ -9756,6 +9768,13 @@ const store = {
     try { if (typeof cloud !== 'undefined') cloud.pushDoc(modKey, item, 'upsert'); } catch (e) {}
     /* Fase 6: espelho relacional dos módulos de registro (pré, ficha, etc.) */
     try { if (typeof cloudRel !== 'undefined' && cloudRel.ehModuloRegistro && cloudRel.ehModuloRegistro(modKey)) cloudRel.mirrorRegistro(modKey, item); } catch (e) {}
+    /* Clicou em Salvar: o RASCUNHO daquele módulo sobe na hora — é o que
+       permite continuar em outro aparelho sem esperar nada. */
+    try {
+      if (typeof rascunhos !== 'undefined' && rascunhos.MODS.indexOf(modKey) >= 0) {
+        rascunhos._agendarEnvio(modKey, { agora: true });
+      }
+    } catch (e) {}
     return item;
   },
   delete(modKey, id) {
@@ -10942,7 +10961,7 @@ const ui = {
         else if (modName === 'financeiro') financeiro.render();
         else if (modName === 'agenda') { agenda.render(); if (!agenda._puxouNestaSessao) { setTimeout(() => { try { agenda.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
-        else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); try { equipeNuvem.render(); } catch (e) {} try { auditoria.render(''); } catch (e) {} try { armazenamento.render(); } catch (e) {} logoUsuario.renderAjustes(); const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
+        else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); try { equipeNuvem.render(); } catch (e) {} try { auditoria.render(''); } catch (e) {} try { armazenamento.render(); } catch (e) {} logoUsuario.renderAjustes(); try { nuvemEstado.render(); } catch (e) {} const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
         else if (modName === 'pre') { try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} try { pre.viaAerea.render(); } catch (e) {} }
         else if (modName === 'anestesia') { anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} try { anestesia.calc.resumoTopo(); } catch (e) {} try { adendos.renderInline('anestesia'); } catch (e) {} try { anestesia.nav._wire(); anestesia.nav.render(); } catch (e) {} try { anestesia.vitais.autoAvanco.wire(); } catch (e) {} }
         else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} try { recuperacao.resumoTopo(); } catch (e) {} try { anestesia.vitais.autoAvanco.wire(); } catch (e) {} }, 60); }
@@ -16165,6 +16184,9 @@ const cloud = {
         try { rascunhosSync.enviarTodos(); } catch (e) {}
         try { rascunhosSync.puxarTodos({ silent: true }); } catch (e) {}
       }, 3000);
+      /* cadastros e modelos DA CLÍNICA: equipe, convênios, hospitais,
+         logomarca, termo… — o que um cadastrou vale para todos */
+      setTimeout(() => { try { clinicaSync.sincronizarAgora({ silent: true }); } catch (e) {} }, 3600);
       /* O que acabou de descer precisa aparecer na tela aberta — senão o
          Dashboard segue com os números velhos até trocar de módulo. */
       setTimeout(() => { try { cloud._repintarTelaAtual(); } catch (e) {} }, 4200);
@@ -16197,6 +16219,9 @@ const cloud = {
   vigiarRetorno() {
     if (typeof document === 'undefined' || cloud._vigiandoRetorno) return;
     cloud._vigiandoRetorno = true;
+    /* Atualização periódica COMPLETA: mesmo com o app aberto o dia todo, a
+       cada 10 minutos o aparelho busca o que os outros fizeram. */
+    try { setInterval(() => { try { cloud.autoSyncAoVoltar({ forcar: true }); } catch (e) {} }, 10 * 60 * 1000); } catch (e) {}
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') cloud.autoSyncAoVoltar();
     });
@@ -16394,20 +16419,214 @@ const cloud = {
    Ao entrar em QUALQUER aparelho, as configurações descem e tudo fica igual.
    Merge por chave: vence quem tem o carimbo de data mais novo.
 ============================================================================ */
+/* ============================================================================
+   CLÍNICA NA NUVEM — cadastros e modelos compartilhados (migração 0012)
+   Registro clínico já era da clínica. Os CADASTROS não: anestesistas,
+   cirurgiões, convênios, hospitais, procedimentos, formas de pagamento,
+   presets, equipamentos, termo padrão, textos padrão e logomarca viajavam
+   pelo canal pessoal — cada usuário com a sua cópia, cada aparelho novo
+   começando vazio. Aqui eles passam a morar em org_configs, uma prateleira
+   por clínica: quem cadastra num aparelho, cadastra para todo mundo.
+   Junção por CHAVE, pelo updated_at mais recente.
+============================================================================ */
+const clinicaSync = {
+  /* chave local → chave na nuvem (sem o prefixo medsys, para ficar legível) */
+  CHAVES: {
+    'medsys.v5.cad.anestesistas': 'cad_anestesistas',
+    'medsys.v5.cad.cirurgioes': 'cad_cirurgioes',
+    'medsys.v5.cad.clinicas': 'cad_clinicas',
+    'medsys.v5.cad.convenios': 'cad_convenios',
+    'medsys.v5.cad.procedimentos': 'cad_procedimentos',
+    'medsys.v5.cad.pagamentos': 'cad_pagamentos',
+    'medsys.v7.cad.presets_med': 'cad_presets_med',
+    'medsys.v7.cad.equipamentos': 'cad_equipamentos',
+    'medsys.v5.cad.assinaturas': 'cad_assinaturas',
+    'medsys.v7.termo_padrao': 'termo_padrao',
+    'medsys.v7.textos_padrao': 'textos_padrao',
+    'medsys.v7.logoCustom': 'logo',
+    'medsys.v7.orcamento_cfg': 'orcamento_cfg',
+    'medsys.v7.orcamento_modelos': 'orcamento_modelos',
+    'medsys.v7.meds_usuario': 'meds_usuario',
+    'medsys.v7.cbhpm.extras': 'cbhpm_extras',
+    'medsys.v5.fin.regras_convenio': 'fin_regras_convenio'
+  },
+  META_KEY: 'medsys.v7.clinicasync.meta',
+  _meta() { try { return JSON.parse(localStorage.getItem(clinicaSync.META_KEY) || '{}'); } catch (e) { return {}; } },
+  _salvarMeta(m) { try { localStorage.setItem(clinicaSync.META_KEY, JSON.stringify(m || {})); } catch (e) {} },
+  _hash(s) { let h = 0; const t = String(s == null ? '' : s); for (let i = 0; i < t.length; i++) h = ((h * 31) + t.charCodeAt(i)) | 0; return String(h); },
+
+  async _org() {
+    try {
+      if (typeof demo !== 'undefined' && demo.ativo()) return null;
+      if (!cloudRel.disponivel()) return null;
+      if (!(await cloud._garantirToken())) return null;
+      return await cloudRel._orgAsync();
+    } catch (e) { return null; }
+  },
+
+  /* Sobe as chaves que mudaram desde a última subida */
+  async enviar(opts = {}) {
+    const org = await clinicaSync._org(); if (!org) return 0;
+    const c = cloud.config(); const s = cloud.session();
+    const meta = clinicaSync._meta();
+    const linhas = [];
+    Object.keys(clinicaSync.CHAVES).forEach(local => {
+      const bruto = localStorage.getItem(local);
+      if (bruto == null) return;
+      const h = clinicaSync._hash(bruto);
+      if (!opts.tudo && meta[local] && meta[local].hash === h) return;   /* nada mudou */
+      let dados; try { dados = JSON.parse(bruto); } catch (e) { dados = bruto; }
+      linhas.push({ local, row: {
+        organization_id: org, chave: clinicaSync.CHAVES[local],
+        dados: { valor: dados }, updated_at: new Date().toISOString(),
+        updated_by: (s && s.user && s.user.id) || null
+      }, hash: h });
+    });
+    if (!linhas.length) return 0;
+    try {
+      const r = await fetch(c.url + '/rest/v1/org_configs?on_conflict=organization_id,chave', {
+        method: 'POST',
+        headers: Object.assign({}, cloud._headers(true), { 'Prefer': 'resolution=merge-duplicates,return=minimal' }),
+        body: JSON.stringify(linhas.map(l => l.row))
+      });
+      if (!r.ok) return 0;
+      linhas.forEach(l => { meta[l.local] = { hash: l.hash, at: l.row.updated_at }; });
+      clinicaSync._salvarMeta(meta);
+      return linhas.length;
+    } catch (e) { return 0; }
+  },
+
+  /* Baixa o que estiver mais novo na clínica e aplica neste aparelho */
+  async puxarAplicar(opts = {}) {
+    const org = await clinicaSync._org(); if (!org) return 0;
+    const c = cloud.config();
+    let linhas;
+    try {
+      const r = await fetch(c.url + '/rest/v1/org_configs?organization_id=eq.' + org + '&select=chave,dados,updated_at',
+        { headers: cloud._headers(true) });
+      if (!r.ok) return 0;
+      linhas = await r.json();
+    } catch (e) { return 0; }
+    if (!Array.isArray(linhas) || !linhas.length) return 0;
+    const porChave = {};
+    Object.keys(clinicaSync.CHAVES).forEach(local => { porChave[clinicaSync.CHAVES[local]] = local; });
+    const meta = clinicaSync._meta();
+    let aplicadas = 0;
+    linhas.forEach(l => {
+      const local = porChave[l.chave]; if (!local) return;
+      const m = meta[local] || {};
+      /* só aplica o que é MAIS NOVO do que a última versão vista aqui */
+      if (m.at && String(l.updated_at) <= String(m.at)) return;
+      const valor = l.dados && Object.prototype.hasOwnProperty.call(l.dados, 'valor') ? l.dados.valor : l.dados;
+      if (valor === undefined || valor === null) return;
+      try {
+        localStorage.setItem(local, typeof valor === 'string' ? valor : JSON.stringify(valor));
+        meta[local] = { hash: clinicaSync._hash(localStorage.getItem(local)), at: l.updated_at };
+        aplicadas++;
+      } catch (e) {}
+    });
+    if (aplicadas) {
+      clinicaSync._salvarMeta(meta);
+      clinicaSync._reaplicar();
+      if (!opts.silent) toast('☁️ ' + aplicadas + ' cadastro(s)/modelo(s) atualizado(s) pela clínica');
+    }
+    return aplicadas;
+  },
+
+  /* Faz a tela refletir o que acabou de descer */
+  _reaplicar() {
+    try { if (typeof logoUsuario !== 'undefined' && logoUsuario.aplicar) logoUsuario.aplicar(); } catch (e) {}
+    try { if (typeof ajustes !== 'undefined' && ajustes.render) ajustes.render(); } catch (e) {}
+    try { if (typeof cbhpm !== 'undefined') cbhpm._cache = null; } catch (e) {}
+    try { if (typeof autocomplete !== 'undefined' && autocomplete.recarregar) autocomplete.recarregar(); } catch (e) {}
+  },
+
+  /* Vigia local: manda o que mudou de tempos em tempos (barato: compara hash) */
+  vigiar() {
+    try {
+      setInterval(() => { try { clinicaSync.enviar(); } catch (e) {} }, 15000);
+      /* atualização periódica completa — "a cada x tempo tudo se atualiza" */
+      setInterval(() => { try { clinicaSync.puxarAplicar({ silent: true }); } catch (e) {} }, 10 * 60 * 1000);
+    } catch (e) {}
+  },
+  /* Enviar tudo e baixar tudo, sem esperar (botão / login) */
+  async sincronizarAgora(opts = {}) {
+    const enviadas = await clinicaSync.enviar({ tudo: !!opts.tudo });
+    const baixadas = await clinicaSync.puxarAplicar({ silent: true });
+    if (!opts.silent) {
+      toast('☁️ Clínica sincronizada — ' + enviadas + ' enviada(s), ' + baixadas + ' recebida(s)');
+    }
+    return { enviadas, baixadas };
+  }
+};
+
+/* ============================================================================
+   ESTADO DA NUVEM — a resposta a "está tudo salvo?" numa linha só, no topo
+   dos Ajustes, mais um botão que força a atualização completa.
+============================================================================ */
+const nuvemEstado = {
+  render() {
+    const el = document.getElementById('nuvem-estado-linha');
+    if (!el) return;
+    const partes = [];
+    let ok = true;
+    const conectado = (() => { try { return cloud.estaConfigurado() && cloud.estaLogado(); } catch (e) { return false; } })();
+    if (!conectado) {
+      el.innerHTML = '<span style="color:#b3392a">⚠️ <b>Sem nuvem neste aparelho.</b> O que você fizer fica só aqui. ' +
+        'Conecte em <b>Nuvem e backups</b>, logo abaixo.</span>';
+      return;
+    }
+    if (cloud.sessaoExpirada()) {
+      el.innerHTML = '<span style="color:#b3392a">🔑 <b>Sessão da nuvem vencida.</b> Nada foi perdido — entre de novo para voltar a sincronizar.</span> ' +
+        '<button class="btn btn-xs btn-primary" onclick="cloud.reentrar()">Entrar de novo</button>';
+      return;
+    }
+    const d = cloud.divergencia();
+    if (d) {
+      el.innerHTML = '<span style="color:#b3392a">⚠️ <b>Contas diferentes</b> (app: ' + utils.escapeHTML(d.app) + ' · nuvem: ' + utils.escapeHTML(d.nuvem) + ').</span> ' +
+        '<button class="btn btn-xs btn-primary" onclick="cloud.resolverDivergencia()">Corrigir</button>';
+      return;
+    }
+    const fila = (() => { try { return cloud._fila().length; } catch (e) { return 0; } })();
+    const ultimo = localStorage.getItem('medsys.v7.cloud.ultimo_sync');
+    partes.push('☁️ <b>Tudo na nuvem</b> — registros, cadastros da clínica, modelos e rascunhos');
+    if (fila) { ok = false; partes.push('⏳ <b>' + fila + '</b> aguardando envio (sobem sozinhos)'); }
+    if (ultimo) partes.push('🕐 última atualização ' + new Date(ultimo).toLocaleString('pt-BR'));
+    el.innerHTML = '<span style="color:' + (ok ? '#1f7a4d' : '#7a4b12') + '">' + partes.join(' · ') + '</span>';
+  },
+  async atualizarTudo() {
+    const prog = document.getElementById('nuvem-estado-prog');
+    const dizer = (t) => { if (prog) prog.textContent = t; };
+    if (!cloud.estaConfigurado() || !cloud.estaLogado()) { toast('Conecte-se à nuvem primeiro', 'warn'); return; }
+    dizer('⏳ enviando o que falta…');
+    try { await cloud.sincronizar({ silent: true }); } catch (e) {}
+    try { await cloudRel.empurrarPendentes({ silent: true }); } catch (e) {}
+    dizer('⏳ atualizando cadastros da clínica…');
+    try { await clinicaSync.sincronizarAgora({ silent: true }); } catch (e) {}
+    try { await configSync.enviar(); } catch (e) {}
+    try { await configSync.puxarAplicar(); } catch (e) {}
+    dizer('⏳ trazendo registros e rascunhos…');
+    try { await cloudDiag.puxarTudo({ silent: true }); } catch (e) {}
+    try { await rascunhosSync.enviarTodos(); } catch (e) {}
+    try { await rascunhosSync.puxarTodos({ silent: true }); } catch (e) {}
+    dizer('');
+    nuvemEstado.render();
+    try { cloud._repintarTelaAtual(); } catch (e) {}
+    toast('✅ Tudo atualizado — este aparelho está igual aos outros');
+  }
+};
+
 const configSync = {
+  /* PREFERÊNCIAS DA PESSOA (viajam entre os aparelhos DELA).
+     O que é da CLÍNICA — cadastros, modelos, logomarca, tabela CBHPM — saiu
+     daqui e passou a viajar por clinicaSync (org_configs), para valer também
+     entre USUÁRIOS diferentes do mesmo consultório. */
   CHAVES: [
-    'medsys.v7.termo_padrao',
-    'medsys.v7.textos_padrao',
     'medsys.v7.pdfbackup.cfg',
-    'medsys.v7.orcamento_cfg',
-    'medsys.v7.orcamento_modelos',
-    'medsys.v7.meds_usuario',
-    'medsys.v7.logoCustom',
     'medsys.v7.theme',
     'medsys.v7.grafico_modo',
     'medsys.v7.auth.timeout_min',
-    'medsys.v7.realtime.on',
-    'medsys.v7.cbhpm.extras'
+    'medsys.v7.realtime.on'
   ],
   META_KEY: 'medsys.v7.configsync.meta',
   _meta() { try { return JSON.parse(localStorage.getItem(configSync.META_KEY) || '{}'); } catch (e) { return {}; } },
@@ -17754,9 +17973,9 @@ const cloudDiag = {
 
   /* Puxa TUDO do banco relacional (pacientes, agenda e todos os registros)
      num toque só, e re-roda o diagnóstico. Fecha o fluxo cross-device. */
-  async puxarTudo() {
+  async puxarTudo(opts = {}) {
     const btn = document.getElementById('clouddiag-puxar-btn');
-    if (!cloudRel.disponivel()) { toast('Conecte-se à nuvem primeiro (Ajustes)', 'warn'); return; }
+    if (!cloudRel.disponivel()) { if (!opts.silent) toast('Conecte-se à nuvem primeiro (Ajustes)', 'warn'); return; }
     if (btn) { btn.disabled = true; btn.textContent = '⏳ Puxando…'; }
     try {
       try { pacientes._puxouNestaSessao = false; await pacientes.sincronizarNuvem({ silent: true }); } catch (e) {}
@@ -17766,11 +17985,11 @@ const cloudDiag = {
       }
       /* re-renderiza listas visíveis */
       try { if (state.currentModule === 'financeiro') financeiro.render(); } catch (e) {}
-      toast('☁️ Tudo sincronizado com o banco relacional');
+      if (!opts.silent) toast('☁️ Tudo sincronizado com o banco relacional');
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = '☁️ Puxar tudo da nuvem'; }
     }
-    try { await cloudDiag.rodar(); } catch (e) {}
+    if (!opts.silent) { try { await cloudDiag.rodar(); } catch (e) {} }
   }
 };
 
@@ -28690,11 +28909,13 @@ const rascunhos = {
        aparelho — começar no celular e terminar no computador) */
     rascunhos._agendarEnvio(mod);
   },
-  /* Junta as gravações seguidas num envio só, alguns segundos depois */
-  _agendarEnvio(mod) {
+  /* Junta as gravações seguidas num envio só, alguns segundos depois.
+     opts.agora = clicou em Salvar: sobe na hora, sem esperar. */
+  _agendarEnvio(mod, opts = {}) {
     try {
       rascunhos._timers = rascunhos._timers || {};
       clearTimeout(rascunhos._timers[mod]);
+      if (opts.agora) { rascunhosSync.enviar(mod); return; }
       rascunhos._timers[mod] = setTimeout(() => {
         try { rascunhosSync.enviar(mod); } catch (e) {}
       }, 4000);
@@ -39831,13 +40052,14 @@ document.addEventListener('DOMContentLoaded', () => {
   window.doses = doses;
   window.modal = modal; window.modelos = modelos; window.fin = fin;
   window.linker = linker; window.templates = templates;
-  window.rascunhos = rascunhos; window.rascunhosSync = rascunhosSync;
+  window.rascunhos = rascunhos; window.rascunhosSync = rascunhosSync; window.clinicaSync = clinicaSync; window.nuvemEstado = nuvemEstado;
   window.globalSearch = globalSearch; window.pacientes = pacientes;
   window.ajustes = ajustes; window.autocomplete = autocomplete;
   window.ajustesGrupos = ajustesGrupos;
   try { ajustesGrupos.montar(); } catch (e) {}
   window.configSync = configSync;
   try { configSync.vigiar(); } catch (e) {}
+  try { clinicaSync.vigiar(); } catch (e) {}
   window.programador = programador;
   try { programador.atualizarVisibilidade(); } catch (e) {}
   window.pendencias = pendencias;

@@ -335,6 +335,20 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   gestor (`ou_sel`). Nulo = padrão do papel. No app, salvar em *Ajustes →
   Usuários → ✏️* grava na nuvem e vale em todos os aparelhos daquela pessoa.
 
+- **Cadastros e configurações da clínica (`0012_configs_da_clinica.sql`):** ✅
+  registros clínicos já eram da clínica, mas os **cadastros** — anestesistas,
+  cirurgiões, convênios, hospitais, procedimentos, formas de pagamento,
+  presets, equipamentos, termo padrão, textos padrão, logomarca e a tabela
+  CBHPM própria — viajavam pelo canal **pessoal** (`documentos`, por
+  `user_id`). Cada usuário tinha a sua cópia: cadastrar um cirurgião no
+  computador do médico não fazia ele aparecer para a secretária, e todo
+  aparelho novo começava vazio. Agora existe `org_configs(organization_id,
+  chave)` → `dados jsonb` + `updated_at`: **lê** qualquer membro ativo,
+  **escreve** qualquer membro ativo (cadastro é do consultório), com
+  `updated_by`/`updated_at` para auditoria. No app, `clinicaSync` junta por
+  chave pelo `updated_at` mais recente, sobe o que muda e baixa ao entrar e a
+  cada 10 minutos.
+
 ## Rollback
 
 Como é aditivo, para reverter basta remover os objetos criados (as tabelas novas
