@@ -1639,18 +1639,22 @@ await test('Eventos: catálogo agrupado com multiseleção adiciona à tabela co
 });
 
 /* 37) Ajustes prático: cards do sistema em 3 grupos recolhíveis + sync automática ao entrar */
-await test('Ajustes: 12 cards viram 3 grupos recolhíveis e a sincronização roda sozinha ao entrar', async () => {
+await test('Ajustes: cards do sistema viram grupos recolhíveis (o técnico em "Avançado") e a sincronização roda sozinha ao entrar', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
     /* — grupos montados: cabeçalhos + cards movidos para dentro dos wrappers — */
     ajustesGrupos.montar();   /* idempotente (já montou no boot) */
-    out.grupos = ['nuvem', 'equipe', 'modelos'].every(id =>
+    out.grupos = ['nuvem', 'equipe', 'modelos', 'avancado'].every(id =>
       document.getElementById('ajg-cab-' + id) && document.getElementById('ajg-' + id));
     out.cardsDentro = document.getElementById('ajg-nuvem').contains(document.getElementById('cloud-card'))
       && document.getElementById('ajg-nuvem').contains(document.getElementById('armazenamento-card'))
       && document.getElementById('ajg-equipe').contains(document.getElementById('equipe-nuvem-card'))
       && document.getElementById('ajg-modelos').contains(document.getElementById('logo-usuario-card'));
+    /* o que é técnico saiu da frente: diagnóstico e migração só em "Avançado" */
+    out.tecnicoEmAvancado = document.getElementById('ajg-avancado').contains(document.getElementById('clouddiag-card'))
+      && document.getElementById('ajg-avancado').contains(document.getElementById('fase4-card'))
+      && document.getElementById('ajg-cab-avancado').classList.contains('ajg-avancado');
     /* fechados por padrão (tela compacta) */
     localStorage.removeItem(ajustesGrupos.KEY);
     ajustesGrupos._aplicar();
@@ -1683,8 +1687,9 @@ await test('Ajustes: 12 cards viram 3 grupos recolhíveis e a sincronização ro
     out.syncPacientes = chamadas.pacientes >= 1 && pacientes._puxouNestaSessao === false;
     return out;
   });
-  assert(r.grupos, 'os 3 grupos (nuvem/equipe/modelos) deveriam existir em Ajustes');
+  assert(r.grupos, 'os grupos (nuvem/equipe/modelos/avancado) deveriam existir em Ajustes');
   assert(r.cardsDentro, 'os cards do sistema deveriam estar DENTRO dos grupos');
+  assert(r.tecnicoEmAvancado, 'diagnóstico e migração deveriam ficar no grupo "Avançado", fora do caminho do dia a dia');
   assert(r.fechadoPadrao, 'os grupos deveriam vir fechados por padrão (tela compacta)');
   assert(r.abriu && r.fechou, 'o toque no cabeçalho deveria abrir/fechar e lembrar a escolha');
   assert(r.abrirPara, 'abrirPara deveria abrir o grupo que contém o card e devolvê-lo');
@@ -3891,6 +3896,65 @@ await test('Cadastros da clínica sobem e descem por org_configs, valendo entre 
   assert(r.naoAtropela, 'versão já vista não pode sobrescrever a edição local');
   assert(r.aceitaMaisNovo, 'versão mais nova da clínica deveria entrar');
   assert(r.semOrgNaoTenta, 'sem clínica conhecida, não envia nada');
+  await page.close();
+});
+
+/* 69) Acesso da secretária conferido e editado pelo médico DE QUALQUER APARELHO.
+   Antes só dava para mexer em "Usuários e segurança" — lista local: no
+   computador novo do médico a secretária nem aparecia. */
+await test('Equipe da nuvem mostra e edita o acesso de cada pessoa (vale em todos os aparelhos)', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud._garantirToken = async () => true;
+    cloud.config = () => ({ url: 'https://x.supabase.co', key: 'k' });
+    cloud._headers = () => ({});
+    cloudRel._orgAsync = async () => 'org-1';
+    auth.usuarioAtual = () => ({ uid: 'uid-medico', role: 'gestor' });
+
+    /* Sem personalização: a tela mostra o padrão do papel */
+    const semPerso = { uid: 'uid-sec', role: 'auxiliar', ativo: true, nome: 'Secretária', email: 's@x.com', permissoes: null };
+    const p1 = equipeNuvem._permsDe(semPerso);
+    out.padraoDoPapel = p1.propria === false && p1.modulos.length > 0
+      && /padrão do papel/.test(equipeNuvem._resumoAcesso(semPerso));
+
+    /* Com personalização: é ELA que vale, e a tela diz isso */
+    const comPerso = Object.assign({}, semPerso, { permissoes: { perfil: 'secretaria', modulos: ['pacientes', 'agenda', 'pre'], soImpressao: ['pre'] } });
+    const p2 = equipeNuvem._permsDe(comPerso);
+    out.personalizado = p2.propria === true && p2.modulos.join(',') === 'pacientes,agenda,pre'
+      && p2.soImpressao.join(',') === 'pre'
+      && /personalizado/.test(equipeNuvem._resumoAcesso(comPerso));
+
+    /* O modal abre com a grade já marcada pelo que está na nuvem */
+    equipeNuvem._ultimaLista = [comPerso];
+    equipeNuvem.editarAcesso('uid-sec');
+    const sels = Array.from(document.querySelectorAll('#modal-body select[name="perm-mod"]'));
+    const val = (m) => (sels.find(s => s.dataset.mod === m) || {}).value;
+    out.gradeMarcada = sels.length > 0 && val('pacientes') === 'edit' && val('pre') === 'print' && val('dashboard') === 'nenhum';
+
+    /* Salvar grava NA NUVEM (organization_users.permissoes), não só aqui */
+    let corpo = null, alvo = '';
+    const fetchOrig = window.fetch;
+    window.fetch = async (url, opts) => {
+      alvo = String(url);
+      try { corpo = JSON.parse(opts.body); } catch (e) {}
+      return { ok: true, status: 200, json: async () => ({}) };
+    };
+    const sel = sels.find(s => s.dataset.mod === 'financeiro'); if (sel) sel.value = 'edit';
+    await equipeNuvem.salvarAcesso('uid-sec');
+    window.fetch = fetchOrig;
+    out.gravouNaNuvem = /organization_users/.test(alvo) && /uid-sec/.test(alvo) && /org-1/.test(alvo)
+      && !!corpo && Array.isArray(corpo.permissoes.modulos)
+      && corpo.permissoes.modulos.includes('financeiro')
+      && corpo.permissoes.soImpressao.includes('pre');
+    return out;
+  });
+  assert(r.padraoDoPapel, 'sem personalização, a equipe deveria mostrar o padrão do papel');
+  assert(r.personalizado, 'com personalização na nuvem, é ela que vale e a tela deveria dizer');
+  assert(r.gradeMarcada, 'o modal deveria abrir com a grade marcada pelo que está na nuvem');
+  assert(r.gravouNaNuvem, 'salvar deveria gravar em organization_users.permissoes da clínica');
   await page.close();
 });
 

@@ -3309,6 +3309,10 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
   border-radius: 999px; padding: 2px 9px; font-size: .7rem; font-weight: 800;
 }
 .ajg-header.aberto .cg-total { background: var(--primary-soft); color: var(--primary-dark); }
+/* "Avançado": continua acessível, mas discreto — não disputa atenção com o resto */
+.ajg-header.ajg-avancado { background: transparent; border-style: dashed; margin-top: 14px; }
+.ajg-header.ajg-avancado b { color: var(--text-mute); font-weight: 700; }
+.ajg-header.ajg-avancado .cg-total { opacity: .65; }
 .proc-grupo-label {
   font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .5px;
   color: var(--primary); padding: 12px 4px 6px; margin-top: 6px;
@@ -8422,9 +8426,6 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
 <div class="module" id="module-ajustes" data-module="ajustes">
   <div class="action-bar">
     <button class="btn btn-sm" id="btn-expandir-ajustes" onclick="ui.alternarTodos('ajustes')" title="Expandir ou recolher todas as seções">⊕ Expandir tudo</button>
-    <button class="btn" onclick="ajustes.exportarTudo()"><span class="icon">⬇️</span> Exportar todos os cadastros</button>
-    <button class="btn btn-ghost" onclick="ajustes.importarTudo()"><span class="icon">⬆️</span> Importar cadastros</button>
-    <input type="file" id="import-ajustes-file" accept=".json" style="display:none" onchange="ajustes.lerImport(event)">
   </div>
 
   <div class="container">
@@ -8459,10 +8460,8 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
 
         <div class="cloud-actions" style="margin-bottom:6px">
           <button type="button" id="cloud-teste-btn" class="btn btn-sm" onclick="cloud.testarConexao()">🔌 Testar conexão com a nuvem</button>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="cloud.testarPublicacao()">🌐 Testar publicação (site/Netlify)</button>
         </div>
         <div id="cloud-teste-resultado" class="diag-box" style="display:none"></div>
-        <div id="pub-teste-resultado" class="diag-box" style="display:none"></div>
 
         <details class="cloud-config-details" id="cloud-config-box">
           <summary>⚙️ Configuração do servidor (já preenchida)</summary>
@@ -8491,11 +8490,9 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
 
         <div id="cloud-logout-box" style="display:none;margin-top:12px">
           <div class="cloud-actions">
-            <button type="button" class="btn btn-primary btn-sm" onclick="cloud.uiSincronizar()">🔄 Sincronizar agora</button>
-            <button type="button" class="btn btn-sm" onclick="cloud.uiEnviarTudo()">⬆️ Enviar tudo para a nuvem</button>
-            <button type="button" class="btn btn-ghost btn-sm" onclick="cloud.uiLogout()">🚪 Desconectar</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="cloud.uiLogout()">🚪 Desconectar deste aparelho</button>
           </div>
-          <p style="font-size:.74rem;color:var(--text-mute);margin-top:8px">Suas gravações sobem para a nuvem automaticamente em segundo plano. Se a internet cair, elas ficam numa fila e sobem quando voltar.</p>
+          <p style="font-size:.74rem;color:var(--text-mute);margin-top:8px">Tudo sobe para a nuvem sozinho, em segundo plano. Se a internet cair, fica numa fila e sobe quando voltar. Para forçar, use <b>🔄 Atualizar tudo agora</b>, no alto desta tela.</p>
         </div>
       </div>
     </section>
@@ -8530,15 +8527,22 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
+        <p style="font-size:.8rem;color:var(--text-mute);margin:0 0 10px;line-height:1.6">
+          No dia a dia isto não é preciso: <b>🔄 Atualizar tudo agora</b>, no alto da tela, já faz o envio e a
+          busca completos. Use daqui só quando algo estiver visivelmente errado.
+        </p>
         <button type="button" class="btn btn-sm" onclick="cloudDiag.rodar()">🩺 Rodar diagnóstico</button>
         <button type="button" class="btn btn-sm" id="clouddiag-puxar-btn" onclick="cloudDiag.puxarTudo()" title="Traz para este aparelho tudo o que está no banco relacional (pacientes, agenda, fichas…)">☁️ Puxar tudo da nuvem</button>
+        <button type="button" class="btn btn-sm" onclick="cloud.uiEnviarTudo()" title="Reenvia todos os registros deste aparelho para a nuvem">⬆️ Reenviar tudo para a nuvem</button>
         <button type="button" class="btn btn-sm" onclick="cloudRel.enviarTudoParaClinica()" title="Envia todos os registros deste aparelho para a clínica (organização) atual — use ao criar/entrar numa clínica para levar o histórico junto">🏥 Enviar tudo para a minha clínica</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="cloud.testarPublicacao()" title="De onde este aparelho está rodando o app">🌐 Testar publicação</button>
         <span id="clinica-envio-prog" style="font-size:.78rem;color:var(--text-mute);margin-left:8px"></span>
         <label class="autosave-toggle" style="margin-left:12px" title="Recebe atualizações ao vivo de outros aparelhos (experimental)">
           <input type="checkbox" id="realtime-chk" onchange="cloudRealtime.toggle(this.checked)"> Tempo real (beta)
           <span id="realtime-status" style="margin-left:6px;font-size:.72rem;color:var(--text-mute)"></span>
         </label>
         <div id="clouddiag-resultado" class="diag-box" style="display:none;margin-top:12px"></div>
+        <div id="pub-teste-resultado" class="diag-box" style="display:none;margin-top:12px"></div>
       </div>
     </section>
 
@@ -8599,6 +8603,13 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <button type="button" class="btn btn-sm" onclick="lixeira.abrir()" title="Registros excluídos ficam recuperáveis por 30 dias">🗑️ Lixeira</button>
           <input type="file" id="backup-completo-file" accept=".json" style="display:none" onchange="backupCompleto.lerImport(event)">
         </div>
+        <!-- Só os cadastros, em arquivo. Hoje eles já viajam pela nuvem da clínica
+             sozinhos — isto aqui é para levar para fora do sistema. -->
+        <div class="cloud-actions" style="margin-top:10px">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="ajustes.exportarTudo()" title="Só os cadastros (equipe, convênios, hospitais…), sem as fichas">⬇️ Exportar só os cadastros</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="ajustes.importarTudo()">⬆️ Importar cadastros</button>
+          <input type="file" id="import-ajustes-file" accept=".json" style="display:none" onchange="ajustes.lerImport(event)">
+        </div>
       </div>
     </section>
 
@@ -8651,6 +8662,10 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
         </p>
         <div style="font-size:.74rem;color:var(--text-mute);background:var(--surface-alt);padding:9px 12px;border-radius:7px;margin-bottom:14px">
           ⚠️ Esta é uma trava de acesso local (as senhas ficam guardadas em hash neste aparelho). Para segurança real dos dados, mantenha a senha/biometria do próprio dispositivo ativada.
+        </div>
+        <div style="font-size:.76rem;color:var(--text-soft);background:var(--surface-alt);padding:9px 12px;border-radius:7px;margin-bottom:14px">
+          👥 Esta lista é <b>deste aparelho</b>. Para conferir ou mudar o que a sua secretária (ou qualquer pessoa da equipe)
+          acessa <b>em todos os aparelhos</b>, use <b>Equipe da nuvem → ✏️ Acesso</b>, logo abaixo.
         </div>
 
         <!-- 🔐 Bloqueio de tela -->
@@ -18351,7 +18366,7 @@ const equipeNuvem = {
     const c = cloud.config();
     try {
       const [ro, rp] = await Promise.all([
-        fetch(c.url + '/rest/v1/organization_users?organization_id=eq.' + org + '&select=user_id,role,ativo&order=created_at.asc', { headers: cloud._headers(true) }),
+        fetch(c.url + '/rest/v1/organization_users?organization_id=eq.' + org + '&select=user_id,role,ativo,permissoes&order=created_at.asc', { headers: cloud._headers(true) }),
         fetch(c.url + '/rest/v1/profiles?select=id,nome,email,funcao,ativo', { headers: cloud._headers(true) })
       ]);
       const ous = ro.ok ? await ro.json() : [];
@@ -18362,7 +18377,8 @@ const equipeNuvem = {
       return Object.entries(byUser).map(([uid, rows]) => {
         const efetivo = rows.find(r => r.ativo) || rows[0];
         const p = pById[uid] || {};
-        return { uid, role: efetivo.role, ativo: !!efetivo.ativo, nome: p.nome || '', email: p.email || '' };
+        return { uid, role: efetivo.role, ativo: !!efetivo.ativo, nome: p.nome || '', email: p.email || '',
+                 permissoes: efetivo.permissoes || null };
       });
     } catch (e) { return null; }
   },
@@ -18411,17 +18427,92 @@ const equipeNuvem = {
     if (lista === null) { host.innerHTML = '<p style="font-size:.82rem;color:var(--danger,#b3392a)">Não foi possível carregar a equipe agora.</p>'; if (addBox) addBox.style.display = 'none'; return; }
     if (addBox) addBox.style.display = '';
     const meuUid = (auth.usuarioAtual() || {}).uid;
+    equipeNuvem._ultimaLista = lista;
     host.innerHTML = lista.length ? lista.map(m => {
       const eu = m.uid && m.uid === meuUid;
       const opts = equipeNuvem.PAPEIS.map(([v, l]) => '<option value="' + v + '"' + (v === m.role ? ' selected' : '') + '>' + l + '</option>').join('');
       return '<div class="user-item">' +
         '<div class="ui-info"><div class="ui-nome">' + utils.escapeHTML(m.nome || m.email || m.uid.slice(0, 8)) + (eu ? ' <span style="font-size:.72rem;color:var(--text-mute)">(você)</span>' : '') + (m.ativo ? '' : ' <span style="font-size:.72rem;color:var(--danger,#b3392a)">· inativo</span>') + '</div>' +
-        '<div class="ui-perfil">' + utils.escapeHTML(m.email || '') + '</div></div>' +
+        '<div class="ui-perfil">' + utils.escapeHTML(m.email || '') + ' · ' + equipeNuvem._resumoAcesso(m) + '</div></div>' +
         '<div style="display:flex;gap:6px;align-items:center;flex-shrink:0">' +
         '<select style="font-size:.78rem" onchange="equipeNuvem.mudarPapel(\'' + m.uid + '\', this.value)"' + (eu ? ' disabled title="Você não pode mudar o próprio papel"' : '') + '>' + opts + '</select>' +
+        '<button type="button" class="btn btn-xs" onclick="equipeNuvem.editarAcesso(\'' + m.uid + '\')" title="Escolher módulo a módulo o que esta pessoa vê e edita — vale em todos os aparelhos dela">✏️ Acesso</button>' +
         '<button type="button" class="btn btn-xs' + (m.ativo ? ' btn-danger' : '') + '" onclick="equipeNuvem.ativar(\'' + m.uid + '\', ' + (m.ativo ? 'false' : 'true') + ')"' + (eu ? ' disabled' : '') + '>' + (m.ativo ? 'Desativar' : 'Ativar') + '</button>' +
         '</div></div>';
     }).join('') : '<p style="font-size:.82rem;color:var(--text-mute)">Só você por enquanto. Use “Adicionar membro por e-mail” abaixo.</p>';
+  },
+
+  /* ---- Acesso por módulo, editado pelo gestor e guardado NA NUVEM ----------
+     Antes isso só existia em "Usuários e segurança", que é a lista LOCAL de
+     cada aparelho: no computador novo do médico a secretária simplesmente não
+     aparecia, e não dava para conferir nem mudar o acesso dela. Aqui a lista é
+     a da clínica, então funciona de qualquer aparelho. */
+  _ultimaLista: null,
+  _permsDe(m) {
+    const p = m && m.permissoes;
+    if (p && Array.isArray(p.modulos)) {
+      return { perfil: p.perfil || 'secretaria', modulos: p.modulos.slice(),
+               soImpressao: Array.isArray(p.soImpressao) ? p.soImpressao.slice() : [], propria: true };
+    }
+    const d = auth._permsDoPapel(m && m.role) || { perfil: 'secretaria', modulos: [], soImpressao: [] };
+    return { perfil: d.perfil, modulos: (d.modulos || []).slice(), soImpressao: (d.soImpressao || []).slice(), propria: false };
+  },
+  _resumoAcesso(m) {
+    const p = equipeNuvem._permsDe(m);
+    const n = p.modulos.length;
+    const base = n + (n === 1 ? ' módulo' : ' módulos');
+    return p.propria
+      ? '<span title="Acesso ajustado à mão pelo gestor">✏️ acesso personalizado · ' + base + '</span>'
+      : '<span title="Segue o padrão do papel">' + base + ' (padrão do papel)</span>';
+  },
+  editarAcesso(uid) {
+    const m = (equipeNuvem._ultimaLista || []).find(x => x.uid === uid);
+    if (!m) { toast('Recarregue a equipe e tente de novo', 'warn'); return; }
+    const p = equipeNuvem._permsDe(m);
+    const quem = utils.escapeHTML(m.nome || m.email || uid.slice(0, 8));
+    const body =
+      '<p style="font-size:.84rem;margin:0 0 4px">Acesso de <b>' + quem + '</b> ' +
+      '<span style="color:var(--text-mute)">(' + utils.escapeHTML(equipeNuvem._rot(m.role)) + ')</span></p>' +
+      '<p style="font-size:.76rem;color:var(--text-mute);margin:0 0 10px">Para cada módulo: <b>Sem acesso</b>, <b>✏️ Editar</b> ou <b>🖨️ Só impressão</b>. ' +
+      'Fica guardado na clínica — vale em <b>todos</b> os aparelhos desta pessoa.</p>' +
+      ajustesUsuarios._gradePermissoes(p.modulos, p.soImpressao);
+    const footer =
+      '<button class="btn" onclick="modal.close()">Cancelar</button>' +
+      '<button class="btn btn-ghost" onclick="equipeNuvem.limparAcesso(\'' + uid + '\')" title="Volta ao conjunto padrão do papel">↺ Usar o padrão do papel</button>' +
+      '<button class="btn btn-primary" onclick="equipeNuvem.salvarAcesso(\'' + uid + '\')">Salvar acesso</button>';
+    modal.open('🔐 Acesso de ' + quem, body, footer);
+  },
+  async salvarAcesso(uid) {
+    const m = (equipeNuvem._ultimaLista || []).find(x => x.uid === uid);
+    if (!m) return;
+    const { modulos, soImpressao } = ajustesUsuarios._lerGradePermissoes();
+    const perfil = equipeNuvem._permsDe(m).perfil;
+    const org = await equipeNuvem._org();
+    const ok = await auth.salvarPermissoesNaNuvem(uid, org, { perfil, modulos, soImpressao });
+    modal.close();
+    if (!ok) { toast('⚠️ Não consegui gravar na nuvem. Só o gestor pode; e a migração 0011 precisa estar rodada.', 'warn'); return; }
+    /* Se esta pessoa também está na lista local deste aparelho, alinha lá */
+    try {
+      const local = auth._lerUsuarios().find(x => x.uid === uid);
+      if (local) auth.atualizarPermissoes(local.id, { perfil, modulos, soImpressao, nome: local.nome });
+    } catch (e) {}
+    toast('✅ Acesso salvo na clínica — vale em todos os aparelhos dela');
+    equipeNuvem.render();
+  },
+  async limparAcesso(uid) {
+    const org = await equipeNuvem._org();
+    if (!org) return;
+    if (!(await cloud._garantirToken())) { toast('Sessão expirada', 'warn'); return; }
+    try {
+      const c = cloud.config();
+      const r = await fetch(c.url + '/rest/v1/organization_users?user_id=eq.' + encodeURIComponent(uid) +
+        '&organization_id=eq.' + encodeURIComponent(org),
+        { method: 'PATCH', headers: Object.assign({}, cloud._headers(true), { 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }),
+          body: JSON.stringify({ permissoes: null }) });
+      modal.close();
+      toast(r.ok ? '↺ Voltou ao padrão do papel' : '⚠️ Não consegui alterar agora', r.ok ? 'success' : 'warn');
+      equipeNuvem.render();
+    } catch (e) { toast('Falha', 'error'); }
   },
 
   async _org() { return await cloudRel._orgAsync(); },
@@ -39930,15 +40021,18 @@ window.addEventListener('beforeprint', atualizarMetaImpressao);
 const ajustesGrupos = {
   KEY: 'medsys.v7.ajustes.sysgrupos',
   GRUPOS: [
-    { id: 'nuvem', titulo: '☁️ Nuvem e backups',
-      desc: 'A sincronização é automática ao entrar. Aqui: cópias de segurança, PDFs na nuvem e espaço do aparelho',
-      cards: ['cloud-card', 'clouddiag-card', 'backup-completo-card', 'pdf-backup-card', 'armazenamento-card', 'fase4-card'] },
-    { id: 'equipe', titulo: '🔐 Usuários, equipe e auditoria',
-      desc: 'Login e permissões, membros da nuvem e registro de quem fez o quê',
+    { id: 'nuvem', titulo: '☁️ Nuvem, backup e espaço',
+      desc: 'A sincronização acontece sozinha. Aqui: entrar na nuvem, cópia de segurança em arquivo, PDFs e espaço do aparelho',
+      cards: ['cloud-card', 'backup-completo-card', 'pdf-backup-card', 'armazenamento-card'] },
+    { id: 'equipe', titulo: '🔐 Usuários, equipe e permissões',
+      desc: 'Quem entra no sistema, o que cada um pode ver e o registro de quem fez o quê',
       cards: ['usuarios-card', 'equipe-nuvem-card', 'auditoria-card'] },
-    { id: 'modelos', titulo: '📄 Modelos e aparência',
-      desc: 'Termo de consentimento padrão, textos padrão por campo e logomarca',
-      cards: ['termo-padrao-card', 'textos-padrao-card', 'logo-usuario-card', 'cbhpm-card'] }
+    { id: 'modelos', titulo: '📄 Modelos, logomarca e procedimentos',
+      desc: 'Termo de consentimento padrão, textos padrão por campo, logomarca e a sua tabela CBHPM',
+      cards: ['termo-padrao-card', 'textos-padrao-card', 'logo-usuario-card', 'cbhpm-card'] },
+    { id: 'avancado', titulo: '🛠️ Avançado', avancado: true,
+      desc: 'Ferramentas técnicas. No uso normal você não precisa abrir isto — só se algo der errado e for pedido',
+      cards: ['clouddiag-card', 'fase4-card'] }
   ],
   _salvos() { try { return JSON.parse(localStorage.getItem(ajustesGrupos.KEY) || '{}'); } catch (e) { return {}; } },
   _aberto(id) { return !!ajustesGrupos._salvos()[id]; },   /* fechado por padrão */
@@ -39977,6 +40071,7 @@ const ajustesGrupos = {
       if (!cab || !wrap) return;
       const aberto = ajustesGrupos._aberto(g.id);
       cab.classList.toggle('aberto', aberto);
+      cab.classList.toggle('ajg-avancado', !!g.avancado);
       cab.innerHTML = '<span class="cg-seta">' + (aberto ? '▾' : '▸') + '</span>' +
         '<span style="flex:1;min-width:0"><b>' + g.titulo + '</b>' +
         '<small style="display:block;font-weight:400;color:var(--text-mute);white-space:normal;line-height:1.4">' + g.desc + '</small></span>' +
