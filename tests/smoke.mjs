@@ -4192,6 +4192,98 @@ await test('Varredura acha o que já está repetido, mantém o mais recente na L
   await page.close();
 });
 
+/* 74) Ficha, itens 3/4/5: o que se escolhe no card (técnica, agulha, calibre,
+   sítio, dispositivo, horário) tem que aparecer JÁ ESCRITO no evento. */
+await test('Ficha: técnica, agulha, sítio e horário escolhidos nos cards entram sozinhos no evento', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    location.hash = '#anestesia';
+    anestesia.graficoUI._contexto = 'anestesia';
+    document.getElementById('eventos-body').innerHTML = '';
+    const f = document.getElementById('form-anestesia');
+    const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el) el.value = v; return !!el; };
+
+    /* --- CARD 3: raqui com todos os detalhes --- */
+    out.temCampos = set('bloqueio_tipo', 'Raquianestesia') && set('bloqueio_espaco', 'L2-L3')
+      && set('bloqueio_posicao', 'Sentado') && set('bloqueio_agulha', 'Whitacre')
+      && set('bloqueio_calibre', '27G') && set('bloqueio_tentativas', '2')
+      && set('bloqueio_puncao', 'Múltipla') && set('bloqueio_liquor', 'Cristalino')
+      && set('bloqueio_hora', '08:15');
+
+    const texto = anestesia.eventos.descricaoPara('Raquianestesia');
+    out.descreveEscolhas = /L2-L3/.test(texto) && /Whitacre 27G/.test(texto) && /sentado/i.test(texto)
+      && /2 tentativas/.test(texto) && /múltipla/i.test(texto) && /cristalino/i.test(texto)
+      && !/L3–L4/.test(texto) && !/fino calibre/.test(texto);
+
+    /* o horário do card cria/ajusta o evento na linha do tempo */
+    anestesia.eventos.sincronizarDoBloqueio();
+    const linhas = () => Array.from(document.querySelectorAll('#eventos-body tr')).map(tr => ({
+      tr, tipo: (tr.querySelector('[name="evt_tipo[]"]') || {}).value,
+      hora: (tr.querySelector('[name="evt_hora[]"]') || {}).value,
+      obs: (tr.querySelector('[name="evt_obs[]"]') || {}).value
+    }));
+    const evRaqui = linhas().find(l => l.tipo === 'Raquianestesia');
+    out.criouComHora = !!evRaqui && evRaqui.hora === '08:15';
+    out.jaVemEscrito = !!evRaqui && /L2-L3/.test(evRaqui.obs) && /Whitacre 27G/.test(evRaqui.obs);
+
+    /* mudar o card reescreve o evento */
+    set('bloqueio_espaco', 'L4-L5');
+    anestesia.eventos.atualizarDescricoes();
+    out.acompanhaMudanca = /L4-L5/.test(linhas().find(l => l.tipo === 'Raquianestesia').obs);
+
+    /* o que a pessoa digitou à mão é intocável */
+    const alvo = linhas().find(l => l.tipo === 'Raquianestesia');
+    alvo.tr.querySelector('[name="evt_obs[]"]').value = 'Meu texto próprio';
+    anestesia.eventos._marcarManual(alvo.tr.querySelector('[name="evt_obs[]"]'));
+    set('bloqueio_espaco', 'T8');
+    anestesia.eventos.atualizarDescricoes();
+    out.respeitaManual = linhas().find(l => l.tipo === 'Raquianestesia').obs === 'Meu texto próprio';
+
+    /* --- CARD 5: via aérea e acesso venoso --- */
+    document.getElementById('eventos-body').innerHTML = '';
+    set('via_aerea_detalhe', 'TOT 7,5 com cuff · Cormack I · fixado a 21 cm');
+    set('via_aerea_hora', '08:40');
+    const selVia = f.querySelector('[name="via_aerea_uso"]');
+    selVia.value = 'Intubação orotraqueal';
+    anestesia.eventos.aoSelecionarViaAerea(selVia);
+    const evIot = linhas().find(l => l.tipo === 'Intubação');
+    out.viaAerea = !!evIot && evIot.hora === '08:40'
+      && /TOT 7,5 com cuff/.test(evIot.obs) && /orotraqueal/.test(evIot.obs);
+
+    /* detalhe do dispositivo entra na venoclise */
+    const chk = Array.from(f.querySelectorAll('[name="dispositivos[]"]')).find(c => c.value === 'Acesso venoso periférico');
+    chk.checked = true; anestesia.disp.alternar(chk);
+    const det = Array.from(f.querySelectorAll('[name="disp_det[]"]')).find(x => x.getAttribute('data-disp') === 'Acesso venoso periférico');
+    det.value = 'Jelco 18G em dorso da mão direita';
+    anestesia.eventos.add({ tipo: 'Venoclise', hora: '08:00', obs: anestesia.eventos.descricaoPara('Venoclise'), auto: true });
+    anestesia.eventos.atualizarDescricoes();
+    const evVeno = linhas().find(l => l.tipo === 'Venoclise');
+    out.dispositivo = !!evVeno && /Jelco 18G em dorso da mão direita/.test(evVeno.obs);
+
+    /* a marca "auto" sobrevive a salvar e reabrir */
+    const coletado = anestesia.eventos.coletar();
+    out.guardaMarca = coletado.some(e => e.tipo === 'Venoclise' && e.auto === true);
+    anestesia.eventos.restaurar(coletado);
+    det.value = 'Jelco 20G em antebraço esquerdo';
+    anestesia.eventos.atualizarDescricoes();
+    out.sobreviveAoSalvar = /Jelco 20G em antebraço esquerdo/.test(linhas().find(l => l.tipo === 'Venoclise').obs);
+
+    document.getElementById('eventos-body').innerHTML = '';
+    return out;
+  });
+  assert(r.temCampos, 'os campos de detalhe do bloqueio, incluindo o horário, deveriam existir');
+  assert(r.descreveEscolhas, 'a descrição padrão deveria sair reescrita com o que foi escolhido, sem o texto genérico');
+  assert(r.criouComHora, 'o horário digitado no card deveria criar o evento na hora certa');
+  assert(r.jaVemEscrito, 'o evento deveria nascer já com os detalhes do card');
+  assert(r.acompanhaMudanca, 'mudar o card deveria reescrever o evento');
+  assert(r.respeitaManual, 'texto digitado à mão no evento não pode ser sobrescrito');
+  assert(r.viaAerea, 'via aérea: detalhe e horário do card deveriam entrar no evento de intubação');
+  assert(r.dispositivo, 'o detalhe do acesso venoso deveria entrar no evento de venoclise');
+  assert(r.guardaMarca && r.sobreviveAoSalvar, 'a marca de texto automático precisa sobreviver a salvar e reabrir');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
