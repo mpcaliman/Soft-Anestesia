@@ -7664,7 +7664,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
             </div>
             <div class="field col-3"><label>Data do procedimento</label><input type="date" name="data_proc"></div>
             <div class="field col-3"><label>Tipo de pagamento</label>
-              <select name="tipo_pagamento"><option value="">—</option><option>Particular</option><option>Convênio</option><option>SUS</option></select>
+              <select name="tipo_pagamento"><option value="">—</option><option>Particular</option><option>Convênio</option><option>SUS</option><option>Cortesia</option></select>
             </div>
             <div class="field col-6"><label>Procedimento principal <small style="color:var(--text-mute);font-weight:400">(CBHPM)</small></label><input type="text" name="procedimento" class="cbhpm-autocomplete" placeholder="Digite parte do procedimento ou o código TUSS..."></div>
             <div class="field col-6"><label>Cirurgião</label><input type="text" name="cirurgiao"></div>
@@ -8010,6 +8010,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
                 <option>Cartão (parcelado)</option>
                 <option>Transferência / TED</option>
                 <option>Boleto</option>
+                <option>Cortesia</option>
                 <option>Outro</option>
               </select>
             </div>
@@ -8620,6 +8621,23 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </section>
 
     <!-- 💾 BACKUP COMPLETO (todos os dados) -->
+    <!-- 🔁 REGISTROS REPETIDOS -->
+    <section class="card" id="duplicados-card">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-icon">🔁</span><h2>Registros repetidos<small>Mesmo paciente, mesmo dia, mesmo módulo — mantenha só o que vale</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <p style="font-size:.84rem;color:var(--text-soft);margin:0 0 10px;line-height:1.6">
+          Ao finalizar, o sistema já pergunta se é para substituir ou gravar como nova. Isto aqui é para o
+          <strong>que ficou para trás</strong>: mostra cada caso, qual é o mais recente e o que sairia.
+          Nada é apagado sem o seu toque, e o que sai vai para a <strong>Lixeira</strong> — volta por 30 dias.
+        </p>
+        <button type="button" class="btn btn-sm btn-primary" onclick="duplicados.abrir()">🔍 Procurar registros repetidos</button>
+        <span id="dup-resumo" style="font-size:.78rem;color:var(--text-mute);margin-left:8px"></span>
+      </div>
+    </section>
+
     <section class="card" id="backup-completo-card">
       <div class="card-header" onclick="ui.toggleCard(this)">
         <div class="card-title-wrap"><span class="card-icon">💾</span><h2>Backup completo<small>Baixa TODOS os dados (fichas, pacientes, cadastros) num único arquivo</small></h2></div>
@@ -10722,6 +10740,125 @@ const duplicados = {
     modal.close();
     if (typeof seguir === 'function') seguir(modo);
   },
+  /* ---- VARREDURA: o que JÁ está repetido -----------------------------------
+     A pergunta ao finalizar protege daqui para a frente. Isto aqui limpa o que
+     ficou para trás. Nada é apagado sem o toque de quem está olhando, e o que
+     sai vai para a Lixeira (30 dias). */
+  MODS: ['pre', 'consulta', 'anestesia', 'recuperacao', 'termo', 'prescricao', 'risco', 'documentos', 'financeiro', 'orcamento'],
+  _quando(r) { return new Date(r._updatedAt || r._createdAt || 0).getTime() || 0; },
+  varrer(opts = {}) {
+    const mods = opts.mods || duplicados.MODS;
+    const grupos = [];
+    mods.forEach(mod => {
+      let lst = [];
+      try { lst = store.list(mod) || []; } catch (e) { return; }
+      const por = {};
+      lst.forEach(r => {
+        if (!r || !r._id) return;
+        const nome = duplicados._norm(duplicados._nome(r));
+        const dia = duplicados._dia(r);
+        if (!nome || !dia) return;
+        (por[nome + '|' + dia] = por[nome + '|' + dia] || []).push(r);
+      });
+      Object.keys(por).forEach(k => {
+        const itens = por[k];
+        if (itens.length < 2) return;
+        itens.sort((a, b) => duplicados._quando(b) - duplicados._quando(a));   /* mais recente primeiro */
+        grupos.push({ mod, nome: duplicados._nome(itens[0]), dia: itens[0] && duplicados._dia(itens[0]), itens });
+      });
+    });
+    grupos.sort((a, b) => (b.dia || '').localeCompare(a.dia || '') || a.mod.localeCompare(b.mod));
+    return grupos;
+  },
+  /* Mantém o mais recente do grupo; o resto vai para a Lixeira. Devolve quantos saíram. */
+  manterUltimo(mod, nomeNorm, dia) {
+    const g = duplicados.varrer({ mods: [mod] })
+      .find(x => duplicados._norm(x.nome) === duplicados._norm(nomeNorm) && x.dia === dia);
+    if (!g) return 0;
+    let n = 0;
+    g.itens.slice(1).forEach(r => { try { store.delete(mod, r._id); n++; } catch (e) {} });
+    return n;
+  },
+
+  /* Linha ao lado do botão em Ajustes: diz de cara se há algo a limpar */
+  resumoNoCard() {
+    const el = document.getElementById('dup-resumo');
+    if (!el) return;
+    let grupos = [];
+    try { grupos = duplicados.varrer(); } catch (e) { return; }
+    const sobra = grupos.reduce((a, g) => a + g.itens.length - 1, 0);
+    el.innerHTML = sobra
+      ? '<span style="color:#7a4b12">⚠️ ' + grupos.length + (grupos.length === 1 ? ' caso' : ' casos') + ' · ' + sobra + ' sobrando</span>'
+      : '✅ nada repetido';
+  },
+
+  /* ---- Tela de limpeza ---- */
+  abrir() {
+    modal.open('🔁 Registros repetidos', '<div id="dup-corpo">⏳ Procurando…</div>',
+      '<button class="btn" onclick="modal.close()">Fechar</button>' +
+      '<button class="btn btn-finalizar" id="dup-todos" onclick="duplicados.manterUltimoEmTodos()">✅ Manter só o mais recente em todos</button>');
+    setTimeout(() => duplicados._render(), 30);
+  },
+  _render() {
+    const host = document.getElementById('dup-corpo');
+    if (!host) return;
+    const grupos = duplicados.varrer();
+    const btnTodos = document.getElementById('dup-todos');
+    if (!grupos.length) {
+      host.innerHTML = '<p style="font-size:.9rem;margin:0">✅ Nenhum registro repetido. Cada paciente tem um registro por dia em cada módulo.</p>';
+      if (btnTodos) btnTodos.style.display = 'none';
+      return;
+    }
+    if (btnTodos) btnTodos.style.display = '';
+    const sobra = grupos.reduce((a, g) => a + g.itens.length - 1, 0);
+    host.innerHTML =
+      '<p style="font-size:.88rem;margin:0 0 4px"><b>' + grupos.length + (grupos.length === 1 ? ' caso' : ' casos') +
+      '</b> de registro repetido — mesmo paciente, mesmo dia, mesmo módulo. Ao todo <b>' + sobra +
+      (sobra === 1 ? '</b> registro sobrando.' : '</b> registros sobrando.') + '</p>' +
+      '<p style="font-size:.78rem;color:var(--text-mute);margin:0 0 12px">O que sair vai para a <b>Lixeira</b> e pode voltar por 30 dias. ' +
+      'Se dois forem procedimentos diferentes do mesmo dia, deixe como está.</p>' +
+      grupos.map(g => {
+        const linhas = g.itens.map((r, i) => {
+          const quando = duplicados._quando(r) ? new Date(duplicados._quando(r)).toLocaleString('pt-BR') : '—';
+          let det = '';
+          try { det = historico._detalheItem(g.mod, r) || ''; } catch (e) {}
+          return '<li style="margin-bottom:3px">' +
+            (i === 0 ? '<b style="color:#1f7a4d">MAIS RECENTE</b> · ' : '<span style="color:var(--text-mute)">sai</span> · ') +
+            utils.escapeHTML(quando) + (r._finalizado ? ' · finalizado' : ' · em aberto') +
+            (det ? '<br><span style="color:var(--text-mute);font-size:.78rem">' + det + '</span>' : '') +
+            '</li>';
+        }).join('');
+        return '<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:10px">' +
+          '<div style="font-size:.86rem;font-weight:600;margin-bottom:6px">' +
+          utils.escapeHTML(duplicados._rotulo(g.mod)) + ' · ' + utils.escapeHTML(g.nome) + ' · ' + historico._fmtData(g.dia) +
+          ' <span style="font-weight:400;color:var(--text-mute)">(' + g.itens.length + ' registros)</span></div>' +
+          '<ul style="margin:0 0 8px;padding-left:18px;font-size:.82rem;line-height:1.5">' + linhas + '</ul>' +
+          '<button type="button" class="btn btn-xs" onclick="duplicados._limparGrupo(\'' + g.mod + '\', ' +
+          JSON.stringify(g.nome).replace(/"/g, '&quot;') + ', \'' + g.dia + '\')">🔁 Manter só o mais recente</button>' +
+          '</div>';
+      }).join('');
+  },
+  _limparGrupo(mod, nome, dia) {
+    const n = duplicados.manterUltimo(mod, nome, dia);
+    toast(n ? '🔁 ' + n + (n === 1 ? ' registro foi para a Lixeira' : ' registros foram para a Lixeira') : 'Nada a fazer');
+    duplicados._render();
+    try { if (typeof pacientes !== 'undefined' && pacientes.render) pacientes.render(); } catch (e) {}
+  },
+  manterUltimoEmTodos() {
+    const grupos = duplicados.varrer();
+    const sobra = grupos.reduce((a, g) => a + g.itens.length - 1, 0);
+    if (!sobra) { toast('Nada repetido'); return; }
+    if (!confirm('Manter só o registro mais recente em TODOS os ' + grupos.length + ' casos?\n\n' +
+                 sobra + ' registro(s) vão para a Lixeira (recuperáveis por 30 dias).\n\n' +
+                 'Atenção: se algum for um procedimento DIFERENTE do mesmo dia, ele também sai. ' +
+                 'Nesse caso, cancele e limpe caso a caso.')) return;
+    let n = 0;
+    grupos.forEach(g => { n += duplicados.manterUltimo(g.mod, g.nome, g.dia); });
+    toast('🔁 ' + n + ' registro(s) foram para a Lixeira — recuperáveis por 30 dias');
+    duplicados._render();
+    try { if (typeof pacientes !== 'undefined' && pacientes.render) pacientes.render(); } catch (e) {}
+  },
+
   /* Executado logo depois da gravação (dentro de store.save): apaga os antigos */
   _consumir(mod, item) {
     const p = duplicados._pendente;
@@ -10746,7 +10883,7 @@ const lixeira = {
     pre: 'Pré-anestésica', consulta: 'Consulta / Dor', anestesia: 'Ficha de anestesia',
     recuperacao: 'Recuperação SRPA', termo: 'Termo (TCLE)', prescricao: 'Receituário',
     risco: 'Risco periop.', financeiro: 'Financeiro', agenda: 'Agenda',
-    pacientes: 'Paciente', orcamento: 'Orçamento'
+    pacientes: 'Paciente', orcamento: 'Orçamento', documentos: 'Documento'
   },
   _ler() {
     try { return JSON.parse(localStorage.getItem(lixeira.KEY) || '[]'); } catch (e) { return []; }
@@ -11109,7 +11246,7 @@ const ui = {
         else if (modName === 'financeiro') financeiro.render();
         else if (modName === 'agenda') { agenda.render(); if (!agenda._puxouNestaSessao) { setTimeout(() => { try { agenda.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
-        else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); try { equipeNuvem.render(); } catch (e) {} try { auditoria.render(''); } catch (e) {} try { armazenamento.render(); } catch (e) {} logoUsuario.renderAjustes(); try { nuvemEstado.render(); } catch (e) {} const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
+        else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); try { equipeNuvem.render(); } catch (e) {} try { auditoria.render(''); } catch (e) {} try { armazenamento.render(); } catch (e) {} logoUsuario.renderAjustes(); try { nuvemEstado.render(); } catch (e) {} try { duplicados.resumoNoCard(); } catch (e) {} const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
         else if (modName === 'pre') { try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} try { pre.viaAerea.render(); } catch (e) {} }
         else if (modName === 'anestesia') { anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} try { anestesia.calc.resumoTopo(); } catch (e) {} try { adendos.renderInline('anestesia'); } catch (e) {} try { anestesia.nav._wire(); anestesia.nav.render(); } catch (e) {} try { anestesia.vitais.autoAvanco.wire(); } catch (e) {} }
         else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} try { recuperacao.resumoTopo(); } catch (e) {} try { anestesia.vitais.autoAvanco.wire(); } catch (e) {} }, 60); }
@@ -40243,7 +40380,7 @@ const ajustesGrupos = {
   GRUPOS: [
     { id: 'nuvem', titulo: '☁️ Nuvem, backup e espaço',
       desc: 'A sincronização acontece sozinha. Aqui: entrar na nuvem, cópia de segurança em arquivo, PDFs e espaço do aparelho',
-      cards: ['cloud-card', 'backup-completo-card', 'pdf-backup-card', 'armazenamento-card'] },
+      cards: ['cloud-card', 'duplicados-card', 'backup-completo-card', 'pdf-backup-card', 'armazenamento-card'] },
     { id: 'equipe', titulo: '🔐 Usuários, equipe e permissões',
       desc: 'Quem entra no sistema, o que cada um pode ver e o registro de quem fez o quê',
       cards: ['usuarios-card', 'equipe-nuvem-card', 'auditoria-card'] },

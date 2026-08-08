@@ -4117,6 +4117,81 @@ await test('Com o menu aberto, a barra de baixo sai da frente e o fim da lista f
   await page.close();
 });
 
+/* 73) Limpeza do que JÁ está repetido (a pergunta ao finalizar só protege
+   daqui para a frente) + "Cortesia" nas formas de pagamento. */
+await test('Varredura acha o que já está repetido, mantém o mais recente na Lixeira e Cortesia entra no pagamento', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ['pre', 'anestesia', 'financeiro', 'recuperacao'].forEach(m => store.setList(m, []));
+    localStorage.removeItem(lixeira.KEY);
+    const dia = '2026-08-07';
+
+    /* O caso da vida real: 4 fichas + 2 financeiros do mesmo paciente no mesmo dia */
+    const fichas = [];
+    for (let i = 1; i <= 4; i++) {
+      const f = store.save('anestesia', { paciente: { nome: 'Vivienne Braga' }, procedimento: { data: dia, nome: 'Mastopexia' }, _finalizado: true, marca: i });
+      f._updatedAt = '2026-08-07T1' + i + ':00:00.000Z';
+      fichas.push(f);
+    }
+    store.setList('anestesia', fichas.slice().reverse());
+    const fins = [1, 2].map(i => {
+      const x = store.save('financeiro', { paciente_nome: 'Vivienne Braga', data_proc: dia, procedimento: 'Mastopexia', marca: i });
+      x._updatedAt = '2026-08-07T1' + i + ':30:00.000Z';
+      return x;
+    });
+    store.setList('financeiro', fins);
+    /* e um caso legítimo que NÃO deve virar grupo: paciente com um registro só */
+    store.save('pre', { paciente_nome: 'João Souza', data_avaliacao: dia });
+
+    const grupos = duplicados.varrer();
+    out.achouDoisGrupos = grupos.length === 2
+      && grupos.some(g => g.mod === 'anestesia' && g.itens.length === 4)
+      && grupos.some(g => g.mod === 'financeiro' && g.itens.length === 2);
+    const gA = grupos.find(g => g.mod === 'anestesia');
+    out.maisRecentePrimeiro = gA.itens[0].marca === 4 && gA.itens[3].marca === 1;
+    out.naoPegaSolitario = !grupos.some(g => g.mod === 'pre');
+
+    /* Limpar um grupo: fica o mais recente, os outros vão para a Lixeira */
+    const saiu = duplicados.manterUltimo('anestesia', 'Vivienne Braga', dia);
+    const fichasRestantes = store.list('anestesia');
+    out.limpouGrupo = saiu === 3 && fichasRestantes.length === 1 && fichasRestantes[0].marca === 4;
+    out.foramParaLixeira = lixeira._ler().filter(e => e.mod === 'anestesia').length === 3;
+
+    /* Financeiro: idem, fica o último */
+    duplicados.manterUltimo('financeiro', 'Vivienne Braga', dia);
+    const finRestante = store.list('financeiro');
+    out.financeiroSoUm = finRestante.length === 1 && finRestante[0].marca === 2;
+
+    out.zerou = duplicados.varrer().length === 0;
+
+    /* A tela abre e diz que não há mais nada */
+    duplicados.abrir();
+    duplicados._render();
+    out.telaLimpa = /Nenhum registro repetido/.test(document.getElementById('dup-corpo').textContent);
+    modal.close();
+
+    /* Cortesia disponível nos dois lugares onde se escolhe pagamento */
+    const opts = (sel) => Array.from(document.querySelectorAll(sel + ' option')).map(o => o.textContent.trim());
+    out.cortesiaFinanceiro = opts('[name="tipo_pagamento"]').includes('Cortesia');
+    out.cortesiaOrcamento = opts('#orc-pgto-tipo').includes('Cortesia');
+
+    ['pre', 'anestesia', 'financeiro', 'recuperacao'].forEach(m => store.setList(m, []));
+    localStorage.removeItem(lixeira.KEY);
+    return out;
+  });
+  assert(r.achouDoisGrupos, 'a varredura deveria achar as 4 fichas e os 2 financeiros repetidos');
+  assert(r.maisRecentePrimeiro, 'dentro do grupo, o mais recente tem que vir primeiro');
+  assert(r.naoPegaSolitario, 'paciente com um registro só não é caso de duplicidade');
+  assert(r.limpouGrupo, 'limpar o grupo deveria deixar só a ficha mais recente');
+  assert(r.foramParaLixeira, 'as fichas removidas têm que ir para a Lixeira, não sumir');
+  assert(r.financeiroSoUm, 'no financeiro deveria ficar só o lançamento mais recente');
+  assert(r.zerou, 'depois da limpeza não deveria sobrar nenhum caso');
+  assert(r.telaLimpa, 'sem duplicados, a tela deveria dizer isso em vez de ficar vazia');
+  assert(r.cortesiaFinanceiro && r.cortesiaOrcamento, '"Cortesia" deveria estar nas formas de pagamento');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
