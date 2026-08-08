@@ -5260,7 +5260,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <div id="bloqueio-detalhes" style="display:none;grid-column:1/-1;padding:12px;background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius)">
             <div class="grid">
               <div class="field col-4"><label>Tipo de bloqueio</label>
-                <select name="bloqueio_tipo">
+                <select name="bloqueio_tipo" onchange="anestesia.eventos.sincronizarDoBloqueio()">
                   <option value="">—</option>
                   <option>Raquianestesia</option>
                   <option>Peridural simples</option>
@@ -5283,33 +5283,36 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
                   <option>Outro</option>
                 </select>
               </div>
-              <div class="field col-3"><label>Espaço/local</label><input type="text" name="bloqueio_espaco" placeholder="L3-L4, T8, etc."></div>
+              <div class="field col-2"><label>Horário da punção</label>
+                <div class="input-group"><input type="time" name="bloqueio_hora" onchange="anestesia.eventos.sincronizarDoBloqueio()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','bloqueio_hora'); anestesia.eventos.sincronizarDoBloqueio();">agora</button></div>
+              </div>
+              <div class="field col-3"><label>Espaço/local</label><input type="text" name="bloqueio_espaco" placeholder="L3-L4, T8, etc." oninput="anestesia.eventos.atualizarDescricoes()"></div>
               <div class="field col-2"><label>Lado</label>
-                <select name="bloqueio_lado"><option value="">—</option><option>Direito</option><option>Esquerdo</option><option>Bilateral</option></select>
+                <select name="bloqueio_lado" onchange="anestesia.eventos.atualizarDescricoes()"><option value="">—</option><option>Direito</option><option>Esquerdo</option><option>Bilateral</option></select>
               </div>
               <div class="field col-3"><label>Posição do paciente</label>
-                <select name="bloqueio_posicao">
+                <select name="bloqueio_posicao" onchange="anestesia.eventos.atualizarDescricoes()">
                   <option value="">—</option><option>Sentado</option><option>Decúbito lateral</option><option>Decúbito ventral</option><option>Decúbito dorsal</option>
                 </select>
               </div>
               <div class="field col-3"><label>Agulha</label>
-                <select name="bloqueio_agulha">
+                <select name="bloqueio_agulha" onchange="anestesia.eventos.atualizarDescricoes()">
                   <option value="">—</option><option>Quincke</option><option>Whitacre</option><option>Sprotte</option><option>Tuohy</option>
                   <option>Stimuplex</option><option>Ecogênica para USG</option><option>Outra</option>
                 </select>
               </div>
               <div class="field col-2"><label>Calibre</label>
-                <select name="bloqueio_calibre">
+                <select name="bloqueio_calibre" onchange="anestesia.eventos.atualizarDescricoes()">
                   <option value="">—</option><option>18G</option><option>20G</option><option>22G</option>
                   <option>25G</option><option>26G</option><option>27G</option><option>29G</option>
                 </select>
               </div>
-              <div class="field col-2"><label>Tentativas</label><input type="number" name="bloqueio_tentativas" min="1" placeholder="1"></div>
+              <div class="field col-2"><label>Tentativas</label><input type="number" name="bloqueio_tentativas" min="1" placeholder="1" oninput="anestesia.eventos.atualizarDescricoes()"></div>
               <div class="field col-2"><label>Punção</label>
-                <select name="bloqueio_puncao"><option value="">—</option><option>Única</option><option>Múltipla</option></select>
+                <select name="bloqueio_puncao" onchange="anestesia.eventos.atualizarDescricoes()"><option value="">—</option><option>Única</option><option>Múltipla</option></select>
               </div>
               <div class="field col-3"><label>Refluxo de líquor</label>
-                <select name="bloqueio_liquor"><option value="">—</option><option>Cristalino</option><option>Hemático leve</option><option>Não aplicável</option></select>
+                <select name="bloqueio_liquor" onchange="anestesia.eventos.atualizarDescricoes()"><option value="">—</option><option>Cristalino</option><option>Hemático leve</option><option>Não aplicável</option></select>
               </div>
               <div class="field col-12">
                 <label>Medicações do bloqueio (anestésicos locais e adjuvantes)
@@ -5409,6 +5412,12 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
                 <option>Traqueostomia</option>
                 <option>Outro</option>
               </select>
+            </div>
+            <div class="field col-5"><label>Detalhes do dispositivo <small style="color:var(--text-mute);font-weight:400">— tamanho, cuff, Cormack, fixação</small></label>
+              <input type="text" name="via_aerea_detalhe" placeholder="Ex.: TOT 7,5 com cuff · Cormack I · fixado a 21 cm" oninput="anestesia.eventos.atualizarDescricoes()">
+            </div>
+            <div class="field col-3"><label>Horário</label>
+              <div class="input-group"><input type="time" name="via_aerea_hora" onchange="anestesia.eventos.sincronizarDaViaAerea()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','via_aerea_hora'); anestesia.eventos.sincronizarDaViaAerea();">agora</button></div>
             </div>
           </div>
           <!-- Derivados automaticamente (não redigitar): tipo de ventilação vem do
@@ -23360,12 +23369,156 @@ const anestesia = {
       'Enfisema subcutâneo': '1) Comunicar a equipe e reduzir a pressão de insuflação (ou pausar); 2) Checar hipercapnia (EtCO₂) e ajustar ventilação-minuto; 3) Palpar a extensão da crepitação — atenção a pescoço/tórax (via aérea) e a pneumotórax/capnotórax associados; 4) Costuma regredir após a desinsuflação; considerar manter intubado até regressão se extenso em face/pescoço.',
       'Pneumotórax': 'CRISE — suspeitar com aumento de pressão de pico + dessaturação + murmúrio abolido unilateral (na laparoscopia, considerar capnotórax): 1) Avisar a equipe; FiO₂ 100%; 2) Reduzir/desfazer o pneumoperitônio; 3) Se hipertensivo: descompressão imediata (agulha no 2º EIC linha hemiclavicular) seguida de dreno torácico; 4) Capnotórax sem tensão pode responder a desinsuflação + PEEP e observação; 5) Suporte hemodinâmico conforme necessário.'
     },
+    /* ---- O QUE FOI ESCOLHIDO NOS CARDS 3, 4 E 5 ---------------------------
+       O anestesista escolhe a técnica, a agulha, o calibre, o sítio de punção,
+       o dispositivo e o horário DENTRO do card. Antes, o evento na linha do
+       tempo continuava com o texto genérico ("punção L3–L4 com agulha de fino
+       calibre") e ele tinha que redigitar tudo. Agora o padrão já sai escrito
+       com o que ele escolheu, e acompanha as mudanças — sem nunca sobrescrever
+       o que ele tiver digitado à mão (é o que a marca "auto" da linha guarda). */
+    _f() { return document.getElementById('form-anestesia'); },
+    _v(nome) {
+      const f = anestesia.eventos._f();
+      const el = f && f.querySelector('[name="' + nome + '"]');
+      return el ? String(el.value || '').trim() : '';
+    },
+    _dispDet(nome) {
+      const f = anestesia.eventos._f();
+      if (!f) return '';
+      const el = Array.from(f.querySelectorAll('[name="disp_det[]"]')).find(x => x.getAttribute('data-disp') === nome);
+      return el ? String(el.value || '').trim() : '';
+    },
+    _bloq() {
+      const v = anestesia.eventos._v;
+      return {
+        tipo: v('bloqueio_tipo'), espaco: v('bloqueio_espaco'), lado: v('bloqueio_lado'),
+        posicao: v('bloqueio_posicao'), agulha: v('bloqueio_agulha'), calibre: v('bloqueio_calibre'),
+        tentativas: v('bloqueio_tentativas'), puncao: v('bloqueio_puncao'), liquor: v('bloqueio_liquor')
+      };
+    },
+    _agulhaTexto(d, padrao) {
+      if (!d.agulha && !d.calibre) return padrao;
+      return [d.agulha, d.calibre].filter(Boolean).join(' ');
+    },
+    _tentativasTexto(d) {
+      if (!d.tentativas) return d.puncao ? ', punção ' + d.puncao.toLowerCase() : '';
+      const n = parseInt(d.tentativas, 10) || 1;
+      return ', ' + n + (n === 1 ? ' tentativa' : ' tentativas') + (d.puncao ? ' (punção ' + d.puncao.toLowerCase() + ')' : '');
+    },
+    /* Descrições que se reescrevem com os detalhes escolhidos */
+    DESCRICOES_DET: {
+      'Raquianestesia'() {
+        const d = anestesia.eventos._bloq();
+        return '1) Assepsia e antissepsia; 2) Campos estéreis' + (d.posicao ? ' (paciente em ' + d.posicao.toLowerCase() + ')' : '') +
+          '; 3) Botão anestésico na pele; 4) Punção subaracnóidea ' + (d.espaco ? 'em ' + d.espaco : '(L3–L4)') +
+          ' com agulha ' + anestesia.eventos._agulhaTexto(d, 'de fino calibre') + anestesia.eventos._tentativasTexto(d) +
+          '; 5) Refluxo de líquor ' + (d.liquor ? d.liquor.toLowerCase() : 'cristalino') +
+          '; 6) Injeção do anestésico; 7) Retorno ao decúbito e checagem do nível do bloqueio.';
+      },
+      'Peridural'() {
+        const d = anestesia.eventos._bloq();
+        const cateter = /cateter|contínua/i.test(d.tipo) ? '6) Passagem de cateter peridural' : '6) Passagem de cateter, se indicado';
+        return '1) Assepsia e antissepsia; 2) Campos estéreis' + (d.posicao ? ' (paciente em ' + d.posicao.toLowerCase() + ')' : '') +
+          '; 3) Botão anestésico; 4) Punção peridural ' + (d.espaco ? 'em ' + d.espaco : '') +
+          ' com agulha ' + anestesia.eventos._agulhaTexto(d, 'de Tuohy') + ' (perda de resistência)' +
+          anestesia.eventos._tentativasTexto(d) + '; 5) Dose-teste; ' + cateter +
+          '; 7) Dose fracionada e checagem do nível.';
+      },
+      'Bloqueio periférico'() {
+        const d = anestesia.eventos._bloq();
+        const alvo = d.tipo && !/raqui|peridural|combinada/i.test(d.tipo) ? d.tipo : 'alvo';
+        return '1) Assepsia e antissepsia; 2) Identificação do ' + alvo.toLowerCase() +
+          ' por ultrassom/neuroestimulação' + (d.lado ? ' — lado ' + d.lado.toLowerCase() : '') +
+          '; 3) Punção com agulha ' + anestesia.eventos._agulhaTexto(d, 'ecogênica') + anestesia.eventos._tentativasTexto(d) +
+          '; 4) Injeção fracionada com aspiração intermitente; 5) Checagem da dispersão e do bloqueio.';
+      },
+      'Intubação'() {
+        const via = anestesia.eventos._v('via_aerea_uso');
+        const det = anestesia.eventos._v('via_aerea_detalhe');
+        const rota = /nasotraqueal/i.test(via) ? 'nasotraqueal' : 'orotraqueal';
+        return '1) Pré-oxigenação; 2) Indução e bloqueio neuromuscular; 3) Laringoscopia; 4) Visualização da glote (Cormack–Lehane); ' +
+          '5) Passagem do tubo ' + rota + (det ? ' — ' + det : '') +
+          '; 6) Confirmação por EtCO₂, ausculta e expansibilidade; 7) Insuflação do cuff e fixação.';
+      },
+      'Máscara laríngea'() {
+        const det = anestesia.eventos._v('via_aerea_detalhe');
+        return '1) Pré-oxigenação; 2) Indução; 3) Inserção da máscara laríngea' + (det ? ' — ' + det : '') +
+          '; 4) Checagem de ventilação (curva de EtCO₂, expansibilidade, ausência de vazamento); 5) Fixação.';
+      },
+      'Venoclise'() {
+        const det = anestesia.eventos._dispDet('Acesso venoso periférico');
+        return '1) Garroteamento; 2) Assepsia; 3) Punção venosa periférica' + (det ? ' — ' + det : '') +
+          '; 4) Refluxo sanguíneo; 5) Fixação e teste de fluxo.';
+      },
+      'Acesso venoso central'() {
+        const det = anestesia.eventos._dispDet('Acesso venoso central');
+        return '1) Assepsia, antissepsia e campos estéreis; 2) Punção guiada por ultrassom' + (det ? ' — ' + det : '') +
+          '; 3) Técnica de Seldinger; 4) Checagem de refluxo em todas as vias; 5) Fixação e curativo; 6) Controle radiológico, se indicado.';
+      },
+      'Punção arterial'() {
+        const det = anestesia.eventos._dispDet('Acesso arterial');
+        return '1) Assepsia e antissepsia; 2) Punção arterial' + (det ? ' — ' + det : '') +
+          '; 3) Refluxo pulsátil; 4) Transdutor zerado e curva adequada; 5) Fixação e curativo.';
+      }
+    },
+    /* Texto que o evento deve ter: o padrão, já reescrito com os detalhes */
+    descricaoPara(tipo) {
+      const fn = anestesia.eventos.DESCRICOES_DET[tipo];
+      if (fn) { try { return fn(); } catch (e) {} }
+      return anestesia.eventos.DESCRICOES[tipo] || '';
+    },
+    _marcarManual(input) {
+      const tr = input && input.closest('tr');
+      if (tr) delete tr.dataset.auto;
+    },
+    /* Reescreve os detalhes dos eventos que ainda estão no padrão do sistema.
+       Chamado sempre que algo muda nos cards 3, 4 e 5. */
+    atualizarDescricoes() {
+      const body = document.getElementById('eventos-body');
+      if (!body) return 0;
+      let n = 0;
+      body.querySelectorAll('tr').forEach(tr => {
+        const tipo = (tr.querySelector('[name="evt_tipo[]"]') || {}).value || '';
+        const obs = tr.querySelector('[name="evt_obs[]"]');
+        if (!tipo || !obs) return;
+        if (!anestesia.eventos.DESCRICOES_DET[tipo]) return;
+        /* só mexe no que é do sistema: vazio, ou marcado como automático */
+        const vazio = !obs.value.trim();
+        if (!vazio && tr.dataset.auto !== '1') return;
+        const novo = anestesia.eventos.descricaoPara(tipo);
+        if (!novo || obs.value === novo) return;
+        obs.value = novo;
+        tr.dataset.auto = '1';
+        n++;
+      });
+      if (n) { try { markDirty(); } catch (e) {} }
+      return n;
+    },
+    /* Horário escolhido dentro do card 3 (bloqueio) ou 5 (via aérea) entra
+       direto na linha do tempo, no evento certo. */
+    sincronizarDoBloqueio() {
+      const d = anestesia.eventos._bloq();
+      const hora = anestesia.eventos._v('bloqueio_hora');
+      const tipoEvt = /peridural|combinada/i.test(d.tipo) ? 'Peridural'
+        : /raqui/i.test(d.tipo) ? 'Raquianestesia'
+        : d.tipo ? 'Bloqueio periférico' : '';
+      if (tipoEvt && hora) anestesia.eventos.sincronizarHorario(tipoEvt, hora);
+      anestesia.eventos.atualizarDescricoes();
+    },
+    sincronizarDaViaAerea() {
+      const via = anestesia.eventos._v('via_aerea_uso');
+      const hora = anestesia.eventos._v('via_aerea_hora');
+      const tipoEvt = anestesia.eventos.VIA_AEREA_EVENTO[via];
+      if (tipoEvt && hora) anestesia.eventos.sincronizarHorario(tipoEvt, hora);
+      anestesia.eventos.atualizarDescricoes();
+    },
+
     /* Insere a descrição técnica do tipo selecionado no campo de detalhes */
     inserirDescricao(btn) {
       const tr = btn.closest('tr');
       if (!tr) return;
       const tipo = (tr.querySelector('[name="evt_tipo[]"]') || {}).value || '';
-      let desc = anestesia.eventos.DESCRICOES[tipo];
+      let desc = anestesia.eventos.descricaoPara(tipo);
       if (!desc) {
         /* tenta por palavra-chave (ex.: "IOT" → Intubação) */
         const t = tipo.toLowerCase();
@@ -23378,7 +23531,11 @@ const anestesia = {
       if (!desc) { toast('Selecione o tipo do evento para inserir a descrição técnica.', 'warn'); return; }
       const obs = tr.querySelector('[name="evt_obs[]"]');
       if (obs) {
-        obs.value = obs.value.trim() ? (obs.value.trim() + ' — ' + desc) : desc;
+        const soPadrao = !obs.value.trim();
+        obs.value = soPadrao ? desc : (obs.value.trim() + ' — ' + desc);
+        /* texto puro do sistema continua acompanhando os cards 3/4/5;
+           misturado com o que a pessoa escreveu, fica intocável */
+        if (soPadrao) tr.dataset.auto = '1'; else delete tr.dataset.auto;
         obs.dispatchEvent(new Event('change', { bubbles: true }));
       }
       try { markDirty(); } catch (e) {}
@@ -23436,9 +23593,8 @@ const anestesia = {
       if (!tipoEvt) return;
       anestesia.graficoUI._contexto = 'anestesia';
       if (anestesia.eventos.existeEvento(tipoEvt)) return; /* não duplica */
-      const desc = anestesia.eventos.DESCRICOES[tipoEvt] || '';
-      anestesia.eventos.add({ tipo: tipoEvt, hora: utils.horaAtual(), obs: desc });
-      try { toast('Evento "' + tipoEvt + '" adicionado — complete os detalhes em Eventos cronológicos.'); } catch (e) {}
+      anestesia.eventos.add({ tipo: tipoEvt, hora: utils.horaAtual(), obs: anestesia.eventos.descricaoPara(tipoEvt), auto: true });
+      try { toast('Evento "' + tipoEvt + '" adicionado — o que você detalhar aqui no card entra sozinho nele.'); } catch (e) {}
     },
     /* Ao escolher a via aérea utilizada (card Acessos), cria o evento de manejo
        correspondente na linha do tempo — evita registrar a intubação em 2 lugares. */
@@ -23452,9 +23608,8 @@ const anestesia = {
       const tipoEvt = anestesia.eventos.VIA_AEREA_EVENTO[sel.value];
       if (!tipoEvt) return;
       anestesia.graficoUI._contexto = 'anestesia';
-      if (anestesia.eventos.existeEvento(tipoEvt)) return; /* não duplica */
-      const desc = anestesia.eventos.DESCRICOES[tipoEvt] || '';
-      anestesia.eventos.add({ tipo: tipoEvt, hora: utils.horaAtual(), obs: desc });
+      if (anestesia.eventos.existeEvento(tipoEvt)) { anestesia.eventos.atualizarDescricoes(); return; }
+      anestesia.eventos.add({ tipo: tipoEvt, hora: anestesia.eventos._v('via_aerea_hora') || utils.horaAtual(), obs: anestesia.eventos.descricaoPara(tipoEvt), auto: true });
       try { toast('Evento "' + tipoEvt + '" adicionado à linha do tempo.'); } catch (e) {}
     },
     /* Início do halogenado: marca o evento e abre a calculadora (agente/fluxo/%) */
@@ -23509,7 +23664,7 @@ const anestesia = {
       marcados.forEach(chk => {
         const g = anestesia.eventos.GRUPOS[+chk.dataset.g]; if (!g) return;
         const t = g.itens[+chk.dataset.i]; if (!t) return;
-        anestesia.eventos.add({ tipo: t, hora: utils.horaAtual(), obs: anestesia.eventos.DESCRICOES[t] || '' });
+        anestesia.eventos.add({ tipo: t, hora: utils.horaAtual(), obs: anestesia.eventos.descricaoPara(t), auto: true });
       });
       markDirty();
       modal.close();
@@ -23524,13 +23679,19 @@ const anestesia = {
       tr.innerHTML = `
         <td data-label="Horário"><input type="time" name="evt_hora[]" value="${hora}" onchange="anestesia.graficoUI.validarHoraInput(this)"></td>
         <td data-label="Evento"><select name="evt_tipo[]"><option value="">— selecione —</option>${opt(anestesia.eventos.TIPOS, dados.tipo)}</select></td>
-        <td data-label="Detalhes"><div style="display:flex;gap:4px;align-items:center"><input type="text" name="evt_obs[]" value="${utils.escapeAttr(dados.obs || '')}" placeholder="Opcional" style="flex:1;min-width:0"><button type="button" class="btn-rm" title="Inserir descrição técnica do procedimento" onclick="anestesia.eventos.inserirDescricao(this)">📝</button></div></td>
+        <td data-label="Detalhes"><div style="display:flex;gap:4px;align-items:center"><input type="text" name="evt_obs[]" value="${utils.escapeAttr(dados.obs || '')}" placeholder="Opcional" style="flex:1;min-width:0" oninput="anestesia.eventos._marcarManual(this)"><button type="button" class="btn-rm" title="Inserir descrição técnica do procedimento" onclick="anestesia.eventos.inserirDescricao(this)">📝</button></div></td>
         <td class="col-rm"><button type="button" class="btn-rm" onclick="this.closest('tr').remove(); anestesia.vitais.atualizarGrafico(); markDirty();">✕</button></td>
       `;
       tbody.appendChild(tr);
+      /* "auto" = o texto de detalhes veio do padrão do sistema, então pode ser
+         reescrito quando os cards 3/4/5 mudarem. Assim que a pessoa digita ali,
+         a marca cai e nada mais mexe no que ela escreveu. */
+      if (dados.auto) tr.dataset.auto = '1';
       tr.querySelectorAll('input, select').forEach(el => {
         el.addEventListener('change', () => anestesia.vitais.atualizarGrafico());
       });
+      const selTipo = tr.querySelector('[name="evt_tipo[]"]');
+      if (selTipo) selTipo.addEventListener('change', () => { try { anestesia.eventos.atualizarDescricoes(); } catch (e) {} });
       anestesia.vitais.atualizarGrafico();
       markDirty();
       return tr;
@@ -23547,14 +23708,14 @@ const anestesia = {
         const hora = tr.querySelector('[name="evt_hora[]"]')?.value;
         const tipo = tr.querySelector('[name="evt_tipo[]"]')?.value;
         const obs = tr.querySelector('[name="evt_obs[]"]')?.value || '';
-        if (hora && tipo) linhas.push({ hora, tipo, observacao: obs });
+        if (hora && tipo) linhas.push({ hora, tipo, observacao: obs, auto: tr.dataset.auto === '1' });
       });
       return linhas;
     },
     restaurar(arr) {
       const tbody = document.getElementById('eventos-body');
       if (tbody) tbody.innerHTML = '';
-      if (Array.isArray(arr)) arr.forEach(e => anestesia.eventos.add({ hora: e.hora, tipo: e.tipo, obs: e.observacao }));
+      if (Array.isArray(arr)) arr.forEach(e => anestesia.eventos.add({ hora: e.hora, tipo: e.tipo, obs: e.observacao, auto: e.auto }));
     }
   },
 
@@ -23726,7 +23887,7 @@ const anestesia = {
           div.className = 'field col-6';
           div.id = fieldId;
           div.innerHTML = `<label>${valor} <small style="color:var(--text-mute);font-weight:400">— detalhes</small></label>
-            <input type="text" name="disp_det[]" data-disp="${valor}" placeholder="Ex.: tamanho, local, calibre">`;
+            <input type="text" name="disp_det[]" data-disp="${valor}" placeholder="Ex.: tamanho, local, calibre" oninput="anestesia.eventos.atualizarDescricoes()">`;
           cont.appendChild(div);
         }
       } else {
