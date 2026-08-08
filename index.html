@@ -300,8 +300,29 @@ html[data-theme="dark"] .theme-toggle:hover {
   background: var(--accent); color: #fff; opacity: 1;
 }
 
+/* ☁️ Botão de atualizar a nuvem, no pé do menu — para todo usuário */
+.sidebar-nuvem { margin-top: auto; padding: 10px 8px 0; }
+.sidebar-nuvem-btn {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 9px 12px; border-radius: 8px; cursor: pointer; text-align: left;
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.10);
+  color: var(--sidebar-text); font: inherit; font-size: .84rem;
+  transition: background .15s;
+}
+.sidebar-nuvem-btn:hover { background: rgba(255,255,255,.11); color: #fff; }
+.sidebar-nuvem-btn:disabled { opacity: .6; cursor: default; }
+.sidebar-nuvem-btn .sn-ico { font-size: 1.05rem; flex-shrink: 0; line-height: 1; }
+.sidebar-nuvem-btn .sn-txt { flex: 1; min-width: 0; }
+.sidebar-nuvem-btn .sn-txt b { display: block; font-weight: 600; }
+.sidebar-nuvem-btn .sn-txt small {
+  display: block; font-size: .7rem; opacity: .65; line-height: 1.35;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sidebar-nuvem-btn.sn-alerta { border-color: rgba(255,170,120,.5); }
+.sidebar-nuvem-btn.sn-alerta .sn-txt small { opacity: .95; color: #ffc79a; }
+
 .sidebar-footer {
-  margin-top: auto; padding: 14px 18px;
+  padding: 14px 18px;
   border-top: 1px solid rgba(255,255,255,.06);
   font-size: .72rem; color: var(--sidebar-text); opacity: .55;
 }
@@ -4132,6 +4153,15 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     <a class="nav-item" data-module="ajustes"    href="#ajustes"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.2 2.2M16.9 16.9l2.2 2.2M19.1 4.9l-2.2 2.2M7.1 16.9l-2.2 2.2"></path></svg></span><span class="nav-label">Ajustes</span></a>
     <a class="nav-item" data-module="programador" id="nav-programador" href="#programador" style="display:none" title="Área exclusiva do programador"><span class="nav-icon" style="font-size:17px;line-height:1">👨‍💻</span><span class="nav-label">Programador</span></a>
   </nav>
+  <!-- ☁️ NUVEM NO MENU — fora de #sidebar-nav de propósito: não é um módulo, então
+       nenhuma regra de permissão o esconde. Quem não tem acesso a Ajustes (a
+       secretária, por exemplo) precisa do mesmo botão de atualizar. -->
+  <div class="sidebar-nuvem">
+    <button type="button" class="sidebar-nuvem-btn" id="sidebar-nuvem-btn" onclick="nuvemEstado.atualizarTudo()" title="Envia o que falta e traz o que foi feito nos outros aparelhos">
+      <span class="sn-ico" id="sidebar-nuvem-ico">☁️</span>
+      <span class="sn-txt"><b>Atualizar tudo</b><small id="sidebar-nuvem-msg">verificando…</small></span>
+    </button>
+  </div>
   <div class="sidebar-footer">
     v7.1 · offline-ready · responsivo<br>
     <span style="opacity:.6">Anestesiologia</span>
@@ -16054,8 +16084,15 @@ const cloud = {
     const s = cloud.session();
     const email = (s && s.user && s.user.email) ||
                   (() => { try { const u = auth.usuarioAtual(); return (u && u.usuario) || ''; } catch (e) { return ''; } })();
-    modal.open('🔑 Entrar de novo na nuvem',
-      '<p style="font-size:.86rem;margin:0 0 10px">A sessão deste aparelho venceu. Entrar de novo <b>não apaga nada</b> — só reabre a conversa com a clínica.</p>' +
+    /* Mesmo modal serve para dois casos: sessão vencida e aparelho que nunca
+       entrou. Dizer "venceu" para quem nunca entrou só confunde. */
+    const nunca = !(s && s.user);
+    modal.open(nunca ? '☁️ Entrar na nuvem' : '🔑 Entrar de novo na nuvem',
+      '<p style="font-size:.86rem;margin:0 0 10px">' +
+      (nunca
+        ? 'Este aparelho ainda não está conectado à nuvem da clínica. Entre com o seu <b>e-mail e senha</b> para ver e enviar tudo.'
+        : 'A sessão deste aparelho venceu. Entrar de novo <b>não apaga nada</b> — só reabre a conversa com a clínica.') +
+      '</p>' +
       '<div class="grid">' +
       '<div class="field col-12"><label>E-mail</label><input type="email" id="reent-email" value="' + utils.escapeAttr(email) + '" autocomplete="username"></div>' +
       '<div class="field col-12"><label>Senha da nuvem</label><input type="password" id="reent-senha" placeholder="••••••" autocomplete="current-password"></div>' +
@@ -16580,7 +16617,42 @@ const clinicaSync = {
    dos Ajustes, mais um botão que força a atualização completa.
 ============================================================================ */
 const nuvemEstado = {
+  /* Diagnóstico único, usado tanto pelo cartão de Ajustes quanto pelo botão do
+     menu. Devolve { estado, msg }: estado = ok | pendente | semNuvem |
+     expirada | contas. */
+  situacao() {
+    try {
+      if (!cloud.estaConfigurado() || !cloud.estaLogado()) return { estado: 'semNuvem', msg: 'sem nuvem neste aparelho' };
+      if (cloud.sessaoExpirada()) return { estado: 'expirada', msg: 'sessão vencida — toque para entrar' };
+      const d = cloud.divergencia();
+      if (d) return { estado: 'contas', msg: 'contas diferentes — toque para corrigir', div: d };
+      const fila = (() => { try { return cloud._fila().length; } catch (e) { return 0; } })();
+      if (fila) return { estado: 'pendente', msg: fila + (fila === 1 ? ' item aguardando envio' : ' itens aguardando envio'), fila };
+      const ultimo = localStorage.getItem('medsys.v7.cloud.ultimo_sync');
+      return { estado: 'ok', msg: ultimo ? 'em dia · ' + new Date(ultimo).toLocaleString('pt-BR') : 'em dia' };
+    } catch (e) { return { estado: 'semNuvem', msg: 'sem nuvem neste aparelho' }; }
+  },
+  /* Botão no pé do MENU — o único caminho de quem não tem acesso a Ajustes */
+  renderMenu(msgForcada) {
+    const btn = document.getElementById('sidebar-nuvem-btn');
+    const ico = document.getElementById('sidebar-nuvem-ico');
+    const msg = document.getElementById('sidebar-nuvem-msg');
+    if (!btn || !msg) return;
+    if (msgForcada) { msg.textContent = msgForcada; return; }
+    const s = nuvemEstado.situacao();
+    const icones = { ok: '☁️', pendente: '⏳', semNuvem: '⚠️', expirada: '🔑', contas: '⚠️' };
+    if (ico) ico.textContent = icones[s.estado] || '☁️';
+    msg.textContent = s.msg;
+    btn.classList.toggle('sn-alerta', s.estado !== 'ok');
+  },
+  vigiar() {
+    try {
+      nuvemEstado.renderMenu();
+      setInterval(() => { try { if (!nuvemEstado._ocupado) nuvemEstado.renderMenu(); } catch (e) {} }, 30000);
+    } catch (e) {}
+  },
   render() {
+    try { nuvemEstado.renderMenu(); } catch (e) {}
     const el = document.getElementById('nuvem-estado-linha');
     if (!el) return;
     const partes = [];
@@ -16609,10 +16681,31 @@ const nuvemEstado = {
     if (ultimo) partes.push('🕐 última atualização ' + new Date(ultimo).toLocaleString('pt-BR'));
     el.innerHTML = '<span style="color:' + (ok ? '#1f7a4d' : '#7a4b12') + '">' + partes.join(' · ') + '</span>';
   },
+  _ocupado: false,
   async atualizarTudo() {
     const prog = document.getElementById('nuvem-estado-prog');
-    const dizer = (t) => { if (prog) prog.textContent = t; };
-    if (!cloud.estaConfigurado() || !cloud.estaLogado()) { toast('Conecte-se à nuvem primeiro', 'warn'); return; }
+    const btn = document.getElementById('sidebar-nuvem-btn');
+    const dizer = (t) => { if (prog) prog.textContent = t; nuvemEstado.renderMenu(t.replace(/^⏳\s*/, '') || null); };
+    /* Sem nuvem, ou com a sessão vencida, o toque tem que LEVAR à solução — não
+       morrer num aviso. Quem está no menu pode nem ter acesso a Ajustes. */
+    if (!cloud.estaConfigurado() || !cloud.estaLogado()) {
+      toast('Este aparelho não está conectado à nuvem. Entre com o seu e-mail e senha para sincronizar.', 'warn');
+      try { cloud.reentrar(); } catch (e) {}
+      return;
+    }
+    if (cloud.sessaoExpirada()) { try { cloud.reentrar(); } catch (e) {} return; }
+    if (nuvemEstado._ocupado) return;
+    nuvemEstado._ocupado = true;
+    if (btn) btn.disabled = true;
+    try {
+      await nuvemEstado._rodar(dizer);
+    } finally {
+      nuvemEstado._ocupado = false;
+      if (btn) btn.disabled = false;
+      nuvemEstado.renderMenu();
+    }
+  },
+  async _rodar(dizer) {
     dizer('⏳ enviando o que falta…');
     try { await cloud.sincronizar({ silent: true }); } catch (e) {}
     try { await cloudRel.empurrarPendentes({ silent: true }); } catch (e) {}
@@ -40155,6 +40248,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.configSync = configSync;
   try { configSync.vigiar(); } catch (e) {}
   try { clinicaSync.vigiar(); } catch (e) {}
+  try { nuvemEstado.vigiar(); } catch (e) {}
   window.programador = programador;
   try { programador.atualizarVisibilidade(); } catch (e) {}
   window.pendencias = pendencias;

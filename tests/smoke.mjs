@@ -3958,6 +3958,65 @@ await test('Equipe da nuvem mostra e edita o acesso de cada pessoa (vale em todo
   await page.close();
 });
 
+/* 70) Atualizar a nuvem tem que estar no MENU: quem não acessa Ajustes (a
+   secretária) ficava sem nenhum caminho para sincronizar o aparelho dela. */
+await test('Botão de atualizar a nuvem fica no menu e sobrevive às permissões (secretária sem Ajustes)', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const btn = document.getElementById('sidebar-nuvem-btn');
+    out.existe = !!btn;
+    /* fora de #sidebar-nav de propósito — é o que impede a regra de permissão
+       de esconder junto com os módulos */
+    out.foraDoNav = !!btn && !document.getElementById('sidebar-nav').contains(btn);
+
+    /* secretária: sem Ajustes. O item de menu some; o botão da nuvem fica. */
+    auth.podeAcessar = (m) => m !== 'ajustes';
+    auth.usuarioAtual = () => ({ id: 'u1', nome: 'Secretária', perfil: 'secretaria' });
+    auth._aplicarPermissoesUI();
+    const itemAjustes = document.querySelector('#sidebar-nav .nav-item[data-module="ajustes"]');
+    out.ajustesEscondido = itemAjustes.style.display === 'none';
+    out.botaoContinua = btn.style.display !== 'none' && !btn.closest('[style*="display: none"]');
+
+    /* a linha do botão diz a verdade em cada estado */
+    cloud.estaConfigurado = () => false;
+    out.semNuvem = nuvemEstado.situacao().estado === 'semNuvem';
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud.sessaoExpirada = () => false;
+    cloud.divergencia = () => null;
+    cloud._fila = () => [1, 2, 3];
+    const sPend = nuvemEstado.situacao();
+    nuvemEstado.renderMenu();
+    out.pendente = sPend.estado === 'pendente'
+      && /3 itens aguardando/.test(document.getElementById('sidebar-nuvem-msg').textContent)
+      && btn.classList.contains('sn-alerta');
+    cloud._fila = () => [];
+    localStorage.setItem('medsys.v7.cloud.ultimo_sync', new Date().toISOString());
+    nuvemEstado.renderMenu();
+    out.emDia = nuvemEstado.situacao().estado === 'ok'
+      && /em dia/.test(document.getElementById('sidebar-nuvem-msg').textContent)
+      && !btn.classList.contains('sn-alerta');
+
+    /* aparelho sem nuvem: o toque tem que LEVAR ao login, não morrer num aviso */
+    cloud.estaLogado = () => false;
+    cloud.session = () => null;
+    await nuvemEstado.atualizarTudo();
+    out.levaAoLogin = document.getElementById('modal-backdrop').classList.contains('show')
+      && !!document.getElementById('reent-senha')
+      && /ainda não está conectado/.test(document.getElementById('modal-body').textContent);
+    modal.close();
+    return out;
+  });
+  assert(r.existe && r.foraDoNav, 'o botão da nuvem deveria existir no menu, fora da lista de módulos');
+  assert(r.ajustesEscondido && r.botaoContinua, 'sem acesso a Ajustes, o botão da nuvem tem que continuar visível');
+  assert(r.semNuvem, 'aparelho sem nuvem deveria ser reportado como tal');
+  assert(r.pendente, 'com fila, o botão deveria dizer quantos itens faltam e destacar');
+  assert(r.emDia, 'sem fila, o botão deveria dizer que está em dia, sem destaque');
+  assert(r.levaAoLogin, 'tocar sem nuvem deveria abrir o login, não só avisar');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
