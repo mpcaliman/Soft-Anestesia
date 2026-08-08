@@ -300,8 +300,29 @@ html[data-theme="dark"] .theme-toggle:hover {
   background: var(--accent); color: #fff; opacity: 1;
 }
 
+/* ☁️ Botão de atualizar a nuvem, no pé do menu — para todo usuário */
+.sidebar-nuvem { margin-top: auto; padding: 10px 8px 0; }
+.sidebar-nuvem-btn {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 9px 12px; border-radius: 8px; cursor: pointer; text-align: left;
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.10);
+  color: var(--sidebar-text); font: inherit; font-size: .84rem;
+  transition: background .15s;
+}
+.sidebar-nuvem-btn:hover { background: rgba(255,255,255,.11); color: #fff; }
+.sidebar-nuvem-btn:disabled { opacity: .6; cursor: default; }
+.sidebar-nuvem-btn .sn-ico { font-size: 1.05rem; flex-shrink: 0; line-height: 1; }
+.sidebar-nuvem-btn .sn-txt { flex: 1; min-width: 0; }
+.sidebar-nuvem-btn .sn-txt b { display: block; font-weight: 600; }
+.sidebar-nuvem-btn .sn-txt small {
+  display: block; font-size: .7rem; opacity: .65; line-height: 1.35;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sidebar-nuvem-btn.sn-alerta { border-color: rgba(255,170,120,.5); }
+.sidebar-nuvem-btn.sn-alerta .sn-txt small { opacity: .95; color: #ffc79a; }
+
 .sidebar-footer {
-  margin-top: auto; padding: 14px 18px;
+  padding: 14px 18px;
   border-top: 1px solid rgba(255,255,255,.06);
   font-size: .72rem; color: var(--sidebar-text); opacity: .55;
 }
@@ -3812,6 +3833,12 @@ textarea { border-radius: 10px; }
   .bottom-nav .bn-menu { flex: 0 0 52px; }
   .main { padding-bottom: 84px !important; }
   .fab-carimbo { bottom: 92px !important; }
+  /* menu aberto = barra de baixo fora do caminho */
+  body.menu-aberto .bottom-nav { display: none !important; }
+}
+@media (max-width: 1199px) {
+  /* Folga no fim do menu para a barra de baixo nunca comer o último item */
+  .sidebar { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 88px); }
 }
 @media print { .bottom-nav { display: none !important; } }
 
@@ -4132,6 +4159,15 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     <a class="nav-item" data-module="ajustes"    href="#ajustes"><span class="nav-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.2 2.2M16.9 16.9l2.2 2.2M19.1 4.9l-2.2 2.2M7.1 16.9l-2.2 2.2"></path></svg></span><span class="nav-label">Ajustes</span></a>
     <a class="nav-item" data-module="programador" id="nav-programador" href="#programador" style="display:none" title="Área exclusiva do programador"><span class="nav-icon" style="font-size:17px;line-height:1">👨‍💻</span><span class="nav-label">Programador</span></a>
   </nav>
+  <!-- ☁️ NUVEM NO MENU — fora de #sidebar-nav de propósito: não é um módulo, então
+       nenhuma regra de permissão o esconde. Quem não tem acesso a Ajustes (a
+       secretária, por exemplo) precisa do mesmo botão de atualizar. -->
+  <div class="sidebar-nuvem">
+    <button type="button" class="sidebar-nuvem-btn" id="sidebar-nuvem-btn" onclick="nuvemEstado.atualizarTudo()" title="Envia o que falta e traz o que foi feito nos outros aparelhos">
+      <span class="sn-ico" id="sidebar-nuvem-ico">☁️</span>
+      <span class="sn-txt"><b>Atualizar tudo</b><small id="sidebar-nuvem-msg">verificando…</small></span>
+    </button>
+  </div>
   <div class="sidebar-footer">
     v7.1 · offline-ready · responsivo<br>
     <span style="opacity:.6">Anestesiologia</span>
@@ -9790,6 +9826,9 @@ const store = {
         rascunhos._agendarEnvio(modKey, { agora: true });
       }
     } catch (e) {}
+    /* Escolheu "Substituir" na pergunta de duplicidade: agora que o novo está
+       gravado, os anteriores do mesmo dia vão para a Lixeira. */
+    try { if (typeof duplicados !== 'undefined') duplicados._consumir(modKey, item); } catch (e) {}
     return item;
   },
   delete(modKey, id) {
@@ -10610,6 +10649,96 @@ const arquivo = {
   }
 };
 
+/* ============================================================================
+   DUPLICADOS AO FINALIZAR
+   Finalizar duas vezes o mesmo atendimento é fácil: reabrir a ficha por outro
+   caminho, terminar no celular o que começou no computador, tocar em Finalizar
+   de novo por dúvida. O resultado eram quatro "Ficha de anestesia" do mesmo
+   paciente no mesmo dia, e ninguém sabia qual valia.
+   Agora, ao finalizar, se já existe registro DO MESMO MÓDULO, DO MESMO PACIENTE
+   e DO MESMO DIA, o app pergunta:
+     • SUBSTITUIR  — fica só o mais atual; os anteriores vão para a Lixeira
+                     (recuperáveis por 30 dias, nada é perdido de verdade)
+     • GRAVAR NOVA — é um procedimento a mais no mesmo dia; convive com o outro
+============================================================================ */
+const duplicados = {
+  _norm(s) {
+    try { if (typeof linker !== 'undefined' && linker._normNome) return linker._normNome(s || ''); } catch (e) {}
+    return String(s || '').toLowerCase().trim();
+  },
+  _nome(it) { try { return pacientes._getNomeEm(it) || ''; } catch (e) { return (it && it.paciente_nome) || ''; } },
+  _dia(it) { try { return String(historico._dataItem(it) || '').slice(0, 10); } catch (e) { return ''; } },
+  _rotulo(mod) { return (lixeira.LABELS && lixeira.LABELS[mod]) || mod; },
+
+  /* Registros do mesmo módulo, mesmo paciente e mesmo dia — fora este */
+  achar(mod, dados) {
+    const nome = duplicados._norm(duplicados._nome(dados));
+    const dia = duplicados._dia(dados);
+    if (!nome || !dia) return [];          /* sem os dois, não dá para afirmar nada */
+    let lst = [];
+    try { lst = store.list(mod) || []; } catch (e) { return []; }
+    return lst.filter(r => r && r._id && r._id !== dados._id &&
+      duplicados._norm(duplicados._nome(r)) === nome &&
+      duplicados._dia(r) === dia);
+  },
+
+  /* Chamado ANTES de gravar. Devolve true quando abriu a pergunta — nesse caso
+     quem chamou deve parar; prosseguir() refaz o salvamento depois da escolha. */
+  perguntar(mod, dados, prosseguir) {
+    let iguais = [];
+    try { iguais = duplicados.achar(mod, dados); } catch (e) { return false; }
+    if (!iguais.length) return false;
+    const nome = duplicados._nome(dados);
+    const dia = historico._fmtData(duplicados._dia(dados));
+    const rot = duplicados._rotulo(mod);
+    const lista = iguais.slice(0, 5).map(r => {
+      const q = (r._finalizado ? 'finalizada' : 'em aberto');
+      const quando = (r._updatedAt || r._createdAt || '') ? new Date(r._updatedAt || r._createdAt).toLocaleString('pt-BR') : '';
+      return '<li>' + utils.escapeHTML(rot) + ' · ' + q + (quando ? ' · última gravação ' + utils.escapeHTML(quando) : '') + '</li>';
+    }).join('');
+    duplicados._pendente = null;
+    modal.open('🔁 Já existe registro deste dia',
+      '<p style="font-size:.88rem;margin:0 0 8px">Já ' + (iguais.length === 1 ? 'existe <b>1</b> registro' : 'existem <b>' + iguais.length + '</b> registros') +
+      ' de <b>' + utils.escapeHTML(rot) + '</b> para <b>' + utils.escapeHTML(nome) + '</b> em <b>' + utils.escapeHTML(dia) + '</b>:</p>' +
+      '<ul style="margin:0 0 12px;padding-left:20px;line-height:1.7;font-size:.84rem;color:var(--text-soft)">' + lista +
+      (iguais.length > 5 ? '<li>… e mais ' + (iguais.length - 5) + '</li>' : '') + '</ul>' +
+      '<p style="font-size:.84rem;margin:0 0 6px"><b>Substituir</b> — é a mesma coisa, corrigida. Fica só esta; ' +
+      (iguais.length === 1 ? 'a anterior vai' : 'as anteriores vão') + ' para a Lixeira e ' +
+      (iguais.length === 1 ? 'pode ser recuperada' : 'podem ser recuperadas') + ' por 30 dias.</p>' +
+      '<p style="font-size:.84rem;margin:0">Gravar como <b>nova</b> — é outro procedimento no mesmo dia. Os dois ficam.</p>',
+      '<button class="btn" onclick="modal.close()">Cancelar</button>' +
+      '<button class="btn" onclick="duplicados._escolher(\'nova\')">➕ Gravar como nova</button>' +
+      '<button class="btn btn-finalizar" onclick="duplicados._escolher(\'substituir\')">🔁 Substituir</button>');
+    duplicados._prosseguir = prosseguir;
+    duplicados._alvo = { mod, ids: iguais.map(r => r._id) };
+    return true;
+  },
+  _pendente: null, _prosseguir: null, _alvo: null,
+  _escolher(modo) {
+    const seguir = duplicados._prosseguir;
+    const alvo = duplicados._alvo;
+    duplicados._prosseguir = null; duplicados._alvo = null;
+    duplicados._pendente = (modo === 'substituir' && alvo) ? alvo : null;
+    modal.close();
+    if (typeof seguir === 'function') seguir(modo);
+  },
+  /* Executado logo depois da gravação (dentro de store.save): apaga os antigos */
+  _consumir(mod, item) {
+    const p = duplicados._pendente;
+    if (!p || p.mod !== mod || !item) return;
+    duplicados._pendente = null;
+    let n = 0;
+    p.ids.forEach(id => {
+      if (id === item._id) return;
+      try { store.delete(mod, id); n++; } catch (e) {}
+    });
+    if (n) {
+      try { toast('🔁 ' + n + (n === 1 ? ' registro anterior foi para a Lixeira' : ' registros anteriores foram para a Lixeira') + ' — recuperáveis por 30 dias'); } catch (e) {}
+      try { if (typeof pacientes !== 'undefined' && pacientes.render) pacientes.render(); } catch (e) {}
+    }
+  }
+};
+
 const lixeira = {
   KEY: 'medsys.v7.lixeira',
   DIAS: 30,
@@ -10726,8 +10855,12 @@ const ui = {
     if (icon) icon.textContent = saved === 'dark' ? '☀️' : '🌙';
   },
   toggleSidebar() {
-    document.getElementById('sidebar').classList.toggle('open');
+    const aberta = document.getElementById('sidebar').classList.toggle('open');
     document.getElementById('sidebar-backdrop').classList.toggle('show');
+    /* No celular a barra de baixo flutua ACIMA do menu e tapava o fim da lista
+       (o "Sair", o botão da nuvem). Com o menu aberto ela não serve para nada
+       mesmo — o menu tem tudo. */
+    document.body.classList.toggle('menu-aberto', aberta);
   },
   toggleCard(headerEl) {
     headerEl.parentElement.classList.toggle('collapsed');
@@ -11966,6 +12099,9 @@ const pre = {
       if (previo && previo._finalizado) { adendos.salvarComoCorrecao('pre', previo, data); return; }
     }
     if (finalizar) data._finalizado = true;
+    /* Mesmo paciente, mesmo dia, mesmo módulo: substituir ou gravar como nova? */
+    if (finalizar && !opts._dupOk &&
+        duplicados.perguntar('pre', data, () => pre.salvar(Object.assign({}, opts, { _dupOk: true })))) return;
     const saved = store.save('pre', data);
     /* Vínculo pendente */
     if (pre._linkPendente) {
@@ -12495,6 +12631,9 @@ const consulta = {
       if (previo && previo._finalizado) { adendos.salvarComoCorrecao('consulta', previo, data); return; }
     }
     if (finalizar) data._finalizado = true;
+    /* Mesmo paciente, mesmo dia, mesmo módulo: substituir ou gravar como nova? */
+    if (finalizar && !opts._dupOk &&
+        duplicados.perguntar('consulta', data, () => consulta.salvar(Object.assign({}, opts, { _dupOk: true })))) return;
     const saved = store.save('consulta', data);
     if (consulta._linkPendente) {
       linker.link('consulta', saved._id, consulta._linkPendente.mod, consulta._linkPendente.id);
@@ -12825,6 +12964,9 @@ const recuperacao = {
       if (previo && previo._finalizado) { adendos.salvarComoCorrecao('recuperacao', previo, data); return; }
     }
     if (finalizar) data._finalizado = true;
+    /* Mesmo paciente, mesmo dia, mesmo módulo: substituir ou gravar como nova? */
+    if (finalizar && !opts._dupOk &&
+        duplicados.perguntar('recuperacao', data, () => recuperacao.salvar(Object.assign({}, opts, { _dupOk: true })))) return;
     const saved = store.save('recuperacao', data);
     if (recuperacao._linkPendente) {
       linker.link('recuperacao', saved._id, recuperacao._linkPendente.mod, recuperacao._linkPendente.id);
@@ -13549,6 +13691,9 @@ const termo = {
       if (previo && previo._finalizado) data._finalizado = true;
     }
     if (finalizar) data._finalizado = true;
+    /* Mesmo paciente, mesmo dia, mesmo módulo: substituir ou gravar como nova? */
+    if (finalizar && !opts._dupOk &&
+        duplicados.perguntar('termo', data, () => termo.salvar(Object.assign({}, opts, { _dupOk: true })))) return;
     const saved = store.save('termo', data);
     if (termo._linkPendente) {
       linker.link('termo', saved._id, termo._linkPendente.mod, termo._linkPendente.id);
@@ -14075,6 +14220,9 @@ const prescricao = {
       if (previo && previo._finalizado) data._finalizado = true;
     }
     if (finalizar) data._finalizado = true;
+    /* Mesmo paciente, mesmo dia, mesmo módulo: substituir ou gravar como nova? */
+    if (finalizar && !opts._dupOk &&
+        duplicados.perguntar('prescricao', data, () => prescricao.salvar(Object.assign({}, opts, { _dupOk: true })))) return;
     const saved = store.save('prescricao', data);
     if (prescricao._linkPendente) {
       linker.link('prescricao', saved._id, prescricao._linkPendente.mod, prescricao._linkPendente.id);
@@ -16054,8 +16202,15 @@ const cloud = {
     const s = cloud.session();
     const email = (s && s.user && s.user.email) ||
                   (() => { try { const u = auth.usuarioAtual(); return (u && u.usuario) || ''; } catch (e) { return ''; } })();
-    modal.open('🔑 Entrar de novo na nuvem',
-      '<p style="font-size:.86rem;margin:0 0 10px">A sessão deste aparelho venceu. Entrar de novo <b>não apaga nada</b> — só reabre a conversa com a clínica.</p>' +
+    /* Mesmo modal serve para dois casos: sessão vencida e aparelho que nunca
+       entrou. Dizer "venceu" para quem nunca entrou só confunde. */
+    const nunca = !(s && s.user);
+    modal.open(nunca ? '☁️ Entrar na nuvem' : '🔑 Entrar de novo na nuvem',
+      '<p style="font-size:.86rem;margin:0 0 10px">' +
+      (nunca
+        ? 'Este aparelho ainda não está conectado à nuvem da clínica. Entre com o seu <b>e-mail e senha</b> para ver e enviar tudo.'
+        : 'A sessão deste aparelho venceu. Entrar de novo <b>não apaga nada</b> — só reabre a conversa com a clínica.') +
+      '</p>' +
       '<div class="grid">' +
       '<div class="field col-12"><label>E-mail</label><input type="email" id="reent-email" value="' + utils.escapeAttr(email) + '" autocomplete="username"></div>' +
       '<div class="field col-12"><label>Senha da nuvem</label><input type="password" id="reent-senha" placeholder="••••••" autocomplete="current-password"></div>' +
@@ -16580,7 +16735,42 @@ const clinicaSync = {
    dos Ajustes, mais um botão que força a atualização completa.
 ============================================================================ */
 const nuvemEstado = {
+  /* Diagnóstico único, usado tanto pelo cartão de Ajustes quanto pelo botão do
+     menu. Devolve { estado, msg }: estado = ok | pendente | semNuvem |
+     expirada | contas. */
+  situacao() {
+    try {
+      if (!cloud.estaConfigurado() || !cloud.estaLogado()) return { estado: 'semNuvem', msg: 'sem nuvem neste aparelho' };
+      if (cloud.sessaoExpirada()) return { estado: 'expirada', msg: 'sessão vencida — toque para entrar' };
+      const d = cloud.divergencia();
+      if (d) return { estado: 'contas', msg: 'contas diferentes — toque para corrigir', div: d };
+      const fila = (() => { try { return cloud._fila().length; } catch (e) { return 0; } })();
+      if (fila) return { estado: 'pendente', msg: fila + (fila === 1 ? ' item aguardando envio' : ' itens aguardando envio'), fila };
+      const ultimo = localStorage.getItem('medsys.v7.cloud.ultimo_sync');
+      return { estado: 'ok', msg: ultimo ? 'em dia · ' + new Date(ultimo).toLocaleString('pt-BR') : 'em dia' };
+    } catch (e) { return { estado: 'semNuvem', msg: 'sem nuvem neste aparelho' }; }
+  },
+  /* Botão no pé do MENU — o único caminho de quem não tem acesso a Ajustes */
+  renderMenu(msgForcada) {
+    const btn = document.getElementById('sidebar-nuvem-btn');
+    const ico = document.getElementById('sidebar-nuvem-ico');
+    const msg = document.getElementById('sidebar-nuvem-msg');
+    if (!btn || !msg) return;
+    if (msgForcada) { msg.textContent = msgForcada; return; }
+    const s = nuvemEstado.situacao();
+    const icones = { ok: '☁️', pendente: '⏳', semNuvem: '⚠️', expirada: '🔑', contas: '⚠️' };
+    if (ico) ico.textContent = icones[s.estado] || '☁️';
+    msg.textContent = s.msg;
+    btn.classList.toggle('sn-alerta', s.estado !== 'ok');
+  },
+  vigiar() {
+    try {
+      nuvemEstado.renderMenu();
+      setInterval(() => { try { if (!nuvemEstado._ocupado) nuvemEstado.renderMenu(); } catch (e) {} }, 30000);
+    } catch (e) {}
+  },
   render() {
+    try { nuvemEstado.renderMenu(); } catch (e) {}
     const el = document.getElementById('nuvem-estado-linha');
     if (!el) return;
     const partes = [];
@@ -16609,10 +16799,31 @@ const nuvemEstado = {
     if (ultimo) partes.push('🕐 última atualização ' + new Date(ultimo).toLocaleString('pt-BR'));
     el.innerHTML = '<span style="color:' + (ok ? '#1f7a4d' : '#7a4b12') + '">' + partes.join(' · ') + '</span>';
   },
+  _ocupado: false,
   async atualizarTudo() {
     const prog = document.getElementById('nuvem-estado-prog');
-    const dizer = (t) => { if (prog) prog.textContent = t; };
-    if (!cloud.estaConfigurado() || !cloud.estaLogado()) { toast('Conecte-se à nuvem primeiro', 'warn'); return; }
+    const btn = document.getElementById('sidebar-nuvem-btn');
+    const dizer = (t) => { if (prog) prog.textContent = t; nuvemEstado.renderMenu(t.replace(/^⏳\s*/, '') || null); };
+    /* Sem nuvem, ou com a sessão vencida, o toque tem que LEVAR à solução — não
+       morrer num aviso. Quem está no menu pode nem ter acesso a Ajustes. */
+    if (!cloud.estaConfigurado() || !cloud.estaLogado()) {
+      toast('Este aparelho não está conectado à nuvem. Entre com o seu e-mail e senha para sincronizar.', 'warn');
+      try { cloud.reentrar(); } catch (e) {}
+      return;
+    }
+    if (cloud.sessaoExpirada()) { try { cloud.reentrar(); } catch (e) {} return; }
+    if (nuvemEstado._ocupado) return;
+    nuvemEstado._ocupado = true;
+    if (btn) btn.disabled = true;
+    try {
+      await nuvemEstado._rodar(dizer);
+    } finally {
+      nuvemEstado._ocupado = false;
+      if (btn) btn.disabled = false;
+      nuvemEstado.renderMenu();
+    }
+  },
+  async _rodar(dizer) {
     dizer('⏳ enviando o que falta…');
     try { await cloud.sincronizar({ silent: true }); } catch (e) {}
     try { await cloudRel.empurrarPendentes({ silent: true }); } catch (e) {}
@@ -20107,10 +20318,13 @@ const documentos = {
     markClean();
     toast('Novo documento iniciado');
   },
-  salvar() {
+  salvar(opts = {}) {
     const f = document.getElementById('form-documentos');
     if (!utils.validar('form-documentos')) { toast('Informe o nome do paciente', 'warn'); return; }
     const data = utils.formData('form-documentos');
+    /* Documento não tem etapa de "finalizar": salvar já é o ato final. */
+    if (!opts._dupOk &&
+        duplicados.perguntar('documentos', data, () => documentos.salvar(Object.assign({}, opts, { _dupOk: true })))) return;
     const saved = store.save('documentos', data);
     let h = f.querySelector('[name="_id"]');
     if (!h) { h = document.createElement('input'); h.type = 'hidden'; h.name = '_id'; f.appendChild(h); }
@@ -20448,6 +20662,9 @@ const risco = {
     const f = document.getElementById(risco.formId);
     const idEl = f.querySelector('[name="_id"]');
     if (idEl) data._id = idEl.value || undefined;
+    /* Risco não tem etapa de "finalizar": salvar já é o ato final. */
+    if (!opts._dupOk &&
+        duplicados.perguntar('risco', data, () => risco.salvar(Object.assign({}, opts, { _dupOk: true })))) return;
     const saved = store.save('risco', data);
     if (risco._linkPendente) {
       linker.link('risco', saved._id, risco._linkPendente.mod, risco._linkPendente.id);
@@ -28059,6 +28276,9 @@ const anestesia = {
       if (previo && previo._finalizado) { adendos.salvarComoCorrecao('anestesia', previo, data); return; }
     }
     if (finalizar) data._finalizado = true;
+    /* Mesmo paciente, mesmo dia, mesmo módulo: substituir ou gravar como nova? */
+    if (finalizar && !opts._dupOk &&
+        duplicados.perguntar('anestesia', data, () => anestesia.salvar(Object.assign({}, opts, { _dupOk: true })))) return;
     const saved = store.save('anestesia', data);
     /* Vínculo pendente (vindo de importação) */
     if (anestesia._linkPendente) {
@@ -40104,7 +40324,7 @@ document.addEventListener('DOMContentLoaded', () => {
        em qualquer navegador, mesmo quando const não é global. */
   window.utils = utils; window.store = store; window.ui = ui;
   window.backupCompleto = backupCompleto;
-  window.lixeira = lixeira;
+  window.lixeira = lixeira; window.duplicados = duplicados;
   window.carimboHora = carimboHora;
   window.cronometros = cronometros;
   window.dashboard = dashboard; window.pre = pre; window.consulta = consulta;
@@ -40155,6 +40375,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.configSync = configSync;
   try { configSync.vigiar(); } catch (e) {}
   try { clinicaSync.vigiar(); } catch (e) {}
+  try { nuvemEstado.vigiar(); } catch (e) {}
   window.programador = programador;
   try { programador.atualizarVisibilidade(); } catch (e) {}
   window.pendencias = pendencias;

@@ -3958,6 +3958,165 @@ await test('Equipe da nuvem mostra e edita o acesso de cada pessoa (vale em todo
   await page.close();
 });
 
+/* 70) Atualizar a nuvem tem que estar no MENU: quem não acessa Ajustes (a
+   secretária) ficava sem nenhum caminho para sincronizar o aparelho dela. */
+await test('Botão de atualizar a nuvem fica no menu e sobrevive às permissões (secretária sem Ajustes)', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const btn = document.getElementById('sidebar-nuvem-btn');
+    out.existe = !!btn;
+    /* fora de #sidebar-nav de propósito — é o que impede a regra de permissão
+       de esconder junto com os módulos */
+    out.foraDoNav = !!btn && !document.getElementById('sidebar-nav').contains(btn);
+
+    /* secretária: sem Ajustes. O item de menu some; o botão da nuvem fica. */
+    auth.podeAcessar = (m) => m !== 'ajustes';
+    auth.usuarioAtual = () => ({ id: 'u1', nome: 'Secretária', perfil: 'secretaria' });
+    auth._aplicarPermissoesUI();
+    const itemAjustes = document.querySelector('#sidebar-nav .nav-item[data-module="ajustes"]');
+    out.ajustesEscondido = itemAjustes.style.display === 'none';
+    out.botaoContinua = btn.style.display !== 'none' && !btn.closest('[style*="display: none"]');
+
+    /* a linha do botão diz a verdade em cada estado */
+    cloud.estaConfigurado = () => false;
+    out.semNuvem = nuvemEstado.situacao().estado === 'semNuvem';
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud.sessaoExpirada = () => false;
+    cloud.divergencia = () => null;
+    cloud._fila = () => [1, 2, 3];
+    const sPend = nuvemEstado.situacao();
+    nuvemEstado.renderMenu();
+    out.pendente = sPend.estado === 'pendente'
+      && /3 itens aguardando/.test(document.getElementById('sidebar-nuvem-msg').textContent)
+      && btn.classList.contains('sn-alerta');
+    cloud._fila = () => [];
+    localStorage.setItem('medsys.v7.cloud.ultimo_sync', new Date().toISOString());
+    nuvemEstado.renderMenu();
+    out.emDia = nuvemEstado.situacao().estado === 'ok'
+      && /em dia/.test(document.getElementById('sidebar-nuvem-msg').textContent)
+      && !btn.classList.contains('sn-alerta');
+
+    /* aparelho sem nuvem: o toque tem que LEVAR ao login, não morrer num aviso */
+    cloud.estaLogado = () => false;
+    cloud.session = () => null;
+    await nuvemEstado.atualizarTudo();
+    out.levaAoLogin = document.getElementById('modal-backdrop').classList.contains('show')
+      && !!document.getElementById('reent-senha')
+      && /ainda não está conectado/.test(document.getElementById('modal-body').textContent);
+    modal.close();
+    return out;
+  });
+  assert(r.existe && r.foraDoNav, 'o botão da nuvem deveria existir no menu, fora da lista de módulos');
+  assert(r.ajustesEscondido && r.botaoContinua, 'sem acesso a Ajustes, o botão da nuvem tem que continuar visível');
+  assert(r.semNuvem, 'aparelho sem nuvem deveria ser reportado como tal');
+  assert(r.pendente, 'com fila, o botão deveria dizer quantos itens faltam e destacar');
+  assert(r.emDia, 'sem fila, o botão deveria dizer que está em dia, sem destaque');
+  assert(r.levaAoLogin, 'tocar sem nuvem deveria abrir o login, não só avisar');
+  await page.close();
+});
+
+/* 71) Finalizar com registro do mesmo paciente/dia: substituir ou gravar nova.
+   Era assim que apareciam 4 "Ficha de anestesia" do mesmo dia no prontuário. */
+await test('Ao finalizar, registro repetido do mesmo paciente e dia pergunta: substituir ou gravar como nova', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    ['pre', 'anestesia', 'recuperacao'].forEach(m => store.setList(m, []));
+
+    /* Um registro já finalizado da Maria, hoje */
+    const hoje = '2026-08-07';
+    const antigo = store.save('pre', { paciente_nome: 'Maria da Silva', data_avaliacao: hoje, _finalizado: true, obs: 'primeira' });
+
+    /* Mesmo paciente + mesmo dia → acha; outro dia ou outro nome → não acha */
+    out.acha = duplicados.achar('pre', { paciente_nome: 'MARIA DA SILVA', data_avaliacao: hoje }).length === 1;
+    out.diaDiferente = duplicados.achar('pre', { paciente_nome: 'Maria da Silva', data_avaliacao: '2026-08-06' }).length === 0;
+    out.outroPaciente = duplicados.achar('pre', { paciente_nome: 'João Souza', data_avaliacao: hoje }).length === 0;
+    /* o próprio registro sendo re-salvo não conta como duplicado */
+    out.naoSeAcusa = duplicados.achar('pre', { _id: antigo._id, paciente_nome: 'Maria da Silva', data_avaliacao: hoje }).length === 0;
+    /* sem nome ou sem data não dá para afirmar nada — não incomoda */
+    out.semDadosNaoPergunta = duplicados.achar('pre', { paciente_nome: '', data_avaliacao: hoje }).length === 0;
+
+    /* A pergunta aparece e traz as duas saídas */
+    let seguiu = null;
+    const abriu = duplicados.perguntar('pre', { paciente_nome: 'Maria da Silva', data_avaliacao: hoje }, (modo) => { seguiu = modo; });
+    const txt = document.getElementById('modal-body').textContent;
+    out.perguntou = abriu === true
+      && document.getElementById('modal-backdrop').classList.contains('show')
+      && /Maria da Silva/.test(txt)
+      && /07\/08\/2026/.test(txt);
+    const rodape = document.getElementById('modal-footer').textContent;
+    out.duasSaidas = /Substituir/.test(rodape) && /Gravar como nova/.test(rodape);
+
+    /* GRAVAR COMO NOVA: os dois convivem */
+    duplicados._escolher('nova');
+    out.seguiuNova = seguiu === 'nova' && duplicados._pendente === null;
+    store.save('pre', { paciente_nome: 'Maria da Silva', data_avaliacao: hoje, _finalizado: true, obs: 'segunda' });
+    out.duasFicam = store.list('pre').length === 2;
+
+    /* SUBSTITUIR: grava a nova e manda as anteriores para a Lixeira */
+    localStorage.removeItem(lixeira.KEY);
+    duplicados.perguntar('pre', { paciente_nome: 'Maria da Silva', data_avaliacao: hoje }, () => {});
+    duplicados._escolher('substituir');
+    out.marcouPendente = !!duplicados._pendente && duplicados._pendente.ids.length === 2;
+    const nova = store.save('pre', { paciente_nome: 'Maria da Silva', data_avaliacao: hoje, _finalizado: true, obs: 'terceira' });
+    const restantes = store.list('pre');
+    out.sobrouSoUma = restantes.length === 1 && restantes[0]._id === nova._id && restantes[0].obs === 'terceira';
+    out.foramParaLixeira = lixeira._ler().filter(e => e.mod === 'pre').length === 2;
+    out.limpou = duplicados._pendente === null;
+
+    /* Vale para a ficha de anestesia, que guarda a data dentro de procedimento */
+    const f1 = store.save('anestesia', { paciente: { nome: 'Ana Lima' }, procedimento: { data: hoje, nome: 'Mastopexia' }, _finalizado: true });
+    out.fichaAcha = duplicados.achar('anestesia', { paciente: { nome: 'Ana Lima' }, procedimento: { data: hoje } }).length === 1
+      && duplicados.achar('anestesia', { _id: f1._id, paciente: { nome: 'Ana Lima' }, procedimento: { data: hoje } }).length === 0;
+
+    ['pre', 'anestesia', 'recuperacao'].forEach(m => store.setList(m, []));
+    localStorage.removeItem(lixeira.KEY);
+    return out;
+  });
+  assert(r.acha, 'mesmo paciente e mesmo dia deveria ser detectado (ignorando maiúsculas)');
+  assert(r.diaDiferente && r.outroPaciente, 'dia diferente ou outro paciente não é duplicidade');
+  assert(r.naoSeAcusa, 'o próprio registro sendo re-salvo não pode se acusar de duplicado');
+  assert(r.semDadosNaoPergunta, 'sem nome ou sem data, não deveria perguntar nada');
+  assert(r.perguntou, 'a pergunta deveria abrir dizendo o paciente e a data');
+  assert(r.duasSaidas, 'a pergunta deveria oferecer substituir E gravar como nova');
+  assert(r.seguiuNova && r.duasFicam, '"gravar como nova" deveria deixar os dois registros');
+  assert(r.marcouPendente, '"substituir" deveria marcar os anteriores para saírem');
+  assert(r.sobrouSoUma, 'depois de substituir deveria ficar só o registro mais atual');
+  assert(r.foramParaLixeira, 'os anteriores têm que ir para a Lixeira, não sumir');
+  assert(r.limpou, 'a marcação não pode sobrar e apagar registros da próxima gravação');
+  assert(r.fichaAcha, 'a ficha de anestesia guarda a data em procedimento.data e também deveria ser coberta');
+  await page.close();
+});
+
+/* 72) Menu no celular: a barra de baixo tapava o fim da lista (Sair, nuvem) */
+await test('Com o menu aberto, a barra de baixo sai da frente e o fim da lista fica alcançável', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    document.body.classList.remove('menu-aberto');
+    ui.toggleSidebar();
+    out.abriu = document.getElementById('sidebar').classList.contains('open')
+      && document.body.classList.contains('menu-aberto');
+    ui.toggleSidebar();
+    out.fechou = !document.getElementById('sidebar').classList.contains('open')
+      && !document.body.classList.contains('menu-aberto');
+    /* a regra de CSS que tira a barra e a folga no fim do menu existem */
+    const css = Array.from(document.styleSheets)
+      .flatMap(s => { try { return Array.from(s.cssRules); } catch (e) { return []; } })
+      .map(r => r.cssText).join('\n');
+    out.regraBarra = /body\.menu-aberto\s+\.bottom-nav/.test(css);
+    out.regraFolga = /\.sidebar\s*\{[^}]*padding-bottom:\s*calc\(env\(safe-area-inset-bottom/.test(css);
+    return out;
+  });
+  assert(r.abriu, 'abrir o menu deveria marcar o body, para a barra de baixo poder sair');
+  assert(r.fechou, 'fechar o menu deveria devolver a barra de baixo');
+  assert(r.regraBarra, 'deveria existir a regra que esconde a barra de baixo com o menu aberto');
+  assert(r.regraFolga, 'o menu deveria ter folga no fim para o último item não ficar sob a barra');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
