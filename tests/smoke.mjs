@@ -1712,35 +1712,35 @@ await test('Configurações sobem para a nuvem, descem ao entrar (vence a mais n
 
     /* 1) mudança local é detectada e sobe num doc modulo=config_sync */
     localStorage.removeItem(configSync.META_KEY);
-    localStorage.setItem('medsys.v7.termo_padrao', 'TERMO LOCAL A');
+    localStorage.setItem('medsys.v7.grafico_modo', 'tabela');
     configSync.checarMudancas();
     await new Promise(r => setTimeout(r, 120));
     const op = envios[envios.length - 1];
     out.subiu = !!op && op.modulo === 'config_sync' && op.doc_id === 'cfg'
-      && op.dados.chaves['medsys.v7.termo_padrao'].v === 'TERMO LOCAL A';
+      && op.dados.chaves['medsys.v7.grafico_modo'].v === 'tabela';
 
     /* 2) nuvem MAIS NOVA vence: valor remoto com carimbo no futuro é aplicado */
     const tFuturo = new Date(Date.now() + 60000).toISOString();
     window.fetch = async () => ({ ok: true, json: async () => ([{ dados: { chaves: {
-      'medsys.v7.termo_padrao': { v: 'TERMO DA NUVEM', t: tFuturo },
+      'medsys.v7.grafico_modo': { v: 'grafico', t: tFuturo },
       'medsys.v7.theme': { v: 'dark', t: tFuturo }
     } } }]) });
     const aplicadas = await configSync.puxarAplicar();
     out.aplicou = aplicadas === 2
-      && localStorage.getItem('medsys.v7.termo_padrao') === 'TERMO DA NUVEM'
+      && localStorage.getItem('medsys.v7.grafico_modo') === 'grafico'
       && localStorage.getItem('medsys.v7.theme') === 'dark';
 
     /* 3) local MAIS NOVO vence e é reenviado para a nuvem */
-    localStorage.setItem('medsys.v7.termo_padrao', 'TERMO LOCAL NOVO');
+    localStorage.setItem('medsys.v7.grafico_modo', 'tabela-nova');
     configSync.checarMudancas();
     const tPassado = new Date(Date.now() - 3600000).toISOString();
     window.fetch = async () => ({ ok: true, json: async () => ([{ dados: { chaves: {
-      'medsys.v7.termo_padrao': { v: 'TERMO VELHO DA NUVEM', t: tPassado }
+      'medsys.v7.grafico_modo': { v: 'valor velho da nuvem', t: tPassado }
     } } }]) });
     const nEnvios = envios.length;
     await configSync.puxarAplicar();
     await new Promise(r => setTimeout(r, 120));
-    out.localVence = localStorage.getItem('medsys.v7.termo_padrao') === 'TERMO LOCAL NOVO'
+    out.localVence = localStorage.getItem('medsys.v7.grafico_modo') === 'tabela-nova'
       && envios.length > nEnvios;
 
     /* 4) o pull normal (legado) ignora o doc de config (não vira "módulo") */
@@ -3007,7 +3007,7 @@ await test('CBHPM: procedimentos próprios entram na busca e no financeiro; paci
     out.protegeOficial = res2.ignorados === 1 && res2.novos === 0 && cbhpm.achar(oficial)[1] === CBHPM_2018[0][1];
 
     /* sobe junto das configurações (mesma nuvem dos ajustes) */
-    out.vaiParaNuvem = configSync.CHAVES.indexOf(cbhpm.EXTRA_KEY) >= 0;
+    out.vaiParaNuvem = !!clinicaSync.CHAVES[cbhpm.EXTRA_KEY];   /* agora é da clínica */
 
     /* a tela lista e remove */
     ajustesGrupos.abrirPara && ajustesGrupos.abrirPara('cbhpm-card');
@@ -3049,7 +3049,7 @@ await test('CBHPM: procedimentos próprios entram na busca e no financeiro; paci
   assert(r.parseCodigoEspaco, 'formato "código espaço descrição" deveria ser separado direito');
   assert(r.financeiroAcha, 'o financeiro deveria reconhecer o código cadastrado');
   assert(r.protegeOficial, 'a tabela oficial embutida não pode ser sobrescrita');
-  assert(r.vaiParaNuvem, 'os procedimentos próprios devem subir para a nuvem');
+  assert(r.vaiParaNuvem, 'os procedimentos próprios devem subir para a clínica (todos os usuários)');
   assert(r.telaLista && r.telaResumo, 'a tela de ajustes deveria listar e contar');
   assert(r.temEnfermaria, 'o cadastro do paciente deveria ter enfermaria além de apartamento');
   assert(r.exclusivos, 'marcar enfermaria deveria desmarcar apartamento');
@@ -3810,6 +3810,87 @@ await test('PDF automático ao finalizar cobre todos os módulos e pode ser exig
   assert(r.cardAvisa, 'o card deveria mostrar que não há destino ativo');
   assert(r.cardConfirma, 'e mostrar onde está guardando quando há');
   assert(r.travadoNaTela, 'com a clínica exigindo, a caixa fica travada no aparelho');
+  await page.close();
+});
+
+/* 68) Cadastros e modelos passam a ser DA CLÍNICA (valem para todos) */
+await test('Cadastros da clínica sobem e descem por org_configs, valendo entre usuários', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud._garantirToken = async () => true;
+    cloud.divergencia = () => null;
+    cloud.session = () => ({ user: { id: 'u1', email: 'medico@ex.com' }, access_token: 't' });
+    cloudRel._lembrarOrg('org-1');
+    localStorage.removeItem(clinicaSync.META_KEY);
+
+    /* o que é da clínica saiu das preferências pessoais */
+    out.separouCanais = configSync.CHAVES.indexOf('medsys.v5.cad.cirurgioes') < 0 &&
+      configSync.CHAVES.indexOf('medsys.v7.logoCustom') < 0 &&
+      !!clinicaSync.CHAVES['medsys.v5.cad.cirurgioes'] &&
+      !!clinicaSync.CHAVES['medsys.v7.logoCustom'] &&
+      configSync.CHAVES.indexOf('medsys.v7.theme') >= 0;   /* tema continua pessoal */
+
+    /* nuvem de mentira para org_configs */
+    let tabela = [];
+    const fetchOrig = window.fetch;
+    window.fetch = async (url, opts) => {
+      const u = String(url);
+      if (u.indexOf('/org_configs') < 0) return fetchOrig(url, opts);
+      if (opts && opts.method === 'POST') {
+        JSON.parse(opts.body).forEach(row => {
+          tabela = tabela.filter(x => x.chave !== row.chave);
+          tabela.push(row);
+        });
+        return { ok: true, json: async () => [] };
+      }
+      return { ok: true, json: async () => tabela.map(x => ({ chave: x.chave, dados: x.dados, updated_at: x.updated_at })) };
+    };
+
+    /* ---- aparelho do MÉDICO cadastra um cirurgião ---- */
+    store.setList('cad_cirurgioes', [{ _id: 'c1', nome: 'Dr. Hugo Serrano', crm: '123' }]);
+    const enviadas = await clinicaSync.enviar();
+    out.subiu = enviadas >= 1 && tabela.some(x => x.chave === 'cad_cirurgioes');
+    /* nada mudou → não reenvia (compara por hash) */
+    out.naoReenvia = (await clinicaSync.enviar()) === 0;
+
+    /* ---- aparelho da SECRETÁRIA: lista vazia, recebe o cadastro ---- */
+    store.setList('cad_cirurgioes', []);
+    localStorage.removeItem(clinicaSync.META_KEY);
+    const baixadas = await clinicaSync.puxarAplicar({ silent: true });
+    out.desceu = baixadas >= 1 && (store.list('cad_cirurgioes')[0] || {}).nome === 'Dr. Hugo Serrano';
+
+    /* versão já vista não é reaplicada por cima do que foi editado aqui */
+    store.setList('cad_cirurgioes', [{ _id: 'c1', nome: 'Dr. Hugo Serrano Alvarado', crm: '123' }]);
+    await clinicaSync.puxarAplicar({ silent: true });
+    out.naoAtropela = (store.list('cad_cirurgioes')[0] || {}).nome === 'Dr. Hugo Serrano Alvarado';
+
+    /* versão mais nova da clínica entra */
+    tabela = [{ chave: 'cad_cirurgioes', dados: { valor: [{ _id: 'c1', nome: 'Dr. Hugo (atualizado na clínica)' }] },
+      updated_at: '2030-01-01T00:00:00.000Z' }];
+    await clinicaSync.puxarAplicar({ silent: true });
+    out.aceitaMaisNovo = (store.list('cad_cirurgioes')[0] || {}).nome === 'Dr. Hugo (atualizado na clínica)';
+
+    /* sem clínica conhecida, não tenta nada */
+    cloudRel._lembrarOrg(null);
+    const sess = auth.usuarioAtual(); if (sess) { sess.organization_id = null; auth._definirSessao(sess); }
+    cloud.buscarPerfil = async () => null;
+    out.semOrgNaoTenta = (await clinicaSync.enviar()) === 0;
+
+    window.fetch = fetchOrig;
+    store.setList('cad_cirurgioes', []);
+    localStorage.removeItem(clinicaSync.META_KEY);
+    return out;
+  });
+  assert(r.separouCanais, 'cadastros/logo viram da clínica; tema segue pessoal');
+  assert(r.subiu, 'o cadastro feito num aparelho deveria subir para a clínica');
+  assert(r.naoReenvia, 'sem mudança, não deveria reenviar');
+  assert(r.desceu, 'outro usuário deveria receber o cadastro');
+  assert(r.naoAtropela, 'versão já vista não pode sobrescrever a edição local');
+  assert(r.aceitaMaisNovo, 'versão mais nova da clínica deveria entrar');
+  assert(r.semOrgNaoTenta, 'sem clínica conhecida, não envia nada');
   await page.close();
 });
 
