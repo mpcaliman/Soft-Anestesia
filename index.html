@@ -10923,6 +10923,27 @@ const espaco = {
         } catch (e) {}
         return Math.max(0, antes - (localStorage.getItem(key) || '').length * 2);
       } },
+    { nome: 'dados de demonstração', fn() {
+        if (typeof demo !== 'undefined' && demo.ativo && demo.ativo()) return 0;  /* não puxa o tapete de quem está no demo */
+        let liberto = 0;
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+          const k = localStorage.key(i);
+          if (k && k.indexOf('demo:') === 0) {
+            liberto += (k.length + (localStorage.getItem(k) || '').length) * 2;
+            localStorage.removeItem(k);
+          }
+        }
+        return liberto;
+      } },
+    { nome: 'cópia de recuperação do formulário', fn() {
+        let liberto = 0;
+        [STORAGE.autosave, 'medsys.v7.autosave.pre', 'medsys.v7.autosave.recuperacao'].forEach(k => {
+          if (!k) return;
+          const v = localStorage.getItem(k);
+          if (v) { liberto += (k.length + v.length) * 2; localStorage.removeItem(k); }
+        });
+        return liberto;
+      } },
     { nome: 'lixeira vencida', fn() {
         const antes = (localStorage.getItem(lixeira.KEY) || '').length * 2;
         try { lixeira.purgarExpirados(); } catch (e) {}
@@ -11010,8 +11031,7 @@ const espaco = {
   avisar(liberado) {
     const pend = espaco.filaPendente();
     try {
-      toast('⚠️ Não consegui salvar: o armazenamento deste aparelho está cheio' +
-            (pend ? ' e ainda há ' + pend + ' item(ns) esperando subir para a nuvem' : '') + '.', 'error');
+      toast('⚠️ Não consegui salvar aqui — o aparelho está cheio. O registro foi para a nuvem; veja a faixa abaixo para liberar espaço.', 'error');
     } catch (e) {}
     const ultimo = parseInt(localStorage.getItem(espaco.AVISO_KEY) || '0', 10);
     if (Date.now() - ultimo < espaco.INTERVALO_AVISO) return;
@@ -11019,16 +11039,53 @@ const espaco = {
     espaco.mostrarFaixa(pend);
   },
 
+  /* POR QUE ainda falta espaço. Sem isto a faixa era um beco sem saída:
+     "liberei tudo e não deu" não diz o que fazer. */
+  diagnostico() {
+    const d = { total: 0, topo: [], pend: espaco.filaPendente(), semEspelho: 0, comEspelho: 0 };
+    try {
+      const u = armazenamento.uso();
+      d.total = u.total;
+      const porRotulo = {};
+      u.itens.forEach(it => {
+        const r = armazenamento._rotulo(it.k);
+        porRotulo[r] = (porRotulo[r] || 0) + it.bytes;
+      });
+      d.topo = Object.entries(porRotulo).sort((a, b) => b[1] - a[1]).slice(0, 3);
+    } catch (e) {}
+    /* Registro só é arquivável quando o espelho relacional confirmou (_relUpdatedAt).
+       Se quase nada tem esse carimbo, o problema não é lixo: é sincronização. */
+    try {
+      Object.keys(arquivo.PRAZOS).forEach(mod => {
+        (store.list(mod) || []).forEach(it => {
+          if (!it || !it._id) return;
+          if (it._relUpdatedAt) d.comEspelho++; else d.semEspelho++;
+        });
+      });
+    } catch (e) {}
+    return d;
+  },
   mostrarFaixa(pend) {
-    if (document.getElementById('espaco-faixa')) return;
+    const el = document.getElementById('espaco-faixa');
+    if (el) el.remove();
+    const d = espaco.diagnostico();
+    const topo = d.topo.map(([r, b]) => r + ' <b>' + armazenamento._fmt(b) + '</b>').join(' · ');
+    let causa;
+    if (d.pend) {
+      causa = 'Há <b>' + d.pend + '</b> item(ns) que ainda não subiram — não posso tirá-los daqui sem isso. Conecte-se e use <b>Atualizar tudo</b>.';
+    } else if (d.semEspelho > d.comEspelho) {
+      /* o caso mais provável quando "tudo atualizado" e ainda falta espaço */
+      causa = '<b>' + d.semEspelho + '</b> registro(s) ainda não estão confirmados no banco da clínica, então não posso tirá-los do aparelho. ' +
+              'Use <b>Ajustes → Avançado → 🏥 Enviar tudo para a minha clínica</b>.';
+    } else {
+      causa = 'Liberei tudo o que era seguro liberar e ainda falta espaço.';
+    }
     const div = document.createElement('div');
     div.id = 'espaco-faixa';
     div.className = 'espaco-faixa';
     div.innerHTML =
-      '<span class="ef-txt"><b>⚠️ Armazenamento cheio.</b> ' +
-      (pend
-        ? 'Há <b>' + pend + '</b> item(ns) que ainda não subiram — por isso não posso tirá-los daqui. Conecte-se à internet e atualize a nuvem.'
-        : 'Liberei tudo o que era seguro liberar e ainda falta espaço.') +
+      '<span class="ef-txt"><b>⚠️ Armazenamento cheio</b> (' + armazenamento._fmt(d.total) + '). ' + causa +
+      (topo ? '<br><span style="opacity:.85">Ocupando mais: ' + topo + '</span>' : '') +
       '</span>' +
       '<button type="button" class="btn btn-xs btn-primary" onclick="espaco.irParaLimpeza()">Liberar espaço</button>' +
       '<button type="button" class="ef-x" onclick="espaco.fecharFaixa()" aria-label="Fechar">✕</button>';

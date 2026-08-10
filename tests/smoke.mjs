@@ -4435,6 +4435,76 @@ await test('Armazenamento cheio: libera espaço sozinho, salva de verdade e não
   await page.close();
 });
 
+/* 77) A faixa tem que DIAGNOSTICAR, não só reclamar: dizer o que ocupa espaço e
+   por que o app não consegue liberar mais. */
+await test('Faixa de armazenamento diz o que ocupa espaço e por que não dá para liberar mais', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ['pre', 'anestesia'].forEach(m => store.setList(m, []));
+    localStorage.removeItem(espaco.AVISO_KEY);
+
+    /* Caso A: registros ainda NÃO confirmados no banco da clínica.
+       Não é lixo sobrando — é sincronização faltando, e a faixa tem que dizer. */
+    cloud._fila = () => [];
+    store.setList('pre', [
+      { _id: 'a', nome: 'A', _updatedAt: '2020-01-01T00:00:00.000Z' },
+      { _id: 'b', nome: 'B', _updatedAt: '2020-01-01T00:00:00.000Z' },
+      { _id: 'c', nome: 'C', _updatedAt: '2020-01-01T00:00:00.000Z' }
+    ]);
+    let d = espaco.diagnostico();
+    out.contaSemEspelho = d.semEspelho === 3 && d.comEspelho === 0;
+    espaco.fecharFaixa();
+    espaco.mostrarFaixa(0);
+    let txt = document.getElementById('espaco-faixa').textContent;
+    out.apontaSincronizacao = /não estão confirmados no banco da clínica/.test(txt)
+      && /Enviar tudo para a minha clínica/.test(txt);
+    out.mostraQuemOcupa = /Ocupando mais:/.test(txt);
+    out.mostraTotal = /KB|MB/.test(txt);
+
+    /* Caso B: fila pendente — a causa é outra, e a mensagem também */
+    cloud._fila = () => [{}, {}];
+    espaco.fecharFaixa();
+    espaco.mostrarFaixa(2);
+    txt = document.getElementById('espaco-faixa').textContent;
+    out.apontaFila = /ainda não subiram/.test(txt) && /Atualizar tudo/.test(txt);
+
+    /* Caso C: tudo confirmado — aí sim é falta de espaço mesmo */
+    cloud._fila = () => [];
+    store.setList('pre', [{ _id: 'a', nome: 'A', _relUpdatedAt: '2020-01-01T00:00:00.000Z' }]);
+    espaco.fecharFaixa();
+    espaco.mostrarFaixa(0);
+    txt = document.getElementById('espaco-faixa').textContent;
+    out.semDesculpa = /Liberei tudo o que era seguro liberar/.test(txt);
+
+    /* As etapas novas existem e a de demonstração não roda dentro do demo */
+    const nomes = espaco.ETAPAS.map(e => e.nome);
+    out.temEtapasNovas = nomes.includes('dados de demonstração') && nomes.includes('cópia de recuperação do formulário');
+    const demoOrig = demo.ativo;
+    demo.ativo = () => true;
+    localStorage.setItem('demo:teste', 'x'.repeat(500));
+    const etapaDemo = espaco.ETAPAS.find(e => e.nome === 'dados de demonstração');
+    out.respeitaDemo = etapaDemo.fn() === 0 && localStorage.getItem('demo:teste') !== null;
+    demo.ativo = () => false;
+    out.limpaDemoForaDele = etapaDemo.fn() > 0 && localStorage.getItem('demo:teste') === null;
+    demo.ativo = demoOrig;
+
+    espaco.fecharFaixa();
+    ['pre', 'anestesia'].forEach(m => store.setList(m, []));
+    localStorage.removeItem(espaco.AVISO_KEY);
+    return out;
+  });
+  assert(r.contaSemEspelho, 'o diagnóstico deveria contar quantos registros ainda não foram confirmados na nuvem');
+  assert(r.apontaSincronizacao, 'com registros não confirmados, a faixa deveria apontar o caminho da sincronização');
+  assert(r.mostraQuemOcupa && r.mostraTotal, 'a faixa deveria dizer o total e o que mais ocupa espaço');
+  assert(r.apontaFila, 'com fila pendente, a causa apontada deveria ser outra');
+  assert(r.semDesculpa, 'com tudo confirmado, a faixa deveria admitir que é falta de espaço mesmo');
+  assert(r.temEtapasNovas, 'demonstração e auto-save deveriam ser etapas de liberação');
+  assert(r.respeitaDemo, 'nunca apagar os dados de demonstração de quem está usando o modo demo');
+  assert(r.limpaDemoForaDele, 'fora do modo demo, esses dados podem sair');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
