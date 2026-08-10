@@ -4505,6 +4505,59 @@ await test('Faixa de armazenamento diz o que ocupa espaço e por que não dá pa
   await page.close();
 });
 
+/* 78) "Pré-anestésicas: 1,2 MB" não é acionável. Precisa dizer o que há dentro. */
+await test('Armazenamento mostra o que pesa DENTRO do módulo e o que já dá para liberar', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const imagem = 'data:image/png;base64,' + 'A'.repeat(4000);
+    store.setList('pre', [
+      { _id: 'p1', nome: 'Paciente Pesado', data_avaliacao: '2026-08-01',
+        _docs: [{ nome: 'ECG', dataurl: imagem, storage_path: 'org/1/ecg.png' }],   /* já na nuvem */
+        assinatura_dataurl: imagem },                                               /* nunca sai */
+      { _id: 'p2', nome: 'Paciente Leve', data_avaliacao: '2026-08-02', obs: 'texto curto' }
+    ]);
+
+    /* soma os binários coladinhos no registro */
+    const bin = armazenamento._binariosDe(store.list('pre')[0]);
+    out.contaBinarios = bin.n === 2 && bin.bytes > 15000;
+    out.ignoraTextoCurto = armazenamento._binariosDe(store.list('pre')[1]).n === 0;
+
+    armazenamento.detalhar('pre');
+    const txt = document.getElementById('modal-body').textContent;
+    out.abriuDetalhe = /imagem\(ns\)\/assinatura/.test(txt);
+    out.dizOqueLibera = /já está na nuvem e pode sair daqui agora/.test(txt);
+    out.listaMaisPesado = txt.indexOf('Paciente Pesado') >= 0
+      && txt.indexOf('Paciente Pesado') < txt.indexOf('Paciente Leve');
+    out.temBotaoLiberar = /Liberar/.test(document.getElementById('modal-body').innerHTML);
+    modal.close();
+
+    /* liberar tira só a cópia local do que TEM storage_path; a assinatura fica */
+    armazenamento.liberarAnexos();
+    const p1 = store.list('pre')[0];
+    out.tirouSoOqueEstaNaNuvem = !p1._docs[0].dataurl && p1._docs[0].storage_path
+      && p1.assinatura_dataurl === imagem;
+
+    /* sem nada na nuvem, o detalhe é honesto: não dá para liberar */
+    store.setList('pre', [{ _id: 'p3', nome: 'Sem nuvem', _docs: [{ nome: 'X', dataurl: imagem }] }]);
+    armazenamento.detalhar('pre');
+    const txt2 = document.getElementById('modal-body').textContent;
+    out.honestoQuandoNaoDa = /Nenhuma dessas imagens foi enviada para a nuvem ainda/.test(txt2);
+    modal.close();
+
+    store.setList('pre', []);
+    return out;
+  });
+  assert(r.contaBinarios, 'deveria somar as imagens e assinaturas coladas no registro');
+  assert(r.ignoraTextoCurto, 'texto comum não pode ser contado como binário');
+  assert(r.abriuDetalhe, 'o detalhe do módulo deveria abrir dizendo quanto é imagem');
+  assert(r.dizOqueLibera && r.temBotaoLiberar, 'deveria dizer quanto dá para liberar e oferecer o botão');
+  assert(r.listaMaisPesado, 'os registros deveriam vir do mais pesado para o mais leve');
+  assert(r.tirouSoOqueEstaNaNuvem, 'liberar só pode tirar a cópia local do que já está na nuvem — assinatura fica');
+  assert(r.honestoQuandoNaoDa, 'sem nada na nuvem, o detalhe tem que dizer que não dá para liberar');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

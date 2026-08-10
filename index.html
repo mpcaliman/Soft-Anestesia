@@ -10449,13 +10449,79 @@ const armazenamento = {
     if (res) res.innerHTML = 'Em uso neste aparelho: <b>' + armazenamento._fmt(u.total) + '</b>. No celular, o navegador costuma dar ~5 MB — acima disso aparece o aviso de armazenamento cheio.' +
       (nArq ? '<br><span style="color:#1c4f7c"><b>🚑 ' + nArq + ' registro(s) estão arquivados na nuvem</b> (fora deste aparelho) — use "Trazer TODOS de volta" abaixo.</span>' : '');
     try { const chk = document.getElementById('arq-auto-chk'); if (chk) chk.checked = arquivo.autoLigado(); } catch (e) {}
+    /* qual módulo está por trás de cada rótulo — para abrir o detalhe */
+    const modDoRotulo = {};
+    Object.keys(STORAGE).forEach(mk => {
+      const r = armazenamento._rotulo(STORAGE[mk]);
+      if (r.indexOf('📋') === 0 && !modDoRotulo[r]) modDoRotulo[r] = mk;
+    });
     host.innerHTML = tops.map(([r, b]) => {
       const pct = u.total ? Math.max(2, Math.round(b / u.total * 100)) : 0;
+      const mod = modDoRotulo[r];
+      const lupa = mod
+        ? ' <button type="button" class="btn btn-xs btn-ghost" style="padding:0 6px" onclick="armazenamento.detalhar(\'' + mod + '\')" title="Ver o que pesa aqui dentro">🔎</button>'
+        : '';
       return '<div style="margin-bottom:7px">' +
-        '<div style="display:flex;justify-content:space-between;font-size:.8rem"><span>' + r + '</span><b>' + armazenamento._fmt(b) + '</b></div>' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:.8rem"><span>' + r + lupa + '</span><b>' + armazenamento._fmt(b) + '</b></div>' +
         '<div style="height:6px;background:var(--surface-alt);border-radius:4px;overflow:hidden"><div style="height:100%;width:' + pct + '%;background:var(--primary)"></div></div></div>';
     }).join('');
   },
+  /* O que pesa DENTRO de um módulo. "Pré-anestésicas: 1,2 MB" não diz nada
+     acionável; saber que 1,1 MB são imagens coladas nos registros, sim. */
+  _pesoDe(obj) { try { return JSON.stringify(obj).length * 2; } catch (e) { return 0; } },
+  _binariosDe(rec) {
+    /* soma tudo que é data:... (foto de exame, assinatura, parecer escaneado) */
+    let bytes = 0, n = 0;
+    const walk = (o) => {
+      if (Array.isArray(o)) { o.forEach(walk); return; }
+      if (o && typeof o === 'object') {
+        Object.keys(o).forEach(k => {
+          const v = o[k];
+          if (typeof v === 'string' && v.length > 512 && v.slice(0, 5) === 'data:') { bytes += v.length * 2; n++; }
+          else if (v && typeof v === 'object') walk(v);
+        });
+      }
+    };
+    try { walk(rec); } catch (e) {}
+    return { bytes, n };
+  },
+  detalhar(mod) {
+    const lst = store.list(mod) || [];
+    let totalBin = 0, totalBinN = 0, naNuvem = 0;
+    const linhas = lst.map(rec => {
+      const bin = armazenamento._binariosDe(rec);
+      totalBin += bin.bytes; totalBinN += bin.n;
+      /* anexo com storage_path já está na nuvem: a cópia local é dispensável */
+      ['_docs', '_docs_troca', 'anexos'].forEach(campo => {
+        (Array.isArray(rec[campo]) ? rec[campo] : []).forEach(d => {
+          if (d && d.storage_path && d.dataurl) naNuvem += String(d.dataurl).length * 2;
+        });
+      });
+      return { rec, total: armazenamento._pesoDe(rec), bin: bin.bytes, nBin: bin.n };
+    }).sort((a, b) => b.total - a.total).slice(0, 10);
+
+    const rot = (typeof lixeira !== 'undefined' && lixeira.LABELS[mod]) || mod;
+    const corpo =
+      '<p style="font-size:.86rem;margin:0 0 10px">Dentro de <b>' + utils.escapeHTML(rot) + '</b>: ' +
+      '<b>' + armazenamento._fmt(totalBin) + '</b> em <b>' + totalBinN + '</b> imagem(ns)/assinatura(s) coladas nos registros' +
+      (naNuvem ? ' — <b>' + armazenamento._fmt(naNuvem) + '</b> disso já está na nuvem e pode sair daqui agora.' : '.') + '</p>' +
+      (naNuvem
+        ? '<button type="button" class="btn btn-sm btn-primary" onclick="armazenamento.liberarAnexos(); modal.close();">☁️ Liberar ' + armazenamento._fmt(naNuvem) + ' agora</button>'
+        : '<p style="font-size:.78rem;color:var(--text-mute);margin:0 0 10px">Nenhuma dessas imagens foi enviada para a nuvem ainda, então nenhuma pode sair do aparelho sem perder o conteúdo. ' +
+          'Elas sobem junto com o registro quando a sincronização completa.</p>') +
+      '<p style="font-size:.8rem;font-weight:600;margin:14px 0 6px">Os registros mais pesados</p>' +
+      '<div style="max-height:46vh;overflow:auto">' +
+      linhas.map(l => {
+        const nome = (typeof arquivo !== 'undefined' ? arquivo._nomeDe(l.rec) : '') || '(sem nome)';
+        const data = (typeof historico !== 'undefined' ? historico._fmtData(historico._dataItem(l.rec)) : '');
+        return '<div style="display:flex;justify-content:space-between;gap:10px;font-size:.82rem;padding:6px 0;border-bottom:1px solid var(--border)">' +
+          '<span style="min-width:0">' + utils.escapeHTML(nome) + ' <span style="color:var(--text-mute)">· ' + utils.escapeHTML(data) + '</span>' +
+          (l.nBin ? '<br><span style="color:var(--text-mute);font-size:.74rem">' + l.nBin + ' imagem(ns) · ' + armazenamento._fmt(l.bin) + '</span>' : '') +
+          '</span><b style="white-space:nowrap">' + armazenamento._fmt(l.total) + '</b></div>';
+      }).join('') + '</div>';
+    modal.open('🔎 O que pesa em ' + rot, corpo, '<button class="btn" onclick="modal.close()">Fechar</button>');
+  },
+
   compactarVersoes() {
     try {
       const key = 'medsys.v7.versions';
