@@ -3798,6 +3798,23 @@ textarea { border-radius: 10px; }
 .sidebar-brand strong { font-weight: 800; letter-spacing: -.2px; }
 /* Header */
 .app-header { backdrop-filter: blur(8px); }
+/* Faixa de armazenamento cheio — avisa sem tomar a tela */
+.espaco-faixa{
+  position: fixed; left: 10px; right: 10px; bottom: 84px; z-index: 950;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: #7a2e18; color: #fff; border-radius: 10px;
+  padding: 10px 12px; font-size: .82rem; line-height: 1.45;
+  box-shadow: 0 8px 24px rgba(15,37,64,.35);
+}
+.espaco-faixa .ef-txt{ flex: 1; min-width: 180px; }
+.espaco-faixa .ef-x{
+  background: transparent; border: 0; color: #fff; opacity: .8;
+  font-size: 1rem; cursor: pointer; padding: 2px 6px; line-height: 1;
+}
+.espaco-faixa .ef-x:hover{ opacity: 1; }
+@media (min-width: 769px){ .espaco-faixa{ bottom: 16px; left: auto; right: 16px; max-width: 460px; } }
+@media print{ .espaco-faixa{ display: none !important; } }
+
 /* ===== Bottom nav (mobile) ===== */
 .bottom-nav { display: none; }
 @media (max-width: 768px) {
@@ -9766,39 +9783,30 @@ const store = {
     try { return JSON.parse(localStorage.getItem(STORAGE[modKey]) || '[]'); }
     catch { return []; }
   },
-  setList(modKey, arr) {
-    try {
-      localStorage.setItem(STORAGE[modKey], JSON.stringify(arr));
-    }
-    catch (e) {
-      /* Detecta armazenamento cheio (QuotaExceededError) e avisa claramente */
-      const cheio = e && (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014 || /quota/i.test(e.message || ''));
-      if (cheio) {
-        store._avisarArmazenamentoCheio();
-      } else {
-        toast('Erro ao salvar: ' + e.message, 'error');
-      }
-    }
+  /* Escrita crua, sem socorro — usada pelas próprias rotinas de liberação de
+     espaço, que não podem chamar o socorro de novo (recursão). */
+  _escrever(modKey, arr) {
+    try { localStorage.setItem(STORAGE[modKey], JSON.stringify(arr)); return true; }
+    catch (e) { return false; }
   },
-  /* Aviso de armazenamento cheio (evita repetir o alerta a cada gravação) */
-  _avisouCheio: false,
-  _avisarArmazenamentoCheio() {
-    toast('⚠️ Armazenamento do aparelho cheio! Faça um backup completo e sincronize a nuvem.', 'error');
-    if (store._avisouCheio) return;
-    store._avisouCheio = true;
-    try {
-      if (typeof modal !== 'undefined') {
-        modal.open('⚠️ Armazenamento cheio',
-          `<p style="font-size:.9rem;line-height:1.6">O espaço de armazenamento deste aparelho atingiu o limite e novos dados podem não ser salvos.</p>
-           <p style="font-size:.9rem;line-height:1.6;margin-top:8px"><strong>O que fazer agora:</strong></p>
-           <ol style="font-size:.88rem;line-height:1.7;padding-left:20px">
-             <li>Use <strong>Ajustes → Armazenamento do aparelho</strong>: mostra o que ocupa espaço e libera com um toque (histórico de versões, lixeira, anexos que já estão na nuvem).</li>
-             <li>Confirme que a <strong>sincronização com a nuvem</strong> está ativa e concluída.</li>
-             <li>Se precisar, faça um <strong>backup completo</strong> (Ajustes → Backup completo → Exportar).</li>
-           </ol>`,
-          '<button class="btn btn-primary" onclick="modal.close(); location.hash=\'#ajustes\'; setTimeout(function(){ try { ajustesGrupos.abrirPara(\'armazenamento-card\'); armazenamento.render(); } catch (e) {} }, 500);">🧹 Ir para a limpeza</button><button class="btn" onclick="modal.close()">Fechar</button>');
-      }
-    } catch (e) {}
+  _ehCheio(e) {
+    return !!(e && (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014 || /quota/i.test(e.message || '')));
+  },
+  /* Devolve true quando gravou de verdade. Se o aparelho estiver cheio, libera
+     espaço sozinho e refaz a gravação — em vez de engolir o erro e deixar a
+     pessoa achando que salvou. */
+  setList(modKey, arr) {
+    const escrever = () => {
+      try { localStorage.setItem(STORAGE[modKey], JSON.stringify(arr)); return true; }
+      catch (e) { escrever._erro = e; return false; }
+    };
+    if (escrever()) return true;
+    const e = escrever._erro;
+    if (!store._ehCheio(e)) {
+      toast('Erro ao salvar: ' + (e && e.message || 'desconhecido'), 'error');
+      return false;
+    }
+    try { return espaco.socorro(escrever); } catch (e2) { return false; }
   },
   /* Salva um item; se data._id existir, atualiza, senão adiciona */
   save(modKey, item) {
@@ -9830,10 +9838,17 @@ const store = {
     if (idx >= 0) list[idx] = item;
     else list.unshift(item);
     if (list.length > HISTORY_MAX) list.length = HISTORY_MAX;
-    store.setList(modKey, list);
+    const gravouLocal = store.setList(modKey, list);
     store._audit(isNew ? 'create' : 'update', modKey, item);
     /* Sincronização em background (não bloqueia; falha silenciosa vai pra fila) */
     try { if (typeof cloud !== 'undefined') cloud.pushDoc(modKey, item, 'upsert'); } catch (e) {}
+    /* Não coube no aparelho: o registro ainda vai para a nuvem, mas dizer
+       "Salvo" seria mentira. A pessoa precisa saber onde ele está. */
+    if (gravouLocal === false) {
+      try {
+        toast('⚠️ Não coube neste aparelho. O registro foi enviado para a NUVEM — para abrir aqui offline, libere espaço.', 'error');
+      } catch (e) {}
+    }
     /* Fase 6: espelho relacional dos módulos de registro (pré, ficha, etc.) */
     try { if (typeof cloudRel !== 'undefined' && cloudRel.ehModuloRegistro && cloudRel.ehModuloRegistro(modKey)) cloudRel.mirrorRegistro(modKey, item); } catch (e) {}
     /* Clicou em Salvar: o RASCUNHO daquele módulo sobe na hora — é o que
@@ -10351,6 +10366,7 @@ const armazenamento = {
         }
       }
     } catch (e) {}
+    try { espaco.preventiva(); } catch (e) {}
     try { armazenamento.repararNomesJSON(); } catch (e) {}
   },
 
@@ -10872,6 +10888,172 @@ const duplicados = {
       try { toast('🔁 ' + n + (n === 1 ? ' registro anterior foi para a Lixeira' : ' registros anteriores foram para a Lixeira') + ' — recuperáveis por 30 dias'); } catch (e) {}
       try { if (typeof pacientes !== 'undefined' && pacientes.render) pacientes.render(); } catch (e) {}
     }
+  }
+};
+
+/* ============================================================================
+   ESPAÇO DO APARELHO — socorro automático
+   O navegador do celular dá ~5 MB. Quando enche, a gravação FALHA. Antes, o
+   app engolia o erro, abria uma janela pedindo limpeza manual e seguia — ou
+   seja: a pessoa achava que tinha salvo e não tinha, e a janela voltava a cada
+   toque em Salvar, no meio do atendimento.
+   Agora, ao falhar, o app LIBERA espaço sozinho, em etapas, da mais segura
+   para a menos, e REFAZ a gravação depois de cada etapa. Só incomoda se todas
+   as etapas falharem — e aí com um aviso que não bloqueia a tela.
+   Regra de ouro: só sai do aparelho o que está CONFIRMADO na nuvem. Nada que
+   ainda esteja na fila de envio é tocado.
+============================================================================ */
+const espaco = {
+  AVISO_KEY: 'medsys.v7.espaco.avisado_em',
+  INTERVALO_AVISO: 6 * 3600000,          /* no máximo 1 aviso a cada 6 h */
+  _rodando: false,
+
+  filaPendente() { try { return cloud._fila().length; } catch (e) { return 0; } },
+
+  /* Etapas de liberação, da mais segura para a menos. Cada uma devolve os
+     bytes liberados (aproximados). */
+  ETAPAS: [
+    { nome: 'histórico de versões', fn() {
+        const key = 'medsys.v7.versions';
+        const antes = (localStorage.getItem(key) || '').length * 2;
+        try {
+          const all = JSON.parse(localStorage.getItem(key) || '{}');
+          Object.keys(all).forEach(k => { all[k] = (all[k] || []).slice(0, 1); });
+          localStorage.setItem(key, JSON.stringify(all));
+        } catch (e) {}
+        return Math.max(0, antes - (localStorage.getItem(key) || '').length * 2);
+      } },
+    { nome: 'lixeira vencida', fn() {
+        const antes = (localStorage.getItem(lixeira.KEY) || '').length * 2;
+        try { lixeira.purgarExpirados(); } catch (e) {}
+        return Math.max(0, antes - (localStorage.getItem(lixeira.KEY) || '').length * 2);
+      } },
+    { nome: 'anexos que já estão na nuvem', fn() {
+        let liberto = 0;
+        ['pre', 'consulta', 'anestesia', 'recuperacao', 'financeiro', 'documentos', 'termo', 'prescricao', 'risco'].forEach(mod => {
+          try {
+            const lista = store.list(mod); let mudou = false;
+            lista.forEach(rec => {
+              ['_docs', '_docs_troca', 'anexos'].forEach(campo => {
+                (Array.isArray(rec[campo]) ? rec[campo] : []).forEach(d => {
+                  /* storage_path = o arquivo está na nuvem; a cópia local é dispensável */
+                  if (d && d.storage_path && d.dataurl) { liberto += d.dataurl.length * 2; delete d.dataurl; mudou = true; }
+                });
+              });
+            });
+            if (mudou) store._escrever(mod, lista);
+          } catch (e) {}
+        });
+        return liberto;
+      } },
+    { nome: 'histórico antigo (fica na nuvem)', fn() { return espaco._arquivarAte(90); } },
+    { nome: 'histórico dos últimos meses (fica na nuvem)', fn() { return espaco._arquivarAte(30); } },
+    { nome: 'lixeira', fn() {
+        const antes = (localStorage.getItem(lixeira.KEY) || '').length * 2;
+        try { localStorage.setItem(lixeira.KEY, '[]'); } catch (e) {}
+        return Math.max(0, antes - 2);
+      } },
+    { nome: 'histórico das últimas semanas (fica na nuvem)', fn() { return espaco._arquivarAte(7); } }
+  ],
+
+  /* Arquiva o que é mais antigo que N dias E já confirmado na nuvem.
+     Reaproveita o índice de `arquivo`, então tudo volta com um toque. */
+  _arquivarAte(dias) {
+    const antes = armazenamento.uso().total;
+    const original = Object.assign({}, arquivo.PRAZOS);
+    try {
+      Object.keys(arquivo.PRAZOS).forEach(m => {
+        /* financeiro/orçamento têm prazo maior de propósito (relatórios do ano) */
+        arquivo.PRAZOS[m] = Math.max(dias, dias === 7 ? 7 : (original[m] > 200 ? Math.max(dias, 180) : dias));
+      });
+      arquivo.arquivarAntigos();
+    } catch (e) {}
+    finally { Object.keys(original).forEach(m => { arquivo.PRAZOS[m] = original[m]; }); }
+    return Math.max(0, antes - armazenamento.uso().total);
+  },
+
+  /* Chamado quando uma gravação falhou por falta de espaço.
+     `regravar` refaz a gravação e devolve true quando conseguir. */
+  socorro(regravar) {
+    if (espaco._rodando) return false;      /* nada de recursão entre etapas */
+    espaco._rodando = true;
+    let liberado = 0;
+    let feitas = [];
+    try {
+      for (const etapa of espaco.ETAPAS) {
+        let ganho = 0;
+        try { ganho = etapa.fn() || 0; } catch (e) { ganho = 0; }
+        if (ganho > 0) { liberado += ganho; feitas.push(etapa.nome); }
+        if (regravar()) {
+          espaco._contarSucesso(liberado, feitas);
+          return true;
+        }
+      }
+    } finally { espaco._rodando = false; }
+    espaco.avisar(liberado);
+    return false;
+  },
+
+  _contarSucesso(liberado, feitas) {
+    try {
+      toast('🧹 Espaço liberado (' + armazenamento._fmt(liberado) + ') e o registro foi salvo. ' +
+            'Saíram do aparelho: ' + feitas.join(', ') + ' — nada foi perdido, está tudo na nuvem.', 'success');
+    } catch (e) {}
+    try { armazenamento.render(); } catch (e) {}
+    /* aproveita para empurrar o que estiver na fila: quanto mais confirmado na
+       nuvem, mais o aparelho consegue liberar da próxima vez */
+    try { if (cloud.estaConfigurado() && cloud.estaLogado()) cloud.sincronizar({ silent: true }); } catch (e) {}
+  },
+
+  /* Aviso de última instância: NÃO bloqueia a tela. Uma faixa no topo que a
+     pessoa fecha, e no máximo uma a cada 6 h. */
+  avisar(liberado) {
+    const pend = espaco.filaPendente();
+    try {
+      toast('⚠️ Não consegui salvar: o armazenamento deste aparelho está cheio' +
+            (pend ? ' e ainda há ' + pend + ' item(ns) esperando subir para a nuvem' : '') + '.', 'error');
+    } catch (e) {}
+    const ultimo = parseInt(localStorage.getItem(espaco.AVISO_KEY) || '0', 10);
+    if (Date.now() - ultimo < espaco.INTERVALO_AVISO) return;
+    try { localStorage.setItem(espaco.AVISO_KEY, String(Date.now())); } catch (e) {}
+    espaco.mostrarFaixa(pend);
+  },
+
+  mostrarFaixa(pend) {
+    if (document.getElementById('espaco-faixa')) return;
+    const div = document.createElement('div');
+    div.id = 'espaco-faixa';
+    div.className = 'espaco-faixa';
+    div.innerHTML =
+      '<span class="ef-txt"><b>⚠️ Armazenamento cheio.</b> ' +
+      (pend
+        ? 'Há <b>' + pend + '</b> item(ns) que ainda não subiram — por isso não posso tirá-los daqui. Conecte-se à internet e atualize a nuvem.'
+        : 'Liberei tudo o que era seguro liberar e ainda falta espaço.') +
+      '</span>' +
+      '<button type="button" class="btn btn-xs btn-primary" onclick="espaco.irParaLimpeza()">Liberar espaço</button>' +
+      '<button type="button" class="ef-x" onclick="espaco.fecharFaixa()" aria-label="Fechar">✕</button>';
+    document.body.appendChild(div);
+  },
+  fecharFaixa() { const el = document.getElementById('espaco-faixa'); if (el) el.remove(); },
+  irParaLimpeza() {
+    espaco.fecharFaixa();
+    location.hash = '#ajustes';
+    setTimeout(() => {
+      try { ajustesGrupos.abrirPara('armazenamento-card'); armazenamento.render(); } catch (e) {}
+    }, 400);
+  },
+
+  /* Manutenção preventiva: roda antes de encher, quando passa de ~3,5 MB.
+     Só faz o que é indolor — não arquiva registro nenhum sem necessidade. */
+  preventiva() {
+    try {
+      if (armazenamento.uso().total < 3.5 * 1024 * 1024) return 0;
+      let ganho = 0;
+      ganho += espaco.ETAPAS[0].fn() || 0;   /* versões */
+      ganho += espaco.ETAPAS[1].fn() || 0;   /* lixeira vencida */
+      ganho += espaco.ETAPAS[2].fn() || 0;   /* anexos já na nuvem */
+      return ganho;
+    } catch (e) { return 0; }
   }
 };
 
@@ -40708,7 +40890,7 @@ document.addEventListener('DOMContentLoaded', () => {
        em qualquer navegador, mesmo quando const não é global. */
   window.utils = utils; window.store = store; window.ui = ui;
   window.backupCompleto = backupCompleto;
-  window.lixeira = lixeira; window.duplicados = duplicados;
+  window.lixeira = lixeira; window.duplicados = duplicados; window.espaco = espaco;
   window.carimboHora = carimboHora;
   window.cronometros = cronometros;
   window.dashboard = dashboard; window.pre = pre; window.consulta = consulta;

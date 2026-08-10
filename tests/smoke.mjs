@@ -4349,6 +4349,92 @@ await test('Gráfico: cada sinal vital tem cor e símbolo próprios, na ficha e 
   await page.close();
 });
 
+/* 76) Aparelho cheio: o app libera espaço sozinho e SALVA, em vez de engolir o
+   erro e abrir uma janela a cada toque em Salvar. */
+await test('Armazenamento cheio: libera espaço sozinho, salva de verdade e não bloqueia a tela', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const setItemOrig = Storage.prototype.setItem;
+
+    /* --- 1) a gravação que falha volta FALSE (antes engolia e devolvia nada) --- */
+    let permitir = false;
+    Storage.prototype.setItem = function (k, v) {
+      if (!permitir && String(k).indexOf('medsys.v3.pre') === 0) {
+        const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e;
+      }
+      return setItemOrig.call(this, k, v);
+    };
+    /* trava também o socorro: nenhuma etapa consegue destravar */
+    const etapasOrig = espaco.ETAPAS.slice();
+    espaco.ETAPAS = [{ nome: 'nada', fn: () => 0 }];
+    localStorage.removeItem(espaco.AVISO_KEY);
+    out.falhaVoltaFalse = store.setList('pre', [{ _id: 'x' }]) === false;
+    /* e avisa numa FAIXA, não numa janela modal que bloqueia o trabalho */
+    out.faixaNaoModal = !!document.getElementById('espaco-faixa')
+      && !document.getElementById('modal-backdrop').classList.contains('show');
+    /* segundo aviso dentro de 6 h não repete a faixa */
+    espaco.fecharFaixa();
+    store.setList('pre', [{ _id: 'x' }]);
+    out.naoRepete = !document.getElementById('espaco-faixa');
+
+    /* --- 2) socorro real: a etapa libera e a gravação passa --- */
+    espaco.ETAPAS = [
+      { nome: 'etapa que não resolve', fn: () => 10 },
+      { nome: 'etapa que resolve', fn: () => { permitir = true; return 2048; } },
+      { nome: 'etapa que nem deveria rodar', fn: () => { out.foiLonge = true; return 1; } }
+    ];
+    espaco.fecharFaixa();
+    out.socorroSalvou = store.setList('pre', [{ _id: 'y' }]) === true;
+    out.parouNaEtapaCerta = out.foiLonge !== true;
+    out.semFaixaQuandoResolve = !document.getElementById('espaco-faixa');
+
+    Storage.prototype.setItem = setItemOrig;
+    espaco.ETAPAS = etapasOrig;
+
+    /* --- 3) as etapas reais existem e vão da mais segura para a menos --- */
+    const nomes = espaco.ETAPAS.map(e => e.nome);
+    out.ordemSegura = nomes[0].includes('versões')
+      && nomes.indexOf('lixeira vencida') < nomes.indexOf('lixeira')
+      && nomes.some(n => n.includes('nuvem'));
+
+    /* --- 4) só sai do aparelho o que está CONFIRMADO na nuvem --- */
+    store.setList('pre', []);
+    const antigo = '2020-01-01T00:00:00.000Z';
+    store.setList('pre', [
+      { _id: 'confirmado', nome: 'A', _updatedAt: antigo, _relUpdatedAt: antigo },
+      { _id: 'so-local',   nome: 'B', _updatedAt: antigo }        /* nunca subiu */
+    ]);
+    localStorage.removeItem(arquivo.INDEX_KEY);
+    espaco._arquivarAte(30);
+    const restaram = store.list('pre').map(x => x._id);
+    out.guardaOnaoSincronizado = restaram.includes('so-local') && !restaram.includes('confirmado');
+    out.indiceLembra = arquivo.estaArquivado('pre', 'confirmado');
+
+    /* --- 5) preventiva não arquiva nada: só mexe no que é descartável --- */
+    store.setList('pre', [{ _id: 'recente', nome: 'C', _updatedAt: new Date().toISOString(), _relUpdatedAt: antigo }]);
+    espaco.preventiva();
+    out.preventivaNaoArquiva = store.list('pre').length === 1;
+
+    store.setList('pre', []);
+    localStorage.removeItem(arquivo.INDEX_KEY);
+    localStorage.removeItem(espaco.AVISO_KEY);
+    espaco.fecharFaixa();
+    return out;
+  });
+  assert(r.falhaVoltaFalse, 'gravação que não coube tem que voltar false, não fingir sucesso');
+  assert(r.faixaNaoModal, 'o aviso deveria ser uma faixa, não uma janela que bloqueia a tela');
+  assert(r.naoRepete, 'o aviso não pode reaparecer a cada gravação');
+  assert(r.socorroSalvou, 'o socorro deveria liberar espaço e conseguir salvar');
+  assert(r.parouNaEtapaCerta, 'o socorro deveria parar assim que a gravação passar, sem liberar demais');
+  assert(r.semFaixaQuandoResolve, 'resolvendo sozinho, não deveria incomodar ninguém');
+  assert(r.ordemSegura, 'as etapas deveriam ir da mais segura para a menos');
+  assert(r.guardaOnaoSincronizado, 'registro que ainda não subiu para a nuvem NUNCA pode sair do aparelho');
+  assert(r.indiceLembra, 'o que foi arquivado tem que ficar no índice, para poder voltar');
+  assert(r.preventivaNaoArquiva, 'a manutenção preventiva não pode arquivar registro nenhum');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
