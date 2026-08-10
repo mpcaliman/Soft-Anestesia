@@ -4284,6 +4284,71 @@ await test('Ficha: técnica, agulha, sítio e horário escolhidos nos cards entr
   await page.close();
 });
 
+/* 75) Símbolos do gráfico: cada sinal vital com cor E marca próprias, valendo
+   igual na ficha e na SRPA — para o gráfico se ler sem depender da cor. */
+await test('Gráfico: cada sinal vital tem cor e símbolo próprios, na ficha e na SRPA', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const S = anestesia.graficoUI.SERIES;
+    const campos = Object.keys(S);
+
+    /* toda série tem cor, marca e rótulo */
+    out.completo = campos.length >= 16 && campos.every(k => S[k].cor && S[k].marca && S[k].label);
+    /* nenhuma cor repetida */
+    out.coresUnicas = new Set(campos.map(k => S[k].cor.toUpperCase())).size === campos.length;
+    /* nenhum par (cor, marca) repetido — se a cor se parecer, a forma separa */
+    out.parUnico = new Set(campos.map(k => S[k].cor + '|' + S[k].marca)).size === campos.length;
+    /* os seis que aparecem juntos o tempo todo têm marcas todas diferentes */
+    const nucleo = ['pas', 'pad', 'pam', 'fc', 'spo2', 'etco2'];
+    out.nucleoDistinto = new Set(nucleo.map(k => S[k].marca)).size === nucleo.length;
+    /* a convenção da ficha de papel */
+    out.tradicao = S.pas.marca === 'vDown' && S.pad.marca === 'vUp'
+      && S.fc.marca === 'dot' && S.fr.marca === 'ring' && S.temp.marca === 'cross';
+
+    /* as marcas realmente desenham algo diferente umas das outras */
+    const assinatura = (marca) => {
+      const cv = document.createElement('canvas');
+      cv.width = 24; cv.height = 24;
+      const c = cv.getContext('2d');
+      anestesia.graficoUI.desenharMarca(c, marca, 12, 12, '#000000', 1.4);
+      return cv.toDataURL();
+    };
+    const marcas = Array.from(new Set(campos.map(k => S[k].marca)));
+    const desenhos = marcas.map(assinatura);
+    out.desenhosDiferentes = new Set(desenhos).size === marcas.length
+      && desenhos.every(d => d.length > 200);   /* nenhuma marca saiu em branco */
+
+    /* legenda montada a partir da MESMA fonte, nas duas telas */
+    anestesia.graficoUI.renderLegendaFixa();
+    const lf = document.getElementById('legend-fixos');
+    const ls = document.getElementById('srpa-legend-fixos');
+    out.legendas = !!lf && !!ls && /PAS/.test(lf.textContent) && /EtCO₂/.test(lf.textContent)
+      && /PAS/.test(ls.textContent) && /FR/.test(ls.textContent)
+      && lf.querySelectorAll('img').length === 6 && ls.querySelectorAll('img').length === 6;
+    /* botão de arrastar herda a cor da série (nada de hex solto divergindo) */
+    const btnPas = document.querySelector('.gt-btn[data-mode="pas"]');
+    out.botaoAlinhado = !!btnPas && btnPas.dataset.color === S.pas.cor;
+
+    /* o gráfico da SRPA usa o mesmo motor: mesmos ids de série */
+    anestesia.graficoUI._contexto = 'recuperacao';
+    const idsSrpa = anestesia.graficoUI._ctxIds();
+    anestesia.graficoUI._contexto = 'anestesia';
+    out.mesmoMotor = idsSrpa.canvas === 'srpa-vitals-chart' && idsSrpa.vitaisBody === 'srpa-vitais-body';
+    return out;
+  });
+  assert(r.completo, 'toda série precisa de cor, marca e rótulo');
+  assert(r.coresUnicas, 'duas séries não podem dividir a mesma cor');
+  assert(r.parUnico, 'duas séries não podem dividir cor e marca ao mesmo tempo');
+  assert(r.nucleoDistinto, 'PAS/PAD/PAM/FC/SpO₂/EtCO₂ aparecem juntos: as marcas têm que ser todas diferentes');
+  assert(r.tradicao, 'a convenção da ficha de papel deveria ser respeitada (∨ ∧ ● ○ ×)');
+  assert(r.desenhosDiferentes, 'cada marca tem que desenhar algo visualmente distinto e não vazio');
+  assert(r.legendas, 'as duas legendas deveriam sair da mesma fonte, com o símbolo desenhado');
+  assert(r.botaoAlinhado, 'o botão de arrastar deveria herdar a cor da série');
+  assert(r.mesmoMotor, 'a SRPA deveria usar o mesmo motor de gráfico da ficha');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

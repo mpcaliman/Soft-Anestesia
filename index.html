@@ -5990,12 +5990,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
 
         <div class="vitals-chart-wrap">
           <div class="legend">
-            <span class="legend-item"><span class="legend-swatch" style="background:#b3392a"></span> PAS</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#c47c1f"></span> PAD</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#7b3a8d"></span> PAM</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#1c64a9"></span> FC</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#1f9171"></span> SpO₂</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#8a2be2"></span> EtCO₂</span>
+            <span id="legend-fixos"></span>
             <span id="legend-extras"></span>
             <span class="legend-item"><span class="legend-swatch" style="background:#444;color:#fff;border-radius:50%;width:14px;height:14px;line-height:14px;text-align:center;font-size:9px;font-weight:bold">M</span> Medicação</span>
             <span class="legend-item"><span class="legend-swatch" style="background:#1f9171;color:#fff;border-radius:3px;width:14px;height:14px;line-height:14px;text-align:center;font-size:9px;font-weight:bold">E</span> Evento</span>
@@ -6793,12 +6788,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
         <!-- CANVAS DO GRÁFICO SRPA -->
         <div class="vitals-chart-wrap" style="margin-top:18px">
           <div class="legend">
-            <span class="legend-item"><span class="legend-swatch" style="background:#b3392a"></span> PAS</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#c47c1f"></span> PAD</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#7b3a8d"></span> PAM</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#1c64a9"></span> FC</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#1f9171"></span> SpO₂</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#7c3aed"></span> FR</span>
+            <span id="srpa-legend-fixos"></span>
             <span id="srpa-legend-extras"></span>
             <span class="legend-item"><span class="legend-swatch" style="background:#444;color:#fff;border-radius:50%;width:14px;height:14px;line-height:14px;text-align:center;font-size:9px;font-weight:bold">M</span> Medicação</span>
             <span class="legend-item"><span class="legend-swatch" style="background:#1f9171;color:#fff;border-radius:3px;width:14px;height:14px;line-height:14px;text-align:center;font-size:9px;font-weight:bold">E</span> Evento</span>
@@ -25730,18 +25720,102 @@ const anestesia = {
       try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
     },
 
-    /* Configuração de monitores extras — usados para gerar botões dinâmicos */
+    /* ====== SÍMBOLOS E CORES DO GRÁFICO — fonte única ======================
+       Cada sinal vital tem COR própria e SÍMBOLO próprio. O símbolo segue a
+       ficha de papel onde ela tem tradição (∨ sistólica, ∧ diastólica, ● pulso,
+       ○ respiração, × temperatura) e, onde não tem — SpO₂, EtCO₂, BIS, TOF —,
+       segue uma lógica de famílias: losango para gases, quadrado para monitores
+       de profundidade/bloqueio.
+       Vale para a ficha de anestesia E para a SRPA: o mesmo motor desenha as duas. */
+    SERIES: {
+      pas:   { cor: '#C0392B', marca: 'vDown',       label: 'PAS' },
+      pad:   { cor: '#E67E22', marca: 'vUp',         label: 'PAD' },
+      pam:   { cor: '#8E44AD', marca: 'dash',        label: 'PAM' },
+      fc:    { cor: '#1C64A9', marca: 'dot',         label: 'FC' },
+      spo2:  { cor: '#0E9F6E', marca: 'diamondOpen', label: 'SpO₂' },
+      etco2: { cor: '#00838F', marca: 'diamondFill', label: 'EtCO₂' },
+      fr:    { cor: '#5E35B1', marca: 'ring',        label: 'FR' },
+      temp:  { cor: '#D81B60', marca: 'cross',       label: 'Temp °C' },
+      bis:   { cor: '#B7791F', marca: 'squareOpen',  label: 'BIS' },
+      tof:   { cor: '#546E7A', marca: 'squareFill',  label: 'TOF %' },
+      glic:  { cor: '#6D4C41', marca: 'triUp',       label: 'Glic' },
+      pvc:   { cor: '#7CB342', marca: 'triDown',     label: 'PVC' },
+      pic:   { cor: '#3949AB', marca: 'plus',        label: 'PIC' },
+      dc:    { cor: '#00ACC1', marca: 'ring',        label: 'DC' },
+      scvo2: { cor: '#558B2F', marca: 'triUp',       label: 'ScvO₂' },
+      cam:   { cor: '#FF7043', marca: 'plus',        label: 'CAM' }
+    },
+    corDe(campo) { return (anestesia.graficoUI.SERIES[campo] || {}).cor || '#444'; },
+    /* Desenha uma marca. Usado pelo gráfico E pela legenda, para nunca divergirem. */
+    desenharMarca(ctx, marca, x, y, cor, escala) {
+      const s = escala || 1;
+      const r = 3.4 * s;
+      ctx.strokeStyle = cor; ctx.fillStyle = cor;
+      ctx.lineWidth = 1.7 * s; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      ctx.beginPath();
+      switch (marca) {
+        case 'vDown': ctx.moveTo(x - r, y - r); ctx.lineTo(x, y); ctx.lineTo(x + r, y - r); ctx.stroke(); break;
+        case 'vUp':   ctx.moveTo(x - r, y + r); ctx.lineTo(x, y); ctx.lineTo(x + r, y + r); ctx.stroke(); break;
+        case 'dot':   ctx.arc(x, y, 2.9 * s, 0, Math.PI * 2); ctx.fill(); break;
+        case 'ring':  ctx.arc(x, y, 3.1 * s, 0, Math.PI * 2); ctx.stroke(); break;
+        case 'cross': ctx.moveTo(x - r, y - r); ctx.lineTo(x + r, y + r);
+                      ctx.moveTo(x + r, y - r); ctx.lineTo(x - r, y + r); ctx.stroke(); break;
+        case 'plus':  ctx.moveTo(x - r, y); ctx.lineTo(x + r, y);
+                      ctx.moveTo(x, y - r); ctx.lineTo(x, y + r); ctx.stroke(); break;
+        case 'dash':  ctx.moveTo(x - r - 1, y); ctx.lineTo(x + r + 1, y); ctx.stroke(); break;
+        case 'diamondOpen': ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath(); ctx.stroke(); break;
+        case 'diamondFill': ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath(); ctx.fill(); break;
+        case 'squareOpen':  ctx.rect(x - r + .5, y - r + .5, r * 2 - 1, r * 2 - 1); ctx.stroke(); break;
+        case 'squareFill':  ctx.rect(x - r, y - r, r * 2, r * 2); ctx.fill(); break;
+        case 'triUp':   ctx.moveTo(x, y - r); ctx.lineTo(x + r, y + r * .8); ctx.lineTo(x - r, y + r * .8); ctx.closePath(); ctx.fill(); break;
+        case 'triDown': ctx.moveTo(x, y + r); ctx.lineTo(x + r, y - r * .8); ctx.lineTo(x - r, y - r * .8); ctx.closePath(); ctx.fill(); break;
+        default: ctx.arc(x, y, 2.8 * s, 0, Math.PI * 2); ctx.fill();
+      }
+    },
+    /* Legenda: mesma marca do gráfico, desenhada num mini-canvas */
+    _swatch(campo) {
+      const S = anestesia.graficoUI.SERIES[campo]; if (!S) return '';
+      const cv = document.createElement('canvas');
+      const box = 16, dpr = (window.devicePixelRatio || 1);
+      cv.width = box * dpr; cv.height = box * dpr;
+      const ctx = cv.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      anestesia.graficoUI.desenharMarca(ctx, S.marca, box / 2, box / 2, S.cor, 1.15);
+      return '<img src="' + cv.toDataURL() + '" width="16" height="16" alt="" style="vertical-align:-3px">';
+    },
+    _itemLegenda(campo) {
+      const S = anestesia.graficoUI.SERIES[campo]; if (!S) return '';
+      return '<span class="legend-item">' + anestesia.graficoUI._swatch(campo) + ' ' + S.label + '</span>';
+    },
+    /* Preenche as legendas fixas das duas telas (ficha e SRPA) */
+    renderLegendaFixa() {
+      /* A ficha mostra EtCO₂; a SRPA, FR — é o que cada uma registra de rotina */
+      const monta = (campos) => campos.map(anestesia.graficoUI._itemLegenda).join('');
+      const fixa = { 'legend-fixos': ['pas', 'pad', 'pam', 'fc', 'spo2', 'etco2'],
+                     'srpa-legend-fixos': ['pas', 'pad', 'pam', 'fc', 'spo2', 'fr'] };
+      Object.keys(fixa).forEach(id => {
+        const el = document.getElementById(id); if (el) el.innerHTML = monta(fixa[id]);
+      });
+      /* botões de arrastar herdam a cor da série */
+      document.querySelectorAll('.gt-btn[data-mode]').forEach(btn => {
+        const S = anestesia.graficoUI.SERIES[btn.dataset.mode];
+        if (S) { btn.dataset.color = S.cor; btn.style.color = S.cor; }
+      });
+    },
+
+    /* Configuração de monitores extras — usados para gerar botões dinâmicos.
+       A cor sai de SERIES, para legenda, botão e gráfico nunca divergirem. */
     MONITORES_EXTRAS: {
-      'BIS':            { campo: 'bis',   cor: '#d97706', label: 'BIS' },
-      'TOF':            { campo: 'tof',   cor: '#e11d48', label: 'TOF %' },
-      'Temperatura':    { campo: 'temp',  cor: '#dc2626', label: 'Temp °C' },
-      'Glicemia':       { campo: 'glic',  cor: '#0891b2', label: 'Glic' },
-      'PVC':            { campo: 'pvc',   cor: '#65a30d', label: 'PVC' },
-      'PIC':            { campo: 'pic',   cor: '#9333ea', label: 'PIC' },
-      'Débito cardíaco':{ campo: 'dc',    cor: '#0369a1', label: 'DC' },
-      'ScvO₂/SvO₂':     { campo: 'scvo2', cor: '#15803d', label: 'ScvO₂' },
-      'FR':             { campo: 'fr',    cor: '#7c3aed', label: 'FR' },
-      'Analisador de gases': { campo: 'cam', cor: '#0d9488', label: 'CAM' }
+      'BIS':            { campo: 'bis',   label: 'BIS' },
+      'TOF':            { campo: 'tof',   label: 'TOF %' },
+      'Temperatura':    { campo: 'temp',  label: 'Temp °C' },
+      'Glicemia':       { campo: 'glic',  label: 'Glic' },
+      'PVC':            { campo: 'pvc',   label: 'PVC' },
+      'PIC':            { campo: 'pic',   label: 'PIC' },
+      'Débito cardíaco':{ campo: 'dc',    label: 'DC' },
+      'ScvO₂/SvO₂':     { campo: 'scvo2', label: 'ScvO₂' },
+      'FR':             { campo: 'fr',    label: 'FR' },
+      'Analisador de gases': { campo: 'cam', label: 'CAM' }
     },
 
     /* Atualiza dinamicamente os botões da toolbar com base nos monitores marcados */
@@ -25763,13 +25837,14 @@ const anestesia = {
       let legHTML = '';
       Object.keys(anestesia.graficoUI.MONITORES_EXTRAS).forEach(monitor => {
         const cfg = anestesia.graficoUI.MONITORES_EXTRAS[monitor];
+        const cor = anestesia.graficoUI.corDe(cfg.campo);
         if (ativos.has(cfg.campo)) {
-          html += `<button type="button" class="gt-btn" data-mode="${cfg.campo}" data-color="${cfg.cor}" style="color:${cfg.cor}" title="Arraste para registrar ${cfg.label}">${cfg.label}</button>`;
-          legHTML += `<span class="legend-item"><span class="legend-swatch" style="background:${cfg.cor}"></span> ${cfg.label}</span>`;
+          html += `<button type="button" class="gt-btn" data-mode="${cfg.campo}" data-color="${cor}" style="color:${cor}" title="Arraste para registrar ${cfg.label}">${cfg.label}</button>`;
+          legHTML += anestesia.graficoUI._itemLegenda(cfg.campo);
         }
       });
       extra.innerHTML = html;
-      const legExtras = document.getElementById('legend-extras');
+      const legExtras = document.getElementById(anestesia.graficoUI._ctxIds().legendExtras || 'legend-extras');
       if (legExtras) legExtras.innerHTML = legHTML;
       /* Religa handlers nos novos botões */
       extra.querySelectorAll('.gt-btn').forEach(btn => {
@@ -27383,83 +27458,91 @@ const anestesia = {
         legendaEventos.style.display = (medicacoes.length > 0 || eventos.length > 0) ? 'block' : 'none';
       }
 
-      function plot(field, color, marker) {
+      /* Desenha uma série: linha de tendência bem suave (só para o olho seguir a
+         sequência) + a marca do parâmetro, que é quem carrega a leitura. */
+      function plot(field) {
+        const S = anestesia.graficoUI.SERIES[field] || {};
+        const color = S.cor || '#444';
         const pts = pontos.filter(p => p[field] != null && p[field] >= yMin && p[field] <= yMax);
         if (pts.length === 0) return;
-        ctx.strokeStyle = color; ctx.fillStyle = color;
-        ctx.lineWidth = 1.6;
-        ctx.beginPath();
-        pts.forEach((p, i) => {
-          const x = xOf(p.t), y = yOf(p[field]);
-          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        });
-        ctx.stroke();
+        if (pts.length > 1) {
+          ctx.save();
+          ctx.globalAlpha = 0.28;            /* quase um fio — não compete com a marca */
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          pts.forEach((p, i) => {
+            const x = xOf(p.t), y = yOf(p[field]);
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          });
+          ctx.stroke();
+          ctx.restore();
+        }
         pts.forEach(p => {
-          const x = xOf(p.t), y = yOf(p[field]);
-          ctx.beginPath();
-          if (marker === 'square') ctx.rect(x - 2.5, y - 2.5, 5, 5);
-          else if (marker === 'triangle') {
-            ctx.moveTo(x, y - 3); ctx.lineTo(x + 3, y + 2.5); ctx.lineTo(x - 3, y + 2.5); ctx.closePath();
-          } else if (marker === 'diamond') {
-            ctx.moveTo(x, y - 3); ctx.lineTo(x + 3, y); ctx.lineTo(x, y + 3); ctx.lineTo(x - 3, y); ctx.closePath();
-          } else if (marker === 'cross') {
-            ctx.moveTo(x - 3, y); ctx.lineTo(x + 3, y); ctx.moveTo(x, y - 3); ctx.lineTo(x, y + 3);
-            ctx.lineWidth = 2; ctx.stroke();
-            return;
-          } else { ctx.arc(x, y, 2.8, 0, Math.PI * 2); }
-          ctx.fill();
+          ctx.save();
+          anestesia.graficoUI.desenharMarca(ctx, S.marca, xOf(p.t), yOf(p[field]), color);
+          ctx.restore();
         });
       }
+      /* Barra da pressão: liga o ∨ da sistólica ao ∧ da diastólica no mesmo
+         horário. Tracejada e quase transparente, só para o olho fechar o par —
+         sem virar uma grade de barras no meio do gráfico. */
+      (function barraPA() {
+        const cor = anestesia.graficoUI.corDe('pas');
+        ctx.save();
+        ctx.globalAlpha = 0.26;
+        ctx.strokeStyle = cor;
+        ctx.lineWidth = 1;
+        if (ctx.setLineDash) ctx.setLineDash([2, 3]);
+        pontos.forEach(p => {
+          if (p.pas == null || p.pad == null) return;
+          if (p.pas < yMin || p.pas > yMax || p.pad < yMin || p.pad > yMax) return;
+          ctx.beginPath();
+          ctx.moveTo(xOf(p.t), yOf(p.pas));
+          ctx.lineTo(xOf(p.t), yOf(p.pad));
+          ctx.stroke();
+        });
+        if (ctx.setLineDash) ctx.setLineDash([]);
+        ctx.restore();
+      })();
       /* Séries fixas: PA + FC + SpO₂ */
-      plot('pas', '#b3392a', 'triangle');
-      plot('pad', '#c47c1f', 'triangle');
-      plot('pam', '#7b3a8d', 'diamond');
-      plot('fc',  '#1c64a9', 'circle');
-      plot('spo2','#1f9171', 'square');
-      plot('etco2','#8a2be2', 'diamond');   /* roxo escuro */
-      plot('fr',  '#7c3aed', 'cross');      /* violeta — frequência respiratória */
+      plot('pas');
+      plot('pad');
+      plot('pam');
+      plot('fc');
+      plot('spo2');
+      plot('etco2');
+      plot('fr');
       /* Séries adicionais — só plotam se houver dados na coluna */
-      plot('bis', '#d97706', 'circle');     /* laranja escuro */
-      plot('tof', '#e11d48', 'square');     /* rosa */
-      plot('temp', '#dc2626', 'cross');     /* vermelho */
-      plot('glic', '#0891b2', 'square');    /* ciano */
-      plot('pvc',  '#65a30d', 'diamond');   /* verde-oliva */
-      plot('pic',  '#9333ea', 'circle');    /* violeta */
-      /* DC tem range pequeno (0-15) — multiplica por 10 para visualização (1 L/min = 10 unidades) */
-      const ptsDC = pontos.filter(p => p.dc != null);
-      if (ptsDC.length > 0) {
-        ctx.strokeStyle = '#0369a1'; ctx.fillStyle = '#0369a1';
-        ctx.lineWidth = 1.6;
-        ctx.beginPath();
-        ptsDC.forEach((p, i) => {
-          const x = xOf(p.t), y = yOf(Math.min(yMax, p.dc * 10));
-          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        });
-        ctx.stroke();
-        ptsDC.forEach(p => {
-          const x = xOf(p.t), y = yOf(Math.min(yMax, p.dc * 10));
+      plot('bis');
+      plot('tof');
+      plot('temp');
+      plot('glic');
+      plot('pvc');
+      plot('pic');
+      /* DC e CAM têm escala própria (0–15 e 0–3): são multiplicados para caber
+         no mesmo eixo. Mesma linha suave e mesma marca das outras séries. */
+      plotEscalado('dc', 10);
+      plot('scvo2');
+      plotEscalado('cam', 100);
+
+      function plotEscalado(field, fator) {
+        const S = anestesia.graficoUI.SERIES[field] || {};
+        const pts = pontos.filter(p => p[field] != null);
+        if (!pts.length) return;
+        const yv = (p) => yOf(Math.min(yMax, p[field] * fator));
+        if (pts.length > 1) {
+          ctx.save();
+          ctx.globalAlpha = 0.28; ctx.strokeStyle = S.cor; ctx.lineWidth = 1;
           ctx.beginPath();
-          ctx.moveTo(x, y - 3); ctx.lineTo(x + 3, y); ctx.lineTo(x, y + 3); ctx.lineTo(x - 3, y);
-          ctx.closePath(); ctx.fill();
-        });
-      }
-      plot('scvo2', '#15803d', 'circle');   /* verde escuro */
-      /* CAM (0-3) — multiplica por 100 para visualização (1,0 CAM = 100 unidades) */
-      const ptsCAM = pontos.filter(p => p.cam != null);
-      if (ptsCAM.length > 0) {
-        ctx.strokeStyle = '#0d9488'; ctx.fillStyle = '#0d9488';
-        ctx.lineWidth = 1.6;
-        ctx.beginPath();
-        ptsCAM.forEach((p, i) => {
-          const x = xOf(p.t), y = yOf(Math.min(yMax, p.cam * 100));
-          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        });
-        ctx.stroke();
-        ptsCAM.forEach(p => {
-          const x = xOf(p.t), y = yOf(Math.min(yMax, p.cam * 100));
-          ctx.beginPath();
-          ctx.arc(x, y, 2.8, 0, Math.PI * 2);
-          ctx.fill();
+          pts.forEach((p, i) => { const x = xOf(p.t), y = yv(p); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
+          ctx.stroke();
+          ctx.restore();
+        }
+        pts.forEach(p => {
+          ctx.save();
+          anestesia.graficoUI.desenharMarca(ctx, S.marca, xOf(p.t), yv(p), S.cor);
+          ctx.restore();
         });
       }
     }
@@ -40674,6 +40757,7 @@ document.addEventListener('DOMContentLoaded', () => {
   try { configSync.vigiar(); } catch (e) {}
   try { clinicaSync.vigiar(); } catch (e) {}
   try { nuvemEstado.vigiar(); } catch (e) {}
+  try { anestesia.graficoUI.renderLegendaFixa(); } catch (e) {}
   window.programador = programador;
   try { programador.atualizarVisibilidade(); } catch (e) {}
   window.pendencias = pendencias;
