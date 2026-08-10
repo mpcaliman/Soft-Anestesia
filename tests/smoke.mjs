@@ -4435,6 +4435,165 @@ await test('Armazenamento cheio: libera espaço sozinho, salva de verdade e não
   await page.close();
 });
 
+/* 77) A faixa tem que DIAGNOSTICAR, não só reclamar: dizer o que ocupa espaço e
+   por que o app não consegue liberar mais. */
+await test('Faixa de armazenamento diz o que ocupa espaço e por que não dá para liberar mais', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ['pre', 'anestesia'].forEach(m => store.setList(m, []));
+    localStorage.removeItem(espaco.AVISO_KEY);
+
+    /* Caso A: registros ainda NÃO confirmados no banco da clínica.
+       Não é lixo sobrando — é sincronização faltando, e a faixa tem que dizer. */
+    cloud._fila = () => [];
+    store.setList('pre', [
+      { _id: 'a', nome: 'A', _updatedAt: '2020-01-01T00:00:00.000Z' },
+      { _id: 'b', nome: 'B', _updatedAt: '2020-01-01T00:00:00.000Z' },
+      { _id: 'c', nome: 'C', _updatedAt: '2020-01-01T00:00:00.000Z' }
+    ]);
+    let d = espaco.diagnostico();
+    out.contaSemEspelho = d.semEspelho === 3 && d.comEspelho === 0;
+    espaco.fecharFaixa();
+    espaco.mostrarFaixa(0);
+    let txt = document.getElementById('espaco-faixa').textContent;
+    out.apontaSincronizacao = /não estão confirmados no banco da clínica/.test(txt)
+      && /Enviar tudo para a minha clínica/.test(txt);
+    out.mostraQuemOcupa = /Ocupando mais:/.test(txt);
+    out.mostraTotal = /KB|MB/.test(txt);
+
+    /* Caso B: fila pendente — a causa é outra, e a mensagem também */
+    cloud._fila = () => [{}, {}];
+    espaco.fecharFaixa();
+    espaco.mostrarFaixa(2);
+    txt = document.getElementById('espaco-faixa').textContent;
+    out.apontaFila = /ainda não subiram/.test(txt) && /Atualizar tudo/.test(txt);
+
+    /* Caso C: tudo confirmado — aí sim é falta de espaço mesmo */
+    cloud._fila = () => [];
+    store.setList('pre', [{ _id: 'a', nome: 'A', _relUpdatedAt: '2020-01-01T00:00:00.000Z' }]);
+    espaco.fecharFaixa();
+    espaco.mostrarFaixa(0);
+    txt = document.getElementById('espaco-faixa').textContent;
+    out.semDesculpa = /Liberei tudo o que era seguro liberar/.test(txt);
+
+    /* As etapas novas existem e a de demonstração não roda dentro do demo */
+    const nomes = espaco.ETAPAS.map(e => e.nome);
+    out.temEtapasNovas = nomes.includes('dados de demonstração') && nomes.includes('cópia de recuperação do formulário');
+    const demoOrig = demo.ativo;
+    demo.ativo = () => true;
+    localStorage.setItem('demo:teste', 'x'.repeat(500));
+    const etapaDemo = espaco.ETAPAS.find(e => e.nome === 'dados de demonstração');
+    out.respeitaDemo = etapaDemo.fn() === 0 && localStorage.getItem('demo:teste') !== null;
+    demo.ativo = () => false;
+    out.limpaDemoForaDele = etapaDemo.fn() > 0 && localStorage.getItem('demo:teste') === null;
+    demo.ativo = demoOrig;
+
+    espaco.fecharFaixa();
+    ['pre', 'anestesia'].forEach(m => store.setList(m, []));
+    localStorage.removeItem(espaco.AVISO_KEY);
+    return out;
+  });
+  assert(r.contaSemEspelho, 'o diagnóstico deveria contar quantos registros ainda não foram confirmados na nuvem');
+  assert(r.apontaSincronizacao, 'com registros não confirmados, a faixa deveria apontar o caminho da sincronização');
+  assert(r.mostraQuemOcupa && r.mostraTotal, 'a faixa deveria dizer o total e o que mais ocupa espaço');
+  assert(r.apontaFila, 'com fila pendente, a causa apontada deveria ser outra');
+  assert(r.semDesculpa, 'com tudo confirmado, a faixa deveria admitir que é falta de espaço mesmo');
+  assert(r.temEtapasNovas, 'demonstração e auto-save deveriam ser etapas de liberação');
+  assert(r.respeitaDemo, 'nunca apagar os dados de demonstração de quem está usando o modo demo');
+  assert(r.limpaDemoForaDele, 'fora do modo demo, esses dados podem sair');
+  await page.close();
+});
+
+/* 78) "Pré-anestésicas: 1,2 MB" não é acionável. Precisa dizer o que há dentro. */
+await test('Armazenamento mostra o que pesa DENTRO do módulo e o que já dá para liberar', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const imagem = 'data:image/png;base64,' + 'A'.repeat(4000);
+    store.setList('pre', [
+      { _id: 'p1', nome: 'Paciente Pesado', data_avaliacao: '2026-08-01',
+        _docs: [{ nome: 'ECG', dataurl: imagem, storage_path: 'org/1/ecg.png' }],   /* já na nuvem */
+        assinatura_dataurl: imagem },                                               /* nunca sai */
+      { _id: 'p2', nome: 'Paciente Leve', data_avaliacao: '2026-08-02', obs: 'texto curto' }
+    ]);
+
+    /* soma os binários coladinhos no registro */
+    const bin = armazenamento._binariosDe(store.list('pre')[0]);
+    out.contaBinarios = bin.n === 2 && bin.bytes > 15000;
+    out.ignoraTextoCurto = armazenamento._binariosDe(store.list('pre')[1]).n === 0;
+
+    armazenamento.detalhar('pre');
+    const txt = document.getElementById('modal-body').textContent;
+    out.abriuDetalhe = /imagem\(ns\)\/assinatura/.test(txt);
+    out.dizOqueLibera = /já está na nuvem e pode sair daqui agora/.test(txt);
+    out.listaMaisPesado = txt.indexOf('Paciente Pesado') >= 0
+      && txt.indexOf('Paciente Pesado') < txt.indexOf('Paciente Leve');
+    out.temBotaoLiberar = /Liberar/.test(document.getElementById('modal-body').innerHTML);
+    modal.close();
+
+    /* liberar tira só a cópia local do que TEM storage_path; a assinatura fica */
+    armazenamento.liberarAnexos();
+    const p1 = store.list('pre')[0];
+    out.tirouSoOqueEstaNaNuvem = !p1._docs[0].dataurl && p1._docs[0].storage_path
+      && p1.assinatura_dataurl === imagem;
+
+    /* sem nada na nuvem, o detalhe é honesto: não dá para liberar */
+    store.setList('pre', [{ _id: 'p3', nome: 'Sem nuvem', _docs: [{ nome: 'X', dataurl: imagem }] }]);
+    armazenamento.detalhar('pre');
+    const txt2 = document.getElementById('modal-body').textContent;
+    out.honestoQuandoNaoDa = /Nenhuma dessas imagens foi enviada para a nuvem ainda/.test(txt2);
+    modal.close();
+
+    store.setList('pre', []);
+    return out;
+  });
+  assert(r.contaBinarios, 'deveria somar as imagens e assinaturas coladas no registro');
+  assert(r.ignoraTextoCurto, 'texto comum não pode ser contado como binário');
+  assert(r.abriuDetalhe, 'o detalhe do módulo deveria abrir dizendo quanto é imagem');
+  assert(r.dizOqueLibera && r.temBotaoLiberar, 'deveria dizer quanto dá para liberar e oferecer o botão');
+  assert(r.listaMaisPesado, 'os registros deveriam vir do mais pesado para o mais leve');
+  assert(r.tirouSoOqueEstaNaNuvem, 'liberar só pode tirar a cópia local do que já está na nuvem — assinatura fica');
+  assert(r.honestoQuandoNaoDa, 'sem nada na nuvem, o detalhe tem que dizer que não dá para liberar');
+  await page.close();
+});
+
+/* 79) Medir a cota de verdade. Aparelho com 200 GB livres acusando "cheio" em
+   2 MB não se resolve por suposição — se mede. */
+await test('Medidor de limite descobre quanto o navegador realmente aceita e não deixa lixo para trás', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const setItemOrig = Storage.prototype.setItem;
+    const TETO = 1500 * 1024;                    /* finge um navegador de ~1,5 MB livre */
+    Storage.prototype.setItem = function (k, v) {
+      if (k === '__medsys_teste_cota__' && String(v).length * 2 > TETO) {
+        const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e;
+      }
+      return setItemOrig.call(this, k, v);
+    };
+    await armazenamento.testarLimite();
+    Storage.prototype.setItem = setItemOrig;
+
+    const txt = document.getElementById('armazenamento-limite').textContent;
+    out.reportou = /Em uso:/.test(txt) && /ainda cabe:/.test(txt) && /teto deste navegador/.test(txt);
+    /* achou perto do teto fingido (1,5 MB), não um número qualquer */
+    const m = txt.match(/ainda cabe:\s*([\d.,]+)\s*(KB|MB)/);
+    const val = m ? parseFloat(m[1].replace(',', '.')) * (m[2] === 'MB' ? 1024 : 1) : 0;
+    out.acertouOTeto = val > 1300 && val < 1550;
+    /* diagnostica em vez de só cuspir número */
+    out.interpretou = /bem menos que os ~5 MB|não aceita nem 256 KB|Espaço normal/.test(txt);
+    /* e não deixou a chave de teste para trás */
+    out.limpou = localStorage.getItem('__medsys_teste_cota__') === null;
+    return out;
+  });
+  assert(r.reportou, 'a medição deveria informar uso, folga e teto');
+  assert(r.acertouOTeto, 'a busca deveria chegar perto do limite real do navegador');
+  assert(r.interpretou, 'a medição deveria dizer o que aquele número significa, não só o número');
+  assert(r.limpou, 'a chave de teste não pode sobrar ocupando espaço');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
