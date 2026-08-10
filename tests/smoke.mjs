@@ -4682,6 +4682,76 @@ await test('Modo nuvem: aparelho guarda só o que está em uso e busca o resto d
   await page.close();
 });
 
+/* 81) O carimbo do profissional era copiado inteiro dentro de CADA ficha
+   (~149 KB por registro). Guardar uma vez só. */
+await test('Carimbo repetido é guardado uma vez só, sem o resto do app perceber', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    localStorage.removeItem(store.BLOBS_KEY);
+    localStorage.removeItem(armazenamento.FLAG_DEDUP);
+    const carimbo = 'data:image/png;base64,' + 'K'.repeat(60000);   /* o mesmo em todas */
+    const outro   = 'data:image/png;base64,' + 'Z'.repeat(60000);   /* de outro profissional */
+
+    store.setList('pre', [
+      { _id: 'f1', nome: 'A', assinatura_dataurl: carimbo },
+      { _id: 'f2', nome: 'B', assinatura_dataurl: carimbo },
+      { _id: 'f3', nome: 'C', assinatura_dataurl: carimbo },
+      { _id: 'f4', nome: 'D', assinatura_dataurl: outro }
+    ]);
+
+    /* na guarda: referência, não a imagem */
+    const cru = localStorage.getItem(STORAGE.pre);
+    out.naoGuardaRepetido = cru.indexOf('KKKKKKKKKK') < 0 && /blob:/.test(cru);
+    /* duas imagens distintas = dois blobs; três fichas iguais compartilham um */
+    out.umBlobPorImagem = Object.keys(store._blobs()).length === 2;
+    /* o peso caiu de ~4 cópias para 2 */
+    out.encolheu = cru.length * 2 < 40000;
+
+    /* na leitura: a imagem inteira volta, o resto do app não muda nada */
+    const lidos = store.list('pre');
+    out.leituraIntacta = lidos[0].assinatura_dataurl === carimbo
+      && lidos[2].assinatura_dataurl === carimbo
+      && lidos[3].assinatura_dataurl === outro;
+    out.getByIdIntacto = store.getById('pre', 'f2').assinatura_dataurl === carimbo;
+
+    /* trocar o carimbo depois NÃO altera ficha antiga (chave é o conteúdo) */
+    const l = store.list('pre');
+    l[0].assinatura_dataurl = outro;
+    store.setList('pre', l);
+    out.naoContaminaAntigas = store.getById('pre', 'f2').assinatura_dataurl === carimbo
+      && store.getById('pre', 'f1').assinatura_dataurl === outro;
+
+    /* texto pequeno continua inteiro — não vale referenciar tudo */
+    store.setList('consulta', [{ _id: 'c1', obs: 'anotação curta', foto: 'data:image/png;base64,AAA' }]);
+    out.ignoraPequeno = /data:image\/png;base64,AAA/.test(localStorage.getItem(STORAGE.consulta));
+
+    /* migração do que já estava duplicado */
+    localStorage.setItem(STORAGE.pre, JSON.stringify([
+      { _id: 'v1', nome: 'Velho A', assinatura_dataurl: carimbo },
+      { _id: 'v2', nome: 'Velho B', assinatura_dataurl: carimbo }
+    ]));
+    localStorage.removeItem(armazenamento.FLAG_DEDUP);
+    const ganho = armazenamento.deduplicarImagens({ forcar: true });
+    out.migrou = ganho > 50000 && localStorage.getItem(STORAGE.pre).indexOf('KKKKKKKKKK') < 0;
+    out.migradoAindaLe = store.getById('pre', 'v2').assinatura_dataurl === carimbo;
+    out.rodaUmaVez = armazenamento.deduplicarImagens() === 0;
+
+    ['pre', 'consulta'].forEach(m => store.setList(m, []));
+    localStorage.removeItem(store.BLOBS_KEY);
+    return out;
+  });
+  assert(r.naoGuardaRepetido, 'a imagem grande não pode ser gravada dentro do registro');
+  assert(r.umBlobPorImagem, 'imagens iguais deveriam compartilhar um único blob');
+  assert(r.encolheu, 'o módulo deveria encolher de verdade, não só trocar de forma');
+  assert(r.leituraIntacta && r.getByIdIntacto, 'na leitura a imagem tem que voltar inteira — nada no app pode notar');
+  assert(r.naoContaminaAntigas, 'trocar o carimbo hoje não pode alterar a ficha assinada ontem');
+  assert(r.ignoraPequeno, 'imagem pequena não precisa virar referência');
+  assert(r.migrou && r.migradoAindaLe, 'a migração deveria desduplicar o que já estava gravado, sem perder nada');
+  assert(r.rodaUmaVez, 'a migração não deveria repetir a cada abertura do app');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

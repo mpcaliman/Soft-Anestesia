@@ -9800,13 +9800,87 @@ const store = {
     } catch { return []; }
   },
   list(modKey) {
-    try { return JSON.parse(localStorage.getItem(STORAGE[modKey]) || '[]'); }
+    try {
+      const arr = JSON.parse(localStorage.getItem(STORAGE[modKey]) || '[]');
+      if (!Array.isArray(arr) || !arr.length) return arr || [];
+      /* devolve as imagens guardadas uma vez só — o resto do app nem sabe */
+      const b = store._blobs();
+      if (Object.keys(b).length) arr.forEach(it => store._hidratar(it, b));
+      return arr;
+    }
     catch { return []; }
   },
+  /* ---- IMAGENS REPETIDAS GUARDADAS UMA VEZ SÓ -----------------------------
+     O carimbo/assinatura do profissional é a MESMA imagem em toda ficha, e
+     estava sendo copiado inteiro dentro de cada registro (~149 KB cada). Dez
+     fichas assinadas = 1,5 MB do aparelho gastos com dez cópias do mesmo PNG.
+     Agora a imagem é guardada uma vez, endereçada pelo conteúdo, e o registro
+     leva só a referência. Como a chave é o próprio conteúdo, trocar o carimbo
+     depois NÃO altera as fichas antigas — cada uma continua apontando para a
+     imagem exata com que foi assinada.
+     A troca é invisível: sai na gravação, volta na leitura. */
+  BLOBS_KEY: 'medsys.v7.blobs',
+  LIM_BLOB: 4096,                 /* abaixo disso não compensa referenciar */
+  _blobs() { try { return JSON.parse(localStorage.getItem(store.BLOBS_KEY) || '{}'); } catch (e) { return {}; } },
+  _refDe(s) {
+    let h1 = 0, h2 = 0;
+    for (let i = 0; i < s.length; i++) {
+      h1 = ((h1 * 31) + s.charCodeAt(i)) | 0;
+      h2 = ((h2 * 131) + s.charCodeAt(i)) | 0;
+    }
+    return 'blob:' + (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36) + '.' + s.length;
+  },
+  _guardarBlob(dataurl) {
+    const ref = store._refDe(dataurl);
+    try {
+      const b = store._blobs();
+      if (!b[ref]) { b[ref] = dataurl; localStorage.setItem(store.BLOBS_KEY, JSON.stringify(b)); }
+    } catch (e) { return null; }   /* sem espaço nem para o blob: mantém inteiro */
+    return ref;
+  },
+  /* registro → guarda: troca imagens grandes por referência */
+  _desidratar(obj) {
+    if (!obj || typeof obj !== 'object') return obj;
+    const walk = (o) => {
+      if (Array.isArray(o)) { o.forEach(walk); return; }
+      if (o && typeof o === 'object') {
+        Object.keys(o).forEach(k => {
+          const v = o[k];
+          if (typeof v === 'string' && v.length > store.LIM_BLOB && v.slice(0, 5) === 'data:') {
+            const ref = store._guardarBlob(v);
+            if (ref) o[k] = ref;
+          } else if (v && typeof v === 'object') walk(v);
+        });
+      }
+    };
+    try { const clone = JSON.parse(JSON.stringify(obj)); walk(clone); return clone; }
+    catch (e) { return obj; }
+  },
+  /* guarda → registro: devolve a imagem inteira, para o resto do app nem saber */
+  _hidratar(obj, blobs) {
+    if (!obj || typeof obj !== 'object') return obj;
+    const b = blobs || store._blobs();
+    const walk = (o) => {
+      if (Array.isArray(o)) { o.forEach(walk); return; }
+      if (o && typeof o === 'object') {
+        Object.keys(o).forEach(k => {
+          const v = o[k];
+          if (typeof v === 'string' && v.slice(0, 5) === 'blob:') { if (b[v]) o[k] = b[v]; }
+          else if (v && typeof v === 'object') walk(v);
+        });
+      }
+    };
+    try { walk(obj); } catch (e) {}
+    return obj;
+  },
+
   /* Escrita crua, sem socorro — usada pelas próprias rotinas de liberação de
      espaço, que não podem chamar o socorro de novo (recursão). */
   _escrever(modKey, arr) {
-    try { localStorage.setItem(STORAGE[modKey], JSON.stringify(arr)); return true; }
+    try {
+      const p = Array.isArray(arr) ? arr.map(it => store._desidratar(it)) : arr;
+      localStorage.setItem(STORAGE[modKey], JSON.stringify(p)); return true;
+    }
     catch (e) { return false; }
   },
   _ehCheio(e) {
@@ -9816,8 +9890,10 @@ const store = {
      espaço sozinho e refaz a gravação — em vez de engolir o erro e deixar a
      pessoa achando que salvou. */
   setList(modKey, arr) {
+    /* imagens grandes saem do registro e viram referência antes de gravar */
+    const paraGravar = Array.isArray(arr) ? arr.map(it => store._desidratar(it)) : arr;
     const escrever = () => {
-      try { localStorage.setItem(STORAGE[modKey], JSON.stringify(arr)); return true; }
+      try { localStorage.setItem(STORAGE[modKey], JSON.stringify(paraGravar)); return true; }
       catch (e) { escrever._erro = e; return false; }
     };
     if (escrever()) return true;
@@ -10386,6 +10462,7 @@ const armazenamento = {
         }
       }
     } catch (e) {}
+    try { armazenamento.deduplicarImagens(); } catch (e) {}
     try { espaco.preventiva(); } catch (e) {}
     try { modoNuvem.manutencao({ silent: true }); } catch (e) {}
     try { armazenamento.repararNomesJSON(); } catch (e) {}
@@ -10592,6 +10669,28 @@ const armazenamento = {
     dizer('<div style="font-size:.82rem;line-height:1.6;background:var(--surface-alt);padding:10px 12px;border-radius:7px;margin-top:8px">' +
       '📏 <b>Em uso:</b> ' + fmt(usoAtual) + ' · <b>ainda cabe:</b> ' + fmt(livre) + ' · <b>teto deste navegador:</b> ~' + fmt(teto) +
       '<br>' + leitura + '</div>');
+  },
+
+  /* Uma vez: tira do aparelho as cópias repetidas do carimbo que já estavam
+     gravadas dentro de cada ficha. Reler + regravar já faz a troca (a leitura
+     hidrata, a escrita referencia), então basta passar por todos os módulos. */
+  FLAG_DEDUP: 'medsys.v7.blobs.dedup_v1',
+  deduplicarImagens(opts = {}) {
+    if (!opts.forcar && localStorage.getItem(armazenamento.FLAG_DEDUP)) return 0;
+    const antes = armazenamento.uso().total;
+    Object.keys(STORAGE).forEach(mod => {
+      if (String(mod).indexOf('cad_') === 0) return;      /* cadastros ficam como estão */
+      try {
+        const lst = store.list(mod);
+        if (Array.isArray(lst) && lst.length) store._escrever(mod, lst);
+      } catch (e) {}
+    });
+    try { localStorage.setItem(armazenamento.FLAG_DEDUP, '1'); } catch (e) {}
+    const ganho = Math.max(0, antes - armazenamento.uso().total);
+    if (ganho > 50 * 1024) {
+      try { toast('🧹 ' + armazenamento._fmt(ganho) + ' liberados: o carimbo repetido em cada ficha agora é guardado uma vez só'); } catch (e) {}
+    }
+    return ganho;
   },
 
   compactarVersoes() {
