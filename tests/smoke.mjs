@@ -4594,6 +4594,94 @@ await test('Medidor de limite descobre quanto o navegador realmente aceita e nã
   await page.close();
 });
 
+/* 80) Modo nuvem: o aparelho guarda só a janela de trabalho e o resto volta
+   sozinho ao abrir o paciente. */
+await test('Modo nuvem: aparelho guarda só o que está em uso e busca o resto da nuvem sozinho', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const antigo = new Date(Date.now() - 60 * 86400000).toISOString();
+    const hoje = new Date().toISOString();
+    localStorage.removeItem(arquivo.INDEX_KEY);
+    localStorage.setItem(modoNuvem.KEY, '0');
+
+    /* sem nuvem, ligar é recusado — arquivar sem nuvem seria perder */
+    cloud.estaConfigurado = () => false;
+    await modoNuvem.alternar(true);
+    out.recusaSemNuvem = modoNuvem.ligado() === false;
+
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud.sessaoExpirada = () => false;
+
+    store.setList('pre', [
+      { _id: 'velho-ok',   nome: 'Antigo confirmado', _updatedAt: antigo, _relUpdatedAt: antigo },
+      { _id: 'velho-solo', nome: 'Antigo só local',   _updatedAt: antigo },
+      { _id: 'recente',    nome: 'Recente',           _updatedAt: hoje,   _relUpdatedAt: hoje },
+      { _id: 'na-tela',    nome: 'Aberto agora',      _updatedAt: antigo, _relUpdatedAt: antigo }
+    ]);
+    /* simula o registro aberto na tela */
+    const f = document.getElementById('form-pre');
+    let hid = f.querySelector('[name="_id"]');
+    if (!hid) { hid = document.createElement('input'); hid.type = 'hidden'; hid.name = '_id'; f.appendChild(hid); }
+    hid.value = 'na-tela';
+
+    localStorage.setItem(modoNuvem.KEY, '1');
+    const saíram = modoNuvem.manutencao();
+    const ficaram = store.list('pre').map(x => x._id);
+    out.saiuSoOCerto = saíram === 1 && ficaram.includes('recente')
+      && ficaram.includes('velho-solo') && ficaram.includes('na-tela')
+      && !ficaram.includes('velho-ok');
+    out.protegeNaoSincronizado = ficaram.includes('velho-solo');
+    out.protegeAberto = ficaram.includes('na-tela');
+    out.indiceLembra = arquivo.estaArquivado('pre', 'velho-ok');
+
+    /* abrir o paciente arquivado busca da nuvem sozinho */
+    let pedido = null;
+    arquivo.restaurar = async (mod, id) => {
+      pedido = mod + ':' + id;
+      const l = store.list(mod); l.push({ _id: id, nome: 'Voltou da nuvem' }); store.setList(mod, l);
+      return true;
+    };
+    let carregado = null;
+    const carregarOrig = pre.carregar;
+    pre.carregar = (item) => { carregado = item; };
+    await dashboard._abrirRegistro('pre', 'velho-ok');
+    await new Promise(r => setTimeout(r, 250));
+    out.buscouSozinho = pedido === 'pre:velho-ok' && carregado && carregado._id === 'velho-ok';
+    pre.carregar = carregarOrig;
+
+    /* sem internet e sem cópia, diz a verdade em vez de abrir vazio */
+    arquivo.restaurar = async () => false;
+    let erro = '';
+    const toastOrig = window.toast;
+    window.toast = (m, t) => { if (t === 'error') erro = m; };
+    await dashboard._abrirRegistro('pre', 'nao-existe');
+    window.toast = toastOrig;
+    out.avisaQuandoNaoAcha = /nem aqui, nem na nuvem/.test(erro);
+
+    /* a janela de dias é configurável */
+    modoNuvem.definirDias(30);
+    out.janelaConfiguravel = modoNuvem.dias() === 30;
+
+    localStorage.setItem(modoNuvem.KEY, '0');
+    localStorage.removeItem(modoNuvem.DIAS_KEY);
+    localStorage.removeItem(arquivo.INDEX_KEY);
+    store.setList('pre', []);
+    hid.value = '';
+    return out;
+  });
+  assert(r.recusaSemNuvem, 'sem nuvem, o modo não pode ser ligado — seria perder registro');
+  assert(r.saiuSoOCerto, 'só o registro antigo E confirmado na nuvem deveria sair do aparelho');
+  assert(r.protegeNaoSincronizado, 'registro que ainda não subiu nunca sai');
+  assert(r.protegeAberto, 'o registro aberto na tela nunca sai no meio do trabalho');
+  assert(r.indiceLembra, 'o que saiu tem que ficar no índice para poder voltar');
+  assert(r.buscouSozinho, 'abrir um paciente arquivado deveria buscar da nuvem sem o usuário pedir');
+  assert(r.avisaQuandoNaoAcha, 'sem achar na nuvem, o app tem que dizer — não abrir ficha vazia');
+  assert(r.janelaConfiguravel, 'a janela de dias guardados deveria ser configurável');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

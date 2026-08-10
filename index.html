@@ -8694,6 +8694,24 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
         <p id="armazenamento-resumo" style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px"></p>
         <div id="armazenamento-lista" style="margin-bottom:14px"></div>
         <div id="armazenamento-limite"></div>
+        <!-- ☁️ MODO NUVEM — o aparelho guarda só a janela de trabalho -->
+        <div style="margin:14px 0;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface-alt)">
+          <label class="check" style="display:flex;align-items:flex-start;gap:9px;font-size:.86rem">
+            <input type="checkbox" id="modo-nuvem-chk" onchange="modoNuvem.alternar(this.checked)" style="margin-top:3px">
+            <span>☁️ <b>Rodar na nuvem</b> — guardar neste aparelho só o que está sendo editado e os últimos
+              <select id="modo-nuvem-dias" onchange="event.stopPropagation(); modoNuvem.definirDias(parseInt(this.value,10))" style="font-size:.82rem;padding:2px 4px">
+                <option value="1">1 dia</option><option value="7" selected>7 dias</option>
+                <option value="15">15 dias</option><option value="30">30 dias</option>
+              </select>.
+              O resto fica na nuvem e volta sozinho quando você abrir o paciente.
+            </span>
+          </label>
+          <div style="font-size:.74rem;color:var(--text-mute);margin-top:8px;line-height:1.55">
+            Só sai do aparelho o que já está <b>confirmado na nuvem</b>, e o registro aberto na tela nunca sai.
+            Sem internet você continua atendendo e salvando; o que não dá é abrir ficha antiga.
+            Desligar traz tudo de volta.
+          </div>
+        </div>
         <!-- 🚑 RECUPERAÇÃO: restaura da nuvem (backup + clínica) e desarquiva -->
         <div style="background:#eef7ff;border:1px solid #bcd9f2;border-radius:8px;padding:11px 13px;margin-bottom:12px">
           <div style="font-size:.86rem;font-weight:700;color:#1c4f7c;margin-bottom:4px">🚑 Recuperar meus dados</div>
@@ -10369,6 +10387,7 @@ const armazenamento = {
       }
     } catch (e) {}
     try { espaco.preventiva(); } catch (e) {}
+    try { modoNuvem.manutencao({ silent: true }); } catch (e) {}
     try { armazenamento.repararNomesJSON(); } catch (e) {}
   },
 
@@ -10451,6 +10470,10 @@ const armazenamento = {
     if (res) res.innerHTML = 'Em uso neste aparelho: <b>' + armazenamento._fmt(u.total) + '</b>. No celular, o navegador costuma dar ~5 MB — acima disso aparece o aviso de armazenamento cheio.' +
       (nArq ? '<br><span style="color:#1c4f7c"><b>🚑 ' + nArq + ' registro(s) estão arquivados na nuvem</b> (fora deste aparelho) — use "Trazer TODOS de volta" abaixo.</span>' : '');
     try { const chk = document.getElementById('arq-auto-chk'); if (chk) chk.checked = arquivo.autoLigado(); } catch (e) {}
+    try {
+      const c = document.getElementById('modo-nuvem-chk'); if (c) c.checked = modoNuvem.ligado();
+      const d = document.getElementById('modo-nuvem-dias'); if (d) d.value = String(modoNuvem.dias());
+    } catch (e) {}
     /* qual módulo está por trás de cada rótulo — para abrir o detalhe */
     const modDoRotulo = {};
     Object.keys(STORAGE).forEach(mk => {
@@ -11226,6 +11249,104 @@ const espaco = {
       ganho += espaco.ETAPAS[2].fn() || 0;   /* anexos já na nuvem */
       return ganho;
     } catch (e) { return 0; }
+  }
+};
+
+/* ============================================================================
+   MODO NUVEM — o aparelho guarda só o que está em uso
+   O sistema nasceu offline-first: tudo morava no aparelho e a nuvem era cópia.
+   Num celular isso não cabe. Aqui a relação se inverte: a NUVEM é a fonte, e o
+   aparelho guarda apenas a janela de trabalho — o que está aberto, os
+   rascunhos que ainda não subiram e os últimos dias.
+   O resto sai daqui e volta sozinho quando você abre o paciente.
+   Salvaguardas: só sai o que está confirmado na nuvem; o registro aberto na
+   tela nunca sai; e desligar o modo traz tudo de volta.
+============================================================================ */
+const modoNuvem = {
+  KEY: 'medsys.v7.modo_nuvem',
+  DIAS_KEY: 'medsys.v7.modo_nuvem.dias',
+  DIAS_PADRAO: 7,
+
+  ligado() { return localStorage.getItem(modoNuvem.KEY) === '1'; },
+  dias() {
+    const n = parseInt(localStorage.getItem(modoNuvem.DIAS_KEY) || '', 10);
+    return (n > 0 && n < 400) ? n : modoNuvem.DIAS_PADRAO;
+  },
+  definirDias(n) {
+    localStorage.setItem(modoNuvem.DIAS_KEY, String(n));
+    toast('☁️ Este aparelho passa a guardar os últimos ' + n + ' dias');
+    modoNuvem.manutencao({ silent: true });
+    try { armazenamento.render(); } catch (e) {}
+  },
+
+  /* Só faz sentido com a nuvem funcionando — sem isso, arquivar é perder. */
+  podeLigar() {
+    try { return cloud.estaConfigurado() && cloud.estaLogado() && !cloud.sessaoExpirada(); }
+    catch (e) { return false; }
+  },
+
+  async alternar(on) {
+    if (on && !modoNuvem.podeLigar()) {
+      toast('Conecte-se à nuvem antes — sem ela, tirar registros do aparelho seria perdê-los.', 'warn');
+      try { const c = document.getElementById('modo-nuvem-chk'); if (c) c.checked = false; } catch (e) {}
+      return;
+    }
+    localStorage.setItem(modoNuvem.KEY, on ? '1' : '0');
+    if (on) {
+      const n = modoNuvem.manutencao();
+      toast(n ? '☁️ Modo nuvem ligado — ' + n + ' registro(s) saíram do aparelho e voltam sozinhos quando você abrir o paciente'
+              : '☁️ Modo nuvem ligado — por enquanto tudo é recente, nada saiu');
+    } else {
+      toast('📥 Modo nuvem desligado — trazendo tudo de volta para este aparelho…');
+      try { await arquivo.restaurarTodos({ silent: true }); } catch (e) {}
+      toast('📥 Pronto: este aparelho voltou a guardar todo o histórico');
+    }
+    try { armazenamento.render(); } catch (e) {}
+  },
+
+  /* Ids abertos AGORA na tela — nunca podem sair daqui no meio do trabalho */
+  _emUso() {
+    const ids = new Set();
+    ['form-pre', 'form-consulta', 'form-anestesia', 'form-recuperacao',
+     'form-termo', 'form-prescricao', 'form-risco', 'form-documentos'].forEach(fid => {
+      try {
+        const el = document.querySelector('#' + fid + ' [name="_id"]');
+        if (el && el.value) ids.add(el.value);
+      } catch (e) {}
+    });
+    return ids;
+  },
+
+  /* Tira do aparelho o que passou da janela e já está confirmado na nuvem. */
+  manutencao(opts = {}) {
+    if (!modoNuvem.ligado() || !modoNuvem.podeLigar()) return 0;
+    const emUso = modoNuvem._emUso();
+    const corte = Date.now() - modoNuvem.dias() * 86400000;
+    const ix = arquivo._indice();
+    let n = 0;
+    Object.keys(arquivo.PRAZOS).forEach(mod => {
+      try {
+        const lst = store.list(mod);
+        const ficam = [], saem = [];
+        lst.forEach(it => {
+          const ts = new Date(it._updatedAt || it._createdAt || 0).getTime();
+          const podeSair = it && it._id && it._relUpdatedAt && ts > 0 && ts < corte && !emUso.has(it._id);
+          if (podeSair) saem.push(it); else ficam.push(it);
+        });
+        if (!saem.length) return;
+        ix[mod] = ix[mod] || [];
+        saem.forEach(it => {
+          if (!ix[mod].some(e => e.id === it._id)) {
+            ix[mod].push({ id: it._id, nome: arquivo._nomeDe(it),
+              data: (it.data || it.data_proc || String(it._updatedAt || '').slice(0, 10) || '') });
+          }
+          n++;
+        });
+        store._escrever(mod, ficam);
+      } catch (e) {}
+    });
+    if (n) arquivo._gravarIndice(ix);
+    return n;
   }
 };
 
@@ -17326,6 +17447,9 @@ const nuvemEstado = {
     try { await rascunhosSync.enviarTodos(); } catch (e) {}
     try { await rascunhosSync.puxarTodos({ silent: true }); } catch (e) {}
     dizer('');
+    /* Depois de tudo confirmado na nuvem é o melhor momento para o aparelho
+       devolver espaço — só agora dá para saber o que pode sair. */
+    try { modoNuvem.manutencao({ silent: true }); } catch (e) {}
     nuvemEstado.render();
     try { cloud._repintarTelaAtual(); } catch (e) {}
     toast('✅ Tudo atualizado — este aparelho está igual aos outros');
@@ -37029,9 +37153,19 @@ const dashboard = {
     out.innerHTML = `<div class="dash-search-count">${resultados.length} registro(s) encontrado(s)${resultados.length > 50 ? ' — mostrando 50' : ''}</div>` + linhas;
   },
 
-  _abrirRegistro(mod, id) {
-    const item = store.getById(mod, id);
-    if (!item) { toast('Registro não encontrado', 'error'); return; }
+  async _abrirRegistro(mod, id) {
+    /* No modo nuvem o registro pode não estar neste aparelho. Buscar é
+       trabalho do app, não do usuário — ele só clicou num paciente. */
+    let item = store.getById(mod, id);
+    if (!item) {
+      const t = toast('☁️ Buscando na nuvem…');
+      const veio = await arquivo.restaurar(mod, id, { silent: true });
+      if (veio) item = store.getById(mod, id);
+    }
+    if (!item) {
+      toast('Não encontrei este registro — nem aqui, nem na nuvem. Confira a conexão.', 'error');
+      return;
+    }
     const handlers = { pre, consulta, anestesia, recuperacao, termo, prescricao, risco, financeiro };
     ui.navegar(mod);
     setTimeout(() => {
@@ -41062,7 +41196,7 @@ document.addEventListener('DOMContentLoaded', () => {
        em qualquer navegador, mesmo quando const não é global. */
   window.utils = utils; window.store = store; window.ui = ui;
   window.backupCompleto = backupCompleto;
-  window.lixeira = lixeira; window.duplicados = duplicados; window.espaco = espaco;
+  window.lixeira = lixeira; window.duplicados = duplicados; window.espaco = espaco; window.modoNuvem = modoNuvem;
   window.carimboHora = carimboHora;
   window.cronometros = cronometros;
   window.dashboard = dashboard; window.pre = pre; window.consulta = consulta;
