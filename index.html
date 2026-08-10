@@ -25746,12 +25746,15 @@ const anestesia = {
       cam:   { cor: '#FF7043', marca: 'plus',        label: 'CAM' }
     },
     corDe(campo) { return (anestesia.graficoUI.SERIES[campo] || {}).cor || '#444'; },
+    /* Tamanho das marcas no gráfico. Vale para ficha e SRPA. */
+    MARCA_ESCALA: 1.4,
     /* Desenha uma marca. Usado pelo gráfico E pela legenda, para nunca divergirem. */
     desenharMarca(ctx, marca, x, y, cor, escala) {
-      const s = escala || 1;
+      const s = escala || anestesia.graficoUI.MARCA_ESCALA;
       const r = 3.4 * s;
       ctx.strokeStyle = cor; ctx.fillStyle = cor;
-      ctx.lineWidth = 1.7 * s; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      /* o traço engrossa menos que a marca — senão o símbolo vira um borrão */
+      ctx.lineWidth = 1.7 * Math.sqrt(s); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
       ctx.beginPath();
       switch (marca) {
         case 'vDown': ctx.moveTo(x - r, y - r); ctx.lineTo(x, y); ctx.lineTo(x + r, y - r); ctx.stroke(); break;
