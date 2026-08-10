@@ -8693,6 +8693,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       <div class="card-body">
         <p id="armazenamento-resumo" style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px"></p>
         <div id="armazenamento-lista" style="margin-bottom:14px"></div>
+        <div id="armazenamento-limite"></div>
         <!-- 🚑 RECUPERAÇÃO: restaura da nuvem (backup + clínica) e desarquiva -->
         <div style="background:#eef7ff;border:1px solid #bcd9f2;border-radius:8px;padding:11px 13px;margin-bottom:12px">
           <div style="font-size:.86rem;font-weight:700;color:#1c4f7c;margin-bottom:4px">🚑 Recuperar meus dados</div>
@@ -8713,6 +8714,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <button type="button" class="btn btn-sm" onclick="arquivo.arquivarAgora()" title="Move para a nuvem os registros antigos (90+ dias; financeiro 1 ano) que já estão confirmados lá. Podem ser trazidos de volta a qualquer momento.">🗄 Arquivar casos antigos</button>
           <button type="button" class="btn btn-sm" onclick="armazenamento.compactarVersoes()" title="Reduz o histórico de versões a 3 por documento e remove assinaturas/fotos em base64 do histórico (os documentos atuais não mudam)">🕓 Compactar histórico de versões</button>
           <button type="button" class="btn btn-sm" onclick="armazenamento.liberarAnexos()" title="Remove do aparelho cópias locais de anexos que JÁ estão na nuvem (continuam abríveis pela nuvem)">☁️ Liberar anexos já na nuvem</button>
+          <button type="button" class="btn btn-sm" onclick="armazenamento.testarLimite()" title="Descobre quanto este navegador realmente aceita guardar — útil quando o aviso de cheio não bate com o espaço em uso">📏 Medir o limite deste navegador</button>
           <button type="button" class="btn btn-sm" onclick="armazenamento.esvaziarLixeira()" title="Esvazia a lixeira de 30 dias">🗑 Esvaziar lixeira</button>
           <button type="button" class="btn btn-sm" onclick="armazenamento.limparDemo()" title="Remove os dados isolados do modo demonstração">🧪 Remover dados de demonstração</button>
           <button type="button" class="btn btn-sm btn-ghost" onclick="armazenamento.render()">🔄 Atualizar</button>
@@ -10520,6 +10522,53 @@ const armazenamento = {
           '</span><b style="white-space:nowrap">' + armazenamento._fmt(l.total) + '</b></div>';
       }).join('') + '</div>';
     modal.open('🔎 O que pesa em ' + rot, corpo, '<button class="btn" onclick="modal.close()">Fechar</button>');
+  },
+
+  /* MEDE a cota real deste navegador, em vez de supor os "~5 MB" do manual.
+     Escreve uma chave temporária cada vez maior até o navegador recusar, e
+     apaga tudo no fim. É a única forma de saber por que um aparelho com 200 GB
+     livres diz que está cheio em 2 MB. */
+  async testarLimite() {
+    const K = '__medsys_teste_cota__';
+    const res = document.getElementById('armazenamento-limite');
+    const dizer = (h) => { if (res) res.innerHTML = h; };
+    dizer('⏳ Medindo…');
+    const usoAtual = armazenamento.uso().total;
+    const cabe = (kb) => {
+      try {
+        localStorage.setItem(K, 'x'.repeat(kb * 512));   /* 512 chars = 1 KB em UTF-16 */
+        localStorage.removeItem(K);
+        return true;
+      } catch (e) { try { localStorage.removeItem(K); } catch (e2) {} return false; }
+    };
+    /* busca binária entre 0 e 12 MB, em KB */
+    let lo = 0, hi = 12 * 1024;
+    if (cabe(hi)) lo = hi;
+    else {
+      while (lo < hi - 64) {
+        const meio = Math.floor((lo + hi) / 2);
+        if (cabe(meio)) lo = meio; else hi = meio;
+        await new Promise(r => setTimeout(r, 0));       /* não trava a tela */
+      }
+    }
+    const livre = lo * 1024;
+    const teto = usoAtual + livre;
+    const fmt = armazenamento._fmt;
+    let leitura;
+    if (livre < 256 * 1024) {
+      leitura = '<b style="color:#b3392a">O navegador não aceita nem 256 KB a mais.</b> ' +
+        'Com o aparelho tendo espaço de sobra, isso aponta para um limite do próprio Safari nesta origem — ' +
+        'normalmente resolvido saindo do modo de navegação privada, ou removendo e recolocando o atalho na tela de início.';
+    } else if (teto < 4 * 1024 * 1024) {
+      leitura = '<b>Este navegador está dando bem menos que os ~5 MB habituais.</b> ' +
+        'O app precisa caber em ' + fmt(teto) + ' — por isso o aviso aparece mesmo com o aparelho vazio.';
+    } else {
+      leitura = 'Espaço normal. Se o aviso de cheio voltar, ele vem de uma gravação grande de uma vez só ' +
+        '(um anexo pesado), não do acúmulo.';
+    }
+    dizer('<div style="font-size:.82rem;line-height:1.6;background:var(--surface-alt);padding:10px 12px;border-radius:7px;margin-top:8px">' +
+      '📏 <b>Em uso:</b> ' + fmt(usoAtual) + ' · <b>ainda cabe:</b> ' + fmt(livre) + ' · <b>teto deste navegador:</b> ~' + fmt(teto) +
+      '<br>' + leitura + '</div>');
   },
 
   compactarVersoes() {

@@ -4558,6 +4558,42 @@ await test('Armazenamento mostra o que pesa DENTRO do módulo e o que já dá pa
   await page.close();
 });
 
+/* 79) Medir a cota de verdade. Aparelho com 200 GB livres acusando "cheio" em
+   2 MB não se resolve por suposição — se mede. */
+await test('Medidor de limite descobre quanto o navegador realmente aceita e não deixa lixo para trás', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const setItemOrig = Storage.prototype.setItem;
+    const TETO = 1500 * 1024;                    /* finge um navegador de ~1,5 MB livre */
+    Storage.prototype.setItem = function (k, v) {
+      if (k === '__medsys_teste_cota__' && String(v).length * 2 > TETO) {
+        const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e;
+      }
+      return setItemOrig.call(this, k, v);
+    };
+    await armazenamento.testarLimite();
+    Storage.prototype.setItem = setItemOrig;
+
+    const txt = document.getElementById('armazenamento-limite').textContent;
+    out.reportou = /Em uso:/.test(txt) && /ainda cabe:/.test(txt) && /teto deste navegador/.test(txt);
+    /* achou perto do teto fingido (1,5 MB), não um número qualquer */
+    const m = txt.match(/ainda cabe:\s*([\d.,]+)\s*(KB|MB)/);
+    const val = m ? parseFloat(m[1].replace(',', '.')) * (m[2] === 'MB' ? 1024 : 1) : 0;
+    out.acertouOTeto = val > 1300 && val < 1550;
+    /* diagnostica em vez de só cuspir número */
+    out.interpretou = /bem menos que os ~5 MB|não aceita nem 256 KB|Espaço normal/.test(txt);
+    /* e não deixou a chave de teste para trás */
+    out.limpou = localStorage.getItem('__medsys_teste_cota__') === null;
+    return out;
+  });
+  assert(r.reportou, 'a medição deveria informar uso, folga e teto');
+  assert(r.acertouOTeto, 'a busca deveria chegar perto do limite real do navegador');
+  assert(r.interpretou, 'a medição deveria dizer o que aquele número significa, não só o número');
+  assert(r.limpou, 'a chave de teste não pode sobrar ocupando espaço');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
