@@ -3798,6 +3798,23 @@ textarea { border-radius: 10px; }
 .sidebar-brand strong { font-weight: 800; letter-spacing: -.2px; }
 /* Header */
 .app-header { backdrop-filter: blur(8px); }
+/* Faixa de armazenamento cheio — avisa sem tomar a tela */
+.espaco-faixa{
+  position: fixed; left: 10px; right: 10px; bottom: 84px; z-index: 950;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: #7a2e18; color: #fff; border-radius: 10px;
+  padding: 10px 12px; font-size: .82rem; line-height: 1.45;
+  box-shadow: 0 8px 24px rgba(15,37,64,.35);
+}
+.espaco-faixa .ef-txt{ flex: 1; min-width: 180px; }
+.espaco-faixa .ef-x{
+  background: transparent; border: 0; color: #fff; opacity: .8;
+  font-size: 1rem; cursor: pointer; padding: 2px 6px; line-height: 1;
+}
+.espaco-faixa .ef-x:hover{ opacity: 1; }
+@media (min-width: 769px){ .espaco-faixa{ bottom: 16px; left: auto; right: 16px; max-width: 460px; } }
+@media print{ .espaco-faixa{ display: none !important; } }
+
 /* ===== Bottom nav (mobile) ===== */
 .bottom-nav { display: none; }
 @media (max-width: 768px) {
@@ -5990,12 +6007,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
 
         <div class="vitals-chart-wrap">
           <div class="legend">
-            <span class="legend-item"><span class="legend-swatch" style="background:#b3392a"></span> PAS</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#c47c1f"></span> PAD</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#7b3a8d"></span> PAM</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#1c64a9"></span> FC</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#1f9171"></span> SpO₂</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#8a2be2"></span> EtCO₂</span>
+            <span id="legend-fixos"></span>
             <span id="legend-extras"></span>
             <span class="legend-item"><span class="legend-swatch" style="background:#444;color:#fff;border-radius:50%;width:14px;height:14px;line-height:14px;text-align:center;font-size:9px;font-weight:bold">M</span> Medicação</span>
             <span class="legend-item"><span class="legend-swatch" style="background:#1f9171;color:#fff;border-radius:3px;width:14px;height:14px;line-height:14px;text-align:center;font-size:9px;font-weight:bold">E</span> Evento</span>
@@ -6793,12 +6805,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
         <!-- CANVAS DO GRÁFICO SRPA -->
         <div class="vitals-chart-wrap" style="margin-top:18px">
           <div class="legend">
-            <span class="legend-item"><span class="legend-swatch" style="background:#b3392a"></span> PAS</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#c47c1f"></span> PAD</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#7b3a8d"></span> PAM</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#1c64a9"></span> FC</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#1f9171"></span> SpO₂</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#7c3aed"></span> FR</span>
+            <span id="srpa-legend-fixos"></span>
             <span id="srpa-legend-extras"></span>
             <span class="legend-item"><span class="legend-swatch" style="background:#444;color:#fff;border-radius:50%;width:14px;height:14px;line-height:14px;text-align:center;font-size:9px;font-weight:bold">M</span> Medicação</span>
             <span class="legend-item"><span class="legend-swatch" style="background:#1f9171;color:#fff;border-radius:3px;width:14px;height:14px;line-height:14px;text-align:center;font-size:9px;font-weight:bold">E</span> Evento</span>
@@ -9776,39 +9783,30 @@ const store = {
     try { return JSON.parse(localStorage.getItem(STORAGE[modKey]) || '[]'); }
     catch { return []; }
   },
-  setList(modKey, arr) {
-    try {
-      localStorage.setItem(STORAGE[modKey], JSON.stringify(arr));
-    }
-    catch (e) {
-      /* Detecta armazenamento cheio (QuotaExceededError) e avisa claramente */
-      const cheio = e && (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014 || /quota/i.test(e.message || ''));
-      if (cheio) {
-        store._avisarArmazenamentoCheio();
-      } else {
-        toast('Erro ao salvar: ' + e.message, 'error');
-      }
-    }
+  /* Escrita crua, sem socorro — usada pelas próprias rotinas de liberação de
+     espaço, que não podem chamar o socorro de novo (recursão). */
+  _escrever(modKey, arr) {
+    try { localStorage.setItem(STORAGE[modKey], JSON.stringify(arr)); return true; }
+    catch (e) { return false; }
   },
-  /* Aviso de armazenamento cheio (evita repetir o alerta a cada gravação) */
-  _avisouCheio: false,
-  _avisarArmazenamentoCheio() {
-    toast('⚠️ Armazenamento do aparelho cheio! Faça um backup completo e sincronize a nuvem.', 'error');
-    if (store._avisouCheio) return;
-    store._avisouCheio = true;
-    try {
-      if (typeof modal !== 'undefined') {
-        modal.open('⚠️ Armazenamento cheio',
-          `<p style="font-size:.9rem;line-height:1.6">O espaço de armazenamento deste aparelho atingiu o limite e novos dados podem não ser salvos.</p>
-           <p style="font-size:.9rem;line-height:1.6;margin-top:8px"><strong>O que fazer agora:</strong></p>
-           <ol style="font-size:.88rem;line-height:1.7;padding-left:20px">
-             <li>Use <strong>Ajustes → Armazenamento do aparelho</strong>: mostra o que ocupa espaço e libera com um toque (histórico de versões, lixeira, anexos que já estão na nuvem).</li>
-             <li>Confirme que a <strong>sincronização com a nuvem</strong> está ativa e concluída.</li>
-             <li>Se precisar, faça um <strong>backup completo</strong> (Ajustes → Backup completo → Exportar).</li>
-           </ol>`,
-          '<button class="btn btn-primary" onclick="modal.close(); location.hash=\'#ajustes\'; setTimeout(function(){ try { ajustesGrupos.abrirPara(\'armazenamento-card\'); armazenamento.render(); } catch (e) {} }, 500);">🧹 Ir para a limpeza</button><button class="btn" onclick="modal.close()">Fechar</button>');
-      }
-    } catch (e) {}
+  _ehCheio(e) {
+    return !!(e && (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014 || /quota/i.test(e.message || '')));
+  },
+  /* Devolve true quando gravou de verdade. Se o aparelho estiver cheio, libera
+     espaço sozinho e refaz a gravação — em vez de engolir o erro e deixar a
+     pessoa achando que salvou. */
+  setList(modKey, arr) {
+    const escrever = () => {
+      try { localStorage.setItem(STORAGE[modKey], JSON.stringify(arr)); return true; }
+      catch (e) { escrever._erro = e; return false; }
+    };
+    if (escrever()) return true;
+    const e = escrever._erro;
+    if (!store._ehCheio(e)) {
+      toast('Erro ao salvar: ' + (e && e.message || 'desconhecido'), 'error');
+      return false;
+    }
+    try { return espaco.socorro(escrever); } catch (e2) { return false; }
   },
   /* Salva um item; se data._id existir, atualiza, senão adiciona */
   save(modKey, item) {
@@ -9840,10 +9838,17 @@ const store = {
     if (idx >= 0) list[idx] = item;
     else list.unshift(item);
     if (list.length > HISTORY_MAX) list.length = HISTORY_MAX;
-    store.setList(modKey, list);
+    const gravouLocal = store.setList(modKey, list);
     store._audit(isNew ? 'create' : 'update', modKey, item);
     /* Sincronização em background (não bloqueia; falha silenciosa vai pra fila) */
     try { if (typeof cloud !== 'undefined') cloud.pushDoc(modKey, item, 'upsert'); } catch (e) {}
+    /* Não coube no aparelho: o registro ainda vai para a nuvem, mas dizer
+       "Salvo" seria mentira. A pessoa precisa saber onde ele está. */
+    if (gravouLocal === false) {
+      try {
+        toast('⚠️ Não coube neste aparelho. O registro foi enviado para a NUVEM — para abrir aqui offline, libere espaço.', 'error');
+      } catch (e) {}
+    }
     /* Fase 6: espelho relacional dos módulos de registro (pré, ficha, etc.) */
     try { if (typeof cloudRel !== 'undefined' && cloudRel.ehModuloRegistro && cloudRel.ehModuloRegistro(modKey)) cloudRel.mirrorRegistro(modKey, item); } catch (e) {}
     /* Clicou em Salvar: o RASCUNHO daquele módulo sobe na hora — é o que
@@ -10361,6 +10366,7 @@ const armazenamento = {
         }
       }
     } catch (e) {}
+    try { espaco.preventiva(); } catch (e) {}
     try { armazenamento.repararNomesJSON(); } catch (e) {}
   },
 
@@ -10882,6 +10888,172 @@ const duplicados = {
       try { toast('🔁 ' + n + (n === 1 ? ' registro anterior foi para a Lixeira' : ' registros anteriores foram para a Lixeira') + ' — recuperáveis por 30 dias'); } catch (e) {}
       try { if (typeof pacientes !== 'undefined' && pacientes.render) pacientes.render(); } catch (e) {}
     }
+  }
+};
+
+/* ============================================================================
+   ESPAÇO DO APARELHO — socorro automático
+   O navegador do celular dá ~5 MB. Quando enche, a gravação FALHA. Antes, o
+   app engolia o erro, abria uma janela pedindo limpeza manual e seguia — ou
+   seja: a pessoa achava que tinha salvo e não tinha, e a janela voltava a cada
+   toque em Salvar, no meio do atendimento.
+   Agora, ao falhar, o app LIBERA espaço sozinho, em etapas, da mais segura
+   para a menos, e REFAZ a gravação depois de cada etapa. Só incomoda se todas
+   as etapas falharem — e aí com um aviso que não bloqueia a tela.
+   Regra de ouro: só sai do aparelho o que está CONFIRMADO na nuvem. Nada que
+   ainda esteja na fila de envio é tocado.
+============================================================================ */
+const espaco = {
+  AVISO_KEY: 'medsys.v7.espaco.avisado_em',
+  INTERVALO_AVISO: 6 * 3600000,          /* no máximo 1 aviso a cada 6 h */
+  _rodando: false,
+
+  filaPendente() { try { return cloud._fila().length; } catch (e) { return 0; } },
+
+  /* Etapas de liberação, da mais segura para a menos. Cada uma devolve os
+     bytes liberados (aproximados). */
+  ETAPAS: [
+    { nome: 'histórico de versões', fn() {
+        const key = 'medsys.v7.versions';
+        const antes = (localStorage.getItem(key) || '').length * 2;
+        try {
+          const all = JSON.parse(localStorage.getItem(key) || '{}');
+          Object.keys(all).forEach(k => { all[k] = (all[k] || []).slice(0, 1); });
+          localStorage.setItem(key, JSON.stringify(all));
+        } catch (e) {}
+        return Math.max(0, antes - (localStorage.getItem(key) || '').length * 2);
+      } },
+    { nome: 'lixeira vencida', fn() {
+        const antes = (localStorage.getItem(lixeira.KEY) || '').length * 2;
+        try { lixeira.purgarExpirados(); } catch (e) {}
+        return Math.max(0, antes - (localStorage.getItem(lixeira.KEY) || '').length * 2);
+      } },
+    { nome: 'anexos que já estão na nuvem', fn() {
+        let liberto = 0;
+        ['pre', 'consulta', 'anestesia', 'recuperacao', 'financeiro', 'documentos', 'termo', 'prescricao', 'risco'].forEach(mod => {
+          try {
+            const lista = store.list(mod); let mudou = false;
+            lista.forEach(rec => {
+              ['_docs', '_docs_troca', 'anexos'].forEach(campo => {
+                (Array.isArray(rec[campo]) ? rec[campo] : []).forEach(d => {
+                  /* storage_path = o arquivo está na nuvem; a cópia local é dispensável */
+                  if (d && d.storage_path && d.dataurl) { liberto += d.dataurl.length * 2; delete d.dataurl; mudou = true; }
+                });
+              });
+            });
+            if (mudou) store._escrever(mod, lista);
+          } catch (e) {}
+        });
+        return liberto;
+      } },
+    { nome: 'histórico antigo (fica na nuvem)', fn() { return espaco._arquivarAte(90); } },
+    { nome: 'histórico dos últimos meses (fica na nuvem)', fn() { return espaco._arquivarAte(30); } },
+    { nome: 'lixeira', fn() {
+        const antes = (localStorage.getItem(lixeira.KEY) || '').length * 2;
+        try { localStorage.setItem(lixeira.KEY, '[]'); } catch (e) {}
+        return Math.max(0, antes - 2);
+      } },
+    { nome: 'histórico das últimas semanas (fica na nuvem)', fn() { return espaco._arquivarAte(7); } }
+  ],
+
+  /* Arquiva o que é mais antigo que N dias E já confirmado na nuvem.
+     Reaproveita o índice de `arquivo`, então tudo volta com um toque. */
+  _arquivarAte(dias) {
+    const antes = armazenamento.uso().total;
+    const original = Object.assign({}, arquivo.PRAZOS);
+    try {
+      Object.keys(arquivo.PRAZOS).forEach(m => {
+        /* financeiro/orçamento têm prazo maior de propósito (relatórios do ano) */
+        arquivo.PRAZOS[m] = Math.max(dias, dias === 7 ? 7 : (original[m] > 200 ? Math.max(dias, 180) : dias));
+      });
+      arquivo.arquivarAntigos();
+    } catch (e) {}
+    finally { Object.keys(original).forEach(m => { arquivo.PRAZOS[m] = original[m]; }); }
+    return Math.max(0, antes - armazenamento.uso().total);
+  },
+
+  /* Chamado quando uma gravação falhou por falta de espaço.
+     `regravar` refaz a gravação e devolve true quando conseguir. */
+  socorro(regravar) {
+    if (espaco._rodando) return false;      /* nada de recursão entre etapas */
+    espaco._rodando = true;
+    let liberado = 0;
+    let feitas = [];
+    try {
+      for (const etapa of espaco.ETAPAS) {
+        let ganho = 0;
+        try { ganho = etapa.fn() || 0; } catch (e) { ganho = 0; }
+        if (ganho > 0) { liberado += ganho; feitas.push(etapa.nome); }
+        if (regravar()) {
+          espaco._contarSucesso(liberado, feitas);
+          return true;
+        }
+      }
+    } finally { espaco._rodando = false; }
+    espaco.avisar(liberado);
+    return false;
+  },
+
+  _contarSucesso(liberado, feitas) {
+    try {
+      toast('🧹 Espaço liberado (' + armazenamento._fmt(liberado) + ') e o registro foi salvo. ' +
+            'Saíram do aparelho: ' + feitas.join(', ') + ' — nada foi perdido, está tudo na nuvem.', 'success');
+    } catch (e) {}
+    try { armazenamento.render(); } catch (e) {}
+    /* aproveita para empurrar o que estiver na fila: quanto mais confirmado na
+       nuvem, mais o aparelho consegue liberar da próxima vez */
+    try { if (cloud.estaConfigurado() && cloud.estaLogado()) cloud.sincronizar({ silent: true }); } catch (e) {}
+  },
+
+  /* Aviso de última instância: NÃO bloqueia a tela. Uma faixa no topo que a
+     pessoa fecha, e no máximo uma a cada 6 h. */
+  avisar(liberado) {
+    const pend = espaco.filaPendente();
+    try {
+      toast('⚠️ Não consegui salvar: o armazenamento deste aparelho está cheio' +
+            (pend ? ' e ainda há ' + pend + ' item(ns) esperando subir para a nuvem' : '') + '.', 'error');
+    } catch (e) {}
+    const ultimo = parseInt(localStorage.getItem(espaco.AVISO_KEY) || '0', 10);
+    if (Date.now() - ultimo < espaco.INTERVALO_AVISO) return;
+    try { localStorage.setItem(espaco.AVISO_KEY, String(Date.now())); } catch (e) {}
+    espaco.mostrarFaixa(pend);
+  },
+
+  mostrarFaixa(pend) {
+    if (document.getElementById('espaco-faixa')) return;
+    const div = document.createElement('div');
+    div.id = 'espaco-faixa';
+    div.className = 'espaco-faixa';
+    div.innerHTML =
+      '<span class="ef-txt"><b>⚠️ Armazenamento cheio.</b> ' +
+      (pend
+        ? 'Há <b>' + pend + '</b> item(ns) que ainda não subiram — por isso não posso tirá-los daqui. Conecte-se à internet e atualize a nuvem.'
+        : 'Liberei tudo o que era seguro liberar e ainda falta espaço.') +
+      '</span>' +
+      '<button type="button" class="btn btn-xs btn-primary" onclick="espaco.irParaLimpeza()">Liberar espaço</button>' +
+      '<button type="button" class="ef-x" onclick="espaco.fecharFaixa()" aria-label="Fechar">✕</button>';
+    document.body.appendChild(div);
+  },
+  fecharFaixa() { const el = document.getElementById('espaco-faixa'); if (el) el.remove(); },
+  irParaLimpeza() {
+    espaco.fecharFaixa();
+    location.hash = '#ajustes';
+    setTimeout(() => {
+      try { ajustesGrupos.abrirPara('armazenamento-card'); armazenamento.render(); } catch (e) {}
+    }, 400);
+  },
+
+  /* Manutenção preventiva: roda antes de encher, quando passa de ~3,5 MB.
+     Só faz o que é indolor — não arquiva registro nenhum sem necessidade. */
+  preventiva() {
+    try {
+      if (armazenamento.uso().total < 3.5 * 1024 * 1024) return 0;
+      let ganho = 0;
+      ganho += espaco.ETAPAS[0].fn() || 0;   /* versões */
+      ganho += espaco.ETAPAS[1].fn() || 0;   /* lixeira vencida */
+      ganho += espaco.ETAPAS[2].fn() || 0;   /* anexos já na nuvem */
+      return ganho;
+    } catch (e) { return 0; }
   }
 };
 
@@ -25730,18 +25902,105 @@ const anestesia = {
       try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
     },
 
-    /* Configuração de monitores extras — usados para gerar botões dinâmicos */
+    /* ====== SÍMBOLOS E CORES DO GRÁFICO — fonte única ======================
+       Cada sinal vital tem COR própria e SÍMBOLO próprio. O símbolo segue a
+       ficha de papel onde ela tem tradição (∨ sistólica, ∧ diastólica, ● pulso,
+       ○ respiração, × temperatura) e, onde não tem — SpO₂, EtCO₂, BIS, TOF —,
+       segue uma lógica de famílias: losango para gases, quadrado para monitores
+       de profundidade/bloqueio.
+       Vale para a ficha de anestesia E para a SRPA: o mesmo motor desenha as duas. */
+    SERIES: {
+      pas:   { cor: '#C0392B', marca: 'vDown',       label: 'PAS' },
+      pad:   { cor: '#E67E22', marca: 'vUp',         label: 'PAD' },
+      pam:   { cor: '#8E44AD', marca: 'dash',        label: 'PAM' },
+      fc:    { cor: '#1C64A9', marca: 'dot',         label: 'FC' },
+      spo2:  { cor: '#0E9F6E', marca: 'diamondOpen', label: 'SpO₂' },
+      etco2: { cor: '#00838F', marca: 'diamondFill', label: 'EtCO₂' },
+      fr:    { cor: '#5E35B1', marca: 'ring',        label: 'FR' },
+      temp:  { cor: '#D81B60', marca: 'cross',       label: 'Temp °C' },
+      bis:   { cor: '#B7791F', marca: 'squareOpen',  label: 'BIS' },
+      tof:   { cor: '#546E7A', marca: 'squareFill',  label: 'TOF %' },
+      glic:  { cor: '#6D4C41', marca: 'triUp',       label: 'Glic' },
+      pvc:   { cor: '#7CB342', marca: 'triDown',     label: 'PVC' },
+      pic:   { cor: '#3949AB', marca: 'plus',        label: 'PIC' },
+      dc:    { cor: '#00ACC1', marca: 'ring',        label: 'DC' },
+      scvo2: { cor: '#558B2F', marca: 'triUp',       label: 'ScvO₂' },
+      cam:   { cor: '#FF7043', marca: 'plus',        label: 'CAM' }
+    },
+    corDe(campo) { return (anestesia.graficoUI.SERIES[campo] || {}).cor || '#444'; },
+    /* Tamanho das marcas no gráfico. Vale para ficha e SRPA. */
+    MARCA_ESCALA: 1.4,
+    /* Desenha uma marca. Usado pelo gráfico E pela legenda, para nunca divergirem. */
+    desenharMarca(ctx, marca, x, y, cor, escala) {
+      const s = escala || anestesia.graficoUI.MARCA_ESCALA;
+      const r = 3.4 * s;
+      ctx.strokeStyle = cor; ctx.fillStyle = cor;
+      /* o traço engrossa menos que a marca — senão o símbolo vira um borrão */
+      ctx.lineWidth = 1.7 * Math.sqrt(s); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      ctx.beginPath();
+      switch (marca) {
+        case 'vDown': ctx.moveTo(x - r, y - r); ctx.lineTo(x, y); ctx.lineTo(x + r, y - r); ctx.stroke(); break;
+        case 'vUp':   ctx.moveTo(x - r, y + r); ctx.lineTo(x, y); ctx.lineTo(x + r, y + r); ctx.stroke(); break;
+        case 'dot':   ctx.arc(x, y, 2.9 * s, 0, Math.PI * 2); ctx.fill(); break;
+        case 'ring':  ctx.arc(x, y, 3.1 * s, 0, Math.PI * 2); ctx.stroke(); break;
+        case 'cross': ctx.moveTo(x - r, y - r); ctx.lineTo(x + r, y + r);
+                      ctx.moveTo(x + r, y - r); ctx.lineTo(x - r, y + r); ctx.stroke(); break;
+        case 'plus':  ctx.moveTo(x - r, y); ctx.lineTo(x + r, y);
+                      ctx.moveTo(x, y - r); ctx.lineTo(x, y + r); ctx.stroke(); break;
+        case 'dash':  ctx.moveTo(x - r - 1, y); ctx.lineTo(x + r + 1, y); ctx.stroke(); break;
+        case 'diamondOpen': ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath(); ctx.stroke(); break;
+        case 'diamondFill': ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath(); ctx.fill(); break;
+        case 'squareOpen':  ctx.rect(x - r + .5, y - r + .5, r * 2 - 1, r * 2 - 1); ctx.stroke(); break;
+        case 'squareFill':  ctx.rect(x - r, y - r, r * 2, r * 2); ctx.fill(); break;
+        case 'triUp':   ctx.moveTo(x, y - r); ctx.lineTo(x + r, y + r * .8); ctx.lineTo(x - r, y + r * .8); ctx.closePath(); ctx.fill(); break;
+        case 'triDown': ctx.moveTo(x, y + r); ctx.lineTo(x + r, y - r * .8); ctx.lineTo(x - r, y - r * .8); ctx.closePath(); ctx.fill(); break;
+        default: ctx.arc(x, y, 2.8 * s, 0, Math.PI * 2); ctx.fill();
+      }
+    },
+    /* Legenda: mesma marca do gráfico, desenhada num mini-canvas */
+    _swatch(campo) {
+      const S = anestesia.graficoUI.SERIES[campo]; if (!S) return '';
+      const cv = document.createElement('canvas');
+      const box = 16, dpr = (window.devicePixelRatio || 1);
+      cv.width = box * dpr; cv.height = box * dpr;
+      const ctx = cv.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      anestesia.graficoUI.desenharMarca(ctx, S.marca, box / 2, box / 2, S.cor, 1.15);
+      return '<img src="' + cv.toDataURL() + '" width="16" height="16" alt="" style="vertical-align:-3px">';
+    },
+    _itemLegenda(campo) {
+      const S = anestesia.graficoUI.SERIES[campo]; if (!S) return '';
+      return '<span class="legend-item">' + anestesia.graficoUI._swatch(campo) + ' ' + S.label + '</span>';
+    },
+    /* Preenche as legendas fixas das duas telas (ficha e SRPA) */
+    renderLegendaFixa() {
+      /* A ficha mostra EtCO₂; a SRPA, FR — é o que cada uma registra de rotina */
+      const monta = (campos) => campos.map(anestesia.graficoUI._itemLegenda).join('');
+      const fixa = { 'legend-fixos': ['pas', 'pad', 'pam', 'fc', 'spo2', 'etco2'],
+                     'srpa-legend-fixos': ['pas', 'pad', 'pam', 'fc', 'spo2', 'fr'] };
+      Object.keys(fixa).forEach(id => {
+        const el = document.getElementById(id); if (el) el.innerHTML = monta(fixa[id]);
+      });
+      /* botões de arrastar herdam a cor da série */
+      document.querySelectorAll('.gt-btn[data-mode]').forEach(btn => {
+        const S = anestesia.graficoUI.SERIES[btn.dataset.mode];
+        if (S) { btn.dataset.color = S.cor; btn.style.color = S.cor; }
+      });
+    },
+
+    /* Configuração de monitores extras — usados para gerar botões dinâmicos.
+       A cor sai de SERIES, para legenda, botão e gráfico nunca divergirem. */
     MONITORES_EXTRAS: {
-      'BIS':            { campo: 'bis',   cor: '#d97706', label: 'BIS' },
-      'TOF':            { campo: 'tof',   cor: '#e11d48', label: 'TOF %' },
-      'Temperatura':    { campo: 'temp',  cor: '#dc2626', label: 'Temp °C' },
-      'Glicemia':       { campo: 'glic',  cor: '#0891b2', label: 'Glic' },
-      'PVC':            { campo: 'pvc',   cor: '#65a30d', label: 'PVC' },
-      'PIC':            { campo: 'pic',   cor: '#9333ea', label: 'PIC' },
-      'Débito cardíaco':{ campo: 'dc',    cor: '#0369a1', label: 'DC' },
-      'ScvO₂/SvO₂':     { campo: 'scvo2', cor: '#15803d', label: 'ScvO₂' },
-      'FR':             { campo: 'fr',    cor: '#7c3aed', label: 'FR' },
-      'Analisador de gases': { campo: 'cam', cor: '#0d9488', label: 'CAM' }
+      'BIS':            { campo: 'bis',   label: 'BIS' },
+      'TOF':            { campo: 'tof',   label: 'TOF %' },
+      'Temperatura':    { campo: 'temp',  label: 'Temp °C' },
+      'Glicemia':       { campo: 'glic',  label: 'Glic' },
+      'PVC':            { campo: 'pvc',   label: 'PVC' },
+      'PIC':            { campo: 'pic',   label: 'PIC' },
+      'Débito cardíaco':{ campo: 'dc',    label: 'DC' },
+      'ScvO₂/SvO₂':     { campo: 'scvo2', label: 'ScvO₂' },
+      'FR':             { campo: 'fr',    label: 'FR' },
+      'Analisador de gases': { campo: 'cam', label: 'CAM' }
     },
 
     /* Atualiza dinamicamente os botões da toolbar com base nos monitores marcados */
@@ -25763,13 +26022,14 @@ const anestesia = {
       let legHTML = '';
       Object.keys(anestesia.graficoUI.MONITORES_EXTRAS).forEach(monitor => {
         const cfg = anestesia.graficoUI.MONITORES_EXTRAS[monitor];
+        const cor = anestesia.graficoUI.corDe(cfg.campo);
         if (ativos.has(cfg.campo)) {
-          html += `<button type="button" class="gt-btn" data-mode="${cfg.campo}" data-color="${cfg.cor}" style="color:${cfg.cor}" title="Arraste para registrar ${cfg.label}">${cfg.label}</button>`;
-          legHTML += `<span class="legend-item"><span class="legend-swatch" style="background:${cfg.cor}"></span> ${cfg.label}</span>`;
+          html += `<button type="button" class="gt-btn" data-mode="${cfg.campo}" data-color="${cor}" style="color:${cor}" title="Arraste para registrar ${cfg.label}">${cfg.label}</button>`;
+          legHTML += anestesia.graficoUI._itemLegenda(cfg.campo);
         }
       });
       extra.innerHTML = html;
-      const legExtras = document.getElementById('legend-extras');
+      const legExtras = document.getElementById(anestesia.graficoUI._ctxIds().legendExtras || 'legend-extras');
       if (legExtras) legExtras.innerHTML = legHTML;
       /* Religa handlers nos novos botões */
       extra.querySelectorAll('.gt-btn').forEach(btn => {
@@ -27383,83 +27643,91 @@ const anestesia = {
         legendaEventos.style.display = (medicacoes.length > 0 || eventos.length > 0) ? 'block' : 'none';
       }
 
-      function plot(field, color, marker) {
+      /* Desenha uma série: linha de tendência bem suave (só para o olho seguir a
+         sequência) + a marca do parâmetro, que é quem carrega a leitura. */
+      function plot(field) {
+        const S = anestesia.graficoUI.SERIES[field] || {};
+        const color = S.cor || '#444';
         const pts = pontos.filter(p => p[field] != null && p[field] >= yMin && p[field] <= yMax);
         if (pts.length === 0) return;
-        ctx.strokeStyle = color; ctx.fillStyle = color;
-        ctx.lineWidth = 1.6;
-        ctx.beginPath();
-        pts.forEach((p, i) => {
-          const x = xOf(p.t), y = yOf(p[field]);
-          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        });
-        ctx.stroke();
+        if (pts.length > 1) {
+          ctx.save();
+          ctx.globalAlpha = 0.28;            /* quase um fio — não compete com a marca */
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          pts.forEach((p, i) => {
+            const x = xOf(p.t), y = yOf(p[field]);
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          });
+          ctx.stroke();
+          ctx.restore();
+        }
         pts.forEach(p => {
-          const x = xOf(p.t), y = yOf(p[field]);
-          ctx.beginPath();
-          if (marker === 'square') ctx.rect(x - 2.5, y - 2.5, 5, 5);
-          else if (marker === 'triangle') {
-            ctx.moveTo(x, y - 3); ctx.lineTo(x + 3, y + 2.5); ctx.lineTo(x - 3, y + 2.5); ctx.closePath();
-          } else if (marker === 'diamond') {
-            ctx.moveTo(x, y - 3); ctx.lineTo(x + 3, y); ctx.lineTo(x, y + 3); ctx.lineTo(x - 3, y); ctx.closePath();
-          } else if (marker === 'cross') {
-            ctx.moveTo(x - 3, y); ctx.lineTo(x + 3, y); ctx.moveTo(x, y - 3); ctx.lineTo(x, y + 3);
-            ctx.lineWidth = 2; ctx.stroke();
-            return;
-          } else { ctx.arc(x, y, 2.8, 0, Math.PI * 2); }
-          ctx.fill();
+          ctx.save();
+          anestesia.graficoUI.desenharMarca(ctx, S.marca, xOf(p.t), yOf(p[field]), color);
+          ctx.restore();
         });
       }
+      /* Barra da pressão: liga o ∨ da sistólica ao ∧ da diastólica no mesmo
+         horário. Tracejada e quase transparente, só para o olho fechar o par —
+         sem virar uma grade de barras no meio do gráfico. */
+      (function barraPA() {
+        const cor = anestesia.graficoUI.corDe('pas');
+        ctx.save();
+        ctx.globalAlpha = 0.26;
+        ctx.strokeStyle = cor;
+        ctx.lineWidth = 1;
+        if (ctx.setLineDash) ctx.setLineDash([2, 3]);
+        pontos.forEach(p => {
+          if (p.pas == null || p.pad == null) return;
+          if (p.pas < yMin || p.pas > yMax || p.pad < yMin || p.pad > yMax) return;
+          ctx.beginPath();
+          ctx.moveTo(xOf(p.t), yOf(p.pas));
+          ctx.lineTo(xOf(p.t), yOf(p.pad));
+          ctx.stroke();
+        });
+        if (ctx.setLineDash) ctx.setLineDash([]);
+        ctx.restore();
+      })();
       /* Séries fixas: PA + FC + SpO₂ */
-      plot('pas', '#b3392a', 'triangle');
-      plot('pad', '#c47c1f', 'triangle');
-      plot('pam', '#7b3a8d', 'diamond');
-      plot('fc',  '#1c64a9', 'circle');
-      plot('spo2','#1f9171', 'square');
-      plot('etco2','#8a2be2', 'diamond');   /* roxo escuro */
-      plot('fr',  '#7c3aed', 'cross');      /* violeta — frequência respiratória */
+      plot('pas');
+      plot('pad');
+      plot('pam');
+      plot('fc');
+      plot('spo2');
+      plot('etco2');
+      plot('fr');
       /* Séries adicionais — só plotam se houver dados na coluna */
-      plot('bis', '#d97706', 'circle');     /* laranja escuro */
-      plot('tof', '#e11d48', 'square');     /* rosa */
-      plot('temp', '#dc2626', 'cross');     /* vermelho */
-      plot('glic', '#0891b2', 'square');    /* ciano */
-      plot('pvc',  '#65a30d', 'diamond');   /* verde-oliva */
-      plot('pic',  '#9333ea', 'circle');    /* violeta */
-      /* DC tem range pequeno (0-15) — multiplica por 10 para visualização (1 L/min = 10 unidades) */
-      const ptsDC = pontos.filter(p => p.dc != null);
-      if (ptsDC.length > 0) {
-        ctx.strokeStyle = '#0369a1'; ctx.fillStyle = '#0369a1';
-        ctx.lineWidth = 1.6;
-        ctx.beginPath();
-        ptsDC.forEach((p, i) => {
-          const x = xOf(p.t), y = yOf(Math.min(yMax, p.dc * 10));
-          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        });
-        ctx.stroke();
-        ptsDC.forEach(p => {
-          const x = xOf(p.t), y = yOf(Math.min(yMax, p.dc * 10));
+      plot('bis');
+      plot('tof');
+      plot('temp');
+      plot('glic');
+      plot('pvc');
+      plot('pic');
+      /* DC e CAM têm escala própria (0–15 e 0–3): são multiplicados para caber
+         no mesmo eixo. Mesma linha suave e mesma marca das outras séries. */
+      plotEscalado('dc', 10);
+      plot('scvo2');
+      plotEscalado('cam', 100);
+
+      function plotEscalado(field, fator) {
+        const S = anestesia.graficoUI.SERIES[field] || {};
+        const pts = pontos.filter(p => p[field] != null);
+        if (!pts.length) return;
+        const yv = (p) => yOf(Math.min(yMax, p[field] * fator));
+        if (pts.length > 1) {
+          ctx.save();
+          ctx.globalAlpha = 0.28; ctx.strokeStyle = S.cor; ctx.lineWidth = 1;
           ctx.beginPath();
-          ctx.moveTo(x, y - 3); ctx.lineTo(x + 3, y); ctx.lineTo(x, y + 3); ctx.lineTo(x - 3, y);
-          ctx.closePath(); ctx.fill();
-        });
-      }
-      plot('scvo2', '#15803d', 'circle');   /* verde escuro */
-      /* CAM (0-3) — multiplica por 100 para visualização (1,0 CAM = 100 unidades) */
-      const ptsCAM = pontos.filter(p => p.cam != null);
-      if (ptsCAM.length > 0) {
-        ctx.strokeStyle = '#0d9488'; ctx.fillStyle = '#0d9488';
-        ctx.lineWidth = 1.6;
-        ctx.beginPath();
-        ptsCAM.forEach((p, i) => {
-          const x = xOf(p.t), y = yOf(Math.min(yMax, p.cam * 100));
-          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        });
-        ctx.stroke();
-        ptsCAM.forEach(p => {
-          const x = xOf(p.t), y = yOf(Math.min(yMax, p.cam * 100));
-          ctx.beginPath();
-          ctx.arc(x, y, 2.8, 0, Math.PI * 2);
-          ctx.fill();
+          pts.forEach((p, i) => { const x = xOf(p.t), y = yv(p); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
+          ctx.stroke();
+          ctx.restore();
+        }
+        pts.forEach(p => {
+          ctx.save();
+          anestesia.graficoUI.desenharMarca(ctx, S.marca, xOf(p.t), yv(p), S.cor);
+          ctx.restore();
         });
       }
     }
@@ -40622,7 +40890,7 @@ document.addEventListener('DOMContentLoaded', () => {
        em qualquer navegador, mesmo quando const não é global. */
   window.utils = utils; window.store = store; window.ui = ui;
   window.backupCompleto = backupCompleto;
-  window.lixeira = lixeira; window.duplicados = duplicados;
+  window.lixeira = lixeira; window.duplicados = duplicados; window.espaco = espaco;
   window.carimboHora = carimboHora;
   window.cronometros = cronometros;
   window.dashboard = dashboard; window.pre = pre; window.consulta = consulta;
@@ -40674,6 +40942,7 @@ document.addEventListener('DOMContentLoaded', () => {
   try { configSync.vigiar(); } catch (e) {}
   try { clinicaSync.vigiar(); } catch (e) {}
   try { nuvemEstado.vigiar(); } catch (e) {}
+  try { anestesia.graficoUI.renderLegendaFixa(); } catch (e) {}
   window.programador = programador;
   try { programador.atualizarVisibilidade(); } catch (e) {}
   window.pendencias = pendencias;

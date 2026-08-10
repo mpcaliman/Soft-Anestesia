@@ -4284,6 +4284,157 @@ await test('Ficha: técnica, agulha, sítio e horário escolhidos nos cards entr
   await page.close();
 });
 
+/* 75) Símbolos do gráfico: cada sinal vital com cor E marca próprias, valendo
+   igual na ficha e na SRPA — para o gráfico se ler sem depender da cor. */
+await test('Gráfico: cada sinal vital tem cor e símbolo próprios, na ficha e na SRPA', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const S = anestesia.graficoUI.SERIES;
+    const campos = Object.keys(S);
+
+    /* toda série tem cor, marca e rótulo */
+    out.completo = campos.length >= 16 && campos.every(k => S[k].cor && S[k].marca && S[k].label);
+    /* nenhuma cor repetida */
+    out.coresUnicas = new Set(campos.map(k => S[k].cor.toUpperCase())).size === campos.length;
+    /* nenhum par (cor, marca) repetido — se a cor se parecer, a forma separa */
+    out.parUnico = new Set(campos.map(k => S[k].cor + '|' + S[k].marca)).size === campos.length;
+    /* os seis que aparecem juntos o tempo todo têm marcas todas diferentes */
+    const nucleo = ['pas', 'pad', 'pam', 'fc', 'spo2', 'etco2'];
+    out.nucleoDistinto = new Set(nucleo.map(k => S[k].marca)).size === nucleo.length;
+    /* a convenção da ficha de papel */
+    out.tradicao = S.pas.marca === 'vDown' && S.pad.marca === 'vUp'
+      && S.fc.marca === 'dot' && S.fr.marca === 'ring' && S.temp.marca === 'cross';
+
+    /* as marcas realmente desenham algo diferente umas das outras */
+    const assinatura = (marca) => {
+      const cv = document.createElement('canvas');
+      cv.width = 24; cv.height = 24;
+      const c = cv.getContext('2d');
+      anestesia.graficoUI.desenharMarca(c, marca, 12, 12, '#000000', 1.4);
+      return cv.toDataURL();
+    };
+    const marcas = Array.from(new Set(campos.map(k => S[k].marca)));
+    const desenhos = marcas.map(assinatura);
+    out.desenhosDiferentes = new Set(desenhos).size === marcas.length
+      && desenhos.every(d => d.length > 200);   /* nenhuma marca saiu em branco */
+
+    /* legenda montada a partir da MESMA fonte, nas duas telas */
+    anestesia.graficoUI.renderLegendaFixa();
+    const lf = document.getElementById('legend-fixos');
+    const ls = document.getElementById('srpa-legend-fixos');
+    out.legendas = !!lf && !!ls && /PAS/.test(lf.textContent) && /EtCO₂/.test(lf.textContent)
+      && /PAS/.test(ls.textContent) && /FR/.test(ls.textContent)
+      && lf.querySelectorAll('img').length === 6 && ls.querySelectorAll('img').length === 6;
+    /* botão de arrastar herda a cor da série (nada de hex solto divergindo) */
+    const btnPas = document.querySelector('.gt-btn[data-mode="pas"]');
+    out.botaoAlinhado = !!btnPas && btnPas.dataset.color === S.pas.cor;
+
+    /* o gráfico da SRPA usa o mesmo motor: mesmos ids de série */
+    anestesia.graficoUI._contexto = 'recuperacao';
+    const idsSrpa = anestesia.graficoUI._ctxIds();
+    anestesia.graficoUI._contexto = 'anestesia';
+    out.mesmoMotor = idsSrpa.canvas === 'srpa-vitals-chart' && idsSrpa.vitaisBody === 'srpa-vitais-body';
+    return out;
+  });
+  assert(r.completo, 'toda série precisa de cor, marca e rótulo');
+  assert(r.coresUnicas, 'duas séries não podem dividir a mesma cor');
+  assert(r.parUnico, 'duas séries não podem dividir cor e marca ao mesmo tempo');
+  assert(r.nucleoDistinto, 'PAS/PAD/PAM/FC/SpO₂/EtCO₂ aparecem juntos: as marcas têm que ser todas diferentes');
+  assert(r.tradicao, 'a convenção da ficha de papel deveria ser respeitada (∨ ∧ ● ○ ×)');
+  assert(r.desenhosDiferentes, 'cada marca tem que desenhar algo visualmente distinto e não vazio');
+  assert(r.legendas, 'as duas legendas deveriam sair da mesma fonte, com o símbolo desenhado');
+  assert(r.botaoAlinhado, 'o botão de arrastar deveria herdar a cor da série');
+  assert(r.mesmoMotor, 'a SRPA deveria usar o mesmo motor de gráfico da ficha');
+  await page.close();
+});
+
+/* 76) Aparelho cheio: o app libera espaço sozinho e SALVA, em vez de engolir o
+   erro e abrir uma janela a cada toque em Salvar. */
+await test('Armazenamento cheio: libera espaço sozinho, salva de verdade e não bloqueia a tela', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const setItemOrig = Storage.prototype.setItem;
+
+    /* --- 1) a gravação que falha volta FALSE (antes engolia e devolvia nada) --- */
+    let permitir = false;
+    Storage.prototype.setItem = function (k, v) {
+      if (!permitir && String(k).indexOf('medsys.v3.pre') === 0) {
+        const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e;
+      }
+      return setItemOrig.call(this, k, v);
+    };
+    /* trava também o socorro: nenhuma etapa consegue destravar */
+    const etapasOrig = espaco.ETAPAS.slice();
+    espaco.ETAPAS = [{ nome: 'nada', fn: () => 0 }];
+    localStorage.removeItem(espaco.AVISO_KEY);
+    out.falhaVoltaFalse = store.setList('pre', [{ _id: 'x' }]) === false;
+    /* e avisa numa FAIXA, não numa janela modal que bloqueia o trabalho */
+    out.faixaNaoModal = !!document.getElementById('espaco-faixa')
+      && !document.getElementById('modal-backdrop').classList.contains('show');
+    /* segundo aviso dentro de 6 h não repete a faixa */
+    espaco.fecharFaixa();
+    store.setList('pre', [{ _id: 'x' }]);
+    out.naoRepete = !document.getElementById('espaco-faixa');
+
+    /* --- 2) socorro real: a etapa libera e a gravação passa --- */
+    espaco.ETAPAS = [
+      { nome: 'etapa que não resolve', fn: () => 10 },
+      { nome: 'etapa que resolve', fn: () => { permitir = true; return 2048; } },
+      { nome: 'etapa que nem deveria rodar', fn: () => { out.foiLonge = true; return 1; } }
+    ];
+    espaco.fecharFaixa();
+    out.socorroSalvou = store.setList('pre', [{ _id: 'y' }]) === true;
+    out.parouNaEtapaCerta = out.foiLonge !== true;
+    out.semFaixaQuandoResolve = !document.getElementById('espaco-faixa');
+
+    Storage.prototype.setItem = setItemOrig;
+    espaco.ETAPAS = etapasOrig;
+
+    /* --- 3) as etapas reais existem e vão da mais segura para a menos --- */
+    const nomes = espaco.ETAPAS.map(e => e.nome);
+    out.ordemSegura = nomes[0].includes('versões')
+      && nomes.indexOf('lixeira vencida') < nomes.indexOf('lixeira')
+      && nomes.some(n => n.includes('nuvem'));
+
+    /* --- 4) só sai do aparelho o que está CONFIRMADO na nuvem --- */
+    store.setList('pre', []);
+    const antigo = '2020-01-01T00:00:00.000Z';
+    store.setList('pre', [
+      { _id: 'confirmado', nome: 'A', _updatedAt: antigo, _relUpdatedAt: antigo },
+      { _id: 'so-local',   nome: 'B', _updatedAt: antigo }        /* nunca subiu */
+    ]);
+    localStorage.removeItem(arquivo.INDEX_KEY);
+    espaco._arquivarAte(30);
+    const restaram = store.list('pre').map(x => x._id);
+    out.guardaOnaoSincronizado = restaram.includes('so-local') && !restaram.includes('confirmado');
+    out.indiceLembra = arquivo.estaArquivado('pre', 'confirmado');
+
+    /* --- 5) preventiva não arquiva nada: só mexe no que é descartável --- */
+    store.setList('pre', [{ _id: 'recente', nome: 'C', _updatedAt: new Date().toISOString(), _relUpdatedAt: antigo }]);
+    espaco.preventiva();
+    out.preventivaNaoArquiva = store.list('pre').length === 1;
+
+    store.setList('pre', []);
+    localStorage.removeItem(arquivo.INDEX_KEY);
+    localStorage.removeItem(espaco.AVISO_KEY);
+    espaco.fecharFaixa();
+    return out;
+  });
+  assert(r.falhaVoltaFalse, 'gravação que não coube tem que voltar false, não fingir sucesso');
+  assert(r.faixaNaoModal, 'o aviso deveria ser uma faixa, não uma janela que bloqueia a tela');
+  assert(r.naoRepete, 'o aviso não pode reaparecer a cada gravação');
+  assert(r.socorroSalvou, 'o socorro deveria liberar espaço e conseguir salvar');
+  assert(r.parouNaEtapaCerta, 'o socorro deveria parar assim que a gravação passar, sem liberar demais');
+  assert(r.semFaixaQuandoResolve, 'resolvendo sozinho, não deveria incomodar ninguém');
+  assert(r.ordemSegura, 'as etapas deveriam ir da mais segura para a menos');
+  assert(r.guardaOnaoSincronizado, 'registro que ainda não subiu para a nuvem NUNCA pode sair do aparelho');
+  assert(r.indiceLembra, 'o que foi arquivado tem que ficar no índice, para poder voltar');
+  assert(r.preventivaNaoArquiva, 'a manutenção preventiva não pode arquivar registro nenhum');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
