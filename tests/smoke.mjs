@@ -4752,6 +4752,60 @@ await test('Carimbo repetido é guardado uma vez só, sem o resto do app percebe
   await page.close();
 });
 
+/* 82) Carimbo trocado deixa a imagem velha guardada para sempre. Tem que sair. */
+await test('Imagem que nenhum registro usa mais é descartada, e a que está em uso nunca', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    localStorage.removeItem(store.BLOBS_KEY);
+    const velho = 'data:image/png;base64,' + 'V'.repeat(60000);
+    const novo  = 'data:image/png;base64,' + 'N'.repeat(60000);
+
+    store.setList('pre', [{ _id: 'x', nome: 'A', assinatura_dataurl: velho }]);
+    out.guardouUm = Object.keys(store._blobs()).length === 1;
+
+    /* troca o carimbo: o antigo fica órfão */
+    store.setList('pre', [{ _id: 'x', nome: 'A', assinatura_dataurl: novo }]);
+    out.doisGuardados = Object.keys(store._blobs()).length === 2;
+
+    const liberto = armazenamento.limparImagensOrfas();
+    const restantes = Object.keys(store._blobs());
+    out.tirouOrfa = liberto > 50000 && restantes.length === 1;
+    out.manteveEmUso = store.getById('pre', 'x').assinatura_dataurl === novo;
+
+    /* imagem citada só pela LIXEIRA não é órfã: o registro ainda pode voltar */
+    store.setList('pre', [{ _id: 'y', nome: 'B', assinatura_dataurl: velho }]);
+    store.delete('pre', 'y');                       /* vai para a lixeira */
+    store.setList('pre', []);                       /* nada mais referencia nada */
+    const refVelho = store._refDe(velho);
+    armazenamento.limparImagensOrfas();
+    out.respeitaLixeira = !!store._blobs()[refVelho];
+    /* e o registro volta da lixeira com a imagem inteira */
+    out.lixeiraDevolveInteiro = (lixeira._ler().find(e => e.item && e.item._id === 'y') || {}).item.assinatura_dataurl === velho;
+
+    /* rodar de novo sem nada a fazer não custa nem quebra */
+    out.idempotente = armazenamento.limparImagensOrfas() === 0;
+    /* e é uma etapa de liberação de espaço */
+    out.ehEtapa = espaco.ETAPAS.some(e => e.nome === 'imagens que ninguém mais usa');
+    /* a prateleira aparece com nome próprio, não some em "Configurações e outros" */
+    out.temRotulo = /Carimbos e imagens/.test(armazenamento._rotulo(store.BLOBS_KEY));
+
+    localStorage.removeItem(store.BLOBS_KEY);
+    localStorage.removeItem(lixeira.KEY);
+    store.setList('pre', []);
+    return out;
+  });
+  assert(r.guardouUm && r.doisGuardados, 'cada imagem distinta deveria ocupar um lugar');
+  assert(r.tirouOrfa, 'a imagem que ninguém mais referencia deveria ser descartada');
+  assert(r.manteveEmUso, 'a imagem em uso não pode ser tocada');
+  assert(r.respeitaLixeira, 'imagem citada pela lixeira ainda é necessária — não é órfã');
+  assert(r.lixeiraDevolveInteiro, 'o registro na lixeira tem que voltar com a imagem inteira');
+  assert(r.idempotente, 'rodar de novo sem órfãs não deveria fazer nada');
+  assert(r.ehEtapa, 'limpar imagens órfãs deveria ser uma etapa de liberação de espaço');
+  assert(r.temRotulo, 'a prateleira de imagens precisa de nome próprio na lista de armazenamento');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

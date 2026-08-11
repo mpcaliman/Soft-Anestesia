@@ -10526,6 +10526,7 @@ const armazenamento = {
     return { total, itens };
   },
   _rotulo(k) {
+    if (k === store.BLOBS_KEY) return '🖼 Carimbos e imagens (guardados 1×)';
     if (k === 'medsys.v7.versions') return '🕓 Histórico de versões';
     if (k === 'medsys.v7.lixeira') return '🗑 Lixeira (30 dias)';
     if (k.indexOf('demo:') === 0) return '🧪 Modo demonstração';
@@ -10686,11 +10687,44 @@ const armazenamento = {
       } catch (e) {}
     });
     try { localStorage.setItem(armazenamento.FLAG_DEDUP, '1'); } catch (e) {}
+    try { armazenamento.limparImagensOrfas(); } catch (e) {}
     const ganho = Math.max(0, antes - armazenamento.uso().total);
     if (ganho > 50 * 1024) {
       try { toast('🧹 ' + armazenamento._fmt(ganho) + ' liberados: o carimbo repetido em cada ficha agora é guardado uma vez só'); } catch (e) {}
     }
     return ganho;
+  },
+
+  /* Imagem órfã: o carimbo trocado ontem continuaria guardado para sempre.
+     Varre todos os registros, junta as referências vivas e descarta o resto. */
+  limparImagensOrfas() {
+    let b;
+    try { b = store._blobs(); } catch (e) { return 0; }
+    const refs = Object.keys(b);
+    if (!refs.length) return 0;
+    const vivas = new Set();
+    const marcar = (o) => {
+      if (Array.isArray(o)) { o.forEach(marcar); return; }
+      if (o && typeof o === 'object') {
+        Object.keys(o).forEach(k => {
+          const v = o[k];
+          if (typeof v === 'string' && v.slice(0, 5) === 'blob:') vivas.add(v);
+          else if (v && typeof v === 'object') marcar(v);
+        });
+      }
+    };
+    /* lê o CRU (a leitura normal já troca a referência pela imagem) */
+    Object.keys(STORAGE).forEach(mod => {
+      try { marcar(JSON.parse(localStorage.getItem(STORAGE[mod]) || '[]')); } catch (e) {}
+    });
+    try { marcar(JSON.parse(localStorage.getItem('medsys.v7.versions') || '{}')); } catch (e) {}
+    try { marcar(JSON.parse(localStorage.getItem(lixeira.KEY) || '[]')); } catch (e) {}
+    const orfas = refs.filter(r => !vivas.has(r));
+    if (!orfas.length) return 0;
+    let liberto = 0;
+    orfas.forEach(r => { liberto += String(b[r] || '').length * 2; delete b[r]; });
+    try { localStorage.setItem(store.BLOBS_KEY, JSON.stringify(b)); } catch (e) { return 0; }
+    return liberto;
   },
 
   compactarVersoes() {
@@ -11181,6 +11215,9 @@ const espaco = {
         });
         return liberto;
       } },
+    { nome: 'imagens que ninguém mais usa', fn() {
+        try { return armazenamento.limparImagensOrfas(); } catch (e) { return 0; }
+      } },
     { nome: 'lixeira vencida', fn() {
         const antes = (localStorage.getItem(lixeira.KEY) || '').length * 2;
         try { lixeira.purgarExpirados(); } catch (e) {}
@@ -11459,7 +11496,13 @@ const lixeira = {
     pacientes: 'Paciente', orcamento: 'Orçamento', documentos: 'Documento'
   },
   _ler() {
-    try { return JSON.parse(localStorage.getItem(lixeira.KEY) || '[]'); } catch (e) { return []; }
+    try {
+      const arr = JSON.parse(localStorage.getItem(lixeira.KEY) || '[]');
+      /* devolve as imagens inteiras, como em store.list */
+      const b = store._blobs();
+      if (Object.keys(b).length) arr.forEach(e => store._hidratar(e.item, b));
+      return arr;
+    } catch (e) { return []; }
   },
   _gravar(arr) {
     try { localStorage.setItem(lixeira.KEY, JSON.stringify(arr)); }
@@ -11471,7 +11514,8 @@ const lixeira = {
   guardar(modKey, item) {
     if (!item || !item._id) return;
     const arr = lixeira._ler();
-    arr.unshift({ mod: modKey, excluidoEm: new Date().toISOString(), item: item });
+    /* a lixeira também referencia a imagem em vez de copiá-la */
+    arr.unshift({ mod: modKey, excluidoEm: new Date().toISOString(), item: store._desidratar(item) });
     /* limite de segurança para não estourar o localStorage */
     if (arr.length > 120) arr.length = 120;
     lixeira._gravar(arr);
