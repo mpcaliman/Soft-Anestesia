@@ -4855,6 +4855,72 @@ await test('Drive: token vencido não desliga a opção nem se perde ao recarreg
   await page.close();
 });
 
+/* 84) Topo da ficha recolhido num só lugar + Salvar/Finalizar no fim da página */
+await test('Ficha: ações do topo viram um menu recolhível e Salvar/Finalizar aparecem no fim', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    localStorage.removeItem(acoesUI.KEY);
+    acoesUI.montar();
+    acoesUI.MODS.forEach(m => acoesUI._aplicar(m));
+
+    const mods = ['pre', 'consulta', 'anestesia', 'recuperacao'];
+    /* cabeçalho existe nos quatro módulos pedidos */
+    out.cabecalhos = mods.every(m => !!document.getElementById('acoes-cab-' + m));
+    /* a barra de botões e as abas de rascunho foram para dentro dele */
+    out.recolheu = mods.every(m => {
+      const caixa = document.getElementById('acoes-caixa-' + m);
+      return caixa && caixa.querySelector('.action-bar') && caixa.style.display === 'none';
+    });
+    /* "Reaproveitar" segue o mesmo estado — é ação, não preenchimento */
+    const tb = document.querySelector('#form-pre .form-toolbar');
+    out.reaproveitarJunto = !tb || tb.style.display === 'none';
+
+    /* abrir mostra tudo e a escolha é lembrada */
+    acoesUI.alternar('pre');
+    out.abre = document.getElementById('acoes-caixa-pre').style.display !== 'none'
+      && JSON.parse(localStorage.getItem(acoesUI.KEY)).pre === true
+      && (!tb || tb.style.display !== 'none');
+    acoesUI.alternar('pre');
+    out.fecha = document.getElementById('acoes-caixa-pre').style.display === 'none';
+
+    /* Salvar e Finalizar no FIM da página, dentro do formulário */
+    out.rodapes = mods.every(m => {
+      const rod = document.getElementById('acoes-rodape-' + m);
+      const form = document.getElementById('form-' + m);
+      return rod && form && form.contains(rod)
+        && form.lastElementChild === rod
+        && /Salvar/.test(rod.textContent) && /Finalizar/.test(rod.textContent);
+    });
+    /* e os botões chamam de verdade o módulo certo */
+    let chamou = '';
+    const salvarOrig = pre.salvar, finalizarOrig = pre.finalizar;
+    pre.salvar = () => { chamou += 'salvar;'; };
+    pre.finalizar = () => { chamou += 'finalizar;'; };
+    const rod = document.getElementById('acoes-rodape-pre');
+    rod.querySelectorAll('button')[0].click();
+    rod.querySelectorAll('button')[1].click();
+    pre.salvar = salvarOrig; pre.finalizar = finalizarOrig;
+    out.botoesFuncionam = chamou === 'salvar;finalizar;';
+
+    /* montar de novo não duplica nada */
+    acoesUI.montar();
+    out.idempotente = document.querySelectorAll('#module-pre .acoes-cab').length === 1
+      && document.querySelectorAll('#form-pre .acoes-rodape').length === 1;
+
+    localStorage.removeItem(acoesUI.KEY);
+    return out;
+  });
+  assert(r.cabecalhos, 'os quatro módulos deveriam ganhar o cabeçalho de ações');
+  assert(r.recolheu, 'a barra de botões deveria ficar dentro dele, recolhida por padrão');
+  assert(r.reaproveitarJunto, 'o bloco Reaproveitar deveria seguir o mesmo estado');
+  assert(r.abre && r.fecha, 'abrir/fechar deveria funcionar e ser lembrado');
+  assert(r.rodapes, 'Salvar e Finalizar deveriam existir no fim de cada ficha');
+  assert(r.botoesFuncionam, 'os botões do rodapé precisam chamar salvar e finalizar de verdade');
+  assert(r.idempotente, 'montar de novo não pode duplicar cabeçalho nem rodapé');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

@@ -3798,6 +3798,28 @@ textarea { border-radius: 10px; }
 .sidebar-brand strong { font-weight: 800; letter-spacing: -.2px; }
 /* Header */
 .app-header { backdrop-filter: blur(8px); }
+/* Ações da ficha: um cabeçalho recolhível no lugar de três faixas de botões */
+.acoes-cab{
+  display:flex; align-items:center; gap:10px; cursor:pointer; user-select:none;
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:11px 14px; margin:10px 14px 8px; -webkit-tap-highlight-color:transparent;
+}
+.acoes-cab:hover{ background:var(--surface-alt); }
+.acoes-cab .ac-seta{ font-size:.8rem; width:12px; color:var(--text-mute); flex-shrink:0; }
+.acoes-cab b{ color:var(--primary-darker); font-size:.9rem; white-space:nowrap; }
+.acoes-cab small{
+  color:var(--text-mute); font-size:.74rem; font-weight:400;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;
+}
+@media (max-width:640px){ .acoes-cab small{ display:none; } }
+/* Salvar/Finalizar no fim da ficha */
+.acoes-rodape{
+  display:flex; flex-wrap:wrap; gap:10px; align-items:center;
+  margin:22px 0 8px; padding-top:16px; border-top:2px solid var(--border);
+}
+.acoes-rodape .btn{ font-size:.95rem; padding:11px 20px; }
+@media print{ .acoes-cab, .acoes-rodape{ display:none !important; } }
+
 /* Faixa de armazenamento cheio — avisa sem tomar a tela */
 .espaco-faixa{
   position: fixed; left: 10px; right: 10px; bottom: 84px; z-index: 950;
@@ -41284,6 +41306,81 @@ window.addEventListener('beforeprint', atualizarMetaImpressao);
    mudam por dentro — só são MOVIDOS (via DOM) para dentro do grupo certo.
    Fechados por padrão; a escolha de abrir/fechar é lembrada por aparelho.
 ============================================================================ */
+/* ============================================================================
+   AÇÕES DA FICHA — topo recolhível + Salvar/Finalizar no pé da página
+   O topo somava abas de rascunho, uma barra com dez botões e o bloco
+   "Reaproveitar": três faixas antes de chegar no primeiro campo, e num celular
+   isso é meia tela. Aqui tudo isso vira UM cabeçalho recolhível.
+   E, como a ficha é longa, Salvar/Finalizar passam a existir também no fim —
+   onde a pessoa termina de preencher, sem ter que subir de volta.
+============================================================================ */
+const acoesUI = {
+  KEY: 'medsys.v7.acoes.abertas',
+  MODS: ['pre', 'consulta', 'anestesia', 'recuperacao', 'termo', 'prescricao', 'risco', 'documentos'],
+  ROT: { pre: 'pré-anestésica', consulta: 'consulta', anestesia: 'ficha', recuperacao: 'SRPA',
+         termo: 'termo', prescricao: 'receituário', risco: 'risco', documentos: 'documento' },
+  _abertas() { try { return JSON.parse(localStorage.getItem(acoesUI.KEY) || '{}'); } catch (e) { return {}; } },
+  aberto(mod) { return !!acoesUI._abertas()[mod]; },
+  alternar(mod) {
+    const a = acoesUI._abertas();
+    a[mod] = !a[mod];
+    try { localStorage.setItem(acoesUI.KEY, JSON.stringify(a)); } catch (e) {}
+    acoesUI._aplicar(mod);
+  },
+  montar() {
+    acoesUI.MODS.forEach(mod => {
+      const modulo = document.getElementById('module-' + mod);
+      if (!modulo || document.getElementById('acoes-cab-' + mod)) return;
+      const barra = modulo.querySelector(':scope > .action-bar');
+      if (!barra) return;
+      const tabs = modulo.querySelector(':scope > .rascunho-tabs');
+      const cab = document.createElement('div');
+      cab.className = 'acoes-cab';
+      cab.id = 'acoes-cab-' + mod;
+      cab.setAttribute('onclick', "acoesUI.alternar('" + mod + "')");
+      const caixa = document.createElement('div');
+      caixa.className = 'acoes-caixa';
+      caixa.id = 'acoes-caixa-' + mod;
+      modulo.insertBefore(cab, tabs || barra);
+      modulo.insertBefore(caixa, tabs || barra);
+      if (tabs) caixa.appendChild(tabs);
+      caixa.appendChild(barra);
+      acoesUI._aplicar(mod);
+      acoesUI._rodape(mod);
+    });
+  },
+  _aplicar(mod) {
+    const cab = document.getElementById('acoes-cab-' + mod);
+    const caixa = document.getElementById('acoes-caixa-' + mod);
+    if (!cab || !caixa) return;
+    const aberto = acoesUI.aberto(mod);
+    caixa.style.display = aberto ? '' : 'none';
+    cab.classList.toggle('aberto', aberto);
+    cab.innerHTML = '<span class="ac-seta">' + (aberto ? '▾' : '▸') + '</span>' +
+      '<b>⚙️ Ações da ' + (acoesUI.ROT[mod] || 'ficha') + '</b>' +
+      '<small>novo, carregar, imprimir, exportar, modelos</small>';
+    /* o bloco "Reaproveitar" segue o mesmo estado — é ação, não preenchimento */
+    const tb = document.querySelector('#form-' + mod + ' .form-toolbar');
+    if (tb) tb.style.display = aberto ? '' : 'none';
+  },
+  /* Salvar/Finalizar no fim da página — só onde os dois existem de fato */
+  _rodape(mod) {
+    const form = document.getElementById('form-' + mod);
+    const obj = window[mod];
+    if (!form || !obj || typeof obj.salvar !== 'function') return;
+    if (document.getElementById('acoes-rodape-' + mod)) return;
+    const temFinalizar = typeof obj.finalizar === 'function';
+    const div = document.createElement('div');
+    div.className = 'acoes-rodape';
+    div.id = 'acoes-rodape-' + mod;
+    div.innerHTML =
+      '<button type="button" class="btn btn-success" onclick="' + mod + '.salvar()">💾 Salvar</button>' +
+      (temFinalizar ? '<button type="button" class="btn btn-finalizar" onclick="' + mod + '.finalizar()">✅ Finalizar</button>' : '') +
+      '<button type="button" class="btn btn-ghost btn-sm" onclick="window.scrollTo({top:0,behavior:\'smooth\'})" title="Voltar ao topo">↑ Topo</button>';
+    form.appendChild(div);
+  }
+};
+
 const ajustesGrupos = {
   KEY: 'medsys.v7.ajustes.sysgrupos',
   GRUPOS: [
@@ -41348,6 +41445,8 @@ const ajustesGrupos = {
   /* Abre o grupo que contém o card e leva até ele (usado por atalhos do app) */
   abrirPara(cardId) {
     try { ajustesGrupos.montar(); } catch (e) {}
+  window.acoesUI = acoesUI;
+  try { acoesUI.montar(); } catch (e) {}
     const g = ajustesGrupos.GRUPOS.find(x => x.cards.includes(cardId));
     if (g && !ajustesGrupos._aberto(g.id)) {
       const s = ajustesGrupos._salvos(); s[g.id] = true;
