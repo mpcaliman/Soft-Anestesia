@@ -4806,6 +4806,55 @@ await test('Imagem que nenhum registro usa mais é descartada, e a que está em 
   await page.close();
 });
 
+/* 83) A autorização do Google vence em ~1 h. Isso não pode desfazer a
+   configuração do médico nem obrigá-lo a autorizar todo dia. */
+await test('Drive: token vencido não desliga a opção nem se perde ao recarregar', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    localStorage.removeItem(pdfBackup.TOKEN_KEY);
+    localStorage.removeItem(pdfBackup.AVISO_DRIVE_KEY);
+    pdfBackup.salvarCfg({ drive: true });
+
+    /* falha automática NÃO pode desligar a opção — era o bug */
+    pdfBackup._obterToken = async () => null;
+    pdfBackup._accessToken = null;
+    await pdfBackup.enviarDrive(new Blob(['x']), 'a.pdf');
+    await pdfBackup.enviarDrive(new Blob(['x']), 'b.pdf');
+    await pdfBackup.enviarDrive(new Blob(['x']), 'c.pdf');
+    out.naoDesliga = pdfBackup.cfg().drive === true;
+    /* avisa uma vez, não a cada PDF */
+    out.avisouUmaVez = !!localStorage.getItem(pdfBackup.AVISO_DRIVE_KEY);
+    const carimbo = localStorage.getItem(pdfBackup.AVISO_DRIVE_KEY);
+    await pdfBackup.enviarDrive(new Blob(['x']), 'd.pdf');
+    out.naoRepeteAviso = localStorage.getItem(pdfBackup.AVISO_DRIVE_KEY) === carimbo;
+
+    /* o token sobrevive ao recarregar: era só memória, e recarregar pedia
+       autorização de novo todo dia */
+    pdfBackup._salvarToken('tk-123', Date.now() + 3600000);
+    pdfBackup._accessToken = null; pdfBackup._tokenExpira = 0;      /* simula reload */
+    const salvo = pdfBackup._lerTokenSalvo();
+    out.tokenPersiste = !!salvo && salvo.access_token === 'tk-123';
+    /* token vencido não é reaproveitado */
+    pdfBackup._salvarToken('tk-velho', Date.now() - 1000);
+    out.ignoraVencido = pdfBackup._lerTokenSalvo() === null;
+
+    /* desligar continua existindo — mas como escolha explícita do usuário */
+    pdfBackup.desligarDrive();
+    out.desligaSePedirem = pdfBackup.cfg().drive === false;
+
+    localStorage.removeItem(pdfBackup.TOKEN_KEY);
+    localStorage.removeItem(pdfBackup.AVISO_DRIVE_KEY);
+    return out;
+  });
+  assert(r.naoDesliga, 'falha de token NUNCA pode desfazer a configuração do usuário');
+  assert(r.avisouUmaVez && r.naoRepeteAviso, 'o pedido de reautorização deveria vir uma vez, não a cada PDF');
+  assert(r.tokenPersiste, 'o token precisa sobreviver ao recarregar a página');
+  assert(r.ignoraVencido, 'token vencido não pode ser reaproveitado');
+  assert(r.desligaSePedirem, 'desligar o Drive continua possível — mas só se o usuário mandar');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

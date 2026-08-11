@@ -22359,10 +22359,30 @@ const pdfBackup = {
     return true;
   },
 
+  /* O token do Google vale ~1 h. Ele ficava só na memória: bastava recarregar
+     a página para sumir, e aí o app pedia autorização de novo. Agora ele
+     sobrevive ao recarregamento — dentro da validade, ninguém é incomodado. */
+  TOKEN_KEY: 'medsys.v7.pdfbk.token',
+  _lerTokenSalvo() {
+    try {
+      const t = JSON.parse(localStorage.getItem(pdfBackup.TOKEN_KEY) || 'null');
+      if (t && t.access_token && t.exp && Date.now() < t.exp - 60000) return t;
+    } catch (e) {}
+    return null;
+  },
+  _salvarToken(access_token, exp) {
+    try { localStorage.setItem(pdfBackup.TOKEN_KEY, JSON.stringify({ access_token, exp })); } catch (e) {}
+  },
   async _obterToken(interactive) {
     /* token ainda válido? */
     if (pdfBackup._accessToken && Date.now() < pdfBackup._tokenExpira - 60000) {
       return pdfBackup._accessToken;
+    }
+    const salvo = pdfBackup._lerTokenSalvo();
+    if (salvo) {
+      pdfBackup._accessToken = salvo.access_token;
+      pdfBackup._tokenExpira = salvo.exp;
+      return salvo.access_token;
     }
     const clientId = pdfBackup.clientId();
     if (!clientId) { toast('Configure o Client ID do Google em Ajustes → Backup de PDFs', 'warn'); return null; }
@@ -22377,6 +22397,7 @@ const pdfBackup = {
               pdfBackup._ultimoErro = null;
               pdfBackup._accessToken = resp.access_token;
               pdfBackup._tokenExpira = Date.now() + (resp.expires_in ? resp.expires_in * 1000 : 3600000);
+              pdfBackup._salvarToken(resp.access_token, pdfBackup._tokenExpira);
               resolve(resp.access_token);
             } else {
               pdfBackup._ultimoErro = (resp && (resp.error || resp.type)) || 'sem_token';
@@ -22432,16 +22453,12 @@ const pdfBackup = {
   async enviarDrive(blob, nomeArq, interactive) {
     const token = await pdfBackup._obterToken(interactive === true);
     if (!token) {
-      /* falhou sozinho (ao finalizar um caso): não insiste para sempre —
-         depois de 2 tentativas o Drive se desliga e avisa uma vez só */
-      if (interactive !== true) {
-        pdfBackup._falhasDrive = (pdfBackup._falhasDrive || 0) + 1;
-        if (pdfBackup._falhasDrive >= 2) {
-          pdfBackup.salvarCfg({ drive: false });
-          pdfBackup._falhasDrive = 0;
-          toast('📁 O Google Drive não está autorizando o app — desliguei essa opção. Os PDFs continuam indo para a nuvem.', 'warn');
-        }
-      }
+      /* O token do Google vale ~1 h. Vencer é NORMAL — não é motivo para
+         desligar a opção que a pessoa configurou. Antes o app desligava
+         sozinho depois de 2 falhas, e o médico encontrava a configuração
+         desfeita sem ter mexido nela. Agora a escolha continua de pé e o app
+         só pede a autorização de volta, no máximo 1× a cada 6 h. */
+      if (interactive !== true) pdfBackup._pedirAutorizacaoDeVolta();
       return false;
     }
     pdfBackup._falhasDrive = 0;
@@ -22464,6 +22481,19 @@ const pdfBackup = {
       console.warn('enviarDrive', e);
       return false;
     }
+  },
+
+  /* Pede a autorização de volta sem bloquear o trabalho: um aviso com ação,
+     no máximo um a cada 6 h. A configuração do usuário nunca é desfeita. */
+  AVISO_DRIVE_KEY: 'medsys.v7.pdfbk.aviso_drive_em',
+  _pedirAutorizacaoDeVolta() {
+    const ultimo = parseInt(localStorage.getItem(pdfBackup.AVISO_DRIVE_KEY) || '0', 10);
+    if (Date.now() - ultimo < 6 * 3600000) return;
+    try { localStorage.setItem(pdfBackup.AVISO_DRIVE_KEY, String(Date.now())); } catch (e) {}
+    try {
+      toast('📁 A autorização do Google Drive venceu (ela dura ~1 h). O PDF foi salvo na nuvem do sistema. ' +
+            'Para voltar a copiar no Drive, toque em Ajustes → Backup de PDFs → Conectar Google Drive.', 'warn');
+    } catch (e) {}
   },
 
   /* Botão de teste em Ajustes: conecta o Drive e sobe um arquivo de teste */
@@ -22503,8 +22533,9 @@ const pdfBackup = {
       '<li>Clique em <b>PUBLICAR APP</b> (o escopo usado é o <code>drive.file</code>, que não exige verificação) — ou adicione a sua conta em <b>Usuários de teste</b>.</li>' +
       '<li>Volte aqui e toque em <b>Conectar Google Drive</b> outra vez.</li>' +
       '</ol></details>',
-      '<button class="btn btn-primary" onclick="pdfBackup.desligarDrive()">👍 Deixar o Drive de lado</button>' +
-      '<button class="btn" onclick="modal.close()">Tentar de novo depois</button>');
+      '<button class="btn btn-primary" onclick="modal.close(); pdfBackup.conectarDrive()">🔄 Autorizar de novo</button>' +
+      '<button class="btn" onclick="modal.close()">Agora não</button>' +
+      '<button class="btn btn-ghost" onclick="pdfBackup.desligarDrive()">Desligar o Drive</button>');
   },
   desligarDrive() {
     pdfBackup.salvarCfg({ drive: false });
