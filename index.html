@@ -32911,12 +32911,13 @@ const historico = {
 
   _render(mod, filtro) {
     const total = store.list(mod).length;
+    const naNuvem = (() => { try { return (arquivo._indice()[mod] || []).length; } catch (e) { return 0; } })();
     return `
       <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <input id="hist-search-input" type="text" class="hist-search" value="${utils.escapeAttr(filtro)}"
                placeholder="Buscar por paciente, senha, procedimento, cirurgião..."
                style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:.9rem">
-        <span style="font-size:.78rem;color:var(--text-mute);white-space:nowrap">${total} registro(s)</span>
+        <span style="font-size:.78rem;color:var(--text-mute);white-space:nowrap">${total} aqui${naNuvem ? ' · <b>' + naNuvem + '</b> na nuvem' : ''}</span>
       </div>
       <div id="hist-table-host" style="max-height:60vh;overflow:auto">${historico._tabelaHTML(mod, filtro)}</div>
     `;
@@ -32985,7 +32986,32 @@ const historico = {
           <button class="btn btn-xs btn-danger" onclick="historico.excluirItem('${mod}','${it._id}')" title="Apagar">🗑</button>
         </td>
       </tr>`;
-    }).join('');
+    }).join('') + historico._linhasArquivadas(mod, q);
+  },
+
+  /* Registros que estão NA NUVEM e não neste aparelho (modo nuvem / arquivamento).
+     Sem isto eles sumiam da busca e pareciam apagados — foi exatamente o susto
+     de uma ficha "desaparecida". Clicar traz de volta e abre. */
+  _linhasArquivadas(mod, q) {
+    let itens = [];
+    try { itens = (arquivo._indice()[mod] || []); } catch (e) { return ''; }
+    if (!itens.length) return '';
+    const filtradas = q
+      ? itens.filter(e => ((e.nome || '') + ' ' + (e.data || '')).toLowerCase().includes(q))
+      : itens;
+    if (!filtradas.length) return '';
+    return filtradas
+      .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))
+      .map(e => `<tr style="background:var(--surface-alt)">
+        <td style="font-size:.82rem;color:var(--text-soft);white-space:nowrap">${utils.escapeHTML(historico._fmtData(e.data) || '—')}</td>
+        <td style="font-size:.82rem;color:var(--text-mute)">—</td>
+        <td><strong>${utils.escapeHTML(e.nome || '(sem nome)')}</strong></td>
+        <td style="font-size:.82rem;color:var(--text-mute)">☁️ guardado na nuvem — não está neste aparelho</td>
+        <td><span class="status-pill" style="font-size:.68rem">na nuvem</span></td>
+        <td style="white-space:nowrap;text-align:right">
+          <button class="btn btn-xs btn-primary" onclick="modal.close(); dashboard._abrirRegistro('${mod}','${e.id}')" title="Buscar na nuvem e abrir">☁️ Abrir</button>
+        </td>
+      </tr>`).join('');
   },
 
   _senhaDe(mod, it) {

@@ -4978,6 +4978,52 @@ await test('Ficha: códigos do mesmo ato (100/70/50%) entram junto do procedimen
   await page.close();
 });
 
+/* 86) Registro guardado na nuvem NÃO pode sumir da busca — foi o susto de uma
+   ficha que parecia apagada e só estava arquivada. */
+await test('Busca mostra também o que está na nuvem, e a limpeza de duplicados nunca junta dias diferentes', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('anestesia', []);
+    localStorage.removeItem(arquivo.INDEX_KEY);
+
+    /* dois procedimentos do MESMO paciente em dias diferentes nunca formam grupo */
+    store.setList('anestesia', [
+      { _id: 'd21', paciente: { nome: 'Abraão Santiago' }, procedimento: { data: '2026-07-21', nome: 'Hipospadia' }, _updatedAt: '2026-07-21T12:00:00.000Z' },
+      { _id: 'd22', paciente: { nome: 'Abraão Santiago' }, procedimento: { data: '2026-07-22', nome: 'Reabordagem' }, _updatedAt: '2026-07-22T12:00:00.000Z' }
+    ]);
+    out.diasDiferentesNaoAgrupam = duplicados.varrer({ mods: ['anestesia'] }).length === 0;
+    /* e a limpeza geral não remove nenhum dos dois */
+    duplicados.manterUltimoEmTodos ? null : null;
+    out.nadaSeriaRemovido = duplicados.achar('anestesia', store.list('anestesia')[0]).length === 0;
+
+    /* agora o de 21 vai para a nuvem (arquivado) e some da lista local */
+    const ix = {}; ix.anestesia = [{ id: 'd21', nome: 'Abraão Santiago', data: '2026-07-21' }];
+    localStorage.setItem(arquivo.INDEX_KEY, JSON.stringify(ix));
+    store.setList('anestesia', [store.list('anestesia').find(x => x._id === 'd22')]);
+
+    const linhas = historico._renderLinhas('anestesia', '');
+    out.apareceNaBusca = /Abra.{0,3}o Santiago/.test(linhas) && /guardado na nuvem/.test(linhas);
+    out.temBotaoAbrir = /dashboard\._abrirRegistro\('anestesia','d21'\)/.test(linhas);
+    /* o filtro também alcança o que está na nuvem */
+    out.filtroAlcanca = /guardado na nuvem/.test(historico._renderLinhas('anestesia', 'abra'))
+      && !/guardado na nuvem/.test(historico._renderLinhas('anestesia', 'zzzz'));
+    /* e o contador avisa que há registros fora do aparelho */
+    out.contadorAvisa = /na nuvem/.test(historico._render('anestesia', ''));
+
+    store.setList('anestesia', []);
+    localStorage.removeItem(arquivo.INDEX_KEY);
+    return out;
+  });
+  assert(r.diasDiferentesNaoAgrupam, 'dois dias diferentes nunca podem virar duplicidade');
+  assert(r.nadaSeriaRemovido, 'nenhum dos dois registros seria removido pela limpeza');
+  assert(r.apareceNaBusca, 'registro arquivado na nuvem tem que aparecer na busca, não sumir');
+  assert(r.temBotaoAbrir, 'deveria haver um botão que traz da nuvem e abre');
+  assert(r.filtroAlcanca, 'o filtro por nome tem que alcançar o que está na nuvem');
+  assert(r.contadorAvisa, 'o contador deveria dizer quantos estão fora do aparelho');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
