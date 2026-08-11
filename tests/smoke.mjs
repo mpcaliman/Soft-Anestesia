@@ -4921,6 +4921,63 @@ await test('Ficha: ações do topo viram um menu recolhível e Salvar/Finalizar 
   await page.close();
 });
 
+/* 85) Códigos do MESMO ato entram junto do procedimento principal; a lista de
+   baixo (outra equipe cirúrgica) continua existindo e é a mesma de sempre. */
+await test('Ficha: códigos do mesmo ato (100/70/50%) entram junto do procedimento, sem mexer na lista de outra equipe', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ['cir-mesma-body', 'cir-combo-body'].forEach(id => { const b = document.getElementById(id); if (b) b.innerHTML = ''; });
+
+    const cima = document.getElementById('cir-mesma-body');
+    const baixo = document.getElementById('cir-combo-body');
+    out.existemOsDois = !!cima && !!baixo;
+    /* o de cima fica ANTES dos horários/duração; o de baixo, depois */
+    const proc = document.querySelector('#form-anestesia [name="procedimento"]');
+    const dur = document.querySelector('#form-anestesia [name="duracao"]');
+    const pos = (a, b) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING;
+    out.ordemCerta = !!pos(proc, cima) && !!pos(cima, dur) && !!pos(dur, baixo);
+
+    /* linha de cima: mesma equipe, com o grau 100/70/50 */
+    anestesia.cirurgias.add({}, { mesmaEquipe: true, alvo: 'cir-mesma-body' });
+    const l1 = cima.querySelector('.grid');
+    const sel = l1.querySelector('[name="cir_extra_grau[]"]');
+    out.temProporcao = !!sel && Array.from(sel.options).map(o => o.value).join(',') === '100,70,50';
+    out.ehMesmaEquipe = l1.classList.contains('cir-mesma-equipe');
+    out.naoMexeuNoDeBaixo = baixo.children.length === 0;
+
+    /* linha de baixo continua sendo a de outra equipe, com cirurgião e horários */
+    anestesia.cirurgias.add({ procedimento: 'Colecistectomia', cirurgiao: 'Dr. Outro', inicio: '10:00' });
+    out.deBaixoIntacto = baixo.children.length === 1
+      && !baixo.querySelector('.grid').classList.contains('cir-mesma-equipe');
+
+    /* os dois grupos são coletados juntos, na ordem da tela */
+    cima.querySelector('[name="cir_extra_proc[]"]').value = 'Biópsia';
+    cima.querySelector('[name="cir_extra_grau[]"]').value = '70';
+    const col = anestesia.cirurgias.coletar();
+    out.coletaOsDois = col.length === 2
+      && col[0].procedimento === 'Biópsia' && col[0].grau === '70' && !col[0].cirurgiao
+      && col[1].procedimento === 'Colecistectomia' && col[1].cirurgiao === 'Dr. Outro';
+
+    /* ao reabrir a ficha, cada linha volta para a lista certa */
+    anestesia.cirurgias.restaurar(col);
+    out.restauraSeparado = cima.children.length === 1 && baixo.children.length === 1
+      && cima.querySelector('[name="cir_extra_proc[]"]').value === 'Biópsia'
+      && baixo.querySelector('[name="cir_extra_proc[]"]').value === 'Colecistectomia';
+
+    ['cir-mesma-body', 'cir-combo-body'].forEach(id => { document.getElementById(id).innerHTML = ''; });
+    return out;
+  });
+  assert(r.existemOsDois, 'as duas listas deveriam existir');
+  assert(r.ordemCerta, 'a nova fica junto do procedimento; a antiga, depois dos horários');
+  assert(r.temProporcao, 'a proporção 100/70/50% precisa estar na linha nova');
+  assert(r.ehMesmaEquipe && r.naoMexeuNoDeBaixo, 'a linha nova é da mesma equipe e não toca na lista de baixo');
+  assert(r.deBaixoIntacto, 'a lista de outra equipe continua como era');
+  assert(r.coletaOsDois, 'as duas listas têm que ser coletadas juntas, na ordem da tela');
+  assert(r.restauraSeparado, 'ao reabrir, cada linha deveria voltar para a lista de onde veio');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

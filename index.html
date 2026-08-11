@@ -5189,6 +5189,14 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
             <div class="input-group"><input type="time" name="hora_sala_saida"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_sala_saida');">agora</button></div>
           </div>
         </div>
+        <!-- Códigos do MESMO ato, mesma equipe — aqui em cima, junto do procedimento
+             principal, que é onde o anestesista pensa neles. A lista de baixo
+             (depois dos horários) continua servindo para OUTRA equipe cirúrgica. -->
+        <div id="cir-mesma-wrap" style="margin:-2px 0 12px">
+          <div id="cir-mesma-body"></div>
+          <button type="button" class="btn btn-sm" onclick="anestesia.cirurgias.add({}, { mesmaEquipe: true, alvo: 'cir-mesma-body' })" title="Mais um código CBHPM deste mesmo ato, com a mesma equipe — escolha 100%, 70% ou 50%">+ Adicionar código deste mesmo ato (100/70/50%)</button>
+        </div>
+
         <div class="grid">
           <div class="field col-4"><label>Duração da anestesia</label><input type="text" name="duracao" readonly></div>
           <div class="field col-4"><label>Duração da cirurgia</label><input type="text" name="duracao_cir" readonly></div>
@@ -24433,7 +24441,7 @@ const anestesia = {
        impressão dependem deles), mas ficam recolhidos atrás de "outra equipe /
        mais detalhes" para a linha não parecer uma segunda cirurgia. */
     add(dados = {}, opts = {}) {
-      const body = document.getElementById('cir-combo-body');
+      const body = document.getElementById(opts.alvo || 'cir-combo-body');
       if (!body) return null;
       const div = document.createElement('div');
       div.className = 'grid';
@@ -24489,9 +24497,16 @@ const anestesia = {
       return linhas;
     },
     restaurar(arr) {
-      const body = document.getElementById('cir-combo-body');
-      if (body) body.innerHTML = '';
-      if (Array.isArray(arr)) arr.forEach(d => anestesia.cirurgias.add(d));
+      ['cir-mesma-body', 'cir-combo-body'].forEach(id => {
+        const b = document.getElementById(id); if (b) b.innerHTML = '';
+      });
+      if (!Array.isArray(arr)) return;
+      arr.forEach(d => {
+        /* linha sem equipe/horário própria é código do mesmo ato → lista de cima */
+        const mesmaEquipe = !d.cirurgiao && !d.inicio && !d.fim && !d.obs;
+        if (mesmaEquipe) anestesia.cirurgias.add(d, { mesmaEquipe: true, alvo: 'cir-mesma-body' });
+        else anestesia.cirurgias.add(d);
+      });
     }
   },
 
