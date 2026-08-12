@@ -5212,6 +5212,47 @@ await test('Pré-lançamento: só entra na fila do médico depois de enviado, e 
   await page.close();
 });
 
+/* 91) Entrar sempre começa no Dashboard — e quem não tem acesso a ele cai no
+   primeiro módulo permitido, nunca numa tela em branco. */
+await test('Ao entrar, o app abre no Dashboard (ou no primeiro módulo permitido)', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    auth._aplicarPermissoesUI = () => {};
+    auth._iniciarTimer = () => {};
+    auth.usuarioAtual = () => ({ id: 'u', nome: 'Teste', perfil: 'admin' });
+
+    /* estava noutro módulo antes de entrar: vai para o Dashboard mesmo assim */
+    location.hash = '#anestesia';
+    await new Promise(r => setTimeout(r, 60));
+    auth.podeAcessar = () => true;
+    auth._desbloquear();
+    await new Promise(r => setTimeout(r, 120));
+    out.vaiParaDashboard = location.hash === '#dashboard';
+
+    /* secretária sem Dashboard: cai no primeiro módulo que ela pode abrir */
+    location.hash = '#anestesia';
+    await new Promise(r => setTimeout(r, 60));
+    auth.podeAcessar = (m) => m === 'pacientes' || m === 'agenda';
+    auth._desbloquear();
+    await new Promise(r => setTimeout(r, 120));
+    out.caiNoPermitido = location.hash === '#pacientes';
+
+    /* já estando no Dashboard, entrar não quebra nada */
+    auth.podeAcessar = () => true;
+    location.hash = '#dashboard';
+    await new Promise(r => setTimeout(r, 60));
+    auth._desbloquear();
+    await new Promise(r => setTimeout(r, 120));
+    out.mantemDashboard = location.hash === '#dashboard';
+    return out;
+  });
+  assert(r.vaiParaDashboard, 'entrar deveria abrir o Dashboard, mesmo vindo de outro módulo');
+  assert(r.caiNoPermitido, 'quem não tem Dashboard deveria cair no primeiro módulo permitido');
+  assert(r.mantemDashboard, 'já estando no Dashboard, entrar deveria mantê-lo');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

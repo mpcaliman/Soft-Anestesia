@@ -15685,11 +15685,19 @@ const auth = {
     if (app) { app.style.filter = ''; app.style.pointerEvents = ''; }
     auth._aplicarPermissoesUI();
     auth._iniciarTimer();
-    /* se o módulo atual não é permitido, vai para o primeiro permitido */
-    const atual = (location.hash || '#dashboard').replace('#', '');
-    if (!auth.podeAcessar(atual)) {
-      const primeiro = auth.MODULOS.find(m => auth.podeAcessar(m.key));
-      if (primeiro) location.hash = primeiro.key;
+    /* Entrar sempre começa no Dashboard — é o painel do dia, e é onde estão a
+       fila de conferência e as pendências. Cair no último módulo aberto fazia
+       cada pessoa começar num lugar diferente, às vezes numa ficha alheia.
+       Quem não tem acesso ao Dashboard vai para o primeiro módulo permitido. */
+    const destino = auth.podeAcessar('dashboard')
+      ? 'dashboard'
+      : ((auth.MODULOS.find(m => auth.podeAcessar(m.key)) || {}).key || '');
+    if (destino) {
+      if ((location.hash || '').replace('#', '') === destino) {
+        try { ui.navegar(destino); } catch (e) {}      /* já estava lá: só repinta */
+      } else {
+        location.hash = destino;
+      }
     }
     try { const u = auth.usuarioAtual(); if (u) { const rl = auth._rotuloPapel(u.role); toast('Bem-vindo, ' + (u.nome || u.usuario) + (rl ? ' · ' + rl : '')); } } catch (e) {}
   },
