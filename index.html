@@ -4331,6 +4331,9 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       <div class="card no-collapse" data-detail="convenios"><div class="card-header"><div class="card-title-wrap"><h2>Convênios / planos</h2></div></div>
         <div class="card-body" id="dash-convenios"></div>
       </div>
+      <div class="card no-collapse" id="pl-fila-card" style="display:none"><div class="card-header"><div class="card-title-wrap"><h2 id="pl-fila-titulo">Aguardando sua conferência</h2></div></div>
+        <div class="card-body" id="pl-fila-lista"></div>
+      </div>
       <div class="card no-collapse" data-detail="hospitais"><div class="card-header"><div class="card-title-wrap"><h2>Hospitais / clínicas</h2></div></div>
         <div class="card-body" id="dash-hospitais"></div>
       </div>
@@ -9966,6 +9969,13 @@ const store = {
     if (idx >= 0) list[idx] = item;
     else list.unshift(item);
     if (list.length > HISTORY_MAX) list.length = HISTORY_MAX;
+    /* Estado do pré-lançamento tem que ser decidido ANTES de gravar */
+    try {
+      if (typeof preLanc !== 'undefined') {
+        if (item._finalizado && preLanc.ehMedico()) preLanc.aoFinalizar(modKey, item);
+        else preLanc.aoSalvar(modKey, item);
+      }
+    } catch (e) {}
     const gravouLocal = store.setList(modKey, list);
     store._audit(isNew ? 'create' : 'update', modKey, item);
     /* Sincronização em background (não bloqueia; falha silenciosa vai pra fila) */
@@ -11616,6 +11626,210 @@ const modoNuvem = {
   }
 };
 
+/* ============================================================================
+   PRÉ-LANÇAMENTO — a auxiliar prepara, o médico confere e finaliza
+   Estados do registro: rascunho (dela) → enviado (fila do médico) →
+   conferido (finalizado por ele). "Devolvido" volta para ela, com o motivo.
+   Enviar NÃO é salvar: o registro continua sendo gravado e sincronizado o
+   tempo todo. Enviar só diz "terminei, é sua vez" — sem isso a fila do médico
+   encheria de ficha pela metade.
+============================================================================ */
+const preLanc = {
+  MODS: ['pre', 'anestesia'],
+  ehAuxiliar() {
+    try {
+      const u = auth.usuarioAtual() || {};
+      if (u.perfil === 'admin') return false;
+      return u.perfil === 'secretaria' || u.role === 'auxiliar' || u.role === 'empresa' || u.role === 'financeiro';
+    } catch (e) { return false; }
+  },
+  ehMedico() {
+    try {
+      const u = auth.usuarioAtual() || {};
+      return u.perfil === 'admin' || u.perfil === 'medico' || u.role === 'gestor' || u.role === 'anestesiologista';
+    } catch (e) { return false; }
+  },
+  _quem() {
+    try { const u = auth.usuarioAtual() || {}; return { id: u.id || u.uid || '', nome: u.nome || u.usuario || '' }; }
+    catch (e) { return { id: '', nome: '' }; }
+  },
+  estado(rec) { return (rec && rec._preLanc && rec._preLanc.estado) || ''; },
+
+  /* Chamado na gravação: marca o registro da auxiliar como rascunho dela */
+  aoSalvar(mod, rec) {
+    if (preLanc.MODS.indexOf(mod) < 0 || !rec) return rec;
+    if (rec._finalizado) return rec;
+    if (!preLanc.ehAuxiliar()) return rec;
+    const q = preLanc._quem();
+    rec._preLanc = rec._preLanc || { estado: 'rascunho', porNome: q.nome, por: q.id, criadoEm: new Date().toISOString() };
+    if (rec._preLanc.estado === 'devolvido') rec._preLanc.estado = 'rascunho';   /* voltou a mexer */
+    return rec;
+  },
+
+  /* Chamado quando o MÉDICO finaliza: sai da fila */
+  aoFinalizar(mod, rec) {
+    if (preLanc.MODS.indexOf(mod) < 0 || !rec || !rec._preLanc) return rec;
+    rec._preLanc.estado = 'conferido';
+    rec._preLanc.conferidoEm = new Date().toISOString();
+    rec._preLanc.conferidoPor = preLanc._quem().nome;
+    return rec;
+  },
+
+  _idAtual(mod) {
+    const el = document.querySelector('#form-' + mod + ' [name="_id"]');
+    return el ? el.value : '';
+  },
+  enviar(mod) {
+    const id = preLanc._idAtual(mod);
+    if (!id) { toast('Salve o pré-lançamento antes de enviar.', 'warn'); return; }
+    const lst = store.list(mod);
+    const rec = lst.find(x => x._id === id);
+    if (!rec) { toast('Registro não encontrado', 'error'); return; }
+    const q = preLanc._quem();
+    rec._preLanc = rec._preLanc || { estado: 'rascunho', porNome: q.nome, por: q.id, criadoEm: new Date().toISOString() };
+    rec._preLanc.estado = 'enviado';
+    rec._preLanc.enviadoEm = new Date().toISOString();
+    rec._preLanc.porNome = rec._preLanc.porNome || q.nome;
+    delete rec._preLanc.motivo;
+    store.setList(mod, lst);
+    toast('📤 Pré-lançamento enviado para conferência do médico');
+    preLanc.renderBotao(mod);
+  },
+  devolver(mod, id) {
+    const motivo = prompt('Devolver para correção — o que falta?', '');
+    if (motivo === null) return;
+    const lst = store.list(mod);
+    const rec = lst.find(x => x._id === id);
+    if (!rec || !rec._preLanc) return;
+    rec._preLanc.estado = 'devolvido';
+    rec._preLanc.devolvidoEm = new Date().toISOString();
+    rec._preLanc.devolvidoPor = preLanc._quem().nome;
+    rec._preLanc.motivo = String(motivo || '').trim();
+    store.setList(mod, lst);
+    toast('↩ Devolvido para correção');
+    try { modal.close(); } catch (e) {}
+    try { preLanc.renderFila(); } catch (e) {}
+  },
+
+  /* Fila do médico: o que foi ENVIADO e ainda não conferido */
+  fila() {
+    const itens = [];
+    preLanc.MODS.forEach(mod => {
+      (store.list(mod) || []).forEach(rec => {
+        if (preLanc.estado(rec) !== 'enviado' || rec._finalizado) return;
+        itens.push({ mod, rec,
+          nome: arquivo._nomeDe(rec),
+          data: (typeof historico !== 'undefined' ? historico._dataItem(rec) : '') || '',
+          por: (rec._preLanc && rec._preLanc.porNome) || '',
+          quando: (rec._preLanc && rec._preLanc.enviadoEm) || '' });
+      });
+    });
+    return itens.sort((a, b) => String(a.quando).localeCompare(String(b.quando)));
+  },
+  /* O que a auxiliar ainda NÃO enviou (ou o médico devolveu) */
+  meusPendentes() {
+    const out = { rascunho: [], devolvido: [] };
+    const q = preLanc._quem();
+    preLanc.MODS.forEach(mod => {
+      (store.list(mod) || []).forEach(rec => {
+        const e = preLanc.estado(rec);
+        if (rec._finalizado) return;
+        if (e !== 'rascunho' && e !== 'devolvido') return;
+        if (rec._preLanc.por && q.id && rec._preLanc.por !== q.id) return;
+        out[e].push({ mod, rec, nome: arquivo._nomeDe(rec),
+          motivo: rec._preLanc.motivo || '',
+          parado: e === 'rascunho' && rec._preLanc.criadoEm &&
+                  (Date.now() - new Date(rec._preLanc.criadoEm).getTime()) > 86400000 });
+      });
+    });
+    return out;
+  },
+
+  /* Cartão no Dashboard: a fila do médico e o lembrete da auxiliar */
+  renderFila() {
+    const card = document.getElementById('pl-fila-card');
+    const host = document.getElementById('pl-fila-lista');
+    const tit = document.getElementById('pl-fila-titulo');
+    if (!card || !host) return;
+
+    if (preLanc.ehAuxiliar()) {
+      const p = preLanc.meusPendentes();
+      const total = p.rascunho.length + p.devolvido.length;
+      if (!total) { card.style.display = 'none'; return; }
+      card.style.display = '';
+      if (tit) tit.textContent = 'Seus pré-lançamentos';
+      host.innerHTML =
+        (p.devolvido.length
+          ? '<p style="font-size:.86rem;color:#7a4b12;margin:0 0 8px">↩ <b>' + p.devolvido.length + '</b> devolvido(s) pelo médico para correção.</p>'
+          : '') +
+        (p.rascunho.length
+          ? '<p style="font-size:.86rem;margin:0 0 8px">📝 <b>' + p.rascunho.length + '</b> ainda <b>não enviado(s)</b> — o médico só vê depois do <b>📤 Enviar pré-lançamento</b>.</p>'
+          : '') +
+        p.devolvido.concat(p.rascunho).map(it =>
+          '<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)">' +
+          '<span style="font-size:.85rem;min-width:0"><b>' + utils.escapeHTML(it.nome || '(sem nome)') + '</b>' +
+          '<br><span style="color:var(--text-mute);font-size:.76rem">' + utils.escapeHTML(lixeira.LABELS[it.mod] || it.mod) +
+          (it.motivo ? ' · ↩ ' + utils.escapeHTML(it.motivo) : '') + (it.parado ? ' · parado há mais de 1 dia' : '') + '</span></span>' +
+          '<button class="btn btn-xs btn-primary" onclick="dashboard._abrirRegistro(\'' + it.mod + '\',\'' + it.rec._id + '\')">Abrir</button>' +
+          '</div>').join('');
+      return;
+    }
+
+    if (!preLanc.ehMedico()) { card.style.display = 'none'; return; }
+    const fila = preLanc.fila();
+    /* o médico também enxerga o que está parado sem envio — para saber que existe */
+    let parados = 0;
+    try {
+      preLanc.MODS.forEach(mod => (store.list(mod) || []).forEach(r => {
+        if (r._finalizado) return;
+        if (preLanc.estado(r) !== 'rascunho') return;
+        const t = r._preLanc && r._preLanc.criadoEm;
+        if (t && Date.now() - new Date(t).getTime() > 86400000) parados++;
+      }));
+    } catch (e) {}
+    if (!fila.length && !parados) { card.style.display = 'none'; return; }
+    card.style.display = '';
+    if (tit) tit.textContent = 'Aguardando sua conferência (' + fila.length + ')';
+    host.innerHTML =
+      (fila.length
+        ? fila.map(it =>
+            '<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">' +
+            '<span style="font-size:.86rem;min-width:0"><b>' + utils.escapeHTML(it.nome || '(sem nome)') + '</b>' +
+            '<br><span style="color:var(--text-mute);font-size:.76rem">' + utils.escapeHTML(lixeira.LABELS[it.mod] || it.mod) +
+            (it.data ? ' · ' + utils.escapeHTML(historico._fmtData(it.data)) : '') +
+            (it.por ? ' · por ' + utils.escapeHTML(it.por) : '') + '</span></span>' +
+            '<span style="white-space:nowrap;display:flex;gap:5px">' +
+            '<button class="btn btn-xs btn-primary" onclick="dashboard._abrirRegistro(\'' + it.mod + '\',\'' + it.rec._id + '\')">Conferir</button>' +
+            '<button class="btn btn-xs" onclick="preLanc.devolver(\'' + it.mod + '\',\'' + it.rec._id + '\')" title="Volta para a auxiliar com um comentário">↩ Devolver</button>' +
+            '</span></div>').join('')
+        : '<p style="font-size:.86rem;color:var(--text-mute);margin:0">Nada aguardando conferência.</p>') +
+      (parados
+        ? '<p style="font-size:.8rem;color:#7a4b12;margin:10px 0 0">⏳ <b>' + parados + '</b> pré-lançamento(s) começado(s) e ainda não enviados há mais de um dia.</p>'
+        : '');
+  },
+
+  /* Botão "Enviar pré-lançamento" no rodapé da ficha (só para a auxiliar) */
+  renderBotao(mod) {
+    const host = document.getElementById('acoes-rodape-' + mod);
+    if (!host) return;
+    const antigo = document.getElementById('pl-btn-' + mod);
+    if (antigo) antigo.remove();
+    if (!preLanc.ehAuxiliar() || preLanc.MODS.indexOf(mod) < 0) return;
+    const id = preLanc._idAtual(mod);
+    const rec = id ? store.getById(mod, id) : null;
+    const e = preLanc.estado(rec);
+    const b = document.createElement('span');
+    b.id = 'pl-btn-' + mod;
+    b.innerHTML = (e === 'enviado')
+      ? '<span class="btn btn-sm" style="background:#eaf7ee;color:#1c5c33;border-color:#b6e0c2;cursor:default">📤 Enviado para conferência</span>'
+      : '<button type="button" class="btn btn-primary" onclick="preLanc.enviar(\'' + mod + '\')" title="Avisa o médico de que este pré-lançamento está pronto para conferência">📤 Enviar pré-lançamento</button>' +
+        (e === 'devolvido' && rec._preLanc.motivo
+          ? '<div style="flex-basis:100%;font-size:.8rem;color:#7a4b12;margin-top:6px">↩ Devolvido: ' + utils.escapeHTML(rec._preLanc.motivo) + '</div>'
+          : '');
+    host.appendChild(b);
+  }
+};
+
 const lixeira = {
   KEY: 'medsys.v7.lixeira',
   DIAS: 30,
@@ -11989,7 +12203,7 @@ const ui = {
 
       /* Refresh por módulo — cada um em try/catch independente para não bloquear navegação */
       try {
-        if (modName === 'dashboard') { dashboard.atualizar(); try { meuDia.render(); } catch (e) {} try { pendencias.renderDashboard(); } catch (e) {} }
+        if (modName === 'dashboard') { dashboard.atualizar(); try { meuDia.render(); } catch (e) {} try { pendencias.renderDashboard(); } catch (e) {} try { preLanc.renderFila(); } catch (e) {} }
         else if (modName === 'financeiro') financeiro.render();
         else if (modName === 'agenda') { agenda.render(); if (!agenda._puxouNestaSessao) { setTimeout(() => { try { agenda.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
@@ -41547,6 +41761,7 @@ const acoesUI = {
       (temFinalizar ? '<button type="button" class="btn btn-finalizar" onclick="' + mod + '.finalizar()">✅ Finalizar</button>' : '') +
       '<button type="button" class="btn btn-ghost btn-sm" onclick="window.scrollTo({top:0,behavior:\'smooth\'})" title="Voltar ao topo">↑ Topo</button>';
     form.appendChild(div);
+    try { if (typeof preLanc !== 'undefined') preLanc.renderBotao(mod); } catch (e) {}
   }
 };
 
@@ -41638,7 +41853,7 @@ document.addEventListener('DOMContentLoaded', () => {
        em qualquer navegador, mesmo quando const não é global. */
   window.utils = utils; window.store = store; window.ui = ui;
   window.backupCompleto = backupCompleto;
-  window.lixeira = lixeira; window.duplicados = duplicados; window.espaco = espaco; window.modoNuvem = modoNuvem;
+  window.lixeira = lixeira; window.duplicados = duplicados; window.espaco = espaco; window.modoNuvem = modoNuvem; window.preLanc = preLanc;
   window.carimboHora = carimboHora;
   window.cronometros = cronometros;
   window.dashboard = dashboard; window.pre = pre; window.consulta = consulta;

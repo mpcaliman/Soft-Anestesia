@@ -5137,6 +5137,81 @@ await test('Dashboard conta pela data do procedimento, não pela data da última
   await page.close();
 });
 
+/* 90) Pré-lançamento: auxiliar prepara e ENVIA; médico confere, devolve ou
+   finaliza. Enviar não é salvar — o registro sobe o tempo todo. */
+await test('Pré-lançamento: só entra na fila do médico depois de enviado, e pode ser devolvido', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('pre', []); store.setList('anestesia', []);
+    const auxiliar = { id: 'sec1', nome: 'Secretária', perfil: 'secretaria', role: 'auxiliar' };
+    const medico = { id: 'med1', nome: 'Dr. Marcelo', perfil: 'admin', role: 'gestor' };
+    auth.usuarioAtual = () => auxiliar;
+
+    /* a auxiliar salva: vira rascunho DELA e NÃO aparece para o médico */
+    const rec = store.save('pre', { nome: 'Paciente X', data_avaliacao: '2026-08-11' });
+    out.nasceRascunho = preLanc.estado(store.getById('pre', rec._id)) === 'rascunho'
+      && store.getById('pre', rec._id)._preLanc.porNome === 'Secretária';
+    auth.usuarioAtual = () => medico;
+    out.filaVaziaAntesDeEnviar = preLanc.fila().length === 0;
+
+    /* ela envia */
+    auth.usuarioAtual = () => auxiliar;
+    const f = document.getElementById('form-pre');
+    let hid = f.querySelector('[name="_id"]');
+    if (!hid) { hid = document.createElement('input'); hid.type = 'hidden'; hid.name = '_id'; f.appendChild(hid); }
+    hid.value = rec._id;
+    preLanc.enviar('pre');
+    out.enviouComCarimbo = preLanc.estado(store.getById('pre', rec._id)) === 'enviado'
+      && !!store.getById('pre', rec._id)._preLanc.enviadoEm;
+
+    /* agora aparece na fila do médico, com quem lançou */
+    auth.usuarioAtual = () => medico;
+    const fila = preLanc.fila();
+    out.entrouNaFila = fila.length === 1 && fila[0].por === 'Secretária' && fila[0].mod === 'pre';
+
+    /* o médico devolve com motivo */
+    window.prompt = () => 'Falta a carteirinha do convênio';
+    preLanc.devolver('pre', rec._id);
+    const dev = store.getById('pre', rec._id);
+    out.devolveu = preLanc.estado(dev) === 'devolvido' && /carteirinha/.test(dev._preLanc.motivo);
+    out.saiuDaFila = preLanc.fila().length === 0;
+
+    /* ela mexe de novo: volta a ser rascunho e precisa reenviar */
+    auth.usuarioAtual = () => auxiliar;
+    store.save('pre', Object.assign({}, dev, { obs: 'corrigido' }));
+    out.voltaARascunho = preLanc.estado(store.getById('pre', rec._id)) === 'rascunho';
+    out.contaPendentes = preLanc.meusPendentes().rascunho.length === 1;
+    preLanc.enviar('pre');
+
+    /* o médico finaliza: sai da fila de vez */
+    auth.usuarioAtual = () => medico;
+    const atual = store.getById('pre', rec._id);
+    store.save('pre', Object.assign({}, atual, { _finalizado: true }));
+    const fim = store.getById('pre', rec._id);
+    out.conferido = fim._preLanc.estado === 'conferido' && fim._preLanc.conferidoPor === 'Dr. Marcelo';
+    out.filaLimpa = preLanc.fila().length === 0;
+
+    /* a auxiliar nunca é tratada como médica */
+    auth.usuarioAtual = () => auxiliar;
+    out.papeis = preLanc.ehAuxiliar() && !preLanc.ehMedico();
+    auth.usuarioAtual = () => medico;
+    out.papeisMedico = preLanc.ehMedico() && !preLanc.ehAuxiliar();
+
+    store.setList('pre', []); store.setList('anestesia', []);
+    return out;
+  });
+  assert(r.nasceRascunho, 'o que a auxiliar salva nasce como rascunho dela, com o nome de quem lançou');
+  assert(r.filaVaziaAntesDeEnviar, 'antes de enviar, nada pode aparecer para o médico');
+  assert(r.enviouComCarimbo, 'enviar deveria mudar o estado e carimbar a hora');
+  assert(r.entrouNaFila, 'depois de enviado, entra na fila do médico com quem lançou');
+  assert(r.devolveu && r.saiuDaFila, 'devolver deveria registrar o motivo e tirar da fila');
+  assert(r.voltaARascunho && r.contaPendentes, 'ao mexer de novo, volta a rascunho e conta como não enviado');
+  assert(r.conferido && r.filaLimpa, 'o Finalizar do médico deveria marcar como conferido e limpar a fila');
+  assert(r.papeis && r.papeisMedico, 'os papéis não podem se confundir');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
