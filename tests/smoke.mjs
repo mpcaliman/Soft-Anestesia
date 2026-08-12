@@ -4752,6 +4752,278 @@ await test('Carimbo repetido é guardado uma vez só, sem o resto do app percebe
   await page.close();
 });
 
+/* 82) Carimbo trocado deixa a imagem velha guardada para sempre. Tem que sair. */
+await test('Imagem que nenhum registro usa mais é descartada, e a que está em uso nunca', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    localStorage.removeItem(store.BLOBS_KEY);
+    const velho = 'data:image/png;base64,' + 'V'.repeat(60000);
+    const novo  = 'data:image/png;base64,' + 'N'.repeat(60000);
+
+    store.setList('pre', [{ _id: 'x', nome: 'A', assinatura_dataurl: velho }]);
+    out.guardouUm = Object.keys(store._blobs()).length === 1;
+
+    /* troca o carimbo: o antigo fica órfão */
+    store.setList('pre', [{ _id: 'x', nome: 'A', assinatura_dataurl: novo }]);
+    out.doisGuardados = Object.keys(store._blobs()).length === 2;
+
+    const liberto = armazenamento.limparImagensOrfas();
+    const restantes = Object.keys(store._blobs());
+    out.tirouOrfa = liberto > 50000 && restantes.length === 1;
+    out.manteveEmUso = store.getById('pre', 'x').assinatura_dataurl === novo;
+
+    /* imagem citada só pela LIXEIRA não é órfã: o registro ainda pode voltar */
+    store.setList('pre', [{ _id: 'y', nome: 'B', assinatura_dataurl: velho }]);
+    store.delete('pre', 'y');                       /* vai para a lixeira */
+    store.setList('pre', []);                       /* nada mais referencia nada */
+    const refVelho = store._refDe(velho);
+    armazenamento.limparImagensOrfas();
+    out.respeitaLixeira = !!store._blobs()[refVelho];
+    /* e o registro volta da lixeira com a imagem inteira */
+    out.lixeiraDevolveInteiro = (lixeira._ler().find(e => e.item && e.item._id === 'y') || {}).item.assinatura_dataurl === velho;
+
+    /* rodar de novo sem nada a fazer não custa nem quebra */
+    out.idempotente = armazenamento.limparImagensOrfas() === 0;
+    /* e é uma etapa de liberação de espaço */
+    out.ehEtapa = espaco.ETAPAS.some(e => e.nome === 'imagens que ninguém mais usa');
+    /* a prateleira aparece com nome próprio, não some em "Configurações e outros" */
+    out.temRotulo = /Carimbos e imagens/.test(armazenamento._rotulo(store.BLOBS_KEY));
+
+    localStorage.removeItem(store.BLOBS_KEY);
+    localStorage.removeItem(lixeira.KEY);
+    store.setList('pre', []);
+    return out;
+  });
+  assert(r.guardouUm && r.doisGuardados, 'cada imagem distinta deveria ocupar um lugar');
+  assert(r.tirouOrfa, 'a imagem que ninguém mais referencia deveria ser descartada');
+  assert(r.manteveEmUso, 'a imagem em uso não pode ser tocada');
+  assert(r.respeitaLixeira, 'imagem citada pela lixeira ainda é necessária — não é órfã');
+  assert(r.lixeiraDevolveInteiro, 'o registro na lixeira tem que voltar com a imagem inteira');
+  assert(r.idempotente, 'rodar de novo sem órfãs não deveria fazer nada');
+  assert(r.ehEtapa, 'limpar imagens órfãs deveria ser uma etapa de liberação de espaço');
+  assert(r.temRotulo, 'a prateleira de imagens precisa de nome próprio na lista de armazenamento');
+  await page.close();
+});
+
+/* 83) A autorização do Google vence em ~1 h. Isso não pode desfazer a
+   configuração do médico nem obrigá-lo a autorizar todo dia. */
+await test('Drive: token vencido não desliga a opção nem se perde ao recarregar', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    localStorage.removeItem(pdfBackup.TOKEN_KEY);
+    localStorage.removeItem(pdfBackup.AVISO_DRIVE_KEY);
+    pdfBackup.salvarCfg({ drive: true });
+
+    /* falha automática NÃO pode desligar a opção — era o bug */
+    pdfBackup._obterToken = async () => null;
+    pdfBackup._accessToken = null;
+    await pdfBackup.enviarDrive(new Blob(['x']), 'a.pdf');
+    await pdfBackup.enviarDrive(new Blob(['x']), 'b.pdf');
+    await pdfBackup.enviarDrive(new Blob(['x']), 'c.pdf');
+    out.naoDesliga = pdfBackup.cfg().drive === true;
+    /* avisa uma vez, não a cada PDF */
+    out.avisouUmaVez = !!localStorage.getItem(pdfBackup.AVISO_DRIVE_KEY);
+    const carimbo = localStorage.getItem(pdfBackup.AVISO_DRIVE_KEY);
+    await pdfBackup.enviarDrive(new Blob(['x']), 'd.pdf');
+    out.naoRepeteAviso = localStorage.getItem(pdfBackup.AVISO_DRIVE_KEY) === carimbo;
+
+    /* o token sobrevive ao recarregar: era só memória, e recarregar pedia
+       autorização de novo todo dia */
+    pdfBackup._salvarToken('tk-123', Date.now() + 3600000);
+    pdfBackup._accessToken = null; pdfBackup._tokenExpira = 0;      /* simula reload */
+    const salvo = pdfBackup._lerTokenSalvo();
+    out.tokenPersiste = !!salvo && salvo.access_token === 'tk-123';
+    /* token vencido não é reaproveitado */
+    pdfBackup._salvarToken('tk-velho', Date.now() - 1000);
+    out.ignoraVencido = pdfBackup._lerTokenSalvo() === null;
+
+    /* desligar continua existindo — mas como escolha explícita do usuário */
+    pdfBackup.desligarDrive();
+    out.desligaSePedirem = pdfBackup.cfg().drive === false;
+
+    localStorage.removeItem(pdfBackup.TOKEN_KEY);
+    localStorage.removeItem(pdfBackup.AVISO_DRIVE_KEY);
+    return out;
+  });
+  assert(r.naoDesliga, 'falha de token NUNCA pode desfazer a configuração do usuário');
+  assert(r.avisouUmaVez && r.naoRepeteAviso, 'o pedido de reautorização deveria vir uma vez, não a cada PDF');
+  assert(r.tokenPersiste, 'o token precisa sobreviver ao recarregar a página');
+  assert(r.ignoraVencido, 'token vencido não pode ser reaproveitado');
+  assert(r.desligaSePedirem, 'desligar o Drive continua possível — mas só se o usuário mandar');
+  await page.close();
+});
+
+/* 84) Topo da ficha recolhido num só lugar + Salvar/Finalizar no fim da página */
+await test('Ficha: ações do topo viram um menu recolhível e Salvar/Finalizar aparecem no fim', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    localStorage.removeItem(acoesUI.KEY);
+    acoesUI.montar();
+    acoesUI.MODS.forEach(m => acoesUI._aplicar(m));
+
+    const mods = ['pre', 'consulta', 'anestesia', 'recuperacao'];
+    /* cabeçalho existe nos quatro módulos pedidos */
+    out.cabecalhos = mods.every(m => !!document.getElementById('acoes-cab-' + m));
+    /* a barra de botões e as abas de rascunho foram para dentro dele */
+    out.recolheu = mods.every(m => {
+      const caixa = document.getElementById('acoes-caixa-' + m);
+      return caixa && caixa.querySelector('.action-bar') && caixa.style.display === 'none';
+    });
+    /* "Reaproveitar" segue o mesmo estado — é ação, não preenchimento */
+    const tb = document.querySelector('#form-pre .form-toolbar');
+    out.reaproveitarJunto = !tb || tb.style.display === 'none';
+
+    /* abrir mostra tudo e a escolha é lembrada */
+    acoesUI.alternar('pre');
+    out.abre = document.getElementById('acoes-caixa-pre').style.display !== 'none'
+      && JSON.parse(localStorage.getItem(acoesUI.KEY)).pre === true
+      && (!tb || tb.style.display !== 'none');
+    acoesUI.alternar('pre');
+    out.fecha = document.getElementById('acoes-caixa-pre').style.display === 'none';
+
+    /* Salvar e Finalizar no FIM da página, dentro do formulário */
+    out.rodapes = mods.every(m => {
+      const rod = document.getElementById('acoes-rodape-' + m);
+      const form = document.getElementById('form-' + m);
+      return rod && form && form.contains(rod)
+        && form.lastElementChild === rod
+        && /Salvar/.test(rod.textContent) && /Finalizar/.test(rod.textContent);
+    });
+    /* e os botões chamam de verdade o módulo certo */
+    let chamou = '';
+    const salvarOrig = pre.salvar, finalizarOrig = pre.finalizar;
+    pre.salvar = () => { chamou += 'salvar;'; };
+    pre.finalizar = () => { chamou += 'finalizar;'; };
+    const rod = document.getElementById('acoes-rodape-pre');
+    rod.querySelectorAll('button')[0].click();
+    rod.querySelectorAll('button')[1].click();
+    pre.salvar = salvarOrig; pre.finalizar = finalizarOrig;
+    out.botoesFuncionam = chamou === 'salvar;finalizar;';
+
+    /* montar de novo não duplica nada */
+    acoesUI.montar();
+    out.idempotente = document.querySelectorAll('#module-pre .acoes-cab').length === 1
+      && document.querySelectorAll('#form-pre .acoes-rodape').length === 1;
+
+    localStorage.removeItem(acoesUI.KEY);
+    return out;
+  });
+  assert(r.cabecalhos, 'os quatro módulos deveriam ganhar o cabeçalho de ações');
+  assert(r.recolheu, 'a barra de botões deveria ficar dentro dele, recolhida por padrão');
+  assert(r.reaproveitarJunto, 'o bloco Reaproveitar deveria seguir o mesmo estado');
+  assert(r.abre && r.fecha, 'abrir/fechar deveria funcionar e ser lembrado');
+  assert(r.rodapes, 'Salvar e Finalizar deveriam existir no fim de cada ficha');
+  assert(r.botoesFuncionam, 'os botões do rodapé precisam chamar salvar e finalizar de verdade');
+  assert(r.idempotente, 'montar de novo não pode duplicar cabeçalho nem rodapé');
+  await page.close();
+});
+
+/* 85) Códigos do MESMO ato entram junto do procedimento principal; a lista de
+   baixo (outra equipe cirúrgica) continua existindo e é a mesma de sempre. */
+await test('Ficha: códigos do mesmo ato (100/70/50%) entram junto do procedimento, sem mexer na lista de outra equipe', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ['cir-mesma-body', 'cir-combo-body'].forEach(id => { const b = document.getElementById(id); if (b) b.innerHTML = ''; });
+
+    const cima = document.getElementById('cir-mesma-body');
+    const baixo = document.getElementById('cir-combo-body');
+    out.existemOsDois = !!cima && !!baixo;
+    /* o de cima fica ANTES dos horários/duração; o de baixo, depois */
+    const proc = document.querySelector('#form-anestesia [name="procedimento"]');
+    const dur = document.querySelector('#form-anestesia [name="duracao"]');
+    const pos = (a, b) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING;
+    out.ordemCerta = !!pos(proc, cima) && !!pos(cima, dur) && !!pos(dur, baixo);
+
+    /* linha de cima: mesma equipe, com o grau 100/70/50 */
+    anestesia.cirurgias.add({}, { mesmaEquipe: true, alvo: 'cir-mesma-body' });
+    const l1 = cima.querySelector('.grid');
+    const sel = l1.querySelector('[name="cir_extra_grau[]"]');
+    out.temProporcao = !!sel && Array.from(sel.options).map(o => o.value).join(',') === '100,70,50';
+    out.ehMesmaEquipe = l1.classList.contains('cir-mesma-equipe');
+    out.naoMexeuNoDeBaixo = baixo.children.length === 0;
+
+    /* linha de baixo continua sendo a de outra equipe, com cirurgião e horários */
+    anestesia.cirurgias.add({ procedimento: 'Colecistectomia', cirurgiao: 'Dr. Outro', inicio: '10:00' });
+    out.deBaixoIntacto = baixo.children.length === 1
+      && !baixo.querySelector('.grid').classList.contains('cir-mesma-equipe');
+
+    /* os dois grupos são coletados juntos, na ordem da tela */
+    cima.querySelector('[name="cir_extra_proc[]"]').value = 'Biópsia';
+    cima.querySelector('[name="cir_extra_grau[]"]').value = '70';
+    const col = anestesia.cirurgias.coletar();
+    out.coletaOsDois = col.length === 2
+      && col[0].procedimento === 'Biópsia' && col[0].grau === '70' && !col[0].cirurgiao
+      && col[1].procedimento === 'Colecistectomia' && col[1].cirurgiao === 'Dr. Outro';
+
+    /* ao reabrir a ficha, cada linha volta para a lista certa */
+    anestesia.cirurgias.restaurar(col);
+    out.restauraSeparado = cima.children.length === 1 && baixo.children.length === 1
+      && cima.querySelector('[name="cir_extra_proc[]"]').value === 'Biópsia'
+      && baixo.querySelector('[name="cir_extra_proc[]"]').value === 'Colecistectomia';
+
+    ['cir-mesma-body', 'cir-combo-body'].forEach(id => { document.getElementById(id).innerHTML = ''; });
+    return out;
+  });
+  assert(r.existemOsDois, 'as duas listas deveriam existir');
+  assert(r.ordemCerta, 'a nova fica junto do procedimento; a antiga, depois dos horários');
+  assert(r.temProporcao, 'a proporção 100/70/50% precisa estar na linha nova');
+  assert(r.ehMesmaEquipe && r.naoMexeuNoDeBaixo, 'a linha nova é da mesma equipe e não toca na lista de baixo');
+  assert(r.deBaixoIntacto, 'a lista de outra equipe continua como era');
+  assert(r.coletaOsDois, 'as duas listas têm que ser coletadas juntas, na ordem da tela');
+  assert(r.restauraSeparado, 'ao reabrir, cada linha deveria voltar para a lista de onde veio');
+  await page.close();
+});
+
+/* 86) Registro guardado na nuvem NÃO pode sumir da busca — foi o susto de uma
+   ficha que parecia apagada e só estava arquivada. */
+await test('Busca mostra também o que está na nuvem, e a limpeza de duplicados nunca junta dias diferentes', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('anestesia', []);
+    localStorage.removeItem(arquivo.INDEX_KEY);
+
+    /* dois procedimentos do MESMO paciente em dias diferentes nunca formam grupo */
+    store.setList('anestesia', [
+      { _id: 'd21', paciente: { nome: 'Abraão Santiago' }, procedimento: { data: '2026-07-21', nome: 'Hipospadia' }, _updatedAt: '2026-07-21T12:00:00.000Z' },
+      { _id: 'd22', paciente: { nome: 'Abraão Santiago' }, procedimento: { data: '2026-07-22', nome: 'Reabordagem' }, _updatedAt: '2026-07-22T12:00:00.000Z' }
+    ]);
+    out.diasDiferentesNaoAgrupam = duplicados.varrer({ mods: ['anestesia'] }).length === 0;
+    /* e a limpeza geral não remove nenhum dos dois */
+    duplicados.manterUltimoEmTodos ? null : null;
+    out.nadaSeriaRemovido = duplicados.achar('anestesia', store.list('anestesia')[0]).length === 0;
+
+    /* agora o de 21 vai para a nuvem (arquivado) e some da lista local */
+    const ix = {}; ix.anestesia = [{ id: 'd21', nome: 'Abraão Santiago', data: '2026-07-21' }];
+    localStorage.setItem(arquivo.INDEX_KEY, JSON.stringify(ix));
+    store.setList('anestesia', [store.list('anestesia').find(x => x._id === 'd22')]);
+
+    const linhas = historico._renderLinhas('anestesia', '');
+    out.apareceNaBusca = /Abra.{0,3}o Santiago/.test(linhas) && /guardado na nuvem/.test(linhas);
+    out.temBotaoAbrir = /dashboard\._abrirRegistro\('anestesia','d21'\)/.test(linhas);
+    /* o filtro também alcança o que está na nuvem */
+    out.filtroAlcanca = /guardado na nuvem/.test(historico._renderLinhas('anestesia', 'abra'))
+      && !/guardado na nuvem/.test(historico._renderLinhas('anestesia', 'zzzz'));
+    /* e o contador avisa que há registros fora do aparelho */
+    out.contadorAvisa = /na nuvem/.test(historico._render('anestesia', ''));
+
+    store.setList('anestesia', []);
+    localStorage.removeItem(arquivo.INDEX_KEY);
+    return out;
+  });
+  assert(r.diasDiferentesNaoAgrupam, 'dois dias diferentes nunca podem virar duplicidade');
+  assert(r.nadaSeriaRemovido, 'nenhum dos dois registros seria removido pela limpeza');
+  assert(r.apareceNaBusca, 'registro arquivado na nuvem tem que aparecer na busca, não sumir');
+  assert(r.temBotaoAbrir, 'deveria haver um botão que traz da nuvem e abre');
+  assert(r.filtroAlcanca, 'o filtro por nome tem que alcançar o que está na nuvem');
+  assert(r.contadorAvisa, 'o contador deveria dizer quantos estão fora do aparelho');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

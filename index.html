@@ -3798,6 +3798,28 @@ textarea { border-radius: 10px; }
 .sidebar-brand strong { font-weight: 800; letter-spacing: -.2px; }
 /* Header */
 .app-header { backdrop-filter: blur(8px); }
+/* Ações da ficha: um cabeçalho recolhível no lugar de três faixas de botões */
+.acoes-cab{
+  display:flex; align-items:center; gap:10px; cursor:pointer; user-select:none;
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:11px 14px; margin:10px 14px 8px; -webkit-tap-highlight-color:transparent;
+}
+.acoes-cab:hover{ background:var(--surface-alt); }
+.acoes-cab .ac-seta{ font-size:.8rem; width:12px; color:var(--text-mute); flex-shrink:0; }
+.acoes-cab b{ color:var(--primary-darker); font-size:.9rem; white-space:nowrap; }
+.acoes-cab small{
+  color:var(--text-mute); font-size:.74rem; font-weight:400;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0;
+}
+@media (max-width:640px){ .acoes-cab small{ display:none; } }
+/* Salvar/Finalizar no fim da ficha */
+.acoes-rodape{
+  display:flex; flex-wrap:wrap; gap:10px; align-items:center;
+  margin:22px 0 8px; padding-top:16px; border-top:2px solid var(--border);
+}
+.acoes-rodape .btn{ font-size:.95rem; padding:11px 20px; }
+@media print{ .acoes-cab, .acoes-rodape{ display:none !important; } }
+
 /* Faixa de armazenamento cheio — avisa sem tomar a tela */
 .espaco-faixa{
   position: fixed; left: 10px; right: 10px; bottom: 84px; z-index: 950;
@@ -5167,6 +5189,14 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
             <div class="input-group"><input type="time" name="hora_sala_saida"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_sala_saida');">agora</button></div>
           </div>
         </div>
+        <!-- Códigos do MESMO ato, mesma equipe — aqui em cima, junto do procedimento
+             principal, que é onde o anestesista pensa neles. A lista de baixo
+             (depois dos horários) continua servindo para OUTRA equipe cirúrgica. -->
+        <div id="cir-mesma-wrap" style="margin:-2px 0 12px">
+          <div id="cir-mesma-body"></div>
+          <button type="button" class="btn btn-sm" onclick="anestesia.cirurgias.add({}, { mesmaEquipe: true, alvo: 'cir-mesma-body' })" title="Mais um código CBHPM deste mesmo ato, com a mesma equipe — escolha 100%, 70% ou 50%">+ Adicionar código deste mesmo ato (100/70/50%)</button>
+        </div>
+
         <div class="grid">
           <div class="field col-4"><label>Duração da anestesia</label><input type="text" name="duracao" readonly></div>
           <div class="field col-4"><label>Duração da cirurgia</label><input type="text" name="duracao_cir" readonly></div>
@@ -10526,6 +10556,7 @@ const armazenamento = {
     return { total, itens };
   },
   _rotulo(k) {
+    if (k === store.BLOBS_KEY) return '🖼 Carimbos e imagens (guardados 1×)';
     if (k === 'medsys.v7.versions') return '🕓 Histórico de versões';
     if (k === 'medsys.v7.lixeira') return '🗑 Lixeira (30 dias)';
     if (k.indexOf('demo:') === 0) return '🧪 Modo demonstração';
@@ -10686,11 +10717,44 @@ const armazenamento = {
       } catch (e) {}
     });
     try { localStorage.setItem(armazenamento.FLAG_DEDUP, '1'); } catch (e) {}
+    try { armazenamento.limparImagensOrfas(); } catch (e) {}
     const ganho = Math.max(0, antes - armazenamento.uso().total);
     if (ganho > 50 * 1024) {
       try { toast('🧹 ' + armazenamento._fmt(ganho) + ' liberados: o carimbo repetido em cada ficha agora é guardado uma vez só'); } catch (e) {}
     }
     return ganho;
+  },
+
+  /* Imagem órfã: o carimbo trocado ontem continuaria guardado para sempre.
+     Varre todos os registros, junta as referências vivas e descarta o resto. */
+  limparImagensOrfas() {
+    let b;
+    try { b = store._blobs(); } catch (e) { return 0; }
+    const refs = Object.keys(b);
+    if (!refs.length) return 0;
+    const vivas = new Set();
+    const marcar = (o) => {
+      if (Array.isArray(o)) { o.forEach(marcar); return; }
+      if (o && typeof o === 'object') {
+        Object.keys(o).forEach(k => {
+          const v = o[k];
+          if (typeof v === 'string' && v.slice(0, 5) === 'blob:') vivas.add(v);
+          else if (v && typeof v === 'object') marcar(v);
+        });
+      }
+    };
+    /* lê o CRU (a leitura normal já troca a referência pela imagem) */
+    Object.keys(STORAGE).forEach(mod => {
+      try { marcar(JSON.parse(localStorage.getItem(STORAGE[mod]) || '[]')); } catch (e) {}
+    });
+    try { marcar(JSON.parse(localStorage.getItem('medsys.v7.versions') || '{}')); } catch (e) {}
+    try { marcar(JSON.parse(localStorage.getItem(lixeira.KEY) || '[]')); } catch (e) {}
+    const orfas = refs.filter(r => !vivas.has(r));
+    if (!orfas.length) return 0;
+    let liberto = 0;
+    orfas.forEach(r => { liberto += String(b[r] || '').length * 2; delete b[r]; });
+    try { localStorage.setItem(store.BLOBS_KEY, JSON.stringify(b)); } catch (e) { return 0; }
+    return liberto;
   },
 
   compactarVersoes() {
@@ -11181,6 +11245,9 @@ const espaco = {
         });
         return liberto;
       } },
+    { nome: 'imagens que ninguém mais usa', fn() {
+        try { return armazenamento.limparImagensOrfas(); } catch (e) { return 0; }
+      } },
     { nome: 'lixeira vencida', fn() {
         const antes = (localStorage.getItem(lixeira.KEY) || '').length * 2;
         try { lixeira.purgarExpirados(); } catch (e) {}
@@ -11459,7 +11526,13 @@ const lixeira = {
     pacientes: 'Paciente', orcamento: 'Orçamento', documentos: 'Documento'
   },
   _ler() {
-    try { return JSON.parse(localStorage.getItem(lixeira.KEY) || '[]'); } catch (e) { return []; }
+    try {
+      const arr = JSON.parse(localStorage.getItem(lixeira.KEY) || '[]');
+      /* devolve as imagens inteiras, como em store.list */
+      const b = store._blobs();
+      if (Object.keys(b).length) arr.forEach(e => store._hidratar(e.item, b));
+      return arr;
+    } catch (e) { return []; }
   },
   _gravar(arr) {
     try { localStorage.setItem(lixeira.KEY, JSON.stringify(arr)); }
@@ -11471,7 +11544,8 @@ const lixeira = {
   guardar(modKey, item) {
     if (!item || !item._id) return;
     const arr = lixeira._ler();
-    arr.unshift({ mod: modKey, excluidoEm: new Date().toISOString(), item: item });
+    /* a lixeira também referencia a imagem em vez de copiá-la */
+    arr.unshift({ mod: modKey, excluidoEm: new Date().toISOString(), item: store._desidratar(item) });
     /* limite de segurança para não estourar o localStorage */
     if (arr.length > 120) arr.length = 120;
     lixeira._gravar(arr);
@@ -22315,10 +22389,30 @@ const pdfBackup = {
     return true;
   },
 
+  /* O token do Google vale ~1 h. Ele ficava só na memória: bastava recarregar
+     a página para sumir, e aí o app pedia autorização de novo. Agora ele
+     sobrevive ao recarregamento — dentro da validade, ninguém é incomodado. */
+  TOKEN_KEY: 'medsys.v7.pdfbk.token',
+  _lerTokenSalvo() {
+    try {
+      const t = JSON.parse(localStorage.getItem(pdfBackup.TOKEN_KEY) || 'null');
+      if (t && t.access_token && t.exp && Date.now() < t.exp - 60000) return t;
+    } catch (e) {}
+    return null;
+  },
+  _salvarToken(access_token, exp) {
+    try { localStorage.setItem(pdfBackup.TOKEN_KEY, JSON.stringify({ access_token, exp })); } catch (e) {}
+  },
   async _obterToken(interactive) {
     /* token ainda válido? */
     if (pdfBackup._accessToken && Date.now() < pdfBackup._tokenExpira - 60000) {
       return pdfBackup._accessToken;
+    }
+    const salvo = pdfBackup._lerTokenSalvo();
+    if (salvo) {
+      pdfBackup._accessToken = salvo.access_token;
+      pdfBackup._tokenExpira = salvo.exp;
+      return salvo.access_token;
     }
     const clientId = pdfBackup.clientId();
     if (!clientId) { toast('Configure o Client ID do Google em Ajustes → Backup de PDFs', 'warn'); return null; }
@@ -22333,6 +22427,7 @@ const pdfBackup = {
               pdfBackup._ultimoErro = null;
               pdfBackup._accessToken = resp.access_token;
               pdfBackup._tokenExpira = Date.now() + (resp.expires_in ? resp.expires_in * 1000 : 3600000);
+              pdfBackup._salvarToken(resp.access_token, pdfBackup._tokenExpira);
               resolve(resp.access_token);
             } else {
               pdfBackup._ultimoErro = (resp && (resp.error || resp.type)) || 'sem_token';
@@ -22388,16 +22483,12 @@ const pdfBackup = {
   async enviarDrive(blob, nomeArq, interactive) {
     const token = await pdfBackup._obterToken(interactive === true);
     if (!token) {
-      /* falhou sozinho (ao finalizar um caso): não insiste para sempre —
-         depois de 2 tentativas o Drive se desliga e avisa uma vez só */
-      if (interactive !== true) {
-        pdfBackup._falhasDrive = (pdfBackup._falhasDrive || 0) + 1;
-        if (pdfBackup._falhasDrive >= 2) {
-          pdfBackup.salvarCfg({ drive: false });
-          pdfBackup._falhasDrive = 0;
-          toast('📁 O Google Drive não está autorizando o app — desliguei essa opção. Os PDFs continuam indo para a nuvem.', 'warn');
-        }
-      }
+      /* O token do Google vale ~1 h. Vencer é NORMAL — não é motivo para
+         desligar a opção que a pessoa configurou. Antes o app desligava
+         sozinho depois de 2 falhas, e o médico encontrava a configuração
+         desfeita sem ter mexido nela. Agora a escolha continua de pé e o app
+         só pede a autorização de volta, no máximo 1× a cada 6 h. */
+      if (interactive !== true) pdfBackup._pedirAutorizacaoDeVolta();
       return false;
     }
     pdfBackup._falhasDrive = 0;
@@ -22420,6 +22511,19 @@ const pdfBackup = {
       console.warn('enviarDrive', e);
       return false;
     }
+  },
+
+  /* Pede a autorização de volta sem bloquear o trabalho: um aviso com ação,
+     no máximo um a cada 6 h. A configuração do usuário nunca é desfeita. */
+  AVISO_DRIVE_KEY: 'medsys.v7.pdfbk.aviso_drive_em',
+  _pedirAutorizacaoDeVolta() {
+    const ultimo = parseInt(localStorage.getItem(pdfBackup.AVISO_DRIVE_KEY) || '0', 10);
+    if (Date.now() - ultimo < 6 * 3600000) return;
+    try { localStorage.setItem(pdfBackup.AVISO_DRIVE_KEY, String(Date.now())); } catch (e) {}
+    try {
+      toast('📁 A autorização do Google Drive venceu (ela dura ~1 h). O PDF foi salvo na nuvem do sistema. ' +
+            'Para voltar a copiar no Drive, toque em Ajustes → Backup de PDFs → Conectar Google Drive.', 'warn');
+    } catch (e) {}
   },
 
   /* Botão de teste em Ajustes: conecta o Drive e sobe um arquivo de teste */
@@ -22459,8 +22563,9 @@ const pdfBackup = {
       '<li>Clique em <b>PUBLICAR APP</b> (o escopo usado é o <code>drive.file</code>, que não exige verificação) — ou adicione a sua conta em <b>Usuários de teste</b>.</li>' +
       '<li>Volte aqui e toque em <b>Conectar Google Drive</b> outra vez.</li>' +
       '</ol></details>',
-      '<button class="btn btn-primary" onclick="pdfBackup.desligarDrive()">👍 Deixar o Drive de lado</button>' +
-      '<button class="btn" onclick="modal.close()">Tentar de novo depois</button>');
+      '<button class="btn btn-primary" onclick="modal.close(); pdfBackup.conectarDrive()">🔄 Autorizar de novo</button>' +
+      '<button class="btn" onclick="modal.close()">Agora não</button>' +
+      '<button class="btn btn-ghost" onclick="pdfBackup.desligarDrive()">Desligar o Drive</button>');
   },
   desligarDrive() {
     pdfBackup.salvarCfg({ drive: false });
@@ -24336,7 +24441,7 @@ const anestesia = {
        impressão dependem deles), mas ficam recolhidos atrás de "outra equipe /
        mais detalhes" para a linha não parecer uma segunda cirurgia. */
     add(dados = {}, opts = {}) {
-      const body = document.getElementById('cir-combo-body');
+      const body = document.getElementById(opts.alvo || 'cir-combo-body');
       if (!body) return null;
       const div = document.createElement('div');
       div.className = 'grid';
@@ -24392,9 +24497,16 @@ const anestesia = {
       return linhas;
     },
     restaurar(arr) {
-      const body = document.getElementById('cir-combo-body');
-      if (body) body.innerHTML = '';
-      if (Array.isArray(arr)) arr.forEach(d => anestesia.cirurgias.add(d));
+      ['cir-mesma-body', 'cir-combo-body'].forEach(id => {
+        const b = document.getElementById(id); if (b) b.innerHTML = '';
+      });
+      if (!Array.isArray(arr)) return;
+      arr.forEach(d => {
+        /* linha sem equipe/horário própria é código do mesmo ato → lista de cima */
+        const mesmaEquipe = !d.cirurgiao && !d.inicio && !d.fim && !d.obs;
+        if (mesmaEquipe) anestesia.cirurgias.add(d, { mesmaEquipe: true, alvo: 'cir-mesma-body' });
+        else anestesia.cirurgias.add(d);
+      });
     }
   },
 
@@ -32799,12 +32911,13 @@ const historico = {
 
   _render(mod, filtro) {
     const total = store.list(mod).length;
+    const naNuvem = (() => { try { return (arquivo._indice()[mod] || []).length; } catch (e) { return 0; } })();
     return `
       <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <input id="hist-search-input" type="text" class="hist-search" value="${utils.escapeAttr(filtro)}"
                placeholder="Buscar por paciente, senha, procedimento, cirurgião..."
                style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:.9rem">
-        <span style="font-size:.78rem;color:var(--text-mute);white-space:nowrap">${total} registro(s)</span>
+        <span style="font-size:.78rem;color:var(--text-mute);white-space:nowrap">${total} aqui${naNuvem ? ' · <b>' + naNuvem + '</b> na nuvem' : ''}</span>
       </div>
       <div id="hist-table-host" style="max-height:60vh;overflow:auto">${historico._tabelaHTML(mod, filtro)}</div>
     `;
@@ -32873,7 +32986,32 @@ const historico = {
           <button class="btn btn-xs btn-danger" onclick="historico.excluirItem('${mod}','${it._id}')" title="Apagar">🗑</button>
         </td>
       </tr>`;
-    }).join('');
+    }).join('') + historico._linhasArquivadas(mod, q);
+  },
+
+  /* Registros que estão NA NUVEM e não neste aparelho (modo nuvem / arquivamento).
+     Sem isto eles sumiam da busca e pareciam apagados — foi exatamente o susto
+     de uma ficha "desaparecida". Clicar traz de volta e abre. */
+  _linhasArquivadas(mod, q) {
+    let itens = [];
+    try { itens = (arquivo._indice()[mod] || []); } catch (e) { return ''; }
+    if (!itens.length) return '';
+    const filtradas = q
+      ? itens.filter(e => ((e.nome || '') + ' ' + (e.data || '')).toLowerCase().includes(q))
+      : itens;
+    if (!filtradas.length) return '';
+    return filtradas
+      .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')))
+      .map(e => `<tr style="background:var(--surface-alt)">
+        <td style="font-size:.82rem;color:var(--text-soft);white-space:nowrap">${utils.escapeHTML(historico._fmtData(e.data) || '—')}</td>
+        <td style="font-size:.82rem;color:var(--text-mute)">—</td>
+        <td><strong>${utils.escapeHTML(e.nome || '(sem nome)')}</strong></td>
+        <td style="font-size:.82rem;color:var(--text-mute)">☁️ guardado na nuvem — não está neste aparelho</td>
+        <td><span class="status-pill" style="font-size:.68rem">na nuvem</span></td>
+        <td style="white-space:nowrap;text-align:right">
+          <button class="btn btn-xs btn-primary" onclick="modal.close(); dashboard._abrirRegistro('${mod}','${e.id}')" title="Buscar na nuvem e abrir">☁️ Abrir</button>
+        </td>
+      </tr>`).join('');
   },
 
   _senhaDe(mod, it) {
@@ -41209,6 +41347,81 @@ window.addEventListener('beforeprint', atualizarMetaImpressao);
    mudam por dentro — só são MOVIDOS (via DOM) para dentro do grupo certo.
    Fechados por padrão; a escolha de abrir/fechar é lembrada por aparelho.
 ============================================================================ */
+/* ============================================================================
+   AÇÕES DA FICHA — topo recolhível + Salvar/Finalizar no pé da página
+   O topo somava abas de rascunho, uma barra com dez botões e o bloco
+   "Reaproveitar": três faixas antes de chegar no primeiro campo, e num celular
+   isso é meia tela. Aqui tudo isso vira UM cabeçalho recolhível.
+   E, como a ficha é longa, Salvar/Finalizar passam a existir também no fim —
+   onde a pessoa termina de preencher, sem ter que subir de volta.
+============================================================================ */
+const acoesUI = {
+  KEY: 'medsys.v7.acoes.abertas',
+  MODS: ['pre', 'consulta', 'anestesia', 'recuperacao', 'termo', 'prescricao', 'risco', 'documentos'],
+  ROT: { pre: 'pré-anestésica', consulta: 'consulta', anestesia: 'ficha', recuperacao: 'SRPA',
+         termo: 'termo', prescricao: 'receituário', risco: 'risco', documentos: 'documento' },
+  _abertas() { try { return JSON.parse(localStorage.getItem(acoesUI.KEY) || '{}'); } catch (e) { return {}; } },
+  aberto(mod) { return !!acoesUI._abertas()[mod]; },
+  alternar(mod) {
+    const a = acoesUI._abertas();
+    a[mod] = !a[mod];
+    try { localStorage.setItem(acoesUI.KEY, JSON.stringify(a)); } catch (e) {}
+    acoesUI._aplicar(mod);
+  },
+  montar() {
+    acoesUI.MODS.forEach(mod => {
+      const modulo = document.getElementById('module-' + mod);
+      if (!modulo || document.getElementById('acoes-cab-' + mod)) return;
+      const barra = modulo.querySelector(':scope > .action-bar');
+      if (!barra) return;
+      const tabs = modulo.querySelector(':scope > .rascunho-tabs');
+      const cab = document.createElement('div');
+      cab.className = 'acoes-cab';
+      cab.id = 'acoes-cab-' + mod;
+      cab.setAttribute('onclick', "acoesUI.alternar('" + mod + "')");
+      const caixa = document.createElement('div');
+      caixa.className = 'acoes-caixa';
+      caixa.id = 'acoes-caixa-' + mod;
+      modulo.insertBefore(cab, tabs || barra);
+      modulo.insertBefore(caixa, tabs || barra);
+      if (tabs) caixa.appendChild(tabs);
+      caixa.appendChild(barra);
+      acoesUI._aplicar(mod);
+      acoesUI._rodape(mod);
+    });
+  },
+  _aplicar(mod) {
+    const cab = document.getElementById('acoes-cab-' + mod);
+    const caixa = document.getElementById('acoes-caixa-' + mod);
+    if (!cab || !caixa) return;
+    const aberto = acoesUI.aberto(mod);
+    caixa.style.display = aberto ? '' : 'none';
+    cab.classList.toggle('aberto', aberto);
+    cab.innerHTML = '<span class="ac-seta">' + (aberto ? '▾' : '▸') + '</span>' +
+      '<b>⚙️ Ações da ' + (acoesUI.ROT[mod] || 'ficha') + '</b>' +
+      '<small>novo, carregar, imprimir, exportar, modelos</small>';
+    /* o bloco "Reaproveitar" segue o mesmo estado — é ação, não preenchimento */
+    const tb = document.querySelector('#form-' + mod + ' .form-toolbar');
+    if (tb) tb.style.display = aberto ? '' : 'none';
+  },
+  /* Salvar/Finalizar no fim da página — só onde os dois existem de fato */
+  _rodape(mod) {
+    const form = document.getElementById('form-' + mod);
+    const obj = window[mod];
+    if (!form || !obj || typeof obj.salvar !== 'function') return;
+    if (document.getElementById('acoes-rodape-' + mod)) return;
+    const temFinalizar = typeof obj.finalizar === 'function';
+    const div = document.createElement('div');
+    div.className = 'acoes-rodape';
+    div.id = 'acoes-rodape-' + mod;
+    div.innerHTML =
+      '<button type="button" class="btn btn-success" onclick="' + mod + '.salvar()">💾 Salvar</button>' +
+      (temFinalizar ? '<button type="button" class="btn btn-finalizar" onclick="' + mod + '.finalizar()">✅ Finalizar</button>' : '') +
+      '<button type="button" class="btn btn-ghost btn-sm" onclick="window.scrollTo({top:0,behavior:\'smooth\'})" title="Voltar ao topo">↑ Topo</button>';
+    form.appendChild(div);
+  }
+};
+
 const ajustesGrupos = {
   KEY: 'medsys.v7.ajustes.sysgrupos',
   GRUPOS: [
@@ -41273,6 +41486,8 @@ const ajustesGrupos = {
   /* Abre o grupo que contém o card e leva até ele (usado por atalhos do app) */
   abrirPara(cardId) {
     try { ajustesGrupos.montar(); } catch (e) {}
+  window.acoesUI = acoesUI;
+  try { acoesUI.montar(); } catch (e) {}
     const g = ajustesGrupos.GRUPOS.find(x => x.cards.includes(cardId));
     if (g && !ajustesGrupos._aberto(g.id)) {
       const s = ajustesGrupos._salvos(); s[g.id] = true;
