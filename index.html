@@ -37315,7 +37315,13 @@ const dashboard = {
     const anestesias  = dashboard.filtrarPorPeriodo(store.list('anestesia'),  periodo, 'procedimento') /* fallback p/ updatedAt */
                           .filter(_ => true); // simplificação: usa _updatedAt
     /* Usa _updatedAt como referência de período pq é confiável */
-    const filtPorMeta = list => dashboard.filtrarPorPeriodo(list, periodo, '_updatedAt');
+    /* A data que importa é a do PROCEDIMENTO, não a da última gravação.
+       Filtrar por _updatedAt fazia o Dashboard contar quando o ARQUIVO foi
+       salvo: bastava a nuvem regravar os registros para o dia de ontem
+       "perder" as anestesias e hoje ganhar todas de uma vez. */
+    const filtPorMeta = list => dashboard.filtrarPorPeriodo(
+      list.map(it => Object.assign({}, it, { _dataClinica: dashboard._dataClinica(it) })),
+      periodo, '_dataClinica');
     const allAnest = filtPorMeta(store.list('anestesia'));
     const allPre = filtPorMeta(store.list('pre'));
     const allCons = filtPorMeta(store.list('consulta'));
@@ -37443,6 +37449,15 @@ const dashboard = {
     dashboard._ligarHandlers();
   },
 
+  /* Data clínica do registro (procedimento/avaliação); só cai na data de
+     gravação quando o registro não tem data própria. */
+  _dataClinica(it) {
+    let d = '';
+    try { d = historico._dataItem(it) || ''; } catch (e) {}
+    if (d) return String(d).length === 10 ? d + 'T12:00:00.000Z' : d;
+    return it._updatedAt || it._createdAt || '';
+  },
+
   /* ===== BUSCA NO BANCO DE DADOS ===== */
   buscar() {
     const inp = document.getElementById('dash-search-input');
@@ -37537,7 +37552,13 @@ const dashboard = {
   /* Abre modal expandido com relatório detalhado para o item clicado */
   verDetalhes(tipo) {
     const periodo = document.getElementById('dash-periodo').value;
-    const filtPorMeta = list => dashboard.filtrarPorPeriodo(list, periodo, '_updatedAt');
+    /* A data que importa é a do PROCEDIMENTO, não a da última gravação.
+       Filtrar por _updatedAt fazia o Dashboard contar quando o ARQUIVO foi
+       salvo: bastava a nuvem regravar os registros para o dia de ontem
+       "perder" as anestesias e hoje ganhar todas de uma vez. */
+    const filtPorMeta = list => dashboard.filtrarPorPeriodo(
+      list.map(it => Object.assign({}, it, { _dataClinica: dashboard._dataClinica(it) })),
+      periodo, '_dataClinica');
     const allAnest = filtPorMeta(store.list('anestesia'));
     const allPre   = filtPorMeta(store.list('pre'));
     const allCons  = filtPorMeta(store.list('consulta'));

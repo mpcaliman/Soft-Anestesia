@@ -5099,6 +5099,44 @@ await test('Eventos: sedação e sondagens (oro/naso/vesical) entram no catálog
   await page.close();
 });
 
+/* 89) Dashboard contava pela data em que o ARQUIVO foi salvo. Com a nuvem
+   regravando registros, o dia de ontem "perdia" as anestesias. */
+await test('Dashboard conta pela data do procedimento, não pela data da última gravação', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const hoje = utils.hojeISO();
+    const ontem = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
+    /* ficha de ONTEM, mas regravada HOJE pela sincronização — o caso real */
+    const ficha = { _id: 'f1', paciente: { nome: 'A' },
+                    procedimento: { data: ontem, descricao: 'Colecistectomia' },
+                    _finalizado: true, _updatedAt: new Date().toISOString() };
+    out.usaDataDoProcedimento = String(dashboard._dataClinica(ficha)).slice(0, 10) === ontem;
+    /* pré usa a data da avaliação */
+    out.preTambem = String(dashboard._dataClinica({ _id: 'p', data_avaliacao: ontem, _updatedAt: new Date().toISOString() })).slice(0, 10) === ontem;
+    /* sem data clínica, cai na data de gravação — não some do painel */
+    out.semDataNaoSome = !!dashboard._dataClinica({ _id: 'x', _updatedAt: '2026-08-01T10:00:00.000Z' });
+
+    /* o filtro de período passa a separar os dias corretamente */
+    const lista = [ficha, { _id: 'f2', paciente: { nome: 'B' },
+                            procedimento: { data: hoje, descricao: 'Hérnia' },
+                            _updatedAt: new Date().toISOString() }]
+      .map(it => Object.assign({}, it, { _dataClinica: dashboard._dataClinica(it) }));
+    /* janela curta: pela data clínica, a de ontem fica de fora; pelo carimbo
+       de gravação as duas entrariam, que era exatamente o defeito */
+    const porClinica = dashboard.filtrarPorPeriodo(lista, '1', '_dataClinica');
+    const porGravacao = dashboard.filtrarPorPeriodo(lista, '1', '_updatedAt');
+    out.separaOsDias = porClinica.length === 1 && porClinica[0]._id === 'f2'
+      && porGravacao.length === 2;
+    return out;
+  });
+  assert(r.usaDataDoProcedimento, 'a ficha deveria contar na data do procedimento, não na data em que foi regravada');
+  assert(r.preTambem, 'a pré deveria contar na data da avaliação');
+  assert(r.semDataNaoSome, 'registro sem data clínica não pode sumir do painel');
+  assert(r.separaOsDias, 'o filtro de período tem que separar ontem de hoje pela data clínica');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
