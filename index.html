@@ -5989,6 +5989,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <span class="qa-label">Adicionar rápido</span>
           <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.eventos.abrirCatalogo()" title="Marque vários eventos de uma vez, agrupados por categoria">📋 Catálogo (multiseleção)</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Venoclise'})">+ Venoclise</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Sedação'})">+ Sedação</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Indução'})">+ Indução</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Intubação'})">+ Intubação</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Início O₂'})">+ Início O₂</button>
@@ -8762,6 +8763,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <button type="button" class="btn btn-sm" onclick="arquivo.arquivarAgora()" title="Move para a nuvem os registros antigos (90+ dias; financeiro 1 ano) que já estão confirmados lá. Podem ser trazidos de volta a qualquer momento.">🗄 Arquivar casos antigos</button>
           <button type="button" class="btn btn-sm" onclick="armazenamento.compactarVersoes()" title="Reduz o histórico de versões a 3 por documento e remove assinaturas/fotos em base64 do histórico (os documentos atuais não mudam)">🕓 Compactar histórico de versões</button>
           <button type="button" class="btn btn-sm" onclick="armazenamento.liberarAnexos()" title="Remove do aparelho cópias locais de anexos que JÁ estão na nuvem (continuam abríveis pela nuvem)">☁️ Liberar anexos já na nuvem</button>
+          <button type="button" class="btn btn-sm btn-primary" onclick="arquivo.uiProcurarNaNuvem()" title="Procura um paciente no banco da clínica E no backup da sua conta — use quando uma ficha não aparece em lugar nenhum">🔎 Procurar paciente na nuvem inteira</button>
           <button type="button" class="btn btn-sm" onclick="armazenamento.testarLimite()" title="Descobre quanto este navegador realmente aceita guardar — útil quando o aviso de cheio não bate com o espaço em uso">📏 Medir o limite deste navegador</button>
           <button type="button" class="btn btn-sm" onclick="armazenamento.esvaziarLixeira()" title="Esvazia a lixeira de 30 dias">🗑 Esvaziar lixeira</button>
           <button type="button" class="btn btn-sm" onclick="armazenamento.limparDemo()" title="Remove os dados isolados do modo demonstração">🧪 Remover dados de demonstração</button>
@@ -10929,6 +10931,104 @@ const arquivo = {
   /* Traz TODOS os arquivados de volta ao aparelho, em lote. Usado quando o
      arquivamento automático levou casos demais de uma vez. Não apaga nada:
      só copia da nuvem de volta para cá. */
+  /* ---- RESGATE: procura um paciente na NUVEM INTEIRA -----------------------
+     O índice local só conhece o que ESTE aparelho arquivou. Se a ficha foi
+     feita noutro aparelho, ou o índice se perdeu, ela existe na nuvem e nada
+     aqui a encontra. Isto varre o banco da clínica e o backup da conta pelo
+     NOME, mostra o que achou e traz de volta o que você escolher. */
+  async procurarNaNuvem(nome) {
+    const alvo = String(nome || '').toLowerCase().trim();
+    if (!alvo) { toast('Escreva parte do nome do paciente', 'warn'); return []; }
+    if (!cloud.estaConfigurado() || !cloud.estaLogado()) { toast('Conecte-se à nuvem primeiro', 'warn'); return []; }
+    if (!(await cloud._garantirToken())) { toast('Sessão da nuvem expirada — entre de novo', 'warn'); return []; }
+    const c = cloud.config();
+    const achados = [];
+    const vistos = new Set();
+    const guardar = (mod, item) => {
+      if (!item || !item._id || vistos.has(mod + ':' + item._id)) return;
+      const n = (arquivo._nomeDe(item) || '').toLowerCase();
+      if (!n.includes(alvo)) return;
+      vistos.add(mod + ':' + item._id);
+      achados.push({ mod, item,
+        nome: arquivo._nomeDe(item),
+        data: (typeof historico !== 'undefined' ? historico._dataItem(item) : '') || '',
+        aqui: !!store.getById(mod, item._id) });
+    };
+    /* 1) banco relacional da clínica (o que a equipe inteira enxerga) */
+    try {
+      const org = await cloudRel._orgAsync();
+      if (org) {
+        for (const mod of Object.keys(cloudRel.MODOS || {})) {
+          const cfg = cloudRel.MODOS[mod];
+          if (!cfg || !cfg.tabela) continue;
+          try {
+            const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
+              '&select=' + encodeURIComponent(cloudRel._REG_SELECT) + '&limit=1000',
+              { headers: cloud._headers(true) });
+            if (!r.ok) continue;
+            (await r.json()).forEach(row => {
+              try { guardar(mod, cloudRel._rowParaRegistro(row)); } catch (e) {}
+            });
+          } catch (e) {}
+        }
+      }
+    } catch (e) {}
+    /* 2) backup pessoal (canal legado) — pega o que nunca foi espelhado */
+    try {
+      const sess = cloud.session();
+      const r = await fetch(c.url + '/rest/v1/documentos?user_id=eq.' + sess.user.id +
+        '&select=modulo,dados&limit=2000', { headers: cloud._headers(true) });
+      if (r.ok) (await r.json()).forEach(row => { try { guardar(row.modulo, row.dados); } catch (e) {} });
+    } catch (e) {}
+    return achados;
+  },
+
+  async uiProcurarNaNuvem() {
+    const nome = prompt('Procurar na nuvem inteira — nome do paciente (ou parte dele):', '');
+    if (nome === null) return;
+    modal.open('🔎 Procurando na nuvem…', '<p style="font-size:.88rem">Varrendo o banco da clínica e o backup da sua conta. Pode levar alguns segundos.</p>', '');
+    let achados = [];
+    try { achados = await arquivo.procurarNaNuvem(nome); } catch (e) {}
+    if (!achados.length) {
+      modal.open('🔎 Nada encontrado',
+        '<p style="font-size:.88rem">Não achei nenhum registro com esse nome na nuvem — nem no banco da clínica, nem no backup da sua conta.</p>' +
+        '<p style="font-size:.82rem;color:var(--text-mute);margin-top:8px">Se a ficha foi feita em outro aparelho e nunca chegou a sincronizar, ela só existe lá. Abra o app naquele aparelho e use <b>Atualizar tudo</b>.</p>',
+        '<button class="btn" onclick="modal.close()">Fechar</button>');
+      return;
+    }
+    arquivo._achados = achados;
+    const linhas = achados.map((a, i) =>
+      '<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">' +
+      '<span style="font-size:.84rem;min-width:0"><b>' + utils.escapeHTML(a.nome) + '</b><br>' +
+      '<span style="color:var(--text-mute);font-size:.78rem">' + utils.escapeHTML((lixeira.LABELS[a.mod] || a.mod)) + ' · ' +
+      utils.escapeHTML(historico._fmtData(a.data)) + (a.aqui ? ' · já está neste aparelho' : '') + '</span></span>' +
+      (a.aqui ? '<span style="font-size:.78rem;color:#1f7a4d;white-space:nowrap">✓ aqui</span>'
+              : '<button class="btn btn-xs btn-primary" onclick="arquivo.trazerAchado(' + i + ', this)">⬇ Trazer</button>') +
+      '</div>').join('');
+    modal.open('🔎 ' + achados.length + ' registro(s) na nuvem',
+      '<div style="max-height:52vh;overflow:auto">' + linhas + '</div>',
+      '<button class="btn btn-primary" onclick="arquivo.trazerTodosAchados()">⬇ Trazer todos</button>' +
+      '<button class="btn" onclick="modal.close()">Fechar</button>');
+  },
+  _achados: null,
+  trazerAchado(i, btn) {
+    const a = (arquivo._achados || [])[i];
+    if (!a) return;
+    const lst = store.list(a.mod);
+    if (!lst.some(x => x._id === a.item._id)) { lst.push(a.item); store.setList(a.mod, lst); }
+    try { arquivo._removerDoIndice(a.mod, a.item._id); } catch (e) {}
+    a.aqui = true;
+    if (btn) { btn.outerHTML = '<span style="font-size:.78rem;color:#1f7a4d">✓ trazido</span>'; }
+    toast('✅ ' + a.nome + ' — registro de volta no aparelho');
+  },
+  trazerTodosAchados() {
+    let n = 0;
+    (arquivo._achados || []).forEach((a, i) => { if (!a.aqui) { arquivo.trazerAchado(i, null); n++; } });
+    modal.close();
+    toast(n ? '✅ ' + n + ' registro(s) trazidos da nuvem' : 'Todos já estavam aqui');
+    try { armazenamento.render(); } catch (e) {}
+  },
+
   async restaurarTodos(opts = {}) {
     const ix = arquivo._indice();
     const itens = [];
@@ -24007,8 +24107,9 @@ const anestesia = {
   eventos: {
     /* Catálogo agrupado (fonte única) — TIPOS é derivado daqui */
     GRUPOS: [
-      { grupo: 'Procedimentos / acessos', itens: ['Venoclise', 'Punção arterial', 'Acesso venoso central'] },
-      { grupo: 'Via aérea / anestesia', itens: ['Indução', 'Intubação', 'Extubação', 'Máscara laríngea', 'Início O₂', 'Fim O₂', 'Início halogenado', 'Fim halogenado', 'Início infusão contínua', 'Fim infusão contínua'] },
+      { grupo: 'Procedimentos / acessos', itens: ['Venoclise', 'Punção arterial', 'Acesso venoso central',
+          'Sondagem orogástrica', 'Sondagem nasogástrica', 'Sondagem vesical (Foley)', 'Sondagem vesical de alívio'] },
+      { grupo: 'Via aérea / anestesia', itens: ['Sedação', 'Indução', 'Intubação', 'Extubação', 'Máscara laríngea', 'Início O₂', 'Fim O₂', 'Início halogenado', 'Fim halogenado', 'Início infusão contínua', 'Fim infusão contínua'] },
       { grupo: 'Bloqueios', itens: ['Raquianestesia', 'Peridural', 'Bloqueio periférico'] },
       { grupo: 'Cirurgia', itens: ['Incisão cirúrgica', 'Início da cirurgia', 'Hemostasia', 'Fim da cirurgia'] },
       { grupo: 'Laparoscopia', itens: ['Início do pneumoperitônio', 'Fim do pneumoperitônio'] },
@@ -24028,6 +24129,11 @@ const anestesia = {
       'Bloqueio periférico': '1) Assepsia e antissepsia; 2) Identificação do alvo por ultrassom/neuroestimulação; 3) Punção; 4) Injeção fracionada com aspiração intermitente; 5) Checagem da dispersão e do bloqueio.',
       'Intubação': '1) Pré-oxigenação; 2) Indução e bloqueio neuromuscular; 3) Laringoscopia; 4) Visualização da glote (Cormack–Lehane); 5) Passagem do tubo; 6) Confirmação por EtCO₂, ausculta e expansibilidade; 7) Insuflação do cuff e fixação.',
       'Extubação': '1) Critérios de extubação (desperto, TOF adequado, ventilação eficaz); 2) Aspiração de vias aéreas; 3) Desinsuflação do cuff; 4) Extubação; 5) O₂ suplementar e observação.',
+      'Sedação': 'Sedação titulada sob monitorização contínua (oximetria, cardioscopia e PA), com oxigênio suplementar; paciente mantendo ventilação espontânea e resposta a estímulo verbal/tátil conforme o nível pretendido.',
+      'Sondagem orogástrica': '1) Medida da distância a introduzir; 2) Lubrificação; 3) Passagem por via oral com o paciente já anestesiado; 4) Confirmação do posicionamento (ausculta epigástrica/aspirado gástrico); 5) Fixação e drenagem.',
+      'Sondagem nasogástrica': '1) Escolha da narina e lubrificação; 2) Passagem cuidadosa (atenção a coagulopatia e trauma de face/base de crânio); 3) Confirmação do posicionamento; 4) Fixação e drenagem.',
+      'Sondagem vesical (Foley)': '1) Assepsia e antissepsia; 2) Campos estéreis; 3) Lubrificação; 4) Passagem da sonda de Foley; 5) Insuflação do balão após retorno de urina; 6) Conexão ao sistema fechado e fixação; 7) Registro do débito urinário.',
+      'Sondagem vesical de alívio': '1) Assepsia e antissepsia; 2) Técnica estéril; 3) Passagem da sonda; 4) Esvaziamento vesical; 5) Retirada imediata; 6) Registro do volume drenado.',
       'Venoclise': '1) Garroteamento; 2) Assepsia; 3) Punção venosa periférica; 4) Refluxo sanguíneo; 5) Fixação e teste de fluxo.',
       'Indução': '1) Pré-oxigenação; 2) Hipnótico + opioide; 3) Checagem de ventilação sob máscara; 4) Bloqueador neuromuscular, se indicado IOT.',
       'Incisão cirúrgica': 'Início da incisão cirúrgica após confirmação de plano anestésico e analgesia adequados.',
@@ -24254,6 +24360,7 @@ const anestesia = {
        só no evento. */
     TIPO_EVENTO: {
       'Anestesia geral': 'Indução',
+      'Sedação': 'Sedação',
       'Raquianestesia': 'Raquianestesia',
       'Peridural': 'Peridural',
       'Bloqueio periférico': 'Bloqueio periférico',

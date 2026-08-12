@@ -5024,6 +5024,81 @@ await test('Busca mostra também o que está na nuvem, e a limpeza de duplicados
   await page.close();
 });
 
+/* 87) Resgate: procurar um paciente na nuvem inteira, não só no índice local */
+await test('Resgate encontra o paciente no banco da clínica e no backup, e traz de volta', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('anestesia', []); store.setList('pre', []);
+    cloud.estaConfigurado = () => true; cloud.estaLogado = () => true;
+    cloud._garantirToken = async () => true;
+    cloud.config = () => ({ url: 'https://x.supabase.co', key: 'k' });
+    cloud._headers = () => ({});
+    cloud.session = () => ({ user: { id: 'u1' } });
+    cloudRel._orgAsync = async () => 'org-1';
+
+    const daClinica = { _id: 'd21', paciente: { nome: 'Abraão Santiago' }, procedimento: { data: '2026-07-21' } };
+    const doBackup = { _id: 'p9', nome: 'Abraão Santiago', data_avaliacao: '2026-07-20' };
+    window.fetch = async (url) => {
+      const u = String(url);
+      if (/anesthesia_records/.test(u) && /organization_id/.test(u)) {
+        return { ok: true, json: async () => [{ id: 'x', legacy_id: 'd21', data: daClinica, updated_at: '2026-07-21' }] };
+      }
+      if (/documentos/.test(u)) {
+        return { ok: true, json: async () => [{ modulo: 'pre', dados: doBackup }] };
+      }
+      return { ok: true, json: async () => [] };
+    };
+
+    const achados = await arquivo.procurarNaNuvem('abraão');
+    out.achouNosDoisCanais = achados.length === 2
+      && achados.some(a => a.mod === 'anestesia' && a.item._id === 'd21')
+      && achados.some(a => a.mod === 'pre' && a.item._id === 'p9');
+    /* nome que não existe não traz nada */
+    out.filtraPorNome = (await arquivo.procurarNaNuvem('zzzz')).length === 0;
+
+    /* trazer de volta coloca o registro no aparelho */
+    arquivo._achados = achados;
+    arquivo.trazerTodosAchados();
+    out.trouxe = !!store.getById('anestesia', 'd21') && !!store.getById('pre', 'p9');
+    /* e some do índice de arquivados, para não aparecer duplicado */
+    out.saiuDoIndice = !arquivo.estaArquivado('anestesia', 'd21');
+
+    store.setList('anestesia', []); store.setList('pre', []);
+    return out;
+  });
+  assert(r.achouNosDoisCanais, 'o resgate deveria varrer o banco da clínica E o backup da conta');
+  assert(r.filtraPorNome, 'nome que não existe não pode trazer registro de outro paciente');
+  assert(r.trouxe, 'trazer deveria colocar o registro de volta no aparelho');
+  assert(r.saiuDoIndice, 'o registro trazido não pode continuar listado como arquivado');
+  await page.close();
+});
+
+/* 88) Eventos novos pedidos: sedação e sondas */
+await test('Eventos: sedação e sondagens (oro/naso/vesical) entram no catálogo com descrição', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const T = anestesia.eventos.TIPOS;
+    out.temSedacao = T.includes('Sedação');
+    out.temSondas = ['Sondagem orogástrica', 'Sondagem nasogástrica',
+                     'Sondagem vesical (Foley)', 'Sondagem vesical de alívio'].every(x => T.includes(x));
+    /* cada um traz a descrição técnica pronta */
+    out.temDescricoes = ['Sedação', 'Sondagem orogástrica', 'Sondagem vesical (Foley)']
+      .every(x => (anestesia.eventos.descricaoPara(x) || '').length > 40);
+    out.foleyFalaDoBalao = /balão/i.test(anestesia.eventos.descricaoPara('Sondagem vesical (Foley)'));
+    /* marcar "Sedação" no card 3 cria o evento de sedação, não o de indução */
+    out.mapeiaTipo = anestesia.eventos.TIPO_EVENTO['Sedação'] === 'Sedação';
+    return out;
+  });
+  assert(r.temSedacao, 'sedação deveria estar no catálogo de eventos');
+  assert(r.temSondas, 'as sondagens oro, naso e vesicais deveriam estar no catálogo');
+  assert(r.temDescricoes, 'cada evento novo precisa da descrição técnica pronta');
+  assert(r.foleyFalaDoBalao, 'a descrição da Foley deveria citar a insuflação do balão');
+  assert(r.mapeiaTipo, 'marcar Sedação no card da técnica deveria criar o evento de sedação');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
