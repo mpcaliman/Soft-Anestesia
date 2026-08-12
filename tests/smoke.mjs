@@ -5024,6 +5024,194 @@ await test('Busca mostra também o que está na nuvem, e a limpeza de duplicados
   await page.close();
 });
 
+/* 87) Resgate: procurar um paciente na nuvem inteira, não só no índice local */
+await test('Resgate encontra o paciente no banco da clínica e no backup, e traz de volta', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('anestesia', []); store.setList('pre', []);
+    cloud.estaConfigurado = () => true; cloud.estaLogado = () => true;
+    cloud._garantirToken = async () => true;
+    cloud.config = () => ({ url: 'https://x.supabase.co', key: 'k' });
+    cloud._headers = () => ({});
+    cloud.session = () => ({ user: { id: 'u1' } });
+    cloudRel._orgAsync = async () => 'org-1';
+
+    const daClinica = { _id: 'd21', paciente: { nome: 'Abraão Santiago' }, procedimento: { data: '2026-07-21' } };
+    const doBackup = { _id: 'p9', nome: 'Abraão Santiago', data_avaliacao: '2026-07-20' };
+    window.fetch = async (url) => {
+      const u = String(url);
+      if (/anesthesia_records/.test(u) && /organization_id/.test(u)) {
+        return { ok: true, json: async () => [{ id: 'x', legacy_id: 'd21', data: daClinica, updated_at: '2026-07-21' }] };
+      }
+      if (/documentos/.test(u)) {
+        return { ok: true, json: async () => [{ modulo: 'pre', dados: doBackup }] };
+      }
+      return { ok: true, json: async () => [] };
+    };
+
+    const achados = await arquivo.procurarNaNuvem('abraão');
+    out.achouNosDoisCanais = achados.length === 2
+      && achados.some(a => a.mod === 'anestesia' && a.item._id === 'd21')
+      && achados.some(a => a.mod === 'pre' && a.item._id === 'p9');
+    /* nome que não existe não traz nada */
+    out.filtraPorNome = (await arquivo.procurarNaNuvem('zzzz')).length === 0;
+
+    /* trazer de volta coloca o registro no aparelho */
+    arquivo._achados = achados;
+    arquivo.trazerTodosAchados();
+    out.trouxe = !!store.getById('anestesia', 'd21') && !!store.getById('pre', 'p9');
+    /* e some do índice de arquivados, para não aparecer duplicado */
+    out.saiuDoIndice = !arquivo.estaArquivado('anestesia', 'd21');
+
+    store.setList('anestesia', []); store.setList('pre', []);
+    return out;
+  });
+  assert(r.achouNosDoisCanais, 'o resgate deveria varrer o banco da clínica E o backup da conta');
+  assert(r.filtraPorNome, 'nome que não existe não pode trazer registro de outro paciente');
+  assert(r.trouxe, 'trazer deveria colocar o registro de volta no aparelho');
+  assert(r.saiuDoIndice, 'o registro trazido não pode continuar listado como arquivado');
+  await page.close();
+});
+
+/* 88) Eventos novos pedidos: sedação e sondas */
+await test('Eventos: sedação e sondagens (oro/naso/vesical) entram no catálogo com descrição', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const T = anestesia.eventos.TIPOS;
+    out.temSedacao = T.includes('Sedação');
+    out.temSondas = ['Sondagem orogástrica', 'Sondagem nasogástrica',
+                     'Sondagem vesical (Foley)', 'Sondagem vesical de alívio'].every(x => T.includes(x));
+    /* cada um traz a descrição técnica pronta */
+    out.temDescricoes = ['Sedação', 'Sondagem orogástrica', 'Sondagem vesical (Foley)']
+      .every(x => (anestesia.eventos.descricaoPara(x) || '').length > 40);
+    out.foleyFalaDoBalao = /balão/i.test(anestesia.eventos.descricaoPara('Sondagem vesical (Foley)'));
+    /* marcar "Sedação" no card 3 cria o evento de sedação, não o de indução */
+    out.mapeiaTipo = anestesia.eventos.TIPO_EVENTO['Sedação'] === 'Sedação';
+    return out;
+  });
+  assert(r.temSedacao, 'sedação deveria estar no catálogo de eventos');
+  assert(r.temSondas, 'as sondagens oro, naso e vesicais deveriam estar no catálogo');
+  assert(r.temDescricoes, 'cada evento novo precisa da descrição técnica pronta');
+  assert(r.foleyFalaDoBalao, 'a descrição da Foley deveria citar a insuflação do balão');
+  assert(r.mapeiaTipo, 'marcar Sedação no card da técnica deveria criar o evento de sedação');
+  await page.close();
+});
+
+/* 89) Dashboard contava pela data em que o ARQUIVO foi salvo. Com a nuvem
+   regravando registros, o dia de ontem "perdia" as anestesias. */
+await test('Dashboard conta pela data do procedimento, não pela data da última gravação', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const hoje = utils.hojeISO();
+    const ontem = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
+    /* ficha de ONTEM, mas regravada HOJE pela sincronização — o caso real */
+    const ficha = { _id: 'f1', paciente: { nome: 'A' },
+                    procedimento: { data: ontem, descricao: 'Colecistectomia' },
+                    _finalizado: true, _updatedAt: new Date().toISOString() };
+    out.usaDataDoProcedimento = String(dashboard._dataClinica(ficha)).slice(0, 10) === ontem;
+    /* pré usa a data da avaliação */
+    out.preTambem = String(dashboard._dataClinica({ _id: 'p', data_avaliacao: ontem, _updatedAt: new Date().toISOString() })).slice(0, 10) === ontem;
+    /* sem data clínica, cai na data de gravação — não some do painel */
+    out.semDataNaoSome = !!dashboard._dataClinica({ _id: 'x', _updatedAt: '2026-08-01T10:00:00.000Z' });
+
+    /* o filtro de período passa a separar os dias corretamente */
+    const lista = [ficha, { _id: 'f2', paciente: { nome: 'B' },
+                            procedimento: { data: hoje, descricao: 'Hérnia' },
+                            _updatedAt: new Date().toISOString() }]
+      .map(it => Object.assign({}, it, { _dataClinica: dashboard._dataClinica(it) }));
+    /* janela curta: pela data clínica, a de ontem fica de fora; pelo carimbo
+       de gravação as duas entrariam, que era exatamente o defeito */
+    const porClinica = dashboard.filtrarPorPeriodo(lista, '1', '_dataClinica');
+    const porGravacao = dashboard.filtrarPorPeriodo(lista, '1', '_updatedAt');
+    out.separaOsDias = porClinica.length === 1 && porClinica[0]._id === 'f2'
+      && porGravacao.length === 2;
+    return out;
+  });
+  assert(r.usaDataDoProcedimento, 'a ficha deveria contar na data do procedimento, não na data em que foi regravada');
+  assert(r.preTambem, 'a pré deveria contar na data da avaliação');
+  assert(r.semDataNaoSome, 'registro sem data clínica não pode sumir do painel');
+  assert(r.separaOsDias, 'o filtro de período tem que separar ontem de hoje pela data clínica');
+  await page.close();
+});
+
+/* 90) Pré-lançamento: auxiliar prepara e ENVIA; médico confere, devolve ou
+   finaliza. Enviar não é salvar — o registro sobe o tempo todo. */
+await test('Pré-lançamento: só entra na fila do médico depois de enviado, e pode ser devolvido', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('pre', []); store.setList('anestesia', []);
+    const auxiliar = { id: 'sec1', nome: 'Secretária', perfil: 'secretaria', role: 'auxiliar' };
+    const medico = { id: 'med1', nome: 'Dr. Marcelo', perfil: 'admin', role: 'gestor' };
+    auth.usuarioAtual = () => auxiliar;
+
+    /* a auxiliar salva: vira rascunho DELA e NÃO aparece para o médico */
+    const rec = store.save('pre', { nome: 'Paciente X', data_avaliacao: '2026-08-11' });
+    out.nasceRascunho = preLanc.estado(store.getById('pre', rec._id)) === 'rascunho'
+      && store.getById('pre', rec._id)._preLanc.porNome === 'Secretária';
+    auth.usuarioAtual = () => medico;
+    out.filaVaziaAntesDeEnviar = preLanc.fila().length === 0;
+
+    /* ela envia */
+    auth.usuarioAtual = () => auxiliar;
+    const f = document.getElementById('form-pre');
+    let hid = f.querySelector('[name="_id"]');
+    if (!hid) { hid = document.createElement('input'); hid.type = 'hidden'; hid.name = '_id'; f.appendChild(hid); }
+    hid.value = rec._id;
+    preLanc.enviar('pre');
+    out.enviouComCarimbo = preLanc.estado(store.getById('pre', rec._id)) === 'enviado'
+      && !!store.getById('pre', rec._id)._preLanc.enviadoEm;
+
+    /* agora aparece na fila do médico, com quem lançou */
+    auth.usuarioAtual = () => medico;
+    const fila = preLanc.fila();
+    out.entrouNaFila = fila.length === 1 && fila[0].por === 'Secretária' && fila[0].mod === 'pre';
+
+    /* o médico devolve com motivo */
+    window.prompt = () => 'Falta a carteirinha do convênio';
+    preLanc.devolver('pre', rec._id);
+    const dev = store.getById('pre', rec._id);
+    out.devolveu = preLanc.estado(dev) === 'devolvido' && /carteirinha/.test(dev._preLanc.motivo);
+    out.saiuDaFila = preLanc.fila().length === 0;
+
+    /* ela mexe de novo: volta a ser rascunho e precisa reenviar */
+    auth.usuarioAtual = () => auxiliar;
+    store.save('pre', Object.assign({}, dev, { obs: 'corrigido' }));
+    out.voltaARascunho = preLanc.estado(store.getById('pre', rec._id)) === 'rascunho';
+    out.contaPendentes = preLanc.meusPendentes().rascunho.length === 1;
+    preLanc.enviar('pre');
+
+    /* o médico finaliza: sai da fila de vez */
+    auth.usuarioAtual = () => medico;
+    const atual = store.getById('pre', rec._id);
+    store.save('pre', Object.assign({}, atual, { _finalizado: true }));
+    const fim = store.getById('pre', rec._id);
+    out.conferido = fim._preLanc.estado === 'conferido' && fim._preLanc.conferidoPor === 'Dr. Marcelo';
+    out.filaLimpa = preLanc.fila().length === 0;
+
+    /* a auxiliar nunca é tratada como médica */
+    auth.usuarioAtual = () => auxiliar;
+    out.papeis = preLanc.ehAuxiliar() && !preLanc.ehMedico();
+    auth.usuarioAtual = () => medico;
+    out.papeisMedico = preLanc.ehMedico() && !preLanc.ehAuxiliar();
+
+    store.setList('pre', []); store.setList('anestesia', []);
+    return out;
+  });
+  assert(r.nasceRascunho, 'o que a auxiliar salva nasce como rascunho dela, com o nome de quem lançou');
+  assert(r.filaVaziaAntesDeEnviar, 'antes de enviar, nada pode aparecer para o médico');
+  assert(r.enviouComCarimbo, 'enviar deveria mudar o estado e carimbar a hora');
+  assert(r.entrouNaFila, 'depois de enviado, entra na fila do médico com quem lançou');
+  assert(r.devolveu && r.saiuDaFila, 'devolver deveria registrar o motivo e tirar da fila');
+  assert(r.voltaARascunho && r.contaPendentes, 'ao mexer de novo, volta a rascunho e conta como não enviado');
+  assert(r.conferido && r.filaLimpa, 'o Finalizar do médico deveria marcar como conferido e limpar a fila');
+  assert(r.papeis && r.papeisMedico, 'os papéis não podem se confundir');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

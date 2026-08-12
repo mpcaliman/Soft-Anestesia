@@ -4331,6 +4331,9 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       <div class="card no-collapse" data-detail="convenios"><div class="card-header"><div class="card-title-wrap"><h2>Convênios / planos</h2></div></div>
         <div class="card-body" id="dash-convenios"></div>
       </div>
+      <div class="card no-collapse" id="pl-fila-card" style="display:none"><div class="card-header"><div class="card-title-wrap"><h2 id="pl-fila-titulo">Aguardando sua conferência</h2></div></div>
+        <div class="card-body" id="pl-fila-lista"></div>
+      </div>
       <div class="card no-collapse" data-detail="hospitais"><div class="card-header"><div class="card-title-wrap"><h2>Hospitais / clínicas</h2></div></div>
         <div class="card-body" id="dash-hospitais"></div>
       </div>
@@ -5989,6 +5992,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <span class="qa-label">Adicionar rápido</span>
           <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.eventos.abrirCatalogo()" title="Marque vários eventos de uma vez, agrupados por categoria">📋 Catálogo (multiseleção)</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Venoclise'})">+ Venoclise</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Sedação'})">+ Sedação</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Indução'})">+ Indução</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Intubação'})">+ Intubação</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Início O₂'})">+ Início O₂</button>
@@ -8762,6 +8766,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <button type="button" class="btn btn-sm" onclick="arquivo.arquivarAgora()" title="Move para a nuvem os registros antigos (90+ dias; financeiro 1 ano) que já estão confirmados lá. Podem ser trazidos de volta a qualquer momento.">🗄 Arquivar casos antigos</button>
           <button type="button" class="btn btn-sm" onclick="armazenamento.compactarVersoes()" title="Reduz o histórico de versões a 3 por documento e remove assinaturas/fotos em base64 do histórico (os documentos atuais não mudam)">🕓 Compactar histórico de versões</button>
           <button type="button" class="btn btn-sm" onclick="armazenamento.liberarAnexos()" title="Remove do aparelho cópias locais de anexos que JÁ estão na nuvem (continuam abríveis pela nuvem)">☁️ Liberar anexos já na nuvem</button>
+          <button type="button" class="btn btn-sm btn-primary" onclick="arquivo.uiProcurarNaNuvem()" title="Procura um paciente no banco da clínica E no backup da sua conta — use quando uma ficha não aparece em lugar nenhum">🔎 Procurar paciente na nuvem inteira</button>
           <button type="button" class="btn btn-sm" onclick="armazenamento.testarLimite()" title="Descobre quanto este navegador realmente aceita guardar — útil quando o aviso de cheio não bate com o espaço em uso">📏 Medir o limite deste navegador</button>
           <button type="button" class="btn btn-sm" onclick="armazenamento.esvaziarLixeira()" title="Esvazia a lixeira de 30 dias">🗑 Esvaziar lixeira</button>
           <button type="button" class="btn btn-sm" onclick="armazenamento.limparDemo()" title="Remove os dados isolados do modo demonstração">🧪 Remover dados de demonstração</button>
@@ -9964,6 +9969,13 @@ const store = {
     if (idx >= 0) list[idx] = item;
     else list.unshift(item);
     if (list.length > HISTORY_MAX) list.length = HISTORY_MAX;
+    /* Estado do pré-lançamento tem que ser decidido ANTES de gravar */
+    try {
+      if (typeof preLanc !== 'undefined') {
+        if (item._finalizado && preLanc.ehMedico()) preLanc.aoFinalizar(modKey, item);
+        else preLanc.aoSalvar(modKey, item);
+      }
+    } catch (e) {}
     const gravouLocal = store.setList(modKey, list);
     store._audit(isNew ? 'create' : 'update', modKey, item);
     /* Sincronização em background (não bloqueia; falha silenciosa vai pra fila) */
@@ -10929,6 +10941,104 @@ const arquivo = {
   /* Traz TODOS os arquivados de volta ao aparelho, em lote. Usado quando o
      arquivamento automático levou casos demais de uma vez. Não apaga nada:
      só copia da nuvem de volta para cá. */
+  /* ---- RESGATE: procura um paciente na NUVEM INTEIRA -----------------------
+     O índice local só conhece o que ESTE aparelho arquivou. Se a ficha foi
+     feita noutro aparelho, ou o índice se perdeu, ela existe na nuvem e nada
+     aqui a encontra. Isto varre o banco da clínica e o backup da conta pelo
+     NOME, mostra o que achou e traz de volta o que você escolher. */
+  async procurarNaNuvem(nome) {
+    const alvo = String(nome || '').toLowerCase().trim();
+    if (!alvo) { toast('Escreva parte do nome do paciente', 'warn'); return []; }
+    if (!cloud.estaConfigurado() || !cloud.estaLogado()) { toast('Conecte-se à nuvem primeiro', 'warn'); return []; }
+    if (!(await cloud._garantirToken())) { toast('Sessão da nuvem expirada — entre de novo', 'warn'); return []; }
+    const c = cloud.config();
+    const achados = [];
+    const vistos = new Set();
+    const guardar = (mod, item) => {
+      if (!item || !item._id || vistos.has(mod + ':' + item._id)) return;
+      const n = (arquivo._nomeDe(item) || '').toLowerCase();
+      if (!n.includes(alvo)) return;
+      vistos.add(mod + ':' + item._id);
+      achados.push({ mod, item,
+        nome: arquivo._nomeDe(item),
+        data: (typeof historico !== 'undefined' ? historico._dataItem(item) : '') || '',
+        aqui: !!store.getById(mod, item._id) });
+    };
+    /* 1) banco relacional da clínica (o que a equipe inteira enxerga) */
+    try {
+      const org = await cloudRel._orgAsync();
+      if (org) {
+        for (const mod of Object.keys(cloudRel.MODOS || {})) {
+          const cfg = cloudRel.MODOS[mod];
+          if (!cfg || !cfg.tabela) continue;
+          try {
+            const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
+              '&select=' + encodeURIComponent(cloudRel._REG_SELECT) + '&limit=1000',
+              { headers: cloud._headers(true) });
+            if (!r.ok) continue;
+            (await r.json()).forEach(row => {
+              try { guardar(mod, cloudRel._rowParaRegistro(row)); } catch (e) {}
+            });
+          } catch (e) {}
+        }
+      }
+    } catch (e) {}
+    /* 2) backup pessoal (canal legado) — pega o que nunca foi espelhado */
+    try {
+      const sess = cloud.session();
+      const r = await fetch(c.url + '/rest/v1/documentos?user_id=eq.' + sess.user.id +
+        '&select=modulo,dados&limit=2000', { headers: cloud._headers(true) });
+      if (r.ok) (await r.json()).forEach(row => { try { guardar(row.modulo, row.dados); } catch (e) {} });
+    } catch (e) {}
+    return achados;
+  },
+
+  async uiProcurarNaNuvem() {
+    const nome = prompt('Procurar na nuvem inteira — nome do paciente (ou parte dele):', '');
+    if (nome === null) return;
+    modal.open('🔎 Procurando na nuvem…', '<p style="font-size:.88rem">Varrendo o banco da clínica e o backup da sua conta. Pode levar alguns segundos.</p>', '');
+    let achados = [];
+    try { achados = await arquivo.procurarNaNuvem(nome); } catch (e) {}
+    if (!achados.length) {
+      modal.open('🔎 Nada encontrado',
+        '<p style="font-size:.88rem">Não achei nenhum registro com esse nome na nuvem — nem no banco da clínica, nem no backup da sua conta.</p>' +
+        '<p style="font-size:.82rem;color:var(--text-mute);margin-top:8px">Se a ficha foi feita em outro aparelho e nunca chegou a sincronizar, ela só existe lá. Abra o app naquele aparelho e use <b>Atualizar tudo</b>.</p>',
+        '<button class="btn" onclick="modal.close()">Fechar</button>');
+      return;
+    }
+    arquivo._achados = achados;
+    const linhas = achados.map((a, i) =>
+      '<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">' +
+      '<span style="font-size:.84rem;min-width:0"><b>' + utils.escapeHTML(a.nome) + '</b><br>' +
+      '<span style="color:var(--text-mute);font-size:.78rem">' + utils.escapeHTML((lixeira.LABELS[a.mod] || a.mod)) + ' · ' +
+      utils.escapeHTML(historico._fmtData(a.data)) + (a.aqui ? ' · já está neste aparelho' : '') + '</span></span>' +
+      (a.aqui ? '<span style="font-size:.78rem;color:#1f7a4d;white-space:nowrap">✓ aqui</span>'
+              : '<button class="btn btn-xs btn-primary" onclick="arquivo.trazerAchado(' + i + ', this)">⬇ Trazer</button>') +
+      '</div>').join('');
+    modal.open('🔎 ' + achados.length + ' registro(s) na nuvem',
+      '<div style="max-height:52vh;overflow:auto">' + linhas + '</div>',
+      '<button class="btn btn-primary" onclick="arquivo.trazerTodosAchados()">⬇ Trazer todos</button>' +
+      '<button class="btn" onclick="modal.close()">Fechar</button>');
+  },
+  _achados: null,
+  trazerAchado(i, btn) {
+    const a = (arquivo._achados || [])[i];
+    if (!a) return;
+    const lst = store.list(a.mod);
+    if (!lst.some(x => x._id === a.item._id)) { lst.push(a.item); store.setList(a.mod, lst); }
+    try { arquivo._removerDoIndice(a.mod, a.item._id); } catch (e) {}
+    a.aqui = true;
+    if (btn) { btn.outerHTML = '<span style="font-size:.78rem;color:#1f7a4d">✓ trazido</span>'; }
+    toast('✅ ' + a.nome + ' — registro de volta no aparelho');
+  },
+  trazerTodosAchados() {
+    let n = 0;
+    (arquivo._achados || []).forEach((a, i) => { if (!a.aqui) { arquivo.trazerAchado(i, null); n++; } });
+    modal.close();
+    toast(n ? '✅ ' + n + ' registro(s) trazidos da nuvem' : 'Todos já estavam aqui');
+    try { armazenamento.render(); } catch (e) {}
+  },
+
   async restaurarTodos(opts = {}) {
     const ix = arquivo._indice();
     const itens = [];
@@ -11516,6 +11626,210 @@ const modoNuvem = {
   }
 };
 
+/* ============================================================================
+   PRÉ-LANÇAMENTO — a auxiliar prepara, o médico confere e finaliza
+   Estados do registro: rascunho (dela) → enviado (fila do médico) →
+   conferido (finalizado por ele). "Devolvido" volta para ela, com o motivo.
+   Enviar NÃO é salvar: o registro continua sendo gravado e sincronizado o
+   tempo todo. Enviar só diz "terminei, é sua vez" — sem isso a fila do médico
+   encheria de ficha pela metade.
+============================================================================ */
+const preLanc = {
+  MODS: ['pre', 'anestesia'],
+  ehAuxiliar() {
+    try {
+      const u = auth.usuarioAtual() || {};
+      if (u.perfil === 'admin') return false;
+      return u.perfil === 'secretaria' || u.role === 'auxiliar' || u.role === 'empresa' || u.role === 'financeiro';
+    } catch (e) { return false; }
+  },
+  ehMedico() {
+    try {
+      const u = auth.usuarioAtual() || {};
+      return u.perfil === 'admin' || u.perfil === 'medico' || u.role === 'gestor' || u.role === 'anestesiologista';
+    } catch (e) { return false; }
+  },
+  _quem() {
+    try { const u = auth.usuarioAtual() || {}; return { id: u.id || u.uid || '', nome: u.nome || u.usuario || '' }; }
+    catch (e) { return { id: '', nome: '' }; }
+  },
+  estado(rec) { return (rec && rec._preLanc && rec._preLanc.estado) || ''; },
+
+  /* Chamado na gravação: marca o registro da auxiliar como rascunho dela */
+  aoSalvar(mod, rec) {
+    if (preLanc.MODS.indexOf(mod) < 0 || !rec) return rec;
+    if (rec._finalizado) return rec;
+    if (!preLanc.ehAuxiliar()) return rec;
+    const q = preLanc._quem();
+    rec._preLanc = rec._preLanc || { estado: 'rascunho', porNome: q.nome, por: q.id, criadoEm: new Date().toISOString() };
+    if (rec._preLanc.estado === 'devolvido') rec._preLanc.estado = 'rascunho';   /* voltou a mexer */
+    return rec;
+  },
+
+  /* Chamado quando o MÉDICO finaliza: sai da fila */
+  aoFinalizar(mod, rec) {
+    if (preLanc.MODS.indexOf(mod) < 0 || !rec || !rec._preLanc) return rec;
+    rec._preLanc.estado = 'conferido';
+    rec._preLanc.conferidoEm = new Date().toISOString();
+    rec._preLanc.conferidoPor = preLanc._quem().nome;
+    return rec;
+  },
+
+  _idAtual(mod) {
+    const el = document.querySelector('#form-' + mod + ' [name="_id"]');
+    return el ? el.value : '';
+  },
+  enviar(mod) {
+    const id = preLanc._idAtual(mod);
+    if (!id) { toast('Salve o pré-lançamento antes de enviar.', 'warn'); return; }
+    const lst = store.list(mod);
+    const rec = lst.find(x => x._id === id);
+    if (!rec) { toast('Registro não encontrado', 'error'); return; }
+    const q = preLanc._quem();
+    rec._preLanc = rec._preLanc || { estado: 'rascunho', porNome: q.nome, por: q.id, criadoEm: new Date().toISOString() };
+    rec._preLanc.estado = 'enviado';
+    rec._preLanc.enviadoEm = new Date().toISOString();
+    rec._preLanc.porNome = rec._preLanc.porNome || q.nome;
+    delete rec._preLanc.motivo;
+    store.setList(mod, lst);
+    toast('📤 Pré-lançamento enviado para conferência do médico');
+    preLanc.renderBotao(mod);
+  },
+  devolver(mod, id) {
+    const motivo = prompt('Devolver para correção — o que falta?', '');
+    if (motivo === null) return;
+    const lst = store.list(mod);
+    const rec = lst.find(x => x._id === id);
+    if (!rec || !rec._preLanc) return;
+    rec._preLanc.estado = 'devolvido';
+    rec._preLanc.devolvidoEm = new Date().toISOString();
+    rec._preLanc.devolvidoPor = preLanc._quem().nome;
+    rec._preLanc.motivo = String(motivo || '').trim();
+    store.setList(mod, lst);
+    toast('↩ Devolvido para correção');
+    try { modal.close(); } catch (e) {}
+    try { preLanc.renderFila(); } catch (e) {}
+  },
+
+  /* Fila do médico: o que foi ENVIADO e ainda não conferido */
+  fila() {
+    const itens = [];
+    preLanc.MODS.forEach(mod => {
+      (store.list(mod) || []).forEach(rec => {
+        if (preLanc.estado(rec) !== 'enviado' || rec._finalizado) return;
+        itens.push({ mod, rec,
+          nome: arquivo._nomeDe(rec),
+          data: (typeof historico !== 'undefined' ? historico._dataItem(rec) : '') || '',
+          por: (rec._preLanc && rec._preLanc.porNome) || '',
+          quando: (rec._preLanc && rec._preLanc.enviadoEm) || '' });
+      });
+    });
+    return itens.sort((a, b) => String(a.quando).localeCompare(String(b.quando)));
+  },
+  /* O que a auxiliar ainda NÃO enviou (ou o médico devolveu) */
+  meusPendentes() {
+    const out = { rascunho: [], devolvido: [] };
+    const q = preLanc._quem();
+    preLanc.MODS.forEach(mod => {
+      (store.list(mod) || []).forEach(rec => {
+        const e = preLanc.estado(rec);
+        if (rec._finalizado) return;
+        if (e !== 'rascunho' && e !== 'devolvido') return;
+        if (rec._preLanc.por && q.id && rec._preLanc.por !== q.id) return;
+        out[e].push({ mod, rec, nome: arquivo._nomeDe(rec),
+          motivo: rec._preLanc.motivo || '',
+          parado: e === 'rascunho' && rec._preLanc.criadoEm &&
+                  (Date.now() - new Date(rec._preLanc.criadoEm).getTime()) > 86400000 });
+      });
+    });
+    return out;
+  },
+
+  /* Cartão no Dashboard: a fila do médico e o lembrete da auxiliar */
+  renderFila() {
+    const card = document.getElementById('pl-fila-card');
+    const host = document.getElementById('pl-fila-lista');
+    const tit = document.getElementById('pl-fila-titulo');
+    if (!card || !host) return;
+
+    if (preLanc.ehAuxiliar()) {
+      const p = preLanc.meusPendentes();
+      const total = p.rascunho.length + p.devolvido.length;
+      if (!total) { card.style.display = 'none'; return; }
+      card.style.display = '';
+      if (tit) tit.textContent = 'Seus pré-lançamentos';
+      host.innerHTML =
+        (p.devolvido.length
+          ? '<p style="font-size:.86rem;color:#7a4b12;margin:0 0 8px">↩ <b>' + p.devolvido.length + '</b> devolvido(s) pelo médico para correção.</p>'
+          : '') +
+        (p.rascunho.length
+          ? '<p style="font-size:.86rem;margin:0 0 8px">📝 <b>' + p.rascunho.length + '</b> ainda <b>não enviado(s)</b> — o médico só vê depois do <b>📤 Enviar pré-lançamento</b>.</p>'
+          : '') +
+        p.devolvido.concat(p.rascunho).map(it =>
+          '<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)">' +
+          '<span style="font-size:.85rem;min-width:0"><b>' + utils.escapeHTML(it.nome || '(sem nome)') + '</b>' +
+          '<br><span style="color:var(--text-mute);font-size:.76rem">' + utils.escapeHTML(lixeira.LABELS[it.mod] || it.mod) +
+          (it.motivo ? ' · ↩ ' + utils.escapeHTML(it.motivo) : '') + (it.parado ? ' · parado há mais de 1 dia' : '') + '</span></span>' +
+          '<button class="btn btn-xs btn-primary" onclick="dashboard._abrirRegistro(\'' + it.mod + '\',\'' + it.rec._id + '\')">Abrir</button>' +
+          '</div>').join('');
+      return;
+    }
+
+    if (!preLanc.ehMedico()) { card.style.display = 'none'; return; }
+    const fila = preLanc.fila();
+    /* o médico também enxerga o que está parado sem envio — para saber que existe */
+    let parados = 0;
+    try {
+      preLanc.MODS.forEach(mod => (store.list(mod) || []).forEach(r => {
+        if (r._finalizado) return;
+        if (preLanc.estado(r) !== 'rascunho') return;
+        const t = r._preLanc && r._preLanc.criadoEm;
+        if (t && Date.now() - new Date(t).getTime() > 86400000) parados++;
+      }));
+    } catch (e) {}
+    if (!fila.length && !parados) { card.style.display = 'none'; return; }
+    card.style.display = '';
+    if (tit) tit.textContent = 'Aguardando sua conferência (' + fila.length + ')';
+    host.innerHTML =
+      (fila.length
+        ? fila.map(it =>
+            '<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">' +
+            '<span style="font-size:.86rem;min-width:0"><b>' + utils.escapeHTML(it.nome || '(sem nome)') + '</b>' +
+            '<br><span style="color:var(--text-mute);font-size:.76rem">' + utils.escapeHTML(lixeira.LABELS[it.mod] || it.mod) +
+            (it.data ? ' · ' + utils.escapeHTML(historico._fmtData(it.data)) : '') +
+            (it.por ? ' · por ' + utils.escapeHTML(it.por) : '') + '</span></span>' +
+            '<span style="white-space:nowrap;display:flex;gap:5px">' +
+            '<button class="btn btn-xs btn-primary" onclick="dashboard._abrirRegistro(\'' + it.mod + '\',\'' + it.rec._id + '\')">Conferir</button>' +
+            '<button class="btn btn-xs" onclick="preLanc.devolver(\'' + it.mod + '\',\'' + it.rec._id + '\')" title="Volta para a auxiliar com um comentário">↩ Devolver</button>' +
+            '</span></div>').join('')
+        : '<p style="font-size:.86rem;color:var(--text-mute);margin:0">Nada aguardando conferência.</p>') +
+      (parados
+        ? '<p style="font-size:.8rem;color:#7a4b12;margin:10px 0 0">⏳ <b>' + parados + '</b> pré-lançamento(s) começado(s) e ainda não enviados há mais de um dia.</p>'
+        : '');
+  },
+
+  /* Botão "Enviar pré-lançamento" no rodapé da ficha (só para a auxiliar) */
+  renderBotao(mod) {
+    const host = document.getElementById('acoes-rodape-' + mod);
+    if (!host) return;
+    const antigo = document.getElementById('pl-btn-' + mod);
+    if (antigo) antigo.remove();
+    if (!preLanc.ehAuxiliar() || preLanc.MODS.indexOf(mod) < 0) return;
+    const id = preLanc._idAtual(mod);
+    const rec = id ? store.getById(mod, id) : null;
+    const e = preLanc.estado(rec);
+    const b = document.createElement('span');
+    b.id = 'pl-btn-' + mod;
+    b.innerHTML = (e === 'enviado')
+      ? '<span class="btn btn-sm" style="background:#eaf7ee;color:#1c5c33;border-color:#b6e0c2;cursor:default">📤 Enviado para conferência</span>'
+      : '<button type="button" class="btn btn-primary" onclick="preLanc.enviar(\'' + mod + '\')" title="Avisa o médico de que este pré-lançamento está pronto para conferência">📤 Enviar pré-lançamento</button>' +
+        (e === 'devolvido' && rec._preLanc.motivo
+          ? '<div style="flex-basis:100%;font-size:.8rem;color:#7a4b12;margin-top:6px">↩ Devolvido: ' + utils.escapeHTML(rec._preLanc.motivo) + '</div>'
+          : '');
+    host.appendChild(b);
+  }
+};
+
 const lixeira = {
   KEY: 'medsys.v7.lixeira',
   DIAS: 30,
@@ -11889,7 +12203,7 @@ const ui = {
 
       /* Refresh por módulo — cada um em try/catch independente para não bloquear navegação */
       try {
-        if (modName === 'dashboard') { dashboard.atualizar(); try { meuDia.render(); } catch (e) {} try { pendencias.renderDashboard(); } catch (e) {} }
+        if (modName === 'dashboard') { dashboard.atualizar(); try { meuDia.render(); } catch (e) {} try { pendencias.renderDashboard(); } catch (e) {} try { preLanc.renderFila(); } catch (e) {} }
         else if (modName === 'financeiro') financeiro.render();
         else if (modName === 'agenda') { agenda.render(); if (!agenda._puxouNestaSessao) { setTimeout(() => { try { agenda.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
@@ -24007,8 +24321,9 @@ const anestesia = {
   eventos: {
     /* Catálogo agrupado (fonte única) — TIPOS é derivado daqui */
     GRUPOS: [
-      { grupo: 'Procedimentos / acessos', itens: ['Venoclise', 'Punção arterial', 'Acesso venoso central'] },
-      { grupo: 'Via aérea / anestesia', itens: ['Indução', 'Intubação', 'Extubação', 'Máscara laríngea', 'Início O₂', 'Fim O₂', 'Início halogenado', 'Fim halogenado', 'Início infusão contínua', 'Fim infusão contínua'] },
+      { grupo: 'Procedimentos / acessos', itens: ['Venoclise', 'Punção arterial', 'Acesso venoso central',
+          'Sondagem orogástrica', 'Sondagem nasogástrica', 'Sondagem vesical (Foley)', 'Sondagem vesical de alívio'] },
+      { grupo: 'Via aérea / anestesia', itens: ['Sedação', 'Indução', 'Intubação', 'Extubação', 'Máscara laríngea', 'Início O₂', 'Fim O₂', 'Início halogenado', 'Fim halogenado', 'Início infusão contínua', 'Fim infusão contínua'] },
       { grupo: 'Bloqueios', itens: ['Raquianestesia', 'Peridural', 'Bloqueio periférico'] },
       { grupo: 'Cirurgia', itens: ['Incisão cirúrgica', 'Início da cirurgia', 'Hemostasia', 'Fim da cirurgia'] },
       { grupo: 'Laparoscopia', itens: ['Início do pneumoperitônio', 'Fim do pneumoperitônio'] },
@@ -24028,6 +24343,11 @@ const anestesia = {
       'Bloqueio periférico': '1) Assepsia e antissepsia; 2) Identificação do alvo por ultrassom/neuroestimulação; 3) Punção; 4) Injeção fracionada com aspiração intermitente; 5) Checagem da dispersão e do bloqueio.',
       'Intubação': '1) Pré-oxigenação; 2) Indução e bloqueio neuromuscular; 3) Laringoscopia; 4) Visualização da glote (Cormack–Lehane); 5) Passagem do tubo; 6) Confirmação por EtCO₂, ausculta e expansibilidade; 7) Insuflação do cuff e fixação.',
       'Extubação': '1) Critérios de extubação (desperto, TOF adequado, ventilação eficaz); 2) Aspiração de vias aéreas; 3) Desinsuflação do cuff; 4) Extubação; 5) O₂ suplementar e observação.',
+      'Sedação': 'Sedação titulada sob monitorização contínua (oximetria, cardioscopia e PA), com oxigênio suplementar; paciente mantendo ventilação espontânea e resposta a estímulo verbal/tátil conforme o nível pretendido.',
+      'Sondagem orogástrica': '1) Medida da distância a introduzir; 2) Lubrificação; 3) Passagem por via oral com o paciente já anestesiado; 4) Confirmação do posicionamento (ausculta epigástrica/aspirado gástrico); 5) Fixação e drenagem.',
+      'Sondagem nasogástrica': '1) Escolha da narina e lubrificação; 2) Passagem cuidadosa (atenção a coagulopatia e trauma de face/base de crânio); 3) Confirmação do posicionamento; 4) Fixação e drenagem.',
+      'Sondagem vesical (Foley)': '1) Assepsia e antissepsia; 2) Campos estéreis; 3) Lubrificação; 4) Passagem da sonda de Foley; 5) Insuflação do balão após retorno de urina; 6) Conexão ao sistema fechado e fixação; 7) Registro do débito urinário.',
+      'Sondagem vesical de alívio': '1) Assepsia e antissepsia; 2) Técnica estéril; 3) Passagem da sonda; 4) Esvaziamento vesical; 5) Retirada imediata; 6) Registro do volume drenado.',
       'Venoclise': '1) Garroteamento; 2) Assepsia; 3) Punção venosa periférica; 4) Refluxo sanguíneo; 5) Fixação e teste de fluxo.',
       'Indução': '1) Pré-oxigenação; 2) Hipnótico + opioide; 3) Checagem de ventilação sob máscara; 4) Bloqueador neuromuscular, se indicado IOT.',
       'Incisão cirúrgica': 'Início da incisão cirúrgica após confirmação de plano anestésico e analgesia adequados.',
@@ -24254,6 +24574,7 @@ const anestesia = {
        só no evento. */
     TIPO_EVENTO: {
       'Anestesia geral': 'Indução',
+      'Sedação': 'Sedação',
       'Raquianestesia': 'Raquianestesia',
       'Peridural': 'Peridural',
       'Bloqueio periférico': 'Bloqueio periférico',
@@ -37208,7 +37529,13 @@ const dashboard = {
     const anestesias  = dashboard.filtrarPorPeriodo(store.list('anestesia'),  periodo, 'procedimento') /* fallback p/ updatedAt */
                           .filter(_ => true); // simplificação: usa _updatedAt
     /* Usa _updatedAt como referência de período pq é confiável */
-    const filtPorMeta = list => dashboard.filtrarPorPeriodo(list, periodo, '_updatedAt');
+    /* A data que importa é a do PROCEDIMENTO, não a da última gravação.
+       Filtrar por _updatedAt fazia o Dashboard contar quando o ARQUIVO foi
+       salvo: bastava a nuvem regravar os registros para o dia de ontem
+       "perder" as anestesias e hoje ganhar todas de uma vez. */
+    const filtPorMeta = list => dashboard.filtrarPorPeriodo(
+      list.map(it => Object.assign({}, it, { _dataClinica: dashboard._dataClinica(it) })),
+      periodo, '_dataClinica');
     const allAnest = filtPorMeta(store.list('anestesia'));
     const allPre = filtPorMeta(store.list('pre'));
     const allCons = filtPorMeta(store.list('consulta'));
@@ -37336,6 +37663,15 @@ const dashboard = {
     dashboard._ligarHandlers();
   },
 
+  /* Data clínica do registro (procedimento/avaliação); só cai na data de
+     gravação quando o registro não tem data própria. */
+  _dataClinica(it) {
+    let d = '';
+    try { d = historico._dataItem(it) || ''; } catch (e) {}
+    if (d) return String(d).length === 10 ? d + 'T12:00:00.000Z' : d;
+    return it._updatedAt || it._createdAt || '';
+  },
+
   /* ===== BUSCA NO BANCO DE DADOS ===== */
   buscar() {
     const inp = document.getElementById('dash-search-input');
@@ -37430,7 +37766,13 @@ const dashboard = {
   /* Abre modal expandido com relatório detalhado para o item clicado */
   verDetalhes(tipo) {
     const periodo = document.getElementById('dash-periodo').value;
-    const filtPorMeta = list => dashboard.filtrarPorPeriodo(list, periodo, '_updatedAt');
+    /* A data que importa é a do PROCEDIMENTO, não a da última gravação.
+       Filtrar por _updatedAt fazia o Dashboard contar quando o ARQUIVO foi
+       salvo: bastava a nuvem regravar os registros para o dia de ontem
+       "perder" as anestesias e hoje ganhar todas de uma vez. */
+    const filtPorMeta = list => dashboard.filtrarPorPeriodo(
+      list.map(it => Object.assign({}, it, { _dataClinica: dashboard._dataClinica(it) })),
+      periodo, '_dataClinica');
     const allAnest = filtPorMeta(store.list('anestesia'));
     const allPre   = filtPorMeta(store.list('pre'));
     const allCons  = filtPorMeta(store.list('consulta'));
@@ -41419,6 +41761,7 @@ const acoesUI = {
       (temFinalizar ? '<button type="button" class="btn btn-finalizar" onclick="' + mod + '.finalizar()">✅ Finalizar</button>' : '') +
       '<button type="button" class="btn btn-ghost btn-sm" onclick="window.scrollTo({top:0,behavior:\'smooth\'})" title="Voltar ao topo">↑ Topo</button>';
     form.appendChild(div);
+    try { if (typeof preLanc !== 'undefined') preLanc.renderBotao(mod); } catch (e) {}
   }
 };
 
@@ -41510,7 +41853,7 @@ document.addEventListener('DOMContentLoaded', () => {
        em qualquer navegador, mesmo quando const não é global. */
   window.utils = utils; window.store = store; window.ui = ui;
   window.backupCompleto = backupCompleto;
-  window.lixeira = lixeira; window.duplicados = duplicados; window.espaco = espaco; window.modoNuvem = modoNuvem;
+  window.lixeira = lixeira; window.duplicados = duplicados; window.espaco = espaco; window.modoNuvem = modoNuvem; window.preLanc = preLanc;
   window.carimboHora = carimboHora;
   window.cronometros = cronometros;
   window.dashboard = dashboard; window.pre = pre; window.consulta = consulta;
