@@ -3798,6 +3798,17 @@ textarea { border-radius: 10px; }
 .sidebar-brand strong { font-weight: 800; letter-spacing: -.2px; }
 /* Header */
 .app-header { backdrop-filter: blur(8px); }
+/* Dashboard da auxiliar: só o trabalho dela — pendências e pré-lançamentos */
+body.dash-auxiliar #module-dashboard #kpi-grid,
+body.dash-auxiliar #module-dashboard #meu-dia-card,
+body.dash-auxiliar #module-dashboard .dash-grid,
+body.dash-auxiliar #module-dashboard .dash-charts,
+body.dash-auxiliar #module-dashboard [data-detail],
+body.dash-auxiliar #module-dashboard .dash-busca-wrap { display: none !important; }
+/* estes dois NÃO levam display forçado: quem manda é o próprio render —
+   forçar block faria um cartão vazio aparecer quando não há nada na fila */
+body.dash-auxiliar #module-dashboard #pendencias-card[data-detail] { display: block !important; }
+
 /* Ações da ficha: um cabeçalho recolhível no lugar de três faixas de botões */
 .acoes-cab{
   display:flex; align-items:center; gap:10px; cursor:pointer; user-select:none;
@@ -11745,6 +11756,22 @@ const preLanc = {
     return out;
   },
 
+  /* O Dashboard do médico é analítico (KPIs, gráficos, financeiro, Meu dia).
+     Para a auxiliar isso não diz nada e ainda expõe números que não são dela.
+     A tela dela fica com o que é o trabalho dela: pendências e os próprios
+     pré-lançamentos. */
+  ajustarDashboard() {
+    const mod = document.getElementById('module-dashboard');
+    if (!mod) return;
+    const aux = preLanc.ehAuxiliar();
+    document.body.classList.toggle('dash-auxiliar', aux);
+    /* o que ELA vê; todo o resto some por CSS */
+    const titulo = mod.querySelector('.page-title .subtitle');
+    if (titulo) titulo.textContent = aux
+      ? 'Seus pré-lançamentos e pendências'
+      : 'Visão analítica dos registros';
+  },
+
   /* Cartão no Dashboard: a fila do médico e o lembrete da auxiliar */
   renderFila() {
     const card = document.getElementById('pl-fila-card');
@@ -12203,7 +12230,7 @@ const ui = {
 
       /* Refresh por módulo — cada um em try/catch independente para não bloquear navegação */
       try {
-        if (modName === 'dashboard') { dashboard.atualizar(); try { meuDia.render(); } catch (e) {} try { pendencias.renderDashboard(); } catch (e) {} try { preLanc.renderFila(); } catch (e) {} }
+        if (modName === 'dashboard') { dashboard.atualizar(); try { meuDia.render(); } catch (e) {} try { pendencias.renderDashboard(); } catch (e) {} try { preLanc.ajustarDashboard(); } catch (e) {} try { preLanc.renderFila(); } catch (e) {} }
         else if (modName === 'financeiro') financeiro.render();
         else if (modName === 'agenda') { agenda.render(); if (!agenda._puxouNestaSessao) { setTimeout(() => { try { agenda.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }

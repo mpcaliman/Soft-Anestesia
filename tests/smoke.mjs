@@ -5253,6 +5253,49 @@ await test('Ao entrar, o app abre no Dashboard (ou no primeiro módulo permitido
   await page.close();
 });
 
+/* 92) Dashboard da auxiliar: só o trabalho dela, sem os números do médico */
+await test('Dashboard da auxiliar mostra só pendências e pré-lançamentos', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const aux = { id: 's1', nome: 'Secretária', perfil: 'secretaria', role: 'auxiliar' };
+    const med = { id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' };
+
+    auth.usuarioAtual = () => aux;
+    preLanc.ajustarDashboard();
+    out.marcaAuxiliar = document.body.classList.contains('dash-auxiliar');
+    const vis = (el) => !!el && getComputedStyle(el).display !== 'none';
+    out.escondeAnalitico = !vis(document.getElementById('kpi-grid'))
+      && !vis(document.getElementById('meu-dia-card'));
+    out.subtituloProprio = /pré-lançamentos e pendências/i.test(
+      document.querySelector('#module-dashboard .page-title .subtitle').textContent);
+
+    /* cartão vazio não pode ser forçado a aparecer */
+    const fila = document.getElementById('pl-fila-card');
+    fila.style.display = 'none';
+    out.naoForcaCartaoVazio = !vis(fila);
+    /* com conteúdo, aparece normalmente */
+    fila.style.display = '';
+    out.mostraQuandoTemConteudo = vis(fila);
+
+    /* médico volta a ver tudo */
+    auth.usuarioAtual = () => med;
+    preLanc.ajustarDashboard();
+    out.medicoVeTudo = !document.body.classList.contains('dash-auxiliar')
+      && vis(document.getElementById('kpi-grid'))
+      && vis(document.getElementById('meu-dia-card'))
+      && /analítica/i.test(document.querySelector('#module-dashboard .page-title .subtitle').textContent);
+    return out;
+  });
+  assert(r.marcaAuxiliar, 'o Dashboard deveria entrar no modo auxiliar');
+  assert(r.escondeAnalitico, 'KPIs e Meu dia não deveriam aparecer para a auxiliar');
+  assert(r.subtituloProprio, 'o subtítulo deveria dizer do que é a tela dela');
+  assert(r.naoForcaCartaoVazio, 'cartão sem conteúdo não pode ser forçado a aparecer');
+  assert(r.mostraQuandoTemConteudo, 'com conteúdo, o cartão dela precisa aparecer');
+  assert(r.medicoVeTudo, 'o médico continua com o Dashboard analítico completo');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
