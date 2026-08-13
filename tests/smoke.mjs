@@ -6433,6 +6433,117 @@ await test('Cortesia é uma das ações da pendência de convênio e chega ao fi
   await page.close();
 });
 
+/* 112) Produtividade é o que ficou PRONTO. Rascunho e pré-lançamento não são
+   produção: o painel contando trabalho em curso vira promessa, não medida. E o
+   painel precisa abrir mostrando NÚMERO, não recado. */
+await test('Dashboard conta só o que foi finalizado, e os números vêm antes dos avisos', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('anestesia', []); store.setList('pre', []);
+    store.setList('consulta', []); store.setList('financeiro', []);
+    auth.usuarioAtual = () => ({ id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
+    const hoje = new Date().toISOString().slice(0, 10);
+
+    /* uma finalizada, um rascunho e um pré-lançamento enviado (não conferido) */
+    store.setList('pre', [
+      { _id: 'f1', nome: 'Finalizada', data: hoje, _finalizado: true, _updatedAt: new Date().toISOString() },
+      { _id: 'r1', nome: 'Rascunho', data: hoje, _updatedAt: new Date().toISOString() },
+      { _id: 'p1', nome: 'Pré-lançada', data: hoje, _updatedAt: new Date().toISOString(),
+        _preLanc: { estado: 'enviado', porNome: 'Sec' } }
+    ]);
+    document.getElementById('dash-escopo').value = 'clinica';
+    document.getElementById('dash-periodo').value = 'hoje';
+    dashboard.atualizar();
+    const kpi = document.getElementById('kpi-grid');
+    const cartaoPre = kpi.querySelector('[data-detail="pre"] .kpi-value');
+    out.contouSoAFinalizada = cartaoPre && cartaoPre.textContent.trim() === '1';
+    out.dizQueEhFinalizada = /finalizad/i.test(kpi.querySelector('[data-detail="pre"] .kpi-sub').textContent);
+
+    /* o helper é a régua única, e o financeiro não passa por ela (não tem
+       "finalizar": ele nasce já lançado) */
+    out.regraUnica = dashboard._soProducao([{ _finalizado: true }, {}, { _finalizado: false }]).length === 1;
+
+    /* números antes dos avisos, na ordem da página */
+    const mod = document.getElementById('module-dashboard');
+    const pos = (sel) => {
+      const el = mod.querySelector(sel);
+      if (!el) return -1;
+      return Array.prototype.indexOf.call(mod.querySelectorAll('*'), el);
+    };
+    out.numerosPrimeiro = pos('#kpi-grid') > 0 && pos('#kpi-grid') < pos('#pl-fila-card')
+      && pos('#kpi-grid') < pos('#pl-alerta');
+
+    /* painel zerado busca a produção na clínica em vez de aceitar o zero */
+    const origDisp = cloudRel.disponivel, origTok = cloud._garantirToken, origPuxa = cloudRel.puxarModulo;
+    cloudRel.disponivel = () => true;
+    cloud._garantirToken = async () => true;
+    let pediu = 0;
+    cloudRel.puxarModulo = async (m) => {
+      pediu++;
+      return m === 'anestesia'
+        ? [{ _id: 'nuvem1', paciente: { nome: 'Da clínica' }, procedimento: { data: hoje },
+             _finalizado: true, _updatedAt: new Date().toISOString(), _relUpdatedAt: '2026-08-13T12:00:00Z' }]
+        : [];
+    };
+    store.setList('pre', []); store.setList('anestesia', []);
+    dashboard._puxouVazio = false;
+    await dashboard._puxarSeVazio(0);
+    out.foiBuscar = pediu > 0;
+    out.trouxe = !!store.getById('anestesia', 'nuvem1');
+    /* e não fica repetindo a cada render */
+    pediu = 0;
+    await dashboard._puxarSeVazio(0);
+    out.naoRepete = pediu === 0;
+    /* com produção na tela, nem tenta */
+    dashboard._puxouVazio = false;
+    pediu = 0;
+    await dashboard._puxarSeVazio(5);
+    out.naoBuscaSeTemDados = pediu === 0;
+
+    cloudRel.disponivel = origDisp; cloud._garantirToken = origTok; cloudRel.puxarModulo = origPuxa;
+    store.setList('anestesia', []); store.setList('pre', []);
+    store.setList('consulta', []); store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.contouSoAFinalizada, 'rascunho e pré-lançamento não podem contar como produção');
+  assert(r.dizQueEhFinalizada, 'o cartão precisa dizer que conta o que foi finalizado');
+  assert(r.regraUnica, 'a régua de produção é uma só');
+  assert(r.numerosPrimeiro, 'os números vêm antes dos avisos — senão o painel vira quadro de aviso');
+  assert(r.foiBuscar && r.trouxe, 'painel zerado vai buscar a produção na clínica');
+  assert(r.naoRepete, 'a busca do painel vazio não pode repetir a cada render');
+  assert(r.naoBuscaSeTemDados, 'com dados na tela, não há o que buscar');
+  await page.close();
+});
+
+/* 113) O termo é documento, não produção faturável: não gera financeiro. */
+await test('Termo de consentimento não gera lançamento financeiro', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('termo', []); store.setList('financeiro', []);
+    ui.navegar('termo');
+    const ft = document.getElementById('form-termo');
+    const h = ft.querySelector('[name="_id"]'); if (h) h.value = '';
+    ft.querySelector('[name="nome"]').value = 'Ana Souza';
+    const dt = ft.querySelector('[name="data"]'); if (dt) dt.value = '2026-08-13';
+    const origPrint = printPreview.abrir; printPreview.abrir = () => {};
+    termo.salvar({ finalizar: true, _dupOk: true });
+    printPreview.abrir = origPrint;
+    const t = store.list('termo')[0];
+    out.finalizou = !!t && t._finalizado === true;
+    out.semFinanceiro = store.list('financeiro').length === 0;
+    /* e o gerador de lançamentos não conhece o termo */
+    out.semRegraDeTermo = fin.fromDoc('termo', t || { _id: 'x', nome: 'Ana' }) === null;
+    store.setList('termo', []); store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.finalizou, 'o termo precisa finalizar normalmente');
+  assert(r.semFinanceiro, 'finalizar o termo não pode gerar lançamento financeiro');
+  assert(r.semRegraDeTermo, 'não existe regra de financeiro para o termo — nem por outro caminho');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

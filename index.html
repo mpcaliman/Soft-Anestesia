@@ -4266,7 +4266,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-13l</b><br>
+    v7.1 · build <b id="build-tag">2026-08-13m</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -4369,6 +4369,10 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     <!-- Pré-lançamento: o aviso da auxiliar e a fila do médico ficam FORA da
          grade de gráficos — a grade some inteira para quem só pré-lança, e o
          cartão dela ia junto. -->
+    <!-- Os NÚMEROS vêm primeiro. Com os avisos no topo, o painel virou quadro
+         de aviso: quem entra quer ver a produção, não pendência. -->
+    <div class="kpi-grid" id="kpi-grid"></div>
+
     <div id="pl-alerta" class="pl-alerta" style="display:none"></div>
     <div class="card no-collapse" id="pl-fila-card" style="display:none">
       <div class="card-header">
@@ -4377,8 +4381,6 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       </div>
       <div class="card-body" id="pl-fila-lista"></div>
     </div>
-
-    <div class="kpi-grid" id="kpi-grid"></div>
 
     <!-- 📅 MEU DIA — casos de hoje com o estado de cada etapa (fechamento do plantão) -->
     <div class="card no-collapse no-print" id="meu-dia-card">
@@ -38384,15 +38386,23 @@ const dashboard = {
       dashboard._filtrarEscopo(list, escopo)
         .map(it => Object.assign({}, it, { _dataClinica: dashboard._dataClinica(it) })),
       periodo, '_dataClinica');
-    const allAnest = filtPorMeta(store.list('anestesia'));
-    const allPre = filtPorMeta(store.list('pre'));
-    const allCons = filtPorMeta(store.list('consulta'));
-    const allRecup = filtPorMeta(store.list('recuperacao'));
-    const allFin = filtPorMeta(store.list('financeiro'));
+    /* PRODUÇÃO = o que foi FINALIZADO. Rascunho e pré-lançamento são trabalho
+       em curso: contá-los inflaria o painel com o que ainda pode mudar (e o
+       pré-lançamento nem é seu até você conferir). É a mesma régua do
+       financeiro, que só nasce na finalização. */
+    const allAnest = dashboard._soProducao(filtPorMeta(store.list('anestesia')));
+    const allPre = dashboard._soProducao(filtPorMeta(store.list('pre')));
+    const allCons = dashboard._soProducao(filtPorMeta(store.list('consulta')));
+    const allRecup = dashboard._soProducao(filtPorMeta(store.list('recuperacao')));
+    const allFin = filtPorMeta(store.list('financeiro'));   /* financeiro não tem "finalizar" */
 
     /* O "Atualizar" do painel também vai buscar os pré-lançamentos na clínica:
        clicar em atualizar e a fila continuar vazia era o pior dos mundos. */
     try { preLanc.sincronizarFila({ silent: true }); } catch (e) {}
+    /* Painel zerado: busca a produção na clínica antes de aceitar o zero. */
+    try {
+      dashboard._puxarSeVazio(allAnest.length + allPre.length + allCons.length + allRecup.length + allFin.length);
+    } catch (e) {}
 
     /* KPIs */
     const nuvem = dashboard._naNuvem(periodo, escopo);
@@ -38408,22 +38418,22 @@ const dashboard = {
       <div class="kpi-card" data-detail="anestesia">
         <div class="kpi-label">Anestesias</div>
         <div class="kpi-value">${allAnest.length + maisNuvem('anestesia')}</div>
-        <div class="kpi-sub">fichas registradas${maisNuvem('anestesia') ? ' · ' + maisNuvem('anestesia') + ' na nuvem' : ''}</div>
+        <div class="kpi-sub">fichas finalizadas${maisNuvem('anestesia') ? ' · ' + maisNuvem('anestesia') + ' na nuvem' : ''}</div>
       </div>
       <div class="kpi-card accent" data-detail="pre">
         <div class="kpi-label">Pré-anestésica</div>
         <div class="kpi-value">${allPre.length}</div>
-        <div class="kpi-sub">avaliações</div>
+        <div class="kpi-sub">avaliações finalizadas</div>
       </div>
       <div class="kpi-card" data-detail="consulta">
         <div class="kpi-label">Consultas / Dor</div>
         <div class="kpi-value">${allCons.length}</div>
-        <div class="kpi-sub">atendimentos</div>
+        <div class="kpi-sub">atendimentos finalizados</div>
       </div>
       <div class="kpi-card accent" data-detail="recuperacao">
         <div class="kpi-label">Recuperação pós</div>
         <div class="kpi-value">${allRecup.length}</div>
-        <div class="kpi-sub">fichas SRPA</div>
+        <div class="kpi-sub">fichas SRPA finalizadas</div>
       </div>
       <div class="kpi-card warn" data-detail="pacientes_unicos">
         <div class="kpi-label">Pacientes únicos</div>
@@ -38572,6 +38582,34 @@ const dashboard = {
       '<button type="button" class="btn btn-xs btn-primary" onclick="arquivo.restaurarTodos().then(function(){ dashboard.atualizar(); })">⬇ Trazer para cá</button>';
   },
 
+  /* Produção é o que ficou pronto. Rascunho e pré-lançamento ficam de fora do
+     painel — eles têm o lugar deles (rascunhos, fila de conferência). */
+  _soProducao(list) { return (list || []).filter(x => x && x._finalizado); },
+
+  /* Painel zerado num aparelho que acabou de entrar quase nunca significa "não
+     trabalhei": significa que os registros estão na clínica e ainda não aqui.
+     Em vez de mostrar zero e deixar a pessoa procurando botão, vai buscar. */
+  _puxouVazio: false,
+  async _puxarSeVazio(total) {
+    try {
+      if (total > 0 || dashboard._puxouVazio) return;
+      if (typeof cloudRel === 'undefined' || !cloudRel.disponivel()) return;
+      if (!(await cloud._garantirToken())) return;
+      dashboard._puxouVazio = true;
+      let trouxe = 0;
+      for (const mod of ['anestesia', 'pre', 'consulta', 'recuperacao', 'financeiro']) {
+        const remotos = await cloudRel.puxarModulo(mod);
+        if (!Array.isArray(remotos)) continue;
+        const m = cloudRel.mesclarLocal(mod, remotos);
+        trouxe += m.novos + m.atualizados;
+      }
+      if (trouxe) {
+        toast('☁️ ' + trouxe + ' registro(s) trazidos da clínica para este aparelho');
+        dashboard.atualizar();
+      }
+    } catch (e) {}
+  },
+
   _dataClinica(it) {
     let d = '';
     try { d = historico._dataItem(it) || ''; } catch (e) {}
@@ -38682,10 +38720,11 @@ const dashboard = {
       dashboard._filtrarEscopo(list, escopo)
         .map(it => Object.assign({}, it, { _dataClinica: dashboard._dataClinica(it) })),
       periodo, '_dataClinica');
-    const allAnest = filtPorMeta(store.list('anestesia'));
-    const allPre   = filtPorMeta(store.list('pre'));
-    const allCons  = filtPorMeta(store.list('consulta'));
-    const allRecup = filtPorMeta(store.list('recuperacao'));
+    /* o detalhe segue a mesma régua do painel: só produção finalizada */
+    const allAnest = dashboard._soProducao(filtPorMeta(store.list('anestesia')));
+    const allPre   = dashboard._soProducao(filtPorMeta(store.list('pre')));
+    const allCons  = dashboard._soProducao(filtPorMeta(store.list('consulta')));
+    const allRecup = dashboard._soProducao(filtPorMeta(store.list('recuperacao')));
     const allFin   = filtPorMeta(store.list('financeiro'));
 
     const periodoLabel = { all: 'Todos os períodos', '7': 'Últimos 7 dias', '30': 'Últimos 30 dias', '90': 'Últimos 90 dias', '365': 'Último ano' }[periodo] || periodo;
