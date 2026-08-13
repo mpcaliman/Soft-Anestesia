@@ -4266,7 +4266,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-13n</b><br>
+    v7.1 · build <b id="build-tag">2026-08-13o</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -11157,8 +11157,13 @@ const arquivo = {
         ix[mod] = ix[mod] || [];
         saem.forEach(it => {
           if (!ix[mod].some(e => e.id === it._id)) {
+            /* `fin` marca se o registro estava FINALIZADO: o painel conta
+               PRODUÇÃO, e sem essa marca o que está na nuvem entraria no total
+               mesmo sendo rascunho. Entradas antigas não têm o campo — nesse
+               caso contam, porque esconder produção real seria pior. */
             ix[mod].push({ id: it._id, nome: arquivo._nomeDe(it),
-              data: (it.data || it.data_proc || String(it._updatedAt || '').slice(0, 10) || '') });
+              data: (it.data || it.data_proc || String(it._updatedAt || '').slice(0, 10) || ''),
+              fin: !!it._finalizado });
           }
           n++;
         });
@@ -11890,8 +11895,13 @@ const modoNuvem = {
         ix[mod] = ix[mod] || [];
         saem.forEach(it => {
           if (!ix[mod].some(e => e.id === it._id)) {
+            /* `fin` marca se o registro estava FINALIZADO: o painel conta
+               PRODUÇÃO, e sem essa marca o que está na nuvem entraria no total
+               mesmo sendo rascunho. Entradas antigas não têm o campo — nesse
+               caso contam, porque esconder produção real seria pior. */
             ix[mod].push({ id: it._id, nome: arquivo._nomeDe(it),
-              data: (it.data || it.data_proc || String(it._updatedAt || '').slice(0, 10) || '') });
+              data: (it.data || it.data_proc || String(it._updatedAt || '').slice(0, 10) || ''),
+              fin: !!it._finalizado });
           }
           n++;
         });
@@ -38402,16 +38412,17 @@ const dashboard = {
     /* O "Atualizar" do painel também vai buscar os pré-lançamentos na clínica:
        clicar em atualizar e a fila continuar vazia era o pior dos mundos. */
     try { preLanc.sincronizarFila({ silent: true }); } catch (e) {}
-    /* Painel zerado: explica o zero e busca a produção na clínica antes de
-       aceitá-lo. Um "0" mudo faz duvidar do sistema inteiro. */
-    const totalProducao = allAnest.length + allPre.length + allCons.length + allRecup.length;
-    try { dashboard._explicarVazio(periodo, escopo, totalProducao); } catch (e) {}
-    try { dashboard._puxarSeVazio(totalProducao + allFin.length); } catch (e) {}
-
     /* KPIs */
     const nuvem = dashboard._naNuvem(periodo, escopo);
     dashboard._avisoNuvem(nuvem);
     const maisNuvem = (mod) => (nuvem.porMod[mod] || 0);
+
+    /* Painel zerado: explica o zero e busca a produção na clínica antes de
+       aceitá-lo. Um "0" mudo faz duvidar do sistema inteiro. O que está na
+       nuvem entra nos totais — então, se há isso, o painel NÃO está vazio. */
+    const totalProducao = allAnest.length + allPre.length + allCons.length + allRecup.length;
+    try { dashboard._explicarVazio(periodo, escopo, totalProducao + (nuvem.total || 0)); } catch (e) {}
+    try { dashboard._puxarSeVazio(totalProducao + allFin.length); } catch (e) {}
     const kpiGrid = document.getElementById('kpi-grid');
     const totFinPrev = allFin.reduce((s, x) => s + (parseFloat(x.valor_previsto) || 0), 0);
     const totFinRec  = allFin.reduce((s, x) => s + (parseFloat(x.valor_recebido) || 0), 0);
@@ -38426,18 +38437,18 @@ const dashboard = {
       </div>
       <div class="kpi-card accent" data-detail="pre">
         <div class="kpi-label">Pré-anestésica</div>
-        <div class="kpi-value">${allPre.length}</div>
-        <div class="kpi-sub">avaliações finalizadas</div>
+        <div class="kpi-value">${allPre.length + maisNuvem('pre')}</div>
+        <div class="kpi-sub">avaliações finalizadas${maisNuvem('pre') ? ' · ' + maisNuvem('pre') + ' na nuvem' : ''}</div>
       </div>
       <div class="kpi-card" data-detail="consulta">
         <div class="kpi-label">Consultas / Dor</div>
-        <div class="kpi-value">${allCons.length}</div>
-        <div class="kpi-sub">atendimentos finalizados</div>
+        <div class="kpi-value">${allCons.length + maisNuvem('consulta')}</div>
+        <div class="kpi-sub">atendimentos finalizados${maisNuvem('consulta') ? ' · ' + maisNuvem('consulta') + ' na nuvem' : ''}</div>
       </div>
       <div class="kpi-card accent" data-detail="recuperacao">
         <div class="kpi-label">Recuperação pós</div>
-        <div class="kpi-value">${allRecup.length}</div>
-        <div class="kpi-sub">fichas SRPA finalizadas</div>
+        <div class="kpi-value">${allRecup.length + maisNuvem('recuperacao')}</div>
+        <div class="kpi-sub">fichas SRPA finalizadas${maisNuvem('recuperacao') ? ' · ' + maisNuvem('recuperacao') + ' na nuvem' : ''}</div>
       </div>
       <div class="kpi-card warn" data-detail="pacientes_unicos">
         <div class="kpi-label">Pacientes únicos</div>
@@ -38572,7 +38583,11 @@ const dashboard = {
     let ix = {};
     try { ix = arquivo._indice() || {}; } catch (e) { return out; }
     Object.keys(ix).forEach(mod => {
-      const itens = (ix[mod] || []).map(e => ({ _dataClinica: e.data ? e.data + 'T12:00:00.000Z' : '' }))
+      const itens = (ix[mod] || [])
+        /* produção é o que foi finalizado; entrada antiga (sem a marca) conta,
+           porque esconder produção real seria pior do que somar um rascunho */
+        .filter(e => e.fin !== false)
+        .map(e => ({ _dataClinica: e.data ? e.data + 'T12:00:00.000Z' : '' }))
         .filter(e => e._dataClinica);
       const n = dashboard.filtrarPorPeriodo(itens, periodo, '_dataClinica').length;
       if (n) { out.porMod[mod] = n; out.total += n; }
@@ -38585,10 +38600,30 @@ const dashboard = {
     if (!host) return;
     if (!nuvem || !nuvem.total) { host.style.display = 'none'; host.innerHTML = ''; return; }
     host.style.display = '';
+    /* Esses registros saíram do aparelho quando o limite de espaço era real
+       (localStorage, 5 MB). Com o disco grande não é mais: dá para trazer tudo
+       de volta e desligar o arquivamento, e aí os gráficos ficam completos. */
+    const cabeTudo = (() => { try { return !!disco._pronto; } catch (e) { return false; } })();
+    const arquivando = (() => {
+      try { return (typeof modoNuvem !== 'undefined' && modoNuvem.ligado()) || arquivo.autoLigado(); }
+      catch (e) { return false; }
+    })();
     host.innerHTML =
       '<span>☁️ <b>' + nuvem.total + '</b> registro(s) deste período estão na nuvem e não neste aparelho. ' +
       'Eles <b>entram nos totais</b>, mas não nos gráficos por cirurgião, hospital e convênio.</span>' +
-      '<button type="button" class="btn btn-xs btn-primary" onclick="arquivo.restaurarTodos().then(function(){ dashboard.atualizar(); })">⬇ Trazer para cá</button>';
+      '<button type="button" class="btn btn-xs btn-primary" onclick="arquivo.restaurarTodos().then(function(){ dashboard.atualizar(); })">⬇ Trazer para cá</button>' +
+      (cabeTudo && arquivando
+        ? '<span style="flex-basis:100%;font-size:.8rem;margin-top:6px">Este aparelho agora guarda imagens e histórico no <b>disco grande</b> — não precisa mais mandar registro para fora para caber. ' +
+          '<button type="button" class="btn btn-xs" onclick="dashboard._voltarTudoParaCa()">Trazer tudo e parar de arquivar</button></span>'
+        : '');
+  },
+  /* Traz o que foi arquivado e desliga o arquivamento automático: os gráficos
+     só ficam completos com os registros no aparelho. */
+  async _voltarTudoParaCa() {
+    try { if (typeof modoNuvem !== 'undefined' && modoNuvem.ligado()) await modoNuvem.alternar(false); } catch (e) {}
+    try { if (arquivo.autoLigado()) arquivo.alternarAuto(false); } catch (e) {}
+    try { await arquivo.restaurarTodos(); } catch (e) {}
+    try { dashboard.atualizar(); } catch (e) {}
   },
 
   /* Produção é o que ficou pronto. Rascunho e pré-lançamento ficam de fora do

@@ -6577,6 +6577,65 @@ await test('Painel zerado explica o porquê e leva até a produção', async () 
   await page.close();
 });
 
+/* 113b) O aviso dizia "eles entram nos totais", mas só o cartão de anestesia
+   somava a nuvem — os outros mostravam zero enquanto o aviso prometia o
+   contrário. E, com o disco grande, arquivar deixou de ser necessário. */
+await test('O que está na nuvem soma em todos os cartões, e dá para trazer tudo de volta', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    ['anestesia', 'pre', 'consulta', 'recuperacao', 'financeiro'].forEach(m => store.setList(m, []));
+    auth.usuarioAtual = () => ({ id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
+    const hoje = new Date().toISOString().slice(0, 10);
+
+    /* índice de arquivados: 2 finalizados e 1 rascunho em cada módulo */
+    const entrada = (i, fin) => ({ id: 'arq' + i, nome: 'P' + i, data: hoje, fin });
+    localStorage.setItem(arquivo.INDEX_KEY, JSON.stringify({
+      pre: [entrada(1, true), entrada(2, true), entrada(3, false)],
+      consulta: [entrada(4, true)],
+      recuperacao: [entrada(5, true)],
+      anestesia: [entrada(6, true)]
+    }));
+    document.getElementById('dash-escopo').value = 'clinica';
+    document.getElementById('dash-periodo').value = 'hoje';
+    dashboard.atualizar();
+    const valor = (mod) => document.querySelector('#kpi-grid [data-detail="' + mod + '"] .kpi-value').textContent.trim();
+    out.preSomou = valor('pre') === '2';                 /* o rascunho arquivado não conta */
+    out.consultaSomou = valor('consulta') === '1';
+    out.srpaSomou = valor('recuperacao') === '1';
+    out.anestesiaSomou = valor('anestesia') === '1';
+
+    /* entrada antiga, sem a marca, continua contando (não esconder produção) */
+    localStorage.setItem(arquivo.INDEX_KEY, JSON.stringify({ pre: [{ id: 'velho', nome: 'V', data: hoje }] }));
+    dashboard.atualizar();
+    out.entradaAntigaConta = valor('pre') === '1';
+
+    /* e o painel oferece trazer tudo de volta quando o disco grande está ativo */
+    const aviso = document.getElementById('dash-aviso-nuvem');
+    localStorage.setItem(modoNuvem.KEY, '1');
+    dashboard.atualizar();
+    out.ofereceVoltar = disco._pronto && /parar de arquivar/i.test(aviso.innerHTML);
+
+    let restaurou = 0;
+    const origRest = arquivo.restaurarTodos;
+    arquivo.restaurarTodos = async () => { restaurou++; };
+    await dashboard._voltarTudoParaCa();
+    arquivo.restaurarTodos = origRest;
+    out.desligouOArquivamento = modoNuvem.ligado() === false && arquivo.autoLigado() === false;
+    out.trouxeDeVolta = restaurou >= 1;   /* desligar o modo nuvem já restaura; a chamada extra é idempotente */
+
+    localStorage.removeItem(arquivo.INDEX_KEY);
+    ['anestesia', 'pre', 'consulta', 'recuperacao', 'financeiro'].forEach(m => store.setList(m, []));
+    return out;
+  });
+  assert(r.preSomou && r.consultaSomou && r.srpaSomou && r.anestesiaSomou,
+    'o que está na nuvem tem que somar em TODOS os cartões, não só no de anestesia');
+  assert(r.entradaAntigaConta, 'arquivo antigo sem a marca continua contando — esconder produção real seria pior');
+  assert(r.ofereceVoltar, 'com o disco grande, o painel oferece trazer tudo de volta');
+  assert(r.desligouOArquivamento && r.trouxeDeVolta, 'trazer de volta também desliga o arquivamento — senão sai tudo de novo');
+  await page.close();
+});
+
 /* 113) O termo é documento, não produção faturável: não gera financeiro. */
 await test('Termo de consentimento não gera lançamento financeiro', async () => {
   const page = await novaPagina();
