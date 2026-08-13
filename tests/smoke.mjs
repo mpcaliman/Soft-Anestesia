@@ -33,7 +33,13 @@ function assert(cond, msg) {
   if (!cond) throw new Error('Assert falhou: ' + msg);
 }
 
+/* Filtro por trecho do nome: `node tests/smoke.mjs impressão` roda só o que
+   casa. A suíte inteira leva minutos; consertar um teste sem poder rodá-lo
+   isolado custa muito mais caro do que estas quatro linhas. */
+const FILTRO = (process.argv[2] || '').toLowerCase();
+
 async function test(name, fn) {
+  if (FILTRO && name.toLowerCase().indexOf(FILTRO) < 0) return;
   currentErrors = [];
   try {
     await fn();
@@ -6221,6 +6227,91 @@ await test('O Buscar volta ao normal mesmo com duas buscas cruzadas, e "não sub
   assert(r.traduziuOMotivo, 'o motivo tem que estar em português, não em código');
   assert(r.mostrouOMotivo, 'e precisa aparecer na tela de quem lançou');
   assert(r.limpouDepoisDeSubir, 'depois que sobe, o aviso e o motivo somem');
+  await page.close();
+});
+
+/* 109) Ao finalizar, o passo seguinte é o papel: pré e termo vão direto para a
+   impressão. E a pré tem que gerar o financeiro COM o pagador — sem convênio o
+   lançamento nasce sem saber de quem cobrar. */
+await test('Pré e Termo vão para a impressão ao finalizar, e a pré gera o financeiro com o convênio', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('pre', []); store.setList('termo', []); store.setList('financeiro', []);
+    let imprimiu = 0;
+    const origPrint = printPreview.abrir;
+    printPreview.abrir = () => { imprimiu++; };
+    const origModal = modal.open;
+    modal.open = () => {};                       /* a pergunta do termo não interessa aqui */
+
+    /* a pré agora tem onde guardar o convênio */
+    const f = document.getElementById('form-pre');
+    out.temCampoConvenio = !!f.querySelector('[name="convenio"]');
+    f.querySelector('[name="_id"]') && (f.querySelector('[name="_id"]').value = '');
+    f.querySelector('[name="nome"]').value = 'Ana Souza';
+    f.querySelector('[name="data"]').value = '2026-08-13';
+    f.querySelector('[name="cirurgia"]').value = 'Colecistectomia';
+    f.querySelector('[name="cirurgiao"]').value = 'Dr. Paulo';
+    f.querySelector('[name="hospital"]').value = 'Hospital X';
+    f.querySelector('[name="convenio"]').value = 'Bradesco Saúde';
+    pre.salvar({ finalizar: true, _dupOk: true });
+    const rec = store.list('pre')[0];
+    out.finalizou = !!rec && rec._finalizado === true && rec.convenio === 'Bradesco Saúde';
+
+    /* financeiro criado, com pagador */
+    const lanc = store.list('financeiro').filter(x => x._origemId === rec._id);
+    out.gerouFinanceiro = lanc.length === 1;
+    out.levouOConvenio = lanc.length === 1 && lanc[0].convenio === 'Bradesco Saúde';
+    out.levouOTipo = lanc.length === 1 && lanc[0].tipo_pagamento === 'Convênio';
+    out.levouOResto = lanc.length === 1 && lanc[0].paciente === 'Ana Souza'
+      && lanc[0].hospital === 'Hospital X' && lanc[0].cirurgiao === 'Dr. Paulo';
+
+    await new Promise(r2 => setTimeout(r2, 400));
+    out.abriuImpressaoDaPre = imprimiu >= 1;
+
+    /* termo: mesma coisa */
+    imprimiu = 0;
+    const ft = document.getElementById('form-termo');
+    ft.querySelector('[name="_id"]') && (ft.querySelector('[name="_id"]').value = '');
+    ft.querySelector('[name="nome"]').value = 'Ana Souza';
+    const dt = ft.querySelector('[name="data"]'); if (dt) dt.value = '2026-08-13';
+    termo.salvar({ finalizar: true, _dupOk: true });
+    await new Promise(r2 => setTimeout(r2, 400));
+    out.abriuImpressaoDoTermo = imprimiu >= 1;
+
+    /* a janela de pendências não volta a interromper de meia em meia hora */
+    let abriu = 0, pintou = 0;
+    const origAbrir = pendencias.abrir, origRender = pendencias.renderDashboard,
+          origPode = pendencias.podeVer, origInterval = window.setInterval;
+    pendencias.abrir = () => { abriu++; };
+    pendencias.renderDashboard = () => { pintou++; };
+    pendencias.podeVer = () => true;
+    let tarefa = null;
+    window.setInterval = (fn) => { tarefa = fn; return 0; };
+    pendencias.iniciarTimer();
+    window.setInterval = origInterval;
+    if (tarefa) tarefa();
+    out.naoInterrompeDeNovo = abriu === 0 && pintou === 1;
+    /* mas ao ENTRAR continua avisando (com a tela livre: por regra, ela não
+       interrompe janela já aberta) */
+    try { document.getElementById('modal-backdrop').classList.remove('show'); } catch (e) {}
+    pendencias.checarAoEntrar();
+    out.avisaAoEntrar = abriu === 1;
+
+    pendencias.abrir = origAbrir; pendencias.renderDashboard = origRender; pendencias.podeVer = origPode;
+    printPreview.abrir = origPrint; modal.open = origModal;
+    store.setList('pre', []); store.setList('termo', []); store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.temCampoConvenio, 'a pré-anestésica precisa ter onde guardar o convênio');
+  assert(r.finalizou, 'a finalização precisa gravar o registro com o convênio');
+  assert(r.gerouFinanceiro, 'finalizar a pré tem que gerar o lançamento financeiro');
+  assert(r.levouOConvenio && r.levouOTipo, 'o lançamento não pode nascer sem saber de quem cobrar');
+  assert(r.levouOResto, 'paciente, hospital e cirurgião viajam junto');
+  assert(r.abriuImpressaoDaPre, 'ao finalizar a pré, a impressão abre sozinha');
+  assert(r.abriuImpressaoDoTermo, 'ao finalizar o termo, a impressão abre sozinha');
+  assert(r.naoInterrompeDeNovo, 'a janela de pendências não pode voltar a interromper de meia em meia hora');
+  assert(r.avisaAoEntrar, 'mas ao entrar ela continua avisando');
   await page.close();
 });
 
