@@ -5296,6 +5296,47 @@ await test('Dashboard da auxiliar mostra só pendências e pré-lançamentos', a
   await page.close();
 });
 
+/* 93) Dashboard: escopo (pessoal/clínica) e os períodos pedidos */
+await test('Dashboard tem escopo pessoal/clínica e períodos hoje/semana/mês/6m/12m/tudo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const opts = (id) => Array.from(document.querySelectorAll('#' + id + ' option')).map(o => o.value);
+    out.temEscopo = opts('dash-escopo').join(',') === 'pessoal,clinica';
+    out.temPeriodos = opts('dash-periodo').join(',') === 'hoje,7,30,180,365,all';
+
+    /* "Hoje" é o dia do calendário: ficha das 8h continua contando às 23h */
+    const hoje = utils.hojeISO();
+    const ontem = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const lista = [
+      { _id: 'a', _dataClinica: hoje + 'T08:00:00.000Z' },
+      { _id: 'b', _dataClinica: ontem + 'T23:00:00.000Z' }
+    ];
+    const doDia = dashboard.filtrarPorPeriodo(lista, 'hoje', '_dataClinica');
+    out.hojeEhOdia = doDia.length === 1 && doDia[0]._id === 'a';
+    out.tudoNaoFiltra = dashboard.filtrarPorPeriodo(lista, 'all', '_dataClinica').length === 2;
+
+    /* escopo pessoal separa por autoria; clínica traz tudo */
+    auth.usuarioAtual = () => ({ nome: 'Dr. Marcelo', usuario: 'mpcaliman' });
+    const regs = [
+      { _id: '1', _updatedBy: 'mpcaliman' },
+      { _id: '2', _updatedBy: 'secretaria' },
+      { _id: '3' }                                   /* sem autoria: conta como meu */
+    ];
+    const meus = dashboard._filtrarEscopo(regs, 'pessoal').map(x => x._id);
+    out.pessoal = meus.join(',') === '1,3';
+    out.clinica = dashboard._filtrarEscopo(regs, 'clinica').length === 3;
+    return out;
+  });
+  assert(r.temEscopo, 'deveria existir o seletor pessoal/clínica');
+  assert(r.temPeriodos, 'os períodos deveriam ser hoje, semana, mês, 6 e 12 meses e tudo');
+  assert(r.hojeEhOdia, '"Hoje" tem que ser o dia do calendário, não as últimas 24 h');
+  assert(r.tudoNaoFiltra, '"Tudo" não pode filtrar nada');
+  assert(r.pessoal, 'pessoal deveria trazer os meus e os sem autoria registrada');
+  assert(r.clinica, 'clínica deveria trazer tudo');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

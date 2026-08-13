@@ -4289,12 +4289,17 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     <div class="action-divider"></div>
     <div class="field" style="margin:0; flex-direction:row; align-items:center; gap:8px">
       <label style="margin:0; font-size:.75rem">Período:</label>
+      <select id="dash-escopo" onchange="dashboard.atualizar()" title="Só os seus registros ou os de toda a clínica" style="padding:5px 8px; font-size:.82rem; width:auto">
+        <option value="pessoal">👤 Pessoal</option>
+        <option value="clinica">🏥 Clínica</option>
+      </select>
       <select id="dash-periodo" onchange="dashboard.atualizar()" style="padding:5px 8px; font-size:.82rem; width:auto">
-        <option value="all">Todos</option>
-        <option value="7">Últimos 7 dias</option>
-        <option value="30">Últimos 30 dias</option>
-        <option value="90">Últimos 90 dias</option>
-        <option value="365">Último ano</option>
+        <option value="hoje">Hoje</option>
+        <option value="7">Esta semana</option>
+        <option value="30" selected>Este mês</option>
+        <option value="180">6 meses</option>
+        <option value="365">12 meses</option>
+        <option value="all">Tudo</option>
       </select>
     </div>
   </div>
@@ -37548,6 +37553,15 @@ const dashboard = {
   /* Filtra por período em dias (a partir de hoje) */
   filtrarPorPeriodo(list, periodo, dateField) {
     if (periodo === 'all') return list;
+    /* "Hoje" é o dia do calendário, não as últimas 24 h — uma ficha das 8 h da
+       manhã não pode sair da conta às 9 h do dia seguinte. */
+    if (periodo === 'hoje') {
+      const hoje = utils.hojeISO();
+      return list.filter(item => {
+        const d = item[dateField] || item._updatedAt || item._createdAt || '';
+        return String(d).slice(0, 10) === hoje;
+      });
+    }
     const dias = parseInt(periodo, 10);
     if (!dias) return list;
     const limite = Date.now() - dias * 86400000;
@@ -37568,8 +37582,10 @@ const dashboard = {
        Filtrar por _updatedAt fazia o Dashboard contar quando o ARQUIVO foi
        salvo: bastava a nuvem regravar os registros para o dia de ontem
        "perder" as anestesias e hoje ganhar todas de uma vez. */
+    const escopo = (document.getElementById('dash-escopo') || {}).value || 'pessoal';
     const filtPorMeta = list => dashboard.filtrarPorPeriodo(
-      list.map(it => Object.assign({}, it, { _dataClinica: dashboard._dataClinica(it) })),
+      dashboard._filtrarEscopo(list, escopo)
+        .map(it => Object.assign({}, it, { _dataClinica: dashboard._dataClinica(it) })),
       periodo, '_dataClinica');
     const allAnest = filtPorMeta(store.list('anestesia'));
     const allPre = filtPorMeta(store.list('pre'));
@@ -37700,6 +37716,29 @@ const dashboard = {
 
   /* Data clínica do registro (procedimento/avaliação); só cai na data de
      gravação quando o registro não tem data própria. */
+  /* "Pessoal" = o que eu criei/assinei. "Clínica" = tudo o que está aqui,
+     inclusive o que as auxiliares lançaram e o que outro anestesista fez. */
+  _filtrarEscopo(list, escopo) {
+    if (escopo !== 'pessoal') return list;
+    /* a autoria pode estar gravada pelo login, pelo nome ou pelo id — todos
+       valem como "eu", senão o filtro esconderia registros meus */
+    const meus = new Set();
+    try {
+      const u = auth.usuarioAtual() || {};
+      [u.nome, u.usuario, u.id, u.uid].forEach(v => { if (v) meus.add(String(v).toLowerCase()); });
+    } catch (e) {}
+    const login = localStorage.getItem('medsys.v7.usuario');
+    if (login) meus.add(String(login).toLowerCase());
+    if (!meus.size) return list;
+    const bate = (v) => { const t = String(v || '').toLowerCase(); return !!t && meus.has(t); };
+    return list.filter(it => {
+      /* sem autoria registrada, o registro conta como meu — não sumir do
+         painel importa mais do que classificar com precisão */
+      if (!it._updatedBy && !it._criadoPor && !it.anestesista && !it.profissional) return true;
+      return bate(it._updatedBy) || bate(it._criadoPor) || bate(it.anestesista) || bate(it.profissional);
+    });
+  },
+
   _dataClinica(it) {
     let d = '';
     try { d = historico._dataItem(it) || ''; } catch (e) {}
@@ -37805,8 +37844,10 @@ const dashboard = {
        Filtrar por _updatedAt fazia o Dashboard contar quando o ARQUIVO foi
        salvo: bastava a nuvem regravar os registros para o dia de ontem
        "perder" as anestesias e hoje ganhar todas de uma vez. */
+    const escopo = (document.getElementById('dash-escopo') || {}).value || 'pessoal';
     const filtPorMeta = list => dashboard.filtrarPorPeriodo(
-      list.map(it => Object.assign({}, it, { _dataClinica: dashboard._dataClinica(it) })),
+      dashboard._filtrarEscopo(list, escopo)
+        .map(it => Object.assign({}, it, { _dataClinica: dashboard._dataClinica(it) })),
       periodo, '_dataClinica');
     const allAnest = filtPorMeta(store.list('anestesia'));
     const allPre   = filtPorMeta(store.list('pre'));
