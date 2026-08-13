@@ -6238,12 +6238,23 @@ await test('Pré e Termo vão para a impressão ao finalizar, e a pré gera o fi
   const r = await page.evaluate(async () => {
     const out = {};
     store.setList('pre', []); store.setList('termo', []); store.setList('financeiro', []);
-    let imprimiu = 0;
+    /* A impressão é montada a partir do FORMULÁRIO. Contar chamadas não basta:
+       da primeira vez ela abria DEPOIS do descarte do rascunho, que limpa a
+       tela, e saía em branco. Aqui olhamos o que foi realmente montado. */
+    let imprimiu = 0, conteudo = '';
     const origPrint = printPreview.abrir;
-    printPreview.abrir = () => { imprimiu++; };
+    printPreview.abrir = function () {
+      imprimiu++;
+      const r2 = origPrint.apply(printPreview, arguments);
+      try { conteudo = (document.getElementById('ppp') || {}).innerHTML || ''; } catch (e) {}
+      try { document.getElementById('print-preview-overlay').classList.remove('show'); } catch (e) {}
+      return r2;
+    };
     const origModal = modal.open;
     modal.open = () => {};                       /* a pergunta do termo não interessa aqui */
 
+    /* como no uso real: finaliza de dentro do módulo aberto */
+    ui.navegar('pre');
     /* a pré agora tem onde guardar o convênio */
     const f = document.getElementById('form-pre');
     out.temCampoConvenio = !!f.querySelector('[name="convenio"]');
@@ -6268,9 +6279,11 @@ await test('Pré e Termo vão para a impressão ao finalizar, e a pré gera o fi
 
     await new Promise(r2 => setTimeout(r2, 400));
     out.abriuImpressaoDaPre = imprimiu >= 1;
+    out.impressaoDaPreTemConteudo = /Ana Souza/.test(conteudo) && /Colecistectomia/.test(conteudo);
 
     /* termo: mesma coisa */
-    imprimiu = 0;
+    imprimiu = 0; conteudo = '';
+    ui.navegar('termo');
     const ft = document.getElementById('form-termo');
     ft.querySelector('[name="_id"]') && (ft.querySelector('[name="_id"]').value = '');
     ft.querySelector('[name="nome"]').value = 'Ana Souza';
@@ -6278,6 +6291,7 @@ await test('Pré e Termo vão para a impressão ao finalizar, e a pré gera o fi
     termo.salvar({ finalizar: true, _dupOk: true });
     await new Promise(r2 => setTimeout(r2, 400));
     out.abriuImpressaoDoTermo = imprimiu >= 1;
+    out.impressaoDoTermoTemConteudo = /Ana Souza/.test(conteudo);
 
     /* a janela de pendências não volta a interromper de meia em meia hora */
     let abriu = 0, pintou = 0;
@@ -6309,7 +6323,9 @@ await test('Pré e Termo vão para a impressão ao finalizar, e a pré gera o fi
   assert(r.levouOConvenio && r.levouOTipo, 'o lançamento não pode nascer sem saber de quem cobrar');
   assert(r.levouOResto, 'paciente, hospital e cirurgião viajam junto');
   assert(r.abriuImpressaoDaPre, 'ao finalizar a pré, a impressão abre sozinha');
+  assert(r.impressaoDaPreTemConteudo, 'a impressão não pode sair em branco: tem que trazer o paciente e o procedimento');
   assert(r.abriuImpressaoDoTermo, 'ao finalizar o termo, a impressão abre sozinha');
+  assert(r.impressaoDoTermoTemConteudo, 'a impressão do termo também precisa vir preenchida');
   assert(r.naoInterrompeDeNovo, 'a janela de pendências não pode voltar a interromper de meia em meia hora');
   assert(r.avisaAoEntrar, 'mas ao entrar ela continua avisando');
   await page.close();

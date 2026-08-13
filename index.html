@@ -4259,7 +4259,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-13i</b><br>
+    v7.1 · build <b id="build-tag">2026-08-13j</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -13828,17 +13828,17 @@ const pre = {
     ui.atualizarDocStatus('pre', saved);
     setSavedStatus((finalizar ? 'Finalizado às ' : 'Salvo às ') + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
     markClean();
+    /* A impressão é montada a partir do FORMULÁRIO, e o descarte do rascunho
+       logo abaixo troca ou limpa o que está na tela. Por isso ela vai ANTES e
+       sem espera: chamada depois, a pré-visualização saía em branco. */
+    if (finalizar) { try { printPreview.abrir(); } catch (e) {} }
     /* Rascunho só é descartado quando finaliza; salvar normal mantém o rascunho ativo */
     if (finalizar) { try { pdfBackup.autoAoFinalizar('pre'); } catch (e) {} }
     if (finalizar) { try { rascunhos.removerAtivo('pre'); } catch (e) {} }
     toast(finalizar ? '✅ Avaliação finalizada' : '💾 Avaliação salva (dados preservados)');
-    /* Finalizou: a impressão é o passo seguinte de fato — o papel vai para o
-       prontuário do hospital. Abre direto, e a pergunta do Termo espera a vez
-       (ela já sabe esperar janela aberta, ver _perguntarTermo). */
-    if (finalizar) {
-      setTimeout(() => { try { printPreview.abrir(); } catch (e) {} }, 250);
-      setTimeout(() => pre._perguntarTermo(saved), 700);
-    }
+    /* A pergunta do Termo espera a impressão sair da frente (ela já sabe
+       esperar janela aberta, ver _perguntarTermo). */
+    if (finalizar) setTimeout(() => pre._perguntarTermo(saved), 700);
   },
   /* ---------- Navegação por seções + status de completude ---------- */
   nav: {
@@ -15413,12 +15413,12 @@ const termo = {
     ui.atualizarDocStatus('termo', saved);
     setSavedStatus((finalizar ? 'Finalizado às ' : 'Salvo às ') + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
     markClean();
+    /* Antes do descarte do rascunho, pelo mesmo motivo da pré: a impressão lê
+       o formulário, e o descarte troca o que está nele. */
+    if (finalizar) { try { printPreview.abrir(); } catch (e) {} }
     if (finalizar) { try { pdfBackup.autoAoFinalizar('termo'); } catch (e) {} }
     if (finalizar) { try { rascunhos.removerAtivo('termo'); } catch (e) {} }
     toast(finalizar ? '✅ Termo finalizado' : '💾 Termo salvo (dados preservados)');
-    /* Termo finalizado existe para ser assinado no papel: vai direto para a
-       impressão, como a pré-anestésica. */
-    if (finalizar) setTimeout(() => { try { printPreview.abrir(); } catch (e) {} }, 250);
   },
   finalizar() { termo.salvar({ finalizar: true }); },
   salvarComoNovo() {
