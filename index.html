@@ -4259,7 +4259,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-13c</b><br>
+    v7.1 · build <b id="build-tag">2026-08-13d</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -4363,7 +4363,11 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
          grade de gráficos — a grade some inteira para quem só pré-lança, e o
          cartão dela ia junto. -->
     <div id="pl-alerta" class="pl-alerta" style="display:none"></div>
-    <div class="card no-collapse" id="pl-fila-card" style="display:none"><div class="card-header"><div class="card-title-wrap"><h2 id="pl-fila-titulo">Aguardando sua conferência</h2></div></div>
+    <div class="card no-collapse" id="pl-fila-card" style="display:none">
+      <div class="card-header">
+        <div class="card-title-wrap"><h2 id="pl-fila-titulo">Aguardando sua conferência</h2></div>
+        <div class="card-actions"><button type="button" class="btn btn-xs" onclick="preLanc.sincronizarFila({forcar:true})" title="Buscar na clínica o que foi enviado nos outros aparelhos">🔄 Buscar</button></div>
+      </div>
       <div class="card-body" id="pl-fila-lista"></div>
     </div>
 
@@ -11855,6 +11859,34 @@ const preLanc = {
       : 'Visão analítica dos registros';
   },
 
+  /* BUSCA A FILA NA NUVEM.
+     A fila é lida do que está NESTE aparelho. Só que o pré-lançamento nasce no
+     aparelho dela: sem ir buscar, o médico podia esperar o dia inteiro. Isto
+     roda ao abrir o Dashboard (no máximo uma vez por minuto) e no botão. */
+  _ultimaBusca: 0,
+  async sincronizarFila(opts = {}) {
+    if (!opts.forcar && Date.now() - preLanc._ultimaBusca < 60000) return null;
+    try {
+      if (typeof cloudRel === 'undefined' || !cloudRel.disponivel()) return null;
+      if (!(await cloud._garantirToken())) return null;
+      preLanc._ultimaBusca = Date.now();
+      let novos = 0, atualizados = 0;
+      for (const mod of preLanc.MODS) {
+        const remotos = await cloudRel.puxarModulo(mod);
+        if (!Array.isArray(remotos)) continue;
+        const m = cloudRel.mesclarLocal(mod, remotos);
+        novos += m.novos; atualizados += m.atualizados;
+      }
+      try { preLanc.renderFila(); } catch (e) {}
+      if ((novos || atualizados) && !opts.silent) {
+        toast('☁️ ' + (novos + atualizados) + ' pré-lançamento(s) atualizado(s) da clínica');
+      } else if (!opts.silent) {
+        toast('Nada novo da clínica por enquanto.');
+      }
+      return { novos, atualizados };
+    } catch (e) { return null; }
+  },
+
   /* Cartão no Dashboard: a fila do médico e o lembrete da auxiliar */
   renderFila() {
     try { preLanc.renderAlerta(); } catch (e) {}
@@ -12417,7 +12449,7 @@ const ui = {
 
       /* Refresh por módulo — cada um em try/catch independente para não bloquear navegação */
       try {
-        if (modName === 'dashboard') { dashboard.atualizar(); try { meuDia.render(); } catch (e) {} try { pendencias.renderDashboard(); } catch (e) {} try { preLanc.ajustarDashboard(); } catch (e) {} try { preLanc.renderFila(); } catch (e) {} }
+        if (modName === 'dashboard') { dashboard.atualizar(); try { meuDia.render(); } catch (e) {} try { pendencias.renderDashboard(); } catch (e) {} try { preLanc.ajustarDashboard(); } catch (e) {} try { preLanc.renderFila(); } catch (e) {} try { preLanc.sincronizarFila({ silent: true }); } catch (e) {} }
         else if (modName === 'financeiro') financeiro.render();
         else if (modName === 'agenda') { agenda.render(); if (!agenda._puxouNestaSessao) { setTimeout(() => { try { agenda.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
@@ -17195,7 +17227,7 @@ const cloud = {
      honesto (achou / baixou / já tinha), por módulo.
   ============================================================ */
   async restaurarTudoDaNuvem(opts = {}) {
-    const rel = { legado: {}, relacional: {}, novos: 0, jaTinha: 0, erro: null };
+    const rel = { legado: {}, relacional: {}, novos: 0, jaTinha: 0, atualizados: 0, erro: null };
     if (!cloud.estaConfigurado()) { rel.erro = 'A nuvem não está configurada neste aparelho.'; return rel; }
     if (!cloud.estaLogado()) { rel.erro = 'Entre na nuvem para restaurar (Ajustes → Backup e sincronização).'; return rel; }
     if (!(await cloud._garantirToken())) { rel.erro = 'Sessão da nuvem expirada — saia e entre de novo.'; return rel; }
@@ -17224,15 +17256,8 @@ const cloud = {
       Object.keys(porMod).forEach(mod => {
         rel.legado[mod] = porMod[mod].length;
         if (!STORAGE[mod]) return;   /* módulo desconhecido nesta versão */
-        const locais = store.list(mod) || [];
-        const ids = new Set(locais.map(x => x && x._id).filter(Boolean));
-        let add = 0;
-        porMod[mod].forEach(item => {
-          if (!item || !item._id) return;
-          if (ids.has(item._id)) { rel.jaTinha++; return; }
-          locais.push(item); ids.add(item._id); add++; rel.novos++;
-        });
-        if (add) store.setList(mod, locais);
+        const m = cloudRel.mesclarLocal(mod, porMod[mod]);
+        rel.novos += m.novos; rel.atualizados += m.atualizados; rel.jaTinha += m.iguais;
       });
     } catch (e) { rel.erro = rel.erro || ('Falha ao ler o backup: ' + e.message); }
 
@@ -17247,15 +17272,8 @@ const cloud = {
             try { remotos = await cloudRel.puxarModulo(mod); } catch (e) {}
             if (!Array.isArray(remotos)) continue;
             rel.relacional[mod] = remotos.length;
-            const locais = store.list(mod) || [];
-            const ids = new Set(locais.map(x => x && x._id).filter(Boolean));
-            let add = 0;
-            remotos.forEach(item => {
-              if (!item || !item._id) return;
-              if (ids.has(item._id)) { rel.jaTinha++; return; }
-              locais.push(item); ids.add(item._id); add++; rel.novos++;
-            });
-            if (add) store.setList(mod, locais);
+            const m = cloudRel.mesclarLocal(mod, remotos);
+            rel.novos += m.novos; rel.atualizados += m.atualizados; rel.jaTinha += m.iguais;
           }
           try { await pacientes.sincronizarNuvem({ silent: true }); } catch (e) {}
         }
@@ -17281,6 +17299,7 @@ const cloud = {
     const corpo =
       (rel.erro ? '<p style="color:#b3261e;font-size:.86rem"><b>' + utils.escapeHTML(rel.erro) + '</b></p>' : '') +
       '<p style="font-size:.88rem;margin:0 0 10px">Trouxe <b>' + rel.novos + '</b> registro(s) de volta para este aparelho' +
+      (rel.atualizados ? ' · <b>' + rel.atualizados + '</b> atualizado(s) com a versão mais recente' : '') +
       (rel.jaTinha ? ' · ' + rel.jaTinha + ' já estavam aqui' : '') + '.</p>' +
       (linhas.length
         ? '<table class="dash-detail-table" style="margin:0"><thead><tr><th>Módulo</th><th style="text-align:right">Backup (nuvem)</th><th style="text-align:right">Clínica</th></tr></thead><tbody>' + linhas.join('') + '</tbody></table>'
@@ -19184,6 +19203,44 @@ const cloudRel = {
     return base;
   },
 
+  /* MESCLA o que veio da nuvem com o que já existe no aparelho.
+     Antes isto era só inserção: o registro que JÁ EXISTIA aqui era descartado,
+     por mais novo que estivesse lá. Era por isso que o pré-lançamento não
+     atravessava — o aparelho do médico já tinha a versão "rascunho" dela, e o
+     "enviado" chegava e era jogado fora. O mesmo valia para qualquer correção
+     feita no outro aparelho.
+     Regra: vence o mais recente. Nunca sobrescreve um registro ABERTO na tela
+     (seria puxar o tapete de quem está digitando). */
+  _quando(x) {
+    if (!x) return '';
+    return String(x._updatedAt || x._relUpdatedAt || x.atualizado_em || x._createdAt || '');
+  },
+  _abertoNaTela(id) {
+    try {
+      if (!id) return false;
+      return Array.from(document.querySelectorAll('form [name="_id"]')).some(el => el.value === id);
+    } catch (e) { return false; }
+  },
+  mesclarLocal(mod, remotos) {
+    const res = { novos: 0, atualizados: 0, iguais: 0, adiados: 0 };
+    if (!Array.isArray(remotos) || !remotos.length) return res;
+    if (typeof STORAGE !== 'undefined' && !STORAGE[mod]) return res;
+    const locais = store.list(mod) || [];
+    const ix = new Map();
+    locais.forEach((x, i) => { if (x && x._id) ix.set(x._id, i); });
+    remotos.forEach(item => {
+      if (!item || !item._id) return;
+      if (!ix.has(item._id)) { locais.push(item); ix.set(item._id, locais.length - 1); res.novos++; return; }
+      const i = ix.get(item._id);
+      const local = locais[i];
+      if (cloudRel._quando(item) <= cloudRel._quando(local)) { res.iguais++; return; }
+      if (cloudRel._abertoNaTela(item._id)) { res.adiados++; return; }
+      locais[i] = item; res.atualizados++;
+    });
+    if (res.novos || res.atualizados) store.setList(mod, locais);
+    return res;
+  },
+
   async puxarModulo(mod) {
     const cfg = cloudRel.MODOS[mod]; if (!cfg) return null;
     if (!cloudRel.disponivel()) return null;
@@ -19343,15 +19400,14 @@ const cloudRel = {
     if (!remotos) return;
     /* registros ARQUIVADOS neste aparelho não voltam pelo pull */
     try { if (typeof arquivo !== 'undefined') remotos = remotos.filter(r => !arquivo.estaArquivado(mod, r._id)); } catch (e) {}
+    /* Aqui morava a falha do pré-lançamento: quando o registro JÁ EXISTIA neste
+       aparelho, só o carimbo _relUpdatedAt era copiado e o conteúdo da nuvem ia
+       fora. Ou seja: o aparelho do médico tinha a versão "rascunho" dela, o
+       "enviado" chegava e era descartado — e nenhum botão de atualizar
+       resolvia, porque todo caminho passava por aqui. */
+    const m = cloudRel.mesclarLocal(mod, remotos);
     const locais = store.list(mod);
-    const porId = new Map(); locais.forEach(x => { if (x._id) porId.set(x._id, x); });
-    let novos = 0;
-    remotos.forEach(r => {
-      if (!r._id) return;
-      const loc = porId.get(r._id);
-      if (!loc) { locais.push(r); porId.set(r._id, r); novos++; }
-      else if (r._relUpdatedAt && !loc._relUpdatedAt) loc._relUpdatedAt = r._relUpdatedAt;
-    });
+    const novos = m.novos + m.atualizados;
     /* Visibilidade 'proprios' (migração 0008): a RLS já devolve só o que este
        usuário pode ver — então o que veio da nuvem um dia (_relUpdatedAt) e
        NÃO voltou agora deixou de ser visível (registro de outro anestesista
@@ -19369,7 +19425,11 @@ const cloudRel = {
         }
       }
     } catch (e) {}
-    if (novos || removidos) store.setList(mod, locais);
+    if (removidos) store.setList(mod, locais);      /* a mescla já gravou o que trouxe */
+    if (novos) {
+      /* trouxe coisa nova: o que está na tela precisa refletir isso */
+      try { if (typeof preLanc !== 'undefined' && preLanc.MODS.indexOf(mod) >= 0) preLanc.renderFila(); } catch (e) {}
+    }
   },
 
   /* Conflito genérico de registro (modal comparando campos simples) */
@@ -37785,6 +37845,10 @@ const dashboard = {
     const allCons = filtPorMeta(store.list('consulta'));
     const allRecup = filtPorMeta(store.list('recuperacao'));
     const allFin = filtPorMeta(store.list('financeiro'));
+
+    /* O "Atualizar" do painel também vai buscar os pré-lançamentos na clínica:
+       clicar em atualizar e a fila continuar vazia era o pior dos mundos. */
+    try { preLanc.sincronizarFila({ silent: true }); } catch (e) {}
 
     /* KPIs */
     const nuvem = dashboard._naNuvem(periodo, escopo);

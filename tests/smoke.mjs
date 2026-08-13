@@ -5731,6 +5731,106 @@ await test('Dashboard da auxiliar avisa, no topo, o que foi devolvido e o que fa
   await page.close();
 });
 
+/* 102) A sincronização era só de inserção: o registro que JÁ existia aqui era
+   descartado, por mais novo que estivesse na clínica. Era por isso que o
+   pré-lançamento enviado por ela nunca chegava no aparelho dele. */
+await test('O que já existe no aparelho também se atualiza — a versão mais nova da clínica vence', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('pre', []);
+    const f = document.getElementById('form-pre');
+    const setId = v => {
+      let h = f.querySelector('[name="_id"]');
+      if (!h) { h = document.createElement('input'); h.type = 'hidden'; h.name = '_id'; f.appendChild(h); }
+      h.value = v;
+    };
+    setId('');
+
+    /* o aparelho dele tem a versão rascunho; a clínica tem a versão enviada */
+    store.setList('pre', [
+      { _id: 'a', nome: 'Ana', _updatedAt: '2026-08-13T10:00:00.000Z',
+        _preLanc: { estado: 'rascunho', porNome: 'Sec' } },
+      { _id: 'b', nome: 'Bia', _updatedAt: '2026-08-13T12:00:00.000Z', obs: 'editei aqui agora' }
+    ]);
+    const m = cloudRel.mesclarLocal('pre', [
+      { _id: 'a', nome: 'Ana', _updatedAt: '2026-08-13T11:00:00.000Z',
+        _preLanc: { estado: 'enviado', porNome: 'Sec' } },                 /* mais nova: entra */
+      { _id: 'b', nome: 'Bia', _updatedAt: '2026-08-13T09:00:00.000Z' },   /* mais velha: não */
+      { _id: 'c', nome: 'Caio', _updatedAt: '2026-08-13T11:30:00.000Z' }   /* nova: insere */
+    ]);
+    out.contou = m.novos === 1 && m.atualizados === 1 && m.iguais === 1;
+    out.atualizouOEnviado = preLanc.estado(store.getById('pre', 'a')) === 'enviado';
+    out.naoPisouNoMaisNovo = (store.getById('pre', 'b') || {}).obs === 'editei aqui agora';
+    out.trouxeONovo = !!store.getById('pre', 'c');
+    out.entraNaFila = preLanc.fila().some(x => x.rec._id === 'a');
+
+    /* registro ABERTO na tela não é trocado por baixo de quem está digitando */
+    setId('a');
+    const m2 = cloudRel.mesclarLocal('pre', [
+      { _id: 'a', nome: 'Ana', _updatedAt: '2026-08-13T13:00:00.000Z', obs: 'da nuvem' }
+    ]);
+    out.adiouOAberto = m2.adiados === 1 && (store.getById('pre', 'a') || {}).obs !== 'da nuvem';
+    setId('');
+
+    store.setList('pre', []);
+    return out;
+  });
+  assert(r.contou, 'a mescla precisa separar o que é novo, o que atualizou e o que já estava igual');
+  assert(r.atualizouOEnviado, 'a versão enviada da clínica tem que substituir o rascunho local');
+  assert(r.naoPisouNoMaisNovo, 'o que foi editado aqui e é mais recente não pode ser sobrescrito');
+  assert(r.trouxeONovo, 'registro que não existe aqui continua sendo trazido');
+  assert(r.entraNaFila, 'depois de atualizado, o pré-lançamento entra na fila do médico');
+  assert(r.adiouOAberto, 'registro aberto na tela não pode ser trocado por baixo de quem está digitando');
+  await page.close();
+});
+
+/* 103) A fila é lida do que está NESTE aparelho — então ela precisa ir buscar
+   sozinha, senão o médico espera um envio que já aconteceu. */
+await test('A fila do médico vai buscar os pré-lançamentos na clínica sozinha', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('pre', []); store.setList('anestesia', []);
+    auth.usuarioAtual = () => ({ id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
+
+    /* clínica de mentira: devolve um pré-lançamento enviado */
+    const pedidos = [];
+    const origDisp = cloudRel.disponivel, origPuxa = cloudRel.puxarModulo, origTok = cloud._garantirToken;
+    cloudRel.disponivel = () => true;
+    cloud._garantirToken = async () => true;
+    cloudRel.puxarModulo = async (mod) => {
+      pedidos.push(mod);
+      return mod === 'pre'
+        ? [{ _id: 'z1', nome: 'Teste', data: '2026-08-13', _updatedAt: '2026-08-13T12:00:00.000Z',
+             _preLanc: { estado: 'enviado', porNome: 'mpcanestesiologia', enviadoEm: '2026-08-13T12:00:00.000Z' } }]
+        : [];
+    };
+
+    preLanc._ultimaBusca = 0;
+    const res = await preLanc.sincronizarFila({ forcar: true, silent: true });
+    out.perguntouNosDois = pedidos.indexOf('pre') >= 0 && pedidos.indexOf('anestesia') >= 0;
+    out.trouxe = !!res && res.novos === 1;
+    out.entrouNaFila = preLanc.fila().some(x => x.rec._id === 'z1');
+    const card = document.getElementById('pl-fila-card');
+    out.mostrouOCartao = !!card && card.style.display !== 'none' && /Teste/.test(card.textContent);
+
+    /* não fica batendo na nuvem a cada render: uma vez por minuto basta */
+    pedidos.length = 0;
+    await preLanc.sincronizarFila({ silent: true });
+    out.naoRepete = pedidos.length === 0;
+
+    cloudRel.disponivel = origDisp; cloudRel.puxarModulo = origPuxa; cloud._garantirToken = origTok;
+    store.setList('pre', []); store.setList('anestesia', []);
+    return out;
+  });
+  assert(r.perguntouNosDois, 'tem que buscar tanto a pré quanto a ficha de anestesia');
+  assert(r.trouxe, 'o que está na clínica e não aqui precisa ser trazido');
+  assert(r.entrouNaFila && r.mostrouOCartao, 'o pré-lançamento enviado tem que aparecer na fila sem ninguém mandar');
+  assert(r.naoRepete, 'a busca automática não pode virar uma consulta a cada render');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
