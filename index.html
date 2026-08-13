@@ -3805,6 +3805,9 @@ textarea { border-radius: 10px; }
 }
 @media print{ .dash-aviso-nuvem{ display:none !important; } }
 
+.pl-rodape{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:16px 0 8px; }
+@media print{ .pl-rodape{ display:none !important; } }
+
 /* Dashboard da auxiliar: só o trabalho dela — pendências e pré-lançamentos */
 body.dash-auxiliar #module-dashboard #kpi-grid,
 body.dash-auxiliar #module-dashboard #meu-dia-card,
@@ -11850,8 +11853,21 @@ const preLanc = {
 
   /* Botão "Enviar pré-lançamento" no rodapé da ficha (só para a auxiliar) */
   renderBotao(mod) {
-    const host = document.getElementById('acoes-rodape-' + mod);
-    if (!host) return;
+    /* normalmente o botão mora no rodapé de ações; se ele ainda não existe
+       (ordem de montagem), o botão vai para o fim do próprio formulário —
+       sumir seria pior do que aparecer noutro lugar */
+    let host = document.getElementById('acoes-rodape-' + mod);
+    if (!host) {
+      const form = document.getElementById('form-' + mod);
+      if (!form) return;
+      host = document.getElementById('pl-host-' + mod);
+      if (!host) {
+        host = document.createElement('div');
+        host.id = 'pl-host-' + mod;
+        host.className = 'pl-rodape';
+        form.appendChild(host);
+      }
+    }
     const antigo = document.getElementById('pl-btn-' + mod);
     if (antigo) antigo.remove();
     if (!preLanc.ehAuxiliar() || preLanc.MODS.indexOf(mod) < 0) return;
@@ -12248,8 +12264,8 @@ const ui = {
         else if (modName === 'agenda') { agenda.render(); if (!agenda._puxouNestaSessao) { setTimeout(() => { try { agenda.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); try { equipeNuvem.render(); } catch (e) {} try { auditoria.render(''); } catch (e) {} try { armazenamento.render(); } catch (e) {} logoUsuario.renderAjustes(); try { nuvemEstado.render(); } catch (e) {} try { duplicados.resumoNoCard(); } catch (e) {} const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
-        else if (modName === 'pre') { try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} try { pre.viaAerea.render(); } catch (e) {} }
-        else if (modName === 'anestesia') { anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} try { anestesia.calc.resumoTopo(); } catch (e) {} try { adendos.renderInline('anestesia'); } catch (e) {} try { anestesia.nav._wire(); anestesia.nav.render(); } catch (e) {} try { anestesia.vitais.autoAvanco.wire(); } catch (e) {} }
+        else if (modName === 'pre') { try { preLanc.renderBotao('pre'); } catch (e) {} try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} try { pre.viaAerea.render(); } catch (e) {} }
+        else if (modName === 'anestesia') { try { preLanc.renderBotao('anestesia'); } catch (e) {} anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} try { anestesia.calc.resumoTopo(); } catch (e) {} try { adendos.renderInline('anestesia'); } catch (e) {} try { anestesia.nav._wire(); anestesia.nav.render(); } catch (e) {} try { anestesia.vitais.autoAvanco.wire(); } catch (e) {} }
         else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} try { recuperacao.resumoTopo(); } catch (e) {} try { anestesia.vitais.autoAvanco.wire(); } catch (e) {} }, 60); }
         else if (modName === 'termo') { setTimeout(() => { try { (termo.sig._ajustar || []).forEach(fn => fn()); assinatura.initCanvas('sig-termo'); } catch (e) {} }, 80); }
         else if (modName === 'prescricao') { setTimeout(() => { try { if (prescricao.sig._ajustar) prescricao.sig._ajustar(); assinatura.initCanvas('sig-prescricao'); } catch (e) {} }, 80); }
@@ -41970,6 +41986,19 @@ document.addEventListener('DOMContentLoaded', () => {
   window.utils = utils; window.store = store; window.ui = ui;
   window.backupCompleto = backupCompleto;
   window.lixeira = lixeira; window.duplicados = duplicados; window.espaco = espaco; window.modoNuvem = modoNuvem; window.preLanc = preLanc;
+  /* O rodapé é montado no boot, quando ninguém está logado ainda — por isso o
+     botão de enviar pré-lançamento nunca aparecia. Recalcula a cada
+     salvar/carregar/novo, que é quando registro e usuário já são conhecidos. */
+  try {
+    const _ads = ui.atualizarDocStatus;
+    if (typeof _ads === 'function') {
+      ui.atualizarDocStatus = function (mod) {
+        const r = _ads.apply(ui, arguments);
+        try { preLanc.renderBotao(mod); } catch (e) {}
+        return r;
+      };
+    }
+  } catch (e) {}
   window.carimboHora = carimboHora;
   window.cronometros = cronometros;
   window.dashboard = dashboard; window.pre = pre; window.consulta = consulta;
