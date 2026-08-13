@@ -3056,6 +3056,13 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
 .print-preview-paper * { position: static !important; }
 .print-preview-paper img { max-width: 100%; height: auto; }
 .print-preview-paper table { table-layout: fixed; width: 100%; word-wrap: break-word; }
+/* IMPRESSÃO COMPACTA — pré-anestésica e termo.
+   Esses dois são documentos de leitura, não de plantão: cabem numa folha com
+   folga e não precisam do corpo de texto grande da ficha de anestesia, que é
+   preenchida à mão e lida de longe. Uma variável só governa o tamanho de tudo
+   (rótulos, valores, títulos e tabelas); a logomarca tem a sua, porque ela
+   pedia uma redução maior do que o texto. */
+.pp-compacto { --pp-esc: .8; --pp-logo: .62; }
 .print-preview-paper .pp-header {
   margin-bottom: 10px;
 }
@@ -3068,9 +3075,9 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
   border-bottom: 1px solid #d0d4da;
 }
 .print-preview-paper .pp-logo {
-  height: 96px;
+  height: calc(96px * var(--pp-logo, 1));
   width: auto;
-  max-width: 440px;
+  max-width: calc(440px * var(--pp-logo, 1));
   object-fit: contain;
   flex-shrink: 0;
 }
@@ -3080,20 +3087,20 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
   min-width: 0;
 }
 .print-preview-paper .pp-prof-nome {
-  font-size: 11pt;
+  font-size: calc(11pt * var(--pp-esc, 1));
   font-weight: 700;
   color: #1a2332;
   letter-spacing: .2px;
 }
 .print-preview-paper .pp-prof-reg {
-  font-size: 8.5pt;
+  font-size: calc(8.5pt * var(--pp-esc, 1));
   color: #5a6472;
   margin-top: 1px;
   text-transform: uppercase;
   letter-spacing: .3px;
 }
 .print-preview-paper .pp-prof-end {
-  font-size: 8.5pt;
+  font-size: calc(8.5pt * var(--pp-esc, 1));
   color: #8a93a0;
   margin-top: 1px;
 }
@@ -3102,7 +3109,7 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
   margin-top: 7px;
 }
 .print-preview-paper .pp-doc-title h1 {
-  font-size: 13.5pt;
+  font-size: calc(13.5pt * var(--pp-esc, 1));
   font-weight: 700;
   letter-spacing: 1px;
   color: #1a2332;
@@ -3110,14 +3117,14 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
   text-transform: uppercase;
 }
 .print-preview-paper .pp-doc-meta {
-  font-size: 9.5pt;
+  font-size: calc(9.5pt * var(--pp-esc, 1));
   color: #8a93a0;
   margin-top: 2px;
   line-height: 1.25;
 }
 .print-preview-paper .pp-doc-meta strong { font-weight: 600; color: #5a6472; }
 .print-preview-paper h2 {
-  font-size: 10pt;
+  font-size: calc(10pt * var(--pp-esc, 1));
   font-weight: 700;
   letter-spacing: .5px;
   text-transform: uppercase;
@@ -3133,7 +3140,7 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
   grid-template-columns: repeat(2, 1fr);
   gap: 3px 16px;
   margin-bottom: 6px;
-  font-size: 10.5pt;
+  font-size: calc(10.5pt * var(--pp-esc, 1));
 }
 .print-preview-paper .pp-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
 .print-preview-paper .pp-grid.cols-1 { grid-template-columns: 1fr; }
@@ -3149,27 +3156,27 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
   font-weight: 600;
   color: #8a93a0;
   text-transform: uppercase;
-  font-size: 8pt;
+  font-size: calc(8pt * var(--pp-esc, 1));
   letter-spacing: .3px;
   white-space: nowrap;
 }
+/* Sem sublinhado: a linha embaixo de cada valor virava um traço em toda a
+   folha e sujava a leitura. O rótulo já separa um campo do outro. */
 .print-preview-paper .pp-field .pp-value {
   flex: 1;
-  font-size: 10.5pt;
+  font-size: calc(10.5pt * var(--pp-esc, 1));
   color: #1a2332;
-  border-bottom: 1px solid #e2e5ea;
-  padding-bottom: 1px;
 }
 .print-preview-paper .pp-block {
   margin-bottom: 6px;
   padding: 1px 0;
-  font-size: 10.5pt;
+  font-size: calc(10.5pt * var(--pp-esc, 1));
 }
 .print-preview-paper .pp-block .pp-label {
   font-weight: 600;
   color: #8a93a0;
   text-transform: uppercase;
-  font-size: 8pt;
+  font-size: calc(8pt * var(--pp-esc, 1));
   letter-spacing: .3px;
   display: block;
   margin-bottom: 2px;
@@ -3183,7 +3190,7 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
   display: grid; grid-template-columns: repeat(6, 1fr); gap: 2px 6px;
   border: 1px solid #d0d5db; border-radius: 4px; padding: 4px 6px;
 }
-.print-preview-paper .pp-lab-item { font-size: 9.5pt; white-space: nowrap; }
+.print-preview-paper .pp-lab-item { font-size: calc(9.5pt * var(--pp-esc, 1)); white-space: nowrap; }
 .print-preview-paper .pp-lab-k { color: #8a93a0; font-weight: 600; }
 .print-preview-paper .pp-lab-v { color: #1a2332; font-weight: 600; }
 .print-preview-paper .pp-table {
@@ -4259,7 +4266,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-13j</b><br>
+    v7.1 · build <b id="build-tag">2026-08-13k</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -4514,7 +4521,9 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <div class="field col-2"><label>Sexo</label>
             <select name="sexo" onchange="pre._calcIMC()"><option value="">—</option><option>Masculino</option><option>Feminino</option><option>Outro</option></select>
           </div>
-          <div class="field col-6">
+          <!-- Nome de procedimento é longo ("videolaparoscopia com…"), e meia
+               linha obrigava a ler por partes: fica com a linha inteira. -->
+          <div class="field col-12">
             <label>Cirurgia proposta <small style="color:var(--text-mute);font-weight:400">(autocompleta da CBHPM)</small></label>
             <div style="display:flex;gap:6px;align-items:stretch">
               <input type="text" name="cirurgia" class="cbhpm-autocomplete" placeholder="Digite parte do procedimento ou o código TUSS..." style="flex:1">
@@ -4523,11 +4532,11 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
             <div id="pre-procs-lista" class="pre-procs-lista"></div>
           </div>
           <div class="field col-6"><label>Cirurgião</label><input type="text" name="cirurgiao"></div>
-          <div class="field col-6"><label>Hospital / clínica</label><input type="text" name="hospital"></div>
+          <div class="field col-3"><label>Hospital / clínica</label><input type="text" name="hospital"></div>
           <!-- Sem o convênio aqui, o lançamento financeiro gerado na finalização
                nascia sem pagador: não dava para saber se era plano, particular
                ou SUS, e a pendência de convênio não tinha como se resolver. -->
-          <div class="field col-6"><label>Convênio / plano</label>
+          <div class="field col-3"><label>Convênio / plano</label>
             <select name="convenio">
               <option value="">—</option><option>Particular</option><option>SUS</option><option>Unimed</option>
               <option>Bradesco Saúde</option><option>Amil</option><option>SulAmérica</option>
@@ -13828,12 +13837,14 @@ const pre = {
     ui.atualizarDocStatus('pre', saved);
     setSavedStatus((finalizar ? 'Finalizado às ' : 'Salvo às ') + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
     markClean();
-    /* A impressão é montada a partir do FORMULÁRIO, e o descarte do rascunho
-       logo abaixo troca ou limpa o que está na tela. Por isso ela vai ANTES e
-       sem espera: chamada depois, a pré-visualização saía em branco. */
+    /* Ordem obrigatória aqui: o backup em PDF desiste se a pré-visualização
+       estiver aberta (ela usa o mesmo container), então ele vai primeiro.
+       E os dois vêm ANTES do descarte do rascunho, porque ambos são montados a
+       partir do FORMULÁRIO — depois do descarte a tela já está limpa e a
+       impressão saía em branco. */
+    if (finalizar) { try { pdfBackup.autoAoFinalizar('pre'); } catch (e) {} }
     if (finalizar) { try { printPreview.abrir(); } catch (e) {} }
     /* Rascunho só é descartado quando finaliza; salvar normal mantém o rascunho ativo */
-    if (finalizar) { try { pdfBackup.autoAoFinalizar('pre'); } catch (e) {} }
     if (finalizar) { try { rascunhos.removerAtivo('pre'); } catch (e) {} }
     toast(finalizar ? '✅ Avaliação finalizada' : '💾 Avaliação salva (dados preservados)');
     /* A pergunta do Termo espera a impressão sair da frente (ela já sabe
@@ -15413,10 +15424,11 @@ const termo = {
     ui.atualizarDocStatus('termo', saved);
     setSavedStatus((finalizar ? 'Finalizado às ' : 'Salvo às ') + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
     markClean();
-    /* Antes do descarte do rascunho, pelo mesmo motivo da pré: a impressão lê
-       o formulário, e o descarte troca o que está nele. */
-    if (finalizar) { try { printPreview.abrir(); } catch (e) {} }
+    /* Mesma ordem da pré: backup do PDF primeiro (ele desiste se a
+       pré-visualização estiver aberta), impressão depois, e ambos antes do
+       descarte do rascunho — os dois leem o formulário. */
     if (finalizar) { try { pdfBackup.autoAoFinalizar('termo'); } catch (e) {} }
+    if (finalizar) { try { printPreview.abrir(); } catch (e) {} }
     if (finalizar) { try { rascunhos.removerAtivo('termo'); } catch (e) {} }
     toast(finalizar ? '✅ Termo finalizado' : '💾 Termo salvo (dados preservados)');
   },
@@ -36262,33 +36274,34 @@ const printPreview = {
         /* Arquivo único ficha + SRPA: capítulo novo em página nova */
         .pp-quebra { page-break-before: always; break-before: page; }
         .pp-capitulo { margin: 0 0 12px; padding: 9px 14px; background: #eef2f7; border-left: 5px solid #3b5b7e; font-weight: 700; font-size: 13pt; color: #22384f; }
+        .pp-compacto { --pp-esc: .8; --pp-logo: .62; }
         .pp-header { margin-bottom: 10px; }
         .pp-header-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 5px; border-bottom: 1px solid #d0d4da; }
-        .pp-logo { height: 96px; width: auto; max-width: 440px; object-fit: contain; flex-shrink: 0; }
+        .pp-logo { height: calc(96px * var(--pp-logo, 1)); width: auto; max-width: calc(440px * var(--pp-logo, 1)); object-fit: contain; flex-shrink: 0; }
         .pp-prof { text-align: right; line-height: 1.22; min-width: 0; }
-        .pp-prof-nome { font-size: 11pt; font-weight: 700; color: #1a2332; letter-spacing: .2px; }
-        .pp-prof-reg { font-size: 8.5pt; color: #5a6472; margin-top: 1px; text-transform: uppercase; letter-spacing: .3px; }
-        .pp-prof-end { font-size: 8.5pt; color: #8a93a0; margin-top: 1px; }
+        .pp-prof-nome { font-size: calc(11pt * var(--pp-esc, 1)); font-weight: 700; color: #1a2332; letter-spacing: .2px; }
+        .pp-prof-reg { font-size: calc(8.5pt * var(--pp-esc, 1)); color: #5a6472; margin-top: 1px; text-transform: uppercase; letter-spacing: .3px; }
+        .pp-prof-end { font-size: calc(8.5pt * var(--pp-esc, 1)); color: #8a93a0; margin-top: 1px; }
         .pp-doc-title { text-align: center; margin-top: 7px; }
-        .pp-doc-title h1 { font-size: 13.5pt; font-weight: 700; letter-spacing: 1px; color: #1a2332; margin: 0; text-transform: uppercase; }
-        .pp-doc-meta { font-size: 9.5pt; color: #8a93a0; margin-top: 2px; line-height: 1.25; }
+        .pp-doc-title h1 { font-size: calc(13.5pt * var(--pp-esc, 1)); font-weight: 700; letter-spacing: 1px; color: #1a2332; margin: 0; text-transform: uppercase; }
+        .pp-doc-meta { font-size: calc(9.5pt * var(--pp-esc, 1)); color: #8a93a0; margin-top: 2px; line-height: 1.25; }
         .pp-doc-meta strong { font-weight: 600; color: #5a6472; }
-        h2 { font-size: 10pt; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: #2a3441; margin: 9px 0 4px; padding: 0 0 2px 0; background: none; border: none; border-bottom: 1px solid #b5bcc6; page-break-after: avoid; }
-        .pp-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 3px 16px; margin-bottom: 6px; font-size: 10.5pt; }
+        h2 { font-size: calc(10pt * var(--pp-esc, 1)); font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: #2a3441; margin: 9px 0 4px; padding: 0 0 2px 0; background: none; border: none; border-bottom: 1px solid #b5bcc6; page-break-after: avoid; }
+        .pp-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 3px 16px; margin-bottom: 6px; font-size: calc(10.5pt * var(--pp-esc, 1)); }
         .pp-grid > .pp-field:only-child, .pp-grid > .pp-block:only-child { grid-column: 1 / -1; }
         .pp-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
         .pp-grid.cols-1 { grid-template-columns: 1fr; }
         .pp-field { display: flex; gap: 5px; align-items: baseline; padding: 0; }
-        .pp-field .pp-label { font-weight: 600; color: #8a93a0; text-transform: uppercase; font-size: 8pt; letter-spacing: .3px; white-space: nowrap; }
-        .pp-field .pp-value { flex: 1; font-size: 10.5pt; color: #1a2332; border-bottom: 1px solid #e2e5ea; padding-bottom: 1px; }
-        .pp-block { margin-bottom: 6px; padding: 1px 0; font-size: 10.5pt; }
-        .pp-block .pp-label { font-weight: 600; color: #8a93a0; text-transform: uppercase; font-size: 8pt; letter-spacing: .3px; display: block; margin-bottom: 2px; }
+        .pp-field .pp-label { font-weight: 600; color: #8a93a0; text-transform: uppercase; font-size: calc(8pt * var(--pp-esc, 1)); letter-spacing: .3px; white-space: nowrap; }
+        .pp-field .pp-value { flex: 1; font-size: calc(10.5pt * var(--pp-esc, 1)); color: #1a2332; }
+        .pp-block { margin-bottom: 6px; padding: 1px 0; font-size: calc(10.5pt * var(--pp-esc, 1)); }
+        .pp-block .pp-label { font-weight: 600; color: #8a93a0; text-transform: uppercase; font-size: calc(8pt * var(--pp-esc, 1)); letter-spacing: .3px; display: block; margin-bottom: 2px; }
         .pp-block .pp-value { white-space: pre-wrap; color: #1a2332; line-height: 1.35; }
         .pp-lab-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 2px 6px; border: 1px solid #d0d5db; border-radius: 4px; padding: 4px 6px; }
-        .pp-lab-item { font-size: 9.5pt; white-space: nowrap; }
+        .pp-lab-item { font-size: calc(9.5pt * var(--pp-esc, 1)); white-space: nowrap; }
         .pp-lab-k { color: #8a93a0; font-weight: 600; }
         .pp-lab-v { color: #1a2332; font-weight: 600; }
-        .pp-table { width: 100%; border-collapse: collapse; font-size: 10pt; margin-bottom: 6px; page-break-inside: auto; }
+        .pp-table { width: 100%; border-collapse: collapse; font-size: calc(10pt * var(--pp-esc, 1)); margin-bottom: 6px; page-break-inside: auto; }
         .pp-table tr { page-break-inside: avoid; }
         .pp-table th, .pp-table td { border: 1px solid #c5cad2; padding: 2px 4px; text-align: left; }
         .pp-table th { background: #f2f4f7; font-size: 8.5pt; text-transform: uppercase; letter-spacing: .4px; color: #5a6472; }
@@ -36905,7 +36918,9 @@ ${TAG_CLOSE_HTML}`;
     /* Topo: só o título. O nome do paciente aparece uma vez, na identificação
        (antes vinha também sob o título) — e ganha a linha inteira, para nome
        comprido não quebrar em duas. */
-    return printPreview._header('AVALIAÇÃO PRÉ-ANESTÉSICA', '') +
+    /* pp-compacto: fonte e logomarca menores neste documento (ver CSS) */
+    return '<div class="pp-compacto">' +
+      printPreview._header('AVALIAÇÃO PRÉ-ANESTÉSICA', '') +
       printPreview._section('Identificação', `
         <div class="pp-grid cols-1">
           ${printPreview._fieldSempre('Nome', nomePac)}
@@ -36962,7 +36977,8 @@ ${TAG_CLOSE_HTML}`;
       `) +
       printPreview._signature(d.anestesiologista, d.crm ? 'CRM ' + d.crm : '', d) +
       printPreview._footer('Avaliação pré-anestésica') +
-      printPreview._buildProtocoloJejumAnexo(d);
+      printPreview._buildProtocoloJejumAnexo(d) +
+      '</div>';
   },
 
   /* Cartõezinhos ilustrados de alimentos (emoji + nome) para o anexo — estilos
@@ -37763,7 +37779,7 @@ ${TAG_CLOSE_HTML}`;
     const meta = `${utils.formatarData(d.data) || new Date().toLocaleDateString('pt-BR')}`;
     /* Texto do termo em parágrafos */
     const textoHtml = (d.texto || '').split('\n').filter(l => l.trim())
-      .map(l => `<p style="margin:0 0 8px;text-align:justify;font-size:10pt;line-height:1.5">${utils.escapeHTML(l)}</p>`).join('');
+      .map(l => `<p style="margin:0 0 8px;text-align:justify;font-size:calc(10pt * var(--pp-esc, 1));line-height:1.5">${utils.escapeHTML(l)}</p>`).join('');
 
     let respHtml = '';
     if (d.tem_responsavel) {
@@ -37786,7 +37802,9 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._assinaturaDesenhada(d.assinatura_dataurl || d.sig_profissional_dataurl, d.profissional || 'Profissional', d.crm, 'prof')}
       </div>`;
 
-    return printPreview._header('TERMO DE CONSENTIMENTO LIVRE E ESCLARECIDO', meta) +
+    /* pp-compacto: mesma redução da pré (ver CSS) */
+    return '<div class="pp-compacto">' +
+      printPreview._header('TERMO DE CONSENTIMENTO LIVRE E ESCLARECIDO', meta) +
       printPreview._section('Identificação do paciente', `
         <div class="pp-grid cols-3">
           ${printPreview._fieldSempre('Nome', d.nome)}
@@ -37802,8 +37820,8 @@ ${TAG_CLOSE_HTML}`;
         </div>`) +
       respHtml +
       printPreview._section('Termo', textoHtml +
-        (d.riscos ? `<p style="margin:10px 0 0;font-size:10pt"><strong>Riscos específicos discutidos:</strong> ${utils.escapeHTML(d.riscos)}</p>` : '') +
-        (d.observacoes ? `<p style="margin:8px 0 0;font-size:10pt"><strong>Observações:</strong> ${utils.escapeHTML(d.observacoes)}</p>` : '')) +
+        (d.riscos ? `<p style="margin:10px 0 0;font-size:calc(10pt * var(--pp-esc, 1))"><strong>Riscos específicos discutidos:</strong> ${utils.escapeHTML(d.riscos)}</p>` : '') +
+        (d.observacoes ? `<p style="margin:8px 0 0;font-size:calc(10pt * var(--pp-esc, 1))"><strong>Observações:</strong> ${utils.escapeHTML(d.observacoes)}</p>` : '')) +
       printPreview._section('Local e data', `
         <div class="pp-grid cols-3">
           ${printPreview._field('Local', d.local)}
@@ -37818,7 +37836,8 @@ ${TAG_CLOSE_HTML}`;
           1. Anesthesia and patient safety: have we reached our limits? Current Opinion in Anesthesiology. 2011;24:349-353.<br>
           2. Perioperative and anaesthetic-related mortality in developed and developing countries: a systematic review and meta-analysis. The Lancet. 2012;380:1075-1081.
         </div>` : '') +
-      printPreview._footer('Termo de Consentimento');
+      printPreview._footer('Termo de Consentimento') +
+      '</div>';
   },
 
   _buildPrescricao() {

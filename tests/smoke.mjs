@@ -6331,6 +6331,55 @@ await test('Pré e Termo vão para a impressão ao finalizar, e a pré gera o fi
   await page.close();
 });
 
+/* 110) Impressão da pré e do termo: menor, sem o traço embaixo de cada valor,
+   e com a logomarca reduzida. São documentos de leitura — não precisam do
+   corpo de texto da ficha de anestesia, que é preenchida à mão. */
+await test('Impressão da pré e do termo sai compacta, sem sublinhado e com logo menor', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    /* os dois documentos pedem o modo compacto */
+    ui.navegar('pre');
+    document.querySelector('#form-pre [name="nome"]').value = 'Ana Souza';
+    out.preCompacta = /pp-compacto/.test(printPreview._buildPre());
+    ui.navegar('termo');
+    document.querySelector('#form-termo [name="nome"]').value = 'Ana Souza';
+    out.termoCompacto = /pp-compacto/.test(printPreview._buildTermo());
+
+    /* mede no papel de verdade: mesmo campo dentro e fora do modo compacto */
+    const ppp = document.getElementById('ppp');
+    ppp.innerHTML =
+      '<div id="tst-normal"><img class="pp-logo" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">' +
+      '<div class="pp-field"><span class="pp-label">L</span><span class="pp-value">V</span></div></div>' +
+      '<div id="tst-comp" class="pp-compacto"><img class="pp-logo" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">' +
+      '<div class="pp-field"><span class="pp-label">L</span><span class="pp-value">V</span></div></div>';
+    const cs = (sel) => getComputedStyle(document.querySelector(sel));
+    const normal = cs('#tst-normal .pp-value'), comp = cs('#tst-comp .pp-value');
+    const fN = parseFloat(normal.fontSize), fC = parseFloat(comp.fontSize);
+    out.reduziuOTexto = fN > 0 && Math.abs((fC / fN) - 0.8) < 0.03;
+    out.reduziuORotulo = (() => {
+      const a = parseFloat(cs('#tst-normal .pp-label').fontSize);
+      const b = parseFloat(cs('#tst-comp .pp-label').fontSize);
+      return a > 0 && Math.abs((b / a) - 0.8) < 0.03;
+    })();
+    const lN = parseFloat(cs('#tst-normal .pp-logo').height), lC = parseFloat(cs('#tst-comp .pp-logo').height);
+    out.reduziuALogo = lN > 0 && lC < lN * 0.7;
+
+    /* o traço embaixo do valor sai — em toda impressão, não só na compacta */
+    out.semTracoNaCompacta = parseFloat(comp.borderBottomWidth || '0') === 0;
+    out.semTracoTambemNoResto = parseFloat(normal.borderBottomWidth || '0') === 0;
+
+    ppp.innerHTML = '';
+    return out;
+  });
+  assert(r.preCompacta && r.termoCompacto, 'pré e termo têm que pedir o modo compacto');
+  assert(r.reduziuOTexto, 'o texto do documento precisa sair ~20% menor');
+  assert(r.reduziuORotulo, 'os rótulos acompanham a redução');
+  assert(r.reduziuALogo, 'a logomarca precisa reduzir mais que o texto');
+  assert(r.semTracoNaCompacta && r.semTracoTambemNoResto, 'o traço embaixo de cada valor sai da impressão');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
