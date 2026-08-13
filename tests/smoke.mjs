@@ -6516,6 +6516,67 @@ await test('Dashboard conta só o que foi finalizado, e os números vêm antes d
   await page.close();
 });
 
+/* 113a) Zero mudo faz duvidar do sistema inteiro: o painel tem que dizer onde
+   a produção está — e o filtro de autoria não pode esconder ficha assinada
+   pela própria pessoa. */
+await test('Painel zerado explica o porquê e leva até a produção', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ['anestesia', 'pre', 'consulta', 'recuperacao', 'financeiro'].forEach(m => store.setList(m, []));
+    auth.usuarioAtual = () => ({ id: 'm1', nome: 'Marcelo', usuario: 'mpcaliman', perfil: 'admin', role: 'gestor' });
+    const hoje = new Date().toISOString().slice(0, 10);
+    const ontemD = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
+
+    /* autoria pelo campo de quem assina — era o buraco: 'anestesiologista' não
+       entrava na conta e a ficha do próprio médico sumia do painel dele */
+    out.reconheceQuemAssina = dashboard._filtrarEscopo(
+      [{ _id: 'x', anestesiologista: 'Marcelo' }, { _id: 'y', anestesiologista: 'Outra pessoa' }], 'pessoal'
+    ).length === 1;
+
+    /* caso 1: tudo em aberto (nada finalizado) */
+    store.setList('pre', [{ _id: 'a1', nome: 'Em aberto', data: hoje, _updatedBy: 'mpcaliman' }]);
+    document.getElementById('dash-escopo').value = 'pessoal';
+    document.getElementById('dash-periodo').value = 'hoje';
+    dashboard.atualizar();
+    const aviso = document.getElementById('dash-vazio');
+    out.explicouNaoFinalizado = aviso.style.display !== 'none' && /não finalizado/i.test(aviso.textContent);
+
+    /* caso 2: finalizado, mas de outra pessoa da clínica */
+    store.setList('pre', [{ _id: 'b1', nome: 'De outro', data: hoje, _finalizado: true, _updatedBy: 'mpcanestesiologia' }]);
+    dashboard.atualizar();
+    out.explicouDeOutro = /de outra pessoa/i.test(aviso.textContent) && /Ver clínica/.test(aviso.innerHTML);
+    /* e o atalho troca o filtro de verdade */
+    dashboard._verComo('clinica');
+    out.atalhoFunciona = document.getElementById('dash-escopo').value === 'clinica'
+      && document.querySelector('#kpi-grid [data-detail="pre"] .kpi-value').textContent.trim() === '1';
+
+    /* caso 3: finalizado meu, mas fora do período */
+    document.getElementById('dash-escopo').value = 'pessoal';
+    store.setList('pre', [{ _id: 'c1', nome: 'Antigo', data: ontemD, _finalizado: true, _updatedBy: 'mpcaliman' }]);
+    document.getElementById('dash-periodo').value = 'hoje';
+    dashboard.atualizar();
+    out.explicouForaDoPeriodo = /fora deste período/i.test(aviso.textContent);
+    dashboard._verComo(null, 'all');
+    out.atalhoDoPeriodo = document.getElementById('dash-periodo').value === 'all'
+      && document.querySelector('#kpi-grid [data-detail="pre"] .kpi-value').textContent.trim() === '1';
+
+    /* com produção na tela, o aviso some */
+    out.some = document.getElementById('dash-vazio').style.display === 'none';
+
+    ['anestesia', 'pre', 'consulta', 'recuperacao', 'financeiro'].forEach(m => store.setList(m, []));
+    return out;
+  });
+  assert(r.reconheceQuemAssina, 'quem assina a ficha é autor dela — senão ela some do painel do próprio médico');
+  assert(r.explicouNaoFinalizado, 'se há registro em aberto, o painel precisa dizer que produção só conta finalizada');
+  assert(r.explicouDeOutro, 'se a produção do período é de outra pessoa, o painel diz e oferece ver a clínica');
+  assert(r.atalhoFunciona, 'o atalho tem que trocar o filtro de verdade');
+  assert(r.explicouForaDoPeriodo, 'produção fora do período precisa ser apontada');
+  assert(r.atalhoDoPeriodo, 'e alcançável em um toque');
+  assert(r.some, 'com produção na tela, o aviso some');
+  await page.close();
+});
+
 /* 113) O termo é documento, não produção faturável: não gera financeiro. */
 await test('Termo de consentimento não gera lançamento financeiro', async () => {
   const page = await novaPagina();

@@ -4266,7 +4266,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-13m</b><br>
+    v7.1 · build <b id="build-tag">2026-08-13n</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -4372,6 +4372,9 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     <!-- Os NÚMEROS vêm primeiro. Com os avisos no topo, o painel virou quadro
          de aviso: quem entra quer ver a produção, não pendência. -->
     <div class="kpi-grid" id="kpi-grid"></div>
+    <!-- Zero sem explicação é o pior número do painel: não dá para saber se foi
+         um dia parado, o filtro errado ou dado que não chegou. -->
+    <div id="dash-vazio" class="dash-aviso-nuvem" style="display:none"></div>
 
     <div id="pl-alerta" class="pl-alerta" style="display:none"></div>
     <div class="card no-collapse" id="pl-fila-card" style="display:none">
@@ -38399,10 +38402,11 @@ const dashboard = {
     /* O "Atualizar" do painel também vai buscar os pré-lançamentos na clínica:
        clicar em atualizar e a fila continuar vazia era o pior dos mundos. */
     try { preLanc.sincronizarFila({ silent: true }); } catch (e) {}
-    /* Painel zerado: busca a produção na clínica antes de aceitar o zero. */
-    try {
-      dashboard._puxarSeVazio(allAnest.length + allPre.length + allCons.length + allRecup.length + allFin.length);
-    } catch (e) {}
+    /* Painel zerado: explica o zero e busca a produção na clínica antes de
+       aceitá-lo. Um "0" mudo faz duvidar do sistema inteiro. */
+    const totalProducao = allAnest.length + allPre.length + allCons.length + allRecup.length;
+    try { dashboard._explicarVazio(periodo, escopo, totalProducao); } catch (e) {}
+    try { dashboard._puxarSeVazio(totalProducao + allFin.length); } catch (e) {}
 
     /* KPIs */
     const nuvem = dashboard._naNuvem(periodo, escopo);
@@ -38548,8 +38552,13 @@ const dashboard = {
     return list.filter(it => {
       /* sem autoria registrada, o registro conta como meu — não sumir do
          painel importa mais do que classificar com precisão */
-      if (!it._updatedBy && !it._criadoPor && !it.anestesista && !it.profissional) return true;
-      return bate(it._updatedBy) || bate(it._criadoPor) || bate(it.anestesista) || bate(it.profissional);
+      /* anestesiologista/responsavel faltavam: são justamente os campos que a
+         pré e a ficha usam para registrar quem assina. Sem eles, registro meu
+         assinado por mim podia ser lido como "de outro" e sumir do painel. */
+      const autores = [it._updatedBy, it._criadoPor, it.anestesista, it.anestesiologista,
+                       it.profissional, it.responsavel];
+      if (!autores.some(v => String(v || '').trim())) return true;
+      return autores.some(bate);
     });
   },
 
@@ -38585,6 +38594,47 @@ const dashboard = {
   /* Produção é o que ficou pronto. Rascunho e pré-lançamento ficam de fora do
      painel — eles têm o lugar deles (rascunhos, fila de conferência). */
   _soProducao(list) { return (list || []).filter(x => x && x._finalizado); },
+
+  /* ZERO TEM QUE SE EXPLICAR. Um painel zerado pode ser dia parado, filtro
+     errado (período/escopo) ou registro que ficou de fora por não estar
+     finalizado. Mostrar só o "0" faz a pessoa duvidar do sistema inteiro —
+     aconteceu. Aqui o painel conta onde a produção está e leva até ela. */
+  _explicarVazio(periodo, escopo, totalProducao) {
+    const host = document.getElementById('dash-vazio');
+    if (!host) return;
+    if (totalProducao > 0) { host.style.display = 'none'; host.innerHTML = ''; return; }
+    const MODS = ['anestesia', 'pre', 'consulta', 'recuperacao'];
+    const conta = (esc, per, exigirFinal) => {
+      let n = 0;
+      MODS.forEach(mod => {
+        let l = dashboard._filtrarEscopo(store.list(mod) || [], esc)
+          .map(it => Object.assign({}, it, { _dataClinica: dashboard._dataClinica(it) }));
+        l = dashboard.filtrarPorPeriodo(l, per, '_dataClinica');
+        if (exigirFinal) l = dashboard._soProducao(l);
+        n += l.length;
+      });
+      return n;
+    };
+    const emAberto = conta(escopo, periodo, false);
+    const naClinica = escopo === 'pessoal' ? conta('clinica', periodo, true) : 0;
+    const emTudo = conta(escopo, 'all', true);
+    const pedaco = [];
+    if (emAberto) pedaco.push('<b>' + emAberto + '</b> registro(s) neste período ainda <b>não finalizado(s)</b> — produção conta só depois de finalizar');
+    if (naClinica) pedaco.push('<b>' + naClinica + '</b> finalizado(s) no período são <b>de outra pessoa da clínica</b> ' +
+      '<button type="button" class="btn btn-xs" onclick="dashboard._verComo(\'clinica\')">Ver clínica</button>');
+    if (emTudo) pedaco.push('<b>' + emTudo + '</b> finalizado(s) seu(s) estão <b>fora deste período</b> ' +
+      '<button type="button" class="btn btn-xs" onclick="dashboard._verComo(null, \'all\')">Ver tudo</button>');
+    host.innerHTML = '📭 Nenhuma produção finalizada neste filtro.' +
+      (pedaco.length ? '<br>' + pedaco.join('<br>') : ' Não encontrei registros deste período neste aparelho — se você lançou em outro, o app está buscando na clínica.');
+    host.style.display = '';
+  },
+  _verComo(escopo, periodo) {
+    try {
+      if (escopo) { const e = document.getElementById('dash-escopo'); if (e) e.value = escopo; }
+      if (periodo) { const p = document.getElementById('dash-periodo'); if (p) p.value = periodo; }
+      dashboard.atualizar();
+    } catch (e) {}
+  },
 
   /* Painel zerado num aparelho que acabou de entrar quase nunca significa "não
      trabalhei": significa que os registros estão na clínica e ainda não aqui.
