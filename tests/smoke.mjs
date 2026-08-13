@@ -5212,6 +5212,172 @@ await test('Pré-lançamento: só entra na fila do médico depois de enviado, e 
   await page.close();
 });
 
+/* 91) Entrar sempre começa no Dashboard — e quem não tem acesso a ele cai no
+   primeiro módulo permitido, nunca numa tela em branco. */
+await test('Ao entrar, o app abre no Dashboard (ou no primeiro módulo permitido)', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    auth._aplicarPermissoesUI = () => {};
+    auth._iniciarTimer = () => {};
+    auth.usuarioAtual = () => ({ id: 'u', nome: 'Teste', perfil: 'admin' });
+
+    /* estava noutro módulo antes de entrar: vai para o Dashboard mesmo assim */
+    location.hash = '#anestesia';
+    await new Promise(r => setTimeout(r, 60));
+    auth.podeAcessar = () => true;
+    auth._desbloquear();
+    await new Promise(r => setTimeout(r, 120));
+    out.vaiParaDashboard = location.hash === '#dashboard';
+
+    /* secretária sem Dashboard: cai no primeiro módulo que ela pode abrir */
+    location.hash = '#anestesia';
+    await new Promise(r => setTimeout(r, 60));
+    auth.podeAcessar = (m) => m === 'pacientes' || m === 'agenda';
+    auth._desbloquear();
+    await new Promise(r => setTimeout(r, 120));
+    out.caiNoPermitido = location.hash === '#pacientes';
+
+    /* já estando no Dashboard, entrar não quebra nada */
+    auth.podeAcessar = () => true;
+    location.hash = '#dashboard';
+    await new Promise(r => setTimeout(r, 60));
+    auth._desbloquear();
+    await new Promise(r => setTimeout(r, 120));
+    out.mantemDashboard = location.hash === '#dashboard';
+    return out;
+  });
+  assert(r.vaiParaDashboard, 'entrar deveria abrir o Dashboard, mesmo vindo de outro módulo');
+  assert(r.caiNoPermitido, 'quem não tem Dashboard deveria cair no primeiro módulo permitido');
+  assert(r.mantemDashboard, 'já estando no Dashboard, entrar deveria mantê-lo');
+  await page.close();
+});
+
+/* 92) Dashboard da auxiliar: só o trabalho dela, sem os números do médico */
+await test('Dashboard da auxiliar mostra só pendências e pré-lançamentos', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const aux = { id: 's1', nome: 'Secretária', perfil: 'secretaria', role: 'auxiliar' };
+    const med = { id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' };
+
+    auth.usuarioAtual = () => aux;
+    preLanc.ajustarDashboard();
+    out.marcaAuxiliar = document.body.classList.contains('dash-auxiliar');
+    const vis = (el) => !!el && getComputedStyle(el).display !== 'none';
+    out.escondeAnalitico = !vis(document.getElementById('kpi-grid'))
+      && !vis(document.getElementById('meu-dia-card'));
+    out.subtituloProprio = /pré-lançamentos e pendências/i.test(
+      document.querySelector('#module-dashboard .page-title .subtitle').textContent);
+
+    /* cartão vazio não pode ser forçado a aparecer */
+    const fila = document.getElementById('pl-fila-card');
+    fila.style.display = 'none';
+    out.naoForcaCartaoVazio = !vis(fila);
+    /* com conteúdo, aparece normalmente */
+    fila.style.display = '';
+    out.mostraQuandoTemConteudo = vis(fila);
+
+    /* médico volta a ver tudo */
+    auth.usuarioAtual = () => med;
+    preLanc.ajustarDashboard();
+    out.medicoVeTudo = !document.body.classList.contains('dash-auxiliar')
+      && vis(document.getElementById('kpi-grid'))
+      && vis(document.getElementById('meu-dia-card'))
+      && /analítica/i.test(document.querySelector('#module-dashboard .page-title .subtitle').textContent);
+    return out;
+  });
+  assert(r.marcaAuxiliar, 'o Dashboard deveria entrar no modo auxiliar');
+  assert(r.escondeAnalitico, 'KPIs e Meu dia não deveriam aparecer para a auxiliar');
+  assert(r.subtituloProprio, 'o subtítulo deveria dizer do que é a tela dela');
+  assert(r.naoForcaCartaoVazio, 'cartão sem conteúdo não pode ser forçado a aparecer');
+  assert(r.mostraQuandoTemConteudo, 'com conteúdo, o cartão dela precisa aparecer');
+  assert(r.medicoVeTudo, 'o médico continua com o Dashboard analítico completo');
+  await page.close();
+});
+
+/* 93) Dashboard: escopo (pessoal/clínica) e os períodos pedidos */
+await test('Dashboard tem escopo pessoal/clínica e períodos hoje/semana/mês/6m/12m/tudo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const opts = (id) => Array.from(document.querySelectorAll('#' + id + ' option')).map(o => o.value);
+    out.temEscopo = opts('dash-escopo').join(',') === 'pessoal,clinica';
+    out.temPeriodos = opts('dash-periodo').join(',') === 'hoje,7,30,180,365,all';
+
+    /* "Hoje" é o dia do calendário: ficha das 8h continua contando às 23h */
+    const hoje = utils.hojeISO();
+    const ontem = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const lista = [
+      { _id: 'a', _dataClinica: hoje + 'T08:00:00.000Z' },
+      { _id: 'b', _dataClinica: ontem + 'T23:00:00.000Z' }
+    ];
+    const doDia = dashboard.filtrarPorPeriodo(lista, 'hoje', '_dataClinica');
+    out.hojeEhOdia = doDia.length === 1 && doDia[0]._id === 'a';
+    out.tudoNaoFiltra = dashboard.filtrarPorPeriodo(lista, 'all', '_dataClinica').length === 2;
+
+    /* escopo pessoal separa por autoria; clínica traz tudo */
+    auth.usuarioAtual = () => ({ nome: 'Dr. Marcelo', usuario: 'mpcaliman' });
+    const regs = [
+      { _id: '1', _updatedBy: 'mpcaliman' },
+      { _id: '2', _updatedBy: 'secretaria' },
+      { _id: '3' }                                   /* sem autoria: conta como meu */
+    ];
+    const meus = dashboard._filtrarEscopo(regs, 'pessoal').map(x => x._id);
+    out.pessoal = meus.join(',') === '1,3';
+    out.clinica = dashboard._filtrarEscopo(regs, 'clinica').length === 3;
+    return out;
+  });
+  assert(r.temEscopo, 'deveria existir o seletor pessoal/clínica');
+  assert(r.temPeriodos, 'os períodos deveriam ser hoje, semana, mês, 6 e 12 meses e tudo');
+  assert(r.hojeEhOdia, '"Hoje" tem que ser o dia do calendário, não as últimas 24 h');
+  assert(r.tudoNaoFiltra, '"Tudo" não pode filtrar nada');
+  assert(r.pessoal, 'pessoal deveria trazer os meus e os sem autoria registrada');
+  assert(r.clinica, 'clínica deveria trazer tudo');
+  await page.close();
+});
+
+/* 94) O painel tem que contar o que está na nuvem — e dizer o que fica de fora */
+await test('Dashboard soma os registros que estão na nuvem e avisa o que não entra nos gráficos', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const hoje = utils.hojeISO();
+    const antigo = '2020-03-01';
+    localStorage.setItem(arquivo.INDEX_KEY, JSON.stringify({
+      anestesia: [{ id: 'n1', nome: 'A', data: hoje }, { id: 'n2', nome: 'B', data: antigo }],
+      pre: [{ id: 'n3', nome: 'C', data: hoje }]
+    }));
+
+    /* respeita o período: só o de hoje entra em "Hoje" */
+    const hojeN = dashboard._naNuvem('hoje', 'clinica');
+    out.respeitaPeriodo = hojeN.total === 2 && hojeN.porMod.anestesia === 1 && hojeN.porMod.pre === 1;
+    const tudoN = dashboard._naNuvem('all', 'clinica');
+    out.tudoSomaGeral = tudoN.total === 3 && tudoN.porMod.anestesia === 2;
+
+    /* o aviso aparece e diz o que fica de fora */
+    dashboard._avisoNuvem(hojeN);
+    const av = document.getElementById('dash-aviso-nuvem');
+    out.avisa = av.style.display !== 'none'
+      && /entram nos totais/.test(av.textContent)
+      && /não nos gráficos/.test(av.textContent)
+      && /2/.test(av.textContent);
+    /* e some quando não há nada fora do aparelho */
+    dashboard._avisoNuvem({ porMod: {}, total: 0 });
+    out.somenteQuandoPreciso = av.style.display === 'none';
+
+    localStorage.removeItem(arquivo.INDEX_KEY);
+    out.semIndiceZero = dashboard._naNuvem('all', 'clinica').total === 0;
+    return out;
+  });
+  assert(r.respeitaPeriodo, 'o que está na nuvem tem que respeitar o período escolhido');
+  assert(r.tudoSomaGeral, 'em "Tudo", todos os registros da nuvem deveriam contar');
+  assert(r.avisa, 'o painel precisa dizer quantos estão na nuvem e o que não entra nos gráficos');
+  assert(r.somenteQuandoPreciso, 'sem nada fora do aparelho, o aviso não deveria aparecer');
+  assert(r.semIndiceZero, 'sem índice, a conta da nuvem é zero — não pode quebrar');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
