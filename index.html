@@ -3815,6 +3815,29 @@ textarea { border-radius: 10px; }
 .pl-rodape{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:16px 0 8px; }
 @media print{ .pl-rodape{ display:none !important; } }
 
+/* Aviso de pré-lançamento no Dashboard de quem pré-lança: o que voltou
+   devolvido e o que ainda não foi enviado. Fica no topo porque é o trabalho
+   dela que está parado — não pode depender de rolar a tela. */
+.pl-alerta{ display:flex; flex-direction:column; gap:8px; margin-bottom:12px; }
+.pl-alerta .pl-av{
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  border-radius:8px; padding:10px 12px; font-size:.85rem;
+}
+.pl-alerta .pl-av b{ font-weight:700; }
+.pl-alerta .pl-av-dev{ background:#fdf1e3; border:1px solid #f0cfa4; color:#7a4b12; }
+.pl-alerta .pl-av-env{ background:#eef4fb; border:1px solid #c7dcf0; color:#1c4f7c; }
+.pl-alerta .pl-av .btn{ margin-left:auto; }
+@media print{ .pl-alerta{ display:none !important; } }
+
+/* Faixa do médico dentro da ficha: quem pré-lançou e o botão de devolver */
+.pl-conf{
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  background:#eef4fb; border:1px solid #c7dcf0; color:#1c4f7c;
+  border-radius:8px; padding:9px 12px; font-size:.83rem;
+}
+.pl-conf.pl-conf-dev{ background:#fdf1e3; border-color:#f0cfa4; color:#7a4b12; }
+@media print{ .pl-conf{ display:none !important; } }
+
 /* Dashboard da auxiliar: só o trabalho dela — pendências e pré-lançamentos */
 body.dash-auxiliar #module-dashboard #kpi-grid,
 body.dash-auxiliar #module-dashboard #meu-dia-card,
@@ -4236,7 +4259,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-13b</b><br>
+    v7.1 · build <b id="build-tag">2026-08-13c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -4335,6 +4358,15 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </div>
 
     <div id="dash-aviso-nuvem" class="dash-aviso-nuvem" style="display:none"></div>
+
+    <!-- Pré-lançamento: o aviso da auxiliar e a fila do médico ficam FORA da
+         grade de gráficos — a grade some inteira para quem só pré-lança, e o
+         cartão dela ia junto. -->
+    <div id="pl-alerta" class="pl-alerta" style="display:none"></div>
+    <div class="card no-collapse" id="pl-fila-card" style="display:none"><div class="card-header"><div class="card-title-wrap"><h2 id="pl-fila-titulo">Aguardando sua conferência</h2></div></div>
+      <div class="card-body" id="pl-fila-lista"></div>
+    </div>
+
     <div class="kpi-grid" id="kpi-grid"></div>
 
     <!-- 📅 MEU DIA — casos de hoje com o estado de cada etapa (fechamento do plantão) -->
@@ -4364,9 +4396,6 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       </div>
       <div class="card no-collapse" data-detail="convenios"><div class="card-header"><div class="card-title-wrap"><h2>Convênios / planos</h2></div></div>
         <div class="card-body" id="dash-convenios"></div>
-      </div>
-      <div class="card no-collapse" id="pl-fila-card" style="display:none"><div class="card-header"><div class="card-title-wrap"><h2 id="pl-fila-titulo">Aguardando sua conferência</h2></div></div>
-        <div class="card-body" id="pl-fila-lista"></div>
       </div>
       <div class="card no-collapse" data-detail="hospitais"><div class="card-header"><div class="card-title-wrap"><h2>Hospitais / clínicas</h2></div></div>
         <div class="card-body" id="dash-hospitais"></div>
@@ -11713,21 +11742,29 @@ const preLanc = {
     const el = document.querySelector('#form-' + mod + ' [name="_id"]');
     return el ? el.value : '';
   },
+  /* Enviar é um ato só: salva, manda para o médico e fecha a ficha. Ela
+     terminou aquele paciente e vai para o próximo — deixar o formulário aberto
+     só convida a mexer no que já saiu das mãos dela. */
   enviar(mod) {
-    /* Antes isto só avisava "salve primeiro" e parava — o toque parecia não
-       fazer nada. Enviar implica salvar: o app grava e segue. */
     if (!preLanc.ehAuxiliar()) {
       toast('Este botão é do pré-lançamento (auxiliar). Você é quem confere e finaliza — use o cartão "Aguardando sua conferência" no Dashboard.', 'warn');
       return;
     }
-    let id = preLanc._idAtual(mod);
-    if (!id) {
-      try { const obj = window[mod]; if (obj && obj.salvar) obj.salvar(); } catch (e) {}
-      id = preLanc._idAtual(mod);
-    }
+    /* Salva SEMPRE, não só quando ainda não há id: o que estiver digitado e
+       ainda não gravado iria embora no fechamento. */
+    try { const obj = window[mod]; if (obj && obj.salvar) obj.salvar(); } catch (e) {}
+    /* Salvou mesmo? Se ainda há alteração pendente, a gravação não passou —
+       campo obrigatório em branco, por exemplo. Fechar aqui jogaria fora o que
+       ela acabou de digitar, e ainda mandaria a versão velha para o médico. */
+    try {
+      if (typeof state !== 'undefined' && state.dirty) {
+        toast('Não consegui salvar antes de enviar — confira os campos obrigatórios.', 'warn');
+        return;
+      }
+    } catch (e) {}
+    const id = preLanc._idAtual(mod);
     if (!id) { toast('Não consegui salvar esta ficha — confira os campos obrigatórios e tente de novo.', 'error'); return; }
-    const lst = store.list(mod);
-    const rec = lst.find(x => x._id === id);
+    const rec = store.getById(mod, id);
     if (!rec) { toast('Registro não encontrado', 'error'); return; }
     if (rec._finalizado) { toast('Esta ficha já foi finalizada pelo médico.', 'warn'); return; }
     const q = preLanc._quem();
@@ -11736,24 +11773,36 @@ const preLanc = {
     rec._preLanc.enviadoEm = new Date().toISOString();
     rec._preLanc.porNome = rec._preLanc.porNome || q.nome;
     delete rec._preLanc.motivo;
-    store.setList(mod, lst);
-    toast('📤 Pré-lançamento enviado para conferência do médico');
-    preLanc.renderBotao(mod);
+    /* store.save (e não setList): é o que espelha na nuvem. Com setList o
+       envio ficava preso no aparelho dela e o médico nunca via a fila. */
+    store.save(mod, rec);
+    toast('📤 Enviado para conferência do médico — ficha salva e fechada');
+    preLanc._fechar(mod);
   },
-  devolver(mod, id) {
+  /* Fecha a ficha depois do envio e leva de volta ao Dashboard, onde ela vê o
+     que ainda falta. markClean antes, senão "Descartar alterações?" aparece. */
+  _fechar(mod) {
+    try { if (typeof markClean === 'function') markClean(); } catch (e) {}
+    try { const obj = window[mod]; if (obj && obj.novo) obj.novo(); } catch (e) {}
+    try { preLanc.renderBotao(mod); } catch (e) {}
+    try {
+      if (typeof auth === 'undefined' || auth.podeAcessar('dashboard')) ui.navegar('dashboard');
+    } catch (e) {}
+  },
+  devolver(mod, id, opts) {
     const motivo = prompt('Devolver para correção — o que falta?', '');
     if (motivo === null) return;
-    const lst = store.list(mod);
-    const rec = lst.find(x => x._id === id);
+    const rec = store.getById(mod, id);
     if (!rec || !rec._preLanc) return;
     rec._preLanc.estado = 'devolvido';
     rec._preLanc.devolvidoEm = new Date().toISOString();
     rec._preLanc.devolvidoPor = preLanc._quem().nome;
     rec._preLanc.motivo = String(motivo || '').trim();
-    store.setList(mod, lst);
+    store.save(mod, rec);                    /* vai para a nuvem: ela usa outro aparelho */
     toast('↩ Devolvido para correção');
-    try { modal.close(); } catch (e) {}
+    if (!(opts && opts.manterAberto)) { try { modal.close(); } catch (e) {} }
     try { preLanc.renderFila(); } catch (e) {}
+    try { preLanc.renderBotao(mod); } catch (e) {}
   },
 
   /* Fila do médico: o que foi ENVIADO e ainda não conferido */
@@ -11808,6 +11857,7 @@ const preLanc = {
 
   /* Cartão no Dashboard: a fila do médico e o lembrete da auxiliar */
   renderFila() {
+    try { preLanc.renderAlerta(); } catch (e) {}
     const card = document.getElementById('pl-fila-card');
     const host = document.getElementById('pl-fila-lista');
     const tit = document.getElementById('pl-fila-titulo');
@@ -11869,7 +11919,38 @@ const preLanc = {
         : '');
   },
 
-  /* Botão "Enviar pré-lançamento" no rodapé da ficha (só para a auxiliar) */
+  /* Aviso no alto do Dashboard de quem pré-lança: o que voltou devolvido e o
+     que ainda não foi enviado. O cartão da lista já existia, mas ficava abaixo
+     de tudo — e o que está devolvido precisa ser a primeira coisa que ela vê. */
+  renderAlerta() {
+    const host = document.getElementById('pl-alerta');
+    if (!host) return;
+    if (!preLanc.ehAuxiliar()) { host.style.display = 'none'; host.innerHTML = ''; return; }
+    let p;
+    try { p = preLanc.meusPendentes(); } catch (e) { p = { rascunho: [], devolvido: [] }; }
+    if (!p.devolvido.length && !p.rascunho.length) { host.style.display = 'none'; host.innerHTML = ''; return; }
+    const abrir = it => 'dashboard._abrirRegistro(\'' + it.mod + '\',\'' + it.rec._id + '\')';
+    let html = '';
+    if (p.devolvido.length) {
+      const it = p.devolvido[0];
+      html += '<div class="pl-av pl-av-dev">↩ <b>' + p.devolvido.length + '</b> ' +
+        (p.devolvido.length === 1 ? 'pré-lançamento devolvido' : 'pré-lançamentos devolvidos') +
+        ' pelo médico para correção' +
+        (it.motivo ? ' — <b>' + utils.escapeHTML(it.motivo) + '</b>' : '') +
+        '<button type="button" class="btn btn-xs btn-primary" onclick="' + abrir(it) + '">Corrigir</button></div>';
+    }
+    if (p.rascunho.length) {
+      const it = p.rascunho[0];
+      html += '<div class="pl-av pl-av-env">📝 <b>' + p.rascunho.length + '</b> ' +
+        (p.rascunho.length === 1 ? 'pré-lançamento ainda não enviado' : 'pré-lançamentos ainda não enviados') +
+        ' — o médico só vê depois do <b>📤 Enviar</b>' +
+        '<button type="button" class="btn btn-xs btn-primary" onclick="' + abrir(it) + '">Abrir</button></div>';
+    }
+    host.innerHTML = html;
+    host.style.display = '';
+  },
+
+  /* Rodapé da ficha: "Enviar" para quem pré-lança, "Devolver" para o médico */
   renderBotao(mod) {
     /* normalmente o botão mora no rodapé de ações; se ele ainda não existe
        (ordem de montagem), o botão vai para o fim do próprio formulário —
@@ -11893,12 +11974,46 @@ const preLanc = {
     }
     const antigo = document.getElementById('pl-btn-' + mod);
     if (antigo) antigo.remove();
-    if (!preLanc.ehAuxiliar() || preLanc.MODS.indexOf(mod) < 0) return;
+    if (preLanc.MODS.indexOf(mod) < 0) return;
     const id = preLanc._idAtual(mod);
     const rec = id ? store.getById(mod, id) : null;
     const e = preLanc.estado(rec);
     const b = document.createElement('span');
     b.id = 'pl-btn-' + mod;
+
+    /* Lado do médico: quem conferir a ficha decide ali mesmo se devolve.
+       Antes o Devolver só existia no cartão do Dashboard — para devolver ele
+       tinha que fechar a ficha que estava lendo e procurar o item na lista. */
+    if (!preLanc.ehAuxiliar()) {
+      if (!preLanc.ehMedico() || !rec || !rec._preLanc || rec._finalizado) return;
+      if (e !== 'enviado' && e !== 'devolvido') return;
+      const faixa = document.createElement('div');
+      faixa.className = 'pl-conf' + (e === 'devolvido' ? ' pl-conf-dev' : '');
+      const quem = rec._preLanc.porNome ? ' por <b>' + utils.escapeHTML(rec._preLanc.porNome) + '</b>' : '';
+      if (e === 'devolvido') {
+        faixa.innerHTML = '↩ Devolvido para correção' +
+          (rec._preLanc.motivo ? ' — <b>' + utils.escapeHTML(rec._preLanc.motivo) + '</b>' : '') +
+          ' · aguardando' + quem;
+      } else {
+        faixa.innerHTML = '📤 Pré-lançamento' + quem + ' aguardando sua conferência.';
+        const dev = document.createElement('button');
+        dev.type = 'button';
+        dev.className = 'btn btn-sm';
+        dev.style.marginLeft = 'auto';
+        dev.textContent = '↩ Devolver';
+        dev.title = 'Volta para quem pré-lançou, com o motivo';
+        dev.addEventListener('click', () => {
+          try { preLanc.devolver(mod, id, { manterAberto: true }); }
+          catch (err) { try { toast('Não consegui devolver: ' + (err && err.message || err), 'error'); } catch (e2) {} }
+        });
+        faixa.appendChild(dev);
+      }
+      b.appendChild(faixa);
+      b.style.cssText = 'flex-basis:100%';
+      host.appendChild(b);
+      return;
+    }
+
     if (e === 'enviado') {
       b.innerHTML = '<span class="btn btn-sm" style="background:#eaf7ee;color:#1c5c33;border-color:#b6e0c2;cursor:default">📤 Enviado para conferência</span>';
       host.appendChild(b);
