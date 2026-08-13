@@ -6149,23 +6149,39 @@ await test('O Buscar volta ao normal mesmo com duas buscas cruzadas, e "não sub
     cloud.estaConfigurado = () => true; cloud.estaLogado = () => true; cloud.sessaoExpirada = () => false;
     cloudRel.disponivel = () => true; cloud._garantirToken = async () => true;
 
-    /* duas buscas ao mesmo tempo: a de dentro do painel e a do toque */
+    /* O defeito era o rótulo GUARDADO: a segunda chamada lia o texto atual do
+       botão — que já era "⏳ Buscando…" — e o devolvia no fim como se fosse o
+       normal. Reproduzir isso não exige corrida (que aqui só tornava o teste
+       instável): basta o botão já estar com o texto de ocupado quando uma
+       busca completa acontece. */
     auth.usuarioAtual = () => ({ id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
     preLanc.renderFila();
-    let solta;
-    cloudRel.puxarModulo = () => new Promise(ok => { solta = () => ok([]); });
-    preLanc._ultimaBusca = 0;
-    const p1 = preLanc.sincronizarFila({ forcar: true, silent: true });
-    await new Promise(r2 => setTimeout(r2, 0));
+    cloudRel.puxarModulo = async () => [];
     const btn = document.getElementById('pl-buscar-btn');
-    out.mostraOcupado = btn.textContent.indexOf('Buscando') >= 0;
-    const p2 = preLanc.sincronizarFila({ forcar: true, silent: true });   /* cruzou */
-    await p2;
-    solta(); await p1;
-    await new Promise(r2 => setTimeout(r2, 20));
-    out.voltouAoNormal = document.getElementById('pl-buscar-btn').textContent.indexOf('Buscar') >= 0
-      && document.getElementById('pl-buscar-btn').textContent.indexOf('Buscando') < 0;
-    out.destravou = document.getElementById('pl-buscar-btn').disabled === false;
+    btn.textContent = '⏳ Buscando…';
+    btn.disabled = true;
+    preLanc._ultimaBusca = 0;
+    await preLanc.sincronizarFila({ forcar: true, silent: true });
+    const b2 = document.getElementById('pl-buscar-btn');
+    out.voltouAoNormal = b2.textContent.indexOf('Buscando') < 0 && b2.textContent.indexOf('Buscar') >= 0;
+    out.destravou = b2.disabled === false;
+
+    /* com uma busca em curso, a outra não entra */
+    preLanc._buscando = true;
+    preLanc._ultimaBusca = 0;
+    const cruzada = await preLanc.sincronizarFila({ forcar: true, silent: true });
+    out.naoEntraCruzada = cruzada === null;
+    preLanc._buscando = false;
+
+    /* e durante a busca o botão mostra que está trabalhando */
+    let vistoDurante = '';
+    cloudRel.puxarModulo = async () => {
+      vistoDurante = document.getElementById('pl-buscar-btn').textContent;
+      return [];
+    };
+    preLanc._ultimaBusca = 0;
+    await preLanc.sincronizarFila({ forcar: true, silent: true });
+    out.mostraOcupado = vistoDurante.indexOf('Buscando') >= 0;
 
     /* motivo da recusa em português, na tela de quem lançou */
     auth.usuarioAtual = () => ({ id: 's1', nome: 'Sec', perfil: 'secretaria', role: 'auxiliar' });
@@ -6198,8 +6214,9 @@ await test('O Buscar volta ao normal mesmo com duas buscas cruzadas, e "não sub
     return out;
   });
   assert(r.mostraOcupado, 'enquanto busca, o botão precisa mostrar que está trabalhando');
-  assert(r.voltouAoNormal, 'duas buscas cruzadas não podem deixar o botão preso em "Buscando…"');
+  assert(r.voltouAoNormal, 'o botão não pode ficar preso em "Buscando…" por ter guardado o rótulo errado');
   assert(r.destravou, 'e o botão precisa voltar a aceitar toque');
+  assert(r.naoEntraCruzada, 'com uma busca em curso, a outra não entra');
   assert(r.contouAFalha, 'a recusa da clínica precisa ser contada');
   assert(r.traduziuOMotivo, 'o motivo tem que estar em português, não em código');
   assert(r.mostrouOMotivo, 'e precisa aparecer na tela de quem lançou');
