@@ -5427,6 +5427,51 @@ await test('Botão de enviar pré-lançamento aparece para a auxiliar em pré e 
   await page.close();
 });
 
+/* 96) Enviar sem ter salvado antes não pode ser um beco: enviar implica salvar */
+await test('Enviar pré-lançamento salva a ficha antes, em vez de não fazer nada', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('pre', []);
+    auth.usuarioAtual = () => ({ id: 's1', nome: 'Sec', perfil: 'secretaria', role: 'auxiliar' });
+    const f = document.getElementById('form-pre');
+    let hid = f.querySelector('[name="_id"]');
+    if (hid) hid.value = '';
+
+    /* sem registro salvo: enviar chama o salvar do módulo e continua */
+    let salvou = 0;
+    const orig = pre.salvar;
+    pre.salvar = () => {
+      salvou++;
+      const rec = store.save('pre', { nome: 'Nova' });
+      let h = f.querySelector('[name="_id"]');
+      if (!h) { h = document.createElement('input'); h.type = 'hidden'; h.name = '_id'; f.appendChild(h); }
+      h.value = rec._id;
+    };
+    preLanc.enviar('pre');
+    pre.salvar = orig;
+    out.salvouSozinho = salvou === 1;
+    const rec = store.list('pre')[0];
+    out.enviouMesmoAssim = preLanc.estado(rec) === 'enviado';
+
+    /* ficha já finalizada pelo médico não pode ser reenviada */
+    const fin = store.save('pre', { _id: rec._id, nome: 'Nova', _finalizado: true });
+    let erro = '';
+    const tOrig = window.toast;
+    window.toast = (m, t) => { if (t === 'warn') erro = m; };
+    preLanc.enviar('pre');
+    window.toast = tOrig;
+    out.naoReenviaFinalizada = /já foi finalizada/.test(erro);
+
+    store.setList('pre', []);
+    return out;
+  });
+  assert(r.salvouSozinho, 'enviar sem ter salvado deveria salvar primeiro');
+  assert(r.enviouMesmoAssim, 'depois de salvar, o envio tem que acontecer');
+  assert(r.naoReenviaFinalizada, 'ficha já finalizada pelo médico não volta para a fila');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

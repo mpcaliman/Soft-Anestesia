@@ -11707,11 +11707,18 @@ const preLanc = {
     return el ? el.value : '';
   },
   enviar(mod) {
-    const id = preLanc._idAtual(mod);
-    if (!id) { toast('Salve o pré-lançamento antes de enviar.', 'warn'); return; }
+    /* Antes isto só avisava "salve primeiro" e parava — o toque parecia não
+       fazer nada. Enviar implica salvar: o app grava e segue. */
+    let id = preLanc._idAtual(mod);
+    if (!id) {
+      try { const obj = window[mod]; if (obj && obj.salvar) obj.salvar(); } catch (e) {}
+      id = preLanc._idAtual(mod);
+    }
+    if (!id) { toast('Não consegui salvar esta ficha — confira os campos obrigatórios e tente de novo.', 'error'); return; }
     const lst = store.list(mod);
     const rec = lst.find(x => x._id === id);
     if (!rec) { toast('Registro não encontrado', 'error'); return; }
+    if (rec._finalizado) { toast('Esta ficha já foi finalizada pelo médico.', 'warn'); return; }
     const q = preLanc._quem();
     rec._preLanc = rec._preLanc || { estado: 'rascunho', porNome: q.nome, por: q.id, criadoEm: new Date().toISOString() };
     rec._preLanc.estado = 'enviado';
