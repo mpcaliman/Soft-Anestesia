@@ -11883,15 +11883,35 @@ const preLanc = {
     const e = preLanc.estado(rec);
     const b = document.createElement('span');
     b.id = 'pl-btn-' + mod;
-    b.innerHTML = (e === 'enviado')
-      ? '<span class="btn btn-sm" style="background:#eaf7ee;color:#1c5c33;border-color:#b6e0c2;cursor:default">📤 Enviado para conferência</span>'
-      : '<button type="button" class="btn btn-primary" onclick="preLanc.enviar(\'' + mod + '\')" title="Avisa o médico de que este pré-lançamento está pronto para conferência">📤 Enviar pré-lançamento</button>' +
-        (e === 'devolvido' && rec._preLanc.motivo
-          ? '<div style="flex-basis:100%;font-size:.8rem;color:#7a4b12;margin-top:6px">↩ Devolvido: ' + utils.escapeHTML(rec._preLanc.motivo) + '</div>'
-          : '');
+    if (e === 'enviado') {
+      b.innerHTML = '<span class="btn btn-sm" style="background:#eaf7ee;color:#1c5c33;border-color:#b6e0c2;cursor:default">📤 Enviado para conferência</span>';
+      host.appendChild(b);
+      return;
+    }
+    /* O clique é ligado AQUI, não por onclick no HTML: o atributo depende de a
+       variável estar publicada no window, e se qualquer coisa falhar antes
+       disso o botão vira um botão morto — sem erro visível, sem aviso. */
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-primary';
+    btn.title = 'Avisa o médico de que este pré-lançamento está pronto para conferência';
+    btn.textContent = '📤 Enviar pré-lançamento';
+    btn.addEventListener('click', () => {
+      try { preLanc.enviar(mod); }
+      catch (err) { try { toast('Não consegui enviar: ' + (err && err.message || err), 'error'); } catch (e2) {} }
+    });
+    b.appendChild(btn);
+    if (e === 'devolvido' && rec && rec._preLanc && rec._preLanc.motivo) {
+      const m = document.createElement('div');
+      m.style.cssText = 'flex-basis:100%;font-size:.8rem;color:#7a4b12;margin-top:6px';
+      m.textContent = '↩ Devolvido: ' + rec._preLanc.motivo;
+      b.appendChild(m);
+    }
     host.appendChild(b);
   }
 };
+
+try { window.preLanc = preLanc; } catch (e) {}
 
 const lixeira = {
   KEY: 'medsys.v7.lixeira',

@@ -5472,6 +5472,49 @@ await test('Enviar pré-lançamento salva a ficha antes, em vez de não fazer na
   await page.close();
 });
 
+/* 97) O botão não pode depender de variável global: se o boot falhar antes de
+   publicá-la, o onclick vira um botão morto — sem erro, sem aviso. */
+await test('O clique do enviar é ligado direto no botão, sem depender do window', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    auth.usuarioAtual = () => ({ id: 's1', nome: 'Sec', perfil: 'secretaria', role: 'auxiliar' });
+    preLanc.renderBotao('pre');
+    const btn = document.querySelector('#pl-btn-pre button');
+    out.temBotao = !!btn;
+    /* nada de onclick no HTML — o vínculo é por listener */
+    out.semOnclickNoHTML = !!btn && !btn.getAttribute('onclick');
+
+    /* mesmo sem preLanc publicado no window, o clique funciona */
+    const salvo = window.preLanc;
+    let chamou = false;
+    const orig = preLanc.enviar;
+    preLanc.enviar = () => { chamou = true; };
+    delete window.preLanc;
+    btn.click();
+    window.preLanc = salvo;
+    preLanc.enviar = orig;
+    out.funcionaSemGlobal = chamou;
+
+    /* e um erro dentro do envio vira aviso, não silêncio */
+    let erro = '';
+    const tOrig = window.toast;
+    window.toast = (m, t) => { if (t === 'error') erro = m; };
+    const orig2 = preLanc.enviar;
+    preLanc.enviar = () => { throw new Error('falha de teste'); };
+    document.querySelector('#pl-btn-pre button').click();
+    preLanc.enviar = orig2;
+    window.toast = tOrig;
+    out.erroVisivel = /falha de teste/.test(erro);
+    return out;
+  });
+  assert(r.temBotao, 'o botão deveria existir para a auxiliar');
+  assert(r.semOnclickNoHTML, 'o clique não pode ser um atributo onclick no HTML');
+  assert(r.funcionaSemGlobal, 'o botão precisa funcionar mesmo sem a variável global publicada');
+  assert(r.erroVisivel, 'erro no envio tem que virar aviso, nunca silêncio');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
