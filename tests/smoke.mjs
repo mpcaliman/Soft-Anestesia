@@ -5141,9 +5141,12 @@ await test('Pré-lançamento: só entra na fila do médico depois de enviado, e 
     let hid = f.querySelector('[name="_id"]');
     if (!hid) { hid = document.createElement('input'); hid.type = 'hidden'; hid.name = '_id'; f.appendChild(hid); }
     hid.value = rec._id;
+    markClean();                       /* ficha gravada: nada pendente na tela */
     preLanc.enviar('pre');
     out.enviouComCarimbo = preLanc.estado(store.getById('pre', rec._id)) === 'enviado'
       && !!store.getById('pre', rec._id)._preLanc.enviadoEm;
+    /* enviar = salvar + fechar: o formulário fica limpo para o próximo */
+    out.fechouAFicha = !preLanc._idAtual('pre');
 
     /* agora aparece na fila do médico, com quem lançou */
     auth.usuarioAtual = () => medico;
@@ -5162,6 +5165,13 @@ await test('Pré-lançamento: só entra na fila do médico depois de enviado, e 
     store.save('pre', Object.assign({}, dev, { obs: 'corrigido' }));
     out.voltaARascunho = preLanc.estado(store.getById('pre', rec._id)) === 'rascunho';
     out.contaPendentes = preLanc.meusPendentes().rascunho.length === 1;
+    hid = document.getElementById('form-pre').querySelector('[name="_id"]');   /* o envio fechou a ficha; ela reabre */
+    if (!hid) {
+      const f2 = document.getElementById('form-pre');
+      hid = document.createElement('input'); hid.type = 'hidden'; hid.name = '_id'; f2.appendChild(hid);
+    }
+    hid.value = rec._id;
+    markClean();
     preLanc.enviar('pre');
 
     /* o médico finaliza: sai da fila de vez */
@@ -5184,6 +5194,7 @@ await test('Pré-lançamento: só entra na fila do médico depois de enviado, e 
   assert(r.nasceRascunho, 'o que a auxiliar salva nasce como rascunho dela, com o nome de quem lançou');
   assert(r.filaVaziaAntesDeEnviar, 'antes de enviar, nada pode aparecer para o médico');
   assert(r.enviouComCarimbo, 'enviar deveria mudar o estado e carimbar a hora');
+  assert(r.fechouAFicha, 'enviar é salvar-e-fechar: a ficha tem que sair da tela');
   assert(r.entrouNaFila, 'depois de enviado, entra na fila do médico com quem lançou');
   assert(r.devolveu && r.saiuDaFila, 'devolver deveria registrar o motivo e tirar da fila');
   assert(r.voltaARascunho && r.contaPendentes, 'ao mexer de novo, volta a rascunho e conta como não enviado');
@@ -5429,6 +5440,7 @@ await test('Enviar pré-lançamento salva a ficha antes, em vez de não fazer na
       let h = f.querySelector('[name="_id"]');
       if (!h) { h = document.createElement('input'); h.type = 'hidden'; h.name = '_id'; f.appendChild(h); }
       h.value = rec._id;
+      markClean();                     /* como o salvar de verdade faz */
     };
     preLanc.enviar('pre');
     pre.salvar = orig;
@@ -5438,6 +5450,10 @@ await test('Enviar pré-lançamento salva a ficha antes, em vez de não fazer na
 
     /* ficha já finalizada pelo médico não pode ser reenviada */
     const fin = store.save('pre', { _id: rec._id, nome: 'Nova', _finalizado: true });
+    let h2 = f.querySelector('[name="_id"]');    /* o envio anterior fechou a ficha; ela reabre */
+    if (!h2) { h2 = document.createElement('input'); h2.type = 'hidden'; h2.name = '_id'; f.appendChild(h2); }
+    h2.value = rec._id;
+    markClean();
     let erro = '';
     const tOrig = window.toast;
     window.toast = (m, t) => { if (t === 'warn') erro = m; };
@@ -5534,6 +5550,184 @@ await test('Edição parcial não pode travar o botão de enviar pré-lançament
   assert(r.clicavel, 'o botão não pode ficar com pointer-events desligado');
   assert(r.regraContinua, 'a trava dos campos do médico continua valendo');
   assert(r.cliqueChega, 'o clique tem que chegar à função mesmo em edição parcial');
+  await page.close();
+});
+
+/* 99) Enviar é um ato só: salva, manda e fecha. E se a gravação não passar,
+   NÃO fecha — fechar ali jogaria fora o que ela acabou de digitar. */
+await test('Enviar salva, fecha a ficha e volta ao Dashboard — mas não fecha se não conseguiu salvar', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('pre', []);
+    auth.usuarioAtual = () => ({ id: 's1', nome: 'Sec', perfil: 'secretaria', role: 'auxiliar' });
+    auth.podeAcessar = () => true;
+    const f = document.getElementById('form-pre');
+    const setId = v => {
+      let h = f.querySelector('[name="_id"]');
+      if (!h) { h = document.createElement('input'); h.type = 'hidden'; h.name = '_id'; f.appendChild(h); }
+      h.value = v;
+    };
+
+    /* caminho feliz: salva, fecha e vai para o Dashboard */
+    const rec = store.save('pre', { nome: 'Ana', data: '2026-08-12' });
+    setId(rec._id);
+    let salvou = 0;
+    const orig = pre.salvar;
+    pre.salvar = () => { salvou++; markClean(); };
+    preLanc.enviar('pre');
+    pre.salvar = orig;
+    out.salvouAntes = salvou === 1;                       /* salva SEMPRE, não só quando falta id */
+    out.enviou = preLanc.estado(store.getById('pre', rec._id)) === 'enviado';
+    out.fechou = !preLanc._idAtual('pre');
+    out.foiProDashboard = (document.getElementById('module-dashboard') || {}).classList
+      ? document.getElementById('module-dashboard').classList.contains('active') : false;
+
+    /* gravação que não passou (campo obrigatório em branco): não fecha nem envia */
+    const rec2 = store.save('pre', { nome: 'Bia', data: '2026-08-12' });
+    setId(rec2._id);
+    const orig2 = pre.salvar;
+    pre.salvar = () => {};                                 /* falhou: state.dirty continua */
+    state.dirty = true;
+    let aviso = '';
+    const tOrig = window.toast;
+    window.toast = (m, t) => { if (t === 'warn') aviso = m; };
+    preLanc.enviar('pre');
+    window.toast = tOrig;
+    pre.salvar = orig2;
+    out.avisouQueNaoSalvou = /confira os campos obrigat/i.test(aviso);
+    out.naoEnviouSemSalvar = preLanc.estado(store.getById('pre', rec2._id)) !== 'enviado';
+    out.naoFechou = preLanc._idAtual('pre') === rec2._id;
+    markClean();
+
+    store.setList('pre', []);
+    return out;
+  });
+  assert(r.salvouAntes, 'enviar tem que salvar o que está na tela antes de fechar');
+  assert(r.enviou && r.fechou, 'depois de enviar, a ficha sai da tela');
+  assert(r.foiProDashboard, 'ao fechar, a auxiliar volta para o Dashboard dela');
+  assert(r.avisouQueNaoSalvou, 'se a gravação não passou, ela precisa saber');
+  assert(r.naoEnviouSemSalvar && r.naoFechou, 'sem salvar não se envia nem se fecha — o que ela digitou não pode sumir');
+  await page.close();
+});
+
+/* 100) Devolver dentro da ficha: quem confere decide ali, sem ter que fechar o
+   que está lendo e caçar o item na lista do Dashboard. */
+await test('Devolver aparece dentro da ficha para o médico, não só no Dashboard', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('pre', []);
+    const f = document.getElementById('form-pre');
+    const setId = v => {
+      let h = f.querySelector('[name="_id"]');
+      if (!h) { h = document.createElement('input'); h.type = 'hidden'; h.name = '_id'; f.appendChild(h); }
+      h.value = v;
+    };
+    /* uma ficha enviada pela auxiliar */
+    auth.usuarioAtual = () => ({ id: 's1', nome: 'Sec', perfil: 'secretaria', role: 'auxiliar' });
+    const rec = store.save('pre', { nome: 'Ana', data: '2026-08-12' });
+    rec._preLanc.estado = 'enviado';
+    rec._preLanc.enviadoEm = new Date().toISOString();
+    store.setList('pre', store.list('pre').map(x => x._id === rec._id ? rec : x));
+    setId(rec._id);
+
+    /* para ela, nada de devolver — o botão dela é o de enviar */
+    preLanc.renderBotao('pre');
+    out.auxNaoDevolve = !document.querySelector('#pl-btn-pre .pl-conf');
+
+    /* para o médico, a faixa com quem lançou e o botão de devolver */
+    auth.usuarioAtual = () => ({ id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
+    preLanc.renderBotao('pre');
+    const faixa = document.querySelector('#pl-btn-pre .pl-conf');
+    out.temFaixa = !!faixa && /Sec/.test(faixa.textContent);
+    const btn = faixa && Array.from(faixa.querySelectorAll('button'))
+      .find(b => /devolver/i.test(b.textContent));
+    out.temBotao = !!btn;
+    out.clicavel = !!btn && getComputedStyle(btn).pointerEvents !== 'none';
+
+    /* clicar devolve de verdade, com o motivo, e mantém a ficha aberta */
+    window.prompt = () => 'Falta o peso';
+    if (btn) btn.click();
+    const dev = store.getById('pre', rec._id);
+    out.devolveu = preLanc.estado(dev) === 'devolvido' && /peso/.test(dev._preLanc.motivo || '');
+    out.continuaAberta = preLanc._idAtual('pre') === rec._id;
+    /* e a faixa passa a dizer que está devolvido */
+    const faixa2 = document.querySelector('#pl-btn-pre .pl-conf');
+    out.faixaVirouDevolvido = !!faixa2 && /devolvid/i.test(faixa2.textContent) && /peso/.test(faixa2.textContent);
+
+    /* ficha sem pré-lançamento nenhum: nada aparece */
+    const solta = store.save('pre', { nome: 'Sem fila', data: '2026-08-12' });
+    setId(solta._id);
+    preLanc.renderBotao('pre');
+    out.semPreLancNadaAparece = !document.querySelector('#pl-btn-pre .pl-conf');
+
+    store.setList('pre', []);
+    return out;
+  });
+  assert(r.auxNaoDevolve, 'quem pré-lança não devolve para si mesma');
+  assert(r.temFaixa && r.temBotao, 'o médico precisa ver, dentro da ficha, quem lançou e o botão de devolver');
+  assert(r.clicavel, 'o botão de devolver não pode ficar travado');
+  assert(r.devolveu, 'o clique tem que devolver de verdade, com o motivo');
+  assert(r.continuaAberta, 'devolver de dentro da ficha não pode fechar o que ele está lendo');
+  assert(r.faixaVirouDevolvido, 'depois de devolver, a faixa mostra o estado novo');
+  assert(r.semPreLancNadaAparece, 'ficha que ninguém pré-lançou não mostra faixa de conferência');
+  await page.close();
+});
+
+/* 101) O aviso no alto do Dashboard dela: o que voltou devolvido e o que ainda
+   não foi enviado. O cartão da lista ficava dentro da grade — e a grade some
+   inteira para quem só pré-lança. */
+await test('Dashboard da auxiliar avisa, no topo, o que foi devolvido e o que falta enviar', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('pre', []); store.setList('anestesia', []);
+    const aux = { id: 's1', nome: 'Sec', perfil: 'secretaria', role: 'auxiliar' };
+    auth.usuarioAtual = () => aux;
+
+    /* sem nada pendente, o aviso não aparece */
+    preLanc.renderFila();
+    const host = document.getElementById('pl-alerta');
+    out.existeHost = !!host;
+    out.calaQuandoNaoTemNada = !!host && host.style.display === 'none';
+
+    /* um devolvido e um não enviado */
+    const a = store.save('pre', { nome: 'Ana', data: '2026-08-12' });
+    a._preLanc.estado = 'devolvido'; a._preLanc.motivo = 'Falta a carteirinha';
+    store.setList('pre', store.list('pre').map(x => x._id === a._id ? a : x));
+    store.save('anestesia', { nome: 'Bia', data: '2026-08-12' });
+
+    preLanc.renderFila();
+    out.apareceu = !!host && host.style.display !== 'none';
+    const txt = host ? host.textContent : '';
+    out.falaDoDevolvido = /devolvid/i.test(txt) && /carteirinha/.test(txt);
+    out.falaDoNaoEnviado = /não enviado/i.test(txt);
+    out.temAtalho = !!host && host.querySelectorAll('button').length >= 2;
+
+    /* o cartão da lista tem que ficar FORA da grade que some para ela */
+    const card = document.getElementById('pl-fila-card');
+    out.cardForaDaGrade = !!card && !card.closest('.dash-grid');
+    preLanc.ajustarDashboard();
+    out.cardVisivelParaEla = !!card && card.offsetParent !== null;
+
+    /* para o médico, o aviso dela não aparece */
+    auth.usuarioAtual = () => ({ id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
+    preLanc.renderFila();
+    out.medicoNaoVeOAviso = !!host && host.style.display === 'none';
+
+    store.setList('pre', []); store.setList('anestesia', []);
+    return out;
+  });
+  assert(r.existeHost, 'o Dashboard precisa ter onde mostrar o aviso');
+  assert(r.calaQuandoNaoTemNada, 'sem pendência, o aviso fica calado');
+  assert(r.apareceu, 'com pendência, o aviso aparece');
+  assert(r.falaDoDevolvido, 'o aviso tem que dizer o que foi devolvido e por quê');
+  assert(r.falaDoNaoEnviado, 'o aviso tem que lembrar o que ainda não foi enviado');
+  assert(r.temAtalho, 'de cada aviso ela precisa conseguir abrir a ficha');
+  assert(r.cardForaDaGrade, 'o cartão dela não pode morar na grade de gráficos, que some para ela');
+  assert(r.cardVisivelParaEla, 'o cartão de pré-lançamentos precisa aparecer no Dashboard dela');
+  assert(r.medicoNaoVeOAviso, 'o aviso é do trabalho dela; para o médico ele não aparece');
   await page.close();
 });
 
