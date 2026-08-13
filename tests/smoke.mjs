@@ -648,15 +648,15 @@ await test('Armazenamento: histórico sem base64, compactação e liberação de
     out.docIntacto = store.getById('pre', doc._id).assinatura_dataurl === GORDO;   // o documento REAL não muda
 
     // 2) compactar: semeia 6 versões gordas antigas → fica ≤3, todas saneadas, tamanho cai
-    const all = JSON.parse(localStorage.getItem('medsys.v7.versions') || '{}');
+    const all = JSON.parse(disco.get('medsys.v7.versions') || '{}');
     all['pre:velho'] = Array.from({ length: 6 }, (_, i) => ({ ts: 't' + i, snapshot: { nome: 'v' + i, foto: GORDO } }));
-    localStorage.setItem('medsys.v7.versions', JSON.stringify(all));
-    const antes = localStorage.getItem('medsys.v7.versions').length;
+    disco.set('medsys.v7.versions', JSON.stringify(all));
+    const antes = disco.get('medsys.v7.versions').length;
     armazenamento.compactarVersoes();
-    const depoisAll = JSON.parse(localStorage.getItem('medsys.v7.versions'));
+    const depoisAll = JSON.parse(disco.get('medsys.v7.versions'));
     out.compactou = depoisAll['pre:velho'].length === 3 &&
       depoisAll['pre:velho'].every(v => v.snapshot.foto !== GORDO) &&
-      localStorage.getItem('medsys.v7.versions').length < antes;
+      disco.get('medsys.v7.versions').length < antes;
 
     // 3) liberar anexos: doc com dataurl + storage_path perde o dataurl; pendente (sem path) fica
     store.setList('anestesia', [{ _id: 'ax', paciente_nome: 'X', _docs: [
@@ -694,19 +694,19 @@ await test('Armazenamento: auto-manutenção compacta o histórico antigo uma ú
     localStorage.removeItem(armazenamento.FLAG_COMPACT);
     const all = {};
     all['anestesia:legado'] = Array.from({ length: 8 }, (_, i) => ({ ts: 't' + i, snapshot: { nome: 'v' + i, assinatura_dataurl: GORDO } }));
-    localStorage.setItem('medsys.v7.versions', JSON.stringify(all));
+    disco.set('medsys.v7.versions', JSON.stringify(all));
     armazenamento.autoManutencao();
-    const depois = JSON.parse(localStorage.getItem('medsys.v7.versions'));
+    const depois = JSON.parse(disco.get('medsys.v7.versions'));
     out.limitou = depois['anestesia:legado'].length === 5;
     out.saneou = depois['anestesia:legado'].every(v => v.snapshot.assinatura_dataurl !== GORDO);
     out.flag = localStorage.getItem(armazenamento.FLAG_COMPACT) === '1';
 
     // idempotente: com a flag, uma nova versão gorda inserida à mão NÃO é tocada
-    const all2 = JSON.parse(localStorage.getItem('medsys.v7.versions'));
+    const all2 = JSON.parse(disco.get('medsys.v7.versions'));
     all2['anestesia:legado'].unshift({ ts: 'novo', snapshot: { foto: GORDO } });
-    localStorage.setItem('medsys.v7.versions', JSON.stringify(all2));
+    disco.set('medsys.v7.versions', JSON.stringify(all2));
     armazenamento.autoManutencao();
-    const depois2 = JSON.parse(localStorage.getItem('medsys.v7.versions'));
+    const depois2 = JSON.parse(disco.get('medsys.v7.versions'));
     out.idempotente = depois2['anestesia:legado'][0].snapshot.foto === GORDO;
 
     // aviso preventivo: uso > 4 MB → toast aparece
@@ -5990,6 +5990,148 @@ await test('O botão Buscar da fila responde sempre — inclusive quando não d�
   assert(r.avisaSessao, 'com a sessão vencida, avisa e leva de volta ao login');
   assert(r.avisaQuandoNaoTemNada, 'quando não há novidade, o botão precisa dizer isso');
   assert(r.avisaFalhaDeLeitura, 'se a leitura da clínica falhou, não pode dizer que está tudo em dia');
+  await page.close();
+});
+
+/* 106) O teto de 5 MB do localStorage não se resolve com faxina: é limite do
+   navegador. O que é pesado — imagens, versões, lixeira — mudou de casa para o
+   IndexedDB, que trabalha na casa de centenas de MB. */
+await test('O que é pesado sai do localStorage e vai para o disco grande do aparelho', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    out.abriu = disco._pronto === true;
+    out.saoAsPesadas = disco.CHAVES.indexOf('medsys.v7.blobs') >= 0
+      && disco.CHAVES.indexOf('medsys.v7.versions') >= 0
+      && disco.CHAVES.indexOf('medsys.v7.lixeira') >= 0;
+
+    /* imagem grande num registro: o registro guarda só a referência, e a
+       imagem não ocupa uma vírgula do localStorage */
+    const img = 'data:image/png;base64,' + 'A'.repeat(60000);
+    store.setList('pre', []);
+    const rec = store.save('pre', { nome: 'Com carimbo', data: '2026-08-13', carimbo: img });
+    const cru = localStorage.getItem(STORAGE['pre']) || '';
+    out.registroFicouLeve = cru.length < 5000 && /blob:/.test(cru);
+    out.imagemForaDoLocalStorage = (localStorage.getItem('medsys.v7.blobs') || '') === '';
+    out.imagemNoDiscoGrande = (disco.get('medsys.v7.blobs') || '').length > 50000;
+    /* e o app continua enxergando a imagem inteira, sem saber de nada disso */
+    out.appVeAImagemInteira = (store.getById('pre', rec._id) || {}).carimbo === img;
+
+    /* a gravação chega mesmo ao IndexedDB, não só à memória */
+    await new Promise(r2 => setTimeout(r2, 700));
+    const doDisco = await disco._ler('medsys.v7.blobs');
+    out.gravouNoIndexedDB = typeof doDisco === 'string' && doDisco.length > 50000;
+
+    /* a tela de armazenamento não pode mentir por omissão */
+    const u = armazenamento.uso();
+    out.contaSeparado = u.grande > 50000 && u.itens.some(it => it.noDiscoGrande);
+
+    store.setList('pre', []);
+    return out;
+  });
+  assert(r.abriu, 'o disco grande precisa abrir no boot');
+  assert(r.saoAsPesadas, 'imagens, versões e lixeira são o que pesa — é o que muda de casa');
+  assert(r.registroFicouLeve, 'o registro guarda a referência, não a imagem');
+  assert(r.imagemForaDoLocalStorage, 'a imagem não pode mais ocupar o espaço apertado de 5 MB');
+  assert(r.imagemNoDiscoGrande, 'a imagem tem que estar no disco grande');
+  assert(r.appVeAImagemInteira, 'para o resto do app nada muda: a imagem volta inteira');
+  assert(r.gravouNoIndexedDB, 'a gravação precisa chegar ao IndexedDB, não parar na memória');
+  assert(r.contaSeparado, 'a tela de armazenamento precisa mostrar o que está no disco grande');
+  await page.close();
+});
+
+/* 107) Cortar a lista local é legítimo; derrubar o que ainda não está na nuvem
+   é perder trabalho. E o ciclo automático existe para o fluxo não depender de
+   ninguém apertar botão. */
+await test('O corte local nunca derruba o que ainda não subiu, e a sincronia roda sozinha', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    /* --- poda --- */
+    const lista = [];
+    for (let i = 0; i < HISTORY_MAX + 5; i++) {
+      lista.push({ _id: 'c' + i, nome: 'na nuvem ' + i, _relUpdatedAt: '2026-08-13T10:00:00Z' });
+    }
+    lista.push({ _id: 'so-aqui', nome: 'ainda não subiu' });     /* sem _relUpdatedAt */
+    store._podar(lista);
+    out.cortouNoTeto = lista.length === HISTORY_MAX;
+    out.preservouOQueNaoSubiu = lista.some(x => x._id === 'so-aqui');
+
+    /* uma lista inteira de não-sincronizados não é cortada: seria perda */
+    const soLocais = [];
+    for (let i = 0; i < HISTORY_MAX + 3; i++) soLocais.push({ _id: 'l' + i, nome: 'local ' + i });
+    store._podar(soLocais);
+    out.naoJogaForaTrabalho = soLocais.length === HISTORY_MAX + 3;
+
+    /* --- sincronia automática --- */
+    out.temCiclo = typeof sincronia !== 'undefined' && typeof sincronia.ciclo === 'function';
+    const origDisp = cloudRel.disponivel, origPuxa = cloudRel.puxarModulo,
+          origTok = cloud._garantirToken, origEmp = cloudRel.empurrarPendentes,
+          origCfg = cloud.estaConfigurado, origLog = cloud.estaLogado, origExp = cloud.sessaoExpirada;
+    cloud.estaConfigurado = () => true; cloud.estaLogado = () => true; cloud.sessaoExpirada = () => false;
+    cloudRel.disponivel = () => true; cloud._garantirToken = async () => true;
+    let empurrou = 0;
+    cloudRel.empurrarPendentes = async () => { empurrou++; return { enviados: 0 }; };
+    const pedidos = [];
+    cloudRel.puxarModulo = async (mod, opts) => {
+      pedidos.push({ mod, desde: (opts || {}).desde || '' });
+      return mod === 'pre'
+        ? [{ _id: 'auto1', nome: 'Vindo sozinho', _updatedAt: '2026-08-13T12:00:00.000Z',
+             _relUpdatedAt: '2026-08-13T12:00:05.000Z',
+             _preLanc: { estado: 'enviado', porNome: 'Sec' } }]
+        : [];
+    };
+    localStorage.removeItem(sincronia.MARCAS_KEY);
+    store.setList('pre', []);
+    /* o ciclo do boot pode estar em curso: esperar por ele evita medir a
+       passada errada (foi assim que este teste falhou da primeira vez) */
+    const ciclo = async () => {
+      while (sincronia._rodando) await new Promise(r2 => setTimeout(r2, 10));
+      try { clearTimeout(sincronia._timer); } catch (e) {}
+      await sincronia.ciclo();
+      try { clearTimeout(sincronia._timer); } catch (e) {}
+    };
+    await ciclo();
+    out.empurrouPendentes = empurrou === 1;
+    out.trouxeSozinho = !!store.getById('pre', 'auto1');
+    out.pediuSemFiltroNaPrimeira = pedidos.length > 0 && pedidos[0].desde === '';
+
+    /* segunda passada: só o que mudou desde a última — leitura barata */
+    pedidos.length = 0;
+    await ciclo();
+    out.segundaEIncremental = pedidos.length > 0 && pedidos[0].desde === '2026-08-13T12:00:05.000Z';
+
+    /* clínica fora do ar: espera mais na próxima, em vez de martelar */
+    cloudRel.puxarModulo = async () => null;
+    sincronia._espera = sincronia.INTERVALO;
+    await ciclo();
+    out.recuaQuandoFalha = sincronia._espera > sincronia.INTERVALO;
+    cloudRel.puxarModulo = async () => [];
+    await ciclo();
+    out.voltaAoRitmoQuandoVolta = sincronia._espera === sincronia.INTERVALO;
+
+    /* sem nuvem não fica tentando à toa */
+    cloud.estaConfigurado = () => false;
+    out.naoTentaSemNuvem = sincronia.podeRodar() === false;
+
+    cloudRel.disponivel = origDisp; cloudRel.puxarModulo = origPuxa;
+    cloud._garantirToken = origTok; cloudRel.empurrarPendentes = origEmp;
+    cloud.estaConfigurado = origCfg; cloud.estaLogado = origLog; cloud.sessaoExpirada = origExp;
+    try { clearTimeout(sincronia._timer); } catch (e) {}
+    store.setList('pre', []);
+    return out;
+  });
+  assert(r.cortouNoTeto, 'a lista local continua tendo um teto');
+  assert(r.preservouOQueNaoSubiu, 'o corte não pode derrubar registro que ainda não está na nuvem');
+  assert(r.naoJogaForaTrabalho, 'se nada subiu ainda, é melhor a lista passar do teto do que perder trabalho');
+  assert(r.temCiclo, 'a sincronia automática precisa existir');
+  assert(r.empurrouPendentes, 'cada ciclo sobe o que ficou para trás');
+  assert(r.trouxeSozinho, 'o que está na clínica chega sem ninguém apertar botão');
+  assert(r.pediuSemFiltroNaPrimeira, 'a primeira leitura vem inteira');
+  assert(r.segundaEIncremental, 'as seguintes trazem só o que mudou — é o que deixa repetir de minuto em minuto');
+  assert(r.recuaQuandoFalha, 'falhou, espera mais na próxima em vez de martelar a rede');
+  assert(r.voltaAoRitmoQuandoVolta, 'voltou a funcionar, volta ao ritmo normal');
+  assert(r.naoTentaSemNuvem, 'sem nuvem configurada não adianta tentar');
   await page.close();
 });
 
