@@ -3798,6 +3798,13 @@ textarea { border-radius: 10px; }
 .sidebar-brand strong { font-weight: 800; letter-spacing: -.2px; }
 /* Header */
 .app-header { backdrop-filter: blur(8px); }
+.dash-aviso-nuvem{
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  background:#eef4fb; border:1px solid #c7dcf0; color:#1c4f7c;
+  border-radius:8px; padding:9px 12px; font-size:.82rem; margin-bottom:12px;
+}
+@media print{ .dash-aviso-nuvem{ display:none !important; } }
+
 /* Dashboard da auxiliar: só o trabalho dela — pendências e pré-lançamentos */
 body.dash-auxiliar #module-dashboard #kpi-grid,
 body.dash-auxiliar #module-dashboard #meu-dia-card,
@@ -4317,6 +4324,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       <span class="subtitle">Visão analítica dos registros · <span style="font-size:.7rem;color:#8a93a0">v7.1 · gráficos</span></span>
     </div>
 
+    <div id="dash-aviso-nuvem" class="dash-aviso-nuvem" style="display:none"></div>
     <div class="kpi-grid" id="kpi-grid"></div>
 
     <!-- 📅 MEU DIA — casos de hoje com o estado de cada etapa (fechamento do plantão) -->
@@ -37594,6 +37602,9 @@ const dashboard = {
     const allFin = filtPorMeta(store.list('financeiro'));
 
     /* KPIs */
+    const nuvem = dashboard._naNuvem(periodo, escopo);
+    dashboard._avisoNuvem(nuvem);
+    const maisNuvem = (mod) => (nuvem.porMod[mod] || 0);
     const kpiGrid = document.getElementById('kpi-grid');
     const totFinPrev = allFin.reduce((s, x) => s + (parseFloat(x.valor_previsto) || 0), 0);
     const totFinRec  = allFin.reduce((s, x) => s + (parseFloat(x.valor_recebido) || 0), 0);
@@ -37603,8 +37614,8 @@ const dashboard = {
     kpiGrid.innerHTML = `
       <div class="kpi-card" data-detail="anestesia">
         <div class="kpi-label">Anestesias</div>
-        <div class="kpi-value">${allAnest.length}</div>
-        <div class="kpi-sub">fichas registradas</div>
+        <div class="kpi-value">${allAnest.length + maisNuvem('anestesia')}</div>
+        <div class="kpi-sub">fichas registradas${maisNuvem('anestesia') ? ' · ' + maisNuvem('anestesia') + ' na nuvem' : ''}</div>
       </div>
       <div class="kpi-card accent" data-detail="pre">
         <div class="kpi-label">Pré-anestésica</div>
@@ -37737,6 +37748,35 @@ const dashboard = {
       if (!it._updatedBy && !it._criadoPor && !it.anestesista && !it.profissional) return true;
       return bate(it._updatedBy) || bate(it._criadoPor) || bate(it.anestesista) || bate(it.profissional);
     });
+  },
+
+  /* Registros que estão na NUVEM e não neste aparelho (modo nuvem/arquivamento).
+     O índice guarda id, nome e data — dá para CONTAR e respeitar o período,
+     mas não dá para alimentar os gráficos (não traz cirurgião, hospital,
+     convênio). Então: somo nos totais e digo, na cara, o que fica de fora. */
+  _naNuvem(periodo, escopo) {
+    const out = { porMod: {}, total: 0 };
+    if (escopo === 'pessoal') { /* o índice não guarda autoria: só conta em Clínica */ }
+    let ix = {};
+    try { ix = arquivo._indice() || {}; } catch (e) { return out; }
+    Object.keys(ix).forEach(mod => {
+      const itens = (ix[mod] || []).map(e => ({ _dataClinica: e.data ? e.data + 'T12:00:00.000Z' : '' }))
+        .filter(e => e._dataClinica);
+      const n = dashboard.filtrarPorPeriodo(itens, periodo, '_dataClinica').length;
+      if (n) { out.porMod[mod] = n; out.total += n; }
+    });
+    return out;
+  },
+  /* Aviso honesto no topo do painel quando a conta não está completa */
+  _avisoNuvem(nuvem) {
+    const host = document.getElementById('dash-aviso-nuvem');
+    if (!host) return;
+    if (!nuvem || !nuvem.total) { host.style.display = 'none'; host.innerHTML = ''; return; }
+    host.style.display = '';
+    host.innerHTML =
+      '<span>☁️ <b>' + nuvem.total + '</b> registro(s) deste período estão na nuvem e não neste aparelho. ' +
+      'Eles <b>entram nos totais</b>, mas não nos gráficos por cirurgião, hospital e convênio.</span>' +
+      '<button type="button" class="btn btn-xs btn-primary" onclick="arquivo.restaurarTodos().then(function(){ dashboard.atualizar(); })">⬇ Trazer para cá</button>';
   },
 
   _dataClinica(it) {

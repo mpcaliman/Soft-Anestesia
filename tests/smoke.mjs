@@ -5337,6 +5337,47 @@ await test('Dashboard tem escopo pessoal/clínica e períodos hoje/semana/mês/6
   await page.close();
 });
 
+/* 94) O painel tem que contar o que está na nuvem — e dizer o que fica de fora */
+await test('Dashboard soma os registros que estão na nuvem e avisa o que não entra nos gráficos', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const hoje = utils.hojeISO();
+    const antigo = '2020-03-01';
+    localStorage.setItem(arquivo.INDEX_KEY, JSON.stringify({
+      anestesia: [{ id: 'n1', nome: 'A', data: hoje }, { id: 'n2', nome: 'B', data: antigo }],
+      pre: [{ id: 'n3', nome: 'C', data: hoje }]
+    }));
+
+    /* respeita o período: só o de hoje entra em "Hoje" */
+    const hojeN = dashboard._naNuvem('hoje', 'clinica');
+    out.respeitaPeriodo = hojeN.total === 2 && hojeN.porMod.anestesia === 1 && hojeN.porMod.pre === 1;
+    const tudoN = dashboard._naNuvem('all', 'clinica');
+    out.tudoSomaGeral = tudoN.total === 3 && tudoN.porMod.anestesia === 2;
+
+    /* o aviso aparece e diz o que fica de fora */
+    dashboard._avisoNuvem(hojeN);
+    const av = document.getElementById('dash-aviso-nuvem');
+    out.avisa = av.style.display !== 'none'
+      && /entram nos totais/.test(av.textContent)
+      && /não nos gráficos/.test(av.textContent)
+      && /2/.test(av.textContent);
+    /* e some quando não há nada fora do aparelho */
+    dashboard._avisoNuvem({ porMod: {}, total: 0 });
+    out.somenteQuandoPreciso = av.style.display === 'none';
+
+    localStorage.removeItem(arquivo.INDEX_KEY);
+    out.semIndiceZero = dashboard._naNuvem('all', 'clinica').total === 0;
+    return out;
+  });
+  assert(r.respeitaPeriodo, 'o que está na nuvem tem que respeitar o período escolhido');
+  assert(r.tudoSomaGeral, 'em "Tudo", todos os registros da nuvem deveriam contar');
+  assert(r.avisa, 'o painel precisa dizer quantos estão na nuvem e o que não entra nos gráficos');
+  assert(r.somenteQuandoPreciso, 'sem nada fora do aparelho, o aviso não deveria aparecer');
+  assert(r.semIndiceZero, 'sem índice, a conta da nuvem é zero — não pode quebrar');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
