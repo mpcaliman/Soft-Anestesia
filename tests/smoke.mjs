@@ -6135,6 +6135,95 @@ await test('O corte local nunca derruba o que ainda não subiu, e a sincronia ro
   await page.close();
 });
 
+/* 108) O botão travou em "⏳ Buscando…" para sempre: a busca automática do
+   painel e o toque na tela se cruzaram, e a segunda chamada guardou o rótulo
+   de ocupado como se fosse o normal. E "não subiu" sem motivo é um beco. */
+await test('O Buscar volta ao normal mesmo com duas buscas cruzadas, e "não subiu" vem com o motivo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('pre', []); store.setList('anestesia', []);
+    const origCfg = cloud.estaConfigurado, origLog = cloud.estaLogado, origExp = cloud.sessaoExpirada,
+          origDisp = cloudRel.disponivel, origTok = cloud._garantirToken, origPuxa = cloudRel.puxarModulo,
+          origEnv = cloudRel.enviarRegistro;
+    cloud.estaConfigurado = () => true; cloud.estaLogado = () => true; cloud.sessaoExpirada = () => false;
+    cloudRel.disponivel = () => true; cloud._garantirToken = async () => true;
+
+    /* O defeito era o rótulo GUARDADO: a segunda chamada lia o texto atual do
+       botão — que já era "⏳ Buscando…" — e o devolvia no fim como se fosse o
+       normal. Reproduzir isso não exige corrida (que aqui só tornava o teste
+       instável): basta o botão já estar com o texto de ocupado quando uma
+       busca completa acontece. */
+    auth.usuarioAtual = () => ({ id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
+    preLanc.renderFila();
+    cloudRel.puxarModulo = async () => [];
+    const btn = document.getElementById('pl-buscar-btn');
+    btn.textContent = '⏳ Buscando…';
+    btn.disabled = true;
+    preLanc._ultimaBusca = 0;
+    await preLanc.sincronizarFila({ forcar: true, silent: true });
+    const b2 = document.getElementById('pl-buscar-btn');
+    out.voltouAoNormal = b2.textContent.indexOf('Buscando') < 0 && b2.textContent.indexOf('Buscar') >= 0;
+    out.destravou = b2.disabled === false;
+
+    /* com uma busca em curso, a outra não entra */
+    preLanc._buscando = true;
+    preLanc._ultimaBusca = 0;
+    const cruzada = await preLanc.sincronizarFila({ forcar: true, silent: true });
+    out.naoEntraCruzada = cruzada === null;
+    preLanc._buscando = false;
+
+    /* e durante a busca o botão mostra que está trabalhando */
+    let vistoDurante = '';
+    cloudRel.puxarModulo = async () => {
+      vistoDurante = document.getElementById('pl-buscar-btn').textContent;
+      return [];
+    };
+    preLanc._ultimaBusca = 0;
+    await preLanc.sincronizarFila({ forcar: true, silent: true });
+    out.mostraOcupado = vistoDurante.indexOf('Buscando') >= 0;
+
+    /* motivo da recusa em português, na tela de quem lançou */
+    auth.usuarioAtual = () => ({ id: 's1', nome: 'Sec', perfil: 'secretaria', role: 'auxiliar' });
+    store.setList('pre', [{
+      _id: 'p1', nome: 'Ana', data: '2026-08-13', _updatedAt: '2026-08-13T12:00:00.000Z',
+      _preLanc: { estado: 'enviado', por: 's1', porNome: 'Sec', enviadoEm: '2026-08-13T12:00:00.000Z' }
+    }]);
+    cloudRel.enviarRegistro = async () => ({ ok: false, motivo: 'org' });
+    const res = await preLanc.subirPendentes({ silent: true });
+    out.contouAFalha = !!res && res.falhou === 1;
+    out.traduziuOMotivo = /clínica na nuvem/i.test(res.motivo || '');
+    const alerta = document.getElementById('pl-alerta');
+    out.mostrouOMotivo = !!alerta && /Motivo/.test(alerta.textContent) && /clínica na nuvem/i.test(alerta.textContent);
+
+    /* subiu: o aviso e o motivo somem */
+    cloudRel.enviarRegistro = async (mod, rec) => {
+      const l = store.list(mod);
+      const i = l.findIndex(x => x._id === rec._id);
+      if (i >= 0) { l[i]._relUpdatedAt = '2026-08-13T12:00:10.000Z'; store.setList(mod, l); }
+      return { ok: true };
+    };
+    await preLanc.subirPendentes({ silent: true });
+    out.limpouDepoisDeSubir = preLanc.naoSubiram().length === 0 && !preLanc._erroSubida;
+
+    cloud.estaConfigurado = origCfg; cloud.estaLogado = origLog; cloud.sessaoExpirada = origExp;
+    cloudRel.disponivel = origDisp; cloud._garantirToken = origTok; cloudRel.puxarModulo = origPuxa;
+    cloudRel.enviarRegistro = origEnv;
+    preLanc._diag = null; preLanc._erroSubida = '';
+    store.setList('pre', []); store.setList('anestesia', []);
+    return out;
+  });
+  assert(r.mostraOcupado, 'enquanto busca, o botão precisa mostrar que está trabalhando');
+  assert(r.voltouAoNormal, 'o botão não pode ficar preso em "Buscando…" por ter guardado o rótulo errado');
+  assert(r.destravou, 'e o botão precisa voltar a aceitar toque');
+  assert(r.naoEntraCruzada, 'com uma busca em curso, a outra não entra');
+  assert(r.contouAFalha, 'a recusa da clínica precisa ser contada');
+  assert(r.traduziuOMotivo, 'o motivo tem que estar em português, não em código');
+  assert(r.mostrouOMotivo, 'e precisa aparecer na tela de quem lançou');
+  assert(r.limpouDepoisDeSubir, 'depois que sobe, o aviso e o motivo somem');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

@@ -4259,7 +4259,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-13g</b><br>
+    v7.1 · build <b id="build-tag">2026-08-13h</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -12070,6 +12070,8 @@ const preLanc = {
      roda ao abrir o Dashboard (no máximo uma vez por minuto) e no botão. */
   _ultimaBusca: 0,
   _diag: null,
+  _buscando: false,
+  _erroSubida: '',
   /* O clique é ligado no botão, não por onclick no HTML: já perdemos horas com
      um botão que existia, aparecia e não fazia nada porque o atributo dependia
      da variável estar publicada no window. */
@@ -12086,13 +12088,18 @@ const preLanc = {
     /* Toque que não responde nada é indistinguível de botão quebrado. Todo
        caminho de saída daqui fala — inclusive os que antes só davam return. */
     const dizer = (msg, tipo) => { if (!opts.silent) { try { toast(msg, tipo); } catch (e) {} } };
-    const btn = document.getElementById('pl-buscar-btn');
-    const rotulo = btn ? btn.textContent : '';
+    /* O rótulo é FIXO. Guardar o texto atual do botão parecia inofensivo e não
+       era: a busca automática do painel e o toque na tela se cruzam, a segunda
+       chamada guardava "⏳ Buscando…" como se fosse o rótulo normal e o
+       devolvia no fim. O botão ficava eternamente "Buscando…". */
     const ocupado = (on) => {
-      if (!btn) return;
-      btn.disabled = on;
-      btn.textContent = on ? '⏳ Buscando…' : (rotulo || '🔄 Buscar');
+      preLanc._buscando = on;
+      const b = document.getElementById('pl-buscar-btn');
+      if (!b) return;
+      b.disabled = on;
+      b.textContent = on ? '⏳ Buscando…' : '🔄 Buscar';
     };
+    if (preLanc._buscando) { dizer('Já estou buscando…'); return null; }
     try {
       if (typeof cloud === 'undefined' || !cloud.estaConfigurado()) {
         dizer('Este aparelho não está conectado à nuvem — sem isso não há o que buscar.', 'warn');
@@ -12160,22 +12167,43 @@ const preLanc = {
     } catch (e) {}
     return out;
   },
-  async subirPendentes() {
+  /* MOTIVO da recusa em português. Sem isto, "não subiu" é um beco: a pessoa
+     tenta de novo para sempre e ninguém descobre que o problema é a conta não
+     estar na clínica, ou a sessão vencida. */
+  _porQueNaoSobe(motivo) {
+    const m = String(motivo || '').toLowerCase();
+    if (!m) return '';
+    if (m === 'org') return 'esta conta ainda não está ligada a uma clínica na nuvem (Ajustes → Equipe da nuvem)';
+    if (m === 'token') return 'a sessão da nuvem venceu — entre de novo';
+    if (m === 'offline') return 'sem conexão com a clínica';
+    if (m === 'mod') return 'módulo sem espelho na clínica';
+    if (/permission|rls|denied|403/.test(m)) return 'a clínica recusou a gravação — esta conta não tem permissão nesse registro';
+    if (/duplicate|conflict|409/.test(m)) return 'já existe um registro conflitante na clínica';
+    if (/failed to fetch|network/.test(m)) return 'a rede caiu no meio do envio';
+    return motivo;
+  },
+  async subirPendentes(opts = {}) {
     const lista = preLanc.naoSubiram();
-    if (!lista.length) { toast('Tudo o que você enviou já está na clínica.'); return { ok: 0, falhou: 0 }; }
+    const dizer = (m, t) => { if (!opts.silent) { try { toast(m, t); } catch (e) {} } };
+    if (!lista.length) { dizer('Tudo o que você enviou já está na clínica.'); return { ok: 0, falhou: 0 }; }
     if (!cloudRel.disponivel() || !(await cloud._garantirToken())) {
-      toast('Sem conexão com a clínica agora — tente de novo quando houver internet.', 'warn');
+      preLanc._erroSubida = preLanc._porQueNaoSobe('offline');
+      dizer('Sem conexão com a clínica agora — vou tentar sozinho assim que houver internet.', 'warn');
+      try { preLanc.renderFila(); } catch (e) {}
       return null;
     }
-    let ok = 0, falhou = 0;
+    let ok = 0, falhou = 0, ultimo = '';
     for (const it of lista) {
-      try { const r = await cloudRel.enviarRegistro(it.mod, it.rec, { force: true }); (r && r.ok) ? ok++ : falhou++; }
-      catch (e) { falhou++; }
+      try {
+        const r = await cloudRel.enviarRegistro(it.mod, it.rec, { force: true });
+        if (r && r.ok) ok++; else { falhou++; ultimo = (r && r.motivo) || 'recusado pela clínica'; }
+      } catch (e) { falhou++; ultimo = (e && e.message) || 'erro inesperado'; }
     }
-    toast(ok ? ('☁️ ' + ok + ' pré-lançamento(s) subiram para a clínica') : 'Não consegui subir agora — tente de novo.',
-      falhou ? 'warn' : 'success');
+    preLanc._erroSubida = falhou ? preLanc._porQueNaoSobe(ultimo) : '';
+    if (ok) dizer('☁️ ' + ok + ' pré-lançamento(s) subiram para a clínica', 'success');
+    if (falhou) dizer('Não consegui subir ' + falhou + ': ' + preLanc._erroSubida, 'warn');
     try { preLanc.renderFila(); } catch (e) {}
-    return { ok, falhou };
+    return { ok, falhou, motivo: preLanc._erroSubida };
   },
 
   /* Cartão no Dashboard: a fila do médico e o lembrete da auxiliar */
@@ -12283,6 +12311,7 @@ const preLanc = {
       html += '<div class="pl-av pl-av-dev">📵 <b>' + presos.length + '</b> ' +
         (presos.length === 1 ? 'pré-lançamento enviado ainda não chegou' : 'pré-lançamentos enviados ainda não chegaram') +
         ' na clínica — o médico não vê até subir.' +
+        (preLanc._erroSubida ? '<br><span style="flex-basis:100%">Motivo: <b>' + utils.escapeHTML(preLanc._erroSubida) + '</b></span>' : '') +
         '<button type="button" class="btn btn-xs btn-primary" onclick="preLanc.subirPendentes()">Subir agora</button></div>';
     }
     if (p.devolvido.length) {
@@ -18473,10 +18502,17 @@ const sincronia = {
     sincronia._ultimo = Date.now();
     let deuCerto = false;
     try {
-      /* 1) o que foi feito aqui e ainda não subiu (inclui o pré-lançamento
-            enviado sem internet) */
+      /* 1) o que foi ENVIADO aqui e ainda não chegou na clínica tem prioridade:
+            é trabalho que alguém já deu por concluído e que o médico não vê.
+            Vai antes da fila geral, que é limitada por lote. */
+      try {
+        if (typeof preLanc !== 'undefined' && preLanc.naoSubiram().length) {
+          await preLanc.subirPendentes({ silent: true });
+        }
+      } catch (e) {}
+      /* 2) o resto do que foi feito aqui e ainda não subiu */
       try { await cloudRel.empurrarPendentes({ silent: true, limite: 15 }); } catch (e) {}
-      /* 2) o que os outros aparelhos fizeram desde a última passada */
+      /* 3) o que os outros aparelhos fizeram desde a última passada */
       const marcas = sincronia._marcas();
       let mudou = 0;
       for (const mod of sincronia.MODS) {
