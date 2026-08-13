@@ -4259,7 +4259,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-13e</b><br>
+    v7.1 · build <b id="build-tag">2026-08-13f</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -4366,7 +4366,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     <div class="card no-collapse" id="pl-fila-card" style="display:none">
       <div class="card-header">
         <div class="card-title-wrap"><h2 id="pl-fila-titulo">Aguardando sua conferência</h2></div>
-        <div class="card-actions"><button type="button" class="btn btn-xs" onclick="preLanc.sincronizarFila({forcar:true})" title="Buscar na clínica o que foi enviado nos outros aparelhos">🔄 Buscar</button></div>
+        <div class="card-actions"><button type="button" class="btn btn-xs" id="pl-buscar-btn" title="Buscar na clínica o que foi enviado nos outros aparelhos">🔄 Buscar</button></div>
       </div>
       <div class="card-body" id="pl-fila-lista"></div>
     </div>
@@ -11884,31 +11884,77 @@ const preLanc = {
      roda ao abrir o Dashboard (no máximo uma vez por minuto) e no botão. */
   _ultimaBusca: 0,
   _diag: null,
+  /* O clique é ligado no botão, não por onclick no HTML: já perdemos horas com
+     um botão que existia, aparecia e não fazia nada porque o atributo dependia
+     da variável estar publicada no window. */
+  _ligarBuscar() {
+    const btn = document.getElementById('pl-buscar-btn');
+    if (!btn || btn.dataset.ligado === '1') return;
+    btn.dataset.ligado = '1';
+    btn.addEventListener('click', () => {
+      preLanc.sincronizarFila({ forcar: true });
+    });
+  },
   async sincronizarFila(opts = {}) {
     if (!opts.forcar && Date.now() - preLanc._ultimaBusca < 60000) return null;
+    /* Toque que não responde nada é indistinguível de botão quebrado. Todo
+       caminho de saída daqui fala — inclusive os que antes só davam return. */
+    const dizer = (msg, tipo) => { if (!opts.silent) { try { toast(msg, tipo); } catch (e) {} } };
+    const btn = document.getElementById('pl-buscar-btn');
+    const rotulo = btn ? btn.textContent : '';
+    const ocupado = (on) => {
+      if (!btn) return;
+      btn.disabled = on;
+      btn.textContent = on ? '⏳ Buscando…' : (rotulo || '🔄 Buscar');
+    };
     try {
-      if (typeof cloudRel === 'undefined' || !cloudRel.disponivel()) return null;
-      if (!(await cloud._garantirToken())) return null;
+      if (typeof cloud === 'undefined' || !cloud.estaConfigurado()) {
+        dizer('Este aparelho não está conectado à nuvem — sem isso não há o que buscar.', 'warn');
+        return null;
+      }
+      if (!cloud.estaLogado() || cloud.sessaoExpirada()) {
+        dizer('Sessão da nuvem vencida — entre de novo para buscar os pré-lançamentos.', 'warn');
+        try { cloud.reentrar(); } catch (e) {}
+        return null;
+      }
+      if (typeof cloudRel === 'undefined' || !cloudRel.disponivel()) {
+        dizer('A clínica na nuvem não está disponível neste aparelho (Ajustes → Equipe da nuvem).', 'warn');
+        return null;
+      }
+      ocupado(true);
+      if (!(await cloud._garantirToken())) {
+        dizer('Não consegui renovar a sessão da nuvem — entre de novo.', 'warn');
+        try { cloud.reentrar(); } catch (e) {}
+        return null;
+      }
       preLanc._ultimaBusca = Date.now();
-      let novos = 0, atualizados = 0, naClinica = 0, naoCouberam = 0;
+      let novos = 0, atualizados = 0, naClinica = 0, naoCouberam = 0, leu = 0;
       for (const mod of preLanc.MODS) {
         const remotos = await cloudRel.puxarModulo(mod);
         if (!Array.isArray(remotos)) continue;
+        leu++;
         /* Quantos ENVIADOS existem na clínica, antes de qualquer filtro daqui.
            É o número que responde "faltou chegar" x "faltou subir". */
         naClinica += remotos.filter(r => preLanc.estado(r) === 'enviado' && !r._finalizado).length;
         const m = cloudRel.mesclarLocal(mod, remotos);
         novos += m.novos; atualizados += m.atualizados; naoCouberam += m.naoCouberam;
       }
+      if (!leu) {
+        dizer('Não consegui ler a clínica agora — confira a conexão e tente de novo.', 'error');
+        return null;
+      }
       preLanc._diag = { naClinica, naoCouberam, quando: new Date().toISOString() };
       try { preLanc.renderFila(); } catch (e) {}
-      if ((novos || atualizados) && !opts.silent) {
-        toast('☁️ ' + (novos + atualizados) + ' pré-lançamento(s) atualizado(s) da clínica');
-      } else if (!opts.silent) {
-        toast('Nada novo da clínica por enquanto.');
+      if (novos || atualizados) {
+        dizer('☁️ ' + (novos + atualizados) + ' pré-lançamento(s) atualizado(s) da clínica');
+      } else {
+        dizer('Já estava tudo em dia: ' + naClinica + ' aguardando conferência na clínica.');
       }
       return { novos, atualizados, naClinica, naoCouberam };
-    } catch (e) { return null; }
+    } catch (e) {
+      dizer('Falhou ao buscar: ' + (e && e.message || e), 'error');
+      return null;
+    } finally { ocupado(false); }
   },
 
   /* Enviado NESTE aparelho mas que ainda não subiu para a clínica: sem
@@ -11949,6 +11995,7 @@ const preLanc = {
   /* Cartão no Dashboard: a fila do médico e o lembrete da auxiliar */
   renderFila() {
     try { preLanc.renderAlerta(); } catch (e) {}
+    try { preLanc._ligarBuscar(); } catch (e) {}
     const card = document.getElementById('pl-fila-card');
     const host = document.getElementById('pl-fila-lista');
     const tit = document.getElementById('pl-fila-titulo');

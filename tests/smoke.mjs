@@ -5797,8 +5797,10 @@ await test('A fila do médico vai buscar os pré-lançamentos na clínica sozinh
     /* clínica de mentira: devolve um pré-lançamento enviado */
     const pedidos = [];
     const origDisp = cloudRel.disponivel, origPuxa = cloudRel.puxarModulo, origTok = cloud._garantirToken;
+    const origCfg = cloud.estaConfigurado, origLog = cloud.estaLogado, origExp = cloud.sessaoExpirada;
     cloudRel.disponivel = () => true;
     cloud._garantirToken = async () => true;
+    cloud.estaConfigurado = () => true; cloud.estaLogado = () => true; cloud.sessaoExpirada = () => false;
     cloudRel.puxarModulo = async (mod) => {
       pedidos.push(mod);
       return mod === 'pre'
@@ -5821,6 +5823,7 @@ await test('A fila do médico vai buscar os pré-lançamentos na clínica sozinh
     out.naoRepete = pedidos.length === 0;
 
     cloudRel.disponivel = origDisp; cloudRel.puxarModulo = origPuxa; cloud._garantirToken = origTok;
+    cloud.estaConfigurado = origCfg; cloud.estaLogado = origLog; cloud.sessaoExpirada = origExp;
     store.setList('pre', []); store.setList('anestesia', []);
     return out;
   });
@@ -5840,8 +5843,10 @@ await test('Quando a conta não fecha, o app diz de que lado o pré-lançamento 
     const out = {};
     store.setList('pre', []); store.setList('anestesia', []);
     const origDisp = cloudRel.disponivel, origPuxa = cloudRel.puxarModulo, origTok = cloud._garantirToken;
+    const origCfg = cloud.estaConfigurado, origLog = cloud.estaLogado, origExp = cloud.sessaoExpirada;
     cloudRel.disponivel = () => true;
     cloud._garantirToken = async () => true;
+    cloud.estaConfigurado = () => true; cloud.estaLogado = () => true; cloud.sessaoExpirada = () => false;
 
     /* LADO DELE: a clínica tem 3 enviados, mas só 1 coube no aparelho */
     auth.usuarioAtual = () => ({ id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
@@ -5880,6 +5885,7 @@ await test('Quando a conta não fecha, o app diz de que lado o pré-lançamento 
     out.paraDeCobrarDepoisDeSubir = preLanc.naoSubiram().length === 0;
 
     cloudRel.disponivel = origDisp; cloudRel.puxarModulo = origPuxa; cloud._garantirToken = origTok;
+    cloud.estaConfigurado = origCfg; cloud.estaLogado = origLog; cloud.sessaoExpirada = origExp;
     preLanc._diag = null;
     store.setList('pre', []); store.setList('anestesia', []);
     return out;
@@ -5891,6 +5897,99 @@ await test('Quando a conta não fecha, o app diz de que lado o pré-lançamento 
   assert(r.avisouAEla, 'ela precisa saber que o envio dela não chegou no médico');
   assert(r.temBotaoSubir, 'e precisa conseguir resolver com um toque');
   assert(r.paraDeCobrarDepoisDeSubir, 'depois de subir, o aviso some');
+  await page.close();
+});
+
+/* 105) Botão que não responde nada é indistinguível de botão quebrado. O
+   "Buscar" saía calado em todo caminho de erro — sem nuvem, sem sessão, sem
+   clínica. Agora todo caminho fala, e o clique é ligado no próprio botão. */
+await test('O botão Buscar da fila responde sempre — inclusive quando não dá para buscar', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('pre', []); store.setList('anestesia', []);
+    auth.usuarioAtual = () => ({ id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
+    preLanc.renderFila();
+    const btn = document.getElementById('pl-buscar-btn');
+    out.existe = !!btn;
+    out.semOnclickNoHtml = !!btn && !btn.getAttribute('onclick');
+
+    /* o clique chega à função */
+    let chamou = 0;
+    const orig = preLanc.sincronizarFila;
+    preLanc.sincronizarFila = async () => { chamou++; };
+    btn.click();
+    await new Promise(r2 => setTimeout(r2, 0));
+    preLanc.sincronizarFila = orig;
+    out.cliqueChega = chamou === 1;
+
+    /* ligar duas vezes não pode disparar duas buscas */
+    preLanc.renderFila(); preLanc.renderFila();
+    let chamou2 = 0;
+    const orig2 = preLanc.sincronizarFila;
+    preLanc.sincronizarFila = async () => { chamou2++; };
+    document.getElementById('pl-buscar-btn').click();
+    await new Promise(r2 => setTimeout(r2, 0));
+    preLanc.sincronizarFila = orig2;
+    out.naoDuplicaOClique = chamou2 === 1;
+
+    /* sem nuvem configurada: fala em vez de sair calado */
+    const avisos = [];
+    const tOrig = window.toast;
+    window.toast = (m) => { avisos.push(String(m)); };
+    const origCfg = cloud.estaConfigurado;
+    cloud.estaConfigurado = () => false;
+    preLanc._ultimaBusca = 0;
+    await preLanc.sincronizarFila({ forcar: true });
+    out.avisaSemNuvem = avisos.some(m => /não está conectado à nuvem/i.test(m));
+
+    /* sessão vencida: fala e chama o login de volta */
+    avisos.length = 0;
+    cloud.estaConfigurado = () => true;
+    const origLog = cloud.estaLogado, origRe = cloud.reentrar;
+    let pediuLogin = 0;
+    cloud.estaLogado = () => false;
+    cloud.reentrar = () => { pediuLogin++; };
+    preLanc._ultimaBusca = 0;
+    await preLanc.sincronizarFila({ forcar: true });
+    out.avisaSessao = avisos.some(m => /sessão da nuvem vencida/i.test(m)) && pediuLogin === 1;
+
+    /* deu tudo certo e não havia nada novo: também fala */
+    avisos.length = 0;
+    cloud.estaLogado = () => true;
+    const origExp = cloud.sessaoExpirada, origDisp = cloudRel.disponivel,
+          origTok = cloud._garantirToken, origPuxa = cloudRel.puxarModulo;
+    cloud.sessaoExpirada = () => false;
+    cloudRel.disponivel = () => true;
+    cloud._garantirToken = async () => true;
+    cloudRel.puxarModulo = async () => [];
+    preLanc._ultimaBusca = 0;
+    await preLanc.sincronizarFila({ forcar: true });
+    out.avisaQuandoNaoTemNada = avisos.some(m => /em dia/i.test(m));
+
+    /* a clínica caiu no meio: não pode ficar mudo nem mentir que está em dia */
+    avisos.length = 0;
+    cloudRel.puxarModulo = async () => null;
+    preLanc._ultimaBusca = 0;
+    await preLanc.sincronizarFila({ forcar: true });
+    out.avisaFalhaDeLeitura = avisos.some(m => /não consegui ler a clínica/i.test(m));
+
+    window.toast = tOrig;
+    cloud.estaConfigurado = origCfg; cloud.estaLogado = origLog; cloud.reentrar = origRe;
+    cloud.sessaoExpirada = origExp; cloudRel.disponivel = origDisp;
+    cloud._garantirToken = origTok; cloudRel.puxarModulo = origPuxa;
+    preLanc._diag = null;
+    store.setList('pre', []); store.setList('anestesia', []);
+    return out;
+  });
+  assert(r.existe, 'o cartão da fila precisa do botão de buscar');
+  assert(r.semOnclickNoHtml, 'o clique tem que ser ligado no botão, não por atributo no HTML');
+  assert(r.cliqueChega, 'o clique precisa chegar à função');
+  assert(r.naoDuplicaOClique, 'rerenderizar o cartão não pode empilhar cliques');
+  assert(r.avisaSemNuvem, 'sem nuvem, o botão tem que explicar — não sair calado');
+  assert(r.avisaSessao, 'com a sessão vencida, avisa e leva de volta ao login');
+  assert(r.avisaQuandoNaoTemNada, 'quando não há novidade, o botão precisa dizer isso');
+  assert(r.avisaFalhaDeLeitura, 'se a leitura da clínica falhou, não pode dizer que está tudo em dia');
   await page.close();
 });
 
