@@ -6135,6 +6135,78 @@ await test('O corte local nunca derruba o que ainda não subiu, e a sincronia ro
   await page.close();
 });
 
+/* 108) O botão travou em "⏳ Buscando…" para sempre: a busca automática do
+   painel e o toque na tela se cruzaram, e a segunda chamada guardou o rótulo
+   de ocupado como se fosse o normal. E "não subiu" sem motivo é um beco. */
+await test('O Buscar volta ao normal mesmo com duas buscas cruzadas, e "não subiu" vem com o motivo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('pre', []); store.setList('anestesia', []);
+    const origCfg = cloud.estaConfigurado, origLog = cloud.estaLogado, origExp = cloud.sessaoExpirada,
+          origDisp = cloudRel.disponivel, origTok = cloud._garantirToken, origPuxa = cloudRel.puxarModulo,
+          origEnv = cloudRel.enviarRegistro;
+    cloud.estaConfigurado = () => true; cloud.estaLogado = () => true; cloud.sessaoExpirada = () => false;
+    cloudRel.disponivel = () => true; cloud._garantirToken = async () => true;
+
+    /* duas buscas ao mesmo tempo: a de dentro do painel e a do toque */
+    auth.usuarioAtual = () => ({ id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
+    preLanc.renderFila();
+    let solta;
+    cloudRel.puxarModulo = () => new Promise(ok => { solta = () => ok([]); });
+    preLanc._ultimaBusca = 0;
+    const p1 = preLanc.sincronizarFila({ forcar: true, silent: true });
+    await new Promise(r2 => setTimeout(r2, 0));
+    const btn = document.getElementById('pl-buscar-btn');
+    out.mostraOcupado = btn.textContent.indexOf('Buscando') >= 0;
+    const p2 = preLanc.sincronizarFila({ forcar: true, silent: true });   /* cruzou */
+    await p2;
+    solta(); await p1;
+    await new Promise(r2 => setTimeout(r2, 20));
+    out.voltouAoNormal = document.getElementById('pl-buscar-btn').textContent.indexOf('Buscar') >= 0
+      && document.getElementById('pl-buscar-btn').textContent.indexOf('Buscando') < 0;
+    out.destravou = document.getElementById('pl-buscar-btn').disabled === false;
+
+    /* motivo da recusa em português, na tela de quem lançou */
+    auth.usuarioAtual = () => ({ id: 's1', nome: 'Sec', perfil: 'secretaria', role: 'auxiliar' });
+    store.setList('pre', [{
+      _id: 'p1', nome: 'Ana', data: '2026-08-13', _updatedAt: '2026-08-13T12:00:00.000Z',
+      _preLanc: { estado: 'enviado', por: 's1', porNome: 'Sec', enviadoEm: '2026-08-13T12:00:00.000Z' }
+    }]);
+    cloudRel.enviarRegistro = async () => ({ ok: false, motivo: 'org' });
+    const res = await preLanc.subirPendentes({ silent: true });
+    out.contouAFalha = !!res && res.falhou === 1;
+    out.traduziuOMotivo = /clínica na nuvem/i.test(res.motivo || '');
+    const alerta = document.getElementById('pl-alerta');
+    out.mostrouOMotivo = !!alerta && /Motivo/.test(alerta.textContent) && /clínica na nuvem/i.test(alerta.textContent);
+
+    /* subiu: o aviso e o motivo somem */
+    cloudRel.enviarRegistro = async (mod, rec) => {
+      const l = store.list(mod);
+      const i = l.findIndex(x => x._id === rec._id);
+      if (i >= 0) { l[i]._relUpdatedAt = '2026-08-13T12:00:10.000Z'; store.setList(mod, l); }
+      return { ok: true };
+    };
+    await preLanc.subirPendentes({ silent: true });
+    out.limpouDepoisDeSubir = preLanc.naoSubiram().length === 0 && !preLanc._erroSubida;
+
+    cloud.estaConfigurado = origCfg; cloud.estaLogado = origLog; cloud.sessaoExpirada = origExp;
+    cloudRel.disponivel = origDisp; cloud._garantirToken = origTok; cloudRel.puxarModulo = origPuxa;
+    cloudRel.enviarRegistro = origEnv;
+    preLanc._diag = null; preLanc._erroSubida = '';
+    store.setList('pre', []); store.setList('anestesia', []);
+    return out;
+  });
+  assert(r.mostraOcupado, 'enquanto busca, o botão precisa mostrar que está trabalhando');
+  assert(r.voltouAoNormal, 'duas buscas cruzadas não podem deixar o botão preso em "Buscando…"');
+  assert(r.destravou, 'e o botão precisa voltar a aceitar toque');
+  assert(r.contouAFalha, 'a recusa da clínica precisa ser contada');
+  assert(r.traduziuOMotivo, 'o motivo tem que estar em português, não em código');
+  assert(r.mostrouOMotivo, 'e precisa aparecer na tela de quem lançou');
+  assert(r.limpouDepoisDeSubir, 'depois que sobe, o aviso e o motivo somem');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
