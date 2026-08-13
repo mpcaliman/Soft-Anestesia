@@ -4259,7 +4259,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-13h</b><br>
+    v7.1 · build <b id="build-tag">2026-08-13i</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -4524,6 +4524,16 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           </div>
           <div class="field col-6"><label>Cirurgião</label><input type="text" name="cirurgiao"></div>
           <div class="field col-6"><label>Hospital / clínica</label><input type="text" name="hospital"></div>
+          <!-- Sem o convênio aqui, o lançamento financeiro gerado na finalização
+               nascia sem pagador: não dava para saber se era plano, particular
+               ou SUS, e a pendência de convênio não tinha como se resolver. -->
+          <div class="field col-6"><label>Convênio / plano</label>
+            <select name="convenio">
+              <option value="">—</option><option>Particular</option><option>SUS</option><option>Unimed</option>
+              <option>Bradesco Saúde</option><option>Amil</option><option>SulAmérica</option>
+              <option>Notredame Intermédica</option><option>Hapvida</option><option>Outro</option>
+            </select>
+          </div>
         </div>
       </div>
     </section>
@@ -13822,9 +13832,12 @@ const pre = {
     if (finalizar) { try { pdfBackup.autoAoFinalizar('pre'); } catch (e) {} }
     if (finalizar) { try { rascunhos.removerAtivo('pre'); } catch (e) {} }
     toast(finalizar ? '✅ Avaliação finalizada' : '💾 Avaliação salva (dados preservados)');
-    /* Ao finalizar, oferece avançar para o Termo de Consentimento */
+    /* Finalizou: a impressão é o passo seguinte de fato — o papel vai para o
+       prontuário do hospital. Abre direto, e a pergunta do Termo espera a vez
+       (ela já sabe esperar janela aberta, ver _perguntarTermo). */
     if (finalizar) {
-      setTimeout(() => pre._perguntarTermo(saved), 300);
+      setTimeout(() => { try { printPreview.abrir(); } catch (e) {} }, 250);
+      setTimeout(() => pre._perguntarTermo(saved), 700);
     }
   },
   /* ---------- Navegação por seções + status de completude ---------- */
@@ -15403,6 +15416,9 @@ const termo = {
     if (finalizar) { try { pdfBackup.autoAoFinalizar('termo'); } catch (e) {} }
     if (finalizar) { try { rascunhos.removerAtivo('termo'); } catch (e) {} }
     toast(finalizar ? '✅ Termo finalizado' : '💾 Termo salvo (dados preservados)');
+    /* Termo finalizado existe para ser assinado no papel: vai direto para a
+       impressão, como a pré-anestésica. */
+    if (finalizar) setTimeout(() => { try { printPreview.abrir(); } catch (e) {} }, 250);
   },
   finalizar() { termo.salvar({ finalizar: true }); },
   salvarComoNovo() {
@@ -19097,15 +19113,17 @@ const pendencias = {
     if (bd && bd.classList.contains('show')) return;
     pendencias.abrir(true);
   },
+  /* A janela de pendências aparece UMA VEZ, ao entrar. Antes ela voltava a se
+     abrir de meia em meia hora, no meio do atendimento — e uma janela que
+     interrompe o trabalho repetidamente deixa de ser aviso e vira estorvo.
+     O cartão do Dashboard continua se atualizando sozinho: quem quiser ver a
+     lista a qualquer momento a tem ali, sem ser interrompido. */
   iniciarTimer() {
     try {
       setInterval(() => {
         try {
           if (!pendencias.podeVer()) return;
           pendencias.renderDashboard();
-          const bd = document.getElementById('modal-backdrop');
-          if (bd && bd.classList.contains('show')) return;
-          pendencias.abrir(true);
         } catch (e) {}
       }, 30 * 60 * 1000);
     } catch (e) {}
@@ -32246,6 +32264,7 @@ const fin = {
       proc      = doc.cirurgia || '';
       cirurgiao = doc.cirurgiao || '';
       hospital  = doc.hospital || '';
+      convenio  = doc.convenio || '';     /* sem isto o lançamento nascia sem pagador */
       dataProc  = doc.data || '';
       senha     = doc.senha || '';
     } else if (modOrigem === 'consulta') {
