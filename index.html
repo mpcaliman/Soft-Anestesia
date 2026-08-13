@@ -4259,7 +4259,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-13d</b><br>
+    v7.1 · build <b id="build-tag">2026-08-13g</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -4366,7 +4366,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     <div class="card no-collapse" id="pl-fila-card" style="display:none">
       <div class="card-header">
         <div class="card-title-wrap"><h2 id="pl-fila-titulo">Aguardando sua conferência</h2></div>
-        <div class="card-actions"><button type="button" class="btn btn-xs" onclick="preLanc.sincronizarFila({forcar:true})" title="Buscar na clínica o que foi enviado nos outros aparelhos">🔄 Buscar</button></div>
+        <div class="card-actions"><button type="button" class="btn btn-xs" id="pl-buscar-btn" title="Buscar na clínica o que foi enviado nos outros aparelhos">🔄 Buscar</button></div>
       </div>
       <div class="card-body" id="pl-fila-lista"></div>
     </div>
@@ -9609,7 +9609,154 @@ const DEMO_PREFIX = 'demo:';
   } catch (e) { /* localStorage indisponível — segue sem demo */ }
 })();
 
-const HISTORY_MAX = 30;
+/* ============================================================================
+   DISCO GRANDE — o que é pesado sai do localStorage e vai para o IndexedDB.
+
+   O localStorage tem ~5 MB por site. Não é pouco por descuido: é o teto do
+   navegador, e nenhuma faxina resolve isso de forma duradoura. Em poucos dias
+   de uso real o aparelho enchia, e um sistema que enche não serve.
+
+   O IndexedDB do mesmo aparelho trabalha na casa de centenas de MB a GB. Aqui
+   ele guarda o que é grande — imagens/carimbos, histórico de versões e a
+   lixeira —, deixando o localStorage só com o que é pequeno: os registros em
+   texto e as preferências.
+
+   A leitura continua SÍNCRONA (o app inteiro depende disso): tudo é espelhado
+   em memória no boot, e a gravação no disco acontece logo depois, sem esperar.
+   Se o navegador não tiver IndexedDB (aba privada de alguns), cai de volta no
+   localStorage exatamente como antes.
+============================================================================ */
+const disco = {
+  DB: 'medsys-v7-grande',
+  LOJA: 'kv',
+  /* o que é pesado por natureza; o resto continua no localStorage */
+  CHAVES: ['medsys.v7.blobs', 'medsys.v7.versions', 'medsys.v7.lixeira'],
+  _mem: {},
+  _db: null,
+  _pronto: false,
+  _fila: {},
+  _timer: null,
+  _bytes: 0,
+
+  suportado() { try { return typeof indexedDB !== 'undefined' && !!indexedDB; } catch (e) { return false; } },
+  ehGrande(k) { return disco.CHAVES.indexOf(k) >= 0; },
+
+  _abrir() {
+    return new Promise((ok, falha) => {
+      let req;
+      try { req = indexedDB.open(disco.DB, 1); } catch (e) { falha(e); return; }
+      req.onupgradeneeded = () => {
+        try { req.result.createObjectStore(disco.LOJA); } catch (e) {}
+      };
+      req.onsuccess = () => ok(req.result);
+      req.onerror = () => falha(req.error);
+      req.onblocked = () => falha(new Error('IndexedDB bloqueado'));
+    });
+  },
+  _tx(modo) {
+    const t = disco._db.transaction(disco.LOJA, modo);
+    return t.objectStore(disco.LOJA);
+  },
+  _ler(chave) {
+    return new Promise((ok) => {
+      try {
+        const r = disco._tx('readonly').get(chave);
+        r.onsuccess = () => ok(r.result == null ? null : r.result);
+        r.onerror = () => ok(null);
+      } catch (e) { ok(null); }
+    });
+  },
+  _gravarNoDisco(chave, valor) {
+    return new Promise((ok) => {
+      try {
+        const r = disco._tx('readwrite').put(valor, chave);
+        r.onsuccess = () => ok(true);
+        r.onerror = () => ok(false);
+      } catch (e) { ok(false); }
+    });
+  },
+
+  /* Boot: abre o banco, traz o que é grande para a memória e MUDA de casa o
+     que ainda estiver no localStorage — é aí que o espaço é devolvido. */
+  async iniciar() {
+    if (!disco.suportado()) return false;
+    try { disco._db = await disco._abrir(); } catch (e) { return false; }
+    let migrou = 0;
+    for (const k of disco.CHAVES) {
+      let v = null;
+      try { v = await disco._ler(k); } catch (e) {}
+      let antigo = null;
+      try { antigo = localStorage.getItem(k); } catch (e) {}
+      /* o que está no localStorage é o mais recente até a mudança acontecer */
+      if (antigo != null) {
+        v = antigo;
+        await disco._gravarNoDisco(k, antigo);
+        try { localStorage.removeItem(k); migrou += antigo.length * 2; } catch (e) {}
+      }
+      if (v != null) disco._mem[k] = v;
+    }
+    disco._pronto = true;
+    disco._recontar();
+    /* imagens que não hidrataram antes do banco abrir aparecem agora */
+    try { if (migrou || Object.keys(disco._mem).length) cloud._repintarTelaAtual(); } catch (e) {}
+    return true;
+  },
+  _recontar() {
+    let n = 0;
+    try { Object.keys(disco._mem).forEach(k => { n += (disco._mem[k] || '').length * 2; }); } catch (e) {}
+    disco._bytes = n;
+  },
+
+  get(chave) {
+    if (disco._pronto && disco.ehGrande(chave)) {
+      const v = disco._mem[chave];
+      return v == null ? null : v;
+    }
+    try { return localStorage.getItem(chave); } catch (e) { return null; }
+  },
+  /* Devolve true quando gravou. Para chave grande a gravação em disco é
+     assíncrona: a memória já vale na hora, e é ela que o app lê. */
+  set(chave, valor) {
+    if (disco._pronto && disco.ehGrande(chave)) {
+      disco._mem[chave] = String(valor);
+      disco._recontar();
+      disco._agendar(chave);
+      return true;
+    }
+    try { localStorage.setItem(chave, valor); return true; }
+    catch (e) { throw e; }         /* quem chama trata a falta de espaço */
+  },
+  remove(chave) {
+    if (disco._pronto && disco.ehGrande(chave)) {
+      delete disco._mem[chave];
+      disco._recontar();
+      try { disco._tx('readwrite').delete(chave); } catch (e) {}
+      return;
+    }
+    try { localStorage.removeItem(chave); } catch (e) {}
+  },
+  _agendar(chave) {
+    disco._fila[chave] = true;
+    if (disco._timer) return;
+    disco._timer = setTimeout(async () => {
+      disco._timer = null;
+      const chaves = Object.keys(disco._fila);
+      disco._fila = {};
+      for (const k of chaves) {
+        try { await disco._gravarNoDisco(k, disco._mem[k] == null ? '' : disco._mem[k]); } catch (e) {}
+      }
+    }, 400);
+  },
+  resumo() {
+    return { ativo: disco._pronto, bytes: disco._bytes, chaves: Object.keys(disco._mem).length };
+  }
+};
+try { window.disco = disco; } catch (e) {}
+
+/* Quantos registros de cada módulo ficam NESTE aparelho. O corte existe para o
+   aparelho não encher; nunca pode derrubar o que ainda não está na nuvem —
+   isso seria perder trabalho, não economizar espaço (ver store._podar). */
+const HISTORY_MAX = 300;
 
 const state = {
   currentModule: 'dashboard',
@@ -9883,7 +10030,7 @@ const store = {
     if (!prev || !prev._id) return;
     try {
       const key = 'medsys.v7.versions';
-      const all = JSON.parse(localStorage.getItem(key) || '{}');
+      const all = JSON.parse(disco.get(key) || '{}');
       const k = modKey + ':' + prev._id;
       all[k] = all[k] || [];
       all[k].unshift({
@@ -9892,12 +10039,12 @@ const store = {
       });
       /* Mantém só as 5 versões mais recentes por documento */
       if (all[k].length > 5) all[k].length = 5;
-      localStorage.setItem(key, JSON.stringify(all));
+      disco.set(key, JSON.stringify(all));
     } catch (e) { /* silent */ }
   },
   listVersions(modKey, id) {
     try {
-      const all = JSON.parse(localStorage.getItem('medsys.v7.versions') || '{}');
+      const all = JSON.parse(disco.get('medsys.v7.versions') || '{}');
       return all[modKey + ':' + id] || [];
     } catch { return []; }
   },
@@ -9923,7 +10070,7 @@ const store = {
      A troca é invisível: sai na gravação, volta na leitura. */
   BLOBS_KEY: 'medsys.v7.blobs',
   LIM_BLOB: 4096,                 /* abaixo disso não compensa referenciar */
-  _blobs() { try { return JSON.parse(localStorage.getItem(store.BLOBS_KEY) || '{}'); } catch (e) { return {}; } },
+  _blobs() { try { return JSON.parse(disco.get(store.BLOBS_KEY) || '{}'); } catch (e) { return {}; } },
   _refDe(s) {
     let h1 = 0, h2 = 0;
     for (let i = 0; i < s.length; i++) {
@@ -9933,10 +10080,14 @@ const store = {
     return 'blob:' + (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36) + '.' + s.length;
   },
   _guardarBlob(dataurl) {
+    /* Janela do boot: o disco grande ainda está abrindo. Referenciar agora
+       gravaria a imagem num lugar e a referência em outro — melhor deixar a
+       imagem inteira dentro do registro e economizar na próxima gravação. */
+    if (disco.suportado() && !disco._pronto) return null;
     const ref = store._refDe(dataurl);
     try {
       const b = store._blobs();
-      if (!b[ref]) { b[ref] = dataurl; localStorage.setItem(store.BLOBS_KEY, JSON.stringify(b)); }
+      if (!b[ref]) { b[ref] = dataurl; disco.set(store.BLOBS_KEY, JSON.stringify(b)); }
     } catch (e) { return null; }   /* sem espaço nem para o blob: mantém inteiro */
     return ref;
   },
@@ -10006,6 +10157,20 @@ const store = {
     }
     try { return espaco.socorro(escrever); } catch (e2) { return false; }
   },
+  /* Corta a lista local no teto, mas NUNCA derruba registro que ainda não
+     está confirmado na nuvem (_relUpdatedAt vazio). Antes era um corte cego
+     (`list.length = HISTORY_MAX`): o que estava só no aparelho e não coube
+     virava perda de trabalho, não economia de espaço. O que já está na nuvem
+     pode sair daqui à vontade — volta pela busca quando for preciso. */
+  _podar(list) {
+    if (!Array.isArray(list) || list.length <= HISTORY_MAX) return list;
+    let excedente = list.length - HISTORY_MAX;
+    for (let i = list.length - 1; i >= 0 && excedente > 0; i--) {
+      const x = list[i];
+      if (x && x._relUpdatedAt) { list.splice(i, 1); excedente--; }
+    }
+    return list;
+  },
   /* Salva um item; se data._id existir, atualiza, senão adiciona */
   save(modKey, item) {
     const list = store.list(modKey);
@@ -10035,7 +10200,7 @@ const store = {
     const idx = list.findIndex(x => x._id === item._id);
     if (idx >= 0) list[idx] = item;
     else list.unshift(item);
-    if (list.length > HISTORY_MAX) list.length = HISTORY_MAX;
+    store._podar(list);
     /* Estado do pré-lançamento tem que ser decidido ANTES de gravar */
     try {
       if (typeof preLanc !== 'undefined') {
@@ -10066,6 +10231,9 @@ const store = {
     /* Escolheu "Substituir" na pergunta de duplicidade: agora que o novo está
        gravado, os anteriores do mesmo dia vão para a Lixeira. */
     try { if (typeof duplicados !== 'undefined') duplicados._consumir(modKey, item); } catch (e) {}
+    /* Acabou de gravar: é o melhor momento para acertar as contas com a
+       clínica — sem esperar o próximo minuto do ciclo. */
+    try { if (typeof sincronia !== 'undefined') sincronia.agora(); } catch (e) {}
     return item;
   },
   delete(modKey, id) {
@@ -10545,12 +10713,12 @@ const armazenamento = {
     try {
       if (!localStorage.getItem(armazenamento.FLAG_COMPACT)) {
         const key = 'medsys.v7.versions';
-        const all = JSON.parse(localStorage.getItem(key) || '{}');
+        const all = JSON.parse(disco.get(key) || '{}');
         Object.keys(all).forEach(k => {
           all[k] = (all[k] || []).slice(0, 5);
           all[k].forEach(v => { v.snapshot = store._sanitizarSnapshot(v.snapshot); });
         });
-        localStorage.setItem(key, JSON.stringify(all));
+        disco.set(key, JSON.stringify(all));
         localStorage.setItem(armazenamento.FLAG_COMPACT, '1');
       }
     } catch (e) {}
@@ -10623,6 +10791,9 @@ const armazenamento = {
     } catch (e) {}
     return consertados;
   },
+  /* Uso do espaço APERTADO (localStorage, ~5 MB). O que mudou de casa para o
+     disco grande não conta aqui — é justamente o objetivo — mas continua
+     listado, com a marca de onde está, senão a tela mentiria por omissão. */
   uso() {
     const itens = []; let total = 0;
     for (let i = 0; i < localStorage.length; i++) {
@@ -10631,8 +10802,17 @@ const armazenamento = {
       const bytes = (k.length + v.length) * 2;   /* UTF-16 */
       total += bytes; itens.push({ k, bytes });
     }
+    let grande = 0;
+    try {
+      if (disco._pronto) {
+        Object.keys(disco._mem).forEach(k => {
+          const bytes = (k.length + (disco._mem[k] || '').length) * 2;
+          grande += bytes; itens.push({ k, bytes, noDiscoGrande: true });
+        });
+      }
+    } catch (e) {}
     itens.sort((a, b) => b.bytes - a.bytes);
-    return { total, itens };
+    return { total, grande, itens };
   },
   _rotulo(k) {
     if (k === store.BLOBS_KEY) return '🖼 Carimbos e imagens (guardados 1×)';
@@ -10651,10 +10831,16 @@ const armazenamento = {
     if (!host) return;
     const u = armazenamento.uso();
     const porRotulo = {};
-    u.itens.forEach(it => { const r = armazenamento._rotulo(it.k); porRotulo[r] = (porRotulo[r] || 0) + it.bytes; });
+    u.itens.forEach(it => {
+      const r = armazenamento._rotulo(it.k) + (it.noDiscoGrande ? ' · no disco grande' : '');
+      porRotulo[r] = (porRotulo[r] || 0) + it.bytes;
+    });
     const tops = Object.entries(porRotulo).sort((a, b) => b[1] - a[1]).slice(0, 9);
     const nArq = (() => { try { return arquivo.total(); } catch (e) { return 0; } })();
     if (res) res.innerHTML = 'Em uso neste aparelho: <b>' + armazenamento._fmt(u.total) + '</b>. No celular, o navegador costuma dar ~5 MB — acima disso aparece o aviso de armazenamento cheio.' +
+      (disco._pronto
+        ? '<br><span style="color:#1c5c33">🗄 <b>' + armazenamento._fmt(u.grande) + '</b> de imagens, versões e lixeira estão no <b>disco grande</b> deste aparelho, fora desse limite de 5 MB.</span>'
+        : '<br><span style="color:#7a4b12">🗄 O disco grande (IndexedDB) não está disponível neste navegador — imagens e histórico continuam disputando os 5 MB.</span>') +
       (nArq ? '<br><span style="color:#1c4f7c"><b>🚑 ' + nArq + ' registro(s) estão arquivados na nuvem</b> (fora deste aparelho) — use "Trazer TODOS de volta" abaixo.</span>' : '');
     try { const chk = document.getElementById('arq-auto-chk'); if (chk) chk.checked = arquivo.autoLigado(); } catch (e) {}
     try {
@@ -10826,27 +11012,27 @@ const armazenamento = {
     Object.keys(STORAGE).forEach(mod => {
       try { marcar(JSON.parse(localStorage.getItem(STORAGE[mod]) || '[]')); } catch (e) {}
     });
-    try { marcar(JSON.parse(localStorage.getItem('medsys.v7.versions') || '{}')); } catch (e) {}
-    try { marcar(JSON.parse(localStorage.getItem(lixeira.KEY) || '[]')); } catch (e) {}
+    try { marcar(JSON.parse(disco.get('medsys.v7.versions') || '{}')); } catch (e) {}
+    try { marcar(JSON.parse(disco.get(lixeira.KEY) || '[]')); } catch (e) {}
     const orfas = refs.filter(r => !vivas.has(r));
     if (!orfas.length) return 0;
     let liberto = 0;
     orfas.forEach(r => { liberto += String(b[r] || '').length * 2; delete b[r]; });
-    try { localStorage.setItem(store.BLOBS_KEY, JSON.stringify(b)); } catch (e) { return 0; }
+    try { disco.set(store.BLOBS_KEY, JSON.stringify(b)); } catch (e) { return 0; }
     return liberto;
   },
 
   compactarVersoes() {
     try {
       const key = 'medsys.v7.versions';
-      const antes = (localStorage.getItem(key) || '').length * 2;
-      const all = JSON.parse(localStorage.getItem(key) || '{}');
+      const antes = (disco.get(key) || '').length * 2;
+      const all = JSON.parse(disco.get(key) || '{}');
       Object.keys(all).forEach(k => {
         all[k] = (all[k] || []).slice(0, 3);
         all[k].forEach(v => { v.snapshot = store._sanitizarSnapshot(v.snapshot); });
       });
-      localStorage.setItem(key, JSON.stringify(all));
-      const depois = (localStorage.getItem(key) || '').length * 2;
+      disco.set(key, JSON.stringify(all));
+      const depois = (disco.get(key) || '').length * 2;
       toast('🕓 Histórico compactado — ' + armazenamento._fmt(Math.max(0, antes - depois)) + ' liberados');
     } catch (e) { toast('Falha ao compactar: ' + e.message, 'error'); }
     armazenamento.render();
@@ -10871,7 +11057,7 @@ const armazenamento = {
   },
   esvaziarLixeira() {
     if (!confirm('Esvaziar a lixeira agora? Itens excluídos há menos de 30 dias serão perdidos definitivamente neste aparelho (os sincronizados continuam na nuvem).')) return;
-    try { localStorage.setItem(lixeira.KEY, '[]'); toast('🗑 Lixeira esvaziada'); } catch (e) {}
+    try { disco.set(lixeira.KEY, '[]'); toast('🗑 Lixeira esvaziada'); } catch (e) {}
     armazenamento.render();
   },
   limparDemo() {
@@ -11393,13 +11579,13 @@ const espaco = {
   ETAPAS: [
     { nome: 'histórico de versões', fn() {
         const key = 'medsys.v7.versions';
-        const antes = (localStorage.getItem(key) || '').length * 2;
+        const antes = (disco.get(key) || '').length * 2;
         try {
-          const all = JSON.parse(localStorage.getItem(key) || '{}');
+          const all = JSON.parse(disco.get(key) || '{}');
           Object.keys(all).forEach(k => { all[k] = (all[k] || []).slice(0, 1); });
-          localStorage.setItem(key, JSON.stringify(all));
+          disco.set(key, JSON.stringify(all));
         } catch (e) {}
-        return Math.max(0, antes - (localStorage.getItem(key) || '').length * 2);
+        return Math.max(0, antes - (disco.get(key) || '').length * 2);
       } },
     { nome: 'dados de demonstração', fn() {
         if (typeof demo !== 'undefined' && demo.ativo && demo.ativo()) return 0;  /* não puxa o tapete de quem está no demo */
@@ -11426,9 +11612,9 @@ const espaco = {
         try { return armazenamento.limparImagensOrfas(); } catch (e) { return 0; }
       } },
     { nome: 'lixeira vencida', fn() {
-        const antes = (localStorage.getItem(lixeira.KEY) || '').length * 2;
+        const antes = (disco.get(lixeira.KEY) || '').length * 2;
         try { lixeira.purgarExpirados(); } catch (e) {}
-        return Math.max(0, antes - (localStorage.getItem(lixeira.KEY) || '').length * 2);
+        return Math.max(0, antes - (disco.get(lixeira.KEY) || '').length * 2);
       } },
     { nome: 'anexos que já estão na nuvem', fn() {
         let liberto = 0;
@@ -11451,8 +11637,8 @@ const espaco = {
     { nome: 'histórico antigo (fica na nuvem)', fn() { return espaco._arquivarAte(90); } },
     { nome: 'histórico dos últimos meses (fica na nuvem)', fn() { return espaco._arquivarAte(30); } },
     { nome: 'lixeira', fn() {
-        const antes = (localStorage.getItem(lixeira.KEY) || '').length * 2;
-        try { localStorage.setItem(lixeira.KEY, '[]'); } catch (e) {}
+        const antes = (disco.get(lixeira.KEY) || '').length * 2;
+        try { disco.set(lixeira.KEY, '[]'); } catch (e) {}
         return Math.max(0, antes - 2);
       } },
     { nome: 'histórico das últimas semanas (fica na nuvem)', fn() { return espaco._arquivarAte(7); } }
@@ -11782,6 +11968,25 @@ const preLanc = {
     store.save(mod, rec);
     toast('📤 Enviado para conferência do médico — ficha salva e fechada');
     preLanc._fechar(mod);
+    /* O espelho na nuvem é "melhor esforço" e falha calada. Enviar sem subir é
+       enviar para ninguém: o médico lê a fila do aparelho DELE. */
+    preLanc._confirmarSubida(mod, id);
+  },
+  async _confirmarSubida(mod, id) {
+    try {
+      if (typeof cloud === 'undefined' || !cloud.estaConfigurado()) return;   /* aparelho sem nuvem: nada a cobrar */
+      const rec = store.getById(mod, id);
+      if (!rec || preLanc.estado(rec) !== 'enviado') return;
+      let ok = false;
+      if (cloudRel.disponivel() && await cloud._garantirToken()) {
+        const r = await cloudRel.enviarRegistro(mod, rec, { force: true });
+        ok = !!(r && r.ok);
+      }
+      if (!ok) {
+        toast('📵 Enviado neste aparelho, mas ainda não subiu para a clínica — o médico só vê depois que subir. Use "Subir agora" no Dashboard.', 'warn');
+        try { preLanc.renderFila(); } catch (e) {}
+      }
+    } catch (e) {}
   },
   /* Fecha a ficha depois do envio e leva de volta ao Dashboard, onde ela vê o
      que ainda falta. markClean antes, senão "Descartar alterações?" aparece. */
@@ -11864,32 +12069,119 @@ const preLanc = {
      aparelho dela: sem ir buscar, o médico podia esperar o dia inteiro. Isto
      roda ao abrir o Dashboard (no máximo uma vez por minuto) e no botão. */
   _ultimaBusca: 0,
+  _diag: null,
+  /* O clique é ligado no botão, não por onclick no HTML: já perdemos horas com
+     um botão que existia, aparecia e não fazia nada porque o atributo dependia
+     da variável estar publicada no window. */
+  _ligarBuscar() {
+    const btn = document.getElementById('pl-buscar-btn');
+    if (!btn || btn.dataset.ligado === '1') return;
+    btn.dataset.ligado = '1';
+    btn.addEventListener('click', () => {
+      preLanc.sincronizarFila({ forcar: true });
+    });
+  },
   async sincronizarFila(opts = {}) {
     if (!opts.forcar && Date.now() - preLanc._ultimaBusca < 60000) return null;
+    /* Toque que não responde nada é indistinguível de botão quebrado. Todo
+       caminho de saída daqui fala — inclusive os que antes só davam return. */
+    const dizer = (msg, tipo) => { if (!opts.silent) { try { toast(msg, tipo); } catch (e) {} } };
+    const btn = document.getElementById('pl-buscar-btn');
+    const rotulo = btn ? btn.textContent : '';
+    const ocupado = (on) => {
+      if (!btn) return;
+      btn.disabled = on;
+      btn.textContent = on ? '⏳ Buscando…' : (rotulo || '🔄 Buscar');
+    };
     try {
-      if (typeof cloudRel === 'undefined' || !cloudRel.disponivel()) return null;
-      if (!(await cloud._garantirToken())) return null;
+      if (typeof cloud === 'undefined' || !cloud.estaConfigurado()) {
+        dizer('Este aparelho não está conectado à nuvem — sem isso não há o que buscar.', 'warn');
+        return null;
+      }
+      if (!cloud.estaLogado() || cloud.sessaoExpirada()) {
+        dizer('Sessão da nuvem vencida — entre de novo para buscar os pré-lançamentos.', 'warn');
+        try { cloud.reentrar(); } catch (e) {}
+        return null;
+      }
+      if (typeof cloudRel === 'undefined' || !cloudRel.disponivel()) {
+        dizer('A clínica na nuvem não está disponível neste aparelho (Ajustes → Equipe da nuvem).', 'warn');
+        return null;
+      }
+      ocupado(true);
+      if (!(await cloud._garantirToken())) {
+        dizer('Não consegui renovar a sessão da nuvem — entre de novo.', 'warn');
+        try { cloud.reentrar(); } catch (e) {}
+        return null;
+      }
       preLanc._ultimaBusca = Date.now();
-      let novos = 0, atualizados = 0;
+      let novos = 0, atualizados = 0, naClinica = 0, naoCouberam = 0, leu = 0;
       for (const mod of preLanc.MODS) {
         const remotos = await cloudRel.puxarModulo(mod);
         if (!Array.isArray(remotos)) continue;
+        leu++;
+        /* Quantos ENVIADOS existem na clínica, antes de qualquer filtro daqui.
+           É o número que responde "faltou chegar" x "faltou subir". */
+        naClinica += remotos.filter(r => preLanc.estado(r) === 'enviado' && !r._finalizado).length;
         const m = cloudRel.mesclarLocal(mod, remotos);
-        novos += m.novos; atualizados += m.atualizados;
+        novos += m.novos; atualizados += m.atualizados; naoCouberam += m.naoCouberam;
       }
+      if (!leu) {
+        dizer('Não consegui ler a clínica agora — confira a conexão e tente de novo.', 'error');
+        return null;
+      }
+      preLanc._diag = { naClinica, naoCouberam, quando: new Date().toISOString() };
       try { preLanc.renderFila(); } catch (e) {}
-      if ((novos || atualizados) && !opts.silent) {
-        toast('☁️ ' + (novos + atualizados) + ' pré-lançamento(s) atualizado(s) da clínica');
-      } else if (!opts.silent) {
-        toast('Nada novo da clínica por enquanto.');
+      if (novos || atualizados) {
+        dizer('☁️ ' + (novos + atualizados) + ' pré-lançamento(s) atualizado(s) da clínica');
+      } else {
+        dizer('Já estava tudo em dia: ' + naClinica + ' aguardando conferência na clínica.');
       }
-      return { novos, atualizados };
-    } catch (e) { return null; }
+      return { novos, atualizados, naClinica, naoCouberam };
+    } catch (e) {
+      dizer('Falhou ao buscar: ' + (e && e.message || e), 'error');
+      return null;
+    } finally { ocupado(false); }
+  },
+
+  /* Enviado NESTE aparelho mas que ainda não subiu para a clínica: sem
+     _relUpdatedAt o registro nunca foi espelhado, e o médico não tem como
+     ver. Antes isso era invisível — ela via "enviado" e o médico, nada. */
+  naoSubiram() {
+    const out = [];
+    try {
+      preLanc.MODS.forEach(mod => {
+        (store.list(mod) || []).forEach(rec => {
+          if (!rec || rec._finalizado) return;
+          if (preLanc.estado(rec) !== 'enviado') return;
+          if (rec._relUpdatedAt) return;
+          out.push({ mod, rec, nome: arquivo._nomeDe(rec) });
+        });
+      });
+    } catch (e) {}
+    return out;
+  },
+  async subirPendentes() {
+    const lista = preLanc.naoSubiram();
+    if (!lista.length) { toast('Tudo o que você enviou já está na clínica.'); return { ok: 0, falhou: 0 }; }
+    if (!cloudRel.disponivel() || !(await cloud._garantirToken())) {
+      toast('Sem conexão com a clínica agora — tente de novo quando houver internet.', 'warn');
+      return null;
+    }
+    let ok = 0, falhou = 0;
+    for (const it of lista) {
+      try { const r = await cloudRel.enviarRegistro(it.mod, it.rec, { force: true }); (r && r.ok) ? ok++ : falhou++; }
+      catch (e) { falhou++; }
+    }
+    toast(ok ? ('☁️ ' + ok + ' pré-lançamento(s) subiram para a clínica') : 'Não consegui subir agora — tente de novo.',
+      falhou ? 'warn' : 'success');
+    try { preLanc.renderFila(); } catch (e) {}
+    return { ok, falhou };
   },
 
   /* Cartão no Dashboard: a fila do médico e o lembrete da auxiliar */
   renderFila() {
     try { preLanc.renderAlerta(); } catch (e) {}
+    try { preLanc._ligarBuscar(); } catch (e) {}
     const card = document.getElementById('pl-fila-card');
     const host = document.getElementById('pl-fila-lista');
     const tit = document.getElementById('pl-fila-titulo');
@@ -11948,7 +12240,28 @@ const preLanc = {
         : '<p style="font-size:.86rem;color:var(--text-mute);margin:0">Nada aguardando conferência.</p>') +
       (parados
         ? '<p style="font-size:.8rem;color:#7a4b12;margin:10px 0 0">⏳ <b>' + parados + '</b> pré-lançamento(s) começado(s) e ainda não enviados há mais de um dia.</p>'
-        : '');
+        : '') +
+      preLanc._conferenciaDeContas(fila.length);
+  },
+
+  /* "Era pra aparecer 13 e aparecem 8." Sem esta conta, não dá para saber se o
+     que falta não CHEGOU (problema aqui) ou não SUBIU (problema no aparelho de
+     quem lançou). O app tem os dois números — então que ele diga. */
+  _conferenciaDeContas(naFila) {
+    const d = preLanc._diag;
+    if (!d) return '';
+    const linhas = [];
+    if (d.naClinica > naFila) {
+      linhas.push('☁️ A clínica tem <b>' + d.naClinica + '</b> aguardando conferência e aqui apareceram <b>' + naFila + '</b>.' +
+        (d.naoCouberam
+          ? ' <b>' + d.naoCouberam + '</b> não couberam neste aparelho — libere espaço em Ajustes → Armazenamento.'
+          : ' Toque em <b>🔄 Buscar</b> de novo; se persistir, me avise.'));
+    } else if (d.naClinica < naFila) {
+      linhas.push('📱 <b>' + (naFila - d.naClinica) + '</b> deste(s) pré-lançamento(s) ainda não estão na clínica — vieram só deste aparelho.');
+    }
+    if (!linhas.length) return '';
+    return '<p style="font-size:.8rem;color:#1c4f7c;background:#eef4fb;border:1px solid #c7dcf0;' +
+      'border-radius:7px;padding:8px 10px;margin:10px 0 0">' + linhas.join('<br>') + '</p>';
   },
 
   /* Aviso no alto do Dashboard de quem pré-lança: o que voltou devolvido e o
@@ -11960,9 +12273,18 @@ const preLanc = {
     if (!preLanc.ehAuxiliar()) { host.style.display = 'none'; host.innerHTML = ''; return; }
     let p;
     try { p = preLanc.meusPendentes(); } catch (e) { p = { rascunho: [], devolvido: [] }; }
-    if (!p.devolvido.length && !p.rascunho.length) { host.style.display = 'none'; host.innerHTML = ''; return; }
+    const presos = preLanc.naoSubiram();
+    if (!p.devolvido.length && !p.rascunho.length && !presos.length) { host.style.display = 'none'; host.innerHTML = ''; return; }
     const abrir = it => 'dashboard._abrirRegistro(\'' + it.mod + '\',\'' + it.rec._id + '\')';
     let html = '';
+    if (presos.length) {
+      /* Enviado aqui, mas nunca espelhado na clínica: para o médico é como se
+         não existisse. Ela precisa saber, e resolver com um toque. */
+      html += '<div class="pl-av pl-av-dev">📵 <b>' + presos.length + '</b> ' +
+        (presos.length === 1 ? 'pré-lançamento enviado ainda não chegou' : 'pré-lançamentos enviados ainda não chegaram') +
+        ' na clínica — o médico não vê até subir.' +
+        '<button type="button" class="btn btn-xs btn-primary" onclick="preLanc.subirPendentes()">Subir agora</button></div>';
+    }
     if (p.devolvido.length) {
       const it = p.devolvido[0];
       html += '<div class="pl-av pl-av-dev">↩ <b>' + p.devolvido.length + '</b> ' +
@@ -12087,7 +12409,7 @@ const lixeira = {
   },
   _ler() {
     try {
-      const arr = JSON.parse(localStorage.getItem(lixeira.KEY) || '[]');
+      const arr = JSON.parse(disco.get(lixeira.KEY) || '[]');
       /* devolve as imagens inteiras, como em store.list */
       const b = store._blobs();
       if (Object.keys(b).length) arr.forEach(e => store._hidratar(e.item, b));
@@ -12095,10 +12417,10 @@ const lixeira = {
     } catch (e) { return []; }
   },
   _gravar(arr) {
-    try { localStorage.setItem(lixeira.KEY, JSON.stringify(arr)); }
+    try { disco.set(lixeira.KEY, JSON.stringify(arr)); }
     catch (e) {
       /* Sem espaço: descarta os mais antigos e tenta de novo */
-      try { arr.sort((a, b) => new Date(b.excluidoEm) - new Date(a.excluidoEm)); arr.length = Math.min(arr.length, 40); localStorage.setItem(lixeira.KEY, JSON.stringify(arr)); } catch (e2) {}
+      try { arr.sort((a, b) => new Date(b.excluidoEm) - new Date(a.excluidoEm)); arr.length = Math.min(arr.length, 40); disco.set(lixeira.KEY, JSON.stringify(arr)); } catch (e2) {}
     }
   },
   guardar(modKey, item) {
@@ -17699,6 +18021,9 @@ const cloud = {
       /* O que foi salvo enquanto a clínica não era conhecida sobe agora — sem
          isso, o registro de um usuário nunca chegava aos outros do consultório */
       setTimeout(() => { try { cloudRel.empurrarPendentes({ silent: true }); } catch (e) {} }, 2600);
+      /* A partir daqui o aparelho se acerta sozinho, de minuto em minuto, sem
+         ninguém tocar em nada (ver sincronia). */
+      try { sincronia.iniciar(); } catch (e) {}
       /* rascunhos: ficha começada no celular aparece no computador */
       setTimeout(() => {
         try { rascunhosSync.enviarTodos(); } catch (e) {}
@@ -18084,6 +18409,112 @@ const clinicaSync = {
    ESTADO DA NUVEM — a resposta a "está tudo salvo?" numa linha só, no topo
    dos Ajustes, mais um botão que força a atualização completa.
 ============================================================================ */
+/* ============================================================================
+   SINCRONIA AUTOMÁTICA — o sistema se acerta sozinho.
+
+   Enquanto sincronizar dependeu de alguém tocar em "Atualizar tudo", o fluxo
+   dependia da disciplina de quem está atendendo paciente. Não é trabalho de
+   operador ficar apertando botão para o app funcionar: se o registro existe na
+   clínica, ele tem que aparecer aqui sem pedido.
+
+   O ciclo roda enquanto o app está em uso, e também quando a tela volta a ser
+   olhada, quando a internet volta e logo depois de cada gravação. A leitura é
+   INCREMENTAL (só o que mudou desde a última passada), então custa quase nada
+   repetir de minuto em minuto. Falhou? A próxima tentativa espera um pouco
+   mais, até dez minutos, e volta ao normal assim que der certo.
+============================================================================ */
+const sincronia = {
+  INTERVALO: 60000,
+  MAX_ESPERA: 600000,
+  MARCAS_KEY: 'medsys.v7.sync.marcas',
+  MODS: ['pre', 'anestesia', 'recuperacao', 'consulta', 'financeiro', 'risco', 'termo', 'prescricao'],
+  _timer: null, _rodando: false, _espera: 60000, _ultimo: 0, _ligado: false,
+
+  _marcas() { try { return JSON.parse(localStorage.getItem(sincronia.MARCAS_KEY) || '{}'); } catch (e) { return {}; } },
+  _salvarMarcas(m) { try { localStorage.setItem(sincronia.MARCAS_KEY, JSON.stringify(m)); } catch (e) {} },
+
+  podeRodar() {
+    try {
+      if (typeof demo !== 'undefined' && demo.ativo()) return false;
+      if (!cloud.estaConfigurado() || !cloud.estaLogado()) return false;
+      if (cloud.sessaoExpirada()) return false;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+      return typeof cloudRel !== 'undefined' && cloudRel.disponivel();
+    } catch (e) { return false; }
+  },
+
+  iniciar() {
+    if (sincronia._ligado) return;
+    sincronia._ligado = true;
+    try {
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) sincronia.agora({ motivo: 'voltou à tela' });
+      });
+      window.addEventListener('online', () => sincronia.agora({ motivo: 'internet voltou' }));
+      window.addEventListener('focus', () => sincronia.agora({ motivo: 'foco' }));
+    } catch (e) {}
+    sincronia._agendar(4000);
+  },
+  _agendar(ms) {
+    try { clearTimeout(sincronia._timer); } catch (e) {}
+    sincronia._timer = setTimeout(() => { sincronia.ciclo(); }, ms);
+  },
+  /* Chamado por quem tem pressa (gravou algo, voltou para a tela). Respeita um
+     mínimo de 10s para não virar uma consulta por tecla digitada. */
+  agora(opts = {}) {
+    if (Date.now() - sincronia._ultimo < 10000) return;
+    sincronia._agendar(opts.emMs || 800);
+  },
+
+  async ciclo() {
+    if (sincronia._rodando) return;
+    if (!sincronia.podeRodar()) { sincronia._agendar(sincronia.INTERVALO); return; }
+    sincronia._rodando = true;
+    sincronia._ultimo = Date.now();
+    let deuCerto = false;
+    try {
+      /* 1) o que foi feito aqui e ainda não subiu (inclui o pré-lançamento
+            enviado sem internet) */
+      try { await cloudRel.empurrarPendentes({ silent: true, limite: 15 }); } catch (e) {}
+      /* 2) o que os outros aparelhos fizeram desde a última passada */
+      const marcas = sincronia._marcas();
+      let mudou = 0;
+      for (const mod of sincronia.MODS) {
+        if (!cloudRel.MODOS[mod]) continue;
+        const desde = marcas[mod] || '';
+        const remotos = await cloudRel.puxarModulo(mod, desde ? { desde } : {});
+        if (!Array.isArray(remotos)) continue;
+        deuCerto = true;
+        if (remotos.length) {
+          const m = cloudRel.mesclarLocal(mod, remotos);
+          mudou += m.novos + m.atualizados;
+        }
+        /* a marca avança pelo mais novo que a clínica devolveu */
+        remotos.forEach(r => {
+          const t = r && r._relUpdatedAt;
+          if (t && String(t) > String(marcas[mod] || '')) marcas[mod] = String(t);
+        });
+      }
+      sincronia._salvarMarcas(marcas);
+      if (mudou) sincronia._repintar();
+    } catch (e) {
+    } finally {
+      sincronia._rodando = false;
+      /* deu certo volta ao ritmo normal; falhou espera mais na próxima */
+      sincronia._espera = deuCerto ? sincronia.INTERVALO
+        : Math.min(sincronia.MAX_ESPERA, Math.max(sincronia.INTERVALO, sincronia._espera * 2));
+      sincronia._agendar(sincronia._espera);
+    }
+  },
+  _repintar() {
+    try { if (typeof preLanc !== 'undefined') preLanc.renderFila(); } catch (e) {}
+    try { if (state.currentModule === 'dashboard') dashboard.atualizar(); } catch (e) {}
+    try { if (state.currentModule === 'financeiro' && financeiro.render) financeiro.render(); } catch (e) {}
+    try { nuvemEstado.renderMenu(); } catch (e) {}
+  }
+};
+try { window.sincronia = sincronia; } catch (e) {}
+
 const nuvemEstado = {
   /* Diagnóstico único, usado tanto pelo cartão de Ajustes quanto pelo botão do
      menu. Devolve { estado, msg }: estado = ok | pendente | semNuvem |
@@ -19222,34 +19653,51 @@ const cloudRel = {
     } catch (e) { return false; }
   },
   mesclarLocal(mod, remotos) {
-    const res = { novos: 0, atualizados: 0, iguais: 0, adiados: 0 };
+    const res = { novos: 0, atualizados: 0, iguais: 0, adiados: 0, naoCouberam: 0, gravou: true };
     if (!Array.isArray(remotos) || !remotos.length) return res;
     if (typeof STORAGE !== 'undefined' && !STORAGE[mod]) return res;
     const locais = store.list(mod) || [];
     const ix = new Map();
     locais.forEach((x, i) => { if (x && x._id) ix.set(x._id, i); });
+    const entraram = [];
+    /* O que chega novo entra NA FRENTE. store.save corta a lista em
+       HISTORY_MAX a partir do fim — jogado no fim, o que acabou de chegar da
+       clínica seria justamente o primeiro a ser cortado na gravação seguinte. */
+    const novos = [];
     remotos.forEach(item => {
       if (!item || !item._id) return;
-      if (!ix.has(item._id)) { locais.push(item); ix.set(item._id, locais.length - 1); res.novos++; return; }
+      if (!ix.has(item._id)) { novos.push(item); entraram.push(item._id); res.novos++; return; }
       const i = ix.get(item._id);
       const local = locais[i];
       if (cloudRel._quando(item) <= cloudRel._quando(local)) { res.iguais++; return; }
       if (cloudRel._abertoNaTela(item._id)) { res.adiados++; return; }
-      locais[i] = item; res.atualizados++;
+      locais[i] = item; entraram.push(item._id); res.atualizados++;
     });
-    if (res.novos || res.atualizados) store.setList(mod, locais);
+    if (!res.novos && !res.atualizados) return res;
+    const final = novos.concat(locais);
+    res.gravou = store.setList(mod, final) !== false;
+    /* Confere o que ficou de fato gravado: sem espaço, o socorro poda a lista
+       e o registro some sem ninguém avisar. Melhor contar do que supor. */
+    try {
+      const agora = new Set((store.list(mod) || []).map(x => x && x._id).filter(Boolean));
+      res.naoCouberam = entraram.filter(id => !agora.has(id)).length;
+    } catch (e) {}
     return res;
   },
 
-  async puxarModulo(mod) {
+  async puxarModulo(mod, opts = {}) {
     const cfg = cloudRel.MODOS[mod]; if (!cfg) return null;
     if (!cloudRel.disponivel()) return null;
     if (!(await cloud._garantirToken())) return null;
     const org = await cloudRel._orgAsync(); if (!org) return null;
     const c = cloud.config();
     try {
+      /* `desde` transforma a leitura periódica em algo barato: só o que mudou
+         depois da última passada. É o que permite sincronizar sozinho, de
+         minuto em minuto, sem pesar na rede nem no aparelho. */
+      const filtroData = opts.desde ? '&updated_at=gt.' + encodeURIComponent(opts.desde) : '';
       const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
-        '&deleted_at=is.null&select=' + cloudRel._REG_SELECT + '&order=updated_at.desc',
+        '&deleted_at=is.null' + filtroData + '&select=' + cloudRel._REG_SELECT + '&order=updated_at.desc',
         { headers: cloud._headers(true) });
       if (!r.ok) return null;
       const rows = await r.json();
@@ -42212,6 +42660,11 @@ const ajustesGrupos = {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
+  /* 0. DISCO GRANDE — abre o IndexedDB e MUDA para lá o que é pesado (imagens,
+       versões, lixeira). É o que tira o sistema do teto de 5 MB do
+       localStorage. Assíncrono de propósito: o app não espera, e a tela é
+       repintada quando os dados chegam. */
+  try { disco.iniciar(); } catch (e) {}
   /* 0a. Aplica tema salvo (claro/escuro) */
   ui._aplicarTemaSalvo();
   /* 0. EXPOSIÇÃO NO WINDOW — garante que inline handlers (onclick="...") acessem os módulos
