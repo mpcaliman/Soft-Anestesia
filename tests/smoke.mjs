@@ -6380,6 +6380,59 @@ await test('Impressão da pré e do termo sai compacta, sem sublinhado e com log
   await page.close();
 });
 
+/* 111) Cortesia entre as ações da pendência: não é etapa de faturamento, é o
+   fim dele. Sem essa opção o caso cobrava baixa para sempre, ou era resolvido
+   sem dizer por quê — e o valor seguia contando como "a receber". */
+await test('Cortesia é uma das ações da pendência de convênio e chega ao financeiro', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('pre', []); store.setList('financeiro', []);
+    out.estaNasOpcoes = pendencias.STATUS.some(([k, rot]) => k === 'cortesia' && /cortesia/i.test(rot));
+
+    /* uma pré de plano, com o lançamento financeiro que ela gerou */
+    const pre1 = store.save('pre', {
+      nome: 'Ana Souza', data: '2026-08-13', convenio: 'Bradesco Saúde', cirurgia: 'Colecistectomia'
+    });
+    const lanc = store.save('financeiro', {
+      _origemId: pre1._id, paciente: 'Ana Souza', convenio: 'Bradesco Saúde',
+      data_proc: '2026-08-13', valor_previsto: 1200, status: 'pendente', pago: false
+    });
+    out.entrouNaLista = pendencias.listar().some(p => p.id === pre1._id);
+
+    /* marca cortesia pela janela */
+    pendencias.marcarStatus('pre', pre1._id, 'cortesia', true);
+    const dep = store.getById('pre', pre1._id);
+    out.carimbouNoRegistro = !!(dep._faturamento && dep._faturamento.cortesia);
+    out.saiuDaPendencia = !pendencias.listar().some(p => p.id === pre1._id);
+
+    const fin1 = store.getById('financeiro', lanc._id);
+    out.marcouNoFinanceiro = fin1.tipo_pagamento === 'Cortesia' && fin1.pago === true;
+    out.naoApagouOValor = Number(fin1.valor_previsto) === 1200;   /* o dado do usuário fica */
+    out.deixouORastro = /cortesia/i.test(fin1.observacoes || '');
+
+    /* marcada direto no próprio lançamento financeiro, funciona igual */
+    const solto = store.save('financeiro', {
+      paciente: 'Bia', convenio: 'Amil', data_proc: '2026-08-13',
+      valor_previsto: 800, status: 'pendente', pago: false
+    });
+    pendencias.marcarStatus('financeiro', solto._id, 'cortesia', true);
+    const fin2 = store.getById('financeiro', solto._id);
+    out.funcionaNoProprioLancamento = fin2.tipo_pagamento === 'Cortesia' && fin2.pago === true;
+
+    store.setList('pre', []); store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.estaNasOpcoes, 'Cortesia precisa estar entre as ações da pendência');
+  assert(r.entrouNaLista, 'a pendência de plano precisa existir antes de ser resolvida');
+  assert(r.carimbouNoRegistro && r.saiuDaPendencia, 'marcar cortesia dá baixa e deixa registrado o porquê');
+  assert(r.marcouNoFinanceiro, 'a cortesia tem que chegar ao financeiro — senão o valor fica como "a receber"');
+  assert(r.naoApagouOValor, 'o valor digitado pelo usuário não é apagado');
+  assert(r.deixouORastro, 'fica escrito no lançamento que foi cortesia');
+  assert(r.funcionaNoProprioLancamento, 'marcada direto no lançamento financeiro, funciona igual');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

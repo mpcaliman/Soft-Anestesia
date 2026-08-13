@@ -4266,7 +4266,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-13k</b><br>
+    v7.1 · build <b id="build-tag">2026-08-13l</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -18982,7 +18982,11 @@ const pendencias = {
     ['em_pagamento', 'Em pagamento'],
     ['pago', 'Pago'],
     ['glosa', 'Glosa'],
-    ['recurso_glosa', 'Recurso de glosa']
+    ['recurso_glosa', 'Recurso de glosa'],
+    /* Cortesia não é etapa de faturamento — é o fim dele. Sem essa opção, o
+       caso ficava cobrando baixa para sempre ou era "resolvido" sem deixar
+       registro do porquê. */
+    ['cortesia', 'Cortesia (não será cobrado)']
   ],
   JANELA_DIAS: 90,
 
@@ -19045,7 +19049,7 @@ const pendencias = {
       '</td></tr>').join('');
     const corpo = !lista.length
       ? '<p style="color:var(--text-mute)">🎉 Nenhuma pendência de convênio.</p>'
-      : '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">Guias de <b>planos de saúde (exceto Unimed)</b> aguardando processamento. Marque uma etapa do fluxo (ou ✔ Resolver) para dar baixa — enquanto houver pendência, esta janela volta ao entrar e a cada 30 minutos.</p>' +
+      : '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">Guias de <b>planos de saúde (exceto Unimed)</b> aguardando processamento. Marque uma etapa do fluxo, <b>Cortesia</b> (quando não haverá cobrança) ou ✔ Resolver para dar baixa. Esta janela aparece <b>uma vez, ao entrar</b>; depois disso a lista fica no cartão do Dashboard.</p>' +
         '<div style="max-height:52vh;overflow:auto"><table class="dash-detail-table" style="margin:0"><thead><tr><th>Data</th><th>Paciente</th><th>Plano</th><th>Guia</th><th>Ação</th></tr></thead><tbody>' + linhas + '</tbody></table></div>';
     modal.open('🔔 Pendências de convênio (' + lista.length + ')', corpo,
       '<button class="btn" onclick="modal.close()">Fechar</button>');
@@ -19073,9 +19077,27 @@ const pendencias = {
     /* marcar qualquer etapa resolve a pendência */
     if (pendencias.temStatus(r) && !r._pendResolvida) r._pendResolvida = new Date().toISOString();
     store.save(mod, r);
+    if (statusKey === 'cortesia' && marcado) { try { pendencias._aplicarCortesia(mod, r); } catch (e) {} }
     try { pendencias.renderDashboard(); } catch (e) {}
     const rot = (pendencias.STATUS.find(s => s[0] === statusKey) || ['', statusKey])[1];
     toast('🔄 Fluxo de faturamento: ' + rot + (marcado ? ' ✓' : ' removido'));
+  },
+
+  /* Cortesia marcada no fluxo tem que chegar ao FINANCEIRO: senão o valor
+     continua como "a receber" num dinheiro que nunca vai entrar, e o painel
+     mente. Não apaga valor nenhum — só diz que não há o que cobrar. */
+  _aplicarCortesia(mod, r) {
+    let alvo = null;
+    if (mod === 'financeiro') alvo = r;
+    else alvo = (store.list('financeiro') || []).find(f => f._origemId === r._id) || null;
+    if (!alvo) return null;
+    alvo.tipo_pagamento = 'Cortesia';
+    alvo.pago = true;                     /* sai de "a receber" */
+    alvo.status = 'finalizado';
+    alvo.observacoes = (alvo.observacoes ? alvo.observacoes + ' · ' : '') + 'Cortesia — sem cobrança';
+    store.save('financeiro', alvo);
+    try { if (state.currentModule === 'financeiro' && financeiro.render) financeiro.render(); } catch (e) {}
+    return alvo;
   },
 
   /* ---- Checklist do fluxo no formulário do FINANCEIRO ---- */
