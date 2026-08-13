@@ -2758,67 +2758,47 @@ await test('Permissões personalizadas sobem para a nuvem e vencem o padrão do 
 });
 
 /* 53) Pré: o que a secretária pode preencher (edição parcial por seção) */
-await test('Pré: secretária edita identificação, anamnese, sinais vitais/exames e pareceres — o resto é do médico', async () => {
+await test('Auxiliar preenche a ficha inteira; finalizar continua sendo do médico', async () => {
   const page = await novaPagina();
-  const r = await page.evaluate(async () => {
+  const r = await page.evaluate(() => {
     const out = {};
-    auth._salvarUsuarios([{
-      id: 'u_s', usuario: 'secretaria@ex.com', nome: 'secre', perfil: 'secretaria', senhaHash: 'x',
-      nuvem: true, role: 'auxiliar', modulos: auth._permsDoPapel('auxiliar').modulos.slice(), soImpressao: []
-    }]);
-    auth._definirSessao(auth._lerUsuarios()[0]);
+    /* O pré-lançamento substituiu a trava campo a campo: ela prepara tudo e o
+       médico confere depois. Travar campo agora só cria atrito. */
+    auth.usuarioAtual = () => ({ id: 's1', nome: 'Sec', perfil: 'secretaria', role: 'auxiliar' });
+    out.semTravaParcial = auth.edicaoParcialDe('pre') === null
+      && auth.edicaoParcialDe('anestesia') === null;
 
-    out.podeEditarPre = auth.podeEditar('pre') === true;
-    out.temParcial = auth.edicaoParcialDe('pre') === '[data-sec-edit]';
-
+    auth.podeEditar = () => true;
+    auth.podeAcessar = () => true;
     auth._aplicarLeitura('pre');
     const mod = document.getElementById('module-pre');
-    out.modoParcial = mod.classList.contains('edicao-parcial') && !mod.classList.contains('somente-impressao');
+    out.semClasseParcial = !mod.classList.contains('edicao-parcial');
+    /* nenhum campo do formulário fica travado */
+    /* a regra que travava os campos só vale sob a classe parcial, que saiu */
+    out.camposLivres = !mod.classList.contains('edicao-parcial')
+      && !mod.classList.contains('somente-impressao');
+    /* mas Finalizar some para quem só pré-lança */
+    const fin = Array.from(mod.querySelectorAll('.btn, button'))
+      .filter(b => /\.finalizar/i.test(b.getAttribute('onclick') || ''));
+    out.qtdFin = fin.length;
+    out.finalizarEscondido = fin.length > 0 && fin.every(b => b.style.display === 'none');
 
-    const liberada = (secId) => {
-      const body = document.querySelector('#' + secId + ' .card-body');
-      return !!body && body.classList.contains('campo-liberado');
-    };
-    out.ident = liberada('pre-sec-ident');
-    out.anamnese = liberada('pre-sec-anamnese');
-    out.exames = liberada('pre-sec-exames');
-    out.pareceres = liberada('pre-sec-pareceres');
-    /* risco e conclusão continuam travados */
-    out.riscoTravado = !liberada('pre-sec-risco');
-    out.conclusaoTravada = !liberada('pre-sec-conclusao');
-    /* exame físico é ato médico, mesmo dentro da seção liberada */
-    const ef = document.querySelector('#form-pre [name="exame_fisico"]');
-    out.exameFisicoTravado = !!ef && !!ef.closest('.campo-travado');
-    /* aviso na tela explica o que ela pode preencher */
-    const banner = document.getElementById('pp-banner-pre');
-    out.avisoCerto = !!banner && /identifica/i.test(banner.textContent) && /pareceres/i.test(banner.textContent);
-
-    /* o médico não entra em modo parcial */
-    auth._salvarUsuarios([{ id: 'u_m', usuario: 'medico@ex.com', nome: 'med', perfil: 'medico', senhaHash: 'x',
-      nuvem: true, role: 'anestesiologista', modulos: auth._permsDoPapel('anestesiologista').modulos.slice(), soImpressao: [] }]);
-    auth._definirSessao(auth._lerUsuarios()[0]);
+    /* para o médico, nada muda */
+    auth.usuarioAtual = () => ({ id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
     auth._aplicarLeitura('pre');
-    out.medicoLivre = !document.getElementById('module-pre').classList.contains('edicao-parcial');
-
-    auth._salvarUsuarios([]);
+    const fin2 = Array.from(mod.querySelectorAll('.btn, button'))
+      .filter(b => /\.finalizar/i.test(b.getAttribute('onclick') || ''));
+    out.medicoFinaliza = fin2.some(b => b.style.display !== 'none');
     return out;
   });
-  assert(r.podeEditarPre, 'a secretária precisa poder editar a pré (modo parcial)');
-  assert(r.temParcial, 'o papel auxiliar deveria ter edição parcial na pré');
-  assert(r.modoParcial, 'o módulo deveria entrar em edição parcial, não em só-impressão');
-  assert(r.ident, 'identificação deveria estar liberada');
-  assert(r.anamnese, 'anamnese deveria estar liberada');
-  assert(r.exames, 'sinais vitais e exames deveriam estar liberados');
-  assert(r.pareceres, 'pareceres de outras clínicas deveriam estar liberados');
-  assert(r.riscoTravado, 'classificação de risco continua sendo do anestesiologista');
-  assert(r.conclusaoTravada, 'a conclusão continua sendo do anestesiologista');
-  assert(r.exameFisicoTravado, 'o exame físico não pode ser liberado para a secretária');
-  assert(r.avisoCerto, 'o aviso deveria listar as seções liberadas');
-  assert(r.medicoLivre, 'o anestesiologista não entra em edição parcial');
+  assert(r.semTravaParcial, 'a edição parcial deixou de existir — o pré-lançamento ocupou o lugar dela');
+  assert(r.semClasseParcial, 'o módulo não deveria mais entrar em modo parcial');
+  assert(r.camposLivres, 'a auxiliar precisa poder preencher a ficha inteira');
+  assert(r.finalizarEscondido, 'finalizar continua sendo ato do médico');
+  assert(r.medicoFinaliza, 'para o médico, o finalizar continua disponível');
   await page.close();
 });
 
-/* 54) A logomarca sai no PDF (orçamento, documentos e receituário) */
 await test('Logomarca aparece no PDF do orçamento, nos documentos e no receituário', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {

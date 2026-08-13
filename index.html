@@ -16270,14 +16270,13 @@ const auth = {
      e esconde os botões que gravam/alteram; mantém visualizar/imprimir/exportar. */
   /* Retorna o seletor das regiões editáveis (edição parcial) para o usuário
      atual neste módulo, ou null se não houver restrição parcial. */
-  edicaoParcialDe(mod) {
-    const u = auth.usuarioAtual();
-    if (!u || u.perfil === 'admin') return null;
-    const fromRole = auth._permsDoPapel(u.role);
-    const fromPerfil = auth.PERFIS[u.perfil];
-    const ep = (fromRole && fromRole.edicaoParcial) || (fromPerfil && fromPerfil.edicaoParcial) || u.edicaoParcial;
-    return (ep && ep[mod]) ? ep[mod] : null;
-  },
+  /* A edição parcial trancava, campo a campo, o que a auxiliar podia preencher.
+     Ela existia porque o registro dela ia direto para o prontuário. Com o
+     PRÉ-LANÇAMENTO isso mudou: ela prepara a ficha inteira e o médico confere e
+     finaliza depois — a validação virou uma etapa explícita, não uma trava de
+     campo. Travar agora só cria atrito sem proteger nada.
+     O que continua sendo só do médico é o FINALIZAR (ver _aplicarLeitura). */
+  edicaoParcialDe(mod) { return null; },
 
   _aplicarLeitura(mod) {
     const el = document.getElementById('module-' + mod);
@@ -16304,6 +16303,18 @@ const auth = {
         const proibido = /\.finalizar|\.excluir|assinar/.test(oc);
         b.style.display = proibido ? 'none' : '';
       } else b.style.display = '';
+    });
+
+    /* Finalizar e assinar são atos do MÉDICO. Fica por último de propósito: o
+       laço acima reexibe os botões quando não há bloqueio, e isto desfaria. */
+    const soPreLanca = (() => {
+      try { return typeof preLanc !== 'undefined' && preLanc.ehAuxiliar(); } catch (e) { return false; }
+    })();
+    el.querySelectorAll('.btn, button').forEach(b => {
+      const oc = ((b.getAttribute('onclick') || '') + ' ' + (b.textContent || '')).toLowerCase();
+      const ehFinalizar = /\.finalizar|assinar/.test(oc) && !/lançamento|lancamento/.test(oc);
+      if (!ehFinalizar) return;
+      b.style.display = soPreLanca ? 'none' : '';
     });
 
     /* Banners: só-impressão (laranja) e edição parcial (verde) */
