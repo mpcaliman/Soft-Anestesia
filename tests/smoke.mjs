@@ -2758,67 +2758,47 @@ await test('Permissões personalizadas sobem para a nuvem e vencem o padrão do 
 });
 
 /* 53) Pré: o que a secretária pode preencher (edição parcial por seção) */
-await test('Pré: secretária edita identificação, anamnese, sinais vitais/exames e pareceres — o resto é do médico', async () => {
+await test('Auxiliar preenche a ficha inteira; finalizar continua sendo do médico', async () => {
   const page = await novaPagina();
-  const r = await page.evaluate(async () => {
+  const r = await page.evaluate(() => {
     const out = {};
-    auth._salvarUsuarios([{
-      id: 'u_s', usuario: 'secretaria@ex.com', nome: 'secre', perfil: 'secretaria', senhaHash: 'x',
-      nuvem: true, role: 'auxiliar', modulos: auth._permsDoPapel('auxiliar').modulos.slice(), soImpressao: []
-    }]);
-    auth._definirSessao(auth._lerUsuarios()[0]);
+    /* O pré-lançamento substituiu a trava campo a campo: ela prepara tudo e o
+       médico confere depois. Travar campo agora só cria atrito. */
+    auth.usuarioAtual = () => ({ id: 's1', nome: 'Sec', perfil: 'secretaria', role: 'auxiliar' });
+    out.semTravaParcial = auth.edicaoParcialDe('pre') === null
+      && auth.edicaoParcialDe('anestesia') === null;
 
-    out.podeEditarPre = auth.podeEditar('pre') === true;
-    out.temParcial = auth.edicaoParcialDe('pre') === '[data-sec-edit]';
-
+    auth.podeEditar = () => true;
+    auth.podeAcessar = () => true;
     auth._aplicarLeitura('pre');
     const mod = document.getElementById('module-pre');
-    out.modoParcial = mod.classList.contains('edicao-parcial') && !mod.classList.contains('somente-impressao');
+    out.semClasseParcial = !mod.classList.contains('edicao-parcial');
+    /* nenhum campo do formulário fica travado */
+    /* a regra que travava os campos só vale sob a classe parcial, que saiu */
+    out.camposLivres = !mod.classList.contains('edicao-parcial')
+      && !mod.classList.contains('somente-impressao');
+    /* mas Finalizar some para quem só pré-lança */
+    const fin = Array.from(mod.querySelectorAll('.btn, button'))
+      .filter(b => /\.finalizar/i.test(b.getAttribute('onclick') || ''));
+    out.qtdFin = fin.length;
+    out.finalizarEscondido = fin.length > 0 && fin.every(b => b.style.display === 'none');
 
-    const liberada = (secId) => {
-      const body = document.querySelector('#' + secId + ' .card-body');
-      return !!body && body.classList.contains('campo-liberado');
-    };
-    out.ident = liberada('pre-sec-ident');
-    out.anamnese = liberada('pre-sec-anamnese');
-    out.exames = liberada('pre-sec-exames');
-    out.pareceres = liberada('pre-sec-pareceres');
-    /* risco e conclusão continuam travados */
-    out.riscoTravado = !liberada('pre-sec-risco');
-    out.conclusaoTravada = !liberada('pre-sec-conclusao');
-    /* exame físico é ato médico, mesmo dentro da seção liberada */
-    const ef = document.querySelector('#form-pre [name="exame_fisico"]');
-    out.exameFisicoTravado = !!ef && !!ef.closest('.campo-travado');
-    /* aviso na tela explica o que ela pode preencher */
-    const banner = document.getElementById('pp-banner-pre');
-    out.avisoCerto = !!banner && /identifica/i.test(banner.textContent) && /pareceres/i.test(banner.textContent);
-
-    /* o médico não entra em modo parcial */
-    auth._salvarUsuarios([{ id: 'u_m', usuario: 'medico@ex.com', nome: 'med', perfil: 'medico', senhaHash: 'x',
-      nuvem: true, role: 'anestesiologista', modulos: auth._permsDoPapel('anestesiologista').modulos.slice(), soImpressao: [] }]);
-    auth._definirSessao(auth._lerUsuarios()[0]);
+    /* para o médico, nada muda */
+    auth.usuarioAtual = () => ({ id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
     auth._aplicarLeitura('pre');
-    out.medicoLivre = !document.getElementById('module-pre').classList.contains('edicao-parcial');
-
-    auth._salvarUsuarios([]);
+    const fin2 = Array.from(mod.querySelectorAll('.btn, button'))
+      .filter(b => /\.finalizar/i.test(b.getAttribute('onclick') || ''));
+    out.medicoFinaliza = fin2.some(b => b.style.display !== 'none');
     return out;
   });
-  assert(r.podeEditarPre, 'a secretária precisa poder editar a pré (modo parcial)');
-  assert(r.temParcial, 'o papel auxiliar deveria ter edição parcial na pré');
-  assert(r.modoParcial, 'o módulo deveria entrar em edição parcial, não em só-impressão');
-  assert(r.ident, 'identificação deveria estar liberada');
-  assert(r.anamnese, 'anamnese deveria estar liberada');
-  assert(r.exames, 'sinais vitais e exames deveriam estar liberados');
-  assert(r.pareceres, 'pareceres de outras clínicas deveriam estar liberados');
-  assert(r.riscoTravado, 'classificação de risco continua sendo do anestesiologista');
-  assert(r.conclusaoTravada, 'a conclusão continua sendo do anestesiologista');
-  assert(r.exameFisicoTravado, 'o exame físico não pode ser liberado para a secretária');
-  assert(r.avisoCerto, 'o aviso deveria listar as seções liberadas');
-  assert(r.medicoLivre, 'o anestesiologista não entra em edição parcial');
+  assert(r.semTravaParcial, 'a edição parcial deixou de existir — o pré-lançamento ocupou o lugar dela');
+  assert(r.semClasseParcial, 'o módulo não deveria mais entrar em modo parcial');
+  assert(r.camposLivres, 'a auxiliar precisa poder preencher a ficha inteira');
+  assert(r.finalizarEscondido, 'finalizar continua sendo ato do médico');
+  assert(r.medicoFinaliza, 'para o médico, o finalizar continua disponível');
   await page.close();
 });
 
-/* 54) A logomarca sai no PDF (orçamento, documentos e receituário) */
 await test('Logomarca aparece no PDF do orçamento, nos documentos e no receituário', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
@@ -5400,12 +5380,14 @@ await test('Botão de enviar pré-lançamento aparece para a auxiliar em pré e 
     out.fichaTem = !!document.getElementById('pl-btn-anestesia')
       && /Enviar pré-lançamento/.test(document.getElementById('pl-btn-anestesia').textContent);
     const btn = document.getElementById('pl-btn-pre');
-    out.dentroDoRodape = !!btn && !!btn.closest('#form-pre');
+    /* fica no módulo, mas FORA do form: dentro dele o modo "edição parcial"
+       aplica pointer-events:none e o toque nunca acontece */
+    out.dentroDoRodape = !!btn && !!btn.closest('#module-pre') && !btn.closest('#form-pre');
 
     /* recalcular não duplica */
     preLanc.renderBotao('pre');
-    out.naoDuplica = document.querySelectorAll('#form-pre [id="pl-btn-pre"]').length === 1
-      && document.querySelectorAll('[id="pl-btn-pre"]').length === 1;
+    out.naoDuplica = document.querySelectorAll('[id="pl-btn-pre"]').length === 1
+      && document.querySelectorAll('[id="pl-host-pre"]').length <= 1;
 
     /* o médico não vê */
     auth.usuarioAtual = () => med;
@@ -5420,7 +5402,7 @@ await test('Botão de enviar pré-lançamento aparece para a auxiliar em pré e 
   });
   assert(r.semLoginNaoTem, 'sem usuário logado o botão não deve existir');
   assert(r.preTem && r.fichaTem, 'a auxiliar deveria ver o botão na pré E na ficha de anestesia');
-  assert(r.dentroDoRodape, 'o botão fica no fim da ficha, junto dos outros');
+  assert(r.dentroDoRodape, 'o botão fica no módulo mas FORA do formulário, senão a edição parcial o trava');
   assert(r.naoDuplica, 'recalcular não pode duplicar o botão');
   assert(r.medicoNaoVe, 'o médico não envia pré-lançamento — ele confere');
   assert(r.recalculaAoSalvar, 'salvar/carregar deveria recalcular o botão sozinho');
@@ -5512,6 +5494,46 @@ await test('O clique do enviar é ligado direto no botão, sem depender do windo
   assert(r.semOnclickNoHTML, 'o clique não pode ser um atributo onclick no HTML');
   assert(r.funcionaSemGlobal, 'o botão precisa funcionar mesmo sem a variável global publicada');
   assert(r.erroVisivel, 'erro no envio tem que virar aviso, nunca silêncio');
+  await page.close();
+});
+
+/* 98) A CAUSA REAL: no modo "edição parcial" o app aplica pointer-events:none
+   em todo botão dentro do formulário. O botão existia, aparecia, e o toque
+   simplesmente não acontecia — nem clique, nem erro. */
+await test('Edição parcial não pode travar o botão de enviar pré-lançamento', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    auth.usuarioAtual = () => ({ id: 's1', nome: 'Sec', perfil: 'secretaria', role: 'auxiliar' });
+    const mod = document.getElementById('module-pre');
+    mod.classList.add('edicao-parcial');           /* é o estado real dela */
+    preLanc.renderBotao('pre');
+
+    const btn = document.querySelector('#pl-btn-pre button');
+    out.existe = !!btn;
+    /* fora do formulário — é o que impede a regra de travar o botão */
+    out.foraDoForm = !!btn && !btn.closest('#form-pre');
+    /* e, mesmo assim, garantido clicável */
+    out.clicavel = !!btn && getComputedStyle(btn).pointerEvents !== 'none' && !btn.disabled;
+    /* um botão qualquer DENTRO do form continua travado — a regra segue valendo */
+    const dentro = document.querySelector('#form-pre button');
+    out.regraContinua = !dentro || getComputedStyle(dentro).pointerEvents === 'none';
+    /* o clique chega mesmo com a classe ativa */
+    let chamou = false;
+    const orig = preLanc.enviar;
+    preLanc.enviar = () => { chamou = true; };
+    btn.click();
+    preLanc.enviar = orig;
+    out.cliqueChega = chamou;
+
+    mod.classList.remove('edicao-parcial');
+    return out;
+  });
+  assert(r.existe, 'o botão precisa existir no modo edição parcial');
+  assert(r.foraDoForm, 'o botão tem que ficar fora do formulário para escapar da trava');
+  assert(r.clicavel, 'o botão não pode ficar com pointer-events desligado');
+  assert(r.regraContinua, 'a trava dos campos do médico continua valendo');
+  assert(r.cliqueChega, 'o clique tem que chegar à função mesmo em edição parcial');
   await page.close();
 });
 
