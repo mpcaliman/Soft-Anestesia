@@ -4229,7 +4229,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · offline-ready · responsivo<br>
+    v7.1 · build <b id="build-tag">2026-08-13b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -11709,6 +11709,10 @@ const preLanc = {
   enviar(mod) {
     /* Antes isto só avisava "salve primeiro" e parava — o toque parecia não
        fazer nada. Enviar implica salvar: o app grava e segue. */
+    if (!preLanc.ehAuxiliar()) {
+      toast('Este botão é do pré-lançamento (auxiliar). Você é quem confere e finaliza — use o cartão "Aguardando sua conferência" no Dashboard.', 'warn');
+      return;
+    }
     let id = preLanc._idAtual(mod);
     if (!id) {
       try { const obj = window[mod]; if (obj && obj.salvar) obj.salvar(); } catch (e) {}
