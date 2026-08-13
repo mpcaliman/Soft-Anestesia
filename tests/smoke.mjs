@@ -5378,6 +5378,55 @@ await test('Dashboard soma os registros que estão na nuvem e avisa o que não e
   await page.close();
 });
 
+/* 95) O botão de enviar pré-lançamento não aparecia: o rodapé é montado no
+   boot, quando ninguém está logado ainda. Tem que ser recalculado depois. */
+await test('Botão de enviar pré-lançamento aparece para a auxiliar em pré e ficha', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const aux = { id: 's1', nome: 'Secretária', perfil: 'secretaria', role: 'auxiliar' };
+    const med = { id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' };
+
+    /* no boot ninguém está logado: o botão não existe — era aqui que parava */
+    auth.usuarioAtual = () => null;
+    ['pre', 'anestesia'].forEach(m => preLanc.renderBotao(m));
+    out.semLoginNaoTem = !document.getElementById('pl-btn-pre');
+
+    /* ela entra: os dois módulos ganham o botão */
+    auth.usuarioAtual = () => aux;
+    ['pre', 'anestesia'].forEach(m => preLanc.renderBotao(m));
+    out.preTem = !!document.getElementById('pl-btn-pre')
+      && /Enviar pré-lançamento/.test(document.getElementById('pl-btn-pre').textContent);
+    out.fichaTem = !!document.getElementById('pl-btn-anestesia')
+      && /Enviar pré-lançamento/.test(document.getElementById('pl-btn-anestesia').textContent);
+    const btn = document.getElementById('pl-btn-pre');
+    out.dentroDoRodape = !!btn && !!btn.closest('#form-pre');
+
+    /* recalcular não duplica */
+    preLanc.renderBotao('pre');
+    out.naoDuplica = document.querySelectorAll('#form-pre [id="pl-btn-pre"]').length === 1
+      && document.querySelectorAll('[id="pl-btn-pre"]').length === 1;
+
+    /* o médico não vê */
+    auth.usuarioAtual = () => med;
+    ['pre', 'anestesia'].forEach(m => preLanc.renderBotao(m));
+    out.medicoNaoVe = !document.getElementById('pl-btn-pre') && !document.getElementById('pl-btn-anestesia');
+
+    /* atualizarDocStatus (salvar/carregar/novo) recalcula sozinho */
+    auth.usuarioAtual = () => aux;
+    ui.atualizarDocStatus('pre', null);
+    out.recalculaAoSalvar = !!document.getElementById('pl-btn-pre');
+    return out;
+  });
+  assert(r.semLoginNaoTem, 'sem usuário logado o botão não deve existir');
+  assert(r.preTem && r.fichaTem, 'a auxiliar deveria ver o botão na pré E na ficha de anestesia');
+  assert(r.dentroDoRodape, 'o botão fica no fim da ficha, junto dos outros');
+  assert(r.naoDuplica, 'recalcular não pode duplicar o botão');
+  assert(r.medicoNaoVe, 'o médico não envia pré-lançamento — ele confere');
+  assert(r.recalculaAoSalvar, 'salvar/carregar deveria recalcular o botão sozinho');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
