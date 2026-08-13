@@ -4259,7 +4259,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-13d</b><br>
+    v7.1 · build <b id="build-tag">2026-08-13e</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -11782,6 +11782,25 @@ const preLanc = {
     store.save(mod, rec);
     toast('📤 Enviado para conferência do médico — ficha salva e fechada');
     preLanc._fechar(mod);
+    /* O espelho na nuvem é "melhor esforço" e falha calada. Enviar sem subir é
+       enviar para ninguém: o médico lê a fila do aparelho DELE. */
+    preLanc._confirmarSubida(mod, id);
+  },
+  async _confirmarSubida(mod, id) {
+    try {
+      if (typeof cloud === 'undefined' || !cloud.estaConfigurado()) return;   /* aparelho sem nuvem: nada a cobrar */
+      const rec = store.getById(mod, id);
+      if (!rec || preLanc.estado(rec) !== 'enviado') return;
+      let ok = false;
+      if (cloudRel.disponivel() && await cloud._garantirToken()) {
+        const r = await cloudRel.enviarRegistro(mod, rec, { force: true });
+        ok = !!(r && r.ok);
+      }
+      if (!ok) {
+        toast('📵 Enviado neste aparelho, mas ainda não subiu para a clínica — o médico só vê depois que subir. Use "Subir agora" no Dashboard.', 'warn');
+        try { preLanc.renderFila(); } catch (e) {}
+      }
+    } catch (e) {}
   },
   /* Fecha a ficha depois do envio e leva de volta ao Dashboard, onde ela vê o
      que ainda falta. markClean antes, senão "Descartar alterações?" aparece. */
@@ -11864,27 +11883,67 @@ const preLanc = {
      aparelho dela: sem ir buscar, o médico podia esperar o dia inteiro. Isto
      roda ao abrir o Dashboard (no máximo uma vez por minuto) e no botão. */
   _ultimaBusca: 0,
+  _diag: null,
   async sincronizarFila(opts = {}) {
     if (!opts.forcar && Date.now() - preLanc._ultimaBusca < 60000) return null;
     try {
       if (typeof cloudRel === 'undefined' || !cloudRel.disponivel()) return null;
       if (!(await cloud._garantirToken())) return null;
       preLanc._ultimaBusca = Date.now();
-      let novos = 0, atualizados = 0;
+      let novos = 0, atualizados = 0, naClinica = 0, naoCouberam = 0;
       for (const mod of preLanc.MODS) {
         const remotos = await cloudRel.puxarModulo(mod);
         if (!Array.isArray(remotos)) continue;
+        /* Quantos ENVIADOS existem na clínica, antes de qualquer filtro daqui.
+           É o número que responde "faltou chegar" x "faltou subir". */
+        naClinica += remotos.filter(r => preLanc.estado(r) === 'enviado' && !r._finalizado).length;
         const m = cloudRel.mesclarLocal(mod, remotos);
-        novos += m.novos; atualizados += m.atualizados;
+        novos += m.novos; atualizados += m.atualizados; naoCouberam += m.naoCouberam;
       }
+      preLanc._diag = { naClinica, naoCouberam, quando: new Date().toISOString() };
       try { preLanc.renderFila(); } catch (e) {}
       if ((novos || atualizados) && !opts.silent) {
         toast('☁️ ' + (novos + atualizados) + ' pré-lançamento(s) atualizado(s) da clínica');
       } else if (!opts.silent) {
         toast('Nada novo da clínica por enquanto.');
       }
-      return { novos, atualizados };
+      return { novos, atualizados, naClinica, naoCouberam };
     } catch (e) { return null; }
+  },
+
+  /* Enviado NESTE aparelho mas que ainda não subiu para a clínica: sem
+     _relUpdatedAt o registro nunca foi espelhado, e o médico não tem como
+     ver. Antes isso era invisível — ela via "enviado" e o médico, nada. */
+  naoSubiram() {
+    const out = [];
+    try {
+      preLanc.MODS.forEach(mod => {
+        (store.list(mod) || []).forEach(rec => {
+          if (!rec || rec._finalizado) return;
+          if (preLanc.estado(rec) !== 'enviado') return;
+          if (rec._relUpdatedAt) return;
+          out.push({ mod, rec, nome: arquivo._nomeDe(rec) });
+        });
+      });
+    } catch (e) {}
+    return out;
+  },
+  async subirPendentes() {
+    const lista = preLanc.naoSubiram();
+    if (!lista.length) { toast('Tudo o que você enviou já está na clínica.'); return { ok: 0, falhou: 0 }; }
+    if (!cloudRel.disponivel() || !(await cloud._garantirToken())) {
+      toast('Sem conexão com a clínica agora — tente de novo quando houver internet.', 'warn');
+      return null;
+    }
+    let ok = 0, falhou = 0;
+    for (const it of lista) {
+      try { const r = await cloudRel.enviarRegistro(it.mod, it.rec, { force: true }); (r && r.ok) ? ok++ : falhou++; }
+      catch (e) { falhou++; }
+    }
+    toast(ok ? ('☁️ ' + ok + ' pré-lançamento(s) subiram para a clínica') : 'Não consegui subir agora — tente de novo.',
+      falhou ? 'warn' : 'success');
+    try { preLanc.renderFila(); } catch (e) {}
+    return { ok, falhou };
   },
 
   /* Cartão no Dashboard: a fila do médico e o lembrete da auxiliar */
@@ -11948,7 +12007,28 @@ const preLanc = {
         : '<p style="font-size:.86rem;color:var(--text-mute);margin:0">Nada aguardando conferência.</p>') +
       (parados
         ? '<p style="font-size:.8rem;color:#7a4b12;margin:10px 0 0">⏳ <b>' + parados + '</b> pré-lançamento(s) começado(s) e ainda não enviados há mais de um dia.</p>'
-        : '');
+        : '') +
+      preLanc._conferenciaDeContas(fila.length);
+  },
+
+  /* "Era pra aparecer 13 e aparecem 8." Sem esta conta, não dá para saber se o
+     que falta não CHEGOU (problema aqui) ou não SUBIU (problema no aparelho de
+     quem lançou). O app tem os dois números — então que ele diga. */
+  _conferenciaDeContas(naFila) {
+    const d = preLanc._diag;
+    if (!d) return '';
+    const linhas = [];
+    if (d.naClinica > naFila) {
+      linhas.push('☁️ A clínica tem <b>' + d.naClinica + '</b> aguardando conferência e aqui apareceram <b>' + naFila + '</b>.' +
+        (d.naoCouberam
+          ? ' <b>' + d.naoCouberam + '</b> não couberam neste aparelho — libere espaço em Ajustes → Armazenamento.'
+          : ' Toque em <b>🔄 Buscar</b> de novo; se persistir, me avise.'));
+    } else if (d.naClinica < naFila) {
+      linhas.push('📱 <b>' + (naFila - d.naClinica) + '</b> deste(s) pré-lançamento(s) ainda não estão na clínica — vieram só deste aparelho.');
+    }
+    if (!linhas.length) return '';
+    return '<p style="font-size:.8rem;color:#1c4f7c;background:#eef4fb;border:1px solid #c7dcf0;' +
+      'border-radius:7px;padding:8px 10px;margin:10px 0 0">' + linhas.join('<br>') + '</p>';
   },
 
   /* Aviso no alto do Dashboard de quem pré-lança: o que voltou devolvido e o
@@ -11960,9 +12040,18 @@ const preLanc = {
     if (!preLanc.ehAuxiliar()) { host.style.display = 'none'; host.innerHTML = ''; return; }
     let p;
     try { p = preLanc.meusPendentes(); } catch (e) { p = { rascunho: [], devolvido: [] }; }
-    if (!p.devolvido.length && !p.rascunho.length) { host.style.display = 'none'; host.innerHTML = ''; return; }
+    const presos = preLanc.naoSubiram();
+    if (!p.devolvido.length && !p.rascunho.length && !presos.length) { host.style.display = 'none'; host.innerHTML = ''; return; }
     const abrir = it => 'dashboard._abrirRegistro(\'' + it.mod + '\',\'' + it.rec._id + '\')';
     let html = '';
+    if (presos.length) {
+      /* Enviado aqui, mas nunca espelhado na clínica: para o médico é como se
+         não existisse. Ela precisa saber, e resolver com um toque. */
+      html += '<div class="pl-av pl-av-dev">📵 <b>' + presos.length + '</b> ' +
+        (presos.length === 1 ? 'pré-lançamento enviado ainda não chegou' : 'pré-lançamentos enviados ainda não chegaram') +
+        ' na clínica — o médico não vê até subir.' +
+        '<button type="button" class="btn btn-xs btn-primary" onclick="preLanc.subirPendentes()">Subir agora</button></div>';
+    }
     if (p.devolvido.length) {
       const it = p.devolvido[0];
       html += '<div class="pl-av pl-av-dev">↩ <b>' + p.devolvido.length + '</b> ' +
@@ -19222,22 +19311,35 @@ const cloudRel = {
     } catch (e) { return false; }
   },
   mesclarLocal(mod, remotos) {
-    const res = { novos: 0, atualizados: 0, iguais: 0, adiados: 0 };
+    const res = { novos: 0, atualizados: 0, iguais: 0, adiados: 0, naoCouberam: 0, gravou: true };
     if (!Array.isArray(remotos) || !remotos.length) return res;
     if (typeof STORAGE !== 'undefined' && !STORAGE[mod]) return res;
     const locais = store.list(mod) || [];
     const ix = new Map();
     locais.forEach((x, i) => { if (x && x._id) ix.set(x._id, i); });
+    const entraram = [];
+    /* O que chega novo entra NA FRENTE. store.save corta a lista em
+       HISTORY_MAX a partir do fim — jogado no fim, o que acabou de chegar da
+       clínica seria justamente o primeiro a ser cortado na gravação seguinte. */
+    const novos = [];
     remotos.forEach(item => {
       if (!item || !item._id) return;
-      if (!ix.has(item._id)) { locais.push(item); ix.set(item._id, locais.length - 1); res.novos++; return; }
+      if (!ix.has(item._id)) { novos.push(item); entraram.push(item._id); res.novos++; return; }
       const i = ix.get(item._id);
       const local = locais[i];
       if (cloudRel._quando(item) <= cloudRel._quando(local)) { res.iguais++; return; }
       if (cloudRel._abertoNaTela(item._id)) { res.adiados++; return; }
-      locais[i] = item; res.atualizados++;
+      locais[i] = item; entraram.push(item._id); res.atualizados++;
     });
-    if (res.novos || res.atualizados) store.setList(mod, locais);
+    if (!res.novos && !res.atualizados) return res;
+    const final = novos.concat(locais);
+    res.gravou = store.setList(mod, final) !== false;
+    /* Confere o que ficou de fato gravado: sem espaço, o socorro poda a lista
+       e o registro some sem ninguém avisar. Melhor contar do que supor. */
+    try {
+      const agora = new Set((store.list(mod) || []).map(x => x && x._id).filter(Boolean));
+      res.naoCouberam = entraram.filter(id => !agora.has(id)).length;
+    } catch (e) {}
     return res;
   },
 

@@ -5831,6 +5831,69 @@ await test('A fila do médico vai buscar os pré-lançamentos na clínica sozinh
   await page.close();
 });
 
+/* 104) "Era pra aparecer 13 e aparecem 8." Sem conferir as contas, não dá para
+   saber se o que falta não CHEGOU aqui ou não SUBIU no aparelho de quem
+   lançou. O app tem os dois números — então que ele diga. */
+await test('Quando a conta não fecha, o app diz de que lado o pré-lançamento parou', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('pre', []); store.setList('anestesia', []);
+    const origDisp = cloudRel.disponivel, origPuxa = cloudRel.puxarModulo, origTok = cloud._garantirToken;
+    cloudRel.disponivel = () => true;
+    cloud._garantirToken = async () => true;
+
+    /* LADO DELE: a clínica tem 3 enviados, mas só 1 coube no aparelho */
+    auth.usuarioAtual = () => ({ id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
+    const naNuvem = ['n1', 'n2', 'n3'].map((id, i) => ({
+      _id: id, nome: 'P' + i, data: '2026-08-13', _updatedAt: '2026-08-13T12:0' + i + ':00.000Z',
+      _preLanc: { estado: 'enviado', porNome: 'Sec', enviadoEm: '2026-08-13T12:00:00.000Z' }
+    }));
+    cloudRel.puxarModulo = async (mod) => (mod === 'pre' ? naNuvem : []);
+    /* o aparelho aceita gravar só o primeiro (simula falta de espaço) */
+    const origSet = store.setList;
+    store.setList = (m, arr) => origSet.call(store, m, m === 'pre' ? (arr || []).slice(0, 1) : arr);
+    preLanc._ultimaBusca = 0;
+    const res = await preLanc.sincronizarFila({ forcar: true, silent: true });
+    store.setList = origSet;
+    out.viuTresNaClinica = !!res && res.naClinica === 3;
+    out.percebeuQueFaltou = !!res && res.naoCouberam >= 1;
+    preLanc.renderFila();
+    const card = document.getElementById('pl-fila-card');
+    const txt = card ? card.textContent : '';
+    out.explicouParaEle = /A clínica tem/.test(txt) && /3/.test(txt);
+
+    /* LADO DELA: enviou, mas o registro nunca subiu (sem _relUpdatedAt) */
+    store.setList('pre', [{
+      _id: 'x1', nome: 'Ana', data: '2026-08-13', _updatedAt: '2026-08-13T12:00:00.000Z',
+      _preLanc: { estado: 'enviado', por: 's1', porNome: 'Sec', enviadoEm: '2026-08-13T12:00:00.000Z' }
+    }]);
+    auth.usuarioAtual = () => ({ id: 's1', nome: 'Sec', perfil: 'secretaria', role: 'auxiliar' });
+    out.achouOPreso = preLanc.naoSubiram().length === 1;
+    preLanc.renderFila();
+    const alerta = document.getElementById('pl-alerta');
+    out.avisouAEla = !!alerta && alerta.style.display !== 'none' && /não chegou/.test(alerta.textContent);
+    out.temBotaoSubir = !!alerta && /Subir agora/.test(alerta.innerHTML);
+
+    /* o que já subiu não fica cobrando */
+    store.setList('pre', store.list('pre').map(x => Object.assign({}, x, { _relUpdatedAt: '2026-08-13T12:00:01Z' })));
+    out.paraDeCobrarDepoisDeSubir = preLanc.naoSubiram().length === 0;
+
+    cloudRel.disponivel = origDisp; cloudRel.puxarModulo = origPuxa; cloud._garantirToken = origTok;
+    preLanc._diag = null;
+    store.setList('pre', []); store.setList('anestesia', []);
+    return out;
+  });
+  assert(r.viuTresNaClinica, 'a busca precisa saber quantos existem na clínica, não só quantos entraram');
+  assert(r.percebeuQueFaltou, 'registro que não coube no aparelho não pode sumir em silêncio');
+  assert(r.explicouParaEle, 'o cartão tem que dizer que a clínica tem mais do que apareceu aqui');
+  assert(r.achouOPreso, 'enviado sem espelho na clínica precisa ser identificado');
+  assert(r.avisouAEla, 'ela precisa saber que o envio dela não chegou no médico');
+  assert(r.temBotaoSubir, 'e precisa conseguir resolver com um toque');
+  assert(r.paraDeCobrarDepoisDeSubir, 'depois de subir, o aviso some');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
