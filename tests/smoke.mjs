@@ -5400,12 +5400,14 @@ await test('Botão de enviar pré-lançamento aparece para a auxiliar em pré e 
     out.fichaTem = !!document.getElementById('pl-btn-anestesia')
       && /Enviar pré-lançamento/.test(document.getElementById('pl-btn-anestesia').textContent);
     const btn = document.getElementById('pl-btn-pre');
-    out.dentroDoRodape = !!btn && !!btn.closest('#form-pre');
+    /* fica no módulo, mas FORA do form: dentro dele o modo "edição parcial"
+       aplica pointer-events:none e o toque nunca acontece */
+    out.dentroDoRodape = !!btn && !!btn.closest('#module-pre') && !btn.closest('#form-pre');
 
     /* recalcular não duplica */
     preLanc.renderBotao('pre');
-    out.naoDuplica = document.querySelectorAll('#form-pre [id="pl-btn-pre"]').length === 1
-      && document.querySelectorAll('[id="pl-btn-pre"]').length === 1;
+    out.naoDuplica = document.querySelectorAll('[id="pl-btn-pre"]').length === 1
+      && document.querySelectorAll('[id="pl-host-pre"]').length <= 1;
 
     /* o médico não vê */
     auth.usuarioAtual = () => med;
@@ -5420,7 +5422,7 @@ await test('Botão de enviar pré-lançamento aparece para a auxiliar em pré e 
   });
   assert(r.semLoginNaoTem, 'sem usuário logado o botão não deve existir');
   assert(r.preTem && r.fichaTem, 'a auxiliar deveria ver o botão na pré E na ficha de anestesia');
-  assert(r.dentroDoRodape, 'o botão fica no fim da ficha, junto dos outros');
+  assert(r.dentroDoRodape, 'o botão fica no módulo mas FORA do formulário, senão a edição parcial o trava');
   assert(r.naoDuplica, 'recalcular não pode duplicar o botão');
   assert(r.medicoNaoVe, 'o médico não envia pré-lançamento — ele confere');
   assert(r.recalculaAoSalvar, 'salvar/carregar deveria recalcular o botão sozinho');
@@ -5512,6 +5514,46 @@ await test('O clique do enviar é ligado direto no botão, sem depender do windo
   assert(r.semOnclickNoHTML, 'o clique não pode ser um atributo onclick no HTML');
   assert(r.funcionaSemGlobal, 'o botão precisa funcionar mesmo sem a variável global publicada');
   assert(r.erroVisivel, 'erro no envio tem que virar aviso, nunca silêncio');
+  await page.close();
+});
+
+/* 98) A CAUSA REAL: no modo "edição parcial" o app aplica pointer-events:none
+   em todo botão dentro do formulário. O botão existia, aparecia, e o toque
+   simplesmente não acontecia — nem clique, nem erro. */
+await test('Edição parcial não pode travar o botão de enviar pré-lançamento', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    auth.usuarioAtual = () => ({ id: 's1', nome: 'Sec', perfil: 'secretaria', role: 'auxiliar' });
+    const mod = document.getElementById('module-pre');
+    mod.classList.add('edicao-parcial');           /* é o estado real dela */
+    preLanc.renderBotao('pre');
+
+    const btn = document.querySelector('#pl-btn-pre button');
+    out.existe = !!btn;
+    /* fora do formulário — é o que impede a regra de travar o botão */
+    out.foraDoForm = !!btn && !btn.closest('#form-pre');
+    /* e, mesmo assim, garantido clicável */
+    out.clicavel = !!btn && getComputedStyle(btn).pointerEvents !== 'none' && !btn.disabled;
+    /* um botão qualquer DENTRO do form continua travado — a regra segue valendo */
+    const dentro = document.querySelector('#form-pre button');
+    out.regraContinua = !dentro || getComputedStyle(dentro).pointerEvents === 'none';
+    /* o clique chega mesmo com a classe ativa */
+    let chamou = false;
+    const orig = preLanc.enviar;
+    preLanc.enviar = () => { chamou = true; };
+    btn.click();
+    preLanc.enviar = orig;
+    out.cliqueChega = chamou;
+
+    mod.classList.remove('edicao-parcial');
+    return out;
+  });
+  assert(r.existe, 'o botão precisa existir no modo edição parcial');
+  assert(r.foraDoForm, 'o botão tem que ficar fora do formulário para escapar da trava');
+  assert(r.clicavel, 'o botão não pode ficar com pointer-events desligado');
+  assert(r.regraContinua, 'a trava dos campos do médico continua valendo');
+  assert(r.cliqueChega, 'o clique tem que chegar à função mesmo em edição parcial');
   await page.close();
 });
 

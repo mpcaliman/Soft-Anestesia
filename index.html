@@ -3679,6 +3679,13 @@ body.tem-demo-banner { padding-bottom: 46px; }
 .module.edicao-parcial form button,
 .module.edicao-parcial form .btn,
 .module.edicao-parcial form canvas { pointer-events: none !important; opacity: .96; }
+/* O envio do pré-lançamento é justamente o que a auxiliar PRECISA tocar no
+   modo parcial — nunca pode ser travado junto com os campos do médico. */
+.module.edicao-parcial .pl-rodape,
+.module.edicao-parcial .pl-rodape button,
+.module.somente-impressao .pl-rodape,
+.module.somente-impressao .pl-rodape button,
+[id^="pl-btn-"], [id^="pl-btn-"] button { pointer-events: auto !important; opacity: 1 !important; }
 .module.edicao-parcial .campo-liberado input,
 .module.edicao-parcial .campo-liberado select,
 .module.edicao-parcial .campo-liberado textarea,
@@ -11876,7 +11883,12 @@ const preLanc = {
         host = document.createElement('div');
         host.id = 'pl-host-' + mod;
         host.className = 'pl-rodape';
-        form.appendChild(host);
+        /* FORA do formulário, de propósito: no modo "edição parcial" o app
+           aplica pointer-events:none em todo botão dentro do form. O botão
+           existia, aparecia, e o toque simplesmente não acontecia — nem
+           clique, nem erro. Era esse o silêncio. */
+        if (form.parentNode) form.parentNode.insertBefore(host, form.nextSibling);
+        else form.appendChild(host);
       }
     }
     const antigo = document.getElementById('pl-btn-' + mod);
