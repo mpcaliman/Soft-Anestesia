@@ -4309,7 +4309,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-14j</b><br>
+    v7.1 · build <b id="build-tag">2026-08-14k</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -8058,6 +8058,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
                 <option value="periciado">Periciado</option>
                 <option value="glosado">Glosado</option>
                 <option value="parcial">Parcial (alguns pagos, outros glosados)</option>
+                <option value="cortesia">Cortesia (não será cobrado)</option>
                 <option value="finalizado">Finalizado</option>
               </select>
             </div>
@@ -8097,6 +8098,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <option value="parcial">Parcial</option>
           <option value="periciado">Periciado</option>
           <option value="glosado">Glosado</option>
+          <option value="cortesia">Cortesia</option>
           <option value="finalizado">Finalizado</option>
         </select>
       </div>
@@ -19544,7 +19546,7 @@ const pendencias = {
     if (!alvo) return null;
     alvo.tipo_pagamento = 'Cortesia';
     alvo.pago = true;                     /* sai de "a receber" */
-    alvo.status = 'finalizado';
+    alvo.status = 'cortesia';             /* na conciliação aparece como o que é */
     alvo.observacoes = (alvo.observacoes ? alvo.observacoes + ' · ' : '') + 'Cortesia — sem cobrança';
     store.save('financeiro', alvo);
     try { if (state.currentModule === 'financeiro' && financeiro.render) financeiro.render(); } catch (e) {}
@@ -33992,7 +33994,7 @@ const fin = {
       const k = f._origemLinhaId || '';
       if (usados.has(k)) return;
       const intocada = f._autoCriado && !f.pago && !f.conferido && !f.periciado &&
-                       !Number(f.valor_recebido) && f.status !== 'finalizado';
+                       !Number(f.valor_recebido) && f.status !== 'finalizado' && f.status !== 'cortesia';
       if (intocada) { try { store.delete('financeiro', f._id); removidas++; } catch (e) {} }
       else {
         store.save('financeiro', Object.assign({}, f, {
@@ -40929,13 +40931,19 @@ const financeiro = {
   _conc: { q: '', de: '', ate: '', classe: '' },
   STATUS_LABELS: {
     pendente: '⏳ Pendente', faturado: '📤 Faturado', recebido: '✅ Pago',
-    parcial: '◐ Parcial', periciado: '🔎 Periciado', glosado: '⛔ Glosa', finalizado: '🏁 Concluído'
+    parcial: '◐ Parcial', periciado: '🔎 Periciado', glosado: '⛔ Glosa',
+    /* Cortesia é desfecho, não etapa: o caso está encerrado e não há o que
+       cobrar. Sem ela, o atendimento sem cobrança ficava eternamente
+       "pendente" na conciliação, ou virava "concluído" sem dizer por quê. */
+    cortesia: '🎁 Cortesia', finalizado: '🏁 Concluído'
   },
   _num(v) { return parseFloat(v) || 0; },
   _rs(v) { return 'R$ ' + (financeiro._num(v)).toFixed(2).replace('.', ','); },
 
   /* Sugere a classe pelo confronto dos valores */
   _sugerirStatus(it) {
+    /* cortesia é decisão, não conta: o app não sugere sair dela */
+    if (it.status === 'cortesia') return 'cortesia';
     const prev = financeiro._num(it.valor_previsto);
     const rec = financeiro._num(it.valor_recebido);
     const glo = financeiro._num(it.glosa);
@@ -41245,7 +41253,9 @@ const financeiro = {
 
   /* === SUBMÓDULO: Códigos TUSS / CBHPM === */
   codigos: {
-    STATUS_OPCOES: ['aguardando', 'faturado', 'pago', 'glosado', 'parcial', 'negado'],
+    /* 'cortesia' também por código: numa cirurgia com vários códigos, um deles
+       pode ser cortesia sem que os outros sejam. */
+    STATUS_OPCOES: ['aguardando', 'faturado', 'pago', 'glosado', 'parcial', 'negado', 'cortesia'],
 
     /* Adiciona uma linha de código TUSS */
     add(dados = {}) {
@@ -41362,7 +41372,7 @@ const financeiro = {
       const form = document.getElementById('form-financeiro');
       if (!form) return;
       let totalPrev = 0, totalRec = 0, totalGlo = 0;
-      let countGlosado = 0, countPago = 0, countAguard = 0, countParcial = 0;
+      let countGlosado = 0, countPago = 0, countAguard = 0, countParcial = 0, countCortesia = 0;
       document.querySelectorAll('#fin-codigos-body tr').forEach(tr => {
         totalPrev += parseFloat(tr.querySelector('[name="fin_cod_previsto[]"]')?.value) || 0;
         totalRec  += parseFloat(tr.querySelector('[name="fin_cod_recebido[]"]')?.value) || 0;
@@ -41371,6 +41381,7 @@ const financeiro = {
         if (st === 'glosado' || st === 'negado') countGlosado++;
         else if (st === 'pago') countPago++;
         else if (st === 'parcial') countParcial++;
+        else if (st === 'cortesia') countCortesia++;   /* não é pendência: não há o que cobrar */
         else countAguard++;
       });
       const setV = (n, v) => { const el = form.querySelector(`[name="${n}"]`); if (el) el.value = v ? v.toFixed(2) : ''; };
@@ -41393,11 +41404,15 @@ const financeiro = {
       setV('valor_recebido', totalRec);
       setV('glosa', totalGlo);
       /* Status geral inteligente */
-      const totalLinhas = countGlosado + countPago + countAguard + countParcial;
+      const totalLinhas = countGlosado + countPago + countAguard + countParcial + countCortesia;
       const statusEl = form.querySelector('[name="status"]');
+      /* Cortesia é decisão de quem atendeu, não resultado de conta: o cálculo
+         automático não a desfaz. */
+      if (statusEl && statusEl.value === 'cortesia') { financeiro.calcDif(); return; }
       if (statusEl && totalLinhas > 0) {
-        if (countGlosado === totalLinhas) statusEl.value = 'glosado';
-        else if (countPago === totalLinhas) statusEl.value = 'recebido';
+        if (countCortesia === totalLinhas) statusEl.value = 'cortesia';
+        else if (countGlosado === totalLinhas) statusEl.value = 'glosado';
+        else if (countPago + countCortesia === totalLinhas) statusEl.value = 'recebido';
         else if (countAguard === totalLinhas) statusEl.value = 'pendente';
         else statusEl.value = 'parcial';
       }
@@ -41866,7 +41881,7 @@ const financeiro = {
             valor_previsto: parseFloat(reg.valor_previsto) || 0,
             valor_recebido: parseFloat(reg.valor_recebido) || 0,
             glosa: parseFloat(reg.glosa) || 0,
-            status: reg.status === 'recebido' ? 'pago' :
+            status: (reg.status === 'recebido' || reg.status === 'cortesia') ? 'pago' :
                     reg.status === 'glosado' ? 'glosado' :
                     reg.status === 'parcial' ? 'parcial' : 'aguardando',
             observacao: reg.observacoes || ''
@@ -41974,6 +41989,7 @@ const financeiro = {
       negado:     { cor: '#b3392a', txt: '✗ Negado' },
       parcial:    { cor: '#c47c1f', txt: '⚠ Parcial' },
       faturado:   { cor: '#1c64a9', txt: '📤 Faturado' },
+      cortesia:   { cor: '#6b4fa8', txt: '🎁 Cortesia' },
       aguardando: { cor: '#666',    txt: '⏳ Aguardando' }
     }[st] || { cor: '#888', txt: st || '—' };
     return `<span style="background:${cfg.cor}22;color:${cfg.cor};padding:2px 8px;border-radius:10px;font-size:.74rem;font-weight:600;white-space:nowrap">${cfg.txt}</span>`;

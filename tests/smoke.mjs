@@ -7674,6 +7674,72 @@ await test('Rascunhos: fechar não deixa a aba voltar, e aba em branco não se m
   await page.close();
 });
 
+/* 128) Cortesia na conciliação: atendimento sem cobrança é desfecho, não
+   etapa. Sem essa classe ele ficava para sempre "pendente" na conciliação,
+   ou virava "concluído" sem dizer por quê. */
+await test('Conciliação: cortesia é uma classificação, e nenhum cálculo a desfaz', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('financeiro', []);
+    const it = store.save('financeiro', {
+      paciente: 'Paciente Cortesia', data_proc: utils.hojeISO(),
+      valor_previsto: 500, status: 'pendente'
+    });
+    out.temNaLista = !!financeiro.STATUS_LABELS.cortesia;
+
+    financeiro.conciliar();
+    await new Promise(r => setTimeout(r, 300));
+    out.opcaoNoSelect = document.getElementById('conc-result').innerHTML.indexOf('value="cortesia"') >= 0;
+
+    financeiro._concStatus(it._id, 'cortesia');
+    const dep = store.getById('financeiro', it._id);
+    out.gravou = dep.status === 'cortesia';
+    /* o app sugere classe a partir dos valores — mas não desfaz a cortesia */
+    out.sugestaoRespeita = financeiro._sugerirStatus(dep) === 'cortesia';
+    out.chipAparece = document.getElementById('conc-chips').textContent.indexOf('Cortesia') >= 0;
+    out.badge = financeiro._statusBadge('cortesia').indexOf('Cortesia') >= 0;
+    try { modal.close(); } catch (e) {}
+
+    /* o recálculo dos códigos também não pode desfazer a decisão */
+    financeiro.editar(null);
+    const form = document.getElementById('form-financeiro');
+    form.querySelector('[name="status"]').value = 'cortesia';
+    document.getElementById('fin-codigos-body').innerHTML = '';
+    financeiro.codigos.add({ descricao: 'Proc', porte: '3A', valor_previsto: 100, status: 'aguardando' });
+    financeiro.codigos.recalcular();
+    out.recalculoRespeita = form.querySelector('[name="status"]').value === 'cortesia';
+
+    /* linha de código também pode ser cortesia, e todas cortesia = registro cortesia */
+    out.opcaoPorCodigo = financeiro.codigos.STATUS_OPCOES.indexOf('cortesia') >= 0;
+    form.querySelector('[name="status"]').value = 'pendente';
+    document.querySelector('#fin-codigos-body [name="fin_cod_status[]"]').value = 'cortesia';
+    financeiro.codigos.recalcular();
+    out.todasCortesia = form.querySelector('[name="status"]').value === 'cortesia';
+
+    /* o fluxo de faturamento marca a cortesia com esse nome no financeiro */
+    store.setList('financeiro', []);
+    const reg = store.save('financeiro', { paciente: 'Fluxo Cortesia', valor_previsto: 300, status: 'pendente' });
+    pendencias._aplicarCortesia('financeiro', reg);
+    const dep2 = store.getById('financeiro', reg._id);
+    out.fluxoMarca = dep2.status === 'cortesia' && dep2.pago === true && dep2.tipo_pagamento === 'Cortesia';
+
+    store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.temNaLista, 'cortesia precisa existir entre as classificações');
+  assert(r.opcaoNoSelect, 'e aparecer no seletor de cada linha da conciliação');
+  assert(r.gravou, 'classificar como cortesia grava no registro');
+  assert(r.sugestaoRespeita, 'a sugestão automática não pode desfazer a cortesia');
+  assert(r.chipAparece, 'a classe aparece nos chips, para poder rastrear');
+  assert(r.badge, 'e tem etiqueta própria na tabela');
+  assert(r.recalculoRespeita, 'o recálculo dos códigos não desfaz a decisão de quem atendeu');
+  assert(r.opcaoPorCodigo, 'um código específico também pode ser cortesia');
+  assert(r.todasCortesia, 'todos os códigos em cortesia = registro em cortesia');
+  assert(r.fluxoMarca, 'a cortesia do fluxo de faturamento chega ao financeiro com esse nome');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
