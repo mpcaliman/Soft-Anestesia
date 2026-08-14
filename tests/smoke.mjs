@@ -2058,11 +2058,13 @@ await test('Pendências: plano ≠ Unimed vira alerta com guia/plano; fluxo de f
       && !!(finDepois._faturamento && finDepois._faturamento.faturado)
       && !!finDepois._pendResolvida;
 
-    /* — checklist no formulário do financeiro (8 etapas) — */
+    /* — checklist no formulário do financeiro: uma caixa por etapa do fluxo.
+         Conta pela própria lista, senão incluir uma etapa nova (Cortesia)
+         quebra o teste sem nada estar errado. — */
     pendencias.renderFinanceiro(finDepois);
     const boxFat = document.getElementById('fat-status-box');
     out.checklist = boxFat.style.display !== 'none'
-      && boxFat.querySelectorAll('input[type="checkbox"]').length === 8
+      && boxFat.querySelectorAll('input[type="checkbox"]').length === pendencias.STATUS.length
       && /Recurso de glosa/.test(boxFat.innerHTML)
       && boxFat.querySelectorAll('input:checked').length === 1;
 
@@ -2089,7 +2091,7 @@ await test('Pendências: plano ≠ Unimed vira alerta com guia/plano; fluxo de f
   assert(r.janela, 'a janela deveria mostrar data/paciente/plano/guia e ter o botão Fechar');
   assert(r.resolveu, '✔ Resolver deveria dar baixa na pendência');
   assert(r.fluxo, 'marcar uma etapa do fluxo deveria dar baixa e gravar o carimbo');
-  assert(r.checklist, 'o financeiro deveria mostrar o checklist com as 8 etapas do fluxo');
+  assert(r.checklist, 'o financeiro deveria mostrar o checklist com todas as etapas do fluxo');
   assert(r.dashboard, 'o Dashboard deveria mostrar o card de pendências com o total');
   assert(r.cardSome, 'sem pendências, o card do Dashboard deveria sumir');
   await page.close();
@@ -6088,6 +6090,7 @@ await test('O corte local nunca derruba o que ainda não subiu, e a sincronia ro
         : [];
     };
     localStorage.removeItem(sincronia.MARCAS_KEY);
+    dashboard._puxouVazio = true;      /* fora da medição: o painel vazio tem busca própria */
     store.setList('pre', []);
     /* o ciclo do boot pode estar em curso: esperar por ele evita medir a
        passada errada (foi assim que este teste falhou da primeira vez) */
@@ -6105,7 +6108,9 @@ await test('O corte local nunca derruba o que ainda não subiu, e a sincronia ro
     /* segunda passada: só o que mudou desde a última — leitura barata */
     pedidos.length = 0;
     await ciclo();
-    out.segundaEIncremental = pedidos.length > 0 && pedidos[0].desde === '2026-08-13T12:00:05.000Z';
+    /* outras rotinas (fila, painel vazio) também leem a clínica: o que importa
+       é que o CICLO peça a pré a partir da última marca */
+    out.segundaEIncremental = pedidos.some(p => p.mod === 'pre' && p.desde === '2026-08-13T12:00:05.000Z');
 
     /* clínica fora do ar: espera mais na próxima, em vez de martelar */
     cloudRel.puxarModulo = async () => null;
@@ -6238,12 +6243,23 @@ await test('Pré e Termo vão para a impressão ao finalizar, e a pré gera o fi
   const r = await page.evaluate(async () => {
     const out = {};
     store.setList('pre', []); store.setList('termo', []); store.setList('financeiro', []);
-    let imprimiu = 0;
+    /* A impressão é montada a partir do FORMULÁRIO. Contar chamadas não basta:
+       da primeira vez ela abria DEPOIS do descarte do rascunho, que limpa a
+       tela, e saía em branco. Aqui olhamos o que foi realmente montado. */
+    let imprimiu = 0, conteudo = '';
     const origPrint = printPreview.abrir;
-    printPreview.abrir = () => { imprimiu++; };
+    printPreview.abrir = function () {
+      imprimiu++;
+      const r2 = origPrint.apply(printPreview, arguments);
+      try { conteudo = (document.getElementById('ppp') || {}).innerHTML || ''; } catch (e) {}
+      try { document.getElementById('print-preview-overlay').classList.remove('show'); } catch (e) {}
+      return r2;
+    };
     const origModal = modal.open;
     modal.open = () => {};                       /* a pergunta do termo não interessa aqui */
 
+    /* como no uso real: finaliza de dentro do módulo aberto */
+    ui.navegar('pre');
     /* a pré agora tem onde guardar o convênio */
     const f = document.getElementById('form-pre');
     out.temCampoConvenio = !!f.querySelector('[name="convenio"]');
@@ -6268,9 +6284,11 @@ await test('Pré e Termo vão para a impressão ao finalizar, e a pré gera o fi
 
     await new Promise(r2 => setTimeout(r2, 400));
     out.abriuImpressaoDaPre = imprimiu >= 1;
+    out.impressaoDaPreTemConteudo = /Ana Souza/.test(conteudo) && /Colecistectomia/.test(conteudo);
 
     /* termo: mesma coisa */
-    imprimiu = 0;
+    imprimiu = 0; conteudo = '';
+    ui.navegar('termo');
     const ft = document.getElementById('form-termo');
     ft.querySelector('[name="_id"]') && (ft.querySelector('[name="_id"]').value = '');
     ft.querySelector('[name="nome"]').value = 'Ana Souza';
@@ -6278,6 +6296,7 @@ await test('Pré e Termo vão para a impressão ao finalizar, e a pré gera o fi
     termo.salvar({ finalizar: true, _dupOk: true });
     await new Promise(r2 => setTimeout(r2, 400));
     out.abriuImpressaoDoTermo = imprimiu >= 1;
+    out.impressaoDoTermoTemConteudo = /Ana Souza/.test(conteudo);
 
     /* a janela de pendências não volta a interromper de meia em meia hora */
     let abriu = 0, pintou = 0;
@@ -6309,9 +6328,344 @@ await test('Pré e Termo vão para a impressão ao finalizar, e a pré gera o fi
   assert(r.levouOConvenio && r.levouOTipo, 'o lançamento não pode nascer sem saber de quem cobrar');
   assert(r.levouOResto, 'paciente, hospital e cirurgião viajam junto');
   assert(r.abriuImpressaoDaPre, 'ao finalizar a pré, a impressão abre sozinha');
+  assert(r.impressaoDaPreTemConteudo, 'a impressão não pode sair em branco: tem que trazer o paciente e o procedimento');
   assert(r.abriuImpressaoDoTermo, 'ao finalizar o termo, a impressão abre sozinha');
+  assert(r.impressaoDoTermoTemConteudo, 'a impressão do termo também precisa vir preenchida');
   assert(r.naoInterrompeDeNovo, 'a janela de pendências não pode voltar a interromper de meia em meia hora');
   assert(r.avisaAoEntrar, 'mas ao entrar ela continua avisando');
+  await page.close();
+});
+
+/* 110) Impressão da pré e do termo: menor, sem o traço embaixo de cada valor,
+   e com a logomarca reduzida. São documentos de leitura — não precisam do
+   corpo de texto da ficha de anestesia, que é preenchida à mão. */
+await test('Impressão da pré e do termo sai compacta, sem sublinhado e com logo menor', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    /* os dois documentos pedem o modo compacto */
+    ui.navegar('pre');
+    document.querySelector('#form-pre [name="nome"]').value = 'Ana Souza';
+    out.preCompacta = /pp-compacto/.test(printPreview._buildPre());
+    ui.navegar('termo');
+    document.querySelector('#form-termo [name="nome"]').value = 'Ana Souza';
+    out.termoCompacto = /pp-compacto/.test(printPreview._buildTermo());
+
+    /* mede no papel de verdade: mesmo campo dentro e fora do modo compacto */
+    const ppp = document.getElementById('ppp');
+    ppp.innerHTML =
+      '<div id="tst-normal"><img class="pp-logo" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">' +
+      '<div class="pp-field"><span class="pp-label">L</span><span class="pp-value">V</span></div></div>' +
+      '<div id="tst-comp" class="pp-compacto"><img class="pp-logo" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">' +
+      '<div class="pp-field"><span class="pp-label">L</span><span class="pp-value">V</span></div></div>';
+    const cs = (sel) => getComputedStyle(document.querySelector(sel));
+    const normal = cs('#tst-normal .pp-value'), comp = cs('#tst-comp .pp-value');
+    const fN = parseFloat(normal.fontSize), fC = parseFloat(comp.fontSize);
+    out.reduziuOTexto = fN > 0 && Math.abs((fC / fN) - 0.8) < 0.03;
+    out.reduziuORotulo = (() => {
+      const a = parseFloat(cs('#tst-normal .pp-label').fontSize);
+      const b = parseFloat(cs('#tst-comp .pp-label').fontSize);
+      return a > 0 && Math.abs((b / a) - 0.8) < 0.03;
+    })();
+    const lN = parseFloat(cs('#tst-normal .pp-logo').height), lC = parseFloat(cs('#tst-comp .pp-logo').height);
+    out.reduziuALogo = lN > 0 && lC < lN * 0.7;
+
+    /* o traço embaixo do valor sai — em toda impressão, não só na compacta */
+    out.semTracoNaCompacta = parseFloat(comp.borderBottomWidth || '0') === 0;
+    out.semTracoTambemNoResto = parseFloat(normal.borderBottomWidth || '0') === 0;
+
+    ppp.innerHTML = '';
+    return out;
+  });
+  assert(r.preCompacta && r.termoCompacto, 'pré e termo têm que pedir o modo compacto');
+  assert(r.reduziuOTexto, 'o texto do documento precisa sair ~20% menor');
+  assert(r.reduziuORotulo, 'os rótulos acompanham a redução');
+  assert(r.reduziuALogo, 'a logomarca precisa reduzir mais que o texto');
+  assert(r.semTracoNaCompacta && r.semTracoTambemNoResto, 'o traço embaixo de cada valor sai da impressão');
+  await page.close();
+});
+
+/* 111) Cortesia entre as ações da pendência: não é etapa de faturamento, é o
+   fim dele. Sem essa opção o caso cobrava baixa para sempre, ou era resolvido
+   sem dizer por quê — e o valor seguia contando como "a receber". */
+await test('Cortesia é uma das ações da pendência de convênio e chega ao financeiro', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('pre', []); store.setList('financeiro', []);
+    out.estaNasOpcoes = pendencias.STATUS.some(([k, rot]) => k === 'cortesia' && /cortesia/i.test(rot));
+
+    /* uma pré de plano, com o lançamento financeiro que ela gerou */
+    const pre1 = store.save('pre', {
+      nome: 'Ana Souza', data: '2026-08-13', convenio: 'Bradesco Saúde', cirurgia: 'Colecistectomia'
+    });
+    const lanc = store.save('financeiro', {
+      _origemId: pre1._id, paciente: 'Ana Souza', convenio: 'Bradesco Saúde',
+      data_proc: '2026-08-13', valor_previsto: 1200, status: 'pendente', pago: false
+    });
+    out.entrouNaLista = pendencias.listar().some(p => p.id === pre1._id);
+
+    /* marca cortesia pela janela */
+    pendencias.marcarStatus('pre', pre1._id, 'cortesia', true);
+    const dep = store.getById('pre', pre1._id);
+    out.carimbouNoRegistro = !!(dep._faturamento && dep._faturamento.cortesia);
+    out.saiuDaPendencia = !pendencias.listar().some(p => p.id === pre1._id);
+
+    const fin1 = store.getById('financeiro', lanc._id);
+    out.marcouNoFinanceiro = fin1.tipo_pagamento === 'Cortesia' && fin1.pago === true;
+    out.naoApagouOValor = Number(fin1.valor_previsto) === 1200;   /* o dado do usuário fica */
+    out.deixouORastro = /cortesia/i.test(fin1.observacoes || '');
+
+    /* marcada direto no próprio lançamento financeiro, funciona igual */
+    const solto = store.save('financeiro', {
+      paciente: 'Bia', convenio: 'Amil', data_proc: '2026-08-13',
+      valor_previsto: 800, status: 'pendente', pago: false
+    });
+    pendencias.marcarStatus('financeiro', solto._id, 'cortesia', true);
+    const fin2 = store.getById('financeiro', solto._id);
+    out.funcionaNoProprioLancamento = fin2.tipo_pagamento === 'Cortesia' && fin2.pago === true;
+
+    store.setList('pre', []); store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.estaNasOpcoes, 'Cortesia precisa estar entre as ações da pendência');
+  assert(r.entrouNaLista, 'a pendência de plano precisa existir antes de ser resolvida');
+  assert(r.carimbouNoRegistro && r.saiuDaPendencia, 'marcar cortesia dá baixa e deixa registrado o porquê');
+  assert(r.marcouNoFinanceiro, 'a cortesia tem que chegar ao financeiro — senão o valor fica como "a receber"');
+  assert(r.naoApagouOValor, 'o valor digitado pelo usuário não é apagado');
+  assert(r.deixouORastro, 'fica escrito no lançamento que foi cortesia');
+  assert(r.funcionaNoProprioLancamento, 'marcada direto no lançamento financeiro, funciona igual');
+  await page.close();
+});
+
+/* 112) Produtividade é o que ficou PRONTO. Rascunho e pré-lançamento não são
+   produção: o painel contando trabalho em curso vira promessa, não medida. E o
+   painel precisa abrir mostrando NÚMERO, não recado. */
+await test('Dashboard conta só o que foi finalizado, e os números vêm antes dos avisos', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('anestesia', []); store.setList('pre', []);
+    store.setList('consulta', []); store.setList('financeiro', []);
+    auth.usuarioAtual = () => ({ id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
+    const hoje = new Date().toISOString().slice(0, 10);
+
+    /* uma finalizada, um rascunho e um pré-lançamento enviado (não conferido) */
+    store.setList('pre', [
+      { _id: 'f1', nome: 'Finalizada', data: hoje, _finalizado: true, _updatedAt: new Date().toISOString() },
+      { _id: 'r1', nome: 'Rascunho', data: hoje, _updatedAt: new Date().toISOString() },
+      { _id: 'p1', nome: 'Pré-lançada', data: hoje, _updatedAt: new Date().toISOString(),
+        _preLanc: { estado: 'enviado', porNome: 'Sec' } }
+    ]);
+    document.getElementById('dash-escopo').value = 'clinica';
+    document.getElementById('dash-periodo').value = 'hoje';
+    dashboard.atualizar();
+    const kpi = document.getElementById('kpi-grid');
+    const cartaoPre = kpi.querySelector('[data-detail="pre"] .kpi-value');
+    out.contouSoAFinalizada = cartaoPre && cartaoPre.textContent.trim() === '1';
+    out.dizQueEhFinalizada = /finalizad/i.test(kpi.querySelector('[data-detail="pre"] .kpi-sub').textContent);
+
+    /* o helper é a régua única, e o financeiro não passa por ela (não tem
+       "finalizar": ele nasce já lançado) */
+    out.regraUnica = dashboard._soProducao([{ _finalizado: true }, {}, { _finalizado: false }]).length === 1;
+
+    /* números antes dos avisos, na ordem da página */
+    const mod = document.getElementById('module-dashboard');
+    const pos = (sel) => {
+      const el = mod.querySelector(sel);
+      if (!el) return -1;
+      return Array.prototype.indexOf.call(mod.querySelectorAll('*'), el);
+    };
+    out.numerosPrimeiro = pos('#kpi-grid') > 0 && pos('#kpi-grid') < pos('#pl-fila-card')
+      && pos('#kpi-grid') < pos('#pl-alerta');
+
+    /* painel zerado busca a produção na clínica em vez de aceitar o zero */
+    const origDisp = cloudRel.disponivel, origTok = cloud._garantirToken, origPuxa = cloudRel.puxarModulo;
+    cloudRel.disponivel = () => true;
+    cloud._garantirToken = async () => true;
+    let pediu = 0;
+    cloudRel.puxarModulo = async (m) => {
+      pediu++;
+      return m === 'anestesia'
+        ? [{ _id: 'nuvem1', paciente: { nome: 'Da clínica' }, procedimento: { data: hoje },
+             _finalizado: true, _updatedAt: new Date().toISOString(), _relUpdatedAt: '2026-08-13T12:00:00Z' }]
+        : [];
+    };
+    store.setList('pre', []); store.setList('anestesia', []);
+    dashboard._puxouVazio = false;
+    await dashboard._puxarSeVazio(0);
+    out.foiBuscar = pediu > 0;
+    out.trouxe = !!store.getById('anestesia', 'nuvem1');
+    /* e não fica repetindo a cada render */
+    pediu = 0;
+    await dashboard._puxarSeVazio(0);
+    out.naoRepete = pediu === 0;
+    /* com produção na tela, nem tenta */
+    dashboard._puxouVazio = false;
+    pediu = 0;
+    await dashboard._puxarSeVazio(5);
+    out.naoBuscaSeTemDados = pediu === 0;
+
+    cloudRel.disponivel = origDisp; cloud._garantirToken = origTok; cloudRel.puxarModulo = origPuxa;
+    store.setList('anestesia', []); store.setList('pre', []);
+    store.setList('consulta', []); store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.contouSoAFinalizada, 'rascunho e pré-lançamento não podem contar como produção');
+  assert(r.dizQueEhFinalizada, 'o cartão precisa dizer que conta o que foi finalizado');
+  assert(r.regraUnica, 'a régua de produção é uma só');
+  assert(r.numerosPrimeiro, 'os números vêm antes dos avisos — senão o painel vira quadro de aviso');
+  assert(r.foiBuscar && r.trouxe, 'painel zerado vai buscar a produção na clínica');
+  assert(r.naoRepete, 'a busca do painel vazio não pode repetir a cada render');
+  assert(r.naoBuscaSeTemDados, 'com dados na tela, não há o que buscar');
+  await page.close();
+});
+
+/* 113a) Zero mudo faz duvidar do sistema inteiro: o painel tem que dizer onde
+   a produção está — e o filtro de autoria não pode esconder ficha assinada
+   pela própria pessoa. */
+await test('Painel zerado explica o porquê e leva até a produção', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ['anestesia', 'pre', 'consulta', 'recuperacao', 'financeiro'].forEach(m => store.setList(m, []));
+    auth.usuarioAtual = () => ({ id: 'm1', nome: 'Marcelo', usuario: 'mpcaliman', perfil: 'admin', role: 'gestor' });
+    const hoje = new Date().toISOString().slice(0, 10);
+    const ontemD = new Date(Date.now() - 5 * 86400000).toISOString().slice(0, 10);
+
+    /* autoria pelo campo de quem assina — era o buraco: 'anestesiologista' não
+       entrava na conta e a ficha do próprio médico sumia do painel dele */
+    out.reconheceQuemAssina = dashboard._filtrarEscopo(
+      [{ _id: 'x', anestesiologista: 'Marcelo' }, { _id: 'y', anestesiologista: 'Outra pessoa' }], 'pessoal'
+    ).length === 1;
+
+    /* caso 1: tudo em aberto (nada finalizado) */
+    store.setList('pre', [{ _id: 'a1', nome: 'Em aberto', data: hoje, _updatedBy: 'mpcaliman' }]);
+    document.getElementById('dash-escopo').value = 'pessoal';
+    document.getElementById('dash-periodo').value = 'hoje';
+    dashboard.atualizar();
+    const aviso = document.getElementById('dash-vazio');
+    out.explicouNaoFinalizado = aviso.style.display !== 'none' && /não finalizado/i.test(aviso.textContent);
+
+    /* caso 2: finalizado, mas de outra pessoa da clínica */
+    store.setList('pre', [{ _id: 'b1', nome: 'De outro', data: hoje, _finalizado: true, _updatedBy: 'mpcanestesiologia' }]);
+    dashboard.atualizar();
+    out.explicouDeOutro = /de outra pessoa/i.test(aviso.textContent) && /Ver clínica/.test(aviso.innerHTML);
+    /* e o atalho troca o filtro de verdade */
+    dashboard._verComo('clinica');
+    out.atalhoFunciona = document.getElementById('dash-escopo').value === 'clinica'
+      && document.querySelector('#kpi-grid [data-detail="pre"] .kpi-value').textContent.trim() === '1';
+
+    /* caso 3: finalizado meu, mas fora do período */
+    document.getElementById('dash-escopo').value = 'pessoal';
+    store.setList('pre', [{ _id: 'c1', nome: 'Antigo', data: ontemD, _finalizado: true, _updatedBy: 'mpcaliman' }]);
+    document.getElementById('dash-periodo').value = 'hoje';
+    dashboard.atualizar();
+    out.explicouForaDoPeriodo = /fora deste período/i.test(aviso.textContent);
+    dashboard._verComo(null, 'all');
+    out.atalhoDoPeriodo = document.getElementById('dash-periodo').value === 'all'
+      && document.querySelector('#kpi-grid [data-detail="pre"] .kpi-value').textContent.trim() === '1';
+
+    /* com produção na tela, o aviso some */
+    out.some = document.getElementById('dash-vazio').style.display === 'none';
+
+    ['anestesia', 'pre', 'consulta', 'recuperacao', 'financeiro'].forEach(m => store.setList(m, []));
+    return out;
+  });
+  assert(r.reconheceQuemAssina, 'quem assina a ficha é autor dela — senão ela some do painel do próprio médico');
+  assert(r.explicouNaoFinalizado, 'se há registro em aberto, o painel precisa dizer que produção só conta finalizada');
+  assert(r.explicouDeOutro, 'se a produção do período é de outra pessoa, o painel diz e oferece ver a clínica');
+  assert(r.atalhoFunciona, 'o atalho tem que trocar o filtro de verdade');
+  assert(r.explicouForaDoPeriodo, 'produção fora do período precisa ser apontada');
+  assert(r.atalhoDoPeriodo, 'e alcançável em um toque');
+  assert(r.some, 'com produção na tela, o aviso some');
+  await page.close();
+});
+
+/* 113b) O aviso dizia "eles entram nos totais", mas só o cartão de anestesia
+   somava a nuvem — os outros mostravam zero enquanto o aviso prometia o
+   contrário. E, com o disco grande, arquivar deixou de ser necessário. */
+await test('O que está na nuvem soma em todos os cartões, e dá para trazer tudo de volta', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    ['anestesia', 'pre', 'consulta', 'recuperacao', 'financeiro'].forEach(m => store.setList(m, []));
+    auth.usuarioAtual = () => ({ id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
+    const hoje = new Date().toISOString().slice(0, 10);
+
+    /* índice de arquivados: 2 finalizados e 1 rascunho em cada módulo */
+    const entrada = (i, fin) => ({ id: 'arq' + i, nome: 'P' + i, data: hoje, fin });
+    localStorage.setItem(arquivo.INDEX_KEY, JSON.stringify({
+      pre: [entrada(1, true), entrada(2, true), entrada(3, false)],
+      consulta: [entrada(4, true)],
+      recuperacao: [entrada(5, true)],
+      anestesia: [entrada(6, true)]
+    }));
+    document.getElementById('dash-escopo').value = 'clinica';
+    document.getElementById('dash-periodo').value = 'hoje';
+    dashboard.atualizar();
+    const valor = (mod) => document.querySelector('#kpi-grid [data-detail="' + mod + '"] .kpi-value').textContent.trim();
+    out.preSomou = valor('pre') === '2';                 /* o rascunho arquivado não conta */
+    out.consultaSomou = valor('consulta') === '1';
+    out.srpaSomou = valor('recuperacao') === '1';
+    out.anestesiaSomou = valor('anestesia') === '1';
+
+    /* entrada antiga, sem a marca, continua contando (não esconder produção) */
+    localStorage.setItem(arquivo.INDEX_KEY, JSON.stringify({ pre: [{ id: 'velho', nome: 'V', data: hoje }] }));
+    dashboard.atualizar();
+    out.entradaAntigaConta = valor('pre') === '1';
+
+    /* e o painel oferece trazer tudo de volta quando o disco grande está ativo */
+    const aviso = document.getElementById('dash-aviso-nuvem');
+    localStorage.setItem(modoNuvem.KEY, '1');
+    dashboard.atualizar();
+    out.ofereceVoltar = disco._pronto && /parar de arquivar/i.test(aviso.innerHTML);
+
+    let restaurou = 0;
+    const origRest = arquivo.restaurarTodos;
+    arquivo.restaurarTodos = async () => { restaurou++; };
+    await dashboard._voltarTudoParaCa();
+    arquivo.restaurarTodos = origRest;
+    out.desligouOArquivamento = modoNuvem.ligado() === false && arquivo.autoLigado() === false;
+    out.trouxeDeVolta = restaurou >= 1;   /* desligar o modo nuvem já restaura; a chamada extra é idempotente */
+
+    localStorage.removeItem(arquivo.INDEX_KEY);
+    ['anestesia', 'pre', 'consulta', 'recuperacao', 'financeiro'].forEach(m => store.setList(m, []));
+    return out;
+  });
+  assert(r.preSomou && r.consultaSomou && r.srpaSomou && r.anestesiaSomou,
+    'o que está na nuvem tem que somar em TODOS os cartões, não só no de anestesia');
+  assert(r.entradaAntigaConta, 'arquivo antigo sem a marca continua contando — esconder produção real seria pior');
+  assert(r.ofereceVoltar, 'com o disco grande, o painel oferece trazer tudo de volta');
+  assert(r.desligouOArquivamento && r.trouxeDeVolta, 'trazer de volta também desliga o arquivamento — senão sai tudo de novo');
+  await page.close();
+});
+
+/* 113) O termo é documento, não produção faturável: não gera financeiro. */
+await test('Termo de consentimento não gera lançamento financeiro', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('termo', []); store.setList('financeiro', []);
+    ui.navegar('termo');
+    const ft = document.getElementById('form-termo');
+    const h = ft.querySelector('[name="_id"]'); if (h) h.value = '';
+    ft.querySelector('[name="nome"]').value = 'Ana Souza';
+    const dt = ft.querySelector('[name="data"]'); if (dt) dt.value = '2026-08-13';
+    const origPrint = printPreview.abrir; printPreview.abrir = () => {};
+    termo.salvar({ finalizar: true, _dupOk: true });
+    printPreview.abrir = origPrint;
+    const t = store.list('termo')[0];
+    out.finalizou = !!t && t._finalizado === true;
+    out.semFinanceiro = store.list('financeiro').length === 0;
+    /* e o gerador de lançamentos não conhece o termo */
+    out.semRegraDeTermo = fin.fromDoc('termo', t || { _id: 'x', nome: 'Ana' }) === null;
+    store.setList('termo', []); store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.finalizou, 'o termo precisa finalizar normalmente');
+  assert(r.semFinanceiro, 'finalizar o termo não pode gerar lançamento financeiro');
+  assert(r.semRegraDeTermo, 'não existe regra de financeiro para o termo — nem por outro caminho');
   await page.close();
 });
 

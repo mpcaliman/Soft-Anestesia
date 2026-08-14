@@ -3056,6 +3056,13 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
 .print-preview-paper * { position: static !important; }
 .print-preview-paper img { max-width: 100%; height: auto; }
 .print-preview-paper table { table-layout: fixed; width: 100%; word-wrap: break-word; }
+/* IMPRESSÃO COMPACTA — pré-anestésica e termo.
+   Esses dois são documentos de leitura, não de plantão: cabem numa folha com
+   folga e não precisam do corpo de texto grande da ficha de anestesia, que é
+   preenchida à mão e lida de longe. Uma variável só governa o tamanho de tudo
+   (rótulos, valores, títulos e tabelas); a logomarca tem a sua, porque ela
+   pedia uma redução maior do que o texto. */
+.pp-compacto { --pp-esc: .8; --pp-logo: .62; }
 .print-preview-paper .pp-header {
   margin-bottom: 10px;
 }
@@ -3068,9 +3075,9 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
   border-bottom: 1px solid #d0d4da;
 }
 .print-preview-paper .pp-logo {
-  height: 96px;
+  height: calc(96px * var(--pp-logo, 1));
   width: auto;
-  max-width: 440px;
+  max-width: calc(440px * var(--pp-logo, 1));
   object-fit: contain;
   flex-shrink: 0;
 }
@@ -3080,20 +3087,20 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
   min-width: 0;
 }
 .print-preview-paper .pp-prof-nome {
-  font-size: 11pt;
+  font-size: calc(11pt * var(--pp-esc, 1));
   font-weight: 700;
   color: #1a2332;
   letter-spacing: .2px;
 }
 .print-preview-paper .pp-prof-reg {
-  font-size: 8.5pt;
+  font-size: calc(8.5pt * var(--pp-esc, 1));
   color: #5a6472;
   margin-top: 1px;
   text-transform: uppercase;
   letter-spacing: .3px;
 }
 .print-preview-paper .pp-prof-end {
-  font-size: 8.5pt;
+  font-size: calc(8.5pt * var(--pp-esc, 1));
   color: #8a93a0;
   margin-top: 1px;
 }
@@ -3102,7 +3109,7 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
   margin-top: 7px;
 }
 .print-preview-paper .pp-doc-title h1 {
-  font-size: 13.5pt;
+  font-size: calc(13.5pt * var(--pp-esc, 1));
   font-weight: 700;
   letter-spacing: 1px;
   color: #1a2332;
@@ -3110,14 +3117,14 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
   text-transform: uppercase;
 }
 .print-preview-paper .pp-doc-meta {
-  font-size: 9.5pt;
+  font-size: calc(9.5pt * var(--pp-esc, 1));
   color: #8a93a0;
   margin-top: 2px;
   line-height: 1.25;
 }
 .print-preview-paper .pp-doc-meta strong { font-weight: 600; color: #5a6472; }
 .print-preview-paper h2 {
-  font-size: 10pt;
+  font-size: calc(10pt * var(--pp-esc, 1));
   font-weight: 700;
   letter-spacing: .5px;
   text-transform: uppercase;
@@ -3133,7 +3140,7 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
   grid-template-columns: repeat(2, 1fr);
   gap: 3px 16px;
   margin-bottom: 6px;
-  font-size: 10.5pt;
+  font-size: calc(10.5pt * var(--pp-esc, 1));
 }
 .print-preview-paper .pp-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
 .print-preview-paper .pp-grid.cols-1 { grid-template-columns: 1fr; }
@@ -3149,27 +3156,27 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
   font-weight: 600;
   color: #8a93a0;
   text-transform: uppercase;
-  font-size: 8pt;
+  font-size: calc(8pt * var(--pp-esc, 1));
   letter-spacing: .3px;
   white-space: nowrap;
 }
+/* Sem sublinhado: a linha embaixo de cada valor virava um traço em toda a
+   folha e sujava a leitura. O rótulo já separa um campo do outro. */
 .print-preview-paper .pp-field .pp-value {
   flex: 1;
-  font-size: 10.5pt;
+  font-size: calc(10.5pt * var(--pp-esc, 1));
   color: #1a2332;
-  border-bottom: 1px solid #e2e5ea;
-  padding-bottom: 1px;
 }
 .print-preview-paper .pp-block {
   margin-bottom: 6px;
   padding: 1px 0;
-  font-size: 10.5pt;
+  font-size: calc(10.5pt * var(--pp-esc, 1));
 }
 .print-preview-paper .pp-block .pp-label {
   font-weight: 600;
   color: #8a93a0;
   text-transform: uppercase;
-  font-size: 8pt;
+  font-size: calc(8pt * var(--pp-esc, 1));
   letter-spacing: .3px;
   display: block;
   margin-bottom: 2px;
@@ -3183,7 +3190,7 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
   display: grid; grid-template-columns: repeat(6, 1fr); gap: 2px 6px;
   border: 1px solid #d0d5db; border-radius: 4px; padding: 4px 6px;
 }
-.print-preview-paper .pp-lab-item { font-size: 9.5pt; white-space: nowrap; }
+.print-preview-paper .pp-lab-item { font-size: calc(9.5pt * var(--pp-esc, 1)); white-space: nowrap; }
 .print-preview-paper .pp-lab-k { color: #8a93a0; font-weight: 600; }
 .print-preview-paper .pp-lab-v { color: #1a2332; font-weight: 600; }
 .print-preview-paper .pp-table {
@@ -4259,7 +4266,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-13i</b><br>
+    v7.1 · build <b id="build-tag">2026-08-13o</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -4362,6 +4369,13 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     <!-- Pré-lançamento: o aviso da auxiliar e a fila do médico ficam FORA da
          grade de gráficos — a grade some inteira para quem só pré-lança, e o
          cartão dela ia junto. -->
+    <!-- Os NÚMEROS vêm primeiro. Com os avisos no topo, o painel virou quadro
+         de aviso: quem entra quer ver a produção, não pendência. -->
+    <div class="kpi-grid" id="kpi-grid"></div>
+    <!-- Zero sem explicação é o pior número do painel: não dá para saber se foi
+         um dia parado, o filtro errado ou dado que não chegou. -->
+    <div id="dash-vazio" class="dash-aviso-nuvem" style="display:none"></div>
+
     <div id="pl-alerta" class="pl-alerta" style="display:none"></div>
     <div class="card no-collapse" id="pl-fila-card" style="display:none">
       <div class="card-header">
@@ -4370,8 +4384,6 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       </div>
       <div class="card-body" id="pl-fila-lista"></div>
     </div>
-
-    <div class="kpi-grid" id="kpi-grid"></div>
 
     <!-- 📅 MEU DIA — casos de hoje com o estado de cada etapa (fechamento do plantão) -->
     <div class="card no-collapse no-print" id="meu-dia-card">
@@ -4514,7 +4526,9 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <div class="field col-2"><label>Sexo</label>
             <select name="sexo" onchange="pre._calcIMC()"><option value="">—</option><option>Masculino</option><option>Feminino</option><option>Outro</option></select>
           </div>
-          <div class="field col-6">
+          <!-- Nome de procedimento é longo ("videolaparoscopia com…"), e meia
+               linha obrigava a ler por partes: fica com a linha inteira. -->
+          <div class="field col-12">
             <label>Cirurgia proposta <small style="color:var(--text-mute);font-weight:400">(autocompleta da CBHPM)</small></label>
             <div style="display:flex;gap:6px;align-items:stretch">
               <input type="text" name="cirurgia" class="cbhpm-autocomplete" placeholder="Digite parte do procedimento ou o código TUSS..." style="flex:1">
@@ -4523,11 +4537,11 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
             <div id="pre-procs-lista" class="pre-procs-lista"></div>
           </div>
           <div class="field col-6"><label>Cirurgião</label><input type="text" name="cirurgiao"></div>
-          <div class="field col-6"><label>Hospital / clínica</label><input type="text" name="hospital"></div>
+          <div class="field col-3"><label>Hospital / clínica</label><input type="text" name="hospital"></div>
           <!-- Sem o convênio aqui, o lançamento financeiro gerado na finalização
                nascia sem pagador: não dava para saber se era plano, particular
                ou SUS, e a pendência de convênio não tinha como se resolver. -->
-          <div class="field col-6"><label>Convênio / plano</label>
+          <div class="field col-3"><label>Convênio / plano</label>
             <select name="convenio">
               <option value="">—</option><option>Particular</option><option>SUS</option><option>Unimed</option>
               <option>Bradesco Saúde</option><option>Amil</option><option>SulAmérica</option>
@@ -11143,8 +11157,13 @@ const arquivo = {
         ix[mod] = ix[mod] || [];
         saem.forEach(it => {
           if (!ix[mod].some(e => e.id === it._id)) {
+            /* `fin` marca se o registro estava FINALIZADO: o painel conta
+               PRODUÇÃO, e sem essa marca o que está na nuvem entraria no total
+               mesmo sendo rascunho. Entradas antigas não têm o campo — nesse
+               caso contam, porque esconder produção real seria pior. */
             ix[mod].push({ id: it._id, nome: arquivo._nomeDe(it),
-              data: (it.data || it.data_proc || String(it._updatedAt || '').slice(0, 10) || '') });
+              data: (it.data || it.data_proc || String(it._updatedAt || '').slice(0, 10) || ''),
+              fin: !!it._finalizado });
           }
           n++;
         });
@@ -11876,8 +11895,13 @@ const modoNuvem = {
         ix[mod] = ix[mod] || [];
         saem.forEach(it => {
           if (!ix[mod].some(e => e.id === it._id)) {
+            /* `fin` marca se o registro estava FINALIZADO: o painel conta
+               PRODUÇÃO, e sem essa marca o que está na nuvem entraria no total
+               mesmo sendo rascunho. Entradas antigas não têm o campo — nesse
+               caso contam, porque esconder produção real seria pior. */
             ix[mod].push({ id: it._id, nome: arquivo._nomeDe(it),
-              data: (it.data || it.data_proc || String(it._updatedAt || '').slice(0, 10) || '') });
+              data: (it.data || it.data_proc || String(it._updatedAt || '').slice(0, 10) || ''),
+              fin: !!it._finalizado });
           }
           n++;
         });
@@ -13828,17 +13852,19 @@ const pre = {
     ui.atualizarDocStatus('pre', saved);
     setSavedStatus((finalizar ? 'Finalizado às ' : 'Salvo às ') + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
     markClean();
-    /* Rascunho só é descartado quando finaliza; salvar normal mantém o rascunho ativo */
+    /* Ordem obrigatória aqui: o backup em PDF desiste se a pré-visualização
+       estiver aberta (ela usa o mesmo container), então ele vai primeiro.
+       E os dois vêm ANTES do descarte do rascunho, porque ambos são montados a
+       partir do FORMULÁRIO — depois do descarte a tela já está limpa e a
+       impressão saía em branco. */
     if (finalizar) { try { pdfBackup.autoAoFinalizar('pre'); } catch (e) {} }
+    if (finalizar) { try { printPreview.abrir(); } catch (e) {} }
+    /* Rascunho só é descartado quando finaliza; salvar normal mantém o rascunho ativo */
     if (finalizar) { try { rascunhos.removerAtivo('pre'); } catch (e) {} }
     toast(finalizar ? '✅ Avaliação finalizada' : '💾 Avaliação salva (dados preservados)');
-    /* Finalizou: a impressão é o passo seguinte de fato — o papel vai para o
-       prontuário do hospital. Abre direto, e a pergunta do Termo espera a vez
-       (ela já sabe esperar janela aberta, ver _perguntarTermo). */
-    if (finalizar) {
-      setTimeout(() => { try { printPreview.abrir(); } catch (e) {} }, 250);
-      setTimeout(() => pre._perguntarTermo(saved), 700);
-    }
+    /* A pergunta do Termo espera a impressão sair da frente (ela já sabe
+       esperar janela aberta, ver _perguntarTermo). */
+    if (finalizar) setTimeout(() => pre._perguntarTermo(saved), 700);
   },
   /* ---------- Navegação por seções + status de completude ---------- */
   nav: {
@@ -15413,12 +15439,13 @@ const termo = {
     ui.atualizarDocStatus('termo', saved);
     setSavedStatus((finalizar ? 'Finalizado às ' : 'Salvo às ') + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
     markClean();
+    /* Mesma ordem da pré: backup do PDF primeiro (ele desiste se a
+       pré-visualização estiver aberta), impressão depois, e ambos antes do
+       descarte do rascunho — os dois leem o formulário. */
     if (finalizar) { try { pdfBackup.autoAoFinalizar('termo'); } catch (e) {} }
+    if (finalizar) { try { printPreview.abrir(); } catch (e) {} }
     if (finalizar) { try { rascunhos.removerAtivo('termo'); } catch (e) {} }
     toast(finalizar ? '✅ Termo finalizado' : '💾 Termo salvo (dados preservados)');
-    /* Termo finalizado existe para ser assinado no papel: vai direto para a
-       impressão, como a pré-anestésica. */
-    if (finalizar) setTimeout(() => { try { printPreview.abrir(); } catch (e) {} }, 250);
   },
   finalizar() { termo.salvar({ finalizar: true }); },
   salvarComoNovo() {
@@ -18970,7 +18997,11 @@ const pendencias = {
     ['em_pagamento', 'Em pagamento'],
     ['pago', 'Pago'],
     ['glosa', 'Glosa'],
-    ['recurso_glosa', 'Recurso de glosa']
+    ['recurso_glosa', 'Recurso de glosa'],
+    /* Cortesia não é etapa de faturamento — é o fim dele. Sem essa opção, o
+       caso ficava cobrando baixa para sempre ou era "resolvido" sem deixar
+       registro do porquê. */
+    ['cortesia', 'Cortesia (não será cobrado)']
   ],
   JANELA_DIAS: 90,
 
@@ -19033,7 +19064,7 @@ const pendencias = {
       '</td></tr>').join('');
     const corpo = !lista.length
       ? '<p style="color:var(--text-mute)">🎉 Nenhuma pendência de convênio.</p>'
-      : '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">Guias de <b>planos de saúde (exceto Unimed)</b> aguardando processamento. Marque uma etapa do fluxo (ou ✔ Resolver) para dar baixa — enquanto houver pendência, esta janela volta ao entrar e a cada 30 minutos.</p>' +
+      : '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">Guias de <b>planos de saúde (exceto Unimed)</b> aguardando processamento. Marque uma etapa do fluxo, <b>Cortesia</b> (quando não haverá cobrança) ou ✔ Resolver para dar baixa. Esta janela aparece <b>uma vez, ao entrar</b>; depois disso a lista fica no cartão do Dashboard.</p>' +
         '<div style="max-height:52vh;overflow:auto"><table class="dash-detail-table" style="margin:0"><thead><tr><th>Data</th><th>Paciente</th><th>Plano</th><th>Guia</th><th>Ação</th></tr></thead><tbody>' + linhas + '</tbody></table></div>';
     modal.open('🔔 Pendências de convênio (' + lista.length + ')', corpo,
       '<button class="btn" onclick="modal.close()">Fechar</button>');
@@ -19061,9 +19092,27 @@ const pendencias = {
     /* marcar qualquer etapa resolve a pendência */
     if (pendencias.temStatus(r) && !r._pendResolvida) r._pendResolvida = new Date().toISOString();
     store.save(mod, r);
+    if (statusKey === 'cortesia' && marcado) { try { pendencias._aplicarCortesia(mod, r); } catch (e) {} }
     try { pendencias.renderDashboard(); } catch (e) {}
     const rot = (pendencias.STATUS.find(s => s[0] === statusKey) || ['', statusKey])[1];
     toast('🔄 Fluxo de faturamento: ' + rot + (marcado ? ' ✓' : ' removido'));
+  },
+
+  /* Cortesia marcada no fluxo tem que chegar ao FINANCEIRO: senão o valor
+     continua como "a receber" num dinheiro que nunca vai entrar, e o painel
+     mente. Não apaga valor nenhum — só diz que não há o que cobrar. */
+  _aplicarCortesia(mod, r) {
+    let alvo = null;
+    if (mod === 'financeiro') alvo = r;
+    else alvo = (store.list('financeiro') || []).find(f => f._origemId === r._id) || null;
+    if (!alvo) return null;
+    alvo.tipo_pagamento = 'Cortesia';
+    alvo.pago = true;                     /* sai de "a receber" */
+    alvo.status = 'finalizado';
+    alvo.observacoes = (alvo.observacoes ? alvo.observacoes + ' · ' : '') + 'Cortesia — sem cobrança';
+    store.save('financeiro', alvo);
+    try { if (state.currentModule === 'financeiro' && financeiro.render) financeiro.render(); } catch (e) {}
+    return alvo;
   },
 
   /* ---- Checklist do fluxo no formulário do FINANCEIRO ---- */
@@ -36262,33 +36311,34 @@ const printPreview = {
         /* Arquivo único ficha + SRPA: capítulo novo em página nova */
         .pp-quebra { page-break-before: always; break-before: page; }
         .pp-capitulo { margin: 0 0 12px; padding: 9px 14px; background: #eef2f7; border-left: 5px solid #3b5b7e; font-weight: 700; font-size: 13pt; color: #22384f; }
+        .pp-compacto { --pp-esc: .8; --pp-logo: .62; }
         .pp-header { margin-bottom: 10px; }
         .pp-header-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 5px; border-bottom: 1px solid #d0d4da; }
-        .pp-logo { height: 96px; width: auto; max-width: 440px; object-fit: contain; flex-shrink: 0; }
+        .pp-logo { height: calc(96px * var(--pp-logo, 1)); width: auto; max-width: calc(440px * var(--pp-logo, 1)); object-fit: contain; flex-shrink: 0; }
         .pp-prof { text-align: right; line-height: 1.22; min-width: 0; }
-        .pp-prof-nome { font-size: 11pt; font-weight: 700; color: #1a2332; letter-spacing: .2px; }
-        .pp-prof-reg { font-size: 8.5pt; color: #5a6472; margin-top: 1px; text-transform: uppercase; letter-spacing: .3px; }
-        .pp-prof-end { font-size: 8.5pt; color: #8a93a0; margin-top: 1px; }
+        .pp-prof-nome { font-size: calc(11pt * var(--pp-esc, 1)); font-weight: 700; color: #1a2332; letter-spacing: .2px; }
+        .pp-prof-reg { font-size: calc(8.5pt * var(--pp-esc, 1)); color: #5a6472; margin-top: 1px; text-transform: uppercase; letter-spacing: .3px; }
+        .pp-prof-end { font-size: calc(8.5pt * var(--pp-esc, 1)); color: #8a93a0; margin-top: 1px; }
         .pp-doc-title { text-align: center; margin-top: 7px; }
-        .pp-doc-title h1 { font-size: 13.5pt; font-weight: 700; letter-spacing: 1px; color: #1a2332; margin: 0; text-transform: uppercase; }
-        .pp-doc-meta { font-size: 9.5pt; color: #8a93a0; margin-top: 2px; line-height: 1.25; }
+        .pp-doc-title h1 { font-size: calc(13.5pt * var(--pp-esc, 1)); font-weight: 700; letter-spacing: 1px; color: #1a2332; margin: 0; text-transform: uppercase; }
+        .pp-doc-meta { font-size: calc(9.5pt * var(--pp-esc, 1)); color: #8a93a0; margin-top: 2px; line-height: 1.25; }
         .pp-doc-meta strong { font-weight: 600; color: #5a6472; }
-        h2 { font-size: 10pt; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: #2a3441; margin: 9px 0 4px; padding: 0 0 2px 0; background: none; border: none; border-bottom: 1px solid #b5bcc6; page-break-after: avoid; }
-        .pp-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 3px 16px; margin-bottom: 6px; font-size: 10.5pt; }
+        h2 { font-size: calc(10pt * var(--pp-esc, 1)); font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: #2a3441; margin: 9px 0 4px; padding: 0 0 2px 0; background: none; border: none; border-bottom: 1px solid #b5bcc6; page-break-after: avoid; }
+        .pp-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 3px 16px; margin-bottom: 6px; font-size: calc(10.5pt * var(--pp-esc, 1)); }
         .pp-grid > .pp-field:only-child, .pp-grid > .pp-block:only-child { grid-column: 1 / -1; }
         .pp-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
         .pp-grid.cols-1 { grid-template-columns: 1fr; }
         .pp-field { display: flex; gap: 5px; align-items: baseline; padding: 0; }
-        .pp-field .pp-label { font-weight: 600; color: #8a93a0; text-transform: uppercase; font-size: 8pt; letter-spacing: .3px; white-space: nowrap; }
-        .pp-field .pp-value { flex: 1; font-size: 10.5pt; color: #1a2332; border-bottom: 1px solid #e2e5ea; padding-bottom: 1px; }
-        .pp-block { margin-bottom: 6px; padding: 1px 0; font-size: 10.5pt; }
-        .pp-block .pp-label { font-weight: 600; color: #8a93a0; text-transform: uppercase; font-size: 8pt; letter-spacing: .3px; display: block; margin-bottom: 2px; }
+        .pp-field .pp-label { font-weight: 600; color: #8a93a0; text-transform: uppercase; font-size: calc(8pt * var(--pp-esc, 1)); letter-spacing: .3px; white-space: nowrap; }
+        .pp-field .pp-value { flex: 1; font-size: calc(10.5pt * var(--pp-esc, 1)); color: #1a2332; }
+        .pp-block { margin-bottom: 6px; padding: 1px 0; font-size: calc(10.5pt * var(--pp-esc, 1)); }
+        .pp-block .pp-label { font-weight: 600; color: #8a93a0; text-transform: uppercase; font-size: calc(8pt * var(--pp-esc, 1)); letter-spacing: .3px; display: block; margin-bottom: 2px; }
         .pp-block .pp-value { white-space: pre-wrap; color: #1a2332; line-height: 1.35; }
         .pp-lab-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 2px 6px; border: 1px solid #d0d5db; border-radius: 4px; padding: 4px 6px; }
-        .pp-lab-item { font-size: 9.5pt; white-space: nowrap; }
+        .pp-lab-item { font-size: calc(9.5pt * var(--pp-esc, 1)); white-space: nowrap; }
         .pp-lab-k { color: #8a93a0; font-weight: 600; }
         .pp-lab-v { color: #1a2332; font-weight: 600; }
-        .pp-table { width: 100%; border-collapse: collapse; font-size: 10pt; margin-bottom: 6px; page-break-inside: auto; }
+        .pp-table { width: 100%; border-collapse: collapse; font-size: calc(10pt * var(--pp-esc, 1)); margin-bottom: 6px; page-break-inside: auto; }
         .pp-table tr { page-break-inside: avoid; }
         .pp-table th, .pp-table td { border: 1px solid #c5cad2; padding: 2px 4px; text-align: left; }
         .pp-table th { background: #f2f4f7; font-size: 8.5pt; text-transform: uppercase; letter-spacing: .4px; color: #5a6472; }
@@ -36905,7 +36955,9 @@ ${TAG_CLOSE_HTML}`;
     /* Topo: só o título. O nome do paciente aparece uma vez, na identificação
        (antes vinha também sob o título) — e ganha a linha inteira, para nome
        comprido não quebrar em duas. */
-    return printPreview._header('AVALIAÇÃO PRÉ-ANESTÉSICA', '') +
+    /* pp-compacto: fonte e logomarca menores neste documento (ver CSS) */
+    return '<div class="pp-compacto">' +
+      printPreview._header('AVALIAÇÃO PRÉ-ANESTÉSICA', '') +
       printPreview._section('Identificação', `
         <div class="pp-grid cols-1">
           ${printPreview._fieldSempre('Nome', nomePac)}
@@ -36962,7 +37014,8 @@ ${TAG_CLOSE_HTML}`;
       `) +
       printPreview._signature(d.anestesiologista, d.crm ? 'CRM ' + d.crm : '', d) +
       printPreview._footer('Avaliação pré-anestésica') +
-      printPreview._buildProtocoloJejumAnexo(d);
+      printPreview._buildProtocoloJejumAnexo(d) +
+      '</div>';
   },
 
   /* Cartõezinhos ilustrados de alimentos (emoji + nome) para o anexo — estilos
@@ -37763,7 +37816,7 @@ ${TAG_CLOSE_HTML}`;
     const meta = `${utils.formatarData(d.data) || new Date().toLocaleDateString('pt-BR')}`;
     /* Texto do termo em parágrafos */
     const textoHtml = (d.texto || '').split('\n').filter(l => l.trim())
-      .map(l => `<p style="margin:0 0 8px;text-align:justify;font-size:10pt;line-height:1.5">${utils.escapeHTML(l)}</p>`).join('');
+      .map(l => `<p style="margin:0 0 8px;text-align:justify;font-size:calc(10pt * var(--pp-esc, 1));line-height:1.5">${utils.escapeHTML(l)}</p>`).join('');
 
     let respHtml = '';
     if (d.tem_responsavel) {
@@ -37786,7 +37839,9 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._assinaturaDesenhada(d.assinatura_dataurl || d.sig_profissional_dataurl, d.profissional || 'Profissional', d.crm, 'prof')}
       </div>`;
 
-    return printPreview._header('TERMO DE CONSENTIMENTO LIVRE E ESCLARECIDO', meta) +
+    /* pp-compacto: mesma redução da pré (ver CSS) */
+    return '<div class="pp-compacto">' +
+      printPreview._header('TERMO DE CONSENTIMENTO LIVRE E ESCLARECIDO', meta) +
       printPreview._section('Identificação do paciente', `
         <div class="pp-grid cols-3">
           ${printPreview._fieldSempre('Nome', d.nome)}
@@ -37802,8 +37857,8 @@ ${TAG_CLOSE_HTML}`;
         </div>`) +
       respHtml +
       printPreview._section('Termo', textoHtml +
-        (d.riscos ? `<p style="margin:10px 0 0;font-size:10pt"><strong>Riscos específicos discutidos:</strong> ${utils.escapeHTML(d.riscos)}</p>` : '') +
-        (d.observacoes ? `<p style="margin:8px 0 0;font-size:10pt"><strong>Observações:</strong> ${utils.escapeHTML(d.observacoes)}</p>` : '')) +
+        (d.riscos ? `<p style="margin:10px 0 0;font-size:calc(10pt * var(--pp-esc, 1))"><strong>Riscos específicos discutidos:</strong> ${utils.escapeHTML(d.riscos)}</p>` : '') +
+        (d.observacoes ? `<p style="margin:8px 0 0;font-size:calc(10pt * var(--pp-esc, 1))"><strong>Observações:</strong> ${utils.escapeHTML(d.observacoes)}</p>` : '')) +
       printPreview._section('Local e data', `
         <div class="pp-grid cols-3">
           ${printPreview._field('Local', d.local)}
@@ -37818,7 +37873,8 @@ ${TAG_CLOSE_HTML}`;
           1. Anesthesia and patient safety: have we reached our limits? Current Opinion in Anesthesiology. 2011;24:349-353.<br>
           2. Perioperative and anaesthetic-related mortality in developed and developing countries: a systematic review and meta-analysis. The Lancet. 2012;380:1075-1081.
         </div>` : '') +
-      printPreview._footer('Termo de Consentimento');
+      printPreview._footer('Termo de Consentimento') +
+      '</div>';
   },
 
   _buildPrescricao() {
@@ -38343,20 +38399,30 @@ const dashboard = {
       dashboard._filtrarEscopo(list, escopo)
         .map(it => Object.assign({}, it, { _dataClinica: dashboard._dataClinica(it) })),
       periodo, '_dataClinica');
-    const allAnest = filtPorMeta(store.list('anestesia'));
-    const allPre = filtPorMeta(store.list('pre'));
-    const allCons = filtPorMeta(store.list('consulta'));
-    const allRecup = filtPorMeta(store.list('recuperacao'));
-    const allFin = filtPorMeta(store.list('financeiro'));
+    /* PRODUÇÃO = o que foi FINALIZADO. Rascunho e pré-lançamento são trabalho
+       em curso: contá-los inflaria o painel com o que ainda pode mudar (e o
+       pré-lançamento nem é seu até você conferir). É a mesma régua do
+       financeiro, que só nasce na finalização. */
+    const allAnest = dashboard._soProducao(filtPorMeta(store.list('anestesia')));
+    const allPre = dashboard._soProducao(filtPorMeta(store.list('pre')));
+    const allCons = dashboard._soProducao(filtPorMeta(store.list('consulta')));
+    const allRecup = dashboard._soProducao(filtPorMeta(store.list('recuperacao')));
+    const allFin = filtPorMeta(store.list('financeiro'));   /* financeiro não tem "finalizar" */
 
     /* O "Atualizar" do painel também vai buscar os pré-lançamentos na clínica:
        clicar em atualizar e a fila continuar vazia era o pior dos mundos. */
     try { preLanc.sincronizarFila({ silent: true }); } catch (e) {}
-
     /* KPIs */
     const nuvem = dashboard._naNuvem(periodo, escopo);
     dashboard._avisoNuvem(nuvem);
     const maisNuvem = (mod) => (nuvem.porMod[mod] || 0);
+
+    /* Painel zerado: explica o zero e busca a produção na clínica antes de
+       aceitá-lo. Um "0" mudo faz duvidar do sistema inteiro. O que está na
+       nuvem entra nos totais — então, se há isso, o painel NÃO está vazio. */
+    const totalProducao = allAnest.length + allPre.length + allCons.length + allRecup.length;
+    try { dashboard._explicarVazio(periodo, escopo, totalProducao + (nuvem.total || 0)); } catch (e) {}
+    try { dashboard._puxarSeVazio(totalProducao + allFin.length); } catch (e) {}
     const kpiGrid = document.getElementById('kpi-grid');
     const totFinPrev = allFin.reduce((s, x) => s + (parseFloat(x.valor_previsto) || 0), 0);
     const totFinRec  = allFin.reduce((s, x) => s + (parseFloat(x.valor_recebido) || 0), 0);
@@ -38367,22 +38433,22 @@ const dashboard = {
       <div class="kpi-card" data-detail="anestesia">
         <div class="kpi-label">Anestesias</div>
         <div class="kpi-value">${allAnest.length + maisNuvem('anestesia')}</div>
-        <div class="kpi-sub">fichas registradas${maisNuvem('anestesia') ? ' · ' + maisNuvem('anestesia') + ' na nuvem' : ''}</div>
+        <div class="kpi-sub">fichas finalizadas${maisNuvem('anestesia') ? ' · ' + maisNuvem('anestesia') + ' na nuvem' : ''}</div>
       </div>
       <div class="kpi-card accent" data-detail="pre">
         <div class="kpi-label">Pré-anestésica</div>
-        <div class="kpi-value">${allPre.length}</div>
-        <div class="kpi-sub">avaliações</div>
+        <div class="kpi-value">${allPre.length + maisNuvem('pre')}</div>
+        <div class="kpi-sub">avaliações finalizadas${maisNuvem('pre') ? ' · ' + maisNuvem('pre') + ' na nuvem' : ''}</div>
       </div>
       <div class="kpi-card" data-detail="consulta">
         <div class="kpi-label">Consultas / Dor</div>
-        <div class="kpi-value">${allCons.length}</div>
-        <div class="kpi-sub">atendimentos</div>
+        <div class="kpi-value">${allCons.length + maisNuvem('consulta')}</div>
+        <div class="kpi-sub">atendimentos finalizados${maisNuvem('consulta') ? ' · ' + maisNuvem('consulta') + ' na nuvem' : ''}</div>
       </div>
       <div class="kpi-card accent" data-detail="recuperacao">
         <div class="kpi-label">Recuperação pós</div>
-        <div class="kpi-value">${allRecup.length}</div>
-        <div class="kpi-sub">fichas SRPA</div>
+        <div class="kpi-value">${allRecup.length + maisNuvem('recuperacao')}</div>
+        <div class="kpi-sub">fichas SRPA finalizadas${maisNuvem('recuperacao') ? ' · ' + maisNuvem('recuperacao') + ' na nuvem' : ''}</div>
       </div>
       <div class="kpi-card warn" data-detail="pacientes_unicos">
         <div class="kpi-label">Pacientes únicos</div>
@@ -38497,8 +38563,13 @@ const dashboard = {
     return list.filter(it => {
       /* sem autoria registrada, o registro conta como meu — não sumir do
          painel importa mais do que classificar com precisão */
-      if (!it._updatedBy && !it._criadoPor && !it.anestesista && !it.profissional) return true;
-      return bate(it._updatedBy) || bate(it._criadoPor) || bate(it.anestesista) || bate(it.profissional);
+      /* anestesiologista/responsavel faltavam: são justamente os campos que a
+         pré e a ficha usam para registrar quem assina. Sem eles, registro meu
+         assinado por mim podia ser lido como "de outro" e sumir do painel. */
+      const autores = [it._updatedBy, it._criadoPor, it.anestesista, it.anestesiologista,
+                       it.profissional, it.responsavel];
+      if (!autores.some(v => String(v || '').trim())) return true;
+      return autores.some(bate);
     });
   },
 
@@ -38512,7 +38583,11 @@ const dashboard = {
     let ix = {};
     try { ix = arquivo._indice() || {}; } catch (e) { return out; }
     Object.keys(ix).forEach(mod => {
-      const itens = (ix[mod] || []).map(e => ({ _dataClinica: e.data ? e.data + 'T12:00:00.000Z' : '' }))
+      const itens = (ix[mod] || [])
+        /* produção é o que foi finalizado; entrada antiga (sem a marca) conta,
+           porque esconder produção real seria pior do que somar um rascunho */
+        .filter(e => e.fin !== false)
+        .map(e => ({ _dataClinica: e.data ? e.data + 'T12:00:00.000Z' : '' }))
         .filter(e => e._dataClinica);
       const n = dashboard.filtrarPorPeriodo(itens, periodo, '_dataClinica').length;
       if (n) { out.porMod[mod] = n; out.total += n; }
@@ -38525,10 +38600,99 @@ const dashboard = {
     if (!host) return;
     if (!nuvem || !nuvem.total) { host.style.display = 'none'; host.innerHTML = ''; return; }
     host.style.display = '';
+    /* Esses registros saíram do aparelho quando o limite de espaço era real
+       (localStorage, 5 MB). Com o disco grande não é mais: dá para trazer tudo
+       de volta e desligar o arquivamento, e aí os gráficos ficam completos. */
+    const cabeTudo = (() => { try { return !!disco._pronto; } catch (e) { return false; } })();
+    const arquivando = (() => {
+      try { return (typeof modoNuvem !== 'undefined' && modoNuvem.ligado()) || arquivo.autoLigado(); }
+      catch (e) { return false; }
+    })();
     host.innerHTML =
       '<span>☁️ <b>' + nuvem.total + '</b> registro(s) deste período estão na nuvem e não neste aparelho. ' +
       'Eles <b>entram nos totais</b>, mas não nos gráficos por cirurgião, hospital e convênio.</span>' +
-      '<button type="button" class="btn btn-xs btn-primary" onclick="arquivo.restaurarTodos().then(function(){ dashboard.atualizar(); })">⬇ Trazer para cá</button>';
+      '<button type="button" class="btn btn-xs btn-primary" onclick="arquivo.restaurarTodos().then(function(){ dashboard.atualizar(); })">⬇ Trazer para cá</button>' +
+      (cabeTudo && arquivando
+        ? '<span style="flex-basis:100%;font-size:.8rem;margin-top:6px">Este aparelho agora guarda imagens e histórico no <b>disco grande</b> — não precisa mais mandar registro para fora para caber. ' +
+          '<button type="button" class="btn btn-xs" onclick="dashboard._voltarTudoParaCa()">Trazer tudo e parar de arquivar</button></span>'
+        : '');
+  },
+  /* Traz o que foi arquivado e desliga o arquivamento automático: os gráficos
+     só ficam completos com os registros no aparelho. */
+  async _voltarTudoParaCa() {
+    try { if (typeof modoNuvem !== 'undefined' && modoNuvem.ligado()) await modoNuvem.alternar(false); } catch (e) {}
+    try { if (arquivo.autoLigado()) arquivo.alternarAuto(false); } catch (e) {}
+    try { await arquivo.restaurarTodos(); } catch (e) {}
+    try { dashboard.atualizar(); } catch (e) {}
+  },
+
+  /* Produção é o que ficou pronto. Rascunho e pré-lançamento ficam de fora do
+     painel — eles têm o lugar deles (rascunhos, fila de conferência). */
+  _soProducao(list) { return (list || []).filter(x => x && x._finalizado); },
+
+  /* ZERO TEM QUE SE EXPLICAR. Um painel zerado pode ser dia parado, filtro
+     errado (período/escopo) ou registro que ficou de fora por não estar
+     finalizado. Mostrar só o "0" faz a pessoa duvidar do sistema inteiro —
+     aconteceu. Aqui o painel conta onde a produção está e leva até ela. */
+  _explicarVazio(periodo, escopo, totalProducao) {
+    const host = document.getElementById('dash-vazio');
+    if (!host) return;
+    if (totalProducao > 0) { host.style.display = 'none'; host.innerHTML = ''; return; }
+    const MODS = ['anestesia', 'pre', 'consulta', 'recuperacao'];
+    const conta = (esc, per, exigirFinal) => {
+      let n = 0;
+      MODS.forEach(mod => {
+        let l = dashboard._filtrarEscopo(store.list(mod) || [], esc)
+          .map(it => Object.assign({}, it, { _dataClinica: dashboard._dataClinica(it) }));
+        l = dashboard.filtrarPorPeriodo(l, per, '_dataClinica');
+        if (exigirFinal) l = dashboard._soProducao(l);
+        n += l.length;
+      });
+      return n;
+    };
+    const emAberto = conta(escopo, periodo, false);
+    const naClinica = escopo === 'pessoal' ? conta('clinica', periodo, true) : 0;
+    const emTudo = conta(escopo, 'all', true);
+    const pedaco = [];
+    if (emAberto) pedaco.push('<b>' + emAberto + '</b> registro(s) neste período ainda <b>não finalizado(s)</b> — produção conta só depois de finalizar');
+    if (naClinica) pedaco.push('<b>' + naClinica + '</b> finalizado(s) no período são <b>de outra pessoa da clínica</b> ' +
+      '<button type="button" class="btn btn-xs" onclick="dashboard._verComo(\'clinica\')">Ver clínica</button>');
+    if (emTudo) pedaco.push('<b>' + emTudo + '</b> finalizado(s) seu(s) estão <b>fora deste período</b> ' +
+      '<button type="button" class="btn btn-xs" onclick="dashboard._verComo(null, \'all\')">Ver tudo</button>');
+    host.innerHTML = '📭 Nenhuma produção finalizada neste filtro.' +
+      (pedaco.length ? '<br>' + pedaco.join('<br>') : ' Não encontrei registros deste período neste aparelho — se você lançou em outro, o app está buscando na clínica.');
+    host.style.display = '';
+  },
+  _verComo(escopo, periodo) {
+    try {
+      if (escopo) { const e = document.getElementById('dash-escopo'); if (e) e.value = escopo; }
+      if (periodo) { const p = document.getElementById('dash-periodo'); if (p) p.value = periodo; }
+      dashboard.atualizar();
+    } catch (e) {}
+  },
+
+  /* Painel zerado num aparelho que acabou de entrar quase nunca significa "não
+     trabalhei": significa que os registros estão na clínica e ainda não aqui.
+     Em vez de mostrar zero e deixar a pessoa procurando botão, vai buscar. */
+  _puxouVazio: false,
+  async _puxarSeVazio(total) {
+    try {
+      if (total > 0 || dashboard._puxouVazio) return;
+      if (typeof cloudRel === 'undefined' || !cloudRel.disponivel()) return;
+      if (!(await cloud._garantirToken())) return;
+      dashboard._puxouVazio = true;
+      let trouxe = 0;
+      for (const mod of ['anestesia', 'pre', 'consulta', 'recuperacao', 'financeiro']) {
+        const remotos = await cloudRel.puxarModulo(mod);
+        if (!Array.isArray(remotos)) continue;
+        const m = cloudRel.mesclarLocal(mod, remotos);
+        trouxe += m.novos + m.atualizados;
+      }
+      if (trouxe) {
+        toast('☁️ ' + trouxe + ' registro(s) trazidos da clínica para este aparelho');
+        dashboard.atualizar();
+      }
+    } catch (e) {}
   },
 
   _dataClinica(it) {
@@ -38641,10 +38805,11 @@ const dashboard = {
       dashboard._filtrarEscopo(list, escopo)
         .map(it => Object.assign({}, it, { _dataClinica: dashboard._dataClinica(it) })),
       periodo, '_dataClinica');
-    const allAnest = filtPorMeta(store.list('anestesia'));
-    const allPre   = filtPorMeta(store.list('pre'));
-    const allCons  = filtPorMeta(store.list('consulta'));
-    const allRecup = filtPorMeta(store.list('recuperacao'));
+    /* o detalhe segue a mesma régua do painel: só produção finalizada */
+    const allAnest = dashboard._soProducao(filtPorMeta(store.list('anestesia')));
+    const allPre   = dashboard._soProducao(filtPorMeta(store.list('pre')));
+    const allCons  = dashboard._soProducao(filtPorMeta(store.list('consulta')));
+    const allRecup = dashboard._soProducao(filtPorMeta(store.list('recuperacao')));
     const allFin   = filtPorMeta(store.list('financeiro'));
 
     const periodoLabel = { all: 'Todos os períodos', '7': 'Últimos 7 dias', '30': 'Últimos 30 dias', '90': 'Últimos 90 dias', '365': 'Último ano' }[periodo] || periodo;
