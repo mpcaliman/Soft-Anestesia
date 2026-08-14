@@ -7509,6 +7509,35 @@ await test('CBHPM: fração sugerida e editável, AN 0 sem honorário e código 
     const marcou = codEl.classList.contains('cbhpm-cod-invalido');
     codEl.value = '1.01.01.01-2'; cbhpm._conferirExiste(codEl);
     out.codigoInventadoMarcado = marcou && !codEl.classList.contains('cbhpm-cod-invalido');
+
+    /* endoscopia alta + baixa no mesmo dia = vias independentes: a segunda
+       entra a 70%, não a 50% */
+    consulta.procs.limpar();
+    const tBaixa = consulta.procs.add({ codigo: '4.02.01.08-2' });   /* colonoscopia */
+    const tAlta = consulta.procs.add({ codigo: '4.02.01.12-0' });    /* endoscopia digestiva alta */
+    [tBaixa, tAlta].forEach(tr => consulta.procs._onCodigo(tr.querySelector('[name="cproc_cod[]"]')));
+    consulta.procs.sugerirFracoes();
+    const viaDe = tr => (tr.querySelector('[name="cproc_via[]"]') || {}).value;
+    const fracDe = tr => (tr.querySelector('[name="cproc_fracao[]"]') || {}).value;
+    out.viaEndoscopica = cbhpm.viaEndoscopica('4.02.01.08-2') === 'baixa' &&
+      cbhpm.viaEndoscopica('4.02.01.12-0') === 'alta' &&
+      cbhpm.viaEndoscopica('3.10.05.12-8') === '' &&
+      viaDe(tAlta) === 'diferente' && fracDe(tAlta) === '70';
+
+    /* mas via escolhida à mão manda mais que a sugestão */
+    const selVia = tAlta.querySelector('[name="cproc_via[]"]');
+    selVia.value = 'mesma';
+    consulta.procs._viaManual(selVia);
+    out.viaManualManda = viaDe(tAlta) === 'mesma' && fracDe(tAlta) === '50';
+
+    /* trocar o código depois tem de deixar dono e rastro */
+    const codTroca = tAlta.querySelector('[name="cproc_cod[]"]');
+    codTroca.value = '3.10.05.12-8';
+    consulta.procs._onCodigo(codTroca);
+    const linhaTroca = consulta.procs.coletar()[1];
+    out.trocaDeCodigoTemDono = linhaTroca.codigo_trocado === true &&
+      linhaTroca.codigo_anterior === '4.02.01.12-0' && !!linhaTroca.codigo_trocado_em;
+
     consulta.procs.limpar();
     return out;
   });
@@ -7524,6 +7553,9 @@ await test('CBHPM: fração sugerida e editável, AN 0 sem honorário e código 
   assert(r.guardouCodigo, 'e o código oficial fica guardado como chave');
   assert(r.textoTrocadoDerrubaCodigo, 'trocar a descrição à mão não pode manter o código antigo pendurado');
   assert(r.codigoInventadoMarcado, 'código que não existe na tabela precisa ficar marcado antes de virar guia');
+  assert(r.viaEndoscopica, 'endoscopia alta e baixa são vias independentes — a via já vem sugerida como diferente');
+  assert(r.viaManualManda, 'via escolhida à mão não é revista pela sugestão');
+  assert(r.trocaDeCodigoTemDono, 'trocar o código depois precisa registrar quem trocou e de qual código');
   await page.close();
 });
 

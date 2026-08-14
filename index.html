@@ -4309,7 +4309,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-14l</b><br>
+    v7.1 · build <b id="build-tag">2026-08-14m</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -14424,7 +14424,7 @@ const consulta = {
         <td data-label="Procedimento"><input type="text" name="cproc_desc[]" value="${v(dados.descricao)}" placeholder="Digite o procedimento ou o código"></td>
         <td data-label="Qtd"><input type="number" name="cproc_qtd[]" min="1" step="1" value="${v(dados.quantidade || 1)}" style="width:48px" oninput="consulta.procs.recalcular()"></td>
         <td data-label="Fração"><input type="number" name="cproc_fracao[]" min="0" max="100" step="1" value="${v(dados.fracao != null ? dados.fracao : 100)}" style="width:60px" title="Sugerida pela regra de múltiplos — ajuste livre" oninput="consulta.procs._fracaoManual(this)"><span style="font-size:.75rem;color:var(--text-mute)">%</span></td>
-        <td data-label="Via"><select name="cproc_via[]" onchange="consulta.procs.sugerirFracoes()" title="Via de acesso — mesma via sugere 50%, via diferente sugere 70%">
+        <td data-label="Via"><select name="cproc_via[]" onchange="consulta.procs._viaManual(this)" title="Via de acesso — mesma via sugere 50%, via diferente sugere 70%">
           <option value="mesma">mesma via</option><option value="diferente">via dif.</option></select></td>
         <td data-label="Valor-base"><input type="number" name="cproc_base[]" step="0.01" min="0" value="${v(dados.valor_base)}" title="Vem da tabela de preços configurada — pode ser ajustado" oninput="this.dataset.manual='1'; consulta.procs.recalcular()"></td>
         <td data-label="Valor calc."><input type="number" name="cproc_valor[]" step="0.01" min="0" value="${v(dados.valor_final)}" readonly class="orc-ro"></td>
@@ -14439,12 +14439,21 @@ const consulta = {
         tr.dataset.fracaoPor = dados.fracao_ajustada_por || '';
         tr.dataset.fracaoEm = dados.fracao_ajustada_em || '';
       }
+      if (dados.codigo) tr.dataset.codigoAtual = dados.codigo;
+      if (dados.codigo_trocado) {
+        tr.dataset.codigoTrocado = '1';
+        tr.dataset.codigoAnterior = dados.codigo_anterior || '';
+        tr.dataset.codigoPor = dados.codigo_trocado_por || '';
+        tr.dataset.codigoEm = dados.codigo_trocado_em || '';
+      }
+      if (dados.via_manual) tr.dataset.viaManual = '1';
       /* mesma busca da CBHPM nos dois campos */
       try {
         const descEl = tr.querySelector('[name="cproc_desc[]"]');
         const codEl = tr.querySelector('[name="cproc_cod[]"]');
         if (descEl) descEl.dataset.semMais = '1';   /* cada procedimento tem a sua linha */
         const casar = (match) => {
+          consulta.procs._marcarCodigo(tr, match[0]);
           if (codEl) codEl.value = match[0];
           if (descEl) descEl.value = match[1];
           consulta.procs._puxarValor(tr);
@@ -14458,18 +14467,34 @@ const consulta = {
     },
     /* Fração mexida à mão fica registrada com quem mexeu e quando: alterar
        proporção é alterar cobrança, e isso precisa ter dono. */
+    _quem() {
+      try { const u = auth.usuarioAtual() || {}; return u.nome || u.usuario || ''; } catch (e) { return ''; }
+    },
     _fracaoManual(input) {
       const tr = input.closest('tr');
-      let quem = '';
-      try { const u = auth.usuarioAtual() || {}; quem = u.nome || u.usuario || ''; } catch (e) {}
       tr.dataset.fracaoManual = '1';
-      tr.dataset.fracaoPor = quem;
+      tr.dataset.fracaoPor = consulta.procs._quem();
       tr.dataset.fracaoEm = new Date().toISOString();
       consulta.procs.recalcular();
+    },
+    /* Trocar o código depois de o registro ter gerado financeiro muda o que
+       vai ser cobrado. Fica registrado quem trocou, quando e de qual código
+       para qual — sem isso, a linha financeira muda sem dono. */
+    _marcarCodigo(tr, novo) {
+      if (!tr) return;
+      const antes = tr.dataset.codigoAtual || '';
+      if (antes === novo) return;
+      tr.dataset.codigoAtual = novo || '';
+      if (!antes) return;                       /* primeira escolha não é troca */
+      tr.dataset.codigoTrocado = '1';
+      tr.dataset.codigoAnterior = antes;
+      tr.dataset.codigoPor = consulta.procs._quem();
+      tr.dataset.codigoEm = new Date().toISOString();
     },
     _onCodigo(input) {
       const tr = input.closest('tr');
       const match = cbhpm.achar(input.value.trim());
+      if (match) consulta.procs._marcarCodigo(tr, match[0]);
       if (match) {
         const descEl = tr.querySelector('[name="cproc_desc[]"]');
         if (descEl && !descEl.value) descEl.value = match[1];
@@ -14489,6 +14514,11 @@ const consulta = {
         ? 'Valor-base de ' + p.tabela + (p.chave ? ' (porte ' + p.chave + ')' : '') + ' — pode ser ajustado'
         : 'Sem valor na tabela configurada — preencha à mão';
     },
+    _viaManual(sel) {
+      const tr = sel.closest('tr');
+      if (tr) tr.dataset.viaManual = '1';
+      consulta.procs.sugerirFracoes();
+    },
     /* Regra de múltiplos: maior valor a 100%, demais 50% (mesma via) ou 70%
        (via diferente). Sempre sugestão — a fração continua editável. */
     sugerirFracoes() {
@@ -14500,6 +14530,7 @@ const consulta = {
         const b = parseFloat((tr.querySelector('[name="cproc_base[]"]') || {}).value);
         if (!isNaN(b) && b > maior) { maior = b; iPrincipal = i; }
       });
+      consulta.procs._sugerirVias(linhas, iPrincipal);
       linhas.forEach((tr, i) => {
         const fr = tr.querySelector('[name="cproc_fracao[]"]');
         const via = (tr.querySelector('[name="cproc_via[]"]') || {}).value || 'mesma';
@@ -14509,6 +14540,22 @@ const consulta = {
         if (fr) fr.value = precos.fracaoSugerida(ehPrincipal, via);
       });
       consulta.procs.recalcular();
+    },
+    /* Endoscopia alta e baixa no mesmo dia são vias independentes: a via já
+       vem sugerida como diferente, em vez de o valor sair 50% e alguém ter de
+       lembrar de corrigir. Só sugere onde a via não foi escolhida à mão. */
+    _sugerirVias(linhas, iPrincipal) {
+      const cod = tr => ((tr.querySelector('[name="cproc_cod[]"]') || {}).value || '').trim();
+      const vias = linhas.map(tr => cbhpm.viaEndoscopica(cod(tr)));
+      const distintas = Array.from(new Set(vias.filter(Boolean)));
+      if (distintas.length < 2) return;
+      const principal = vias[iPrincipal >= 0 ? iPrincipal : 0];
+      if (!principal) return;
+      linhas.forEach((tr, i) => {
+        if (i === iPrincipal || tr.dataset.viaManual === '1') return;
+        const sel = tr.querySelector('[name="cproc_via[]"]');
+        if (sel && vias[i] && vias[i] !== principal) sel.value = 'diferente';
+      });
     },
     recalcular() {
       const tbody = consulta.procs._body();
@@ -14553,7 +14600,12 @@ const consulta = {
           observacao: g('cproc_obs'),
           fracao_manual: tr.dataset.fracaoManual === '1',
           fracao_ajustada_por: tr.dataset.fracaoPor || '',
-          fracao_ajustada_em: tr.dataset.fracaoEm || ''
+          fracao_ajustada_em: tr.dataset.fracaoEm || '',
+          codigo_trocado: tr.dataset.codigoTrocado === '1',
+          codigo_anterior: tr.dataset.codigoAnterior || '',
+          codigo_trocado_por: tr.dataset.codigoPor || '',
+          codigo_trocado_em: tr.dataset.codigoEm || '',
+          via_manual: tr.dataset.viaManual === '1'
         });
       });
       return linhas;
@@ -24546,6 +24598,23 @@ const cbhpm = {
       legado: CBHPM_LEGADO.indexOf(c) >= 0
     };
   },
+  /* Endoscopia alta e baixa são vias independentes para valoração: feitas no
+     mesmo dia, a segunda não é "mais um procedimento pela mesma via". O
+     subgrupo da CBHPM só separa diagnóstica de intervencionista, então a
+     distinção sai da descrição — e serve como SUGESTÃO da via, nunca como
+     trava: quem decide a via de acesso é quem fez. */
+  viaEndoscopica(codigoOuDescricao) {
+    const i = cbhpm.info(codigoOuDescricao);
+    if (!i) return '';
+    if (!/ENDOSC/i.test(i.grupo || '') && !/endoscop/i.test(i.descricao)) {
+      /* fora do grupo endoscópico, só interessa quando a descrição é explícita */
+      if (!/colonoscopia|retossigmoid|esofagogastro|digestiva alta/i.test(i.descricao)) return '';
+    }
+    const d = cbhpm._norm(i.descricao);
+    if (/colonoscop|retossigmoid|anuscop|colon|reto |retal|sigmoid/.test(d)) return 'baixa';
+    if (/digestiva alta|esofag|gastr|duoden|endoscopia alta/.test(d)) return 'alta';
+    return '';
+  },
   /* Porte anestésico que vale para o ato: o do próprio procedimento ou, quando
      a CBHPM prevê código anestésico específico (endoscopia, imagem), o dele. */
   anestesiaDe(codigoOuDescricao) {
@@ -33897,6 +33966,10 @@ const fin = {
           fracao_manual: !!pr.fracao_manual,
           fracao_ajustada_por: pr.fracao_ajustada_por || '',
           fracao_ajustada_em: pr.fracao_ajustada_em || '',
+          codigo_trocado: !!pr.codigo_trocado,
+          codigo_anterior: pr.codigo_anterior || '',
+          codigo_trocado_por: pr.codigo_trocado_por || '',
+          codigo_trocado_em: pr.codigo_trocado_em || '',
           valor_base: (base != null) ? base : null,
           valor_final: (pr.valor_final != null) ? pr.valor_final : precos.calcular(base, pr.quantidade, pr.fracao),
           origem_valor: (pr.valor_base != null) ? 'manual' : precos.base(pr.codigo, 'medico').origem,
@@ -33970,6 +34043,12 @@ const fin = {
         fracao_manual: !!l.fracao_manual,
         fracao_ajustada_por: l.fracao_ajustada_por || '',
         fracao_ajustada_em: l.fracao_ajustada_em || '',
+        /* troca de código depois de gerado o financeiro: quem trocou e de qual
+           código para qual — a linha muda, mas não muda sem dono */
+        codigo_trocado: !!l.codigo_trocado,
+        codigo_anterior: l.codigo_anterior || '',
+        codigo_trocado_por: l.codigo_trocado_por || '',
+        codigo_trocado_em: l.codigo_trocado_em || '',
         valor_base: l.valor_base,
         valor_final: l.valor_final,
         origem_valor: l.origem_valor || '',
