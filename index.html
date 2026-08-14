@@ -4304,7 +4304,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-14g</b><br>
+    v7.1 · build <b id="build-tag">2026-08-14h</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -25657,6 +25657,28 @@ const anestesia = {
         const det = anestesia.eventos._dispDet('Acesso arterial');
         return '1) Assepsia e antissepsia; 2) Punção arterial' + (det ? ' — ' + det : '') +
           '; 3) Refluxo pulsátil; 4) Transdutor zerado e curva adequada; 5) Fixação e curativo.';
+      },
+      'Sondagem vesical (Foley)'() {
+        const det = anestesia.eventos._dispDet('Sonda vesical');
+        return '1) Assepsia e antissepsia; 2) Campos estéreis; 3) Lubrificação; 4) Passagem da sonda de Foley' +
+          (det ? ' — ' + det : '') +
+          '; 5) Insuflação do balão após retorno de urina; 6) Conexão ao sistema coletor fechado e fixação.';
+      },
+      'Sondagem vesical de alívio'() {
+        const det = anestesia.eventos._dispDet('Sonda vesical');
+        return '1) Assepsia e antissepsia; 2) Técnica estéril; 3) Passagem da sonda' + (det ? ' — ' + det : '') +
+          '; 4) Esvaziamento vesical; 5) Retirada da sonda, com o volume drenado registrado.';
+      },
+      'Sondagem orogástrica'() {
+        const det = anestesia.eventos._dispDet('Sonda gástrica');
+        return '1) Medida da distância a introduzir; 2) Lubrificação; 3) Passagem por via oral com o paciente já anestesiado' +
+          (det ? ' — ' + det : '') +
+          '; 4) Confirmação do posicionamento (ausculta epigástrica/aspirado gástrico); 5) Fixação e drenagem.';
+      },
+      'Sondagem nasogástrica'() {
+        const det = anestesia.eventos._dispDet('Sonda gástrica');
+        return '1) Narina escolhida e sonda lubrificada; 2) Passagem por via nasal' + (det ? ' — ' + det : '') +
+          '; 3) Confirmação do posicionamento; 4) Fixação e drenagem.';
       }
     },
     /* Texto que o evento deve ter: o padrão, já reescrito com os detalhes */
@@ -25848,6 +25870,58 @@ const anestesia = {
       if (anestesia.eventos.existeEvento(tipoEvt)) { anestesia.eventos.atualizarDescricoes(); return; }
       anestesia.eventos.add({ tipo: tipoEvt, hora: anestesia.eventos._v('via_aerea_hora') || utils.horaAtual(), obs: anestesia.eventos.descricaoPara(tipoEvt), auto: true });
       try { toast('Evento "' + tipoEvt + '" adicionado à linha do tempo.'); } catch (e) {}
+    },
+    /* Card "Acessos e dispositivos": marcar o acesso É o registro do procedimento.
+       O evento entra sozinho na linha do tempo e o que for detalhado ali
+       (tipo de cateter, calibre, local) desce para a descrição — sem redigitar.
+       Drenos e bombas não têm procedimento próprio e ficam de fora. */
+    DISP_EVENTO: {
+      'Acesso venoso periférico': 'Venoclise',
+      'Acesso venoso central': 'Acesso venoso central',
+      'Acesso arterial': 'Punção arterial',
+      'Sonda vesical': 'Sondagem vesical (Foley)',
+      'Sonda gástrica': 'Sondagem orogástrica'
+    },
+    aoMarcarDispositivo(valor) {
+      const tipoEvt = anestesia.eventos.DISP_EVENTO[valor];
+      if (!tipoEvt) return '';
+      anestesia.graficoUI._contexto = 'anestesia';
+      /* já registrado (inclusive pela variante — alívio, nasogástrica): só
+         reescreve a descrição com o que estiver detalhado no card */
+      if (anestesia.eventos._jaRegistrado(valor)) { anestesia.eventos.atualizarDescricoes(); return ''; }
+      anestesia.eventos.add({ tipo: tipoEvt, hora: utils.horaAtual(), obs: anestesia.eventos.descricaoPara(tipoEvt), auto: true });
+      return tipoEvt;
+    },
+    /* Variantes do mesmo procedimento contam como o mesmo registro: quem trocou
+       Foley por alívio (ou oro por nasogástrica) não deve ganhar um evento repetido. */
+    VARIANTES_DISP: {
+      'Sonda vesical': ['Sondagem vesical (Foley)', 'Sondagem vesical de alívio'],
+      'Sonda gástrica': ['Sondagem orogástrica', 'Sondagem nasogástrica']
+    },
+    _tiposDe(valor) {
+      return anestesia.eventos.VARIANTES_DISP[valor] ||
+        (anestesia.eventos.DISP_EVENTO[valor] ? [anestesia.eventos.DISP_EVENTO[valor]] : []);
+    },
+    _jaRegistrado(valor) {
+      return anestesia.eventos._tiposDe(valor).some(t => anestesia.eventos.existeEvento(t));
+    },
+    /* Desmarcar o dispositivo é dizer que aquilo não foi feito. Se o evento ainda
+       é o que o sistema escreveu (nada digitado por cima), ele sai junto — o que o
+       anestesista escreveu à mão fica, porque só ele pode desfazer. */
+    aoDesmarcarDispositivo(valor) {
+      const tipos = anestesia.eventos._tiposDe(valor);
+      if (!tipos.length) return 0;
+      anestesia.graficoUI._contexto = 'anestesia';
+      const body = document.getElementById(anestesia.graficoUI._ctxIds().eventosBody);
+      if (!body) return 0;
+      let n = 0;
+      Array.from(body.querySelectorAll('tr')).forEach(tr => {
+        const tipo = (tr.querySelector('[name="evt_tipo[]"]') || {}).value || '';
+        if (tipos.indexOf(tipo) < 0 || tr.dataset.auto !== '1') return;
+        tr.remove(); n++;
+      });
+      if (n) { try { anestesia.vitais.atualizarGrafico(); } catch (e) {} }
+      return n;
     },
     /* Início do halogenado: marca o evento e abre a calculadora (agente/fluxo/%) */
     iniciarHalogenado() {
@@ -26159,8 +26233,10 @@ const anestesia = {
       try { markDirty(); } catch (e) {}
       return txt;
     },
-    /* Mostra/esconde campo de descrição para cada dispositivo marcado */
-    alternar(checkbox) {
+    /* Mostra/esconde campo de descrição para cada dispositivo marcado.
+       opts.restaurando = ficha sendo reaberta: os eventos já vieram gravados,
+       então aqui só remontamos os campos, sem criar nem apagar nada. */
+    alternar(checkbox, opts) {
       const valor = checkbox.value;
       const cont = document.getElementById('disp-detalhes-body');
       const wrap = document.getElementById('disp-detalhes');
@@ -26206,6 +26282,17 @@ const anestesia = {
       wrap.style.display = anyChecked ? 'block' : 'none';
       /* Sonda vesical → mostra/oculta o painel de débito urinário */
       if (valor === 'Sonda vesical') { try { anestesia.diurese.sincronizar(); } catch (e) {} }
+      /* O acesso marcado já é o procedimento: entra na linha do tempo sozinho */
+      if (!(opts && opts.restaurando)) {
+        try {
+          if (checkbox.checked) {
+            const evt = anestesia.eventos.aoMarcarDispositivo(valor);
+            if (evt) toast('Evento "' + evt + '" adicionado — o tipo, o calibre e o local que você marcar aqui entram sozinhos na descrição.');
+          } else {
+            anestesia.eventos.aoDesmarcarDispositivo(valor);
+          }
+        } catch (e) {}
+      }
       markDirty();
     },
     /* Sincroniza as TRÊS formas de registro (tabela, grade e gráfico) com os
@@ -31114,7 +31201,7 @@ const anestesia = {
     setTimeout(() => {
       (mn.dispositivos || []).forEach(disp => {
         const el = f.querySelector(`[name="dispositivos[]"][value="${disp}"]`);
-        if (el && el.checked) anestesia.disp.alternar(el);
+        if (el && el.checked) anestesia.disp.alternar(el, { restaurando: true });
       });
       if (mn.dispositivos_detalhes) anestesia.disp.restaurarDetalhes(mn.dispositivos_detalhes);
       try { if (mn.diurese) anestesia.diurese.restaurar(mn.diurese); else anestesia.diurese.sincronizar(); } catch (e) {}
@@ -34283,7 +34370,12 @@ const modelos = {
     if (Array.isArray(p.dispositivos)) {
       p.dispositivos.forEach(d => {
         const el = document.querySelector(`#form-anestesia [name="dispositivos[]"][value="${d}"]`);
-        if (el && !el.checked) el.checked = true;
+        if (el && !el.checked) {
+          el.checked = true;
+          /* mesmo caminho da marcação manual: abre o campo de detalhes e
+             registra o procedimento na linha do tempo */
+          try { anestesia.disp.alternar(el); } catch (e) {}
+        }
       });
     }
     /* Posição */

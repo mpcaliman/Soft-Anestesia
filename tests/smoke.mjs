@@ -4247,7 +4247,6 @@ await test('Ficha: técnica, agulha, sítio e horário escolhidos nos cards entr
     chk.checked = true; anestesia.disp.alternar(chk);
     const det = Array.from(f.querySelectorAll('[name="disp_det[]"]')).find(x => x.getAttribute('data-disp') === 'Acesso venoso periférico');
     det.value = 'Jelco 18G em dorso da mão direita';
-    anestesia.eventos.add({ tipo: 'Venoclise', hora: '08:00', obs: anestesia.eventos.descricaoPara('Venoclise'), auto: true });
     anestesia.eventos.atualizarDescricoes();
     const evVeno = linhas().find(l => l.tipo === 'Venoclise');
     out.dispositivo = !!evVeno && /Jelco 18G em dorso da mão direita/.test(evVeno.obs);
@@ -6861,7 +6860,6 @@ await test('Ficha: técnica define a ventilação, e tubo/cateter escolhidos esc
     document.querySelector('[data-campo="calibre"][data-disp="Acesso venoso periférico"]').value = '18G';
     document.querySelector('[data-campo="local"][data-disp="Acesso venoso periférico"]').value = 'dorso da mão D';
     anestesia.disp.montarDet('Acesso venoso periférico');
-    anestesia.eventos.add({ tipo: 'Venoclise', hora: '08:10', obs: anestesia.eventos.descricaoPara('Venoclise'), auto: true });
     out.venoclise = /Cateter sobre agulha \(Jelco\) 18G em dorso da mão D/.test(descDe('Venoclise'));
 
     /* seleções sobrevivem ao salvar/reabrir */
@@ -7138,6 +7136,109 @@ await test('Bloqueio: via Interfascial existe e sobrevive ao espelho na tabela d
   assert(r.ordemUtil, 'fica ao lado de perineural, que é a via mais próxima');
   assert(r.espelhouComVia, 'a via tem que sobreviver ao espelho na tabela de medicações');
   assert(r.perineuralTambem, 'perineural também precisa existir lá — se perdia do mesmo jeito');
+  await page.close();
+});
+
+/* 122) Acessos e dispositivos (card 5): marcar o acesso É registrar o
+   procedimento — o evento entra sozinho e o cateter escolhido vira a descrição. */
+await test('Ficha: acesso marcado no card 5 vira evento na linha do tempo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('anestesia');
+    const f = document.getElementById('form-anestesia');
+    document.getElementById('eventos-body').innerHTML = '';
+    const marcar = (valor, on) => {
+      const el = Array.from(f.querySelectorAll('[name="dispositivos[]"]')).find(c => c.value === valor);
+      el.checked = on !== false;
+      anestesia.disp.alternar(el);
+      return el;
+    };
+    const descDe = tipo => {
+      const tr = Array.from(document.querySelectorAll('#eventos-body tr'))
+        .find(x => (x.querySelector('[name="evt_tipo[]"]') || {}).value === tipo);
+      return tr ? (tr.querySelector('[name="evt_obs[]"]') || {}).value : null;
+    };
+    const quantos = tipo => Array.from(document.querySelectorAll('#eventos-body [name="evt_tipo[]"]'))
+      .filter(el => el.value === tipo).length;
+
+    /* AVP: o evento nasce ao marcar, antes mesmo de detalhar */
+    marcar('Acesso venoso periférico');
+    out.criouVenoclise = descDe('Venoclise') !== null;
+
+    /* e o que se escolhe depois desce sozinho para a descrição */
+    document.querySelector('[data-campo="tipo"][data-disp="Acesso venoso periférico"]').value = 'Cateter sobre agulha (Jelco)';
+    document.querySelector('[data-campo="calibre"][data-disp="Acesso venoso periférico"]').value = '20G';
+    document.querySelector('[data-campo="local"][data-disp="Acesso venoso periférico"]').value = 'fossa antecubital E';
+    anestesia.disp.montarDet('Acesso venoso periférico');
+    out.detalheDesceu = /Cateter sobre agulha \(Jelco\) 20G em fossa antecubital E/.test(descDe('Venoclise'));
+
+    /* os demais acessos e sondas seguem o mesmo caminho */
+    marcar('Acesso arterial');
+    marcar('Acesso venoso central');
+    marcar('Sonda vesical');
+    marcar('Sonda gástrica');
+    out.arterial = descDe('Punção arterial') !== null;
+    out.central = descDe('Acesso venoso central') !== null;
+    out.vesical = descDe('Sondagem vesical (Foley)') !== null;
+    out.gastrica = descDe('Sondagem orogástrica') !== null;
+
+    /* detalhe em texto livre da sonda também entra na descrição */
+    const detSonda = Array.from(f.querySelectorAll('[name="disp_det[]"]')).find(x => x.getAttribute('data-disp') === 'Sonda gástrica');
+    detSonda.value = 'sonda 16Fr, narina D';
+    anestesia.eventos.atualizarDescricoes();
+    out.sondaDetalhada = /sonda 16Fr, narina D/.test(descDe('Sondagem orogástrica'));
+
+    /* dreno não é procedimento com evento próprio: nada é inventado */
+    marcar('Dreno torácico');
+    out.drenoNaoInventa = quantos('Venoclise') === 1 &&
+      !Array.from(document.querySelectorAll('#eventos-body [name="evt_tipo[]"]')).some(el => /dreno/i.test(el.value));
+
+    /* desmarcar e marcar de novo não duplica */
+    marcar('Acesso arterial', false);
+    marcar('Acesso arterial');
+    out.naoDuplica = quantos('Punção arterial') === 1;
+
+    /* trocar Foley por alívio é o mesmo procedimento: remarcar não repete */
+    const trVes = Array.from(document.querySelectorAll('#eventos-body tr'))
+      .find(x => (x.querySelector('[name="evt_tipo[]"]') || {}).value === 'Sondagem vesical (Foley)');
+    trVes.querySelector('[name="evt_tipo[]"]').value = 'Sondagem vesical de alívio';
+    marcar('Sonda vesical', false);
+    marcar('Sonda vesical');
+    out.varianteNaoDuplica = quantos('Sondagem vesical de alívio') + quantos('Sondagem vesical (Foley)') === 1;
+
+    /* desmarcar tira o evento que o sistema escreveu... */
+    marcar('Acesso venoso central', false);
+    out.desmarcarLimpa = descDe('Acesso venoso central') === null;
+
+    /* ...mas nunca o que o anestesista escreveu à mão */
+    const trVeno = Array.from(document.querySelectorAll('#eventos-body tr'))
+      .find(x => (x.querySelector('[name="evt_tipo[]"]') || {}).value === 'Venoclise');
+    const obsVeno = trVeno.querySelector('[name="evt_obs[]"]');
+    obsVeno.value = 'Punção difícil, 2 tentativas.';
+    anestesia.eventos._marcarManual(obsVeno);
+    marcar('Acesso venoso periférico', false);
+    out.preservaOManual = descDe('Venoclise') === 'Punção difícil, 2 tentativas.';
+
+    /* reabrir a ficha não pode duplicar o que já está gravado */
+    const gravado = anestesia.eventos.coletar();
+    anestesia.eventos.restaurar(gravado);
+    const el = Array.from(f.querySelectorAll('[name="dispositivos[]"]')).find(c => c.value === 'Acesso arterial');
+    anestesia.disp.alternar(el, { restaurando: true });
+    out.reabrirNaoDuplica = quantos('Punção arterial') === 1;
+    return out;
+  });
+  assert(r.criouVenoclise, 'marcar o acesso venoso já registra a venoclise na linha do tempo');
+  assert(r.detalheDesceu, 'o cateter escolhido no card escreve a descrição do evento');
+  assert(r.arterial && r.central, 'acesso arterial e central também registram o procedimento');
+  assert(r.vesical && r.gastrica, 'sondas vesical e gástrica idem');
+  assert(r.sondaDetalhada, 'o detalhe da sonda entra na descrição do evento');
+  assert(r.drenoNaoInventa, 'dreno não é procedimento com evento próprio — nada inventado');
+  assert(r.naoDuplica, 'remarcar o mesmo acesso não pode duplicar o evento');
+  assert(r.varianteNaoDuplica, 'Foley e alívio são o mesmo registro — não duplicam');
+  assert(r.desmarcarLimpa, 'desmarcar retira o evento que o sistema tinha escrito');
+  assert(r.preservaOManual, 'o que foi escrito à mão fica, mesmo desmarcando');
+  assert(r.reabrirNaoDuplica, 'reabrir a ficha não pode multiplicar os eventos gravados');
   await page.close();
 });
 
