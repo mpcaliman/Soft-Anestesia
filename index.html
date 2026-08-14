@@ -4266,7 +4266,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-13o</b><br>
+    v7.1 · build <b id="build-tag">2026-08-14a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -6399,11 +6399,17 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
 
           <!-- tabela de parciais -->
           <div id="diurese-parciais-wrap">
+            <p style="font-size:.78rem;color:var(--text-soft);margin:0 0 6px">
+              Cada linha é o volume <b>do intervalo</b>: o que saiu desde o registro anterior até aquele horário —
+              não o total acumulado do caso. O app soma tudo, calcula o ritmo de cada intervalo e o débito final,
+              e leva a diurese para o balanço hídrico sozinho. Dá para lançar direto na
+              <b>grade dos sinais vitais</b>, junto com os outros parâmetros.
+            </p>
             <div class="dyn-table-wrap">
               <table class="dyn" id="tab-diurese">
                 <thead><tr>
                   <th style="width:90px">Horário</th>
-                  <th style="width:110px">Volume (mL)</th>
+                  <th style="width:130px">Volume no intervalo (mL)</th>
                   <th>Observação</th>
                   <th class="col-rm">×</th>
                 </tr></thead>
@@ -24403,63 +24409,97 @@ const SET_MED_COMUM = ['midazolam','fentanil','propofol','rocuronio','cefazolina
 /* Catálogo das medicações mais usadas em anestesia, agrupadas por classe.
    Multiseleção → entram na tabela para detalhar dose/hora/via. Doses fixas
    comuns já vêm preenchidas; as por peso ficam em branco. */
+/* CATÁLOGO DE MEDICAÇÕES — cada item traz o PADRÃO de uso: dose habitual do
+   adulto, unidade, via e o modo (bolus, bomba, inalatório). É o que a
+   digitação sugere e preenche sozinha: numa ficha, a mesma droga é lançada do
+   mesmo jeito dezenas de vezes por semana, e redigitar via/modo a cada vez é
+   trabalho que o app pode poupar. Dose fica em branco quando depende do peso
+   ou do efeito — chutar número em prontuário seria pior do que deixar vazio.
+   `dil` é a diluição usual das que correm em bomba. */
 const CATALOGO_MED = [
   { grupo: 'Hipnóticos / indução', itens: [
-    { nome: 'Propofol', unidade: 'mg', via: 'EV' },
-    { nome: 'Etomidato', unidade: 'mg', via: 'EV' },
-    { nome: 'Cetamina', unidade: 'mg', via: 'EV' },
-    { nome: 'Midazolam', unidade: 'mg', via: 'EV' },
-    { nome: 'Tiopental', unidade: 'mg', via: 'EV' }
+    { nome: 'Propofol', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Propofol (infusão)', base: 'Propofol', unidade: 'mcg/kg/min', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '1000 mg/100 mL (10 mg/mL)' },
+    { nome: 'Etomidato', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Cetamina', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Midazolam', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Tiopental', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Dexmedetomidina', unidade: 'mcg/kg/h', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '200 mcg/50 mL (4 mcg/mL)' }
   ]},
   { grupo: 'Opioides', itens: [
-    { nome: 'Fentanil', unidade: 'mcg', via: 'EV' },
-    { nome: 'Sufentanil', unidade: 'mcg', via: 'EV' },
-    { nome: 'Remifentanil', unidade: 'mcg', via: 'EV' },
-    { nome: 'Alfentanil', unidade: 'mcg', via: 'EV' },
-    { nome: 'Morfina', unidade: 'mg', via: 'EV' },
-    { nome: 'Tramadol', dose: '100', unidade: 'mg', via: 'EV' }
+    { nome: 'Fentanil', unidade: 'mcg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Sufentanil', unidade: 'mcg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Remifentanil', unidade: 'mcg/kg/min', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '2 mg/40 mL (50 mcg/mL)' },
+    { nome: 'Alfentanil', unidade: 'mcg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Morfina', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Tramadol', dose: '100', unidade: 'mg', via: 'EV', tipo: 'Bolus' }
   ]},
   { grupo: 'Bloqueadores neuromusculares', itens: [
-    { nome: 'Succinilcolina', unidade: 'mg', via: 'EV' },
-    { nome: 'Rocurônio', unidade: 'mg', via: 'EV' },
-    { nome: 'Cisatracúrio', unidade: 'mg', via: 'EV' },
-    { nome: 'Atracúrio', unidade: 'mg', via: 'EV' }
+    { nome: 'Succinilcolina', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Rocurônio', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Cisatracúrio', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Atracúrio', unidade: 'mg', via: 'EV', tipo: 'Bolus' }
   ]},
   { grupo: 'Reversores / anticolinérgicos', itens: [
-    { nome: 'Sugammadex', unidade: 'mg', via: 'EV' },
-    { nome: 'Neostigmina', unidade: 'mg', via: 'EV' },
-    { nome: 'Atropina', unidade: 'mg', via: 'EV' }
+    { nome: 'Sugammadex', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Neostigmina', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Atropina', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Flumazenil', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Naloxona', unidade: 'mcg', via: 'EV', tipo: 'Bolus' }
   ]},
   { grupo: 'Vasoativos', itens: [
-    { nome: 'Efedrina', unidade: 'mg', via: 'EV' },
-    { nome: 'Fenilefrina', unidade: 'mcg', via: 'EV' },
-    { nome: 'Metaraminol', unidade: 'mg', via: 'EV' },
-    { nome: 'Noradrenalina', unidade: 'mcg/kg/min', via: 'EV' },
-    { nome: 'Adrenalina', unidade: 'mcg', via: 'EV' },
-    { nome: 'Dobutamina', unidade: 'mcg/kg/min', via: 'EV' }
+    { nome: 'Efedrina', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Fenilefrina', unidade: 'mcg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Metaraminol', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Noradrenalina', unidade: 'mcg/kg/min', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '4 mg/250 mL (16 mcg/mL)' },
+    { nome: 'Adrenalina', unidade: 'mcg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Dobutamina', unidade: 'mcg/kg/min', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '250 mg/250 mL (1 mg/mL)' },
+    { nome: 'Nitroglicerina', unidade: 'mcg/kg/min', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '25 mg/250 mL (100 mcg/mL)' },
+    { nome: 'Nitroprussiato', unidade: 'mcg/kg/min', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '50 mg/250 mL (200 mcg/mL)' }
   ]},
   { grupo: 'Antieméticos / corticoide', itens: [
-    { nome: 'Ondansetrona', dose: '4', unidade: 'mg', via: 'EV' },
-    { nome: 'Metoclopramida', dose: '10', unidade: 'mg', via: 'EV' },
-    { nome: 'Dexametasona', dose: '10', unidade: 'mg', via: 'EV' }
+    { nome: 'Ondansetrona', dose: '4', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Metoclopramida', dose: '10', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Dexametasona', dose: '10', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Droperidol', dose: '0,625', unidade: 'mg', via: 'EV', tipo: 'Bolus' }
   ]},
   { grupo: 'Analgésicos / AINE', itens: [
-    { nome: 'Dipirona', dose: '2', unidade: 'g', via: 'EV' },
-    { nome: 'Cetoprofeno', dose: '100', unidade: 'mg', via: 'EV' },
-    { nome: 'Tenoxicam', dose: '40', unidade: 'mg', via: 'EV' },
-    { nome: 'Lidocaína', unidade: 'mg', via: 'EV' }
+    { nome: 'Dipirona', dose: '2', unidade: 'g', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Cetoprofeno', dose: '100', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Tenoxicam', dose: '40', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Cetorolaco', dose: '30', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Paracetamol', dose: '1', unidade: 'g', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Lidocaína', unidade: 'mg', via: 'EV', tipo: 'Bolus' }
   ]},
   { grupo: 'Antibióticos', itens: [
-    { nome: 'Cefazolina', dose: '2', unidade: 'g', via: 'EV' },
-    { nome: 'Cefuroxima', dose: '1.5', unidade: 'g', via: 'EV' },
-    { nome: 'Clindamicina', dose: '600', unidade: 'mg', via: 'EV' }
+    { nome: 'Cefazolina', dose: '2', unidade: 'g', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Cefuroxima', dose: '1.5', unidade: 'g', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Ceftriaxona', dose: '1', unidade: 'g', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Clindamicina', dose: '600', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Metronidazol', dose: '500', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Vancomicina', dose: '1', unidade: 'g', via: 'EV', tipo: 'Infusão contínua (gravitacional)' }
+  ]},
+  { grupo: 'Inalatórios / gases', itens: [
+    { nome: 'Sevoflurano', unidade: 'CAM', via: 'Inalatória', tipo: 'Inalatório' },
+    { nome: 'Desflurano', unidade: 'CAM', via: 'Inalatória', tipo: 'Inalatório' },
+    { nome: 'Isoflurano', unidade: 'CAM', via: 'Inalatória', tipo: 'Inalatório' },
+    { nome: 'Oxigênio', unidade: 'L/min', via: 'Inalatória', tipo: 'Inalatório' },
+    { nome: 'Óxido nitroso', unidade: 'L/min', via: 'Inalatória', tipo: 'Inalatório' }
+  ]},
+  { grupo: 'Anestésicos locais', itens: [
+    { nome: 'Bupivacaína 0,5% pesada', unidade: 'mg', via: 'Subaracnóideo', tipo: 'Bolus' },
+    { nome: 'Bupivacaína 0,5% isobárica', unidade: 'mg', via: 'Peridural', tipo: 'Bolus' },
+    { nome: 'Ropivacaína 0,75%', unidade: 'mg', via: 'Peridural', tipo: 'Bolus' },
+    { nome: 'Lidocaína 2% com vasoconstritor', unidade: 'mg', via: 'Peridural', tipo: 'Bolus' },
+    { nome: 'Morfina (subaracnóidea)', base: 'Morfina', unidade: 'mcg', via: 'Subaracnóideo', tipo: 'Bolus' }
   ]},
   { grupo: 'Outros', itens: [
-    { nome: 'Sulfato de magnésio', unidade: 'g', via: 'EV' },
-    { nome: 'Ácido tranexâmico', dose: '1', unidade: 'g', via: 'EV' },
-    { nome: 'Hidrocortisona', dose: '100', unidade: 'mg', via: 'EV' },
-    { nome: 'Omeprazol', dose: '40', unidade: 'mg', via: 'EV' },
-    { nome: 'Dexmedetomidina', unidade: 'mcg', via: 'EV' }
+    { nome: 'Sulfato de magnésio', unidade: 'g', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Ácido tranexâmico', dose: '1', unidade: 'g', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Hidrocortisona', dose: '100', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Omeprazol', dose: '40', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Gluconato de cálcio', dose: '1', unidade: 'g', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Insulina regular', unidade: 'UI', via: 'EV', tipo: 'Bolus' }
   ]}
 ];
 const UNIDADES = ['mg', 'mcg', 'g', 'mL', 'L', 'L/min', 'UI', '%', 'cp', 'mg/kg', 'mcg/kg', 'ng/dL', 'mcg/kg/min', 'mcg/min', 'mg/h', 'mcg/kg/h', 'mL/h', 'ng/mL', 'CAM'];
@@ -25847,6 +25887,84 @@ const anestesia = {
       if (mins < 0) mins += 24 * 60;
       return { min: mins, fonte: fonte };
     },
+    /* ---- DIURESE NA GRADE DOS SINAIS VITAIS --------------------------------
+       A diurese é lida junto com os outros sinais, de hora em hora. Digitá-la
+       num painel separado é trabalho dobrado — e trabalho dobrado, no meio do
+       ato, simplesmente não é feito. Cada coluna guarda o volume do INTERVALO
+       (o que saiu desde o registro anterior); o app soma, calcula o ritmo do
+       intervalo e o débito do caso, e alimenta o balanço hídrico sozinho. */
+    mostrarNaGrade() {
+      try {
+        if (anestesia.diurese._temSonda()) return true;
+        /* sem sonda marcada, só aparece se já houver algo registrado — não
+           poluir a grade de quem não mediu diurese */
+        return document.querySelectorAll('[name="diurese_vol[]"]').length > 0
+          && Array.prototype.some.call(document.querySelectorAll('[name="diurese_vol[]"]'), el => String(el.value || '').trim());
+      } catch (e) { return false; }
+    },
+    _parciais() {
+      const horas = document.querySelectorAll('[name="diurese_hora[]"]');
+      const vols = document.querySelectorAll('[name="diurese_vol[]"]');
+      const out = [];
+      for (let i = 0; i < vols.length; i++) {
+        out.push({ hora: horas[i] ? horas[i].value : '', vol: vols[i] ? vols[i].value : '', el: vols[i], elHora: horas[i] });
+      }
+      return out;
+    },
+    _volumeEm(hora) {
+      if (!hora) return '';
+      const p = anestesia.diurese._parciais().find(x => x.hora === hora);
+      return p ? (p.vol || '') : '';
+    },
+    /* Ritmo do intervalo: o que saiu dividido pelo peso e pelo tempo decorrido
+       desde o registro anterior. É o número que diz se a diurese está caindo
+       AGORA — o débito do caso inteiro só se fecha no fim. */
+    _ritmoIntervalo(horaAnt, hora, vol) {
+      const v = parseFloat(vol);
+      if (isNaN(v) || !hora) return { txt: '', alerta: false };
+      const peso = parseFloat((document.querySelector('#form-anestesia [name="paciente_peso"]') || {}).value);
+      let ini = horaAnt;
+      if (!ini) { try { ini = (document.querySelector('#form-anestesia [name="hora_inicio"]') || {}).value || ''; } catch (e) {} }
+      const min = anestesia.diurese._difMin(ini, hora);
+      if (!peso || !min) return { txt: v ? v + ' mL' : '', alerta: false };
+      const mlkgh = v / peso / (min / 60);
+      return {
+        txt: mlkgh.toFixed(1).replace('.', ',') + ' mL/kg/h',
+        alerta: mlkgh < 0.5,
+        valor: mlkgh
+      };
+    },
+    _difMin(a, b) {
+      if (!a || !b) return 0;
+      const p = t => { const [h, m] = String(t).split(':').map(Number); return (h * 60 + m); };
+      let d = p(b) - p(a);
+      if (d < 0) d += 24 * 60;
+      return d;
+    },
+    /* Editou a diurese na grade: vira parcial do registro (criando se preciso),
+       recalcula o débito e o balanço. */
+    _daGrade(input) {
+      const hora = input.dataset.hora || '';
+      const val = String(input.value || '').trim();
+      if (!hora) return;
+      const p = anestesia.diurese._parciais().find(x => x.hora === hora);
+      if (p) {
+        if (p.el) p.el.value = val;
+        if (!val && p.el) { const tr = p.el.closest('tr'); if (tr) tr.remove(); }
+      } else if (val) {
+        anestesia.diurese.addParcial();
+        const todos = anestesia.diurese._parciais();
+        const ult = todos[todos.length - 1];
+        if (ult) { if (ult.elHora) ult.elHora.value = hora; if (ult.el) ult.el.value = val; }
+      }
+      /* garante que o painel esteja no modo parcial, senão o total ignora isto */
+      const modoEl = document.getElementById('diurese-modo');
+      if (modoEl && modoEl.value !== 'parcial') { modoEl.value = 'parcial'; try { anestesia.diurese.setModo(); } catch (e) {} }
+      anestesia.diurese.recalcular();
+      try { markDirty(); } catch (e) {}
+      try { anestesia.vitais._renderGrade(); } catch (e) {}
+    },
+
     _volume() {
       const modo = (document.getElementById('diurese-modo') || {}).value || 'parcial';
       if (modo === 'total') {
@@ -26206,7 +26324,8 @@ const anestesia = {
       const medHora = anestesia.graficoUI.clampHora(dados.hora || '');
       tr.innerHTML = `
         <td data-label="Horário"><input type="time" name="med_hora[]" value="${medHora}" onchange="anestesia.graficoUI.validarHoraInput(this)"></td>
-        <td data-label="Medicação"><input type="text" name="med_nome[]" value="${utils.escapeAttr(dados.nome || '')}" placeholder="Medicação"></td>
+        <td data-label="Medicação"><input type="text" name="med_nome[]" value="${utils.escapeAttr(dados.nome || '')}" placeholder="Digite 2 letras…" autocomplete="off"
+          oninput="anestesia.meds.sugerir(this)" onkeydown="anestesia.meds._tecla(event, this)" onblur="anestesia.meds._fecharSugestoesDepois()"></td>
         <td data-label="Dose"><input type="text" name="med_dose[]" value="${utils.escapeAttr(dados.dose || '')}" placeholder="Dose"></td>
         <td data-label="Unidade"><select name="med_unidade[]"><option value="">—</option>${opt(UNIDADES, dados.unidade)}</select></td>
         <td data-label="Via"><select name="med_via[]"><option value="">—</option>${opt(VIAS, dados.via)}</select></td>
@@ -26224,6 +26343,120 @@ const anestesia = {
       });
       return tr;
     },
+    /* ---- SUGESTÃO AO DIGITAR ----------------------------------------------
+       A mesma droga é lançada do mesmo jeito dezenas de vezes por semana.
+       Escolher pela lista preenche o PADRÃO — via, unidade, modo (bolus/bomba/
+       inalatório) e a diluição usual —, deixando para digitar só o que muda de
+       paciente para paciente: a dose e a hora.
+       Regra: nunca sobrescreve o que já está preenchido. Quem digitou uma dose
+       e depois trocou o nome não pode perder o que escreveu. */
+    _norm(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim(); },
+    _catalogoPlano() {
+      if (anestesia.meds.__plano) return anestesia.meds.__plano;
+      const out = [];
+      try {
+        CATALOGO_MED.forEach(g => (g.itens || []).forEach(m => out.push(Object.assign({ grupo: g.grupo }, m))));
+      } catch (e) {}
+      anestesia.meds.__plano = out;
+      return out;
+    },
+    _achar(q) {
+      const nq = anestesia.meds._norm(q);
+      if (nq.length < 2) return [];
+      const lista = anestesia.meds._catalogoPlano();
+      /* quem começa com o que foi digitado vem primeiro — é o que a pessoa
+         quase sempre quer, e evita ter que descer a lista */
+      const comeca = [], contem = [];
+      lista.forEach(m => {
+        const n = anestesia.meds._norm(m.nome + ' ' + (m.base || ''));
+        if (n.indexOf(nq) === 0) comeca.push(m);
+        else if (n.indexOf(nq) >= 0) contem.push(m);
+      });
+      return comeca.concat(contem).slice(0, 10);
+    },
+    _caixa() {
+      let box = document.getElementById('med-sug-box');
+      if (!box) {
+        box = document.createElement('div');
+        box.id = 'med-sug-box';
+        box.className = 'presc-sugestoes';
+        box.style.display = 'none';
+        box.style.position = 'fixed';
+        document.body.appendChild(box);
+      }
+      return box;
+    },
+    sugerir(input) {
+      const box = anestesia.meds._caixa();
+      const res = anestesia.meds._achar(input.value);
+      anestesia.meds._alvo = input;
+      anestesia.meds._res = res;
+      anestesia.meds._sel = -1;
+      if (!res.length) { box.style.display = 'none'; return; }
+      const det = m => [m.via, m.tipo, m.dose ? m.dose + ' ' + (m.unidade || '') : (m.unidade || '')]
+        .filter(Boolean).join(' · ');
+      box.innerHTML = res.map((m, i) =>
+        '<div class="presc-sug-item" data-i="' + i + '" onmousedown="event.preventDefault(); anestesia.meds.escolher(' + i + ')">' +
+        '<strong>' + utils.escapeHTML(m.nome) + '</strong>' +
+        '<div style="font-size:.74rem;color:var(--text-mute)">' + utils.escapeHTML(det(m)) + '</div></div>').join('');
+      const r = input.getBoundingClientRect();
+      box.style.left = r.left + 'px';
+      box.style.top = (r.bottom + 2) + 'px';
+      box.style.width = Math.max(220, r.width) + 'px';
+      box.style.display = 'block';
+    },
+    _tecla(ev, input) {
+      const box = document.getElementById('med-sug-box');
+      if (!box || box.style.display === 'none') return;
+      const n = (anestesia.meds._res || []).length;
+      if (!n) return;
+      if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+        ev.preventDefault();
+        anestesia.meds._sel = (anestesia.meds._sel + (ev.key === 'ArrowDown' ? 1 : -1) + n) % n;
+        Array.from(box.children).forEach((el, i) => {
+          el.style.background = i === anestesia.meds._sel ? 'var(--primary-soft)' : '';
+        });
+      } else if (ev.key === 'Enter') {
+        ev.preventDefault();
+        anestesia.meds.escolher(anestesia.meds._sel >= 0 ? anestesia.meds._sel : 0);
+      } else if (ev.key === 'Escape') {
+        box.style.display = 'none';
+      }
+    },
+    _fecharSugestoesDepois() {
+      setTimeout(() => { const b = document.getElementById('med-sug-box'); if (b) b.style.display = 'none'; }, 150);
+    },
+    escolher(i) {
+      const m = (anestesia.meds._res || [])[i];
+      const input = anestesia.meds._alvo;
+      const box = document.getElementById('med-sug-box');
+      if (box) box.style.display = 'none';
+      if (!m || !input) return;
+      const tr = input.closest('tr');
+      if (!tr) return;
+      input.value = m.base || m.nome;
+      const põe = (nome, valor) => {
+        if (!valor) return;
+        const el = tr.querySelector('[name="' + nome + '"]');
+        if (!el || String(el.value || '').trim()) return;   /* não pisa no que já foi digitado */
+        el.value = valor;
+      };
+      põe('med_dose[]', m.dose);
+      põe('med_unidade[]', m.unidade);
+      põe('med_via[]', m.via);
+      põe('med_tipo[]', m.tipo);
+      põe('med_diluicao[]', m.dil);
+      /* hora em branco vira a hora do lançamento: é quando a droga foi dada */
+      const hora = tr.querySelector('[name="med_hora[]"]');
+      if (hora && !hora.value) hora.value = anestesia.graficoUI.clampHora(utils.horaAtual());
+      const tipoSel = tr.querySelector('[name="med_tipo[]"]');
+      if (tipoSel) anestesia.meds._toggleInfusao(tipoSel);
+      const dose = tr.querySelector('[name="med_dose[]"]');
+      if (dose) { try { dose.focus(); dose.select(); } catch (e) {} }
+      try { markDirty(); } catch (e) {}
+      try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
+    },
+
     _toggleInfusao(sel) {
       const tr = sel.closest('tr');
       if (!tr) return;
@@ -28320,6 +28553,25 @@ const anestesia = {
         });
         html += '</tr>';
       });
+      /* DIURESE junto dos sinais vitais: é ali que ela é lida, de hora em hora,
+         e digitá-la num painel separado é trabalho dobrado. O valor de cada
+         coluna é o volume do INTERVALO (o que saiu desde o registro anterior),
+         e vira automaticamente um parcial do registro de diurese — que por sua
+         vez alimenta o balanço hídrico. Abaixo do número, o ritmo do intervalo. */
+      if (anestesia.diurese.mostrarNaGrade()) {
+        html += '<tr class="vg-diurese"><th>Diurese<small style="display:block;font-weight:400;color:var(--text-mute);font-size:.68rem">mL desde o anterior</small></th>';
+        const horas = comHora.map(c => g(c.tr, 'hora'));
+        horas.forEach((hora, i) => {
+          const vol = anestesia.diurese._volumeEm(hora);
+          const ritmo = anestesia.diurese._ritmoIntervalo(horas[i - 1] || '', hora, vol);
+          html += '<td><input type="number" class="vg-inp" min="0" step="1" inputmode="numeric" data-hora="' + ea(hora) +
+            '" data-anterior="' + ea(horas[i - 1] || '') + '" value="' + ea(vol) +
+            '" placeholder="mL" onchange="anestesia.diurese._daGrade(this)">' +
+            '<div style="font-size:.66rem;color:' + (ritmo.alerta ? '#c0392b' : 'var(--text-mute)') + ';text-align:center">' +
+            (ritmo.txt || '&nbsp;') + '</div></td>';
+        });
+        html += '</tr>';
+      }
       html += '</tbody></table>';
       host.innerHTML = html;
     },
