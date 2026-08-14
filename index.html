@@ -4309,7 +4309,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-14k</b><br>
+    v7.1 · build <b id="build-tag">2026-08-14l</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -25079,12 +25079,14 @@ const cbhpmUI = {
    Nada aqui inventa preço. Sem porte e sem tabela, devolve valor nulo e o campo
    fica em branco para ser preenchido à mão — que é o comportamento honesto.
 
-   Observação sobre AN → porte: a CBHPM publica uma relação classificatória
-   (cbhpm.AN_PORTE: AN1→3A … AN8→12A). O sistema já vinha usando outra conversão
-   para PREÇO (ORC_ANEST_DE_CIR: AN3→5B, AN4→7B, AN5→9A, AN7→11C, AN8→13C), que
-   é a que sustenta os orçamentos já emitidos. As duas convivem de propósito:
-   a da CBHPM classifica, a do sistema precifica. Trocar a segunda muda valor
-   cobrado e é decisão do médico, não do código.
+   AN → porte: vale a relação publicada pela CBHPM (cbhpm.AN_PORTE: AN1→3A,
+   AN2→3C, AN3→4C, AN4→6B, AN5→7C, AN6→9B, AN7→10C, AN8→12A), a mesma para
+   classificar e para derivar valor. Uma fonte só, para não haver dois números
+   verdadeiros ao mesmo tempo.
+
+   Isso vale para as tabelas DERIVADAS de uma tabela cirúrgica ("→ porte anest.
+   (conversão)"). As tabelas com valores próprios por AN — Unimed, CBHPM 2015 —
+   não passam por conversão nenhuma e seguem exatamente como foram cadastradas.
 ============================================================================ */
 const precos = {
   /* Valor específico por código cadastrado pela clínica (tem precedência) */
@@ -42533,13 +42535,26 @@ const ORC_PORTE_CIR_2024_F3 = {
 
 /* Bases de referência do orçamento. tipo:'anest' usa o porte ANESTÉSICO (AN0–8);
    tipo:'cir' usa o porte CIRÚRGICO (1A–14C) do procedimento. */
-/* Conversão oficial: porte ANESTÉSICO (AN0–8) → porte CBHPM correspondente.
-   AN0 = sem remuneração anestésica. Permite derivar valores de anestesia
-   a partir de qualquer tabela CBHPM cirúrgica (2018, 2024/25, faixas). */
-const ORC_ANEST_DE_CIR = { 1: '3A', 2: '3C', 3: '5B', 4: '7B', 5: '9A', 6: '9B', 7: '11C', 8: '13C' };
+/* Conversão porte ANESTÉSICO (AN0–8) → porte CBHPM correspondente. É a
+   relação publicada pela própria CBHPM (cbhpm.AN_PORTE), usada tanto para
+   classificar quanto para derivar o valor da anestesia a partir de qualquer
+   tabela cirúrgica (2018, 2024/25, faixas). Fonte única: mudou lá, muda aqui.
+
+   AN0 = anestesia local / sem participação do anestesiologista: não há
+   honorário a derivar.
+
+   Nota histórica: até agosto/2026 o app usava outra correspondência para
+   PREÇO (AN3→5B, AN4→7B, AN5→9A, AN7→11C, AN8→13C), mais alta nesses portes.
+   A troca para a relação da CBHPM foi decisão do médico responsável, ciente
+   de que ela reduz o valor derivado nesses AN. As tabelas com valores
+   próprios por AN (Unimed, CBHPM 2015) não passam por esta conversão e
+   seguem exatamente como estavam. */
 function orcDerivarAnestDeCir(tabCir) {
   const v = { 0: 0 };
-  for (let p = 1; p <= 8; p++) v[p] = Number(tabCir[ORC_ANEST_DE_CIR[p]]) || 0;
+  for (let p = 1; p <= 8; p++) {
+    const porte = (typeof cbhpm !== 'undefined' && cbhpm.AN_PORTE) ? cbhpm.AN_PORTE[p] : '';
+    v[p] = Number(tabCir[porte]) || 0;
+  }
   return v;
 }
 
