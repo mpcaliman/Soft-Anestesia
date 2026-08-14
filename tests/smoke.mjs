@@ -7570,6 +7570,16 @@ await test('Orçamento: fração por linha editável e preço vindo da tabela co
       semPreco.origem === antesPreco.origem && semPreco.valor === antesPreco.valor;
     /* o valor nunca sai da CBHPM: sai da tabela configurada */
     out.valorDaConfiguracao = antesPreco.origem === 'porte_cir' && !!antesPreco.tabela;
+
+    /* AN → porte tem uma fonte só: a relação da CBHPM vale para classificar
+       E para derivar valor, senão haveria dois números verdadeiros ao mesmo tempo */
+    const tabs = orcamento.tabelasAnest();
+    const cir = tabs.cir2018.valores;
+    const der = tabs.anest2018_conv.valores;
+    out.derivaPelaCBHPM = [1, 2, 3, 4, 5, 6, 7, 8]
+      .every(an => Math.abs(der[an] - cir[cbhpm.AN_PORTE[an]]) < 0.01) && der[0] === 0;
+    /* tabela com valores próprios por AN não é derivada de nada */
+    out.fixasIntactas = tabs.cbhpm2015.valores[3] === 292.50 && tabs.unimed.valores[8] === 1874.88;
     return out;
   });
   assert(r.descricaoVeio, 'o código escolhido traz a descrição oficial');
@@ -7581,6 +7591,8 @@ await test('Orçamento: fração por linha editável e preço vindo da tabela co
   assert(r.fracaoSalva, 'e é gravada junto do orçamento');
   assert(r.precedencia, 'preço próprio do código vence o porte, e removê-lo devolve o valor por porte');
   assert(r.valorDaConfiguracao, 'o preço vem da configuração do sistema, nunca da CBHPM');
+  assert(r.derivaPelaCBHPM, 'a tabela derivada tem que usar a relação AN → porte da CBHPM, a mesma da classificação');
+  assert(r.fixasIntactas, 'tabela com valor próprio por AN não passa por conversão — fica como foi cadastrada');
   await page.close();
 });
 
