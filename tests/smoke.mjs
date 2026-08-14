@@ -2058,11 +2058,13 @@ await test('Pendências: plano ≠ Unimed vira alerta com guia/plano; fluxo de f
       && !!(finDepois._faturamento && finDepois._faturamento.faturado)
       && !!finDepois._pendResolvida;
 
-    /* — checklist no formulário do financeiro (8 etapas) — */
+    /* — checklist no formulário do financeiro: uma caixa por etapa do fluxo.
+         Conta pela própria lista, senão incluir uma etapa nova (Cortesia)
+         quebra o teste sem nada estar errado. — */
     pendencias.renderFinanceiro(finDepois);
     const boxFat = document.getElementById('fat-status-box');
     out.checklist = boxFat.style.display !== 'none'
-      && boxFat.querySelectorAll('input[type="checkbox"]').length === 8
+      && boxFat.querySelectorAll('input[type="checkbox"]').length === pendencias.STATUS.length
       && /Recurso de glosa/.test(boxFat.innerHTML)
       && boxFat.querySelectorAll('input:checked').length === 1;
 
@@ -2089,7 +2091,7 @@ await test('Pendências: plano ≠ Unimed vira alerta com guia/plano; fluxo de f
   assert(r.janela, 'a janela deveria mostrar data/paciente/plano/guia e ter o botão Fechar');
   assert(r.resolveu, '✔ Resolver deveria dar baixa na pendência');
   assert(r.fluxo, 'marcar uma etapa do fluxo deveria dar baixa e gravar o carimbo');
-  assert(r.checklist, 'o financeiro deveria mostrar o checklist com as 8 etapas do fluxo');
+  assert(r.checklist, 'o financeiro deveria mostrar o checklist com todas as etapas do fluxo');
   assert(r.dashboard, 'o Dashboard deveria mostrar o card de pendências com o total');
   assert(r.cardSome, 'sem pendências, o card do Dashboard deveria sumir');
   await page.close();
@@ -6088,6 +6090,7 @@ await test('O corte local nunca derruba o que ainda não subiu, e a sincronia ro
         : [];
     };
     localStorage.removeItem(sincronia.MARCAS_KEY);
+    dashboard._puxouVazio = true;      /* fora da medição: o painel vazio tem busca própria */
     store.setList('pre', []);
     /* o ciclo do boot pode estar em curso: esperar por ele evita medir a
        passada errada (foi assim que este teste falhou da primeira vez) */
@@ -6105,7 +6108,9 @@ await test('O corte local nunca derruba o que ainda não subiu, e a sincronia ro
     /* segunda passada: só o que mudou desde a última — leitura barata */
     pedidos.length = 0;
     await ciclo();
-    out.segundaEIncremental = pedidos.length > 0 && pedidos[0].desde === '2026-08-13T12:00:05.000Z';
+    /* outras rotinas (fila, painel vazio) também leem a clínica: o que importa
+       é que o CICLO peça a pré a partir da última marca */
+    out.segundaEIncremental = pedidos.some(p => p.mod === 'pre' && p.desde === '2026-08-13T12:00:05.000Z');
 
     /* clínica fora do ar: espera mais na próxima, em vez de martelar */
     cloudRel.puxarModulo = async () => null;
