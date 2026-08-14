@@ -1088,7 +1088,10 @@ await test('Eventos: pneumoperitônio (início/fim) e crises da laparoscopia com
     out.temCrises = T.includes('Embolia gasosa (CO₂)') && T.includes('Enfisema subcutâneo') && T.includes('Pneumotórax');
     const D = anestesia.eventos.DESCRICOES;
     out.descInsuflacao = /12–15 mmHg/.test(D['Início do pneumoperitônio'] || '');
-    out.condutaEmbolia = /Durant/.test(D['Embolia gasosa (CO₂)'] || '') && /INTERROMPER/.test(D['Embolia gasosa (CO₂)'] || '');
+    /* a conduta continua descrita — mudou o tempo verbal: o prontuário registra
+       o que FOI feito ("insuflação interrompida"), não o que se deve fazer */
+    out.condutaEmbolia = /Durant/.test(D['Embolia gasosa (CO₂)'] || '')
+      && /insuflação interrompida/i.test(D['Embolia gasosa (CO₂)'] || '');
     out.condutaPntx = /descompress/i.test(D['Pneumotórax'] || '');
     // o select de evento da ficha é gerado de TIPOS → novo evento aparece
     location.hash = '#anestesia';
@@ -1103,7 +1106,7 @@ await test('Eventos: pneumoperitônio (início/fim) e crises da laparoscopia com
   assert(r.temInicio && r.temFim, 'TIPOS deveria ter início e fim do pneumoperitônio');
   assert(r.temCrises, 'TIPOS deveria ter embolia gasosa, enfisema subcutâneo e pneumotórax');
   assert(r.descInsuflacao, 'descrição da insuflação deveria citar a pressão alvo (12–15 mmHg)');
-  assert(r.condutaEmbolia, 'conduta da embolia gasosa deveria incluir interromper insuflação e posição de Durant');
+  assert(r.condutaEmbolia, 'a conduta da embolia gasosa continua registrada (insuflação interrompida, posição de Durant)');
   assert(r.condutaPntx, 'conduta do pneumotórax deveria incluir descompressão');
   assert(r.noSelect, 'o select de eventos da ficha deveria listar o pneumoperitônio');
   assert(r.noChecklist, 'o checklist de intercorrências deveria ter as crises da laparoscopia');
@@ -6666,6 +6669,228 @@ await test('Termo de consentimento não gera lançamento financeiro', async () =
   assert(r.finalizou, 'o termo precisa finalizar normalmente');
   assert(r.semFinanceiro, 'finalizar o termo não pode gerar lançamento financeiro');
   assert(r.semRegraDeTermo, 'não existe regra de financeiro para o termo — nem por outro caminho');
+  await page.close();
+});
+
+/* 114) Medicação: digitar sugere, e escolher preenche o padrão de uso. A mesma
+   droga é lançada do mesmo jeito dezenas de vezes por semana — via, unidade e
+   modo não deviam ser redigitados a cada caso. */
+await test('Ficha: digitar a medicação sugere e o padrão (via, modo, diluição) vem junto', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('anestesia');
+    const v = (tr, n) => (tr.querySelector('[name="' + n + '"]') || {}).value || '';
+
+    /* infusão contínua: vem com bomba e diluição usual */
+    const tr1 = anestesia.meds.add({});
+    const n1 = tr1.querySelector('[name="med_nome[]"]');
+    n1.value = 'remi';
+    anestesia.meds.sugerir(n1);
+    const box = document.getElementById('med-sug-box');
+    out.sugeriu = !!box && box.style.display !== 'none' && /Remifentanil/.test(box.textContent);
+    anestesia.meds.escolher(0);
+    out.preencheuInfusao = v(tr1, 'med_nome[]') === 'Remifentanil'
+      && v(tr1, 'med_via[]') === 'EV'
+      && v(tr1, 'med_tipo[]').indexOf('bomba') >= 0
+      && /mcg\/mL/.test(v(tr1, 'med_diluicao[]'))
+      && !!v(tr1, 'med_hora[]');
+    out.fechouACaixa = box.style.display === 'none';
+
+    /* bolus com dose habitual */
+    const tr2 = anestesia.meds.add({});
+    const n2 = tr2.querySelector('[name="med_nome[]"]');
+    n2.value = 'ondan';
+    anestesia.meds.sugerir(n2);
+    anestesia.meds.escolher(0);
+    out.preencheuBolus = v(tr2, 'med_nome[]') === 'Ondansetrona' && v(tr2, 'med_dose[]') === '4'
+      && v(tr2, 'med_unidade[]') === 'mg' && v(tr2, 'med_tipo[]') === 'Bolus';
+
+    /* inalatório entra como inalatório, não como bolus */
+    const tr3 = anestesia.meds.add({});
+    const n3 = tr3.querySelector('[name="med_nome[]"]');
+    n3.value = 'sevo';
+    anestesia.meds.sugerir(n3);
+    anestesia.meds.escolher(0);
+    out.inalatorio = v(tr3, 'med_tipo[]') === 'Inalatório' && v(tr3, 'med_via[]') === 'Inalatória';
+
+    /* NÃO sobrescreve o que já foi digitado */
+    const tr4 = anestesia.meds.add({});
+    const n4 = tr4.querySelector('[name="med_nome[]"]');
+    tr4.querySelector('[name="med_dose[]"]').value = '2';
+    tr4.querySelector('[name="med_via[]"]').value = 'IM';
+    n4.value = 'dipiro';
+    anestesia.meds.sugerir(n4);
+    anestesia.meds.escolher(0);
+    out.naoPisouNoDigitado = v(tr4, 'med_dose[]') === '2' && v(tr4, 'med_via[]') === 'IM'
+      && v(tr4, 'med_nome[]') === 'Dipirona';
+
+    /* uma letra não sugere nada (ruído); duas já sugerem */
+    out.soComDuasLetras = anestesia.meds._achar('d').length === 0 && anestesia.meds._achar('di').length > 0;
+    /* quem começa com o texto vem antes de quem só contém */
+    out.ordemUtil = (anestesia.meds._achar('morf')[0] || {}).nome.indexOf('Morfina') === 0;
+
+    return out;
+  });
+  assert(r.sugeriu, 'digitar parte do nome tem que sugerir a medicação');
+  assert(r.preencheuInfusao, 'escolher uma infusão traz bomba, unidade e diluição usual');
+  assert(r.fechouACaixa, 'depois de escolher, a lista some');
+  assert(r.preencheuBolus, 'bolus com dose habitual vem pronto');
+  assert(r.inalatorio, 'inalatório não pode entrar como bolus');
+  assert(r.naoPisouNoDigitado, 'o padrão nunca sobrescreve o que a pessoa já digitou');
+  assert(r.soComDuasLetras, 'uma letra só sugeriria meio catálogo');
+  assert(r.ordemUtil, 'quem começa com o que foi digitado vem primeiro');
+  await page.close();
+});
+
+/* 115) Diurese junto dos sinais vitais: é ali que ela é lida. Cada volume é o
+   do intervalo, o app calcula o ritmo na hora, o débito no fim, e leva tudo
+   para o balanço hídrico sem digitação dupla. */
+await test('Ficha: diurese entra na grade dos sinais vitais, calcula ritmo e alimenta o balanço', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('anestesia');
+    const f = document.getElementById('form-anestesia');
+    f.querySelector('[name="paciente_peso"]').value = '70';
+    f.querySelector('[name="hora_inicio"]').value = '08:00';
+    f.querySelector('[name="hora_fim"]').value = '12:00';
+
+    /* sem sonda e sem registro, a linha não polui a grade */
+    anestesia.vitais.add(false, { hora: '09:00', fc: '70' });
+    anestesia.vitais._renderGrade();
+    out.semSondaNaoAparece = !document.querySelector('#vitais-grade tr.vg-diurese');
+
+    const sonda = Array.from(document.querySelectorAll('[name="dispositivos[]"]')).find(el => el.value === 'Sonda vesical');
+    sonda.checked = true;
+    anestesia.diurese.sincronizar();
+    anestesia.vitais.add(false, { hora: '10:00', fc: '72' });
+    anestesia.vitais._renderGrade();
+    out.apareceComSonda = !!document.querySelector('#vitais-grade tr.vg-diurese');
+    out.explicaOQuePreencher = /desde o anterior/i.test(
+      document.querySelector('#vitais-grade tr.vg-diurese th').textContent);
+
+    /* 100 mL na primeira hora, 30 mL na segunda */
+    const cels = () => document.querySelectorAll('#vitais-grade tr.vg-diurese input');
+    const c1 = cels(); c1[0].value = '100'; anestesia.diurese._daGrade(c1[0]);
+    const c2 = cels(); c2[1].value = '30'; anestesia.diurese._daGrade(c2[1]);
+
+    out.virouRegistro = anestesia.diurese._parciais()
+      .map(p => p.hora + '=' + p.vol).join('|') === '09:00=100|10:00=30';
+    out.foiParaOBalanco = (f.querySelector('[name="diurese"]') || {}).value === '130';
+
+    const ritmos = Array.from(document.querySelectorAll('#vitais-grade tr.vg-diurese td div'))
+      .map(d => d.textContent.trim());
+    out.ritmoDoIntervalo = /1,4 mL\/kg\/h/.test(ritmos[0]) && /0,4 mL\/kg\/h/.test(ritmos[1]);
+    /* abaixo de 0,5 mL/kg/h o número aparece em vermelho — é o alerta */
+    const tds = document.querySelectorAll('#vitais-grade tr.vg-diurese td');
+    out.alertouOligúria = /rgb\(192, 57, 43\)|#c0392b/.test(tds[1].querySelector('div').getAttribute('style') || '');
+    out.debitoDoCaso = /0,46 mL\/kg\/h/.test((document.getElementById('diurese-resultado') || {}).value || '');
+
+    /* apagar o valor tira o registro (e o balanço acompanha) */
+    const c3 = cels(); c3[1].value = ''; anestesia.diurese._daGrade(c3[1]);
+    out.apagarRemove = anestesia.diurese._parciais().length === 1
+      && (f.querySelector('[name="diurese"]') || {}).value === '100';
+    return out;
+  });
+  assert(r.semSondaNaoAparece, 'sem sonda e sem registro, a diurese não polui a grade');
+  assert(r.apareceComSonda, 'com sonda vesical, a diurese entra na grade dos sinais vitais');
+  assert(r.explicaOQuePreencher, 'a grade precisa dizer que o volume é o do intervalo');
+  assert(r.virouRegistro, 'o que é lançado na grade vira registro de diurese');
+  assert(r.foiParaOBalanco, 'a diurese registrada alimenta o balanço hídrico sozinha');
+  assert(r.ritmoDoIntervalo, 'cada intervalo mostra o próprio ritmo urinário');
+  assert(r.alertouOligúria, 'ritmo abaixo de 0,5 mL/kg/h precisa saltar aos olhos');
+  assert(r.debitoDoCaso, 'o débito do caso continua sendo calculado no fim');
+  assert(r.apagarRemove, 'apagar o valor desfaz o registro e corrige o balanço');
+  await page.close();
+});
+
+/* 116) Técnica, via aérea e acessos: escolher uma vez basta. O que foi marcado
+   no card vira o texto do evento, a ventilação certa e a faixa no gráfico. */
+await test('Ficha: técnica define a ventilação, e tubo/cateter escolhidos escrevem o evento', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('anestesia');
+    const f = document.getElementById('form-anestesia');
+    const descDe = tipo => {
+      const tr = Array.from(document.querySelectorAll('#eventos-body tr'))
+        .find(x => (x.querySelector('[name="evt_tipo[]"]') || {}).value === tipo);
+      return tr ? (tr.querySelector('[name="evt_obs[]"]') || {}).value : '';
+    };
+
+    /* técnica geral → ventilação mecânica marcada e período na linha do tempo */
+    const geral = f.querySelector('[name="tipo[]"][value="Anestesia geral"]');
+    geral.checked = true;
+    anestesia.eventos.aoSelecionarTipo(geral);
+    out.ventDaTecnica = (f.querySelector('[name="vent_modo_geral"]:checked') || {}).value === 'mecanica';
+    out.marcouInicioVent = anestesia.eventos.existeEvento('Início da ventilação mecânica');
+
+    /* escolha do anestesista não é revista: já marcado, o app não muda */
+    f.querySelector('[name="vent_modo_geral"][value="espontanea"]').checked = true;
+    const sed = f.querySelector('[name="tipo[]"][value="Sedação"]');
+    sed.checked = true; anestesia.eventos.aoSelecionarTipo(sed);
+    out.naoRevisaEscolha = (f.querySelector('[name="vent_modo_geral"]:checked') || {}).value === 'espontanea';
+
+    /* voltar para espontânea marca o FIM da ventilação mecânica */
+    anestesia.vent.alternar();
+    out.marcouFimVent = anestesia.eventos.existeEvento('Fim da ventilação mecânica');
+
+    /* tubo: tamanho/cuff/Cormack/fixação viram texto e entram no evento */
+    const va = f.querySelector('[name="via_aerea_uso"]');
+    va.value = 'Intubação orotraqueal';
+    anestesia.eventos.aoSelecionarViaAerea(va);
+    f.querySelector('[name="via_aerea_tamanho"]').value = '7,5';
+    f.querySelector('[name="via_aerea_cuff"]').value = 'com cuff';
+    f.querySelector('[name="via_aerea_cormack"]').value = 'I';
+    f.querySelector('[name="via_aerea_fixacao"]').value = '21';
+    anestesia.viaAerea.montarDetalhe();
+    out.montouTubo = f.querySelector('[name="via_aerea_detalhe"]').value === 'TOT 7,5 com cuff · Cormack I · fixado a 21 cm';
+    out.tuboNoEvento = /TOT 7,5 com cuff · Cormack I · fixado a 21 cm/.test(descDe('Intubação'));
+
+    /* escrever à mão manda mais que o padrão */
+    const det = f.querySelector('[name="via_aerea_detalhe"]');
+    det.value = 'TOT 8,0 — Cormack IIa'; det.dataset.manual = '1';
+    anestesia.viaAerea.montarDetalhe();
+    out.respeitaOManual = det.value === 'TOT 8,0 — Cormack IIa';
+
+    /* venoclise: tipo e calibre selecionados escrevem o evento */
+    const acesso = Array.from(document.querySelectorAll('[name="dispositivos[]"]')).find(el => el.value === 'Acesso venoso periférico');
+    acesso.checked = true; anestesia.disp.alternar(acesso);
+    document.querySelector('[data-campo="tipo"][data-disp="Acesso venoso periférico"]').value = 'Cateter sobre agulha (Jelco)';
+    document.querySelector('[data-campo="calibre"][data-disp="Acesso venoso periférico"]').value = '18G';
+    document.querySelector('[data-campo="local"][data-disp="Acesso venoso periférico"]').value = 'dorso da mão D';
+    anestesia.disp.montarDet('Acesso venoso periférico');
+    anestesia.eventos.add({ tipo: 'Venoclise', hora: '08:10', obs: anestesia.eventos.descricaoPara('Venoclise'), auto: true });
+    out.venoclise = /Cateter sobre agulha \(Jelco\) 18G em dorso da mão D/.test(descDe('Venoclise'));
+
+    /* seleções sobrevivem ao salvar/reabrir */
+    const guardado = anestesia.disp.coletarDetalhes();
+    document.querySelector('[data-campo="calibre"][data-disp="Acesso venoso periférico"]').value = '';
+    document.querySelector('[name="disp_det[]"][data-disp="Acesso venoso periférico"]').value = '';
+    anestesia.disp.restaurarDetalhes(guardado);
+    out.voltaDepoisDeReabrir = document.querySelector('[data-campo="calibre"][data-disp="Acesso venoso periférico"]').value === '18G'
+      && /18G/.test(document.querySelector('[name="disp_det[]"][data-disp="Acesso venoso periférico"]').value);
+
+    /* descrições: registro do que foi feito, não manual de conduta */
+    const D = anestesia.eventos.DESCRICOES;
+    const orientacao = /vigiar|avisar a equipe|considerar|se indicado|conforme necessário|suspeitar|crise —/i;
+    out.semOrientacoes = !orientacao.test(D['Pneumotórax'] + ' ' + D['Embolia gasosa (CO₂)'] + ' ' +
+      D['Início do pneumoperitônio'] + ' ' + D['Fim do pneumoperitônio'] + ' ' + D['Enfisema subcutâneo']);
+    out.temDescricaoDeVent = !!D['Início da ventilação mecânica'] && !!D['Fim da ventilação mecânica'];
+    return out;
+  });
+  assert(r.ventDaTecnica, 'anestesia geral implica ventilação mecânica — não deveria ser remarcada à mão');
+  assert(r.marcouInicioVent, 'o início da ventilação mecânica entra na linha do tempo');
+  assert(r.naoRevisaEscolha, 'escolha já feita pelo anestesista não é revista pelo sistema');
+  assert(r.marcouFimVent, 'voltar à espontânea marca o fim da ventilação mecânica');
+  assert(r.montouTubo, 'tamanho, cuff, Cormack e fixação montam o texto do dispositivo');
+  assert(r.tuboNoEvento, 'e esse texto entra na descrição da intubação');
+  assert(r.respeitaOManual, 'o que foi escrito à mão vale mais que o padrão');
+  assert(r.venoclise, 'tipo e calibre do cateter escrevem a descrição da venoclise');
+  assert(r.voltaDepoisDeReabrir, 'as seleções precisam sobreviver ao salvar e reabrir');
+  assert(r.semOrientacoes, 'a descrição do evento é o registro do que foi feito, não orientação ao profissional');
+  assert(r.temDescricaoDeVent, 'os eventos novos de ventilação precisam de descrição técnica');
   await page.close();
 });
 

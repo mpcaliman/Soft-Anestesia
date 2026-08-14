@@ -4266,7 +4266,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-13o</b><br>
+    v7.1 · build <b id="build-tag">2026-08-14b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -5554,8 +5554,30 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
                 <option>Outro</option>
               </select>
             </div>
-            <div class="field col-5"><label>Detalhes do dispositivo <small style="color:var(--text-mute);font-weight:400">— tamanho, cuff, Cormack, fixação</small></label>
-              <input type="text" name="via_aerea_detalhe" placeholder="Ex.: TOT 7,5 com cuff · Cormack I · fixado a 21 cm" oninput="anestesia.eventos.atualizarDescricoes()">
+            <!-- Tamanho, cuff, Cormack e fixação em seleção: é sempre a mesma
+                 informação, e digitá-la por extenso a cada caso é redigitar o
+                 padrão. O texto do dispositivo se monta sozinho a partir daqui
+                 (e continua editável à mão, para o que fugir do comum). -->
+            <div class="field col-2" id="va-tam-wrap"><label>Tamanho</label>
+              <select name="via_aerea_tamanho" onchange="anestesia.viaAerea.montarDetalhe()">
+                <option value="">—</option>
+              </select>
+            </div>
+            <div class="field col-2" id="va-cuff-wrap"><label>Cuff</label>
+              <select name="via_aerea_cuff" onchange="anestesia.viaAerea.montarDetalhe()">
+                <option value="">—</option><option>com cuff</option><option>sem cuff</option>
+              </select>
+            </div>
+            <div class="field col-2" id="va-cormack-wrap"><label>Cormack</label>
+              <select name="via_aerea_cormack" onchange="anestesia.viaAerea.montarDetalhe()">
+                <option value="">—</option><option>I</option><option>IIa</option><option>IIb</option><option>III</option><option>IV</option>
+              </select>
+            </div>
+            <div class="field col-2" id="va-fix-wrap"><label>Fixado a (cm)</label>
+              <input type="number" name="via_aerea_fixacao" min="10" max="35" step="0.5" placeholder="21" oninput="anestesia.viaAerea.montarDetalhe()">
+            </div>
+            <div class="field col-4"><label>Detalhes do dispositivo <small style="color:var(--text-mute);font-weight:400">— montado do que você marcou</small></label>
+              <input type="text" name="via_aerea_detalhe" placeholder="Ex.: TOT 7,5 com cuff · Cormack I · fixado a 21 cm" oninput="anestesia.viaAerea._marcarManual(); anestesia.eventos.atualizarDescricoes()">
             </div>
             <div class="field col-3"><label>Horário</label>
               <div class="input-group"><input type="time" name="via_aerea_hora" onchange="anestesia.eventos.sincronizarDaViaAerea()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','via_aerea_hora'); anestesia.eventos.sincronizarDaViaAerea();">agora</button></div>
@@ -6399,11 +6421,17 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
 
           <!-- tabela de parciais -->
           <div id="diurese-parciais-wrap">
+            <p style="font-size:.78rem;color:var(--text-soft);margin:0 0 6px">
+              Cada linha é o volume <b>do intervalo</b>: o que saiu desde o registro anterior até aquele horário —
+              não o total acumulado do caso. O app soma tudo, calcula o ritmo de cada intervalo e o débito final,
+              e leva a diurese para o balanço hídrico sozinho. Dá para lançar direto na
+              <b>grade dos sinais vitais</b>, junto com os outros parâmetros.
+            </p>
             <div class="dyn-table-wrap">
               <table class="dyn" id="tab-diurese">
                 <thead><tr>
                   <th style="width:90px">Horário</th>
-                  <th style="width:110px">Volume (mL)</th>
+                  <th style="width:130px">Volume no intervalo (mL)</th>
                   <th>Observação</th>
                   <th class="col-rm">×</th>
                 </tr></thead>
@@ -24403,63 +24431,97 @@ const SET_MED_COMUM = ['midazolam','fentanil','propofol','rocuronio','cefazolina
 /* Catálogo das medicações mais usadas em anestesia, agrupadas por classe.
    Multiseleção → entram na tabela para detalhar dose/hora/via. Doses fixas
    comuns já vêm preenchidas; as por peso ficam em branco. */
+/* CATÁLOGO DE MEDICAÇÕES — cada item traz o PADRÃO de uso: dose habitual do
+   adulto, unidade, via e o modo (bolus, bomba, inalatório). É o que a
+   digitação sugere e preenche sozinha: numa ficha, a mesma droga é lançada do
+   mesmo jeito dezenas de vezes por semana, e redigitar via/modo a cada vez é
+   trabalho que o app pode poupar. Dose fica em branco quando depende do peso
+   ou do efeito — chutar número em prontuário seria pior do que deixar vazio.
+   `dil` é a diluição usual das que correm em bomba. */
 const CATALOGO_MED = [
   { grupo: 'Hipnóticos / indução', itens: [
-    { nome: 'Propofol', unidade: 'mg', via: 'EV' },
-    { nome: 'Etomidato', unidade: 'mg', via: 'EV' },
-    { nome: 'Cetamina', unidade: 'mg', via: 'EV' },
-    { nome: 'Midazolam', unidade: 'mg', via: 'EV' },
-    { nome: 'Tiopental', unidade: 'mg', via: 'EV' }
+    { nome: 'Propofol', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Propofol (infusão)', base: 'Propofol', unidade: 'mcg/kg/min', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '1000 mg/100 mL (10 mg/mL)' },
+    { nome: 'Etomidato', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Cetamina', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Midazolam', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Tiopental', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Dexmedetomidina', unidade: 'mcg/kg/h', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '200 mcg/50 mL (4 mcg/mL)' }
   ]},
   { grupo: 'Opioides', itens: [
-    { nome: 'Fentanil', unidade: 'mcg', via: 'EV' },
-    { nome: 'Sufentanil', unidade: 'mcg', via: 'EV' },
-    { nome: 'Remifentanil', unidade: 'mcg', via: 'EV' },
-    { nome: 'Alfentanil', unidade: 'mcg', via: 'EV' },
-    { nome: 'Morfina', unidade: 'mg', via: 'EV' },
-    { nome: 'Tramadol', dose: '100', unidade: 'mg', via: 'EV' }
+    { nome: 'Fentanil', unidade: 'mcg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Sufentanil', unidade: 'mcg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Remifentanil', unidade: 'mcg/kg/min', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '2 mg/40 mL (50 mcg/mL)' },
+    { nome: 'Alfentanil', unidade: 'mcg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Morfina', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Tramadol', dose: '100', unidade: 'mg', via: 'EV', tipo: 'Bolus' }
   ]},
   { grupo: 'Bloqueadores neuromusculares', itens: [
-    { nome: 'Succinilcolina', unidade: 'mg', via: 'EV' },
-    { nome: 'Rocurônio', unidade: 'mg', via: 'EV' },
-    { nome: 'Cisatracúrio', unidade: 'mg', via: 'EV' },
-    { nome: 'Atracúrio', unidade: 'mg', via: 'EV' }
+    { nome: 'Succinilcolina', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Rocurônio', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Cisatracúrio', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Atracúrio', unidade: 'mg', via: 'EV', tipo: 'Bolus' }
   ]},
   { grupo: 'Reversores / anticolinérgicos', itens: [
-    { nome: 'Sugammadex', unidade: 'mg', via: 'EV' },
-    { nome: 'Neostigmina', unidade: 'mg', via: 'EV' },
-    { nome: 'Atropina', unidade: 'mg', via: 'EV' }
+    { nome: 'Sugammadex', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Neostigmina', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Atropina', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Flumazenil', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Naloxona', unidade: 'mcg', via: 'EV', tipo: 'Bolus' }
   ]},
   { grupo: 'Vasoativos', itens: [
-    { nome: 'Efedrina', unidade: 'mg', via: 'EV' },
-    { nome: 'Fenilefrina', unidade: 'mcg', via: 'EV' },
-    { nome: 'Metaraminol', unidade: 'mg', via: 'EV' },
-    { nome: 'Noradrenalina', unidade: 'mcg/kg/min', via: 'EV' },
-    { nome: 'Adrenalina', unidade: 'mcg', via: 'EV' },
-    { nome: 'Dobutamina', unidade: 'mcg/kg/min', via: 'EV' }
+    { nome: 'Efedrina', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Fenilefrina', unidade: 'mcg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Metaraminol', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Noradrenalina', unidade: 'mcg/kg/min', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '4 mg/250 mL (16 mcg/mL)' },
+    { nome: 'Adrenalina', unidade: 'mcg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Dobutamina', unidade: 'mcg/kg/min', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '250 mg/250 mL (1 mg/mL)' },
+    { nome: 'Nitroglicerina', unidade: 'mcg/kg/min', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '25 mg/250 mL (100 mcg/mL)' },
+    { nome: 'Nitroprussiato', unidade: 'mcg/kg/min', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '50 mg/250 mL (200 mcg/mL)' }
   ]},
   { grupo: 'Antieméticos / corticoide', itens: [
-    { nome: 'Ondansetrona', dose: '4', unidade: 'mg', via: 'EV' },
-    { nome: 'Metoclopramida', dose: '10', unidade: 'mg', via: 'EV' },
-    { nome: 'Dexametasona', dose: '10', unidade: 'mg', via: 'EV' }
+    { nome: 'Ondansetrona', dose: '4', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Metoclopramida', dose: '10', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Dexametasona', dose: '10', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Droperidol', dose: '0,625', unidade: 'mg', via: 'EV', tipo: 'Bolus' }
   ]},
   { grupo: 'Analgésicos / AINE', itens: [
-    { nome: 'Dipirona', dose: '2', unidade: 'g', via: 'EV' },
-    { nome: 'Cetoprofeno', dose: '100', unidade: 'mg', via: 'EV' },
-    { nome: 'Tenoxicam', dose: '40', unidade: 'mg', via: 'EV' },
-    { nome: 'Lidocaína', unidade: 'mg', via: 'EV' }
+    { nome: 'Dipirona', dose: '2', unidade: 'g', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Cetoprofeno', dose: '100', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Tenoxicam', dose: '40', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Cetorolaco', dose: '30', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Paracetamol', dose: '1', unidade: 'g', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Lidocaína', unidade: 'mg', via: 'EV', tipo: 'Bolus' }
   ]},
   { grupo: 'Antibióticos', itens: [
-    { nome: 'Cefazolina', dose: '2', unidade: 'g', via: 'EV' },
-    { nome: 'Cefuroxima', dose: '1.5', unidade: 'g', via: 'EV' },
-    { nome: 'Clindamicina', dose: '600', unidade: 'mg', via: 'EV' }
+    { nome: 'Cefazolina', dose: '2', unidade: 'g', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Cefuroxima', dose: '1.5', unidade: 'g', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Ceftriaxona', dose: '1', unidade: 'g', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Clindamicina', dose: '600', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Metronidazol', dose: '500', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Vancomicina', dose: '1', unidade: 'g', via: 'EV', tipo: 'Infusão contínua (gravitacional)' }
+  ]},
+  { grupo: 'Inalatórios / gases', itens: [
+    { nome: 'Sevoflurano', unidade: 'CAM', via: 'Inalatória', tipo: 'Inalatório' },
+    { nome: 'Desflurano', unidade: 'CAM', via: 'Inalatória', tipo: 'Inalatório' },
+    { nome: 'Isoflurano', unidade: 'CAM', via: 'Inalatória', tipo: 'Inalatório' },
+    { nome: 'Oxigênio', unidade: 'L/min', via: 'Inalatória', tipo: 'Inalatório' },
+    { nome: 'Óxido nitroso', unidade: 'L/min', via: 'Inalatória', tipo: 'Inalatório' }
+  ]},
+  { grupo: 'Anestésicos locais', itens: [
+    { nome: 'Bupivacaína 0,5% pesada', unidade: 'mg', via: 'Subaracnóideo', tipo: 'Bolus' },
+    { nome: 'Bupivacaína 0,5% isobárica', unidade: 'mg', via: 'Peridural', tipo: 'Bolus' },
+    { nome: 'Ropivacaína 0,75%', unidade: 'mg', via: 'Peridural', tipo: 'Bolus' },
+    { nome: 'Lidocaína 2% com vasoconstritor', unidade: 'mg', via: 'Peridural', tipo: 'Bolus' },
+    { nome: 'Morfina (subaracnóidea)', base: 'Morfina', unidade: 'mcg', via: 'Subaracnóideo', tipo: 'Bolus' }
   ]},
   { grupo: 'Outros', itens: [
-    { nome: 'Sulfato de magnésio', unidade: 'g', via: 'EV' },
-    { nome: 'Ácido tranexâmico', dose: '1', unidade: 'g', via: 'EV' },
-    { nome: 'Hidrocortisona', dose: '100', unidade: 'mg', via: 'EV' },
-    { nome: 'Omeprazol', dose: '40', unidade: 'mg', via: 'EV' },
-    { nome: 'Dexmedetomidina', unidade: 'mcg', via: 'EV' }
+    { nome: 'Sulfato de magnésio', unidade: 'g', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Ácido tranexâmico', dose: '1', unidade: 'g', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Hidrocortisona', dose: '100', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Omeprazol', dose: '40', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Gluconato de cálcio', dose: '1', unidade: 'g', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Insulina regular', unidade: 'UI', via: 'EV', tipo: 'Bolus' }
   ]}
 ];
 const UNIDADES = ['mg', 'mcg', 'g', 'mL', 'L', 'L/min', 'UI', '%', 'cp', 'mg/kg', 'mcg/kg', 'ng/dL', 'mcg/kg/min', 'mcg/min', 'mg/h', 'mcg/kg/h', 'mL/h', 'ng/mL', 'CAM'];
@@ -24671,7 +24733,30 @@ const anestesia = {
       if (mecEl) mecEl.style.display = r === 'mecanica' ? 'block' : 'none';
       if (r === 'mecanica') { try { anestesia.vent.mostrarCamposModo(); } catch (e) {} }
       anestesia.vent._derivarTipo();
+      /* Ventilação mecânica tem começo e fim, e isso é registro: entra na linha
+         do tempo e aparece como faixa no gráfico, junto dos sinais vitais. */
+      try { anestesia.vent._marcarPeriodo(r); } catch (e) {}
       markDirty();
+    },
+    /* Marca início/fim da ventilação mecânica como evento — sem duplicar e sem
+       inventar: só marca o fim se houve início. */
+    _marcarPeriodo(modo) {
+      const ev = anestesia.eventos;
+      if (!ev || !ev.existeEvento) return;
+      const temInicio = ev.existeEvento('Início da ventilação mecânica');
+      if (modo === 'mecanica') {
+        if (temInicio) return;
+        anestesia.graficoUI._contexto = 'anestesia';
+        ev.add({ tipo: 'Início da ventilação mecânica', hora: utils.horaAtual(),
+                 obs: ev.descricaoPara('Início da ventilação mecânica'), auto: true });
+        try { toast('🫁 Início da ventilação mecânica marcado na linha do tempo'); } catch (e) {}
+      } else if (temInicio && !ev.existeEvento('Fim da ventilação mecânica')) {
+        anestesia.graficoUI._contexto = 'anestesia';
+        ev.add({ tipo: 'Fim da ventilação mecânica', hora: utils.horaAtual(),
+                 obs: ev.descricaoPara('Fim da ventilação mecânica'), auto: true });
+        try { toast('🫁 Fim da ventilação mecânica marcado na linha do tempo'); } catch (e) {}
+      }
+      try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
     },
     /* FiO₂ é uma só: mantém os três campos (espontânea, mecânica, gases frescos)
        em sincronia — informa-se uma vez. */
@@ -25161,13 +25246,75 @@ const anestesia = {
     }
   },
 
+  /* ---- VIA AÉREA: tamanho, cuff, Cormack e fixação viram texto sozinhos ----
+     O detalhe do dispositivo é sempre a mesma informação, escrita do mesmo
+     jeito. Escolher em vez de digitar tira erro de digitação da ficha e faz o
+     texto chegar pronto na descrição do evento de intubação. Se o anestesista
+     escrever à mão, o app para de montar aquele texto — o que ele escreveu
+     vale mais do que o padrão. */
+  viaAerea: {
+    TAMANHOS: {
+      tubo: ['6,0', '6,5', '7,0', '7,5', '8,0', '8,5', '9,0'],
+      ml: ['1', '1,5', '2', '2,5', '3', '4', '5', '6'],
+      nenhum: []
+    },
+    _f() { return document.getElementById('form-anestesia'); },
+    _v(n) { const f = anestesia.viaAerea._f(); const el = f && f.querySelector('[name="' + n + '"]'); return el ? String(el.value || '').trim() : ''; },
+    _familia() {
+      const via = anestesia.viaAerea._v('via_aerea_uso');
+      if (/intuba|traqueosto/i.test(via)) return 'tubo';
+      if (/laríngea/i.test(via)) return 'ml';
+      return 'nenhum';
+    },
+    _marcarManual() {
+      const f = anestesia.viaAerea._f();
+      const el = f && f.querySelector('[name="via_aerea_detalhe"]');
+      if (el) el.dataset.manual = '1';
+    },
+    montarDetalhe() {
+      const f = anestesia.viaAerea._f(); if (!f) return '';
+      const fam = anestesia.viaAerea._familia();
+      /* tamanhos certos para o dispositivo escolhido */
+      const sel = f.querySelector('[name="via_aerea_tamanho"]');
+      if (sel) {
+        const atual = sel.value;
+        const lista = anestesia.viaAerea.TAMANHOS[fam] || [];
+        sel.innerHTML = '<option value="">—</option>' + lista.map(t => '<option>' + t + '</option>').join('');
+        if (lista.indexOf(atual) >= 0) sel.value = atual;
+      }
+      const mostrar = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+      mostrar('va-tam-wrap', fam !== 'nenhum');
+      mostrar('va-cuff-wrap', fam === 'tubo');
+      mostrar('va-cormack-wrap', fam === 'tubo');
+      mostrar('va-fix-wrap', fam === 'tubo');
+
+      const det = f.querySelector('[name="via_aerea_detalhe"]');
+      if (!det || det.dataset.manual === '1') return det ? det.value : '';
+      const tam = anestesia.viaAerea._v('via_aerea_tamanho');
+      const cuff = anestesia.viaAerea._v('via_aerea_cuff');
+      const cormack = anestesia.viaAerea._v('via_aerea_cormack');
+      const fix = anestesia.viaAerea._v('via_aerea_fixacao');
+      const partes = [];
+      if (fam === 'tubo' && tam) partes.push('TOT ' + tam + (cuff ? ' ' + cuff : ''));
+      else if (fam === 'ml' && tam) partes.push('Máscara laríngea nº ' + tam);
+      else if (cuff) partes.push(cuff);
+      if (cormack) partes.push('Cormack ' + cormack);
+      if (fix) partes.push('fixado a ' + String(fix).replace('.', ',') + ' cm');
+      const txt = partes.join(' · ');
+      if (txt || !det.value) det.value = txt;
+      try { anestesia.eventos.atualizarDescricoes(); } catch (e) {}
+      try { markDirty(); } catch (e) {}
+      return txt;
+    }
+  },
+
   /* ---- EVENTOS CRONOLÓGICOS ---- */
   eventos: {
     /* Catálogo agrupado (fonte única) — TIPOS é derivado daqui */
     GRUPOS: [
       { grupo: 'Procedimentos / acessos', itens: ['Venoclise', 'Punção arterial', 'Acesso venoso central',
           'Sondagem orogástrica', 'Sondagem nasogástrica', 'Sondagem vesical (Foley)', 'Sondagem vesical de alívio'] },
-      { grupo: 'Via aérea / anestesia', itens: ['Sedação', 'Indução', 'Intubação', 'Extubação', 'Máscara laríngea', 'Início O₂', 'Fim O₂', 'Início halogenado', 'Fim halogenado', 'Início infusão contínua', 'Fim infusão contínua'] },
+      { grupo: 'Via aérea / anestesia', itens: ['Sedação', 'Indução', 'Intubação', 'Extubação', 'Máscara laríngea', 'Início da ventilação mecânica', 'Fim da ventilação mecânica', 'Início O₂', 'Fim O₂', 'Início halogenado', 'Fim halogenado', 'Início infusão contínua', 'Fim infusão contínua'] },
       { grupo: 'Bloqueios', itens: ['Raquianestesia', 'Peridural', 'Bloqueio periférico'] },
       { grupo: 'Cirurgia', itens: ['Incisão cirúrgica', 'Início da cirurgia', 'Hemostasia', 'Fim da cirurgia'] },
       { grupo: 'Laparoscopia', itens: ['Início do pneumoperitônio', 'Fim do pneumoperitônio'] },
@@ -25186,24 +25333,26 @@ const anestesia = {
       'Peridural': '1) Assepsia e antissepsia; 2) Campos estéreis; 3) Botão anestésico; 4) Punção peridural com agulha de Tuohy (perda de resistência); 5) Dose-teste; 6) Passagem de cateter, se indicado; 7) Dose fracionada e checagem do nível.',
       'Bloqueio periférico': '1) Assepsia e antissepsia; 2) Identificação do alvo por ultrassom/neuroestimulação; 3) Punção; 4) Injeção fracionada com aspiração intermitente; 5) Checagem da dispersão e do bloqueio.',
       'Intubação': '1) Pré-oxigenação; 2) Indução e bloqueio neuromuscular; 3) Laringoscopia; 4) Visualização da glote (Cormack–Lehane); 5) Passagem do tubo; 6) Confirmação por EtCO₂, ausculta e expansibilidade; 7) Insuflação do cuff e fixação.',
-      'Extubação': '1) Critérios de extubação (desperto, TOF adequado, ventilação eficaz); 2) Aspiração de vias aéreas; 3) Desinsuflação do cuff; 4) Extubação; 5) O₂ suplementar e observação.',
-      'Sedação': 'Sedação titulada sob monitorização contínua (oximetria, cardioscopia e PA), com oxigênio suplementar; paciente mantendo ventilação espontânea e resposta a estímulo verbal/tátil conforme o nível pretendido.',
+      'Extubação': '1) Paciente desperto, com TOF adequado e ventilação eficaz; 2) Aspiração de vias aéreas; 3) Desinsuflação do cuff; 4) Extubação; 5) Oxigênio suplementar.',
+      'Sedação': 'Sedação titulada sob monitorização contínua (oximetria, cardioscopia e PA), com oxigênio suplementar; ventilação espontânea mantida.',
       'Sondagem orogástrica': '1) Medida da distância a introduzir; 2) Lubrificação; 3) Passagem por via oral com o paciente já anestesiado; 4) Confirmação do posicionamento (ausculta epigástrica/aspirado gástrico); 5) Fixação e drenagem.',
-      'Sondagem nasogástrica': '1) Escolha da narina e lubrificação; 2) Passagem cuidadosa (atenção a coagulopatia e trauma de face/base de crânio); 3) Confirmação do posicionamento; 4) Fixação e drenagem.',
-      'Sondagem vesical (Foley)': '1) Assepsia e antissepsia; 2) Campos estéreis; 3) Lubrificação; 4) Passagem da sonda de Foley; 5) Insuflação do balão após retorno de urina; 6) Conexão ao sistema fechado e fixação; 7) Registro do débito urinário.',
-      'Sondagem vesical de alívio': '1) Assepsia e antissepsia; 2) Técnica estéril; 3) Passagem da sonda; 4) Esvaziamento vesical; 5) Retirada imediata; 6) Registro do volume drenado.',
+      'Sondagem nasogástrica': '1) Narina escolhida e sonda lubrificada; 2) Passagem por via nasal; 3) Confirmação do posicionamento; 4) Fixação e drenagem.',
+      'Sondagem vesical (Foley)': '1) Assepsia e antissepsia; 2) Campos estéreis; 3) Lubrificação; 4) Passagem da sonda de Foley; 5) Insuflação do balão após retorno de urina; 6) Conexão ao sistema coletor fechado e fixação.',
+      'Sondagem vesical de alívio': '1) Assepsia e antissepsia; 2) Técnica estéril; 3) Passagem da sonda; 4) Esvaziamento vesical; 5) Retirada da sonda, com o volume drenado registrado.',
       'Venoclise': '1) Garroteamento; 2) Assepsia; 3) Punção venosa periférica; 4) Refluxo sanguíneo; 5) Fixação e teste de fluxo.',
       'Indução': '1) Pré-oxigenação; 2) Hipnótico + opioide; 3) Checagem de ventilação sob máscara; 4) Bloqueador neuromuscular, se indicado IOT.',
-      'Incisão cirúrgica': 'Início da incisão cirúrgica após confirmação de plano anestésico e analgesia adequados.',
+      'Incisão cirúrgica': 'Incisão cirúrgica realizada com plano anestésico e analgesia estabelecidos.',
+      'Início da ventilação mecânica': 'Início da ventilação mecânica controlada, com parâmetros ajustados conforme o registro do card Ventilação.',
+      'Fim da ventilação mecânica': 'Retorno à ventilação espontânea, com ventilação eficaz e oxigenação adequada.',
       'Início O₂': 'Início de oxigenoterapia suplementar.',
       'Início halogenado': 'Início do agente halogenado para manutenção.',
-      'Fim da cirurgia': 'Término do tempo cirúrgico; curativo e preparo para o despertar/transferência.',
-      'Antibioticoprofilaxia': 'Antibioticoprofilaxia administrada conforme protocolo (idealmente até 60 min antes da incisão).',
-      'Início do pneumoperitônio': 'Insuflação de CO₂ para pneumoperitônio; pressão intra-abdominal alvo 12–15 mmHg. Vigiar: EtCO₂ (hipercapnia), aumento das pressões de via aérea, bradicardia vagal na insuflação e repercussão hemodinâmica do posicionamento.',
-      'Fim do pneumoperitônio': 'Desinsuflação do pneumoperitônio com exsuflação o mais completa possível; observar normalização das pressões de via aérea, do EtCO₂ e da hemodinâmica; analgesia para dor referida no ombro, se necessário.',
-      'Embolia gasosa (CO₂)': 'CRISE — suspeitar com queda súbita do EtCO₂ + hipotensão/dessaturação na insuflação: 1) Avisar a equipe e INTERROMPER a insuflação / desfazer o pneumoperitônio; 2) FiO₂ 100% e suspender N₂O; 3) Posição de Durant (Trendelenburg + decúbito lateral esquerdo); 4) Volume + vasopressor conforme hemodinâmica; 5) Aspirar pelo cateter central, se disponível; 6) RCP imediata se colapso.',
-      'Enfisema subcutâneo': '1) Comunicar a equipe e reduzir a pressão de insuflação (ou pausar); 2) Checar hipercapnia (EtCO₂) e ajustar ventilação-minuto; 3) Palpar a extensão da crepitação — atenção a pescoço/tórax (via aérea) e a pneumotórax/capnotórax associados; 4) Costuma regredir após a desinsuflação; considerar manter intubado até regressão se extenso em face/pescoço.',
-      'Pneumotórax': 'CRISE — suspeitar com aumento de pressão de pico + dessaturação + murmúrio abolido unilateral (na laparoscopia, considerar capnotórax): 1) Avisar a equipe; FiO₂ 100%; 2) Reduzir/desfazer o pneumoperitônio; 3) Se hipertensivo: descompressão imediata (agulha no 2º EIC linha hemiclavicular) seguida de dreno torácico; 4) Capnotórax sem tensão pode responder a desinsuflação + PEEP e observação; 5) Suporte hemodinâmico conforme necessário.'
+      'Fim da cirurgia': 'Término do tempo cirúrgico, com curativo realizado.',
+      'Antibioticoprofilaxia': 'Antibioticoprofilaxia administrada por via endovenosa antes da incisão.',
+      'Início do pneumoperitônio': 'Insuflação de CO₂ para pneumoperitônio, com pressão intra-abdominal de 12–15 mmHg.',
+      'Fim do pneumoperitônio': 'Desinsuflação do pneumoperitônio, com normalização das pressões de via aérea e do EtCO₂.',
+      'Embolia gasosa (CO₂)': 'Queda súbita do EtCO₂ com hipotensão e dessaturação durante a insuflação. Insuflação interrompida e pneumoperitônio desfeito; FiO₂ 100% e suspensão do N₂O; posição de Durant; expansão volêmica e vasopressor.',
+      'Enfisema subcutâneo': 'Crepitação subcutânea identificada à palpação, com extensão registrada; pressão de insuflação reduzida e ventilação-minuto ajustada pelo EtCO₂.',
+      'Pneumotórax': 'Aumento da pressão de pico com dessaturação e abolição do murmúrio vesicular unilateral. FiO₂ 100%, pneumoperitônio desfeito e descompressão torácica realizada.'
     },
     /* ---- O QUE FOI ESCOLHIDO NOS CARDS 3, 4 E 5 ---------------------------
        O anestesista escolhe a técnica, a agulha, o calibre, o sítio de punção,
@@ -25424,14 +25573,46 @@ const anestesia = {
       'Bloqueio periférico': 'Bloqueio periférico',
       'Bloqueio regional': 'Bloqueio periférico'
     },
+    /* A técnica escolhida já diz como o paciente vai respirar: geral com via
+       aérea artificial é ventilação mecânica; sedação, bloqueio e local são
+       espontânea. Marcar isso à mão, logo depois de marcar a técnica, é
+       redigitar o que o app já sabe. Só preenche quando ainda está em branco —
+       a escolha do anestesista, uma vez feita, não é revista pelo sistema. */
+    VENT_POR_TIPO: {
+      'Anestesia geral': 'mecanica',
+      'Sedação': 'espontanea',
+      'Raquianestesia': 'espontanea',
+      'Peridural': 'espontanea',
+      'Bloqueio periférico': 'espontanea',
+      'Bloqueio regional': 'espontanea',
+      'Local assistida': 'espontanea',
+      'Monitoração e vigilância clínica': 'espontanea'
+    },
+    _sugerirVentilacao(valorTipo) {
+      const modo = anestesia.eventos.VENT_POR_TIPO[valorTipo];
+      if (!modo) return false;
+      const f = anestesia.eventos._f();
+      if (!f) return false;
+      if (f.querySelector('[name="vent_modo_geral"]:checked')) return false;   /* já escolhido */
+      const alvo = f.querySelector('[name="vent_modo_geral"][value="' + modo + '"]');
+      if (!alvo) return false;
+      alvo.checked = true;
+      try { anestesia.vent.alternar(); } catch (e) {}
+      return true;
+    },
     aoSelecionarTipo(cb) {
       if (!cb || !cb.checked) return;
+      const mudouVent = anestesia.eventos._sugerirVentilacao(cb.value);
       const tipoEvt = anestesia.eventos.TIPO_EVENTO[cb.value];
       if (!tipoEvt) return;
       anestesia.graficoUI._contexto = 'anestesia';
       if (anestesia.eventos.existeEvento(tipoEvt)) return; /* não duplica */
       anestesia.eventos.add({ tipo: tipoEvt, hora: utils.horaAtual(), obs: anestesia.eventos.descricaoPara(tipoEvt), auto: true });
-      try { toast('Evento "' + tipoEvt + '" adicionado — o que você detalhar aqui no card entra sozinho nele.'); } catch (e) {}
+      try {
+        toast('Evento "' + tipoEvt + '" adicionado' +
+          (mudouVent ? ' · ventilação marcada conforme a técnica' : '') +
+          ' — o que você detalhar aqui no card entra sozinho nele.');
+      } catch (e) {}
     },
     /* Ao escolher a via aérea utilizada (card Acessos), cria o evento de manejo
        correspondente na linha do tempo — evita registrar a intubação em 2 lugares. */
@@ -25442,6 +25623,12 @@ const anestesia = {
     },
     aoSelecionarViaAerea(sel) {
       if (!sel || !sel.value) return;
+      /* tubo ou máscara laríngea: a ventilação é mecânica, salvo escolha
+         anterior do anestesista (que o app não sobrescreve) */
+      if (/intuba|laríngea|traqueostomia/i.test(sel.value)) {
+        try { anestesia.eventos._sugerirVentilacao('Anestesia geral'); } catch (e) {}
+      }
+      try { anestesia.viaAerea.montarDetalhe(); } catch (e) {}
       const tipoEvt = anestesia.eventos.VIA_AEREA_EVENTO[sel.value];
       if (!tipoEvt) return;
       anestesia.graficoUI._contexto = 'anestesia';
@@ -25717,6 +25904,48 @@ const anestesia = {
   },
 
   disp: {
+    /* Acessos vasculares: o que muda de caso para caso é tipo, calibre e local
+       — o resto do texto é sempre igual. Selecionar em vez de digitar é o que
+       permite a descrição do evento sair pronta (ver eventos.DESCRICOES_DET). */
+    OPCOES: {
+      'Acesso venoso periférico': {
+        rotTipo: 'tipo de cateter',
+        tipos: ['Cateter sobre agulha (Jelco)', 'Cateter de segurança', 'Scalp', 'Cateter longo (midline)'],
+        calibres: ['14G', '16G', '18G', '20G', '22G', '24G'],
+        locais: ['dorso da mão D', 'dorso da mão E', 'antebraço D', 'antebraço E', 'fossa antecubital D', 'fossa antecubital E', 'jugular externa', 'pé']
+      },
+      'Acesso venoso central': {
+        rotTipo: 'tipo de cateter',
+        tipos: ['Duplo lúmen', 'Triplo lúmen', 'Introdutor', 'PICC', 'Cateter de diálise'],
+        calibres: ['5F', '7F', '8,5F', '9F', '12F'],
+        locais: ['jugular interna D', 'jugular interna E', 'subclávia D', 'subclávia E', 'femoral D', 'femoral E', 'basílica D', 'basílica E']
+      },
+      'Acesso arterial': {
+        rotTipo: 'tipo de cateter',
+        tipos: ['Cateter sobre agulha (Jelco)', 'Cateter arterial com fio-guia'],
+        calibres: ['18G', '20G', '22G'],
+        locais: ['radial D', 'radial E', 'femoral D', 'femoral E', 'braquial D', 'braquial E', 'pediosa']
+      }
+    },
+    _sel(disp, campo) {
+      const el = document.querySelector('[data-campo="' + campo + '"][data-disp="' + disp + '"]');
+      return el ? String(el.value || '').trim() : '';
+    },
+    /* Monta o texto do acesso a partir das seleções. Se o anestesista escrever
+       à mão, o app para de montar aquele texto. */
+    montarDet(disp) {
+      const alvo = document.querySelector('[name="disp_det[]"][data-disp="' + disp + '"]');
+      if (!alvo) return '';
+      const tipo = anestesia.disp._sel(disp, 'tipo');
+      const cal = anestesia.disp._sel(disp, 'calibre');
+      const local = anestesia.disp._sel(disp, 'local');
+      const txt = [ [tipo, cal].filter(Boolean).join(' '), local ? 'em ' + local : '' ]
+        .filter(Boolean).join(' ');
+      if (alvo.dataset.manual !== '1' && (txt || !alvo.value)) alvo.value = txt;
+      try { anestesia.eventos.atualizarDescricoes(); } catch (e) {}
+      try { markDirty(); } catch (e) {}
+      return txt;
+    },
     /* Mostra/esconde campo de descrição para cada dispositivo marcado */
     alternar(checkbox) {
       const valor = checkbox.value;
@@ -25730,8 +25959,30 @@ const anestesia = {
           const div = document.createElement('div');
           div.className = 'field col-6';
           div.id = fieldId;
-          div.innerHTML = `<label>${valor} <small style="color:var(--text-mute);font-weight:400">— detalhes</small></label>
-            <input type="text" name="disp_det[]" data-disp="${valor}" placeholder="Ex.: tamanho, local, calibre" oninput="anestesia.eventos.atualizarDescricoes()">`;
+          /* Acessos vasculares: tipo e calibre em seleção, porque é sempre a
+             mesma informação — e o texto que vai para o evento se monta
+             sozinho a partir dela. Os demais dispositivos seguem em texto
+             livre, que é onde a variedade é real. */
+          const op = anestesia.disp.OPCOES[valor];
+          if (op) {
+            div.innerHTML = `<label>${valor} <small style="color:var(--text-mute);font-weight:400">— tipo e calibre</small></label>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <select data-campo="tipo" data-disp="${valor}" style="flex:2;min-width:120px" onchange="anestesia.disp.montarDet('${valor}')">
+                  <option value="">${op.rotTipo}</option>${op.tipos.map(t => '<option>' + t + '</option>').join('')}
+                </select>
+                <select data-campo="calibre" data-disp="${valor}" style="flex:1;min-width:90px" onchange="anestesia.disp.montarDet('${valor}')">
+                  <option value="">calibre</option>${op.calibres.map(c => '<option>' + c + '</option>').join('')}
+                </select>
+                <select data-campo="local" data-disp="${valor}" style="flex:2;min-width:120px" onchange="anestesia.disp.montarDet('${valor}')">
+                  <option value="">local</option>${op.locais.map(l => '<option>' + l + '</option>').join('')}
+                </select>
+              </div>
+              <input type="text" name="disp_det[]" data-disp="${valor}" placeholder="montado do que você marcou" style="margin-top:6px"
+                oninput="this.dataset.manual='1'; anestesia.eventos.atualizarDescricoes()">`;
+          } else {
+            div.innerHTML = `<label>${valor} <small style="color:var(--text-mute);font-weight:400">— detalhes</small></label>
+              <input type="text" name="disp_det[]" data-disp="${valor}" placeholder="Ex.: tamanho, local, calibre" oninput="anestesia.eventos.atualizarDescricoes()">`;
+          }
           cont.appendChild(div);
         }
       } else {
@@ -25763,12 +26014,19 @@ const anestesia = {
       const map = { hora: 1, pas: 2, pad: 3, pam: 4, fc: 5, ritmo: 6, spo2: 7, etco2: 8, fr: 9, temp: 10, bis: 11, tof: 12, glic: 13, pvc: 14, pic: 15, dc: 16, scvo2: 17, cam: 18 };
       return map[k] || 0;
     },
-    /* Coleta detalhes dos dispositivos */
+    /* Coleta detalhes dos dispositivos. Guarda também tipo/calibre/local, para
+       a ficha reabrir com as seleções feitas — e não só com o texto montado. */
     coletarDetalhes() {
       const det = {};
       document.querySelectorAll('[name="disp_det[]"]').forEach(el => {
         const k = el.getAttribute('data-disp');
-        if (k) det[k] = el.value || '';
+        if (!k) return;
+        const sel = c => anestesia.disp._sel(k, c);
+        const partes = { texto: el.value || '' };
+        ['tipo', 'calibre', 'local'].forEach(c => { const v = sel(c); if (v) partes[c] = v; });
+        /* formato antigo (só texto) continua válido na leitura; aqui gravamos
+           o objeto só quando há seleção, para não inchar registro sem motivo */
+        det[k] = (partes.tipo || partes.calibre || partes.local) ? partes : partes.texto;
       });
       return det;
     },
@@ -25776,8 +26034,20 @@ const anestesia = {
     restaurarDetalhes(det) {
       if (!det) return;
       Object.keys(det).forEach(k => {
+        const v = det[k];
+        const texto = (v && typeof v === 'object') ? (v.texto || '') : (v || '');
         const el = document.querySelector(`[name="disp_det[]"][data-disp="${k}"]`);
-        if (el) el.value = det[k];
+        if (el) el.value = texto;
+        if (v && typeof v === 'object') {
+          ['tipo', 'calibre', 'local'].forEach(c => {
+            const sel = document.querySelector('[data-campo="' + c + '"][data-disp="' + k + '"]');
+            if (sel && v[c]) sel.value = v[c];
+          });
+        } else if (el && texto) {
+          /* veio só o texto (ficha antiga ou digitada à mão): não deixar uma
+             seleção posterior sobrescrever o que está gravado */
+          el.dataset.manual = '1';
+        }
       });
     }
   },
@@ -25847,6 +26117,84 @@ const anestesia = {
       if (mins < 0) mins += 24 * 60;
       return { min: mins, fonte: fonte };
     },
+    /* ---- DIURESE NA GRADE DOS SINAIS VITAIS --------------------------------
+       A diurese é lida junto com os outros sinais, de hora em hora. Digitá-la
+       num painel separado é trabalho dobrado — e trabalho dobrado, no meio do
+       ato, simplesmente não é feito. Cada coluna guarda o volume do INTERVALO
+       (o que saiu desde o registro anterior); o app soma, calcula o ritmo do
+       intervalo e o débito do caso, e alimenta o balanço hídrico sozinho. */
+    mostrarNaGrade() {
+      try {
+        if (anestesia.diurese._temSonda()) return true;
+        /* sem sonda marcada, só aparece se já houver algo registrado — não
+           poluir a grade de quem não mediu diurese */
+        return document.querySelectorAll('[name="diurese_vol[]"]').length > 0
+          && Array.prototype.some.call(document.querySelectorAll('[name="diurese_vol[]"]'), el => String(el.value || '').trim());
+      } catch (e) { return false; }
+    },
+    _parciais() {
+      const horas = document.querySelectorAll('[name="diurese_hora[]"]');
+      const vols = document.querySelectorAll('[name="diurese_vol[]"]');
+      const out = [];
+      for (let i = 0; i < vols.length; i++) {
+        out.push({ hora: horas[i] ? horas[i].value : '', vol: vols[i] ? vols[i].value : '', el: vols[i], elHora: horas[i] });
+      }
+      return out;
+    },
+    _volumeEm(hora) {
+      if (!hora) return '';
+      const p = anestesia.diurese._parciais().find(x => x.hora === hora);
+      return p ? (p.vol || '') : '';
+    },
+    /* Ritmo do intervalo: o que saiu dividido pelo peso e pelo tempo decorrido
+       desde o registro anterior. É o número que diz se a diurese está caindo
+       AGORA — o débito do caso inteiro só se fecha no fim. */
+    _ritmoIntervalo(horaAnt, hora, vol) {
+      const v = parseFloat(vol);
+      if (isNaN(v) || !hora) return { txt: '', alerta: false };
+      const peso = parseFloat((document.querySelector('#form-anestesia [name="paciente_peso"]') || {}).value);
+      let ini = horaAnt;
+      if (!ini) { try { ini = (document.querySelector('#form-anestesia [name="hora_inicio"]') || {}).value || ''; } catch (e) {} }
+      const min = anestesia.diurese._difMin(ini, hora);
+      if (!peso || !min) return { txt: v ? v + ' mL' : '', alerta: false };
+      const mlkgh = v / peso / (min / 60);
+      return {
+        txt: mlkgh.toFixed(1).replace('.', ',') + ' mL/kg/h',
+        alerta: mlkgh < 0.5,
+        valor: mlkgh
+      };
+    },
+    _difMin(a, b) {
+      if (!a || !b) return 0;
+      const p = t => { const [h, m] = String(t).split(':').map(Number); return (h * 60 + m); };
+      let d = p(b) - p(a);
+      if (d < 0) d += 24 * 60;
+      return d;
+    },
+    /* Editou a diurese na grade: vira parcial do registro (criando se preciso),
+       recalcula o débito e o balanço. */
+    _daGrade(input) {
+      const hora = input.dataset.hora || '';
+      const val = String(input.value || '').trim();
+      if (!hora) return;
+      const p = anestesia.diurese._parciais().find(x => x.hora === hora);
+      if (p) {
+        if (p.el) p.el.value = val;
+        if (!val && p.el) { const tr = p.el.closest('tr'); if (tr) tr.remove(); }
+      } else if (val) {
+        anestesia.diurese.addParcial();
+        const todos = anestesia.diurese._parciais();
+        const ult = todos[todos.length - 1];
+        if (ult) { if (ult.elHora) ult.elHora.value = hora; if (ult.el) ult.el.value = val; }
+      }
+      /* garante que o painel esteja no modo parcial, senão o total ignora isto */
+      const modoEl = document.getElementById('diurese-modo');
+      if (modoEl && modoEl.value !== 'parcial') { modoEl.value = 'parcial'; try { anestesia.diurese.setModo(); } catch (e) {} }
+      anestesia.diurese.recalcular();
+      try { markDirty(); } catch (e) {}
+      try { anestesia.vitais._renderGrade(); } catch (e) {}
+    },
+
     _volume() {
       const modo = (document.getElementById('diurese-modo') || {}).value || 'parcial';
       if (modo === 'total') {
@@ -26206,7 +26554,8 @@ const anestesia = {
       const medHora = anestesia.graficoUI.clampHora(dados.hora || '');
       tr.innerHTML = `
         <td data-label="Horário"><input type="time" name="med_hora[]" value="${medHora}" onchange="anestesia.graficoUI.validarHoraInput(this)"></td>
-        <td data-label="Medicação"><input type="text" name="med_nome[]" value="${utils.escapeAttr(dados.nome || '')}" placeholder="Medicação"></td>
+        <td data-label="Medicação"><input type="text" name="med_nome[]" value="${utils.escapeAttr(dados.nome || '')}" placeholder="Digite 2 letras…" autocomplete="off"
+          oninput="anestesia.meds.sugerir(this)" onkeydown="anestesia.meds._tecla(event, this)" onblur="anestesia.meds._fecharSugestoesDepois()"></td>
         <td data-label="Dose"><input type="text" name="med_dose[]" value="${utils.escapeAttr(dados.dose || '')}" placeholder="Dose"></td>
         <td data-label="Unidade"><select name="med_unidade[]"><option value="">—</option>${opt(UNIDADES, dados.unidade)}</select></td>
         <td data-label="Via"><select name="med_via[]"><option value="">—</option>${opt(VIAS, dados.via)}</select></td>
@@ -26224,6 +26573,120 @@ const anestesia = {
       });
       return tr;
     },
+    /* ---- SUGESTÃO AO DIGITAR ----------------------------------------------
+       A mesma droga é lançada do mesmo jeito dezenas de vezes por semana.
+       Escolher pela lista preenche o PADRÃO — via, unidade, modo (bolus/bomba/
+       inalatório) e a diluição usual —, deixando para digitar só o que muda de
+       paciente para paciente: a dose e a hora.
+       Regra: nunca sobrescreve o que já está preenchido. Quem digitou uma dose
+       e depois trocou o nome não pode perder o que escreveu. */
+    _norm(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim(); },
+    _catalogoPlano() {
+      if (anestesia.meds.__plano) return anestesia.meds.__plano;
+      const out = [];
+      try {
+        CATALOGO_MED.forEach(g => (g.itens || []).forEach(m => out.push(Object.assign({ grupo: g.grupo }, m))));
+      } catch (e) {}
+      anestesia.meds.__plano = out;
+      return out;
+    },
+    _achar(q) {
+      const nq = anestesia.meds._norm(q);
+      if (nq.length < 2) return [];
+      const lista = anestesia.meds._catalogoPlano();
+      /* quem começa com o que foi digitado vem primeiro — é o que a pessoa
+         quase sempre quer, e evita ter que descer a lista */
+      const comeca = [], contem = [];
+      lista.forEach(m => {
+        const n = anestesia.meds._norm(m.nome + ' ' + (m.base || ''));
+        if (n.indexOf(nq) === 0) comeca.push(m);
+        else if (n.indexOf(nq) >= 0) contem.push(m);
+      });
+      return comeca.concat(contem).slice(0, 10);
+    },
+    _caixa() {
+      let box = document.getElementById('med-sug-box');
+      if (!box) {
+        box = document.createElement('div');
+        box.id = 'med-sug-box';
+        box.className = 'presc-sugestoes';
+        box.style.display = 'none';
+        box.style.position = 'fixed';
+        document.body.appendChild(box);
+      }
+      return box;
+    },
+    sugerir(input) {
+      const box = anestesia.meds._caixa();
+      const res = anestesia.meds._achar(input.value);
+      anestesia.meds._alvo = input;
+      anestesia.meds._res = res;
+      anestesia.meds._sel = -1;
+      if (!res.length) { box.style.display = 'none'; return; }
+      const det = m => [m.via, m.tipo, m.dose ? m.dose + ' ' + (m.unidade || '') : (m.unidade || '')]
+        .filter(Boolean).join(' · ');
+      box.innerHTML = res.map((m, i) =>
+        '<div class="presc-sug-item" data-i="' + i + '" onmousedown="event.preventDefault(); anestesia.meds.escolher(' + i + ')">' +
+        '<strong>' + utils.escapeHTML(m.nome) + '</strong>' +
+        '<div style="font-size:.74rem;color:var(--text-mute)">' + utils.escapeHTML(det(m)) + '</div></div>').join('');
+      const r = input.getBoundingClientRect();
+      box.style.left = r.left + 'px';
+      box.style.top = (r.bottom + 2) + 'px';
+      box.style.width = Math.max(220, r.width) + 'px';
+      box.style.display = 'block';
+    },
+    _tecla(ev, input) {
+      const box = document.getElementById('med-sug-box');
+      if (!box || box.style.display === 'none') return;
+      const n = (anestesia.meds._res || []).length;
+      if (!n) return;
+      if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+        ev.preventDefault();
+        anestesia.meds._sel = (anestesia.meds._sel + (ev.key === 'ArrowDown' ? 1 : -1) + n) % n;
+        Array.from(box.children).forEach((el, i) => {
+          el.style.background = i === anestesia.meds._sel ? 'var(--primary-soft)' : '';
+        });
+      } else if (ev.key === 'Enter') {
+        ev.preventDefault();
+        anestesia.meds.escolher(anestesia.meds._sel >= 0 ? anestesia.meds._sel : 0);
+      } else if (ev.key === 'Escape') {
+        box.style.display = 'none';
+      }
+    },
+    _fecharSugestoesDepois() {
+      setTimeout(() => { const b = document.getElementById('med-sug-box'); if (b) b.style.display = 'none'; }, 150);
+    },
+    escolher(i) {
+      const m = (anestesia.meds._res || [])[i];
+      const input = anestesia.meds._alvo;
+      const box = document.getElementById('med-sug-box');
+      if (box) box.style.display = 'none';
+      if (!m || !input) return;
+      const tr = input.closest('tr');
+      if (!tr) return;
+      input.value = m.base || m.nome;
+      const põe = (nome, valor) => {
+        if (!valor) return;
+        const el = tr.querySelector('[name="' + nome + '"]');
+        if (!el || String(el.value || '').trim()) return;   /* não pisa no que já foi digitado */
+        el.value = valor;
+      };
+      põe('med_dose[]', m.dose);
+      põe('med_unidade[]', m.unidade);
+      põe('med_via[]', m.via);
+      põe('med_tipo[]', m.tipo);
+      põe('med_diluicao[]', m.dil);
+      /* hora em branco vira a hora do lançamento: é quando a droga foi dada */
+      const hora = tr.querySelector('[name="med_hora[]"]');
+      if (hora && !hora.value) hora.value = anestesia.graficoUI.clampHora(utils.horaAtual());
+      const tipoSel = tr.querySelector('[name="med_tipo[]"]');
+      if (tipoSel) anestesia.meds._toggleInfusao(tipoSel);
+      const dose = tr.querySelector('[name="med_dose[]"]');
+      if (dose) { try { dose.focus(); dose.select(); } catch (e) {} }
+      try { markDirty(); } catch (e) {}
+      try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
+    },
+
     _toggleInfusao(sel) {
       const tr = sel.closest('tr');
       if (!tr) return;
@@ -28320,6 +28783,25 @@ const anestesia = {
         });
         html += '</tr>';
       });
+      /* DIURESE junto dos sinais vitais: é ali que ela é lida, de hora em hora,
+         e digitá-la num painel separado é trabalho dobrado. O valor de cada
+         coluna é o volume do INTERVALO (o que saiu desde o registro anterior),
+         e vira automaticamente um parcial do registro de diurese — que por sua
+         vez alimenta o balanço hídrico. Abaixo do número, o ritmo do intervalo. */
+      if (anestesia.diurese.mostrarNaGrade()) {
+        html += '<tr class="vg-diurese"><th>Diurese<small style="display:block;font-weight:400;color:var(--text-mute);font-size:.68rem">mL desde o anterior</small></th>';
+        const horas = comHora.map(c => g(c.tr, 'hora'));
+        horas.forEach((hora, i) => {
+          const vol = anestesia.diurese._volumeEm(hora);
+          const ritmo = anestesia.diurese._ritmoIntervalo(horas[i - 1] || '', hora, vol);
+          html += '<td><input type="number" class="vg-inp" min="0" step="1" inputmode="numeric" data-hora="' + ea(hora) +
+            '" data-anterior="' + ea(horas[i - 1] || '') + '" value="' + ea(vol) +
+            '" placeholder="mL" onchange="anestesia.diurese._daGrade(this)">' +
+            '<div style="font-size:.66rem;color:' + (ritmo.alerta ? '#c0392b' : 'var(--text-mute)') + ';text-align:center">' +
+            (ritmo.txt || '&nbsp;') + '</div></td>';
+        });
+        html += '</tr>';
+      }
       html += '</tbody></table>';
       host.innerHTML = html;
     },
@@ -29276,6 +29758,38 @@ const anestesia = {
           ctx.stroke();
         });
         ctx.setLineDash([]);
+        ctx.font = 'bold 9px -apple-system, "Segoe UI", sans-serif';
+        ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+        /* FAIXAS DE PERÍODO — ventilação mecânica, pneumoperitônio e halogenado
+           têm começo e fim, e o que interessa clinicamente é o INTERVALO: ler
+           dois marcadores soltos no eixo e calcular de cabeça é trabalho que o
+           gráfico pode fazer. Cada par vira uma barra fina no alto da área. */
+        const PERIODOS = [
+          { ini: 'Início da ventilação mecânica', fim: 'Fim da ventilação mecânica', rot: 'Ventilação mecânica', cor: '#2e7d92' },
+          { ini: 'Início do pneumoperitônio', fim: 'Fim do pneumoperitônio', rot: 'Pneumoperitônio', cor: '#8a6d1f' },
+          { ini: 'Início halogenado', fim: 'Fim halogenado', rot: 'Halogenado', cor: '#7a4b9c' }
+        ];
+        let faixaY = padT + 4;
+        PERIODOS.forEach(per => {
+          const a0 = eventos.find(e => e.tipo === per.ini);
+          if (!a0) return;
+          const b0 = eventos.find(e => e.tipo === per.fim);
+          const x0 = xOf(a0.t);
+          /* sem fim marcado, a faixa vai até o fim do eixo: está em curso */
+          const x1 = b0 ? xOf(b0.t) : padL + w;
+          if (!(x1 > x0)) return;
+          ctx.save();
+          ctx.globalAlpha = 0.5;
+          ctx.fillStyle = per.cor;
+          ctx.fillRect(x0, faixaY, Math.max(2, x1 - x0), 7);
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = per.cor;
+          ctx.font = 'bold 8px -apple-system, "Segoe UI", sans-serif';
+          ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+          ctx.fillText(per.rot + (b0 ? '' : ' (em curso)'), x0 + 2, faixaY + 7 + 9);
+          ctx.restore();
+          faixaY += 18;
+        });
         ctx.font = 'bold 9px -apple-system, "Segoe UI", sans-serif';
         ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
         eventos.forEach((e, idx) => {
