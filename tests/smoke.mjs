@@ -7405,6 +7405,18 @@ await test('Consulta → Financeiro: 1 linha da consulta + 1 por procedimento, s
     fin.fromDoc('pre', pre1);
     out.preNaoDuplica = store.list('financeiro').length === 1;
 
+    /* o documento impresso diz o que foi feito (código e descrição), sem preço */
+    ui.navegar('consulta');
+    consulta.procs.limpar();
+    const tri = consulta.procs.add({ codigo: '3.10.05.12-8', quantidade: 2 });
+    consulta.procs._onCodigo(tri.querySelector('[name="cproc_cod[]"]'));
+    const html = printPreview._buildConsulta();
+    out.impressaoLista = html.indexOf('Procedimentos realizados nesta consulta') >= 0 &&
+      html.indexOf('3.10.05.12-8') >= 0 && html.indexOf('×2') >= 0;
+    const baseImp = (consulta.procs.coletar()[0] || {}).valor_base;
+    out.impressaoSemValor = !!baseImp && html.indexOf(String(Math.floor(baseImp))) < 0;
+    consulta.procs.limpar();
+
     store.setList('financeiro', []); store.setList('consulta', []); store.setList('pre', []);
     return out;
   });
@@ -7422,6 +7434,8 @@ await test('Consulta → Financeiro: 1 linha da consulta + 1 por procedimento, s
   assert(r.preGeraConsulta, 'a pré-anestésica gera a linha de consulta');
   assert(r.prePrecoDaTabela, 'com o preço vindo da configuração, não do código');
   assert(r.preNaoDuplica, 'e salvar de novo não cria uma segunda');
+  assert(r.impressaoLista, 'o documento da consulta precisa listar o que foi feito, com o código');
+  assert(r.impressaoSemValor, 'valor e fração são conta interna — não vão para o documento do paciente');
   await page.close();
 });
 

@@ -14421,7 +14421,7 @@ const consulta = {
         <td data-label="Código"><input type="text" name="cproc_cod[]" value="${v(dados.codigo)}" placeholder="CBHPM" oninput="consulta.procs._onCodigo(this)"></td>
         <td data-label="Procedimento"><input type="text" name="cproc_desc[]" value="${v(dados.descricao)}" placeholder="Digite o procedimento ou o código"></td>
         <td data-label="Qtd"><input type="number" name="cproc_qtd[]" min="1" step="1" value="${v(dados.quantidade || 1)}" style="width:48px" oninput="consulta.procs.recalcular()"></td>
-        <td data-label="Fração"><input type="number" name="cproc_fracao[]" min="0" max="100" step="1" value="${v(dados.fracao != null ? dados.fracao : 100)}" style="width:60px" title="Sugerida pela regra de múltiplos — ajuste livre" oninput="consulta.procs.recalcular()"><span style="font-size:.75rem;color:var(--text-mute)">%</span></td>
+        <td data-label="Fração"><input type="number" name="cproc_fracao[]" min="0" max="100" step="1" value="${v(dados.fracao != null ? dados.fracao : 100)}" style="width:60px" title="Sugerida pela regra de múltiplos — ajuste livre" oninput="consulta.procs._fracaoManual(this)"><span style="font-size:.75rem;color:var(--text-mute)">%</span></td>
         <td data-label="Via"><select name="cproc_via[]" onchange="consulta.procs.sugerirFracoes()" title="Via de acesso — mesma via sugere 50%, via diferente sugere 70%">
           <option value="mesma">mesma via</option><option value="diferente">via dif.</option></select></td>
         <td data-label="Valor-base"><input type="number" name="cproc_base[]" step="0.01" min="0" value="${v(dados.valor_base)}" title="Vem da tabela de preços configurada — pode ser ajustado" oninput="this.dataset.manual='1'; consulta.procs.recalcular()"></td>
@@ -14432,6 +14432,11 @@ const consulta = {
       tbody.appendChild(tr);
       if (dados.via) { const s = tr.querySelector('[name="cproc_via[]"]'); if (s) s.value = dados.via; }
       if (dados.valor_base != null) { const b = tr.querySelector('[name="cproc_base[]"]'); if (b) b.dataset.manual = '1'; }
+      if (dados.fracao_manual) {
+        tr.dataset.fracaoManual = '1';
+        tr.dataset.fracaoPor = dados.fracao_ajustada_por || '';
+        tr.dataset.fracaoEm = dados.fracao_ajustada_em || '';
+      }
       /* mesma busca da CBHPM nos dois campos */
       try {
         const descEl = tr.querySelector('[name="cproc_desc[]"]');
@@ -14448,6 +14453,17 @@ const consulta = {
       } catch (e) {}
       markDirty();
       return tr;
+    },
+    /* Fração mexida à mão fica registrada com quem mexeu e quando: alterar
+       proporção é alterar cobrança, e isso precisa ter dono. */
+    _fracaoManual(input) {
+      const tr = input.closest('tr');
+      let quem = '';
+      try { const u = auth.usuarioAtual() || {}; quem = u.nome || u.usuario || ''; } catch (e) {}
+      tr.dataset.fracaoManual = '1';
+      tr.dataset.fracaoPor = quem;
+      tr.dataset.fracaoEm = new Date().toISOString();
+      consulta.procs.recalcular();
     },
     _onCodigo(input) {
       const tr = input.closest('tr');
@@ -14532,7 +14548,10 @@ const consulta = {
           via: g('cproc_via') || 'mesma',
           valor_base: g('cproc_base') === '' ? null : Number(g('cproc_base')),
           valor_final: g('cproc_valor') === '' ? null : Number(g('cproc_valor')),
-          observacao: g('cproc_obs')
+          observacao: g('cproc_obs'),
+          fracao_manual: tr.dataset.fracaoManual === '1',
+          fracao_ajustada_por: tr.dataset.fracaoPor || '',
+          fracao_ajustada_em: tr.dataset.fracaoEm || ''
         });
       });
       return linhas;
@@ -33741,6 +33760,9 @@ const fin = {
           procedimento: pr.descricao || pr.codigo,
           quantidade: pr.quantidade || 1,
           fracao: (pr.fracao != null) ? pr.fracao : 100,
+          fracao_manual: !!pr.fracao_manual,
+          fracao_ajustada_por: pr.fracao_ajustada_por || '',
+          fracao_ajustada_em: pr.fracao_ajustada_em || '',
           valor_base: (base != null) ? base : null,
           valor_final: (pr.valor_final != null) ? pr.valor_final : precos.calcular(base, pr.quantidade, pr.fracao),
           origem_valor: (pr.valor_base != null) ? 'manual' : precos.base(pr.codigo, 'medico').origem,
@@ -33809,6 +33831,11 @@ const fin = {
         cbhpm_versao: CBHPM_VERSAO,
         quantidade: l.quantidade,
         fracao: l.fracao,
+        /* quem mexeu na fração à mão, e quando (alterar proporção é alterar
+           cobrança — precisa ter dono) */
+        fracao_manual: !!l.fracao_manual,
+        fracao_ajustada_por: l.fracao_ajustada_por || '',
+        fracao_ajustada_em: l.fracao_ajustada_em || '',
         valor_base: l.valor_base,
         valor_final: l.valor_final,
         origem_valor: l.origem_valor || '',
@@ -38665,6 +38692,22 @@ ${TAG_CLOSE_HTML}`;
         .join('');
       segHtml = printPreview._section('Seguimento / Acompanhamento', linhas);
     }
+    /* Procedimentos realizados: o documento tem de dizer o que foi feito, com
+       o código. Fração e valor são conta interna e ficam fora da impressão. */
+    let procHtml = '';
+    let procs = [];
+    try { procs = consulta.procs.coletar(); } catch (e) {}
+    const procValidos = procs.filter(p => p.codigo || p.descricao);
+    if (procValidos.length) {
+      procHtml = printPreview._section('Procedimentos realizados nesta consulta',
+        procValidos.map(p => {
+          const qtd = (p.quantidade > 1) ? ' ×' + p.quantidade : '';
+          const obs = p.observacao ? ' — ' + p.observacao : '';
+          return '<div class="pp-field" style="margin-bottom:4px"><span class="pp-label">' +
+            utils.escapeHTML(p.codigo || '—') + ':</span><span class="pp-value">' +
+            utils.escapeHTML((p.descricao || '') + qtd + obs) + '</span></div>';
+        }).join(''));
+    }
     return printPreview._header('CONSULTA / AVALIAÇÃO DE DOR', meta) +
       printPreview._section('Identificação', `
         <div class="pp-grid cols-3">
@@ -38699,6 +38742,7 @@ ${TAG_CLOSE_HTML}`;
           ${printPreview._field('Observações', d.observacoes)}
         </div>
       `) +
+      procHtml +
       segHtml +
       printPreview._signature(d.profissional, d.crm ? 'CRM ' + d.crm : '', d) +
       printPreview._footer('Consulta');
