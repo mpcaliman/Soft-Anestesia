@@ -4304,7 +4304,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-14f</b><br>
+    v7.1 · build <b id="build-tag">2026-08-14g</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -24731,7 +24731,11 @@ const CATALOGO_MED = [
   ]}
 ];
 const UNIDADES = ['mg', 'mcg', 'g', 'mL', 'L', 'L/min', 'UI', '%', 'cp', 'mg/kg', 'mcg/kg', 'ng/dL', 'mcg/kg/min', 'mcg/min', 'mg/h', 'mcg/kg/h', 'mL/h', 'ng/mL', 'CAM'];
-const VIAS = ['EV', 'IM', 'SC', 'VO', 'SL', 'IT', 'Peridural', 'Subaracnóideo', 'Tópica', 'Inalatória'];
+/* As vias do BLOQUEIO precisam existir aqui também: a medicação do bloqueio é
+   espelhada nesta tabela, e via que não existe na lista não cola no campo — a
+   linha espelhada aparecia sem via nenhuma (perineural já se perdia assim). */
+const VIAS = ['EV', 'IM', 'SC', 'VO', 'SL', 'IT', 'Peridural', 'Subaracnóideo',
+  'Perineural', 'Interfascial', 'Caudal', 'IV regional', 'Tópica', 'Inalatória'];
 
 const anestesia = {
   formId: 'form-anestesia',
@@ -25222,7 +25226,10 @@ const anestesia = {
         document.body.appendChild(dl);
       }
       const opt = (arr, sel) => arr.map(v => `<option ${v === sel ? 'selected' : ''}>${v}</option>`).join('');
-      const viasBloq = ['Subaracnóideo', 'Peridural', 'Perineural', 'Caudal', 'IV regional', 'EV', 'IM'];
+      /* Interfascial: os bloqueios de plano (TAP, PEC, ESP, serrátil, QL) não
+         depositam ao redor do nervo, e sim no plano entre fáscias — chamar isso
+         de perineural descreveria errado o que foi feito. */
+      const viasBloq = ['Subaracnóideo', 'Peridural', 'Perineural', 'Interfascial', 'Caudal', 'IV regional', 'EV', 'IM'];
       const hora = dados.hora || utils.horaAtual();
       tr.innerHTML = `
         <td data-label="Hora"><input type="time" name="bloq_med_hora[]" value="${hora}" oninput="anestesia.bloqueio._syncMed(this)"></td>

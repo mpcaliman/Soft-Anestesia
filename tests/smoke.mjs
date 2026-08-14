@@ -7104,6 +7104,43 @@ await test('Ficha: a linha da via aérea ocupa a largura toda e os campos não s
   await page.close();
 });
 
+/* 121) Bloqueio de plano (TAP, PEC, ESP, serrátil, QL) deposita entre fáscias,
+   não ao redor do nervo: chamar de perineural descreveria errado o ato. */
+await test('Bloqueio: via Interfascial existe e sobrevive ao espelho na tabela de medicações', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('anestesia');
+    const chk = document.querySelector('[name="bloqueio_realizado"]');
+    chk.checked = true;
+    anestesia.bloqueio.alternar(chk);
+    anestesia.bloqueio.addMed({ nome: 'Ropivacaína 0,25%', dose: '200', unidade: 'mg', via: 'Interfascial' });
+
+    const sel = document.querySelector('#bloq-meds-body [name="bloq_med_via[]"]');
+    const vias = Array.from(sel.options).map(o => o.value);
+    out.temOpcao = vias.indexOf('Interfascial') >= 0;
+    out.ficouSelecionada = sel.value === 'Interfascial';
+    /* ordem clínica: fica junto de perineural, antes de caudal */
+    out.ordemUtil = vias.indexOf('Interfascial') === vias.indexOf('Perineural') + 1;
+
+    /* a medicação do bloqueio é espelhada na seção 6: via que não existe na
+       lista de lá não cola no campo, e a linha aparecia sem via nenhuma */
+    const ids = anestesia.graficoUI._ctxIds();
+    const espelho = Array.from(document.querySelectorAll('#' + ids.medsBody + ' tr'))
+      .find(tr => (tr.querySelector('[name="med_nome[]"]') || {}).value === 'Ropivacaína 0,25%');
+    out.espelhouComVia = !!espelho && (espelho.querySelector('[name="med_via[]"]') || {}).value === 'Interfascial';
+    /* perineural tinha o mesmo problema e também precisa existir lá */
+    out.perineuralTambem = VIAS.indexOf('Perineural') >= 0;
+    return out;
+  });
+  assert(r.temOpcao, 'a via interfascial precisa existir no bloqueio');
+  assert(r.ficouSelecionada, 'e ser aceita quando escolhida');
+  assert(r.ordemUtil, 'fica ao lado de perineural, que é a via mais próxima');
+  assert(r.espelhouComVia, 'a via tem que sobreviver ao espelho na tabela de medicações');
+  assert(r.perineuralTambem, 'perineural também precisa existir lá — se perdia do mesmo jeito');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
