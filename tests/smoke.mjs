@@ -7584,6 +7584,96 @@ await test('Orçamento: fração por linha editável e preço vindo da tabela co
   await page.close();
 });
 
+/* 127) Rascunho fechado fica fechado. A aba voltava porque a exclusão na
+   nuvem era disparada sem conferir o resultado, e porque cada aparelho
+   mandava o seu "Rascunho 1" em branco para os outros. */
+await test('Rascunhos: fechar não deixa a aba voltar, e aba em branco não se multiplica', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const M = 'anestesia';
+    const vazio = { paciente: { nome: '' }, procedimento: { data: '2026-08-14' } };
+    localStorage.removeItem(rascunhos.LAPIDES_KEY + M);
+
+    /* o que se vê na tela: três abas "Rascunho 1" em branco + a do paciente */
+    rascunhos.setList(M, [
+      { id: 'a1', label: 'Rascunho 1', dados: vazio, updatedAt: '2026-08-14T10:00:00Z' },
+      { id: 'a2', label: 'Rascunho 1', dados: vazio, updatedAt: '2026-08-14T11:00:00Z' },
+      { id: 'a3', label: 'Rascunho 1', dados: vazio, updatedAt: '2026-08-14T12:00:00Z' },
+      { id: 'a4', label: 'LAIS', dados: { paciente: { nome: 'LAIS' } }, updatedAt: '2026-08-14T12:30:00Z' }
+    ]);
+    rascunhos.setAtivo(M, 'a4');
+    rascunhos.limparVazios(M);
+    const ids = rascunhos.list(M).map(x => x.id);
+    out.sobrouUmaEmBranco = ids.length === 2 && ids.indexOf('a4') >= 0;
+    out.oTrabalhoFicou = !!rascunhos.list(M).find(x => x.id === 'a4');
+    out.sobrasComLapide = ['a1', 'a2'].every(id => rascunhos.fechadoAqui(M, id));
+
+    /* a aba em branco que sobrou não sobe para a nuvem */
+    demo.ativo = () => false;
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud._garantirToken = async () => true;
+    cloud.config = () => ({ url: 'http://nuvem.teste', anonKey: 'k' });
+    cloud.session = () => ({ user: { id: 'u1' } });
+    cloud._headers = () => ({});
+    const enviados = [];
+    const apagados = [];
+    const fetchOriginal = window.fetch;
+    window.fetch = async (url, opts) => {
+      const o = opts || {};
+      if (o.method === 'DELETE') { apagados.push(String(url)); return { ok: true, json: async () => [] }; }
+      if (o.method === 'POST') { enviados.push(JSON.parse(o.body || '[]')); return { ok: true, json: async () => [] }; }
+      /* pull: a nuvem ainda tem o fechado e um vazio de outro aparelho */
+      return { ok: true, json: async () => ([
+        { doc_id: 'a1', dados: { id: 'a1', label: 'Rascunho 1', dados: vazio, updatedAt: '2026-08-14T10:00:00Z' } },
+        { doc_id: 'b9', dados: { id: 'b9', label: 'Rascunho 1', dados: vazio, updatedAt: '2026-08-14T13:00:00Z' } },
+        { doc_id: 'a4', dados: { id: 'a4', label: 'LAIS', dados: { paciente: { nome: 'LAIS' } }, updatedAt: '2026-08-14T12:30:00Z' } }
+      ]) };
+    };
+    await rascunhosSync.enviar(M);
+    const subiram = (enviados[0] || []).map(x => x.doc_id);
+    out.soSobeComConteudo = subiram.length === 1 && subiram[0] === 'a4';
+    out.retentouApagar = apagados.some(u => u.indexOf('a1') >= 0) && apagados.some(u => u.indexOf('a2') >= 0);
+
+    /* e o pull não ressuscita o que foi fechado nem traz aba em branco */
+    await rascunhosSync.puxar(M);
+    const depois = rascunhos.list(M).map(x => x.id);
+    out.naoRessuscita = depois.indexOf('a1') < 0;
+    out.naoTrazVazioDeFora = depois.indexOf('b9') < 0;
+    out.mantemOTrabalho = depois.indexOf('a4') >= 0;
+    window.fetch = fetchOriginal;
+
+    /* numeração não repete mais */
+    rascunhos.setList(M, [{ id: 'x', label: 'Rascunho 3', dados: null }]);
+    rascunhos.setAtivo(M, null);
+    rascunhos.novo(M);
+    out.numeraDireito = rascunhos.list(M).map(x => x.label).join('/') === 'Rascunho 3/Rascunho 4';
+
+    /* o que conta como vazio é conservador: dois campos de rotina */
+    out.vazioEhVazio = rascunhos.temConteudo(M, { dados: vazio }) === false;
+    out.comNomeConta = rascunhos.temConteudo(M, { dados: { paciente: { nome: 'X' } } }) === true;
+    out.semNomeMasPreenchidoConta = rascunhos.temConteudo(M, { dados: {
+      paciente: { nome: '', peso: '70', idade: '31' }, procedimento: { descricao: 'Colecistectomia' } } }) === true;
+
+    localStorage.removeItem(rascunhos.LAPIDES_KEY + M);
+    rascunhos.setList(M, []); rascunhos.setAtivo(M, null);
+    return out;
+  });
+  assert(r.sobrouUmaEmBranco, 'três abas em branco viram uma — as outras são sobra de sincronização');
+  assert(r.oTrabalhoFicou, 'e a aba com paciente nunca é tocada');
+  assert(r.sobrasComLapide, 'o que foi retirado fica registrado, para não voltar');
+  assert(r.soSobeComConteudo, 'aba em branco não sobe para a nuvem');
+  assert(r.retentouApagar, 'exclusão que falhou é tentada de novo na sincronização seguinte');
+  assert(r.naoRessuscita, 'rascunho fechado aqui não pode voltar no próximo pull');
+  assert(r.naoTrazVazioDeFora, 'nem aba em branco de outro aparelho vira aba aqui');
+  assert(r.mantemOTrabalho, 'o rascunho com trabalho continua chegando normalmente');
+  assert(r.numeraDireito, 'o número da aba nova não repete o de outra');
+  assert(r.vazioEhVazio && r.comNomeConta && r.semNomeMasPreenchidoConta,
+    'o corte do que é "vazio" precisa ser conservador — na dúvida, o rascunho fica');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

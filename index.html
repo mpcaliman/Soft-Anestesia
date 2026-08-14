@@ -4309,7 +4309,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-14i</b><br>
+    v7.1 · build <b id="build-tag">2026-08-14j</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -32674,7 +32674,13 @@ const rascunhosSync = {
       if (!(await cloud._garantirToken())) return 0;
       const c = cloud.config(); const s = cloud.session();
       if (!s || !s.user) return 0;
-      const lista = (rascunhos.list(mod) || []).filter(r => r && r.id && r.dados);
+      /* Retenta o que foi fechado aqui e ainda não saiu da nuvem — é isso que
+         impedia o rascunho fechado de voltar na próxima sincronização. */
+      try { await rascunhosSync._apagarPendentes(mod); } catch (e) {}
+      /* Rascunho em branco não sobe: era assim que cada aparelho mandava o seu
+         "Rascunho 1" vazio e todos acabavam com três abas iguais. */
+      const lista = (rascunhos.list(mod) || [])
+        .filter(r => r && r.id && r.dados && rascunhos.temConteudo(mod, r) && !rascunhos.fechadoAqui(mod, r.id));
       if (!lista.length) return 0;
       const body = lista.map(r => ({
         user_id: s.user.id, modulo: rascunhosSync._modulo(mod), doc_id: r.id,
@@ -32707,9 +32713,12 @@ const rascunhosSync = {
       /* guarda o que chegou, para a tela poder ABRIR o rascunho trazido —
          antes ele entrava na lista em silêncio e o usuário não via */
       rascunhosSync._chegaram = [];
+      const fechados = new Set(rascunhos.lapides(mod).map(x => x.id));
       linhas.forEach(l => {
         const r = l && l.dados;
         if (!r || !r.id || !r.dados) return;
+        if (fechados.has(r.id)) return;          /* fechado aqui: não volta */
+        if (!rascunhos.temConteudo(mod, r)) return;   /* aba vazia de outro aparelho não vira aba aqui */
         const local = porId.get(r.id);
         if (!local) {
           locais.push(r); porId.set(r.id, r); novos++;
@@ -32745,6 +32754,19 @@ const rascunhosSync = {
       return rq.ok;
     } catch (e) { return false; }
   },
+  /* Rascunho fechado aqui e ainda vivo na nuvem: tenta apagar de novo. Sem
+     isso, uma falha de rede no momento do fechamento fazia a aba voltar. */
+  async _apagarPendentes(mod) {
+    const pendentes = rascunhos.pendentesDeApagar(mod);
+    if (!pendentes.length) return 0;
+    let n = 0;
+    for (const id of pendentes.slice(0, 20)) {
+      const ok = await rascunhosSync.apagar(mod, id);
+      if (ok) { rascunhos.marcarApagado(mod, id); n++; }
+    }
+    return n;
+  },
+
   /* Sobe os rascunhos de todos os módulos (ao sair da tela/entrar em outra) */
   async enviarTodos() {
     let n = 0;
@@ -32781,6 +32803,69 @@ const rascunhos = {
     else localStorage.removeItem(rascunhos.KEY_ATIVO + mod);
   },
 
+  /* ---- LÁPIDES: rascunho fechado não pode voltar ----
+     Fechar apagava na nuvem sem conferir o resultado. Se a exclusão falhasse
+     (sem rede, sessão expirada, servidor fora), o pull seguinte trazia o
+     rascunho de volta — e a aba reaparecia como se o fechar não funcionasse.
+     Agora o fechamento fica registrado aqui: o pull ignora o que foi fechado
+     e a exclusão é tentada de novo a cada sincronização, até dar certo. */
+  LAPIDES_KEY: 'medsys.v7.rascunhos_fechados.',
+  DIAS_LAPIDE: 60,
+  lapides(mod) {
+    try {
+      const arr = JSON.parse(localStorage.getItem(rascunhos.LAPIDES_KEY + mod) || '[]');
+      if (!Array.isArray(arr)) return [];
+      const limite = Date.now() - rascunhos.DIAS_LAPIDE * 24 * 3600 * 1000;
+      return arr.filter(x => x && x.id && (!x.em || new Date(x.em).getTime() > limite));
+    } catch (e) { return []; }
+  },
+  _gravarLapides(mod, arr) {
+    try { localStorage.setItem(rascunhos.LAPIDES_KEY + mod, JSON.stringify((arr || []).slice(-300))); } catch (e) {}
+  },
+  fechadoAqui(mod, id) {
+    return rascunhos.lapides(mod).some(x => x.id === id);
+  },
+  marcarFechado(mod, id) {
+    if (!id) return;
+    const arr = rascunhos.lapides(mod).filter(x => x.id !== id);
+    arr.push({ id, em: new Date().toISOString(), naNuvem: true });
+    rascunhos._gravarLapides(mod, arr);
+  },
+  /* A exclusão na nuvem deu certo: a lápide continua (para o caso de outro
+     aparelho ainda ter o rascunho), mas para de ser tentada. */
+  marcarApagado(mod, id) {
+    const arr = rascunhos.lapides(mod).map(x => x.id === id ? Object.assign({}, x, { naNuvem: false }) : x);
+    rascunhos._gravarLapides(mod, arr);
+  },
+  pendentesDeApagar(mod) {
+    return rascunhos.lapides(mod).filter(x => x.naNuvem !== false).map(x => x.id);
+  },
+
+  /* Rascunho vazio não é trabalho: não sobe para a nuvem, não vira aba em
+     outro aparelho e não fica ocupando lugar. Um formulário recém-aberto já
+     traz um ou dois campos preenchidos sozinho (a data de hoje), então o
+     corte é conservador — na dúvida, o rascunho fica. */
+  _contarPreenchidos(dados) {
+    let n = 0;
+    const ignorar = /^_|data|hora|versao|meta|^id$/i;
+    const anda = (x, chave) => {
+      if (x == null || n > 40) return;
+      if (Array.isArray(x)) { x.forEach(v => anda(v, chave)); return; }
+      if (typeof x === 'object') { Object.keys(x).forEach(k => anda(x[k], k)); return; }
+      if (typeof x === 'boolean') { if (x) n++; return; }
+      const s = String(x).trim();
+      if (!s || ignorar.test(chave || '')) return;
+      n++;
+    };
+    anda(dados, '');
+    return n;
+  },
+  temConteudo(mod, r) {
+    if (!r) return false;
+    if (!r.dados) return false;
+    if (rascunhos._extrairNomePaciente(mod, r.dados)) return true;
+    return rascunhos._contarPreenchidos(r.dados) > 2;
+  },
   /* Cria novo rascunho vazio e o torna ativo */
   novo(mod) {
     /* Salva o ativo antes de criar novo (se houver) */
@@ -32789,7 +32874,12 @@ const rascunhos = {
     }
     const id = 'rasc_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
     const list = rascunhos.list(mod);
-    const n = list.length + 1;
+    /* maior número já usado + 1 — contar a lista dava "Rascunho 1" toda vez
+       que ela estivesse vazia, e as abas ficavam todas com o mesmo nome */
+    const n = list.reduce((mx, r) => {
+      const m = String(r.label || '').match(/^Rascunho (\d+)$/);
+      return m ? Math.max(mx, parseInt(m[1], 10)) : mx;
+    }, 0) + 1;
     list.push({
       id,
       label: 'Rascunho ' + n,
@@ -32903,8 +32993,15 @@ const rascunhos = {
       /* Remove da lista */
       const list = rascunhos.list(mod).filter(x => x.id !== id);
       rascunhos.setList(mod, list);
-      /* apaga também na nuvem — senão o próximo pull ressuscitaria o rascunho */
-      try { rascunhosSync.apagar(mod, id); } catch (e) {}
+      /* Fechado fica fechado: a lápide impede que o próximo pull o traga de
+         volta, mesmo que a exclusão na nuvem falhe agora (ela é tentada de
+         novo a cada sincronização). */
+      rascunhos.marcarFechado(mod, id);
+      try {
+        Promise.resolve(rascunhosSync.apagar(mod, id))
+          .then(ok => { if (ok) rascunhos.marcarApagado(mod, id); })
+          .catch(() => {});
+      } catch (e) {}
       if (eraAtivo) {
         /* IMPORTANTE: limpa o ativo ANTES de chamar ativar() — senão o early-return
            em ativar() (if atual===id) impede de carregar dados do próximo */
@@ -32919,7 +33016,9 @@ const rascunhos = {
         }
       }
       rascunhos.renderAbas(mod);
-      toast('Rascunho "' + nome + '" fechado');
+      toast('Rascunho "' + nome + '" fechado' +
+        (rascunhos.list(mod).length === 1 && !rascunhos.temConteudo(mod, rascunhos.list(mod)[0])
+          ? ' — a aba em branco que ficou é a ficha nova' : ''));
     };
 
     /* Modal customizado (não depende do confirm nativo, que pode ser bloqueado em alguns ambientes) */
@@ -32961,7 +33060,12 @@ const rascunhos = {
     if (!id) return;
     const list = rascunhos.list(mod).filter(x => x.id !== id);
     rascunhos.setList(mod, list);
-    try { rascunhosSync.apagar(mod, id); } catch (e) {}
+    rascunhos.marcarFechado(mod, id);
+    try {
+      Promise.resolve(rascunhosSync.apagar(mod, id))
+        .then(ok => { if (ok) rascunhos.marcarApagado(mod, id); })
+        .catch(() => {});
+    } catch (e) {}
     /* IMPORTANTE: limpa o ativo antes de chamar ativar() */
     rascunhos.setAtivo(mod, null);
     if (list.length > 0) {
@@ -32996,8 +33100,34 @@ const rascunhos = {
     }
   },
 
+  /* Abas em branco repetidas: sobra de sincronização (cada aparelho mandava
+     o seu "Rascunho 1" vazio). Uma aba em branco é a ficha nova — várias são
+     lixo. Fica a mais recente; as outras saem, com lápide, para não voltarem. */
+  limparVazios(mod) {
+    const list = rascunhos.list(mod);
+    const ativo = rascunhos.ativo(mod);
+    const vazios = list.filter(r => !rascunhos.temConteudo(mod, r));
+    if (vazios.length < 2) return 0;
+    /* preserva o que está aberto na tela; senão, o mais recente */
+    const manter = vazios.find(r => r.id === ativo) ||
+      vazios.slice().sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0];
+    const remover = vazios.filter(r => r.id !== manter.id);
+    if (!remover.length) return 0;
+    rascunhos.setList(mod, list.filter(r => !remover.some(x => x.id === r.id)));
+    remover.forEach(r => {
+      rascunhos.marcarFechado(mod, r.id);
+      try {
+        Promise.resolve(rascunhosSync.apagar(mod, r.id))
+          .then(ok => { if (ok) rascunhos.marcarApagado(mod, r.id); })
+          .catch(() => {});
+      } catch (e) {}
+    });
+    return remover.length;
+  },
+
   /* Garante que ao entrar no módulo, existe ao menos um rascunho ativo */
   garantirAtivo(mod) {
+    try { rascunhos.limparVazios(mod); } catch (e) {}
     const list = rascunhos.list(mod);
     if (list.length === 0) {
       rascunhos.novo(mod);
