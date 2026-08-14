@@ -834,6 +834,11 @@ table.vitais-grade .vg-hora:focus { border-color: var(--primary); background: #f
   border-radius: 5px; background: var(--surface); width: 100%;
 }
 .lab-item input:focus { border-color: var(--primary); outline: none; }
+/* Cirurgia proposta: campo alto, que cresce com o texto e não corta o começo */
+textarea.campo-cirurgia {
+  min-height: 62px; line-height: 1.45; resize: vertical; overflow: hidden;
+  font-size: .92rem;
+}
 /* O amarelo que aparecia nos exames não era nosso: é o preenchimento
    automático do navegador pintando o campo. Numa ficha clínica isso engana —
    parece marcação de valor alterado. */
@@ -2887,6 +2892,11 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
 ============================================================================= */
 /* === Autocomplete (v5) === */
 .autocomplete-wrap { position: relative; }
+/* Dentro de uma linha flex (campo CBHPM com o botão ➕ ao lado), este invólucro
+   precisa esticar: sem isso ele ficava do tamanho padrão do campo (~180px) e o
+   resto da linha sobrava vazio. */
+.cbhpm-linha > .autocomplete-wrap { flex: 1; min-width: 0; }
+.autocomplete-wrap > textarea, .autocomplete-wrap > input { width: 100%; }
 .autocomplete-list {
   position: absolute;
   top: calc(100% + 2px); left: 0; right: 0;
@@ -4290,7 +4300,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-14d</b><br>
+    v7.1 · build <b id="build-tag">2026-08-14e</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -4555,7 +4565,13 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <div class="field col-12">
             <label>Cirurgia proposta <small style="color:var(--text-mute);font-weight:400">(autocompleta da CBHPM)</small></label>
             <div style="display:flex;gap:6px;align-items:stretch">
-              <input type="text" name="cirurgia" class="cbhpm-autocomplete" placeholder="Digite parte do procedimento ou o código TUSS..." style="flex:1">
+              <!-- Nome de procedimento é longo e frequentemente vem em série
+                   ("... + ... + ..."). Numa linha só, o começo saía da vista
+                   assim que passava do meio do campo: para conferir o que
+                   estava escrito era preciso rolar dentro do campo. Textarea
+                   que cresce com o conteúdo mostra tudo de uma vez. -->
+              <textarea name="cirurgia" class="cbhpm-autocomplete campo-cirurgia" rows="2"
+                placeholder="Digite parte do procedimento ou o código TUSS..." style="flex:1"></textarea>
               <button type="button" class="btn btn-primary btn-sm" style="flex-shrink:0;padding:0 12px" onclick="pre.procs.add()" title="Adicionar mais um procedimento">+</button>
             </div>
             <div id="pre-procs-lista" class="pre-procs-lista"></div>
@@ -24274,6 +24290,27 @@ const cbhpm = {
     input._cbhpmLigado = true;
     input._cbhpmOpts = opts;
 
+    /* Campo alto (textarea): cresce com o conteúdo e não aceita quebra de
+       linha — o valor é UMA descrição; vários procedimentos se separam por
+       " + ", que é o que o resto do app entende. */
+    if (input.tagName === 'TEXTAREA') {
+      const crescer = () => {
+        try {
+          /* campo escondido (card recolhido, módulo fora da tela) tem
+             scrollHeight 0 — crescer aí achataria o campo para 2px */
+          if (!input.offsetParent && input.offsetHeight === 0) return;
+          input.style.height = 'auto';
+          input.style.height = (input.scrollHeight + 2) + 'px';
+        } catch (e) {}
+      };
+      input.addEventListener('input', crescer);
+      input.addEventListener('focus', crescer);
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && (input._cbhpmIdx == null || input._cbhpmIdx < 0)) e.preventDefault();
+      });
+      setTimeout(crescer, 0);
+      input._cbhpmCrescer = crescer;
+    }
     input.addEventListener('input', () => cbhpm._abrir(input));
     input.addEventListener('focus', () => { if ((input.value || '').trim().length >= 2) cbhpm._abrir(input); });
     input.addEventListener('keydown', (e) => cbhpm._teclado(e, input));

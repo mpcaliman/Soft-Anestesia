@@ -7011,6 +7011,58 @@ await test('Pré: nascimento (e o resto da identificação) vêm do cadastro do 
   await page.close();
 });
 
+/* 119) Cirurgia proposta: nome longo e vários procedimentos encadeados não
+   cabiam numa linha — o começo saía da vista e conferir exigia rolar dentro do
+   campo. Campo alto, que cresce com o texto e continua sugerindo a CBHPM. */
+await test('Pré: campo da cirurgia proposta ocupa a linha, cresce com o texto e mantém a CBHPM', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    ui.navegar('pre');
+    document.querySelectorAll('#module-pre .card').forEach(c => c.classList.remove('collapsed'));
+    const f = document.getElementById('form-pre');
+    const el = f.querySelector('[name="cirurgia"]');
+    out.ehCampoAlto = el.tagName === 'TEXTAREA';
+
+    const antes = el.getBoundingClientRect().height;
+    /* texto que não cabe nem em duas linhas: é aí que o campo tem que crescer */
+    el.value = 'Colecistectomia videolaparoscópica + colangiografia intraoperatória + '
+      + 'hernioplastia umbilical com tela + biópsia hepática + enterectomia segmentar + '
+      + 'adesiólise extensa + colocação de dreno de cavidade + revisão de hemostasia + '
+      + 'gastrostomia endoscópica percutânea + jejunostomia para nutrição enteral';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(r2 => setTimeout(r2, 80));
+    const depois = el.getBoundingClientRect().height;
+    out.cresceuComOTexto = depois > antes;
+    out.ocupaALinha = el.getBoundingClientRect().width > 400;
+    out.semRolagemInterna = el.scrollHeight <= el.clientHeight + 4;
+
+    /* Enter não quebra linha: o valor é uma descrição só (vários vão com " + ") */
+    const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    el.dispatchEvent(ev);
+    out.enterNaoQuebra = ev.defaultPrevented;
+
+    /* a sugestão da CBHPM continua funcionando no campo alto */
+    el.value = 'coleci';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(r2 => setTimeout(r2, 260));
+    out.sugereCBHPM = !!(el._cbhpmBox && el._cbhpmBox.querySelectorAll('.cbhpm-item').length);
+
+    /* e o valor continua sendo coletado como texto simples */
+    el.value = 'Colecistectomia';
+    out.coletaNormal = utils.formData('form-pre').cirurgia === 'Colecistectomia';
+    return out;
+  });
+  assert(r.ehCampoAlto, 'o campo precisa comportar mais de uma linha');
+  assert(r.ocupaALinha, 'e ocupar a largura da linha, não o tamanho padrão de um input');
+  assert(r.cresceuComOTexto, 'com texto longo, o campo cresce em vez de esconder o começo');
+  assert(r.semRolagemInterna, 'nada de rolar dentro do campo para ler o que foi escrito');
+  assert(r.enterNaoQuebra, 'Enter não pode quebrar linha num campo que é uma descrição só');
+  assert(r.sugereCBHPM, 'a sugestão da CBHPM continua valendo no campo alto');
+  assert(r.coletaNormal, 'o valor continua sendo gravado como texto simples');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
