@@ -1091,6 +1091,10 @@ body.dark .dropdown-menu { background: var(--surface); border-color: var(--borde
   grid-template-columns: repeat(12, 1fr);
 }
 .field { display: flex; flex-direction: column; min-width: 0; }
+/* Linha de campos DENTRO de outra linha (grid aninhada). Sem isto ela entra
+   como um item qualquer e ocupa 1 das 12 colunas: os campos espremem e os
+   rótulos se atropelam — era o que acontecia na via aérea do card 3. */
+.grid > .grid { grid-column: 1 / -1; }
 .field.col-1  { grid-column: span 1; }
 .field.col-2  { grid-column: span 2; }
 .field.col-3  { grid-column: span 3; }
@@ -4300,7 +4304,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-14e</b><br>
+    v7.1 · build <b id="build-tag">2026-08-14f</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -5597,7 +5601,10 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
             <!-- Tamanho, cuff, Cormack e fixação em seleção: é sempre a mesma
                  informação, e digitá-la por extenso a cada caso é redigitar o
                  padrão. O texto do dispositivo se monta sozinho a partir daqui
-                 (e continua editável à mão, para o que fugir do comum). -->
+                 (e continua editável à mão, para o que fugir do comum).
+                 A LINHA FECHA EM 12: via aérea (4) + tamanho (2) + cuff (2) +
+                 Cormack (2) + fixação (2). Passar disso espremia os campos e
+                 fazia os rótulos se atropelarem. -->
             <div class="field col-2" id="va-tam-wrap"><label>Tamanho</label>
               <select name="via_aerea_tamanho" onchange="anestesia.viaAerea.montarDetalhe()">
                 <option value="">—</option>
@@ -5616,7 +5623,9 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
             <div class="field col-2" id="va-fix-wrap"><label>Fixado a (cm)</label>
               <input type="number" name="via_aerea_fixacao" min="10" max="35" step="0.5" placeholder="21" oninput="anestesia.viaAerea.montarDetalhe()">
             </div>
-            <div class="field col-4"><label>Detalhes do dispositivo <small style="color:var(--text-mute);font-weight:400">— montado do que você marcou</small></label>
+          </div>
+          <div class="grid">
+            <div class="field col-9"><label>Detalhes do dispositivo <small style="color:var(--text-mute);font-weight:400">— montado do que você marcou; pode editar</small></label>
               <input type="text" name="via_aerea_detalhe" placeholder="Ex.: TOT 7,5 com cuff · Cormack I · fixado a 21 cm" oninput="anestesia.viaAerea._marcarManual(); anestesia.eventos.atualizarDescricoes()">
             </div>
             <div class="field col-3"><label>Horário</label>

@@ -7063,6 +7063,47 @@ await test('Pré: campo da cirurgia proposta ocupa a linha, cresce com o texto e
   await page.close();
 });
 
+/* 120) Uma linha de campos DENTRO de outra linha entrava como item qualquer e
+   ocupava 1 das 12 colunas: os campos espremiam e os rótulos se atropelavam.
+   Apareceu na via aérea do card 3, mas valia para qualquer grade aninhada. */
+await test('Ficha: a linha da via aérea ocupa a largura toda e os campos não se espremem', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('anestesia');
+    document.querySelectorAll('#module-anestesia .card').forEach(c => c.classList.remove('collapsed'));
+    const f = document.getElementById('form-anestesia');
+    const va = f.querySelector('[name="via_aerea_uso"]');
+    const linha = va.closest('.grid');
+    const pai = linha.parentElement;
+
+    out.estaAninhada = pai.classList.contains('grid');
+    out.linhaOcupaTudo = Math.round(linha.getBoundingClientRect().width)
+      >= Math.round(pai.getBoundingClientRect().width) - 2;
+
+    /* a linha fecha em 12 colunas: nada é empurrado para fora */
+    const cols = Array.from(linha.children)
+      .map(el => (String(el.className).match(/col-(\d+)/) || [0, 0])[1])
+      .reduce((s, n) => s + Number(n), 0);
+    out.fechaEm12 = cols === 12;
+
+    /* e o campo tem largura de campo, não de coluninha */
+    out.campoUsavel = va.getBoundingClientRect().width > 150;
+
+    /* detalhes e horário foram para a linha de baixo, também completa */
+    const det = f.querySelector('[name="via_aerea_detalhe"]');
+    out.detalheEmOutraLinha = det.closest('.grid') !== linha;
+    out.detalheLargo = det.getBoundingClientRect().width > 300;
+    return out;
+  });
+  assert(r.estaAninhada, 'a linha da via aérea é uma grade dentro de outra — é esse o caso que quebrava');
+  assert(r.linhaOcupaTudo, 'grade aninhada precisa ocupar a largura inteira, não uma coluna');
+  assert(r.fechaEm12, 'a linha tem que fechar em 12 colunas — passar disso espreme tudo');
+  assert(r.campoUsavel, 'o campo precisa ter largura de campo');
+  assert(r.detalheEmOutraLinha && r.detalheLargo, 'detalhes e horário ficam na linha de baixo, com espaço');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
