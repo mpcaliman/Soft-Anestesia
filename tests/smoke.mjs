@@ -6894,6 +6894,66 @@ await test('Ficha: técnica define a ventilação, e tubo/cateter escolhidos esc
   await page.close();
 });
 
+/* 117) Exame fora da faixa é marca de CONFERÊNCIA: ajuda quem preenche, não é
+   conteúdo do documento. Não imprime e não fica na ficha finalizada. */
+await test('Pré: exame fora da faixa é marcado na tela, mas não imprime nem fica após finalizar', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('pre', []);
+    ui.navegar('pre');
+    const f = document.getElementById('form-pre');
+    const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el) el.value = v; };
+    const marcado = n => /lab-fora/.test((f.querySelector('[name="' + n + '"]') || {}).className || '');
+
+    set('sexo', 'Feminino');
+    set('lab_hb', '9,5');      /* baixa */
+    set('lab_k', '4,2');       /* normal */
+    set('lab_na', '150');      /* alto */
+    set('lab_creat', '1,0');   /* normal para mulher (0,6–1,1) */
+    set('lab_plt', '90');      /* 90 mil — o hemograma é lido dos dois jeitos */
+    pre.labs.marcar(f);
+    out.marcouBaixo = marcado('lab_hb');
+    out.marcouAlto = marcado('lab_na');
+    out.deixouNormalEmPaz = !marcado('lab_k') && !marcado('lab_creat');
+    out.entendeuMilhar = marcado('lab_plt');
+    out.explicaNoTitulo = /faixa de referência/.test((f.querySelector('[name="lab_hb"]') || {}).title || '');
+
+    /* a faixa segue o sexo: creatinina 1,2 é normal em homem e alta em mulher */
+    set('lab_creat', '1,2');
+    pre.labs.marcar(f);
+    out.mulherAlta = marcado('lab_creat');
+    set('sexo', 'Masculino');
+    pre.labs.marcar(f);
+    out.homemNormal = !marcado('lab_creat');
+
+    /* finalizada: a marca sai — o documento assinado mostra o valor, sem grifo */
+    const rec = store.save('pre', { nome: 'Ana', data: '2026-08-14', lab_hb: '9,5', _finalizado: true });
+    let h = f.querySelector('[name="_id"]');
+    if (!h) { h = document.createElement('input'); h.type = 'hidden'; h.name = '_id'; f.appendChild(h); }
+    h.value = rec._id;
+    pre.labs.marcar(f);
+    out.finalizadaLimpa = !marcado('lab_hb');
+
+    /* a impressão é montada do valor, não do campo: a marca nunca viaja */
+    h.value = '';
+    pre.labs.marcar(f);
+    const html = printPreview._buildPre();
+    out.naoVaiParaImpressao = html.indexOf('lab-fora') < 0 && /9,5/.test(html);
+
+    store.setList('pre', []);
+    return out;
+  });
+  assert(r.marcouBaixo && r.marcouAlto, 'valor fora da faixa precisa saltar aos olhos de quem preenche');
+  assert(r.deixouNormalEmPaz, 'valor normal não pode ser marcado — marca demais é o mesmo que marca nenhuma');
+  assert(r.entendeuMilhar, 'plaqueta escrita em milhares ("90") é 90 mil');
+  assert(r.explicaNoTitulo, 'a marca precisa dizer qual é a faixa');
+  assert(r.mulherAlta && r.homemNormal, 'a faixa acompanha o sexo do paciente');
+  assert(r.finalizadaLimpa, 'ficha finalizada não carrega marca de conferência');
+  assert(r.naoVaiParaImpressao, 'a marca não vai para o papel — mas o valor vai');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

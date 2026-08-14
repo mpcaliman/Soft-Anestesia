@@ -834,6 +834,30 @@ table.vitais-grade .vg-hora:focus { border-color: var(--primary); background: #f
   border-radius: 5px; background: var(--surface); width: 100%;
 }
 .lab-item input:focus { border-color: var(--primary); outline: none; }
+/* O amarelo que aparecia nos exames não era nosso: é o preenchimento
+   automático do navegador pintando o campo. Numa ficha clínica isso engana —
+   parece marcação de valor alterado. */
+.lab-item input:-webkit-autofill,
+.lab-item input:-webkit-autofill:hover,
+.lab-item input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 30px var(--surface) inset !important;
+  -webkit-text-fill-color: var(--text) !important;
+}
+/* EXAME FORA DA FAIXA — marca de trabalho, não conteúdo do documento.
+   Ajuda a bater o olho enquanto se preenche; não vai para o papel e some
+   quando a ficha é finalizada (ver pre.labs). */
+.lab-item input.lab-fora {
+  border-color: var(--warning);
+  background: var(--warning-soft);
+  font-weight: 600;
+}
+.lab-item input.lab-fora + .lab-seta { color: var(--warning); }
+@media print {
+  .lab-item input.lab-fora { border-color: var(--border) !important; background: none !important; font-weight: 400 !important; }
+}
+body.ficha-finalizada .lab-item input.lab-fora {
+  border-color: var(--border); background: var(--surface); font-weight: 400;
+}
 @media (max-width: 700px) { .lab-grid { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 420px) { .lab-grid { grid-template-columns: repeat(2, 1fr); } }
 
@@ -4266,7 +4290,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-14b</b><br>
+    v7.1 · build <b id="build-tag">2026-08-14c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -12867,7 +12891,7 @@ const ui = {
         else if (modName === 'agenda') { agenda.render(); if (!agenda._puxouNestaSessao) { setTimeout(() => { try { agenda.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); try { equipeNuvem.render(); } catch (e) {} try { auditoria.render(''); } catch (e) {} try { armazenamento.render(); } catch (e) {} logoUsuario.renderAjustes(); try { nuvemEstado.render(); } catch (e) {} try { duplicados.resumoNoCard(); } catch (e) {} const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
-        else if (modName === 'pre') { try { preLanc.renderBotao('pre'); } catch (e) {} try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} try { pre.viaAerea.render(); } catch (e) {} }
+        else if (modName === 'pre') { try { preLanc.renderBotao('pre'); } catch (e) {} try { pre.labs.ligar(); pre.labs.marcar(); } catch (e) {} try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} try { pre.viaAerea.render(); } catch (e) {} }
         else if (modName === 'anestesia') { try { preLanc.renderBotao('anestesia'); } catch (e) {} anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} try { anestesia.calc.resumoTopo(); } catch (e) {} try { adendos.renderInline('anestesia'); } catch (e) {} try { anestesia.nav._wire(); anestesia.nav.render(); } catch (e) {} try { anestesia.vitais.autoAvanco.wire(); } catch (e) {} }
         else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} try { recuperacao.resumoTopo(); } catch (e) {} try { anestesia.vitais.autoAvanco.wire(); } catch (e) {} }, 60); }
         else if (modName === 'termo') { setTimeout(() => { try { (termo.sig._ajustar || []).forEach(fn => fn()); assinatura.initCanvas('sig-termo'); } catch (e) {} }, 80); }
@@ -13304,6 +13328,136 @@ const prontuario = {
 const pre = {
   formId: 'form-pre',
   _linkPendente: null,
+
+  /* ===== EXAMES FORA DA FAIXA — marca de trabalho, não conteúdo =====
+     Bater o olho em 26 exames procurando o que está alterado é trabalho de
+     conferência que o app faz melhor. Mas isso é ajuda para QUEM PREENCHE:
+     não é conteúdo do documento. Por isso a marca não vai para a impressão e
+     desaparece quando a ficha é finalizada — o registro assinado mostra os
+     valores, e quem lê tira as próprias conclusões.
+     As faixas são de adulto e servem de triagem, não de laudo: valor marcado
+     quer dizer "olhe para este", não "está doente". */
+  labs: {
+    REF: {
+      lab_hb:            { m: [13, 17],    f: [12, 16] },
+      lab_ht:            { m: [39, 50],    f: [36, 46] },
+      lab_hm:            { m: [4.5, 5.9],  f: [4.0, 5.2] },
+      lab_leuco:         { faixa: [4000, 11000], mil: true },
+      lab_plt:           { faixa: [150000, 450000], mil: true },
+      lab_fibrinogenio:  { faixa: [200, 400] },
+      lab_tp:            { faixa: [11, 14] },
+      lab_inr:           { faixa: [0.9, 1.2] },
+      lab_ttpa:          { faixa: [25, 35] },
+      lab_ativprot:      { faixa: [70, 100] },
+      lab_ureia:         { faixa: [15, 45] },
+      lab_creat:         { m: [0.7, 1.3],  f: [0.6, 1.1] },
+      lab_na:            { faixa: [135, 145] },
+      lab_k:             { faixa: [3.5, 5.1] },
+      lab_ca:            { faixa: [8.5, 10.5] },
+      lab_mg:            { faixa: [1.6, 2.6] },
+      lab_glicemia:      { faixa: [70, 110] },
+      lab_hba1c:         { faixa: [4, 5.7] },
+      lab_tsh:           { faixa: [0.4, 4.5] },
+      lab_t4l:           { faixa: [0.8, 1.8] },
+      lab_ast:           { faixa: [10, 40] },
+      lab_alt:           { faixa: [7, 56] },
+      lab_bilirrubinas:  { faixa: [0.2, 1.2] },
+      lab_proteinas:     { faixa: [6, 8] }
+    },
+    _num(raw) {
+      const t = String(raw == null ? '' : raw).replace(/[^\d,.\-]/g, '').replace(',', '.');
+      if (!t) return null;
+      const v = parseFloat(t);
+      return isNaN(v) ? null : v;
+    },
+    _sexo(form) {
+      const el = form && form.querySelector('[name="sexo"]');
+      const v = String((el && el.value) || '').toLowerCase();
+      if (v.indexOf('fem') === 0) return 'f';
+      if (v.indexOf('mas') === 0) return 'm';
+      return '';
+    },
+    /* Devolve a faixa que vale para este paciente, ou null se não há regra */
+    faixaDe(nome, form) {
+      const r = pre.labs.REF[nome];
+      if (!r) return null;
+      if (r.faixa) return r.faixa;
+      const sx = pre.labs._sexo(form);
+      /* sem sexo informado, usa a faixa mais larga: marcar por suposição seria
+         apontar alteração que talvez não exista */
+      if (!sx) return [Math.min(r.m[0], r.f[0]), Math.max(r.m[1], r.f[1])];
+      return r[sx];
+    },
+    /* "250" em plaquetas é 250 mil — o hemograma é lido dos dois jeitos */
+    _ajustarMil(nome, v) {
+      const r = pre.labs.REF[nome];
+      if (!r || !r.mil || v == null) return v;
+      return v < 1000 ? v * 1000 : v;
+    },
+    fora(nome, raw, form) {
+      const faixa = pre.labs.faixaDe(nome, form);
+      if (!faixa) return null;
+      let v = pre.labs._num(raw);
+      if (v == null) return null;
+      v = pre.labs._ajustarMil(nome, v);
+      if (v < faixa[0]) return 'baixo';
+      if (v > faixa[1]) return 'alto';
+      return null;
+    },
+    /* Ficha finalizada não mostra marca: o documento assinado é o que vale */
+    _finalizada(form) {
+      try {
+        const id = (form.querySelector('[name="_id"]') || {}).value;
+        if (!id) return false;
+        const rec = store.getById('pre', id);
+        return !!(rec && rec._finalizado);
+      } catch (e) { return false; }
+    },
+    marcar(form) {
+      const f = form || document.getElementById(pre.formId);
+      if (!f) return 0;
+      const finalizada = pre.labs._finalizada(f);
+      let n = 0;
+      Object.keys(pre.labs.REF).forEach(nome => {
+        const el = f.querySelector('[name="' + nome + '"]');
+        if (!el) return;
+        const status = finalizada ? null : pre.labs.fora(nome, el.value, f);
+        el.classList.toggle('lab-fora', !!status);
+        if (status) {
+          const fx = pre.labs.faixaDe(nome, f);
+          el.title = 'Fora da faixa de referência (' + fx[0] + '–' + fx[1] + ') — ' + status +
+            '. Marca de conferência: não sai na impressão nem fica na ficha finalizada.';
+          n++;
+        } else if (el.title && el.title.indexOf('faixa de referência') >= 0) {
+          el.removeAttribute('title');
+        }
+      });
+      return n;
+    },
+    limpar(form) {
+      const f = form || document.getElementById(pre.formId);
+      if (!f) return;
+      f.querySelectorAll('.lab-fora').forEach(el => {
+        el.classList.remove('lab-fora');
+        if (el.title && el.title.indexOf('faixa de referência') >= 0) el.removeAttribute('title');
+      });
+    },
+    /* Um ouvinte só, no formulário: pega os 26 campos e os que vierem depois */
+    ligar() {
+      const f = document.getElementById(pre.formId);
+      if (!f || f.dataset.labsLigados === '1') return;
+      f.dataset.labsLigados = '1';
+      f.addEventListener('input', (ev) => {
+        const el = ev.target;
+        if (!el || !el.name) return;
+        if (pre.labs.REF[el.name]) pre.labs.marcar(f);
+        else if (el.name === 'sexo') pre.labs.marcar(f);   /* faixa muda com o sexo */
+      });
+      f.addEventListener('change', (ev) => {
+        if (ev.target && ev.target.name === 'sexo') pre.labs.marcar(f);
+      });
+    }
+  },
   /* ===== JEJUM — opções padronizadas + orientação automática ao paciente ===== */
   jejum: {
     TEXTOS: {
@@ -13823,6 +13977,7 @@ const pre = {
     try { pre.procs.limpar(); } catch (e) {}
     try { const c = document.getElementById('pre-lab-extras'); if (c) c.innerHTML = ''; } catch (e) {}
     document.querySelector(`#${pre.formId} [name="data"]`).value = utils.hojeISO();
+    try { pre.labs.limpar(); } catch (e) {}
     pre._linkPendente = null;
     ui.atualizarDocStatus('pre', null);
     try { prontuario.limpar('pre'); } catch (e) {}
@@ -13885,6 +14040,8 @@ const pre = {
        E os dois vêm ANTES do descarte do rascunho, porque ambos são montados a
        partir do FORMULÁRIO — depois do descarte a tela já está limpa e a
        impressão saía em branco. */
+    /* finalizou: a marca de conferência sai da tela junto com o ato */
+    if (finalizar) { try { pre.labs.marcar(f); } catch (e) {} }
     if (finalizar) { try { pdfBackup.autoAoFinalizar('pre'); } catch (e) {} }
     if (finalizar) { try { printPreview.abrir(); } catch (e) {} }
     /* Rascunho só é descartado quando finaliza; salvar normal mantém o rascunho ativo */
@@ -14038,6 +14195,9 @@ const pre = {
     try { pre.meds.restaurar(item); } catch (e) {}
     try { pre.procs.restaurar(item._procsExtra); } catch (e) {}
     try { labExtra.restaurar('pre-lab-extras', item._labExtras); } catch (e) {}
+    /* marca os exames fora da faixa — e, se a ficha já está finalizada, tira
+       a marca: o documento assinado mostra os valores, sem grifo do sistema */
+    try { pre.labs.ligar(); pre.labs.marcar(f); } catch (e) {}
     try { prontuario.restaurar('pre', item._docs); } catch (e) {}
     try { pre.jejum.restaurar(item); } catch (e) {}
     try { pre.premed.restaurar(item._premedSel); } catch (e) {}
