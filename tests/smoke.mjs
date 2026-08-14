@@ -1450,7 +1450,9 @@ await test('Grau: cirurgias da ficha têm grau, previsto = unit × qtd × grau, 
     // (antes as combinadas nem eram importadas — a ficha salva c.procedimento)
     store.setList('anestesia', [{
       _id: 'fx', paciente: { nome: 'Grau Teste' },
-      procedimento: { descricao: 'Colonoscopia', data: '2026-07-25',
+      /* descrições exatas da CBHPM: a importação acha o código e o porte, e é
+         pelo porte que o sistema decide quem é o principal */
+      procedimento: { descricao: 'Colecistectomia sem colangiografia', data: '2026-07-25',
         cirurgias_extra: [{ procedimento: 'Endoscopia digestiva alta', grau: '50' }] }
     }]);
     financeiro.editar(null);
@@ -1461,6 +1463,14 @@ await test('Grau: cirurgias da ficha têm grau, previsto = unit × qtd × grau, 
     out.importou2 = rows.length === 2;
     const graus = rows.map(x => x.querySelector('[name="fin_cod_grau[]"]').value);
     out.grausImportados = graus[0] === '100' && graus[1] === '50';
+    out.codigosImportados = rows.every(x => /^\d\.\d\d\./.test(x.querySelector('[name="fin_cod_codigo[]"]').value));
+
+    /* código sem porte reconhecido não pode ser rebaixado por falta de dado */
+    document.getElementById('fin-codigos-body').innerHTML = '';
+    financeiro.codigos.add({ descricao: 'Sem porte', porte: '', grau: '100' });
+    financeiro.codigos.add({ descricao: 'Com porte', porte: '5A', grau: '100' });
+    financeiro.codigos.classificarGrau({ silent: true });
+    out.semPorteIntacto = financeiro.codigos.coletar().map(c => c.grau).join('/') === '100/100';
 
     financeiro.cancelar();
     document.getElementById('cir-combo-body').innerHTML = '';
@@ -1474,7 +1484,9 @@ await test('Grau: cirurgias da ficha têm grau, previsto = unit × qtd × grau, 
   assert(r.coletaGrau, 'o grau deveria ser salvo com o código');
   assert(r.classificou, 'classificar: maior porte → 100%, demais → 50%, e o 70% manual preservado');
   assert(r.importou2, 'a importação deveria trazer principal + combinada (bug do c.descricao corrigido)');
-  assert(r.grausImportados, 'principal deveria entrar 100% e a combinada com o grau da ficha (50%)');
+  assert(r.grausImportados, 'o de maior porte entra 100% e o outro fica com 50% (mesma via)');
+  assert(r.codigosImportados, 'a importação deveria achar o código CBHPM dos dois procedimentos');
+  assert(r.semPorteIntacto, 'sem porte reconhecido, o grau não pode ser mexido por conta própria');
   await page.close();
 });
 
@@ -2972,35 +2984,36 @@ await test('CBHPM: procedimentos próprios entram na busca e no financeiro; paci
     const out = {};
     localStorage.removeItem(cbhpm.EXTRA_KEY); cbhpm._cache = null;
 
-    /* a tabela embutida só tem os capítulos 3 e 4 (cirúrgico/invasivo) */
-    out.semAmbulatorial = !cbhpm.tabela().some(c => String(c[0]).startsWith('1.') || String(c[0]).startsWith('2.'));
+    /* a tabela oficial cobre os quatro capítulos da CBHPM 2022 */
+    out.temAmbulatorial = ['1.', '2.', '3.', '4.'].every(p => cbhpm.tabela().some(c => String(c[0]).startsWith(p)));
     const totalAntes = cbhpm.tabela().length;
 
-    /* importação em lote, em formatos diferentes */
+    /* importação em lote (código de convênio/pacote que a tabela não cobre),
+       em formatos diferentes */
     const res = cbhpm.importarTexto(
-      '1.01.01.01-2;Consulta em consultório;;;\n' +
-      '2.01.03.15-8\tAtendimento ambulatorial de urgência\t2A\t0\t\n' +
-      '4.01.02.03-7 Eletrocardiograma convencional\n' +
+      '9.01.01.01-2;Pacote negociado do convênio;;;\n' +
+      '9.01.03.15-8\tAtendimento fora da tabela\t2A\t0\t\n' +
+      '9.01.02.03-7 Código próprio da clínica\n' +
       'linha sem código nenhum\n'
     );
     out.importou = res.novos === 3 && res.ignorados === 1;
     out.cresceu = cbhpm.tabela().length === totalAntes + 3;
 
     /* busca por DESCRIÇÃO e por CÓDIGO */
-    out.achaPorDescricao = cbhpm.buscar('consulta em consult').some(i => i.codigo === '1.01.01.01-2');
-    out.achaPorCodigo = cbhpm.buscar('2.01.03').some(i => i.codigo === '2.01.03.15-8');
-    out.achaPorCodigoParcial = cbhpm.buscar('4.01.02.03-7').some(i => i.descricao === 'Eletrocardiograma convencional');
+    out.achaPorDescricao = cbhpm.buscar('pacote negociado').some(i => i.codigo === '9.01.01.01-2');
+    out.achaPorCodigo = cbhpm.buscar('9.01.03').some(i => i.codigo === '9.01.03.15-8');
+    out.achaPorCodigoParcial = cbhpm.buscar('9.01.02.03-7').some(i => i.descricao === 'Código próprio da clínica');
     /* separa código e descrição corretamente no formato "código espaço descrição" */
-    const ecg = cbhpm.achar('4.01.02.03-7');
-    out.parseCodigoEspaco = !!ecg && ecg[1] === 'Eletrocardiograma convencional';
+    const proprio = cbhpm.achar('9.01.02.03-7');
+    out.parseCodigoEspaco = !!proprio && proprio[1] === 'Código próprio da clínica';
 
     /* o financeiro reconhece o código cadastrado (é o mesmo achar()) */
-    out.financeiroAcha = !!cbhpm.achar('Consulta em consultório') && cbhpm.achar('Consulta em consultório')[0] === '1.01.01.01-2';
+    out.financeiroAcha = !!cbhpm.achar('Pacote negociado do convênio') && cbhpm.achar('Pacote negociado do convênio')[0] === '9.01.01.01-2';
 
     /* não sobrescreve a tabela oficial embutida */
-    const oficial = CBHPM_2018[0][0];
+    const oficial = CBHPM_2022[0][0];
     const res2 = cbhpm.importarTexto(oficial + ';Descrição inventada;;;');
-    out.protegeOficial = res2.ignorados === 1 && res2.novos === 0 && cbhpm.achar(oficial)[1] === CBHPM_2018[0][1];
+    out.protegeOficial = res2.ignorados === 1 && res2.novos === 0 && cbhpm.achar(oficial)[1] === CBHPM_2022[0][1];
 
     /* sobe junto das configurações (mesma nuvem dos ajustes) */
     out.vaiParaNuvem = !!clinicaSync.CHAVES[cbhpm.EXTRA_KEY];   /* agora é da clínica */
@@ -3009,8 +3022,9 @@ await test('CBHPM: procedimentos próprios entram na busca e no financeiro; paci
     ajustesGrupos.abrirPara && ajustesGrupos.abrirPara('cbhpm-card');
     cbhpmUI.render();
     const lista = document.getElementById('cbhpm-lista');
-    out.telaLista = !!lista && lista.textContent.indexOf('Consulta em consultório') >= 0;
-    out.telaResumo = (document.getElementById('cbhpm-resumo') || {}).textContent.indexOf('3') >= 0;
+    out.telaLista = !!lista && lista.textContent.indexOf('Pacote negociado do convênio') >= 0;
+    const resumoTxt = (document.getElementById('cbhpm-resumo') || {}).textContent || '';
+    out.telaResumo = resumoTxt.indexOf('3') >= 0 && resumoTxt.indexOf('CBHPM 2022') >= 0;
 
     /* ---- paciente: enfermaria ---- */
     const fp = document.getElementById('form-pacientes');
@@ -3038,7 +3052,7 @@ await test('CBHPM: procedimentos próprios entram na busca e no financeiro; paci
     store.setList('pacientes', []);
     return out;
   });
-  assert(r.semAmbulatorial, 'o cenário parte sem os códigos ambulatoriais');
+  assert(r.temAmbulatorial, 'a tabela oficial precisa cobrir os quatro capítulos da CBHPM');
   assert(r.importou && r.cresceu, 'a importação deveria aceitar os três formatos e ignorar lixo');
   assert(r.achaPorDescricao, 'deveria achar pelo texto da descrição');
   assert(r.achaPorCodigo && r.achaPorCodigoParcial, 'deveria achar pelo número do código');
@@ -4247,7 +4261,6 @@ await test('Ficha: técnica, agulha, sítio e horário escolhidos nos cards entr
     chk.checked = true; anestesia.disp.alternar(chk);
     const det = Array.from(f.querySelectorAll('[name="disp_det[]"]')).find(x => x.getAttribute('data-disp') === 'Acesso venoso periférico');
     det.value = 'Jelco 18G em dorso da mão direita';
-    anestesia.eventos.add({ tipo: 'Venoclise', hora: '08:00', obs: anestesia.eventos.descricaoPara('Venoclise'), auto: true });
     anestesia.eventos.atualizarDescricoes();
     const evVeno = linhas().find(l => l.tipo === 'Venoclise');
     out.dispositivo = !!evVeno && /Jelco 18G em dorso da mão direita/.test(evVeno.obs);
@@ -6730,6 +6743,14 @@ await test('Ficha: digitar a medicação sugere e o padrão (via, modo, diluiç�
     /* quem começa com o texto vem antes de quem só contém */
     out.ordemUtil = (anestesia.meds._achar('morf')[0] || {}).nome.indexOf('Morfina') === 0;
 
+    /* fármacos usados na rotina precisam estar no catálogo — sugestão e
+       lista de marcação saem da mesma fonte */
+    const acharNo = nome => {
+      const m = anestesia.meds._catalogoPlano().find(x => x.nome === nome);
+      return m ? m.grupo : '';
+    };
+    out.etilefrina = acharNo('Etilefrina') === 'Vasoativos';
+    out.pantoprazol = !!acharNo('Pantoprazol');
     return out;
   });
   assert(r.sugeriu, 'digitar parte do nome tem que sugerir a medicação');
@@ -6740,6 +6761,8 @@ await test('Ficha: digitar a medicação sugere e o padrão (via, modo, diluiç�
   assert(r.naoPisouNoDigitado, 'o padrão nunca sobrescreve o que a pessoa já digitou');
   assert(r.soComDuasLetras, 'uma letra só sugeriria meio catálogo');
   assert(r.ordemUtil, 'quem começa com o que foi digitado vem primeiro');
+  assert(r.etilefrina, 'etilefrina precisa estar entre os vasoativos');
+  assert(r.pantoprazol, 'pantoprazol precisa estar no catálogo');
   await page.close();
 });
 
@@ -6861,7 +6884,6 @@ await test('Ficha: técnica define a ventilação, e tubo/cateter escolhidos esc
     document.querySelector('[data-campo="calibre"][data-disp="Acesso venoso periférico"]').value = '18G';
     document.querySelector('[data-campo="local"][data-disp="Acesso venoso periférico"]').value = 'dorso da mão D';
     anestesia.disp.montarDet('Acesso venoso periférico');
-    anestesia.eventos.add({ tipo: 'Venoclise', hora: '08:10', obs: anestesia.eventos.descricaoPara('Venoclise'), auto: true });
     out.venoclise = /Cateter sobre agulha \(Jelco\) 18G em dorso da mão D/.test(descDe('Venoclise'));
 
     /* seleções sobrevivem ao salvar/reabrir */
@@ -6891,6 +6913,674 @@ await test('Ficha: técnica define a ventilação, e tubo/cateter escolhidos esc
   assert(r.voltaDepoisDeReabrir, 'as seleções precisam sobreviver ao salvar e reabrir');
   assert(r.semOrientacoes, 'a descrição do evento é o registro do que foi feito, não orientação ao profissional');
   assert(r.temDescricaoDeVent, 'os eventos novos de ventilação precisam de descrição técnica');
+  await page.close();
+});
+
+/* 117) Exame fora da faixa é marca de CONFERÊNCIA: ajuda quem preenche, não é
+   conteúdo do documento. Não imprime e não fica na ficha finalizada. */
+await test('Pré: exame fora da faixa é marcado na tela, mas não imprime nem fica após finalizar', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('pre', []);
+    ui.navegar('pre');
+    const f = document.getElementById('form-pre');
+    const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el) el.value = v; };
+    const marcado = n => /lab-fora/.test((f.querySelector('[name="' + n + '"]') || {}).className || '');
+
+    set('sexo', 'Feminino');
+    set('lab_hb', '9,5');      /* baixa */
+    set('lab_k', '4,2');       /* normal */
+    set('lab_na', '150');      /* alto */
+    set('lab_creat', '1,0');   /* normal para mulher (0,6–1,1) */
+    set('lab_plt', '90');      /* 90 mil — o hemograma é lido dos dois jeitos */
+    pre.labs.marcar(f);
+    out.marcouBaixo = marcado('lab_hb');
+    out.marcouAlto = marcado('lab_na');
+    out.deixouNormalEmPaz = !marcado('lab_k') && !marcado('lab_creat');
+    out.entendeuMilhar = marcado('lab_plt');
+    out.explicaNoTitulo = /faixa de referência/.test((f.querySelector('[name="lab_hb"]') || {}).title || '');
+
+    /* a faixa segue o sexo: creatinina 1,2 é normal em homem e alta em mulher */
+    set('lab_creat', '1,2');
+    pre.labs.marcar(f);
+    out.mulherAlta = marcado('lab_creat');
+    set('sexo', 'Masculino');
+    pre.labs.marcar(f);
+    out.homemNormal = !marcado('lab_creat');
+
+    /* finalizada: a marca sai — o documento assinado mostra o valor, sem grifo */
+    const rec = store.save('pre', { nome: 'Ana', data: '2026-08-14', lab_hb: '9,5', _finalizado: true });
+    let h = f.querySelector('[name="_id"]');
+    if (!h) { h = document.createElement('input'); h.type = 'hidden'; h.name = '_id'; f.appendChild(h); }
+    h.value = rec._id;
+    pre.labs.marcar(f);
+    out.finalizadaLimpa = !marcado('lab_hb');
+
+    /* a impressão é montada do valor, não do campo: a marca nunca viaja */
+    h.value = '';
+    pre.labs.marcar(f);
+    const html = printPreview._buildPre();
+    out.naoVaiParaImpressao = html.indexOf('lab-fora') < 0 && /9,5/.test(html);
+
+    store.setList('pre', []);
+    return out;
+  });
+  assert(r.marcouBaixo && r.marcouAlto, 'valor fora da faixa precisa saltar aos olhos de quem preenche');
+  assert(r.deixouNormalEmPaz, 'valor normal não pode ser marcado — marca demais é o mesmo que marca nenhuma');
+  assert(r.entendeuMilhar, 'plaqueta escrita em milhares ("90") é 90 mil');
+  assert(r.explicaNoTitulo, 'a marca precisa dizer qual é a faixa');
+  assert(r.mulherAlta && r.homemNormal, 'a faixa acompanha o sexo do paciente');
+  assert(r.finalizadaLimpa, 'ficha finalizada não carrega marca de conferência');
+  assert(r.naoVaiParaImpressao, 'a marca não vai para o papel — mas o valor vai');
+  await page.close();
+});
+
+/* 118) A data de nascimento não vinha do cadastro: o mapa procurava um campo
+   chamado "nascimento" e a pré chama o dele de "nasc". Um apelido diferente
+   derrubava o preenchimento inteiro daquele dado. */
+await test('Pré: nascimento (e o resto da identificação) vêm do cadastro do paciente', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ['pacientes', 'pre', 'anestesia'].forEach(m => store.setList(m, []));
+    store.save('pacientes', {
+      nome: 'Ana Souza', nascimento: '1980-05-10', sexo: 'Feminino',
+      convenio: 'Amil', peso: '70', altura: '165'
+    });
+    ui.navegar('pre');
+    const f = document.getElementById('form-pre');
+    const v = n => (f.querySelector('[name="' + n + '"]') || {}).value || '';
+
+    /* ao sair do campo do nome, a identificação vem sozinha */
+    f.querySelector('[name="nome"]').value = 'Ana Souza';
+    linker.autoPreencherDadosPaciente('Ana Souza', 'pre');
+    out.trouxeNascimento = v('nasc') === '1980-05-10';
+    out.derivouIdade = /^\d+$/.test(v('idade'));
+    out.trouxeResto = v('sexo') === 'Feminino' && v('convenio') === 'Amil' && v('peso') === '70';
+
+    /* não sobrescreve o que já está preenchido */
+    pre.novo();
+    f.querySelector('[name="nome"]').value = 'Ana Souza';
+    f.querySelector('[name="nasc"]').value = '1979-01-02';
+    linker.autoPreencherDadosPaciente('Ana Souza', 'pre');
+    out.respeitaOQueJaEstava = v('nasc') === '1979-01-02';
+
+    /* e pelo botão "Importar dados de paciente", que agora enxerga o cadastro */
+    pre.novo();
+    const pac = store.list('pacientes')[0];
+    modelos.importarRegistro('pre', 'pacientes', pac._id);
+    out.importouDoCadastro = v('nasc') === '1980-05-10' && v('nome') === 'Ana Souza';
+
+    /* a ficha de anestesia guarda o nascimento como paciente.nasc */
+    pre.novo();
+    const fa = store.save('anestesia', {
+      paciente: { nome: 'Bia Lima', nasc: '1990-03-04', sexo: 'Feminino', peso: '60' },
+      procedimento: { descricao: 'Colecistectomia' }
+    });
+    modelos.importarRegistro('pre', 'anestesia', fa._id);
+    out.importouDaFicha = v('nasc') === '1990-03-04';
+
+    ['pacientes', 'pre', 'anestesia'].forEach(m => store.setList(m, []));
+    return out;
+  });
+  assert(r.trouxeNascimento, 'a data de nascimento tem que vir do cadastro do paciente');
+  assert(r.derivouIdade, 'com o nascimento, a idade sai sozinha');
+  assert(r.trouxeResto, 'sexo, convênio e peso continuam vindo junto');
+  assert(r.respeitaOQueJaEstava, 'o preenchimento automático nunca sobrescreve o que já está lá');
+  assert(r.importouDoCadastro, 'o botão "Importar dados de paciente" precisa enxergar o cadastro de pacientes');
+  assert(r.importouDaFicha, 'e o nascimento guardado na ficha de anestesia também serve');
+  await page.close();
+});
+
+/* 119) Cirurgia proposta: nome longo e vários procedimentos encadeados não
+   cabiam numa linha — o começo saía da vista e conferir exigia rolar dentro do
+   campo. Campo alto, que cresce com o texto e continua sugerindo a CBHPM. */
+await test('Pré: campo da cirurgia proposta ocupa a linha, cresce com o texto e mantém a CBHPM', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    ui.navegar('pre');
+    document.querySelectorAll('#module-pre .card').forEach(c => c.classList.remove('collapsed'));
+    const f = document.getElementById('form-pre');
+    const el = f.querySelector('[name="cirurgia"]');
+    out.ehCampoAlto = el.tagName === 'TEXTAREA';
+
+    const antes = el.getBoundingClientRect().height;
+    /* texto que não cabe nem em duas linhas: é aí que o campo tem que crescer */
+    el.value = 'Colecistectomia videolaparoscópica + colangiografia intraoperatória + '
+      + 'hernioplastia umbilical com tela + biópsia hepática + enterectomia segmentar + '
+      + 'adesiólise extensa + colocação de dreno de cavidade + revisão de hemostasia + '
+      + 'gastrostomia endoscópica percutânea + jejunostomia para nutrição enteral';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(r2 => setTimeout(r2, 80));
+    const depois = el.getBoundingClientRect().height;
+    out.cresceuComOTexto = depois > antes;
+    out.ocupaALinha = el.getBoundingClientRect().width > 400;
+    out.semRolagemInterna = el.scrollHeight <= el.clientHeight + 4;
+
+    /* Enter não quebra linha: o valor é uma descrição só (vários vão com " + ") */
+    const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    el.dispatchEvent(ev);
+    out.enterNaoQuebra = ev.defaultPrevented;
+
+    /* a sugestão da CBHPM continua funcionando no campo alto */
+    el.value = 'coleci';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(r2 => setTimeout(r2, 260));
+    out.sugereCBHPM = !!(el._cbhpmBox && el._cbhpmBox.querySelectorAll('.cbhpm-item').length);
+
+    /* e o valor continua sendo coletado como texto simples */
+    el.value = 'Colecistectomia';
+    out.coletaNormal = utils.formData('form-pre').cirurgia === 'Colecistectomia';
+    return out;
+  });
+  assert(r.ehCampoAlto, 'o campo precisa comportar mais de uma linha');
+  assert(r.ocupaALinha, 'e ocupar a largura da linha, não o tamanho padrão de um input');
+  assert(r.cresceuComOTexto, 'com texto longo, o campo cresce em vez de esconder o começo');
+  assert(r.semRolagemInterna, 'nada de rolar dentro do campo para ler o que foi escrito');
+  assert(r.enterNaoQuebra, 'Enter não pode quebrar linha num campo que é uma descrição só');
+  assert(r.sugereCBHPM, 'a sugestão da CBHPM continua valendo no campo alto');
+  assert(r.coletaNormal, 'o valor continua sendo gravado como texto simples');
+  await page.close();
+});
+
+/* 120) Uma linha de campos DENTRO de outra linha entrava como item qualquer e
+   ocupava 1 das 12 colunas: os campos espremiam e os rótulos se atropelavam.
+   Apareceu na via aérea do card 3, mas valia para qualquer grade aninhada. */
+await test('Ficha: a linha da via aérea ocupa a largura toda e os campos não se espremem', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('anestesia');
+    document.querySelectorAll('#module-anestesia .card').forEach(c => c.classList.remove('collapsed'));
+    const f = document.getElementById('form-anestesia');
+    const va = f.querySelector('[name="via_aerea_uso"]');
+    const linha = va.closest('.grid');
+    const pai = linha.parentElement;
+
+    out.estaAninhada = pai.classList.contains('grid');
+    out.linhaOcupaTudo = Math.round(linha.getBoundingClientRect().width)
+      >= Math.round(pai.getBoundingClientRect().width) - 2;
+
+    /* a linha fecha em 12 colunas: nada é empurrado para fora */
+    const cols = Array.from(linha.children)
+      .map(el => (String(el.className).match(/col-(\d+)/) || [0, 0])[1])
+      .reduce((s, n) => s + Number(n), 0);
+    out.fechaEm12 = cols === 12;
+
+    /* e o campo tem largura de campo, não de coluninha */
+    out.campoUsavel = va.getBoundingClientRect().width > 150;
+
+    /* detalhes e horário foram para a linha de baixo, também completa */
+    const det = f.querySelector('[name="via_aerea_detalhe"]');
+    out.detalheEmOutraLinha = det.closest('.grid') !== linha;
+    out.detalheLargo = det.getBoundingClientRect().width > 300;
+    return out;
+  });
+  assert(r.estaAninhada, 'a linha da via aérea é uma grade dentro de outra — é esse o caso que quebrava');
+  assert(r.linhaOcupaTudo, 'grade aninhada precisa ocupar a largura inteira, não uma coluna');
+  assert(r.fechaEm12, 'a linha tem que fechar em 12 colunas — passar disso espreme tudo');
+  assert(r.campoUsavel, 'o campo precisa ter largura de campo');
+  assert(r.detalheEmOutraLinha && r.detalheLargo, 'detalhes e horário ficam na linha de baixo, com espaço');
+  await page.close();
+});
+
+/* 121) Bloqueio de plano (TAP, PEC, ESP, serrátil, QL) deposita entre fáscias,
+   não ao redor do nervo: chamar de perineural descreveria errado o ato. */
+await test('Bloqueio: via Interfascial existe e sobrevive ao espelho na tabela de medicações', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('anestesia');
+    const chk = document.querySelector('[name="bloqueio_realizado"]');
+    chk.checked = true;
+    anestesia.bloqueio.alternar(chk);
+    anestesia.bloqueio.addMed({ nome: 'Ropivacaína 0,25%', dose: '200', unidade: 'mg', via: 'Interfascial' });
+
+    const sel = document.querySelector('#bloq-meds-body [name="bloq_med_via[]"]');
+    const vias = Array.from(sel.options).map(o => o.value);
+    out.temOpcao = vias.indexOf('Interfascial') >= 0;
+    out.ficouSelecionada = sel.value === 'Interfascial';
+    /* ordem clínica: fica junto de perineural, antes de caudal */
+    out.ordemUtil = vias.indexOf('Interfascial') === vias.indexOf('Perineural') + 1;
+
+    /* a medicação do bloqueio é espelhada na seção 6: via que não existe na
+       lista de lá não cola no campo, e a linha aparecia sem via nenhuma */
+    const ids = anestesia.graficoUI._ctxIds();
+    const espelho = Array.from(document.querySelectorAll('#' + ids.medsBody + ' tr'))
+      .find(tr => (tr.querySelector('[name="med_nome[]"]') || {}).value === 'Ropivacaína 0,25%');
+    out.espelhouComVia = !!espelho && (espelho.querySelector('[name="med_via[]"]') || {}).value === 'Interfascial';
+    /* perineural tinha o mesmo problema e também precisa existir lá */
+    out.perineuralTambem = VIAS.indexOf('Perineural') >= 0;
+    return out;
+  });
+  assert(r.temOpcao, 'a via interfascial precisa existir no bloqueio');
+  assert(r.ficouSelecionada, 'e ser aceita quando escolhida');
+  assert(r.ordemUtil, 'fica ao lado de perineural, que é a via mais próxima');
+  assert(r.espelhouComVia, 'a via tem que sobreviver ao espelho na tabela de medicações');
+  assert(r.perineuralTambem, 'perineural também precisa existir lá — se perdia do mesmo jeito');
+  await page.close();
+});
+
+/* 122) Acessos e dispositivos (card 5): marcar o acesso É registrar o
+   procedimento — o evento entra sozinho e o cateter escolhido vira a descrição. */
+await test('Ficha: acesso marcado no card 5 vira evento na linha do tempo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('anestesia');
+    const f = document.getElementById('form-anestesia');
+    document.getElementById('eventos-body').innerHTML = '';
+    const marcar = (valor, on) => {
+      const el = Array.from(f.querySelectorAll('[name="dispositivos[]"]')).find(c => c.value === valor);
+      el.checked = on !== false;
+      anestesia.disp.alternar(el);
+      return el;
+    };
+    const descDe = tipo => {
+      const tr = Array.from(document.querySelectorAll('#eventos-body tr'))
+        .find(x => (x.querySelector('[name="evt_tipo[]"]') || {}).value === tipo);
+      return tr ? (tr.querySelector('[name="evt_obs[]"]') || {}).value : null;
+    };
+    const quantos = tipo => Array.from(document.querySelectorAll('#eventos-body [name="evt_tipo[]"]'))
+      .filter(el => el.value === tipo).length;
+
+    /* AVP: o evento nasce ao marcar, antes mesmo de detalhar */
+    marcar('Acesso venoso periférico');
+    out.criouVenoclise = descDe('Venoclise') !== null;
+
+    /* e o que se escolhe depois desce sozinho para a descrição */
+    document.querySelector('[data-campo="tipo"][data-disp="Acesso venoso periférico"]').value = 'Cateter sobre agulha (Jelco)';
+    document.querySelector('[data-campo="calibre"][data-disp="Acesso venoso periférico"]').value = '20G';
+    document.querySelector('[data-campo="local"][data-disp="Acesso venoso periférico"]').value = 'fossa antecubital E';
+    anestesia.disp.montarDet('Acesso venoso periférico');
+    out.detalheDesceu = /Cateter sobre agulha \(Jelco\) 20G em fossa antecubital E/.test(descDe('Venoclise'));
+
+    /* os demais acessos e sondas seguem o mesmo caminho */
+    marcar('Acesso arterial');
+    marcar('Acesso venoso central');
+    marcar('Sonda vesical');
+    marcar('Sonda gástrica');
+    out.arterial = descDe('Punção arterial') !== null;
+    out.central = descDe('Acesso venoso central') !== null;
+    out.vesical = descDe('Sondagem vesical (Foley)') !== null;
+    out.gastrica = descDe('Sondagem orogástrica') !== null;
+
+    /* detalhe em texto livre da sonda também entra na descrição */
+    const detSonda = Array.from(f.querySelectorAll('[name="disp_det[]"]')).find(x => x.getAttribute('data-disp') === 'Sonda gástrica');
+    detSonda.value = 'sonda 16Fr, narina D';
+    anestesia.eventos.atualizarDescricoes();
+    out.sondaDetalhada = /sonda 16Fr, narina D/.test(descDe('Sondagem orogástrica'));
+
+    /* dreno não é procedimento com evento próprio: nada é inventado */
+    marcar('Dreno torácico');
+    out.drenoNaoInventa = quantos('Venoclise') === 1 &&
+      !Array.from(document.querySelectorAll('#eventos-body [name="evt_tipo[]"]')).some(el => /dreno/i.test(el.value));
+
+    /* desmarcar e marcar de novo não duplica */
+    marcar('Acesso arterial', false);
+    marcar('Acesso arterial');
+    out.naoDuplica = quantos('Punção arterial') === 1;
+
+    /* trocar Foley por alívio é o mesmo procedimento: remarcar não repete */
+    const trVes = Array.from(document.querySelectorAll('#eventos-body tr'))
+      .find(x => (x.querySelector('[name="evt_tipo[]"]') || {}).value === 'Sondagem vesical (Foley)');
+    trVes.querySelector('[name="evt_tipo[]"]').value = 'Sondagem vesical de alívio';
+    marcar('Sonda vesical', false);
+    marcar('Sonda vesical');
+    out.varianteNaoDuplica = quantos('Sondagem vesical de alívio') + quantos('Sondagem vesical (Foley)') === 1;
+
+    /* desmarcar tira o evento que o sistema escreveu... */
+    marcar('Acesso venoso central', false);
+    out.desmarcarLimpa = descDe('Acesso venoso central') === null;
+
+    /* ...mas nunca o que o anestesista escreveu à mão */
+    const trVeno = Array.from(document.querySelectorAll('#eventos-body tr'))
+      .find(x => (x.querySelector('[name="evt_tipo[]"]') || {}).value === 'Venoclise');
+    const obsVeno = trVeno.querySelector('[name="evt_obs[]"]');
+    obsVeno.value = 'Punção difícil, 2 tentativas.';
+    anestesia.eventos._marcarManual(obsVeno);
+    marcar('Acesso venoso periférico', false);
+    out.preservaOManual = descDe('Venoclise') === 'Punção difícil, 2 tentativas.';
+
+    /* reabrir a ficha não pode duplicar o que já está gravado */
+    const gravado = anestesia.eventos.coletar();
+    anestesia.eventos.restaurar(gravado);
+    const el = Array.from(f.querySelectorAll('[name="dispositivos[]"]')).find(c => c.value === 'Acesso arterial');
+    anestesia.disp.alternar(el, { restaurando: true });
+    out.reabrirNaoDuplica = quantos('Punção arterial') === 1;
+    return out;
+  });
+  assert(r.criouVenoclise, 'marcar o acesso venoso já registra a venoclise na linha do tempo');
+  assert(r.detalheDesceu, 'o cateter escolhido no card escreve a descrição do evento');
+  assert(r.arterial && r.central, 'acesso arterial e central também registram o procedimento');
+  assert(r.vesical && r.gastrica, 'sondas vesical e gástrica idem');
+  assert(r.sondaDetalhada, 'o detalhe da sonda entra na descrição do evento');
+  assert(r.drenoNaoInventa, 'dreno não é procedimento com evento próprio — nada inventado');
+  assert(r.naoDuplica, 'remarcar o mesmo acesso não pode duplicar o evento');
+  assert(r.varianteNaoDuplica, 'Foley e alívio são o mesmo registro — não duplicam');
+  assert(r.desmarcarLimpa, 'desmarcar retira o evento que o sistema tinha escrito');
+  assert(r.preservaOManual, 'o que foi escrito à mão fica, mesmo desmarcando');
+  assert(r.reabrirNaoDuplica, 'reabrir a ficha não pode multiplicar os eventos gravados');
+  await page.close();
+});
+
+/* 123) CBHPM 2022 completa: fonte única de código e descrição. Busca por
+   descrição, por código formatado e por código só numérico; classificação
+   (porte, AN, código anestésico próprio) disponível para o financeiro. */
+await test('CBHPM 2022: tabela completa, busca por número e classificação anestésica', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    out.versao = CBHPM_VERSAO;
+    out.tamanho = CBHPM_2022.length;
+    out.capitulos = ['1.', '2.', '3.', '4.'].filter(p => CBHPM_2022.some(c => c[0].startsWith(p))).length;
+
+    /* teste 1 do pacote: "colecist" só sugere CBHPM */
+    const colecist = cbhpm.buscar('colecist', 10);
+    out.colecist = colecist.length > 0 && colecist.every(i => !!cbhpm.achar(i.codigo));
+
+    /* teste 2: o código numérico acha a consulta */
+    out.porNumero = (cbhpm.buscar('10101012')[0] || {}).codigo === '1.01.01.01-2' &&
+      (cbhpm.achar('10101012') || [])[1] === 'Consulta em horário normal ou preestabelecido';
+    out.porCodigo = (cbhpm.buscar('1.01.01.01-2')[0] || {}).codigo === '1.01.01.01-2';
+
+    /* sem acento e sem caixa */
+    out.semAcento = cbhpm.buscar('cesarea').some(i => /Cesariana|cesárea/i.test(i.descricao));
+    out.semCaixa = cbhpm.buscar('COLECIST').length === cbhpm.buscar('colecist').length;
+
+    /* relevância: quem começa pelo que foi digitado vem antes */
+    out.relevancia = /^Colecist/i.test((cbhpm.buscar('colecist')[0] || {}).descricao || '');
+
+    /* teste 9 e 10: endoscopia diagnóstica × intervencionista */
+    const colono = cbhpm.anestesiaDe('4.02.01.08-2');
+    const polip = cbhpm.anestesiaDe('4.02.02.54-2');
+    out.colono = colono.codigo === '3.16.02.23-1' && colono.porte_anest === 2 && colono.porte_ref === '3C';
+    out.polip = polip.codigo === '3.16.02.24-0' && polip.porte_anest === 3 && polip.porte_ref === '4C';
+
+    /* AN ↔ porte de referência (classificação, não preço) */
+    out.anPorte = cbhpm.porteDoAN(0) === '' && cbhpm.porteDoAN(1) === '3A' && cbhpm.porteDoAN(2) === '3C' &&
+      cbhpm.porteDoAN(3) === '4C' && cbhpm.porteDoAN(4) === '6B' && cbhpm.porteDoAN(5) === '7C' &&
+      cbhpm.porteDoAN(6) === '9B' && cbhpm.porteDoAN(7) === '10C' && cbhpm.porteDoAN(8) === '12A';
+
+    /* classificação completa disponível */
+    const i = cbhpm.info('4.02.01.08-2');
+    out.info = i.codigo_numerico === '40201082' && !!i.capitulo && !!i.grupo && !!i.subgrupo &&
+      i.porte === '6A' && i.pagina > 0 && i.versao === CBHPM_VERSAO;
+
+    /* teste 15: código da tabela anterior que saiu da 2022 continua sendo
+       resolvido (registro antigo não perde a descrição), mas não é sugerido */
+    out.legadoResolve = (cbhpm.achar('3.06.02.02-5') || [])[1] === 'Coleta de fluxo papilar de mama';
+    out.legadoNaoSugere = !cbhpm.buscar('coleta de fluxo papilar').some(x => x.codigo === '3.06.02.02-5');
+
+    /* nunca sugerir grupo/observação: só entram registros selecionáveis */
+    out.soProcedimento = !cbhpm.buscar('consulta', 40).some(x => /^[A-ZÇÃÕÁÉÍÓÚ\s\/,-]+$/.test(x.descricao));
+    return out;
+  });
+  assert(r.versao === 'CBHPM 2022 — agosto/2023', 'a versão da tabela precisa ficar registrada');
+  assert(r.tamanho === 4882, 'a tabela deveria trazer os 4.882 procedimentos selecionáveis, veio ' + r.tamanho);
+  assert(r.capitulos === 4, 'os quatro capítulos precisam estar na tabela');
+  assert(r.colecist, 'digitar "colecist" tem que sugerir só procedimento da CBHPM');
+  assert(r.porNumero, 'o código numérico (10101012) tem que achar a consulta');
+  assert(r.porCodigo, 'e o código formatado também');
+  assert(r.semAcento && r.semCaixa, 'a busca não pode depender de acento nem de maiúscula');
+  assert(r.relevancia, 'quem começa pelo que foi digitado vem primeiro');
+  assert(r.colono, 'colonoscopia diagnóstica → 3.16.02.23-1, AN 2');
+  assert(r.polip, 'polipectomia de cólon → 3.16.02.24-0, AN 3');
+  assert(r.anPorte, 'a relação AN ↔ porte de referência precisa estar completa');
+  assert(r.info, 'classificação (capítulo, grupo, porte, página) precisa vir junto');
+  assert(r.legadoResolve, 'código da tabela anterior continua sendo resolvido');
+  assert(r.legadoNaoSugere, 'mas não pode ser sugerido — não está na tabela vigente');
+  assert(r.soProcedimento, 'grupo e observação nunca podem virar sugestão');
+  await page.close();
+});
+
+/* 124) Consulta gera Financeiro: a consulta em si + cada procedimento
+   realizado, cada um com o seu código, fração e rastreabilidade. Editar
+   atualiza as mesmas linhas; retirar um procedimento não deixa linha órfã. */
+await test('Consulta → Financeiro: 1 linha da consulta + 1 por procedimento, sem duplicar', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('financeiro', []); store.setList('consulta', []); store.setList('pre', []);
+    ui.navegar('consulta');
+    const f = document.getElementById('form-consulta');
+    f.querySelector('[name="nome"]').value = 'Paciente da Consulta';
+    f.querySelector('[name="data"]').value = utils.hojeISO();
+
+    /* dois procedimentos além da consulta */
+    consulta.procs.add({ codigo: '4.02.01.08-2' });   /* colonoscopia */
+    consulta.procs.add({ codigo: '3.01.01.01-8' });   /* abrasão cirúrgica */
+    document.querySelectorAll('#consulta-procs-body tr')
+      .forEach(tr => consulta.procs._onCodigo(tr.querySelector('[name="cproc_cod[]"]')));
+    out.descricoesVieram = Array.from(document.querySelectorAll('#consulta-procs-body [name="cproc_desc[]"]'))
+      .every(el => el.value.length > 3);
+    /* valor-base veio da tabela de preços configurada, não de lugar nenhum */
+    out.baseDaTabela = Array.from(document.querySelectorAll('#consulta-procs-body [name="cproc_base[]"]'))
+      .every(el => Number(el.value) > 0);
+
+    consulta.salvar();
+    out.semFinanceiroAoSalvar = store.list('financeiro').length === 0;   /* só na finalização */
+
+    const doc = store.last('consulta');
+    fin.fromDoc('consulta', doc);
+    const linhas = store.list('financeiro');
+    out.tresLinhas = linhas.length === 3;
+    out.umaDeConsulta = linhas.filter(x => x.tipo_honorario === 'consulta').length === 1;
+    out.codigoDaConsulta = (linhas.find(x => x.tipo_honorario === 'consulta') || {}).cbhpm_codigo === '1.01.01.01-2';
+    out.doisProcedimentos = linhas.filter(x => x.tipo_honorario === 'procedimento').length === 2;
+    /* rastreabilidade exigida: de onde veio, qual linha, qual código, com que regra */
+    out.rastreio = linhas.every(x => x._origemTipo === 'consulta' && x._origemId === doc._id &&
+      x._origemLinhaId !== undefined && x.cbhpm_versao === CBHPM_VERSAO &&
+      x.quantidade >= 1 && x.fracao != null && x.tipo_honorario);
+    /* valor não é inventado: sai de base × qtd × fração */
+    const proc = linhas.find(x => x.cbhpm_codigo === '4.02.01.08-2');
+    out.valorCalculado = Math.abs(proc.valor_final - proc.valor_base * proc.quantidade * (proc.fracao / 100)) < 0.01;
+
+    /* idempotência: gerar de novo atualiza as MESMAS linhas */
+    const res2 = fin.fromDoc('consulta', doc);
+    out.naoDuplicou = store.list('financeiro').length === 3 && res2.criadas === 0 && res2.atualizadas === 3;
+
+    /* retirar um procedimento não pode deixar cobrança fantasma */
+    const doc2 = Object.assign({}, doc, { _procsRealizados: doc._procsRealizados.slice(0, 1) });
+    store.save('consulta', doc2);
+    fin.fromDoc('consulta', doc2);
+    out.duasAposRetirar = store.list('financeiro').length === 2;
+
+    /* ...mas linha já paga não some: fica cancelada, com o motivo */
+    const paga = store.list('financeiro').find(x => x._origemLinhaId === 'cproc-0');
+    store.save('financeiro', Object.assign({}, paga, { pago: true }));
+    fin.fromDoc('consulta', Object.assign({}, doc2, { _procsRealizados: [] }));
+    const restante = store.list('financeiro').find(x => x._origemLinhaId === 'cproc-0');
+    out.pagaViraCancelada = !!restante && restante.status === 'cancelado' && /retirado/i.test(restante.observacoes || '');
+
+    /* pré-anestésica gera a linha de consulta, e só uma */
+    store.setList('financeiro', []);
+    const pre1 = store.save('pre', { nome: 'Paciente da Pré', data: utils.hojeISO(), cirurgia: 'Colecistectomia sem colangiografia' });
+    fin.fromDoc('pre', pre1);
+    const fp = store.list('financeiro');
+    out.preGeraConsulta = fp.length === 1 && fp[0].cbhpm_codigo === '1.01.01.01-2' && fp[0].tipo_honorario === 'consulta';
+    out.prePrecoDaTabela = fp[0].valor_base > 0;
+    fin.fromDoc('pre', pre1);
+    out.preNaoDuplica = store.list('financeiro').length === 1;
+
+    /* o documento impresso diz o que foi feito (código e descrição), sem preço */
+    ui.navegar('consulta');
+    consulta.procs.limpar();
+    const tri = consulta.procs.add({ codigo: '3.10.05.12-8', quantidade: 2 });
+    consulta.procs._onCodigo(tri.querySelector('[name="cproc_cod[]"]'));
+    const html = printPreview._buildConsulta();
+    out.impressaoLista = html.indexOf('Procedimentos realizados nesta consulta') >= 0 &&
+      html.indexOf('3.10.05.12-8') >= 0 && html.indexOf('×2') >= 0;
+    const baseImp = (consulta.procs.coletar()[0] || {}).valor_base;
+    out.impressaoSemValor = !!baseImp && html.indexOf(String(Math.floor(baseImp))) < 0;
+    consulta.procs.limpar();
+
+    store.setList('financeiro', []); store.setList('consulta', []); store.setList('pre', []);
+    return out;
+  });
+  assert(r.descricoesVieram, 'o código digitado tem que trazer a descrição da CBHPM');
+  assert(r.baseDaTabela, 'o valor-base tem que vir da tabela de preços configurada');
+  assert(r.semFinanceiroAoSalvar, 'salvar sem finalizar não gera financeiro');
+  assert(r.tresLinhas, 'consulta + 2 procedimentos = 3 linhas financeiras');
+  assert(r.umaDeConsulta && r.codigoDaConsulta, 'exatamente 1 linha de consulta, no código 1.01.01.01-2');
+  assert(r.doisProcedimentos, 'e 1 linha para cada procedimento realizado');
+  assert(r.rastreio, 'cada linha precisa dizer de onde veio, com que código e com que regra');
+  assert(r.valorCalculado, 'valor final = base × quantidade × fração');
+  assert(r.naoDuplicou, 'editar o mesmo registro atualiza as linhas, nunca duplica');
+  assert(r.duasAposRetirar, 'procedimento retirado leva a sua linha junto');
+  assert(r.pagaViraCancelada, 'linha já paga não é apagada: fica cancelada com o motivo');
+  assert(r.preGeraConsulta, 'a pré-anestésica gera a linha de consulta');
+  assert(r.prePrecoDaTabela, 'com o preço vindo da configuração, não do código');
+  assert(r.preNaoDuplica, 'e salvar de novo não cria uma segunda');
+  assert(r.impressaoLista, 'o documento da consulta precisa listar o que foi feito, com o código');
+  assert(r.impressaoSemValor, 'valor e fração são conta interna — não vão para o documento do paciente');
+  await page.close();
+});
+
+/* 125) Frações em múltiplos procedimentos: a regra sugere, o usuário decide.
+   E o código oficial fica guardado junto do texto, em todo campo CBHPM. */
+await test('CBHPM: fração sugerida e editável, AN 0 sem honorário e código guardado como chave', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('consulta');
+    const f = document.getElementById('form-consulta');
+    consulta.procs.limpar();
+    consulta.procs.add({ codigo: '3.10.05.12-8' });   /* colecistectomia — porte maior */
+    consulta.procs.add({ codigo: '3.01.01.01-8' });   /* abrasão — porte menor */
+    const linhas = () => Array.from(document.querySelectorAll('#consulta-procs-body tr'));
+    linhas().forEach(tr => consulta.procs._onCodigo(tr.querySelector('[name="cproc_cod[]"]')));
+    consulta.procs.sugerirFracoes();
+    const fr = () => linhas().map(tr => Number(tr.querySelector('[name="cproc_fracao[]"]').value));
+    out.principal100 = fr()[0] === 100;
+    out.mesmaVia50 = fr()[1] === 50;
+    /* via diferente sugere 70% */
+    const via = linhas()[1].querySelector('[name="cproc_via[]"]');
+    via.value = 'diferente';
+    consulta.procs.sugerirFracoes();
+    out.viaDiferente70 = fr()[1] === 70;
+    /* e o ajuste manual manda: contrato de convênio pode ter regra própria */
+    const frEl = linhas()[1].querySelector('[name="cproc_fracao[]"]');
+    frEl.value = '85';
+    consulta.procs.recalcular();
+    const calc = Number(linhas()[1].querySelector('[name="cproc_valor[]"]').value);
+    const base = Number(linhas()[1].querySelector('[name="cproc_base[]"]').value);
+    out.manualVale = Math.abs(calc - base * 0.85) < 0.01;
+
+    /* AN 0 = anestesia local: não se inventa honorário anestésico */
+    const an0 = CBHPM_2022.find(c => c[3] === 0 && c[0].startsWith('3.'));
+    out.an0SemValor = precos.base(an0[0], 'anestesia').valor === null &&
+      precos.base(an0[0], 'anestesia').origem === 'an0';
+    /* AN 5 usa a tabela configurada — nada de valor fixo no código */
+    const an5 = CBHPM_2022.find(c => c[3] === 5);
+    const p5 = precos.base(an5[0], 'anestesia');
+    out.an5DaTabela = p5.valor > 0 && p5.origem === 'porte_anest' && !!p5.tabela;
+    /* preço específico por código tem precedência sobre o porte */
+    precos.definirPorCodigo(an5[0], 123.45);
+    const p5b = precos.base(an5[0], 'anestesia');
+    out.codigoTemPrecedencia = p5b.valor === 123.45 && p5b.origem === 'codigo';
+    precos.definirPorCodigo(an5[0], '');
+
+    /* o código escolhido fica guardado junto do texto (chave da guia) */
+    ui.navegar('pre');
+    const cir = document.querySelector('#form-pre [name="cirurgia"]');
+    cbhpm.aplicarTodos(document.getElementById('form-pre'));
+    const hidden = document.querySelector('#form-pre [name="cirurgia_cbhpm"]');
+    out.temCampoCodigo = !!hidden;
+    cir.value = 'coleciste';
+    cbhpm._abrir(cir);
+    const item = document.querySelector('#form-pre .cbhpm-box .cbhpm-item');
+    if (item) cbhpm._escolher(item);
+    out.escolheuNoTextarea = cir.value.length > 5;               /* textarea aceita a escolha */
+    out.guardouCodigo = !!hidden && /^\d\.\d\d\./.test(hidden.value);
+    /* trocar o texto à mão derruba o código: nada de código oficial em silêncio */
+    cir.value = 'outra coisa qualquer';
+    cbhpm._conferirCodigo(cir);
+    out.textoTrocadoDerrubaCodigo = hidden.value === '';
+
+    /* código inventado não é aceito em silêncio: fica marcado no campo */
+    ui.navegar('consulta');
+    consulta.procs.limpar();
+    const linha = consulta.procs.add({});
+    const codEl = linha.querySelector('[name="cproc_cod[]"]');
+    codEl.value = '9.99.99.99-9'; cbhpm._conferirExiste(codEl);
+    const marcou = codEl.classList.contains('cbhpm-cod-invalido');
+    codEl.value = '1.01.01.01-2'; cbhpm._conferirExiste(codEl);
+    out.codigoInventadoMarcado = marcou && !codEl.classList.contains('cbhpm-cod-invalido');
+    consulta.procs.limpar();
+    return out;
+  });
+  assert(r.principal100, 'o de maior valor entra a 100%');
+  assert(r.mesmaVia50, 'os demais, na mesma via, a 50%');
+  assert(r.viaDiferente70, 'via de acesso diferente sugere 70%');
+  assert(r.manualVale, 'a fração ajustada à mão é a que vale');
+  assert(r.an0SemValor, 'AN 0 não gera honorário anestésico automático');
+  assert(r.an5DaTabela, 'AN 5 usa a tabela de preços configurada, sem valor fixo no código');
+  assert(r.codigoTemPrecedencia, 'preço específico do código tem precedência sobre o porte');
+  assert(r.temCampoCodigo, 'todo campo CBHPM guarda o código escolhido');
+  assert(r.escolheuNoTextarea, 'escolher a sugestão precisa funcionar no campo alto da cirurgia proposta');
+  assert(r.guardouCodigo, 'e o código oficial fica guardado como chave');
+  assert(r.textoTrocadoDerrubaCodigo, 'trocar a descrição à mão não pode manter o código antigo pendurado');
+  assert(r.codigoInventadoMarcado, 'código que não existe na tabela precisa ficar marcado antes de virar guia');
+  await page.close();
+});
+
+/* 126) Orçamento: só CBHPM, com porte à vista, fração por linha e preço da
+   configuração do sistema — o seed da CBHPM não redefine preço nenhum. */
+await test('Orçamento: fração por linha editável e preço vindo da tabela configurada', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('orcamento');
+    orcamento.init();
+    document.getElementById('orcamento-body').innerHTML = '';
+    orcamento.addProc({ codigo: '3.10.05.12-8' });   /* colecistectomia — AN maior */
+    orcamento.addProc({ codigo: '3.01.01.01-8' });   /* abrasão — AN menor */
+    const linhas = () => Array.from(document.querySelectorAll('#orcamento-body tr'));
+    linhas().forEach(tr => orcamento._onCodigo(tr.querySelector('[name="orc_cod[]"]')));
+    orcamento.recalcular();
+    const val = n => linhas().map(tr => (tr.querySelector('[name="' + n + '[]"]') || {}).value);
+    out.descricaoVeio = val('orc_desc').every(v => v.length > 3);
+    out.porteAparece = val('orc_pcir').every(v => v) && val('orc_panest').every(v => v !== '');
+    out.fracaoPadrao = val('orc_frac').join('/') === '100/50';
+    out.refCalculado = val('orc_ref').every(v => /R\$/.test(v));
+
+    /* via diferente → 70% */
+    const vias = document.querySelectorAll('#orcamento-body [name="orc_via[]"]');
+    vias[1].value = 'diferente'; orcamento._onVia(vias[1]);
+    out.viaDiferente = val('orc_frac')[1] === '70';
+
+    /* e a fração ajustada à mão manda no valor de referência */
+    const f2 = document.querySelectorAll('#orcamento-body [name="orc_frac[]"]')[1];
+    const antes = parseFloat(val('orc_ref')[1].replace(/[^\d,]/g, '').replace(',', '.'));
+    f2.value = '85'; f2.dispatchEvent(new Event('input', { bubbles: true }));
+    const depois = parseFloat(val('orc_ref')[1].replace(/[^\d,]/g, '').replace(',', '.'));
+    out.manualManda = depois > antes && /85%/.test(val('orc_ref')[1]);
+    out.fracaoSalva = orcamento.coletar().procedimentos[1].fracao === '85';
+
+    /* preço próprio do código tem precedência — e some quando removido */
+    const antesPreco = precos.base('3.10.05.12-8', 'medico');
+    precos.definirPorCodigo('3.10.05.12-8', 999.99);
+    const comPreco = precos.base('3.10.05.12-8', 'medico');
+    precos.definirPorCodigo('3.10.05.12-8', '');
+    const semPreco = precos.base('3.10.05.12-8', 'medico');
+    out.precedencia = comPreco.valor === 999.99 && comPreco.origem === 'codigo' &&
+      semPreco.origem === antesPreco.origem && semPreco.valor === antesPreco.valor;
+    /* o valor nunca sai da CBHPM: sai da tabela configurada */
+    out.valorDaConfiguracao = antesPreco.origem === 'porte_cir' && !!antesPreco.tabela;
+    return out;
+  });
+  assert(r.descricaoVeio, 'o código escolhido traz a descrição oficial');
+  assert(r.porteAparece, 'porte médico e anestésico ficam à vista no orçamento');
+  assert(r.fracaoPadrao, 'principal 100% e o seguinte 50% na mesma via');
+  assert(r.refCalculado, 'o valor de referência sai da tabela configurada');
+  assert(r.viaDiferente, 'via de acesso diferente sugere 70%');
+  assert(r.manualManda, 'a fração ajustada à mão é a que vale no cálculo');
+  assert(r.fracaoSalva, 'e é gravada junto do orçamento');
+  assert(r.precedencia, 'preço próprio do código vence o porte, e removê-lo devolve o valor por porte');
+  assert(r.valorDaConfiguracao, 'o preço vem da configuração do sistema, nunca da CBHPM');
   await page.close();
 });
 
