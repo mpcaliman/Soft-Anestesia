@@ -18,6 +18,8 @@ No painel do Supabase → **SQL Editor**, rode nesta ordem:
 1. `migrations/0001_foundation.sql` — tabelas, funções, triggers, RLS.
 2. `migrations/0002_storage_realtime.sql` — bucket privado de anexos + Realtime.
 3. **Seed inicial** (abaixo) — cria sua organização e te vincula como `gestor`.
+4. `migrations/0003` … `0013` — na ordem do número.
+5. `seeds/cbhpm_2022.sql` — carrega os códigos da CBHPM 2022 (depois da 0013).
 
 Pode rodar de novo com segurança (idempotente).
 
@@ -348,6 +350,22 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   `updated_by`/`updated_at` para auditoria. No app, `clinicaSync` junta por
   chave pelo `updated_at` mais recente, sobe o que muda e baixa ao entrar e a
   cada 10 minutos.
+
+- **CBHPM 2022 (`0013_cbhpm_2022.sql` + `seeds/cbhpm_2022.sql`):** ✅ a tabela
+  oficial de procedimentos, com os 5.219 códigos do documento (4.882
+  selecionáveis, 255 grupos, 74 observações). O aplicativo já traz a mesma
+  lista embutida, porque no centro cirúrgico ele precisa funcionar sem rede;
+  esta tabela é para o que o navegador não faz — conferência em massa,
+  relatório por capítulo/grupo, cruzamento de glosa por código. É
+  **referência, não preço**: `porte_medico`, `porte_anestesico` e o UCO são
+  classificação da CBHPM, e a precificação continua na configuração do
+  sistema. Leitura liberada a qualquer autenticado; escrita, nenhuma (quem
+  troca a versão da CBHPM é a migração). A mesma migração cria os índices de
+  `finance_entries` por origem (`_origemTipo`, `_origemId`, `_origemLinhaId`)
+  e por `cbhpm_codigo` — são eles que respondem barato "que linhas vieram
+  deste atendimento?", pergunta da conciliação e do controle de linha órfã.
+  Para carregar: rode a migração e depois `seeds/cbhpm_2022.sql` (um
+  `insert … on conflict do update`, reexecutável).
 
 ## Rollback
 
