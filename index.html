@@ -4290,7 +4290,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-14c</b><br>
+    v7.1 · build <b id="build-tag">2026-08-14d</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -32537,7 +32537,9 @@ const linker = {
     Object.entries(mapa).forEach(([chaveDados, nomeCampo]) => {
       const valor = dados[chaveDados];
       if (valor == null || valor === '') return;
-      const el = form.querySelector(`[name="${nomeCampo}"]`);
+      const candidatos = Array.isArray(nomeCampo) ? nomeCampo : [nomeCampo];
+      let el = null;
+      for (const n of candidatos) { el = form.querySelector('[name="' + n + '"]'); if (el) break; }
       if (!el) return;
       if (el.value && el.value.trim() !== '') return;   /* não sobrescreve */
       if (linker._setCampo(el, valor)) preenchidos++;
@@ -32551,7 +32553,9 @@ const linker = {
         try { anestesia.calc.idade(); } catch (e) {}
       }
       if (modAtual === 'pre') {
+        try { pre.calcIdade(); } catch (e) {}   /* nascimento chegou: idade sai dele */
         try { pre._calcIMC(); } catch (e) {}
+        try { pre.labs.marcar(); } catch (e) {} /* sexo importado muda as faixas */
       }
     }
   },
@@ -32715,9 +32719,13 @@ const linker = {
         sexo: 'sexo', convenio: 'convenio', cirurgia: 'procedimento', procedimento: 'procedimento'
       };
     }
-    /* pre, consulta, recuperacao, prescricao usam mesmos nomes simples */
+    /* pre, consulta, recuperacao, prescricao usam mesmos nomes simples.
+       O nascimento é o caso que quebrou: a pré chama o campo de `nasc` e este
+       mapa procurava `nascimento` — nunca achava, e a data de nascimento
+       simplesmente não vinha do cadastro. Agora o mapa aceita ALTERNATIVAS,
+       para um apelido diferente num formulário não derrubar o preenchimento. */
     return {
-      nome: 'nome', nascimento: 'nascimento', idade: 'idade',
+      nome: 'nome', nascimento: ['nascimento', 'nasc', 'data_nascimento'], idade: 'idade',
       sexo: 'sexo', peso: 'peso', altura: 'altura',
       cpf: 'cpf', prontuario: 'prontuario',
       convenio: 'convenio', plano: 'plano', matricula: 'matricula',
@@ -33883,8 +33891,19 @@ const modelos = {
     if (targetMod === 'anestesia') nomeAtual = (document.querySelector('#form-anestesia [name="paciente_nome"]') || {}).value || '';
     else nomeAtual = (document.querySelector(`#${formId} [name="nome"]`) || {}).value || '';
 
-    /* Coleta registros de TODOS os módulos relevantes */
+    /* Coleta registros de TODOS os módulos relevantes — e o CADASTRO DE
+       PACIENTES, que ficava de fora justamente do botão chamado "Importar
+       dados de paciente": quem cadastrou o paciente não achava o paciente. */
     const all = [];
+    store.list('pacientes').forEach(item => {
+      if (!item || !item.nome) return;
+      all.push({
+        mod: 'pacientes', item, nome: item.nome,
+        data: item._updatedAt,
+        procedimento: [item.convenio || item.plano,
+          item.nascimento ? 'nasc. ' + utils.formatarData(item.nascimento) : ''].filter(Boolean).join(' · ')
+      });
+    });
     ['pre', 'consulta', 'anestesia', 'recuperacao'].forEach(mod => {
       store.list(mod).forEach(item => {
         const nome = mod === 'anestesia' ? (item.paciente && item.paciente.nome) : item.nome;
@@ -34070,6 +34089,7 @@ const modelos = {
     const setV = (n, v) => modelos._setSeVazio('form-pre', n, v);
     if (srcMod === 'anestesia') {
       setV('nome', src.paciente && src.paciente.nome);
+      setV('nasc', src.paciente && (src.paciente.nasc || src.paciente.nascimento));
       setV('sexo', src.paciente && src.paciente.sexo);
       setV('peso', src.paciente && src.paciente.peso);
       setV('altura', src.paciente && src.paciente.altura);
@@ -34096,7 +34116,22 @@ const modelos = {
       ['nome', 'data', 'idade', 'peso', 'altura'].forEach(k => semId[k] = '');
       utils.fillForm('form-pre', semId);
       ui.mostrarBanner('banner-pre', '✅ Dados importados de avaliação anterior.', 'success');
+    } else if (srcMod === 'pacientes') {
+      /* do cadastro vem a identificação — inclusive o NASCIMENTO, que é o dado
+         que ninguém quer redigitar e que estava faltando */
+      setV('nome', src.nome);
+      setV('nasc', src.nascimento);
+      setV('sexo', src.sexo);
+      setV('peso', src.peso);
+      setV('altura', src.altura);
+      setV('convenio', src.convenio || src.plano);
+      setV('senha', src.senha || src.matricula || src.carteirinha);
+      ui.mostrarBanner('banner-pre', '✅ Dados importados do cadastro do paciente.', 'success');
     }
+    /* nascimento chegou: idade, IMC e faixas de exame saem dele */
+    try { pre.calcIdade(); } catch (e) {}
+    try { pre._calcIMC(); } catch (e) {}
+    try { pre.labs.marcar(); } catch (e) {}
   },
 
   _importarParaConsulta(srcMod, src) {

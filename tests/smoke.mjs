@@ -6954,6 +6954,63 @@ await test('Pré: exame fora da faixa é marcado na tela, mas não imprime nem f
   await page.close();
 });
 
+/* 118) A data de nascimento não vinha do cadastro: o mapa procurava um campo
+   chamado "nascimento" e a pré chama o dele de "nasc". Um apelido diferente
+   derrubava o preenchimento inteiro daquele dado. */
+await test('Pré: nascimento (e o resto da identificação) vêm do cadastro do paciente', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ['pacientes', 'pre', 'anestesia'].forEach(m => store.setList(m, []));
+    store.save('pacientes', {
+      nome: 'Ana Souza', nascimento: '1980-05-10', sexo: 'Feminino',
+      convenio: 'Amil', peso: '70', altura: '165'
+    });
+    ui.navegar('pre');
+    const f = document.getElementById('form-pre');
+    const v = n => (f.querySelector('[name="' + n + '"]') || {}).value || '';
+
+    /* ao sair do campo do nome, a identificação vem sozinha */
+    f.querySelector('[name="nome"]').value = 'Ana Souza';
+    linker.autoPreencherDadosPaciente('Ana Souza', 'pre');
+    out.trouxeNascimento = v('nasc') === '1980-05-10';
+    out.derivouIdade = /^\d+$/.test(v('idade'));
+    out.trouxeResto = v('sexo') === 'Feminino' && v('convenio') === 'Amil' && v('peso') === '70';
+
+    /* não sobrescreve o que já está preenchido */
+    pre.novo();
+    f.querySelector('[name="nome"]').value = 'Ana Souza';
+    f.querySelector('[name="nasc"]').value = '1979-01-02';
+    linker.autoPreencherDadosPaciente('Ana Souza', 'pre');
+    out.respeitaOQueJaEstava = v('nasc') === '1979-01-02';
+
+    /* e pelo botão "Importar dados de paciente", que agora enxerga o cadastro */
+    pre.novo();
+    const pac = store.list('pacientes')[0];
+    modelos.importarRegistro('pre', 'pacientes', pac._id);
+    out.importouDoCadastro = v('nasc') === '1980-05-10' && v('nome') === 'Ana Souza';
+
+    /* a ficha de anestesia guarda o nascimento como paciente.nasc */
+    pre.novo();
+    const fa = store.save('anestesia', {
+      paciente: { nome: 'Bia Lima', nasc: '1990-03-04', sexo: 'Feminino', peso: '60' },
+      procedimento: { descricao: 'Colecistectomia' }
+    });
+    modelos.importarRegistro('pre', 'anestesia', fa._id);
+    out.importouDaFicha = v('nasc') === '1990-03-04';
+
+    ['pacientes', 'pre', 'anestesia'].forEach(m => store.setList(m, []));
+    return out;
+  });
+  assert(r.trouxeNascimento, 'a data de nascimento tem que vir do cadastro do paciente');
+  assert(r.derivouIdade, 'com o nascimento, a idade sai sozinha');
+  assert(r.trouxeResto, 'sexo, convênio e peso continuam vindo junto');
+  assert(r.respeitaOQueJaEstava, 'o preenchimento automático nunca sobrescreve o que já está lá');
+  assert(r.importouDoCadastro, 'o botão "Importar dados de paciente" precisa enxergar o cadastro de pacientes');
+  assert(r.importouDaFicha, 'e o nascimento guardado na ficha de anestesia também serve');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
