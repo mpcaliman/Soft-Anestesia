@@ -6729,6 +6729,14 @@ await test('Ficha: digitar a medicação sugere e o padrão (via, modo, diluiç�
     /* quem começa com o texto vem antes de quem só contém */
     out.ordemUtil = (anestesia.meds._achar('morf')[0] || {}).nome.indexOf('Morfina') === 0;
 
+    /* fármacos usados na rotina precisam estar no catálogo — sugestão e
+       lista de marcação saem da mesma fonte */
+    const acharNo = nome => {
+      const m = anestesia.meds._catalogoPlano().find(x => x.nome === nome);
+      return m ? m.grupo : '';
+    };
+    out.etilefrina = acharNo('Etilefrina') === 'Vasoativos';
+    out.pantoprazol = !!acharNo('Pantoprazol');
     return out;
   });
   assert(r.sugeriu, 'digitar parte do nome tem que sugerir a medicação');
@@ -6739,6 +6747,8 @@ await test('Ficha: digitar a medicação sugere e o padrão (via, modo, diluiç�
   assert(r.naoPisouNoDigitado, 'o padrão nunca sobrescreve o que a pessoa já digitou');
   assert(r.soComDuasLetras, 'uma letra só sugeriria meio catálogo');
   assert(r.ordemUtil, 'quem começa com o que foi digitado vem primeiro');
+  assert(r.etilefrina, 'etilefrina precisa estar entre os vasoativos');
+  assert(r.pantoprazol, 'pantoprazol precisa estar no catálogo');
   await page.close();
 });
 
