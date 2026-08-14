@@ -6802,6 +6802,95 @@ await test('Ficha: diurese entra na grade dos sinais vitais, calcula ritmo e ali
   await page.close();
 });
 
+/* 116) Técnica, via aérea e acessos: escolher uma vez basta. O que foi marcado
+   no card vira o texto do evento, a ventilação certa e a faixa no gráfico. */
+await test('Ficha: técnica define a ventilação, e tubo/cateter escolhidos escrevem o evento', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('anestesia');
+    const f = document.getElementById('form-anestesia');
+    const descDe = tipo => {
+      const tr = Array.from(document.querySelectorAll('#eventos-body tr'))
+        .find(x => (x.querySelector('[name="evt_tipo[]"]') || {}).value === tipo);
+      return tr ? (tr.querySelector('[name="evt_obs[]"]') || {}).value : '';
+    };
+
+    /* técnica geral → ventilação mecânica marcada e período na linha do tempo */
+    const geral = f.querySelector('[name="tipo[]"][value="Anestesia geral"]');
+    geral.checked = true;
+    anestesia.eventos.aoSelecionarTipo(geral);
+    out.ventDaTecnica = (f.querySelector('[name="vent_modo_geral"]:checked') || {}).value === 'mecanica';
+    out.marcouInicioVent = anestesia.eventos.existeEvento('Início da ventilação mecânica');
+
+    /* escolha do anestesista não é revista: já marcado, o app não muda */
+    f.querySelector('[name="vent_modo_geral"][value="espontanea"]').checked = true;
+    const sed = f.querySelector('[name="tipo[]"][value="Sedação"]');
+    sed.checked = true; anestesia.eventos.aoSelecionarTipo(sed);
+    out.naoRevisaEscolha = (f.querySelector('[name="vent_modo_geral"]:checked') || {}).value === 'espontanea';
+
+    /* voltar para espontânea marca o FIM da ventilação mecânica */
+    anestesia.vent.alternar();
+    out.marcouFimVent = anestesia.eventos.existeEvento('Fim da ventilação mecânica');
+
+    /* tubo: tamanho/cuff/Cormack/fixação viram texto e entram no evento */
+    const va = f.querySelector('[name="via_aerea_uso"]');
+    va.value = 'Intubação orotraqueal';
+    anestesia.eventos.aoSelecionarViaAerea(va);
+    f.querySelector('[name="via_aerea_tamanho"]').value = '7,5';
+    f.querySelector('[name="via_aerea_cuff"]').value = 'com cuff';
+    f.querySelector('[name="via_aerea_cormack"]').value = 'I';
+    f.querySelector('[name="via_aerea_fixacao"]').value = '21';
+    anestesia.viaAerea.montarDetalhe();
+    out.montouTubo = f.querySelector('[name="via_aerea_detalhe"]').value === 'TOT 7,5 com cuff · Cormack I · fixado a 21 cm';
+    out.tuboNoEvento = /TOT 7,5 com cuff · Cormack I · fixado a 21 cm/.test(descDe('Intubação'));
+
+    /* escrever à mão manda mais que o padrão */
+    const det = f.querySelector('[name="via_aerea_detalhe"]');
+    det.value = 'TOT 8,0 — Cormack IIa'; det.dataset.manual = '1';
+    anestesia.viaAerea.montarDetalhe();
+    out.respeitaOManual = det.value === 'TOT 8,0 — Cormack IIa';
+
+    /* venoclise: tipo e calibre selecionados escrevem o evento */
+    const acesso = Array.from(document.querySelectorAll('[name="dispositivos[]"]')).find(el => el.value === 'Acesso venoso periférico');
+    acesso.checked = true; anestesia.disp.alternar(acesso);
+    document.querySelector('[data-campo="tipo"][data-disp="Acesso venoso periférico"]').value = 'Cateter sobre agulha (Jelco)';
+    document.querySelector('[data-campo="calibre"][data-disp="Acesso venoso periférico"]').value = '18G';
+    document.querySelector('[data-campo="local"][data-disp="Acesso venoso periférico"]').value = 'dorso da mão D';
+    anestesia.disp.montarDet('Acesso venoso periférico');
+    anestesia.eventos.add({ tipo: 'Venoclise', hora: '08:10', obs: anestesia.eventos.descricaoPara('Venoclise'), auto: true });
+    out.venoclise = /Cateter sobre agulha \(Jelco\) 18G em dorso da mão D/.test(descDe('Venoclise'));
+
+    /* seleções sobrevivem ao salvar/reabrir */
+    const guardado = anestesia.disp.coletarDetalhes();
+    document.querySelector('[data-campo="calibre"][data-disp="Acesso venoso periférico"]').value = '';
+    document.querySelector('[name="disp_det[]"][data-disp="Acesso venoso periférico"]').value = '';
+    anestesia.disp.restaurarDetalhes(guardado);
+    out.voltaDepoisDeReabrir = document.querySelector('[data-campo="calibre"][data-disp="Acesso venoso periférico"]').value === '18G'
+      && /18G/.test(document.querySelector('[name="disp_det[]"][data-disp="Acesso venoso periférico"]').value);
+
+    /* descrições: registro do que foi feito, não manual de conduta */
+    const D = anestesia.eventos.DESCRICOES;
+    const orientacao = /vigiar|avisar a equipe|considerar|se indicado|conforme necessário|suspeitar|crise —/i;
+    out.semOrientacoes = !orientacao.test(D['Pneumotórax'] + ' ' + D['Embolia gasosa (CO₂)'] + ' ' +
+      D['Início do pneumoperitônio'] + ' ' + D['Fim do pneumoperitônio'] + ' ' + D['Enfisema subcutâneo']);
+    out.temDescricaoDeVent = !!D['Início da ventilação mecânica'] && !!D['Fim da ventilação mecânica'];
+    return out;
+  });
+  assert(r.ventDaTecnica, 'anestesia geral implica ventilação mecânica — não deveria ser remarcada à mão');
+  assert(r.marcouInicioVent, 'o início da ventilação mecânica entra na linha do tempo');
+  assert(r.naoRevisaEscolha, 'escolha já feita pelo anestesista não é revista pelo sistema');
+  assert(r.marcouFimVent, 'voltar à espontânea marca o fim da ventilação mecânica');
+  assert(r.montouTubo, 'tamanho, cuff, Cormack e fixação montam o texto do dispositivo');
+  assert(r.tuboNoEvento, 'e esse texto entra na descrição da intubação');
+  assert(r.respeitaOManual, 'o que foi escrito à mão vale mais que o padrão');
+  assert(r.venoclise, 'tipo e calibre do cateter escrevem a descrição da venoclise');
+  assert(r.voltaDepoisDeReabrir, 'as seleções precisam sobreviver ao salvar e reabrir');
+  assert(r.semOrientacoes, 'a descrição do evento é o registro do que foi feito, não orientação ao profissional');
+  assert(r.temDescricaoDeVent, 'os eventos novos de ventilação precisam de descrição técnica');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
