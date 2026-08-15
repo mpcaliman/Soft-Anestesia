@@ -4309,7 +4309,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-15a</b><br>
+    v7.1 · build <b id="build-tag">2026-08-15b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -6385,6 +6385,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <button type="button" class="btn btn-sm" onclick="anestesia.hidra.addPreset('chad')">+ CHAD</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.hidra.addPreset('plasma')">+ Plasma</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.hidra.addPreset('plaquetas')">+ Plaquetas</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.hidra.abrirPediatrica()" title="Calcula a manutenção pela regra de Holliday-Segar com o peso do paciente e lança a linha na tabela">🧒 Manutenção pediátrica</button>
         </div>
 
         <div class="dyn-table-wrap">
@@ -8450,6 +8451,33 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       <div class="card-body">
         <p style="font-size:.78rem;color:var(--text-mute);margin:0 0 10px">Gera um resumo das doses de emerg&ecirc;ncia e via a&eacute;rea j&aacute; calculadas para o peso/idade informados &mdash; pronto para imprimir ou salvar em PDF.</p>
         <button type="button" class="btn btn-primary" onclick="doses.cartao()">&#128424;&#65039; Gerar cart&atilde;o de doses</button>
+      </div>
+    </section>
+
+    <!-- HIDRATAÇÃO DE MANUTENÇÃO — PEDIATRIA (Holliday-Segar) -->
+    <section class="card">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-icon">&#129490;</span><h2>Hidrata&ccedil;&atilde;o de manuten&ccedil;&atilde;o &mdash; pediatria<small>Holliday-Segar: volume, eletr&oacute;litos e glicose do dia</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">&#9662;</span></div>
+      </div>
+      <div class="card-body">
+        <div class="grid" style="gap:10px">
+          <div class="field col-3"><label>Peso (kg)</label>
+            <input type="number" id="ph-peso" min="0.4" max="80" step="0.1" inputmode="decimal" placeholder="ex.: 12" oninput="doses.pedHidra.calcular()">
+          </div>
+          <div class="field col-3"><label>TIG <small style="color:var(--text-mute);font-weight:400">mg/kg/min</small></label>
+            <input type="number" id="ph-tig" min="0" max="20" step="0.5" inputmode="decimal" value="5" oninput="doses.pedHidra.calcular()">
+          </div>
+          <div class="field col-6" style="align-self:end">
+            <p style="font-size:.74rem;color:var(--text-mute);margin:0">Faixa usual da TIG: <strong>4&ndash;8 mg/kg/min</strong>. Na&sup1; 3 mEq e K&spades; 2 mEq a cada 100 kcal.</p>
+          </div>
+        </div>
+        <div id="ph-resultado" style="margin-top:10px"></div>
+        <p style="font-size:.72rem;color:var(--text-mute);margin:10px 0 0">
+          Regra de Holliday-Segar (manuten&ccedil;&atilde;o de 24 h). N&atilde;o cobre reposi&ccedil;&atilde;o de perdas, jejum
+          prolongado, d&eacute;bito de dreno nem d&eacute;ficit pr&eacute;vio &mdash; e n&atilde;o vale para rec&eacute;m-nascido nos
+          primeiros dias. Refer&ecirc;ncia consultiva: confira com o protocolo da unidade.
+        </p>
       </div>
     </section>
 
@@ -31034,6 +31062,65 @@ const anestesia = {
         volEl.title = 'Volume calculado: ' + vel + ' ' + unVel + ' × ' + durMin + ' min';
       }
     },
+    /* Manutenção pediátrica (Holliday-Segar) com o peso do próprio paciente.
+       A conta mora em Doses & Infusões — aqui só se usa o resultado, para não
+       existirem duas fórmulas no sistema. */
+    abrirPediatrica() {
+      const f = document.getElementById('form-anestesia');
+      const peso = f ? (f.querySelector('[name="paciente_peso"]') || {}).value : '';
+      if (!peso) { toast('Preencha o peso do paciente na identificação primeiro', 'warn'); return; }
+      const corpo =
+        '<p style="font-size:.84rem;color:var(--text-soft);margin:0 0 10px">Regra de Holliday-Segar — manutenção de 24 h. ' +
+        'Não cobre reposição de perdas, déficit prévio nem jejum prolongado.</p>' +
+        '<div class="grid" style="gap:10px">' +
+        '<div class="field col-6"><label>Peso (kg)</label><input type="number" id="phm-peso" step="0.1" min="0.4" max="80" value="' + utils.escapeAttr(peso) + '" oninput="anestesia.hidra._calcPed()"></div>' +
+        '<div class="field col-6"><label>TIG <small style="color:var(--text-mute);font-weight:400">mg/kg/min (4–8)</small></label><input type="number" id="phm-tig" step="0.5" min="0" max="20" value="5" oninput="anestesia.hidra._calcPed()"></div>' +
+        '</div><div id="phm-res" style="margin-top:8px"></div>';
+      modal.open('🧒 Manutenção pediátrica', corpo,
+        '<button class="btn" onclick="modal.close()">Fechar</button>' +
+        '<button class="btn btn-primary" onclick="anestesia.hidra._lancarPed()">Lançar na tabela</button>');
+      setTimeout(() => anestesia.hidra._calcPed(), 60);
+    },
+    _pedAtual() {
+      return doses.pedHidra.calcularDe(
+        (document.getElementById('phm-peso') || {}).value,
+        (document.getElementById('phm-tig') || {}).value);
+    },
+    _calcPed() {
+      const box = document.getElementById('phm-res');
+      if (!box) return;
+      const r = anestesia.hidra._pedAtual();
+      if (!r) { box.innerHTML = '<p style="font-size:.82rem;color:var(--text-mute);margin:0">Informe o peso.</p>'; return; }
+      const n = doses.pedHidra._n;
+      box.innerHTML =
+        '<div style="background:var(--primary-soft);border-radius:8px;padding:10px 12px">' +
+        '<div style="font-size:1.05rem;font-weight:700;color:var(--primary-darker)">' + n(r.volume, 0) + ' mL/dia · ' + n(r.mlh, 1) + ' mL/h</div>' +
+        '<div style="font-size:.8rem;color:var(--text-soft)">Na ' + n(r.na_meq, 1) + ' mEq (' + n(r.na_ml, 1) + ' mL NaCl 20%) · ' +
+        'K ' + n(r.k_meq, 1) + ' mEq (' + n(r.k_ml, 1) + ' mL KCl 10%)' +
+        (r.glicose_g != null ? ' · glicose ' + n(r.glicose_g, 1) + ' g' : '') + '</div></div>' +
+        (r.mistura && !r.mistura.impossivel
+          ? '<p style="font-size:.8rem;margin:8px 0 0">≈ <b>' + n(r.mistura.concentracao, 1) + '%</b> de glicose no volume do dia — ' +
+            n(r.mistura.sg5, 0) + ' mL de SG 5% + ' + n(r.mistura.sg50, 0) + ' mL de SG 50%.</p>'
+          : (r.mistura ? '<p style="font-size:.8rem;margin:8px 0 0;color:#8a5300">A glicose pedida sai fora da faixa de SG 5%–50% nesse volume — ajuste a TIG.</p>' : ''));
+    },
+    _lancarPed() {
+      const r = anestesia.hidra._pedAtual();
+      if (!r) { toast('Informe o peso', 'warn'); return; }
+      const n = doses.pedHidra._n;
+      const tr = anestesia.hidra.add({
+        hora: utils.horaAtual(),
+        tipo: 'Manutenção pediátrica (Holliday-Segar)',
+        via: 'EV',
+        categoria: 'cristaloide',
+        velocidade: Number(r.mlh.toFixed(1)),
+        unidadeVel: 'mL/h',
+        observacao: doses.pedHidra.resumo(r)
+      });
+      try { anestesia.hidra.recalc(); } catch (e) {}
+      modal.close();
+      toast('💧 Manutenção lançada a ' + n(r.mlh, 1) + ' mL/h — ajuste o volume conforme o tempo de sala');
+      if (tr) { const v = tr.querySelector('[name="hidra_volume[]"]'); if (v) v.focus(); }
+    },
     addPreset(chave) {
       const p = anestesia.hidra.PRESETS[chave];
       if (!p) return;
@@ -42822,6 +42909,107 @@ const doses = {
     try { doses.puxarPaciente(true); } catch (e) {}
     doses.recalcular();
     try { doses.equiv.init(); } catch (e) {}
+    try { doses.pedHidra._puxarPeso(); doses.pedHidra.calcular(); } catch (e) {}
+  },
+
+  /* ---- HIDRATAÇÃO DE MANUTENÇÃO — PEDIATRIA (Holliday-Segar) ----------
+     Volume/dia:  ≤10 kg → peso × 100
+                  10–20 kg → 1000 + (peso − 10) × 50
+                  >20 kg  → 1500 + (peso − 20) × 20
+     kcal/dia (em unidades de 100 kcal) = volume ÷ 100
+     Na⁺ 3 mEq e K⁺ 2 mEq por 100 kcal
+     Glicose g/dia = peso × 1,44 × TIG(mg/kg/min)   [1 mg/kg/min = 1,44 g/kg/dia]
+
+     É manutenção de 24 h: não cobre reposição de perdas, déficit prévio,
+     jejum prolongado nem débito de dreno — e o app não finge que cobre. */
+  pedHidra: {
+    NACL20: 3.4,      /* mEq/mL */
+    KCL10: 1.34,      /* mEq/mL */
+    SG: { '5%': 0.05, '10%': 0.1, '50%': 0.5 },   /* g/mL */
+    volumeDia(peso) {
+      const p = parseFloat(peso);
+      if (isNaN(p) || p <= 0) return null;
+      if (p <= 10) return p * 100;
+      if (p <= 20) return 1000 + (p - 10) * 50;
+      return 1500 + (p - 20) * 20;
+    },
+    calcularDe(peso, tig) {
+      const vol = doses.pedHidra.volumeDia(peso);
+      if (vol == null) return null;
+      const p = parseFloat(peso);
+      const t = (tig === '' || tig == null) ? NaN : parseFloat(tig);
+      const cem = vol / 100;                       /* unidades de 100 kcal */
+      const na = 3 * cem, k = 2 * cem;
+      const gli = isNaN(t) ? null : p * 1.44 * t;
+      const r = {
+        peso: p, volume: vol, mlh: vol / 24, kcal: cem,
+        na_meq: na, na_ml: na / doses.pedHidra.NACL20,
+        k_meq: k, k_ml: k / doses.pedHidra.KCL10,
+        tig: isNaN(t) ? null : t, glicose_g: gli, mistura: null
+      };
+      /* Para chegar a essa massa de glicose DENTRO do volume do dia, a conta
+         é uma mistura de SG 5% com SG 50% — que é como se faz na prática. */
+      if (gli != null) {
+        const v50 = (gli - doses.pedHidra.SG['5%'] * vol) / (doses.pedHidra.SG['50%'] - doses.pedHidra.SG['5%']);
+        if (v50 >= 0 && v50 <= vol) r.mistura = { sg5: vol - v50, sg50: v50, concentracao: (gli / vol) * 100 };
+        else r.mistura = { impossivel: true, concentracao: (gli / vol) * 100 };
+      }
+      return r;
+    },
+    _n(v, casas) {
+      if (v == null || isNaN(v)) return '—';
+      /* só zero DEPOIS da vírgula sai: 1100 tem de continuar 1100 */
+      return v.toFixed(casas == null ? 1 : casas)
+        .replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '').replace('.', ',');
+    },
+    _puxarPeso() {
+      const el = document.getElementById('ph-peso');
+      if (!el || el.value) return;
+      const p = doses._val('dose-peso');
+      /* só faz sentido oferecer a conta pediátrica com peso de criança */
+      if (p && p > 0 && p <= 40) el.value = p;
+    },
+    calcular() {
+      const box = document.getElementById('ph-resultado');
+      if (!box) return;
+      const peso = (document.getElementById('ph-peso') || {}).value;
+      const tig = (document.getElementById('ph-tig') || {}).value;
+      const r = doses.pedHidra.calcularDe(peso, tig);
+      if (!r) { box.innerHTML = '<p style="font-size:.82rem;color:var(--text-mute);margin:0">Informe o peso para calcular.</p>'; return; }
+      const n = doses.pedHidra._n;
+      let mist = '';
+      if (r.mistura && !r.mistura.impossivel) {
+        mist = '<div style="font-size:.8rem;margin-top:6px">Para essa glicose no volume do dia (≈ <b>' +
+          n(r.mistura.concentracao, 1) + '%</b>): <b>' + n(r.mistura.sg5, 0) + ' mL</b> de SG 5% + <b>' +
+          n(r.mistura.sg50, 0) + ' mL</b> de SG 50%.</div>';
+      } else if (r.mistura && r.mistura.impossivel) {
+        mist = '<div style="font-size:.8rem;margin-top:6px;color:#8a5300">A glicose pedida dá <b>' +
+          n(r.mistura.concentracao, 1) + '%</b> no volume do dia — fora da faixa de SG 5%–50%. Ajuste a TIG ou o volume.</div>';
+      }
+      box.innerHTML =
+        '<div style="background:var(--primary-soft);border-radius:8px;padding:10px 12px">' +
+        '<div style="font-size:1.05rem;font-weight:700;color:var(--primary-darker)">' +
+        n(r.volume, 0) + ' mL/dia · ' + n(r.mlh, 1) + ' mL/h</div>' +
+        '<div style="font-size:.78rem;color:var(--text-soft)">' + n(r.kcal, 1) + ' × 100 kcal/dia</div>' +
+        '</div>' +
+        '<div style="overflow-x:auto;margin-top:8px"><table class="data" style="font-size:.84rem"><tbody>' +
+        '<tr><td>Sódio</td><td style="text-align:right"><b>' + n(r.na_meq, 1) + ' mEq</b></td>' +
+        '<td style="text-align:right;color:var(--text-mute)">' + n(r.na_ml, 1) + ' mL de NaCl 20%</td></tr>' +
+        '<tr><td>Potássio</td><td style="text-align:right"><b>' + n(r.k_meq, 1) + ' mEq</b></td>' +
+        '<td style="text-align:right;color:var(--text-mute)">' + n(r.k_ml, 1) + ' mL de KCl 10%</td></tr>' +
+        (r.glicose_g != null ? '<tr><td>Glicose (TIG ' + n(r.tig, 1) + ')</td><td style="text-align:right"><b>' +
+          n(r.glicose_g, 1) + ' g</b></td><td style="text-align:right;color:var(--text-mute)">no volume do dia</td></tr>' : '') +
+        '</tbody></table></div>' + mist;
+    },
+    /* Texto de uma linha, para levar o cálculo para a ficha sem redigitar */
+    resumo(r) {
+      if (!r) return '';
+      const n = doses.pedHidra._n;
+      return 'Manutenção (Holliday-Segar, ' + n(r.peso, 1) + ' kg): ' + n(r.volume, 0) + ' mL/24 h · ' +
+        n(r.mlh, 1) + ' mL/h · Na ' + n(r.na_meq, 1) + ' mEq (' + n(r.na_ml, 1) + ' mL NaCl 20%) · K ' +
+        n(r.k_meq, 1) + ' mEq (' + n(r.k_ml, 1) + ' mL KCl 10%)' +
+        (r.glicose_g != null ? ' · glicose ' + n(r.glicose_g, 1) + ' g (TIG ' + n(r.tig, 1) + ')' : '');
+    }
   },
 
   /* ---- EQUIVALÊNCIA DE NORADRENALINA ----------------------------------
@@ -42866,8 +43054,9 @@ const doses = {
       if (v == null || isNaN(v)) return '—';
       const abs = Math.abs(v);
       const casas = abs >= 10 ? 1 : (abs >= 1 ? 2 : (abs >= 0.01 ? 3 : 4));
-      /* zero à direita só faz o número parecer mais preciso do que é */
-      return v.toFixed(casas).replace(/\.?0+$/, '').replace('.', ',') || '0';
+      /* zero à direita só faz o número parecer mais preciso do que é — mas
+         só depois da vírgula: 1100 não pode virar 11 */
+      return v.toFixed(casas).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '').replace('.', ',');
     },
     init() {
       const sel = document.getElementById('eq-droga');

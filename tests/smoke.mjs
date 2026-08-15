@@ -7874,6 +7874,79 @@ await test('Doses: equivalência de noradrenalina bate com a fonte e converte no
   await page.close();
 });
 
+/* 130) Hidratação de manutenção pediátrica (Holliday-Segar): a conta que se
+   fazia no papel, conferida contra o exemplo publicado, e disponível também
+   dentro da hidratação da ficha, com o peso do próprio paciente. */
+await test('Doses: manutenção pediátrica (Holliday) bate com o exemplo e entra na hidratação da ficha', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('doses');
+    const ph = doses.pedHidra;
+
+    /* faixas da regra, nos pontos de virada */
+    out.faixas = ph.volumeDia(8) === 800 && ph.volumeDia(10) === 1000 &&
+      ph.volumeDia(15) === 1250 && ph.volumeDia(20) === 1500 && ph.volumeDia(30) === 1700;
+    out.semPesoSemConta = ph.volumeDia('') === null && ph.volumeDia(0) === null;
+
+    /* exemplo publicado: 12 kg, TIG 5 */
+    const r12 = ph.calcularDe(12, 5);
+    out.exemplo = r12.volume === 1100 && r12.kcal === 11 && r12.na_meq === 33 &&
+      Math.abs(r12.na_ml - 9.7) < 0.05 && r12.k_meq === 22 && Math.abs(r12.glicose_g - 86.4) < 0.05;
+    out.mlh = Math.abs(r12.mlh - 45.83) < 0.02;
+    /* a mistura para chegar à glicose dentro do volume do dia fecha a conta */
+    const m = r12.mistura;
+    out.mistura = !m.impossivel &&
+      Math.abs((m.sg5 * 0.05 + m.sg50 * 0.5) - r12.glicose_g) < 0.01 &&
+      Math.abs((m.sg5 + m.sg50) - r12.volume) < 0.01;
+    /* TIG que pede menos glicose do que o próprio SG 5% do volume já traz
+       (12 kg, TIG 2 → 34,6 g em 1100 mL = 3,1%) não vira mistura inventada */
+    out.tigForaAvisa = ph.calcularDe(12, 2).mistura.impossivel === true;
+    /* mas TIG alta que ainda cabe entre 5% e 50% continua sendo calculada */
+    out.tigAltaCabe = ph.calcularDe(12, 20).mistura.impossivel !== true;
+
+    /* número grande não pode encolher na formatação (1100 ≠ 11) */
+    out.formata = ph._n(1100, 0) === '1100' && ph._n(45.83, 1) === '45,8' &&
+      doses.equiv._fmt(100) === '100' && doses.equiv._fmt(10) === '10';
+
+    document.getElementById('ph-peso').value = '12';
+    document.getElementById('ph-tig').value = '5';
+    ph.calcular();
+    const tela = document.getElementById('ph-resultado').textContent;
+    out.naTela = /1100 mL\/dia/.test(tela) && /33 mEq/.test(tela) && /9,7 mL de NaCl 20%/.test(tela);
+
+    /* na ficha: usa o peso do paciente e lança a linha na hidratação */
+    ui.navegar('anestesia');
+    document.querySelector('#form-anestesia [name="paciente_peso"]').value = '12';
+    document.getElementById('hidra-body').innerHTML = '';
+    anestesia.hidra.abrirPediatrica();
+    return new Promise(res => setTimeout(() => {
+      out.modalCalculou = /1100 mL\/dia/.test(document.getElementById('phm-res').textContent);
+      anestesia.hidra._lancarPed();
+      const tr = document.querySelector('#hidra-body tr');
+      out.lancou = !!tr &&
+        /Holliday/.test(tr.querySelector('[name="hidra_tipo[]"]').value) &&
+        Math.abs(parseFloat(tr.querySelector('[name="hidra_velocidade[]"]').value) - 45.8) < 0.1 &&
+        tr.querySelector('[name="hidra_un_vel[]"]').value === 'mL/h' &&
+        /Na 33 mEq/.test(tr.querySelector('[name="hidra_obs[]"]').value);
+      document.getElementById('hidra-body').innerHTML = '';
+      res(out);
+    }, 250));
+  });
+  assert(r.faixas, 'as três faixas de Holliday-Segar precisam bater nos pontos de virada');
+  assert(r.semPesoSemConta, 'sem peso não se calcula nada');
+  assert(r.exemplo, 'o exemplo de 12 kg tem de dar 1100 mL, Na 33 mEq (9,7 mL), K 22 mEq e 86,4 g de glicose');
+  assert(r.mlh, 'e a velocidade em mL/h sai do volume do dia');
+  assert(r.mistura, 'a mistura de SG 5% e 50% tem de fechar volume e gramas');
+  assert(r.tigForaAvisa, 'glicose fora da faixa de SG 5%–50% avisa, em vez de inventar mistura');
+  assert(r.tigAltaCabe, 'e o que cabe entre 5% e 50% continua sendo calculado');
+  assert(r.formata, 'número grande não pode encolher na formatação — 1100 não é 11');
+  assert(r.naTela, 'a tela mostra volume, eletrólitos e o volume de cada sal');
+  assert(r.modalCalculou, 'na ficha, a conta usa o peso do paciente');
+  assert(r.lancou, 'e lança a linha na hidratação com velocidade, unidade e o resumo da conta');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
