@@ -4309,7 +4309,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-14o</b><br>
+    v7.1 · build <b id="build-tag">2026-08-15a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -8450,6 +8450,41 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       <div class="card-body">
         <p style="font-size:.78rem;color:var(--text-mute);margin:0 0 10px">Gera um resumo das doses de emerg&ecirc;ncia e via a&eacute;rea j&aacute; calculadas para o peso/idade informados &mdash; pronto para imprimir ou salvar em PDF.</p>
         <button type="button" class="btn btn-primary" onclick="doses.cartao()">&#128424;&#65039; Gerar cart&atilde;o de doses</button>
+      </div>
+    </section>
+
+    <!-- EQUIVALÊNCIA DE NORADRENALINA (vasopressores) -->
+    <section class="card">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-icon">⚖️</span><h2>Equival&ecirc;ncia de noradrenalina<small>Quanto de vasopressor equivale a quanto de noradrenalina</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">&#9662;</span></div>
+      </div>
+      <div class="card-body">
+        <p style="font-size:.8rem;color:var(--text-soft);margin:0 0 10px">
+          Converte a dose de um vasopressor no <strong>equivalente em noradrenalina</strong> (mcg/kg/min) &mdash; e o contr&aacute;rio.
+          Serve para comparar a intensidade do suporte vasopressor entre drogas e ao longo do caso, n&atilde;o para trocar
+          uma pela outra: a substitui&ccedil;&atilde;o depende do mecanismo, do contexto e da resposta do paciente.
+        </p>
+        <div class="grid" style="gap:10px">
+          <div class="field col-4"><label>Droga</label>
+            <select id="eq-droga" onchange="doses.equiv.calcular()"></select>
+          </div>
+          <div class="field col-3"><label>Dose</label>
+            <input type="number" id="eq-dose" step="0.001" min="0" inputmode="decimal" placeholder="0,1" oninput="doses.equiv.calcular()">
+          </div>
+          <div class="field col-2"><label>Unidade</label>
+            <input type="text" id="eq-unidade" readonly class="orc-ro" style="background:var(--surface-alt)">
+          </div>
+          <div class="field col-3"><label>Peso (kg) <small style="color:var(--text-mute);font-weight:400">do card Paciente</small></label>
+            <input type="number" id="eq-peso" min="0.4" max="300" step="0.1" inputmode="decimal" placeholder="70" oninput="doses.equiv.calcular()">
+          </div>
+        </div>
+        <div id="eq-resultado" style="margin-top:10px"></div>
+        <div id="eq-tabela" style="margin-top:12px"></div>
+        <p style="font-size:.72rem;color:var(--text-mute);margin:10px 0 0">
+          Fatores de <em>Crit Care</em> 2023;27:2 &mdash; DOI 10.1186/s13054-023-04322-y. Refer&ecirc;ncia consultiva:
+          confira sempre com o protocolo da unidade.
+        </p>
       </div>
     </section>
 
@@ -25319,6 +25354,12 @@ const CATALOGO_MED = [
     { nome: 'Metaraminol', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
     { nome: 'Etilefrina', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
     { nome: 'Noradrenalina', unidade: 'mcg/kg/min', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '4 mg/250 mL (16 mcg/mL)' },
+    /* Vasopressores de resgate/segunda linha. A equivalência entre eles está
+       em Doses & Infusões → Equivalência de noradrenalina. */
+    { nome: 'Vasopressina', unidade: 'UI/min', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '20 UI/100 mL (0,2 UI/mL)' },
+    { nome: 'Terlipressina', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Dopamina', unidade: 'mcg/kg/min', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '250 mg/250 mL (1 mg/mL)' },
+    { nome: 'Azul de metileno', unidade: 'mg/kg', via: 'EV', tipo: 'Bolus' },
     { nome: 'Adrenalina', unidade: 'mcg', via: 'EV', tipo: 'Bolus' },
     { nome: 'Dobutamina', unidade: 'mcg/kg/min', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '250 mg/250 mL (1 mg/mL)' },
     { nome: 'Nitroglicerina', unidade: 'mcg/kg/min', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '25 mg/250 mL (100 mcg/mL)' },
@@ -42776,7 +42817,122 @@ const DOSES_DB = [
 
 const doses = {
   _cat: 'todas',
-  init() { doses._renderChips(); try { doses.puxarPaciente(true); } catch (e) {} doses.recalcular(); },
+  init() {
+    doses._renderChips();
+    try { doses.puxarPaciente(true); } catch (e) {}
+    doses.recalcular();
+    try { doses.equiv.init(); } catch (e) {}
+  },
+
+  /* ---- EQUIVALÊNCIA DE NORADRENALINA ----------------------------------
+     Fatores de Crit Care 2023;27:2 (DOI 10.1186/s13054-023-04322-y): a dose
+     da droga × fator = equivalente em noradrenalina (mcg/kg/min).
+
+     Serve para COMPARAR a intensidade do suporte vasopressor — entre drogas
+     e ao longo do caso. Não é receita de troca: substituir um vasopressor
+     por outro depende do mecanismo, do contexto e da resposta do paciente.
+
+     Só entram aqui as drogas cuja unidade está inequívoca na fonte. Dose e
+     unidade andam juntas: dizer "0,8" sem dizer de quê é o começo de um erro. */
+  equiv: {
+    REF: 0.1,                         /* dose de referência da fonte (mcg/kg/min) */
+    DROGAS: [
+      { nome: 'Noradrenalina',        unidade: 'mcg/kg/min', fator: 1,      porPeso: true },
+      { nome: 'Adrenalina',           unidade: 'mcg/kg/min', fator: 1,      porPeso: true },
+      { nome: 'Vasopressina',         unidade: 'U/min',      fator: 2.5,    porPeso: false },
+      { nome: 'Terlipressina',        unidade: 'mcg/kg/min', fator: 10,     porPeso: true },
+      { nome: 'Metaraminol',          unidade: 'mcg/kg/min', fator: 0.125,  porPeso: true },
+      { nome: 'Fenilefrina',          unidade: 'mcg/kg/min', fator: 0.06,   porPeso: true },
+      { nome: 'Midodrina',            unidade: 'mcg/kg/min', fator: 0.4,    porPeso: true },
+      { nome: 'Dopamina',             unidade: 'mcg/kg/min', fator: 0.01,   porPeso: true },
+      { nome: 'Angiotensina II',      unidade: 'ng/kg/min',  fator: 0.0025, porPeso: true }
+    ],
+    _dr(nome) { return doses.equiv.DROGAS.find(d => d.nome === nome) || null; },
+    /* dose da droga → equivalente em noradrenalina (mcg/kg/min) */
+    paraNora(nome, dose) {
+      const d = doses.equiv._dr(nome);
+      const v = parseFloat(dose);
+      if (!d || isNaN(v)) return null;
+      return v * d.fator;
+    },
+    /* equivalente em noradrenalina → dose da droga */
+    deNora(nome, nora) {
+      const d = doses.equiv._dr(nome);
+      const v = parseFloat(nora);
+      if (!d || isNaN(v) || !d.fator) return null;
+      return v / d.fator;
+    },
+    _fmt(v) {
+      if (v == null || isNaN(v)) return '—';
+      const abs = Math.abs(v);
+      const casas = abs >= 10 ? 1 : (abs >= 1 ? 2 : (abs >= 0.01 ? 3 : 4));
+      /* zero à direita só faz o número parecer mais preciso do que é */
+      return v.toFixed(casas).replace(/\.?0+$/, '').replace('.', ',') || '0';
+    },
+    init() {
+      const sel = document.getElementById('eq-droga');
+      if (!sel) return;
+      if (!sel.options.length) {
+        sel.innerHTML = doses.equiv.DROGAS.map(d => '<option>' + utils.escapeHTML(d.nome) + '</option>').join('');
+        sel.value = 'Noradrenalina';
+      }
+      const dose = document.getElementById('eq-dose');
+      if (dose && !dose.value) dose.value = doses.equiv.REF;
+      doses.equiv._puxarPeso();
+      doses.equiv.calcular();
+    },
+    _puxarPeso() {
+      const el = document.getElementById('eq-peso');
+      if (!el || el.value) return;
+      const p = doses._val('dose-peso');
+      if (p) el.value = p;
+    },
+    calcular() {
+      const sel = document.getElementById('eq-droga');
+      const box = document.getElementById('eq-resultado');
+      if (!sel || !box) return;
+      const d = doses.equiv._dr(sel.value);
+      const uni = document.getElementById('eq-unidade');
+      if (uni && d) uni.value = d.unidade;
+      const dose = parseFloat((document.getElementById('eq-dose') || {}).value);
+      const peso = parseFloat((document.getElementById('eq-peso') || {}).value);
+      if (!d || isNaN(dose)) { box.innerHTML = ''; doses.equiv._renderTabela(null, peso); return; }
+      const nora = doses.equiv.paraNora(d.nome, dose);
+      /* mcg/min só faz sentido com peso — sem ele, mostramos apenas o /kg/min */
+      const total = (!isNaN(peso) && peso > 0) ? nora * peso : null;
+      box.innerHTML =
+        '<div style="background:var(--primary-soft);border-radius:8px;padding:10px 12px">' +
+        '<div style="font-size:.8rem;color:var(--text-soft)">' + utils.escapeHTML(d.nome) + ' ' +
+        doses.equiv._fmt(dose) + ' ' + utils.escapeHTML(d.unidade) + ' equivale a</div>' +
+        '<div style="font-size:1.15rem;font-weight:700;color:var(--primary-darker)">' +
+        doses.equiv._fmt(nora) + ' mcg/kg/min de noradrenalina</div>' +
+        (total != null ? '<div style="font-size:.78rem;color:var(--text-mute)">≈ ' + doses.equiv._fmt(total) +
+          ' mcg/min para ' + doses.equiv._fmt(peso) + ' kg</div>' : '') +
+        '</div>';
+      doses.equiv._renderTabela(nora, peso);
+    },
+    /* A mesma equivalência nas outras drogas — é a leitura que o anestesista
+       faz na prática: "isso aqui dá quanto naquela outra?" */
+    _renderTabela(nora, peso) {
+      const host = document.getElementById('eq-tabela');
+      if (!host) return;
+      const base = (nora == null || isNaN(nora)) ? doses.equiv.REF : nora;
+      const linhas = doses.equiv.DROGAS.map(d => {
+        const v = doses.equiv.deNora(d.nome, base);
+        return '<tr><td>' + utils.escapeHTML(d.nome) + '</td>' +
+          '<td style="text-align:right;white-space:nowrap"><b>' + doses.equiv._fmt(v) + '</b> ' + utils.escapeHTML(d.unidade) + '</td>' +
+          '<td style="text-align:right;color:var(--text-mute)">× ' + doses.equiv._fmt(d.fator) + '</td></tr>';
+      }).join('');
+      host.innerHTML =
+        '<p style="font-size:.78rem;color:var(--text-mute);margin:0 0 6px">Doses equivalentes a <b>' +
+        doses.equiv._fmt(base) + ' mcg/kg/min</b> de noradrenalina' +
+        (!isNaN(peso) && peso > 0 ? ' (paciente de ' + doses.equiv._fmt(peso) + ' kg)' : '') + ':</p>' +
+        '<div style="overflow-x:auto"><table class="data" style="font-size:.82rem"><thead><tr>' +
+        '<th>Vasopressor</th><th style="text-align:right">Dose equivalente</th><th style="text-align:right">Fator</th>' +
+        '</tr></thead><tbody>' + linhas + '</tbody></table></div>';
+    }
+  },
+
   /* Puxa peso/altura/idade/sexo do paciente da Ficha de Anestesia ativa,
      evitando redigitar. soSeVazio=true só preenche campos ainda em branco. */
   puxarPaciente(soSeVazio) {

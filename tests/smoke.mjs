@@ -7814,6 +7814,66 @@ await test('Conciliação: cortesia é uma classificação, e nenhum cálculo a 
   await page.close();
 });
 
+/* 129) Equivalência de noradrenalina: comparar a intensidade do suporte
+   vasopressor entre drogas. Os fatores são conferidos contra a própria fonte —
+   cada dose equivalente publicada tem de devolver 0,1 mcg/kg/min. */
+await test('Doses: equivalência de noradrenalina bate com a fonte e converte nos dois sentidos', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('doses');
+    doses.equiv.init();
+    const eq = doses.equiv;
+
+    /* conferência contra a tabela publicada (Crit Care 2023;27:2):
+       na dose equivalente de cada droga, o resultado é a dose de referência */
+    const publicadas = [
+      ['Adrenalina', 0.1], ['Vasopressina', 0.04], ['Metaraminol', 0.8],
+      ['Fenilefrina', 1.66], ['Dopamina', 10], ['Angiotensina II', 40]
+    ];
+    out.bateComAFonte = publicadas.every(([nome, dose]) =>
+      Math.abs(eq.paraNora(nome, dose) - eq.REF) < 0.005);
+
+    /* ida e volta: converter e desconverter devolve a mesma dose */
+    out.idaEVolta = publicadas.every(([nome, dose]) =>
+      Math.abs(eq.deNora(nome, eq.paraNora(nome, dose)) - dose) < 0.001);
+
+    /* a unidade acompanha a droga — dose sem unidade é o começo de um erro */
+    out.unidades = eq._dr('Vasopressina').unidade === 'U/min' &&
+      eq._dr('Angiotensina II').unidade === 'ng/kg/min' &&
+      eq._dr('Noradrenalina').unidade === 'mcg/kg/min';
+
+    /* na tela: escolher a droga troca a unidade e calcula */
+    document.getElementById('eq-droga').value = 'Metaraminol';
+    document.getElementById('eq-dose').value = '0.8';
+    document.getElementById('eq-peso').value = '70';
+    eq.calcular();
+    const txt = document.getElementById('eq-resultado').textContent;
+    out.naTela = document.getElementById('eq-unidade').value === 'mcg/kg/min' &&
+      /0,1 mcg\/kg\/min de noradrenalina/.test(txt) && /7 mcg\/min/.test(txt);
+    out.tabelaComparativa = document.getElementById('eq-tabela').textContent.indexOf('Vasopressina') >= 0;
+
+    /* sem dose, não inventa resultado */
+    document.getElementById('eq-dose').value = '';
+    eq.calcular();
+    out.semDoseSemResultado = document.getElementById('eq-resultado').innerHTML === '';
+
+    /* os vasopressores da tabela também entram no catálogo da ficha */
+    const cat = anestesia.meds._catalogoPlano();
+    out.noCatalogo = ['Vasopressina', 'Terlipressina', 'Dopamina', 'Noradrenalina', 'Metaraminol']
+      .every(n => !!cat.find(m => m.nome === n));
+    return out;
+  });
+  assert(r.bateComAFonte, 'cada dose equivalente publicada tem de devolver a dose de referência');
+  assert(r.idaEVolta, 'converter e desconverter precisa devolver a mesma dose');
+  assert(r.unidades, 'cada droga carrega a sua unidade — vasopressina em U/min, angiotensina em ng/kg/min');
+  assert(r.naTela, 'a tela converte e mostra também o total em mcg/min para o peso');
+  assert(r.tabelaComparativa, 'a tabela comparativa mostra a mesma equivalência nas outras drogas');
+  assert(r.semDoseSemResultado, 'sem dose informada não se inventa resultado');
+  assert(r.noCatalogo, 'os vasopressores da tabela precisam existir no catálogo da ficha');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
