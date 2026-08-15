@@ -4309,7 +4309,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-15c</b><br>
+    v7.1 · build <b id="build-tag">2026-08-15d</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -25472,6 +25472,7 @@ const CATALOGO_MED = [
   ]},
   { grupo: 'Outros', itens: [
     { nome: 'Sulfato de magnésio', unidade: 'g', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Sulfato de magnésio (infusão)', base: 'Sulfato de magnésio', unidade: 'mg/kg/h', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '5 g/100 mL (50 mg/mL)' },
     { nome: 'Ácido tranexâmico', dose: '1', unidade: 'g', via: 'EV', tipo: 'Bolus' },
     { nome: 'Hidrocortisona', dose: '100', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
     { nome: 'Omeprazol', dose: '40', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
@@ -42911,6 +42912,7 @@ const DOSES_DB = [
   { c:'inf', n:'Dexmedetomidina', a:'100 mcg/mL (amp 2 mL)', d:'200 mcg em 50 mL = 4 mcg/mL', conc:4, t:'i', un:'mcg/kg/h', faixa:[0.2,1.4], tip:0.5, o:'Ataque 0,5-1 mcg/kg em 10 min (opcional). Bradicardia/hipotensão.' },
   { c:'inf', n:'Cetamina (analgesia contínua)', a:'50 mg/mL', d:'100 mg em 100 mL = 1.000 mcg/mL', conc:1000, t:'i', un:'mg/kg/h', faixa:[0.1,0.3], tip:0.15, o:'Poupador de opioide.' },
   { c:'inf', n:'Lidocaína EV (analgesia)', a:'2% = 20 mg/mL', d:'200 mg em 100 mL = 2 mg/mL', conc:2000, t:'i', un:'mg/kg/h', faixa:[1,2], tip:1.5, o:'Bolus 1-1,5 mg/kg. Vigiar toxicidade (perioral, zumbido, arritmia).' },
+  { c:'inf', n:'Sulfato de magnésio (manutenção)', a:'50% = 500 mg/mL (amp 10 mL)', d:'5 g em 100 mL = 50 mg/mL', conc:50000, t:'i', un:'mg/kg/h', faixa:[6,20], tip:10, o:'Manutenção durante a cirurgia, depois do ataque de 30-50 mg/kg em 10-20 min. Vigiar hipotensão, bloqueio neuromuscular prolongado e reflexos. Ajustar na disfunção renal.' },
 
   { c:'atb', n:'Cefazolina', a:'Fr 1 g', d:'Diluir 1 g/10 mL; infundir 3-5 min', conc:100, t:'b', ped:[30,30,'mg/kg'], adu:[2000,2000,'mg'], max:{v:2000,u:'mg'}, via:'EV', o:'>=120 kg: 3 g. Repique intraop: 4 h. Até 60 min antes da incisão.' },
   { c:'atb', n:'Cefuroxima', a:'Fr 750 mg', d:'Diluir e infundir lento', conc:100, t:'b', ped:[50,50,'mg/kg'], adu:[1500,1500,'mg'], max:{v:1500,u:'mg'}, via:'EV', o:'Repique: 4 h.' },
@@ -42931,6 +42933,9 @@ const DOSES_DB = [
   { c:'ana', n:'Ondansetrona', a:'2 mg/mL (amp 2/4 mL)', d:'Puro; EV lento', conc:2, t:'b', ped:[0.1,0.1,'mg/kg'], adu:[4,8,'mg'], max:{v:8,u:'mg'}, via:'EV', o:'Prolonga QT (dose-dependente).' },
   { c:'ana', n:'Dexametasona', a:'4 mg/mL (amp 2,5 mL)', d:'Puro', conc:4, t:'b', ped:[0.1,0.15,'mg/kg'], adu:[4,8,'mg'], max:{v:10,u:'mg'}, via:'EV', o:'Antiemético + adjuvante analgésico.' },
   { c:'ana', n:'Ácido tranexâmico', a:'50 mg/mL (amp 5 mL)', d:'Diluir em 50-100 mL; infundir 10 min', conc:50, t:'b', ped:[10,20,'mg/kg'], adu:[1000,1000,'mg'], max:{v:2000,u:'mg'}, via:'EV', o:'Trauma: 1 g em 10 min + 1 g em 8 h.' },
+  /* Magnésio como adjuvante analgésico: o ataque é por peso também no adulto
+     (o registro em "Eletrólitos" é o do uso como eletrólito/eclâmpsia). */
+  { c:'ana', n:'Sulfato de magnésio (analgesia)', a:'50% = 500 mg/mL (amp 10 mL)', d:'Diluir em 50-100 mL; infundir em 10-20 min', conc:null, t:'b', ped:[30,50,'mg/kg'], adu:[30,50,'mg/kg'], via:'EV', o:'Ataque perioperatório. Manutenção opcional 6-20 mg/kg/h durante a cirurgia (ver Infusão contínua). Vigiar hipotensão; potencializa o bloqueio neuromuscular. Ajustar na disfunção renal.' },
   { c:'ana', n:'Hidrocortisona', a:'Fr 100/500 mg', d:'Diluir 100 mg/10 mL', conc:10, t:'b', ped:[2,4,'mg/kg'], adu:[100,200,'mg'], max:{v:500,u:'mg'}, via:'EV', o:'Anafilaxia (adjuvante), insuf. adrenal, broncoespasmo.' },
 
   { c:'eme', n:'Adrenalina - PCR', a:'1 mg/mL (amp 1 mL)', d:'Ped: 1:10.000 (1 mg + 9 mL SF) = 0,1 mg/mL', conc:0.1, t:'b', ped:[0.01,0.01,'mg/kg'], adu:[1,1,'mg'], max:{v:1,u:'mg'}, via:'EV/IO', perigo:true, o:'Ped: 0,1 mL/kg de 1:10.000, a cada 3-5 min. Adulto: 1 mg a cada 3-5 min.' },
@@ -43538,11 +43543,14 @@ const doses = {
   render() {
     const host = document.getElementById('dose-lista');
     if (!host) return;
-    const q = ((document.getElementById('dose-busca') || {}).value || '').toLowerCase().trim();
+    /* buscar sem acento: quem digita "magnesio" ou "adrenalina" no meio do caso
+       não vai parar para achar o acento certo */
+    const norm = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const q = norm((document.getElementById('dose-busca') || {}).value).trim();
     const peso = doses._peso();
     const crianca = doses._ehCrianca();
     const temIdade = doses._idade() != null;
-    const lista = DOSES_DB.filter(d => (doses._cat === 'todas' || d.c === doses._cat) && (!q || (d.n + ' ' + DOSES_CATS[d.c] + ' ' + (d.o || '')).toLowerCase().includes(q)));
+    const lista = DOSES_DB.filter(d => (doses._cat === 'todas' || d.c === doses._cat) && (!q || norm(d.n + ' ' + DOSES_CATS[d.c] + ' ' + (d.o || '')).includes(q)));
     if (!lista.length) { host.innerHTML = '<p style="color:var(--text-mute);font-size:.86rem;padding:8px">Nenhuma droga encontrada.</p>'; return; }
     host.innerHTML = lista.map(d => {
       const i = DOSES_DB.indexOf(d);

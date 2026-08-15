@@ -7999,6 +7999,61 @@ await test('Doses: necessidade hídrica — manutenção, déficit, perdas e Par
   await page.close();
 });
 
+/* 131) Magnésio como adjuvante analgésico: ataque por peso (também no adulto)
+   e manutenção em bomba — com a conta de mL/h conferida. */
+await test('Doses: magnésio perioperatório — ataque 30–50 mg/kg e manutenção 6–20 mg/kg/h', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const ata = DOSES_DB.find(d => d.n === 'Sulfato de magnésio (analgesia)');
+    const man = DOSES_DB.find(d => d.n === 'Sulfato de magnésio (manutenção)');
+    out.existe = !!ata && !!man;
+    /* o ataque é por peso NOS DOIS: no adulto era dose fixa em mg */
+    out.ataquePorPeso = ata.ped[0] === 30 && ata.ped[1] === 50 && ata.ped[2] === 'mg/kg' &&
+      ata.adu[0] === 30 && ata.adu[1] === 50 && ata.adu[2] === 'mg/kg' && ata.c === 'ana';
+    out.manutencao = man.faixa[0] === 6 && man.faixa[1] === 20 && man.un === 'mg/kg/h' && man.c === 'inf';
+
+    /* 70 kg, 10 mg/kg/h, diluição 5 g/100 mL (50 mg/mL) → 14 mL/h */
+    out.mlh = doses._mlh(10, man.un, man.conc, 70) === 14 &&
+      doses._mlh(6, man.un, man.conc, 70) === 8.4 &&
+      doses._mlh(20, man.un, man.conc, 70) === 28;
+
+    /* o registro antigo (eletrólito/eclâmpsia) continua existindo — são usos
+       diferentes da mesma droga, e apagar um esconderia indicação */
+    out.eletrolitoContinua = !!DOSES_DB.find(d => d.n === 'Sulfato de magnésio' && d.c === 'ele');
+
+    ui.navegar('doses');
+    document.getElementById('dose-peso').value = '70';
+    document.getElementById('dose-idade').value = '40';
+    doses.recalcular();
+    /* buscar sem acento tem de achar */
+    document.getElementById('dose-busca').value = 'magnesio';
+    doses.render();
+    const html = document.getElementById('dose-lista').textContent.replace(/\s+/g, ' ');
+    out.buscaSemAcento = /magnésio/i.test(html);
+    out.mostraAtaqueCalculado = /2\.?100/.test(html) && /3\.?500/.test(html);
+    out.mostraBomba = /8,4/.test(html) && /28/.test(html);
+    document.getElementById('dose-busca').value = '';
+    doses.render();
+
+    /* e existe no catálogo da ficha, para lançar na medicação */
+    const cat = anestesia.meds._catalogoPlano();
+    const inf = cat.find(m => m.nome === 'Sulfato de magnésio (infusão)');
+    out.noCatalogo = !!inf && inf.unidade === 'mg/kg/h' && /50 mg\/mL/.test(inf.dil || '');
+    return out;
+  });
+  assert(r.existe, 'magnésio precisa existir como ataque analgésico e como manutenção');
+  assert(r.ataquePorPeso, 'o ataque é 30–50 mg/kg — por peso também no adulto');
+  assert(r.manutencao, 'a manutenção é 6–20 mg/kg/h, em bomba');
+  assert(r.mlh, 'a conta de mL/h da bomba tem de fechar com a diluição informada');
+  assert(r.eletrolitoContinua, 'o uso como eletrólito/eclâmpsia continua na lista — são indicações diferentes');
+  assert(r.buscaSemAcento, 'buscar "magnesio" sem acento tem de achar');
+  assert(r.mostraAtaqueCalculado, 'a dose de ataque aparece já calculada para o peso');
+  assert(r.mostraBomba, 'e a faixa em mL/h aparece para a bomba');
+  assert(r.noCatalogo, 'a infusão precisa existir no catálogo de medicações da ficha');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
