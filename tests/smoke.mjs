@@ -6818,6 +6818,29 @@ await test('Ficha: diurese entra na grade dos sinais vitais, calcula ritmo e ali
     const c3 = cels(); c3[1].value = ''; anestesia.diurese._daGrade(c3[1]);
     out.apagarRemove = anestesia.diurese._parciais().length === 1
       && (f.querySelector('[name="diurese"]') || {}).value === '100';
+
+    /* débito urinário como MONITOR: vale sem sonda (coletor externo, micção
+       medida) — marcar abre o painel e a coluna, e o total vai para as saídas */
+    document.querySelectorAll('[name="dispositivos[]"]:checked').forEach(el => {
+      el.checked = false; anestesia.disp.alternar(el);
+    });
+    document.getElementById('diurese-body').innerHTML = '';
+    anestesia.diurese.recalcular();
+    const monDU = Array.from(f.querySelectorAll('[name="monitores[]"]')).find(e => e.value === 'Débito urinário');
+    monDU.checked = true;
+    anestesia.disp.sincronizarVitais();
+    out.monitorAbre = !!monDU && document.getElementById('diurese-painel').style.display === 'block'
+      && anestesia.diurese.mostrarNaGrade() === true;
+    anestesia.diurese.addParcial();
+    const trM = document.querySelector('#diurese-body tr');
+    trM.querySelector('[name="diurese_hora[]"]').value = '09:00';
+    trM.querySelector('[name="diurese_vol[]"]').value = '150';
+    anestesia.diurese.recalcular();
+    out.monitorNoBalanco = (f.querySelector('[name="diurese"]') || {}).value === '150';
+    /* desmarcar não pode esconder o que já foi medido */
+    monDU.checked = false;
+    anestesia.disp.sincronizarVitais();
+    out.naoSomeComDado = document.getElementById('diurese-painel').style.display === 'block';
     return out;
   });
   assert(r.semSondaNaoAparece, 'sem sonda e sem registro, a diurese não polui a grade');
@@ -6829,6 +6852,9 @@ await test('Ficha: diurese entra na grade dos sinais vitais, calcula ritmo e ali
   assert(r.alertouOligúria, 'ritmo abaixo de 0,5 mL/kg/h precisa saltar aos olhos');
   assert(r.debitoDoCaso, 'o débito do caso continua sendo calculado no fim');
   assert(r.apagarRemove, 'apagar o valor desfaz o registro e corrige o balanço');
+  assert(r.monitorAbre, 'débito urinário marcado nos monitores abre o painel e a coluna, sem depender da sonda');
+  assert(r.monitorNoBalanco, 'e o total medido continua indo sozinho para as saídas do balanço');
+  assert(r.naoSomeComDado, 'desmarcar não pode esconder um volume já registrado');
   await page.close();
 });
 

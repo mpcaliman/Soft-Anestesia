@@ -4309,7 +4309,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-14n</b><br>
+    v7.1 · build <b id="build-tag">2026-08-14o</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -6154,6 +6154,11 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
               <label class="check"><input type="checkbox" name="monitores[]" value="BIS" onchange="anestesia.disp.sincronizarVitais()"><span>🧠 BIS</span></label>
               <label class="check"><input type="checkbox" name="monitores[]" value="TOF" onchange="anestesia.disp.sincronizarVitais()"><span>💪 TOF</span></label>
               <label class="check"><input type="checkbox" name="monitores[]" value="Glicemia" onchange="anestesia.disp.sincronizarVitais()"><span>🍬 Glicemia capilar</span></label>
+              <!-- Débito urinário: monitorização como as outras. Marcar aqui abre
+                   a coluna na grade e o painel de cálculo, mesmo que a sonda não
+                   esteja marcada no card de acessos (coletor externo, micção
+                   espontânea medida). O total vai sozinho para o balanço. -->
+              <label class="check"><input type="checkbox" name="monitores[]" value="Débito urinário" onchange="anestesia.disp.sincronizarVitais()"><span>🚻 Débito urinário</span></label>
               <label class="check"><input type="checkbox" name="monitores[]" value="PVC" onchange="anestesia.disp.sincronizarVitais()"><span>📉 PVC</span></label>
               <label class="check"><input type="checkbox" name="monitores[]" value="PIC" onchange="anestesia.disp.sincronizarVitais()"><span>🧠 PIC</span></label>
               <label class="check"><input type="checkbox" name="monitores[]" value="Débito cardíaco" onchange="anestesia.disp.sincronizarVitais()"><span>❤️ Débito cardíaco</span></label>
@@ -26934,6 +26939,9 @@ const anestesia = {
        parâmetros habilitados pelos monitores selecionados. */
     sincronizarVitais() {
       try { anestesia.vitais.aplicarMonitores(); } catch (e) {}
+      /* débito urinário é monitorização como as outras: marcar abre o painel
+         de cálculo e a coluna na grade */
+      try { anestesia.diurese.sincronizar(); } catch (e) {}
       anestesia.disp._derivarMonitorizacao();
       markDirty();
     },
@@ -26995,11 +27003,26 @@ const anestesia = {
     _temSonda() {
       return Array.prototype.some.call(document.querySelectorAll('[name="dispositivos[]"]:checked'), el => el.value === 'Sonda vesical');
     },
-    /* Mostra/oculta o painel conforme a sonda vesical */
+    /* Marcado como monitorização (card de monitores) — vale mesmo sem sonda:
+       coletor externo, micção espontânea medida, nefrostomia. */
+    _monitorMarcado() {
+      return Array.prototype.some.call(document.querySelectorAll('#form-anestesia [name="monitores[]"]:checked'), el => el.value === 'Débito urinário');
+    },
+    _ativa() {
+      return anestesia.diurese._temSonda() || anestesia.diurese._monitorMarcado();
+    },
+    /* Já há volume medido? Então o painel não some ao desmarcar — esconder o
+       que foi registrado é perder o registro de vista. */
+    _temRegistro() {
+      const tot = (document.getElementById('diurese-total') || {}).value;
+      if (String(tot || '').trim()) return true;
+      return Array.prototype.some.call(document.querySelectorAll('[name="diurese_vol[]"]'), el => String(el.value || '').trim());
+    },
+    /* Mostra/oculta o painel conforme a sonda vesical ou o monitor marcado */
     sincronizar() {
       const p = anestesia.diurese._painel();
       if (!p) return;
-      const on = anestesia.diurese._temSonda();
+      const on = anestesia.diurese._ativa() || anestesia.diurese._temRegistro();
       p.style.display = on ? 'block' : 'none';
       if (on) {
         if (document.getElementById('diurese-modo').value === 'parcial' && !document.querySelector('#diurese-body tr')) anestesia.diurese.addParcial();
@@ -27060,7 +27083,7 @@ const anestesia = {
        intervalo e o débito do caso, e alimenta o balanço hídrico sozinho. */
     mostrarNaGrade() {
       try {
-        if (anestesia.diurese._temSonda()) return true;
+        if (anestesia.diurese._ativa()) return true;
         /* sem sonda marcada, só aparece se já houver algo registrado — não
            poluir a grade de quem não mediu diurese */
         return document.querySelectorAll('[name="diurese_vol[]"]').length > 0
