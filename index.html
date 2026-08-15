@@ -4309,7 +4309,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-14m</b><br>
+    v7.1 · build <b id="build-tag">2026-08-14n</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -38019,12 +38019,12 @@ const printPreview = {
       printPreview._verCtx = { mod: 'anestesia', formId: 'form-anestesia' };
       const ppp = document.getElementById('ppp');
       if (!ppp) { toast('Erro: container de preview não encontrado', 'error'); return; }
-      /* Capítulos: 1º a ficha COMPLETA; a SRPA começa em PÁGINA NOVA com capa
-         de capítulo (a quebra vale na impressão do navegador e no PDF gerado —
-         o _gerarDocDeTexto reconhece .pp-quebra e .pp-capitulo). */
+      /* Ficha e SRPA são o mesmo ato: a SRPA entra logo abaixo, na mesma
+         página, com a faixa de capítulo separando. Forçar página nova aqui
+         gastava uma folha por caso — e a SRPA costuma ocupar meia página.
+         A faixa não fica sozinha no pé da folha (page-break-after: avoid). */
       ppp.innerHTML = htmlFicha +
-        '<div class="pp-quebra" style="page-break-before:always;break-before:page"></div>' +
-        '<div class="pp-capitulo" style="margin:0 0 12px;padding:9px 14px;background:#eef2f7;border-left:5px solid #3b5b7e;font-weight:700;font-size:13pt;color:#22384f">2ª parte — Recuperação pós-anestésica (SRPA)</div>' +
+        '<div class="pp-capitulo" style="margin:14px 0 12px;padding:9px 14px;background:#eef2f7;border-left:5px solid #3b5b7e;font-weight:700;font-size:13pt;color:#22384f;break-inside:avoid;page-break-inside:avoid;page-break-after:avoid;break-after:avoid">2ª parte — Recuperação pós-anestésica (SRPA)</div>' +
         htmlSrpa;
       /* Nome do arquivo: Paciente_Ficha-Anestesia+SRPA_data de criação (hoje) */
       let paciente = '';

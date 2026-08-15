@@ -1169,16 +1169,19 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
     await new Promise(r => setTimeout(r, 200));
     const pppEl = document.getElementById('ppp');
     const ppp = pppEl.innerHTML;
-    out.conjuntoTemAmbas = ppp.includes('pp-quebra') &&
-      (ppp.match(/Paciente Conjunto/g) || []).length >= 2;
+    out.conjuntoTemAmbas = (ppp.match(/Paciente Conjunto/g) || []).length >= 2;
+    /* ficha e SRPA são o mesmo ato: a SRPA continua na mesma página, sem
+       quebra forçada — antes gastava uma folha por caso */
+    out.semQuebraForcada = !ppp.includes('pp-quebra');
     /* capítulos: a SRPA vem DEPOIS da ficha completa, com capa de capítulo */
     out.capituloSrpa = ppp.includes('pp-capitulo') && ppp.includes('2ª parte — Recuperação pós-anestésica');
     out.fichaAntesDaSrpa = ppp.indexOf('pp-capitulo') > ppp.indexOf('RELATÓRIO') || ppp.indexOf('pp-capitulo') > 100;
-    /* no PDF gerado (nuvem/backup), a quebra vira página nova de verdade */
+    /* no PDF gerado (nuvem/backup) a SRPA também segue no fio, sem página nova
+       só para separar — e o texto dela continua lá */
     const J = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
     const docPdf = printPreview._gerarDocDeTexto(J, pppEl);
     const nPag = docPdf.getNumberOfPages ? docPdf.getNumberOfPages() : docPdf.internal.getNumberOfPages();
-    out.pdfDuasPaginas = nPag >= 2;
+    out.pdfSaiu = nPag >= 1;
     /* Convenção: Paciente primeiro, depois o tipo, e a data é SEMPRE a de criação (hoje) */
     const hoje = new Date();
     const hojeStr = String(hoje.getDate()).padStart(2, '0') + String(hoje.getMonth() + 1).padStart(2, '0') + hoje.getFullYear();
@@ -1232,9 +1235,10 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
   assert(r.srpaComDados, 'o capítulo da SRPA no arquivo único deveria ter os vitais da janela (não sair vazio)');
   assert(r.botaoPadrao, 'o botão 🧪 da SRPA deveria gerar vitais normais + Aldrete 10/10 + sem intercorrências');
   assert(r.vinculada, 'ficha e SRPA deveriam ficar vinculadas nos dois sentidos');
-  assert(r.conjuntoTemAmbas, 'o arquivo único deveria conter as duas fichas com quebra de página');
+  assert(r.conjuntoTemAmbas, 'o arquivo único deveria conter as duas fichas');
+  assert(r.semQuebraForcada, 'ficha e SRPA são o mesmo ato — não se gasta uma folha para separar');
   assert(r.capituloSrpa, 'a SRPA deveria abrir como capítulo ("2ª parte — Recuperação pós-anestésica")');
-  assert(r.pdfDuasPaginas, 'no PDF gerado, a SRPA deveria começar em página nova (>= 2 páginas)');
+  assert(r.pdfSaiu, 'o PDF do conjunto deveria ser gerado');
   assert(r.nomeArquivo, 'o nome do arquivo deveria ser Paciente_Ficha-Anestesia+SRPA_data-de-criação (hoje)');
   assert(r.botaoConjunto, 'o botão "+ SRPA" da ficha deveria abrir a impressão conjunta');
   await page.close();
