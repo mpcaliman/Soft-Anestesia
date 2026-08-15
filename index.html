@@ -4309,7 +4309,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-15b</b><br>
+    v7.1 · build <b id="build-tag">2026-08-15c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -8457,7 +8457,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     <!-- HIDRATAÇÃO DE MANUTENÇÃO — PEDIATRIA (Holliday-Segar) -->
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-icon">&#129490;</span><h2>Hidrata&ccedil;&atilde;o de manuten&ccedil;&atilde;o &mdash; pediatria<small>Holliday-Segar: volume, eletr&oacute;litos e glicose do dia</small></h2></div>
+        <div class="card-title-wrap"><span class="card-icon">&#128167;</span><h2>Necessidade h&iacute;drica<small>Manuten&ccedil;&atilde;o, d&eacute;ficit, jejum, perdas e queimadura &mdash; com o total do dia</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">&#9662;</span></div>
       </div>
       <div class="card-body">
@@ -8465,18 +8465,59 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <div class="field col-3"><label>Peso (kg)</label>
             <input type="number" id="ph-peso" min="0.4" max="80" step="0.1" inputmode="decimal" placeholder="ex.: 12" oninput="doses.pedHidra.calcular()">
           </div>
+          <div class="field col-3"><label>Regra da manuten&ccedil;&atilde;o</label>
+            <select id="ph-regra" onchange="doses.pedHidra.calcular()">
+              <option value="holliday">Holliday-Segar (100/50/20)</option>
+              <option value="30">Adulto &mdash; 30 mL/kg/dia</option>
+              <option value="25">Adulto &mdash; 25 mL/kg/dia</option>
+            </select>
+          </div>
           <div class="field col-3"><label>TIG <small style="color:var(--text-mute);font-weight:400">mg/kg/min</small></label>
             <input type="number" id="ph-tig" min="0" max="20" step="0.5" inputmode="decimal" value="5" oninput="doses.pedHidra.calcular()">
           </div>
-          <div class="field col-6" style="align-self:end">
-            <p style="font-size:.74rem;color:var(--text-mute);margin:0">Faixa usual da TIG: <strong>4&ndash;8 mg/kg/min</strong>. Na&sup1; 3 mEq e K&spades; 2 mEq a cada 100 kcal.</p>
+          <div class="field col-3" style="align-self:end">
+            <p style="font-size:.74rem;color:var(--text-mute);margin:0">TIG usual: <strong>4&ndash;8 mg/kg/min</strong>.</p>
           </div>
         </div>
         <div id="ph-resultado" style="margin-top:10px"></div>
+
+        <!-- O RESTO DA CONTA: déficit, jejum, perdas, terceiro espaço, queimadura -->
+        <h3 style="font-size:.9rem;color:var(--primary-darker);margin:18px 0 8px;border-top:1px solid var(--border);padding-top:14px">
+          &#128167; Al&eacute;m da manuten&ccedil;&atilde;o <small style="color:var(--text-mute);font-weight:400">&mdash; d&eacute;ficit, jejum, perdas e terceiro espa&ccedil;o</small>
+        </h3>
+        <div class="grid" style="gap:10px">
+          <div class="field col-3"><label>Desidrata&ccedil;&atilde;o (%)</label>
+            <input type="number" id="ph-desidr" min="0" max="20" step="0.5" inputmode="decimal" placeholder="ex.: 8" oninput="doses.pedHidra.calcular()">
+          </div>
+          <div class="field col-3"><label>Jejum (h)</label>
+            <input type="number" id="ph-jejum" min="0" max="48" step="0.5" inputmode="decimal" placeholder="ex.: 8" oninput="doses.pedHidra.calcular()">
+          </div>
+          <div class="field col-3"><label>V&ocirc;mitos <small style="color:var(--text-mute);font-weight:400">epis&oacute;dios</small></label>
+            <input type="number" id="ph-vomito" min="0" step="1" inputmode="numeric" placeholder="0" oninput="doses.pedHidra.calcular()">
+          </div>
+          <div class="field col-3"><label>Diarreia <small style="color:var(--text-mute);font-weight:400">evacua&ccedil;&otilde;es</small></label>
+            <input type="number" id="ph-diarreia" min="0" step="1" inputmode="numeric" placeholder="0" oninput="doses.pedHidra.calcular()">
+          </div>
+          <div class="field col-3"><label>Aspirado/dreno (mL)</label>
+            <input type="number" id="ph-dreno" min="0" step="1" inputmode="numeric" placeholder="0" oninput="doses.pedHidra.calcular()">
+          </div>
+          <div class="field col-3"><label>3&ordm; espa&ccedil;o <small style="color:var(--text-mute);font-weight:400">mL/kg/h</small></label>
+            <input type="number" id="ph-3esp" min="0" max="15" step="0.5" inputmode="decimal" placeholder="0" oninput="doses.pedHidra.calcular()" title="Pancreatite 3–6 · Peritonite 2–4">
+          </div>
+          <div class="field col-3"><label>3&ordm; espa&ccedil;o <small style="color:var(--text-mute);font-weight:400">horas</small></label>
+            <input type="number" id="ph-3esph" min="0" max="48" step="0.5" inputmode="decimal" placeholder="0" oninput="doses.pedHidra.calcular()">
+          </div>
+          <div class="field col-3"><label>Queimadura <small style="color:var(--text-mute);font-weight:400">%SCQ</small></label>
+            <input type="number" id="ph-scq" min="0" max="100" step="1" inputmode="numeric" placeholder="0" oninput="doses.pedHidra.calcular()" title="Parkland: 4 mL × peso × %SCQ nas primeiras 24 h">
+          </div>
+        </div>
+        <div id="ph-extra" style="margin-top:10px"></div>
+
         <p style="font-size:.72rem;color:var(--text-mute);margin:10px 0 0">
-          Regra de Holliday-Segar (manuten&ccedil;&atilde;o de 24 h). N&atilde;o cobre reposi&ccedil;&atilde;o de perdas, jejum
-          prolongado, d&eacute;bito de dreno nem d&eacute;ficit pr&eacute;vio &mdash; e n&atilde;o vale para rec&eacute;m-nascido nos
-          primeiros dias. Refer&ecirc;ncia consultiva: confira com o protocolo da unidade.
+          Holliday-Segar para manuten&ccedil;&atilde;o de 24 h; d&eacute;ficit de desidrata&ccedil;&atilde;o reposto em 24&ndash;48 h
+          conforme a gravidade; Parkland a partir da <strong>hora da queimadura</strong>, n&atilde;o da chegada.
+          N&atilde;o vale para rec&eacute;m-nascido nos primeiros dias. Refer&ecirc;ncia consultiva &mdash; reavalie sempre pelo
+          estado cl&iacute;nico, sinais vitais e diurese; hiper-hidrata&ccedil;&atilde;o faz tanto mal quanto desidrata&ccedil;&atilde;o.
         </p>
       </div>
     </section>
@@ -42933,8 +42974,17 @@ const doses = {
       if (p <= 20) return 1000 + (p - 10) * 50;
       return 1500 + (p - 20) * 20;
     },
-    calcularDe(peso, tig) {
-      const vol = doses.pedHidra.volumeDia(peso);
+    /* regra = 'holliday' (padrão) ou mL/kg/dia do adulto (25 / 30) */
+    calcularDe(peso, tig, regra) {
+      const p0 = parseFloat(peso);
+      let vol, adulto = false;
+      if (regra && regra !== 'holliday') {
+        const m = doses.hidraNec.manutencaoAdulto(p0, regra);
+        if (!m) return null;
+        vol = m.volume; adulto = true;
+      } else {
+        vol = doses.pedHidra.volumeDia(peso);
+      }
       if (vol == null) return null;
       const p = parseFloat(peso);
       const t = (tig === '' || tig == null) ? NaN : parseFloat(tig);
@@ -42942,7 +42992,7 @@ const doses = {
       const na = 3 * cem, k = 2 * cem;
       const gli = isNaN(t) ? null : p * 1.44 * t;
       const r = {
-        peso: p, volume: vol, mlh: vol / 24, kcal: cem,
+        peso: p, volume: vol, mlh: vol / 24, kcal: cem, adulto: adulto, regra: regra || 'holliday',
         na_meq: na, na_ml: na / doses.pedHidra.NACL20,
         k_meq: k, k_ml: k / doses.pedHidra.KCL10,
         tig: isNaN(t) ? null : t, glicose_g: gli, mistura: null
@@ -42974,7 +43024,8 @@ const doses = {
       if (!box) return;
       const peso = (document.getElementById('ph-peso') || {}).value;
       const tig = (document.getElementById('ph-tig') || {}).value;
-      const r = doses.pedHidra.calcularDe(peso, tig);
+      const regra = (document.getElementById('ph-regra') || {}).value;
+      const r = doses.pedHidra.calcularDe(peso, tig, regra);
       if (!r) { box.innerHTML = '<p style="font-size:.82rem;color:var(--text-mute);margin:0">Informe o peso para calcular.</p>'; return; }
       const n = doses.pedHidra._n;
       let mist = '';
@@ -42990,8 +43041,13 @@ const doses = {
         '<div style="background:var(--primary-soft);border-radius:8px;padding:10px 12px">' +
         '<div style="font-size:1.05rem;font-weight:700;color:var(--primary-darker)">' +
         n(r.volume, 0) + ' mL/dia · ' + n(r.mlh, 1) + ' mL/h</div>' +
-        '<div style="font-size:.78rem;color:var(--text-soft)">' + n(r.kcal, 1) + ' × 100 kcal/dia</div>' +
+        '<div style="font-size:.78rem;color:var(--text-soft)">' +
+        (r.adulto ? 'manutenção do adulto — ' + n(parseFloat(r.regra), 0) + ' mL/kg/dia'
+                  : n(r.kcal, 1) + ' × 100 kcal/dia') + '</div>' +
         '</div>' +
+        /* eletrólitos e glicose por 100 kcal são da regra pediátrica: com a
+           taxa do adulto, essa conta não se aplica e não é mostrada */
+        (r.adulto ? '' :
         '<div style="overflow-x:auto;margin-top:8px"><table class="data" style="font-size:.84rem"><tbody>' +
         '<tr><td>Sódio</td><td style="text-align:right"><b>' + n(r.na_meq, 1) + ' mEq</b></td>' +
         '<td style="text-align:right;color:var(--text-mute)">' + n(r.na_ml, 1) + ' mL de NaCl 20%</td></tr>' +
@@ -42999,7 +43055,60 @@ const doses = {
         '<td style="text-align:right;color:var(--text-mute)">' + n(r.k_ml, 1) + ' mL de KCl 10%</td></tr>' +
         (r.glicose_g != null ? '<tr><td>Glicose (TIG ' + n(r.tig, 1) + ')</td><td style="text-align:right"><b>' +
           n(r.glicose_g, 1) + ' g</b></td><td style="text-align:right;color:var(--text-mute)">no volume do dia</td></tr>' : '') +
-        '</tbody></table></div>' + mist;
+        '</tbody></table></div>' + mist);
+      doses.pedHidra._extras(r);
+    },
+    /* Déficit + jejum + perdas + terceiro espaço + Parkland, e o total do dia */
+    _extras(r) {
+      const host = document.getElementById('ph-extra');
+      if (!host) return;
+      const n = doses.pedHidra._n;
+      const v = id => (document.getElementById(id) || {}).value;
+      const H = doses.hidraNec;
+      const peso = r.peso;
+      const linhas = [];
+      let total = r.volume;
+
+      linhas.push(['Manutenção (24 h)', r.volume, n(r.mlh, 1) + ' mL/h']);
+
+      const defi = H.deficitDesidratacao(peso, v('ph-desidr'));
+      if (defi) { total += defi; linhas.push(['Déficit de desidratação (' + n(parseFloat(v('ph-desidr')), 1) + '%)', defi, 'repor em 24–48 h']); }
+
+      const jej = H.deficitJejum(r.mlh, v('ph-jejum'));
+      if (jej) { total += jej; linhas.push(['Déficit de jejum (' + n(parseFloat(v('ph-jejum')), 1) + ' h)', jej, 'manutenção/h × horas']); }
+
+      const vom = H.perdaPorEpisodios(peso, v('ph-vomito'), 15);
+      if (vom) { total += vom; linhas.push(['Vômitos (' + v('ph-vomito') + ')', vom, '15 mL/kg por episódio (10–20)']); }
+
+      const dia = H.perdaPorEpisodios(peso, v('ph-diarreia'), 10);
+      if (dia) { total += dia; linhas.push(['Diarreia (' + v('ph-diarreia') + ')', dia, '10 mL/kg por evacuação']); }
+
+      const dren = parseFloat(v('ph-dreno'));
+      if (!isNaN(dren) && dren > 0) { total += dren; linhas.push(['Aspirado / dreno', dren, 'reposição mL a mL']); }
+
+      const te = H.terceiroEspaco(peso, v('ph-3esp'), v('ph-3esph'));
+      if (te) { total += te; linhas.push(['Terceiro espaço', te, v('ph-3esp') + ' mL/kg/h × ' + v('ph-3esph') + ' h']); }
+
+      const pk = H.parkland(peso, v('ph-scq'));
+      const du = H.diureseEsperada(peso, peso <= 40);
+
+      host.innerHTML =
+        '<div style="overflow-x:auto"><table class="data" style="font-size:.84rem"><tbody>' +
+        linhas.map(l => '<tr><td>' + utils.escapeHTML(l[0]) + '</td>' +
+          '<td style="text-align:right;white-space:nowrap"><b>' + n(l[1], 0) + ' mL</b></td>' +
+          '<td style="text-align:right;color:var(--text-mute);font-size:.92em">' + utils.escapeHTML(l[2]) + '</td></tr>').join('') +
+        '<tr style="border-top:2px solid var(--border);font-weight:700"><td>Total do dia</td>' +
+        '<td style="text-align:right;white-space:nowrap">' + n(total, 0) + ' mL</td>' +
+        '<td style="text-align:right;color:var(--text-mute)">' + n(total / 24, 1) + ' mL/h</td></tr>' +
+        '</tbody></table></div>' +
+        (pk ? '<div style="background:#fff6e8;border-left:4px solid #c47c1f;border-radius:6px;padding:9px 11px;margin-top:10px;font-size:.84rem">' +
+          '<b>Parkland — queimadura ' + n(parseFloat(v('ph-scq')), 0) + '% SCQ:</b> ' + n(pk.total, 0) + ' mL nas primeiras 24 h · ' +
+          n(pk.primeiras8h, 0) + ' mL nas primeiras 8 h (' + n(pk.mlh8, 0) + ' mL/h) · ' +
+          n(pk.proximas16h, 0) + ' mL nas 16 h seguintes (' + n(pk.mlh16, 0) + ' mL/h).' +
+          '<div style="font-size:.92em;color:#8a5300;margin-top:3px">As 8 horas contam <b>da queimadura</b>, não da chegada. Fora da soma acima: Parkland substitui a reposição, não se acumula com ela.</div>' +
+          '</div>' : '') +
+        (du ? '<p style="font-size:.78rem;color:var(--text-mute);margin:8px 0 0">Diurese esperada: <b>' +
+          n(du.min, 0) + '–' + n(du.max, 0) + ' mL/h</b> (' + du.faixa[0] + '–' + du.faixa[1] + ' mL/kg/h) — é por ela que se confere a reposição.</p>' : '');
     },
     /* Texto de uma linha, para levar o cálculo para a ficha sem redigitar */
     resumo(r) {
@@ -43009,6 +43118,78 @@ const doses = {
         n(r.mlh, 1) + ' mL/h · Na ' + n(r.na_meq, 1) + ' mEq (' + n(r.na_ml, 1) + ' mL NaCl 20%) · K ' +
         n(r.k_meq, 1) + ' mEq (' + n(r.k_ml, 1) + ' mL KCl 10%)' +
         (r.glicose_g != null ? ' · glicose ' + n(r.glicose_g, 1) + ' g (TIG ' + n(r.tig, 1) + ')' : '');
+    }
+  },
+
+  /* ---- NECESSIDADE HÍDRICA: déficit, perdas, jejum, terceiro espaço ----
+     Manutenção é só a primeira parcela. O que faltava era o resto da conta:
+     déficit de desidratação, déficit de jejum, perdas contínuas, terceiro
+     espaço e queimadura (Parkland) — e o total do dia, que é o número que
+     interessa na beira do leito.
+
+     Referências: Holliday & Segar, Pediatrics 1957;19(5):823-32; Carcillo et
+     al., Pediatr Crit Care Med 2009;10(3):394-400; Jeschke et al., Lancet
+     2011;378(9794):799-808; Morgan & Mikhail, Clinical Anesthesiology, 6ª ed. */
+  hidraNec: {
+    /* Adulto: 25–30 mL/kg/dia (a taxa fica à escolha, com 30 como padrão) */
+    manutencaoAdulto(peso, mlkg) {
+      const p = parseFloat(peso);
+      const t = parseFloat(mlkg);
+      if (isNaN(p) || p <= 0) return null;
+      const taxa = isNaN(t) ? 30 : t;
+      const vol = p * taxa;
+      return { volume: vol, mlh: vol / 24, taxa: taxa };
+    },
+    /* Déficit de desidratação: % × peso × 10 (repor em 24–48 h) */
+    deficitDesidratacao(peso, perc) {
+      const p = parseFloat(peso), d = parseFloat(perc);
+      if (isNaN(p) || isNaN(d) || p <= 0 || d <= 0) return null;
+      return d * p * 10;
+    },
+    /* Déficit de jejum: manutenção por hora × horas de jejum */
+    deficitJejum(mlh, horas) {
+      const m = parseFloat(mlh), h = parseFloat(horas);
+      if (isNaN(m) || isNaN(h) || h <= 0) return null;
+      return m * h;
+    },
+    /* Perdas contínuas — reposição mL a mL, com as estimativas usuais */
+    PERDAS: {
+      vomito:   { rot: 'Vômito', porEpisodio: [10, 20], unidade: 'mL/kg por episódio' },
+      diarreia: { rot: 'Diarreia', porEpisodio: [10, 10], unidade: 'mL/kg por evacuação' }
+    },
+    perdaPorEpisodios(peso, episodios, mlkg) {
+      const p = parseFloat(peso), n = parseFloat(episodios), m = parseFloat(mlkg);
+      if (isNaN(p) || isNaN(n) || isNaN(m) || n <= 0) return null;
+      return p * n * m;
+    },
+    /* Terceiro espaço: mL/kg/h conforme a condição (pancreatite 3–6,
+       peritonite 2–4) — o app não escolhe a taxa, só faz a conta. */
+    TERCEIRO_ESPACO: [
+      { rot: 'Pancreatite', faixa: [3, 6] },
+      { rot: 'Peritonite', faixa: [2, 4] },
+      { rot: 'Queimadura extensa', faixa: null, obs: 'usar Parkland' }
+    ],
+    terceiroEspaco(peso, mlkgh, horas) {
+      const p = parseFloat(peso), t = parseFloat(mlkgh), h = parseFloat(horas);
+      if (isNaN(p) || isNaN(t) || isNaN(h) || t <= 0 || h <= 0) return null;
+      return p * t * h;
+    },
+    /* Parkland (queimadura): 4 mL × peso × %SCQ nas primeiras 24 h,
+       metade nas primeiras 8 h A PARTIR DA QUEIMADURA, metade nas 16 h
+       seguintes. O horário da queimadura é o que costuma ser esquecido. */
+    parkland(peso, scq) {
+      const p = parseFloat(peso), s = parseFloat(scq);
+      if (isNaN(p) || isNaN(s) || p <= 0 || s <= 0) return null;
+      const total = 4 * p * s;
+      return { total: total, primeiras8h: total / 2, proximas16h: total / 2,
+               mlh8: total / 2 / 8, mlh16: total / 2 / 16 };
+    },
+    /* Diurese esperada — é por ela que se confere se a reposição está certa */
+    diureseEsperada(peso, crianca) {
+      const p = parseFloat(peso);
+      if (isNaN(p) || p <= 0) return null;
+      const f = crianca ? [1, 2] : [0.5, 1];
+      return { min: p * f[0], max: p * f[1], faixa: f };
     }
   },
 

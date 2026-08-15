@@ -7877,7 +7877,7 @@ await test('Doses: equivalência de noradrenalina bate com a fonte e converte no
 /* 130) Hidratação de manutenção pediátrica (Holliday-Segar): a conta que se
    fazia no papel, conferida contra o exemplo publicado, e disponível também
    dentro da hidratação da ficha, com o peso do próprio paciente. */
-await test('Doses: manutenção pediátrica (Holliday) bate com o exemplo e entra na hidratação da ficha', async () => {
+await test('Doses: necessidade hídrica — manutenção, déficit, perdas e Parkland, e a linha na ficha', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(() => {
     const out = {};
@@ -7930,6 +7930,52 @@ await test('Doses: manutenção pediátrica (Holliday) bate com o exemplo e entr
         tr.querySelector('[name="hidra_un_vel[]"]').value === 'mL/h' &&
         /Na 33 mEq/.test(tr.querySelector('[name="hidra_obs[]"]').value);
       document.getElementById('hidra-body').innerHTML = '';
+
+      /* --- o resto da conta de hidratação, conferido contra os exemplos --- */
+      const H = doses.hidraNec;
+      const ad = ph.calcularDe(70, 5, '30');
+      out.adulto = ad.volume === 2100 && Math.abs(ad.mlh - 87.5) < 0.1 && ad.adulto === true &&
+        Math.abs(H.manutencaoAdulto(70, 25).volume - 1750) < 0.01;
+
+      ui.navegar('doses');
+      document.getElementById('ph-peso').value = '70';
+      document.getElementById('ph-regra').value = '30';
+      ph.calcular();
+      const telaAd = document.getElementById('ph-resultado').textContent;
+      out.semEletrolitoNoAdulto = /2100 mL\/dia/.test(telaAd) && telaAd.indexOf('Sódio') < 0;
+
+      /* déficit 20 kg 8% = 1600 mL; jejum de 15 kg por 8 h ≈ 416 mL */
+      const m15 = ph.volumeDia(15) / 24;
+      out.deficitEPerdas = H.deficitDesidratacao(20, 8) === 1600 &&
+        Math.abs(H.deficitJejum(m15, 8) - 416.7) < 1 &&
+        H.perdaPorEpisodios(20, 3, 10) === 600 &&
+        H.terceiroEspaco(20, 4, 5) === 400 &&
+        H.deficitDesidratacao(20, 0) === null;
+
+      /* Parkland: 60 kg, 30% SCQ */
+      const pk = H.parkland(60, 30);
+      out.parkland = pk.total === 7200 && pk.primeiras8h === 3600 && pk.mlh8 === 450 && pk.mlh16 === 225;
+
+      /* o Parkland não entra no total: ele substitui a reposição */
+      document.getElementById('ph-peso').value = '20';
+      document.getElementById('ph-regra').value = 'holliday';
+      ['ph-desidr', 'ph-jejum', 'ph-vomito', 'ph-diarreia', 'ph-dreno', 'ph-3esp', 'ph-3esph'].forEach(id => {
+        const el = document.getElementById(id); if (el) el.value = '';
+      });
+      document.getElementById('ph-scq').value = '';
+      ph.calcular();
+      const semQueimadura = document.getElementById('ph-extra').textContent;
+      document.getElementById('ph-scq').value = '30';
+      ph.calcular();
+      const comQueimadura = document.getElementById('ph-extra').textContent;
+      const totalDe = txt => (txt.match(/Total do dia\s*([\d.]+) mL/) || [])[1];
+      out.parklandForaDoTotal = totalDe(semQueimadura) === totalDe(comQueimadura) &&
+        /Parkland/.test(comQueimadura) && /da queimadura/.test(comQueimadura);
+
+      /* diurese esperada: criança 1–2, adulto 0,5–1 mL/kg/h */
+      const dc = H.diureseEsperada(15, true), da = H.diureseEsperada(70, false);
+      out.diurese = dc.min === 15 && dc.max === 30 && da.min === 35 && da.max === 70;
+
       res(out);
     }, 250));
   });
@@ -7944,6 +7990,12 @@ await test('Doses: manutenção pediátrica (Holliday) bate com o exemplo e entr
   assert(r.naTela, 'a tela mostra volume, eletrólitos e o volume de cada sal');
   assert(r.modalCalculou, 'na ficha, a conta usa o peso do paciente');
   assert(r.lancou, 'e lança a linha na hidratação com velocidade, unidade e o resumo da conta');
+  assert(r.adulto, 'a manutenção do adulto (25–30 mL/kg/dia) tem de existir ao lado da pediátrica');
+  assert(r.semEletrolitoNoAdulto, 'eletrólito por 100 kcal é da regra pediátrica — não se mostra na do adulto');
+  assert(r.deficitEPerdas, 'déficit, jejum, perdas e terceiro espaço entram na conta do dia');
+  assert(r.parkland, 'Parkland: 4 mL × peso × %SCQ, metade nas primeiras 8 h');
+  assert(r.parklandForaDoTotal, 'Parkland substitui a reposição — não pode ser somado ao total');
+  assert(r.diurese, 'a diurese esperada é a conferência da reposição');
   await page.close();
 });
 
