@@ -7633,13 +7633,21 @@ await test('Orçamento: fração por linha editável e preço vindo da tabela co
     /* o valor nunca sai da CBHPM: sai da tabela configurada */
     out.valorDaConfiguracao = antesPreco.origem === 'porte_cir' && !!antesPreco.tabela;
 
-    /* AN → porte tem uma fonte só: a relação da CBHPM vale para classificar
-       E para derivar valor, senão haveria dois números verdadeiros ao mesmo tempo */
+    /* AN → porte: as DUAS conversões convivem no seletor, cada uma com o seu
+       nome. A clássica sustenta os orçamentos já emitidos e não pode mudar de
+       valor; a da CBHPM 2022 entra ao lado, como opção. */
     const tabs = orcamento.tabelasAnest();
     const cir = tabs.cir2018.valores;
-    const der = tabs.anest2018_conv.valores;
+    const classica = tabs.anest2018_conv.valores;
+    const nova = tabs.anest2018_conv22.valores;
+    const CLASSICA = { 1: '3A', 2: '3C', 3: '5B', 4: '7B', 5: '9A', 6: '9B', 7: '11C', 8: '13C' };
+    out.classicaIntacta = [1, 2, 3, 4, 5, 6, 7, 8]
+      .every(an => Math.abs(classica[an] - cir[CLASSICA[an]]) < 0.01) &&
+      Math.abs(classica[8] - 3719.35) < 0.01;
     out.derivaPelaCBHPM = [1, 2, 3, 4, 5, 6, 7, 8]
-      .every(an => Math.abs(der[an] - cir[cbhpm.AN_PORTE[an]]) < 0.01) && der[0] === 0;
+      .every(an => Math.abs(nova[an] - cir[cbhpm.AN_PORTE[an]]) < 0.01) && nova[0] === 0;
+    out.duasConvivem = classica[3] !== nova[3] && !!tabs.anest2024_f3_conv && !!tabs.anest2024_f3_conv22 &&
+      /CBHPM 2022/.test(tabs.anest2018_conv22.nome) && !/CBHPM 2022/.test(tabs.anest2018_conv.nome);
     /* tabela com valores próprios por AN não é derivada de nada */
     out.fixasIntactas = tabs.cbhpm2015.valores[3] === 292.50 && tabs.unimed.valores[8] === 1874.88;
     return out;
@@ -7653,7 +7661,9 @@ await test('Orçamento: fração por linha editável e preço vindo da tabela co
   assert(r.fracaoSalva, 'e é gravada junto do orçamento');
   assert(r.precedencia, 'preço próprio do código vence o porte, e removê-lo devolve o valor por porte');
   assert(r.valorDaConfiguracao, 'o preço vem da configuração do sistema, nunca da CBHPM');
-  assert(r.derivaPelaCBHPM, 'a tabela derivada tem que usar a relação AN → porte da CBHPM, a mesma da classificação');
+  assert(r.classicaIntacta, 'a conversão clássica não pode mudar de valor — ela sustenta os orçamentos já emitidos');
+  assert(r.derivaPelaCBHPM, 'a tabela nova tem que usar a relação AN → porte publicada na CBHPM 2022');
+  assert(r.duasConvivem, 'as duas conversões convivem no seletor, cada uma com o seu nome');
   assert(r.fixasIntactas, 'tabela com valor próprio por AN não passa por conversão — fica como foi cadastrada');
   await page.close();
 });
@@ -7841,7 +7851,14 @@ await test('Doses: equivalência de noradrenalina bate com a fonte e converte no
     /* a unidade acompanha a droga — dose sem unidade é o começo de um erro */
     out.unidades = eq._dr('Vasopressina').unidade === 'U/min' &&
       eq._dr('Angiotensina II').unidade === 'ng/kg/min' &&
-      eq._dr('Noradrenalina').unidade === 'mcg/kg/min';
+      eq._dr('Noradrenalina').unidade === 'mcg/kg/min' &&
+      eq._dr('Azul de metileno').unidade === 'mg/kg/h' &&
+      eq._dr('Hidroxicobalamina').unidade === 'g';
+    /* adjuvantes da vasoplegia, na mesma escala da fonte */
+    out.adjuvantes = Math.abs(eq.paraNora('Azul de metileno', 0.5) - eq.REF) < 0.005 &&
+      Math.abs(eq.paraNora('Hidroxicobalamina', 5) - eq.REF) < 0.005 &&
+      Math.abs(eq.paraNora('Midodrina', 0.25) - eq.REF) < 0.005 &&
+      Math.abs(eq.paraNora('Terlipressina', 0.01) - eq.REF) < 0.005;
 
     /* na tela: escolher a droga troca a unidade e calcula */
     document.getElementById('eq-droga').value = 'Metaraminol';
@@ -7866,7 +7883,8 @@ await test('Doses: equivalência de noradrenalina bate com a fonte e converte no
   });
   assert(r.bateComAFonte, 'cada dose equivalente publicada tem de devolver a dose de referência');
   assert(r.idaEVolta, 'converter e desconverter precisa devolver a mesma dose');
-  assert(r.unidades, 'cada droga carrega a sua unidade — vasopressina em U/min, angiotensina em ng/kg/min');
+  assert(r.unidades, 'cada droga carrega a sua unidade — vasopressina em U/min, azul de metileno em mg/kg/h, hidroxicobalamina em g');
+  assert(r.adjuvantes, 'azul de metileno, hidroxicobalamina, midodrina e terlipressina na mesma escala da fonte');
   assert(r.naTela, 'a tela converte e mostra também o total em mcg/min para o peso');
   assert(r.tabelaComparativa, 'a tabela comparativa mostra a mesma equivalência nas outras drogas');
   assert(r.semDoseSemResultado, 'sem dose informada não se inventa resultado');

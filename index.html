@@ -4309,7 +4309,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-15d</b><br>
+    v7.1 · build <b id="build-tag">2026-08-15e</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -42807,21 +42807,29 @@ const ORC_PORTE_CIR_2024_F3 = {
 
 /* Bases de referência do orçamento. tipo:'anest' usa o porte ANESTÉSICO (AN0–8);
    tipo:'cir' usa o porte CIRÚRGICO (1A–14C) do procedimento. */
-/* Conversão porte ANESTÉSICO (AN0–8) → porte CBHPM correspondente. É a
-   relação publicada pela própria CBHPM (cbhpm.AN_PORTE), usada tanto para
-   classificar quanto para derivar o valor da anestesia a partir de qualquer
-   tabela cirúrgica (2018, 2024/25, faixas). Fonte única: mudou lá, muda aqui.
+/* Conversão porte ANESTÉSICO (AN0–8) → porte CBHPM correspondente. Existem
+   DUAS, e as duas ficam disponíveis de propósito:
+
+   • a CLÁSSICA (abaixo), que o sistema usa desde sempre e que sustenta os
+     orçamentos já emitidos — não muda de valor;
+   • a da CBHPM 2022 (cbhpm.AN_PORTE), publicada pela própria tabela, que
+     entra como opção separada no seletor do Orçamento.
+
+   Escolher qual usar é decisão de quem cobra, não do código: por isso as
+   duas convivem no seletor, cada uma com o seu nome, em vez de uma
+   substituir a outra em silêncio.
 
    AN0 = anestesia local / sem participação do anestesiologista: não há
-   honorário a derivar.
-
-   Nota histórica: até agosto/2026 o app usava outra correspondência para
-   PREÇO (AN3→5B, AN4→7B, AN5→9A, AN7→11C, AN8→13C), mais alta nesses portes.
-   A troca para a relação da CBHPM foi decisão do médico responsável, ciente
-   de que ela reduz o valor derivado nesses AN. As tabelas com valores
-   próprios por AN (Unimed, CBHPM 2015) não passam por esta conversão e
-   seguem exatamente como estavam. */
+   honorário a derivar. Tabelas com valores próprios por AN (Unimed, CBHPM
+   2015) não passam por conversão nenhuma. */
+const ORC_ANEST_DE_CIR = { 1: '3A', 2: '3C', 3: '5B', 4: '7B', 5: '9A', 6: '9B', 7: '11C', 8: '13C' };
 function orcDerivarAnestDeCir(tabCir) {
+  const v = { 0: 0 };
+  for (let p = 1; p <= 8; p++) v[p] = Number(tabCir[ORC_ANEST_DE_CIR[p]]) || 0;
+  return v;
+}
+/* Mesma derivação, pela relação AN → porte publicada na CBHPM 2022 */
+function orcDerivarAnestCBHPM2022(tabCir) {
   const v = { 0: 0 };
   for (let p = 1; p <= 8; p++) {
     const porte = (typeof cbhpm !== 'undefined' && cbhpm.AN_PORTE) ? cbhpm.AN_PORTE[p] : '';
@@ -42833,12 +42841,22 @@ function orcDerivarAnestDeCir(tabCir) {
 const ORC_PORTE_ANEST_PADRAO = {
   unimed:    { nome: 'Unimed (CBHPM 2015 + 7%) — porte anest.', tipo: 'anest', valores: { 0: 0, 1: 145.28, 2: 212.64, 3: 312.98, 4: 462.74, 5: 715.80, 6: 998.85, 7: 1421.12, 8: 1874.88 } },
   cbhpm2015: { nome: 'CBHPM 2015 (0%) — porte anest.',          tipo: 'anest', valores: { 0: 0, 1: 135.78, 2: 198.73, 3: 292.50, 4: 432.47, 5: 668.97, 6: 933.50, 7: 1328.15, 8: 1752.22 } },
-  /* Derivadas pela conversão AN→CBHPM (1→3A, 2→3C, 3→5B, 4→7B, 5→9A, 6→9B, 7→11C, 8→13C) */
+  /* Derivadas pela conversão CLÁSSICA do sistema (1→3A, 2→3C, 3→5B, 4→7B,
+     5→9A, 6→9B, 7→11C, 8→13C). São as que sustentam os orçamentos já
+     emitidos — os valores não mudam. */
   anest2018_conv:      { nome: 'CBHPM 2018 → porte anest. (conversão)',            tipo: 'anest', valores: orcDerivarAnestDeCir(ORC_PORTE_CIR_2018) },
   anest2024_orig_conv: { nome: 'CBHPM 2024/25 Original → porte anest. (conversão)', tipo: 'anest', valores: orcDerivarAnestDeCir(ORC_PORTE_CIR_2024_ORIG) },
   anest2024_f1_conv:   { nome: 'CBHPM 2024/25 Faixa I → porte anest. (conversão)',  tipo: 'anest', valores: orcDerivarAnestDeCir(ORC_PORTE_CIR_2024_F1) },
   anest2024_f2_conv:   { nome: 'CBHPM 2024/25 Faixa II → porte anest. (conversão)', tipo: 'anest', valores: orcDerivarAnestDeCir(ORC_PORTE_CIR_2024_F2) },
   anest2024_f3_conv:   { nome: 'CBHPM 2024/25 Faixa III → porte anest. (conversão)', tipo: 'anest', valores: orcDerivarAnestDeCir(ORC_PORTE_CIR_2024_F3) },
+  /* As mesmas tabelas derivadas pela relação AN → porte publicada na CBHPM
+     2022 (1→3A, 2→3C, 3→4C, 4→6B, 5→7C, 6→9B, 7→10C, 8→12A). Entram ao lado
+     das anteriores, não no lugar delas: qual usar é decisão de quem cobra. */
+  anest2018_conv22:      { nome: 'CBHPM 2018 → porte anest. (conversão CBHPM 2022)',            tipo: 'anest', valores: orcDerivarAnestCBHPM2022(ORC_PORTE_CIR_2018) },
+  anest2024_orig_conv22: { nome: 'CBHPM 2024/25 Original → porte anest. (conversão CBHPM 2022)', tipo: 'anest', valores: orcDerivarAnestCBHPM2022(ORC_PORTE_CIR_2024_ORIG) },
+  anest2024_f1_conv22:   { nome: 'CBHPM 2024/25 Faixa I → porte anest. (conversão CBHPM 2022)',  tipo: 'anest', valores: orcDerivarAnestCBHPM2022(ORC_PORTE_CIR_2024_F1) },
+  anest2024_f2_conv22:   { nome: 'CBHPM 2024/25 Faixa II → porte anest. (conversão CBHPM 2022)', tipo: 'anest', valores: orcDerivarAnestCBHPM2022(ORC_PORTE_CIR_2024_F2) },
+  anest2024_f3_conv22:   { nome: 'CBHPM 2024/25 Faixa III → porte anest. (conversão CBHPM 2022)', tipo: 'anest', valores: orcDerivarAnestCBHPM2022(ORC_PORTE_CIR_2024_F3) },
   cir2018:      { nome: 'CBHPM 2018 — porte cirúrgico',                tipo: 'cir', valores: ORC_PORTE_CIR_2018 },
   cir2024_orig: { nome: 'CBHPM 2024/2025 — Original (porte cir.)',     tipo: 'cir', valores: ORC_PORTE_CIR_2024_ORIG },
   cir2024_f1:   { nome: 'CBHPM 2024/2025 — Faixa I (porte cir.)',      tipo: 'cir', valores: ORC_PORTE_CIR_2024_F1 },
@@ -43219,7 +43237,12 @@ const doses = {
       { nome: 'Fenilefrina',          unidade: 'mcg/kg/min', fator: 0.06,   porPeso: true },
       { nome: 'Midodrina',            unidade: 'mcg/kg/min', fator: 0.4,    porPeso: true },
       { nome: 'Dopamina',             unidade: 'mcg/kg/min', fator: 0.01,   porPeso: true },
-      { nome: 'Angiotensina II',      unidade: 'ng/kg/min',  fator: 0.0025, porPeso: true }
+      { nome: 'Angiotensina II',      unidade: 'ng/kg/min',  fator: 0.0025, porPeso: true },
+      /* Adjuvantes da vasoplegia: entram na mesma escala na fonte, com
+         unidades próprias — azul de metileno por hora, hidroxicobalamina
+         como dose única em gramas. */
+      { nome: 'Azul de metileno',     unidade: 'mg/kg/h',    fator: 0.2,    porPeso: true },
+      { nome: 'Hidroxicobalamina',    unidade: 'g',          fator: 0.02,   porPeso: false }
     ],
     _dr(nome) { return doses.equiv.DROGAS.find(d => d.nome === nome) || null; },
     /* dose da droga → equivalente em noradrenalina (mcg/kg/min) */
