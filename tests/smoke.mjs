@@ -1169,16 +1169,19 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
     await new Promise(r => setTimeout(r, 200));
     const pppEl = document.getElementById('ppp');
     const ppp = pppEl.innerHTML;
-    out.conjuntoTemAmbas = ppp.includes('pp-quebra') &&
-      (ppp.match(/Paciente Conjunto/g) || []).length >= 2;
+    out.conjuntoTemAmbas = (ppp.match(/Paciente Conjunto/g) || []).length >= 2;
+    /* ficha e SRPA são o mesmo ato: a SRPA continua na mesma página, sem
+       quebra forçada — antes gastava uma folha por caso */
+    out.semQuebraForcada = !ppp.includes('pp-quebra');
     /* capítulos: a SRPA vem DEPOIS da ficha completa, com capa de capítulo */
     out.capituloSrpa = ppp.includes('pp-capitulo') && ppp.includes('2ª parte — Recuperação pós-anestésica');
     out.fichaAntesDaSrpa = ppp.indexOf('pp-capitulo') > ppp.indexOf('RELATÓRIO') || ppp.indexOf('pp-capitulo') > 100;
-    /* no PDF gerado (nuvem/backup), a quebra vira página nova de verdade */
+    /* no PDF gerado (nuvem/backup) a SRPA também segue no fio, sem página nova
+       só para separar — e o texto dela continua lá */
     const J = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
     const docPdf = printPreview._gerarDocDeTexto(J, pppEl);
     const nPag = docPdf.getNumberOfPages ? docPdf.getNumberOfPages() : docPdf.internal.getNumberOfPages();
-    out.pdfDuasPaginas = nPag >= 2;
+    out.pdfSaiu = nPag >= 1;
     /* Convenção: Paciente primeiro, depois o tipo, e a data é SEMPRE a de criação (hoje) */
     const hoje = new Date();
     const hojeStr = String(hoje.getDate()).padStart(2, '0') + String(hoje.getMonth() + 1).padStart(2, '0') + hoje.getFullYear();
@@ -1232,9 +1235,10 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
   assert(r.srpaComDados, 'o capítulo da SRPA no arquivo único deveria ter os vitais da janela (não sair vazio)');
   assert(r.botaoPadrao, 'o botão 🧪 da SRPA deveria gerar vitais normais + Aldrete 10/10 + sem intercorrências');
   assert(r.vinculada, 'ficha e SRPA deveriam ficar vinculadas nos dois sentidos');
-  assert(r.conjuntoTemAmbas, 'o arquivo único deveria conter as duas fichas com quebra de página');
+  assert(r.conjuntoTemAmbas, 'o arquivo único deveria conter as duas fichas');
+  assert(r.semQuebraForcada, 'ficha e SRPA são o mesmo ato — não se gasta uma folha para separar');
   assert(r.capituloSrpa, 'a SRPA deveria abrir como capítulo ("2ª parte — Recuperação pós-anestésica")');
-  assert(r.pdfDuasPaginas, 'no PDF gerado, a SRPA deveria começar em página nova (>= 2 páginas)');
+  assert(r.pdfSaiu, 'o PDF do conjunto deveria ser gerado');
   assert(r.nomeArquivo, 'o nome do arquivo deveria ser Paciente_Ficha-Anestesia+SRPA_data-de-criação (hoje)');
   assert(r.botaoConjunto, 'o botão "+ SRPA" da ficha deveria abrir a impressão conjunta');
   await page.close();
@@ -6814,6 +6818,29 @@ await test('Ficha: diurese entra na grade dos sinais vitais, calcula ritmo e ali
     const c3 = cels(); c3[1].value = ''; anestesia.diurese._daGrade(c3[1]);
     out.apagarRemove = anestesia.diurese._parciais().length === 1
       && (f.querySelector('[name="diurese"]') || {}).value === '100';
+
+    /* débito urinário como MONITOR: vale sem sonda (coletor externo, micção
+       medida) — marcar abre o painel e a coluna, e o total vai para as saídas */
+    document.querySelectorAll('[name="dispositivos[]"]:checked').forEach(el => {
+      el.checked = false; anestesia.disp.alternar(el);
+    });
+    document.getElementById('diurese-body').innerHTML = '';
+    anestesia.diurese.recalcular();
+    const monDU = Array.from(f.querySelectorAll('[name="monitores[]"]')).find(e => e.value === 'Débito urinário');
+    monDU.checked = true;
+    anestesia.disp.sincronizarVitais();
+    out.monitorAbre = !!monDU && document.getElementById('diurese-painel').style.display === 'block'
+      && anestesia.diurese.mostrarNaGrade() === true;
+    anestesia.diurese.addParcial();
+    const trM = document.querySelector('#diurese-body tr');
+    trM.querySelector('[name="diurese_hora[]"]').value = '09:00';
+    trM.querySelector('[name="diurese_vol[]"]').value = '150';
+    anestesia.diurese.recalcular();
+    out.monitorNoBalanco = (f.querySelector('[name="diurese"]') || {}).value === '150';
+    /* desmarcar não pode esconder o que já foi medido */
+    monDU.checked = false;
+    anestesia.disp.sincronizarVitais();
+    out.naoSomeComDado = document.getElementById('diurese-painel').style.display === 'block';
     return out;
   });
   assert(r.semSondaNaoAparece, 'sem sonda e sem registro, a diurese não polui a grade');
@@ -6825,6 +6852,9 @@ await test('Ficha: diurese entra na grade dos sinais vitais, calcula ritmo e ali
   assert(r.alertouOligúria, 'ritmo abaixo de 0,5 mL/kg/h precisa saltar aos olhos');
   assert(r.debitoDoCaso, 'o débito do caso continua sendo calculado no fim');
   assert(r.apagarRemove, 'apagar o valor desfaz o registro e corrige o balanço');
+  assert(r.monitorAbre, 'débito urinário marcado nos monitores abre o painel e a coluna, sem depender da sonda');
+  assert(r.monitorNoBalanco, 'e o total medido continua indo sozinho para as saídas do balanço');
+  assert(r.naoSomeComDado, 'desmarcar não pode esconder um volume já registrado');
   await page.close();
 });
 
@@ -7781,6 +7811,246 @@ await test('Conciliação: cortesia é uma classificação, e nenhum cálculo a 
   assert(r.opcaoPorCodigo, 'um código específico também pode ser cortesia');
   assert(r.todasCortesia, 'todos os códigos em cortesia = registro em cortesia');
   assert(r.fluxoMarca, 'a cortesia do fluxo de faturamento chega ao financeiro com esse nome');
+  await page.close();
+});
+
+/* 129) Equivalência de noradrenalina: comparar a intensidade do suporte
+   vasopressor entre drogas. Os fatores são conferidos contra a própria fonte —
+   cada dose equivalente publicada tem de devolver 0,1 mcg/kg/min. */
+await test('Doses: equivalência de noradrenalina bate com a fonte e converte nos dois sentidos', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('doses');
+    doses.equiv.init();
+    const eq = doses.equiv;
+
+    /* conferência contra a tabela publicada (Crit Care 2023;27:2):
+       na dose equivalente de cada droga, o resultado é a dose de referência */
+    const publicadas = [
+      ['Adrenalina', 0.1], ['Vasopressina', 0.04], ['Metaraminol', 0.8],
+      ['Fenilefrina', 1.66], ['Dopamina', 10], ['Angiotensina II', 40]
+    ];
+    out.bateComAFonte = publicadas.every(([nome, dose]) =>
+      Math.abs(eq.paraNora(nome, dose) - eq.REF) < 0.005);
+
+    /* ida e volta: converter e desconverter devolve a mesma dose */
+    out.idaEVolta = publicadas.every(([nome, dose]) =>
+      Math.abs(eq.deNora(nome, eq.paraNora(nome, dose)) - dose) < 0.001);
+
+    /* a unidade acompanha a droga — dose sem unidade é o começo de um erro */
+    out.unidades = eq._dr('Vasopressina').unidade === 'U/min' &&
+      eq._dr('Angiotensina II').unidade === 'ng/kg/min' &&
+      eq._dr('Noradrenalina').unidade === 'mcg/kg/min';
+
+    /* na tela: escolher a droga troca a unidade e calcula */
+    document.getElementById('eq-droga').value = 'Metaraminol';
+    document.getElementById('eq-dose').value = '0.8';
+    document.getElementById('eq-peso').value = '70';
+    eq.calcular();
+    const txt = document.getElementById('eq-resultado').textContent;
+    out.naTela = document.getElementById('eq-unidade').value === 'mcg/kg/min' &&
+      /0,1 mcg\/kg\/min de noradrenalina/.test(txt) && /7 mcg\/min/.test(txt);
+    out.tabelaComparativa = document.getElementById('eq-tabela').textContent.indexOf('Vasopressina') >= 0;
+
+    /* sem dose, não inventa resultado */
+    document.getElementById('eq-dose').value = '';
+    eq.calcular();
+    out.semDoseSemResultado = document.getElementById('eq-resultado').innerHTML === '';
+
+    /* os vasopressores da tabela também entram no catálogo da ficha */
+    const cat = anestesia.meds._catalogoPlano();
+    out.noCatalogo = ['Vasopressina', 'Terlipressina', 'Dopamina', 'Noradrenalina', 'Metaraminol']
+      .every(n => !!cat.find(m => m.nome === n));
+    return out;
+  });
+  assert(r.bateComAFonte, 'cada dose equivalente publicada tem de devolver a dose de referência');
+  assert(r.idaEVolta, 'converter e desconverter precisa devolver a mesma dose');
+  assert(r.unidades, 'cada droga carrega a sua unidade — vasopressina em U/min, angiotensina em ng/kg/min');
+  assert(r.naTela, 'a tela converte e mostra também o total em mcg/min para o peso');
+  assert(r.tabelaComparativa, 'a tabela comparativa mostra a mesma equivalência nas outras drogas');
+  assert(r.semDoseSemResultado, 'sem dose informada não se inventa resultado');
+  assert(r.noCatalogo, 'os vasopressores da tabela precisam existir no catálogo da ficha');
+  await page.close();
+});
+
+/* 130) Hidratação de manutenção pediátrica (Holliday-Segar): a conta que se
+   fazia no papel, conferida contra o exemplo publicado, e disponível também
+   dentro da hidratação da ficha, com o peso do próprio paciente. */
+await test('Doses: necessidade hídrica — manutenção, déficit, perdas e Parkland, e a linha na ficha', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('doses');
+    const ph = doses.pedHidra;
+
+    /* faixas da regra, nos pontos de virada */
+    out.faixas = ph.volumeDia(8) === 800 && ph.volumeDia(10) === 1000 &&
+      ph.volumeDia(15) === 1250 && ph.volumeDia(20) === 1500 && ph.volumeDia(30) === 1700;
+    out.semPesoSemConta = ph.volumeDia('') === null && ph.volumeDia(0) === null;
+
+    /* exemplo publicado: 12 kg, TIG 5 */
+    const r12 = ph.calcularDe(12, 5);
+    out.exemplo = r12.volume === 1100 && r12.kcal === 11 && r12.na_meq === 33 &&
+      Math.abs(r12.na_ml - 9.7) < 0.05 && r12.k_meq === 22 && Math.abs(r12.glicose_g - 86.4) < 0.05;
+    out.mlh = Math.abs(r12.mlh - 45.83) < 0.02;
+    /* a mistura para chegar à glicose dentro do volume do dia fecha a conta */
+    const m = r12.mistura;
+    out.mistura = !m.impossivel &&
+      Math.abs((m.sg5 * 0.05 + m.sg50 * 0.5) - r12.glicose_g) < 0.01 &&
+      Math.abs((m.sg5 + m.sg50) - r12.volume) < 0.01;
+    /* TIG que pede menos glicose do que o próprio SG 5% do volume já traz
+       (12 kg, TIG 2 → 34,6 g em 1100 mL = 3,1%) não vira mistura inventada */
+    out.tigForaAvisa = ph.calcularDe(12, 2).mistura.impossivel === true;
+    /* mas TIG alta que ainda cabe entre 5% e 50% continua sendo calculada */
+    out.tigAltaCabe = ph.calcularDe(12, 20).mistura.impossivel !== true;
+
+    /* número grande não pode encolher na formatação (1100 ≠ 11) */
+    out.formata = ph._n(1100, 0) === '1100' && ph._n(45.83, 1) === '45,8' &&
+      doses.equiv._fmt(100) === '100' && doses.equiv._fmt(10) === '10';
+
+    document.getElementById('ph-peso').value = '12';
+    document.getElementById('ph-tig').value = '5';
+    ph.calcular();
+    const tela = document.getElementById('ph-resultado').textContent;
+    out.naTela = /1100 mL\/dia/.test(tela) && /33 mEq/.test(tela) && /9,7 mL de NaCl 20%/.test(tela);
+
+    /* na ficha: usa o peso do paciente e lança a linha na hidratação */
+    ui.navegar('anestesia');
+    document.querySelector('#form-anestesia [name="paciente_peso"]').value = '12';
+    document.getElementById('hidra-body').innerHTML = '';
+    anestesia.hidra.abrirPediatrica();
+    return new Promise(res => setTimeout(() => {
+      out.modalCalculou = /1100 mL\/dia/.test(document.getElementById('phm-res').textContent);
+      anestesia.hidra._lancarPed();
+      const tr = document.querySelector('#hidra-body tr');
+      out.lancou = !!tr &&
+        /Holliday/.test(tr.querySelector('[name="hidra_tipo[]"]').value) &&
+        Math.abs(parseFloat(tr.querySelector('[name="hidra_velocidade[]"]').value) - 45.8) < 0.1 &&
+        tr.querySelector('[name="hidra_un_vel[]"]').value === 'mL/h' &&
+        /Na 33 mEq/.test(tr.querySelector('[name="hidra_obs[]"]').value);
+      document.getElementById('hidra-body').innerHTML = '';
+
+      /* --- o resto da conta de hidratação, conferido contra os exemplos --- */
+      const H = doses.hidraNec;
+      const ad = ph.calcularDe(70, 5, '30');
+      out.adulto = ad.volume === 2100 && Math.abs(ad.mlh - 87.5) < 0.1 && ad.adulto === true &&
+        Math.abs(H.manutencaoAdulto(70, 25).volume - 1750) < 0.01;
+
+      ui.navegar('doses');
+      document.getElementById('ph-peso').value = '70';
+      document.getElementById('ph-regra').value = '30';
+      ph.calcular();
+      const telaAd = document.getElementById('ph-resultado').textContent;
+      out.semEletrolitoNoAdulto = /2100 mL\/dia/.test(telaAd) && telaAd.indexOf('Sódio') < 0;
+
+      /* déficit 20 kg 8% = 1600 mL; jejum de 15 kg por 8 h ≈ 416 mL */
+      const m15 = ph.volumeDia(15) / 24;
+      out.deficitEPerdas = H.deficitDesidratacao(20, 8) === 1600 &&
+        Math.abs(H.deficitJejum(m15, 8) - 416.7) < 1 &&
+        H.perdaPorEpisodios(20, 3, 10) === 600 &&
+        H.terceiroEspaco(20, 4, 5) === 400 &&
+        H.deficitDesidratacao(20, 0) === null;
+
+      /* Parkland: 60 kg, 30% SCQ */
+      const pk = H.parkland(60, 30);
+      out.parkland = pk.total === 7200 && pk.primeiras8h === 3600 && pk.mlh8 === 450 && pk.mlh16 === 225;
+
+      /* o Parkland não entra no total: ele substitui a reposição */
+      document.getElementById('ph-peso').value = '20';
+      document.getElementById('ph-regra').value = 'holliday';
+      ['ph-desidr', 'ph-jejum', 'ph-vomito', 'ph-diarreia', 'ph-dreno', 'ph-3esp', 'ph-3esph'].forEach(id => {
+        const el = document.getElementById(id); if (el) el.value = '';
+      });
+      document.getElementById('ph-scq').value = '';
+      ph.calcular();
+      const semQueimadura = document.getElementById('ph-extra').textContent;
+      document.getElementById('ph-scq').value = '30';
+      ph.calcular();
+      const comQueimadura = document.getElementById('ph-extra').textContent;
+      const totalDe = txt => (txt.match(/Total do dia\s*([\d.]+) mL/) || [])[1];
+      out.parklandForaDoTotal = totalDe(semQueimadura) === totalDe(comQueimadura) &&
+        /Parkland/.test(comQueimadura) && /da queimadura/.test(comQueimadura);
+
+      /* diurese esperada: criança 1–2, adulto 0,5–1 mL/kg/h */
+      const dc = H.diureseEsperada(15, true), da = H.diureseEsperada(70, false);
+      out.diurese = dc.min === 15 && dc.max === 30 && da.min === 35 && da.max === 70;
+
+      res(out);
+    }, 250));
+  });
+  assert(r.faixas, 'as três faixas de Holliday-Segar precisam bater nos pontos de virada');
+  assert(r.semPesoSemConta, 'sem peso não se calcula nada');
+  assert(r.exemplo, 'o exemplo de 12 kg tem de dar 1100 mL, Na 33 mEq (9,7 mL), K 22 mEq e 86,4 g de glicose');
+  assert(r.mlh, 'e a velocidade em mL/h sai do volume do dia');
+  assert(r.mistura, 'a mistura de SG 5% e 50% tem de fechar volume e gramas');
+  assert(r.tigForaAvisa, 'glicose fora da faixa de SG 5%–50% avisa, em vez de inventar mistura');
+  assert(r.tigAltaCabe, 'e o que cabe entre 5% e 50% continua sendo calculado');
+  assert(r.formata, 'número grande não pode encolher na formatação — 1100 não é 11');
+  assert(r.naTela, 'a tela mostra volume, eletrólitos e o volume de cada sal');
+  assert(r.modalCalculou, 'na ficha, a conta usa o peso do paciente');
+  assert(r.lancou, 'e lança a linha na hidratação com velocidade, unidade e o resumo da conta');
+  assert(r.adulto, 'a manutenção do adulto (25–30 mL/kg/dia) tem de existir ao lado da pediátrica');
+  assert(r.semEletrolitoNoAdulto, 'eletrólito por 100 kcal é da regra pediátrica — não se mostra na do adulto');
+  assert(r.deficitEPerdas, 'déficit, jejum, perdas e terceiro espaço entram na conta do dia');
+  assert(r.parkland, 'Parkland: 4 mL × peso × %SCQ, metade nas primeiras 8 h');
+  assert(r.parklandForaDoTotal, 'Parkland substitui a reposição — não pode ser somado ao total');
+  assert(r.diurese, 'a diurese esperada é a conferência da reposição');
+  await page.close();
+});
+
+/* 131) Magnésio como adjuvante analgésico: ataque por peso (também no adulto)
+   e manutenção em bomba — com a conta de mL/h conferida. */
+await test('Doses: magnésio perioperatório — ataque 30–50 mg/kg e manutenção 6–20 mg/kg/h', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const ata = DOSES_DB.find(d => d.n === 'Sulfato de magnésio (analgesia)');
+    const man = DOSES_DB.find(d => d.n === 'Sulfato de magnésio (manutenção)');
+    out.existe = !!ata && !!man;
+    /* o ataque é por peso NOS DOIS: no adulto era dose fixa em mg */
+    out.ataquePorPeso = ata.ped[0] === 30 && ata.ped[1] === 50 && ata.ped[2] === 'mg/kg' &&
+      ata.adu[0] === 30 && ata.adu[1] === 50 && ata.adu[2] === 'mg/kg' && ata.c === 'ana';
+    out.manutencao = man.faixa[0] === 6 && man.faixa[1] === 20 && man.un === 'mg/kg/h' && man.c === 'inf';
+
+    /* 70 kg, 10 mg/kg/h, diluição 5 g/100 mL (50 mg/mL) → 14 mL/h */
+    out.mlh = doses._mlh(10, man.un, man.conc, 70) === 14 &&
+      doses._mlh(6, man.un, man.conc, 70) === 8.4 &&
+      doses._mlh(20, man.un, man.conc, 70) === 28;
+
+    /* o registro antigo (eletrólito/eclâmpsia) continua existindo — são usos
+       diferentes da mesma droga, e apagar um esconderia indicação */
+    out.eletrolitoContinua = !!DOSES_DB.find(d => d.n === 'Sulfato de magnésio' && d.c === 'ele');
+
+    ui.navegar('doses');
+    document.getElementById('dose-peso').value = '70';
+    document.getElementById('dose-idade').value = '40';
+    doses.recalcular();
+    /* buscar sem acento tem de achar */
+    document.getElementById('dose-busca').value = 'magnesio';
+    doses.render();
+    const html = document.getElementById('dose-lista').textContent.replace(/\s+/g, ' ');
+    out.buscaSemAcento = /magnésio/i.test(html);
+    out.mostraAtaqueCalculado = /2\.?100/.test(html) && /3\.?500/.test(html);
+    out.mostraBomba = /8,4/.test(html) && /28/.test(html);
+    document.getElementById('dose-busca').value = '';
+    doses.render();
+
+    /* e existe no catálogo da ficha, para lançar na medicação */
+    const cat = anestesia.meds._catalogoPlano();
+    const inf = cat.find(m => m.nome === 'Sulfato de magnésio (infusão)');
+    out.noCatalogo = !!inf && inf.unidade === 'mg/kg/h' && /50 mg\/mL/.test(inf.dil || '');
+    return out;
+  });
+  assert(r.existe, 'magnésio precisa existir como ataque analgésico e como manutenção');
+  assert(r.ataquePorPeso, 'o ataque é 30–50 mg/kg — por peso também no adulto');
+  assert(r.manutencao, 'a manutenção é 6–20 mg/kg/h, em bomba');
+  assert(r.mlh, 'a conta de mL/h da bomba tem de fechar com a diluição informada');
+  assert(r.eletrolitoContinua, 'o uso como eletrólito/eclâmpsia continua na lista — são indicações diferentes');
+  assert(r.buscaSemAcento, 'buscar "magnesio" sem acento tem de achar');
+  assert(r.mostraAtaqueCalculado, 'a dose de ataque aparece já calculada para o peso');
+  assert(r.mostraBomba, 'e a faixa em mL/h aparece para a bomba');
+  assert(r.noCatalogo, 'a infusão precisa existir no catálogo de medicações da ficha');
   await page.close();
 });
 

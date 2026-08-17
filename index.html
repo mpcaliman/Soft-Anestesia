@@ -4309,7 +4309,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-14m</b><br>
+    v7.1 · build <b id="build-tag">2026-08-15d</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -6154,6 +6154,11 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
               <label class="check"><input type="checkbox" name="monitores[]" value="BIS" onchange="anestesia.disp.sincronizarVitais()"><span>🧠 BIS</span></label>
               <label class="check"><input type="checkbox" name="monitores[]" value="TOF" onchange="anestesia.disp.sincronizarVitais()"><span>💪 TOF</span></label>
               <label class="check"><input type="checkbox" name="monitores[]" value="Glicemia" onchange="anestesia.disp.sincronizarVitais()"><span>🍬 Glicemia capilar</span></label>
+              <!-- Débito urinário: monitorização como as outras. Marcar aqui abre
+                   a coluna na grade e o painel de cálculo, mesmo que a sonda não
+                   esteja marcada no card de acessos (coletor externo, micção
+                   espontânea medida). O total vai sozinho para o balanço. -->
+              <label class="check"><input type="checkbox" name="monitores[]" value="Débito urinário" onchange="anestesia.disp.sincronizarVitais()"><span>🚻 Débito urinário</span></label>
               <label class="check"><input type="checkbox" name="monitores[]" value="PVC" onchange="anestesia.disp.sincronizarVitais()"><span>📉 PVC</span></label>
               <label class="check"><input type="checkbox" name="monitores[]" value="PIC" onchange="anestesia.disp.sincronizarVitais()"><span>🧠 PIC</span></label>
               <label class="check"><input type="checkbox" name="monitores[]" value="Débito cardíaco" onchange="anestesia.disp.sincronizarVitais()"><span>❤️ Débito cardíaco</span></label>
@@ -6380,6 +6385,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <button type="button" class="btn btn-sm" onclick="anestesia.hidra.addPreset('chad')">+ CHAD</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.hidra.addPreset('plasma')">+ Plasma</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.hidra.addPreset('plaquetas')">+ Plaquetas</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.hidra.abrirPediatrica()" title="Calcula a manutenção pela regra de Holliday-Segar com o peso do paciente e lança a linha na tabela">🧒 Manutenção pediátrica</button>
         </div>
 
         <div class="dyn-table-wrap">
@@ -8445,6 +8451,109 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       <div class="card-body">
         <p style="font-size:.78rem;color:var(--text-mute);margin:0 0 10px">Gera um resumo das doses de emerg&ecirc;ncia e via a&eacute;rea j&aacute; calculadas para o peso/idade informados &mdash; pronto para imprimir ou salvar em PDF.</p>
         <button type="button" class="btn btn-primary" onclick="doses.cartao()">&#128424;&#65039; Gerar cart&atilde;o de doses</button>
+      </div>
+    </section>
+
+    <!-- HIDRATAÇÃO DE MANUTENÇÃO — PEDIATRIA (Holliday-Segar) -->
+    <section class="card">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-icon">&#128167;</span><h2>Necessidade h&iacute;drica<small>Manuten&ccedil;&atilde;o, d&eacute;ficit, jejum, perdas e queimadura &mdash; com o total do dia</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">&#9662;</span></div>
+      </div>
+      <div class="card-body">
+        <div class="grid" style="gap:10px">
+          <div class="field col-3"><label>Peso (kg)</label>
+            <input type="number" id="ph-peso" min="0.4" max="80" step="0.1" inputmode="decimal" placeholder="ex.: 12" oninput="doses.pedHidra.calcular()">
+          </div>
+          <div class="field col-3"><label>Regra da manuten&ccedil;&atilde;o</label>
+            <select id="ph-regra" onchange="doses.pedHidra.calcular()">
+              <option value="holliday">Holliday-Segar (100/50/20)</option>
+              <option value="30">Adulto &mdash; 30 mL/kg/dia</option>
+              <option value="25">Adulto &mdash; 25 mL/kg/dia</option>
+            </select>
+          </div>
+          <div class="field col-3"><label>TIG <small style="color:var(--text-mute);font-weight:400">mg/kg/min</small></label>
+            <input type="number" id="ph-tig" min="0" max="20" step="0.5" inputmode="decimal" value="5" oninput="doses.pedHidra.calcular()">
+          </div>
+          <div class="field col-3" style="align-self:end">
+            <p style="font-size:.74rem;color:var(--text-mute);margin:0">TIG usual: <strong>4&ndash;8 mg/kg/min</strong>.</p>
+          </div>
+        </div>
+        <div id="ph-resultado" style="margin-top:10px"></div>
+
+        <!-- O RESTO DA CONTA: déficit, jejum, perdas, terceiro espaço, queimadura -->
+        <h3 style="font-size:.9rem;color:var(--primary-darker);margin:18px 0 8px;border-top:1px solid var(--border);padding-top:14px">
+          &#128167; Al&eacute;m da manuten&ccedil;&atilde;o <small style="color:var(--text-mute);font-weight:400">&mdash; d&eacute;ficit, jejum, perdas e terceiro espa&ccedil;o</small>
+        </h3>
+        <div class="grid" style="gap:10px">
+          <div class="field col-3"><label>Desidrata&ccedil;&atilde;o (%)</label>
+            <input type="number" id="ph-desidr" min="0" max="20" step="0.5" inputmode="decimal" placeholder="ex.: 8" oninput="doses.pedHidra.calcular()">
+          </div>
+          <div class="field col-3"><label>Jejum (h)</label>
+            <input type="number" id="ph-jejum" min="0" max="48" step="0.5" inputmode="decimal" placeholder="ex.: 8" oninput="doses.pedHidra.calcular()">
+          </div>
+          <div class="field col-3"><label>V&ocirc;mitos <small style="color:var(--text-mute);font-weight:400">epis&oacute;dios</small></label>
+            <input type="number" id="ph-vomito" min="0" step="1" inputmode="numeric" placeholder="0" oninput="doses.pedHidra.calcular()">
+          </div>
+          <div class="field col-3"><label>Diarreia <small style="color:var(--text-mute);font-weight:400">evacua&ccedil;&otilde;es</small></label>
+            <input type="number" id="ph-diarreia" min="0" step="1" inputmode="numeric" placeholder="0" oninput="doses.pedHidra.calcular()">
+          </div>
+          <div class="field col-3"><label>Aspirado/dreno (mL)</label>
+            <input type="number" id="ph-dreno" min="0" step="1" inputmode="numeric" placeholder="0" oninput="doses.pedHidra.calcular()">
+          </div>
+          <div class="field col-3"><label>3&ordm; espa&ccedil;o <small style="color:var(--text-mute);font-weight:400">mL/kg/h</small></label>
+            <input type="number" id="ph-3esp" min="0" max="15" step="0.5" inputmode="decimal" placeholder="0" oninput="doses.pedHidra.calcular()" title="Pancreatite 3–6 · Peritonite 2–4">
+          </div>
+          <div class="field col-3"><label>3&ordm; espa&ccedil;o <small style="color:var(--text-mute);font-weight:400">horas</small></label>
+            <input type="number" id="ph-3esph" min="0" max="48" step="0.5" inputmode="decimal" placeholder="0" oninput="doses.pedHidra.calcular()">
+          </div>
+          <div class="field col-3"><label>Queimadura <small style="color:var(--text-mute);font-weight:400">%SCQ</small></label>
+            <input type="number" id="ph-scq" min="0" max="100" step="1" inputmode="numeric" placeholder="0" oninput="doses.pedHidra.calcular()" title="Parkland: 4 mL × peso × %SCQ nas primeiras 24 h">
+          </div>
+        </div>
+        <div id="ph-extra" style="margin-top:10px"></div>
+
+        <p style="font-size:.72rem;color:var(--text-mute);margin:10px 0 0">
+          Holliday-Segar para manuten&ccedil;&atilde;o de 24 h; d&eacute;ficit de desidrata&ccedil;&atilde;o reposto em 24&ndash;48 h
+          conforme a gravidade; Parkland a partir da <strong>hora da queimadura</strong>, n&atilde;o da chegada.
+          N&atilde;o vale para rec&eacute;m-nascido nos primeiros dias. Refer&ecirc;ncia consultiva &mdash; reavalie sempre pelo
+          estado cl&iacute;nico, sinais vitais e diurese; hiper-hidrata&ccedil;&atilde;o faz tanto mal quanto desidrata&ccedil;&atilde;o.
+        </p>
+      </div>
+    </section>
+
+    <!-- EQUIVALÊNCIA DE NORADRENALINA (vasopressores) -->
+    <section class="card">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-icon">⚖️</span><h2>Equival&ecirc;ncia de noradrenalina<small>Quanto de vasopressor equivale a quanto de noradrenalina</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">&#9662;</span></div>
+      </div>
+      <div class="card-body">
+        <p style="font-size:.8rem;color:var(--text-soft);margin:0 0 10px">
+          Converte a dose de um vasopressor no <strong>equivalente em noradrenalina</strong> (mcg/kg/min) &mdash; e o contr&aacute;rio.
+          Serve para comparar a intensidade do suporte vasopressor entre drogas e ao longo do caso, n&atilde;o para trocar
+          uma pela outra: a substitui&ccedil;&atilde;o depende do mecanismo, do contexto e da resposta do paciente.
+        </p>
+        <div class="grid" style="gap:10px">
+          <div class="field col-4"><label>Droga</label>
+            <select id="eq-droga" onchange="doses.equiv.calcular()"></select>
+          </div>
+          <div class="field col-3"><label>Dose</label>
+            <input type="number" id="eq-dose" step="0.001" min="0" inputmode="decimal" placeholder="0,1" oninput="doses.equiv.calcular()">
+          </div>
+          <div class="field col-2"><label>Unidade</label>
+            <input type="text" id="eq-unidade" readonly class="orc-ro" style="background:var(--surface-alt)">
+          </div>
+          <div class="field col-3"><label>Peso (kg) <small style="color:var(--text-mute);font-weight:400">do card Paciente</small></label>
+            <input type="number" id="eq-peso" min="0.4" max="300" step="0.1" inputmode="decimal" placeholder="70" oninput="doses.equiv.calcular()">
+          </div>
+        </div>
+        <div id="eq-resultado" style="margin-top:10px"></div>
+        <div id="eq-tabela" style="margin-top:12px"></div>
+        <p style="font-size:.72rem;color:var(--text-mute);margin:10px 0 0">
+          Fatores de <em>Crit Care</em> 2023;27:2 &mdash; DOI 10.1186/s13054-023-04322-y. Refer&ecirc;ncia consultiva:
+          confira sempre com o protocolo da unidade.
+        </p>
       </div>
     </section>
 
@@ -25314,6 +25423,12 @@ const CATALOGO_MED = [
     { nome: 'Metaraminol', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
     { nome: 'Etilefrina', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
     { nome: 'Noradrenalina', unidade: 'mcg/kg/min', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '4 mg/250 mL (16 mcg/mL)' },
+    /* Vasopressores de resgate/segunda linha. A equivalência entre eles está
+       em Doses & Infusões → Equivalência de noradrenalina. */
+    { nome: 'Vasopressina', unidade: 'UI/min', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '20 UI/100 mL (0,2 UI/mL)' },
+    { nome: 'Terlipressina', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Dopamina', unidade: 'mcg/kg/min', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '250 mg/250 mL (1 mg/mL)' },
+    { nome: 'Azul de metileno', unidade: 'mg/kg', via: 'EV', tipo: 'Bolus' },
     { nome: 'Adrenalina', unidade: 'mcg', via: 'EV', tipo: 'Bolus' },
     { nome: 'Dobutamina', unidade: 'mcg/kg/min', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '250 mg/250 mL (1 mg/mL)' },
     { nome: 'Nitroglicerina', unidade: 'mcg/kg/min', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '25 mg/250 mL (100 mcg/mL)' },
@@ -25357,6 +25472,7 @@ const CATALOGO_MED = [
   ]},
   { grupo: 'Outros', itens: [
     { nome: 'Sulfato de magnésio', unidade: 'g', via: 'EV', tipo: 'Bolus' },
+    { nome: 'Sulfato de magnésio (infusão)', base: 'Sulfato de magnésio', unidade: 'mg/kg/h', via: 'EV', tipo: 'Infusão contínua (bomba)', dil: '5 g/100 mL (50 mg/mL)' },
     { nome: 'Ácido tranexâmico', dose: '1', unidade: 'g', via: 'EV', tipo: 'Bolus' },
     { nome: 'Hidrocortisona', dose: '100', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
     { nome: 'Omeprazol', dose: '40', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
@@ -26934,6 +27050,9 @@ const anestesia = {
        parâmetros habilitados pelos monitores selecionados. */
     sincronizarVitais() {
       try { anestesia.vitais.aplicarMonitores(); } catch (e) {}
+      /* débito urinário é monitorização como as outras: marcar abre o painel
+         de cálculo e a coluna na grade */
+      try { anestesia.diurese.sincronizar(); } catch (e) {}
       anestesia.disp._derivarMonitorizacao();
       markDirty();
     },
@@ -26995,11 +27114,26 @@ const anestesia = {
     _temSonda() {
       return Array.prototype.some.call(document.querySelectorAll('[name="dispositivos[]"]:checked'), el => el.value === 'Sonda vesical');
     },
-    /* Mostra/oculta o painel conforme a sonda vesical */
+    /* Marcado como monitorização (card de monitores) — vale mesmo sem sonda:
+       coletor externo, micção espontânea medida, nefrostomia. */
+    _monitorMarcado() {
+      return Array.prototype.some.call(document.querySelectorAll('#form-anestesia [name="monitores[]"]:checked'), el => el.value === 'Débito urinário');
+    },
+    _ativa() {
+      return anestesia.diurese._temSonda() || anestesia.diurese._monitorMarcado();
+    },
+    /* Já há volume medido? Então o painel não some ao desmarcar — esconder o
+       que foi registrado é perder o registro de vista. */
+    _temRegistro() {
+      const tot = (document.getElementById('diurese-total') || {}).value;
+      if (String(tot || '').trim()) return true;
+      return Array.prototype.some.call(document.querySelectorAll('[name="diurese_vol[]"]'), el => String(el.value || '').trim());
+    },
+    /* Mostra/oculta o painel conforme a sonda vesical ou o monitor marcado */
     sincronizar() {
       const p = anestesia.diurese._painel();
       if (!p) return;
-      const on = anestesia.diurese._temSonda();
+      const on = anestesia.diurese._ativa() || anestesia.diurese._temRegistro();
       p.style.display = on ? 'block' : 'none';
       if (on) {
         if (document.getElementById('diurese-modo').value === 'parcial' && !document.querySelector('#diurese-body tr')) anestesia.diurese.addParcial();
@@ -27060,7 +27194,7 @@ const anestesia = {
        intervalo e o débito do caso, e alimenta o balanço hídrico sozinho. */
     mostrarNaGrade() {
       try {
-        if (anestesia.diurese._temSonda()) return true;
+        if (anestesia.diurese._ativa()) return true;
         /* sem sonda marcada, só aparece se já houver algo registrado — não
            poluir a grade de quem não mediu diurese */
         return document.querySelectorAll('[name="diurese_vol[]"]').length > 0
@@ -30969,6 +31103,65 @@ const anestesia = {
         volEl.style.background = '#e8f5e9';
         volEl.title = 'Volume calculado: ' + vel + ' ' + unVel + ' × ' + durMin + ' min';
       }
+    },
+    /* Manutenção pediátrica (Holliday-Segar) com o peso do próprio paciente.
+       A conta mora em Doses & Infusões — aqui só se usa o resultado, para não
+       existirem duas fórmulas no sistema. */
+    abrirPediatrica() {
+      const f = document.getElementById('form-anestesia');
+      const peso = f ? (f.querySelector('[name="paciente_peso"]') || {}).value : '';
+      if (!peso) { toast('Preencha o peso do paciente na identificação primeiro', 'warn'); return; }
+      const corpo =
+        '<p style="font-size:.84rem;color:var(--text-soft);margin:0 0 10px">Regra de Holliday-Segar — manutenção de 24 h. ' +
+        'Não cobre reposição de perdas, déficit prévio nem jejum prolongado.</p>' +
+        '<div class="grid" style="gap:10px">' +
+        '<div class="field col-6"><label>Peso (kg)</label><input type="number" id="phm-peso" step="0.1" min="0.4" max="80" value="' + utils.escapeAttr(peso) + '" oninput="anestesia.hidra._calcPed()"></div>' +
+        '<div class="field col-6"><label>TIG <small style="color:var(--text-mute);font-weight:400">mg/kg/min (4–8)</small></label><input type="number" id="phm-tig" step="0.5" min="0" max="20" value="5" oninput="anestesia.hidra._calcPed()"></div>' +
+        '</div><div id="phm-res" style="margin-top:8px"></div>';
+      modal.open('🧒 Manutenção pediátrica', corpo,
+        '<button class="btn" onclick="modal.close()">Fechar</button>' +
+        '<button class="btn btn-primary" onclick="anestesia.hidra._lancarPed()">Lançar na tabela</button>');
+      setTimeout(() => anestesia.hidra._calcPed(), 60);
+    },
+    _pedAtual() {
+      return doses.pedHidra.calcularDe(
+        (document.getElementById('phm-peso') || {}).value,
+        (document.getElementById('phm-tig') || {}).value);
+    },
+    _calcPed() {
+      const box = document.getElementById('phm-res');
+      if (!box) return;
+      const r = anestesia.hidra._pedAtual();
+      if (!r) { box.innerHTML = '<p style="font-size:.82rem;color:var(--text-mute);margin:0">Informe o peso.</p>'; return; }
+      const n = doses.pedHidra._n;
+      box.innerHTML =
+        '<div style="background:var(--primary-soft);border-radius:8px;padding:10px 12px">' +
+        '<div style="font-size:1.05rem;font-weight:700;color:var(--primary-darker)">' + n(r.volume, 0) + ' mL/dia · ' + n(r.mlh, 1) + ' mL/h</div>' +
+        '<div style="font-size:.8rem;color:var(--text-soft)">Na ' + n(r.na_meq, 1) + ' mEq (' + n(r.na_ml, 1) + ' mL NaCl 20%) · ' +
+        'K ' + n(r.k_meq, 1) + ' mEq (' + n(r.k_ml, 1) + ' mL KCl 10%)' +
+        (r.glicose_g != null ? ' · glicose ' + n(r.glicose_g, 1) + ' g' : '') + '</div></div>' +
+        (r.mistura && !r.mistura.impossivel
+          ? '<p style="font-size:.8rem;margin:8px 0 0">≈ <b>' + n(r.mistura.concentracao, 1) + '%</b> de glicose no volume do dia — ' +
+            n(r.mistura.sg5, 0) + ' mL de SG 5% + ' + n(r.mistura.sg50, 0) + ' mL de SG 50%.</p>'
+          : (r.mistura ? '<p style="font-size:.8rem;margin:8px 0 0;color:#8a5300">A glicose pedida sai fora da faixa de SG 5%–50% nesse volume — ajuste a TIG.</p>' : ''));
+    },
+    _lancarPed() {
+      const r = anestesia.hidra._pedAtual();
+      if (!r) { toast('Informe o peso', 'warn'); return; }
+      const n = doses.pedHidra._n;
+      const tr = anestesia.hidra.add({
+        hora: utils.horaAtual(),
+        tipo: 'Manutenção pediátrica (Holliday-Segar)',
+        via: 'EV',
+        categoria: 'cristaloide',
+        velocidade: Number(r.mlh.toFixed(1)),
+        unidadeVel: 'mL/h',
+        observacao: doses.pedHidra.resumo(r)
+      });
+      try { anestesia.hidra.recalc(); } catch (e) {}
+      modal.close();
+      toast('💧 Manutenção lançada a ' + n(r.mlh, 1) + ' mL/h — ajuste o volume conforme o tempo de sala');
+      if (tr) { const v = tr.querySelector('[name="hidra_volume[]"]'); if (v) v.focus(); }
     },
     addPreset(chave) {
       const p = anestesia.hidra.PRESETS[chave];
@@ -38019,12 +38212,12 @@ const printPreview = {
       printPreview._verCtx = { mod: 'anestesia', formId: 'form-anestesia' };
       const ppp = document.getElementById('ppp');
       if (!ppp) { toast('Erro: container de preview não encontrado', 'error'); return; }
-      /* Capítulos: 1º a ficha COMPLETA; a SRPA começa em PÁGINA NOVA com capa
-         de capítulo (a quebra vale na impressão do navegador e no PDF gerado —
-         o _gerarDocDeTexto reconhece .pp-quebra e .pp-capitulo). */
+      /* Ficha e SRPA são o mesmo ato: a SRPA entra logo abaixo, na mesma
+         página, com a faixa de capítulo separando. Forçar página nova aqui
+         gastava uma folha por caso — e a SRPA costuma ocupar meia página.
+         A faixa não fica sozinha no pé da folha (page-break-after: avoid). */
       ppp.innerHTML = htmlFicha +
-        '<div class="pp-quebra" style="page-break-before:always;break-before:page"></div>' +
-        '<div class="pp-capitulo" style="margin:0 0 12px;padding:9px 14px;background:#eef2f7;border-left:5px solid #3b5b7e;font-weight:700;font-size:13pt;color:#22384f">2ª parte — Recuperação pós-anestésica (SRPA)</div>' +
+        '<div class="pp-capitulo" style="margin:14px 0 12px;padding:9px 14px;background:#eef2f7;border-left:5px solid #3b5b7e;font-weight:700;font-size:13pt;color:#22384f;break-inside:avoid;page-break-inside:avoid;page-break-after:avoid;break-after:avoid">2ª parte — Recuperação pós-anestésica (SRPA)</div>' +
         htmlSrpa;
       /* Nome do arquivo: Paciente_Ficha-Anestesia+SRPA_data de criação (hoje) */
       let paciente = '';
@@ -42719,6 +42912,7 @@ const DOSES_DB = [
   { c:'inf', n:'Dexmedetomidina', a:'100 mcg/mL (amp 2 mL)', d:'200 mcg em 50 mL = 4 mcg/mL', conc:4, t:'i', un:'mcg/kg/h', faixa:[0.2,1.4], tip:0.5, o:'Ataque 0,5-1 mcg/kg em 10 min (opcional). Bradicardia/hipotensão.' },
   { c:'inf', n:'Cetamina (analgesia contínua)', a:'50 mg/mL', d:'100 mg em 100 mL = 1.000 mcg/mL', conc:1000, t:'i', un:'mg/kg/h', faixa:[0.1,0.3], tip:0.15, o:'Poupador de opioide.' },
   { c:'inf', n:'Lidocaína EV (analgesia)', a:'2% = 20 mg/mL', d:'200 mg em 100 mL = 2 mg/mL', conc:2000, t:'i', un:'mg/kg/h', faixa:[1,2], tip:1.5, o:'Bolus 1-1,5 mg/kg. Vigiar toxicidade (perioral, zumbido, arritmia).' },
+  { c:'inf', n:'Sulfato de magnésio (manutenção)', a:'50% = 500 mg/mL (amp 10 mL)', d:'5 g em 100 mL = 50 mg/mL', conc:50000, t:'i', un:'mg/kg/h', faixa:[6,20], tip:10, o:'Manutenção durante a cirurgia, depois do ataque de 30-50 mg/kg em 10-20 min. Vigiar hipotensão, bloqueio neuromuscular prolongado e reflexos. Ajustar na disfunção renal.' },
 
   { c:'atb', n:'Cefazolina', a:'Fr 1 g', d:'Diluir 1 g/10 mL; infundir 3-5 min', conc:100, t:'b', ped:[30,30,'mg/kg'], adu:[2000,2000,'mg'], max:{v:2000,u:'mg'}, via:'EV', o:'>=120 kg: 3 g. Repique intraop: 4 h. Até 60 min antes da incisão.' },
   { c:'atb', n:'Cefuroxima', a:'Fr 750 mg', d:'Diluir e infundir lento', conc:100, t:'b', ped:[50,50,'mg/kg'], adu:[1500,1500,'mg'], max:{v:1500,u:'mg'}, via:'EV', o:'Repique: 4 h.' },
@@ -42739,6 +42933,9 @@ const DOSES_DB = [
   { c:'ana', n:'Ondansetrona', a:'2 mg/mL (amp 2/4 mL)', d:'Puro; EV lento', conc:2, t:'b', ped:[0.1,0.1,'mg/kg'], adu:[4,8,'mg'], max:{v:8,u:'mg'}, via:'EV', o:'Prolonga QT (dose-dependente).' },
   { c:'ana', n:'Dexametasona', a:'4 mg/mL (amp 2,5 mL)', d:'Puro', conc:4, t:'b', ped:[0.1,0.15,'mg/kg'], adu:[4,8,'mg'], max:{v:10,u:'mg'}, via:'EV', o:'Antiemético + adjuvante analgésico.' },
   { c:'ana', n:'Ácido tranexâmico', a:'50 mg/mL (amp 5 mL)', d:'Diluir em 50-100 mL; infundir 10 min', conc:50, t:'b', ped:[10,20,'mg/kg'], adu:[1000,1000,'mg'], max:{v:2000,u:'mg'}, via:'EV', o:'Trauma: 1 g em 10 min + 1 g em 8 h.' },
+  /* Magnésio como adjuvante analgésico: o ataque é por peso também no adulto
+     (o registro em "Eletrólitos" é o do uso como eletrólito/eclâmpsia). */
+  { c:'ana', n:'Sulfato de magnésio (analgesia)', a:'50% = 500 mg/mL (amp 10 mL)', d:'Diluir em 50-100 mL; infundir em 10-20 min', conc:null, t:'b', ped:[30,50,'mg/kg'], adu:[30,50,'mg/kg'], via:'EV', o:'Ataque perioperatório. Manutenção opcional 6-20 mg/kg/h durante a cirurgia (ver Infusão contínua). Vigiar hipotensão; potencializa o bloqueio neuromuscular. Ajustar na disfunção renal.' },
   { c:'ana', n:'Hidrocortisona', a:'Fr 100/500 mg', d:'Diluir 100 mg/10 mL', conc:10, t:'b', ped:[2,4,'mg/kg'], adu:[100,200,'mg'], max:{v:500,u:'mg'}, via:'EV', o:'Anafilaxia (adjuvante), insuf. adrenal, broncoespasmo.' },
 
   { c:'eme', n:'Adrenalina - PCR', a:'1 mg/mL (amp 1 mL)', d:'Ped: 1:10.000 (1 mg + 9 mL SF) = 0,1 mg/mL', conc:0.1, t:'b', ped:[0.01,0.01,'mg/kg'], adu:[1,1,'mg'], max:{v:1,u:'mg'}, via:'EV/IO', perigo:true, o:'Ped: 0,1 mL/kg de 1:10.000, a cada 3-5 min. Adulto: 1 mg a cada 3-5 min.' },
@@ -42753,7 +42950,364 @@ const DOSES_DB = [
 
 const doses = {
   _cat: 'todas',
-  init() { doses._renderChips(); try { doses.puxarPaciente(true); } catch (e) {} doses.recalcular(); },
+  init() {
+    doses._renderChips();
+    try { doses.puxarPaciente(true); } catch (e) {}
+    doses.recalcular();
+    try { doses.equiv.init(); } catch (e) {}
+    try { doses.pedHidra._puxarPeso(); doses.pedHidra.calcular(); } catch (e) {}
+  },
+
+  /* ---- HIDRATAÇÃO DE MANUTENÇÃO — PEDIATRIA (Holliday-Segar) ----------
+     Volume/dia:  ≤10 kg → peso × 100
+                  10–20 kg → 1000 + (peso − 10) × 50
+                  >20 kg  → 1500 + (peso − 20) × 20
+     kcal/dia (em unidades de 100 kcal) = volume ÷ 100
+     Na⁺ 3 mEq e K⁺ 2 mEq por 100 kcal
+     Glicose g/dia = peso × 1,44 × TIG(mg/kg/min)   [1 mg/kg/min = 1,44 g/kg/dia]
+
+     É manutenção de 24 h: não cobre reposição de perdas, déficit prévio,
+     jejum prolongado nem débito de dreno — e o app não finge que cobre. */
+  pedHidra: {
+    NACL20: 3.4,      /* mEq/mL */
+    KCL10: 1.34,      /* mEq/mL */
+    SG: { '5%': 0.05, '10%': 0.1, '50%': 0.5 },   /* g/mL */
+    volumeDia(peso) {
+      const p = parseFloat(peso);
+      if (isNaN(p) || p <= 0) return null;
+      if (p <= 10) return p * 100;
+      if (p <= 20) return 1000 + (p - 10) * 50;
+      return 1500 + (p - 20) * 20;
+    },
+    /* regra = 'holliday' (padrão) ou mL/kg/dia do adulto (25 / 30) */
+    calcularDe(peso, tig, regra) {
+      const p0 = parseFloat(peso);
+      let vol, adulto = false;
+      if (regra && regra !== 'holliday') {
+        const m = doses.hidraNec.manutencaoAdulto(p0, regra);
+        if (!m) return null;
+        vol = m.volume; adulto = true;
+      } else {
+        vol = doses.pedHidra.volumeDia(peso);
+      }
+      if (vol == null) return null;
+      const p = parseFloat(peso);
+      const t = (tig === '' || tig == null) ? NaN : parseFloat(tig);
+      const cem = vol / 100;                       /* unidades de 100 kcal */
+      const na = 3 * cem, k = 2 * cem;
+      const gli = isNaN(t) ? null : p * 1.44 * t;
+      const r = {
+        peso: p, volume: vol, mlh: vol / 24, kcal: cem, adulto: adulto, regra: regra || 'holliday',
+        na_meq: na, na_ml: na / doses.pedHidra.NACL20,
+        k_meq: k, k_ml: k / doses.pedHidra.KCL10,
+        tig: isNaN(t) ? null : t, glicose_g: gli, mistura: null
+      };
+      /* Para chegar a essa massa de glicose DENTRO do volume do dia, a conta
+         é uma mistura de SG 5% com SG 50% — que é como se faz na prática. */
+      if (gli != null) {
+        const v50 = (gli - doses.pedHidra.SG['5%'] * vol) / (doses.pedHidra.SG['50%'] - doses.pedHidra.SG['5%']);
+        if (v50 >= 0 && v50 <= vol) r.mistura = { sg5: vol - v50, sg50: v50, concentracao: (gli / vol) * 100 };
+        else r.mistura = { impossivel: true, concentracao: (gli / vol) * 100 };
+      }
+      return r;
+    },
+    _n(v, casas) {
+      if (v == null || isNaN(v)) return '—';
+      /* só zero DEPOIS da vírgula sai: 1100 tem de continuar 1100 */
+      return v.toFixed(casas == null ? 1 : casas)
+        .replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '').replace('.', ',');
+    },
+    _puxarPeso() {
+      const el = document.getElementById('ph-peso');
+      if (!el || el.value) return;
+      const p = doses._val('dose-peso');
+      /* só faz sentido oferecer a conta pediátrica com peso de criança */
+      if (p && p > 0 && p <= 40) el.value = p;
+    },
+    calcular() {
+      const box = document.getElementById('ph-resultado');
+      if (!box) return;
+      const peso = (document.getElementById('ph-peso') || {}).value;
+      const tig = (document.getElementById('ph-tig') || {}).value;
+      const regra = (document.getElementById('ph-regra') || {}).value;
+      const r = doses.pedHidra.calcularDe(peso, tig, regra);
+      if (!r) { box.innerHTML = '<p style="font-size:.82rem;color:var(--text-mute);margin:0">Informe o peso para calcular.</p>'; return; }
+      const n = doses.pedHidra._n;
+      let mist = '';
+      if (r.mistura && !r.mistura.impossivel) {
+        mist = '<div style="font-size:.8rem;margin-top:6px">Para essa glicose no volume do dia (≈ <b>' +
+          n(r.mistura.concentracao, 1) + '%</b>): <b>' + n(r.mistura.sg5, 0) + ' mL</b> de SG 5% + <b>' +
+          n(r.mistura.sg50, 0) + ' mL</b> de SG 50%.</div>';
+      } else if (r.mistura && r.mistura.impossivel) {
+        mist = '<div style="font-size:.8rem;margin-top:6px;color:#8a5300">A glicose pedida dá <b>' +
+          n(r.mistura.concentracao, 1) + '%</b> no volume do dia — fora da faixa de SG 5%–50%. Ajuste a TIG ou o volume.</div>';
+      }
+      box.innerHTML =
+        '<div style="background:var(--primary-soft);border-radius:8px;padding:10px 12px">' +
+        '<div style="font-size:1.05rem;font-weight:700;color:var(--primary-darker)">' +
+        n(r.volume, 0) + ' mL/dia · ' + n(r.mlh, 1) + ' mL/h</div>' +
+        '<div style="font-size:.78rem;color:var(--text-soft)">' +
+        (r.adulto ? 'manutenção do adulto — ' + n(parseFloat(r.regra), 0) + ' mL/kg/dia'
+                  : n(r.kcal, 1) + ' × 100 kcal/dia') + '</div>' +
+        '</div>' +
+        /* eletrólitos e glicose por 100 kcal são da regra pediátrica: com a
+           taxa do adulto, essa conta não se aplica e não é mostrada */
+        (r.adulto ? '' :
+        '<div style="overflow-x:auto;margin-top:8px"><table class="data" style="font-size:.84rem"><tbody>' +
+        '<tr><td>Sódio</td><td style="text-align:right"><b>' + n(r.na_meq, 1) + ' mEq</b></td>' +
+        '<td style="text-align:right;color:var(--text-mute)">' + n(r.na_ml, 1) + ' mL de NaCl 20%</td></tr>' +
+        '<tr><td>Potássio</td><td style="text-align:right"><b>' + n(r.k_meq, 1) + ' mEq</b></td>' +
+        '<td style="text-align:right;color:var(--text-mute)">' + n(r.k_ml, 1) + ' mL de KCl 10%</td></tr>' +
+        (r.glicose_g != null ? '<tr><td>Glicose (TIG ' + n(r.tig, 1) + ')</td><td style="text-align:right"><b>' +
+          n(r.glicose_g, 1) + ' g</b></td><td style="text-align:right;color:var(--text-mute)">no volume do dia</td></tr>' : '') +
+        '</tbody></table></div>' + mist);
+      doses.pedHidra._extras(r);
+    },
+    /* Déficit + jejum + perdas + terceiro espaço + Parkland, e o total do dia */
+    _extras(r) {
+      const host = document.getElementById('ph-extra');
+      if (!host) return;
+      const n = doses.pedHidra._n;
+      const v = id => (document.getElementById(id) || {}).value;
+      const H = doses.hidraNec;
+      const peso = r.peso;
+      const linhas = [];
+      let total = r.volume;
+
+      linhas.push(['Manutenção (24 h)', r.volume, n(r.mlh, 1) + ' mL/h']);
+
+      const defi = H.deficitDesidratacao(peso, v('ph-desidr'));
+      if (defi) { total += defi; linhas.push(['Déficit de desidratação (' + n(parseFloat(v('ph-desidr')), 1) + '%)', defi, 'repor em 24–48 h']); }
+
+      const jej = H.deficitJejum(r.mlh, v('ph-jejum'));
+      if (jej) { total += jej; linhas.push(['Déficit de jejum (' + n(parseFloat(v('ph-jejum')), 1) + ' h)', jej, 'manutenção/h × horas']); }
+
+      const vom = H.perdaPorEpisodios(peso, v('ph-vomito'), 15);
+      if (vom) { total += vom; linhas.push(['Vômitos (' + v('ph-vomito') + ')', vom, '15 mL/kg por episódio (10–20)']); }
+
+      const dia = H.perdaPorEpisodios(peso, v('ph-diarreia'), 10);
+      if (dia) { total += dia; linhas.push(['Diarreia (' + v('ph-diarreia') + ')', dia, '10 mL/kg por evacuação']); }
+
+      const dren = parseFloat(v('ph-dreno'));
+      if (!isNaN(dren) && dren > 0) { total += dren; linhas.push(['Aspirado / dreno', dren, 'reposição mL a mL']); }
+
+      const te = H.terceiroEspaco(peso, v('ph-3esp'), v('ph-3esph'));
+      if (te) { total += te; linhas.push(['Terceiro espaço', te, v('ph-3esp') + ' mL/kg/h × ' + v('ph-3esph') + ' h']); }
+
+      const pk = H.parkland(peso, v('ph-scq'));
+      const du = H.diureseEsperada(peso, peso <= 40);
+
+      host.innerHTML =
+        '<div style="overflow-x:auto"><table class="data" style="font-size:.84rem"><tbody>' +
+        linhas.map(l => '<tr><td>' + utils.escapeHTML(l[0]) + '</td>' +
+          '<td style="text-align:right;white-space:nowrap"><b>' + n(l[1], 0) + ' mL</b></td>' +
+          '<td style="text-align:right;color:var(--text-mute);font-size:.92em">' + utils.escapeHTML(l[2]) + '</td></tr>').join('') +
+        '<tr style="border-top:2px solid var(--border);font-weight:700"><td>Total do dia</td>' +
+        '<td style="text-align:right;white-space:nowrap">' + n(total, 0) + ' mL</td>' +
+        '<td style="text-align:right;color:var(--text-mute)">' + n(total / 24, 1) + ' mL/h</td></tr>' +
+        '</tbody></table></div>' +
+        (pk ? '<div style="background:#fff6e8;border-left:4px solid #c47c1f;border-radius:6px;padding:9px 11px;margin-top:10px;font-size:.84rem">' +
+          '<b>Parkland — queimadura ' + n(parseFloat(v('ph-scq')), 0) + '% SCQ:</b> ' + n(pk.total, 0) + ' mL nas primeiras 24 h · ' +
+          n(pk.primeiras8h, 0) + ' mL nas primeiras 8 h (' + n(pk.mlh8, 0) + ' mL/h) · ' +
+          n(pk.proximas16h, 0) + ' mL nas 16 h seguintes (' + n(pk.mlh16, 0) + ' mL/h).' +
+          '<div style="font-size:.92em;color:#8a5300;margin-top:3px">As 8 horas contam <b>da queimadura</b>, não da chegada. Fora da soma acima: Parkland substitui a reposição, não se acumula com ela.</div>' +
+          '</div>' : '') +
+        (du ? '<p style="font-size:.78rem;color:var(--text-mute);margin:8px 0 0">Diurese esperada: <b>' +
+          n(du.min, 0) + '–' + n(du.max, 0) + ' mL/h</b> (' + du.faixa[0] + '–' + du.faixa[1] + ' mL/kg/h) — é por ela que se confere a reposição.</p>' : '');
+    },
+    /* Texto de uma linha, para levar o cálculo para a ficha sem redigitar */
+    resumo(r) {
+      if (!r) return '';
+      const n = doses.pedHidra._n;
+      return 'Manutenção (Holliday-Segar, ' + n(r.peso, 1) + ' kg): ' + n(r.volume, 0) + ' mL/24 h · ' +
+        n(r.mlh, 1) + ' mL/h · Na ' + n(r.na_meq, 1) + ' mEq (' + n(r.na_ml, 1) + ' mL NaCl 20%) · K ' +
+        n(r.k_meq, 1) + ' mEq (' + n(r.k_ml, 1) + ' mL KCl 10%)' +
+        (r.glicose_g != null ? ' · glicose ' + n(r.glicose_g, 1) + ' g (TIG ' + n(r.tig, 1) + ')' : '');
+    }
+  },
+
+  /* ---- NECESSIDADE HÍDRICA: déficit, perdas, jejum, terceiro espaço ----
+     Manutenção é só a primeira parcela. O que faltava era o resto da conta:
+     déficit de desidratação, déficit de jejum, perdas contínuas, terceiro
+     espaço e queimadura (Parkland) — e o total do dia, que é o número que
+     interessa na beira do leito.
+
+     Referências: Holliday & Segar, Pediatrics 1957;19(5):823-32; Carcillo et
+     al., Pediatr Crit Care Med 2009;10(3):394-400; Jeschke et al., Lancet
+     2011;378(9794):799-808; Morgan & Mikhail, Clinical Anesthesiology, 6ª ed. */
+  hidraNec: {
+    /* Adulto: 25–30 mL/kg/dia (a taxa fica à escolha, com 30 como padrão) */
+    manutencaoAdulto(peso, mlkg) {
+      const p = parseFloat(peso);
+      const t = parseFloat(mlkg);
+      if (isNaN(p) || p <= 0) return null;
+      const taxa = isNaN(t) ? 30 : t;
+      const vol = p * taxa;
+      return { volume: vol, mlh: vol / 24, taxa: taxa };
+    },
+    /* Déficit de desidratação: % × peso × 10 (repor em 24–48 h) */
+    deficitDesidratacao(peso, perc) {
+      const p = parseFloat(peso), d = parseFloat(perc);
+      if (isNaN(p) || isNaN(d) || p <= 0 || d <= 0) return null;
+      return d * p * 10;
+    },
+    /* Déficit de jejum: manutenção por hora × horas de jejum */
+    deficitJejum(mlh, horas) {
+      const m = parseFloat(mlh), h = parseFloat(horas);
+      if (isNaN(m) || isNaN(h) || h <= 0) return null;
+      return m * h;
+    },
+    /* Perdas contínuas — reposição mL a mL, com as estimativas usuais */
+    PERDAS: {
+      vomito:   { rot: 'Vômito', porEpisodio: [10, 20], unidade: 'mL/kg por episódio' },
+      diarreia: { rot: 'Diarreia', porEpisodio: [10, 10], unidade: 'mL/kg por evacuação' }
+    },
+    perdaPorEpisodios(peso, episodios, mlkg) {
+      const p = parseFloat(peso), n = parseFloat(episodios), m = parseFloat(mlkg);
+      if (isNaN(p) || isNaN(n) || isNaN(m) || n <= 0) return null;
+      return p * n * m;
+    },
+    /* Terceiro espaço: mL/kg/h conforme a condição (pancreatite 3–6,
+       peritonite 2–4) — o app não escolhe a taxa, só faz a conta. */
+    TERCEIRO_ESPACO: [
+      { rot: 'Pancreatite', faixa: [3, 6] },
+      { rot: 'Peritonite', faixa: [2, 4] },
+      { rot: 'Queimadura extensa', faixa: null, obs: 'usar Parkland' }
+    ],
+    terceiroEspaco(peso, mlkgh, horas) {
+      const p = parseFloat(peso), t = parseFloat(mlkgh), h = parseFloat(horas);
+      if (isNaN(p) || isNaN(t) || isNaN(h) || t <= 0 || h <= 0) return null;
+      return p * t * h;
+    },
+    /* Parkland (queimadura): 4 mL × peso × %SCQ nas primeiras 24 h,
+       metade nas primeiras 8 h A PARTIR DA QUEIMADURA, metade nas 16 h
+       seguintes. O horário da queimadura é o que costuma ser esquecido. */
+    parkland(peso, scq) {
+      const p = parseFloat(peso), s = parseFloat(scq);
+      if (isNaN(p) || isNaN(s) || p <= 0 || s <= 0) return null;
+      const total = 4 * p * s;
+      return { total: total, primeiras8h: total / 2, proximas16h: total / 2,
+               mlh8: total / 2 / 8, mlh16: total / 2 / 16 };
+    },
+    /* Diurese esperada — é por ela que se confere se a reposição está certa */
+    diureseEsperada(peso, crianca) {
+      const p = parseFloat(peso);
+      if (isNaN(p) || p <= 0) return null;
+      const f = crianca ? [1, 2] : [0.5, 1];
+      return { min: p * f[0], max: p * f[1], faixa: f };
+    }
+  },
+
+  /* ---- EQUIVALÊNCIA DE NORADRENALINA ----------------------------------
+     Fatores de Crit Care 2023;27:2 (DOI 10.1186/s13054-023-04322-y): a dose
+     da droga × fator = equivalente em noradrenalina (mcg/kg/min).
+
+     Serve para COMPARAR a intensidade do suporte vasopressor — entre drogas
+     e ao longo do caso. Não é receita de troca: substituir um vasopressor
+     por outro depende do mecanismo, do contexto e da resposta do paciente.
+
+     Só entram aqui as drogas cuja unidade está inequívoca na fonte. Dose e
+     unidade andam juntas: dizer "0,8" sem dizer de quê é o começo de um erro. */
+  equiv: {
+    REF: 0.1,                         /* dose de referência da fonte (mcg/kg/min) */
+    DROGAS: [
+      { nome: 'Noradrenalina',        unidade: 'mcg/kg/min', fator: 1,      porPeso: true },
+      { nome: 'Adrenalina',           unidade: 'mcg/kg/min', fator: 1,      porPeso: true },
+      { nome: 'Vasopressina',         unidade: 'U/min',      fator: 2.5,    porPeso: false },
+      { nome: 'Terlipressina',        unidade: 'mcg/kg/min', fator: 10,     porPeso: true },
+      { nome: 'Metaraminol',          unidade: 'mcg/kg/min', fator: 0.125,  porPeso: true },
+      { nome: 'Fenilefrina',          unidade: 'mcg/kg/min', fator: 0.06,   porPeso: true },
+      { nome: 'Midodrina',            unidade: 'mcg/kg/min', fator: 0.4,    porPeso: true },
+      { nome: 'Dopamina',             unidade: 'mcg/kg/min', fator: 0.01,   porPeso: true },
+      { nome: 'Angiotensina II',      unidade: 'ng/kg/min',  fator: 0.0025, porPeso: true }
+    ],
+    _dr(nome) { return doses.equiv.DROGAS.find(d => d.nome === nome) || null; },
+    /* dose da droga → equivalente em noradrenalina (mcg/kg/min) */
+    paraNora(nome, dose) {
+      const d = doses.equiv._dr(nome);
+      const v = parseFloat(dose);
+      if (!d || isNaN(v)) return null;
+      return v * d.fator;
+    },
+    /* equivalente em noradrenalina → dose da droga */
+    deNora(nome, nora) {
+      const d = doses.equiv._dr(nome);
+      const v = parseFloat(nora);
+      if (!d || isNaN(v) || !d.fator) return null;
+      return v / d.fator;
+    },
+    _fmt(v) {
+      if (v == null || isNaN(v)) return '—';
+      const abs = Math.abs(v);
+      const casas = abs >= 10 ? 1 : (abs >= 1 ? 2 : (abs >= 0.01 ? 3 : 4));
+      /* zero à direita só faz o número parecer mais preciso do que é — mas
+         só depois da vírgula: 1100 não pode virar 11 */
+      return v.toFixed(casas).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '').replace('.', ',');
+    },
+    init() {
+      const sel = document.getElementById('eq-droga');
+      if (!sel) return;
+      if (!sel.options.length) {
+        sel.innerHTML = doses.equiv.DROGAS.map(d => '<option>' + utils.escapeHTML(d.nome) + '</option>').join('');
+        sel.value = 'Noradrenalina';
+      }
+      const dose = document.getElementById('eq-dose');
+      if (dose && !dose.value) dose.value = doses.equiv.REF;
+      doses.equiv._puxarPeso();
+      doses.equiv.calcular();
+    },
+    _puxarPeso() {
+      const el = document.getElementById('eq-peso');
+      if (!el || el.value) return;
+      const p = doses._val('dose-peso');
+      if (p) el.value = p;
+    },
+    calcular() {
+      const sel = document.getElementById('eq-droga');
+      const box = document.getElementById('eq-resultado');
+      if (!sel || !box) return;
+      const d = doses.equiv._dr(sel.value);
+      const uni = document.getElementById('eq-unidade');
+      if (uni && d) uni.value = d.unidade;
+      const dose = parseFloat((document.getElementById('eq-dose') || {}).value);
+      const peso = parseFloat((document.getElementById('eq-peso') || {}).value);
+      if (!d || isNaN(dose)) { box.innerHTML = ''; doses.equiv._renderTabela(null, peso); return; }
+      const nora = doses.equiv.paraNora(d.nome, dose);
+      /* mcg/min só faz sentido com peso — sem ele, mostramos apenas o /kg/min */
+      const total = (!isNaN(peso) && peso > 0) ? nora * peso : null;
+      box.innerHTML =
+        '<div style="background:var(--primary-soft);border-radius:8px;padding:10px 12px">' +
+        '<div style="font-size:.8rem;color:var(--text-soft)">' + utils.escapeHTML(d.nome) + ' ' +
+        doses.equiv._fmt(dose) + ' ' + utils.escapeHTML(d.unidade) + ' equivale a</div>' +
+        '<div style="font-size:1.15rem;font-weight:700;color:var(--primary-darker)">' +
+        doses.equiv._fmt(nora) + ' mcg/kg/min de noradrenalina</div>' +
+        (total != null ? '<div style="font-size:.78rem;color:var(--text-mute)">≈ ' + doses.equiv._fmt(total) +
+          ' mcg/min para ' + doses.equiv._fmt(peso) + ' kg</div>' : '') +
+        '</div>';
+      doses.equiv._renderTabela(nora, peso);
+    },
+    /* A mesma equivalência nas outras drogas — é a leitura que o anestesista
+       faz na prática: "isso aqui dá quanto naquela outra?" */
+    _renderTabela(nora, peso) {
+      const host = document.getElementById('eq-tabela');
+      if (!host) return;
+      const base = (nora == null || isNaN(nora)) ? doses.equiv.REF : nora;
+      const linhas = doses.equiv.DROGAS.map(d => {
+        const v = doses.equiv.deNora(d.nome, base);
+        return '<tr><td>' + utils.escapeHTML(d.nome) + '</td>' +
+          '<td style="text-align:right;white-space:nowrap"><b>' + doses.equiv._fmt(v) + '</b> ' + utils.escapeHTML(d.unidade) + '</td>' +
+          '<td style="text-align:right;color:var(--text-mute)">× ' + doses.equiv._fmt(d.fator) + '</td></tr>';
+      }).join('');
+      host.innerHTML =
+        '<p style="font-size:.78rem;color:var(--text-mute);margin:0 0 6px">Doses equivalentes a <b>' +
+        doses.equiv._fmt(base) + ' mcg/kg/min</b> de noradrenalina' +
+        (!isNaN(peso) && peso > 0 ? ' (paciente de ' + doses.equiv._fmt(peso) + ' kg)' : '') + ':</p>' +
+        '<div style="overflow-x:auto"><table class="data" style="font-size:.82rem"><thead><tr>' +
+        '<th>Vasopressor</th><th style="text-align:right">Dose equivalente</th><th style="text-align:right">Fator</th>' +
+        '</tr></thead><tbody>' + linhas + '</tbody></table></div>';
+    }
+  },
+
   /* Puxa peso/altura/idade/sexo do paciente da Ficha de Anestesia ativa,
      evitando redigitar. soSeVazio=true só preenche campos ainda em branco. */
   puxarPaciente(soSeVazio) {
@@ -42989,11 +43543,14 @@ const doses = {
   render() {
     const host = document.getElementById('dose-lista');
     if (!host) return;
-    const q = ((document.getElementById('dose-busca') || {}).value || '').toLowerCase().trim();
+    /* buscar sem acento: quem digita "magnesio" ou "adrenalina" no meio do caso
+       não vai parar para achar o acento certo */
+    const norm = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const q = norm((document.getElementById('dose-busca') || {}).value).trim();
     const peso = doses._peso();
     const crianca = doses._ehCrianca();
     const temIdade = doses._idade() != null;
-    const lista = DOSES_DB.filter(d => (doses._cat === 'todas' || d.c === doses._cat) && (!q || (d.n + ' ' + DOSES_CATS[d.c] + ' ' + (d.o || '')).toLowerCase().includes(q)));
+    const lista = DOSES_DB.filter(d => (doses._cat === 'todas' || d.c === doses._cat) && (!q || norm(d.n + ' ' + DOSES_CATS[d.c] + ' ' + (d.o || '')).includes(q)));
     if (!lista.length) { host.innerHTML = '<p style="color:var(--text-mute);font-size:.86rem;padding:8px">Nenhuma droga encontrada.</p>'; return; }
     host.innerHTML = lista.map(d => {
       const i = DOSES_DB.indexOf(d);
