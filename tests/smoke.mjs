@@ -2094,6 +2094,36 @@ await test('Pendências: plano ≠ Unimed vira alerta com guia/plano; fluxo de f
     const card = document.getElementById('pendencias-card');
     out.dashboard = !!card && card.style.display !== 'none' && card.innerHTML.includes('Ver pendências (1)');
 
+    /* — a JANELA é de quem chega: abre uma vez e não volta a interromper —
+         (ela reaparecia a cada sincronização, de 10 em 10 minutos) */
+    const janelaAberta = () => {
+      const bd = document.getElementById('modal-backdrop');
+      return !!bd && bd.classList.contains('show');
+    };
+    try { modal.close(); } catch (e) {}
+    await new Promise(r => setTimeout(r, 350));
+    pendencias.esquecerMostrada();
+    pendencias.checarAoEntrar();
+    await new Promise(r => setTimeout(r, 120));
+    out.abreAoEntrar = janelaAberta() && pendencias.jaMostrou() === true;
+    modal.close();
+    await new Promise(r => setTimeout(r, 350));
+    pendencias.checarAoEntrar();                       /* a sincronização seguinte */
+    await new Promise(r => setTimeout(r, 120));
+    out.naoVoltaSozinha = janelaAberta() === false;
+    out.cartaoContinua = !!document.getElementById('pendencias-card');
+    pendencias.checarAoEntrar({ forcar: true });        /* pelo botão, abre */
+    await new Promise(r => setTimeout(r, 120));
+    out.botaoAbre = janelaAberta();
+    modal.close();
+    await new Promise(r => setTimeout(r, 350));
+    pendencias.esquecerMostrada();                     /* sair/entrar de novo */
+    pendencias.checarAoEntrar();
+    await new Promise(r => setTimeout(r, 120));
+    out.novoLoginAvisa = janelaAberta();
+    modal.close();
+    await new Promise(r => setTimeout(r, 350));
+
     /* — resolvida a última, o card some — */
     const resta = pendencias.listar()[0];
     pendencias.resolver(resta.mod, resta.id);
@@ -2112,6 +2142,11 @@ await test('Pendências: plano ≠ Unimed vira alerta com guia/plano; fluxo de f
   assert(r.fluxo, 'marcar uma etapa do fluxo deveria dar baixa e gravar o carimbo');
   assert(r.checklist, 'o financeiro deveria mostrar o checklist com todas as etapas do fluxo');
   assert(r.dashboard, 'o Dashboard deveria mostrar o card de pendências com o total');
+  assert(r.abreAoEntrar, 'a janela de pendências abre ao entrar');
+  assert(r.naoVoltaSozinha, 'e não volta a abrir sozinha — antes reaparecia a cada sincronização');
+  assert(r.cartaoContinua, 'o cartão do Dashboard continua lá, para ver a lista quando quiser');
+  assert(r.botaoAbre, 'abrir pelo botão continua funcionando');
+  assert(r.novoLoginAvisa, 'quem entra depois volta a receber o aviso uma vez');
   assert(r.cardSome, 'sem pendências, o card do Dashboard deveria sumir');
   await page.close();
 });
@@ -4378,9 +4413,13 @@ await test('Armazenamento cheio: libera espaço sozinho, salva de verdade e não
     espaco.ETAPAS = [{ nome: 'nada', fn: () => 0 }];
     localStorage.removeItem(espaco.AVISO_KEY);
     out.falhaVoltaFalse = store.setList('pre', [{ _id: 'x' }]) === false;
-    /* e avisa numa FAIXA, não numa janela modal que bloqueia o trabalho */
-    out.faixaNaoModal = !!document.getElementById('espaco-faixa')
-      && !document.getElementById('modal-backdrop').classList.contains('show');
+    /* e avisa numa FAIXA, não numa janela modal que bloqueia o trabalho.
+       (Confere pelo TÍTULO: outra janela do app aberta na hora não é o que
+       este teste mede — o que não pode é o aviso de espaço virar modal.) */
+    const bdEsp = document.getElementById('modal-backdrop');
+    const tituloModal = ((document.getElementById('modal-title') || {}).textContent || '');
+    out.faixaNaoModal = !!document.getElementById('espaco-faixa') &&
+      !(bdEsp.classList.contains('show') && /espa|armazenam|memória/i.test(tituloModal));
     /* segundo aviso dentro de 6 h não repete a faixa */
     espaco.fecharFaixa();
     store.setList('pre', [{ _id: 'x' }]);
@@ -7371,7 +7410,7 @@ await test('CBHPM 2022: tabela completa, busca por número e classificação ane
    atualiza as mesmas linhas; retirar um procedimento não deixa linha órfã. */
 await test('Consulta → Financeiro: 1 linha da consulta + 1 por procedimento, sem duplicar', async () => {
   const page = await novaPagina();
-  const r = await page.evaluate(() => {
+  const r = await page.evaluate(async () => {
     const out = {};
     store.setList('financeiro', []); store.setList('consulta', []); store.setList('pre', []);
     ui.navegar('consulta');
@@ -7447,6 +7486,28 @@ await test('Consulta → Financeiro: 1 linha da consulta + 1 por procedimento, s
     out.impressaoSemValor = !!baseImp && html.indexOf(String(Math.floor(baseImp))) < 0;
     consulta.procs.limpar();
 
+    /* corrigir um lançamento à mão (o caso real: valor errado) não pode apagar
+       a rastreabilidade — se apagar, o registro clínico salvo depois não
+       reconhece a linha, cria outra e o valor corrigido vira duplicata */
+    store.setList('financeiro', []); store.setList('consulta', []);
+    const docEd = store.save('consulta', { nome: 'Paciente Edição', data: utils.hojeISO(),
+      _procsRealizados: [{ linhaId: 'cproc-0', codigo: '3.10.05.12-8', descricao: 'Colecistectomia sem colangiografia', quantidade: 1, fracao: 100 }] });
+    fin.fromDoc('consulta', docEd);
+    const alvoEd = store.list('financeiro').find(x => x._origemLinhaId === 'cproc-0');
+    ui.navegar('financeiro');
+    financeiro.editar(alvoEd._id);
+    await new Promise(res => setTimeout(res, 200));
+    document.querySelector('#form-financeiro [name="valor_recebido"]').value = '250';
+    financeiro.salvar();
+    await new Promise(res => setTimeout(res, 250));
+    const depoisEd = store.getById('financeiro', alvoEd._id);
+    out.edicaoManualMantemVinculo = depoisEd._origemLinhaId === 'cproc-0' &&
+      depoisEd.cbhpm_codigo === '3.10.05.12-8' && depoisEd.tipo_honorario === 'procedimento' &&
+      Number(depoisEd.valor_recebido) === 250;
+    fin.fromDoc('consulta', store.getById('consulta', docEd._id));
+    out.edicaoManualNaoDuplica = store.list('financeiro').length === 2 &&
+      Number(store.getById('financeiro', alvoEd._id).valor_recebido) === 250;
+
     store.setList('financeiro', []); store.setList('consulta', []); store.setList('pre', []);
     return out;
   });
@@ -7466,6 +7527,8 @@ await test('Consulta → Financeiro: 1 linha da consulta + 1 por procedimento, s
   assert(r.preNaoDuplica, 'e salvar de novo não cria uma segunda');
   assert(r.impressaoLista, 'o documento da consulta precisa listar o que foi feito, com o código');
   assert(r.impressaoSemValor, 'valor e fração são conta interna — não vão para o documento do paciente');
+  assert(r.edicaoManualMantemVinculo, 'corrigir o lançamento à mão não pode apagar de onde ele veio');
+  assert(r.edicaoManualNaoDuplica, 'e o registro clínico salvo depois atualiza a mesma linha, sem duplicar');
   await page.close();
 });
 
@@ -7633,13 +7696,21 @@ await test('Orçamento: fração por linha editável e preço vindo da tabela co
     /* o valor nunca sai da CBHPM: sai da tabela configurada */
     out.valorDaConfiguracao = antesPreco.origem === 'porte_cir' && !!antesPreco.tabela;
 
-    /* AN → porte tem uma fonte só: a relação da CBHPM vale para classificar
-       E para derivar valor, senão haveria dois números verdadeiros ao mesmo tempo */
+    /* AN → porte: as DUAS conversões convivem no seletor, cada uma com o seu
+       nome. A clássica sustenta os orçamentos já emitidos e não pode mudar de
+       valor; a da CBHPM 2022 entra ao lado, como opção. */
     const tabs = orcamento.tabelasAnest();
     const cir = tabs.cir2018.valores;
-    const der = tabs.anest2018_conv.valores;
+    const classica = tabs.anest2018_conv.valores;
+    const nova = tabs.anest2018_conv22.valores;
+    const CLASSICA = { 1: '3A', 2: '3C', 3: '5B', 4: '7B', 5: '9A', 6: '9B', 7: '11C', 8: '13C' };
+    out.classicaIntacta = [1, 2, 3, 4, 5, 6, 7, 8]
+      .every(an => Math.abs(classica[an] - cir[CLASSICA[an]]) < 0.01) &&
+      Math.abs(classica[8] - 3719.35) < 0.01;
     out.derivaPelaCBHPM = [1, 2, 3, 4, 5, 6, 7, 8]
-      .every(an => Math.abs(der[an] - cir[cbhpm.AN_PORTE[an]]) < 0.01) && der[0] === 0;
+      .every(an => Math.abs(nova[an] - cir[cbhpm.AN_PORTE[an]]) < 0.01) && nova[0] === 0;
+    out.duasConvivem = classica[3] !== nova[3] && !!tabs.anest2024_f3_conv && !!tabs.anest2024_f3_conv22 &&
+      /CBHPM 2022/.test(tabs.anest2018_conv22.nome) && !/CBHPM 2022/.test(tabs.anest2018_conv.nome);
     /* tabela com valores próprios por AN não é derivada de nada */
     out.fixasIntactas = tabs.cbhpm2015.valores[3] === 292.50 && tabs.unimed.valores[8] === 1874.88;
     return out;
@@ -7653,7 +7724,9 @@ await test('Orçamento: fração por linha editável e preço vindo da tabela co
   assert(r.fracaoSalva, 'e é gravada junto do orçamento');
   assert(r.precedencia, 'preço próprio do código vence o porte, e removê-lo devolve o valor por porte');
   assert(r.valorDaConfiguracao, 'o preço vem da configuração do sistema, nunca da CBHPM');
-  assert(r.derivaPelaCBHPM, 'a tabela derivada tem que usar a relação AN → porte da CBHPM, a mesma da classificação');
+  assert(r.classicaIntacta, 'a conversão clássica não pode mudar de valor — ela sustenta os orçamentos já emitidos');
+  assert(r.derivaPelaCBHPM, 'a tabela nova tem que usar a relação AN → porte publicada na CBHPM 2022');
+  assert(r.duasConvivem, 'as duas conversões convivem no seletor, cada uma com o seu nome');
   assert(r.fixasIntactas, 'tabela com valor próprio por AN não passa por conversão — fica como foi cadastrada');
   await page.close();
 });
@@ -7841,7 +7914,14 @@ await test('Doses: equivalência de noradrenalina bate com a fonte e converte no
     /* a unidade acompanha a droga — dose sem unidade é o começo de um erro */
     out.unidades = eq._dr('Vasopressina').unidade === 'U/min' &&
       eq._dr('Angiotensina II').unidade === 'ng/kg/min' &&
-      eq._dr('Noradrenalina').unidade === 'mcg/kg/min';
+      eq._dr('Noradrenalina').unidade === 'mcg/kg/min' &&
+      eq._dr('Azul de metileno').unidade === 'mg/kg/h' &&
+      eq._dr('Hidroxicobalamina').unidade === 'g';
+    /* adjuvantes da vasoplegia, na mesma escala da fonte */
+    out.adjuvantes = Math.abs(eq.paraNora('Azul de metileno', 0.5) - eq.REF) < 0.005 &&
+      Math.abs(eq.paraNora('Hidroxicobalamina', 5) - eq.REF) < 0.005 &&
+      Math.abs(eq.paraNora('Midodrina', 0.25) - eq.REF) < 0.005 &&
+      Math.abs(eq.paraNora('Terlipressina', 0.01) - eq.REF) < 0.005;
 
     /* na tela: escolher a droga troca a unidade e calcula */
     document.getElementById('eq-droga').value = 'Metaraminol';
@@ -7866,7 +7946,8 @@ await test('Doses: equivalência de noradrenalina bate com a fonte e converte no
   });
   assert(r.bateComAFonte, 'cada dose equivalente publicada tem de devolver a dose de referência');
   assert(r.idaEVolta, 'converter e desconverter precisa devolver a mesma dose');
-  assert(r.unidades, 'cada droga carrega a sua unidade — vasopressina em U/min, angiotensina em ng/kg/min');
+  assert(r.unidades, 'cada droga carrega a sua unidade — vasopressina em U/min, azul de metileno em mg/kg/h, hidroxicobalamina em g');
+  assert(r.adjuvantes, 'azul de metileno, hidroxicobalamina, midodrina e terlipressina na mesma escala da fonte');
   assert(r.naTela, 'a tela converte e mostra também o total em mcg/min para o peso');
   assert(r.tabelaComparativa, 'a tabela comparativa mostra a mesma equivalência nas outras drogas');
   assert(r.semDoseSemResultado, 'sem dose informada não se inventa resultado');
@@ -8051,6 +8132,148 @@ await test('Doses: magnésio perioperatório — ataque 30–50 mg/kg e manuten�
   assert(r.mostraAtaqueCalculado, 'a dose de ataque aparece já calculada para o peso');
   assert(r.mostraBomba, 'e a faixa em mL/h aparece para a bomba');
   assert(r.noCatalogo, 'a infusão precisa existir no catálogo de medicações da ficha');
+  await page.close();
+});
+
+/* 132) Impressão da ficha: campo preenchido que não sai é campo perdido.
+   A CEC inteira lia chaves que a ficha não coleta, e o detalhe da via aérea
+   nem era salvo. */
+await test('Ficha impressa: identificação, pré, via aérea, ventilação e CEC saem completas', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('anestesia');
+    const f = document.getElementById('form-anestesia');
+    const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el) { el.value = v; return true; } return false; };
+    const chk = n => { const el = f.querySelector('[name="' + n + '"]'); if (el) el.checked = true; return el; };
+
+    set('paciente_nome', 'Paciente Impressão');
+    set('paciente_nasc', '1990-05-10');
+    set('paciente_mae', 'ZZMAEZZ');
+    set('pre_glicemia', '98');
+    set('pre_via_aerea_obs', 'ZZVIAOBSZZ');
+    set('pre_observacoes', 'ZZPREOBSZZ');
+    set('via_aerea_detalhe', 'ZZDETALHEZZ');
+    set('via_aerea_hora', '08:15');
+    /* ventilação: dado nos DOIS blocos (espontânea no fim, mecânica no meio) */
+    set('vent_esp_obs', 'ZZESPOBSZZ');
+    set('vent_gaso', 'ZZGASOZZ');
+    set('vent_trigger', 'ZZTRIGZZ');
+    /* bloqueio com ultrassom */
+    const bq = chk('bloqueio_realizado'); if (bq) anestesia.bloqueio.alternar(bq);
+    chk('usg_usado'); set('usg_obs', 'ZZUSGZZ');
+    /* CEC preenchida */
+    const c = chk('cec_utilizada'); if (c) anestesia.cec.alternar(c);
+    set('cec_tempo_total', '95');
+    ['cec_relacao_pro_hep', 'cec_prime_descricao', 'cec_perfusao_obs', 'cec_canul_obs',
+     'cec_cardio_obs', 'cec_eventos_obs', 'cec_medic_vaso', 'cec_medic_ino',
+     'cec_medic_vasodil', 'cec_medic_antifib', 'cec_medic_outros', 'cec_saida_obs']
+      .forEach(n => set(n, 'ZZ' + n.toUpperCase() + 'ZZ'));
+
+    const html = printPreview._buildAnestesia();
+    const saiu = m => html.indexOf(m) >= 0;
+    out.identificacao = saiu('ZZMAEZZ') && saiu('10/05/1990');
+    out.pre = saiu('ZZVIAOBSZZ') && saiu('ZZPREOBSZZ') && /Glicemia/.test(html);
+    out.viaAerea = saiu('ZZDETALHEZZ') && saiu('08:15');
+    out.ventilacao = saiu('ZZESPOBSZZ') && saiu('ZZGASOZZ') && saiu('ZZTRIGZZ');
+    out.usg = saiu('ZZUSGZZ');
+    out.cec = ['CEC_RELACAO_PRO_HEP', 'CEC_PRIME_DESCRICAO', 'CEC_PERFUSAO_OBS', 'CEC_CANUL_OBS',
+               'CEC_CARDIO_OBS', 'CEC_EVENTOS_OBS', 'CEC_MEDIC_VASO', 'CEC_MEDIC_INO',
+               'CEC_MEDIC_VASODIL', 'CEC_MEDIC_ANTIFIB', 'CEC_MEDIC_OUTROS', 'CEC_SAIDA_OBS']
+      .every(k => saiu('ZZ' + k + 'ZZ')) && saiu('95');
+
+    /* o detalhe da via aérea e o trigger passam a ser GRAVADOS no registro —
+       antes o texto vivia só dentro da descrição do evento */
+    const d = anestesia.coletarEstruturado();
+    const txt = JSON.stringify(d);
+    out.gravaDetalhe = txt.indexOf('ZZDETALHEZZ') >= 0 && txt.indexOf('ZZTRIGZZ') >= 0;
+    /* e voltam ao reabrir */
+    set('via_aerea_detalhe', ''); set('vent_trigger', '');
+    anestesia.restaurarEstruturado(d);
+    out.restaura = (f.querySelector('[name="via_aerea_detalhe"]') || {}).value === 'ZZDETALHEZZ';
+    return out;
+  });
+  assert(r.identificacao, 'nome da mãe e data de nascimento precisam sair na identificação');
+  assert(r.pre, 'observações da via aérea, observações gerais e glicemia do pré precisam sair');
+  assert(r.viaAerea, 'o detalhe da via aérea (tubo, cuff, Cormack, fixação) e o horário precisam sair');
+  assert(r.ventilacao, 'os dois blocos de ventilação saem quando os dois têm dado');
+  assert(r.usg, 'a observação do ultrassom do bloqueio precisa sair');
+  assert(r.cec, 'a CEC inteira precisa sair — ela lia campos que a ficha não coleta');
+  assert(r.gravaDetalhe, 'o detalhe da via aérea e o trigger têm de ser gravados no registro');
+  assert(r.restaura, 'e voltar ao reabrir a ficha');
+  await page.close();
+});
+
+/* 133) Capnografia e gases só existem com o circuito conectado; a FR da
+   ventilação mecânica é a do ventilador, não uma faixa estatística. */
+await test('Vitais gerados: EtCO₂/gases só na janela da via aérea, FR seguindo o ventilador', async () => {
+  const page = await novaPagina();
+  page.on('dialog', d => d.accept('08:00'));
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('anestesia');
+    const f = document.getElementById('form-anestesia');
+    const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el) el.value = v; };
+    set('hora_sala_entrada', '08:00'); set('hora_sala_saida', '10:00'); set('paciente_idade', '40');
+    ['Capnografia', 'Analisador de gases', 'FR', 'Oximetria', 'PNI'].forEach(v => {
+      const el = Array.from(f.querySelectorAll('[name="monitores[]"]')).find(x => x.value === v);
+      if (el) el.checked = true;
+    });
+    anestesia.disp.sincronizarVitais();
+    const rm = f.querySelector('[name="vent_modo_geral"][value="mecanica"]');
+    if (rm) { rm.checked = true; anestesia.vent.alternar(); }
+    set('vent_fr', '12');
+
+    document.getElementById('eventos-body').innerHTML = '';
+    anestesia.eventos.add({ tipo: 'Intubação', hora: '08:15' });
+    anestesia.eventos.add({ tipo: 'Extubação', hora: '09:30' });
+    const j = anestesia.vitais._janelaViaAerea();
+    out.janela = j && j.ini === 8 * 60 + 15 && j.fim === 9 * 60 + 30;
+    out.frDoVentilador = anestesia.vitais._frDoVentilador() === 12;
+
+    document.getElementById('vitais-body').innerHTML = '';
+    anestesia.vitais._gerarPadrao(10);
+    const linhas = Array.from(document.querySelectorAll('#vitais-body tr')).map(tr => ({
+      hora: (tr.querySelector('[name="vit_hora[]"]') || {}).value,
+      etco2: (tr.querySelector('[name="vit_etco2[]"]') || {}).value,
+      cam: (tr.querySelector('[name="vit_cam[]"]') || {}).value,
+      fr: (tr.querySelector('[name="vit_fr[]"]') || {}).value
+    }));
+    const dentro = linhas.filter(l => l.hora >= '08:15' && l.hora <= '09:30');
+    const fora = linhas.filter(l => l.hora < '08:15' || l.hora > '09:30');
+    out.temAmbos = dentro.length >= 3 && fora.length >= 2;
+    out.soDentro = dentro.every(l => l.etco2 && l.cam) && fora.every(l => !l.etco2 && !l.cam);
+    const et = dentro.map(l => Number(l.etco2));
+    out.faixa = et.every(v => v >= 35 && v <= 45);
+    out.oscila = new Set(et).size >= 3;                      /* não é linha reta */
+    out.frSegue = dentro.every(l => Math.abs(Number(l.fr) - 12) <= 1);
+    out.frForaDaJanela = fora.every(l => Number(l.fr) >= 10);  /* volta à faixa da idade */
+
+    /* retirada da máscara laríngea também fecha a janela */
+    document.getElementById('eventos-body').innerHTML = '';
+    anestesia.eventos.add({ tipo: 'Máscara laríngea', hora: '08:20' });
+    anestesia.eventos.add({ tipo: 'Retirada da máscara laríngea', hora: '09:00' });
+    const j2 = anestesia.vitais._janelaViaAerea();
+    out.janelaML = j2 && j2.ini === 8 * 60 + 20 && j2.fim === 9 * 60;
+    out.eventoExiste = anestesia.eventos.TIPOS.indexOf('Retirada da máscara laríngea') >= 0 &&
+      !!anestesia.eventos.DESCRICOES['Retirada da máscara laríngea'];
+
+    /* sem evento nenhum de via aérea, não há janela — e o gerador não fica mudo */
+    document.getElementById('eventos-body').innerHTML = '';
+    out.semEventosSemJanela = anestesia.vitais._janelaViaAerea() === null;
+    return out;
+  });
+  assert(r.janela, 'a janela vai da intubação à extubação');
+  assert(r.frDoVentilador, 'a FR ajustada no ventilador é lida da seção de ventilação');
+  assert(r.temAmbos, 'o cenário precisa ter medidas dentro e fora da janela');
+  assert(r.soDentro, 'capnografia e analisador de gases só entram dentro da janela');
+  assert(r.faixa, 'EtCO₂ gerado tem de ficar entre 35 e 45');
+  assert(r.oscila, 'e oscilar — capnógrafo não marca o mesmo número o caso inteiro');
+  assert(r.frSegue, 'a FR dentro da ventilação mecânica segue o ventilador');
+  assert(r.frForaDaJanela, 'e fora dela volta à faixa da idade');
+  assert(r.janelaML, 'máscara laríngea e a sua retirada também delimitam a janela');
+  assert(r.eventoExiste, 'a retirada da máscara laríngea precisa existir como evento, com descrição');
+  assert(r.semEventosSemJanela, 'sem evento de via aérea não há janela a impor');
   await page.close();
 });
 

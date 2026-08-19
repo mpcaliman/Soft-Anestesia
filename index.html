@@ -4309,7 +4309,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-15d</b><br>
+    v7.1 · build <b id="build-tag">2026-08-19b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -16902,6 +16902,8 @@ const auth = {
     /* Sair/Bloquear agora SEMPRE derruba também a sessão do dia — a próxima
        entrada pede senha mesmo no modo "1x por dia". */
     try { localStorage.removeItem(auth.DIA_KEY); } catch (e) {}
+    /* quem entrar depois merece ver o aviso de pendências uma vez */
+    try { pendencias.esquecerMostrada(); } catch (e) {}
     auth._pararTimer();
     auth._bloquear();
   },
@@ -18674,8 +18676,11 @@ const cloud = {
       /* PAPEL do servidor reaplicado a cada entrada: se o gestor mudou o papel
          de alguém, o aparelho dessa pessoa obedece sem depender de botão */
       setTimeout(() => { try { auth.atualizarPapelDaNuvem(); } catch (e) {} }, 1400);
-      /* pendências de convênio: a janela aparece ao entrar (após os pulls) */
-      setTimeout(() => { try { if (typeof pendencias !== 'undefined') pendencias.checarAoEntrar(); } catch (e) {} }, 3200);
+      /* Pendências: aqui só o CARTÃO do Dashboard se atualiza. A janela é
+         assunto de login — esta rotina roda também a cada 10 minutos e ao
+         voltar para a aba, e abrir a janela nessas horas era interromper o
+         atendimento de meia em meia hora. */
+      setTimeout(() => { try { if (typeof pendencias !== 'undefined') pendencias.renderDashboard(); } catch (e) {} }, 3200);
       setTimeout(() => {
         try {
           if (typeof cloudRel !== 'undefined' && cloudRel.autoPullModulo) {
@@ -19752,13 +19757,45 @@ const pendencias = {
       '<div class="card-body"><button class="btn btn-primary btn-sm" onclick="pendencias.abrir(false)">🔔 Ver pendências (' + lista.length + ')</button></div>';
   },
 
-  /* ---- Gatilhos: ao entrar + a cada 30 minutos ---- */
-  checarAoEntrar() {
+  /* ---- Gatilho: UMA vez, ao entrar ----
+     A janela de pendências é um aviso de quem chega, não um alarme que toca
+     durante o dia. Ela abre uma vez por sessão; o cartão do Dashboard segue
+     se atualizando, e por ele a lista está sempre a um clique. */
+  _MOSTRADA_KEY: 'medsys.v7.pend.mostrada',
+  _quemEstaLogado() {
+    try { const u = auth.usuarioAtual() || {}; return String(u.id || u.usuario || u.nome || 'local'); }
+    catch (e) { return 'local'; }
+  },
+  jaMostrou() {
+    const quem = pendencias._quemEstaLogado();
+    if (pendencias._mostradaPara === quem) return true;
+    try { return sessionStorage.getItem(pendencias._MOSTRADA_KEY) === quem; } catch (e) { return false; }
+  },
+  _marcarMostrada() {
+    const quem = pendencias._quemEstaLogado();
+    pendencias._mostradaPara = quem;
+    try { sessionStorage.setItem(pendencias._MOSTRADA_KEY, quem); } catch (e) {}
+  },
+  /* Sair (ou trocar de usuário) devolve o aviso para quem entrar depois */
+  esquecerMostrada() {
+    pendencias._mostradaPara = null;
+    try { sessionStorage.removeItem(pendencias._MOSTRADA_KEY); } catch (e) {}
+  },
+  checarAoEntrar(opts = {}) {
     if (!pendencias.podeVer()) return;
     try { pendencias.renderDashboard(); } catch (e) {}
-    /* não interrompe um modal já aberto */
+    if (!opts.forcar && pendencias.jaMostrou()) return;
+    /* Não interrompe um modal já aberto — mas também não perde o aviso: como
+       agora a checagem é só uma, sair sem mostrar significaria não mostrar
+       nunca. Tenta de novo daqui a pouco, uma vez. */
     const bd = document.getElementById('modal-backdrop');
-    if (bd && bd.classList.contains('show')) return;
+    if (bd && bd.classList.contains('show')) {
+      if (!opts._retentativa) {
+        setTimeout(() => { try { pendencias.checarAoEntrar({ _retentativa: true }); } catch (e) {} }, 20000);
+      }
+      return;
+    }
+    pendencias._marcarMostrada();
     pendencias.abrir(true);
   },
   /* A janela de pendências aparece UMA VEZ, ao entrar. Antes ela voltava a se
@@ -25907,6 +25944,7 @@ const anestesia = {
           ppico: v('vent_ppico'), pplato: v('vent_pplato'),
           driving: v('vent_driving'), ie: v('vent_ie'),
           vm: v('vent_vm'), etco2: v('vent_etco2'),
+          trigger: v('vent_trigger'),
           complacencia: v('vent_compl'), gaso: v('vent_gaso')
         },
         recursos: recursos,
@@ -25930,6 +25968,7 @@ const anestesia = {
       set('vent_peep', m.peep); set('vent_fio2', m.fio2);
       set('vent_ppico', m.ppico); set('vent_pplato', m.pplato);
       set('vent_driving', m.driving); set('vent_ie', m.ie);
+      set('vent_trigger', m.trigger);
       set('vent_vm', m.vm); set('vent_etco2', m.etco2);
       set('vent_compl', m.complacencia); set('vent_gaso', m.gaso);
       f.querySelectorAll('[name="vent_recursos[]"]').forEach(el => {
@@ -26278,7 +26317,7 @@ const anestesia = {
     GRUPOS: [
       { grupo: 'Procedimentos / acessos', itens: ['Venoclise', 'Punção arterial', 'Acesso venoso central',
           'Sondagem orogástrica', 'Sondagem nasogástrica', 'Sondagem vesical (Foley)', 'Sondagem vesical de alívio'] },
-      { grupo: 'Via aérea / anestesia', itens: ['Sedação', 'Indução', 'Intubação', 'Extubação', 'Máscara laríngea', 'Início da ventilação mecânica', 'Fim da ventilação mecânica', 'Início O₂', 'Fim O₂', 'Início halogenado', 'Fim halogenado', 'Início infusão contínua', 'Fim infusão contínua'] },
+      { grupo: 'Via aérea / anestesia', itens: ['Sedação', 'Indução', 'Intubação', 'Extubação', 'Máscara laríngea', 'Retirada da máscara laríngea', 'Início da ventilação mecânica', 'Fim da ventilação mecânica', 'Início O₂', 'Fim O₂', 'Início halogenado', 'Fim halogenado', 'Início infusão contínua', 'Fim infusão contínua'] },
       { grupo: 'Bloqueios', itens: ['Raquianestesia', 'Peridural', 'Bloqueio periférico'] },
       { grupo: 'Cirurgia', itens: ['Incisão cirúrgica', 'Início da cirurgia', 'Hemostasia', 'Fim da cirurgia'] },
       { grupo: 'Laparoscopia', itens: ['Início do pneumoperitônio', 'Fim do pneumoperitônio'] },
@@ -26298,6 +26337,7 @@ const anestesia = {
       'Bloqueio periférico': '1) Assepsia e antissepsia; 2) Identificação do alvo por ultrassom/neuroestimulação; 3) Punção; 4) Injeção fracionada com aspiração intermitente; 5) Checagem da dispersão e do bloqueio.',
       'Intubação': '1) Pré-oxigenação; 2) Indução e bloqueio neuromuscular; 3) Laringoscopia; 4) Visualização da glote (Cormack–Lehane); 5) Passagem do tubo; 6) Confirmação por EtCO₂, ausculta e expansibilidade; 7) Insuflação do cuff e fixação.',
       'Extubação': '1) Paciente desperto, com TOF adequado e ventilação eficaz; 2) Aspiração de vias aéreas; 3) Desinsuflação do cuff; 4) Extubação; 5) Oxigênio suplementar.',
+      'Retirada da máscara laríngea': '1) Paciente desperto, com ventilação espontânea eficaz; 2) Aspiração da cavidade oral; 3) Desinsuflação do cuff; 4) Retirada do dispositivo supraglótico; 5) Oxigênio suplementar.',
       'Sedação': 'Sedação titulada sob monitorização contínua (oximetria, cardioscopia e PA), com oxigênio suplementar; ventilação espontânea mantida.',
       'Sondagem orogástrica': '1) Medida da distância a introduzir; 2) Lubrificação; 3) Passagem por via oral com o paciente já anestesiado; 4) Confirmação do posicionamento (ausculta epigástrica/aspirado gástrico); 5) Fixação e drenagem.',
       'Sondagem nasogástrica': '1) Narina escolhida e sonda lubrificada; 2) Passagem por via nasal; 3) Confirmação do posicionamento; 4) Fixação e drenagem.',
@@ -30215,7 +30255,9 @@ const anestesia = {
       pad:  { base: 76,  decl: 0.14, jit: 0.08, min: 48,  bmin: 64,  bmax: 88,  dec: 0 },
       fc:   { base: 80,  decl: 0.12, jit: 0.08, min: 52,  bmin: 60,  bmax: 92,  dec: 0 },
       spo2: { base: 99,  decl: 0,    jit: 0.015, min: 95, max: 100, dec: 0 },
-      etco2:{ base: 34,  decl: 0,    jit: 0.08, min: 29,  max: 41, dec: 0 },
+      /* EtCO₂ normocapnia: média 40, faixa 35–45, oscilando 2–3 pontos ao
+         longo do caso (0,06 × 40 ≈ ±2,4) */
+      etco2:{ base: 40,  decl: 0,    jit: 0.08, min: 35,  max: 45, dec: 0 },
       fr:   { base: 13,  decl: 0,    jit: 0.10, min: 10,  max: 16, dec: 0 },
       temp: { base: 36.3,decl: 0.02, jit: 0.008,min: 35.3,max: 37, dec: 1 },
       bis:  { base: 45,  decl: 0,    jit: 0.14, min: 38,  max: 58, dec: 0 },
@@ -30302,13 +30344,61 @@ const anestesia = {
     /* Gera um valor para o parâmetro. base = valor de partida (de um registro
        já lançado, já limitado ao normal); prog = progresso 0→1.
        Só PA/FC variam de leve (e caem um pouco); o resto fica quase constante. */
+    /* Janela em que a via aérea artificial / ventilação mecânica está em uso.
+       Capnografia e analisador de gases só existem aí: fora dessa janela não
+       há o que medir, e gerar número seria inventar registro.
+       Início: intubação, máscara laríngea ou início da ventilação mecânica.
+       Fim: extubação, retirada da máscara laríngea ou fim da ventilação. */
+    JANELA_INI: ['Intubação', 'Máscara laríngea', 'Início da ventilação mecânica'],
+    JANELA_FIM: ['Extubação', 'Retirada da máscara laríngea', 'Fim da ventilação mecânica'],
+    _janelaViaAerea() {
+      const toMin = s => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || '').trim()); return m ? (+m[1]) * 60 + (+m[2]) : null; };
+      let body = null;
+      try { body = document.getElementById(anestesia.graficoUI._ctxIds().eventosBody); } catch (e) {}
+      if (!body) return null;
+      let ini = null, fim = null;
+      Array.from(body.querySelectorAll('tr')).forEach(tr => {
+        const tipo = (tr.querySelector('[name="evt_tipo[]"]') || {}).value || '';
+        const t = toMin((tr.querySelector('[name="evt_hora[]"]') || {}).value);
+        if (t == null) return;
+        if (anestesia.vitais.JANELA_INI.indexOf(tipo) >= 0) ini = (ini == null) ? t : Math.min(ini, t);
+        if (anestesia.vitais.JANELA_FIM.indexOf(tipo) >= 0) fim = (fim == null) ? t : Math.max(fim, t);
+      });
+      /* Sem nenhum evento de via aérea, não há janela — e aí o gerador segue
+         como sempre foi (o caso da sedação com capnografia por cânula). */
+      if (ini == null && fim == null) return null;
+      /* Só o início registrado: vale até o fim da anestesia/saída de sala. */
+      if (fim == null) {
+        const f = document.getElementById('form-anestesia');
+        const v = n => (f && f.querySelector('[name="' + n + '"]') || {}).value || '';
+        fim = toMin(v('hora_fim')) || toMin(v('hora_sala_saida'));
+      }
+      if (ini == null) ini = -Infinity;
+      if (fim == null) fim = Infinity;
+      if (fim < ini) fim += 24 * 60;
+      return { ini, fim };
+    },
+    /* FR da ventilação mecânica: quem manda é o parâmetro ajustado no
+       ventilador, não uma faixa estatística. */
+    _frDoVentilador() {
+      const f = document.getElementById('form-anestesia');
+      if (!f) return null;
+      const modo = (f.querySelector('[name="vent_modo_geral"]:checked') || {}).value || '';
+      const fr = parseFloat((f.querySelector('[name="vent_fr"]') || {}).value);
+      if (isNaN(fr) || fr <= 0) return null;
+      if (modo === 'espontanea') return null;
+      return fr;
+    },
     _valorPadrao(param, prog, base, tabela) {
       const s = (tabela || anestesia.vitais._BASE_PADRAO)[param];
       if (!s) return null;   /* param sem modelo → deixa em branco */
       const b = (base != null && !isNaN(base)) ? base : s.base;
       const variavel = (param === 'pas' || param === 'pad' || param === 'fc');
       const decl = variavel ? (s.decl || 0) : 0;          /* só PA/FC caem */
-      const jit  = variavel ? (s.jit || 0.08) : 0.015;    /* resto: quase constante */
+      /* A oscilação é a do próprio parâmetro: fixar 1,5% para todo o resto
+         achatava tudo numa linha reta — EtCO₂ saía 40, 40, 40 o caso inteiro,
+         que não é como um capnógrafo se comporta. */
+      const jit  = (s.jit != null) ? s.jit : (variavel ? 0.08 : 0.015);
       let v = b * (1 - decl * prog);
       v = v * (1 + (Math.random() * 2 - 1) * jit);
       if (s.min != null) v = Math.max(s.min, v);
@@ -30395,6 +30485,10 @@ const anestesia = {
         .sort((a, b) => a.min - b.min);
       ordenadas.forEach(o => minutosOcupados.push(o.min));
 
+      /* Janela da via aérea (capnografia/gases) e FR do ventilador */
+      const janela = anestesia.vitais._janelaViaAerea();
+      const frVent = anestesia.vitais._frDoVentilador();
+
       const base = {};
       ativos.forEach(p => {
         if (p === 'pam' || p === 'ritmo') return;
@@ -30419,8 +30513,20 @@ const anestesia = {
         if (minutosOcupados.some(m => Math.abs(m - t) <= 2)) continue;   /* já tem registro perto */
         const prog = n ? i / n : 0;
         const dados = { hora: anestesia.graficoUI.tToHora(t % (24 * 60)) };
+        /* dentro da janela em que há via aérea artificial/ventilação? */
+        const naJanela = !janela || (t >= janela.ini && t <= janela.fim);
         ativos.forEach(p => {
           if (p === 'pam' || p === 'ritmo') return;
+          /* capnografia e analisador de gases só existem com o circuito
+             conectado — fora da janela, campo em branco */
+          if ((p === 'etco2' || p === 'cam') && !naJanela) return;
+          /* FR: com ventilação mecânica, é o valor ajustado no ventilador
+             (varia pouco); fora dela, a faixa normal da idade */
+          if (p === 'fr' && frVent && naJanela) {
+            const jitter = frVent * (1 + (Math.random() * 2 - 1) * 0.03);
+            dados.fr = String(Math.max(1, Math.round(jitter)));
+            return;
+          }
           const v = anestesia.vitais._valorPadrao(p, prog, base[p], TAB);
           if (v != null) dados[p] = v;
         });
@@ -31854,6 +31960,11 @@ const anestesia = {
       tecnica: {
         tipos: arr('tipo'), descricao: v('tecnica_descricao'),
         via_aerea_uso: v('via_aerea_uso'), ventilacao_tipo: v('ventilacao_tipo'),
+        /* tamanho do tubo, cuff, Cormack e fixação — montados no card 3.
+           Sem isto o detalhe existia só dentro da descrição do evento: não
+           era salvo no registro nem saía na impressão. */
+        via_aerea_detalhe: v('via_aerea_detalhe'),
+        via_aerea_hora: v('via_aerea_hora'),
         monitorizacao_descricao: v('monitorizacao'),
         equipamentos: v('equipamentos_usados'),
         bloqueio: anestesia.bloqueio.coletar()
@@ -32013,6 +32124,8 @@ const anestesia = {
     if (tc.manutencao && !tdesc.includes(tc.manutencao)) tdesc = (tdesc ? tdesc + '\n' : '') + 'Manutenção: ' + tc.manutencao;
     set('tecnica_descricao', tdesc);
     set('via_aerea_uso', tc.via_aerea_uso);
+    set('via_aerea_detalhe', tc.via_aerea_detalhe);
+    set('via_aerea_hora', tc.via_aerea_hora);
     set('ventilacao_tipo', tc.ventilacao_tipo);
     set('monitorizacao', tc.monitorizacao_descricao);
     set('equipamentos_usados', tc.equipamentos);
@@ -39164,8 +39277,10 @@ ${TAG_CLOSE_HTML}`;
     html += printPreview._section('Identificação do paciente', `
       <div class="pp-grid cols-3">
         ${printPreview._field('Nome', p.nome)}
+        ${printPreview._field('Nascimento', utils.formatarData(p.nascimento))}
         ${printPreview._field('Idade', p.idade)}
         ${printPreview._field('Sexo', p.sexo)}
+        ${printPreview._field('Nome da mãe', p.nome_mae)}
         ${printPreview._field('Peso', p.peso ? p.peso + ' kg' : '')}
         ${printPreview._field('Altura', p.altura ? p.altura + ' cm' : '')}
         ${printPreview._field('IMC', p.imc)}
@@ -39208,23 +39323,29 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._field('Diagnóstico', pa.diagnostico)}
         ${printPreview._field('ASA', pa.asa)}
         ${printPreview._field('Jejum', pa.jejum)}
+        ${printPreview._field('Glicemia', pa.glicemia)}
         ${printPreview._field('Via aérea', pa.via_aerea)}
       </div>
+      ${printPreview._field('Via aérea — observações', pa.via_aerea_obs, true)}
       ${printPreview._field('Alergias', pa.alergias, true)}
       ${printPreview._field('Comorbidades', pa.comorbidades, true)}
       ${printPreview._field('Exames', pa.exames, true)}
       ${printPreview._field('Medicações em uso', pa.medicacoes_uso, true)}
       ${printPreview._field('Medicação pré-anestésica', pa.medicacao_pre, true)}
+      ${printPreview._field('Observações', pa.observacoes, true)}
+      ${pa.timeout_realizado ? printPreview._field('Time-out', 'Realizado antes da incisão') : ''}
     `);
     html += printPreview._section('Técnica anestésica', `
       <div class="pp-checks">${(tc.tipos || []).map(t => `<span class="pp-check">${utils.escapeHTML(t)}</span>`).join('')}</div>
       ${printPreview._field('Técnica realizada', tc.descricao, true)}
       ${printPreview._field('Indução', tc.inducao, true)}
       ${printPreview._field('Manutenção', tc.manutencao, true)}
-      <div class="pp-grid">
+      <div class="pp-grid cols-3">
         ${printPreview._field('Via aérea utilizada', tc.via_aerea_uso)}
+        ${printPreview._field('Horário', tc.via_aerea_hora)}
         ${printPreview._field('Ventilação', tc.ventilacao_tipo)}
       </div>
+      ${printPreview._field('Via aérea — detalhe', tc.via_aerea_detalhe, true)}
       ${printPreview._field('Monitorização', tc.monitorizacao_descricao, true)}
       ${printPreview._field('Equipamentos utilizados', tc.equipamentos, true)}
     `);
@@ -39286,7 +39407,8 @@ ${TAG_CLOSE_HTML}`;
             ${printPreview._field('Técnica', usg.tecnica)}
             ${printPreview._field('Estruturas', usg.estruturas)}
           </div>` +
-          (usg.obs ? printPreview._field('Observações USG', usg.obs, true) : '');
+          /* o card grava em "observacoes"; "obs" é o formato antigo */
+          printPreview._field('Observações USG', usg.observacoes || usg.obs, true);
       }
       if (bl.observacoes) blqHTML += printPreview._field('Observações do bloqueio', bl.observacoes, true);
       html += printPreview._section('Bloqueio regional / neuroaxial', blqHTML);
@@ -39320,12 +39442,15 @@ ${TAG_CLOSE_HTML}`;
     const terHasData = Array.isArray(vt.terapias) && vt.terapias.some(t => t.modo || t.hora_ini || t.param);
     if (vt.modo_geral || espHasData || mecHasData || recHasData || terHasData) {
       let ventHTML = '';
-      /* Decide qual bloco mostrar: respeita modo_geral; se vazio, infere pelos dados */
-      const mostrarEsp = vt.modo_geral === 'espontanea' || (espHasData && !mecHasData);
-      const mostrarMec = vt.modo_geral === 'mecanica' || (mecHasData && !espHasData);
+      /* Mostra TODO bloco que tenha dado. Antes escolhia um só pelo radio, e
+         quem ventilou espontâneo no começo e mecânico depois (ou o contrário)
+         perdia metade do registro na impressão — dado preenchido que não sai
+         é o mesmo que dado perdido. */
+      const mostrarEsp = espHasData || vt.modo_geral === 'espontanea';
+      const mostrarMec = mecHasData || vt.modo_geral === 'mecanica';
       if (mostrarEsp && vt.espontanea) {
         const e = vt.espontanea;
-        ventHTML = `<h3 style="font-size:9pt;margin:0 0 4px">Espontânea</h3>
+        ventHTML += `<h3 style="font-size:9pt;margin:0 0 4px">Espontânea</h3>
           <div class="pp-grid cols-3">
             ${printPreview._field('Suporte O₂', e.suporte)}
             ${printPreview._field('FiO₂', e.fio2 ? e.fio2 + '%' : '')}
@@ -39346,6 +39471,7 @@ ${TAG_CLOSE_HTML}`;
             ${printPreview._field('P. platô', m.pplato ? m.pplato + ' cmH₂O' : '')}
             ${printPreview._field('Driving P.', m.driving ? m.driving + ' cmH₂O' : '')}
             ${printPreview._field('I:E', m.ie)}
+            ${printPreview._field('Trigger', m.trigger)}
             ${printPreview._field('VM', m.vm ? m.vm + ' L/min' : '')}
             ${printPreview._field('EtCO₂', m.etco2 ? m.etco2 + ' mmHg' : '')}
             ${printPreview._field('Complacência', m.complacencia)}
@@ -39374,26 +39500,75 @@ ${TAG_CLOSE_HTML}`;
       if (ventHTML) html += printPreview._section('Ventilação', ventHTML);
     }
 
-    /* === CEC === */
+    /* === CEC ===
+       Este bloco lia campos que a ficha não coleta (cec.usado, cec.inicio,
+       cec.fim): a seção inteira saía vazia mesmo com a CEC toda preenchida.
+       Agora acompanha a estrutura real do card. */
     const cec = d.cec || {};
-    if (cec.usado || (cec.terapias && cec.terapias.length > 0)) {
+    const cecTer = (cec.terapias || []).filter(t => t.tipo);
+    if (cec.utilizada || cecTer.length) {
+      const F = printPreview._field;
+      const g = cec.geral || {}, ac = cec.anticoag || {}, pf = cec.perfusao || {},
+            cn = cec.canulacoes || {}, cp = cec.cardioplegia || {},
+            ev = cec.eventos || {}, md = cec.medicamentos || {}, sd = cec.saida || {};
+      const bloco = (titulo, corpo) => corpo.replace(/\s+/g, '') ? '<h3 style="font-size:9pt;margin:8px 0 4px">' + titulo + '</h3>' + corpo : '';
       let cecHTML = `<div class="pp-grid cols-3">
-        ${printPreview._field('Início', cec.inicio)}
-        ${printPreview._field('Fim', cec.fim)}
-        ${printPreview._field('Duração total', cec.duracao)}
+        ${F('Tempo total de CEC', g.tempo_total ? g.tempo_total + ' min' : '')}
+        ${F('Anóxia / clampeamento', g.tempo_anoxia ? g.tempo_anoxia + ' min' : '')}
+        ${F('Reperfusão', g.tempo_reperf ? g.tempo_reperf + ' min' : '')}
+        ${F('Temperatura mínima', g.temp_min ? g.temp_min + ' °C' : '')}
+        ${F('Fluxo de bomba', g.fluxo_bomba)}
+        ${F('Ht mínimo', g.ht_min ? g.ht_min + '%' : '')}
+        ${F('Lactato máximo', g.lactato_max)}
+        ${F('SvO₂ mínima', g.svo2_min ? g.svo2_min + '%' : '')}
       </div>`;
-      if (cec.observacoes) cecHTML += printPreview._field('Observações', cec.observacoes, true);
-      const ter = (cec.terapias || []).filter(t => t.tipo);
-      if (ter.length > 0) {
+      cecHTML += bloco('Anticoagulação', `<div class="pp-grid cols-3">
+        ${F('TCA inicial', ac.act_ini)}
+        ${F('TCA alvo', ac.act_alvo)}
+        ${F('TCA máximo', ac.act_max)}
+        ${F('TCA final', ac.act_final)}
+        ${F('Heparina', ac.heparina_dose)}
+        ${F('Protamina', ac.protamina_dose)}
+        ${F('Relação protamina/heparina', ac.relacao_pro_hep)}
+      </div>`);
+      cecHTML += bloco('Perfusão', `<div class="pp-grid cols-3">
+        ${F('Oxigenador', pf.oxigenador)}
+        ${F('Prime — tipo', pf.prime_tipo)}
+        ${F('Prime — volume', pf.prime_vol ? pf.prime_vol + ' mL' : '')}
+        ${F('Hemofiltração', pf.hemofiltracao ? 'Sim' + (pf.hemof_vol ? ' — ' + pf.hemof_vol + ' mL' : '') : '')}
+        ${F('UF modificada', pf.uf_modificada ? 'Sim' : '')}
+        ${F('Recuperação celular', pf.recuperacao_celular ? 'Sim' + (pf.recup_vol ? ' — ' + pf.recup_vol + ' mL' : '') : '')}
+      </div>` + F('Prime — descrição', pf.prime_descricao, true) + F('Observações da perfusão', pf.observacoes, true));
+      const canulTipos = (cn.tipos || []).join(', ');
+      cecHTML += bloco('Canulação', (canulTipos ? F('Canulações', canulTipos, true) : '') + F('Observações', cn.observacoes, true));
+      cecHTML += bloco('Cardioplegia', `<div class="pp-grid cols-3">
+        ${F('Solução', cp.solucao)}
+        ${F('Via', cp.via)}
+        ${F('Volume', cp.volume ? cp.volume + ' mL' : '')}
+        ${F('Doses', cp.doses)}
+      </div>` + F('Observações', cp.observacoes, true));
+      const evLista = (ev.lista || []).join(', ');
+      cecHTML += bloco('Intercorrências na CEC', (evLista ? F('Eventos', evLista, true) : '') + F('Observações', ev.observacoes, true));
+      cecHTML += bloco('Medicações na CEC',
+        F('Vasopressores', md.vasopressores, true) + F('Inotrópicos', md.inotropicos, true) +
+        F('Vasodilatadores', md.vasodilatadores, true) + F('Antifibrinolíticos', md.antifibrinoliticos, true) +
+        F('Outros', md.outros, true));
+      cecHTML += bloco('Saída de CEC', `<div class="pp-grid cols-3">
+        ${F('Ritmo', sd.ritmo)}
+        ${F('Inotrópico', sd.inotropico)}
+        ${F('Marca-passo temporário', sd.mp_temp)}
+        ${F('Cardioversão', sd.cardiov)}
+      </div>` + F('Observações', sd.observacoes, true));
+      if (cecTer.length > 0) {
         cecHTML += '<h3 style="font-size:9pt;margin:8px 0 4px">Terapias durante CEC</h3>' +
           '<table class="pp-table"><thead><tr><th>Tipo</th><th>Início</th><th>Fim</th><th>Duração</th><th>Obs</th></tr></thead><tbody>' +
-          ter.map(t => `
+          cecTer.map(t => `
             <tr>
               <td>${utils.escapeHTML(t.tipo || '')}</td>
-              <td>${utils.escapeHTML(t.inicio || '')}</td>
-              <td>${utils.escapeHTML(t.fim || '')}</td>
+              <td>${utils.escapeHTML(t.inicio || t.hora_ini || '')}</td>
+              <td>${utils.escapeHTML(t.fim || t.hora_fim || '')}</td>
               <td>${utils.escapeHTML(t.duracao || '')}</td>
-              <td>${utils.escapeHTML(t.observacoes || '')}</td>
+              <td>${utils.escapeHTML(t.observacoes || t.obs || '')}</td>
             </tr>
           `).join('') + '</tbody></table>';
       }
@@ -42069,14 +42244,27 @@ const financeiro = {
     const rec  = parseFloat(data.valor_recebido) || 0;
     const glo  = parseFloat(data.glosa) || 0;
     data.diferenca_calc = prev - rec - glo;
-    /* Preserva campos que não são inputs do formulário (anexos herdados do
-       registro clínico de origem e vínculos) ao salvar manualmente. */
+    /* Preserva o que não é campo do formulário mas tem de sobreviver à edição
+       manual: anexos herdados do registro clínico, vínculos e — sobretudo — a
+       RASTREABILIDADE da linha (de que registro e de que linha ela veio, com
+       que código, quantidade e fração).
+
+       Sem isso, corrigir um lançamento à mão apagava o vínculo da linha: o
+       registro clínico salvo em seguida não reconhecia mais aquela linha,
+       criava outra no lugar e o valor corrigido virava duplicata. */
     if (data._id) {
       const previo = store.getById('financeiro', data._id);
       if (previo) {
         if (data._docsOrigem === undefined && previo._docsOrigem) data._docsOrigem = previo._docsOrigem;
         if (previo._links && !data._links) data._links = previo._links;
         if (previo._autoCriado && data._autoCriado === undefined) data._autoCriado = previo._autoCriado;
+        [
+          '_origemLinhaId', '_origemDescricao',
+          'cbhpm_codigo', 'cbhpm_descricao', 'cbhpm_versao',
+          'quantidade', 'fracao', 'fracao_manual', 'fracao_ajustada_por', 'fracao_ajustada_em',
+          'codigo_trocado', 'codigo_anterior', 'codigo_trocado_por', 'codigo_trocado_em',
+          'valor_base', 'valor_final', 'origem_valor', 'tipo_honorario'
+        ].forEach(k => { if (data[k] === undefined && previo[k] !== undefined) data[k] = previo[k]; });
       }
     }
     store.save('financeiro', data);
@@ -42807,21 +42995,29 @@ const ORC_PORTE_CIR_2024_F3 = {
 
 /* Bases de referência do orçamento. tipo:'anest' usa o porte ANESTÉSICO (AN0–8);
    tipo:'cir' usa o porte CIRÚRGICO (1A–14C) do procedimento. */
-/* Conversão porte ANESTÉSICO (AN0–8) → porte CBHPM correspondente. É a
-   relação publicada pela própria CBHPM (cbhpm.AN_PORTE), usada tanto para
-   classificar quanto para derivar o valor da anestesia a partir de qualquer
-   tabela cirúrgica (2018, 2024/25, faixas). Fonte única: mudou lá, muda aqui.
+/* Conversão porte ANESTÉSICO (AN0–8) → porte CBHPM correspondente. Existem
+   DUAS, e as duas ficam disponíveis de propósito:
+
+   • a CLÁSSICA (abaixo), que o sistema usa desde sempre e que sustenta os
+     orçamentos já emitidos — não muda de valor;
+   • a da CBHPM 2022 (cbhpm.AN_PORTE), publicada pela própria tabela, que
+     entra como opção separada no seletor do Orçamento.
+
+   Escolher qual usar é decisão de quem cobra, não do código: por isso as
+   duas convivem no seletor, cada uma com o seu nome, em vez de uma
+   substituir a outra em silêncio.
 
    AN0 = anestesia local / sem participação do anestesiologista: não há
-   honorário a derivar.
-
-   Nota histórica: até agosto/2026 o app usava outra correspondência para
-   PREÇO (AN3→5B, AN4→7B, AN5→9A, AN7→11C, AN8→13C), mais alta nesses portes.
-   A troca para a relação da CBHPM foi decisão do médico responsável, ciente
-   de que ela reduz o valor derivado nesses AN. As tabelas com valores
-   próprios por AN (Unimed, CBHPM 2015) não passam por esta conversão e
-   seguem exatamente como estavam. */
+   honorário a derivar. Tabelas com valores próprios por AN (Unimed, CBHPM
+   2015) não passam por conversão nenhuma. */
+const ORC_ANEST_DE_CIR = { 1: '3A', 2: '3C', 3: '5B', 4: '7B', 5: '9A', 6: '9B', 7: '11C', 8: '13C' };
 function orcDerivarAnestDeCir(tabCir) {
+  const v = { 0: 0 };
+  for (let p = 1; p <= 8; p++) v[p] = Number(tabCir[ORC_ANEST_DE_CIR[p]]) || 0;
+  return v;
+}
+/* Mesma derivação, pela relação AN → porte publicada na CBHPM 2022 */
+function orcDerivarAnestCBHPM2022(tabCir) {
   const v = { 0: 0 };
   for (let p = 1; p <= 8; p++) {
     const porte = (typeof cbhpm !== 'undefined' && cbhpm.AN_PORTE) ? cbhpm.AN_PORTE[p] : '';
@@ -42833,12 +43029,22 @@ function orcDerivarAnestDeCir(tabCir) {
 const ORC_PORTE_ANEST_PADRAO = {
   unimed:    { nome: 'Unimed (CBHPM 2015 + 7%) — porte anest.', tipo: 'anest', valores: { 0: 0, 1: 145.28, 2: 212.64, 3: 312.98, 4: 462.74, 5: 715.80, 6: 998.85, 7: 1421.12, 8: 1874.88 } },
   cbhpm2015: { nome: 'CBHPM 2015 (0%) — porte anest.',          tipo: 'anest', valores: { 0: 0, 1: 135.78, 2: 198.73, 3: 292.50, 4: 432.47, 5: 668.97, 6: 933.50, 7: 1328.15, 8: 1752.22 } },
-  /* Derivadas pela conversão AN→CBHPM (1→3A, 2→3C, 3→5B, 4→7B, 5→9A, 6→9B, 7→11C, 8→13C) */
+  /* Derivadas pela conversão CLÁSSICA do sistema (1→3A, 2→3C, 3→5B, 4→7B,
+     5→9A, 6→9B, 7→11C, 8→13C). São as que sustentam os orçamentos já
+     emitidos — os valores não mudam. */
   anest2018_conv:      { nome: 'CBHPM 2018 → porte anest. (conversão)',            tipo: 'anest', valores: orcDerivarAnestDeCir(ORC_PORTE_CIR_2018) },
   anest2024_orig_conv: { nome: 'CBHPM 2024/25 Original → porte anest. (conversão)', tipo: 'anest', valores: orcDerivarAnestDeCir(ORC_PORTE_CIR_2024_ORIG) },
   anest2024_f1_conv:   { nome: 'CBHPM 2024/25 Faixa I → porte anest. (conversão)',  tipo: 'anest', valores: orcDerivarAnestDeCir(ORC_PORTE_CIR_2024_F1) },
   anest2024_f2_conv:   { nome: 'CBHPM 2024/25 Faixa II → porte anest. (conversão)', tipo: 'anest', valores: orcDerivarAnestDeCir(ORC_PORTE_CIR_2024_F2) },
   anest2024_f3_conv:   { nome: 'CBHPM 2024/25 Faixa III → porte anest. (conversão)', tipo: 'anest', valores: orcDerivarAnestDeCir(ORC_PORTE_CIR_2024_F3) },
+  /* As mesmas tabelas derivadas pela relação AN → porte publicada na CBHPM
+     2022 (1→3A, 2→3C, 3→4C, 4→6B, 5→7C, 6→9B, 7→10C, 8→12A). Entram ao lado
+     das anteriores, não no lugar delas: qual usar é decisão de quem cobra. */
+  anest2018_conv22:      { nome: 'CBHPM 2018 → porte anest. (conversão CBHPM 2022)',            tipo: 'anest', valores: orcDerivarAnestCBHPM2022(ORC_PORTE_CIR_2018) },
+  anest2024_orig_conv22: { nome: 'CBHPM 2024/25 Original → porte anest. (conversão CBHPM 2022)', tipo: 'anest', valores: orcDerivarAnestCBHPM2022(ORC_PORTE_CIR_2024_ORIG) },
+  anest2024_f1_conv22:   { nome: 'CBHPM 2024/25 Faixa I → porte anest. (conversão CBHPM 2022)',  tipo: 'anest', valores: orcDerivarAnestCBHPM2022(ORC_PORTE_CIR_2024_F1) },
+  anest2024_f2_conv22:   { nome: 'CBHPM 2024/25 Faixa II → porte anest. (conversão CBHPM 2022)', tipo: 'anest', valores: orcDerivarAnestCBHPM2022(ORC_PORTE_CIR_2024_F2) },
+  anest2024_f3_conv22:   { nome: 'CBHPM 2024/25 Faixa III → porte anest. (conversão CBHPM 2022)', tipo: 'anest', valores: orcDerivarAnestCBHPM2022(ORC_PORTE_CIR_2024_F3) },
   cir2018:      { nome: 'CBHPM 2018 — porte cirúrgico',                tipo: 'cir', valores: ORC_PORTE_CIR_2018 },
   cir2024_orig: { nome: 'CBHPM 2024/2025 — Original (porte cir.)',     tipo: 'cir', valores: ORC_PORTE_CIR_2024_ORIG },
   cir2024_f1:   { nome: 'CBHPM 2024/2025 — Faixa I (porte cir.)',      tipo: 'cir', valores: ORC_PORTE_CIR_2024_F1 },
@@ -43219,7 +43425,12 @@ const doses = {
       { nome: 'Fenilefrina',          unidade: 'mcg/kg/min', fator: 0.06,   porPeso: true },
       { nome: 'Midodrina',            unidade: 'mcg/kg/min', fator: 0.4,    porPeso: true },
       { nome: 'Dopamina',             unidade: 'mcg/kg/min', fator: 0.01,   porPeso: true },
-      { nome: 'Angiotensina II',      unidade: 'ng/kg/min',  fator: 0.0025, porPeso: true }
+      { nome: 'Angiotensina II',      unidade: 'ng/kg/min',  fator: 0.0025, porPeso: true },
+      /* Adjuvantes da vasoplegia: entram na mesma escala na fonte, com
+         unidades próprias — azul de metileno por hora, hidroxicobalamina
+         como dose única em gramas. */
+      { nome: 'Azul de metileno',     unidade: 'mg/kg/h',    fator: 0.2,    porPeso: true },
+      { nome: 'Hidroxicobalamina',    unidade: 'g',          fator: 0.02,   porPeso: false }
     ],
     _dr(nome) { return doses.equiv.DROGAS.find(d => d.nome === nome) || null; },
     /* dose da droga → equivalente em noradrenalina (mcg/kg/min) */
