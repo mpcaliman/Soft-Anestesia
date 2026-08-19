@@ -4413,9 +4413,13 @@ await test('Armazenamento cheio: libera espaço sozinho, salva de verdade e não
     espaco.ETAPAS = [{ nome: 'nada', fn: () => 0 }];
     localStorage.removeItem(espaco.AVISO_KEY);
     out.falhaVoltaFalse = store.setList('pre', [{ _id: 'x' }]) === false;
-    /* e avisa numa FAIXA, não numa janela modal que bloqueia o trabalho */
-    out.faixaNaoModal = !!document.getElementById('espaco-faixa')
-      && !document.getElementById('modal-backdrop').classList.contains('show');
+    /* e avisa numa FAIXA, não numa janela modal que bloqueia o trabalho.
+       (Confere pelo TÍTULO: outra janela do app aberta na hora não é o que
+       este teste mede — o que não pode é o aviso de espaço virar modal.) */
+    const bdEsp = document.getElementById('modal-backdrop');
+    const tituloModal = ((document.getElementById('modal-title') || {}).textContent || '');
+    out.faixaNaoModal = !!document.getElementById('espaco-faixa') &&
+      !(bdEsp.classList.contains('show') && /espa|armazenam|memória/i.test(tituloModal));
     /* segundo aviso dentro de 6 h não repete a faixa */
     espaco.fecharFaixa();
     store.setList('pre', [{ _id: 'x' }]);
