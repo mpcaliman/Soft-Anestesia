@@ -4309,7 +4309,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-15f</b><br>
+    v7.1 · build <b id="build-tag">2026-08-19a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -42106,14 +42106,27 @@ const financeiro = {
     const rec  = parseFloat(data.valor_recebido) || 0;
     const glo  = parseFloat(data.glosa) || 0;
     data.diferenca_calc = prev - rec - glo;
-    /* Preserva campos que não são inputs do formulário (anexos herdados do
-       registro clínico de origem e vínculos) ao salvar manualmente. */
+    /* Preserva o que não é campo do formulário mas tem de sobreviver à edição
+       manual: anexos herdados do registro clínico, vínculos e — sobretudo — a
+       RASTREABILIDADE da linha (de que registro e de que linha ela veio, com
+       que código, quantidade e fração).
+
+       Sem isso, corrigir um lançamento à mão apagava o vínculo da linha: o
+       registro clínico salvo em seguida não reconhecia mais aquela linha,
+       criava outra no lugar e o valor corrigido virava duplicata. */
     if (data._id) {
       const previo = store.getById('financeiro', data._id);
       if (previo) {
         if (data._docsOrigem === undefined && previo._docsOrigem) data._docsOrigem = previo._docsOrigem;
         if (previo._links && !data._links) data._links = previo._links;
         if (previo._autoCriado && data._autoCriado === undefined) data._autoCriado = previo._autoCriado;
+        [
+          '_origemLinhaId', '_origemDescricao',
+          'cbhpm_codigo', 'cbhpm_descricao', 'cbhpm_versao',
+          'quantidade', 'fracao', 'fracao_manual', 'fracao_ajustada_por', 'fracao_ajustada_em',
+          'codigo_trocado', 'codigo_anterior', 'codigo_trocado_por', 'codigo_trocado_em',
+          'valor_base', 'valor_final', 'origem_valor', 'tipo_honorario'
+        ].forEach(k => { if (data[k] === undefined && previo[k] !== undefined) data[k] = previo[k]; });
       }
     }
     store.save('financeiro', data);

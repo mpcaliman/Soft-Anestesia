@@ -7406,7 +7406,7 @@ await test('CBHPM 2022: tabela completa, busca por número e classificação ane
    atualiza as mesmas linhas; retirar um procedimento não deixa linha órfã. */
 await test('Consulta → Financeiro: 1 linha da consulta + 1 por procedimento, sem duplicar', async () => {
   const page = await novaPagina();
-  const r = await page.evaluate(() => {
+  const r = await page.evaluate(async () => {
     const out = {};
     store.setList('financeiro', []); store.setList('consulta', []); store.setList('pre', []);
     ui.navegar('consulta');
@@ -7482,6 +7482,28 @@ await test('Consulta → Financeiro: 1 linha da consulta + 1 por procedimento, s
     out.impressaoSemValor = !!baseImp && html.indexOf(String(Math.floor(baseImp))) < 0;
     consulta.procs.limpar();
 
+    /* corrigir um lançamento à mão (o caso real: valor errado) não pode apagar
+       a rastreabilidade — se apagar, o registro clínico salvo depois não
+       reconhece a linha, cria outra e o valor corrigido vira duplicata */
+    store.setList('financeiro', []); store.setList('consulta', []);
+    const docEd = store.save('consulta', { nome: 'Paciente Edição', data: utils.hojeISO(),
+      _procsRealizados: [{ linhaId: 'cproc-0', codigo: '3.10.05.12-8', descricao: 'Colecistectomia sem colangiografia', quantidade: 1, fracao: 100 }] });
+    fin.fromDoc('consulta', docEd);
+    const alvoEd = store.list('financeiro').find(x => x._origemLinhaId === 'cproc-0');
+    ui.navegar('financeiro');
+    financeiro.editar(alvoEd._id);
+    await new Promise(res => setTimeout(res, 200));
+    document.querySelector('#form-financeiro [name="valor_recebido"]').value = '250';
+    financeiro.salvar();
+    await new Promise(res => setTimeout(res, 250));
+    const depoisEd = store.getById('financeiro', alvoEd._id);
+    out.edicaoManualMantemVinculo = depoisEd._origemLinhaId === 'cproc-0' &&
+      depoisEd.cbhpm_codigo === '3.10.05.12-8' && depoisEd.tipo_honorario === 'procedimento' &&
+      Number(depoisEd.valor_recebido) === 250;
+    fin.fromDoc('consulta', store.getById('consulta', docEd._id));
+    out.edicaoManualNaoDuplica = store.list('financeiro').length === 2 &&
+      Number(store.getById('financeiro', alvoEd._id).valor_recebido) === 250;
+
     store.setList('financeiro', []); store.setList('consulta', []); store.setList('pre', []);
     return out;
   });
@@ -7501,6 +7523,8 @@ await test('Consulta → Financeiro: 1 linha da consulta + 1 por procedimento, s
   assert(r.preNaoDuplica, 'e salvar de novo não cria uma segunda');
   assert(r.impressaoLista, 'o documento da consulta precisa listar o que foi feito, com o código');
   assert(r.impressaoSemValor, 'valor e fração são conta interna — não vão para o documento do paciente');
+  assert(r.edicaoManualMantemVinculo, 'corrigir o lançamento à mão não pode apagar de onde ele veio');
+  assert(r.edicaoManualNaoDuplica, 'e o registro clínico salvo depois atualiza a mesma linha, sem duplicar');
   await page.close();
 });
 
