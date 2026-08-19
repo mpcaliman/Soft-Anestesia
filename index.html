@@ -4309,7 +4309,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-19b</b><br>
+    v7.1 · build <b id="build-tag">2026-08-19c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -31929,7 +31929,11 @@ const anestesia = {
         peso: v('paciente_peso'), altura: v('paciente_altura'),
         imc: v('paciente_imc'), prontuario: v('paciente_prontuario'),
         nome_mae: v('paciente_mae'), convenio: v('paciente_convenio'),
-        carteirinha: v('paciente_carteirinha'), senha: v('paciente_senha')
+        carteirinha: v('paciente_carteirinha'), senha: v('paciente_senha'),
+        /* Procedência/acomodação (apartamento, enfermaria, UTI...): estava no
+           formulário mas não era salva — saía da tela a cada recarga e não
+           chegava ao financeiro nem à impressão. */
+        acomodacao: v('origem')
       },
       procedimento: {
         descricao: v('procedimento'),
@@ -32087,6 +32091,7 @@ const anestesia = {
     set('paciente_altura', p.altura); set('paciente_prontuario', p.prontuario);
     set('paciente_mae', p.nome_mae); set('paciente_convenio', p.convenio);
     set('paciente_carteirinha', p.carteirinha); set('paciente_senha', p.senha);
+    set('origem', p.acomodacao || p.origem);
 
     const pr = d.procedimento || {};
     set('procedimento', pr.descricao); set('cirurgiao', pr.cirurgiao);
@@ -32581,13 +32586,11 @@ const anestesia = {
     /* Acomodação cadastrada no paciente: 'apartamento', 'enfermaria' ou '' */
     acomodacaoDoPaciente(nome) {
       try {
-        const marcado = (v) => v === true || v === '1' || v === 1;
         if (!nome) return '';
         const alvo = linker._normNome(nome);
         const pac = store.list('pacientes').find(p => linker._normNome(p.nome) === alvo);
         if (!pac) return '';
-        if (marcado(pac.apartamento)) return 'apartamento';
-        if (marcado(pac.enfermaria)) return 'enfermaria';
+        return linker._acomodacaoDoCadastro(pac);
       } catch (e) {}
       return '';
     },
@@ -32597,7 +32600,9 @@ const anestesia = {
       try {
         const f = document.getElementById('form-anestesia');
         const nome = f ? (f.querySelector('[name="paciente_nome"]') || {}).value : '';
-        if (anestesia.adicionais.acomodacaoDoPaciente(nome) === 'apartamento') auto.push('apartamento');
+        const naFicha = f ? ((f.querySelector('[name="origem"]') || {}).value || '').toLowerCase() : '';
+        if (naFicha === 'apartamento'
+            || (!naFicha && anestesia.adicionais.acomodacaoDoPaciente(nome) === 'apartamento')) auto.push('apartamento');
       } catch (e) {}
       return auto;
     },
@@ -33780,7 +33785,7 @@ const linker = {
   /* Campos de paciente rastreados no per-campo-mais-recente */
   _CAMPOS_PACIENTE: ['nome', 'nascimento', 'idade', 'sexo', 'peso', 'altura', 'imc',
     'cpf', 'rg', 'prontuario', 'convenio', 'plano', 'matricula', 'carteirinha',
-    'telefone', 'email', 'endereco'],
+    'telefone', 'email', 'endereco', 'acomodacao'],
 
   /* === PER-CAMPO MAIS RECENTE ===
      Reúne TODOS os registros do paciente (todos os módulos + cadastro),
@@ -33897,8 +33902,20 @@ const linker = {
       prontuario: p.prontuario, endereco: p.endereco,
       convenio: p.convenio || p.plano, plano: p.plano || p.convenio,
       matricula: p.matricula || p.carteirinha, carteirinha: p.carteirinha || p.matricula,
-      telefone: p.telefone, email: p.email
+      telefone: p.telefone, email: p.email,
+      /* No cadastro a acomodação são duas caixas (apartamento / enfermaria);
+         aqui vira um dado só, do jeito que os formulários esperam. */
+      acomodacao: linker._acomodacaoDoCadastro(p)
     };
+  },
+
+  /* 'apartamento' | 'enfermaria' | '' a partir das caixas do cadastro */
+  _acomodacaoDoCadastro(p) {
+    const marcado = v => v === true || v === '1' || v === 1 || v === 'true';
+    if (!p) return '';
+    if (marcado(p.apartamento)) return 'apartamento';
+    if (marcado(p.enfermaria)) return 'enfermaria';
+    return p.acomodacao || '';
   },
 
   /* Extrai estrutura normalizada de dados do paciente a partir de QUALQUER módulo */
@@ -33911,7 +33928,8 @@ const linker = {
       cpf: src.cpf, rg: src.rg, prontuario: src.prontuario, endereco: src.endereco,
       convenio: src.convenio, plano: src.plano,
       matricula: src.matricula, carteirinha: src.carteirinha,
-      telefone: src.telefone, email: src.email
+      telefone: src.telefone, email: src.email,
+      acomodacao: src.acomodacao || item.acomodacao || item.origem
     });
     return o;
   },
@@ -33924,6 +33942,11 @@ const linker = {
         sexo: 'paciente_sexo', peso: 'paciente_peso', altura: 'paciente_altura',
         cpf: 'paciente_cpf', prontuario: 'paciente_prontuario',
         convenio: 'paciente_convenio', plano: 'paciente_plano', matricula: 'paciente_matricula',
+        /* a carteirinha estava fora do mapa: existe no cadastro e no formulário,
+           mas nunca era trazida — e é ela que vai na guia */
+        carteirinha: ['paciente_carteirinha', 'carteirinha'],
+        /* apartamento/enfermaria do cadastro → "Procedência / origem" da ficha */
+        acomodacao: ['origem', 'acomodacao'],
         telefone: 'paciente_telefone', email: 'paciente_email'
       };
     }
@@ -33943,6 +33966,8 @@ const linker = {
       sexo: 'sexo', peso: 'peso', altura: 'altura',
       cpf: 'cpf', prontuario: 'prontuario',
       convenio: 'convenio', plano: 'plano', matricula: 'matricula',
+      carteirinha: 'carteirinha',
+      acomodacao: ['acomodacao', 'origem'],
       telefone: 'telefone', email: 'email', endereco: 'endereco'
     };
   },
@@ -33970,10 +33995,41 @@ const linker = {
     return partes.join('. ');
   },
 
+  /* Nomes para os quais já tentamos buscar a pré na nuvem nesta sessão —
+     evita repetir a ida ao servidor a cada blur do campo de nome. */
+  _preBuscadaNaNuvem: {},
+
+  /* A pré pode existir só na nuvem (feita em outro aparelho). Sem isto, o
+     médico digitava o nome, nada acontecia, e não havia como saber por quê. */
+  _buscarPreNaNuvem(nomePaciente, opts) {
+    try {
+      const chave = linker._normNome(nomePaciente);
+      if (!chave || linker._preBuscadaNaNuvem[chave]) return;
+      if (typeof cloudRel === 'undefined' || !cloudRel.autoPullModulo || !cloudRel.disponivel || !cloudRel.disponivel()) return;
+      linker._preBuscadaNaNuvem[chave] = true;
+      /* o pull do módulo só roda uma vez por sessão; aqui queremos de fato ir
+         buscar, senão a chamada volta vazia sem tocar no servidor */
+      try { cloudRel._puxados['pre'] = false; } catch (e) {}
+      Promise.resolve(cloudRel.autoPullModulo('pre')).then(() => {
+        if (!linker.ultimoPorNome('pre', nomePaciente)) return;
+        /* o médico pode ter trocado de paciente enquanto a nuvem respondia */
+        const f = document.getElementById('form-anestesia');
+        const atual = f ? (f.querySelector('[name="paciente_nome"]') || {}).value : '';
+        if (linker._normNome(atual) !== chave) return;
+        linker.importarPreParaAnestesia(nomePaciente, Object.assign({}, opts, { _semNuvem: true }));
+      }).catch(() => {});
+    } catch (e) {}
+  },
+
   importarPreParaAnestesia(nomePaciente, opts = {}) {
     if (!nomePaciente) return false;
-    const pre = linker.ultimoPorNome('pre', nomePaciente);
-    if (!pre) return false;
+    /* opts.registro: a pré exata escolhida pelo usuário (importação manual),
+       em vez da mais recente daquele nome */
+    const pre = opts.registro || linker.ultimoPorNome('pre', nomePaciente);
+    if (!pre) {
+      if (!opts._semNuvem) linker._buscarPreNaNuvem(nomePaciente, opts);
+      return false;
+    }
 
     const form = document.getElementById('form-anestesia');
     if (!form) return false;
@@ -33982,13 +34038,22 @@ const linker = {
     const setSe = (name, val) => {
       if (val == null || val === '') return;
       const el = form.querySelector('[name="' + name + '"]');
-      if (el && !el.value) el.value = val;
+      /* _setCampo em vez de el.value = val: convênio e sexo são <select> e
+         atribuição crua não casa "Unimed"/"Masculino" com a opção certa. */
+      if (el && !el.value) linker._setCampo(el, val);
     };
     /* Dados do paciente e clínicos vindos da Pré-anestésica */
     setSe('paciente_nasc', pre.nasc || pre.nascimento);
     setSe('paciente_sexo', pre.sexo);
     setSe('paciente_peso', pre.peso);
     setSe('paciente_altura', pre.altura);
+    /* Estes quatro estavam na pré e não vinham para a ficha — o médico
+       redigitava convênio, senha, cirurgião e hospital a cada ficha. */
+    setSe('paciente_convenio', pre.convenio);
+    setSe('paciente_senha', pre.senha);
+    setSe('paciente_prontuario', pre.prontuario);
+    setSe('cirurgiao', pre.cirurgiao);
+    setSe('local_hospital', pre.hospital || pre.local);
     setSe('pre_diagnostico', pre.cirurgia);
     setSe('pre_comorbidades', pre.comorbidades);
     setSe('pre_alergias', pre.alergias);
@@ -33996,10 +34061,10 @@ const linker = {
     setSe('pre_asa', pre.asa);
     setSe('pre_jejum', pre.jejum);
     setSe('pre_medicacao', pre.medicacao_pre);
-    setSe('pre_via_aerea', pre.via_aerea);
+    setSe('pre_via_aerea', pre.via_aerea || pre.via_aerea_resumo);
     setSe('pre_glicemia', pre.lab_glicemia);
     setSe('pre_exames', linker._resumoExamesPre(pre));
-    setSe('pre_observacoes', pre.risco_resumo || pre.conclusao);
+    setSe('pre_observacoes', pre.risco_resumo || pre.conclusao || pre.antecedentes);
 
     /* Procedimento principal (respeita o já digitado, salvo force=true) */
     const procEl = form.querySelector('[name="procedimento"]');
@@ -34124,7 +34189,10 @@ const linker = {
     try {
       const acEl0 = form.querySelector('[name="acomodacao"]');
       const nomePac = (a.paciente && a.paciente.nome) || a.paciente_nome || '';
-      const acom = anestesia.adicionais.acomodacaoDoPaciente(nomePac);
+      /* o que está na ficha vale mais que o cadastro: é o desta internação */
+      const daFicha = ((a.paciente && a.paciente.acomodacao) || '').toLowerCase();
+      const acom = (daFicha === 'apartamento' || daFicha === 'enfermaria')
+        ? daFicha : anestesia.adicionais.acomodacaoDoPaciente(nomePac);
       if (acEl0 && !acEl0.value && acom) {
         acEl0.value = acom;
         try { financeiro.fatores.onAcomodacao(acom); } catch (e) {}
@@ -35389,26 +35457,15 @@ const modelos = {
   _importarParaAnestesia(srcMod, src) {
     const setV = (n, v) => modelos._setSeVazio('form-anestesia', n, v);
     if (srcMod === 'pre') {
+      /* Havia DUAS importações da pré para a ficha, cada uma trazendo um
+         conjunto diferente de campos: quem entrava por aqui perdia
+         nascimento, convênio, senha, glicemia e o resumo dos exames. Agora
+         este caminho usa a mesma importação do linker — só passando a pré
+         escolhida, em vez da mais recente daquele nome. */
       setV('paciente_nome', src.nome);
-      setV('paciente_sexo', src.sexo);
-      setV('paciente_peso', src.peso);
-      setV('paciente_altura', src.altura);
-      setV('cirurgiao', src.cirurgiao);
-      setV('procedimento', src.cirurgia);
-      setV('local_hospital', src.hospital);
-      setV('pre_diagnostico', src.cirurgia);
-      setV('pre_asa', src.asa);
-      setV('pre_jejum', src.jejum);
-      setV('pre_alergias', src.alergias);
-      setV('pre_comorbidades', src.comorbidades);
-      setV('pre_via_aerea', src.via_aerea);
-      setV('pre_exames', src.exames_compl);
-      setV('pre_medicacoes', src.medicacoes);
-      setV('pre_medicacao', src.medicacao_pre);
-      setV('pre_observacoes', src.conclusao || src.antecedentes);
-      /* avaliação pré realizada */
-      const avEl = document.querySelector('#form-anestesia [name="pre_avaliacao"]');
-      if (avEl && !avEl.value) avEl.value = 'Sim';
+      linker.importarPreParaAnestesia(src.nome, { registro: src, silent: true });
+      /* acomodação e demais dados do cadastro central */
+      try { linker.autoPreencherDadosPaciente(src.nome, 'anestesia'); } catch (e) {}
       ui.mostrarBanner('banner-anestesia', '✅ Dados importados da Avaliação pré-anestésica. Revise antes de salvar.', 'success');
       anestesia._linkPendente = { mod: 'pre', id: src._id };
     } else if (srcMod === 'consulta') {
@@ -37763,6 +37820,24 @@ const autocomplete = {
       h.value = p._id;
     }
     toast('Paciente "' + p.nome + '" carregado');
+    /* AQUI ESTAVA A FALHA DA IMPORTAÇÃO DA PRÉ: escolher o paciente na lista
+       preenchia só os campos do cadastro. Quem chama o linker é o onblur do
+       campo de nome — e o clique na sugestão dá preventDefault no mousedown,
+       de propósito, para não fechar a lista: o campo NÃO perde o foco e o
+       onblur não dispara. A pré só entraria se o médico depois clicasse em
+       outro campo; indo direto para salvar, imprimir ou outro módulo, não
+       entrava nunca. Agora a importação roda na hora da escolha. */
+    try {
+      const MOD = {
+        'form-anestesia': 'anestesia', 'form-pre': 'pre',
+        'form-consulta': 'consulta', 'form-recuperacao': 'recuperacao'
+      }[formId];
+      if (MOD && p.nome) {
+        linker.autoPreencherDadosPaciente(p.nome, MOD);
+        if (MOD === 'anestesia') linker.importarPreParaAnestesia(p.nome);
+        try { rascunhos.renomearAba(MOD); } catch (e) {}
+      }
+    } catch (e) {}
   },
   /* Anexa autocomplete simples baseado em uma categoria de cadastro */
   attachSimples(input, catKey) {
@@ -39288,6 +39363,7 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._field('Convênio', p.convenio)}
         ${printPreview._field('Carteirinha', p.carteirinha)}
         ${printPreview._field('Senha / Autorização', p.senha)}
+        ${printPreview._field('Procedência / acomodação', p.acomodacao)}
       </div>
     `);
     /* O procedimento começa quando o paciente ENTRA na sala e termina quando
