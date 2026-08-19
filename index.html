@@ -4309,7 +4309,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-15e</b><br>
+    v7.1 · build <b id="build-tag">2026-08-15f</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -16902,6 +16902,8 @@ const auth = {
     /* Sair/Bloquear agora SEMPRE derruba também a sessão do dia — a próxima
        entrada pede senha mesmo no modo "1x por dia". */
     try { localStorage.removeItem(auth.DIA_KEY); } catch (e) {}
+    /* quem entrar depois merece ver o aviso de pendências uma vez */
+    try { pendencias.esquecerMostrada(); } catch (e) {}
     auth._pararTimer();
     auth._bloquear();
   },
@@ -18674,8 +18676,11 @@ const cloud = {
       /* PAPEL do servidor reaplicado a cada entrada: se o gestor mudou o papel
          de alguém, o aparelho dessa pessoa obedece sem depender de botão */
       setTimeout(() => { try { auth.atualizarPapelDaNuvem(); } catch (e) {} }, 1400);
-      /* pendências de convênio: a janela aparece ao entrar (após os pulls) */
-      setTimeout(() => { try { if (typeof pendencias !== 'undefined') pendencias.checarAoEntrar(); } catch (e) {} }, 3200);
+      /* Pendências: aqui só o CARTÃO do Dashboard se atualiza. A janela é
+         assunto de login — esta rotina roda também a cada 10 minutos e ao
+         voltar para a aba, e abrir a janela nessas horas era interromper o
+         atendimento de meia em meia hora. */
+      setTimeout(() => { try { if (typeof pendencias !== 'undefined') pendencias.renderDashboard(); } catch (e) {} }, 3200);
       setTimeout(() => {
         try {
           if (typeof cloudRel !== 'undefined' && cloudRel.autoPullModulo) {
@@ -19752,13 +19757,45 @@ const pendencias = {
       '<div class="card-body"><button class="btn btn-primary btn-sm" onclick="pendencias.abrir(false)">🔔 Ver pendências (' + lista.length + ')</button></div>';
   },
 
-  /* ---- Gatilhos: ao entrar + a cada 30 minutos ---- */
-  checarAoEntrar() {
+  /* ---- Gatilho: UMA vez, ao entrar ----
+     A janela de pendências é um aviso de quem chega, não um alarme que toca
+     durante o dia. Ela abre uma vez por sessão; o cartão do Dashboard segue
+     se atualizando, e por ele a lista está sempre a um clique. */
+  _MOSTRADA_KEY: 'medsys.v7.pend.mostrada',
+  _quemEstaLogado() {
+    try { const u = auth.usuarioAtual() || {}; return String(u.id || u.usuario || u.nome || 'local'); }
+    catch (e) { return 'local'; }
+  },
+  jaMostrou() {
+    const quem = pendencias._quemEstaLogado();
+    if (pendencias._mostradaPara === quem) return true;
+    try { return sessionStorage.getItem(pendencias._MOSTRADA_KEY) === quem; } catch (e) { return false; }
+  },
+  _marcarMostrada() {
+    const quem = pendencias._quemEstaLogado();
+    pendencias._mostradaPara = quem;
+    try { sessionStorage.setItem(pendencias._MOSTRADA_KEY, quem); } catch (e) {}
+  },
+  /* Sair (ou trocar de usuário) devolve o aviso para quem entrar depois */
+  esquecerMostrada() {
+    pendencias._mostradaPara = null;
+    try { sessionStorage.removeItem(pendencias._MOSTRADA_KEY); } catch (e) {}
+  },
+  checarAoEntrar(opts = {}) {
     if (!pendencias.podeVer()) return;
     try { pendencias.renderDashboard(); } catch (e) {}
-    /* não interrompe um modal já aberto */
+    if (!opts.forcar && pendencias.jaMostrou()) return;
+    /* Não interrompe um modal já aberto — mas também não perde o aviso: como
+       agora a checagem é só uma, sair sem mostrar significaria não mostrar
+       nunca. Tenta de novo daqui a pouco, uma vez. */
     const bd = document.getElementById('modal-backdrop');
-    if (bd && bd.classList.contains('show')) return;
+    if (bd && bd.classList.contains('show')) {
+      if (!opts._retentativa) {
+        setTimeout(() => { try { pendencias.checarAoEntrar({ _retentativa: true }); } catch (e) {} }, 20000);
+      }
+      return;
+    }
+    pendencias._marcarMostrada();
     pendencias.abrir(true);
   },
   /* A janela de pendências aparece UMA VEZ, ao entrar. Antes ela voltava a se

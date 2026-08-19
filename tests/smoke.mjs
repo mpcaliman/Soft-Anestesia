@@ -2094,6 +2094,36 @@ await test('Pendências: plano ≠ Unimed vira alerta com guia/plano; fluxo de f
     const card = document.getElementById('pendencias-card');
     out.dashboard = !!card && card.style.display !== 'none' && card.innerHTML.includes('Ver pendências (1)');
 
+    /* — a JANELA é de quem chega: abre uma vez e não volta a interromper —
+         (ela reaparecia a cada sincronização, de 10 em 10 minutos) */
+    const janelaAberta = () => {
+      const bd = document.getElementById('modal-backdrop');
+      return !!bd && bd.classList.contains('show');
+    };
+    try { modal.close(); } catch (e) {}
+    await new Promise(r => setTimeout(r, 350));
+    pendencias.esquecerMostrada();
+    pendencias.checarAoEntrar();
+    await new Promise(r => setTimeout(r, 120));
+    out.abreAoEntrar = janelaAberta() && pendencias.jaMostrou() === true;
+    modal.close();
+    await new Promise(r => setTimeout(r, 350));
+    pendencias.checarAoEntrar();                       /* a sincronização seguinte */
+    await new Promise(r => setTimeout(r, 120));
+    out.naoVoltaSozinha = janelaAberta() === false;
+    out.cartaoContinua = !!document.getElementById('pendencias-card');
+    pendencias.checarAoEntrar({ forcar: true });        /* pelo botão, abre */
+    await new Promise(r => setTimeout(r, 120));
+    out.botaoAbre = janelaAberta();
+    modal.close();
+    await new Promise(r => setTimeout(r, 350));
+    pendencias.esquecerMostrada();                     /* sair/entrar de novo */
+    pendencias.checarAoEntrar();
+    await new Promise(r => setTimeout(r, 120));
+    out.novoLoginAvisa = janelaAberta();
+    modal.close();
+    await new Promise(r => setTimeout(r, 350));
+
     /* — resolvida a última, o card some — */
     const resta = pendencias.listar()[0];
     pendencias.resolver(resta.mod, resta.id);
@@ -2112,6 +2142,11 @@ await test('Pendências: plano ≠ Unimed vira alerta com guia/plano; fluxo de f
   assert(r.fluxo, 'marcar uma etapa do fluxo deveria dar baixa e gravar o carimbo');
   assert(r.checklist, 'o financeiro deveria mostrar o checklist com todas as etapas do fluxo');
   assert(r.dashboard, 'o Dashboard deveria mostrar o card de pendências com o total');
+  assert(r.abreAoEntrar, 'a janela de pendências abre ao entrar');
+  assert(r.naoVoltaSozinha, 'e não volta a abrir sozinha — antes reaparecia a cada sincronização');
+  assert(r.cartaoContinua, 'o cartão do Dashboard continua lá, para ver a lista quando quiser');
+  assert(r.botaoAbre, 'abrir pelo botão continua funcionando');
+  assert(r.novoLoginAvisa, 'quem entra depois volta a receber o aviso uma vez');
   assert(r.cardSome, 'sem pendências, o card do Dashboard deveria sumir');
   await page.close();
 });
