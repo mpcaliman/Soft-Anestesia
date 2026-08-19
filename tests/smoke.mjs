@@ -8131,6 +8131,148 @@ await test('Doses: magnésio perioperatório — ataque 30–50 mg/kg e manuten�
   await page.close();
 });
 
+/* 132) Impressão da ficha: campo preenchido que não sai é campo perdido.
+   A CEC inteira lia chaves que a ficha não coleta, e o detalhe da via aérea
+   nem era salvo. */
+await test('Ficha impressa: identificação, pré, via aérea, ventilação e CEC saem completas', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('anestesia');
+    const f = document.getElementById('form-anestesia');
+    const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el) { el.value = v; return true; } return false; };
+    const chk = n => { const el = f.querySelector('[name="' + n + '"]'); if (el) el.checked = true; return el; };
+
+    set('paciente_nome', 'Paciente Impressão');
+    set('paciente_nasc', '1990-05-10');
+    set('paciente_mae', 'ZZMAEZZ');
+    set('pre_glicemia', '98');
+    set('pre_via_aerea_obs', 'ZZVIAOBSZZ');
+    set('pre_observacoes', 'ZZPREOBSZZ');
+    set('via_aerea_detalhe', 'ZZDETALHEZZ');
+    set('via_aerea_hora', '08:15');
+    /* ventilação: dado nos DOIS blocos (espontânea no fim, mecânica no meio) */
+    set('vent_esp_obs', 'ZZESPOBSZZ');
+    set('vent_gaso', 'ZZGASOZZ');
+    set('vent_trigger', 'ZZTRIGZZ');
+    /* bloqueio com ultrassom */
+    const bq = chk('bloqueio_realizado'); if (bq) anestesia.bloqueio.alternar(bq);
+    chk('usg_usado'); set('usg_obs', 'ZZUSGZZ');
+    /* CEC preenchida */
+    const c = chk('cec_utilizada'); if (c) anestesia.cec.alternar(c);
+    set('cec_tempo_total', '95');
+    ['cec_relacao_pro_hep', 'cec_prime_descricao', 'cec_perfusao_obs', 'cec_canul_obs',
+     'cec_cardio_obs', 'cec_eventos_obs', 'cec_medic_vaso', 'cec_medic_ino',
+     'cec_medic_vasodil', 'cec_medic_antifib', 'cec_medic_outros', 'cec_saida_obs']
+      .forEach(n => set(n, 'ZZ' + n.toUpperCase() + 'ZZ'));
+
+    const html = printPreview._buildAnestesia();
+    const saiu = m => html.indexOf(m) >= 0;
+    out.identificacao = saiu('ZZMAEZZ') && saiu('10/05/1990');
+    out.pre = saiu('ZZVIAOBSZZ') && saiu('ZZPREOBSZZ') && /Glicemia/.test(html);
+    out.viaAerea = saiu('ZZDETALHEZZ') && saiu('08:15');
+    out.ventilacao = saiu('ZZESPOBSZZ') && saiu('ZZGASOZZ') && saiu('ZZTRIGZZ');
+    out.usg = saiu('ZZUSGZZ');
+    out.cec = ['CEC_RELACAO_PRO_HEP', 'CEC_PRIME_DESCRICAO', 'CEC_PERFUSAO_OBS', 'CEC_CANUL_OBS',
+               'CEC_CARDIO_OBS', 'CEC_EVENTOS_OBS', 'CEC_MEDIC_VASO', 'CEC_MEDIC_INO',
+               'CEC_MEDIC_VASODIL', 'CEC_MEDIC_ANTIFIB', 'CEC_MEDIC_OUTROS', 'CEC_SAIDA_OBS']
+      .every(k => saiu('ZZ' + k + 'ZZ')) && saiu('95');
+
+    /* o detalhe da via aérea e o trigger passam a ser GRAVADOS no registro —
+       antes o texto vivia só dentro da descrição do evento */
+    const d = anestesia.coletarEstruturado();
+    const txt = JSON.stringify(d);
+    out.gravaDetalhe = txt.indexOf('ZZDETALHEZZ') >= 0 && txt.indexOf('ZZTRIGZZ') >= 0;
+    /* e voltam ao reabrir */
+    set('via_aerea_detalhe', ''); set('vent_trigger', '');
+    anestesia.restaurarEstruturado(d);
+    out.restaura = (f.querySelector('[name="via_aerea_detalhe"]') || {}).value === 'ZZDETALHEZZ';
+    return out;
+  });
+  assert(r.identificacao, 'nome da mãe e data de nascimento precisam sair na identificação');
+  assert(r.pre, 'observações da via aérea, observações gerais e glicemia do pré precisam sair');
+  assert(r.viaAerea, 'o detalhe da via aérea (tubo, cuff, Cormack, fixação) e o horário precisam sair');
+  assert(r.ventilacao, 'os dois blocos de ventilação saem quando os dois têm dado');
+  assert(r.usg, 'a observação do ultrassom do bloqueio precisa sair');
+  assert(r.cec, 'a CEC inteira precisa sair — ela lia campos que a ficha não coleta');
+  assert(r.gravaDetalhe, 'o detalhe da via aérea e o trigger têm de ser gravados no registro');
+  assert(r.restaura, 'e voltar ao reabrir a ficha');
+  await page.close();
+});
+
+/* 133) Capnografia e gases só existem com o circuito conectado; a FR da
+   ventilação mecânica é a do ventilador, não uma faixa estatística. */
+await test('Vitais gerados: EtCO₂/gases só na janela da via aérea, FR seguindo o ventilador', async () => {
+  const page = await novaPagina();
+  page.on('dialog', d => d.accept('08:00'));
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('anestesia');
+    const f = document.getElementById('form-anestesia');
+    const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el) el.value = v; };
+    set('hora_sala_entrada', '08:00'); set('hora_sala_saida', '10:00'); set('paciente_idade', '40');
+    ['Capnografia', 'Analisador de gases', 'FR', 'Oximetria', 'PNI'].forEach(v => {
+      const el = Array.from(f.querySelectorAll('[name="monitores[]"]')).find(x => x.value === v);
+      if (el) el.checked = true;
+    });
+    anestesia.disp.sincronizarVitais();
+    const rm = f.querySelector('[name="vent_modo_geral"][value="mecanica"]');
+    if (rm) { rm.checked = true; anestesia.vent.alternar(); }
+    set('vent_fr', '12');
+
+    document.getElementById('eventos-body').innerHTML = '';
+    anestesia.eventos.add({ tipo: 'Intubação', hora: '08:15' });
+    anestesia.eventos.add({ tipo: 'Extubação', hora: '09:30' });
+    const j = anestesia.vitais._janelaViaAerea();
+    out.janela = j && j.ini === 8 * 60 + 15 && j.fim === 9 * 60 + 30;
+    out.frDoVentilador = anestesia.vitais._frDoVentilador() === 12;
+
+    document.getElementById('vitais-body').innerHTML = '';
+    anestesia.vitais._gerarPadrao(10);
+    const linhas = Array.from(document.querySelectorAll('#vitais-body tr')).map(tr => ({
+      hora: (tr.querySelector('[name="vit_hora[]"]') || {}).value,
+      etco2: (tr.querySelector('[name="vit_etco2[]"]') || {}).value,
+      cam: (tr.querySelector('[name="vit_cam[]"]') || {}).value,
+      fr: (tr.querySelector('[name="vit_fr[]"]') || {}).value
+    }));
+    const dentro = linhas.filter(l => l.hora >= '08:15' && l.hora <= '09:30');
+    const fora = linhas.filter(l => l.hora < '08:15' || l.hora > '09:30');
+    out.temAmbos = dentro.length >= 3 && fora.length >= 2;
+    out.soDentro = dentro.every(l => l.etco2 && l.cam) && fora.every(l => !l.etco2 && !l.cam);
+    const et = dentro.map(l => Number(l.etco2));
+    out.faixa = et.every(v => v >= 35 && v <= 45);
+    out.oscila = new Set(et).size >= 3;                      /* não é linha reta */
+    out.frSegue = dentro.every(l => Math.abs(Number(l.fr) - 12) <= 1);
+    out.frForaDaJanela = fora.every(l => Number(l.fr) >= 10);  /* volta à faixa da idade */
+
+    /* retirada da máscara laríngea também fecha a janela */
+    document.getElementById('eventos-body').innerHTML = '';
+    anestesia.eventos.add({ tipo: 'Máscara laríngea', hora: '08:20' });
+    anestesia.eventos.add({ tipo: 'Retirada da máscara laríngea', hora: '09:00' });
+    const j2 = anestesia.vitais._janelaViaAerea();
+    out.janelaML = j2 && j2.ini === 8 * 60 + 20 && j2.fim === 9 * 60;
+    out.eventoExiste = anestesia.eventos.TIPOS.indexOf('Retirada da máscara laríngea') >= 0 &&
+      !!anestesia.eventos.DESCRICOES['Retirada da máscara laríngea'];
+
+    /* sem evento nenhum de via aérea, não há janela — e o gerador não fica mudo */
+    document.getElementById('eventos-body').innerHTML = '';
+    out.semEventosSemJanela = anestesia.vitais._janelaViaAerea() === null;
+    return out;
+  });
+  assert(r.janela, 'a janela vai da intubação à extubação');
+  assert(r.frDoVentilador, 'a FR ajustada no ventilador é lida da seção de ventilação');
+  assert(r.temAmbos, 'o cenário precisa ter medidas dentro e fora da janela');
+  assert(r.soDentro, 'capnografia e analisador de gases só entram dentro da janela');
+  assert(r.faixa, 'EtCO₂ gerado tem de ficar entre 35 e 45');
+  assert(r.oscila, 'e oscilar — capnógrafo não marca o mesmo número o caso inteiro');
+  assert(r.frSegue, 'a FR dentro da ventilação mecânica segue o ventilador');
+  assert(r.frForaDaJanela, 'e fora dela volta à faixa da idade');
+  assert(r.janelaML, 'máscara laríngea e a sua retirada também delimitam a janela');
+  assert(r.eventoExiste, 'a retirada da máscara laríngea precisa existir como evento, com descrição');
+  assert(r.semEventosSemJanela, 'sem evento de via aérea não há janela a impor');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
