@@ -8277,6 +8277,98 @@ await test('Vitais gerados: EtCO₂/gases só na janela da via aérea, FR seguin
   await page.close();
 });
 
+/* 134) Escolher na lista o paciente que já tem pré-anestésica tem de trazer a
+   pré inteira para a ficha — e apartamento/enfermaria vêm do cadastro. */
+await test('Ficha: pré importada ao escolher o paciente, acomodação vinda do cadastro', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const NOME = 'Zulmira Importacao Pre';
+    store.save('pacientes', { nome: NOME, apartamento: true, prontuario: 'ZZPRONTZZ' });
+    store.save('pre', {
+      nome: NOME, data: '2026-08-10',
+      cirurgia: 'Colecistectomia videolaparoscópica',
+      cirurgiao: 'Dr. ZZCIRZZ', hospital: 'Hospital ZZHOSPZZ',
+      convenio: 'Unimed', senha: 'ZZSENHAZZ',
+      asa: 'ASA II', jejum: '8h', comorbidades: 'ZZCOMORBZZ',
+      alergias: 'ZZALERGZZ', medicacoes: 'ZZMEDUSOZZ',
+      via_aerea: 'Mallampati II', lab_hb: '13', risco_resumo: 'ZZRISCOZZ'
+    });
+
+    ui.navegar('anestesia');
+    const f = document.getElementById('form-anestesia');
+    const v = n => ((f.querySelector('[name="' + n + '"]') || {}).value || '');
+    ['paciente_nome', 'cirurgiao', 'local_hospital', 'paciente_convenio', 'paciente_senha',
+     'origem', 'pre_asa', 'pre_comorbidades', 'pre_alergias', 'pre_observacoes', 'procedimento']
+      .forEach(n => { const el = f.querySelector('[name="' + n + '"]'); if (el) el.value = ''; });
+
+    /* o caminho real do médico: clicar o paciente na lista de sugestões.
+       O onblur do campo dispara ANTES do clique, com o nome pela metade —
+       era por isso que a pré não vinha. */
+    const p = store.list('pacientes').find(x => x.nome === NOME);
+    out.temCadastro = !!p;
+    autocomplete._aplicarPaciente('form-anestesia', p);
+
+    out.nome = v('paciente_nome') === NOME;
+    out.cirurgiao = v('cirurgiao') === 'Dr. ZZCIRZZ';
+    out.hospital = v('local_hospital') === 'Hospital ZZHOSPZZ';
+    out.convenio = v('paciente_convenio') === 'Unimed';
+    out.senha = v('paciente_senha') === 'ZZSENHAZZ';
+    out.procedimento = v('procedimento').indexOf('Colecistectomia') >= 0;
+    out.clinico = v('pre_comorbidades') === 'ZZCOMORBZZ'
+      && v('pre_alergias') === 'ZZALERGZZ'
+      && v('pre_medicacoes') === 'ZZMEDUSOZZ'
+      && v('pre_observacoes') === 'ZZRISCOZZ';
+    out.exames = v('pre_exames').indexOf('Hb 13') >= 0;
+    out.acomodacao = v('origem').toLowerCase() === 'apartamento';
+
+    /* a acomodação era um campo morto: preenchida na tela e perdida ao salvar */
+    const d = anestesia.coletarEstruturado();
+    out.grava = (d.paciente.acomodacao || '').toLowerCase() === 'apartamento';
+    const el = f.querySelector('[name="origem"]'); if (el) el.value = '';
+    anestesia.restaurarEstruturado(d);
+    out.restaura = v('origem').toLowerCase() === 'apartamento';
+    out.imprime = printPreview._buildAnestesia().indexOf('Procedência / acomodação') >= 0;
+
+    out.doCadastro = linker._acomodacaoDoCadastro({ enfermaria: '1' }) === 'enfermaria'
+      && linker._acomodacaoDoCadastro({ apartamento: 1 }) === 'apartamento'
+      && linker._acomodacaoDoCadastro({}) === '';
+
+    /* O OUTRO caminho: "importar desta pré", que tinha uma segunda cópia da
+       importação, mais pobre. Tem de trazer exatamente o mesmo. */
+    const pre = store.list('pre').find(x => x.nome === NOME);
+    ['paciente_nome', 'paciente_nasc', 'cirurgiao', 'local_hospital', 'paciente_convenio',
+     'paciente_senha', 'pre_exames', 'pre_glicemia', 'pre_comorbidades', 'origem']
+      .forEach(n => { const el = f.querySelector('[name="' + n + '"]'); if (el) el.value = ''; });
+    modelos._importarParaAnestesia('pre', pre);
+    out.modelosMesmo = v('cirurgiao') === 'Dr. ZZCIRZZ'
+      && v('local_hospital') === 'Hospital ZZHOSPZZ'
+      && v('paciente_convenio') === 'Unimed'
+      && v('paciente_senha') === 'ZZSENHAZZ'
+      && v('pre_exames').indexOf('Hb 13') >= 0
+      && v('pre_comorbidades') === 'ZZCOMORBZZ';
+    out.modelosAcomodacao = v('origem').toLowerCase() === 'apartamento';
+    return out;
+  });
+  assert(r.temCadastro, 'o paciente de teste precisa existir no cadastro');
+  assert(r.nome, 'o nome escolhido na lista vai para a ficha');
+  assert(r.cirurgiao, 'o cirurgião da pré precisa vir para a ficha');
+  assert(r.hospital, 'o hospital da pré precisa vir para a ficha');
+  assert(r.convenio, 'o convênio da pré precisa vir para a ficha (é um select)');
+  assert(r.senha, 'a senha do plano registrada na pré precisa vir');
+  assert(r.procedimento, 'o procedimento da pré precisa vir para a ficha');
+  assert(r.clinico, 'comorbidades, alergias, medicações e conclusão da pré precisam vir');
+  assert(r.exames, 'os exames da pré precisam vir resumidos');
+  assert(r.acomodacao, 'apartamento/enfermaria do cadastro precisa cair na procedência da ficha');
+  assert(r.grava, 'a acomodação precisa ser gravada no registro da ficha');
+  assert(r.restaura, 'e voltar ao reabrir a ficha');
+  assert(r.imprime, 'a acomodação precisa sair na impressão da ficha');
+  assert(r.doCadastro, 'as duas caixas do cadastro viram um dado só de acomodação');
+  assert(r.modelosMesmo, 'importar "desta pré" tem de trazer os mesmos campos, não uma cópia mais pobre');
+  assert(r.modelosAcomodacao, 'e a acomodação do cadastro também por esse caminho');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
