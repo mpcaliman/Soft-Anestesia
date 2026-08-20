@@ -3114,6 +3114,14 @@ await test('Pré finalizada oferece o Termo; pré + termo saem num arquivo únic
   const r = await page.evaluate(async () => {
     const out = {};
     store.setList('pre', []); store.setList('termo', []);
+    /* _perguntarTermo ADIA de propósito quando já há janela aberta (é o que
+       `esperaAVez` verifica adiante). Se o boot do app abrir alguma janela
+       por volta dos 900ms que o harness espera, o convite era adiado e este
+       teste falhava por corrida, não por defeito. Parte-se do zero. */
+    try { modal.close(); } catch (e) {}
+    try { printPreview.fechar(); } catch (e) {}
+    document.getElementById('modal-backdrop').classList.remove('show');
+    document.getElementById('print-preview-overlay').classList.remove('show');
 
     /* ---- ao finalizar a pré, a janela oferece avançar/imprimir junto ---- */
     const docPre = store.save('pre', { nome: 'Maria das Dores', cirurgia: 'Colecistectomia', data: utils.hojeISO() });
