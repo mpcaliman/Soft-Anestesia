@@ -8369,6 +8369,47 @@ await test('Ficha: pré importada ao escolher o paciente, acomodação vinda do 
   await page.close();
 });
 
+/* 135) A linha de procedimento adicional da pré cabia fora do cartão: a regra
+   base `input[type="text"] { width:100% }` tem especificidade maior que a
+   classe e anulava os 130px do código. */
+await test('Pré: linha de procedimento adicional cabe dentro do cartão', async () => {
+  const page = await novaPagina();
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'load' }).catch(() => {}),
+    page.evaluate(() => demo.entrar()).catch(() => {})
+  ]);
+  await page.waitForFunction(() => typeof window.ui !== 'undefined' && typeof window.pre !== 'undefined', null, { timeout: 8000 });
+  await page.waitForTimeout(600);
+  const r = await page.evaluate(() => {
+    try { modal.close(); } catch (e) {}
+    document.querySelectorAll('.modal-backdrop, #modal-backdrop').forEach(m => m.remove());
+    ui.navegar('pre');
+    document.querySelectorAll('#module-pre .card').forEach(c => c.classList.remove('collapsed'));
+    document.querySelectorAll('#module-pre .card-body').forEach(c => c.style.display = '');
+    pre.procs.add({});
+    const row = document.querySelector('.pre-proc-row');
+    const campo = document.querySelector('#form-pre [name="cirurgia"]').closest('.field');
+    const R = e => e.getBoundingClientRect();
+    const cod = row.querySelector('.pre-proc-cod');
+    const desc = row.querySelector('.pre-proc-desc');
+    const rm = row.querySelector('.btn-rm');
+    return {
+      visivel: R(campo).width > 300,
+      codLargura: Math.round(R(cod).width),
+      descLargura: Math.round(R(desc).width),
+      /* nada pode passar da borda direita do campo */
+      transbordo: Math.round(R(rm).right - R(campo).right)
+    };
+  });
+  assert(r.visivel, 'o cartão precisa estar visível para medir a linha');
+  assert(r.codLargura > 100 && r.codLargura < 160,
+    'o campo de código tem de ficar estreito (130px), não tomar a linha inteira — deu ' + r.codLargura + 'px');
+  assert(r.descLargura > 300, 'o nome do procedimento é quem fica largo — deu ' + r.descLargura + 'px');
+  assert(r.transbordo <= 1, 'o ✕ não pode ser empurrado para fora do cartão — transbordou ' + r.transbordo + 'px');
+  await page.evaluate(() => { try { localStorage.removeItem('medsys.v7.demo'); } catch (e) {} }).catch(() => {});
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
