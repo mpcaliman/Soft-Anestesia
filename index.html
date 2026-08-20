@@ -923,8 +923,12 @@ body.ficha-finalizada .lab-item input.lab-fora {
 /* === PROCEDIMENTOS EXTRAS NA PRÉ === */
 .pre-procs-lista { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
 .pre-proc-row { display: flex; gap: 6px; align-items: center; }
-.pre-proc-cod { width: 130px; flex-shrink: 0; font-size: .84rem; }
-.pre-proc-desc { flex: 1; font-size: .84rem; }
+/* A regra base `input[type="text"] { width:100% }` tem especificidade MAIOR
+   que uma classe sozinha: os 130px do código eram ignorados, o campo pedia a
+   linha inteira e, com flex-shrink:0, empurrava a descrição e o ✕ para fora
+   do cartão. Daí a linha de procedimento adicional aparecer quebrada. */
+.pre-proc-row .pre-proc-cod { flex: 0 0 130px; width: 130px; font-size: .84rem; }
+.pre-proc-row .pre-proc-desc { flex: 1 1 auto; width: auto; min-width: 0; font-size: .84rem; }
 .pre-proc-row .btn-rm {
   flex-shrink: 0; width: 30px; height: 30px; border: 1px solid var(--border);
   background: var(--surface); border-radius: 6px; cursor: pointer; color: var(--danger, #c92a52);
@@ -4309,7 +4313,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-19c</b><br>
+    v7.1 · build <b id="build-tag">2026-08-20a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -4573,7 +4577,10 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
                linha obrigava a ler por partes: fica com a linha inteira. -->
           <div class="field col-12">
             <label>Cirurgia proposta <small style="color:var(--text-mute);font-weight:400">(autocompleta da CBHPM)</small></label>
-            <div style="display:flex;gap:6px;align-items:stretch">
+            <!-- align-items:center e não stretch: o ➕ da CBHPM entra centrado
+                 no textarea alto e o botão ao lado esticava até 62px, ficando
+                 uma pílula desproporcional ao lado de um botão pequeno. -->
+            <div style="display:flex;gap:6px;align-items:center">
               <!-- Nome de procedimento é longo e frequentemente vem em série
                    ("... + ... + ..."). Numa linha só, o começo saía da vista
                    assim que passava do meio do campo: para conferir o que
