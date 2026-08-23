@@ -8418,6 +8418,76 @@ await test('Pré: linha de procedimento adicional cabe dentro do cartão', async
   await page.close();
 });
 
+/* 138) Termo jurídico: texto de assinar não pode chegar mutilado ao papel. */
+await test('Termo: modelo jurídico entra íntegro, com o nome do paciente e até a última cláusula', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    out.existe = !!termoBiblioteca.get('juridico');
+    out.naOrdem = termoBiblioteca.ordem.indexOf('juridico') >= 0;
+    out.rotulo = termoBiblioteca.MODELOS.juridico.label === 'Jurídico';
+    /* o botão nos dois lugares: no módulo e no editor de Ajustes */
+    const botoes = Array.from(document.querySelectorAll('button'))
+      .map(b => b.getAttribute('onclick') || '');
+    out.botaoTermo = botoes.some(o => o.indexOf("termo.aplicarModelo('juridico')") >= 0);
+    out.botaoAjustes = botoes.some(o => o.indexOf("termoPadrao.uiCarregarModelo('juridico')") >= 0);
+
+    ui.navegar('termo');
+    const f = document.getElementById('form-termo');
+    const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el) el.value = v; };
+    set('nome', 'Joaquim Menezes Barbosa');
+    set('procedimento', 'Orquidopexia unilateral');
+    set('texto', '');
+    termo.aplicarModelo('juridico');
+    const txt = (f.querySelector('[name="texto"]') || {}).value || '';
+
+    out.nomeEntrou = txt.indexOf('Eu, Joaquim Menezes Barbosa, declaro que fui devidamente informado') >= 0;
+    out.semPlaceholder = txt.indexOf('{{') < 0;
+    /* uma âncora por seção: se o texto for cortado no meio, alguma cai */
+    out.secoes = [
+      'Prezado paciente ou Representante legal',
+      'TIPOS DE ANESTESIA',
+      'Bloqueio do Neuroeixo (Raquianestesia ou Peridural)',
+      'Sonda vesical de demora',
+      'RISCOS E COMPLICAÇÕES POSSÍVEIS',
+      'Complicações graves (mais raras)',
+      'RECOMENDAÇÕES PRÉ-ANESTÉSICAS',
+      'Inibidores da Monoamina Oxidase (IMAO)',
+      'Na dúvida solicite teste de gravidez!',
+      'DECLARAÇÃO DE CONSENTIMENTO',
+      'obrigação de meios e não de resultado',
+      'Unidade de Terapia Intensiva (UTI)'
+    ].every(a => txt.indexOf(a) >= 0);
+    /* a última cláusula é a que some quando algo trunca */
+    out.ultimaClausula = txt.trim().endsWith('não me submeter ao procedimento proposto.');
+    out.tamanho = txt.length;
+
+    /* e chega ao papel */
+    const html = printPreview._buildTermo();
+    out.imprime = html.indexOf('Termo de Revogação') >= 0
+      && html.indexOf('Joaquim Menezes Barbosa') >= 0;
+
+    /* aplicar o jurídico não pode desmarcar nem sobrescrever a técnica digitada */
+    set('texto', ''); set('tecnica', 'Raquianestesia');
+    termo.aplicarModelo('juridico');
+    out.tecnicaPreservada = (f.querySelector('[name="tecnica"]') || {}).value === 'Raquianestesia';
+    return out;
+  });
+  assert(r.existe, 'o modelo jurídico precisa existir na biblioteca');
+  assert(r.naOrdem, 'e entrar na lista ordenada de modelos');
+  assert(r.rotulo, 'com o nome "Jurídico"');
+  assert(r.botaoTermo, 'o botão precisa estar no módulo do Termo');
+  assert(r.botaoAjustes, 'e no editor de termo padrão em Ajustes');
+  assert(r.nomeEntrou, 'a lacuna da assinatura tem de virar o nome do paciente');
+  assert(r.semPlaceholder, 'nenhuma variável {{...}} pode sobrar no texto aplicado');
+  assert(r.secoes, 'todas as seções do termo precisam estar no texto aplicado');
+  assert(r.ultimaClausula, 'a cláusula de revogação é a última — se sumiu, o texto truncou');
+  assert(r.tamanho > 5000, 'o termo jurídico é longo; ' + r.tamanho + ' caracteres é pouco');
+  assert(r.imprime, 'o termo jurídico precisa sair na impressão, com o nome do paciente');
+  assert(r.tecnicaPreservada, 'aplicar o modelo não pode apagar a técnica já digitada');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
