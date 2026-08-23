@@ -4313,7 +4313,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-20a</b><br>
+    v7.1 · build <b id="build-tag">2026-08-20b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -7252,6 +7252,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <button type="button" class="btn btn-sm" onclick="termo.aplicarModelo('regional')">Bloqueio / regional</button>
           <button type="button" class="btn btn-sm" onclick="termo.aplicarModelo('sedacao')">Sedação</button>
           <button type="button" class="btn btn-sm" onclick="termo.aplicarModelo('resumido')">Resumido</button>
+          <button type="button" class="btn btn-sm" onclick="termo.aplicarModelo('juridico')">⚖️ Jurídico</button>
         </div>
         <div class="grid">
           <div class="field col-12"><label>Técnica anestésica proposta</label><input type="text" name="tecnica" placeholder="Ex.: Anestesia geral balanceada"></div>
@@ -9271,6 +9272,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <button type="button" class="btn btn-sm" onclick="termoPadrao.uiCarregarModelo('regional')">Bloqueio / regional</button>
           <button type="button" class="btn btn-sm" onclick="termoPadrao.uiCarregarModelo('sedacao')">Sedação</button>
           <button type="button" class="btn btn-sm" onclick="termoPadrao.uiCarregarModelo('resumido')">Resumido</button>
+          <button type="button" class="btn btn-sm" onclick="termoPadrao.uiCarregarModelo('juridico')">⚖️ Jurídico</button>
         </div>
         <div class="cloud-actions" style="margin-top:10px">
           <button type="button" class="btn btn-primary btn-sm" onclick="termoPadrao.uiSalvar()">💾 Salvar texto padrão</button>
@@ -21608,11 +21610,61 @@ Fui informado(a) de que poderão ocorrer alterações no plano anestésico duran
 Tive a oportunidade de esclarecer todas as minhas dúvidas e recebi respostas satisfatórias. Estou ciente de que posso revogar este consentimento a qualquer momento antes do procedimento.
 
 Declaro, portanto, que CONSINTO LIVRE E ESCLARECIDAMENTE com a realização do procedimento anestésico.`
+    },
+
+    /* Texto fornecido pelo médico, na redação da assessoria jurídica. Vai
+       LITERAL: num documento que é assinado, reescrever frase não é ajuste de
+       estilo, é mudar o que foi consentido. A única alteração é a lacuna da
+       assinatura ("Eu, ______") virar {{paciente}} — que preenche sozinha e,
+       sem nome, volta a ser exatamente a mesma lacuna. */
+    juridico: {
+      label: 'Jurídico',
+      tecnica: '',
+      texto:
+`Prezado paciente ou Representante legal, o termo de consentimento livre e esclarecido somente deverá ser assinado se todas as dúvidas já tiverem sido esclarecidas. Caso ainda tenha alguma dúvida, esclareça com a equipe médica. A assinatura deste documento representa o expresso consentimento esclarecido na realização do procedimento indicado, bem como no comprometimento em seguir as orientações médicas, inclusive quanto ao tratamento com equipe multidisciplinar.
+
+A anestesia é um procedimento médico realizado para garantir conforto e segurança durante exames, cirurgias e outros procedimentos médicos. Este documento tem a finalidade de esclarecer ao paciente (ou responsável legal) sobre os tipos de anestesia, os riscos envolvidos, as recomendações pré e pós-anestésicas e a necessidade de colaboração do paciente para um procedimento seguro.
+
+TIPOS DE ANESTESIA
+1. Sedação Consciente: O paciente recebe medicações para reduzir a ansiedade e o desconforto, mas permanece acordado e responsivo.
+2. Sedação Profunda: O paciente pode dormir e não responder a estímulos, mas sem perda total da consciência.
+3. Anestesia Geral: Induz um estado de inconsciência controlada, com necessidade de suporte ventilatório, podendo envolver intubação orotraqueal.
+4. Bloqueio do Neuroeixo (Raquianestesia ou Peridural): Medicações anestésicas são administradas na coluna vertebral, resultando na perda da sensibilidade e, em alguns casos, da movimentação dos membros inferiores ou do abdômen.
+5. Bloqueio de Nervos Periféricos: Utilizado para anestesiar regiões específicas do corpo, como parede abdominal e torácica, membros superiores e inferiores.
+
+Além dos tipos mencionados, podem ser necessários procedimentos adicionais, como: Intubação orotraqueal: Inserção de um tubo na traqueia para garantir a ventilação adequada. Acesso venoso profundo: Inserção de um cateter em uma veia central para administração de medicações e líquidos. Monitorização da pressão arterial invasiva (PAM): Inserção de um cateter em uma artéria para monitoramento contínuo da pressão arterial. Sonda vesical de demora: Inserção de um cateter na bexiga para drenagem da urina em procedimentos prolongados.
+
+RISCOS E COMPLICAÇÕES POSSÍVEIS
+A anestesia é geralmente segura, mas pode apresentar riscos, que variam conforme o estado de saúde do paciente, o tipo de procedimento e a técnica anestésica utilizada.
+
+Complicações leves: Náuseas e vômitos; Tremores e calafrios; Dor no local da injeção; Rouquidão ou dor de garganta (após intubação); Sonolência prolongada; Reações alérgicas leves (coceira, urticária); Dormência; Tonturas;
+
+Complicações graves (mais raras): Reações alérgicas graves (anafilaxia); Depressão respiratória; Lesões dentárias ou na via aérea durante a intubação; Complicações cardiovasculares (alterações da pressão arterial, arritmias, parada cardíaca); Complicações neurológicas (convulsões, lesões nervosas; Tromboembolismo; Morte (raro, mas possível em casos de risco elevado);
+
+RECOMENDAÇÕES PRÉ-ANESTÉSICAS
+Para minimizar os riscos, é essencial que o paciente siga as seguintes orientações: Jejum, conforme oriento pelo médico. Uso de medicamentos: Continuar o uso de medicamentos conforme orientação do anestesiologista. Informar todos os medicamentos em uso, especialmente, medicações para diabetes, anticoagulantes, para emagrecimento (ex: Ozempic, Saxenda): Podem afetar o esvaziamento gástrico. Psicoestimulantes (ex: Ritalina): Podem alterar a resposta cardiovascular; Isotretinoína (ex: Roacutan): Pode afetar o metabolismo, a cicatrização e a resposta inflamatória; Inibidores da Monoamina Oxidase (IMAO): Interagem com anestésicos e podem causar crises hipertensivas.
+
+Álcool, tabaco, cigarros eletrônicos e drogas: Devem ser informados ao anestesiologista e sua equipe. Suspender o uso de bebidas alcoólicas pelo menos 5 dias antes da anestesia. Parar o uso de cigarros e outros fumos pelo menos 1 mês antes, pois aumentam o risco de complicações pulmonares. Informar qualquer uso de drogas ilícitas, pois podem interferir na anestesia e na recuperação.
+
+Gestantes e mães em amamentação: É essencial informar o anestesiologista sobre suspeita ou confirmação de gravidez; algumas anestesias podem afetar o desenvolvimento do feto e precisam ser ajustadas. Na dúvida solicite teste de gravidez!
+
+DECLARAÇÃO DE CONSENTIMENTO
+Eu, {{paciente}}, declaro que fui devidamente informado(a) sobre o procedimento anestésico, seus riscos, benefícios e alternativas. Tive a oportunidade de esclarecer minhas dúvidas e entendi a necessidade de seguir as orientações médicas para minimizar riscos.
+
+As informações relativas ao estado e histórico de saúde, hábitos e vícios, são de absoluta importância para a segurança do procedimento proposto, razão pela qual o(a) Paciente declara estar ciente e se compromete a prestar informações verdadeiras e completas, assumindo a total responsabilidade por eventuais danos ocasionados por informações prestadas de forma inverídica, superficial ou omissa.
+
+Paciente declara ter sido informado que a uso de drogas entorpecentes como maconha, cocaína, anfetaminas, dentre outras drogas ilícitas, bem como tabaco e bebidas alcoólicas, pode trazer interferências ao ato anestésico e/ou ação do medicamento sedativo, inclusive com prejuízos e danos graves à sua saúde
+
+Paciente não poderá conduzir veículos nem manusear máquinas perigosas durante as primeiras 24 horas após a realização da anestesia/sedação; e não poderá deixar as dependências da instituição sozinho, se deslocar em motocicletas ou pegar ônibus sozinho. É necessário que um familiar ou outro adulto capaz acompanhe a liberação das dependências da instituição e conduza o(a) paciente para seu domicílio ou outro local que seja possível fazer o repouso recomendado.
+
+O ato anestésico configura uma obrigação de meios e não de resultado, não sendo possível apresentar qualquer garantia ao Paciente, seu(s) acompanhante(s) e/ou familiares. Autorizo a realização do procedimento anestésico e eventuais intervenções necessárias para garantir minha segurança. Autorizo, ainda, a realização de exames complementares, como exames laboratoriais, de imagem ou outros que se façam necessários para o adequado acompanhamento da minha condição clínica. Estou ciente de que, em determinadas situações, pode ser necessária a administração de transfusão sanguínea para garantir minha estabilidade hemodinâmica. Compreendo também que, dependendo da evolução do quadro clínico no pós-operatório, poderá ser necessária a minha internação em Unidade de Terapia Intensiva (UTI), seja essa conduta previamente planejada ou determinada pela equipe médica conforme a necessidade durante ou após o procedimento. Ciente de que custos adicionais poderão existir.
+
+Declaro ainda, que fui INFORMADO de que posso REVOGAR a qualquer momento, antes do procedimento cirúrgico meu CONSENTIMENTO, bastando para tanto que comunico minha decisão ao(a) meu/minha médico(a) e assine, conjuntamente com ele(a), o Termo de Revogação, que será disponibilizado no momento da declaração da vontade de não me submeter ao procedimento proposto.`
     }
   },
 
   /* Lista ordenada para render dos botões */
-  ordem: ['completo', 'geral', 'regional', 'sedacao', 'resumido'],
+  ordem: ['completo', 'geral', 'regional', 'sedacao', 'resumido', 'juridico'],
 
   get(chave) { return termoBiblioteca.MODELOS[chave] || null; }
 };
