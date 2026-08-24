@@ -8864,7 +8864,6 @@ await test('Arquivo: todo documento tem rótulo próprio, e nome repetido no mes
    sai da pré-anestésica DESTE paciente — não de um palpite. */
 await test('Termo: riscos específicos sugeridos pela pré-anestésica, com o princípio ativo por trás da marca', async () => {
   const page = await novaPagina();
-  page.on('dialog', d => d.accept());
   const r = await page.evaluate(() => {
     const out = {};
     store.setList('pre', []);
@@ -8970,7 +8969,6 @@ await test('Termo: riscos específicos sugeridos pela pré-anestésica, com o pr
 /* 144) A janela de pendências é aviso da SECRETÁRIA, e era ela quem não via. */
 await test('Pendências: a janela espera a nuvem antes de desistir — é a secretária quem depende dela', async () => {
   const page = await novaPagina();
-  page.on('dialog', d => d.accept());
   const r = await page.evaluate(async () => {
     const out = {};
     const entrarComo = (role, email) => {
@@ -9068,7 +9066,6 @@ await test('Pendências: a janela espera a nuvem antes de desistir — é a secr
    e o convênio, que era texto livre, vira lista dos planos JÁ LANÇADOS. */
 await test('Financeiro: botão de filtrar com contagem e filtro por planos de saúde já lançados', async () => {
   const page = await novaPagina();
-  page.on('dialog', d => d.accept());
   const r = await page.evaluate(() => {
     const out = {};
     const fecharJanela = () => {
@@ -9189,6 +9186,165 @@ await test('Financeiro: botão de filtrar com contagem e filtro por planos de sa
   assert(/Todos os planos/.test(r.rotuloLimpo), 'e o botão volta a "Todos os planos" — deu "' + r.rotuloLimpo + '"');
   assert(r.botaoLimpo, 'sem destaque');
   assert(r.semTextoLivre, 'o convênio em texto livre foi substituído pela lista de planos');
+  await page.close();
+});
+
+
+/* 146) O que a pré-anestésica cobra é a CONSULTA. A cirurgia proposta será
+   feita — e cobrada — em outro dia, na ficha de anestesia. */
+await test('Financeiro: consulta e pré lançam o código da consulta, não a cirurgia proposta', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('financeiro', []); store.setList('pre', []);
+    store.setList('consulta', []); store.setList('anestesia', []);
+    out.desc = fin.descricaoConsulta();
+    out.descEhDaTabela = out.desc === cbhpm.info(fin.CODIGO_CONSULTA).descricao;
+
+    /* --- o caso relatado --------------------------------------------------
+       Pré da Giselly para uma histeroscopia que será feita em outro dia. */
+    const pre = store.save('pre', {
+      nome: 'GISELLY VILELA DA SILVA', data: utils.hojeISO(),
+      cirurgia: 'Histeroscopia', cirurgiao: 'Dr Murilo Andrade',
+      convenio: 'Unimed', hospital: 'Hospital Teste'
+    });
+    const fp = fin.fromDoc('pre', pre).item;
+    out.pre = { proc: fp.procedimento, tipo: fp.tipo_atendimento, cod: fp.cbhpm_codigo };
+    out.preSemCirurgia = !/histeroscopia/i.test(fp.procedimento || '');
+    /* o resto da identificação continua vindo da pré */
+    out.preMantemDados = fp.cirurgiao === 'Dr Murilo Andrade' && fp.convenio === 'Unimed';
+
+    /* --- consulta geral e consulta de dor: mesmo código, tipos diferentes -- */
+    const c1 = store.save('consulta', { nome: 'Paciente Geral', data: utils.hojeISO(),
+      queixa: 'Dor lombar há 3 meses com irradiação para o membro inferior', convenio: 'Particular' });
+    const fc1 = fin.fromDoc('consulta', c1).item;
+    out.consGeral = { proc: fc1.procedimento, tipo: fc1.tipo_atendimento, cod: fc1.cbhpm_codigo };
+    /* a queixa não é procedimento — e recortada em 50 caracteres não servia a ninguém */
+    out.semQueixaNoProc = !/dor lombar/i.test(fc1.procedimento || '');
+
+    const c2 = store.save('consulta', { nome: 'Paciente Dor', data: utils.hojeISO(),
+      convenio: 'Unimed', tipo_atendimento: 'consulta_dor' });
+    out.consDorTipo = fin.fromDoc('consulta', c2).item.tipo_atendimento;
+
+    /* --- procedimento FEITO na consulta continua sendo procedimento ------- */
+    const c3 = store.save('consulta', { nome: 'Paciente Com Bloqueio', data: utils.hojeISO(),
+      convenio: 'Amil', _procsRealizados: [{ linhaId: 'x1', codigo: '3.09.06.01-0',
+        descricao: 'Bloqueio de nervo periférico', quantidade: 1, fracao: 100 }] });
+    fin.fromDoc('consulta', c3);
+    const linhas = store.list('financeiro').filter(x => x._origemId === c3._id);
+    out.duasLinhas = linhas.length === 2;
+    out.linhaProcTipo = (linhas.find(x => x._origemLinhaId === 'x1') || {}).tipo_atendimento;
+    out.linhaConsTipo = (linhas.find(x => !x._origemLinhaId) || {}).tipo_atendimento;
+
+    /* --- a ficha de anestesia não muda: lá o procedimento É o procedimento - */
+    const a1 = store.save('anestesia', { paciente: { nome: 'Paciente Ficha', convenio: 'Unimed' },
+      procedimento: { descricao: 'Colecistectomia videolaparoscópica', data: utils.hojeISO(),
+        cirurgiao: 'Dr X', codigo: '3.07.14.03-6' } });
+    const fa = fin.fromDoc('anestesia', a1).item;
+    out.ficha = { proc: fa.procedimento, tipo: fa.tipo_atendimento };
+
+    /* --- e a cirurgia proposta continua indo da pré para a FICHA ---------- */
+    ui.navegar('anestesia');
+    const f = document.getElementById('form-anestesia');
+    f.querySelector('[name="procedimento"]').value = '';
+    linker.importarPreParaAnestesia('GISELLY VILELA DA SILVA');
+    out.fichaRecebeCirurgia = f.querySelector('[name="procedimento"]').value;
+
+    /* --- REPARO RETROATIVO dos que já nasceram errados -------------------- */
+    store.setList('financeiro', []);
+    const velho = store.save('financeiro', {
+      paciente: 'GISELLY VILELA DA SILVA', procedimento: 'Histeroscopia',
+      cbhpm_codigo: fin.CODIGO_CONSULTA, convenio: 'Unimed', valor_previsto: 104.64,
+      valor_recebido: 0, status: 'pendente', data_proc: utils.hojeISO(),
+      _origemTipo: 'pre', _origemId: 'velho-1', _autoCriado: true
+    });
+    /* já pago, finalizado e periciado: o texto se corrige, o dinheiro não */
+    const pago = store.save('financeiro', {
+      paciente: 'Paciente Pago', procedimento: 'Consulta — dor lombar há 3 meses com irr',
+      cbhpm_codigo: fin.CODIGO_CONSULTA, convenio: 'Amil', valor_previsto: 200,
+      valor_recebido: 200, glosa: 0, pago: true, status: 'finalizado', periciado: true,
+      conferido: true, data_proc: '2026-01-10', _origemTipo: 'consulta',
+      _origemId: 'velho-2', _autoCriado: true
+    });
+    /* lançamento manual não é da conta do reparo */
+    const avulso = store.save('financeiro', { paciente: 'Manual', procedimento: 'Artroplastia de joelho',
+      valor_previsto: 5000, status: 'pendente', _origemTipo: 'avulso' });
+    /* linha de procedimento feito na consulta também não */
+    const extra = store.save('financeiro', { paciente: 'Com Bloqueio',
+      procedimento: 'Bloqueio de nervo periférico', _origemTipo: 'consulta',
+      _origemId: 'velho-3', _origemLinhaId: 'p1', _autoCriado: true });
+
+    out.corrigidos = fin.repararLancamentosDeConsulta().corrigidos;
+    const g = store.getById('financeiro', velho._id);
+    out.reparoPre = { proc: g.procedimento, tipo: g.tipo_atendimento,
+                      valor: g.valor_previsto, status: g.status };
+    out.notaDizOQueEra = /constava "Histeroscopia"/.test(g.observacoes || '')
+      && /Valores inalterados/.test(g.observacoes || '');
+    const gp = store.getById('financeiro', pago._id);
+    out.pagoCorrigido = gp.procedimento === out.desc && gp.tipo_atendimento === 'consulta_geral';
+    out.pagoIntocadoNoDinheiro = gp.pago === true && gp.periciado === true && gp.conferido === true
+      && gp.status === 'finalizado' && Number(gp.valor_recebido) === 200
+      && Number(gp.valor_previsto) === 200;
+    out.avulsoIntacto = store.getById('financeiro', avulso._id).procedimento === 'Artroplastia de joelho';
+    out.extraIntacta = store.getById('financeiro', extra._id).procedimento === 'Bloqueio de nervo periférico';
+
+    /* idempotente: nada a corrigir na segunda passada, e a nota não duplica */
+    const obsAntes = store.getById('financeiro', velho._id).observacoes;
+    out.segundaRodada = fin.repararLancamentosDeConsulta().corrigidos;
+    out.notaNaoDuplica = store.getById('financeiro', velho._id).observacoes === obsAntes;
+
+    /* --- a tela mostra o par código + descrição, e o tipo ----------------- */
+    ui.navegar('financeiro');
+    financeiro.limparFiltros();
+    const html = document.getElementById('financeiro-tbody').innerHTML;
+    out.mostraCodigo = html.indexOf(fin.CODIGO_CONSULTA) >= 0;
+    out.mostraTipo = html.indexOf('Consulta pré-anestésica') >= 0;
+    out.colunas = document.querySelectorAll('#financeiro-table thead th').length;
+    out.celulas = document.querySelectorAll('#financeiro-tbody tr:first-child td').length;
+
+    /* --- o select do Financeiro e o da consulta falam a mesma língua ------ */
+    ui.navegar('consulta');
+    const selC = document.querySelector('#form-consulta [name="tipo_atendimento"]');
+    out.selConsulta = selC ? Array.from(selC.options).map(o => o.value) : [];
+    ui.navegar('financeiro');
+    const selF = document.querySelector('#form-financeiro [name="tipo_atendimento"]');
+    const valsF = selF ? Array.from(selF.options).map(o => o.value) : [];
+    out.tiposCasam = out.selConsulta.every(v => valsF.indexOf(v) >= 0)
+      && Object.keys(fin.TIPO_LABEL).every(v => valsF.indexOf(v) >= 0);
+    return out;
+  });
+
+  assert(r.descEhDaTabela, 'a descrição vem da própria tabela CBHPM, não de um texto solto');
+  assert(r.preSemCirurgia, 'a pré NÃO pode lançar a cirurgia proposta como procedimento — deu "' + r.pre.proc + '"');
+  assert(r.pre.proc === r.desc, 'a pré lança a descrição do código cobrado');
+  assert(r.pre.cod === '1.01.01.01-2', 'com o código da consulta');
+  assert(r.pre.tipo === 'consulta_pre', 'e tipo "consulta pré-anestésica" — deu "' + r.pre.tipo + '"');
+  assert(r.preMantemDados, 'cirurgião e convênio continuam vindo da pré');
+  assert(r.semQueixaNoProc, 'a queixa não é procedimento — deu "' + r.consGeral.proc + '"');
+  assert(r.consGeral.tipo === 'consulta_geral', 'consulta sem tipo declarado é consulta geral');
+  assert(r.consDorTipo === 'consulta_dor', 'consulta de dor carrega o próprio tipo');
+  assert(r.consGeral.cod === r.pre.cod, 'consulta e pré cobram o mesmo código');
+  assert(r.duasLinhas, 'consulta com procedimento gera duas linhas');
+  assert(r.linhaProcTipo === 'procedimento', 'o bloqueio feito na consulta é procedimento');
+  assert(r.linhaConsTipo === 'consulta_geral', 'e a linha do atendimento continua sendo consulta');
+  assert(r.ficha.proc === 'Colecistectomia videolaparoscópica', 'na ficha, o procedimento É o procedimento');
+  assert(r.ficha.tipo === 'procedimento', 'e o tipo é procedimento');
+  assert(r.fichaRecebeCirurgia === 'Histeroscopia', 'a cirurgia proposta vai da pré para a FICHA, que é onde ela é cobrada');
+  assert(r.corrigidos === 2, 'o reparo acerta os dois lançamentos errados — acertou ' + r.corrigidos);
+  assert(r.reparoPre.proc === r.desc && r.reparoPre.tipo === 'consulta_pre', 'inclusive o da foto');
+  assert(Number(r.reparoPre.valor) === 104.64 && r.reparoPre.status === 'pendente', 'sem tocar em valor nem status');
+  assert(r.notaDizOQueEra, 'a observação registra o que constava antes e que os valores não mudaram');
+  assert(r.pagoCorrigido, 'lançamento já pago também tem a descrição corrigida');
+  assert(r.pagoIntocadoNoDinheiro, 'mas nada do dinheiro dele se move');
+  assert(r.avulsoIntacto, 'lançamento manual não é da conta do reparo');
+  assert(r.extraIntacta, 'nem a linha do procedimento feito na consulta');
+  assert(r.segundaRodada === 0, 'rodar de novo não corrige nada — corrigiu ' + r.segundaRodada);
+  assert(r.notaNaoDuplica, 'e não duplica a observação');
+  assert(r.mostraCodigo, 'a lista mostra o código CBHPM junto da descrição');
+  assert(r.mostraTipo, 'e o tipo de atendimento');
+  assert(r.colunas === r.celulas, 'cabeçalho e linha têm de ter o mesmo número de colunas — ' + r.colunas + ' vs ' + r.celulas);
+  assert(r.selConsulta.length === 2, 'a consulta declara geral ou dor');
+  assert(r.tiposCasam, 'os tipos da consulta e do Financeiro precisam ser os mesmos valores');
   await page.close();
 });
 
