@@ -24680,7 +24680,14 @@ const pdfGen = {
     doc.text('Documento gerado por Soft Anestesia. Válido somente com assinatura digital ICP-Brasil (QR Code do assinador oficial).', W / 2, H - 8, { align: 'center' });
     doc.setTextColor(0);
 
-    const nomeArq = printPreview._sanitizarPaciente(d.nome) + '_Receita_' + printPreview._dataCriacao() + '.pdf';
+    /* Era "Receita" fixo: receita comum, de controle especial e de
+       antimicrobiano saíam com o mesmo nome, e duas do mesmo paciente no
+       mesmo dia se sobrescreviam. */
+    const nomeArq = printPreview.nomeDeArquivo({
+      paciente: d.nome,
+      tipo: printPreview._tipoDoDocumento('prescricao'),
+      chave: printPreview._chaveDocumento('prescricao')
+    }).replace(/[^\w.\-]+/g, '_') + '.pdf';
     return { doc, nomeArq };
   },
 
@@ -39792,37 +39799,134 @@ ${TAG_CLOSE_HTML}`;
   },
 
   /* Gera nome sugerido do arquivo: paciente_tipo_ddmmaaaa */
-  _gerarNomeArquivo() {
-    if (printPreview._nomeArquivoOverride) return printPreview._nomeArquivoOverride;
-    const mod = state.currentModule;
-    const tipos = {
-      pre: 'APA',
-      consulta: 'Consulta',
-      anestesia: 'Ficha-Anestesia',
-      recuperacao: 'SRPA',
-      documentos: 'Documento',
-      financeiro: 'Financeiro',
-      agenda: 'Agenda',
-      dashboard: 'Dashboard'
-    };
-    const tipo = tipos[mod] || 'Documento';
-    let paciente = '';
-    if (mod === 'anestesia') {
-      const d = anestesia.coletarEstruturado();
-      paciente = (d.paciente && d.paciente.nome) || '';
-    } else if (mod === 'pre' || mod === 'consulta' || mod === 'recuperacao' || mod === 'documentos') {
-      const f = document.getElementById('form-' + mod);
-      if (f) paciente = f.querySelector('[name="nome"]')?.value || '';
+  /* --------------------------------------------------------------------------
+     NOME DO ARQUIVO — Paciente_Tipo-do-documento_Data
+     Todo documento tem rótulo PRÓPRIO. Antes o mapa cobria oito módulos e
+     termo, receituário e risco cirúrgico caíam num "Documento" genérico: um
+     termo de consentimento e um laudo do mesmo paciente, no mesmo dia,
+     chegavam à pasta com o mesmo nome, e o segundo virava "(1)".
+  -------------------------------------------------------------------------- */
+  TIPOS_ARQUIVO: {
+    pre: 'APA',
+    consulta: 'Consulta',
+    anestesia: 'Ficha-Anestesia',
+    recuperacao: 'SRPA',
+    termo: 'Termo-Consentimento',
+    documentos: 'Documento',
+    risco: 'Risco-Cirurgico',
+    financeiro: 'Financeiro',
+    agenda: 'Agenda',
+    dashboard: 'Dashboard',
+    orcamento: 'Orcamento'
+  },
+  /* O receituário não é um tipo só: o mesmo módulo imprime receita comum, de
+     controle especial, de antimicrobiano, atestado, declaração e laudo. São
+     documentos diferentes e precisam de nomes diferentes. */
+  TIPOS_PRESCRICAO: {
+    simples: 'Receita',
+    especial: 'Receita-Controle-Especial',
+    antimicrobiano: 'Receita-Antimicrobiano',
+    atestado: 'Atestado',
+    declaracao: 'Declaracao',
+    laudo: 'Laudo'
+  },
+  _tipoDoDocumento(mod) {
+    if (mod === 'prescricao') {
+      const r = document.querySelector('#form-prescricao [name="modelo"]:checked');
+      return printPreview.TIPOS_PRESCRICAO[(r && r.value) || 'simples'] || 'Receita';
     }
-    /* Sanitiza nome do paciente — só letras/números/espaço */
-    paciente = (paciente || 'sem-paciente')
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-zA-Z0-9\s]/g, '')
-      .trim()
-      .replace(/\s+/g, '-')
-      .slice(0, 40);
-    /* Ordem fixa: Paciente_Tipo_Data — a data é SEMPRE a de criação do arquivo (hoje) */
-    return `${paciente}_${tipo}_${printPreview._dataCriacao()}`;
+    return printPreview.TIPOS_ARQUIVO[mod] || 'Documento';
+  },
+
+  /* --------------------------------------------------------------------------
+     IDENTIDADE DO DOCUMENTO
+     Reimprimir o MESMO documento tem de devolver o MESMO nome — senão a cópia
+     automática para a nuvem guardaria um arquivo novo a cada impressão, e a
+     pasta encheria de duplicatas do mesmo papel. Por isso o desempate se
+     prende ao registro, não ao instante da impressão.
+     Registro salvo tem _id. Documento ainda não salvo é identificado pelo
+     conteúdo do próprio formulário.
+  -------------------------------------------------------------------------- */
+  _chaveDocumento(mod) {
+    const form = document.getElementById('form-' + mod);
+    const id = form && (form.querySelector('[name="_id"]') || {}).value;
+    if (id) return mod + ':' + id;
+    if (!form) return mod + ':sem-form';
+    /* sem _id: impressão digital dos campos preenchidos */
+    let acc = 0;
+    const txt = Array.from(form.querySelectorAll('input, select, textarea'))
+      .filter(el => el.type !== 'hidden' && el.name)
+      .map(el => el.name + '=' + (el.type === 'checkbox' || el.type === 'radio' ? (el.checked ? 1 : 0) : (el.value || '')))
+      .join('|');
+    for (let i = 0; i < txt.length; i++) { acc = ((acc << 5) - acc + txt.charCodeAt(i)) | 0; }
+    return mod + ':form:' + Math.abs(acc).toString(36);
+  },
+
+  /* --------------------------------------------------------------------------
+     UNICIDADE NO DIA
+     Dois documentos DIFERENTES não podem sair com o mesmo nome no mesmo dia.
+     O registro guarda, por dia, que documento reservou cada nome:
+       - mesmo documento pedindo de novo  → devolve o nome que ele já tinha;
+       - documento diferente, nome ocupado → recebe _2, _3, …
+     Só o dia de hoje é mantido; o resto é descartado a cada uso.
+  -------------------------------------------------------------------------- */
+  _KEY_NOMES: 'medsys.v7.nomes_arquivo',
+  _lerReserva() {
+    try {
+      const o = JSON.parse(localStorage.getItem(printPreview._KEY_NOMES) || '{}');
+      const hoje = printPreview._dataCriacao();
+      return (o && o.dia === hoje && o.nomes) ? o : { dia: hoje, nomes: {} };
+    } catch (e) { return { dia: printPreview._dataCriacao(), nomes: {} }; }
+  },
+  _gravarReserva(r) {
+    try { localStorage.setItem(printPreview._KEY_NOMES, JSON.stringify(r)); } catch (e) {}
+  },
+  _nomeUnico(base, chave) {
+    const r = printPreview._lerReserva();
+    /* este documento já reservou um nome hoje? devolve o mesmo */
+    for (const nome in r.nomes) { if (r.nomes[nome] === chave) return nome; }
+    let nome = base, n = 1;
+    while (r.nomes[nome] && r.nomes[nome] !== chave) { n++; nome = base + '_' + n; }
+    r.nomes[nome] = chave;
+    printPreview._gravarReserva(r);
+    return nome;
+  },
+  /* Esquece as reservas (usado pelos testes e por quem quiser recomeçar) */
+  _limparReservaNomes() {
+    try { localStorage.removeItem(printPreview._KEY_NOMES); } catch (e) {}
+  },
+
+  /* Para quem desenha o PDF direto, sem passar pela pré-visualização (receita,
+     orçamento): mesma regra de nome e mesma garantia de unicidade no dia. */
+  nomeDeArquivo(opts) {
+    const base = printPreview._sanitizarPaciente(opts.paciente) + '_' +
+                 (opts.tipo || 'Documento') + '_' + printPreview._dataCriacao();
+    return printPreview._nomeUnico(base, opts.chave || base);
+  },
+
+  _gerarNomeArquivo() {
+    const mod = state.currentModule;
+    let base, chave;
+    if (printPreview._nomeArquivoOverride) {
+      /* arquivo combinado (ficha + SRPA, pré + termo): o nome vem pronto, mas
+         a unicidade do dia vale para ele igual */
+      base = printPreview._nomeArquivoOverride;
+      chave = 'combinado:' + printPreview._chaveDocumento(mod);
+    } else {
+      const tipo = printPreview._tipoDoDocumento(mod);
+      let paciente = '';
+      if (mod === 'anestesia') {
+        try { const d = anestesia.coletarEstruturado(); paciente = (d.paciente && d.paciente.nome) || ''; } catch (e) {}
+      } else {
+        const f = document.getElementById('form-' + mod);
+        if (f) paciente = (f.querySelector('[name="nome"]') || f.querySelector('[name="paciente_nome"]') || {}).value || '';
+      }
+      /* Ordem fixa: Paciente_Tipo_Data — a data é SEMPRE a de criação do
+         arquivo (hoje), porque é ela que ordena a pasta. */
+      base = printPreview._sanitizarPaciente(paciente) + '_' + tipo + '_' + printPreview._dataCriacao();
+      chave = printPreview._chaveDocumento(mod);
+    }
+    return printPreview._nomeUnico(base, chave);
   },
   /* ------------------------------------------------------------------
      LOGOMARCA NO PDF
@@ -39861,7 +39965,7 @@ ${TAG_CLOSE_HTML}`;
   /* Sanitiza nome do paciente para uso em nome de arquivo */
   _sanitizarPaciente(nome) {
     return (nome || 'sem-paciente')
-      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       .replace(/[^a-zA-Z0-9\s]/g, '')
       .trim()
       .replace(/\s+/g, '-')
@@ -45804,7 +45908,10 @@ const orcamento = {
     if (contato.length) { const cl = doc.splitTextToSize(contato.join('  |  '), cw); doc.text(cl, M, y); y += cl.length * 4.4; }
     doc.setTextColor(0);
 
-    const nomeArq = printPreview._sanitizarPaciente(d.paciente) + '_Orcamento_' + printPreview._dataCriacao() + '.pdf';
+    const nomeArq = printPreview.nomeDeArquivo({
+      paciente: d.paciente, tipo: 'Orcamento',
+      chave: printPreview._chaveDocumento('orcamento')
+    }).replace(/[^\w.\-]+/g, '_') + '.pdf';
     try {
       if (typeof pdfGen !== 'undefined' && pdfGen._compartilhar) await pdfGen._compartilhar(doc, nomeArq);
       else doc.save(nomeArq);

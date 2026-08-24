@@ -8742,6 +8742,106 @@ await test('Medicamentos: uma base só nos três módulos, com rastreabilidade e
   await page.close();
 });
 
+/* 142) Nome de arquivo: cada documento com o seu rótulo, e dois documentos
+   diferentes nunca com o mesmo nome no mesmo dia. */
+await test('Arquivo: todo documento tem rótulo próprio, e nome repetido no mesmo dia não existe', async () => {
+  /* novaPagina() já aceita os diálogos; instalar outro handler aqui daria
+     "Cannot accept dialog which is already handled". */
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    printPreview._limparReservaNomes();
+    const põeId = (f, v) => {
+      let i = f.querySelector('[name="_id"]');
+      if (!i) { i = document.createElement('input'); i.type = 'hidden'; i.name = '_id'; f.appendChild(i); }
+      i.value = v;
+    };
+    const nomeDe = (mod, id) => {
+      ui.navegar(mod);
+      const f = document.getElementById('form-' + mod);
+      const el = f.querySelector('[name="nome"]') || f.querySelector('[name="paciente_nome"]');
+      if (el) el.value = 'Joaquim Menezes';
+      põeId(f, id);
+      return printPreview._gerarNomeArquivo();
+    };
+
+    /* --- cada módulo com o SEU rótulo -------------------------------------- */
+    out.nomes = {};
+    ['pre', 'anestesia', 'recuperacao', 'consulta', 'termo', 'risco', 'documentos']
+      .forEach(m => { out.nomes[m] = nomeDe(m, m + '-1'); });
+
+    /* --- o receituário não é um tipo só ------------------------------------ */
+    ui.navegar('prescricao');
+    const fp = document.getElementById('form-prescricao');
+    fp.querySelector('[name="nome"]').value = 'Joaquim Menezes';
+    out.presc = {};
+    ['simples', 'especial', 'antimicrobiano', 'atestado', 'declaracao', 'laudo'].forEach(m => {
+      const rd = fp.querySelector('[name="modelo"][value="' + m + '"]');
+      if (rd) rd.checked = true;
+      põeId(fp, 'presc-' + m);
+      out.presc[m] = printPreview._gerarNomeArquivo();
+    });
+
+    /* Nenhum rótulo genérico onde existe nome próprio, e todos distintos */
+    const todos = Object.values(out.nomes).concat(Object.values(out.presc));
+    out.todosDistintos = new Set(todos).size === todos.length;
+    out.semGenericoIndevido = ['termo', 'risco'].every(m => !/_Documento_/.test(out.nomes[m]))
+      && Object.values(out.presc).every(n => !/_Documento_/.test(n));
+
+    /* --- reimprimir o MESMO documento devolve o MESMO nome ----------------- */
+    /* Se mudasse, a cópia automática para a nuvem guardaria um arquivo novo a
+       cada impressão e a pasta encheria de duplicatas do mesmo papel. */
+    fp.querySelector('[name="modelo"][value="simples"]').checked = true;
+    põeId(fp, 'presc-simples');
+    out.reimprimir = printPreview._gerarNomeArquivo();
+    out.idempotente = out.reimprimir === out.presc.simples;
+
+    /* --- documentos DIFERENTES, mesmo tipo/paciente/dia, não colidem ------- */
+    põeId(fp, 'presc-outro');    const seg = printPreview._gerarNomeArquivo();
+    põeId(fp, 'presc-terceiro'); const ter = printPreview._gerarNomeArquivo();
+    out.segundo = seg; out.terceiro = ter;
+    out.desempata = seg !== out.presc.simples && ter !== seg && ter !== out.presc.simples;
+    out.sufixo = /_2$/.test(seg) && /_3$/.test(ter);
+
+    /* --- documento ainda NÃO salvo também é distinguido -------------------- */
+    printPreview._limparReservaNomes();
+    ui.navegar('termo');
+    const ft = document.getElementById('form-termo');
+    ft.querySelector('[name="nome"]').value = 'Maria das Dores';
+    const idT = ft.querySelector('[name="_id"]'); if (idT) idT.value = '';
+    ft.querySelector('[name="procedimento"]').value = 'Colecistectomia';
+    const n1 = printPreview._gerarNomeArquivo();
+    ft.querySelector('[name="procedimento"]').value = 'Herniorrafia';
+    const n2 = printPreview._gerarNomeArquivo();
+    out.semIdDistingue = n1 !== n2;
+    out.n1 = n1;
+
+    /* --- o formato é Paciente_Tipo_Data ----------------------------------- */
+    out.formato = /^Joaquim-Menezes_[A-Za-z-]+_\d{8}(_\d+)?$/.test(out.nomes.pre);
+    return out;
+  });
+
+  assert(/_APA_/.test(r.nomes.pre), 'a pré sai como APA');
+  assert(/_Ficha-Anestesia_/.test(r.nomes.anestesia), 'a ficha sai como Ficha-Anestesia');
+  assert(/_SRPA_/.test(r.nomes.recuperacao), 'a recuperação sai como SRPA');
+  assert(/_Termo-Consentimento_/.test(r.nomes.termo), 'o termo precisa de rótulo próprio — deu "' + r.nomes.termo + '"');
+  assert(/_Risco-Cirurgico_/.test(r.nomes.risco), 'o risco cirúrgico precisa de rótulo próprio — deu "' + r.nomes.risco + '"');
+  assert(/_Receita_/.test(r.presc.simples), 'receita comum');
+  assert(/_Receita-Controle-Especial_/.test(r.presc.especial), 'receita de controle especial tem nome próprio');
+  assert(/_Receita-Antimicrobiano_/.test(r.presc.antimicrobiano), 'receita de antimicrobiano tem nome próprio');
+  assert(/_Atestado_/.test(r.presc.atestado), 'atestado tem nome próprio');
+  assert(/_Declaracao_/.test(r.presc.declaracao), 'declaração tem nome próprio');
+  assert(/_Laudo_/.test(r.presc.laudo), 'laudo tem nome próprio');
+  assert(r.semGenericoIndevido, 'nenhum documento com nome próprio pode cair no rótulo genérico "Documento"');
+  assert(r.todosDistintos, 'os treze tipos de documento têm de gerar treze nomes diferentes');
+  assert(r.formato, 'o formato é Paciente_Tipo_Data — deu "' + r.nomes.pre + '"');
+  assert(r.idempotente, 'reimprimir o mesmo documento tem de devolver o mesmo nome');
+  assert(r.desempata, 'dois documentos diferentes não podem sair com o mesmo nome no mesmo dia');
+  assert(r.sufixo, 'o desempate é _2, _3 — deu "' + r.segundo + '" e "' + r.terceiro + '"');
+  assert(r.semIdDistingue, 'documento ainda não salvo também precisa ser distinguido — deu "' + r.n1 + '" duas vezes');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
