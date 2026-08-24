@@ -4241,8 +4241,69 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
 .hoje-hero .hh-btn-line { background: transparent; color: #cfe0ee; border: 1px solid rgba(255,255,255,.3); }
 @media print { .hoje-hero { display: none !important; } }
 
+/* ===== Autocomplete de medicamento (base Anvisa/CMED) =====================
+   Três linhas por sugestão, e não uma tabela: no celular é essa hierarquia —
+   marca em destaque, princípio ativo abaixo, forma/via em texto secundário —
+   que deixa diferenciar duas apresentações sem rolagem horizontal. */
+.med-ac-box {
+  position: fixed; z-index: 4000; max-height: 58vh; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: 0 10px 32px rgba(0,0,0,.18);
+  -webkit-overflow-scrolling: touch;
+}
+.med-ac-item {
+  padding: 10px 12px; cursor: pointer; border-bottom: 1px solid var(--surface-alt);
+  /* 44px é o alvo mínimo confortável no toque; abaixo disso erra-se de linha */
+  min-height: 44px;
+}
+.med-ac-item:last-child { border-bottom: none; }
+.med-ac-item:hover, .med-ac-item.med-ac-sel { background: var(--primary-soft); }
+.med-ac-nome { font-weight: 600; font-size: .9rem; color: var(--text); line-height: 1.3; }
+.med-ac-conc { font-weight: 700; color: var(--primary-darker); }
+.med-ac-princ { font-size: .8rem; color: var(--text-soft); line-height: 1.3; margin-top: 1px; }
+.med-ac-sub { font-size: .74rem; color: var(--text-mute); line-height: 1.3; margin-top: 2px; }
+.med-ac-vazio { padding: 10px 12px; font-size: .82rem; color: var(--text-mute); }
+.med-ac-manual { background: var(--surface-alt); }
+.med-ac-desc { color: var(--warning); }
+/* Via que a Anvisa NÃO determina. Fica visualmente diferente de propósito:
+   é um campo que o médico ainda precisa preencher, não um dado pronto. */
+.med-ac-via-indef { color: var(--warning); font-weight: 600; }
+.med-ac-tag {
+  font-size: .62rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .3px; padding: 1px 6px; border-radius: 9px;
+  background: var(--surface-alt); color: var(--text-soft);
+  vertical-align: middle; white-space: nowrap;
+}
+.med-ac-tag-referencia { background: #e8f1fa; color: #1c64a9; }
+.med-ac-tag-generico   { background: #e6f5ec; color: #1f7a45; }
+.med-ac-tag-similar    { background: #fdf3e2; color: #96631a; }
+@media (max-width: 640px) {
+  .med-ac-item { padding: 12px 14px; min-height: 52px; }
+  .med-ac-nome { font-size: .95rem; }
+  .med-ac-princ { font-size: .85rem; }
+}
+
+/* Princípio ativo abaixo da marca na lista de medicações em uso (§19) */
+.med-uso-princ {
+  font-size: .8rem; color: var(--text-soft); line-height: 1.25; margin-top: 1px;
+}
+.med-uso-pos { font-size: .78rem; color: var(--text-mute); margin-top: 2px; }
+.med-uso-tag {
+  font-size: .6rem; font-weight: 700; text-transform: uppercase;
+  padding: 1px 5px; border-radius: 8px; background: var(--surface-alt);
+  color: var(--text-soft); margin-left: 4px;
+}
+.med-via-indef-aviso {
+  font-size: .74rem; color: var(--warning); font-weight: 600;
+}
 
 </style>
+<!-- Base de medicamentos Anvisa/CMED (10.898 apresentações clínicas).
+     `defer` porque nada na abertura do app depende dela: é consultada quando
+     alguém procura um medicamento. Existe para a busca funcionar SEM
+     INTERNET — o Supabase é a fonte oficial e responde quando há rede; este
+     arquivo é quem responde no centro cirúrgico quando não há. -->
+<script src="medicamentos-base.js" defer></script>
 </head>
 <body>
 
@@ -4313,7 +4374,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-20b</b><br>
+    v7.1 · build <b id="build-tag">2026-08-24a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -4628,7 +4689,10 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
             <label>Medicações em uso</label>
             <div class="med-pre-wrap">
               <div class="med-pre-add" style="position:relative">
-                <input type="text" id="pre-med-busca" placeholder="Digite o medicamento (ex.: losartana, metformina, AAS, rivaroxabana...)" autocomplete="off" oninput="pre.meds.buscar(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault(); pre.meds.addManual();}">
+                <!-- Base central Anvisa/CMED: busca por marca, nome genérico ou
+                     princípio ativo. Quem escolhe pela marca leva o princípio
+                     ativo junto, sempre (§6). -->
+                <input type="text" id="pre-med-busca" placeholder="Marca, genérico ou princípio ativo (ex.: Xarelto, rivaroxabana, losartana...)" autocomplete="off" onkeydown="if(event.key==='Enter'&&!document.querySelector('#med-ac-box')?.offsetParent){event.preventDefault(); pre.meds.addManual();}">
                 <div id="pre-med-suggest" class="presc-sugestoes" style="display:none"></div>
               </div>
               <div id="pre-med-lista" class="med-pre-lista"></div>
@@ -7385,16 +7449,26 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     <!-- 2. MEDICAMENTOS -->
     <section class="card" id="card-presc-medicamentos">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-num">2</span><h2>Medicamentos<small>Digite o princípio ativo ou nome — sugestões automáticas</small></h2></div>
+        <div class="card-title-wrap"><span class="card-num">2</span><h2>Medicamentos<small>Base Anvisa/CMED — busque por marca, genérico ou princípio ativo</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
+        <!-- Tipo desejado (§11). Escolhido aqui, vale para as buscas das linhas:
+             pedir "Genérico" e continuar vendo marca de referência na lista
+             seria o filtro não fazer nada. -->
+        <div class="quick-actions" style="margin-bottom:10px">
+          <span class="qa-label">Tipo de medicamento</span>
+          <label class="chk-inline"><input type="radio" name="presc_tipo_pref" value="" checked onchange="prescricao.definirTipo(this.value)"> Sem preferência</label>
+          <label class="chk-inline"><input type="radio" name="presc_tipo_pref" value="generico" onchange="prescricao.definirTipo(this.value)"> Genérico</label>
+          <label class="chk-inline"><input type="radio" name="presc_tipo_pref" value="referencia" onchange="prescricao.definirTipo(this.value)"> Referência</label>
+          <label class="chk-inline"><input type="radio" name="presc_tipo_pref" value="similar" onchange="prescricao.definirTipo(this.value)"> Similar</label>
+        </div>
         <div class="dyn-table-wrap">
           <table class="dyn" id="tab-prescricao">
             <thead><tr>
               <th style="width:34px">#</th>
               <th style="min-width:200px">Medicamento</th>
-              <th style="min-width:130px">Apresentação</th>
+              <th style="min-width:150px">Apresentação</th>
               <th style="width:90px">Qtd.</th>
               <th style="min-width:220px">Posologia / orientação</th>
               <th style="width:90px">Via</th>
@@ -13098,7 +13172,7 @@ const ui = {
         else if (modName === 'agenda') { agenda.render(); if (!agenda._puxouNestaSessao) { setTimeout(() => { try { agenda.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); try { equipeNuvem.render(); } catch (e) {} try { auditoria.render(''); } catch (e) {} try { armazenamento.render(); } catch (e) {} logoUsuario.renderAjustes(); try { nuvemEstado.render(); } catch (e) {} try { duplicados.resumoNoCard(); } catch (e) {} const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
-        else if (modName === 'pre') { try { preLanc.renderBotao('pre'); } catch (e) {} try { pre.labs.ligar(); pre.labs.marcar(); } catch (e) {} try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} try { pre.viaAerea.render(); } catch (e) {} }
+        else if (modName === 'pre') { try { preLanc.renderBotao('pre'); } catch (e) {} try { pre.labs.ligar(); pre.labs.marcar(); } catch (e) {} try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} try { pre.viaAerea.render(); } catch (e) {} try { pre.meds.ligar(); } catch (e) {} }
         else if (modName === 'anestesia') { try { preLanc.renderBotao('anestesia'); } catch (e) {} anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} try { anestesia.calc.resumoTopo(); } catch (e) {} try { adendos.renderInline('anestesia'); } catch (e) {} try { anestesia.nav._wire(); anestesia.nav.render(); } catch (e) {} try { anestesia.vitais.autoAvanco.wire(); } catch (e) {} }
         else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} try { recuperacao.resumoTopo(); } catch (e) {} try { anestesia.vitais.autoAvanco.wire(); } catch (e) {} }, 60); }
         else if (modName === 'termo') { setTimeout(() => { try { (termo.sig._ajustar || []).forEach(fn => fn()); assinatura.initCanvas('sig-termo'); } catch (e) {} }, 80); }
@@ -13906,122 +13980,226 @@ const pre = {
     }
   },
 
-  /* ===== Medicações em uso: busca combinada (Prescrição + condutas peri-op) ===== */
+  /* ===== Medicações em uso =====================================================
+     Vem da BASE CENTRAL Anvisa/CMED (§6). A pergunta desta tela é "o que o
+     paciente usa?", e a resposta dele quase sempre é uma marca: "tomo
+     Xarelto". Escolhida a marca, o princípio ativo é gravado JUNTO e mostrado
+     embaixo — perder "rivaroxabana" porque o paciente só sabe o nome da caixa
+     é perder o dado que decide a conduta anestésica.
+
+     Apresentação e concentração NÃO são obrigatórias (§8): é comum o paciente
+     saber "Losartana" e mais nada, e um formulário que exige a dose exata
+     transforma isso em campo vazio — ou em invenção.
+
+     E o produto (Xarelto 20 mg comprimido) não se confunde com o uso relatado
+     (1 comprimido às 20h): são campos diferentes, porque são fatos diferentes.
+  =========================================================================== */
   meds: {
-    _lista: [],   // [{nome, conduta}]
-    _norm(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim(); },
-    /* Combina as duas bases: MED_BASE (princípios+comerciais) e RISCO_MED (classes/condutas) */
-    buscar(q) {
-      const box = document.getElementById('pre-med-suggest');
-      if (!box) return;
-      const nq = pre.meds._norm(q);
-      if (nq.length < 2) { box.style.display = 'none'; box.innerHTML = ''; return; }
-      const res = [];
-      const vistos = {};
-      /* 1) base de fármacos da Prescrição (princípio + comerciais) */
-      (typeof MED_BASE !== 'undefined' ? MED_BASE : []).forEach(m => {
-        const alvo = pre.meds._norm(m.p + ' ' + (m.n || []).join(' '));
-        if (alvo.includes(nq)) {
-          const key = pre.meds._norm(m.p);
-          if (!vistos[key]) { vistos[key] = 1; res.push({ nome: m.p, fonte: 'farmaco' }); }
-        }
-      });
-      /* 2) base de condutas perioperatórias (classes e exemplos) */
-      (typeof RISCO_MED !== 'undefined' ? RISCO_MED : []).forEach(m => {
-        const alvo = pre.meds._norm([m.classe, m.exemplos, m.nomes, m.cat].filter(Boolean).join(' '));
-        if (alvo.includes(nq)) {
-          const key = pre.meds._norm(m.classe);
-          if (!vistos['cl_' + key]) { vistos['cl_' + key] = 1; res.push({ nome: m.classe, fonte: 'classe', med: m }); }
-        }
-      });
-      if (!res.length) { box.innerHTML = '<div class="presc-sug-item" style="color:var(--text-mute)">Nenhuma sugestão — Enter para adicionar como digitado</div>'; box.style.display = 'block'; return; }
-      box.innerHTML = res.slice(0, 12).map((x, i) =>
-        `<div class="presc-sug-item" onclick="pre.meds.escolher(${i})">
-          <strong>${pre.meds._escAttr(x.nome)}</strong>
-          <span style="font-size:.72rem;color:var(--text-mute)">${x.fonte === 'classe' ? '· conduta peri-op' : '· fármaco'}</span>
-        </div>`).join('');
-      pre.meds._sugAtual = res.slice(0, 12);
-      box.style.display = 'block';
-    },
-    _escAttr(s) { return String(s || '').replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c])); },
-    escolher(i) {
-      const x = (pre.meds._sugAtual || [])[i];
-      if (!x) return;
-      pre.meds.adicionar(x.nome);
-    },
-    addManual() {
+    /* [{nome, principio, base, conc, forma, via, ggrem, registro, tipo,
+         dose, freq, horario, viaUso, obs, origem, conduta}] */
+    _lista: [],
+    _norm(s) { return medicamentos._norm(s); },
+
+    /* Liga o campo de busca à base central. Chamado quando a pré abre. */
+    ligar() {
       const inp = document.getElementById('pre-med-busca');
-      if (inp && inp.value.trim()) pre.meds.adicionar(inp.value.trim());
+      if (!inp || inp._medLigado) return;
+      medAutocomplete.ligar(inp, {
+        modo: 'homeMedication',
+        aoEscolher: (m) => pre.meds.adicionarDaBase(m),
+        aoManual: (texto) => pre.meds.adicionar(texto)
+      });
     },
-    /* Adiciona o medicamento à lista, buscando a conduta sugerida (editável) */
-    adicionar(nome) {
-      let conduta = '';
-      try { conduta = (typeof risco !== 'undefined' && risco.buscarConduta) ? (risco.buscarConduta(nome) || '') : ''; } catch (e) {}
-      pre.meds._lista.push({ nome: nome, conduta: conduta });
+
+    /* Compatibilidade: o campo antigo chamava pre.meds.buscar() no oninput.
+       Continua funcionando (teste antigo, chamada externa), delegando. */
+    buscar(q) {
+      const inp = document.getElementById('pre-med-busca');
+      if (inp) { pre.meds.ligar(); if (inp.value !== q) inp.value = q; medAutocomplete._digitou(inp); }
+    },
+
+    _escAttr(s) { return String(s || '').replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c])); },
+
+    /* Conduta peri-operatória: procurada pelo PRINCÍPIO ATIVO antes da marca.
+       Uma regra de rivaroxabana tem de valer para Xarelto e para os genéricos
+       sem ser recadastrada marca a marca (§21). */
+    _conduta(item) {
+      const tentar = (t) => {
+        if (!t) return '';
+        try { return (typeof risco !== 'undefined' && risco.buscarConduta) ? (risco.buscarConduta(t) || '') : ''; }
+        catch (e) { return ''; }
+      };
+      return tentar(item.principio) || tentar(item.base) || tentar(item.nome);
+    },
+
+    /* Escolhido na lista de sugestões da base oficial */
+    adicionarDaBase(m) {
+      if (!m) return;
+      const item = {
+        nome: m.nome || '',
+        principio: m.principio || '',
+        base: m.base || '',
+        conc: m.conc || '',
+        forma: m.forma || '',
+        via: m.via || '',
+        tipo: m.tipo || '',
+        ggrem: m.ggrem || '',
+        registro: m.registro || '',
+        origem: m._manual ? 'manual' : 'anvisa',
+        baseVersao: medicamentos.versao(),
+        /* posologia relatada — vazia de propósito: quem informa é o paciente,
+           o sistema não deduz dose de ninguém (§25) */
+        dose: '', freq: '', horario: '', viaUso: '', obs: ''
+      };
+      item.conduta = pre.meds._conduta(item);
+      pre.meds._lista.push(item);
       const inp = document.getElementById('pre-med-busca'); if (inp) inp.value = '';
-      const box = document.getElementById('pre-med-suggest'); if (box) { box.style.display = 'none'; box.innerHTML = ''; }
       pre.meds.render();
       pre.meds._sincronizarTexto();
       markDirty();
     },
+
+    addManual() {
+      const inp = document.getElementById('pre-med-busca');
+      if (inp && inp.value.trim()) pre.meds.adicionar(inp.value.trim());
+    },
+
+    /* Texto livre: medicamento fora da base, ou registro antigo. Fica marcado
+       como manual e NUNCA entra na base oficial da Anvisa (§18). */
+    adicionar(nome) {
+      const item = {
+        nome: String(nome || '').trim(), principio: '', base: '', conc: '',
+        forma: '', via: '', tipo: '', ggrem: '', registro: '', origem: 'manual',
+        baseVersao: medicamentos.versao(),
+        dose: '', freq: '', horario: '', viaUso: '', obs: ''
+      };
+      if (!item.nome) return;
+      item.conduta = pre.meds._conduta(item);
+      pre.meds._lista.push(item);
+      const inp = document.getElementById('pre-med-busca'); if (inp) inp.value = '';
+      const box = document.getElementById('pre-med-suggest'); if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+      try { medAutocomplete.fechar(); } catch (e) {}
+      pre.meds.render();
+      pre.meds._sincronizarTexto();
+      markDirty();
+    },
+
     remover(i) {
       pre.meds._lista.splice(i, 1);
       pre.meds.render(); pre.meds._sincronizarTexto(); markDirty();
     },
+
+    /* Posologia relatada pelo paciente — separada da apresentação do produto */
+    editarCampo(i, campo, valor) {
+      const item = pre.meds._lista[i];
+      if (!item) return;
+      item[campo] = valor;
+      pre.meds._sincronizarTexto();
+      markDirty();
+    },
+
     /* Insere a conduta de um item nas Orientações (editável) */
     inserirConduta(i) {
       const item = pre.meds._lista[i];
       if (!item || !item.conduta) { toast('Sem conduta sugerida para este item', 'warn'); return; }
       const ori = document.querySelector('#form-pre [name="orientacoes"]');
       if (!ori) return;
-      const linha = `• ${item.nome}: ${item.conduta}`;
+      const linha = `• ${pre.meds._titulo(item)}: ${item.conduta}`;
       ori.value = (ori.value ? ori.value.trim() + '\n' : '') + linha;
       toast('Conduta inserida nas Orientações — edite à vontade');
       markDirty();
     },
-    /* Insere TODAS as condutas de uma vez */
     inserirTodasCondutas() {
       const ori = document.querySelector('#form-pre [name="orientacoes"]');
       if (!ori) return;
-      const linhas = pre.meds._lista.filter(x => x.conduta).map(x => `• ${x.nome}: ${x.conduta}`);
+      const linhas = pre.meds._lista.filter(x => x.conduta).map(x => `• ${pre.meds._titulo(x)}: ${x.conduta}`);
       if (!linhas.length) { toast('Nenhuma conduta sugerida disponível', 'warn'); return; }
       ori.value = (ori.value ? ori.value.trim() + '\n' : '') + linhas.join('\n');
       toast(linhas.length + ' conduta(s) inserida(s) nas Orientações');
       markDirty();
     },
+
+    /* "Xarelto 20 mg" — marca e concentração, quando houver */
+    _titulo(item) {
+      return [item.nome, item.conc].filter(Boolean).join(' ');
+    },
+    /* "1 cp 12/12h — VO": o uso RELATADO, nunca deduzido */
+    _posologia(item) {
+      const p = [item.dose, item.freq].filter(Boolean).join(' ');
+      const v = item.viaUso || (item.via ? medicamentos.siglaDaVia((medicamentos.viasDoRotulo(item.via) || [])[0]) || item.via : '');
+      return [p, v].filter(Boolean).join(' — ') + (item.horario ? ' (' + item.horario + ')' : '');
+    },
+
     render() {
       const wrap = document.getElementById('pre-med-lista');
       if (!wrap) return;
       if (!pre.meds._lista.length) { wrap.innerHTML = ''; return; }
-      wrap.innerHTML = pre.meds._lista.map((item, i) => `
+      const E = pre.meds._escAttr;
+      wrap.innerHTML = pre.meds._lista.map((item, i) => {
+        const tipoLbl = medicamentos.TIPO_LABEL[item.tipo] || '';
+        /* Marca em cima, PRINCÍPIO ATIVO logo abaixo (§19). Quando o paciente
+           informou a marca, é isto que impede o princípio de se perder. */
+        const princ = (item.principio && pre.meds._norm(item.principio) !== pre.meds._norm(item.nome))
+          ? `<div class="med-uso-princ">${E(item.principio)}</div>` : '';
+        const pos = pre.meds._posologia(item).replace(/^—\s*/, '').trim();
+        return `
         <div class="med-pre-item">
           <div class="med-pre-item-head">
-            <strong>${pre.meds._escAttr(item.nome)}</strong>
+            <div style="min-width:0">
+              <strong>${E(pre.meds._titulo(item))}</strong>${tipoLbl ? `<span class="med-uso-tag">${E(tipoLbl)}</span>` : ''}${item.origem === 'manual' ? '<span class="med-uso-tag">manual</span>' : ''}
+              ${princ}
+              ${pos ? `<div class="med-uso-pos">${E(pos)}</div>` : ''}
+            </div>
             <div class="med-pre-item-actions">
               ${item.conduta ? `<button type="button" class="btn btn-xs" onclick="pre.meds.inserirConduta(${i})" title="Inserir conduta nas Orientações">➕ Conduta</button>` : ''}
               <button type="button" class="btn btn-xs btn-danger" onclick="pre.meds.remover(${i})">✕</button>
             </div>
           </div>
-          ${item.conduta ? `<div class="med-pre-conduta">${pre.meds._escAttr(item.conduta)}</div>` : '<div class="med-pre-conduta vazio">Sem conduta peri-operatória padronizada — registre manualmente se necessário.</div>'}
-        </div>`).join('') +
+          <div class="grid" style="margin-top:6px;gap:6px">
+            <div class="field col-4" style="margin:0"><label style="font-size:.68rem">Dose relatada</label>
+              <input type="text" value="${E(item.dose)}" placeholder="Ex.: 1 cp" oninput="pre.meds.editarCampo(${i},'dose',this.value)"></div>
+            <div class="field col-4" style="margin:0"><label style="font-size:.68rem">Frequência</label>
+              <input type="text" value="${E(item.freq)}" placeholder="Ex.: 12/12h" oninput="pre.meds.editarCampo(${i},'freq',this.value)"></div>
+            <div class="field col-4" style="margin:0"><label style="font-size:.68rem">Horário</label>
+              <input type="text" value="${E(item.horario)}" placeholder="Ex.: 20h" oninput="pre.meds.editarCampo(${i},'horario',this.value)"></div>
+          </div>
+          ${item.conduta ? `<div class="med-pre-conduta">${E(item.conduta)}</div>` : '<div class="med-pre-conduta vazio">Sem conduta peri-operatória padronizada — registre manualmente se necessário.</div>'}
+        </div>`;
+      }).join('') +
         (pre.meds._lista.some(x => x.conduta) ? `<button type="button" class="btn btn-sm" style="margin-top:6px" onclick="pre.meds.inserirTodasCondutas()">➕ Inserir todas as condutas nas Orientações</button>` : '');
     },
-    /* Mantém o textarea "medicacoes" sincronizado (para salvar/imprimir/buscar) */
+
+    /* Mantém o textarea "medicacoes" sincronizado (salvar/imprimir/buscar).
+       O princípio ativo entra no texto: é ele que a ficha de anestesia lê, e
+       quem procurar "rivaroxabana" no histórico tem de achar este paciente. */
     _sincronizarTexto() {
       const txt = document.getElementById('pre-med-texto');
       if (!txt) return;
-      /* preserva o que o usuário digitou manualmente que não seja linha automática */
-      const auto = pre.meds._lista.map(x => x.nome).join(', ');
-      txt.value = auto;
+      txt.value = pre.meds._lista.map(x => {
+        const t = pre.meds._titulo(x);
+        const p = (x.principio && pre.meds._norm(x.principio) !== pre.meds._norm(x.nome))
+          ? ' (' + x.principio + ')' : '';
+        const pos = pre.meds._posologia(x).replace(/^—\s*/, '').trim();
+        return t + p + (pos ? ' — ' + pos : '');
+      }).join('; ');
     },
-    /* Restaura a lista ao carregar uma ficha salva */
+
+    /* Restaura a lista ao carregar uma pré salva. Aceita o formato antigo
+       ({nome, conduta}) sem perder nada — pré já gravada continua abrindo. */
     restaurar(item) {
       pre.meds._lista = [];
       if (item && Array.isArray(item._medsLista)) {
-        pre.meds._lista = item._medsLista.slice();
+        pre.meds._lista = item._medsLista.map(x => Object.assign({
+          nome: '', principio: '', base: '', conc: '', forma: '', via: '',
+          tipo: '', ggrem: '', registro: '', origem: 'manual', baseVersao: '',
+          dose: '', freq: '', horario: '', viaUso: '', obs: '', conduta: ''
+        }, x));
       } else if (item && item.medicacoes) {
-        /* compatibilidade: ficha antiga só tinha texto */
-        pre.meds._lista = item.medicacoes.split(/[,;]+/).map(s => s.trim()).filter(Boolean).map(n => ({ nome: n, conduta: '' }));
+        /* compatibilidade: pré antiga só tinha texto */
+        pre.meds._lista = item.medicacoes.split(/[,;]+/).map(s => s.trim()).filter(Boolean)
+          .map(n => ({ nome: n, principio: '', base: '', conc: '', forma: '', via: '',
+                       tipo: '', ggrem: '', registro: '', origem: 'manual', baseVersao: '',
+                       dose: '', freq: '', horario: '', viaUso: '', obs: '', conduta: '' }));
       }
       pre.meds.render();
     },
@@ -16416,6 +16594,19 @@ const prescricao = {
     prescricao._origemVolta = null;
     ui.navegar(destino);
   },
+  /* Tipo desejado (§11): genérico, referência, similar ou sem preferência.
+     Vale para todas as linhas — pedir "Genérico" e continuar vendo marca de
+     referência na lista seria o filtro não fazer nada. */
+  _tipoPref: '',
+  definirTipo(tipo) {
+    prescricao._tipoPref = tipo || '';
+    document.querySelectorAll('#prescricao-body [name="presc_nome[]"]').forEach(inp => {
+      try { medAutocomplete.definirTipo(inp, prescricao._tipoPref); } catch (e) {}
+    });
+    const rot = { generico: 'genéricos', referencia: 'marcas de referência', similar: 'similares' }[prescricao._tipoPref];
+    if (rot) toast('Buscando apenas ' + rot);
+  },
+
   addItem(dados = {}) {
     const tbody = document.getElementById('prescricao-body');
     if (!tbody) return null;
@@ -16425,58 +16616,144 @@ const prescricao = {
     tr.innerHTML = `
       <td data-label="#" style="text-align:center;color:var(--text-mute)">${idx}</td>
       <td data-label="Medicamento">
-        <input type="text" name="presc_nome[]" value="${utils.escapeAttr(dados.nome || '')}" placeholder="Princípio ativo ou nome" autocomplete="off"
-          oninput="prescricao._onInput(this)" data-uid="${uid}">
-        <div class="presc-sugestoes" id="sug-${uid}" style="display:none"></div>
+        <input type="text" name="presc_nome[]" value="${utils.escapeAttr(dados.nome || '')}" placeholder="Marca, genérico ou princípio ativo" autocomplete="off" data-uid="${uid}">
+        <!-- O princípio ativo fica VISÍVEL na linha, não escondido no registro:
+             quem confere uma receita precisa ver que "Xarelto" é rivaroxabana
+             sem ter de abrir outra tela. -->
+        <div class="med-uso-princ" data-princ="${uid}">${utils.escapeHTML(dados.principio || '')}</div>
+        <input type="hidden" name="presc_principio[]" value="${utils.escapeAttr(dados.principio || '')}">
+        <input type="hidden" name="presc_base[]" value="${utils.escapeAttr(dados.base || '')}">
+        <input type="hidden" name="med_snapshot[]" value="${utils.escapeAttr(dados.snapshot || '')}">
       </td>
-      <td data-label="Apresentação"><input type="text" name="presc_apres[]" value="${utils.escapeAttr(dados.apres || '')}" placeholder="Apresentação"></td>
+      <td data-label="Apresentação">
+        <!-- Vira <select> com as apresentações REAIS daquele princípio assim que
+             um medicamento é escolhido (§13). Antes disso é texto livre, para
+             não travar quem está editando uma receita antiga. -->
+        <div data-apres="${uid}"><input type="text" name="presc_apres[]" value="${utils.escapeAttr(dados.apres || '')}" placeholder="Apresentação"></div>
+      </td>
       <td data-label="Qtd."><input type="text" name="presc_qtd[]" value="${utils.escapeAttr(dados.qtd || '')}" placeholder="Ex.: 1 cx"></td>
       <td data-label="Posologia"><input type="text" name="presc_pos[]" value="${utils.escapeAttr(dados.pos || '')}" placeholder="Posologia / orientação"></td>
-      <td data-label="Via"><input type="text" name="presc_via[]" value="${utils.escapeAttr(dados.via || '')}" placeholder="Via"></td>
+      <td data-label="Via">
+        <input type="text" name="presc_via[]" value="${utils.escapeAttr(dados.via || '')}" placeholder="Via">
+        <div class="med-via-indef-aviso" data-viaaviso="${uid}" style="display:none">Via a definir</div>
+      </td>
       <td class="col-rm"><button type="button" class="btn-rm" onclick="this.closest('tr').remove(); prescricao._renumerar(); markDirty();">✕</button></td>
     `;
     tbody.appendChild(tr);
+    const inp = tr.querySelector('[name="presc_nome[]"]');
+    if (inp) {
+      medAutocomplete.ligar(inp, {
+        modo: 'prescription',
+        tipo: prescricao._tipoPref,
+        aoEscolher: (m, el) => prescricao._aplicar(m, el),
+        aoManual: (texto, el) => prescricao._aplicar(medicamentos.manual(texto), el)
+      });
+    }
     markDirty();
     return tr;
   },
+
+  /* Escolhido um medicamento: nome, princípio ativo, apresentações possíveis e
+     via. A via só é preenchida quando a base DETERMINA — injetável cuja via a
+     CMED não especifica não vira IV (§14). */
+  _aplicar(m, input) {
+    if (!m || !input) return;
+    const tr = input.closest('tr');
+    if (!tr) return;
+    const uid = input.dataset.uid;
+    input.value = m.nome || input.value;
+
+    const setH = (nome, valor) => { const el = tr.querySelector(`[name="${nome}"]`); if (el) el.value = valor || ''; };
+    setH('presc_principio[]', m.principio);
+    setH('presc_base[]', m.base);
+    const divP = tr.querySelector(`[data-princ="${uid}"]`);
+    if (divP) divP.textContent = (m.principio && medicamentos._norm(m.principio) !== medicamentos._norm(m.nome)) ? m.principio : '';
+
+    prescricao._montarApresentacoes(tr, m);
+    prescricao._aplicarVia(tr, m);
+    setH('med_snapshot[]', JSON.stringify(medicamentos.paraRegistro(m, m._manual ? 'manual' : 'anvisa') || {}));
+    markDirty();
+  },
+
+  /* Só as apresentações que EXISTEM para aquele princípio (§13). O médico não
+     redigita concentração nem forma — escolhe. */
+  _montarApresentacoes(tr, m) {
+    const uid = (tr.querySelector('[name="presc_nome[]"]') || {}).dataset?.uid;
+    const wrap = tr.querySelector('[data-apres]');
+    if (!wrap) return;
+    const rotulo = a => [a.conc, a.forma].filter(Boolean).join(' — ');
+    const escolhido = rotulo(m);
+    const lista = m._manual ? [] : medicamentos.apresentacoesDoPrincipio(m.base || m.principio, {
+      tipo: prescricao._tipoPref || ''
+    });
+    /* Sem base (medicamento manual) ou princípio com uma apresentação só:
+       campo de texto, como antes. Um <select> de um item não ajuda ninguém. */
+    if (lista.length < 2) {
+      wrap.innerHTML = `<input type="text" name="presc_apres[]" value="${utils.escapeAttr(escolhido)}" placeholder="Apresentação">`;
+      return;
+    }
+    const vistos = {};
+    const opts = [];
+    lista.forEach((a, i) => {
+      const r = rotulo(a);
+      const chave = medicamentos._norm(a.nome + '|' + r);
+      if (!r || vistos[chave]) return;
+      vistos[chave] = 1;
+      const marca = (medicamentos._norm(a.nome) !== medicamentos._norm(m.nome)) ? (a.nome + ' — ') : '';
+      const via = medicamentos.viaParaTela(a);
+      opts.push(`<option value="${utils.escapeAttr(marca + r)}" data-i="${i}"${(medicamentos._norm(a.nome) === medicamentos._norm(m.nome) && r === escolhido) ? ' selected' : ''}>${utils.escapeHTML(marca + r + ' · ' + via)}</option>`);
+    });
+    wrap.innerHTML =
+      `<select name="presc_apres[]" onchange="prescricao._trocouApresentacao(this)">` +
+      opts.join('') + `</select>`;
+    /* guarda a lista para o onchange saber a via de cada apresentação */
+    wrap._apresentacoes = lista;
+    if (uid) wrap.dataset.apres = uid;
+  },
+
+  _trocouApresentacao(sel) {
+    const tr = sel.closest('tr');
+    const wrap = sel.closest('[data-apres]');
+    const opt = sel.options[sel.selectedIndex];
+    const i = opt ? parseInt(opt.dataset.i, 10) : -1;
+    const a = (wrap && wrap._apresentacoes && i >= 0) ? wrap._apresentacoes[i] : null;
+    if (a && tr) {
+      prescricao._aplicarVia(tr, a);
+      const h = tr.querySelector('[name="med_snapshot[]"]');
+      if (h) h.value = JSON.stringify(medicamentos.paraRegistro(a, 'anvisa') || {});
+    }
+    markDirty();
+  },
+
+  /* Via preenchida sozinha quando a base determina; "Via a definir" e campo
+     VAZIO quando não determina — inventar via é inventar prescrição (§14). */
+  _aplicarVia(tr, m) {
+    const elVia = tr.querySelector('[name="presc_via[]"]');
+    const aviso = tr.querySelector('[data-viaaviso]');
+    if (!elVia) return;
+    if (medicamentos.viaIndefinida(m)) {
+      elVia.value = '';
+      elVia.placeholder = 'Via a definir';
+      if (aviso) aviso.style.display = '';
+    } else {
+      const chaves = m.vias && m.vias.length ? m.vias : medicamentos.viasDoRotulo(m.via);
+      const sigla = chaves.length === 1 ? medicamentos.siglaDaVia(chaves[0]) : '';
+      elVia.value = sigla || m.via || '';
+      elVia.placeholder = 'Via';
+      if (aviso) aviso.style.display = 'none';
+    }
+  },
+
   _renumerar() {
     document.querySelectorAll('#prescricao-body tr').forEach((tr, i) => {
       const c = tr.querySelector('td'); if (c) c.textContent = i + 1;
     });
   },
-  _onInput(input) {
-    const uid = input.dataset.uid;
-    const box = document.getElementById('sug-' + uid);
-    if (!box) return;
-    const sugestoes = prescricao.buscar(input.value);
-    if (sugestoes.length === 0) { box.style.display = 'none'; box.innerHTML = ''; return; }
-    box.innerHTML = sugestoes.map((m, i) => {
-      const nomes = (m.n || []).slice(0, 2).join(', ');
-      return `<div class="presc-sug-item" onclick="prescricao._escolher('${uid}', ${i})" data-idx="${i}">
-        <strong>${utils.escapeHTML(m.p)}</strong>${nomes ? ` <span style="color:var(--text-mute);font-size:.78rem">(${utils.escapeHTML(nomes)})</span>` : ''}
-        <div style="font-size:.74rem;color:var(--text-soft)">${utils.escapeHTML((m.apres || [])[0] || '')} · ${utils.escapeHTML(m.via || '')}${m.ctrl && m.ctrl !== 'comum' ? ' · <span style="color:#b3392a">⚠ ' + utils.escapeHTML(m.ctrl) + '</span>' : ''}</div>
-      </div>`;
-    }).join('');
-    box.style.display = 'block';
-    prescricao._sugestoesAtuais = prescricao._sugestoesAtuais || {};
-    prescricao._sugestoesAtuais[uid] = sugestoes;
-  },
-  _escolher(uid, idx) {
-    const sug = (prescricao._sugestoesAtuais || {})[uid];
-    if (!sug || !sug[idx]) return;
-    const m = sug[idx];
-    const input = document.querySelector(`[data-uid="${uid}"]`);
-    if (!input) return;
-    const tr = input.closest('tr');
-    input.value = m.p;
-    const setV = (name, val) => { const el = tr.querySelector(`[name="${name}"]`); if (el && val) el.value = val; };
-    setV('presc_apres[]', (m.apres || [])[0] || '');
-    setV('presc_pos[]', m.pos || '');
-    setV('presc_via[]', m.via || '');
-    const box = document.getElementById('sug-' + uid);
-    if (box) { box.style.display = 'none'; box.innerHTML = ''; }
-    markDirty();
-  },
+  /* A busca e a escolha agora são do componente único medAutocomplete, ligado
+     em addItem(). _onInput/_escolher existiam só para este módulo e sumiram:
+     duas implementações da mesma coisa é como a pré e a prescrição passaram a
+     achar medicamentos diferentes para o mesmo texto. */
+
   limparItens() {
     if (!confirm('Limpar todos os medicamentos?')) return;
     document.getElementById('prescricao-body').innerHTML = '';
@@ -16490,6 +16767,14 @@ const prescricao = {
       const nome = q('presc_nome[]');
       if (!nome) return;
       const item = { nome, apres: q('presc_apres[]'), qtd: q('presc_qtd[]'), pos: q('presc_pos[]'), via: q('presc_via[]') };
+      /* Princípio ativo e o vínculo com a base oficial vão junto (§17). O
+         snapshot é uma CÓPIA dos campos no momento da escolha: a base da
+         Anvisa é atualizada e apresentação sai de linha — sem a cópia, uma
+         receita de dois anos atrás viraria um código sem significado. */
+      item.principio = q('presc_principio[]');
+      item.principio_base = q('presc_base[]');
+      const snap = q('med_snapshot[]');
+      if (snap) { try { item.medicamento = JSON.parse(snap); } catch (e) {} }
       itens.push(item);
       /* aprende medicamento novo para autocomplete futuro */
       const jaConhecido = MED_BASE.some(m => m.p.toLowerCase() === nome.toLowerCase());
@@ -21509,6 +21794,649 @@ const cloudRealtime = {
    didática estruturada e os dados estatísticos do modelo Einstein.
    Variáveis suportadas: {{paciente}} e {{cirurgia}}.
 ============================================================================ */
+/* ============================================================================
+   MEDICAMENTOS — base central (Anvisa/CMED)
+   ----------------------------------------------------------------------------
+   Uma base só para pré-anestésica, ficha de anestesia e prescrição. Antes cada
+   módulo tinha a sua lista e o nome do remédio era texto livre: "Xarelto" na
+   pré e "rivaroxabana" na prescrição eram, para o sistema, duas coisas sem
+   relação nenhuma. Aqui a relação é explícita — marca ↔ princípio ativo ↔
+   apresentação ↔ forma ↔ via.
+
+   DE ONDE VÊM OS DADOS
+   Duas fontes, na ordem:
+     1. Supabase (RPC buscar_medicamentos) — é a fonte OFICIAL e sempre atual.
+     2. medicamentos-base.js — o mesmo conteúdo, agrupado, dentro do app.
+
+   A segunda não é redundância preguiçosa: centro cirúrgico não tem internet
+   garantida, e uma busca de medicamento que só funciona online é uma busca que
+   falha na hora em que o anestesista mais precisa dela. As duas saem do mesmo
+   gerador e da mesma normalização, então não divergem.
+
+   O QUE ESTA BASE NÃO FAZ
+   Não sugere dose. A CMED não tem posologia e o sistema não inventa nenhuma:
+   dose, frequência e duração são decisão médica (§25). O que ela resolve é
+   identificação, apresentação, concentração, forma e via.
+============================================================================ */
+const medicamentos = {
+  /* --- normalização: TEM de dar o mesmo que med_normalizar() no Postgres --- */
+  _norm(s) {
+    return String(s == null ? '' : s).toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ').trim();
+  },
+
+  TIPO_LABEL: {
+    referencia: 'Referência', generico: 'Genérico', similar: 'Similar',
+    biologico: 'Biológico', especifico: 'Específico', fitoterapico: 'Fitoterápico',
+    terapia_avancada: 'Terapia avançada', radiofarmaco: 'Radiofármaco'
+  },
+  /* Vias padronizadas (§15). Guarda-se a descrição completa; a sigla é só
+     como o clínico lê depressa. */
+  VIAS: [
+    { chave: 'oral', label: 'Oral', sigla: 'VO' },
+    { chave: 'intravenosa', label: 'Intravenosa', sigla: 'IV' },
+    { chave: 'intramuscular', label: 'Intramuscular', sigla: 'IM' },
+    { chave: 'subcutanea', label: 'Subcutânea', sigla: 'SC' },
+    { chave: 'sublingual', label: 'Sublingual', sigla: 'SL' },
+    { chave: 'inalatoria', label: 'Inalatória', sigla: 'INAL' },
+    { chave: 'nasal', label: 'Nasal', sigla: 'NAS' },
+    { chave: 'retal', label: 'Retal', sigla: 'VR' },
+    { chave: 'vaginal', label: 'Vaginal', sigla: 'VV' },
+    { chave: 'topica', label: 'Tópica/Cutânea', sigla: 'TOP' },
+    { chave: 'transdermica', label: 'Transdérmica', sigla: 'TD' },
+    { chave: 'oftalmica', label: 'Oftálmica', sigla: 'OFT' },
+    { chave: 'otologica', label: 'Otológica', sigla: 'OTO' },
+    { chave: 'oromucosal', label: 'Oromucosal/Bucal', sigla: 'BUC' },
+    { chave: 'intradermica', label: 'Intradérmica', sigla: 'ID' },
+    { chave: 'intratecal', label: 'Intratecal', sigla: 'IT' },
+    { chave: 'epidural', label: 'Epidural', sigla: 'PERI' },
+    { chave: 'perineural', label: 'Perineural', sigla: 'PN' },
+    { chave: 'outras', label: 'Outras', sigla: '' }
+  ],
+  siglaDaVia(chave) { const v = medicamentos.VIAS.find(x => x.chave === chave); return v ? v.sigla : ''; },
+  labelDaVia(chave) { const v = medicamentos.VIAS.find(x => x.chave === chave); return v ? v.label : ''; },
+  /* Do rótulo ('Intravenosa / Intramuscular') de volta para as chaves */
+  viasDoRotulo(rotulo) {
+    if (!rotulo) return [];
+    const n = medicamentos._norm(rotulo);
+    if (n === 'topica/cutanea' || n === 'oromucosal/bucal') {
+      const v = medicamentos.VIAS.find(x => medicamentos._norm(x.label) === n);
+      return v ? [v.chave] : [];
+    }
+    return String(rotulo).split('/').map(p => {
+      const pn = medicamentos._norm(p);
+      const v = medicamentos.VIAS.find(x => medicamentos._norm(x.label) === pn);
+      return v ? v.chave : '';
+    }).filter(Boolean);
+  },
+
+  /* ---------------------------------------------------------------------------
+     ÍNDICE LOCAL
+     Vem de medicamentos-base.js como vetores posicionais mais um dicionário. É
+     expandido UMA vez, na primeira busca — não na abertura do app.
+  --------------------------------------------------------------------------- */
+  _indice: null,
+  _expandindo: false,
+
+  disponivelLocal() {
+    return typeof window !== 'undefined' && Array.isArray(window.MED_ANVISA_DADOS);
+  },
+  versao() {
+    return (typeof window !== 'undefined' && window.MED_ANVISA_VERSAO) || '';
+  },
+
+  _expandir() {
+    if (medicamentos._indice) return medicamentos._indice;
+    if (!medicamentos.disponivelLocal()) return [];
+    const dic = window.MED_ANVISA_DIC || {};
+    const txt = (campo, i) => {
+      const v = (dic[campo] || [])[i];
+      return Array.isArray(v) ? v[0] : (v || '');
+    };
+    const extra = (campo, i) => {
+      const v = (dic[campo] || [])[i];
+      return Array.isArray(v) ? (v[1] || '') : '';
+    };
+    const N = medicamentos._norm;
+    medicamentos._indice = window.MED_ANVISA_DADOS.map(r => {
+      const principio = r[1];
+      const nome = r[0];
+      const via = txt('via', r[5]);
+      const item = {
+        nome: nome,
+        principio: principio,
+        /* a raiz só é gravada quando difere do princípio normalizado — o
+           arquivo seria um terço maior repetindo o que dá para derivar */
+        base: r[2] || N(principio),
+        conc: txt('conc', r[3]),
+        forma: txt('forma', r[4]),
+        via: via,
+        vias: extra('via', r[5]) ? extra('via', r[5]).split(',') : [],
+        injetavelSemVia: r[6] === 1,
+        tipo: txt('tipo', r[7]),
+        lab: txt('lab', r[8]),
+        registro: r[9],
+        ggrem: r[10],
+        classe: txt('classe', r[11]),
+        comercializado: r[12] === 1
+      };
+      item._nomeN = N(nome);
+      item._princN = N(principio);
+      item._buscaN = item._nomeN + ' ' + item._princN;
+      return item;
+    });
+    return medicamentos._indice;
+  },
+
+  /* ---------------------------------------------------------------------------
+     BUSCA LOCAL
+     Mesma ordem de relevância da função do Postgres (§23): começo do nome
+     comercial, começo do princípio, contido. O que o SQL faz com trigrama —
+     tolerar erro de digitação — aqui é distância de edição sobre os poucos
+     candidatos que sobraram, e só quando nada exato apareceu: rodar isso em
+     onze mil registros a cada tecla seria caro para não mudar o resultado.
+  --------------------------------------------------------------------------- */
+  RANK: { NOME: 1, PRINCIPIO: 2, GENERICO: 3, CONTIDO: 4, PARECIDO: 5 },
+
+  _rankTipo(t) {
+    return t === 'referencia' ? 1 : t === 'generico' ? 2 : t === 'similar' ? 3 : 4;
+  },
+
+  buscarLocal(termo, opts = {}) {
+    const t = medicamentos._norm(termo);
+    if (t.length < 2) return [];
+    const lista = medicamentos._expandir();
+    const limite = opts.limite || 20;
+    const tipo = opts.tipo || '';
+    const curto = t.length < 3;
+    const achados = [];
+    for (let i = 0; i < lista.length; i++) {
+      const m = lista[i];
+      if (tipo && m.tipo !== tipo) continue;
+      if (opts.soComercializados && !m.comercializado) continue;
+      let r = 0;
+      if (m._nomeN.indexOf(t) === 0) r = medicamentos.RANK.NOME;
+      else if (m._princN.indexOf(t) === 0) r = medicamentos.RANK.PRINCIPIO;
+      /* Duas letras: só começo de palavra. "di" no meio de um nome é ruído —
+         ninguém digita duas letras procurando o miolo de uma palavra. */
+      else if (!curto && m._buscaN.indexOf(t) >= 0) r = medicamentos.RANK.CONTIDO;
+      if (!r) continue;
+      achados.push({ m: m, r: r });
+      /* corte de segurança: com o índice inteiro varrido não faz diferença,
+         mas evita montar um vetor de milhares para mostrar vinte */
+      if (achados.length > 4000) break;
+    }
+    if (!achados.length && !curto) return medicamentos._parecidos(t, opts);
+    achados.sort((a, b) =>
+      a.r - b.r
+      || (b.m.comercializado - a.m.comercializado)
+      || (medicamentos._rankTipo(a.m.tipo) - medicamentos._rankTipo(b.m.tipo))
+      || (a.m.nome.length - b.m.nome.length)
+      || a.m._nomeN.localeCompare(b.m._nomeN)
+      || a.m.conc.localeCompare(b.m.conc));
+    return achados.slice(0, limite).map(x => Object.assign({ relevancia: x.r }, x.m));
+  },
+
+  /* Tolerância a erro de digitação (§23): "xareuto" → Xarelto. Só entra quando
+     a busca exata não achou nada, e prioriza sempre o exato. */
+  _parecidos(t, opts = {}) {
+    const lista = medicamentos._expandir();
+    const limite = opts.limite || 20;
+    const tipo = opts.tipo || '';
+    const out = [];
+    for (let i = 0; i < lista.length; i++) {
+      const m = lista[i];
+      if (tipo && m.tipo !== tipo) continue;
+      /* só compara com quem tem tamanho parecido: distância de edição em
+         palavra de tamanho muito diferente nunca vai passar do limiar */
+      if (Math.abs(m._nomeN.length - t.length) > 3) continue;
+      const d = medicamentos._distancia(m._nomeN, t, 2);
+      if (d <= 2) out.push({ m: m, d: d });
+    }
+    out.sort((a, b) => a.d - b.d
+      || (b.m.comercializado - a.m.comercializado)
+      || (medicamentos._rankTipo(a.m.tipo) - medicamentos._rankTipo(b.m.tipo))
+      || a.m._nomeN.localeCompare(b.m._nomeN));
+    return out.slice(0, limite).map(x => Object.assign({ relevancia: medicamentos.RANK.PARECIDO }, x.m));
+  },
+
+  /* Levenshtein com corte: passou do máximo, para de contar. */
+  _distancia(a, b, max) {
+    const la = a.length, lb = b.length;
+    if (Math.abs(la - lb) > max) return max + 1;
+    let anterior = new Array(lb + 1);
+    for (let j = 0; j <= lb; j++) anterior[j] = j;
+    for (let i = 1; i <= la; i++) {
+      const atual = new Array(lb + 1);
+      atual[0] = i;
+      let melhor = i;
+      for (let j = 1; j <= lb; j++) {
+        const custo = a.charCodeAt(i - 1) === b.charCodeAt(j - 1) ? 0 : 1;
+        atual[j] = Math.min(atual[j - 1] + 1, anterior[j] + 1, anterior[j - 1] + custo);
+        if (atual[j] < melhor) melhor = atual[j];
+      }
+      if (melhor > max) return max + 1;
+      anterior = atual;
+    }
+    return anterior[lb];
+  },
+
+  /* ---------------------------------------------------------------------------
+     BUSCA NA NUVEM (fonte oficial)
+     A RPC devolve a base ATUAL do servidor, que pode estar à frente do índice
+     embutido no app. Quando responde, é ela que vale.
+  --------------------------------------------------------------------------- */
+  _nuvemDoente: 0,     /* timestamp até quando parar de tentar após uma falha */
+
+  nuvemDisponivel() {
+    try {
+      if (typeof cloud === 'undefined' || !cloud.estaConfigurado || !cloud.estaConfigurado()) return false;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+      return Date.now() > medicamentos._nuvemDoente;
+    } catch (e) { return false; }
+  },
+
+  async buscarNaNuvem(termo, opts = {}) {
+    if (!medicamentos.nuvemDisponivel()) return null;
+    try {
+      const c = cloud.config();
+      const ctrl = new AbortController();
+      /* Autocomplete que trava esperando rede é pior que autocomplete local:
+         passou de 2,5 s, desiste e o índice embutido responde. */
+      const t = setTimeout(() => ctrl.abort(), 2500);
+      const r = await fetch(c.url + '/rest/v1/rpc/buscar_medicamentos', {
+        method: 'POST',
+        headers: cloud._headers(true),
+        signal: ctrl.signal,
+        body: JSON.stringify({
+          p_termo: termo,
+          p_tipo: opts.tipo || null,
+          p_limite: opts.limite || 20,
+          p_so_comercializados: !!opts.soComercializados
+        })
+      });
+      clearTimeout(t);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const linhas = await r.json();
+      if (!Array.isArray(linhas)) return null;
+      return linhas.map(medicamentos._daNuvem);
+    } catch (e) {
+      /* Falhou: para de tentar por um minuto. Sem isto, cada tecla digitada
+         gastaria 2,5 s de espera para falhar de novo. */
+      medicamentos._nuvemDoente = Date.now() + 60000;
+      return null;
+    }
+  },
+
+  _daNuvem(x) {
+    return {
+      nome: x.nome_comercial || '',
+      principio: x.principio_ativo || '',
+      base: x.principio_base || '',
+      conc: x.concentracao || '',
+      forma: x.forma_farmaceutica || '',
+      via: x.via_administracao || '',
+      vias: medicamentos.viasDoRotulo(x.via_administracao),
+      injetavelSemVia: !!x.injetavel_sem_via,
+      tipo: x.tipo_medicamento || '',
+      lab: x.laboratorio || '',
+      registro: x.registro_anvisa || '',
+      ggrem: x.ggrem || '',
+      classe: x.classe_terapeutica || '',
+      comercializado: x.comercializado !== false,
+      relevancia: x.relevancia || 0,
+      _daNuvem: true
+    };
+  },
+
+  /* Busca de verdade: nuvem quando dá, índice local sempre que não dá. */
+  async buscar(termo, opts = {}) {
+    const t = medicamentos._norm(termo);
+    if (t.length < 2) return [];
+    const naNuvem = await medicamentos.buscarNaNuvem(termo, opts);
+    if (naNuvem && naNuvem.length) return naNuvem;
+    return medicamentos.buscarLocal(termo, opts);
+  },
+
+  /* ---------------------------------------------------------------------------
+     APRESENTAÇÕES DE UM MESMO FÁRMACO (§13)
+     Depois de escolher, a tela oferece SÓ o que existe para aquele princípio —
+     o médico não redigita concentração nem forma.
+  --------------------------------------------------------------------------- */
+  apresentacoesDoPrincipio(principioOuBase, opts = {}) {
+    const alvo = medicamentos._norm(principioOuBase);
+    if (!alvo) return [];
+    const lista = medicamentos._expandir();
+    const tipo = opts.tipo || '';
+    const out = lista.filter(m =>
+      (m.base === alvo || m._princN === alvo) && (!tipo || m.tipo === tipo));
+    out.sort((a, b) =>
+      (b.comercializado - a.comercializado)
+      || (medicamentos._rankTipo(a.tipo) - medicamentos._rankTipo(b.tipo))
+      || a.forma.localeCompare(b.forma)
+      || a.conc.localeCompare(b.conc)
+      || a.nome.localeCompare(b.nome));
+    return out.slice(0, opts.limite || 100);
+  },
+
+  /* ---------------------------------------------------------------------------
+     APRESENTAÇÃO PARA A TELA
+  --------------------------------------------------------------------------- */
+  /* "Via a definir" quando a CMED não determina a via. Não vira IV, IM nem SC:
+     inventar via é inventar prescrição (§14). */
+  VIA_INDEFINIDA: 'Via a definir',
+  viaParaTela(m) {
+    if (!m) return '';
+    return m.via || medicamentos.VIA_INDEFINIDA;
+  },
+  viaIndefinida(m) { return !!m && !m.via; },
+
+  /* Nome — Princípio — Concentração — Forma — Via (§5) */
+  rotulo(m) {
+    if (!m) return '';
+    return [m.nome, m.principio, m.conc, m.forma, medicamentos.viaParaTela(m)]
+      .filter(Boolean).join(' — ');
+  },
+  /* Linha curta para leitura rápida na lista da pré (§19) */
+  rotuloCurto(m) {
+    if (!m) return '';
+    return [m.nome, m.conc].filter(Boolean).join(' ');
+  },
+
+  /* ---------------------------------------------------------------------------
+     O QUE FICA GRAVADO NO REGISTRO CLÍNICO (§17)
+     Vínculo com a base MAIS uma cópia dos campos. A cópia não é redundância:
+     a base da Anvisa é atualizada, apresentação sai de linha, e sem ela uma
+     prescrição de dois anos atrás viraria um código sem significado.
+  --------------------------------------------------------------------------- */
+  paraRegistro(m, origem) {
+    if (!m) return null;
+    return {
+      medicamento_ggrem: m.ggrem || '',
+      medicamento_registro_anvisa: m.registro || '',
+      nome_comercial_snapshot: m.nome || '',
+      principio_ativo_snapshot: m.principio || '',
+      principio_base_snapshot: m.base || '',
+      concentracao_snapshot: m.conc || '',
+      forma_snapshot: m.forma || '',
+      via_snapshot: m.via || '',
+      tipo_snapshot: m.tipo || '',
+      laboratorio_snapshot: m.lab || '',
+      classe_snapshot: m.classe || '',
+      base_versao: medicamentos.versao(),
+      origem: origem || 'anvisa'
+    };
+  },
+
+  /* Medicamento que NÃO está na base (§18). Fica marcado como manual, e nunca
+     entra na base oficial: o que a Anvisa publica é a Anvisa que decide. */
+  manual(texto) {
+    const t = String(texto || '').trim();
+    if (!t) return null;
+    return {
+      nome: t, principio: '', base: '', conc: '', forma: '', via: '',
+      vias: [], injetavelSemVia: false, tipo: '', lab: '', registro: '',
+      ggrem: '', classe: '', comercializado: true, _manual: true
+    };
+  }
+};
+
+/* ============================================================================
+   MedicationAutocomplete — o campo de escolher medicamento, um só (§27)
+   ----------------------------------------------------------------------------
+   Pré-anestésica, ficha de anestesia e prescrição usam ESTE componente. Três
+   telas com perguntas diferentes:
+
+     homeMedication          o que o paciente usa em casa. Pode não saber a
+                             apresentação — e isso não pode impedir o registro.
+     anesthesiaAdministration o que foi dado durante a anestesia. Concentração
+                             da ampola e dose administrada são coisas
+                             diferentes e ficam em campos diferentes.
+     prescription            o que vai ser prescrito. Filtro por genérico /
+                             referência / similar e escolha da apresentação.
+
+   O que é igual nos três: a busca, a ordem dos resultados, o formato da
+   sugestão e o princípio ativo aparecendo junto da marca.
+============================================================================ */
+const medAutocomplete = {
+  ESPERA_MS: 250,        /* §4: nem a cada tecla, nem esperando o Enter */
+  MIN_CARACTERES: 2,
+  _seq: 0,
+  _timers: {},
+  _estado: {},           /* por instância: resultados atuais, seleção */
+
+  _esc(s) { return utils.escapeHTML(String(s == null ? '' : s)); },
+
+  /* --------------------------------------------------------------------------
+     Liga o componente a um <input> já existente na página.
+     opts:
+       modo        'homeMedication' | 'anesthesiaAdministration' | 'prescription'
+       tipo        filtro de tipo (só prescription usa)
+       aoEscolher  função(medicamento, input) — o módulo decide o que preencher
+       aoManual    função(texto, input) — medicamento fora da base (§18)
+  -------------------------------------------------------------------------- */
+  ligar(input, opts = {}) {
+    if (!input || input._medLigado) return;
+    input._medLigado = true;
+    input.setAttribute('autocomplete', 'off');
+    const id = 'med' + (++medAutocomplete._seq);
+    input.dataset.medId = id;
+    medAutocomplete._estado[id] = { opts: opts, res: [], sel: -1 };
+
+    input.addEventListener('input', () => medAutocomplete._digitou(input));
+    input.addEventListener('keydown', ev => medAutocomplete._tecla(ev, input));
+    input.addEventListener('blur', () => {
+      /* atraso: sem ele, o clique na sugestão fecha a caixa antes de o clique
+         chegar nela e nada é escolhido */
+      setTimeout(() => medAutocomplete.fechar(), 180);
+    });
+    input.addEventListener('focus', () => {
+      if ((input.value || '').trim().length >= medAutocomplete.MIN_CARACTERES) {
+        medAutocomplete._digitou(input);
+      }
+    });
+  },
+
+  /* Troca o filtro de tipo de uma instância já ligada (§11) */
+  definirTipo(input, tipo) {
+    const st = medAutocomplete._estado[input && input.dataset && input.dataset.medId];
+    if (st) st.opts = Object.assign({}, st.opts, { tipo: tipo || '' });
+  },
+
+  _digitou(input) {
+    const id = input.dataset.medId;
+    const st = medAutocomplete._estado[id];
+    if (!st) return;
+    clearTimeout(medAutocomplete._timers[id]);
+    const termo = (input.value || '').trim();
+    if (termo.length < medAutocomplete.MIN_CARACTERES) { medAutocomplete.fechar(); return; }
+    medAutocomplete._timers[id] = setTimeout(() => {
+      medAutocomplete._procurar(input, termo);
+    }, medAutocomplete.ESPERA_MS);
+  },
+
+  async _procurar(input, termo) {
+    const id = input.dataset.medId;
+    const st = medAutocomplete._estado[id];
+    if (!st) return;
+    st.pedido = (st.pedido || 0) + 1;
+    const meu = st.pedido;
+    /* O índice local responde na hora: a lista aparece já, e é trocada se a
+       nuvem (que é a fonte oficial) devolver algo diferente. Esperar a rede
+       para mostrar a primeira letra é o que faz autocomplete parecer travado. */
+    const local = medicamentos.buscarLocal(termo, { tipo: st.opts.tipo, limite: 20 });
+    if (meu === st.pedido) medAutocomplete._pintar(input, local, termo);
+    const naNuvem = await medicamentos.buscarNaNuvem(termo, { tipo: st.opts.tipo, limite: 20 });
+    /* pedido antigo chegando atrasado não pode sobrescrever o atual */
+    if (naNuvem && naNuvem.length && meu === st.pedido) {
+      medAutocomplete._pintar(input, naNuvem, termo);
+    }
+  },
+
+  _caixa() {
+    let box = document.getElementById('med-ac-box');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'med-ac-box';
+      box.className = 'med-ac-box';
+      box.style.display = 'none';
+      document.body.appendChild(box);
+    }
+    return box;
+  },
+
+  _pintar(input, res, termo) {
+    const id = input.dataset.medId;
+    const st = medAutocomplete._estado[id];
+    if (!st) return;
+    st.res = res;
+    st.sel = -1;
+    const box = medAutocomplete._caixa();
+    const E = medAutocomplete._esc;
+
+    if (!res.length) {
+      box.innerHTML =
+        '<div class="med-ac-vazio">Nenhum medicamento encontrado para "' + E(termo) + '"</div>' +
+        '<div class="med-ac-item med-ac-manual" onmousedown="event.preventDefault(); medAutocomplete.escolherManual(\'' + id + '\')">' +
+        '<div class="med-ac-nome">✎ Cadastrar "' + E(termo) + '" manualmente</div>' +
+        '<div class="med-ac-sub">Fora da base da Anvisa — fica marcado como registro manual</div></div>';
+    } else {
+      box.innerHTML = res.map((m, i) => {
+        const via = medicamentos.viaParaTela(m);
+        const indef = medicamentos.viaIndefinida(m);
+        const tipoLbl = medicamentos.TIPO_LABEL[m.tipo] || '';
+        /* Marca em destaque, princípio ativo LOGO ABAIXO (§19, §26) e o resto
+           em texto secundário: no celular é essa hierarquia que deixa
+           diferenciar duas apresentações sem tabela horizontal. */
+        return '<div class="med-ac-item" data-i="' + i + '" ' +
+          'onmousedown="event.preventDefault(); medAutocomplete.escolher(\'' + id + '\',' + i + ')">' +
+          '<div class="med-ac-nome">' + E(m.nome) +
+            (m.conc ? ' <span class="med-ac-conc">' + E(m.conc) + '</span>' : '') +
+            (tipoLbl ? ' <span class="med-ac-tag med-ac-tag-' + E(m.tipo) + '">' + E(tipoLbl) + '</span>' : '') +
+          '</div>' +
+          (m.principio && medicamentos._norm(m.principio) !== medicamentos._norm(m.nome)
+            ? '<div class="med-ac-princ">' + E(m.principio) + '</div>' : '') +
+          '<div class="med-ac-sub">' + E(m.forma) +
+            (m.forma && via ? ' · ' : '') +
+            '<span class="' + (indef ? 'med-ac-via-indef' : '') + '">' + E(via) + '</span>' +
+            (m.comercializado ? '' : ' · <span class="med-ac-desc">não comercializado</span>') +
+          '</div></div>';
+      }).join('') +
+      '<div class="med-ac-item med-ac-manual" onmousedown="event.preventDefault(); medAutocomplete.escolherManual(\'' + id + '\')">' +
+      '<div class="med-ac-nome">✎ Não encontrei — cadastrar manualmente</div></div>';
+    }
+
+    const r = input.getBoundingClientRect();
+    box.style.left = Math.max(4, Math.min(r.left, window.innerWidth - Math.max(260, r.width) - 8)) + 'px';
+    box.style.top = (r.bottom + 3) + 'px';
+    box.style.width = Math.max(260, Math.min(r.width, window.innerWidth - 16)) + 'px';
+    box.style.display = 'block';
+    medAutocomplete._ativo = id;
+  },
+
+  fechar() {
+    const box = document.getElementById('med-ac-box');
+    if (box) box.style.display = 'none';
+    medAutocomplete._ativo = null;
+  },
+
+  _tecla(ev, input) {
+    const box = document.getElementById('med-ac-box');
+    if (!box || box.style.display === 'none') return;
+    const id = input.dataset.medId;
+    const st = medAutocomplete._estado[id];
+    if (!st) return;
+    const itens = Array.from(box.querySelectorAll('.med-ac-item'));
+    if (!itens.length) return;
+    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      st.sel = (st.sel + (ev.key === 'ArrowDown' ? 1 : -1) + itens.length) % itens.length;
+      itens.forEach((el, i) => el.classList.toggle('med-ac-sel', i === st.sel));
+      if (itens[st.sel]) itens[st.sel].scrollIntoView({ block: 'nearest' });
+    } else if (ev.key === 'Enter') {
+      ev.preventDefault();
+      const i = st.sel >= 0 ? st.sel : 0;
+      if (i >= st.res.length) medAutocomplete.escolherManual(id);
+      else medAutocomplete.escolher(id, i);
+    } else if (ev.key === 'Escape') {
+      medAutocomplete.fechar();
+    }
+  },
+
+  escolher(id, i) {
+    const st = medAutocomplete._estado[id];
+    if (!st) return;
+    const m = st.res[i];
+    const input = document.querySelector('[data-med-id="' + id + '"]');
+    medAutocomplete.fechar();
+    if (!m || !input) return;
+    if (typeof st.opts.aoEscolher === 'function') st.opts.aoEscolher(m, input);
+    try { markDirty(); } catch (e) {}
+  },
+
+  escolherManual(id) {
+    const st = medAutocomplete._estado[id];
+    const input = document.querySelector('[data-med-id="' + id + '"]');
+    medAutocomplete.fechar();
+    if (!st || !input) return;
+    const texto = (input.value || '').trim();
+    if (!texto) return;
+    const m = medicamentos.manual(texto);
+    if (typeof st.opts.aoManual === 'function') st.opts.aoManual(texto, input);
+    else if (typeof st.opts.aoEscolher === 'function') st.opts.aoEscolher(m, input);
+    try { markDirty(); } catch (e) {}
+  },
+
+  /* Liga todo campo com class="med-autocomplete". Chamado no boot e depois de
+     render dinâmico (linha nova de prescrição, de medicação da ficha…). */
+  aplicarTodos(raiz) {
+    const r = raiz || document;
+    r.querySelectorAll('.med-autocomplete').forEach(el => {
+      if (el._medLigado) return;
+      const modo = el.dataset.medModo || 'prescription';
+      medAutocomplete.ligar(el, {
+        modo: modo,
+        aoEscolher: (m, input) => medAutocomplete._preencherPadrao(modo, m, input)
+      });
+    });
+  },
+
+  /* Preenchimento padrão por modo, para os campos que seguem a convenção de
+     nomes. Módulo que precise de algo diferente passa o seu aoEscolher. */
+  _preencherPadrao(modo, m, input) {
+    const linha = input.closest('tr') || input.closest('.med-linha') || input.parentElement;
+    if (!linha) return;
+    const põe = (nome, valor) => {
+      const el = linha.querySelector('[name="' + nome + '"]');
+      if (el && valor != null && !String(el.value || '').trim()) el.value = valor;
+    };
+    input.value = m.nome || input.value;
+    põe('presc_principio[]', m.principio);
+    põe('presc_apres[]', [m.conc, m.forma].filter(Boolean).join(' — '));
+    /* Via só quando a base DETERMINA. Injetável sem via não vira IV (§14). */
+    if (!medicamentos.viaIndefinida(m)) põe('presc_via[]', m.via);
+    medAutocomplete.guardarSnapshot(linha, m);
+  },
+
+  /* Guarda o vínculo + a cópia dos campos num input escondido da linha (§17) */
+  guardarSnapshot(linha, m) {
+    if (!linha) return;
+    let h = linha.querySelector('[name="med_snapshot[]"]');
+    if (!h) {
+      h = document.createElement('input');
+      h.type = 'hidden'; h.name = 'med_snapshot[]';
+      linha.appendChild(h);
+    }
+    h.value = JSON.stringify(medicamentos.paraRegistro(m, m && m._manual ? 'manual' : 'anvisa') || {});
+  },
+  lerSnapshot(linha) {
+    const h = linha && linha.querySelector('[name="med_snapshot[]"]');
+    if (!h || !h.value) return null;
+    try { return JSON.parse(h.value); } catch (e) { return null; }
+  }
+};
+
 const termoBiblioteca = {
   MODELOS: {
     completo: {
@@ -27770,7 +28698,42 @@ const anestesia = {
         if (n.indexOf(nq) === 0) comeca.push(m);
         else if (n.indexOf(nq) >= 0) contem.push(m);
       });
-      return comeca.concat(contem).slice(0, 10);
+      const doCatalogo = comeca.concat(contem);
+      /* CATÁLOGO ANESTÉSICO PRIMEIRO, base da Anvisa depois.
+         Não é preferência estética: o catálogo traz dose usual, diluição e via
+         das drogas de sala, que é o que a ficha precisa e o que a CMED não
+         tem. A base oficial entra em seguida, para o que foi dado e não é
+         droga de rotina anestésica — antibiótico, anti-hipertensivo do
+         paciente, o que apareça. Uma base só, dois papéis distintos. */
+      /* Deduplicação por princípio MAIS concentração, e não só por princípio:
+         propofol 10 mg/mL e 20 mg/mL são o mesmo fármaco e apresentações
+         diferentes, e escolher a certa é exatamente o que esta tela precisa.
+         Deduplicar só pelo princípio escondia todas as apresentações da base
+         oficial atrás da entrada do catálogo. */
+      const jaTem = {};
+      doCatalogo.forEach(m => {
+        jaTem[anestesia.meds._norm((m.base || m.nome) + '|' + (m.dil || ''))] = 1;
+      });
+      const daAnvisa = [];
+      try {
+        medicamentos.buscarLocal(q, { limite: 12 }).forEach(m => {
+          const k = anestesia.meds._norm((m.principio || m.nome) + '|' + m.conc);
+          if (jaTem[k]) return;
+          jaTem[k] = 1;
+          daAnvisa.push({
+            nome: m.nome,
+            base: m.principio,
+            /* Concentração da AMPOLA, e nunca dose: Propofol 10 mg/mL é o que
+               está no frasco; 150 mg é o que entrou no paciente. Por isso a
+               concentração vai para a diluição e o campo de dose fica VAZIO,
+               esperando o número que o anestesista viu na seringa (§25, Teste 8). */
+            dil: [m.conc, m.forma].filter(Boolean).join(' — '),
+            via: medicamentos.viaIndefinida(m) ? '' : (medicamentos.siglaDaVia((m.vias || [])[0]) || m.via),
+            _anvisa: m
+          });
+        });
+      } catch (e) {}
+      return doCatalogo.concat(daAnvisa).slice(0, 14);
     },
     _caixa() {
       let box = document.getElementById('med-sug-box');
@@ -27844,6 +28807,12 @@ const anestesia = {
       põe('med_via[]', m.via);
       põe('med_tipo[]', m.tipo);
       põe('med_diluicao[]', m.dil);
+      /* Vindo da base oficial, guarda o vínculo + a cópia dos campos (§17) e
+         NÃO preenche dose: a ficha registra o que foi administrado, e isso só
+         o anestesista sabe. */
+      if (m._anvisa) {
+        try { medAutocomplete.guardarSnapshot(tr, m._anvisa); } catch (e) {}
+      }
       /* hora em branco vira a hora do lançamento: é quando a droga foi dada */
       const hora = tr.querySelector('[name="med_hora[]"]');
       if (hora && !hora.value) hora.value = anestesia.graficoUI.clampHora(utils.horaAtual());
@@ -45666,6 +46635,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.fabDial = fabDial;
   window.termoPadrao = termoPadrao;
   window.termoBiblioteca = termoBiblioteca;
+  window.medicamentos = medicamentos; window.medAutocomplete = medAutocomplete;
   window.textosPadrao = textosPadrao;
   window.pacienteAutocomplete = pacienteAutocomplete;
   window.comorbidades = comorbidades;
@@ -46031,6 +47001,10 @@ document.addEventListener('DOMContentLoaded', () => {
   /* Aplica autocomplete CBHPM em todos os campos com class="cbhpm-autocomplete"
      (procedimento cirúrgico em Anestesia, Pré, SRPA, Consulta, Financeiro) */
   try { cbhpm.aplicarTodos(); } catch (e) { console.warn('cbhpm.aplicarTodos:', e); }
+  /* Liga a base central de medicamentos em qualquer campo marcado com
+     class="med-autocomplete" — é o ponto de extensão para um módulo novo
+     precisar escolher medicamento sem escrever busca própria de novo. */
+  try { medAutocomplete.aplicarTodos(); } catch (e) { console.warn('medAutocomplete.aplicarTodos:', e); }
 
   /* Autocomplete de HISTÓRICO nos campos de texto livre recorrentes
      (cirurgião, hospital, local, convênio, profissional) — sugere valores já usados. */

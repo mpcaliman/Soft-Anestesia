@@ -18,8 +18,10 @@ No painel do Supabase → **SQL Editor**, rode nesta ordem:
 1. `migrations/0001_foundation.sql` — tabelas, funções, triggers, RLS.
 2. `migrations/0002_storage_realtime.sql` — bucket privado de anexos + Realtime.
 3. **Seed inicial** (abaixo) — cria sua organização e te vincula como `gestor`.
-4. `migrations/0003` … `0013` — na ordem do número.
+4. `migrations/0003` … `0014` — na ordem do número.
 5. `seeds/cbhpm_2022.sql` — carrega os códigos da CBHPM 2022 (depois da 0013).
+6. Base de medicamentos (depois da 0014) — pelo importador, não por seed:
+   veja "Carregar e atualizar a base da Anvisa" no fim deste arquivo.
 
 Pode rodar de novo com segurança (idempotente).
 
@@ -366,6 +368,66 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   deste atendimento?", pergunta da conciliação e do controle de linha órfã.
   Para carregar: rode a migração e depois `seeds/cbhpm_2022.sql` (um
   `insert … on conflict do update`, reexecutável).
+
+- **Medicamentos Anvisa/CMED (`0014_medicamentos_anvisa.sql`):** ✅ a base
+  central de medicamentos, usada por pré-anestésica, ficha de anestesia e
+  prescrição. Antes cada módulo tinha a sua listinha e o nome do remédio era
+  texto livre: "Xarelto" na pré e "rivaroxabana" na prescrição eram, para o
+  sistema, duas coisas sem relação. Agora a relação é explícita — marca ↔
+  princípio ativo ↔ apresentação ↔ forma ↔ via.
+
+  Cria `medicamentos` (uma linha por apresentação da CMED, chave **GGREM**),
+  a matview `medicamentos_clinicos` (o agrupamento que o médico enxerga como
+  "um item": embalagem, quantidade e EAN não separam nada para quem
+  prescreve), `medicamentos_regras_anestesicas` (presa ao **princípio ativo**,
+  para que uma regra de rivaroxabana valha para Xarelto e para todos os
+  genéricos sem recadastro) e `medicamentos_base_versao` (qual base oficial
+  está carregada). Busca por `buscar_medicamentos()` e
+  `apresentacoes_do_principio()`.
+
+  **Não é tabela de preço** — a CMED publica preço máximo e nada disso é
+  importado. **Não é fonte de posologia** — a CMED não tem dose terapêutica e
+  o sistema não inventa nenhuma.
+
+### Carregar e atualizar a base da Anvisa
+
+O caminho normal é o importador, que faz `upsert` por GGREM:
+
+```bash
+export SUPABASE_URL=https://xxxx.supabase.co
+export SUPABASE_SERVICE_KEY=eyJ...          # chave de SERVIÇO, não a anon
+node scripts/import-anvisa-medications.mjs base_cmed.xlsx --versao 2026-08-11
+```
+
+Antes de gravar, vale conferir o que mudaria:
+
+```bash
+node scripts/import-anvisa-medications.mjs base_cmed.xlsx --so-conferir
+node scripts/import-anvisa-medications.mjs base_cmed.xlsx --dry-run
+```
+
+**Depois de trocar a base no servidor, gere também o índice offline** — senão o
+app continua buscando na base antiga quando estiver sem rede:
+
+```bash
+node scripts/gerar-base-medicamentos.mjs base_cmed.xlsx --versao 2026-08-11
+```
+
+Três coisas que valem saber ao atualizar:
+
+- **O importador nunca apaga.** Apresentação retirada do ar continua no banco,
+  porque prescrição antiga aponta para ela. Para tirá-la da busca, marque
+  `ativo = false` — não delete.
+- **A chave é o GGREM**, não o "ID apresentação": há um caso de dois GGREM
+  com o mesmo ID, e usar o ID como chave perderia um registro.
+- **A matview precisa ser atualizada** depois da carga (o importador faz isso
+  sozinho pela RPC `refresh_medicamentos_clinicos`; no editor SQL é
+  `refresh materialized view public.medicamentos_clinicos;`). Sem isso a busca
+  continua respondendo a base anterior.
+
+O seed em SQL (`seeds/medicamentos_anvisa.sql`, 12,8 MB) é gerado pelo mesmo
+comando e **não vai para o repositório**: é grande demais para colar no editor
+SQL do Supabase, que era o único motivo de existir em SQL.
 
 ## Rollback
 
