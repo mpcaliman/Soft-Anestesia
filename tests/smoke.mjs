@@ -9062,6 +9062,136 @@ await test('Pendências: a janela espera a nuvem antes de desistir — é a secr
   await page.close();
 });
 
+
+/* 145) Financeiro: os filtros tinham campos e nenhum botão. Quem preenche
+   precisa de um comando para acionar e de um retorno dizendo o que sobrou —
+   e o convênio, que era texto livre, vira lista dos planos JÁ LANÇADOS. */
+await test('Financeiro: botão de filtrar com contagem e filtro por planos de saúde já lançados', async () => {
+  const page = await novaPagina();
+  page.on('dialog', d => d.accept());
+  const r = await page.evaluate(() => {
+    const out = {};
+    const fecharJanela = () => {
+      try { modal.close(); } catch (e) {}
+      document.getElementById('modal-backdrop').classList.remove('show');
+    };
+    store.setList('financeiro', []);
+    const lanca = (conv, extra) => store.save('financeiro', Object.assign({
+      paciente: 'Paciente ' + conv, convenio: conv, valor: 100,
+      data: utils.hojeISO(), status: 'Pendente'
+    }, extra || {}));
+    lanca('Bradesco Saúde'); lanca('Bradesco Saúde');
+    lanca('Unimed'); lanca('SulAmérica');
+    /* sem convênio, mas com forma de pagamento: é particular, não "sem nome" */
+    store.save('financeiro', { paciente: 'Avulso', convenio: '', tipo_pagamento: 'Particular',
+      valor: 300, data: utils.hojeISO(), status: 'Pendente' });
+    /* sem convênio e sem forma de pagamento: precisa de um lugar na lista */
+    store.save('financeiro', { paciente: 'Orfao', convenio: '', valor: 50,
+      data: utils.hojeISO(), status: 'Pendente' });
+
+    ui.navegar('financeiro');
+    financeiro.limparFiltros();
+
+    /* --- o botão existe e devolve resposta ------------------------------- */
+    const btnFiltrar = Array.from(document.querySelectorAll('#financeiro .filter-actions button, .filter-actions button'))
+      .find(b => /filtrar/i.test(b.textContent) && /financeiro\.aplicarFiltros/.test(b.getAttribute('onclick') || ''));
+    out.temBotao = !!btnFiltrar;
+    financeiro.aplicarFiltros();
+    out.contagemTotal = (document.getElementById('fin-f-resultado') || {}).textContent || '';
+    out.semFiltro = financeiro.filtrar().length;
+
+    /* --- a lista de planos sai dos lançamentos --------------------------- */
+    const lista = financeiro.planos.lancados();
+    out.nomes = lista.map(p => p.nome);
+    out.qtdBradesco = (lista.find(p => p.nome === 'Bradesco Saúde') || {}).qtd;
+    out.temParticular = out.nomes.indexOf('Particular') >= 0;
+    out.temSemConvenio = out.nomes.indexOf('(sem convênio)') >= 0;
+    /* ordem alfabética em português: SulAmérica não pode cair depois de Unimed */
+    out.ordenado = out.nomes.slice().sort((a, b) => a.localeCompare(b, 'pt-BR')).join('|') === out.nomes.join('|');
+
+    /* --- a janela mostra um item por plano, marcado ---------------------- */
+    financeiro.planos.abrir();
+    out.itens = document.querySelectorAll('#modal-body .fin-plano-item').length;
+    out.todosMarcados = document.querySelectorAll('#modal-body .fin-plano-item input:checked').length === out.itens;
+    /* desmarcar todos e marcar só Bradesco */
+    financeiro.planos._todos(false);
+    document.querySelectorAll('#modal-body .fin-plano-item input')
+      .forEach(el => { if (el.value === 'Bradesco Saúde') el.checked = true; });
+    financeiro.planos.aplicar();
+    fecharJanela();
+    out.soBradesco = financeiro.filtrar().length;
+    out.rotuloFiltrado = (document.getElementById('fin-f-planos-rot') || {}).textContent || '';
+    out.botaoAtivo = (document.getElementById('fin-f-planos-btn') || { classList: { contains: () => false } })
+      .classList.contains('ativo');
+    out.contagemFiltrada = (document.getElementById('fin-f-resultado') || {}).textContent || '';
+
+    /* --- plano lançado depois NÃO pode nascer escondido ------------------- */
+    financeiro.planos.abrir();
+    financeiro.planos._todos(true);
+    financeiro.planos.aplicar();
+    fecharJanela();
+    out.todosViraNulo = financeiro.planos._selecao === null;
+    lanca('Amil Novo Plano');
+    out.planoNovoAparece = financeiro.filtrar().some(x => x.convenio === 'Amil Novo Plano');
+
+    /* --- desmarcar tudo é "nenhum", não "todos" --------------------------- */
+    financeiro.planos.abrir();
+    financeiro.planos._todos(false);
+    financeiro.planos.aplicar();
+    fecharJanela();
+    out.nenhum = financeiro.filtrar().length;
+    out.rotuloNenhum = (document.getElementById('fin-f-planos-rot') || {}).textContent || '';
+
+    /* --- o (sem convênio) é filtrável como qualquer outro ----------------- */
+    financeiro.planos.abrir();
+    document.querySelectorAll('#modal-body .fin-plano-item input')
+      .forEach(el => { el.checked = el.value === '(sem convênio)'; });
+    financeiro.planos.aplicar();
+    fecharJanela();
+    const orfaos = financeiro.filtrar();
+    out.orfaoFiltra = orfaos.length === 1 && orfaos[0].paciente === 'Orfao';
+
+    /* --- limpar filtros devolve tudo -------------------------------------- */
+    const hosp = document.getElementById('fin-f-hospital');
+    if (hosp) hosp.value = 'Hospital Que Nao Existe';
+    financeiro.limparFiltros();
+    out.depoisDeLimpar = financeiro.filtrar().length;
+    out.hospitalLimpo = hosp ? hosp.value === '' : true;
+    out.rotuloLimpo = (document.getElementById('fin-f-planos-rot') || {}).textContent || '';
+    out.botaoLimpo = !(document.getElementById('fin-f-planos-btn') || { classList: { contains: () => true } })
+      .classList.contains('ativo');
+    /* o campo de convênio em texto livre não existe mais */
+    out.semTextoLivre = !document.getElementById('fin-f-convenio');
+    store.setList('financeiro', []);
+    return out;
+  });
+
+  assert(r.temBotao, 'o filtro precisa de um botão que o acione');
+  assert(/\b6\b/.test(r.contagemTotal), 'sem filtro, a contagem mostra o total — deu "' + r.contagemTotal + '"');
+  assert(r.semFiltro === 6, 'sem filtro passam os 6 lançamentos — passaram ' + r.semFiltro);
+  assert(r.qtdBradesco === 2, 'a lista de planos conta os lançamentos de cada um');
+  assert(r.temParticular, 'lançamento sem convênio mas com forma de pagamento entra como Particular');
+  assert(r.temSemConvenio, 'lançamento sem convênio nenhum precisa de um lugar na lista');
+  assert(r.ordenado, 'a lista sai em ordem alfabética portuguesa — deu ' + JSON.stringify(r.nomes));
+  assert(r.itens === r.nomes.length, 'a janela mostra um item por plano lançado');
+  assert(r.todosMarcados, 'sem filtro ligado, todos vêm marcados');
+  assert(r.soBradesco === 2, 'marcando só um plano, só os dele passam — passaram ' + r.soBradesco);
+  assert(/1 de \d+ planos/.test(r.rotuloFiltrado), 'o botão diz quantos planos estão ligados — deu "' + r.rotuloFiltrado + '"');
+  assert(r.botaoAtivo, 'e fica destacado enquanto há filtro');
+  assert(/2 de 6/.test(r.contagemFiltrada), 'a contagem mostra quantos sobraram de quantos — deu "' + r.contagemFiltrada + '"');
+  assert(r.todosViraNulo, 'marcar todos é o mesmo que não filtrar');
+  assert(r.planoNovoAparece, 'plano lançado depois não pode nascer escondido');
+  assert(r.nenhum === 0, 'desmarcar tudo é "nenhum plano", não "todos" — passaram ' + r.nenhum);
+  assert(/Nenhum plano/.test(r.rotuloNenhum), 'e o botão diz isso — deu "' + r.rotuloNenhum + '"');
+  assert(r.orfaoFiltra, 'o "(sem convênio)" filtra como qualquer outro plano');
+  assert(r.depoisDeLimpar === 7, 'limpar filtros devolve todos os lançamentos — voltaram ' + r.depoisDeLimpar);
+  assert(r.hospitalLimpo, 'limpar filtros esvazia também os campos de texto');
+  assert(/Todos os planos/.test(r.rotuloLimpo), 'e o botão volta a "Todos os planos" — deu "' + r.rotuloLimpo + '"');
+  assert(r.botaoLimpo, 'sem destaque');
+  assert(r.semTextoLivre, 'o convênio em texto livre foi substituído pela lista de planos');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
