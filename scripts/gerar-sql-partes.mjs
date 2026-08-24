@@ -27,12 +27,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { lerBase } from './anvisa/ler-base.mjs';
-import { registroDeLinha } from './anvisa/normalizar.mjs';
+import { registroDeLinha, norm } from './anvisa/normalizar.mjs';
 
 const args = process.argv.slice(2);
 const arquivo = args.find(a => !a.startsWith('--'));
 const versao = (args.includes('--versao') ? args[args.indexOf('--versao') + 1] : '') || '2026-08-11';
 const ALVO_KB = parseInt((args.includes('--kb') ? args[args.indexOf('--kb') + 1] : '700'), 10) || 700;
+/* --essencial: carrega só UMA apresentação por item clínico, em vez das 26 mil
+   linhas da CMED. O app consulta o agrupamento clínico e nada mais, então a
+   busca fica idêntica — e o arquivo cabe num celular. A diferença é de
+   rastreabilidade: some o registro por embalagem/EAN, que só interessa a
+   auditoria de farmácia. */
+const ESSENCIAL = args.includes('--essencial');
 if (!arquivo) {
   console.error('uso: node scripts/gerar-sql-partes.mjs <arquivo.csv|.xlsx> [--versao AAAA-MM-DD] [--kb 700]');
   process.exit(2);
@@ -48,7 +54,18 @@ for (const l of lerBase(arquivo)) {
   if (!r.nome_comercial && !r.principio_ativo) continue;
   porChave.set(r.ggrem, r);
 }
-const dados = [...porChave.values()];
+let dados = [...porChave.values()];
+if (ESSENCIAL) {
+  const grupos = new Map();
+  for (const r of dados) {
+    const k = [norm(r.nome_comercial), norm(r.principio_ativo), norm(r.concentracao),
+               norm(r.forma_farmaceutica), norm(r.via_administracao), r.tipo_medicamento].join('|');
+    const atual = grupos.get(k);
+    /* o representante preferido é um que esteja comercializado */
+    if (!atual || (!atual.comercializado && r.comercializado)) grupos.set(k, r);
+  }
+  dados = [...grupos.values()];
+}
 
 const q = s => "'" + String(s == null ? '' : s).replace(/'/g, "''") + "'";
 
@@ -74,7 +91,11 @@ const linhasDados = dados.map(r => '(' + [
   "'{" + r.vias.join(',') + "}'",
   r.via_definida ? 'true' : 'false',
   r.injetavel_sem_via ? 'true' : 'false',
-  ix('origem', r.origem_via), ix('apres', r.apresentacao_original_anvisa),
+  ix('origem', r.origem_via),
+  /* A embalagem completa da CMED ("CT BL AL PLAS INC X 30") é o maior texto de
+     cada linha e serve só a auditoria de farmácia — na versão de celular ela
+     fica de fora, e o campo entra vazio. */
+  ESSENCIAL ? -1 : ix('apres', r.apresentacao_original_anvisa),
   ix('lab', r.laboratorio), ix('tipo', r.tipo_medicamento),
   ix('entrada', r.tipo_entrada),
   q(r.ean), q(r.ean2), q(r.ean3),
@@ -173,7 +194,7 @@ insert into public.medicamentos (
 )
 select
   m.ggrem, m.idap, dn.v, dg.v, dp.v, db.v, dc.v, df.v, dv.v, m.vias,
-  m.via_def, m.inj_sem_via, do_.v, da.v, dl.v, dt.v, de.v,
+  m.via_def, m.inj_sem_via, do_.v, coalesce(da.v, ''), dl.v, dt.v, de.v,
   -- registro_anvisa é o mesmo número do id_apresentacao nesta base
   m.idap,
   m.ean, m.ean2, m.ean3, dk.v, dr.v, m.comercializado, dfo.v
@@ -186,7 +207,7 @@ from public._carga_med m
   join public._carga_dic df  on df.campo  = 'forma'     and df.i  = m.i_forma
   join public._carga_dic dv  on dv.campo  = 'via'       and dv.i  = m.i_via
   join public._carga_dic do_ on do_.campo = 'origem'    and do_.i = m.i_origem
-  join public._carga_dic da  on da.campo  = 'apres'     and da.i  = m.i_apres
+  left join public._carga_dic da on da.campo = 'apres'    and da.i  = m.i_apres
   join public._carga_dic dl  on dl.campo  = 'lab'       and dl.i  = m.i_lab
   join public._carga_dic dt  on dt.campo  = 'tipo'      and dt.i  = m.i_tipo
   join public._carga_dic de  on de.campo  = 'entrada'   and de.i  = m.i_entrada
@@ -242,7 +263,7 @@ select nome_comercial, principio_ativo, concentracao,
 });
 
 /* --- grava ---------------------------------------------------------------- */
-const dir = path.join(raiz, 'database', 'partes');
+const dir = path.join(raiz, 'database', ESSENCIAL ? 'partes-celular' : 'partes');
 fs.rmSync(dir, { recursive: true, force: true });
 fs.mkdirSync(dir, { recursive: true });
 
@@ -261,7 +282,7 @@ partes.forEach((p, i) => {
   fs.writeFileSync(path.join(dir, n + '-' + p.nome + '.sql'), cabecalho + p.sql);
 });
 
-console.log('Partes → database/partes/  (' + N + ' arquivos)');
+console.log('Partes → database/' + (ESSENCIAL ? 'partes-celular' : 'partes') + '/  (' + N + ' arquivos)');
 let total = 0;
 fs.readdirSync(dir).sort().forEach(f => {
   const kb = fs.statSync(path.join(dir, f)).size / 1024;
