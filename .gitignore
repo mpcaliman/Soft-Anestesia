@@ -14,3 +14,4 @@ database/seeds/medicamentos_anvisa.sql
 # pelo mesmo motivo do seed: sai de um comando —
 #   node scripts/gerar-sql-unico.mjs <arquivo-da-cmed>
 database/medicamentos_anvisa_completo.sql
+database/partes/
