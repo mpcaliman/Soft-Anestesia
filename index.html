@@ -4241,6 +4241,33 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
 .hoje-hero .hh-btn-line { background: transparent; color: #cfe0ee; border: 1px solid rgba(255,255,255,.3); }
 @media print { .hoje-hero { display: none !important; } }
 
+/* ===== Filtros do financeiro ============================================== */
+.fin-f-resultado {
+  font-size: .8rem; color: var(--text-soft); align-self: center;
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.fin-f-resultado b { color: var(--text); }
+/* Quando algum filtro está ligado, o botão de planos precisa DIZER isso —
+   filtro ativo e invisível é como se some registro sem explicação. */
+#fin-f-planos-btn.ativo {
+  border-color: var(--primary); background: var(--primary-soft);
+  color: var(--primary-darker); font-weight: 600;
+}
+.fin-planos-lista { max-height: 46vh; overflow-y: auto; margin: 4px 0 0; }
+.fin-plano-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 10px; border-bottom: 1px solid var(--surface-alt);
+  cursor: pointer; font-size: .88rem;
+}
+.fin-plano-item:last-child { border-bottom: none; }
+.fin-plano-item:hover { background: var(--surface-alt); }
+.fin-plano-item input { width: 17px; height: 17px; flex-shrink: 0; }
+.fin-plano-nome { flex: 1; min-width: 0; }
+.fin-plano-qtd {
+  font-size: .74rem; color: var(--text-mute); font-variant-numeric: tabular-nums;
+  background: var(--surface-alt); padding: 1px 8px; border-radius: 10px;
+}
+
 /* ===== Escolha de riscos específicos do termo ============================= */
 .risco-aviso {
   font-size: .82rem; padding: 9px 12px; border-radius: 6px; margin-bottom: 12px;
@@ -4401,7 +4428,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-24a</b><br>
+    v7.1 · build <b id="build-tag">2026-08-24b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -8244,8 +8271,15 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       <div class="field" style="grid-column:auto"><label>Cirurgião</label>
         <input type="text" id="fin-f-cirurgiao" placeholder="Filtrar por cirurgião" oninput="financeiro.render()">
       </div>
-      <div class="field" style="grid-column:auto"><label>Convênio</label>
-        <input type="text" id="fin-f-convenio" placeholder="Convênio" oninput="financeiro.render()">
+      <!-- Convênio deixou de ser texto livre: quem lança conhece os planos pelo
+           nome, e digitar "brad" para achar "Bradesco Saúde" é adivinhação.
+           Aqui aparecem os planos QUE JÁ FORAM LANÇADOS, com a contagem de
+           cada um, e marca-se quais entram. -->
+      <div class="field" style="grid-column:auto;min-width:190px"><label>Planos de saúde</label>
+        <button type="button" class="btn btn-sm" id="fin-f-planos-btn"
+                onclick="financeiro.planos.abrir()" style="width:100%;text-align:left">
+          <span id="fin-f-planos-rot">Todos os planos</span> ▾
+        </button>
       </div>
       <div class="field" style="grid-column:auto"><label>Procedimento</label>
         <input type="text" id="fin-f-procedimento" placeholder="Filtrar por proc." oninput="financeiro.render()">
@@ -8256,7 +8290,13 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
         </select>
       </div>
       <div class="filter-actions">
+        <!-- Os filtros já valiam ao digitar, mas sem botão nem retorno ninguém
+             tem como saber disso: parecia que faltava apertar alguma coisa.
+             O botão existe para dizer que o filtro foi aplicado, e a linha
+             abaixo diz quantos registros sobraram. -->
+        <button class="btn btn-sm btn-primary" onclick="financeiro.aplicarFiltros()">🔍 Filtrar</button>
         <button class="btn btn-sm" onclick="financeiro.limparFiltros()">Limpar filtros</button>
+        <span id="fin-f-resultado" class="fin-f-resultado"></span>
       </div>
     </div>
 
@@ -44355,7 +44395,7 @@ const financeiro = {
     const fAte = getVal('fin-f-ate');
     const fHosp = getVal('fin-f-hospital').toLowerCase();
     const fCir = getVal('fin-f-cirurgiao').toLowerCase();
-    const fConv = getVal('fin-f-convenio').toLowerCase();
+    const planosSel = financeiro.planos._selecao;   /* null = todos */
     const fProc = getVal('fin-f-procedimento').toLowerCase();
     const fForma = getVal('fin-f-forma');
     return list.filter(x => {
@@ -44365,7 +44405,13 @@ const financeiro = {
       if (fForma && x.tipo_pagamento !== fForma) return false;
       if (fHosp && !(x.hospital || '').toLowerCase().includes(fHosp)) return false;
       if (fCir && !(x.cirurgiao || '').toLowerCase().includes(fCir)) return false;
-      if (fConv && !(x.convenio || '').toLowerCase().includes(fConv)) return false;
+      /* Nenhum plano marcado = nenhum registro passa. É o que o usuário
+         pediu ao desmarcar tudo, e dizer isso na tela é melhor do que
+         ignorar a escolha e mostrar tudo como se nada tivesse acontecido. */
+      if (planosSel) {
+        const plano = financeiro.planos._chave(x);
+        if (!planosSel[plano]) return false;
+      }
       if (fProc && !(x.procedimento || '').toLowerCase().includes(fProc)) return false;
       if (fDe && (!x.data_proc || x.data_proc < fDe)) return false;
       if (fAte && (!x.data_proc || x.data_proc > fAte)) return false;
@@ -44486,6 +44532,10 @@ const financeiro = {
 
   render() {
     const list = financeiro.filtrar();
+    /* O botão de planos e a contagem seguem o que a lista está mostrando —
+       inclusive quando a tela é redesenhada por outro caminho (registro novo,
+       sincronização), e não só quando alguém aperta Filtrar. */
+    try { financeiro.planos.atualizarRotulo(); } catch (e) {}
     const tbody = document.getElementById('financeiro-tbody');
     if (list.length === 0) {
       tbody.innerHTML = '<tr class="empty-row"><td colspan="14">Nenhum registro encontrado</td></tr>';
@@ -44546,12 +44596,128 @@ const financeiro = {
       <div class="totalizador"><div class="lbl">A receber</div><div class="val ${totDif > 0 ? 'warn' : (totDif < 0 ? 'danger' : 'accent')}">R$ ${utils.formatarBR(totDif)}</div></div>
     `;
   },
+  /* ==========================================================================
+     FILTRO POR PLANO DE SAÚDE
+     Não é uma lista fixa de convênios: são os planos QUE JÁ FORAM LANÇADOS,
+     lidos dos próprios registros. Plano novo aparece sozinho no dia em que
+     entrar o primeiro lançamento dele, e plano que nunca foi usado não polui
+     a lista.
+  ========================================================================== */
+  planos: {
+    /* null = todos (sem filtro). Objeto = só as chaves marcadas passam. */
+    _selecao: null,
+
+    /* Lançamento sem convênio ainda é alguma coisa — particular, SUS — e
+       precisa de um lugar na lista, senão some do filtro sem explicação. */
+    _chave(x) {
+      return String((x && (x.convenio || x.tipo_pagamento)) || '').trim() || '(sem convênio)';
+    },
+
+    /* Todos os planos já lançados, com quantos registros cada um tem */
+    lancados() {
+      const conta = {};
+      (store.list('financeiro') || []).forEach(x => {
+        const k = financeiro.planos._chave(x);
+        conta[k] = (conta[k] || 0) + 1;
+      });
+      return Object.keys(conta)
+        .sort((a, b) => a.localeCompare(b, 'pt-BR'))
+        .map(nome => ({ nome, qtd: conta[nome] }));
+    },
+
+    abrir() {
+      const lista = financeiro.planos.lancados();
+      if (!lista.length) {
+        toast('Ainda não há lançamento nenhum — nenhum plano para filtrar', 'warn');
+        return;
+      }
+      const sel = financeiro.planos._selecao;
+      const marcado = nome => !sel || !!sel[nome];
+      const E = utils.escapeHTML;
+      const corpo =
+        '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">' +
+        'Desmarque os planos que <b>não</b> devem aparecer na lista. O número ao lado é ' +
+        'quantos lançamentos existem de cada um.</p>' +
+        '<div style="display:flex;gap:8px;margin-bottom:8px">' +
+          '<button type="button" class="btn btn-xs" onclick="financeiro.planos._todos(true)">Marcar todos</button>' +
+          '<button type="button" class="btn btn-xs" onclick="financeiro.planos._todos(false)">Desmarcar todos</button>' +
+        '</div>' +
+        '<div class="fin-planos-lista">' +
+        lista.map(p =>
+          '<label class="fin-plano-item">' +
+            '<input type="checkbox" value="' + utils.escapeAttr(p.nome) + '"' + (marcado(p.nome) ? ' checked' : '') + '>' +
+            '<span class="fin-plano-nome">' + E(p.nome) + '</span>' +
+            '<span class="fin-plano-qtd">' + p.qtd + '</span>' +
+          '</label>').join('') +
+        '</div>';
+      modal.open('Planos de saúde a exibir', corpo,
+        '<button class="btn" onclick="modal.close()">Cancelar</button>' +
+        '<button class="btn btn-primary" onclick="financeiro.planos.aplicar()">Aplicar filtro</button>');
+    },
+
+    _todos(marcar) {
+      document.querySelectorAll('#modal-body .fin-plano-item input').forEach(el => { el.checked = !!marcar; });
+    },
+
+    aplicar() {
+      const todos = Array.from(document.querySelectorAll('#modal-body .fin-plano-item input'));
+      const marcados = todos.filter(el => el.checked).map(el => el.value);
+      /* Todos marcados é o mesmo que filtro nenhum — e guardar como "nenhum
+         filtro" faz plano novo aparecer sozinho depois, em vez de nascer
+         escondido por não estar na lista do dia em que o filtro foi feito. */
+      if (marcados.length === todos.length) financeiro.planos._selecao = null;
+      else {
+        const sel = {};
+        marcados.forEach(n => { sel[n] = true; });
+        financeiro.planos._selecao = sel;
+      }
+      modal.close();
+      financeiro.aplicarFiltros();
+    },
+
+    limpar() { financeiro.planos._selecao = null; },
+
+    /* Rótulo do botão: precisa dizer de relance se há filtro ligado */
+    atualizarRotulo() {
+      const rot = document.getElementById('fin-f-planos-rot');
+      const btn = document.getElementById('fin-f-planos-btn');
+      if (!rot) return;
+      const sel = financeiro.planos._selecao;
+      const total = financeiro.planos.lancados().length;
+      if (!sel) {
+        rot.textContent = total ? 'Todos os planos (' + total + ')' : 'Todos os planos';
+        if (btn) btn.classList.remove('ativo');
+        return;
+      }
+      const n = Object.keys(sel).length;
+      rot.textContent = n === 0 ? 'Nenhum plano' : n + ' de ' + total + ' planos';
+      if (btn) btn.classList.add('ativo');
+    }
+  },
+
+  /* Os filtros já valiam ao digitar; o botão existe para DIZER que valeram.
+     Sem ele, e sem a contagem, quem olha a tela não tem como saber se a
+     lista está filtrada ou se simplesmente não há mais registro. */
+  aplicarFiltros() {
+    financeiro.render();
+    const n = financeiro.filtrar().length;
+    const total = (store.list('financeiro') || []).length;
+    const el = document.getElementById('fin-f-resultado');
+    if (el) {
+      el.innerHTML = (n === total)
+        ? '<b>' + total + '</b> lançamento(s)'
+        : '<b>' + n + '</b> de ' + total + ' lançamento(s)';
+    }
+    return n;
+  },
+
   limparFiltros() {
     ['fin-f-status', 'fin-f-pago', 'fin-f-de', 'fin-f-ate', 'fin-f-hospital',
-     'fin-f-cirurgiao', 'fin-f-convenio', 'fin-f-procedimento', 'fin-f-forma'].forEach(id => {
+     'fin-f-cirurgiao', 'fin-f-procedimento', 'fin-f-forma'].forEach(id => {
       const el = document.getElementById(id); if (el) el.value = '';
     });
-    financeiro.render();
+    financeiro.planos.limpar();
+    financeiro.aplicarFiltros();
   },
   exportar() {
     const list = store.list('financeiro');
