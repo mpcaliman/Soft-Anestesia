@@ -8488,6 +8488,377 @@ await test('Termo: modelo jurídico entra íntegro, com o nome do paciente e at�
   await page.close();
 });
 
+/* 139) Base central de medicamentos — os oito cenários do §35, mais o que
+   sustenta os oito: a base carregada, o agrupamento clínico e a normalização. */
+await test('Medicamentos: base Anvisa carregada, agrupada e com a normalização que a busca depende', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    out.carregou = medicamentos.disponivelLocal();
+    out.versao = medicamentos.versao();
+    const t0 = performance.now();
+    const idx = medicamentos._expandir();
+    out.expandirMs = performance.now() - t0;
+    out.total = idx.length;
+    /* Expandiu com os campos que a tela usa — dicionário decodificado certo */
+    const um = idx.find(m => m.nome === 'XARELTO');
+    out.expandiuCampos = !!(um && um.principio && um.forma && um.conc && um.tipo && um.ggrem);
+    /* Acento e caixa não podem separar nada */
+    out.norm = medicamentos._norm('  PANTOPRAZOL   SÓDICO ') === 'pantoprazol sodico';
+    /* Raiz do princípio: marca, genérico e similar do mesmo fármaco na mesma
+       lista. Sem isto "as apresentações deste princípio" daria três listas. */
+    const pantoz = idx.find(m => m.nome === 'PANTOZOL');
+    out.raiz = !!pantoz && pantoz.base === 'pantoprazol';
+    /* Tipos traduzidos: a CMED chama de "Novo" o que o médico chama de
+       referência, e um filtro chamado "Novo" não diz nada a quem prescreve */
+    out.tipos = !!idx.find(m => m.tipo === 'referencia') && !!idx.find(m => m.tipo === 'generico')
+      && !!idx.find(m => m.tipo === 'similar') && !idx.find(m => m.tipo === 'Novo');
+    /* Latência: a lista aparece enquanto se digita */
+    const cron = t => { const a = performance.now(); medicamentos.buscarLocal(t); return performance.now() - a; };
+    out.msPior = Math.max(cron('di'), cron('xar'), cron('panto'), cron('losartana'), cron('rivaroxabana'));
+    return out;
+  });
+  assert(r.carregou, 'medicamentos-base.js precisa carregar junto com o app');
+  assert(/ANVISA\/CMED/.test(r.versao), 'a versão da base precisa estar identificada — deu "' + r.versao + '"');
+  assert(r.total > 10000, 'a base tem de ter mais de dez mil apresentações — veio ' + r.total);
+  assert(r.expandiuCampos, 'o dicionário posicional precisa expandir com todos os campos da tela');
+  assert(r.norm, 'a normalização tem de ignorar acento, caixa e espaço dobrado');
+  assert(r.raiz, 'PANTOZOL precisa reduzir a raiz "pantoprazol" para agrupar com genérico e similar');
+  assert(r.tipos, '"Novo" da CMED precisa virar "referencia"');
+  assert(r.expandirMs < 400, 'expandir o índice não pode travar a tela — levou ' + Math.round(r.expandirMs) + 'ms');
+  assert(r.msPior < 120, 'busca precisa responder enquanto se digita — pior caso ' + r.msPior.toFixed(1) + 'ms');
+  await page.close();
+});
+
+await test('Medicamentos §35: os oito cenários de aceite, da marca ao princípio ativo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const nomes = res => res.map(m => m.nome);
+
+    /* --- Teste 1: "xar" acha Xarelto; escolher guarda rivaroxabana --------- */
+    const xar = medicamentos.buscarLocal('xar');
+    out.t1_acha = nomes(xar).indexOf('XARELTO') === 0;
+    ui.navegar('pre');
+    pre.meds.limpar();
+    pre.meds.adicionarDaBase(xar.find(m => m.nome === 'XARELTO' && m.conc === '20 MG'));
+    const it = pre.meds._lista[0];
+    out.t1_principio = it && it.principio === 'RIVAROXABANA';
+    out.t1_vinculo = !!(it && it.ggrem && it.origem === 'anvisa');
+    /* e o princípio ativo APARECE embaixo da marca, não só fica gravado (§19) */
+    const html = document.getElementById('pre-med-lista').innerHTML;
+    out.t1_mostra = html.indexOf('XARELTO 20 MG') >= 0 && html.indexOf('RIVAROXABANA') >= 0;
+    /* e vai para o texto que a ficha lê e a busca do histórico varre */
+    out.t1_texto = /XARELTO 20 MG \(RIVAROXABANA\)/.test(document.getElementById('pre-med-texto').value);
+
+    /* --- Teste 2: "rivarox" acha a rivaroxabana e as marcas --------------- */
+    const riv = medicamentos.buscarLocal('rivarox', { limite: 40 });
+    out.t2_generico = riv.some(m => m.principio === 'RIVAROXABANA' && m.tipo === 'generico');
+    out.t2_marcas = riv.some(m => m.tipo === 'similar' || m.tipo === 'referencia');
+    /* busca bidirecional: pelo princípio chega-se à marca */
+    out.t2_bidirecional = medicamentos.apresentacoesDoPrincipio('rivaroxabana')
+      .some(m => m.nome === 'XARELTO');
+
+    /* --- Teste 3: "panto" diferencia 20 oral, 40 oral e 40 injetável ------ */
+    const panto = medicamentos.buscarLocal('panto', { limite: 20 });
+    const pz = panto.filter(m => m.nome === 'PANTOZOL');
+    const assinatura = m => m.conc + '|' + medicamentos.viaParaTela(m);
+    const assinaturas = pz.map(assinatura);
+    out.t3_tres = assinaturas.indexOf('20 MG|Oral') >= 0
+      && assinaturas.indexOf('40 MG|Oral') >= 0
+      && assinaturas.indexOf('40 MG|Intravenosa') >= 0;
+    /* referência antes de genérico: PANTOZOL é a marca que o paciente cita */
+    out.t3_ordem = panto.findIndex(m => m.nome === 'PANTOZOL') <
+                   panto.findIndex(m => m.tipo === 'generico');
+
+    /* --- Teste 4: pré aceita medicação sem concentração ------------------- */
+    pre.meds.limpar();
+    pre.meds.adicionar('Xarelto');
+    const so = pre.meds._lista[0];
+    out.t4_aceita = !!so && so.nome === 'Xarelto' && so.conc === '' && so.origem === 'manual';
+    out.t4_render = document.getElementById('pre-med-lista').innerHTML.indexOf('Xarelto') >= 0;
+
+    /* --- Teste 5: prescrição filtrada por Referência ---------------------- */
+    ui.navegar('prescricao');
+    prescricao.definirTipo('referencia');
+    const soRef = medicamentos.buscarLocal('pantoprazol', { tipo: 'referencia', limite: 30 });
+    out.t5_sofiltro = soRef.length > 0 && soRef.every(m => m.tipo === 'referencia');
+    out.t5_temPantozol = soRef.some(m => m.nome === 'PANTOZOL');
+    const soGen = medicamentos.buscarLocal('pantoprazol', { tipo: 'generico', limite: 30 });
+    out.t5_generico = soGen.length > 0 && soGen.every(m => m.tipo === 'generico');
+
+    /* --- Teste 6: escolher Pantoprazol 40 mg comprimido preenche a via ---- */
+    prescricao.definirTipo('');
+    document.getElementById('prescricao-body').innerHTML = '';
+    const tr = prescricao.addItem();
+    const el = tr.querySelector('[name="presc_nome[]"]');
+    const oral40 = medicamentos.buscarLocal('pantozol', { limite: 20 })
+      .find(m => m.conc === '40 MG' && m.via === 'Oral');
+    prescricao._aplicar(oral40, el);
+    const q = n => (tr.querySelector('[name="' + n + '"]') || {}).value;
+    out.t6_via = q('presc_via[]') === 'VO';
+    out.t6_principio = /PANTOPRAZOL/.test(q('presc_principio[]'));
+    /* §13: a apresentação vira escolha entre as que EXISTEM, não redigitação */
+    const sel = tr.querySelector('select[name="presc_apres[]"]');
+    out.t6_select = !!sel && sel.options.length >= 3;
+    const textos = sel ? Array.from(sel.options).map(o => o.textContent) : [];
+    out.t6_temAsTres = textos.some(t => /20 MG/.test(t) && /Oral/.test(t))
+      && textos.some(t => /40 MG/.test(t) && /Oral/.test(t))
+      && textos.some(t => /40 MG/.test(t) && /Intravenosa/.test(t));
+
+    /* --- Teste 7: via que a CMED não determina NÃO pode ser inventada ----- */
+    const tr2 = prescricao.addItem();
+    const el2 = tr2.querySelector('[name="presc_nome[]"]');
+    const semVia = medicamentos.buscarLocal('ozempic', { limite: 10 })
+      .find(m => medicamentos.viaIndefinida(m));
+    prescricao._aplicar(semVia, el2);
+    const via2 = tr2.querySelector('[name="presc_via[]"]');
+    out.t7_vazia = via2.value === '';
+    out.t7_avisa = via2.placeholder === 'Via a definir'
+      && tr2.querySelector('[data-viaaviso]').style.display !== 'none';
+    out.t7_naoInventou = !/IV|IM|SC|Intravenosa/i.test(via2.value);
+    out.t7_rotulo = medicamentos.viaParaTela(semVia) === 'Via a definir';
+
+    /* --- Teste 8: concentração da ampola ≠ dose administrada -------------- */
+    ui.navegar('anestesia');
+    const achados = anestesia.meds._achar('propofol');
+    const daBase = achados.filter(m => m._anvisa);
+    out.t8_temBase = daBase.length > 0;
+    /* a concentração vai para DILUIÇÃO e a dose fica VAZIA: 10 mg/mL é o que
+       está no frasco, 150 mg é o que entrou no paciente */
+    const p10 = daBase.find(m => /10 MG\/ML/.test(m.dil || ''));
+    out.t8_concNaDiluicao = !!p10;
+    out.t8_doseVazia = !!p10 && !p10.dose;
+    out.t8_naoConfunde = achados.every(m => !m.dose || !/MG\/ML/i.test(String(m.dose)));
+    /* e as duas apresentações aparecem para escolher */
+    out.t8_duasApres = daBase.some(m => /10 MG\/ML/.test(m.dil || ''))
+                    && daBase.some(m => /20 MG\/ML/.test(m.dil || ''));
+    return out;
+  });
+
+  assert(r.t1_acha, 'T1: "xar" tem de trazer Xarelto em primeiro');
+  assert(r.t1_principio, 'T1: escolher Xarelto tem de guardar RIVAROXABANA');
+  assert(r.t1_vinculo, 'T1: e o vínculo com a base oficial');
+  assert(r.t1_mostra, 'T1: o princípio ativo aparece abaixo da marca, não só no registro');
+  assert(r.t1_texto, 'T1: e entra no texto das medicações em uso');
+  assert(r.t2_generico, 'T2: "rivarox" tem de achar a rivaroxabana genérica');
+  assert(r.t2_marcas, 'T2: e as marcas correspondentes');
+  assert(r.t2_bidirecional, 'T2: pelo princípio ativo tem de se chegar a Xarelto');
+  assert(r.t3_tres, 'T3: as três apresentações do Pantozol precisam se diferenciar');
+  assert(r.t3_ordem, 'T3: a referência vem antes do genérico');
+  assert(r.t4_aceita, 'T4: a pré tem de aceitar medicação sem concentração');
+  assert(r.t4_render, 'T4: e mostrá-la na lista');
+  assert(r.t5_sofiltro, 'T5: filtro Referência só pode devolver referência');
+  assert(r.t5_temPantozol, 'T5: e Pantozol tem de estar entre elas');
+  assert(r.t5_generico, 'T5: o mesmo vale para o filtro Genérico');
+  assert(r.t6_via, 'T6: comprimido oral preenche a via sozinho');
+  assert(r.t6_principio, 'T6: com o princípio ativo junto');
+  assert(r.t6_select, 'T6: a apresentação vira escolha entre as que existem');
+  assert(r.t6_temAsTres, 'T6: e a lista traz 20 oral, 40 oral e 40 injetável');
+  assert(r.t7_vazia, 'T7: via não determinada pela Anvisa fica VAZIA');
+  assert(r.t7_avisa, 'T7: e a tela diz "Via a definir"');
+  assert(r.t7_naoInventou, 'T7: o sistema não pode escrever IV/IM/SC por conta própria');
+  assert(r.t7_rotulo, 'T7: o rótulo da via indefinida é "Via a definir"');
+  assert(r.t8_temBase, 'T8: a ficha precisa oferecer as apresentações da base oficial');
+  assert(r.t8_concNaDiluicao, 'T8: 10 mg/mL é concentração e vai para a diluição');
+  assert(r.t8_doseVazia, 'T8: a dose administrada fica VAZIA — quem sabe é o anestesista');
+  assert(r.t8_naoConfunde, 'T8: concentração nunca pode cair no campo de dose');
+  assert(r.t8_duasApres, 'T8: 10 e 20 mg/mL têm de aparecer as duas para escolher');
+  await page.close();
+});
+
+await test('Medicamentos: uma base só nos três módulos, com rastreabilidade e exceção controlada', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    /* §17: vínculo + CÓPIA dos campos. A cópia não é redundância — a base da
+       Anvisa é atualizada e apresentação sai de linha; sem ela, receita antiga
+       vira um código sem significado. */
+    const m = medicamentos.buscarLocal('xarelto').find(x => x.conc === '20 MG');
+    const snap = medicamentos.paraRegistro(m, 'anvisa');
+    out.snapshot = !!snap && snap.medicamento_ggrem === m.ggrem
+      && snap.nome_comercial_snapshot === 'XARELTO'
+      && snap.principio_ativo_snapshot === 'RIVAROXABANA'
+      && snap.concentracao_snapshot === '20 MG'
+      && /ANVISA\/CMED/.test(snap.base_versao)
+      && snap.origem === 'anvisa';
+
+    /* §18: medicamento fora da base é permitido, e fica MARCADO como manual —
+       nunca entra na base oficial da Anvisa */
+    const manual = medicamentos.manual('Fórmula manipulada do Dr. Fulano');
+    out.manual = manual._manual === true && manual.ggrem === '';
+    out.manualMarcado = medicamentos.paraRegistro(manual, 'manual').origem === 'manual';
+
+    /* §27: um componente só, os três módulos */
+    ui.navegar('pre'); pre.meds.ligar();
+    const inpPre = document.getElementById('pre-med-busca');
+    ui.navegar('prescricao');
+    document.getElementById('prescricao-body').innerHTML = '';
+    const inpPresc = prescricao.addItem().querySelector('[name="presc_nome[]"]');
+    out.mesmoComponente = !!(inpPre && inpPre._medLigado && inpPresc && inpPresc._medLigado);
+    /* e a ficha consulta a MESMA base, não uma segunda lista */
+    ui.navegar('anestesia');
+    out.fichaUsaABase = anestesia.meds._achar('rivaroxabana').some(x => x._anvisa);
+
+    /* §16: a prescrição guarda princípio ativo e o vínculo ao coletar */
+    ui.navegar('prescricao');
+    document.getElementById('prescricao-body').innerHTML = '';
+    const tr = prescricao.addItem();
+    prescricao._aplicar(m, tr.querySelector('[name="presc_nome[]"]'));
+    tr.querySelector('[name="presc_pos[]"]').value = '1 cp/dia';
+    const itens = prescricao._coletarItens();
+    out.coleta = itens.length === 1 && itens[0].principio === 'RIVAROXABANA'
+      && !!itens[0].medicamento && itens[0].medicamento.medicamento_ggrem === m.ggrem;
+
+    /* §8 e §7: produto e posologia relatada são campos diferentes */
+    ui.navegar('pre'); pre.meds.limpar();
+    pre.meds.adicionarDaBase(m);
+    pre.meds.editarCampo(0, 'dose', '1 cp');
+    pre.meds.editarCampo(0, 'freq', '1x/dia');
+    pre.meds.editarCampo(0, 'horario', '20h');
+    const it = pre.meds._lista[0];
+    out.produtoVsUso = it.conc === '20 MG' && it.dose === '1 cp' && it.freq === '1x/dia' && it.horario === '20h';
+    out.textoFinal = document.getElementById('pre-med-texto').value;
+
+    /* Pré antiga (só texto) continua abrindo — migração compatível (§33) */
+    pre.meds.restaurar({ medicacoes: 'Losartana, AAS' });
+    out.compat = pre.meds._lista.length === 2 && pre.meds._lista[0].nome === 'Losartana'
+      && pre.meds._lista[0].origem === 'manual';
+    /* e pré nova volta inteira */
+    pre.meds.restaurar({ _medsLista: [{ nome: 'XARELTO', principio: 'RIVAROXABANA', conc: '20 MG', ggrem: '123', origem: 'anvisa', dose: '1 cp' }] });
+    out.compatNova = pre.meds._lista[0].principio === 'RIVAROXABANA' && pre.meds._lista[0].dose === '1 cp';
+    return out;
+  });
+  assert(r.snapshot, 'a escolha precisa gravar o vínculo E a cópia dos campos');
+  assert(r.manual, 'medicamento fora da base precisa ser permitido');
+  assert(r.manualMarcado, 'e ficar marcado como manual, nunca como Anvisa');
+  assert(r.mesmoComponente, 'pré e prescrição têm de usar o MESMO componente');
+  assert(r.fichaUsaABase, 'a ficha tem de consultar a mesma base, não uma segunda lista');
+  assert(r.coleta, 'a prescrição salva precisa levar princípio ativo e vínculo');
+  assert(r.produtoVsUso, 'apresentação do produto e posologia relatada não podem se misturar');
+  assert(/1 cp 1x\/dia/.test(r.textoFinal), 'a posologia relatada entra no resumo — deu "' + r.textoFinal + '"');
+  assert(r.compat, 'pré antiga, só com texto, tem de continuar abrindo');
+  assert(r.compatNova, 'e pré nova volta com princípio ativo e posologia');
+  await page.close();
+});
+
+/* 142) Nome de arquivo: cada documento com o seu rótulo, e dois documentos
+   diferentes nunca com o mesmo nome no mesmo dia. */
+await test('Arquivo: todo documento tem rótulo próprio, e nome repetido no mesmo dia não existe', async () => {
+  /* novaPagina() já aceita os diálogos; instalar outro handler aqui daria
+     "Cannot accept dialog which is already handled". */
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    printPreview._limparReservaNomes();
+    const põeId = (f, v) => {
+      let i = f.querySelector('[name="_id"]');
+      if (!i) { i = document.createElement('input'); i.type = 'hidden'; i.name = '_id'; f.appendChild(i); }
+      i.value = v;
+    };
+    const nomeDe = (mod, id) => {
+      ui.navegar(mod);
+      const f = document.getElementById('form-' + mod);
+      const el = f.querySelector('[name="nome"]') || f.querySelector('[name="paciente_nome"]');
+      if (el) el.value = 'Joaquim Menezes';
+      põeId(f, id);
+      return printPreview._gerarNomeArquivo();
+    };
+
+    /* --- cada módulo com o SEU rótulo -------------------------------------- */
+    out.nomes = {};
+    ['pre', 'anestesia', 'recuperacao', 'consulta', 'termo', 'risco', 'documentos']
+      .forEach(m => { out.nomes[m] = nomeDe(m, m + '-1'); });
+
+    /* --- o receituário não é um tipo só ------------------------------------ */
+    ui.navegar('prescricao');
+    const fp = document.getElementById('form-prescricao');
+    fp.querySelector('[name="nome"]').value = 'Joaquim Menezes';
+    out.presc = {};
+    ['simples', 'especial', 'antimicrobiano', 'atestado', 'declaracao', 'laudo'].forEach(m => {
+      const rd = fp.querySelector('[name="modelo"][value="' + m + '"]');
+      if (rd) rd.checked = true;
+      põeId(fp, 'presc-' + m);
+      out.presc[m] = printPreview._gerarNomeArquivo();
+    });
+
+    /* Nenhum rótulo genérico onde existe nome próprio, e todos distintos */
+    const todos = Object.values(out.nomes).concat(Object.values(out.presc));
+    out.todosDistintos = new Set(todos).size === todos.length;
+    out.semGenericoIndevido = ['termo', 'risco'].every(m => !/_Documento_/.test(out.nomes[m]))
+      && Object.values(out.presc).every(n => !/_Documento_/.test(n));
+
+    /* --- reimprimir o MESMO documento devolve o MESMO nome ----------------- */
+    /* Se mudasse, a cópia automática para a nuvem guardaria um arquivo novo a
+       cada impressão e a pasta encheria de duplicatas do mesmo papel. */
+    fp.querySelector('[name="modelo"][value="simples"]').checked = true;
+    põeId(fp, 'presc-simples');
+    out.reimprimir = printPreview._gerarNomeArquivo();
+    out.idempotente = out.reimprimir === out.presc.simples;
+
+    /* --- documentos DIFERENTES, mesmo tipo/paciente/dia, não colidem ------- */
+    põeId(fp, 'presc-outro');    const seg = printPreview._gerarNomeArquivo();
+    põeId(fp, 'presc-terceiro'); const ter = printPreview._gerarNomeArquivo();
+    out.segundo = seg; out.terceiro = ter;
+    out.desempata = seg !== out.presc.simples && ter !== seg && ter !== out.presc.simples;
+    out.sufixo = /_2$/.test(seg) && /_3$/.test(ter);
+
+    /* --- o MESMO registro pode gerar documentos DIFERENTES ----------------- */
+    /* Trocar o modelo do receituário no mesmo registro é outro documento e
+       precisa de outro nome. Prender a reserva só à identidade do registro
+       devolvia o nome do primeiro — foi assim que "Pré + Termo" seguido de
+       "só o termo" saía com o nome do arquivo combinado. */
+    põeId(fp, 'presc-mesmo-registro');
+    fp.querySelector('[name="modelo"][value="simples"]').checked = true;
+    const comoReceita = printPreview._gerarNomeArquivo();
+    fp.querySelector('[name="modelo"][value="atestado"]').checked = true;
+    const comoAtestado = printPreview._gerarNomeArquivo();
+    out.mesmoRegistroOutroDoc = /_Receita_/.test(comoReceita) && /_Atestado_/.test(comoAtestado);
+    /* e voltar ao primeiro devolve o nome do primeiro */
+    fp.querySelector('[name="modelo"][value="simples"]').checked = true;
+    out.voltaAoMesmo = printPreview._gerarNomeArquivo() === comoReceita;
+
+    /* --- documento ainda NÃO salvo também é distinguido -------------------- */
+    printPreview._limparReservaNomes();
+    ui.navegar('termo');
+    const ft = document.getElementById('form-termo');
+    ft.querySelector('[name="nome"]').value = 'Maria das Dores';
+    const idT = ft.querySelector('[name="_id"]'); if (idT) idT.value = '';
+    ft.querySelector('[name="procedimento"]').value = 'Colecistectomia';
+    const n1 = printPreview._gerarNomeArquivo();
+    ft.querySelector('[name="procedimento"]').value = 'Herniorrafia';
+    const n2 = printPreview._gerarNomeArquivo();
+    out.semIdDistingue = n1 !== n2;
+    out.n1 = n1;
+
+    /* --- o formato é Paciente_Tipo_Data ----------------------------------- */
+    out.formato = /^Joaquim-Menezes_[A-Za-z-]+_\d{8}(_\d+)?$/.test(out.nomes.pre);
+    return out;
+  });
+
+  assert(/_APA_/.test(r.nomes.pre), 'a pré sai como APA');
+  assert(/_Ficha-Anestesia_/.test(r.nomes.anestesia), 'a ficha sai como Ficha-Anestesia');
+  assert(/_SRPA_/.test(r.nomes.recuperacao), 'a recuperação sai como SRPA');
+  assert(/_Termo-Consentimento_/.test(r.nomes.termo), 'o termo precisa de rótulo próprio — deu "' + r.nomes.termo + '"');
+  assert(/_Risco-Cirurgico_/.test(r.nomes.risco), 'o risco cirúrgico precisa de rótulo próprio — deu "' + r.nomes.risco + '"');
+  assert(/_Receita_/.test(r.presc.simples), 'receita comum');
+  assert(/_Receita-Controle-Especial_/.test(r.presc.especial), 'receita de controle especial tem nome próprio');
+  assert(/_Receita-Antimicrobiano_/.test(r.presc.antimicrobiano), 'receita de antimicrobiano tem nome próprio');
+  assert(/_Atestado_/.test(r.presc.atestado), 'atestado tem nome próprio');
+  assert(/_Declaracao_/.test(r.presc.declaracao), 'declaração tem nome próprio');
+  assert(/_Laudo_/.test(r.presc.laudo), 'laudo tem nome próprio');
+  assert(r.semGenericoIndevido, 'nenhum documento com nome próprio pode cair no rótulo genérico "Documento"');
+  assert(r.todosDistintos, 'os treze tipos de documento têm de gerar treze nomes diferentes');
+  assert(r.formato, 'o formato é Paciente_Tipo_Data — deu "' + r.nomes.pre + '"');
+  assert(r.idempotente, 'reimprimir o mesmo documento tem de devolver o mesmo nome');
+  assert(r.desempata, 'dois documentos diferentes não podem sair com o mesmo nome no mesmo dia');
+  assert(r.sufixo, 'o desempate é _2, _3 — deu "' + r.segundo + '" e "' + r.terceiro + '"');
+  assert(r.mesmoRegistroOutroDoc, 'o mesmo registro em outro modelo é outro documento e precisa de outro nome');
+  assert(r.voltaAoMesmo, 'e voltar ao modelo anterior devolve o nome que ele já tinha');
+  assert(r.semIdDistingue, 'documento ainda não salvo também precisa ser distinguido — deu "' + r.n1 + '" duas vezes');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
