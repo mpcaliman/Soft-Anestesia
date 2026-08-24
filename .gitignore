@@ -2,3 +2,10 @@ node_modules
 package-lock.json
 test-results/
 playwright-report/
+
+# Seed gerado da base Anvisa/CMED (12,8 MB). Não vai para o repositório: é
+# grande demais para colar no editor SQL do Supabase (que é o único motivo de
+# ele existir em SQL), e sai de um comando —
+#   node scripts/gerar-base-medicamentos.mjs <arquivo-da-cmed>
+# O caminho normal de carga é scripts/import-anvisa-medications.mjs.
+database/seeds/medicamentos_anvisa.sql
