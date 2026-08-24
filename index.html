@@ -4242,6 +4242,26 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
 @media print { .hoje-hero { display: none !important; } }
 
 /* ===== Filtros do financeiro ============================================== */
+/* Código CBHPM ao lado da descrição: discreto, mas legível — é o par
+   código+descrição que o convênio recebe e por onde a glosa se discute. */
+.fin-cod {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: .72rem; color: var(--text-mute); white-space: nowrap;
+}
+/* Tipo de atendimento: separa consulta de procedimento de relance, que é o
+   que faltava para ninguém mais confundir a pré com a cirurgia proposta. */
+.fin-tipo {
+  display: inline-block; font-size: .68rem; font-weight: 600;
+  padding: 2px 7px; border-radius: 9px; white-space: nowrap;
+  background: var(--surface-alt); color: var(--text-soft);
+}
+.fin-tipo.procedimento   { background: var(--primary-light);  color: var(--primary-dark); }
+.fin-tipo.consulta_geral { background: #e6f2ec; color: #2a6b4f; }
+.fin-tipo.consulta_dor   { background: #fdeee2; color: #8a4b1c; }
+.fin-tipo.consulta_pre   { background: #eae6f6; color: #4b3a8d; }
+html[data-theme="dark"] .fin-tipo.consulta_geral { background: #1d3a2e; color: #7fd4ab; }
+html[data-theme="dark"] .fin-tipo.consulta_dor   { background: #40291a; color: #e8b183; }
+html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #b7a6ee; }
 .fin-f-resultado {
   font-size: .8rem; color: var(--text-soft); align-self: center;
   white-space: nowrap; font-variant-numeric: tabular-nums;
@@ -4428,7 +4448,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-24b</b><br>
+    v7.1 · build <b id="build-tag">2026-08-24c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -5120,6 +5140,15 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
               <option value="">—</option><option>Particular</option><option>SUS</option><option>Unimed</option>
               <option>Bradesco Saúde</option><option>Amil</option><option>SulAmérica</option>
               <option>Notredame Intermédica</option><option>Hapvida</option><option>Outro</option>
+            </select>
+          </div>
+          <!-- Consulta geral e consulta de dor cobram o MESMO código CBHPM. O que
+               separa uma da outra no relatório é este campo — e ele precisa ser
+               declarado aqui, na consulta, porque adivinhar pela queixa erraria. -->
+          <div class="field col-3"><label>Tipo de atendimento <small style="color:var(--text-mute);font-weight:400">(vai para o Financeiro)</small></label>
+            <select name="tipo_atendimento">
+              <option value="consulta_geral">Consulta geral</option>
+              <option value="consulta_dor">Consulta de dor</option>
             </select>
           </div>
           <div class="field col-6"><label>Hospital / clínica</label><input type="text" name="local"></div>
@@ -8310,7 +8339,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
         <div style="overflow-x:auto">
           <table class="data" id="financeiro-table">
             <thead><tr>
-              <th>Paciente</th><th>Senha</th><th>Procedimento</th><th>Cirurgião</th><th>Hospital</th>
+              <th>Paciente</th><th>Senha</th><th>Procedimento</th><th>Tipo</th><th>Cirurgião</th><th>Hospital</th>
               <th>Convênio</th><th>Data proc.</th><th style="text-align:right">Previsto</th>
               <th style="text-align:right">Recebido</th><th style="text-align:right">Diferença</th>
               <th>Pago</th><th>Periciado</th><th>Status</th><th class="actions-cell"></th>
@@ -19063,6 +19092,9 @@ const cloud = {
               catch (e) { return Promise.resolve(); }
             })).then(() => {
               try { if (typeof pendencias !== 'undefined') pendencias.checarAoEntrar(); } catch (e) {}
+              /* Lançamento errado pode chegar de um aparelho que ainda não
+                 atualizou — conserta na chegada, não só na abertura. */
+              try { if (typeof fin !== 'undefined') fin.repararEAvisar(); } catch (e) {}
             });
           }
           if (typeof pacientes !== 'undefined' && pacientes.sincronizarNuvem) {
@@ -35873,9 +35905,101 @@ const fin = {
      pré-anestésica lançam no Financeiro. O VALOR não mora aqui: vem da
      tabela de preços configurada (ver precos.base). */
   CODIGO_CONSULTA: '1.01.01.01-2',
+
+  /* Descrição oficial do código de consulta, lida da própria tabela CBHPM.
+     O Financeiro passa a mostrar CÓDIGO + DESCRIÇÃO DO CÓDIGO — o que de fato
+     foi cobrado — e não mais um texto inventado por módulo. */
+  descricaoConsulta() {
+    try {
+      const info = cbhpm.info(fin.CODIGO_CONSULTA);
+      if (info && info.descricao) return info.descricao;
+    } catch (e) {}
+    return 'Consulta em horário normal ou preestabelecido';
+  },
+
+  /* Rótulos do tipo de atendimento — os mesmos valores do <select> do
+     Financeiro, para que o automático e o manual falem a mesma língua. */
+  TIPO_LABEL: {
+    procedimento: 'Procedimento / Cirurgia',
+    consulta_geral: 'Consulta geral',
+    consulta_dor: 'Consulta de dor',
+    consulta_pre: 'Consulta pré-anestésica',
+    outro: 'Outro'
+  },
+
   isAutoEnabled() {
     const v = localStorage.getItem('medsys.v4.autofin');
     return v == null ? true : v === '1';
+  },
+
+  /* ==========================================================================
+     REPARO RETROATIVO — os lançamentos que já nasceram errados
+
+     Até esta versão, toda pré-anestésica lançava no Financeiro a CIRURGIA
+     PROPOSTA como procedimento, e toda consulta lançava a queixa recortada em
+     50 caracteres. O código cobrado sempre foi o certo (1.01.01.01-2); era o
+     texto que mentia — e um lançamento que diz "Histeroscopia" quando o que se
+     cobrou foi a consulta é exatamente o que se lê numa contestação de glosa.
+
+     Corrige o texto, o código e o tipo, e anota nas observações o que constava
+     antes e quando mudou. NÃO toca em valor, status, pagamento nem perícia:
+     nenhum centavo muda de lugar. Corrige também os já pagos, porque descrição
+     errada em registro pago é pior, não melhor.
+
+     Roda a cada abertura em vez de uma vez só: é uma varredura sem escrita
+     quando não há nada errado, e assim conserta também o que chegar da nuvem
+     de um aparelho que ainda não tinha atualizado. */
+  repararLancamentosDeConsulta(opts = {}) {
+    let lista;
+    try { lista = store.list('financeiro') || []; } catch (e) { return null; }
+    const desc = fin.descricaoConsulta();
+    const detalhes = [];
+    lista.forEach(f => {
+      if (!f) return;
+      if (f._origemTipo !== 'pre' && f._origemTipo !== 'consulta') return;
+      /* Só a linha do próprio atendimento. Procedimento FEITO na consulta —
+         bloqueio, infiltração — é procedimento mesmo e fica como está. */
+      if (f._origemLinhaId) return;
+      const tipoCerto = f._origemTipo === 'pre' ? 'consulta_pre'
+        : (f.tipo_atendimento === 'consulta_dor' ? 'consulta_dor' : 'consulta_geral');
+      const procErrado = (f.procedimento || '') !== desc;
+      const tipoErrado = (f.tipo_atendimento || '') !== tipoCerto;
+      const codErrado  = (f.cbhpm_codigo || '') !== fin.CODIGO_CONSULTA;
+      if (!procErrado && !tipoErrado && !codErrado) return;
+      const antes = f.procedimento || '(em branco)';
+      const novo = Object.assign({}, f, {
+        procedimento: desc,
+        cbhpm_codigo: fin.CODIGO_CONSULTA,
+        cbhpm_descricao: desc,
+        tipo_atendimento: tipoCerto
+      });
+      /* A nota só entra quando o texto de fato mudou — e só uma vez, porque
+         na varredura seguinte o procedimento já bate e o registro é pulado. */
+      if (procErrado) {
+        novo.observacoes = [f.observacoes,
+          'Procedimento corrigido em ' + utils.formatarData(utils.hojeISO()) + ': constava "' +
+          antes + '" (cirurgia proposta / queixa). O atendimento cobrado é ' +
+          (fin.TIPO_LABEL[tipoCerto] || 'consulta').toLowerCase() +
+          ', código ' + fin.CODIGO_CONSULTA + '. Valores inalterados.'
+        ].filter(Boolean).join(' · ');
+      }
+      if (!opts.simular) { try { store.save('financeiro', novo); } catch (e) { return; } }
+      detalhes.push({ paciente: f.paciente || '', antes: antes, pago: !!f.pago, status: f.status || '' });
+    });
+    return { corrigidos: detalhes.length, detalhes: detalhes };
+  },
+
+  /* Chamado na abertura e quando os registros chegam da nuvem. Avisa só
+     quando de fato corrigiu — varredura silenciosa não interrompe ninguém. */
+  repararEAvisar() {
+    let r = null;
+    try { r = fin.repararLancamentosDeConsulta(); } catch (e) { return null; }
+    if (!r || !r.corrigidos) return r;
+    try {
+      toast('🧾 ' + r.corrigidos + ' lançamento(s) de consulta/pré corrigidos: o procedimento passou a ser o da consulta, não a cirurgia proposta', 'success');
+    } catch (e) {}
+    try { if (state.currentModule === 'financeiro' && financeiro.render) financeiro.render(); } catch (e) {}
+    return r;
   },
   setAutoEnabled(b) {
     localStorage.setItem('medsys.v4.autofin', b ? '1' : '0');
@@ -35883,7 +36007,7 @@ const fin = {
 
   /* Identificação do paciente/atendimento, comum a todas as linhas */
   _cabecalho(modOrigem, doc) {
-    const c = { paciente: '', procedimento: '', cirurgiao: '', hospital: '', convenio: '', dataProc: '', senha: '', codigo: '' };
+    const c = { paciente: '', procedimento: '', cirurgiao: '', hospital: '', convenio: '', dataProc: '', senha: '', codigo: '', tipoAtendimento: 'procedimento' };
     if (modOrigem === 'anestesia') {
       c.paciente  = (doc.paciente && doc.paciente.nome) || '';
       c.procedimento = (doc.procedimento && doc.procedimento.descricao) || '';
@@ -35895,8 +36019,19 @@ const fin = {
       c.senha     = (doc.paciente && doc.paciente.senha) || '';
     } else if (modOrigem === 'pre') {
       c.paciente  = doc.nome || '';
-      c.procedimento = doc.cirurgia || '';
-      c.codigo    = doc.cirurgia_cbhpm || '';
+      /* AQUI ESTAVA O ERRO. O Financeiro recebia `doc.cirurgia` — a cirurgia
+         PROPOSTA, que será feita em outro dia e cobrada na ficha de anestesia.
+         O lançamento saía dizendo "Histeroscopia" quando o que foi feito e
+         cobrado naquele atendimento foi a AVALIAÇÃO PRÉ-ANESTÉSICA. O código
+         lançado já era o da consulta (1.01.01.01-2): só o texto mentia, e um
+         texto que mente é exatamente o que se lê numa glosa.
+         Agora o procedimento é a descrição do código cobrado, e o que separa
+         esta consulta de uma consulta comum é o tipo de atendimento.
+         A cirurgia proposta continua na pré e é ela que preenche o
+         procedimento da ficha de anestesia — que é onde ela é cobrada. */
+      c.procedimento = fin.descricaoConsulta();
+      c.codigo    = fin.CODIGO_CONSULTA;
+      c.tipoAtendimento = 'consulta_pre';
       c.cirurgiao = doc.cirurgiao || '';
       c.hospital  = doc.hospital || '';
       c.convenio  = doc.convenio || '';     /* sem isto o lançamento nascia sem pagador */
@@ -35904,7 +36039,12 @@ const fin = {
       c.senha     = doc.senha || '';
     } else if (modOrigem === 'consulta') {
       c.paciente  = doc.nome || '';
-      c.procedimento = doc.queixa ? 'Consulta — ' + doc.queixa.slice(0, 50) : 'Consulta';
+      /* Mesma regra: o que se cobra é a consulta, e o procedimento é a
+         descrição do código. A queixa não é procedimento — ela já está na
+         anamnese, e recortada em 50 caracteres não servia a ninguém. */
+      c.procedimento = fin.descricaoConsulta();
+      c.codigo    = fin.CODIGO_CONSULTA;
+      c.tipoAtendimento = doc.tipo_atendimento === 'consulta_dor' ? 'consulta_dor' : 'consulta_geral';
       c.hospital  = doc.local || '';
       c.convenio  = doc.convenio || '';
       c.dataProc  = doc.data || '';
@@ -35928,6 +36068,7 @@ const fin = {
       const p = precos.base(cod, 'medico');
       linhas.push({
         linhaId: '', tipo_honorario: 'consulta',
+        tipo_atendimento: cab.tipoAtendimento,
         cbhpm_codigo: cod,
         cbhpm_descricao: info ? info.descricao : 'Consulta',
         procedimento: cab.procedimento || (info ? info.descricao : 'Consulta'),
@@ -35940,6 +36081,7 @@ const fin = {
       const p = cab.codigo ? precos.base(cab.codigo, 'anestesia') : { valor: null, origem: '' };
       linhas.push({
         linhaId: '', tipo_honorario: 'anestesia',
+        tipo_atendimento: 'procedimento',
         cbhpm_codigo: cab.codigo || '',
         cbhpm_descricao: cab.procedimento,
         procedimento: cab.procedimento,
@@ -35956,6 +36098,9 @@ const fin = {
         linhas.push({
           linhaId: pr.linhaId || ('cproc-' + i),
           tipo_honorario: 'procedimento',
+          /* procedimento feito NA consulta é procedimento, não consulta —
+             cada linha responde pelo que ela própria cobra */
+          tipo_atendimento: 'procedimento',
           cbhpm_codigo: pr.codigo || '',
           cbhpm_descricao: pr.descricao || '',
           procedimento: pr.descricao || pr.codigo,
@@ -36015,6 +36160,11 @@ const fin = {
       const novo = Object.assign({}, item, {
         paciente: cab.paciente,
         procedimento: ehPrincipal ? cab.procedimento : (l.procedimento || ''),
+        /* Quem responde pelo tipo é o documento de origem: uma pré é sempre
+           consulta pré-anestésica, uma ficha é sempre procedimento. Antes o
+           campo nascia vazio e o <select> caía na primeira opção — todo
+           lançamento de consulta aparecia como "Procedimento / Cirurgia". */
+        tipo_atendimento: l.tipo_atendimento || item.tipo_atendimento || 'procedimento',
         cirurgiao: cab.cirurgiao, hospital: cab.hospital, convenio: cab.convenio,
         /* Senha/autorização do plano: o registro clínico é a fonte da verdade.
            Se o clínico tiver senha, ela reflete no Financeiro; senão preserva a
@@ -44538,7 +44688,7 @@ const financeiro = {
     try { financeiro.planos.atualizarRotulo(); } catch (e) {}
     const tbody = document.getElementById('financeiro-tbody');
     if (list.length === 0) {
-      tbody.innerHTML = '<tr class="empty-row"><td colspan="14">Nenhum registro encontrado</td></tr>';
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="15">Nenhum registro encontrado</td></tr>';
     } else {
       tbody.innerHTML = list.map(x => {
         const prev = parseFloat(x.valor_previsto) || 0;
@@ -44550,11 +44700,17 @@ const financeiro = {
         const auto = x._autoCriado ? '<span style="font-size:.62rem;background:var(--primary-light);color:var(--primary-dark);padding:1px 5px;border-radius:8px;margin-left:4px" title="Criado automaticamente">auto</span>' : '';
         const nAnexos = (Array.isArray(x.anexos) ? x.anexos.length : 0) + (Array.isArray(x._docsOrigem) ? x._docsOrigem.length : 0) + (Array.isArray(x._docs_troca) ? x._docs_troca.length : 0);
         const anexoTag = nAnexos ? `<span title="${nAnexos} anexo(s) de suporte financeiro" style="margin-left:4px;cursor:default">📎${nAnexos}</span>` : '';
+        /* Código junto da descrição: é o par que o convênio recebe, e é por ele
+           que se discute glosa. Descrição sozinha não se defende. */
+        const cod = x.cbhpm_codigo
+          ? `<span class="fin-cod">${utils.escapeHTML(x.cbhpm_codigo)}</span> ` : '';
+        const tipo = fin.TIPO_LABEL[x.tipo_atendimento] || '';
         return `
           <tr>
             <td data-label="Paciente">${utils.escapeHTML(x.paciente || '')}${auto}${anexoTag}</td>
             <td data-label="Senha">${x.senha ? utils.escapeHTML(x.senha) : '<span style="color:var(--text-mute)">—</span>'}</td>
-            <td data-label="Procedimento">${utils.escapeHTML(x.procedimento || '')}</td>
+            <td data-label="Procedimento">${cod}${utils.escapeHTML(x.procedimento || '')}</td>
+            <td data-label="Tipo">${tipo ? `<span class="fin-tipo ${utils.escapeAttr(x.tipo_atendimento)}">${utils.escapeHTML(tipo)}</span>` : '<span style="color:var(--text-mute)">—</span>'}</td>
             <td data-label="Cirurgião">${utils.escapeHTML(x.cirurgiao || '')}</td>
             <td data-label="Hospital">${utils.escapeHTML(x.hospital || '')}</td>
             <td data-label="Convênio">${utils.escapeHTML(x.convenio || x.tipo_pagamento || '')}</td>
@@ -47494,6 +47650,9 @@ document.addEventListener('DOMContentLoaded', () => {
   try { auth._repararIds(); } catch (e) {}
   /* sessão já aberta (ex.: login diário sem nuvem): checa as pendências também */
   setTimeout(() => { try { pendencias.checarAoEntrar(); } catch (e) {} }, 3500);
+  /* Acerta os lançamentos de consulta/pré que nasceram com a cirurgia proposta
+     no lugar do procedimento. Varredura sem escrita quando não há nada errado. */
+  setTimeout(() => { try { fin.repararEAvisar(); } catch (e) {} }, 4000);
   window.quickActions = quickActions; window.printPreview = printPreview;
   window.actions = actions; window.toast = toast;
   window.cbhpm = cbhpm; window.CBHPM_2022 = CBHPM_2022; window.CBHPM_LEGADO = CBHPM_LEGADO;
