@@ -4241,6 +4241,33 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
 .hoje-hero .hh-btn-line { background: transparent; color: #cfe0ee; border: 1px solid rgba(255,255,255,.3); }
 @media print { .hoje-hero { display: none !important; } }
 
+/* ===== Escolha de riscos específicos do termo ============================= */
+.risco-aviso {
+  font-size: .82rem; padding: 9px 12px; border-radius: 6px; margin-bottom: 12px;
+  background: var(--surface-alt); color: var(--text-soft);
+  border-left: 3px solid var(--border);
+}
+.risco-aviso.ok { background: var(--primary-soft); border-left-color: var(--primary); color: var(--text); }
+.risco-grupo { margin-bottom: 14px; }
+.risco-grupo h4 {
+  font-size: .68rem; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--text-mute); margin: 0 0 6px; font-weight: 700;
+}
+.risco-item {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px;
+  margin-bottom: 6px; cursor: pointer; font-size: .86rem; line-height: 1.35;
+}
+.risco-item:hover { background: var(--surface-alt); }
+/* O que a pré-anestésica sugeriu fica visualmente separado do que é escolha
+   manual: o médico precisa ver de relance o que o sistema propôs. */
+.risco-item.sugerido { border-color: var(--primary); background: var(--primary-soft); }
+.risco-item input { width: 17px; height: 17px; margin-top: 1px; flex-shrink: 0; }
+.risco-motivo {
+  display: block; font-size: .72rem; color: var(--text-mute); margin-top: 2px;
+}
+.risco-item.sugerido .risco-motivo { color: var(--primary-darker); font-weight: 600; }
+
 /* ===== Autocomplete de medicamento (base Anvisa/CMED) =====================
    Três linhas por sugestão, e não uma tabela: no celular é essa hierarquia —
    marca em destaque, princípio ativo abaixo, forma/via em texto secundário —
@@ -7264,7 +7291,7 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
       <div class="card-body">
         <div class="grid">
           <div class="field col-6 required"><label>Nome do paciente <span class="req">*</span></label>
-            <input type="text" name="nome" data-required onblur="linker.autoPreencherDadosPaciente(this.value, 'termo'); termo._reaplicarPadraoSeAtivo()"></div>
+            <input type="text" name="nome" data-required onblur="linker.autoPreencherDadosPaciente(this.value, 'termo'); termo._reaplicarPadraoSeAtivo(); riscosTermo.avisar(this.value)"></div>
           <div class="field col-3"><label>Data de nascimento</label><input type="date" name="nascimento" oninput="termo.calcIdade()"></div>
           <div class="field col-3"><label>Idade</label><input type="text" name="idade" readonly></div>
           <div class="field col-4"><label>Documento (RG/CPF)</label><input type="text" name="documento"></div>
@@ -7322,8 +7349,16 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
           <div class="field col-12"><label>Técnica anestésica proposta</label><input type="text" name="tecnica" placeholder="Ex.: Anestesia geral balanceada"></div>
           <div class="field col-12"><label>Texto do termo</label>
             <textarea name="texto" rows="14" style="font-size:.86rem;line-height:1.55"></textarea></div>
-          <div class="field col-12"><label>Riscos específicos discutidos com o paciente</label>
-            <textarea name="riscos" rows="3" placeholder="Riscos adicionais conforme condição clínica do paciente"></textarea></div>
+          <div class="field col-12">
+            <label>Riscos específicos discutidos com o paciente</label>
+            <!-- O texto de cada risco é redigido; aqui só se escolhe qual entra.
+                 As sugestões saem da avaliação pré-anestésica DESTE paciente. -->
+            <div class="field-templates" style="margin-bottom:6px">
+              <button type="button" class="btn btn-sm btn-primary" onclick="riscosTermo.abrir()" title="Escolher entre os riscos redigidos, com sugestão a partir da pré-anestésica deste paciente">⚠️ Escolher riscos…</button>
+              <span id="risco-sugestao-aviso" style="font-size:.76rem;color:var(--text-mute)"></span>
+            </div>
+            <textarea name="riscos" rows="5" placeholder="Riscos adicionais conforme a condição clínica do paciente — use o botão acima para inserir os textos prontos, e edite à vontade"></textarea>
+          </div>
           <div class="field col-12"><label>Dúvidas / observações registradas</label>
             <textarea name="observacoes" rows="2"></textarea></div>
         </div>
@@ -18979,8 +19014,15 @@ const cloud = {
         try {
           if (typeof cloudRel !== 'undefined' && cloudRel.autoPullModulo) {
             cloudRel._puxados = {};   /* qualquer módulo visitado puxa de novo nesta sessão */
-            ['pre', 'anestesia', 'recuperacao', 'financeiro'].forEach(m => {
-              try { cloudRel.autoPullModulo(m); } catch (e) {}
+            /* Quando os registros CHEGAM, reconfere as pendências. Esperar só
+               o relógio funcionaria, mas isto avisa no instante certo — e é o
+               que faz a janela aparecer para quem não tem nada no aparelho e
+               depende inteiramente do que vem da nuvem. */
+            Promise.all(['pre', 'anestesia', 'recuperacao', 'financeiro'].map(m => {
+              try { return Promise.resolve(cloudRel.autoPullModulo(m)).catch(() => {}); }
+              catch (e) { return Promise.resolve(); }
+            })).then(() => {
+              try { if (typeof pendencias !== 'undefined') pendencias.checarAoEntrar(); } catch (e) {}
             });
           }
           if (typeof pacientes !== 'undefined' && pacientes.sincronizarNuvem) {
@@ -19946,7 +19988,7 @@ const pendencias = {
   /* ---- Janela de alerta ---- */
   abrir(auto) {
     const lista = pendencias.listar();
-    if (auto && !lista.length) return;
+    if (auto && !lista.length) return false;
     const linhas = lista.map(p =>
       '<tr>' +
       '<td style="white-space:nowrap">' + utils.formatarData(p.data) + '</td>' +
@@ -19966,6 +20008,7 @@ const pendencias = {
         '<div style="max-height:52vh;overflow:auto"><table class="dash-detail-table" style="margin:0"><thead><tr><th>Data</th><th>Paciente</th><th>Plano</th><th>Guia</th><th>Ação</th></tr></thead><tbody>' + linhas + '</tbody></table></div>';
     modal.open('🔔 Pendências de convênio (' + lista.length + ')', corpo,
       '<button class="btn" onclick="modal.close()">Fechar</button>');
+    return true;
   },
   resolver(mod, id) {
     const r = store.getById(mod, id);
@@ -20075,22 +20118,44 @@ const pendencias = {
     pendencias._mostradaPara = null;
     try { sessionStorage.removeItem(pendencias._MOSTRADA_KEY); } catch (e) {}
   },
+  /* Quantas vezes ainda vale esperar a nuvem antes de desistir do aviso.
+     8 s, 20 s e 45 s depois de entrar: tempo de sobra para a sincronização
+     terminar, e curto o bastante para o aviso ainda ser "de quem chega". */
+  _ESPERAS: [8000, 20000, 45000],
+
   checarAoEntrar(opts = {}) {
-    if (!pendencias.podeVer()) return;
+    if (!pendencias.podeVer()) return false;
     try { pendencias.renderDashboard(); } catch (e) {}
-    if (!opts.forcar && pendencias.jaMostrou()) return;
-    /* Não interrompe um modal já aberto — mas também não perde o aviso: como
-       agora a checagem é só uma, sair sem mostrar significaria não mostrar
-       nunca. Tenta de novo daqui a pouco, uma vez. */
+    if (!opts.forcar && pendencias.jaMostrou()) return false;
+
+    /* Não interrompe um modal já aberto — mas também não perde o aviso. */
     const bd = document.getElementById('modal-backdrop');
-    if (bd && bd.classList.contains('show')) {
-      if (!opts._retentativa) {
-        setTimeout(() => { try { pendencias.checarAoEntrar({ _retentativa: true }); } catch (e) {} }, 20000);
-      }
-      return;
-    }
-    pendencias._marcarMostrada();
-    pendencias.abrir(true);
+    if (bd && bd.classList.contains('show')) { pendencias._reagendar(opts); return false; }
+
+    const abriu = pendencias.abrir(true);
+    if (abriu) { pendencias._marcarMostrada(); return true; }
+
+    /* AQUI ESTAVA A FALHA, e ela batia justamente na secretária.
+       A lista vazia neste instante quer dizer uma de duas coisas: não há
+       pendência, ou a nuvem ainda não respondeu. A checagem roda 3,5 s depois
+       de abrir o app, e o pull dos registros começa aos 3,2 s — não dá tempo
+       de a rede voltar. Quem cria fichas tem os registros no próprio aparelho
+       e via a janela assim mesmo; a secretária NÃO CRIA FICHA NENHUMA, o
+       aparelho dela depende inteiramente do pull, e a lista chegava sempre
+       vazia. Pior: marcava-se "já mostrada" antes de saber se algo apareceu,
+       então não mostrava nem depois.
+       Agora só marca quando de fato abriu, e espera a nuvem antes de desistir. */
+    pendencias._reagendar(opts);
+    return false;
+  },
+
+  _reagendar(opts = {}) {
+    const tentativa = opts._tentativa || 0;
+    const espera = pendencias._ESPERAS[tentativa];
+    if (espera == null) return;            /* esgotou: não há mesmo o que mostrar */
+    setTimeout(() => {
+      try { pendencias.checarAoEntrar({ forcar: opts.forcar, _tentativa: tentativa + 1 }); } catch (e) {}
+    }, espera);
   },
   /* A janela de pendências aparece UMA VEZ, ao entrar. Antes ela voltava a se
      abrir de meia em meia hora, no meio do atendimento — e uma janela que
@@ -22434,6 +22499,484 @@ const medAutocomplete = {
     const h = linha && linha.querySelector('[name="med_snapshot[]"]');
     if (!h || !h.value) return null;
     try { return JSON.parse(h.value); } catch (e) { return null; }
+  }
+};
+
+/* ============================================================================
+   RISCOS ESPECÍFICOS DISCUTIDOS COM O PACIENTE
+   ----------------------------------------------------------------------------
+   O campo era texto livre. Escrever de novo, a cada termo, o parágrafo sobre
+   obesidade ou sobre anticoagulante é trabalho repetido — e trabalho repetido
+   à mão, num documento que se assina, é onde some justamente o parágrafo que
+   importava.
+
+   Aqui cada risco tem um texto pronto e uma REGRA que diz quando ele se
+   aplica. O sistema lê a avaliação pré-anestésica do próprio paciente e marca
+   os que couberem, dizendo por quê. O médico confere, desmarca o que não quer,
+   acrescenta o que faltar e edita à vontade: a sugestão é uma lista de
+   lembretes, nunca uma decisão tomada sozinha.
+
+   COMO OS TEXTOS SÃO ESCRITOS
+   Na voz do paciente, como o resto do termo, e sempre com os três elementos
+   que sustentam um consentimento: o que é o risco, por que ele se aplica a
+   ESTE paciente, e a declaração de que foi explicado e compreendido. Nenhum
+   deles promete resultado — o ato anestésico é obrigação de meios.
+
+   O QUE ELES NÃO FAZEM
+   Não trazem conduta nem protocolo de suspensão de medicamento. Isso é
+   decisão clínica do caso, muda com a diretriz vigente, e num termo assinado
+   viraria promessa. Onde a conduta importa, o texto diz que ela foi explicada
+   — e o médico escreve qual foi.
+============================================================================ */
+const riscosTermo = {
+  _norm(s) {
+    return String(s == null ? '' : s).toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+  },
+
+  /* Princípios ativos que mudam a conduta anestésica. Reconhecidos pelo
+     PRINCÍPIO, não pela marca: o paciente diz "Mounjaro", a regra é da
+     tirzepatida, e vale igual para o genérico. */
+  CLASSES: {
+    glp1: {
+      rotulo: 'agonista de GLP-1 / GIP',
+      principios: ['semaglutida', 'liraglutida', 'dulaglutida', 'tirzepatida',
+                   'exenatida', 'lixisenatida'],
+      marcas: ['ozempic', 'wegovy', 'saxenda', 'victoza', 'trulicity', 'mounjaro',
+               'rybelsus', 'byetta', 'saxend']
+    },
+    sglt2: {
+      rotulo: 'inibidor de SGLT2',
+      principios: ['empagliflozina', 'dapagliflozina', 'canagliflozina', 'ertugliflozina'],
+      marcas: ['jardiance', 'forxiga', 'xigduo', 'invokana', 'glyxambi']
+    },
+    anticoagulante: {
+      rotulo: 'anticoagulante',
+      principios: ['varfarina', 'rivaroxabana', 'apixabana', 'edoxabana', 'dabigatrana',
+                   'heparina', 'enoxaparina', 'fondaparinux'],
+      marcas: ['marevan', 'xarelto', 'eliquis', 'lixiana', 'pradaxa', 'clexane', 'coumadin']
+    },
+    antiagregante: {
+      rotulo: 'antiagregante plaquetário',
+      principios: ['clopidogrel', 'ticagrelor', 'prasugrel', 'acido acetilsalicilico'],
+      marcas: ['plavix', 'brilinta', 'effient', 'aas', 'aspirina', 'iscover']
+    },
+    imao: {
+      rotulo: 'inibidor da monoaminoxidase (IMAO)',
+      principios: ['tranilcipromina', 'fenelzina', 'selegilina', 'moclobemida'],
+      marcas: ['parnate', 'aurorix', 'niar']
+    }
+  },
+
+  /* --------------------------------------------------------------------------
+     CONTEXTO — o que se sabe deste paciente
+     Sai da avaliação pré-anestésica mais recente com o mesmo nome. Sem pré,
+     devolve o que der para ler do próprio termo, e a sugestão vira só a lista
+     completa para escolher à mão.
+  -------------------------------------------------------------------------- */
+  contexto(nome) {
+    const ctx = { temPre: false, comorb: '', meds: '', classes: {}, imc: null,
+                  idade: null, asa: '', risco: '', viaAerea: '', jejum: '', pre: null };
+    let pre = null;
+    try { pre = linker.ultimoPorNome('pre', nome); } catch (e) {}
+    if (!pre) return ctx;
+    ctx.temPre = true;
+    ctx.pre = pre;
+    ctx.comorb = riscosTermo._norm(pre.comorbidades);
+    ctx.asa = String(pre.asa || '');
+    ctx.risco = String(pre.risco || '');
+    ctx.viaAerea = riscosTermo._norm([pre.via_aerea, pre.via_aerea_resumo].filter(Boolean).join(' '));
+    ctx.jejum = String(pre.jejum || '');
+    const imc = parseFloat(String(pre.imc || '').replace(',', '.'));
+    if (imc > 5 && imc < 100) ctx.imc = imc;
+    const idade = parseInt(String(pre.idade || '').replace(/\D+/g, ''), 10);
+    if (idade > 0 && idade < 130) ctx.idade = idade;
+
+    /* Medicações: o princípio ativo vem da lista estruturada quando existe
+       (é o que a base da Anvisa passou a guardar); o texto livre entra junto
+       para o caso das pré antigas, que só tinham o nome digitado. */
+    const partes = [riscosTermo._norm(pre.medicacoes)];
+    if (Array.isArray(pre._medsLista)) {
+      pre._medsLista.forEach(m => {
+        partes.push(riscosTermo._norm(m.nome), riscosTermo._norm(m.principio), riscosTermo._norm(m.base));
+      });
+    }
+    ctx.meds = partes.filter(Boolean).join(' | ');
+    Object.keys(riscosTermo.CLASSES).forEach(k => {
+      const c = riscosTermo.CLASSES[k];
+      const achado = c.principios.concat(c.marcas).find(t => ctx.meds.indexOf(t) >= 0);
+      if (achado) ctx.classes[k] = achado;
+    });
+    return ctx;
+  },
+
+  grauObesidade(imc) {
+    if (imc == null) return 0;
+    if (imc >= 40) return 3;
+    if (imc >= 35) return 2;
+    if (imc >= 30) return 1;
+    return 0;
+  },
+
+  /* --------------------------------------------------------------------------
+     CATÁLOGO
+     `quando(ctx)` devolve o MOTIVO da sugestão (texto curto que aparece na
+     tela) ou '' quando não se aplica. Mostrar o motivo é o que separa uma
+     sugestão de um chute: o médico vê o que a disparou e decide.
+  -------------------------------------------------------------------------- */
+  CATALOGO: [
+    {
+      chave: 'comorbidades',
+      grupo: 'Condição clínica',
+      rotulo: 'Comorbidades que elevam o risco anestésico',
+      quando: ctx => ctx.comorb && ctx.comorb.indexOf('nega') !== 0 && ctx.comorb.length > 3
+        ? 'comorbidades registradas na pré-anestésica' : '',
+      texto: ctx => 'Fui informado(a) de que sou portador(a) de doenças pré-existentes' +
+        (ctx && ctx.pre && ctx.pre.comorbidades ? ' (' + String(ctx.pre.comorbidades).trim().replace(/\s*[.;]\s*$/, '') + ')' : '') +
+        ' e de que essa condição eleva o risco do ato anestésico em relação a uma pessoa sem essas doenças, ' +
+        'aumentando a probabilidade de complicações cardiovasculares, respiratórias e metabólicas durante e após o procedimento. ' +
+        'Compreendi que a equipe adotará as medidas de monitorização e suporte indicadas ao meu caso, e que essas medidas ' +
+        'reduzem, mas não eliminam, esse risco aumentado.'
+    },
+    {
+      chave: 'asa_elevado',
+      grupo: 'Condição clínica',
+      rotulo: 'Estado físico ASA III ou superior',
+      quando: ctx => /ASA\s*(III|IV|V)/i.test(ctx.asa) ? 'classificação ' + ctx.asa + ' na pré-anestésica' : '',
+      texto: ctx => 'Fui informado(a) de que minha classificação de estado físico é ' + (ctx && ctx.asa ? ctx.asa : 'ASA III ou superior') +
+        ', o que significa doença sistêmica com limitação funcional relevante, e de que pacientes nessa classificação ' +
+        'apresentam risco de complicações peri-operatórias significativamente maior do que pacientes hígidos. ' +
+        'Compreendi que essa classificação foi considerada no planejamento anestésico e que dela decorrem cuidados adicionais.'
+    },
+    {
+      chave: 'obesidade',
+      grupo: 'Condição clínica',
+      rotulo: 'Obesidade — riscos específicos',
+      quando: ctx => {
+        const g = riscosTermo.grauObesidade(ctx.imc);
+        return g ? 'IMC ' + ctx.imc.toFixed(1).replace('.', ',') + ' registrado na pré-anestésica' : '';
+      },
+      texto: ctx => {
+        const g = riscosTermo.grauObesidade(ctx && ctx.imc);
+        const nome = g === 3 ? 'obesidade grau III' : g === 2 ? 'obesidade grau II' : g === 1 ? 'obesidade grau I' : 'obesidade';
+        const imc = (ctx && ctx.imc) ? ' (IMC ' + ctx.imc.toFixed(1).replace('.', ',') + ' kg/m²)' : '';
+        return 'Fui informado(a) de que sou portador(a) de ' + nome + imc + ' e de que essa condição acarreta riscos ' +
+          'anestésicos específicos: maior dificuldade de acesso venoso e de manejo da via aérea, redução da reserva ' +
+          'de oxigênio com queda mais rápida da oxigenação, maior risco de refluxo e de aspiração de conteúdo gástrico, ' +
+          'alteração da distribuição e da duração dos medicamentos anestésicos, e maior probabilidade de complicações ' +
+          'respiratórias e de trombose no período pós-operatório. ' +
+          'Compreendi que a equipe adotará as precauções indicadas a essa condição e que elas reduzem, mas não eliminam, esses riscos.';
+      }
+    },
+    {
+      chave: 'glp1',
+      grupo: 'Medicações em uso',
+      rotulo: 'Uso de agonista de GLP-1/GIP (Mounjaro, Ozempic, Saxenda e semelhantes)',
+      quando: ctx => ctx.classes.glp1 ? 'uso de ' + ctx.classes.glp1 + ' registrado na pré-anestésica' : '',
+      texto: ctx => 'Fui informado(a) de que faço uso de medicamento da classe dos agonistas de GLP-1 / GIP' +
+        (ctx && ctx.classes && ctx.classes.glp1 ? ' (' + String(ctx.classes.glp1).toUpperCase() + ')' : '') +
+        ', utilizado para diabetes e/ou para redução de peso, e de que essa classe RETARDA O ESVAZIAMENTO DO ESTÔMAGO. ' +
+        'Compreendi que, por esse motivo, mesmo cumprindo o jejum orientado, meu estômago pode ainda conter alimento, ' +
+        'e que disso decorre risco aumentado de vômito e de aspiração de conteúdo gástrico para os pulmões durante a ' +
+        'anestesia — complicação que pode ser grave. Fui esclarecido(a) sobre a conduta adotada pela equipe diante ' +
+        'dessa condição, incluindo a possibilidade de adiamento do procedimento, de jejum prolongado, de exame para ' +
+        'avaliar o conteúdo gástrico ou de mudança da técnica anestésica, conforme o julgamento do anestesiologista no dia.'
+    },
+    {
+      chave: 'sglt2',
+      grupo: 'Medicações em uso',
+      rotulo: 'Uso de inibidor de SGLT2 (Jardiance, Forxiga e semelhantes)',
+      quando: ctx => ctx.classes.sglt2 ? 'uso de ' + ctx.classes.sglt2 + ' registrado na pré-anestésica' : '',
+      texto: ctx => 'Fui informado(a) de que faço uso de medicamento da classe dos inibidores de SGLT2' +
+        (ctx && ctx.classes && ctx.classes.sglt2 ? ' (' + String(ctx.classes.sglt2).toUpperCase() + ')' : '') +
+        ' e de que essa classe está associada a uma complicação chamada cetoacidose euglicêmica — uma descompensação ' +
+        'metabólica grave que pode ocorrer mesmo com o açúcar no sangue em valores normais, o que dificulta o seu ' +
+        'reconhecimento. Compreendi que fui orientado(a) quanto ao manejo desse medicamento no período que antecede ' +
+        'o procedimento e quanto à necessidade de comunicar imediatamente sintomas como náusea persistente, vômitos, ' +
+        'dor abdominal ou mal-estar no pós-operatório.'
+    },
+    {
+      chave: 'anticoagulante',
+      grupo: 'Medicações em uso',
+      rotulo: 'Uso de anticoagulante — sangramento e bloqueio no neuroeixo',
+      quando: ctx => ctx.classes.anticoagulante ? 'uso de ' + ctx.classes.anticoagulante + ' registrado na pré-anestésica' : '',
+      texto: ctx => 'Fui informado(a) de que faço uso de anticoagulante' +
+        (ctx && ctx.classes && ctx.classes.anticoagulante ? ' (' + String(ctx.classes.anticoagulante).toUpperCase() + ')' : '') +
+        ' e de que essa condição aumenta o risco de sangramento durante e após o procedimento. ' +
+        'Compreendi, em especial, que a realização de anestesia junto à coluna (raquianestesia ou peridural) em ' +
+        'paciente anticoagulado envolve risco de formação de coágulo dentro do canal da coluna (hematoma), complicação ' +
+        'rara mas capaz de causar lesão neurológica permanente, e que por isso a técnica anestésica pode ser alterada ' +
+        'ou o procedimento adiado. Fui esclarecido(a) sobre a orientação recebida quanto à suspensão e ao reinício do ' +
+        'medicamento, e sobre a importância de tê-la seguido exatamente como informada.'
+    },
+    {
+      chave: 'antiagregante',
+      grupo: 'Medicações em uso',
+      rotulo: 'Uso de antiagregante plaquetário',
+      quando: ctx => ctx.classes.antiagregante ? 'uso de ' + ctx.classes.antiagregante + ' registrado na pré-anestésica' : '',
+      texto: ctx => 'Fui informado(a) de que faço uso de antiagregante plaquetário' +
+        (ctx && ctx.classes && ctx.classes.antiagregante ? ' (' + String(ctx.classes.antiagregante).toUpperCase() + ')' : '') +
+        ', que reduz a capacidade de coagulação do sangue, e de que disso decorre maior risco de sangramento no ' +
+        'procedimento e restrição às técnicas de anestesia junto à coluna. Compreendi que a decisão de manter ou ' +
+        'suspender esse medicamento pondera o risco de sangramento contra o risco de trombose da minha condição de ' +
+        'base, e que essa ponderação me foi explicada.'
+    },
+    {
+      chave: 'imao',
+      grupo: 'Medicações em uso',
+      rotulo: 'Uso de IMAO — interação com anestésicos',
+      quando: ctx => ctx.classes.imao ? 'uso de ' + ctx.classes.imao + ' registrado na pré-anestésica' : '',
+      texto: ctx => 'Fui informado(a) de que faço uso de inibidor da monoaminoxidase (IMAO)' +
+        (ctx && ctx.classes && ctx.classes.imao ? ' (' + String(ctx.classes.imao).toUpperCase() + ')' : '') +
+        ' e de que essa classe interage com diversos medicamentos empregados em anestesia, podendo provocar crises ' +
+        'graves de pressão alta ou outras reações. Compreendi que a equipe evitará os medicamentos incompatíveis e ' +
+        'que essa restrição foi considerada no planejamento anestésico.'
+    },
+    {
+      chave: 'urgencia',
+      grupo: 'Circunstância do procedimento',
+      rotulo: 'Cirurgia de urgência — sem preparo ideal',
+      quando: () => '',   /* circunstância do dia: quem marca é o médico */
+      texto: () => 'Fui informado(a) de que este procedimento é realizado em caráter de URGÊNCIA e de que, por essa ' +
+        'razão, NÃO FOI POSSÍVEL alcançar as condições ideais de preparo: o tempo disponível não permitiu a ' +
+        'compensação completa das minhas condições clínicas, a complementação de exames, a avaliação por outras ' +
+        'especialidades nem o cumprimento do jejum nas condições habitualmente recomendadas. ' +
+        'Compreendi que a urgência do quadro impõe que o procedimento seja realizado assim mesmo, porque o risco de ' +
+        'adiá-lo é maior do que o risco de realizá-lo nas condições atuais, e que essa ponderação me foi explicada. ' +
+        'Estou ciente de que essa circunstância eleva o risco anestésico, em especial o risco de aspiração de ' +
+        'conteúdo gástrico e o de descompensação das minhas doenças de base, e ainda assim CONSINTO com a realização ' +
+        'do procedimento.'
+    },
+    {
+      chave: 'estomago_cheio',
+      grupo: 'Circunstância do procedimento',
+      rotulo: 'Jejum não cumprido / estômago cheio',
+      quando: ctx => {
+        const j = riscosTermo._norm(ctx.jejum);
+        return (j && /nao|incompleto|parcial|ausente|sem jejum/.test(j)) ? 'jejum registrado como "' + ctx.jejum + '"' : '';
+      },
+      texto: () => 'Fui informado(a) de que o jejum recomendado não foi cumprido nas condições ideais e de que, por ' +
+        'isso, meu estômago pode conter conteúdo no momento da anestesia. Compreendi que essa condição aumenta o ' +
+        'risco de vômito e de aspiração de conteúdo gástrico para os pulmões, complicação que pode ser grave, e que ' +
+        'a equipe adotará técnica específica para reduzir esse risco, sem poder eliminá-lo.'
+    },
+    {
+      chave: 'via_aerea_dificil',
+      grupo: 'Condição clínica',
+      rotulo: 'Via aérea difícil prevista',
+      quando: ctx => /dificil|dificuldade|mallampati (iii|iv)|mallampati 3|mallampati 4/.test(ctx.viaAerea)
+        ? 'via aérea avaliada como difícil na pré-anestésica' : '',
+      texto: () => 'Fui informado(a) de que a avaliação da minha via aérea indica DIFICULDADE PREVISTA para a ' +
+        'colocação do dispositivo que garante a respiração durante a anestesia. Compreendi que dessa condição decorrem ' +
+        'riscos específicos — dificuldade ou impossibilidade de ventilação, lesão de dentes, lábios, garganta ou ' +
+        'cordas vocais, rouquidão, e, em situação extrema, necessidade de acesso cirúrgico ao pescoço para garantir a ' +
+        'respiração — e que a equipe adotará técnica e equipamentos apropriados a essa previsão, incluindo a ' +
+        'possibilidade de realizar o procedimento com o paciente acordado.'
+    },
+    {
+      chave: 'saos',
+      grupo: 'Condição clínica',
+      rotulo: 'Apneia do sono (SAOS)',
+      quando: ctx => /saos|apneia/.test(ctx.comorb) ? 'apneia do sono registrada na pré-anestésica' : '',
+      texto: () => 'Fui informado(a) de que sou portador(a) de apneia obstrutiva do sono e de que essa condição ' +
+        'aumenta a sensibilidade aos medicamentos sedativos e analgésicos, com maior risco de obstrução da ' +
+        'respiração e de queda da oxigenação durante e após o procedimento. Compreendi que isso pode exigir ' +
+        'monitorização prolongada na recuperação, uso de aparelho de pressão positiva e, eventualmente, internação ' +
+        'em unidade de maior complexidade.'
+    },
+    {
+      chave: 'cardiopatia',
+      grupo: 'Condição clínica',
+      rotulo: 'Cardiopatia / coronariopatia',
+      quando: ctx => /coronariopatia|iam|infarto|insuficiencia cardiaca|icc|valvopatia|arritmia|marcapasso/.test(ctx.comorb)
+        ? 'doença cardiovascular registrada na pré-anestésica' : '',
+      texto: () => 'Fui informado(a) de que sou portador(a) de doença do coração e de que essa condição eleva o risco ' +
+        'de complicações cardíacas durante e após o procedimento, entre elas alterações da pressão arterial, ' +
+        'arritmias, isquemia do músculo cardíaco, infarto e, em situações extremas, parada cardíaca. Compreendi que ' +
+        'essa condição orienta a monitorização e a técnica escolhidas, e que pode exigir cuidados em unidade de ' +
+        'terapia intensiva no pós-operatório.'
+    },
+    {
+      chave: 'diabetes',
+      grupo: 'Condição clínica',
+      rotulo: 'Diabetes',
+      quando: ctx => /diabetes|dm2|dm 2|dm1/.test(ctx.comorb) ? 'diabetes registrado na pré-anestésica' : '',
+      texto: () => 'Fui informado(a) de que sou portador(a) de diabetes e de que essa condição exige controle do ' +
+        'açúcar no sangue durante todo o período peri-operatório, com risco tanto de hipoglicemia quanto de ' +
+        'hiperglicemia, além de maior risco de infecção e de retardo na cicatrização. Compreendi as orientações ' +
+        'recebidas quanto às minhas medicações no dia do procedimento.'
+    },
+    {
+      chave: 'respiratoria',
+      grupo: 'Condição clínica',
+      rotulo: 'Doença respiratória (asma, DPOC) e/ou tabagismo',
+      quando: ctx => /asma|dpoc|tabagismo|fibrose pulmonar/.test(ctx.comorb)
+        ? 'doença respiratória ou tabagismo na pré-anestésica' : '',
+      texto: () => 'Fui informado(a) de que minha condição respiratória aumenta o risco de complicações pulmonares ' +
+        'durante e após o procedimento, entre elas broncoespasmo, queda da oxigenação, acúmulo de secreção, ' +
+        'pneumonia e necessidade de suporte ventilatório prolongado. Compreendi que o tabagismo, quando presente, ' +
+        'agrava esse risco, e que fui orientado(a) quanto à sua suspensão.'
+    },
+    {
+      chave: 'renal_hepatica',
+      grupo: 'Condição clínica',
+      rotulo: 'Doença renal ou hepática',
+      quando: ctx => /renal cronica|drc|cirrose|hepatite|insuficiencia hepatica/.test(ctx.comorb)
+        ? 'doença renal ou hepática registrada na pré-anestésica' : '',
+      texto: () => 'Fui informado(a) de que sou portador(a) de doença que compromete a função dos rins e/ou do ' +
+        'fígado, e de que esses órgãos são responsáveis por eliminar do organismo os medicamentos anestésicos. ' +
+        'Compreendi que, por isso, os efeitos da anestesia podem ser mais intensos ou mais prolongados, que há maior ' +
+        'risco de acúmulo de líquidos e de distúrbios de coagulação, e que a escolha e as doses dos medicamentos ' +
+        'foram ajustadas a essa condição.'
+    },
+    {
+      chave: 'idoso',
+      grupo: 'Condição clínica',
+      rotulo: 'Idade avançada',
+      quando: ctx => (ctx.idade != null && ctx.idade >= 70) ? ctx.idade + ' anos registrados na pré-anestésica' : '',
+      texto: ctx => 'Fui informado(a) de que a idade' + (ctx && ctx.idade ? ' (' + ctx.idade + ' anos)' : ' avançada') +
+        ' é, por si só, fator de aumento do risco anestésico, pela redução natural da reserva funcional dos órgãos. ' +
+        'Compreendi que há maior sensibilidade aos medicamentos, maior risco de queda da pressão arterial, e risco ' +
+        'de confusão mental e alteração da memória no pós-operatório, geralmente transitórias mas eventualmente ' +
+        'prolongadas.'
+    },
+    {
+      chave: 'crianca',
+      grupo: 'Condição clínica',
+      rotulo: 'Paciente pediátrico',
+      quando: ctx => (ctx.idade != null && ctx.idade <= 12) ? ctx.idade + ' anos registrados na pré-anestésica' : '',
+      texto: () => 'Na condição de responsável legal, fui informado(a) dos riscos específicos da anestesia em ' +
+        'criança: menor reserva de oxigênio com queda mais rápida da oxigenação, maior risco de espasmo da laringe e ' +
+        'de complicações respiratórias — especialmente na vigência de infecção recente das vias aéreas — e ' +
+        'necessidade de jejum rigoroso conforme a faixa etária. Compreendi as orientações recebidas e a importância ' +
+        'de comunicar qualquer sinal de resfriado ou febre até o dia do procedimento.'
+    },
+    {
+      chave: 'gestante',
+      grupo: 'Condição clínica',
+      rotulo: 'Gestação ou suspeita de gravidez',
+      quando: ctx => /gestante|gravidez|gestacao/.test(ctx.comorb) ? 'gestação registrada na pré-anestésica' : '',
+      texto: () => 'Fui informada de que estou gestante ou de que há suspeita de gravidez, e de que essa condição ' +
+        'impõe cuidados específicos: escolha de medicamentos com menor repercussão sobre o feto, atenção à posição ' +
+        'durante o procedimento, maior risco de refluxo e de aspiração, e alterações da via aérea que dificultam o ' +
+        'manejo respiratório. Compreendi que existe risco para a gestação decorrente do procedimento e da anestesia, ' +
+        'e que esse risco foi ponderado contra a necessidade do tratamento.'
+    },
+    {
+      chave: 'recusa_hemoderivados',
+      grupo: 'Circunstância do procedimento',
+      rotulo: 'Recusa de transfusão de sangue',
+      quando: () => '',
+      texto: () => 'Declaro que, por convicção pessoal, RECUSO a transfusão de sangue e de hemocomponentes, e fui ' +
+        'informado(a) de que essa recusa acarreta risco aumentado de complicações graves e de morte na hipótese de ' +
+        'sangramento importante, uma vez que a equipe ficará impedida de empregar o recurso terapêutico indicado ' +
+        'nessa situação. Compreendi as alternativas disponíveis e suas limitações, e mantenho a minha decisão, ' +
+        'assumindo as consequências dela decorrentes.'
+    },
+    {
+      chave: 'uti_provavel',
+      grupo: 'Circunstância do procedimento',
+      rotulo: 'Probabilidade de internação em UTI',
+      quando: ctx => /^ASA\s*(IV|V)/i.test(ctx.asa) || riscosTermo._norm(ctx.risco) === 'alto'
+        ? 'risco anestésico alto na pré-anestésica' : '',
+      texto: () => 'Fui informado(a) de que, pelas minhas condições clínicas e pelo porte do procedimento, é ' +
+        'provável a necessidade de internação em Unidade de Terapia Intensiva no pós-operatório, seja como conduta ' +
+        'planejada, seja por decisão da equipe durante ou após o procedimento. Estou ciente de que dessa internação ' +
+        'podem decorrer custos adicionais.'
+    }
+  ],
+
+  /* --------------------------------------------------------------------------
+     TELA
+  -------------------------------------------------------------------------- */
+  _sugeridos: {},
+
+  abrir() {
+    const f = document.getElementById('form-termo');
+    const nome = f ? ((f.querySelector('[name="nome"]') || {}).value || '') : '';
+    const ctx = riscosTermo.contexto(nome);
+    riscosTermo._ctx = ctx;
+    riscosTermo._sugeridos = {};
+
+    const jaTem = riscosTermo._norm((f.querySelector('[name="riscos"]') || {}).value);
+    const grupos = {};
+    riscosTermo.CATALOGO.forEach(r => {
+      let motivo = '';
+      try { motivo = r.quando(ctx) || ''; } catch (e) {}
+      if (motivo) riscosTermo._sugeridos[r.chave] = motivo;
+      /* já está escrito no campo? vem marcado, para não duplicar parágrafo */
+      let texto = '';
+      try { texto = r.texto(ctx) || ''; } catch (e) {}
+      const jaEscrito = texto && jaTem.indexOf(riscosTermo._norm(texto).slice(0, 60)) >= 0;
+      (grupos[r.grupo] = grupos[r.grupo] || []).push({ r, motivo, jaEscrito });
+    });
+
+    const E = utils.escapeHTML;
+    const aviso = ctx.temPre
+      ? '<div class="risco-aviso ok">✓ Sugestões a partir da avaliação pré-anestésica de <b>' + E(nome) + '</b>. Confira, desmarque o que não couber e edite o texto depois — a sugestão é um lembrete, não uma decisão.</div>'
+      : '<div class="risco-aviso">Não há avaliação pré-anestésica salva para <b>' + E(nome || 'este paciente') + '</b>, então nada foi sugerido automaticamente. Escolha à mão os riscos que se aplicam.</div>';
+
+    const html = aviso + Object.keys(grupos).map(g =>
+      '<div class="risco-grupo"><h4>' + E(g) + '</h4>' +
+      grupos[g].map(({ r, motivo, jaEscrito }) =>
+        '<label class="risco-item' + (motivo ? ' sugerido' : '') + '">' +
+        '<input type="checkbox" value="' + E(r.chave) + '"' + ((motivo || jaEscrito) ? ' checked' : '') + '>' +
+        '<span><b>' + E(r.rotulo) + '</b>' +
+        (motivo ? '<span class="risco-motivo">sugerido: ' + E(motivo) + '</span>' : '') +
+        (jaEscrito ? '<span class="risco-motivo">já está no texto</span>' : '') +
+        '</span></label>'
+      ).join('') + '</div>').join('');
+
+    modal.open('Riscos específicos a discutir e registrar', html,
+      '<button class="btn" onclick="modal.close()">Cancelar</button>' +
+      '<button class="btn btn-primary" onclick="riscosTermo.aplicar()">Inserir no termo</button>');
+  },
+
+  aplicar() {
+    const f = document.getElementById('form-termo');
+    const campo = f && f.querySelector('[name="riscos"]');
+    if (!campo) { modal.close(); return; }
+    const escolhidas = Array.from(document.querySelectorAll('#modal-body .risco-item input:checked'))
+      .map(el => el.value);
+    const ctx = riscosTermo._ctx || {};
+    const textos = escolhidas.map(ch => {
+      const r = riscosTermo.CATALOGO.find(x => x.chave === ch);
+      try { return r ? (r.texto(ctx) || '') : ''; } catch (e) { return ''; }
+    }).filter(Boolean);
+
+    /* O que o médico já tinha escrito à mão fica: substituir o campo apagaria
+       exatamente o parágrafo que ele redigiu para este caso. */
+    const jaTem = (campo.value || '').trim();
+    const novos = textos.filter(t => riscosTermo._norm(jaTem).indexOf(riscosTermo._norm(t).slice(0, 60)) < 0);
+    campo.value = [jaTem].concat(novos).filter(Boolean).join('\n\n');
+    modal.close();
+    try { markDirty(); } catch (e) {}
+    toast(novos.length ? novos.length + ' risco(s) inserido(s) — revise e edite à vontade'
+                       : 'Nada a acrescentar: os riscos escolhidos já estavam no texto');
+  },
+
+  /* Avisa, ao lado do botão, que há sugestões esperando. Sem isso o médico
+     não tem como saber que a pré-anestésica deste paciente tem algo a dizer —
+     e o botão passaria despercebido justamente nos casos que mais importam. */
+  avisar(nome) {
+    const el = document.getElementById('risco-sugestao-aviso');
+    if (!el) return;
+    let n = 0;
+    try { n = riscosTermo.quantosSugere(nome); } catch (e) {}
+    el.textContent = n
+      ? '⚠️ ' + n + ' risco(s) sugerido(s) pela pré-anestésica deste paciente'
+      : '';
+    el.style.color = n ? 'var(--primary-darker)' : 'var(--text-mute)';
+    el.style.fontWeight = n ? '600' : '400';
+  },
+
+  /* Quantos riscos o pré-anestésico deste paciente sugere — para o botão
+     avisar antes de ser aberto. */
+  quantosSugere(nome) {
+    const ctx = riscosTermo.contexto(nome);
+    let n = 0;
+    riscosTermo.CATALOGO.forEach(r => { try { if (r.quando(ctx)) n++; } catch (e) {} });
+    return n;
   }
 };
 
@@ -46754,6 +47297,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.termoPadrao = termoPadrao;
   window.termoBiblioteca = termoBiblioteca;
   window.medicamentos = medicamentos; window.medAutocomplete = medAutocomplete;
+  window.riscosTermo = riscosTermo;
   window.textosPadrao = textosPadrao;
   window.pacienteAutocomplete = pacienteAutocomplete;
   window.comorbidades = comorbidades;

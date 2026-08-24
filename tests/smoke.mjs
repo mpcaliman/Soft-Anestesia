@@ -8859,6 +8859,209 @@ await test('Arquivo: todo documento tem rótulo próprio, e nome repetido no mes
   await page.close();
 });
 
+
+/* 143) Riscos específicos do termo: o texto é escrito uma vez, e a sugestão
+   sai da pré-anestésica DESTE paciente — não de um palpite. */
+await test('Termo: riscos específicos sugeridos pela pré-anestésica, com o princípio ativo por trás da marca', async () => {
+  const page = await novaPagina();
+  page.on('dialog', d => d.accept());
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('pre', []);
+    store.save('pre', {
+      nome: 'Zulmira Riscos Especificos', idade: '74 anos', imc: '37,4', asa: 'ASA III',
+      risco: 'Alto', jejum: 'Não cumprido',
+      comorbidades: 'HAS, Diabetes tipo 2, SAOS (Apneia do sono), Doença arterial coronariana',
+      via_aerea: 'Via aérea difícil prevista',
+      /* O paciente sabe a MARCA. O princípio ativo vem da base da Anvisa. */
+      medicacoes: 'Mounjaro 5 mg, Xarelto 20 mg, Jardiance 25 mg',
+      _medsLista: [
+        { nome: 'MOUNJARO', principio: 'TIRZEPATIDA', base: 'tirzepatida' },
+        { nome: 'XARELTO', principio: 'RIVAROXABANA', base: 'rivaroxabana' },
+        { nome: 'JARDIANCE', principio: 'EMPAGLIFLOZINA', base: 'empagliflozina' }
+      ]
+    });
+
+    const ctx = riscosTermo.contexto('Zulmira Riscos Especificos');
+    out.leuPre = ctx.temPre && ctx.imc === 37.4 && ctx.idade === 74;
+    /* marca → princípio: a regra é do fármaco, não do nome comercial */
+    out.marcaViraPrincipio = ctx.classes.glp1 === 'tirzepatida'
+      && ctx.classes.anticoagulante === 'rivaroxabana'
+      && ctx.classes.sglt2 === 'empagliflozina';
+
+    const sug = riscosTermo.CATALOGO.filter(x => { try { return !!x.quando(ctx); } catch (e) { return false; } })
+      .map(x => x.chave);
+    out.sug = sug;
+    ['comorbidades', 'asa_elevado', 'obesidade', 'glp1', 'sglt2', 'anticoagulante',
+     'estomago_cheio', 'via_aerea_dificil', 'saos', 'diabetes', 'idoso', 'uti_provavel']
+      .forEach(k => { if (sug.indexOf(k) < 0) out['falta_' + k] = true; });
+    out.todosEsperados = Object.keys(out).filter(k => k.indexOf('falta_') === 0).length === 0;
+
+    /* o que NÃO se aplica não pode ser sugerido */
+    out.naoSugereIndevido = sug.indexOf('crianca') < 0 && sug.indexOf('gestante') < 0
+      && sug.indexOf('urgencia') < 0 && sug.indexOf('recusa_hemoderivados') < 0;
+
+    /* grau da obesidade vem do IMC, e a vírgula é decimal em português */
+    const obe = riscosTermo.CATALOGO.find(x => x.chave === 'obesidade').texto(ctx);
+    out.grauCerto = obe.indexOf('obesidade grau II') >= 0 && obe.indexOf('IMC 37,4') >= 0;
+
+    /* o texto do GLP-1 nomeia o princípio e o risco que muda a conduta */
+    const glp = riscosTermo.CATALOGO.find(x => x.chave === 'glp1').texto(ctx);
+    out.glpNomeia = glp.indexOf('TIRZEPATIDA') >= 0
+      && /esvaziamento do est/i.test(glp) && /aspira/i.test(glp);
+    /* e NÃO prescreve protocolo de suspensão: isso é decisão do caso */
+    out.glpSemProtocolo = !/suspender por \d+|\d+ dias antes|\d+ semanas antes/i.test(glp);
+
+    /* paciente sem pré: nada é sugerido, e a tela diz isso */
+    out.semPre = riscosTermo.quantosSugere('Ninguem Sem Pre Nenhuma') === 0;
+
+    /* --- inserir no termo ------------------------------------------------- */
+    ui.navegar('termo');
+    const f = document.getElementById('form-termo');
+    f.querySelector('[name="nome"]').value = 'Zulmira Riscos Especificos';
+    f.querySelector('[name="riscos"]').value = '';
+    riscosTermo.abrir();
+    out.abriu = /pr[ée]-anest/i.test(document.getElementById('modal-body').innerHTML);
+    out.marcados = document.querySelectorAll('#modal-body .risco-item input:checked').length;
+    riscosTermo.aplicar();
+    const campo = f.querySelector('[name="riscos"]').value;
+    out.inseriu = campo.length > 800 && campo.indexOf('TIRZEPATIDA') >= 0
+      && campo.indexOf('obesidade grau II') >= 0;
+
+    /* aplicar duas vezes não duplica parágrafo */
+    const antes = campo.length;
+    riscosTermo.abrir(); riscosTermo.aplicar();
+    out.naoDuplica = f.querySelector('[name="riscos"]').value.length === antes;
+
+    /* o que o médico escreveu à mão NÃO pode ser apagado */
+    f.querySelector('[name="riscos"]').value = 'Conversado também sobre o risco de rouquidão prolongada.';
+    riscosTermo.abrir(); riscosTermo.aplicar();
+    const depois = f.querySelector('[name="riscos"]').value;
+    out.preservaManual = depois.indexOf('rouquidão prolongada') >= 0 && depois.indexOf('TIRZEPATIDA') >= 0;
+
+    /* e sai na impressão */
+    out.imprime = printPreview._buildTermo().indexOf('Riscos específicos discutidos') >= 0;
+
+    /* o aviso ao lado do botão conta as sugestões */
+    riscosTermo.avisar('Zulmira Riscos Especificos');
+    out.avisa = /\d+ risco/.test(document.getElementById('risco-sugestao-aviso').textContent);
+    return out;
+  });
+
+  assert(r.leuPre, 'o contexto precisa sair da pré-anestésica do paciente');
+  assert(r.marcaViraPrincipio, 'Mounjaro tem de virar tirzepatida — a regra é do fármaco, não da marca');
+  assert(r.todosEsperados, 'faltaram riscos que a pré-anestésica deveria sugerir: ' + JSON.stringify(r.sug));
+  assert(r.naoSugereIndevido, 'não pode sugerir criança, gestante, urgência nem recusa de sangue neste caso');
+  assert(r.grauCerto, 'o grau da obesidade sai do IMC, com vírgula decimal');
+  assert(r.glpNomeia, 'o texto do GLP-1 precisa nomear o princípio e o risco de aspiração');
+  assert(r.glpSemProtocolo, 'o termo não pode prescrever protocolo de suspensão — isso é decisão do caso');
+  assert(r.semPre, 'sem pré-anestésica não se sugere nada');
+  assert(r.abriu, 'a tela precisa dizer de onde vieram as sugestões');
+  assert(r.marcados >= 10, 'os sugeridos vêm marcados — vieram ' + r.marcados);
+  assert(r.inseriu, 'os textos escolhidos entram no campo do termo');
+  assert(r.naoDuplica, 'aplicar duas vezes não pode duplicar parágrafo');
+  assert(r.preservaManual, 'o que o médico escreveu à mão não pode ser apagado');
+  assert(r.imprime, 'os riscos precisam sair na impressão do termo');
+  assert(r.avisa, 'o aviso ao lado do botão conta quantos riscos a pré sugere');
+  await page.close();
+});
+
+
+/* 144) A janela de pendências é aviso da SECRETÁRIA, e era ela quem não via. */
+await test('Pendências: a janela espera a nuvem antes de desistir — é a secretária quem depende dela', async () => {
+  const page = await novaPagina();
+  page.on('dialog', d => d.accept());
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const entrarComo = (role, email) => {
+      const perms = auth.ROLE_PERMS[role];
+      sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({
+        id: 'u-' + role, usuario: email || (role + '@teste'), nome: role,
+        perfil: perms.perfil, modulos: perms.modulos.slice(),
+        soImpressao: (perms.soImpressao || []).slice(), role: role, entrouEm: Date.now()
+      }));
+      pendencias.esquecerMostrada();
+    };
+    const fecharJanela = () => {
+      try { modal.close(); } catch (e) {}
+      document.getElementById('modal-backdrop').classList.remove('show');
+    };
+    const limpar = () => ['anestesia', 'pre', 'consulta', 'financeiro'].forEach(m => store.setList(m, []));
+    const criarPendencia = (nome) => store.save('anestesia', {
+      paciente: { nome: nome, convenio: 'Bradesco Saúde' },
+      procedimento: { data: utils.hojeISO() }
+    });
+
+    /* --- todo papel de secretária enxerga a janela ------------------------ */
+    limpar(); criarPendencia('Paciente Um');
+    out.papeis = {};
+    ['auxiliar', 'financeiro', 'empresa', 'anestesiologista', 'gestor'].forEach(role => {
+      entrarComo(role); fecharJanela();
+      const abriu = pendencias.checarAoEntrar();
+      out.papeis[role] = { podeVer: pendencias.podeVer(), abriu: abriu };
+      fecharJanela();
+    });
+    out.todosVeem = Object.keys(out.papeis).every(k => out.papeis[k].podeVer && out.papeis[k].abriu);
+
+    /* --- O CASO DA SECRETÁRIA -------------------------------------------- */
+    /* O aparelho dela não tem registro nenhum: ela não cria ficha. Tudo o que
+       ela vê depende do que a nuvem manda, e a nuvem demora mais do que os
+       3,5 s até a checagem. */
+    entrarComo('auxiliar', 'mpcanestesiologia@gmail.com');
+    limpar(); fecharJanela();
+    out.vazioNaoAbre = pendencias.checarAoEntrar() === false;
+    /* e — o ponto — NÃO pode ficar marcada como já mostrada */
+    out.naoMarcouIndevidamente = pendencias.jaMostrou() === false;
+
+    /* a nuvem responde: a janela aparece */
+    criarPendencia('Chegou Da Nuvem');
+    out.abreQuandoChega = pendencias.checarAoEntrar() === true;
+    out.titulo = (document.getElementById('modal-title') || {}).textContent || '';
+    out.marcouDepoisDeAbrir = pendencias.jaMostrou() === true;
+    fecharJanela();
+
+    /* e não volta a abrir na mesma sessão */
+    out.naoRepete = pendencias.checarAoEntrar() === false;
+
+    /* --- sem pendência de verdade, a espera termina sem incomodar -------- */
+    entrarComo('auxiliar'); limpar(); fecharJanela();
+    out.semPendenciaNaoAbre = pendencias.checarAoEntrar() === false;
+    /* o reagendamento tem fim: três esperas e para */
+    out.esperasFinitas = Array.isArray(pendencias._ESPERAS) && pendencias._ESPERAS.length >= 2;
+    out.paraDeTentar = (() => {
+      let chamou = 0;
+      const real = pendencias.checarAoEntrar;
+      /* a última tentativa não pode reagendar outra */
+      const t = pendencias._ESPERAS.length;
+      pendencias._reagendar({ _tentativa: t });
+      return true;   /* _reagendar sem espera definida não agenda nada */
+    })();
+
+    /* --- quem não tem acesso ao financeiro não é incomodado -------------- */
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({
+      id: 'x', usuario: 'cirurgiao@teste', nome: 'Cirurgiao', perfil: 'medico',
+      modulos: auth.ROLE_PERMS.cirurgiao.modulos.slice(), role: 'cirurgiao', entrouEm: Date.now()
+    }));
+    pendencias.esquecerMostrada();
+    criarPendencia('Nao Deve Ver');
+    fecharJanela();
+    out.cirurgiaoNaoVe = pendencias.checarAoEntrar() === false && pendencias.podeVer() === false;
+    return out;
+  });
+
+  assert(r.todosVeem, 'auxiliar, financeiro, empresa, médico e gestor precisam ver a janela: ' + JSON.stringify(r.papeis));
+  assert(r.vazioNaoAbre, 'com o aparelho vazio não há o que abrir ainda');
+  assert(r.naoMarcouIndevidamente, 'e NÃO pode marcar "já mostrada" — era isso que apagava o aviso da secretária');
+  assert(r.abreQuandoChega, 'quando os registros chegam da nuvem, a janela abre');
+  assert(/Pendências de convênio \(1\)/.test(r.titulo), 'com a pendência listada — deu "' + r.titulo + '"');
+  assert(r.marcouDepoisDeAbrir, 'só depois de abrir é que fica marcada');
+  assert(r.naoRepete, 'e não volta a abrir na mesma sessão');
+  assert(r.semPendenciaNaoAbre, 'sem pendência nenhuma, nada abre');
+  assert(r.esperasFinitas, 'a espera pela nuvem tem de ser finita');
+  assert(r.cirurgiaoNaoVe, 'quem não tem acesso ao financeiro não é incomodado');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
