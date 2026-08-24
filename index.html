@@ -39883,11 +39883,16 @@ ${TAG_CLOSE_HTML}`;
   },
   _nomeUnico(base, chave) {
     const r = printPreview._lerReserva();
-    /* este documento já reservou um nome hoje? devolve o mesmo */
-    for (const nome in r.nomes) { if (r.nomes[nome] === chave) return nome; }
+    /* A reserva é do documento MAIS do nome que ele pediu. Só a identidade do
+       registro não basta: o mesmo registro gera documentos diferentes —
+       imprimir "Pré + Termo" e depois só o termo, ou trocar o modelo do
+       receituário de receita para atestado. Sem o nome na chave, o segundo
+       recebia de volta o nome do primeiro. */
+    const posse = chave + '|' + base;
+    for (const nome in r.nomes) { if (r.nomes[nome] === posse) return nome; }
     let nome = base, n = 1;
-    while (r.nomes[nome] && r.nomes[nome] !== chave) { n++; nome = base + '_' + n; }
-    r.nomes[nome] = chave;
+    while (r.nomes[nome] && r.nomes[nome] !== posse) { n++; nome = base + '_' + n; }
+    r.nomes[nome] = posse;
     printPreview._gravarReserva(r);
     return nome;
   },

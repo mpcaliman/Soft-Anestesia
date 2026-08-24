@@ -8803,6 +8803,21 @@ await test('Arquivo: todo documento tem rótulo próprio, e nome repetido no mes
     out.desempata = seg !== out.presc.simples && ter !== seg && ter !== out.presc.simples;
     out.sufixo = /_2$/.test(seg) && /_3$/.test(ter);
 
+    /* --- o MESMO registro pode gerar documentos DIFERENTES ----------------- */
+    /* Trocar o modelo do receituário no mesmo registro é outro documento e
+       precisa de outro nome. Prender a reserva só à identidade do registro
+       devolvia o nome do primeiro — foi assim que "Pré + Termo" seguido de
+       "só o termo" saía com o nome do arquivo combinado. */
+    põeId(fp, 'presc-mesmo-registro');
+    fp.querySelector('[name="modelo"][value="simples"]').checked = true;
+    const comoReceita = printPreview._gerarNomeArquivo();
+    fp.querySelector('[name="modelo"][value="atestado"]').checked = true;
+    const comoAtestado = printPreview._gerarNomeArquivo();
+    out.mesmoRegistroOutroDoc = /_Receita_/.test(comoReceita) && /_Atestado_/.test(comoAtestado);
+    /* e voltar ao primeiro devolve o nome do primeiro */
+    fp.querySelector('[name="modelo"][value="simples"]').checked = true;
+    out.voltaAoMesmo = printPreview._gerarNomeArquivo() === comoReceita;
+
     /* --- documento ainda NÃO salvo também é distinguido -------------------- */
     printPreview._limparReservaNomes();
     ui.navegar('termo');
@@ -8838,6 +8853,8 @@ await test('Arquivo: todo documento tem rótulo próprio, e nome repetido no mes
   assert(r.idempotente, 'reimprimir o mesmo documento tem de devolver o mesmo nome');
   assert(r.desempata, 'dois documentos diferentes não podem sair com o mesmo nome no mesmo dia');
   assert(r.sufixo, 'o desempate é _2, _3 — deu "' + r.segundo + '" e "' + r.terceiro + '"');
+  assert(r.mesmoRegistroOutroDoc, 'o mesmo registro em outro modelo é outro documento e precisa de outro nome');
+  assert(r.voltaAoMesmo, 'e voltar ao modelo anterior devolve o nome que ele já tinha');
   assert(r.semIdDistingue, 'documento ainda não salvo também precisa ser distinguido — deu "' + r.n1 + '" duas vezes');
   await page.close();
 });
