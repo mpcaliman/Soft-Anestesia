@@ -4448,7 +4448,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-25a</b><br>
+    v7.1 · build <b id="build-tag">2026-08-25b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -41769,10 +41769,22 @@ ${TAG_CLOSE_HTML}`;
         (mn.observacoes ? printPreview._field('Observações', mn.observacoes, true) : '')
       );
     }
-    if (d.posicionamento.posicao) {
+    /* POSICIONAMENTO — o registro sempre teve `protecao`, a impressão nunca o
+       mostrou. Coxim, proteção ocular, acolchoamento de plexos, botas
+       pneumáticas e manta térmica são justamente o que se pergunta quando
+       aparece lesão por posicionamento ou hipotermia: cuidado tomado e não
+       registrado no documento é, para quem lê depois, cuidado não tomado.
+       E a seção saía só quando havia POSIÇÃO marcada — quem preenchesse só as
+       proteções e a observação não imprimia nada. */
+    const pos = d.posicionamento || {};
+    const protec = (pos.protecao || []).filter(Boolean);
+    if (pos.posicao || protec.length || pos.observacoes) {
       html += printPreview._section('Posicionamento',
-        printPreview._field('Posição', d.posicionamento.posicao, true) +
-        (d.posicionamento.observacoes ? printPreview._field('Observações', d.posicionamento.observacoes, true) : '')
+        (pos.posicao ? printPreview._field('Posição', pos.posicao, true) : '') +
+        (protec.length
+          ? printPreview._field('Proteção, aquecimento e profilaxia', protec.join(' · '), true)
+          : '') +
+        (pos.observacoes ? printPreview._field('Observações', pos.observacoes, true) : '')
       );
     }
     if ((d.medicacoes || []).filter(m => m.nome).length > 0) {

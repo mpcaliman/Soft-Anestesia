@@ -9624,6 +9624,58 @@ await test('Sync: o índice primeiro, o conteúdo só do que mudou — e nada é
   await page.close();
 });
 
+
+/* 149) Coxim, proteção ocular, botas pneumáticas e manta térmica eram
+   coletados no registro e NUNCA saíam no papel. Cuidado tomado e não
+   registrado é, para quem lê o documento depois, cuidado não tomado. */
+await test('Ficha: posicionamento e dispositivos de proteção saem na impressão e no PDF', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('anestesia');
+    const f = document.getElementById('form-anestesia');
+    const marcar = vals => f.querySelectorAll('[name="protec[]"]')
+      .forEach(el => { el.checked = vals.indexOf(el.value) >= 0; });
+    const radio = v => { const el = f.querySelector('[name="posicao"][value="' + v + '"]'); if (el) el.checked = true; };
+    const limpar = () => {
+      f.querySelectorAll('[name="posicao"]').forEach(el => { el.checked = false; });
+      marcar([]); f.querySelector('[name="posicao_obs"]').value = '';
+    };
+
+    /* o registro sempre soube guardar as proteções — o defeito era na saída */
+    limpar(); radio('Litotomia');
+    marcar(['Coxim de gel', 'Proteção ocular', 'Botas pneumáticas', 'Manta térmica ar forçado']);
+    f.querySelector('[name="posicao_obs"]').value = 'Membros acolchoados, apoios conferidos a cada 2h.';
+    let html = printPreview._buildAnestesia();
+    out.completo = /Posicionamento/.test(html) && /Litotomia/.test(html)
+      && /Coxim de gel/.test(html) && /Proteção ocular/.test(html)
+      && /Botas pneumáticas/.test(html) && /Manta térmica ar forçado/.test(html)
+      && /apoios conferidos/.test(html);
+
+    /* SÓ as proteções, sem posição marcada: antes a seção inteira sumia */
+    limpar(); marcar(['Colchão antiescaras', 'Acolchoamento plexos']);
+    html = printPreview._buildAnestesia();
+    out.soProtecao = /Posicionamento/.test(html) && /Colchão antiescaras/.test(html)
+      && /Acolchoamento plexos/.test(html);
+
+    /* só a observação também basta para a seção existir */
+    limpar(); f.querySelector('[name="posicao_obs"]').value = 'Sem intercorrência de posicionamento.';
+    html = printPreview._buildAnestesia();
+    out.soObs = /Sem intercorrência de posicionamento/.test(html);
+
+    /* mas com o card em branco a seção não polui o documento */
+    limpar();
+    out.vazioNaoImprime = !/Posicionamento/.test(printPreview._buildAnestesia());
+    return out;
+  });
+
+  assert(r.completo, 'posição, proteções e observações precisam sair todas na impressão');
+  assert(r.soProtecao, 'marcar só as proteções, sem posição, ainda tem de imprimir');
+  assert(r.soObs, 'só a observação também');
+  assert(r.vazioNaoImprime, 'mas o card em branco não imprime seção vazia');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
