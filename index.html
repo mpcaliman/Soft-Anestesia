@@ -4492,7 +4492,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-25d</b><br>
+    v7.1 · build <b id="build-tag">2026-08-25e</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -12765,9 +12765,27 @@ const preLanc = {
         if (t && Date.now() - new Date(t).getTime() > 86400000) parados++;
       }));
     } catch (e) {}
-    if (!fila.length && !parados) { card.style.display = 'none'; return; }
+    /* O CARTÃO DO MÉDICO NÃO SE ESCONDE MAIS QUANDO ESTÁ VAZIO.
+       Escondia — e com ele ia embora o botão 🔄 Buscar, que mora no cabeçalho.
+       O resultado é que o único momento em que se precisa procurar um
+       pré-lançamento (quando ele não apareceu) era exatamente o momento em que
+       não havia como procurar. A auxiliar dizia "enviei", o médico não via
+       nada, e não havia nem botão nem número para descobrir onde parou.
+       Vazio, o cartão custa uma linha de texto e devolve a busca e o
+       diagnóstico — que é o que responde "não chegou" ou "não subiu". */
+    /* Vazio, o cartão fica só para quem de fato CONFERE. `ehMedico()` aceita
+       qualquer perfil médico — o cirurgião entra nele —, e não é dele a fila:
+       antes ele não via porque estava vazia, e não porque a regra dissesse. */
+    const confere = (() => {
+      try { const u = auth.usuarioAtual() || {};
+        return u.perfil === 'admin' || u.role === 'gestor' || u.role === 'anestesiologista'; }
+      catch (e) { return false; }
+    })();
+    if (!fila.length && !parados && !confere) { card.style.display = 'none'; return; }
     card.style.display = '';
-    if (tit) tit.textContent = 'Aguardando sua conferência (' + fila.length + ')';
+    if (tit) tit.textContent = fila.length
+      ? 'Aguardando sua conferência (' + fila.length + ')'
+      : 'Pré-lançamentos';
     host.innerHTML =
       (fila.length
         ? fila.map(it =>
@@ -12780,7 +12798,9 @@ const preLanc = {
             '<button class="btn btn-xs btn-primary" onclick="dashboard._abrirRegistro(\'' + it.mod + '\',\'' + it.rec._id + '\')">Conferir</button>' +
             '<button class="btn btn-xs" onclick="preLanc.devolver(\'' + it.mod + '\',\'' + it.rec._id + '\')" title="Volta para a auxiliar com um comentário">↩ Devolver</button>' +
             '</span></div>').join('')
-        : '<p style="font-size:.86rem;color:var(--text-mute);margin:0">Nada aguardando conferência.</p>') +
+        : '<p style="font-size:.86rem;color:var(--text-mute);margin:0">Nada aguardando conferência. ' +
+          'Se alguém enviou um pré-lançamento e ele não apareceu aqui, toque em <b>🔄 Buscar</b> — ' +
+          'a resposta diz se ele chegou à clínica ou ficou parado no outro aparelho.</p>') +
       (parados
         ? '<p style="font-size:.8rem;color:#7a4b12;margin:10px 0 0">⏳ <b>' + parados + '</b> pré-lançamento(s) começado(s) e ainda não enviados há mais de um dia.</p>'
         : '') +
