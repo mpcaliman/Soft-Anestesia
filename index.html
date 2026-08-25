@@ -4448,7 +4448,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-24c</b><br>
+    v7.1 · build <b id="build-tag">2026-08-25a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -9487,7 +9487,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <span><strong>☁️ Supabase Storage</strong> (recomendado — automático, sem configuração extra)</span>
           </label>
           <p style="font-size:.78rem;color:var(--text-mute);margin:4px 0 0 26px">
-            Usa a mesma conta da nuvem já configurada acima. Requer um bucket chamado <code>documentos-pdf</code> no seu projeto Supabase (Storage → New bucket). Acesse os PDFs de qualquer dispositivo pelo painel do Supabase.
+            Usa a mesma conta da nuvem já configurada acima. Guarda no bucket privado <code>clinical-attachments</code>, criado pela migração <code>0002</code> — nada a fazer à mão, e o acesso é isolado por clínica. Acesse os PDFs de qualquer dispositivo pelo painel do Supabase.
           </p>
         </div>
 
@@ -13490,16 +13490,26 @@ const actions = {
 /* =============================================================================
    PRONTUÁRIO — documentos anexos (fotos e PDFs) com armazenamento na NUVEM
    Usado na Pré-anestésica ('pre') e na Ficha de Anestesia ('anestesia').
-   Nuvem-primeiro: arquivo sobe para o Supabase Storage (bucket documentos-pdf,
-   pasta do usuário) e o registro guarda só a referência (leve). Se estiver
-   offline/deslogado, guarda localmente (base64) e permite subir depois.
+   Nuvem-primeiro: arquivo sobe para o Supabase Storage (bucket
+   clinical-attachments, PASTA DA ORGANIZAÇÃO) e o registro guarda só a
+   referência (leve). Se estiver offline/deslogado, guarda localmente (base64)
+   e permite subir depois.
+
+   O BUCKET E A PRIMEIRA PASTA NÃO SÃO ESCOLHA DE ESTILO. A policy da migração
+   0002 isola por organização lendo a primeira pasta do caminho:
+       (storage.foldername(name))[1]::uuid in (select app.org_ids())
+   Este código apontava para um bucket 'documentos-pdf' que a migração nunca
+   criou, com caminho começando pelo id do USUÁRIO. Resultado: todo envio era
+   recusado pelo RLS e caía no base64 local — em silêncio, desde sempre. Era
+   por isso que o Storage aparecia zerado no painel enquanto os registros
+   engordavam com imagens dentro.
    Doc: { nome, tipo:'imagem'|'pdf', categoria, storage_path? , dataurl?,
           tamanho, data }
 ============================================================================= */
 const prontuario = {
   _docs: {},
   CATS: ['Exame', 'Laudo', 'Parecer', 'Guia/Autorização', 'Documento', 'Outro'],
-  BUCKET: 'documentos-pdf',
+  BUCKET: 'clinical-attachments',
   MAX_PDF_NUVEM: 10 * 1024 * 1024,    // 10 MB por PDF na nuvem
   MAX_PDF_LOCAL: 2.5 * 1024 * 1024,   // 2,5 MB por PDF no modo offline
   MAX_LOCAL_TOTAL: 3 * 1024 * 1024,   // teto do fallback local por registro (o celular dá ~5 MB no total)
@@ -13518,11 +13528,20 @@ const prontuario = {
     return new Blob([bytes], { type: mime });
   },
 
+  /* A organização é OBRIGATÓRIA no caminho: é ela que a policy lê para
+     autorizar. Sem org não adianta tentar — o servidor recusaria, e a
+     mensagem de erro do RLS não diria o porquê para quem está anexando. */
+  async _org() {
+    try { return await cloudRel._orgAsync(); } catch (e) { return null; }
+  },
+
   async _upload(blob, nome, mime) {
     const c = cloud.config(); const s = cloud.session();
     if (!c || !s || !s.access_token) return null;
+    const org = await prontuario._org();
+    if (!org) throw new Error('conta ainda não está ligada a uma clínica na nuvem');
     const uid = (s.user && s.user.id) || 'anon';
-    const path = uid + '/anexos/' + Date.now() + '_' + prontuario._safeName(nome);
+    const path = org + '/' + uid + '/anexos/' + Date.now() + '_' + prontuario._safeName(nome);
     const r = await fetch(c.url + '/storage/v1/object/' + prontuario.BUCKET + '/' + encodeURI(path), {
       method: 'POST',
       headers: { 'apikey': c.anonKey, 'Authorization': 'Bearer ' + s.access_token, 'Content-Type': mime, 'x-upsert': 'true' },
@@ -20771,6 +20790,13 @@ const cloudRel = {
   },
   ehModuloRegistro(mod) { return !!cloudRel.MODOS[mod]; },
   _REG_SELECT: 'id,legacy_id,data,updated_at',
+  /* O MESMO registro SEM o campo `data` — que é o registro inteiro, com as
+     imagens em base64 dentro. Ler só isto custa ~60 bytes por linha em vez de
+     alguns KB, e é o que permite descobrir o que mudou sem baixar nada. */
+  _REG_SELECT_LEVE: 'id,legacy_id,updated_at',
+  /* Quantos ids cabem num `id=in.(...)`. Uuid tem 36 caracteres; 80 deles dão
+     uma URL de ~3 KB, folgada para qualquer servidor. */
+  _LOTE_IDS: 80,
 
   /* Garante o encounter (paciente + data + procedimento) e devolve o uuid. */
   async _garantirEncounter(org, patientId, item) {
@@ -20873,6 +20899,83 @@ const cloudRel = {
       const rows = await r.json();
       return rows.map(row => cloudRel._rowParaRegistro(row));
     } catch (e) { return null; }
+  },
+
+  /* ==========================================================================
+     LEITURA INCREMENTAL — o índice primeiro, o conteúdo só do que mudou
+
+     Até esta versão, cada passagem baixava TODOS os registros do módulo POR
+     INTEIRO — inclusive as imagens em base64 gravadas dentro deles. E isso
+     roda a cada 10 minutos com o app aberto, a cada volta de foco, a cada
+     login. Com quatro pessoas trabalhando, um acervo de 2 MB era baixado umas
+     190 vezes por dia: ~420 MB/dia, ~8 GB/mês. O plano gratuito dá 5 GB.
+
+     Agora são duas etapas. Primeiro o ÍNDICE (id, legacy_id, updated_at),
+     que é minúsculo e diz exatamente o que existe e em que versão. Depois o
+     CONTEÚDO, e só dos que mudaram. Sincronização com nada novo passa a
+     custar alguns KB em vez de alguns MB.
+
+     Por que não usar só o filtro `desde`, que já existia: porque duas coisas
+     dependem de conhecer a lista COMPLETA do que está na nuvem — a remoção do
+     que deixou de ser visível (visibilidade 'proprios') e a conferência do que
+     foi arquivado. Com `desde` puro essas duas deixariam de funcionar em
+     silêncio. O índice dá a lista completa e continua sendo barato.
+  ========================================================================== */
+
+  /* O _id local que uma linha da nuvem representa — a MESMA regra de
+     _rowParaRegistro, mas sem precisar do `data`. Se as duas divergirem, o
+     incremental deixa de reconhecer registros e volta a baixar tudo; por isso
+     há teste amarrando as duas. */
+  _idLocalDaLinha(row) {
+    if (!row) return '';
+    return row.legacy_id || ('rel_' + String(row.id || '').slice(0, 8));
+  },
+
+  async puxarIndiceModulo(mod) {
+    const cfg = cloudRel.MODOS[mod]; if (!cfg) return null;
+    if (!cloudRel.disponivel()) return null;
+    if (!(await cloud._garantirToken())) return null;
+    const org = await cloudRel._orgAsync(); if (!org) return null;
+    const c = cloud.config();
+    try {
+      const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
+        '&deleted_at=is.null&select=' + cloudRel._REG_SELECT_LEVE + '&order=updated_at.desc',
+        { headers: cloud._headers(true) });
+      if (!r.ok) return null;
+      const rows = await r.json();
+      if (!Array.isArray(rows)) return null;
+      return rows.map(row => ({
+        id: row.id, legacy_id: row.legacy_id, updated_at: row.updated_at,
+        _idLocal: cloudRel._idLocalDaLinha(row)
+      }));
+    } catch (e) { return null; }
+  },
+
+  /* Conteúdo de ids específicos, em lotes. Devolve null se QUALQUER lote
+     falhar: meia lista parece sincronização bem-sucedida e some registro sem
+     ninguém perceber — prefiro não mesclar nada e tentar de novo depois. */
+  async puxarPorIds(mod, ids) {
+    const cfg = cloudRel.MODOS[mod]; if (!cfg) return null;
+    if (!Array.isArray(ids) || !ids.length) return [];
+    if (!cloudRel.disponivel()) return null;
+    if (!(await cloud._garantirToken())) return null;
+    const org = await cloudRel._orgAsync(); if (!org) return null;
+    const c = cloud.config();
+    const out = [];
+    for (let i = 0; i < ids.length; i += cloudRel._LOTE_IDS) {
+      const lote = ids.slice(i, i + cloudRel._LOTE_IDS);
+      try {
+        const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
+          '&deleted_at=is.null&id=in.(' + lote.map(encodeURIComponent).join(',') + ')' +
+          '&select=' + cloudRel._REG_SELECT,
+          { headers: cloud._headers(true) });
+        if (!r.ok) return null;
+        const rows = await r.json();
+        if (!Array.isArray(rows)) return null;
+        rows.forEach(row => out.push(cloudRel._rowParaRegistro(row)));
+      } catch (e) { return null; }
+    }
+    return out;
   },
 
   /* ---- EMPURRÃO AUTOMÁTICO DOS PENDENTES ----
@@ -21014,10 +21117,47 @@ const cloudRel = {
     if (!cloudRel.MODOS[mod] || cloudRel._puxados[mod]) return;
     if (!cloudRel.disponivel()) return;
     cloudRel._puxados[mod] = true;
-    let remotos = await cloudRel.puxarModulo(mod);
-    if (!remotos) return;
-    /* registros ARQUIVADOS neste aparelho não voltam pelo pull */
-    try { if (typeof arquivo !== 'undefined') remotos = remotos.filter(r => !arquivo.estaArquivado(mod, r._id)); } catch (e) {}
+
+    /* ETAPA 1 — o índice. Barato, e diz tudo o que existe lá. */
+    const indiceCompleto = await cloudRel.puxarIndiceModulo(mod);
+    if (!indiceCompleto) return;
+    /* A lista COMPLETA do que a nuvem devolve, guardada antes de qualquer
+       filtro: é ela que diz o que continua visível para este usuário. Usar a
+       lista filtrada aqui apagaria do aparelho tudo o que não foi baixado
+       nesta passagem — ou seja, quase tudo. */
+    const idsRemotos = new Set(indiceCompleto.map(r => r._idLocal));
+    /* registros ARQUIVADOS neste aparelho não voltam pelo pull. Filtrar AQUI,
+       e não depois, é o que evita baixar de novo o que seria descartado — era
+       assim que os 80 arquivados desta conta vinham junto em toda passagem. */
+    let indice = indiceCompleto;
+    try {
+      if (typeof arquivo !== 'undefined') indice = indice.filter(r => !arquivo.estaArquivado(mod, r._idLocal));
+    } catch (e) {}
+
+    /* ETAPA 2 — o conteúdo, só do que este aparelho ainda não tem nesta
+       versão. `_relUpdatedAt` é o carimbo da versão que veio da nuvem: se ele
+       bate com o de lá, a cópia daqui É aquela versão e não há o que baixar.
+       Editar o registro aqui mexe em `_updatedAt`, não neste — então trabalho
+       local não faz o aparelho rebaixar o que já tinha. */
+    const carimboLocal = new Map();
+    try {
+      (store.list(mod) || []).forEach(x => {
+        if (x && x._id) carimboLocal.set(x._id, x._relUpdatedAt || '');
+      });
+    } catch (e) {}
+    const precisam = indice
+      .filter(r => carimboLocal.get(r._idLocal) !== r.updated_at)
+      .map(r => r.id);
+
+    let remotos = [];
+    if (precisam.length) {
+      remotos = await cloudRel.puxarPorIds(mod, precisam);
+      /* Falhou o conteúdo: não mescla nada e não reconcilia nada. Sair aqui
+         mantém o aparelho na versão anterior, que é íntegra — meia
+         sincronização seria pior que nenhuma. */
+      if (!remotos) { cloudRel._puxados[mod] = false; return; }
+      try { if (typeof arquivo !== 'undefined') remotos = remotos.filter(r => !arquivo.estaArquivado(mod, r._id)); } catch (e) {}
+    }
     /* Aqui morava a falha do pré-lançamento: quando o registro JÁ EXISTIA neste
        aparelho, só o carimbo _relUpdatedAt era copiado e o conteúdo da nuvem ia
        fora. Ou seja: o aparelho do médico tinha a versão "rascunho" dela, o
@@ -21036,7 +21176,9 @@ const cloudRel = {
       const u = auth.usuarioAtual();
       if (typeof orgSettings !== 'undefined' && orgSettings.visibilidade() === 'proprios'
           && u && u.role === 'anestesiologista') {
-        const idsRemotos = new Set(remotos.map(r => r._id));
+        /* idsRemotos vem do ÍNDICE COMPLETO, não do que foi baixado agora.
+           Com a leitura incremental, `remotos` traz só o que mudou — usá-lo
+           aqui apagaria do aparelho todo registro que continuou igual. */
         for (let i = locais.length - 1; i >= 0; i--) {
           const x = locais[i];
           if (x && x._relUpdatedAt && x._id && !idsRemotos.has(x._id)) { locais.splice(i, 1); removidos++; }
@@ -25827,13 +25969,22 @@ const pdfBackup = {
   },
 
   /* ======================= SUPABASE STORAGE ======================= */
-  BUCKET: 'documentos-pdf',
+  /* Mesmo bucket e mesma regra do prontuário: a primeira pasta é a
+     organização, porque é ela que a policy lê. Ver o comentário longo em
+     `prontuario` — este módulo apontava para o mesmo bucket inexistente. */
+  BUCKET: 'clinical-attachments',
   async enviarSupabase(blob, nomeArq) {
     const c = cloud.config();
     const s = cloud.session();
     if (!c || !s || !s.access_token) return false;
+    let org = null;
+    try { org = await cloudRel._orgAsync(); } catch (e) {}
+    if (!org) {
+      toast('⚠️ Backup de PDF na nuvem exige conta ligada a uma clínica (Ajustes → Equipe da nuvem)', 'warn');
+      return false;
+    }
     const uid = (s.user && s.user.id) || 'anon';
-    const path = `${uid}/${utils.hojeISO()}/${Date.now()}_${nomeArq}`;
+    const path = `${org}/${uid}/backups-pdf/${utils.hojeISO()}/${Date.now()}_${nomeArq}`;
     const url = `${c.url}/storage/v1/object/${pdfBackup.BUCKET}/${encodeURI(path)}`;
     try {
       const r = await fetch(url, {
@@ -25853,7 +26004,7 @@ const pdfBackup = {
       /* bucket ausente → orienta a criar */
       const txt = await r.text().catch(() => '');
       if (r.status === 404 || /bucket/i.test(txt)) {
-        toast('⚠️ Crie o bucket "documentos-pdf" no Supabase (Storage) para o backup automático', 'warn');
+        toast('⚠️ Bucket "clinical-attachments" ausente — rode a migração 0002 no Supabase', 'warn');
       } else if (r.status === 401 || r.status === 403) {
         toast('⚠️ Sem permissão para salvar PDF na nuvem — verifique login e políticas do bucket', 'warn');
       }
