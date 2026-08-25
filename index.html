@@ -4492,7 +4492,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-25f</b><br>
+    v7.1 · build <b id="build-tag">2026-08-25g</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -12820,7 +12820,17 @@ const preLanc = {
           ? ' <b>' + d.naoCouberam + '</b> não couberam neste aparelho — libere espaço em Ajustes → Armazenamento.'
           : ' Toque em <b>🔄 Buscar</b> de novo; se persistir, me avise.'));
     } else if (d.naClinica < naFila) {
-      linhas.push('📱 <b>' + (naFila - d.naClinica) + '</b> deste(s) pré-lançamento(s) ainda não estão na clínica — vieram só deste aparelho.');
+      /* Registro preso NESTE aparelho: existe aqui, não existe na clínica.
+         Antes isto era só um informe — o botão de subir e o motivo da falha
+         moravam no aviso da auxiliar, e quem estivesse vendo esta tela não
+         tinha o que fazer com a notícia. O registro está igualmente preso
+         para os dois; a ação e o porquê valem para os dois. */
+      const presos = (() => { try { return preLanc.naoSubiram().length; } catch (e) { return 0; } })();
+      linhas.push('📱 <b>' + (naFila - d.naClinica) + '</b> deste(s) pré-lançamento(s) ainda não estão na clínica — vieram só deste aparelho.' +
+        (preLanc._erroSubida ? '<br>Motivo: <b>' + utils.escapeHTML(preLanc._erroSubida) + '</b>' : '') +
+        (presos
+          ? '<br><button type="button" class="btn btn-xs btn-primary" style="margin-top:6px" onclick="preLanc.subirPendentes()">Subir agora</button>'
+          : ''));
     }
     if (!linhas.length) return '';
     return '<p style="font-size:.8rem;color:#1c4f7c;background:#eef4fb;border:1px solid #c7dcf0;' +

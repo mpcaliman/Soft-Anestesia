@@ -9900,6 +9900,52 @@ await test('Nuvem: conta sem clínica é dita em vez de fingir "em dia"', async 
   await page.close();
 });
 
+
+/* 153) Pré-lançamento preso NESTE aparelho: existe aqui, não existe na
+   clínica. O botão de subir e o motivo da falha só apareciam para a auxiliar
+   — quem visse o aviso na tela do médico não tinha o que fazer com ele. */
+await test('Pré-lançamento: o que ficou preso no aparelho mostra o motivo e como destravar', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'medico@teste',
+      nome: 'Medico', perfil: 'medico', modulos: auth.ROLE_PERMS.anestesiologista.modulos.slice(),
+      role: 'anestesiologista', entrouEm: Date.now() }));
+    const limpar = () => ['pre', 'anestesia'].forEach(m => store.setList(m, []));
+    const corpo = () => (document.getElementById('pl-fila-lista') || {}).innerHTML || '';
+
+    /* enviado aqui e nunca espelhado: é o que falta `_relUpdatedAt` */
+    limpar();
+    store.save('pre', { nome: 'Linalva Presa Silva', data: utils.hojeISO(),
+      _preLanc: { estado: 'enviado', porNome: 'Auxiliar', enviadoEm: new Date().toISOString() } });
+    out.detectaPreso = preLanc.naoSubiram().length === 1;
+    preLanc._diag = { naClinica: 0, naoCouberam: 0, quando: new Date().toISOString() };
+    preLanc._erroSubida = 'esta conta ainda não está ligada a uma clínica na nuvem (Ajustes → Equipe da nuvem)';
+    preLanc.renderFila();
+    out.avisa = /vieram só deste aparelho/.test(corpo());
+    out.mostraMotivo = /Motivo:/.test(corpo()) && /Equipe da nuvem/.test(corpo());
+    out.temBotaoSubir = /subirPendentes\(\)/.test(corpo());
+
+    /* o que JÁ subiu não ganha botão nenhum */
+    limpar();
+    store.save('pre', { nome: 'Ja Subiu Souza', data: utils.hojeISO(),
+      _relUpdatedAt: '2026-08-01T00:00:00Z',
+      _preLanc: { estado: 'enviado', porNome: 'Aux', enviadoEm: new Date().toISOString() } });
+    preLanc._diag = { naClinica: 1, naoCouberam: 0 };
+    preLanc.renderFila();
+    out.semPresoSemBotao = !/subirPendentes\(\)/.test(corpo());
+    preLanc._diag = null; preLanc._erroSubida = '';
+    return out;
+  });
+
+  assert(r.detectaPreso, 'enviado sem carimbo da nuvem é registro preso no aparelho');
+  assert(r.avisa, 'e a tela precisa dizer isso');
+  assert(r.mostraMotivo, 'com o motivo da falha, não só o fato');
+  assert(r.temBotaoSubir, 'e com o botão de destravar — antes ele só existia para a auxiliar');
+  assert(r.semPresoSemBotao, 'o que já subiu não ganha botão');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
