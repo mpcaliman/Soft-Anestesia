@@ -3110,6 +3110,50 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
    (rótulos, valores, títulos e tabelas); a logomarca tem a sua, porque ela
    pedia uma redução maior do que o texto. */
 .pp-compacto { --pp-esc: .8; --pp-logo: .62; }
+/* RECEITA — 96px de logomarca para duas linhas de medicamento fazia a marca
+   mandar na folha. Aqui ela recua e quem manda é a prescrição: é ela que o
+   farmacêutico confere e o paciente segue.
+   Os tamanhos vinham escritos à mão no HTML (9,5pt aqui, 9pt ali, 10pt
+   adiante), fora da escala do resto do documento — era isso que fazia as
+   letras parecerem de fontes diferentes. Agora tudo passa por --pp-esc. */
+.pp-receita { --pp-logo: .68; }
+/* A receita tem poucas seções e muito branco. Sem respiro entre elas, tudo se
+   amontoa no alto da folha e a metade de baixo fica vazia — que era a queixa
+   de "má distribuição". Aqui o ritmo é maior de propósito. */
+.pp-receita .pp-header { margin-bottom: 14px; }
+.print-preview-paper .pp-receita h2 { margin: 15px 0 7px; }
+/* Nome de paciente é longo e quebrava em duas linhas dentro de um terço da
+   largura, com espaço sobrando à direita. Colunas desiguais resolvem os dois
+   problemas: o nome respira e paciente/idade/data cabem na MESMA linha — antes
+   a data sobrava sozinha numa segunda linha, quase vazia. */
+.print-preview-paper .pp-receita .pp-ident { grid-template-columns: 2.2fr 1fr 1fr; }
+.pp-receita .pp-med {
+  padding: 6px 0 7px;
+  border-bottom: 1px dotted #c8ccd2;
+}
+.pp-receita .pp-med:last-child { border-bottom: none; }
+.pp-receita .pp-med-linha {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 14px;
+}
+.pp-receita .pp-med-nome {
+  font-size: calc(11.5pt * var(--pp-esc, 1));
+  font-weight: 700; color: #1a2332; letter-spacing: .1px;
+}
+/* A concentração pertence ao nome, mas não disputa com ele */
+.pp-receita .pp-med-apres { font-weight: 500; color: #3a4450; }
+.pp-receita .pp-med-qtd {
+  font-size: calc(10.5pt * var(--pp-esc, 1));
+  font-weight: 600; color: #2a3441; white-space: nowrap; flex-shrink: 0;
+}
+.pp-receita .pp-med-pos {
+  font-size: calc(10.5pt * var(--pp-esc, 1));
+  color: #3a4450; margin-top: 3px;
+}
+.pp-receita .pp-med-vazio { font-size: calc(10.5pt * var(--pp-esc, 1)); color: #8a93a0; }
+.pp-receita .pp-validade {
+  font-size: calc(9.5pt * var(--pp-esc, 1)); color: #5a6472; margin-top: 8px;
+}
+.pp-receita .pp-orient { font-size: calc(10.5pt * var(--pp-esc, 1)); margin: 0; }
 .print-preview-paper .pp-header {
   margin-bottom: 10px;
 }
@@ -4448,7 +4492,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-25b</b><br>
+    v7.1 · build <b id="build-tag">2026-08-25c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -40472,6 +40516,21 @@ const printPreview = {
         .pp-quebra { page-break-before: always; break-before: page; }
         .pp-capitulo { margin: 0 0 12px; padding: 9px 14px; background: #eef2f7; border-left: 5px solid #3b5b7e; font-weight: 700; font-size: 13pt; color: #22384f; }
         .pp-compacto { --pp-esc: .8; --pp-logo: .62; }
+        /* Receita: ver o comentário longo na folha de estilo da visualização */
+        .pp-receita { --pp-logo: .68; }
+        .pp-receita .pp-header { margin-bottom: 14px; }
+        .pp-receita h2 { margin: 15px 0 7px; }
+        .pp-receita .pp-ident { grid-template-columns: 2.2fr 1fr 1fr; }
+        .pp-receita .pp-med { padding: 6px 0 7px; border-bottom: 1px dotted #c8ccd2; }
+        .pp-receita .pp-med:last-child { border-bottom: none; }
+        .pp-receita .pp-med-linha { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; }
+        .pp-receita .pp-med-nome { font-size: calc(11.5pt * var(--pp-esc, 1)); font-weight: 700; color: #1a2332; letter-spacing: .1px; }
+        .pp-receita .pp-med-apres { font-weight: 500; color: #3a4450; }
+        .pp-receita .pp-med-qtd { font-size: calc(10.5pt * var(--pp-esc, 1)); font-weight: 600; color: #2a3441; white-space: nowrap; flex-shrink: 0; }
+        .pp-receita .pp-med-pos { font-size: calc(10.5pt * var(--pp-esc, 1)); color: #3a4450; margin-top: 3px; }
+        .pp-receita .pp-med-vazio { font-size: calc(10.5pt * var(--pp-esc, 1)); color: #8a93a0; }
+        .pp-receita .pp-validade { font-size: calc(9.5pt * var(--pp-esc, 1)); color: #5a6472; margin-top: 8px; }
+        .pp-receita .pp-orient { font-size: calc(10.5pt * var(--pp-esc, 1)); margin: 0; }
         .pp-header { margin-bottom: 10px; }
         .pp-header-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 5px; border-bottom: 1px solid #d0d4da; }
         .pp-logo { height: calc(96px * var(--pp-logo, 1)); width: auto; max-width: calc(440px * var(--pp-logo, 1)); object-fit: contain; flex-shrink: 0; }
@@ -42231,6 +42290,26 @@ ${TAG_CLOSE_HTML}`;
       '</div>';
   },
 
+  /* A APRESENTAÇÃO NA RECEITA É A CONCENTRAÇÃO, NÃO A FORMA.
+     Ao escolher o medicamento, o sistema compõe o campo com
+        [conc, forma].join(' — ')   →  "7 MG — Comprimido"
+     e isso é útil NA TELA: é o que distingue o comprimido de 7 mg da caneta
+     de 7 mg na hora de selecionar. No papel vira ruído — a forma já está dita
+     na posologia ("1 comprimido pela manhã") e repeti-la só rouba a leitura da
+     dose, que é o que o farmacêutico confere.
+     O snapshot da Anvisa guarda os dois campos separados; quando ele existe, a
+     concentração vem dele. Sem snapshot, desfaz-se exatamente a junção que o
+     próprio sistema fez — e o que foi digitado à mão fica como está. */
+  _apresParaImpressao(it) {
+    if (!it) return '';
+    const snap = it.medicamento;
+    if (snap && snap.conc) return String(snap.conc).trim();
+    const apres = String(it.apres || '').trim();
+    if (!apres) return '';
+    const corte = apres.indexOf(' — ');
+    return corte > 0 ? apres.slice(0, corte).trim() : apres;
+  },
+
   _buildPrescricao() {
     const d = utils.formData('form-prescricao');
     const modelo = d.modelo || (d.tipo === 'especial' ? 'especial' : 'simples');
@@ -42248,14 +42327,21 @@ ${TAG_CLOSE_HTML}`;
     const validadeTxt = d.validade || (modelo === 'antimicrobiano' ? '10 dias' : (modelo === 'especial' ? '30 dias' : ''));
 
     /* Lista de medicamentos numerada */
-    const listaMeds = itens.length ? itens.map((it, i) => `
-      <div style="margin-bottom:10px;padding-bottom:8px;border-bottom:1px dotted #ccc">
-        <div style="font-size:9.5pt"><strong>${i + 1}. ${utils.escapeHTML(it.nome)}</strong>${it.apres ? ' — ' + utils.escapeHTML(it.apres) : ''}${it.qtd ? ' &nbsp;&nbsp;<span style="color:#444">' + utils.escapeHTML(it.qtd) + '</span>' : ''}</div>
-        ${it.pos || it.via ? `<div style="font-size:9pt;color:#333;margin-top:2px">${utils.escapeHTML(it.pos || '')}${it.via ? ' · Via: ' + utils.escapeHTML(it.via) : ''}</div>` : ''}
-      </div>`).join('') : '<p style="color:#888">Nenhum medicamento.</p>';
+    const listaMeds = itens.length ? itens.map((it, i) => {
+      const apres = printPreview._apresParaImpressao(it);
+      const pos = [it.pos || '', it.via ? 'Via: ' + it.via : ''].filter(Boolean).join(' · ');
+      return `
+      <div class="pp-med">
+        <div class="pp-med-linha">
+          <span class="pp-med-nome">${i + 1}. ${utils.escapeHTML(it.nome)}${apres ? ' <span class="pp-med-apres">' + utils.escapeHTML(apres) + '</span>' : ''}</span>
+          ${it.qtd ? `<span class="pp-med-qtd">${utils.escapeHTML(it.qtd)}</span>` : ''}
+        </div>
+        ${pos ? `<div class="pp-med-pos">${utils.escapeHTML(pos)}</div>` : ''}
+      </div>`;
+    }).join('') : '<p class="pp-med-vazio">Nenhum medicamento.</p>';
 
     const cabecalhoPac = `
-      <div class="pp-grid cols-3">
+      <div class="pp-grid cols-3 pp-ident">
         ${printPreview._fieldSempre('Paciente', d.nome)}
         ${printPreview._field('Idade', d.idade)}
         ${printPreview._field('CPF/RG', d.documento)}
@@ -42268,8 +42354,8 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._assinaturaDesenhada(d.assinatura_dataurl || d.sig_dataurl, d.profissional || 'Profissional', d.crm, 'prof')}
       </div>`;
 
-    const orient = d.orientacoes ? printPreview._section('Orientações', `<p style="font-size:10pt">${utils.escapeHTML(d.orientacoes)}</p>`) : '';
-    const validade = validadeTxt ? `<div style="font-size:9pt;color:#555;margin-top:6px">Validade: ${utils.escapeHTML(validadeTxt)}</div>` : '';
+    const orient = d.orientacoes ? printPreview._section('Orientações', `<p class="pp-orient">${utils.escapeHTML(d.orientacoes)}</p>`) : '';
+    const validade = validadeTxt ? `<div class="pp-validade">Validade: ${utils.escapeHTML(validadeTxt)}</div>` : '';
 
     /* Monta uma via */
     const umaVia = (rotulo) => printPreview._header(titulo, meta + (rotulo ? `<br><span style="font-size:8pt;font-weight:700;color:#b3392a">${rotulo}</span>` : '')) +
@@ -42285,12 +42371,12 @@ ${TAG_CLOSE_HTML}`;
       const via1 = especial ? '1ª via — Retenção da Farmácia' : '1ª via — Paciente';
       const via2 = especial ? '2ª via — Orientação ao Paciente' : '2ª via — Retida na Farmácia';
       const rodapeLabel = especial ? 'Receituário de Controle Especial (2 vias)' : 'Receita de Antimicrobiano (2 vias)';
-      return umaVia(via1) +
+      return '<div class="pp-receita">' + umaVia(via1) +
         '<div style="page-break-before:always"></div>' +
         umaVia(via2) +
-        printPreview._footer(rodapeLabel);
+        printPreview._footer(rodapeLabel) + '</div>';
     }
-    return umaVia('') + printPreview._footer('Receituário');
+    return '<div class="pp-receita">' + umaVia('') + printPreview._footer('Receituário') + '</div>';
   },
 
   /* Atestado médico e Declaração de comparecimento — documentos declaratórios
