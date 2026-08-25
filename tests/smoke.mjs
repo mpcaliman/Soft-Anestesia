@@ -9770,6 +9770,70 @@ await test('Receita: a apresentação impressa é a concentração, não a forma
   await page.close();
 });
 
+
+/* 151) A auxiliar envia, o médico não vê, e não há como procurar: o botão
+   🔄 Buscar mora no cartão da fila, e o cartão se escondia quando vazio. */
+await test('Pré-lançamento: com a fila vazia o médico ainda tem como buscar na clínica', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const entrar = (role, perfil) => sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({
+      id: 'u-' + role, usuario: role + '@teste', nome: role, perfil: perfil,
+      modulos: auth.ROLE_PERMS[role].modulos.slice(), role: role, entrouEm: Date.now() }));
+    const card = () => document.getElementById('pl-fila-card');
+    const visivel = () => !!card() && card().style.display !== 'none';
+    const corpo = () => (document.getElementById('pl-fila-lista') || {}).innerHTML || '';
+    const limpar = () => ['pre', 'anestesia'].forEach(m => store.setList(m, []));
+
+    /* --- ERA AQUI O BECO: fila vazia, cartão sumia, botão sumia junto ---- */
+    limpar();
+    entrar('anestesiologista', 'medico');
+    preLanc.renderFila();
+    out.vazioMostraCartao = visivel();
+    out.botaoExiste = !!(card() && card().querySelector('#pl-buscar-btn'));
+    out.textoOrienta = /Buscar/.test(corpo());
+    out.tituloVazio = (document.getElementById('pl-fila-titulo') || {}).textContent || '';
+
+    /* --- com item, tudo como era ---------------------------------------- */
+    store.save('pre', { nome: 'Linalva Teste Silva', data: utils.hojeISO(),
+      _preLanc: { estado: 'enviado', porNome: 'Auxiliar', enviadoEm: new Date().toISOString() } });
+    preLanc.renderFila();
+    out.comItem = visivel() && /Linalva Teste Silva/.test(corpo());
+    out.tituloComItem = (document.getElementById('pl-fila-titulo') || {}).textContent || '';
+
+    /* --- gestor também confere ------------------------------------------ */
+    limpar(); entrar('gestor', 'medico'); preLanc.renderFila();
+    out.gestorVe = visivel();
+
+    /* --- a auxiliar sem pendência continua sem cartão: a fila não é dela - */
+    limpar(); entrar('auxiliar', 'secretaria'); preLanc.renderFila();
+    out.auxiliarVazioEsconde = !visivel();
+
+    /* --- e o CIRURGIÃO não passa a ver o que não é dele ------------------
+       `ehMedico()` aceita qualquer perfil médico, e cirurgião é médico:
+       antes ele não via porque a fila estava vazia, não porque a regra
+       dissesse. Mostrar o cartão vazio não podia abrir essa porta. */
+    limpar();
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'cx', usuario: 'cir@teste',
+      nome: 'Cirurgiao', perfil: 'medico', modulos: auth.ROLE_PERMS.cirurgiao.modulos.slice(),
+      role: 'cirurgiao', entrouEm: Date.now() }));
+    preLanc.renderFila();
+    out.cirurgiaoNaoVe = !visivel();
+    return out;
+  });
+
+  assert(r.vazioMostraCartao, 'com a fila vazia o cartão precisa continuar na tela');
+  assert(r.botaoExiste, 'porque é nele que mora o 🔄 Buscar — sem cartão não há como procurar');
+  assert(r.textoOrienta, 'e o texto diz o que fazer quando algo enviado não apareceu');
+  assert(/Pré-lançamentos/.test(r.tituloVazio), 'título neutro quando não há fila — deu "' + r.tituloVazio + '"');
+  assert(r.comItem, 'com item enviado, ele aparece na lista');
+  assert(/\(1\)/.test(r.tituloComItem), 'e o título conta quantos — deu "' + r.tituloComItem + '"');
+  assert(r.gestorVe, 'o gestor também confere pré-lançamento');
+  assert(r.auxiliarVazioEsconde, 'a auxiliar sem pendência não ganha cartão vazio');
+  assert(r.cirurgiaoNaoVe, 'e o cirurgião não passa a ver a fila que não é dele');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
