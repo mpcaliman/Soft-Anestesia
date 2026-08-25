@@ -22659,6 +22659,10 @@ const riscosTermo = {
     ctx.risco = String(pre.risco || '');
     ctx.viaAerea = riscosTermo._norm([pre.via_aerea, pre.via_aerea_resumo].filter(Boolean).join(' '));
     ctx.jejum = String(pre.jejum || '');
+    /* A cirurgia proposta é o único sinal que a pré dá sobre POSIÇÃO e DURAÇÃO:
+       não há campo de porte nem de tempo previsto. Serve para sugerir, nunca
+       para afirmar — quem confirma é o médico, desmarcando o que não couber. */
+    ctx.cirurgia = riscosTermo._norm(pre.cirurgia);
     const imc = parseFloat(String(pre.imc || '').replace(',', '.'));
     if (imc > 5 && imc < 100) ctx.imc = imc;
     const idade = parseInt(String(pre.idade || '').replace(/\D+/g, ''), 10);
@@ -22818,6 +22822,86 @@ const riscosTermo = {
         'Estou ciente de que essa circunstância eleva o risco anestésico, em especial o risco de aspiração de ' +
         'conteúdo gástrico e o de descompensação das minhas doenças de base, e ainda assim CONSINTO com a realização ' +
         'do procedimento.'
+    },
+    {
+      chave: 'posicionamento',
+      grupo: 'Circunstância do procedimento',
+      rotulo: 'Posicionamento na mesa cirúrgica',
+      /* A posição de verdade só se conhece na sala. O que a pré permite é
+         apontar quem tem MAIS chance de se machucar com ela — e as cirurgias
+         cuja posição é notoriamente exigente. */
+      quando: ctx => {
+        const posicaoExigente = /coluna|artrodese|laminectomia|discectomia|nefrectomia|quadril|artroplastia|ombro|litotomia|prostatectomia|histerectomia|videolaparoscop|robotic|bariatric|toracotomia|lobectomia/.test(ctx.cirurgia);
+        const fatores = [];
+        if (riscosTermo.grauObesidade(ctx.imc) > 0) fatores.push('obesidade');
+        if (/diabet/.test(ctx.comorb)) fatores.push('diabetes');
+        if (ctx.idade != null && ctx.idade >= 70) fatores.push('idade avançada');
+        if (/neuropat|vascular perif|arterial perif|doenca arterial obstrutiva/.test(ctx.comorb)) fatores.push('doença neurológica ou vascular periférica');
+        if (!posicaoExigente && !fatores.length) return '';
+        if (posicaoExigente && fatores.length) return 'cirurgia de posicionamento exigente e ' + fatores.join(', ');
+        if (posicaoExigente) return 'cirurgia cuja posição na mesa é exigente';
+        return fatores.join(', ') + ' — condição que aumenta o risco de lesão por posicionamento';
+      },
+      texto: ctx => {
+        const porques = [];
+        if (riscosTermo.grauObesidade(ctx.imc) > 0) porques.push('meu peso corporal');
+        if (/diabet/.test(ctx.comorb)) porques.push('o diabetes, que compromete os nervos e a circulação');
+        if (ctx.idade != null && ctx.idade >= 70) porques.push('a minha idade');
+        const razao = porques.length
+          ? ' Compreendi que ' + porques.join(', ') + ' aumenta(m) a minha chance de sofrer esse tipo de lesão.'
+          : '';
+        return 'Fui informado(a) de que, para que a cirurgia possa ser realizada, meu corpo precisará ser colocado em ' +
+          'POSIÇÃO ESPECÍFICA sobre a mesa cirúrgica e nela permanecer imóvel enquanto durar o procedimento, sob efeito ' +
+          'da anestesia — condição em que não sinto dor nem consigo mudar de posição por conta própria. ' +
+          'Compreendi que dessa imobilidade decorrem riscos que existem mesmo quando a equipe toma todos os cuidados de ' +
+          'proteção e acolchoamento: LESÃO DE NERVOS periféricos, com formigamento, dormência, dor ou fraqueza em um ' +
+          'braço ou perna; LESÃO DA PELE por pressão em pontos de apoio; dor muscular e articular; inchaço da face, das ' +
+          'pálpebras ou da língua em posições com a cabeça mais baixa; e, em posições e durações desfavoráveis, ' +
+          'comprometimento da circulação de um membro ou lesão ocular com alteração da visão. ' +
+          'Fui esclarecido(a) de que a maioria dessas alterações é temporária e se resolve em dias ou semanas, mas que ' +
+          'algumas podem ser prolongadas ou permanentes, e que a escolha da posição é determinada pela via de acesso ' +
+          'que a cirurgia exige, não sendo possível evitá-la sem inviabilizar o procedimento.' + razao +
+          ' Declaro que essas explicações me foram dadas em linguagem que compreendi e que tive oportunidade de perguntar.';
+      }
+    },
+    {
+      chave: 'tempo_cirurgico',
+      grupo: 'Circunstância do procedimento',
+      rotulo: 'Tempo cirúrgico prolongado',
+      /* Não existe campo de duração prevista na pré. O que dá para inferir é o
+         porte pelo nome do procedimento — e mesmo isso é sugestão: uma
+         colecistectomia pode durar quarenta minutos ou quatro horas. */
+      quando: ctx => {
+        /* \b em cistectomia e hipec de propósito: sem ele "coleCISTECTOMIA"
+           casava com "cistectomia" e uma colecistectomia virava cirurgia de
+           grande porte. Sugestão errada num termo assinado é pior que sugestão
+           nenhuma — o médico passa a desconfiar de todas. */
+        const demorada = /artroplastia|revasculariza|coluna|artrodese|escoliose|bariatric|gastrectomia|esofagectomia|duodenopancreat|whipple|hepatectomia|transplante|microcirurg|retalho|reconstru|craniotomia|\bcistectomia|prostatectomia radical|citorredu|\bhipec|toracotomia|lobectomia|aneurisma|aorta/.test(ctx.cirurgia);
+        if (!demorada) return '';
+        const extra = [];
+        if (riscosTermo.grauObesidade(ctx.imc) > 0) extra.push('obesidade');
+        if (/^ASA (III|IV|V)/i.test(ctx.asa)) extra.push(ctx.asa.split(' ')[0] + ' ' + (ctx.asa.split(' ')[1] || ''));
+        return 'procedimento de grande porte, com duração habitualmente prolongada' +
+          (extra.length ? ' — e ' + extra.join(', ') : '');
+      },
+      texto: ctx => {
+        const idoso = ctx.idade != null && ctx.idade >= 70;
+        return 'Fui informado(a) de que o procedimento a que serei submetido(a) tem DURAÇÃO HABITUALMENTE PROLONGADA e de ' +
+          'que o tempo de anestesia acompanha o tempo de cirurgia, podendo ainda ser maior do que o previsto se surgirem ' +
+          'dificuldades durante o ato. Compreendi que o tempo prolongado, por si só, acrescenta riscos: QUEDA DA ' +
+          'TEMPERATURA corporal, com tremores e desconforto ao despertar; maior chance de FORMAÇÃO DE COÁGULOS nas veias ' +
+          'das pernas, que podem migrar para o pulmão; LESÃO DE PELE E DE NERVOS pela permanência imóvel na mesma ' +
+          'posição; maior perda de sangue e maior necessidade de reposição de líquidos ou de transfusão; maior risco de ' +
+          'infecção da ferida operatória; e exposição mais longa aos medicamentos anestésicos, com despertar mais ' +
+          'demorado.' +
+          (idoso ? ' Compreendi que, pela minha idade, há ainda risco aumentado de confusão mental no pós-operatório, ' +
+            'geralmente passageira.' : '') +
+          ' Fui esclarecido(a) de que, em razão da extensão do procedimento e da sua duração, pode ser necessário que eu ' +
+          'permaneça sob cuidados intensivos ou em observação prolongada após a cirurgia, e que a equipe adotará medidas ' +
+          'de aquecimento, de proteção dos pontos de apoio e de prevenção de coágulos ao longo de todo o ato. ' +
+          'Declaro que essas explicações me foram dadas em linguagem que compreendi e que consinto com a realização do ' +
+          'procedimento ciente da sua duração.';
+      }
     },
     {
       chave: 'estomago_cheio',

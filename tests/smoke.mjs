@@ -9348,6 +9348,112 @@ await test('Financeiro: consulta e pré lançam o código da consulta, não a ci
   await page.close();
 });
 
+
+/* 147) Posicionamento e tempo cirúrgico: a pré não tem campo de posição nem de
+   duração, então a sugestão sai do nome da cirurgia — e errar aí é pior que
+   não sugerir, porque o médico passa a desconfiar de todas. */
+await test('Termo: riscos de posicionamento e de tempo cirúrgico prolongado', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const roda = (nome, cirurgia, extra) => {
+      store.setList('pre', []);
+      store.save('pre', Object.assign({ nome: nome, data: utils.hojeISO(), cirurgia: cirurgia,
+        idade: '40 anos', imc: '24', asa: 'ASA I' }, extra || {}));
+      const ctx = riscosTermo.contexto(nome);
+      const s = riscosTermo.CATALOGO
+        .filter(x => { try { return !!x.quando(ctx); } catch (e) { return false; } }).map(x => x.chave);
+      return { ctx: ctx, pos: s.indexOf('posicionamento') >= 0, tempo: s.indexOf('tempo_cirurgico') >= 0 };
+    };
+    const item = ch => riscosTermo.CATALOGO.find(x => x.chave === ch);
+
+    out.existem = !!item('posicionamento') && !!item('tempo_cirurgico');
+    out.grupo = item('posicionamento').grupo === 'Circunstância do procedimento'
+      && item('tempo_cirurgico').grupo === 'Circunstância do procedimento';
+
+    /* videolaparoscopia: a posição é exigente (Trendelenburg), a duração não */
+    const cole = roda('Maria Colecisto Silva', 'Colecistectomia videolaparoscopica');
+    out.colePos = cole.pos; out.coleTempo = cole.tempo;
+
+    /* ARMADILHA: "coleCISTECTOMIA" não pode casar com "cistectomia" */
+    const cist = roda('Joao Cistectomia Souza', 'Cistectomia radical');
+    out.cistectomiaTempo = cist.tempo;
+
+    /* grande porte: os dois */
+    const artro = roda('Ana Artro Lima', 'Artroplastia total de joelho', { idade: '78 anos', imc: '33,2',
+      asa: 'ASA III', comorbidades: 'HAS, Diabetes tipo 2' });
+    out.artroAmbos = artro.pos && artro.tempo;
+    out.motivoPos = item('posicionamento').quando(artro.ctx);
+    out.motivoTempo = item('tempo_cirurgico').quando(artro.ctx);
+    const tPos = item('posicionamento').texto(artro.ctx);
+    const tTempo = item('tempo_cirurgico').texto(artro.ctx);
+    /* o texto diz o que é o risco E por que se aplica a ESTE paciente */
+    out.posNomeia = /LES[ÃA]O DE NERVOS/.test(tPos) && /peso corporal/.test(tPos) && /diabetes/.test(tPos);
+    out.tempoNomeia = /COÁGULOS/.test(tTempo) && /TEMPERATURA/.test(tTempo) && /confus[ãa]o mental/.test(tTempo);
+    /* e nenhum promete conduta, prazo ou resultado */
+    out.semPromessa = !/(\d+\s?(h|horas|min|minutos)\b)|suspender|garant|sem risco/i.test(tPos + tTempo);
+
+    /* cirurgia pequena em paciente hígido: nenhum dos dois */
+    const peq = roda('Rita Nodulo Costa', 'Exerese de nodulo de mama');
+    out.pequenaNenhum = !peq.pos && !peq.tempo;
+
+    /* cirurgia pequena, MAS paciente que se machuca com posição: só posicionamento */
+    const fat = roda('Pedro Hernia Alves', 'Herniorrafia inguinal',
+      { imc: '34,5', idade: '75 anos', comorbidades: 'Diabetes tipo 2' });
+    out.fatoresPos = fat.pos && !fat.tempo;
+    out.motivoFatores = item('posicionamento').quando(fat.ctx);
+
+    /* sem pré nenhuma, nada é sugerido */
+    store.setList('pre', []);
+    const vazio = riscosTermo.contexto('Ninguem Sem Pre Alguma');
+    out.semPre = !item('posicionamento').quando(vazio) && !item('tempo_cirurgico').quando(vazio);
+
+    /* --- e os dois entram no termo, mesmo quando não sugeridos ------------ */
+    store.save('pre', { nome: 'Rita Nodulo Costa', data: utils.hojeISO(),
+      cirurgia: 'Exerese de nodulo de mama', idade: '31 anos', imc: '22', asa: 'ASA I' });
+    ui.navegar('termo');
+    const f = document.getElementById('form-termo');
+    f.querySelector('[name="nome"]').value = 'Rita Nodulo Costa';
+    f.querySelector('[name="riscos"]').value = '';
+    riscosTermo.abrir();
+    const caixas = Array.from(document.querySelectorAll('#modal-body .risco-item input'));
+    out.selecionaveis = caixas.some(e => e.value === 'posicionamento')
+      && caixas.some(e => e.value === 'tempo_cirurgico');
+    out.vemDesmarcados = caixas.filter(e =>
+      (e.value === 'posicionamento' || e.value === 'tempo_cirurgico') && e.checked).length === 0;
+    /* marcar à mão e aplicar */
+    caixas.forEach(e => { e.checked = (e.value === 'posicionamento' || e.value === 'tempo_cirurgico'); });
+    riscosTermo.aplicar();
+    const campo = f.querySelector('[name="riscos"]').value;
+    out.inseriu = /POSI[ÇC][ÃA]O ESPEC[ÍI]FICA/.test(campo) && /DURA[ÇC][ÃA]O HABITUALMENTE PROLONGADA/.test(campo);
+    out.saiNaImpressao = printPreview._buildTermo().indexOf('Riscos específicos discutidos') >= 0;
+    try { modal.close(); } catch (e) {}
+    return out;
+  });
+
+  assert(r.existem, 'os dois riscos precisam existir no catálogo');
+  assert(r.grupo, 'ambos são circunstância do procedimento');
+  assert(r.colePos, 'videolaparoscopia tem posição exigente e deve sugerir posicionamento');
+  assert(!r.coleTempo, 'mas colecistectomia não é cirurgia de duração prolongada');
+  assert(r.cistectomiaTempo, 'cistectomia radical é de grande porte e deve sugerir tempo prolongado');
+  assert(r.artroAmbos, 'artroplastia em idoso obeso sugere posicionamento e tempo');
+  assert(/posicionamento exigente/.test(r.motivoPos), 'o motivo diz por que foi sugerido — deu "' + r.motivoPos + '"');
+  assert(/grande porte/.test(r.motivoTempo), 'idem para o tempo — deu "' + r.motivoTempo + '"');
+  assert(r.posNomeia, 'o texto do posicionamento nomeia a lesão de nervos e os fatores DESTE paciente');
+  assert(r.tempoNomeia, 'o do tempo nomeia coágulos, hipotermia e confusão no idoso');
+  assert(r.semPromessa, 'nenhum dos dois promete conduta, prazo ou resultado');
+  assert(r.pequenaNenhum, 'cirurgia pequena em paciente hígido não sugere nenhum dos dois');
+  assert(r.fatoresPos, 'mas obeso, diabético e idoso sugere posicionamento mesmo em cirurgia pequena');
+  assert(/obesidade/.test(r.motivoFatores) && /idade avançada/.test(r.motivoFatores),
+    'e o motivo nomeia os fatores — deu "' + r.motivoFatores + '"');
+  assert(r.semPre, 'sem pré-anestésica não se sugere nada');
+  assert(r.selecionaveis, 'os dois aparecem na janela para marcar à mão');
+  assert(r.vemDesmarcados, 'desmarcados quando não são sugeridos');
+  assert(r.inseriu, 'marcados à mão, os textos entram no termo');
+  assert(r.saiNaImpressao, 'e saem na impressão');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
