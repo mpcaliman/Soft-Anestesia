@@ -4492,7 +4492,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-25e</b><br>
+    v7.1 · build <b id="build-tag">2026-08-25g</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -12820,7 +12820,17 @@ const preLanc = {
           ? ' <b>' + d.naoCouberam + '</b> não couberam neste aparelho — libere espaço em Ajustes → Armazenamento.'
           : ' Toque em <b>🔄 Buscar</b> de novo; se persistir, me avise.'));
     } else if (d.naClinica < naFila) {
-      linhas.push('📱 <b>' + (naFila - d.naClinica) + '</b> deste(s) pré-lançamento(s) ainda não estão na clínica — vieram só deste aparelho.');
+      /* Registro preso NESTE aparelho: existe aqui, não existe na clínica.
+         Antes isto era só um informe — o botão de subir e o motivo da falha
+         moravam no aviso da auxiliar, e quem estivesse vendo esta tela não
+         tinha o que fazer com a notícia. O registro está igualmente preso
+         para os dois; a ação e o porquê valem para os dois. */
+      const presos = (() => { try { return preLanc.naoSubiram().length; } catch (e) { return 0; } })();
+      linhas.push('📱 <b>' + (naFila - d.naClinica) + '</b> deste(s) pré-lançamento(s) ainda não estão na clínica — vieram só deste aparelho.' +
+        (preLanc._erroSubida ? '<br>Motivo: <b>' + utils.escapeHTML(preLanc._erroSubida) + '</b>' : '') +
+        (presos
+          ? '<br><button type="button" class="btn btn-xs btn-primary" style="margin-top:6px" onclick="preLanc.subirPendentes()">Subir agora</button>'
+          : ''));
     }
     if (!linhas.length) return '';
     return '<p style="font-size:.8rem;color:#1c4f7c;background:#eef4fb;border:1px solid #c7dcf0;' +
@@ -19699,6 +19709,20 @@ const nuvemEstado = {
       if (cloud.sessaoExpirada()) return { estado: 'expirada', msg: 'sessão vencida — toque para entrar' };
       const d = cloud.divergencia();
       if (d) return { estado: 'contas', msg: 'contas diferentes — toque para corrigir', div: d };
+      /* CONTA SEM CLÍNICA — a falha que dizia "em dia" enquanto nada andava.
+         Sem organização, `_orgAsync()` devolve null e TUDO para em silêncio:
+         `enviarRegistro` recusa com motivo 'org' e `puxarModulo` volta vazio.
+         Para quem usa o aparelho, o painel simplesmente não tem nada, o
+         financeiro tem só o que foi digitado ali, e o pré-lançamento enviado
+         nunca chega ao médico — sem uma linha explicando por quê.
+         Este indicador é o único caminho de quem não tem acesso a Ajustes;
+         se ele não contar isso, ninguém conta. */
+      try {
+        if (typeof cloudRel !== 'undefined' && !cloudRel._org() && cloudRel._semClinicaConfirmado()) {
+          return { estado: 'semClinica',
+            msg: 'conta sem clínica — nada sincroniza (toque)' };
+        }
+      } catch (e) {}
       const fila = (() => { try { return cloud._fila().length; } catch (e) { return 0; } })();
       if (fila) return { estado: 'pendente', msg: fila + (fila === 1 ? ' item aguardando envio' : ' itens aguardando envio'), fila };
       const ultimo = localStorage.getItem('medsys.v7.cloud.ultimo_sync');
@@ -19713,7 +19737,7 @@ const nuvemEstado = {
     if (!btn || !msg) return;
     if (msgForcada) { msg.textContent = msgForcada; return; }
     const s = nuvemEstado.situacao();
-    const icones = { ok: '☁️', pendente: '⏳', semNuvem: '⚠️', expirada: '🔑', contas: '⚠️' };
+    const icones = { ok: '☁️', pendente: '⏳', semNuvem: '⚠️', expirada: '🔑', contas: '⚠️', semClinica: '🏥' };
     if (ico) ico.textContent = icones[s.estado] || '☁️';
     msg.textContent = s.msg;
     btn.classList.toggle('sn-alerta', s.estado !== 'ok');
@@ -19767,6 +19791,28 @@ const nuvemEstado = {
       return;
     }
     if (cloud.sessaoExpirada()) { try { cloud.reentrar(); } catch (e) {} return; }
+    /* Conta sem clínica: sincronizar não adianta, porque não há para onde.
+       Confirma no servidor antes de acusar — o cache pode só não ter sido
+       preenchido ainda — e, confirmado, diz o que é e QUEM resolve. Ela não
+       resolve sozinha, e ficar tocando num botão que não responde é o que
+       faz alguém concluir que "o sistema não funciona". */
+    try {
+      if (typeof cloudRel !== 'undefined' && !cloudRel._org()) {
+        const org = await cloudRel._orgAsync();
+        if (!org) {
+          const eu = (() => { try { return (auth.usuarioAtual() || {}).usuario || ''; } catch (e) { return ''; } })();
+          modal.open('🏥 Esta conta não está ligada a nenhuma clínica',
+            '<p style="font-size:.9rem;margin:0 0 10px">Enquanto estiver assim, <b>nada sincroniza</b>: o que você salva fica só neste aparelho, ' +
+            'o que a equipe faz não chega aqui, e o pré-lançamento que você envia <b>o médico não vê</b>.</p>' +
+            '<p style="font-size:.86rem;color:var(--text-soft);margin:0 0 10px">Não é senha nem internet — a conta existe, só não pertence a nenhuma clínica na nuvem.</p>' +
+            (eu ? '<p style="font-size:.86rem;margin:0 0 10px">Conta: <b>' + utils.escapeHTML(eu) + '</b></p>' : '') +
+            '<p style="font-size:.86rem;margin:0"><b>Quem resolve é o gestor</b>, em <b>Ajustes → Equipe da nuvem</b>, adicionando esta conta à clínica. ' +
+            'Depois disso, toque aqui de novo e tudo sobe e desce de uma vez.</p>',
+            '<button class="btn btn-primary" onclick="modal.close()">Entendi</button>');
+          return;
+        }
+      }
+    } catch (e) {}
     if (nuvemEstado._ocupado) return;
     nuvemEstado._ocupado = true;
     if (btn) btn.disabled = true;
@@ -20617,11 +20663,27 @@ const cloudRel = {
      acusava "conta não vinculada a uma organização". */
   ORG_KEY: 'medsys.v7.cloud.org_id',
   _orgLembrada() { try { return localStorage.getItem(cloudRel.ORG_KEY) || null; } catch (e) { return null; } },
+  /* "Não tem clínica" e "ainda não perguntei" eram a mesma coisa: a chave
+     ausente. Sem separar os dois, ou o app cala sobre uma conta solta, ou
+     acusa toda conta recém-aberta de estar solta. Esta marca só é gravada
+     quando o SERVIDOR responde que não há vínculo. */
+  SEM_ORG_KEY: 'medsys.v7.cloud.sem_clinica',
+  _semClinicaConfirmado() {
+    try { return localStorage.getItem(cloudRel.SEM_ORG_KEY) === '1'; } catch (e) { return false; }
+  },
+  _marcarSemClinica(b) {
+    try {
+      if (b) localStorage.setItem(cloudRel.SEM_ORG_KEY, '1');
+      else localStorage.removeItem(cloudRel.SEM_ORG_KEY);
+    } catch (e) {}
+  },
   _lembrarOrg(org) {
     try {
       if (org) localStorage.setItem(cloudRel.ORG_KEY, org);
       else localStorage.removeItem(cloudRel.ORG_KEY);
     } catch (e) {}
+    /* achou clínica: a dúvida acabou nos dois sentidos */
+    if (org) cloudRel._marcarSemClinica(false);
   },
   _org() {
     try {
@@ -20636,7 +20698,7 @@ const cloudRel = {
       const p = await cloud.buscarPerfil();
       if (p && p.organization_id) { cloudRel._lembrarOrg(p.organization_id); return p.organization_id; }
       /* resposta clara do servidor: a conta realmente não tem clínica */
-      if (p && p.semVinculo) cloudRel._lembrarOrg(null);
+      if (p && p.semVinculo) { cloudRel._lembrarOrg(null); cloudRel._marcarSemClinica(true); }
     } catch (e) {}
     return null;
   },

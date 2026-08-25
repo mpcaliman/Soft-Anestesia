@@ -9834,6 +9834,118 @@ await test('Pré-lançamento: com a fila vazia o médico ainda tem como buscar n
   await page.close();
 });
 
+
+/* 152) Conta sem clínica: o indicador dizia "em dia" enquanto NADA andava.
+   Sem organização, `_orgAsync()` volta null e tudo para em silêncio — o
+   painel fica vazio, o financeiro só tem o que foi digitado ali, e o
+   pré-lançamento enviado nunca chega ao médico. */
+await test('Nuvem: conta sem clínica é dita em vez de fingir "em dia"', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud.sessaoExpirada = () => false;
+    cloud.divergencia = () => null;
+    cloud._fila = () => [];
+    auth.usuarioAtual = () => ({ id: 'u1', usuario: 'secretaria@teste.com',
+      role: 'auxiliar', perfil: 'secretaria' });
+
+    /* --- ainda não perguntei ao servidor: acusar seria alarme falso ------ */
+    cloudRel._marcarSemClinica(false);
+    cloudRel._lembrarOrg(null);
+    out.semPerguntarNaoAcusa = nuvemEstado.situacao().estado !== 'semClinica';
+
+    /* --- o servidor confirmou que não há vínculo ------------------------ */
+    cloudRel._marcarSemClinica(true);
+    const s = nuvemEstado.situacao();
+    out.confirmadoAcusa = s.estado === 'semClinica';
+    out.msgDizQueNadaSincroniza = /nada sincroniza/.test(s.msg || '');
+
+    /* --- achar clínica desfaz a marca nos dois sentidos ------------------ */
+    cloudRel._lembrarOrg('11111111-1111-1111-1111-111111111111');
+    out.marcaLimpa = cloudRel._semClinicaConfirmado() === false;
+    out.voltaAoNormal = nuvemEstado.situacao().estado === 'ok';
+
+    /* --- o toque explica, em vez de rodar sincronização que não vai a
+           lugar nenhum. Quem está no menu pode nem ter acesso a Ajustes. */
+    cloudRel._lembrarOrg(null);
+    cloudRel._marcarSemClinica(true);
+    cloudRel._orgAsync = async () => null;
+    await nuvemEstado.atualizarTudo();
+    const corpo = (document.getElementById('modal-body') || {}).innerHTML || '';
+    out.titulo = (document.getElementById('modal-title') || {}).textContent || '';
+    out.dizQuemResolve = /Equipe da nuvem/.test(corpo) && /gestor/.test(corpo);
+    out.nomeiaConta = /secretaria@teste\.com/.test(corpo);
+    out.explicaConsequencia = /m[ée]dico n[ãa]o v[êe]/.test(corpo);
+    try { modal.close(); } catch (e) {}
+
+    /* --- ícone próprio: não pode passar por "tudo certo" ---------------- */
+    nuvemEstado.renderMenu();
+    out.icone = (document.getElementById('sidebar-nuvem-ico') || {}).textContent || '';
+    cloudRel._marcarSemClinica(false);
+    return out;
+  });
+
+  assert(r.semPerguntarNaoAcusa, 'sem resposta do servidor não se acusa a conta — seria alarme falso');
+  assert(r.confirmadoAcusa, 'confirmado o não-vínculo, o indicador precisa dizer');
+  assert(r.msgDizQueNadaSincroniza, 'e dizer a consequência, não só o estado');
+  assert(r.marcaLimpa, 'achar clínica desfaz a marca');
+  assert(r.voltaAoNormal, 'e o indicador volta ao normal');
+  assert(/n[ãa]o est[áa] ligada a nenhuma cl[íi]nica/i.test(r.titulo), 'o toque abre a explicação — deu "' + r.titulo + '"');
+  assert(r.explicaConsequencia, 'que diz o que deixa de funcionar, inclusive o pré-lançamento');
+  assert(r.dizQuemResolve, 'e quem resolve: o gestor, em Equipe da nuvem');
+  assert(r.nomeiaConta, 'nomeando a conta, para o gestor saber qual adicionar');
+  assert(r.icone === '🏥', 'com ícone próprio no menu — deu "' + r.icone + '"');
+  await page.close();
+});
+
+
+/* 153) Pré-lançamento preso NESTE aparelho: existe aqui, não existe na
+   clínica. O botão de subir e o motivo da falha só apareciam para a auxiliar
+   — quem visse o aviso na tela do médico não tinha o que fazer com ele. */
+await test('Pré-lançamento: o que ficou preso no aparelho mostra o motivo e como destravar', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'medico@teste',
+      nome: 'Medico', perfil: 'medico', modulos: auth.ROLE_PERMS.anestesiologista.modulos.slice(),
+      role: 'anestesiologista', entrouEm: Date.now() }));
+    const limpar = () => ['pre', 'anestesia'].forEach(m => store.setList(m, []));
+    const corpo = () => (document.getElementById('pl-fila-lista') || {}).innerHTML || '';
+
+    /* enviado aqui e nunca espelhado: é o que falta `_relUpdatedAt` */
+    limpar();
+    store.save('pre', { nome: 'Linalva Presa Silva', data: utils.hojeISO(),
+      _preLanc: { estado: 'enviado', porNome: 'Auxiliar', enviadoEm: new Date().toISOString() } });
+    out.detectaPreso = preLanc.naoSubiram().length === 1;
+    preLanc._diag = { naClinica: 0, naoCouberam: 0, quando: new Date().toISOString() };
+    preLanc._erroSubida = 'esta conta ainda não está ligada a uma clínica na nuvem (Ajustes → Equipe da nuvem)';
+    preLanc.renderFila();
+    out.avisa = /vieram só deste aparelho/.test(corpo());
+    out.mostraMotivo = /Motivo:/.test(corpo()) && /Equipe da nuvem/.test(corpo());
+    out.temBotaoSubir = /subirPendentes\(\)/.test(corpo());
+
+    /* o que JÁ subiu não ganha botão nenhum */
+    limpar();
+    store.save('pre', { nome: 'Ja Subiu Souza', data: utils.hojeISO(),
+      _relUpdatedAt: '2026-08-01T00:00:00Z',
+      _preLanc: { estado: 'enviado', porNome: 'Aux', enviadoEm: new Date().toISOString() } });
+    preLanc._diag = { naClinica: 1, naoCouberam: 0 };
+    preLanc.renderFila();
+    out.semPresoSemBotao = !/subirPendentes\(\)/.test(corpo());
+    preLanc._diag = null; preLanc._erroSubida = '';
+    return out;
+  });
+
+  assert(r.detectaPreso, 'enviado sem carimbo da nuvem é registro preso no aparelho');
+  assert(r.avisa, 'e a tela precisa dizer isso');
+  assert(r.mostraMotivo, 'com o motivo da falha, não só o fato');
+  assert(r.temBotaoSubir, 'e com o botão de destravar — antes ele só existia para a auxiliar');
+  assert(r.semPresoSemBotao, 'o que já subiu não ganha botão');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
