@@ -4492,7 +4492,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-25c</b><br>
+    v7.1 · build <b id="build-tag">2026-08-25d</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -20975,6 +20975,24 @@ const cloudRel = {
     return row.legacy_id || ('rel_' + String(row.id || '').slice(0, 8));
   },
 
+  /* TODOS os _id que uma linha da nuvem pode representar.
+     `_rowParaRegistro` usa `data._id` quando ele existe e só então cai no
+     legacy_id — e o índice não lê `data`, justamente para ser barato. No
+     caminho normal os dois coincidem (`enviarRegistro` grava
+     `legacy_id = item._id`), mas basta uma linha com legacy_id nulo para
+     divergirem. E divergir aqui não é detalhe: a limpeza de visibilidade
+     apagaria do aparelho um registro que existe na nuvem.
+     Por isso o conjunto guarda as duas formas. Errar para o lado de NÃO
+     apagar custa uma passagem de convergência; errar para o outro custa o
+     registro. */
+  _idsPossiveisDaLinha(row) {
+    if (!row) return [];
+    const ids = [];
+    if (row.legacy_id) ids.push(row.legacy_id);
+    if (row.id) ids.push('rel_' + String(row.id).slice(0, 8));
+    return ids;
+  },
+
   async puxarIndiceModulo(mod) {
     const cfg = cloudRel.MODOS[mod]; if (!cfg) return null;
     if (!cloudRel.disponivel()) return null;
@@ -20990,7 +21008,8 @@ const cloudRel = {
       if (!Array.isArray(rows)) return null;
       return rows.map(row => ({
         id: row.id, legacy_id: row.legacy_id, updated_at: row.updated_at,
-        _idLocal: cloudRel._idLocalDaLinha(row)
+        _idLocal: cloudRel._idLocalDaLinha(row),
+        _idsPossiveis: cloudRel._idsPossiveisDaLinha(row)
       }));
     } catch (e) { return null; }
   },
@@ -21169,7 +21188,17 @@ const cloudRel = {
        filtro: é ela que diz o que continua visível para este usuário. Usar a
        lista filtrada aqui apagaria do aparelho tudo o que não foi baixado
        nesta passagem — ou seja, quase tudo. */
-    const idsRemotos = new Set(indiceCompleto.map(r => r._idLocal));
+    const idsRemotos = new Set();
+    indiceCompleto.forEach(r => (r._idsPossiveis || [r._idLocal]).forEach(id => { if (id) idsRemotos.add(id); }));
+    /* O índice não lê `data`, e é de lá que sai o _id quando o registro tem um
+       (`_rowParaRegistro` só cai no legacy_id se `data._id` não existir). No
+       caminho normal os dois são o mesmo — `enviarRegistro` grava
+       `legacy_id = item._id`. Mas se UMA linha vier sem legacy_id, o índice
+       deixa de conseguir afirmar qual registro do aparelho ela representa.
+       Nesse caso a limpeza de visibilidade não roda: convergir um pouco mais
+       tarde custa nada, apagar um registro que existe na nuvem custa o
+       registro. */
+    const indicePodeIdentificarTudo = indiceCompleto.every(r => !!r.legacy_id);
     /* registros ARQUIVADOS neste aparelho não voltam pelo pull. Filtrar AQUI,
        e não depois, é o que evita baixar de novo o que seria descartado — era
        assim que os 80 arquivados desta conta vinham junto em toda passagem. */
@@ -21218,7 +21247,8 @@ const cloudRel = {
     let removidos = 0;
     try {
       const u = auth.usuarioAtual();
-      if (typeof orgSettings !== 'undefined' && orgSettings.visibilidade() === 'proprios'
+      if (indicePodeIdentificarTudo
+          && typeof orgSettings !== 'undefined' && orgSettings.visibilidade() === 'proprios'
           && u && u.role === 'anestesiologista') {
         /* idsRemotos vem do ÍNDICE COMPLETO, não do que foi baixado agora.
            Com a leitura incremental, `remotos` traz só o que mudou — usá-lo
