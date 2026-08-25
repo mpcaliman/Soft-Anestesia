@@ -9522,6 +9522,14 @@ await test('Sync: o índice primeiro, o conteúdo só do que mudou — e nada é
     out.idBate = cloudRel._idLocalDaLinha(linhaTeste) === cloudRel._rowParaRegistro(linhaTeste)._id;
     const semLegacy = { id: 'abcdef12-0000-0000-0000-000000000000', updated_at: 'x', data: {} };
     out.idBateSemLegacy = cloudRel._idLocalDaLinha(semLegacy) === cloudRel._rowParaRegistro(semLegacy)._id;
+    /* O CASO QUE APAGARIA REGISTRO: legacy_id nulo e data._id preenchido. O
+       índice não lê `data`, então não tem como saber o _id verdadeiro — e a
+       limpeza de visibilidade removeria do aparelho um registro que EXISTE na
+       nuvem. O conjunto precisa cobrir as duas formas possíveis. */
+    const divergente = { id: 'abcdef12-0000-0000-0000-000000000000', legacy_id: null,
+                         updated_at: 'x', data: { _id: 'doc-real', nome: 'Linalva' } };
+    out.idRealDivergente = cloudRel._rowParaRegistro(divergente)._id === 'doc-real';
+    out.indiceNaoAdivinha = cloudRel._idsPossiveisDaLinha(divergente).indexOf('doc-real') < 0;
 
     /* --- 1ª passagem: aparelho vazio, baixa tudo ------------------------ */
     montar(60);
@@ -9568,6 +9576,15 @@ await test('Sync: o índice primeiro, o conteúdo só do que mudou — e nada é
     await puxar();
     out.removeuOSumido = !store.list('financeiro').find(x => x._id === sumido.legacy_id);
     out.sobrouORestante = store.list('financeiro').length === antes - 1;
+
+    /* SEM CERTEZA, NÃO SE APAGA. Uma linha sem legacy_id torna o índice
+       incapaz de dizer qual registro do aparelho ela representa — e nesse
+       caso a limpeza inteira tem de ficar para depois, não apagar no escuro. */
+    const nAntesDoNulo = store.list('financeiro').length;
+    linhas[2].legacy_id = null;
+    await puxar();
+    out.nuloNaoApaga = store.list('financeiro').length === nAntesDoNulo;
+    linhas[2].legacy_id = 'doc-2';
     auth.usuarioAtual = realUsuario;
     if (realVis) orgSettings.visibilidade = realVis;
 
@@ -9605,6 +9622,9 @@ await test('Sync: o índice primeiro, o conteúdo só do que mudou — e nada é
 
   assert(r.idBate, 'a regra do _id precisa ser a mesma no índice e no registro completo');
   assert(r.idBateSemLegacy, 'inclusive para linha sem legacy_id');
+  assert(r.idRealDivergente, 'quando data._id existe, é ELE o _id do registro');
+  assert(r.indiceNaoAdivinha, 'e o índice não tem como adivinhá-lo — por isso a limpeza precisa de guarda');
+  assert(r.nuloNaoApaga, 'linha sem legacy_id suspende a limpeza inteira — não se apaga no escuro');
   assert(r.registrosPrimeira === 60, 'a primeira passagem traz os 60 registros — trouxe ' + r.registrosPrimeira);
   assert(r.segundaSoIndice, 'sem nada novo, só o índice é lido — nenhuma leitura de conteúdo');
   assert(r.economia >= 95, 'a economia com nada novo tem de passar de 95% — deu ' + r.economia + '%');
