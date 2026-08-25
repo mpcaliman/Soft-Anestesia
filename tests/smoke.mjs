@@ -9676,6 +9676,80 @@ await test('Ficha: posicionamento e dispositivos de proteção saem na impressã
   await page.close();
 });
 
+
+/* 150) A receita impressa: a forma farmacêutica ajuda a ESCOLHER na tela e
+   atrapalha a LER no papel — a posologia já diz "1 comprimido". E os tamanhos
+   de fonte estavam escritos à mão no HTML, fora da escala do documento. */
+await test('Receita: a apresentação impressa é a concentração, não a forma, e a tipografia é a do documento', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('prescricao');
+    const f = document.getElementById('form-prescricao');
+    const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el) el.value = v; };
+    set('nome', 'Maria Aparecida de Souza Lima');
+    set('idade', '62 anos'); set('data', utils.hojeISO());
+    prescricao.addItem();
+    const tr = document.querySelectorAll('#prescricao-body tr');
+    const por = (t, campo, v) => { const el = t && t.querySelector('[name="' + campo + '"]'); if (el) el.value = v; };
+    por(tr[0], 'presc_nome[]', 'RYBELSUS');
+    por(tr[0], 'presc_apres[]', '7 MG — Comprimido');
+    por(tr[0], 'presc_qtd[]', '1 caixa');
+    por(tr[0], 'presc_pos[]', '1 comprimido pela manhã, em jejum');
+    por(tr[0], 'presc_via[]', 'VO');
+    let html = printPreview._buildPrescricao();
+
+    /* --- o que o farmacêutico precisa ler continua lá ------------------- */
+    out.temNome = /RYBELSUS/.test(html);
+    out.temConcentracao = /7 MG/.test(html);
+    out.temQtd = /1 caixa/.test(html);
+    out.temPosologia = /1 comprimido pela manhã/.test(html);
+    /* --- e a FORMA não deve aparecer como apresentação ------------------- */
+    out.semForma = html.indexOf('7 MG — Comprimido') < 0;
+
+    /* --- a regra, isolada ----------------------------------------------- */
+    const ap = it => printPreview._apresParaImpressao(it);
+    out.desfazJuncao = ap({ apres: '20 MG — Cápsula dura de liberação retardada' }) === '20 MG';
+    /* o snapshot da Anvisa manda, quando existe */
+    out.usaSnapshot = ap({ apres: 'qualquer coisa', medicamento: { conc: '500 MG', forma: 'Comprimido' } }) === '500 MG';
+    /* o que foi digitado à mão, sem o separador do sistema, fica como está */
+    out.preservaManual = ap({ apres: '10mg/mL frasco 20mL' }) === '10mg/mL frasco 20mL';
+    out.vazioSegue = ap({}) === '' && ap(null) === '';
+
+    /* --- tipografia: nada de tamanho escrito à mão na lista ------------- */
+    out.usaClasses = /pp-med-nome/.test(html) && /pp-med-pos/.test(html) && /pp-med-linha/.test(html);
+    const trecho = html.slice(html.indexOf('pp-med'), html.indexOf('pp-med') + 1200);
+    out.semFontInline = !/font-size:\s*\d/.test(trecho);
+    /* --- e a receita tem a sua escala própria --------------------------- */
+    out.temEscala = /class="pp-receita"/.test(html);
+
+    /* --- receita de controle especial: duas vias, mesma regra ----------- */
+    set('modelo', 'especial');
+    const sel = f.querySelector('[name="modelo"]');
+    if (sel) { sel.value = 'especial'; }
+    html = printPreview._buildPrescricao();
+    out.especialEnvolvida = /class="pp-receita"/.test(html);
+    out.especialSemForma = html.indexOf('7 MG — Comprimido') < 0;
+    out.especialDuasVias = (html.match(/RYBELSUS/g) || []).length === 2;
+    return out;
+  });
+
+  assert(r.temNome && r.temConcentracao, 'nome e concentração precisam sair na receita');
+  assert(r.temQtd && r.temPosologia, 'quantidade e posologia também');
+  assert(r.semForma, 'a forma farmacêutica NÃO sai como apresentação — a posologia já a diz');
+  assert(r.desfazJuncao, 'desfaz exatamente a junção que o sistema fez ao escolher o medicamento');
+  assert(r.usaSnapshot, 'com snapshot da Anvisa, a concentração vem dele');
+  assert(r.preservaManual, 'apresentação digitada à mão fica como está');
+  assert(r.vazioSegue, 'sem apresentação, nada quebra');
+  assert(r.usaClasses, 'a lista usa as classes do documento');
+  assert(r.semFontInline, 'e nenhum tamanho de fonte escrito à mão — era isso que fazia as letras destoarem');
+  assert(r.temEscala, 'a receita tem a sua própria escala de logomarca e espaçamento');
+  assert(r.especialEnvolvida, 'o controle especial também');
+  assert(r.especialSemForma, 'e também sem a forma farmacêutica');
+  assert(r.especialDuasVias, 'com as duas vias que a Portaria 344/98 exige');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
