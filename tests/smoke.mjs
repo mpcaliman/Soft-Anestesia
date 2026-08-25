@@ -861,7 +861,17 @@ await test('Visibilidade: opção do gestor, e no modo próprios o pull converge
       { _id: 'so_local',  paciente: 'C' }
     ]);
     cloudRel.disponivel = () => true;
-    cloudRel.puxarModulo = async () => ([{ _id: 'meu', _relUpdatedAt: 't2', paciente: 'A' }]);
+    /* A leitura passou a ser em duas etapas — índice primeiro, conteúdo só do
+       que mudou — então o dublê é dos dois métodos novos. O que este teste
+       cobra continua igual: com visibilidade 'proprios', o que a RLS não
+       devolve mais tem de sair do aparelho. A lista de quem "continua
+       visível" agora vem do ÍNDICE, e é justamente por isso que ela precisa
+       ser completa: se viesse só do conteúdo baixado, todo registro que não
+       mudou seria apagado. */
+    cloudRel.puxarIndiceModulo = async () => ([
+      { id: 'id-meu', legacy_id: 'meu', updated_at: 't2', _idLocal: 'meu' }
+    ]);
+    cloudRel.puxarPorIds = async () => ([{ _id: 'meu', _relUpdatedAt: 't2', paciente: 'A' }]);
     delete cloudRel._puxados['anestesia'];
     await cloudRel.autoPullModulo('anestesia');
     const ids = store.list('anestesia').map(x => x._id);
@@ -9451,6 +9461,166 @@ await test('Termo: riscos de posicionamento e de tempo cirúrgico prolongado', a
   assert(r.vemDesmarcados, 'desmarcados quando não são sugeridos');
   assert(r.inseriu, 'marcados à mão, os textos entram no termo');
   assert(r.saiNaImpressao, 'e saem na impressão');
+  await page.close();
+});
+
+
+/* 148) Leitura incremental: baixar o acervo inteiro a cada 10 minutos custava
+   ~8 GB/mês numa cota de 5 GB. Agora vem o índice, e só o que mudou vem por
+   inteiro. O teste conta os BYTES, porque economia sem medida é promessa. */
+await test('Sync: o índice primeiro, o conteúdo só do que mudou — e nada é apagado no caminho', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const ORG = '11111111-1111-1111-1111-111111111111';
+
+    /* --- servidor de mentira que conta o que sairia pela rede ----------- */
+    let linhas = [];
+    const montar = n => {
+      linhas = [];
+      for (let i = 0; i < n; i++) {
+        linhas.push({
+          id: '00000000-0000-0000-0000-' + String(i).padStart(12, '0'),
+          legacy_id: 'doc-' + i,
+          updated_at: '2026-08-0' + (1 + (i % 9)) + 'T10:00:00Z',
+          /* registro realista: com imagem em base64 dentro, que é o que pesa */
+          data: { _id: 'doc-' + i, nome: 'Paciente ' + i, convenio: 'Unimed',
+                  anexos: [{ nome: 'guia.jpg', dataurl: 'data:image/jpeg;base64,' + 'A'.repeat(20000) }] }
+        });
+      }
+    };
+    let bytes = 0, chamadas = [], falhaLeve = false, falhaCheia = false;
+    const realFetch = window.fetch;
+    window.fetch = async (url, opts) => {
+      const u = String(url);
+      if (u.indexOf('/rest/v1/finance_entries') >= 0) {
+        const leve = u.indexOf('select=id,legacy_id,updated_at') >= 0;
+        if (leve && falhaLeve) return new Response('erro', { status: 500 });
+        if (!leve && falhaCheia) return new Response('erro', { status: 500 });
+        let sel = linhas;
+        const m = u.match(/id=in\.\(([^)]*)\)/);
+        if (m) { const ids = new Set(decodeURIComponent(m[1]).split(',')); sel = linhas.filter(l => ids.has(l.id)); }
+        const corpo = JSON.stringify(sel.map(l => leve
+          ? { id: l.id, legacy_id: l.legacy_id, updated_at: l.updated_at } : l));
+        bytes += corpo.length;
+        chamadas.push({ leve: leve, n: sel.length });
+        return new Response(corpo, { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return realFetch(url, opts);
+    };
+    cloudRel.disponivel = () => true;
+    cloud._garantirToken = async () => true;
+    cloudRel._orgAsync = async () => ORG;
+    cloud.config = () => ({ url: 'https://x.supabase.co', anonKey: 'k' });
+    cloud._headers = () => ({});
+    const puxar = async () => { bytes = 0; chamadas = []; cloudRel._puxados = {};
+      await cloudRel.autoPullModulo('financeiro'); return bytes; };
+
+    /* --- a regra do _id tem de ser a MESMA nos dois caminhos ------------ */
+    const linhaTeste = { id: 'abcdef12-0000-0000-0000-000000000000', legacy_id: 'doc-x',
+                         updated_at: '2026-08-01T00:00:00Z', data: { _id: 'doc-x' } };
+    out.idBate = cloudRel._idLocalDaLinha(linhaTeste) === cloudRel._rowParaRegistro(linhaTeste)._id;
+    const semLegacy = { id: 'abcdef12-0000-0000-0000-000000000000', updated_at: 'x', data: {} };
+    out.idBateSemLegacy = cloudRel._idLocalDaLinha(semLegacy) === cloudRel._rowParaRegistro(semLegacy)._id;
+
+    /* --- 1ª passagem: aparelho vazio, baixa tudo ------------------------ */
+    montar(60);
+    store.setList('financeiro', []);
+    out.bytesPrimeira = await puxar();
+    out.registrosPrimeira = store.list('financeiro').length;
+
+    /* --- 2ª passagem: nada mudou. É AQUI que mora a economia ------------ */
+    out.bytesSegunda = await puxar();
+    out.registrosSegunda = store.list('financeiro').length;
+    out.segundaSoIndice = chamadas.length === 1 && chamadas[0].leve === true;
+    out.economia = Math.round(100 - (out.bytesSegunda * 100 / out.bytesPrimeira));
+
+    /* --- 3ª: um registro mudou. Só ele desce ---------------------------- */
+    linhas[7].updated_at = '2026-08-20T15:00:00Z';
+    linhas[7].data.nome = 'Paciente 7 CORRIGIDO';
+    await puxar();
+    out.baixouUmSo = chamadas.filter(c => !c.leve).reduce((s, c) => s + c.n, 0) === 1;
+    out.conteudoChegou = (store.list('financeiro').find(x => x._id === 'doc-7') || {}).nome;
+
+    /* --- 4ª: registro novo na nuvem ------------------------------------ */
+    linhas.push({ id: '00000000-0000-0000-0000-999999999999', legacy_id: 'doc-novo',
+      updated_at: '2026-08-21T09:00:00Z', data: { _id: 'doc-novo', nome: 'Chegou Agora' } });
+    await puxar();
+    out.novoChegou = !!store.list('financeiro').find(x => x._id === 'doc-novo');
+    out.registrosApos = store.list('financeiro').length;
+
+    /* --- O CASO QUE APAGA DADOS ----------------------------------------
+       Com visibilidade 'proprios', o que não voltou da nuvem é removido do
+       aparelho. Se essa conferência olhasse só o que foi BAIXADO agora, o
+       incremental apagaria todo registro que continuou igual — quase tudo. */
+    const realUsuario = auth.usuarioAtual;
+    const realVis = (typeof orgSettings !== 'undefined') ? orgSettings.visibilidade : null;
+    auth.usuarioAtual = () => ({ id: 'u1', role: 'anestesiologista', perfil: 'medico' });
+    if (typeof orgSettings !== 'undefined') orgSettings.visibilidade = () => 'proprios';
+    /* todos os locais precisam ter carimbo da nuvem para entrar na regra */
+    const antes = store.list('financeiro').length;
+    await puxar();
+    out.naoApagouOsIguais = store.list('financeiro').length === antes;
+    out.sobrouTudo = store.list('financeiro').length;
+
+    /* mas o que REALMENTE sumiu da nuvem continua sendo removido */
+    const sumido = linhas.pop();
+    await puxar();
+    out.removeuOSumido = !store.list('financeiro').find(x => x._id === sumido.legacy_id);
+    out.sobrouORestante = store.list('financeiro').length === antes - 1;
+    auth.usuarioAtual = realUsuario;
+    if (realVis) orgSettings.visibilidade = realVis;
+
+    /* --- falha de rede não pode mutilar o aparelho ---------------------- */
+    const nAntesFalha = store.list('financeiro').length;
+    falhaLeve = true;  await puxar();  falhaLeve = false;
+    out.indiceFalhouIntacto = store.list('financeiro').length === nAntesFalha;
+
+    /* conteúdo falhando: não mescla nada, e libera para tentar de novo */
+    linhas[3].updated_at = '2026-08-22T10:00:00Z';
+    linhas[3].data.nome = 'Nao Pode Chegar Pela Metade';
+    falhaCheia = true; await puxar(); falhaCheia = false;
+    out.conteudoFalhouIntacto = store.list('financeiro').length === nAntesFalha
+      && (store.list('financeiro').find(x => x._id === 'doc-3') || {}).nome !== 'Nao Pode Chegar Pela Metade';
+    out.liberouRetentativa = cloudRel._puxados['financeiro'] === false;
+    /* e a tentativa seguinte, com a rede de volta, traz o que ficou faltando */
+    await puxar();
+    out.recuperouDepois = (store.list('financeiro').find(x => x._id === 'doc-3') || {}).nome === 'Nao Pode Chegar Pela Metade';
+
+    /* --- arquivado não desce de novo ------------------------------------ */
+    if (typeof arquivo !== 'undefined') {
+      const realArq = arquivo.estaArquivado;
+      arquivo.estaArquivado = (mod, id) => id === 'doc-11';
+      linhas[11].updated_at = '2026-08-23T10:00:00Z';
+      await puxar();
+      /* mudou na nuvem, mas está arquivado aqui: nenhuma leitura de conteúdo */
+      out.arquivadoNaoDesce = chamadas.filter(c => !c.leve).reduce((s, c) => s + c.n, 0) === 0;
+      arquivo.estaArquivado = realArq;
+    } else { out.arquivadoNaoDesce = true; }
+
+    window.fetch = realFetch;
+    store.setList('financeiro', []);
+    return out;
+  });
+
+  assert(r.idBate, 'a regra do _id precisa ser a mesma no índice e no registro completo');
+  assert(r.idBateSemLegacy, 'inclusive para linha sem legacy_id');
+  assert(r.registrosPrimeira === 60, 'a primeira passagem traz os 60 registros — trouxe ' + r.registrosPrimeira);
+  assert(r.segundaSoIndice, 'sem nada novo, só o índice é lido — nenhuma leitura de conteúdo');
+  assert(r.economia >= 95, 'a economia com nada novo tem de passar de 95% — deu ' + r.economia + '%');
+  assert(r.registrosSegunda === 60, 'e os registros continuam todos — ficaram ' + r.registrosSegunda);
+  assert(r.baixouUmSo, 'mudando um registro, só ele desce por inteiro');
+  assert(r.conteudoChegou === 'Paciente 7 CORRIGIDO', 'e o conteúdo novo chega de verdade');
+  assert(r.novoChegou, 'registro novo na nuvem chega');
+  assert(r.registrosApos === 61, 'somando ao que já existia — ficaram ' + r.registrosApos);
+  assert(r.naoApagouOsIguais, 'VISIBILIDADE PRÓPRIOS: registro que não mudou NÃO pode ser apagado — sobraram ' + r.sobrouTudo);
+  assert(r.removeuOSumido, 'mas o que saiu da nuvem continua sendo removido do aparelho');
+  assert(r.sobrouORestante, 'e só ele');
+  assert(r.indiceFalhouIntacto, 'falha ao ler o índice não pode mexer no aparelho');
+  assert(r.conteudoFalhouIntacto, 'falha ao ler o conteúdo não pode mesclar pela metade');
+  assert(r.liberouRetentativa, 'e precisa liberar a próxima tentativa');
+  assert(r.recuperouDepois, 'com a rede de volta, o que faltou chega');
+  assert(r.arquivadoNaoDesce, 'registro arquivado não é baixado de novo');
   await page.close();
 });
 
