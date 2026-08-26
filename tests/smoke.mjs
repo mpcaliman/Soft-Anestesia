@@ -10076,6 +10076,70 @@ await test('Sync: gravação que não sobe entra em fila durável e sobe sozinha
   await page.close();
 });
 
+
+/* 156) A janela "Entrar na nuvem" exigia a senha e a única saída era "Agora
+   não" — que deixa o aparelho fora da sincronização. Para o gestor havia o
+   painel do Supabase; para a secretária, caminho nenhum. */
+await test('Nuvem: dá para recuperar a senha pela própria janela de entrar', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    let pedido = null;
+    cloud.estaConfigurado = () => true;
+    cloud.config = () => ({ url: 'https://x.supabase.co', anonKey: 'k' });
+    cloud._headers = () => ({ 'Content-Type': 'application/json' });
+    const real = window.fetch;
+    window.fetch = async (u, o) => {
+      if (String(u).indexOf('/auth/v1/recover') >= 0) {
+        pedido = { url: String(u), body: JSON.parse(o.body) };
+        return new Response('{}', { status: 200 });
+      }
+      return real(u, o);
+    };
+
+    cloud.reentrar();
+    out.temSaida = /Esqueci a senha/.test((document.getElementById('modal-body') || {}).innerHTML || '');
+
+    const el = document.getElementById('reent-email');
+    if (el) el.value = 'secretaria@teste.com';
+    await cloud._reentrarRecuperar();
+    out.chamouEndpoint = !!pedido && /\/auth\/v1\/recover$/.test(pedido.url);
+    out.mandaOEmailDoCampo = !!pedido && pedido.body.email === 'secretaria@teste.com';
+    /* o link do e-mail tem de trazer a pessoa de volta para o app */
+    out.mandaRedirect = !!pedido && typeof pedido.body.redirect_to === 'string';
+    out.confirmaNaTela = /Link enviado/.test((document.getElementById('reent-erro') || {}).textContent || '');
+
+    /* sem e-mail não chama nada e explica */
+    pedido = null;
+    if (el) el.value = '';
+    await cloud._reentrarRecuperar();
+    out.vazioNaoChama = pedido === null;
+    out.vazioExplica = /Informe o e-mail/.test((document.getElementById('reent-erro') || {}).textContent || '');
+
+    /* falha do servidor não mente dizendo que enviou */
+    if (el) el.value = 'x@y.com';
+    window.fetch = async (u, o) => {
+      if (String(u).indexOf('/auth/v1/recover') >= 0) return new Response('{"msg":"rate limit"}', { status: 429 });
+      return real(u, o);
+    };
+    await cloud._reentrarRecuperar();
+    out.falhaNaoMente = !/Link enviado/.test((document.getElementById('reent-erro') || {}).textContent || '');
+
+    window.fetch = real;
+    try { modal.close(); } catch (e) {}
+    return out;
+  });
+
+  assert(r.temSaida, 'a janela precisa oferecer saída para quem esqueceu a senha');
+  assert(r.chamouEndpoint, 'que pede a recuperação ao Supabase');
+  assert(r.mandaOEmailDoCampo, 'usando o e-mail já preenchido — não se pede para lembrar duas coisas');
+  assert(r.mandaRedirect, 'e o link do e-mail traz a pessoa de volta ao app');
+  assert(r.confirmaNaTela, 'com confirmação na tela');
+  assert(r.vazioNaoChama && r.vazioExplica, 'sem e-mail, não chama e explica');
+  assert(r.falhaNaoMente, 'falha do servidor não pode dizer que enviou');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

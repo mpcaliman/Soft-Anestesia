@@ -4492,7 +4492,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-26a</b><br>
+    v7.1 · build <b id="build-tag">2026-08-26b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -18581,6 +18581,49 @@ const cloud = {
     }
   },
 
+  /* ==========================================================================
+     RECUPERAR A SENHA DA NUVEM
+
+     Não existia. A janela "Entrar na nuvem" exigia a senha e a única saída era
+     "Agora não" — que deixa o aparelho fora da sincronização, exatamente o
+     estado em que o registro fica preso e ninguém descobre por quê.
+
+     Para o gestor faltava um caminho cômodo (dava para ir ao painel do
+     Supabase). Para a secretária não havia caminho nenhum: ela não tem acesso
+     ao painel. Ficar sem sincronizar por ter esquecido uma senha é o pior
+     motivo possível para um prontuário não chegar ao médico.
+  ========================================================================== */
+  async recuperarSenha(email) {
+    const alvo = String(email || '').trim();
+    if (!alvo || alvo.indexOf('@') < 0) { toast('Informe o e-mail da conta da nuvem', 'warn'); return false; }
+    if (!cloud.estaConfigurado()) { toast('Este aparelho ainda não tem a nuvem configurada', 'warn'); return false; }
+    const c = cloud.config();
+    try {
+      /* redirect_to precisa estar na lista de URLs permitidas do projeto
+         (Authentication → URL Configuration). Mandamos o endereço do próprio
+         app para o link do e-mail trazer a pessoa de volta para cá. */
+      const volta = (typeof location !== 'undefined')
+        ? location.origin + location.pathname : '';
+      const r = await fetch(c.url + '/auth/v1/recover', {
+        method: 'POST', headers: cloud._headers(false),
+        body: JSON.stringify(volta ? { email: alvo, redirect_to: volta } : { email: alvo })
+      });
+      /* O Supabase responde 200 mesmo para e-mail inexistente, de propósito:
+         dizer "esta conta não existe" entregaria quais e-mails estão
+         cadastrados. Então a mensagem aqui é a mesma nos dois casos. */
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        toast('Não consegui pedir a recuperação: ' + (d.msg || d.error_description || d.error || r.status), 'error');
+        return false;
+      }
+      toast('📧 Se houver conta para ' + alvo + ', o link de nova senha chega em instantes. Confira também o spam.', 'success');
+      return true;
+    } catch (e) {
+      toast('Sem conexão para pedir a recuperação agora', 'error');
+      return false;
+    }
+  },
+
   async login(email, senha) {
     if (!cloud.estaConfigurado()) { toast('Configure a nuvem primeiro (URL + chave)', 'warn'); return false; }
     const c = cloud.config();
@@ -19057,11 +19100,31 @@ const cloud = {
       '<div class="grid">' +
       '<div class="field col-12"><label>E-mail</label><input type="email" id="reent-email" value="' + utils.escapeAttr(email) + '" autocomplete="username"></div>' +
       '<div class="field col-12"><label>Senha da nuvem</label><input type="password" id="reent-senha" placeholder="••••••" autocomplete="current-password"></div>' +
-      '</div><div id="reent-erro" style="color:#b3261e;font-size:.82rem;min-height:16px"></div>',
+      '</div><div id="reent-erro" style="color:#b3261e;font-size:.82rem;min-height:16px"></div>' +
+      /* Sem esta saída, quem esqueceu a senha só tinha "Agora não" — e "agora
+         não" deixa o aparelho fora da sincronização por tempo indeterminado. */
+      '<div style="margin-top:2px"><a href="javascript:void(0)" onclick="cloud._reentrarRecuperar()" ' +
+      'style="color:var(--primary);font-size:.84rem">Esqueci a senha — receber link por e-mail</a></div>',
       '<button class="btn btn-primary" onclick="cloud._reentrarConfirmar()">Entrar</button>' +
       '<button class="btn" onclick="modal.close()">Agora não</button>');
     setTimeout(() => { const el = document.getElementById('reent-senha'); if (el) el.focus(); }, 80);
   },
+  /* Usa o e-mail que já está no campo — quem esqueceu a senha não deve ter de
+     lembrar em qual e-mail se cadastrou também. */
+  async _reentrarRecuperar() {
+    const email = ((document.getElementById('reent-email') || {}).value || '').trim();
+    const err = document.getElementById('reent-erro');
+    if (!email) { if (err) err.textContent = 'Informe o e-mail para receber o link.'; return; }
+    if (err) { err.style.color = 'var(--text-soft)'; err.textContent = 'Pedindo o link…'; }
+    const ok = await cloud.recuperarSenha(email);
+    if (err) {
+      err.style.color = ok ? '#1f7a4d' : '#b3261e';
+      err.textContent = ok
+        ? 'Link enviado para ' + email + '. Confira a caixa de entrada e o spam.'
+        : 'Não consegui pedir o link agora.';
+    }
+  },
+
   async _reentrarConfirmar() {
     const email = (document.getElementById('reent-email') || {}).value || '';
     const senha = (document.getElementById('reent-senha') || {}).value || '';
