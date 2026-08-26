@@ -10388,6 +10388,99 @@ await test('Escrita contínua: pausou de digitar, grava — sem criar ficha do n
   await page.close();
 });
 
+
+/* 160) ETAPA 5 — Realtime: a clínica avisa, em vez de o aparelho perguntar.
+   O ciclo de 10 minutos funciona, mas o que a secretária lança pode levar
+   minutos para aparecer no computador do médico. No dia da cirurgia, esses
+   minutos são a diferença entre conferir antes e conferir depois. */
+await test('Realtime: mudança na clínica chega ao aparelho na hora, sem esperar o ciclo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {}; const enviados = [];
+    cloudRel.disponivel = () => true;
+    cloud._garantirToken = async () => true;
+    cloudRel._orgAsync = async () => 'org-abc';
+    cloud.config = () => ({ url: 'https://xyz.supabase.co', anonKey: 'ANON' });
+    cloud.session = () => ({ access_token: 'JWT1', user: { id: 'u1' } });
+    store.setList('pre', []);
+
+    let inst = null;
+    window.WebSocket = function (url) {
+      this.url = url; this.readyState = 1; inst = this;
+      this.send = m => enviados.push(JSON.parse(m));
+      this.close = () => { this.readyState = 3; if (this.onclose) this.onclose(); };
+      setTimeout(() => { if (this.onopen) this.onopen(); }, 0);
+    };
+    realtime._ws = null; realtime._ligado = false;
+    realtime._tentativa = 0; realtime._recebidos = 0;
+    await realtime.conectar();
+    await new Promise(res => setTimeout(res, 30));
+
+    /* --- conexão ------------------------------------------------------- */
+    out.wsCifrado = /^wss:/.test(inst.url);
+    out.levaApiKey = inst.url.indexOf('apikey=ANON') > 0;
+    out.umCanalPorModulo = enviados.filter(m => m.event === 'phx_join').length
+      === Object.keys(realtime.TABELAS).length;
+    const j = enviados.find(m => m.event === 'phx_join') || {};
+    out.mandaToken = (j.payload || {}).access_token === 'JWT1';
+    /* o filtro por organização é no SERVIDOR: o aparelho não recebe nem gasta
+       banda com mudança de clínica que não é a dele */
+    const cfg = (((j.payload || {}).config) || {}).postgres_changes || [];
+    out.filtraNoServidor = (cfg[0] || {}).filter === 'organization_id=eq.org-abc';
+    out.ativo = realtime.ativo();
+
+    const msg = o => inst.onmessage({ data: JSON.stringify({ event: 'postgres_changes', payload: { data: o } }) });
+
+    /* --- a mudança chega e entra no aparelho ---------------------------- */
+    msg({ table: 'preanesthetic_assessments', type: 'INSERT',
+          record: { id: 'uuid-1', legacy_id: 'doc-linalva', updated_at: '2026-08-26T15:00:00Z',
+                    data: { _id: 'doc-linalva', nome: 'Linalva Realtime Silva', data: '2026-08-26' } } });
+    out.chegouSemCiclo = !!store.list('pre').find(x => x._id === 'doc-linalva');
+
+    /* --- versão MAIS VELHA que a daqui não rebaixa o registro ----------- */
+    const l = store.list('pre');
+    l[0]._updatedAt = '2026-08-26T18:00:00Z'; l[0].nome = 'Editado Aqui Depois';
+    store.setList('pre', l);
+    msg({ table: 'preanesthetic_assessments', type: 'UPDATE',
+          record: { id: 'uuid-1', legacy_id: 'doc-linalva', updated_at: '2026-08-26T15:00:00Z',
+                    data: { _id: 'doc-linalva', nome: 'Versao Velha', _updatedAt: '2026-08-26T15:00:00Z' } } });
+    out.naoRebaixa = (store.list('pre').find(x => x._id === 'doc-linalva') || {}).nome === 'Editado Aqui Depois';
+
+    /* --- tabela que não é de módulo é ignorada sem quebrar -------------- */
+    msg({ table: 'attachments', type: 'INSERT', record: { id: 'x' } });
+    out.ignoraOutrasTabelas = store.list('pre').length === 1;
+
+    /* --- DELETE não apaga sozinho: remoção é da reconciliação, que tem a
+           lista completa na mão. Apagar por evento solto é perder registro. */
+    msg({ table: 'preanesthetic_assessments', type: 'DELETE',
+          old_record: { id: 'uuid-1', legacy_id: 'doc-linalva' } });
+    out.deleteNaoApaga = !!store.list('pre').find(x => x._id === 'doc-linalva');
+
+    /* --- socket cai: desliga e reagenda com recuo ----------------------- */
+    const antes = realtime._tentativa;
+    inst.close();
+    out.desligou = realtime.ativo() === false;
+    out.reagendou = realtime._tentativa > antes;
+    out.recuoCresce = realtime.ESPERAS.length > 1
+      && realtime.ESPERAS[realtime.ESPERAS.length - 1] > realtime.ESPERAS[0];
+    return out;
+  });
+
+  assert(r.wsCifrado, 'a conexão do Realtime tem de ser wss');
+  assert(r.levaApiKey, 'com a chave do projeto');
+  assert(r.umCanalPorModulo, 'um canal por tabela de módulo');
+  assert(r.mandaToken, 'autenticado pelo token da sessão — senão o RLS recusa em silêncio');
+  assert(r.filtraNoServidor, 'e filtrado por organização NO SERVIDOR, não no aparelho');
+  assert(r.ativo, 'depois de entrar nos canais, o Realtime está ativo');
+  assert(r.chegouSemCiclo, 'a mudança da clínica entra no aparelho sem esperar o ciclo');
+  assert(r.naoRebaixa, 'e uma versão mais velha não sobrescreve o que foi editado aqui');
+  assert(r.ignoraOutrasTabelas, 'tabela que não é de módulo é ignorada sem quebrar');
+  assert(r.deleteNaoApaga, 'DELETE não apaga sozinho — remoção é da reconciliação, com a lista completa');
+  assert(r.desligou && r.reagendou, 'socket que cai desliga e reagenda');
+  assert(r.recuoCresce, 'com recuo crescente, para não martelar a rede do hospital');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
