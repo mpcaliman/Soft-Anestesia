@@ -10481,6 +10481,78 @@ await test('Realtime: mudança na clínica chega ao aparelho na hora, sem espera
   await page.close();
 });
 
+
+/* 161) ETAPA 4 — "vazio" e "não carregado" são coisas diferentes.
+   Um aparelho que nunca sincronizou mostra tela vazia, e tela vazia é
+   indistinguível de "não há nada". Foi assim que o painel da secretária
+   pareceu funcionar enquanto nada chegava. */
+await test('Tela vazia sabe dizer quando nunca falou com a clínica', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    localStorage.removeItem(cloudRel.PUXOU_KEY);
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud.divergencia = () => null;
+    cloudRel._org = () => 'org-x';
+    cloudRel._semClinicaConfirmado = () => false;
+
+    /* --- nunca puxou: o vazio se explica -------------------------------- */
+    out.nuncaPuxou = /ainda não carreguei/i.test(cloudRel.porQueVazio('financeiro'));
+    out.admiteDuvida = /não estar vazio de verdade/i.test(cloudRel.porQueVazio('financeiro'));
+
+    /* --- já puxou: vazio é vazio, e cala ------------------------------- */
+    cloudRel.marcarPuxado('financeiro');
+    out.depoisCala = cloudRel.porQueVazio('financeiro') === '';
+    out.guardaQuando = !!cloudRel.quandoPuxou('financeiro');
+
+    /* --- cada motivo tem a sua explicação ------------------------------ */
+    localStorage.removeItem(cloudRel.PUXOU_KEY);
+    cloud.estaLogado = () => false;
+    out.semLogin = /não entrou na nuvem/i.test(cloudRel.porQueVazio('financeiro'));
+    cloud.estaLogado = () => true;
+
+    cloudRel._org = () => null;
+    cloudRel._semClinicaConfirmado = () => true;
+    out.semClinica = /Equipe da nuvem/.test(cloudRel.porQueVazio('financeiro'));
+    cloudRel._org = () => 'org-x'; cloudRel._semClinicaConfirmado = () => false;
+
+    cloud.divergencia = () => ({ app: 'a@x.com', nuvem: 'b@y.com' });
+    out.divergencia = /a@x\.com/.test(cloudRel.porQueVazio('financeiro'))
+      && /b@y\.com/.test(cloudRel.porQueVazio('financeiro'));
+    cloud.divergencia = () => null;
+
+    /* --- aparelho sem nuvem não é advertido: o vazio dele é legítimo ---- */
+    cloud.estaConfigurado = () => false;
+    out.semNuvemNaoAvisa = cloudRel.porQueVazio('financeiro') === '';
+    cloud.estaConfigurado = () => true;
+
+    /* --- e a tela mostra de verdade ------------------------------------ */
+    store.setList('financeiro', []);
+    ui.navegar('financeiro');
+    financeiro.render();
+    out.telaAvisa = /ainda não carreguei/i.test(document.getElementById('financeiro-tbody').innerHTML);
+    cloudRel.marcarPuxado('financeiro');
+    financeiro.render();
+    out.telaCalaDepois = !/ainda não carreguei/i.test(document.getElementById('financeiro-tbody').innerHTML);
+
+    localStorage.removeItem(cloudRel.PUXOU_KEY);
+    return out;
+  });
+
+  assert(r.nuncaPuxou, 'lista vazia num aparelho que nunca sincronizou tem de se explicar');
+  assert(r.admiteDuvida, 'admitindo que pode não estar vazio de verdade');
+  assert(r.depoisCala, 'depois de falar com a clínica, vazio é vazio e o aviso some');
+  assert(r.guardaQuando, 'e fica o registro de quando foi');
+  assert(r.semLogin, 'sem login, o motivo é esse');
+  assert(r.semClinica, 'sem clínica, o aviso diz quem resolve');
+  assert(r.divergencia, 'com contas divergentes, nomeia as duas');
+  assert(r.semNuvemNaoAvisa, 'aparelho sem nuvem não é advertido — o vazio dele é legítimo');
+  assert(r.telaAvisa, 'a tela do financeiro mostra o aviso');
+  assert(r.telaCalaDepois, 'e para de mostrar quando deixa de ser verdade');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
