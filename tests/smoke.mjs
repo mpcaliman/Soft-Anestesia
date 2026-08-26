@@ -10140,6 +10140,76 @@ await test('Nuvem: dá para recuperar a senha pela própria janela de entrar', a
   await page.close();
 });
 
+
+/* 157) A OUTRA METADE: o link do e-mail chegando de volta. Sem tratar a
+   âncora, o app a lê como NOME DE MÓDULO e o link vira um beco — a pessoa
+   clica, cai no sistema e não acontece nada. */
+await test('Nuvem: o link do e-mail abre a definição de nova senha e não vira nome de módulo', async () => {
+  const page = await browser.newPage();
+  await page.route('**://*.supabase.co/**', route => route.abort());
+  page.on('dialog', d => d.dismiss());
+  await page.goto(APP_URL + '#access_token=TOK123&expires_in=3600&type=recovery');
+  await page.waitForFunction(() => typeof cloud !== 'undefined');
+  const r = await page.evaluate(async () => {
+    const out = {};
+    let put = null;
+    cloud.estaConfigurado = () => true;
+    cloud.config = () => ({ url: 'https://x.supabase.co', anonKey: 'k' });
+    cloud._headers = () => ({ 'Content-Type': 'application/json' });
+    const real = window.fetch;
+    window.fetch = async (u, o) => {
+      if (String(u).indexOf('/auth/v1/user') >= 0 && o.method === 'PUT') {
+        put = { auth: o.headers.Authorization, body: JSON.parse(o.body) };
+        return new Response('{}', { status: 200 });
+      }
+      return real(u, o);
+    };
+
+    /* o boot reconheceu a âncora */
+    out.pegouToken = cloud._tokenRecuperacao === 'TOK123';
+    /* e limpou a URL: token é credencial de uso único e não pode ficar no
+       histórico do navegador nem numa captura de tela */
+    out.limpouURL = location.hash.indexOf('access_token') < 0;
+
+    cloud.uiNovaSenha();
+    out.abriu = /Definir nova senha/.test((document.getElementById('modal-title') || {}).textContent || '');
+
+    const erro = () => (document.getElementById('ns-erro') || {}).textContent || '';
+    const por = (a, b) => { document.getElementById('ns-1').value = a; document.getElementById('ns-2').value = b; };
+
+    por('123', '123');
+    await cloud._salvarNovaSenha();
+    out.recusaCurta = /6 caracteres/.test(erro()) && put === null;
+
+    por('senhaNova1', 'senhaNova2');
+    await cloud._salvarNovaSenha();
+    out.recusaDiferentes = /não são iguais/.test(erro()) && put === null;
+
+    por('senhaNova1', 'senhaNova1');
+    await cloud._salvarNovaSenha();
+    out.enviouSenha = !!put && put.body.password === 'senhaNova1';
+    out.usouOToken = !!put && put.auth === 'Bearer TOK123';
+    /* uso único: some da memória assim que serve */
+    out.tokenSumiu = cloud._tokenRecuperacao === null;
+
+    /* âncora comum continua sendo módulo, como sempre foi */
+    out.ancoraNormalIntacta = cloud._lerAncoraAuth() === null;
+    window.fetch = real;
+    return out;
+  });
+
+  assert(r.pegouToken, 'o app precisa reconhecer o token que vem na âncora do link');
+  assert(r.limpouURL, 'e limpar a URL — token é de uso único e não pode ficar no histórico');
+  assert(r.abriu, 'abrindo a definição de nova senha');
+  assert(r.recusaCurta, 'senha curta é recusada antes de ir ao servidor');
+  assert(r.recusaDiferentes, 'e senhas diferentes também');
+  assert(r.enviouSenha, 'a senha nova é enviada ao Supabase');
+  assert(r.usouOToken, 'autenticada pelo token do link');
+  assert(r.tokenSumiu, 'que some da memória depois de usado');
+  assert(r.ancoraNormalIntacta, 'âncora comum continua sendo nome de módulo');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

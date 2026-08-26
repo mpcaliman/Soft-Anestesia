@@ -4492,7 +4492,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-26b</b><br>
+    v7.1 · build <b id="build-tag">2026-08-26c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -18593,6 +18593,84 @@ const cloud = {
      ao painel. Ficar sem sincronizar por ter esquecido uma senha é o pior
      motivo possível para um prontuário não chegar ao médico.
   ========================================================================== */
+  /* ---- A OUTRA METADE: o link do e-mail chegando de volta ----------------
+     Pedir a recuperação era metade do caminho. O Supabase devolve a pessoa ao
+     app com o token na âncora:
+
+         .../Soft-Anestesia/#access_token=...&type=recovery&...
+
+     Sem tratar isso, o app lê a âncora como NOME DE MÓDULO — e o link vira um
+     beco: a pessoa clica no e-mail, cai no sistema e não acontece nada.
+     Aqui a âncora é lida, o token guardado em memória (nunca no localStorage:
+     é credencial de uso único) e a URL limpa na hora, para o token não ficar
+     no histórico do navegador nem em captura de tela. */
+  _lerAncoraAuth() {
+    try {
+      const h = String(location.hash || '').replace(/^#/, '');
+      if (!h || h.indexOf('access_token=') < 0) return null;
+      const p = new URLSearchParams(h);
+      const token = p.get('access_token');
+      if (!token) return null;
+      return { token: token, tipo: p.get('type') || '', erro: p.get('error_description') || '' };
+    } catch (e) { return null; }
+  },
+  _limparAncora() {
+    try {
+      history.replaceState(null, '', location.pathname + location.search + '#dashboard');
+    } catch (e) { try { location.hash = '#dashboard'; } catch (e2) {} }
+  },
+
+  checarLinkRecuperacao() {
+    const a = cloud._lerAncoraAuth();
+    if (!a) return false;
+    cloud._limparAncora();
+    if (a.tipo !== 'recovery') return false;
+    cloud._tokenRecuperacao = a.token;
+    setTimeout(() => { try { cloud.uiNovaSenha(); } catch (e) {} }, 400);
+    return true;
+  },
+
+  uiNovaSenha() {
+    if (!cloud._tokenRecuperacao) { toast('O link de recuperação venceu — peça outro', 'warn'); return; }
+    modal.open('🔑 Definir nova senha da nuvem',
+      '<p style="font-size:.86rem;margin:0 0 10px">Você chegou pelo link do e-mail. Escolha a nova senha da <b>conta da nuvem</b> — ' +
+      'é a que este e os outros aparelhos vão usar para sincronizar.</p>' +
+      '<div class="grid">' +
+      '<div class="field col-12"><label>Nova senha</label><input type="password" id="ns-1" autocomplete="new-password" placeholder="mínimo 6 caracteres"></div>' +
+      '<div class="field col-12"><label>Repita a nova senha</label><input type="password" id="ns-2" autocomplete="new-password"></div>' +
+      '</div><div id="ns-erro" style="color:#b3261e;font-size:.82rem;min-height:16px"></div>',
+      '<button class="btn btn-primary" onclick="cloud._salvarNovaSenha()">Salvar senha</button>' +
+      '<button class="btn" onclick="modal.close()">Cancelar</button>');
+    setTimeout(() => { const el = document.getElementById('ns-1'); if (el) el.focus(); }, 80);
+  },
+
+  async _salvarNovaSenha() {
+    const err = document.getElementById('ns-erro');
+    const a = (document.getElementById('ns-1') || {}).value || '';
+    const b2 = (document.getElementById('ns-2') || {}).value || '';
+    const diz = (t) => { if (err) err.textContent = t; };
+    if (a.length < 6) { diz('A senha precisa de ao menos 6 caracteres.'); return; }
+    if (a !== b2) { diz('As duas senhas não são iguais.'); return; }
+    if (!cloud._tokenRecuperacao) { diz('O link venceu — peça outro e-mail.'); return; }
+    diz('Salvando…');
+    const c = cloud.config();
+    try {
+      const r = await fetch(c.url + '/auth/v1/user', {
+        method: 'PUT',
+        headers: Object.assign({}, cloud._headers(false),
+          { 'Authorization': 'Bearer ' + cloud._tokenRecuperacao }),
+        body: JSON.stringify({ password: a })
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { diz('Não deu: ' + (d.msg || d.error_description || d.error || r.status)); return; }
+      /* Token de recuperação é de uso único: some da memória assim que serve. */
+      cloud._tokenRecuperacao = null;
+      modal.close();
+      toast('✅ Senha alterada. Entre com ela para reconectar este aparelho.', 'success');
+      setTimeout(() => { try { cloud.reentrar(); } catch (e) {} }, 600);
+    } catch (e) { diz('Sem conexão para salvar agora.'); }
+  },
+
   async recuperarSenha(email) {
     const alvo = String(email || '').trim();
     if (!alvo || alvo.indexOf('@') < 0) { toast('Informe o e-mail da conta da nuvem', 'warn'); return false; }
@@ -48272,6 +48350,9 @@ document.addEventListener('DOMContentLoaded', () => {
   try { programador.atualizarVisibilidade(); } catch (e) {}
   window.pendencias = pendencias;
   try { pendencias.iniciarTimer(); } catch (e) {}
+  /* Chegou pelo link de recuperação de senha do e-mail: trata a âncora antes
+     de qualquer outra coisa, senão ela é lida como nome de módulo. */
+  try { cloud.checarLinkRecuperacao(); } catch (e) {}
   /* Repara espelhos de conta da nuvem criados sem id (✏️/🗑️ sem ação) */
   try { auth._repararIds(); } catch (e) {}
   /* sessão já aberta (ex.: login diário sem nuvem): checa as pendências também */
