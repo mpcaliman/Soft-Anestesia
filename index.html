@@ -4508,7 +4508,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-26f</b><br>
+    v7.1 · build <b id="build-tag">2026-08-26g</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -5467,7 +5467,6 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <button class="btn btn-success" onclick="anestesia.salvar()" title="Salvar dados sem finalizar (Ctrl+S)"><span class="icon">💾</span> Salvar</button>
     <button class="btn btn-finalizar" onclick="anestesia.finalizar()" title="Finalizar ficha — gera lançamento financeiro"><span class="icon">✅</span> Finalizar</button>
     <button class="btn" onclick="anestesia.salvarComoNovo()" title="Salvar como novo registro"><span class="icon">📋</span> Salvar como novo</button>
-    <button class="btn" onclick="adendos.abrir('anestesia')" title="Adicionar correção/complemento sem alterar o registro original"><span class="icon">📝</span> Adendo/correção</button>
     <button class="btn" onclick="anestesia.linhaTempo()" title="Ver sinais vitais, medicações, eventos e fluidos em ordem cronológica"><span class="icon">🕒</span> Linha do tempo</button>
     <div class="dropdown" id="dd-anestesia">
       <button class="btn" onclick="ui.toggleDropdown('dd-anestesia')"><span class="icon">📂</span> Carregar ▾</button>
@@ -49347,7 +49346,11 @@ const assinaturaDigital = (function () {
     termo:       { form: 'form-termo',       titulo: 'Termo de Consentimento',     pac: ['paciente', 'nome'], prof: ['profissional'],                    crm: ['crm'] },
     prescricao:  { form: 'form-prescricao',  titulo: 'Receituário',                  pac: ['paciente', 'nome'], prof: ['profissional'],                    crm: ['crm'] },
     risco:       { form: 'form-risco',       titulo: 'Avaliação de Risco',         pac: ['nome'],           prof: ['profissional'],                     crm: ['crm'] },
-    financeiro:  { form: 'form-financeiro',  titulo: 'Documento Financeiro',       pac: ['paciente'],       prof: ['profissional'],                     crm: ['crm'] }
+    financeiro:  { form: 'form-financeiro',  titulo: 'Documento Financeiro',       pac: ['paciente'],       prof: ['profissional'],                     crm: ['crm'] },
+    /* Atestado, declaração e laudo estavam de fora, e são justamente o tipo de
+       documento que se assina — um laudo para o INSS mais que os outros. O
+       botão existia na barra e só sabia dizer "abra um documento assinável". */
+    documentos:  { form: 'form-documentos',  titulo: 'Documento Médico',           pac: ['nome', 'paciente'], prof: ['profissional'],                   crm: ['crm'] }
   };
 
   function ctxAtual() {
@@ -49616,6 +49619,14 @@ const assinaturaDigital = (function () {
       if (bar._adBtn) return;
       const temImprimir = Array.from(bar.querySelectorAll('button')).some(b => /printPreview\.abrir/.test(b.getAttribute('onclick') || ''));
       if (!temImprimir) return;
+      /* "Tem Imprimir" não é o mesmo que "é assinável". Dashboard e Agenda
+         imprimem e não são documentos: ali o botão só conseguia dar o aviso
+         "Abra um documento assinável" — um botão que só sabe falhar.
+         Quem decide é a tabela de módulos assináveis, a mesma que ctxAtual()
+         consulta; assim os dois não podem divergir. */
+      const dono = bar.closest('[data-module]');
+      const mod = dono && dono.getAttribute('data-module');
+      if (!mod || !MODULOS[mod]) return;
       const b = document.createElement('button');
       b.className = 'btn'; b.type = 'button';
       b.style.cssText = 'background:#14532d;color:#fff;border-color:#0f3d21';
