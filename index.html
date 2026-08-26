@@ -4492,7 +4492,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-25g</b><br>
+    v7.1 · build <b id="build-tag">2026-08-26a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -12507,6 +12507,13 @@ const preLanc = {
      que ainda falta. markClean antes, senão "Descartar alterações?" aparece. */
   _fechar(mod) {
     try { if (typeof markClean === 'function') markClean(); } catch (e) {}
+    /* A ABA DO RASCUNHO TAMBÉM SE FECHA. Sem isto, `novo()` limpava o
+       formulário e a aba do paciente continuava lá, agora apontando para
+       nada: ela via "VANDERLITO SOARES" na aba e os campos em branco, como se
+       a ficha tivesse sumido. A ficha está salva e enviada — o que sobrava era
+       só a aba órfã. Finalizar já fazia isso (`rascunhos.removerAtivo`);
+       enviar, não. */
+    try { rascunhos.removerAtivo(mod); } catch (e) {}
     try { const obj = window[mod]; if (obj && obj.novo) obj.novo(); } catch (e) {}
     try { preLanc.renderBotao(mod); } catch (e) {}
     try {
@@ -19249,7 +19256,12 @@ const cloud = {
     });
     if (typeof window !== 'undefined') {
       window.addEventListener('focus', () => cloud.autoSyncAoVoltar());
-      window.addEventListener('online', () => cloud.autoSyncAoVoltar({ forcar: true }));
+      /* A internet voltou: a fila drena NA HORA, não no próximo ciclo. É o
+         caso que você mais tem — sinal caindo no centro cirúrgico. */
+      window.addEventListener('online', () => {
+        cloud.autoSyncAoVoltar({ forcar: true });
+        try { cloudRel.drenarFila(); } catch (e) {}
+      });
     }
   },
   uiEnviarTudo() {
@@ -19658,6 +19670,10 @@ const sincronia = {
           await preLanc.subirPendentes({ silent: true });
         }
       } catch (e) {}
+      /* 1c) a FILA do canal relacional: o que uma gravação tentou subir e não
+             conseguiu. Vem antes da varredura porque é precisa — sabe
+             exatamente o que falhou, em vez de procurar. */
+      try { await cloudRel.drenarFila(); } catch (e) {}
       /* 2) o resto do que foi feito aqui e ainda não subiu */
       try { await cloudRel.empurrarPendentes({ silent: true, limite: 15 }); } catch (e) {}
       /* 3) o que os outros aparelhos fizeram desde a última passada */
@@ -19723,8 +19739,15 @@ const nuvemEstado = {
             msg: 'conta sem clínica — nada sincroniza (toque)' };
         }
       } catch (e) {}
-      const fila = (() => { try { return cloud._fila().length; } catch (e) { return 0; } })();
-      if (fila) return { estado: 'pendente', msg: fila + (fila === 1 ? ' item aguardando envio' : ' itens aguardando envio'), fila };
+      /* Conta as DUAS filas. A do canal relacional é a que importa para a
+         equipe — é por ela que um registro chega ao outro aparelho — e era
+         justamente a que não existia, logo não era contada por ninguém. */
+      const filaBackup = (() => { try { return cloud._fila().length; } catch (e) { return 0; } })();
+      const filaRel = (() => { try { return cloudRel.filaPendentes(); } catch (e) { return 0; } })();
+      const fila = filaBackup + filaRel;
+      if (fila) return { estado: 'pendente', fila: fila, filaRel: filaRel,
+        msg: fila + (fila === 1 ? ' registro aguardando envio' : ' registros aguardando envio') +
+             (cloudRel._ultimoMotivo ? ' · ' + cloudRel._ultimoMotivo : '') };
       const ultimo = localStorage.getItem('medsys.v7.cloud.ultimo_sync');
       return { estado: 'ok', msg: ultimo ? 'em dia · ' + new Date(ultimo).toLocaleString('pt-BR') : 'em dia' };
     } catch (e) { return { estado: 'semNuvem', msg: 'sem nuvem neste aparelho' }; }
@@ -21221,13 +21244,108 @@ const cloudRel = {
   },
 
   /* Espelho chamado pelo store.save (best-effort, em segundo plano) */
+  /* ==========================================================================
+     FILA DURÁVEL DO CANAL RELACIONAL
+
+     Havia dois caminhos para a nuvem e só um era confiável. O `cloud` (backup
+     pessoal, tabela `documentos`) sempre teve fila com dedup e retentativa. O
+     `cloudRel` — que é o canal que COMPARTILHA entre os aparelhos da clínica —
+     disparava e esquecia:
+
+         cloudRel.enviarRegistro(mod, item).then(...).catch(() => {});
+
+     Sem org, sem rede, com token vencido ou com o RLS recusando, a promessa
+     morria no catch vazio. O registro ficava no aparelho sem `_relUpdatedAt` e
+     ninguém sabia. Era assim que um pré-lançamento "enviado" nunca chegava ao
+     médico: o canal confiável era o que não compartilha.
+
+     A fila guarda o ID, não o registro. Na hora de drenar, relê do `store` —
+     assim o que sobe é sempre a versão mais nova, e a fila cabe em poucos KB
+     mesmo com centenas de itens pendentes.
+  ========================================================================== */
+  FILA_KEY: 'medsys.v7.rel.fila',
+  MAX_FILA: 2000,
+
+  _filaLer() {
+    try { return JSON.parse(localStorage.getItem(cloudRel.FILA_KEY) || '[]'); }
+    catch (e) { return []; }
+  },
+  _filaGravar(q) {
+    try { localStorage.setItem(cloudRel.FILA_KEY, JSON.stringify(q.slice(-cloudRel.MAX_FILA))); }
+    catch (e) {}
+  },
+  filaPendentes() { return cloudRel._filaLer().length; },
+
+  /* Uma entrada por documento: o que importa é que ELE suba, não quantas vezes
+     foi editado enquanto estava offline. */
+  _filaPor(mod, id, motivo) {
+    if (!mod || !id) return;
+    const q = cloudRel._filaLer().filter(x => !(x.mod === mod && x.id === id));
+    const antes = cloudRel._filaLer().find(x => x.mod === mod && x.id === id);
+    q.push({ mod: mod, id: id, ts: Date.now(),
+             tentativas: ((antes && antes.tentativas) || 0) + 1, motivo: motivo || '' });
+    cloudRel._filaGravar(q);
+    /* O motivo vale desde a PRIMEIRA falha, não só depois de drenar: é ele que
+       transforma "1 registro aguardando envio" em "1 registro aguardando envio
+       · org" — a diferença entre um número e uma explicação. */
+    if (motivo) cloudRel._ultimoMotivo = motivo;
+    try { syncStatus.refresh(); } catch (e) {}
+  },
+  _filaTirar(mod, id) {
+    cloudRel._filaGravar(cloudRel._filaLer().filter(x => !(x.mod === mod && x.id === id)));
+    try { syncStatus.refresh(); } catch (e) {}
+  },
+
+  /* Drena a fila. Só uma execução por vez; falha mantém na fila e conta a
+     tentativa, com o motivo, para a tela poder dizer por que parou. */
+  async drenarFila(opts = {}) {
+    if (cloudRel._drenando) return null;
+    const q = cloudRel._filaLer();
+    if (!q.length) return { enviados: 0, restantes: 0 };
+    if (!cloudRel.disponivel()) return null;
+    cloudRel._drenando = true;
+    let enviados = 0, ultimoMotivo = '';
+    try {
+      if (!(await cloud._garantirToken())) { cloudRel._ultimoMotivo = 'token'; return null; }
+      const limite = opts.limite || 40;
+      for (const it of q.slice(0, limite)) {
+        let rec = null;
+        try { rec = store.getById(it.mod, it.id); } catch (e) {}
+        /* Sumiu do aparelho (apagado, arquivado): não há o que subir. */
+        if (!rec) { cloudRel._filaTirar(it.mod, it.id); continue; }
+        let r = null;
+        try { r = await cloudRel.enviarRegistro(it.mod, rec); } catch (e) { r = null; }
+        if (r && r.ok) {
+          cloudRel._filaTirar(it.mod, it.id);
+          enviados++;
+          try { cloudRel.registrarAnexos(it.mod, rec); } catch (e) {}
+        } else if (r && r.conflict) {
+          /* Conflito não é falha de entrega: sai da fila e vira decisão de
+             quem está na frente do aparelho. */
+          cloudRel._filaTirar(it.mod, it.id);
+          try { cloudRel._resolverConflitoRegistro(it.mod, rec, r.cloud, r.cloudUpdatedAt); } catch (e) {}
+        } else {
+          ultimoMotivo = (r && r.motivo) || 'rede';
+          cloudRel._filaPor(it.mod, it.id, ultimoMotivo);
+        }
+      }
+    } finally {
+      cloudRel._drenando = false;
+      if (ultimoMotivo) cloudRel._ultimoMotivo = ultimoMotivo;
+      else if (enviados) cloudRel._ultimoMotivo = '';
+    }
+    return { enviados: enviados, restantes: cloudRel.filaPendentes() };
+  },
+
   mirrorRegistro(mod, item) {
+    const id = item && item._id;
     try {
       cloudRel.enviarRegistro(mod, item).then(res => {
         if (res && res.conflict) cloudRel._resolverConflitoRegistro(mod, item, res.cloud, res.cloudUpdatedAt);
-        else if (res && res.ok) cloudRel.registrarAnexos(mod, item);
-      }).catch(() => {});
-    } catch (e) {}
+        else if (res && res.ok) { cloudRel._filaTirar(mod, id); cloudRel.registrarAnexos(mod, item); }
+        else cloudRel._filaPor(mod, id, (res && res.motivo) || 'rede');
+      }).catch(() => { cloudRel._filaPor(mod, id, 'rede'); });
+    } catch (e) { cloudRel._filaPor(mod, id, 'rede'); }
   },
 
   /* Registra os metadados dos anexos (já enviados ao Storage) na tabela
