@@ -10210,6 +10210,92 @@ await test('Nuvem: o link do e-mail abre a definição de nova senha e não vira
   await page.close();
 });
 
+
+/* 158) ETAPA 2 — o estado da nuvem, ficha a ficha.
+   "Salvo às 14:32" dizia só que os dados encostaram no aparelho. Se tinham
+   chegado à clínica — que é o que decide se o outro aparelho vai vê-los — era
+   outra história, e não havia onde ler essa história. */
+await test('Ficha: o selo diz se o registro chegou à clínica, não só se foi salvo aqui', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const esperar = () => new Promise(res => setTimeout(res, 60));
+    localStorage.removeItem(cloudRel.FILA_KEY);
+    store.setList('pre', []);
+    cloudRel.disponivel = () => true;
+    cloud._garantirToken = async () => true;
+    cloudRel.registrarAnexos = () => {};
+    const selo = () => {
+      const e = document.getElementById('dsnuvem-pre');
+      return e ? { cls: e.className, txt: e.textContent, tit: e.title } : null;
+    };
+    ui.navegar('pre');
+
+    /* --- aparelho sem nuvem não ganha alerta permanente ----------------- */
+    cloud.estaConfigurado = () => false;
+    ui.atualizarDocStatus('pre', { _id: 'x1', nome: 'Sem Nuvem' });
+    out.semNuvemSemSelo = selo() === null;
+    cloud.estaConfigurado = () => true;
+
+    /* --- a nuvem recusou: ⚠️ com o motivo em português ------------------ */
+    cloudRel.enviarRegistro = async () => ({ ok: false, motivo: 'org' });
+    const rec = store.save('pre', { nome: 'Linalva Selo Silva', data: utils.hojeISO() });
+    await esperar();
+    ui.atualizarDocStatus('pre', store.getById('pre', rec._id));
+    const parado = selo();
+    out.paradoMarca = !!parado && /parado/.test(parado.cls) && /não subiu/.test(parado.txt);
+    out.paradoDizMotivo = !!parado && /conta sem clínica/.test(parado.tit);
+    /* e tranquiliza: não subiu ≠ perdeu */
+    out.paradoTranquiliza = !!parado && /não se perde/.test(parado.tit);
+
+    /* --- drenou: ✓ na nuvem --------------------------------------------- */
+    cloudRel.enviarRegistro = async (m, it) => {
+      const l = store.list('pre'); const i = l.findIndex(x => x._id === it._id);
+      if (i >= 0) { l[i]._relUpdatedAt = '2026-08-26T12:00:00Z'; store.setList('pre', l); }
+      return { ok: true };
+    };
+    await cloudRel.drenarFila();
+    ui.atualizarDocStatus('pre', store.getById('pre', rec._id));
+    const ok = selo();
+    out.confirmado = !!ok && /ok/.test(ok.cls) && /na nuvem/.test(ok.txt);
+    out.confirmadoTemQuando = !!ok && /26\/08\/2026/.test(ok.tit);
+
+    /* --- gravado e ainda sem confirmação: ⏳ ----------------------------- */
+    ui.atualizarDocStatus('pre', { _id: 'sem-carimbo', nome: 'Aguardando Souza' });
+    const sub = selo();
+    out.subindo = !!sub && /subindo/.test(sub.cls);
+
+    /* --- ficha nova não mostra selo nenhum ------------------------------ */
+    ui.atualizarDocStatus('pre', null);
+    out.novoSemSelo = selo() === null;
+
+    /* --- e o selo se repinta sozinho quando a fila muda ----------------- */
+    const f = document.getElementById('form-pre');
+    let h = f.querySelector('[name="_id"]');
+    if (!h) { h = document.createElement('input'); h.type = 'hidden'; h.name = '_id'; f.appendChild(h); }
+    h.value = rec._id;
+    cloudRel._filaPor('pre', rec._id, 'rede');
+    out.repintouSozinho = /parado/.test((selo() || {}).cls || '');
+    cloudRel._filaTirar('pre', rec._id);
+    out.repintouDeVolta = /ok/.test((selo() || {}).cls || '');
+
+    localStorage.removeItem(cloudRel.FILA_KEY);
+    return out;
+  });
+
+  assert(r.semNuvemSemSelo, 'quem escolheu rodar local não precisa de alerta permanente');
+  assert(r.paradoMarca, 'registro que não subiu precisa dizer isso na ficha');
+  assert(r.paradoDizMotivo, 'com o motivo em português, não um código');
+  assert(r.paradoTranquiliza, 'e deixando claro que não se perde — senão vira pânico');
+  assert(r.confirmado, 'confirmado pela clínica, o selo muda para "na nuvem"');
+  assert(r.confirmadoTemQuando, 'dizendo quando foi confirmado');
+  assert(r.subindo, 'gravado e sem confirmação ainda é "subindo"');
+  assert(r.novoSemSelo, 'ficha nova não mostra selo');
+  assert(r.repintouSozinho, 'a ficha aberta não pode continuar dizendo "na nuvem" depois de falhar');
+  assert(r.repintouDeVolta, 'nem "não subiu" depois de subir');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

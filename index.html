@@ -4286,6 +4286,22 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
 @media print { .hoje-hero { display: none !important; } }
 
 /* ===== Filtros do financeiro ============================================== */
+/* ETAPA 2 — estado da nuvem ao lado do selo do documento. "Salvo às 14:32"
+   dizia só que os dados encostaram no aparelho; este selo diz se chegaram à
+   clínica, que é o que decide se o outro aparelho vai vê-los. */
+.ds-nuvem {
+  display: inline-flex; align-items: center;
+  font-size: .7rem; font-weight: 600; letter-spacing: .2px;
+  padding: 2px 8px; border-radius: 10px; margin-left: 6px;
+  white-space: nowrap; cursor: default;
+}
+.ds-nuvem.ok      { background: #e6f2ec; color: #24704f; }
+.ds-nuvem.subindo { background: #eaf0f8; color: #38557c; }
+.ds-nuvem.parado  { background: #fdeee2; color: #8a4b1c; }
+html[data-theme="dark"] .ds-nuvem.ok      { background: #1d3a2e; color: #7fd4ab; }
+html[data-theme="dark"] .ds-nuvem.subindo { background: #22304a; color: #9db9e0; }
+html[data-theme="dark"] .ds-nuvem.parado  { background: #40291a; color: #e8b183; }
+@media print { .ds-nuvem { display: none; } }
 /* Código CBHPM ao lado da descrição: discreto, mas legível — é o par
    código+descrição que o convênio recebe e por onde a glosa se discute. */
 .fin-cod {
@@ -4492,7 +4508,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-26c</b><br>
+    v7.1 · build <b id="build-tag">2026-08-26d</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -13086,6 +13102,85 @@ const lixeira = {
    UI — interface, navegação, modais
 ============================================================================ */
 const ui = {
+  /* ==========================================================================
+     ETAPA 2 — O ESTADO DA NUVEM, FICHA A FICHA
+
+     A Etapa 1 deu à gravação uma fila durável: o que não sobe fica registrado
+     e sobe depois. Faltava o outro lado — quem está com a ficha aberta saber
+     em que pé ela está. Antes, "Salvo às 14:32" dizia apenas que os dados
+     encostaram no aparelho; se tinham chegado à clínica era outra história, e
+     não havia onde ler essa história.
+
+     Três estados, e só três:
+       ✓ na nuvem   — a clínica confirmou (tem `_relUpdatedAt`)
+       ⏳ subindo    — gravou aqui, ainda sem confirmação
+       ⚠️ parado     — está na fila com motivo conhecido (sem clínica, sessão
+                       vencida, sem rede)
+
+     Aparelho sem nuvem configurada não mostra nada: quem escolheu rodar local
+     não precisa de um alerta permanente dizendo o que ele já sabe.
+  ========================================================================== */
+  NUVEM_ROTULOS: {
+    org: 'conta sem clínica', token: 'sessão vencida',
+    rede: 'sem conexão', offline: 'sem conexão'
+  },
+
+  estadoNuvem(modKey, item) {
+    if (!item || !item._id) return null;
+    try { if (typeof demo !== 'undefined' && demo.ativo()) return null; } catch (e) {}
+    try { if (typeof cloud === 'undefined' || !cloud.estaConfigurado()) return null; } catch (e) {}
+    try { if (!cloudRel.ehModuloRegistro || !cloudRel.ehModuloRegistro(modKey)) return null; } catch (e) {}
+    let naFila = null;
+    try {
+      naFila = cloudRel._filaLer().find(x => x.mod === modKey && x.id === item._id) || null;
+    } catch (e) {}
+    if (naFila) {
+      const motivo = ui.NUVEM_ROTULOS[naFila.motivo] || naFila.motivo || '';
+      return { cls: 'parado', txt: '⚠️ não subiu',
+               tit: 'Este registro ainda não chegou à clínica' + (motivo ? ' — ' + motivo : '') +
+                    '. Ele não se perde: sobe sozinho quando der.' };
+    }
+    if (item._relUpdatedAt) {
+      return { cls: 'ok', txt: '✓ na nuvem',
+               tit: 'A clínica confirmou este registro em ' + utils.formatarDataHora(item._relUpdatedAt) };
+    }
+    return { cls: 'subindo', txt: '⏳ subindo',
+             tit: 'Gravado neste aparelho; aguardando confirmação da clínica.' };
+  },
+
+  atualizarNuvemDoc(modKey, item) {
+    const host = document.getElementById('docstatus-' + modKey);
+    if (!host) return;
+    let el = document.getElementById('dsnuvem-' + modKey);
+    const est = ui.estadoNuvem(modKey, item);
+    if (!est) { if (el) el.remove(); return; }
+    if (!el) {
+      el = document.createElement('span');
+      el.id = 'dsnuvem-' + modKey;
+      const badge = document.getElementById('dsbadge-' + modKey);
+      /* logo depois do selo do documento: os dois contam o mesmo fato por
+         ângulos diferentes — salvo onde, e chegou aonde */
+      if (badge && badge.parentNode === host) host.insertBefore(el, badge.nextSibling);
+      else host.appendChild(el);
+    }
+    el.className = 'ds-nuvem ' + est.cls;
+    el.textContent = est.txt;
+    el.title = est.tit;
+  },
+
+  /* Chamado quando a fila muda: a ficha aberta não pode continuar dizendo
+     "subindo" depois que subiu, nem "na nuvem" depois que falhou. */
+  repintarNuvemAtual() {
+    try {
+      const mod = (typeof state !== 'undefined' && state.currentModule) || '';
+      if (!mod) return;
+      const el = document.querySelector('#form-' + mod + ' [name="_id"]');
+      const id = el && el.value;
+      if (!id) return;
+      ui.atualizarNuvemDoc(mod, store.getById(mod, id));
+    } catch (e) {}
+  },
+
   toggleTheme() {
     const curr = document.documentElement.getAttribute('data-theme') || 'light';
     const next = curr === 'dark' ? 'light' : 'dark';
@@ -21430,11 +21525,13 @@ const cloudRel = {
        transforma "1 registro aguardando envio" em "1 registro aguardando envio
        · org" — a diferença entre um número e uma explicação. */
     if (motivo) cloudRel._ultimoMotivo = motivo;
+    try { ui.repintarNuvemAtual(); } catch (e) {}
     try { syncStatus.refresh(); } catch (e) {}
   },
   _filaTirar(mod, id) {
     cloudRel._filaGravar(cloudRel._filaLer().filter(x => !(x.mod === mod && x.id === id)));
     try { syncStatus.refresh(); } catch (e) {}
+    try { ui.repintarNuvemAtual(); } catch (e) {}
   },
 
   /* Drena a fila. Só uma execução por vez; falha mantém na fila e conta a
@@ -38124,6 +38221,7 @@ ui.atualizarDocStatus = function(modKey, item) {
   const meta = document.getElementById('dsmeta-' + modKey);
   const links = document.getElementById('dslinks-' + modKey);
   if (!badge) return;
+  try { ui.atualizarNuvemDoc(modKey, item); } catch (e) {}
   if (item && item._id) {
     if (item._finalizado) {
       badge.className = 'ds-badge finalizado';
