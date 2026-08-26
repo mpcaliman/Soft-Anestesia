@@ -10171,6 +10171,17 @@ await test('Nuvem: o link do e-mail abre a definição de nova senha e não vira
        histórico do navegador nem numa captura de tela */
     out.limpouURL = location.hash.indexOf('access_token') < 0;
 
+    /* tela de acesso ABERTA: a definição vai PARA ELA. Um modal ficaria
+       atrás (z-index 1290 contra 100000) e sumiria — e quem clica no link é,
+       por definição, quem não consegue entrar. */
+    const ov = document.getElementById('auth-overlay');
+    ov.style.display = 'flex';
+    cloud.abrirNovaSenha();
+    out.usouTelaDeAcesso = /Definir nova senha/.test((document.getElementById('auth-sub') || {}).textContent || '')
+      && !!document.getElementById('auth-ns1');
+    out.naoEscondeuEmModal = !(document.getElementById('modal-backdrop') || {}).classList.contains('show');
+    ov.style.display = 'none';
+
     cloud.uiNovaSenha();
     out.abriu = /Definir nova senha/.test((document.getElementById('modal-title') || {}).textContent || '');
 
@@ -10200,7 +10211,9 @@ await test('Nuvem: o link do e-mail abre a definição de nova senha e não vira
 
   assert(r.pegouToken, 'o app precisa reconhecer o token que vem na âncora do link');
   assert(r.limpouURL, 'e limpar a URL — token é de uso único e não pode ficar no histórico');
-  assert(r.abriu, 'abrindo a definição de nova senha');
+  assert(r.usouTelaDeAcesso, 'com a tela de acesso aberta, a nova senha se define NELA — modal ficaria atrás e sumiria');
+  assert(r.naoEscondeuEmModal, 'e nenhum modal invisível é aberto por trás');
+  assert(r.abriu, 'com o app já aberto, a mesma definição vem em modal');
   assert(r.recusaCurta, 'senha curta é recusada antes de ir ao servidor');
   assert(r.recusaDiferentes, 'e senhas diferentes também');
   assert(r.enviouSenha, 'a senha nova é enviada ao Supabase');
@@ -10293,6 +10306,85 @@ await test('Ficha: o selo diz se o registro chegou à clínica, não só se foi 
   assert(r.novoSemSelo, 'ficha nova não mostra selo');
   assert(r.repintouSozinho, 'a ficha aberta não pode continuar dizendo "na nuvem" depois de falhar');
   assert(r.repintouDeVolta, 'nem "não subiu" depois de subir');
+  await page.close();
+});
+
+
+/* 159) ETAPA 3 — escrita contínua. "Cada letra digitada deve subir" não é
+   viável por letra (200 caracteres = 200 requisições), mas a garantia é a
+   mesma por outro caminho: pausou de digitar, sobe. */
+await test('Escrita contínua: pausou de digitar, grava — sem criar ficha do nada nem gravar sobre finalizada', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const esperar = ms => new Promise(res => setTimeout(res, ms));
+    /* pausas curtas para o teste não levar 3 s por asserção */
+    escritaContinua.PAUSA = 120; escritaContinua.PAUSA_SAIDA = 60;
+    store.setList('pre', []);
+    let toasts = [];
+    const realToast = window.toast;
+    window.toast = (m) => { toasts.push(String(m)); };
+    ui.navegar('pre');
+    const f = document.getElementById('form-pre');
+    const campo = n => f.querySelector('[name="' + n + '"]');
+    const digitar = (n, v, ev) => {
+      campo(n).value = v; markDirty();
+      campo(n).dispatchEvent(new Event(ev || 'input', { bubbles: true }));
+    };
+
+    /* --- ficha nunca gravada NÃO nasce sozinha -------------------------- */
+    campo('nome').value = 'Fantasma Nao Criar Silva';
+    campo('data').value = utils.hojeISO();
+    markDirty();
+    campo('nome').dispatchEvent(new Event('input', { bubbles: true }));
+    await esperar(300);
+    out.naoCriaSozinho = store.list('pre').length === 0;
+
+    /* --- depois da primeira gravação, digitar sobe sozinho -------------- */
+    pre.salvar();
+    toasts = [];
+    const id = campo('_id').value;
+    digitar('idade', '73 anos');
+    await esperar(300);
+    out.gravouSozinho = (store.getById('pre', id) || {}).idade === '73 anos';
+    /* --- e sem anunciar: aviso a cada pausa vira ruído ------------------ */
+    out.semAnuncio = toasts.filter(t => /salva|Avalia/i.test(t)).length === 0;
+
+    /* --- sair do campo grava mais rápido que a pausa -------------------- */
+    digitar('peso', '80', 'focusout');
+    await esperar(150);
+    out.saidaEhMaisRapida = (store.getById('pre', id) || {}).peso === '80';
+
+    /* --- ficha FINALIZADA não é gravada por cima ------------------------
+       documento finalizado se corrige por adendo, com autoria e data */
+    const rec = store.getById('pre', id);
+    rec._finalizado = true; store.save('pre', rec);
+    digitar('altura', '1,70');
+    await esperar(300);
+    out.finalizadaIntacta = (store.getById('pre', id) || {}).altura !== '1,70';
+    rec._finalizado = false; store.save('pre', rec);
+
+    /* --- sem alteração pendente, não grava à toa ------------------------ */
+    markClean();
+    out.limpoNaoGrava = escritaContinua.gravar('pre') === false;
+
+    /* --- campo obrigatório vazio: não grava e NÃO reclama --------------- */
+    campo('nome').value = ''; markDirty(); toasts = [];
+    out.invalidoNaoGrava = escritaContinua.gravar('pre') === false;
+    out.invalidoNaoReclama = toasts.filter(t => /obrigat/i.test(t)).length === 0;
+
+    window.toast = realToast;
+    return out;
+  });
+
+  assert(r.naoCriaSozinho, 'ficha nunca gravada não pode nascer sozinha — encheria a clínica de fichas em branco');
+  assert(r.gravouSozinho, 'depois da primeira gravação, parar de digitar grava');
+  assert(r.semAnuncio, 'e sem anunciar: aviso a cada pausa vira ruído e a pessoa para de ler todos');
+  assert(r.saidaEhMaisRapida, 'sair do campo grava mais rápido que esperar a pausa');
+  assert(r.finalizadaIntacta, 'ficha FINALIZADA não é gravada por cima — corrige-se por adendo');
+  assert(r.limpoNaoGrava, 'sem alteração pendente não grava à toa');
+  assert(r.invalidoNaoGrava, 'campo obrigatório vazio não grava');
+  assert(r.invalidoNaoReclama, 'e não reclama a cada pausa de digitação');
   await page.close();
 });
 

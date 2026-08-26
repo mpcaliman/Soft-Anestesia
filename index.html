@@ -4508,7 +4508,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-26d</b><br>
+    v7.1 · build <b id="build-tag">2026-08-26f</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -13544,6 +13544,93 @@ window.addEventListener('resize', () => {
 });
 
 /* Dirty state */
+/* ============================================================================
+   ETAPA 3 — ESCRITA CONTÍNUA
+
+   Antes, um dado só saía do formulário quando alguém apertava Salvar. Quem
+   esquecia, perdia; e o que estava digitado e não gravado não existia para
+   mais ninguém. A exigência era "cada letra digitada deve subir".
+
+   Por letra não dá: uma gravação no Supabase leva de 100 a 300 ms daí, e um
+   campo de 200 caracteres viraria 200 requisições e quarenta segundos de
+   escrita — no centro cirúrgico, com sinal oscilando, isso é o app travando
+   na mão de quem está atendendo.
+
+   A garantia que interessa é a mesma, obtida de outro jeito: PAUSOU DE
+   DIGITAR, SOBE. Dois segundos e meio de silêncio, ou a saída do campo, o que
+   vier primeiro. Na prática o dado está na clínica antes de a pessoa terminar
+   de ler o que escreveu — sem 200 requisições.
+
+   Três limites, todos deliberados:
+
+   1. Só mexe em ficha que JÁ FOI GRAVADA uma vez. Criar registro sozinho
+      encheria a base da clínica de fichas em branco de quem abriu a tela e
+      desistiu. Enquanto não há primeira gravação, quem guarda é o rascunho,
+      que já sincroniza.
+   2. Não grava ficha FINALIZADA. Documento finalizado se corrige por adendo,
+      com autoria e data — gravar por cima em silêncio destruiria isso.
+   3. Não grava o que não passa na validação, e não reclama. Um aviso de
+      "campo obrigatório" a cada pausa de digitação seria insuportável.
+============================================================================ */
+const escritaContinua = {
+  PAUSA: 2500,        /* silêncio depois da última tecla */
+  PAUSA_SAIDA: 400,   /* saiu do campo: quase imediato */
+  _timers: {},
+  _ligados: {},
+
+  modulos() {
+    try { return Object.keys(cloudRel.MODOS).filter(m => document.getElementById('form-' + m)); }
+    catch (e) { return []; }
+  },
+
+  ligar() {
+    escritaContinua.modulos().forEach(mod => {
+      const f = document.getElementById('form-' + mod);
+      if (!f || escritaContinua._ligados[mod]) return;
+      escritaContinua._ligados[mod] = true;
+      f.addEventListener('input', () => escritaContinua.agendar(mod, escritaContinua.PAUSA));
+      f.addEventListener('change', () => escritaContinua.agendar(mod, escritaContinua.PAUSA_SAIDA));
+      /* focusout borbulha; blur não. Sair do campo é o sinal mais forte de
+         "terminei este dado" que o formulário dá. */
+      f.addEventListener('focusout', () => escritaContinua.agendar(mod, escritaContinua.PAUSA_SAIDA));
+    });
+  },
+
+  agendar(mod, espera) {
+    if (!escritaContinua.podeGravar(mod)) return;
+    clearTimeout(escritaContinua._timers[mod]);
+    escritaContinua._timers[mod] = setTimeout(() => escritaContinua.gravar(mod), espera);
+  },
+
+  podeGravar(mod) {
+    try {
+      const f = document.getElementById('form-' + mod);
+      if (!f) return false;
+      const idEl = f.querySelector('[name="_id"]');
+      const id = idEl && idEl.value;
+      if (!id) return false;                       /* ainda não foi gravada uma vez */
+      const rec = store.getById(mod, id);
+      if (!rec) return false;
+      if (rec._finalizado) return false;           /* finalizada se corrige por adendo */
+      if (typeof state !== 'undefined' && !state.dirty) return false;
+      return true;
+    } catch (e) { return false; }
+  },
+
+  gravar(mod) {
+    if (!escritaContinua.podeGravar(mod)) return false;
+    /* Validação ANTES de chamar salvar: assim o módulo não precisa aprender a
+       calar o aviso de campo obrigatório — ele nem chega a ser chamado. */
+    try { if (!utils.validar('form-' + mod)) return false; } catch (e) { return false; }
+    try {
+      const obj = window[mod];
+      if (!obj || !obj.salvar) return false;
+      obj.salvar({ auto: true });
+      return true;
+    } catch (e) { return false; }
+  }
+};
+
 function markDirty() {
   if (state.dirty) return;
   state.dirty = true;
@@ -14724,7 +14811,10 @@ const pre = {
     if (finalizar) { try { printPreview.abrir(); } catch (e) {} }
     /* Rascunho só é descartado quando finaliza; salvar normal mantém o rascunho ativo */
     if (finalizar) { try { rascunhos.removerAtivo('pre'); } catch (e) {} }
-    toast(finalizar ? '✅ Avaliação finalizada' : '💾 Avaliação salva (dados preservados)');
+    /* Gravação automática não anuncia: um aviso a cada pausa de digitação
+       vira ruído e a pessoa para de ler todos os avisos, inclusive os que
+       importam. O selo da ficha já mostra o estado. */
+    if (!opts.auto) toast(finalizar ? '✅ Avaliação finalizada' : '💾 Avaliação salva (dados preservados)');
     /* A pergunta do Termo espera a impressão sair da frente (ela já sabe
        esperar janela aberta, ver _perguntarTermo). */
     if (finalizar) setTimeout(() => pre._perguntarTermo(saved), 700);
@@ -15471,7 +15561,10 @@ const consulta = {
     markClean();
     if (finalizar) { try { pdfBackup.autoAoFinalizar('consulta'); } catch (e) {} }
     if (finalizar) { try { rascunhos.removerAtivo('consulta'); } catch (e) {} }
-    toast(finalizar ? '✅ Consulta finalizada' : '💾 Consulta salva (dados preservados)');
+    /* Gravação automática não anuncia: um aviso a cada pausa de digitação
+       vira ruído e a pessoa para de ler todos os avisos, inclusive os que
+       importam. O selo da ficha já mostra o estado. */
+    if (!opts.auto) toast(finalizar ? '✅ Consulta finalizada' : '💾 Consulta salva (dados preservados)');
   },
   finalizar() { consulta.salvar({ finalizar: true }); },
   salvarComoNovo() {
@@ -15800,7 +15893,10 @@ const recuperacao = {
     markClean();
     if (finalizar) { try { pdfBackup.autoAoFinalizar('recuperacao'); } catch (e) {} }
     if (finalizar) { try { rascunhos.removerAtivo('recuperacao'); } catch (e) {} }
-    toast(finalizar ? '✅ Recuperação finalizada' : '💾 Recuperação salva (dados preservados)');
+    /* Gravação automática não anuncia: um aviso a cada pausa de digitação
+       vira ruído e a pessoa para de ler todos os avisos, inclusive os que
+       importam. O selo da ficha já mostra o estado. */
+    if (!opts.auto) toast(finalizar ? '✅ Recuperação finalizada' : '💾 Recuperação salva (dados preservados)');
   },
   /* Faixa de totais no topo da SRPA (tempo, Aldrete). */
   resumoTopo() {
@@ -16530,7 +16626,10 @@ const termo = {
     if (finalizar) { try { pdfBackup.autoAoFinalizar('termo'); } catch (e) {} }
     if (finalizar) { try { printPreview.abrir(); } catch (e) {} }
     if (finalizar) { try { rascunhos.removerAtivo('termo'); } catch (e) {} }
-    toast(finalizar ? '✅ Termo finalizado' : '💾 Termo salvo (dados preservados)');
+    /* Gravação automática não anuncia: um aviso a cada pausa de digitação
+       vira ruído e a pessoa para de ler todos os avisos, inclusive os que
+       importam. O selo da ficha já mostra o estado. */
+    if (!opts.auto) toast(finalizar ? '✅ Termo finalizado' : '💾 Termo salvo (dados preservados)');
   },
   finalizar() { termo.salvar({ finalizar: true }); },
   salvarComoNovo() {
@@ -17166,7 +17265,10 @@ const prescricao = {
     markClean();
     if (finalizar) { try { rascunhos.removerAtivo('prescricao'); } catch (e) {} }
     if (finalizar) { try { pdfBackup.autoAoFinalizar('prescricao'); } catch (e) {} }
-    toast(finalizar ? '✅ Prescrição finalizada' : '💾 Prescrição salva (dados preservados)');
+    /* Gravação automática não anuncia: um aviso a cada pausa de digitação
+       vira ruído e a pessoa para de ler todos os avisos, inclusive os que
+       importam. O selo da ficha já mostra o estado. */
+    if (!opts.auto) toast(finalizar ? '✅ Prescrição finalizada' : '💾 Prescrição salva (dados preservados)');
   },
   finalizar() { prescricao.salvar({ finalizar: true }); },
   salvarComoNovo() {
@@ -17537,6 +17639,52 @@ const auth = {
   },
 
   /* Renderiza a tela de login (ou o cadastro inicial do admin) */
+  /* ---------- CHEGOU PELO LINK DE RECUPERAÇÃO ----------
+     Quem clica no link é, por definição, quem NÃO consegue entrar. Exigir o
+     login antes de deixar redefinir a senha da nuvem é um círculo fechado — e
+     era o que acontecia: a janela abria com z-index 1290 atrás da tela de
+     acesso, que tem 100000. Invisível.
+     A definição da nova senha passa a acontecer AQUI, na própria tela de
+     acesso, que é quem manda antes do login. */
+  _telaNovaSenha() {
+    const sub = document.getElementById('auth-sub');
+    const foot = document.getElementById('auth-foot');
+    const form = document.getElementById('auth-form');
+    if (!form) return;
+    sub.textContent = 'Definir nova senha da nuvem';
+    form.innerHTML = `
+      <p style="font-size:.85rem;color:var(--text-soft, #55606d);margin:0 0 12px;text-align:left">
+        Você chegou pelo link do e-mail. Escolha a nova senha da <b>conta da nuvem</b> —
+        é a que este e os outros aparelhos vão usar para entrar e sincronizar.</p>
+      <div class="auth-field"><label>Nova senha</label><input type="password" id="auth-ns1" autocomplete="new-password" placeholder="mínimo 6 caracteres"></div>
+      <div class="auth-field"><label>Repita a nova senha</label><input type="password" id="auth-ns2" autocomplete="new-password" placeholder="Repita"></div>
+      <div class="auth-error" id="auth-error"></div>
+      <button type="submit" class="auth-btn">Salvar nova senha</button>`;
+    form.onsubmit = (e) => { e.preventDefault(); auth._salvarNovaSenhaNuvem(); };
+    foot.innerHTML = '<a href="javascript:void(0)" onclick="auth._render()" style="color:var(--text-mute);font-size:.82rem">← Voltar ao login</a>';
+    setTimeout(() => { const el = document.getElementById('auth-ns1'); if (el) el.focus(); }, 80);
+  },
+
+  async _salvarNovaSenhaNuvem() {
+    const err = document.getElementById('auth-error');
+    const a = (document.getElementById('auth-ns1') || {}).value || '';
+    const b = (document.getElementById('auth-ns2') || {}).value || '';
+    const diz = t => { if (err) err.textContent = t; };
+    if (a.length < 6) { diz('A senha precisa de ao menos 6 caracteres.'); return; }
+    if (a !== b) { diz('As duas senhas não são iguais.'); return; }
+    diz('Salvando…');
+    const ok = await cloud.trocarSenhaComToken(a);
+    if (!ok) { diz('Não consegui salvar. O link pode ter vencido — peça outro.'); return; }
+    diz('');
+    auth._render();
+    /* já deixa o e-mail preenchido: ela acabou de definir a senha, e o passo
+       seguinte é entrar com ela — o e-mail veio dentro do próprio token */
+    const el = document.getElementById('auth-email');
+    if (el && cloud._emailRecuperado) el.value = cloud._emailRecuperado;
+    const pw = document.getElementById('auth-pass'); if (pw) pw.focus();
+    toast('✅ Senha alterada. Entre com ela agora.', 'success');
+  },
+
   _render() {
     const sub = document.getElementById('auth-sub');
     const foot = document.getElementById('auth-foot');
@@ -18721,8 +18869,39 @@ const cloud = {
     cloud._limparAncora();
     if (a.tipo !== 'recovery') return false;
     cloud._tokenRecuperacao = a.token;
-    setTimeout(() => { try { cloud.uiNovaSenha(); } catch (e) {} }, 400);
+    /* o e-mail vem dentro do próprio token (JWT), sem precisar perguntar */
+    try {
+      const corpo = JSON.parse(atob(a.token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      cloud._emailRecuperado = corpo.email || '';
+    } catch (e) { cloud._emailRecuperado = ''; }
+    setTimeout(() => { try { cloud.abrirNovaSenha(); } catch (e) {} }, 300);
     return true;
+  },
+
+  /* Duas telas para o mesmo ato, e a escolha não é estética: com a tela de
+     acesso aberta, um modal fica ATRÁS dela (1290 contra 100000) e some. */
+  abrirNovaSenha() {
+    const ov = document.getElementById('auth-overlay');
+    const trancado = ov && ov.style.display !== 'none';
+    if (trancado && typeof auth !== 'undefined' && auth._telaNovaSenha) auth._telaNovaSenha();
+    else cloud.uiNovaSenha();
+  },
+
+  /* A troca em si, usada pelas duas telas. */
+  async trocarSenhaComToken(nova) {
+    if (!cloud._tokenRecuperacao) return false;
+    const c = cloud.config();
+    try {
+      const r = await fetch(c.url + '/auth/v1/user', {
+        method: 'PUT',
+        headers: Object.assign({}, cloud._headers(false),
+          { 'Authorization': 'Bearer ' + cloud._tokenRecuperacao }),
+        body: JSON.stringify({ password: nova })
+      });
+      if (!r.ok) return false;
+      cloud._tokenRecuperacao = null;   /* uso único */
+      return true;
+    } catch (e) { return false; }
   },
 
   uiNovaSenha() {
@@ -18748,22 +18927,11 @@ const cloud = {
     if (a !== b2) { diz('As duas senhas não são iguais.'); return; }
     if (!cloud._tokenRecuperacao) { diz('O link venceu — peça outro e-mail.'); return; }
     diz('Salvando…');
-    const c = cloud.config();
-    try {
-      const r = await fetch(c.url + '/auth/v1/user', {
-        method: 'PUT',
-        headers: Object.assign({}, cloud._headers(false),
-          { 'Authorization': 'Bearer ' + cloud._tokenRecuperacao }),
-        body: JSON.stringify({ password: a })
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) { diz('Não deu: ' + (d.msg || d.error_description || d.error || r.status)); return; }
-      /* Token de recuperação é de uso único: some da memória assim que serve. */
-      cloud._tokenRecuperacao = null;
-      modal.close();
-      toast('✅ Senha alterada. Entre com ela para reconectar este aparelho.', 'success');
-      setTimeout(() => { try { cloud.reentrar(); } catch (e) {} }, 600);
-    } catch (e) { diz('Sem conexão para salvar agora.'); }
+    const ok = await cloud.trocarSenhaComToken(a);
+    if (!ok) { diz('Não consegui salvar. O link pode ter vencido — peça outro.'); return; }
+    modal.close();
+    toast('✅ Senha alterada. Entre com ela para reconectar este aparelho.', 'success');
+    setTimeout(() => { try { cloud.reentrar(); } catch (e) {} }, 600);
   },
 
   async recuperarSenha(email) {
@@ -34708,7 +34876,10 @@ const anestesia = {
     markClean();
     if (finalizar) { try { pdfBackup.autoAoFinalizar('anestesia'); } catch (e) {} }
     if (finalizar) { try { rascunhos.removerAtivo('anestesia'); } catch (e) {} }
-    toast(finalizar ? '✅ Ficha finalizada' : '💾 Ficha salva (dados preservados)');
+    /* Gravação automática não anuncia: um aviso a cada pausa de digitação
+       vira ruído e a pessoa para de ler todos os avisos, inclusive os que
+       importam. O selo da ficha já mostra o estado. */
+    if (!opts.auto) toast(finalizar ? '✅ Ficha finalizada' : '💾 Ficha salva (dados preservados)');
 
     /* Pergunta sobre SRPA — em TODA finalização sem SRPA vinculada
        (antes só em ficha nova; quem salvava rascunho e finalizava depois
@@ -48451,6 +48622,8 @@ document.addEventListener('DOMContentLoaded', () => {
   /* Chegou pelo link de recuperação de senha do e-mail: trata a âncora antes
      de qualquer outra coisa, senão ela é lida como nome de módulo. */
   try { cloud.checarLinkRecuperacao(); } catch (e) {}
+  window.escritaContinua = escritaContinua;
+  try { escritaContinua.ligar(); } catch (e) {}
   /* Repara espelhos de conta da nuvem criados sem id (✏️/🗑️ sem ação) */
   try { auth._repararIds(); } catch (e) {}
   /* sessão já aberta (ex.: login diário sem nuvem): checa as pendências também */
