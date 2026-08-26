@@ -4508,7 +4508,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-26h</b><br>
+    v7.1 · build <b id="build-tag">2026-08-26i</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -21659,6 +21659,57 @@ const cloudRel = {
      _rowParaRegistro, mas sem precisar do `data`. Se as duas divergirem, o
      incremental deixa de reconhecer registros e volta a baixar tudo; por isso
      há teste amarrando as duas. */
+  /* ==========================================================================
+     ETAPA 4 — "VAZIO" E "NÃO CARREGADO" SÃO COISAS DIFERENTES
+
+     O objetivo da etapa era tirar do cache local o posto de fonte da verdade.
+     Reescrever as 159 leituras para irem à nuvem seria caro, arriscado num
+     sistema em uso clínico — e, depois do Realtime e da escrita contínua,
+     quase sem ganho: o cache já é mantido em dia por empurrão.
+
+     O que SOBRAVA de perigoso no cache era outra coisa, e essa a gente viu
+     acontecer: um aparelho que nunca sincronizou mostra tela vazia, e tela
+     vazia é indistinguível de "não há nada". Foi assim que o painel da
+     secretária pareceu funcionar enquanto nada chegava.
+
+     Então o cache continua servindo de leitura — mas passa a saber DIZER que
+     nunca falou com a clínica. É a diferença entre uma lista vazia e uma
+     lista vazia que se explica.
+  ========================================================================== */
+  PUXOU_KEY: 'medsys.v7.rel.puxou',
+
+  _puxouMapa() {
+    try { return JSON.parse(localStorage.getItem(cloudRel.PUXOU_KEY) || '{}'); }
+    catch (e) { return {}; }
+  },
+  marcarPuxado(mod) {
+    try {
+      const m = cloudRel._puxouMapa();
+      m[mod] = new Date().toISOString();
+      localStorage.setItem(cloudRel.PUXOU_KEY, JSON.stringify(m));
+    } catch (e) {}
+  },
+  jaPuxou(mod) { return !!cloudRel._puxouMapa()[mod]; },
+  quandoPuxou(mod) { return cloudRel._puxouMapa()[mod] || ''; },
+
+  /* Texto para a tela quando a lista está vazia. Devolve '' quando o vazio é
+     legítimo — nem toda lista vazia merece explicação, só a que pode estar
+     mentindo. */
+  porQueVazio(mod) {
+    try {
+      if (typeof demo !== 'undefined' && demo.ativo()) return '';
+      if (!cloud.estaConfigurado()) return '';
+      if (cloudRel.jaPuxou(mod)) return '';           /* falou com a clínica: vazio é vazio */
+      const d = cloud.divergencia();
+      if (d) return 'Este aparelho está no app como ' + d.app + ' e na nuvem como ' + d.nuvem +
+                    ' — enquanto estiver assim nada é carregado.';
+      if (!cloud.estaLogado()) return 'Este aparelho ainda não entrou na nuvem — o que a equipe lançou não chegou aqui.';
+      if (!cloudRel._org() && cloudRel._semClinicaConfirmado())
+        return 'Esta conta não está ligada a nenhuma clínica — nada sincroniza. O gestor resolve em Ajustes → Equipe da nuvem.';
+      return 'Ainda não carreguei este módulo da clínica. Pode não estar vazio de verdade.';
+    } catch (e) { return ''; }
+  },
+
   _idLocalDaLinha(row) {
     if (!row) return '';
     return row.legacy_id || ('rel_' + String(row.id || '').slice(0, 8));
@@ -22046,6 +22097,9 @@ const cloudRel = {
       }
     } catch (e) {}
     if (removidos) store.setList(mod, locais);      /* a mescla já gravou o que trouxe */
+    /* Chegou até aqui: a clínica respondeu por este módulo. É o carimbo que
+       separa "não tem registro" de "ainda não carregou" — ver `jaPuxou`. */
+    cloudRel.marcarPuxado(mod);
     if (novos) {
       /* trouxe coisa nova: o que está na tela precisa refletir isso */
       try { if (typeof preLanc !== 'undefined' && preLanc.MODS.indexOf(mod) >= 0) preLanc.renderFila(); } catch (e) {}
@@ -43919,8 +43973,20 @@ const dashboard = {
       '<button type="button" class="btn btn-xs" onclick="dashboard._verComo(\'clinica\')">Ver clínica</button>');
     if (emTudo) pedaco.push('<b>' + emTudo + '</b> finalizado(s) seu(s) estão <b>fora deste período</b> ' +
       '<button type="button" class="btn btn-xs" onclick="dashboard._verComo(null, \'all\')">Ver tudo</button>');
+    /* Se este aparelho nunca falou com a clínica, o painel zerado não é
+       resultado — é falta de resposta. Dizer isso vale mais que qualquer
+       contagem, porque muda o que a pessoa faz em seguida. */
+    const naoCarregou = (() => {
+      try { return cloudRel.porQueVazio('anestesia') || cloudRel.porQueVazio('financeiro'); }
+      catch (e) { return ''; }
+    })();
+    /* O aviso SOMA, não substitui. "Há 3 em aberto" continua sendo verdade e
+       continua sendo acionável mesmo que o módulo ainda não tenha carregado —
+       trocar uma informação pela outra foi erro meu, e o teste pegou. */
     host.innerHTML = '📭 Nenhuma produção finalizada neste filtro.' +
-      (pedaco.length ? '<br>' + pedaco.join('<br>') : ' Não encontrei registros deste período neste aparelho — se você lançou em outro, o app está buscando na clínica.');
+      (pedaco.length ? '<br>' + pedaco.join('<br>')
+                     : (naoCarregou ? '' : ' Não encontrei registros deste período neste aparelho — se você lançou em outro, o app está buscando na clínica.')) +
+      (naoCarregou ? '<br><b style="color:var(--warning,#8a4b1c)">⚠️ ' + utils.escapeHTML(naoCarregou) + '</b>' : '');
     host.style.display = '';
   },
   _verComo(escopo, periodo) {
@@ -45841,7 +45907,12 @@ const financeiro = {
     try { financeiro.planos.atualizarRotulo(); } catch (e) {}
     const tbody = document.getElementById('financeiro-tbody');
     if (list.length === 0) {
-      tbody.innerHTML = '<tr class="empty-row"><td colspan="15">Nenhum registro encontrado</td></tr>';
+      /* "Nenhum registro" pode ser mentira: num aparelho que nunca falou com
+         a clínica, a lista vazia parece resposta e é ausência de pergunta. */
+      const porque = (() => { try { return cloudRel.porQueVazio('financeiro'); } catch (e) { return ''; } })();
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="15">Nenhum registro encontrado' +
+        (porque ? '<div style="font-size:.8rem;color:var(--warning,#8a4b1c);margin-top:6px;font-weight:600">⚠️ ' +
+                  utils.escapeHTML(porque) + '</div>' : '') + '</td></tr>';
     } else {
       tbody.innerHTML = list.map(x => {
         const prev = parseFloat(x.valor_previsto) || 0;
