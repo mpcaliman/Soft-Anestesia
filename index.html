@@ -4492,7 +4492,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-25g</b><br>
+    v7.1 · build <b id="build-tag">2026-08-25h</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -12507,6 +12507,13 @@ const preLanc = {
      que ainda falta. markClean antes, senão "Descartar alterações?" aparece. */
   _fechar(mod) {
     try { if (typeof markClean === 'function') markClean(); } catch (e) {}
+    /* A ABA DO RASCUNHO TAMBÉM SE FECHA. Sem isto, `novo()` limpava o
+       formulário e a aba do paciente continuava lá, agora apontando para
+       nada: ela via "VANDERLITO SOARES" na aba e os campos em branco, como se
+       a ficha tivesse sumido. A ficha está salva e enviada — o que sobrava era
+       só a aba órfã. Finalizar já fazia isso (`rascunhos.removerAtivo`);
+       enviar, não. */
+    try { rascunhos.removerAtivo(mod); } catch (e) {}
     try { const obj = window[mod]; if (obj && obj.novo) obj.novo(); } catch (e) {}
     try { preLanc.renderBotao(mod); } catch (e) {}
     try {

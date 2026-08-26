@@ -9946,6 +9946,44 @@ await test('Pré-lançamento: o que ficou preso no aparelho mostra o motivo e co
   await page.close();
 });
 
+
+/* 154) Enviar fechava o formulário e deixava a ABA do paciente aberta,
+   apontando para nada: o nome na aba e os campos em branco. */
+await test('Pré-lançamento: enviar fecha a aba do paciente, não só o formulário', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'a1', usuario: 'aux@teste',
+      nome: 'Auxiliar', perfil: 'secretaria', modulos: auth.ROLE_PERMS.auxiliar.modulos.slice(),
+      role: 'auxiliar', entrouEm: Date.now() }));
+    store.setList('pre', []);
+    ui.navegar('pre');
+    const f = document.getElementById('form-pre');
+    f.querySelector('[name="nome"]').value = 'VANDERLITO SOARES TESTE';
+    f.querySelector('[name="data"]').value = utils.hojeISO();
+    pre.salvar();
+    try { rascunhos.renomearAba('pre'); } catch (e) {}
+    out.abaAntes = rascunhos.list('pre').length === 1 && !!rascunhos.ativo('pre');
+
+    preLanc.enviar('pre');
+
+    out.abaFechou = rascunhos.list('pre').length === 0 && !rascunhos.ativo('pre');
+    out.formLimpo = (f.querySelector('[name="nome"]') || {}).value === '';
+    /* e o essencial: a ficha NÃO se perde ao fechar a aba */
+    const rec = store.list('pre')[0] || {};
+    out.registroIntacto = rec.nome === 'VANDERLITO SOARES TESTE';
+    out.marcadoEnviado = (rec._preLanc || {}).estado === 'enviado';
+    return out;
+  });
+
+  assert(r.abaAntes, 'a aba do paciente existe antes de enviar');
+  assert(r.abaFechou, 'e some ao enviar — aba com nome e formulário vazio parece ficha perdida');
+  assert(r.formLimpo, 'o formulário fica limpo para o próximo paciente');
+  assert(r.registroIntacto, 'e a ficha enviada continua salva, com o nome');
+  assert(r.marcadoEnviado, 'marcada como enviada para o médico');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
