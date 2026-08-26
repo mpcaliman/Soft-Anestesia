@@ -10076,6 +10076,318 @@ await test('Sync: gravação que não sobe entra em fila durável e sobe sozinha
   await page.close();
 });
 
+
+/* 156) A janela "Entrar na nuvem" exigia a senha e a única saída era "Agora
+   não" — que deixa o aparelho fora da sincronização. Para o gestor havia o
+   painel do Supabase; para a secretária, caminho nenhum. */
+await test('Nuvem: dá para recuperar a senha pela própria janela de entrar', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    let pedido = null;
+    cloud.estaConfigurado = () => true;
+    cloud.config = () => ({ url: 'https://x.supabase.co', anonKey: 'k' });
+    cloud._headers = () => ({ 'Content-Type': 'application/json' });
+    const real = window.fetch;
+    window.fetch = async (u, o) => {
+      if (String(u).indexOf('/auth/v1/recover') >= 0) {
+        pedido = { url: String(u), body: JSON.parse(o.body) };
+        return new Response('{}', { status: 200 });
+      }
+      return real(u, o);
+    };
+
+    cloud.reentrar();
+    out.temSaida = /Esqueci a senha/.test((document.getElementById('modal-body') || {}).innerHTML || '');
+
+    const el = document.getElementById('reent-email');
+    if (el) el.value = 'secretaria@teste.com';
+    await cloud._reentrarRecuperar();
+    out.chamouEndpoint = !!pedido && /\/auth\/v1\/recover$/.test(pedido.url);
+    out.mandaOEmailDoCampo = !!pedido && pedido.body.email === 'secretaria@teste.com';
+    /* o link do e-mail tem de trazer a pessoa de volta para o app */
+    out.mandaRedirect = !!pedido && typeof pedido.body.redirect_to === 'string';
+    out.confirmaNaTela = /Link enviado/.test((document.getElementById('reent-erro') || {}).textContent || '');
+
+    /* sem e-mail não chama nada e explica */
+    pedido = null;
+    if (el) el.value = '';
+    await cloud._reentrarRecuperar();
+    out.vazioNaoChama = pedido === null;
+    out.vazioExplica = /Informe o e-mail/.test((document.getElementById('reent-erro') || {}).textContent || '');
+
+    /* falha do servidor não mente dizendo que enviou */
+    if (el) el.value = 'x@y.com';
+    window.fetch = async (u, o) => {
+      if (String(u).indexOf('/auth/v1/recover') >= 0) return new Response('{"msg":"rate limit"}', { status: 429 });
+      return real(u, o);
+    };
+    await cloud._reentrarRecuperar();
+    out.falhaNaoMente = !/Link enviado/.test((document.getElementById('reent-erro') || {}).textContent || '');
+
+    window.fetch = real;
+    try { modal.close(); } catch (e) {}
+    return out;
+  });
+
+  assert(r.temSaida, 'a janela precisa oferecer saída para quem esqueceu a senha');
+  assert(r.chamouEndpoint, 'que pede a recuperação ao Supabase');
+  assert(r.mandaOEmailDoCampo, 'usando o e-mail já preenchido — não se pede para lembrar duas coisas');
+  assert(r.mandaRedirect, 'e o link do e-mail traz a pessoa de volta ao app');
+  assert(r.confirmaNaTela, 'com confirmação na tela');
+  assert(r.vazioNaoChama && r.vazioExplica, 'sem e-mail, não chama e explica');
+  assert(r.falhaNaoMente, 'falha do servidor não pode dizer que enviou');
+  await page.close();
+});
+
+
+/* 157) A OUTRA METADE: o link do e-mail chegando de volta. Sem tratar a
+   âncora, o app a lê como NOME DE MÓDULO e o link vira um beco — a pessoa
+   clica, cai no sistema e não acontece nada. */
+await test('Nuvem: o link do e-mail abre a definição de nova senha e não vira nome de módulo', async () => {
+  const page = await browser.newPage();
+  await page.route('**://*.supabase.co/**', route => route.abort());
+  page.on('dialog', d => d.dismiss());
+  await page.goto(APP_URL + '#access_token=TOK123&expires_in=3600&type=recovery');
+  await page.waitForFunction(() => typeof cloud !== 'undefined');
+  const r = await page.evaluate(async () => {
+    const out = {};
+    let put = null;
+    cloud.estaConfigurado = () => true;
+    cloud.config = () => ({ url: 'https://x.supabase.co', anonKey: 'k' });
+    cloud._headers = () => ({ 'Content-Type': 'application/json' });
+    const real = window.fetch;
+    window.fetch = async (u, o) => {
+      if (String(u).indexOf('/auth/v1/user') >= 0 && o.method === 'PUT') {
+        put = { auth: o.headers.Authorization, body: JSON.parse(o.body) };
+        return new Response('{}', { status: 200 });
+      }
+      return real(u, o);
+    };
+
+    /* o boot reconheceu a âncora */
+    out.pegouToken = cloud._tokenRecuperacao === 'TOK123';
+    /* e limpou a URL: token é credencial de uso único e não pode ficar no
+       histórico do navegador nem numa captura de tela */
+    out.limpouURL = location.hash.indexOf('access_token') < 0;
+
+    /* tela de acesso ABERTA: a definição vai PARA ELA. Um modal ficaria
+       atrás (z-index 1290 contra 100000) e sumiria — e quem clica no link é,
+       por definição, quem não consegue entrar. */
+    const ov = document.getElementById('auth-overlay');
+    ov.style.display = 'flex';
+    cloud.abrirNovaSenha();
+    out.usouTelaDeAcesso = /Definir nova senha/.test((document.getElementById('auth-sub') || {}).textContent || '')
+      && !!document.getElementById('auth-ns1');
+    out.naoEscondeuEmModal = !(document.getElementById('modal-backdrop') || {}).classList.contains('show');
+    ov.style.display = 'none';
+
+    cloud.uiNovaSenha();
+    out.abriu = /Definir nova senha/.test((document.getElementById('modal-title') || {}).textContent || '');
+
+    const erro = () => (document.getElementById('ns-erro') || {}).textContent || '';
+    const por = (a, b) => { document.getElementById('ns-1').value = a; document.getElementById('ns-2').value = b; };
+
+    por('123', '123');
+    await cloud._salvarNovaSenha();
+    out.recusaCurta = /6 caracteres/.test(erro()) && put === null;
+
+    por('senhaNova1', 'senhaNova2');
+    await cloud._salvarNovaSenha();
+    out.recusaDiferentes = /não são iguais/.test(erro()) && put === null;
+
+    por('senhaNova1', 'senhaNova1');
+    await cloud._salvarNovaSenha();
+    out.enviouSenha = !!put && put.body.password === 'senhaNova1';
+    out.usouOToken = !!put && put.auth === 'Bearer TOK123';
+    /* uso único: some da memória assim que serve */
+    out.tokenSumiu = cloud._tokenRecuperacao === null;
+
+    /* âncora comum continua sendo módulo, como sempre foi */
+    out.ancoraNormalIntacta = cloud._lerAncoraAuth() === null;
+    window.fetch = real;
+    return out;
+  });
+
+  assert(r.pegouToken, 'o app precisa reconhecer o token que vem na âncora do link');
+  assert(r.limpouURL, 'e limpar a URL — token é de uso único e não pode ficar no histórico');
+  assert(r.usouTelaDeAcesso, 'com a tela de acesso aberta, a nova senha se define NELA — modal ficaria atrás e sumiria');
+  assert(r.naoEscondeuEmModal, 'e nenhum modal invisível é aberto por trás');
+  assert(r.abriu, 'com o app já aberto, a mesma definição vem em modal');
+  assert(r.recusaCurta, 'senha curta é recusada antes de ir ao servidor');
+  assert(r.recusaDiferentes, 'e senhas diferentes também');
+  assert(r.enviouSenha, 'a senha nova é enviada ao Supabase');
+  assert(r.usouOToken, 'autenticada pelo token do link');
+  assert(r.tokenSumiu, 'que some da memória depois de usado');
+  assert(r.ancoraNormalIntacta, 'âncora comum continua sendo nome de módulo');
+  await page.close();
+});
+
+
+/* 158) ETAPA 2 — o estado da nuvem, ficha a ficha.
+   "Salvo às 14:32" dizia só que os dados encostaram no aparelho. Se tinham
+   chegado à clínica — que é o que decide se o outro aparelho vai vê-los — era
+   outra história, e não havia onde ler essa história. */
+await test('Ficha: o selo diz se o registro chegou à clínica, não só se foi salvo aqui', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const esperar = () => new Promise(res => setTimeout(res, 60));
+    localStorage.removeItem(cloudRel.FILA_KEY);
+    store.setList('pre', []);
+    cloudRel.disponivel = () => true;
+    cloud._garantirToken = async () => true;
+    cloudRel.registrarAnexos = () => {};
+    const selo = () => {
+      const e = document.getElementById('dsnuvem-pre');
+      return e ? { cls: e.className, txt: e.textContent, tit: e.title } : null;
+    };
+    ui.navegar('pre');
+
+    /* --- aparelho sem nuvem não ganha alerta permanente ----------------- */
+    cloud.estaConfigurado = () => false;
+    ui.atualizarDocStatus('pre', { _id: 'x1', nome: 'Sem Nuvem' });
+    out.semNuvemSemSelo = selo() === null;
+    cloud.estaConfigurado = () => true;
+
+    /* --- a nuvem recusou: ⚠️ com o motivo em português ------------------ */
+    cloudRel.enviarRegistro = async () => ({ ok: false, motivo: 'org' });
+    const rec = store.save('pre', { nome: 'Linalva Selo Silva', data: utils.hojeISO() });
+    await esperar();
+    ui.atualizarDocStatus('pre', store.getById('pre', rec._id));
+    const parado = selo();
+    out.paradoMarca = !!parado && /parado/.test(parado.cls) && /não subiu/.test(parado.txt);
+    out.paradoDizMotivo = !!parado && /conta sem clínica/.test(parado.tit);
+    /* e tranquiliza: não subiu ≠ perdeu */
+    out.paradoTranquiliza = !!parado && /não se perde/.test(parado.tit);
+
+    /* --- drenou: ✓ na nuvem --------------------------------------------- */
+    cloudRel.enviarRegistro = async (m, it) => {
+      const l = store.list('pre'); const i = l.findIndex(x => x._id === it._id);
+      if (i >= 0) { l[i]._relUpdatedAt = '2026-08-26T12:00:00Z'; store.setList('pre', l); }
+      return { ok: true };
+    };
+    await cloudRel.drenarFila();
+    ui.atualizarDocStatus('pre', store.getById('pre', rec._id));
+    const ok = selo();
+    out.confirmado = !!ok && /ok/.test(ok.cls) && /na nuvem/.test(ok.txt);
+    out.confirmadoTemQuando = !!ok && /26\/08\/2026/.test(ok.tit);
+
+    /* --- gravado e ainda sem confirmação: ⏳ ----------------------------- */
+    ui.atualizarDocStatus('pre', { _id: 'sem-carimbo', nome: 'Aguardando Souza' });
+    const sub = selo();
+    out.subindo = !!sub && /subindo/.test(sub.cls);
+
+    /* --- ficha nova não mostra selo nenhum ------------------------------ */
+    ui.atualizarDocStatus('pre', null);
+    out.novoSemSelo = selo() === null;
+
+    /* --- e o selo se repinta sozinho quando a fila muda ----------------- */
+    const f = document.getElementById('form-pre');
+    let h = f.querySelector('[name="_id"]');
+    if (!h) { h = document.createElement('input'); h.type = 'hidden'; h.name = '_id'; f.appendChild(h); }
+    h.value = rec._id;
+    cloudRel._filaPor('pre', rec._id, 'rede');
+    out.repintouSozinho = /parado/.test((selo() || {}).cls || '');
+    cloudRel._filaTirar('pre', rec._id);
+    out.repintouDeVolta = /ok/.test((selo() || {}).cls || '');
+
+    localStorage.removeItem(cloudRel.FILA_KEY);
+    return out;
+  });
+
+  assert(r.semNuvemSemSelo, 'quem escolheu rodar local não precisa de alerta permanente');
+  assert(r.paradoMarca, 'registro que não subiu precisa dizer isso na ficha');
+  assert(r.paradoDizMotivo, 'com o motivo em português, não um código');
+  assert(r.paradoTranquiliza, 'e deixando claro que não se perde — senão vira pânico');
+  assert(r.confirmado, 'confirmado pela clínica, o selo muda para "na nuvem"');
+  assert(r.confirmadoTemQuando, 'dizendo quando foi confirmado');
+  assert(r.subindo, 'gravado e sem confirmação ainda é "subindo"');
+  assert(r.novoSemSelo, 'ficha nova não mostra selo');
+  assert(r.repintouSozinho, 'a ficha aberta não pode continuar dizendo "na nuvem" depois de falhar');
+  assert(r.repintouDeVolta, 'nem "não subiu" depois de subir');
+  await page.close();
+});
+
+
+/* 159) ETAPA 3 — escrita contínua. "Cada letra digitada deve subir" não é
+   viável por letra (200 caracteres = 200 requisições), mas a garantia é a
+   mesma por outro caminho: pausou de digitar, sobe. */
+await test('Escrita contínua: pausou de digitar, grava — sem criar ficha do nada nem gravar sobre finalizada', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const esperar = ms => new Promise(res => setTimeout(res, ms));
+    /* pausas curtas para o teste não levar 3 s por asserção */
+    escritaContinua.PAUSA = 120; escritaContinua.PAUSA_SAIDA = 60;
+    store.setList('pre', []);
+    let toasts = [];
+    const realToast = window.toast;
+    window.toast = (m) => { toasts.push(String(m)); };
+    ui.navegar('pre');
+    const f = document.getElementById('form-pre');
+    const campo = n => f.querySelector('[name="' + n + '"]');
+    const digitar = (n, v, ev) => {
+      campo(n).value = v; markDirty();
+      campo(n).dispatchEvent(new Event(ev || 'input', { bubbles: true }));
+    };
+
+    /* --- ficha nunca gravada NÃO nasce sozinha -------------------------- */
+    campo('nome').value = 'Fantasma Nao Criar Silva';
+    campo('data').value = utils.hojeISO();
+    markDirty();
+    campo('nome').dispatchEvent(new Event('input', { bubbles: true }));
+    await esperar(300);
+    out.naoCriaSozinho = store.list('pre').length === 0;
+
+    /* --- depois da primeira gravação, digitar sobe sozinho -------------- */
+    pre.salvar();
+    toasts = [];
+    const id = campo('_id').value;
+    digitar('idade', '73 anos');
+    await esperar(300);
+    out.gravouSozinho = (store.getById('pre', id) || {}).idade === '73 anos';
+    /* --- e sem anunciar: aviso a cada pausa vira ruído ------------------ */
+    out.semAnuncio = toasts.filter(t => /salva|Avalia/i.test(t)).length === 0;
+
+    /* --- sair do campo grava mais rápido que a pausa -------------------- */
+    digitar('peso', '80', 'focusout');
+    await esperar(150);
+    out.saidaEhMaisRapida = (store.getById('pre', id) || {}).peso === '80';
+
+    /* --- ficha FINALIZADA não é gravada por cima ------------------------
+       documento finalizado se corrige por adendo, com autoria e data */
+    const rec = store.getById('pre', id);
+    rec._finalizado = true; store.save('pre', rec);
+    digitar('altura', '1,70');
+    await esperar(300);
+    out.finalizadaIntacta = (store.getById('pre', id) || {}).altura !== '1,70';
+    rec._finalizado = false; store.save('pre', rec);
+
+    /* --- sem alteração pendente, não grava à toa ------------------------ */
+    markClean();
+    out.limpoNaoGrava = escritaContinua.gravar('pre') === false;
+
+    /* --- campo obrigatório vazio: não grava e NÃO reclama --------------- */
+    campo('nome').value = ''; markDirty(); toasts = [];
+    out.invalidoNaoGrava = escritaContinua.gravar('pre') === false;
+    out.invalidoNaoReclama = toasts.filter(t => /obrigat/i.test(t)).length === 0;
+
+    window.toast = realToast;
+    return out;
+  });
+
+  assert(r.naoCriaSozinho, 'ficha nunca gravada não pode nascer sozinha — encheria a clínica de fichas em branco');
+  assert(r.gravouSozinho, 'depois da primeira gravação, parar de digitar grava');
+  assert(r.semAnuncio, 'e sem anunciar: aviso a cada pausa vira ruído e a pessoa para de ler todos');
+  assert(r.saidaEhMaisRapida, 'sair do campo grava mais rápido que esperar a pausa');
+  assert(r.finalizadaIntacta, 'ficha FINALIZADA não é gravada por cima — corrige-se por adendo');
+  assert(r.limpoNaoGrava, 'sem alteração pendente não grava à toa');
+  assert(r.invalidoNaoGrava, 'campo obrigatório vazio não grava');
+  assert(r.invalidoNaoReclama, 'e não reclama a cada pausa de digitação');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

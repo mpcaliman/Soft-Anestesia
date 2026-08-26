@@ -4286,6 +4286,22 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
 @media print { .hoje-hero { display: none !important; } }
 
 /* ===== Filtros do financeiro ============================================== */
+/* ETAPA 2 — estado da nuvem ao lado do selo do documento. "Salvo às 14:32"
+   dizia só que os dados encostaram no aparelho; este selo diz se chegaram à
+   clínica, que é o que decide se o outro aparelho vai vê-los. */
+.ds-nuvem {
+  display: inline-flex; align-items: center;
+  font-size: .7rem; font-weight: 600; letter-spacing: .2px;
+  padding: 2px 8px; border-radius: 10px; margin-left: 6px;
+  white-space: nowrap; cursor: default;
+}
+.ds-nuvem.ok      { background: #e6f2ec; color: #24704f; }
+.ds-nuvem.subindo { background: #eaf0f8; color: #38557c; }
+.ds-nuvem.parado  { background: #fdeee2; color: #8a4b1c; }
+html[data-theme="dark"] .ds-nuvem.ok      { background: #1d3a2e; color: #7fd4ab; }
+html[data-theme="dark"] .ds-nuvem.subindo { background: #22304a; color: #9db9e0; }
+html[data-theme="dark"] .ds-nuvem.parado  { background: #40291a; color: #e8b183; }
+@media print { .ds-nuvem { display: none; } }
 /* Código CBHPM ao lado da descrição: discreto, mas legível — é o par
    código+descrição que o convênio recebe e por onde a glosa se discute. */
 .fin-cod {
@@ -4492,7 +4508,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-26a</b><br>
+    v7.1 · build <b id="build-tag">2026-08-26g</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -5451,7 +5467,6 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <button class="btn btn-success" onclick="anestesia.salvar()" title="Salvar dados sem finalizar (Ctrl+S)"><span class="icon">💾</span> Salvar</button>
     <button class="btn btn-finalizar" onclick="anestesia.finalizar()" title="Finalizar ficha — gera lançamento financeiro"><span class="icon">✅</span> Finalizar</button>
     <button class="btn" onclick="anestesia.salvarComoNovo()" title="Salvar como novo registro"><span class="icon">📋</span> Salvar como novo</button>
-    <button class="btn" onclick="adendos.abrir('anestesia')" title="Adicionar correção/complemento sem alterar o registro original"><span class="icon">📝</span> Adendo/correção</button>
     <button class="btn" onclick="anestesia.linhaTempo()" title="Ver sinais vitais, medicações, eventos e fluidos em ordem cronológica"><span class="icon">🕒</span> Linha do tempo</button>
     <div class="dropdown" id="dd-anestesia">
       <button class="btn" onclick="ui.toggleDropdown('dd-anestesia')"><span class="icon">📂</span> Carregar ▾</button>
@@ -13086,6 +13101,85 @@ const lixeira = {
    UI — interface, navegação, modais
 ============================================================================ */
 const ui = {
+  /* ==========================================================================
+     ETAPA 2 — O ESTADO DA NUVEM, FICHA A FICHA
+
+     A Etapa 1 deu à gravação uma fila durável: o que não sobe fica registrado
+     e sobe depois. Faltava o outro lado — quem está com a ficha aberta saber
+     em que pé ela está. Antes, "Salvo às 14:32" dizia apenas que os dados
+     encostaram no aparelho; se tinham chegado à clínica era outra história, e
+     não havia onde ler essa história.
+
+     Três estados, e só três:
+       ✓ na nuvem   — a clínica confirmou (tem `_relUpdatedAt`)
+       ⏳ subindo    — gravou aqui, ainda sem confirmação
+       ⚠️ parado     — está na fila com motivo conhecido (sem clínica, sessão
+                       vencida, sem rede)
+
+     Aparelho sem nuvem configurada não mostra nada: quem escolheu rodar local
+     não precisa de um alerta permanente dizendo o que ele já sabe.
+  ========================================================================== */
+  NUVEM_ROTULOS: {
+    org: 'conta sem clínica', token: 'sessão vencida',
+    rede: 'sem conexão', offline: 'sem conexão'
+  },
+
+  estadoNuvem(modKey, item) {
+    if (!item || !item._id) return null;
+    try { if (typeof demo !== 'undefined' && demo.ativo()) return null; } catch (e) {}
+    try { if (typeof cloud === 'undefined' || !cloud.estaConfigurado()) return null; } catch (e) {}
+    try { if (!cloudRel.ehModuloRegistro || !cloudRel.ehModuloRegistro(modKey)) return null; } catch (e) {}
+    let naFila = null;
+    try {
+      naFila = cloudRel._filaLer().find(x => x.mod === modKey && x.id === item._id) || null;
+    } catch (e) {}
+    if (naFila) {
+      const motivo = ui.NUVEM_ROTULOS[naFila.motivo] || naFila.motivo || '';
+      return { cls: 'parado', txt: '⚠️ não subiu',
+               tit: 'Este registro ainda não chegou à clínica' + (motivo ? ' — ' + motivo : '') +
+                    '. Ele não se perde: sobe sozinho quando der.' };
+    }
+    if (item._relUpdatedAt) {
+      return { cls: 'ok', txt: '✓ na nuvem',
+               tit: 'A clínica confirmou este registro em ' + utils.formatarDataHora(item._relUpdatedAt) };
+    }
+    return { cls: 'subindo', txt: '⏳ subindo',
+             tit: 'Gravado neste aparelho; aguardando confirmação da clínica.' };
+  },
+
+  atualizarNuvemDoc(modKey, item) {
+    const host = document.getElementById('docstatus-' + modKey);
+    if (!host) return;
+    let el = document.getElementById('dsnuvem-' + modKey);
+    const est = ui.estadoNuvem(modKey, item);
+    if (!est) { if (el) el.remove(); return; }
+    if (!el) {
+      el = document.createElement('span');
+      el.id = 'dsnuvem-' + modKey;
+      const badge = document.getElementById('dsbadge-' + modKey);
+      /* logo depois do selo do documento: os dois contam o mesmo fato por
+         ângulos diferentes — salvo onde, e chegou aonde */
+      if (badge && badge.parentNode === host) host.insertBefore(el, badge.nextSibling);
+      else host.appendChild(el);
+    }
+    el.className = 'ds-nuvem ' + est.cls;
+    el.textContent = est.txt;
+    el.title = est.tit;
+  },
+
+  /* Chamado quando a fila muda: a ficha aberta não pode continuar dizendo
+     "subindo" depois que subiu, nem "na nuvem" depois que falhou. */
+  repintarNuvemAtual() {
+    try {
+      const mod = (typeof state !== 'undefined' && state.currentModule) || '';
+      if (!mod) return;
+      const el = document.querySelector('#form-' + mod + ' [name="_id"]');
+      const id = el && el.value;
+      if (!id) return;
+      ui.atualizarNuvemDoc(mod, store.getById(mod, id));
+    } catch (e) {}
+  },
+
   toggleTheme() {
     const curr = document.documentElement.getAttribute('data-theme') || 'light';
     const next = curr === 'dark' ? 'light' : 'dark';
@@ -13449,6 +13543,93 @@ window.addEventListener('resize', () => {
 });
 
 /* Dirty state */
+/* ============================================================================
+   ETAPA 3 — ESCRITA CONTÍNUA
+
+   Antes, um dado só saía do formulário quando alguém apertava Salvar. Quem
+   esquecia, perdia; e o que estava digitado e não gravado não existia para
+   mais ninguém. A exigência era "cada letra digitada deve subir".
+
+   Por letra não dá: uma gravação no Supabase leva de 100 a 300 ms daí, e um
+   campo de 200 caracteres viraria 200 requisições e quarenta segundos de
+   escrita — no centro cirúrgico, com sinal oscilando, isso é o app travando
+   na mão de quem está atendendo.
+
+   A garantia que interessa é a mesma, obtida de outro jeito: PAUSOU DE
+   DIGITAR, SOBE. Dois segundos e meio de silêncio, ou a saída do campo, o que
+   vier primeiro. Na prática o dado está na clínica antes de a pessoa terminar
+   de ler o que escreveu — sem 200 requisições.
+
+   Três limites, todos deliberados:
+
+   1. Só mexe em ficha que JÁ FOI GRAVADA uma vez. Criar registro sozinho
+      encheria a base da clínica de fichas em branco de quem abriu a tela e
+      desistiu. Enquanto não há primeira gravação, quem guarda é o rascunho,
+      que já sincroniza.
+   2. Não grava ficha FINALIZADA. Documento finalizado se corrige por adendo,
+      com autoria e data — gravar por cima em silêncio destruiria isso.
+   3. Não grava o que não passa na validação, e não reclama. Um aviso de
+      "campo obrigatório" a cada pausa de digitação seria insuportável.
+============================================================================ */
+const escritaContinua = {
+  PAUSA: 2500,        /* silêncio depois da última tecla */
+  PAUSA_SAIDA: 400,   /* saiu do campo: quase imediato */
+  _timers: {},
+  _ligados: {},
+
+  modulos() {
+    try { return Object.keys(cloudRel.MODOS).filter(m => document.getElementById('form-' + m)); }
+    catch (e) { return []; }
+  },
+
+  ligar() {
+    escritaContinua.modulos().forEach(mod => {
+      const f = document.getElementById('form-' + mod);
+      if (!f || escritaContinua._ligados[mod]) return;
+      escritaContinua._ligados[mod] = true;
+      f.addEventListener('input', () => escritaContinua.agendar(mod, escritaContinua.PAUSA));
+      f.addEventListener('change', () => escritaContinua.agendar(mod, escritaContinua.PAUSA_SAIDA));
+      /* focusout borbulha; blur não. Sair do campo é o sinal mais forte de
+         "terminei este dado" que o formulário dá. */
+      f.addEventListener('focusout', () => escritaContinua.agendar(mod, escritaContinua.PAUSA_SAIDA));
+    });
+  },
+
+  agendar(mod, espera) {
+    if (!escritaContinua.podeGravar(mod)) return;
+    clearTimeout(escritaContinua._timers[mod]);
+    escritaContinua._timers[mod] = setTimeout(() => escritaContinua.gravar(mod), espera);
+  },
+
+  podeGravar(mod) {
+    try {
+      const f = document.getElementById('form-' + mod);
+      if (!f) return false;
+      const idEl = f.querySelector('[name="_id"]');
+      const id = idEl && idEl.value;
+      if (!id) return false;                       /* ainda não foi gravada uma vez */
+      const rec = store.getById(mod, id);
+      if (!rec) return false;
+      if (rec._finalizado) return false;           /* finalizada se corrige por adendo */
+      if (typeof state !== 'undefined' && !state.dirty) return false;
+      return true;
+    } catch (e) { return false; }
+  },
+
+  gravar(mod) {
+    if (!escritaContinua.podeGravar(mod)) return false;
+    /* Validação ANTES de chamar salvar: assim o módulo não precisa aprender a
+       calar o aviso de campo obrigatório — ele nem chega a ser chamado. */
+    try { if (!utils.validar('form-' + mod)) return false; } catch (e) { return false; }
+    try {
+      const obj = window[mod];
+      if (!obj || !obj.salvar) return false;
+      obj.salvar({ auto: true });
+      return true;
+    } catch (e) { return false; }
+  }
+};
+
 function markDirty() {
   if (state.dirty) return;
   state.dirty = true;
@@ -14629,7 +14810,10 @@ const pre = {
     if (finalizar) { try { printPreview.abrir(); } catch (e) {} }
     /* Rascunho só é descartado quando finaliza; salvar normal mantém o rascunho ativo */
     if (finalizar) { try { rascunhos.removerAtivo('pre'); } catch (e) {} }
-    toast(finalizar ? '✅ Avaliação finalizada' : '💾 Avaliação salva (dados preservados)');
+    /* Gravação automática não anuncia: um aviso a cada pausa de digitação
+       vira ruído e a pessoa para de ler todos os avisos, inclusive os que
+       importam. O selo da ficha já mostra o estado. */
+    if (!opts.auto) toast(finalizar ? '✅ Avaliação finalizada' : '💾 Avaliação salva (dados preservados)');
     /* A pergunta do Termo espera a impressão sair da frente (ela já sabe
        esperar janela aberta, ver _perguntarTermo). */
     if (finalizar) setTimeout(() => pre._perguntarTermo(saved), 700);
@@ -15376,7 +15560,10 @@ const consulta = {
     markClean();
     if (finalizar) { try { pdfBackup.autoAoFinalizar('consulta'); } catch (e) {} }
     if (finalizar) { try { rascunhos.removerAtivo('consulta'); } catch (e) {} }
-    toast(finalizar ? '✅ Consulta finalizada' : '💾 Consulta salva (dados preservados)');
+    /* Gravação automática não anuncia: um aviso a cada pausa de digitação
+       vira ruído e a pessoa para de ler todos os avisos, inclusive os que
+       importam. O selo da ficha já mostra o estado. */
+    if (!opts.auto) toast(finalizar ? '✅ Consulta finalizada' : '💾 Consulta salva (dados preservados)');
   },
   finalizar() { consulta.salvar({ finalizar: true }); },
   salvarComoNovo() {
@@ -15705,7 +15892,10 @@ const recuperacao = {
     markClean();
     if (finalizar) { try { pdfBackup.autoAoFinalizar('recuperacao'); } catch (e) {} }
     if (finalizar) { try { rascunhos.removerAtivo('recuperacao'); } catch (e) {} }
-    toast(finalizar ? '✅ Recuperação finalizada' : '💾 Recuperação salva (dados preservados)');
+    /* Gravação automática não anuncia: um aviso a cada pausa de digitação
+       vira ruído e a pessoa para de ler todos os avisos, inclusive os que
+       importam. O selo da ficha já mostra o estado. */
+    if (!opts.auto) toast(finalizar ? '✅ Recuperação finalizada' : '💾 Recuperação salva (dados preservados)');
   },
   /* Faixa de totais no topo da SRPA (tempo, Aldrete). */
   resumoTopo() {
@@ -16435,7 +16625,10 @@ const termo = {
     if (finalizar) { try { pdfBackup.autoAoFinalizar('termo'); } catch (e) {} }
     if (finalizar) { try { printPreview.abrir(); } catch (e) {} }
     if (finalizar) { try { rascunhos.removerAtivo('termo'); } catch (e) {} }
-    toast(finalizar ? '✅ Termo finalizado' : '💾 Termo salvo (dados preservados)');
+    /* Gravação automática não anuncia: um aviso a cada pausa de digitação
+       vira ruído e a pessoa para de ler todos os avisos, inclusive os que
+       importam. O selo da ficha já mostra o estado. */
+    if (!opts.auto) toast(finalizar ? '✅ Termo finalizado' : '💾 Termo salvo (dados preservados)');
   },
   finalizar() { termo.salvar({ finalizar: true }); },
   salvarComoNovo() {
@@ -17071,7 +17264,10 @@ const prescricao = {
     markClean();
     if (finalizar) { try { rascunhos.removerAtivo('prescricao'); } catch (e) {} }
     if (finalizar) { try { pdfBackup.autoAoFinalizar('prescricao'); } catch (e) {} }
-    toast(finalizar ? '✅ Prescrição finalizada' : '💾 Prescrição salva (dados preservados)');
+    /* Gravação automática não anuncia: um aviso a cada pausa de digitação
+       vira ruído e a pessoa para de ler todos os avisos, inclusive os que
+       importam. O selo da ficha já mostra o estado. */
+    if (!opts.auto) toast(finalizar ? '✅ Prescrição finalizada' : '💾 Prescrição salva (dados preservados)');
   },
   finalizar() { prescricao.salvar({ finalizar: true }); },
   salvarComoNovo() {
@@ -17442,6 +17638,52 @@ const auth = {
   },
 
   /* Renderiza a tela de login (ou o cadastro inicial do admin) */
+  /* ---------- CHEGOU PELO LINK DE RECUPERAÇÃO ----------
+     Quem clica no link é, por definição, quem NÃO consegue entrar. Exigir o
+     login antes de deixar redefinir a senha da nuvem é um círculo fechado — e
+     era o que acontecia: a janela abria com z-index 1290 atrás da tela de
+     acesso, que tem 100000. Invisível.
+     A definição da nova senha passa a acontecer AQUI, na própria tela de
+     acesso, que é quem manda antes do login. */
+  _telaNovaSenha() {
+    const sub = document.getElementById('auth-sub');
+    const foot = document.getElementById('auth-foot');
+    const form = document.getElementById('auth-form');
+    if (!form) return;
+    sub.textContent = 'Definir nova senha da nuvem';
+    form.innerHTML = `
+      <p style="font-size:.85rem;color:var(--text-soft, #55606d);margin:0 0 12px;text-align:left">
+        Você chegou pelo link do e-mail. Escolha a nova senha da <b>conta da nuvem</b> —
+        é a que este e os outros aparelhos vão usar para entrar e sincronizar.</p>
+      <div class="auth-field"><label>Nova senha</label><input type="password" id="auth-ns1" autocomplete="new-password" placeholder="mínimo 6 caracteres"></div>
+      <div class="auth-field"><label>Repita a nova senha</label><input type="password" id="auth-ns2" autocomplete="new-password" placeholder="Repita"></div>
+      <div class="auth-error" id="auth-error"></div>
+      <button type="submit" class="auth-btn">Salvar nova senha</button>`;
+    form.onsubmit = (e) => { e.preventDefault(); auth._salvarNovaSenhaNuvem(); };
+    foot.innerHTML = '<a href="javascript:void(0)" onclick="auth._render()" style="color:var(--text-mute);font-size:.82rem">← Voltar ao login</a>';
+    setTimeout(() => { const el = document.getElementById('auth-ns1'); if (el) el.focus(); }, 80);
+  },
+
+  async _salvarNovaSenhaNuvem() {
+    const err = document.getElementById('auth-error');
+    const a = (document.getElementById('auth-ns1') || {}).value || '';
+    const b = (document.getElementById('auth-ns2') || {}).value || '';
+    const diz = t => { if (err) err.textContent = t; };
+    if (a.length < 6) { diz('A senha precisa de ao menos 6 caracteres.'); return; }
+    if (a !== b) { diz('As duas senhas não são iguais.'); return; }
+    diz('Salvando…');
+    const ok = await cloud.trocarSenhaComToken(a);
+    if (!ok) { diz('Não consegui salvar. O link pode ter vencido — peça outro.'); return; }
+    diz('');
+    auth._render();
+    /* já deixa o e-mail preenchido: ela acabou de definir a senha, e o passo
+       seguinte é entrar com ela — o e-mail veio dentro do próprio token */
+    const el = document.getElementById('auth-email');
+    if (el && cloud._emailRecuperado) el.value = cloud._emailRecuperado;
+    const pw = document.getElementById('auth-pass'); if (pw) pw.focus();
+    toast('✅ Senha alterada. Entre com ela agora.', 'success');
+  },
+
   _render() {
     const sub = document.getElementById('auth-sub');
     const foot = document.getElementById('auth-foot');
@@ -18581,6 +18823,147 @@ const cloud = {
     }
   },
 
+  /* ==========================================================================
+     RECUPERAR A SENHA DA NUVEM
+
+     Não existia. A janela "Entrar na nuvem" exigia a senha e a única saída era
+     "Agora não" — que deixa o aparelho fora da sincronização, exatamente o
+     estado em que o registro fica preso e ninguém descobre por quê.
+
+     Para o gestor faltava um caminho cômodo (dava para ir ao painel do
+     Supabase). Para a secretária não havia caminho nenhum: ela não tem acesso
+     ao painel. Ficar sem sincronizar por ter esquecido uma senha é o pior
+     motivo possível para um prontuário não chegar ao médico.
+  ========================================================================== */
+  /* ---- A OUTRA METADE: o link do e-mail chegando de volta ----------------
+     Pedir a recuperação era metade do caminho. O Supabase devolve a pessoa ao
+     app com o token na âncora:
+
+         .../Soft-Anestesia/#access_token=...&type=recovery&...
+
+     Sem tratar isso, o app lê a âncora como NOME DE MÓDULO — e o link vira um
+     beco: a pessoa clica no e-mail, cai no sistema e não acontece nada.
+     Aqui a âncora é lida, o token guardado em memória (nunca no localStorage:
+     é credencial de uso único) e a URL limpa na hora, para o token não ficar
+     no histórico do navegador nem em captura de tela. */
+  _lerAncoraAuth() {
+    try {
+      const h = String(location.hash || '').replace(/^#/, '');
+      if (!h || h.indexOf('access_token=') < 0) return null;
+      const p = new URLSearchParams(h);
+      const token = p.get('access_token');
+      if (!token) return null;
+      return { token: token, tipo: p.get('type') || '', erro: p.get('error_description') || '' };
+    } catch (e) { return null; }
+  },
+  _limparAncora() {
+    try {
+      history.replaceState(null, '', location.pathname + location.search + '#dashboard');
+    } catch (e) { try { location.hash = '#dashboard'; } catch (e2) {} }
+  },
+
+  checarLinkRecuperacao() {
+    const a = cloud._lerAncoraAuth();
+    if (!a) return false;
+    cloud._limparAncora();
+    if (a.tipo !== 'recovery') return false;
+    cloud._tokenRecuperacao = a.token;
+    /* o e-mail vem dentro do próprio token (JWT), sem precisar perguntar */
+    try {
+      const corpo = JSON.parse(atob(a.token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      cloud._emailRecuperado = corpo.email || '';
+    } catch (e) { cloud._emailRecuperado = ''; }
+    setTimeout(() => { try { cloud.abrirNovaSenha(); } catch (e) {} }, 300);
+    return true;
+  },
+
+  /* Duas telas para o mesmo ato, e a escolha não é estética: com a tela de
+     acesso aberta, um modal fica ATRÁS dela (1290 contra 100000) e some. */
+  abrirNovaSenha() {
+    const ov = document.getElementById('auth-overlay');
+    const trancado = ov && ov.style.display !== 'none';
+    if (trancado && typeof auth !== 'undefined' && auth._telaNovaSenha) auth._telaNovaSenha();
+    else cloud.uiNovaSenha();
+  },
+
+  /* A troca em si, usada pelas duas telas. */
+  async trocarSenhaComToken(nova) {
+    if (!cloud._tokenRecuperacao) return false;
+    const c = cloud.config();
+    try {
+      const r = await fetch(c.url + '/auth/v1/user', {
+        method: 'PUT',
+        headers: Object.assign({}, cloud._headers(false),
+          { 'Authorization': 'Bearer ' + cloud._tokenRecuperacao }),
+        body: JSON.stringify({ password: nova })
+      });
+      if (!r.ok) return false;
+      cloud._tokenRecuperacao = null;   /* uso único */
+      return true;
+    } catch (e) { return false; }
+  },
+
+  uiNovaSenha() {
+    if (!cloud._tokenRecuperacao) { toast('O link de recuperação venceu — peça outro', 'warn'); return; }
+    modal.open('🔑 Definir nova senha da nuvem',
+      '<p style="font-size:.86rem;margin:0 0 10px">Você chegou pelo link do e-mail. Escolha a nova senha da <b>conta da nuvem</b> — ' +
+      'é a que este e os outros aparelhos vão usar para sincronizar.</p>' +
+      '<div class="grid">' +
+      '<div class="field col-12"><label>Nova senha</label><input type="password" id="ns-1" autocomplete="new-password" placeholder="mínimo 6 caracteres"></div>' +
+      '<div class="field col-12"><label>Repita a nova senha</label><input type="password" id="ns-2" autocomplete="new-password"></div>' +
+      '</div><div id="ns-erro" style="color:#b3261e;font-size:.82rem;min-height:16px"></div>',
+      '<button class="btn btn-primary" onclick="cloud._salvarNovaSenha()">Salvar senha</button>' +
+      '<button class="btn" onclick="modal.close()">Cancelar</button>');
+    setTimeout(() => { const el = document.getElementById('ns-1'); if (el) el.focus(); }, 80);
+  },
+
+  async _salvarNovaSenha() {
+    const err = document.getElementById('ns-erro');
+    const a = (document.getElementById('ns-1') || {}).value || '';
+    const b2 = (document.getElementById('ns-2') || {}).value || '';
+    const diz = (t) => { if (err) err.textContent = t; };
+    if (a.length < 6) { diz('A senha precisa de ao menos 6 caracteres.'); return; }
+    if (a !== b2) { diz('As duas senhas não são iguais.'); return; }
+    if (!cloud._tokenRecuperacao) { diz('O link venceu — peça outro e-mail.'); return; }
+    diz('Salvando…');
+    const ok = await cloud.trocarSenhaComToken(a);
+    if (!ok) { diz('Não consegui salvar. O link pode ter vencido — peça outro.'); return; }
+    modal.close();
+    toast('✅ Senha alterada. Entre com ela para reconectar este aparelho.', 'success');
+    setTimeout(() => { try { cloud.reentrar(); } catch (e) {} }, 600);
+  },
+
+  async recuperarSenha(email) {
+    const alvo = String(email || '').trim();
+    if (!alvo || alvo.indexOf('@') < 0) { toast('Informe o e-mail da conta da nuvem', 'warn'); return false; }
+    if (!cloud.estaConfigurado()) { toast('Este aparelho ainda não tem a nuvem configurada', 'warn'); return false; }
+    const c = cloud.config();
+    try {
+      /* redirect_to precisa estar na lista de URLs permitidas do projeto
+         (Authentication → URL Configuration). Mandamos o endereço do próprio
+         app para o link do e-mail trazer a pessoa de volta para cá. */
+      const volta = (typeof location !== 'undefined')
+        ? location.origin + location.pathname : '';
+      const r = await fetch(c.url + '/auth/v1/recover', {
+        method: 'POST', headers: cloud._headers(false),
+        body: JSON.stringify(volta ? { email: alvo, redirect_to: volta } : { email: alvo })
+      });
+      /* O Supabase responde 200 mesmo para e-mail inexistente, de propósito:
+         dizer "esta conta não existe" entregaria quais e-mails estão
+         cadastrados. Então a mensagem aqui é a mesma nos dois casos. */
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        toast('Não consegui pedir a recuperação: ' + (d.msg || d.error_description || d.error || r.status), 'error');
+        return false;
+      }
+      toast('📧 Se houver conta para ' + alvo + ', o link de nova senha chega em instantes. Confira também o spam.', 'success');
+      return true;
+    } catch (e) {
+      toast('Sem conexão para pedir a recuperação agora', 'error');
+      return false;
+    }
+  },
+
   async login(email, senha) {
     if (!cloud.estaConfigurado()) { toast('Configure a nuvem primeiro (URL + chave)', 'warn'); return false; }
     const c = cloud.config();
@@ -19057,11 +19440,31 @@ const cloud = {
       '<div class="grid">' +
       '<div class="field col-12"><label>E-mail</label><input type="email" id="reent-email" value="' + utils.escapeAttr(email) + '" autocomplete="username"></div>' +
       '<div class="field col-12"><label>Senha da nuvem</label><input type="password" id="reent-senha" placeholder="••••••" autocomplete="current-password"></div>' +
-      '</div><div id="reent-erro" style="color:#b3261e;font-size:.82rem;min-height:16px"></div>',
+      '</div><div id="reent-erro" style="color:#b3261e;font-size:.82rem;min-height:16px"></div>' +
+      /* Sem esta saída, quem esqueceu a senha só tinha "Agora não" — e "agora
+         não" deixa o aparelho fora da sincronização por tempo indeterminado. */
+      '<div style="margin-top:2px"><a href="javascript:void(0)" onclick="cloud._reentrarRecuperar()" ' +
+      'style="color:var(--primary);font-size:.84rem">Esqueci a senha — receber link por e-mail</a></div>',
       '<button class="btn btn-primary" onclick="cloud._reentrarConfirmar()">Entrar</button>' +
       '<button class="btn" onclick="modal.close()">Agora não</button>');
     setTimeout(() => { const el = document.getElementById('reent-senha'); if (el) el.focus(); }, 80);
   },
+  /* Usa o e-mail que já está no campo — quem esqueceu a senha não deve ter de
+     lembrar em qual e-mail se cadastrou também. */
+  async _reentrarRecuperar() {
+    const email = ((document.getElementById('reent-email') || {}).value || '').trim();
+    const err = document.getElementById('reent-erro');
+    if (!email) { if (err) err.textContent = 'Informe o e-mail para receber o link.'; return; }
+    if (err) { err.style.color = 'var(--text-soft)'; err.textContent = 'Pedindo o link…'; }
+    const ok = await cloud.recuperarSenha(email);
+    if (err) {
+      err.style.color = ok ? '#1f7a4d' : '#b3261e';
+      err.textContent = ok
+        ? 'Link enviado para ' + email + '. Confira a caixa de entrada e o spam.'
+        : 'Não consegui pedir o link agora.';
+    }
+  },
+
   async _reentrarConfirmar() {
     const email = (document.getElementById('reent-email') || {}).value || '';
     const senha = (document.getElementById('reent-senha') || {}).value || '';
@@ -21289,11 +21692,13 @@ const cloudRel = {
        transforma "1 registro aguardando envio" em "1 registro aguardando envio
        · org" — a diferença entre um número e uma explicação. */
     if (motivo) cloudRel._ultimoMotivo = motivo;
+    try { ui.repintarNuvemAtual(); } catch (e) {}
     try { syncStatus.refresh(); } catch (e) {}
   },
   _filaTirar(mod, id) {
     cloudRel._filaGravar(cloudRel._filaLer().filter(x => !(x.mod === mod && x.id === id)));
     try { syncStatus.refresh(); } catch (e) {}
+    try { ui.repintarNuvemAtual(); } catch (e) {}
   },
 
   /* Drena a fila. Só uma execução por vez; falha mantém na fila e conta a
@@ -34470,7 +34875,10 @@ const anestesia = {
     markClean();
     if (finalizar) { try { pdfBackup.autoAoFinalizar('anestesia'); } catch (e) {} }
     if (finalizar) { try { rascunhos.removerAtivo('anestesia'); } catch (e) {} }
-    toast(finalizar ? '✅ Ficha finalizada' : '💾 Ficha salva (dados preservados)');
+    /* Gravação automática não anuncia: um aviso a cada pausa de digitação
+       vira ruído e a pessoa para de ler todos os avisos, inclusive os que
+       importam. O selo da ficha já mostra o estado. */
+    if (!opts.auto) toast(finalizar ? '✅ Ficha finalizada' : '💾 Ficha salva (dados preservados)');
 
     /* Pergunta sobre SRPA — em TODA finalização sem SRPA vinculada
        (antes só em ficha nova; quem salvava rascunho e finalizava depois
@@ -37983,6 +38391,7 @@ ui.atualizarDocStatus = function(modKey, item) {
   const meta = document.getElementById('dsmeta-' + modKey);
   const links = document.getElementById('dslinks-' + modKey);
   if (!badge) return;
+  try { ui.atualizarNuvemDoc(modKey, item); } catch (e) {}
   if (item && item._id) {
     if (item._finalizado) {
       badge.className = 'ds-badge finalizado';
@@ -48209,6 +48618,11 @@ document.addEventListener('DOMContentLoaded', () => {
   try { programador.atualizarVisibilidade(); } catch (e) {}
   window.pendencias = pendencias;
   try { pendencias.iniciarTimer(); } catch (e) {}
+  /* Chegou pelo link de recuperação de senha do e-mail: trata a âncora antes
+     de qualquer outra coisa, senão ela é lida como nome de módulo. */
+  try { cloud.checarLinkRecuperacao(); } catch (e) {}
+  window.escritaContinua = escritaContinua;
+  try { escritaContinua.ligar(); } catch (e) {}
   /* Repara espelhos de conta da nuvem criados sem id (✏️/🗑️ sem ação) */
   try { auth._repararIds(); } catch (e) {}
   /* sessão já aberta (ex.: login diário sem nuvem): checa as pendências também */
@@ -48932,7 +49346,11 @@ const assinaturaDigital = (function () {
     termo:       { form: 'form-termo',       titulo: 'Termo de Consentimento',     pac: ['paciente', 'nome'], prof: ['profissional'],                    crm: ['crm'] },
     prescricao:  { form: 'form-prescricao',  titulo: 'Receituário',                  pac: ['paciente', 'nome'], prof: ['profissional'],                    crm: ['crm'] },
     risco:       { form: 'form-risco',       titulo: 'Avaliação de Risco',         pac: ['nome'],           prof: ['profissional'],                     crm: ['crm'] },
-    financeiro:  { form: 'form-financeiro',  titulo: 'Documento Financeiro',       pac: ['paciente'],       prof: ['profissional'],                     crm: ['crm'] }
+    financeiro:  { form: 'form-financeiro',  titulo: 'Documento Financeiro',       pac: ['paciente'],       prof: ['profissional'],                     crm: ['crm'] },
+    /* Atestado, declaração e laudo estavam de fora, e são justamente o tipo de
+       documento que se assina — um laudo para o INSS mais que os outros. O
+       botão existia na barra e só sabia dizer "abra um documento assinável". */
+    documentos:  { form: 'form-documentos',  titulo: 'Documento Médico',           pac: ['nome', 'paciente'], prof: ['profissional'],                   crm: ['crm'] }
   };
 
   function ctxAtual() {
@@ -49201,6 +49619,14 @@ const assinaturaDigital = (function () {
       if (bar._adBtn) return;
       const temImprimir = Array.from(bar.querySelectorAll('button')).some(b => /printPreview\.abrir/.test(b.getAttribute('onclick') || ''));
       if (!temImprimir) return;
+      /* "Tem Imprimir" não é o mesmo que "é assinável". Dashboard e Agenda
+         imprimem e não são documentos: ali o botão só conseguia dar o aviso
+         "Abra um documento assinável" — um botão que só sabe falhar.
+         Quem decide é a tabela de módulos assináveis, a mesma que ctxAtual()
+         consulta; assim os dois não podem divergir. */
+      const dono = bar.closest('[data-module]');
+      const mod = dono && dono.getAttribute('data-module');
+      if (!mod || !MODULOS[mod]) return;
       const b = document.createElement('button');
       b.className = 'btn'; b.type = 'button';
       b.style.cssText = 'background:#14532d;color:#fff;border-color:#0f3d21';
