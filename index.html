@@ -4508,7 +4508,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-26g</b><br>
+    v7.1 · build <b id="build-tag">2026-08-26h</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -19653,7 +19653,18 @@ const cloud = {
     cloud._vigiandoRetorno = true;
     /* Atualização periódica COMPLETA: mesmo com o app aberto o dia todo, a
        cada 10 minutos o aparelho busca o que os outros fizeram. */
-    try { setInterval(() => { try { cloud.autoSyncAoVoltar({ forcar: true }); } catch (e) {} }, 10 * 60 * 1000); } catch (e) {}
+    /* Com o Realtime de pé, o ciclo vira rede de segurança e não via
+       principal: espaça para 30 min. Sem ele, mantém os 10. A checagem é a
+       cada volta do relógio, não uma vez só — o socket cai e volta. */
+    try {
+      setInterval(() => {
+        try {
+          const vivo = (typeof realtime !== 'undefined') && realtime.ativo();
+          if (vivo && (Date.now() - (cloud._ultimoPull || 0)) < 30 * 60 * 1000) return;
+          cloud.autoSyncAoVoltar({ forcar: true });
+        } catch (e) {}
+      }, 10 * 60 * 1000);
+    } catch (e) {}
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') cloud.autoSyncAoVoltar();
     });
@@ -20015,6 +20026,176 @@ const clinicaSync = {
    repetir de minuto em minuto. Falhou? A próxima tentativa espera um pouco
    mais, até dez minutos, e volta ao normal assim que der certo.
 ============================================================================ */
+/* ============================================================================
+   ETAPA 5 — REALTIME: a clínica avisa, em vez de o aparelho perguntar
+
+   Até aqui a atualização era por relógio: de dez em dez minutos, ou ao voltar
+   para a aba. Funciona, mas o que a secretária lança pode levar minutos para
+   aparecer no computador do médico — e no dia da cirurgia esses minutos são a
+   diferença entre conferir antes e conferir depois.
+
+   O Postgres já publica as mudanças (migração 0002). Falta o aparelho ouvir.
+   Isto é um cliente Phoenix Channels enxuto — o protocolo do Realtime do
+   Supabase — sem biblioteca: o app inteiro é um arquivo e não vale trazer o
+   supabase-js para escutar sete tabelas.
+
+   O QUE ISTO NÃO É: substituto da sincronização por ciclo. WebSocket cai, o
+   navegador dorme a aba, a rede do hospital corta. O ciclo continua rodando
+   como rede de segurança — só que mais espaçado quando o Realtime está de pé,
+   porque aí ele é redundância, não a via principal.
+============================================================================ */
+const realtime = {
+  /* Uma tabela por módulo. As que a migração 0002 ainda não publica entram na
+     0015; enquanto isso, o canal conecta e simplesmente não recebe nada —
+     nunca quebra, no máximo não acelera. */
+  TABELAS: {
+    preanesthetic_assessments: 'pre',
+    anesthesia_records: 'anestesia',
+    recovery_records: 'recuperacao',
+    consultations: 'consulta',
+    finance_entries: 'financeiro',
+    risk_assessments: 'risco',
+    consents: 'termo'
+  },
+  HEARTBEAT: 25000,
+  ESPERAS: [2000, 5000, 15000, 30000, 60000],
+
+  _ws: null, _ref: 0, _hb: null, _tentativa: 0, _ligado: false,
+  _org: null, _recebidos: 0, _ultimoEvento: 0,
+
+  ativo() { return !!(realtime._ws && realtime._ws.readyState === 1 && realtime._ligado); },
+  _proxRef() { return String(++realtime._ref); },
+
+  async conectar() {
+    if (realtime._ws) return;
+    try {
+      if (typeof cloudRel === 'undefined' || !cloudRel.disponivel()) return;
+      if (!(await cloud._garantirToken())) return;
+      const org = await cloudRel._orgAsync(); if (!org) return;
+      realtime._org = org;
+      const c = cloud.config(); const s = cloud.session();
+      if (!c || !s || !s.access_token) return;
+      const url = c.url.replace(/^http/, 'ws') + '/realtime/v1/websocket?apikey=' +
+                  encodeURIComponent(c.anonKey) + '&vsn=1.0.0';
+      const ws = new WebSocket(url);
+      realtime._ws = ws;
+      ws.onopen = () => { realtime._tentativa = 0; realtime._entrarNosCanais(s.access_token); realtime._baterCoracao(); };
+      ws.onmessage = (ev) => { try { realtime._receber(JSON.parse(ev.data)); } catch (e) {} };
+      ws.onclose = () => { realtime._encerrar(false); realtime._reagendar(); };
+      ws.onerror = () => { try { ws.close(); } catch (e) {} };
+    } catch (e) { realtime._reagendar(); }
+  },
+
+  _entrarNosCanais(token) {
+    Object.keys(realtime.TABELAS).forEach(tabela => {
+      realtime._enviar({
+        topic: 'realtime:public:' + tabela,
+        event: 'phx_join',
+        /* filtro por organização no servidor: o aparelho não recebe (nem gasta
+           banda com) mudança de clínica que não é a dele */
+        payload: {
+          config: {
+            postgres_changes: [{ event: '*', schema: 'public', table: tabela,
+                                 filter: 'organization_id=eq.' + realtime._org }]
+          },
+          access_token: token
+        },
+        ref: realtime._proxRef()
+      });
+    });
+    realtime._ligado = true;
+  },
+
+  _enviar(msg) {
+    try { if (realtime._ws && realtime._ws.readyState === 1) realtime._ws.send(JSON.stringify(msg)); }
+    catch (e) {}
+  },
+
+  _baterCoracao() {
+    clearInterval(realtime._hb);
+    realtime._hb = setInterval(() => {
+      if (!realtime._ws || realtime._ws.readyState !== 1) return;
+      realtime._enviar({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: realtime._proxRef() });
+      /* o token expira antes do socket: renova em voo, senão o servidor passa
+         a recusar as mudanças por RLS e o silêncio parece "nada mudou" */
+      try {
+        const s = cloud.session();
+        if (s && s.access_token) {
+          realtime._enviar({ topic: 'realtime:public:' + Object.keys(realtime.TABELAS)[0],
+            event: 'access_token', payload: { access_token: s.access_token }, ref: realtime._proxRef() });
+        }
+      } catch (e) {}
+    }, realtime.HEARTBEAT);
+  },
+
+  _receber(msg) {
+    if (!msg || msg.event !== 'postgres_changes') return;
+    const d = msg.payload && msg.payload.data;
+    if (!d) return;
+    const mod = realtime.TABELAS[d.table];
+    if (!mod) return;
+    const linha = d.record || d.old_record;
+    if (!linha || !linha.id) return;
+    /* Apagado na clínica não some daqui por conta própria: quem decide
+       remoção é a reconciliação, com a lista completa na mão. Aqui só
+       registramos que algo mudou. */
+    if (d.type === 'DELETE') { realtime._marcarMudanca(); return; }
+    if (linha.deleted_at) { realtime._marcarMudanca(); return; }
+    try {
+      const reg = cloudRel._rowParaRegistro(linha);
+      if (!reg || !reg._id) return;
+      /* mesclarLocal já decide por carimbo: o que chega mais velho que o
+         daqui é descartado, e o que está aberto na tela não é sobrescrito */
+      const r = cloudRel.mesclarLocal(mod, [reg]);
+      realtime._recebidos += (r.novos + r.atualizados);
+      if (r.novos || r.atualizados) realtime._repintar(mod);
+    } catch (e) {}
+    realtime._marcarMudanca();
+  },
+
+  _marcarMudanca() { realtime._ultimoEvento = Date.now(); },
+
+  _repintar(mod) {
+    try { if (typeof preLanc !== 'undefined') preLanc.renderFila(); } catch (e) {}
+    try { if (typeof ui !== 'undefined') ui.repintarNuvemAtual(); } catch (e) {}
+    try { if (state.currentModule === 'financeiro' && mod === 'financeiro') financeiro.render(); } catch (e) {}
+    try { if (state.currentModule === 'dashboard') dashboard.atualizar(); } catch (e) {}
+    try { if (typeof pendencias !== 'undefined') pendencias.renderDashboard(); } catch (e) {}
+  },
+
+  _encerrar(fechar) {
+    realtime._ligado = false;
+    clearInterval(realtime._hb); realtime._hb = null;
+    if (fechar) { try { if (realtime._ws) realtime._ws.close(); } catch (e) {} }
+    realtime._ws = null;
+  },
+
+  _reagendar() {
+    const espera = realtime.ESPERAS[Math.min(realtime._tentativa, realtime.ESPERAS.length - 1)];
+    realtime._tentativa++;
+    setTimeout(() => {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) { realtime._reagendar(); return; }
+      realtime.conectar();
+    }, espera);
+  },
+
+  vigiar() {
+    if (realtime._vigiando) return;
+    realtime._vigiando = true;
+    realtime.conectar();
+    try {
+      window.addEventListener('online', () => { realtime._tentativa = 0; realtime.conectar(); });
+      document.addEventListener('visibilitychange', () => {
+        /* aba dormindo mata o socket em muitos navegadores; ao voltar,
+           reconecta na hora em vez de esperar o próximo recuo */
+        if (document.visibilityState === 'visible' && !realtime.ativo()) {
+          realtime._tentativa = 0; realtime.conectar();
+        }
+      });
+    } catch (e) {}
+  }
+};
+
 const sincronia = {
   INTERVALO: 60000,
   MAX_ESPERA: 600000,
@@ -48618,6 +48799,9 @@ document.addEventListener('DOMContentLoaded', () => {
   try { programador.atualizarVisibilidade(); } catch (e) {}
   window.pendencias = pendencias;
   try { pendencias.iniciarTimer(); } catch (e) {}
+  window.realtime = realtime;
+  /* A clínica avisa, em vez de o aparelho perguntar (Etapa 5). */
+  try { realtime.vigiar(); } catch (e) {}
   /* Chegou pelo link de recuperação de senha do e-mail: trata a âncora antes
      de qualquer outra coisa, senão ela é lida como nome de módulo. */
   try { cloud.checarLinkRecuperacao(); } catch (e) {}
