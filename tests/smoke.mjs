@@ -4051,7 +4051,7 @@ await test('Botão de atualizar a nuvem fica no menu e sobrevive às permissões
     const sPend = nuvemEstado.situacao();
     nuvemEstado.renderMenu();
     out.pendente = sPend.estado === 'pendente'
-      && /3 itens aguardando/.test(document.getElementById('sidebar-nuvem-msg').textContent)
+      && /3 registros aguardando/.test(document.getElementById('sidebar-nuvem-msg').textContent)
       && btn.classList.contains('sn-alerta');
     cloud._fila = () => [];
     localStorage.setItem('medsys.v7.cloud.ultimo_sync', new Date().toISOString());
@@ -9981,6 +9981,98 @@ await test('Pré-lançamento: enviar fecha a aba do paciente, não só o formul�
   assert(r.formLimpo, 'o formulário fica limpo para o próximo paciente');
   assert(r.registroIntacto, 'e a ficha enviada continua salva, com o nome');
   assert(r.marcadoEnviado, 'marcada como enviada para o médico');
+  await page.close();
+});
+
+
+/* 155) ETAPA 1 — fila durável do canal relacional.
+   Havia dois caminhos para a nuvem e só um era confiável: o backup pessoal
+   tinha fila, o canal que COMPARTILHA entre aparelhos disparava e esquecia
+   (`.catch(() => {})`). Era assim que um pré-lançamento "enviado" nunca
+   chegava ao médico. */
+await test('Sync: gravação que não sobe entra em fila durável e sobe sozinha depois', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const esperar = () => new Promise(res => setTimeout(res, 60));
+    localStorage.removeItem(cloudRel.FILA_KEY);
+    store.setList('pre', []);
+    cloudRel.disponivel = () => true;
+    cloud._garantirToken = async () => true;
+    cloudRel.registrarAnexos = () => {};
+    const falha = motivo => { cloudRel.enviarRegistro = async () => ({ ok: false, motivo: motivo }); };
+    let recebido = null;
+    const sucesso = () => { cloudRel.enviarRegistro = async (m, it) => { recebido = it; return { ok: true }; }; };
+
+    /* --- gravar com a nuvem fora ENFILEIRA (antes sumia no catch) -------- */
+    falha('org');
+    const rec = store.save('pre', { nome: 'Linalva Fila Silva', data: utils.hojeISO() });
+    await esperar();
+    out.enfileirou = cloudRel.filaPendentes() === 1;
+    out.guardaMotivo = (cloudRel._filaLer()[0] || {}).motivo === 'org';
+
+    /* --- editar de novo não duplica: uma entrada por documento ---------- */
+    store.save('pre', Object.assign({}, store.getById('pre', rec._id), { idade: '70 anos' }));
+    await esperar();
+    out.naoDuplica = cloudRel.filaPendentes() === 1;
+
+    /* --- a nuvem volta: drena e limpa ----------------------------------- */
+    sucesso();
+    const d = await cloudRel.drenarFila();
+    out.drenou = !!d && d.enviados === 1 && cloudRel.filaPendentes() === 0;
+
+    /* --- o que sobe é a versão MAIS NOVA (a fila guarda id, não cópia) --- */
+    falha('rede');
+    store.save('pre', Object.assign({}, store.getById('pre', rec._id), { idade: '81 anos' }));
+    await esperar();
+    recebido = null; sucesso();
+    await cloudRel.drenarFila();
+    out.sobeVersaoNova = !!recebido && recebido.idade === '81 anos';
+
+    /* --- registro apagado sai da fila sem travar o resto ---------------- */
+    falha('rede');
+    const r2 = store.save('pre', { nome: 'Sera Apagado Souza', data: utils.hojeISO() });
+    await esperar();
+    const antes = cloudRel.filaPendentes();
+    store.setList('pre', store.list('pre').filter(x => x._id !== r2._id));
+    sucesso();
+    await cloudRel.drenarFila();
+    out.apagadoSaiDaFila = antes > 0 && cloudRel.filaPendentes() === 0;
+
+    /* --- conflito não é falha de entrega: sai da fila ------------------- */
+    cloudRel.enviarRegistro = async () => ({ ok: false, conflict: true, cloud: {}, cloudUpdatedAt: 'x' });
+    cloudRel._resolverConflitoRegistro = () => {};
+    falha('rede');
+    store.save('pre', Object.assign({}, store.getById('pre', rec._id), { idade: '82 anos' }));
+    await esperar();
+    cloudRel.enviarRegistro = async () => ({ ok: false, conflict: true, cloud: {}, cloudUpdatedAt: 'x' });
+    await cloudRel.drenarFila();
+    out.conflitoSaiDaFila = cloudRel.filaPendentes() === 0;
+
+    /* --- o indicador de nuvem CONTA essa fila e diz o motivo ------------ */
+    cloud.estaConfigurado = () => true; cloud.estaLogado = () => true;
+    cloud.sessaoExpirada = () => false; cloud.divergencia = () => null;
+    cloud._fila = () => [];
+    cloudRel._org = () => 'org-x';
+    falha('org');
+    store.save('pre', { nome: 'Conta No Indicador Lima', data: utils.hojeISO() });
+    await esperar();
+    const s = nuvemEstado.situacao();
+    out.indicadorConta = s.estado === 'pendente' && s.filaRel >= 1;
+    out.indicadorDizMotivo = /org/.test(s.msg || '');
+    localStorage.removeItem(cloudRel.FILA_KEY);
+    return out;
+  });
+
+  assert(r.enfileirou, 'gravação que não sobe TEM de entrar na fila — antes morria num catch vazio');
+  assert(r.guardaMotivo, 'com o motivo da falha guardado');
+  assert(r.naoDuplica, 'uma entrada por documento, por mais que seja editado offline');
+  assert(r.drenou, 'com a nuvem de volta, a fila drena e esvazia');
+  assert(r.sobeVersaoNova, 'e o que sobe é a versão mais nova, não a do momento da falha');
+  assert(r.apagadoSaiDaFila, 'registro que sumiu do aparelho sai da fila sem travar as outras');
+  assert(r.conflitoSaiDaFila, 'conflito não é falha de entrega — sai da fila e vira decisão de quem está na tela');
+  assert(r.indicadorConta, 'o indicador de nuvem precisa CONTAR essa fila');
+  assert(r.indicadorDizMotivo, 'e dizer o motivo — número sem explicação não resolve nada');
   await page.close();
 });
 
