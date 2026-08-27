@@ -4519,7 +4519,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-27c</b><br>
+    v7.1 · build <b id="build-tag">2026-08-27d</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -12431,28 +12431,24 @@ const modoNuvem = {
 const preLanc = {
   MODS: ['pre', 'anestesia'],
   /* Quem PRÉ-LANÇA e quem CONFERE.
-     O papel no banco é só o palpite inicial: quem manda é o Ajustes. Se o
-     gestor deu a FICHA DE ANESTESIA para alguém editar, essa pessoa está do
-     lado de quem finaliza — a ficha é o ato que se finaliza e se assina, e é
-     exatamente a linha que separa médico de auxiliar no padrão dos papéis.
-     Sem isto, dar acesso total a uma auxiliar no Ajustes não adiantava: ela
-     continuava só podendo "Enviar", porque o papel dizia auxiliar. */
-  _mandaNaFicha() {
-    try { return !!(auth.podeEditar && auth.podeEditar('anestesia')); } catch (e) { return false; }
-  },
+     São DUAS perguntas diferentes, e é fácil confundi-las:
+       • a grade de acesso diz QUE MÓDULOS a pessoa abre;
+       • o PAPEL diz se ela prepara ou se ela confere.
+     Ter a ficha de anestesia não faz de ninguém o médico do caso: a auxiliar
+     PRÉ-PREENCHE a ficha e a pré — as duas estão em MODS —, e quem finaliza
+     continua sendo quem confere. As duas coisas se escolhem na mesma tela
+     (Ajustes -> Equipe da nuvem): a grade ao lado do papel. */
   ehAuxiliar() {
     try {
       const u = auth.usuarioAtual() || {};
       if (u.perfil === 'admin' || u.perfil === 'medico') return false;
-      if (preLanc._mandaNaFicha()) return false;
       return u.perfil === 'secretaria' || u.role === 'auxiliar' || u.role === 'empresa' || u.role === 'financeiro';
     } catch (e) { return false; }
   },
   ehMedico() {
     try {
       const u = auth.usuarioAtual() || {};
-      return u.perfil === 'admin' || u.perfil === 'medico' || u.role === 'gestor' || u.role === 'anestesiologista'
-          || preLanc._mandaNaFicha();
+      return u.perfil === 'admin' || u.perfil === 'medico' || u.role === 'gestor' || u.role === 'anestesiologista';
     } catch (e) { return false; }
   },
   _quem() {
@@ -12823,8 +12819,7 @@ const preLanc = {
        antes ele não via porque estava vazia, e não porque a regra dissesse. */
     const confere = (() => {
       try { const u = auth.usuarioAtual() || {};
-        return u.perfil === 'admin' || u.role === 'gestor' || u.role === 'anestesiologista'
-            || preLanc._mandaNaFicha(); }
+        return u.perfil === 'admin' || u.role === 'gestor' || u.role === 'anestesiologista'; }
       catch (e) { return false; }
     })();
     if (!fila.length && !parados && !confere) { card.style.display = 'none'; return; }

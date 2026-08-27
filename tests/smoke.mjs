@@ -2840,10 +2840,8 @@ await test('Auxiliar preenche a ficha inteira; finalizar continua sendo do médi
     out.semTravaParcial = auth.edicaoParcialDe('pre') === null
       && auth.edicaoParcialDe('anestesia') === null;
 
-    /* Uma auxiliar de verdade: tem a pré, NÃO tem a ficha de anestesia. É o
-       Ajustes que separa quem pré-lança de quem finaliza — não o papel. */
-    auth.podeEditar = (m) => m !== 'anestesia';
-    auth.podeAcessar = (m) => m !== 'anestesia';
+    auth.podeEditar = () => true;
+    auth.podeAcessar = () => true;
     auth._aplicarLeitura('pre');
     const mod = document.getElementById('module-pre');
     out.semClasseParcial = !mod.classList.contains('edicao-parcial');
@@ -5648,9 +5646,8 @@ await test('Enviar salva, fecha a ficha e volta ao Dashboard — mas não fecha 
     const out = {};
     store.setList('pre', []);
     auth.usuarioAtual = () => ({ id: 's1', nome: 'Sec', perfil: 'secretaria', role: 'auxiliar',
-                                 modulos: ['dashboard','pacientes','pre','financeiro'], soImpressao: [] });
-    /* sem a ficha de anestesia: é o que faz dela quem pré-lança */
-    auth.podeAcessar = (m) => m !== 'anestesia';
+                                 modulos: ['dashboard','pacientes','pre','anestesia'], soImpressao: [] });
+    auth.podeAcessar = () => true;
     const f = document.getElementById('form-pre');
     const setId = v => {
       let h = f.querySelector('[name="_id"]');
@@ -10697,15 +10694,14 @@ await test('O Ajustes decide sozinho — inclusive para tirar de um admin', asyn
     entrar({ perfil: 'admin', role: 'gestor', modulos: [], soImpressao: [] });
     out.legadoSemListaEntra = auth.podeAcessar('financeiro') === true;
 
-    /* 4) auxiliar a quem o Ajustes deu a ficha de anestesia sai do pré-lançamento */
+    /* 4) a auxiliar PRÉ-PREENCHE a ficha de anestesia — ter o módulo não a
+       transforma em quem finaliza. Quem prepara e quem confere é o PAPEL. */
     entrar({ perfil: 'secretaria', role: 'auxiliar',
-             modulos: ['dashboard','pacientes','pre','anestesia','financeiro'], soImpressao: [] });
-    out.auxComFichaFinaliza = preLanc.ehAuxiliar() === false && preLanc.ehMedico() === true;
+             modulos: ['dashboard','pacientes','pre','anestesia','termo'], soImpressao: [] });
+    out.auxComFichaAindaPreLanca = preLanc.ehAuxiliar() === true && preLanc.ehMedico() === false;
 
-    /* 5) a secretária de verdade (sem a ficha) continua pré-lançando */
-    entrar({ perfil: 'secretaria', role: 'auxiliar',
-             modulos: ['dashboard','pacientes','pre','financeiro'], soImpressao: [] });
-    out.auxSemFichaPreLanca = preLanc.ehAuxiliar() === true;
+    /* 5) e o módulo a mais abre a ficha para ela preencher */
+    out.auxAbreAFicha = auth.podeEditar('anestesia') === true;
 
     /* 6) "Ajustes" é um módulo escolhível, um por pessoa */
     out.ajustesNaGrade = auth.MODULOS.some(m => m.key === 'ajustes')
@@ -10734,8 +10730,8 @@ await test('O Ajustes decide sozinho — inclusive para tirar de um admin', asyn
   assert(r.adminMantemORestante, 'sem mexer no que continuou marcado');
   assert(r.adminSoImprime, '"Só impressão" também vale para o administrador');
   assert(r.legadoSemListaEntra, 'espelho antigo sem lista não fica trancado do lado de fora');
-  assert(r.auxComFichaFinaliza, 'quem recebeu a ficha de anestesia finaliza, não pré-lança');
-  assert(r.auxSemFichaPreLanca, 'e a secretária sem a ficha segue no pré-lançamento');
+  assert(r.auxComFichaAindaPreLanca, 'a auxiliar pré-preenche a ficha de anestesia — não vira quem finaliza');
+  assert(r.auxAbreAFicha, 'mas o módulo marcado abre mesmo a ficha para ela preencher');
   assert(r.ajustesNaGrade, 'o próprio Ajustes é escolhível pessoa a pessoa');
   assert(r.temRevalidacao, 'o acesso é reconferido na nuvem');
   assert(r.consultouANuvem, 'consultando o vínculo de quem está logado');
