@@ -4508,7 +4508,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-26i</b><br>
+    v7.1 · build <b id="build-tag">2026-08-27a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -36334,7 +36334,69 @@ const rascunhos = {
   },
 
   /* Renderiza as abas na UI */
+  /* ==========================================================================
+     DUAS ABAS, UMA FICHA
+
+     Um rascunho guarda `dados`, e `dados._id` é a ficha salva a que ele
+     pertence. Nada impedia dois rascunhos apontarem para a MESMA ficha — e
+     acontece justamente quando o fluxo funciona: a secretária começa a pré no
+     aparelho dela, o rascunho dela chega aqui pela sincronização, e este
+     aparelho já tinha criado o seu ao abrir a mesma ficha. Resultado: duas
+     abas com o nome do mesmo paciente, e a impressão de que uma "não fechou".
+
+     Rascunho SEM `_id` nunca é juntado: duas fichas novas em branco são
+     legitimamente duas. Só se funde o que aponta para o mesmo registro
+     gravado — e fica o mais recente, com lápide no outro para o próximo pull
+     não trazê-lo de volta.
+  ========================================================================== */
+  dedupPorFicha(mod) {
+    if (rascunhos._dedupindo) return 0;
+    let lista;
+    try { lista = rascunhos.list(mod) || []; } catch (e) { return 0; }
+    const porFicha = new Map();
+    const sobra = [];
+    lista.forEach(r => {
+      const fid = r && r.dados && r.dados._id;
+      if (!fid) { sobra.push(r); return; }          /* ainda não é ficha: fica */
+      const anterior = porFicha.get(fid);
+      if (!anterior) { porFicha.set(fid, r); return; }
+      /* fica o mais recente; o outro é descartado */
+      const maisNovo = String(r.updatedAt || '') > String(anterior.updatedAt || '') ? r : anterior;
+      const velho = maisNovo === r ? anterior : r;
+      porFicha.set(fid, maisNovo);
+      sobra.push({ _remover: velho });
+    });
+    const remover = sobra.filter(x => x._remover).map(x => x._remover);
+    if (!remover.length) return 0;
+    rascunhos._dedupindo = true;
+    try {
+      const idsFora = new Set(remover.map(r => r.id));
+      const nova = lista.filter(r => !idsFora.has(r.id));
+      const ativoEra = rascunhos.ativo(mod);
+      rascunhos.setList(mod, nova);
+      remover.forEach(r => {
+        try { rascunhos.marcarFechado(mod, r.id); } catch (e) {}
+        try {
+          Promise.resolve(rascunhosSync.apagar(mod, r.id))
+            .then(ok => { if (ok) rascunhos.marcarApagado(mod, r.id); }).catch(() => {});
+        } catch (e) {}
+      });
+      /* a aba aberta era uma das descartadas: passa para a que ficou, em vez
+         de deixar o formulário órfão */
+      if (idsFora.has(ativoEra)) {
+        const fid = (remover.find(r => r.id === ativoEra) || {}).dados;
+        const sobrevivente = fid && fid._id ? porFicha.get(fid._id) : null;
+        rascunhos.setAtivo(mod, null);
+        if (sobrevivente) rascunhos.ativar(mod, sobrevivente.id);
+        else if (nova.length) rascunhos.ativar(mod, nova[0].id);
+      }
+    } finally { rascunhos._dedupindo = false; }
+    return remover.length;
+  },
+
   renderAbas(mod) {
+    /* Antes de desenhar: se sobraram duas abas da mesma ficha, uma sai. */
+    try { rascunhos.dedupPorFicha(mod); } catch (e) {}
     const wrap = document.getElementById('rasc-tabs-' + mod);
     if (!wrap) return;
     const list = rascunhos.list(mod);
