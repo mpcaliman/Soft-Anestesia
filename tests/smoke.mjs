@@ -2840,8 +2840,10 @@ await test('Auxiliar preenche a ficha inteira; finalizar continua sendo do médi
     out.semTravaParcial = auth.edicaoParcialDe('pre') === null
       && auth.edicaoParcialDe('anestesia') === null;
 
-    auth.podeEditar = () => true;
-    auth.podeAcessar = () => true;
+    /* Uma auxiliar de verdade: tem a pré, NÃO tem a ficha de anestesia. É o
+       Ajustes que separa quem pré-lança de quem finaliza — não o papel. */
+    auth.podeEditar = (m) => m !== 'anestesia';
+    auth.podeAcessar = (m) => m !== 'anestesia';
     auth._aplicarLeitura('pre');
     const mod = document.getElementById('module-pre');
     out.semClasseParcial = !mod.classList.contains('edicao-parcial');
@@ -5645,8 +5647,10 @@ await test('Enviar salva, fecha a ficha e volta ao Dashboard — mas não fecha 
   const r = await page.evaluate(() => {
     const out = {};
     store.setList('pre', []);
-    auth.usuarioAtual = () => ({ id: 's1', nome: 'Sec', perfil: 'secretaria', role: 'auxiliar' });
-    auth.podeAcessar = () => true;
+    auth.usuarioAtual = () => ({ id: 's1', nome: 'Sec', perfil: 'secretaria', role: 'auxiliar',
+                                 modulos: ['dashboard','pacientes','pre','financeiro'], soImpressao: [] });
+    /* sem a ficha de anestesia: é o que faz dela quem pré-lança */
+    auth.podeAcessar = (m) => m !== 'anestesia';
     const f = document.getElementById('form-pre');
     const setId = v => {
       let h = f.querySelector('[name="_id"]');
@@ -10663,6 +10667,80 @@ await test('Diagnóstico da nuvem alcançável por quem não tem Ajustes', async
   assert(r.abriu, 'e abrir em janela para quem não tem Ajustes');
   assert(r.renderizou, 'renderizando o mesmo relatório');
   assert(r.dizOEstado, 'que diz o estado da conexão');
+  await page.close();
+});
+
+/* 164) "Nenhum usuário tem restrição de fábrica: quem decide é o Ajustes."
+   Havia um atalho — perfil 'admin' pode tudo — que passava por cima da grade
+   de acesso: marcar "Sem acesso" para um administrador não tirava nada. E o
+   outro lado do mesmo defeito: dar acesso total a uma auxiliar não a tirava
+   do pré-lançamento, porque quem decidia era o papel, não a grade. */
+await test('O Ajustes decide sozinho — inclusive para tirar de um admin', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const entrar = (s) => sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify(
+      Object.assign({ id: 'a1', usuario: 'x@t', nome: 'X', entrouEm: Date.now() }, s)));
+
+    /* 1) admin com "Financeiro: Sem acesso" perde mesmo o financeiro */
+    entrar({ perfil: 'admin', role: 'gestor',
+             modulos: auth.MODULOS.map(m => m.key).filter(k => k !== 'financeiro'), soImpressao: [] });
+    out.adminPerdeOQueTiraram = auth.podeAcessar('financeiro') === false;
+    out.adminMantemORestante  = auth.podeAcessar('anestesia') === true;
+
+    /* 2) e "Só impressão" vale para o admin também */
+    entrar({ perfil: 'admin', role: 'gestor',
+             modulos: auth.MODULOS.map(m => m.key), soImpressao: ['financeiro'] });
+    out.adminSoImprime = auth.podeAcessar('financeiro') === true && auth.podeEditar('financeiro') === false;
+
+    /* 3) espelho antigo, sem lista nenhuma: não pode ficar trancado do lado de fora */
+    entrar({ perfil: 'admin', role: 'gestor', modulos: [], soImpressao: [] });
+    out.legadoSemListaEntra = auth.podeAcessar('financeiro') === true;
+
+    /* 4) auxiliar a quem o Ajustes deu a ficha de anestesia sai do pré-lançamento */
+    entrar({ perfil: 'secretaria', role: 'auxiliar',
+             modulos: ['dashboard','pacientes','pre','anestesia','financeiro'], soImpressao: [] });
+    out.auxComFichaFinaliza = preLanc.ehAuxiliar() === false && preLanc.ehMedico() === true;
+
+    /* 5) a secretária de verdade (sem a ficha) continua pré-lançando */
+    entrar({ perfil: 'secretaria', role: 'auxiliar',
+             modulos: ['dashboard','pacientes','pre','financeiro'], soImpressao: [] });
+    out.auxSemFichaPreLanca = preLanc.ehAuxiliar() === true;
+
+    /* 6) "Ajustes" é um módulo escolhível, um por pessoa */
+    out.ajustesNaGrade = auth.MODULOS.some(m => m.key === 'ajustes')
+      && /data-mod="ajustes"/.test(ajustesUsuarios._gradePermissoes(['dashboard'], []));
+
+    /* 7) e o acesso é reconferido na nuvem sem novo login */
+    out.temRevalidacao = typeof auth.revalidarAcesso === 'function';
+    let pediu = false;
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud.buscarPerfil = async () => { pediu = true; return { uid: 'u9', role: 'auxiliar',
+      permissoes: { perfil: 'secretaria', modulos: ['dashboard','financeiro'], soImpressao: [] } }; };
+    entrar({ uid: 'u9', perfil: 'secretaria', role: 'auxiliar', modulos: ['dashboard'], soImpressao: [] });
+    await auth.revalidarAcesso({ silencioso: true });
+    out.consultouANuvem = pediu;
+    out.acessoNovoValeJa = auth.podeAcessar('financeiro') === true;
+
+    /* 8) resposta indisponível (rede) não rebaixa ninguém */
+    cloud.buscarPerfil = async () => null;
+    await auth.revalidarAcesso({ silencioso: true });
+    out.redeRuimNaoTira = auth.podeAcessar('financeiro') === true;
+    return out;
+  });
+
+  assert(r.adminPerdeOQueTiraram, '"Sem acesso" tira mesmo de um administrador');
+  assert(r.adminMantemORestante, 'sem mexer no que continuou marcado');
+  assert(r.adminSoImprime, '"Só impressão" também vale para o administrador');
+  assert(r.legadoSemListaEntra, 'espelho antigo sem lista não fica trancado do lado de fora');
+  assert(r.auxComFichaFinaliza, 'quem recebeu a ficha de anestesia finaliza, não pré-lança');
+  assert(r.auxSemFichaPreLanca, 'e a secretária sem a ficha segue no pré-lançamento');
+  assert(r.ajustesNaGrade, 'o próprio Ajustes é escolhível pessoa a pessoa');
+  assert(r.temRevalidacao, 'o acesso é reconferido na nuvem');
+  assert(r.consultouANuvem, 'consultando o vínculo de quem está logado');
+  assert(r.acessoNovoValeJa, 'e o que o gestor marcou passa a valer sem novo login');
+  assert(r.redeRuimNaoTira, 'mas uma resposta que não veio não tira acesso de ninguém');
   await page.close();
 });
 

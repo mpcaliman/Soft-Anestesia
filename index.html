@@ -4519,7 +4519,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-27b</b><br>
+    v7.1 · build <b id="build-tag">2026-08-27c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -12430,17 +12430,29 @@ const modoNuvem = {
 ============================================================================ */
 const preLanc = {
   MODS: ['pre', 'anestesia'],
+  /* Quem PRÉ-LANÇA e quem CONFERE.
+     O papel no banco é só o palpite inicial: quem manda é o Ajustes. Se o
+     gestor deu a FICHA DE ANESTESIA para alguém editar, essa pessoa está do
+     lado de quem finaliza — a ficha é o ato que se finaliza e se assina, e é
+     exatamente a linha que separa médico de auxiliar no padrão dos papéis.
+     Sem isto, dar acesso total a uma auxiliar no Ajustes não adiantava: ela
+     continuava só podendo "Enviar", porque o papel dizia auxiliar. */
+  _mandaNaFicha() {
+    try { return !!(auth.podeEditar && auth.podeEditar('anestesia')); } catch (e) { return false; }
+  },
   ehAuxiliar() {
     try {
       const u = auth.usuarioAtual() || {};
-      if (u.perfil === 'admin') return false;
+      if (u.perfil === 'admin' || u.perfil === 'medico') return false;
+      if (preLanc._mandaNaFicha()) return false;
       return u.perfil === 'secretaria' || u.role === 'auxiliar' || u.role === 'empresa' || u.role === 'financeiro';
     } catch (e) { return false; }
   },
   ehMedico() {
     try {
       const u = auth.usuarioAtual() || {};
-      return u.perfil === 'admin' || u.perfil === 'medico' || u.role === 'gestor' || u.role === 'anestesiologista';
+      return u.perfil === 'admin' || u.perfil === 'medico' || u.role === 'gestor' || u.role === 'anestesiologista'
+          || preLanc._mandaNaFicha();
     } catch (e) { return false; }
   },
   _quem() {
@@ -12811,7 +12823,8 @@ const preLanc = {
        antes ele não via porque estava vazia, e não porque a regra dissesse. */
     const confere = (() => {
       try { const u = auth.usuarioAtual() || {};
-        return u.perfil === 'admin' || u.role === 'gestor' || u.role === 'anestesiologista'; }
+        return u.perfil === 'admin' || u.role === 'gestor' || u.role === 'anestesiologista'
+            || preLanc._mandaNaFicha(); }
       catch (e) { return false; }
     })();
     if (!fila.length && !parados && !confere) { card.style.display = 'none'; return; }
@@ -17561,6 +17574,72 @@ const auth = {
   },
   estaLogado() { return !!auth.usuarioAtual(); },
 
+  /* Reconfere o acesso na nuvem SEM pedir login de novo.
+     Até aqui o acesso só era lido no login. O gestor marcava "Financeiro:
+     Editar" para a secretária e, no computador dela, nada mudava — ela já
+     estava dentro, e o espelho antigo continuava valendo até ela sair e
+     entrar. Como o Ajustes é o único juiz do que se pode, ele precisa
+     alcançar quem já está com o sistema aberto. */
+  _revalidando: false,
+  REVALIDA_MS: 5 * 60 * 1000,
+  async revalidarAcesso(opts) {
+    opts = opts || {};
+    if (auth._revalidando) return false;
+    const sess = auth.usuarioAtual();
+    if (!sess || !sess.uid) return false;
+    let podeIr = false;
+    try { podeIr = navigator.onLine && cloud.estaConfigurado() && cloud.estaLogado(); } catch (e) { podeIr = false; }
+    if (!podeIr) return false;
+    auth._revalidando = true;
+    try {
+      let perfil = null;
+      try { perfil = await cloud.buscarPerfil(); } catch (e) { perfil = null; }
+      /* null = não deu para saber (rede, token). Nada muda: rebaixar alguém
+         por causa de um 4G ruim seria pior que a informação velha. */
+      if (!perfil) return false;
+      if (perfil.uid && sess.uid && perfil.uid !== sess.uid) return false;
+      const novo = auth._permsPersonalizadas(perfil) || auth._permsDoPapel(perfil.role);
+      if (!novo) return false;
+      const mods = (novo.modulos || []).slice().sort();
+      const so = (novo.soImpressao || []).slice().sort();
+      const igual = JSON.stringify(mods) === JSON.stringify((sess.modulos || []).slice().sort())
+                 && JSON.stringify(so) === JSON.stringify((sess.soImpressao || []).slice().sort())
+                 && novo.perfil === sess.perfil;
+      if (igual) return false;
+      /* grava no espelho do aparelho e na sessão em curso */
+      try {
+        const lista = auth._lerUsuarios();
+        const alvo = lista.find(x => x.uid === sess.uid || x.usuario === sess.usuario);
+        if (alvo) {
+          alvo.perfil = novo.perfil; alvo.modulos = mods.slice(); alvo.soImpressao = so.slice();
+          if (perfil.role) alvo.role = perfil.role;
+          auth._salvarUsuarios(lista);
+        }
+      } catch (e) {}
+      const atual = auth.usuarioAtual() || sess;
+      auth._definirSessao(Object.assign({}, atual, {
+        perfil: novo.perfil, modulos: mods.slice(), soImpressao: so.slice(),
+        role: perfil.role || atual.role
+      }));
+      try { auth._aplicarPermissoesUI(); } catch (e) {}
+      try { auth._aplicarLeitura(state.currentModule); } catch (e) {}
+      if (!opts.silencioso) toast('🔐 Seu acesso foi atualizado pelo gestor.', 'info');
+      return true;
+    } finally { auth._revalidando = false; }
+  },
+  _agendarRevalidacao() {
+    try {
+      if (auth._timerRevalida) return;
+      auth._timerRevalida = setInterval(() => {
+        auth.revalidarAcesso({ silencioso: false });
+      }, auth.REVALIDA_MS);
+      window.addEventListener('online', () => auth.revalidarAcesso({ silencioso: false }));
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) auth.revalidarAcesso({ silencioso: false });
+      });
+    } catch (e) {}
+  },
+
   podeAcessar(modKey) {
     /* aba do PROGRAMADOR: só a conta do programador (nem outros admins) */
     if (modKey === 'programador') {
@@ -17569,16 +17648,21 @@ const auth = {
     }
     const u = auth.usuarioAtual();
     if (!u) return false;
-    if (u.perfil === 'admin') return true;
-    return Array.isArray(u.modulos) && u.modulos.includes(modKey);
+    /* O Ajustes é o único juiz. Havia um atalho aqui — "perfil admin pode
+       tudo" — que passava por cima da grade: marcar "Sem acesso" para um
+       administrador não tirava nada, e a tela prometia uma coisa e o sistema
+       fazia outra. Agora, havendo lista de módulos, é ela que decide, para
+       todo mundo. O atalho sobrou só para espelhos antigos que nunca
+       receberam lista, para ninguém ficar trancado do lado de fora. */
+    if (Array.isArray(u.modulos) && u.modulos.length) return u.modulos.includes(modKey);
+    return u.perfil === 'admin';
   },
 
-  /* Pode editar (não só imprimir) o módulo? admin sempre; senão precisa ter
-     acesso e o módulo NÃO estar na lista "só impressão". */
+  /* Pode editar (não só imprimir) o módulo? Precisa ter acesso e o módulo
+     NÃO estar na lista "só impressão" — inclusive para administrador. */
   podeEditar(modKey) {
     const u = auth.usuarioAtual();
     if (!u) return true;                 /* sem login = app aberto (edita) */
-    if (u.perfil === 'admin') return true;
     if (!auth.podeAcessar(modKey)) return false;
     return !(Array.isArray(u.soImpressao) && u.soImpressao.includes(modKey));
   },
@@ -17631,6 +17715,10 @@ const auth = {
     if (app) { app.style.filter = ''; app.style.pointerEvents = ''; }
     auth._aplicarPermissoesUI();
     auth._iniciarTimer();
+    /* O Ajustes manda também em quem já está dentro: confere agora e
+       de tempos em tempos, sem pedir login de novo. */
+    auth._agendarRevalidacao();
+    setTimeout(() => { try { auth.revalidarAcesso({ silencioso: true }); } catch (e) {} }, 4000);
     /* Entrar sempre começa no Dashboard — é o painel do dia, e é onde estão a
        fila de conferência e as pendências. Cair no último módulo aberto fazia
        cada pessoa começar num lugar diferente, às vezes numa ficha alheia.
@@ -22795,6 +22883,14 @@ const equipeNuvem = {
     const m = (equipeNuvem._ultimaLista || []).find(x => x.uid === uid);
     if (!m) return;
     const { modulos, soImpressao } = ajustesUsuarios._lerGradePermissoes();
+    /* Tirar "Ajustes" de si mesmo tranca a porta por dentro: esta tela mora
+       lá. Só o gestor grava aqui, então quem se tira não tem a quem recorrer
+       a não ser outro gestor. Pergunta antes. */
+    try {
+      const eu = auth.usuarioAtual() || {};
+      if (eu.uid && eu.uid === uid && !modulos.includes('ajustes')
+          && !confirm('Você está tirando o módulo "Ajustes" de você mesmo. Esta tela fica dentro dele — depois de salvar, só outro gestor consegue devolver. Continuar?')) return;
+    } catch (e) {}
     const perfil = equipeNuvem._permsDe(m).perfil;
     const org = await equipeNuvem._org();
     const ok = await auth.salvarPermissoesNaNuvem(uid, org, { perfil, modulos, soImpressao });
