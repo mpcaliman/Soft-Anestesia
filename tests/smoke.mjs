@@ -10553,6 +10553,80 @@ await test('Tela vazia sabe dizer quando nunca falou com a clínica', async () =
   await page.close();
 });
 
+
+/* 162) Duas abas, uma ficha. Acontece justamente quando o fluxo FUNCIONA: a
+   secretária começa a pré no aparelho dela, o rascunho chega aqui pela
+   sincronização, e este aparelho já tinha criado o seu ao abrir a mesma
+   ficha. Duas abas com o mesmo nome, e a impressão de que uma não fechou. */
+await test('Rascunhos: duas abas apontando para a mesma ficha viram uma', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    rascunhosSync.apagar = async () => true;
+    const por = lista => rascunhos.setList('pre', lista);
+
+    /* --- o caso relatado ------------------------------------------------ */
+    por([
+      { id: 'r1', label: 'MARIA EDUARDA', updatedAt: '2026-08-27T10:00:00Z',
+        dados: { _id: 'ficha-A', nome: 'MARIA EDUARDA PENALVA' } },
+      { id: 'r2', label: 'MARIA EDUARDA', updatedAt: '2026-08-27T12:31:00Z',
+        dados: { _id: 'ficha-A', nome: 'MARIA EDUARDA PENALVA' } }
+    ]);
+    rascunhos.setAtivo('pre', 'r1');
+    out.removeuUma = rascunhos.dedupPorFicha('pre') === 1 && rascunhos.list('pre').length === 1;
+    out.ficouOMaisNovo = (rascunhos.list('pre')[0] || {}).id === 'r2';
+    /* a aba aberta era a descartada: passa para a que ficou, sem deixar o
+       formulário órfão */
+    out.ativoMigrou = rascunhos.ativo('pre') === 'r2';
+
+    /* --- fichas diferentes continuam sendo duas ------------------------- */
+    por([
+      { id: 'a', updatedAt: '2026-08-27T10:00:00Z', dados: { _id: 'f1' } },
+      { id: 'b', updatedAt: '2026-08-27T11:00:00Z', dados: { _id: 'f2' } }
+    ]);
+    rascunhos.dedupPorFicha('pre');
+    out.diferentesFicam = rascunhos.list('pre').length === 2;
+
+    /* --- duas em branco são LEGITIMAMENTE duas: sem _id, não se junta ---- */
+    por([
+      { id: 'n1', updatedAt: '2026-08-27T10:00:00Z', dados: null },
+      { id: 'n2', updatedAt: '2026-08-27T11:00:00Z', dados: { nome: '' } }
+    ]);
+    rascunhos.dedupPorFicha('pre');
+    out.brancasFicam = rascunhos.list('pre').length === 2;
+
+    /* --- três da mesma ficha viram uma, a mais recente ------------------ */
+    por([
+      { id: 'x1', updatedAt: '2026-08-27T09:00:00Z', dados: { _id: 'f9' } },
+      { id: 'x2', updatedAt: '2026-08-27T10:00:00Z', dados: { _id: 'f9' } },
+      { id: 'x3', updatedAt: '2026-08-27T11:00:00Z', dados: { _id: 'f9' } }
+    ]);
+    rascunhos.dedupPorFicha('pre');
+    const l3 = rascunhos.list('pre');
+    out.tresViramUma = l3.length === 1 && l3[0].id === 'x3';
+
+    /* --- e desenhar as abas não entra em laço --------------------------- */
+    por([
+      { id: 'y1', updatedAt: '2026-08-27T09:00:00Z', dados: { _id: 'f7' } },
+      { id: 'y2', updatedAt: '2026-08-27T10:00:00Z', dados: { _id: 'f7' } }
+    ]);
+    rascunhos.renderAbas('pre');
+    out.renderDedupSemLaco = rascunhos.list('pre').length === 1;
+
+    rascunhos.setList('pre', []);
+    return out;
+  });
+
+  assert(r.removeuUma, 'duas abas da mesma ficha precisam virar uma');
+  assert(r.ficouOMaisNovo, 'ficando a mais recente');
+  assert(r.ativoMigrou, 'e a aba aberta passa para a que ficou, sem formulário órfão');
+  assert(r.diferentesFicam, 'fichas diferentes continuam sendo duas abas');
+  assert(r.brancasFicam, 'duas fichas novas em branco são legitimamente duas — sem _id não se junta');
+  assert(r.tresViramUma, 'três da mesma ficha viram uma');
+  assert(r.renderDedupSemLaco, 'desenhar as abas já limpa a duplicata, sem entrar em laço');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
