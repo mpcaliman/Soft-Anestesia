@@ -10627,6 +10627,45 @@ await test('Rascunhos: duas abas apontando para a mesma ficha viram uma', async 
   await page.close();
 });
 
+
+/* 163) O diagnóstico da nuvem existia e só abria dentro de Ajustes — módulo
+   que o perfil auxiliar não tem. A ferramenta que diz POR QUE nada chega
+   estava atrás de uma porta fechada para quem mais precisa dela. */
+await test('Diagnóstico da nuvem alcançável por quem não tem Ajustes', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'a1',
+      usuario: 'secretaria@teste.com', nome: 'Aux', perfil: 'secretaria',
+      modulos: auth.ROLE_PERMS.auxiliar.modulos.slice(), role: 'auxiliar', entrouEm: Date.now() }));
+
+    /* a premissa do defeito: ela realmente não tem Ajustes */
+    out.semAjustes = auth.ROLE_PERMS.auxiliar.modulos.indexOf('ajustes') < 0;
+    /* e o financeiro ela TEM — não era permissão, era falta de diagnóstico */
+    out.temFinanceiro = auth.ROLE_PERMS.auxiliar.modulos.indexOf('financeiro') >= 0;
+
+    out.botaoNoMenu = !!document.getElementById('sidebar-diag-btn');
+
+    cloud.estaConfigurado = () => false;   /* caminho curto, sem rede */
+    cloudDiag.abrirJanela();
+    await new Promise(res => setTimeout(res, 200));
+    out.abriu = /Diagn[óo]stico da nuvem/.test((document.getElementById('modal-title') || {}).textContent || '');
+    const alvo = document.getElementById('clouddiag-janela');
+    out.renderizou = !!alvo && alvo.innerHTML.length > 50;
+    out.dizOEstado = !!alvo && /Sem configura|Não conectado|Offline|Online/.test(alvo.innerHTML);
+    try { modal.close(); } catch (e) {}
+    return out;
+  });
+
+  assert(r.semAjustes, 'o perfil auxiliar não tem o módulo Ajustes — essa é a premissa');
+  assert(r.temFinanceiro, 'mas TEM financeiro: nunca foi permissão, era falta de diagnóstico');
+  assert(r.botaoNoMenu, 'o diagnóstico precisa estar no menu, ao lado do indicador de nuvem');
+  assert(r.abriu, 'e abrir em janela para quem não tem Ajustes');
+  assert(r.renderizou, 'renderizando o mesmo relatório');
+  assert(r.dizOEstado, 'que diz o estado da conexão');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

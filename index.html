@@ -4506,9 +4506,20 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
       <span class="sn-ico" id="sidebar-nuvem-ico">☁️</span>
       <span class="sn-txt"><b>Atualizar tudo</b><small id="sidebar-nuvem-msg">verificando…</small></span>
     </button>
+    <!-- O diagnóstico existia e só abria dentro de Ajustes — módulo que o
+         perfil auxiliar não tem. Ou seja: a ferramenta que diz POR QUE nada
+         chega estava atrás de uma porta fechada justamente para quem mais
+         precisa dela. Aqui ela fica ao lado do indicador, que é o caminho de
+         quem não tem Ajustes. -->
+    <button type="button" class="sidebar-nuvem-btn" id="sidebar-diag-btn"
+            onclick="cloudDiag.abrirJanela()"
+            title="Compara o que existe na clínica com o que existe neste aparelho, módulo a módulo">
+      <span class="sn-ico">🩺</span>
+      <span class="sn-txt"><b>Diagnóstico da nuvem</b><small>por que algo não aparece aqui</small></span>
+    </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-27a</b><br>
+    v7.1 · build <b id="build-tag">2026-08-27b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -22176,8 +22187,20 @@ const cloudDiag = {
   },
   _localCount(mod) { try { return mod ? store.list(mod).length : null; } catch (e) { return null; } },
 
-  async rodar() {
-    const box = document.getElementById('clouddiag-resultado');
+  /* Abre o diagnóstico numa janela, para quem não tem o módulo Ajustes.
+     O conteúdo é o MESMO — duas telas do mesmo relatório divergiriam na
+     primeira correção. */
+  abrirJanela() {
+    modal.open('🩺 Diagnóstico da nuvem',
+      '<p style="font-size:.85rem;color:var(--text-soft);margin:0 0 10px">Compara o que existe na clínica com o que existe neste aparelho, módulo a módulo. ' +
+      'Se algum número da clínica for maior que o daqui, o registro existe e não chegou.</p>' +
+      '<div id="clouddiag-janela"></div>',
+      '<button class="btn" onclick="modal.close()">Fechar</button>');
+    setTimeout(() => { try { cloudDiag.rodar('clouddiag-janela'); } catch (e) {} }, 60);
+  },
+
+  async rodar(alvoId) {
+    const box = document.getElementById(alvoId || 'clouddiag-resultado');
     if (!box) return;
     box.style.display = 'block';
     const online = (typeof navigator === 'undefined' || navigator.onLine !== false);
