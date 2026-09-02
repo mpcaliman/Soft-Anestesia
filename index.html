@@ -4444,7 +4444,11 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
 <!-- ===========================================================================
      TELA DE LOGIN / BLOQUEIO (segurança de acesso)
 =========================================================================== -->
-<div id="auth-overlay" class="auth-overlay" style="display:none">
+<!-- Nasce VISÍVEL de propósito. auth.init() é a última etapa do carregamento,
+     e enquanto ela não chegava o app inteiro aparecia pintado na tela antes
+     da senha. Quem já tem sessão válida não perde nada: _desbloquear() some
+     com isto no mesmo instante. -->
+<div id="auth-overlay" class="auth-overlay">
   <div class="auth-box">
     <div class="auth-logo"><img id="auth-logo-img" alt="" style="width:64px;height:64px;object-fit:contain"></div>
     <h1 class="auth-title">Soft Anestesia</h1>
@@ -4506,9 +4510,20 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
       <span class="sn-ico" id="sidebar-nuvem-ico">☁️</span>
       <span class="sn-txt"><b>Atualizar tudo</b><small id="sidebar-nuvem-msg">verificando…</small></span>
     </button>
+    <!-- O diagnóstico existia e só abria dentro de Ajustes — módulo que o
+         perfil auxiliar não tem. Ou seja: a ferramenta que diz POR QUE nada
+         chega estava atrás de uma porta fechada justamente para quem mais
+         precisa dela. Aqui ela fica ao lado do indicador, que é o caminho de
+         quem não tem Ajustes. -->
+    <button type="button" class="sidebar-nuvem-btn" id="sidebar-diag-btn"
+            onclick="cloudDiag.abrirJanela()"
+            title="Compara o que existe na clínica com o que existe neste aparelho, módulo a módulo">
+      <span class="sn-ico">🩺</span>
+      <span class="sn-txt"><b>Diagnóstico da nuvem</b><small>por que algo não aparece aqui</small></span>
+    </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-27a</b><br>
+    v7.1 · build <b id="build-tag">2026-08-28b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -8533,6 +8548,15 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <div class="field col-6"><label>Detalhe do pagamento <small style="color:var(--text-mute);font-weight:400">(aparece no PDF)</small></label>
               <input type="text" name="pagamento_detalhe" id="orc-pgto-detalhe" placeholder="Ex.: PIX (email@ex.com) ou espécie. Até o dia anterior ao procedimento.">
             </div>
+            <div class="field col-12">
+              <label style="display:flex;align-items:center;gap:8px;font-weight:600">
+                <input type="checkbox" name="inclui_pre" id="orc-inclui-pre" checked
+                       onchange="window.orcamento.aoMudarIncluiPre(this.checked)"
+                       style="width:auto;margin:0">
+                Inclui a consulta de avaliação pré-anestésica
+              </label>
+              <small style="color:var(--text-mute)">Desmarque quando a avaliação for cobrada à parte — o texto abaixo se ajusta sozinho.</small>
+            </div>
             <div class="field col-12"><label>Observações / regras <small style="color:var(--text-mute);font-weight:400">(texto livre, editável — aparece no PDF)</small></label>
               <textarea name="observacoes" id="orc-observacoes" rows="5"></textarea>
               <div style="margin-top:6px">
@@ -12419,10 +12443,18 @@ const modoNuvem = {
 ============================================================================ */
 const preLanc = {
   MODS: ['pre', 'anestesia'],
+  /* Quem PRÉ-LANÇA e quem CONFERE.
+     São DUAS perguntas diferentes, e é fácil confundi-las:
+       • a grade de acesso diz QUE MÓDULOS a pessoa abre;
+       • o PAPEL diz se ela prepara ou se ela confere.
+     Ter a ficha de anestesia não faz de ninguém o médico do caso: a auxiliar
+     PRÉ-PREENCHE a ficha e a pré — as duas estão em MODS —, e quem finaliza
+     continua sendo quem confere. As duas coisas se escolhem na mesma tela
+     (Ajustes -> Equipe da nuvem): a grade ao lado do papel. */
   ehAuxiliar() {
     try {
       const u = auth.usuarioAtual() || {};
-      if (u.perfil === 'admin') return false;
+      if (u.perfil === 'admin' || u.perfil === 'medico') return false;
       return u.perfil === 'secretaria' || u.role === 'auxiliar' || u.role === 'empresa' || u.role === 'financeiro';
     } catch (e) { return false; }
   },
@@ -13398,6 +13430,7 @@ const ui = {
     });
   },
   /* Navegação entre módulos */
+  _navegando: false,
   navegar(modName) {
     try {
       if (!modName) modName = 'dashboard';
@@ -13422,6 +13455,27 @@ const ui = {
       }
       document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.module === modName));
       state.currentModule = modName;
+
+      /* O endereço (#hash) é o que a barra inferior, a faixa do paciente e o
+         painel leem para saber onde estamos. Muitos atalhos chamam navegar()
+         direto — abrir uma ficha da fila, do histórico, de um paciente — e o
+         endereço ficava para trás. Aí clicar em "Dashboard" no menu não fazia
+         nada: atribuir ao hash o MESMO valor que ele já tem não dispara evento
+         nenhum, e a navegação inteira depende desse evento. Era isto que
+         prendia quem estava na pré ou na ficha; ir a outro módulo antes
+         "funcionava" só porque mexia no endereço.
+         replaceState não empilha histórico; o hashchange sintético mantém as
+         partes cosméticas em dia, e a trava evita a volta por cima. */
+      try {
+        const alvoHash = '#' + modName;
+        if (location.hash !== alvoHash && !/validar/i.test(location.hash || '')) {
+          ui._navegando = true;
+          history.replaceState(null, '', location.pathname + location.search + alvoHash);
+          let ev; try { ev = new HashChangeEvent('hashchange'); } catch (e2) { ev = new Event('hashchange'); }
+          window.dispatchEvent(ev);
+          ui._navegando = false;
+        }
+      } catch (e) { ui._navegando = false; }
 
       /* PERMISSÃO: se o grupo só pode imprimir este módulo, entra em modo leitura */
       try { if (typeof auth !== 'undefined' && auth._aplicarLeitura) auth._aplicarLeitura(modName); } catch (e) {}
@@ -17550,6 +17604,72 @@ const auth = {
   },
   estaLogado() { return !!auth.usuarioAtual(); },
 
+  /* Reconfere o acesso na nuvem SEM pedir login de novo.
+     Até aqui o acesso só era lido no login. O gestor marcava "Financeiro:
+     Editar" para a secretária e, no computador dela, nada mudava — ela já
+     estava dentro, e o espelho antigo continuava valendo até ela sair e
+     entrar. Como o Ajustes é o único juiz do que se pode, ele precisa
+     alcançar quem já está com o sistema aberto. */
+  _revalidando: false,
+  REVALIDA_MS: 5 * 60 * 1000,
+  async revalidarAcesso(opts) {
+    opts = opts || {};
+    if (auth._revalidando) return false;
+    const sess = auth.usuarioAtual();
+    if (!sess || !sess.uid) return false;
+    let podeIr = false;
+    try { podeIr = navigator.onLine && cloud.estaConfigurado() && cloud.estaLogado(); } catch (e) { podeIr = false; }
+    if (!podeIr) return false;
+    auth._revalidando = true;
+    try {
+      let perfil = null;
+      try { perfil = await cloud.buscarPerfil(); } catch (e) { perfil = null; }
+      /* null = não deu para saber (rede, token). Nada muda: rebaixar alguém
+         por causa de um 4G ruim seria pior que a informação velha. */
+      if (!perfil) return false;
+      if (perfil.uid && sess.uid && perfil.uid !== sess.uid) return false;
+      const novo = auth._permsPersonalizadas(perfil) || auth._permsDoPapel(perfil.role);
+      if (!novo) return false;
+      const mods = (novo.modulos || []).slice().sort();
+      const so = (novo.soImpressao || []).slice().sort();
+      const igual = JSON.stringify(mods) === JSON.stringify((sess.modulos || []).slice().sort())
+                 && JSON.stringify(so) === JSON.stringify((sess.soImpressao || []).slice().sort())
+                 && novo.perfil === sess.perfil;
+      if (igual) return false;
+      /* grava no espelho do aparelho e na sessão em curso */
+      try {
+        const lista = auth._lerUsuarios();
+        const alvo = lista.find(x => x.uid === sess.uid || x.usuario === sess.usuario);
+        if (alvo) {
+          alvo.perfil = novo.perfil; alvo.modulos = mods.slice(); alvo.soImpressao = so.slice();
+          if (perfil.role) alvo.role = perfil.role;
+          auth._salvarUsuarios(lista);
+        }
+      } catch (e) {}
+      const atual = auth.usuarioAtual() || sess;
+      auth._definirSessao(Object.assign({}, atual, {
+        perfil: novo.perfil, modulos: mods.slice(), soImpressao: so.slice(),
+        role: perfil.role || atual.role
+      }));
+      try { auth._aplicarPermissoesUI(); } catch (e) {}
+      try { auth._aplicarLeitura(state.currentModule); } catch (e) {}
+      if (!opts.silencioso) toast('🔐 Seu acesso foi atualizado pelo gestor.', 'info');
+      return true;
+    } finally { auth._revalidando = false; }
+  },
+  _agendarRevalidacao() {
+    try {
+      if (auth._timerRevalida) return;
+      auth._timerRevalida = setInterval(() => {
+        auth.revalidarAcesso({ silencioso: false });
+      }, auth.REVALIDA_MS);
+      window.addEventListener('online', () => auth.revalidarAcesso({ silencioso: false }));
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) auth.revalidarAcesso({ silencioso: false });
+      });
+    } catch (e) {}
+  },
+
   podeAcessar(modKey) {
     /* aba do PROGRAMADOR: só a conta do programador (nem outros admins) */
     if (modKey === 'programador') {
@@ -17558,16 +17678,21 @@ const auth = {
     }
     const u = auth.usuarioAtual();
     if (!u) return false;
-    if (u.perfil === 'admin') return true;
-    return Array.isArray(u.modulos) && u.modulos.includes(modKey);
+    /* O Ajustes é o único juiz. Havia um atalho aqui — "perfil admin pode
+       tudo" — que passava por cima da grade: marcar "Sem acesso" para um
+       administrador não tirava nada, e a tela prometia uma coisa e o sistema
+       fazia outra. Agora, havendo lista de módulos, é ela que decide, para
+       todo mundo. O atalho sobrou só para espelhos antigos que nunca
+       receberam lista, para ninguém ficar trancado do lado de fora. */
+    if (Array.isArray(u.modulos) && u.modulos.length) return u.modulos.includes(modKey);
+    return u.perfil === 'admin';
   },
 
-  /* Pode editar (não só imprimir) o módulo? admin sempre; senão precisa ter
-     acesso e o módulo NÃO estar na lista "só impressão". */
+  /* Pode editar (não só imprimir) o módulo? Precisa ter acesso e o módulo
+     NÃO estar na lista "só impressão" — inclusive para administrador. */
   podeEditar(modKey) {
     const u = auth.usuarioAtual();
     if (!u) return true;                 /* sem login = app aberto (edita) */
-    if (u.perfil === 'admin') return true;
     if (!auth.podeAcessar(modKey)) return false;
     return !(Array.isArray(u.soImpressao) && u.soImpressao.includes(modKey));
   },
@@ -17620,6 +17745,10 @@ const auth = {
     if (app) { app.style.filter = ''; app.style.pointerEvents = ''; }
     auth._aplicarPermissoesUI();
     auth._iniciarTimer();
+    /* O Ajustes manda também em quem já está dentro: confere agora e
+       de tempos em tempos, sem pedir login de novo. */
+    auth._agendarRevalidacao();
+    setTimeout(() => { try { auth.revalidarAcesso({ silencioso: true }); } catch (e) {} }, 4000);
     /* Entrar sempre começa no Dashboard — é o painel do dia, e é onde estão a
        fila de conferência e as pendências. Cair no último módulo aberto fazia
        cada pessoa começar num lugar diferente, às vezes numa ficha alheia.
@@ -20462,9 +20591,14 @@ const configSync = {
     'medsys.v7.pdfbackup.cfg',
     'medsys.v7.theme',
     'medsys.v7.grafico_modo',
-    'medsys.v7.auth.timeout_min',
     'medsys.v7.realtime.on'
   ],
+  /* medsys.v7.auth.timeout_min NÃO entra aqui, e é de propósito.
+     O bloqueio de tela é do APARELHO, não da conta: o celular de uso pessoal
+     quer "1x por dia", o computador da secretaria quer 5 minutos. Enquanto
+     esta chave viajava junto, um aparelho desfazia a escolha do outro — quem
+     marcava "1x por dia" via a senha voltar a ser pedida de 5 em 5 minutos,
+     sem ter mexido em nada. */
   META_KEY: 'medsys.v7.configsync.meta',
   _meta() { try { return JSON.parse(localStorage.getItem(configSync.META_KEY) || '{}'); } catch (e) { return {}; } },
   _salvarMeta(m) { try { localStorage.setItem(configSync.META_KEY, JSON.stringify(m)); } catch (e) {} },
@@ -22176,8 +22310,20 @@ const cloudDiag = {
   },
   _localCount(mod) { try { return mod ? store.list(mod).length : null; } catch (e) { return null; } },
 
-  async rodar() {
-    const box = document.getElementById('clouddiag-resultado');
+  /* Abre o diagnóstico numa janela, para quem não tem o módulo Ajustes.
+     O conteúdo é o MESMO — duas telas do mesmo relatório divergiriam na
+     primeira correção. */
+  abrirJanela() {
+    modal.open('🩺 Diagnóstico da nuvem',
+      '<p style="font-size:.85rem;color:var(--text-soft);margin:0 0 10px">Compara o que existe na clínica com o que existe neste aparelho, módulo a módulo. ' +
+      'Se algum número da clínica for maior que o daqui, o registro existe e não chegou.</p>' +
+      '<div id="clouddiag-janela"></div>',
+      '<button class="btn" onclick="modal.close()">Fechar</button>');
+    setTimeout(() => { try { cloudDiag.rodar('clouddiag-janela'); } catch (e) {} }, 60);
+  },
+
+  async rodar(alvoId) {
+    const box = document.getElementById(alvoId || 'clouddiag-resultado');
     if (!box) return;
     box.style.display = 'block';
     const online = (typeof navigator === 'undefined' || navigator.onLine !== false);
@@ -22772,6 +22918,14 @@ const equipeNuvem = {
     const m = (equipeNuvem._ultimaLista || []).find(x => x.uid === uid);
     if (!m) return;
     const { modulos, soImpressao } = ajustesUsuarios._lerGradePermissoes();
+    /* Tirar "Ajustes" de si mesmo tranca a porta por dentro: esta tela mora
+       lá. Só o gestor grava aqui, então quem se tira não tem a quem recorrer
+       a não ser outro gestor. Pergunta antes. */
+    try {
+      const eu = auth.usuarioAtual() || {};
+      if (eu.uid && eu.uid === uid && !modulos.includes('ajustes')
+          && !confirm('Você está tirando o módulo "Ajustes" de você mesmo. Esta tela fica dentro dele — depois de salvar, só outro gestor consegue devolver. Continuar?')) return;
+    } catch (e) {}
     const perfil = equipeNuvem._permsDe(m).perfil;
     const org = await equipeNuvem._org();
     const ok = await auth.salvarPermissoesNaNuvem(uid, org, { perfil, modulos, soImpressao });
@@ -41557,54 +41711,29 @@ ${TAG_CLOSE_HTML}`;
         return;
       }
 
-      /* Fallback: iframe oculto (caso o pop-up tenha sido bloqueado) */
-      let iframe = document.getElementById('print-iframe');
-      if (iframe) iframe.remove();
-      iframe = document.createElement('iframe');
-      iframe.id = 'print-iframe';
-      iframe.style.cssText = 'position:fixed;top:-10000px;left:-10000px;width:800px;height:1100px;border:0;visibility:hidden';
-      document.body.appendChild(iframe);
-
-      const idoc = iframe.contentDocument || iframe.contentWindow.document;
-      idoc.open();
-      idoc.write(fullHTML);
-      idoc.close();
-
-      /* Aguarda imagens (logo + carimbo + gráfico) carregarem */
-      const dispararPrint = () => {
-        try {
-          /* Define o title do iframe para o nome do arquivo aparecer no diálogo */
-          if (idoc.title !== titulo) idoc.title = titulo;
-          iframe.contentWindow.focus();
-          iframe.contentWindow.print();
-        } catch (err) {
-          /* Fallback: imprime a janela atual */
-          console.warn('Print do iframe falhou, usando window.print:', err);
-          window.print();
-        }
+      /* Pop-up bloqueado — que é o PADRÃO no navegador do celular.
+         Antes daqui saía um iframe escondido com visibility:hidden a
+         -10000px. O Safari do iPhone não rasteriza o que não está
+         renderizado: o diálogo abria e a folha saía EM BRANCO. Não era do
+         módulo — era de qualquer impressão feita pelo celular.
+         Agora imprime-se a PRÓPRIA página. A folha de estilo
+         `body.printing-preview` já existia para exatamente isto (esconde o
+         app e deixa só o papel da visualização) e nunca chegou a ser ligada:
+         só havia a linha que a removia. */
+      const corpo = document.body;
+      const tituloOriginal = document.title;
+      const limparImpressao = () => {
+        corpo.classList.remove('printing-preview');
+        document.title = tituloOriginal;
+        window.removeEventListener('afterprint', limparImpressao);
       };
-      const imgs = idoc.querySelectorAll('img');
-      if (imgs.length === 0) {
-        setTimeout(dispararPrint, 200);
-      } else {
-        let loaded = 0, done = false;
-        const checkAll = () => {
-          if (done) return;
-          if (loaded >= imgs.length) {
-            done = true;
-            setTimeout(dispararPrint, 150);
-          }
-        };
-        imgs.forEach(img => {
-          if (img.complete && img.naturalHeight > 0) { loaded++; checkAll(); }
-          else {
-            img.addEventListener('load', () => { loaded++; checkAll(); });
-            img.addEventListener('error', () => { loaded++; checkAll(); });
-          }
-        });
-        /* Timeout máximo: se imagens demoram >3s, dispara mesmo assim */
-        setTimeout(() => { if (!done) { done = true; dispararPrint(); } }, 3000);
-      }
+      corpo.classList.add('printing-preview');
+      document.title = titulo;          /* vira o nome sugerido do PDF */
+      window.addEventListener('afterprint', limparImpressao);
+      /* afterprint não existe em todo navegador: rede de segurança */
+      setTimeout(limparImpressao, 60000);
+      /* um quadro para o navegador aplicar o estilo antes de abrir o diálogo */
+      setTimeout(() => { try { window.print(); } catch (err) { limparImpressao(); toast('Não consegui abrir a impressão: ' + (err.message || ''), 'error'); } }, 150);
 
       toast('Diálogo de impressão sendo aberto — escolha "Salvar como PDF" para gerar arquivo.', 'success');
     } catch (e) {
@@ -46434,7 +46563,11 @@ const ORC_CFG_PADRAO = {
   },
   tabelaAtiva: 'unimed',
   pagamentoPadrao: 'PIX (mpcaliman@hotmail.com) ou espécie. Preferencialmente realizado até o dia anterior ao procedimento.',
+  /* Dois textos, porque são duas propostas diferentes. Dizer "incluindo
+     avaliação" num orçamento que NÃO cobre a consulta pré-anestésica é
+     prometer o que não foi cobrado — e é o paciente quem cobra depois. */
   obsPadrao: 'O valor informado refere-se à assistência anestesiológica relacionada ao procedimento descrito, incluindo avaliação, planejamento e acompanhamento anestésico intra-operatório, conforme necessidade clínica do paciente e características do ato cirúrgico.',
+  obsSemPre: 'O valor informado refere-se à assistência anestesiológica relacionada ao procedimento descrito, incluindo planejamento e acompanhamento anestésico intra-operatório, conforme necessidade clínica do paciente e características do ato cirúrgico. A consulta de avaliação pré-anestésica não está incluída neste valor e é cobrada à parte.',
   regra: { mesma: 0.5, diferente: 0.7 }
 };
 
@@ -47499,7 +47632,10 @@ const orcamento = {
     orcamento.setTipoPorte(orcamento._tipoPorte);
     orcamento._preencherSelectTabela();
     const cfg = orcamento.cfg();
-    document.getElementById('orc-observacoes').value = cfg.obsPadrao || '';
+    /* f.reset() já devolve a caixa ao padrão do HTML (marcada). O texto sai
+       daí, não do contrário — senão um "sem avaliação" do orçamento anterior
+       ficaria valendo no seguinte. */
+    document.getElementById('orc-observacoes').value = orcamento._obsDe(orcamento._incluiPre());
     document.getElementById('orc-pgto-detalhe').value = cfg.pagamentoPadrao || '';
     orcamento.addProc();
     orcamento.recalcular();
@@ -47696,8 +47832,34 @@ const orcamento = {
     else det.value = v;
   },
 
+  /* O texto que corresponde à caixa "inclui a avaliação". */
+  _obsDe(incluiPre) {
+    const cfg = orcamento.cfg();
+    return (incluiPre === false ? (cfg.obsSemPre || ORC_CFG_PADRAO.obsSemPre)
+                                : (cfg.obsPadrao || ORC_CFG_PADRAO.obsPadrao)) || '';
+  },
+  _incluiPre() {
+    const el = document.getElementById('orc-inclui-pre');
+    return el ? !!el.checked : true;
+  },
+  /* Só troca o texto quando ele ainda é um dos DOIS padrões (ou está vazio).
+     Se o médico escreveu o dele, marcar a caixa não pode apagar o que ele
+     escreveu — avisa e deixa a decisão com quem escreveu. */
+  aoMudarIncluiPre(inclui) {
+    const ta = document.getElementById('orc-observacoes');
+    if (!ta) return;
+    const atual = (ta.value || '').trim();
+    const padroes = [orcamento._obsDe(true).trim(), orcamento._obsDe(false).trim()];
+    if (!atual || padroes.indexOf(atual) >= 0) {
+      ta.value = orcamento._obsDe(inclui);
+      try { markDirty(); } catch (e) {}
+      return;
+    }
+    toast('O texto das observações foi editado à mão — não mexi nele. Use "↺ Restaurar texto padrão" para trocar.', 'warn');
+  },
   restaurarObs() {
-    document.getElementById('orc-observacoes').value = orcamento.cfg().obsPadrao || '';
+    document.getElementById('orc-observacoes').value = orcamento._obsDe(orcamento._incluiPre());
+    try { markDirty(); } catch (e) {}
   },
 
   /* ===== MODELOS DE ORÇAMENTO — procedimentos frequentes prontos em 30s ===== */
@@ -47861,6 +48023,9 @@ const orcamento = {
       perc_urgencia: g('orc_perc_urgencia') || '30',
       procedimentos: procs, total_ref: g('total_ref'), total_paciente: g('total_paciente'),
       pagamento_tipo: g('pagamento_tipo'), pagamento_detalhe: g('pagamento_detalhe'),
+      /* fica gravado: reabrir um orçamento antigo tem de mostrar a mesma
+         proposta que o paciente recebeu */
+      inclui_pre: orcamento._incluiPre(),
       observacoes: g('observacoes')
     };
   },
@@ -47900,6 +48065,10 @@ const orcamento = {
     const urgEl = f.querySelector('[name="orc_urgencia"]'); if (urgEl) urgEl.checked = !!item.urgencia;
     set('orc_perc_urgencia', item.perc_urgencia || '30');
     set('pagamento_tipo', item.pagamento_tipo); set('pagamento_detalhe', item.pagamento_detalhe);
+    /* orçamentos gravados antes desta opção não têm o campo: valem como
+       "inclui", que é o que o texto deles dizia */
+    const chkPre = document.getElementById('orc-inclui-pre');
+    if (chkPre) chkPre.checked = (item.inclui_pre !== false);
     set('observacoes', item.observacoes);
     document.getElementById('orcamento-body').innerHTML = '';
     (item.procedimentos || []).forEach(p => {
@@ -48969,12 +49138,17 @@ document.addEventListener('DOMContentLoaded', () => {
     item.addEventListener('click', (e) => {
       e.preventDefault();
       const mod = item.dataset.module;
-      window.location.hash = mod;
+      /* Se o endereço já aponta para cá, atribuí-lo de novo não dispara nada:
+         navega direto. (Com a sincronia acima isto é raro, mas o menu não
+         pode depender de sorte.) */
+      if (('#' + mod) === window.location.hash) ui.navegar(mod);
+      else window.location.hash = mod;
     });
   });
 
   /* 2. Hashchange para navegação */
   function navegarPorHash() {
+    if (ui._navegando) return;   /* foi a própria navegar() que ajustou o endereço */
     const h = (window.location.hash || '#dashboard').replace('#', '');
     ui.navegar(h || 'dashboard');
   }

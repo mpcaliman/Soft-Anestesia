@@ -5645,7 +5645,8 @@ await test('Enviar salva, fecha a ficha e volta ao Dashboard — mas não fecha 
   const r = await page.evaluate(() => {
     const out = {};
     store.setList('pre', []);
-    auth.usuarioAtual = () => ({ id: 's1', nome: 'Sec', perfil: 'secretaria', role: 'auxiliar' });
+    auth.usuarioAtual = () => ({ id: 's1', nome: 'Sec', perfil: 'secretaria', role: 'auxiliar',
+                                 modulos: ['dashboard','pacientes','pre','anestesia'], soImpressao: [] });
     auth.podeAcessar = () => true;
     const f = document.getElementById('form-pre');
     const setId = v => {
@@ -10624,6 +10625,336 @@ await test('Rascunhos: duas abas apontando para a mesma ficha viram uma', async 
   assert(r.brancasFicam, 'duas fichas novas em branco são legitimamente duas — sem _id não se junta');
   assert(r.tresViramUma, 'três da mesma ficha viram uma');
   assert(r.renderDedupSemLaco, 'desenhar as abas já limpa a duplicata, sem entrar em laço');
+  await page.close();
+});
+
+
+/* 163) O diagnóstico da nuvem existia e só abria dentro de Ajustes — módulo
+   que o perfil auxiliar não tem. A ferramenta que diz POR QUE nada chega
+   estava atrás de uma porta fechada para quem mais precisa dela. */
+await test('Diagnóstico da nuvem alcançável por quem não tem Ajustes', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'a1',
+      usuario: 'secretaria@teste.com', nome: 'Aux', perfil: 'secretaria',
+      modulos: auth.ROLE_PERMS.auxiliar.modulos.slice(), role: 'auxiliar', entrouEm: Date.now() }));
+
+    /* a premissa do defeito: ela realmente não tem Ajustes */
+    out.semAjustes = auth.ROLE_PERMS.auxiliar.modulos.indexOf('ajustes') < 0;
+    /* e o financeiro ela TEM — não era permissão, era falta de diagnóstico */
+    out.temFinanceiro = auth.ROLE_PERMS.auxiliar.modulos.indexOf('financeiro') >= 0;
+
+    out.botaoNoMenu = !!document.getElementById('sidebar-diag-btn');
+
+    cloud.estaConfigurado = () => false;   /* caminho curto, sem rede */
+    cloudDiag.abrirJanela();
+    await new Promise(res => setTimeout(res, 200));
+    out.abriu = /Diagn[óo]stico da nuvem/.test((document.getElementById('modal-title') || {}).textContent || '');
+    const alvo = document.getElementById('clouddiag-janela');
+    out.renderizou = !!alvo && alvo.innerHTML.length > 50;
+    out.dizOEstado = !!alvo && /Sem configura|Não conectado|Offline|Online/.test(alvo.innerHTML);
+    try { modal.close(); } catch (e) {}
+    return out;
+  });
+
+  assert(r.semAjustes, 'o perfil auxiliar não tem o módulo Ajustes — essa é a premissa');
+  assert(r.temFinanceiro, 'mas TEM financeiro: nunca foi permissão, era falta de diagnóstico');
+  assert(r.botaoNoMenu, 'o diagnóstico precisa estar no menu, ao lado do indicador de nuvem');
+  assert(r.abriu, 'e abrir em janela para quem não tem Ajustes');
+  assert(r.renderizou, 'renderizando o mesmo relatório');
+  assert(r.dizOEstado, 'que diz o estado da conexão');
+  await page.close();
+});
+
+/* 164) "Nenhum usuário tem restrição de fábrica: quem decide é o Ajustes."
+   Havia um atalho — perfil 'admin' pode tudo — que passava por cima da grade
+   de acesso: marcar "Sem acesso" para um administrador não tirava nada. E o
+   outro lado do mesmo defeito: dar acesso total a uma auxiliar não a tirava
+   do pré-lançamento, porque quem decidia era o papel, não a grade. */
+await test('O Ajustes decide sozinho — inclusive para tirar de um admin', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const entrar = (s) => sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify(
+      Object.assign({ id: 'a1', usuario: 'x@t', nome: 'X', entrouEm: Date.now() }, s)));
+
+    /* 1) admin com "Financeiro: Sem acesso" perde mesmo o financeiro */
+    entrar({ perfil: 'admin', role: 'gestor',
+             modulos: auth.MODULOS.map(m => m.key).filter(k => k !== 'financeiro'), soImpressao: [] });
+    out.adminPerdeOQueTiraram = auth.podeAcessar('financeiro') === false;
+    out.adminMantemORestante  = auth.podeAcessar('anestesia') === true;
+
+    /* 2) e "Só impressão" vale para o admin também */
+    entrar({ perfil: 'admin', role: 'gestor',
+             modulos: auth.MODULOS.map(m => m.key), soImpressao: ['financeiro'] });
+    out.adminSoImprime = auth.podeAcessar('financeiro') === true && auth.podeEditar('financeiro') === false;
+
+    /* 3) espelho antigo, sem lista nenhuma: não pode ficar trancado do lado de fora */
+    entrar({ perfil: 'admin', role: 'gestor', modulos: [], soImpressao: [] });
+    out.legadoSemListaEntra = auth.podeAcessar('financeiro') === true;
+
+    /* 4) a auxiliar PRÉ-PREENCHE a ficha de anestesia — ter o módulo não a
+       transforma em quem finaliza. Quem prepara e quem confere é o PAPEL. */
+    entrar({ perfil: 'secretaria', role: 'auxiliar',
+             modulos: ['dashboard','pacientes','pre','anestesia','termo'], soImpressao: [] });
+    out.auxComFichaAindaPreLanca = preLanc.ehAuxiliar() === true && preLanc.ehMedico() === false;
+
+    /* 5) e o módulo a mais abre a ficha para ela preencher */
+    out.auxAbreAFicha = auth.podeEditar('anestesia') === true;
+
+    /* 6) "Ajustes" é um módulo escolhível, um por pessoa */
+    out.ajustesNaGrade = auth.MODULOS.some(m => m.key === 'ajustes')
+      && /data-mod="ajustes"/.test(ajustesUsuarios._gradePermissoes(['dashboard'], []));
+
+    /* 7) e o acesso é reconferido na nuvem sem novo login */
+    out.temRevalidacao = typeof auth.revalidarAcesso === 'function';
+    let pediu = false;
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud.buscarPerfil = async () => { pediu = true; return { uid: 'u9', role: 'auxiliar',
+      permissoes: { perfil: 'secretaria', modulos: ['dashboard','financeiro'], soImpressao: [] } }; };
+    entrar({ uid: 'u9', perfil: 'secretaria', role: 'auxiliar', modulos: ['dashboard'], soImpressao: [] });
+    await auth.revalidarAcesso({ silencioso: true });
+    out.consultouANuvem = pediu;
+    out.acessoNovoValeJa = auth.podeAcessar('financeiro') === true;
+
+    /* 8) resposta indisponível (rede) não rebaixa ninguém */
+    cloud.buscarPerfil = async () => null;
+    await auth.revalidarAcesso({ silencioso: true });
+    out.redeRuimNaoTira = auth.podeAcessar('financeiro') === true;
+    return out;
+  });
+
+  assert(r.adminPerdeOQueTiraram, '"Sem acesso" tira mesmo de um administrador');
+  assert(r.adminMantemORestante, 'sem mexer no que continuou marcado');
+  assert(r.adminSoImprime, '"Só impressão" também vale para o administrador');
+  assert(r.legadoSemListaEntra, 'espelho antigo sem lista não fica trancado do lado de fora');
+  assert(r.auxComFichaAindaPreLanca, 'a auxiliar pré-preenche a ficha de anestesia — não vira quem finaliza');
+  assert(r.auxAbreAFicha, 'mas o módulo marcado abre mesmo a ficha para ela preencher');
+  assert(r.ajustesNaGrade, 'o próprio Ajustes é escolhível pessoa a pessoa');
+  assert(r.temRevalidacao, 'o acesso é reconferido na nuvem');
+  assert(r.consultouANuvem, 'consultando o vínculo de quem está logado');
+  assert(r.acessoNovoValeJa, 'e o que o gestor marcou passa a valer sem novo login');
+  assert(r.redeRuimNaoTira, 'mas uma resposta que não veio não tira acesso de ninguém');
+  await page.close();
+});
+
+/* 165) Três coisas do dia a dia que o uso mostrou, e que têm a mesma raiz:
+   estado guardado em dois lugares que discordam. */
+await test('Entrar pede a senha antes de mostrar o app; o menu leva ao Dashboard de qualquer módulo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+
+    /* a) A tela de login nasce na frente. auth.init() é a ÚLTIMA etapa do
+       carregamento — enquanto ela não chegava, o app aparecia pintado antes
+       da senha. O padrão do HTML tem de ser "trancado". */
+    const ov = document.getElementById('auth-overlay');
+    out.overlayExiste = !!ov;
+    out.semDisplayNoneNoHTML = !!ov && !/display\s*:\s*none/.test(ov.getAttribute('style') || '');
+    /* o formulário vem pronto no HTML (auth._render troca os campos conforme
+       seja primeiro cadastro ou entrada normal — por isso não fixamos ids) */
+    out.temFormularioPronto = !!document.getElementById('auth-form')
+      && !!ov.querySelector('input[type="password"]');
+    out.estaVisivel = !!ov && getComputedStyle(ov).display !== 'none';
+    /* e desbloquear continua sendo o que a tira da frente */
+    auth._desbloquear();
+    out.desbloquearEsconde = ov.style.display === 'none';
+
+    /* b) O bloqueio de tela é do APARELHO. Enquanto viajava entre aparelhos,
+       um desfazia a escolha do outro: quem marcava "1x por dia" via a senha
+       voltar de 5 em 5 minutos. */
+    out.naoViajaEntreAparelhos = configSync.CHAVES.indexOf('medsys.v7.auth.timeout_min') < 0;
+    auth.definirTimeout(-1);
+    out.diarioLiga = auth._modoDiario() === true;
+    out.diarioNaoTemRelogio = auth._timeoutMs() === 0;   /* nada de bloqueio por inatividade */
+    auth.definirTimeout(5);
+    out.cincoMinVolta = auth._timeoutMs() === 5 * 60 * 1000;
+    auth.definirTimeout(-1);
+
+    /* c) Navegar por dentro (fila, histórico, paciente) deixava o endereço
+       para trás. Depois disso, clicar em Dashboard no menu não fazia nada:
+       atribuir ao hash o MESMO valor não dispara evento, e a navegação toda
+       depende do evento. */
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t',
+      nome: 'Dr', perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [],
+      role: 'gestor', entrouEm: Date.now() }));
+    location.hash = '#dashboard';
+    await new Promise(res => setTimeout(res, 120));
+
+    ui.navegar('pre');                     /* o atalho de sempre: chamada direta */
+    out.foiParaAPre = state.currentModule === 'pre';
+    out.enderecoAcompanhou = location.hash === '#pre';   /* é isto que faltava */
+
+    /* e o clique no menu volta para o Dashboard, de primeira */
+    const item = document.querySelector('#sidebar-nav .nav-item[data-module="dashboard"]');
+    out.temItemNoMenu = !!item;
+    if (item) item.click();
+    await new Promise(res => setTimeout(res, 200));
+    out.voltouAoDashboard = state.currentModule === 'dashboard';
+
+    /* mesmo partindo da ficha de anestesia, e mesmo se o endereço já estiver
+       igual ao destino (o menu não pode depender de sorte) */
+    ui.navegar('anestesia');
+    out.enderecoNaFicha = location.hash === '#anestesia';
+    history.replaceState(null, '', location.pathname + '#dashboard');  /* endereço mente */
+    const item2 = document.querySelector('#sidebar-nav .nav-item[data-module="dashboard"]');
+    if (item2) item2.click();
+    await new Promise(res => setTimeout(res, 200));
+    out.voltouMesmoComHashIgual = state.currentModule === 'dashboard';
+    return out;
+  });
+
+  assert(r.overlayExiste && r.temFormularioPronto, 'a tela de login existe pronta no HTML');
+  assert(r.semDisplayNoneNoHTML && r.estaVisivel, 'e nasce visível — o app não pode aparecer antes da senha');
+  assert(r.desbloquearEsconde, 'quem tem sessão válida passa direto');
+  assert(r.naoViajaEntreAparelhos, 'o bloqueio de tela não viaja entre aparelhos');
+  assert(r.diarioLiga && r.diarioNaoTemRelogio, '"1x por dia" desliga o bloqueio por inatividade');
+  assert(r.cincoMinVolta, 'e escolher 5 minutos volta a valer');
+  assert(r.foiParaAPre && r.enderecoAcompanhou, 'navegar por dentro leva o endereço junto');
+  assert(r.temItemNoMenu && r.voltouAoDashboard, 'do módulo de pré, o menu leva ao Dashboard de primeira');
+  assert(r.enderecoNaFicha, 'o mesmo vale para a ficha de anestesia');
+  assert(r.voltouMesmoComHashIgual, 'e o menu funciona mesmo se o endereço já apontar para o destino');
+  await page.close();
+});
+
+/* 166) Orçamento: a avaliação pré-anestésica entra ou não entra, e o texto
+   tem de dizer a verdade. Prometer "incluindo avaliação" num orçamento que
+   não a cobre é o paciente cobrando depois. */
+await test('Orçamento: incluir ou não a avaliação pré-anestésica muda o texto e fica gravado', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor', entrouEm: Date.now() }));
+    auth._desbloquear();
+    ui.navegar('orcamento');
+    await new Promise(res => setTimeout(res, 300));
+
+    const chk = document.getElementById('orc-inclui-pre');
+    const ta = document.getElementById('orc-observacoes');
+    out.temCaixa = !!chk && !!ta;
+    if (!out.temCaixa) return out;
+
+    orcamento.novo();
+    out.nasceMarcado = chk.checked === true;
+    out.textoInclui = /incluindo avalia/i.test(ta.value);
+
+    /* desmarcar troca o texto: some a promessa, entra o aviso */
+    chk.checked = false; orcamento.aoMudarIncluiPre(false);
+    out.semPromessa = !/incluindo avalia/i.test(ta.value);
+    out.dizQueEhAParte = /n[ãa]o est[áa] inclu[íi]da/i.test(ta.value) && /parte/i.test(ta.value);
+
+    /* e voltar desfaz */
+    chk.checked = true; orcamento.aoMudarIncluiPre(true);
+    out.voltaAoInclui = /incluindo avalia/i.test(ta.value);
+
+    /* texto escrito à mão NÃO pode ser apagado pela caixa */
+    ta.value = 'Combinado direto com o paciente: R$ 0 na primeira consulta.';
+    chk.checked = false; orcamento.aoMudarIncluiPre(false);
+    out.respeitaTextoDoMedico = ta.value.indexOf('Combinado direto') >= 0;
+
+    /* a escolha viaja com o orçamento */
+    orcamento.novo();
+    const f = document.getElementById('form-orcamento');
+    f.querySelector('[name="paciente"]').value = 'Luciana Teste';
+    const tr = document.querySelector('#orcamento-body tr');
+    if (tr) { tr.querySelector('[name="orc_desc[]"]').value = 'Colecistectomia'; }
+    document.getElementById('orc-inclui-pre').checked = false;
+    orcamento.aoMudarIncluiPre(false);
+    orcamento.salvar();
+    const lista = store.list('orcamento');
+    const salvo = lista[lista.length - 1];
+    out.gravouAEscolha = salvo && salvo.inclui_pre === false;
+    out.gravouOTexto = !!salvo && /n[ãa]o est[áa] inclu[íi]da/i.test(salvo.observacoes || '');
+
+    /* reabrir mostra a mesma proposta que o paciente recebeu */
+    orcamento.novo();
+    orcamento.editar(salvo._id);
+    out.reabreDesmarcado = document.getElementById('orc-inclui-pre').checked === false;
+
+    /* orçamento antigo, gravado antes da opção, vale como "inclui" */
+    const antigo = store.save('orcamento', { paciente: 'Antigo', data: '2026-01-10',
+      procedimentos: [{ codigo: '', descricao: 'X', qtd: 1 }], observacoes: 'texto antigo' });
+    orcamento.novo();
+    orcamento.editar(antigo._id);
+    out.antigoContaComoInclui = document.getElementById('orc-inclui-pre').checked === true;
+
+    store.setList('orcamento', []);
+    return out;
+  });
+
+  assert(r.temCaixa, 'a opção precisa existir no formulário do orçamento');
+  assert(r.nasceMarcado && r.textoInclui, 'orçamento novo nasce com a avaliação incluída, como sempre foi');
+  assert(r.semPromessa, 'desmarcando, o texto para de prometer a avaliação');
+  assert(r.dizQueEhAParte, 'e diz que ela é cobrada à parte');
+  assert(r.voltaAoInclui, 'marcar de novo devolve o texto de sempre');
+  assert(r.respeitaTextoDoMedico, 'texto escrito à mão não pode ser apagado pela caixa');
+  assert(r.gravouAEscolha && r.gravouOTexto, 'a escolha e o texto ficam gravados no orçamento');
+  assert(r.reabreDesmarcado, 'reabrir mostra a mesma proposta que o paciente recebeu');
+  assert(r.antigoContaComoInclui, 'orçamento antigo, sem o campo, vale como "inclui" — é o que o texto dele dizia');
+  await page.close();
+});
+
+/* 167) Impressão em branco no celular. O pop-up é bloqueado por padrão no
+   navegador do telefone, e a alternativa era um iframe escondido com
+   visibility:hidden a -10000px — o Safari do iPhone não rasteriza o que não
+   está renderizado, e a folha saía vazia. */
+await test('Impressão pelo celular sai com conteúdo, não em branco', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor', entrouEm: Date.now() }));
+    auth._desbloquear();
+    ui.navegar('recuperacao');
+    await new Promise(res => setTimeout(res, 300));
+
+    const f = document.getElementById('form-recuperacao');
+    const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el) el.value = v; };
+    set('nome', 'Maria Teste'); set('data', '2026-09-02');
+    set('entrada', '10:30'); set('alta', '11:45');
+    set('procedimento', 'Colecistectomia'); set('observacoes', 'Sem intercorrências.');
+
+    printPreview.abrir();
+    await new Promise(res => setTimeout(res, 400));
+    const ppp = document.getElementById('ppp');
+    out.previewTemConteudo = !!ppp && ppp.innerHTML.indexOf('Maria Teste') >= 0
+      && ppp.innerHTML.indexOf('Colecistectomia') >= 0;
+
+    /* pop-up bloqueado, como no celular */
+    const origOpen = window.open, origPrint = window.print;
+    window.open = () => null;
+    let imprimiu = 0, classeNaHora = false;
+    window.print = () => { imprimiu++; classeNaHora = document.body.classList.contains('printing-preview'); };
+    printPreview.imprimir();
+    await new Promise(res => setTimeout(res, 400));
+    window.open = origOpen; window.print = origPrint;
+
+    out.chamouImprimir = imprimiu === 1;
+    /* é ESTA classe que esconde o app e deixa o papel — sem ela, folha vazia */
+    out.ligouAFolhaDeEstilo = classeNaHora;
+    /* e o papel continua na página, com o conteúdo, na hora de imprimir */
+    out.papelSegueNaPagina = !!document.getElementById('ppp')
+      && document.getElementById('ppp').innerHTML.indexOf('Maria Teste') >= 0;
+
+    /* terminada a impressão, a tela volta ao normal */
+    window.dispatchEvent(new Event('afterprint'));
+    out.limpouDepois = !document.body.classList.contains('printing-preview');
+
+    /* e nada de iframe escondido, que era a origem da folha em branco */
+    const ifr = document.getElementById('print-iframe');
+    out.semIframeEscondido = !ifr;
+    return out;
+  });
+
+  assert(r.previewTemConteudo, 'a visualização da SRPA traz o que foi preenchido');
+  assert(r.chamouImprimir, 'com o pop-up bloqueado, ainda assim abre a impressão');
+  assert(r.ligouAFolhaDeEstilo, 'ligando o estilo que esconde o app e deixa só o papel');
+  assert(r.papelSegueNaPagina, 'e o papel com o conteúdo é o que vai para a impressora');
+  assert(r.limpouDepois, 'terminada a impressão, a tela volta ao normal');
+  assert(r.semIframeEscondido, 'sem iframe escondido — era ele que saía em branco no iPhone');
   await page.close();
 });
 
