@@ -10819,6 +10819,145 @@ await test('Entrar pede a senha antes de mostrar o app; o menu leva ao Dashboard
   await page.close();
 });
 
+/* 166) Orçamento: a avaliação pré-anestésica entra ou não entra, e o texto
+   tem de dizer a verdade. Prometer "incluindo avaliação" num orçamento que
+   não a cobre é o paciente cobrando depois. */
+await test('Orçamento: incluir ou não a avaliação pré-anestésica muda o texto e fica gravado', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor', entrouEm: Date.now() }));
+    auth._desbloquear();
+    ui.navegar('orcamento');
+    await new Promise(res => setTimeout(res, 300));
+
+    const chk = document.getElementById('orc-inclui-pre');
+    const ta = document.getElementById('orc-observacoes');
+    out.temCaixa = !!chk && !!ta;
+    if (!out.temCaixa) return out;
+
+    orcamento.novo();
+    out.nasceMarcado = chk.checked === true;
+    out.textoInclui = /incluindo avalia/i.test(ta.value);
+
+    /* desmarcar troca o texto: some a promessa, entra o aviso */
+    chk.checked = false; orcamento.aoMudarIncluiPre(false);
+    out.semPromessa = !/incluindo avalia/i.test(ta.value);
+    out.dizQueEhAParte = /n[ãa]o est[áa] inclu[íi]da/i.test(ta.value) && /parte/i.test(ta.value);
+
+    /* e voltar desfaz */
+    chk.checked = true; orcamento.aoMudarIncluiPre(true);
+    out.voltaAoInclui = /incluindo avalia/i.test(ta.value);
+
+    /* texto escrito à mão NÃO pode ser apagado pela caixa */
+    ta.value = 'Combinado direto com o paciente: R$ 0 na primeira consulta.';
+    chk.checked = false; orcamento.aoMudarIncluiPre(false);
+    out.respeitaTextoDoMedico = ta.value.indexOf('Combinado direto') >= 0;
+
+    /* a escolha viaja com o orçamento */
+    orcamento.novo();
+    const f = document.getElementById('form-orcamento');
+    f.querySelector('[name="paciente"]').value = 'Luciana Teste';
+    const tr = document.querySelector('#orcamento-body tr');
+    if (tr) { tr.querySelector('[name="orc_desc[]"]').value = 'Colecistectomia'; }
+    document.getElementById('orc-inclui-pre').checked = false;
+    orcamento.aoMudarIncluiPre(false);
+    orcamento.salvar();
+    const lista = store.list('orcamento');
+    const salvo = lista[lista.length - 1];
+    out.gravouAEscolha = salvo && salvo.inclui_pre === false;
+    out.gravouOTexto = !!salvo && /n[ãa]o est[áa] inclu[íi]da/i.test(salvo.observacoes || '');
+
+    /* reabrir mostra a mesma proposta que o paciente recebeu */
+    orcamento.novo();
+    orcamento.editar(salvo._id);
+    out.reabreDesmarcado = document.getElementById('orc-inclui-pre').checked === false;
+
+    /* orçamento antigo, gravado antes da opção, vale como "inclui" */
+    const antigo = store.save('orcamento', { paciente: 'Antigo', data: '2026-01-10',
+      procedimentos: [{ codigo: '', descricao: 'X', qtd: 1 }], observacoes: 'texto antigo' });
+    orcamento.novo();
+    orcamento.editar(antigo._id);
+    out.antigoContaComoInclui = document.getElementById('orc-inclui-pre').checked === true;
+
+    store.setList('orcamento', []);
+    return out;
+  });
+
+  assert(r.temCaixa, 'a opção precisa existir no formulário do orçamento');
+  assert(r.nasceMarcado && r.textoInclui, 'orçamento novo nasce com a avaliação incluída, como sempre foi');
+  assert(r.semPromessa, 'desmarcando, o texto para de prometer a avaliação');
+  assert(r.dizQueEhAParte, 'e diz que ela é cobrada à parte');
+  assert(r.voltaAoInclui, 'marcar de novo devolve o texto de sempre');
+  assert(r.respeitaTextoDoMedico, 'texto escrito à mão não pode ser apagado pela caixa');
+  assert(r.gravouAEscolha && r.gravouOTexto, 'a escolha e o texto ficam gravados no orçamento');
+  assert(r.reabreDesmarcado, 'reabrir mostra a mesma proposta que o paciente recebeu');
+  assert(r.antigoContaComoInclui, 'orçamento antigo, sem o campo, vale como "inclui" — é o que o texto dele dizia');
+  await page.close();
+});
+
+/* 167) Impressão em branco no celular. O pop-up é bloqueado por padrão no
+   navegador do telefone, e a alternativa era um iframe escondido com
+   visibility:hidden a -10000px — o Safari do iPhone não rasteriza o que não
+   está renderizado, e a folha saía vazia. */
+await test('Impressão pelo celular sai com conteúdo, não em branco', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor', entrouEm: Date.now() }));
+    auth._desbloquear();
+    ui.navegar('recuperacao');
+    await new Promise(res => setTimeout(res, 300));
+
+    const f = document.getElementById('form-recuperacao');
+    const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el) el.value = v; };
+    set('nome', 'Maria Teste'); set('data', '2026-09-02');
+    set('entrada', '10:30'); set('alta', '11:45');
+    set('procedimento', 'Colecistectomia'); set('observacoes', 'Sem intercorrências.');
+
+    printPreview.abrir();
+    await new Promise(res => setTimeout(res, 400));
+    const ppp = document.getElementById('ppp');
+    out.previewTemConteudo = !!ppp && ppp.innerHTML.indexOf('Maria Teste') >= 0
+      && ppp.innerHTML.indexOf('Colecistectomia') >= 0;
+
+    /* pop-up bloqueado, como no celular */
+    const origOpen = window.open, origPrint = window.print;
+    window.open = () => null;
+    let imprimiu = 0, classeNaHora = false;
+    window.print = () => { imprimiu++; classeNaHora = document.body.classList.contains('printing-preview'); };
+    printPreview.imprimir();
+    await new Promise(res => setTimeout(res, 400));
+    window.open = origOpen; window.print = origPrint;
+
+    out.chamouImprimir = imprimiu === 1;
+    /* é ESTA classe que esconde o app e deixa o papel — sem ela, folha vazia */
+    out.ligouAFolhaDeEstilo = classeNaHora;
+    /* e o papel continua na página, com o conteúdo, na hora de imprimir */
+    out.papelSegueNaPagina = !!document.getElementById('ppp')
+      && document.getElementById('ppp').innerHTML.indexOf('Maria Teste') >= 0;
+
+    /* terminada a impressão, a tela volta ao normal */
+    window.dispatchEvent(new Event('afterprint'));
+    out.limpouDepois = !document.body.classList.contains('printing-preview');
+
+    /* e nada de iframe escondido, que era a origem da folha em branco */
+    const ifr = document.getElementById('print-iframe');
+    out.semIframeEscondido = !ifr;
+    return out;
+  });
+
+  assert(r.previewTemConteudo, 'a visualização da SRPA traz o que foi preenchido');
+  assert(r.chamouImprimir, 'com o pop-up bloqueado, ainda assim abre a impressão');
+  assert(r.ligouAFolhaDeEstilo, 'ligando o estilo que esconde o app e deixa só o papel');
+  assert(r.papelSegueNaPagina, 'e o papel com o conteúdo é o que vai para a impressora');
+  assert(r.limpouDepois, 'terminada a impressão, a tela volta ao normal');
+  assert(r.semIframeEscondido, 'sem iframe escondido — era ele que saía em branco no iPhone');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

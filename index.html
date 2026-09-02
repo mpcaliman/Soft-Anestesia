@@ -4523,7 +4523,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-28a</b><br>
+    v7.1 · build <b id="build-tag">2026-08-28b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -8547,6 +8547,15 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             </div>
             <div class="field col-6"><label>Detalhe do pagamento <small style="color:var(--text-mute);font-weight:400">(aparece no PDF)</small></label>
               <input type="text" name="pagamento_detalhe" id="orc-pgto-detalhe" placeholder="Ex.: PIX (email@ex.com) ou espécie. Até o dia anterior ao procedimento.">
+            </div>
+            <div class="field col-12">
+              <label style="display:flex;align-items:center;gap:8px;font-weight:600">
+                <input type="checkbox" name="inclui_pre" id="orc-inclui-pre" checked
+                       onchange="window.orcamento.aoMudarIncluiPre(this.checked)"
+                       style="width:auto;margin:0">
+                Inclui a consulta de avaliação pré-anestésica
+              </label>
+              <small style="color:var(--text-mute)">Desmarque quando a avaliação for cobrada à parte — o texto abaixo se ajusta sozinho.</small>
             </div>
             <div class="field col-12"><label>Observações / regras <small style="color:var(--text-mute);font-weight:400">(texto livre, editável — aparece no PDF)</small></label>
               <textarea name="observacoes" id="orc-observacoes" rows="5"></textarea>
@@ -41702,54 +41711,29 @@ ${TAG_CLOSE_HTML}`;
         return;
       }
 
-      /* Fallback: iframe oculto (caso o pop-up tenha sido bloqueado) */
-      let iframe = document.getElementById('print-iframe');
-      if (iframe) iframe.remove();
-      iframe = document.createElement('iframe');
-      iframe.id = 'print-iframe';
-      iframe.style.cssText = 'position:fixed;top:-10000px;left:-10000px;width:800px;height:1100px;border:0;visibility:hidden';
-      document.body.appendChild(iframe);
-
-      const idoc = iframe.contentDocument || iframe.contentWindow.document;
-      idoc.open();
-      idoc.write(fullHTML);
-      idoc.close();
-
-      /* Aguarda imagens (logo + carimbo + gráfico) carregarem */
-      const dispararPrint = () => {
-        try {
-          /* Define o title do iframe para o nome do arquivo aparecer no diálogo */
-          if (idoc.title !== titulo) idoc.title = titulo;
-          iframe.contentWindow.focus();
-          iframe.contentWindow.print();
-        } catch (err) {
-          /* Fallback: imprime a janela atual */
-          console.warn('Print do iframe falhou, usando window.print:', err);
-          window.print();
-        }
+      /* Pop-up bloqueado — que é o PADRÃO no navegador do celular.
+         Antes daqui saía um iframe escondido com visibility:hidden a
+         -10000px. O Safari do iPhone não rasteriza o que não está
+         renderizado: o diálogo abria e a folha saía EM BRANCO. Não era do
+         módulo — era de qualquer impressão feita pelo celular.
+         Agora imprime-se a PRÓPRIA página. A folha de estilo
+         `body.printing-preview` já existia para exatamente isto (esconde o
+         app e deixa só o papel da visualização) e nunca chegou a ser ligada:
+         só havia a linha que a removia. */
+      const corpo = document.body;
+      const tituloOriginal = document.title;
+      const limparImpressao = () => {
+        corpo.classList.remove('printing-preview');
+        document.title = tituloOriginal;
+        window.removeEventListener('afterprint', limparImpressao);
       };
-      const imgs = idoc.querySelectorAll('img');
-      if (imgs.length === 0) {
-        setTimeout(dispararPrint, 200);
-      } else {
-        let loaded = 0, done = false;
-        const checkAll = () => {
-          if (done) return;
-          if (loaded >= imgs.length) {
-            done = true;
-            setTimeout(dispararPrint, 150);
-          }
-        };
-        imgs.forEach(img => {
-          if (img.complete && img.naturalHeight > 0) { loaded++; checkAll(); }
-          else {
-            img.addEventListener('load', () => { loaded++; checkAll(); });
-            img.addEventListener('error', () => { loaded++; checkAll(); });
-          }
-        });
-        /* Timeout máximo: se imagens demoram >3s, dispara mesmo assim */
-        setTimeout(() => { if (!done) { done = true; dispararPrint(); } }, 3000);
-      }
+      corpo.classList.add('printing-preview');
+      document.title = titulo;          /* vira o nome sugerido do PDF */
+      window.addEventListener('afterprint', limparImpressao);
+      /* afterprint não existe em todo navegador: rede de segurança */
+      setTimeout(limparImpressao, 60000);
+      /* um quadro para o navegador aplicar o estilo antes de abrir o diálogo */
+      setTimeout(() => { try { window.print(); } catch (err) { limparImpressao(); toast('Não consegui abrir a impressão: ' + (err.message || ''), 'error'); } }, 150);
 
       toast('Diálogo de impressão sendo aberto — escolha "Salvar como PDF" para gerar arquivo.', 'success');
     } catch (e) {
@@ -46579,7 +46563,11 @@ const ORC_CFG_PADRAO = {
   },
   tabelaAtiva: 'unimed',
   pagamentoPadrao: 'PIX (mpcaliman@hotmail.com) ou espécie. Preferencialmente realizado até o dia anterior ao procedimento.',
+  /* Dois textos, porque são duas propostas diferentes. Dizer "incluindo
+     avaliação" num orçamento que NÃO cobre a consulta pré-anestésica é
+     prometer o que não foi cobrado — e é o paciente quem cobra depois. */
   obsPadrao: 'O valor informado refere-se à assistência anestesiológica relacionada ao procedimento descrito, incluindo avaliação, planejamento e acompanhamento anestésico intra-operatório, conforme necessidade clínica do paciente e características do ato cirúrgico.',
+  obsSemPre: 'O valor informado refere-se à assistência anestesiológica relacionada ao procedimento descrito, incluindo planejamento e acompanhamento anestésico intra-operatório, conforme necessidade clínica do paciente e características do ato cirúrgico. A consulta de avaliação pré-anestésica não está incluída neste valor e é cobrada à parte.',
   regra: { mesma: 0.5, diferente: 0.7 }
 };
 
@@ -47644,7 +47632,10 @@ const orcamento = {
     orcamento.setTipoPorte(orcamento._tipoPorte);
     orcamento._preencherSelectTabela();
     const cfg = orcamento.cfg();
-    document.getElementById('orc-observacoes').value = cfg.obsPadrao || '';
+    /* f.reset() já devolve a caixa ao padrão do HTML (marcada). O texto sai
+       daí, não do contrário — senão um "sem avaliação" do orçamento anterior
+       ficaria valendo no seguinte. */
+    document.getElementById('orc-observacoes').value = orcamento._obsDe(orcamento._incluiPre());
     document.getElementById('orc-pgto-detalhe').value = cfg.pagamentoPadrao || '';
     orcamento.addProc();
     orcamento.recalcular();
@@ -47841,8 +47832,34 @@ const orcamento = {
     else det.value = v;
   },
 
+  /* O texto que corresponde à caixa "inclui a avaliação". */
+  _obsDe(incluiPre) {
+    const cfg = orcamento.cfg();
+    return (incluiPre === false ? (cfg.obsSemPre || ORC_CFG_PADRAO.obsSemPre)
+                                : (cfg.obsPadrao || ORC_CFG_PADRAO.obsPadrao)) || '';
+  },
+  _incluiPre() {
+    const el = document.getElementById('orc-inclui-pre');
+    return el ? !!el.checked : true;
+  },
+  /* Só troca o texto quando ele ainda é um dos DOIS padrões (ou está vazio).
+     Se o médico escreveu o dele, marcar a caixa não pode apagar o que ele
+     escreveu — avisa e deixa a decisão com quem escreveu. */
+  aoMudarIncluiPre(inclui) {
+    const ta = document.getElementById('orc-observacoes');
+    if (!ta) return;
+    const atual = (ta.value || '').trim();
+    const padroes = [orcamento._obsDe(true).trim(), orcamento._obsDe(false).trim()];
+    if (!atual || padroes.indexOf(atual) >= 0) {
+      ta.value = orcamento._obsDe(inclui);
+      try { markDirty(); } catch (e) {}
+      return;
+    }
+    toast('O texto das observações foi editado à mão — não mexi nele. Use "↺ Restaurar texto padrão" para trocar.', 'warn');
+  },
   restaurarObs() {
-    document.getElementById('orc-observacoes').value = orcamento.cfg().obsPadrao || '';
+    document.getElementById('orc-observacoes').value = orcamento._obsDe(orcamento._incluiPre());
+    try { markDirty(); } catch (e) {}
   },
 
   /* ===== MODELOS DE ORÇAMENTO — procedimentos frequentes prontos em 30s ===== */
@@ -48006,6 +48023,9 @@ const orcamento = {
       perc_urgencia: g('orc_perc_urgencia') || '30',
       procedimentos: procs, total_ref: g('total_ref'), total_paciente: g('total_paciente'),
       pagamento_tipo: g('pagamento_tipo'), pagamento_detalhe: g('pagamento_detalhe'),
+      /* fica gravado: reabrir um orçamento antigo tem de mostrar a mesma
+         proposta que o paciente recebeu */
+      inclui_pre: orcamento._incluiPre(),
       observacoes: g('observacoes')
     };
   },
@@ -48045,6 +48065,10 @@ const orcamento = {
     const urgEl = f.querySelector('[name="orc_urgencia"]'); if (urgEl) urgEl.checked = !!item.urgencia;
     set('orc_perc_urgencia', item.perc_urgencia || '30');
     set('pagamento_tipo', item.pagamento_tipo); set('pagamento_detalhe', item.pagamento_detalhe);
+    /* orçamentos gravados antes desta opção não têm o campo: valem como
+       "inclui", que é o que o texto deles dizia */
+    const chkPre = document.getElementById('orc-inclui-pre');
+    if (chkPre) chkPre.checked = (item.inclui_pre !== false);
     set('observacoes', item.observacoes);
     document.getElementById('orcamento-body').innerHTML = '';
     (item.procedimentos || []).forEach(p => {
