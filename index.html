@@ -4444,7 +4444,11 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
 <!-- ===========================================================================
      TELA DE LOGIN / BLOQUEIO (segurança de acesso)
 =========================================================================== -->
-<div id="auth-overlay" class="auth-overlay" style="display:none">
+<!-- Nasce VISÍVEL de propósito. auth.init() é a última etapa do carregamento,
+     e enquanto ela não chegava o app inteiro aparecia pintado na tela antes
+     da senha. Quem já tem sessão válida não perde nada: _desbloquear() some
+     com isto no mesmo instante. -->
+<div id="auth-overlay" class="auth-overlay">
   <div class="auth-box">
     <div class="auth-logo"><img id="auth-logo-img" alt="" style="width:64px;height:64px;object-fit:contain"></div>
     <h1 class="auth-title">Soft Anestesia</h1>
@@ -4519,7 +4523,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-27d</b><br>
+    v7.1 · build <b id="build-tag">2026-08-28a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -13417,6 +13421,7 @@ const ui = {
     });
   },
   /* Navegação entre módulos */
+  _navegando: false,
   navegar(modName) {
     try {
       if (!modName) modName = 'dashboard';
@@ -13441,6 +13446,27 @@ const ui = {
       }
       document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.module === modName));
       state.currentModule = modName;
+
+      /* O endereço (#hash) é o que a barra inferior, a faixa do paciente e o
+         painel leem para saber onde estamos. Muitos atalhos chamam navegar()
+         direto — abrir uma ficha da fila, do histórico, de um paciente — e o
+         endereço ficava para trás. Aí clicar em "Dashboard" no menu não fazia
+         nada: atribuir ao hash o MESMO valor que ele já tem não dispara evento
+         nenhum, e a navegação inteira depende desse evento. Era isto que
+         prendia quem estava na pré ou na ficha; ir a outro módulo antes
+         "funcionava" só porque mexia no endereço.
+         replaceState não empilha histórico; o hashchange sintético mantém as
+         partes cosméticas em dia, e a trava evita a volta por cima. */
+      try {
+        const alvoHash = '#' + modName;
+        if (location.hash !== alvoHash && !/validar/i.test(location.hash || '')) {
+          ui._navegando = true;
+          history.replaceState(null, '', location.pathname + location.search + alvoHash);
+          let ev; try { ev = new HashChangeEvent('hashchange'); } catch (e2) { ev = new Event('hashchange'); }
+          window.dispatchEvent(ev);
+          ui._navegando = false;
+        }
+      } catch (e) { ui._navegando = false; }
 
       /* PERMISSÃO: se o grupo só pode imprimir este módulo, entra em modo leitura */
       try { if (typeof auth !== 'undefined' && auth._aplicarLeitura) auth._aplicarLeitura(modName); } catch (e) {}
@@ -20556,9 +20582,14 @@ const configSync = {
     'medsys.v7.pdfbackup.cfg',
     'medsys.v7.theme',
     'medsys.v7.grafico_modo',
-    'medsys.v7.auth.timeout_min',
     'medsys.v7.realtime.on'
   ],
+  /* medsys.v7.auth.timeout_min NÃO entra aqui, e é de propósito.
+     O bloqueio de tela é do APARELHO, não da conta: o celular de uso pessoal
+     quer "1x por dia", o computador da secretaria quer 5 minutos. Enquanto
+     esta chave viajava junto, um aparelho desfazia a escolha do outro — quem
+     marcava "1x por dia" via a senha voltar a ser pedida de 5 em 5 minutos,
+     sem ter mexido em nada. */
   META_KEY: 'medsys.v7.configsync.meta',
   _meta() { try { return JSON.parse(localStorage.getItem(configSync.META_KEY) || '{}'); } catch (e) { return {}; } },
   _salvarMeta(m) { try { localStorage.setItem(configSync.META_KEY, JSON.stringify(m)); } catch (e) {} },
@@ -49083,12 +49114,17 @@ document.addEventListener('DOMContentLoaded', () => {
     item.addEventListener('click', (e) => {
       e.preventDefault();
       const mod = item.dataset.module;
-      window.location.hash = mod;
+      /* Se o endereço já aponta para cá, atribuí-lo de novo não dispara nada:
+         navega direto. (Com a sincronia acima isto é raro, mas o menu não
+         pode depender de sorte.) */
+      if (('#' + mod) === window.location.hash) ui.navegar(mod);
+      else window.location.hash = mod;
     });
   });
 
   /* 2. Hashchange para navegação */
   function navegarPorHash() {
+    if (ui._navegando) return;   /* foi a própria navegar() que ajustou o endereço */
     const h = (window.location.hash || '#dashboard').replace('#', '');
     ui.navegar(h || 'dashboard');
   }

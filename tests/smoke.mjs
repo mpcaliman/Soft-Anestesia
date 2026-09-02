@@ -10740,6 +10740,85 @@ await test('O Ajustes decide sozinho — inclusive para tirar de um admin', asyn
   await page.close();
 });
 
+/* 165) Três coisas do dia a dia que o uso mostrou, e que têm a mesma raiz:
+   estado guardado em dois lugares que discordam. */
+await test('Entrar pede a senha antes de mostrar o app; o menu leva ao Dashboard de qualquer módulo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+
+    /* a) A tela de login nasce na frente. auth.init() é a ÚLTIMA etapa do
+       carregamento — enquanto ela não chegava, o app aparecia pintado antes
+       da senha. O padrão do HTML tem de ser "trancado". */
+    const ov = document.getElementById('auth-overlay');
+    out.overlayExiste = !!ov;
+    out.semDisplayNoneNoHTML = !!ov && !/display\s*:\s*none/.test(ov.getAttribute('style') || '');
+    /* o formulário vem pronto no HTML (auth._render troca os campos conforme
+       seja primeiro cadastro ou entrada normal — por isso não fixamos ids) */
+    out.temFormularioPronto = !!document.getElementById('auth-form')
+      && !!ov.querySelector('input[type="password"]');
+    out.estaVisivel = !!ov && getComputedStyle(ov).display !== 'none';
+    /* e desbloquear continua sendo o que a tira da frente */
+    auth._desbloquear();
+    out.desbloquearEsconde = ov.style.display === 'none';
+
+    /* b) O bloqueio de tela é do APARELHO. Enquanto viajava entre aparelhos,
+       um desfazia a escolha do outro: quem marcava "1x por dia" via a senha
+       voltar de 5 em 5 minutos. */
+    out.naoViajaEntreAparelhos = configSync.CHAVES.indexOf('medsys.v7.auth.timeout_min') < 0;
+    auth.definirTimeout(-1);
+    out.diarioLiga = auth._modoDiario() === true;
+    out.diarioNaoTemRelogio = auth._timeoutMs() === 0;   /* nada de bloqueio por inatividade */
+    auth.definirTimeout(5);
+    out.cincoMinVolta = auth._timeoutMs() === 5 * 60 * 1000;
+    auth.definirTimeout(-1);
+
+    /* c) Navegar por dentro (fila, histórico, paciente) deixava o endereço
+       para trás. Depois disso, clicar em Dashboard no menu não fazia nada:
+       atribuir ao hash o MESMO valor não dispara evento, e a navegação toda
+       depende do evento. */
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t',
+      nome: 'Dr', perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [],
+      role: 'gestor', entrouEm: Date.now() }));
+    location.hash = '#dashboard';
+    await new Promise(res => setTimeout(res, 120));
+
+    ui.navegar('pre');                     /* o atalho de sempre: chamada direta */
+    out.foiParaAPre = state.currentModule === 'pre';
+    out.enderecoAcompanhou = location.hash === '#pre';   /* é isto que faltava */
+
+    /* e o clique no menu volta para o Dashboard, de primeira */
+    const item = document.querySelector('#sidebar-nav .nav-item[data-module="dashboard"]');
+    out.temItemNoMenu = !!item;
+    if (item) item.click();
+    await new Promise(res => setTimeout(res, 200));
+    out.voltouAoDashboard = state.currentModule === 'dashboard';
+
+    /* mesmo partindo da ficha de anestesia, e mesmo se o endereço já estiver
+       igual ao destino (o menu não pode depender de sorte) */
+    ui.navegar('anestesia');
+    out.enderecoNaFicha = location.hash === '#anestesia';
+    history.replaceState(null, '', location.pathname + '#dashboard');  /* endereço mente */
+    const item2 = document.querySelector('#sidebar-nav .nav-item[data-module="dashboard"]');
+    if (item2) item2.click();
+    await new Promise(res => setTimeout(res, 200));
+    out.voltouMesmoComHashIgual = state.currentModule === 'dashboard';
+    return out;
+  });
+
+  assert(r.overlayExiste && r.temFormularioPronto, 'a tela de login existe pronta no HTML');
+  assert(r.semDisplayNoneNoHTML && r.estaVisivel, 'e nasce visível — o app não pode aparecer antes da senha');
+  assert(r.desbloquearEsconde, 'quem tem sessão válida passa direto');
+  assert(r.naoViajaEntreAparelhos, 'o bloqueio de tela não viaja entre aparelhos');
+  assert(r.diarioLiga && r.diarioNaoTemRelogio, '"1x por dia" desliga o bloqueio por inatividade');
+  assert(r.cincoMinVolta, 'e escolher 5 minutos volta a valer');
+  assert(r.foiParaAPre && r.enderecoAcompanhou, 'navegar por dentro leva o endereço junto');
+  assert(r.temItemNoMenu && r.voltouAoDashboard, 'do módulo de pré, o menu leva ao Dashboard de primeira');
+  assert(r.enderecoNaFicha, 'o mesmo vale para a ficha de anestesia');
+  assert(r.voltouMesmoComHashIgual, 'e o menu funciona mesmo se o endereço já apontar para o destino');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
