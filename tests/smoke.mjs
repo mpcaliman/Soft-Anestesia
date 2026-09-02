@@ -10958,6 +10958,98 @@ await test('Impressão pelo celular sai com conteúdo, não em branco', async ()
   await page.close();
 });
 
+/* 168) O painel tem de contar o que a CLÍNICA tem, e no momento em que chega.
+   Três defeitos com a mesma origem: ele lia o aparelho e desenhava uma vez. */
+await test('Dashboard busca na clínica ao abrir, conta as consultas e redesenha quando os dados chegam', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+
+    /* a) A lista de módulos do painel é uma só, e inclui `consulta` — o
+       cartão "Consultas / Dor" existe desde sempre e a busca ao entrar não
+       o trazia. */
+    out.temListaUnica = Array.isArray(dashboard.MODULOS_DADOS);
+    out.incluiConsulta = dashboard.MODULOS_DADOS.indexOf('consulta') >= 0;
+    out.incluiOsCinco = ['pre','anestesia','recuperacao','consulta','financeiro']
+      .every(m => dashboard.MODULOS_DADOS.indexOf(m) >= 0);
+
+    /* b) Abrir o painel BUSCA na clínica. Antes só relia o aparelho: quem
+       trabalhou no outro computador não aparecia. */
+    const pedidos = [];
+    let liberar;
+    const espera = new Promise(res => { liberar = res; });
+    cloudRel.disponivel = () => true;
+    cloudRel._puxados = {};
+    cloudRel.autoPullModulo = async (mod) => {
+      pedidos.push(mod);
+      await espera;                       /* segura o pull, como uma rede lenta */
+      cloudRel._puxados[mod] = true;
+      /* o registro que estava só na clínica chega agora */
+      if (mod === 'consulta') {
+        const l = store.list('consulta');
+        l.push({ _id: 'c_nuvem', nome: 'Vinda da clínica', data: utils.hojeISO(),
+                 _finalizado: true, finalizado: true, _updatedAt: new Date().toISOString() });
+        store.setList('consulta', l);
+      }
+      return true;
+    };
+
+    store.setList('consulta', []); store.setList('anestesia', []);
+    store.setList('pre', []); store.setList('recuperacao', []); store.setList('financeiro', []);
+
+    ui.navegar('dashboard');
+    await new Promise(res => setTimeout(res, 250));
+    out.pediuAoAbrir = dashboard.MODULOS_DADOS.every(m => pedidos.indexOf(m) >= 0);
+    out.avisaQueEstaBuscando = /buscando/i.test((document.getElementById('dash-frescor') || {}).textContent || '');
+
+    /* enquanto o pull não volta, o painel mostra o que tem: zero consultas */
+    const valorDe = (chave) => {
+      const card = document.querySelector('.kpi-card[data-detail="' + chave + '"] .kpi-value');
+      return card ? card.textContent.trim() : null;
+    };
+    out.antesZero = valorDe('consulta') === '0';
+
+    /* c) os dados chegam — e o painel se redesenha sozinho, sem trocar de
+       módulo e sem esperar relógio nenhum */
+    liberar();
+    await new Promise(res => setTimeout(res, 400));
+    out.depoisConta = valorDe('consulta') === '1';
+    out.carimbouAHora = /atualizado \d\d:\d\d/.test((document.getElementById('dash-frescor') || {}).textContent || '');
+
+    /* d) reabrir o painel não repete a busca (nem desenha duas vezes à toa).
+       Só contam os módulos DO PAINEL: navegar puxa também o da tela aberta. */
+    const doPainel = () => pedidos.filter(m => dashboard.MODULOS_DADOS.indexOf(m) >= 0).length;
+    const antes = doPainel();
+    ui.navegar('pacientes');
+    await new Promise(res => setTimeout(res, 700));
+    ui.navegar('dashboard');
+    await new Promise(res => setTimeout(res, 700));
+    out.naoRepetiuAToa = doPainel() === antes;
+
+    /* e) mas o botão Atualizar força de novo — é para isso que ele existe */
+    dashboard.atualizar({ forcar: true });
+    await new Promise(res => setTimeout(res, 300));
+    out.botaoForcaDeNovo = doPainel() === antes + dashboard.MODULOS_DADOS.length;
+
+    store.setList('consulta', []);
+    return out;
+  });
+
+  assert(r.temListaUnica && r.incluiOsCinco, 'o painel declara de quais módulos ele vive');
+  assert(r.incluiConsulta, 'e "consulta" está na lista — era o que faltava na busca ao entrar');
+  assert(r.pediuAoAbrir, 'abrir o painel busca na clínica, não só relê o aparelho');
+  assert(r.avisaQueEstaBuscando, 'e diz que está buscando, em vez de mostrar um número velho calado');
+  assert(r.antesZero, 'antes de chegar, mostra honestamente o que tem');
+  assert(r.depoisConta, 'e quando chega, redesenha sozinho — sem trocar de módulo');
+  assert(r.carimbouAHora, 'com a hora do que está na tela: número velho parece número certo');
+  assert(r.naoRepetiuAToa, 'reabrir não repete a busca à toa');
+  assert(r.botaoForcaDeNovo, 'mas o botão Atualizar busca de novo — é para isso que ele serve');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
