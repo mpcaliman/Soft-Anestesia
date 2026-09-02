@@ -11050,6 +11050,71 @@ await test('Dashboard busca na clínica ao abrir, conta as consultas e redesenha
   await page.close();
 });
 
+/* 169) Os gráficos por cirurgião, hospital e convênio desenhavam só o que
+   estava no aparelho — o que foi arquivado entrava nos totais e sumia dos
+   gráficos. O botão que resolvia isso baixava o histórico INTEIRO para
+   consertar o gráfico de um mês. */
+await test('Dashboard completa os gráficos trazendo só os arquivados do período', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor', entrouEm: Date.now() }));
+
+    const hoje = new Date();
+    const diasAtras = (n) => { const d = new Date(hoje); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
+
+    /* índice de arquivados: um deste mês, dois de mais de um ano atrás */
+    localStorage.setItem(arquivo.INDEX_KEY, JSON.stringify({
+      anestesia: [
+        { id: 'a_recente', nome: 'Recente',  data: diasAtras(10),  fin: true },
+        { id: 'a_velho1',  nome: 'Velho 1',  data: diasAtras(400), fin: true },
+        { id: 'a_velho2',  nome: 'Velho 2',  data: diasAtras(500), fin: true }
+      ]
+    }));
+
+    const pedidos = [];
+    arquivo.restaurar = async (mod, id) => { pedidos.push(mod + ':' + id); return true; };
+
+    /* "Este mês": só o recente é do período — os velhos não têm por que descer */
+    await arquivo.restaurarPeriodo('30', { silent: true });
+    out.mesTrouxeSoORecente = pedidos.length === 1 && pedidos[0] === 'anestesia:a_recente';
+
+    /* "Hoje": nada arquivado cai aqui (o arquivamento só alcança >90 dias) */
+    pedidos.length = 0;
+    const rHoje = await arquivo.restaurarPeriodo('hoje', { silent: true });
+    out.hojeNaoBaixaNada = pedidos.length === 0 && rHoje.ok === 0;
+
+    /* "Tudo": aí sim, os três */
+    pedidos.length = 0;
+    await arquivo.restaurarPeriodo('all', { silent: true });
+    out.tudoTrazOsTres = pedidos.length === 3;
+
+    /* o botão do aviso do painel usa o período que está na tela — não o
+       histórico inteiro, que era o que ele fazia antes */
+    const host = document.getElementById('dash-aviso-nuvem');
+    dashboard._avisoNuvem({ total: 3, porMod: { anestesia: 3 } });
+    out.botaoUsaOPeriodo = !!host && /_completarGraficos/.test(host.innerHTML)
+      && !/restaurarTodos/.test(host.innerHTML);
+
+    pedidos.length = 0;
+    const sel = document.getElementById('dash-periodo');
+    if (sel) sel.value = '30';
+    await dashboard._completarGraficos();
+    out.completarSegueOPeriodo = pedidos.length === 1 && pedidos[0] === 'anestesia:a_recente';
+
+    localStorage.removeItem(arquivo.INDEX_KEY);
+    return out;
+  });
+
+  assert(r.mesTrouxeSoORecente, 'para consertar o gráfico do mês, desce só o que é do mês');
+  assert(r.hojeNaoBaixaNada, 'e em "Hoje" não desce nada — não há arquivado tão novo');
+  assert(r.tudoTrazOsTres, 'em "Tudo", aí sim vem o histórico inteiro');
+  assert(r.botaoUsaOPeriodo, 'o aviso do painel deixou de oferecer o download do histórico inteiro');
+  assert(r.completarSegueOPeriodo, 'o botão desce exatamente o que falta ao período que está na tela');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

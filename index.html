@@ -4523,7 +4523,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-28c</b><br>
+    v7.1 · build <b id="build-tag">2026-08-28d</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -11840,6 +11840,41 @@ const arquivo = {
     modal.close();
     toast(n ? '✅ ' + n + ' registro(s) trazidos da nuvem' : 'Todos já estavam aqui');
     try { armazenamento.render(); } catch (e) {}
+  },
+
+  /* Traz de volta só os arquivados QUE CAEM NO PERÍODO pedido.
+     `restaurarTodos` existe e continua servindo, mas para consertar o gráfico
+     do mês ele baixava o histórico inteiro — caro, demorado, e quase todo
+     inútil para a pergunta que foi feita. Como o arquivamento só alcança o
+     que tem mais de 90 dias, em "Hoje", "Semana" e "Mês" isto não baixa nada:
+     não há nada a baixar. */
+  async restaurarPeriodo(periodo, opts = {}) {
+    const ix = arquivo._indice();
+    const itens = [];
+    Object.keys(ix).forEach(mod => (ix[mod] || []).forEach(e => {
+      if (!e || !e.data) return;
+      itens.push({ mod, id: e.id, nome: e.nome, _dataClinica: e.data + 'T12:00:00.000Z' });
+    }));
+    const noPeriodo = dashboard.filtrarPorPeriodo(itens, periodo, '_dataClinica');
+    if (!noPeriodo.length) {
+      if (!opts.silent) toast('Não há registro arquivado neste período.', 'warn');
+      return { ok: 0, falhou: 0 };
+    }
+    if (!opts.silent && !confirm('Trazer ' + noPeriodo.length + ' registro(s) deste período de volta para este aparelho? É o que faltava nos gráficos.')) {
+      return { ok: 0, falhou: 0 };
+    }
+    let ok = 0, falhou = 0;
+    for (const it of noPeriodo) {
+      try { (await arquivo.restaurar(it.mod, it.id, { silent: true })) ? ok++ : falhou++; }
+      catch (e) { falhou++; }
+    }
+    if (!opts.silent) {
+      toast(ok ? '✅ ' + ok + ' registro(s) de volta — os gráficos deste período agora estão completos'
+               + (falhou ? ' · ' + falhou + ' não encontrado(s) na nuvem' : '')
+               : '⚠️ Nenhum registro pôde ser trazido — confira a conexão com a clínica', ok ? 'success' : 'warn');
+    }
+    try { armazenamento.render(); } catch (e) {}
+    return { ok, falhou };
   },
 
   async restaurarTodos(opts = {}) {
@@ -44200,12 +44235,22 @@ const dashboard = {
     host.innerHTML =
       '<span>☁️ <b>' + nuvem.total + '</b> registro(s) deste período estão na nuvem e não neste aparelho. ' +
       'Eles <b>entram nos totais</b>, mas não nos gráficos por cirurgião, hospital e convênio.</span>' +
-      '<button type="button" class="btn btn-xs btn-primary" onclick="arquivo.restaurarTodos().then(function(){ dashboard.atualizar(); })">⬇ Trazer para cá</button>' +
+      /* Traz só os DESTE período. O botão antigo chamava restaurarTodos(): para
+         corrigir o gráfico do mês baixava o histórico inteiro. */
+      '<button type="button" class="btn btn-xs btn-primary" onclick="dashboard._completarGraficos()">⬇ Completar os gráficos deste período</button>' +
       (cabeTudo && arquivando
         ? '<span style="flex-basis:100%;font-size:.8rem;margin-top:6px">Este aparelho agora guarda imagens e histórico no <b>disco grande</b> — não precisa mais mandar registro para fora para caber. ' +
           '<button type="button" class="btn btn-xs" onclick="dashboard._voltarTudoParaCa()">Trazer tudo e parar de arquivar</button></span>'
         : '');
   },
+  /* O que falta aos gráficos é exatamente o que foi arquivado NESTE período.
+     Traz só isso e redesenha. */
+  async _completarGraficos() {
+    const periodo = (document.getElementById('dash-periodo') || {}).value || '30';
+    try { await arquivo.restaurarPeriodo(periodo); } catch (e) {}
+    try { dashboard.atualizar({ semPuxar: true }); } catch (e) {}
+  },
+
   /* Traz o que foi arquivado e desliga o arquivamento automático: os gráficos
      só ficam completos com os registros no aparelho. */
   async _voltarTudoParaCa() {
