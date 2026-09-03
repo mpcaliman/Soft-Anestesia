@@ -4523,7 +4523,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-28b</b><br>
+    v7.1 · build <b id="build-tag">2026-08-28d</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -4588,7 +4588,8 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
 <div class="module" id="module-dashboard" data-module="dashboard">
   <div class="action-bar">
     <button class="btn btn-sm" id="btn-expandir-dashboard" onclick="ui.alternarTodos('dashboard')" title="Expandir ou recolher todos os campos">⊕ Expandir tudo</button>
-    <button class="btn btn-primary" onclick="dashboard.atualizar()" title="Atualizar dados"><span class="icon">↻</span> Atualizar</button>
+    <button class="btn btn-primary" onclick="dashboard.atualizar({ forcar: true })" title="Buscar na clínica e redesenhar"><span class="icon">↻</span> Atualizar</button>
+    <span id="dash-frescor" style="font-size:.72rem;color:var(--text-mute);align-self:center" title=""></span>
     <button class="btn" onclick="printPreview.abrir()" title="Visualizar e imprimir"><span class="icon">🖨️</span> Imprimir</button>
     <div class="action-divider"></div>
     <div class="field" style="margin:0; flex-direction:row; align-items:center; gap:8px">
@@ -11839,6 +11840,41 @@ const arquivo = {
     modal.close();
     toast(n ? '✅ ' + n + ' registro(s) trazidos da nuvem' : 'Todos já estavam aqui');
     try { armazenamento.render(); } catch (e) {}
+  },
+
+  /* Traz de volta só os arquivados QUE CAEM NO PERÍODO pedido.
+     `restaurarTodos` existe e continua servindo, mas para consertar o gráfico
+     do mês ele baixava o histórico inteiro — caro, demorado, e quase todo
+     inútil para a pergunta que foi feita. Como o arquivamento só alcança o
+     que tem mais de 90 dias, em "Hoje", "Semana" e "Mês" isto não baixa nada:
+     não há nada a baixar. */
+  async restaurarPeriodo(periodo, opts = {}) {
+    const ix = arquivo._indice();
+    const itens = [];
+    Object.keys(ix).forEach(mod => (ix[mod] || []).forEach(e => {
+      if (!e || !e.data) return;
+      itens.push({ mod, id: e.id, nome: e.nome, _dataClinica: e.data + 'T12:00:00.000Z' });
+    }));
+    const noPeriodo = dashboard.filtrarPorPeriodo(itens, periodo, '_dataClinica');
+    if (!noPeriodo.length) {
+      if (!opts.silent) toast('Não há registro arquivado neste período.', 'warn');
+      return { ok: 0, falhou: 0 };
+    }
+    if (!opts.silent && !confirm('Trazer ' + noPeriodo.length + ' registro(s) deste período de volta para este aparelho? É o que faltava nos gráficos.')) {
+      return { ok: 0, falhou: 0 };
+    }
+    let ok = 0, falhou = 0;
+    for (const it of noPeriodo) {
+      try { (await arquivo.restaurar(it.mod, it.id, { silent: true })) ? ok++ : falhou++; }
+      catch (e) { falhou++; }
+    }
+    if (!opts.silent) {
+      toast(ok ? '✅ ' + ok + ' registro(s) de volta — os gráficos deste período agora estão completos'
+               + (falhou ? ' · ' + falhou + ' não encontrado(s) na nuvem' : '')
+               : '⚠️ Nenhum registro pôde ser trazido — confira a conexão com a clínica', ok ? 'success' : 'warn');
+    }
+    try { armazenamento.render(); } catch (e) {}
+    return { ok, falhou };
   },
 
   async restaurarTodos(opts = {}) {
@@ -19719,7 +19755,11 @@ const cloud = {
                o relógio funcionaria, mas isto avisa no instante certo — e é o
                que faz a janela aparecer para quem não tem nada no aparelho e
                depende inteiramente do que vem da nuvem. */
-            Promise.all(['pre', 'anestesia', 'recuperacao', 'financeiro'].map(m => {
+            /* A lista vem do painel: faltava `consulta` aqui, e o cartão
+               "Consultas / Dor" só contava o que estava no aparelho. */
+            const mods = (typeof dashboard !== 'undefined' && dashboard.MODULOS_DADOS)
+              ? dashboard.MODULOS_DADOS : ['pre', 'anestesia', 'recuperacao', 'financeiro'];
+            Promise.all(mods.map(m => {
               try { return Promise.resolve(cloudRel.autoPullModulo(m)).catch(() => {}); }
               catch (e) { return Promise.resolve(); }
             })).then(() => {
@@ -19727,6 +19767,12 @@ const cloud = {
               /* Lançamento errado pode chegar de um aparelho que ainda não
                  atualizou — conserta na chegada, não só na abertura. */
               try { if (typeof fin !== 'undefined') fin.repararEAvisar(); } catch (e) {}
+              /* E redesenha AGORA, que é quando os dados chegaram. O repintar
+                 por relógio (4,2 s) continua abaixo como rede de segurança,
+                 mas ele sozinho perdia a corrida em qualquer conexão lenta:
+                 disparava antes do pull terminar e o painel ficava com os
+                 números velhos até trocar de módulo. */
+              try { cloud._repintarTelaAtual(); } catch (e) {}
             });
           }
           if (typeof pacientes !== 'undefined' && pacientes.sincronizarNuvem) {
@@ -43723,6 +43769,68 @@ const meuDia = {
 };
 
 const dashboard = {
+  /* Os módulos de que o painel vive. Estava escrito à mão em outro lugar — e
+     lá faltava `consulta`, que é um dos cartões daqui: as consultas nunca
+     eram buscadas na clínica ao entrar, então só apareciam as do aparelho.
+     Uma lista só, para as duas pontas não voltarem a divergir. */
+  MODULOS_DADOS: ['pre', 'anestesia', 'recuperacao', 'consulta', 'financeiro'],
+
+  /* Busca na clínica tudo o que o painel conta e repinta QUANDO CHEGAR.
+     `forcar` limpa a marca de "já puxei nesta sessão" — é o que faz o botão
+     Atualizar e a entrada no módulo trazerem coisa nova de verdade. */
+  async puxarDaClinica(opts = {}) {
+    try {
+      if (typeof cloudRel === 'undefined' || !cloudRel.autoPullModulo) return false;
+      if (!cloudRel.disponivel || !cloudRel.disponivel()) return false;
+      if (dashboard._puxando) return false;
+      if (opts.forcar) {
+        try { dashboard.MODULOS_DADOS.forEach(m => { cloudRel._puxados[m] = false; }); } catch (e) {}
+      }
+      /* Nada por buscar: sai sem redesenhar. Redesenhar aqui faria toda
+         entrada no painel desenhar duas vezes o mesmo quadro. */
+      const precisam = dashboard.MODULOS_DADOS.filter(m => !cloudRel._puxados[m]);
+      if (!precisam.length) return false;
+      dashboard._puxando = true;
+      dashboard._marcarBusca(true);
+      try {
+        await Promise.all(precisam.map(m => {
+          try { return Promise.resolve(cloudRel.autoPullModulo(m)).catch(() => {}); }
+          catch (e) { return Promise.resolve(); }
+        }));
+      } finally {
+        dashboard._puxando = false;
+        dashboard._ultimoPull = Date.now();
+        dashboard._marcarBusca(false);
+      }
+      /* chegou: redesenha com o que veio, sem esperar relógio nenhum */
+      try { if (state.currentModule === 'dashboard') dashboard.atualizar({ semPuxar: true }); } catch (e) {}
+      return true;
+    } catch (e) { dashboard._puxando = false; return false; }
+  },
+  _puxando: false,
+  _marcarBusca(ligado) {
+    const el = document.getElementById('dash-frescor');
+    if (!el) return;
+    if (ligado) { el.textContent = '⟳ buscando na clínica…'; el.title = ''; return; }
+    dashboard._carimbarFrescor();
+  },
+  /* Diz de quando são os números que estão na tela. Sem isto não há como
+     saber se o painel está velho — e um número velho parece um número certo. */
+  _carimbarFrescor() {
+    const el = document.getElementById('dash-frescor');
+    if (!el) return;
+    const t = dashboard._ultimaAtualizacao;
+    if (!t) { el.textContent = ''; return; }
+    const d = new Date(t);
+    const hh = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    let fonte = 'só deste aparelho';
+    try { if (cloudRel.disponivel && cloudRel.disponivel() && dashboard._ultimoPull) fonte = 'com a clínica'; } catch (e) {}
+    el.textContent = 'atualizado ' + hh + ' · ' + fonte;
+    el.title = 'Números e gráficos desenhados às ' + hh + '.';
+  },
+  _ultimaAtualizacao: 0,
+  _ultimoPull: 0,
+
   /* ===== GRÁFICOS SVG (offline, sem libs) ===== */
 
   /* Paleta consistente */
@@ -43890,7 +43998,15 @@ const dashboard = {
     });
   },
 
-  atualizar() {
+  atualizar(opts = {}) {
+    /* Abrir o painel passa a BUSCAR na clínica, não só reler o aparelho.
+       Antes, entrar no Dashboard redesenhava o que já estava aqui: quem
+       trabalhou no outro computador não aparecia até alguém abrir o módulo
+       daquele registro. `semPuxar` evita o laço quando é o próprio pull que
+       está mandando redesenhar. */
+    if (!opts.semPuxar) {
+      try { dashboard.puxarDaClinica({ forcar: !!opts.forcar }); } catch (e) {}
+    }
     const periodo = document.getElementById('dash-periodo').value;
     const anestesias  = dashboard.filtrarPorPeriodo(store.list('anestesia'),  periodo, 'procedimento') /* fallback p/ updatedAt */
                           .filter(_ => true); // simplificação: usa _updatedAt
@@ -44046,6 +44162,9 @@ const dashboard = {
 
     /* Liga event delegation para abrir relatórios expandidos ao clicar */
     dashboard._ligarHandlers();
+
+    dashboard._ultimaAtualizacao = Date.now();
+    if (!dashboard._puxando) dashboard._carimbarFrescor();
   },
 
   /* Data clínica do registro (procedimento/avaliação); só cai na data de
@@ -44116,12 +44235,22 @@ const dashboard = {
     host.innerHTML =
       '<span>☁️ <b>' + nuvem.total + '</b> registro(s) deste período estão na nuvem e não neste aparelho. ' +
       'Eles <b>entram nos totais</b>, mas não nos gráficos por cirurgião, hospital e convênio.</span>' +
-      '<button type="button" class="btn btn-xs btn-primary" onclick="arquivo.restaurarTodos().then(function(){ dashboard.atualizar(); })">⬇ Trazer para cá</button>' +
+      /* Traz só os DESTE período. O botão antigo chamava restaurarTodos(): para
+         corrigir o gráfico do mês baixava o histórico inteiro. */
+      '<button type="button" class="btn btn-xs btn-primary" onclick="dashboard._completarGraficos()">⬇ Completar os gráficos deste período</button>' +
       (cabeTudo && arquivando
         ? '<span style="flex-basis:100%;font-size:.8rem;margin-top:6px">Este aparelho agora guarda imagens e histórico no <b>disco grande</b> — não precisa mais mandar registro para fora para caber. ' +
           '<button type="button" class="btn btn-xs" onclick="dashboard._voltarTudoParaCa()">Trazer tudo e parar de arquivar</button></span>'
         : '');
   },
+  /* O que falta aos gráficos é exatamente o que foi arquivado NESTE período.
+     Traz só isso e redesenha. */
+  async _completarGraficos() {
+    const periodo = (document.getElementById('dash-periodo') || {}).value || '30';
+    try { await arquivo.restaurarPeriodo(periodo); } catch (e) {}
+    try { dashboard.atualizar({ semPuxar: true }); } catch (e) {}
+  },
+
   /* Traz o que foi arquivado e desliga o arquivamento automático: os gráficos
      só ficam completos com os registros no aparelho. */
   async _voltarTudoParaCa() {
