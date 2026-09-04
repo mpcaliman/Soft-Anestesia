@@ -4523,7 +4523,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-28f</b><br>
+    v7.1 · build <b id="build-tag">2026-08-28g</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -4594,11 +4594,11 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <div class="action-divider"></div>
     <div class="field" style="margin:0; flex-direction:row; align-items:center; gap:8px">
       <label style="margin:0; font-size:.75rem">Período:</label>
-      <select id="dash-escopo" onchange="dashboard.atualizar()" title="Só os seus registros ou os de toda a clínica" style="padding:5px 8px; font-size:.82rem; width:auto">
+      <select id="dash-escopo" onchange="dashboard._guardarFiltros(); dashboard.atualizar()" title="Só os seus registros ou os de toda a clínica" style="padding:5px 8px; font-size:.82rem; width:auto">
         <option value="pessoal">👤 Pessoal</option>
         <option value="clinica">🏥 Clínica</option>
       </select>
-      <select id="dash-periodo" onchange="dashboard.atualizar()" style="padding:5px 8px; font-size:.82rem; width:auto">
+      <select id="dash-periodo" onchange="dashboard._guardarFiltros(); dashboard.atualizar()" style="padding:5px 8px; font-size:.82rem; width:auto">
         <option value="hoje">Hoje</option>
         <option value="7">Esta semana</option>
         <option value="30" selected>Este mês</option>
@@ -44134,6 +44134,7 @@ const dashboard = {
     if (!opts.semPuxar) {
       try { dashboard.puxarDaClinica({ forcar: !!opts.forcar }); } catch (e) {}
     }
+    dashboard._restaurarFiltros();
     const periodo = document.getElementById('dash-periodo').value;
     const anestesias  = dashboard.filtrarPorPeriodo(store.list('anestesia'),  periodo, 'procedimento') /* fallback p/ updatedAt */
                           .filter(_ => true); // simplificação: usa _updatedAt
@@ -44304,25 +44305,56 @@ const dashboard = {
      gravação quando o registro não tem data própria. */
   /* "Pessoal" = o que eu criei/assinei. "Clínica" = tudo o que está aqui,
      inclusive o que as auxiliares lançaram e o que outro anestesista fez. */
-  _filtrarEscopo(list, escopo) {
-    if (escopo !== 'pessoal') return list;
-    /* a autoria pode estar gravada pelo login, pelo nome ou pelo id — todos
-       valem como "eu", senão o filtro esconderia registros meus */
+  /* Nome comparável: sem acento, sem título, sem espaço sobrando. "Dr. Marcelo
+     Pandolfi Caliman" e "marcelo pandolfi caliman" são a mesma pessoa, e o
+     painel não pode achar que não são. */
+  _normAutor(v) {
+    return String(v || '').toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/^\s*(dr|dra|drª|prof|profa)\.?\s+/, '')
+      .replace(/\s+/g, ' ').trim();
+  },
+  /* Tudo que identifica ESTA pessoa: a conta, o login do aparelho e o nome
+     profissional configurado (o mesmo que sai no cabeçalho dos documentos). */
+  _souEu() {
     const meus = new Set();
+    const por = (v) => { const t = dashboard._normAutor(v); if (t) meus.add(t); };
     try {
       const u = auth.usuarioAtual() || {};
-      [u.nome, u.usuario, u.id, u.uid].forEach(v => { if (v) meus.add(String(v).toLowerCase()); });
+      [u.nome, u.usuario, u.id, u.uid].forEach(por);
+      if (u.usuario && u.usuario.indexOf('@') > 0) por(u.usuario.split('@')[0]);
     } catch (e) {}
-    const login = localStorage.getItem('medsys.v7.usuario');
-    if (login) meus.add(String(login).toLowerCase());
+    try { por(localStorage.getItem('medsys.v7.usuario')); } catch (e) {}
+    /* o nome que assina os documentos é o mesmo que vai no campo
+       "anestesiologista" das fichas — é por ele que o caso é meu */
+    try { por(((orcamento.cfg() || {}).cabecalho || {}).profissional); } catch (e) {}
+    return meus;
+  },
+  _filtrarEscopo(list, escopo) {
+    if (escopo !== 'pessoal') return list;
+    const meus = dashboard._souEu();
     if (!meus.size) return list;
-    const bate = (v) => { const t = String(v || '').toLowerCase(); return !!t && meus.has(t); };
+    const bate = (v) => {
+      const t = dashboard._normAutor(v);
+      if (!t) return false;
+      if (meus.has(t)) return true;
+      /* "Marcelo Pandolfi Caliman" x "Marcelo Caliman": um contém o outro.
+         Exigir igualdade exata fazia o caso do próprio médico contar como
+         de outra pessoa — e o painel dele zerava. */
+      for (const m of meus) { if (m.length >= 6 && (t.includes(m) || m.includes(t))) return true; }
+      return false;
+    };
     return list.filter(it => {
+      /* QUEM CONFERIU É O DONO DO CASO. No pré-lançamento a secretária digita
+         e o médico confere e finaliza: se "meu" fosse só "quem digitou", o
+         painel do médico ficaria permanentemente vazio num consultório onde a
+         secretária prepara tudo — que é exatamente o que acontecia. */
+      try {
+        const pl = it._preLanc || {};
+        if (pl.conferidoPor && bate(pl.conferidoPor)) return true;
+      } catch (e) {}
       /* sem autoria registrada, o registro conta como meu — não sumir do
          painel importa mais do que classificar com precisão */
-      /* anestesiologista/responsavel faltavam: são justamente os campos que a
-         pré e a ficha usam para registrar quem assina. Sem eles, registro meu
-         assinado por mim podia ser lido como "de outro" e sumir do painel. */
       const autores = [it._updatedBy, it._criadoPor, it.anestesista, it.anestesiologista,
                        it.profissional, it.responsavel];
       if (!autores.some(v => String(v || '').trim())) return true;
@@ -44442,10 +44474,38 @@ const dashboard = {
       (naoCarregou ? '<br><b style="color:var(--warning,#8a4b1c)">⚠️ ' + utils.escapeHTML(naoCarregou) + '</b>' : '');
     host.style.display = '';
   },
+  /* O filtro escolhido é uma DECISÃO, e decisão não se desfaz sozinha.
+     "Ver clínica" trocava o seletor e o próximo carregamento devolvia
+     "Pessoal" — num consultório onde a secretária prepara tudo, isso é voltar
+     ao painel zerado toda vez que se abre o app. */
+  ESCOPO_KEY: 'medsys.v7.dash.escopo',
+  PERIODO_KEY: 'medsys.v7.dash.periodo',
+  _restaurados: false,
+  _restaurarFiltros() {
+    if (dashboard._restaurados) return;
+    dashboard._restaurados = true;
+    try {
+      const e = document.getElementById('dash-escopo');
+      const p = document.getElementById('dash-periodo');
+      const ge = localStorage.getItem(dashboard.ESCOPO_KEY);
+      const gp = localStorage.getItem(dashboard.PERIODO_KEY);
+      if (e && ge && e.querySelector('option[value="' + ge + '"]')) e.value = ge;
+      if (p && gp && p.querySelector('option[value="' + gp + '"]')) p.value = gp;
+    } catch (er) {}
+  },
+  _guardarFiltros() {
+    try {
+      const e = document.getElementById('dash-escopo');
+      const p = document.getElementById('dash-periodo');
+      if (e) localStorage.setItem(dashboard.ESCOPO_KEY, e.value);
+      if (p) localStorage.setItem(dashboard.PERIODO_KEY, p.value);
+    } catch (er) {}
+  },
   _verComo(escopo, periodo) {
     try {
       if (escopo) { const e = document.getElementById('dash-escopo'); if (e) e.value = escopo; }
       if (periodo) { const p = document.getElementById('dash-periodo'); if (p) p.value = periodo; }
+      dashboard._guardarFiltros();
       dashboard.atualizar();
     } catch (e) {}
   },

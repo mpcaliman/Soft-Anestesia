@@ -11284,6 +11284,76 @@ await test('Pré-lançamento que ficou na clínica: a atualização deixa de ser
   await page.close();
 });
 
+/* 172) Painel do médico zerado com 173 registros no período. Não era conta
+   errada: "Pessoal" queria dizer "quem digitou", e num consultório onde a
+   secretária pré-preenche tudo, nada nunca é do médico. */
+await test('"Pessoal" reconhece o médico responsável, e o filtro escolhido não se desfaz sozinho', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    localStorage.removeItem(dashboard.ESCOPO_KEY);
+    localStorage.removeItem(dashboard.PERIODO_KEY);
+    dashboard._restaurados = false;
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1',
+      usuario: 'mpcaliman@hotmail.com', nome: 'Marcelo Caliman', perfil: 'admin',
+      modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor', entrouEm: Date.now() }));
+    localStorage.setItem('medsys.v7.usuario', 'mpcaliman@hotmail.com');
+
+    const so = (l) => dashboard._filtrarEscopo(l, 'pessoal').map(x => x._id);
+
+    /* a ficha que a secretária digitou, com o médico como responsável */
+    out.reconhecePeloResponsavel = so([
+      { _id: 'r1', _updatedBy: 'auxiliompc@gmail.com', anestesiologista: 'Dr. Marcelo Pandolfi Caliman' }
+    ]).length === 1;
+
+    /* variação do nome: o cadastro diz "Marcelo Caliman", a ficha diz o nome
+       completo. Exigir igualdade exata era o que zerava o painel. */
+    out.aceitaNomeMaisCompleto = so([
+      { _id: 'r2', _updatedBy: 'auxiliompc@gmail.com', anestesiologista: 'MARCELO PANDOLFI CALIMAN' }
+    ]).length === 1;
+
+    /* pré-lançamento: quem CONFERIU é o dono do caso */
+    out.reconhecePorQuemConferiu = so([
+      { _id: 'r3', _updatedBy: 'mpcanestesiologia@gmail.com',
+        _preLanc: { estado: 'conferido', conferidoPor: 'Marcelo Caliman' } }
+    ]).length === 1;
+
+    /* e continua excluindo o que é mesmo de outro anestesista */
+    out.aindaExcluiDeOutro = so([
+      { _id: 'r4', _updatedBy: 'outro@x.com', anestesiologista: 'Dra. Fernanda Lopes' }
+    ]).length === 0;
+
+    /* registro sem autoria nenhuma continua contando como meu */
+    out.semAutoriaContinuaMeu = so([{ _id: 'r5' }]).length === 1;
+
+    /* --- o filtro escolhido é uma decisão, e não se desfaz sozinha --- */
+    ui.navegar('dashboard');
+    await new Promise(res => setTimeout(res, 250));
+    dashboard._verComo('clinica');
+    await new Promise(res => setTimeout(res, 150));
+    out.guardouAEscolha = localStorage.getItem(dashboard.ESCOPO_KEY) === 'clinica';
+
+    /* simula abrir o app de novo: o seletor volta ao padrão do HTML */
+    document.getElementById('dash-escopo').value = 'pessoal';
+    dashboard._restaurados = false;
+    dashboard.atualizar({ semPuxar: true });
+    out.voltouComoClinica = document.getElementById('dash-escopo').value === 'clinica';
+
+    localStorage.removeItem(dashboard.ESCOPO_KEY);
+    localStorage.removeItem(dashboard.PERIODO_KEY);
+    return out;
+  });
+
+  assert(r.reconhecePeloResponsavel, 'a ficha digitada pela secretária é do médico que assina');
+  assert(r.aceitaNomeMaisCompleto, 'e o nome não precisa bater letra por letra');
+  assert(r.reconhecePorQuemConferiu, 'no pré-lançamento, quem confere é o dono do caso');
+  assert(r.aindaExcluiDeOutro, 'mas o caso de outro anestesista continua sendo de outro');
+  assert(r.semAutoriaContinuaMeu, 'e o que não tem autoria nenhuma continua contando');
+  assert(r.guardouAEscolha, '"Ver clínica" guarda a escolha');
+  assert(r.voltouComoClinica, 'e ela continua valendo na próxima abertura — senão o painel zera de novo');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
