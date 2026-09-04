@@ -11354,6 +11354,100 @@ await test('"Pessoal" reconhece o médico responsável, e o filtro escolhido nã
   await page.close();
 });
 
+/* 173) Pacientes: a tela mais larga do sistema. Sem ordenação, sem filtro por
+   plano, com colunas quebrando em duas linhas e o último botão fora da tela. */
+await test('Pacientes: ordenação, filtro por plano e a linha inteira cabendo na tela', async () => {
+  const page = await novaPagina();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const r = await page.evaluate(async () => {
+    const out = {};
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor', entrouEm: Date.now() }));
+    auth._desbloquear();
+    store.setList('pacientes', [
+      { _id: 'p1', nome: 'ZULEICA ROCHA',  nascimento: '1950-03-02', plano: 'Unimed',    cpf: '111', carteirinha: '0286220300557', telefone: '73 98134-0232', _createdAt: '2026-01-01T10:00:00.000Z' },
+      { _id: 'p2', nome: 'ÂNGELA SOUZA',   nascimento: '1990-07-15', plano: 'Particular',cpf: '222', carteirinha: '', telefone: '73 99907-2543', _createdAt: '2026-03-01T10:00:00.000Z' },
+      { _id: 'p3', nome: 'BRUNO ALVES',    nascimento: '2015-11-05', plano: 'Unimed',    cpf: '333', carteirinha: '2861907009050118', telefone: '73 99943-7042', _createdAt: '2026-02-01T10:00:00.000Z' }
+    ]);
+    ui.navegar('pacientes');
+    await new Promise(res => setTimeout(res, 350));
+
+    const nomes = () => Array.from(document.querySelectorAll('#pacientes-tbody tr td:first-child strong'))
+      .map(x => x.textContent.trim());
+    const sel = document.getElementById('pac-f-ordem');
+    const plano = document.getElementById('pac-f-plano');
+    out.temOrdenacao = !!sel;
+    out.temFiltroDePlano = !!plano;
+
+    /* acento não pode jogar "Ângela" para depois de "Zuleica" */
+    sel.value = 'nome'; pacientes.render();
+    out.alfabeticaIgnoraAcento = nomes()[0] === 'ÂNGELA SOUZA' && nomes()[2] === 'ZULEICA ROCHA';
+    sel.value = 'nome_desc'; pacientes.render();
+    out.inverte = nomes()[0] === 'ZULEICA ROCHA';
+    sel.value = 'recente'; pacientes.render();
+    out.porCadastro = nomes()[0] === 'ÂNGELA SOUZA';
+    sel.value = 'nasc_novo'; pacientes.render();
+    out.porNascimento = nomes()[0] === 'BRUNO ALVES';
+
+    /* o filtro de plano só oferece o que existe */
+    out.planosDoCadastro = Array.from(plano.options).map(o => o.value).sort().join(',') === ',Particular,Unimed';
+    plano.value = 'Unimed'; sel.value = 'nome'; pacientes.render();
+    out.filtraPorPlano = nomes().length === 2 && nomes().indexOf('ÂNGELA SOUZA') < 0;
+
+    /* filtro que não deixa passar nada não pode dizer "nenhum cadastrado" */
+    document.getElementById('pac-f-busca').value = 'zzzzz';
+    pacientes.render();
+    const vazio = document.querySelector('#pacientes-tbody .empty-row td').textContent;
+    out.vazioNaoMente = /no cadastro/i.test(vazio) && !/Nenhum paciente cadastrado/.test(vazio);
+
+    pacientes.limparFiltros();
+    out.limparVoltaTudo = nomes().length === 3 && sel.value === 'nome' && plano.value === '';
+
+    /* clicar no cabeçalho ordena, e a seta diz por onde */
+    pacientes.ordenarPor('nome');
+    out.cabecalhoInverte = sel.value === 'nome_desc';
+    out.temSeta = !!document.querySelector('#pacientes-table th[data-ord="nome"] .ord-seta');
+    pacientes.ordenarPor('nome');
+
+    /* --- alinhamento: nada quebrando em duas linhas, nada fora da tela --- */
+    const linha = document.querySelector('#pacientes-tbody tr');
+    const cels = Array.from(linha.querySelectorAll('td'));
+    const tel = cels.find(td => td.getAttribute('data-label') === 'Telefone');
+    out.telefoneNaoQuebra = getComputedStyle(tel).whiteSpace === 'nowrap';
+
+    const acoes = linha.querySelector('td.actions-cell');
+    const botoes = Array.from(acoes.querySelectorAll('.btn'));
+    out.temTodosOsBotoes = botoes.length === 5;
+    /* o último botão tem de caber DENTRO da célula de ações — era ele que
+       ficava fora do campo visual */
+    const rc = acoes.getBoundingClientRect();
+    const rb = botoes[botoes.length - 1].getBoundingClientRect();
+    out.ultimoBotaoCabe = rb.right <= rc.right + 1 && rb.width > 0;
+    /* e a tabela é larga o bastante para o contêiner rolar até ele */
+    const tab = document.getElementById('pacientes-table');
+    out.tabelaTemLarguraReal = tab.getBoundingClientRect().width >= 1100;
+
+    store.setList('pacientes', []);
+    return out;
+  });
+
+  assert(r.temOrdenacao && r.temFiltroDePlano, 'a tela ganha ordenação e filtro por plano');
+  assert(r.alfabeticaIgnoraAcento, 'a ordem alfabética não joga os acentuados para o fim');
+  assert(r.inverte, 'e inverte quando se pede Z → A');
+  assert(r.porCadastro, 'ordena por cadastro mais recente');
+  assert(r.porNascimento, 'e por nascimento');
+  assert(r.planosDoCadastro, 'o filtro só oferece os planos que existem no cadastro');
+  assert(r.filtraPorPlano, 'e filtra por eles');
+  assert(r.vazioNaoMente, 'lista vazia por filtro não pode dizer "nenhum paciente cadastrado"');
+  assert(r.limparVoltaTudo, 'Limpar devolve a lista inteira e a ordem padrão');
+  assert(r.cabecalhoInverte && r.temSeta, 'o cabeçalho ordena e a seta diz por onde');
+  assert(r.telefoneNaoQuebra, 'telefone e afins param de quebrar em duas linhas');
+  assert(r.temTodosOsBotoes, 'os cinco botões da linha continuam existindo');
+  assert(r.ultimoBotaoCabe, 'e o último cabe na célula — era ele que ficava fora da tela');
+  assert(r.tabelaTemLarguraReal, 'a tabela tem largura de verdade, para a rolagem alcançar tudo');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

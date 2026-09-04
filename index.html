@@ -1310,6 +1310,31 @@ table.data .empty-row td {
   text-align: center; color: var(--text-mute);
   padding: 30px; font-style: italic;
 }
+
+/* PACIENTES — a tabela mais larga do sistema, e a que mais quebrava.
+   Duas coisas estavam erradas ao mesmo tempo:
+   • CPF, nascimento, carteirinha e telefone quebravam em duas linhas, e cada
+     linha da tabela ficava com o dobro da altura por causa de um espaço;
+   • a coluna de ações é um flex container e não entra na conta de largura da
+     tabela — o último botão ficava fora da tela, sem nem chegar a empurrar a
+     barra de rolagem que existia justamente para alcançá-lo.
+   A largura mínima devolve a rolagem horizontal onde ela faz sentido; abaixo
+   de 768px a tabela vira cartão e a regra sai do caminho. */
+@media (min-width: 769px) {
+  #pacientes-table { min-width: 1040px; }
+  #pacientes-table th, #pacientes-table td { white-space: nowrap; }
+  /* o nome pode ser longo: é ele que ganha o espaço que sobra */
+  #pacientes-table th:first-child, #pacientes-table td:first-child { white-space: normal; min-width: 210px; }
+  /* colunas de números ficam compactas: elas não precisam do espaço, o nome sim */
+  #pacientes-table th, #pacientes-table td { padding-left: 9px; padding-right: 9px; }
+  #pacientes-table td.actions-cell .btn { padding-left: 7px; padding-right: 7px; }
+  #pacientes-table td.actions-cell { flex-wrap: nowrap; justify-content: flex-end; }
+  #pacientes-table td.actions-cell .btn { flex: 0 0 auto; }
+}
+/* cabeçalho clicável para ordenar */
+#pacientes-table th[data-ord] { cursor: pointer; user-select: none; }
+#pacientes-table th[data-ord]:hover { color: var(--primary); }
+#pacientes-table th[data-ord] .ord-seta { opacity: .55; font-size: .7rem; margin-left: 3px; }
 .status-pill {
   display: inline-block; padding: 2px 10px;
   border-radius: 12px; font-size: .72rem;
@@ -4523,7 +4548,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-28g</b><br>
+    v7.1 · build <b id="build-tag">2026-08-28h</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -9065,8 +9090,24 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
       <div class="field" style="grid-column:auto"><label>Buscar</label>
         <input type="text" id="pac-f-busca" placeholder="Nome, CPF, plano..." oninput="pacientes.render()">
       </div>
+      <div class="field" style="grid-column:auto"><label>Plano</label>
+        <select id="pac-f-plano" onchange="pacientes.render()">
+          <option value="">Todos os planos</option>
+        </select>
+      </div>
+      <div class="field" style="grid-column:auto"><label>Ordenar por</label>
+        <select id="pac-f-ordem" onchange="pacientes.render()">
+          <option value="nome">Nome (A → Z)</option>
+          <option value="nome_desc">Nome (Z → A)</option>
+          <option value="recente">Cadastro mais recente</option>
+          <option value="antigo">Cadastro mais antigo</option>
+          <option value="nasc_novo">Nascimento (mais novo)</option>
+          <option value="nasc_velho">Nascimento (mais velho)</option>
+          <option value="plano">Plano (A → Z)</option>
+        </select>
+      </div>
       <div class="filter-actions">
-        <button class="btn btn-sm" onclick="document.getElementById('pac-f-busca').value=''; pacientes.render();">Limpar</button>
+        <button class="btn btn-sm" onclick="pacientes.limparFiltros()">Limpar</button>
         <button class="btn btn-sm" id="pac-sync-btn" onclick="pacientes.sincronizarNuvem()" title="Puxa os pacientes do banco relacional (nuvem) e junta com os deste aparelho">☁️ Sincronizar pacientes</button>
         <button class="btn btn-sm" onclick="pacientes.mesclarDuplicados()" title="Junta num só os cadastros repetidos do mesmo paciente (o histórico continua completo)">👥 Juntar cadastros repetidos</button>
       </div>
@@ -9078,8 +9119,11 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
         <div style="overflow-x:auto">
           <table class="data" id="pacientes-table">
             <thead><tr>
-              <th>Nome</th><th>CPF</th><th>Nascimento</th>
-              <th>Plano</th><th>Carteirinha</th><th>Telefone</th>
+              <th data-ord="nome" onclick="pacientes.ordenarPor('nome')">Nome</th>
+              <th>CPF</th>
+              <th data-ord="nasc_novo" onclick="pacientes.ordenarPor('nasc_novo')">Nascimento</th>
+              <th data-ord="plano" onclick="pacientes.ordenarPor('plano')">Plano</th>
+              <th>Carteirinha</th><th>Telefone</th>
               <th class="actions-cell"></th>
             </tr></thead>
             <tbody id="pacientes-tbody"></tbody>
@@ -40344,21 +40388,105 @@ const pacientes = {
     toast('Versão da nuvem adotada neste aparelho');
     pacientes._conflito = null;
   },
+  /* Nome comparável para ordenar: sem acento e em caixa baixa. Sem isto,
+     "Ângela" cai depois de "Zuleica" — a tabela ASCII põe os acentuados no
+     fim, e uma lista de pacientes brasileiros fica visivelmente errada. */
+  _chaveNome(v) {
+    return String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  },
+  _quandoCadastrou(p) {
+    return new Date((p && (p._createdAt || p._updatedAt)) || 0).getTime() || 0;
+  },
+  ORDENS: {
+    nome:      (a, b) => pacientes._chaveNome(a.nome).localeCompare(pacientes._chaveNome(b.nome)),
+    nome_desc: (a, b) => pacientes._chaveNome(b.nome).localeCompare(pacientes._chaveNome(a.nome)),
+    recente:   (a, b) => pacientes._quandoCadastrou(b) - pacientes._quandoCadastrou(a),
+    antigo:    (a, b) => pacientes._quandoCadastrou(a) - pacientes._quandoCadastrou(b),
+    /* nascimento vazio vai para o fim nas duas direções: um campo em branco
+       não é "o mais novo" nem "o mais velho", é ausência de informação */
+    nasc_novo: (a, b) => String(b.nascimento || '').localeCompare(String(a.nascimento || '')),
+    nasc_velho:(a, b) => (String(a.nascimento || '~').localeCompare(String(b.nascimento || '~'))),
+    plano:     (a, b) => (String(a.plano || '~~').toLowerCase().localeCompare(String(b.plano || '~~').toLowerCase()))
+                          || pacientes.ORDENS.nome(a, b)
+  },
+  /* Preenche o filtro de planos com os que EXISTEM no cadastro — oferecer um
+     plano que ninguém tem é oferecer uma lista vazia. */
+  _planosNoCadastro() {
+    const set = new Set();
+    pacientes.list().forEach(p => { const v = String(p.plano || '').trim(); if (v) set.add(v); });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  },
+  _encherPlanos() {
+    const sel = document.getElementById('pac-f-plano');
+    if (!sel) return;
+    const atual = sel.value;
+    const planos = pacientes._planosNoCadastro();
+    sel.innerHTML = '<option value="">Todos os planos</option>' +
+      planos.map(v => '<option value="' + utils.escapeAttr(v) + '">' + utils.escapeHTML(v) + '</option>').join('');
+    if (atual && planos.indexOf(atual) >= 0) sel.value = atual;
+  },
+  /* Clique no cabeçalho: mesma coluna de novo inverte, quando faz sentido. */
+  /* A seta no cabeçalho diz por onde a lista está ordenada. Sem ela, clicar
+     numa coluna e ver a lista mudar não explica o que aconteceu. */
+  _marcarSetaOrdem() {
+    const sel = document.getElementById('pac-f-ordem');
+    const atual = sel ? sel.value : 'nome';
+    const seta = { nome: '▲', nome_desc: '▼', nasc_novo: '▼', nasc_velho: '▲', plano: '▲' };
+    document.querySelectorAll('#pacientes-table th[data-ord]').forEach(th => {
+      const chave = th.getAttribute('data-ord');
+      const casa = (chave === atual) ||
+        (chave === 'nome' && atual === 'nome_desc') ||
+        (chave === 'nasc_novo' && atual === 'nasc_velho');
+      const antiga = th.querySelector('.ord-seta');
+      if (antiga) antiga.remove();
+      if (!casa) return;
+      const el = document.createElement('span');
+      el.className = 'ord-seta';
+      el.textContent = seta[atual] || '▲';
+      th.appendChild(el);
+    });
+  },
+  ordenarPor(chave) {
+    const sel = document.getElementById('pac-f-ordem');
+    if (!sel) return;
+    const par = { nome: 'nome_desc', nome_desc: 'nome', nasc_novo: 'nasc_velho', nasc_velho: 'nasc_novo' };
+    sel.value = (sel.value === chave && par[chave]) ? par[chave] : chave;
+    pacientes.render();
+  },
+  limparFiltros() {
+    const b = document.getElementById('pac-f-busca'); if (b) b.value = '';
+    const p = document.getElementById('pac-f-plano'); if (p) p.value = '';
+    const o = document.getElementById('pac-f-ordem'); if (o) o.value = 'nome';
+    pacientes.render();
+  },
   filtrar() {
     const q = (document.getElementById('pac-f-busca')?.value || '').toLowerCase().trim();
-    const list = pacientes.list();
-    if (!q) return list;
-    return list.filter(p => {
+    const plano = (document.getElementById('pac-f-plano')?.value || '').trim();
+    const ordem = (document.getElementById('pac-f-ordem')?.value || 'nome');
+    let list = pacientes.list();
+    if (plano) list = list.filter(p => String(p.plano || '').trim() === plano);
+    if (q) list = list.filter(p => {
       const blob = ((p.nome || '') + ' ' + (p.cpf || '') + ' ' + (p.plano || '') + ' ' + (p.carteirinha || '')).toLowerCase();
       return blob.includes(q);
     });
+    const cmp = pacientes.ORDENS[ordem] || pacientes.ORDENS.nome;
+    /* cópia: ordenar a lista do store trocaria a ordem de gravação */
+    return list.slice().sort(cmp);
   },
   render() {
+    pacientes._encherPlanos();
+    pacientes._marcarSetaOrdem();
     const listaCompleta = pacientes.filtrar();
     const tbody = document.getElementById('pacientes-tbody');
     if (!tbody) return;
     if (listaCompleta.length === 0) {
-      tbody.innerHTML = '<tr class="empty-row"><td colspan="7">Nenhum paciente cadastrado</td></tr>';
+      /* "Nenhum paciente cadastrado" com filtro ligado é mentira: há
+         cadastro, o filtro é que não deixou passar. */
+      const total = pacientes.list().length;
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="7">' +
+        (total ? 'Nenhum paciente com este filtro — há <b>' + total + '</b> no cadastro. ' +
+                 '<button type="button" class="btn btn-xs" onclick="pacientes.limparFiltros()">Limpar filtros</button>'
+               : 'Nenhum paciente cadastrado') + '</td></tr>';
       return;
     }
     /* Performance: renderiza no máximo 100 por vez. Com muitos pacientes,
