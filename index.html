@@ -4523,7 +4523,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-28d</b><br>
+    v7.1 · build <b id="build-tag">2026-08-28e</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -43673,7 +43673,7 @@ const meuDia = {
     const caso = (nome) => {
       const k = meuDia._norm(nome);
       if (!k) return null;
-      if (!casos[k]) casos[k] = { nome, hora: '', procedimento: '', agenda: null, ficha: null, srpa: null, fin: null };
+      if (!casos[k]) casos[k] = { nome, hora: '', procedimento: '', agenda: null, ficha: null, srpa: null, fin: null, consulta: null };
       return casos[k];
     };
     store.list('agenda').filter(x => x.data === hoje).forEach(x => {
@@ -43695,6 +43695,19 @@ const meuDia = {
       if (!c.hora) c.hora = pr.hora_sala_entrada || pr.hora_inicio || x.hora_sala_entrada || x.hora_inicio || '';
       if (!c.procedimento) c.procedimento = pr.descricao || (typeof x.procedimento === 'string' ? x.procedimento : '') || '';
     });
+    /* CONSULTA. Estava fora, e era o buraco: uma consulta de hoje só chegava
+       aqui se já tivesse virado lançamento financeiro — e chegava como caso
+       "sem ficha", cobrando uma ficha de anestesia que consulta nenhuma tem.
+       Quem atende no consultório via o dia inteiro acusado de pendência. */
+    store.list('consulta').forEach(x => {
+      const data = x.data || x.data_consulta || '';
+      if (data !== hoje) return;
+      const nome = x.paciente || x.nome || (x.paciente_nome || '');
+      const c = caso(nome); if (!c) return;
+      c.consulta = x;
+      if (!c.hora) c.hora = x.hora || '';
+      if (!c.procedimento) c.procedimento = x.motivo || x.procedimento || 'Consulta';
+    });
     store.list('recuperacao').filter(x => x.data === hoje).forEach(x => {
       const c = caso(x.nome); if (!c) return;
       c.srpa = x;
@@ -43709,7 +43722,17 @@ const meuDia = {
   },
 
   /* Chips de etapa: cor/ação conforme o estado */
+  /* Consulta é atendimento completo por si: tem o próprio estado, e não
+     precisa de ficha de anestesia nem de SRPA. */
+  _ehSoConsulta(c) { return !!c.consulta && !c.ficha && !c.srpa && !c.agenda; },
+  _chipConsulta(c) {
+    if (!c.consulta) return '';
+    const ok = !!c.consulta._finalizado;
+    return '<button type="button" class="md-chip ' + (ok ? 'md-ok' : 'md-meio') + '" onclick="dashboard._abrirFicha(\'consulta\',\'' + c.consulta._id + '\')" title="' + (ok ? 'Consulta finalizada — abrir' : 'Consulta em rascunho — continuar') + '">🩺 ' + (ok ? 'Consulta ✓' : 'Consulta…') + '</button>';
+  },
   _chipFicha(c) {
+    /* nada de cobrar ficha de anestesia de quem veio para uma consulta */
+    if (meuDia._ehSoConsulta(c)) return '';
     if (c.ficha) {
       const ok = !!c.ficha._finalizado;
       return '<button type="button" class="md-chip ' + (ok ? 'md-ok' : 'md-meio') + '" onclick="dashboard._abrirFicha(\'anestesia\',\'' + c.ficha._id + '\')" title="' + (ok ? 'Ficha finalizada — abrir' : 'Ficha em rascunho — continuar') + '">📋 ' + (ok ? 'Ficha ✓' : 'Ficha…') + '</button>';
@@ -43718,6 +43741,7 @@ const meuDia = {
     return '<span class="md-chip md-nada">— ficha</span>';
   },
   _chipSrpa(c) {
+    if (meuDia._ehSoConsulta(c)) return '';
     if (!c.srpa) return '<span class="md-chip md-nada">— SRPA</span>';
     const ok = !!c.srpa._finalizado;
     return '<button type="button" class="md-chip ' + (ok ? 'md-ok' : 'md-meio') + '" onclick="dashboard._abrirFicha(\'recuperacao\',\'' + c.srpa._id + '\')" title="' + (ok ? 'SRPA finalizada — abrir' : 'SRPA em andamento — continuar') + '">🏥 ' + (ok ? 'SRPA ✓' : 'SRPA…') + '</button>';
@@ -43745,12 +43769,19 @@ const meuDia = {
           <span class="md-nome">${utils.escapeHTML(c.nome)}</span>
           <span class="md-proc">${utils.escapeHTML(c.procedimento || '')}</span>
         </div>
-        <div class="md-chips">${meuDia._chipFicha(c)}${meuDia._chipSrpa(c)}${meuDia._chipFin(c)}</div>
+        <div class="md-chips">${meuDia._chipConsulta(c)}${meuDia._chipFicha(c)}${meuDia._chipSrpa(c)}${meuDia._chipFin(c)}</div>
       </div>`).join('');
     if (res) {
+      const consultas = casos.filter(c => meuDia._ehSoConsulta(c));
+      /* "Sem ficha" é um ALARME, e alarme que toca sozinho todo dia deixa de
+         ser lido. Ele acusava as consultas de não terem ficha de anestesia —
+         quatro falsos por dia em quem atende no consultório. Consulta sai da
+         conta: o que falta a ela é ser finalizada, e isso tem chip próprio. */
+      const cirurgicos = casos.filter(c => !meuDia._ehSoConsulta(c));
       const fichasOk = casos.filter(c => c.ficha && c.ficha._finalizado).length;
       const fichasRasc = casos.filter(c => c.ficha && !c.ficha._finalizado).length;
-      const semFicha = casos.filter(c => !c.ficha).length;
+      const semFicha = cirurgicos.filter(c => !c.ficha).length;
+      const consultasAbertas = consultas.filter(c => !c.consulta._finalizado).length;
       const finPend = casos.filter(c => c.fin && !(c.fin.pago || c.fin.status === 'recebido' || c.fin.status === 'finalizado')).length;
       const semFin = casos.filter(c => c.ficha && c.ficha._finalizado && !c.fin).length;
       const chips = [
@@ -43760,6 +43791,10 @@ const meuDia = {
         { i: '⚠️', l: 'Sem ficha', v: semFicha, neg: semFicha > 0 },
         { i: '💰', l: 'Fin. pendente', v: finPend, neg: finPend > 0 }
       ];
+      /* consulta só entra na conta quando existe consulta no dia */
+      if (consultas.length) {
+        chips.splice(2, 0, { i: '🩺', l: 'Consultas por finalizar', v: consultasAbertas, neg: consultasAbertas > 0 });
+      }
       if (semFin) chips.push({ i: '❗', l: 'Finalizada sem financeiro', v: semFin, neg: true });
       res.innerHTML = chips.map(ch =>
         '<span class="fr-chip' + (ch.neg ? ' fr-neg' : '') + '"><span>' + ch.i + '</span><span class="fr-l">' + ch.l + '</span><b>' + ch.v + '</b></span>').join('');
@@ -44162,6 +44197,12 @@ const dashboard = {
 
     /* Liga event delegation para abrir relatórios expandidos ao clicar */
     dashboard._ligarHandlers();
+
+    /* "Meu dia" é parte do mesmo painel e vive dos mesmos registros. Ficava de
+       fora daqui: quando as consultas chegavam da clínica, os cartões e os
+       gráficos se atualizavam e o Meu dia seguia com o dia de antes, até
+       alguém sair do módulo e voltar. */
+    try { if (typeof meuDia !== 'undefined' && meuDia.render) meuDia.render(); } catch (e) {}
 
     dashboard._ultimaAtualizacao = Date.now();
     if (!dashboard._puxando) dashboard._carimbarFrescor();

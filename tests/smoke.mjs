@@ -11115,6 +11115,84 @@ await test('Dashboard completa os gráficos trazendo só os arquivados do perío
   await page.close();
 });
 
+/* 170) "Meu dia" não enxergava CONSULTA. Uma consulta de hoje só chegava lá
+   se já tivesse virado lançamento financeiro — e chegava acusada de "sem
+   ficha", cobrando uma ficha de anestesia que consulta nenhuma tem. Quem
+   atende no consultório via o dia inteiro marcado como pendência. */
+await test('Meu dia enxerga a consulta, não a acusa de "sem ficha", e acompanha o painel', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor', entrouEm: Date.now() }));
+    const hoje = utils.hojeISO();
+    ['agenda','anestesia','recuperacao','financeiro','consulta'].forEach(m => store.setList(m, []));
+
+    /* quatro consultas de hoje, como no consultório — e NENHUM lançamento
+       financeiro ainda: antes, assim, elas sumiam por completo */
+    store.setList('consulta', [
+      { _id: 'c1', paciente: 'LEANDRO QUINTAO', data: hoje, hora: '08:00', _finalizado: true },
+      { _id: 'c2', paciente: 'ARTHUR SOUZA',    data: hoje, hora: '09:00' },
+      { _id: 'c3', paciente: 'CELINA ALVES',    data: hoje, hora: '10:00' },
+      { _id: 'c4', paciente: 'SHEYLA REGINA',   data: hoje, hora: '11:00' }
+    ]);
+
+    const casos = meuDia.coletar();
+    out.enxergaAsQuatro = casos.length === 4;
+    out.trouxeONome = casos.some(c => /LEANDRO/i.test(c.nome));
+    out.trouxeAHora = casos.every(c => !!c.hora);
+
+    ui.navegar('dashboard');
+    await new Promise(res => setTimeout(res, 300));
+    const chip = (rot) => {
+      const el = Array.from(document.querySelectorAll('#meu-dia-resumo .fr-chip'))
+        .find(x => new RegExp(rot, 'i').test(x.textContent || ''));
+      return el ? (el.querySelector('b') || {}).textContent : null;
+    };
+    out.casosHoje = chip('Casos hoje') === '4';
+    /* o alarme para de tocar sozinho: consulta não deve ficha de anestesia */
+    out.semFichaZerou = chip('Sem ficha') === '0';
+    /* e o que de fato falta ganha nome: três ainda não finalizadas */
+    out.contaPorFinalizar = chip('Consultas por finalizar') === '3';
+
+    const linhas = document.getElementById('meu-dia-lista').innerHTML;
+    out.temChipDeConsulta = /Consulta ✓|Consulta…/.test(linhas);
+    out.naoCobraFicha = !/— ficha/.test(linhas) && !/— SRPA/.test(linhas);
+
+    /* caso cirúrgico de verdade continua sendo cobrado */
+    store.setList('anestesia', [{ _id: 'a1', paciente: { nome: 'MARIA CIRURGICA' },
+      procedimento: { data: hoje, hora_inicio: '13:00', descricao: 'Colecistectomia' } }]);
+    store.setList('agenda', [{ _id: 'g1', paciente: 'JOAO AGENDADO', data: hoje, hora: '14:00' }]);
+    meuDia.render();
+    out.cirurgicoAindaCobra = chip('Sem ficha') === '1';   /* o agendado, sem ficha */
+    out.rascunhoContado = chip('Em rascunho') === '1';     /* a ficha da Maria */
+
+    /* e "Meu dia" acompanha o painel: quando a clínica manda dados novos,
+       ele se redesenha junto, sem trocar de módulo */
+    store.setList('consulta', store.list('consulta').concat([
+      { _id: 'c5', paciente: 'CHEGOU DA CLINICA', data: hoje, hora: '15:00' }
+    ]));
+    dashboard.atualizar({ semPuxar: true });
+    await new Promise(res => setTimeout(res, 150));
+    out.acompanhaOPainel = /CHEGOU DA CLINICA/.test(document.getElementById('meu-dia-lista').innerHTML);
+
+    ['agenda','anestesia','recuperacao','financeiro','consulta'].forEach(m => store.setList(m, []));
+    return out;
+  });
+
+  assert(r.enxergaAsQuatro, 'as consultas de hoje aparecem sem depender de lançamento financeiro');
+  assert(r.trouxeONome && r.trouxeAHora, 'com nome e hora');
+  assert(r.casosHoje, 'e entram na conta de casos do dia');
+  assert(r.semFichaZerou, '"Sem ficha" para de acusar consulta — alarme que toca sozinho não é lido');
+  assert(r.contaPorFinalizar, 'o que de fato falta à consulta ganha nome: finalizar');
+  assert(r.temChipDeConsulta, 'a consulta tem chip próprio, que abre a consulta');
+  assert(r.naoCobraFicha, 'e não exibe "— ficha" nem "— SRPA" para quem veio para uma consulta');
+  assert(r.cirurgicoAindaCobra, 'caso cirúrgico sem ficha continua sendo cobrado');
+  assert(r.rascunhoContado, 'e a ficha em rascunho continua contada');
+  assert(r.acompanhaOPainel, 'Meu dia se redesenha junto com o painel quando chega dado da clínica');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
