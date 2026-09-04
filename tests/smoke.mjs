@@ -5851,7 +5851,11 @@ await test('O que já existe no aparelho também se atualiza — a versão mais 
     out.trouxeONovo = !!store.getById('pre', 'c');
     out.entraNaFila = preLanc.fila().some(x => x.rec._id === 'a');
 
-    /* registro ABERTO na tela não é trocado por baixo de quem está digitando */
+    /* Registro ABERTO na tela não é trocado por baixo de quem está digitando.
+       "Aberto" agora exige estar NO MÓDULO: todos os formulários vivem no DOM
+       o tempo todo, e um id esquecido num módulo fechado bloqueava para
+       sempre a atualização vinda da clínica. */
+    ui.navegar('pre');
     setId('a');
     const m2 = cloudRel.mesclarLocal('pre', [
       { _id: 'a', nome: 'Ana', _updatedAt: '2026-08-13T13:00:00.000Z', obs: 'da nuvem' }
@@ -11112,6 +11116,335 @@ await test('Dashboard completa os gráficos trazendo só os arquivados do perío
   assert(r.tudoTrazOsTres, 'em "Tudo", aí sim vem o histórico inteiro');
   assert(r.botaoUsaOPeriodo, 'o aviso do painel deixou de oferecer o download do histórico inteiro');
   assert(r.completarSegueOPeriodo, 'o botão desce exatamente o que falta ao período que está na tela');
+  await page.close();
+});
+
+/* 170) "Meu dia" não enxergava CONSULTA. Uma consulta de hoje só chegava lá
+   se já tivesse virado lançamento financeiro — e chegava acusada de "sem
+   ficha", cobrando uma ficha de anestesia que consulta nenhuma tem. Quem
+   atende no consultório via o dia inteiro marcado como pendência. */
+await test('Meu dia enxerga a consulta, não a acusa de "sem ficha", e acompanha o painel', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor', entrouEm: Date.now() }));
+    const hoje = utils.hojeISO();
+    ['agenda','anestesia','recuperacao','financeiro','consulta'].forEach(m => store.setList(m, []));
+
+    /* quatro consultas de hoje, como no consultório — e NENHUM lançamento
+       financeiro ainda: antes, assim, elas sumiam por completo */
+    store.setList('consulta', [
+      { _id: 'c1', paciente: 'LEANDRO QUINTAO', data: hoje, hora: '08:00', _finalizado: true },
+      { _id: 'c2', paciente: 'ARTHUR SOUZA',    data: hoje, hora: '09:00' },
+      { _id: 'c3', paciente: 'CELINA ALVES',    data: hoje, hora: '10:00' },
+      { _id: 'c4', paciente: 'SHEYLA REGINA',   data: hoje, hora: '11:00' }
+    ]);
+
+    const casos = meuDia.coletar();
+    out.enxergaAsQuatro = casos.length === 4;
+    out.trouxeONome = casos.some(c => /LEANDRO/i.test(c.nome));
+    out.trouxeAHora = casos.every(c => !!c.hora);
+
+    ui.navegar('dashboard');
+    await new Promise(res => setTimeout(res, 300));
+    const chip = (rot) => {
+      const el = Array.from(document.querySelectorAll('#meu-dia-resumo .fr-chip'))
+        .find(x => new RegExp(rot, 'i').test(x.textContent || ''));
+      return el ? (el.querySelector('b') || {}).textContent : null;
+    };
+    out.casosHoje = chip('Casos hoje') === '4';
+    /* o alarme para de tocar sozinho: consulta não deve ficha de anestesia */
+    out.semFichaZerou = chip('Sem ficha') === '0';
+    /* e o que de fato falta ganha nome: três ainda não finalizadas */
+    out.contaPorFinalizar = chip('Consultas por finalizar') === '3';
+
+    const linhas = document.getElementById('meu-dia-lista').innerHTML;
+    out.temChipDeConsulta = /Consulta ✓|Consulta…/.test(linhas);
+    out.naoCobraFicha = !/— ficha/.test(linhas) && !/— SRPA/.test(linhas);
+
+    /* caso cirúrgico de verdade continua sendo cobrado */
+    store.setList('anestesia', [{ _id: 'a1', paciente: { nome: 'MARIA CIRURGICA' },
+      procedimento: { data: hoje, hora_inicio: '13:00', descricao: 'Colecistectomia' } }]);
+    store.setList('agenda', [{ _id: 'g1', paciente: 'JOAO AGENDADO', data: hoje, hora: '14:00' }]);
+    meuDia.render();
+    out.cirurgicoAindaCobra = chip('Sem ficha') === '1';   /* o agendado, sem ficha */
+    out.rascunhoContado = chip('Em rascunho') === '1';     /* a ficha da Maria */
+
+    /* e "Meu dia" acompanha o painel: quando a clínica manda dados novos,
+       ele se redesenha junto, sem trocar de módulo */
+    store.setList('consulta', store.list('consulta').concat([
+      { _id: 'c5', paciente: 'CHEGOU DA CLINICA', data: hoje, hora: '15:00' }
+    ]));
+    dashboard.atualizar({ semPuxar: true });
+    await new Promise(res => setTimeout(res, 150));
+    out.acompanhaOPainel = /CHEGOU DA CLINICA/.test(document.getElementById('meu-dia-lista').innerHTML);
+
+    ['agenda','anestesia','recuperacao','financeiro','consulta'].forEach(m => store.setList(m, []));
+    return out;
+  });
+
+  assert(r.enxergaAsQuatro, 'as consultas de hoje aparecem sem depender de lançamento financeiro');
+  assert(r.trouxeONome && r.trouxeAHora, 'com nome e hora');
+  assert(r.casosHoje, 'e entram na conta de casos do dia');
+  assert(r.semFichaZerou, '"Sem ficha" para de acusar consulta — alarme que toca sozinho não é lido');
+  assert(r.contaPorFinalizar, 'o que de fato falta à consulta ganha nome: finalizar');
+  assert(r.temChipDeConsulta, 'a consulta tem chip próprio, que abre a consulta');
+  assert(r.naoCobraFicha, 'e não exibe "— ficha" nem "— SRPA" para quem veio para uma consulta');
+  assert(r.cirurgicoAindaCobra, 'caso cirúrgico sem ficha continua sendo cobrado');
+  assert(r.rascunhoContado, 'e a ficha em rascunho continua contada');
+  assert(r.acompanhaOPainel, 'Meu dia se redesenha junto com o painel quando chega dado da clínica');
+  await page.close();
+});
+
+/* 171) Um pré-lançamento enviado que a clínica tem e o médico não vê. Dois
+   defeitos independentes levavam ao mesmo lugar. */
+await test('Pré-lançamento que ficou na clínica: a atualização deixa de ser descartada, e o que falta tem nome e botão', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor', entrouEm: Date.now() }));
+
+    /* ---- (a) a atualização era descartada na porta ----
+       `_abertoNaTela` varria os formulários da PÁGINA INTEIRA, e no app todos
+       os módulos ficam no DOM o tempo todo, só escondidos. Bastava ter aberto
+       o registro uma vez para o id ficar no campo escondido daquele
+       formulário — e daí toda atualização vinda da clínica era adiada, calada
+       e para sempre. */
+    ui.navegar('dashboard');
+    await new Promise(res => setTimeout(res, 200));
+    const formPre = document.getElementById('form-pre');
+    let hid = formPre.querySelector('[name="_id"]');
+    if (!hid) { hid = document.createElement('input'); hid.type = 'hidden'; hid.name = '_id'; formPre.appendChild(hid); }
+    hid.value = 'p_adilson';
+
+    store.setList('pre', [{ _id: 'p_adilson', nome: 'ADILSON NUNES', data: '2026-09-01',
+      _updatedAt: '2026-09-01T10:00:00.000Z', _preLanc: { estado: 'rascunho' } }]);
+
+    /* a mesma ficha, agora ENVIADA, chegando da clínica */
+    const daClinica = [{ _id: 'p_adilson', nome: 'ADILSON NUNES', data: '2026-09-01',
+      _updatedAt: '2026-09-01T11:00:00.000Z',
+      _preLanc: { estado: 'enviado', porNome: 'Secretaria', enviadoEm: '2026-09-01T11:00:00.000Z' } }];
+
+    /* estando no Dashboard, o formulário da pré não está sendo editado */
+    const res1 = cloudRel.mesclarLocal('pre', daClinica);
+    out.naoAdiouComOutroModuloAberto = res1.adiados === 0 && res1.atualizados === 1;
+    out.chegouAFila = preLanc.fila().length === 1;
+
+    /* e a guarda continua valendo onde ela importa: no módulo aberto */
+    ui.navegar('pre');
+    await new Promise(res => setTimeout(res, 200));
+    document.getElementById('form-pre').querySelector('[name="_id"]').value = 'p_adilson';
+    const res2 = cloudRel.mesclarLocal('pre', [Object.assign({}, daClinica[0],
+      { _updatedAt: '2026-09-01T12:00:00.000Z', nome: 'SOBRESCREVERIA' })]);
+    out.aindaProtegeOQueEstaNaTela = res2.adiados === 1;
+
+    /* ---- (b) o que falta passa a ter nome e botão ----
+       A conta já existia: "a clínica tem 3, aqui apareceram 0". Mas era só o
+       tamanho do buraco, e mandava tentar de novo — e quando tentar de novo
+       não resolvia, acabava o que o sistema tinha a oferecer. */
+    ui.navegar('dashboard');
+    await new Promise(res => setTimeout(res, 200));
+    store.setList('pre', []);
+    preLanc._diag = { naClinica: 1, naoCouberam: 0, quando: new Date().toISOString(),
+      lista: [{ mod: 'pre', id: 'p_adilson', nome: 'ADILSON NUNES', por: 'Secretaria' }] };
+    preLanc.renderFila();
+    const html = document.getElementById('pl-fila-lista').innerHTML;
+    out.mostraONome = /ADILSON NUNES/.test(html);
+    out.dizOndeEle = /est[áa] na cl[íi]nica, n[ãa]o neste aparelho/.test(html);
+    out.temBotaoDeTrazer = /trazerDaClinica\('pre','p_adilson'\)/.test(html);
+
+    /* e o botão busca UM registro pelo id do aparelho (legacy), não pelo id
+       do banco — que quem parte de uma ficha daqui não tem */
+    out.temBuscaPorLegacy = typeof cloudRel.puxarPorLegacy === 'function';
+    let pediu = null;
+    cloudRel.disponivel = () => true;
+    cloudRel.puxarPorLegacy = async (mod, ids) => { pediu = { mod, ids }; return [{ _id: ids[0],
+      nome: 'ADILSON NUNES', data: '2026-09-01', _preLanc: { estado: 'enviado' } }]; };
+    await preLanc.trazerDaClinica('pre', 'p_adilson');
+    out.buscouOCerto = !!pediu && pediu.mod === 'pre' && pediu.ids[0] === 'p_adilson';
+    out.gravouAqui = !!store.getById('pre', 'p_adilson');
+    out.entrouNaFila = preLanc.fila().some(x => x.rec._id === 'p_adilson');
+
+    store.setList('pre', []);
+    preLanc._diag = null;
+    return out;
+  });
+
+  assert(r.naoAdiouComOutroModuloAberto, 'com outro módulo aberto, a atualização da clínica não é mais descartada');
+  assert(r.chegouAFila, 'e o pré-lançamento enviado chega à fila de conferência');
+  assert(r.aindaProtegeOQueEstaNaTela, 'mas o que está sendo editado na tela continua protegido');
+  assert(r.mostraONome, 'o que ficou na clínica passa a aparecer pelo nome');
+  assert(r.dizOndeEle, 'dizendo onde ele está, em vez de só contar quantos faltam');
+  assert(r.temBotaoDeTrazer, 'com um botão que vai buscá-lo');
+  assert(r.temBuscaPorLegacy, 'buscando pelo id que o aparelho conhece, não pelo id do banco');
+  assert(r.buscouOCerto, 'pede exatamente aquele registro, um só');
+  assert(r.gravouAqui && r.entrouNaFila, 'grava aqui e entra na fila de conferência');
+  await page.close();
+});
+
+/* 172) Painel do médico zerado com 173 registros no período. Não era conta
+   errada: "Pessoal" queria dizer "quem digitou", e num consultório onde a
+   secretária pré-preenche tudo, nada nunca é do médico. */
+await test('"Pessoal" reconhece o médico responsável, e o filtro escolhido não se desfaz sozinho', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    localStorage.removeItem(dashboard.ESCOPO_KEY);
+    localStorage.removeItem(dashboard.PERIODO_KEY);
+    dashboard._restaurados = false;
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1',
+      usuario: 'mpcaliman@hotmail.com', nome: 'Marcelo Caliman', perfil: 'admin',
+      modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor', entrouEm: Date.now() }));
+    localStorage.setItem('medsys.v7.usuario', 'mpcaliman@hotmail.com');
+
+    const so = (l) => dashboard._filtrarEscopo(l, 'pessoal').map(x => x._id);
+
+    /* a ficha que a secretária digitou, com o médico como responsável */
+    out.reconhecePeloResponsavel = so([
+      { _id: 'r1', _updatedBy: 'auxiliompc@gmail.com', anestesiologista: 'Dr. Marcelo Pandolfi Caliman' }
+    ]).length === 1;
+
+    /* variação do nome: o cadastro diz "Marcelo Caliman", a ficha diz o nome
+       completo. Exigir igualdade exata era o que zerava o painel. */
+    out.aceitaNomeMaisCompleto = so([
+      { _id: 'r2', _updatedBy: 'auxiliompc@gmail.com', anestesiologista: 'MARCELO PANDOLFI CALIMAN' }
+    ]).length === 1;
+
+    /* pré-lançamento: quem CONFERIU é o dono do caso */
+    out.reconhecePorQuemConferiu = so([
+      { _id: 'r3', _updatedBy: 'mpcanestesiologia@gmail.com',
+        _preLanc: { estado: 'conferido', conferidoPor: 'Marcelo Caliman' } }
+    ]).length === 1;
+
+    /* e continua excluindo o que é mesmo de outro anestesista */
+    out.aindaExcluiDeOutro = so([
+      { _id: 'r4', _updatedBy: 'outro@x.com', anestesiologista: 'Dra. Fernanda Lopes' }
+    ]).length === 0;
+
+    /* registro sem autoria nenhuma continua contando como meu */
+    out.semAutoriaContinuaMeu = so([{ _id: 'r5' }]).length === 1;
+
+    /* --- o filtro escolhido é uma decisão, e não se desfaz sozinha --- */
+    ui.navegar('dashboard');
+    await new Promise(res => setTimeout(res, 250));
+    dashboard._verComo('clinica');
+    await new Promise(res => setTimeout(res, 150));
+    out.guardouAEscolha = localStorage.getItem(dashboard.ESCOPO_KEY) === 'clinica';
+
+    /* simula abrir o app de novo: o seletor volta ao padrão do HTML */
+    document.getElementById('dash-escopo').value = 'pessoal';
+    dashboard._restaurados = false;
+    dashboard.atualizar({ semPuxar: true });
+    out.voltouComoClinica = document.getElementById('dash-escopo').value === 'clinica';
+
+    localStorage.removeItem(dashboard.ESCOPO_KEY);
+    localStorage.removeItem(dashboard.PERIODO_KEY);
+    return out;
+  });
+
+  assert(r.reconhecePeloResponsavel, 'a ficha digitada pela secretária é do médico que assina');
+  assert(r.aceitaNomeMaisCompleto, 'e o nome não precisa bater letra por letra');
+  assert(r.reconhecePorQuemConferiu, 'no pré-lançamento, quem confere é o dono do caso');
+  assert(r.aindaExcluiDeOutro, 'mas o caso de outro anestesista continua sendo de outro');
+  assert(r.semAutoriaContinuaMeu, 'e o que não tem autoria nenhuma continua contando');
+  assert(r.guardouAEscolha, '"Ver clínica" guarda a escolha');
+  assert(r.voltouComoClinica, 'e ela continua valendo na próxima abertura — senão o painel zera de novo');
+  await page.close();
+});
+
+/* 173) Pacientes: a tela mais larga do sistema. Sem ordenação, sem filtro por
+   plano, com colunas quebrando em duas linhas e o último botão fora da tela. */
+await test('Pacientes: ordenação, filtro por plano e a linha inteira cabendo na tela', async () => {
+  const page = await novaPagina();
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const r = await page.evaluate(async () => {
+    const out = {};
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor', entrouEm: Date.now() }));
+    auth._desbloquear();
+    store.setList('pacientes', [
+      { _id: 'p1', nome: 'ZULEICA ROCHA',  nascimento: '1950-03-02', plano: 'Unimed',    cpf: '111', carteirinha: '0286220300557', telefone: '73 98134-0232', _createdAt: '2026-01-01T10:00:00.000Z' },
+      { _id: 'p2', nome: 'ÂNGELA SOUZA',   nascimento: '1990-07-15', plano: 'Particular',cpf: '222', carteirinha: '', telefone: '73 99907-2543', _createdAt: '2026-03-01T10:00:00.000Z' },
+      { _id: 'p3', nome: 'BRUNO ALVES',    nascimento: '2015-11-05', plano: 'Unimed',    cpf: '333', carteirinha: '2861907009050118', telefone: '73 99943-7042', _createdAt: '2026-02-01T10:00:00.000Z' }
+    ]);
+    ui.navegar('pacientes');
+    await new Promise(res => setTimeout(res, 350));
+
+    const nomes = () => Array.from(document.querySelectorAll('#pacientes-tbody tr td:first-child strong'))
+      .map(x => x.textContent.trim());
+    const sel = document.getElementById('pac-f-ordem');
+    const plano = document.getElementById('pac-f-plano');
+    out.temOrdenacao = !!sel;
+    out.temFiltroDePlano = !!plano;
+
+    /* acento não pode jogar "Ângela" para depois de "Zuleica" */
+    sel.value = 'nome'; pacientes.render();
+    out.alfabeticaIgnoraAcento = nomes()[0] === 'ÂNGELA SOUZA' && nomes()[2] === 'ZULEICA ROCHA';
+    sel.value = 'nome_desc'; pacientes.render();
+    out.inverte = nomes()[0] === 'ZULEICA ROCHA';
+    sel.value = 'recente'; pacientes.render();
+    out.porCadastro = nomes()[0] === 'ÂNGELA SOUZA';
+    sel.value = 'nasc_novo'; pacientes.render();
+    out.porNascimento = nomes()[0] === 'BRUNO ALVES';
+
+    /* o filtro de plano só oferece o que existe */
+    out.planosDoCadastro = Array.from(plano.options).map(o => o.value).sort().join(',') === ',Particular,Unimed';
+    plano.value = 'Unimed'; sel.value = 'nome'; pacientes.render();
+    out.filtraPorPlano = nomes().length === 2 && nomes().indexOf('ÂNGELA SOUZA') < 0;
+
+    /* filtro que não deixa passar nada não pode dizer "nenhum cadastrado" */
+    document.getElementById('pac-f-busca').value = 'zzzzz';
+    pacientes.render();
+    const vazio = document.querySelector('#pacientes-tbody .empty-row td').textContent;
+    out.vazioNaoMente = /no cadastro/i.test(vazio) && !/Nenhum paciente cadastrado/.test(vazio);
+
+    pacientes.limparFiltros();
+    out.limparVoltaTudo = nomes().length === 3 && sel.value === 'nome' && plano.value === '';
+
+    /* clicar no cabeçalho ordena, e a seta diz por onde */
+    pacientes.ordenarPor('nome');
+    out.cabecalhoInverte = sel.value === 'nome_desc';
+    out.temSeta = !!document.querySelector('#pacientes-table th[data-ord="nome"] .ord-seta');
+    pacientes.ordenarPor('nome');
+
+    /* --- alinhamento: nada quebrando em duas linhas, nada fora da tela --- */
+    const linha = document.querySelector('#pacientes-tbody tr');
+    const cels = Array.from(linha.querySelectorAll('td'));
+    const tel = cels.find(td => td.getAttribute('data-label') === 'Telefone');
+    out.telefoneNaoQuebra = getComputedStyle(tel).whiteSpace === 'nowrap';
+
+    const acoes = linha.querySelector('td.actions-cell');
+    const botoes = Array.from(acoes.querySelectorAll('.btn'));
+    out.temTodosOsBotoes = botoes.length === 5;
+    /* o último botão tem de caber DENTRO da célula de ações — era ele que
+       ficava fora do campo visual */
+    const rc = acoes.getBoundingClientRect();
+    const rb = botoes[botoes.length - 1].getBoundingClientRect();
+    out.ultimoBotaoCabe = rb.right <= rc.right + 1 && rb.width > 0;
+    /* e a tabela é larga o bastante para o contêiner rolar até ele */
+    const tab = document.getElementById('pacientes-table');
+    out.tabelaTemLarguraReal = tab.getBoundingClientRect().width >= 1100;
+
+    store.setList('pacientes', []);
+    return out;
+  });
+
+  assert(r.temOrdenacao && r.temFiltroDePlano, 'a tela ganha ordenação e filtro por plano');
+  assert(r.alfabeticaIgnoraAcento, 'a ordem alfabética não joga os acentuados para o fim');
+  assert(r.inverte, 'e inverte quando se pede Z → A');
+  assert(r.porCadastro, 'ordena por cadastro mais recente');
+  assert(r.porNascimento, 'e por nascimento');
+  assert(r.planosDoCadastro, 'o filtro só oferece os planos que existem no cadastro');
+  assert(r.filtraPorPlano, 'e filtra por eles');
+  assert(r.vazioNaoMente, 'lista vazia por filtro não pode dizer "nenhum paciente cadastrado"');
+  assert(r.limparVoltaTudo, 'Limpar devolve a lista inteira e a ordem padrão');
+  assert(r.cabecalhoInverte && r.temSeta, 'o cabeçalho ordena e a seta diz por onde');
+  assert(r.telefoneNaoQuebra, 'telefone e afins param de quebrar em duas linhas');
+  assert(r.temTodosOsBotoes, 'os cinco botões da linha continuam existindo');
+  assert(r.ultimoBotaoCabe, 'e o último cabe na célula — era ele que ficava fora da tela');
+  assert(r.tabelaTemLarguraReal, 'a tabela tem largura de verdade, para a rolagem alcançar tudo');
   await page.close();
 });
 

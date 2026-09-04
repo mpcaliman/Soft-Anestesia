@@ -1310,6 +1310,31 @@ table.data .empty-row td {
   text-align: center; color: var(--text-mute);
   padding: 30px; font-style: italic;
 }
+
+/* PACIENTES — a tabela mais larga do sistema, e a que mais quebrava.
+   Duas coisas estavam erradas ao mesmo tempo:
+   • CPF, nascimento, carteirinha e telefone quebravam em duas linhas, e cada
+     linha da tabela ficava com o dobro da altura por causa de um espaço;
+   • a coluna de ações é um flex container e não entra na conta de largura da
+     tabela — o último botão ficava fora da tela, sem nem chegar a empurrar a
+     barra de rolagem que existia justamente para alcançá-lo.
+   A largura mínima devolve a rolagem horizontal onde ela faz sentido; abaixo
+   de 768px a tabela vira cartão e a regra sai do caminho. */
+@media (min-width: 769px) {
+  #pacientes-table { min-width: 1040px; }
+  #pacientes-table th, #pacientes-table td { white-space: nowrap; }
+  /* o nome pode ser longo: é ele que ganha o espaço que sobra */
+  #pacientes-table th:first-child, #pacientes-table td:first-child { white-space: normal; min-width: 210px; }
+  /* colunas de números ficam compactas: elas não precisam do espaço, o nome sim */
+  #pacientes-table th, #pacientes-table td { padding-left: 9px; padding-right: 9px; }
+  #pacientes-table td.actions-cell .btn { padding-left: 7px; padding-right: 7px; }
+  #pacientes-table td.actions-cell { flex-wrap: nowrap; justify-content: flex-end; }
+  #pacientes-table td.actions-cell .btn { flex: 0 0 auto; }
+}
+/* cabeçalho clicável para ordenar */
+#pacientes-table th[data-ord] { cursor: pointer; user-select: none; }
+#pacientes-table th[data-ord]:hover { color: var(--primary); }
+#pacientes-table th[data-ord] .ord-seta { opacity: .55; font-size: .7rem; margin-left: 3px; }
 .status-pill {
   display: inline-block; padding: 2px 10px;
   border-radius: 12px; font-size: .72rem;
@@ -4523,7 +4548,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-28d</b><br>
+    v7.1 · build <b id="build-tag">2026-08-28h</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -4594,11 +4619,11 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <div class="action-divider"></div>
     <div class="field" style="margin:0; flex-direction:row; align-items:center; gap:8px">
       <label style="margin:0; font-size:.75rem">Período:</label>
-      <select id="dash-escopo" onchange="dashboard.atualizar()" title="Só os seus registros ou os de toda a clínica" style="padding:5px 8px; font-size:.82rem; width:auto">
+      <select id="dash-escopo" onchange="dashboard._guardarFiltros(); dashboard.atualizar()" title="Só os seus registros ou os de toda a clínica" style="padding:5px 8px; font-size:.82rem; width:auto">
         <option value="pessoal">👤 Pessoal</option>
         <option value="clinica">🏥 Clínica</option>
       </select>
-      <select id="dash-periodo" onchange="dashboard.atualizar()" style="padding:5px 8px; font-size:.82rem; width:auto">
+      <select id="dash-periodo" onchange="dashboard._guardarFiltros(); dashboard.atualizar()" style="padding:5px 8px; font-size:.82rem; width:auto">
         <option value="hoje">Hoje</option>
         <option value="7">Esta semana</option>
         <option value="30" selected>Este mês</option>
@@ -9065,8 +9090,24 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
       <div class="field" style="grid-column:auto"><label>Buscar</label>
         <input type="text" id="pac-f-busca" placeholder="Nome, CPF, plano..." oninput="pacientes.render()">
       </div>
+      <div class="field" style="grid-column:auto"><label>Plano</label>
+        <select id="pac-f-plano" onchange="pacientes.render()">
+          <option value="">Todos os planos</option>
+        </select>
+      </div>
+      <div class="field" style="grid-column:auto"><label>Ordenar por</label>
+        <select id="pac-f-ordem" onchange="pacientes.render()">
+          <option value="nome">Nome (A → Z)</option>
+          <option value="nome_desc">Nome (Z → A)</option>
+          <option value="recente">Cadastro mais recente</option>
+          <option value="antigo">Cadastro mais antigo</option>
+          <option value="nasc_novo">Nascimento (mais novo)</option>
+          <option value="nasc_velho">Nascimento (mais velho)</option>
+          <option value="plano">Plano (A → Z)</option>
+        </select>
+      </div>
       <div class="filter-actions">
-        <button class="btn btn-sm" onclick="document.getElementById('pac-f-busca').value=''; pacientes.render();">Limpar</button>
+        <button class="btn btn-sm" onclick="pacientes.limparFiltros()">Limpar</button>
         <button class="btn btn-sm" id="pac-sync-btn" onclick="pacientes.sincronizarNuvem()" title="Puxa os pacientes do banco relacional (nuvem) e junta com os deste aparelho">☁️ Sincronizar pacientes</button>
         <button class="btn btn-sm" onclick="pacientes.mesclarDuplicados()" title="Junta num só os cadastros repetidos do mesmo paciente (o histórico continua completo)">👥 Juntar cadastros repetidos</button>
       </div>
@@ -9078,8 +9119,11 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
         <div style="overflow-x:auto">
           <table class="data" id="pacientes-table">
             <thead><tr>
-              <th>Nome</th><th>CPF</th><th>Nascimento</th>
-              <th>Plano</th><th>Carteirinha</th><th>Telefone</th>
+              <th data-ord="nome" onclick="pacientes.ordenarPor('nome')">Nome</th>
+              <th>CPF</th>
+              <th data-ord="nasc_novo" onclick="pacientes.ordenarPor('nasc_novo')">Nascimento</th>
+              <th data-ord="plano" onclick="pacientes.ordenarPor('plano')">Plano</th>
+              <th>Carteirinha</th><th>Telefone</th>
               <th class="actions-cell"></th>
             </tr></thead>
             <tbody id="pacientes-tbody"></tbody>
@@ -12727,13 +12771,22 @@ const preLanc = {
       }
       preLanc._ultimaBusca = Date.now();
       let novos = 0, atualizados = 0, naClinica = 0, naoCouberam = 0, leu = 0;
+      const naClinicaLista = [];
       for (const mod of preLanc.MODS) {
         const remotos = await cloudRel.puxarModulo(mod);
         if (!Array.isArray(remotos)) continue;
         leu++;
         /* Quantos ENVIADOS existem na clínica, antes de qualquer filtro daqui.
            É o número que responde "faltou chegar" x "faltou subir". */
-        naClinica += remotos.filter(r => preLanc.estado(r) === 'enviado' && !r._finalizado).length;
+        const enviados = remotos.filter(r => preLanc.estado(r) === 'enviado' && !r._finalizado);
+        naClinica += enviados.length;
+        /* Guarda QUEM está esperando, não só quantos. "A clínica tem 3 e aqui
+           apareceram 0" é um diagnóstico; sem os nomes, não é uma saída. */
+        enviados.forEach(r => naClinicaLista.push({
+          mod, id: r._id, nome: arquivo._nomeDe(r),
+          quando: (r._preLanc && r._preLanc.enviadoEm) || '',
+          por: (r._preLanc && r._preLanc.porNome) || ''
+        }));
         const m = cloudRel.mesclarLocal(mod, remotos);
         novos += m.novos; atualizados += m.atualizados; naoCouberam += m.naoCouberam;
       }
@@ -12741,7 +12794,7 @@ const preLanc = {
         dizer('Não consegui ler a clínica agora — confira a conexão e tente de novo.', 'error');
         return null;
       }
-      preLanc._diag = { naClinica, naoCouberam, quando: new Date().toISOString() };
+      preLanc._diag = { naClinica, naoCouberam, lista: naClinicaLista, quando: new Date().toISOString() };
       try { preLanc.renderFila(); } catch (e) {}
       if (novos || atualizados) {
         dizer('☁️ ' + (novos + atualizados) + ' pré-lançamento(s) atualizado(s) da clínica');
@@ -12897,6 +12950,33 @@ const preLanc = {
       preLanc._conferenciaDeContas(fila.length);
   },
 
+  /* Busca UM registro na clínica e o grava aqui, passando por cima das
+     guardas da mesclagem — elas existem para o caso geral (não sobrescrever o
+     que está sendo editado, não regravar o que já é igual), e aqui a pessoa
+     está pedindo justamente aquele registro, de propósito. */
+  async trazerDaClinica(mod, id) {
+    if (!mod || !id) return false;
+    try {
+      if (typeof cloudRel === 'undefined' || !cloudRel.disponivel()) {
+        toast('A clínica não está disponível neste aparelho agora.', 'warn'); return false;
+      }
+      toast('⏳ Buscando na clínica…');
+      const remotos = await cloudRel.puxarPorLegacy(mod, [id]);
+      const achado = Array.isArray(remotos) ? remotos.find(x => x && x._id === id) : null;
+      if (!achado) { toast('Não achei este registro na clínica agora — tente de novo.', 'warn'); return false; }
+      const lst = store.list(mod) || [];
+      const i = lst.findIndex(x => x && x._id === id);
+      if (i >= 0) lst[i] = achado; else lst.unshift(achado);
+      if (store.setList(mod, lst) === false) {
+        toast('⚠️ Não coube neste aparelho — libere espaço em Ajustes → Armazenamento.', 'error');
+        return false;
+      }
+      try { preLanc.renderFila(); } catch (e) {}
+      try { dashboard._abrirRegistro(mod, id); } catch (e) {}
+      return true;
+    } catch (e) { toast('Falha ao trazer da clínica: ' + (e.message || ''), 'error'); return false; }
+  },
+
   /* "Era pra aparecer 13 e aparecem 8." Sem esta conta, não dá para saber se o
      que falta não CHEGOU (problema aqui) ou não SUBIU (problema no aparelho de
      quem lançou). O app tem os dois números — então que ele diga. */
@@ -12905,9 +12985,25 @@ const preLanc = {
     if (!d) return '';
     const linhas = [];
     if (d.naClinica > naFila) {
+      /* NOMEAR o que falta, e dar como abrir. Antes esta linha só dizia o
+         tamanho do buraco e mandava "tentar de novo" — e quando tentar de
+         novo não resolvia, acabava o que o sistema tinha a oferecer. Agora
+         cada um que ficou de fora aparece com nome e um botão que vai
+         buscá-lo na clínica, um só, e abre. */
+      const naFilaIds = new Set(preLanc.fila().map(x => x.rec && x.rec._id));
+      const faltando = (d.lista || []).filter(x => x && x.id && !naFilaIds.has(x.id));
       linhas.push('☁️ A clínica tem <b>' + d.naClinica + '</b> aguardando conferência e aqui apareceram <b>' + naFila + '</b>.' +
         (d.naoCouberam
           ? ' <b>' + d.naoCouberam + '</b> não couberam neste aparelho — libere espaço em Ajustes → Armazenamento.'
+          : '') +
+        (faltando.length
+          ? '<div style="margin-top:8px">' + faltando.map(x =>
+              '<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:6px 0;border-top:1px dashed var(--border)">' +
+              '<span style="font-size:.84rem;min-width:0"><b>' + utils.escapeHTML(x.nome || '(sem nome)') + '</b>' +
+              '<br><span style="color:var(--text-mute);font-size:.75rem">' + utils.escapeHTML(lixeira.LABELS[x.mod] || x.mod) +
+              (x.por ? ' · por ' + utils.escapeHTML(x.por) : '') + ' · está na clínica, não neste aparelho</span></span>' +
+              '<button class="btn btn-xs btn-primary" onclick="preLanc.trazerDaClinica(\'' + x.mod + '\',\'' + x.id + '\')">Trazer e abrir</button>' +
+              '</div>').join('') + '</div>'
           : ' Toque em <b>🔄 Buscar</b> de novo; se persistir, me avise.'));
     } else if (d.naClinica < naFila) {
       /* Registro preso NESTE aparelho: existe aqui, não existe na clínica.
@@ -21755,10 +21851,23 @@ const cloudRel = {
     if (!x) return '';
     return String(x._updatedAt || x._relUpdatedAt || x.atualizado_em || x._createdAt || '');
   },
-  _abertoNaTela(id) {
+  /* Adiar a mesclagem só faz sentido para o que está SENDO EDITADO agora —
+     sobrescrever o que a pessoa tem na tela seria apagar o que ela digitou.
+     A varredura pegava `form [name="_id"]` da página inteira, e no app TODOS
+     os módulos ficam no DOM o tempo todo, apenas escondidos. Bastava alguém
+     ter aberto um registro uma vez para o id continuar no campo escondido
+     daquele formulário — e daí em diante toda atualização vinda da clínica
+     era adiada para sempre, calada. Era assim que um pré-lançamento enviado
+     não chegava: chegava e era descartado na porta. */
+  _abertoNaTela(id, mod) {
     try {
       if (!id) return false;
-      return Array.from(document.querySelectorAll('form [name="_id"]')).some(el => el.value === id);
+      const atual = (typeof state !== 'undefined' && state.currentModule) || '';
+      if (mod && atual !== mod) return false;      /* módulo fechado não edita nada */
+      const form = document.getElementById('form-' + (mod || atual));
+      if (!form) return false;
+      const el = form.querySelector('[name="_id"]');
+      return !!el && el.value === id;
     } catch (e) { return false; }
   },
   mesclarLocal(mod, remotos) {
@@ -21779,7 +21888,7 @@ const cloudRel = {
       const i = ix.get(item._id);
       const local = locais[i];
       if (cloudRel._quando(item) <= cloudRel._quando(local)) { res.iguais++; return; }
-      if (cloudRel._abertoNaTela(item._id)) { res.adiados++; return; }
+      if (cloudRel._abertoNaTela(item._id, mod)) { res.adiados++; return; }
       locais[i] = item; entraram.push(item._id); res.atualizados++;
     });
     if (!res.novos && !res.atualizados) return res;
@@ -21937,6 +22046,33 @@ const cloudRel = {
   /* Conteúdo de ids específicos, em lotes. Devolve null se QUALQUER lote
      falhar: meia lista parece sincronização bem-sucedida e some registro sem
      ninguém perceber — prefiro não mesclar nada e tentar de novo depois. */
+  /* Busca por LEGACY_ID — o `_id` que o aparelho conhece. `puxarPorIds` usa a
+     chave do banco, que só quem leu o índice tem em mãos; quem parte de um
+     registro daqui parte do legacy. */
+  async puxarPorLegacy(mod, legacyIds) {
+    const cfg = cloudRel.MODOS[mod]; if (!cfg) return null;
+    if (!Array.isArray(legacyIds) || !legacyIds.length) return [];
+    if (!cloudRel.disponivel()) return null;
+    if (!(await cloud._garantirToken())) return null;
+    const org = await cloudRel._orgAsync(); if (!org) return null;
+    const c = cloud.config();
+    const out = [];
+    for (let i = 0; i < legacyIds.length; i += cloudRel._LOTE_IDS) {
+      const lote = legacyIds.slice(i, i + cloudRel._LOTE_IDS);
+      try {
+        const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
+          '&deleted_at=is.null&legacy_id=in.(' + lote.map(encodeURIComponent).join(',') + ')' +
+          '&select=' + cloudRel._REG_SELECT,
+          { headers: cloud._headers(true) });
+        if (!r.ok) return null;
+        const rows = await r.json();
+        if (!Array.isArray(rows)) return null;
+        rows.forEach(row => out.push(cloudRel._rowParaRegistro(row)));
+      } catch (e) { return null; }
+    }
+    return out;
+  },
+
   async puxarPorIds(mod, ids) {
     const cfg = cloudRel.MODOS[mod]; if (!cfg) return null;
     if (!Array.isArray(ids) || !ids.length) return [];
@@ -40252,21 +40388,105 @@ const pacientes = {
     toast('Versão da nuvem adotada neste aparelho');
     pacientes._conflito = null;
   },
+  /* Nome comparável para ordenar: sem acento e em caixa baixa. Sem isto,
+     "Ângela" cai depois de "Zuleica" — a tabela ASCII põe os acentuados no
+     fim, e uma lista de pacientes brasileiros fica visivelmente errada. */
+  _chaveNome(v) {
+    return String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  },
+  _quandoCadastrou(p) {
+    return new Date((p && (p._createdAt || p._updatedAt)) || 0).getTime() || 0;
+  },
+  ORDENS: {
+    nome:      (a, b) => pacientes._chaveNome(a.nome).localeCompare(pacientes._chaveNome(b.nome)),
+    nome_desc: (a, b) => pacientes._chaveNome(b.nome).localeCompare(pacientes._chaveNome(a.nome)),
+    recente:   (a, b) => pacientes._quandoCadastrou(b) - pacientes._quandoCadastrou(a),
+    antigo:    (a, b) => pacientes._quandoCadastrou(a) - pacientes._quandoCadastrou(b),
+    /* nascimento vazio vai para o fim nas duas direções: um campo em branco
+       não é "o mais novo" nem "o mais velho", é ausência de informação */
+    nasc_novo: (a, b) => String(b.nascimento || '').localeCompare(String(a.nascimento || '')),
+    nasc_velho:(a, b) => (String(a.nascimento || '~').localeCompare(String(b.nascimento || '~'))),
+    plano:     (a, b) => (String(a.plano || '~~').toLowerCase().localeCompare(String(b.plano || '~~').toLowerCase()))
+                          || pacientes.ORDENS.nome(a, b)
+  },
+  /* Preenche o filtro de planos com os que EXISTEM no cadastro — oferecer um
+     plano que ninguém tem é oferecer uma lista vazia. */
+  _planosNoCadastro() {
+    const set = new Set();
+    pacientes.list().forEach(p => { const v = String(p.plano || '').trim(); if (v) set.add(v); });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  },
+  _encherPlanos() {
+    const sel = document.getElementById('pac-f-plano');
+    if (!sel) return;
+    const atual = sel.value;
+    const planos = pacientes._planosNoCadastro();
+    sel.innerHTML = '<option value="">Todos os planos</option>' +
+      planos.map(v => '<option value="' + utils.escapeAttr(v) + '">' + utils.escapeHTML(v) + '</option>').join('');
+    if (atual && planos.indexOf(atual) >= 0) sel.value = atual;
+  },
+  /* Clique no cabeçalho: mesma coluna de novo inverte, quando faz sentido. */
+  /* A seta no cabeçalho diz por onde a lista está ordenada. Sem ela, clicar
+     numa coluna e ver a lista mudar não explica o que aconteceu. */
+  _marcarSetaOrdem() {
+    const sel = document.getElementById('pac-f-ordem');
+    const atual = sel ? sel.value : 'nome';
+    const seta = { nome: '▲', nome_desc: '▼', nasc_novo: '▼', nasc_velho: '▲', plano: '▲' };
+    document.querySelectorAll('#pacientes-table th[data-ord]').forEach(th => {
+      const chave = th.getAttribute('data-ord');
+      const casa = (chave === atual) ||
+        (chave === 'nome' && atual === 'nome_desc') ||
+        (chave === 'nasc_novo' && atual === 'nasc_velho');
+      const antiga = th.querySelector('.ord-seta');
+      if (antiga) antiga.remove();
+      if (!casa) return;
+      const el = document.createElement('span');
+      el.className = 'ord-seta';
+      el.textContent = seta[atual] || '▲';
+      th.appendChild(el);
+    });
+  },
+  ordenarPor(chave) {
+    const sel = document.getElementById('pac-f-ordem');
+    if (!sel) return;
+    const par = { nome: 'nome_desc', nome_desc: 'nome', nasc_novo: 'nasc_velho', nasc_velho: 'nasc_novo' };
+    sel.value = (sel.value === chave && par[chave]) ? par[chave] : chave;
+    pacientes.render();
+  },
+  limparFiltros() {
+    const b = document.getElementById('pac-f-busca'); if (b) b.value = '';
+    const p = document.getElementById('pac-f-plano'); if (p) p.value = '';
+    const o = document.getElementById('pac-f-ordem'); if (o) o.value = 'nome';
+    pacientes.render();
+  },
   filtrar() {
     const q = (document.getElementById('pac-f-busca')?.value || '').toLowerCase().trim();
-    const list = pacientes.list();
-    if (!q) return list;
-    return list.filter(p => {
+    const plano = (document.getElementById('pac-f-plano')?.value || '').trim();
+    const ordem = (document.getElementById('pac-f-ordem')?.value || 'nome');
+    let list = pacientes.list();
+    if (plano) list = list.filter(p => String(p.plano || '').trim() === plano);
+    if (q) list = list.filter(p => {
       const blob = ((p.nome || '') + ' ' + (p.cpf || '') + ' ' + (p.plano || '') + ' ' + (p.carteirinha || '')).toLowerCase();
       return blob.includes(q);
     });
+    const cmp = pacientes.ORDENS[ordem] || pacientes.ORDENS.nome;
+    /* cópia: ordenar a lista do store trocaria a ordem de gravação */
+    return list.slice().sort(cmp);
   },
   render() {
+    pacientes._encherPlanos();
+    pacientes._marcarSetaOrdem();
     const listaCompleta = pacientes.filtrar();
     const tbody = document.getElementById('pacientes-tbody');
     if (!tbody) return;
     if (listaCompleta.length === 0) {
-      tbody.innerHTML = '<tr class="empty-row"><td colspan="7">Nenhum paciente cadastrado</td></tr>';
+      /* "Nenhum paciente cadastrado" com filtro ligado é mentira: há
+         cadastro, o filtro é que não deixou passar. */
+      const total = pacientes.list().length;
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="7">' +
+        (total ? 'Nenhum paciente com este filtro — há <b>' + total + '</b> no cadastro. ' +
+                 '<button type="button" class="btn btn-xs" onclick="pacientes.limparFiltros()">Limpar filtros</button>'
+               : 'Nenhum paciente cadastrado') + '</td></tr>';
       return;
     }
     /* Performance: renderiza no máximo 100 por vez. Com muitos pacientes,
@@ -43673,7 +43893,7 @@ const meuDia = {
     const caso = (nome) => {
       const k = meuDia._norm(nome);
       if (!k) return null;
-      if (!casos[k]) casos[k] = { nome, hora: '', procedimento: '', agenda: null, ficha: null, srpa: null, fin: null };
+      if (!casos[k]) casos[k] = { nome, hora: '', procedimento: '', agenda: null, ficha: null, srpa: null, fin: null, consulta: null };
       return casos[k];
     };
     store.list('agenda').filter(x => x.data === hoje).forEach(x => {
@@ -43695,6 +43915,19 @@ const meuDia = {
       if (!c.hora) c.hora = pr.hora_sala_entrada || pr.hora_inicio || x.hora_sala_entrada || x.hora_inicio || '';
       if (!c.procedimento) c.procedimento = pr.descricao || (typeof x.procedimento === 'string' ? x.procedimento : '') || '';
     });
+    /* CONSULTA. Estava fora, e era o buraco: uma consulta de hoje só chegava
+       aqui se já tivesse virado lançamento financeiro — e chegava como caso
+       "sem ficha", cobrando uma ficha de anestesia que consulta nenhuma tem.
+       Quem atende no consultório via o dia inteiro acusado de pendência. */
+    store.list('consulta').forEach(x => {
+      const data = x.data || x.data_consulta || '';
+      if (data !== hoje) return;
+      const nome = x.paciente || x.nome || (x.paciente_nome || '');
+      const c = caso(nome); if (!c) return;
+      c.consulta = x;
+      if (!c.hora) c.hora = x.hora || '';
+      if (!c.procedimento) c.procedimento = x.motivo || x.procedimento || 'Consulta';
+    });
     store.list('recuperacao').filter(x => x.data === hoje).forEach(x => {
       const c = caso(x.nome); if (!c) return;
       c.srpa = x;
@@ -43709,7 +43942,17 @@ const meuDia = {
   },
 
   /* Chips de etapa: cor/ação conforme o estado */
+  /* Consulta é atendimento completo por si: tem o próprio estado, e não
+     precisa de ficha de anestesia nem de SRPA. */
+  _ehSoConsulta(c) { return !!c.consulta && !c.ficha && !c.srpa && !c.agenda; },
+  _chipConsulta(c) {
+    if (!c.consulta) return '';
+    const ok = !!c.consulta._finalizado;
+    return '<button type="button" class="md-chip ' + (ok ? 'md-ok' : 'md-meio') + '" onclick="dashboard._abrirFicha(\'consulta\',\'' + c.consulta._id + '\')" title="' + (ok ? 'Consulta finalizada — abrir' : 'Consulta em rascunho — continuar') + '">🩺 ' + (ok ? 'Consulta ✓' : 'Consulta…') + '</button>';
+  },
   _chipFicha(c) {
+    /* nada de cobrar ficha de anestesia de quem veio para uma consulta */
+    if (meuDia._ehSoConsulta(c)) return '';
     if (c.ficha) {
       const ok = !!c.ficha._finalizado;
       return '<button type="button" class="md-chip ' + (ok ? 'md-ok' : 'md-meio') + '" onclick="dashboard._abrirFicha(\'anestesia\',\'' + c.ficha._id + '\')" title="' + (ok ? 'Ficha finalizada — abrir' : 'Ficha em rascunho — continuar') + '">📋 ' + (ok ? 'Ficha ✓' : 'Ficha…') + '</button>';
@@ -43718,6 +43961,7 @@ const meuDia = {
     return '<span class="md-chip md-nada">— ficha</span>';
   },
   _chipSrpa(c) {
+    if (meuDia._ehSoConsulta(c)) return '';
     if (!c.srpa) return '<span class="md-chip md-nada">— SRPA</span>';
     const ok = !!c.srpa._finalizado;
     return '<button type="button" class="md-chip ' + (ok ? 'md-ok' : 'md-meio') + '" onclick="dashboard._abrirFicha(\'recuperacao\',\'' + c.srpa._id + '\')" title="' + (ok ? 'SRPA finalizada — abrir' : 'SRPA em andamento — continuar') + '">🏥 ' + (ok ? 'SRPA ✓' : 'SRPA…') + '</button>';
@@ -43745,12 +43989,19 @@ const meuDia = {
           <span class="md-nome">${utils.escapeHTML(c.nome)}</span>
           <span class="md-proc">${utils.escapeHTML(c.procedimento || '')}</span>
         </div>
-        <div class="md-chips">${meuDia._chipFicha(c)}${meuDia._chipSrpa(c)}${meuDia._chipFin(c)}</div>
+        <div class="md-chips">${meuDia._chipConsulta(c)}${meuDia._chipFicha(c)}${meuDia._chipSrpa(c)}${meuDia._chipFin(c)}</div>
       </div>`).join('');
     if (res) {
+      const consultas = casos.filter(c => meuDia._ehSoConsulta(c));
+      /* "Sem ficha" é um ALARME, e alarme que toca sozinho todo dia deixa de
+         ser lido. Ele acusava as consultas de não terem ficha de anestesia —
+         quatro falsos por dia em quem atende no consultório. Consulta sai da
+         conta: o que falta a ela é ser finalizada, e isso tem chip próprio. */
+      const cirurgicos = casos.filter(c => !meuDia._ehSoConsulta(c));
       const fichasOk = casos.filter(c => c.ficha && c.ficha._finalizado).length;
       const fichasRasc = casos.filter(c => c.ficha && !c.ficha._finalizado).length;
-      const semFicha = casos.filter(c => !c.ficha).length;
+      const semFicha = cirurgicos.filter(c => !c.ficha).length;
+      const consultasAbertas = consultas.filter(c => !c.consulta._finalizado).length;
       const finPend = casos.filter(c => c.fin && !(c.fin.pago || c.fin.status === 'recebido' || c.fin.status === 'finalizado')).length;
       const semFin = casos.filter(c => c.ficha && c.ficha._finalizado && !c.fin).length;
       const chips = [
@@ -43760,6 +44011,10 @@ const meuDia = {
         { i: '⚠️', l: 'Sem ficha', v: semFicha, neg: semFicha > 0 },
         { i: '💰', l: 'Fin. pendente', v: finPend, neg: finPend > 0 }
       ];
+      /* consulta só entra na conta quando existe consulta no dia */
+      if (consultas.length) {
+        chips.splice(2, 0, { i: '🩺', l: 'Consultas por finalizar', v: consultasAbertas, neg: consultasAbertas > 0 });
+      }
       if (semFin) chips.push({ i: '❗', l: 'Finalizada sem financeiro', v: semFin, neg: true });
       res.innerHTML = chips.map(ch =>
         '<span class="fr-chip' + (ch.neg ? ' fr-neg' : '') + '"><span>' + ch.i + '</span><span class="fr-l">' + ch.l + '</span><b>' + ch.v + '</b></span>').join('');
@@ -44007,6 +44262,7 @@ const dashboard = {
     if (!opts.semPuxar) {
       try { dashboard.puxarDaClinica({ forcar: !!opts.forcar }); } catch (e) {}
     }
+    dashboard._restaurarFiltros();
     const periodo = document.getElementById('dash-periodo').value;
     const anestesias  = dashboard.filtrarPorPeriodo(store.list('anestesia'),  periodo, 'procedimento') /* fallback p/ updatedAt */
                           .filter(_ => true); // simplificação: usa _updatedAt
@@ -44163,6 +44419,12 @@ const dashboard = {
     /* Liga event delegation para abrir relatórios expandidos ao clicar */
     dashboard._ligarHandlers();
 
+    /* "Meu dia" é parte do mesmo painel e vive dos mesmos registros. Ficava de
+       fora daqui: quando as consultas chegavam da clínica, os cartões e os
+       gráficos se atualizavam e o Meu dia seguia com o dia de antes, até
+       alguém sair do módulo e voltar. */
+    try { if (typeof meuDia !== 'undefined' && meuDia.render) meuDia.render(); } catch (e) {}
+
     dashboard._ultimaAtualizacao = Date.now();
     if (!dashboard._puxando) dashboard._carimbarFrescor();
   },
@@ -44171,25 +44433,56 @@ const dashboard = {
      gravação quando o registro não tem data própria. */
   /* "Pessoal" = o que eu criei/assinei. "Clínica" = tudo o que está aqui,
      inclusive o que as auxiliares lançaram e o que outro anestesista fez. */
-  _filtrarEscopo(list, escopo) {
-    if (escopo !== 'pessoal') return list;
-    /* a autoria pode estar gravada pelo login, pelo nome ou pelo id — todos
-       valem como "eu", senão o filtro esconderia registros meus */
+  /* Nome comparável: sem acento, sem título, sem espaço sobrando. "Dr. Marcelo
+     Pandolfi Caliman" e "marcelo pandolfi caliman" são a mesma pessoa, e o
+     painel não pode achar que não são. */
+  _normAutor(v) {
+    return String(v || '').toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/^\s*(dr|dra|drª|prof|profa)\.?\s+/, '')
+      .replace(/\s+/g, ' ').trim();
+  },
+  /* Tudo que identifica ESTA pessoa: a conta, o login do aparelho e o nome
+     profissional configurado (o mesmo que sai no cabeçalho dos documentos). */
+  _souEu() {
     const meus = new Set();
+    const por = (v) => { const t = dashboard._normAutor(v); if (t) meus.add(t); };
     try {
       const u = auth.usuarioAtual() || {};
-      [u.nome, u.usuario, u.id, u.uid].forEach(v => { if (v) meus.add(String(v).toLowerCase()); });
+      [u.nome, u.usuario, u.id, u.uid].forEach(por);
+      if (u.usuario && u.usuario.indexOf('@') > 0) por(u.usuario.split('@')[0]);
     } catch (e) {}
-    const login = localStorage.getItem('medsys.v7.usuario');
-    if (login) meus.add(String(login).toLowerCase());
+    try { por(localStorage.getItem('medsys.v7.usuario')); } catch (e) {}
+    /* o nome que assina os documentos é o mesmo que vai no campo
+       "anestesiologista" das fichas — é por ele que o caso é meu */
+    try { por(((orcamento.cfg() || {}).cabecalho || {}).profissional); } catch (e) {}
+    return meus;
+  },
+  _filtrarEscopo(list, escopo) {
+    if (escopo !== 'pessoal') return list;
+    const meus = dashboard._souEu();
     if (!meus.size) return list;
-    const bate = (v) => { const t = String(v || '').toLowerCase(); return !!t && meus.has(t); };
+    const bate = (v) => {
+      const t = dashboard._normAutor(v);
+      if (!t) return false;
+      if (meus.has(t)) return true;
+      /* "Marcelo Pandolfi Caliman" x "Marcelo Caliman": um contém o outro.
+         Exigir igualdade exata fazia o caso do próprio médico contar como
+         de outra pessoa — e o painel dele zerava. */
+      for (const m of meus) { if (m.length >= 6 && (t.includes(m) || m.includes(t))) return true; }
+      return false;
+    };
     return list.filter(it => {
+      /* QUEM CONFERIU É O DONO DO CASO. No pré-lançamento a secretária digita
+         e o médico confere e finaliza: se "meu" fosse só "quem digitou", o
+         painel do médico ficaria permanentemente vazio num consultório onde a
+         secretária prepara tudo — que é exatamente o que acontecia. */
+      try {
+        const pl = it._preLanc || {};
+        if (pl.conferidoPor && bate(pl.conferidoPor)) return true;
+      } catch (e) {}
       /* sem autoria registrada, o registro conta como meu — não sumir do
          painel importa mais do que classificar com precisão */
-      /* anestesiologista/responsavel faltavam: são justamente os campos que a
-         pré e a ficha usam para registrar quem assina. Sem eles, registro meu
-         assinado por mim podia ser lido como "de outro" e sumir do painel. */
       const autores = [it._updatedBy, it._criadoPor, it.anestesista, it.anestesiologista,
                        it.profissional, it.responsavel];
       if (!autores.some(v => String(v || '').trim())) return true;
@@ -44309,10 +44602,38 @@ const dashboard = {
       (naoCarregou ? '<br><b style="color:var(--warning,#8a4b1c)">⚠️ ' + utils.escapeHTML(naoCarregou) + '</b>' : '');
     host.style.display = '';
   },
+  /* O filtro escolhido é uma DECISÃO, e decisão não se desfaz sozinha.
+     "Ver clínica" trocava o seletor e o próximo carregamento devolvia
+     "Pessoal" — num consultório onde a secretária prepara tudo, isso é voltar
+     ao painel zerado toda vez que se abre o app. */
+  ESCOPO_KEY: 'medsys.v7.dash.escopo',
+  PERIODO_KEY: 'medsys.v7.dash.periodo',
+  _restaurados: false,
+  _restaurarFiltros() {
+    if (dashboard._restaurados) return;
+    dashboard._restaurados = true;
+    try {
+      const e = document.getElementById('dash-escopo');
+      const p = document.getElementById('dash-periodo');
+      const ge = localStorage.getItem(dashboard.ESCOPO_KEY);
+      const gp = localStorage.getItem(dashboard.PERIODO_KEY);
+      if (e && ge && e.querySelector('option[value="' + ge + '"]')) e.value = ge;
+      if (p && gp && p.querySelector('option[value="' + gp + '"]')) p.value = gp;
+    } catch (er) {}
+  },
+  _guardarFiltros() {
+    try {
+      const e = document.getElementById('dash-escopo');
+      const p = document.getElementById('dash-periodo');
+      if (e) localStorage.setItem(dashboard.ESCOPO_KEY, e.value);
+      if (p) localStorage.setItem(dashboard.PERIODO_KEY, p.value);
+    } catch (er) {}
+  },
   _verComo(escopo, periodo) {
     try {
       if (escopo) { const e = document.getElementById('dash-escopo'); if (e) e.value = escopo; }
       if (periodo) { const p = document.getElementById('dash-periodo'); if (p) p.value = periodo; }
+      dashboard._guardarFiltros();
       dashboard.atualizar();
     } catch (e) {}
   },
