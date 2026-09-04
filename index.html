@@ -4523,7 +4523,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-28e</b><br>
+    v7.1 · build <b id="build-tag">2026-08-28f</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -12727,13 +12727,22 @@ const preLanc = {
       }
       preLanc._ultimaBusca = Date.now();
       let novos = 0, atualizados = 0, naClinica = 0, naoCouberam = 0, leu = 0;
+      const naClinicaLista = [];
       for (const mod of preLanc.MODS) {
         const remotos = await cloudRel.puxarModulo(mod);
         if (!Array.isArray(remotos)) continue;
         leu++;
         /* Quantos ENVIADOS existem na clínica, antes de qualquer filtro daqui.
            É o número que responde "faltou chegar" x "faltou subir". */
-        naClinica += remotos.filter(r => preLanc.estado(r) === 'enviado' && !r._finalizado).length;
+        const enviados = remotos.filter(r => preLanc.estado(r) === 'enviado' && !r._finalizado);
+        naClinica += enviados.length;
+        /* Guarda QUEM está esperando, não só quantos. "A clínica tem 3 e aqui
+           apareceram 0" é um diagnóstico; sem os nomes, não é uma saída. */
+        enviados.forEach(r => naClinicaLista.push({
+          mod, id: r._id, nome: arquivo._nomeDe(r),
+          quando: (r._preLanc && r._preLanc.enviadoEm) || '',
+          por: (r._preLanc && r._preLanc.porNome) || ''
+        }));
         const m = cloudRel.mesclarLocal(mod, remotos);
         novos += m.novos; atualizados += m.atualizados; naoCouberam += m.naoCouberam;
       }
@@ -12741,7 +12750,7 @@ const preLanc = {
         dizer('Não consegui ler a clínica agora — confira a conexão e tente de novo.', 'error');
         return null;
       }
-      preLanc._diag = { naClinica, naoCouberam, quando: new Date().toISOString() };
+      preLanc._diag = { naClinica, naoCouberam, lista: naClinicaLista, quando: new Date().toISOString() };
       try { preLanc.renderFila(); } catch (e) {}
       if (novos || atualizados) {
         dizer('☁️ ' + (novos + atualizados) + ' pré-lançamento(s) atualizado(s) da clínica');
@@ -12897,6 +12906,33 @@ const preLanc = {
       preLanc._conferenciaDeContas(fila.length);
   },
 
+  /* Busca UM registro na clínica e o grava aqui, passando por cima das
+     guardas da mesclagem — elas existem para o caso geral (não sobrescrever o
+     que está sendo editado, não regravar o que já é igual), e aqui a pessoa
+     está pedindo justamente aquele registro, de propósito. */
+  async trazerDaClinica(mod, id) {
+    if (!mod || !id) return false;
+    try {
+      if (typeof cloudRel === 'undefined' || !cloudRel.disponivel()) {
+        toast('A clínica não está disponível neste aparelho agora.', 'warn'); return false;
+      }
+      toast('⏳ Buscando na clínica…');
+      const remotos = await cloudRel.puxarPorLegacy(mod, [id]);
+      const achado = Array.isArray(remotos) ? remotos.find(x => x && x._id === id) : null;
+      if (!achado) { toast('Não achei este registro na clínica agora — tente de novo.', 'warn'); return false; }
+      const lst = store.list(mod) || [];
+      const i = lst.findIndex(x => x && x._id === id);
+      if (i >= 0) lst[i] = achado; else lst.unshift(achado);
+      if (store.setList(mod, lst) === false) {
+        toast('⚠️ Não coube neste aparelho — libere espaço em Ajustes → Armazenamento.', 'error');
+        return false;
+      }
+      try { preLanc.renderFila(); } catch (e) {}
+      try { dashboard._abrirRegistro(mod, id); } catch (e) {}
+      return true;
+    } catch (e) { toast('Falha ao trazer da clínica: ' + (e.message || ''), 'error'); return false; }
+  },
+
   /* "Era pra aparecer 13 e aparecem 8." Sem esta conta, não dá para saber se o
      que falta não CHEGOU (problema aqui) ou não SUBIU (problema no aparelho de
      quem lançou). O app tem os dois números — então que ele diga. */
@@ -12905,9 +12941,25 @@ const preLanc = {
     if (!d) return '';
     const linhas = [];
     if (d.naClinica > naFila) {
+      /* NOMEAR o que falta, e dar como abrir. Antes esta linha só dizia o
+         tamanho do buraco e mandava "tentar de novo" — e quando tentar de
+         novo não resolvia, acabava o que o sistema tinha a oferecer. Agora
+         cada um que ficou de fora aparece com nome e um botão que vai
+         buscá-lo na clínica, um só, e abre. */
+      const naFilaIds = new Set(preLanc.fila().map(x => x.rec && x.rec._id));
+      const faltando = (d.lista || []).filter(x => x && x.id && !naFilaIds.has(x.id));
       linhas.push('☁️ A clínica tem <b>' + d.naClinica + '</b> aguardando conferência e aqui apareceram <b>' + naFila + '</b>.' +
         (d.naoCouberam
           ? ' <b>' + d.naoCouberam + '</b> não couberam neste aparelho — libere espaço em Ajustes → Armazenamento.'
+          : '') +
+        (faltando.length
+          ? '<div style="margin-top:8px">' + faltando.map(x =>
+              '<div style="display:flex;justify-content:space-between;gap:10px;align-items:center;padding:6px 0;border-top:1px dashed var(--border)">' +
+              '<span style="font-size:.84rem;min-width:0"><b>' + utils.escapeHTML(x.nome || '(sem nome)') + '</b>' +
+              '<br><span style="color:var(--text-mute);font-size:.75rem">' + utils.escapeHTML(lixeira.LABELS[x.mod] || x.mod) +
+              (x.por ? ' · por ' + utils.escapeHTML(x.por) : '') + ' · está na clínica, não neste aparelho</span></span>' +
+              '<button class="btn btn-xs btn-primary" onclick="preLanc.trazerDaClinica(\'' + x.mod + '\',\'' + x.id + '\')">Trazer e abrir</button>' +
+              '</div>').join('') + '</div>'
           : ' Toque em <b>🔄 Buscar</b> de novo; se persistir, me avise.'));
     } else if (d.naClinica < naFila) {
       /* Registro preso NESTE aparelho: existe aqui, não existe na clínica.
@@ -21755,10 +21807,23 @@ const cloudRel = {
     if (!x) return '';
     return String(x._updatedAt || x._relUpdatedAt || x.atualizado_em || x._createdAt || '');
   },
-  _abertoNaTela(id) {
+  /* Adiar a mesclagem só faz sentido para o que está SENDO EDITADO agora —
+     sobrescrever o que a pessoa tem na tela seria apagar o que ela digitou.
+     A varredura pegava `form [name="_id"]` da página inteira, e no app TODOS
+     os módulos ficam no DOM o tempo todo, apenas escondidos. Bastava alguém
+     ter aberto um registro uma vez para o id continuar no campo escondido
+     daquele formulário — e daí em diante toda atualização vinda da clínica
+     era adiada para sempre, calada. Era assim que um pré-lançamento enviado
+     não chegava: chegava e era descartado na porta. */
+  _abertoNaTela(id, mod) {
     try {
       if (!id) return false;
-      return Array.from(document.querySelectorAll('form [name="_id"]')).some(el => el.value === id);
+      const atual = (typeof state !== 'undefined' && state.currentModule) || '';
+      if (mod && atual !== mod) return false;      /* módulo fechado não edita nada */
+      const form = document.getElementById('form-' + (mod || atual));
+      if (!form) return false;
+      const el = form.querySelector('[name="_id"]');
+      return !!el && el.value === id;
     } catch (e) { return false; }
   },
   mesclarLocal(mod, remotos) {
@@ -21779,7 +21844,7 @@ const cloudRel = {
       const i = ix.get(item._id);
       const local = locais[i];
       if (cloudRel._quando(item) <= cloudRel._quando(local)) { res.iguais++; return; }
-      if (cloudRel._abertoNaTela(item._id)) { res.adiados++; return; }
+      if (cloudRel._abertoNaTela(item._id, mod)) { res.adiados++; return; }
       locais[i] = item; entraram.push(item._id); res.atualizados++;
     });
     if (!res.novos && !res.atualizados) return res;
@@ -21937,6 +22002,33 @@ const cloudRel = {
   /* Conteúdo de ids específicos, em lotes. Devolve null se QUALQUER lote
      falhar: meia lista parece sincronização bem-sucedida e some registro sem
      ninguém perceber — prefiro não mesclar nada e tentar de novo depois. */
+  /* Busca por LEGACY_ID — o `_id` que o aparelho conhece. `puxarPorIds` usa a
+     chave do banco, que só quem leu o índice tem em mãos; quem parte de um
+     registro daqui parte do legacy. */
+  async puxarPorLegacy(mod, legacyIds) {
+    const cfg = cloudRel.MODOS[mod]; if (!cfg) return null;
+    if (!Array.isArray(legacyIds) || !legacyIds.length) return [];
+    if (!cloudRel.disponivel()) return null;
+    if (!(await cloud._garantirToken())) return null;
+    const org = await cloudRel._orgAsync(); if (!org) return null;
+    const c = cloud.config();
+    const out = [];
+    for (let i = 0; i < legacyIds.length; i += cloudRel._LOTE_IDS) {
+      const lote = legacyIds.slice(i, i + cloudRel._LOTE_IDS);
+      try {
+        const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
+          '&deleted_at=is.null&legacy_id=in.(' + lote.map(encodeURIComponent).join(',') + ')' +
+          '&select=' + cloudRel._REG_SELECT,
+          { headers: cloud._headers(true) });
+        if (!r.ok) return null;
+        const rows = await r.json();
+        if (!Array.isArray(rows)) return null;
+        rows.forEach(row => out.push(cloudRel._rowParaRegistro(row)));
+      } catch (e) { return null; }
+    }
+    return out;
+  },
+
   async puxarPorIds(mod, ids) {
     const cfg = cloudRel.MODOS[mod]; if (!cfg) return null;
     if (!Array.isArray(ids) || !ids.length) return [];

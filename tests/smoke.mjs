@@ -5851,7 +5851,11 @@ await test('O que já existe no aparelho também se atualiza — a versão mais 
     out.trouxeONovo = !!store.getById('pre', 'c');
     out.entraNaFila = preLanc.fila().some(x => x.rec._id === 'a');
 
-    /* registro ABERTO na tela não é trocado por baixo de quem está digitando */
+    /* Registro ABERTO na tela não é trocado por baixo de quem está digitando.
+       "Aberto" agora exige estar NO MÓDULO: todos os formulários vivem no DOM
+       o tempo todo, e um id esquecido num módulo fechado bloqueava para
+       sempre a atualização vinda da clínica. */
+    ui.navegar('pre');
     setId('a');
     const m2 = cloudRel.mesclarLocal('pre', [
       { _id: 'a', nome: 'Ana', _updatedAt: '2026-08-13T13:00:00.000Z', obs: 'da nuvem' }
@@ -11190,6 +11194,93 @@ await test('Meu dia enxerga a consulta, não a acusa de "sem ficha", e acompanha
   assert(r.cirurgicoAindaCobra, 'caso cirúrgico sem ficha continua sendo cobrado');
   assert(r.rascunhoContado, 'e a ficha em rascunho continua contada');
   assert(r.acompanhaOPainel, 'Meu dia se redesenha junto com o painel quando chega dado da clínica');
+  await page.close();
+});
+
+/* 171) Um pré-lançamento enviado que a clínica tem e o médico não vê. Dois
+   defeitos independentes levavam ao mesmo lugar. */
+await test('Pré-lançamento que ficou na clínica: a atualização deixa de ser descartada, e o que falta tem nome e botão', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor', entrouEm: Date.now() }));
+
+    /* ---- (a) a atualização era descartada na porta ----
+       `_abertoNaTela` varria os formulários da PÁGINA INTEIRA, e no app todos
+       os módulos ficam no DOM o tempo todo, só escondidos. Bastava ter aberto
+       o registro uma vez para o id ficar no campo escondido daquele
+       formulário — e daí toda atualização vinda da clínica era adiada, calada
+       e para sempre. */
+    ui.navegar('dashboard');
+    await new Promise(res => setTimeout(res, 200));
+    const formPre = document.getElementById('form-pre');
+    let hid = formPre.querySelector('[name="_id"]');
+    if (!hid) { hid = document.createElement('input'); hid.type = 'hidden'; hid.name = '_id'; formPre.appendChild(hid); }
+    hid.value = 'p_adilson';
+
+    store.setList('pre', [{ _id: 'p_adilson', nome: 'ADILSON NUNES', data: '2026-09-01',
+      _updatedAt: '2026-09-01T10:00:00.000Z', _preLanc: { estado: 'rascunho' } }]);
+
+    /* a mesma ficha, agora ENVIADA, chegando da clínica */
+    const daClinica = [{ _id: 'p_adilson', nome: 'ADILSON NUNES', data: '2026-09-01',
+      _updatedAt: '2026-09-01T11:00:00.000Z',
+      _preLanc: { estado: 'enviado', porNome: 'Secretaria', enviadoEm: '2026-09-01T11:00:00.000Z' } }];
+
+    /* estando no Dashboard, o formulário da pré não está sendo editado */
+    const res1 = cloudRel.mesclarLocal('pre', daClinica);
+    out.naoAdiouComOutroModuloAberto = res1.adiados === 0 && res1.atualizados === 1;
+    out.chegouAFila = preLanc.fila().length === 1;
+
+    /* e a guarda continua valendo onde ela importa: no módulo aberto */
+    ui.navegar('pre');
+    await new Promise(res => setTimeout(res, 200));
+    document.getElementById('form-pre').querySelector('[name="_id"]').value = 'p_adilson';
+    const res2 = cloudRel.mesclarLocal('pre', [Object.assign({}, daClinica[0],
+      { _updatedAt: '2026-09-01T12:00:00.000Z', nome: 'SOBRESCREVERIA' })]);
+    out.aindaProtegeOQueEstaNaTela = res2.adiados === 1;
+
+    /* ---- (b) o que falta passa a ter nome e botão ----
+       A conta já existia: "a clínica tem 3, aqui apareceram 0". Mas era só o
+       tamanho do buraco, e mandava tentar de novo — e quando tentar de novo
+       não resolvia, acabava o que o sistema tinha a oferecer. */
+    ui.navegar('dashboard');
+    await new Promise(res => setTimeout(res, 200));
+    store.setList('pre', []);
+    preLanc._diag = { naClinica: 1, naoCouberam: 0, quando: new Date().toISOString(),
+      lista: [{ mod: 'pre', id: 'p_adilson', nome: 'ADILSON NUNES', por: 'Secretaria' }] };
+    preLanc.renderFila();
+    const html = document.getElementById('pl-fila-lista').innerHTML;
+    out.mostraONome = /ADILSON NUNES/.test(html);
+    out.dizOndeEle = /est[áa] na cl[íi]nica, n[ãa]o neste aparelho/.test(html);
+    out.temBotaoDeTrazer = /trazerDaClinica\('pre','p_adilson'\)/.test(html);
+
+    /* e o botão busca UM registro pelo id do aparelho (legacy), não pelo id
+       do banco — que quem parte de uma ficha daqui não tem */
+    out.temBuscaPorLegacy = typeof cloudRel.puxarPorLegacy === 'function';
+    let pediu = null;
+    cloudRel.disponivel = () => true;
+    cloudRel.puxarPorLegacy = async (mod, ids) => { pediu = { mod, ids }; return [{ _id: ids[0],
+      nome: 'ADILSON NUNES', data: '2026-09-01', _preLanc: { estado: 'enviado' } }]; };
+    await preLanc.trazerDaClinica('pre', 'p_adilson');
+    out.buscouOCerto = !!pediu && pediu.mod === 'pre' && pediu.ids[0] === 'p_adilson';
+    out.gravouAqui = !!store.getById('pre', 'p_adilson');
+    out.entrouNaFila = preLanc.fila().some(x => x.rec._id === 'p_adilson');
+
+    store.setList('pre', []);
+    preLanc._diag = null;
+    return out;
+  });
+
+  assert(r.naoAdiouComOutroModuloAberto, 'com outro módulo aberto, a atualização da clínica não é mais descartada');
+  assert(r.chegouAFila, 'e o pré-lançamento enviado chega à fila de conferência');
+  assert(r.aindaProtegeOQueEstaNaTela, 'mas o que está sendo editado na tela continua protegido');
+  assert(r.mostraONome, 'o que ficou na clínica passa a aparecer pelo nome');
+  assert(r.dizOndeEle, 'dizendo onde ele está, em vez de só contar quantos faltam');
+  assert(r.temBotaoDeTrazer, 'com um botão que vai buscá-lo');
+  assert(r.temBuscaPorLegacy, 'buscando pelo id que o aparelho conhece, não pelo id do banco');
+  assert(r.buscouOCerto, 'pede exatamente aquele registro, um só');
+  assert(r.gravouAqui && r.entrouNaFila, 'grava aqui e entra na fila de conferência');
   await page.close();
 });
 
