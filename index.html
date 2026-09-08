@@ -3376,6 +3376,45 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
 }
 
 /* Apenas overlay aparece na impressão quando estiver aberto */
+/* JANELA DO BLOQUEIO — o card 3 apresentado como janela, sem sair do lugar.
+   Mover os campos para dentro do modal seria tirá-los do formulário, e a
+   gravação automática (que roda sozinha a cada pausa de digitação) passaria a
+   salvar a ficha SEM eles. Aqui só a apresentação muda: o quadro continua
+   dentro do form, exatamente onde estava. */
+#bloqueio-detalhes.bloq-janela {
+  /* Centrada na ÁREA DE CONTEÚDO, não na tela: o menu lateral é pintado por
+     cima (ele vive no mesmo contexto de empilhamento do app) e comia a borda
+     esquerda da janela. Em vez de disputar z-index com ele, a janela ocupa o
+     espaço que é dela. */
+  position: fixed; top: 50%;
+  left: calc(var(--sidebar-w) + (100vw - var(--sidebar-w)) / 2);
+  transform: translate(-50%, -50%);
+  width: min(940px, calc(100vw - var(--sidebar-w) - 32px)); max-height: 88vh; overflow-y: auto;
+  z-index: 100600; background: var(--surface); box-shadow: 0 24px 70px rgba(0,0,0,.35);
+  border-radius: 12px; padding: 0;
+}
+#bloqueio-detalhes.bloq-janela > .grid { padding: 14px 16px 18px; }
+.bloq-janela-cab {
+  position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--border);
+  border-radius: 12px 12px 0 0;
+}
+.bloq-janela-cab h3 { margin: 0; font-size: 1rem; color: var(--primary-darker); flex: 1 }
+#bloq-janela-fundo {
+  position: fixed; top: 0; right: 0; bottom: 0; left: var(--sidebar-w);
+  background: rgba(15, 30, 45, .55); z-index: 100550;
+}
+@media (max-width: 1199px) {
+  /* menu lateral fora do fluxo: a janela volta a ser da tela inteira */
+  #bloqueio-detalhes.bloq-janela { left: 50%; width: min(940px, 95vw); }
+  #bloq-janela-fundo { left: 0; }
+}
+@media (max-width: 768px) {
+  #bloqueio-detalhes.bloq-janela { width: 100vw; max-height: 92vh; top: auto; bottom: 0;
+    left: 0; transform: none; border-radius: 12px 12px 0 0; }
+}
+@media print { #bloqueio-detalhes.bloq-janela, #bloq-janela-fundo { position: static; box-shadow: none; } }
+
 @media print {
   body.printing-preview .app { display: none !important; }
   body.printing-preview .print-preview-overlay {
@@ -4548,7 +4587,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-28k</b><br>
+    v7.1 · build <b id="build-tag">2026-08-28m</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -29235,7 +29274,10 @@ const anestesia = {
          aparece 600 ms depois de entrar na ficha. Espera a vez. */
       try {
         const bd = document.getElementById('modal-backdrop');
-        if (bd && bd.classList.contains('show')) {
+        const painelBloq = document.getElementById('bloqueio-detalhes');
+        const ocupado = (bd && bd.classList.contains('show'))
+          || (painelBloq && painelBloq.classList.contains('bloq-janela'));
+        if (ocupado) {
           const n = (tentativa || 0) + 1;
           if (n <= 8) { setTimeout(() => anestesia.tecnicaDet.abrir(tipo, n), 700); return true; }
           return false;
@@ -29265,11 +29307,19 @@ const anestesia = {
         '<button class="btn btn-primary" onclick="anestesia.tecnicaDet.salvar(\'' + utils.escapeAttr(tipo) + '\')">Salvar detalhes</button>');
       return true;
     },
+    /* O bloqueio também abre em janela — só que a janela é o PRÓPRIO quadro
+       do card 3, apresentado por cima. Mover os campos para dentro do modal
+       seria tirá-los do formulário, e a gravação automática (que roda sozinha
+       a cada pausa de digitação) passaria a salvar a ficha sem eles. Aqui só a
+       apresentação muda: o quadro continua onde estava, com a mesma tabela de
+       medicações que se replica no gráfico. */
     _irParaBloqueio(tipo) {
       const f = document.getElementById('form-anestesia');
-      if (!f) return false;
+      const painel = document.getElementById('bloqueio-detalhes');
+      if (!f || !painel) return false;
       const chk = f.querySelector('[name="bloqueio_realizado"]');
-      if (chk && !chk.checked) { chk.checked = true; anestesia.bloqueio.alternar(chk); }
+      if (chk && !chk.checked) { chk.checked = true; }
+      painel.style.display = '';
       /* já deixa o tipo do bloqueio coerente com o que foi marcado */
       const sel = f.querySelector('[name="bloqueio_tipo"]');
       if (sel && !sel.value) {
@@ -29277,14 +29327,58 @@ const anestesia = {
           || Array.from(sel.options).find(o => new RegExp(tipo.split(' ')[0], 'i').test(o.value));
         if (alvo) { sel.value = alvo.value; try { anestesia.eventos.sincronizarDoBloqueio(); } catch (e) {} }
       }
-      const alvo = document.getElementById('bloqueio-detalhes');
-      if (alvo) {
-        try { alvo.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { alvo.scrollIntoView(); }
-        alvo.style.outline = '2px solid var(--primary)';
-        setTimeout(() => { alvo.style.outline = ''; }, 1600);
-      }
-      try { toast('Detalhe o bloqueio no quadro destacado — ele já tem a tabela de medicações que entra no gráfico.'); } catch (e) {}
+      anestesia.tecnicaDet._janelaBloqueio(tipo);
       return true;
+    },
+    _janelaBloqueio(tipo) {
+      const painel = document.getElementById('bloqueio-detalhes');
+      if (!painel || painel.classList.contains('bloq-janela')) return;
+      /* O card 3 pode estar recolhido, e um card recolhido é display:none —
+         o que apaga até o que está posicionado por cima. A janela apareceria
+         só como um escurecimento sem conteúdo. */
+      try {
+        const card = painel.closest('.card');
+        if (card) { card.classList.remove('collapsed'); painel._cardAberto = card; }
+      } catch (e) {}
+      let fundo = document.getElementById('bloq-janela-fundo');
+      if (!fundo) {
+        fundo = document.createElement('div');
+        fundo.id = 'bloq-janela-fundo';
+        fundo.onclick = () => anestesia.tecnicaDet.fecharJanelaBloqueio();
+        document.body.appendChild(fundo);
+      }
+      fundo.style.display = '';
+      let cab = painel.querySelector('.bloq-janela-cab');
+      if (!cab) {
+        cab = document.createElement('div');
+        cab.className = 'bloq-janela-cab';
+        cab.innerHTML = '<h3></h3><button type="button" class="btn btn-primary btn-sm" ' +
+          'onclick="anestesia.tecnicaDet.fecharJanelaBloqueio()">Concluir</button>';
+        painel.insertBefore(cab, painel.firstChild);
+      }
+      cab.querySelector('h3').textContent = '💉 ' + (tipo || 'Bloqueio') + ' — detalhes da punção';
+      cab.style.display = '';
+      painel.classList.add('bloq-janela');
+      document.body.classList.add('tem-modal');
+      painel.scrollTop = 0;
+    },
+    fecharJanelaBloqueio() {
+      const painel = document.getElementById('bloqueio-detalhes');
+      if (!painel) return;
+      painel.classList.remove('bloq-janela');
+      const cab = painel.querySelector('.bloq-janela-cab');
+      if (cab) cab.style.display = 'none';
+      const fundo = document.getElementById('bloq-janela-fundo');
+      if (fundo) fundo.style.display = 'none';
+      document.body.classList.remove('tem-modal');
+      /* o quadro volta a obedecer a caixa "Detalhar bloqueio" */
+      try {
+        const chk = document.querySelector('#form-anestesia [name="bloqueio_realizado"]');
+        painel.style.display = (chk && chk.checked) ? '' : 'none';
+      } catch (e) {}
+      try { anestesia.eventos.sincronizarDoBloqueio(); } catch (e) {}
+      try { anestesia.tecnicaDet.renderResumos(); } catch (e) {}
+      try { markDirty(); } catch (e) {}
     },
     salvar(tipo) {
       const esp = anestesia.tecnicaDet.ESPECS[tipo];
@@ -36307,6 +36401,7 @@ const anestesia = {
     /* os detalhes por técnica vivem fora do formulário: sem isto, a ficha
        nova nasceria com o que foi respondido na ficha anterior */
     try { anestesia.tecnicaDet.limpar(); } catch (e) {}
+    try { anestesia.tecnicaDet.fecharJanelaBloqueio(); } catch (e) {}
     try { prontuario.limpar('anestesia'); } catch (e) {}
     document.getElementById('medicacoes-body').innerHTML = '';
     document.getElementById('vitais-body').innerHTML = '';
@@ -38800,7 +38895,17 @@ document.addEventListener('click', e => {
   if (bd && e.target === bd) modal.close();
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') modal.close();
+  if (e.key !== 'Escape') return;
+  /* a janela do bloqueio não é o modal comum (os campos precisam continuar
+     dentro do formulário) — mas fecha pelo mesmo Esc */
+  try {
+    const painel = document.getElementById('bloqueio-detalhes');
+    if (painel && painel.classList.contains('bloq-janela')) {
+      anestesia.tecnicaDet.fecharJanelaBloqueio();
+      return;
+    }
+  } catch (er) {}
+  modal.close();
 });
 
 /* ============================================================================

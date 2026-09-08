@@ -11672,10 +11672,26 @@ await test('Cada técnica pede seus detalhes numa janela, e o que se responde vi
     raqui.checked = true;
     anestesia.tecnicaDet.abrir('Raquianestesia');
     await new Promise(res => setTimeout(res, 200));
+    const painel = document.getElementById('bloqueio-detalhes');
     out.bloqMarcou = f.querySelector('[name="bloqueio_realizado"]').checked === true;
-    out.bloqAbriuOCard = document.getElementById('bloqueio-detalhes').style.display !== 'none';
-    out.bloqSemJanelaNova = !/Anestesia geral|Sedação/.test((document.getElementById('modal-title') || {}).textContent || '');
-    out.bloqueioNaoDuplica = out.bloqMarcou && out.bloqAbriuOCard;
+    out.bloqAbriuEmJanela = painel.classList.contains('bloq-janela');
+    out.bloqTemFundo = !!document.getElementById('bloq-janela-fundo')
+      && document.getElementById('bloq-janela-fundo').style.display !== 'none';
+    out.bloqTemCabecalho = /Raquianestesia/.test((painel.querySelector('.bloq-janela-cab h3') || {}).textContent || '');
+    /* o essencial: os campos CONTINUAM dentro do formulário. Se saíssem, a
+       gravação automática salvaria a ficha sem eles. */
+    out.bloqSegueNoForm = !!f.querySelector('#bloqueio-detalhes [name="bloqueio_espaco"]');
+    const esp = f.querySelector('[name="bloqueio_espaco"]');
+    esp.value = 'L3-L4';
+    out.coletaEnquantoAberta = anestesia.bloqueio.coletar().espaco === 'L3-L4';
+    /* e a tabela de medicações do bloqueio veio junto — é ela que se replica
+       no gráfico, e por isso o bloqueio não podia virar uma janela à parte */
+    out.temTabelaDeMeds = !!painel.querySelector('#tab-bloq-meds');
+
+    anestesia.tecnicaDet.fecharJanelaBloqueio();
+    out.fechouEVoltou = !painel.classList.contains('bloq-janela')
+      && painel.style.display !== 'none'
+      && anestesia.bloqueio.coletar().espaco === 'L3-L4';
 
     anestesia.limparSilencioso();
     return out;
@@ -11692,9 +11708,13 @@ await test('Cada técnica pede seus detalhes numa janela, e o que se responde vi
   assert(r.fichaNovaNasceLimpa, 'ficha nova não nasce com o que foi respondido na anterior');
   assert(r.voltouAoReabrir, 'e volta ao reabrir a ficha, para edição');
   assert(r.temAtalhoDeEdicao, 'com um atalho ao lado do tipo para editar de novo');
-  assert(r.bloqMarcou, 'pedir o detalhe de um bloqueio liga o card de detalhamento');
-  assert(r.bloqAbriuOCard, 'e o abre — é lá que estão os campos e a tabela de medicações');
-  assert(r.bloqueioNaoDuplica, 'bloqueio não ganha janela duplicada: a ação leva ao card que já existe');
+  assert(r.bloqMarcou, 'pedir o detalhe de um bloqueio liga o detalhamento');
+  assert(r.bloqAbriuEmJanela && r.bloqTemFundo, 'e abre em janela, como as outras técnicas');
+  assert(r.bloqTemCabecalho, 'com o nome da técnica no cabeçalho e um botão de concluir');
+  assert(r.temTabelaDeMeds, 'a janela traz a tabela de medicações — é ela que se replica no gráfico');
+  assert(r.bloqSegueNoForm && r.coletaEnquantoAberta,
+    'e os campos continuam DENTRO do formulário: fora dele, a gravação automática salvaria a ficha sem eles');
+  assert(r.fechouEVoltou, 'ao concluir, o quadro volta ao lugar sem perder o que foi digitado');
   await page.close();
 });
 
