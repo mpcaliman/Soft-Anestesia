@@ -11805,6 +11805,96 @@ await test('Via aérea e acessos também abrem em janela, com os campos ainda de
   await page.close();
 });
 
+/* 178) A agenda era o último módulo no fio antigo: gravava na clínica com
+   dispara-e-esquece, nunca apagava lá, e o que mudava no outro aparelho não
+   chegava. Sincronizava — mal. */
+await test('Agenda: fila durável, exclusão que chega aos outros aparelhos, e mudança que desce', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+    store.setList('agenda', []);
+    localStorage.removeItem(cloudRel.FILA_KEY);
+    localStorage.removeItem(cloudRel.FILA_DEL_KEY);
+
+    /* --- (a) gravação que não sobe entra na fila, em vez de sumir --- */
+    cloudRel.disponivel = () => true;
+    cloud._garantirToken = async () => true;   /* sem isso a fila nem chega a drenar */
+    cloudRel.enviarAgenda = async () => ({ ok: false, motivo: 'rede' });
+    const ag = store.save('agenda', { paciente: 'MARIA AGENDA', data: '2026-09-20', hora: '08:00' });
+    agenda._espelhar(ag);
+    await new Promise(res => setTimeout(res, 120));
+    out.entrouNaFila = cloudRel._filaLer().some(x => x.mod === 'agenda' && x.id === ag._id);
+
+    /* e a fila sabe subir a agenda pelo caminho dela (colunas scheduled_at e
+       status), não pelo envio genérico que deixaria as duas em branco */
+    let usouEnvioDaAgenda = false, usouGenerico = false;
+    cloudRel.enviarAgenda = async () => { usouEnvioDaAgenda = true; return { ok: true }; };
+    cloudRel.enviarRegistro = async () => { usouGenerico = true; return { ok: true }; };
+    await cloudRel.drenarFila();
+    out.drenouPeloCaminhoCerto = usouEnvioDaAgenda && !usouGenerico;
+    out.saiuDaFila = !cloudRel._filaLer().some(x => x.mod === 'agenda');
+
+    /* --- (b) excluir chega à clínica --- */
+    let apagou = null;
+    cloudRel.apagarNaClinica = async (tab, id) => { apagou = { tab, id }; return { ok: true }; };
+    window.confirm = () => true;
+    agenda.excluir(ag._id);
+    out.pediuParaApagarLa = !!apagou && apagou.tab === 'appointments' && apagou.id === ag._id;
+    out.sumiuDaqui = !store.getById('agenda', ag._id);
+
+    /* a exclusão tem fila própria: relê do aparelho não serve para o que já
+       foi apagado dele */
+    out.temFilaDeExclusao = typeof cloudRel._filaDelPor === 'function'
+      && typeof cloudRel.drenarFilaDel === 'function';
+    cloudRel._filaDelPor('appointments', 'x1');
+    out.guardouAExclusao = cloudRel._filaDelLer().some(x => x.id === 'x1');
+    cloudRel._filaDelTirar('appointments', 'x1');
+    out.tirouDaFila = !cloudRel._filaDelLer().some(x => x.id === 'x1');
+
+    /* --- (c) o que muda na clínica desce, e o apagado lá some daqui --- */
+    store.setList('agenda', [
+      { _id: 'a1', paciente: 'ANA', data: '2026-09-21', hora: '09:00', _relUpdatedAt: '2026-09-01T10:00:00Z' },
+      { _id: 'a2', paciente: 'BIA', data: '2026-09-22', hora: '10:00', _relUpdatedAt: '2026-09-01T10:00:00Z' },
+      { _id: 'a3', paciente: 'SO DAQUI', data: '2026-09-23', hora: '11:00' }
+    ]);
+    cloudRel.puxarAgenda = async () => ([
+      /* ANA foi remarcada na secretaria */
+      { _id: 'a1', paciente: 'ANA', data: '2026-09-21', hora: '14:30', _relUpdatedAt: '2026-09-05T10:00:00Z' }
+      /* BIA foi cancelada lá — não vem mais */
+    ]);
+    agenda._puxouNestaSessao = false;
+    await agenda.sincronizarNuvem({ silent: true });
+    const lst = store.list('agenda');
+    out.mudancaDesceu = (lst.find(x => x._id === 'a1') || {}).hora === '14:30';
+    out.canceladoSumiu = !lst.find(x => x._id === 'a2');
+    /* o que nunca subiu NÃO pode ser confundido com "apagado por alguém" */
+    out.oQueNuncaSubiuFica = !!lst.find(x => x._id === 'a3');
+
+    /* --- (d) Realtime escuta a agenda --- */
+    out.realtimeEscuta = realtime.TABELAS.appointments === 'agenda';
+
+    store.setList('agenda', []);
+    localStorage.removeItem(cloudRel.FILA_KEY);
+    localStorage.removeItem(cloudRel.FILA_DEL_KEY);
+    return out;
+  });
+
+  assert(r.entrouNaFila, 'compromisso que não subiu entra na fila durável, em vez de sumir no catch vazio');
+  assert(r.drenouPeloCaminhoCerto, 'e a fila o sobe pelo envio da agenda — o genérico deixaria horário e status em branco');
+  assert(r.saiuDaFila, 'subiu, saiu da fila');
+  assert(r.pediuParaApagarLa && r.sumiuDaqui, 'excluir aqui apaga também na clínica');
+  assert(r.temFilaDeExclusao, 'a exclusão tem fila própria — a normal relê do aparelho, e o apagado não está mais lá');
+  assert(r.guardouAExclusao && r.tirouDaFila, 'que guarda e libera a chave');
+  assert(r.mudancaDesceu, 'remarcar num aparelho chega ao outro');
+  assert(r.canceladoSumiu, 'e cancelar na clínica remove daqui');
+  assert(r.oQueNuncaSubiuFica, 'mas o que ainda não subiu não é confundido com apagado');
+  assert(r.realtimeEscuta, 'a agenda passa a chegar na hora, pelo Realtime');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
