@@ -11954,6 +11954,74 @@ await test('Campo de assinatura: uma pessoa, uma linha — e o carimbo vem do ca
   await page.close();
 });
 
+/* 180) O backup de PDF era o último "dispara-e-esquece" do sistema: o blob era
+   gerado em memória, a tentativa falhava (autorização do Drive vencida) e o
+   arquivo morria ali. Não havia fila — logar de volta não trazia nada, porque
+   nada estava esperando. */
+await test('PDF que não sobe fica esperando na fila, e sobe quando a autorização volta', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    await pdfFila.limpar();
+    const docFalso = { output: () => new Blob(['%PDF-1.4 teste'], { type: 'application/pdf' }) };
+
+    /* --- (a) os dois destinos ligados, e os dois falhando --- */
+    pdfBackup.salvarCfg({ supabase: true, drive: true, driveClientId: 'x.apps.googleusercontent.com' });
+    cloud.estaLogado = () => true;
+    let tentouSupa = 0, tentouDrive = 0;
+    pdfBackup.enviarSupabase = async () => { tentouSupa++; return false; };
+    pdfBackup.enviarDrive = async () => { tentouDrive++; return false; };
+    await pdfBackup.enviarTodos(docFalso, 'FICHA_MARIA.pdf', { mod: 'anestesia', paciente: 'MARIA' });
+    const espera = await pdfFila.listar();
+    out.guardouOsDois = espera.length === 2
+      && espera.some(i => i.destino === 'supabase') && espera.some(i => i.destino === 'drive');
+    out.guardouOBlob = espera.every(i => i.blob && i.blob.size > 0);
+    out.guardouOContexto = espera.every(i => i.nomeArq === 'FICHA_MARIA.pdf' && i.paciente === 'MARIA');
+
+    /* --- (b) o que subiu num destino não espera por ele --- */
+    await pdfFila.limpar();
+    pdfBackup.enviarSupabase = async () => true;      /* nuvem ok */
+    pdfBackup.enviarDrive = async () => false;        /* Drive deslogado */
+    await pdfBackup.enviarTodos(docFalso, 'PRE_JOAO.pdf', { mod: 'pre' });
+    const so1 = await pdfFila.listar();
+    out.soOQueFalhouEspera = so1.length === 1 && so1[0].destino === 'drive';
+
+    /* --- (c) a autorização volta: a fila drena e esvazia --- */
+    let subiuNoDrive = 0;
+    pdfBackup.enviarDrive = async (blob, nome) => { subiuNoDrive++; return !!(blob && nome); };
+    const res = await pdfBackup.drenarFila();
+    out.drenou = res.enviados === 1 && subiuNoDrive === 1;
+    out.filaVazia = (await pdfFila.listar()).length === 0;
+
+    /* --- (d) porta ainda fechada: tenta uma vez por destino, não 40 --- */
+    await pdfFila.limpar();
+    pdfBackup.enviarDrive = async () => false;
+    for (let i = 0; i < 4; i++) await pdfFila.guardar(docFalso.output(), 'D' + i + '.pdf', 'drive', {});
+    let tentativas = 0;
+    pdfBackup.enviarDrive = async () => { tentativas++; return false; };
+    const res2 = await pdfBackup.drenarFila();
+    out.naoInsiste = tentativas === 1 && res2.enviados === 0;
+    out.continuamEsperando = (await pdfFila.listar()).length === 4;
+
+    /* --- (e) conectar o Drive drena sozinho, sem ninguém pedir --- */
+    out.conectarDrena = /drenarFila/.test(String(pdfBackup.conectarDrive));
+
+    await pdfFila.limpar();
+    return out;
+  });
+
+  assert(r.guardouOsDois, 'PDF que não subiu em nenhum destino fica esperando pelos dois');
+  assert(r.guardouOBlob, 'e o arquivo em si fica gravado — antes só existia na memória durante a tentativa');
+  assert(r.guardouOContexto, 'com nome e paciente, para saber o que está esperando');
+  assert(r.soOQueFalhouEspera, 'o que já subiu na nuvem não espera de novo pelo Drive');
+  assert(r.drenou, 'quando a autorização volta, o que esperava sobe');
+  assert(r.filaVazia, 'e sai da fila');
+  assert(r.naoInsiste, 'com a porta ainda fechada, tenta uma vez por destino — não uma por arquivo');
+  assert(r.continuamEsperando, 'e nada é descartado por ter falhado');
+  assert(r.conectarDrena, 'conectar o Drive drena a fila sozinho');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
