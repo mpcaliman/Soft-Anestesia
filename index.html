@@ -1926,7 +1926,7 @@ canvas#signature-canvas {
 .dash-bar-label { width: 34%; font-size: .8rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dash-bar-track { flex: 1; height: 16px; background: var(--surface-alt); border-radius: 8px; overflow: hidden; }
 .dash-bar-fill { height: 100%; border-radius: 8px; transition: width .5s ease; min-width: 3px; }
-.dash-bar-val { width: 28px; text-align: right; font-size: .8rem; font-weight: 700; color: var(--text); flex-shrink: 0; }
+.dash-bar-val { width: 40px; text-align: right; font-size: .8rem; font-weight: 700; color: var(--text); flex-shrink: 0; }
 
 /* Elementos clicáveis dos gráficos */
 .dash-clickable { cursor: pointer; transition: opacity .12s, transform .12s; }
@@ -4548,7 +4548,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-28h</b><br>
+    v7.1 · build <b id="build-tag">2026-08-28i</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -44129,7 +44129,7 @@ const dashboard = {
       <div class="dash-legend-item dash-clickable" onclick="event.stopPropagation(); dashboard.detalhar('${cat}', '${utils.escapeAttr(s.k)}')">
         <span class="dash-legend-dot" style="background:${s.cor}"></span>
         <span class="dash-legend-label">${utils.escapeHTML(s.k)}</span>
-        <span class="dash-legend-val">${s.v} · ${s.pct.toFixed(0)}%</span>
+        <span class="dash-legend-val" title="${s.v} de ${total}">${s.pct.toFixed(0)}%</span>
       </div>`).join('')}</div>`;
 
     el.innerHTML = `<div class="dash-donut-wrap">${svg}${legenda}</div>`;
@@ -44139,17 +44139,26 @@ const dashboard = {
   renderBarsSVG(elId, data, opts = {}) {
     const el = document.getElementById(elId);
     if (!el) return;
-    const entries = Object.entries(data).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, opts.limit || 8);
+    const todas = Object.entries(data).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+    const entries = todas.slice(0, opts.limit || 8);
     if (!entries.length) { el.innerHTML = '<div class="empty-state">Sem registros ainda — cadastre atendimentos para ver o gráfico</div>'; return; }
     const cat = opts.categoria || elId;
     const max = entries[0][1];
+    /* A porcentagem é do TOTAL do gráfico, não da maior barra. O comprimento
+       da barra é que se mede pela maior — é o que faz a comparação visual
+       funcionar; a porcentagem responde outra pergunta: "quanto do meu
+       trabalho é isto". Usar a mesma base para as duas coisas faria a maior
+       barra marcar sempre 100%. O gráfico mostra as primeiras, mas a conta
+       leva TODAS: senão o que ficou de fora sumiria da porcentagem também. */
+    const total = todas.reduce((acc, [, v]) => acc + v, 0);
     const rows = entries.map(([k, v], i) => {
-      const pct = max ? (v / max) * 100 : 0;
+      const larg = max ? (v / max) * 100 : 0;
+      const pct = total ? (v / total) * 100 : 0;
       const cor = opts.corFixa || dashboard._paleta[i % dashboard._paleta.length];
-      return `<div class="dash-bar-row dash-clickable" onclick="event.stopPropagation(); dashboard.detalhar('${cat}', '${utils.escapeAttr(k)}')" title="Toque para ver os registros">
+      return `<div class="dash-bar-row dash-clickable" onclick="event.stopPropagation(); dashboard.detalhar('${cat}', '${utils.escapeAttr(k)}')" title="${v} de ${total} — toque para ver os registros">
         <div class="dash-bar-label">${utils.escapeHTML(k)}</div>
-        <div class="dash-bar-track"><div class="dash-bar-fill" style="width:${pct}%;background:${cor}"></div></div>
-        <div class="dash-bar-val">${v}</div>
+        <div class="dash-bar-track"><div class="dash-bar-fill" style="width:${larg}%;background:${cor}"></div></div>
+        <div class="dash-bar-val">${pct.toFixed(0)}%</div>
       </div>`;
     }).join('');
     el.innerHTML = `<div class="dash-bars">${rows}</div>`;

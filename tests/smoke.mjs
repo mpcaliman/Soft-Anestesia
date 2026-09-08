@@ -11448,6 +11448,59 @@ await test('Pacientes: ordenação, filtro por plano e a linha inteira cabendo n
   await page.close();
 });
 
+/* 174) Gráficos do painel: a leitura passa a ser em porcentagem. O número
+   absoluto continua acessível no toque — some da tela, não do sistema. */
+await test('Gráficos do painel mostram porcentagem, e a barra mede pela maior enquanto a conta é do total', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const host = document.getElementById('dash-total-atend');
+    out.temOnde = !!host;
+
+    /* rosca */
+    dashboard.renderDonut('dash-total-atend', { Anestesia: 69, 'Recuperação': 66, 'Pré-anestésica': 42 },
+      { centerLabel: 'atend.', categoria: 'x' });
+    const legendas = Array.from(host.querySelectorAll('.dash-legend-val'));
+    out.roscaSoPorcento = legendas.map(x => x.textContent.trim()).join('|') === '39%|37%|24%';
+    out.roscaGuardaONumero = /69 de 177/.test(legendas[0].getAttribute('title') || '');
+    /* o total no meio continua — ele É a informação do centro */
+    out.roscaMantemOTotal = /177/.test(host.querySelector('.dash-donut-total').textContent);
+
+    /* barras */
+    dashboard.renderBarsSVG('dash-total-atend', {
+      'Anestesia geral': 34, 'Sedação': 31, 'Local assistida': 20,
+      'Raquianestesia': 9, 'Peridural': 5, 'Bloqueio periférico': 4
+    }, { categoria: 'y' });
+    const vals = Array.from(host.querySelectorAll('.dash-bar-val')).map(x => x.textContent.trim());
+    out.barraSoPorcento = vals.every(v => /^\d+%$/.test(v));
+    /* 34 de 103 = 33% — porcentagem do TOTAL, não da maior barra */
+    out.barraContaDoTotal = vals[0] === '33%';
+    /* mas o comprimento continua medido pela maior: a primeira ocupa 100% */
+    const larguras = Array.from(host.querySelectorAll('.dash-bar-fill')).map(x => x.style.width);
+    out.barraMedePelaMaior = larguras[0] === '100%';
+    out.barraGuardaONumero = /34 de 103/.test(host.querySelector('.dash-bar-row').getAttribute('title') || '');
+
+    /* com corte de 8, a conta continua sendo do total inteiro */
+    const muitos = {}; for (let i = 0; i < 12; i++) muitos['C' + i] = 10;
+    dashboard.renderBarsSVG('dash-total-atend', muitos, { categoria: 'z' });
+    const v2 = Array.from(host.querySelectorAll('.dash-bar-val')).map(x => x.textContent.trim());
+    out.cortouAsBarras = v2.length === 8;
+    out.masContouTodas = v2[0] === '8%';   /* 10 de 120, não 10 de 80 */
+    return out;
+  });
+
+  assert(r.temOnde, 'o gráfico precisa de onde desenhar');
+  assert(r.roscaSoPorcento, 'a legenda da rosca mostra a porcentagem, sem o número absoluto');
+  assert(r.roscaGuardaONumero, 'mas o número continua no toque — sai da tela, não do sistema');
+  assert(r.roscaMantemOTotal, 'e o total no centro fica: ele é a informação do centro');
+  assert(r.barraSoPorcento, 'as barras também passam a marcar porcentagem');
+  assert(r.barraContaDoTotal, 'calculada sobre o total do gráfico');
+  assert(r.barraMedePelaMaior, 'enquanto o comprimento continua medido pela maior barra');
+  assert(r.barraGuardaONumero, 'e a contagem fica no toque');
+  assert(r.cortouAsBarras && r.masContouTodas, 'com mais de 8, mostra 8 mas conta todas — senão a porcentagem mentiria');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
