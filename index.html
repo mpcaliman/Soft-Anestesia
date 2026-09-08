@@ -1926,7 +1926,7 @@ canvas#signature-canvas {
 .dash-bar-label { width: 34%; font-size: .8rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dash-bar-track { flex: 1; height: 16px; background: var(--surface-alt); border-radius: 8px; overflow: hidden; }
 .dash-bar-fill { height: 100%; border-radius: 8px; transition: width .5s ease; min-width: 3px; }
-.dash-bar-val { width: 28px; text-align: right; font-size: .8rem; font-weight: 700; color: var(--text); flex-shrink: 0; }
+.dash-bar-val { width: 66px; text-align: right; font-size: .8rem; font-weight: 700; color: var(--text); flex-shrink: 0; }
 
 /* Elementos clicáveis dos gráficos */
 .dash-clickable { cursor: pointer; transition: opacity .12s, transform .12s; }
@@ -3376,6 +3376,45 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
 }
 
 /* Apenas overlay aparece na impressão quando estiver aberto */
+/* JANELA DO BLOQUEIO — o card 3 apresentado como janela, sem sair do lugar.
+   Mover os campos para dentro do modal seria tirá-los do formulário, e a
+   gravação automática (que roda sozinha a cada pausa de digitação) passaria a
+   salvar a ficha SEM eles. Aqui só a apresentação muda: o quadro continua
+   dentro do form, exatamente onde estava. */
+#bloqueio-detalhes.bloq-janela {
+  /* Centrada na ÁREA DE CONTEÚDO, não na tela: o menu lateral é pintado por
+     cima (ele vive no mesmo contexto de empilhamento do app) e comia a borda
+     esquerda da janela. Em vez de disputar z-index com ele, a janela ocupa o
+     espaço que é dela. */
+  position: fixed; top: 50%;
+  left: calc(var(--sidebar-w) + (100vw - var(--sidebar-w)) / 2);
+  transform: translate(-50%, -50%);
+  width: min(940px, calc(100vw - var(--sidebar-w) - 32px)); max-height: 88vh; overflow-y: auto;
+  z-index: 100600; background: var(--surface); box-shadow: 0 24px 70px rgba(0,0,0,.35);
+  border-radius: 12px; padding: 0;
+}
+#bloqueio-detalhes.bloq-janela > .grid { padding: 14px 16px 18px; }
+.bloq-janela-cab {
+  position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--border);
+  border-radius: 12px 12px 0 0;
+}
+.bloq-janela-cab h3 { margin: 0; font-size: 1rem; color: var(--primary-darker); flex: 1 }
+#bloq-janela-fundo {
+  position: fixed; top: 0; right: 0; bottom: 0; left: var(--sidebar-w);
+  background: rgba(15, 30, 45, .55); z-index: 100550;
+}
+@media (max-width: 1199px) {
+  /* menu lateral fora do fluxo: a janela volta a ser da tela inteira */
+  #bloqueio-detalhes.bloq-janela { left: 50%; width: min(940px, 95vw); }
+  #bloq-janela-fundo { left: 0; }
+}
+@media (max-width: 768px) {
+  #bloqueio-detalhes.bloq-janela { width: 100vw; max-height: 92vh; top: auto; bottom: 0;
+    left: 0; transform: none; border-radius: 12px 12px 0 0; }
+}
+@media print { #bloqueio-detalhes.bloq-janela, #bloq-janela-fundo { position: static; box-shadow: none; } }
+
 @media print {
   body.printing-preview .app { display: none !important; }
   body.printing-preview .print-preview-overlay {
@@ -4548,7 +4587,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-28h</b><br>
+    v7.1 · build <b id="build-tag">2026-08-28m</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -10163,6 +10202,13 @@ const STORAGE = {
   fin_fechamentos: 'medsys.v7.fin_fechamentos',
   agenda:      'medsys.v3.agenda',
   pacientes:   'medsys.v5.pacientes',
+  /* Cadastro ÚNICO de profissionais. Antes eram três — "Meu perfil
+     profissional", "Anestesistas" e "Cirurgiões" — e o próprio dono do
+     sistema aparecia em dois deles, com o mesmo CRM digitado duas vezes.
+     Agora é um só: a especialidade e a marca de "sou eu" são campos, não
+     cadastros separados. Os três antigos viraram VISTAS sobre este (ver
+     ajustes.list), para que nada que dependia deles precisasse mudar. */
+  cad_profissionais: 'medsys.v7.cad.profissionais',
   cad_anestesistas: 'medsys.v5.cad.anestesistas',
   cad_cirurgioes:   'medsys.v5.cad.cirurgioes',
   cad_clinicas:     'medsys.v5.cad.clinicas',
@@ -11178,7 +11224,7 @@ const backupCompleto = {
   CHAVES: [
     'pre','consulta','anestesia','recuperacao','termo','prescricao','risco',
     'financeiro','fin_fechamentos','agenda','pacientes','orcamento','orcamento_cfg',
-    'cad_anestesistas','cad_cirurgioes','cad_clinicas','cad_convenios',
+    'cad_profissionais','cad_anestesistas','cad_cirurgioes','cad_clinicas','cad_convenios',
     'cad_procedimentos','cad_pagamentos','cad_presets_med','cad_assinaturas',
     'cad_assinatura_ativa','termo_padrao'
   ],
@@ -16988,7 +17034,7 @@ const prescricao = {
        art. 35, III). Esses dados vêm do perfil profissional (Ajustes). */
     if (receita) {
       const falta = prescricao._faltaPerfilReceita();
-      if (falta.length) banner += ' ⚠️ Cadastre ' + falta.join(' e ') + ' em Ajustes → perfil profissional (exigido por lei na receita).';
+      if (falta.length) banner += ' ⚠️ Cadastre ' + falta.join(' e ') + ' em Ajustes → Profissionais, no seu cadastro (exigido por lei na receita).';
     }
     if (banner) ui.mostrarBanner('banner-prescricao', banner, 'info'); else ui.fecharBanner('banner-prescricao');
     prescricao._toggleCID();
@@ -16997,7 +17043,7 @@ const prescricao = {
   _faltaPerfilReceita() {
     let cad = {};
     try {
-      cad = store.list('cad_assinaturas').find(x => x._id === localStorage.getItem(STORAGE.cad_assinatura_ativa)) || store.list('cad_assinaturas')[0] || {};
+      cad = ajustes.perfilAtivo();
     } catch (e) {}
     const falta = [];
     if (!(cad.crm || '').trim()) falta.push('CRM');
@@ -18976,9 +19022,9 @@ const cloud = {
   MODS: ['pre','consulta','anestesia','recuperacao','termo','prescricao','documentos','risco','financeiro','orcamento','agenda','pacientes',
          /* cadastros (perfil profissional/carimbo, equipe, locais, tabelas) —
             sincronizam entre aparelhos como qualquer registro */
-         'cad_assinaturas','cad_anestesistas','cad_cirurgioes','cad_clinicas','cad_convenios','cad_procedimentos','cad_pagamentos','cad_presets_med','cad_equipamentos'],
+         'cad_profissionais','cad_assinaturas','cad_anestesistas','cad_cirurgioes','cad_clinicas','cad_convenios','cad_procedimentos','cad_pagamentos','cad_presets_med','cad_equipamentos'],
   /* Módulos de cadastro (subconjunto de MODS) — usados no envio único inicial */
-  CAD_MODS: ['cad_assinaturas','cad_anestesistas','cad_cirurgioes','cad_clinicas','cad_convenios','cad_procedimentos','cad_pagamentos','cad_presets_med','cad_equipamentos'],
+  CAD_MODS: ['cad_profissionais','cad_assinaturas','cad_anestesistas','cad_cirurgioes','cad_clinicas','cad_convenios','cad_procedimentos','cad_pagamentos','cad_presets_med','cad_equipamentos'],
   _syncing: false,
 
   /* ---- Configuração (URL + anon key) ---- */
@@ -20151,6 +20197,7 @@ const cloud = {
 const clinicaSync = {
   /* chave local → chave na nuvem (sem o prefixo medsys, para ficar legível) */
   CHAVES: {
+    'medsys.v7.cad.profissionais': 'cad_profissionais',
     'medsys.v5.cad.anestesistas': 'cad_anestesistas',
     'medsys.v5.cad.cirurgioes': 'cad_cirurgioes',
     'medsys.v5.cad.clinicas': 'cad_clinicas',
@@ -26654,7 +26701,7 @@ const pdfGen = {
     /* dados do profissional / clínica a partir do cadastro, se houver */
     let clinica = {};
     try {
-      const ativa = store.list('cad_assinaturas').find(x => x._id === localStorage.getItem(STORAGE.cad_assinatura_ativa)) || store.list('cad_assinaturas')[0];
+      const ativa = ajustes.perfilAtivo();
       if (ativa) clinica = ativa;
     } catch (e) {}
 
@@ -26828,18 +26875,18 @@ const pdfGen = {
     /* identificação do profissional */
     let clinica = {};
     try {
-      const ativa = store.list('cad_assinaturas').find(x => x._id === localStorage.getItem(STORAGE.cad_assinatura_ativa)) || store.list('cad_assinaturas')[0];
+      const ativa = ajustes.perfilAtivo();
       if (ativa) clinica = ativa;
     } catch (e) {}
-    if (!(clinica.crm || d.crm)) faltando.push('CRM do médico (cadastre em Ajustes → Meu perfil profissional)');
-    if (!(clinica.endereco)) faltando.push('Endereço do consultório (Ajustes → Meu perfil profissional)');
+    if (!(clinica.crm || d.crm)) faltando.push('CRM do médico (cadastre em Ajustes → Profissionais)');
+    if (!(clinica.endereco)) faltando.push('Endereço do consultório (Ajustes → Profissionais)');
 
     if (faltando.length) {
       const lista = faltando.map(f => `<li>${utils.escapeHTML(f)}</li>`).join('');
       modal.open('⚠️ Campos obrigatórios para validade legal',
         `<p style="font-size:.9rem;margin-bottom:10px">Para a receita ser aceita pela farmácia, a lei exige estes itens. Complete antes de assinar:</p>
          <ul style="font-size:.88rem;line-height:1.7;padding-left:20px;color:var(--danger)">${lista}</ul>
-         <p style="font-size:.82rem;color:var(--text-soft);margin-top:12px">A identificação do médico (nome, CRM, endereço do consultório) vem do cadastro em <b>Ajustes → Meu perfil profissional</b>.</p>`,
+         <p style="font-size:.82rem;color:var(--text-soft);margin-top:12px">A identificação do médico (nome, CRM, endereço do consultório) vem do cadastro em <b>Ajustes → Profissionais</b>, do profissional marcado como responsável.</p>`,
         `<button class="btn" onclick="modal.close()">Entendi</button>`);
       return;
     }
@@ -29083,6 +29130,336 @@ const anestesia = {
   },
 
   /* ---- BLOQUEIO REGIONAL, USG, CATETERES ---- */
+  /* ==========================================================================
+     DETALHE POR TÉCNICA — a janela que se abre ao marcar o tipo de anestesia
+
+     Marcar "Anestesia geral" criava o evento na linha do tempo e parava aí: o
+     COMO ficava para o anestesista escrever à mão, num campo livre, toda vez.
+     O bloqueio regional tinha um card completo; todo o resto, nada.
+
+     Aqui cada técnica declara os campos que a descrevem. A janela pergunta,
+     a resposta fica gravada no registro (e volta ao reabrir), e vira a
+     descrição-padrão daquela técnica — que alimenta a "Técnica realizada" e a
+     descrição do evento no gráfico.
+
+     Os tipos NEUROAXIAIS e de bloqueio não entram aqui de propósito: eles já
+     têm o card 3 inteiro, com tabela de medicações que se replica no gráfico.
+     Duplicar os campos numa janela criaria duas verdades para o mesmo dado.
+     Para esses, a janela abre o card e leva a pessoa até ele.
+  ========================================================================== */
+  tecnicaDet: {
+    /* tipos que já têm card próprio — a janela leva até ele */
+    BLOQUEIOS: ['Raquianestesia', 'Peridural', 'Bloqueio periférico', 'Bloqueio regional'],
+
+    ESPECS: {
+      'Anestesia geral': {
+        titulo: '💤 Anestesia geral',
+        campos: [
+          { n: 'inducao', l: 'Indução', t: 'select', col: 6, o: ['Venosa', 'Inalatória', 'Venosa + inalatória', 'Sequência rápida'] },
+          { n: 'manutencao', l: 'Manutenção', t: 'select', col: 6, o: ['Inalatória', 'Venosa total (TIVA)', 'Balanceada'] },
+          { n: 'agente_ind', l: 'Agente de indução', t: 'text', col: 6, p: 'Propofol 2 mg/kg' },
+          { n: 'agente_man', l: 'Agente de manutenção', t: 'text', col: 6, p: 'Sevoflurano 1 CAM' },
+          { n: 'opioide', l: 'Opioide', t: 'text', col: 6, p: 'Fentanil 3 mcg/kg' },
+          { n: 'bnm', l: 'Bloqueador neuromuscular', t: 'text', col: 6, p: 'Rocurônio 0,6 mg/kg' },
+          { n: 'reversao', l: 'Reversão do bloqueio neuromuscular', t: 'select', col: 6,
+            o: ['Não utilizada', 'Neostigmina + atropina', 'Sugamadex', 'Reversão espontânea'] },
+          { n: 'profundidade', l: 'Monitorização da profundidade', t: 'select', col: 6,
+            o: ['Clínica', 'BIS', 'Entropia', 'TOF (bloqueio neuromuscular)'] },
+          { n: 'obs', l: 'Observações', t: 'textarea', col: 12 }
+        ],
+        texto(d) {
+          const p = [];
+          if (d.inducao) p.push('Indução ' + d.inducao.toLowerCase() + (d.agente_ind ? ' com ' + d.agente_ind : ''));
+          else if (d.agente_ind) p.push('Indução com ' + d.agente_ind);
+          if (d.opioide) p.push('opioide: ' + d.opioide);
+          if (d.bnm) p.push('bloqueio neuromuscular: ' + d.bnm);
+          if (d.manutencao) p.push('manutenção ' + d.manutencao.toLowerCase() + (d.agente_man ? ' com ' + d.agente_man : ''));
+          else if (d.agente_man) p.push('manutenção com ' + d.agente_man);
+          if (d.profundidade) p.push('monitorização da profundidade por ' + d.profundidade.toLowerCase());
+          if (d.reversao && d.reversao !== 'Não utilizada') p.push('reversão com ' + d.reversao.toLowerCase());
+          return anestesia.tecnicaDet._frase('Anestesia geral', p, d.obs);
+        }
+      },
+      'Sedação': {
+        titulo: '😴 Sedação',
+        campos: [
+          { n: 'nivel', l: 'Nível de sedação', t: 'select', col: 6, o: ['Leve (ansiólise)', 'Moderada (consciente)', 'Profunda'] },
+          { n: 'agentes', l: 'Agentes utilizados', t: 'text', col: 6, p: 'Propofol em infusão + fentanil' },
+          { n: 'oxigenio', l: 'Suporte de oxigênio', t: 'select', col: 6,
+            o: ['Cateter nasal', 'Máscara facial', 'Máscara de Venturi', 'Ar ambiente'] },
+          { n: 'via_aerea', l: 'Via aérea', t: 'select', col: 6, o: ['Espontânea, pérvia', 'Cânula de Guedel', 'Suporte manual em algum momento'] },
+          { n: 'escala', l: 'Escala / grau atingido', t: 'text', col: 6, p: 'Ramsay 3' },
+          { n: 'obs', l: 'Observações', t: 'textarea', col: 12 }
+        ],
+        texto(d) {
+          const p = [];
+          if (d.nivel) p.push('sedação ' + d.nivel.toLowerCase());
+          if (d.agentes) p.push('com ' + d.agentes);
+          if (d.via_aerea) p.push('via aérea ' + d.via_aerea.toLowerCase());
+          if (d.oxigenio) p.push('oxigênio por ' + d.oxigenio.toLowerCase());
+          if (d.escala) p.push('nível atingido: ' + d.escala);
+          return anestesia.tecnicaDet._frase('Sedação', p, d.obs);
+        }
+      },
+      'Local assistida': {
+        titulo: '💉 Anestesia local assistida',
+        campos: [
+          { n: 'agente', l: 'Anestésico local', t: 'text', col: 6, p: 'Lidocaína 2% com vasoconstritor' },
+          { n: 'volume', l: 'Volume total', t: 'text', col: 3, p: '20 mL' },
+          { n: 'quem', l: 'Infiltração realizada por', t: 'select', col: 3, o: ['Cirurgião', 'Anestesiologista'] },
+          { n: 'complemento', l: 'Complementação', t: 'select', col: 6, o: ['Nenhuma', 'Sedação leve', 'Analgesia venosa'] },
+          { n: 'obs', l: 'Observações', t: 'textarea', col: 12 }
+        ],
+        texto(d) {
+          const p = [];
+          if (d.agente) p.push('infiltração com ' + d.agente + (d.volume ? ', ' + d.volume : ''));
+          if (d.quem) p.push('realizada pelo ' + d.quem.toLowerCase());
+          if (d.complemento && d.complemento !== 'Nenhuma') p.push('complementada por ' + d.complemento.toLowerCase());
+          return anestesia.tecnicaDet._frase('Anestesia local assistida', p, d.obs);
+        }
+      },
+      'Monitoração e vigilância clínica': {
+        titulo: '📈 Monitoração e vigilância clínica',
+        campos: [
+          { n: 'motivo', l: 'Motivo', t: 'text', col: 12, p: 'Procedimento sob anestesia local pelo cirurgião, com acompanhamento anestesiológico' },
+          { n: 'monitor', l: 'Monitorização utilizada', t: 'text', col: 12, p: 'Cardioscopia, oximetria e PANI' },
+          { n: 'suporte', l: 'Suporte utilizado', t: 'select', col: 6, o: ['Nenhum', 'Oxigênio suplementar', 'Analgesia venosa', 'Ansiolítico'] },
+          { n: 'obs', l: 'Observações', t: 'textarea', col: 12 }
+        ],
+        texto(d) {
+          const p = [];
+          if (d.motivo) p.push(d.motivo);
+          if (d.monitor) p.push('monitorização: ' + d.monitor);
+          if (d.suporte && d.suporte !== 'Nenhum') p.push('suporte: ' + d.suporte.toLowerCase());
+          return anestesia.tecnicaDet._frase('Monitoração e vigilância clínica', p, d.obs);
+        }
+      },
+      'Outra': {
+        titulo: '➕ Outra técnica',
+        campos: [
+          { n: 'nome', l: 'Qual técnica', t: 'text', col: 12, p: 'Descreva a técnica utilizada' },
+          { n: 'obs', l: 'Descrição', t: 'textarea', col: 12 }
+        ],
+        texto(d) { return anestesia.tecnicaDet._frase(d.nome || 'Outra técnica', [], d.obs); }
+      }
+    },
+
+    /* Uma frase legível a partir das partes preenchidas. Campo em branco não
+       vira "undefined" nem vírgula solta: some. */
+    _frase(titulo, partes, obs) {
+      const corpo = partes.filter(Boolean).join('; ');
+      let t = titulo + (corpo ? ': ' + corpo : '');
+      if (!/[.!?]\s*$/.test(t)) t += '.';
+      if (obs && obs.trim()) t += ' ' + obs.trim().replace(/\s*$/, '') + (/[.!?]$/.test(obs.trim()) ? '' : '.');
+      return t;
+    },
+
+    /* ---- estado: fica no registro, não só na tela ---- */
+    _dados: {},
+    de(tipo) { return anestesia.tecnicaDet._dados[tipo] || {}; },
+    coletar() { return JSON.parse(JSON.stringify(anestesia.tecnicaDet._dados || {})); },
+    restaurar(d) {
+      anestesia.tecnicaDet._dados = (d && typeof d === 'object') ? JSON.parse(JSON.stringify(d)) : {};
+      try { anestesia.tecnicaDet.renderResumos(); } catch (e) {}
+    },
+    limpar() { anestesia.tecnicaDet._dados = {}; try { anestesia.tecnicaDet.renderResumos(); } catch (e) {} },
+
+    /* ---- a janela ---- */
+    abrir(tipo, tentativa) {
+      if (anestesia.tecnicaDet.BLOQUEIOS.indexOf(tipo) >= 0) return anestesia.tecnicaDet._irParaBloqueio(tipo);
+      const esp = anestesia.tecnicaDet.ESPECS[tipo];
+      if (!esp) return false;
+      /* Só existe UMA janela no app. Abrir por cima de outra faz a nossa
+         sumir sem aviso — foi o que aconteceu com o tutorial do gráfico, que
+         aparece 600 ms depois de entrar na ficha. Espera a vez. */
+      try {
+        const bd = document.getElementById('modal-backdrop');
+        const painelBloq = document.getElementById('bloqueio-detalhes');
+        const ocupado = (bd && bd.classList.contains('show'))
+          || (painelBloq && painelBloq.classList.contains('bloq-janela'));
+        if (ocupado) {
+          const n = (tentativa || 0) + 1;
+          if (n <= 8) { setTimeout(() => anestesia.tecnicaDet.abrir(tipo, n), 700); return true; }
+          return false;
+        }
+      } catch (e) {}
+      const d = anestesia.tecnicaDet.de(tipo);
+      const campo = (f) => {
+        const val = d[f.n] || '';
+        if (f.t === 'textarea') {
+          return '<div class="field col-' + f.col + '"><label>' + utils.escapeHTML(f.l) + '</label>' +
+            '<textarea name="td_' + f.n + '" rows="2" placeholder="' + utils.escapeAttr(f.p || '') + '">' + utils.escapeHTML(val) + '</textarea></div>';
+        }
+        if (f.t === 'select') {
+          return '<div class="field col-' + f.col + '"><label>' + utils.escapeHTML(f.l) + '</label>' +
+            '<select name="td_' + f.n + '"><option value="">—</option>' +
+            f.o.map(o => '<option ' + (o === val ? 'selected' : '') + '>' + utils.escapeHTML(o) + '</option>').join('') +
+            '</select></div>';
+        }
+        return '<div class="field col-' + f.col + '"><label>' + utils.escapeHTML(f.l) + '</label>' +
+          '<input type="text" name="td_' + f.n + '" value="' + utils.escapeAttr(val) + '" placeholder="' + utils.escapeAttr(f.p || '') + '"></div>';
+      };
+      const corpo =
+        '<p style="font-size:.82rem;color:var(--text-mute);margin:0 0 10px">O que você preencher aqui fica gravado na ficha e vira a descrição desta técnica — no texto da técnica realizada e no evento da linha do tempo. Tudo é opcional.</p>' +
+        '<form id="form-tecdet" onsubmit="return false"><div class="grid">' + esp.campos.map(campo).join('') + '</div></form>';
+      modal.open(esp.titulo, corpo,
+        '<button class="btn" onclick="modal.close()">Cancelar</button>' +
+        '<button class="btn btn-primary" onclick="anestesia.tecnicaDet.salvar(\'' + utils.escapeAttr(tipo) + '\')">Salvar detalhes</button>');
+      return true;
+    },
+    /* O bloqueio também abre em janela — só que a janela é o PRÓPRIO quadro
+       do card 3, apresentado por cima. Mover os campos para dentro do modal
+       seria tirá-los do formulário, e a gravação automática (que roda sozinha
+       a cada pausa de digitação) passaria a salvar a ficha sem eles. Aqui só a
+       apresentação muda: o quadro continua onde estava, com a mesma tabela de
+       medicações que se replica no gráfico. */
+    _irParaBloqueio(tipo) {
+      const f = document.getElementById('form-anestesia');
+      const painel = document.getElementById('bloqueio-detalhes');
+      if (!f || !painel) return false;
+      const chk = f.querySelector('[name="bloqueio_realizado"]');
+      if (chk && !chk.checked) { chk.checked = true; }
+      painel.style.display = '';
+      /* já deixa o tipo do bloqueio coerente com o que foi marcado */
+      const sel = f.querySelector('[name="bloqueio_tipo"]');
+      if (sel && !sel.value) {
+        const alvo = Array.from(sel.options).find(o => o.value === tipo)
+          || Array.from(sel.options).find(o => new RegExp(tipo.split(' ')[0], 'i').test(o.value));
+        if (alvo) { sel.value = alvo.value; try { anestesia.eventos.sincronizarDoBloqueio(); } catch (e) {} }
+      }
+      anestesia.tecnicaDet._janelaBloqueio(tipo);
+      return true;
+    },
+    _janelaBloqueio(tipo) {
+      const painel = document.getElementById('bloqueio-detalhes');
+      if (!painel || painel.classList.contains('bloq-janela')) return;
+      /* O card 3 pode estar recolhido, e um card recolhido é display:none —
+         o que apaga até o que está posicionado por cima. A janela apareceria
+         só como um escurecimento sem conteúdo. */
+      try {
+        const card = painel.closest('.card');
+        if (card) { card.classList.remove('collapsed'); painel._cardAberto = card; }
+      } catch (e) {}
+      let fundo = document.getElementById('bloq-janela-fundo');
+      if (!fundo) {
+        fundo = document.createElement('div');
+        fundo.id = 'bloq-janela-fundo';
+        fundo.onclick = () => anestesia.tecnicaDet.fecharJanelaBloqueio();
+        document.body.appendChild(fundo);
+      }
+      fundo.style.display = '';
+      let cab = painel.querySelector('.bloq-janela-cab');
+      if (!cab) {
+        cab = document.createElement('div');
+        cab.className = 'bloq-janela-cab';
+        cab.innerHTML = '<h3></h3><button type="button" class="btn btn-primary btn-sm" ' +
+          'onclick="anestesia.tecnicaDet.fecharJanelaBloqueio()">Concluir</button>';
+        painel.insertBefore(cab, painel.firstChild);
+      }
+      cab.querySelector('h3').textContent = '💉 ' + (tipo || 'Bloqueio') + ' — detalhes da punção';
+      cab.style.display = '';
+      painel.classList.add('bloq-janela');
+      document.body.classList.add('tem-modal');
+      painel.scrollTop = 0;
+    },
+    fecharJanelaBloqueio() {
+      const painel = document.getElementById('bloqueio-detalhes');
+      if (!painel) return;
+      painel.classList.remove('bloq-janela');
+      const cab = painel.querySelector('.bloq-janela-cab');
+      if (cab) cab.style.display = 'none';
+      const fundo = document.getElementById('bloq-janela-fundo');
+      if (fundo) fundo.style.display = 'none';
+      document.body.classList.remove('tem-modal');
+      /* o quadro volta a obedecer a caixa "Detalhar bloqueio" */
+      try {
+        const chk = document.querySelector('#form-anestesia [name="bloqueio_realizado"]');
+        painel.style.display = (chk && chk.checked) ? '' : 'none';
+      } catch (e) {}
+      try { anestesia.eventos.sincronizarDoBloqueio(); } catch (e) {}
+      try { anestesia.tecnicaDet.renderResumos(); } catch (e) {}
+      try { markDirty(); } catch (e) {}
+    },
+    salvar(tipo) {
+      const esp = anestesia.tecnicaDet.ESPECS[tipo];
+      const f = document.getElementById('form-tecdet');
+      if (!esp || !f) { modal.close(); return; }
+      const d = {};
+      esp.campos.forEach(c => {
+        const el = f.querySelector('[name="td_' + c.n + '"]');
+        if (el && el.value.trim()) d[c.n] = el.value.trim();
+      });
+      if (Object.keys(d).length) anestesia.tecnicaDet._dados[tipo] = d;
+      else delete anestesia.tecnicaDet._dados[tipo];
+      modal.close();
+      anestesia.tecnicaDet.aplicar(tipo);
+      try { markDirty(); } catch (e) {}
+      try { toast('Detalhes de "' + tipo + '" gravados na ficha.'); } catch (e) {}
+    },
+
+    /* ---- o texto que estes detalhes produzem ---- */
+    textoDe(tipo) {
+      const esp = anestesia.tecnicaDet.ESPECS[tipo];
+      const d = anestesia.tecnicaDet.de(tipo);
+      if (!esp || !Object.keys(d).length) return '';
+      try { return esp.texto(d); } catch (e) { return ''; }
+    },
+    /* Todas as técnicas marcadas, na ordem em que aparecem no formulário. */
+    textoCompleto() {
+      const f = document.getElementById('form-anestesia');
+      if (!f) return '';
+      const marcados = Array.from(f.querySelectorAll('[name="tipo[]"]:checked')).map(x => x.value);
+      return marcados.map(t => anestesia.tecnicaDet.textoDe(t)).filter(Boolean).join('\n');
+    },
+
+    /* Leva o texto para a "Técnica realizada" e para o evento do gráfico.
+       O campo livre é do anestesista: só se escreve nele o que ainda não
+       está lá, e nunca por cima do que ele digitou. */
+    MARCA: '​',
+    aplicar(tipo) {
+      const f = document.getElementById('form-anestesia');
+      if (!f) return;
+      const txt = anestesia.tecnicaDet.textoDe(tipo);
+      const ta = f.querySelector('[name="tecnica_descricao"]');
+      if (ta && txt) {
+        const atual = ta.value || '';
+        const linhas = atual.split('\n').filter(l => l.trim());
+        /* substitui a linha anterior desta mesma técnica, se houver */
+        const rotulo = (anestesia.tecnicaDet.ESPECS[tipo] || {}).campos ? txt.split(':')[0] : '';
+        const i = rotulo ? linhas.findIndex(l => l.indexOf(rotulo) === 0) : -1;
+        if (i >= 0) linhas[i] = txt; else linhas.push(txt);
+        ta.value = linhas.join('\n');
+      }
+      try { anestesia.eventos.atualizarDescricoes(); } catch (e) {}
+      anestesia.tecnicaDet.renderResumos();
+    },
+
+    /* Um resumo do que foi preenchido fica ao lado de cada tipo marcado —
+       senão não há como saber que a janela já foi respondida. */
+    renderResumos() {
+      const f = document.getElementById('form-anestesia');
+      if (!f) return;
+      f.querySelectorAll('[name="tipo[]"]').forEach(cb => {
+        const lab = cb.closest('label');
+        if (!lab) return;
+        let tag = lab.parentElement.querySelector('[data-tecdet="' + cb.value + '"]');
+        const temEspec = !!anestesia.tecnicaDet.ESPECS[cb.value] || anestesia.tecnicaDet.BLOQUEIOS.indexOf(cb.value) >= 0;
+        if (!cb.checked || !temEspec) { if (tag) tag.remove(); return; }
+        if (!tag) {
+          tag = document.createElement('button');
+          tag.type = 'button';
+          tag.className = 'btn btn-xs';
+          tag.setAttribute('data-tecdet', cb.value);
+          tag.style.cssText = 'margin:2px 0 8px 30px;display:block';
+          tag.onclick = () => anestesia.tecnicaDet.abrir(cb.value);
+          lab.insertAdjacentElement('afterend', tag);
+        }
+        const preenchido = Object.keys(anestesia.tecnicaDet.de(cb.value)).length > 0;
+        tag.textContent = preenchido ? '✏️ Detalhes preenchidos — editar' : '📝 Detalhar esta técnica';
+        tag.title = preenchido ? anestesia.tecnicaDet.textoDe(cb.value) : 'Abre a janela com os campos desta técnica';
+      });
+    }
+  },
   bloqueio: {
     alternar(checkbox) {
       const el = document.getElementById('bloqueio-detalhes');
@@ -29572,8 +29949,26 @@ const anestesia = {
           '; 3) Confirmação do posicionamento; 4) Fixação e drenagem.';
       }
     },
+    /* Evento da linha do tempo → tipo de anestesia que o gerou. É por aqui
+       que o detalhe respondido na janela alcança a descrição do evento e,
+       com ela, o gráfico de eventos e medicações. */
+    EVENTO_TIPO: {
+      'Indução': 'Anestesia geral',
+      'Sedação': 'Sedação',
+      'Anestesia local': 'Local assistida',
+      'Monitoração e vigilância clínica': 'Monitoração e vigilância clínica'
+    },
     /* Texto que o evento deve ter: o padrão, já reescrito com os detalhes */
     descricaoPara(tipo) {
+      /* o que a pessoa respondeu na janela vem primeiro: é o que ela disse
+         sobre ESTE caso, não o texto genérico da técnica */
+      try {
+        const tec = anestesia.eventos.EVENTO_TIPO[tipo];
+        if (tec) {
+          const t = anestesia.tecnicaDet.textoDe(tec);
+          if (t) return t;
+        }
+      } catch (e) {}
       const fn = anestesia.eventos.DESCRICOES_DET[tipo];
       if (fn) { try { return fn(); } catch (e) {} }
       return anestesia.eventos.DESCRICOES[tipo] || '';
@@ -29592,7 +29987,10 @@ const anestesia = {
         const tipo = (tr.querySelector('[name="evt_tipo[]"]') || {}).value || '';
         const obs = tr.querySelector('[name="evt_obs[]"]');
         if (!tipo || !obs) return;
-        if (!anestesia.eventos.DESCRICOES_DET[tipo]) return;
+        /* os tipos com janela própria também são reescritos: sem isto, a
+           resposta ficava na ficha e não chegava ao evento */
+        const temJanela = !!anestesia.eventos.EVENTO_TIPO[tipo];
+        if (!anestesia.eventos.DESCRICOES_DET[tipo] && !temJanela) return;
         /* só mexe no que é do sistema: vazio, ou marcado como automático */
         const vazio = !obs.value.trim();
         if (!vazio && tr.dataset.auto !== '1') return;
@@ -29727,7 +30125,13 @@ const anestesia = {
       return true;
     },
     aoSelecionarTipo(cb) {
-      if (!cb || !cb.checked) return;
+      if (!cb) return;
+      if (!cb.checked) { try { anestesia.tecnicaDet.renderResumos(); } catch (e) {} return; }
+      /* A janela com os campos daquela técnica. Marcar o tipo criava o evento
+         e parava aí: o COMO ficava para escrever à mão, num campo livre,
+         toda vez. Abre depois do evento entrar, para a linha do tempo já
+         existir quando a descrição for gerada. */
+      setTimeout(() => { try { anestesia.tecnicaDet.abrir(cb.value); } catch (e) {} }, 260);
       const mudouVent = anestesia.eventos._sugerirVentilacao(cb.value);
       const tipoEvt = anestesia.eventos.TIPO_EVENTO[cb.value];
       if (!tipoEvt) return;
@@ -35112,6 +35516,9 @@ const anestesia = {
         via_aerea_hora: v('via_aerea_hora'),
         monitorizacao_descricao: v('monitorizacao'),
         equipamentos: v('equipamentos_usados'),
+        /* o que a janela de cada técnica coletou — é isto que faltava ficar
+           gravado para edição futura */
+        detalhes: anestesia.tecnicaDet.coletar(),
         bloqueio: anestesia.bloqueio.coletar()
       },
       ventilacao: anestesia.vent.coletar(),
@@ -35276,6 +35683,8 @@ const anestesia = {
     set('monitorizacao', tc.monitorizacao_descricao);
     set('equipamentos_usados', tc.equipamentos);
     try { anestesia.equip.render(); } catch (e) {}
+    /* Detalhes por técnica (janela do card 3) */
+    try { anestesia.tecnicaDet.restaurar(tc.detalhes); } catch (e) {}
     /* Bloqueio regional / USG / cateteres */
     if (tc.bloqueio) anestesia.bloqueio.restaurar(tc.bloqueio);
     /* Ventilação detalhada */
@@ -35989,6 +36398,10 @@ const anestesia = {
   limparSilencioso() {
     anestesia.graficoUI._contexto = 'anestesia';   /* garante o contexto da ficha */
     utils.clearForm('form-anestesia');
+    /* os detalhes por técnica vivem fora do formulário: sem isto, a ficha
+       nova nasceria com o que foi respondido na ficha anterior */
+    try { anestesia.tecnicaDet.limpar(); } catch (e) {}
+    try { anestesia.tecnicaDet.fecharJanelaBloqueio(); } catch (e) {}
     try { prontuario.limpar('anestesia'); } catch (e) {}
     document.getElementById('medicacoes-body').innerHTML = '';
     document.getElementById('vitais-body').innerHTML = '';
@@ -38482,7 +38895,17 @@ document.addEventListener('click', e => {
   if (bd && e.target === bd) modal.close();
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') modal.close();
+  if (e.key !== 'Escape') return;
+  /* a janela do bloqueio não é o modal comum (os campos precisam continuar
+     dentro do formulário) — mas fecha pelo mesmo Esc */
+  try {
+    const painel = document.getElementById('bloqueio-detalhes');
+    if (painel && painel.classList.contains('bloq-janela')) {
+      anestesia.tecnicaDet.fecharJanelaBloqueio();
+      return;
+    }
+  } catch (er) {}
+  modal.close();
 });
 
 /* ============================================================================
@@ -40715,37 +41138,102 @@ const pacientes = {
 /* ============================================================================
    AJUSTES — cadastros simples (anestesistas, cirurgiões, clínicas, etc)
 ============================================================================ */
+/* A especialidade decide onde a pessoa aparece: quem é da anestesiologia
+   entra nas listas de anestesista, os demais nas de cirurgião. É a mesma
+   separação de antes — só que agora é um campo, não um cadastro à parte. */
+const ajustes_ESPECIALIDADES = [
+  'Anestesiologia',
+  'Cirurgia geral', 'Cirurgia plástica', 'Cirurgia vascular', 'Cirurgia pediátrica',
+  'Cirurgia de cabeça e pescoço', 'Cirurgia torácica', 'Cirurgia do aparelho digestivo',
+  'Ginecologia e obstetrícia', 'Ortopedia', 'Urologia', 'Otorrinolaringologia',
+  'Oftalmologia', 'Proctologia', 'Mastologia', 'Neurocirurgia', 'Bucomaxilofacial',
+  'Endoscopia', 'Dermatologia', 'Outra'
+];
+
 const ajustes = {
+  ESPECIALIDADES: ajustes_ESPECIALIDADES,
+
+  /* MIGRAÇÃO — junta os três cadastros antigos num só, uma vez.
+     Junta POR NOME normalizado: era exatamente aí que estava a redundância —
+     a mesma pessoa em "Meu perfil profissional" e em "Anestesistas". Quando
+     os dois têm o mesmo campo preenchido com coisas diferentes, vence o que
+     tem conteúdo; o perfil profissional entra por último e por cima, porque
+     é o cadastro que o dono do sistema mantém sobre si mesmo.
+     Nada é apagado: as chaves antigas ficam onde estão. */
+  MIGROU_KEY: 'medsys.v7.cad.profissionais.migrado',
+  migrarProfissionais() {
+    try {
+      if (localStorage.getItem(ajustes.MIGROU_KEY) === '1') return 0;
+      const jaTem = store.list('cad_profissionais');
+      if (jaTem.length) { localStorage.setItem(ajustes.MIGROU_KEY, '1'); return 0; }
+
+      const norm = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase().replace(/^\s*(dr|dra)\.?\s+/, '').replace(/\s+/g, ' ').trim();
+      const por = new Map();
+      const juntar = (nome, dados) => {
+        const k = norm(nome);
+        if (!k) return;
+        const atual = por.get(k) || {};
+        Object.keys(dados).forEach(campo => {
+          const v = dados[campo];
+          if (v === undefined || v === null || v === '') return;
+          atual[campo] = v;
+        });
+        atual.nome = atual.nome || nome;
+        por.set(k, atual);
+      };
+
+      store.list('cad_anestesistas').forEach(x => juntar(x.nome, {
+        nome: x.nome, especialidade: 'Anestesiologia', crm: x.crm, rqe: x.rqe,
+        telefone: x.telefone, email: x.email, carimbo: x.carimbo
+      }));
+      store.list('cad_cirurgioes').forEach(x => juntar(x.nome, {
+        nome: x.nome, especialidade: x.especialidade || 'Cirurgia geral', crm: x.crm,
+        telefone: x.telefone, email: x.email, carimbo: x.carimbo
+      }));
+      /* por último: é o cadastro que a pessoa mantém sobre si mesma */
+      store.list('cad_assinaturas').forEach(x => juntar(x.nomeProfissional || x.nome, {
+        nome: x.nomeProfissional || x.nome, especialidade: x.especialidade || 'Anestesiologia',
+        crm: x.crm, rqe: x.rqe, telefone: x.telefone, endereco: x.endereco,
+        cidade: x.cidade, carimbo: x.carimbo, responsavel: true
+      }));
+
+      const lista = Array.from(por.values());
+      if (!lista.length) { localStorage.setItem(ajustes.MIGROU_KEY, '1'); return 0; }
+      /* exatamente um responsável */
+      const resp = lista.filter(x => x.responsavel === true);
+      if (resp.length > 1) resp.slice(1).forEach(x => { x.responsavel = false; });
+      lista.forEach(x => {
+        if (!x._id) x._id = 'prof_' + (utils.uid ? utils.uid() : String(Date.now()) + Math.random().toString(16).slice(2));
+        if (!x._createdAt) x._createdAt = new Date().toISOString();
+        x._updatedAt = new Date().toISOString();
+      });
+      lista.sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR'));
+      store.setList('cad_profissionais', lista);
+      localStorage.setItem(ajustes.MIGROU_KEY, '1');
+      return lista.length;
+    } catch (e) { return 0; }
+  },
+
   /* Configuração de cada categoria */
   CATEGORIAS: [
     /* ——— GRUPO: Perfil e equipe ——— */
-    { key: 'cad_assinaturas', icon: '🪪', label: 'Meu perfil profissional', singular: 'Perfil profissional', grupo: 'Perfil e equipe', hasCarimbo: true,
+    /* UM cadastro de gente, com a especialidade e o "sou eu" como campos.
+       Eram três telas — "Meu perfil profissional", "Anestesistas" e
+       "Cirurgiões" — e o dono do sistema aparecia em duas delas, com o mesmo
+       CRM digitado duas vezes. Quando divergiam, ninguém sabia qual valia. */
+    { key: 'cad_profissionais', icon: '👨‍⚕️', label: 'Profissionais', singular: 'Profissional', grupo: 'Perfil e equipe', hasCarimbo: true,
       campos: [
-        { name: 'nomeProfissional', label: 'Nome do profissional', required: true, col: 8 },
+        { name: 'nome', label: 'Nome', required: true, col: 7 },
+        { name: 'especialidade', label: 'Especialidade', required: true, col: 5, type: 'select',
+          options: ajustes_ESPECIALIDADES },
+        { name: 'responsavel', label: 'Sou eu — profissional responsável (assina os documentos)', col: 12, type: 'checkbox' },
         { name: 'crm', label: 'CRM', col: 4 },
         { name: 'rqe', label: 'RQE', col: 4 },
-        { name: 'especialidade', label: 'Especialidade', col: 8 },
-        { name: 'endereco', label: 'Endereço do consultório', col: 12 },
-        { name: 'cidade', label: 'Cidade (para o local na assinatura)', col: 6 },
-        { name: 'telefone', label: 'Telefone', col: 6 }
-      ]
-    },
-    { key: 'cad_anestesistas', icon: '👨‍⚕️', label: 'Anestesistas', singular: 'Anestesista', grupo: 'Perfil e equipe', hasCarimbo: true,
-      campos: [
-        { name: 'nome', label: 'Nome', required: true, col: 6 },
-        { name: 'crm', label: 'CRM', col: 3 },
-        { name: 'rqe', label: 'RQE', col: 3 },
-        { name: 'telefone', label: 'Telefone', col: 6 },
-        { name: 'email', label: 'E-mail', col: 6 }
-      ]
-    },
-    { key: 'cad_cirurgioes', icon: '🩺', label: 'Cirurgiões', singular: 'Cirurgião', grupo: 'Perfil e equipe', hasCarimbo: true,
-      campos: [
-        { name: 'nome', label: 'Nome', required: true, col: 6 },
-        { name: 'crm', label: 'CRM', col: 3 },
-        { name: 'especialidade', label: 'Especialidade', col: 3 },
-        { name: 'telefone', label: 'Telefone', col: 6 },
-        { name: 'email', label: 'E-mail', col: 6 }
+        { name: 'telefone', label: 'Telefone', col: 4 },
+        { name: 'email', label: 'E-mail', col: 6 },
+        { name: 'cidade', label: 'Cidade (local na assinatura)', col: 6 },
+        { name: 'endereco', label: 'Endereço do consultório (sai no cabeçalho dos documentos)', col: 12 }
       ]
     },
     /* ——— GRUPO: Locais e faturamento ——— */
@@ -40805,7 +41293,41 @@ const ajustes = {
 
   _activeCat: null,
 
-  list(catKey) { return store.list(catKey); },
+  /* Quem assina os documentos: o profissional marcado como responsável.
+     Quatro lugares faziam esta mesma busca à mão, lendo direto a chave
+     antiga — e por isso não enxergariam o cadastro novo. */
+  perfilAtivo() {
+    const lista = ajustes.list('cad_assinaturas');
+    if (!lista.length) return {};
+    try {
+      const id = localStorage.getItem(STORAGE.cad_assinatura_ativa);
+      return lista.find(x => x._id === id) || lista[0] || {};
+    } catch (e) { return lista[0] || {}; }
+  },
+  /* É da anestesiologia? Decide em que lista a pessoa aparece. */
+  _ehAnestesista(p) {
+    return /anestesi/i.test(String((p && p.especialidade) || ''));
+  },
+  /* AS TRÊS CHAVES ANTIGAS VIRARAM VISTAS sobre o cadastro único.
+     Há mais de vinte lugares no sistema que pedem `cad_anestesistas`,
+     `cad_cirurgioes` ou `cad_assinaturas` — autocompletes, carimbo da
+     impressão, cabeçalho da receita, orçamento. Reescrever os vinte seria
+     trocar um risco por outro; roteando aqui, todos continuam funcionando e
+     passam a ler de uma fonte só. */
+  list(catKey) {
+    if (catKey === 'cad_profissionais') return store.list('cad_profissionais');
+    const prof = store.list('cad_profissionais');
+    if (!prof.length) return store.list(catKey);   /* antes da migração, o antigo vale */
+    if (catKey === 'cad_anestesistas') return prof.filter(ajustes._ehAnestesista);
+    if (catKey === 'cad_cirurgioes')   return prof.filter(p => !ajustes._ehAnestesista(p));
+    if (catKey === 'cad_assinaturas') {
+      /* O "perfil profissional" é o profissional marcado como responsável.
+         Os nomes de campo mudam porque quem lê esta vista espera os antigos. */
+      return prof.filter(p => p.responsavel === true || p.responsavel === 'true' || p.responsavel === 1)
+        .map(p => Object.assign({}, p, { nomeProfissional: p.nome }));
+    }
+    return store.list(catKey);
+  },
 
   /* ---------- Grupos recolhíveis do menu ----------
      Padrão: só o grupo da categoria ativa fica aberto (menu compacto no
@@ -40939,6 +41461,15 @@ const ajustes = {
                     <textarea name="${f.name}" rows="2" ${f.required ? 'data-required' : ''}>${utils.escapeHTML(item[f.name] || '')}</textarea>
                   </div>`;
                 }
+                if (f.type === 'checkbox') {
+                  const marc = (item[f.name] === true || item[f.name] === 'true' || item[f.name] === 1) ? 'checked' : '';
+                  return `<div class="field col-${f.col}">
+                    <label style="display:flex;align-items:center;gap:8px;font-weight:600">
+                      <input type="checkbox" name="${f.name}" ${marc} style="width:auto;margin:0">
+                      ${f.label}
+                    </label>
+                  </div>`;
+                }
                 if (f.type === 'select') {
                   const cur = item[f.name] || '';
                   return `<div class="field col-${f.col} ${f.required ? 'required' : ''}">
@@ -41000,10 +41531,30 @@ const ajustes = {
       if (el.name === '_id') {
         if (el.value) data._id = el.value;
       } else if (el.name) {
-        data[el.name] = el.value;
+        data[el.name] = (el.type === 'checkbox') ? el.checked : el.value;
       }
     });
+    /* Só UM responsável: marcar um novo desmarca o anterior, senão o carimbo
+       e o cabeçalho passam a ter duas respostas e o sistema escolhe sozinho. */
+    if (catKey === 'cad_profissionais' && data.responsavel === true) {
+      try {
+        const todos = store.list('cad_profissionais');
+        let mudou = false;
+        todos.forEach(x => {
+          if (x._id !== data._id && (x.responsavel === true || x.responsavel === 'true')) { x.responsavel = false; mudou = true; }
+        });
+        if (mudou) store.setList('cad_profissionais', todos);
+      } catch (er) {}
+    }
     store.save(catKey, data);
+    /* O responsável recém-salvo passa a ser a assinatura ativa. */
+    if (catKey === 'cad_profissionais' && data.responsavel === true) {
+      try {
+        const salvos = store.list('cad_profissionais');
+        const atual = data._id ? salvos.find(x => x._id === data._id) : salvos[salvos.length - 1];
+        if (atual) localStorage.setItem(STORAGE.cad_assinatura_ativa, atual._id);
+      } catch (er) {}
+    }
     /* Se for o perfil profissional, marca como assinatura ativa automaticamente */
     if (catKey === 'cad_assinaturas') {
       try {
@@ -42387,7 +42938,7 @@ ${TAG_CLOSE_HTML}`;
     /* Identidade do profissional a partir do carimbo/cadastro ativo, se houver */
     let prof = {};
     try {
-      const ativa = store.list('cad_assinaturas').find(x => x._id === localStorage.getItem(STORAGE.cad_assinatura_ativa)) || store.list('cad_assinaturas')[0];
+      const ativa = ajustes.perfilAtivo();
       if (ativa) prof = ativa;
     } catch (e) {}
     const nomeProf = opts.semProfissional ? '' : (prof.nomeProfissional || '');
@@ -44129,7 +44680,7 @@ const dashboard = {
       <div class="dash-legend-item dash-clickable" onclick="event.stopPropagation(); dashboard.detalhar('${cat}', '${utils.escapeAttr(s.k)}')">
         <span class="dash-legend-dot" style="background:${s.cor}"></span>
         <span class="dash-legend-label">${utils.escapeHTML(s.k)}</span>
-        <span class="dash-legend-val">${s.v} · ${s.pct.toFixed(0)}%</span>
+        <span class="dash-legend-val" title="${s.v} de ${total}">${s.v} · ${s.pct.toFixed(0)}%</span>
       </div>`).join('')}</div>`;
 
     el.innerHTML = `<div class="dash-donut-wrap">${svg}${legenda}</div>`;
@@ -44139,17 +44690,26 @@ const dashboard = {
   renderBarsSVG(elId, data, opts = {}) {
     const el = document.getElementById(elId);
     if (!el) return;
-    const entries = Object.entries(data).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, opts.limit || 8);
+    const todas = Object.entries(data).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+    const entries = todas.slice(0, opts.limit || 8);
     if (!entries.length) { el.innerHTML = '<div class="empty-state">Sem registros ainda — cadastre atendimentos para ver o gráfico</div>'; return; }
     const cat = opts.categoria || elId;
     const max = entries[0][1];
+    /* A porcentagem é do TOTAL do gráfico, não da maior barra. O comprimento
+       da barra é que se mede pela maior — é o que faz a comparação visual
+       funcionar; a porcentagem responde outra pergunta: "quanto do meu
+       trabalho é isto". Usar a mesma base para as duas coisas faria a maior
+       barra marcar sempre 100%. O gráfico mostra as primeiras, mas a conta
+       leva TODAS: senão o que ficou de fora sumiria da porcentagem também. */
+    const total = todas.reduce((acc, [, v]) => acc + v, 0);
     const rows = entries.map(([k, v], i) => {
-      const pct = max ? (v / max) * 100 : 0;
+      const larg = max ? (v / max) * 100 : 0;
+      const pct = total ? (v / total) * 100 : 0;
       const cor = opts.corFixa || dashboard._paleta[i % dashboard._paleta.length];
-      return `<div class="dash-bar-row dash-clickable" onclick="event.stopPropagation(); dashboard.detalhar('${cat}', '${utils.escapeAttr(k)}')" title="Toque para ver os registros">
+      return `<div class="dash-bar-row dash-clickable" onclick="event.stopPropagation(); dashboard.detalhar('${cat}', '${utils.escapeAttr(k)}')" title="${v} de ${total} — toque para ver os registros">
         <div class="dash-bar-label">${utils.escapeHTML(k)}</div>
-        <div class="dash-bar-track"><div class="dash-bar-fill" style="width:${pct}%;background:${cor}"></div></div>
-        <div class="dash-bar-val">${v}</div>
+        <div class="dash-bar-track"><div class="dash-bar-fill" style="width:${larg}%;background:${cor}"></div></div>
+        <div class="dash-bar-val">${v} · ${pct.toFixed(0)}%</div>
       </div>`;
     }).join('');
     el.innerHTML = `<div class="dash-bars">${rows}</div>`;
@@ -49941,6 +50501,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* === SEGURANÇA: inicializa o controle de acesso (login/bloqueio) ===
      Deve ser a última etapa: se não houver sessão, bloqueia a tela. */
+  /* Junta os três cadastros de profissional num só, uma vez, antes de
+     qualquer tela ler deles. */
+  try { ajustes.migrarProfissionais(); } catch (e) { console.warn('migrarProfissionais:', e); }
+
   try { auth.init(); } catch (e) { console.warn('auth.init:', e); }
 });
 </script>
