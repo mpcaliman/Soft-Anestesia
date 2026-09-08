@@ -4590,7 +4590,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-28o</b><br>
+    v7.1 · build <b id="build-tag">2026-08-28p</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -10447,10 +10447,19 @@ const utils = {
     };
     const key = norm(nomeOuId);
     const candidatos = [];
-    ['cad_assinaturas', 'cad_anestesistas', 'cad_cirurgioes'].forEach(catKey => {
-      store.list(catKey).forEach(p => {
+    const vistos = new Set();
+    /* Lia `store.list` direto — as listas ANTIGAS, congeladas no momento da
+       migração. Editar o CRM ou trocar o carimbo no cadastro único não
+       chegava aqui: o carimbo aplicado continuava sendo o de antes. Passa
+       pelo ajustes.list, que é a vista sobre o cadastro de verdade. */
+    ['cad_profissionais', 'cad_assinaturas', 'cad_anestesistas', 'cad_cirurgioes'].forEach(catKey => {
+      let lista = [];
+      try { lista = ajustes.list(catKey) || []; } catch (e) { lista = []; }
+      lista.forEach(p => {
         const nome = p.nomeProfissional || p.nome || '';
         if (!nome && p._id !== nomeOuId) return;
+        if (p._id && vistos.has(p._id)) return;
+        if (p._id) vistos.add(p._id);
         candidatos.push(Object.assign({}, p, { nome }));
       });
     });
@@ -42069,22 +42078,39 @@ const autocomplete = {
     autocomplete.attach(
       el,
       () => {
-        const perfil = ajustes.list('cad_assinaturas').map(x => ({
-          value: x._id, label: x.nomeProfissional || x.nome,
-          meta: 'Meu perfil' + (x.crm ? ' · CRM ' + x.crm : '') + (x.carimbo ? ' · ✓ carimbo' : ''),
-          data: { ...x, nome: x.nomeProfissional || x.nome }
-        }));
-        const an = ajustes.list('cad_anestesistas').map(x => ({
-          value: x._id, label: x.nome,
-          meta: 'Anestesista' + (x.crm ? ' · CRM ' + x.crm : '') + (x.carimbo ? ' · ✓ carimbo' : ''),
-          data: x
-        }));
-        const ci = ajustes.list('cad_cirurgioes').map(x => ({
-          value: x._id, label: x.nome,
-          meta: 'Cirurgião' + (x.crm ? ' · CRM ' + x.crm : '') + (x.carimbo ? ' · ✓ carimbo' : ''),
-          data: x
-        }));
-        return [...perfil, ...an, ...ci].filter(x => x.label);
+        /* UMA PESSOA, UMA LINHA. As três listas viraram vistas sobre o mesmo
+           cadastro, e quem é o responsável E anestesiologista aparecia duas
+           vezes — mesmo nome, mesmo CRM, escolhas idênticas. Antes eram
+           cadastros separados e a repetição não existia; foi a unificação que
+           a criou. A lista sai do cadastro único, e as vistas só entram
+           enquanto ele estiver vazio (aparelho ainda não migrado). */
+        const daLista = (x) => {
+          const nome = x.nomeProfissional || x.nome;
+          const partes = [];
+          if (x.responsavel === true || x.responsavel === 'true') partes.push('Meu perfil');
+          if (x.especialidade) partes.push(x.especialidade);
+          if (x.crm) partes.push('CRM ' + x.crm);
+          if (x.carimbo) partes.push('✓ carimbo');
+          return { value: x._id, label: nome, meta: partes.join(' · '), data: Object.assign({}, x, { nome }) };
+        };
+        const unico = ajustes.list('cad_profissionais');
+        let itens;
+        if (unico.length) itens = unico.map(daLista);
+        else {
+          itens = [].concat(
+            ajustes.list('cad_assinaturas').map(daLista),
+            ajustes.list('cad_anestesistas').map(daLista),
+            ajustes.list('cad_cirurgioes').map(daLista));
+        }
+        /* rede de segurança: mesma pessoa nunca duas vezes */
+        const vistos = new Set();
+        return itens.filter(x => {
+          if (!x.label) return false;
+          const k = x.value || String(x.label).toLowerCase();
+          if (vistos.has(k)) return false;
+          vistos.add(k);
+          return true;
+        });
       },
       (it) => aplicar(el, it.data)
     );

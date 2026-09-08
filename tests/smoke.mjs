@@ -11895,6 +11895,65 @@ await test('Agenda: fila durável, exclusão que chega aos outros aparelhos, e m
   await page.close();
 });
 
+/* 179) A unificação dos cadastros criou uma repetição: as três listas viraram
+   vistas sobre a MESMA lista, e quem é o responsável E anestesiologista
+   passou a aparecer duas vezes no campo de assinatura — mesmo nome, mesmo
+   CRM, duas escolhas idênticas. Antes eram cadastros separados e isso não
+   existia; foi a unificação que criou. */
+await test('Campo de assinatura: uma pessoa, uma linha — e o carimbo vem do cadastro de verdade', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    /* estado depois da migração: um cadastro só, e as listas antigas paradas */
+    store.setList('cad_profissionais', [
+      { _id: 'p1', nome: 'Marcelo Pandolfi Caliman', especialidade: 'Anestesiologia',
+        crm: 'CRM 30601', rqe: '14630', responsavel: true, carimbo: 'data:image/png;base64,AAA' },
+      { _id: 'p2', nome: 'Dr Leonardo Salim', especialidade: 'Ortopedia', crm: 'CRM 999' }
+    ]);
+    /* as listas antigas ainda existem no aparelho, com dados VELHOS */
+    store.setList('cad_assinaturas', [{ _id: 's1', nomeProfissional: 'Marcelo Pandolfi Caliman',
+      crm: 'CRM ANTIGO', carimbo: 'data:image/png;base64,VELHO' }]);
+    store.setList('cad_anestesistas', [{ _id: 'a1', nome: 'Marcelo Pandolfi Caliman', crm: 'CRM ANTIGO' }]);
+    store.setList('cad_cirurgioes', []);
+
+    /* a mesma pessoa aparece nas duas vistas — é daí que vinha a repetição */
+    const naVistaPerfil = ajustes.list('cad_assinaturas').some(x => x._id === 'p1');
+    const naVistaAnest = ajustes.list('cad_anestesistas').some(x => x._id === 'p1');
+    out.estaNasDuasVistas = naVistaPerfil && naVistaAnest;
+
+    /* mas o campo de assinatura mostra UMA linha */
+    const inp = document.createElement('input');
+    document.body.appendChild(inp);
+    let fonte = null;
+    const origAttach = autocomplete.attach;
+    autocomplete.attach = (el, fn) => { fonte = fn; };
+    autocomplete.ligarProfissionalEm(inp);
+    autocomplete.attach = origAttach;
+    const itens = fonte ? fonte() : [];
+    const doMarcelo = itens.filter(x => /Marcelo Pandolfi/i.test(x.label));
+    out.umaLinhaSo = doMarcelo.length === 1;
+    out.trazOsDois = itens.length === 2;
+    /* e a linha diz tudo o que as duas diziam separadas */
+    out.metaCompleta = /Meu perfil/.test(doMarcelo[0].meta) && /Anestesiologia/.test(doMarcelo[0].meta)
+      && /30601/.test(doMarcelo[0].meta) && /carimbo/.test(doMarcelo[0].meta);
+
+    /* o carimbo sai do cadastro ATUAL, não da lista congelada na migração */
+    const achado = utils.getCarimboDoProfissional('Marcelo Pandolfi Caliman');
+    out.carimboAtual = !!achado && achado.crm === 'CRM 30601' && !/VELHO/.test(achado.carimbo || '');
+
+    inp.remove();
+    ['cad_profissionais','cad_assinaturas','cad_anestesistas','cad_cirurgioes'].forEach(k => store.setList(k, []));
+    return out;
+  });
+
+  assert(r.estaNasDuasVistas, 'a mesma pessoa está nas duas vistas — é daí que vinha a repetição');
+  assert(r.umaLinhaSo, 'mas o campo de assinatura oferece uma linha por pessoa');
+  assert(r.trazOsDois, 'sem perder ninguém: os dois profissionais continuam na lista');
+  assert(r.metaCompleta, 'e a linha diz o que as duas diziam separadas — perfil, especialidade, CRM e carimbo');
+  assert(r.carimboAtual, 'o carimbo vem do cadastro de verdade, não da lista congelada na migração');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
