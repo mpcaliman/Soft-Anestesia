@@ -1926,7 +1926,7 @@ canvas#signature-canvas {
 .dash-bar-label { width: 34%; font-size: .8rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dash-bar-track { flex: 1; height: 16px; background: var(--surface-alt); border-radius: 8px; overflow: hidden; }
 .dash-bar-fill { height: 100%; border-radius: 8px; transition: width .5s ease; min-width: 3px; }
-.dash-bar-val { width: 40px; text-align: right; font-size: .8rem; font-weight: 700; color: var(--text); flex-shrink: 0; }
+.dash-bar-val { width: 66px; text-align: right; font-size: .8rem; font-weight: 700; color: var(--text); flex-shrink: 0; }
 
 /* Elementos clicáveis dos gráficos */
 .dash-clickable { cursor: pointer; transition: opacity .12s, transform .12s; }
@@ -4548,7 +4548,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-28i</b><br>
+    v7.1 · build <b id="build-tag">2026-08-28j</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -10163,6 +10163,13 @@ const STORAGE = {
   fin_fechamentos: 'medsys.v7.fin_fechamentos',
   agenda:      'medsys.v3.agenda',
   pacientes:   'medsys.v5.pacientes',
+  /* Cadastro ÚNICO de profissionais. Antes eram três — "Meu perfil
+     profissional", "Anestesistas" e "Cirurgiões" — e o próprio dono do
+     sistema aparecia em dois deles, com o mesmo CRM digitado duas vezes.
+     Agora é um só: a especialidade e a marca de "sou eu" são campos, não
+     cadastros separados. Os três antigos viraram VISTAS sobre este (ver
+     ajustes.list), para que nada que dependia deles precisasse mudar. */
+  cad_profissionais: 'medsys.v7.cad.profissionais',
   cad_anestesistas: 'medsys.v5.cad.anestesistas',
   cad_cirurgioes:   'medsys.v5.cad.cirurgioes',
   cad_clinicas:     'medsys.v5.cad.clinicas',
@@ -11178,7 +11185,7 @@ const backupCompleto = {
   CHAVES: [
     'pre','consulta','anestesia','recuperacao','termo','prescricao','risco',
     'financeiro','fin_fechamentos','agenda','pacientes','orcamento','orcamento_cfg',
-    'cad_anestesistas','cad_cirurgioes','cad_clinicas','cad_convenios',
+    'cad_profissionais','cad_anestesistas','cad_cirurgioes','cad_clinicas','cad_convenios',
     'cad_procedimentos','cad_pagamentos','cad_presets_med','cad_assinaturas',
     'cad_assinatura_ativa','termo_padrao'
   ],
@@ -16988,7 +16995,7 @@ const prescricao = {
        art. 35, III). Esses dados vêm do perfil profissional (Ajustes). */
     if (receita) {
       const falta = prescricao._faltaPerfilReceita();
-      if (falta.length) banner += ' ⚠️ Cadastre ' + falta.join(' e ') + ' em Ajustes → perfil profissional (exigido por lei na receita).';
+      if (falta.length) banner += ' ⚠️ Cadastre ' + falta.join(' e ') + ' em Ajustes → Profissionais, no seu cadastro (exigido por lei na receita).';
     }
     if (banner) ui.mostrarBanner('banner-prescricao', banner, 'info'); else ui.fecharBanner('banner-prescricao');
     prescricao._toggleCID();
@@ -16997,7 +17004,7 @@ const prescricao = {
   _faltaPerfilReceita() {
     let cad = {};
     try {
-      cad = store.list('cad_assinaturas').find(x => x._id === localStorage.getItem(STORAGE.cad_assinatura_ativa)) || store.list('cad_assinaturas')[0] || {};
+      cad = ajustes.perfilAtivo();
     } catch (e) {}
     const falta = [];
     if (!(cad.crm || '').trim()) falta.push('CRM');
@@ -18976,9 +18983,9 @@ const cloud = {
   MODS: ['pre','consulta','anestesia','recuperacao','termo','prescricao','documentos','risco','financeiro','orcamento','agenda','pacientes',
          /* cadastros (perfil profissional/carimbo, equipe, locais, tabelas) —
             sincronizam entre aparelhos como qualquer registro */
-         'cad_assinaturas','cad_anestesistas','cad_cirurgioes','cad_clinicas','cad_convenios','cad_procedimentos','cad_pagamentos','cad_presets_med','cad_equipamentos'],
+         'cad_profissionais','cad_assinaturas','cad_anestesistas','cad_cirurgioes','cad_clinicas','cad_convenios','cad_procedimentos','cad_pagamentos','cad_presets_med','cad_equipamentos'],
   /* Módulos de cadastro (subconjunto de MODS) — usados no envio único inicial */
-  CAD_MODS: ['cad_assinaturas','cad_anestesistas','cad_cirurgioes','cad_clinicas','cad_convenios','cad_procedimentos','cad_pagamentos','cad_presets_med','cad_equipamentos'],
+  CAD_MODS: ['cad_profissionais','cad_assinaturas','cad_anestesistas','cad_cirurgioes','cad_clinicas','cad_convenios','cad_procedimentos','cad_pagamentos','cad_presets_med','cad_equipamentos'],
   _syncing: false,
 
   /* ---- Configuração (URL + anon key) ---- */
@@ -20151,6 +20158,7 @@ const cloud = {
 const clinicaSync = {
   /* chave local → chave na nuvem (sem o prefixo medsys, para ficar legível) */
   CHAVES: {
+    'medsys.v7.cad.profissionais': 'cad_profissionais',
     'medsys.v5.cad.anestesistas': 'cad_anestesistas',
     'medsys.v5.cad.cirurgioes': 'cad_cirurgioes',
     'medsys.v5.cad.clinicas': 'cad_clinicas',
@@ -26654,7 +26662,7 @@ const pdfGen = {
     /* dados do profissional / clínica a partir do cadastro, se houver */
     let clinica = {};
     try {
-      const ativa = store.list('cad_assinaturas').find(x => x._id === localStorage.getItem(STORAGE.cad_assinatura_ativa)) || store.list('cad_assinaturas')[0];
+      const ativa = ajustes.perfilAtivo();
       if (ativa) clinica = ativa;
     } catch (e) {}
 
@@ -26828,18 +26836,18 @@ const pdfGen = {
     /* identificação do profissional */
     let clinica = {};
     try {
-      const ativa = store.list('cad_assinaturas').find(x => x._id === localStorage.getItem(STORAGE.cad_assinatura_ativa)) || store.list('cad_assinaturas')[0];
+      const ativa = ajustes.perfilAtivo();
       if (ativa) clinica = ativa;
     } catch (e) {}
-    if (!(clinica.crm || d.crm)) faltando.push('CRM do médico (cadastre em Ajustes → Meu perfil profissional)');
-    if (!(clinica.endereco)) faltando.push('Endereço do consultório (Ajustes → Meu perfil profissional)');
+    if (!(clinica.crm || d.crm)) faltando.push('CRM do médico (cadastre em Ajustes → Profissionais)');
+    if (!(clinica.endereco)) faltando.push('Endereço do consultório (Ajustes → Profissionais)');
 
     if (faltando.length) {
       const lista = faltando.map(f => `<li>${utils.escapeHTML(f)}</li>`).join('');
       modal.open('⚠️ Campos obrigatórios para validade legal',
         `<p style="font-size:.9rem;margin-bottom:10px">Para a receita ser aceita pela farmácia, a lei exige estes itens. Complete antes de assinar:</p>
          <ul style="font-size:.88rem;line-height:1.7;padding-left:20px;color:var(--danger)">${lista}</ul>
-         <p style="font-size:.82rem;color:var(--text-soft);margin-top:12px">A identificação do médico (nome, CRM, endereço do consultório) vem do cadastro em <b>Ajustes → Meu perfil profissional</b>.</p>`,
+         <p style="font-size:.82rem;color:var(--text-soft);margin-top:12px">A identificação do médico (nome, CRM, endereço do consultório) vem do cadastro em <b>Ajustes → Profissionais</b>, do profissional marcado como responsável.</p>`,
         `<button class="btn" onclick="modal.close()">Entendi</button>`);
       return;
     }
@@ -40715,37 +40723,102 @@ const pacientes = {
 /* ============================================================================
    AJUSTES — cadastros simples (anestesistas, cirurgiões, clínicas, etc)
 ============================================================================ */
+/* A especialidade decide onde a pessoa aparece: quem é da anestesiologia
+   entra nas listas de anestesista, os demais nas de cirurgião. É a mesma
+   separação de antes — só que agora é um campo, não um cadastro à parte. */
+const ajustes_ESPECIALIDADES = [
+  'Anestesiologia',
+  'Cirurgia geral', 'Cirurgia plástica', 'Cirurgia vascular', 'Cirurgia pediátrica',
+  'Cirurgia de cabeça e pescoço', 'Cirurgia torácica', 'Cirurgia do aparelho digestivo',
+  'Ginecologia e obstetrícia', 'Ortopedia', 'Urologia', 'Otorrinolaringologia',
+  'Oftalmologia', 'Proctologia', 'Mastologia', 'Neurocirurgia', 'Bucomaxilofacial',
+  'Endoscopia', 'Dermatologia', 'Outra'
+];
+
 const ajustes = {
+  ESPECIALIDADES: ajustes_ESPECIALIDADES,
+
+  /* MIGRAÇÃO — junta os três cadastros antigos num só, uma vez.
+     Junta POR NOME normalizado: era exatamente aí que estava a redundância —
+     a mesma pessoa em "Meu perfil profissional" e em "Anestesistas". Quando
+     os dois têm o mesmo campo preenchido com coisas diferentes, vence o que
+     tem conteúdo; o perfil profissional entra por último e por cima, porque
+     é o cadastro que o dono do sistema mantém sobre si mesmo.
+     Nada é apagado: as chaves antigas ficam onde estão. */
+  MIGROU_KEY: 'medsys.v7.cad.profissionais.migrado',
+  migrarProfissionais() {
+    try {
+      if (localStorage.getItem(ajustes.MIGROU_KEY) === '1') return 0;
+      const jaTem = store.list('cad_profissionais');
+      if (jaTem.length) { localStorage.setItem(ajustes.MIGROU_KEY, '1'); return 0; }
+
+      const norm = (v) => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase().replace(/^\s*(dr|dra)\.?\s+/, '').replace(/\s+/g, ' ').trim();
+      const por = new Map();
+      const juntar = (nome, dados) => {
+        const k = norm(nome);
+        if (!k) return;
+        const atual = por.get(k) || {};
+        Object.keys(dados).forEach(campo => {
+          const v = dados[campo];
+          if (v === undefined || v === null || v === '') return;
+          atual[campo] = v;
+        });
+        atual.nome = atual.nome || nome;
+        por.set(k, atual);
+      };
+
+      store.list('cad_anestesistas').forEach(x => juntar(x.nome, {
+        nome: x.nome, especialidade: 'Anestesiologia', crm: x.crm, rqe: x.rqe,
+        telefone: x.telefone, email: x.email, carimbo: x.carimbo
+      }));
+      store.list('cad_cirurgioes').forEach(x => juntar(x.nome, {
+        nome: x.nome, especialidade: x.especialidade || 'Cirurgia geral', crm: x.crm,
+        telefone: x.telefone, email: x.email, carimbo: x.carimbo
+      }));
+      /* por último: é o cadastro que a pessoa mantém sobre si mesma */
+      store.list('cad_assinaturas').forEach(x => juntar(x.nomeProfissional || x.nome, {
+        nome: x.nomeProfissional || x.nome, especialidade: x.especialidade || 'Anestesiologia',
+        crm: x.crm, rqe: x.rqe, telefone: x.telefone, endereco: x.endereco,
+        cidade: x.cidade, carimbo: x.carimbo, responsavel: true
+      }));
+
+      const lista = Array.from(por.values());
+      if (!lista.length) { localStorage.setItem(ajustes.MIGROU_KEY, '1'); return 0; }
+      /* exatamente um responsável */
+      const resp = lista.filter(x => x.responsavel === true);
+      if (resp.length > 1) resp.slice(1).forEach(x => { x.responsavel = false; });
+      lista.forEach(x => {
+        if (!x._id) x._id = 'prof_' + (utils.uid ? utils.uid() : String(Date.now()) + Math.random().toString(16).slice(2));
+        if (!x._createdAt) x._createdAt = new Date().toISOString();
+        x._updatedAt = new Date().toISOString();
+      });
+      lista.sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR'));
+      store.setList('cad_profissionais', lista);
+      localStorage.setItem(ajustes.MIGROU_KEY, '1');
+      return lista.length;
+    } catch (e) { return 0; }
+  },
+
   /* Configuração de cada categoria */
   CATEGORIAS: [
     /* ——— GRUPO: Perfil e equipe ——— */
-    { key: 'cad_assinaturas', icon: '🪪', label: 'Meu perfil profissional', singular: 'Perfil profissional', grupo: 'Perfil e equipe', hasCarimbo: true,
+    /* UM cadastro de gente, com a especialidade e o "sou eu" como campos.
+       Eram três telas — "Meu perfil profissional", "Anestesistas" e
+       "Cirurgiões" — e o dono do sistema aparecia em duas delas, com o mesmo
+       CRM digitado duas vezes. Quando divergiam, ninguém sabia qual valia. */
+    { key: 'cad_profissionais', icon: '👨‍⚕️', label: 'Profissionais', singular: 'Profissional', grupo: 'Perfil e equipe', hasCarimbo: true,
       campos: [
-        { name: 'nomeProfissional', label: 'Nome do profissional', required: true, col: 8 },
+        { name: 'nome', label: 'Nome', required: true, col: 7 },
+        { name: 'especialidade', label: 'Especialidade', required: true, col: 5, type: 'select',
+          options: ajustes_ESPECIALIDADES },
+        { name: 'responsavel', label: 'Sou eu — profissional responsável (assina os documentos)', col: 12, type: 'checkbox' },
         { name: 'crm', label: 'CRM', col: 4 },
         { name: 'rqe', label: 'RQE', col: 4 },
-        { name: 'especialidade', label: 'Especialidade', col: 8 },
-        { name: 'endereco', label: 'Endereço do consultório', col: 12 },
-        { name: 'cidade', label: 'Cidade (para o local na assinatura)', col: 6 },
-        { name: 'telefone', label: 'Telefone', col: 6 }
-      ]
-    },
-    { key: 'cad_anestesistas', icon: '👨‍⚕️', label: 'Anestesistas', singular: 'Anestesista', grupo: 'Perfil e equipe', hasCarimbo: true,
-      campos: [
-        { name: 'nome', label: 'Nome', required: true, col: 6 },
-        { name: 'crm', label: 'CRM', col: 3 },
-        { name: 'rqe', label: 'RQE', col: 3 },
-        { name: 'telefone', label: 'Telefone', col: 6 },
-        { name: 'email', label: 'E-mail', col: 6 }
-      ]
-    },
-    { key: 'cad_cirurgioes', icon: '🩺', label: 'Cirurgiões', singular: 'Cirurgião', grupo: 'Perfil e equipe', hasCarimbo: true,
-      campos: [
-        { name: 'nome', label: 'Nome', required: true, col: 6 },
-        { name: 'crm', label: 'CRM', col: 3 },
-        { name: 'especialidade', label: 'Especialidade', col: 3 },
-        { name: 'telefone', label: 'Telefone', col: 6 },
-        { name: 'email', label: 'E-mail', col: 6 }
+        { name: 'telefone', label: 'Telefone', col: 4 },
+        { name: 'email', label: 'E-mail', col: 6 },
+        { name: 'cidade', label: 'Cidade (local na assinatura)', col: 6 },
+        { name: 'endereco', label: 'Endereço do consultório (sai no cabeçalho dos documentos)', col: 12 }
       ]
     },
     /* ——— GRUPO: Locais e faturamento ——— */
@@ -40805,7 +40878,41 @@ const ajustes = {
 
   _activeCat: null,
 
-  list(catKey) { return store.list(catKey); },
+  /* Quem assina os documentos: o profissional marcado como responsável.
+     Quatro lugares faziam esta mesma busca à mão, lendo direto a chave
+     antiga — e por isso não enxergariam o cadastro novo. */
+  perfilAtivo() {
+    const lista = ajustes.list('cad_assinaturas');
+    if (!lista.length) return {};
+    try {
+      const id = localStorage.getItem(STORAGE.cad_assinatura_ativa);
+      return lista.find(x => x._id === id) || lista[0] || {};
+    } catch (e) { return lista[0] || {}; }
+  },
+  /* É da anestesiologia? Decide em que lista a pessoa aparece. */
+  _ehAnestesista(p) {
+    return /anestesi/i.test(String((p && p.especialidade) || ''));
+  },
+  /* AS TRÊS CHAVES ANTIGAS VIRARAM VISTAS sobre o cadastro único.
+     Há mais de vinte lugares no sistema que pedem `cad_anestesistas`,
+     `cad_cirurgioes` ou `cad_assinaturas` — autocompletes, carimbo da
+     impressão, cabeçalho da receita, orçamento. Reescrever os vinte seria
+     trocar um risco por outro; roteando aqui, todos continuam funcionando e
+     passam a ler de uma fonte só. */
+  list(catKey) {
+    if (catKey === 'cad_profissionais') return store.list('cad_profissionais');
+    const prof = store.list('cad_profissionais');
+    if (!prof.length) return store.list(catKey);   /* antes da migração, o antigo vale */
+    if (catKey === 'cad_anestesistas') return prof.filter(ajustes._ehAnestesista);
+    if (catKey === 'cad_cirurgioes')   return prof.filter(p => !ajustes._ehAnestesista(p));
+    if (catKey === 'cad_assinaturas') {
+      /* O "perfil profissional" é o profissional marcado como responsável.
+         Os nomes de campo mudam porque quem lê esta vista espera os antigos. */
+      return prof.filter(p => p.responsavel === true || p.responsavel === 'true' || p.responsavel === 1)
+        .map(p => Object.assign({}, p, { nomeProfissional: p.nome }));
+    }
+    return store.list(catKey);
+  },
 
   /* ---------- Grupos recolhíveis do menu ----------
      Padrão: só o grupo da categoria ativa fica aberto (menu compacto no
@@ -40939,6 +41046,15 @@ const ajustes = {
                     <textarea name="${f.name}" rows="2" ${f.required ? 'data-required' : ''}>${utils.escapeHTML(item[f.name] || '')}</textarea>
                   </div>`;
                 }
+                if (f.type === 'checkbox') {
+                  const marc = (item[f.name] === true || item[f.name] === 'true' || item[f.name] === 1) ? 'checked' : '';
+                  return `<div class="field col-${f.col}">
+                    <label style="display:flex;align-items:center;gap:8px;font-weight:600">
+                      <input type="checkbox" name="${f.name}" ${marc} style="width:auto;margin:0">
+                      ${f.label}
+                    </label>
+                  </div>`;
+                }
                 if (f.type === 'select') {
                   const cur = item[f.name] || '';
                   return `<div class="field col-${f.col} ${f.required ? 'required' : ''}">
@@ -41000,10 +41116,30 @@ const ajustes = {
       if (el.name === '_id') {
         if (el.value) data._id = el.value;
       } else if (el.name) {
-        data[el.name] = el.value;
+        data[el.name] = (el.type === 'checkbox') ? el.checked : el.value;
       }
     });
+    /* Só UM responsável: marcar um novo desmarca o anterior, senão o carimbo
+       e o cabeçalho passam a ter duas respostas e o sistema escolhe sozinho. */
+    if (catKey === 'cad_profissionais' && data.responsavel === true) {
+      try {
+        const todos = store.list('cad_profissionais');
+        let mudou = false;
+        todos.forEach(x => {
+          if (x._id !== data._id && (x.responsavel === true || x.responsavel === 'true')) { x.responsavel = false; mudou = true; }
+        });
+        if (mudou) store.setList('cad_profissionais', todos);
+      } catch (er) {}
+    }
     store.save(catKey, data);
+    /* O responsável recém-salvo passa a ser a assinatura ativa. */
+    if (catKey === 'cad_profissionais' && data.responsavel === true) {
+      try {
+        const salvos = store.list('cad_profissionais');
+        const atual = data._id ? salvos.find(x => x._id === data._id) : salvos[salvos.length - 1];
+        if (atual) localStorage.setItem(STORAGE.cad_assinatura_ativa, atual._id);
+      } catch (er) {}
+    }
     /* Se for o perfil profissional, marca como assinatura ativa automaticamente */
     if (catKey === 'cad_assinaturas') {
       try {
@@ -42387,7 +42523,7 @@ ${TAG_CLOSE_HTML}`;
     /* Identidade do profissional a partir do carimbo/cadastro ativo, se houver */
     let prof = {};
     try {
-      const ativa = store.list('cad_assinaturas').find(x => x._id === localStorage.getItem(STORAGE.cad_assinatura_ativa)) || store.list('cad_assinaturas')[0];
+      const ativa = ajustes.perfilAtivo();
       if (ativa) prof = ativa;
     } catch (e) {}
     const nomeProf = opts.semProfissional ? '' : (prof.nomeProfissional || '');
@@ -44129,7 +44265,7 @@ const dashboard = {
       <div class="dash-legend-item dash-clickable" onclick="event.stopPropagation(); dashboard.detalhar('${cat}', '${utils.escapeAttr(s.k)}')">
         <span class="dash-legend-dot" style="background:${s.cor}"></span>
         <span class="dash-legend-label">${utils.escapeHTML(s.k)}</span>
-        <span class="dash-legend-val" title="${s.v} de ${total}">${s.pct.toFixed(0)}%</span>
+        <span class="dash-legend-val" title="${s.v} de ${total}">${s.v} · ${s.pct.toFixed(0)}%</span>
       </div>`).join('')}</div>`;
 
     el.innerHTML = `<div class="dash-donut-wrap">${svg}${legenda}</div>`;
@@ -44158,7 +44294,7 @@ const dashboard = {
       return `<div class="dash-bar-row dash-clickable" onclick="event.stopPropagation(); dashboard.detalhar('${cat}', '${utils.escapeAttr(k)}')" title="${v} de ${total} — toque para ver os registros">
         <div class="dash-bar-label">${utils.escapeHTML(k)}</div>
         <div class="dash-bar-track"><div class="dash-bar-fill" style="width:${larg}%;background:${cor}"></div></div>
-        <div class="dash-bar-val">${pct.toFixed(0)}%</div>
+        <div class="dash-bar-val">${v} · ${pct.toFixed(0)}%</div>
       </div>`;
     }).join('');
     el.innerHTML = `<div class="dash-bars">${rows}</div>`;
@@ -49950,6 +50086,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* === SEGURANÇA: inicializa o controle de acesso (login/bloqueio) ===
      Deve ser a última etapa: se não houver sessão, bloqueia a tela. */
+  /* Junta os três cadastros de profissional num só, uma vez, antes de
+     qualquer tela ler deles. */
+  try { ajustes.migrarProfissionais(); } catch (e) { console.warn('migrarProfissionais:', e); }
+
   try { auth.init(); } catch (e) { console.warn('auth.init:', e); }
 });
 </script>

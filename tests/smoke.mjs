@@ -742,20 +742,21 @@ await test('Cadastros: grupos recolhíveis — só o ativo aberto, toggle persis
     localStorage.removeItem(ajustes.GRUPOS_KEY);
     location.hash = '#ajustes';
     await new Promise(r => setTimeout(r, 500));
-    ajustes._activeCat = 'cad_assinaturas';   /* grupo Perfil e equipe */
+    ajustes._activeCat = 'cad_profissionais';   /* grupo Perfil e equipe */
     ajustes.render();
     const cats = () => document.getElementById('ajustes-cats');
     const visiveis = () => cats().querySelectorAll('.cadastro-cat').length;
     const cabecalhos = () => cats().querySelectorAll('.cg-toggle').length;
 
-    // padrão: 3 cabeçalhos, só o grupo ativo expandido (3 categorias de Perfil e equipe)
+    /* padrão: 3 cabeçalhos, só o grupo ativo expandido. "Perfil e equipe"
+       tem UMA categoria agora — os três cadastros de profissional viraram um. */
     out.cabecalhos = cabecalhos();          // 3
-    out.soAtivoAberto = visiveis() === 3;
+    out.soAtivoAberto = visiveis() === 1;
     out.htmlTemTotal = cats().innerHTML.includes('cg-total');
 
     // expandir outro grupo → soma as categorias dele (4 de Locais e faturamento)
     ajustes.alternarGrupo('Locais e faturamento');
-    out.aposAbrir = visiveis();             // 7
+    out.aposAbrir = visiveis();             // 1 + 4
     // recolher o grupo ativo → some
     ajustes.alternarGrupo('Perfil e equipe');
     out.aposRecolher = visiveis();          // 4
@@ -764,15 +765,15 @@ await test('Cadastros: grupos recolhíveis — só o ativo aberto, toggle persis
     out.persistiu = salvos['Locais e faturamento'] === true && salvos['Perfil e equipe'] === false;
 
     // selecionar categoria de grupo fechado reabre o grupo
-    ajustes.selecionar('cad_anestesistas');  /* Perfil e equipe, que está fechado */
+    ajustes.selecionar('cad_profissionais');  /* Perfil e equipe, que está fechado */
     out.reabriu = !!cats().querySelector('.cadastro-cat.active') &&
       JSON.parse(localStorage.getItem(ajustes.GRUPOS_KEY))['Perfil e equipe'] === true;
     return out;
   });
   assert(r.cabecalhos === 3, 'deveriam ser 3 cabeçalhos de grupo, veio ' + r.cabecalhos);
-  assert(r.soAtivoAberto, 'por padrão só o grupo ativo deveria estar expandido (3 itens)');
+  assert(r.soAtivoAberto, 'por padrão só o grupo ativo deveria estar expandido');
   assert(r.htmlTemTotal, 'cabeçalho deveria mostrar o total do grupo');
-  assert(r.aposAbrir === 7, 'abrir Locais e faturamento deveria mostrar 7 itens, veio ' + r.aposAbrir);
+  assert(r.aposAbrir === 5, 'abrir Locais e faturamento deveria mostrar 5 itens, veio ' + r.aposAbrir);
   assert(r.aposRecolher === 4, 'recolher Perfil e equipe deveria deixar 4, veio ' + r.aposRecolher);
   assert(r.persistiu, 'preferência de grupos deveria persistir no localStorage');
   assert(r.reabriu, 'selecionar categoria de grupo fechado deveria reabri-lo');
@@ -11450,7 +11451,7 @@ await test('Pacientes: ordenação, filtro por plano e a linha inteira cabendo n
 
 /* 174) Gráficos do painel: a leitura passa a ser em porcentagem. O número
    absoluto continua acessível no toque — some da tela, não do sistema. */
-await test('Gráficos do painel mostram porcentagem, e a barra mede pela maior enquanto a conta é do total', async () => {
+await test('Gráficos do painel mostram número e porcentagem, e a barra mede pela maior enquanto a conta é do total', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(() => {
     const out = {};
@@ -11461,7 +11462,7 @@ await test('Gráficos do painel mostram porcentagem, e a barra mede pela maior e
     dashboard.renderDonut('dash-total-atend', { Anestesia: 69, 'Recuperação': 66, 'Pré-anestésica': 42 },
       { centerLabel: 'atend.', categoria: 'x' });
     const legendas = Array.from(host.querySelectorAll('.dash-legend-val'));
-    out.roscaSoPorcento = legendas.map(x => x.textContent.trim()).join('|') === '39%|37%|24%';
+    out.roscaSoPorcento = legendas.map(x => x.textContent.trim()).join('|') === '69 · 39%|66 · 37%|42 · 24%';
     out.roscaGuardaONumero = /69 de 177/.test(legendas[0].getAttribute('title') || '');
     /* o total no meio continua — ele É a informação do centro */
     out.roscaMantemOTotal = /177/.test(host.querySelector('.dash-donut-total').textContent);
@@ -11472,9 +11473,9 @@ await test('Gráficos do painel mostram porcentagem, e a barra mede pela maior e
       'Raquianestesia': 9, 'Peridural': 5, 'Bloqueio periférico': 4
     }, { categoria: 'y' });
     const vals = Array.from(host.querySelectorAll('.dash-bar-val')).map(x => x.textContent.trim());
-    out.barraSoPorcento = vals.every(v => /^\d+%$/.test(v));
+    out.barraSoPorcento = vals.every(v => /^\d+ · \d+%$/.test(v));
     /* 34 de 103 = 33% — porcentagem do TOTAL, não da maior barra */
-    out.barraContaDoTotal = vals[0] === '33%';
+    out.barraContaDoTotal = vals[0] === '34 · 33%';
     /* mas o comprimento continua medido pela maior: a primeira ocupa 100% */
     const larguras = Array.from(host.querySelectorAll('.dash-bar-fill')).map(x => x.style.width);
     out.barraMedePelaMaior = larguras[0] === '100%';
@@ -11485,19 +11486,110 @@ await test('Gráficos do painel mostram porcentagem, e a barra mede pela maior e
     dashboard.renderBarsSVG('dash-total-atend', muitos, { categoria: 'z' });
     const v2 = Array.from(host.querySelectorAll('.dash-bar-val')).map(x => x.textContent.trim());
     out.cortouAsBarras = v2.length === 8;
-    out.masContouTodas = v2[0] === '8%';   /* 10 de 120, não 10 de 80 */
+    out.masContouTodas = v2[0] === '10 · 8%';   /* 10 de 120, não 10 de 80 */
     return out;
   });
 
   assert(r.temOnde, 'o gráfico precisa de onde desenhar');
-  assert(r.roscaSoPorcento, 'a legenda da rosca mostra a porcentagem, sem o número absoluto');
-  assert(r.roscaGuardaONumero, 'mas o número continua no toque — sai da tela, não do sistema');
+  assert(r.roscaSoPorcento, 'a legenda da rosca mostra o número E a porcentagem');
+  assert(r.roscaGuardaONumero, 'e o toque mostra a fração inteira');
   assert(r.roscaMantemOTotal, 'e o total no centro fica: ele é a informação do centro');
-  assert(r.barraSoPorcento, 'as barras também passam a marcar porcentagem');
+  assert(r.barraSoPorcento, 'as barras ganham a porcentagem ao lado do número, que fica');
   assert(r.barraContaDoTotal, 'calculada sobre o total do gráfico');
   assert(r.barraMedePelaMaior, 'enquanto o comprimento continua medido pela maior barra');
   assert(r.barraGuardaONumero, 'e a contagem fica no toque');
   assert(r.cortouAsBarras && r.masContouTodas, 'com mais de 8, mostra 8 mas conta todas — senão a porcentagem mentiria');
+  await page.close();
+});
+
+/* 175) Três cadastros para a mesma pessoa. O dono do sistema aparecia em
+   "Meu perfil profissional" E em "Anestesistas", com o mesmo CRM digitado
+   duas vezes — e quando divergiam, ninguém sabia qual valia. */
+await test('Cadastro único de profissionais: a especialidade e o "sou eu" viram campos', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    /* estado antigo: a mesma pessoa nos dois cadastros, com dados parciais */
+    localStorage.removeItem(ajustes.MIGROU_KEY);
+    store.setList('cad_profissionais', []);
+    store.setList('cad_anestesistas', [
+      { _id: 'a1', nome: 'Marcelo Pandolfi Caliman', crm: 'CREMEB 30601', telefone: '73 99976-9179' },
+      { _id: 'a2', nome: 'Dra. Fernanda Lopes', crm: 'CRM 12345' }
+    ]);
+    store.setList('cad_cirurgioes', [
+      { _id: 'c1', nome: 'Dr Leonardo Salim', especialidade: 'Ortopedia', crm: 'CRM 999' }
+    ]);
+    store.setList('cad_assinaturas', [
+      { _id: 's1', nomeProfissional: 'MARCELO PANDOLFI CALIMAN', crm: 'CREMEB 30601',
+        rqe: '14630', especialidade: 'Anestesiologia',
+        endereco: 'Rua Rui Barbosa 62, Eunápolis', cidade: 'Eunápolis' }
+    ]);
+
+    out.migrou = ajustes.migrarProfissionais() === 3;   /* 4 fichas, 3 pessoas */
+    const prof = store.list('cad_profissionais');
+    out.juntouAMesmaPessoa = prof.length === 3;
+
+    const eu = prof.find(p => /caliman/i.test(p.nome));
+    /* o que estava em cada cadastro se soma numa ficha só */
+    out.somouOsCampos = !!eu && eu.crm === 'CREMEB 30601' && eu.rqe === '14630'
+      && eu.telefone === '73 99976-9179' && /Rui Barbosa/.test(eu.endereco || '');
+    out.marcouOResponsavel = !!eu && eu.responsavel === true;
+    out.soUmResponsavel = prof.filter(p => p.responsavel === true).length === 1;
+
+    /* as três telas antigas viraram VISTAS: quem lia delas continua lendo */
+    const an = ajustes.list('cad_anestesistas').map(x => x.nome);
+    const ci = ajustes.list('cad_cirurgioes').map(x => x.nome);
+    out.vistaAnestesistas = an.length === 2 && an.some(n => /caliman/i.test(n)) && an.some(n => /fernanda/i.test(n));
+    out.vistaCirurgioes = ci.length === 1 && /salim/i.test(ci[0]);
+    const perfil = ajustes.perfilAtivo();
+    out.vistaPerfil = /caliman/i.test(perfil.nomeProfissional || '') && perfil.crm === 'CREMEB 30601';
+
+    /* a tela some do menu de Ajustes: é uma só agora */
+    const chaves = ajustes.CATEGORIAS.map(c => c.key);
+    out.umaTelaSo = chaves.indexOf('cad_profissionais') >= 0
+      && chaves.indexOf('cad_assinaturas') < 0
+      && chaves.indexOf('cad_anestesistas') < 0
+      && chaves.indexOf('cad_cirurgioes') < 0;
+
+    /* especialidade e "sou eu" são campos do formulário */
+    const cat = ajustes.CATEGORIAS.find(c => c.key === 'cad_profissionais');
+    const esp = cat.campos.find(f => f.name === 'especialidade');
+    const resp = cat.campos.find(f => f.name === 'responsavel');
+    out.temSelectDeEspecialidade = !!esp && esp.type === 'select' && esp.options.indexOf('Anestesiologia') >= 0;
+    out.temCaixaDeResponsavel = !!resp && resp.type === 'checkbox';
+
+    /* marcar OUTRO como responsável desmarca o anterior — duas respostas para
+       "quem assina" é pior que nenhuma */
+    const outra = prof.find(p => /fernanda/i.test(p.nome));
+    outra.responsavel = true;
+    store.setList('cad_profissionais', prof);
+    ajustes.selecionar('cad_profissionais');
+    ajustes.editar('cad_profissionais', outra._id);
+    ajustes._salvar('cad_profissionais', 'form-ajustes-cad_profissionais');
+    const depois = store.list('cad_profissionais');
+    out.soUmDepoisDeTrocar = depois.filter(p => p.responsavel === true).length === 1;
+    out.trocouOResponsavel = /fernanda/i.test((depois.find(p => p.responsavel === true) || {}).nome || '');
+
+    /* rodar a migração de novo não duplica nada */
+    const antes = store.list('cad_profissionais').length;
+    ajustes.migrarProfissionais();
+    out.naoDuplica = store.list('cad_profissionais').length === antes;
+
+    ['cad_profissionais','cad_anestesistas','cad_cirurgioes','cad_assinaturas'].forEach(k => store.setList(k, []));
+    localStorage.removeItem(ajustes.MIGROU_KEY);
+    return out;
+  });
+
+  assert(r.migrou && r.juntouAMesmaPessoa, 'quatro fichas de três pessoas viram três cadastros');
+  assert(r.somouOsCampos, 'o que estava em cada cadastro se soma numa ficha só, sem perder campo');
+  assert(r.marcouOResponsavel && r.soUmResponsavel, 'quem tinha "perfil profissional" vira o responsável, e só um');
+  assert(r.vistaAnestesistas, 'a lista de anestesistas continua existindo, agora pela especialidade');
+  assert(r.vistaCirurgioes, 'e a de cirurgiões também');
+  assert(r.vistaPerfil, 'e quem assina os documentos continua sendo encontrado');
+  assert(r.umaTelaSo, 'no menu de Ajustes fica UMA tela, não três');
+  assert(r.temSelectDeEspecialidade && r.temCaixaDeResponsavel, 'com a especialidade e o "sou eu" como campos');
+  assert(r.soUmDepoisDeTrocar && r.trocouOResponsavel, 'marcar outro responsável desmarca o anterior');
+  assert(r.naoDuplica, 'e rodar a migração de novo não duplica nada');
   await page.close();
 });
 
