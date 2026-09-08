@@ -4590,7 +4590,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-28o</b><br>
+    v7.1 · build <b id="build-tag">2026-08-28q</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -9653,6 +9653,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <span><strong>🪄 Salvar PDF automaticamente ao FINALIZAR</strong> (ficha de anestesia, pré, SRPA, consulta, termo e receituário)</span>
           </label>
           <div id="pdfbk-estado" style="font-size:.78rem;margin:6px 0 0 26px"></div>
+          <div id="pdfbk-fila" style="font-size:.78rem;margin:8px 0 0 26px"></div>
           <p style="font-size:.78rem;color:var(--text-mute);margin:4px 0 0 26px">
             Sem nenhum toque extra: ao finalizar o documento, o PDF é gerado e enviado aos destinos marcados abaixo.
           </p>
@@ -10447,10 +10448,19 @@ const utils = {
     };
     const key = norm(nomeOuId);
     const candidatos = [];
-    ['cad_assinaturas', 'cad_anestesistas', 'cad_cirurgioes'].forEach(catKey => {
-      store.list(catKey).forEach(p => {
+    const vistos = new Set();
+    /* Lia `store.list` direto — as listas ANTIGAS, congeladas no momento da
+       migração. Editar o CRM ou trocar o carimbo no cadastro único não
+       chegava aqui: o carimbo aplicado continuava sendo o de antes. Passa
+       pelo ajustes.list, que é a vista sobre o cadastro de verdade. */
+    ['cad_profissionais', 'cad_assinaturas', 'cad_anestesistas', 'cad_cirurgioes'].forEach(catKey => {
+      let lista = [];
+      try { lista = ajustes.list(catKey) || []; } catch (e) { lista = []; }
+      lista.forEach(p => {
         const nome = p.nomeProfissional || p.nome || '';
         if (!nome && p._id !== nomeOuId) return;
+        if (p._id && vistos.has(p._id)) return;
+        if (p._id) vistos.add(p._id);
         candidatos.push(Object.assign({}, p, { nome }));
       });
     });
@@ -20003,6 +20013,7 @@ const cloud = {
         cloud.autoSyncAoVoltar({ forcar: true });
         try { cloudRel.drenarFila(); } catch (e) {}
         try { cloudRel.drenarFilaDel(); } catch (e) {}
+        try { pdfBackup.drenarFila(); } catch (e) {}
       });
     }
   },
@@ -20593,6 +20604,8 @@ const sincronia = {
              exatamente o que falhou, em vez de procurar. */
       try { await cloudRel.drenarFila(); } catch (e) {}
       try { await cloudRel.drenarFilaDel(); } catch (e) {}
+      /* 1d) e os PDFs que não subiram — mesma ideia, outro tipo de carga */
+      try { await pdfBackup.drenarFila(); } catch (e) {}
       /* 2) o resto do que foi feito aqui e ainda não subiu */
       try { await cloudRel.empurrarPendentes({ silent: true, limite: 15 }); } catch (e) {}
       /* 3) o que os outros aparelhos fizeram desde a última passada */
@@ -27310,10 +27323,127 @@ const driveImport = {
 };
 
 /* ============================================================================
+   FILA DE PDFs QUE NÃO SUBIRAM
+   ----------------------------------------------------------------------------
+   "Best-effort" virou "sem esforço nenhum": o PDF era gerado em memória, a
+   tentativa de envio falhava (autorização do Drive vencida, internet fora,
+   sessão da nuvem expirada) e o blob morria ali. Nada ficava pendente porque
+   nada era guardado — logar de volta não trazia PDF nenhum, porque não havia
+   PDF esperando em lugar algum.
+
+   Aqui o PDF que não subiu fica GRAVADO até subir. Mesmo padrão da fila da
+   agenda: guarda, tenta de novo quando a porta reabre, some quando entregou.
+
+   Banco próprio, e não o `disco`: o `disco` espelha tudo em memória, e uma
+   fila de PDFs em memória seria justamente o peso que ele existe para evitar.
+   Aqui o Blob vai direto para o IndexedDB e só sai de lá na hora do envio.
+============================================================================ */
+const pdfFila = {
+  DB: 'medsys-v7-pdf-fila',
+  LOJA: 'pendentes',
+  /* Teto de segurança: a fila é uma sala de espera, não um arquivo morto.
+     Se o Drive ficar semanas sem autorização, o mais antigo cede a vez. */
+  MAX_ITENS: 60,
+  MAX_BYTES: 40 * 1024 * 1024,
+  _db: null,
+
+  suportado() { try { return typeof indexedDB !== 'undefined' && !!indexedDB; } catch (e) { return false; } },
+
+  _abrir() {
+    if (pdfFila._db) return Promise.resolve(pdfFila._db);
+    return new Promise((ok, falha) => {
+      let req;
+      try { req = indexedDB.open(pdfFila.DB, 1); } catch (e) { falha(e); return; }
+      req.onupgradeneeded = () => {
+        try {
+          const s = req.result.createObjectStore(pdfFila.LOJA, { keyPath: 'id' });
+          s.createIndex('em', 'em');
+        } catch (e) {}
+      };
+      req.onsuccess = () => { pdfFila._db = req.result; ok(req.result); };
+      req.onerror = () => falha(req.error);
+      req.onblocked = () => falha(new Error('IndexedDB bloqueado'));
+    });
+  },
+  async _loja(modo) {
+    const db = await pdfFila._abrir();
+    return db.transaction(pdfFila.LOJA, modo).objectStore(pdfFila.LOJA);
+  },
+
+  /* Guarda um PDF que não conseguiu subir. `destino` é 'drive' ou 'supabase':
+     um PDF pode falhar num e ter ido bem no outro, e só o que falhou espera. */
+  async guardar(blob, nomeArq, destino, meta) {
+    if (!pdfFila.suportado() || !blob) return false;
+    try {
+      const loja = await pdfFila._loja('readwrite');
+      const item = {
+        id: 'pdf_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+        nomeArq: nomeArq || 'documento.pdf',
+        destino: destino,
+        blob: blob,
+        bytes: blob.size || 0,
+        em: new Date().toISOString(),
+        tentativas: 0,
+        mod: (meta && meta.mod) || '',
+        paciente: (meta && meta.paciente) || ''
+      };
+      await new Promise((ok) => { const r = loja.put(item); r.onsuccess = () => ok(true); r.onerror = () => ok(false); });
+      await pdfFila._podar();
+      return true;
+    } catch (e) { console.warn('pdfFila.guardar', e); return false; }
+  },
+
+  async listar() {
+    if (!pdfFila.suportado()) return [];
+    try {
+      const loja = await pdfFila._loja('readonly');
+      const todos = await new Promise((ok) => { const r = loja.getAll(); r.onsuccess = () => ok(r.result || []); r.onerror = () => ok([]); });
+      return todos.sort((a, b) => String(a.em).localeCompare(String(b.em)));
+    } catch (e) { return []; }
+  },
+
+  async remover(id) {
+    if (!pdfFila.suportado()) return;
+    try {
+      const loja = await pdfFila._loja('readwrite');
+      await new Promise((ok) => { const r = loja.delete(id); r.onsuccess = () => ok(true); r.onerror = () => ok(false); });
+    } catch (e) {}
+  },
+
+  async limpar() {
+    if (!pdfFila.suportado()) return;
+    try {
+      const loja = await pdfFila._loja('readwrite');
+      await new Promise((ok) => { const r = loja.clear(); r.onsuccess = () => ok(true); r.onerror = () => ok(false); });
+    } catch (e) {}
+  },
+
+  /* Quantos esperam, e quanto pesam — é o que a tela de Ajustes mostra. */
+  async resumo() {
+    const l = await pdfFila.listar();
+    return { n: l.length, bytes: l.reduce((s, i) => s + (i.bytes || 0), 0) };
+  },
+
+  async _podar() {
+    const l = await pdfFila.listar();
+    let bytes = l.reduce((s, i) => s + (i.bytes || 0), 0);
+    let i = 0;
+    while (i < l.length && (l.length - i > pdfFila.MAX_ITENS || bytes > pdfFila.MAX_BYTES)) {
+      bytes -= (l[i].bytes || 0);
+      await pdfFila.remover(l[i].id);
+      i++;
+    }
+    if (i) console.warn('pdfFila: ' + i + ' PDF(s) antigos descartados por limite de espaço');
+  }
+};
+try { window.pdfFila = pdfFila; } catch (e) {}
+
+/* ============================================================================
    BACKUP DE PDF NAS NUVENS
    - Supabase Storage: automático, usa a mesma sessão do cloud (sem OAuth).
    - Google Drive: opcional, OAuth client-side (Google Identity Services).
-   Ambos são "best-effort": nunca bloqueiam a geração/compartilhamento do PDF.
+   Ambos são "best-effort" na geração — nunca bloqueiam a impressão. Mas o que
+   falha agora ESPERA na fila (pdfFila) em vez de sumir.
 ============================================================================ */
 const pdfBackup = {
   /* ---------- Configuração (Ajustes → Backup de PDFs) ---------- */
@@ -27328,20 +27458,83 @@ const pdfBackup = {
     return c;
   },
 
-  /* Dispara os dois backups habilitados, em paralelo */
-  async enviarTodos(doc, nomeArq) {
+  /* Dispara os dois backups habilitados, em paralelo.
+     O que não subir não se perde: vai para a fila e sobe depois. */
+  async enviarTodos(doc, nomeArq, meta) {
     const blob = doc.output('blob');
     const c = pdfBackup.cfg();
     const proms = [];
     /* Supabase: por padrão ligado se a nuvem estiver logada */
     if (c.supabase !== false && cloud.estaLogado()) {
-      proms.push(pdfBackup.enviarSupabase(blob, nomeArq).catch(e => console.warn('supabase pdf', e)));
+      proms.push(pdfBackup.enviarSupabase(blob, nomeArq)
+        .catch(e => { console.warn('supabase pdf', e); return false; })
+        .then(ok => { if (!ok) return pdfFila.guardar(blob, nomeArq, 'supabase', meta); }));
     }
     /* Google Drive: só se o usuário ativou e conectou */
     if (c.drive === true) {
-      proms.push(pdfBackup.enviarDrive(blob, nomeArq).catch(e => console.warn('drive pdf', e)));
+      proms.push(pdfBackup.enviarDrive(blob, nomeArq)
+        .catch(e => { console.warn('drive pdf', e); return false; })
+        .then(ok => { if (!ok) return pdfFila.guardar(blob, nomeArq, 'drive', meta); }));
     }
     if (proms.length) await Promise.all(proms);
+  },
+
+  /* ---------- DRENAR A FILA ----------
+     Chamada quando uma porta reabre: no boot, ao conectar o Drive, ao entrar
+     na nuvem, e no botão de Ajustes. Silenciosa quando não há nada — só fala
+     quando entregou alguma coisa, para não virar barulho de fundo.
+
+     Para de tentar no primeiro erro daquele destino: se a autorização ainda
+     não voltou, insistir 40 vezes só gasta bateria e enche o console. */
+  _drenando: false,
+  async drenarFila(opts) {
+    if (pdfBackup._drenando) return { enviados: 0, restam: -1 };
+    const pendentes = await pdfFila.listar();
+    if (!pendentes.length) return { enviados: 0, restam: 0 };
+    pdfBackup._drenando = true;
+    const bloqueado = {};
+    let enviados = 0;
+    try {
+      for (const it of pendentes) {
+        if (bloqueado[it.destino]) continue;
+        let ok = false;
+        try {
+          ok = it.destino === 'drive'
+            ? await pdfBackup.enviarDrive(it.blob, it.nomeArq, opts && opts.interactive)
+            : await pdfBackup.enviarSupabase(it.blob, it.nomeArq);
+        } catch (e) { console.warn('drenarFila', e); }
+        if (ok) { await pdfFila.remover(it.id); enviados++; }
+        else { bloqueado[it.destino] = true; }
+      }
+    } finally { pdfBackup._drenando = false; }
+    const resumo = await pdfFila.resumo();
+    if (enviados) toast('📤 ' + enviados + ' PDF(s) que estavam esperando foram enviados' +
+      (resumo.n ? ' — ainda faltam ' + resumo.n : ''));
+    try { pdfBackup.renderFila(); } catch (e) {}
+    return { enviados, restam: resumo.n };
+  },
+
+  /* Estado da fila em Ajustes → Backup de PDFs */
+  async renderFila() {
+    const el = document.getElementById('pdfbk-fila');
+    if (!el) return;
+    const r = await pdfFila.resumo();
+    if (!r.n) { el.innerHTML = '<span style="color:var(--text-mute)">Nenhum PDF esperando envio.</span>'; return; }
+    const mb = (r.bytes / 1048576).toFixed(1);
+    el.innerHTML =
+      '<div style="background:#fff4e5;border:1px solid #f0c890;color:#7a4b12;border-radius:8px;padding:10px 12px;font-size:.84rem">' +
+      '📥 <b>' + r.n + ' PDF(s)</b> esperando para subir (' + mb + ' MB). ' +
+      'Eles sobem sozinhos quando a autorização voltar — ou agora, se você quiser.' +
+      '<div style="margin-top:8px">' +
+      '<button type="button" class="btn btn-sm btn-primary" onclick="pdfBackup.drenarFila({interactive:true})">📤 Enviar agora</button> ' +
+      '<button type="button" class="btn btn-sm btn-ghost" onclick="pdfBackup.descartarFila()">Descartar</button>' +
+      '</div></div>';
+  },
+  descartarFila() {
+    modal.open('Descartar os PDFs que esperam?',
+      '<p style="font-size:.88rem;margin:0">Os documentos em si continuam salvos no sistema — o que se perde é a <b>cópia em PDF</b> que ainda não subiu para a nuvem. Não dá para desfazer.</p>',
+      '<button class="btn btn-ghost" onclick="modal.close(); pdfFila.limpar().then(()=>{ pdfBackup.renderFila(); toast(\'Fila de PDFs descartada\'); })">Descartar</button>' +
+      '<button class="btn btn-primary" onclick="modal.close()">Manter</button>');
   },
 
   /* ======================= SUPABASE STORAGE ======================= */
@@ -27561,6 +27754,8 @@ const pdfBackup = {
     pdfBackup.salvarCfg({ drive: true });
     toast('✅ Google Drive conectado. Os próximos PDFs serão salvos lá.');
     try { const cb = document.getElementById('pdfbk-drive'); if (cb) cb.checked = true; } catch (e) {}
+    /* A porta reabriu: o que ficou esperando sobe agora, sem ninguém pedir. */
+    try { pdfBackup.drenarFila(); } catch (e) {}
   },
 
   /* O Drive é CONVENIÊNCIA, não necessidade: o Supabase Storage já guarda todo
@@ -27662,6 +27857,7 @@ const pdfBackup = {
           'Marque o Supabase Storage abaixo (usa a conta da nuvem que você já tem).</span>';
       }
     }
+    try { pdfBackup.renderFila(); } catch (e) {}
   },
 
   /* ---------- BACKUP AUTOMÁTICO AO FINALIZAR ----------
@@ -42069,22 +42265,39 @@ const autocomplete = {
     autocomplete.attach(
       el,
       () => {
-        const perfil = ajustes.list('cad_assinaturas').map(x => ({
-          value: x._id, label: x.nomeProfissional || x.nome,
-          meta: 'Meu perfil' + (x.crm ? ' · CRM ' + x.crm : '') + (x.carimbo ? ' · ✓ carimbo' : ''),
-          data: { ...x, nome: x.nomeProfissional || x.nome }
-        }));
-        const an = ajustes.list('cad_anestesistas').map(x => ({
-          value: x._id, label: x.nome,
-          meta: 'Anestesista' + (x.crm ? ' · CRM ' + x.crm : '') + (x.carimbo ? ' · ✓ carimbo' : ''),
-          data: x
-        }));
-        const ci = ajustes.list('cad_cirurgioes').map(x => ({
-          value: x._id, label: x.nome,
-          meta: 'Cirurgião' + (x.crm ? ' · CRM ' + x.crm : '') + (x.carimbo ? ' · ✓ carimbo' : ''),
-          data: x
-        }));
-        return [...perfil, ...an, ...ci].filter(x => x.label);
+        /* UMA PESSOA, UMA LINHA. As três listas viraram vistas sobre o mesmo
+           cadastro, e quem é o responsável E anestesiologista aparecia duas
+           vezes — mesmo nome, mesmo CRM, escolhas idênticas. Antes eram
+           cadastros separados e a repetição não existia; foi a unificação que
+           a criou. A lista sai do cadastro único, e as vistas só entram
+           enquanto ele estiver vazio (aparelho ainda não migrado). */
+        const daLista = (x) => {
+          const nome = x.nomeProfissional || x.nome;
+          const partes = [];
+          if (x.responsavel === true || x.responsavel === 'true') partes.push('Meu perfil');
+          if (x.especialidade) partes.push(x.especialidade);
+          if (x.crm) partes.push('CRM ' + x.crm);
+          if (x.carimbo) partes.push('✓ carimbo');
+          return { value: x._id, label: nome, meta: partes.join(' · '), data: Object.assign({}, x, { nome }) };
+        };
+        const unico = ajustes.list('cad_profissionais');
+        let itens;
+        if (unico.length) itens = unico.map(daLista);
+        else {
+          itens = [].concat(
+            ajustes.list('cad_assinaturas').map(daLista),
+            ajustes.list('cad_anestesistas').map(daLista),
+            ajustes.list('cad_cirurgioes').map(daLista));
+        }
+        /* rede de segurança: mesma pessoa nunca duas vezes */
+        const vistos = new Set();
+        return itens.filter(x => {
+          if (!x.label) return false;
+          const k = x.value || String(x.label).toLowerCase();
+          if (vistos.has(k)) return false;
+          vistos.add(k);
+          return true;
+        });
       },
       (it) => aplicar(el, it.data)
     );
