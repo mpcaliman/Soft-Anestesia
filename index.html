@@ -4590,7 +4590,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-28n</b><br>
+    v7.1 · build <b id="build-tag">2026-08-28o</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -20002,6 +20002,7 @@ const cloud = {
       window.addEventListener('online', () => {
         cloud.autoSyncAoVoltar({ forcar: true });
         try { cloudRel.drenarFila(); } catch (e) {}
+        try { cloudRel.drenarFilaDel(); } catch (e) {}
       });
     }
   },
@@ -20377,6 +20378,10 @@ const realtime = {
      0015; enquanto isso, o canal conecta e simplesmente não recebe nada —
      nunca quebra, no máximo não acelera. */
   TABELAS: {
+    /* A agenda entra aqui: um compromisso marcado na secretaria tem de
+       aparecer na tela do médico na hora, não no próximo ciclo. A tabela já
+       está publicada no Realtime desde a 0002 — faltava escutá-la. */
+    appointments: 'agenda',
     preanesthetic_assessments: 'pre',
     anesthesia_records: 'anestesia',
     recovery_records: 'recuperacao',
@@ -20487,6 +20492,7 @@ const realtime = {
     try { if (typeof preLanc !== 'undefined') preLanc.renderFila(); } catch (e) {}
     try { if (typeof ui !== 'undefined') ui.repintarNuvemAtual(); } catch (e) {}
     try { if (state.currentModule === 'financeiro' && mod === 'financeiro') financeiro.render(); } catch (e) {}
+    try { if (mod === 'agenda') { agenda._puxouNestaSessao = false; agenda.sincronizarNuvem({ silent: true }); } } catch (e) {}
     try { if (state.currentModule === 'dashboard') dashboard.atualizar(); } catch (e) {}
     try { if (typeof pendencias !== 'undefined') pendencias.renderDashboard(); } catch (e) {}
   },
@@ -20586,6 +20592,7 @@ const sincronia = {
              conseguiu. Vem antes da varredura porque é precisa — sabe
              exatamente o que falhou, em vez de procurar. */
       try { await cloudRel.drenarFila(); } catch (e) {}
+      try { await cloudRel.drenarFilaDel(); } catch (e) {}
       /* 2) o resto do que foi feito aqui e ainda não subiu */
       try { await cloudRel.empurrarPendentes({ silent: true, limite: 15 }); } catch (e) {}
       /* 3) o que os outros aparelhos fizeram desde a última passada */
@@ -22324,7 +22331,14 @@ const cloudRel = {
         /* Sumiu do aparelho (apagado, arquivado): não há o que subir. */
         if (!rec) { cloudRel._filaTirar(it.mod, it.id); continue; }
         let r = null;
-        try { r = await cloudRel.enviarRegistro(it.mod, rec); } catch (e) { r = null; }
+        /* A agenda tem envio próprio: além do `data`, ela grava as colunas
+           scheduled_at e status, que são o que ordena e filtra a lista do
+           lado do servidor. Usar enviarRegistro aqui as deixaria em branco. */
+        try {
+          r = (it.mod === 'agenda')
+            ? await cloudRel.enviarAgenda(rec)
+            : await cloudRel.enviarRegistro(it.mod, rec);
+        } catch (e) { r = null; }
         if (r && r.ok) {
           cloudRel._filaTirar(it.mod, it.id);
           enviados++;
@@ -22333,7 +22347,10 @@ const cloudRel = {
           /* Conflito não é falha de entrega: sai da fila e vira decisão de
              quem está na frente do aparelho. */
           cloudRel._filaTirar(it.mod, it.id);
-          try { cloudRel._resolverConflitoRegistro(it.mod, rec, r.cloud, r.cloudUpdatedAt); } catch (e) {}
+          try {
+            if (it.mod === 'agenda') agenda._resolverConflito(rec, r.cloud, r.cloudUpdatedAt);
+            else cloudRel._resolverConflitoRegistro(it.mod, rec, r.cloud, r.cloudUpdatedAt);
+          } catch (e) {}
         } else {
           ultimoMotivo = (r && r.motivo) || 'rede';
           cloudRel._filaPor(it.mod, it.id, ultimoMotivo);
@@ -22345,6 +22362,58 @@ const cloudRel = {
       else if (enviados) cloudRel._ultimoMotivo = '';
     }
     return { enviados: enviados, restantes: cloudRel.filaPendentes() };
+  },
+
+  /* ---- APAGAR NA CLÍNICA ----
+     Excluir era um ato só local: `store.delete` e pronto. O registro
+     continuava na clínica, e o próximo aparelho a sincronizar o trazia de
+     volta — um compromisso cancelado reaparecendo na agenda do outro. O
+     banco já tem `deleted_at` e todas as leituras filtram por ele; faltava
+     alguém escrever.
+
+     A exclusão não cabe na fila normal: ela relê o registro do aparelho para
+     subir a versão mais nova, e um registro apagado não está mais lá. Por
+     isso uma fila própria, que guarda só a chave. */
+  FILA_DEL_KEY: 'medsys.v7.rel.fila_del',
+  _filaDelLer() { try { return JSON.parse(localStorage.getItem(cloudRel.FILA_DEL_KEY) || '[]') || []; } catch (e) { return []; } },
+  _filaDelGravar(q) { try { localStorage.setItem(cloudRel.FILA_DEL_KEY, JSON.stringify(q.slice(0, cloudRel.MAX_FILA))); } catch (e) {} },
+  _filaDelPor(tabela, id) {
+    if (!tabela || !id) return;
+    const q = cloudRel._filaDelLer();
+    if (!q.some(x => x.tabela === tabela && x.id === id)) q.push({ tabela, id, em: new Date().toISOString() });
+    cloudRel._filaDelGravar(q);
+  },
+  _filaDelTirar(tabela, id) {
+    cloudRel._filaDelGravar(cloudRel._filaDelLer().filter(x => !(x.tabela === tabela && x.id === id)));
+  },
+  async apagarNaClinica(tabela, legacyId) {
+    if (!tabela || !legacyId) return { ok: false, motivo: 'chave' };
+    if (!cloudRel.disponivel()) { cloudRel._filaDelPor(tabela, legacyId); return { ok: false, motivo: 'offline' }; }
+    if (!(await cloud._garantirToken())) { cloudRel._filaDelPor(tabela, legacyId); return { ok: false, motivo: 'token' }; }
+    const org = await cloudRel._orgAsync();
+    if (!org) { cloudRel._filaDelPor(tabela, legacyId); return { ok: false, motivo: 'org' }; }
+    try {
+      const c = cloud.config();
+      const r = await fetch(c.url + '/rest/v1/' + tabela + '?organization_id=eq.' + org +
+        '&legacy_id=eq.' + encodeURIComponent(legacyId),
+        { method: 'PATCH',
+          headers: Object.assign({}, cloud._headers(true), { 'Content-Type': 'application/json', 'Prefer': 'return=minimal' }),
+          body: JSON.stringify({ deleted_at: new Date().toISOString() }) });
+      if (!r.ok) { cloudRel._filaDelPor(tabela, legacyId); return { ok: false, motivo: 'http ' + r.status }; }
+      cloudRel._filaDelTirar(tabela, legacyId);
+      return { ok: true };
+    } catch (e) { cloudRel._filaDelPor(tabela, legacyId); return { ok: false, motivo: 'rede' }; }
+  },
+  async drenarFilaDel() {
+    const q = cloudRel._filaDelLer();
+    if (!q.length) return { enviados: 0 };
+    if (!cloudRel.disponivel()) return null;
+    let n = 0;
+    for (const it of q.slice(0, 40)) {
+      const r = await cloudRel.apagarNaClinica(it.tabela, it.id);
+      if (r && r.ok) n++;
+    }
+    return { enviados: n, restantes: cloudRel._filaDelLer().length };
   },
 
   mirrorRegistro(mod, item) {
@@ -49566,14 +49635,22 @@ const agenda = {
     agenda.render();
     agenda._espelhar(saved);
   },
-  /* Fase 6: espelha um compromisso no banco relacional (appointments). */
+  /* Espelha um compromisso na clínica (appointments).
+     Era dispara-e-esquece: `.catch(() => {})`. Sem org, sem rede, com token
+     vencido ou com o RLS recusando, a promessa morria no catch vazio e o
+     compromisso ficava só neste aparelho — ninguém sabia. É o mesmo defeito
+     que fez uma pré-anestésica "enviada" nunca chegar ao médico; os módulos
+     clínicos ganharam fila durável e a agenda ficou para trás. */
   _espelhar(item) {
+    const id = item && item._id;
     try {
       if (typeof cloudRel === 'undefined' || !item) return;
       cloudRel.enviarAgenda(item).then(res => {
-        if (res && res.conflict) agenda._resolverConflito(item, res.cloud, res.cloudUpdatedAt);
-      }).catch(() => {});
-    } catch (e) {}
+        if (res && res.conflict) { cloudRel._filaTirar('agenda', id); agenda._resolverConflito(item, res.cloud, res.cloudUpdatedAt); }
+        else if (res && res.ok) cloudRel._filaTirar('agenda', id);
+        else cloudRel._filaPor('agenda', id, (res && res.motivo) || 'rede');
+      }).catch(() => { cloudRel._filaPor('agenda', id, 'rede'); });
+    } catch (e) { try { cloudRel._filaPor('agenda', id, 'rede'); } catch (er) {} }
   },
   _resolverConflito(local, nuvem, cloudUpdatedAt) {
     const usar = confirm('⚠️ Este compromisso foi alterado na nuvem por outra pessoa (ou noutro aparelho).\n\nOK = usar a versão da NUVEM neste aparelho.\nCancelar = manter a SUA versão (grava por cima).');
@@ -49600,21 +49677,48 @@ const agenda = {
     if (remotos === null) { if (!opts.silent) toast('Não foi possível puxar a agenda agora', 'warn'); return; }
     const locais = store.list('agenda');
     const porId = new Map(); locais.forEach(a => { if (a._id) porId.set(a._id, a); });
-    let novos = 0;
+    let novos = 0, atualizados = 0;
+    const idsRemotos = new Set();
     remotos.forEach(r => {
       if (!r._id) return;
+      idsRemotos.add(r._id);
       const loc = porId.get(r._id);
-      if (!loc) { locais.unshift(r); porId.set(r._id, r); novos++; }
-      else if (r._relUpdatedAt) loc._relUpdatedAt = r._relUpdatedAt;
+      if (!loc) { locais.unshift(r); porId.set(r._id, r); novos++; return; }
+      /* O que mudou na clínica tem de chegar. Antes só o carimbo era copiado:
+         remarcar o horário num aparelho não mexia no outro, e a agenda ficava
+         dizendo coisas diferentes para cada pessoa. */
+      const maisNovo = r._relUpdatedAt && loc._relUpdatedAt && r._relUpdatedAt > loc._relUpdatedAt;
+      if (maisNovo || !loc._relUpdatedAt) {
+        const i = locais.indexOf(loc);
+        if (i >= 0) { locais[i] = Object.assign({}, loc, r); atualizados++; }
+      }
+      if (r._relUpdatedAt) (locais[locais.indexOf(loc)] || loc)._relUpdatedAt = r._relUpdatedAt;
     });
+    /* Apagado na clínica some daqui. Só vale para o que UM DIA veio de lá
+       (tem carimbo): o que foi criado neste aparelho e ainda não subiu não
+       pode ser confundido com "excluído por alguém". */
+    let removidos = 0;
+    for (let i = locais.length - 1; i >= 0; i--) {
+      const x = locais[i];
+      if (x && x._relUpdatedAt && x._id && !idsRemotos.has(x._id)) { locais.splice(i, 1); removidos++; }
+    }
     store.setList('agenda', locais);
     agenda._puxouNestaSessao = true;
     try { agenda.render(); } catch (e) {}
-    if (!opts.silent) toast('☁️ Agenda sincronizada — ' + novos + ' novo(s)');
+    if (!opts.silent) {
+      const partes = [];
+      if (novos) partes.push(novos + ' novo(s)');
+      if (atualizados) partes.push(atualizados + ' atualizado(s)');
+      if (removidos) partes.push(removidos + ' removido(s) na clínica');
+      toast('☁️ Agenda sincronizada' + (partes.length ? ' — ' + partes.join(', ') : ' — já estava em dia'));
+    }
   },
   excluir(id) {
     if (!confirm('Excluir este compromisso?')) return;
     store.delete('agenda', id);
+    /* e some da clínica também: apagar só aqui fazia o compromisso voltar na
+       próxima sincronização, e continuar na agenda de quem mais o via */
+    try { cloudRel.apagarNaClinica('appointments', id); } catch (e) {}
     agenda.render();
     toast('Compromisso excluído');
   },
