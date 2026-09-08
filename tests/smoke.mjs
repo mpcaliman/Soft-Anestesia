@@ -11593,6 +11593,111 @@ await test('Cadastro único de profissionais: a especialidade e o "sou eu" viram
   await page.close();
 });
 
+/* 176) Marcar o tipo de anestesia criava o evento e parava aí: o COMO ficava
+   para escrever à mão, num campo livre, toda vez. E o que se escrevia não
+   compunha nada — nem a técnica realizada, nem a descrição do evento. */
+await test('Cada técnica pede seus detalhes numa janela, e o que se responde vira a descrição — na ficha e no gráfico', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor', entrouEm: Date.now() }));
+    auth._desbloquear();
+    /* o tutorial do gráfico abre uma janela 600 ms depois de entrar na ficha;
+       aqui ele só atrapalharia a leitura do teste */
+    localStorage.setItem('medsys.v7.tutorial_grafico', '1');
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 400));
+    /* a janela de "entrar na nuvem" fica aberta neste ambiente sem rede;
+       a nossa espera a vez de propósito, então é preciso liberá-la */
+    try { modal.close(); } catch (e) {}
+    await new Promise(res => setTimeout(res, 100));
+    anestesia.limparSilencioso();
+
+    const f = document.getElementById('form-anestesia');
+    const cb = Array.from(f.querySelectorAll('[name="tipo[]"]')).find(x => x.value === 'Anestesia geral');
+    out.temOTipo = !!cb;
+
+    /* marcar abre a janela com os campos daquela técnica */
+    cb.checked = true;
+    anestesia.eventos.aoSelecionarTipo(cb);
+    await new Promise(res => setTimeout(res, 600));
+    out.abriuAJanela = !!document.getElementById('form-tecdet');
+    out.tituloDaTecnica = /Anestesia geral/.test((document.getElementById('modal-title') || {}).textContent || '');
+    const campos = Array.from(document.querySelectorAll('#form-tecdet [name^="td_"]')).map(x => x.name);
+    out.temCamposDaTecnica = ['td_inducao','td_manutencao','td_agente_ind','td_bnm','td_reversao'].every(n => campos.indexOf(n) >= 0);
+
+    /* responder e salvar */
+    const pf = (n, v) => { const el = document.querySelector('#form-tecdet [name="' + n + '"]'); if (el) el.value = v; };
+    pf('td_inducao', 'Venosa'); pf('td_agente_ind', 'Propofol 2 mg/kg');
+    pf('td_opioide', 'Fentanil 3 mcg/kg'); pf('td_bnm', 'Rocurônio 0,6 mg/kg');
+    pf('td_manutencao', 'Balanceada'); pf('td_agente_man', 'Sevoflurano 1 CAM');
+    pf('td_reversao', 'Sugamadex');
+    anestesia.tecnicaDet.salvar('Anestesia geral');
+    await new Promise(res => setTimeout(res, 200));
+
+    /* 1) fica GRAVADO — era isto que não acontecia */
+    out.ficouNoEstado = !!anestesia.tecnicaDet.de('Anestesia geral').agente_ind;
+    const texto = anestesia.tecnicaDet.textoDe('Anestesia geral');
+    out.viraFrase = /Indução venosa com Propofol/.test(texto) && /Sugamadex/i.test(texto)
+      && !/undefined/.test(texto);
+
+    /* 2) compõe a descrição da técnica realizada */
+    out.entrouNaTecnica = /Propofol 2 mg\/kg/.test(f.querySelector('[name="tecnica_descricao"]').value);
+
+    /* 3) chega à descrição do evento — e por ela ao gráfico */
+    out.eventoRecebeu = /Propofol 2 mg\/kg/.test(anestesia.eventos.descricaoPara('Indução'));
+    const obs = Array.from(document.querySelectorAll('#eventos-body tr')).map(tr => {
+      const t = (tr.querySelector('[name="evt_tipo[]"]') || {}).value || '';
+      const o = (tr.querySelector('[name="evt_obs[]"]') || {}).value || '';
+      return t + '=' + o;
+    }).join('|');
+    out.linhaDoTempoRecebeu = /Indução=.*Propofol 2 mg\/kg/.test(obs);
+
+    /* 4) sobrevive a salvar e reabrir */
+    f.querySelector('[name="paciente_nome"]').value = 'TESTE TECNICA';
+    f.querySelector('[name="data_anestesia"]').value = utils.hojeISO();
+    const est = anestesia.coletarEstruturado();
+    out.entrouNoRegistro = !!(est.tecnica && est.tecnica.detalhes && est.tecnica.detalhes['Anestesia geral']);
+    anestesia.limparSilencioso();
+    out.fichaNovaNasceLimpa = Object.keys(anestesia.tecnicaDet.coletar()).length === 0;
+    anestesia.carregar(est);
+    await new Promise(res => setTimeout(res, 300));
+    out.voltouAoReabrir = anestesia.tecnicaDet.de('Anestesia geral').agente_ind === 'Propofol 2 mg/kg';
+    out.temAtalhoDeEdicao = !!document.querySelector('[data-tecdet="Anestesia geral"]');
+
+    /* 5) bloqueio NÃO ganha janela duplicada: ele já tem o card com a tabela
+       de medicações que se replica no gráfico. A ação leva até lá. */
+    const raqui = Array.from(f.querySelectorAll('[name="tipo[]"]')).find(x => x.value === 'Raquianestesia');
+    raqui.checked = true;
+    anestesia.tecnicaDet.abrir('Raquianestesia');
+    await new Promise(res => setTimeout(res, 200));
+    out.bloqMarcou = f.querySelector('[name="bloqueio_realizado"]').checked === true;
+    out.bloqAbriuOCard = document.getElementById('bloqueio-detalhes').style.display !== 'none';
+    out.bloqSemJanelaNova = !/Anestesia geral|Sedação/.test((document.getElementById('modal-title') || {}).textContent || '');
+    out.bloqueioNaoDuplica = out.bloqMarcou && out.bloqAbriuOCard;
+
+    anestesia.limparSilencioso();
+    return out;
+  });
+
+  assert(r.temOTipo, 'o tipo de anestesia existe no formulário');
+  assert(r.abriuAJanela && r.tituloDaTecnica, 'marcar o tipo abre a janela daquela técnica');
+  assert(r.temCamposDaTecnica, 'com os campos que descrevem justamente aquela técnica');
+  assert(r.ficouNoEstado, 'o que se responde fica gravado — era isto que não acontecia');
+  assert(r.viraFrase, 'e vira uma frase legível, sem buraco de campo vazio');
+  assert(r.entrouNaTecnica, 'que compõe a descrição da técnica realizada');
+  assert(r.eventoRecebeu && r.linhaDoTempoRecebeu, 'e chega à descrição do evento, no gráfico');
+  assert(r.entrouNoRegistro, 'o detalhe entra no registro salvo');
+  assert(r.fichaNovaNasceLimpa, 'ficha nova não nasce com o que foi respondido na anterior');
+  assert(r.voltouAoReabrir, 'e volta ao reabrir a ficha, para edição');
+  assert(r.temAtalhoDeEdicao, 'com um atalho ao lado do tipo para editar de novo');
+  assert(r.bloqMarcou, 'pedir o detalhe de um bloqueio liga o card de detalhamento');
+  assert(r.bloqAbriuOCard, 'e o abre — é lá que estão os campos e a tabela de medicações');
+  assert(r.bloqueioNaoDuplica, 'bloqueio não ganha janela duplicada: a ação leva ao card que já existe');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

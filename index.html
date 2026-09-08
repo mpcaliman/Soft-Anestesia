@@ -4548,7 +4548,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-28j</b><br>
+    v7.1 · build <b id="build-tag">2026-08-28k</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -29091,6 +29091,281 @@ const anestesia = {
   },
 
   /* ---- BLOQUEIO REGIONAL, USG, CATETERES ---- */
+  /* ==========================================================================
+     DETALHE POR TÉCNICA — a janela que se abre ao marcar o tipo de anestesia
+
+     Marcar "Anestesia geral" criava o evento na linha do tempo e parava aí: o
+     COMO ficava para o anestesista escrever à mão, num campo livre, toda vez.
+     O bloqueio regional tinha um card completo; todo o resto, nada.
+
+     Aqui cada técnica declara os campos que a descrevem. A janela pergunta,
+     a resposta fica gravada no registro (e volta ao reabrir), e vira a
+     descrição-padrão daquela técnica — que alimenta a "Técnica realizada" e a
+     descrição do evento no gráfico.
+
+     Os tipos NEUROAXIAIS e de bloqueio não entram aqui de propósito: eles já
+     têm o card 3 inteiro, com tabela de medicações que se replica no gráfico.
+     Duplicar os campos numa janela criaria duas verdades para o mesmo dado.
+     Para esses, a janela abre o card e leva a pessoa até ele.
+  ========================================================================== */
+  tecnicaDet: {
+    /* tipos que já têm card próprio — a janela leva até ele */
+    BLOQUEIOS: ['Raquianestesia', 'Peridural', 'Bloqueio periférico', 'Bloqueio regional'],
+
+    ESPECS: {
+      'Anestesia geral': {
+        titulo: '💤 Anestesia geral',
+        campos: [
+          { n: 'inducao', l: 'Indução', t: 'select', col: 6, o: ['Venosa', 'Inalatória', 'Venosa + inalatória', 'Sequência rápida'] },
+          { n: 'manutencao', l: 'Manutenção', t: 'select', col: 6, o: ['Inalatória', 'Venosa total (TIVA)', 'Balanceada'] },
+          { n: 'agente_ind', l: 'Agente de indução', t: 'text', col: 6, p: 'Propofol 2 mg/kg' },
+          { n: 'agente_man', l: 'Agente de manutenção', t: 'text', col: 6, p: 'Sevoflurano 1 CAM' },
+          { n: 'opioide', l: 'Opioide', t: 'text', col: 6, p: 'Fentanil 3 mcg/kg' },
+          { n: 'bnm', l: 'Bloqueador neuromuscular', t: 'text', col: 6, p: 'Rocurônio 0,6 mg/kg' },
+          { n: 'reversao', l: 'Reversão do bloqueio neuromuscular', t: 'select', col: 6,
+            o: ['Não utilizada', 'Neostigmina + atropina', 'Sugamadex', 'Reversão espontânea'] },
+          { n: 'profundidade', l: 'Monitorização da profundidade', t: 'select', col: 6,
+            o: ['Clínica', 'BIS', 'Entropia', 'TOF (bloqueio neuromuscular)'] },
+          { n: 'obs', l: 'Observações', t: 'textarea', col: 12 }
+        ],
+        texto(d) {
+          const p = [];
+          if (d.inducao) p.push('Indução ' + d.inducao.toLowerCase() + (d.agente_ind ? ' com ' + d.agente_ind : ''));
+          else if (d.agente_ind) p.push('Indução com ' + d.agente_ind);
+          if (d.opioide) p.push('opioide: ' + d.opioide);
+          if (d.bnm) p.push('bloqueio neuromuscular: ' + d.bnm);
+          if (d.manutencao) p.push('manutenção ' + d.manutencao.toLowerCase() + (d.agente_man ? ' com ' + d.agente_man : ''));
+          else if (d.agente_man) p.push('manutenção com ' + d.agente_man);
+          if (d.profundidade) p.push('monitorização da profundidade por ' + d.profundidade.toLowerCase());
+          if (d.reversao && d.reversao !== 'Não utilizada') p.push('reversão com ' + d.reversao.toLowerCase());
+          return anestesia.tecnicaDet._frase('Anestesia geral', p, d.obs);
+        }
+      },
+      'Sedação': {
+        titulo: '😴 Sedação',
+        campos: [
+          { n: 'nivel', l: 'Nível de sedação', t: 'select', col: 6, o: ['Leve (ansiólise)', 'Moderada (consciente)', 'Profunda'] },
+          { n: 'agentes', l: 'Agentes utilizados', t: 'text', col: 6, p: 'Propofol em infusão + fentanil' },
+          { n: 'oxigenio', l: 'Suporte de oxigênio', t: 'select', col: 6,
+            o: ['Cateter nasal', 'Máscara facial', 'Máscara de Venturi', 'Ar ambiente'] },
+          { n: 'via_aerea', l: 'Via aérea', t: 'select', col: 6, o: ['Espontânea, pérvia', 'Cânula de Guedel', 'Suporte manual em algum momento'] },
+          { n: 'escala', l: 'Escala / grau atingido', t: 'text', col: 6, p: 'Ramsay 3' },
+          { n: 'obs', l: 'Observações', t: 'textarea', col: 12 }
+        ],
+        texto(d) {
+          const p = [];
+          if (d.nivel) p.push('sedação ' + d.nivel.toLowerCase());
+          if (d.agentes) p.push('com ' + d.agentes);
+          if (d.via_aerea) p.push('via aérea ' + d.via_aerea.toLowerCase());
+          if (d.oxigenio) p.push('oxigênio por ' + d.oxigenio.toLowerCase());
+          if (d.escala) p.push('nível atingido: ' + d.escala);
+          return anestesia.tecnicaDet._frase('Sedação', p, d.obs);
+        }
+      },
+      'Local assistida': {
+        titulo: '💉 Anestesia local assistida',
+        campos: [
+          { n: 'agente', l: 'Anestésico local', t: 'text', col: 6, p: 'Lidocaína 2% com vasoconstritor' },
+          { n: 'volume', l: 'Volume total', t: 'text', col: 3, p: '20 mL' },
+          { n: 'quem', l: 'Infiltração realizada por', t: 'select', col: 3, o: ['Cirurgião', 'Anestesiologista'] },
+          { n: 'complemento', l: 'Complementação', t: 'select', col: 6, o: ['Nenhuma', 'Sedação leve', 'Analgesia venosa'] },
+          { n: 'obs', l: 'Observações', t: 'textarea', col: 12 }
+        ],
+        texto(d) {
+          const p = [];
+          if (d.agente) p.push('infiltração com ' + d.agente + (d.volume ? ', ' + d.volume : ''));
+          if (d.quem) p.push('realizada pelo ' + d.quem.toLowerCase());
+          if (d.complemento && d.complemento !== 'Nenhuma') p.push('complementada por ' + d.complemento.toLowerCase());
+          return anestesia.tecnicaDet._frase('Anestesia local assistida', p, d.obs);
+        }
+      },
+      'Monitoração e vigilância clínica': {
+        titulo: '📈 Monitoração e vigilância clínica',
+        campos: [
+          { n: 'motivo', l: 'Motivo', t: 'text', col: 12, p: 'Procedimento sob anestesia local pelo cirurgião, com acompanhamento anestesiológico' },
+          { n: 'monitor', l: 'Monitorização utilizada', t: 'text', col: 12, p: 'Cardioscopia, oximetria e PANI' },
+          { n: 'suporte', l: 'Suporte utilizado', t: 'select', col: 6, o: ['Nenhum', 'Oxigênio suplementar', 'Analgesia venosa', 'Ansiolítico'] },
+          { n: 'obs', l: 'Observações', t: 'textarea', col: 12 }
+        ],
+        texto(d) {
+          const p = [];
+          if (d.motivo) p.push(d.motivo);
+          if (d.monitor) p.push('monitorização: ' + d.monitor);
+          if (d.suporte && d.suporte !== 'Nenhum') p.push('suporte: ' + d.suporte.toLowerCase());
+          return anestesia.tecnicaDet._frase('Monitoração e vigilância clínica', p, d.obs);
+        }
+      },
+      'Outra': {
+        titulo: '➕ Outra técnica',
+        campos: [
+          { n: 'nome', l: 'Qual técnica', t: 'text', col: 12, p: 'Descreva a técnica utilizada' },
+          { n: 'obs', l: 'Descrição', t: 'textarea', col: 12 }
+        ],
+        texto(d) { return anestesia.tecnicaDet._frase(d.nome || 'Outra técnica', [], d.obs); }
+      }
+    },
+
+    /* Uma frase legível a partir das partes preenchidas. Campo em branco não
+       vira "undefined" nem vírgula solta: some. */
+    _frase(titulo, partes, obs) {
+      const corpo = partes.filter(Boolean).join('; ');
+      let t = titulo + (corpo ? ': ' + corpo : '');
+      if (!/[.!?]\s*$/.test(t)) t += '.';
+      if (obs && obs.trim()) t += ' ' + obs.trim().replace(/\s*$/, '') + (/[.!?]$/.test(obs.trim()) ? '' : '.');
+      return t;
+    },
+
+    /* ---- estado: fica no registro, não só na tela ---- */
+    _dados: {},
+    de(tipo) { return anestesia.tecnicaDet._dados[tipo] || {}; },
+    coletar() { return JSON.parse(JSON.stringify(anestesia.tecnicaDet._dados || {})); },
+    restaurar(d) {
+      anestesia.tecnicaDet._dados = (d && typeof d === 'object') ? JSON.parse(JSON.stringify(d)) : {};
+      try { anestesia.tecnicaDet.renderResumos(); } catch (e) {}
+    },
+    limpar() { anestesia.tecnicaDet._dados = {}; try { anestesia.tecnicaDet.renderResumos(); } catch (e) {} },
+
+    /* ---- a janela ---- */
+    abrir(tipo, tentativa) {
+      if (anestesia.tecnicaDet.BLOQUEIOS.indexOf(tipo) >= 0) return anestesia.tecnicaDet._irParaBloqueio(tipo);
+      const esp = anestesia.tecnicaDet.ESPECS[tipo];
+      if (!esp) return false;
+      /* Só existe UMA janela no app. Abrir por cima de outra faz a nossa
+         sumir sem aviso — foi o que aconteceu com o tutorial do gráfico, que
+         aparece 600 ms depois de entrar na ficha. Espera a vez. */
+      try {
+        const bd = document.getElementById('modal-backdrop');
+        if (bd && bd.classList.contains('show')) {
+          const n = (tentativa || 0) + 1;
+          if (n <= 8) { setTimeout(() => anestesia.tecnicaDet.abrir(tipo, n), 700); return true; }
+          return false;
+        }
+      } catch (e) {}
+      const d = anestesia.tecnicaDet.de(tipo);
+      const campo = (f) => {
+        const val = d[f.n] || '';
+        if (f.t === 'textarea') {
+          return '<div class="field col-' + f.col + '"><label>' + utils.escapeHTML(f.l) + '</label>' +
+            '<textarea name="td_' + f.n + '" rows="2" placeholder="' + utils.escapeAttr(f.p || '') + '">' + utils.escapeHTML(val) + '</textarea></div>';
+        }
+        if (f.t === 'select') {
+          return '<div class="field col-' + f.col + '"><label>' + utils.escapeHTML(f.l) + '</label>' +
+            '<select name="td_' + f.n + '"><option value="">—</option>' +
+            f.o.map(o => '<option ' + (o === val ? 'selected' : '') + '>' + utils.escapeHTML(o) + '</option>').join('') +
+            '</select></div>';
+        }
+        return '<div class="field col-' + f.col + '"><label>' + utils.escapeHTML(f.l) + '</label>' +
+          '<input type="text" name="td_' + f.n + '" value="' + utils.escapeAttr(val) + '" placeholder="' + utils.escapeAttr(f.p || '') + '"></div>';
+      };
+      const corpo =
+        '<p style="font-size:.82rem;color:var(--text-mute);margin:0 0 10px">O que você preencher aqui fica gravado na ficha e vira a descrição desta técnica — no texto da técnica realizada e no evento da linha do tempo. Tudo é opcional.</p>' +
+        '<form id="form-tecdet" onsubmit="return false"><div class="grid">' + esp.campos.map(campo).join('') + '</div></form>';
+      modal.open(esp.titulo, corpo,
+        '<button class="btn" onclick="modal.close()">Cancelar</button>' +
+        '<button class="btn btn-primary" onclick="anestesia.tecnicaDet.salvar(\'' + utils.escapeAttr(tipo) + '\')">Salvar detalhes</button>');
+      return true;
+    },
+    _irParaBloqueio(tipo) {
+      const f = document.getElementById('form-anestesia');
+      if (!f) return false;
+      const chk = f.querySelector('[name="bloqueio_realizado"]');
+      if (chk && !chk.checked) { chk.checked = true; anestesia.bloqueio.alternar(chk); }
+      /* já deixa o tipo do bloqueio coerente com o que foi marcado */
+      const sel = f.querySelector('[name="bloqueio_tipo"]');
+      if (sel && !sel.value) {
+        const alvo = Array.from(sel.options).find(o => o.value === tipo)
+          || Array.from(sel.options).find(o => new RegExp(tipo.split(' ')[0], 'i').test(o.value));
+        if (alvo) { sel.value = alvo.value; try { anestesia.eventos.sincronizarDoBloqueio(); } catch (e) {} }
+      }
+      const alvo = document.getElementById('bloqueio-detalhes');
+      if (alvo) {
+        try { alvo.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { alvo.scrollIntoView(); }
+        alvo.style.outline = '2px solid var(--primary)';
+        setTimeout(() => { alvo.style.outline = ''; }, 1600);
+      }
+      try { toast('Detalhe o bloqueio no quadro destacado — ele já tem a tabela de medicações que entra no gráfico.'); } catch (e) {}
+      return true;
+    },
+    salvar(tipo) {
+      const esp = anestesia.tecnicaDet.ESPECS[tipo];
+      const f = document.getElementById('form-tecdet');
+      if (!esp || !f) { modal.close(); return; }
+      const d = {};
+      esp.campos.forEach(c => {
+        const el = f.querySelector('[name="td_' + c.n + '"]');
+        if (el && el.value.trim()) d[c.n] = el.value.trim();
+      });
+      if (Object.keys(d).length) anestesia.tecnicaDet._dados[tipo] = d;
+      else delete anestesia.tecnicaDet._dados[tipo];
+      modal.close();
+      anestesia.tecnicaDet.aplicar(tipo);
+      try { markDirty(); } catch (e) {}
+      try { toast('Detalhes de "' + tipo + '" gravados na ficha.'); } catch (e) {}
+    },
+
+    /* ---- o texto que estes detalhes produzem ---- */
+    textoDe(tipo) {
+      const esp = anestesia.tecnicaDet.ESPECS[tipo];
+      const d = anestesia.tecnicaDet.de(tipo);
+      if (!esp || !Object.keys(d).length) return '';
+      try { return esp.texto(d); } catch (e) { return ''; }
+    },
+    /* Todas as técnicas marcadas, na ordem em que aparecem no formulário. */
+    textoCompleto() {
+      const f = document.getElementById('form-anestesia');
+      if (!f) return '';
+      const marcados = Array.from(f.querySelectorAll('[name="tipo[]"]:checked')).map(x => x.value);
+      return marcados.map(t => anestesia.tecnicaDet.textoDe(t)).filter(Boolean).join('\n');
+    },
+
+    /* Leva o texto para a "Técnica realizada" e para o evento do gráfico.
+       O campo livre é do anestesista: só se escreve nele o que ainda não
+       está lá, e nunca por cima do que ele digitou. */
+    MARCA: '​',
+    aplicar(tipo) {
+      const f = document.getElementById('form-anestesia');
+      if (!f) return;
+      const txt = anestesia.tecnicaDet.textoDe(tipo);
+      const ta = f.querySelector('[name="tecnica_descricao"]');
+      if (ta && txt) {
+        const atual = ta.value || '';
+        const linhas = atual.split('\n').filter(l => l.trim());
+        /* substitui a linha anterior desta mesma técnica, se houver */
+        const rotulo = (anestesia.tecnicaDet.ESPECS[tipo] || {}).campos ? txt.split(':')[0] : '';
+        const i = rotulo ? linhas.findIndex(l => l.indexOf(rotulo) === 0) : -1;
+        if (i >= 0) linhas[i] = txt; else linhas.push(txt);
+        ta.value = linhas.join('\n');
+      }
+      try { anestesia.eventos.atualizarDescricoes(); } catch (e) {}
+      anestesia.tecnicaDet.renderResumos();
+    },
+
+    /* Um resumo do que foi preenchido fica ao lado de cada tipo marcado —
+       senão não há como saber que a janela já foi respondida. */
+    renderResumos() {
+      const f = document.getElementById('form-anestesia');
+      if (!f) return;
+      f.querySelectorAll('[name="tipo[]"]').forEach(cb => {
+        const lab = cb.closest('label');
+        if (!lab) return;
+        let tag = lab.parentElement.querySelector('[data-tecdet="' + cb.value + '"]');
+        const temEspec = !!anestesia.tecnicaDet.ESPECS[cb.value] || anestesia.tecnicaDet.BLOQUEIOS.indexOf(cb.value) >= 0;
+        if (!cb.checked || !temEspec) { if (tag) tag.remove(); return; }
+        if (!tag) {
+          tag = document.createElement('button');
+          tag.type = 'button';
+          tag.className = 'btn btn-xs';
+          tag.setAttribute('data-tecdet', cb.value);
+          tag.style.cssText = 'margin:2px 0 8px 30px;display:block';
+          tag.onclick = () => anestesia.tecnicaDet.abrir(cb.value);
+          lab.insertAdjacentElement('afterend', tag);
+        }
+        const preenchido = Object.keys(anestesia.tecnicaDet.de(cb.value)).length > 0;
+        tag.textContent = preenchido ? '✏️ Detalhes preenchidos — editar' : '📝 Detalhar esta técnica';
+        tag.title = preenchido ? anestesia.tecnicaDet.textoDe(cb.value) : 'Abre a janela com os campos desta técnica';
+      });
+    }
+  },
   bloqueio: {
     alternar(checkbox) {
       const el = document.getElementById('bloqueio-detalhes');
@@ -29580,8 +29855,26 @@ const anestesia = {
           '; 3) Confirmação do posicionamento; 4) Fixação e drenagem.';
       }
     },
+    /* Evento da linha do tempo → tipo de anestesia que o gerou. É por aqui
+       que o detalhe respondido na janela alcança a descrição do evento e,
+       com ela, o gráfico de eventos e medicações. */
+    EVENTO_TIPO: {
+      'Indução': 'Anestesia geral',
+      'Sedação': 'Sedação',
+      'Anestesia local': 'Local assistida',
+      'Monitoração e vigilância clínica': 'Monitoração e vigilância clínica'
+    },
     /* Texto que o evento deve ter: o padrão, já reescrito com os detalhes */
     descricaoPara(tipo) {
+      /* o que a pessoa respondeu na janela vem primeiro: é o que ela disse
+         sobre ESTE caso, não o texto genérico da técnica */
+      try {
+        const tec = anestesia.eventos.EVENTO_TIPO[tipo];
+        if (tec) {
+          const t = anestesia.tecnicaDet.textoDe(tec);
+          if (t) return t;
+        }
+      } catch (e) {}
       const fn = anestesia.eventos.DESCRICOES_DET[tipo];
       if (fn) { try { return fn(); } catch (e) {} }
       return anestesia.eventos.DESCRICOES[tipo] || '';
@@ -29600,7 +29893,10 @@ const anestesia = {
         const tipo = (tr.querySelector('[name="evt_tipo[]"]') || {}).value || '';
         const obs = tr.querySelector('[name="evt_obs[]"]');
         if (!tipo || !obs) return;
-        if (!anestesia.eventos.DESCRICOES_DET[tipo]) return;
+        /* os tipos com janela própria também são reescritos: sem isto, a
+           resposta ficava na ficha e não chegava ao evento */
+        const temJanela = !!anestesia.eventos.EVENTO_TIPO[tipo];
+        if (!anestesia.eventos.DESCRICOES_DET[tipo] && !temJanela) return;
         /* só mexe no que é do sistema: vazio, ou marcado como automático */
         const vazio = !obs.value.trim();
         if (!vazio && tr.dataset.auto !== '1') return;
@@ -29735,7 +30031,13 @@ const anestesia = {
       return true;
     },
     aoSelecionarTipo(cb) {
-      if (!cb || !cb.checked) return;
+      if (!cb) return;
+      if (!cb.checked) { try { anestesia.tecnicaDet.renderResumos(); } catch (e) {} return; }
+      /* A janela com os campos daquela técnica. Marcar o tipo criava o evento
+         e parava aí: o COMO ficava para escrever à mão, num campo livre,
+         toda vez. Abre depois do evento entrar, para a linha do tempo já
+         existir quando a descrição for gerada. */
+      setTimeout(() => { try { anestesia.tecnicaDet.abrir(cb.value); } catch (e) {} }, 260);
       const mudouVent = anestesia.eventos._sugerirVentilacao(cb.value);
       const tipoEvt = anestesia.eventos.TIPO_EVENTO[cb.value];
       if (!tipoEvt) return;
@@ -35120,6 +35422,9 @@ const anestesia = {
         via_aerea_hora: v('via_aerea_hora'),
         monitorizacao_descricao: v('monitorizacao'),
         equipamentos: v('equipamentos_usados'),
+        /* o que a janela de cada técnica coletou — é isto que faltava ficar
+           gravado para edição futura */
+        detalhes: anestesia.tecnicaDet.coletar(),
         bloqueio: anestesia.bloqueio.coletar()
       },
       ventilacao: anestesia.vent.coletar(),
@@ -35284,6 +35589,8 @@ const anestesia = {
     set('monitorizacao', tc.monitorizacao_descricao);
     set('equipamentos_usados', tc.equipamentos);
     try { anestesia.equip.render(); } catch (e) {}
+    /* Detalhes por técnica (janela do card 3) */
+    try { anestesia.tecnicaDet.restaurar(tc.detalhes); } catch (e) {}
     /* Bloqueio regional / USG / cateteres */
     if (tc.bloqueio) anestesia.bloqueio.restaurar(tc.bloqueio);
     /* Ventilação detalhada */
@@ -35997,6 +36304,9 @@ const anestesia = {
   limparSilencioso() {
     anestesia.graficoUI._contexto = 'anestesia';   /* garante o contexto da ficha */
     utils.clearForm('form-anestesia');
+    /* os detalhes por técnica vivem fora do formulário: sem isto, a ficha
+       nova nasceria com o que foi respondido na ficha anterior */
+    try { anestesia.tecnicaDet.limpar(); } catch (e) {}
     try { prontuario.limpar('anestesia'); } catch (e) {}
     document.getElementById('medicacoes-body').innerHTML = '';
     document.getElementById('vitais-body').innerHTML = '';
