@@ -11718,6 +11718,93 @@ await test('Cada técnica pede seus detalhes numa janela, e o que se responde vi
   await page.close();
 });
 
+/* 177) A janela virou o padrão da ficha: técnica, via aérea e acessos. Antes
+   metade da ficha abria janela e metade não — e os quadros de detalhe ficavam
+   escondidos card abaixo, esperando ser encontrados. */
+await test('Via aérea e acessos também abrem em janela, com os campos ainda dentro do formulário', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor', entrouEm: Date.now() }));
+    auth._desbloquear();
+    localStorage.setItem('medsys.v7.tutorial_grafico', '1');
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 400));
+    try { modal.close(); } catch (e) {}
+    anestesia.limparSilencioso();
+    const f = document.getElementById('form-anestesia');
+
+    /* --- VIA AÉREA --- */
+    const painelVA = document.getElementById('via-aerea-detalhes');
+    out.temPainelViaAerea = !!painelVA;
+    out.camposVANoForm = !!f.querySelector('#via-aerea-detalhes [name="via_aerea_tamanho"]')
+      && !!f.querySelector('#via-aerea-detalhes [name="via_aerea_detalhe"]');
+
+    const sel = f.querySelector('[name="via_aerea_uso"]');
+    sel.value = 'Intubação orotraqueal';
+    anestesia.eventos.aoSelecionarViaAerea(sel);
+    await new Promise(res => setTimeout(res, 600));
+    out.vaAbriuJanela = painelVA.classList.contains('bloq-janela');
+    out.vaTemTitulo = /Intubação orotraqueal/.test((painelVA.querySelector('.bloq-janela-cab h3') || {}).textContent || '');
+
+    /* preencher pela janela alimenta a descrição do evento, como antes */
+    f.querySelector('[name="via_aerea_tamanho"]').value = '7,5';
+    f.querySelector('[name="via_aerea_cuff"]').value = 'com cuff';
+    anestesia.viaAerea.montarDetalhe();
+    out.montouODetalhe = /TOT 7,5/.test(f.querySelector('[name="via_aerea_detalhe"]').value);
+    out.coletaComJanelaAberta = /TOT 7,5/.test((anestesia.coletarEstruturado().tecnica || {}).via_aerea_detalhe || '');
+
+    anestesia.tecnicaDet.fecharJanela();
+    out.vaFechou = !painelVA.classList.contains('bloq-janela');
+    out.vaSegueVisivelNoCard = painelVA.style.display !== 'none';
+
+    /* --- ACESSOS --- */
+    const painelDisp = document.getElementById('disp-detalhes');
+    out.temPainelDisp = !!painelDisp;
+    const cbDisp = Array.from(f.querySelectorAll('[name="dispositivos[]"]'))
+      .find(x => x.value === 'Acesso venoso central');
+    out.achouODispositivo = !!cbDisp;
+    if (cbDisp) {
+      cbDisp.checked = true;
+      anestesia.disp.alternar(cbDisp);
+      anestesia.eventos.aoMarcarDispositivo('Acesso venoso central');
+      await new Promise(res => setTimeout(res, 600));
+      out.dispAbriuJanela = painelDisp.classList.contains('bloq-janela');
+      out.dispTemCampos = !!painelDisp.querySelector('[data-campo="calibre"][data-disp="Acesso venoso central"]');
+      out.dispNoForm = !!f.querySelector('#disp-detalhes [name="disp_det[]"]');
+      anestesia.tecnicaDet.fecharJanela();
+      out.dispFechou = !painelDisp.classList.contains('bloq-janela');
+    }
+
+    /* dispositivo sem o que perguntar não abre janela à toa */
+    const cbSimples = Array.from(f.querySelectorAll('[name="dispositivos[]"]'))
+      .find(x => /manta|aquecedor|bomba/i.test(x.value));
+    if (cbSimples) {
+      anestesia.eventos.aoMarcarDispositivo(cbSimples.value);
+      await new Promise(res => setTimeout(res, 400));
+      out.semPerguntaSemJanela = !document.querySelector('.bloq-janela');
+    } else { out.semPerguntaSemJanela = true; }
+
+    anestesia.limparSilencioso();
+    return out;
+  });
+
+  assert(r.temPainelViaAerea && r.camposVANoForm,
+    'a via aérea ganha um quadro próprio, e os campos continuam dentro do formulário');
+  assert(r.vaAbriuJanela && r.vaTemTitulo, 'escolher o dispositivo abre a janela com o nome dele');
+  assert(r.montouODetalhe, 'o que se marca ali continua montando o texto do dispositivo');
+  assert(r.coletaComJanelaAberta,
+    'e coletar a ficha com a janela aberta ainda devolve o detalhe — os campos não saíram do form');
+  assert(r.vaFechou && r.vaSegueVisivelNoCard, 'ao concluir, o quadro volta ao card');
+  assert(r.temPainelDisp && r.achouODispositivo, 'os acessos têm o seu quadro');
+  assert(r.dispAbriuJanela && r.dispTemCampos, 'marcar um acesso vascular abre a janela com tipo, calibre e local');
+  assert(r.dispNoForm, 'e esses campos também continuam dentro do formulário');
+  assert(r.dispFechou, 'e a janela fecha');
+  assert(r.semPerguntaSemJanela, 'dispositivo sem o que perguntar não abre janela à toa');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

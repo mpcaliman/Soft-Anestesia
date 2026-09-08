@@ -1102,8 +1102,10 @@ body.dark .dropdown-menu { background: var(--surface); border-color: var(--borde
 .field { display: flex; flex-direction: column; min-width: 0; }
 /* Linha de campos DENTRO de outra linha (grid aninhada). Sem isto ela entra
    como um item qualquer e ocupa 1 das 12 colunas: os campos espremem e os
-   rótulos se atropelam — era o que acontecia na via aérea do card 3. */
-.grid > .grid { grid-column: 1 / -1; }
+   rótulos se atropelam — era o que acontecia na via aérea do card 3.
+   O quadro da via aérea é uma grade só para herdar isto: ele agrupa duas
+   linhas e precisa ocupar a largura toda, como elas. */
+.grid > .grid, .grid > #via-aerea-detalhes { grid-column: 1 / -1; }
 .field.col-1  { grid-column: span 1; }
 .field.col-2  { grid-column: span 2; }
 .field.col-3  { grid-column: span 3; }
@@ -3381,7 +3383,7 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
    gravação automática (que roda sozinha a cada pausa de digitação) passaria a
    salvar a ficha SEM eles. Aqui só a apresentação muda: o quadro continua
    dentro do form, exatamente onde estava. */
-#bloqueio-detalhes.bloq-janela {
+.bloq-janela {
   /* Centrada na ÁREA DE CONTEÚDO, não na tela: o menu lateral é pintado por
      cima (ele vive no mesmo contexto de empilhamento do app) e comia a borda
      esquerda da janela. Em vez de disputar z-index com ele, a janela ocupa o
@@ -3393,7 +3395,8 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
   z-index: 100600; background: var(--surface); box-shadow: 0 24px 70px rgba(0,0,0,.35);
   border-radius: 12px; padding: 0;
 }
-#bloqueio-detalhes.bloq-janela > .grid { padding: 14px 16px 18px; }
+.bloq-janela > .grid { padding: 14px 16px 18px; }
+.bloq-janela > .grid + .grid { padding-top: 0; }
 .bloq-janela-cab {
   position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px;
   padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--border);
@@ -3406,14 +3409,14 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
 }
 @media (max-width: 1199px) {
   /* menu lateral fora do fluxo: a janela volta a ser da tela inteira */
-  #bloqueio-detalhes.bloq-janela { left: 50%; width: min(940px, 95vw); }
+  .bloq-janela { left: 50%; width: min(940px, 95vw); }
   #bloq-janela-fundo { left: 0; }
 }
 @media (max-width: 768px) {
-  #bloqueio-detalhes.bloq-janela { width: 100vw; max-height: 92vh; top: auto; bottom: 0;
+  .bloq-janela { width: 100vw; max-height: 92vh; top: auto; bottom: 0;
     left: 0; transform: none; border-radius: 12px 12px 0 0; }
 }
-@media print { #bloqueio-detalhes.bloq-janela, #bloq-janela-fundo { position: static; box-shadow: none; } }
+@media print { .bloq-janela, #bloq-janela-fundo { position: static; box-shadow: none; } }
 
 @media print {
   body.printing-preview .app { display: none !important; }
@@ -4587,7 +4590,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-28m</b><br>
+    v7.1 · build <b id="build-tag">2026-08-28n</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -5922,7 +5925,13 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
               </div>
             </div>
           </div>
-          <div class="grid">
+          <!-- Os detalhes do dispositivo de via aérea num quadro próprio: é ele
+               que se apresenta como janela ao escolher a via aérea, do mesmo
+               jeito que o bloqueio. Continua dentro do formulário.
+               AS DUAS LINHAS FECHAM EM 12: via aérea (4) + tamanho (2) + cuff (2)
+               + Cormack (2) + fixação (2); detalhe (9) + horário (3). Passar
+               disso espreme os campos e faz os rótulos se atropelarem. -->
+          <div id="via-aerea-detalhes" class="grid"><div class="grid">
             <div class="field col-4"><label>Via aérea utilizada</label>
               <select name="via_aerea_uso" onchange="anestesia.eventos.aoSelecionarViaAerea(this)">
                 <option value="">—</option>
@@ -5969,7 +5978,8 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <div class="field col-3"><label>Horário</label>
               <div class="input-group"><input type="time" name="via_aerea_hora" onchange="anestesia.eventos.sincronizarDaViaAerea()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','via_aerea_hora'); anestesia.eventos.sincronizarDaViaAerea();">agora</button></div>
             </div>
-          </div>
+          </div></div>
+          <div class="grid">
           <!-- Derivados automaticamente (não redigitar): tipo de ventilação vem do
                card Ventilação; monitorização vem dos monitores selecionados. -->
           <input type="hidden" name="ventilacao_tipo">
@@ -29274,9 +29284,8 @@ const anestesia = {
          aparece 600 ms depois de entrar na ficha. Espera a vez. */
       try {
         const bd = document.getElementById('modal-backdrop');
-        const painelBloq = document.getElementById('bloqueio-detalhes');
         const ocupado = (bd && bd.classList.contains('show'))
-          || (painelBloq && painelBloq.classList.contains('bloq-janela'));
+          || !!document.querySelector('.bloq-janela');
         if (ocupado) {
           const n = (tentativa || 0) + 1;
           if (n <= 8) { setTimeout(() => anestesia.tecnicaDet.abrir(tipo, n), 700); return true; }
@@ -29330,6 +29339,67 @@ const anestesia = {
       anestesia.tecnicaDet._janelaBloqueio(tipo);
       return true;
     },
+    /* A MESMA janela serve para qualquer quadro de detalhe da ficha: bloqueio,
+       via aérea, acessos. Todos precisam continuar dentro do formulário (a
+       gravação automática lê de lá), então o que muda é só a apresentação. */
+    janelaPainel(painelId, titulo) {
+      const painel = document.getElementById(painelId);
+      if (!painel || painel.classList.contains('bloq-janela')) return false;
+      try {
+        const card = painel.closest('.card');
+        if (card) card.classList.remove('collapsed');
+      } catch (e) {}
+      painel.dataset.displayAntes = painel.style.display || '';
+      painel.style.display = '';
+      let fundo = document.getElementById('bloq-janela-fundo');
+      if (!fundo) {
+        fundo = document.createElement('div');
+        fundo.id = 'bloq-janela-fundo';
+        fundo.onclick = () => anestesia.tecnicaDet.fecharJanela();
+        document.body.appendChild(fundo);
+      }
+      fundo.style.display = '';
+      let cab = painel.querySelector(':scope > .bloq-janela-cab');
+      if (!cab) {
+        cab = document.createElement('div');
+        cab.className = 'bloq-janela-cab';
+        cab.innerHTML = '<h3></h3><button type="button" class="btn btn-primary btn-sm" ' +
+          'onclick="anestesia.tecnicaDet.fecharJanela()">Concluir</button>';
+        painel.insertBefore(cab, painel.firstChild);
+      }
+      cab.querySelector('h3').textContent = titulo;
+      cab.style.display = '';
+      painel.classList.add('bloq-janela');
+      document.body.classList.add('tem-modal');
+      painel.scrollTop = 0;
+      anestesia.tecnicaDet._painelAberto = painelId;
+      return true;
+    },
+    _painelAberto: null,
+    /* Fecha qualquer quadro que esteja apresentado como janela. */
+    fecharJanela() {
+      const id = anestesia.tecnicaDet._painelAberto;
+      const painel = id ? document.getElementById(id) : document.querySelector('.bloq-janela');
+      anestesia.tecnicaDet._painelAberto = null;
+      if (!painel) return;
+      painel.classList.remove('bloq-janela');
+      const cab = painel.querySelector(':scope > .bloq-janela-cab');
+      if (cab) cab.style.display = 'none';
+      const fundo = document.getElementById('bloq-janela-fundo');
+      if (fundo) fundo.style.display = 'none';
+      document.body.classList.remove('tem-modal');
+      painel.style.display = painel.dataset.displayAntes || '';
+      if (painel.id === 'bloqueio-detalhes') {
+        try {
+          const chk = document.querySelector('#form-anestesia [name="bloqueio_realizado"]');
+          painel.style.display = (chk && chk.checked) ? '' : 'none';
+        } catch (e) {}
+        try { anestesia.eventos.sincronizarDoBloqueio(); } catch (e) {}
+      }
+      try { anestesia.eventos.atualizarDescricoes(); } catch (e) {}
+      try { anestesia.tecnicaDet.renderResumos(); } catch (e) {}
+      try { markDirty(); } catch (e) {}
+    },
     _janelaBloqueio(tipo) {
       const painel = document.getElementById('bloqueio-detalhes');
       if (!painel || painel.classList.contains('bloq-janela')) return;
@@ -29340,46 +29410,11 @@ const anestesia = {
         const card = painel.closest('.card');
         if (card) { card.classList.remove('collapsed'); painel._cardAberto = card; }
       } catch (e) {}
-      let fundo = document.getElementById('bloq-janela-fundo');
-      if (!fundo) {
-        fundo = document.createElement('div');
-        fundo.id = 'bloq-janela-fundo';
-        fundo.onclick = () => anestesia.tecnicaDet.fecharJanelaBloqueio();
-        document.body.appendChild(fundo);
-      }
-      fundo.style.display = '';
-      let cab = painel.querySelector('.bloq-janela-cab');
-      if (!cab) {
-        cab = document.createElement('div');
-        cab.className = 'bloq-janela-cab';
-        cab.innerHTML = '<h3></h3><button type="button" class="btn btn-primary btn-sm" ' +
-          'onclick="anestesia.tecnicaDet.fecharJanelaBloqueio()">Concluir</button>';
-        painel.insertBefore(cab, painel.firstChild);
-      }
-      cab.querySelector('h3').textContent = '💉 ' + (tipo || 'Bloqueio') + ' — detalhes da punção';
-      cab.style.display = '';
-      painel.classList.add('bloq-janela');
-      document.body.classList.add('tem-modal');
-      painel.scrollTop = 0;
+      anestesia.tecnicaDet.janelaPainel('bloqueio-detalhes',
+        '💉 ' + (tipo || 'Bloqueio') + ' — detalhes da punção');
     },
-    fecharJanelaBloqueio() {
-      const painel = document.getElementById('bloqueio-detalhes');
-      if (!painel) return;
-      painel.classList.remove('bloq-janela');
-      const cab = painel.querySelector('.bloq-janela-cab');
-      if (cab) cab.style.display = 'none';
-      const fundo = document.getElementById('bloq-janela-fundo');
-      if (fundo) fundo.style.display = 'none';
-      document.body.classList.remove('tem-modal');
-      /* o quadro volta a obedecer a caixa "Detalhar bloqueio" */
-      try {
-        const chk = document.querySelector('#form-anestesia [name="bloqueio_realizado"]');
-        painel.style.display = (chk && chk.checked) ? '' : 'none';
-      } catch (e) {}
-      try { anestesia.eventos.sincronizarDoBloqueio(); } catch (e) {}
-      try { anestesia.tecnicaDet.renderResumos(); } catch (e) {}
-      try { markDirty(); } catch (e) {}
-    },
+    /* nome antigo, mantido: havia chamadas espalhadas */
+    fecharJanelaBloqueio() { anestesia.tecnicaDet.fecharJanela(); },
     salvar(tipo) {
       const esp = anestesia.tecnicaDet.ESPECS[tipo];
       const f = document.getElementById('form-tecdet');
@@ -30159,6 +30194,15 @@ const anestesia = {
         try { anestesia.eventos._sugerirVentilacao('Anestesia geral'); } catch (e) {}
       }
       try { anestesia.viaAerea.montarDetalhe(); } catch (e) {}
+      /* Mesma regra das técnicas: escolher o dispositivo abre a janela com o
+         que descreve ESTE caso — tamanho, cuff, Cormack, fixação e horário.
+         Só para os dispositivos que têm o que detalhar. */
+      if (/intuba|laríngea|traqueosto/i.test(sel.value)) {
+        setTimeout(() => {
+          try { anestesia.tecnicaDet.janelaPainel('via-aerea-detalhes', '🫁 ' + sel.value + ' — detalhes do dispositivo'); }
+          catch (e) {}
+        }, 260);
+      }
       const tipoEvt = anestesia.eventos.VIA_AEREA_EVENTO[sel.value];
       if (!tipoEvt) return;
       anestesia.graficoUI._contexto = 'anestesia';
@@ -30180,6 +30224,17 @@ const anestesia = {
     aoMarcarDispositivo(valor) {
       const tipoEvt = anestesia.eventos.DISP_EVENTO[valor];
       if (!tipoEvt) return '';
+      /* Mesma regra das técnicas e da via aérea: marcar o acesso abre a janela
+         com o que descreve ESTE caso. Só para os que têm o que perguntar —
+         acessos vasculares têm tipo, calibre e local; dreno e bomba, não. */
+      try {
+        if (anestesia.disp.OPCOES[valor]) {
+          setTimeout(() => {
+            try { anestesia.tecnicaDet.janelaPainel('disp-detalhes', '🩹 ' + valor + ' — tipo, calibre e local'); }
+            catch (e) {}
+          }, 260);
+        }
+      } catch (e) {}
       anestesia.graficoUI._contexto = 'anestesia';
       /* já registrado (inclusive pela variante — alívio, nasogástrica): só
          reescreve a descrição com o que estiver detalhado no card */
@@ -38896,12 +38951,12 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
-  /* a janela do bloqueio não é o modal comum (os campos precisam continuar
-     dentro do formulário) — mas fecha pelo mesmo Esc */
+  /* os quadros de detalhe da ficha (bloqueio, via aérea, acessos) não são o
+     modal comum — os campos precisam continuar dentro do formulário —, mas
+     fecham pelo mesmo Esc */
   try {
-    const painel = document.getElementById('bloqueio-detalhes');
-    if (painel && painel.classList.contains('bloq-janela')) {
-      anestesia.tecnicaDet.fecharJanelaBloqueio();
+    if (document.querySelector('.bloq-janela')) {
+      anestesia.tecnicaDet.fecharJanela();
       return;
     }
   } catch (er) {}
