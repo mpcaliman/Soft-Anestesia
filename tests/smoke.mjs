@@ -12022,6 +12022,83 @@ await test('PDF que não sobe fica esperando na fila, e sobe quando a autorizaç
   await page.close();
 });
 
+/* 181) As janelas abriam ATRÁS do próprio fundo escuro, e qualquer clique
+   batia no fundo e as fechava. Os testes anteriores mediam geometria e
+   visibilidade — e as duas estavam certas. O que estava errado era a ORDEM DE
+   PINTURA, que só `elementFromPoint` enxerga.
+
+   `.app` tem isolation:isolate e `main` tem z-index:1 — cada um abre um
+   contexto de empilhamento. O quadro mora dentro deles, então o z-index dele
+   só vale ali dentro; o fundo, pendurado no <body>, ficava no contexto raiz e
+   passava por cima do app inteiro. */
+await test('As janelas da ficha abrem NA FRENTE do fundo — e o clique cai nelas, não nele', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1200);
+  await page.evaluate(() => { try { modal.close(); } catch (e) {} ui.navegar('anestesia'); });
+  await page.waitForTimeout(1500);
+
+  const r = await page.evaluate(() => {
+    const out = { janelas: [] };
+    try { modal.close(); } catch (e) {}
+    for (const id of ['bloqueio-detalhes', 'via-aerea-detalhes', 'disp-detalhes']) {
+      anestesia.tecnicaDet.fecharJanela();
+      const abriu = anestesia.tecnicaDet.janelaPainel(id, 'teste');
+      const p = document.getElementById(id);
+      if (!abriu || !p) { out.janelas.push({ id, abriu: false }); continue; }
+      const rc = p.getBoundingClientRect();
+      /* quem está por cima em três alturas da janela */
+      const naFrente = [[rc.x + rc.width / 2, rc.y + 20],
+                        [rc.x + rc.width / 2, rc.y + rc.height / 2],
+                        [rc.x + rc.width / 2, rc.y + rc.height - 12]]
+        .every(([x, y]) => { const t = document.elementFromPoint(x, y); return !!(t && p.contains(t)); });
+      /* e nenhum campo visível pode estar tapado — clicar nele tem de alcançá-lo */
+      const tapados = [...p.querySelectorAll('input,select,textarea,button')]
+        .filter(e => e.offsetParent !== null)
+        .filter(e => {
+          const b = e.getBoundingClientRect();
+          if (!b.width || !b.height) return false;
+          const t = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+          return !(t && (e === t || e.contains(t) || t.contains(e)));
+        }).length;
+      const f = document.getElementById('bloq-janela-fundo');
+      const fb = f.getBoundingClientRect();
+      out.janelas.push({ id, abriu: true, naFrente, tapados,
+        /* o fundo precisa ser IRMÃO do quadro: é o que põe os dois no mesmo
+           contexto de empilhamento e faz o z-index voltar a significar algo */
+        fundoIrmao: f.parentNode === p.parentNode,
+        /* cobre a área de conteúdo inteira: toda a altura da tela e daí até a
+           borda direita — o menu lateral fica de fora de propósito */
+        fundoCobre: Math.abs(fb.height - innerHeight) < 2
+                 && Math.abs((fb.x + fb.width) - innerWidth) < 2
+                 && fb.width > innerWidth / 2 });
+    }
+    /* o fundo dentro do formulário não pode atrapalhar a gravação automática */
+    anestesia.tecnicaDet.fecharJanela();
+    const semJanela = Object.keys(utils.formData('form-anestesia')).length;
+    anestesia.tecnicaDet.janelaPainel('bloqueio-detalhes', 'teste');
+    out.formIntacto = Object.keys(utils.formData('form-anestesia')).length === semJanela;
+    out.temCampos = semJanela > 50;
+    anestesia.tecnicaDet.fecharJanela();
+    return out;
+  });
+
+  assert(r.janelas.length === 3 && r.janelas.every(j => j.abriu), 'os três quadros abrem em janela');
+  r.janelas.forEach(j => {
+    assert(j.naFrente, j.id + ': a janela fica na frente do fundo escuro, não atrás dele');
+    assert(j.tapados === 0, j.id + ': nenhum campo da janela fica tapado — o clique chega nele');
+    assert(j.fundoIrmao, j.id + ': o fundo é irmão do quadro, no mesmo contexto de empilhamento');
+    assert(j.fundoCobre, j.id + ': e ainda cobre a área de conteúdo');
+  });
+  assert(r.temCampos && r.formIntacto, 'e o fundo no meio do formulário não muda o que a gravação automática lê');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

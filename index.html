@@ -4590,7 +4590,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-28q</b><br>
+    v7.1 · build <b id="build-tag">2026-08-29a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -29621,8 +29621,18 @@ const anestesia = {
         fundo = document.createElement('div');
         fundo.id = 'bloq-janela-fundo';
         fundo.onclick = () => anestesia.tecnicaDet.fecharJanela();
-        document.body.appendChild(fundo);
       }
+      /* O fundo entra AO LADO do quadro, e não no <body>.
+         Motivo: `.app` tem `isolation: isolate` e `main` tem `z-index: 1` —
+         cada um abre um contexto de empilhamento. O quadro mora dentro deles,
+         então o `z-index: 100600` dele só vale ali dentro. Um fundo pendurado
+         no <body> fica no contexto RAIZ e passa por cima do app inteiro, por
+         mais alto que seja o número da janela: ela abria atrás do escuro, e
+         qualquer clique batia no fundo e a fechava.
+         Irmãos compartilham o mesmo contexto — aí o 100550 do fundo perde para
+         o 100600 da janela, que é o que sempre se quis. E vale para qualquer
+         quadro, sem depender de onde ele esteja na página. */
+      if (fundo.parentNode !== painel.parentNode) painel.parentNode.insertBefore(fundo, painel);
       fundo.style.display = '';
       let cab = painel.querySelector(':scope > .bloq-janela-cab');
       if (!cab) {
