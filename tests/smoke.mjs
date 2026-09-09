@@ -12099,6 +12099,147 @@ await test('As janelas da ficha abrem NA FRENTE do fundo — e o clique cai nela
   await page.close();
 });
 
+/* 182) A pergunta certa sobre as janelas não é se elas abrem, é se o que se
+   digita nelas CHEGA a algum lugar. Este teste preenche todo campo de toda
+   janela, salva, zera a ficha, recarrega do registro e imprime — e cobra cada
+   valor nas três pontas.
+
+   Achou dois buracos reais: o "Horário da punção" do bloqueio nunca era
+   gravado (só alimentava o evento da linha do tempo, que é outro registro), e
+   o detalhe do acesso vascular — tipo, calibre e local — era salvo mas não
+   saía no documento. */
+await test('O que se preenche nas janelas fica na ficha, sobrevive ao recarregar e sai na impressão', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1200);
+  await page.evaluate(() => { try { modal.close(); } catch (e) {} ui.navegar('anestesia'); });
+  await page.waitForTimeout(1600);
+
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const espera = [];
+    try { modal.close(); } catch (e) {}
+    const f = document.getElementById('form-anestesia');
+
+    /* --- janelas de técnica (modal → tecnica.detalhes) --- */
+    for (const tipo of Object.keys(anestesia.tecnicaDet.ESPECS)) {
+      const cb = Array.from(f.querySelectorAll('[name="tipo[]"]')).find(x => x.value === tipo);
+      if (!cb) continue;
+      cb.checked = true;
+      if (!anestesia.tecnicaDet.abrir(tipo)) continue;
+      const form = document.getElementById('form-tecdet'); if (!form) continue;
+      anestesia.tecnicaDet.ESPECS[tipo].campos.forEach(c => {
+        const el = form.querySelector('[name="td_' + c.n + '"]'); if (!el) return;
+        if (el.tagName === 'SELECT') { const o = Array.from(el.options).filter(o => o.value)[0]; if (o) el.value = o.value; }
+        else el.value = 'Zq' + tipo.replace(/\W/g, '').slice(0, 5) + c.n.replace(/\W/g, '').toUpperCase();
+        if (el.value) espera.push({ origem: 'tecnica:' + tipo, campo: c.n, valor: el.value });
+      });
+      anestesia.tecnicaDet.salvar(tipo);
+    }
+
+    /* --- quadros que viram janela, dentro do formulário --- */
+    const sel = f.querySelector('[name="via_aerea_uso"]');
+    if (sel) { const o = Array.from(sel.options).filter(o => o.value)[0]; sel.value = o.value;
+               sel.dispatchEvent(new Event('change', { bubbles: true })); }
+    const disp = Array.from(f.querySelectorAll('[name="dispositivos[]"]'));
+    if (disp.length) { disp[0].checked = true; disp[0].dispatchEvent(new Event('change', { bubbles: true })); }
+    const chk = f.querySelector('[name="bloqueio_realizado"]');
+    if (chk) { chk.checked = true; anestesia.bloqueio.alternar(chk); }
+    await new Promise(res => setTimeout(res, 400));
+
+    for (const id of ['via-aerea-detalhes', 'disp-detalhes', 'bloqueio-detalhes']) {
+      const p = document.getElementById(id); if (!p) continue;
+      anestesia.tecnicaDet.fecharJanela();
+      anestesia.tecnicaDet.janelaPainel(id, 'teste');
+      [...p.querySelectorAll('input,select,textarea')].filter(e => e.name && e.offsetParent !== null).forEach(el => {
+        const reg = { origem: 'painel:' + id, campo: el.name };
+        if (el.type === 'checkbox' || el.type === 'radio') { el.checked = true; reg.valor = '__marcado__'; }
+        else if (el.tagName === 'SELECT') { const o = Array.from(el.options).filter(o => o.value)[0]; if (!o) return; el.value = o.value; reg.valor = o.value; }
+        else if (el.type === 'time') { el.value = '08:37'; reg.valor = '08:37'; }
+        else if (el.type === 'number') { el.value = '7'; reg.valor = '7'; }
+        else { el.value = 'Zq' + el.name.replace(/\W/g, '').toUpperCase(); reg.valor = el.value; }
+        espera.push(reg);
+      });
+      anestesia.tecnicaDet.fecharJanela();
+    }
+    out.nCampos = espera.length;
+
+    const lerTela = () => {
+      const m = {};
+      espera.forEach(e => {
+        if (e.origem.startsWith('tecnica:')) {
+          m[e.origem + '|' + e.campo] = (anestesia.tecnicaDet.de(e.origem.slice(8)) || {})[e.campo];
+        } else {
+          const el = f.querySelector('[name="' + CSS.escape(e.campo) + '"]');
+          m[e.origem + '|' + e.campo] = !el ? undefined
+            : (el.type === 'checkbox' || el.type === 'radio') ? (el.checked ? '__marcado__' : '') : el.value;
+        }
+      });
+      return m;
+    };
+    const antes = lerTela();
+
+    /* --- salvar --- */
+    f.querySelectorAll('[data-required]').forEach(el => {
+      if (el.value) return;
+      if (el.tagName === 'SELECT') { const o = Array.from(el.options).filter(o => o.value)[0]; if (o) el.value = o.value; }
+      else if (el.type === 'date') el.value = '2026-09-09';
+      else if (el.type === 'time') el.value = '07:00';
+      else el.value = 'PACIENTE TESTE';
+    });
+    anestesia.salvar();
+    await new Promise(res => setTimeout(res, 700));
+    const rec = store.last('anestesia');
+    out.salvou = !!rec;
+    if (!rec) return out;
+
+    /* --- zerar e recarregar do registro --- */
+    anestesia.limparSilencioso();
+    await new Promise(res => setTimeout(res, 600));
+    const zerado = lerTela();
+    /* campo que a limpeza NÃO zerou não prova nada: ele nunca chegou a ser
+       lido de volta do registro. Sem esta conferência o teste se engana. */
+    out.naoZeraram = espera.filter(e => {
+      const k = e.origem + '|' + e.campo;
+      return String(antes[k] || '') !== '' && String(zerado[k] || '') === String(antes[k] || '');
+    }).map(e => e.origem + ' · ' + e.campo);
+
+    anestesia.carregar(store.getById('anestesia', rec._id));
+    await new Promise(res => setTimeout(res, 1500));
+    const depois = lerTela();
+    out.perdidos = espera.filter(e => {
+      const k = e.origem + '|' + e.campo;
+      return String(antes[k] || '') !== String(depois[k] || '');
+    }).map(e => e.origem + ' · ' + e.campo);
+
+    /* --- impressão --- */
+    printPreview._verCtx = { mod: 'anestesia', formId: 'form-anestesia' };
+    const texto = printPreview._buildAnestesia()
+      .replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').toLowerCase();
+    /* só cobra os valores inventados aqui: uma opção comum de select pode sair
+       reescrita ("Venosa" → "indução venosa"), e valor curto casa por acaso */
+    const distintos = espera.filter(e => /^Zq/.test(String(e.valor || '')));
+    out.nDistintos = distintos.length;
+    out.faltamNaImpressao = distintos
+      .filter(e => !texto.includes(String(e.valor).toLowerCase()))
+      .map(e => e.origem + ' · ' + e.campo);
+    return out;
+  });
+
+  assert(r.nCampos >= 40, 'o teste preenche todos os campos de todas as janelas (achou ' + r.nCampos + ')');
+  assert(r.salvou, 'a ficha com as janelas preenchidas salva');
+  assert(r.naoZeraram.length === 0, 'a limpeza zera tudo antes de recarregar — senão o teste se engana sozinho: ' + r.naoZeraram.join(', '));
+  assert(r.perdidos.length === 0, 'todo campo de janela sobrevive a salvar e recarregar: ' + r.perdidos.join(', '));
+  assert(r.nDistintos >= 15, 'há valores distintos suficientes para cobrar na impressão');
+  assert(r.faltamNaImpressao.length === 0, 'e todo campo de janela sai no documento impresso: ' + r.faltamNaImpressao.join(', '));
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

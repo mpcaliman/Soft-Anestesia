@@ -4590,7 +4590,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-29a</b><br>
+    v7.1 · build <b id="build-tag">2026-08-29b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -29974,6 +29974,12 @@ const anestesia = {
       return {
         realizado: chk('bloqueio_realizado'),
         tipo: v('bloqueio_tipo'),
+        /* O horário da punção existia no formulário desde sempre e nunca era
+           gravado: quem preenchia perdia o dado ao recarregar a ficha, e ele
+           não saía na impressão. Ele alimentava só o evento da linha do tempo,
+           que é outro registro — quem abrisse a janela para editar encontrava
+           o campo em branco. */
+        hora: v('bloqueio_hora'),
         espaco: v('bloqueio_espaco'),
         lado: v('bloqueio_lado'),
         posicao: v('bloqueio_posicao'),
@@ -30005,7 +30011,8 @@ const anestesia = {
         if (el) el.checked = !!val;
       };
       chk('bloqueio_realizado', d.realizado);
-      set('bloqueio_tipo', d.tipo); set('bloqueio_espaco', d.espaco);
+      set('bloqueio_tipo', d.tipo); set('bloqueio_hora', d.hora);
+      set('bloqueio_espaco', d.espaco);
       set('bloqueio_lado', d.lado); set('bloqueio_posicao', d.posicao);
       set('bloqueio_agulha', d.agulha); set('bloqueio_calibre', d.calibre);
       set('bloqueio_tentativas', d.tentativas); set('bloqueio_puncao', d.puncao);
@@ -43848,6 +43855,7 @@ ${TAG_CLOSE_HTML}`;
     if (bl.realizado || bl.tipo || (bl.medicacoes && bl.medicacoes.length > 0)) {
       let blqHTML = `<div class="pp-grid cols-3">
         ${printPreview._field('Tipo', bl.tipo)}
+        ${printPreview._field('Horário da punção', bl.hora)}
         ${printPreview._field('Espaço / local', bl.espaco)}
         ${printPreview._field('Lado', bl.lado)}
         ${printPreview._field('Posição', bl.posicao)}
@@ -44050,10 +44058,24 @@ ${TAG_CLOSE_HTML}`;
       html += printPreview._section('Circulação extracorpórea (CEC)', cecHTML);
     }
     if ((mn.dispositivos || []).length || (mn.monitores || []).length) {
+      /* O DETALHE do acesso — tipo, calibre e local — é justamente o que a
+         janela de acessos existe para coletar, e era o único campo dela que
+         não saía no documento: imprimia-se "Acesso venoso periférico" e se
+         perdia o "18G, dorso da mão direita". Sai como uma linha por acesso,
+         logo abaixo das marcações. */
+      const det = mn.dispositivos_detalhes || {};
+      const linhaDet = (mn.dispositivos || []).map(nome => {
+        const v = det[nome];
+        const partes = (v && typeof v === 'object')
+          ? [v.tipo, v.calibre, v.local, v.texto].filter(Boolean)
+          : [v].filter(Boolean);
+        return partes.length ? `<div><b>${utils.escapeHTML(nome)}:</b> ${utils.escapeHTML(partes.join(' · '))}</div>` : '';
+      }).filter(Boolean).join('');
       html += printPreview._section('Acessos e monitorização',
         '<div class="pp-checks">' +
         [...(mn.dispositivos || []), ...(mn.monitores || [])].map(x => `<span class="pp-check">${utils.escapeHTML(x)}</span>`).join('') +
         '</div>' +
+        (linhaDet ? `<div style="font-size:9pt;margin-top:6px;line-height:1.5">${linhaDet}</div>` : '') +
         (mn.observacoes ? printPreview._field('Observações', mn.observacoes, true) : '')
       );
     }
