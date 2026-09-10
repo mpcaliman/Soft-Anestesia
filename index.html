@@ -4590,7 +4590,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-08-29b</b><br>
+    v7.1 · build <b id="build-tag">2026-09-10a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -9654,6 +9654,24 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
           </label>
           <div id="pdfbk-estado" style="font-size:.78rem;margin:6px 0 0 26px"></div>
           <div id="pdfbk-fila" style="font-size:.78rem;margin:8px 0 0 26px"></div>
+          <div style="margin:12px 0 0 26px;padding:10px 12px;border:1px solid var(--border);border-radius:8px">
+            <div style="font-weight:600;font-size:.84rem">🔁 Regenerar PDFs de documentos já finalizados</div>
+            <div style="font-size:.78rem;color:var(--text-mute);margin:4px 0 8px">
+              Para recuperar o que não subiu antes de existir a fila. O documento está salvo; o PDF é montado de novo a partir dele.
+              Quem já foi enviado por aqui fica de fora, para não duplicar.
+            </div>
+            <div class="grid">
+              <div class="field col-4"><label>De</label><input type="date" id="pdfbk-regen-de" onchange="pdfBackup.regen.previa()"></div>
+              <div class="field col-4"><label>Até</label><input type="date" id="pdfbk-regen-ate" onchange="pdfBackup.regen.previa()"></div>
+              <div class="field col-4" style="display:flex;align-items:flex-end">
+                <label style="display:flex;align-items:center;gap:6px;font-size:.8rem">
+                  <input type="checkbox" id="pdfbk-regen-forcar" onchange="pdfBackup.regen.previa()"> incluir os já enviados
+                </label>
+              </div>
+            </div>
+            <button type="button" class="btn btn-sm" onclick="pdfBackup.regen.previa()">🔍 Ver quantos são</button>
+            <div id="pdfbk-regen-prog" style="font-size:.82rem;margin-top:8px"></div>
+          </div>
           <p style="font-size:.78rem;color:var(--text-mute);margin:4px 0 0 26px">
             Sem nenhum toque extra: ao finalizar o documento, o PDF é gerado e enviado aos destinos marcados abaixo.
           </p>
@@ -27914,6 +27932,157 @@ const pdfBackup = {
         .then(() => toast('☁️ PDF do documento finalizado salvo na nuvem' + (temDrive ? ' (Drive)' : '')))
         .catch(e => console.warn('auto pdf finalizar', e));
     } catch (e) { console.warn('autoAoFinalizar', e); }
+  },
+
+  /* ==========================================================================
+     REGENERAR PDFs DE DOCUMENTOS JÁ FINALIZADOS
+
+     A fila protege daqui para a frente. Ela não traz de volta o que se perdeu
+     antes dela existir: aqueles PDFs nunca chegaram a ser gravados em lugar
+     nenhum — só existiram em memória durante a tentativa de envio.
+
+     Mas o DOCUMENTO está salvo. O PDF é montado a partir dele, então dá para
+     refazê-lo: carrega o registro no formulário do módulo (é de lá que o
+     construtor lê), monta, envia, e devolve o formulário ao estado anterior.
+
+     Por isso a tela pisca durante o processo, e por isso ele se recusa a rodar
+     com alteração não salva na tela — carregar por cima perderia o que a
+     pessoa está digitando.
+  ========================================================================== */
+  MARCA: '_pdfBackupEm',
+  regen: {
+    MODS: ['pre', 'consulta', 'anestesia', 'recuperacao', 'termo', 'risco', 'prescricao'],
+    _rodando: false,
+    _parar: false,
+
+    _dataDe(x) { try { return String(historico._dataItem(x) || '').slice(0, 10); } catch (e) { return ''; } },
+
+    /* Documentos finalizados no período. Os que já subiram por esta via ficam
+       de fora — rodar de novo não deve encher o Drive de repetidos. */
+    candidatos(de, ate, forcar) {
+      const out = [];
+      pdfBackup.regen.MODS.forEach(mod => {
+        let lst = [];
+        try { lst = store.list(mod); } catch (e) { return; }
+        lst.forEach(x => {
+          if (!x || !x._finalizado) return;
+          const d = pdfBackup.regen._dataDe(x);
+          if (de && d < de) return;
+          if (ate && d > ate) return;
+          if (!forcar && x[pdfBackup.MARCA]) return;
+          out.push({ mod, rec: x, data: d, nome: (function(){ try { return arquivo._nomeDe(x); } catch(e){ return ''; } })() });
+        });
+      });
+      return out.sort((a, b) => String(a.data).localeCompare(String(b.data)));
+    },
+
+    /* Monta o PDF de UM registro. Devolve {doc, nomeArq} ou null. */
+    async _gerar(mod, rec) {
+      const J = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+      const builders = {
+        pre: printPreview._buildPre, consulta: printPreview._buildConsulta,
+        anestesia: printPreview._buildAnestesia, recuperacao: printPreview._buildRecuperacao,
+        termo: printPreview._buildTermo, risco: printPreview._buildRisco,
+        prescricao: printPreview._buildPrescricao
+      };
+      const builder = builders[mod];
+      const ppp = document.getElementById('ppp');
+      if (!J || !builder || !ppp || !window[mod] || typeof window[mod].carregar !== 'function') return null;
+      window[mod].carregar(rec);
+      /* alguns módulos repõem partes do formulário em setTimeout */
+      await new Promise(res => setTimeout(res, 700));
+      printPreview._nomeArquivoOverride = null;
+      printPreview._verCtx = { mod, formId: 'form-' + mod };
+      /* O nome do arquivo sai de state.currentModule — quem chama isto está
+         parado em Ajustes, e sem esta troca todo PDF saía como
+         "sempaciente_Dashboard_<hoje>.pdf": mesmo nome para todos, e nenhum
+         deles achável depois. */
+      const modAntes = state.currentModule;
+      state.currentModule = mod;
+      const guardado = ppp.innerHTML;
+      try {
+        ppp.innerHTML = builder();
+        const doc = printPreview._gerarDocDeTexto(J, ppp);
+        const nomeArq = printPreview._gerarNomeArquivo().replace(/[^\w.\-]+/g, '_') + '.pdf';
+        return { doc, nomeArq };
+      } finally { ppp.innerHTML = guardado; state.currentModule = modAntes; }
+    },
+
+    async rodar(opts) {
+      opts = opts || {};
+      if (pdfBackup.regen._rodando) { toast('A regeneração já está em andamento', 'warn'); return; }
+      if (state.dirty) {
+        toast('⚠️ Há alteração não salva na tela. Salve ou descarte antes de regenerar — o processo carrega documentos no formulário.', 'warn');
+        return;
+      }
+      const c = pdfBackup.cfg();
+      const temDrive = c.drive === true && !!c.driveClientId;
+      const temSupa = c.supabase !== false && (typeof cloud !== 'undefined' && cloud.estaConfigurado() && cloud.estaLogado());
+      if (!temDrive && !temSupa) { toast('⚠️ Nenhum destino de PDF ativo — ligue o Supabase Storage ou o Drive antes', 'warn'); return; }
+
+      const lista = pdfBackup.regen.candidatos(opts.de, opts.ate, opts.forcar);
+      if (!lista.length) { toast('Nenhum documento finalizado no período — ou todos já foram enviados'); return; }
+
+      pdfBackup.regen._rodando = true;
+      pdfBackup.regen._parar = false;
+      const prog = document.getElementById('pdfbk-regen-prog');
+      let ok = 0, falhou = 0;
+      const dizer = (txt) => { if (prog) prog.innerHTML = txt; };
+      try {
+        for (let i = 0; i < lista.length; i++) {
+          if (pdfBackup.regen._parar) { dizer('⏹ Interrompido em ' + i + ' de ' + lista.length + '.'); break; }
+          const it = lista[i];
+          dizer('⏳ ' + (i + 1) + ' de ' + lista.length + ' — ' + utils.escapeHTML(it.nome || '(sem nome)') +
+                ' <small style="color:var(--text-mute)">(' + it.mod + ')</small>');
+          try {
+            const g = await pdfBackup.regen._gerar(it.mod, it.rec);
+            if (!g) { falhou++; continue; }
+            await pdfBackup.enviarTodos(g.doc, g.nomeArq, { mod: it.mod, paciente: it.nome });
+            /* marca no registro para uma segunda passada não repetir */
+            const atual = store.getById(it.mod, it.rec._id);
+            if (atual) { atual[pdfBackup.MARCA] = new Date().toISOString(); store.save(it.mod, atual); }
+            ok++;
+          } catch (e) { console.warn('regen', it.mod, e); falhou++; }
+        }
+      } finally {
+        pdfBackup.regen._rodando = false;
+        /* devolve o formulário ao estado limpo: nada de um paciente pode
+           sobrar na tela para o próximo */
+        try { window[lista[0].mod] && utils.clearForm('form-' + lista[0].mod); } catch (e) {}
+        try { anestesia.limparSilencioso(); } catch (e) {}
+        markClean();
+      }
+      const resumo = '✅ ' + ok + ' documento(s) processado(s)' + (falhou ? ' · ⚠️ ' + falhou + ' com erro' : '');
+      const r = await pdfFila.resumo();
+      dizer(resumo + (r.n ? ' · ' + r.n + ' aguardando na fila (sobem quando a autorização voltar)' : ''));
+      toast('📄 ' + resumo);
+      try { pdfBackup.renderFila(); } catch (e) {}
+    },
+
+    parar() { pdfBackup.regen._parar = true; },
+
+    /* Prévia: quantos e de que período, antes de rodar qualquer coisa */
+    previa() {
+      const de = (document.getElementById('pdfbk-regen-de') || {}).value || '';
+      const ate = (document.getElementById('pdfbk-regen-ate') || {}).value || '';
+      const forcar = !!(document.getElementById('pdfbk-regen-forcar') || {}).checked;
+      const lista = pdfBackup.regen.candidatos(de, ate, forcar);
+      const prog = document.getElementById('pdfbk-regen-prog');
+      if (!prog) return;
+      if (!lista.length) {
+        prog.innerHTML = '<span style="color:var(--text-mute)">Nenhum documento finalizado nesse período' +
+          (forcar ? '' : ' que ainda não tenha sido enviado por aqui') + '.</span>';
+        return;
+      }
+      const porMod = {};
+      lista.forEach(it => { porMod[it.mod] = (porMod[it.mod] || 0) + 1; });
+      prog.innerHTML = '<b>' + lista.length + ' documento(s)</b> — ' +
+        Object.keys(porMod).map(m => porMod[m] + ' ' + m).join(', ') +
+        '<div style="margin-top:8px">' +
+        '<button type="button" class="btn btn-sm btn-primary" onclick="pdfBackup.regen.rodar({de:\'' + de + '\',ate:\'' + ate + '\',forcar:' + forcar + '})">📤 Regenerar e enviar</button> ' +
+        '<button type="button" class="btn btn-sm btn-ghost" onclick="pdfBackup.regen.parar()">⏹ Parar</button></div>' +
+        '<div style="font-size:.78rem;color:var(--text-mute);margin-top:6px">A tela vai piscar: cada documento é carregado no formulário para o PDF ser montado. Não mexa no sistema enquanto roda.</div>';
+    }
   }
 };
 
@@ -44813,9 +44982,15 @@ const meuDia = {
     const caso = (nome) => {
       const k = meuDia._norm(nome);
       if (!k) return null;
-      if (!casos[k]) casos[k] = { nome, hora: '', procedimento: '', agenda: null, ficha: null, srpa: null, fin: null, consulta: null };
+      if (!casos[k]) casos[k] = { nome, hora: '', procedimento: '', agenda: null, ficha: null, srpa: null, fin: null, consulta: null, pre: null };
       return casos[k];
     };
+    /* Data e nome saem dos MESMOS auxiliares que o resto do sistema usa
+       (historico._dataItem / arquivo._nomeDe). Ler campo a campo aqui foi o
+       que fez a pré-anestésica ficar de fora e a ficha aparecer sem nome: cada
+       módulo grava com um formato, e a lista escrita à mão sempre atrasa. */
+    const dataDe = (x) => { try { return String(historico._dataItem(x) || '').slice(0, 10); } catch (e) { return ''; } };
+    const nomeDe = (x) => { try { const n = arquivo._nomeDe(x); return n === '(sem nome)' ? '' : n; } catch (e) { return ''; } };
     store.list('agenda').filter(x => x.data === hoje).forEach(x => {
       const c = caso(x.paciente); if (!c) return;
       c.agenda = x;
@@ -44827,10 +45002,8 @@ const meuDia = {
        constava só pela SRPA (que é rasa) e o chip ficava em "— ficha". */
     store.list('anestesia').forEach(x => {
       const pr = (x.procedimento && typeof x.procedimento === 'object') ? x.procedimento : {};
-      const data = pr.data || x.data_anestesia || '';
-      if (data !== hoje) return;
-      const nome = (x.paciente && x.paciente.nome) || x.paciente_nome || '';
-      const c = caso(nome); if (!c) return;
+      if (dataDe(x) !== hoje) return;
+      const c = caso(nomeDe(x)); if (!c) return;
       c.ficha = x;
       if (!c.hora) c.hora = pr.hora_sala_entrada || pr.hora_inicio || x.hora_sala_entrada || x.hora_inicio || '';
       if (!c.procedimento) c.procedimento = pr.descricao || (typeof x.procedimento === 'string' ? x.procedimento : '') || '';
@@ -44840,16 +45013,27 @@ const meuDia = {
        "sem ficha", cobrando uma ficha de anestesia que consulta nenhuma tem.
        Quem atende no consultório via o dia inteiro acusado de pendência. */
     store.list('consulta').forEach(x => {
-      const data = x.data || x.data_consulta || '';
-      if (data !== hoje) return;
-      const nome = x.paciente || x.nome || (x.paciente_nome || '');
-      const c = caso(nome); if (!c) return;
+      if (dataDe(x) !== hoje) return;
+      const c = caso(nomeDe(x)); if (!c) return;
       c.consulta = x;
       if (!c.hora) c.hora = x.hora || '';
-      if (!c.procedimento) c.procedimento = x.motivo || x.procedimento || 'Consulta';
+      if (!c.procedimento) c.procedimento = x.motivo || (typeof x.procedimento === 'string' ? x.procedimento : '') || 'Consulta';
     });
-    store.list('recuperacao').filter(x => x.data === hoje).forEach(x => {
-      const c = caso(x.nome); if (!c) return;
+    /* PRÉ-ANESTÉSICA. Faltava — e para quem avalia no consultório é o dia
+       inteiro. A pré não aparecia em lugar nenhum do "Meu dia": o caso só
+       existia se ela já tivesse virado lançamento financeiro, e chegava aí
+       como um caso anônimo cobrando ficha de anestesia e SRPA que uma
+       avaliação pré-anestésica nunca vai ter. */
+    store.list('pre').forEach(x => {
+      if (dataDe(x) !== hoje) return;
+      const c = caso(nomeDe(x)); if (!c) return;
+      c.pre = x;
+      if (!c.hora) c.hora = x.hora || '';
+      if (!c.procedimento) c.procedimento = x.cirurgia || x.procedimento_proposto || 'Avaliação pré-anestésica';
+    });
+    store.list('recuperacao').forEach(x => {
+      if (dataDe(x) !== hoje) return;
+      const c = caso(nomeDe(x)); if (!c) return;
       c.srpa = x;
       if (!c.procedimento) c.procedimento = x.procedimento || '';
     });
@@ -44864,7 +45048,30 @@ const meuDia = {
   /* Chips de etapa: cor/ação conforme o estado */
   /* Consulta é atendimento completo por si: tem o próprio estado, e não
      precisa de ficha de anestesia nem de SRPA. */
-  _ehSoConsulta(c) { return !!c.consulta && !c.ficha && !c.srpa && !c.agenda; },
+  /* Atendimento CLÍNICO — consulta ou pré-anestésica — é completo por si:
+     tem o próprio estado e não deve ficha de anestesia nem SRPA.
+
+     A regra antiga era `tem consulta E não tem agenda`: bastava o atendimento
+     estar agendado, ou ter virado lançamento no financeiro sem o documento
+     clínico ter sido lido aqui, para ele voltar a ser cobrado de ficha e de
+     SRPA. Agora a pergunta é a certa — há alguma evidência de que isto é um
+     caso cirúrgico? — e a resposta vem de quem sabe: a ficha, a SRPA, o tipo
+     do compromisso na agenda e o tipo de atendimento do lançamento. */
+  _ehClinico(c) {
+    if (c.ficha || c.srpa) return false;
+    if (c.consulta || c.pre) return true;
+    const t = meuDia._norm((c.agenda && c.agenda.tipo) || '');
+    if (t === 'consulta' || t === 'pre-anestesico') return true;
+    if (/^consulta/.test(String((c.fin && c.fin.tipo_atendimento) || ''))) return true;
+    return false;
+  },
+  /* nome antigo, mantido: havia chamadas espalhadas */
+  _ehSoConsulta(c) { return meuDia._ehClinico(c); },
+  _chipPre(c) {
+    if (!c.pre) return '';
+    const ok = !!c.pre._finalizado;
+    return '<button type="button" class="md-chip ' + (ok ? 'md-ok' : 'md-meio') + '" onclick="dashboard._abrirFicha(\'pre\',\'' + c.pre._id + '\')" title="' + (ok ? 'Pré-anestésica finalizada — abrir' : 'Pré-anestésica em rascunho — continuar') + '">🫀 ' + (ok ? 'Pré ✓' : 'Pré…') + '</button>';
+  },
   _chipConsulta(c) {
     if (!c.consulta) return '';
     const ok = !!c.consulta._finalizado;
@@ -44909,19 +45116,23 @@ const meuDia = {
           <span class="md-nome">${utils.escapeHTML(c.nome)}</span>
           <span class="md-proc">${utils.escapeHTML(c.procedimento || '')}</span>
         </div>
-        <div class="md-chips">${meuDia._chipConsulta(c)}${meuDia._chipFicha(c)}${meuDia._chipSrpa(c)}${meuDia._chipFin(c)}</div>
+        <div class="md-chips">${meuDia._chipPre(c)}${meuDia._chipConsulta(c)}${meuDia._chipFicha(c)}${meuDia._chipSrpa(c)}${meuDia._chipFin(c)}</div>
       </div>`).join('');
     if (res) {
-      const consultas = casos.filter(c => meuDia._ehSoConsulta(c));
+      const clinicos = casos.filter(c => meuDia._ehClinico(c));
       /* "Sem ficha" é um ALARME, e alarme que toca sozinho todo dia deixa de
          ser lido. Ele acusava as consultas de não terem ficha de anestesia —
          quatro falsos por dia em quem atende no consultório. Consulta sai da
          conta: o que falta a ela é ser finalizada, e isso tem chip próprio. */
-      const cirurgicos = casos.filter(c => !meuDia._ehSoConsulta(c));
+      const cirurgicos = casos.filter(c => !meuDia._ehClinico(c));
       const fichasOk = casos.filter(c => c.ficha && c.ficha._finalizado).length;
       const fichasRasc = casos.filter(c => c.ficha && !c.ficha._finalizado).length;
       const semFicha = cirurgicos.filter(c => !c.ficha).length;
-      const consultasAbertas = consultas.filter(c => !c.consulta._finalizado).length;
+      /* um atendimento clínico pode ser consulta OU pré — e um lançamento
+         financeiro sozinho não é documento nenhum, então não conta como
+         "por finalizar": não há o que finalizar nele */
+      const clinicosAbertos = clinicos.filter(c =>
+        (c.consulta && !c.consulta._finalizado) || (c.pre && !c.pre._finalizado)).length;
       const finPend = casos.filter(c => c.fin && !(c.fin.pago || c.fin.status === 'recebido' || c.fin.status === 'finalizado')).length;
       const semFin = casos.filter(c => c.ficha && c.ficha._finalizado && !c.fin).length;
       const chips = [
@@ -44931,9 +45142,9 @@ const meuDia = {
         { i: '⚠️', l: 'Sem ficha', v: semFicha, neg: semFicha > 0 },
         { i: '💰', l: 'Fin. pendente', v: finPend, neg: finPend > 0 }
       ];
-      /* consulta só entra na conta quando existe consulta no dia */
-      if (consultas.length) {
-        chips.splice(2, 0, { i: '🩺', l: 'Consultas por finalizar', v: consultasAbertas, neg: consultasAbertas > 0 });
+      /* consulta/pré só entram na conta quando existe atendimento clínico no dia */
+      if (clinicos.length) {
+        chips.splice(2, 0, { i: '🩺', l: 'Consultas/pré por finalizar', v: clinicosAbertos, neg: clinicosAbertos > 0 });
       }
       if (semFin) chips.push({ i: '❗', l: 'Finalizada sem financeiro', v: semFin, neg: true });
       res.innerHTML = chips.map(ch =>
