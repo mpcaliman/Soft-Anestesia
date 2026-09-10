@@ -4590,7 +4590,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-10b</b><br>
+    v7.1 · build <b id="build-tag">2026-09-10c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -10848,13 +10848,14 @@ const store = {
   save(modKey, item) {
     const list = store.list(modKey);
     const isNew = !item._id;
+    const prevExistente = isNew ? null : list.find(x => x._id === item._id);
     if (isNew) {
       item._id = utils.uid();
       item._createdAt = new Date().toISOString();
       item._rev = 1;
     } else {
       /* Salva versão anterior antes de sobrescrever */
-      const prev = list.find(x => x._id === item._id);
+      const prev = prevExistente;
       if (prev) {
         store._saveVersion(modKey, prev);
         /* Preserva metadados internos que o formulário não carrega, mas que
@@ -10866,7 +10867,32 @@ const store = {
         /* Revisão: número que incrementa a cada gravação (rastreabilidade). */
         item._rev = ((prev._rev || 1) + 1);
         if (prev._createdAt && !item._createdAt) item._createdAt = prev._createdAt;
+        /* CARIMBO DE FINALIZAÇÃO — nunca se move.
+           A produção conta pelo dia em que o trabalho foi FECHADO, não pelo dia
+           em que o rascunho nasceu. E correção feita depois não pode mudar esse
+           dia: o mês já contado não se reescreve porque alguém acrescentou uma
+           linha na semana seguinte. */
+        if (prev._finalizadoEm) item._finalizadoEm = prev._finalizadoEm;
       } else if (!item._rev) { item._rev = 1; }
+    }
+    /* Aqui, e não em cada módulo: são sete lugares que finalizam documento, e
+       lista escrita à mão sempre atrasa em relação aos módulos (foi o que fez
+       a pré-anestésica ficar de fora do "Meu dia"). */
+    if (item._finalizado && !item._finalizadoEm) {
+      /* Documento que JÁ ESTAVA finalizado antes deste carimbo existir não
+         pode ganhar a data de hoje só por ser aberto e salvo de novo: ele
+         pularia para o mês corrente e inflaria a produção do mês com trabalho
+         de meses atrás. Para esses, o carimbo nasce onde o relatório já os
+         contava — na data clínica. Só quem está sendo finalizado AGORA
+         recebe o instante de agora. */
+      const jaEraFinalizado = !!(prevExistente && prevExistente._finalizado);
+      let base = '';
+      if (jaEraFinalizado) {
+        try { base = historico._dataItem(prevExistente) || ''; } catch (e) {}
+        if (base && String(base).length === 10) base += 'T12:00:00.000Z';
+        if (!base) base = prevExistente._createdAt || '';
+      }
+      item._finalizadoEm = base || new Date().toISOString();
     }
     item._updatedAt = new Date().toISOString();
     item._updatedBy = localStorage.getItem('medsys.v7.usuario') || 'local';
@@ -45823,7 +45849,15 @@ const dashboard = {
     } catch (e) {}
   },
 
+  /* A data pela qual a PRODUÇÃO é contada.
+     É a da FINALIZAÇÃO — o dia em que o trabalho foi fechado —, não a da
+     criação do rascunho nem a da última gravação. O carimbo é posto uma vez
+     e não se move: correção feita depois não muda o mês que já foi contado.
+
+     Registro antigo (anterior ao carimbo) e registro ainda em rascunho caem
+     na data clínica de sempre, que é o melhor que se tem para eles. */
   _dataClinica(it) {
+    if (it && it._finalizadoEm) return it._finalizadoEm;
     let d = '';
     try { d = historico._dataItem(it) || ''; } catch (e) {}
     if (d) return String(d).length === 10 ? d + 'T12:00:00.000Z' : d;

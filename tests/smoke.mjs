@@ -12412,7 +12412,8 @@ await test('O Dashboard impresso conta o mesmo que a tela: finalizados, mesmo pe
     /* 3 finalizadas hoje · 2 rascunhos hoje · 1 finalizada em 2020 */
     for (let i = 0; i < 3; i++) store.save('consulta', { nome: 'FIN' + i, data_consulta: hoje, _finalizado: true });
     for (let i = 0; i < 2; i++) store.save('consulta', { nome: 'RASC' + i, data_consulta: hoje });
-    store.save('consulta', { nome: 'ANTIGA', data_consulta: '2020-01-05', _finalizado: true });
+    store.save('consulta', { nome: 'ANTIGA', data_consulta: '2020-01-05', _finalizado: true,
+                             _finalizadoEm: '2020-01-05T12:00:00.000Z' });
     out.gravados = store.list('consulta').length;
 
     ui.navegar('dashboard');
@@ -12447,6 +12448,107 @@ await test('O Dashboard impresso conta o mesmo que a tela: finalizados, mesmo pe
   assert(r.papel === '3', 'e o papel diz o mesmo — antes dizia 6, contando rascunho e todo período (achou ' + r.papel + ')');
   assert(r.cabecalho, 'o relatório declara sob que régua foi feito: período, escopo e "finalizados"');
   assert(r.papelTudo === '4', 'mudar o período na tela muda o papel junto: em "Tudo" entra a de 2020, mas os rascunhos seguem fora (achou ' + r.papelTudo + ')');
+  await page.close();
+});
+
+/* 186) A produção conta pelo dia em que o trabalho foi FECHADO, e esse dia
+   não se move. Corrigir ou acrescentar depois não pode reescrever o mês já
+   contado, nem gerar uma segunda cobrança pelo mesmo atendimento. */
+await test('Data de produção é a da finalização, não se move em correção, e não nasce financeiro novo', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1200);
+
+  /* (a) o carimbo, em todos os módulos que finalizam documento */
+  const a = await page.evaluate(async () => {
+    const out = { porModulo: {} };
+    try { modal.close(); } catch (e) {}
+    const MODS = ['pre', 'consulta', 'anestesia', 'recuperacao', 'termo', 'prescricao', 'risco'];
+    MODS.concat(['financeiro']).forEach(m => store.setList(m, []));
+    MODS.forEach(m => {
+      const rasc = store.save(m, { nome: 'RASCUNHO ' + m });
+      const fim = store.save(m, { nome: 'FINAL ' + m, _finalizado: true });
+      out.porModulo[m] = !rasc._finalizadoEm && !!fim._finalizadoEm;
+    });
+    /* não se move numa gravação posterior */
+    const r1 = store.save('pre', { nome: 'ANA', data_avaliacao: '2026-09-01', _finalizado: true });
+    const carimbo = r1._finalizadoEm;
+    await new Promise(res => setTimeout(res, 30));
+    const r2 = store.save('pre', Object.assign({}, store.getById('pre', r1._id), { cirurgia: 'ACRESCENTADO' }));
+    out.naoSeMoveu = r2._finalizadoEm === carimbo && r2.cirurgia === 'ACRESCENTADO';
+    /* nem quando o formulário devolve o registro sem os metadados internos —
+       que é o caso real: o form não carrega campos que começam com "_" */
+    const r3 = store.save('pre', { _id: r1._id, nome: 'ANA', data_avaliacao: '2026-09-01', _finalizado: true, obs: 'mais' });
+    out.sobreviveuAoForm = r3._finalizadoEm === carimbo;
+    /* a produção conta por ele — e registro sem carimbo cai na data clínica */
+    out.producaoUsaCarimbo = dashboard._dataClinica(
+      { data_avaliacao: '2020-01-05', _finalizado: true, _finalizadoEm: '2026-09-10T10:00:00.000Z' }) === '2026-09-10T10:00:00.000Z';
+    out.antigoUsaDataClinica = String(dashboard._dataClinica({ data_avaliacao: '2020-01-05' })).startsWith('2020-01-05');
+    /* Documento JÁ finalizado antes de existir o carimbo, reaberto e salvo
+       hoje: não pode pular para o mês corrente e inflar a produção do mês com
+       trabalho de meses atrás. O carimbo nasce onde o relatório já o contava. */
+    store.setList('pre', [{ _id: 'velho1', nome: 'VELHO', data_avaliacao: '2020-01-05', _finalizado: true }]);
+    const velho = store.save('pre', { _id: 'velho1', nome: 'VELHO', data_avaliacao: '2020-01-05', _finalizado: true, obs: 'reaberto hoje' });
+    out.antigoNaoPulaParaHoje = String(velho._finalizadoEm).startsWith('2020-01-05');
+    return out;
+  });
+
+  assert(Object.keys(a.porModulo).length === 7 && Object.values(a.porModulo).every(Boolean),
+    'todo módulo que finaliza documento carimba a data da finalização, e só na finalização: ' + JSON.stringify(a.porModulo));
+  assert(a.naoSeMoveu, 'gravar de novo não move o carimbo — mas grava o que foi acrescentado');
+  assert(a.sobreviveuAoForm, 'e ele sobrevive quando o formulário devolve o registro sem os metadados internos');
+  assert(a.producaoUsaCarimbo, 'a produção conta pela data da finalização');
+  assert(a.antigoUsaDataClinica, 'registro sem carimbo (anterior a isto, ou em rascunho) segue pela data clínica');
+  assert(a.antigoNaoPulaParaHoje, 'documento antigo reaberto e salvo hoje NÃO pula para o mês corrente (ficou em ' + a.antigoNaoPulaParaHoje + ')');
+
+  /* (b) o caminho real da tela: finalizar, acrescentar, salvar */
+  for (const mod of ['pre', 'consulta', 'anestesia']) {
+    const r = await page.evaluate(async (mod) => {
+      const out = { mod };
+      try { modal.close(); } catch (e) {}
+      ['pre', 'consulta', 'anestesia', 'recuperacao', 'financeiro'].forEach(m => store.setList(m, []));
+      ui.navegar(mod); await new Promise(res => setTimeout(res, 1200));
+      try { modal.close(); } catch (e) {}
+      const f = document.getElementById('form-' + mod);
+      f.querySelectorAll('[data-required]').forEach(el => {
+        if (el.value) return;
+        if (el.tagName === 'SELECT') { const o = [...el.options].filter(o => o.value)[0]; if (o) el.value = o.value; }
+        else if (el.type === 'date') el.value = utils.hojeISO();
+        else if (el.type === 'time') el.value = '08:00';
+        else el.value = 'PACIENTE X';
+      });
+      window[mod].salvar({ finalizar: true });
+      await new Promise(res => setTimeout(res, 1000));
+      try { modal.close(); } catch (e) {}
+      const rec = store.list(mod).find(x => x._finalizado);
+      out.finAntes = store.list('financeiro').length;
+      out.dataAntes = dashboard._dataClinica(rec);
+
+      /* acrescenta num campo que estava vazio, e salva */
+      window[mod].carregar(store.getById(mod, rec._id));
+      await new Promise(res => setTimeout(res, 900));
+      const obs = [...document.getElementById('form-' + mod).querySelectorAll('textarea')].find(t => !t.value && t.name);
+      if (obs) obs.value = 'ACRESCENTADO DEPOIS DE FINALIZAR';
+      window[mod].salvar();
+      await new Promise(res => setTimeout(res, 1000));
+      try { modal.close(); } catch (e) {}
+      const rec2 = store.getById(mod, rec._id);
+      out.finDepois = store.list('financeiro').length;
+      out.dataIgual = dashboard._dataClinica(rec2) === out.dataAntes;
+      out.umRegistroSo = store.list(mod).length === 1;
+      return out;
+    }, mod);
+
+    assert(r.finAntes === 1, mod + ': finalizar cria um lançamento financeiro');
+    assert(r.finDepois === 1, mod + ': acrescentar depois NÃO cria um segundo lançamento (ficou com ' + r.finDepois + ')');
+    assert(r.dataIgual, mod + ': e a data que a produção conta não se move');
+    assert(r.umRegistroSo, mod + ': nem nasce um documento duplicado');
+  }
   await page.close();
 });
 
