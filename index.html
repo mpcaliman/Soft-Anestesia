@@ -4590,7 +4590,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-10a</b><br>
+    v7.1 · build <b id="build-tag">2026-09-10b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -44930,14 +44930,35 @@ ${TAG_CLOSE_HTML}`;
   },
 
   _buildDashboard() {
-    const meta = `<strong>Dashboard</strong><br>${new Date().toLocaleDateString('pt-BR')}`;
+    /* O relatório precisa dizer a MESMA coisa que a tela de onde ele saiu.
+       Ele contava tudo: todo período, todo mundo, e rascunho junto com o que
+       foi finalizado. Quem imprimia o painel recebia números que não batiam
+       com os que acabara de olhar — e produção é justamente o número que se
+       leva para fora do sistema.
+
+       Mesma régua da tela: mesmo período, mesmo escopo (Pessoal/Clínica), e
+       PRODUÇÃO = o que foi finalizado. Rascunho é trabalho em curso. */
+    const periodo = (document.getElementById('dash-periodo') || {}).value || 'mes';
+    const escopo = (document.getElementById('dash-escopo') || {}).value || 'pessoal';
+    const filtPorMeta = list => dashboard.filtrarPorPeriodo(
+      dashboard._filtrarEscopo(list || [], escopo)
+        .map(it => Object.assign({}, it, { _dataClinica: dashboard._dataClinica(it) })),
+      periodo, '_dataClinica');
+    const rotuloPeriodo = (() => {
+      const sel = document.getElementById('dash-periodo');
+      const opt = sel && sel.options[sel.selectedIndex];
+      return (opt && opt.textContent) || periodo;
+    })();
+    const meta = `<strong>Dashboard</strong><br>${new Date().toLocaleDateString('pt-BR')}` +
+      `<br><span style="font-weight:normal">${utils.escapeHTML(rotuloPeriodo)} · ` +
+      `${escopo === 'pessoal' ? 'meus atendimentos' : 'clínica'} · finalizados</span>`;
     let html = printPreview._header('RELATÓRIO — DASHBOARD', meta);
     /* Coleta totais */
-    const allAnest = store.list('anestesia');
-    const allPre = store.list('pre');
-    const allCons = store.list('consulta');
-    const allRec = store.list('recuperacao');
-    const allFin = store.list('financeiro');
+    const allAnest = dashboard._soProducao(filtPorMeta(store.list('anestesia')));
+    const allPre = dashboard._soProducao(filtPorMeta(store.list('pre')));
+    const allCons = dashboard._soProducao(filtPorMeta(store.list('consulta')));
+    const allRec = dashboard._soProducao(filtPorMeta(store.list('recuperacao')));
+    const allFin = filtPorMeta(store.list('financeiro'));   /* financeiro não tem "finalizar" */
     const totPrev = allFin.reduce((s, x) => s + (parseFloat(x.valor_previsto) || 0), 0);
     const totRec = allFin.reduce((s, x) => s + (parseFloat(x.valor_recebido) || 0), 0);
     const totGlo = allFin.reduce((s, x) => s + (parseFloat(x.glosa) || 0), 0);

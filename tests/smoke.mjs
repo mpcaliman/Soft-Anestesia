@@ -12390,6 +12390,66 @@ await test('Regenerar PDFs de documentos já finalizados, sem repetir os que já
   await page.close();
 });
 
+/* 185) Produção é o que foi FINALIZADO — a tela sempre respeitou isso, o
+   relatório impresso não. Ele contava `store.list(mod)` cru: todo período,
+   todo mundo, rascunho junto. Quem imprimia o painel levava para fora números
+   que não batiam com os que acabara de olhar. */
+await test('O Dashboard impresso conta o mesmo que a tela: finalizados, mesmo período, mesmo escopo', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1200);
+
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    const hoje = utils.hojeISO();
+    ['pre', 'consulta', 'anestesia', 'recuperacao', 'financeiro'].forEach(m => store.setList(m, []));
+    /* 3 finalizadas hoje · 2 rascunhos hoje · 1 finalizada em 2020 */
+    for (let i = 0; i < 3; i++) store.save('consulta', { nome: 'FIN' + i, data_consulta: hoje, _finalizado: true });
+    for (let i = 0; i < 2; i++) store.save('consulta', { nome: 'RASC' + i, data_consulta: hoje });
+    store.save('consulta', { nome: 'ANTIGA', data_consulta: '2020-01-05', _finalizado: true });
+    out.gravados = store.list('consulta').length;
+
+    ui.navegar('dashboard');
+    await new Promise(res => setTimeout(res, 1500));
+    try { modal.close(); } catch (e) {}
+    const selP = document.getElementById('dash-periodo'); if (selP) selP.value = '30';
+    const selE = document.getElementById('dash-escopo'); if (selE) selE.value = 'clinica';
+    dashboard.atualizar({ semPuxar: true });
+    await new Promise(res => setTimeout(res, 900));
+
+    const donut = document.getElementById('dash-total-atend');
+    const mTela = (donut ? donut.textContent : '').match(/Consulta\/Dor[:\s]+(\d+)/);
+    out.tela = mTela ? mTela[1] : null;
+
+    const txt = printPreview._buildDashboard().replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+    const mPapel = txt.match(/Consultas:?\s*(\d+)/);
+    out.papel = mPapel ? mPapel[1] : null;
+    out.cabecalho = /Este mês/.test(txt) && /clínica/.test(txt) && /finalizados/.test(txt);
+
+    /* trocar o período na tela tem de mudar o papel junto */
+    if (selP) selP.value = 'all';
+    dashboard.atualizar({ semPuxar: true });
+    await new Promise(res => setTimeout(res, 700));
+    const txt2 = printPreview._buildDashboard().replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+    const m2 = txt2.match(/Consultas:?\s*(\d+)/);
+    out.papelTudo = m2 ? m2[1] : null;
+    return out;
+  });
+
+  assert(r.gravados === 6, 'o cenário tem 6 consultas gravadas ao todo');
+  assert(r.tela === '3', 'a tela conta as 3 finalizadas do período (achou ' + r.tela + ')');
+  assert(r.papel === '3', 'e o papel diz o mesmo — antes dizia 6, contando rascunho e todo período (achou ' + r.papel + ')');
+  assert(r.cabecalho, 'o relatório declara sob que régua foi feito: período, escopo e "finalizados"');
+  assert(r.papelTudo === '4', 'mudar o período na tela muda o papel junto: em "Tudo" entra a de 2020, mas os rascunhos seguem fora (achou ' + r.papelTudo + ')');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
