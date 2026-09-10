@@ -11158,7 +11158,7 @@ await test('Meu dia enxerga a consulta, não a acusa de "sem ficha", e acompanha
     /* o alarme para de tocar sozinho: consulta não deve ficha de anestesia */
     out.semFichaZerou = chip('Sem ficha') === '0';
     /* e o que de fato falta ganha nome: três ainda não finalizadas */
-    out.contaPorFinalizar = chip('Consultas por finalizar') === '3';
+    out.contaPorFinalizar = chip('Consultas/pré por finalizar') === '3';
 
     const linhas = document.getElementById('meu-dia-lista').innerHTML;
     out.temChipDeConsulta = /Consulta ✓|Consulta…/.test(linhas);
@@ -12237,6 +12237,156 @@ await test('O que se preenche nas janelas fica na ficha, sobrevive ao recarregar
   assert(r.perdidos.length === 0, 'todo campo de janela sobrevive a salvar e recarregar: ' + r.perdidos.join(', '));
   assert(r.nDistintos >= 15, 'há valores distintos suficientes para cobrar na impressão');
   assert(r.faltamNaImpressao.length === 0, 'e todo campo de janela sai no documento impresso: ' + r.faltamNaImpressao.join(', '));
+  await page.close();
+});
+
+/* 183) "Meu dia" lia agenda, ficha, consulta, SRPA e financeiro — e NUNCA a
+   pré-anestésica. Para quem avalia no consultório isso é o dia inteiro: a pré
+   só chegava lá se já tivesse virado lançamento financeiro, e chegava como um
+   caso anônimo cobrando ficha de anestesia e SRPA que uma avaliação
+   pré-anestésica nunca vai ter. */
+await test('Meu dia enxerga a pré-anestésica — e não cobra ficha de quem veio para consulta ou pré', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1000);
+
+  const r = await page.evaluate(() => {
+    const hoje = utils.hojeISO();
+    ['pre', 'anestesia', 'consulta', 'recuperacao', 'financeiro', 'agenda'].forEach(m => store.setList(m, []));
+
+    const p1 = store.save('pre', { paciente_nome: 'ANA PRE', data_avaliacao: hoje, cirurgia: 'Colecistectomia', _finalizado: true });
+    store.save('pre', { paciente_nome: 'BIA PRE', data_avaliacao: hoje, cirurgia: 'Histerectomia' });
+    store.save('consulta', { paciente: 'CLARA CONSULTA', data_consulta: hoje, motivo: 'Dor lombar' });
+    store.save('anestesia', { paciente: { nome: 'DINA CIRURGIA' }, procedimento: { data: hoje, descricao: 'Artroscopia' }, _finalizado: true });
+    /* lançamento automático da pré, como o auto-financeiro cria */
+    store.save('financeiro', { paciente: 'ANA PRE', data_proc: hoje, tipo_atendimento: 'consulta_pre',
+                               procedimento: 'Consulta em horário normal ou preestabelecido', _origemId: p1._id });
+    /* e um lançamento SEM documento clínico junto — o caso da foto */
+    store.save('financeiro', { paciente: 'ELI SO FINANCEIRO', data_proc: hoje, tipo_atendimento: 'consulta_pre',
+                               procedimento: 'Consulta em horário normal ou preestabelecido' });
+    /* uma consulta AGENDADA: estar na agenda não a torna caso cirúrgico */
+    store.save('agenda', { paciente: 'FLOR AGENDADA', data: hoje, hora: '14:00', tipo: 'Consulta' });
+
+    const casos = meuDia.coletar();
+    const por = n => casos.find(c => c.nome === n) || {};
+    /* só o TEXTO visível: o title do chip financeiro fala em "ficha", e
+       casar contra os atributos daria falso positivo */
+    const chipsDe = c => {
+      const d = document.createElement('div');
+      d.innerHTML = meuDia._chipPre(c) + meuDia._chipConsulta(c) + meuDia._chipFicha(c) +
+                    meuDia._chipSrpa(c) + meuDia._chipFin(c);
+      return [...d.children].map(e => e.textContent).join(' | ');
+    };
+    meuDia.render();
+    const cirurgicos = casos.filter(c => !meuDia._ehClinico(c));
+    return {
+      n: casos.length,
+      preAparece: !!por('ANA PRE').pre && !!por('BIA PRE').pre,
+      /* a pré e o lançamento dela são o MESMO caso, não dois */
+      preEFinJuntos: !!(por('ANA PRE').pre && por('ANA PRE').fin),
+      chipPreOk: /Pré ✓/.test(chipsDe(por('ANA PRE'))) && /Pré…/.test(chipsDe(por('BIA PRE'))),
+      preNaoPedeFicha: !/ficha|SRPA/i.test(chipsDe(por('ANA PRE'))),
+      consultaNaoPedeFicha: !/ficha|SRPA/i.test(chipsDe(por('CLARA CONSULTA'))),
+      agendadaNaoPedeFicha: !/— ficha|— SRPA/i.test(chipsDe(por('FLOR AGENDADA'))),
+      soFinNaoPedeFicha: !/ficha|SRPA/i.test(chipsDe(por('ELI SO FINANCEIRO'))),
+      /* a cirurgia de verdade continua sendo cobrada */
+      cirurgiaTemFicha: /Ficha ✓/.test(chipsDe(por('DINA CIRURGIA'))),
+      soUmCirurgico: cirurgicos.length === 1 && cirurgicos[0].nome === 'DINA CIRURGIA',
+      resumo: (document.getElementById('meu-dia-resumo') || {}).textContent || ''
+    };
+  });
+
+  assert(r.n === 6, 'todos os atendimentos do dia aparecem, não só os que viraram lançamento (achou ' + r.n + ' de 6)');
+  assert(r.preAparece, 'a pré-anestésica do dia aparece no Meu dia');
+  assert(r.preEFinJuntos, 'a pré e o lançamento financeiro dela são o mesmo caso, não dois');
+  assert(r.chipPreOk, 'a pré tem chip próprio, e ele diz se está finalizada ou em rascunho');
+  assert(r.preNaoPedeFicha, 'pré-anestésica não é cobrada de ficha de anestesia nem de SRPA');
+  assert(r.consultaNaoPedeFicha, 'consulta também não');
+  assert(r.agendadaNaoPedeFicha, 'nem a consulta que estava agendada — estar na agenda não a torna cirurgia');
+  assert(r.soFinNaoPedeFicha, 'nem o lançamento de consulta sem documento clínico junto');
+  assert(r.cirurgiaTemFicha && r.soUmCirurgico, 'e a cirurgia de verdade continua sendo o único caso cirúrgico');
+  assert(/Semficha0/.test(r.resumo.replace(/\s+/g, '')), 'o alarme "Sem ficha" zera: ele acusava um falso por atendimento de consultório — ' + r.resumo);
+  await page.close();
+});
+
+/* 184) A fila protege daqui para a frente, mas não traz de volta o que se
+   perdeu antes dela existir — aqueles PDFs nunca foram gravados. O DOCUMENTO
+   está salvo, então dá para montar o PDF de novo a partir dele. */
+await test('Regenerar PDFs de documentos já finalizados, sem repetir os que já subiram', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1200);
+
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['pre', 'consulta', 'anestesia'].forEach(m => store.setList(m, []));
+    await pdfFila.limpar();
+    store.save('pre', { nome: 'ANA PRE', data_avaliacao: '2026-09-01', cirurgia: 'Colecistectomia', _finalizado: true });
+    store.save('pre', { nome: 'BIA PRE', data_avaliacao: '2026-09-05', cirurgia: 'Hérnia', _finalizado: true });
+    store.save('pre', { nome: 'RASCUNHO', data_avaliacao: '2026-09-03', cirurgia: 'X' });               /* não finalizado */
+    store.save('consulta', { nome: 'CLARA', data_consulta: '2026-09-04', motivo: 'Dor', _finalizado: true });
+    store.save('anestesia', { paciente: { nome: 'DINA' }, procedimento: { data: '2026-08-20' }, _finalizado: true }); /* fora do período */
+
+    out.candidatos = pdfBackup.regen.candidatos('2026-09-01', '2026-09-30', false).map(x => x.mod + ':' + x.nome);
+
+    pdfBackup.salvarCfg({ supabase: true, drive: false });
+    cloud.estaConfigurado = () => true; cloud.estaLogado = () => true;
+    const enviados = [];
+    pdfBackup.enviarSupabase = async (blob, nome) => { enviados.push({ nome, bytes: blob && blob.size }); return true; };
+
+    markClean();
+    await pdfBackup.regen.rodar({ de: '2026-09-01', ate: '2026-09-30' });
+    out.enviados = enviados.map(e => e.nome);
+    out.temConteudo = enviados.every(e => e.bytes > 1000);
+
+    /* segunda passada não repete: cada registro fica marcado */
+    const antes = enviados.length;
+    markClean();
+    await pdfBackup.regen.rodar({ de: '2026-09-01', ate: '2026-09-30' });
+    out.segundaPassada = enviados.length - antes;
+    /* mas "incluir os já enviados" repete de propósito */
+    markClean();
+    await pdfBackup.regen.rodar({ de: '2026-09-01', ate: '2026-09-30', forcar: true });
+    out.comForcar = enviados.length - antes;
+
+    /* o que falhar no envio vai para a fila, não some */
+    await pdfFila.limpar();
+    pdfBackup.enviarSupabase = async () => false;
+    markClean();
+    await pdfBackup.regen.rodar({ de: '2026-09-01', ate: '2026-09-30', forcar: true });
+    out.naFila = (await pdfFila.listar()).length;
+
+    /* e recusa rodar com alteração não salva: carregar por cima perderia o
+       que a pessoa está digitando */
+    const n2 = enviados.length;
+    pdfBackup.enviarSupabase = async (b, nm) => { enviados.push({ nome: nm, bytes: 9999 }); return true; };
+    markDirty();
+    await pdfBackup.regen.rodar({ de: '2026-09-01', ate: '2026-09-30', forcar: true });
+    out.recusouComSujo = enviados.length === n2;
+    markClean();
+    await pdfFila.limpar();
+    return out;
+  });
+
+  assert(r.candidatos.length === 3, 'só entram os finalizados do período — rascunho e documento de fora ficam de fora (achou ' + r.candidatos.join(', ') + ')');
+  assert(r.enviados.length === 3 && r.temConteudo, 'os três são regenerados com conteúdo de verdade');
+  assert(r.enviados.some(n => /^ANA-PRE_APA/.test(n)) && r.enviados.some(n => /^CLARA_Consulta/.test(n)),
+    'cada PDF sai com o nome do SEU paciente e do SEU tipo — não com o do módulo aberto na hora: ' + r.enviados.join(', '));
+  assert(r.segundaPassada === 0, 'rodar de novo não duplica: quem já subiu por aqui fica marcado');
+  assert(r.comForcar === 3, 'e "incluir os já enviados" repete de propósito');
+  assert(r.naFila === 3, 'o que falha no envio vai para a fila, em vez de sumir');
+  assert(r.recusouComSujo, 'com alteração não salva na tela, o processo se recusa a rodar');
   await page.close();
 });
 
