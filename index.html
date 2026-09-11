@@ -4590,7 +4590,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-10c</b><br>
+    v7.1 · build <b id="build-tag">2026-09-11a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -21169,18 +21169,39 @@ const pendencias = {
   },
   temStatus(r) { const f = r && r._faturamento; return !!f && Object.keys(f).some(k => f[k]); },
 
+  /* Esta janela é de pendência FINANCEIRA — faturamento, glosa, cobrança do
+     plano, nota fiscal. Pendência de preenchimento de prontuário é outra
+     coisa, e tem outro lugar ("Meu dia").
+
+     Ela varria os documentos clínicos E o financeiro. Como toda ficha
+     finalizada gera um lançamento, o mesmo atendimento aparecia DUAS vezes —
+     "Ficha de anestesia" e "Financeiro", mesmo paciente, mesma guia — e era
+     preciso dar baixa nas duas para o caso sumir.
+
+     Agora é uma linha por cobrança. Quem manda é o lançamento financeiro: é
+     nele que o faturamento acontece. O documento clínico só aparece quando
+     NÃO existe lançamento nenhum vindo dele — aí não é repetição, é a pior
+     pendência financeira que há: atendimento feito e nada lançado para
+     cobrar. */
   listar() {
     const corte = Date.now() - pendencias.JANELA_DIAS * 86400000;
     const out = [];
+    /* de que documentos já saiu lançamento financeiro */
+    const comLancamento = new Set();
+    (store.list('financeiro') || []).forEach(f => { if (f && f._origemId) comLancamento.add(f._origemId); });
+
     pendencias.MODS.forEach(mod => {
       (store.list(mod) || []).forEach(r => {
         if (!r || !r._id || r._pendResolvida) return;
         if (pendencias.temStatus(r)) return;
+        /* o clínico cede a vez ao lançamento que nasceu dele */
+        if (mod !== 'financeiro' && comLancamento.has(r._id)) return;
         const i = pendencias._info(mod, r);
         if (!pendencias.ehPlanoPendente(i.convenio)) return;
         const t = new Date(i.data || r._updatedAt || 0).getTime();
         if (!t || t < corte) return;
-        out.push({ mod, id: r._id, nome: i.nome, data: i.data, convenio: i.convenio, guia: i.guia });
+        out.push({ mod, id: r._id, nome: i.nome, data: i.data, convenio: i.convenio, guia: i.guia,
+                   semLancamento: mod !== 'financeiro' });
       });
     });
     out.sort((a, b) => String(a.data).localeCompare(String(b.data)));
@@ -21197,7 +21218,9 @@ const pendencias = {
     const linhas = lista.map(p =>
       '<tr>' +
       '<td style="white-space:nowrap">' + utils.formatarData(p.data) + '</td>' +
-      '<td><b>' + utils.escapeHTML(p.nome || '—') + '</b><br><small style="color:var(--text-mute)">' + pendencias.MOD_ROT[p.mod] + '</small></td>' +
+      '<td><b>' + utils.escapeHTML(p.nome || '—') + '</b><br><small style="color:' +
+        (p.semLancamento ? '#b3261e' : 'var(--text-mute)') + '">' + pendencias.MOD_ROT[p.mod] +
+        (p.semLancamento ? ' · sem lançamento financeiro' : '') + '</small></td>' +
       '<td>' + utils.escapeHTML(p.convenio) + '</td>' +
       '<td>' + (p.guia ? utils.escapeHTML(p.guia) : '<span style="color:#b3261e">sem guia</span>') + '</td>' +
       '<td style="white-space:nowrap">' +
@@ -21220,6 +21243,7 @@ const pendencias = {
     if (!r) return;
     r._pendResolvida = new Date().toISOString();
     store.save(mod, r);
+    pendencias._espelharNoLancamento(mod, r);
     toast('✔ Pendência resolvida');
     pendencias.abrir(false);
     try { pendencias.renderDashboard(); } catch (e) {}
@@ -21228,6 +21252,19 @@ const pendencias = {
     if (!statusKey) return;
     pendencias.marcarStatus(mod, id, statusKey, true);
     pendencias.abrir(false);
+  },
+  /* O faturamento de um atendimento é UM só, esteja a pessoa olhando o
+     documento clínico ou o lançamento que nasceu dele. Marcar etapa num e
+     deixar o outro pendente fazia o caso voltar a cobrar baixa pela outra
+     porta — ficava escondido enquanto a janela mostrava as duas linhas. */
+  _espelharNoLancamento(mod, r) {
+    if (mod === 'financeiro' || !r || !r._id) return;
+    (store.list('financeiro') || []).filter(f => f && f._origemId === r._id).forEach(f => {
+      f._faturamento = Object.assign({}, f._faturamento, r._faturamento);
+      if (r._pendResolvida && !f._pendResolvida) f._pendResolvida = r._pendResolvida;
+      if (!r._pendResolvida) delete f._pendResolvida;
+      store.save('financeiro', f);
+    });
   },
   marcarStatus(mod, id, statusKey, marcado) {
     const r = store.getById(mod, id);
@@ -21238,6 +21275,7 @@ const pendencias = {
     /* marcar qualquer etapa resolve a pendência */
     if (pendencias.temStatus(r) && !r._pendResolvida) r._pendResolvida = new Date().toISOString();
     store.save(mod, r);
+    pendencias._espelharNoLancamento(mod, r);
     if (statusKey === 'cortesia' && marcado) { try { pendencias._aplicarCortesia(mod, r); } catch (e) {} }
     try { pendencias.renderDashboard(); } catch (e) {}
     const rot = (pendencias.STATUS.find(s => s[0] === statusKey) || ['', statusKey])[1];

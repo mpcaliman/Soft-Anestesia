@@ -6486,13 +6486,18 @@ await test('Cortesia é uma das ações da pendência de convênio e chega ao fi
       _origemId: pre1._id, paciente: 'Ana Souza', convenio: 'Bradesco Saúde',
       data_proc: '2026-08-13', valor_previsto: 1200, status: 'pendente', pago: false
     });
-    out.entrouNaLista = pendencias.listar().some(p => p.id === pre1._id);
+    /* o caso entra UMA vez, pela linha do financeiro — é nela que o
+       faturamento acontece; a pré cede a vez ao lançamento que nasceu dela */
+    const lista1 = pendencias.listar();
+    out.entrouNaLista = lista1.some(p => p.id === lanc._id);
+    out.naoDuplicou = lista1.filter(p => /Ana Souza/i.test(p.nome)).length === 1;
 
-    /* marca cortesia pela janela */
+    /* marcar cortesia no documento clínico continua valendo (é o caminho de
+       quem ainda não tem lançamento) e alcança o financeiro */
     pendencias.marcarStatus('pre', pre1._id, 'cortesia', true);
     const dep = store.getById('pre', pre1._id);
     out.carimbouNoRegistro = !!(dep._faturamento && dep._faturamento.cortesia);
-    out.saiuDaPendencia = !pendencias.listar().some(p => p.id === pre1._id);
+    out.saiuDaPendencia = !pendencias.listar().some(p => p.id === pre1._id || p.id === lanc._id);
 
     const fin1 = store.getById('financeiro', lanc._id);
     out.marcouNoFinanceiro = fin1.tipo_pagamento === 'Cortesia' && fin1.pago === true;
@@ -6512,6 +6517,7 @@ await test('Cortesia é uma das ações da pendência de convênio e chega ao fi
     return out;
   });
   assert(r.estaNasOpcoes, 'Cortesia precisa estar entre as ações da pendência');
+  assert(r.naoDuplicou, 'e o atendimento aparece uma vez só, não como documento e como lançamento');
   assert(r.entrouNaLista, 'a pendência de plano precisa existir antes de ser resolvida');
   assert(r.carimbouNoRegistro && r.saiuDaPendencia, 'marcar cortesia dá baixa e deixa registrado o porquê');
   assert(r.marcouNoFinanceiro, 'a cortesia tem que chegar ao financeiro — senão o valor fica como "a receber"');
@@ -12549,6 +12555,70 @@ await test('Data de produção é a da finalização, não se move em correção
     assert(r.dataIgual, mod + ': e a data que a produção conta não se move');
     assert(r.umRegistroSo, mod + ': nem nasce um documento duplicado');
   }
+  await page.close();
+});
+
+/* 187) "Pendências de convênio" é janela FINANCEIRA — faturamento, glosa,
+   cobrança do plano, nota fiscal. Ela varria os documentos clínicos E o
+   financeiro; como toda ficha finalizada gera um lançamento, o mesmo
+   atendimento aparecia DUAS vezes (mesma guia, mesmo paciente) e era preciso
+   dar baixa nas duas para o caso sumir. */
+await test('Pendência de convênio é uma linha por cobrança, não uma por documento', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1000);
+
+  const r = await page.evaluate(() => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['anestesia', 'pre', 'consulta', 'financeiro'].forEach(m => store.setList(m, []));
+    const hoje = utils.hojeISO();
+
+    /* o caso da foto: ficha finalizada + o lançamento que nasceu dela */
+    const ficha = store.save('anestesia', {
+      paciente: { nome: 'FABIANO', convenio: 'Bradesco Saúde', senha: 'K3EK7V7' },
+      procedimento: { data: hoje }, _finalizado: true });
+    store.save('financeiro', { paciente: 'FABIANO', convenio: 'Bradesco Saúde',
+      senha: 'K3EK7V7', data_proc: hoje, _origemId: ficha._id });
+    /* uma pré que NÃO gerou lançamento: não é repetição, é pendência de verdade */
+    store.save('pre', { nome: 'SEM LANCAMENTO', convenio: 'Amil', senha: '999', data: hoje, _finalizado: true });
+    /* particular não é plano — fica fora dos dois lados */
+    const f2 = store.save('anestesia', { paciente: { nome: 'PARTICULAR', convenio: 'Particular' }, procedimento: { data: hoje }, _finalizado: true });
+    store.save('financeiro', { paciente: 'PARTICULAR', convenio: 'Particular', data_proc: hoje, _origemId: f2._id });
+
+    const l = pendencias.listar();
+    out.n = l.length;
+    out.fabianoVezes = l.filter(p => p.nome === 'FABIANO').length;
+    const fab = l.find(p => p.nome === 'FABIANO') || {};
+    out.fabianoEhFinanceiro = fab.mod === 'financeiro';
+    out.guiaPreservada = fab.guia === 'K3EK7V7';
+    out.semLancApareceu = l.some(p => p.nome === 'SEM LANCAMENTO' && p.semLancamento);
+    out.particularFora = !l.some(p => p.nome === 'PARTICULAR');
+    /* e a janela diz POR QUE aquele documento clínico está ali */
+    pendencias.abrir(false);
+    const html = (document.querySelector('.modal-body') || document.body).innerHTML;
+    out.explicaSemLancamento = /sem lançamento financeiro/i.test(html);
+    try { modal.close(); } catch (e) {}
+    /* dar baixa UMA vez limpa o caso */
+    pendencias.resolver('financeiro', fab.id);
+    try { modal.close(); } catch (e) {}
+    out.aposResolverUmaVez = pendencias.listar().filter(p => p.nome === 'FABIANO').length;
+    return out;
+  });
+
+  assert(r.fabianoVezes === 1, 'o mesmo atendimento aparece UMA vez — antes vinha como ficha e como financeiro (achou ' + r.fabianoVezes + ')');
+  assert(r.fabianoEhFinanceiro, 'e quem fica é o lançamento financeiro: é nele que o faturamento acontece');
+  assert(r.guiaPreservada, 'sem perder a guia');
+  assert(r.semLancApareceu, 'documento clínico SEM lançamento continua aparecendo — atendimento feito e nada a cobrar é a pior pendência financeira');
+  assert(r.explicaSemLancamento, 'e a janela diz por que ele está ali, em vez de parecer repetição');
+  assert(r.particularFora, 'particular não é plano de saúde — fica fora dos dois lados');
+  assert(r.n === 2, 'ao todo, duas linhas para os três atendimentos (achou ' + r.n + ')');
+  assert(r.aposResolverUmaVez === 0, 'dar baixa uma vez limpa o caso — antes era preciso resolver nos dois');
   await page.close();
 });
 
