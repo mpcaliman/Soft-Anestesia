@@ -6486,13 +6486,18 @@ await test('Cortesia é uma das ações da pendência de convênio e chega ao fi
       _origemId: pre1._id, paciente: 'Ana Souza', convenio: 'Bradesco Saúde',
       data_proc: '2026-08-13', valor_previsto: 1200, status: 'pendente', pago: false
     });
-    out.entrouNaLista = pendencias.listar().some(p => p.id === pre1._id);
+    /* o caso entra UMA vez, pela linha do financeiro — é nela que o
+       faturamento acontece; a pré cede a vez ao lançamento que nasceu dela */
+    const lista1 = pendencias.listar();
+    out.entrouNaLista = lista1.some(p => p.id === lanc._id);
+    out.naoDuplicou = lista1.filter(p => /Ana Souza/i.test(p.nome)).length === 1;
 
-    /* marca cortesia pela janela */
+    /* marcar cortesia no documento clínico continua valendo (é o caminho de
+       quem ainda não tem lançamento) e alcança o financeiro */
     pendencias.marcarStatus('pre', pre1._id, 'cortesia', true);
     const dep = store.getById('pre', pre1._id);
     out.carimbouNoRegistro = !!(dep._faturamento && dep._faturamento.cortesia);
-    out.saiuDaPendencia = !pendencias.listar().some(p => p.id === pre1._id);
+    out.saiuDaPendencia = !pendencias.listar().some(p => p.id === pre1._id || p.id === lanc._id);
 
     const fin1 = store.getById('financeiro', lanc._id);
     out.marcouNoFinanceiro = fin1.tipo_pagamento === 'Cortesia' && fin1.pago === true;
@@ -6512,6 +6517,7 @@ await test('Cortesia é uma das ações da pendência de convênio e chega ao fi
     return out;
   });
   assert(r.estaNasOpcoes, 'Cortesia precisa estar entre as ações da pendência');
+  assert(r.naoDuplicou, 'e o atendimento aparece uma vez só, não como documento e como lançamento');
   assert(r.entrouNaLista, 'a pendência de plano precisa existir antes de ser resolvida');
   assert(r.carimbouNoRegistro && r.saiuDaPendencia, 'marcar cortesia dá baixa e deixa registrado o porquê');
   assert(r.marcouNoFinanceiro, 'a cortesia tem que chegar ao financeiro — senão o valor fica como "a receber"');
@@ -12387,6 +12393,232 @@ await test('Regenerar PDFs de documentos já finalizados, sem repetir os que já
   assert(r.comForcar === 3, 'e "incluir os já enviados" repete de propósito');
   assert(r.naFila === 3, 'o que falha no envio vai para a fila, em vez de sumir');
   assert(r.recusouComSujo, 'com alteração não salva na tela, o processo se recusa a rodar');
+  await page.close();
+});
+
+/* 185) Produção é o que foi FINALIZADO — a tela sempre respeitou isso, o
+   relatório impresso não. Ele contava `store.list(mod)` cru: todo período,
+   todo mundo, rascunho junto. Quem imprimia o painel levava para fora números
+   que não batiam com os que acabara de olhar. */
+await test('O Dashboard impresso conta o mesmo que a tela: finalizados, mesmo período, mesmo escopo', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1200);
+
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    const hoje = utils.hojeISO();
+    ['pre', 'consulta', 'anestesia', 'recuperacao', 'financeiro'].forEach(m => store.setList(m, []));
+    /* 3 finalizadas hoje · 2 rascunhos hoje · 1 finalizada em 2020 */
+    for (let i = 0; i < 3; i++) store.save('consulta', { nome: 'FIN' + i, data_consulta: hoje, _finalizado: true });
+    for (let i = 0; i < 2; i++) store.save('consulta', { nome: 'RASC' + i, data_consulta: hoje });
+    store.save('consulta', { nome: 'ANTIGA', data_consulta: '2020-01-05', _finalizado: true,
+                             _finalizadoEm: '2020-01-05T12:00:00.000Z' });
+    out.gravados = store.list('consulta').length;
+
+    ui.navegar('dashboard');
+    await new Promise(res => setTimeout(res, 1500));
+    try { modal.close(); } catch (e) {}
+    const selP = document.getElementById('dash-periodo'); if (selP) selP.value = '30';
+    const selE = document.getElementById('dash-escopo'); if (selE) selE.value = 'clinica';
+    dashboard.atualizar({ semPuxar: true });
+    await new Promise(res => setTimeout(res, 900));
+
+    const donut = document.getElementById('dash-total-atend');
+    const mTela = (donut ? donut.textContent : '').match(/Consulta\/Dor[:\s]+(\d+)/);
+    out.tela = mTela ? mTela[1] : null;
+
+    const txt = printPreview._buildDashboard().replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+    const mPapel = txt.match(/Consultas:?\s*(\d+)/);
+    out.papel = mPapel ? mPapel[1] : null;
+    out.cabecalho = /Este mês/.test(txt) && /clínica/.test(txt) && /finalizados/.test(txt);
+
+    /* trocar o período na tela tem de mudar o papel junto */
+    if (selP) selP.value = 'all';
+    dashboard.atualizar({ semPuxar: true });
+    await new Promise(res => setTimeout(res, 700));
+    const txt2 = printPreview._buildDashboard().replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
+    const m2 = txt2.match(/Consultas:?\s*(\d+)/);
+    out.papelTudo = m2 ? m2[1] : null;
+    return out;
+  });
+
+  assert(r.gravados === 6, 'o cenário tem 6 consultas gravadas ao todo');
+  assert(r.tela === '3', 'a tela conta as 3 finalizadas do período (achou ' + r.tela + ')');
+  assert(r.papel === '3', 'e o papel diz o mesmo — antes dizia 6, contando rascunho e todo período (achou ' + r.papel + ')');
+  assert(r.cabecalho, 'o relatório declara sob que régua foi feito: período, escopo e "finalizados"');
+  assert(r.papelTudo === '4', 'mudar o período na tela muda o papel junto: em "Tudo" entra a de 2020, mas os rascunhos seguem fora (achou ' + r.papelTudo + ')');
+  await page.close();
+});
+
+/* 186) A produção conta pelo dia em que o trabalho foi FECHADO, e esse dia
+   não se move. Corrigir ou acrescentar depois não pode reescrever o mês já
+   contado, nem gerar uma segunda cobrança pelo mesmo atendimento. */
+await test('Data de produção é a da finalização, não se move em correção, e não nasce financeiro novo', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1200);
+
+  /* (a) o carimbo, em todos os módulos que finalizam documento */
+  const a = await page.evaluate(async () => {
+    const out = { porModulo: {} };
+    try { modal.close(); } catch (e) {}
+    const MODS = ['pre', 'consulta', 'anestesia', 'recuperacao', 'termo', 'prescricao', 'risco'];
+    MODS.concat(['financeiro']).forEach(m => store.setList(m, []));
+    MODS.forEach(m => {
+      const rasc = store.save(m, { nome: 'RASCUNHO ' + m });
+      const fim = store.save(m, { nome: 'FINAL ' + m, _finalizado: true });
+      out.porModulo[m] = !rasc._finalizadoEm && !!fim._finalizadoEm;
+    });
+    /* não se move numa gravação posterior */
+    const r1 = store.save('pre', { nome: 'ANA', data_avaliacao: '2026-09-01', _finalizado: true });
+    const carimbo = r1._finalizadoEm;
+    await new Promise(res => setTimeout(res, 30));
+    const r2 = store.save('pre', Object.assign({}, store.getById('pre', r1._id), { cirurgia: 'ACRESCENTADO' }));
+    out.naoSeMoveu = r2._finalizadoEm === carimbo && r2.cirurgia === 'ACRESCENTADO';
+    /* nem quando o formulário devolve o registro sem os metadados internos —
+       que é o caso real: o form não carrega campos que começam com "_" */
+    const r3 = store.save('pre', { _id: r1._id, nome: 'ANA', data_avaliacao: '2026-09-01', _finalizado: true, obs: 'mais' });
+    out.sobreviveuAoForm = r3._finalizadoEm === carimbo;
+    /* a produção conta por ele — e registro sem carimbo cai na data clínica */
+    out.producaoUsaCarimbo = dashboard._dataClinica(
+      { data_avaliacao: '2020-01-05', _finalizado: true, _finalizadoEm: '2026-09-10T10:00:00.000Z' }) === '2026-09-10T10:00:00.000Z';
+    out.antigoUsaDataClinica = String(dashboard._dataClinica({ data_avaliacao: '2020-01-05' })).startsWith('2020-01-05');
+    /* Documento JÁ finalizado antes de existir o carimbo, reaberto e salvo
+       hoje: não pode pular para o mês corrente e inflar a produção do mês com
+       trabalho de meses atrás. O carimbo nasce onde o relatório já o contava. */
+    store.setList('pre', [{ _id: 'velho1', nome: 'VELHO', data_avaliacao: '2020-01-05', _finalizado: true }]);
+    const velho = store.save('pre', { _id: 'velho1', nome: 'VELHO', data_avaliacao: '2020-01-05', _finalizado: true, obs: 'reaberto hoje' });
+    out.antigoNaoPulaParaHoje = String(velho._finalizadoEm).startsWith('2020-01-05');
+    return out;
+  });
+
+  assert(Object.keys(a.porModulo).length === 7 && Object.values(a.porModulo).every(Boolean),
+    'todo módulo que finaliza documento carimba a data da finalização, e só na finalização: ' + JSON.stringify(a.porModulo));
+  assert(a.naoSeMoveu, 'gravar de novo não move o carimbo — mas grava o que foi acrescentado');
+  assert(a.sobreviveuAoForm, 'e ele sobrevive quando o formulário devolve o registro sem os metadados internos');
+  assert(a.producaoUsaCarimbo, 'a produção conta pela data da finalização');
+  assert(a.antigoUsaDataClinica, 'registro sem carimbo (anterior a isto, ou em rascunho) segue pela data clínica');
+  assert(a.antigoNaoPulaParaHoje, 'documento antigo reaberto e salvo hoje NÃO pula para o mês corrente (ficou em ' + a.antigoNaoPulaParaHoje + ')');
+
+  /* (b) o caminho real da tela: finalizar, acrescentar, salvar */
+  for (const mod of ['pre', 'consulta', 'anestesia']) {
+    const r = await page.evaluate(async (mod) => {
+      const out = { mod };
+      try { modal.close(); } catch (e) {}
+      ['pre', 'consulta', 'anestesia', 'recuperacao', 'financeiro'].forEach(m => store.setList(m, []));
+      ui.navegar(mod); await new Promise(res => setTimeout(res, 1200));
+      try { modal.close(); } catch (e) {}
+      const f = document.getElementById('form-' + mod);
+      f.querySelectorAll('[data-required]').forEach(el => {
+        if (el.value) return;
+        if (el.tagName === 'SELECT') { const o = [...el.options].filter(o => o.value)[0]; if (o) el.value = o.value; }
+        else if (el.type === 'date') el.value = utils.hojeISO();
+        else if (el.type === 'time') el.value = '08:00';
+        else el.value = 'PACIENTE X';
+      });
+      window[mod].salvar({ finalizar: true });
+      await new Promise(res => setTimeout(res, 1000));
+      try { modal.close(); } catch (e) {}
+      const rec = store.list(mod).find(x => x._finalizado);
+      out.finAntes = store.list('financeiro').length;
+      out.dataAntes = dashboard._dataClinica(rec);
+
+      /* acrescenta num campo que estava vazio, e salva */
+      window[mod].carregar(store.getById(mod, rec._id));
+      await new Promise(res => setTimeout(res, 900));
+      const obs = [...document.getElementById('form-' + mod).querySelectorAll('textarea')].find(t => !t.value && t.name);
+      if (obs) obs.value = 'ACRESCENTADO DEPOIS DE FINALIZAR';
+      window[mod].salvar();
+      await new Promise(res => setTimeout(res, 1000));
+      try { modal.close(); } catch (e) {}
+      const rec2 = store.getById(mod, rec._id);
+      out.finDepois = store.list('financeiro').length;
+      out.dataIgual = dashboard._dataClinica(rec2) === out.dataAntes;
+      out.umRegistroSo = store.list(mod).length === 1;
+      return out;
+    }, mod);
+
+    assert(r.finAntes === 1, mod + ': finalizar cria um lançamento financeiro');
+    assert(r.finDepois === 1, mod + ': acrescentar depois NÃO cria um segundo lançamento (ficou com ' + r.finDepois + ')');
+    assert(r.dataIgual, mod + ': e a data que a produção conta não se move');
+    assert(r.umRegistroSo, mod + ': nem nasce um documento duplicado');
+  }
+  await page.close();
+});
+
+/* 187) "Pendências de convênio" é janela FINANCEIRA — faturamento, glosa,
+   cobrança do plano, nota fiscal. Ela varria os documentos clínicos E o
+   financeiro; como toda ficha finalizada gera um lançamento, o mesmo
+   atendimento aparecia DUAS vezes (mesma guia, mesmo paciente) e era preciso
+   dar baixa nas duas para o caso sumir. */
+await test('Pendência de convênio é uma linha por cobrança, não uma por documento', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1000);
+
+  const r = await page.evaluate(() => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['anestesia', 'pre', 'consulta', 'financeiro'].forEach(m => store.setList(m, []));
+    const hoje = utils.hojeISO();
+
+    /* o caso da foto: ficha finalizada + o lançamento que nasceu dela */
+    const ficha = store.save('anestesia', {
+      paciente: { nome: 'FABIANO', convenio: 'Bradesco Saúde', senha: 'K3EK7V7' },
+      procedimento: { data: hoje }, _finalizado: true });
+    store.save('financeiro', { paciente: 'FABIANO', convenio: 'Bradesco Saúde',
+      senha: 'K3EK7V7', data_proc: hoje, _origemId: ficha._id });
+    /* uma pré que NÃO gerou lançamento: não é repetição, é pendência de verdade */
+    store.save('pre', { nome: 'SEM LANCAMENTO', convenio: 'Amil', senha: '999', data: hoje, _finalizado: true });
+    /* particular não é plano — fica fora dos dois lados */
+    const f2 = store.save('anestesia', { paciente: { nome: 'PARTICULAR', convenio: 'Particular' }, procedimento: { data: hoje }, _finalizado: true });
+    store.save('financeiro', { paciente: 'PARTICULAR', convenio: 'Particular', data_proc: hoje, _origemId: f2._id });
+
+    const l = pendencias.listar();
+    out.n = l.length;
+    out.fabianoVezes = l.filter(p => p.nome === 'FABIANO').length;
+    const fab = l.find(p => p.nome === 'FABIANO') || {};
+    out.fabianoEhFinanceiro = fab.mod === 'financeiro';
+    out.guiaPreservada = fab.guia === 'K3EK7V7';
+    out.semLancApareceu = l.some(p => p.nome === 'SEM LANCAMENTO' && p.semLancamento);
+    out.particularFora = !l.some(p => p.nome === 'PARTICULAR');
+    /* e a janela diz POR QUE aquele documento clínico está ali */
+    pendencias.abrir(false);
+    const html = (document.querySelector('.modal-body') || document.body).innerHTML;
+    out.explicaSemLancamento = /sem lançamento financeiro/i.test(html);
+    try { modal.close(); } catch (e) {}
+    /* dar baixa UMA vez limpa o caso */
+    pendencias.resolver('financeiro', fab.id);
+    try { modal.close(); } catch (e) {}
+    out.aposResolverUmaVez = pendencias.listar().filter(p => p.nome === 'FABIANO').length;
+    return out;
+  });
+
+  assert(r.fabianoVezes === 1, 'o mesmo atendimento aparece UMA vez — antes vinha como ficha e como financeiro (achou ' + r.fabianoVezes + ')');
+  assert(r.fabianoEhFinanceiro, 'e quem fica é o lançamento financeiro: é nele que o faturamento acontece');
+  assert(r.guiaPreservada, 'sem perder a guia');
+  assert(r.semLancApareceu, 'documento clínico SEM lançamento continua aparecendo — atendimento feito e nada a cobrar é a pior pendência financeira');
+  assert(r.explicaSemLancamento, 'e a janela diz por que ele está ali, em vez de parecer repetição');
+  assert(r.particularFora, 'particular não é plano de saúde — fica fora dos dois lados');
+  assert(r.n === 2, 'ao todo, duas linhas para os três atendimentos (achou ' + r.n + ')');
+  assert(r.aposResolverUmaVez === 0, 'dar baixa uma vez limpa o caso — antes era preciso resolver nos dois');
   await page.close();
 });
 

@@ -4590,7 +4590,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-10a</b><br>
+    v7.1 · build <b id="build-tag">2026-09-11a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -10848,13 +10848,14 @@ const store = {
   save(modKey, item) {
     const list = store.list(modKey);
     const isNew = !item._id;
+    const prevExistente = isNew ? null : list.find(x => x._id === item._id);
     if (isNew) {
       item._id = utils.uid();
       item._createdAt = new Date().toISOString();
       item._rev = 1;
     } else {
       /* Salva versão anterior antes de sobrescrever */
-      const prev = list.find(x => x._id === item._id);
+      const prev = prevExistente;
       if (prev) {
         store._saveVersion(modKey, prev);
         /* Preserva metadados internos que o formulário não carrega, mas que
@@ -10866,7 +10867,32 @@ const store = {
         /* Revisão: número que incrementa a cada gravação (rastreabilidade). */
         item._rev = ((prev._rev || 1) + 1);
         if (prev._createdAt && !item._createdAt) item._createdAt = prev._createdAt;
+        /* CARIMBO DE FINALIZAÇÃO — nunca se move.
+           A produção conta pelo dia em que o trabalho foi FECHADO, não pelo dia
+           em que o rascunho nasceu. E correção feita depois não pode mudar esse
+           dia: o mês já contado não se reescreve porque alguém acrescentou uma
+           linha na semana seguinte. */
+        if (prev._finalizadoEm) item._finalizadoEm = prev._finalizadoEm;
       } else if (!item._rev) { item._rev = 1; }
+    }
+    /* Aqui, e não em cada módulo: são sete lugares que finalizam documento, e
+       lista escrita à mão sempre atrasa em relação aos módulos (foi o que fez
+       a pré-anestésica ficar de fora do "Meu dia"). */
+    if (item._finalizado && !item._finalizadoEm) {
+      /* Documento que JÁ ESTAVA finalizado antes deste carimbo existir não
+         pode ganhar a data de hoje só por ser aberto e salvo de novo: ele
+         pularia para o mês corrente e inflaria a produção do mês com trabalho
+         de meses atrás. Para esses, o carimbo nasce onde o relatório já os
+         contava — na data clínica. Só quem está sendo finalizado AGORA
+         recebe o instante de agora. */
+      const jaEraFinalizado = !!(prevExistente && prevExistente._finalizado);
+      let base = '';
+      if (jaEraFinalizado) {
+        try { base = historico._dataItem(prevExistente) || ''; } catch (e) {}
+        if (base && String(base).length === 10) base += 'T12:00:00.000Z';
+        if (!base) base = prevExistente._createdAt || '';
+      }
+      item._finalizadoEm = base || new Date().toISOString();
     }
     item._updatedAt = new Date().toISOString();
     item._updatedBy = localStorage.getItem('medsys.v7.usuario') || 'local';
@@ -21143,18 +21169,39 @@ const pendencias = {
   },
   temStatus(r) { const f = r && r._faturamento; return !!f && Object.keys(f).some(k => f[k]); },
 
+  /* Esta janela é de pendência FINANCEIRA — faturamento, glosa, cobrança do
+     plano, nota fiscal. Pendência de preenchimento de prontuário é outra
+     coisa, e tem outro lugar ("Meu dia").
+
+     Ela varria os documentos clínicos E o financeiro. Como toda ficha
+     finalizada gera um lançamento, o mesmo atendimento aparecia DUAS vezes —
+     "Ficha de anestesia" e "Financeiro", mesmo paciente, mesma guia — e era
+     preciso dar baixa nas duas para o caso sumir.
+
+     Agora é uma linha por cobrança. Quem manda é o lançamento financeiro: é
+     nele que o faturamento acontece. O documento clínico só aparece quando
+     NÃO existe lançamento nenhum vindo dele — aí não é repetição, é a pior
+     pendência financeira que há: atendimento feito e nada lançado para
+     cobrar. */
   listar() {
     const corte = Date.now() - pendencias.JANELA_DIAS * 86400000;
     const out = [];
+    /* de que documentos já saiu lançamento financeiro */
+    const comLancamento = new Set();
+    (store.list('financeiro') || []).forEach(f => { if (f && f._origemId) comLancamento.add(f._origemId); });
+
     pendencias.MODS.forEach(mod => {
       (store.list(mod) || []).forEach(r => {
         if (!r || !r._id || r._pendResolvida) return;
         if (pendencias.temStatus(r)) return;
+        /* o clínico cede a vez ao lançamento que nasceu dele */
+        if (mod !== 'financeiro' && comLancamento.has(r._id)) return;
         const i = pendencias._info(mod, r);
         if (!pendencias.ehPlanoPendente(i.convenio)) return;
         const t = new Date(i.data || r._updatedAt || 0).getTime();
         if (!t || t < corte) return;
-        out.push({ mod, id: r._id, nome: i.nome, data: i.data, convenio: i.convenio, guia: i.guia });
+        out.push({ mod, id: r._id, nome: i.nome, data: i.data, convenio: i.convenio, guia: i.guia,
+                   semLancamento: mod !== 'financeiro' });
       });
     });
     out.sort((a, b) => String(a.data).localeCompare(String(b.data)));
@@ -21171,7 +21218,9 @@ const pendencias = {
     const linhas = lista.map(p =>
       '<tr>' +
       '<td style="white-space:nowrap">' + utils.formatarData(p.data) + '</td>' +
-      '<td><b>' + utils.escapeHTML(p.nome || '—') + '</b><br><small style="color:var(--text-mute)">' + pendencias.MOD_ROT[p.mod] + '</small></td>' +
+      '<td><b>' + utils.escapeHTML(p.nome || '—') + '</b><br><small style="color:' +
+        (p.semLancamento ? '#b3261e' : 'var(--text-mute)') + '">' + pendencias.MOD_ROT[p.mod] +
+        (p.semLancamento ? ' · sem lançamento financeiro' : '') + '</small></td>' +
       '<td>' + utils.escapeHTML(p.convenio) + '</td>' +
       '<td>' + (p.guia ? utils.escapeHTML(p.guia) : '<span style="color:#b3261e">sem guia</span>') + '</td>' +
       '<td style="white-space:nowrap">' +
@@ -21194,6 +21243,7 @@ const pendencias = {
     if (!r) return;
     r._pendResolvida = new Date().toISOString();
     store.save(mod, r);
+    pendencias._espelharNoLancamento(mod, r);
     toast('✔ Pendência resolvida');
     pendencias.abrir(false);
     try { pendencias.renderDashboard(); } catch (e) {}
@@ -21202,6 +21252,19 @@ const pendencias = {
     if (!statusKey) return;
     pendencias.marcarStatus(mod, id, statusKey, true);
     pendencias.abrir(false);
+  },
+  /* O faturamento de um atendimento é UM só, esteja a pessoa olhando o
+     documento clínico ou o lançamento que nasceu dele. Marcar etapa num e
+     deixar o outro pendente fazia o caso voltar a cobrar baixa pela outra
+     porta — ficava escondido enquanto a janela mostrava as duas linhas. */
+  _espelharNoLancamento(mod, r) {
+    if (mod === 'financeiro' || !r || !r._id) return;
+    (store.list('financeiro') || []).filter(f => f && f._origemId === r._id).forEach(f => {
+      f._faturamento = Object.assign({}, f._faturamento, r._faturamento);
+      if (r._pendResolvida && !f._pendResolvida) f._pendResolvida = r._pendResolvida;
+      if (!r._pendResolvida) delete f._pendResolvida;
+      store.save('financeiro', f);
+    });
   },
   marcarStatus(mod, id, statusKey, marcado) {
     const r = store.getById(mod, id);
@@ -21212,6 +21275,7 @@ const pendencias = {
     /* marcar qualquer etapa resolve a pendência */
     if (pendencias.temStatus(r) && !r._pendResolvida) r._pendResolvida = new Date().toISOString();
     store.save(mod, r);
+    pendencias._espelharNoLancamento(mod, r);
     if (statusKey === 'cortesia' && marcado) { try { pendencias._aplicarCortesia(mod, r); } catch (e) {} }
     try { pendencias.renderDashboard(); } catch (e) {}
     const rot = (pendencias.STATUS.find(s => s[0] === statusKey) || ['', statusKey])[1];
@@ -44930,14 +44994,35 @@ ${TAG_CLOSE_HTML}`;
   },
 
   _buildDashboard() {
-    const meta = `<strong>Dashboard</strong><br>${new Date().toLocaleDateString('pt-BR')}`;
+    /* O relatório precisa dizer a MESMA coisa que a tela de onde ele saiu.
+       Ele contava tudo: todo período, todo mundo, e rascunho junto com o que
+       foi finalizado. Quem imprimia o painel recebia números que não batiam
+       com os que acabara de olhar — e produção é justamente o número que se
+       leva para fora do sistema.
+
+       Mesma régua da tela: mesmo período, mesmo escopo (Pessoal/Clínica), e
+       PRODUÇÃO = o que foi finalizado. Rascunho é trabalho em curso. */
+    const periodo = (document.getElementById('dash-periodo') || {}).value || 'mes';
+    const escopo = (document.getElementById('dash-escopo') || {}).value || 'pessoal';
+    const filtPorMeta = list => dashboard.filtrarPorPeriodo(
+      dashboard._filtrarEscopo(list || [], escopo)
+        .map(it => Object.assign({}, it, { _dataClinica: dashboard._dataClinica(it) })),
+      periodo, '_dataClinica');
+    const rotuloPeriodo = (() => {
+      const sel = document.getElementById('dash-periodo');
+      const opt = sel && sel.options[sel.selectedIndex];
+      return (opt && opt.textContent) || periodo;
+    })();
+    const meta = `<strong>Dashboard</strong><br>${new Date().toLocaleDateString('pt-BR')}` +
+      `<br><span style="font-weight:normal">${utils.escapeHTML(rotuloPeriodo)} · ` +
+      `${escopo === 'pessoal' ? 'meus atendimentos' : 'clínica'} · finalizados</span>`;
     let html = printPreview._header('RELATÓRIO — DASHBOARD', meta);
     /* Coleta totais */
-    const allAnest = store.list('anestesia');
-    const allPre = store.list('pre');
-    const allCons = store.list('consulta');
-    const allRec = store.list('recuperacao');
-    const allFin = store.list('financeiro');
+    const allAnest = dashboard._soProducao(filtPorMeta(store.list('anestesia')));
+    const allPre = dashboard._soProducao(filtPorMeta(store.list('pre')));
+    const allCons = dashboard._soProducao(filtPorMeta(store.list('consulta')));
+    const allRec = dashboard._soProducao(filtPorMeta(store.list('recuperacao')));
+    const allFin = filtPorMeta(store.list('financeiro'));   /* financeiro não tem "finalizar" */
     const totPrev = allFin.reduce((s, x) => s + (parseFloat(x.valor_previsto) || 0), 0);
     const totRec = allFin.reduce((s, x) => s + (parseFloat(x.valor_recebido) || 0), 0);
     const totGlo = allFin.reduce((s, x) => s + (parseFloat(x.glosa) || 0), 0);
@@ -45802,7 +45887,15 @@ const dashboard = {
     } catch (e) {}
   },
 
+  /* A data pela qual a PRODUÇÃO é contada.
+     É a da FINALIZAÇÃO — o dia em que o trabalho foi fechado —, não a da
+     criação do rascunho nem a da última gravação. O carimbo é posto uma vez
+     e não se move: correção feita depois não muda o mês que já foi contado.
+
+     Registro antigo (anterior ao carimbo) e registro ainda em rascunho caem
+     na data clínica de sempre, que é o melhor que se tem para eles. */
   _dataClinica(it) {
+    if (it && it._finalizadoEm) return it._finalizadoEm;
     let d = '';
     try { d = historico._dataItem(it) || ''; } catch (e) {}
     if (d) return String(d).length === 10 ? d + 'T12:00:00.000Z' : d;
