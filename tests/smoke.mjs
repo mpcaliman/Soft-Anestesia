@@ -12702,6 +12702,76 @@ await test('Pendências de prontuário: rascunho de dia passado e cirurgia sem f
   await page.close();
 });
 
+/* 189) "Minha produção tem que ser igual à da clínica, pois só eu produzo
+   nela." O painel decidia a autoria por `_updatedBy` — QUEM SALVOU POR ÚLTIMO.
+   Num consultório onde a secretária prepara e corrige registros, isso tirava
+   do painel do médico a produção que é dele. */
+await test('Pessoal = Clínica quando há um anestesista só — e volta a separar quando há sócio', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'mpcaliman@x',
+      nome: 'Marcelo Pandolfi Caliman', perfil: 'admin', modulos: auth.MODULOS.map(m => m.key),
+      soImpressao: [], role: 'gestor', organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1000);
+
+  const r = await page.evaluate(() => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    const hoje = utils.hojeISO();
+    /* o cadastro dele: um anestesista só */
+    store.setList('cad_profissionais', [
+      { _id: 'p1', nome: 'Marcelo Pandolfi Caliman', especialidade: 'Anestesiologia', responsavel: true },
+      { _id: 'p2', nome: 'Fulano Cirurgiao', especialidade: 'Cirurgia Geral' }
+    ]);
+    /* setList e não save: store.save reescreve _updatedBy, e é justamente ele
+       que este teste precisa controlar */
+    const mk = (id, nome, patch) => Object.assign({ _id: id, nome, data_avaliacao: hoje, _finalizado: true }, patch);
+    const base = [
+      mk('xA', 'A eu salvei', { _updatedBy: 'mpcaliman@x' }),
+      mk('xB', 'B secretaria salvou', { _updatedBy: 'auxiliompc@gmail.com' }),
+      mk('xC', 'C secretaria criou', { _updatedBy: 'mpcanestesiologia@gmail.com', _criadoPor: 'mpcanestesiologia@gmail.com' }),
+      mk('xD', 'D sem autoria', {}),
+      /* nome escrito de outro jeito: "Dr. Marcelo Caliman" x "Marcelo Pandolfi
+         Caliman". Nenhum contém o outro — o nome do meio quebra a sequência. */
+      mk('xE', 'E anestesista eu', { _updatedBy: 'auxiliompc@gmail.com', anestesiologista: 'Dr. Marcelo Caliman' })
+    ];
+    store.setList('pre', base);
+    const todos = store.list('pre');
+    out.clinica = dashboard._filtrarEscopo(todos, 'clinica').length;
+    out.pessoal = dashboard._filtrarEscopo(todos, 'pessoal').length;
+    out.souOUnico = dashboard._souOUnicoAnestesista();
+    out.nomeDeOutroJeito = dashboard._mesmaPessoa('Dr. Marcelo Caliman', dashboard._souEu());
+    out.naoConfundeOutraPessoa = !dashboard._mesmaPessoa('Marcelo Pandolfi Souza', dashboard._souEu());
+
+    /* com sócio no cadastro, a regra se desliga sozinha */
+    store.setList('cad_profissionais', [
+      { _id: 'p1', nome: 'Marcelo Pandolfi Caliman', especialidade: 'Anestesiologia', responsavel: true },
+      { _id: 'p3', nome: 'Socio Anestesista', especialidade: 'Anestesiologia' }
+    ]);
+    store.setList('pre', base.concat([
+      mk('xF', 'F do socio', { anestesiologista: 'Socio Anestesista' })
+    ]));
+    out.comSocio_souOUnico = dashboard._souOUnicoAnestesista();
+    const meusComSocio = dashboard._filtrarEscopo(store.list('pre'), 'pessoal').map(x => x._id);
+    out.socioNaoEhMeu = !meusComSocio.includes('xF');
+    out.comSocio_aindaTenhoOsMeus = meusComSocio.includes('xA') && meusComSocio.includes('xE');
+    store.setList('pre', []); store.setList('cad_profissionais', []);
+    return out;
+  });
+
+  assert(r.souOUnico, 'o cadastro com um anestesista só é reconhecido');
+  assert(r.clinica === 5, 'a clínica conta os 5');
+  assert(r.pessoal === 5, 'e a produção pessoal conta os mesmos 5 — quem salvou por último não decide de quem é o caso (achou ' + r.pessoal + ')');
+  assert(r.nomeDeOutroJeito, '"Dr. Marcelo Caliman" e "Marcelo Pandolfi Caliman" são a mesma pessoa — nenhum contém o outro, o nome do meio quebra a sequência');
+  assert(r.naoConfundeOutraPessoa, 'mas outro sobrenome não vira a mesma pessoa');
+  assert(!r.comSocio_souOUnico, 'com sócio anestesista no cadastro, a regra se desliga sozinha');
+  assert(r.socioNaoEhMeu, 'e o caso do sócio não entra na minha produção');
+  assert(r.comSocio_aindaTenhoOsMeus, 'sem que eu perca os meus');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

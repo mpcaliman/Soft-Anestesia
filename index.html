@@ -4590,7 +4590,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-12a</b><br>
+    v7.1 · build <b id="build-tag">2026-09-12b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -45832,16 +45832,8 @@ const dashboard = {
     if (escopo !== 'pessoal') return list;
     const meus = dashboard._souEu();
     if (!meus.size) return list;
-    const bate = (v) => {
-      const t = dashboard._normAutor(v);
-      if (!t) return false;
-      if (meus.has(t)) return true;
-      /* "Marcelo Pandolfi Caliman" x "Marcelo Caliman": um contém o outro.
-         Exigir igualdade exata fazia o caso do próprio médico contar como
-         de outra pessoa — e o painel dele zerava. */
-      for (const m of meus) { if (m.length >= 6 && (t.includes(m) || m.includes(t))) return true; }
-      return false;
-    };
+    const bate = (v) => dashboard._mesmaPessoa(v, meus);
+    const sozinho = dashboard._souOUnicoAnestesista();
     return list.filter(it => {
       /* QUEM CONFERIU É O DONO DO CASO. No pré-lançamento a secretária digita
          e o médico confere e finaliza: se "meu" fosse só "quem digitou", o
@@ -45851,13 +45843,62 @@ const dashboard = {
         const pl = it._preLanc || {};
         if (pl.conferidoPor && bate(pl.conferidoPor)) return true;
       } catch (e) {}
-      /* sem autoria registrada, o registro conta como meu — não sumir do
-         painel importa mais do que classificar com precisão */
-      const autores = [it._updatedBy, it._criadoPor, it.anestesista, it.anestesiologista,
-                       it.profissional, it.responsavel];
+      /* O PROFISSIONAL vem antes de quem digitou. Produção é de quem atendeu,
+         não de quem salvou o arquivo por último. */
+      const profissionais = [it.anestesista, it.anestesiologista, it.profissional, it.responsavel];
+      if (profissionais.some(v => String(v || '').trim())) return profissionais.some(bate);
+
+      /* Nenhum profissional registrado. Aqui estava o buraco: caía-se em
+         `_updatedBy`, que é QUEM SALVOU POR ÚLTIMO — e num consultório onde a
+         secretária prepara e corrige os registros, isso tira do painel do
+         médico a produção que é dele. "Minha produção tem que ser igual à da
+         clínica, pois só eu produzo nela."
+
+         Quando o cadastro diz que há UM anestesista só, e sou eu, não há o que
+         classificar: o caso é meu. Se um dia houver sócio no cadastro, a regra
+         se desliga sozinha e volta a olhar a autoria. */
+      if (sozinho) return true;
+      const autores = [it._updatedBy, it._criadoPor];
       if (!autores.some(v => String(v || '').trim())) return true;
       return autores.some(bate);
     });
+  },
+
+  /* É a mesma pessoa? O nome de um médico raramente é escrito duas vezes do
+     mesmo jeito: "Marcelo Pandolfi Caliman", "Marcelo Caliman", "Dr. Marcelo P.
+     Caliman". A regra anterior era substring — e ela NÃO resolve justamente
+     esse caso: nenhum dos dois contém o outro, porque o nome do meio quebra a
+     sequência. Comparar por PARTES resolve: primeiro nome igual e sobrenome
+     igual é a mesma pessoa; o meio pode faltar, abreviar ou sobrar. */
+  _mesmaPessoa(v, meus) {
+    const t = dashboard._normAutor(v);
+    if (!t) return false;
+    if (meus.has(t)) return true;
+    const partes = s => String(s).split(/[\s.]+/).filter(x => x.length > 1);
+    const a = partes(t);
+    for (const m of meus) {
+      if (m.length < 4) continue;
+      if (t === m) return true;
+      /* login/e-mail: comparação direta, sem partir em nomes */
+      if (m.indexOf('@') >= 0 || t.indexOf('@') >= 0) { if (t === m) return true; continue; }
+      const b = partes(m);
+      if (a.length >= 2 && b.length >= 2 && a[0] === b[0] && a[a.length - 1] === b[b.length - 1]) return true;
+      /* um lado só tem uma palavra (apelido, usuário): exige conter a outra */
+      if ((a.length === 1 || b.length === 1) && m.length >= 6 && (t.includes(m) || m.includes(t))) return true;
+    }
+    return false;
+  },
+
+  /* O cadastro de profissionais tem um anestesista só, e ele sou eu? */
+  _souOUnicoAnestesista() {
+    try {
+      const anest = (ajustes.list('cad_anestesistas') || []).filter(p => p && p.nome);
+      if (anest.length !== 1) return false;
+      if (dashboard._mesmaPessoa(anest[0].nome, dashboard._souEu())) return true;
+      /* o próprio cadastro diz que este é o profissional responsável, e é o
+         único: num aparelho configurado assim, ele é o dono do painel */
+      return anest[0].responsavel === true || anest[0].responsavel === 'true';
+    } catch (e) { return false; }
   },
 
   /* Registros que estão na NUVEM e não neste aparelho (modo nuvem/arquivamento).
