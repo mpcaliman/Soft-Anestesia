@@ -4590,7 +4590,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-11a</b><br>
+    v7.1 · build <b id="build-tag">2026-09-12a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -4708,6 +4708,19 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
         <div class="card-actions"><button type="button" class="btn btn-xs" id="pl-buscar-btn" title="Buscar na clínica o que foi enviado nos outros aparelhos">🔄 Buscar</button></div>
       </div>
       <div class="card-body" id="pl-fila-lista"></div>
+    </div>
+
+    <!-- 📋 PENDÊNCIAS DE PRONTUÁRIO — o par clínico do cartão de convênio.
+         Uma cuida do documento, a outra do dinheiro; juntas numa lista só
+         foi o que tornou a janela de convênio ilegível. -->
+    <div class="card no-collapse no-print" id="pend-prontuario-card" style="display:none">
+      <div class="card-header">
+        <div class="card-title-wrap"><span class="card-icon">📋</span><h2>Pendências de prontuário<small>Documentos de dias anteriores em rascunho, e cirurgias agendadas sem ficha</small></h2></div>
+        <div class="card-actions"><span id="pend-prontuario-n" style="background:#fff4e5;color:#7a4b12;border-radius:999px;padding:2px 10px;font-weight:800;font-size:.78rem">0</span></div>
+      </div>
+      <div class="card-body">
+        <button class="btn btn-primary btn-sm" id="pend-prontuario-btn" onclick="pendProntuario.abrir()">📋 Ver pendências</button>
+      </div>
     </div>
 
     <!-- 📅 MEU DIA — casos de hoje com o estado de cada etapa (fechamento do plantão) -->
@@ -13742,7 +13755,7 @@ const ui = {
 
       /* Refresh por módulo — cada um em try/catch independente para não bloquear navegação */
       try {
-        if (modName === 'dashboard') { dashboard.atualizar(); try { meuDia.render(); } catch (e) {} try { pendencias.renderDashboard(); } catch (e) {} try { preLanc.ajustarDashboard(); } catch (e) {} try { preLanc.renderFila(); } catch (e) {} try { preLanc.sincronizarFila({ silent: true }); } catch (e) {} }
+        if (modName === 'dashboard') { dashboard.atualizar(); try { meuDia.render(); } catch (e) {} try { pendencias.renderDashboard(); } catch (e) {} try { pendProntuario.renderDashboard(); } catch (e) {} try { preLanc.ajustarDashboard(); } catch (e) {} try { preLanc.renderFila(); } catch (e) {} try { preLanc.sincronizarFila({ silent: true }); } catch (e) {} }
         else if (modName === 'financeiro') financeiro.render();
         else if (modName === 'agenda') { agenda.render(); if (!agenda._puxouNestaSessao) { setTimeout(() => { try { agenda.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
@@ -19934,6 +19947,7 @@ const cloud = {
       try { dashboard.atualizar(); } catch (e) {}
       try { meuDia.render(); } catch (e) {}
       try { pendencias.renderDashboard(); } catch (e) {}
+      try { pendProntuario.renderDashboard(); } catch (e) {}
     } else if (mod === 'pacientes') { try { pacientes.render(); } catch (e) {} }
     else if (mod === 'agenda') { try { agenda.render(); } catch (e) {} }
   },
@@ -19952,7 +19966,8 @@ const cloud = {
          assunto de login — esta rotina roda também a cada 10 minutos e ao
          voltar para a aba, e abrir a janela nessas horas era interromper o
          atendimento de meia em meia hora. */
-      setTimeout(() => { try { if (typeof pendencias !== 'undefined') pendencias.renderDashboard(); } catch (e) {} }, 3200);
+      setTimeout(() => { try { if (typeof pendencias !== 'undefined') pendencias.renderDashboard(); } catch (e) {}
+                         try { if (typeof pendProntuario !== 'undefined') pendProntuario.renderDashboard(); } catch (e) {} }, 3200);
       setTimeout(() => {
         try {
           if (typeof cloudRel !== 'undefined' && cloudRel.autoPullModulo) {
@@ -20550,6 +20565,7 @@ const realtime = {
     try { if (mod === 'agenda') { agenda._puxouNestaSessao = false; agenda.sincronizarNuvem({ silent: true }); } } catch (e) {}
     try { if (state.currentModule === 'dashboard') dashboard.atualizar(); } catch (e) {}
     try { if (typeof pendencias !== 'undefined') pendencias.renderDashboard(); } catch (e) {}
+    try { if (typeof pendProntuario !== 'undefined') pendProntuario.renderDashboard(); } catch (e) {}
   },
 
   _encerrar(fechar) {
@@ -21416,6 +21432,135 @@ const pendencias = {
     } catch (e) {}
   }
 };
+
+/* ============================================================================
+   PENDÊNCIAS DE PRONTUÁRIO — o outro tipo de pendência
+
+   "Pendências de convênio" cuida do dinheiro: faturamento, glosa, cobrança,
+   nota. Este cuida do PRONTUÁRIO: documento que ficou pela metade e cirurgia
+   que não tem ficha. São coisas diferentes, com donos e prazos diferentes, e
+   misturá-las numa lista só foi o que tornou aquela janela ilegível.
+
+   O que entra aqui é só o que se verifica sem adivinhar:
+     · documento em rascunho de um dia que já passou;
+     · compromisso de cirurgia no passado sem ficha nenhuma.
+
+   O que NÃO entra: rascunho de HOJE (é trabalho em curso, não pendência) e
+   palpite sobre campo faltando. Alarme que toca sozinho todo dia deixa de ser
+   lido — foi o que aconteceu com o "Sem ficha" contando consultas.
+============================================================================ */
+const pendProntuario = {
+  MODS: ['anestesia', 'pre', 'consulta', 'recuperacao', 'termo', 'prescricao', 'risco'],
+  ROT: {
+    anestesia: 'Ficha de anestesia', pre: 'Pré-anestésica', consulta: 'Consulta',
+    recuperacao: 'Recuperação (SRPA)', termo: 'Termo (TCLE)',
+    prescricao: 'Receituário', risco: 'Risco perioperatório',
+    agenda: 'Compromisso da agenda'
+  },
+  JANELA_DIAS: 90,
+  IGNORADA: '_pendProntIgnorada',
+
+  podeVer() {
+    try {
+      if (!auth.estaLogado()) return false;
+      return pendProntuario.MODS.some(m => auth.podeAcessar(m));
+    } catch (e) { return false; }
+  },
+
+  _data(x) { try { return String(historico._dataItem(x) || '').slice(0, 10); } catch (e) { return ''; } },
+  _nome(x) { try { const n = arquivo._nomeDe(x); return n === '(sem nome)' ? '' : n; } catch (e) { return ''; } },
+
+  listar() {
+    const hoje = utils.hojeISO();
+    const corte = new Date(Date.now() - pendProntuario.JANELA_DIAS * 86400000).toISOString().slice(0, 10);
+    const escopo = (document.getElementById('dash-escopo') || {}).value || 'pessoal';
+    const doEscopo = (l) => { try { return dashboard._filtrarEscopo(l, escopo); } catch (e) { return l; } };
+    const out = [];
+
+    /* 1) rascunho de dia que já passou */
+    pendProntuario.MODS.forEach(mod => {
+      if (!auth.podeAcessar(mod)) return;
+      doEscopo(store.list(mod) || []).forEach(r => {
+        if (!r || !r._id || r._finalizado || r[pendProntuario.IGNORADA]) return;
+        const d = pendProntuario._data(r);
+        if (!d || d >= hoje || d < corte) return;      /* hoje é trabalho em curso */
+        out.push({ tipo: 'rascunho', mod, id: r._id, nome: pendProntuario._nome(r), data: d,
+                   motivo: 'Em rascunho — falta finalizar' });
+      });
+    });
+
+    /* 2) cirurgia agendada no passado sem ficha nenhuma */
+    if (auth.podeAcessar('anestesia')) {
+      const fichas = doEscopo(store.list('anestesia') || []);
+      const chave = (n, d) => (n || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim() + '|' + d;
+      const temFicha = new Set(fichas.map(f => chave(pendProntuario._nome(f), pendProntuario._data(f))));
+      doEscopo(store.list('agenda') || []).forEach(a => {
+        if (!a || !a._id || a[pendProntuario.IGNORADA]) return;
+        const t = String(a.tipo || '').toLowerCase();
+        if (!/cirurgia|procedimento/.test(t)) return;
+        const d = String(a.data || '').slice(0, 10);
+        if (!d || d >= hoje || d < corte) return;
+        if (temFicha.has(chave(a.paciente, d))) return;
+        out.push({ tipo: 'sem_ficha', mod: 'agenda', id: a._id, nome: a.paciente || '', data: d,
+                   motivo: 'Cirurgia agendada sem ficha de anestesia' });
+      });
+    }
+
+    out.sort((a, b) => String(a.data).localeCompare(String(b.data)));
+    return out;
+  },
+
+  /* Rascunho que não vai ser terminado tem que poder sair da lista, senão a
+     lista vira ruído permanente e ninguém olha mais. Não apaga nada. */
+  dispensar(mod, id) {
+    const r = store.getById(mod, id);
+    if (!r) return;
+    r[pendProntuario.IGNORADA] = new Date().toISOString();
+    store.save(mod, r);
+    toast('Pendência dispensada — o documento continua salvo');
+    pendProntuario.abrir();
+    try { pendProntuario.renderDashboard(); } catch (e) {}
+  },
+
+  abrir() {
+    const lista = pendProntuario.listar();
+    const linhas = lista.map(p =>
+      '<tr>' +
+      '<td style="white-space:nowrap">' + utils.formatarData(p.data) + '</td>' +
+      '<td><b>' + utils.escapeHTML(p.nome || '—') + '</b><br><small style="color:var(--text-mute)">' +
+        utils.escapeHTML(pendProntuario.ROT[p.mod] || p.mod) + '</small></td>' +
+      '<td style="color:' + (p.tipo === 'sem_ficha' ? '#b3261e' : 'var(--text-soft)') + ';font-size:.82rem">' +
+        utils.escapeHTML(p.motivo) + '</td>' +
+      '<td style="white-space:nowrap">' +
+        (p.tipo === 'sem_ficha'
+          ? '<button class="btn btn-xs btn-primary" onclick="modal.close(); agenda.atender(\'' + p.id + '\')" title="Abrir a ficha já preenchida com os dados do compromisso">▶ Fazer a ficha</button> '
+          : '<button class="btn btn-xs btn-primary" onclick="modal.close(); dashboard._abrirFicha(\'' + p.mod + '\',\'' + p.id + '\')" title="Abrir para terminar">✏️ Continuar</button> ') +
+        '<button class="btn btn-xs" onclick="pendProntuario.dispensar(\'' + p.mod + '\',\'' + p.id + '\')" title="Tirar da lista sem apagar o documento">✕ Dispensar</button>' +
+      '</td></tr>').join('');
+    const corpo = !lista.length
+      ? '<p style="color:var(--text-mute)">🎉 Nenhum documento pendente. Rascunho de hoje não conta — é trabalho em curso.</p>'
+      : '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">Documentos de dias anteriores que ficaram <b>em rascunho</b>, e cirurgias agendadas <b>sem ficha</b>. ' +
+        'Rascunho de hoje não entra. <b>Dispensar</b> tira da lista sem apagar nada.</p>' +
+        '<div style="max-height:52vh;overflow:auto"><table class="dash-detail-table" style="margin:0"><thead><tr><th>Data</th><th>Paciente</th><th>O que falta</th><th>Ação</th></tr></thead><tbody>' +
+        linhas + '</tbody></table></div>';
+    modal.open('📋 Pendências de prontuário (' + lista.length + ')', corpo,
+      '<button class="btn" onclick="modal.close()">Fechar</button>');
+    return true;
+  },
+
+  renderDashboard() {
+    const card = document.getElementById('pend-prontuario-card');
+    if (!card) return;
+    if (!pendProntuario.podeVer()) { card.style.display = 'none'; return; }
+    const lista = pendProntuario.listar();
+    card.style.display = lista.length ? '' : 'none';
+    const n = document.getElementById('pend-prontuario-n');
+    if (n) n.textContent = lista.length;
+    const b = document.getElementById('pend-prontuario-btn');
+    if (b) b.textContent = '📋 Ver pendências (' + lista.length + ')';
+  }
+};
+try { window.pendProntuario = pendProntuario; } catch (e) {}
 
 /* ============================================================================
    MIGRAÇÃO FASE 4 — dados atuais → banco relacional (patients/encounters/…)

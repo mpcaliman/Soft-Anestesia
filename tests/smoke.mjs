@@ -12622,6 +12622,86 @@ await test('Pendência de convênio é uma linha por cobrança, não uma por doc
   await page.close();
 });
 
+/* 188) Pendência tem dois tipos, e eles não se misturam: o dinheiro
+   (faturamento, glosa, cobrança, nota) e o PRONTUÁRIO (documento pela metade,
+   cirurgia sem ficha). Juntá-los numa lista só foi o que tornou a janela de
+   convênio ilegível. Este é o cartão clínico, par do financeiro. */
+await test('Pendências de prontuário: rascunho de dia passado e cirurgia sem ficha — e nada além disso', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1000);
+
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    const hoje = utils.hojeISO();
+    const ontem = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const antigo = new Date(Date.now() - 200 * 86400000).toISOString().slice(0, 10);
+    ['anestesia', 'pre', 'consulta', 'recuperacao', 'termo', 'prescricao', 'risco', 'agenda', 'financeiro']
+      .forEach(m => store.setList(m, []));
+
+    store.save('pre', { nome: 'RASC ONTEM', data_avaliacao: ontem });                       /* entra */
+    store.save('consulta', { nome: 'RASC HOJE', data_consulta: hoje });                     /* não: em curso */
+    store.save('anestesia', { paciente: { nome: 'FINALIZADA' }, procedimento: { data: ontem }, _finalizado: true }); /* não */
+    store.save('termo', { nome: 'MUITO ANTIGO', data: antigo });                            /* não: fora da janela */
+    store.save('agenda', { paciente: 'SEM FICHA', data: ontem, tipo: 'Cirurgia' });         /* entra */
+    store.save('agenda', { paciente: 'CONSULTA AGENDADA', data: ontem, tipo: 'Consulta' }); /* não: não é cirurgia */
+    /* cirurgia agendada que já tem ficha não cobra nada por estar na agenda */
+    store.save('agenda', { paciente: 'TEM FICHA', data: ontem, tipo: 'Cirurgia' });
+    store.save('anestesia', { paciente: { nome: 'TEM FICHA' }, procedimento: { data: ontem }, _finalizado: true });
+
+    const sel = document.getElementById('dash-escopo'); if (sel) sel.value = 'clinica';
+    const l = pendProntuario.listar();
+    const nomes = l.map(p => p.nome);
+    out.rascunhoDeOntem = l.some(p => p.nome === 'RASC ONTEM' && p.tipo === 'rascunho');
+    out.cirurgiaSemFicha = l.some(p => p.nome === 'SEM FICHA' && p.tipo === 'sem_ficha');
+    out.foraHoje = !nomes.includes('RASC HOJE');
+    out.foraFinalizada = !nomes.includes('FINALIZADA');
+    out.foraAntigo = !nomes.includes('MUITO ANTIGO');
+    out.foraConsultaAgendada = !nomes.includes('CONSULTA AGENDADA');
+    out.foraQuemTemFicha = !l.some(p => p.nome === 'TEM FICHA');
+    out.n = l.length;
+
+    /* o cartão do Dashboard aparece com a conta */
+    ui.navegar('dashboard'); await new Promise(res => setTimeout(res, 1400));
+    try { modal.close(); } catch (e) {}
+    const sel2 = document.getElementById('dash-escopo'); if (sel2) sel2.value = 'clinica';
+    pendProntuario.renderDashboard();
+    const card = document.getElementById('pend-prontuario-card');
+    out.cardVisivel = !!card && card.style.display !== 'none';
+    out.cardConta = (document.getElementById('pend-prontuario-n') || {}).textContent;
+
+    /* dispensar tira da lista e NÃO apaga o documento */
+    const alvo = l.find(p => p.tipo === 'rascunho');
+    pendProntuario.dispensar(alvo.mod, alvo.id);
+    try { modal.close(); } catch (e) {}
+    out.saiuAoDispensar = !pendProntuario.listar().some(p => p.id === alvo.id);
+    out.documentoContinua = !!store.getById(alvo.mod, alvo.id);
+
+    /* e não é a mesma lista da de convênio: aquela é financeira */
+    out.saoListasDiferentes = pendProntuario.listar !== pendencias.listar;
+    return out;
+  });
+
+  assert(r.rascunhoDeOntem, 'documento em rascunho de um dia que já passou é pendência de prontuário');
+  assert(r.cirurgiaSemFicha, 'cirurgia agendada no passado sem ficha também');
+  assert(r.foraHoje, 'rascunho de HOJE não entra — é trabalho em curso, não pendência');
+  assert(r.foraFinalizada, 'documento finalizado não entra');
+  assert(r.foraAntigo, 'e o que está fora da janela de 90 dias também não');
+  assert(r.foraConsultaAgendada, 'consulta agendada não cobra ficha de anestesia');
+  assert(r.foraQuemTemFicha, 'nem a cirurgia que já tem a ficha feita');
+  assert(r.n === 2, 'ao todo, duas pendências no cenário (achou ' + r.n + ')');
+  assert(r.cardVisivel && r.cardConta === '2', 'o cartão aparece no Dashboard com a conta certa (achou ' + r.cardConta + ')');
+  assert(r.saiuAoDispensar && r.documentoContinua, 'dispensar tira da lista sem apagar o documento');
+  assert(r.saoListasDiferentes, 'é uma lista própria — a de convênio segue sendo só financeira');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
