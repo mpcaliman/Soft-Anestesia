@@ -12622,6 +12622,156 @@ await test('Pendência de convênio é uma linha por cobrança, não uma por doc
   await page.close();
 });
 
+/* 188) Pendência tem dois tipos, e eles não se misturam: o dinheiro
+   (faturamento, glosa, cobrança, nota) e o PRONTUÁRIO (documento pela metade,
+   cirurgia sem ficha). Juntá-los numa lista só foi o que tornou a janela de
+   convênio ilegível. Este é o cartão clínico, par do financeiro. */
+await test('Pendências de prontuário: rascunho de dia passado e cirurgia sem ficha — e nada além disso', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1000);
+
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    const hoje = utils.hojeISO();
+    const ontem = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const antigo = new Date(Date.now() - 200 * 86400000).toISOString().slice(0, 10);
+    ['anestesia', 'pre', 'consulta', 'recuperacao', 'termo', 'prescricao', 'risco', 'agenda', 'financeiro']
+      .forEach(m => store.setList(m, []));
+
+    store.save('pre', { nome: 'RASC ONTEM', data_avaliacao: ontem });                       /* entra */
+    store.save('consulta', { nome: 'RASC HOJE', data_consulta: hoje });                     /* não: em curso */
+    store.save('anestesia', { paciente: { nome: 'FINALIZADA' }, procedimento: { data: ontem }, _finalizado: true }); /* não */
+    store.save('termo', { nome: 'MUITO ANTIGO', data: antigo });                            /* não: fora da janela */
+    store.save('agenda', { paciente: 'SEM FICHA', data: ontem, tipo: 'Cirurgia' });         /* entra */
+    store.save('agenda', { paciente: 'CONSULTA AGENDADA', data: ontem, tipo: 'Consulta' }); /* não: não é cirurgia */
+    /* cirurgia agendada que já tem ficha não cobra nada por estar na agenda */
+    store.save('agenda', { paciente: 'TEM FICHA', data: ontem, tipo: 'Cirurgia' });
+    store.save('anestesia', { paciente: { nome: 'TEM FICHA' }, procedimento: { data: ontem }, _finalizado: true });
+
+    const sel = document.getElementById('dash-escopo'); if (sel) sel.value = 'clinica';
+    const l = pendProntuario.listar();
+    const nomes = l.map(p => p.nome);
+    out.rascunhoDeOntem = l.some(p => p.nome === 'RASC ONTEM' && p.tipo === 'rascunho');
+    out.cirurgiaSemFicha = l.some(p => p.nome === 'SEM FICHA' && p.tipo === 'sem_ficha');
+    out.foraHoje = !nomes.includes('RASC HOJE');
+    out.foraFinalizada = !nomes.includes('FINALIZADA');
+    out.foraAntigo = !nomes.includes('MUITO ANTIGO');
+    out.foraConsultaAgendada = !nomes.includes('CONSULTA AGENDADA');
+    out.foraQuemTemFicha = !l.some(p => p.nome === 'TEM FICHA');
+    out.n = l.length;
+
+    /* o cartão do Dashboard aparece com a conta */
+    ui.navegar('dashboard'); await new Promise(res => setTimeout(res, 1400));
+    try { modal.close(); } catch (e) {}
+    const sel2 = document.getElementById('dash-escopo'); if (sel2) sel2.value = 'clinica';
+    pendProntuario.renderDashboard();
+    const card = document.getElementById('pend-prontuario-card');
+    out.cardVisivel = !!card && card.style.display !== 'none';
+    out.cardConta = (document.getElementById('pend-prontuario-n') || {}).textContent;
+
+    /* dispensar tira da lista e NÃO apaga o documento */
+    const alvo = l.find(p => p.tipo === 'rascunho');
+    pendProntuario.dispensar(alvo.mod, alvo.id);
+    try { modal.close(); } catch (e) {}
+    out.saiuAoDispensar = !pendProntuario.listar().some(p => p.id === alvo.id);
+    out.documentoContinua = !!store.getById(alvo.mod, alvo.id);
+
+    /* e não é a mesma lista da de convênio: aquela é financeira */
+    out.saoListasDiferentes = pendProntuario.listar !== pendencias.listar;
+    return out;
+  });
+
+  assert(r.rascunhoDeOntem, 'documento em rascunho de um dia que já passou é pendência de prontuário');
+  assert(r.cirurgiaSemFicha, 'cirurgia agendada no passado sem ficha também');
+  assert(r.foraHoje, 'rascunho de HOJE não entra — é trabalho em curso, não pendência');
+  assert(r.foraFinalizada, 'documento finalizado não entra');
+  assert(r.foraAntigo, 'e o que está fora da janela de 90 dias também não');
+  assert(r.foraConsultaAgendada, 'consulta agendada não cobra ficha de anestesia');
+  assert(r.foraQuemTemFicha, 'nem a cirurgia que já tem a ficha feita');
+  assert(r.n === 2, 'ao todo, duas pendências no cenário (achou ' + r.n + ')');
+  assert(r.cardVisivel && r.cardConta === '2', 'o cartão aparece no Dashboard com a conta certa (achou ' + r.cardConta + ')');
+  assert(r.saiuAoDispensar && r.documentoContinua, 'dispensar tira da lista sem apagar o documento');
+  assert(r.saoListasDiferentes, 'é uma lista própria — a de convênio segue sendo só financeira');
+  await page.close();
+});
+
+/* 189) "Minha produção tem que ser igual à da clínica, pois só eu produzo
+   nela." O painel decidia a autoria por `_updatedBy` — QUEM SALVOU POR ÚLTIMO.
+   Num consultório onde a secretária prepara e corrige registros, isso tirava
+   do painel do médico a produção que é dele. */
+await test('Pessoal = Clínica quando há um anestesista só — e volta a separar quando há sócio', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'mpcaliman@x',
+      nome: 'Marcelo Pandolfi Caliman', perfil: 'admin', modulos: auth.MODULOS.map(m => m.key),
+      soImpressao: [], role: 'gestor', organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1000);
+
+  const r = await page.evaluate(() => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    const hoje = utils.hojeISO();
+    /* o cadastro dele: um anestesista só */
+    store.setList('cad_profissionais', [
+      { _id: 'p1', nome: 'Marcelo Pandolfi Caliman', especialidade: 'Anestesiologia', responsavel: true },
+      { _id: 'p2', nome: 'Fulano Cirurgiao', especialidade: 'Cirurgia Geral' }
+    ]);
+    /* setList e não save: store.save reescreve _updatedBy, e é justamente ele
+       que este teste precisa controlar */
+    const mk = (id, nome, patch) => Object.assign({ _id: id, nome, data_avaliacao: hoje, _finalizado: true }, patch);
+    const base = [
+      mk('xA', 'A eu salvei', { _updatedBy: 'mpcaliman@x' }),
+      mk('xB', 'B secretaria salvou', { _updatedBy: 'auxiliompc@gmail.com' }),
+      mk('xC', 'C secretaria criou', { _updatedBy: 'mpcanestesiologia@gmail.com', _criadoPor: 'mpcanestesiologia@gmail.com' }),
+      mk('xD', 'D sem autoria', {}),
+      /* nome escrito de outro jeito: "Dr. Marcelo Caliman" x "Marcelo Pandolfi
+         Caliman". Nenhum contém o outro — o nome do meio quebra a sequência. */
+      mk('xE', 'E anestesista eu', { _updatedBy: 'auxiliompc@gmail.com', anestesiologista: 'Dr. Marcelo Caliman' })
+    ];
+    store.setList('pre', base);
+    const todos = store.list('pre');
+    out.clinica = dashboard._filtrarEscopo(todos, 'clinica').length;
+    out.pessoal = dashboard._filtrarEscopo(todos, 'pessoal').length;
+    out.souOUnico = dashboard._souOUnicoAnestesista();
+    out.nomeDeOutroJeito = dashboard._mesmaPessoa('Dr. Marcelo Caliman', dashboard._souEu());
+    out.naoConfundeOutraPessoa = !dashboard._mesmaPessoa('Marcelo Pandolfi Souza', dashboard._souEu());
+
+    /* com sócio no cadastro, a regra se desliga sozinha */
+    store.setList('cad_profissionais', [
+      { _id: 'p1', nome: 'Marcelo Pandolfi Caliman', especialidade: 'Anestesiologia', responsavel: true },
+      { _id: 'p3', nome: 'Socio Anestesista', especialidade: 'Anestesiologia' }
+    ]);
+    store.setList('pre', base.concat([
+      mk('xF', 'F do socio', { anestesiologista: 'Socio Anestesista' })
+    ]));
+    out.comSocio_souOUnico = dashboard._souOUnicoAnestesista();
+    const meusComSocio = dashboard._filtrarEscopo(store.list('pre'), 'pessoal').map(x => x._id);
+    out.socioNaoEhMeu = !meusComSocio.includes('xF');
+    out.comSocio_aindaTenhoOsMeus = meusComSocio.includes('xA') && meusComSocio.includes('xE');
+    store.setList('pre', []); store.setList('cad_profissionais', []);
+    return out;
+  });
+
+  assert(r.souOUnico, 'o cadastro com um anestesista só é reconhecido');
+  assert(r.clinica === 5, 'a clínica conta os 5');
+  assert(r.pessoal === 5, 'e a produção pessoal conta os mesmos 5 — quem salvou por último não decide de quem é o caso (achou ' + r.pessoal + ')');
+  assert(r.nomeDeOutroJeito, '"Dr. Marcelo Caliman" e "Marcelo Pandolfi Caliman" são a mesma pessoa — nenhum contém o outro, o nome do meio quebra a sequência');
+  assert(r.naoConfundeOutraPessoa, 'mas outro sobrenome não vira a mesma pessoa');
+  assert(!r.comSocio_souOUnico, 'com sócio anestesista no cadastro, a regra se desliga sozinha');
+  assert(r.socioNaoEhMeu, 'e o caso do sócio não entra na minha produção');
+  assert(r.comSocio_aindaTenhoOsMeus, 'sem que eu perca os meus');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
