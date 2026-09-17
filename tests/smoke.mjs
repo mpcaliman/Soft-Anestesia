@@ -12855,6 +12855,99 @@ await test('Detalhamento para faturamento junta plano, carteirinha, horários e 
   await page.close();
 });
 
+/* 191) A baixa da nuvem trazia TODAS as linhas de `documentos` com o registro
+   inteiro (anexos em base64 junto), sem filtro — e rodava a cada abertura do
+   app, a cada volta de foco, a cada volta da internet. Consumiu 2,5 GB dos
+   5 GB da cota em 12 dias; passada a cota, o Supabase responde 402 e a
+   sincronização para. Agora pede só o que mudou. */
+await test('Baixa da nuvem é incremental — e cai para a base inteira quando precisa', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    /* nuvem falsa com 200 registros "pesados", como os que carregam anexo */
+    const LINHAS = [];
+    for (let i = 0; i < 200; i++) {
+      const dia = '2026-09-0' + (1 + (i % 9));
+      LINHAS.push({ modulo: 'pre', doc_id: 'd' + i,
+        dados: { _id: 'd' + i, nome: 'P' + i, _updatedAt: dia + 'T10:00:00.000Z', blob: 'x'.repeat(5000) },
+        atualizado_em: dia + 'T10:00:00.000Z' });
+    }
+    let bytes = 0, pedidos = [];
+    cloud.config = () => ({ url: 'https://fake.supabase.co', anonKey: 'k' });
+    cloud.session = () => ({ user: { id: 'u1' }, access_token: 't' });
+    cloud._garantirToken = async () => true;
+    cloud._headers = () => ({});
+    window.fetch = async (url) => {
+      pedidos.push(url);
+      const u = new URL(url);
+      const gt = (u.search.match(/atualizado_em=gt\.([^&]+)/) || [])[1];
+      const desde = gt ? decodeURIComponent(gt) : '';
+      const off = parseInt((u.search.match(/offset=(\d+)/) || [])[1] || '0', 10);
+      const lim = parseInt((u.search.match(/limit=(\d+)/) || [])[1] || '500', 10);
+      const filtradas = desde ? LINHAS.filter(l => l.atualizado_em > desde) : LINHAS;
+      const corpo = JSON.stringify(filtradas.slice(off, off + lim));
+      bytes += corpo.length;
+      return { ok: true, json: async () => JSON.parse(corpo) };
+    };
+
+    store.setList('pre', []);
+    cloud.esquecerMarcaBaixa();
+
+    /* 1ª vez: sem marca → base inteira */
+    const r1 = await cloud._baixarTudo();
+    out.primeiraTrouxeTudo = (r1.porMod.pre || []).length === 200;
+    const bytesPrimeira = bytes;
+    store.setList('pre', r1.porMod.pre);
+    cloud._gravarMarca(r1.marca);
+    /* a marca é o carimbo do registro mais novo, não a hora deste aparelho */
+    out.marcaDoMaisNovo = r1.marca === '2026-09-09T10:00:00.000Z';
+
+    /* 2ª vez, nada mudou: só a janela de margem volta */
+    bytes = 0; pedidos = [];
+    const r2 = await cloud._baixarTudo();
+    out.usouFiltro = pedidos.some(u => /atualizado_em=gt/.test(u));
+    out.segundaBemMenor = bytes < bytesPrimeira * 0.2;
+
+    /* 3ª: chega um registro novo — ele TEM de vir */
+    LINHAS.push({ modulo: 'pre', doc_id: 'novo',
+      dados: { _id: 'novo', nome: 'NOVO', _updatedAt: '2026-09-20T10:00:00.000Z' },
+      atualizado_em: '2026-09-20T10:00:00.000Z' });
+    bytes = 0;
+    const r3 = await cloud._baixarTudo();
+    out.trouxeONovo = (r3.porMod.pre || []).some(x => x._id === 'novo');
+    out.economia = 1 - (bytes / bytesPrimeira);
+
+    /* 4ª: aparelho SEM nada gravado não pode fazer baixa incremental — o app
+       apareceria vazio e a pessoa acharia que perdeu tudo */
+    store.setList('pre', []);
+    const r4 = await cloud._baixarTudo();
+    out.aparelhoVazioBaixaTudo = (r4.porMod.pre || []).length === 201;
+
+    /* 5ª: "completo" força a base inteira mesmo com marca — é o botão de quem
+       quer reconstruir o aparelho */
+    store.setList('pre', r1.porMod.pre);
+    const r5 = await cloud._baixarTudo({ completo: true });
+    out.completoTrazTudo = (r5.porMod.pre || []).length === 201;
+
+    /* a marca é por usuário: a de um não pode filtrar a baixa do outro */
+    const k1 = cloud._marcaKey();
+    cloud.session = () => ({ user: { id: 'u2' }, access_token: 't' });
+    out.marcaPorUsuario = cloud._marcaKey() !== k1 && cloud._lerMarca() === '';
+    return out;
+  });
+
+  assert(r.primeiraTrouxeTudo, 'na primeira vez, sem marca, baixa a base inteira');
+  assert(r.marcaDoMaisNovo, 'a marca é o carimbo do registro mais novo que veio — o relógio deste aparelho não entra na conta');
+  assert(r.usouFiltro, 'da segunda vez em diante, pede só o que mudou');
+  assert(r.segundaBemMenor, 'e o que desce é uma fração do que descia antes');
+  assert(r.trouxeONovo, 'mas um registro novo continua chegando — economia que perde dado não serve');
+  assert(r.economia > 0.8, 'a economia medida passa de 80% já neste cenário (foi ' + (r.economia * 100).toFixed(0) + '%)');
+  assert(r.aparelhoVazioBaixaTudo, 'aparelho sem nada gravado baixa tudo: incremental aí deixaria o app vazio e a pessoa acharia que perdeu os dados');
+  assert(r.completoTrazTudo, '"completo" força a base inteira mesmo havendo marca');
+  assert(r.marcaPorUsuario, 'a marca é por usuário — a de um não filtra a baixa do outro');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

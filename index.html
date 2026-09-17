@@ -4590,7 +4590,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-17a</b><br>
+    v7.1 · build <b id="build-tag">2026-09-17b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -19146,6 +19146,7 @@ const cloud = {
     return true;
   },
   limparConfig() {
+    try { cloud.esquecerMarcaBaixa(); } catch (e) {}
     localStorage.removeItem(cloud.CFG_KEY);
     localStorage.removeItem(cloud.SESSION_KEY);
     toast('Configuração da nuvem removida');
@@ -19458,6 +19459,9 @@ const cloud = {
     return true;
   },
   logout(opts) {
+    /* A marca de baixa incremental é por usuário, mas limpá-la aqui garante
+       que quem entrar depois receba a base inteira em vez de uma faixa. */
+    try { cloud.esquecerMarcaBaixa(); } catch (e) {}
     localStorage.removeItem(cloud.SESSION_KEY);
     if (!(opts && opts.silent)) toast('Desconectado da nuvem');
     cloud._atualizarUI();
@@ -19677,8 +19681,11 @@ const cloud = {
           }
         }
       }
-      /* 3) Baixa da nuvem e mescla (a nuvem prevalece em conflito por data) */
-      const baixados = await cloud._baixarTudo();
+      /* 3) Baixa da nuvem e mescla (a nuvem prevalece em conflito por data).
+            Só o que mudou desde a última vez — "Enviar tudo" força a baixa
+            completa, que é o botão de quem quer reconstruir o aparelho. */
+      const resBaixa = await cloud._baixarTudo({ completo: opts.enviarTudo === true || opts.completo === true });
+      const baixados = resBaixa.porMod || {};
       let novos = 0;
       for (const mod of cloud.MODS) {
         const remotos = baixados[mod] || [];
@@ -19700,6 +19707,9 @@ const cloud = {
           .sort((a, b) => new Date(b._updatedAt || 0) - new Date(a._updatedAt || 0));
         store.setList(mod, mesclada);
       }
+      /* A marca só avança AGORA, depois de mesclar e gravar. Se algo estourar
+         no meio, a próxima sincronização repete a faixa em vez de pulá-la. */
+      cloud._gravarMarca(resBaixa.marca);
       localStorage.setItem('medsys.v7.cloud.ultimo_sync', new Date().toISOString());
       /* 4) Atualiza as configurações da organização (ex.: visibilidade dos
          registros) — best-effort, não bloqueia o sync */
@@ -19716,26 +19726,94 @@ const cloud = {
       cloud._syncing = false;
     }
   },
-  async _baixarTudo() {
-    if (!(await cloud._garantirToken())) return {};
-    const c = cloud.config(); const s = cloud.session();
-    const out = {};
+  /* ==========================================================================
+     BAIXA INCREMENTAL — só o que mudou desde a última vez
+
+     Esta função baixava TODAS as linhas de `documentos` com o campo `dados`
+     inteiro (o registro completo, anexos em base64 junto), sem filtro. E ela
+     roda em toda sincronização: ao abrir o app, ao entrar, ao voltar o foco da
+     aba, ao voltar a internet.
+
+     Ou seja: cada abertura do app rebaixava o backup inteiro. Com três pessoas
+     usando, isso consumiu 2,5 GB dos 5 GB da cota em 12 dias — e, passada a
+     cota, o Supabase responde 402 e a sincronização simplesmente para.
+
+     Agora ela pede só `atualizado_em > marca`, como o canal relacional já
+     fazia. A marca só avança depois que a mesclagem deu certo.
+  ========================================================================== */
+  _MARCA_BAIXA: 'medsys.v7.cloud.marca_baixa',
+  /* por usuário: a marca de um não pode servir de filtro para o outro, senão
+     quem entrar depois não recebe nada */
+  _marcaKey() {
+    let uid = '';
+    try { const s = cloud.session(); uid = (s && s.user && s.user.id) || ''; } catch (e) {}
+    return cloud._MARCA_BAIXA + (uid ? '.' + uid : '');
+  },
+  _lerMarca() { try { return localStorage.getItem(cloud._marcaKey()) || ''; } catch (e) { return ''; } },
+  _gravarMarca(v) { try { if (v) localStorage.setItem(cloud._marcaKey(), v); } catch (e) {} },
+  esquecerMarcaBaixa() {
     try {
-      const r = await fetch(c.url + '/rest/v1/documentos?user_id=eq.' + s.user.id +
-        '&select=modulo,doc_id,dados,atualizado_em&order=atualizado_em.desc', {
-        headers: cloud._headers(true)
-      });
-      if (!r.ok) return {};
-      const rows = await r.json();
-      rows.forEach(row => {
-        if (cloud.MODS.indexOf(row.modulo) < 0) return;
-        out[row.modulo] = out[row.modulo] || [];
-        const d = row.dados || {};
-        if (!d._id) d._id = row.doc_id;
-        out[row.modulo].push(d);
+      localStorage.removeItem(cloud._marcaKey());
+      /* troca de conta: limpa as marcas de todos os usuários deste aparelho */
+      Object.keys(localStorage).forEach(k => {
+        if (k.indexOf(cloud._MARCA_BAIXA) === 0) localStorage.removeItem(k);
       });
     } catch (e) {}
-    return out;
+  },
+  /* O relógio que carimba `atualizado_em` é o do CLIENTE (ver _enviarOp), e
+     relógios de aparelhos diferentes não batem. Uma margem para trás evita
+     que um registro gravado por um celular alguns minutos atrasado caia no
+     buraco entre a marca e o filtro. Dez minutos custam quase nada de tráfego
+     e cobrem folgadamente o desvio de um telefone comum. */
+  _MARGEM_MS: 10 * 60 * 1000,
+
+  async _baixarTudo(opts = {}) {
+    if (!(await cloud._garantirToken())) return { porMod: {}, marca: '' };
+    const c = cloud.config(); const s = cloud.session();
+    const out = {};
+    let marca = cloud._lerMarca();
+    /* Aparelho sem nada gravado NÃO pode fazer baixa incremental: o app
+       apareceria vazio e a pessoa acharia que perdeu tudo. Aconteceria em
+       navegador com dados limpos, aba anônima, ou aparelho novo com a marca
+       vinda de um restore. Sem registro local, baixa tudo. */
+    let completo = opts.completo === true || !marca;
+    try { if (!completo && cloud._totalLocal() === 0) completo = true; } catch (e) {}
+
+    let filtro = '';
+    if (!completo) {
+      const t = new Date(new Date(marca).getTime() - cloud._MARGEM_MS);
+      if (!isNaN(t)) filtro = '&atualizado_em=gt.' + encodeURIComponent(t.toISOString());
+      else completo = true;
+    }
+
+    let maisNovo = '';
+    try {
+      /* Paginado: sem limite, o PostgREST corta em `max-rows` e o resto some
+         calado — registro que não volta é registro que parece perdido. */
+      const passo = 500;
+      for (let de = 0; ; de += passo) {
+        const r = await fetch(c.url + '/rest/v1/documentos?user_id=eq.' + s.user.id +
+          '&select=modulo,doc_id,dados,atualizado_em' + filtro +
+          '&order=atualizado_em.desc&limit=' + passo + '&offset=' + de, {
+          headers: cloud._headers(true)
+        });
+        if (!r.ok) return { porMod: {}, marca: '' };
+        const rows = await r.json();
+        rows.forEach(row => {
+          if (row.atualizado_em && row.atualizado_em > maisNovo) maisNovo = row.atualizado_em;
+          if (cloud.MODS.indexOf(row.modulo) < 0) return;
+          out[row.modulo] = out[row.modulo] || [];
+          const d = row.dados || {};
+          if (!d._id) d._id = row.doc_id;
+          out[row.modulo].push(d);
+        });
+        if (rows.length < passo) break;
+      }
+    } catch (e) { return { porMod: {}, marca: '' }; }
+    /* A marca nova é o carimbo do registro MAIS NOVO que veio — e não a hora
+       deste aparelho. Assim o relógio local nunca entra na conta. Sem linha
+       nova, a marca antiga continua valendo. */
+    return { porMod: out, marca: maisNovo || marca };
   },
 
   /* ---- Conta quantos registros locais existem (para mostrar na UI) ---- */
