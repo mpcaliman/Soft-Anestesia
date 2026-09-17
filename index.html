@@ -4590,7 +4590,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-12b</b><br>
+    v7.1 · build <b id="build-tag">2026-09-17a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -47509,6 +47509,216 @@ const financeiro = {
     financeiro.render();
     toast('Registro excluído');
   },
+
+  /* ==========================================================================
+     DETALHAMENTO PARA FATURAMENTO
+
+     Preencher uma guia exige dados que hoje estão espalhados: o plano e a
+     carteirinha vêm do cadastro do paciente, os horários de sala vêm da ficha
+     de anestesia, os códigos e os fatores vêm do próprio lançamento. Quem
+     fatura abria três telas e anotava num papel.
+
+     Aqui é uma janela só, por lançamento, montada a partir de onde o dado
+     mora — e que DIZ O QUE ESTÁ FALTANDO em vez de mostrar campo vazio: guia
+     devolvida por falta de carteirinha custa mais do que a consulta.
+  ========================================================================== */
+  faturamento: {
+    /* o documento clínico que gerou este lançamento */
+    _origem(x) {
+      if (!x || !x._origemId) return null;
+      for (const mod of ['anestesia', 'pre', 'consulta', 'recuperacao']) {
+        try { const d = store.getById(mod, x._origemId); if (d) return { mod, doc: d }; } catch (e) {}
+      }
+      return null;
+    },
+    /* o cadastro central do paciente, que é onde carteirinha e acomodação moram */
+    _paciente(x) {
+      try {
+        const alvo = meuDia._norm(x && x.paciente);
+        if (!alvo) return null;
+        return (store.list('pacientes') || []).find(p => meuDia._norm(p.nome) === alvo) || null;
+      } catch (e) { return null; }
+    },
+    DIA_SEMANA: ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'],
+
+    dados(x) {
+      const o = financeiro.faturamento._origem(x) || {};
+      const doc = o.doc || {};
+      const pr = (doc.procedimento && typeof doc.procedimento === 'object') ? doc.procedimento : {};
+      const pac = (doc.paciente && typeof doc.paciente === 'object') ? doc.paciente : {};
+      const cad = financeiro.faturamento._paciente(x) || {};
+      const primeiro = (...vs) => { for (const v of vs) { const s = String(v == null ? '' : v).trim(); if (s) return s; } return ''; };
+
+      const dataProc = primeiro(x.data_proc, pr.data, doc.data, doc.data_avaliacao, doc.data_consulta);
+      let diaSemana = '', fimDeSemana = false;
+      if (/^\d{4}-\d{2}-\d{2}/.test(dataProc)) {
+        const d = new Date(dataProc + 'T12:00:00');
+        if (!isNaN(d)) { diaSemana = financeiro.faturamento.DIA_SEMANA[d.getDay()]; fimDeSemana = d.getDay() === 0 || d.getDay() === 6; }
+      }
+      const acom = primeiro(x.acomodacao, pac.acomodacao, doc.origem, doc.acomodacao,
+                            (function () { try { return linker._acomodacaoDoCadastro(cad); } catch (e) { return ''; } })());
+
+      return {
+        origemMod: o.mod || '',
+        paciente: primeiro(x.paciente, pac.nome, doc.nome),
+        plano: primeiro(x.convenio, pac.convenio, pac.plano, cad.plano, cad.convenio, doc.convenio),
+        carteirinha: primeiro(pac.carteirinha, pac.matricula, cad.carteirinha, cad.matricula, doc.carteirinha, doc.matricula),
+        guia: primeiro(x.senha, pac.senha, doc.senha),
+        tipoPagamento: primeiro(x.tipo_pagamento),
+        dataProc, diaSemana, fimDeSemana,
+        salaEntrada: primeiro(pr.hora_sala_entrada, doc.hora_sala_entrada),
+        salaSaida: primeiro(pr.hora_sala_saida, doc.hora_sala_saida),
+        anestIni: primeiro(pr.hora_inicio, doc.hora_inicio),
+        anestFim: primeiro(pr.hora_fim, doc.hora_fim),
+        duracao: primeiro(pr.duracao, doc.duracao),
+        cirIni: primeiro(pr.hora_cir_inicio), cirFim: primeiro(pr.hora_cir_fim),
+        acomodacao: acom,
+        fatorAcom: primeiro(x.fator_acomodacao),
+        urgencia: !!x.urgencia,
+        percUrgencia: primeiro(x.perc_urgencia),
+        hospital: primeiro(x.hospital, pr.hospital, doc.hospital),
+        cirurgiao: primeiro(x.cirurgiao, pr.cirurgiao, doc.cirurgiao),
+        procedimento: primeiro(x.procedimento, pr.descricao),
+        codigos: (Array.isArray(x.codigos) ? x.codigos : []).filter(c => c && (c.codigo || c.descricao)),
+        codigoUnico: primeiro(x.cbhpm_codigo),
+        descUnica: primeiro(x.cbhpm_descricao),
+        previsto: parseFloat(x.valor_previsto) || 0,
+        recebido: parseFloat(x.valor_recebido) || 0,
+        glosa: parseFloat(x.glosa) || 0
+      };
+    },
+
+    /* O que falta para a guia ser preenchida. Guia devolvida por falta de
+       carteirinha custa mais caro do que a consulta que a gerou. */
+    _faltas(d) {
+      const f = [];
+      if (!d.carteirinha) f.push('Carteirinha — preencha no cadastro do paciente (módulo Pacientes)');
+      if (!d.guia) f.push('Guia / senha de autorização — preencha no lançamento ou na ficha');
+      if (!d.codigos.length && !d.codigoUnico) f.push('Código a cobrar — nenhum código TUSS/CBHPM neste lançamento');
+      if (!d.dataProc) f.push('Data da execução');
+      if (d.origemMod === 'anestesia' && !d.salaEntrada && !d.anestIni) f.push('Horários de sala — a ficha de anestesia não tem entrada nem início preenchidos');
+      if (!d.acomodacao) f.push('Acomodação (apartamento / enfermaria)');
+      return f;
+    },
+
+    /* Texto puro para colar no site do convênio */
+    texto(x) {
+      const d = financeiro.faturamento.dados(x);
+      const L = [];
+      const p = (r, v) => { if (v) L.push(r + ': ' + v); };
+      p('Paciente', d.paciente);
+      p('Plano', d.plano); p('Carteirinha', d.carteirinha); p('Guia/senha', d.guia);
+      p('Data da execução', utils.formatarData(d.dataProc) + (d.diaSemana ? ' (' + d.diaSemana + ')' : ''));
+      p('Entrada em sala', d.salaEntrada); p('Saída de sala', d.salaSaida);
+      p('Início da anestesia', d.anestIni); p('Fim da anestesia', d.anestFim);
+      p('Duração', d.duracao);
+      p('Acomodação', d.acomodacao);
+      if (d.urgencia) L.push('Urgência / feriado / FDS / noturno: sim' + (d.percUrgencia ? ' (+' + d.percUrgencia + '%)' : ''));
+      p('Hospital', d.hospital); p('Cirurgião', d.cirurgiao);
+      const cods = d.codigos.length ? d.codigos : (d.codigoUnico ? [{ codigo: d.codigoUnico, descricao: d.descUnica }] : []);
+      if (cods.length) {
+        L.push('Códigos:');
+        cods.forEach(c => L.push('  ' + [c.codigo, c.descricao, c.porte ? 'porte ' + c.porte : '',
+          c.qtd && Number(c.qtd) > 1 ? 'qtd ' + c.qtd : '', c.grau && String(c.grau) !== '100' ? c.grau + '%' : '']
+          .filter(Boolean).join(' · ')));
+      }
+      return L.join('\n');
+    },
+    copiar(id) {
+      const x = store.getById('financeiro', id);
+      if (!x) return;
+      const t = financeiro.faturamento.texto(x);
+      try {
+        navigator.clipboard.writeText(t)
+          .then(() => toast('📋 Detalhamento copiado — cole na guia do convênio'))
+          .catch(() => financeiro.faturamento._copiarNaMao(t));
+      } catch (e) { financeiro.faturamento._copiarNaMao(t); }
+    },
+    _copiarNaMao(t) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        document.execCommand('copy'); ta.remove();
+        toast('📋 Detalhamento copiado');
+      } catch (e) { toast('Não consegui copiar automaticamente', 'warn'); }
+    },
+
+    abrir(id) {
+      const x = store.getById('financeiro', id);
+      if (!x) { toast('Lançamento não encontrado', 'warn'); return; }
+      const d = financeiro.faturamento.dados(x);
+      const e = utils.escapeHTML;
+      const vazio = '<span style="color:#b3261e">— falta</span>';
+      const campo = (rot, val, extra) =>
+        '<div style="padding:5px 0;border-bottom:1px solid var(--border)">' +
+        '<div style="font-size:.7rem;color:var(--text-mute);text-transform:uppercase;letter-spacing:.3px">' + e(rot) + '</div>' +
+        '<div style="font-size:.9rem">' + (val ? e(val) : vazio) + (extra || '') + '</div></div>';
+
+      const cods = d.codigos.length ? d.codigos : (d.codigoUnico ? [{ codigo: d.codigoUnico, descricao: d.descUnica }] : []);
+      const tabCod = cods.length
+        ? '<table class="dash-detail-table" style="margin:0"><thead><tr><th>Código</th><th>Procedimento</th><th>Porte</th><th>Qtd</th><th>Grau</th><th style="text-align:right">Previsto</th></tr></thead><tbody>' +
+          cods.map(c => '<tr>' +
+            '<td><b>' + e(c.codigo || '—') + '</b></td>' +
+            '<td style="font-size:.82rem">' + e(c.descricao || '') + '</td>' +
+            '<td>' + e(c.porte || '—') + '</td>' +
+            '<td>' + e(String(c.qtd || 1)) + '</td>' +
+            '<td>' + e(String(c.grau || '100')) + '%</td>' +
+            '<td style="text-align:right">' + (c.valor_previsto ? 'R$ ' + utils.formatarBR(c.valor_previsto) : '—') + '</td>' +
+            '</tr>').join('') + '</tbody></table>'
+        : '<p style="color:#b3261e;font-size:.85rem;margin:0">Nenhum código lançado — é o que o convênio cobra na guia.</p>';
+
+      /* O dia da semana é DERIVADO da data: quem fatura não precisa abrir o
+         calendário para saber se cabe acréscimo de fim de semana. Feriado o
+         sistema não sabe — e não vai fingir que sabe. */
+      const dataExtra = d.diaSemana
+        ? ' <span style="font-size:.78rem;color:' + (d.fimDeSemana ? '#7a4b12' : 'var(--text-mute)') + '">· ' +
+          e(d.diaSemana) + (d.fimDeSemana ? ' (fim de semana)' : '') + '</span>' : '';
+      const urg = d.urgencia
+        ? 'Sim' + (d.percUrgencia ? ' · acréscimo de ' + d.percUrgencia + '%' : '')
+        : (d.fimDeSemana ? 'Não marcado — mas a data cai em ' + d.diaSemana : 'Não');
+
+      const faltas = financeiro.faturamento._faltas(d);
+      const corpo =
+        (faltas.length
+          ? '<div style="background:#fff4e5;border:1px solid #f0c890;color:#7a4b12;border-radius:8px;padding:10px 12px;font-size:.82rem;margin-bottom:12px">' +
+            '⚠️ <b>Falta para a guia:</b><ul style="margin:6px 0 0;padding-left:18px">' +
+            faltas.map(f => '<li>' + e(f) + '</li>').join('') + '</ul></div>'
+          : '<div style="background:#eaf7ee;border:1px solid #b6e0c2;color:#1c5c33;border-radius:8px;padding:8px 12px;font-size:.82rem;margin-bottom:12px">✅ Tudo que a guia pede está preenchido.</div>') +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 18px">' +
+          campo('Paciente', d.paciente) +
+          campo('Plano', d.plano + (d.tipoPagamento && d.tipoPagamento !== d.plano ? ' · ' + d.tipoPagamento : '')) +
+          campo('Carteirinha', d.carteirinha) +
+          campo('Guia / senha', d.guia) +
+          campo('Data da execução', utils.formatarData(d.dataProc), dataExtra) +
+          campo('Acomodação', d.acomodacao ? (d.acomodacao === 'apartamento' ? 'Apartamento' : 'Enfermaria') +
+                (d.fatorAcom && d.fatorAcom !== '1' ? ' · fator ×' + d.fatorAcom : '') : '') +
+          campo('Entrada em sala', d.salaEntrada) +
+          campo('Saída de sala', d.salaSaida) +
+          campo('Início da anestesia', d.anestIni) +
+          campo('Fim da anestesia', d.anestFim) +
+          campo('Duração', d.duracao) +
+          campo('Urgência / feriado / FDS / noturno', urg) +
+          campo('Hospital', d.hospital) +
+          campo('Cirurgião', d.cirurgiao) +
+        '</div>' +
+        '<h3 style="font-size:.9rem;margin:16px 0 8px">Códigos a cobrar</h3>' + tabCod +
+        '<div style="display:flex;gap:18px;margin-top:12px;font-size:.86rem">' +
+          '<span>Previsto: <b>R$ ' + utils.formatarBR(d.previsto) + '</b></span>' +
+          '<span>Recebido: <b>R$ ' + utils.formatarBR(d.recebido) + '</b></span>' +
+          (d.glosa ? '<span style="color:#b3261e">Glosa: <b>R$ ' + utils.formatarBR(d.glosa) + '</b></span>' : '') +
+        '</div>' +
+        (d.origemMod
+          ? '<p style="font-size:.76rem;color:var(--text-mute);margin:12px 0 0">Horários e dados clínicos vêm de: ' +
+            e({ anestesia: 'Ficha de anestesia', pre: 'Pré-anestésica', consulta: 'Consulta', recuperacao: 'Recuperação (SRPA)' }[d.origemMod] || d.origemMod) + '.</p>'
+          : '<p style="font-size:.76rem;color:var(--text-mute);margin:12px 0 0">Lançamento avulso — sem documento clínico vinculado, então não há horários de sala para trazer.</p>');
+
+      modal.open('🧾 Detalhamento para faturamento — ' + (d.paciente || 'sem nome'), corpo,
+        '<button class="btn" onclick="financeiro.faturamento.copiar(\'' + id + '\')">📋 Copiar</button>' +
+        '<button class="btn btn-primary" onclick="modal.close(); financeiro.editar(\'' + id + '\')">✏️ Editar lançamento</button>' +
+        '<button class="btn btn-ghost" onclick="modal.close()">Fechar</button>');
+    }
+  },
   calcDif() {
     const f = document.getElementById(financeiro.formId);
     const prev = parseFloat(f.querySelector('[name="valor_previsto"]').value) || 0;
@@ -48006,6 +48216,7 @@ const financeiro = {
             <td data-label="Periciado" style="text-align:center">${peric}</td>
             <td data-label="Status"><span class="status-pill ${x.status || ''}">${utils.escapeHTML(x.status || '—')}</span></td>
             <td class="actions-cell">
+              <button class="btn btn-xs" onclick="financeiro.faturamento.abrir('${x._id}')" title="Detalhamento para faturamento: plano, carteirinha, códigos, horários, acomodação e caráter">🧾</button>
               <button class="btn btn-xs" onclick="financeiro.editar('${x._id}')">Editar</button>
               <button class="btn btn-xs btn-danger" onclick="financeiro.excluir('${x._id}')">Excluir</button>
             </td>

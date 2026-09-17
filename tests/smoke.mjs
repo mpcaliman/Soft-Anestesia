@@ -12772,6 +12772,89 @@ await test('Pessoal = Clínica quando há um anestesista só — e volta a separ
   await page.close();
 });
 
+/* 190) Preencher uma guia exige dados espalhados: plano e carteirinha vêm do
+   cadastro do paciente, horários de sala vêm da ficha de anestesia, códigos e
+   fatores vêm do lançamento. Quem fatura abria três telas e anotava num papel.
+   O ícone 🧾 junta tudo numa janela — e diz o que está faltando. */
+await test('Detalhamento para faturamento junta plano, carteirinha, horários e códigos — e acusa o que falta', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1000);
+
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['financeiro', 'anestesia', 'pacientes'].forEach(m => store.setList(m, []));
+    const sabado = '2026-09-12';   /* para o dia da semana ser derivado */
+    /* a carteirinha mora SÓ no cadastro do paciente */
+    store.setList('pacientes', [{ _id: 'pa1', nome: 'MARIA DAS GRACAS', carteirinha: '0123456789',
+      plano: 'Bradesco Saúde', apartamento: true }]);
+    /* os horários moram SÓ na ficha */
+    const ficha = store.save('anestesia', {
+      paciente: { nome: 'MARIA DAS GRACAS', convenio: 'Bradesco Saúde', senha: 'K3EK7V7' },
+      procedimento: { data: sabado, descricao: 'Colecistectomia', hora_sala_entrada: '07:30',
+                      hora_sala_saida: '09:45', hora_inicio: '07:40', hora_fim: '09:35',
+                      duracao: '1h55', cirurgiao: 'Dr. Fulano', hospital: 'Hospital X' },
+      _finalizado: true });
+    const lanc = store.save('financeiro', {
+      paciente: 'MARIA DAS GRACAS', convenio: 'Bradesco Saúde', senha: 'K3EK7V7',
+      data_proc: sabado, procedimento: 'Colecistectomia', hospital: 'Hospital X', cirurgiao: 'Dr. Fulano',
+      acomodacao: 'apartamento', fator_acomodacao: '2', urgencia: true, perc_urgencia: '30',
+      valor_previsto: 1800, valor_recebido: 0, _origemId: ficha._id,
+      codigos: [{ codigo: '3.09.12.24-5', descricao: 'Colecistectomia', porte: '5B', qtd: 1, grau: '100', valor_previsto: 1800 }]
+    });
+
+    const d = financeiro.faturamento.dados(store.getById('financeiro', lanc._id));
+    out.carteirinhaDoCadastro = d.carteirinha === '0123456789';
+    out.horariosDaFicha = [d.salaEntrada, d.salaSaida, d.anestIni, d.anestFim].join('/') === '07:30/09:45/07:40/09:35';
+    out.acomodacao = d.acomodacao === 'apartamento';
+    out.diaSemanaDerivado = d.diaSemana === 'sábado' && d.fimDeSemana === true;
+    out.temCodigo = d.codigos.length === 1;
+    out.semFaltas = financeiro.faturamento._faltas(d).length === 0;
+    /* o texto para colar na guia traz o essencial */
+    const txt = financeiro.faturamento.texto(store.getById('financeiro', lanc._id));
+    out.textoCompleto = ['0123456789', 'K3EK7V7', '07:30', '09:45', '3.09.12.24-5', 'apartamento']
+      .every(s => txt.includes(s));
+
+    /* lançamento pelado: a janela tem de DIZER o que falta, não mostrar vazio */
+    const cru = store.save('financeiro', { paciente: 'JOAO SEM DADOS', data_proc: sabado });
+    const faltasCru = financeiro.faturamento._faltas(financeiro.faturamento.dados(store.getById('financeiro', cru._id)));
+    out.acusaFaltas = faltasCru.length >= 4;
+    out.diagnosticaCarteirinha = faltasCru.some(f => /carteirinha/i.test(f));
+    out.dizOndePreencher = faltasCru.some(f => /cadastro do paciente/i.test(f));
+
+    /* o ícone está em cada linha, e a janela abre com os dados */
+    ui.navegar('financeiro'); await new Promise(res => setTimeout(res, 1400));
+    try { modal.close(); } catch (e) {}
+    financeiro.render();
+    out.temIcone = /faturamento\.abrir/.test(document.getElementById('financeiro-tbody').innerHTML);
+    financeiro.faturamento.abrir(lanc._id);
+    await new Promise(res => setTimeout(res, 300));
+    const html = (document.querySelector('.modal-body') || document.body).innerHTML;
+    out.janelaMostra = html.includes('0123456789') && html.includes('07:30') && /sábado/i.test(html);
+    try { modal.close(); } catch (e) {}
+    return out;
+  });
+
+  assert(r.temIcone, 'cada lançamento tem o ícone de detalhamento');
+  assert(r.carteirinhaDoCadastro, 'a carteirinha vem do cadastro do paciente — ela não está no lançamento');
+  assert(r.horariosDaFicha, 'entrada, saída, início e fim vêm da ficha de anestesia');
+  assert(r.acomodacao, 'a acomodação aparece');
+  assert(r.diaSemanaDerivado, 'o dia da semana é derivado da data: quem fatura não precisa abrir o calendário para saber se cabe acréscimo de FDS');
+  assert(r.temCodigo, 'os códigos a cobrar aparecem');
+  assert(r.semFaltas, 'com tudo preenchido, a janela não inventa pendência');
+  assert(r.textoCompleto, 'o texto para colar na guia traz carteirinha, guia, horários, código e acomodação');
+  assert(r.acusaFaltas, 'lançamento sem dados acusa o que falta, em vez de mostrar campo vazio');
+  assert(r.diagnosticaCarteirinha && r.dizOndePreencher, 'e diz QUAL dado falta e ONDE preenchê-lo');
+  assert(r.janelaMostra, 'a janela renderiza os dados reunidos');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
