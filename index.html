@@ -4590,7 +4590,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-17b</b><br>
+    v7.1 · build <b id="build-tag">2026-09-18a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -42505,15 +42505,60 @@ const autocomplete = {
     });
   },
 
+  /* Todo mundo que este aparelho já conhece como paciente.
+
+     Só o cadastro central não basta: nada registra o paciente lá
+     automaticamente, então quem só tem ficha, pré ou consulta não aparecia na
+     lista — e a pessoa que atendeu ontem parecia não existir. Aqui o cadastro
+     vem primeiro (é o registro completo) e os nomes vistos nos módulos
+     clínicos completam, sem repetir. */
+  _MODS_NOME: ['anestesia', 'pre', 'consulta', 'recuperacao', 'termo', 'prescricao', 'documentos', 'risco'],
+  listaPacientes() {
+    const norm = s => { try { return linker._normNome(s); } catch (e) { return String(s || '').toLowerCase().trim(); } };
+    const vistos = new Set();
+    const out = [];
+    try {
+      pacientes.list().forEach(p => {
+        const k = norm(p.nome);
+        if (!k || vistos.has(k)) return;
+        vistos.add(k);
+        out.push({ value: p._id, label: p.nome,
+          meta: [p.cpf, p.plano, p.carteirinha].filter(Boolean).join(' · '), data: p });
+      });
+    } catch (e) {}
+    /* conhecidos só pelos registros clínicos */
+    const ROT = { anestesia: 'ficha', pre: 'pré-anestésica', consulta: 'consulta',
+                  recuperacao: 'SRPA', termo: 'termo', prescricao: 'receituário',
+                  documentos: 'documento', risco: 'risco' };
+    autocomplete._MODS_NOME.forEach(mod => {
+      let lst = [];
+      try { lst = store.list(mod) || []; } catch (e) { return; }
+      lst.forEach(it => {
+        const nome = (it.paciente && it.paciente.nome) || it.paciente_nome || it.nome ||
+                     (typeof it.paciente === 'string' ? it.paciente : '');
+        const k = norm(nome);
+        if (!k || vistos.has(k)) return;
+        vistos.add(k);
+        const pac = (it.paciente && typeof it.paciente === 'object') ? it.paciente : it;
+        out.push({
+          value: '', label: nome,
+          meta: [pac.convenio || pac.plano, 'de ' + (ROT[mod] || mod)].filter(Boolean).join(' · '),
+          /* sem _id: não é registro do cadastro, e gravar esse id no vínculo
+             apontaria para o documento, não para o paciente */
+          data: { nome, sexo: pac.sexo, nascimento: pac.nascimento || pac.nasc,
+                  plano: pac.convenio || pac.plano, carteirinha: pac.carteirinha,
+                  prontuario: pac.prontuario, _semCadastro: true }
+        });
+      });
+    });
+    return out;
+  },
+
   /* Configurações por campo */
   attachPacientes(input, formId) {
     autocomplete.attach(
       input,
-      () => pacientes.list().map(p => ({
-        value: p._id, label: p.nome,
-        meta: [p.cpf, p.plano, p.carteirinha].filter(Boolean).join(' · '),
-        data: p
-      })),
+      () => autocomplete.listaPacientes(),
       (it) => autocomplete._aplicarPaciente(formId, it.data),
       (textoAtual) => {
         pacientes.modalNovoPaciente({ nome: textoAtual }, (saved) => {
@@ -42568,9 +42613,13 @@ const autocomplete = {
         }
       }
       setIfEmpty('convenio', p.plano);
-      let h = f.querySelector('[name="_paciente_id"]');
-      if (!h) { h = document.createElement('input'); h.type = 'hidden'; h.name = '_paciente_id'; f.appendChild(h); }
-      h.value = p._id;
+      /* Paciente conhecido só por um registro clínico não tem id de cadastro:
+         gravar o id do DOCUMENTO aqui criaria um vínculo para a coisa errada. */
+      if (p._id && !p._semCadastro) {
+        let h = f.querySelector('[name="_paciente_id"]');
+        if (!h) { h = document.createElement('input'); h.type = 'hidden'; h.name = '_paciente_id'; f.appendChild(h); }
+        h.value = p._id;
+      }
     }
     toast('Paciente "' + p.nome + '" carregado');
     /* AQUI ESTAVA A FALHA DA IMPORTAÇÃO DA PRÉ: escolher o paciente na lista
@@ -42583,7 +42632,9 @@ const autocomplete = {
     try {
       const MOD = {
         'form-anestesia': 'anestesia', 'form-pre': 'pre',
-        'form-consulta': 'consulta', 'form-recuperacao': 'recuperacao'
+        'form-consulta': 'consulta', 'form-recuperacao': 'recuperacao',
+        'form-documentos': 'documentos', 'form-prescricao': 'prescricao',
+        'form-termo': 'termo', 'form-risco': 'risco'
       }[formId];
       if (MOD && p.nome) {
         linker.autoPreencherDadosPaciente(p.nome, MOD);
@@ -42633,6 +42684,19 @@ const autocomplete = {
     /* Agenda também tem campo paciente — autocomplete + auto-preenchimento */
     const inpNomeAg = document.querySelector('#form-agenda [name="paciente"]');
     if (inpNomeAg) autocomplete.attachPacientes(inpNomeAg, 'form-agenda');
+    /* Documentos (atestado, declaração, laudo), receituário, termo e risco
+       ficaram de fora desta lista quando ela foi escrita — e são justamente os
+       que se faz DEPOIS, para um paciente que já existe. Quem ia emitir um
+       atestado digitava o nome inteiro e o sistema agia como se não a
+       conhecesse. */
+    [['#form-documentos [name="nome"]', 'form-documentos'],
+     ['#form-prescricao [name="nome"]', 'form-prescricao'],
+     ['#form-termo [name="nome"]', 'form-termo'],
+     ['#form-risco [name="nome"]', 'form-risco']
+    ].forEach(([sel, formId]) => {
+      const el = document.querySelector(sel);
+      if (el) autocomplete.attachPacientes(el, formId);
+    });
 
     /* Cirurgião */
     document.querySelectorAll('[name="cirurgiao"], [name="cirurgiao2"]').forEach(el => autocomplete.attachSimples(el, 'cad_cirurgioes'));

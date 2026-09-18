@@ -12948,6 +12948,84 @@ await test('Baixa da nuvem é incremental — e cai para a base inteira quando p
   await page.close();
 });
 
+/* 192) Emitir um atestado para paciente já cadastrada: digitava-se o nome e
+   nada aparecia. O autocomplete de paciente estava ligado só na ficha, pré,
+   consulta, SRPA e agenda — e ficou de fora justamente dos módulos que se usam
+   DEPOIS, para quem já existe: documentos (atestado), receituário, termo e
+   risco. Lá só havia o preenchimento no onblur, que exige o nome exato. */
+await test('Autocomplete de paciente também no atestado, receituário, termo e risco', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1400);
+
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['pacientes', 'anestesia', 'pre', 'consulta', 'documentos'].forEach(m => store.setList(m, []));
+    store.setList('pacientes', [{ _id: 'p1', nome: 'LUCIANA LYRA', plano: 'Bradesco Saúde',
+      carteirinha: '998877', sexo: 'F', nascimento: '1970-04-02' }]);
+    /* paciente que só tem ficha e nunca foi ao cadastro central — nada
+       registra o paciente lá automaticamente */
+    store.save('anestesia', { paciente: { nome: 'ADILSON NUNES', convenio: 'Amil', sexo: 'M' },
+      procedimento: { data: '2026-09-10' } });
+
+    const lista = autocomplete.listaPacientes();
+    out.temCadastrada = lista.some(x => x.label === 'LUCIANA LYRA');
+    out.temSoDaFicha = lista.some(x => x.label === 'ADILSON NUNES');
+    out.dizDeOndeVem = /ficha/.test((lista.find(x => x.label === 'ADILSON NUNES') || {}).meta || '');
+    out.semDuplicata = lista.filter(x => x.label === 'LUCIANA LYRA').length === 1;
+    /* quem veio de registro clínico não carrega id de cadastro: gravar o id do
+       DOCUMENTO no vínculo apontaria para a coisa errada */
+    out.semVinculoFalso = !(lista.find(x => x.label === 'ADILSON NUNES') || {}).data._id;
+
+    /* o campo do ATESTADO passa a ter autocomplete */
+    ui.navegar('documentos'); await new Promise(res => setTimeout(res, 1200));
+    try { modal.close(); } catch (e) {}
+    const inp = document.querySelector('#form-documentos [name="nome"]');
+    out.ligado = !!(inp && inp.dataset.acAttached);
+
+    /* digitar PARTE do nome já mostra a sugestão — antes exigia o nome exato */
+    inp.focus(); inp.value = 'lucia';
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(res => setTimeout(res, 200));
+    const box = inp.closest('.autocomplete-wrap') && inp.closest('.autocomplete-wrap').querySelector('.autocomplete-list');
+    out.sugeriu = !!box && box.classList.contains('show') && /LUCIANA LYRA/.test(box.textContent);
+
+    /* escolher preenche e vincula */
+    box.querySelector('.autocomplete-item').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    await new Promise(res => setTimeout(res, 300));
+    const f = document.getElementById('form-documentos');
+    out.nomePreenchido = f.querySelector('[name="nome"]').value === 'LUCIANA LYRA';
+    out.vinculou = (f.querySelector('[name="_paciente_id"]') || {}).value === 'p1';
+
+    /* e os outros três módulos que faltavam */
+    out.outros = {};
+    for (const [mod, formId] of [['prescricao', 'form-prescricao'], ['termo', 'form-termo'], ['risco', 'form-risco']]) {
+      ui.navegar(mod); await new Promise(res => setTimeout(res, 900));
+      try { modal.close(); } catch (e) {}
+      const el = document.querySelector('#' + formId + ' [name="nome"]');
+      out.outros[mod] = !!(el && el.dataset.acAttached);
+    }
+    return out;
+  });
+
+  assert(r.ligado, 'o campo de nome do atestado tem autocomplete');
+  assert(r.sugeriu, 'digitar parte do nome já mostra a paciente cadastrada — antes exigia o nome exato e no onblur');
+  assert(r.nomePreenchido && r.vinculou, 'escolher preenche o nome e grava o vínculo com o cadastro');
+  assert(r.temCadastrada, 'quem está no cadastro central aparece');
+  assert(r.temSoDaFicha, 'e quem só tem ficha também — nada registra o paciente no cadastro automaticamente');
+  assert(r.dizDeOndeVem, 'a linha diz de onde o sistema conhece esse nome');
+  assert(r.semDuplicata, 'sem repetir quem está nos dois lugares');
+  assert(r.semVinculoFalso, 'paciente sem cadastro não grava vínculo — o id do documento apontaria para a coisa errada');
+  assert(Object.values(r.outros).every(Boolean), 'receituário, termo e risco também: ' + JSON.stringify(r.outros));
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
