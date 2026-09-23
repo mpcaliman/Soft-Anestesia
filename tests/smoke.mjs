@@ -13026,6 +13026,100 @@ await test('Autocomplete de paciente também no atestado, receituário, termo e 
   await page.close();
 });
 
+/* 193) "Fui criar um outro ambiente e não faz nada." Fazia: o erro saía num
+   aviso que some em três segundos, e quem clicou ficava achando que o botão
+   estava morto. A causa por trás é que o APP libera a aba pelo e-mail, e o
+   BANCO autoriza por uma linha em app_programmers — checagens diferentes, que
+   discordam quando a semente da migração 0009 rodou antes de a conta existir. */
+await test('Aba do programador diz por que criar ambiente falhou, e não deixa o erro sumir', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1200);
+
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    cloud.config = () => ({ url: 'https://fake.supabase.co', anonKey: 'k' });
+    cloud.session = () => ({ user: { id: 'u1', email: 'mpcaliman@hotmail.com' }, access_token: 't' });
+    cloud._garantirToken = async () => true;
+    cloud._headers = () => ({});
+    out.appLibera = programador.souProgramador();
+
+    /* cenário: o banco NÃO tem a conta em app_programmers */
+    let modoProg = 'vazio';   /* 'vazio' | 'ok' | 'sem_tabela' */
+    window.fetch = async (url) => {
+      const u = String(url);
+      if (/app_programmers/.test(u)) {
+        if (modoProg === 'sem_tabela') return { ok: false, status: 404, json: async () => ({ message: 'Could not find the table public.app_programmers in the schema cache' }) };
+        return { ok: true, json: async () => (modoProg === 'ok' ? [{ user_id: 'u1' }] : []) };
+      }
+      if (/rpc\/prog_criar_ambiente/.test(u)) {
+        return { ok: false, status: 400, json: async () => ({ message: 'Apenas o programador pode criar ambientes.' }) };
+      }
+      return { ok: true, json: async () => [] };
+    };
+
+    ui.navegar('programador');
+    await new Promise(res => setTimeout(res, 900));
+    try { modal.close(); } catch (e) {}
+    out.abaAbriu = !!document.getElementById('prog-amb-nome');
+    const aviso = () => (document.getElementById('prog-aviso') || {}).innerHTML || '';
+    out.avisouDivergencia = /não reconhece esta conta como programador/i.test(aviso());
+    out.mostraOSQL = /insert into public\.app_programmers/.test(aviso());
+    out.usaOEmailReal = /mpcaliman@hotmail\.com/.test(aviso());
+
+    /* o botão não pode ser submit: dentro de um form recarregaria a página */
+    const btn = [...document.querySelectorAll('#prog-conteudo button')].find(b => /Criar ambiente/.test(b.textContent));
+    out.botaoNaoEhSubmit = btn.getAttribute('type') === 'button';
+
+    /* clicar deixa o erro NA TELA, não só num aviso que some */
+    document.getElementById('prog-amb-nome').value = 'Clinica Teste';
+    document.getElementById('prog-amb-email').value = 'novo@medico.com';
+    btn.click();
+    await new Promise(res => setTimeout(res, 400));
+    const erro = () => (document.getElementById('prog-erro') || {}).innerHTML || '';
+    out.erroFicaNaTela = /Apenas o programador pode criar ambientes/.test(erro());
+    out.erroExplica = /app_programmers/.test(erro());
+
+    /* campo vazio também explica, em vez de só piscar um aviso */
+    document.getElementById('prog-amb-nome').value = '';
+    btn.click();
+    await new Promise(res => setTimeout(res, 200));
+    out.vazioExplica = /Informe o nome do ambiente/.test(erro());
+
+    /* a mensagem do servidor sobre conta inexistente vira instrução */
+    programador._mostrarErro('Nenhuma conta na nuvem com o e-mail x@y.com.');
+    out.ensinaCriarConta = /Criar conta/.test(erro()) && /chave de administrador/i.test(erro());
+
+    /* migração 0009 ausente tem diagnóstico próprio */
+    modoProg = 'sem_tabela';
+    await programador._conferirCredencial();
+    out.diagnosticaMigracao = /migração 0009 ainda não rodou/i.test(aviso());
+
+    /* e quando está tudo certo, nenhum aviso aparece */
+    modoProg = 'ok';
+    await programador._conferirCredencial();
+    out.semAvisoQuandoOk = aviso().trim() === '';
+    return out;
+  });
+
+  assert(r.appLibera && r.abaAbriu, 'a aba abre para o e-mail do programador');
+  assert(r.avisouDivergencia, 'e avisa na tela quando o BANCO não reconhece a conta — antes isso só aparecia ao clicar, num aviso que some');
+  assert(r.mostraOSQL && r.usaOEmailReal, 'com o SQL pronto para rodar, já com o e-mail da conta logada');
+  assert(r.botaoNaoEhSubmit, 'o botão é type="button" — dentro de um form, submit recarregaria a página e o erro se perderia');
+  assert(r.erroFicaNaTela && r.erroExplica, 'o erro do servidor fica na tela e diz o que significa');
+  assert(r.vazioExplica, 'campo vazio também explica');
+  assert(r.ensinaCriarConta, 'conta inexistente vira instrução: a pessoa cria a própria conta, e o painel não pode criar por ela');
+  assert(r.diagnosticaMigracao, 'migração ausente tem diagnóstico próprio, em vez de virar "erro desconhecido"');
+  assert(r.semAvisoQuandoOk, 'e com tudo certo nenhum aviso aparece — alarme que toca à toa deixa de ser lido');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
