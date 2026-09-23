@@ -4590,7 +4590,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-23a</b><br>
+    v7.1 · build <b id="build-tag">2026-09-23b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -11963,8 +11963,12 @@ const arquivo = {
     return achados;
   },
 
-  async uiProcurarNaNuvem() {
-    const nome = prompt('Procurar na nuvem inteira — nome do paciente (ou parte dele):', '');
+  /* `termo` vem da caixa de busca quando a tela de histórico chama daqui:
+     quem já digitou o nome não deve ter de digitar de novo. */
+  async uiProcurarNaNuvem(termo) {
+    const nome = (termo && String(termo).trim())
+      ? String(termo).trim()
+      : prompt('Procurar na nuvem inteira — nome do paciente (ou parte dele):', '');
     if (nome === null) return;
     modal.open('🔎 Procurando na nuvem…', '<p style="font-size:.88rem">Varrendo o banco da clínica e o backup da sua conta. Pode levar alguns segundos.</p>', '');
     let achados = [];
@@ -40836,6 +40840,8 @@ const historico = {
                placeholder="Buscar por paciente, senha, procedimento, cirurgião..."
                style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:.9rem">
         <span style="font-size:.78rem;color:var(--text-mute);white-space:nowrap">${total} aqui${naNuvem ? ' · <b>' + naNuvem + '</b> na nuvem' : ''}</span>
+        <button class="btn btn-sm" title="Varre o banco da clínica e o backup da conta pelo nome do paciente — acha até o que foi feito em outro aparelho"
+                onclick="arquivo.uiProcurarNaNuvem((document.getElementById('hist-search-input')||{}).value)">🔎 Procurar na nuvem</button>
       </div>
       <div id="hist-table-host" style="max-height:60vh;overflow:auto">${historico._tabelaHTML(mod, filtro)}</div>
     `;
@@ -40875,7 +40881,22 @@ const historico = {
       return 0;
     });
     if (filtradas.length === 0) {
-      return `<tr><td colspan="6" style="text-align:center;color:var(--text-mute);padding:20px">Nenhum registro ${q ? 'corresponde ao filtro' : 'salvo'}.</td></tr>`;
+      /* AQUI ESTAVA O BURACO. As linhas do que está guardado na nuvem são
+         acrescentadas no fim desta função — e este `return` passava por cima
+         delas. Resultado: quando a busca local não achava nada (justamente o
+         caso de quem procura uma ficha antiga, que o socorro de espaço mandou
+         para a nuvem), a tela dizia "nenhum registro" com a ficha inteira
+         guardada e localizável. */
+      const arq = historico._linhasArquivadas(mod, q);
+      if (arq) return arq;
+      return `<tr><td colspan="6" style="text-align:center;color:var(--text-mute);padding:20px">` +
+        `Nenhum registro ${q ? 'corresponde ao filtro' : 'salvo'} neste aparelho.` +
+        (q ? `<div style="margin-top:10px">` +
+             `<button class="btn btn-sm btn-primary" onclick="arquivo.uiProcurarNaNuvem('${utils.escapeAttr(q)}')">🔎 Procurar na nuvem inteira</button>` +
+             `</div><div style="font-size:.78rem;margin-top:8px">O índice deste aparelho só conhece o que ELE arquivou. ` +
+             `Ficha feita noutro aparelho, ou índice perdido, está na nuvem e só aparece por aqui.</div>`
+           : '') +
+        `</td></tr>`;
     }
     return filtradas.map(it => {
       const dt = historico._fmtData(historico._dataItem(it)) || (it._updatedAt ? new Date(it._updatedAt).toLocaleDateString('pt-BR') : '—');

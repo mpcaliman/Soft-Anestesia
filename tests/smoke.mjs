@@ -13120,6 +13120,76 @@ await test('Aba do programador diz por que criar ambiente falhou, e não deixa o
   await page.close();
 });
 
+/* 194) "Essa ficha foi feita no sistema, mas ao buscar hoje não aparece nada."
+   Aparecia zero com a ficha inteira guardada na nuvem: as linhas do que está
+   arquivado eram acrescentadas no FIM de _renderLinhas, e o `return` de lista
+   vazia passava por cima delas. Ou seja, elas só apareciam quando a busca
+   local JÁ tinha achado alguma coisa — exatamente o caso em que não fazem
+   falta. E a varredura da nuvem inteira (arquivo.uiProcurarNaNuvem) existia
+   pronta, sem ser chamada de lugar nenhum. */
+await test('Busca acha a ficha guardada na nuvem, e oferece varrer a nuvem quando não acha nada', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1200);
+
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    store.setList('anestesia', []);
+    /* o cenário real: a ficha saiu do aparelho (socorro de espaço arquiva o
+       que tem mais de 7 dias) e só existe no índice + na nuvem */
+    localStorage.setItem(arquivo.INDEX_KEY, JSON.stringify({
+      anestesia: [{ id: 'f-jaime', nome: 'JAIME ROLANDO PEIXOTO', data: '2026-08-13', fin: true }]
+    }));
+
+    /* (a) busca por um nome que SÓ existe na nuvem — antes dava "nenhum registro" */
+    const so = historico._renderLinhas('anestesia', 'jaime');
+    out.achouSozinho = /JAIME ROLANDO PEIXOTO/.test(so);
+    out.dizOndeEsta = /guardado na nuvem/.test(so);
+    out.temComoAbrir = /_abrirRegistro/.test(so);
+
+    /* (b) continua aparecendo quando há resultado local junto */
+    store.save('anestesia', { paciente: { nome: 'OUTRA PESSOA' }, procedimento: { data: '2026-09-20' } });
+    const juntos = historico._renderLinhas('anestesia', '');
+    out.convivemNaMesmaLista = /JAIME ROLANDO PEIXOTO/.test(juntos) && /OUTRA PESSOA/.test(juntos);
+
+    /* (c) nome que não existe em lugar nenhum: oferece varrer a nuvem inteira */
+    const vazio = historico._renderLinhas('anestesia', 'zzz-inexistente');
+    out.ofereceVarredura = /uiProcurarNaNuvem/.test(vazio);
+    out.explicaPorque = /outro aparelho/.test(vazio);
+
+    /* (d) o resgate deixa de ser invisível: botão fixo na tela de busca */
+    out.botaoFixo = /uiProcurarNaNuvem/.test(historico._render('anestesia', ''));
+
+    /* (e) e usa o que já foi digitado, sem pedir o nome de novo */
+    let usouPrompt = false;
+    const p = window.prompt; window.prompt = () => { usouPrompt = true; return null; };
+    let termo = null;
+    arquivo.procurarNaNuvem = async (n) => { termo = n; return []; };
+    await arquivo.uiProcurarNaNuvem('jaime');
+    window.prompt = p;
+    out.usaOTermoDigitado = termo === 'jaime' && !usouPrompt;
+
+    try { modal.close(); } catch (e) {}
+    localStorage.removeItem(arquivo.INDEX_KEY);
+    store.setList('anestesia', []);
+    return out;
+  });
+
+  assert(r.achouSozinho, 'a ficha guardada na nuvem aparece na busca mesmo sem nenhum resultado local — era exatamente o caso que falhava');
+  assert(r.dizOndeEsta && r.temComoAbrir, 'dizendo onde ela está e com um jeito de trazê-la de volta');
+  assert(r.convivemNaMesmaLista, 'e continua convivendo com os resultados locais');
+  assert(r.ofereceVarredura && r.explicaPorque, 'nada encontrado oferece varrer a nuvem inteira, e explica por que o índice local pode não bastar');
+  assert(r.botaoFixo, 'a varredura deixa de ser invisível — existia pronta e não era chamada de lugar nenhum');
+  assert(r.usaOTermoDigitado, 'e aproveita o nome já digitado, em vez de pedir de novo');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
