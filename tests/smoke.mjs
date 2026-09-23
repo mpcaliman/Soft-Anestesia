@@ -12772,6 +12772,354 @@ await test('Pessoal = Clínica quando há um anestesista só — e volta a separ
   await page.close();
 });
 
+/* 190) Preencher uma guia exige dados espalhados: plano e carteirinha vêm do
+   cadastro do paciente, horários de sala vêm da ficha de anestesia, códigos e
+   fatores vêm do lançamento. Quem fatura abria três telas e anotava num papel.
+   O ícone 🧾 junta tudo numa janela — e diz o que está faltando. */
+await test('Detalhamento para faturamento junta plano, carteirinha, horários e códigos — e acusa o que falta', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1000);
+
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['financeiro', 'anestesia', 'pacientes'].forEach(m => store.setList(m, []));
+    const sabado = '2026-09-12';   /* para o dia da semana ser derivado */
+    /* a carteirinha mora SÓ no cadastro do paciente */
+    store.setList('pacientes', [{ _id: 'pa1', nome: 'MARIA DAS GRACAS', carteirinha: '0123456789',
+      plano: 'Bradesco Saúde', apartamento: true }]);
+    /* os horários moram SÓ na ficha */
+    const ficha = store.save('anestesia', {
+      paciente: { nome: 'MARIA DAS GRACAS', convenio: 'Bradesco Saúde', senha: 'K3EK7V7' },
+      procedimento: { data: sabado, descricao: 'Colecistectomia', hora_sala_entrada: '07:30',
+                      hora_sala_saida: '09:45', hora_inicio: '07:40', hora_fim: '09:35',
+                      duracao: '1h55', cirurgiao: 'Dr. Fulano', hospital: 'Hospital X' },
+      _finalizado: true });
+    const lanc = store.save('financeiro', {
+      paciente: 'MARIA DAS GRACAS', convenio: 'Bradesco Saúde', senha: 'K3EK7V7',
+      data_proc: sabado, procedimento: 'Colecistectomia', hospital: 'Hospital X', cirurgiao: 'Dr. Fulano',
+      acomodacao: 'apartamento', fator_acomodacao: '2', urgencia: true, perc_urgencia: '30',
+      valor_previsto: 1800, valor_recebido: 0, _origemId: ficha._id,
+      codigos: [{ codigo: '3.09.12.24-5', descricao: 'Colecistectomia', porte: '5B', qtd: 1, grau: '100', valor_previsto: 1800 }]
+    });
+
+    const d = financeiro.faturamento.dados(store.getById('financeiro', lanc._id));
+    out.carteirinhaDoCadastro = d.carteirinha === '0123456789';
+    out.horariosDaFicha = [d.salaEntrada, d.salaSaida, d.anestIni, d.anestFim].join('/') === '07:30/09:45/07:40/09:35';
+    out.acomodacao = d.acomodacao === 'apartamento';
+    out.diaSemanaDerivado = d.diaSemana === 'sábado' && d.fimDeSemana === true;
+    out.temCodigo = d.codigos.length === 1;
+    out.semFaltas = financeiro.faturamento._faltas(d).length === 0;
+    /* o texto para colar na guia traz o essencial */
+    const txt = financeiro.faturamento.texto(store.getById('financeiro', lanc._id));
+    out.textoCompleto = ['0123456789', 'K3EK7V7', '07:30', '09:45', '3.09.12.24-5', 'apartamento']
+      .every(s => txt.includes(s));
+
+    /* lançamento pelado: a janela tem de DIZER o que falta, não mostrar vazio */
+    const cru = store.save('financeiro', { paciente: 'JOAO SEM DADOS', data_proc: sabado });
+    const faltasCru = financeiro.faturamento._faltas(financeiro.faturamento.dados(store.getById('financeiro', cru._id)));
+    out.acusaFaltas = faltasCru.length >= 4;
+    out.diagnosticaCarteirinha = faltasCru.some(f => /carteirinha/i.test(f));
+    out.dizOndePreencher = faltasCru.some(f => /cadastro do paciente/i.test(f));
+
+    /* o ícone está em cada linha, e a janela abre com os dados */
+    ui.navegar('financeiro'); await new Promise(res => setTimeout(res, 1400));
+    try { modal.close(); } catch (e) {}
+    financeiro.render();
+    out.temIcone = /faturamento\.abrir/.test(document.getElementById('financeiro-tbody').innerHTML);
+    financeiro.faturamento.abrir(lanc._id);
+    await new Promise(res => setTimeout(res, 300));
+    const html = (document.querySelector('.modal-body') || document.body).innerHTML;
+    out.janelaMostra = html.includes('0123456789') && html.includes('07:30') && /sábado/i.test(html);
+    try { modal.close(); } catch (e) {}
+    return out;
+  });
+
+  assert(r.temIcone, 'cada lançamento tem o ícone de detalhamento');
+  assert(r.carteirinhaDoCadastro, 'a carteirinha vem do cadastro do paciente — ela não está no lançamento');
+  assert(r.horariosDaFicha, 'entrada, saída, início e fim vêm da ficha de anestesia');
+  assert(r.acomodacao, 'a acomodação aparece');
+  assert(r.diaSemanaDerivado, 'o dia da semana é derivado da data: quem fatura não precisa abrir o calendário para saber se cabe acréscimo de FDS');
+  assert(r.temCodigo, 'os códigos a cobrar aparecem');
+  assert(r.semFaltas, 'com tudo preenchido, a janela não inventa pendência');
+  assert(r.textoCompleto, 'o texto para colar na guia traz carteirinha, guia, horários, código e acomodação');
+  assert(r.acusaFaltas, 'lançamento sem dados acusa o que falta, em vez de mostrar campo vazio');
+  assert(r.diagnosticaCarteirinha && r.dizOndePreencher, 'e diz QUAL dado falta e ONDE preenchê-lo');
+  assert(r.janelaMostra, 'a janela renderiza os dados reunidos');
+  await page.close();
+});
+
+/* 191) A baixa da nuvem trazia TODAS as linhas de `documentos` com o registro
+   inteiro (anexos em base64 junto), sem filtro — e rodava a cada abertura do
+   app, a cada volta de foco, a cada volta da internet. Consumiu 2,5 GB dos
+   5 GB da cota em 12 dias; passada a cota, o Supabase responde 402 e a
+   sincronização para. Agora pede só o que mudou. */
+await test('Baixa da nuvem é incremental — e cai para a base inteira quando precisa', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    /* nuvem falsa com 200 registros "pesados", como os que carregam anexo */
+    const LINHAS = [];
+    for (let i = 0; i < 200; i++) {
+      const dia = '2026-09-0' + (1 + (i % 9));
+      LINHAS.push({ modulo: 'pre', doc_id: 'd' + i,
+        dados: { _id: 'd' + i, nome: 'P' + i, _updatedAt: dia + 'T10:00:00.000Z', blob: 'x'.repeat(5000) },
+        atualizado_em: dia + 'T10:00:00.000Z' });
+    }
+    let bytes = 0, pedidos = [];
+    cloud.config = () => ({ url: 'https://fake.supabase.co', anonKey: 'k' });
+    cloud.session = () => ({ user: { id: 'u1' }, access_token: 't' });
+    cloud._garantirToken = async () => true;
+    cloud._headers = () => ({});
+    window.fetch = async (url) => {
+      pedidos.push(url);
+      const u = new URL(url);
+      const gt = (u.search.match(/atualizado_em=gt\.([^&]+)/) || [])[1];
+      const desde = gt ? decodeURIComponent(gt) : '';
+      const off = parseInt((u.search.match(/offset=(\d+)/) || [])[1] || '0', 10);
+      const lim = parseInt((u.search.match(/limit=(\d+)/) || [])[1] || '500', 10);
+      const filtradas = desde ? LINHAS.filter(l => l.atualizado_em > desde) : LINHAS;
+      const corpo = JSON.stringify(filtradas.slice(off, off + lim));
+      bytes += corpo.length;
+      return { ok: true, json: async () => JSON.parse(corpo) };
+    };
+
+    store.setList('pre', []);
+    cloud.esquecerMarcaBaixa();
+
+    /* 1ª vez: sem marca → base inteira */
+    const r1 = await cloud._baixarTudo();
+    out.primeiraTrouxeTudo = (r1.porMod.pre || []).length === 200;
+    const bytesPrimeira = bytes;
+    store.setList('pre', r1.porMod.pre);
+    cloud._gravarMarca(r1.marca);
+    /* a marca é o carimbo do registro mais novo, não a hora deste aparelho */
+    out.marcaDoMaisNovo = r1.marca === '2026-09-09T10:00:00.000Z';
+
+    /* 2ª vez, nada mudou: só a janela de margem volta */
+    bytes = 0; pedidos = [];
+    const r2 = await cloud._baixarTudo();
+    out.usouFiltro = pedidos.some(u => /atualizado_em=gt/.test(u));
+    out.segundaBemMenor = bytes < bytesPrimeira * 0.2;
+
+    /* 3ª: chega um registro novo — ele TEM de vir */
+    LINHAS.push({ modulo: 'pre', doc_id: 'novo',
+      dados: { _id: 'novo', nome: 'NOVO', _updatedAt: '2026-09-20T10:00:00.000Z' },
+      atualizado_em: '2026-09-20T10:00:00.000Z' });
+    bytes = 0;
+    const r3 = await cloud._baixarTudo();
+    out.trouxeONovo = (r3.porMod.pre || []).some(x => x._id === 'novo');
+    out.economia = 1 - (bytes / bytesPrimeira);
+
+    /* 4ª: aparelho SEM nada gravado não pode fazer baixa incremental — o app
+       apareceria vazio e a pessoa acharia que perdeu tudo */
+    store.setList('pre', []);
+    const r4 = await cloud._baixarTudo();
+    out.aparelhoVazioBaixaTudo = (r4.porMod.pre || []).length === 201;
+
+    /* 5ª: "completo" força a base inteira mesmo com marca — é o botão de quem
+       quer reconstruir o aparelho */
+    store.setList('pre', r1.porMod.pre);
+    const r5 = await cloud._baixarTudo({ completo: true });
+    out.completoTrazTudo = (r5.porMod.pre || []).length === 201;
+
+    /* a marca é por usuário: a de um não pode filtrar a baixa do outro */
+    const k1 = cloud._marcaKey();
+    cloud.session = () => ({ user: { id: 'u2' }, access_token: 't' });
+    out.marcaPorUsuario = cloud._marcaKey() !== k1 && cloud._lerMarca() === '';
+    return out;
+  });
+
+  assert(r.primeiraTrouxeTudo, 'na primeira vez, sem marca, baixa a base inteira');
+  assert(r.marcaDoMaisNovo, 'a marca é o carimbo do registro mais novo que veio — o relógio deste aparelho não entra na conta');
+  assert(r.usouFiltro, 'da segunda vez em diante, pede só o que mudou');
+  assert(r.segundaBemMenor, 'e o que desce é uma fração do que descia antes');
+  assert(r.trouxeONovo, 'mas um registro novo continua chegando — economia que perde dado não serve');
+  assert(r.economia > 0.8, 'a economia medida passa de 80% já neste cenário (foi ' + (r.economia * 100).toFixed(0) + '%)');
+  assert(r.aparelhoVazioBaixaTudo, 'aparelho sem nada gravado baixa tudo: incremental aí deixaria o app vazio e a pessoa acharia que perdeu os dados');
+  assert(r.completoTrazTudo, '"completo" força a base inteira mesmo havendo marca');
+  assert(r.marcaPorUsuario, 'a marca é por usuário — a de um não filtra a baixa do outro');
+  await page.close();
+});
+
+/* 192) Emitir um atestado para paciente já cadastrada: digitava-se o nome e
+   nada aparecia. O autocomplete de paciente estava ligado só na ficha, pré,
+   consulta, SRPA e agenda — e ficou de fora justamente dos módulos que se usam
+   DEPOIS, para quem já existe: documentos (atestado), receituário, termo e
+   risco. Lá só havia o preenchimento no onblur, que exige o nome exato. */
+await test('Autocomplete de paciente também no atestado, receituário, termo e risco', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1400);
+
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['pacientes', 'anestesia', 'pre', 'consulta', 'documentos'].forEach(m => store.setList(m, []));
+    store.setList('pacientes', [{ _id: 'p1', nome: 'LUCIANA LYRA', plano: 'Bradesco Saúde',
+      carteirinha: '998877', sexo: 'F', nascimento: '1970-04-02' }]);
+    /* paciente que só tem ficha e nunca foi ao cadastro central — nada
+       registra o paciente lá automaticamente */
+    store.save('anestesia', { paciente: { nome: 'ADILSON NUNES', convenio: 'Amil', sexo: 'M' },
+      procedimento: { data: '2026-09-10' } });
+
+    const lista = autocomplete.listaPacientes();
+    out.temCadastrada = lista.some(x => x.label === 'LUCIANA LYRA');
+    out.temSoDaFicha = lista.some(x => x.label === 'ADILSON NUNES');
+    out.dizDeOndeVem = /ficha/.test((lista.find(x => x.label === 'ADILSON NUNES') || {}).meta || '');
+    out.semDuplicata = lista.filter(x => x.label === 'LUCIANA LYRA').length === 1;
+    /* quem veio de registro clínico não carrega id de cadastro: gravar o id do
+       DOCUMENTO no vínculo apontaria para a coisa errada */
+    out.semVinculoFalso = !(lista.find(x => x.label === 'ADILSON NUNES') || {}).data._id;
+
+    /* o campo do ATESTADO passa a ter autocomplete */
+    ui.navegar('documentos'); await new Promise(res => setTimeout(res, 1200));
+    try { modal.close(); } catch (e) {}
+    const inp = document.querySelector('#form-documentos [name="nome"]');
+    out.ligado = !!(inp && inp.dataset.acAttached);
+
+    /* digitar PARTE do nome já mostra a sugestão — antes exigia o nome exato */
+    inp.focus(); inp.value = 'lucia';
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(res => setTimeout(res, 200));
+    const box = inp.closest('.autocomplete-wrap') && inp.closest('.autocomplete-wrap').querySelector('.autocomplete-list');
+    out.sugeriu = !!box && box.classList.contains('show') && /LUCIANA LYRA/.test(box.textContent);
+
+    /* escolher preenche e vincula */
+    box.querySelector('.autocomplete-item').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    await new Promise(res => setTimeout(res, 300));
+    const f = document.getElementById('form-documentos');
+    out.nomePreenchido = f.querySelector('[name="nome"]').value === 'LUCIANA LYRA';
+    out.vinculou = (f.querySelector('[name="_paciente_id"]') || {}).value === 'p1';
+
+    /* e os outros três módulos que faltavam */
+    out.outros = {};
+    for (const [mod, formId] of [['prescricao', 'form-prescricao'], ['termo', 'form-termo'], ['risco', 'form-risco']]) {
+      ui.navegar(mod); await new Promise(res => setTimeout(res, 900));
+      try { modal.close(); } catch (e) {}
+      const el = document.querySelector('#' + formId + ' [name="nome"]');
+      out.outros[mod] = !!(el && el.dataset.acAttached);
+    }
+    return out;
+  });
+
+  assert(r.ligado, 'o campo de nome do atestado tem autocomplete');
+  assert(r.sugeriu, 'digitar parte do nome já mostra a paciente cadastrada — antes exigia o nome exato e no onblur');
+  assert(r.nomePreenchido && r.vinculou, 'escolher preenche o nome e grava o vínculo com o cadastro');
+  assert(r.temCadastrada, 'quem está no cadastro central aparece');
+  assert(r.temSoDaFicha, 'e quem só tem ficha também — nada registra o paciente no cadastro automaticamente');
+  assert(r.dizDeOndeVem, 'a linha diz de onde o sistema conhece esse nome');
+  assert(r.semDuplicata, 'sem repetir quem está nos dois lugares');
+  assert(r.semVinculoFalso, 'paciente sem cadastro não grava vínculo — o id do documento apontaria para a coisa errada');
+  assert(Object.values(r.outros).every(Boolean), 'receituário, termo e risco também: ' + JSON.stringify(r.outros));
+  await page.close();
+});
+
+/* 193) "Fui criar um outro ambiente e não faz nada." Fazia: o erro saía num
+   aviso que some em três segundos, e quem clicou ficava achando que o botão
+   estava morto. A causa por trás é que o APP libera a aba pelo e-mail, e o
+   BANCO autoriza por uma linha em app_programmers — checagens diferentes, que
+   discordam quando a semente da migração 0009 rodou antes de a conta existir. */
+await test('Aba do programador diz por que criar ambiente falhou, e não deixa o erro sumir', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1200);
+
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    cloud.config = () => ({ url: 'https://fake.supabase.co', anonKey: 'k' });
+    cloud.session = () => ({ user: { id: 'u1', email: 'mpcaliman@hotmail.com' }, access_token: 't' });
+    cloud._garantirToken = async () => true;
+    cloud._headers = () => ({});
+    out.appLibera = programador.souProgramador();
+
+    /* cenário: o banco NÃO tem a conta em app_programmers */
+    let modoProg = 'vazio';   /* 'vazio' | 'ok' | 'sem_tabela' */
+    window.fetch = async (url) => {
+      const u = String(url);
+      if (/app_programmers/.test(u)) {
+        if (modoProg === 'sem_tabela') return { ok: false, status: 404, json: async () => ({ message: 'Could not find the table public.app_programmers in the schema cache' }) };
+        return { ok: true, json: async () => (modoProg === 'ok' ? [{ user_id: 'u1' }] : []) };
+      }
+      if (/rpc\/prog_criar_ambiente/.test(u)) {
+        return { ok: false, status: 400, json: async () => ({ message: 'Apenas o programador pode criar ambientes.' }) };
+      }
+      return { ok: true, json: async () => [] };
+    };
+
+    ui.navegar('programador');
+    await new Promise(res => setTimeout(res, 900));
+    try { modal.close(); } catch (e) {}
+    out.abaAbriu = !!document.getElementById('prog-amb-nome');
+    const aviso = () => (document.getElementById('prog-aviso') || {}).innerHTML || '';
+    out.avisouDivergencia = /não reconhece esta conta como programador/i.test(aviso());
+    out.mostraOSQL = /insert into public\.app_programmers/.test(aviso());
+    out.usaOEmailReal = /mpcaliman@hotmail\.com/.test(aviso());
+
+    /* o botão não pode ser submit: dentro de um form recarregaria a página */
+    const btn = [...document.querySelectorAll('#prog-conteudo button')].find(b => /Criar ambiente/.test(b.textContent));
+    out.botaoNaoEhSubmit = btn.getAttribute('type') === 'button';
+
+    /* clicar deixa o erro NA TELA, não só num aviso que some */
+    document.getElementById('prog-amb-nome').value = 'Clinica Teste';
+    document.getElementById('prog-amb-email').value = 'novo@medico.com';
+    btn.click();
+    await new Promise(res => setTimeout(res, 400));
+    const erro = () => (document.getElementById('prog-erro') || {}).innerHTML || '';
+    out.erroFicaNaTela = /Apenas o programador pode criar ambientes/.test(erro());
+    out.erroExplica = /app_programmers/.test(erro());
+
+    /* campo vazio também explica, em vez de só piscar um aviso */
+    document.getElementById('prog-amb-nome').value = '';
+    btn.click();
+    await new Promise(res => setTimeout(res, 200));
+    out.vazioExplica = /Informe o nome do ambiente/.test(erro());
+
+    /* a mensagem do servidor sobre conta inexistente vira instrução */
+    programador._mostrarErro('Nenhuma conta na nuvem com o e-mail x@y.com.');
+    out.ensinaCriarConta = /Criar conta/.test(erro()) && /chave de administrador/i.test(erro());
+
+    /* migração 0009 ausente tem diagnóstico próprio */
+    modoProg = 'sem_tabela';
+    await programador._conferirCredencial();
+    out.diagnosticaMigracao = /migração 0009 ainda não rodou/i.test(aviso());
+
+    /* e quando está tudo certo, nenhum aviso aparece */
+    modoProg = 'ok';
+    await programador._conferirCredencial();
+    out.semAvisoQuandoOk = aviso().trim() === '';
+    return out;
+  });
+
+  assert(r.appLibera && r.abaAbriu, 'a aba abre para o e-mail do programador');
+  assert(r.avisouDivergencia, 'e avisa na tela quando o BANCO não reconhece a conta — antes isso só aparecia ao clicar, num aviso que some');
+  assert(r.mostraOSQL && r.usaOEmailReal, 'com o SQL pronto para rodar, já com o e-mail da conta logada');
+  assert(r.botaoNaoEhSubmit, 'o botão é type="button" — dentro de um form, submit recarregaria a página e o erro se perderia');
+  assert(r.erroFicaNaTela && r.erroExplica, 'o erro do servidor fica na tela e diz o que significa');
+  assert(r.vazioExplica, 'campo vazio também explica');
+  assert(r.ensinaCriarConta, 'conta inexistente vira instrução: a pessoa cria a própria conta, e o painel não pode criar por ela');
+  assert(r.diagnosticaMigracao, 'migração ausente tem diagnóstico próprio, em vez de virar "erro desconhecido"');
+  assert(r.semAvisoQuandoOk, 'e com tudo certo nenhum aviso aparece — alarme que toca à toa deixa de ser lido');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
