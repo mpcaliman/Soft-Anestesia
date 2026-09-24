@@ -4590,7 +4590,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-24a</b><br>
+    v7.1 · build <b id="build-tag">2026-09-24b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -4727,7 +4727,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <div class="card no-collapse no-print" id="meu-dia-card">
       <div class="card-header">
         <div class="card-title-wrap"><span class="card-icon">📅</span><h2>Meu dia<small>Casos de hoje: agenda × ficha × SRPA × financeiro — confira o plantão de relance</small></h2></div>
-        <div class="card-actions"><button type="button" class="btn btn-xs" onclick="meuDia.render()" title="Atualizar">🔄</button></div>
+        <div class="card-actions" style="display:flex;align-items:center;gap:10px"><span id="meu-dia-filtro"></span><button type="button" class="btn btn-xs" onclick="meuDia.render()" title="Atualizar">🔄</button></div>
       </div>
       <div class="card-body">
         <div class="ficha-resumo" id="meu-dia-resumo" style="display:none;margin-bottom:10px"></div>
@@ -45585,11 +45585,52 @@ const meuDia = {
     return '<button type="button" class="md-chip ' + (ok ? 'md-ok' : 'md-meio') + '" onclick="dashboard._abrirFicha(\'financeiro\',\'' + c.fin._id + '\')" title="' + (ok ? 'Financeiro ok — abrir' : 'Financeiro pendente — abrir') + '">💰 ' + (ok ? 'Fin ✓' : 'Fin…') + '</button>';
   },
 
+  /* ---- Ver só o que foi finalizado ----
+     "Meu dia" é duas coisas ao mesmo tempo: a lista do que FALTA fazer no
+     plantão e o retrato do que foi produzido. Some as duas e nenhuma fica
+     boa. Filtrar de vez esconderia justamente o que cobra ser terminado —
+     então é um interruptor, e a escolha fica lembrada.
+
+     Produção, aqui como no painel: o que foi FINALIZADO. Um caso conta quando
+     tem ao menos um documento finalizado; lançamento financeiro sozinho não
+     é documento, e compromisso de agenda menos ainda. */
+  SO_FIN_KEY: 'medsys.v7.meudia.so_finalizados',
+  soFinalizados() { try { return localStorage.getItem(meuDia.SO_FIN_KEY) === '1'; } catch (e) { return false; } },
+  alternarSoFinalizados(lig) {
+    try { localStorage.setItem(meuDia.SO_FIN_KEY, lig ? '1' : '0'); } catch (e) {}
+    meuDia.render();
+    toast(lig ? '✅ Mostrando só o que foi finalizado' : '📋 Mostrando o dia inteiro, inclusive o que falta terminar');
+  },
+  _temFinalizado(c) {
+    return !!((c.ficha && c.ficha._finalizado) || (c.pre && c.pre._finalizado)
+           || (c.consulta && c.consulta._finalizado) || (c.srpa && c.srpa._finalizado));
+  },
+
   render() {
     const host = document.getElementById('meu-dia-lista');
     const res = document.getElementById('meu-dia-resumo');
     if (!host) return;
-    const casos = meuDia.coletar();
+    const todos = meuDia.coletar();
+    const so = meuDia.soFinalizados();
+    const casos = so ? todos.filter(meuDia._temFinalizado) : todos;
+    /* o interruptor mora no cartão, e diz quantos ficaram de fora */
+    const alt = document.getElementById('meu-dia-filtro');
+    if (alt) {
+      const escondidos = todos.length - casos.length;
+      alt.innerHTML =
+        '<label style="display:inline-flex;align-items:center;gap:6px;font-size:.78rem;cursor:pointer;color:var(--text-soft)">' +
+        '<input type="checkbox" ' + (so ? 'checked' : '') + ' onchange="meuDia.alternarSoFinalizados(this.checked)"> ' +
+        'só finalizados</label>' +
+        (so && escondidos
+          ? '<span style="font-size:.76rem;color:#7a4b12;margin-left:8px">' + escondidos + ' por finalizar fora da lista</span>'
+          : '');
+    }
+    if (so && !casos.length && todos.length) {
+      host.innerHTML = '<p style="font-size:.84rem;color:var(--text-mute);margin:0">Nada finalizado hoje ainda — ' +
+        todos.length + ' caso(s) em andamento. Desmarque "só finalizados" para vê-los.</p>';
+      if (res) res.style.display = 'none';
+      return;
+    }
     if (!casos.length) {
       host.innerHTML = '<p style="font-size:.84rem;color:var(--text-mute);margin:0">Nenhum caso registrado para hoje ainda. Os compromissos da Agenda e as fichas de hoje aparecem aqui automaticamente.</p>';
       if (res) res.style.display = 'none';

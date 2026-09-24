@@ -13238,6 +13238,65 @@ await test('Meu dia diz POR QUE não há financeiro quando o documento está em 
   await page.close();
 });
 
+/* 196) "Nesse painel só deve aparecer coisa finalizada." "Meu dia" é duas
+   coisas ao mesmo tempo: a lista do que FALTA fazer no plantão e o retrato do
+   que foi produzido. Filtrar de vez esconderia justamente o que cobra ser
+   terminado — então é um interruptor, e a escolha fica lembrada. */
+await test('Meu dia: interruptor "só finalizados" — sem perder a lista do que falta', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1200);
+
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    const hoje = utils.hojeISO();
+    ['pre', 'consulta', 'anestesia', 'financeiro', 'agenda', 'recuperacao'].forEach(m => store.setList(m, []));
+    const p1 = store.save('pre', { nome: 'ARTHUR', data_avaliacao: hoje, cirurgia: 'Postectomia', _finalizado: true });
+    store.save('financeiro', { paciente: 'ARTHUR', data_proc: hoje, tipo_atendimento: 'consulta_pre', _origemId: p1._id });
+    store.save('pre', { nome: 'SILMARIA', data_avaliacao: hoje, cirurgia: 'SLING' });
+    store.save('pre', { nome: 'JOTENILDO', data_avaliacao: hoje, cirurgia: 'DBS' });
+    store.save('agenda', { paciente: 'SO AGENDA', data: hoje, hora: '09:00', tipo: 'Cirurgia' });
+
+    localStorage.setItem(meuDia.SO_FIN_KEY, '0');
+    ui.navegar('dashboard'); await new Promise(res => setTimeout(res, 1500));
+    try { modal.close(); } catch (e) {}
+    meuDia.render();
+    const lista = () => document.getElementById('meu-dia-lista').textContent;
+    out.tudoMostraTodos = ['ARTHUR', 'SILMARIA', 'JOTENILDO', 'SO AGENDA'].every(n => lista().includes(n));
+    out.temInterruptor = /só finalizados/.test(document.getElementById('meu-dia-filtro').innerHTML);
+
+    meuDia.alternarSoFinalizados(true);
+    await new Promise(res => setTimeout(res, 200));
+    out.soMostraFinalizado = lista().includes('ARTHUR');
+    out.escondeRascunhos = !lista().includes('SILMARIA') && !lista().includes('JOTENILDO');
+    /* compromisso de agenda não é produção: não tem documento nenhum */
+    out.escondeAgenda = !lista().includes('SO AGENDA');
+    out.dizQuantosFicaramFora = /por finalizar fora da lista/.test(document.getElementById('meu-dia-filtro').textContent);
+    out.lembrouEscolha = meuDia.soFinalizados();
+
+    meuDia.alternarSoFinalizados(false);
+    await new Promise(res => setTimeout(res, 200));
+    out.voltaTudo = ['ARTHUR', 'SILMARIA', 'JOTENILDO'].every(n => lista().includes(n));
+    localStorage.setItem(meuDia.SO_FIN_KEY, '0');
+    return out;
+  });
+
+  assert(r.tudoMostraTodos, 'por padrão o dia inteiro aparece — é a lista do que falta fazer');
+  assert(r.temInterruptor, 'com um interruptor "só finalizados" no cartão');
+  assert(r.soMostraFinalizado && r.escondeRascunhos, 'ligado, mostra só o que foi finalizado');
+  assert(r.escondeAgenda, 'compromisso de agenda sem documento não conta como produção');
+  assert(r.dizQuantosFicaramFora, 'e diz quantos ficaram de fora — esconder sem avisar faria perder o que falta terminar');
+  assert(r.lembrouEscolha, 'a escolha fica lembrada');
+  assert(r.voltaTudo, 'desligado, o dia inteiro volta');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
