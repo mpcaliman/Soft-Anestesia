@@ -13190,6 +13190,54 @@ await test('Busca acha a ficha guardada na nuvem, e oferece varrer a nuvem quand
   await page.close();
 });
 
+/* 195) "Por que Silmaria e Jotenildo não geraram financeiro?" Não geraram
+   porque a pré deles está em RASCUNHO — o lançamento nasce na finalização, que
+   é a regra pedida. O sistema estava certo; a tela é que não dizia o motivo:
+   "— financeiro" sozinho, com a explicação num `title` invisível no celular. */
+await test('Meu dia diz POR QUE não há financeiro quando o documento está em rascunho', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1000);
+
+  const r = await page.evaluate(() => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    const hoje = utils.hojeISO();
+    ['pre', 'consulta', 'anestesia', 'financeiro', 'agenda'].forEach(m => store.setList(m, []));
+    /* o dia da foto: uma pré finalizada (com financeiro) e duas em rascunho */
+    const p1 = store.save('pre', { nome: 'ARTHUR', data_avaliacao: hoje, cirurgia: 'Postectomia', _finalizado: true });
+    store.save('financeiro', { paciente: 'ARTHUR', data_proc: hoje, tipo_atendimento: 'consulta_pre', _origemId: p1._id });
+    store.save('pre', { nome: 'SILMARIA', data_avaliacao: hoje, cirurgia: 'SLING' });
+    store.save('consulta', { nome: 'JOTENILDO', data_consulta: hoje, motivo: 'DBS' });
+    /* e um caso sem documento nenhum, só compromisso */
+    store.save('agenda', { paciente: 'SO AGENDA', data: hoje, hora: '09:00', tipo: 'Cirurgia' });
+
+    const casos = meuDia.coletar();
+    const txt = nome => {
+      const c = casos.find(x => x.nome === nome) || {};
+      const d = document.createElement('div'); d.innerHTML = meuDia._chipFin(c);
+      return d.textContent;
+    };
+    out.finalizadaTemFin = /Fin/.test(txt('ARTHUR'));
+    out.preRascunhoExplica = /falta finalizar/.test(txt('SILMARIA'));
+    out.consultaRascunhoExplica = /falta finalizar/.test(txt('JOTENILDO'));
+    /* quem não tem documento nenhum não pode ser acusado de "falta finalizar" */
+    out.semDocumentoNaoAcusa = !/falta finalizar/.test(txt('SO AGENDA'));
+    return out;
+  });
+
+  assert(r.finalizadaTemFin, 'documento finalizado tem o lançamento financeiro');
+  assert(r.preRascunhoExplica, 'pré em rascunho diz "falta finalizar" ao lado do financeiro, em vez de só um traço');
+  assert(r.consultaRascunhoExplica, 'consulta em rascunho também');
+  assert(r.semDocumentoNaoAcusa, 'mas caso sem documento nenhum não acusa "falta finalizar" à toa');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

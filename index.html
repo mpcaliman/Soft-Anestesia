@@ -4590,7 +4590,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-23b</b><br>
+    v7.1 · build <b id="build-tag">2026-09-24a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -45565,7 +45565,22 @@ const meuDia = {
     return '<button type="button" class="md-chip ' + (ok ? 'md-ok' : 'md-meio') + '" onclick="dashboard._abrirFicha(\'recuperacao\',\'' + c.srpa._id + '\')" title="' + (ok ? 'SRPA finalizada — abrir' : 'SRPA em andamento — continuar') + '">🏥 ' + (ok ? 'SRPA ✓' : 'SRPA…') + '</button>';
   },
   _chipFin(c) {
-    if (!c.fin) return '<span class="md-chip md-nada" title="Nenhum lançamento financeiro hoje — o Finalizar da ficha cria automaticamente">— financeiro</span>';
+    if (!c.fin) {
+      /* "— financeiro" sozinho não explica nada, e a explicação estava só num
+         title — invisível no celular e fácil de não ver no computador. Daí a
+         pergunta certa de quem olha a tela: "por que este não gerou
+         financeiro?". Quando dá para saber o motivo, ele vai escrito ao lado:
+         o lançamento nasce na FINALIZAÇÃO, e documento em rascunho ainda não
+         chegou lá. */
+      const rascunho = (c.pre && !c.pre._finalizado) || (c.consulta && !c.consulta._finalizado)
+                    || (c.ficha && !c.ficha._finalizado);
+      if (rascunho) {
+        return '<span class="md-chip md-nada" style="color:#7a4b12" ' +
+          'title="O lançamento financeiro é criado ao FINALIZAR o documento. Este ainda está em rascunho.">' +
+          '— financeiro · falta finalizar</span>';
+      }
+      return '<span class="md-chip md-nada" title="Nenhum lançamento financeiro hoje — o Finalizar do documento cria automaticamente">— financeiro</span>';
+    }
     const ok = !!c.fin.pago || c.fin.status === 'recebido' || c.fin.status === 'finalizado';
     return '<button type="button" class="md-chip ' + (ok ? 'md-ok' : 'md-meio') + '" onclick="dashboard._abrirFicha(\'financeiro\',\'' + c.fin._id + '\')" title="' + (ok ? 'Financeiro ok — abrir' : 'Financeiro pendente — abrir') + '">💰 ' + (ok ? 'Fin ✓' : 'Fin…') + '</button>';
   },
