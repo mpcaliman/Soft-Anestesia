@@ -2948,6 +2948,16 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
   display: none; z-index: 110;
 }
 .autocomplete-list.show { display: block; }
+/* O cartão recorta o que passa da borda (`overflow: hidden`, por causa do
+   canto arredondado). Enquanto há um autocomplete aberto ele para de
+   recortar — senão a lista sai cortada e o resto dela fica atrás dos campos
+   do cartão de baixo, que roubam o clique. Vale para todos os módulos: o
+   cartão é o mesmo em todos. */
+.card.ac-aberto { overflow: visible; }
+/* Fora do cartão, a lista precisa vencer o conteúdo seguinte. O cartão de
+   baixo não é posicionado, então o dropdown já ganharia; este z-index é o
+   cinto para quando algum vizinho ganhar posicionamento um dia. */
+.card.ac-aberto .autocomplete-list { z-index: 400; }
 .autocomplete-item {
   padding: 7px 10px; cursor: pointer;
   font-size: .82rem;
@@ -4590,7 +4600,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-24b</b><br>
+    v7.1 · build <b id="build-tag">2026-09-25a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -42557,18 +42567,30 @@ const autocomplete = {
         html += `<div class="autocomplete-item create-new" data-idx="-1">+ Cadastrar novo "${utils.escapeHTML(input.value)}"</div>`;
       }
       list.innerHTML = html;
-      list.classList.toggle('show', items.length > 0 || (onCreateNew && q.length >= 2));
+      mostrar(items.length > 0 || (onCreateNew && q.length >= 2));
+    };
+    /* O CARTÃO RECORTAVA A LISTA.
+       `.card` tem `overflow: hidden` (por causa do canto arredondado), e o
+       dropdown é absoluto: passando da borda do cartão, ele era CORTADO — e o
+       pedaço que sobrava ficava atrás dos campos do cartão seguinte, que
+       roubavam o clique. Medido: lista de 8 nomes, 7 inalcançáveis.
+       Enquanto a lista está aberta o cartão deixa de recortar; ao fechar,
+       volta a recortar (senão o cabeçalho colorido vaza dos cantos). */
+    const mostrar = (on) => {
+      list.classList.toggle('show', !!on);
+      const card = input.closest('.card');
+      if (card) card.classList.toggle('ac-aberto', !!on);
     };
     const escolher = idx => {
       if (idx === -1 && onCreateNew) {
-        list.classList.remove('show');
+        mostrar(false);
         onCreateNew(input.value);
         return;
       }
       const it = items[idx];
       if (!it) return;
       input.value = it.label;
-      list.classList.remove('show');
+      mostrar(false);
       if (onPick) onPick(it);
       input.dispatchEvent(new Event('change'));
     };
@@ -42590,7 +42612,7 @@ const autocomplete = {
         const idx = parseInt(cells[activeIdx].dataset.idx);
         escolher(idx);
       } else if (e.key === 'Escape') {
-        list.classList.remove('show');
+        mostrar(false);
       }
     });
     list.addEventListener('mousedown', e => {
@@ -42600,7 +42622,7 @@ const autocomplete = {
       escolher(parseInt(cell.dataset.idx));
     });
     document.addEventListener('click', e => {
-      if (!wrap.contains(e.target)) list.classList.remove('show');
+      if (!wrap.contains(e.target)) mostrar(false);
     });
   },
 

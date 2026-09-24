@@ -13297,6 +13297,79 @@ await test('Meu dia: interruptor "só finalizados" — sem perder a lista do que
   await page.close();
 });
 
+/* 197) "O dropdown está por trás dos campos inferiores, dificultando a
+   seleção." O cartão tem `overflow: hidden` (por causa do canto arredondado) e
+   a lista do autocomplete é absoluta: passando da borda do cartão ela era
+   CORTADA, e o pedaço que sobrava ficava atrás dos campos do cartão de baixo,
+   que roubavam o clique. Medido antes: 3 dos 4 itens visíveis inalcançáveis. */
+await test('Lista do autocomplete não é recortada pelo cartão nem coberta pelos campos de baixo', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1300);
+
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    /* nomes longos e muitos, para a lista transbordar o cartão */
+    store.setList('cad_profissionais', Array.from({ length: 8 }, (_, i) => ({
+      _id: 'c' + i, nome: 'Dr Lucidio Duarte de Souza Filho ' + i,
+      especialidade: 'Cirurgia Geral', crm: '123' + i })));
+
+    const provar = async (mod, sel) => {
+      ui.navegar(mod); await new Promise(res => setTimeout(res, 1000));
+      try { modal.close(); } catch (e) {}
+      document.querySelectorAll('#module-' + mod + ' .card.collapsed').forEach(c => c.classList.remove('collapsed'));
+      await new Promise(res => setTimeout(res, 150));
+      const inp = document.querySelector(sel);
+      if (!inp) return { erro: 'sem campo' };
+      inp.scrollIntoView({ block: 'center' }); await new Promise(res => setTimeout(res, 150));
+      inp.focus(); inp.value = 'Lucidio'; inp.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise(res => setTimeout(res, 200));
+      const lista = inp.closest('.autocomplete-wrap').querySelector('.autocomplete-list');
+      if (!lista || !lista.classList.contains('show')) return { erro: 'não abriu' };
+      const card = inp.closest('.card');
+      const res_ = { liberouORecorte: getComputedStyle(card).overflow === 'visible' };
+      const rl = lista.getBoundingClientRect(), rc = card.getBoundingClientRect();
+      /* Só vale cobrar o que está DENTRO da área visível da lista: ela tem
+         max-height com rolagem própria, e o que fica abaixo do corte está
+         fora dela por definição — não é defeito. */
+      const vis = [...lista.querySelectorAll('.autocomplete-item')]
+        .filter(it => { const q = it.getBoundingClientRect(); return q.bottom <= rl.bottom + 1 && q.top >= rl.top - 1; });
+      res_.visiveis = vis.length;
+      res_.tapados = vis.filter(it => {
+        const q = it.getBoundingClientRect();
+        const a = document.elementFromPoint(q.x + q.width / 2, q.y + q.height / 2);
+        return !(a && (it === a || it.contains(a) || a.contains(it)));
+      }).length;
+      res_.saemDoCard = vis.filter(it => it.getBoundingClientRect().bottom > rc.bottom).length;
+      /* ao fechar, o cartão volta a recortar — senão o cabeçalho vaza do canto */
+      lista.classList.remove('show'); card.classList.remove('ac-aberto');
+      res_.voltouARecortar = getComputedStyle(card).overflow === 'hidden';
+      return res_;
+    };
+    out.pre = await provar('pre', '#form-pre [name="cirurgiao"]');
+    out.anestesia = await provar('anestesia', '#form-anestesia [name="cirurgiao"]');
+    out.consulta = await provar('consulta', '#form-consulta [name="profissional"]');
+    return out;
+  });
+
+  ['pre', 'anestesia', 'consulta'].forEach(mod => {
+    const m = r[mod];
+    assert(!m.erro, mod + ': a lista precisa abrir (' + m.erro + ')');
+    assert(m.visiveis > 0, mod + ': a lista tem itens visíveis');
+    assert(m.tapados === 0, mod + ': nenhum item visível fica atrás dos campos de baixo (' + m.tapados + ' tapado(s))');
+    assert(m.liberouORecorte, mod + ': com a lista aberta, o cartão para de recortar');
+    assert(m.voltouARecortar, mod + ': e volta a recortar ao fechar — senão o cabeçalho vaza do canto arredondado');
+  });
+  assert(r.pre.saemDoCard > 0, 'o cenário é real: na pré há itens que passam da borda do cartão — é o transbordo que era cortado');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
