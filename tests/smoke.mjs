@@ -13120,6 +13120,346 @@ await test('Aba do programador diz por que criar ambiente falhou, e não deixa o
   await page.close();
 });
 
+/* 194) "Essa ficha foi feita no sistema, mas ao buscar hoje não aparece nada."
+   Aparecia zero com a ficha inteira guardada na nuvem: as linhas do que está
+   arquivado eram acrescentadas no FIM de _renderLinhas, e o `return` de lista
+   vazia passava por cima delas. Ou seja, elas só apareciam quando a busca
+   local JÁ tinha achado alguma coisa — exatamente o caso em que não fazem
+   falta. E a varredura da nuvem inteira (arquivo.uiProcurarNaNuvem) existia
+   pronta, sem ser chamada de lugar nenhum. */
+await test('Busca acha a ficha guardada na nuvem, e oferece varrer a nuvem quando não acha nada', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1200);
+
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    store.setList('anestesia', []);
+    /* o cenário real: a ficha saiu do aparelho (socorro de espaço arquiva o
+       que tem mais de 7 dias) e só existe no índice + na nuvem */
+    localStorage.setItem(arquivo.INDEX_KEY, JSON.stringify({
+      anestesia: [{ id: 'f-jaime', nome: 'JAIME ROLANDO PEIXOTO', data: '2026-08-13', fin: true }]
+    }));
+
+    /* (a) busca por um nome que SÓ existe na nuvem — antes dava "nenhum registro" */
+    const so = historico._renderLinhas('anestesia', 'jaime');
+    out.achouSozinho = /JAIME ROLANDO PEIXOTO/.test(so);
+    out.dizOndeEsta = /guardado na nuvem/.test(so);
+    out.temComoAbrir = /_abrirRegistro/.test(so);
+
+    /* (b) continua aparecendo quando há resultado local junto */
+    store.save('anestesia', { paciente: { nome: 'OUTRA PESSOA' }, procedimento: { data: '2026-09-20' } });
+    const juntos = historico._renderLinhas('anestesia', '');
+    out.convivemNaMesmaLista = /JAIME ROLANDO PEIXOTO/.test(juntos) && /OUTRA PESSOA/.test(juntos);
+
+    /* (c) nome que não existe em lugar nenhum: oferece varrer a nuvem inteira */
+    const vazio = historico._renderLinhas('anestesia', 'zzz-inexistente');
+    out.ofereceVarredura = /uiProcurarNaNuvem/.test(vazio);
+    out.explicaPorque = /outro aparelho/.test(vazio);
+
+    /* (d) o resgate deixa de ser invisível: botão fixo na tela de busca */
+    out.botaoFixo = /uiProcurarNaNuvem/.test(historico._render('anestesia', ''));
+
+    /* (e) e usa o que já foi digitado, sem pedir o nome de novo */
+    let usouPrompt = false;
+    const p = window.prompt; window.prompt = () => { usouPrompt = true; return null; };
+    let termo = null;
+    arquivo.procurarNaNuvem = async (n) => { termo = n; return []; };
+    await arquivo.uiProcurarNaNuvem('jaime');
+    window.prompt = p;
+    out.usaOTermoDigitado = termo === 'jaime' && !usouPrompt;
+
+    try { modal.close(); } catch (e) {}
+    localStorage.removeItem(arquivo.INDEX_KEY);
+    store.setList('anestesia', []);
+    return out;
+  });
+
+  assert(r.achouSozinho, 'a ficha guardada na nuvem aparece na busca mesmo sem nenhum resultado local — era exatamente o caso que falhava');
+  assert(r.dizOndeEsta && r.temComoAbrir, 'dizendo onde ela está e com um jeito de trazê-la de volta');
+  assert(r.convivemNaMesmaLista, 'e continua convivendo com os resultados locais');
+  assert(r.ofereceVarredura && r.explicaPorque, 'nada encontrado oferece varrer a nuvem inteira, e explica por que o índice local pode não bastar');
+  assert(r.botaoFixo, 'a varredura deixa de ser invisível — existia pronta e não era chamada de lugar nenhum');
+  assert(r.usaOTermoDigitado, 'e aproveita o nome já digitado, em vez de pedir de novo');
+  await page.close();
+});
+
+/* 195) "Por que Silmaria e Jotenildo não geraram financeiro?" Não geraram
+   porque a pré deles está em RASCUNHO — o lançamento nasce na finalização, que
+   é a regra pedida. O sistema estava certo; a tela é que não dizia o motivo:
+   "— financeiro" sozinho, com a explicação num `title` invisível no celular. */
+await test('Meu dia diz POR QUE não há financeiro quando o documento está em rascunho', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1000);
+
+  const r = await page.evaluate(() => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    const hoje = utils.hojeISO();
+    ['pre', 'consulta', 'anestesia', 'financeiro', 'agenda'].forEach(m => store.setList(m, []));
+    /* o dia da foto: uma pré finalizada (com financeiro) e duas em rascunho */
+    const p1 = store.save('pre', { nome: 'ARTHUR', data_avaliacao: hoje, cirurgia: 'Postectomia', _finalizado: true });
+    store.save('financeiro', { paciente: 'ARTHUR', data_proc: hoje, tipo_atendimento: 'consulta_pre', _origemId: p1._id });
+    store.save('pre', { nome: 'SILMARIA', data_avaliacao: hoje, cirurgia: 'SLING' });
+    store.save('consulta', { nome: 'JOTENILDO', data_consulta: hoje, motivo: 'DBS' });
+    /* e um caso sem documento nenhum, só compromisso */
+    store.save('agenda', { paciente: 'SO AGENDA', data: hoje, hora: '09:00', tipo: 'Cirurgia' });
+
+    const casos = meuDia.coletar();
+    const txt = nome => {
+      const c = casos.find(x => x.nome === nome) || {};
+      const d = document.createElement('div'); d.innerHTML = meuDia._chipFin(c);
+      return d.textContent;
+    };
+    out.finalizadaTemFin = /Fin/.test(txt('ARTHUR'));
+    out.preRascunhoExplica = /falta finalizar/.test(txt('SILMARIA'));
+    out.consultaRascunhoExplica = /falta finalizar/.test(txt('JOTENILDO'));
+    /* quem não tem documento nenhum não pode ser acusado de "falta finalizar" */
+    out.semDocumentoNaoAcusa = !/falta finalizar/.test(txt('SO AGENDA'));
+    return out;
+  });
+
+  assert(r.finalizadaTemFin, 'documento finalizado tem o lançamento financeiro');
+  assert(r.preRascunhoExplica, 'pré em rascunho diz "falta finalizar" ao lado do financeiro, em vez de só um traço');
+  assert(r.consultaRascunhoExplica, 'consulta em rascunho também');
+  assert(r.semDocumentoNaoAcusa, 'mas caso sem documento nenhum não acusa "falta finalizar" à toa');
+  await page.close();
+});
+
+/* 196) "Nesse painel só deve aparecer coisa finalizada." "Meu dia" é duas
+   coisas ao mesmo tempo: a lista do que FALTA fazer no plantão e o retrato do
+   que foi produzido. Filtrar de vez esconderia justamente o que cobra ser
+   terminado — então é um interruptor, e a escolha fica lembrada. */
+await test('Meu dia: interruptor "só finalizados" — sem perder a lista do que falta', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1200);
+
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    const hoje = utils.hojeISO();
+    ['pre', 'consulta', 'anestesia', 'financeiro', 'agenda', 'recuperacao'].forEach(m => store.setList(m, []));
+    const p1 = store.save('pre', { nome: 'ARTHUR', data_avaliacao: hoje, cirurgia: 'Postectomia', _finalizado: true });
+    store.save('financeiro', { paciente: 'ARTHUR', data_proc: hoje, tipo_atendimento: 'consulta_pre', _origemId: p1._id });
+    store.save('pre', { nome: 'SILMARIA', data_avaliacao: hoje, cirurgia: 'SLING' });
+    store.save('pre', { nome: 'JOTENILDO', data_avaliacao: hoje, cirurgia: 'DBS' });
+    store.save('agenda', { paciente: 'SO AGENDA', data: hoje, hora: '09:00', tipo: 'Cirurgia' });
+
+    localStorage.setItem(meuDia.SO_FIN_KEY, '0');
+    ui.navegar('dashboard'); await new Promise(res => setTimeout(res, 1500));
+    try { modal.close(); } catch (e) {}
+    meuDia.render();
+    const lista = () => document.getElementById('meu-dia-lista').textContent;
+    out.tudoMostraTodos = ['ARTHUR', 'SILMARIA', 'JOTENILDO', 'SO AGENDA'].every(n => lista().includes(n));
+    out.temInterruptor = /só finalizados/.test(document.getElementById('meu-dia-filtro').innerHTML);
+
+    meuDia.alternarSoFinalizados(true);
+    await new Promise(res => setTimeout(res, 200));
+    out.soMostraFinalizado = lista().includes('ARTHUR');
+    out.escondeRascunhos = !lista().includes('SILMARIA') && !lista().includes('JOTENILDO');
+    /* compromisso de agenda não é produção: não tem documento nenhum */
+    out.escondeAgenda = !lista().includes('SO AGENDA');
+    out.dizQuantosFicaramFora = /por finalizar fora da lista/.test(document.getElementById('meu-dia-filtro').textContent);
+    out.lembrouEscolha = meuDia.soFinalizados();
+
+    meuDia.alternarSoFinalizados(false);
+    await new Promise(res => setTimeout(res, 200));
+    out.voltaTudo = ['ARTHUR', 'SILMARIA', 'JOTENILDO'].every(n => lista().includes(n));
+    localStorage.setItem(meuDia.SO_FIN_KEY, '0');
+    return out;
+  });
+
+  assert(r.tudoMostraTodos, 'por padrão o dia inteiro aparece — é a lista do que falta fazer');
+  assert(r.temInterruptor, 'com um interruptor "só finalizados" no cartão');
+  assert(r.soMostraFinalizado && r.escondeRascunhos, 'ligado, mostra só o que foi finalizado');
+  assert(r.escondeAgenda, 'compromisso de agenda sem documento não conta como produção');
+  assert(r.dizQuantosFicaramFora, 'e diz quantos ficaram de fora — esconder sem avisar faria perder o que falta terminar');
+  assert(r.lembrouEscolha, 'a escolha fica lembrada');
+  assert(r.voltaTudo, 'desligado, o dia inteiro volta');
+  await page.close();
+});
+
+/* 197) "O dropdown está por trás dos campos inferiores, dificultando a
+   seleção." O cartão tem `overflow: hidden` (por causa do canto arredondado) e
+   a lista do autocomplete é absoluta: passando da borda do cartão ela era
+   CORTADA, e o pedaço que sobrava ficava atrás dos campos do cartão de baixo,
+   que roubavam o clique. Medido antes: 3 dos 4 itens visíveis inalcançáveis. */
+await test('Lista do autocomplete não é recortada pelo cartão nem coberta pelos campos de baixo', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1300);
+
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    /* nomes longos e muitos, para a lista transbordar o cartão */
+    store.setList('cad_profissionais', Array.from({ length: 8 }, (_, i) => ({
+      _id: 'c' + i, nome: 'Dr Lucidio Duarte de Souza Filho ' + i,
+      especialidade: 'Cirurgia Geral', crm: '123' + i })));
+
+    const provar = async (mod, sel) => {
+      ui.navegar(mod); await new Promise(res => setTimeout(res, 1000));
+      try { modal.close(); } catch (e) {}
+      document.querySelectorAll('#module-' + mod + ' .card.collapsed').forEach(c => c.classList.remove('collapsed'));
+      await new Promise(res => setTimeout(res, 150));
+      const inp = document.querySelector(sel);
+      if (!inp) return { erro: 'sem campo' };
+      inp.scrollIntoView({ block: 'center' }); await new Promise(res => setTimeout(res, 150));
+      inp.focus(); inp.value = 'Lucidio'; inp.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise(res => setTimeout(res, 200));
+      const lista = inp.closest('.autocomplete-wrap').querySelector('.autocomplete-list');
+      if (!lista || !lista.classList.contains('show')) return { erro: 'não abriu' };
+      const card = inp.closest('.card');
+      const res_ = { liberouORecorte: getComputedStyle(card).overflow === 'visible' };
+      const rl = lista.getBoundingClientRect(), rc = card.getBoundingClientRect();
+      /* Só vale cobrar o que está DENTRO da área visível da lista: ela tem
+         max-height com rolagem própria, e o que fica abaixo do corte está
+         fora dela por definição — não é defeito. */
+      const vis = [...lista.querySelectorAll('.autocomplete-item')]
+        .filter(it => { const q = it.getBoundingClientRect(); return q.bottom <= rl.bottom + 1 && q.top >= rl.top - 1; });
+      res_.visiveis = vis.length;
+      res_.tapados = vis.filter(it => {
+        const q = it.getBoundingClientRect();
+        const a = document.elementFromPoint(q.x + q.width / 2, q.y + q.height / 2);
+        return !(a && (it === a || it.contains(a) || a.contains(it)));
+      }).length;
+      res_.saemDoCard = vis.filter(it => it.getBoundingClientRect().bottom > rc.bottom).length;
+      /* ao fechar, o cartão volta a recortar — senão o cabeçalho vaza do canto */
+      lista.classList.remove('show'); card.classList.remove('ac-aberto');
+      res_.voltouARecortar = getComputedStyle(card).overflow === 'hidden';
+      return res_;
+    };
+    out.pre = await provar('pre', '#form-pre [name="cirurgiao"]');
+    out.anestesia = await provar('anestesia', '#form-anestesia [name="cirurgiao"]');
+    out.consulta = await provar('consulta', '#form-consulta [name="profissional"]');
+    return out;
+  });
+
+  ['pre', 'anestesia', 'consulta'].forEach(mod => {
+    const m = r[mod];
+    assert(!m.erro, mod + ': a lista precisa abrir (' + m.erro + ')');
+    assert(m.visiveis > 0, mod + ': a lista tem itens visíveis');
+    assert(m.tapados === 0, mod + ': nenhum item visível fica atrás dos campos de baixo (' + m.tapados + ' tapado(s))');
+    assert(m.liberouORecorte, mod + ': com a lista aberta, o cartão para de recortar');
+    assert(m.voltouARecortar, mod + ': e volta a recortar ao fechar — senão o cabeçalho vaza do canto arredondado');
+  });
+  assert(r.pre.saemDoCard > 0, 'o cenário é real: na pré há itens que passam da borda do cartão — é o transbordo que era cortado');
+  await page.close();
+});
+
+/* 198) "Não finalizei por faltarem exames. Porém tem que gerar financeiro na
+   data de hoje, pois a consulta foi concretizada."
+
+   Eram duas coisas numa bandeira só: "atendimento concluído" (que se cobra) e
+   "paciente liberado para a cirurgia" (que depende de exame). Agora Finalizar
+   encerra o ATENDIMENTO, e o desfecho diz em que pé o paciente ficou — e o que
+   não liberou continua cobrando providência, para finalizar não fazer o caso
+   sumir do radar. */
+await test('Pré com exames pendentes: finaliza, cobra na data da avaliação, e segue como pendência', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1300);
+
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    const hoje = utils.hojeISO();
+    ['pre', 'financeiro', 'anestesia', 'consulta', 'agenda'].forEach(m => store.setList(m, []));
+
+    /* o caminho real da tela: preencher, marcar pendente, finalizar */
+    ui.navegar('pre'); await new Promise(res => setTimeout(res, 1200));
+    try { modal.close(); } catch (e) {}
+    document.querySelectorAll('#module-pre .card.collapsed').forEach(c => c.classList.remove('collapsed'));
+    const f = document.getElementById('form-pre');
+    out.temCampo = !!f.querySelector('[name="conclusao_status"]');
+    f.querySelectorAll('[data-required]').forEach(el => {
+      if (el.value) return;
+      if (el.tagName === 'SELECT') { const o = [...el.options].filter(o => o.value)[0]; if (o) el.value = o.value; }
+      else if (el.type === 'date') el.value = hoje;
+      else el.value = 'SILMARIA';
+    });
+    f.querySelector('[name="nome"]').value = 'SILMARIA';
+    f.querySelector('[name="data"]').value = hoje;
+    f.querySelector('[name="convenio"]').value = 'Bradesco Saúde';
+    f.querySelector('[name="conclusao_status"]').value = 'pendente';
+    pre.aoMudarDesfecho('pendente');
+    out.avisaOQueVaiAcontecer = /Pend|cobrado/i.test(document.getElementById('pre-desfecho-aviso').textContent);
+    out.escreveAConclusao = /exames/i.test(f.querySelector('[name="conclusao"]').value);
+
+    pre.salvar({ finalizar: true });
+    await new Promise(res => setTimeout(res, 900));
+    try { modal.close(); } catch (e) {}
+    const rec = store.list('pre').find(x => x._finalizado);
+    out.finalizou = !!rec;
+    out.gravouODesfecho = rec && rec.conclusao_status === 'pendente';
+
+    /* 1) cobrou — e na data da AVALIAÇÃO, não na de quando finalizar */
+    const lanc = store.list('financeiro')[0];
+    out.gerouFinanceiro = !!lanc;
+    out.naDataDaAvaliacao = lanc && lanc.data_proc === hoje;
+
+    /* 2) continua cobrando providência */
+    const se = document.getElementById('dash-escopo'); if (se) se.value = 'clinica';
+    const pend = pendProntuario.listar();
+    out.segueNaPendencia = pend.some(p => p.id === rec._id && p.tipo === 'desfecho');
+    out.motivoNomeado = /exames|pareceres/i.test((pend.find(p => p.id === rec._id) || {}).motivo || '');
+
+    /* 3) o Meu dia não mostra como resolvido */
+    const caso = meuDia.coletar().find(c => (c.nome || '').startsWith('SILMARIA')) || {};
+    const d = document.createElement('div'); d.innerHTML = meuDia._chipPre(caso);
+    out.chipDizOQueFalta = /Pré ✓ ·/.test(d.textContent) && /exames|pareceres/i.test(d.textContent);
+
+    /* 4) liberado não vira pendência */
+    const r2 = store.save('pre', { nome: 'ARTHUR', data: hoje, _finalizado: true, conclusao_status: 'liberado' });
+    out.liberadoNaoPendura = !pendProntuario.listar().some(p => p.id === r2._id);
+    /* 5) registro antigo, sem o campo, vale como liberado — histórico intacto */
+    const r3 = store.save('pre', { nome: 'ANTIGO', data: hoje, _finalizado: true });
+    out.antigoValeLiberado = pre.desfechoDe(r3) === 'liberado'
+                          && !pendProntuario.listar().some(p => p.id === r3._id);
+    return out;
+  });
+
+  assert(r.temCampo, 'a pré tem o campo de desfecho da avaliação');
+  assert(r.avisaOQueVaiAcontecer, 'e avisa que o atendimento será cobrado mesmo assim');
+  assert(r.escreveAConclusao, 'escrevendo o texto padrão da conclusão quando ela está vazia');
+  assert(r.finalizou && r.gravouODesfecho, 'finaliza guardando o desfecho escolhido');
+  assert(r.gerouFinanceiro, 'e GERA o lançamento financeiro — era o que não acontecia');
+  assert(r.naDataDaAvaliacao, 'na data da avaliação, não na de quando se finaliza');
+  assert(r.segueNaPendencia && r.motivoNomeado, 'o caso continua nas Pendências de prontuário, com o motivo nomeado');
+  assert(r.chipDizOQueFalta, 'e o Meu dia não mostra como resolvido — diz o que ainda falta');
+  assert(r.liberadoNaoPendura, 'quem saiu liberado não vira pendência');
+  assert(r.antigoValeLiberado, 'registro anterior a isto vale como liberado: nenhum histórico se mexe');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

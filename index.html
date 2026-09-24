@@ -2948,6 +2948,16 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
   display: none; z-index: 110;
 }
 .autocomplete-list.show { display: block; }
+/* O cartão recorta o que passa da borda (`overflow: hidden`, por causa do
+   canto arredondado). Enquanto há um autocomplete aberto ele para de
+   recortar — senão a lista sai cortada e o resto dela fica atrás dos campos
+   do cartão de baixo, que roubam o clique. Vale para todos os módulos: o
+   cartão é o mesmo em todos. */
+.card.ac-aberto { overflow: visible; }
+/* Fora do cartão, a lista precisa vencer o conteúdo seguinte. O cartão de
+   baixo não é posicionado, então o dropdown já ganharia; este z-index é o
+   cinto para quando algum vizinho ganhar posicionamento um dia. */
+.card.ac-aberto .autocomplete-list { z-index: 400; }
 .autocomplete-item {
   padding: 7px 10px; cursor: pointer;
   font-size: .82rem;
@@ -4590,7 +4600,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-23a</b><br>
+    v7.1 · build <b id="build-tag">2026-09-25b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -4727,7 +4737,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <div class="card no-collapse no-print" id="meu-dia-card">
       <div class="card-header">
         <div class="card-title-wrap"><span class="card-icon">📅</span><h2>Meu dia<small>Casos de hoje: agenda × ficha × SRPA × financeiro — confira o plantão de relance</small></h2></div>
-        <div class="card-actions"><button type="button" class="btn btn-xs" onclick="meuDia.render()" title="Atualizar">🔄</button></div>
+        <div class="card-actions" style="display:flex;align-items:center;gap:10px"><span id="meu-dia-filtro"></span><button type="button" class="btn btn-xs" onclick="meuDia.render()" title="Atualizar">🔄</button></div>
       </div>
       <div class="card-body">
         <div class="ficha-resumo" id="meu-dia-resumo" style="display:none;margin-bottom:10px"></div>
@@ -5172,6 +5182,25 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
               <button type="button" class="btn btn-xs tpl-btn" onclick="templates.aplicar('pre','orientacoes','medicacoesContinuar')">+ Continuar HAS/DM</button>
               <button type="button" class="btn btn-xs tpl-btn" onclick="templates.aplicar('pre','orientacoes','suspenderAnticoag')">+ Suspender anticoag.</button>
             </div>
+          </div>
+          <!-- O DESFECHO DA AVALIAÇÃO, separado do ATENDIMENTO.
+               Eram a mesma coisa: "Finalizar" queria dizer ao mesmo tempo
+               "atendimento concluído" (que se cobra) e "paciente liberado para
+               a cirurgia" (que depende de exame). Quem avaliava com exame
+               pendente não finalizava — e a consulta, feita e cobrável, não
+               gerava lançamento nenhum.
+               Agora Finalizar encerra o ATENDIMENTO, e este campo diz em que
+               pé o paciente ficou. O que não está liberado continua cobrando
+               providência nas Pendências de prontuário. -->
+          <div class="field col-12">
+            <label>Desfecho da avaliação <small style="color:var(--text-mute);font-weight:400">— o atendimento é cobrado de qualquer forma; isto diz se o paciente está liberado</small></label>
+            <select name="conclusao_status" onchange="pre.aoMudarDesfecho(this.value)">
+              <option value="liberado">✅ Liberado para a cirurgia</option>
+              <option value="pendente">⏳ Pendente — aguardando exames / pareceres</option>
+              <option value="retorno">🔄 Necessário retorno</option>
+              <option value="nao_liberado">⛔ Não liberado</option>
+            </select>
+            <div id="pre-desfecho-aviso" style="font-size:.78rem;margin-top:6px"></div>
           </div>
           <div class="field col-12"><label>Conclusão</label>
             <textarea name="conclusao" rows="3"></textarea>
@@ -11963,8 +11992,12 @@ const arquivo = {
     return achados;
   },
 
-  async uiProcurarNaNuvem() {
-    const nome = prompt('Procurar na nuvem inteira — nome do paciente (ou parte dele):', '');
+  /* `termo` vem da caixa de busca quando a tela de histórico chama daqui:
+     quem já digitou o nome não deve ter de digitar de novo. */
+  async uiProcurarNaNuvem(termo) {
+    const nome = (termo && String(termo).trim())
+      ? String(termo).trim()
+      : prompt('Procurar na nuvem inteira — nome do paciente (ou parte dele):', '');
     if (nome === null) return;
     modal.open('🔎 Procurando na nuvem…', '<p style="font-size:.88rem">Varrendo o banco da clínica e o backup da sua conta. Pode levar alguns segundos.</p>', '');
     let achados = [];
@@ -15182,6 +15215,48 @@ const pre = {
     if (!g('conclusao')) avisos.push('Conclusão / aptidão não preenchida');
     return avisos;
   },
+  /* ---- Desfecho da avaliação ----
+     "Finalizar" encerra o ATENDIMENTO — é o que gera a cobrança e conta a
+     produção, na data da avaliação. O desfecho diz outra coisa: se o paciente
+     saiu liberado. Quem não saiu continua cobrando providência, então
+     finalizar não faz o caso sumir do radar. */
+  DESFECHOS: {
+    liberado:     { rot: 'Liberado para a cirurgia', pend: false },
+    pendente:     { rot: 'Aguardando exames / pareceres', pend: true },
+    retorno:      { rot: 'Necessário retorno', pend: true },
+    nao_liberado: { rot: 'Não liberado', pend: true }
+  },
+  /* registro antigo não tem o campo: valia como liberado, que é o que
+     "finalizado" sempre significou. Nada do histórico se mexe. */
+  desfechoDe(rec) {
+    const v = rec && (rec.conclusao_status || (rec.conclusao_status === '' ? '' : null));
+    return (v && pre.DESFECHOS[v]) ? v : 'liberado';
+  },
+  ehPendente(rec) {
+    const d = pre.DESFECHOS[pre.desfechoDe(rec)];
+    return !!(d && d.pend);
+  },
+  aoMudarDesfecho(v) {
+    const box = document.getElementById('pre-desfecho-aviso');
+    if (box) {
+      const d = pre.DESFECHOS[v];
+      box.innerHTML = (d && d.pend)
+        ? '<span style="color:#7a4b12">⏳ O atendimento será cobrado normalmente na data da avaliação. ' +
+          'O caso continua nas <b>Pendências de prontuário</b> até você concluir.</span>'
+        : '';
+    }
+    /* conveniência: se a conclusão ainda está vazia, escreve o texto padrão
+       que combina com o desfecho — sem nunca por cima do que foi digitado */
+    try {
+      const ta = document.querySelector('#form-pre [name="conclusao"]');
+      if (ta && !String(ta.value || '').trim()) {
+        const tpl = { liberado: 'aptoSem', pendente: 'aguardarExames' }[v];
+        if (tpl) templates.aplicar('pre', 'conclusao', tpl);
+      }
+    } catch (e) {}
+    try { markDirty(); } catch (e) {}
+  },
+
   finalizar() {
     const avisos = pre._checarCompletude();
     if (avisos.length) {
@@ -21644,6 +21719,23 @@ const pendProntuario = {
                    motivo: 'Em rascunho — falta finalizar' });
       });
     });
+
+    /* 1b) PRÉ FINALIZADA QUE NÃO LIBEROU O PACIENTE.
+       O atendimento acabou e foi cobrado; o que falta é clínico — exame,
+       parecer, retorno. Sem isto, finalizar para poder cobrar faria o caso
+       sumir do radar, que é justamente o medo de quem não quer finalizar algo
+       incompleto. Estas entram DESDE HOJE: não é rascunho do dia, é uma
+       pendência que já nasceu declarada. */
+    if (auth.podeAcessar('pre')) {
+      doEscopo(store.list('pre') || []).forEach(r => {
+        if (!r || !r._id || !r._finalizado || r[pendProntuario.IGNORADA]) return;
+        if (!pre.ehPendente(r)) return;
+        const d = pendProntuario._data(r);
+        if (!d || d < corte) return;
+        out.push({ tipo: 'desfecho', mod: 'pre', id: r._id, nome: pendProntuario._nome(r), data: d,
+                   motivo: (pre.DESFECHOS[pre.desfechoDe(r)] || {}).rot || 'Avaliação em aberto' });
+      });
+    }
 
     /* 2) cirurgia agendada no passado sem ficha nenhuma */
     if (auth.podeAcessar('anestesia')) {
@@ -40836,6 +40928,8 @@ const historico = {
                placeholder="Buscar por paciente, senha, procedimento, cirurgião..."
                style="flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:.9rem">
         <span style="font-size:.78rem;color:var(--text-mute);white-space:nowrap">${total} aqui${naNuvem ? ' · <b>' + naNuvem + '</b> na nuvem' : ''}</span>
+        <button class="btn btn-sm" title="Varre o banco da clínica e o backup da conta pelo nome do paciente — acha até o que foi feito em outro aparelho"
+                onclick="arquivo.uiProcurarNaNuvem((document.getElementById('hist-search-input')||{}).value)">🔎 Procurar na nuvem</button>
       </div>
       <div id="hist-table-host" style="max-height:60vh;overflow:auto">${historico._tabelaHTML(mod, filtro)}</div>
     `;
@@ -40875,7 +40969,22 @@ const historico = {
       return 0;
     });
     if (filtradas.length === 0) {
-      return `<tr><td colspan="6" style="text-align:center;color:var(--text-mute);padding:20px">Nenhum registro ${q ? 'corresponde ao filtro' : 'salvo'}.</td></tr>`;
+      /* AQUI ESTAVA O BURACO. As linhas do que está guardado na nuvem são
+         acrescentadas no fim desta função — e este `return` passava por cima
+         delas. Resultado: quando a busca local não achava nada (justamente o
+         caso de quem procura uma ficha antiga, que o socorro de espaço mandou
+         para a nuvem), a tela dizia "nenhum registro" com a ficha inteira
+         guardada e localizável. */
+      const arq = historico._linhasArquivadas(mod, q);
+      if (arq) return arq;
+      return `<tr><td colspan="6" style="text-align:center;color:var(--text-mute);padding:20px">` +
+        `Nenhum registro ${q ? 'corresponde ao filtro' : 'salvo'} neste aparelho.` +
+        (q ? `<div style="margin-top:10px">` +
+             `<button class="btn btn-sm btn-primary" onclick="arquivo.uiProcurarNaNuvem('${utils.escapeAttr(q)}')">🔎 Procurar na nuvem inteira</button>` +
+             `</div><div style="font-size:.78rem;margin-top:8px">O índice deste aparelho só conhece o que ELE arquivou. ` +
+             `Ficha feita noutro aparelho, ou índice perdido, está na nuvem e só aparece por aqui.</div>`
+           : '') +
+        `</td></tr>`;
     }
     return filtradas.map(it => {
       const dt = historico._fmtData(historico._dataItem(it)) || (it._updatedAt ? new Date(it._updatedAt).toLocaleDateString('pt-BR') : '—');
@@ -42536,18 +42645,30 @@ const autocomplete = {
         html += `<div class="autocomplete-item create-new" data-idx="-1">+ Cadastrar novo "${utils.escapeHTML(input.value)}"</div>`;
       }
       list.innerHTML = html;
-      list.classList.toggle('show', items.length > 0 || (onCreateNew && q.length >= 2));
+      mostrar(items.length > 0 || (onCreateNew && q.length >= 2));
+    };
+    /* O CARTÃO RECORTAVA A LISTA.
+       `.card` tem `overflow: hidden` (por causa do canto arredondado), e o
+       dropdown é absoluto: passando da borda do cartão, ele era CORTADO — e o
+       pedaço que sobrava ficava atrás dos campos do cartão seguinte, que
+       roubavam o clique. Medido: lista de 8 nomes, 7 inalcançáveis.
+       Enquanto a lista está aberta o cartão deixa de recortar; ao fechar,
+       volta a recortar (senão o cabeçalho colorido vaza dos cantos). */
+    const mostrar = (on) => {
+      list.classList.toggle('show', !!on);
+      const card = input.closest('.card');
+      if (card) card.classList.toggle('ac-aberto', !!on);
     };
     const escolher = idx => {
       if (idx === -1 && onCreateNew) {
-        list.classList.remove('show');
+        mostrar(false);
         onCreateNew(input.value);
         return;
       }
       const it = items[idx];
       if (!it) return;
       input.value = it.label;
-      list.classList.remove('show');
+      mostrar(false);
       if (onPick) onPick(it);
       input.dispatchEvent(new Event('change'));
     };
@@ -42569,7 +42690,7 @@ const autocomplete = {
         const idx = parseInt(cells[activeIdx].dataset.idx);
         escolher(idx);
       } else if (e.key === 'Escape') {
-        list.classList.remove('show');
+        mostrar(false);
       }
     });
     list.addEventListener('mousedown', e => {
@@ -42579,7 +42700,7 @@ const autocomplete = {
       escolher(parseInt(cell.dataset.idx));
     });
     document.addEventListener('click', e => {
-      if (!wrap.contains(e.target)) list.classList.remove('show');
+      if (!wrap.contains(e.target)) mostrar(false);
     });
   },
 
@@ -45519,6 +45640,15 @@ const meuDia = {
   _ehSoConsulta(c) { return meuDia._ehClinico(c); },
   _chipPre(c) {
     if (!c.pre) return '';
+    /* Finalizada MAS sem liberar o paciente não é caso resolvido: o
+       atendimento fechou (e foi cobrado), o clínico não. Verde puro aqui
+       esconderia o que ainda falta. */
+    if (c.pre._finalizado && typeof pre !== 'undefined' && pre.ehPendente && pre.ehPendente(c.pre)) {
+      const rot = (pre.DESFECHOS[pre.desfechoDe(c.pre)] || {}).rot || 'em aberto';
+      return '<button type="button" class="md-chip md-meio" onclick="dashboard._abrirFicha(\'pre\',\'' + c.pre._id + '\')" ' +
+        'title="Atendimento concluído e cobrado — mas o paciente não está liberado: ' + utils.escapeAttr(rot) + '">' +
+        '🫀 Pré ✓ · ' + utils.escapeHTML(rot.toLowerCase()) + '</button>';
+    }
     const ok = !!c.pre._finalizado;
     return '<button type="button" class="md-chip ' + (ok ? 'md-ok' : 'md-meio') + '" onclick="dashboard._abrirFicha(\'pre\',\'' + c.pre._id + '\')" title="' + (ok ? 'Pré-anestésica finalizada — abrir' : 'Pré-anestésica em rascunho — continuar') + '">🫀 ' + (ok ? 'Pré ✓' : 'Pré…') + '</button>';
   },
@@ -45544,16 +45674,72 @@ const meuDia = {
     return '<button type="button" class="md-chip ' + (ok ? 'md-ok' : 'md-meio') + '" onclick="dashboard._abrirFicha(\'recuperacao\',\'' + c.srpa._id + '\')" title="' + (ok ? 'SRPA finalizada — abrir' : 'SRPA em andamento — continuar') + '">🏥 ' + (ok ? 'SRPA ✓' : 'SRPA…') + '</button>';
   },
   _chipFin(c) {
-    if (!c.fin) return '<span class="md-chip md-nada" title="Nenhum lançamento financeiro hoje — o Finalizar da ficha cria automaticamente">— financeiro</span>';
+    if (!c.fin) {
+      /* "— financeiro" sozinho não explica nada, e a explicação estava só num
+         title — invisível no celular e fácil de não ver no computador. Daí a
+         pergunta certa de quem olha a tela: "por que este não gerou
+         financeiro?". Quando dá para saber o motivo, ele vai escrito ao lado:
+         o lançamento nasce na FINALIZAÇÃO, e documento em rascunho ainda não
+         chegou lá. */
+      const rascunho = (c.pre && !c.pre._finalizado) || (c.consulta && !c.consulta._finalizado)
+                    || (c.ficha && !c.ficha._finalizado);
+      if (rascunho) {
+        return '<span class="md-chip md-nada" style="color:#7a4b12" ' +
+          'title="O lançamento financeiro é criado ao FINALIZAR o documento. Este ainda está em rascunho.">' +
+          '— financeiro · falta finalizar</span>';
+      }
+      return '<span class="md-chip md-nada" title="Nenhum lançamento financeiro hoje — o Finalizar do documento cria automaticamente">— financeiro</span>';
+    }
     const ok = !!c.fin.pago || c.fin.status === 'recebido' || c.fin.status === 'finalizado';
     return '<button type="button" class="md-chip ' + (ok ? 'md-ok' : 'md-meio') + '" onclick="dashboard._abrirFicha(\'financeiro\',\'' + c.fin._id + '\')" title="' + (ok ? 'Financeiro ok — abrir' : 'Financeiro pendente — abrir') + '">💰 ' + (ok ? 'Fin ✓' : 'Fin…') + '</button>';
+  },
+
+  /* ---- Ver só o que foi finalizado ----
+     "Meu dia" é duas coisas ao mesmo tempo: a lista do que FALTA fazer no
+     plantão e o retrato do que foi produzido. Some as duas e nenhuma fica
+     boa. Filtrar de vez esconderia justamente o que cobra ser terminado —
+     então é um interruptor, e a escolha fica lembrada.
+
+     Produção, aqui como no painel: o que foi FINALIZADO. Um caso conta quando
+     tem ao menos um documento finalizado; lançamento financeiro sozinho não
+     é documento, e compromisso de agenda menos ainda. */
+  SO_FIN_KEY: 'medsys.v7.meudia.so_finalizados',
+  soFinalizados() { try { return localStorage.getItem(meuDia.SO_FIN_KEY) === '1'; } catch (e) { return false; } },
+  alternarSoFinalizados(lig) {
+    try { localStorage.setItem(meuDia.SO_FIN_KEY, lig ? '1' : '0'); } catch (e) {}
+    meuDia.render();
+    toast(lig ? '✅ Mostrando só o que foi finalizado' : '📋 Mostrando o dia inteiro, inclusive o que falta terminar');
+  },
+  _temFinalizado(c) {
+    return !!((c.ficha && c.ficha._finalizado) || (c.pre && c.pre._finalizado)
+           || (c.consulta && c.consulta._finalizado) || (c.srpa && c.srpa._finalizado));
   },
 
   render() {
     const host = document.getElementById('meu-dia-lista');
     const res = document.getElementById('meu-dia-resumo');
     if (!host) return;
-    const casos = meuDia.coletar();
+    const todos = meuDia.coletar();
+    const so = meuDia.soFinalizados();
+    const casos = so ? todos.filter(meuDia._temFinalizado) : todos;
+    /* o interruptor mora no cartão, e diz quantos ficaram de fora */
+    const alt = document.getElementById('meu-dia-filtro');
+    if (alt) {
+      const escondidos = todos.length - casos.length;
+      alt.innerHTML =
+        '<label style="display:inline-flex;align-items:center;gap:6px;font-size:.78rem;cursor:pointer;color:var(--text-soft)">' +
+        '<input type="checkbox" ' + (so ? 'checked' : '') + ' onchange="meuDia.alternarSoFinalizados(this.checked)"> ' +
+        'só finalizados</label>' +
+        (so && escondidos
+          ? '<span style="font-size:.76rem;color:#7a4b12;margin-left:8px">' + escondidos + ' por finalizar fora da lista</span>'
+          : '');
+    }
+    if (so && !casos.length && todos.length) {
+      host.innerHTML = '<p style="font-size:.84rem;color:var(--text-mute);margin:0">Nada finalizado hoje ainda — ' +
+        todos.length + ' caso(s) em andamento. Desmarque "só finalizados" para vê-los.</p>';
+      if (res) res.style.display = 'none';
+      return;
+    }
     if (!casos.length) {
       host.innerHTML = '<p style="font-size:.84rem;color:var(--text-mute);margin:0">Nenhum caso registrado para hoje ainda. Os compromissos da Agenda e as fichas de hoje aparecem aqui automaticamente.</p>';
       if (res) res.style.display = 'none';
