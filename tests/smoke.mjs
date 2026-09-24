@@ -13370,6 +13370,96 @@ await test('Lista do autocomplete não é recortada pelo cartão nem coberta pel
   await page.close();
 });
 
+/* 198) "Não finalizei por faltarem exames. Porém tem que gerar financeiro na
+   data de hoje, pois a consulta foi concretizada."
+
+   Eram duas coisas numa bandeira só: "atendimento concluído" (que se cobra) e
+   "paciente liberado para a cirurgia" (que depende de exame). Agora Finalizar
+   encerra o ATENDIMENTO, e o desfecho diz em que pé o paciente ficou — e o que
+   não liberou continua cobrando providência, para finalizar não fazer o caso
+   sumir do radar. */
+await test('Pré com exames pendentes: finaliza, cobra na data da avaliação, e segue como pendência', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => {
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
+      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
+      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+  });
+  await page.reload();
+  await page.waitForTimeout(1300);
+
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    const hoje = utils.hojeISO();
+    ['pre', 'financeiro', 'anestesia', 'consulta', 'agenda'].forEach(m => store.setList(m, []));
+
+    /* o caminho real da tela: preencher, marcar pendente, finalizar */
+    ui.navegar('pre'); await new Promise(res => setTimeout(res, 1200));
+    try { modal.close(); } catch (e) {}
+    document.querySelectorAll('#module-pre .card.collapsed').forEach(c => c.classList.remove('collapsed'));
+    const f = document.getElementById('form-pre');
+    out.temCampo = !!f.querySelector('[name="conclusao_status"]');
+    f.querySelectorAll('[data-required]').forEach(el => {
+      if (el.value) return;
+      if (el.tagName === 'SELECT') { const o = [...el.options].filter(o => o.value)[0]; if (o) el.value = o.value; }
+      else if (el.type === 'date') el.value = hoje;
+      else el.value = 'SILMARIA';
+    });
+    f.querySelector('[name="nome"]').value = 'SILMARIA';
+    f.querySelector('[name="data"]').value = hoje;
+    f.querySelector('[name="convenio"]').value = 'Bradesco Saúde';
+    f.querySelector('[name="conclusao_status"]').value = 'pendente';
+    pre.aoMudarDesfecho('pendente');
+    out.avisaOQueVaiAcontecer = /Pend|cobrado/i.test(document.getElementById('pre-desfecho-aviso').textContent);
+    out.escreveAConclusao = /exames/i.test(f.querySelector('[name="conclusao"]').value);
+
+    pre.salvar({ finalizar: true });
+    await new Promise(res => setTimeout(res, 900));
+    try { modal.close(); } catch (e) {}
+    const rec = store.list('pre').find(x => x._finalizado);
+    out.finalizou = !!rec;
+    out.gravouODesfecho = rec && rec.conclusao_status === 'pendente';
+
+    /* 1) cobrou — e na data da AVALIAÇÃO, não na de quando finalizar */
+    const lanc = store.list('financeiro')[0];
+    out.gerouFinanceiro = !!lanc;
+    out.naDataDaAvaliacao = lanc && lanc.data_proc === hoje;
+
+    /* 2) continua cobrando providência */
+    const se = document.getElementById('dash-escopo'); if (se) se.value = 'clinica';
+    const pend = pendProntuario.listar();
+    out.segueNaPendencia = pend.some(p => p.id === rec._id && p.tipo === 'desfecho');
+    out.motivoNomeado = /exames|pareceres/i.test((pend.find(p => p.id === rec._id) || {}).motivo || '');
+
+    /* 3) o Meu dia não mostra como resolvido */
+    const caso = meuDia.coletar().find(c => (c.nome || '').startsWith('SILMARIA')) || {};
+    const d = document.createElement('div'); d.innerHTML = meuDia._chipPre(caso);
+    out.chipDizOQueFalta = /Pré ✓ ·/.test(d.textContent) && /exames|pareceres/i.test(d.textContent);
+
+    /* 4) liberado não vira pendência */
+    const r2 = store.save('pre', { nome: 'ARTHUR', data: hoje, _finalizado: true, conclusao_status: 'liberado' });
+    out.liberadoNaoPendura = !pendProntuario.listar().some(p => p.id === r2._id);
+    /* 5) registro antigo, sem o campo, vale como liberado — histórico intacto */
+    const r3 = store.save('pre', { nome: 'ANTIGO', data: hoje, _finalizado: true });
+    out.antigoValeLiberado = pre.desfechoDe(r3) === 'liberado'
+                          && !pendProntuario.listar().some(p => p.id === r3._id);
+    return out;
+  });
+
+  assert(r.temCampo, 'a pré tem o campo de desfecho da avaliação');
+  assert(r.avisaOQueVaiAcontecer, 'e avisa que o atendimento será cobrado mesmo assim');
+  assert(r.escreveAConclusao, 'escrevendo o texto padrão da conclusão quando ela está vazia');
+  assert(r.finalizou && r.gravouODesfecho, 'finaliza guardando o desfecho escolhido');
+  assert(r.gerouFinanceiro, 'e GERA o lançamento financeiro — era o que não acontecia');
+  assert(r.naDataDaAvaliacao, 'na data da avaliação, não na de quando se finaliza');
+  assert(r.segueNaPendencia && r.motivoNomeado, 'o caso continua nas Pendências de prontuário, com o motivo nomeado');
+  assert(r.chipDizOQueFalta, 'e o Meu dia não mostra como resolvido — diz o que ainda falta');
+  assert(r.liberadoNaoPendura, 'quem saiu liberado não vira pendência');
+  assert(r.antigoValeLiberado, 'registro anterior a isto vale como liberado: nenhum histórico se mexe');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

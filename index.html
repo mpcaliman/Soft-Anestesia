@@ -4600,7 +4600,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-25a</b><br>
+    v7.1 · build <b id="build-tag">2026-09-25b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -5182,6 +5182,25 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
               <button type="button" class="btn btn-xs tpl-btn" onclick="templates.aplicar('pre','orientacoes','medicacoesContinuar')">+ Continuar HAS/DM</button>
               <button type="button" class="btn btn-xs tpl-btn" onclick="templates.aplicar('pre','orientacoes','suspenderAnticoag')">+ Suspender anticoag.</button>
             </div>
+          </div>
+          <!-- O DESFECHO DA AVALIAÇÃO, separado do ATENDIMENTO.
+               Eram a mesma coisa: "Finalizar" queria dizer ao mesmo tempo
+               "atendimento concluído" (que se cobra) e "paciente liberado para
+               a cirurgia" (que depende de exame). Quem avaliava com exame
+               pendente não finalizava — e a consulta, feita e cobrável, não
+               gerava lançamento nenhum.
+               Agora Finalizar encerra o ATENDIMENTO, e este campo diz em que
+               pé o paciente ficou. O que não está liberado continua cobrando
+               providência nas Pendências de prontuário. -->
+          <div class="field col-12">
+            <label>Desfecho da avaliação <small style="color:var(--text-mute);font-weight:400">— o atendimento é cobrado de qualquer forma; isto diz se o paciente está liberado</small></label>
+            <select name="conclusao_status" onchange="pre.aoMudarDesfecho(this.value)">
+              <option value="liberado">✅ Liberado para a cirurgia</option>
+              <option value="pendente">⏳ Pendente — aguardando exames / pareceres</option>
+              <option value="retorno">🔄 Necessário retorno</option>
+              <option value="nao_liberado">⛔ Não liberado</option>
+            </select>
+            <div id="pre-desfecho-aviso" style="font-size:.78rem;margin-top:6px"></div>
           </div>
           <div class="field col-12"><label>Conclusão</label>
             <textarea name="conclusao" rows="3"></textarea>
@@ -15196,6 +15215,48 @@ const pre = {
     if (!g('conclusao')) avisos.push('Conclusão / aptidão não preenchida');
     return avisos;
   },
+  /* ---- Desfecho da avaliação ----
+     "Finalizar" encerra o ATENDIMENTO — é o que gera a cobrança e conta a
+     produção, na data da avaliação. O desfecho diz outra coisa: se o paciente
+     saiu liberado. Quem não saiu continua cobrando providência, então
+     finalizar não faz o caso sumir do radar. */
+  DESFECHOS: {
+    liberado:     { rot: 'Liberado para a cirurgia', pend: false },
+    pendente:     { rot: 'Aguardando exames / pareceres', pend: true },
+    retorno:      { rot: 'Necessário retorno', pend: true },
+    nao_liberado: { rot: 'Não liberado', pend: true }
+  },
+  /* registro antigo não tem o campo: valia como liberado, que é o que
+     "finalizado" sempre significou. Nada do histórico se mexe. */
+  desfechoDe(rec) {
+    const v = rec && (rec.conclusao_status || (rec.conclusao_status === '' ? '' : null));
+    return (v && pre.DESFECHOS[v]) ? v : 'liberado';
+  },
+  ehPendente(rec) {
+    const d = pre.DESFECHOS[pre.desfechoDe(rec)];
+    return !!(d && d.pend);
+  },
+  aoMudarDesfecho(v) {
+    const box = document.getElementById('pre-desfecho-aviso');
+    if (box) {
+      const d = pre.DESFECHOS[v];
+      box.innerHTML = (d && d.pend)
+        ? '<span style="color:#7a4b12">⏳ O atendimento será cobrado normalmente na data da avaliação. ' +
+          'O caso continua nas <b>Pendências de prontuário</b> até você concluir.</span>'
+        : '';
+    }
+    /* conveniência: se a conclusão ainda está vazia, escreve o texto padrão
+       que combina com o desfecho — sem nunca por cima do que foi digitado */
+    try {
+      const ta = document.querySelector('#form-pre [name="conclusao"]');
+      if (ta && !String(ta.value || '').trim()) {
+        const tpl = { liberado: 'aptoSem', pendente: 'aguardarExames' }[v];
+        if (tpl) templates.aplicar('pre', 'conclusao', tpl);
+      }
+    } catch (e) {}
+    try { markDirty(); } catch (e) {}
+  },
+
   finalizar() {
     const avisos = pre._checarCompletude();
     if (avisos.length) {
@@ -21658,6 +21719,23 @@ const pendProntuario = {
                    motivo: 'Em rascunho — falta finalizar' });
       });
     });
+
+    /* 1b) PRÉ FINALIZADA QUE NÃO LIBEROU O PACIENTE.
+       O atendimento acabou e foi cobrado; o que falta é clínico — exame,
+       parecer, retorno. Sem isto, finalizar para poder cobrar faria o caso
+       sumir do radar, que é justamente o medo de quem não quer finalizar algo
+       incompleto. Estas entram DESDE HOJE: não é rascunho do dia, é uma
+       pendência que já nasceu declarada. */
+    if (auth.podeAcessar('pre')) {
+      doEscopo(store.list('pre') || []).forEach(r => {
+        if (!r || !r._id || !r._finalizado || r[pendProntuario.IGNORADA]) return;
+        if (!pre.ehPendente(r)) return;
+        const d = pendProntuario._data(r);
+        if (!d || d < corte) return;
+        out.push({ tipo: 'desfecho', mod: 'pre', id: r._id, nome: pendProntuario._nome(r), data: d,
+                   motivo: (pre.DESFECHOS[pre.desfechoDe(r)] || {}).rot || 'Avaliação em aberto' });
+      });
+    }
 
     /* 2) cirurgia agendada no passado sem ficha nenhuma */
     if (auth.podeAcessar('anestesia')) {
@@ -45562,6 +45640,15 @@ const meuDia = {
   _ehSoConsulta(c) { return meuDia._ehClinico(c); },
   _chipPre(c) {
     if (!c.pre) return '';
+    /* Finalizada MAS sem liberar o paciente não é caso resolvido: o
+       atendimento fechou (e foi cobrado), o clínico não. Verde puro aqui
+       esconderia o que ainda falta. */
+    if (c.pre._finalizado && typeof pre !== 'undefined' && pre.ehPendente && pre.ehPendente(c.pre)) {
+      const rot = (pre.DESFECHOS[pre.desfechoDe(c.pre)] || {}).rot || 'em aberto';
+      return '<button type="button" class="md-chip md-meio" onclick="dashboard._abrirFicha(\'pre\',\'' + c.pre._id + '\')" ' +
+        'title="Atendimento concluído e cobrado — mas o paciente não está liberado: ' + utils.escapeAttr(rot) + '">' +
+        '🫀 Pré ✓ · ' + utils.escapeHTML(rot.toLowerCase()) + '</button>';
+    }
     const ok = !!c.pre._finalizado;
     return '<button type="button" class="md-chip ' + (ok ? 'md-ok' : 'md-meio') + '" onclick="dashboard._abrirFicha(\'pre\',\'' + c.pre._id + '\')" title="' + (ok ? 'Pré-anestésica finalizada — abrir' : 'Pré-anestésica em rascunho — continuar') + '">🫀 ' + (ok ? 'Pré ✓' : 'Pré…') + '</button>';
   },
