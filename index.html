@@ -4604,7 +4604,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-25i</b><br>
+    v7.1 · build <b id="build-tag">2026-09-25j</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -8480,6 +8480,10 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
               <div style="padding-top:6px"><label class="check" style="display:inline-flex"><input type="checkbox" name="pago"> <span>Pago</span></label></div>
             </div>
             <div class="field col-3"><label>Data do pagamento</label><input type="date" name="data_pagamento"></div>
+            <div class="field col-3"><label>Meio de pagamento</label>
+              <select name="forma_pagamento"><option value="">—</option><option>PIX</option><option>Dinheiro</option><option>Cartão de débito</option><option>Cartão de crédito</option><option>Transferência / TED</option><option>Boleto</option><option>Cheque</option><option>Outro</option></select>
+            </div>
+            <div class="field col-3"><label>Conta que recebeu</label><input type="text" name="conta_recebeu" placeholder="ex.: Conta PJ Itaú, Caixa da clínica"></div>
             <div class="field col-2"><label>Valor pago (R$)</label><input type="number" name="valor_pago" step="0.01" min="0"></div>
             <div class="field col-2"><label>Data recebimento</label><input type="date" name="data_recebimento"></div>
 
@@ -15206,6 +15210,7 @@ const pre = {
       const fr = fin.fromDoc('pre', saved);
       if (fr && fr.isNew) {
         ui.mostrarBanner('banner-pre', '💰 Lançamento financeiro criado automaticamente. Acesse o módulo Financeiro para complementar valores.', 'success');
+        try { fin.perguntarPagamento(fr.item); } catch (e) {}
       }
     }
     /* atualiza id hidden */
@@ -16008,6 +16013,7 @@ const consulta = {
       const fr = fin.fromDoc('consulta', saved);
       if (fr && fr.isNew) {
         ui.mostrarBanner('banner-consulta', '💰 Lançamento financeiro criado automaticamente.', 'success');
+        try { fin.perguntarPagamento(fr.item); } catch (e) {}
       }
     }
     if (!idEl) {
@@ -25847,7 +25853,7 @@ const histAutocomplete = {
      (cirurgião, hospital, convênio, procedimento e profissional já são tratados por
      autocomplete.ligarTudo, que agora também mescla histórico). Aqui ficam os demais
      campos de texto livre que se repetem: sala, técnica, acompanhante, plano, etc. */
-  CAMPOS: ['sala', 'tecnica', 'acompanhante', 'plano', 'equipe', 'clinica'],
+  CAMPOS: ['sala', 'tecnica', 'acompanhante', 'plano', 'equipe', 'clinica', 'conta_recebeu'],
   _MODULOS: ['pre', 'consulta', 'anestesia', 'recuperacao', 'termo', 'prescricao', 'risco', 'financeiro', 'orcamento', 'agenda', 'pacientes'],
 
   /* Reúne valores únicos já usados naquele campo, em todos os registros salvos */
@@ -37266,6 +37272,7 @@ const anestesia = {
       const fr = fin.fromDoc('anestesia', saved);
       if (fr && fr.isNew) {
         ui.mostrarBanner('banner-anestesia', '💰 Lançamento financeiro criado automaticamente. Acesse o módulo Financeiro para complementar valores.', 'success');
+        try { fin.perguntarPagamento(fr.item); } catch (e) {}
       }
     }
     /* atualiza hidden */
@@ -39511,6 +39518,135 @@ const fin = {
     return linhas;
   },
 
+  /* ---- PARTICULAR: O DINHEIRO ENTRA NA HORA -------------------------------
+     Convênio se fatura e se espera semanas; particular se acerta ali, na
+     saída. Se a pergunta não for feita no momento da finalização, o
+     lançamento nasce "pendente" e ninguém volta nele — e o que entrou em
+     dinheiro ou PIX fica sem registro de meio, de valor e de conta.
+     Só pergunta quando o lançamento é NOVO, é particular e ainda não está
+     pago: refinalizar uma ficha não pode reabrir a pergunta. */
+  MEIOS_PAGAMENTO: ['PIX', 'Dinheiro', 'Cartão de débito', 'Cartão de crédito',
+                    'Transferência / TED', 'Boleto', 'Cheque', 'Outro'],
+  ehParticular(item) {
+    const c = String((item && (item.tipo_pagamento || item.convenio)) || '').toLowerCase();
+    return c.indexOf('particular') >= 0;
+  },
+  _pagamentoId: null,
+  perguntarPagamento(item) {
+    if (!item || !item._id) return false;
+    if (!fin.ehParticular(item)) return false;
+    if (item.pago) return false;
+    if (String(item.status || '').toLowerCase() === 'cortesia') return false;
+    fin._pagamentoId = item._id;
+    fin._abrirPagamentoQuandoLivre(0);
+    return true;
+  },
+  /* Só existe UMA janela. A finalização já abre a pergunta da SRPA, e abrir
+     por cima faria uma das duas sumir sem aviso. Espera a vez. */
+  _abrirPagamentoQuandoLivre(tentativa) {
+    let ocupado = false;
+    try {
+      const bd = document.getElementById('modal-backdrop');
+      ocupado = (bd && bd.classList.contains('show')) || !!document.querySelector('.bloq-janela');
+    } catch (e) {}
+    if (ocupado) {
+      if ((tentativa || 0) < 90) setTimeout(() => fin._abrirPagamentoQuandoLivre((tentativa || 0) + 1), 1000);
+      return;
+    }
+    fin._abrirPagamento();
+  },
+  _abrirPagamento() {
+    const item = store.getById('financeiro', fin._pagamentoId);
+    if (!item) return;
+    const prev = parseFloat(item.valor_previsto) || 0;
+    const e = utils.escapeHTML, ea = utils.escapeAttr;
+    /* contas já usadas antes: a lista cresce sozinha, sem cadastro para manter */
+    let contas = [];
+    try { contas = histAutocomplete._coletar('conta_recebeu'); } catch (x) {}
+    const corpo =
+      '<p style="font-size:.86rem;margin:0 0 10px">Atendimento <b>particular</b> de <b>' + e(item.paciente || '') + '</b>' +
+      (item.procedimento ? ' — ' + e(item.procedimento) : '') + '.<br>' +
+      '<span style="color:var(--text-mute);font-size:.82rem">O lançamento foi criado. Se o acerto já foi feito, registre agora; senão ele fica em aberto e aparece nas pendências.</span></p>' +
+      '<form id="form-fin-pag" onsubmit="return false"><div class="grid">' +
+      '<div class="field col-4"><label>Foi pago?</label><select name="fp_pago" onchange="fin._pagAjustar()">' +
+      '<option value="sim">Sim — integral</option><option value="parcial">Parcial</option><option value="nao">Ainda não</option>' +
+      '</select></div>' +
+      '<div class="field col-4"><label>Valor recebido (R$)</label><input type="number" step="0.01" min="0" name="fp_valor" value="' + (prev ? prev.toFixed(2) : '') + '"></div>' +
+      '<div class="field col-4"><label>Data do pagamento</label><input type="date" name="fp_data" value="' + ea(utils.hojeISO()) + '"></div>' +
+      '<div class="field col-6"><label>Meio de pagamento</label><select name="fp_meio"><option value="">—</option>' +
+      fin.MEIOS_PAGAMENTO.map(m => '<option>' + e(m) + '</option>').join('') + '</select></div>' +
+      '<div class="field col-6"><label>Conta que recebeu</label>' +
+      '<input type="text" name="fp_conta" list="fin-contas-lista" placeholder="ex.: Conta PJ Itaú, Caixa da clínica">' +
+      '<datalist id="fin-contas-lista">' + contas.map(c => '<option value="' + ea(c) + '">').join('') + '</datalist></div>' +
+      '<div class="field col-12" id="fp-aviso" style="font-size:.8rem;color:var(--text-mute)"></div>' +
+      '</div></form>';
+    modal.open('💵 Pagamento particular', corpo,
+      '<button class="btn" onclick="fin._pagDepois()">Depois</button>' +
+      '<button class="btn btn-primary" onclick="fin.registrarPagamento()">Registrar</button>');
+    setTimeout(() => { try { fin._pagAjustar(); } catch (x) {} }, 30);
+  },
+  _pagAjustar() {
+    const f = document.getElementById('form-fin-pag');
+    if (!f) return;
+    const pago = (f.querySelector('[name="fp_pago"]') || {}).value;
+    const item = store.getById('financeiro', fin._pagamentoId) || {};
+    const prev = parseFloat(item.valor_previsto) || 0;
+    const vEl = f.querySelector('[name="fp_valor"]');
+    const aviso = document.getElementById('fp-aviso');
+    /* "ainda não" com valor preenchido é contradição: o campo sai de cena */
+    ['fp_valor', 'fp_data', 'fp_meio', 'fp_conta'].forEach(n => {
+      const campo = f.querySelector('[name="' + n + '"]');
+      if (campo && campo.closest('.field')) campo.closest('.field').style.display = (pago === 'nao') ? 'none' : '';
+    });
+    if (pago === 'sim' && vEl && prev) vEl.value = prev.toFixed(2);
+    if (pago === 'parcial' && vEl && vEl.value && prev && parseFloat(vEl.value) >= prev) vEl.value = '';
+    if (aviso) {
+      aviso.textContent = pago === 'nao'
+        ? 'Fica como pendente, com o valor previsto de ' + historico._fmtRS(prev) + '. Dá para registrar depois no módulo Financeiro.'
+        : (prev ? 'Valor previsto: ' + historico._fmtRS(prev) + '.' : '');
+    }
+  },
+  _pagDepois() {
+    modal.close();
+    fin._pagamentoId = null;
+    toast('Deixado em aberto — o lançamento está no Financeiro.');
+  },
+  registrarPagamento() {
+    const f = document.getElementById('form-fin-pag');
+    const item = store.getById('financeiro', fin._pagamentoId);
+    if (!f || !item) { modal.close(); return; }
+    const g = n => ((f.querySelector('[name="' + n + '"]') || {}).value || '').trim();
+    const pago = g('fp_pago');
+    const prev = parseFloat(item.valor_previsto) || 0;
+    const novo = Object.assign({}, item);
+    if (pago === 'nao') {
+      novo.pago = false;
+      novo.status = 'pendente';
+    } else {
+      const val = parseFloat(g('fp_valor'));
+      if (isNaN(val) || val <= 0) { toast('Informe o valor recebido.', 'warn'); return; }
+      novo.valor_recebido = val;
+      novo.valor_pago = val;
+      novo.data_pagamento = g('fp_data') || utils.hojeISO();
+      novo.data_recebimento = novo.data_pagamento;
+      novo.forma_pagamento = g('fp_meio');
+      novo.conta_recebeu = g('fp_conta');
+      /* integral é o que cobre o previsto; abaixo disso é parcial, ainda que
+         a pessoa tenha marcado "sim" — quem decide é a conta */
+      const integral = !prev || val >= prev - 0.005;
+      novo.pago = integral;
+      novo.status = integral ? 'recebido' : 'parcial';
+      novo.diferenca_calc = prev - val - (parseFloat(novo.glosa) || 0);
+    }
+    store.save('financeiro', novo);
+    modal.close();
+    fin._pagamentoId = null;
+    try { financeiro.render(); } catch (e) {}
+    toast(pago === 'nao' ? 'Lançamento em aberto registrado.'
+      : '💵 Pagamento registrado: ' + historico._fmtRS(novo.valor_recebido) +
+        (novo.forma_pagamento ? ' · ' + novo.forma_pagamento : ''));
+  },
+
   /* Mapeia campos do documento de origem para o Financeiro.
      Uma linha financeira por linha do documento, casada por _origemLinhaId:
      editar o registro ATUALIZA a linha vinculada, nunca duplica. Linha que
@@ -41654,7 +41790,13 @@ const historico = {
       return '<tr>' +
         '<td style="white-space:nowrap">' + historico._fmtData(ev.data) + '</td>' +
         '<td style="font-size:.8rem">' + e(it.procedimento || '—') +
-          (it.convenio ? ' <small style="color:var(--text-mute)">· ' + e(it.convenio) + '</small>' : '') + '</td>' +
+          (it.convenio ? ' <small style="color:var(--text-mute)">· ' + e(it.convenio) + '</small>' : '') +
+          /* como e onde o dinheiro entrou — é o que se procura num particular */
+          ((it.forma_pagamento || it.conta_recebeu)
+            ? '<br><small style="color:var(--text-mute)">💵 ' +
+              [it.forma_pagamento, it.conta_recebeu].filter(Boolean).map(e).join(' · ') +
+              (it.data_pagamento ? ' · ' + historico._fmtData(it.data_pagamento) : '') + '</small>'
+            : '') + '</td>' +
         '<td style="text-align:right;white-space:nowrap">' + historico._fmtRS(prev) + '</td>' +
         '<td style="text-align:right;white-space:nowrap">' + historico._fmtRS(rec) + '</td>' +
         '<td style="text-align:right;white-space:nowrap">' + (glo ? historico._fmtRS(glo) : '—') + '</td>' +

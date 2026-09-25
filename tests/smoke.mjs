@@ -14006,6 +14006,106 @@ await test('Histórico do paciente: cadastro, documentos com data e o financeiro
   await page.close();
 });
 
+/* 205) Particular: o acerto é na hora. Convênio se fatura e se espera semanas;
+   particular se paga na saída. Sem a pergunta no momento da finalização, o
+   lançamento nasce "pendente" e ninguém volta nele — e o que entrou em PIX ou
+   dinheiro fica sem meio, sem valor e sem conta registrados. */
+await test('Particular: finalizar abre a janela de pagamento — meio, valor e conta que recebeu', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['pre', 'consulta', 'anestesia', 'financeiro', 'pacientes'].forEach(m => store.setList(m, []));
+    const hoje = utils.hojeISO();
+
+    /* 1) convênio NÃO abre a janela — lá o acerto é depois */
+    const conv = store.save('financeiro', { paciente: 'COM PLANO', convenio: 'Unimed',
+      tipo_pagamento: 'Convênio', valor_previsto: '800', data_proc: hoje, status: 'pendente' });
+    out.convenioNaoPergunta = fin.perguntarPagamento(conv) === false;
+
+    /* 2) particular abre */
+    const part = store.save('financeiro', { paciente: 'MARIA PARTICULAR', procedimento: 'Consulta',
+      convenio: 'Particular', tipo_pagamento: 'Particular', valor_previsto: '500',
+      data_proc: hoje, status: 'pendente' });
+    out.particularPergunta = fin.perguntarPagamento(part) === true;
+    await new Promise(res => setTimeout(res, 300));
+    const f = document.getElementById('form-fin-pag');
+    out.abriuJanela = !!f;
+    out.pedeOsQuatro = !!f && ['fp_pago', 'fp_valor', 'fp_meio', 'fp_conta']
+      .every(n => !!f.querySelector('[name="' + n + '"]'));
+    out.jaVemComOPrevisto = f.querySelector('[name="fp_valor"]').value === '500.00';
+
+    /* 3) pago integral: vira recebido, com meio e conta gravados */
+    f.querySelector('[name="fp_meio"]').value = 'PIX';
+    f.querySelector('[name="fp_conta"]').value = 'Conta PJ Itaú';
+    fin.registrarPagamento();
+    await new Promise(res => setTimeout(res, 200));
+    const p1 = store.getById('financeiro', part._id);
+    out.gravouPagamento = p1.pago === true && p1.status === 'recebido'
+      && Number(p1.valor_recebido) === 500 && p1.forma_pagamento === 'PIX'
+      && p1.conta_recebeu === 'Conta PJ Itaú' && p1.data_pagamento === hoje;
+
+    /* 4) já pago não volta a perguntar — refinalizar não reabre a janela */
+    out.pagoNaoPergunta = fin.perguntarPagamento(p1) === false;
+
+    /* 5) valor abaixo do previsto é PARCIAL, ainda que ele marque "sim":
+       quem decide é a conta, não o clique */
+    const p2 = store.save('financeiro', { paciente: 'JOSE PARTICULAR', convenio: 'Particular',
+      tipo_pagamento: 'Particular', valor_previsto: '400', data_proc: hoje, status: 'pendente' });
+    fin.perguntarPagamento(p2);
+    await new Promise(res => setTimeout(res, 300));
+    const f2 = document.getElementById('form-fin-pag');
+    f2.querySelector('[name="fp_pago"]').value = 'sim';
+    f2.querySelector('[name="fp_valor"]').value = '150';
+    f2.querySelector('[name="fp_meio"]').value = 'Dinheiro';
+    fin.registrarPagamento();
+    await new Promise(res => setTimeout(res, 200));
+    const r2 = store.getById('financeiro', p2._id);
+    out.parcialPelaConta = r2.status === 'parcial' && r2.pago === false && Number(r2.valor_recebido) === 150;
+
+    /* 6) "ainda não" deixa em aberto, sem inventar valor recebido */
+    const p3 = store.save('financeiro', { paciente: 'ANA PARTICULAR', convenio: 'Particular',
+      tipo_pagamento: 'Particular', valor_previsto: '300', data_proc: hoje, status: 'pendente' });
+    fin.perguntarPagamento(p3);
+    await new Promise(res => setTimeout(res, 300));
+    const f3 = document.getElementById('form-fin-pag');
+    f3.querySelector('[name="fp_pago"]').value = 'nao';
+    fin._pagAjustar();
+    out.escondeOsCamposDeDinheiro = f3.querySelector('[name="fp_valor"]').closest('.field').style.display === 'none';
+    fin.registrarPagamento();
+    await new Promise(res => setTimeout(res, 200));
+    const r3 = store.getById('financeiro', p3._id);
+    out.naoPagoFicaEmAberto = r3.status === 'pendente' && !r3.pago && !Number(r3.valor_recebido);
+
+    /* 7) cortesia não é cobrança — não pergunta */
+    const p4 = store.save('financeiro', { paciente: 'CORTESIA', convenio: 'Particular',
+      tipo_pagamento: 'Particular', valor_previsto: '200', data_proc: hoje, status: 'cortesia' });
+    out.cortesiaNaoPergunta = fin.perguntarPagamento(p4) === false;
+
+    /* 8) meio e conta aparecem no histórico do paciente */
+    const html = historico._prontRender('MARIA PARTICULAR');
+    out.saiNoHistorico = /PIX/.test(html) && /Conta PJ Itaú/.test(html);
+    /* e o campo existe no formulário do Financeiro, para corrigir depois */
+    out.temCampoNoFormulario = !!document.querySelector('#form-financeiro [name="forma_pagamento"]')
+      && !!document.querySelector('#form-financeiro [name="conta_recebeu"]');
+    return out;
+  });
+
+  assert(r.convenioNaoPergunta, 'convênio não abre a janela — lá o acerto é depois');
+  assert(r.particularPergunta && r.abriuJanela, 'particular abre a janela ao gerar o financeiro');
+  assert(r.pedeOsQuatro, 'perguntando se foi pago, o meio, o valor e a conta que recebeu');
+  assert(r.jaVemComOPrevisto, 'já com o valor previsto preenchido');
+  assert(r.gravouPagamento, 'e grava tudo no lançamento, que vira recebido');
+  assert(r.pagoNaoPergunta, 'lançamento já pago não reabre a pergunta');
+  assert(r.parcialPelaConta, 'valor abaixo do previsto é parcial — quem decide é a conta, não o clique');
+  assert(r.escondeOsCamposDeDinheiro, '"ainda não" tira de cena os campos de dinheiro');
+  assert(r.naoPagoFicaEmAberto, 'e deixa em aberto, sem inventar valor recebido');
+  assert(r.cortesiaNaoPergunta, 'cortesia não é cobrança — não pergunta');
+  assert(r.saiNoHistorico, 'meio e conta aparecem no histórico do paciente');
+  assert(r.temCampoNoFormulario, 'e ficam editáveis no formulário do Financeiro');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
