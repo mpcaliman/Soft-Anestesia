@@ -14798,6 +14798,77 @@ await test('Financeiro: um fato, um lugar — status manda no "pago" e no fluxo 
   await page.close();
 });
 
+/* 213) Abrir o lançamento tocando na linha. O botão "Editar" existe, mas mora
+   na última coluna de uma tabela de quinze — fora da tela, alcançável só
+   rolando na horizontal. Tocar no que se está olhando é o gesto natural. */
+await test('Financeiro: tocar na linha abre o lançamento para editar', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    store.setList('financeiro', []);
+    const hoje = utils.hojeISO();
+    const a = store.save('financeiro', { paciente: 'ALVO DA LINHA', data_proc: hoje,
+      procedimento: 'Consulta', convenio: 'Unimed', valor_previsto: '212.64', status: 'pendente' });
+    store.save('financeiro', { paciente: 'OUTRO QUALQUER', data_proc: hoje,
+      procedimento: 'Cirurgia', valor_previsto: '500', status: 'pendente' });
+
+    ui.navegar('financeiro');
+    await new Promise(res => setTimeout(res, 500));
+    try { modal.close(); } catch (e) {}
+    financeiro.render();
+    await new Promise(res => setTimeout(res, 200));
+
+    const linha = [...document.querySelectorAll('#financeiro-tbody tr')]
+      .find(tr => /ALVO DA LINHA/.test(tr.textContent));
+    out.linhaEhClicavel = !!linha && linha.classList.contains('fin-linha')
+      && getComputedStyle(linha).cursor === 'pointer';
+
+    /* 1) tocar numa célula qualquer abre AQUELE lançamento */
+    const card = document.getElementById(financeiro.cardId);
+    card.style.display = 'none';
+    linha.querySelector('[data-label="Procedimento"]').click();
+    await new Promise(res => setTimeout(res, 200));
+    const f = document.getElementById('form-financeiro');
+    out.abriuOCard = card.style.display === 'block';
+    out.abriuOCerto = (f.querySelector('[name="id"]') || {}).value === a._id
+      && f.querySelector('[name="paciente"]').value === 'ALVO DA LINHA';
+
+    /* 2) clique em BOTÃO da linha continua sendo do botão — o de excluir não
+       pode virar "abrir" nem o contrário */
+    financeiro.editar(null);
+    await new Promise(res => setTimeout(res, 150));
+    let chamou = null;
+    const editarOriginal = financeiro.editar;
+    financeiro.editar = (id) => { chamou = id; };
+    const btn = linha.querySelector('.actions-cell button');
+    financeiro.abrirLinha({ target: btn }, a._id);
+    out.botaoNaoVira = chamou === null;
+
+    /* 3) selecionar texto para copiar não vira navegação */
+    const sel = window.getSelection();
+    const rng = document.createRange();
+    rng.selectNodeContents(linha.querySelector('[data-label="Paciente"]'));
+    sel.removeAllRanges(); sel.addRange(rng);
+    financeiro.abrirLinha({ target: linha.querySelector('[data-label="Paciente"]') }, a._id);
+    out.selecaoNaoVira = chamou === null;
+    sel.removeAllRanges();
+
+    /* 4) sem seleção e fora de botão, abre */
+    financeiro.abrirLinha({ target: linha.querySelector('[data-label="Convênio"]') }, a._id);
+    out.abreQuandoDeve = chamou === a._id;
+    financeiro.editar = editarOriginal;
+    return out;
+  });
+
+  assert(r.linhaEhClicavel, 'a linha do Financeiro vira clicável');
+  assert(r.abriuOCard && r.abriuOCerto, 'e tocar nela abre AQUELE lançamento para editar');
+  assert(r.botaoNaoVira, 'clique num botão da linha continua sendo do botão');
+  assert(r.selecaoNaoVira, 'e selecionar texto para copiar não vira navegação');
+  assert(r.abreQuandoDeve, 'fora disso, o toque abre');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

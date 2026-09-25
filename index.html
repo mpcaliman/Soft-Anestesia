@@ -1175,6 +1175,11 @@ textarea.campo-desc { min-height: 0; overflow-y: hidden; line-height: 1.45; }
 }
 .pront-chip:hover { background: var(--primary-soft, #e8eef5); transform: translateY(-1px); }
 .pront-chip:active { transform: none; }
+
+/* Linha do Financeiro: toda ela abre o lançamento */
+tr.fin-linha { cursor: pointer; }
+tr.fin-linha:hover > td { background: var(--primary-soft, #e8eef5); }
+tr.fin-linha .actions-cell { cursor: default; }
 /* no celular a fileira vira coluna em vez de cortar os últimos */
 @media (max-width: 640px) {
   .pront-chip { font-size: .74rem; padding: 5px 10px; }
@@ -4634,7 +4639,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-25q</b><br>
+    v7.1 · build <b id="build-tag">2026-09-25r</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -49380,9 +49385,24 @@ const financeiro = {
     return saved;
   },
 
+  /* A linha inteira abre o lançamento. O botão "Editar" existe, mas mora na
+     última coluna de uma tabela de quinze — fora da tela, e alcançá-lo exige
+     rolar na horizontal. Tocar no que se está olhando é o gesto natural.
+     Só que a linha tem botões e texto dentro: clique em botão continua sendo
+     do botão, e arrastar para selecionar texto não pode virar navegação. */
+  abrirLinha(ev, id) {
+    if (!id) return;
+    const alvo = ev && ev.target;
+    if (alvo && alvo.closest && alvo.closest('button, a, input, select, textarea, label')) return;
+    try { if (String(window.getSelection()) .trim().length > 0) return; } catch (e) {}
+    financeiro.editar(id);
+  },
   editar(id) {
     const card = document.getElementById(financeiro.cardId);
     card.style.display = 'block';
+    /* o formulário fica ACIMA da lista: aberto sem rolar, ele some da vista e
+       parece que o toque não fez nada */
+    setTimeout(() => { try { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {} }, 30);
     utils.clearForm(financeiro.formId);
     /* Limpa tabela de códigos */
     const tbody = document.getElementById('fin-codigos-body');
@@ -50179,7 +50199,7 @@ const financeiro = {
           ? `<span class="fin-cod">${utils.escapeHTML(x.cbhpm_codigo)}</span> ` : '';
         const tipo = fin.TIPO_LABEL[x.tipo_atendimento] || '';
         return `
-          <tr>
+          <tr class="fin-linha" onclick="financeiro.abrirLinha(event, '${x._id}')" title="Toque na linha para abrir e editar este lançamento">
             <td data-label="Paciente">${utils.escapeHTML(x.paciente || '')}${auto}${anexoTag}</td>
             <td data-label="Senha">${x.senha ? utils.escapeHTML(x.senha) : '<span style="color:var(--text-mute)">—</span>'}</td>
             <td data-label="Procedimento">${cod}${utils.escapeHTML(x.procedimento || '')}</td>
