@@ -4600,7 +4600,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-25d</b><br>
+    v7.1 · build <b id="build-tag">2026-09-25e</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -6071,31 +6071,45 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
         <div id="vent-mecanica" style="display:none">
           <h3 style="font-size:.92rem;color:var(--primary-darker);margin:14px 0 8px">🫁 Ventilação mecânica</h3>
           <div class="grid">
-            <div class="field col-3"><label>Modo ventilatório</label>
+            <div class="field col-3"><label>Modo ventilatório <small style="color:var(--text-mute);font-weight:400">— o nome muda com a marca do aparelho</small></label>
+              <!-- O texto da opção é o que fica GRAVADO na ficha: os que já
+                   existiam ficam escritos igual, senão as fichas antigas
+                   abririam com o campo em branco. Quem diz quais parâmetros
+                   aparecem é o data-vkey, não o texto — "PCV-VG" começa com
+                   "PCV" e, sem a chave, herdaria os campos da pressão
+                   controlada e perderia o volume-alvo, que é justamente o que
+                   o modo tem de diferente. -->
               <select name="vent_modo" onchange="anestesia.vent.mostrarCamposModo()">
                 <option value="">—</option>
-                <option>VCV (volume controlado)</option>
-                <option>PCV (pressão controlada)</option>
-                <option>PSV (pressão de suporte)</option>
-                <option>SIMV</option>
-                <option>PRVC</option>
-                <option>APRV</option>
-                <option>BIPAP / Bi-Vent</option>
-                <option>VAPS</option>
+                <option data-vkey="MANUAL">Manual / balão</option>
+                <option data-vkey="VCV">VCV (volume controlado)</option>
+                <option data-vkey="PCV">PCV (pressão controlada)</option>
+                <option data-vkey="PCVVG" title="Entrega a pressão, ajustando-a respiração a respiração para garantir o volume corrente alvo. Nos aparelhos aparece como PCV-VG (GE), AutoFlow (Dräger), APV (Hamilton), VC+ (Puritan Bennett) ou PRVC (Maquet).">PCV-VG (pressão controlada com volume garantido)</option>
+                <option data-vkey="PSV">PSV (pressão de suporte)</option>
+                <option data-vkey="SIMV">SIMV</option>
+                <option data-vkey="SIMVVC">SIMV-VC (ciclos a volume)</option>
+                <option data-vkey="SIMVPC">SIMV-PC (ciclos a pressão)</option>
+                <option data-vkey="PRVC" title="Mesma família do PCV-VG: pressão regulada com volume controlado.">PRVC</option>
+                <option data-vkey="VAPS" title="Pressão de suporte com volume assegurado.">VAPS</option>
+                <option data-vkey="CPAP">CPAP</option>
+                <option data-vkey="CPAPPSV">CPAP + PSV</option>
+                <option data-vkey="APRV">APRV</option>
+                <option data-vkey="BIPAP">BIPAP / Bi-Vent</option>
               </select>
+              <small style="color:var(--text-mute);display:block;margin-top:3px;line-height:1.3">Volume garantido a pressão: <b>PCV-VG</b> (GE) = <b>AutoFlow</b> (Dräger) = <b>APV</b> (Hamilton) = <b>VC+</b> (PB) = <b>PRVC</b> (Maquet).</small>
             </div>
-            <div class="field col-2" data-vmodo="VCV SIMV PRVC VAPS"><label>VC (mL)</label><input type="number" name="vent_vc" min="0"></div>
-            <div class="field col-2" data-vmodo="PCV BIPAP APRV SIMV"><label>P insp (cmH₂O)</label><input type="number" name="vent_pinsp" min="0"></div>
-            <div class="field col-2" data-vmodo="PSV SIMV"><label>Press. suporte (cmH₂O)</label><input type="number" name="vent_ps" min="0"></div>
+            <div class="field col-2" data-vmodo="VCV SIMV SIMVVC PRVC VAPS PCVVG"><label>VC (mL) <small style="color:var(--text-mute);font-weight:400" title="Nos modos com volume garantido este é o volume-alvo: o aparelho ajusta a pressão para alcançá-lo.">— alvo nos modos garantidos</small></label><input type="number" name="vent_vc" min="0"></div>
+            <div class="field col-2" data-vmodo="PCV BIPAP APRV SIMV SIMVPC PCVVG"><label>P insp (cmH₂O) <small style="color:var(--text-mute);font-weight:400" title="No PCV-VG e no PRVC é o limite de pressão que o aparelho não ultrapassa ao perseguir o volume-alvo.">— limite nos garantidos</small></label><input type="number" name="vent_pinsp" min="0"></div>
+            <div class="field col-2" data-vmodo="PSV SIMV SIMVVC SIMVPC CPAPPSV"><label>Press. suporte (cmH₂O)</label><input type="number" name="vent_ps" min="0"></div>
             <div class="field col-2"><label>FR prog. (irpm) <small style="color:var(--text-mute);font-weight:400">— do ventilador</small></label><input type="number" name="vent_fr" min="0" title="Frequência programada no ventilador (diferente da FR medida, que fica nos sinais vitais)."></div>
             <div class="field col-2"><label>PEEP (cmH₂O)</label><input type="number" name="vent_peep" min="0" step="0.5"></div>
             <div class="field col-2"><label>FiO₂ (%)</label><input type="number" name="vent_fio2" min="21" max="100" oninput="anestesia.vent.sincronizarFiO2(this.value)"></div>
             <div class="field col-2"><label>P pico (cmH₂O)</label><input type="number" name="vent_ppico" min="0"></div>
-            <div class="field col-2" data-vmodo="VCV SIMV PRVC VAPS"><label>P platô (cmH₂O)</label><input type="number" name="vent_pplato" min="0" oninput="anestesia.vent.calcDriving()"></div>
-            <div class="field col-2" data-vmodo="VCV SIMV PRVC VAPS"><label>Driving P. (cmH₂O)</label><input type="number" name="vent_driving" readonly placeholder="auto"></div>
-            <div class="field col-2" data-vmodo="VCV PRVC VAPS"><label>Pausa insp. (%)</label><input type="number" name="vent_pausa" min="0" step="1"></div>
-            <div class="field col-2" data-vmodo="PCV PRVC"><label>T insp. (s)</label><input type="number" name="vent_tinsp" min="0" step="0.1"></div>
-            <div class="field col-2" data-vmodo="PSV SIMV PCV"><label>Trigger</label><input type="text" name="vent_trigger" placeholder="fluxo/pressão"></div>
+            <div class="field col-2" data-vmodo="VCV SIMV SIMVVC PRVC VAPS PCVVG"><label>P platô (cmH₂O)</label><input type="number" name="vent_pplato" min="0" oninput="anestesia.vent.calcDriving()"></div>
+            <div class="field col-2" data-vmodo="VCV SIMV SIMVVC PRVC VAPS PCVVG"><label>Driving P. (cmH₂O)</label><input type="number" name="vent_driving" readonly placeholder="auto"></div>
+            <div class="field col-2" data-vmodo="VCV PRVC VAPS PCVVG"><label>Pausa insp. (%)</label><input type="number" name="vent_pausa" min="0" step="1"></div>
+            <div class="field col-2" data-vmodo="PCV PRVC PCVVG SIMVPC"><label>T insp. (s)</label><input type="number" name="vent_tinsp" min="0" step="0.1"></div>
+            <div class="field col-2" data-vmodo="PSV SIMV SIMVVC SIMVPC PCV PCVVG CPAPPSV"><label>Trigger</label><input type="text" name="vent_trigger" placeholder="fluxo/pressão"></div>
             <div class="field col-2"><label>Relação I:E</label><input type="text" name="vent_ie" placeholder="1:2"></div>
             <div class="field col-2"><label>VM (L/min)</label><input type="number" name="vent_vm" step="0.1"></div>
             <div class="field col-2"><label>EtCO₂ (mmHg) <small style="color:var(--text-mute);font-weight:400">— dos sinais vitais</small></label><input type="number" name="vent_etco2" readonly ondblclick="this.readOnly=false" title="Último EtCO₂ registrado nos sinais vitais. Dê 2 toques para editar manualmente." style="background:var(--surface-alt)"></div>
@@ -29869,7 +29883,13 @@ const anestesia = {
       const f = document.getElementById('form-anestesia'); if (!f) return;
       const sel = f.querySelector('[name="vent_modo"]');
       const modo = sel ? sel.value : '';
-      const key = (modo.match(/^([A-Za-z]+)/) || [, ''])[1].toUpperCase();
+      /* a chave vem da opção escolhida. Deduzi-la do texto ("as primeiras
+         letras") daria PCV para "PCV-VG", e o modo perderia o volume-alvo —
+         que é o que ele tem de diferente do PCV. O texto só entra como recurso
+         para ficha gravada com um modo que não está mais na lista. */
+      const opt = sel && sel.selectedOptions && sel.selectedOptions[0];
+      const key = (opt && opt.dataset.vkey)
+        || (modo.match(/^([A-Za-z]+)/) || [, ''])[1].toUpperCase();
       document.querySelectorAll('#vent-mecanica [data-vmodo]').forEach(el => {
         if (!modo) { el.style.display = ''; return; }   /* sem modo: mostra tudo */
         const modos = el.getAttribute('data-vmodo').toUpperCase().split(/\s+/);
@@ -29955,7 +29975,9 @@ const anestesia = {
       if (!document.getElementById('vent-modos-datalist')) {
         const dl = document.createElement('datalist');
         dl.id = 'vent-modos-datalist';
-        ['VCV (volume controlado)','PCV (pressão controlada)','PSV (pressão de suporte)','SIMV','PRVC','APRV','BIPAP / Bi-Vent','VAPS',
+        ['VCV (volume controlado)','PCV (pressão controlada)','PCV-VG (pressão controlada com volume garantido)',
+         'PSV (pressão de suporte)','SIMV','SIMV-VC (ciclos a volume)','SIMV-PC (ciclos a pressão)',
+         'PRVC','APRV','BIPAP / Bi-Vent','VAPS','Manual / balão',
          'Manobra de recrutamento','Ventilação monopulmonar','Espontânea','CPAP','BiPAP / VNI','Alto fluxo (HFNC)',
          'Pré-oxigenação','Recrutamento alveolar'].forEach(m => {
           dl.innerHTML += `<option value="${m}">`;
@@ -30009,6 +30031,11 @@ const anestesia = {
           driving: v('vent_driving'), ie: v('vent_ie'),
           vm: v('vent_vm'), etco2: v('vent_etco2'),
           trigger: v('vent_trigger'),
+          /* estes quatro estavam na tela desde sempre e não eram gravados:
+             preenchidos, sumiam no salvar. No PCV-VG a P insp é o limite de
+             pressão do modo — sem ela o registro fica pela metade. */
+          pinsp: v('vent_pinsp'), ps: v('vent_ps'),
+          pausa: v('vent_pausa'), tinsp: v('vent_tinsp'),
           complacencia: v('vent_compl'), gaso: v('vent_gaso')
         },
         recursos: recursos,
@@ -30033,6 +30060,8 @@ const anestesia = {
       set('vent_ppico', m.ppico); set('vent_pplato', m.pplato);
       set('vent_driving', m.driving); set('vent_ie', m.ie);
       set('vent_trigger', m.trigger);
+      set('vent_pinsp', m.pinsp); set('vent_ps', m.ps);
+      set('vent_pausa', m.pausa); set('vent_tinsp', m.tinsp);
       set('vent_vm', m.vm); set('vent_etco2', m.etco2);
       set('vent_compl', m.complacencia); set('vent_gaso', m.gaso);
       f.querySelectorAll('[name="vent_recursos[]"]').forEach(el => {
@@ -44999,8 +45028,12 @@ ${TAG_CLOSE_HTML}`;
             ${printPreview._field('FR', m.fr ? m.fr + ' irpm' : '')}
             ${printPreview._field('PEEP', m.peep ? m.peep + ' cmH₂O' : '')}
             ${printPreview._field('FiO₂', m.fio2 ? m.fio2 + '%' : '')}
+            ${printPreview._field('P. insp', m.pinsp ? m.pinsp + ' cmH₂O' : '')}
+            ${printPreview._field('P. suporte', m.ps ? m.ps + ' cmH₂O' : '')}
             ${printPreview._field('P. pico', m.ppico ? m.ppico + ' cmH₂O' : '')}
             ${printPreview._field('P. platô', m.pplato ? m.pplato + ' cmH₂O' : '')}
+            ${printPreview._field('T insp.', m.tinsp ? m.tinsp + ' s' : '')}
+            ${printPreview._field('Pausa insp.', m.pausa ? m.pausa + '%' : '')}
             ${printPreview._field('Driving P.', m.driving ? m.driving + ' cmH₂O' : '')}
             ${printPreview._field('I:E', m.ie)}
             ${printPreview._field('Trigger', m.trigger)}

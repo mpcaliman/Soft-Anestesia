@@ -13593,6 +13593,102 @@ await test('Ficha: exames entram na linha do tempo dos eventos, com os valores d
   await page.close();
 });
 
+/* 200) Modos de ventilação. O pedido foi o modo a pressão com volume garantido
+   — PCV-VG, que cada fabricante chama de um jeito. Ele não é só mais uma linha
+   na lista: é o único modo em que VOLUME e PRESSÃO são programados juntos (o
+   volume é alvo, a pressão é limite), e a regra que escolhia os campos lia as
+   primeiras letras do nome, o que faria "PCV-VG" herdar os campos do "PCV" e
+   perder o volume. De quebra, quatro campos da ventilação estavam na tela
+   desde sempre e não eram gravados. */
+await test('Ventilação: PCV-VG e os outros modos — com os campos certos, e gravando o que a tela pede', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    store.setList('anestesia', []);
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 400));
+    try { modal.close(); } catch (e) {}
+
+    const f = document.getElementById('form-anestesia');
+    const sel = f.querySelector('[name="vent_modo"]');
+    const opcoes = [...sel.options].map(o => o.value);
+    out.temPcvVg = opcoes.some(o => /PCV-VG/.test(o) && /volume garantido/i.test(o));
+    /* os modos que já existiam continuam escritos igual: ficha antiga abre */
+    out.mantemOsAntigos = ['VCV (volume controlado)', 'PCV (pressão controlada)',
+      'PSV (pressão de suporte)', 'SIMV', 'PRVC', 'APRV', 'BIPAP / Bi-Vent', 'VAPS']
+      .every(v => opcoes.indexOf(v) >= 0);
+    out.temOsNovos = ['SIMV-VC', 'SIMV-PC', 'CPAP', 'CPAP + PSV', 'Manual / balão']
+      .every(t => opcoes.some(o => o.indexOf(t) === 0));
+
+    /* ventilação mecânica precisa estar visível para os campos aparecerem */
+    f.querySelector('[name="vent_modo_geral"][value="mecanica"]').checked = true;
+    anestesia.vent.alternar();
+
+    const visivel = n => {
+      const el = f.querySelector('[name="' + n + '"]');
+      const campo = el && el.closest('[data-vmodo]');
+      return !!campo && campo.style.display !== 'none';
+    };
+    const escolher = v => { sel.value = v; anestesia.vent.mostrarCamposModo(); };
+
+    /* PCV puro: pressão, sem volume */
+    escolher('PCV (pressão controlada)');
+    out.pcvSemVolume = visivel('vent_pinsp') && !visivel('vent_vc');
+
+    /* PCV-VG: volume-alvo E limite de pressão, os dois juntos — é o modo */
+    escolher(opcoes.find(o => /PCV-VG/.test(o)));
+    out.pcvVgTemOsDois = visivel('vent_vc') && visivel('vent_pinsp')
+      && visivel('vent_pplato') && visivel('vent_tinsp');
+
+    /* VCV segue sem pressão de suporte; PSV segue sem volume */
+    escolher('VCV (volume controlado)');
+    out.vcvIntacto = visivel('vent_vc') && !visivel('vent_ps');
+    escolher('PSV (pressão de suporte)');
+    out.psvIntacto = visivel('vent_ps') && !visivel('vent_vc');
+
+    /* 2) os quatro campos que a tela pedia e o registro jogava fora */
+    escolher(opcoes.find(o => /PCV-VG/.test(o)));
+    f.querySelector('[name="vent_vc"]').value = '420';
+    f.querySelector('[name="vent_pinsp"]').value = '22';
+    f.querySelector('[name="vent_ps"]').value = '8';
+    f.querySelector('[name="vent_pausa"]').value = '10';
+    f.querySelector('[name="vent_tinsp"]').value = '1.2';
+    const d = anestesia.coletarEstruturado();
+    const m = d.ventilacao.mecanica;
+    out.gravaOsQuatro = m.pinsp === '22' && m.ps === '8' && m.pausa === '10' && m.tinsp === '1.2';
+    out.gravaOModo = /PCV-VG/.test(m.modo) && m.vc === '420';
+
+    /* 3) e voltam ao reabrir a ficha, com os campos do modo já certos */
+    ['vent_vc', 'vent_pinsp', 'vent_ps', 'vent_pausa', 'vent_tinsp'].forEach(n => {
+      f.querySelector('[name="' + n + '"]').value = '';
+    });
+    sel.value = '';
+    anestesia.vent.restaurar(d.ventilacao);
+    out.restaura = f.querySelector('[name="vent_pinsp"]').value === '22'
+      && f.querySelector('[name="vent_tinsp"]').value === '1.2'
+      && /PCV-VG/.test(sel.value);
+    out.restauraOsCampos = visivel('vent_vc') && visivel('vent_pinsp');
+
+    /* 4) sai na ficha impressa */
+    const html = printPreview._buildAnestesia();
+    out.saiNaImpressao = /PCV-VG/.test(html) && /22 cmH₂O/.test(html) && /1\.2 s/.test(html);
+    return out;
+  });
+
+  assert(r.temPcvVg, 'o modo a pressão com volume garantido (PCV-VG) está na lista');
+  assert(r.mantemOsAntigos, 'e os modos que já existiam seguem escritos igual — ficha antiga abre');
+  assert(r.temOsNovos, 'junto de SIMV-VC, SIMV-PC, CPAP, CPAP+PSV e manual/balão');
+  assert(r.pcvSemVolume, 'o PCV puro mostra a pressão e não o volume');
+  assert(r.pcvVgTemOsDois, 'e o PCV-VG mostra os DOIS: volume-alvo e limite de pressão');
+  assert(r.vcvIntacto && r.psvIntacto, 'sem mexer no que VCV e PSV já mostravam');
+  assert(r.gravaOsQuatro, 'P insp, P suporte, pausa e T insp passam a ser gravados — não eram');
+  assert(r.gravaOModo, 'com o modo e o volume-alvo');
+  assert(r.restaura && r.restauraOsCampos, 'e voltam ao reabrir a ficha, com os campos do modo certos');
+  assert(r.saiNaImpressao, 'e saem na ficha impressa');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
