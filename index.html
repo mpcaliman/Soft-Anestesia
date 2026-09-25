@@ -4600,7 +4600,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-25e</b><br>
+    v7.1 · build <b id="build-tag">2026-09-25f</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -5689,10 +5689,10 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
         <div class="hora-grupo-titulo">▶️ Horários de início</div>
         <div class="grid">
           <div class="field col-4"><label>Entrada em sala</label>
-            <div class="input-group"><input type="time" name="hora_sala_entrada" oninput="anestesia.calc.duracao()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_sala_entrada'); anestesia.calc.duracao();">agora</button></div>
+            <div class="input-group"><input type="time" name="hora_sala_entrada" oninput="anestesia.calc.duracao()" onchange="anestesia.eventos.sincronizarHorario('Entrada em sala', this.value)"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_sala_entrada'); anestesia.calc.duracao(); anestesia.eventos.sincronizarHorario('Entrada em sala', this.previousElementSibling.value);">agora</button></div>
           </div>
           <div class="field col-4"><label>Início da anestesia</label>
-            <div class="input-group"><input type="time" name="hora_inicio" oninput="anestesia.calc.duracao()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_inicio'); anestesia.calc.duracao();">agora</button></div>
+            <div class="input-group"><input type="time" name="hora_inicio" oninput="anestesia.calc.duracao()" onchange="anestesia.eventos.sincronizarHorario('Início da anestesia', this.value)"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_inicio'); anestesia.calc.duracao(); anestesia.eventos.sincronizarHorario('Início da anestesia', this.previousElementSibling.value);">agora</button></div>
           </div>
           <div class="field col-4"><label>Início da cirurgia/procedimento</label>
             <div class="input-group"><input type="time" name="hora_cir_inicio" oninput="anestesia.calc.duracao()" onchange="anestesia.eventos.sincronizarHorario('Incisão cirúrgica', this.value)"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_cir_inicio'); anestesia.calc.duracao(); anestesia.eventos.sincronizarHorario('Incisão cirúrgica', this.previousElementSibling.value);">agora</button></div>
@@ -5704,10 +5704,10 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <div class="input-group"><input type="time" name="hora_cir_fim" oninput="anestesia.calc.duracao()" onchange="anestesia.eventos.sincronizarHorario('Fim da cirurgia', this.value)"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_cir_fim'); anestesia.calc.duracao(); anestesia.eventos.sincronizarHorario('Fim da cirurgia', this.previousElementSibling.value);">agora</button></div>
           </div>
           <div class="field col-4"><label>Fim da anestesia</label>
-            <div class="input-group"><input type="time" name="hora_fim" oninput="anestesia.calc.duracao()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_fim'); anestesia.calc.duracao();">agora</button></div>
+            <div class="input-group"><input type="time" name="hora_fim" oninput="anestesia.calc.duracao()" onchange="anestesia.eventos.sincronizarHorario('Fim da anestesia', this.value)"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_fim'); anestesia.calc.duracao(); anestesia.eventos.sincronizarHorario('Fim da anestesia', this.previousElementSibling.value);">agora</button></div>
           </div>
           <div class="field col-4"><label>Saída de sala</label>
-            <div class="input-group"><input type="time" name="hora_sala_saida"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_sala_saida');">agora</button></div>
+            <div class="input-group"><input type="time" name="hora_sala_saida" onchange="anestesia.eventos.sincronizarHorario('Saída de sala', this.value)"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_sala_saida'); anestesia.eventos.sincronizarHorario('Saída de sala', this.previousElementSibling.value);">agora</button></div>
           </div>
         </div>
         <!-- Códigos do MESMO ato, mesma equipe — aqui em cima, junto do procedimento
@@ -6113,6 +6113,16 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <div class="field col-2"><label>Relação I:E</label><input type="text" name="vent_ie" placeholder="1:2"></div>
             <div class="field col-2"><label>VM (L/min)</label><input type="number" name="vent_vm" step="0.1"></div>
             <div class="field col-2"><label>EtCO₂ (mmHg) <small style="color:var(--text-mute);font-weight:400">— dos sinais vitais</small></label><input type="number" name="vent_etco2" readonly ondblclick="this.readOnly=false" title="Último EtCO₂ registrado nos sinais vitais. Dê 2 toques para editar manualmente." style="background:var(--surface-alt)"></div>
+            <!-- A ventilação tem começo e fim, e é isso que a linha do tempo
+                 precisa. Antes o evento era carimbado com a hora do clique no
+                 "Mecânica" — que raramente é a hora em que a ventilação
+                 começou. Agora o horário digitado aqui manda no evento. -->
+            <div class="field col-2"><label>Início da VM</label>
+              <div class="input-group"><input type="time" name="vent_hora_ini" onchange="anestesia.vent.sincronizarHorarios()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','vent_hora_ini'); anestesia.vent.sincronizarHorarios();">agora</button></div>
+            </div>
+            <div class="field col-2"><label>Fim da VM</label>
+              <div class="input-group"><input type="time" name="vent_hora_fim" onchange="anestesia.vent.sincronizarHorarios()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','vent_hora_fim'); anestesia.vent.sincronizarHorarios();">agora</button></div>
+            </div>
             <div class="field col-3"><label>Complacência (mL/cmH₂O)</label><input type="number" name="vent_compl" step="0.1"></div>
             <div class="field col-9"><label>Gasometria arterial</label><input type="text" name="vent_gaso" placeholder="pH / pCO₂ / pO₂ / HCO₃ / BE / Sat"></div>
           </div>
@@ -29815,24 +29825,44 @@ const anestesia = {
       markDirty();
     },
     /* Marca início/fim da ventilação mecânica como evento — sem duplicar e sem
-       inventar: só marca o fim se houve início. */
+       inventar: só marca o fim se houve início.
+       A hora é a que estiver digitada no card; sem ela, a de agora — e essa
+       volta escrita no campo, para o card e a linha do tempo não discordarem. */
     _marcarPeriodo(modo) {
       const ev = anestesia.eventos;
       if (!ev || !ev.existeEvento) return;
+      const f = document.getElementById('form-anestesia');
+      const campo = n => f && f.querySelector('[name="' + n + '"]');
+      const marcar = (tipo, nomeCampo) => {
+        const el = campo(nomeCampo);
+        const hora = (el && el.value) || utils.horaAtual();
+        anestesia.graficoUI._contexto = 'anestesia';
+        const tr = ev.add({ tipo, hora, obs: ev.descricaoPara(tipo), auto: true });
+        /* a hora que o evento REALMENTE ficou: add() a ajusta aos limites da
+           ficha (clampHora), então escrever de volta a que eu pedi deixaria o
+           card dizendo uma coisa e a linha do tempo outra */
+        const real = (tr && (tr.querySelector('[name="evt_hora[]"]') || {}).value) || hora;
+        if (el && !el.value) el.value = real;
+      };
       const temInicio = ev.existeEvento('Início da ventilação mecânica');
       if (modo === 'mecanica') {
         if (temInicio) return;
-        anestesia.graficoUI._contexto = 'anestesia';
-        ev.add({ tipo: 'Início da ventilação mecânica', hora: utils.horaAtual(),
-                 obs: ev.descricaoPara('Início da ventilação mecânica'), auto: true });
+        marcar('Início da ventilação mecânica', 'vent_hora_ini');
         try { toast('🫁 Início da ventilação mecânica marcado na linha do tempo'); } catch (e) {}
       } else if (temInicio && !ev.existeEvento('Fim da ventilação mecânica')) {
-        anestesia.graficoUI._contexto = 'anestesia';
-        ev.add({ tipo: 'Fim da ventilação mecânica', hora: utils.horaAtual(),
-                 obs: ev.descricaoPara('Fim da ventilação mecânica'), auto: true });
+        marcar('Fim da ventilação mecânica', 'vent_hora_fim');
         try { toast('🫁 Fim da ventilação mecânica marcado na linha do tempo'); } catch (e) {}
       }
       try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
+    },
+    /* Digitou o horário no card: o evento correspondente passa a ter essa hora
+       (e nasce, se ainda não existir). Uma via só — o que se corrige na linha
+       do tempo não volta reescrevendo o card, que é onde ele decidiu. */
+    sincronizarHorarios() {
+      const f = document.getElementById('form-anestesia'); if (!f) return;
+      const v = n => (f.querySelector('[name="' + n + '"]') || {}).value || '';
+      anestesia.eventos.sincronizarHorario('Início da ventilação mecânica', v('vent_hora_ini'));
+      anestesia.eventos.sincronizarHorario('Fim da ventilação mecânica', v('vent_hora_fim'));
     },
     /* FiO₂ é uma só: mantém os três campos (espontânea, mecânica, gases frescos)
        em sincronia — informa-se uma vez. */
@@ -30036,6 +30066,7 @@ const anestesia = {
              pressão do modo — sem ela o registro fica pela metade. */
           pinsp: v('vent_pinsp'), ps: v('vent_ps'),
           pausa: v('vent_pausa'), tinsp: v('vent_tinsp'),
+          hora_ini: v('vent_hora_ini'), hora_fim: v('vent_hora_fim'),
           complacencia: v('vent_compl'), gaso: v('vent_gaso')
         },
         recursos: recursos,
@@ -30062,6 +30093,7 @@ const anestesia = {
       set('vent_trigger', m.trigger);
       set('vent_pinsp', m.pinsp); set('vent_ps', m.ps);
       set('vent_pausa', m.pausa); set('vent_tinsp', m.tinsp);
+      set('vent_hora_ini', m.hora_ini); set('vent_hora_fim', m.hora_fim);
       set('vent_vm', m.vm); set('vent_etco2', m.etco2);
       set('vent_compl', m.complacencia); set('vent_gaso', m.gaso);
       f.querySelectorAll('[name="vent_recursos[]"]').forEach(el => {
@@ -30244,9 +30276,20 @@ const anestesia = {
         return '<div class="field col-' + f.col + '"><label>' + utils.escapeHTML(f.l) + '</label>' +
           '<input type="text" name="td_' + f.n + '" value="' + utils.escapeAttr(val) + '" placeholder="' + utils.escapeAttr(f.p || '') + '"></div>';
       };
+      /* O HORÁRIO não é um campo da técnica: é o mesmo para todas, e o que ele
+         faz é mandar no evento da linha do tempo. Marcar a técnica carimbava o
+         evento com a hora do clique, e não havia onde corrigir sem ir na
+         tabela. Já vem preenchido com a hora que o evento tem hoje. */
+      const evtTipo = anestesia.eventos.TIPO_EVENTO[tipo];
+      anestesia.graficoUI._contexto = 'anestesia';
+      const horaEvt = d.hora || (evtTipo ? anestesia.eventos.horaDe(evtTipo) : '') || '';
+      const campoHora = evtTipo
+        ? '<div class="field col-3"><label>Horário <small style="color:var(--text-mute);font-weight:400">— vai para o evento</small></label>' +
+          '<input type="time" name="td_hora" value="' + utils.escapeAttr(horaEvt) + '"></div>'
+        : '';
       const corpo =
         '<p style="font-size:.82rem;color:var(--text-mute);margin:0 0 10px">O que você preencher aqui fica gravado na ficha e vira a descrição desta técnica — no texto da técnica realizada e no evento da linha do tempo. Tudo é opcional.</p>' +
-        '<form id="form-tecdet" onsubmit="return false"><div class="grid">' + esp.campos.map(campo).join('') + '</div></form>';
+        '<form id="form-tecdet" onsubmit="return false"><div class="grid">' + campoHora + esp.campos.map(campo).join('') + '</div></form>';
       modal.open(esp.titulo, corpo,
         '<button class="btn" onclick="modal.close()">Cancelar</button>' +
         '<button class="btn btn-primary" onclick="anestesia.tecnicaDet.salvar(\'' + utils.escapeAttr(tipo) + '\')">Salvar detalhes</button>');
@@ -30370,10 +30413,18 @@ const anestesia = {
         const el = f.querySelector('[name="td_' + c.n + '"]');
         if (el && el.value.trim()) d[c.n] = el.value.trim();
       });
+      const hEl = f.querySelector('[name="td_hora"]');
+      const hora = hEl ? String(hEl.value || '').trim() : '';
+      if (hora) d.hora = hora;
       if (Object.keys(d).length) anestesia.tecnicaDet._dados[tipo] = d;
       else delete anestesia.tecnicaDet._dados[tipo];
       modal.close();
       anestesia.tecnicaDet.aplicar(tipo);
+      /* o horário digitado manda no evento — era isto que não saía do card */
+      const evtTipo = anestesia.eventos.TIPO_EVENTO[tipo];
+      if (hora && evtTipo) {
+        try { anestesia.eventos.sincronizarHorario(evtTipo, hora); } catch (e) {}
+      }
       try { markDirty(); } catch (e) {}
       try { toast('Detalhes de "' + tipo + '" gravados na ficha.'); } catch (e) {}
     },
@@ -30780,6 +30831,10 @@ const anestesia = {
   eventos: {
     /* Catálogo agrupado (fonte única) — TIPOS é derivado daqui */
     GRUPOS: [
+      /* Os tempos do ato são eventos: entrada em sala, início e fim da
+         anestesia, saída. Estavam só nos campos do card 2, e a linha do tempo
+         começava na indução — sem o que veio antes e sem o que veio depois. */
+      { grupo: 'Tempos do ato', itens: ['Entrada em sala', 'Início da anestesia', 'Fim da anestesia', 'Saída de sala'] },
       { grupo: 'Procedimentos / acessos', itens: ['Venoclise', 'Punção arterial', 'Acesso venoso central',
           'Sondagem orogástrica', 'Sondagem nasogástrica', 'Sondagem vesical (Foley)', 'Sondagem vesical de alívio'] },
       { grupo: 'Via aérea / anestesia', itens: ['Sedação', 'Indução', 'Intubação', 'Extubação', 'Máscara laríngea', 'Retirada da máscara laríngea', 'Início da ventilação mecânica', 'Fim da ventilação mecânica', 'Início O₂', 'Fim O₂', 'Início halogenado', 'Fim halogenado', 'Início infusão contínua', 'Fim infusão contínua'] },
@@ -45032,6 +45087,8 @@ ${TAG_CLOSE_HTML}`;
             ${printPreview._field('P. suporte', m.ps ? m.ps + ' cmH₂O' : '')}
             ${printPreview._field('P. pico', m.ppico ? m.ppico + ' cmH₂O' : '')}
             ${printPreview._field('P. platô', m.pplato ? m.pplato + ' cmH₂O' : '')}
+            ${printPreview._field('Início da VM', m.hora_ini)}
+            ${printPreview._field('Fim da VM', m.hora_fim)}
             ${printPreview._field('T insp.', m.tinsp ? m.tinsp + ' s' : '')}
             ${printPreview._field('Pausa insp.', m.pausa ? m.pausa + '%' : '')}
             ${printPreview._field('Driving P.', m.driving ? m.driving + ' cmH₂O' : '')}

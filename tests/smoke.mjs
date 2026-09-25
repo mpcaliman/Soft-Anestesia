@@ -13689,6 +13689,110 @@ await test('Ventilação: PCV-VG e os outros modos — com os campos certos, e g
   await page.close();
 });
 
+/* 201) Os horários digitados nos cards têm de chegar à linha do tempo. Bloqueio
+   e via aérea já mandavam no evento; o resto, não: a técnica e a ventilação
+   carimbavam o evento com a hora do CLIQUE, e entrada em sala, início e fim da
+   anestesia e saída não viravam evento nenhum. Quem opera preenche o card e
+   espera que a linha do tempo siga — não que ela guarde o instante em que o
+   dedo tocou a tela. */
+await test('Horários dos cards mandam no evento: técnica, ventilação e os tempos do ato', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    store.setList('anestesia', []);
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 400));
+    try { modal.close(); } catch (e) {}
+    document.querySelectorAll('#module-anestesia .card.collapsed').forEach(c => c.classList.remove('collapsed'));
+    const f = document.getElementById('form-anestesia');
+    anestesia.graficoUI._contexto = 'anestesia';
+    const horaDe = t => anestesia.eventos.horaDe(t);
+    const existe = t => anestesia.eventos.existeEvento(t);
+    const mudar = (nome, val) => {
+      const el = f.querySelector('[name="' + nome + '"]');
+      el.value = val;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+
+    /* 1) os quatro tempos do ato viram evento, com a hora digitada */
+    out.tiposNovos = ['Entrada em sala', 'Início da anestesia', 'Fim da anestesia', 'Saída de sala']
+      .every(t => anestesia.eventos.TIPOS.indexOf(t) >= 0);
+    mudar('hora_sala_entrada', '07:40');
+    mudar('hora_inicio', '07:55');
+    mudar('hora_fim', '09:30');
+    mudar('hora_sala_saida', '09:45');
+    out.temposViramEvento = horaDe('Entrada em sala') === '07:40'
+      && horaDe('Início da anestesia') === '07:55'
+      && horaDe('Fim da anestesia') === '09:30'
+      && horaDe('Saída de sala') === '09:45';
+    /* corrigir o campo corrige o evento, não cria um segundo */
+    mudar('hora_inicio', '08:05');
+    const quantos = [...document.querySelectorAll('#eventos-body [name="evt_tipo[]"]')]
+      .filter(el => el.value === 'Início da anestesia').length;
+    out.corrigeNaoDuplica = horaDe('Início da anestesia') === '08:05' && quantos === 1;
+
+    /* 2) ventilação mecânica: o evento nasce com a hora do clique, mas ela
+       volta escrita no card — e digitar outra manda no evento */
+    f.querySelector('[name="vent_modo_geral"][value="mecanica"]').checked = true;
+    anestesia.vent.alternar();
+    out.marcouVM = existe('Início da ventilação mecânica');
+    out.carimbouNoCard = !!f.querySelector('[name="vent_hora_ini"]').value
+      && f.querySelector('[name="vent_hora_ini"]').value === horaDe('Início da ventilação mecânica');
+    mudar('vent_hora_ini', '08:10');
+    out.ventHoraVaiProEvento = horaDe('Início da ventilação mecânica') === '08:10';
+    mudar('vent_hora_fim', '09:20');
+    out.ventFimVaiProEvento = horaDe('Fim da ventilação mecânica') === '09:20';
+    /* e os dois horários são gravados e voltam */
+    const dv = anestesia.coletarEstruturado().ventilacao.mecanica;
+    out.gravaHorariosVM = dv.hora_ini === '08:10' && dv.hora_fim === '09:20';
+
+    /* 3) tipo de anestesia: a janela pede o horário e ele manda no evento */
+    const chk = f.querySelector('[name="tipo[]"][value="Anestesia geral"]');
+    chk.checked = true;
+    anestesia.eventos.aoSelecionarTipo(chk);
+    await new Promise(res => setTimeout(res, 500));
+    out.criouInducao = existe('Indução');
+    const horaClique = horaDe('Indução');
+    /* marcar a técnica já abre a janela sozinho; fecha e abre de novo pelo
+       caminho direto, para o teste não depender do tempo do agendamento */
+    try { modal.close(); } catch (e) {}
+    await new Promise(res => setTimeout(res, 300));
+    anestesia.tecnicaDet.abrir('Anestesia geral');
+    await new Promise(res => setTimeout(res, 800));
+    const ft = document.getElementById('form-tecdet');
+    out.janelaPedeHorario = !!ft && !!ft.querySelector('[name="td_hora"]');
+    /* já vem com a hora que o evento tem hoje, para corrigir e não redigitar */
+    out.janelaJaVemPreenchida = ft.querySelector('[name="td_hora"]').value === horaClique;
+    ft.querySelector('[name="td_hora"]').value = '08:07';
+    anestesia.tecnicaDet.salvar('Anestesia geral');
+    await new Promise(res => setTimeout(res, 300));
+    out.tecnicaMandaNoEvento = horaDe('Indução') === '08:07';
+    /* e fica gravado: reabrir a janela mostra o que ele escolheu */
+    out.guardaNaFicha = anestesia.tecnicaDet.coletar()['Anestesia geral'].hora === '08:07';
+
+    /* 4) o que já funcionava continua: bloqueio e via aérea */
+    mudar('bloqueio_tipo', 'Raquianestesia');
+    mudar('bloqueio_hora', '07:58');
+    out.bloqueioSegue = horaDe('Raquianestesia') === '07:58';
+    return out;
+  });
+
+  assert(r.tiposNovos, 'entrada em sala, início e fim da anestesia e saída são eventos');
+  assert(r.temposViramEvento, 'e os horários digitados no card 2 chegam à linha do tempo');
+  assert(r.corrigeNaoDuplica, 'corrigir o campo corrige o evento — não cria um segundo');
+  assert(r.marcouVM && r.carimbouNoCard, 'a ventilação marca o evento e escreve a hora no card, para os dois não discordarem');
+  assert(r.ventHoraVaiProEvento && r.ventFimVaiProEvento, 'e o horário digitado na ventilação manda no evento');
+  assert(r.gravaHorariosVM, 'início e fim da VM são gravados na ficha');
+  assert(r.criouInducao, 'marcar a técnica segue criando o evento');
+  assert(r.janelaPedeHorario, 'a janela da técnica passa a pedir o horário');
+  assert(r.janelaJaVemPreenchida, 'já preenchida com a hora que o evento tem — é correção, não redigitação');
+  assert(r.tecnicaMandaNoEvento, 'e o horário escolhido ali manda no evento da linha do tempo');
+  assert(r.guardaNaFicha, 'ficando gravado na ficha');
+  assert(r.bloqueioSegue, 'sem mexer no que bloqueio e via aérea já faziam');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
