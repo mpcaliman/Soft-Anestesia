@@ -4600,7 +4600,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-25b</b><br>
+    v7.1 · build <b id="build-tag">2026-09-25c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -6575,6 +6575,39 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
         <div class="table-actions">
           <button type="button" class="btn btn-primary btn-sm" onclick="anestesia.eventos.add()">+ Adicionar evento</button>
           <button type="button" class="btn btn-danger btn-sm" onclick="anestesia.eventos.limparTabela()">🗑 Limpar eventos</button>
+        </div>
+
+        <!-- EXAMES INTRAOPERATÓRIOS
+             Diferentes dos monitores logo acima: monitor é medida CONTÍNUA de
+             um parâmetro; exame é pontual, tem hora, e traz VÁRIOS valores de
+             uma vez. Gasometria não cabe numa coluna da grade de sinais
+             vitais — tem dez números. Por isso tabela própria, com os campos
+             de cada exame numa janela. -->
+        <h3 style="font-size:.92rem;color:var(--primary-darker);margin:18px 0 8px;border-top:1px solid var(--border);padding-top:14px">🧪 Exames intraoperatórios<small style="font-weight:400;color:var(--text-mute);margin-left:8px">— gasometria, hemograma, glicemia… cada um com hora e resultado</small></h3>
+        <div class="quick-actions">
+          <span class="qa-label">Adicionar rápido</span>
+          <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.exames.add({ tipo: 'Gasometria arterial' }, true)">+ Gasometria arterial</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add({ tipo: 'Gasometria venosa' }, true)">+ Gasometria venosa</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add({ tipo: 'Hemograma' }, true)">+ Hemograma</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add({ tipo: 'Glicemia' }, true)">+ Glicemia</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add({ tipo: 'Eletrólitos' }, true)">+ Eletrólitos</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add({ tipo: 'Coagulograma' }, true)">+ Coagulograma</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add({ tipo: 'Lactato' }, true)">+ Lactato</button>
+        </div>
+        <div class="dyn-table-wrap">
+          <table class="dyn" id="tab-exames">
+            <thead><tr>
+              <th style="width:80px;cursor:pointer" onclick="anestesia.ordenarPorHorario('exames-body')" title="Toque para ordenar por horário">Horário ↕</th>
+              <th style="width:190px">Exame</th>
+              <th>Resultado</th>
+              <th class="col-rm">×</th>
+            </tr></thead>
+            <tbody id="exames-body"></tbody>
+          </table>
+        </div>
+        <div class="table-actions">
+          <button type="button" class="btn btn-primary btn-sm" onclick="anestesia.exames.add()">+ Adicionar exame</button>
+          <button type="button" class="btn btn-danger btn-sm" onclick="anestesia.exames.limparTabela()">🗑 Limpar exames</button>
         </div>
 
         <!-- GRADE POR HORÁRIO — edição principal (estilo tabela), acima do gráfico -->
@@ -31288,6 +31321,288 @@ const anestesia = {
     }
   },
 
+  /* ---- EXAMES INTRAOPERATÓRIOS -------------------------------------------
+     Por que tabela própria, e não mais uma coluna nos sinais vitais: o monitor
+     mede UM parâmetro de forma contínua; o exame é pontual e traz VÁRIOS
+     valores de uma vez. Uma gasometria tem treze números — não cabe numa
+     célula da grade, e espalhá-la por treze colunas encheria a grade de
+     espaços vazios em todos os horários em que não houve coleta.
+     Cada linha é um exame: hora, tipo e o resultado. Os números vão numa
+     janela com os campos daquele exame (a mesma ideia das técnicas do card 3),
+     e o texto da coluna "Resultado" é gerado a partir deles — continuando
+     editável à mão, e aí o sistema não mexe mais (é o que a marca "auto" da
+     linha guarda, igual aos eventos). */
+  exames: {
+    /* Campos por exame. `u` é a unidade que aparece no resumo; `p` é o valor
+       de referência mostrado como dica dentro do campo — não é validação,
+       serve de lembrete na hora da coleta. */
+    ESPECS: {
+      'Gasometria arterial': {
+        titulo: '🩸 Gasometria arterial',
+        campos: [
+          { n: 'ph', l: 'pH', p: '7,35–7,45' },
+          { n: 'pco2', l: 'pCO₂', u: 'mmHg', p: '35–45' },
+          { n: 'po2', l: 'pO₂', u: 'mmHg', p: '80–100' },
+          { n: 'hco3', l: 'HCO₃⁻', u: 'mEq/L', p: '22–26' },
+          { n: 'be', l: 'BE', u: 'mEq/L', p: '−2 a +2' },
+          { n: 'sat', l: 'SatO₂', u: '%', p: '95–100' },
+          { n: 'fio2', l: 'FiO₂', u: '%', p: 'no momento da coleta' },
+          { n: 'lactato', l: 'Lactato', u: 'mmol/L', p: '< 2' },
+          { n: 'na', l: 'Na⁺', u: 'mEq/L', p: '135–145' },
+          { n: 'k', l: 'K⁺', u: 'mEq/L', p: '3,5–5,0' },
+          { n: 'cai', l: 'Ca²⁺ iônico', u: 'mmol/L', p: '1,1–1,3' },
+          { n: 'hb', l: 'Hb', u: 'g/dL' },
+          { n: 'glic', l: 'Glicose', u: 'mg/dL' }
+        ]
+      },
+      'Gasometria venosa': {
+        titulo: '🩸 Gasometria venosa',
+        campos: [
+          { n: 'ph', l: 'pH', p: '7,32–7,42' },
+          { n: 'pco2', l: 'pCO₂', u: 'mmHg', p: '41–51' },
+          { n: 'po2', l: 'pO₂', u: 'mmHg', p: '35–45' },
+          { n: 'hco3', l: 'HCO₃⁻', u: 'mEq/L', p: '22–26' },
+          { n: 'be', l: 'BE', u: 'mEq/L' },
+          { n: 'sat', l: 'SvO₂ / ScvO₂', u: '%', p: '65–75' },
+          { n: 'lactato', l: 'Lactato', u: 'mmol/L' },
+          { n: 'k', l: 'K⁺', u: 'mEq/L' },
+          { n: 'hb', l: 'Hb', u: 'g/dL' }
+        ]
+      },
+      'Hemograma': {
+        titulo: '🧫 Hemograma',
+        campos: [
+          { n: 'hb', l: 'Hb', u: 'g/dL', p: '12–16' },
+          { n: 'ht', l: 'Ht', u: '%', p: '36–48' },
+          { n: 'leuco', l: 'Leucócitos', u: '/mm³' },
+          { n: 'plaq', l: 'Plaquetas', u: '/mm³', p: '150.000–450.000' }
+        ]
+      },
+      'Glicemia': {
+        titulo: '🍬 Glicemia',
+        campos: [
+          { n: 'glic', l: 'Glicemia', u: 'mg/dL', p: '70–110' },
+          { n: 'metodo', l: 'Método', t: 'select', o: ['Capilar (ponta de dedo)', 'Venosa', 'Arterial (gasometria)'] }
+        ]
+      },
+      'Eletrólitos': {
+        titulo: '🧂 Eletrólitos',
+        campos: [
+          { n: 'na', l: 'Na⁺', u: 'mEq/L', p: '135–145' },
+          { n: 'k', l: 'K⁺', u: 'mEq/L', p: '3,5–5,0' },
+          { n: 'cl', l: 'Cl⁻', u: 'mEq/L', p: '98–107' },
+          { n: 'cai', l: 'Ca²⁺ iônico', u: 'mmol/L', p: '1,1–1,3' },
+          { n: 'mg', l: 'Mg²⁺', u: 'mg/dL', p: '1,7–2,4' }
+        ]
+      },
+      'Coagulograma': {
+        titulo: '🩹 Coagulograma',
+        campos: [
+          { n: 'tp', l: 'TP', u: 's' },
+          { n: 'inr', l: 'INR', p: '0,9–1,2' },
+          { n: 'ttpa', l: 'TTPa', u: 's' },
+          { n: 'ttpa_r', l: 'TTPa (relação)', p: '0,8–1,2' },
+          { n: 'fib', l: 'Fibrinogênio', u: 'mg/dL', p: '200–400' },
+          { n: 'plaq', l: 'Plaquetas', u: '/mm³' }
+        ]
+      },
+      'Lactato': {
+        titulo: '⚡ Lactato',
+        campos: [{ n: 'lactato', l: 'Lactato', u: 'mmol/L', p: '< 2' }]
+      },
+      'Troponina': {
+        titulo: '❤️ Troponina',
+        campos: [
+          { n: 'valor', l: 'Troponina', u: 'ng/mL' },
+          { n: 'ref', l: 'Referência do laboratório', t: 'text' }
+        ]
+      },
+      'Tromboelastografia (TEG/ROTEM)': {
+        titulo: '🧵 Tromboelastografia (TEG/ROTEM)',
+        campos: [
+          { n: 'r', l: 'R / CT', u: 's' },
+          { n: 'k', l: 'K / CFT', u: 's' },
+          { n: 'angulo', l: 'Ângulo α', u: '°' },
+          { n: 'ma', l: 'MA / MCF', u: 'mm' },
+          { n: 'ly30', l: 'LY30 / ML', u: '%' }
+        ]
+      },
+      'Outro': {
+        titulo: '🧪 Outro exame',
+        campos: [
+          { n: 'nome', l: 'Qual exame', t: 'text', col: 12 },
+          { n: 'resultado', l: 'Resultado', t: 'textarea', col: 12 }
+        ]
+      }
+    },
+    get TIPOS() { return Object.keys(anestesia.exames.ESPECS); },
+
+    /* Uma linha de texto com o que foi preenchido. Campo vazio some — o
+       resumo é do que existe, não do formulário. */
+    resumo(tipo, vals) {
+      const esp = anestesia.exames.ESPECS[tipo];
+      if (!esp || !vals) return '';
+      if (tipo === 'Outro') {
+        return [vals.nome, vals.resultado].filter(Boolean).join(': ');
+      }
+      return esp.campos
+        .filter(c => String(vals[c.n] || '').trim())
+        .map(c => c.l + ' ' + String(vals[c.n]).trim() + (c.u ? ' ' + c.u : ''))
+        .join(' · ');
+    },
+
+    _valores(tr) {
+      const el = tr && tr.querySelector('[name="exame_val[]"]');
+      if (!el || !el.value) return {};
+      try { return JSON.parse(el.value) || {}; } catch (e) { return {}; }
+    },
+    _marcarManual(input) {
+      const tr = input && input.closest('tr');
+      if (tr) delete tr.dataset.auto;
+    },
+
+    add(dados = {}, abrirJanela) {
+      const tbody = document.getElementById('exames-body');
+      if (!tbody) return null;
+      const tr = document.createElement('tr');
+      const hora = anestesia.graficoUI.clampHora(dados.hora || utils.horaAtual());
+      const vals = (dados.valores && typeof dados.valores === 'object') ? dados.valores : {};
+      const texto = dados.resultado != null ? dados.resultado : anestesia.exames.resumo(dados.tipo, vals);
+      const opt = anestesia.exames.TIPOS
+        .map(v => `<option ${v === dados.tipo ? 'selected' : ''}>${utils.escapeHTML(v)}</option>`).join('');
+      tr.innerHTML = `
+        <td data-label="Horário"><input type="time" name="exame_hora[]" value="${hora}" onchange="anestesia.graficoUI.validarHoraInput(this)"></td>
+        <td data-label="Exame"><select name="exame_tipo[]" onchange="anestesia.exames.aoTrocarTipo(this)"><option value="">— selecione —</option>${opt}</select></td>
+        <td data-label="Resultado"><div style="display:flex;gap:4px;align-items:center">
+          <input type="text" name="exame_res[]" value="${utils.escapeAttr(texto || '')}" placeholder="Preencha pelos campos do exame (🧪) ou escreva aqui" style="flex:1;min-width:0" oninput="anestesia.exames._marcarManual(this)">
+          <input type="hidden" name="exame_val[]" value="${utils.escapeAttr(Object.keys(vals).length ? JSON.stringify(vals) : '')}">
+          <button type="button" class="btn-rm" title="Preencher os valores deste exame" onclick="anestesia.exames.abrir(this)">🧪</button>
+        </div></td>
+        <td class="col-rm"><button type="button" class="btn-rm" onclick="this.closest('tr').remove(); markDirty();">✕</button></td>
+      `;
+      tbody.appendChild(tr);
+      /* "auto" = o texto do resultado foi escrito pelo sistema a partir dos
+         valores, então pode ser reescrito quando eles mudarem. Basta a pessoa
+         digitar ali para a marca cair e o que ela escreveu ficar intocável. */
+      if (dados.auto || !texto) tr.dataset.auto = '1';
+      tr.querySelectorAll('input, select').forEach(el => {
+        el.addEventListener('change', () => { try { markDirty(); } catch (e) {} });
+      });
+      markDirty();
+      if (abrirJanela && dados.tipo) {
+        setTimeout(() => { try { anestesia.exames.abrir(tr); } catch (e) {} }, 60);
+      }
+      return tr;
+    },
+
+    /* Trocar o tipo com a linha ainda em branco abre direto os campos do novo
+       exame — é o que a pessoa ia fazer em seguida de qualquer jeito. */
+    aoTrocarTipo(sel) {
+      const tr = sel && sel.closest('tr');
+      if (!tr || !sel.value) return;
+      const res = tr.querySelector('[name="exame_res[]"]');
+      const vazio = !res || !res.value.trim();
+      if (vazio) setTimeout(() => { try { anestesia.exames.abrir(tr); } catch (e) {} }, 60);
+      try { markDirty(); } catch (e) {}
+    },
+
+    _linhaAberta: null,
+    abrir(ref) {
+      const tr = (ref && ref.closest) ? ref.closest('tr') : ref;
+      if (!tr) return false;
+      const sel = tr.querySelector('[name="exame_tipo[]"]');
+      const tipo = sel ? sel.value : '';
+      if (!tipo) { toast('Escolha primeiro qual é o exame.', 'warn'); if (sel) sel.focus(); return false; }
+      const esp = anestesia.exames.ESPECS[tipo];
+      if (!esp) return false;
+      const d = anestesia.exames._valores(tr);
+      anestesia.exames._linhaAberta = tr;
+      const campo = (c) => {
+        const val = d[c.n] || '';
+        const col = c.col || 4;
+        const rot = utils.escapeHTML(c.l) + (c.u ? ' <small style="color:var(--text-mute);font-weight:400">(' + utils.escapeHTML(c.u) + ')</small>' : '');
+        if (c.t === 'textarea') {
+          return '<div class="field col-' + col + '"><label>' + rot + '</label>' +
+            '<textarea name="ex_' + c.n + '" rows="3">' + utils.escapeHTML(val) + '</textarea></div>';
+        }
+        if (c.t === 'select') {
+          return '<div class="field col-' + col + '"><label>' + rot + '</label>' +
+            '<select name="ex_' + c.n + '"><option value="">—</option>' +
+            c.o.map(o => '<option ' + (o === val ? 'selected' : '') + '>' + utils.escapeHTML(o) + '</option>').join('') +
+            '</select></div>';
+        }
+        return '<div class="field col-' + col + '"><label>' + rot + '</label>' +
+          '<input type="text" name="ex_' + c.n + '" value="' + utils.escapeAttr(val) + '"' +
+          (c.p ? ' placeholder="' + utils.escapeAttr(c.p) + '"' : '') + '></div>';
+      };
+      const hora = (tr.querySelector('[name="exame_hora[]"]') || {}).value || '';
+      const corpo =
+        '<p style="font-size:.82rem;color:var(--text-mute);margin:0 0 10px">' +
+        (hora ? 'Coleta das <b>' + utils.escapeHTML(hora) + '</b>. ' : '') +
+        'Preencha só o que veio no resultado — o que ficar em branco não aparece na ficha. ' +
+        'As faixas em cinza são de referência, para conferência; o sistema não recusa valor nenhum.</p>' +
+        '<form id="form-exame" onsubmit="return false"><div class="grid">' + esp.campos.map(campo).join('') + '</div></form>';
+      modal.open(esp.titulo, corpo,
+        '<button class="btn" onclick="modal.close()">Cancelar</button>' +
+        '<button class="btn btn-primary" onclick="anestesia.exames.salvar()">Salvar resultado</button>');
+      return true;
+    },
+
+    salvar() {
+      const tr = anestesia.exames._linhaAberta;
+      const f = document.getElementById('form-exame');
+      if (!tr || !f) { modal.close(); return; }
+      const sel = tr.querySelector('[name="exame_tipo[]"]');
+      const tipo = sel ? sel.value : '';
+      const esp = anestesia.exames.ESPECS[tipo];
+      if (!esp) { modal.close(); return; }
+      const d = {};
+      esp.campos.forEach(c => {
+        const el = f.querySelector('[name="ex_' + c.n + '"]');
+        if (el && String(el.value).trim()) d[c.n] = String(el.value).trim();
+      });
+      const hid = tr.querySelector('[name="exame_val[]"]');
+      if (hid) hid.value = Object.keys(d).length ? JSON.stringify(d) : '';
+      const res = tr.querySelector('[name="exame_res[]"]');
+      /* o texto só é reescrito enquanto for do sistema: o que o anestesista
+         digitou por cima é dele, e nenhuma edição de valores o apaga */
+      if (res && (tr.dataset.auto === '1' || !res.value.trim())) {
+        res.value = anestesia.exames.resumo(tipo, d);
+        tr.dataset.auto = '1';
+      }
+      modal.close();
+      try { markDirty(); } catch (e) {}
+      toast('🧪 Resultado registrado em ' + tipo.toLowerCase() + '.');
+    },
+
+    limparTabela() {
+      if (!confirm('Apagar todos os exames intraoperatórios?')) return;
+      const tb = document.getElementById('exames-body');
+      if (tb) tb.innerHTML = '';
+      markDirty();
+    },
+
+    coletar() {
+      const linhas = [];
+      document.querySelectorAll('#exames-body tr').forEach(tr => {
+        const hora = (tr.querySelector('[name="exame_hora[]"]') || {}).value || '';
+        const tipo = (tr.querySelector('[name="exame_tipo[]"]') || {}).value || '';
+        const resultado = (tr.querySelector('[name="exame_res[]"]') || {}).value || '';
+        const valores = anestesia.exames._valores(tr);
+        if (!tipo && !resultado.trim()) return;
+        linhas.push({ hora, tipo, resultado, valores, auto: tr.dataset.auto === '1' });
+      });
+      return linhas;
+    },
+    restaurar(arr) {
+      const tb = document.getElementById('exames-body');
+      if (tb) tb.innerHTML = '';
+      if (Array.isArray(arr)) arr.forEach(e => anestesia.exames.add({
+        hora: e.hora, tipo: e.tipo, resultado: e.resultado, valores: e.valores, auto: e.auto
+      }));
+    }
+  },
+
   /* Ordena as linhas de uma tabela dinâmica pelo horário (crescente).
      Acionado pelo clique no cabeçalho "Horário" (medicações e eventos).
      Linhas sem horário vão para o fim. */
@@ -36361,6 +36676,18 @@ const anestesia = {
         if (evts.length) partes.push(`Eventos: ${evts.join('; ')}.`);
       }
 
+      /* 9b. EXAMES INTRAOPERATÓRIOS */
+      if (Array.isArray(d.exames) && d.exames.length > 0) {
+        const exs = d.exames
+          .filter(e => e.tipo || (e.resultado || '').trim())
+          .sort((a, b) => (a.hora || '99:99').localeCompare(b.hora || '99:99'))
+          .map(e => {
+            const txt = (e.resultado || '').trim() || anestesia.exames.resumo(e.tipo, e.valores || {});
+            return `${e.hora ? e.hora + ' ' : ''}${e.tipo || 'Exame'}${txt ? ' — ' + txt : ''}`;
+          });
+        if (exs.length) partes.push(`Exames intraoperatórios: ${exs.join('; ')}.`);
+      }
+
       /* 10. INTERCORRÊNCIAS */
       const interArr = (d.intercorrencias && d.intercorrencias.eventos) || [];
       const inter = interArr.filter(e => e !== 'Nenhuma intercorrência');
@@ -36499,6 +36826,7 @@ const anestesia = {
         observacoes: v('posicao_obs')
       },
       eventos: anestesia.eventos.coletar(),
+      exames: anestesia.exames.coletar(),
       medicacoes: anestesia.meds.coletar(),
       fluidos: {
         /* Entradas */
@@ -36678,6 +37006,10 @@ const anestesia = {
     if (Array.isArray(d.eventos)) {
       anestesia.eventos.restaurar(d.eventos);
     }
+
+    /* Exames intraoperatórios — restaura sempre, inclusive a lista vazia:
+       trocar de ficha sem limpar deixaria os exames da anterior na tela. */
+    anestesia.exames.restaurar(Array.isArray(d.exames) ? d.exames : []);
 
     document.getElementById('medicacoes-body').innerHTML = '';
     if (Array.isArray(d.medicacoes)) {
@@ -37374,6 +37706,8 @@ const anestesia = {
     if (cb) cb.innerHTML = '';
     const eb = document.getElementById('eventos-body');
     if (eb) eb.innerHTML = '';
+    const exb = document.getElementById('exames-body');
+    if (exb) exb.innerHTML = '';
     const cco = document.getElementById('cir-combo-body');
     if (cco) cco.innerHTML = '';
     const eax = document.getElementById('equipe-aux-lista');
@@ -44931,6 +45265,26 @@ ${TAG_CLOSE_HTML}`;
         `;
         }).join('') + '</tbody></table>'
       );
+    }
+    /* Exames intraoperatórios */
+    {
+      const exs = (d.exames || [])
+        .filter(e => e.tipo || (e.resultado || '').trim())
+        .slice()
+        .sort((a, b) => (a.hora || '99:99').localeCompare(b.hora || '99:99'));
+      if (exs.length) {
+        html += printPreview._section('Exames intraoperatórios',
+          '<table class="pp-table"><thead><tr><th style="width:60px">Hora</th><th style="width:150px">Exame</th><th>Resultado</th></tr></thead><tbody>' +
+          exs.map(e => {
+            /* o texto da linha é o que vale; se estiver vazio, monta a partir
+               dos valores para o exame não sair da ficha sem resultado */
+            const txt = (e.resultado || '').trim() || anestesia.exames.resumo(e.tipo, e.valores || {});
+            return '<tr><td>' + utils.escapeHTML(e.hora || '') + '</td>' +
+              '<td>' + utils.escapeHTML(e.tipo || '') + '</td>' +
+              '<td>' + utils.escapeHTML(txt) + '</td></tr>';
+          }).join('') + '</tbody></table>'
+        );
+      }
     }
     /* Fluidos */
     const f = d.fluidos;

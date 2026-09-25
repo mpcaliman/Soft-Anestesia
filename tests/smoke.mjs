@@ -13460,6 +13460,109 @@ await test('Pré com exames pendentes: finaliza, cobra na data da avaliação, e
   await page.close();
 });
 
+/* 199) Exames intraoperatórios na ficha de anestesia. Gasometria, hemograma,
+   glicemia: são pontuais e trazem vários valores de uma vez, então não cabem
+   na grade de sinais vitais (que é uma coluna por parâmetro contínuo). Aqui
+   se verifica o caminho inteiro: lançar, preencher os valores, o resultado
+   virar texto, sobreviver ao salvar/recarregar e sair na impressão — e que o
+   que o anestesista escreveu à mão nunca é reescrito pelo sistema. */
+await test('Ficha: exames intraoperatórios — vários valores por exame, do lançamento à impressão', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    store.setList('anestesia', []);
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 400));
+    try { modal.close(); } catch (e) {}
+
+    out.temTabela = !!document.getElementById('exames-body');
+
+    /* 1) botão de atalho lança a linha já com o tipo */
+    const tr = anestesia.exames.add({ tipo: 'Gasometria arterial', hora: '09:20' });
+    out.lancou = !!tr && (tr.querySelector('[name="exame_tipo[]"]') || {}).value === 'Gasometria arterial';
+
+    /* 2) a janela traz os campos DAQUELE exame — não um campo de texto solto */
+    anestesia.exames.abrir(tr);
+    const f = document.getElementById('form-exame');
+    out.abriuCamposDoExame = !!f && !!f.querySelector('[name="ex_ph"]') && !!f.querySelector('[name="ex_pco2"]')
+      && !!f.querySelector('[name="ex_be"]') && !!f.querySelector('[name="ex_k"]');
+    /* hemograma não tem pH; cada exame tem os seus */
+    f.querySelector('[name="ex_ph"]').value = '7,28';
+    f.querySelector('[name="ex_pco2"]').value = '52';
+    f.querySelector('[name="ex_k"]').value = '5,4';
+    anestesia.exames.salvar();
+    await new Promise(res => setTimeout(res, 200));
+
+    const res = tr.querySelector('[name="exame_res[]"]');
+    out.viroutexto = /pH 7,28/.test(res.value) && /pCO₂ 52 mmHg/.test(res.value) && /K⁺ 5,4 mEq\/L/.test(res.value);
+    /* o que ficou em branco não aparece: resumo é do que existe */
+    out.brancoNaoAparece = !/pO₂/.test(res.value) && !/undefined/.test(res.value);
+
+    /* 3) segundo exame, de outro tipo, com outros campos */
+    const tr2 = anestesia.exames.add({ tipo: 'Hemograma', hora: '10:05' });
+    anestesia.exames.abrir(tr2);
+    const f2 = document.getElementById('form-exame');
+    out.hemogramaNaoTemPh = !f2.querySelector('[name="ex_ph"]') && !!f2.querySelector('[name="ex_hb"]');
+    f2.querySelector('[name="ex_hb"]').value = '8,1';
+    f2.querySelector('[name="ex_plaq"]').value = '96000';
+    anestesia.exames.salvar();
+    await new Promise(res => setTimeout(res, 200));
+
+    /* 4) sobrevive ao salvar e ao recarregar a ficha */
+    const d = anestesia.coletarEstruturado();
+    out.coletou = Array.isArray(d.exames) && d.exames.length === 2
+      && d.exames[0].valores.ph === '7,28' && d.exames[1].valores.plaq === '96000';
+
+    anestesia.exames.restaurar([]);
+    out.limpou = document.querySelectorAll('#exames-body tr').length === 0;
+    anestesia.exames.restaurar(d.exames);
+    const linhas = document.querySelectorAll('#exames-body tr');
+    out.restaurou = linhas.length === 2
+      && (linhas[0].querySelector('[name="exame_hora[]"]') || {}).value === '09:20'
+      && /Hb 8,1 g\/dL/.test((linhas[1].querySelector('[name="exame_res[]"]') || {}).value);
+    /* e os valores voltam editáveis, não só o texto */
+    anestesia.exames.abrir(linhas[0]);
+    out.valoresVoltaram = (document.querySelector('#form-exame [name="ex_pco2"]') || {}).value === '52';
+    try { modal.close(); } catch (e) {}
+
+    /* 5) o que foi escrito à mão é do anestesista: mexer nos valores não apaga */
+    const r0 = linhas[0].querySelector('[name="exame_res[]"]');
+    r0.value = 'Acidose respiratória — ajustada a ventilação';
+    anestesia.exames._marcarManual(r0);
+    anestesia.exames.abrir(linhas[0]);
+    document.querySelector('#form-exame [name="ex_pco2"]').value = '39';
+    anestesia.exames.salvar();
+    await new Promise(res => setTimeout(res, 200));
+    out.naoReescreveOQueEleEscreveu = r0.value === 'Acidose respiratória — ajustada a ventilação';
+    /* mas o valor novo foi guardado assim mesmo */
+    out.guardouOValorNovo = anestesia.exames.coletar()[0].valores.pco2 === '39';
+
+    /* 6) sai na ficha impressa e no resumo narrativo */
+    const html = printPreview._buildAnestesia();
+    out.saiNaImpressao = /Exames intraoperat/i.test(html) && /Hemograma/.test(html) && /09:20/.test(html);
+    anestesia.resumo.gerar();
+    const narr = (document.querySelector('#form-anestesia [name="resumo_narrativo"]') || {}).value || '';
+    out.temNarrativa = /Exames intraoperat/i.test(narr) && /Hemograma/.test(narr);
+    return out;
+  });
+
+  assert(r.temTabela, 'a ficha tem a tabela de exames intraoperatórios');
+  assert(r.lancou, 'o atalho lança o exame já com o tipo escolhido');
+  assert(r.abriuCamposDoExame, 'e abre os campos daquele exame — pH, pCO₂, BE, K⁺ na gasometria');
+  assert(r.viroutexto, 'os valores preenchidos viram o texto do resultado, com as unidades');
+  assert(r.brancoNaoAparece, 'o que ficou em branco não aparece no resultado');
+  assert(r.hemogramaNaoTemPh, 'cada exame tem os seus campos: o hemograma não pede pH');
+  assert(r.coletou, 'os exames entram no registro salvo, com os valores separados');
+  assert(r.limpou && r.restaurou, 'e voltam na tela ao reabrir a ficha');
+  assert(r.valoresVoltaram, 'com os valores editáveis de novo, não só o texto');
+  assert(r.naoReescreveOQueEleEscreveu, 'o texto escrito à mão não é reescrito pelo sistema');
+  assert(r.guardouOValorNovo, 'ainda que o valor corrigido seja guardado');
+  assert(r.saiNaImpressao, 'e tudo sai na ficha impressa');
+  assert(r.temNarrativa, 'e entra no resumo narrativo da anestesia');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
