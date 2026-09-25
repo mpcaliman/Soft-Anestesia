@@ -7619,7 +7619,19 @@ await test('CBHPM: fração sugerida e editável, AN 0 sem honorário e código 
     out.temCampoCodigo = !!hidden;
     cir.value = 'coleciste';
     cbhpm._abrir(cir);
-    const item = document.querySelector('#form-pre .cbhpm-box .cbhpm-item');
+    /* A lista deixou de morar dentro do formulário: o card tem overflow hidden
+       e RECORTAVA a caixa — ela abria e ninguém via. Agora, quando algum
+       ancestral recorta, ela é presa à tela e pendurada no <body>. Procurar
+       dentro de #form-pre não acha mais nada; e este teste passava enquanto o
+       usuário não enxergava a lista, porque só olhava o DOM. */
+    const item = document.querySelector('.cbhpm-box .cbhpm-item');
+    out.listaVisivelDeVerdade = (function () {
+      if (!item) return false;
+      const rb = item.getBoundingClientRect();
+      if (rb.width < 2 || rb.height < 2) return false;
+      const alvo = document.elementFromPoint(rb.left + Math.min(40, rb.width / 2), rb.top + rb.height / 2);
+      return !!alvo && (alvo === item || item.contains(alvo) || item.parentNode.contains(alvo));
+    })();
     if (item) cbhpm._escolher(item);
     out.escolheuNoTextarea = cir.value.length > 5;               /* textarea aceita a escolha */
     out.guardouCodigo = !!hidden && /^\d\.\d\d\./.test(hidden.value);
@@ -7678,6 +7690,7 @@ await test('CBHPM: fração sugerida e editável, AN 0 sem honorário e código 
   assert(r.codigoTemPrecedencia, 'preço específico do código tem precedência sobre o porte');
   assert(r.temCampoCodigo, 'todo campo CBHPM guarda o código escolhido');
   assert(r.escolheuNoTextarea, 'escolher a sugestão precisa funcionar no campo alto da cirurgia proposta');
+  assert(r.listaVisivelDeVerdade, 'a lista da CBHPM aparece de verdade na tela — o card a recortava');
   assert(r.guardouCodigo, 'e o código oficial fica guardado como chave');
   assert(r.textoTrocadoDerrubaCodigo, 'trocar a descrição à mão não pode manter o código antigo pendurado');
   assert(r.codigoInventadoMarcado, 'código que não existe na tabela precisa ficar marcado antes de virar guia');
@@ -14582,6 +14595,106 @@ await test('Financeiro: códigos TUSS já preenchidos, com o valor da tabela do 
   assert(r.particularUsaOOrcamento, 'no particular o valor vem do orçamento passado ao paciente');
   assert(r.orcamentoVelhoNaoVale, 'orçamento velho demais não vale — preço de um ano atrás não é este preço');
   assert(r.orcamentoDeOutroNaoVale, 'e orçamento de outro paciente nunca vale');
+  await page.close();
+});
+
+/* 211) Sugestão da CBHPM na tabela de códigos do Financeiro. Digitar
+   "consulta" no campo de procedimento não mostrava nada: a lista ABRIA, mas
+   era recortada pelo contêiner da tabela, que tem overflow para poder deslizar
+   na horizontal. Geometria e visibilidade não pegam isso — só perguntar quem
+   está pintado naquele ponto da tela. E escolher o código não trazia o valor,
+   que é a razão de escolher pela tabela. */
+await test('Códigos TUSS: a sugestão da CBHPM aparece de verdade, e traz o valor do convênio', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    store.setList('financeiro', []);
+    ui.navegar('financeiro');
+    await new Promise(res => setTimeout(res, 500));
+    try { modal.close(); } catch (e) {}
+    financeiro.editar(null);
+    await new Promise(res => setTimeout(res, 300));
+    document.querySelectorAll('#module-financeiro .card.collapsed').forEach(c => c.classList.remove('collapsed'));
+    const f = document.getElementById('form-financeiro');
+    f.querySelector('[name="convenio"]').value = 'Unimed';
+
+    const tr = financeiro.codigos.add();
+    const desc = tr.querySelector('[name="fin_cod_desc[]"]');
+    desc.value = 'consulta';
+    desc.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(res => setTimeout(res, 300));
+
+    const box = document.querySelector('.cbhpm-box');
+    out.abriuALista = !!box && box.querySelectorAll('.cbhpm-item').length > 0;
+
+    /* O TESTE QUE IMPORTA: o primeiro item está REALMENTE visível na tela?
+       Pergunta quem está pintado no ponto dele — a lista existia antes, com
+       tamanho e sem display:none, e mesmo assim ninguém a via. */
+    const item = box && box.querySelector('.cbhpm-item');
+    const rb = item.getBoundingClientRect();
+    const alvo = document.elementFromPoint(rb.left + Math.min(40, rb.width / 2), rb.top + rb.height / 2);
+    out.estaVisivelDeVerdade = !!alvo && (alvo === item || item.contains(alvo) || box.contains(alvo));
+    out.escapouDoRecorte = box.classList.contains('cbhpm-fixa');
+
+    /* escolher traz código, descrição, porte E valor */
+    cbhpm._escolher(item);
+    await new Promise(res => setTimeout(res, 200));
+    const g = n => (tr.querySelector('[name="' + n + '[]"]') || {}).value || '';
+    out.preencheuOCodigo = /\d/.test(g('fin_cod_codigo')) && g('fin_cod_desc').length > 3;
+    out.trouxeOValor = parseFloat(g('fin_cod_unit')) > 0 && parseFloat(g('fin_cod_previsto')) > 0;
+    /* e o campo continua editável — é sugestão, não imposição */
+    const unit = tr.querySelector('[name="fin_cod_unit[]"]');
+    out.continuaEditavel = !unit.readOnly && !unit.disabled;
+    unit.value = '999';
+    unit.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(res => setTimeout(res, 100));
+    out.ajusteManualVale = parseFloat(g('fin_cod_previsto')) === 999;
+
+    /* 2) o valor segue a tabela DO CONVÊNIO do registro */
+    const cod = g('fin_cod_codigo');
+    const comUnimed = financeiro.codigos.valorSugerido(cod);
+    precos.definirTabelaDoConvenio('Unimed', 'cir2024_f1', 'cir');
+    precos.definirTabelaDoConvenio('Unimed', 'cbhpm2015', 'anest');
+    const comOutra = financeiro.codigos.valorSugerido(cod);
+    out.segueOConvenio = comUnimed && comOutra && comUnimed.valor !== comOutra.valor;
+
+    /* 3) o botão pergunta o que fazer com as linhas que JÁ têm valor. As duas
+       respostas são testadas: o teste fixa o retorno do confirm em vez de
+       depender de como o navegador do teste responde sozinho. */
+    const confOriginal = window.confirm;
+    const tr2 = financeiro.codigos.add({ codigo: cod, descricao: 'Outra linha' });
+    window.confirm = () => false;                 /* "só as que estão em branco" */
+    financeiro.codigos.sugerirTodos();
+    await new Promise(res => setTimeout(res, 150));
+    out.naoPisaNoAjuste = parseFloat(g('fin_cod_unit')) === 999;
+    out.preencheOVazio = parseFloat((tr2.querySelector('[name="fin_cod_unit[]"]') || {}).value) > 0;
+
+    window.confirm = () => true;                  /* "refazer todas pela tabela" */
+    financeiro.codigos.sugerirTodos();
+    await new Promise(res => setTimeout(res, 150));
+    out.refazQuandoEleManda = parseFloat(g('fin_cod_unit')) !== 999
+      && parseFloat(g('fin_cod_unit')) > 0;
+    window.confirm = confOriginal;
+
+    /* 4) código sem valor na tabela não inventa número */
+    const tr3 = financeiro.codigos.add({ codigo: '9.99.99.99-9', descricao: 'Inexistente' });
+    financeiro.codigos.sugerirValor(tr3, '9.99.99.99-9');
+    out.naoInventa = String((tr3.querySelector('[name="fin_cod_unit[]"]') || {}).value || '') === '';
+    return out;
+  });
+
+  assert(r.abriuALista, 'digitar no procedimento abre a lista da CBHPM');
+  assert(r.estaVisivelDeVerdade, 'e ela aparece DE VERDADE — antes era recortada pela tabela que rola');
+  assert(r.escapouDoRecorte, 'por isso a lista passa a ser presa à tela quando o campo mora numa área que rola');
+  assert(r.preencheuOCodigo, 'escolher preenche código, descrição e porte');
+  assert(r.trouxeOValor, 'e traz o valor da tabela — que é a razão de escolher por ela');
+  assert(r.continuaEditavel && r.ajusteManualVale, 'o valor é sugestão: continua editável e o ajuste manda no previsto');
+  assert(r.segueOConvenio, 'o valor sugerido segue a tabela cadastrada para o convênio do registro');
+  assert(r.naoPisaNoAjuste, 'o botão de sugerir não pisa no valor que ele ajustou à mão');
+  assert(r.preencheOVazio, 'e preenche a linha que estava em branco');
+  assert(r.refazQuandoEleManda, 'mas refaz todas quando ele responde que quer refazer');
+  assert(r.naoInventa, 'e código sem valor na tabela não vira número inventado');
   await page.close();
 });
 

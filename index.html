@@ -961,6 +961,13 @@ body.ficha-finalizada .lab-item input.lab-fora {
 .pac-auto-add:hover, .pac-auto-add.pac-auto-active { background: var(--primary-soft); }
 /* Dropdown de autocomplete CBHPM/TUSS — customizado (funciona no iPhone,
    ao contrário do <datalist> nativo). Aparece logo abaixo do campo. */
+/* Dentro de uma tabela que rola (.dyn-table-wrap tem overflow para poder
+   deslizar na horizontal), uma caixa "absolute" é RECORTADA pelo contêiner:
+   a lista abria e ninguém via. Aí ela passa a ser presa à tela, com as
+   coordenadas calculadas do campo — assim escapa de qualquer recorte. */
+.cbhpm-box.cbhpm-fixa {
+  position: fixed; top: auto; left: auto; right: auto; z-index: 100700;
+}
 .cbhpm-box {
   position: absolute; top: 100%; left: 0; right: 0; z-index: 60;
   background: var(--surface); border: 1px solid var(--border);
@@ -4627,7 +4634,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-25o</b><br>
+    v7.1 · build <b id="build-tag">2026-09-25p</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -8414,6 +8421,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
           <div class="table-actions">
             <button type="button" class="btn btn-primary btn-sm" onclick="financeiro.codigos.add()">+ Adicionar código TUSS</button>
             <button type="button" class="btn btn-sm" onclick="financeiro.codigos.importarPorNome()" title="Buscar códigos da ficha de anestesia do mesmo paciente">📥 Importar da anestesia</button>
+            <button type="button" class="btn btn-sm" onclick="financeiro.codigos.sugerirTodos()" title="Preenche o valor unitário de cada linha pela tabela cadastrada para o convênio deste registro. É sugestão: tudo continua editável.">💲 Sugerir valores da tabela</button>
             <button type="button" class="btn btn-sm" onclick="financeiro.codigos.classificarGrau()" title="Maior porte → 100%; demais → 50% (mesma via). Linhas marcadas 70% (via diferente) são preservadas.">⚖️ Classificar graus</button>
             <button type="button" class="btn btn-sm" onclick="financeiro.codigos.recalcular()" title="Recalcular totais com base nos códigos">↻ Recalcular totais</button>
           </div>
@@ -29182,9 +29190,24 @@ const cbhpm = {
     } else {
       box.innerHTML = '<div class="cbhpm-empty">Nenhum procedimento encontrado na CBHPM ' + utils.escapeHTML(CBHPM_VERSAO) + '</div>';
     }
-    const wrap = input.closest('.field') || input.parentNode;
-    if (wrap && getComputedStyle(wrap).position === 'static') wrap.style.position = 'relative';
-    wrap.appendChild(box);
+    /* Algum ancestral recorta? (tabela que rola, card com overflow hidden)
+       Se recorta, a caixa vai para o <body> presa à tela — senão ela abre e
+       fica invisível, que foi o que aconteceu na tabela de códigos TUSS. */
+    const recortado = cbhpm._temAncestralQueRecorta(input);
+    if (recortado) {
+      box.classList.add('cbhpm-fixa');
+      document.body.appendChild(box);
+      cbhpm._posicionarFixa(input, box);
+      /* rolar a página move o campo; a lista tem de ir junto ou some do lugar */
+      const seguir = () => cbhpm._posicionarFixa(input, box);
+      box._cbhpmSeguir = seguir;
+      window.addEventListener('scroll', seguir, true);
+      window.addEventListener('resize', seguir);
+    } else {
+      const wrap = input.closest('.field') || input.parentNode;
+      if (wrap && getComputedStyle(wrap).position === 'static') wrap.style.position = 'relative';
+      wrap.appendChild(box);
+    }
     /* o campo fica guardado na própria caixa: o "cirurgia proposta" é um
        textarea, e procurar por <input> ali não achava nada — clicar na
        sugestão não fazia coisa nenhuma */
@@ -29192,8 +29215,44 @@ const cbhpm = {
     input._cbhpmBox = box;
   },
 
+  _temAncestralQueRecorta(el) {
+    let n = el && el.parentElement;
+    while (n && n !== document.body) {
+      const st = getComputedStyle(n);
+      if (st.overflow !== 'visible' || st.overflowX !== 'visible' || st.overflowY !== 'visible') return n;
+      n = n.parentElement;
+    }
+    return null;
+  },
+  _posicionarFixa(input, box) {
+    if (!input || !box || !box.isConnected) return;
+    const r = input.getBoundingClientRect();
+    /* pouco espaço embaixo: abre para cima, senão a lista nasce fora da tela */
+    const alturaMax = 300;
+    const abaixo = window.innerHeight - r.bottom;
+    const largura = Math.max(r.width, 260);
+    box.style.left = Math.max(6, Math.min(r.left, window.innerWidth - largura - 6)) + 'px';
+    box.style.width = largura + 'px';
+    if (abaixo < 160 && r.top > abaixo) {
+      box.style.top = 'auto';
+      box.style.bottom = (window.innerHeight - r.top + 2) + 'px';
+      box.style.maxHeight = Math.min(alturaMax, r.top - 10) + 'px';
+    } else {
+      box.style.bottom = 'auto';
+      box.style.top = (r.bottom + 2) + 'px';
+      box.style.maxHeight = Math.min(alturaMax, abaixo - 10) + 'px';
+    }
+  },
   _fechar(input) {
-    if (input && input._cbhpmBox) { input._cbhpmBox.remove(); input._cbhpmBox = null; }
+    if (input && input._cbhpmBox) {
+      const b = input._cbhpmBox;
+      if (b._cbhpmSeguir) {
+        window.removeEventListener('scroll', b._cbhpmSeguir, true);
+        window.removeEventListener('resize', b._cbhpmSeguir);
+      }
+      b.remove();
+      input._cbhpmBox = null;
+    }
   },
 
   _teclado(e, input) {
@@ -48698,6 +48757,72 @@ const financeiro = {
        pode ser cortesia sem que os outros sejam. */
     STATUS_OPCOES: ['aguardando', 'faturado', 'pago', 'glosado', 'parcial', 'negado', 'cortesia'],
 
+    /* ---- DE ONDE VEM O VALOR SUGERIDO --------------------------------
+       Da mesma régua que o Financeiro usa ao gerar o lançamento sozinho: a
+       tabela cadastrada para o convênio deste registro. Honorário anestésico
+       se calcula pelo porte anestésico; o resto, pelo cirúrgico — e é o
+       próprio código que diz qual dos dois ele tem. */
+    _convenioDoRegistro() {
+      const f = document.getElementById('form-financeiro');
+      return f ? ((f.querySelector('[name="convenio"]') || {}).value || '') : '';
+    },
+    valorSugerido(codigo) {
+      if (!codigo) return null;
+      const conv = financeiro.codigos._convenioDoRegistro();
+      let info = null;
+      try { info = cbhpm.info(codigo); } catch (e) {}
+      /* o código tem porte anestésico próprio? então o honorário é anestésico */
+      const temAN = info && (info.porte_anest || (info.anestesico && info.anestesico.porte_anest));
+      const tentar = temAN ? ['anestesia', 'medico'] : ['medico', 'anestesia'];
+      for (const tipo of tentar) {
+        const p = precos.base(codigo, tipo, conv);
+        if (p && p.valor != null) return p;
+      }
+      return null;
+    },
+    sugerirValor(tr, codigo, opts = {}) {
+      if (!tr) return null;
+      const unitEl = tr.querySelector('[name="fin_cod_unit[]"]');
+      const prevEl = tr.querySelector('[name="fin_cod_previsto[]"]');
+      if (!unitEl) return null;
+      /* o que ele digitou é dele: só preenche o que está em branco, salvo
+         quando ele pede explicitamente para refazer (botão Sugerir valores) */
+      if (!opts.forcar && String(unitEl.value).trim()) return null;
+      const p = financeiro.codigos.valorSugerido(codigo);
+      if (!p || p.valor == null) return null;
+      unitEl.value = Number(p.valor).toFixed(2);
+      unitEl.title = 'Sugerido por ' + (p.tabela || 'tabela de referência') +
+        (p.doConvenio ? ' (tabela deste convênio)' : '') + ' — pode editar';
+      if (prevEl) {
+        const qtd = (tr.querySelector('[name="fin_cod_qtd[]"]') || {}).value || 1;
+        const grau = (tr.querySelector('[name="fin_cod_grau[]"]') || {}).value || 100;
+        const v = precos.calcular(p.valor, qtd, grau);
+        if (v != null) prevEl.value = v.toFixed(2);
+      }
+      return p;
+    },
+    /* Refaz a sugestão em TODAS as linhas que têm código. Serve para o
+       lançamento antigo, que nasceu antes disso, e para quando o convênio do
+       registro muda depois das linhas já estarem lançadas. */
+    sugerirTodos() {
+      const linhas = Array.from(document.querySelectorAll('#fin-codigos-body tr'));
+      if (!linhas.length) { toast('Nenhuma linha de código para preencher.', 'warn'); return; }
+      const comValor = linhas.filter(tr => String((tr.querySelector('[name="fin_cod_unit[]"]') || {}).value || '').trim());
+      const refazer = comValor.length
+        ? confirm(comValor.length + ' linha(s) já têm valor.\n\nOK = refazer TODAS pela tabela\nCancelar = preencher só as que estão em branco')
+        : false;
+      let n = 0;
+      linhas.forEach(tr => {
+        const cod = ((tr.querySelector('[name="fin_cod_codigo[]"]') || {}).value || '').trim();
+        if (!cod) return;
+        if (financeiro.codigos.sugerirValor(tr, cod, { forcar: refazer })) n++;
+      });
+      financeiro.codigos.recalcular();
+      markDirty();
+      toast(n ? '💲 ' + n + ' linha(s) com valor da tabela — confira e ajuste o que precisar.'
+              : 'Nada a preencher: sem código na linha ou sem valor na tabela para ele.');
+    },
+
     /* Adiciona uma linha de código TUSS */
     add(dados = {}) {
       const tbody = document.getElementById('fin-codigos-body');
@@ -48743,6 +48868,10 @@ const financeiro = {
           if (codEl) codEl.value = match[0];
           if (descEl) descEl.value = match[1];
           if (porteEl) porteEl.value = match[2];
+          /* SUGESTÃO DO VALOR: escolher o código traz o valor da tabela daquele
+             convênio. É sugestão e não imposição — o campo continua editável, e
+             o que ele já tiver digitado não é sobrescrito. */
+          financeiro.codigos.sugerirValor(tr, match[0]);
           financeiro.codigos.recalcular();
         };
         cbhpm.ligar(descEl, {
