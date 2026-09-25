@@ -13793,6 +13793,60 @@ await test('Horários dos cards mandam no evento: técnica, ventilação e os te
   await page.close();
 });
 
+/* 202) CAM na monitorização da profundidade. É a medida do dia a dia na
+   anestesia inalatória e na balanceada — vem do analisador de gases, que já
+   está nos monitores do card 7 e tem coluna na grade de sinais vitais. Estava
+   em toda parte menos onde se descreve a técnica. E a frase gerada minusculava
+   tudo, então a sigla saía "por cam", "por bis". */
+await test('Técnica: CAM entra na monitorização da profundidade, e a sigla não vira palavra', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    store.setList('anestesia', []);
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 400));
+    try { modal.close(); } catch (e) {}
+
+    const opcoes = anestesia.tecnicaDet.ESPECS['Anestesia geral'].campos
+      .find(c => c.n === 'profundidade').o;
+    out.temCam = opcoes.some(o => /^CAM/.test(o));
+    out.mantemOsOutros = ['Clínica', 'BIS', 'Entropia', 'TOF (bloqueio neuromuscular)']
+      .every(o => opcoes.indexOf(o) >= 0);
+
+    /* a janela oferece a opção de verdade, não só o dado.
+       O tutorial do gráfico abre sozinho ~600 ms depois de entrar na ficha e
+       fica aberto; a janela da técnica espera a vez. Então: deixa o tutorial
+       aparecer, fecha, e só aí abre a janela. */
+    await new Promise(res => setTimeout(res, 900));
+    try { modal.close(); } catch (e) {}
+    await new Promise(res => setTimeout(res, 150));
+    anestesia.tecnicaDet.abrir('Anestesia geral');
+    await new Promise(res => setTimeout(res, 400));
+    const sel = document.querySelector('#form-tecdet [name="td_profundidade"]');
+    out.saiNaJanela = !!sel && [...sel.options].some(o => /^CAM/.test(o.value));
+    sel.value = opcoes.find(o => /^CAM/.test(o));
+    document.querySelector('#form-tecdet [name="td_manutencao"]').value = 'Venosa total (TIVA)';
+    anestesia.tecnicaDet.salvar('Anestesia geral');
+    await new Promise(res => setTimeout(res, 300));
+
+    const txt = anestesia.tecnicaDet.textoDe('Anestesia geral');
+    out.entraNoTexto = /profundidade por CAM \(analisador de gases\)/.test(txt);
+    out.siglaEmPe = /\(TIVA\)/.test(txt) && !/\(tiva\)/.test(txt) && !/por cam/.test(txt);
+    /* e a palavra comum continua descendo — não virou tudo maiúscula */
+    out.palavraComumDesce = /manutenção venosa total/.test(txt);
+    return out;
+  });
+
+  assert(r.temCam, 'CAM está entre as opções de monitorização da profundidade');
+  assert(r.mantemOsOutros, 'sem tirar clínica, BIS, entropia e TOF');
+  assert(r.saiNaJanela, 'e aparece na janela da técnica');
+  assert(r.entraNoTexto, 'entrando na descrição da técnica realizada');
+  assert(r.siglaEmPe, 'com a sigla em pé: CAM e TIVA não viram palavra minúscula');
+  assert(r.palavraComumDesce, 'enquanto a palavra comum continua em minúscula no meio da frase');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

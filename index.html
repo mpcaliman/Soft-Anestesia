@@ -4600,7 +4600,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-25f</b><br>
+    v7.1 · build <b id="build-tag">2026-09-25g</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -30141,20 +30141,24 @@ const anestesia = {
           { n: 'bnm', l: 'Bloqueador neuromuscular', t: 'text', col: 6, p: 'Rocurônio 0,6 mg/kg' },
           { n: 'reversao', l: 'Reversão do bloqueio neuromuscular', t: 'select', col: 6,
             o: ['Não utilizada', 'Neostigmina + atropina', 'Sugamadex', 'Reversão espontânea'] },
+          /* CAM é a medida de profundidade do dia a dia na anestesia inalatória
+             e na balanceada — vem do analisador de gases, que já está na lista
+             de monitores do card 7 e tem coluna na grade de sinais vitais.
+             Faltava justamente aqui, onde se descreve a técnica. */
           { n: 'profundidade', l: 'Monitorização da profundidade', t: 'select', col: 6,
-            o: ['Clínica', 'BIS', 'Entropia', 'TOF (bloqueio neuromuscular)'] },
+            o: ['Clínica', 'CAM (analisador de gases)', 'BIS', 'Entropia', 'TOF (bloqueio neuromuscular)'] },
           { n: 'obs', l: 'Observações', t: 'textarea', col: 12 }
         ],
         texto(d) {
           const p = [];
-          if (d.inducao) p.push('Indução ' + d.inducao.toLowerCase() + (d.agente_ind ? ' com ' + d.agente_ind : ''));
+          if (d.inducao) p.push('Indução ' + anestesia.tecnicaDet._min(d.inducao) + (d.agente_ind ? ' com ' + d.agente_ind : ''));
           else if (d.agente_ind) p.push('Indução com ' + d.agente_ind);
           if (d.opioide) p.push('opioide: ' + d.opioide);
           if (d.bnm) p.push('bloqueio neuromuscular: ' + d.bnm);
-          if (d.manutencao) p.push('manutenção ' + d.manutencao.toLowerCase() + (d.agente_man ? ' com ' + d.agente_man : ''));
+          if (d.manutencao) p.push('manutenção ' + anestesia.tecnicaDet._min(d.manutencao) + (d.agente_man ? ' com ' + d.agente_man : ''));
           else if (d.agente_man) p.push('manutenção com ' + d.agente_man);
-          if (d.profundidade) p.push('monitorização da profundidade por ' + d.profundidade.toLowerCase());
-          if (d.reversao && d.reversao !== 'Não utilizada') p.push('reversão com ' + d.reversao.toLowerCase());
+          if (d.profundidade) p.push('monitorização da profundidade por ' + anestesia.tecnicaDet._min(d.profundidade));
+          if (d.reversao && d.reversao !== 'Não utilizada') p.push('reversão com ' + anestesia.tecnicaDet._min(d.reversao));
           return anestesia.tecnicaDet._frase('Anestesia geral', p, d.obs);
         }
       },
@@ -30171,10 +30175,10 @@ const anestesia = {
         ],
         texto(d) {
           const p = [];
-          if (d.nivel) p.push('sedação ' + d.nivel.toLowerCase());
+          if (d.nivel) p.push('sedação ' + anestesia.tecnicaDet._min(d.nivel));
           if (d.agentes) p.push('com ' + d.agentes);
-          if (d.via_aerea) p.push('via aérea ' + d.via_aerea.toLowerCase());
-          if (d.oxigenio) p.push('oxigênio por ' + d.oxigenio.toLowerCase());
+          if (d.via_aerea) p.push('via aérea ' + anestesia.tecnicaDet._min(d.via_aerea));
+          if (d.oxigenio) p.push('oxigênio por ' + anestesia.tecnicaDet._min(d.oxigenio));
           if (d.escala) p.push('nível atingido: ' + d.escala);
           return anestesia.tecnicaDet._frase('Sedação', p, d.obs);
         }
@@ -30192,7 +30196,7 @@ const anestesia = {
           const p = [];
           if (d.agente) p.push('infiltração com ' + d.agente + (d.volume ? ', ' + d.volume : ''));
           if (d.quem) p.push('realizada pelo ' + d.quem.toLowerCase());
-          if (d.complemento && d.complemento !== 'Nenhuma') p.push('complementada por ' + d.complemento.toLowerCase());
+          if (d.complemento && d.complemento !== 'Nenhuma') p.push('complementada por ' + anestesia.tecnicaDet._min(d.complemento));
           return anestesia.tecnicaDet._frase('Anestesia local assistida', p, d.obs);
         }
       },
@@ -30208,7 +30212,7 @@ const anestesia = {
           const p = [];
           if (d.motivo) p.push(d.motivo);
           if (d.monitor) p.push('monitorização: ' + d.monitor);
-          if (d.suporte && d.suporte !== 'Nenhum') p.push('suporte: ' + d.suporte.toLowerCase());
+          if (d.suporte && d.suporte !== 'Nenhum') p.push('suporte: ' + anestesia.tecnicaDet._min(d.suporte));
           return anestesia.tecnicaDet._frase('Monitoração e vigilância clínica', p, d.obs);
         }
       },
@@ -30220,6 +30224,15 @@ const anestesia = {
         ],
         texto(d) { return anestesia.tecnicaDet._frase(d.nome || 'Outra técnica', [], d.obs); }
       }
+    },
+
+    /* Minúscula no meio da frase, SEM desmanchar sigla: "BIS" continua BIS,
+       "CAM (analisador de gases)" continua CAM, "Venosa total (TIVA)" vira
+       "venosa total (TIVA)". A regra é simples — palavra que já tem alguma
+       letra minúscula é palavra comum e desce; palavra sem nenhuma é sigla e
+       fica como está. Antes saía "monitorização da profundidade por bis". */
+    _min(txt) {
+      return String(txt || '').replace(/\S+/g, w => /[a-zà-ÿ]/.test(w) ? w.toLowerCase() : w);
     },
 
     /* Uma frase legível a partir das partes preenchidas. Campo em branco não
