@@ -11424,7 +11424,7 @@ await test('Pacientes: ordenação, filtro por plano e a linha inteira cabendo n
 
     const acoes = linha.querySelector('td.actions-cell');
     const botoes = Array.from(acoes.querySelectorAll('.btn'));
-    out.temTodosOsBotoes = botoes.length === 5;
+    out.temTodosOsBotoes = botoes.length === 6;   /* + 📚 Histórico do paciente */
     /* o último botão tem de caber DENTRO da célula de ações — era ele que
        ficava fora do campo visual */
     const rc = acoes.getBoundingClientRect();
@@ -11449,7 +11449,7 @@ await test('Pacientes: ordenação, filtro por plano e a linha inteira cabendo n
   assert(r.limparVoltaTudo, 'Limpar devolve a lista inteira e a ordem padrão');
   assert(r.cabecalhoInverte && r.temSeta, 'o cabeçalho ordena e a seta diz por onde');
   assert(r.telefoneNaoQuebra, 'telefone e afins param de quebrar em duas linhas');
-  assert(r.temTodosOsBotoes, 'os cinco botões da linha continuam existindo');
+  assert(r.temTodosOsBotoes, 'os seis botões da linha continuam existindo');
   assert(r.ultimoBotaoCabe, 'e o último cabe na célula — era ele que ficava fora da tela');
   assert(r.tabelaTemLarguraReal, 'a tabela tem largura de verdade, para a rolagem alcançar tudo');
   await page.close();
@@ -13921,6 +13921,88 @@ await test('Campos de descrição crescem com o texto — digitado, colado por b
   assert(r.cresceuPorBotao, 'o texto que vem dos seletores também faz a caixa crescer');
   assert(r.respeitaOTeto, 'com teto: texto enorme passa a rolar em vez de empurrar a ficha');
   assert(r.ajustaAoCarregar, 'e a ficha carregada já abre com a descrição inteira à vista');
+  await page.close();
+});
+
+/* 204) Histórico do paciente a partir da linha de Pacientes. O que se quer ao
+   abrir a história de alguém: desde quando ele existe aqui, que documentos
+   foram feitos e em que datas, e o financeiro inteiro — o que foi pago e,
+   principalmente, QUAL cobrança está em aberto. O resumo de uma linha só
+   ("previsto X, recebido Y") não respondia a última. */
+await test('Histórico do paciente: cadastro, documentos com data e o financeiro cobrança a cobrança', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['pacientes', 'anestesia', 'pre', 'financeiro', 'consulta', 'termo'].forEach(m => store.setList(m, []));
+    const hoje = utils.hojeISO();
+
+    store.save('pacientes', { nome: 'JOANA PEREIRA LIMA', cpf: '111.222.333-44',
+      nascimento: '1970-03-12', plano: 'Unimed', carteirinha: '0286123', telefone: '73 99999-0000' });
+    store.save('pre', { nome: 'JOANA PEREIRA LIMA', data: hoje, cirurgia: 'Artroplastia de joelho' });
+    store.save('anestesia', { paciente: { nome: 'JOANA PEREIRA LIMA' },
+      procedimento: { data: hoje, descricao: 'Artroplastia total de joelho', cirurgiao: 'Dr. Souza' } });
+    /* três cobranças: uma paga, uma parcialmente glosada, uma nem faturada */
+    store.save('financeiro', { paciente: 'JOANA PEREIRA LIMA', data_proc: hoje, procedimento: 'Artroplastia',
+      convenio: 'Unimed', valor_previsto: '1000', valor_recebido: '1000', glosa: '0', status: 'recebido', pago: true });
+    store.save('financeiro', { paciente: 'JOANA PEREIRA LIMA', data_proc: hoje, procedimento: 'Consulta pré',
+      convenio: 'Unimed', valor_previsto: '300', valor_recebido: '100', glosa: '50', status: 'parcial', pago: false });
+    store.save('financeiro', { paciente: 'JOANA PEREIRA LIMA', data_proc: hoje, procedimento: 'Visita SRPA',
+      convenio: 'Unimed', valor_previsto: '200', valor_recebido: '0', glosa: '0', status: 'pendente', pago: false });
+
+    /* 1) o botão existe na linha do paciente e abre por ele */
+    ui.navegar('pacientes');
+    await new Promise(res => setTimeout(res, 400));
+    pacientes.render();
+    const linha = [...document.querySelectorAll('#pacientes-tbody tr')]
+      .find(tr => /JOANA/.test(tr.textContent));
+    out.temBotao = !!linha && /Histórico/.test(linha.textContent);
+    const btn = linha && [...linha.querySelectorAll('button')].find(b => /Histórico/.test(b.textContent));
+    out.abrePeloPaciente = !!btn && /JOANA PEREIRA LIMA/.test(btn.getAttribute('onclick') || '');
+
+    const html = historico._prontRender('JOANA PEREIRA LIMA');
+
+    /* 2) cadastro: quem é e desde quando */
+    out.mostraCadastro = /111\.222\.333-44/.test(html) && /Unimed/.test(html)
+      && /0286123/.test(html) && /Cadastrado em/.test(html);
+
+    /* 3) documentos com data */
+    out.mostraDocumentos = /Pré-anestésica/.test(html) && /Ficha de Anestesia/.test(html)
+      && /Artroplastia total de joelho/.test(html) && /Linha do tempo/.test(html);
+
+    /* 4) financeiro cobrança a cobrança, com totais */
+    out.temSecaoFinanceira = /Financeiro \(3\)/.test(html);
+    out.somaOsTotais = /R\$ 1500,00/.test(html)   /* previsto 1000+300+200 */
+                    && /R\$ 1100,00/.test(html);  /* recebido 1000+100 */
+    /* em aberto = previsto − recebido − glosa: 0 + 150 + 200 = 350 */
+    out.apontaOEmAberto = /R\$ 350,00/.test(html) && /2 cobran/.test(html) && /em aberto/.test(html);
+    out.mostraStatus = /Recebido/.test(html) && /Parcial/.test(html) && /Pendente/.test(html);
+
+    /* 5) cortesia não conta como dívida — não foi cobrado de ninguém */
+    store.save('financeiro', { paciente: 'JOANA PEREIRA LIMA', data_proc: hoje, procedimento: 'Retorno',
+      valor_previsto: '400', valor_recebido: '0', glosa: '0', status: 'cortesia' });
+    const html2 = historico._prontRender('JOANA PEREIRA LIMA');
+    out.cortesiaNaoEhDivida = /R\$ 350,00/.test(html2) && !/R\$ 750,00/.test(html2);
+
+    /* 6) paciente cadastrado e ainda sem documento: a pergunta "desde quando"
+       tem resposta mesmo assim */
+    store.save('pacientes', { nome: 'NOVO SEM DOCUMENTO', cpf: '999.888.777-66' });
+    const html3 = historico._prontRender('NOVO SEM DOCUMENTO');
+    out.novoAparece = /999\.888\.777-66/.test(html3) && /Cadastrado em/.test(html3)
+      && !/Nenhum registro encontrado/.test(html3);
+    return out;
+  });
+
+  assert(r.temBotao, 'a linha do paciente tem o botão de histórico');
+  assert(r.abrePeloPaciente, 'e abre já naquele paciente, sem redigitar o nome');
+  assert(r.mostraCadastro, 'o histórico mostra a ficha do cadastro e desde quando ele existe aqui');
+  assert(r.mostraDocumentos, 'os documentos feitos para ele, com data');
+  assert(r.temSecaoFinanceira, 'e o financeiro em seção própria, cobrança a cobrança');
+  assert(r.somaOsTotais, 'somando previsto e recebido');
+  assert(r.apontaOEmAberto, 'e dizendo quanto e quantas cobranças estão em aberto');
+  assert(r.mostraStatus, 'com o status de cada uma');
+  assert(r.cortesiaNaoEhDivida, 'cortesia não entra como dívida — não foi cobrada de ninguém');
+  assert(r.novoAparece, 'paciente cadastrado e ainda sem documento não é dado como inexistente');
   await page.close();
 });
 

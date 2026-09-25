@@ -4604,7 +4604,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-25h</b><br>
+    v7.1 · build <b id="build-tag">2026-09-25i</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -41579,6 +41579,111 @@ const historico = {
     return m ? m[3] + '/' + m[2] + '/' + m[1] : d;
   },
   _fmtRS(v) { return 'R$ ' + (parseFloat(v) || 0).toFixed(2).replace('.', ','); },
+
+  /* ---- COMO CADA STATUS FINANCEIRO SE LÊ --------------------------------
+     O status é o que o anestesista marcou; o "em aberto" é conta, e é ela que
+     diz se ainda falta receber: previsto − recebido − glosa. Os dois aparecem
+     lado a lado de propósito — um "faturado" com tudo recebido não é
+     pendência, e um "recebido" com valor a menos é. */
+  FIN_STATUS: {
+    pendente:   { rot: 'Pendente',   cor: '#b3261e' },
+    faturado:   { rot: 'Faturado',   cor: '#8a6d00' },
+    recebido:   { rot: 'Recebido',   cor: '#0f7b4f' },
+    periciado:  { rot: 'Periciado',  cor: '#8a6d00' },
+    glosado:    { rot: 'Glosado',    cor: '#b3261e' },
+    parcial:    { rot: 'Parcial',    cor: '#8a6d00' },
+    cortesia:   { rot: 'Cortesia',   cor: '#6b7280' },
+    finalizado: { rot: 'Finalizado', cor: '#0f7b4f' }
+  },
+  _finChip(st) {
+    const d = historico.FIN_STATUS[String(st || '').toLowerCase()];
+    const rot = d ? d.rot : (st || '—');
+    const cor = d ? d.cor : '#6b7280';
+    return '<span style="font-size:.7rem;border:1px solid ' + cor + ';color:' + cor +
+           ';border-radius:10px;padding:1px 7px;white-space:nowrap">' + utils.escapeHTML(rot) + '</span>';
+  },
+  _ehCortesia(it) { return String(it.status || '').toLowerCase() === 'cortesia'; },
+  _emAberto(it) {
+    if (historico._ehCortesia(it)) return 0;
+    const v = (parseFloat(it.valor_previsto) || 0) - (parseFloat(it.valor_recebido) || 0) - (parseFloat(it.glosa) || 0);
+    return v > 0.005 ? v : 0;
+  },
+
+  /* Ficha do cadastro: quem é o paciente e desde quando ele existe aqui.
+     Estava em toda parte menos no lugar onde se olha a história dele. */
+  _prontCadastro(nq, norm) {
+    const lista = (store.list('pacientes') || []).filter(p => norm(p.nome || '').includes(nq));
+    if (!lista.length) {
+      return '<div style="font-size:.78rem;color:var(--text-mute);margin-top:6px">' +
+        'Sem ficha no cadastro central — os registros abaixo existem, mas o paciente nunca foi cadastrado.</div>';
+    }
+    const p = lista[0];
+    const e = utils.escapeHTML;
+    const quando = (d) => { try { return d ? new Date(d).toLocaleString('pt-BR') : ''; } catch (x) { return ''; } };
+    const par = (rot, val) => val ? '<span style="margin-right:14px"><small style="color:var(--text-mute)">' + rot + '</small> ' + e(val) + '</span>' : '';
+    return '<div style="font-size:.78rem;margin-top:8px;line-height:1.9">' +
+      par('CPF', p.cpf) + par('Nascimento', utils.formatarData(p.nascimento)) +
+      par('Plano', p.plano) + par('Carteirinha', p.carteirinha) + par('Telefone', p.telefone) +
+      par('Cadastrado em', quando(p._createdAt)) + par('Atualizado em', quando(p._updatedAt)) +
+      (lista.length > 1 ? '<div style="color:#8a6d00;margin-top:2px">⚠️ ' + lista.length +
+        ' cadastros com este nome — use "Juntar cadastros repetidos" em Pacientes.</div>' : '') +
+      '</div>';
+  },
+
+  /* O financeiro por extenso: cada cobrança com o que foi previsto, o que
+     entrou, o que foi glosado e o que ainda falta. O resumo de uma linha só
+     não respondia "qual delas está em aberto". */
+  _prontFinanceiro(eventos) {
+    const fins = eventos.filter(ev => ev.mod === 'financeiro')
+      .sort((a, b) => (b.data || '0').localeCompare(a.data || '0'));
+    if (!fins.length) {
+      return '<h3 style="font-size:.85rem;margin:14px 0 6px">💰 Financeiro</h3>' +
+        '<p style="font-size:.8rem;color:var(--text-mute);margin:0">Nenhum lançamento financeiro para este paciente.</p>';
+    }
+    const e = utils.escapeHTML;
+    let tPrev = 0, tRec = 0, tGlo = 0, tAberto = 0, nAberto = 0;
+    const linhas = fins.map(ev => {
+      const it = ev.it;
+      const prev = parseFloat(it.valor_previsto) || 0;
+      const rec = parseFloat(it.valor_recebido) || 0;
+      const glo = parseFloat(it.glosa) || 0;
+      const ab = historico._emAberto(it);
+      tPrev += prev; tRec += rec; tGlo += glo;
+      if (ab > 0) { tAberto += ab; nAberto++; }
+      const pago = it.pago ? '✅' : (historico._ehCortesia(it) ? '—' : '⬜');
+      return '<tr>' +
+        '<td style="white-space:nowrap">' + historico._fmtData(ev.data) + '</td>' +
+        '<td style="font-size:.8rem">' + e(it.procedimento || '—') +
+          (it.convenio ? ' <small style="color:var(--text-mute)">· ' + e(it.convenio) + '</small>' : '') + '</td>' +
+        '<td style="text-align:right;white-space:nowrap">' + historico._fmtRS(prev) + '</td>' +
+        '<td style="text-align:right;white-space:nowrap">' + historico._fmtRS(rec) + '</td>' +
+        '<td style="text-align:right;white-space:nowrap">' + (glo ? historico._fmtRS(glo) : '—') + '</td>' +
+        '<td style="text-align:right;white-space:nowrap;font-weight:' + (ab ? '700' : '400') +
+          ';color:' + (ab ? '#b3261e' : 'inherit') + '">' + (ab ? historico._fmtRS(ab) : '—') + '</td>' +
+        '<td style="text-align:center">' + historico._finChip(it.status) + '</td>' +
+        '<td style="text-align:center" title="Marcado como pago">' + pago + '</td>' +
+        '<td style="text-align:center"><button class="btn btn-xs btn-primary" onclick="historico.abrirItem(\'financeiro\',\'' + it._id + '\')">📂</button></td>' +
+        '</tr>';
+    }).join('');
+    const aviso = nAberto
+      ? '<div style="margin-top:6px;font-size:.8rem;color:#b3261e"><b>⚠️ ' + nAberto +
+        ' cobrança(s) em aberto</b> — total de ' + historico._fmtRS(tAberto) + ' ainda por receber.</div>'
+      : '<div style="margin-top:6px;font-size:.8rem;color:#0f7b4f">✅ Nada em aberto para este paciente.</div>';
+    return '<h3 style="font-size:.85rem;margin:14px 0 6px">💰 Financeiro (' + fins.length + ')</h3>' +
+      '<table class="dash-detail-table" style="margin-top:0">' +
+      '<thead><tr><th style="width:86px">Data</th><th>Procedimento / convênio</th>' +
+      '<th style="width:92px;text-align:right">Previsto</th><th style="width:92px;text-align:right">Recebido</th>' +
+      '<th style="width:80px;text-align:right">Glosa</th><th style="width:92px;text-align:right">Em aberto</th>' +
+      '<th style="width:90px;text-align:center">Status</th><th style="width:50px;text-align:center">Pago</th>' +
+      '<th style="width:44px"></th></tr></thead><tbody>' + linhas + '</tbody>' +
+      '<tfoot><tr style="font-weight:700;background:var(--surface-alt)">' +
+      '<td colspan="2">Totais</td>' +
+      '<td style="text-align:right">' + historico._fmtRS(tPrev) + '</td>' +
+      '<td style="text-align:right">' + historico._fmtRS(tRec) + '</td>' +
+      '<td style="text-align:right">' + historico._fmtRS(tGlo) + '</td>' +
+      '<td style="text-align:right;color:' + (tAberto > 0.005 ? '#b3261e' : 'inherit') + '">' + historico._fmtRS(tAberto) + '</td>' +
+      '<td colspan="3"></td></tr></tfoot></table>' + aviso;
+  },
   _detalheItem(mod, it) {
     const e = utils.escapeHTML;
     if (mod === 'financeiro') {
@@ -41639,7 +41744,19 @@ const historico = {
         }
       });
     });
-    if (!eventos.length) return '<p style="color:var(--text-mute);font-size:.85rem">Nenhum registro encontrado para "' + utils.escapeHTML(q) + '".</p>';
+    if (!eventos.length) {
+      /* Paciente recém-cadastrado ainda não tem documento nenhum. Dizer só
+         "nenhum registro" faria parecer que ele não existe — e a pergunta
+         "quando foi cadastrado" tem resposta mesmo assim. */
+      const so = (store.list('pacientes') || []).filter(p => norm(p.nome || '').includes(nq));
+      if (so.length) {
+        return '<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;background:var(--surface-alt)">' +
+          '<b style="font-size:.95rem">' + utils.escapeHTML(so[0].nome || '') + '</b>' +
+          '<span style="font-size:.76rem;color:var(--text-mute)"> — cadastrado, ainda sem documentos</span>' +
+          historico._prontCadastro(nq, norm) + '</div>';
+      }
+      return '<p style="color:var(--text-mute);font-size:.85rem">Nenhum registro encontrado para "' + utils.escapeHTML(q) + '".</p>';
+    }
     /* Ordena por data desc (sem data vai pro fim) */
     eventos.sort((a, b) => (b.data || '0').localeCompare(a.data || '0'));
     /* Cabeçalho-resumo */
@@ -41656,6 +41773,11 @@ const historico = {
       historico.MODS_PRONT[m] + ': <b>' + porMod[m] + '</b></span>').join('');
     const resumoFin = porMod.financeiro ?
       '<div style="font-size:.78rem;margin-top:6px">💰 Previsto: <b>' + historico._fmtRS(fin.prev) + '</b> · Recebido: <b>' + historico._fmtRS(fin.rec) + '</b> · Em aberto: <b style="color:' + (fin.prev - fin.rec > 0.005 ? 'var(--danger, #b3261e)' : 'inherit') + '">' + historico._fmtRS(fin.prev - fin.rec) + '</b></div>' : '';
+    /* Ficha do cadastro e o financeiro por extenso — o resumo de uma linha só
+       não dizia desde quando o paciente existe aqui nem QUAL cobrança está em
+       aberto, que é o que se quer saber ao abrir a história dele. */
+    const cadastroHtml = historico._prontCadastro(nq, norm);
+    const financeiroHtml = historico._prontFinanceiro(eventos);
     /* Anexos de todos os registros */
     let anexosHtml = '';
     const anexos = [];
@@ -41689,9 +41811,11 @@ const historico = {
         <span style="font-size:.76rem;color:var(--text-mute)"> — ${eventos.length} registro(s)</span>
         <div style="margin-top:4px">${chips}</div>
         ${resumoFin}
+        ${cadastroHtml}
       </div>
+      ${financeiroHtml}
       ${anexosHtml}
-      <h3 style="font-size:.85rem;margin:14px 0 6px">🕐 Linha do tempo</h3>
+      <h3 style="font-size:.85rem;margin:14px 0 6px">🕐 Linha do tempo <small style="font-weight:400;color:var(--text-mute)">— todo documento feito para este paciente, com a data</small></h3>
       <table class="dash-detail-table" style="margin-top:0">
         <thead><tr><th style="width:86px">Data</th><th style="width:130px">Módulo</th><th>Detalhe</th><th style="width:90px;text-align:center">Ações</th></tr></thead>
         <tbody>${linhas}</tbody>
@@ -42379,7 +42503,8 @@ const pacientes = {
         <td class="actions-cell">
           <button class="btn btn-xs" onclick="pacientes.editar('${p._id}')">Editar</button>
           <button class="btn btn-xs" onclick="pacientes.corrigirNome('${p._id}')" title="Corrige o nome no cadastro E em todos os registros deste paciente">✏️ Nome</button>
-          <button class="btn btn-xs" onclick="pacientes.resumo('${utils.escapeAttr(p.nome || '')}')" title="Histórico consolidado do paciente">📋 Resumo</button>
+          <button class="btn btn-xs" onclick="historico.prontuario('${utils.escapeAttr(p.nome || '')}')" title="Tudo deste paciente: cadastro, documentos com data, financeiro, o que está pago e o que está em aberto">📚 Histórico</button>
+          <button class="btn btn-xs" onclick="pacientes.resumo('${utils.escapeAttr(p.nome || '')}')" title="Resumo clínico com evolução da dor (EVA)">📋 Resumo</button>
           <button class="btn btn-xs" onclick="quickActions.abrir('${p._id}')">⚡ Ações</button>
           <button class="btn btn-xs btn-danger" onclick="pacientes.excluir('${p._id}')">×</button>
         </td>
