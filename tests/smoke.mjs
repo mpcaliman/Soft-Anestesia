@@ -14319,6 +14319,83 @@ await test('Dispositivos e via aérea prévios ao ato: ficam na ficha, mas não 
   await page.close();
 });
 
+/* 208) Campo de paciente em TODOS os módulos, e o registro rastreável depois.
+   Orçamento e Financeiro eram os dois que faltavam — e são onde redigitar o
+   nome custa mais caro: nome escrito diferente do cadastro é registro que não
+   aparece no histórico daquele paciente e não casa com a cobrança. E o vínculo
+   tem de sobreviver a uma correção de nome, senão "rastreável" é só enquanto
+   ninguém corrige nada. */
+await test('Paciente do cadastro em todos os módulos — e o registro segue rastreável depois', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['pacientes', 'orcamento', 'financeiro', 'documentos', 'termo', 'anestesia', 'pre'].forEach(m => store.setList(m, []));
+    const pac = store.save('pacientes', { nome: 'CLARA MENDES SOUZA', plano: 'Unimed',
+      cpf: '123.456.789-00', nascimento: '1985-02-20', carteirinha: '0286999' });
+
+    /* 1) a lista de pacientes chega a todos os formulários com campo de nome */
+    ['orcamento', 'financeiro', 'documentos', 'termo', 'prescricao', 'risco', 'agenda'].forEach(m => {
+      try { ui.navegar(m); } catch (e) {}
+    });
+    await new Promise(res => setTimeout(res, 400));
+    try { modal.close(); } catch (e) {}
+    autocomplete.ligarTudo();
+    const ligado = sel => { const el = document.querySelector(sel); return !!el && !!el.dataset.acAttached; };
+    out.orcamentoLigado = ligado('#form-orcamento [name="paciente"]');
+    out.financeiroLigado = ligado('#form-financeiro [name="paciente"]');
+    out.documentosLigado = ligado('#form-documentos [name="nome"]');
+    out.termoLigado = ligado('#form-termo [name="nome"]');
+
+    /* 2) escolher o paciente preenche o campo certo em cada um — o nome do
+       campo não é o mesmo em todos, e supor "nome" deixava dois de fora */
+    autocomplete._aplicarPaciente('form-orcamento', pac);
+    out.preencheOrcamento = document.querySelector('#form-orcamento [name="paciente"]').value === 'CLARA MENDES SOUZA';
+    autocomplete._aplicarPaciente('form-financeiro', pac);
+    out.preencheFinanceiro = document.querySelector('#form-financeiro [name="paciente"]').value === 'CLARA MENDES SOUZA';
+    /* e deixa o vínculo com o cadastro */
+    out.deixaOVinculo = (document.querySelector('#form-orcamento [name="_paciente_id"]') || {}).value === pac._id;
+
+    /* 3) o que foi salvo aparece no histórico daquele paciente */
+    const hoje = utils.hojeISO();
+    store.save('orcamento', { paciente: 'CLARA MENDES SOUZA', _paciente_id: pac._id, data: hoje,
+      total_paciente: '1200', procedimentos: [{ descricao: 'Artroscopia' }] });
+    store.save('documentos', { nome: 'CLARA MENDES SOUZA', _paciente_id: pac._id, data: hoje, modelo: 'atestado' });
+    store.save('financeiro', { paciente: 'CLARA MENDES SOUZA', _paciente_id: pac._id, data_proc: hoje,
+      procedimento: 'Artroscopia', valor_previsto: '1200', valor_recebido: '1200', status: 'recebido', pago: true });
+    let html = historico._prontRender('CLARA MENDES SOUZA');
+    out.tudoNoHistorico = /Orçamento/.test(html) && /Documentos/.test(html) && /Financeiro/.test(html)
+      && /Artroscopia/.test(html);
+
+    /* 4) O TESTE QUE IMPORTA: o nome do registro é corrigido/digitado diferente.
+       Pelo vínculo com o cadastro ele continua no histórico. */
+    const orc = store.list('orcamento')[0];
+    store.save('orcamento', Object.assign({}, orc, { paciente: 'CLARA M. SOUSA' }));
+    html = historico._prontRender('CLARA MENDES SOUZA');
+    out.sobreviveAoNomeDiferente = /Orçamento/.test(html) && /Artroscopia/.test(html);
+
+    /* 5) e não duplica: o mesmo registro casa por nome E por id */
+    const linhasOrc = (html.match(/Orçamento/g) || []).length;
+    out.naoDuplica = linhasOrc <= 2;   /* o chip do cabeçalho + a linha */
+
+    /* 6) registro sem vínculo e com outro nome NÃO é atribuído a ela */
+    store.save('orcamento', { paciente: 'OUTRA PESSOA QUALQUER', data: hoje, total_paciente: '99' });
+    html = historico._prontRender('CLARA MENDES SOUZA');
+    out.naoRoubaDosOutros = !/OUTRA PESSOA/.test(html);
+    return out;
+  });
+
+  assert(r.orcamentoLigado && r.financeiroLigado, 'orçamento e financeiro passam a buscar no cadastro de pacientes');
+  assert(r.documentosLigado && r.termoLigado, 'junto dos que já buscavam');
+  assert(r.preencheOrcamento && r.preencheFinanceiro, 'escolher o paciente preenche o campo certo em cada formulário');
+  assert(r.deixaOVinculo, 'deixando o vínculo com o cadastro no registro');
+  assert(r.tudoNoHistorico, 'e o que se salva aparece no histórico do paciente');
+  assert(r.sobreviveAoNomeDiferente, 'o registro continua no histórico mesmo com o nome escrito diferente — o vínculo é que manda');
+  assert(r.naoDuplica, 'sem duplicar quando casa pelos dois caminhos');
+  assert(r.naoRoubaDosOutros, 'e sem puxar registro de outro paciente');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

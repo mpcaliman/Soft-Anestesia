@@ -4604,7 +4604,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-25l</b><br>
+    v7.1 · build <b id="build-tag">2026-09-25m</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -10717,6 +10717,40 @@ const utils = {
     if (!base.querySelectorAll) return;
     base.querySelectorAll('textarea').forEach(el => utils.autoAltura(el));
   },
+
+  /* ---- CORREÇÃO ORTOGRÁFICA -----------------------------------------------
+     Quem corrige é o navegador, com o dicionário que o usuário tem instalado —
+     não há dicionário embutido aqui. O que o app faz é dizer ONDE checar e em
+     QUE idioma: lang="pt-BR" no campo escolhe o dicionário português mesmo
+     quando o navegador está em outro idioma.
+     E, sobretudo, diz onde NÃO checar. Sublinhar em vermelho um CPF, um código
+     CBHPM ou uma carteirinha é ruído, e ruído constante faz a pessoa ignorar
+     também os sublinhados que importam. */
+  _SEM_CORRETOR: /cpf|cnpj|^rg$|cep|crm|codigo|código|carteirinha|senha|usuario|usuário|email|e_mail|telefone|celular|whatsapp|conta|agencia|agência|_id$|^id$|matricula|matrícula|autorizacao|autorização|guia|nota|cbhpm|tuss/i,
+  _corrigeAqui(el) {
+    const tipo = (el.getAttribute('type') || 'text').toLowerCase();
+    if (['number', 'date', 'time', 'email', 'tel', 'password', 'url', 'hidden', 'checkbox', 'radio', 'file', 'color', 'range'].indexOf(tipo) >= 0) return false;
+    if (el.readOnly || el.disabled) return false;
+    const nome = (el.getAttribute('name') || el.id || '') + ' ' + (el.getAttribute('data-campo') || '');
+    return !utils._SEM_CORRETOR.test(nome);
+  },
+  corretorTodos(raiz) {
+    const base = raiz || document;
+    if (!base.querySelectorAll) return 0;
+    let n = 0;
+    base.querySelectorAll('textarea, input[type="text"], input[type="search"], input:not([type])').forEach(el => {
+      /* o que já foi marcado à mão manda: os campos de login pedem
+         spellcheck="false" no próprio HTML e não podem ser revirados */
+      if (el.dataset.corretor === 'manual') return;
+      if (el.hasAttribute('spellcheck') && el.dataset.corretor !== '1') { el.dataset.corretor = 'manual'; return; }
+      const on = utils._corrigeAqui(el);
+      el.setAttribute('spellcheck', on ? 'true' : 'false');
+      if (on) el.setAttribute('lang', 'pt-BR');
+      el.dataset.corretor = '1';
+      n++;
+    });
+    return n;
+  },
   clearForm(formId) {
     const f = document.getElementById(formId);
     if (!f) return;
@@ -13612,6 +13646,7 @@ const ui = {
        medida. A hora de ajustar é esta, quando ele acaba de abrir. */
     if (!headerEl.parentElement.classList.contains('collapsed')) {
       try { utils.autoAlturaTodos(headerEl.parentElement); } catch (e) {}
+      try { utils.corretorTodos(headerEl.parentElement); } catch (e) {}
     }
   },
   /* Expande ou recolhe todos os cards de um módulo */
@@ -13827,7 +13862,10 @@ const ui = {
       if (!target) { ui.navegar('dashboard'); return; }
       target.classList.add('active');
       /* módulo recém-exibido: agora as caixas podem ser medidas */
-      setTimeout(() => { try { utils.autoAlturaTodos(target); } catch (e) {} }, 0);
+      setTimeout(() => {
+        try { utils.autoAlturaTodos(target); } catch (e) {}
+        try { utils.corretorTodos(target); } catch (e) {}
+      }, 0);
       /* Primeira abertura: começa com os campos recolhidos (módulos de formulário) */
       if (['pre','consulta','anestesia','recuperacao','termo','prescricao','risco'].includes(modName)) {
         ui._recolherInicial(modName);
@@ -42112,14 +42150,28 @@ const historico = {
     const norm = s => (linker._normNome ? linker._normNome(s || '') : (s || '').toLowerCase().trim());
     const nq = norm(q);
     if (nq.length < 2) return '<p style="color:var(--text-mute);font-size:.85rem">Digite ao menos 2 letras do nome do paciente.</p>';
-    /* Coleta em todos os módulos */
+    /* Coleta em todos os módulos.
+       Casa pelo NOME e também pelo ID DO CADASTRO: quem escolheu o paciente na
+       lista carrega _paciente_id, e aí um nome corrigido depois (ou digitado
+       com uma letra diferente naquele dia) não tira o registro do histórico.
+       É o que torna o registro rastreável de verdade. */
+    const ids = new Set(
+      (store.list('pacientes') || [])
+        .filter(p => norm(p.nome || '').includes(nq))
+        .map(p => p._id).filter(Boolean)
+    );
     const eventos = [];
+    const vistos = new Set();
     Object.keys(historico.MODS_PRONT).forEach(mod => {
       (store.list(mod) || []).forEach(it => {
         const nome = historico._nomeItem(it);
-        if (nome && norm(nome).includes(nq)) {
-          eventos.push({ mod, it, nome, data: historico._dataItem(it) });
-        }
+        const porNome = nome && norm(nome).includes(nq);
+        const porId = it._paciente_id && ids.has(it._paciente_id);
+        if (!porNome && !porId) return;
+        const chave = mod + ':' + (it._id || nome);
+        if (vistos.has(chave)) return;
+        vistos.add(chave);
+        eventos.push({ mod, it, nome: nome || '', data: historico._dataItem(it) });
       });
     });
     if (!eventos.length) {
@@ -42138,7 +42190,10 @@ const historico = {
     /* Ordena por data desc (sem data vai pro fim) */
     eventos.sort((a, b) => (b.data || '0').localeCompare(a.data || '0'));
     /* Cabeçalho-resumo */
-    const nomeTitulo = eventos[0].nome;
+    /* achado só pelo id (nome gravado diferente): o título vem do cadastro */
+    const nomeTitulo = eventos.map(ev => ev.nome).find(Boolean)
+      || ((store.list('pacientes') || []).find(p => norm(p.nome || '').includes(nq)) || {}).nome
+      || q;
     const porMod = {};
     eventos.forEach(ev => { porMod[ev.mod] = (porMod[ev.mod] || 0) + 1; });
     let fin = { prev: 0, rec: 0 };
@@ -43771,9 +43826,15 @@ const autocomplete = {
       if (!h) { h = document.createElement('input'); h.type = 'hidden'; h.name = '_paciente_id'; f.appendChild(h); }
       h.value = p._id;
     } else {
-      /* form-pre, form-consulta, form-recuperacao */
+      /* todos os demais: pré, consulta, SRPA, termo, receituário, risco,
+         documentos, orçamento e financeiro. O campo do nome não se chama
+         igual em todos — supor "nome" deixava orçamento e financeiro de fora
+         e quebrava calado. */
       const setIfEmpty = (n, v) => { const el = f.querySelector(`[name="${n}"]`); if (el && !el.value && v) el.value = v; };
-      f.querySelector('[name="nome"]').value = p.nome || '';
+      const campoNome = f.querySelector('[name="nome"]') || f.querySelector('[name="paciente"]')
+                     || f.querySelector('[name="paciente_nome"]');
+      if (!campoNome) return;
+      campoNome.value = p.nome || '';
       setIfEmpty('sexo', p.sexo);
       if (p.nascimento && f.querySelector('[name="idade"]')) {
         const d = new Date(p.nascimento);
@@ -43807,7 +43868,8 @@ const autocomplete = {
         'form-anestesia': 'anestesia', 'form-pre': 'pre',
         'form-consulta': 'consulta', 'form-recuperacao': 'recuperacao',
         'form-documentos': 'documentos', 'form-prescricao': 'prescricao',
-        'form-termo': 'termo', 'form-risco': 'risco'
+        'form-termo': 'termo', 'form-risco': 'risco',
+        'form-orcamento': 'orcamento', 'form-agenda': 'agenda'
       }[formId];
       if (MOD && p.nome) {
         linker.autoPreencherDadosPaciente(p.nome, MOD);
@@ -43862,10 +43924,16 @@ const autocomplete = {
        que se faz DEPOIS, para um paciente que já existe. Quem ia emitir um
        atestado digitava o nome inteiro e o sistema agia como se não a
        conhecesse. */
+    /* A lista completa dos formulários com campo de paciente. Orçamento e
+       Financeiro ficaram de fora por último — e são os dois em que redigitar o
+       nome custa mais caro: nome digitado diferente do cadastro é registro que
+       não aparece no histórico daquele paciente nem casa com a cobrança. */
     [['#form-documentos [name="nome"]', 'form-documentos'],
      ['#form-prescricao [name="nome"]', 'form-prescricao'],
      ['#form-termo [name="nome"]', 'form-termo'],
-     ['#form-risco [name="nome"]', 'form-risco']
+     ['#form-risco [name="nome"]', 'form-risco'],
+     ['#form-orcamento [name="paciente"]', 'form-orcamento'],
+     ['#form-financeiro [name="paciente"]', 'form-financeiro']
     ].forEach(([sel, formId]) => {
       const el = document.querySelector(sel);
       if (el) autocomplete.attachPacientes(el, formId);
@@ -52816,7 +52884,7 @@ document.addEventListener('DOMContentLoaded', () => {
     clearTimeout(_reAlt);
     _reAlt = setTimeout(() => utils.autoAlturaTodos(document.querySelector('.module.active')), 150);
   });
-  setTimeout(() => utils.autoAlturaTodos(), 300);
+  setTimeout(() => { utils.autoAlturaTodos(); utils.corretorTodos(); }, 300);
 
   /* 13e. Inicializa interação do gráfico (drag/touch) */
   setTimeout(() => {
