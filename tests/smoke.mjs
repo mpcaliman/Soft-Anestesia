@@ -14698,6 +14698,106 @@ await test('Códigos TUSS: a sugestão da CBHPM aparece de verdade, e traz o val
   await page.close();
 });
 
+/* 212) O mesmo fato em três lugares que não se falavam. "Esta cobrança está
+   quitada" estava no checklist do Fluxo de faturamento, no campo status e na
+   caixinha "Pago?". Marcar Pago no fluxo não mexia no status — o dinheiro
+   seguia "a receber" em todo relatório. Marcar a caixinha não dava baixa na
+   pendência — a janela continuava cobrando. E havia código somando
+   `pago || status==='recebido'` para se defender da discordância. */
+await test('Financeiro: um fato, um lugar — status manda no "pago" e no fluxo de faturamento', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['financeiro', 'pre'].forEach(m => store.setList(m, []));
+    const hoje = utils.hojeISO();
+
+    /* 1) a caixinha "Pago?" saiu do formulário; no lugar ficou a leitura */
+    ui.navegar('financeiro');
+    await new Promise(res => setTimeout(res, 500));
+    try { modal.close(); } catch (e) {}
+    financeiro.editar(null);
+    await new Promise(res => setTimeout(res, 300));
+    const f = document.getElementById('form-financeiro');
+    out.semCaixinhaDuplicada = !f.querySelector('input[type="checkbox"][name="pago"]');
+    out.temALeitura = !!f.querySelector('[name="pago_rotulo"]')
+      && f.querySelector('[name="pago_rotulo"]').readOnly === true;
+
+    /* 2) o status manda no "pago" */
+    out.quitados = ['recebido', 'finalizado', 'cortesia'].every(s => financeiro.ehQuitado(s))
+      && !financeiro.ehQuitado('pendente') && !financeiro.ehQuitado('faturado')
+      && !financeiro.ehQuitado('glosado') && !financeiro.ehQuitado('parcial');
+
+    const sel = f.querySelector('[name="status"]');
+    sel.value = 'recebido';
+    financeiro.aoMudarStatus(sel);
+    out.rotuloSegueOStatus = /Sim/.test(f.querySelector('[name="pago_rotulo"]').value);
+    sel.value = 'pendente';
+    financeiro.aoMudarStatus(sel);
+    out.rotuloVolta = /Não/.test(f.querySelector('[name="pago_rotulo"]').value);
+
+    /* 3) salvar deriva o campo pago do status — não do que estava na tela */
+    f.querySelector('[name="paciente"]').value = 'TESTE STATUS';
+    f.querySelector('[name="data_proc"]').value = hoje;
+    sel.value = 'recebido';
+    financeiro.salvar();
+    await new Promise(res => setTimeout(res, 300));
+    const rec = store.list('financeiro').find(x => x.paciente === 'TESTE STATUS');
+    out.salvouPagoDerivado = !!rec && rec.pago === true && rec.status === 'recebido';
+
+    /* 4) MARCAR NO FLUXO CHEGA AO STATUS — era o defeito principal */
+    const alvo = store.save('financeiro', { paciente: 'FLUXO TESTE', data_proc: hoje,
+      convenio: 'Bradesco Saúde', valor_previsto: '500', status: 'pendente', pago: false });
+    pendencias.marcarStatus('financeiro', alvo._id, 'faturado', true);
+    let r1 = store.getById('financeiro', alvo._id);
+    out.fluxoFaturadoVaiProStatus = r1.status === 'faturado' && r1.pago === false;
+    pendencias.marcarStatus('financeiro', alvo._id, 'pago', true);
+    r1 = store.getById('financeiro', alvo._id);
+    out.fluxoPagoVaiProStatus = r1.status === 'recebido' && r1.pago === true;
+
+    /* 5) etapas que não dizem se o dinheiro entrou não mexem no status */
+    const alvo2 = store.save('financeiro', { paciente: 'MEIO DO CAMINHO', data_proc: hoje,
+      convenio: 'Bradesco Saúde', valor_previsto: '300', status: 'pendente', pago: false });
+    pendencias.marcarStatus('financeiro', alvo2._id, 'cobrado', true);
+    pendencias.marcarStatus('financeiro', alvo2._id, 'recorrido', true);
+    out.etapaSemRespostaNaoMexe = store.getById('financeiro', alvo2._id).status === 'pendente';
+
+    /* 6) cortesia é decisão de quem atendeu: etapa posterior não a desfaz */
+    const cort = store.save('financeiro', { paciente: 'CORTESIA TESTE', data_proc: hoje,
+      valor_previsto: '200', status: 'cortesia', pago: true });
+    pendencias.marcarStatus('financeiro', cort._id, 'faturado', true);
+    out.cortesiaNaoSeDesfaz = store.getById('financeiro', cort._id).status === 'cortesia';
+
+    /* 7) e o contrário: mudar o status na mão dá baixa na pendência */
+    const doc = store.save('pre', { nome: 'PENDENTE TESTE', data: hoje,
+      convenio: 'Bradesco Saúde', _finalizado: true });
+    const fr = fin.fromDoc('pre', doc);
+    out.nasceuPendente = pendencias.temStatus(store.getById('financeiro', fr.item._id)) === false;
+    financeiro.editar(fr.item._id);
+    await new Promise(res => setTimeout(res, 300));
+    const sel2 = document.querySelector('#form-financeiro [name="status"]');
+    sel2.value = 'recebido';
+    financeiro.aoMudarStatus(sel2);
+    await new Promise(res => setTimeout(res, 200));
+    const depois = store.getById('financeiro', fr.item._id);
+    out.statusDaBaixaNaPendencia = pendencias.temStatus(depois) === true
+      && !!depois._faturamento && !!depois._faturamento.pago;
+    return out;
+  });
+
+  assert(r.semCaixinhaDuplicada, 'a caixinha "Pago?" saiu — era o mesmo fato do status em outro controle');
+  assert(r.temALeitura, 'no lugar dela ficou a leitura, só para conferir');
+  assert(r.quitados, 'recebido, finalizado e cortesia contam como quitado; pendente, faturado, glosado e parcial não');
+  assert(r.rotuloSegueOStatus && r.rotuloVolta, 'a leitura acompanha o status nos dois sentidos');
+  assert(r.salvouPagoDerivado, 'e o campo gravado é derivado do status, não do que estava na tela');
+  assert(r.fluxoFaturadoVaiProStatus, 'marcar "Faturado" no fluxo chega ao status');
+  assert(r.fluxoPagoVaiProStatus, 'e marcar "Pago" faz o dinheiro sair de "a receber" — era o defeito principal');
+  assert(r.etapaSemRespostaNaoMexe, 'cobrado e recorrido não dizem se o dinheiro entrou: não mexem no status');
+  assert(r.cortesiaNaoSeDesfaz, 'cortesia é decisão de quem atendeu e não se desfaz por uma etapa marcada depois');
+  assert(r.statusDaBaixaNaPendencia, 'e o caminho inverso: mudar o status na mão dá baixa na pendência');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

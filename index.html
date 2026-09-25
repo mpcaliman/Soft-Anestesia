@@ -4634,7 +4634,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-25p</b><br>
+    v7.1 · build <b id="build-tag">2026-09-25q</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -8507,8 +8507,8 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <div class="field col-3"><label>Glosa total (R$) <small style="color:var(--text-mute)">auto</small></label><input type="number" name="glosa" step="0.01" min="0" oninput="financeiro.calcDif()"></div>
             <div class="field col-3"><label>Diferença (R$)</label><input type="text" name="diferenca" readonly></div>
 
-            <div class="field col-3"><label>Status geral</label>
-              <select name="status">
+            <div class="field col-3"><label>Status geral <small style="color:var(--text-mute);font-weight:400">— manda no fluxo e no "pago"</small></label>
+              <select name="status" onchange="financeiro.aoMudarStatus(this)">
                 <option value="pendente">Pendente</option>
                 <option value="faturado">Faturado</option>
                 <option value="recebido">Recebido</option>
@@ -8519,8 +8519,13 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
                 <option value="finalizado">Finalizado</option>
               </select>
             </div>
-            <div class="field col-2"><label>Pago?</label>
-              <div style="padding-top:6px"><label class="check" style="display:inline-flex"><input type="checkbox" name="pago"> <span>Pago</span></label></div>
+            <!-- "Pago?" era a mesma informação do status ("Recebido") em outro
+                 controle, e os dois podiam discordar: metade do sistema lia um,
+                 metade lia o outro, e havia código somando os dois com OR para
+                 se defender disso. Agora existe UM lugar — o status — e "pago"
+                 é derivado dele, mostrado aqui só para conferência. -->
+            <div class="field col-3"><label>Pago? <small style="color:var(--text-mute);font-weight:400">— vem do status</small></label>
+              <input type="text" name="pago_rotulo" readonly style="background:var(--surface-alt);font-weight:600" title="Recebido, Finalizado ou Cortesia contam como quitado. Para mudar, mude o status.">
             </div>
             <div class="field col-3"><label>Data do pagamento</label><input type="date" name="data_pagamento"></div>
             <div class="field col-3"><label>Meio de pagamento</label>
@@ -21687,9 +21692,34 @@ const pendencias = {
     store.save(mod, r);
     pendencias._espelharNoLancamento(mod, r);
     if (statusKey === 'cortesia' && marcado) { try { pendencias._aplicarCortesia(mod, r); } catch (e) {} }
+    /* Marcar "Pago" ou "Faturado" no fluxo tem de chegar ao STATUS. Antes não
+       chegava: o fluxo dizia pago e o dinheiro seguia "a receber" em todo
+       relatório, porque quem responde por isso é o status. */
+    if (marcado) { try { pendencias._aplicarStatus(mod, r, statusKey); } catch (e) {} }
     try { pendencias.renderDashboard(); } catch (e) {}
     const rot = (pendencias.STATUS.find(s => s[0] === statusKey) || ['', statusKey])[1];
     toast('🔄 Fluxo de faturamento: ' + rot + (marcado ? ' ✓' : ' removido'));
+  },
+
+  /* Etapa do fluxo → status do lançamento. Só as etapas que têm resposta
+     clara: "cobrado" e "recorrido" não dizem se o dinheiro entrou, então não
+     mexem em status nenhum. */
+  FLUXO_STATUS: { faturado: 'faturado', pago: 'recebido', glosa: 'glosado' },
+  _aplicarStatus(mod, r, statusKey) {
+    const novo = pendencias.FLUXO_STATUS[statusKey];
+    if (!novo) return null;
+    const alvo = (mod === 'financeiro') ? r
+      : (store.list('financeiro') || []).find(f => f._origemId === r._id) || null;
+    if (!alvo) return null;
+    /* cortesia é decisão de quem atendeu e tem caminho próprio: não se desfaz
+       porque alguém marcou uma etapa depois */
+    if (String(alvo.status || '').toLowerCase() === 'cortesia') return null;
+    if (alvo.status === novo) return alvo;
+    alvo.status = novo;
+    alvo.pago = financeiro.ehQuitado(novo);
+    store.save('financeiro', alvo);
+    try { if (state.currentModule === 'financeiro' && financeiro.render) financeiro.render(); } catch (e) {}
+    return alvo;
   },
 
   /* Cortesia marcada no fluxo tem que chegar ao FINANCEIRO: senão o valor
@@ -40163,7 +40193,15 @@ const fin = {
       novo.status = integral ? 'recebido' : 'parcial';
       novo.diferenca_calc = prev - val - (parseFloat(novo.glosa) || 0);
     }
+    novo.pago = financeiro.ehQuitado(novo.status);
     store.save('financeiro', novo);
+    /* o fluxo acompanha: senão a pendência segue cobrando baixa de uma
+       cobrança que acabou de ser paga na frente dele */
+    try {
+      const etapa = pendencias.FLUXO_STATUS && Object.keys(pendencias.FLUXO_STATUS)
+        .find(k => pendencias.FLUXO_STATUS[k] === novo.status);
+      if (etapa) pendencias.marcarStatus('financeiro', novo._id, etapa, true);
+    } catch (e) {}
     modal.close();
     fin._pagamentoId = null;
     try { financeiro.render(); } catch (e) {}
@@ -48752,6 +48790,46 @@ const financeiro = {
   },
 
   /* === SUBMÓDULO: Códigos TUSS / CBHPM === */
+  /* ---- UM FATO, UM LUGAR -------------------------------------------------
+     O mesmo fato — "esta cobrança está quitada" — estava em três lugares que
+     não se falavam: o checklist do Fluxo de faturamento (_faturamento), o
+     campo status e a caixinha pago. Marcar "Pago" no fluxo não mexia no
+     status: o dinheiro seguia "a receber" nos relatórios. Marcar a caixinha
+     não dava baixa na pendência: a janela continuava cobrando. E havia código
+     somando `pago || status==='recebido'` para se defender disso.
+     Agora o STATUS manda: "pago" é derivado dele e o fluxo é marcado junto. */
+  STATUS_QUITADO: ['recebido', 'finalizado', 'cortesia'],
+  ehQuitado(status) {
+    return financeiro.STATUS_QUITADO.indexOf(String(status || '').toLowerCase()) >= 0;
+  },
+  /* status ⇄ etapa do fluxo de faturamento (as que têm correspondência) */
+  STATUS_FLUXO: { faturado: 'faturado', recebido: 'pago', finalizado: 'pago',
+                  glosado: 'glosa', cortesia: 'cortesia' },
+  _rotuloPago(status) {
+    const st = String(status || '').toLowerCase();
+    if (st === 'cortesia') return '— cortesia, não há o que receber';
+    return financeiro.ehQuitado(st) ? '✅ Sim' : '⬜ Não';
+  },
+  _pintarPago(form, status) {
+    const el = (form || document).querySelector('[name="pago_rotulo"]');
+    if (el) el.value = financeiro._rotuloPago(status);
+  },
+  /* Mudou o status na mão: o fluxo acompanha, para a pendência não continuar
+     cobrando baixa de uma cobrança que já foi resolvida. */
+  aoMudarStatus(sel) {
+    const form = document.getElementById(financeiro.formId);
+    if (!form || !sel) return;
+    const st = sel.value;
+    financeiro._pintarPago(form, st);
+    const etapa = financeiro.STATUS_FLUXO[st];
+    const id = (form.querySelector('[name="id"]') || {}).value;
+    if (etapa && id) {
+      try { pendencias.marcarStatus('financeiro', id, etapa, true); } catch (e) {}
+      try { pendencias.renderFinanceiro(store.getById('financeiro', id)); } catch (e) {}
+    }
+    try { markDirty(); } catch (e) {}
+  },
+
   codigos: {
     /* 'cortesia' também por código: numa cirurgia com vários códigos, um deles
        pode ser cortesia sem que os outros sejam. */
@@ -48978,7 +49056,10 @@ const financeiro = {
       const statusEl = form.querySelector('[name="status"]');
       /* Cortesia é decisão de quem atendeu, não resultado de conta: o cálculo
          automático não a desfaz. */
-      if (statusEl && statusEl.value === 'cortesia') { financeiro.calcDif(); return; }
+      if (statusEl && statusEl.value === 'cortesia') {
+        financeiro._pintarPago(form, 'cortesia');
+        financeiro.calcDif(); return;
+      }
       if (statusEl && totalLinhas > 0) {
         if (countCortesia === totalLinhas) statusEl.value = 'cortesia';
         else if (countGlosado === totalLinhas) statusEl.value = 'glosado';
@@ -48986,6 +49067,8 @@ const financeiro = {
         else if (countAguard === totalLinhas) statusEl.value = 'pendente';
         else statusEl.value = 'parcial';
       }
+      /* o status acabou de ser recalculado das linhas: "pago" acompanha */
+      if (statusEl) financeiro._pintarPago(form, statusEl.value);
       financeiro.calcDif();
     },
 
@@ -49319,6 +49402,7 @@ const financeiro = {
         document.getElementById('financeiro-form-titulo').textContent = 'Editar registro';
         /* Restaura códigos TUSS */
         if (Array.isArray(item.codigos)) financeiro.codigos.restaurar(item.codigos);
+        try { financeiro._pintarPago(document.getElementById(financeiro.formId), item.status); } catch (e) {}
         /* Restaura anexos */
         financeiro.anexos.restaurar(item.anexos);
         /* Anexos de suporte vindos do registro clínico de origem (foto/PDF) */
@@ -49332,6 +49416,7 @@ const financeiro = {
       try { pendencias.renderFinanceiro(null); } catch (e) {}
       document.querySelector(`#${financeiro.formId} [name="data_proc"]`).value = utils.hojeISO();
       document.querySelector(`#${financeiro.formId} [name="status"]`).value = 'pendente';
+      try { financeiro._pintarPago(document.getElementById(financeiro.formId), 'pendente'); } catch (e) {}
       const fq = s => document.querySelector(`#${financeiro.formId} [name="${s}"]`);
       if (fq('fator_acomodacao')) fq('fator_acomodacao').value = 1;
       if (fq('perc_urgencia')) fq('perc_urgencia').value = 30;
@@ -49365,6 +49450,10 @@ const financeiro = {
     const rec  = parseFloat(data.valor_recebido) || 0;
     const glo  = parseFloat(data.glosa) || 0;
     data.diferenca_calc = prev - rec - glo;
+    /* "pago" é derivado do status — um fato, um lugar. O campo continua no
+       registro porque meia dúzia de telas e relatórios o leem. */
+    data.pago = financeiro.ehQuitado(data.status);
+    delete data.pago_rotulo;
     /* Preserva o que não é campo do formulário mas tem de sobreviver à edição
        manual: anexos herdados do registro clínico, vínculos e — sobretudo — a
        RASTREABILIDADE da linha (de que registro e de que linha ela veio, com
