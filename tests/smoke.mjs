@@ -6881,7 +6881,12 @@ await test('Ficha: diurese entra na grade dos sinais vitais, calcula ritmo e ali
     /* abaixo de 0,5 mL/kg/h o número aparece em vermelho — é o alerta */
     const tds = document.querySelectorAll('#vitais-grade tr.vg-diurese td');
     out.alertouOligúria = /rgb\(192, 57, 43\)|#c0392b/.test(tds[1].querySelector('div').getAttribute('style') || '');
-    out.debitoDoCaso = /0,46 mL\/kg\/h/.test((document.getElementById('diurese-resultado') || {}).value || '');
+    /* 130 mL medidos entre 08:00 e 10:00 (último registro) = 0,93 mL/kg/h.
+       Este teste afirmava 0,46, que é 130 dividido pelas 4h da anestesia
+       inteira — e entre 10:00 e 12:00 NADA foi medido. Dividir por um tempo
+       maior do que o medido supõe diurese zero nesse trecho: era isso que
+       fazia um caso normal aparecer como oligúria. */
+    out.debitoDoCaso = /0,93 mL\/kg\/h/.test((document.getElementById('diurese-resultado') || {}).value || '');
 
     /* apagar o valor tira o registro (e o balanço acompanha) */
     const c3 = cels(); c3[1].value = ''; anestesia.diurese._daGrade(c3[1]);
@@ -6919,7 +6924,7 @@ await test('Ficha: diurese entra na grade dos sinais vitais, calcula ritmo e ali
   assert(r.foiParaOBalanco, 'a diurese registrada alimenta o balanço hídrico sozinha');
   assert(r.ritmoDoIntervalo, 'cada intervalo mostra o próprio ritmo urinário');
   assert(r.alertouOligúria, 'ritmo abaixo de 0,5 mL/kg/h precisa saltar aos olhos');
-  assert(r.debitoDoCaso, 'o débito do caso continua sendo calculado no fim');
+  assert(r.debitoDoCaso, 'o débito do caso é o volume medido dividido pelo tempo MEDIDO, não pelo ato inteiro');
   assert(r.apagarRemove, 'apagar o valor desfaz o registro e corrige o balanço');
   assert(r.monitorAbre, 'débito urinário marcado nos monitores abre o painel e a coluna, sem depender da sonda');
   assert(r.monitorNoBalanco, 'e o total medido continua indo sozinho para as saídas do balanço');
@@ -14103,6 +14108,108 @@ await test('Particular: finalizar abre a janela de pagamento — meio, valor e c
   assert(r.cortesiaNaoPergunta, 'cortesia não é cobrança — não pergunta');
   assert(r.saiNoHistorico, 'meio e conta aparecem no histórico do paciente');
   assert(r.temCampoNoFormulario, 'e ficam editáveis no formulário do Financeiro');
+  await page.close();
+});
+
+/* 206) Débito urinário. A conta estava errada por um motivo específico: a
+   janela de tempo ia do início ao FIM DA ANESTESIA, mas o volume só é contado
+   até o ÚLTIMO REGISTRO. Com a última aferição às 10:30 e o fim às 12:00, o
+   número saía um terço menor do que o real — a diferença entre "adequado" e
+   "oligúria". E o painel não mostrava nem o intervalo contado nem o ritmo de
+   cada registro, que é o que diz se a diurese está caindo AGORA. */
+await test('Débito urinário: janela certa, total, intervalo contado e ritmo por registro', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    const D = anestesia.diurese;
+
+    /* 1) a conta: 300 mL de 08:00 às 11:00, paciente de 60 kg
+       300 / 60 / 3h = 1,67 mL/kg/h */
+    const di = { modo: 'parcial', base: 'auto', parciais: [
+      { hora: '09:00', vol: '100' }, { hora: '10:00', vol: '120' }, { hora: '11:00', vol: '80' }
+    ] };
+    const c = D.calcular(di, 60, '08:00', '13:00', '');
+    out.somaOVolume = c.vol === 300;
+    /* o fim é o último registro (11:00), NÃO o fim da anestesia (13:00) */
+    out.janelaAteOUltimoRegistro = c.ini === '08:00' && c.fim === '11:00' && c.min === 180;
+    out.contaCerta = Math.abs(c.mlkgh - (300 / 60 / 3)) < 0.001;
+    /* o defeito de antes: dividir por 5h daria 1,00 — e não é o que se mede */
+    out.naoDivideMais = Math.abs(c.mlkgh - 1.0) > 0.5;
+
+    /* 2) modo total continua indo até o fim da anestesia: é um volume só,
+       sem registro intermediário que diga até quando foi medido */
+    const ct = D.calcular({ modo: 'total', base: 'auto', total: '600' }, 60, '08:00', '12:00', '');
+    out.totalUsaOFimDoAto = ct.min === 240 && Math.abs(ct.mlkgh - (600 / 60 / 4)) < 0.001;
+
+    /* 3) tempo informado à mão manda em tudo */
+    const cm = D.calcular({ modo: 'total', base: 'manual', min: '120', total: '240' }, 60, '08:00', '18:00', '');
+    out.manualManda = cm.min === 120 && Math.abs(cm.mlkgh - (240 / 60 / 2)) < 0.001;
+
+    /* 4) sem início do ato: o 1º registro é o marco zero e o volume dele sai
+       da conta — veio de antes e não dá para saber de quanto tempo */
+    const cs = D.calcular(di, 60, '', '', '');
+    out.semInicioDescontaOPrimeiro = cs.descontouPrimeiro === true && cs.vol === 200
+      && cs.ini === '09:00' && cs.fim === '11:00' && cs.min === 120;
+
+    /* 5) ritmo de cada registro, com o acumulado */
+    const rit = D.ritmos(di, 60, '08:00');
+    out.acumulaCerto = rit.map(x => x.acumulado).join(',') === '100,220,300';
+    /* 1º: 100 mL em 1h (08:00→09:00) = 1,67; 2º: 120 em 1h = 2,00 */
+    out.ritmoPorRegistro = Math.abs(rit[0].mlkgh - (100 / 60)) < 0.001
+      && Math.abs(rit[1].mlkgh - (120 / 60)) < 0.001
+      && rit[1].desde === '09:00';
+
+    /* 6) na tela: intervalo contado e ritmo por linha aparecem */
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 600));
+    try { modal.close(); } catch (e) {}
+    document.querySelectorAll('#module-anestesia .card.collapsed').forEach(x => x.classList.remove('collapsed'));
+    const f = document.getElementById('form-anestesia');
+    f.querySelector('[name="paciente_peso"]').value = '60';
+    f.querySelector('[name="hora_inicio"]').value = '08:00';
+    f.querySelector('[name="hora_fim"]').value = '13:00';
+    D.restaurar(di);
+    D.recalcular();
+    await new Promise(res => setTimeout(res, 200));
+    out.mostraAJanela = document.getElementById('diurese-janela').value === '08:00 → 11:00';
+    out.mostraOTempo = document.getElementById('diurese-tempo').value === '3h 00min';
+    out.mostraOTotal = /300/.test(document.getElementById('diurese-acumulado').value);
+    out.mostraODebito = /1,67 mL\/kg\/h/.test(document.getElementById('diurese-resultado').value);
+    const linhas = [...document.querySelectorAll('#diurese-body tr')];
+    out.linhaTemAcumulado = linhas.map(tr => tr.querySelector('.di-acum').textContent).join(',') === '100 mL,220 mL,300 mL';
+    out.linhaTemRitmo = /1,67 mL\/kg\/h/.test(linhas[0].querySelector('.di-ritmo').textContent)
+      && /2,00 mL\/kg\/h/.test(linhas[1].querySelector('.di-ritmo').textContent);
+
+    /* 7) apagar os registros zera o balanço — não pode ficar o valor velho */
+    out.levouProBalanco = f.querySelector('[name="diurese"]').value === '300';
+    document.getElementById('diurese-body').innerHTML = '';
+    D.recalcular();
+    out.zeraOBalanco = f.querySelector('[name="diurese"]').value === '';
+
+    /* 8) a ficha impressa usa a MESMA conta */
+    const imp = printPreview._debitoUrinario({
+      paciente: { peso: '60' }, tempos: { hora_inicio: '08:00', hora_fim: '13:00' },
+      monitorizacao: { diurese: di }, fluidos: {}
+    });
+    out.impressaoConcorda = /1,67 mL\/kg\/h/.test(imp) && /300 mL em 3h 00min/.test(imp)
+      && /08:00→11:00/.test(imp);
+    return out;
+  });
+
+  assert(r.somaOVolume, 'o volume total é a soma dos registros do intervalo');
+  assert(r.janelaAteOUltimoRegistro, 'e o tempo vai do início do ato até o ÚLTIMO REGISTRO, não até o fim da anestesia');
+  assert(r.contaCerta && r.naoDivideMais, 'com isso a conta bate — antes o débito saía rebaixado');
+  assert(r.totalUsaOFimDoAto, 'no modo total, sem registro intermediário, a janela segue sendo o ato inteiro');
+  assert(r.manualManda, 'tempo informado à mão manda em tudo');
+  assert(r.semInicioDescontaOPrimeiro, 'sem início do ato, o 1º registro vira marco zero e o volume dele sai da conta');
+  assert(r.acumulaCerto, 'cada linha mostra o acumulado até ali');
+  assert(r.ritmoPorRegistro, 'e o ritmo daquele intervalo, medido desde o registro anterior');
+  assert(r.mostraAJanela && r.mostraOTempo, 'o painel diz o intervalo contado — início → fim — e a duração');
+  assert(r.mostraOTotal && r.mostraODebito, 'com o total e o débito do caso');
+  assert(r.linhaTemAcumulado && r.linhaTemRitmo, 'e a tabela mostra acumulado e ritmo por registro');
+  assert(r.levouProBalanco && r.zeraOBalanco, 'o balanço hídrico acompanha, inclusive quando os registros são apagados');
+  assert(r.impressaoConcorda, 'a ficha impressa usa a mesma conta do painel');
   await page.close();
 });
 

@@ -4604,7 +4604,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-25j</b><br>
+    v7.1 · build <b id="build-tag">2026-09-25k</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -6921,6 +6921,8 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
                 <thead><tr>
                   <th style="width:90px">Horário</th>
                   <th style="width:130px">Volume no intervalo (mL)</th>
+                  <th style="width:90px" title="Soma de tudo o que saiu até este registro">Acumulado</th>
+                  <th style="width:120px" title="Volume deste intervalo ÷ peso ÷ tempo desde o registro anterior">Ritmo</th>
                   <th>Observação</th>
                   <th class="col-rm">×</th>
                 </tr></thead>
@@ -6935,8 +6937,9 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
           <!-- resultado -->
           <div class="grid" style="margin-top:8px">
             <div class="field col-3"><label>Volume acumulado (mL)</label><input type="text" id="diurese-acumulado" readonly></div>
-            <div class="field col-3"><label>Tempo considerado</label><input type="text" id="diurese-tempo" readonly></div>
-            <div class="field col-6"><label>Débito urinário</label><input type="text" id="diurese-resultado" readonly style="font-weight:700"></div>
+            <div class="field col-3"><label>Intervalo contado <small style="color:var(--text-mute);font-weight:400">— início → fim</small></label><input type="text" id="diurese-janela" readonly title="De quando até quando o volume acima foi medido"></div>
+            <div class="field col-2"><label>Tempo</label><input type="text" id="diurese-tempo" readonly></div>
+            <div class="field col-4"><label>Débito urinário</label><input type="text" id="diurese-resultado" readonly style="font-weight:700"></div>
           </div>
           <p id="diurese-alerta" style="font-size:.78rem;margin:2px 2px 0"></p>
         </div>
@@ -32111,43 +32114,123 @@ const anestesia = {
       anestesia.diurese.recalcular();
       markDirty();
     },
+    _linhaHTML(p) {
+      p = p || {};
+      const ea = utils.escapeAttr;
+      return '<td data-label="Horário"><input type="time" name="diurese_hora[]" value="' + ea(p.hora || '') + '" onchange="anestesia.diurese.recalcular()"></td>' +
+        '<td data-label="Volume (mL)"><input type="number" name="diurese_vol[]" min="0" step="1" inputmode="numeric" placeholder="mL" value="' + ea(p.vol || '') + '" oninput="anestesia.diurese.recalcular()"></td>' +
+        '<td data-label="Acumulado" class="di-acum" style="font-size:.82rem;color:var(--text-soft)">—</td>' +
+        '<td data-label="Ritmo" class="di-ritmo" style="font-size:.82rem;font-weight:600">—</td>' +
+        '<td data-label="Observação"><input type="text" name="diurese_obs[]" value="' + ea(p.obs || '') + '" placeholder="ex.: concentrada, clara..."></td>' +
+        '<td class="col-rm"><button type="button" class="btn-rm" onclick="this.closest(\'tr\').remove(); anestesia.diurese.recalcular(); markDirty();">×</button></td>';
+    },
     addParcial(usarAgora) {
       const tb = document.getElementById('diurese-body');
       if (!tb) return;
       let hora = '';
       if (usarAgora) { const d = new Date(); hora = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
       const tr = document.createElement('tr');
-      tr.innerHTML =
-        '<td data-label="Horário"><input type="time" name="diurese_hora[]" value="' + hora + '"></td>' +
-        '<td data-label="Volume (mL)"><input type="number" name="diurese_vol[]" min="0" step="1" inputmode="numeric" placeholder="mL" oninput="anestesia.diurese.recalcular()"></td>' +
-        '<td data-label="Observação"><input type="text" name="diurese_obs[]" placeholder="ex.: concentrada, clara..."></td>' +
-        '<td class="col-rm"><button type="button" class="btn-rm" onclick="this.closest(\'tr\').remove(); anestesia.diurese.recalcular(); markDirty();">×</button></td>';
+      tr.innerHTML = anestesia.diurese._linhaHTML({ hora: hora });
       tb.appendChild(tr);
+      anestesia.diurese.recalcular();
       markDirty();
     },
-    /* Minutos de anestesia: manual, ou início→fim, ou início→agora (tempo real) */
-    _minutos() {
-      const base = (document.getElementById('diurese-base') || {}).value || 'auto';
-      if (base === 'manual') {
-        const m = parseInt((document.getElementById('diurese-min') || {}).value, 10);
-        return { min: isNaN(m) ? null : m, fonte: 'informado' };
-      }
-      const f = document.getElementById('form-anestesia');
-      const ini = (f.querySelector('[name="hora_inicio"]') || {}).value;
-      const fim = (f.querySelector('[name="hora_fim"]') || {}).value;
-      if (!ini) return { min: null, fonte: 'sem início' };
-      const [h1, m1] = ini.split(':').map(Number);
-      let alvoMin, fonte;
-      if (fim) {
-        const [h2, m2] = fim.split(':').map(Number);
-        alvoMin = h2 * 60 + m2; fonte = 'anestesia (início→fim)';
+    /* ---- A CONTA DO DÉBITO URINÁRIO, EM UM LUGAR SÓ -----------------------
+       Função pura: recebe o registro de diurese, o peso e os horários do ato,
+       e devolve volume, janela de tempo e ritmo. O painel e a ficha impressa
+       chamam esta mesma função — antes cada um fazia a sua conta e os dois
+       podiam discordar.
+
+       O erro que havia: a janela ia do início ao FIM DA ANESTESIA, mas o
+       volume só é contado até o ÚLTIMO REGISTRO. Dividir tudo o que saiu por
+       um tempo maior do que o medido rebaixa o débito — num caso com a última
+       aferição às 10:30 e fim às 12:00, o número saía um terço menor do que
+       o real, e isso é a diferença entre "adequado" e "oligúria".
+
+       Sem horário de início do ato não dá para saber em quanto tempo o PRIMEIRO
+       registro se acumulou — ele veio de antes. Nesse caso a janela vai do 1º
+       ao último registro e o volume do 1º sai da conta, que é o que a régua
+       permite afirmar. */
+    calcular(di, peso, horaIni, horaFim, agora) {
+      di = di || {};
+      const num = v => { const n = parseFloat(v); return isNaN(n) ? null : n; };
+      const dif = (a, b) => {
+        if (!a || !b) return null;
+        const p = t => { const x = String(t).split(':').map(Number); return x[0] * 60 + x[1]; };
+        let d = p(b) - p(a);
+        if (d < 0) d += 1440;
+        return d;
+      };
+      const parciais = (di.parciais || [])
+        .filter(p => num(p.vol) != null)
+        .slice()
+        .sort((a, b) => String(a.hora || '~').localeCompare(String(b.hora || '~')));
+      const modo = di.modo || 'parcial';
+      const out = { vol: 0, min: null, ini: '', fim: '', fonte: '', mlkgh: null,
+                    parciais: parciais, descontouPrimeiro: false };
+
+      if (modo === 'total') {
+        out.vol = num(di.total) || 0;
       } else {
-        const now = new Date();
-        alvoMin = now.getHours() * 60 + now.getMinutes(); fonte = 'em tempo real (início→agora)';
+        parciais.forEach(p => { out.vol += num(p.vol); });
       }
-      let mins = alvoMin - (h1 * 60 + m1);
-      if (mins < 0) mins += 24 * 60;
-      return { min: mins, fonte: fonte };
+
+      if (di.base === 'manual' && String(di.min || '').trim()) {
+        out.min = parseInt(di.min, 10) || null;
+        out.fonte = 'tempo informado';
+      } else {
+        const comHora = parciais.filter(p => p.hora);
+        if (modo !== 'total' && comHora.length) {
+          out.fim = comHora[comHora.length - 1].hora;
+          if (horaIni) {
+            out.ini = horaIni;
+            out.fonte = 'do início do ato até o último registro';
+          } else if (comHora.length > 1) {
+            /* sem início do ato: o 1º registro é o marco zero, e o que ele
+               trouxe veio de antes — sai da conta */
+            out.ini = comHora[0].hora;
+            out.vol -= num(comHora[0].vol);
+            out.descontouPrimeiro = true;
+            out.fonte = 'do 1º ao último registro (o 1º volume veio de antes)';
+          }
+        } else {
+          out.ini = horaIni || '';
+          if (horaFim) { out.fim = horaFim; out.fonte = 'anestesia (início→fim)'; }
+          else if (agora) { out.fim = agora; out.fonte = 'em tempo real (início→agora)'; }
+        }
+        out.min = dif(out.ini, out.fim);
+      }
+      if (peso && out.min && out.min > 0 && out.vol > 0) {
+        out.mlkgh = out.vol / peso / (out.min / 60);
+      }
+      return out;
+    },
+    /* Ritmo de cada registro: o que saiu naquele intervalo dividido pelo tempo
+       desde o registro anterior (ou desde o início do ato, para o primeiro). */
+    ritmos(di, peso, horaIni) {
+      const c = anestesia.diurese.calcular(di, peso, horaIni, '', '');
+      let acum = 0, ant = horaIni || '';
+      return c.parciais.map((p, i) => {
+        const v = parseFloat(p.vol);
+        acum += v;
+        const min = anestesia.diurese._difMin(ant, p.hora);
+        const taxa = (peso && min > 0) ? (v / peso / (min / 60)) : null;
+        const linha = { hora: p.hora, vol: v, acumulado: acum, min: min, mlkgh: taxa, desde: ant };
+        ant = p.hora || ant;
+        return linha;
+      });
+    },
+    _horaIniAto() {
+      const f = document.getElementById('form-anestesia');
+      if (!f) return '';
+      /* a coleta começa quando o paciente entra, não quando a anestesia começa;
+         mas o registro de entrada nem sempre existe — então cai para o início */
+      return (f.querySelector('[name="hora_inicio"]') || {}).value ||
+             (f.querySelector('[name="hora_sala_entrada"]') || {}).value || '';
+    },
+    _horaFimAto() {
+      const f = document.getElementById('form-anestesia');
+      return f ? ((f.querySelector('[name="hora_fim"]') || {}).value || '') : '';
     },
     /* ---- DIURESE NA GRADE DOS SINAIS VITAIS --------------------------------
        A diurese é lida junto com os outros sinais, de hora em hora. Digitá-la
@@ -32237,35 +32320,88 @@ const anestesia = {
       document.querySelectorAll('[name="diurese_vol[]"]').forEach(el => { const v = parseFloat(el.value); if (!isNaN(v)) soma += v; });
       return soma;
     },
+    _fmtDur(min) {
+      if (min == null) return '—';
+      const h = Math.floor(min / 60), m = min % 60;
+      return (h ? h + 'h ' : '') + String(m).padStart(2, '0') + 'min';
+    },
     recalcular() {
       if (!anestesia.diurese._painel()) return;
       const peso = parseFloat((document.querySelector('#form-anestesia [name="paciente_peso"]') || {}).value);
-      const vol = anestesia.diurese._volume();
-      const t = anestesia.diurese._minutos();
+      const di = anestesia.diurese.coletar();
+      const agora = (() => { const d = new Date();
+        return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); })();
+      const c = anestesia.diurese.calcular(di, peso,
+        anestesia.diurese._horaIniAto(), anestesia.diurese._horaFimAto(), agora);
+
       const acEl = document.getElementById('diurese-acumulado');
       const tEl = document.getElementById('diurese-tempo');
+      const jEl = document.getElementById('diurese-janela');
       const rEl = document.getElementById('diurese-resultado');
       const alerta = document.getElementById('diurese-alerta');
-      if (acEl) acEl.value = vol ? (vol.toLocaleString('pt-BR') + ' mL') : '—';
-      /* Alimenta o campo de diurese do balanço hídrico (evita dupla digitação) */
+
+      if (acEl) acEl.value = c.vol ? (Math.round(c.vol).toLocaleString('pt-BR') + ' mL') : '—';
+      /* Alimenta a diurese do balanço hídrico. Zerar também é informação: se
+         os registros são apagados, o balanço não pode ficar com o valor velho. */
       const campoBal = document.querySelector('#form-anestesia [name="diurese"]');
-      if (campoBal && vol) { campoBal.value = Math.round(vol); try { anestesia.calc.balanco(); } catch (e) {} }
-      if (tEl) {
-        if (t.min == null) tEl.value = '—';
-        else { const h = Math.floor(t.min / 60), m = t.min % 60; tEl.value = (h ? h + 'h ' : '') + String(m).padStart(2, '0') + 'min'; }
+      if (campoBal && campoBal.readOnly !== false) {
+        campoBal.value = c.vol ? Math.round(c.vol) : '';
+        try { anestesia.calc.balanco(); } catch (e) {}
       }
+      if (tEl) tEl.value = anestesia.diurese._fmtDur(c.min);
+      /* o intervalo contado, por extenso: é aqui que se vê se a conta está
+         medindo o que se acha que ela mede */
+      if (jEl) jEl.value = (c.ini && c.fim) ? (c.ini + ' → ' + c.fim) : (c.fonte === 'tempo informado' ? 'tempo informado' : '—');
+
+      anestesia.diurese._renderRitmos(di, peso);
+
       if (!rEl) return;
       if (!peso) { rEl.value = 'informe o peso do paciente'; if (alerta) alerta.textContent = ''; return; }
-      if (!vol || t.min == null || t.min <= 0) { rEl.value = '—'; if (alerta) alerta.textContent = ''; return; }
-      const horas = t.min / 60;
-      const mlkgh = vol / peso / horas;
-      rEl.value = mlkgh.toFixed(2).replace('.', ',') + ' mL/kg/h  (' + t.fonte + ')';
-      /* Alerta clínico: oligúria < 0,5 mL/kg/h */
-      if (alerta) {
-        if (mlkgh < 0.5) { alerta.style.color = '#c0392b'; alerta.textContent = '⚠️ Oligúria (< 0,5 mL/kg/h) — reavaliar volemia/perfusão.'; }
-        else if (mlkgh > 4) { alerta.style.color = '#8a5a10'; alerta.textContent = 'Débito elevado (> 4 mL/kg/h) — considerar poliúria/diuréticos/hiperglicemia.'; }
-        else { alerta.style.color = '#1f7a4d'; alerta.textContent = '✓ Débito adequado (meta usual ≥ 0,5 mL/kg/h).'; }
+      if (c.mlkgh == null) {
+        rEl.value = c.vol ? Math.round(c.vol) + ' mL — falta o tempo' : '—';
+        if (alerta) alerta.textContent = c.vol && !c.min
+          ? 'Sem horário de início do ato nem dois registros com hora, não dá para dizer em quanto tempo saiu.' : '';
+        return;
       }
+      rEl.value = c.mlkgh.toFixed(2).replace('.', ',') + ' mL/kg/h  (' + c.fonte + ')';
+      if (alerta) {
+        let extra = c.descontouPrimeiro
+          ? ' O volume do 1º registro não entrou: ele se acumulou antes do marco inicial.' : '';
+        if (c.mlkgh < 0.5) { alerta.style.color = '#c0392b'; alerta.textContent = '⚠️ Oligúria (< 0,5 mL/kg/h) — reavaliar volemia/perfusão.' + extra; }
+        else if (c.mlkgh > 4) { alerta.style.color = '#8a5a10'; alerta.textContent = 'Débito elevado (> 4 mL/kg/h) — considerar poliúria/diuréticos/hiperglicemia.' + extra; }
+        else { alerta.style.color = '#1f7a4d'; alerta.textContent = '✓ Débito adequado (meta usual ≥ 0,5 mL/kg/h).' + extra; }
+      }
+    },
+    /* Acumulado e ritmo de cada registro, escritos na própria linha. Sem isto
+       só existia o número do caso inteiro, e uma queda no meio do ato — que é
+       o que importa ver na hora — não aparecia em lugar nenhum. */
+    _renderRitmos(di, peso) {
+      const linhas = anestesia.diurese.ritmos(di, peso, anestesia.diurese._horaIniAto());
+      const trs = document.querySelectorAll('#diurese-body tr');
+      const porHora = {};
+      linhas.forEach(l => { porHora[l.hora || ''] = l; });
+      let i = 0;
+      trs.forEach(tr => {
+        const volEl = tr.querySelector('[name="diurese_vol[]"]');
+        const horaEl = tr.querySelector('[name="diurese_hora[]"]');
+        const acEl = tr.querySelector('.di-acum');
+        const riEl = tr.querySelector('.di-ritmo');
+        if (!acEl || !riEl) return;
+        const l = (horaEl && porHora[horaEl.value]) ||
+                  (volEl && String(volEl.value).trim() ? linhas[i] : null);
+        if (volEl && String(volEl.value).trim()) i++;
+        if (!l) { acEl.textContent = '—'; riEl.textContent = '—'; riEl.style.color = ''; return; }
+        acEl.textContent = Math.round(l.acumulado) + ' mL';
+        if (l.mlkgh == null) {
+          riEl.textContent = l.min ? '—' : 'sem intervalo';
+          riEl.style.color = 'var(--text-mute)';
+          riEl.title = peso ? 'Falta a hora do registro anterior ou do início do ato.' : 'Informe o peso do paciente.';
+        } else {
+          riEl.textContent = l.mlkgh.toFixed(2).replace('.', ',') + ' mL/kg/h';
+          riEl.style.color = l.mlkgh < 0.5 ? '#c0392b' : (l.mlkgh > 4 ? '#8a5a10' : '#1f7a4d');
+          riEl.title = 'Em ' + anestesia.diurese._fmtDur(l.min) + ' desde ' + (l.desde || 'o registro anterior');
+        }
+      });
     },
     coletar() {
       const parciais = [];
@@ -32295,11 +32431,7 @@ const anestesia = {
         tb.innerHTML = '';
         (d.parciais || []).forEach(p => {
           const tr = document.createElement('tr');
-          tr.innerHTML =
-            '<td data-label="Horário"><input type="time" name="diurese_hora[]" value="' + utils.escapeAttr(p.hora || '') + '"></td>' +
-            '<td data-label="Volume (mL)"><input type="number" name="diurese_vol[]" min="0" step="1" inputmode="numeric" value="' + utils.escapeAttr(p.vol || '') + '" oninput="anestesia.diurese.recalcular()"></td>' +
-            '<td data-label="Observação"><input type="text" name="diurese_obs[]" value="' + utils.escapeAttr(p.obs || '') + '"></td>' +
-            '<td class="col-rm"><button type="button" class="btn-rm" onclick="this.closest(\'tr\').remove(); anestesia.diurese.recalcular(); markDirty();">×</button></td>';
+          tr.innerHTML = anestesia.diurese._linhaHTML(p);
           tb.appendChild(tr);
         });
       }
@@ -44792,35 +44924,27 @@ ${TAG_CLOSE_HTML}`;
   },
   /* Débito urinário em mL/kg/h para a impressão da anestesia.
      Usa o volume da diurese (painel ou campo do balanço), o peso e o tempo. */
+  /* A ficha impressa usa a MESMA conta do painel (anestesia.diurese.calcular).
+     Antes cada um fazia a sua, e as duas podiam discordar — a impressão dividia
+     pelo tempo inteiro da anestesia mesmo quando a última aferição foi bem
+     antes do fim. */
   _debitoUrinario(d) {
     try {
-      const mn = d.monitorizacao || {};
-      const di = mn.diurese || {};
+      const di = ((d.monitorizacao || {}).diurese) || {};
       const peso = parseFloat((d.paciente || {}).peso);
-      if (!peso) return '';
-      /* volume: total ou soma das parciais; senão o campo simples do balanço */
-      let vol = 0;
-      if (di.modo === 'total') vol = parseFloat(di.total) || 0;
-      else if (di.parciais && di.parciais.length) di.parciais.forEach(p => { const v = parseFloat(p.vol); if (!isNaN(v)) vol += v; });
+      const t = d.tempos || {};
+      const ini = t.hora_inicio || (d.procedimento || {}).hora_inicio || d.hora_inicio ||
+                  t.hora_sala_entrada || '';
+      const fim = t.hora_fim || (d.procedimento || {}).hora_fim || d.hora_fim || '';
+      const c = anestesia.diurese.calcular(di, peso, ini, fim, '');
+      let vol = c.vol;
       if (!vol) vol = parseFloat((d.fluidos || {}).diurese) || 0;
       if (!vol) return '';
-      /* minutos: manual, ou início→fim */
-      let mins = null;
-      if (di.base === 'manual' && di.min) mins = parseInt(di.min, 10);
-      else {
-        const t = d.tempos || {};
-        const ini = t.hora_inicio || (d.procedimento || {}).hora_inicio || d.hora_inicio;
-        const fim = t.hora_fim || (d.procedimento || {}).hora_fim || d.hora_fim;
-        if (ini && fim) {
-          const [h1, m1] = ini.split(':').map(Number);
-          const [h2, m2] = fim.split(':').map(Number);
-          mins = (h2 * 60 + m2) - (h1 * 60 + m1);
-          if (mins < 0) mins += 1440;
-        }
-      }
-      if (!mins || mins <= 0) return vol + ' mL (tempo n/d)';
-      const mlkgh = vol / peso / (mins / 60);
-      return mlkgh.toFixed(2).replace('.', ',') + ' mL/kg/h';
+      if (!peso) return Math.round(vol) + ' mL (sem peso)';
+      if (c.mlkgh == null) return Math.round(vol) + ' mL (tempo n/d)';
+      const janela = (c.ini && c.fim) ? ' — ' + c.ini + '→' + c.fim : '';
+      return c.mlkgh.toFixed(2).replace('.', ',') + ' mL/kg/h (' +
+             Math.round(vol) + ' mL em ' + anestesia.diurese._fmtDur(c.min) + janela + ')';
     } catch (e) { return ''; }
   },
   /* Sinais vitais e medidas (peso, altura, IMC, PA, FC, FR, SpO2, Temp, Dor) — só preenchidos */
