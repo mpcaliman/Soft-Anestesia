@@ -14374,9 +14374,12 @@ await test('Paciente do cadastro em todos os módulos — e o registro segue ras
     html = historico._prontRender('CLARA MENDES SOUZA');
     out.sobreviveAoNomeDiferente = /Orçamento/.test(html) && /Artroscopia/.test(html);
 
-    /* 5) e não duplica: o mesmo registro casa por nome E por id */
-    const linhasOrc = (html.match(/Orçamento/g) || []).length;
-    out.naoDuplica = linhasOrc <= 2;   /* o chip do cabeçalho + a linha */
+    /* 5) e não duplica: o mesmo registro casa por nome E por id, e mesmo assim
+       aparece uma vez só. Conta as aberturas daquele registro pelo id — contar
+       a palavra "Orçamento" contaria também o chip do cabeçalho e o rótulo. */
+    const orcId = store.list('orcamento')[0]._id;
+    const aberturas = (html.match(new RegExp("abrirItem\\('orcamento','" + orcId + "'", 'g')) || []).length;
+    out.naoDuplica = aberturas === 1;
 
     /* 6) registro sem vínculo e com outro nome NÃO é atribuído a ela */
     store.save('orcamento', { paciente: 'OUTRA PESSOA QUALQUER', data: hoje, total_paciente: '99' });
@@ -14393,6 +14396,86 @@ await test('Paciente do cadastro em todos os módulos — e o registro segue ras
   assert(r.sobreviveAoNomeDiferente, 'o registro continua no histórico mesmo com o nome escrito diferente — o vínculo é que manda');
   assert(r.naoDuplica, 'sem duplicar quando casa pelos dois caminhos');
   assert(r.naoRoubaDosOutros, 'e sem puxar registro de outro paciente');
+  await page.close();
+});
+
+/* 209) Histórico do paciente por ATENDIMENTO. Uma linha por documento punha
+   ficha, SRPA e financeiro do mesmo ato em linhas separadas, repetindo data e
+   descrição em cada uma — e num dia com dois atos era impossível dizer qual
+   SRPA era de qual ficha. O agrupamento não é por data: é pelo vínculo que os
+   registros já carregam. Data agruparia os dois atos num bloco só. */
+await test('Histórico do paciente: registros do mesmo atendimento lado a lado, cada um clicável', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['pacientes', 'anestesia', 'recuperacao', 'financeiro', 'pre'].forEach(m => store.setList(m, []));
+    const hoje = utils.hojeISO();
+    store.save('pacientes', { nome: 'ALANA TESTE', plano: 'Unimed' });
+
+    /* DOIS atos no MESMO dia, cada um com sua ficha, sua SRPA e seu financeiro */
+    const mk = (n) => {
+      const fa = store.save('anestesia', { paciente: { nome: 'ALANA TESTE' }, _finalizado: true,
+        procedimento: { data: hoje, descricao: 'Procedimento ' + n, cirurgiao: 'Dr Souza' } });
+      const sr = store.save('recuperacao', { nome: 'ALANA TESTE', data: hoje,
+        procedimento: 'Procedimento ' + n, _finalizado: true });
+      const fi = store.save('financeiro', { paciente: 'ALANA TESTE', data_proc: hoje,
+        procedimento: 'Procedimento ' + n, valor_previsto: n === 1 ? '212.64' : '300',
+        valor_recebido: n === 1 ? '0' : '300', status: n === 1 ? 'pendente' : 'recebido',
+        pago: n !== 1, _origemId: fa._id, _origemTipo: 'anestesia' });
+      linker.link('anestesia', fa._id, 'recuperacao', sr._id);
+      return { fa, sr, fi };
+    };
+    const a1 = mk(1), a2 = mk(2);
+
+    /* 1) dois blocos, não seis linhas e não um bloco só do dia */
+    const eventos = [];
+    ['anestesia', 'recuperacao', 'financeiro'].forEach(mod => {
+      store.list(mod).forEach(it => eventos.push({ mod, it, nome: 'ALANA TESTE', data: historico._dataItem(it) }));
+    });
+    const grupos = historico._prontAgrupar(eventos);
+    out.doisBlocos = grupos.length === 2;
+    out.cadaUmComTres = grupos.every(g => g.itens.length === 3);
+
+    /* 2) cada bloco tem a SRPA e o financeiro DO SEU ato — é isto que a data
+       sozinha não conseguiria separar */
+    const bloco1 = grupos.find(g => g.itens.some(x => x.it._id === a1.fa._id));
+    out.juntouOCerto = !!bloco1
+      && bloco1.itens.some(x => x.it._id === a1.sr._id)
+      && bloco1.itens.some(x => x.it._id === a1.fi._id)
+      && !bloco1.itens.some(x => x.it._id === a2.sr._id);
+
+    /* 3) a ficha manda no título do bloco, não o lançamento financeiro */
+    out.ancoraEhAFicha = grupos.every(g => g.ancora.mod === 'anestesia');
+
+    /* 4) na tela: cabeçalho do dia uma vez, e os chips clicáveis */
+    const html = historico._prontRender('ALANA TESTE');
+    out.diaUmaVezSo = (html.match(/📅/g) || []).length === 1;
+    out.temBlocos = (html.match(/class="pront-bloco"/g) || []).length === 2;
+    out.chipsClicaveis = /pront-chip[^>]*onclick="historico\.abrirItem\('recuperacao'/.test(html)
+      && /pront-chip[^>]*onclick="historico\.abrirItem\('anestesia'/.test(html);
+
+    /* 5) o chip do financeiro diz o estado da cobrança na própria etiqueta */
+    out.chipDizOEstado = /em aberto/.test(html) && /quitado/.test(html) && /R\$ 212,64/.test(html);
+
+    /* 6) registro solto (sem vínculo) continua aparecendo, no bloco dele */
+    store.save('pre', { nome: 'ALANA TESTE', data: '2026-09-01', cirurgia: 'Avaliação isolada' });
+    const html2 = historico._prontRender('ALANA TESTE');
+    out.soltoAparece = /Avaliação isolada/.test(html2) && (html2.match(/📅/g) || []).length === 2;
+
+    /* 7) e os dois blocos do mesmo dia continuam separados */
+    out.continuaSeparado = (html2.match(/class="pront-bloco"/g) || []).length === 3;
+    return out;
+  });
+
+  assert(r.doisBlocos && r.cadaUmComTres, 'dois atos no mesmo dia dão dois blocos, cada um com seus três registros');
+  assert(r.juntouOCerto, 'cada bloco leva a SRPA e o financeiro DO SEU ato — a data sozinha não separaria');
+  assert(r.ancoraEhAFicha, 'a ficha manda no título do bloco, não o lançamento financeiro');
+  assert(r.diaUmaVezSo, 'a data aparece uma vez, como cabeçalho do dia');
+  assert(r.temBlocos && r.chipsClicaveis, 'os registros ficam lado a lado, cada um clicável para abrir e editar');
+  assert(r.chipDizOEstado, 'e o do financeiro já diz o valor e se está em aberto ou quitado');
+  assert(r.soltoAparece, 'registro sem vínculo nenhum continua aparecendo, no dia dele');
+  assert(r.continuaSeparado, 'sem embolar os dois atos do mesmo dia');
   await page.close();
 });
 

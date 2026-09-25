@@ -1150,6 +1150,29 @@ textarea { resize: vertical; min-height: 70px; }
    min-height de 70px o deixaria alto e vazio desde o começo. */
 textarea.campo-desc { min-height: 0; overflow-y: hidden; line-height: 1.45; }
 
+/* ---- HISTÓRICO DO PACIENTE: um bloco por atendimento --------------------
+   Os registros do mesmo ato (ficha, SRPA, financeiro) ficam lado a lado, e
+   cada um é um botão: toque abre aquele registro para ver e editar. */
+.pront-bloco {
+  border: 1px solid var(--border); border-left: 3px solid var(--primary, #2c6fb5);
+  border-radius: 6px; padding: 7px 10px; margin: 5px 0; background: var(--surface);
+}
+.pront-bloco-tit { font-size: .82rem; font-weight: 600; margin-bottom: 5px; line-height: 1.35; }
+.pront-bloco-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.pront-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: .76rem; font-family: inherit; line-height: 1.3;
+  border: 1px solid var(--border); border-radius: 14px; padding: 4px 11px;
+  background: var(--surface-alt); color: var(--text); cursor: pointer;
+  white-space: nowrap; transition: background .12s, transform .12s;
+}
+.pront-chip:hover { background: var(--primary-soft, #e8eef5); transform: translateY(-1px); }
+.pront-chip:active { transform: none; }
+/* no celular a fileira vira coluna em vez de cortar os últimos */
+@media (max-width: 640px) {
+  .pront-chip { font-size: .74rem; padding: 5px 10px; }
+}
+
 .field.required input, .field.required select, .field.required textarea {
   border-left: 3px solid var(--primary);
 }
@@ -4604,7 +4627,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-25m</b><br>
+    v7.1 · build <b id="build-tag">2026-09-25n</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -42228,16 +42251,8 @@ const historico = {
           '<button class="btn btn-xs" onclick="historico._prontVerDoc(\'' + a.ev.mod + '\',\'' + a.ev.it._id + '\',' + a.i + ')">👁 Ver</button>' +
           '</div>').join('');
     }
-    /* Linha do tempo */
-    const linhas = eventos.map(ev =>
-      '<tr>' +
-      '<td style="white-space:nowrap">' + historico._fmtData(ev.data) + '</td>' +
-      '<td><span style="font-size:.72rem;background:var(--primary-soft, #e8eef5);border-radius:10px;padding:2px 8px;white-space:nowrap">' + historico.MODS_PRONT[ev.mod] + '</span></td>' +
-      '<td style="font-size:.8rem">' + (historico._detalheItem(ev.mod, ev.it) || '—') +
-        ((ev.it._docs && ev.it._docs.length) ? ' <span title="anexos">📎' + ev.it._docs.length + '</span>' : '') + '</td>' +
-      '<td style="text-align:center;white-space:nowrap">' +
-        '<button class="btn btn-xs btn-primary" onclick="historico.abrirItem(\'' + ev.mod + '\',\'' + ev.it._id + '\')">📂 Abrir</button>' +
-      '</td></tr>').join('');
+    /* Linha do tempo agrupada por ATENDIMENTO */
+    const linhaDoTempo = historico._prontLinhaDoTempo(eventos);
     return `
       <div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;background:var(--surface-alt)">
         <b style="font-size:.95rem">${utils.escapeHTML(nomeTitulo)}</b>
@@ -42248,11 +42263,116 @@ const historico = {
       </div>
       ${financeiroHtml}
       ${anexosHtml}
-      <h3 style="font-size:.85rem;margin:14px 0 6px">🕐 Linha do tempo <small style="font-weight:400;color:var(--text-mute)">— todo documento feito para este paciente, com a data</small></h3>
-      <table class="dash-detail-table" style="margin-top:0">
-        <thead><tr><th style="width:86px">Data</th><th style="width:130px">Módulo</th><th>Detalhe</th><th style="width:90px;text-align:center">Ações</th></tr></thead>
-        <tbody>${linhas}</tbody>
-      </table>`;
+      ${linhaDoTempo}`;
+  },
+
+  /* ---- LINHA DO TEMPO POR ATENDIMENTO ------------------------------------
+     Uma linha por documento punha ficha, SRPA e financeiro do MESMO ato em
+     linhas separadas e distantes, repetindo a data e a descrição em cada uma.
+     Num dia com dois atos ficava impossível dizer qual SRPA era de qual ficha.
+
+     O agrupamento não é por data: é pelo VÍNCULO que os registros já carregam
+     (_links entre si, e _origemId do financeiro para o documento que o gerou).
+     Data agrupa dois atos do mesmo dia num bloco só — vínculo separa cada um
+     com o que é dele. Dia é só o cabeçalho. */
+  MOD_ICONE: {
+    pre: '🫀', consulta: '🩺', anestesia: '💉', recuperacao: '🛏', termo: '📄',
+    prescricao: '💊', documentos: '📎', risco: '⚠️', financeiro: '💰',
+    agenda: '📅', orcamento: '🧾'
+  },
+  /* Quem manda no título do bloco: a ficha descreve o ato melhor que o
+     lançamento financeiro que saiu dela. */
+  _PESO_ANCORA: { anestesia: 1, pre: 2, consulta: 3, recuperacao: 4, orcamento: 5,
+                  termo: 6, risco: 7, prescricao: 8, documentos: 9, agenda: 10, financeiro: 11 },
+
+  _prontAgrupar(eventos) {
+    const chave = ev => ev.mod + ':' + (ev.it._id || '');
+    const pai = {};
+    eventos.forEach(ev => { pai[chave(ev)] = chave(ev); });
+    const existe = new Set(Object.keys(pai));
+    const raiz = k => { while (pai[k] && pai[k] !== k) k = pai[k]; return k; };
+    const une = (a, b) => { const ra = raiz(a), rb = raiz(b); if (ra !== rb) pai[rb] = ra; };
+
+    eventos.forEach(ev => {
+      const k = chave(ev);
+      const links = ev.it._links || {};
+      Object.keys(links).forEach(campo => {
+        const mod = campo.replace(/_id$/, '');
+        const alvo = mod + ':' + links[campo];
+        if (existe.has(alvo)) une(k, alvo);
+      });
+      /* o financeiro sabe de que documento nasceu, mesmo sem _links */
+      if (ev.mod === 'financeiro' && ev.it._origemId && ev.it._origemTipo) {
+        const alvo = ev.it._origemTipo + ':' + ev.it._origemId;
+        if (existe.has(alvo)) une(k, alvo);
+      }
+    });
+
+    const porRaiz = new Map();
+    eventos.forEach(ev => {
+      const r = raiz(chave(ev));
+      if (!porRaiz.has(r)) porRaiz.set(r, []);
+      porRaiz.get(r).push(ev);
+    });
+    return Array.from(porRaiz.values()).map(itens => {
+      itens.sort((a, b) => (historico._PESO_ANCORA[a.mod] || 99) - (historico._PESO_ANCORA[b.mod] || 99));
+      const ancora = itens[0];
+      /* a data do bloco é a mais antiga: é quando o atendimento aconteceu, não
+         quando o financeiro foi lançado depois */
+      const datas = itens.map(x => x.data).filter(Boolean).sort();
+      return { itens, ancora, data: datas[0] || ancora.data || '' };
+    }).sort((a, b) => (b.data || '0').localeCompare(a.data || '0'));
+  },
+
+  _prontChip(ev) {
+    const e = utils.escapeHTML;
+    const rot = historico.MODS_PRONT[ev.mod] || ev.mod;
+    const icone = historico.MOD_ICONE[ev.mod] || '📄';
+    let extra = '', cor = 'var(--border)';
+    if (ev.mod === 'financeiro') {
+      const ab = historico._emAberto(ev.it);
+      extra = ' · ' + historico._fmtRS(ev.it.valor_previsto);
+      if (ab > 0.005) { extra += ' · em aberto'; cor = '#b3261e'; }
+      else if (historico._ehCortesia(ev.it)) { extra += ' · cortesia'; }
+      else { extra += ' · quitado'; cor = '#0f7b4f'; }
+    } else if (ev.it._finalizado) {
+      extra = ' ✓';
+      cor = '#0f7b4f';
+    } else {
+      extra = ' · rascunho';
+      cor = '#8a6d00';
+    }
+    const anexos = (ev.it._docs && ev.it._docs.length) ? ' 📎' + ev.it._docs.length : '';
+    const det = historico._detalheItem(ev.mod, ev.it) || '';
+    return '<button type="button" class="pront-chip" ' +
+      'style="border-color:' + cor + '" ' +
+      'title="' + utils.escapeAttr(rot + (det ? ' — ' + det.replace(/<[^>]*>/g, '') : '') + ' · toque para abrir e editar') + '" ' +
+      'onclick="historico.abrirItem(\'' + ev.mod + '\',\'' + ev.it._id + '\')">' +
+      icone + ' ' + e(rot) + '<small style="opacity:.8">' + e(extra) + e(anexos) + '</small></button>';
+  },
+
+  _prontLinhaDoTempo(eventos) {
+    const grupos = historico._prontAgrupar(eventos);
+    if (!grupos.length) return '';
+    const e = utils.escapeHTML;
+    let html = '<h3 style="font-size:.85rem;margin:14px 0 6px">🕐 Linha do tempo ' +
+      '<small style="font-weight:400;color:var(--text-mute)">— por atendimento: ficha, SRPA e financeiro do mesmo ato ficam juntos. Toque no que quiser abrir.</small></h3>';
+    let diaAtual = null;
+    grupos.forEach(g => {
+      const dia = g.data || '';
+      if (dia !== diaAtual) {
+        diaAtual = dia;
+        html += '<div style="font-size:.78rem;font-weight:700;color:var(--primary-darker);' +
+          'margin:12px 0 4px;border-bottom:1px solid var(--border);padding-bottom:3px">📅 ' +
+          historico._fmtData(dia) + '</div>';
+      }
+      const titulo = historico._detalheItem(g.ancora.mod, g.ancora.it) || historico.MODS_PRONT[g.ancora.mod];
+      html += '<div class="pront-bloco">' +
+        '<div class="pront-bloco-tit">' + titulo + '</div>' +
+        '<div class="pront-bloco-chips">' + g.itens.map(historico._prontChip).join('') + '</div>' +
+        '</div>';
+    });
+    return html;
   },
 
   async _prontVerDoc(mod, id, i) {
