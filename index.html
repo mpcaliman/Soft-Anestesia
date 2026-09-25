@@ -1145,6 +1145,10 @@ input:read-only, input[readonly] {
   background: var(--surface-alt); color: var(--text-soft);
 }
 textarea { resize: vertical; min-height: 70px; }
+/* Campo de descrição que antes era <input> de uma linha: começa com a altura
+   de um campo comum e cresce com o texto (utils.autoAltura). Sem isto o
+   min-height de 70px o deixaria alto e vazio desde o começo. */
+textarea.campo-desc { min-height: 0; overflow-y: hidden; line-height: 1.45; }
 
 .field.required input, .field.required select, .field.required textarea {
   border-left: 3px solid var(--primary);
@@ -4600,7 +4604,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-25b</b><br>
+    v7.1 · build <b id="build-tag">2026-09-25m</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -5689,10 +5693,10 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
         <div class="hora-grupo-titulo">▶️ Horários de início</div>
         <div class="grid">
           <div class="field col-4"><label>Entrada em sala</label>
-            <div class="input-group"><input type="time" name="hora_sala_entrada" oninput="anestesia.calc.duracao()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_sala_entrada'); anestesia.calc.duracao();">agora</button></div>
+            <div class="input-group"><input type="time" name="hora_sala_entrada" oninput="anestesia.calc.duracao()" onchange="anestesia.eventos.sincronizarHorario('Entrada em sala', this.value)"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_sala_entrada'); anestesia.calc.duracao(); anestesia.eventos.sincronizarHorario('Entrada em sala', this.previousElementSibling.value);">agora</button></div>
           </div>
           <div class="field col-4"><label>Início da anestesia</label>
-            <div class="input-group"><input type="time" name="hora_inicio" oninput="anestesia.calc.duracao()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_inicio'); anestesia.calc.duracao();">agora</button></div>
+            <div class="input-group"><input type="time" name="hora_inicio" oninput="anestesia.calc.duracao()" onchange="anestesia.eventos.sincronizarHorario('Início da anestesia', this.value)"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_inicio'); anestesia.calc.duracao(); anestesia.eventos.sincronizarHorario('Início da anestesia', this.previousElementSibling.value);">agora</button></div>
           </div>
           <div class="field col-4"><label>Início da cirurgia/procedimento</label>
             <div class="input-group"><input type="time" name="hora_cir_inicio" oninput="anestesia.calc.duracao()" onchange="anestesia.eventos.sincronizarHorario('Incisão cirúrgica', this.value)"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_cir_inicio'); anestesia.calc.duracao(); anestesia.eventos.sincronizarHorario('Incisão cirúrgica', this.previousElementSibling.value);">agora</button></div>
@@ -5704,10 +5708,10 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <div class="input-group"><input type="time" name="hora_cir_fim" oninput="anestesia.calc.duracao()" onchange="anestesia.eventos.sincronizarHorario('Fim da cirurgia', this.value)"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_cir_fim'); anestesia.calc.duracao(); anestesia.eventos.sincronizarHorario('Fim da cirurgia', this.previousElementSibling.value);">agora</button></div>
           </div>
           <div class="field col-4"><label>Fim da anestesia</label>
-            <div class="input-group"><input type="time" name="hora_fim" oninput="anestesia.calc.duracao()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_fim'); anestesia.calc.duracao();">agora</button></div>
+            <div class="input-group"><input type="time" name="hora_fim" oninput="anestesia.calc.duracao()" onchange="anestesia.eventos.sincronizarHorario('Fim da anestesia', this.value)"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_fim'); anestesia.calc.duracao(); anestesia.eventos.sincronizarHorario('Fim da anestesia', this.previousElementSibling.value);">agora</button></div>
           </div>
           <div class="field col-4"><label>Saída de sala</label>
-            <div class="input-group"><input type="time" name="hora_sala_saida"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_sala_saida');">agora</button></div>
+            <div class="input-group"><input type="time" name="hora_sala_saida" onchange="anestesia.eventos.sincronizarHorario('Saída de sala', this.value)"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_sala_saida'); anestesia.eventos.sincronizarHorario('Saída de sala', this.previousElementSibling.value);">agora</button></div>
           </div>
         </div>
         <!-- Códigos do MESMO ato, mesma equipe — aqui em cima, junto do procedimento
@@ -5740,23 +5744,23 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
       </div>
       <div class="card-body">
         <div class="grid">
-          <div class="field col-6"><label>Diagnóstico</label><input type="text" name="pre_diagnostico"></div>
+          <div class="field col-6"><label>Diagnóstico</label><textarea class="campo-desc" rows="1" name="pre_diagnostico"></textarea></div>
           <div class="field col-2"><label>ASA</label>
             <select name="pre_asa"><option value="">—</option><option>ASA I</option><option>ASA II</option><option>ASA III</option><option>ASA IV</option><option>ASA V</option><option>ASA VI</option><option>ASA I-E</option><option>ASA II-E</option><option>ASA III-E</option><option>ASA IV-E</option><option>ASA V-E</option></select>
           </div>
           <div class="field col-2"><label>Jejum</label><input type="text" name="pre_jejum"></div>
           <div class="field col-2"><label>Glicemia capilar (mg/dL)</label><input type="number" name="pre_glicemia" min="0"></div>
-          <div class="field col-6"><label>Alergias</label><input type="text" name="pre_alergias">
+          <div class="field col-6"><label>Alergias</label><textarea class="campo-desc" rows="1" name="pre_alergias"></textarea>
             <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.alergias.abrir('#form-anestesia [name=pre_alergias]')">⚠️ Selecionar alergias</button><button type="button" class="btn btn-xs tpl-btn" onclick="window.alergias.negarCampo('#form-anestesia [name=pre_alergias]')">🚫 Nega alergias</button></div>
           </div>
-          <div class="field col-6"><label>Comorbidades</label><input type="text" name="pre_comorbidades">
+          <div class="field col-6"><label>Comorbidades</label><textarea class="campo-desc" rows="1" name="pre_comorbidades"></textarea>
             <div class="comorb-rapidas" data-alvo="#form-anestesia [name=pre_comorbidades]"></div>
             <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.comorbidades.abrir('#form-anestesia [name=pre_comorbidades]')">➕ Mais comorbidades…</button><button type="button" class="btn btn-xs tpl-btn" onclick="window.comorbidades.negar('#form-anestesia [name=pre_comorbidades]')">🚫 Nega comorbidades</button></div>
           </div>
           <div class="field col-4"><label>Avaliação de via aérea</label>
             <select name="pre_via_aerea"><option value="">—</option><option>Mallampati I</option><option>Mallampati II</option><option>Mallampati III</option><option>Mallampati IV</option><option>Via aérea difícil prevista</option><option>Sem alterações</option></select>
           </div>
-          <div class="field col-8"><label>Observações da via aérea</label><input type="text" name="pre_via_aerea_obs"></div>
+          <div class="field col-8"><label>Observações da via aérea</label><textarea class="campo-desc" rows="1" name="pre_via_aerea_obs"></textarea></div>
           <div class="field col-6"><label>Exames relevantes</label><textarea name="pre_exames" rows="2"></textarea></div>
           <div class="field col-6"><label>Medicações em uso</label><textarea name="pre_medicacoes" rows="2"></textarea>
             <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.medicacoes.abrir('#form-anestesia [name=pre_medicacoes]')">💊 Selecionar medicações</button></div>
@@ -6020,6 +6024,15 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <div class="field col-3"><label>Horário</label>
               <div class="input-group"><input type="time" name="via_aerea_hora" onchange="anestesia.eventos.sincronizarDaViaAerea()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','via_aerea_hora'); anestesia.eventos.sincronizarDaViaAerea();">agora</button></div>
             </div>
+            <!-- Paciente que desce da UTI já intubado: o tubo estava lá, e a
+                 ficha tem de dizer isso — mas não pode afirmar que ele fez a
+                 intubação. Marcar aqui tira o evento da linha do tempo. -->
+            <div class="field col-12" style="margin-top:-4px">
+              <label class="check" style="display:inline-flex;font-size:.82rem" title="O dispositivo já estava instalado quando o paciente chegou — não foi procedimento deste ato">
+                <input type="checkbox" name="via_aerea_previo" onchange="anestesia.viaAerea.alternarPrevio()">
+                <span>Via aérea <b>prévia ao ato</b> <small style="color:var(--text-mute)">— paciente já chegou com o dispositivo</small></span>
+              </label>
+            </div>
           </div></div>
           <div class="grid">
           <!-- Derivados automaticamente (não redigitar): tipo de ventilação vem do
@@ -6071,34 +6084,58 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
         <div id="vent-mecanica" style="display:none">
           <h3 style="font-size:.92rem;color:var(--primary-darker);margin:14px 0 8px">🫁 Ventilação mecânica</h3>
           <div class="grid">
-            <div class="field col-3"><label>Modo ventilatório</label>
+            <div class="field col-3"><label>Modo ventilatório <small style="color:var(--text-mute);font-weight:400">— o nome muda com a marca do aparelho</small></label>
+              <!-- O texto da opção é o que fica GRAVADO na ficha: os que já
+                   existiam ficam escritos igual, senão as fichas antigas
+                   abririam com o campo em branco. Quem diz quais parâmetros
+                   aparecem é o data-vkey, não o texto — "PCV-VG" começa com
+                   "PCV" e, sem a chave, herdaria os campos da pressão
+                   controlada e perderia o volume-alvo, que é justamente o que
+                   o modo tem de diferente. -->
               <select name="vent_modo" onchange="anestesia.vent.mostrarCamposModo()">
                 <option value="">—</option>
-                <option>VCV (volume controlado)</option>
-                <option>PCV (pressão controlada)</option>
-                <option>PSV (pressão de suporte)</option>
-                <option>SIMV</option>
-                <option>PRVC</option>
-                <option>APRV</option>
-                <option>BIPAP / Bi-Vent</option>
-                <option>VAPS</option>
+                <option data-vkey="MANUAL">Manual / balão</option>
+                <option data-vkey="VCV">VCV (volume controlado)</option>
+                <option data-vkey="PCV">PCV (pressão controlada)</option>
+                <option data-vkey="PCVVG" title="Entrega a pressão, ajustando-a respiração a respiração para garantir o volume corrente alvo. Nos aparelhos aparece como PCV-VG (GE), AutoFlow (Dräger), APV (Hamilton), VC+ (Puritan Bennett) ou PRVC (Maquet).">PCV-VG (pressão controlada com volume garantido)</option>
+                <option data-vkey="PSV">PSV (pressão de suporte)</option>
+                <option data-vkey="SIMV">SIMV</option>
+                <option data-vkey="SIMVVC">SIMV-VC (ciclos a volume)</option>
+                <option data-vkey="SIMVPC">SIMV-PC (ciclos a pressão)</option>
+                <option data-vkey="PRVC" title="Mesma família do PCV-VG: pressão regulada com volume controlado.">PRVC</option>
+                <option data-vkey="VAPS" title="Pressão de suporte com volume assegurado.">VAPS</option>
+                <option data-vkey="CPAP">CPAP</option>
+                <option data-vkey="CPAPPSV">CPAP + PSV</option>
+                <option data-vkey="APRV">APRV</option>
+                <option data-vkey="BIPAP">BIPAP / Bi-Vent</option>
               </select>
+              <small style="color:var(--text-mute);display:block;margin-top:3px;line-height:1.3">Volume garantido a pressão: <b>PCV-VG</b> (GE) = <b>AutoFlow</b> (Dräger) = <b>APV</b> (Hamilton) = <b>VC+</b> (PB) = <b>PRVC</b> (Maquet).</small>
             </div>
-            <div class="field col-2" data-vmodo="VCV SIMV PRVC VAPS"><label>VC (mL)</label><input type="number" name="vent_vc" min="0"></div>
-            <div class="field col-2" data-vmodo="PCV BIPAP APRV SIMV"><label>P insp (cmH₂O)</label><input type="number" name="vent_pinsp" min="0"></div>
-            <div class="field col-2" data-vmodo="PSV SIMV"><label>Press. suporte (cmH₂O)</label><input type="number" name="vent_ps" min="0"></div>
+            <div class="field col-2" data-vmodo="VCV SIMV SIMVVC PRVC VAPS PCVVG"><label>VC (mL) <small style="color:var(--text-mute);font-weight:400" title="Nos modos com volume garantido este é o volume-alvo: o aparelho ajusta a pressão para alcançá-lo.">— alvo nos modos garantidos</small></label><input type="number" name="vent_vc" min="0"></div>
+            <div class="field col-2" data-vmodo="PCV BIPAP APRV SIMV SIMVPC PCVVG"><label>P insp (cmH₂O) <small style="color:var(--text-mute);font-weight:400" title="No PCV-VG e no PRVC é o limite de pressão que o aparelho não ultrapassa ao perseguir o volume-alvo.">— limite nos garantidos</small></label><input type="number" name="vent_pinsp" min="0"></div>
+            <div class="field col-2" data-vmodo="PSV SIMV SIMVVC SIMVPC CPAPPSV"><label>Press. suporte (cmH₂O)</label><input type="number" name="vent_ps" min="0"></div>
             <div class="field col-2"><label>FR prog. (irpm) <small style="color:var(--text-mute);font-weight:400">— do ventilador</small></label><input type="number" name="vent_fr" min="0" title="Frequência programada no ventilador (diferente da FR medida, que fica nos sinais vitais)."></div>
             <div class="field col-2"><label>PEEP (cmH₂O)</label><input type="number" name="vent_peep" min="0" step="0.5"></div>
             <div class="field col-2"><label>FiO₂ (%)</label><input type="number" name="vent_fio2" min="21" max="100" oninput="anestesia.vent.sincronizarFiO2(this.value)"></div>
             <div class="field col-2"><label>P pico (cmH₂O)</label><input type="number" name="vent_ppico" min="0"></div>
-            <div class="field col-2" data-vmodo="VCV SIMV PRVC VAPS"><label>P platô (cmH₂O)</label><input type="number" name="vent_pplato" min="0" oninput="anestesia.vent.calcDriving()"></div>
-            <div class="field col-2" data-vmodo="VCV SIMV PRVC VAPS"><label>Driving P. (cmH₂O)</label><input type="number" name="vent_driving" readonly placeholder="auto"></div>
-            <div class="field col-2" data-vmodo="VCV PRVC VAPS"><label>Pausa insp. (%)</label><input type="number" name="vent_pausa" min="0" step="1"></div>
-            <div class="field col-2" data-vmodo="PCV PRVC"><label>T insp. (s)</label><input type="number" name="vent_tinsp" min="0" step="0.1"></div>
-            <div class="field col-2" data-vmodo="PSV SIMV PCV"><label>Trigger</label><input type="text" name="vent_trigger" placeholder="fluxo/pressão"></div>
+            <div class="field col-2" data-vmodo="VCV SIMV SIMVVC PRVC VAPS PCVVG"><label>P platô (cmH₂O)</label><input type="number" name="vent_pplato" min="0" oninput="anestesia.vent.calcDriving()"></div>
+            <div class="field col-2" data-vmodo="VCV SIMV SIMVVC PRVC VAPS PCVVG"><label>Driving P. (cmH₂O)</label><input type="number" name="vent_driving" readonly placeholder="auto"></div>
+            <div class="field col-2" data-vmodo="VCV PRVC VAPS PCVVG"><label>Pausa insp. (%)</label><input type="number" name="vent_pausa" min="0" step="1"></div>
+            <div class="field col-2" data-vmodo="PCV PRVC PCVVG SIMVPC"><label>T insp. (s)</label><input type="number" name="vent_tinsp" min="0" step="0.1"></div>
+            <div class="field col-2" data-vmodo="PSV SIMV SIMVVC SIMVPC PCV PCVVG CPAPPSV"><label>Trigger</label><input type="text" name="vent_trigger" placeholder="fluxo/pressão"></div>
             <div class="field col-2"><label>Relação I:E</label><input type="text" name="vent_ie" placeholder="1:2"></div>
             <div class="field col-2"><label>VM (L/min)</label><input type="number" name="vent_vm" step="0.1"></div>
             <div class="field col-2"><label>EtCO₂ (mmHg) <small style="color:var(--text-mute);font-weight:400">— dos sinais vitais</small></label><input type="number" name="vent_etco2" readonly ondblclick="this.readOnly=false" title="Último EtCO₂ registrado nos sinais vitais. Dê 2 toques para editar manualmente." style="background:var(--surface-alt)"></div>
+            <!-- A ventilação tem começo e fim, e é isso que a linha do tempo
+                 precisa. Antes o evento era carimbado com a hora do clique no
+                 "Mecânica" — que raramente é a hora em que a ventilação
+                 começou. Agora o horário digitado aqui manda no evento. -->
+            <div class="field col-2"><label>Início da VM</label>
+              <div class="input-group"><input type="time" name="vent_hora_ini" onchange="anestesia.vent.sincronizarHorarios()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','vent_hora_ini'); anestesia.vent.sincronizarHorarios();">agora</button></div>
+            </div>
+            <div class="field col-2"><label>Fim da VM</label>
+              <div class="input-group"><input type="time" name="vent_hora_fim" onchange="anestesia.vent.sincronizarHorarios()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','vent_hora_fim'); anestesia.vent.sincronizarHorarios();">agora</button></div>
+            </div>
             <div class="field col-3"><label>Complacência (mL/cmH₂O)</label><input type="number" name="vent_compl" step="0.1"></div>
             <div class="field col-9"><label>Gasometria arterial</label><input type="text" name="vent_gaso" placeholder="pH / pCO₂ / pO₂ / HCO₃ / BE / Sat"></div>
           </div>
@@ -6561,6 +6598,22 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
           <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Fim da cirurgia'})">+ Fim cirurgia</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Extubação'})">+ Extubação</button>
         </div>
+        <!-- EXAMES — mesma linha do tempo, mesma tabela. O exame é um evento
+             como outro qualquer: tem hora e entra na ordem em que aconteceu.
+             O que ele tem de diferente são os VALORES (uma gasometria tem
+             treze números), e esses ficam numa janela atrás do botão 🧪 da
+             própria linha, indo para os detalhes já escritos com as unidades. -->
+        <div class="quick-actions">
+          <span class="qa-label">🧪 Exames</span>
+          <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.exames.add('Gasometria arterial')">+ Gasometria arterial</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add('Gasometria venosa')">+ Gasometria venosa</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add('Hemograma')">+ Hemograma</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add('Glicemia')">+ Glicemia</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add('Eletrólitos')">+ Eletrólitos</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add('Coagulograma')">+ Coagulograma</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add('Lactato')">+ Lactato</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.exames.abrirCatalogo()" title="Todos os exames, inclusive troponina, tromboelastografia e outros">＋ outros exames…</button>
+        </div>
         <div class="dyn-table-wrap">
           <table class="dyn" id="tab-eventos">
             <thead><tr>
@@ -6877,6 +6930,8 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
                 <thead><tr>
                   <th style="width:90px">Horário</th>
                   <th style="width:130px">Volume no intervalo (mL)</th>
+                  <th style="width:90px" title="Soma de tudo o que saiu até este registro">Acumulado</th>
+                  <th style="width:120px" title="Volume deste intervalo ÷ peso ÷ tempo desde o registro anterior">Ritmo</th>
                   <th>Observação</th>
                   <th class="col-rm">×</th>
                 </tr></thead>
@@ -6891,8 +6946,9 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
           <!-- resultado -->
           <div class="grid" style="margin-top:8px">
             <div class="field col-3"><label>Volume acumulado (mL)</label><input type="text" id="diurese-acumulado" readonly></div>
-            <div class="field col-3"><label>Tempo considerado</label><input type="text" id="diurese-tempo" readonly></div>
-            <div class="field col-6"><label>Débito urinário</label><input type="text" id="diurese-resultado" readonly style="font-weight:700"></div>
+            <div class="field col-3"><label>Intervalo contado <small style="color:var(--text-mute);font-weight:400">— início → fim</small></label><input type="text" id="diurese-janela" readonly title="De quando até quando o volume acima foi medido"></div>
+            <div class="field col-2"><label>Tempo</label><input type="text" id="diurese-tempo" readonly></div>
+            <div class="field col-4"><label>Débito urinário</label><input type="text" id="diurese-resultado" readonly style="font-weight:700"></div>
           </div>
           <p id="diurese-alerta" style="font-size:.78rem;margin:2px 2px 0"></p>
         </div>
@@ -8436,6 +8492,10 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
               <div style="padding-top:6px"><label class="check" style="display:inline-flex"><input type="checkbox" name="pago"> <span>Pago</span></label></div>
             </div>
             <div class="field col-3"><label>Data do pagamento</label><input type="date" name="data_pagamento"></div>
+            <div class="field col-3"><label>Meio de pagamento</label>
+              <select name="forma_pagamento"><option value="">—</option><option>PIX</option><option>Dinheiro</option><option>Cartão de débito</option><option>Cartão de crédito</option><option>Transferência / TED</option><option>Boleto</option><option>Cheque</option><option>Outro</option></select>
+            </div>
+            <div class="field col-3"><label>Conta que recebeu</label><input type="text" name="conta_recebeu" placeholder="ex.: Conta PJ Itaú, Caixa da clínica"></div>
             <div class="field col-2"><label>Valor pago (R$)</label><input type="number" name="valor_pago" step="0.01" min="0"></div>
             <div class="field col-2"><label>Data recebimento</label><input type="date" name="data_recebimento"></div>
 
@@ -10634,6 +10694,63 @@ const utils = {
     });
   },
   /* Limpa um <form> */
+  /* ---- CAIXA DE TEXTO QUE CRESCE COM O TEXTO ------------------------------
+     Um campo de descrição com altura fixa esconde o que foi escrito: o
+     diagnóstico inteiro estava lá, mas só se lia o pedaço que coubesse na
+     linha. Aqui a caixa acompanha o conteúdo, até um teto (60% da altura da
+     tela) — passando disso ela rola, senão um texto muito longo empurraria o
+     resto da ficha para fora do alcance.
+     A medida só vale com o elemento VISÍVEL: escondido, scrollHeight é 0 e a
+     caixa colapsaria. Por isso a varredura roda ao abrir o módulo e ao abrir
+     o card, não uma vez só no carregamento. */
+  autoAltura(el) {
+    if (!el || el.tagName !== 'TEXTAREA') return;
+    if (!el.offsetParent && el.offsetHeight === 0) return;   /* escondido: mede errado */
+    const teto = Math.max(140, Math.round(window.innerHeight * 0.6));
+    el.style.height = 'auto';
+    const precisa = el.scrollHeight + 2;                      /* +2: bordas */
+    el.style.height = Math.min(precisa, teto) + 'px';
+    el.style.overflowY = precisa > teto ? 'auto' : 'hidden';
+  },
+  autoAlturaTodos(raiz) {
+    const base = raiz || document;
+    if (!base.querySelectorAll) return;
+    base.querySelectorAll('textarea').forEach(el => utils.autoAltura(el));
+  },
+
+  /* ---- CORREÇÃO ORTOGRÁFICA -----------------------------------------------
+     Quem corrige é o navegador, com o dicionário que o usuário tem instalado —
+     não há dicionário embutido aqui. O que o app faz é dizer ONDE checar e em
+     QUE idioma: lang="pt-BR" no campo escolhe o dicionário português mesmo
+     quando o navegador está em outro idioma.
+     E, sobretudo, diz onde NÃO checar. Sublinhar em vermelho um CPF, um código
+     CBHPM ou uma carteirinha é ruído, e ruído constante faz a pessoa ignorar
+     também os sublinhados que importam. */
+  _SEM_CORRETOR: /cpf|cnpj|^rg$|cep|crm|codigo|código|carteirinha|senha|usuario|usuário|email|e_mail|telefone|celular|whatsapp|conta|agencia|agência|_id$|^id$|matricula|matrícula|autorizacao|autorização|guia|nota|cbhpm|tuss/i,
+  _corrigeAqui(el) {
+    const tipo = (el.getAttribute('type') || 'text').toLowerCase();
+    if (['number', 'date', 'time', 'email', 'tel', 'password', 'url', 'hidden', 'checkbox', 'radio', 'file', 'color', 'range'].indexOf(tipo) >= 0) return false;
+    if (el.readOnly || el.disabled) return false;
+    const nome = (el.getAttribute('name') || el.id || '') + ' ' + (el.getAttribute('data-campo') || '');
+    return !utils._SEM_CORRETOR.test(nome);
+  },
+  corretorTodos(raiz) {
+    const base = raiz || document;
+    if (!base.querySelectorAll) return 0;
+    let n = 0;
+    base.querySelectorAll('textarea, input[type="text"], input[type="search"], input:not([type])').forEach(el => {
+      /* o que já foi marcado à mão manda: os campos de login pedem
+         spellcheck="false" no próprio HTML e não podem ser revirados */
+      if (el.dataset.corretor === 'manual') return;
+      if (el.hasAttribute('spellcheck') && el.dataset.corretor !== '1') { el.dataset.corretor = 'manual'; return; }
+      const on = utils._corrigeAqui(el);
+      el.setAttribute('spellcheck', on ? 'true' : 'false');
+      if (on) el.setAttribute('lang', 'pt-BR');
+      el.dataset.corretor = '1';
+      n++;
+    });
+    return n;
+  },
   clearForm(formId) {
     const f = document.getElementById(formId);
     if (!f) return;
@@ -13525,6 +13642,12 @@ const ui = {
   },
   toggleCard(headerEl) {
     headerEl.parentElement.classList.toggle('collapsed');
+    /* card recolhido é display:none, e aí a caixa de texto não tem como ser
+       medida. A hora de ajustar é esta, quando ele acaba de abrir. */
+    if (!headerEl.parentElement.classList.contains('collapsed')) {
+      try { utils.autoAlturaTodos(headerEl.parentElement); } catch (e) {}
+      try { utils.corretorTodos(headerEl.parentElement); } catch (e) {}
+    }
   },
   /* Expande ou recolhe todos os cards de um módulo */
   expandirTodos(modName) {
@@ -13532,6 +13655,7 @@ const ui = {
     if (!mod) return;
     mod.querySelectorAll('.card').forEach(c => c.classList.remove('collapsed'));
     ui._atualizarBotaoExpandir(modName, false);
+    try { utils.autoAlturaTodos(mod); } catch (e) {}
   },
   recolherTodos(modName) {
     const mod = document.getElementById('module-' + modName);
@@ -13737,6 +13861,11 @@ const ui = {
       const target = document.getElementById('module-' + modName);
       if (!target) { ui.navegar('dashboard'); return; }
       target.classList.add('active');
+      /* módulo recém-exibido: agora as caixas podem ser medidas */
+      setTimeout(() => {
+        try { utils.autoAlturaTodos(target); } catch (e) {}
+        try { utils.corretorTodos(target); } catch (e) {}
+      }, 0);
       /* Primeira abertura: começa com os campos recolhidos (módulos de formulário) */
       if (['pre','consulta','anestesia','recuperacao','termo','prescricao','risco'].includes(modName)) {
         ui._recolherInicial(modName);
@@ -15131,6 +15260,7 @@ const pre = {
       const fr = fin.fromDoc('pre', saved);
       if (fr && fr.isNew) {
         ui.mostrarBanner('banner-pre', '💰 Lançamento financeiro criado automaticamente. Acesse o módulo Financeiro para complementar valores.', 'success');
+        try { fin.perguntarPagamento(fr.item); } catch (e) {}
       }
     }
     /* atualiza id hidden */
@@ -15933,6 +16063,7 @@ const consulta = {
       const fr = fin.fromDoc('consulta', saved);
       if (fr && fr.isNew) {
         ui.mostrarBanner('banner-consulta', '💰 Lançamento financeiro criado automaticamente.', 'success');
+        try { fin.perguntarPagamento(fr.item); } catch (e) {}
       }
     }
     if (!idEl) {
@@ -25772,7 +25903,7 @@ const histAutocomplete = {
      (cirurgião, hospital, convênio, procedimento e profissional já são tratados por
      autocomplete.ligarTudo, que agora também mescla histórico). Aqui ficam os demais
      campos de texto livre que se repetem: sala, técnica, acompanhante, plano, etc. */
-  CAMPOS: ['sala', 'tecnica', 'acompanhante', 'plano', 'equipe', 'clinica'],
+  CAMPOS: ['sala', 'tecnica', 'acompanhante', 'plano', 'equipe', 'clinica', 'conta_recebeu'],
   _MODULOS: ['pre', 'consulta', 'anestesia', 'recuperacao', 'termo', 'prescricao', 'risco', 'financeiro', 'orcamento', 'agenda', 'pacientes'],
 
   /* Reúne valores únicos já usados naquele campo, em todos os registros salvos */
@@ -29785,24 +29916,44 @@ const anestesia = {
       markDirty();
     },
     /* Marca início/fim da ventilação mecânica como evento — sem duplicar e sem
-       inventar: só marca o fim se houve início. */
+       inventar: só marca o fim se houve início.
+       A hora é a que estiver digitada no card; sem ela, a de agora — e essa
+       volta escrita no campo, para o card e a linha do tempo não discordarem. */
     _marcarPeriodo(modo) {
       const ev = anestesia.eventos;
       if (!ev || !ev.existeEvento) return;
+      const f = document.getElementById('form-anestesia');
+      const campo = n => f && f.querySelector('[name="' + n + '"]');
+      const marcar = (tipo, nomeCampo) => {
+        const el = campo(nomeCampo);
+        const hora = (el && el.value) || utils.horaAtual();
+        anestesia.graficoUI._contexto = 'anestesia';
+        const tr = ev.add({ tipo, hora, obs: ev.descricaoPara(tipo), auto: true });
+        /* a hora que o evento REALMENTE ficou: add() a ajusta aos limites da
+           ficha (clampHora), então escrever de volta a que eu pedi deixaria o
+           card dizendo uma coisa e a linha do tempo outra */
+        const real = (tr && (tr.querySelector('[name="evt_hora[]"]') || {}).value) || hora;
+        if (el && !el.value) el.value = real;
+      };
       const temInicio = ev.existeEvento('Início da ventilação mecânica');
       if (modo === 'mecanica') {
         if (temInicio) return;
-        anestesia.graficoUI._contexto = 'anestesia';
-        ev.add({ tipo: 'Início da ventilação mecânica', hora: utils.horaAtual(),
-                 obs: ev.descricaoPara('Início da ventilação mecânica'), auto: true });
+        marcar('Início da ventilação mecânica', 'vent_hora_ini');
         try { toast('🫁 Início da ventilação mecânica marcado na linha do tempo'); } catch (e) {}
       } else if (temInicio && !ev.existeEvento('Fim da ventilação mecânica')) {
-        anestesia.graficoUI._contexto = 'anestesia';
-        ev.add({ tipo: 'Fim da ventilação mecânica', hora: utils.horaAtual(),
-                 obs: ev.descricaoPara('Fim da ventilação mecânica'), auto: true });
+        marcar('Fim da ventilação mecânica', 'vent_hora_fim');
         try { toast('🫁 Fim da ventilação mecânica marcado na linha do tempo'); } catch (e) {}
       }
       try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
+    },
+    /* Digitou o horário no card: o evento correspondente passa a ter essa hora
+       (e nasce, se ainda não existir). Uma via só — o que se corrige na linha
+       do tempo não volta reescrevendo o card, que é onde ele decidiu. */
+    sincronizarHorarios() {
+      const f = document.getElementById('form-anestesia'); if (!f) return;
+      const v = n => (f.querySelector('[name="' + n + '"]') || {}).value || '';
+      anestesia.eventos.sincronizarHorario('Início da ventilação mecânica', v('vent_hora_ini'));
+      anestesia.eventos.sincronizarHorario('Fim da ventilação mecânica', v('vent_hora_fim'));
     },
     /* FiO₂ é uma só: mantém os três campos (espontânea, mecânica, gases frescos)
        em sincronia — informa-se uma vez. */
@@ -29853,7 +30004,13 @@ const anestesia = {
       const f = document.getElementById('form-anestesia'); if (!f) return;
       const sel = f.querySelector('[name="vent_modo"]');
       const modo = sel ? sel.value : '';
-      const key = (modo.match(/^([A-Za-z]+)/) || [, ''])[1].toUpperCase();
+      /* a chave vem da opção escolhida. Deduzi-la do texto ("as primeiras
+         letras") daria PCV para "PCV-VG", e o modo perderia o volume-alvo —
+         que é o que ele tem de diferente do PCV. O texto só entra como recurso
+         para ficha gravada com um modo que não está mais na lista. */
+      const opt = sel && sel.selectedOptions && sel.selectedOptions[0];
+      const key = (opt && opt.dataset.vkey)
+        || (modo.match(/^([A-Za-z]+)/) || [, ''])[1].toUpperCase();
       document.querySelectorAll('#vent-mecanica [data-vmodo]').forEach(el => {
         if (!modo) { el.style.display = ''; return; }   /* sem modo: mostra tudo */
         const modos = el.getAttribute('data-vmodo').toUpperCase().split(/\s+/);
@@ -29939,7 +30096,9 @@ const anestesia = {
       if (!document.getElementById('vent-modos-datalist')) {
         const dl = document.createElement('datalist');
         dl.id = 'vent-modos-datalist';
-        ['VCV (volume controlado)','PCV (pressão controlada)','PSV (pressão de suporte)','SIMV','PRVC','APRV','BIPAP / Bi-Vent','VAPS',
+        ['VCV (volume controlado)','PCV (pressão controlada)','PCV-VG (pressão controlada com volume garantido)',
+         'PSV (pressão de suporte)','SIMV','SIMV-VC (ciclos a volume)','SIMV-PC (ciclos a pressão)',
+         'PRVC','APRV','BIPAP / Bi-Vent','VAPS','Manual / balão',
          'Manobra de recrutamento','Ventilação monopulmonar','Espontânea','CPAP','BiPAP / VNI','Alto fluxo (HFNC)',
          'Pré-oxigenação','Recrutamento alveolar'].forEach(m => {
           dl.innerHTML += `<option value="${m}">`;
@@ -29993,6 +30152,12 @@ const anestesia = {
           driving: v('vent_driving'), ie: v('vent_ie'),
           vm: v('vent_vm'), etco2: v('vent_etco2'),
           trigger: v('vent_trigger'),
+          /* estes quatro estavam na tela desde sempre e não eram gravados:
+             preenchidos, sumiam no salvar. No PCV-VG a P insp é o limite de
+             pressão do modo — sem ela o registro fica pela metade. */
+          pinsp: v('vent_pinsp'), ps: v('vent_ps'),
+          pausa: v('vent_pausa'), tinsp: v('vent_tinsp'),
+          hora_ini: v('vent_hora_ini'), hora_fim: v('vent_hora_fim'),
           complacencia: v('vent_compl'), gaso: v('vent_gaso')
         },
         recursos: recursos,
@@ -30017,6 +30182,9 @@ const anestesia = {
       set('vent_ppico', m.ppico); set('vent_pplato', m.pplato);
       set('vent_driving', m.driving); set('vent_ie', m.ie);
       set('vent_trigger', m.trigger);
+      set('vent_pinsp', m.pinsp); set('vent_ps', m.ps);
+      set('vent_pausa', m.pausa); set('vent_tinsp', m.tinsp);
+      set('vent_hora_ini', m.hora_ini); set('vent_hora_fim', m.hora_fim);
       set('vent_vm', m.vm); set('vent_etco2', m.etco2);
       set('vent_compl', m.complacencia); set('vent_gaso', m.gaso);
       f.querySelectorAll('[name="vent_recursos[]"]').forEach(el => {
@@ -30064,20 +30232,24 @@ const anestesia = {
           { n: 'bnm', l: 'Bloqueador neuromuscular', t: 'text', col: 6, p: 'Rocurônio 0,6 mg/kg' },
           { n: 'reversao', l: 'Reversão do bloqueio neuromuscular', t: 'select', col: 6,
             o: ['Não utilizada', 'Neostigmina + atropina', 'Sugamadex', 'Reversão espontânea'] },
+          /* CAM é a medida de profundidade do dia a dia na anestesia inalatória
+             e na balanceada — vem do analisador de gases, que já está na lista
+             de monitores do card 7 e tem coluna na grade de sinais vitais.
+             Faltava justamente aqui, onde se descreve a técnica. */
           { n: 'profundidade', l: 'Monitorização da profundidade', t: 'select', col: 6,
-            o: ['Clínica', 'BIS', 'Entropia', 'TOF (bloqueio neuromuscular)'] },
+            o: ['Clínica', 'CAM (analisador de gases)', 'BIS', 'Entropia', 'TOF (bloqueio neuromuscular)'] },
           { n: 'obs', l: 'Observações', t: 'textarea', col: 12 }
         ],
         texto(d) {
           const p = [];
-          if (d.inducao) p.push('Indução ' + d.inducao.toLowerCase() + (d.agente_ind ? ' com ' + d.agente_ind : ''));
+          if (d.inducao) p.push('Indução ' + anestesia.tecnicaDet._min(d.inducao) + (d.agente_ind ? ' com ' + d.agente_ind : ''));
           else if (d.agente_ind) p.push('Indução com ' + d.agente_ind);
           if (d.opioide) p.push('opioide: ' + d.opioide);
           if (d.bnm) p.push('bloqueio neuromuscular: ' + d.bnm);
-          if (d.manutencao) p.push('manutenção ' + d.manutencao.toLowerCase() + (d.agente_man ? ' com ' + d.agente_man : ''));
+          if (d.manutencao) p.push('manutenção ' + anestesia.tecnicaDet._min(d.manutencao) + (d.agente_man ? ' com ' + d.agente_man : ''));
           else if (d.agente_man) p.push('manutenção com ' + d.agente_man);
-          if (d.profundidade) p.push('monitorização da profundidade por ' + d.profundidade.toLowerCase());
-          if (d.reversao && d.reversao !== 'Não utilizada') p.push('reversão com ' + d.reversao.toLowerCase());
+          if (d.profundidade) p.push('monitorização da profundidade por ' + anestesia.tecnicaDet._min(d.profundidade));
+          if (d.reversao && d.reversao !== 'Não utilizada') p.push('reversão com ' + anestesia.tecnicaDet._min(d.reversao));
           return anestesia.tecnicaDet._frase('Anestesia geral', p, d.obs);
         }
       },
@@ -30094,10 +30266,10 @@ const anestesia = {
         ],
         texto(d) {
           const p = [];
-          if (d.nivel) p.push('sedação ' + d.nivel.toLowerCase());
+          if (d.nivel) p.push('sedação ' + anestesia.tecnicaDet._min(d.nivel));
           if (d.agentes) p.push('com ' + d.agentes);
-          if (d.via_aerea) p.push('via aérea ' + d.via_aerea.toLowerCase());
-          if (d.oxigenio) p.push('oxigênio por ' + d.oxigenio.toLowerCase());
+          if (d.via_aerea) p.push('via aérea ' + anestesia.tecnicaDet._min(d.via_aerea));
+          if (d.oxigenio) p.push('oxigênio por ' + anestesia.tecnicaDet._min(d.oxigenio));
           if (d.escala) p.push('nível atingido: ' + d.escala);
           return anestesia.tecnicaDet._frase('Sedação', p, d.obs);
         }
@@ -30115,7 +30287,7 @@ const anestesia = {
           const p = [];
           if (d.agente) p.push('infiltração com ' + d.agente + (d.volume ? ', ' + d.volume : ''));
           if (d.quem) p.push('realizada pelo ' + d.quem.toLowerCase());
-          if (d.complemento && d.complemento !== 'Nenhuma') p.push('complementada por ' + d.complemento.toLowerCase());
+          if (d.complemento && d.complemento !== 'Nenhuma') p.push('complementada por ' + anestesia.tecnicaDet._min(d.complemento));
           return anestesia.tecnicaDet._frase('Anestesia local assistida', p, d.obs);
         }
       },
@@ -30131,7 +30303,7 @@ const anestesia = {
           const p = [];
           if (d.motivo) p.push(d.motivo);
           if (d.monitor) p.push('monitorização: ' + d.monitor);
-          if (d.suporte && d.suporte !== 'Nenhum') p.push('suporte: ' + d.suporte.toLowerCase());
+          if (d.suporte && d.suporte !== 'Nenhum') p.push('suporte: ' + anestesia.tecnicaDet._min(d.suporte));
           return anestesia.tecnicaDet._frase('Monitoração e vigilância clínica', p, d.obs);
         }
       },
@@ -30143,6 +30315,15 @@ const anestesia = {
         ],
         texto(d) { return anestesia.tecnicaDet._frase(d.nome || 'Outra técnica', [], d.obs); }
       }
+    },
+
+    /* Minúscula no meio da frase, SEM desmanchar sigla: "BIS" continua BIS,
+       "CAM (analisador de gases)" continua CAM, "Venosa total (TIVA)" vira
+       "venosa total (TIVA)". A regra é simples — palavra que já tem alguma
+       letra minúscula é palavra comum e desce; palavra sem nenhuma é sigla e
+       fica como está. Antes saía "monitorização da profundidade por bis". */
+    _min(txt) {
+      return String(txt || '').replace(/\S+/g, w => /[a-zà-ÿ]/.test(w) ? w.toLowerCase() : w);
     },
 
     /* Uma frase legível a partir das partes preenchidas. Campo em branco não
@@ -30199,9 +30380,20 @@ const anestesia = {
         return '<div class="field col-' + f.col + '"><label>' + utils.escapeHTML(f.l) + '</label>' +
           '<input type="text" name="td_' + f.n + '" value="' + utils.escapeAttr(val) + '" placeholder="' + utils.escapeAttr(f.p || '') + '"></div>';
       };
+      /* O HORÁRIO não é um campo da técnica: é o mesmo para todas, e o que ele
+         faz é mandar no evento da linha do tempo. Marcar a técnica carimbava o
+         evento com a hora do clique, e não havia onde corrigir sem ir na
+         tabela. Já vem preenchido com a hora que o evento tem hoje. */
+      const evtTipo = anestesia.eventos.TIPO_EVENTO[tipo];
+      anestesia.graficoUI._contexto = 'anestesia';
+      const horaEvt = d.hora || (evtTipo ? anestesia.eventos.horaDe(evtTipo) : '') || '';
+      const campoHora = evtTipo
+        ? '<div class="field col-3"><label>Horário <small style="color:var(--text-mute);font-weight:400">— vai para o evento</small></label>' +
+          '<input type="time" name="td_hora" value="' + utils.escapeAttr(horaEvt) + '"></div>'
+        : '';
       const corpo =
         '<p style="font-size:.82rem;color:var(--text-mute);margin:0 0 10px">O que você preencher aqui fica gravado na ficha e vira a descrição desta técnica — no texto da técnica realizada e no evento da linha do tempo. Tudo é opcional.</p>' +
-        '<form id="form-tecdet" onsubmit="return false"><div class="grid">' + esp.campos.map(campo).join('') + '</div></form>';
+        '<form id="form-tecdet" onsubmit="return false"><div class="grid">' + campoHora + esp.campos.map(campo).join('') + '</div></form>';
       modal.open(esp.titulo, corpo,
         '<button class="btn" onclick="modal.close()">Cancelar</button>' +
         '<button class="btn btn-primary" onclick="anestesia.tecnicaDet.salvar(\'' + utils.escapeAttr(tipo) + '\')">Salvar detalhes</button>');
@@ -30325,10 +30517,18 @@ const anestesia = {
         const el = f.querySelector('[name="td_' + c.n + '"]');
         if (el && el.value.trim()) d[c.n] = el.value.trim();
       });
+      const hEl = f.querySelector('[name="td_hora"]');
+      const hora = hEl ? String(hEl.value || '').trim() : '';
+      if (hora) d.hora = hora;
       if (Object.keys(d).length) anestesia.tecnicaDet._dados[tipo] = d;
       else delete anestesia.tecnicaDet._dados[tipo];
       modal.close();
       anestesia.tecnicaDet.aplicar(tipo);
+      /* o horário digitado manda no evento — era isto que não saía do card */
+      const evtTipo = anestesia.eventos.TIPO_EVENTO[tipo];
+      if (hora && evtTipo) {
+        try { anestesia.eventos.sincronizarHorario(evtTipo, hora); } catch (e) {}
+      }
       try { markDirty(); } catch (e) {}
       try { toast('Detalhes de "' + tipo + '" gravados na ficha.'); } catch (e) {}
     },
@@ -30694,6 +30894,41 @@ const anestesia = {
       const el = f && f.querySelector('[name="via_aerea_detalhe"]');
       if (el) el.dataset.manual = '1';
     },
+    /* Via aérea prévia: o paciente chegou com o dispositivo. Ele fica na ficha
+       (a ventilação e o manejo dependem de saber que existe), mas sai da linha
+       do tempo — intubação que ele não fez não é procedimento dele. */
+    ehPrevio() {
+      const f = anestesia.viaAerea._f();
+      const el = f && f.querySelector('[name="via_aerea_previo"]');
+      return !!(el && el.checked);
+    },
+    alternarPrevio() {
+      anestesia.graficoUI._contexto = 'anestesia';
+      const via = anestesia.viaAerea._v('via_aerea_uso');
+      const tipoEvt = anestesia.eventos.VIA_AEREA_EVENTO[via];
+      if (anestesia.viaAerea.ehPrevio()) {
+        let n = 0;
+        if (tipoEvt) {
+          const body = document.getElementById(anestesia.graficoUI._ctxIds().eventosBody);
+          if (body) {
+            Array.from(body.querySelectorAll('tr')).forEach(tr => {
+              const t = (tr.querySelector('[name="evt_tipo[]"]') || {}).value || '';
+              /* só o que o sistema escreveu: o que ele digitou à mão é dele */
+              if (t === tipoEvt && tr.dataset.auto === '1') { tr.remove(); n++; }
+            });
+          }
+        }
+        toast(n ? 'Via aérea marcada como prévia — o evento saiu da linha do tempo.'
+                : 'Via aérea marcada como prévia ao ato.');
+        try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
+      } else if (tipoEvt && !anestesia.eventos.existeEvento(tipoEvt)) {
+        anestesia.eventos.add({ tipo: tipoEvt, hora: anestesia.viaAerea._v('via_aerea_hora') || utils.horaAtual(),
+                                obs: anestesia.eventos.descricaoPara(tipoEvt), auto: true });
+        toast('Evento "' + tipoEvt + '" devolvido à linha do tempo.');
+      }
+      try { anestesia.viaAerea.montarDetalhe(); } catch (e) {}
+      markDirty();
+    },
     montarDetalhe() {
       const f = anestesia.viaAerea._f(); if (!f) return '';
       const fam = anestesia.viaAerea._familia();
@@ -30735,6 +30970,10 @@ const anestesia = {
   eventos: {
     /* Catálogo agrupado (fonte única) — TIPOS é derivado daqui */
     GRUPOS: [
+      /* Os tempos do ato são eventos: entrada em sala, início e fim da
+         anestesia, saída. Estavam só nos campos do card 2, e a linha do tempo
+         começava na indução — sem o que veio antes e sem o que veio depois. */
+      { grupo: 'Tempos do ato', itens: ['Entrada em sala', 'Início da anestesia', 'Fim da anestesia', 'Saída de sala'] },
       { grupo: 'Procedimentos / acessos', itens: ['Venoclise', 'Punção arterial', 'Acesso venoso central',
           'Sondagem orogástrica', 'Sondagem nasogástrica', 'Sondagem vesical (Foley)', 'Sondagem vesical de alívio'] },
       { grupo: 'Via aérea / anestesia', itens: ['Sedação', 'Indução', 'Intubação', 'Extubação', 'Máscara laríngea', 'Retirada da máscara laríngea', 'Início da ventilação mecânica', 'Fim da ventilação mecânica', 'Início O₂', 'Fim O₂', 'Início halogenado', 'Fim halogenado', 'Início infusão contínua', 'Fim infusão contínua'] },
@@ -30747,6 +30986,11 @@ const anestesia = {
       { grupo: 'Respiratórias', itens: ['Dessaturação', 'Broncoespasmo', 'Laringoespasmo', 'Apneia', 'Disritmia ventilatória'] },
       { grupo: 'Intercorrências', itens: ['Reação alérgica', 'Anafilaxia', 'Náusea', 'Vômito', 'Sangramento importante', 'Hipotermia', 'Hipertermia maligna', 'Convulsão', 'Despertar intraoperatório', 'Embolia gasosa (CO₂)', 'Enfisema subcutâneo', 'Pneumotórax'] },
       { grupo: 'Procedimentos terapêuticos', itens: ['Transfusão', 'Manobra de recrutamento', 'Reversão BNM', 'Cardioversão / RCP', 'Antibioticoprofilaxia'] },
+      /* Exames: são eventos como os outros — têm hora e entram na ordem em que
+         aconteceram. O que muda é o botão da linha, que abre os campos daquele
+         exame em vez da descrição técnica (ver anestesia.exames). */
+      { grupo: 'Exames', itens: ['Gasometria arterial', 'Gasometria venosa', 'Hemograma', 'Glicemia',
+          'Eletrólitos', 'Coagulograma', 'Lactato', 'Troponina', 'Tromboelastografia (TEG/ROTEM)', 'Outro exame'] },
       { grupo: 'Outros', itens: ['Outro'] }
     ],
     get TIPOS() { return [].concat(...anestesia.eventos.GRUPOS.map(g => g.itens)); },
@@ -31113,6 +31357,8 @@ const anestesia = {
       }
       const tipoEvt = anestesia.eventos.VIA_AEREA_EVENTO[sel.value];
       if (!tipoEvt) return;
+      /* já estava instalado quando chegou: não é procedimento deste ato */
+      try { if (anestesia.viaAerea.ehPrevio()) return; } catch (e) {}
       anestesia.graficoUI._contexto = 'anestesia';
       if (anestesia.eventos.existeEvento(tipoEvt)) { anestesia.eventos.atualizarDescricoes(); return; }
       anestesia.eventos.add({ tipo: tipoEvt, hora: anestesia.eventos._v('via_aerea_hora') || utils.horaAtual(), obs: anestesia.eventos.descricaoPara(tipoEvt), auto: true });
@@ -31248,7 +31494,7 @@ const anestesia = {
       tr.innerHTML = `
         <td data-label="Horário"><input type="time" name="evt_hora[]" value="${hora}" onchange="anestesia.graficoUI.validarHoraInput(this)"></td>
         <td data-label="Evento"><select name="evt_tipo[]"><option value="">— selecione —</option>${opt(anestesia.eventos.TIPOS, dados.tipo)}</select></td>
-        <td data-label="Detalhes"><div style="display:flex;gap:4px;align-items:center"><input type="text" name="evt_obs[]" value="${utils.escapeAttr(dados.obs || '')}" placeholder="Opcional" style="flex:1;min-width:0" oninput="anestesia.eventos._marcarManual(this)"><button type="button" class="btn-rm" title="Inserir descrição técnica do procedimento" onclick="anestesia.eventos.inserirDescricao(this)">📝</button></div></td>
+        <td data-label="Detalhes"><div style="display:flex;gap:4px;align-items:center"><input type="text" name="evt_obs[]" value="${utils.escapeAttr(dados.obs || '')}" placeholder="Opcional" style="flex:1;min-width:0" oninput="anestesia.eventos._marcarManual(this)"><input type="hidden" name="evt_val[]" value="${utils.escapeAttr(dados.valores && Object.keys(dados.valores).length ? JSON.stringify(dados.valores) : '')}"><button type="button" class="btn-rm" onclick="anestesia.eventos.detalhar(this)">📝</button></div></td>
         <td class="col-rm"><button type="button" class="btn-rm" onclick="this.closest('tr').remove(); anestesia.vitais.atualizarGrafico(); markDirty();">✕</button></td>
       `;
       tbody.appendChild(tr);
@@ -31260,10 +31506,32 @@ const anestesia = {
         el.addEventListener('change', () => anestesia.vitais.atualizarGrafico());
       });
       const selTipo = tr.querySelector('[name="evt_tipo[]"]');
-      if (selTipo) selTipo.addEventListener('change', () => { try { anestesia.eventos.atualizarDescricoes(); } catch (e) {} });
+      if (selTipo) selTipo.addEventListener('change', () => {
+        try { anestesia.eventos.atualizarDescricoes(); } catch (e) {}
+        try { anestesia.eventos._ajustarBotao(tr); } catch (e) {}
+      });
+      anestesia.eventos._ajustarBotao(tr);
       anestesia.vitais.atualizarGrafico();
       markDirty();
       return tr;
+    },
+    /* Um botão só na linha, com o significado do que está selecionado: no
+       exame ele abre os valores (🧪), no resto insere a descrição técnica (📝).
+       Dois botões fixos dariam um sempre inútil em cada linha. */
+    _ajustarBotao(tr) {
+      const btn = tr && tr.querySelector('td[data-label="Detalhes"] .btn-rm');
+      if (!btn) return;
+      const tipo = (tr.querySelector('[name="evt_tipo[]"]') || {}).value || '';
+      const ehExame = anestesia.exames.ehExame(tipo);
+      btn.textContent = ehExame ? '🧪' : '📝';
+      btn.title = ehExame ? 'Preencher os valores deste exame' : 'Inserir descrição técnica do procedimento';
+    },
+    detalhar(btn) {
+      const tr = btn && btn.closest('tr');
+      if (!tr) return;
+      const tipo = (tr.querySelector('[name="evt_tipo[]"]') || {}).value || '';
+      if (anestesia.exames.ehExame(tipo)) { anestesia.exames.abrir(tr); return; }
+      anestesia.eventos.inserirDescricao(btn);
     },
     limparTabela() {
       if (!confirm('Apagar todos os eventos?')) return;
@@ -31277,14 +31545,289 @@ const anestesia = {
         const hora = tr.querySelector('[name="evt_hora[]"]')?.value;
         const tipo = tr.querySelector('[name="evt_tipo[]"]')?.value;
         const obs = tr.querySelector('[name="evt_obs[]"]')?.value || '';
-        if (hora && tipo) linhas.push({ hora, tipo, observacao: obs, auto: tr.dataset.auto === '1' });
+        if (!hora || !tipo) return;
+        const linha = { hora, tipo, observacao: obs, auto: tr.dataset.auto === '1' };
+        /* valores do exame, quando a linha for um exame: o texto de detalhes é
+           só a leitura deles, e é dos números que a impressão precisa */
+        const vals = anestesia.exames._valores(tr);
+        if (Object.keys(vals).length) linha.valores = vals;
+        linhas.push(linha);
       });
       return linhas;
     },
     restaurar(arr) {
       const tbody = document.getElementById('eventos-body');
       if (tbody) tbody.innerHTML = '';
-      if (Array.isArray(arr)) arr.forEach(e => anestesia.eventos.add({ hora: e.hora, tipo: e.tipo, obs: e.observacao, auto: e.auto }));
+      if (Array.isArray(arr)) arr.forEach(e => anestesia.eventos.add({
+        hora: e.hora, tipo: e.tipo, obs: e.observacao, auto: e.auto, valores: e.valores
+      }));
+    }
+  },
+
+  /* ---- EXAMES INTRAOPERATÓRIOS -------------------------------------------
+     Por que tabela própria, e não mais uma coluna nos sinais vitais: o monitor
+     mede UM parâmetro de forma contínua; o exame é pontual e traz VÁRIOS
+     valores de uma vez. Uma gasometria tem treze números — não cabe numa
+     célula da grade, e espalhá-la por treze colunas encheria a grade de
+     espaços vazios em todos os horários em que não houve coleta.
+     Mas exame TEM hora e aconteceu no meio do ato, então ele mora na tabela de
+     EVENTOS, junto com indução, incisão e extubação: uma linha do tempo só,
+     que se ordena junta e conta a cirurgia na ordem em que ela correu.
+     O que este módulo acrescenta ao evento são os VALORES: o botão 🧪 da linha
+     abre os campos daquele exame, e o que for preenchido vira o texto de
+     detalhes já com as unidades — continuando editável à mão, e aí o sistema
+     não mexe mais (é o que a marca "auto" da linha guarda). */
+  exames: {
+    /* Campos por exame. `u` é a unidade que aparece no resumo; `p` é o valor
+       de referência mostrado como dica dentro do campo — não é validação,
+       serve de lembrete na hora da coleta. */
+    ESPECS: {
+      'Gasometria arterial': {
+        titulo: '🩸 Gasometria arterial',
+        campos: [
+          { n: 'ph', l: 'pH', p: '7,35–7,45' },
+          { n: 'pco2', l: 'pCO₂', u: 'mmHg', p: '35–45' },
+          { n: 'po2', l: 'pO₂', u: 'mmHg', p: '80–100' },
+          { n: 'hco3', l: 'HCO₃⁻', u: 'mEq/L', p: '22–26' },
+          { n: 'be', l: 'BE', u: 'mEq/L', p: '−2 a +2' },
+          { n: 'sat', l: 'SatO₂', u: '%', p: '95–100' },
+          { n: 'fio2', l: 'FiO₂', u: '%', p: 'no momento da coleta' },
+          { n: 'lactato', l: 'Lactato', u: 'mmol/L', p: '< 2' },
+          { n: 'na', l: 'Na⁺', u: 'mEq/L', p: '135–145' },
+          { n: 'k', l: 'K⁺', u: 'mEq/L', p: '3,5–5,0' },
+          { n: 'cai', l: 'Ca²⁺ iônico', u: 'mmol/L', p: '1,1–1,3' },
+          { n: 'hb', l: 'Hb', u: 'g/dL' },
+          { n: 'glic', l: 'Glicose', u: 'mg/dL' }
+        ]
+      },
+      'Gasometria venosa': {
+        titulo: '🩸 Gasometria venosa',
+        campos: [
+          { n: 'ph', l: 'pH', p: '7,32–7,42' },
+          { n: 'pco2', l: 'pCO₂', u: 'mmHg', p: '41–51' },
+          { n: 'po2', l: 'pO₂', u: 'mmHg', p: '35–45' },
+          { n: 'hco3', l: 'HCO₃⁻', u: 'mEq/L', p: '22–26' },
+          { n: 'be', l: 'BE', u: 'mEq/L' },
+          { n: 'sat', l: 'SvO₂ / ScvO₂', u: '%', p: '65–75' },
+          { n: 'lactato', l: 'Lactato', u: 'mmol/L' },
+          { n: 'k', l: 'K⁺', u: 'mEq/L' },
+          { n: 'hb', l: 'Hb', u: 'g/dL' }
+        ]
+      },
+      'Hemograma': {
+        titulo: '🧫 Hemograma',
+        campos: [
+          { n: 'hb', l: 'Hb', u: 'g/dL', p: '12–16' },
+          { n: 'ht', l: 'Ht', u: '%', p: '36–48' },
+          { n: 'leuco', l: 'Leucócitos', u: '/mm³' },
+          { n: 'plaq', l: 'Plaquetas', u: '/mm³', p: '150.000–450.000' }
+        ]
+      },
+      'Glicemia': {
+        titulo: '🍬 Glicemia',
+        campos: [
+          { n: 'glic', l: 'Glicemia', u: 'mg/dL', p: '70–110' },
+          { n: 'metodo', l: 'Método', t: 'select', o: ['Capilar (ponta de dedo)', 'Venosa', 'Arterial (gasometria)'] }
+        ]
+      },
+      'Eletrólitos': {
+        titulo: '🧂 Eletrólitos',
+        campos: [
+          { n: 'na', l: 'Na⁺', u: 'mEq/L', p: '135–145' },
+          { n: 'k', l: 'K⁺', u: 'mEq/L', p: '3,5–5,0' },
+          { n: 'cl', l: 'Cl⁻', u: 'mEq/L', p: '98–107' },
+          { n: 'cai', l: 'Ca²⁺ iônico', u: 'mmol/L', p: '1,1–1,3' },
+          { n: 'mg', l: 'Mg²⁺', u: 'mg/dL', p: '1,7–2,4' }
+        ]
+      },
+      'Coagulograma': {
+        titulo: '🩹 Coagulograma',
+        campos: [
+          { n: 'tp', l: 'TP', u: 's' },
+          { n: 'inr', l: 'INR', p: '0,9–1,2' },
+          { n: 'ttpa', l: 'TTPa', u: 's' },
+          { n: 'ttpa_r', l: 'TTPa (relação)', p: '0,8–1,2' },
+          { n: 'fib', l: 'Fibrinogênio', u: 'mg/dL', p: '200–400' },
+          { n: 'plaq', l: 'Plaquetas', u: '/mm³' }
+        ]
+      },
+      'Lactato': {
+        titulo: '⚡ Lactato',
+        campos: [{ n: 'lactato', l: 'Lactato', u: 'mmol/L', p: '< 2' }]
+      },
+      'Troponina': {
+        titulo: '❤️ Troponina',
+        campos: [
+          { n: 'valor', l: 'Troponina', u: 'ng/mL' },
+          { n: 'ref', l: 'Referência do laboratório', t: 'text' }
+        ]
+      },
+      'Tromboelastografia (TEG/ROTEM)': {
+        titulo: '🧵 Tromboelastografia (TEG/ROTEM)',
+        campos: [
+          { n: 'r', l: 'R / CT', u: 's' },
+          { n: 'k', l: 'K / CFT', u: 's' },
+          { n: 'angulo', l: 'Ângulo α', u: '°' },
+          { n: 'ma', l: 'MA / MCF', u: 'mm' },
+          { n: 'ly30', l: 'LY30 / ML', u: '%' }
+        ]
+      },
+      'Outro exame': {
+        titulo: '🧪 Outro exame',
+        campos: [
+          { n: 'nome', l: 'Qual exame', t: 'text', col: 12 },
+          { n: 'resultado', l: 'Resultado', t: 'textarea', col: 12 }
+        ]
+      }
+    },
+    get TIPOS() { return Object.keys(anestesia.exames.ESPECS); },
+    /* Este evento é um exame? É o que decide o botão da linha e o que sai na
+       seção de exames da impressão. */
+    ehExame(tipo) { return !!(tipo && anestesia.exames.ESPECS[tipo]); },
+
+    /* Uma linha de texto com o que foi preenchido. Campo vazio some — o
+       resumo é do que existe, não do formulário. */
+    resumo(tipo, vals) {
+      const esp = anestesia.exames.ESPECS[tipo];
+      if (!esp || !vals) return '';
+      if (tipo === 'Outro exame') {
+        return [vals.nome, vals.resultado].filter(Boolean).join(': ');
+      }
+      return esp.campos
+        .filter(c => String(vals[c.n] || '').trim())
+        .map(c => c.l + ' ' + String(vals[c.n]).trim() + (c.u ? ' ' + c.u : ''))
+        .join(' · ');
+    },
+
+    /* Os valores ficam num campo escondido da própria linha do evento, para
+       serem gravados e relidos com ela — o texto de detalhes é só a leitura. */
+    _valores(tr) {
+      const el = tr && tr.querySelector('[name="evt_val[]"]');
+      if (!el || !el.value) return {};
+      try { return JSON.parse(el.value) || {}; } catch (e) { return {}; }
+    },
+
+    /* Lança o exame como evento, na hora atual, e já abre os campos dele —
+       é o que a pessoa ia fazer em seguida de qualquer jeito. */
+    add(tipo) {
+      anestesia.graficoUI._contexto = 'anestesia';
+      const tr = anestesia.eventos.add({ tipo: tipo || '', hora: utils.horaAtual() });
+      if (!tr) return null;
+      if (tipo) setTimeout(() => { try { anestesia.exames.abrir(tr); } catch (e) {} }, 60);
+      return tr;
+    },
+
+    /* Todos os exames numa janela só, para os que não têm botão de atalho */
+    abrirCatalogo() {
+      const corpo =
+        '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">O exame entra na <b>linha do tempo dos eventos</b>, com a hora atual. Em seguida abrem os campos dele para você lançar os valores.</p>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
+        anestesia.exames.TIPOS.map(t =>
+          '<button type="button" class="btn btn-sm" onclick="modal.close(); anestesia.exames.add(\'' + utils.escapeAttr(t) + '\')">' +
+          utils.escapeHTML(t) + '</button>').join('') +
+        '</div>';
+      modal.open('🧪 Exames intraoperatórios', corpo, '<button class="btn" onclick="modal.close()">Fechar</button>');
+    },
+
+    _linhaAberta: null,
+    abrir(ref) {
+      const tr = (ref && ref.closest) ? ref.closest('tr') : ref;
+      if (!tr) return false;
+      const sel = tr.querySelector('[name="evt_tipo[]"]');
+      const tipo = sel ? sel.value : '';
+      if (!tipo) { toast('Escolha primeiro qual é o exame.', 'warn'); if (sel) sel.focus(); return false; }
+      const esp = anestesia.exames.ESPECS[tipo];
+      if (!esp) return false;
+      const d = anestesia.exames._valores(tr);
+      anestesia.exames._linhaAberta = tr;
+      const campo = (c) => {
+        const val = d[c.n] || '';
+        const col = c.col || 4;
+        const rot = utils.escapeHTML(c.l) + (c.u ? ' <small style="color:var(--text-mute);font-weight:400">(' + utils.escapeHTML(c.u) + ')</small>' : '');
+        if (c.t === 'textarea') {
+          return '<div class="field col-' + col + '"><label>' + rot + '</label>' +
+            '<textarea name="ex_' + c.n + '" rows="3">' + utils.escapeHTML(val) + '</textarea></div>';
+        }
+        if (c.t === 'select') {
+          return '<div class="field col-' + col + '"><label>' + rot + '</label>' +
+            '<select name="ex_' + c.n + '"><option value="">—</option>' +
+            c.o.map(o => '<option ' + (o === val ? 'selected' : '') + '>' + utils.escapeHTML(o) + '</option>').join('') +
+            '</select></div>';
+        }
+        return '<div class="field col-' + col + '"><label>' + rot + '</label>' +
+          '<input type="text" name="ex_' + c.n + '" value="' + utils.escapeAttr(val) + '"' +
+          (c.p ? ' placeholder="' + utils.escapeAttr(c.p) + '"' : '') + '></div>';
+      };
+      const hora = (tr.querySelector('[name="evt_hora[]"]') || {}).value || '';
+      const corpo =
+        '<p style="font-size:.82rem;color:var(--text-mute);margin:0 0 10px">' +
+        (hora ? 'Coleta das <b>' + utils.escapeHTML(hora) + '</b>. ' : '') +
+        'Preencha só o que veio no resultado — o que ficar em branco não aparece na ficha. ' +
+        'As faixas em cinza são de referência, para conferência; o sistema não recusa valor nenhum.</p>' +
+        '<form id="form-exame" onsubmit="return false"><div class="grid">' + esp.campos.map(campo).join('') + '</div></form>';
+      modal.open(esp.titulo, corpo,
+        '<button class="btn" onclick="modal.close()">Cancelar</button>' +
+        '<button class="btn btn-primary" onclick="anestesia.exames.salvar()">Salvar resultado</button>');
+      return true;
+    },
+
+    salvar() {
+      const tr = anestesia.exames._linhaAberta;
+      const f = document.getElementById('form-exame');
+      if (!tr || !f) { modal.close(); return; }
+      const sel = tr.querySelector('[name="evt_tipo[]"]');
+      const tipo = sel ? sel.value : '';
+      const esp = anestesia.exames.ESPECS[tipo];
+      if (!esp) { modal.close(); return; }
+      const d = {};
+      esp.campos.forEach(c => {
+        const el = f.querySelector('[name="ex_' + c.n + '"]');
+        if (el && String(el.value).trim()) d[c.n] = String(el.value).trim();
+      });
+      const hid = tr.querySelector('[name="evt_val[]"]');
+      if (hid) hid.value = Object.keys(d).length ? JSON.stringify(d) : '';
+      const res = tr.querySelector('[name="evt_obs[]"]');
+      /* o texto só é reescrito enquanto for do sistema: o que o anestesista
+         digitou por cima é dele, e nenhuma edição de valores o apaga */
+      if (res && (tr.dataset.auto === '1' || !res.value.trim())) {
+        res.value = anestesia.exames.resumo(tipo, d);
+        tr.dataset.auto = '1';
+      }
+      modal.close();
+      try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
+      try { markDirty(); } catch (e) {}
+      toast('🧪 Resultado registrado em ' + tipo.toLowerCase() + '.');
+    },
+
+    /* Os exames de um registro salvo, em ordem de hora. Sai daqui a seção de
+       exames da impressão e a frase do resumo narrativo — sem uma segunda
+       cópia dentro do registro, que é como os dois começam a divergir. */
+    listar(d) {
+      return ((d && d.eventos) || [])
+        .filter(e => anestesia.exames.ehExame(e.tipo))
+        .slice()
+        .sort((a, b) => (a.hora || '99:99').localeCompare(b.hora || '99:99'))
+        .map(e => ({
+          hora: e.hora || '',
+          tipo: e.tipo,
+          /* o texto da linha é o que vale; vazio, remonta dos valores para o
+             exame não sair da ficha sem resultado */
+          resultado: (e.observacao || '').trim() || anestesia.exames.resumo(e.tipo, e.valores || {}),
+          valores: e.valores || {}
+        }))
+        .filter(e => e.resultado);
+    },
+
+    /* Ficha gravada pela versão que teve tabela separada (build 2026-09-25c):
+       os exames voltam como eventos, na linha do tempo única. */
+    _migrarAntigos(d) {
+      if (!d || !Array.isArray(d.exames) || !d.exames.length) return [];
+      return d.exames
+        .filter(e => e.tipo || (e.resultado || '').trim())
+        .map(e => ({
+          hora: e.hora || '', tipo: e.tipo === 'Outro' ? 'Outro exame' : e.tipo,
+          observacao: e.resultado || '', valores: e.valores || {}, auto: e.auto
+        }));
     }
   },
 
@@ -31484,7 +32027,8 @@ const anestesia = {
       const tipo = anestesia.disp._sel(disp, 'tipo');
       const cal = anestesia.disp._sel(disp, 'calibre');
       const local = anestesia.disp._sel(disp, 'local');
-      const txt = [ [tipo, cal].filter(Boolean).join(' '), local ? 'em ' + local : '' ]
+      const txt = [ [tipo, cal].filter(Boolean).join(' '), local ? 'em ' + local : '',
+                    anestesia.disp.ehPrevio(disp) ? '(prévio ao ato)' : '' ]
         .filter(Boolean).join(' ');
       if (alvo.dataset.manual !== '1' && (txt || !alvo.value)) alvo.value = txt;
       try { anestesia.eventos.atualizarDescricoes(); } catch (e) {}
@@ -31525,10 +32069,12 @@ const anestesia = {
                 </select>
               </div>
               <input type="text" name="disp_det[]" data-disp="${valor}" placeholder="montado do que você marcou" style="margin-top:6px"
-                oninput="this.dataset.manual='1'; anestesia.eventos.atualizarDescricoes()">`;
+                oninput="this.dataset.manual='1'; anestesia.eventos.atualizarDescricoes()">
+              ${anestesia.disp._previoHTML(valor)}`;
           } else {
             div.innerHTML = `<label>${valor} <small style="color:var(--text-mute);font-weight:400">— detalhes</small></label>
-              <input type="text" name="disp_det[]" data-disp="${valor}" placeholder="Ex.: tamanho, local, calibre" oninput="anestesia.eventos.atualizarDescricoes()">`;
+              <input type="text" name="disp_det[]" data-disp="${valor}" placeholder="Ex.: tamanho, local, calibre" oninput="anestesia.eventos.atualizarDescricoes()">
+              ${anestesia.disp._previoHTML(valor)}`;
           }
           cont.appendChild(div);
         }
@@ -31544,13 +32090,55 @@ const anestesia = {
       if (!(opts && opts.restaurando)) {
         try {
           if (checkbox.checked) {
-            const evt = anestesia.eventos.aoMarcarDispositivo(valor);
-            if (evt) toast('Evento "' + evt + '" adicionado — o tipo, o calibre e o local que você marcar aqui entram sozinhos na descrição.');
+            /* prévio = já estava instalado quando o paciente chegou. Não é
+               procedimento dele, então não entra como evento na linha do tempo
+               (e não vira cobrança) — mas continua registrado como presente. */
+            if (anestesia.disp.ehPrevio(valor)) {
+              toast(valor + ' registrado como PRÉVIO — fica na ficha, mas não entra como procedimento.');
+            } else {
+              const evt = anestesia.eventos.aoMarcarDispositivo(valor);
+              if (evt) toast('Evento "' + evt + '" adicionado — o tipo, o calibre e o local que você marcar aqui entram sozinhos na descrição.');
+            }
           } else {
             anestesia.eventos.aoDesmarcarDispositivo(valor);
           }
         } catch (e) {}
       }
+      markDirty();
+    },
+
+    /* ---- DISPOSITIVO PRÉVIO AO ATO --------------------------------------
+       Paciente que desce da UTI já intubado, com acesso central e sonda
+       vesical. Marcar esses dispositivos é correto — eles estavam lá e o
+       registro tem de dizer isso. O que é errado é a ficha afirmar que ELE
+       puncionou, intubou e sondou: vira procedimento na linha do tempo e
+       cobrança que não aconteceu. Daí a marca. */
+    _previoHTML(valor) {
+      return '<label class="check" style="display:inline-flex;margin-top:6px;font-size:.8rem" ' +
+        'title="Já estava instalado quando o paciente chegou — não foi procedimento deste ato">' +
+        '<input type="checkbox" name="disp_previo[]" data-disp="' + utils.escapeAttr(valor) + '" ' +
+        'onchange="anestesia.disp.alternarPrevio(\'' + utils.escapeAttr(valor) + '\')"> ' +
+        '<span>Prévio ao ato <small style="color:var(--text-mute)">— já instalado</small></span></label>';
+    },
+    ehPrevio(valor) {
+      const el = document.querySelector('[name="disp_previo[]"][data-disp="' + valor + '"]');
+      return !!(el && el.checked);
+    },
+    alternarPrevio(valor) {
+      anestesia.graficoUI._contexto = 'anestesia';
+      if (anestesia.disp.ehPrevio(valor)) {
+        /* deixou de ser procedimento dele: o evento que o sistema criou sai.
+           O que ele escreveu à mão fica — aoDesmarcarDispositivo só remove o
+           que está marcado como automático. */
+        const n = anestesia.eventos.aoDesmarcarDispositivo(valor);
+        toast(n ? valor + ' marcado como prévio — o evento saiu da linha do tempo.'
+                : valor + ' marcado como prévio.');
+      } else {
+        const evt = anestesia.eventos.aoMarcarDispositivo(valor);
+        if (evt) toast('Evento "' + evt + '" adicionado à linha do tempo.');
+      }
+      try { anestesia.disp.montarDet(valor); } catch (e) {}
+      try { anestesia.eventos.atualizarDescricoes(); } catch (e) {}
       markDirty();
     },
     /* Sincroniza as TRÊS formas de registro (tabela, grade e gráfico) com os
@@ -31585,9 +32173,10 @@ const anestesia = {
         const sel = c => anestesia.disp._sel(k, c);
         const partes = { texto: el.value || '' };
         ['tipo', 'calibre', 'local'].forEach(c => { const v = sel(c); if (v) partes[c] = v; });
+        if (anestesia.disp.ehPrevio(k)) partes.previo = true;
         /* formato antigo (só texto) continua válido na leitura; aqui gravamos
            o objeto só quando há seleção, para não inchar registro sem motivo */
-        det[k] = (partes.tipo || partes.calibre || partes.local) ? partes : partes.texto;
+        det[k] = (partes.tipo || partes.calibre || partes.local || partes.previo) ? partes : partes.texto;
       });
       return det;
     },
@@ -31604,6 +32193,8 @@ const anestesia = {
             const sel = document.querySelector('[data-campo="' + c + '"][data-disp="' + k + '"]');
             if (sel && v[c]) sel.value = v[c];
           });
+          const pv = document.querySelector('[name="disp_previo[]"][data-disp="' + k + '"]');
+          if (pv) pv.checked = !!v.previo;
         } else if (el && texto) {
           /* veio só o texto (ficha antiga ou digitada à mão): não deixar uma
              seleção posterior sobrescrever o que está gravado */
@@ -31655,43 +32246,123 @@ const anestesia = {
       anestesia.diurese.recalcular();
       markDirty();
     },
+    _linhaHTML(p) {
+      p = p || {};
+      const ea = utils.escapeAttr;
+      return '<td data-label="Horário"><input type="time" name="diurese_hora[]" value="' + ea(p.hora || '') + '" onchange="anestesia.diurese.recalcular()"></td>' +
+        '<td data-label="Volume (mL)"><input type="number" name="diurese_vol[]" min="0" step="1" inputmode="numeric" placeholder="mL" value="' + ea(p.vol || '') + '" oninput="anestesia.diurese.recalcular()"></td>' +
+        '<td data-label="Acumulado" class="di-acum" style="font-size:.82rem;color:var(--text-soft)">—</td>' +
+        '<td data-label="Ritmo" class="di-ritmo" style="font-size:.82rem;font-weight:600">—</td>' +
+        '<td data-label="Observação"><input type="text" name="diurese_obs[]" value="' + ea(p.obs || '') + '" placeholder="ex.: concentrada, clara..."></td>' +
+        '<td class="col-rm"><button type="button" class="btn-rm" onclick="this.closest(\'tr\').remove(); anestesia.diurese.recalcular(); markDirty();">×</button></td>';
+    },
     addParcial(usarAgora) {
       const tb = document.getElementById('diurese-body');
       if (!tb) return;
       let hora = '';
       if (usarAgora) { const d = new Date(); hora = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
       const tr = document.createElement('tr');
-      tr.innerHTML =
-        '<td data-label="Horário"><input type="time" name="diurese_hora[]" value="' + hora + '"></td>' +
-        '<td data-label="Volume (mL)"><input type="number" name="diurese_vol[]" min="0" step="1" inputmode="numeric" placeholder="mL" oninput="anestesia.diurese.recalcular()"></td>' +
-        '<td data-label="Observação"><input type="text" name="diurese_obs[]" placeholder="ex.: concentrada, clara..."></td>' +
-        '<td class="col-rm"><button type="button" class="btn-rm" onclick="this.closest(\'tr\').remove(); anestesia.diurese.recalcular(); markDirty();">×</button></td>';
+      tr.innerHTML = anestesia.diurese._linhaHTML({ hora: hora });
       tb.appendChild(tr);
+      anestesia.diurese.recalcular();
       markDirty();
     },
-    /* Minutos de anestesia: manual, ou início→fim, ou início→agora (tempo real) */
-    _minutos() {
-      const base = (document.getElementById('diurese-base') || {}).value || 'auto';
-      if (base === 'manual') {
-        const m = parseInt((document.getElementById('diurese-min') || {}).value, 10);
-        return { min: isNaN(m) ? null : m, fonte: 'informado' };
-      }
-      const f = document.getElementById('form-anestesia');
-      const ini = (f.querySelector('[name="hora_inicio"]') || {}).value;
-      const fim = (f.querySelector('[name="hora_fim"]') || {}).value;
-      if (!ini) return { min: null, fonte: 'sem início' };
-      const [h1, m1] = ini.split(':').map(Number);
-      let alvoMin, fonte;
-      if (fim) {
-        const [h2, m2] = fim.split(':').map(Number);
-        alvoMin = h2 * 60 + m2; fonte = 'anestesia (início→fim)';
+    /* ---- A CONTA DO DÉBITO URINÁRIO, EM UM LUGAR SÓ -----------------------
+       Função pura: recebe o registro de diurese, o peso e os horários do ato,
+       e devolve volume, janela de tempo e ritmo. O painel e a ficha impressa
+       chamam esta mesma função — antes cada um fazia a sua conta e os dois
+       podiam discordar.
+
+       O erro que havia: a janela ia do início ao FIM DA ANESTESIA, mas o
+       volume só é contado até o ÚLTIMO REGISTRO. Dividir tudo o que saiu por
+       um tempo maior do que o medido rebaixa o débito — num caso com a última
+       aferição às 10:30 e fim às 12:00, o número saía um terço menor do que
+       o real, e isso é a diferença entre "adequado" e "oligúria".
+
+       Sem horário de início do ato não dá para saber em quanto tempo o PRIMEIRO
+       registro se acumulou — ele veio de antes. Nesse caso a janela vai do 1º
+       ao último registro e o volume do 1º sai da conta, que é o que a régua
+       permite afirmar. */
+    calcular(di, peso, horaIni, horaFim, agora) {
+      di = di || {};
+      const num = v => { const n = parseFloat(v); return isNaN(n) ? null : n; };
+      const dif = (a, b) => {
+        if (!a || !b) return null;
+        const p = t => { const x = String(t).split(':').map(Number); return x[0] * 60 + x[1]; };
+        let d = p(b) - p(a);
+        if (d < 0) d += 1440;
+        return d;
+      };
+      const parciais = (di.parciais || [])
+        .filter(p => num(p.vol) != null)
+        .slice()
+        .sort((a, b) => String(a.hora || '~').localeCompare(String(b.hora || '~')));
+      const modo = di.modo || 'parcial';
+      const out = { vol: 0, min: null, ini: '', fim: '', fonte: '', mlkgh: null,
+                    parciais: parciais, descontouPrimeiro: false };
+
+      if (modo === 'total') {
+        out.vol = num(di.total) || 0;
       } else {
-        const now = new Date();
-        alvoMin = now.getHours() * 60 + now.getMinutes(); fonte = 'em tempo real (início→agora)';
+        parciais.forEach(p => { out.vol += num(p.vol); });
       }
-      let mins = alvoMin - (h1 * 60 + m1);
-      if (mins < 0) mins += 24 * 60;
-      return { min: mins, fonte: fonte };
+
+      if (di.base === 'manual' && String(di.min || '').trim()) {
+        out.min = parseInt(di.min, 10) || null;
+        out.fonte = 'tempo informado';
+      } else {
+        const comHora = parciais.filter(p => p.hora);
+        if (modo !== 'total' && comHora.length) {
+          out.fim = comHora[comHora.length - 1].hora;
+          if (horaIni) {
+            out.ini = horaIni;
+            out.fonte = 'do início do ato até o último registro';
+          } else if (comHora.length > 1) {
+            /* sem início do ato: o 1º registro é o marco zero, e o que ele
+               trouxe veio de antes — sai da conta */
+            out.ini = comHora[0].hora;
+            out.vol -= num(comHora[0].vol);
+            out.descontouPrimeiro = true;
+            out.fonte = 'do 1º ao último registro (o 1º volume veio de antes)';
+          }
+        } else {
+          out.ini = horaIni || '';
+          if (horaFim) { out.fim = horaFim; out.fonte = 'anestesia (início→fim)'; }
+          else if (agora) { out.fim = agora; out.fonte = 'em tempo real (início→agora)'; }
+        }
+        out.min = dif(out.ini, out.fim);
+      }
+      if (peso && out.min && out.min > 0 && out.vol > 0) {
+        out.mlkgh = out.vol / peso / (out.min / 60);
+      }
+      return out;
+    },
+    /* Ritmo de cada registro: o que saiu naquele intervalo dividido pelo tempo
+       desde o registro anterior (ou desde o início do ato, para o primeiro). */
+    ritmos(di, peso, horaIni) {
+      const c = anestesia.diurese.calcular(di, peso, horaIni, '', '');
+      let acum = 0, ant = horaIni || '';
+      return c.parciais.map((p, i) => {
+        const v = parseFloat(p.vol);
+        acum += v;
+        const min = anestesia.diurese._difMin(ant, p.hora);
+        const taxa = (peso && min > 0) ? (v / peso / (min / 60)) : null;
+        const linha = { hora: p.hora, vol: v, acumulado: acum, min: min, mlkgh: taxa, desde: ant };
+        ant = p.hora || ant;
+        return linha;
+      });
+    },
+    _horaIniAto() {
+      const f = document.getElementById('form-anestesia');
+      if (!f) return '';
+      /* a coleta começa quando o paciente entra, não quando a anestesia começa;
+         mas o registro de entrada nem sempre existe — então cai para o início */
+      return (f.querySelector('[name="hora_inicio"]') || {}).value ||
+             (f.querySelector('[name="hora_sala_entrada"]') || {}).value || '';
+    },
+    _horaFimAto() {
+      const f = document.getElementById('form-anestesia');
+      return f ? ((f.querySelector('[name="hora_fim"]') || {}).value || '') : '';
     },
     /* ---- DIURESE NA GRADE DOS SINAIS VITAIS --------------------------------
        A diurese é lida junto com os outros sinais, de hora em hora. Digitá-la
@@ -31781,35 +32452,88 @@ const anestesia = {
       document.querySelectorAll('[name="diurese_vol[]"]').forEach(el => { const v = parseFloat(el.value); if (!isNaN(v)) soma += v; });
       return soma;
     },
+    _fmtDur(min) {
+      if (min == null) return '—';
+      const h = Math.floor(min / 60), m = min % 60;
+      return (h ? h + 'h ' : '') + String(m).padStart(2, '0') + 'min';
+    },
     recalcular() {
       if (!anestesia.diurese._painel()) return;
       const peso = parseFloat((document.querySelector('#form-anestesia [name="paciente_peso"]') || {}).value);
-      const vol = anestesia.diurese._volume();
-      const t = anestesia.diurese._minutos();
+      const di = anestesia.diurese.coletar();
+      const agora = (() => { const d = new Date();
+        return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); })();
+      const c = anestesia.diurese.calcular(di, peso,
+        anestesia.diurese._horaIniAto(), anestesia.diurese._horaFimAto(), agora);
+
       const acEl = document.getElementById('diurese-acumulado');
       const tEl = document.getElementById('diurese-tempo');
+      const jEl = document.getElementById('diurese-janela');
       const rEl = document.getElementById('diurese-resultado');
       const alerta = document.getElementById('diurese-alerta');
-      if (acEl) acEl.value = vol ? (vol.toLocaleString('pt-BR') + ' mL') : '—';
-      /* Alimenta o campo de diurese do balanço hídrico (evita dupla digitação) */
+
+      if (acEl) acEl.value = c.vol ? (Math.round(c.vol).toLocaleString('pt-BR') + ' mL') : '—';
+      /* Alimenta a diurese do balanço hídrico. Zerar também é informação: se
+         os registros são apagados, o balanço não pode ficar com o valor velho. */
       const campoBal = document.querySelector('#form-anestesia [name="diurese"]');
-      if (campoBal && vol) { campoBal.value = Math.round(vol); try { anestesia.calc.balanco(); } catch (e) {} }
-      if (tEl) {
-        if (t.min == null) tEl.value = '—';
-        else { const h = Math.floor(t.min / 60), m = t.min % 60; tEl.value = (h ? h + 'h ' : '') + String(m).padStart(2, '0') + 'min'; }
+      if (campoBal && campoBal.readOnly !== false) {
+        campoBal.value = c.vol ? Math.round(c.vol) : '';
+        try { anestesia.calc.balanco(); } catch (e) {}
       }
+      if (tEl) tEl.value = anestesia.diurese._fmtDur(c.min);
+      /* o intervalo contado, por extenso: é aqui que se vê se a conta está
+         medindo o que se acha que ela mede */
+      if (jEl) jEl.value = (c.ini && c.fim) ? (c.ini + ' → ' + c.fim) : (c.fonte === 'tempo informado' ? 'tempo informado' : '—');
+
+      anestesia.diurese._renderRitmos(di, peso);
+
       if (!rEl) return;
       if (!peso) { rEl.value = 'informe o peso do paciente'; if (alerta) alerta.textContent = ''; return; }
-      if (!vol || t.min == null || t.min <= 0) { rEl.value = '—'; if (alerta) alerta.textContent = ''; return; }
-      const horas = t.min / 60;
-      const mlkgh = vol / peso / horas;
-      rEl.value = mlkgh.toFixed(2).replace('.', ',') + ' mL/kg/h  (' + t.fonte + ')';
-      /* Alerta clínico: oligúria < 0,5 mL/kg/h */
-      if (alerta) {
-        if (mlkgh < 0.5) { alerta.style.color = '#c0392b'; alerta.textContent = '⚠️ Oligúria (< 0,5 mL/kg/h) — reavaliar volemia/perfusão.'; }
-        else if (mlkgh > 4) { alerta.style.color = '#8a5a10'; alerta.textContent = 'Débito elevado (> 4 mL/kg/h) — considerar poliúria/diuréticos/hiperglicemia.'; }
-        else { alerta.style.color = '#1f7a4d'; alerta.textContent = '✓ Débito adequado (meta usual ≥ 0,5 mL/kg/h).'; }
+      if (c.mlkgh == null) {
+        rEl.value = c.vol ? Math.round(c.vol) + ' mL — falta o tempo' : '—';
+        if (alerta) alerta.textContent = c.vol && !c.min
+          ? 'Sem horário de início do ato nem dois registros com hora, não dá para dizer em quanto tempo saiu.' : '';
+        return;
       }
+      rEl.value = c.mlkgh.toFixed(2).replace('.', ',') + ' mL/kg/h  (' + c.fonte + ')';
+      if (alerta) {
+        let extra = c.descontouPrimeiro
+          ? ' O volume do 1º registro não entrou: ele se acumulou antes do marco inicial.' : '';
+        if (c.mlkgh < 0.5) { alerta.style.color = '#c0392b'; alerta.textContent = '⚠️ Oligúria (< 0,5 mL/kg/h) — reavaliar volemia/perfusão.' + extra; }
+        else if (c.mlkgh > 4) { alerta.style.color = '#8a5a10'; alerta.textContent = 'Débito elevado (> 4 mL/kg/h) — considerar poliúria/diuréticos/hiperglicemia.' + extra; }
+        else { alerta.style.color = '#1f7a4d'; alerta.textContent = '✓ Débito adequado (meta usual ≥ 0,5 mL/kg/h).' + extra; }
+      }
+    },
+    /* Acumulado e ritmo de cada registro, escritos na própria linha. Sem isto
+       só existia o número do caso inteiro, e uma queda no meio do ato — que é
+       o que importa ver na hora — não aparecia em lugar nenhum. */
+    _renderRitmos(di, peso) {
+      const linhas = anestesia.diurese.ritmos(di, peso, anestesia.diurese._horaIniAto());
+      const trs = document.querySelectorAll('#diurese-body tr');
+      const porHora = {};
+      linhas.forEach(l => { porHora[l.hora || ''] = l; });
+      let i = 0;
+      trs.forEach(tr => {
+        const volEl = tr.querySelector('[name="diurese_vol[]"]');
+        const horaEl = tr.querySelector('[name="diurese_hora[]"]');
+        const acEl = tr.querySelector('.di-acum');
+        const riEl = tr.querySelector('.di-ritmo');
+        if (!acEl || !riEl) return;
+        const l = (horaEl && porHora[horaEl.value]) ||
+                  (volEl && String(volEl.value).trim() ? linhas[i] : null);
+        if (volEl && String(volEl.value).trim()) i++;
+        if (!l) { acEl.textContent = '—'; riEl.textContent = '—'; riEl.style.color = ''; return; }
+        acEl.textContent = Math.round(l.acumulado) + ' mL';
+        if (l.mlkgh == null) {
+          riEl.textContent = l.min ? '—' : 'sem intervalo';
+          riEl.style.color = 'var(--text-mute)';
+          riEl.title = peso ? 'Falta a hora do registro anterior ou do início do ato.' : 'Informe o peso do paciente.';
+        } else {
+          riEl.textContent = l.mlkgh.toFixed(2).replace('.', ',') + ' mL/kg/h';
+          riEl.style.color = l.mlkgh < 0.5 ? '#c0392b' : (l.mlkgh > 4 ? '#8a5a10' : '#1f7a4d');
+          riEl.title = 'Em ' + anestesia.diurese._fmtDur(l.min) + ' desde ' + (l.desde || 'o registro anterior');
+        }
+      });
     },
     coletar() {
       const parciais = [];
@@ -31839,11 +32563,7 @@ const anestesia = {
         tb.innerHTML = '';
         (d.parciais || []).forEach(p => {
           const tr = document.createElement('tr');
-          tr.innerHTML =
-            '<td data-label="Horário"><input type="time" name="diurese_hora[]" value="' + utils.escapeAttr(p.hora || '') + '"></td>' +
-            '<td data-label="Volume (mL)"><input type="number" name="diurese_vol[]" min="0" step="1" inputmode="numeric" value="' + utils.escapeAttr(p.vol || '') + '" oninput="anestesia.diurese.recalcular()"></td>' +
-            '<td data-label="Observação"><input type="text" name="diurese_obs[]" value="' + utils.escapeAttr(p.obs || '') + '"></td>' +
-            '<td class="col-rm"><button type="button" class="btn-rm" onclick="this.closest(\'tr\').remove(); anestesia.diurese.recalcular(); markDirty();">×</button></td>';
+          tr.innerHTML = anestesia.diurese._linhaHTML(p);
           tb.appendChild(tr);
         });
       }
@@ -36267,7 +36987,9 @@ const anestesia = {
 
       /* 4c. VIA AÉREA + VENTILAÇÃO */
       if (d.tecnica.via_aerea_uso) {
-        let v = `Via aérea: ${d.tecnica.via_aerea_uso}`;
+        /* prévia = o paciente chegou com ela; a ficha diz isso em vez de
+           deixar parecer que a intubação foi feita aqui */
+        let v = `Via aérea: ${d.tecnica.via_aerea_uso}` + (d.tecnica.via_aerea_previo ? ' (prévia ao ato)' : '');
         if (d.ventilacao) {
           if (d.ventilacao.modo) v += `; ventilação ${d.ventilacao.modo}`;
           if (d.ventilacao.vt) v += ` VT ${d.ventilacao.vt} mL`;
@@ -36357,8 +37079,18 @@ const anestesia = {
         const evts = d.eventos
           .filter(e => e.hora && e.tipo)
           .sort((a, b) => (a.hora || '').localeCompare(b.hora || ''))
-          .map(e => `${e.hora} ${e.tipo}${e.observacao ? ' (' + e.observacao + ')' : ''}`);
+          .map(e => anestesia.exames.ehExame(e.tipo)
+            ? `${e.hora} ${e.tipo}`
+            : `${e.hora} ${e.tipo}${e.observacao ? ' (' + e.observacao + ')' : ''}`);
         if (evts.length) partes.push(`Eventos: ${evts.join('; ')}.`);
+      }
+
+      /* 9b. EXAMES INTRAOPERATÓRIOS — são eventos; aqui saem com os valores
+         por extenso, que na lista de eventos acima ficariam ilegíveis */
+      {
+        const exs = anestesia.exames.listar(d)
+          .map(e => `${e.hora ? e.hora + ' ' : ''}${e.tipo} — ${e.resultado}`);
+        if (exs.length) partes.push(`Exames intraoperatórios: ${exs.join('; ')}.`);
       }
 
       /* 10. INTERCORRÊNCIAS */
@@ -36477,6 +37209,10 @@ const anestesia = {
            era salvo no registro nem saía na impressão. */
         via_aerea_detalhe: v('via_aerea_detalhe'),
         via_aerea_hora: v('via_aerea_hora'),
+        /* dispositivo que o paciente já trouxe: não é procedimento deste ato */
+        via_aerea_previo: (function () {
+          const el = f.querySelector('[name="via_aerea_previo"]'); return el ? el.checked : false;
+        })(),
         monitorizacao_descricao: v('monitorizacao'),
         equipamentos: v('equipamentos_usados'),
         /* o que a janela de cada técnica coletou — é isto que faltava ficar
@@ -36642,6 +37378,10 @@ const anestesia = {
     set('via_aerea_uso', tc.via_aerea_uso);
     set('via_aerea_detalhe', tc.via_aerea_detalhe);
     set('via_aerea_hora', tc.via_aerea_hora);
+    (function () {
+      const el = f.querySelector('[name="via_aerea_previo"]');
+      if (el) el.checked = !!tc.via_aerea_previo;
+    })();
     set('ventilacao_tipo', tc.ventilacao_tipo);
     set('monitorizacao', tc.monitorizacao_descricao);
     set('equipamentos_usados', tc.equipamentos);
@@ -36674,10 +37414,12 @@ const anestesia = {
     setRadio('posicao', po.posicao); set('posicao_obs', po.observacoes);
     setArr('protec', po.protecao);
 
-    /* Eventos cronológicos */
-    if (Array.isArray(d.eventos)) {
-      anestesia.eventos.restaurar(d.eventos);
-    }
+    /* Eventos cronológicos — inclusive os exames, que são eventos. Restaura
+       sempre, mesmo vazio: trocar de ficha sem limpar deixaria na tela a linha
+       do tempo da anterior. */
+    anestesia.eventos.restaurar(
+      (Array.isArray(d.eventos) ? d.eventos : []).concat(anestesia.exames._migrarAntigos(d))
+    );
 
     document.getElementById('medicacoes-body').innerHTML = '';
     if (Array.isArray(d.medicacoes)) {
@@ -36804,6 +37546,7 @@ const anestesia = {
       const fr = fin.fromDoc('anestesia', saved);
       if (fr && fr.isNew) {
         ui.mostrarBanner('banner-anestesia', '💰 Lançamento financeiro criado automaticamente. Acesse o módulo Financeiro para complementar valores.', 'success');
+        try { fin.perguntarPagamento(fr.item); } catch (e) {}
       }
     }
     /* atualiza hidden */
@@ -39049,6 +39792,135 @@ const fin = {
     return linhas;
   },
 
+  /* ---- PARTICULAR: O DINHEIRO ENTRA NA HORA -------------------------------
+     Convênio se fatura e se espera semanas; particular se acerta ali, na
+     saída. Se a pergunta não for feita no momento da finalização, o
+     lançamento nasce "pendente" e ninguém volta nele — e o que entrou em
+     dinheiro ou PIX fica sem registro de meio, de valor e de conta.
+     Só pergunta quando o lançamento é NOVO, é particular e ainda não está
+     pago: refinalizar uma ficha não pode reabrir a pergunta. */
+  MEIOS_PAGAMENTO: ['PIX', 'Dinheiro', 'Cartão de débito', 'Cartão de crédito',
+                    'Transferência / TED', 'Boleto', 'Cheque', 'Outro'],
+  ehParticular(item) {
+    const c = String((item && (item.tipo_pagamento || item.convenio)) || '').toLowerCase();
+    return c.indexOf('particular') >= 0;
+  },
+  _pagamentoId: null,
+  perguntarPagamento(item) {
+    if (!item || !item._id) return false;
+    if (!fin.ehParticular(item)) return false;
+    if (item.pago) return false;
+    if (String(item.status || '').toLowerCase() === 'cortesia') return false;
+    fin._pagamentoId = item._id;
+    fin._abrirPagamentoQuandoLivre(0);
+    return true;
+  },
+  /* Só existe UMA janela. A finalização já abre a pergunta da SRPA, e abrir
+     por cima faria uma das duas sumir sem aviso. Espera a vez. */
+  _abrirPagamentoQuandoLivre(tentativa) {
+    let ocupado = false;
+    try {
+      const bd = document.getElementById('modal-backdrop');
+      ocupado = (bd && bd.classList.contains('show')) || !!document.querySelector('.bloq-janela');
+    } catch (e) {}
+    if (ocupado) {
+      if ((tentativa || 0) < 90) setTimeout(() => fin._abrirPagamentoQuandoLivre((tentativa || 0) + 1), 1000);
+      return;
+    }
+    fin._abrirPagamento();
+  },
+  _abrirPagamento() {
+    const item = store.getById('financeiro', fin._pagamentoId);
+    if (!item) return;
+    const prev = parseFloat(item.valor_previsto) || 0;
+    const e = utils.escapeHTML, ea = utils.escapeAttr;
+    /* contas já usadas antes: a lista cresce sozinha, sem cadastro para manter */
+    let contas = [];
+    try { contas = histAutocomplete._coletar('conta_recebeu'); } catch (x) {}
+    const corpo =
+      '<p style="font-size:.86rem;margin:0 0 10px">Atendimento <b>particular</b> de <b>' + e(item.paciente || '') + '</b>' +
+      (item.procedimento ? ' — ' + e(item.procedimento) : '') + '.<br>' +
+      '<span style="color:var(--text-mute);font-size:.82rem">O lançamento foi criado. Se o acerto já foi feito, registre agora; senão ele fica em aberto e aparece nas pendências.</span></p>' +
+      '<form id="form-fin-pag" onsubmit="return false"><div class="grid">' +
+      '<div class="field col-4"><label>Foi pago?</label><select name="fp_pago" onchange="fin._pagAjustar()">' +
+      '<option value="sim">Sim — integral</option><option value="parcial">Parcial</option><option value="nao">Ainda não</option>' +
+      '</select></div>' +
+      '<div class="field col-4"><label>Valor recebido (R$)</label><input type="number" step="0.01" min="0" name="fp_valor" value="' + (prev ? prev.toFixed(2) : '') + '"></div>' +
+      '<div class="field col-4"><label>Data do pagamento</label><input type="date" name="fp_data" value="' + ea(utils.hojeISO()) + '"></div>' +
+      '<div class="field col-6"><label>Meio de pagamento</label><select name="fp_meio"><option value="">—</option>' +
+      fin.MEIOS_PAGAMENTO.map(m => '<option>' + e(m) + '</option>').join('') + '</select></div>' +
+      '<div class="field col-6"><label>Conta que recebeu</label>' +
+      '<input type="text" name="fp_conta" list="fin-contas-lista" placeholder="ex.: Conta PJ Itaú, Caixa da clínica">' +
+      '<datalist id="fin-contas-lista">' + contas.map(c => '<option value="' + ea(c) + '">').join('') + '</datalist></div>' +
+      '<div class="field col-12" id="fp-aviso" style="font-size:.8rem;color:var(--text-mute)"></div>' +
+      '</div></form>';
+    modal.open('💵 Pagamento particular', corpo,
+      '<button class="btn" onclick="fin._pagDepois()">Depois</button>' +
+      '<button class="btn btn-primary" onclick="fin.registrarPagamento()">Registrar</button>');
+    setTimeout(() => { try { fin._pagAjustar(); } catch (x) {} }, 30);
+  },
+  _pagAjustar() {
+    const f = document.getElementById('form-fin-pag');
+    if (!f) return;
+    const pago = (f.querySelector('[name="fp_pago"]') || {}).value;
+    const item = store.getById('financeiro', fin._pagamentoId) || {};
+    const prev = parseFloat(item.valor_previsto) || 0;
+    const vEl = f.querySelector('[name="fp_valor"]');
+    const aviso = document.getElementById('fp-aviso');
+    /* "ainda não" com valor preenchido é contradição: o campo sai de cena */
+    ['fp_valor', 'fp_data', 'fp_meio', 'fp_conta'].forEach(n => {
+      const campo = f.querySelector('[name="' + n + '"]');
+      if (campo && campo.closest('.field')) campo.closest('.field').style.display = (pago === 'nao') ? 'none' : '';
+    });
+    if (pago === 'sim' && vEl && prev) vEl.value = prev.toFixed(2);
+    if (pago === 'parcial' && vEl && vEl.value && prev && parseFloat(vEl.value) >= prev) vEl.value = '';
+    if (aviso) {
+      aviso.textContent = pago === 'nao'
+        ? 'Fica como pendente, com o valor previsto de ' + historico._fmtRS(prev) + '. Dá para registrar depois no módulo Financeiro.'
+        : (prev ? 'Valor previsto: ' + historico._fmtRS(prev) + '.' : '');
+    }
+  },
+  _pagDepois() {
+    modal.close();
+    fin._pagamentoId = null;
+    toast('Deixado em aberto — o lançamento está no Financeiro.');
+  },
+  registrarPagamento() {
+    const f = document.getElementById('form-fin-pag');
+    const item = store.getById('financeiro', fin._pagamentoId);
+    if (!f || !item) { modal.close(); return; }
+    const g = n => ((f.querySelector('[name="' + n + '"]') || {}).value || '').trim();
+    const pago = g('fp_pago');
+    const prev = parseFloat(item.valor_previsto) || 0;
+    const novo = Object.assign({}, item);
+    if (pago === 'nao') {
+      novo.pago = false;
+      novo.status = 'pendente';
+    } else {
+      const val = parseFloat(g('fp_valor'));
+      if (isNaN(val) || val <= 0) { toast('Informe o valor recebido.', 'warn'); return; }
+      novo.valor_recebido = val;
+      novo.valor_pago = val;
+      novo.data_pagamento = g('fp_data') || utils.hojeISO();
+      novo.data_recebimento = novo.data_pagamento;
+      novo.forma_pagamento = g('fp_meio');
+      novo.conta_recebeu = g('fp_conta');
+      /* integral é o que cobre o previsto; abaixo disso é parcial, ainda que
+         a pessoa tenha marcado "sim" — quem decide é a conta */
+      const integral = !prev || val >= prev - 0.005;
+      novo.pago = integral;
+      novo.status = integral ? 'recebido' : 'parcial';
+      novo.diferenca_calc = prev - val - (parseFloat(novo.glosa) || 0);
+    }
+    store.save('financeiro', novo);
+    modal.close();
+    fin._pagamentoId = null;
+    try { financeiro.render(); } catch (e) {}
+    toast(pago === 'nao' ? 'Lançamento em aberto registrado.'
+      : '💵 Pagamento registrado: ' + historico._fmtRS(novo.valor_recebido) +
+        (novo.forma_pagamento ? ' · ' + novo.forma_pagamento : ''));
+  },
+
   /* Mapeia campos do documento de origem para o Financeiro.
      Uma linha financeira por linha do documento, casada por _origemLinhaId:
      editar o registro ATUALIZA a linha vinculada, nunca duplica. Linha que
@@ -40406,6 +41278,15 @@ ui.fecharBanner = function(bannerId) {
 
 /* Atualiza doc-status (Novo / Editando / metadados / vínculos) */
 ui.atualizarDocStatus = function(modKey, item) {
+  /* Todo módulo passa por aqui ao carregar um registro no formulário. É o
+     único ponto comum a todos, e por isso o lugar de reajustar as caixas de
+     texto: com o card já aberto, nenhuma das outras varreduras aconteceria e
+     a descrição inteira ficaria escondida atrás de uma linha. */
+  if (item) {
+    setTimeout(() => {
+      try { utils.autoAlturaTodos(document.getElementById('module-' + modKey)); } catch (e) {}
+    }, 0);
+  }
   const badge = document.getElementById('dsbadge-' + modKey);
   const meta = document.getElementById('dsmeta-' + modKey);
   const links = document.getElementById('dslinks-' + modKey);
@@ -41108,6 +41989,117 @@ const historico = {
     return m ? m[3] + '/' + m[2] + '/' + m[1] : d;
   },
   _fmtRS(v) { return 'R$ ' + (parseFloat(v) || 0).toFixed(2).replace('.', ','); },
+
+  /* ---- COMO CADA STATUS FINANCEIRO SE LÊ --------------------------------
+     O status é o que o anestesista marcou; o "em aberto" é conta, e é ela que
+     diz se ainda falta receber: previsto − recebido − glosa. Os dois aparecem
+     lado a lado de propósito — um "faturado" com tudo recebido não é
+     pendência, e um "recebido" com valor a menos é. */
+  FIN_STATUS: {
+    pendente:   { rot: 'Pendente',   cor: '#b3261e' },
+    faturado:   { rot: 'Faturado',   cor: '#8a6d00' },
+    recebido:   { rot: 'Recebido',   cor: '#0f7b4f' },
+    periciado:  { rot: 'Periciado',  cor: '#8a6d00' },
+    glosado:    { rot: 'Glosado',    cor: '#b3261e' },
+    parcial:    { rot: 'Parcial',    cor: '#8a6d00' },
+    cortesia:   { rot: 'Cortesia',   cor: '#6b7280' },
+    finalizado: { rot: 'Finalizado', cor: '#0f7b4f' }
+  },
+  _finChip(st) {
+    const d = historico.FIN_STATUS[String(st || '').toLowerCase()];
+    const rot = d ? d.rot : (st || '—');
+    const cor = d ? d.cor : '#6b7280';
+    return '<span style="font-size:.7rem;border:1px solid ' + cor + ';color:' + cor +
+           ';border-radius:10px;padding:1px 7px;white-space:nowrap">' + utils.escapeHTML(rot) + '</span>';
+  },
+  _ehCortesia(it) { return String(it.status || '').toLowerCase() === 'cortesia'; },
+  _emAberto(it) {
+    if (historico._ehCortesia(it)) return 0;
+    const v = (parseFloat(it.valor_previsto) || 0) - (parseFloat(it.valor_recebido) || 0) - (parseFloat(it.glosa) || 0);
+    return v > 0.005 ? v : 0;
+  },
+
+  /* Ficha do cadastro: quem é o paciente e desde quando ele existe aqui.
+     Estava em toda parte menos no lugar onde se olha a história dele. */
+  _prontCadastro(nq, norm) {
+    const lista = (store.list('pacientes') || []).filter(p => norm(p.nome || '').includes(nq));
+    if (!lista.length) {
+      return '<div style="font-size:.78rem;color:var(--text-mute);margin-top:6px">' +
+        'Sem ficha no cadastro central — os registros abaixo existem, mas o paciente nunca foi cadastrado.</div>';
+    }
+    const p = lista[0];
+    const e = utils.escapeHTML;
+    const quando = (d) => { try { return d ? new Date(d).toLocaleString('pt-BR') : ''; } catch (x) { return ''; } };
+    const par = (rot, val) => val ? '<span style="margin-right:14px"><small style="color:var(--text-mute)">' + rot + '</small> ' + e(val) + '</span>' : '';
+    return '<div style="font-size:.78rem;margin-top:8px;line-height:1.9">' +
+      par('CPF', p.cpf) + par('Nascimento', utils.formatarData(p.nascimento)) +
+      par('Plano', p.plano) + par('Carteirinha', p.carteirinha) + par('Telefone', p.telefone) +
+      par('Cadastrado em', quando(p._createdAt)) + par('Atualizado em', quando(p._updatedAt)) +
+      (lista.length > 1 ? '<div style="color:#8a6d00;margin-top:2px">⚠️ ' + lista.length +
+        ' cadastros com este nome — use "Juntar cadastros repetidos" em Pacientes.</div>' : '') +
+      '</div>';
+  },
+
+  /* O financeiro por extenso: cada cobrança com o que foi previsto, o que
+     entrou, o que foi glosado e o que ainda falta. O resumo de uma linha só
+     não respondia "qual delas está em aberto". */
+  _prontFinanceiro(eventos) {
+    const fins = eventos.filter(ev => ev.mod === 'financeiro')
+      .sort((a, b) => (b.data || '0').localeCompare(a.data || '0'));
+    if (!fins.length) {
+      return '<h3 style="font-size:.85rem;margin:14px 0 6px">💰 Financeiro</h3>' +
+        '<p style="font-size:.8rem;color:var(--text-mute);margin:0">Nenhum lançamento financeiro para este paciente.</p>';
+    }
+    const e = utils.escapeHTML;
+    let tPrev = 0, tRec = 0, tGlo = 0, tAberto = 0, nAberto = 0;
+    const linhas = fins.map(ev => {
+      const it = ev.it;
+      const prev = parseFloat(it.valor_previsto) || 0;
+      const rec = parseFloat(it.valor_recebido) || 0;
+      const glo = parseFloat(it.glosa) || 0;
+      const ab = historico._emAberto(it);
+      tPrev += prev; tRec += rec; tGlo += glo;
+      if (ab > 0) { tAberto += ab; nAberto++; }
+      const pago = it.pago ? '✅' : (historico._ehCortesia(it) ? '—' : '⬜');
+      return '<tr>' +
+        '<td style="white-space:nowrap">' + historico._fmtData(ev.data) + '</td>' +
+        '<td style="font-size:.8rem">' + e(it.procedimento || '—') +
+          (it.convenio ? ' <small style="color:var(--text-mute)">· ' + e(it.convenio) + '</small>' : '') +
+          /* como e onde o dinheiro entrou — é o que se procura num particular */
+          ((it.forma_pagamento || it.conta_recebeu)
+            ? '<br><small style="color:var(--text-mute)">💵 ' +
+              [it.forma_pagamento, it.conta_recebeu].filter(Boolean).map(e).join(' · ') +
+              (it.data_pagamento ? ' · ' + historico._fmtData(it.data_pagamento) : '') + '</small>'
+            : '') + '</td>' +
+        '<td style="text-align:right;white-space:nowrap">' + historico._fmtRS(prev) + '</td>' +
+        '<td style="text-align:right;white-space:nowrap">' + historico._fmtRS(rec) + '</td>' +
+        '<td style="text-align:right;white-space:nowrap">' + (glo ? historico._fmtRS(glo) : '—') + '</td>' +
+        '<td style="text-align:right;white-space:nowrap;font-weight:' + (ab ? '700' : '400') +
+          ';color:' + (ab ? '#b3261e' : 'inherit') + '">' + (ab ? historico._fmtRS(ab) : '—') + '</td>' +
+        '<td style="text-align:center">' + historico._finChip(it.status) + '</td>' +
+        '<td style="text-align:center" title="Marcado como pago">' + pago + '</td>' +
+        '<td style="text-align:center"><button class="btn btn-xs btn-primary" onclick="historico.abrirItem(\'financeiro\',\'' + it._id + '\')">📂</button></td>' +
+        '</tr>';
+    }).join('');
+    const aviso = nAberto
+      ? '<div style="margin-top:6px;font-size:.8rem;color:#b3261e"><b>⚠️ ' + nAberto +
+        ' cobrança(s) em aberto</b> — total de ' + historico._fmtRS(tAberto) + ' ainda por receber.</div>'
+      : '<div style="margin-top:6px;font-size:.8rem;color:#0f7b4f">✅ Nada em aberto para este paciente.</div>';
+    return '<h3 style="font-size:.85rem;margin:14px 0 6px">💰 Financeiro (' + fins.length + ')</h3>' +
+      '<table class="dash-detail-table" style="margin-top:0">' +
+      '<thead><tr><th style="width:86px">Data</th><th>Procedimento / convênio</th>' +
+      '<th style="width:92px;text-align:right">Previsto</th><th style="width:92px;text-align:right">Recebido</th>' +
+      '<th style="width:80px;text-align:right">Glosa</th><th style="width:92px;text-align:right">Em aberto</th>' +
+      '<th style="width:90px;text-align:center">Status</th><th style="width:50px;text-align:center">Pago</th>' +
+      '<th style="width:44px"></th></tr></thead><tbody>' + linhas + '</tbody>' +
+      '<tfoot><tr style="font-weight:700;background:var(--surface-alt)">' +
+      '<td colspan="2">Totais</td>' +
+      '<td style="text-align:right">' + historico._fmtRS(tPrev) + '</td>' +
+      '<td style="text-align:right">' + historico._fmtRS(tRec) + '</td>' +
+      '<td style="text-align:right">' + historico._fmtRS(tGlo) + '</td>' +
+      '<td style="text-align:right;color:' + (tAberto > 0.005 ? '#b3261e' : 'inherit') + '">' + historico._fmtRS(tAberto) + '</td>' +
+      '<td colspan="3"></td></tr></tfoot></table>' + aviso;
+  },
   _detalheItem(mod, it) {
     const e = utils.escapeHTML;
     if (mod === 'financeiro') {
@@ -41158,21 +42150,50 @@ const historico = {
     const norm = s => (linker._normNome ? linker._normNome(s || '') : (s || '').toLowerCase().trim());
     const nq = norm(q);
     if (nq.length < 2) return '<p style="color:var(--text-mute);font-size:.85rem">Digite ao menos 2 letras do nome do paciente.</p>';
-    /* Coleta em todos os módulos */
+    /* Coleta em todos os módulos.
+       Casa pelo NOME e também pelo ID DO CADASTRO: quem escolheu o paciente na
+       lista carrega _paciente_id, e aí um nome corrigido depois (ou digitado
+       com uma letra diferente naquele dia) não tira o registro do histórico.
+       É o que torna o registro rastreável de verdade. */
+    const ids = new Set(
+      (store.list('pacientes') || [])
+        .filter(p => norm(p.nome || '').includes(nq))
+        .map(p => p._id).filter(Boolean)
+    );
     const eventos = [];
+    const vistos = new Set();
     Object.keys(historico.MODS_PRONT).forEach(mod => {
       (store.list(mod) || []).forEach(it => {
         const nome = historico._nomeItem(it);
-        if (nome && norm(nome).includes(nq)) {
-          eventos.push({ mod, it, nome, data: historico._dataItem(it) });
-        }
+        const porNome = nome && norm(nome).includes(nq);
+        const porId = it._paciente_id && ids.has(it._paciente_id);
+        if (!porNome && !porId) return;
+        const chave = mod + ':' + (it._id || nome);
+        if (vistos.has(chave)) return;
+        vistos.add(chave);
+        eventos.push({ mod, it, nome: nome || '', data: historico._dataItem(it) });
       });
     });
-    if (!eventos.length) return '<p style="color:var(--text-mute);font-size:.85rem">Nenhum registro encontrado para "' + utils.escapeHTML(q) + '".</p>';
+    if (!eventos.length) {
+      /* Paciente recém-cadastrado ainda não tem documento nenhum. Dizer só
+         "nenhum registro" faria parecer que ele não existe — e a pergunta
+         "quando foi cadastrado" tem resposta mesmo assim. */
+      const so = (store.list('pacientes') || []).filter(p => norm(p.nome || '').includes(nq));
+      if (so.length) {
+        return '<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;background:var(--surface-alt)">' +
+          '<b style="font-size:.95rem">' + utils.escapeHTML(so[0].nome || '') + '</b>' +
+          '<span style="font-size:.76rem;color:var(--text-mute)"> — cadastrado, ainda sem documentos</span>' +
+          historico._prontCadastro(nq, norm) + '</div>';
+      }
+      return '<p style="color:var(--text-mute);font-size:.85rem">Nenhum registro encontrado para "' + utils.escapeHTML(q) + '".</p>';
+    }
     /* Ordena por data desc (sem data vai pro fim) */
     eventos.sort((a, b) => (b.data || '0').localeCompare(a.data || '0'));
     /* Cabeçalho-resumo */
-    const nomeTitulo = eventos[0].nome;
+    /* achado só pelo id (nome gravado diferente): o título vem do cadastro */
+    const nomeTitulo = eventos.map(ev => ev.nome).find(Boolean)
+      || ((store.list('pacientes') || []).find(p => norm(p.nome || '').includes(nq)) || {}).nome
+      || q;
     const porMod = {};
     eventos.forEach(ev => { porMod[ev.mod] = (porMod[ev.mod] || 0) + 1; });
     let fin = { prev: 0, rec: 0 };
@@ -41185,6 +42206,11 @@ const historico = {
       historico.MODS_PRONT[m] + ': <b>' + porMod[m] + '</b></span>').join('');
     const resumoFin = porMod.financeiro ?
       '<div style="font-size:.78rem;margin-top:6px">💰 Previsto: <b>' + historico._fmtRS(fin.prev) + '</b> · Recebido: <b>' + historico._fmtRS(fin.rec) + '</b> · Em aberto: <b style="color:' + (fin.prev - fin.rec > 0.005 ? 'var(--danger, #b3261e)' : 'inherit') + '">' + historico._fmtRS(fin.prev - fin.rec) + '</b></div>' : '';
+    /* Ficha do cadastro e o financeiro por extenso — o resumo de uma linha só
+       não dizia desde quando o paciente existe aqui nem QUAL cobrança está em
+       aberto, que é o que se quer saber ao abrir a história dele. */
+    const cadastroHtml = historico._prontCadastro(nq, norm);
+    const financeiroHtml = historico._prontFinanceiro(eventos);
     /* Anexos de todos os registros */
     let anexosHtml = '';
     const anexos = [];
@@ -41218,9 +42244,11 @@ const historico = {
         <span style="font-size:.76rem;color:var(--text-mute)"> — ${eventos.length} registro(s)</span>
         <div style="margin-top:4px">${chips}</div>
         ${resumoFin}
+        ${cadastroHtml}
       </div>
+      ${financeiroHtml}
       ${anexosHtml}
-      <h3 style="font-size:.85rem;margin:14px 0 6px">🕐 Linha do tempo</h3>
+      <h3 style="font-size:.85rem;margin:14px 0 6px">🕐 Linha do tempo <small style="font-weight:400;color:var(--text-mute)">— todo documento feito para este paciente, com a data</small></h3>
       <table class="dash-detail-table" style="margin-top:0">
         <thead><tr><th style="width:86px">Data</th><th style="width:130px">Módulo</th><th>Detalhe</th><th style="width:90px;text-align:center">Ações</th></tr></thead>
         <tbody>${linhas}</tbody>
@@ -41908,7 +42936,8 @@ const pacientes = {
         <td class="actions-cell">
           <button class="btn btn-xs" onclick="pacientes.editar('${p._id}')">Editar</button>
           <button class="btn btn-xs" onclick="pacientes.corrigirNome('${p._id}')" title="Corrige o nome no cadastro E em todos os registros deste paciente">✏️ Nome</button>
-          <button class="btn btn-xs" onclick="pacientes.resumo('${utils.escapeAttr(p.nome || '')}')" title="Histórico consolidado do paciente">📋 Resumo</button>
+          <button class="btn btn-xs" onclick="historico.prontuario('${utils.escapeAttr(p.nome || '')}')" title="Tudo deste paciente: cadastro, documentos com data, financeiro, o que está pago e o que está em aberto">📚 Histórico</button>
+          <button class="btn btn-xs" onclick="pacientes.resumo('${utils.escapeAttr(p.nome || '')}')" title="Resumo clínico com evolução da dor (EVA)">📋 Resumo</button>
           <button class="btn btn-xs" onclick="quickActions.abrir('${p._id}')">⚡ Ações</button>
           <button class="btn btn-xs btn-danger" onclick="pacientes.excluir('${p._id}')">×</button>
         </td>
@@ -42797,9 +43826,15 @@ const autocomplete = {
       if (!h) { h = document.createElement('input'); h.type = 'hidden'; h.name = '_paciente_id'; f.appendChild(h); }
       h.value = p._id;
     } else {
-      /* form-pre, form-consulta, form-recuperacao */
+      /* todos os demais: pré, consulta, SRPA, termo, receituário, risco,
+         documentos, orçamento e financeiro. O campo do nome não se chama
+         igual em todos — supor "nome" deixava orçamento e financeiro de fora
+         e quebrava calado. */
       const setIfEmpty = (n, v) => { const el = f.querySelector(`[name="${n}"]`); if (el && !el.value && v) el.value = v; };
-      f.querySelector('[name="nome"]').value = p.nome || '';
+      const campoNome = f.querySelector('[name="nome"]') || f.querySelector('[name="paciente"]')
+                     || f.querySelector('[name="paciente_nome"]');
+      if (!campoNome) return;
+      campoNome.value = p.nome || '';
       setIfEmpty('sexo', p.sexo);
       if (p.nascimento && f.querySelector('[name="idade"]')) {
         const d = new Date(p.nascimento);
@@ -42833,7 +43868,8 @@ const autocomplete = {
         'form-anestesia': 'anestesia', 'form-pre': 'pre',
         'form-consulta': 'consulta', 'form-recuperacao': 'recuperacao',
         'form-documentos': 'documentos', 'form-prescricao': 'prescricao',
-        'form-termo': 'termo', 'form-risco': 'risco'
+        'form-termo': 'termo', 'form-risco': 'risco',
+        'form-orcamento': 'orcamento', 'form-agenda': 'agenda'
       }[formId];
       if (MOD && p.nome) {
         linker.autoPreencherDadosPaciente(p.nome, MOD);
@@ -42888,10 +43924,16 @@ const autocomplete = {
        que se faz DEPOIS, para um paciente que já existe. Quem ia emitir um
        atestado digitava o nome inteiro e o sistema agia como se não a
        conhecesse. */
+    /* A lista completa dos formulários com campo de paciente. Orçamento e
+       Financeiro ficaram de fora por último — e são os dois em que redigitar o
+       nome custa mais caro: nome digitado diferente do cadastro é registro que
+       não aparece no histórico daquele paciente nem casa com a cobrança. */
     [['#form-documentos [name="nome"]', 'form-documentos'],
      ['#form-prescricao [name="nome"]', 'form-prescricao'],
      ['#form-termo [name="nome"]', 'form-termo'],
-     ['#form-risco [name="nome"]', 'form-risco']
+     ['#form-risco [name="nome"]', 'form-risco'],
+     ['#form-orcamento [name="paciente"]', 'form-orcamento'],
+     ['#form-financeiro [name="paciente"]', 'form-financeiro']
     ].forEach(([sel, formId]) => {
       const el = document.querySelector(sel);
       if (el) autocomplete.attachPacientes(el, formId);
@@ -44054,35 +45096,27 @@ ${TAG_CLOSE_HTML}`;
   },
   /* Débito urinário em mL/kg/h para a impressão da anestesia.
      Usa o volume da diurese (painel ou campo do balanço), o peso e o tempo. */
+  /* A ficha impressa usa a MESMA conta do painel (anestesia.diurese.calcular).
+     Antes cada um fazia a sua, e as duas podiam discordar — a impressão dividia
+     pelo tempo inteiro da anestesia mesmo quando a última aferição foi bem
+     antes do fim. */
   _debitoUrinario(d) {
     try {
-      const mn = d.monitorizacao || {};
-      const di = mn.diurese || {};
+      const di = ((d.monitorizacao || {}).diurese) || {};
       const peso = parseFloat((d.paciente || {}).peso);
-      if (!peso) return '';
-      /* volume: total ou soma das parciais; senão o campo simples do balanço */
-      let vol = 0;
-      if (di.modo === 'total') vol = parseFloat(di.total) || 0;
-      else if (di.parciais && di.parciais.length) di.parciais.forEach(p => { const v = parseFloat(p.vol); if (!isNaN(v)) vol += v; });
+      const t = d.tempos || {};
+      const ini = t.hora_inicio || (d.procedimento || {}).hora_inicio || d.hora_inicio ||
+                  t.hora_sala_entrada || '';
+      const fim = t.hora_fim || (d.procedimento || {}).hora_fim || d.hora_fim || '';
+      const c = anestesia.diurese.calcular(di, peso, ini, fim, '');
+      let vol = c.vol;
       if (!vol) vol = parseFloat((d.fluidos || {}).diurese) || 0;
       if (!vol) return '';
-      /* minutos: manual, ou início→fim */
-      let mins = null;
-      if (di.base === 'manual' && di.min) mins = parseInt(di.min, 10);
-      else {
-        const t = d.tempos || {};
-        const ini = t.hora_inicio || (d.procedimento || {}).hora_inicio || d.hora_inicio;
-        const fim = t.hora_fim || (d.procedimento || {}).hora_fim || d.hora_fim;
-        if (ini && fim) {
-          const [h1, m1] = ini.split(':').map(Number);
-          const [h2, m2] = fim.split(':').map(Number);
-          mins = (h2 * 60 + m2) - (h1 * 60 + m1);
-          if (mins < 0) mins += 1440;
-        }
-      }
-      if (!mins || mins <= 0) return vol + ' mL (tempo n/d)';
-      const mlkgh = vol / peso / (mins / 60);
-      return mlkgh.toFixed(2).replace('.', ',') + ' mL/kg/h';
+      if (!peso) return Math.round(vol) + ' mL (sem peso)';
+      if (c.mlkgh == null) return Math.round(vol) + ' mL (tempo n/d)';
+      const janela = (c.ini && c.fim) ? ' — ' + c.ini + '→' + c.fim : '';
+      return c.mlkgh.toFixed(2).replace('.', ',') + ' mL/kg/h (' +
+             Math.round(vol) + ' mL em ' + anestesia.diurese._fmtDur(c.min) + janela + ')';
     } catch (e) { return ''; }
   },
   /* Sinais vitais e medidas (peso, altura, IMC, PA, FC, FR, SpO2, Temp, Dor) — só preenchidos */
@@ -44669,8 +45703,14 @@ ${TAG_CLOSE_HTML}`;
             ${printPreview._field('FR', m.fr ? m.fr + ' irpm' : '')}
             ${printPreview._field('PEEP', m.peep ? m.peep + ' cmH₂O' : '')}
             ${printPreview._field('FiO₂', m.fio2 ? m.fio2 + '%' : '')}
+            ${printPreview._field('P. insp', m.pinsp ? m.pinsp + ' cmH₂O' : '')}
+            ${printPreview._field('P. suporte', m.ps ? m.ps + ' cmH₂O' : '')}
             ${printPreview._field('P. pico', m.ppico ? m.ppico + ' cmH₂O' : '')}
             ${printPreview._field('P. platô', m.pplato ? m.pplato + ' cmH₂O' : '')}
+            ${printPreview._field('Início da VM', m.hora_ini)}
+            ${printPreview._field('Fim da VM', m.hora_fim)}
+            ${printPreview._field('T insp.', m.tinsp ? m.tinsp + ' s' : '')}
+            ${printPreview._field('Pausa insp.', m.pausa ? m.pausa + '%' : '')}
             ${printPreview._field('Driving P.', m.driving ? m.driving + ' cmH₂O' : '')}
             ${printPreview._field('I:E', m.ie)}
             ${printPreview._field('Trigger', m.trigger)}
@@ -44876,7 +45916,10 @@ ${TAG_CLOSE_HTML}`;
           });
           if (meds.length > 0 && evts.length > 0) legendaPrint += '<br>';
           evts.forEach((e, i) => {
-            legendaPrint += `<span style="display:inline-block;margin-right:10px;margin-bottom:2px"><span style="display:inline-block;background:#1f9171;color:#fff;border-radius:3px;width:18px;height:14px;line-height:14px;text-align:center;font-size:8pt;font-weight:bold;margin-right:3px">E${i+1}</span>${e.hora} · ${utils.escapeHTML(e.tipo)}${e.observacao ? ' — ' + utils.escapeHTML(e.observacao) : ''}</span>`;
+            /* exame entra só pelo nome: os valores saem legíveis na tabela de
+               exames, e não espremidos numa linha da legenda */
+            const detalhe = anestesia.exames.ehExame(e.tipo) ? '' : (e.observacao ? ' — ' + utils.escapeHTML(e.observacao) : '');
+            legendaPrint += `<span style="display:inline-block;margin-right:10px;margin-bottom:2px"><span style="display:inline-block;background:#1f9171;color:#fff;border-radius:3px;width:18px;height:14px;line-height:14px;text-align:center;font-size:8pt;font-weight:bold;margin-right:3px">E${i+1}</span>${e.hora} · ${utils.escapeHTML(e.tipo)}${detalhe}</span>`;
           });
           legendaPrint += '</div>';
         }
@@ -44931,6 +45974,20 @@ ${TAG_CLOSE_HTML}`;
         `;
         }).join('') + '</tbody></table>'
       );
+    }
+    /* Exames intraoperatórios — os eventos que são exame, em tabela: os
+       números de uma gasometria não se leem numa linha corrida da legenda */
+    {
+      const exs = anestesia.exames.listar(d);
+      if (exs.length) {
+        html += printPreview._section('Exames intraoperatórios',
+          '<table class="pp-table"><thead><tr><th style="width:60px">Hora</th><th style="width:150px">Exame</th><th>Resultado</th></tr></thead><tbody>' +
+          exs.map(e => '<tr><td>' + utils.escapeHTML(e.hora) + '</td>' +
+            '<td>' + utils.escapeHTML(e.tipo) + '</td>' +
+            '<td>' + utils.escapeHTML(e.resultado) + '</td></tr>').join('') +
+          '</tbody></table>'
+        );
+      }
     }
     /* Fluidos */
     const f = d.fluidos;
@@ -51808,6 +52865,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* 13b. Liga autocomplete em todos os campos relevantes */
   setTimeout(() => autocomplete.ligarTudo(), 100);
+
+  /* 13b2. Caixas de texto acompanham o conteúdo. Um ouvinte só, na captura:
+     vale para o que se digita E para o que os seletores (alergias,
+     comorbidades, medicações, modelos) escrevem no campo — todos disparam
+     'input'. Campo novo criado depois entra junto, sem precisar ser ligado. */
+  document.addEventListener('input', (e) => {
+    if (e.target && e.target.tagName === 'TEXTAREA') utils.autoAltura(e.target);
+  }, true);
+  /* rede de segurança: ficha carregada com o card já aberto não passa por
+     nenhuma das varreduras — ao tocar no campo, ele se ajusta na hora */
+  document.addEventListener('focusin', (e) => {
+    if (e.target && e.target.tagName === 'TEXTAREA') utils.autoAltura(e.target);
+  }, true);
+  /* mudou a largura, mudou onde o texto quebra; e o teto vem da altura da tela */
+  let _reAlt;
+  window.addEventListener('resize', () => {
+    clearTimeout(_reAlt);
+    _reAlt = setTimeout(() => utils.autoAlturaTodos(document.querySelector('.module.active')), 150);
+  });
+  setTimeout(() => { utils.autoAlturaTodos(); utils.corretorTodos(); }, 300);
 
   /* 13e. Inicializa interação do gráfico (drag/touch) */
   setTimeout(() => {

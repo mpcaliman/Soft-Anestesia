@@ -6881,7 +6881,12 @@ await test('Ficha: diurese entra na grade dos sinais vitais, calcula ritmo e ali
     /* abaixo de 0,5 mL/kg/h o número aparece em vermelho — é o alerta */
     const tds = document.querySelectorAll('#vitais-grade tr.vg-diurese td');
     out.alertouOligúria = /rgb\(192, 57, 43\)|#c0392b/.test(tds[1].querySelector('div').getAttribute('style') || '');
-    out.debitoDoCaso = /0,46 mL\/kg\/h/.test((document.getElementById('diurese-resultado') || {}).value || '');
+    /* 130 mL medidos entre 08:00 e 10:00 (último registro) = 0,93 mL/kg/h.
+       Este teste afirmava 0,46, que é 130 dividido pelas 4h da anestesia
+       inteira — e entre 10:00 e 12:00 NADA foi medido. Dividir por um tempo
+       maior do que o medido supõe diurese zero nesse trecho: era isso que
+       fazia um caso normal aparecer como oligúria. */
+    out.debitoDoCaso = /0,93 mL\/kg\/h/.test((document.getElementById('diurese-resultado') || {}).value || '');
 
     /* apagar o valor tira o registro (e o balanço acompanha) */
     const c3 = cels(); c3[1].value = ''; anestesia.diurese._daGrade(c3[1]);
@@ -6919,7 +6924,7 @@ await test('Ficha: diurese entra na grade dos sinais vitais, calcula ritmo e ali
   assert(r.foiParaOBalanco, 'a diurese registrada alimenta o balanço hídrico sozinha');
   assert(r.ritmoDoIntervalo, 'cada intervalo mostra o próprio ritmo urinário');
   assert(r.alertouOligúria, 'ritmo abaixo de 0,5 mL/kg/h precisa saltar aos olhos');
-  assert(r.debitoDoCaso, 'o débito do caso continua sendo calculado no fim');
+  assert(r.debitoDoCaso, 'o débito do caso é o volume medido dividido pelo tempo MEDIDO, não pelo ato inteiro');
   assert(r.apagarRemove, 'apagar o valor desfaz o registro e corrige o balanço');
   assert(r.monitorAbre, 'débito urinário marcado nos monitores abre o painel e a coluna, sem depender da sonda');
   assert(r.monitorNoBalanco, 'e o total medido continua indo sozinho para as saídas do balanço');
@@ -11424,7 +11429,7 @@ await test('Pacientes: ordenação, filtro por plano e a linha inteira cabendo n
 
     const acoes = linha.querySelector('td.actions-cell');
     const botoes = Array.from(acoes.querySelectorAll('.btn'));
-    out.temTodosOsBotoes = botoes.length === 5;
+    out.temTodosOsBotoes = botoes.length === 6;   /* + 📚 Histórico do paciente */
     /* o último botão tem de caber DENTRO da célula de ações — era ele que
        ficava fora do campo visual */
     const rc = acoes.getBoundingClientRect();
@@ -11449,7 +11454,7 @@ await test('Pacientes: ordenação, filtro por plano e a linha inteira cabendo n
   assert(r.limparVoltaTudo, 'Limpar devolve a lista inteira e a ordem padrão');
   assert(r.cabecalhoInverte && r.temSeta, 'o cabeçalho ordena e a seta diz por onde');
   assert(r.telefoneNaoQuebra, 'telefone e afins param de quebrar em duas linhas');
-  assert(r.temTodosOsBotoes, 'os cinco botões da linha continuam existindo');
+  assert(r.temTodosOsBotoes, 'os seis botões da linha continuam existindo');
   assert(r.ultimoBotaoCabe, 'e o último cabe na célula — era ele que ficava fora da tela');
   assert(r.tabelaTemLarguraReal, 'a tabela tem largura de verdade, para a rolagem alcançar tudo');
   await page.close();
@@ -13457,6 +13462,937 @@ await test('Pré com exames pendentes: finaliza, cobra na data da avaliação, e
   assert(r.chipDizOQueFalta, 'e o Meu dia não mostra como resolvido — diz o que ainda falta');
   assert(r.liberadoNaoPendura, 'quem saiu liberado não vira pendência');
   assert(r.antigoValeLiberado, 'registro anterior a isto vale como liberado: nenhum histórico se mexe');
+  await page.close();
+});
+
+/* 199) Exames intraoperatórios. Gasometria, hemograma, glicemia: são pontuais e
+   trazem vários valores de uma vez, então não cabem na grade de sinais vitais
+   (uma coluna por parâmetro contínuo). Mas têm hora e aconteceram no meio do
+   ato, então ficam na tabela de EVENTOS — uma linha do tempo só, que se ordena
+   junta. Aqui se verifica o caminho inteiro: lançar, preencher os valores, o
+   detalhe virar texto, sobreviver ao salvar/recarregar e sair na impressão —
+   e que o que o anestesista escreveu à mão nunca é reescrito pelo sistema. */
+await test('Ficha: exames entram na linha do tempo dos eventos, com os valores de cada um', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    store.setList('anestesia', []);
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 400));
+    try { modal.close(); } catch (e) {}
+
+    /* 1) não há tabela separada: o exame é um evento */
+    out.semTabelaPropria = !document.getElementById('exames-body');
+    out.ehEvento = anestesia.eventos.TIPOS.indexOf('Gasometria arterial') >= 0;
+
+    const linhasEvt = () => document.querySelectorAll('#eventos-body tr');
+    const nAntes = linhasEvt().length;
+    const tr = anestesia.exames.add('Gasometria arterial');
+    out.lancouNaLinhaDoTempo = linhasEvt().length === nAntes + 1
+      && (tr.querySelector('[name="evt_tipo[]"]') || {}).value === 'Gasometria arterial';
+    tr.querySelector('[name="evt_hora[]"]').value = '09:20';
+
+    /* 2) o botão da linha vira 🧪 e abre os campos DAQUELE exame */
+    const btn = tr.querySelector('td[data-label="Detalhes"] .btn-rm');
+    out.botaoViraDeExame = btn.textContent === '🧪';
+    anestesia.eventos.detalhar(btn);
+    const f = document.getElementById('form-exame');
+    out.abriuCamposDoExame = !!f && !!f.querySelector('[name="ex_ph"]') && !!f.querySelector('[name="ex_pco2"]')
+      && !!f.querySelector('[name="ex_be"]') && !!f.querySelector('[name="ex_k"]');
+    f.querySelector('[name="ex_ph"]').value = '7,28';
+    f.querySelector('[name="ex_pco2"]').value = '52';
+    f.querySelector('[name="ex_k"]').value = '5,4';
+    anestesia.exames.salvar();
+    await new Promise(res => setTimeout(res, 200));
+
+    const obs = tr.querySelector('[name="evt_obs[]"]');
+    out.viroutexto = /pH 7,28/.test(obs.value) && /pCO₂ 52 mmHg/.test(obs.value) && /K⁺ 5,4 mEq\/L/.test(obs.value);
+    out.brancoNaoAparece = !/pO₂/.test(obs.value) && !/undefined/.test(obs.value);
+
+    /* 3) evento comum continua com o botão de descrição técnica */
+    const trEvt = anestesia.eventos.add({ tipo: 'Intubação', hora: '09:00' });
+    out.eventoComumSegue = trEvt.querySelector('td[data-label="Detalhes"] .btn-rm').textContent === '📝';
+
+    /* 4) segundo exame, de outro tipo, com outros campos */
+    const tr2 = anestesia.exames.add('Hemograma');
+    tr2.querySelector('[name="evt_hora[]"]').value = '10:05';
+    anestesia.eventos.detalhar(tr2.querySelector('td[data-label="Detalhes"] .btn-rm'));
+    const f2 = document.getElementById('form-exame');
+    out.hemogramaNaoTemPh = !f2.querySelector('[name="ex_ph"]') && !!f2.querySelector('[name="ex_hb"]');
+    f2.querySelector('[name="ex_hb"]').value = '8,1';
+    f2.querySelector('[name="ex_plaq"]').value = '96000';
+    anestesia.exames.salvar();
+    await new Promise(res => setTimeout(res, 200));
+
+    /* 5) ordenar a linha do tempo mistura exame e evento na ordem da hora */
+    anestesia.ordenarPorHorario('eventos-body');
+    const ordem = [...linhasEvt()].map(x => (x.querySelector('[name="evt_tipo[]"]') || {}).value);
+    out.ordenaJunto = ordem.join('|') === 'Intubação|Gasometria arterial|Hemograma';
+
+    /* 6) sobrevive ao salvar e ao recarregar a ficha */
+    const d = anestesia.coletarEstruturado();
+    out.semCopiaSeparada = d.exames === undefined;
+    const gaso = d.eventos.find(e => e.tipo === 'Gasometria arterial');
+    out.coletou = !!gaso && gaso.valores.ph === '7,28' && gaso.hora === '09:20'
+      && d.eventos.find(e => e.tipo === 'Hemograma').valores.plaq === '96000';
+    out.derivaOsExames = anestesia.exames.listar(d).length === 2
+      && anestesia.exames.listar(d)[0].tipo === 'Gasometria arterial';
+
+    anestesia.eventos.restaurar([]);
+    out.limpou = linhasEvt().length === 0;
+    anestesia.eventos.restaurar(d.eventos);
+    const volta = [...linhasEvt()].find(x => (x.querySelector('[name="evt_tipo[]"]') || {}).value === 'Gasometria arterial');
+    out.restaurou = !!volta && (volta.querySelector('[name="evt_hora[]"]') || {}).value === '09:20';
+    anestesia.eventos.detalhar(volta.querySelector('td[data-label="Detalhes"] .btn-rm'));
+    out.valoresVoltaram = (document.querySelector('#form-exame [name="ex_pco2"]') || {}).value === '52';
+    try { modal.close(); } catch (e) {}
+
+    /* 7) o que foi escrito à mão é do anestesista: mexer nos valores não apaga */
+    const o0 = volta.querySelector('[name="evt_obs[]"]');
+    o0.value = 'Acidose respiratória — ajustada a ventilação';
+    anestesia.eventos._marcarManual(o0);
+    anestesia.eventos.detalhar(volta.querySelector('td[data-label="Detalhes"] .btn-rm'));
+    document.querySelector('#form-exame [name="ex_pco2"]').value = '39';
+    anestesia.exames.salvar();
+    await new Promise(res => setTimeout(res, 200));
+    out.naoReescreveOQueEleEscreveu = o0.value === 'Acidose respiratória — ajustada a ventilação';
+    out.guardouOValorNovo = anestesia.eventos.coletar()
+      .find(e => e.tipo === 'Gasometria arterial').valores.pco2 === '39';
+
+    /* 8) ficha antiga, da versão com tabela separada, volta como evento */
+    const antiga = { eventos: [{ hora: '08:00', tipo: 'Indução' }],
+      exames: [{ hora: '08:30', tipo: 'Outro', resultado: 'Beta-HCG negativo', valores: {} }] };
+    const migrados = anestesia.exames._migrarAntigos(antiga);
+    out.migraAntiga = migrados.length === 1 && migrados[0].tipo === 'Outro exame'
+      && migrados[0].observacao === 'Beta-HCG negativo';
+
+    /* 9) sai na ficha impressa, no resumo narrativo, e a legenda não estoura */
+    const html = printPreview._buildAnestesia();
+    out.saiNaImpressao = /Exames intraoperat/i.test(html) && /Hemograma/.test(html) && /09:20/.test(html);
+    anestesia.resumo.gerar();
+    const narr = (document.querySelector('#form-anestesia [name="resumo_narrativo"]') || {}).value || '';
+    out.temNarrativa = /Exames intraoperat/i.test(narr) && /Hemograma/.test(narr);
+    return out;
+  });
+
+  assert(r.semTabelaPropria && r.ehEvento, 'o exame é um evento — não há segunda tabela');
+  assert(r.lancouNaLinhaDoTempo, 'o atalho lança o exame na linha do tempo, já com o tipo');
+  assert(r.botaoViraDeExame, 'e o botão da linha vira o de valores (🧪)');
+  assert(r.eventoComumSegue, 'enquanto o evento comum segue com o de descrição técnica (📝)');
+  assert(r.abriuCamposDoExame, 'a janela traz os campos daquele exame — pH, pCO₂, BE, K⁺ na gasometria');
+  assert(r.viroutexto, 'os valores viram o texto de detalhes, com as unidades');
+  assert(r.brancoNaoAparece, 'o que ficou em branco não aparece');
+  assert(r.hemogramaNaoTemPh, 'cada exame tem os seus campos: o hemograma não pede pH');
+  assert(r.ordenaJunto, 'ordenar por horário mistura exame e evento na ordem em que aconteceram');
+  assert(r.semCopiaSeparada, 'o registro não guarda uma segunda cópia dos exames');
+  assert(r.coletou, 'os exames entram no registro salvo, com os valores separados');
+  assert(r.derivaOsExames, 'e são reconhecidos como exames quando o registro é lido');
+  assert(r.limpou && r.restaurou, 'voltam na tela ao reabrir a ficha');
+  assert(r.valoresVoltaram, 'com os valores editáveis de novo, não só o texto');
+  assert(r.naoReescreveOQueEleEscreveu, 'o texto escrito à mão não é reescrito pelo sistema');
+  assert(r.guardouOValorNovo, 'ainda que o valor corrigido seja guardado');
+  assert(r.migraAntiga, 'ficha salva antes desta mudança volta com os exames na linha do tempo');
+  assert(r.saiNaImpressao, 'e tudo sai na ficha impressa');
+  assert(r.temNarrativa, 'e no resumo narrativo da anestesia');
+  await page.close();
+});
+
+/* 200) Modos de ventilação. O pedido foi o modo a pressão com volume garantido
+   — PCV-VG, que cada fabricante chama de um jeito. Ele não é só mais uma linha
+   na lista: é o único modo em que VOLUME e PRESSÃO são programados juntos (o
+   volume é alvo, a pressão é limite), e a regra que escolhia os campos lia as
+   primeiras letras do nome, o que faria "PCV-VG" herdar os campos do "PCV" e
+   perder o volume. De quebra, quatro campos da ventilação estavam na tela
+   desde sempre e não eram gravados. */
+await test('Ventilação: PCV-VG e os outros modos — com os campos certos, e gravando o que a tela pede', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    store.setList('anestesia', []);
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 400));
+    try { modal.close(); } catch (e) {}
+
+    const f = document.getElementById('form-anestesia');
+    const sel = f.querySelector('[name="vent_modo"]');
+    const opcoes = [...sel.options].map(o => o.value);
+    out.temPcvVg = opcoes.some(o => /PCV-VG/.test(o) && /volume garantido/i.test(o));
+    /* os modos que já existiam continuam escritos igual: ficha antiga abre */
+    out.mantemOsAntigos = ['VCV (volume controlado)', 'PCV (pressão controlada)',
+      'PSV (pressão de suporte)', 'SIMV', 'PRVC', 'APRV', 'BIPAP / Bi-Vent', 'VAPS']
+      .every(v => opcoes.indexOf(v) >= 0);
+    out.temOsNovos = ['SIMV-VC', 'SIMV-PC', 'CPAP', 'CPAP + PSV', 'Manual / balão']
+      .every(t => opcoes.some(o => o.indexOf(t) === 0));
+
+    /* ventilação mecânica precisa estar visível para os campos aparecerem */
+    f.querySelector('[name="vent_modo_geral"][value="mecanica"]').checked = true;
+    anestesia.vent.alternar();
+
+    const visivel = n => {
+      const el = f.querySelector('[name="' + n + '"]');
+      const campo = el && el.closest('[data-vmodo]');
+      return !!campo && campo.style.display !== 'none';
+    };
+    const escolher = v => { sel.value = v; anestesia.vent.mostrarCamposModo(); };
+
+    /* PCV puro: pressão, sem volume */
+    escolher('PCV (pressão controlada)');
+    out.pcvSemVolume = visivel('vent_pinsp') && !visivel('vent_vc');
+
+    /* PCV-VG: volume-alvo E limite de pressão, os dois juntos — é o modo */
+    escolher(opcoes.find(o => /PCV-VG/.test(o)));
+    out.pcvVgTemOsDois = visivel('vent_vc') && visivel('vent_pinsp')
+      && visivel('vent_pplato') && visivel('vent_tinsp');
+
+    /* VCV segue sem pressão de suporte; PSV segue sem volume */
+    escolher('VCV (volume controlado)');
+    out.vcvIntacto = visivel('vent_vc') && !visivel('vent_ps');
+    escolher('PSV (pressão de suporte)');
+    out.psvIntacto = visivel('vent_ps') && !visivel('vent_vc');
+
+    /* 2) os quatro campos que a tela pedia e o registro jogava fora */
+    escolher(opcoes.find(o => /PCV-VG/.test(o)));
+    f.querySelector('[name="vent_vc"]').value = '420';
+    f.querySelector('[name="vent_pinsp"]').value = '22';
+    f.querySelector('[name="vent_ps"]').value = '8';
+    f.querySelector('[name="vent_pausa"]').value = '10';
+    f.querySelector('[name="vent_tinsp"]').value = '1.2';
+    const d = anestesia.coletarEstruturado();
+    const m = d.ventilacao.mecanica;
+    out.gravaOsQuatro = m.pinsp === '22' && m.ps === '8' && m.pausa === '10' && m.tinsp === '1.2';
+    out.gravaOModo = /PCV-VG/.test(m.modo) && m.vc === '420';
+
+    /* 3) e voltam ao reabrir a ficha, com os campos do modo já certos */
+    ['vent_vc', 'vent_pinsp', 'vent_ps', 'vent_pausa', 'vent_tinsp'].forEach(n => {
+      f.querySelector('[name="' + n + '"]').value = '';
+    });
+    sel.value = '';
+    anestesia.vent.restaurar(d.ventilacao);
+    out.restaura = f.querySelector('[name="vent_pinsp"]').value === '22'
+      && f.querySelector('[name="vent_tinsp"]').value === '1.2'
+      && /PCV-VG/.test(sel.value);
+    out.restauraOsCampos = visivel('vent_vc') && visivel('vent_pinsp');
+
+    /* 4) sai na ficha impressa */
+    const html = printPreview._buildAnestesia();
+    out.saiNaImpressao = /PCV-VG/.test(html) && /22 cmH₂O/.test(html) && /1\.2 s/.test(html);
+    return out;
+  });
+
+  assert(r.temPcvVg, 'o modo a pressão com volume garantido (PCV-VG) está na lista');
+  assert(r.mantemOsAntigos, 'e os modos que já existiam seguem escritos igual — ficha antiga abre');
+  assert(r.temOsNovos, 'junto de SIMV-VC, SIMV-PC, CPAP, CPAP+PSV e manual/balão');
+  assert(r.pcvSemVolume, 'o PCV puro mostra a pressão e não o volume');
+  assert(r.pcvVgTemOsDois, 'e o PCV-VG mostra os DOIS: volume-alvo e limite de pressão');
+  assert(r.vcvIntacto && r.psvIntacto, 'sem mexer no que VCV e PSV já mostravam');
+  assert(r.gravaOsQuatro, 'P insp, P suporte, pausa e T insp passam a ser gravados — não eram');
+  assert(r.gravaOModo, 'com o modo e o volume-alvo');
+  assert(r.restaura && r.restauraOsCampos, 'e voltam ao reabrir a ficha, com os campos do modo certos');
+  assert(r.saiNaImpressao, 'e saem na ficha impressa');
+  await page.close();
+});
+
+/* 201) Os horários digitados nos cards têm de chegar à linha do tempo. Bloqueio
+   e via aérea já mandavam no evento; o resto, não: a técnica e a ventilação
+   carimbavam o evento com a hora do CLIQUE, e entrada em sala, início e fim da
+   anestesia e saída não viravam evento nenhum. Quem opera preenche o card e
+   espera que a linha do tempo siga — não que ela guarde o instante em que o
+   dedo tocou a tela. */
+await test('Horários dos cards mandam no evento: técnica, ventilação e os tempos do ato', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    store.setList('anestesia', []);
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 400));
+    try { modal.close(); } catch (e) {}
+    document.querySelectorAll('#module-anestesia .card.collapsed').forEach(c => c.classList.remove('collapsed'));
+    const f = document.getElementById('form-anestesia');
+    anestesia.graficoUI._contexto = 'anestesia';
+    const horaDe = t => anestesia.eventos.horaDe(t);
+    const existe = t => anestesia.eventos.existeEvento(t);
+    const mudar = (nome, val) => {
+      const el = f.querySelector('[name="' + nome + '"]');
+      el.value = val;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+
+    /* 1) os quatro tempos do ato viram evento, com a hora digitada */
+    out.tiposNovos = ['Entrada em sala', 'Início da anestesia', 'Fim da anestesia', 'Saída de sala']
+      .every(t => anestesia.eventos.TIPOS.indexOf(t) >= 0);
+    mudar('hora_sala_entrada', '07:40');
+    mudar('hora_inicio', '07:55');
+    mudar('hora_fim', '09:30');
+    mudar('hora_sala_saida', '09:45');
+    out.temposViramEvento = horaDe('Entrada em sala') === '07:40'
+      && horaDe('Início da anestesia') === '07:55'
+      && horaDe('Fim da anestesia') === '09:30'
+      && horaDe('Saída de sala') === '09:45';
+    /* corrigir o campo corrige o evento, não cria um segundo */
+    mudar('hora_inicio', '08:05');
+    const quantos = [...document.querySelectorAll('#eventos-body [name="evt_tipo[]"]')]
+      .filter(el => el.value === 'Início da anestesia').length;
+    out.corrigeNaoDuplica = horaDe('Início da anestesia') === '08:05' && quantos === 1;
+
+    /* 2) ventilação mecânica: o evento nasce com a hora do clique, mas ela
+       volta escrita no card — e digitar outra manda no evento */
+    f.querySelector('[name="vent_modo_geral"][value="mecanica"]').checked = true;
+    anestesia.vent.alternar();
+    out.marcouVM = existe('Início da ventilação mecânica');
+    out.carimbouNoCard = !!f.querySelector('[name="vent_hora_ini"]').value
+      && f.querySelector('[name="vent_hora_ini"]').value === horaDe('Início da ventilação mecânica');
+    mudar('vent_hora_ini', '08:10');
+    out.ventHoraVaiProEvento = horaDe('Início da ventilação mecânica') === '08:10';
+    mudar('vent_hora_fim', '09:20');
+    out.ventFimVaiProEvento = horaDe('Fim da ventilação mecânica') === '09:20';
+    /* e os dois horários são gravados e voltam */
+    const dv = anestesia.coletarEstruturado().ventilacao.mecanica;
+    out.gravaHorariosVM = dv.hora_ini === '08:10' && dv.hora_fim === '09:20';
+
+    /* 3) tipo de anestesia: a janela pede o horário e ele manda no evento */
+    const chk = f.querySelector('[name="tipo[]"][value="Anestesia geral"]');
+    chk.checked = true;
+    anestesia.eventos.aoSelecionarTipo(chk);
+    await new Promise(res => setTimeout(res, 500));
+    out.criouInducao = existe('Indução');
+    const horaClique = horaDe('Indução');
+    /* marcar a técnica já abre a janela sozinho; fecha e abre de novo pelo
+       caminho direto, para o teste não depender do tempo do agendamento */
+    try { modal.close(); } catch (e) {}
+    await new Promise(res => setTimeout(res, 300));
+    anestesia.tecnicaDet.abrir('Anestesia geral');
+    await new Promise(res => setTimeout(res, 800));
+    const ft = document.getElementById('form-tecdet');
+    out.janelaPedeHorario = !!ft && !!ft.querySelector('[name="td_hora"]');
+    /* já vem com a hora que o evento tem hoje, para corrigir e não redigitar */
+    out.janelaJaVemPreenchida = ft.querySelector('[name="td_hora"]').value === horaClique;
+    ft.querySelector('[name="td_hora"]').value = '08:07';
+    anestesia.tecnicaDet.salvar('Anestesia geral');
+    await new Promise(res => setTimeout(res, 300));
+    out.tecnicaMandaNoEvento = horaDe('Indução') === '08:07';
+    /* e fica gravado: reabrir a janela mostra o que ele escolheu */
+    out.guardaNaFicha = anestesia.tecnicaDet.coletar()['Anestesia geral'].hora === '08:07';
+
+    /* 4) o que já funcionava continua: bloqueio e via aérea */
+    mudar('bloqueio_tipo', 'Raquianestesia');
+    mudar('bloqueio_hora', '07:58');
+    out.bloqueioSegue = horaDe('Raquianestesia') === '07:58';
+    return out;
+  });
+
+  assert(r.tiposNovos, 'entrada em sala, início e fim da anestesia e saída são eventos');
+  assert(r.temposViramEvento, 'e os horários digitados no card 2 chegam à linha do tempo');
+  assert(r.corrigeNaoDuplica, 'corrigir o campo corrige o evento — não cria um segundo');
+  assert(r.marcouVM && r.carimbouNoCard, 'a ventilação marca o evento e escreve a hora no card, para os dois não discordarem');
+  assert(r.ventHoraVaiProEvento && r.ventFimVaiProEvento, 'e o horário digitado na ventilação manda no evento');
+  assert(r.gravaHorariosVM, 'início e fim da VM são gravados na ficha');
+  assert(r.criouInducao, 'marcar a técnica segue criando o evento');
+  assert(r.janelaPedeHorario, 'a janela da técnica passa a pedir o horário');
+  assert(r.janelaJaVemPreenchida, 'já preenchida com a hora que o evento tem — é correção, não redigitação');
+  assert(r.tecnicaMandaNoEvento, 'e o horário escolhido ali manda no evento da linha do tempo');
+  assert(r.guardaNaFicha, 'ficando gravado na ficha');
+  assert(r.bloqueioSegue, 'sem mexer no que bloqueio e via aérea já faziam');
+  await page.close();
+});
+
+/* 202) CAM na monitorização da profundidade. É a medida do dia a dia na
+   anestesia inalatória e na balanceada — vem do analisador de gases, que já
+   está nos monitores do card 7 e tem coluna na grade de sinais vitais. Estava
+   em toda parte menos onde se descreve a técnica. E a frase gerada minusculava
+   tudo, então a sigla saía "por cam", "por bis". */
+await test('Técnica: CAM entra na monitorização da profundidade, e a sigla não vira palavra', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    store.setList('anestesia', []);
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 400));
+    try { modal.close(); } catch (e) {}
+
+    const opcoes = anestesia.tecnicaDet.ESPECS['Anestesia geral'].campos
+      .find(c => c.n === 'profundidade').o;
+    out.temCam = opcoes.some(o => /^CAM/.test(o));
+    out.mantemOsOutros = ['Clínica', 'BIS', 'Entropia', 'TOF (bloqueio neuromuscular)']
+      .every(o => opcoes.indexOf(o) >= 0);
+
+    /* a janela oferece a opção de verdade, não só o dado.
+       O tutorial do gráfico abre sozinho ~600 ms depois de entrar na ficha e
+       fica aberto; a janela da técnica espera a vez. Então: deixa o tutorial
+       aparecer, fecha, e só aí abre a janela. */
+    await new Promise(res => setTimeout(res, 900));
+    try { modal.close(); } catch (e) {}
+    await new Promise(res => setTimeout(res, 150));
+    anestesia.tecnicaDet.abrir('Anestesia geral');
+    await new Promise(res => setTimeout(res, 400));
+    const sel = document.querySelector('#form-tecdet [name="td_profundidade"]');
+    out.saiNaJanela = !!sel && [...sel.options].some(o => /^CAM/.test(o.value));
+    sel.value = opcoes.find(o => /^CAM/.test(o));
+    document.querySelector('#form-tecdet [name="td_manutencao"]').value = 'Venosa total (TIVA)';
+    anestesia.tecnicaDet.salvar('Anestesia geral');
+    await new Promise(res => setTimeout(res, 300));
+
+    const txt = anestesia.tecnicaDet.textoDe('Anestesia geral');
+    out.entraNoTexto = /profundidade por CAM \(analisador de gases\)/.test(txt);
+    out.siglaEmPe = /\(TIVA\)/.test(txt) && !/\(tiva\)/.test(txt) && !/por cam/.test(txt);
+    /* e a palavra comum continua descendo — não virou tudo maiúscula */
+    out.palavraComumDesce = /manutenção venosa total/.test(txt);
+    return out;
+  });
+
+  assert(r.temCam, 'CAM está entre as opções de monitorização da profundidade');
+  assert(r.mantemOsOutros, 'sem tirar clínica, BIS, entropia e TOF');
+  assert(r.saiNaJanela, 'e aparece na janela da técnica');
+  assert(r.entraNoTexto, 'entrando na descrição da técnica realizada');
+  assert(r.siglaEmPe, 'com a sigla em pé: CAM e TIVA não viram palavra minúscula');
+  assert(r.palavraComumDesce, 'enquanto a palavra comum continua em minúscula no meio da frase');
+  await page.close();
+});
+
+/* 203) Caixa de descrição que cresce com o texto. O diagnóstico era um campo de
+   uma linha: o texto inteiro estava lá, mas só se lia o pedaço que coubesse.
+   Verifica o que importa — que ela cresce ao digitar, que cresce também quando
+   o texto vem de um botão (alergias, comorbidades) ou de um registro
+   carregado, e que tem teto: texto enorme não pode empurrar a ficha inteira
+   para fora do alcance. */
+await test('Campos de descrição crescem com o texto — digitado, colado por botão ou vindo da ficha', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    store.setList('anestesia', []);
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 600));
+    try { modal.close(); } catch (e) {}
+    document.querySelectorAll('#module-anestesia .card.collapsed').forEach(c => c.classList.remove('collapsed'));
+    const f = document.getElementById('form-anestesia');
+
+    /* 1) deixaram de ser campo de uma linha */
+    const diag = f.querySelector('[name="pre_diagnostico"]');
+    out.viraramCaixa = !!diag && diag.tagName === 'TEXTAREA'
+      && ['pre_alergias', 'pre_comorbidades', 'pre_via_aerea_obs']
+        .every(n => (f.querySelector('[name="' + n + '"]') || {}).tagName === 'TEXTAREA');
+
+    /* 2) cresce ao digitar — e começa baixa, não com o vão de um textarea longo */
+    utils.autoAltura(diag);
+    const h0 = diag.offsetHeight;
+    out.comecaBaixa = h0 < 70;
+    diag.value = 'Fratura de joelho esquerdo, evoluiu com trombose e infecção. '.repeat(6);
+    diag.dispatchEvent(new Event('input', { bubbles: true }));
+    const h1 = diag.offsetHeight;
+    out.cresceuAoDigitar = h1 > h0 + 20;
+    /* e encolhe de volta quando o texto sai */
+    diag.value = 'Artroscopia';
+    diag.dispatchEvent(new Event('input', { bubbles: true }));
+    out.encolheDeVolta = diag.offsetHeight < h1;
+
+    /* 3) texto que vem de um botão também faz crescer (os seletores disparam
+       'input' no campo — é por onde o ajuste entra) */
+    const com = f.querySelector('[name="pre_comorbidades"]');
+    utils.autoAltura(com);
+    const c0 = com.offsetHeight;
+    comorbidades.negar('#form-anestesia [name=pre_comorbidades]');
+    com.value = 'HAS, diabetes, dislipidemia, obesidade, DRC, coronariopatia, SAOS, hipotireoidismo, depressão, anticoagulação plena'.repeat(3);
+    com.dispatchEvent(new Event('input', { bubbles: true }));
+    out.cresceuPorBotao = com.offsetHeight > c0 + 20;
+
+    /* 4) teto: texto enorme não empurra a ficha para fora — passa a rolar */
+    diag.value = 'x '.repeat(4000);
+    diag.dispatchEvent(new Event('input', { bubbles: true }));
+    const teto = Math.max(140, Math.round(window.innerHeight * 0.6));
+    out.respeitaOTeto = diag.offsetHeight <= teto + 4 && diag.style.overflowY === 'auto';
+
+    /* 5) ficha carregada com o card já aberto: a caixa se ajusta sozinha */
+    diag.value = '';
+    const rec = store.save('anestesia', {
+      nome: 'TESTE ALTURA', data: utils.hojeISO(),
+      pre_anestesico: { diagnostico: 'Fratura exposta de tíbia direita com lesão vascular associada, ' +
+        'submetido a fixação externa prévia, evoluiu com trombose e infecção de partes moles. '.repeat(3) }
+    });
+    anestesia.carregar(rec);
+    await new Promise(res => setTimeout(res, 300));
+    const dg = f.querySelector('[name="pre_diagnostico"]');
+    out.ajustaAoCarregar = dg.value.length > 100 && dg.offsetHeight > 70;
+    return out;
+  });
+
+  assert(r.viraramCaixa, 'diagnóstico, alergias, comorbidades e observações da via aérea viraram caixa de texto');
+  assert(r.comecaBaixa, 'começando com a altura de um campo comum, não com um vão vazio');
+  assert(r.cresceuAoDigitar, 'e crescendo conforme se digita');
+  assert(r.encolheDeVolta, 'encolhendo de volta quando o texto sai');
+  assert(r.cresceuPorBotao, 'o texto que vem dos seletores também faz a caixa crescer');
+  assert(r.respeitaOTeto, 'com teto: texto enorme passa a rolar em vez de empurrar a ficha');
+  assert(r.ajustaAoCarregar, 'e a ficha carregada já abre com a descrição inteira à vista');
+  await page.close();
+});
+
+/* 204) Histórico do paciente a partir da linha de Pacientes. O que se quer ao
+   abrir a história de alguém: desde quando ele existe aqui, que documentos
+   foram feitos e em que datas, e o financeiro inteiro — o que foi pago e,
+   principalmente, QUAL cobrança está em aberto. O resumo de uma linha só
+   ("previsto X, recebido Y") não respondia a última. */
+await test('Histórico do paciente: cadastro, documentos com data e o financeiro cobrança a cobrança', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['pacientes', 'anestesia', 'pre', 'financeiro', 'consulta', 'termo'].forEach(m => store.setList(m, []));
+    const hoje = utils.hojeISO();
+
+    store.save('pacientes', { nome: 'JOANA PEREIRA LIMA', cpf: '111.222.333-44',
+      nascimento: '1970-03-12', plano: 'Unimed', carteirinha: '0286123', telefone: '73 99999-0000' });
+    store.save('pre', { nome: 'JOANA PEREIRA LIMA', data: hoje, cirurgia: 'Artroplastia de joelho' });
+    store.save('anestesia', { paciente: { nome: 'JOANA PEREIRA LIMA' },
+      procedimento: { data: hoje, descricao: 'Artroplastia total de joelho', cirurgiao: 'Dr. Souza' } });
+    /* três cobranças: uma paga, uma parcialmente glosada, uma nem faturada */
+    store.save('financeiro', { paciente: 'JOANA PEREIRA LIMA', data_proc: hoje, procedimento: 'Artroplastia',
+      convenio: 'Unimed', valor_previsto: '1000', valor_recebido: '1000', glosa: '0', status: 'recebido', pago: true });
+    store.save('financeiro', { paciente: 'JOANA PEREIRA LIMA', data_proc: hoje, procedimento: 'Consulta pré',
+      convenio: 'Unimed', valor_previsto: '300', valor_recebido: '100', glosa: '50', status: 'parcial', pago: false });
+    store.save('financeiro', { paciente: 'JOANA PEREIRA LIMA', data_proc: hoje, procedimento: 'Visita SRPA',
+      convenio: 'Unimed', valor_previsto: '200', valor_recebido: '0', glosa: '0', status: 'pendente', pago: false });
+
+    /* 1) o botão existe na linha do paciente e abre por ele */
+    ui.navegar('pacientes');
+    await new Promise(res => setTimeout(res, 400));
+    pacientes.render();
+    const linha = [...document.querySelectorAll('#pacientes-tbody tr')]
+      .find(tr => /JOANA/.test(tr.textContent));
+    out.temBotao = !!linha && /Histórico/.test(linha.textContent);
+    const btn = linha && [...linha.querySelectorAll('button')].find(b => /Histórico/.test(b.textContent));
+    out.abrePeloPaciente = !!btn && /JOANA PEREIRA LIMA/.test(btn.getAttribute('onclick') || '');
+
+    const html = historico._prontRender('JOANA PEREIRA LIMA');
+
+    /* 2) cadastro: quem é e desde quando */
+    out.mostraCadastro = /111\.222\.333-44/.test(html) && /Unimed/.test(html)
+      && /0286123/.test(html) && /Cadastrado em/.test(html);
+
+    /* 3) documentos com data */
+    out.mostraDocumentos = /Pré-anestésica/.test(html) && /Ficha de Anestesia/.test(html)
+      && /Artroplastia total de joelho/.test(html) && /Linha do tempo/.test(html);
+
+    /* 4) financeiro cobrança a cobrança, com totais */
+    out.temSecaoFinanceira = /Financeiro \(3\)/.test(html);
+    out.somaOsTotais = /R\$ 1500,00/.test(html)   /* previsto 1000+300+200 */
+                    && /R\$ 1100,00/.test(html);  /* recebido 1000+100 */
+    /* em aberto = previsto − recebido − glosa: 0 + 150 + 200 = 350 */
+    out.apontaOEmAberto = /R\$ 350,00/.test(html) && /2 cobran/.test(html) && /em aberto/.test(html);
+    out.mostraStatus = /Recebido/.test(html) && /Parcial/.test(html) && /Pendente/.test(html);
+
+    /* 5) cortesia não conta como dívida — não foi cobrado de ninguém */
+    store.save('financeiro', { paciente: 'JOANA PEREIRA LIMA', data_proc: hoje, procedimento: 'Retorno',
+      valor_previsto: '400', valor_recebido: '0', glosa: '0', status: 'cortesia' });
+    const html2 = historico._prontRender('JOANA PEREIRA LIMA');
+    out.cortesiaNaoEhDivida = /R\$ 350,00/.test(html2) && !/R\$ 750,00/.test(html2);
+
+    /* 6) paciente cadastrado e ainda sem documento: a pergunta "desde quando"
+       tem resposta mesmo assim */
+    store.save('pacientes', { nome: 'NOVO SEM DOCUMENTO', cpf: '999.888.777-66' });
+    const html3 = historico._prontRender('NOVO SEM DOCUMENTO');
+    out.novoAparece = /999\.888\.777-66/.test(html3) && /Cadastrado em/.test(html3)
+      && !/Nenhum registro encontrado/.test(html3);
+    return out;
+  });
+
+  assert(r.temBotao, 'a linha do paciente tem o botão de histórico');
+  assert(r.abrePeloPaciente, 'e abre já naquele paciente, sem redigitar o nome');
+  assert(r.mostraCadastro, 'o histórico mostra a ficha do cadastro e desde quando ele existe aqui');
+  assert(r.mostraDocumentos, 'os documentos feitos para ele, com data');
+  assert(r.temSecaoFinanceira, 'e o financeiro em seção própria, cobrança a cobrança');
+  assert(r.somaOsTotais, 'somando previsto e recebido');
+  assert(r.apontaOEmAberto, 'e dizendo quanto e quantas cobranças estão em aberto');
+  assert(r.mostraStatus, 'com o status de cada uma');
+  assert(r.cortesiaNaoEhDivida, 'cortesia não entra como dívida — não foi cobrada de ninguém');
+  assert(r.novoAparece, 'paciente cadastrado e ainda sem documento não é dado como inexistente');
+  await page.close();
+});
+
+/* 205) Particular: o acerto é na hora. Convênio se fatura e se espera semanas;
+   particular se paga na saída. Sem a pergunta no momento da finalização, o
+   lançamento nasce "pendente" e ninguém volta nele — e o que entrou em PIX ou
+   dinheiro fica sem meio, sem valor e sem conta registrados. */
+await test('Particular: finalizar abre a janela de pagamento — meio, valor e conta que recebeu', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['pre', 'consulta', 'anestesia', 'financeiro', 'pacientes'].forEach(m => store.setList(m, []));
+    const hoje = utils.hojeISO();
+
+    /* 1) convênio NÃO abre a janela — lá o acerto é depois */
+    const conv = store.save('financeiro', { paciente: 'COM PLANO', convenio: 'Unimed',
+      tipo_pagamento: 'Convênio', valor_previsto: '800', data_proc: hoje, status: 'pendente' });
+    out.convenioNaoPergunta = fin.perguntarPagamento(conv) === false;
+
+    /* 2) particular abre */
+    const part = store.save('financeiro', { paciente: 'MARIA PARTICULAR', procedimento: 'Consulta',
+      convenio: 'Particular', tipo_pagamento: 'Particular', valor_previsto: '500',
+      data_proc: hoje, status: 'pendente' });
+    out.particularPergunta = fin.perguntarPagamento(part) === true;
+    await new Promise(res => setTimeout(res, 300));
+    const f = document.getElementById('form-fin-pag');
+    out.abriuJanela = !!f;
+    out.pedeOsQuatro = !!f && ['fp_pago', 'fp_valor', 'fp_meio', 'fp_conta']
+      .every(n => !!f.querySelector('[name="' + n + '"]'));
+    out.jaVemComOPrevisto = f.querySelector('[name="fp_valor"]').value === '500.00';
+
+    /* 3) pago integral: vira recebido, com meio e conta gravados */
+    f.querySelector('[name="fp_meio"]').value = 'PIX';
+    f.querySelector('[name="fp_conta"]').value = 'Conta PJ Itaú';
+    fin.registrarPagamento();
+    await new Promise(res => setTimeout(res, 200));
+    const p1 = store.getById('financeiro', part._id);
+    out.gravouPagamento = p1.pago === true && p1.status === 'recebido'
+      && Number(p1.valor_recebido) === 500 && p1.forma_pagamento === 'PIX'
+      && p1.conta_recebeu === 'Conta PJ Itaú' && p1.data_pagamento === hoje;
+
+    /* 4) já pago não volta a perguntar — refinalizar não reabre a janela */
+    out.pagoNaoPergunta = fin.perguntarPagamento(p1) === false;
+
+    /* 5) valor abaixo do previsto é PARCIAL, ainda que ele marque "sim":
+       quem decide é a conta, não o clique */
+    const p2 = store.save('financeiro', { paciente: 'JOSE PARTICULAR', convenio: 'Particular',
+      tipo_pagamento: 'Particular', valor_previsto: '400', data_proc: hoje, status: 'pendente' });
+    fin.perguntarPagamento(p2);
+    await new Promise(res => setTimeout(res, 300));
+    const f2 = document.getElementById('form-fin-pag');
+    f2.querySelector('[name="fp_pago"]').value = 'sim';
+    f2.querySelector('[name="fp_valor"]').value = '150';
+    f2.querySelector('[name="fp_meio"]').value = 'Dinheiro';
+    fin.registrarPagamento();
+    await new Promise(res => setTimeout(res, 200));
+    const r2 = store.getById('financeiro', p2._id);
+    out.parcialPelaConta = r2.status === 'parcial' && r2.pago === false && Number(r2.valor_recebido) === 150;
+
+    /* 6) "ainda não" deixa em aberto, sem inventar valor recebido */
+    const p3 = store.save('financeiro', { paciente: 'ANA PARTICULAR', convenio: 'Particular',
+      tipo_pagamento: 'Particular', valor_previsto: '300', data_proc: hoje, status: 'pendente' });
+    fin.perguntarPagamento(p3);
+    await new Promise(res => setTimeout(res, 300));
+    const f3 = document.getElementById('form-fin-pag');
+    f3.querySelector('[name="fp_pago"]').value = 'nao';
+    fin._pagAjustar();
+    out.escondeOsCamposDeDinheiro = f3.querySelector('[name="fp_valor"]').closest('.field').style.display === 'none';
+    fin.registrarPagamento();
+    await new Promise(res => setTimeout(res, 200));
+    const r3 = store.getById('financeiro', p3._id);
+    out.naoPagoFicaEmAberto = r3.status === 'pendente' && !r3.pago && !Number(r3.valor_recebido);
+
+    /* 7) cortesia não é cobrança — não pergunta */
+    const p4 = store.save('financeiro', { paciente: 'CORTESIA', convenio: 'Particular',
+      tipo_pagamento: 'Particular', valor_previsto: '200', data_proc: hoje, status: 'cortesia' });
+    out.cortesiaNaoPergunta = fin.perguntarPagamento(p4) === false;
+
+    /* 8) meio e conta aparecem no histórico do paciente */
+    const html = historico._prontRender('MARIA PARTICULAR');
+    out.saiNoHistorico = /PIX/.test(html) && /Conta PJ Itaú/.test(html);
+    /* e o campo existe no formulário do Financeiro, para corrigir depois */
+    out.temCampoNoFormulario = !!document.querySelector('#form-financeiro [name="forma_pagamento"]')
+      && !!document.querySelector('#form-financeiro [name="conta_recebeu"]');
+    return out;
+  });
+
+  assert(r.convenioNaoPergunta, 'convênio não abre a janela — lá o acerto é depois');
+  assert(r.particularPergunta && r.abriuJanela, 'particular abre a janela ao gerar o financeiro');
+  assert(r.pedeOsQuatro, 'perguntando se foi pago, o meio, o valor e a conta que recebeu');
+  assert(r.jaVemComOPrevisto, 'já com o valor previsto preenchido');
+  assert(r.gravouPagamento, 'e grava tudo no lançamento, que vira recebido');
+  assert(r.pagoNaoPergunta, 'lançamento já pago não reabre a pergunta');
+  assert(r.parcialPelaConta, 'valor abaixo do previsto é parcial — quem decide é a conta, não o clique');
+  assert(r.escondeOsCamposDeDinheiro, '"ainda não" tira de cena os campos de dinheiro');
+  assert(r.naoPagoFicaEmAberto, 'e deixa em aberto, sem inventar valor recebido');
+  assert(r.cortesiaNaoPergunta, 'cortesia não é cobrança — não pergunta');
+  assert(r.saiNoHistorico, 'meio e conta aparecem no histórico do paciente');
+  assert(r.temCampoNoFormulario, 'e ficam editáveis no formulário do Financeiro');
+  await page.close();
+});
+
+/* 206) Débito urinário. A conta estava errada por um motivo específico: a
+   janela de tempo ia do início ao FIM DA ANESTESIA, mas o volume só é contado
+   até o ÚLTIMO REGISTRO. Com a última aferição às 10:30 e o fim às 12:00, o
+   número saía um terço menor do que o real — a diferença entre "adequado" e
+   "oligúria". E o painel não mostrava nem o intervalo contado nem o ritmo de
+   cada registro, que é o que diz se a diurese está caindo AGORA. */
+await test('Débito urinário: janela certa, total, intervalo contado e ritmo por registro', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    const D = anestesia.diurese;
+
+    /* 1) a conta: 300 mL de 08:00 às 11:00, paciente de 60 kg
+       300 / 60 / 3h = 1,67 mL/kg/h */
+    const di = { modo: 'parcial', base: 'auto', parciais: [
+      { hora: '09:00', vol: '100' }, { hora: '10:00', vol: '120' }, { hora: '11:00', vol: '80' }
+    ] };
+    const c = D.calcular(di, 60, '08:00', '13:00', '');
+    out.somaOVolume = c.vol === 300;
+    /* o fim é o último registro (11:00), NÃO o fim da anestesia (13:00) */
+    out.janelaAteOUltimoRegistro = c.ini === '08:00' && c.fim === '11:00' && c.min === 180;
+    out.contaCerta = Math.abs(c.mlkgh - (300 / 60 / 3)) < 0.001;
+    /* o defeito de antes: dividir por 5h daria 1,00 — e não é o que se mede */
+    out.naoDivideMais = Math.abs(c.mlkgh - 1.0) > 0.5;
+
+    /* 2) modo total continua indo até o fim da anestesia: é um volume só,
+       sem registro intermediário que diga até quando foi medido */
+    const ct = D.calcular({ modo: 'total', base: 'auto', total: '600' }, 60, '08:00', '12:00', '');
+    out.totalUsaOFimDoAto = ct.min === 240 && Math.abs(ct.mlkgh - (600 / 60 / 4)) < 0.001;
+
+    /* 3) tempo informado à mão manda em tudo */
+    const cm = D.calcular({ modo: 'total', base: 'manual', min: '120', total: '240' }, 60, '08:00', '18:00', '');
+    out.manualManda = cm.min === 120 && Math.abs(cm.mlkgh - (240 / 60 / 2)) < 0.001;
+
+    /* 4) sem início do ato: o 1º registro é o marco zero e o volume dele sai
+       da conta — veio de antes e não dá para saber de quanto tempo */
+    const cs = D.calcular(di, 60, '', '', '');
+    out.semInicioDescontaOPrimeiro = cs.descontouPrimeiro === true && cs.vol === 200
+      && cs.ini === '09:00' && cs.fim === '11:00' && cs.min === 120;
+
+    /* 5) ritmo de cada registro, com o acumulado */
+    const rit = D.ritmos(di, 60, '08:00');
+    out.acumulaCerto = rit.map(x => x.acumulado).join(',') === '100,220,300';
+    /* 1º: 100 mL em 1h (08:00→09:00) = 1,67; 2º: 120 em 1h = 2,00 */
+    out.ritmoPorRegistro = Math.abs(rit[0].mlkgh - (100 / 60)) < 0.001
+      && Math.abs(rit[1].mlkgh - (120 / 60)) < 0.001
+      && rit[1].desde === '09:00';
+
+    /* 6) na tela: intervalo contado e ritmo por linha aparecem */
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 600));
+    try { modal.close(); } catch (e) {}
+    document.querySelectorAll('#module-anestesia .card.collapsed').forEach(x => x.classList.remove('collapsed'));
+    const f = document.getElementById('form-anestesia');
+    f.querySelector('[name="paciente_peso"]').value = '60';
+    f.querySelector('[name="hora_inicio"]').value = '08:00';
+    f.querySelector('[name="hora_fim"]').value = '13:00';
+    D.restaurar(di);
+    D.recalcular();
+    await new Promise(res => setTimeout(res, 200));
+    out.mostraAJanela = document.getElementById('diurese-janela').value === '08:00 → 11:00';
+    out.mostraOTempo = document.getElementById('diurese-tempo').value === '3h 00min';
+    out.mostraOTotal = /300/.test(document.getElementById('diurese-acumulado').value);
+    out.mostraODebito = /1,67 mL\/kg\/h/.test(document.getElementById('diurese-resultado').value);
+    const linhas = [...document.querySelectorAll('#diurese-body tr')];
+    out.linhaTemAcumulado = linhas.map(tr => tr.querySelector('.di-acum').textContent).join(',') === '100 mL,220 mL,300 mL';
+    out.linhaTemRitmo = /1,67 mL\/kg\/h/.test(linhas[0].querySelector('.di-ritmo').textContent)
+      && /2,00 mL\/kg\/h/.test(linhas[1].querySelector('.di-ritmo').textContent);
+
+    /* 7) apagar os registros zera o balanço — não pode ficar o valor velho */
+    out.levouProBalanco = f.querySelector('[name="diurese"]').value === '300';
+    document.getElementById('diurese-body').innerHTML = '';
+    D.recalcular();
+    out.zeraOBalanco = f.querySelector('[name="diurese"]').value === '';
+
+    /* 8) a ficha impressa usa a MESMA conta */
+    const imp = printPreview._debitoUrinario({
+      paciente: { peso: '60' }, tempos: { hora_inicio: '08:00', hora_fim: '13:00' },
+      monitorizacao: { diurese: di }, fluidos: {}
+    });
+    out.impressaoConcorda = /1,67 mL\/kg\/h/.test(imp) && /300 mL em 3h 00min/.test(imp)
+      && /08:00→11:00/.test(imp);
+    return out;
+  });
+
+  assert(r.somaOVolume, 'o volume total é a soma dos registros do intervalo');
+  assert(r.janelaAteOUltimoRegistro, 'e o tempo vai do início do ato até o ÚLTIMO REGISTRO, não até o fim da anestesia');
+  assert(r.contaCerta && r.naoDivideMais, 'com isso a conta bate — antes o débito saía rebaixado');
+  assert(r.totalUsaOFimDoAto, 'no modo total, sem registro intermediário, a janela segue sendo o ato inteiro');
+  assert(r.manualManda, 'tempo informado à mão manda em tudo');
+  assert(r.semInicioDescontaOPrimeiro, 'sem início do ato, o 1º registro vira marco zero e o volume dele sai da conta');
+  assert(r.acumulaCerto, 'cada linha mostra o acumulado até ali');
+  assert(r.ritmoPorRegistro, 'e o ritmo daquele intervalo, medido desde o registro anterior');
+  assert(r.mostraAJanela && r.mostraOTempo, 'o painel diz o intervalo contado — início → fim — e a duração');
+  assert(r.mostraOTotal && r.mostraODebito, 'com o total e o débito do caso');
+  assert(r.linhaTemAcumulado && r.linhaTemRitmo, 'e a tabela mostra acumulado e ritmo por registro');
+  assert(r.levouProBalanco && r.zeraOBalanco, 'o balanço hídrico acompanha, inclusive quando os registros são apagados');
+  assert(r.impressaoConcorda, 'a ficha impressa usa a mesma conta do painel');
+  await page.close();
+});
+
+/* 207) Dispositivo prévio ao ato. Paciente que desce da UTI já intubado, com
+   acesso central e sonda vesical. Marcar esses dispositivos é correto — eles
+   estavam lá. O que é errado é a ficha afirmar que ELE puncionou, intubou e
+   sondou: vira procedimento na linha do tempo, entra na descrição e pode
+   virar cobrança do que não aconteceu. */
+await test('Dispositivos e via aérea prévios ao ato: ficam na ficha, mas não viram procedimento dele', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    store.setList('anestesia', []);
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 600));
+    try { modal.close(); } catch (e) {}
+    document.querySelectorAll('#module-anestesia .card.collapsed').forEach(c => c.classList.remove('collapsed'));
+    const f = document.getElementById('form-anestesia');
+    anestesia.graficoUI._contexto = 'anestesia';
+    const existe = t => anestesia.eventos.existeEvento(t);
+
+    /* 1) sem a marca, marcar o acesso segue criando o procedimento */
+    const central = [...f.querySelectorAll('[name="dispositivos[]"]')].find(el => el.value === 'Acesso venoso central');
+    central.checked = true;
+    anestesia.disp.alternar(central);
+    out.semMarcaCriaOEvento = existe('Acesso venoso central');
+    out.temACaixaPrevio = !!document.querySelector('[name="disp_previo[]"][data-disp="Acesso venoso central"]');
+
+    /* 2) marcar "prévio" tira o evento — e o dispositivo continua na ficha */
+    const pv = document.querySelector('[name="disp_previo[]"][data-disp="Acesso venoso central"]');
+    pv.checked = true;
+    anestesia.disp.alternarPrevio('Acesso venoso central');
+    out.previoTiraOEvento = !existe('Acesso venoso central');
+    out.dispositivoSegueMarcado = central.checked === true;
+
+    /* 3) e o texto do dispositivo diz que era prévio */
+    const selTipo = document.querySelector('[data-campo="tipo"][data-disp="Acesso venoso central"]');
+    if (selTipo) { selTipo.value = selTipo.options[1] ? selTipo.options[1].value : ''; }
+    anestesia.disp.montarDet('Acesso venoso central');
+    out.textoDizPrevio = /prévio ao ato/.test(
+      (document.querySelector('[name="disp_det[]"][data-disp="Acesso venoso central"]') || {}).value || '');
+
+    /* 4) desmarcar devolve o procedimento à linha do tempo */
+    pv.checked = false;
+    anestesia.disp.alternarPrevio('Acesso venoso central');
+    out.desmarcarDevolve = existe('Acesso venoso central');
+    pv.checked = true;
+    anestesia.disp.alternarPrevio('Acesso venoso central');
+
+    /* 5) via aérea prévia: o paciente chegou intubado */
+    const via = f.querySelector('[name="via_aerea_uso"]');
+    via.value = 'Intubação orotraqueal';
+    anestesia.eventos.aoSelecionarViaAerea(via);
+    await new Promise(res => setTimeout(res, 400));
+    try { modal.close(); } catch (e) {}
+    out.viaCriaOEvento = existe('Intubação');
+    const vp = f.querySelector('[name="via_aerea_previo"]');
+    out.temACaixaDaVia = !!vp;
+    vp.checked = true;
+    anestesia.viaAerea.alternarPrevio();
+    out.viaPreviaTiraOEvento = !existe('Intubação');
+
+    /* 6) escolher a via com a marca já ligada não recria o evento */
+    via.value = 'Máscara laríngea';
+    anestesia.eventos.aoSelecionarViaAerea(via);
+    await new Promise(res => setTimeout(res, 400));
+    try { modal.close(); } catch (e) {}
+    out.naoRecriaComMarcaLigada = !existe('Máscara laríngea');
+
+    /* 7) tudo isso sobrevive ao salvar e voltar */
+    f.querySelector('[name="paciente_nome"]').value = 'PACIENTE UTI';
+    const d = anestesia.coletarEstruturado();
+    out.gravouAVia = d.tecnica.via_aerea_previo === true;
+    const detCentral = (d.monitorizacao.dispositivos_detalhes || {})['Acesso venoso central'];
+    out.gravouODispositivo = !!detCentral && detCentral.previo === true;
+
+    anestesia.limparSilencioso();
+    await new Promise(res => setTimeout(res, 200));
+    anestesia.carregar(store.save('anestesia', d));
+    await new Promise(res => setTimeout(res, 500));
+    try { modal.close(); } catch (e) {}
+    out.voltouAVia = (f.querySelector('[name="via_aerea_previo"]') || {}).checked === true;
+    out.voltouODispositivo = (document.querySelector('[name="disp_previo[]"][data-disp="Acesso venoso central"]') || {}).checked === true;
+
+    /* 8) e a ficha impressa diz que a via aérea era prévia */
+    const txt = anestesia.resumo ? (function () {
+      anestesia.resumo.gerar();
+      return (f.querySelector('[name="resumo_narrativo"]') || {}).value || '';
+    })() : '';
+    out.impressoDizPrevia = /prévia ao ato/.test(txt);
+    return out;
+  });
+
+  assert(r.semMarcaCriaOEvento, 'sem a marca, o acesso continua entrando como procedimento');
+  assert(r.temACaixaPrevio && r.temACaixaDaVia, 'dispositivos e via aérea ganham a marca "prévio ao ato"');
+  assert(r.previoTiraOEvento, 'marcar prévio tira o procedimento da linha do tempo');
+  assert(r.dispositivoSegueMarcado, 'sem tirar o dispositivo da ficha — ele estava lá e o registro diz isso');
+  assert(r.textoDizPrevio, 'e o texto do dispositivo passa a dizer que era prévio');
+  assert(r.desmarcarDevolve, 'desmarcar devolve o procedimento');
+  assert(r.viaCriaOEvento, 'a via aérea escolhida segue criando o evento de manejo');
+  assert(r.viaPreviaTiraOEvento, 'e marcá-la como prévia tira — intubação que ele não fez não é procedimento dele');
+  assert(r.naoRecriaComMarcaLigada, 'trocar o dispositivo com a marca ligada não recria o evento');
+  assert(r.gravouAVia && r.gravouODispositivo, 'a marca é gravada na ficha');
+  assert(r.voltouAVia && r.voltouODispositivo, 'e volta ao reabrir');
+  assert(r.impressoDizPrevia, 'o texto da ficha diz que a via aérea era prévia ao ato');
+  await page.close();
+});
+
+/* 208) Campo de paciente em TODOS os módulos, e o registro rastreável depois.
+   Orçamento e Financeiro eram os dois que faltavam — e são onde redigitar o
+   nome custa mais caro: nome escrito diferente do cadastro é registro que não
+   aparece no histórico daquele paciente e não casa com a cobrança. E o vínculo
+   tem de sobreviver a uma correção de nome, senão "rastreável" é só enquanto
+   ninguém corrige nada. */
+await test('Paciente do cadastro em todos os módulos — e o registro segue rastreável depois', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['pacientes', 'orcamento', 'financeiro', 'documentos', 'termo', 'anestesia', 'pre'].forEach(m => store.setList(m, []));
+    const pac = store.save('pacientes', { nome: 'CLARA MENDES SOUZA', plano: 'Unimed',
+      cpf: '123.456.789-00', nascimento: '1985-02-20', carteirinha: '0286999' });
+
+    /* 1) a lista de pacientes chega a todos os formulários com campo de nome */
+    ['orcamento', 'financeiro', 'documentos', 'termo', 'prescricao', 'risco', 'agenda'].forEach(m => {
+      try { ui.navegar(m); } catch (e) {}
+    });
+    await new Promise(res => setTimeout(res, 400));
+    try { modal.close(); } catch (e) {}
+    autocomplete.ligarTudo();
+    const ligado = sel => { const el = document.querySelector(sel); return !!el && !!el.dataset.acAttached; };
+    out.orcamentoLigado = ligado('#form-orcamento [name="paciente"]');
+    out.financeiroLigado = ligado('#form-financeiro [name="paciente"]');
+    out.documentosLigado = ligado('#form-documentos [name="nome"]');
+    out.termoLigado = ligado('#form-termo [name="nome"]');
+
+    /* 2) escolher o paciente preenche o campo certo em cada um — o nome do
+       campo não é o mesmo em todos, e supor "nome" deixava dois de fora */
+    autocomplete._aplicarPaciente('form-orcamento', pac);
+    out.preencheOrcamento = document.querySelector('#form-orcamento [name="paciente"]').value === 'CLARA MENDES SOUZA';
+    autocomplete._aplicarPaciente('form-financeiro', pac);
+    out.preencheFinanceiro = document.querySelector('#form-financeiro [name="paciente"]').value === 'CLARA MENDES SOUZA';
+    /* e deixa o vínculo com o cadastro */
+    out.deixaOVinculo = (document.querySelector('#form-orcamento [name="_paciente_id"]') || {}).value === pac._id;
+
+    /* 3) o que foi salvo aparece no histórico daquele paciente */
+    const hoje = utils.hojeISO();
+    store.save('orcamento', { paciente: 'CLARA MENDES SOUZA', _paciente_id: pac._id, data: hoje,
+      total_paciente: '1200', procedimentos: [{ descricao: 'Artroscopia' }] });
+    store.save('documentos', { nome: 'CLARA MENDES SOUZA', _paciente_id: pac._id, data: hoje, modelo: 'atestado' });
+    store.save('financeiro', { paciente: 'CLARA MENDES SOUZA', _paciente_id: pac._id, data_proc: hoje,
+      procedimento: 'Artroscopia', valor_previsto: '1200', valor_recebido: '1200', status: 'recebido', pago: true });
+    let html = historico._prontRender('CLARA MENDES SOUZA');
+    out.tudoNoHistorico = /Orçamento/.test(html) && /Documentos/.test(html) && /Financeiro/.test(html)
+      && /Artroscopia/.test(html);
+
+    /* 4) O TESTE QUE IMPORTA: o nome do registro é corrigido/digitado diferente.
+       Pelo vínculo com o cadastro ele continua no histórico. */
+    const orc = store.list('orcamento')[0];
+    store.save('orcamento', Object.assign({}, orc, { paciente: 'CLARA M. SOUSA' }));
+    html = historico._prontRender('CLARA MENDES SOUZA');
+    out.sobreviveAoNomeDiferente = /Orçamento/.test(html) && /Artroscopia/.test(html);
+
+    /* 5) e não duplica: o mesmo registro casa por nome E por id */
+    const linhasOrc = (html.match(/Orçamento/g) || []).length;
+    out.naoDuplica = linhasOrc <= 2;   /* o chip do cabeçalho + a linha */
+
+    /* 6) registro sem vínculo e com outro nome NÃO é atribuído a ela */
+    store.save('orcamento', { paciente: 'OUTRA PESSOA QUALQUER', data: hoje, total_paciente: '99' });
+    html = historico._prontRender('CLARA MENDES SOUZA');
+    out.naoRoubaDosOutros = !/OUTRA PESSOA/.test(html);
+    return out;
+  });
+
+  assert(r.orcamentoLigado && r.financeiroLigado, 'orçamento e financeiro passam a buscar no cadastro de pacientes');
+  assert(r.documentosLigado && r.termoLigado, 'junto dos que já buscavam');
+  assert(r.preencheOrcamento && r.preencheFinanceiro, 'escolher o paciente preenche o campo certo em cada formulário');
+  assert(r.deixaOVinculo, 'deixando o vínculo com o cadastro no registro');
+  assert(r.tudoNoHistorico, 'e o que se salva aparece no histórico do paciente');
+  assert(r.sobreviveAoNomeDiferente, 'o registro continua no histórico mesmo com o nome escrito diferente — o vínculo é que manda');
+  assert(r.naoDuplica, 'sem duplicar quando casa pelos dois caminhos');
+  assert(r.naoRoubaDosOutros, 'e sem puxar registro de outro paciente');
   await page.close();
 });
 
