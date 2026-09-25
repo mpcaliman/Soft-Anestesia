@@ -4604,7 +4604,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-25k</b><br>
+    v7.1 · build <b id="build-tag">2026-09-25l</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -6023,6 +6023,15 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             </div>
             <div class="field col-3"><label>Horário</label>
               <div class="input-group"><input type="time" name="via_aerea_hora" onchange="anestesia.eventos.sincronizarDaViaAerea()"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','via_aerea_hora'); anestesia.eventos.sincronizarDaViaAerea();">agora</button></div>
+            </div>
+            <!-- Paciente que desce da UTI já intubado: o tubo estava lá, e a
+                 ficha tem de dizer isso — mas não pode afirmar que ele fez a
+                 intubação. Marcar aqui tira o evento da linha do tempo. -->
+            <div class="field col-12" style="margin-top:-4px">
+              <label class="check" style="display:inline-flex;font-size:.82rem" title="O dispositivo já estava instalado quando o paciente chegou — não foi procedimento deste ato">
+                <input type="checkbox" name="via_aerea_previo" onchange="anestesia.viaAerea.alternarPrevio()">
+                <span>Via aérea <b>prévia ao ato</b> <small style="color:var(--text-mute)">— paciente já chegou com o dispositivo</small></span>
+              </label>
             </div>
           </div></div>
           <div class="grid">
@@ -30847,6 +30856,41 @@ const anestesia = {
       const el = f && f.querySelector('[name="via_aerea_detalhe"]');
       if (el) el.dataset.manual = '1';
     },
+    /* Via aérea prévia: o paciente chegou com o dispositivo. Ele fica na ficha
+       (a ventilação e o manejo dependem de saber que existe), mas sai da linha
+       do tempo — intubação que ele não fez não é procedimento dele. */
+    ehPrevio() {
+      const f = anestesia.viaAerea._f();
+      const el = f && f.querySelector('[name="via_aerea_previo"]');
+      return !!(el && el.checked);
+    },
+    alternarPrevio() {
+      anestesia.graficoUI._contexto = 'anestesia';
+      const via = anestesia.viaAerea._v('via_aerea_uso');
+      const tipoEvt = anestesia.eventos.VIA_AEREA_EVENTO[via];
+      if (anestesia.viaAerea.ehPrevio()) {
+        let n = 0;
+        if (tipoEvt) {
+          const body = document.getElementById(anestesia.graficoUI._ctxIds().eventosBody);
+          if (body) {
+            Array.from(body.querySelectorAll('tr')).forEach(tr => {
+              const t = (tr.querySelector('[name="evt_tipo[]"]') || {}).value || '';
+              /* só o que o sistema escreveu: o que ele digitou à mão é dele */
+              if (t === tipoEvt && tr.dataset.auto === '1') { tr.remove(); n++; }
+            });
+          }
+        }
+        toast(n ? 'Via aérea marcada como prévia — o evento saiu da linha do tempo.'
+                : 'Via aérea marcada como prévia ao ato.');
+        try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
+      } else if (tipoEvt && !anestesia.eventos.existeEvento(tipoEvt)) {
+        anestesia.eventos.add({ tipo: tipoEvt, hora: anestesia.viaAerea._v('via_aerea_hora') || utils.horaAtual(),
+                                obs: anestesia.eventos.descricaoPara(tipoEvt), auto: true });
+        toast('Evento "' + tipoEvt + '" devolvido à linha do tempo.');
+      }
+      try { anestesia.viaAerea.montarDetalhe(); } catch (e) {}
+      markDirty();
+    },
     montarDetalhe() {
       const f = anestesia.viaAerea._f(); if (!f) return '';
       const fam = anestesia.viaAerea._familia();
@@ -31275,6 +31319,8 @@ const anestesia = {
       }
       const tipoEvt = anestesia.eventos.VIA_AEREA_EVENTO[sel.value];
       if (!tipoEvt) return;
+      /* já estava instalado quando chegou: não é procedimento deste ato */
+      try { if (anestesia.viaAerea.ehPrevio()) return; } catch (e) {}
       anestesia.graficoUI._contexto = 'anestesia';
       if (anestesia.eventos.existeEvento(tipoEvt)) { anestesia.eventos.atualizarDescricoes(); return; }
       anestesia.eventos.add({ tipo: tipoEvt, hora: anestesia.eventos._v('via_aerea_hora') || utils.horaAtual(), obs: anestesia.eventos.descricaoPara(tipoEvt), auto: true });
@@ -31943,7 +31989,8 @@ const anestesia = {
       const tipo = anestesia.disp._sel(disp, 'tipo');
       const cal = anestesia.disp._sel(disp, 'calibre');
       const local = anestesia.disp._sel(disp, 'local');
-      const txt = [ [tipo, cal].filter(Boolean).join(' '), local ? 'em ' + local : '' ]
+      const txt = [ [tipo, cal].filter(Boolean).join(' '), local ? 'em ' + local : '',
+                    anestesia.disp.ehPrevio(disp) ? '(prévio ao ato)' : '' ]
         .filter(Boolean).join(' ');
       if (alvo.dataset.manual !== '1' && (txt || !alvo.value)) alvo.value = txt;
       try { anestesia.eventos.atualizarDescricoes(); } catch (e) {}
@@ -31984,10 +32031,12 @@ const anestesia = {
                 </select>
               </div>
               <input type="text" name="disp_det[]" data-disp="${valor}" placeholder="montado do que você marcou" style="margin-top:6px"
-                oninput="this.dataset.manual='1'; anestesia.eventos.atualizarDescricoes()">`;
+                oninput="this.dataset.manual='1'; anestesia.eventos.atualizarDescricoes()">
+              ${anestesia.disp._previoHTML(valor)}`;
           } else {
             div.innerHTML = `<label>${valor} <small style="color:var(--text-mute);font-weight:400">— detalhes</small></label>
-              <input type="text" name="disp_det[]" data-disp="${valor}" placeholder="Ex.: tamanho, local, calibre" oninput="anestesia.eventos.atualizarDescricoes()">`;
+              <input type="text" name="disp_det[]" data-disp="${valor}" placeholder="Ex.: tamanho, local, calibre" oninput="anestesia.eventos.atualizarDescricoes()">
+              ${anestesia.disp._previoHTML(valor)}`;
           }
           cont.appendChild(div);
         }
@@ -32003,13 +32052,55 @@ const anestesia = {
       if (!(opts && opts.restaurando)) {
         try {
           if (checkbox.checked) {
-            const evt = anestesia.eventos.aoMarcarDispositivo(valor);
-            if (evt) toast('Evento "' + evt + '" adicionado — o tipo, o calibre e o local que você marcar aqui entram sozinhos na descrição.');
+            /* prévio = já estava instalado quando o paciente chegou. Não é
+               procedimento dele, então não entra como evento na linha do tempo
+               (e não vira cobrança) — mas continua registrado como presente. */
+            if (anestesia.disp.ehPrevio(valor)) {
+              toast(valor + ' registrado como PRÉVIO — fica na ficha, mas não entra como procedimento.');
+            } else {
+              const evt = anestesia.eventos.aoMarcarDispositivo(valor);
+              if (evt) toast('Evento "' + evt + '" adicionado — o tipo, o calibre e o local que você marcar aqui entram sozinhos na descrição.');
+            }
           } else {
             anestesia.eventos.aoDesmarcarDispositivo(valor);
           }
         } catch (e) {}
       }
+      markDirty();
+    },
+
+    /* ---- DISPOSITIVO PRÉVIO AO ATO --------------------------------------
+       Paciente que desce da UTI já intubado, com acesso central e sonda
+       vesical. Marcar esses dispositivos é correto — eles estavam lá e o
+       registro tem de dizer isso. O que é errado é a ficha afirmar que ELE
+       puncionou, intubou e sondou: vira procedimento na linha do tempo e
+       cobrança que não aconteceu. Daí a marca. */
+    _previoHTML(valor) {
+      return '<label class="check" style="display:inline-flex;margin-top:6px;font-size:.8rem" ' +
+        'title="Já estava instalado quando o paciente chegou — não foi procedimento deste ato">' +
+        '<input type="checkbox" name="disp_previo[]" data-disp="' + utils.escapeAttr(valor) + '" ' +
+        'onchange="anestesia.disp.alternarPrevio(\'' + utils.escapeAttr(valor) + '\')"> ' +
+        '<span>Prévio ao ato <small style="color:var(--text-mute)">— já instalado</small></span></label>';
+    },
+    ehPrevio(valor) {
+      const el = document.querySelector('[name="disp_previo[]"][data-disp="' + valor + '"]');
+      return !!(el && el.checked);
+    },
+    alternarPrevio(valor) {
+      anestesia.graficoUI._contexto = 'anestesia';
+      if (anestesia.disp.ehPrevio(valor)) {
+        /* deixou de ser procedimento dele: o evento que o sistema criou sai.
+           O que ele escreveu à mão fica — aoDesmarcarDispositivo só remove o
+           que está marcado como automático. */
+        const n = anestesia.eventos.aoDesmarcarDispositivo(valor);
+        toast(n ? valor + ' marcado como prévio — o evento saiu da linha do tempo.'
+                : valor + ' marcado como prévio.');
+      } else {
+        const evt = anestesia.eventos.aoMarcarDispositivo(valor);
+        if (evt) toast('Evento "' + evt + '" adicionado à linha do tempo.');
+      }
+      try { anestesia.disp.montarDet(valor); } catch (e) {}
+      try { anestesia.eventos.atualizarDescricoes(); } catch (e) {}
       markDirty();
     },
     /* Sincroniza as TRÊS formas de registro (tabela, grade e gráfico) com os
@@ -32044,9 +32135,10 @@ const anestesia = {
         const sel = c => anestesia.disp._sel(k, c);
         const partes = { texto: el.value || '' };
         ['tipo', 'calibre', 'local'].forEach(c => { const v = sel(c); if (v) partes[c] = v; });
+        if (anestesia.disp.ehPrevio(k)) partes.previo = true;
         /* formato antigo (só texto) continua válido na leitura; aqui gravamos
            o objeto só quando há seleção, para não inchar registro sem motivo */
-        det[k] = (partes.tipo || partes.calibre || partes.local) ? partes : partes.texto;
+        det[k] = (partes.tipo || partes.calibre || partes.local || partes.previo) ? partes : partes.texto;
       });
       return det;
     },
@@ -32063,6 +32155,8 @@ const anestesia = {
             const sel = document.querySelector('[data-campo="' + c + '"][data-disp="' + k + '"]');
             if (sel && v[c]) sel.value = v[c];
           });
+          const pv = document.querySelector('[name="disp_previo[]"][data-disp="' + k + '"]');
+          if (pv) pv.checked = !!v.previo;
         } else if (el && texto) {
           /* veio só o texto (ficha antiga ou digitada à mão): não deixar uma
              seleção posterior sobrescrever o que está gravado */
@@ -36855,7 +36949,9 @@ const anestesia = {
 
       /* 4c. VIA AÉREA + VENTILAÇÃO */
       if (d.tecnica.via_aerea_uso) {
-        let v = `Via aérea: ${d.tecnica.via_aerea_uso}`;
+        /* prévia = o paciente chegou com ela; a ficha diz isso em vez de
+           deixar parecer que a intubação foi feita aqui */
+        let v = `Via aérea: ${d.tecnica.via_aerea_uso}` + (d.tecnica.via_aerea_previo ? ' (prévia ao ato)' : '');
         if (d.ventilacao) {
           if (d.ventilacao.modo) v += `; ventilação ${d.ventilacao.modo}`;
           if (d.ventilacao.vt) v += ` VT ${d.ventilacao.vt} mL`;
@@ -37075,6 +37171,10 @@ const anestesia = {
            era salvo no registro nem saía na impressão. */
         via_aerea_detalhe: v('via_aerea_detalhe'),
         via_aerea_hora: v('via_aerea_hora'),
+        /* dispositivo que o paciente já trouxe: não é procedimento deste ato */
+        via_aerea_previo: (function () {
+          const el = f.querySelector('[name="via_aerea_previo"]'); return el ? el.checked : false;
+        })(),
         monitorizacao_descricao: v('monitorizacao'),
         equipamentos: v('equipamentos_usados'),
         /* o que a janela de cada técnica coletou — é isto que faltava ficar
@@ -37240,6 +37340,10 @@ const anestesia = {
     set('via_aerea_uso', tc.via_aerea_uso);
     set('via_aerea_detalhe', tc.via_aerea_detalhe);
     set('via_aerea_hora', tc.via_aerea_hora);
+    (function () {
+      const el = f.querySelector('[name="via_aerea_previo"]');
+      if (el) el.checked = !!tc.via_aerea_previo;
+    })();
     set('ventilacao_tipo', tc.ventilacao_tipo);
     set('monitorizacao', tc.monitorizacao_descricao);
     set('equipamentos_usados', tc.equipamentos);

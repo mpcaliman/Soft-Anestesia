@@ -14213,6 +14213,112 @@ await test('Débito urinário: janela certa, total, intervalo contado e ritmo po
   await page.close();
 });
 
+/* 207) Dispositivo prévio ao ato. Paciente que desce da UTI já intubado, com
+   acesso central e sonda vesical. Marcar esses dispositivos é correto — eles
+   estavam lá. O que é errado é a ficha afirmar que ELE puncionou, intubou e
+   sondou: vira procedimento na linha do tempo, entra na descrição e pode
+   virar cobrança do que não aconteceu. */
+await test('Dispositivos e via aérea prévios ao ato: ficam na ficha, mas não viram procedimento dele', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    store.setList('anestesia', []);
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 600));
+    try { modal.close(); } catch (e) {}
+    document.querySelectorAll('#module-anestesia .card.collapsed').forEach(c => c.classList.remove('collapsed'));
+    const f = document.getElementById('form-anestesia');
+    anestesia.graficoUI._contexto = 'anestesia';
+    const existe = t => anestesia.eventos.existeEvento(t);
+
+    /* 1) sem a marca, marcar o acesso segue criando o procedimento */
+    const central = [...f.querySelectorAll('[name="dispositivos[]"]')].find(el => el.value === 'Acesso venoso central');
+    central.checked = true;
+    anestesia.disp.alternar(central);
+    out.semMarcaCriaOEvento = existe('Acesso venoso central');
+    out.temACaixaPrevio = !!document.querySelector('[name="disp_previo[]"][data-disp="Acesso venoso central"]');
+
+    /* 2) marcar "prévio" tira o evento — e o dispositivo continua na ficha */
+    const pv = document.querySelector('[name="disp_previo[]"][data-disp="Acesso venoso central"]');
+    pv.checked = true;
+    anestesia.disp.alternarPrevio('Acesso venoso central');
+    out.previoTiraOEvento = !existe('Acesso venoso central');
+    out.dispositivoSegueMarcado = central.checked === true;
+
+    /* 3) e o texto do dispositivo diz que era prévio */
+    const selTipo = document.querySelector('[data-campo="tipo"][data-disp="Acesso venoso central"]');
+    if (selTipo) { selTipo.value = selTipo.options[1] ? selTipo.options[1].value : ''; }
+    anestesia.disp.montarDet('Acesso venoso central');
+    out.textoDizPrevio = /prévio ao ato/.test(
+      (document.querySelector('[name="disp_det[]"][data-disp="Acesso venoso central"]') || {}).value || '');
+
+    /* 4) desmarcar devolve o procedimento à linha do tempo */
+    pv.checked = false;
+    anestesia.disp.alternarPrevio('Acesso venoso central');
+    out.desmarcarDevolve = existe('Acesso venoso central');
+    pv.checked = true;
+    anestesia.disp.alternarPrevio('Acesso venoso central');
+
+    /* 5) via aérea prévia: o paciente chegou intubado */
+    const via = f.querySelector('[name="via_aerea_uso"]');
+    via.value = 'Intubação orotraqueal';
+    anestesia.eventos.aoSelecionarViaAerea(via);
+    await new Promise(res => setTimeout(res, 400));
+    try { modal.close(); } catch (e) {}
+    out.viaCriaOEvento = existe('Intubação');
+    const vp = f.querySelector('[name="via_aerea_previo"]');
+    out.temACaixaDaVia = !!vp;
+    vp.checked = true;
+    anestesia.viaAerea.alternarPrevio();
+    out.viaPreviaTiraOEvento = !existe('Intubação');
+
+    /* 6) escolher a via com a marca já ligada não recria o evento */
+    via.value = 'Máscara laríngea';
+    anestesia.eventos.aoSelecionarViaAerea(via);
+    await new Promise(res => setTimeout(res, 400));
+    try { modal.close(); } catch (e) {}
+    out.naoRecriaComMarcaLigada = !existe('Máscara laríngea');
+
+    /* 7) tudo isso sobrevive ao salvar e voltar */
+    f.querySelector('[name="paciente_nome"]').value = 'PACIENTE UTI';
+    const d = anestesia.coletarEstruturado();
+    out.gravouAVia = d.tecnica.via_aerea_previo === true;
+    const detCentral = (d.monitorizacao.dispositivos_detalhes || {})['Acesso venoso central'];
+    out.gravouODispositivo = !!detCentral && detCentral.previo === true;
+
+    anestesia.limparSilencioso();
+    await new Promise(res => setTimeout(res, 200));
+    anestesia.carregar(store.save('anestesia', d));
+    await new Promise(res => setTimeout(res, 500));
+    try { modal.close(); } catch (e) {}
+    out.voltouAVia = (f.querySelector('[name="via_aerea_previo"]') || {}).checked === true;
+    out.voltouODispositivo = (document.querySelector('[name="disp_previo[]"][data-disp="Acesso venoso central"]') || {}).checked === true;
+
+    /* 8) e a ficha impressa diz que a via aérea era prévia */
+    const txt = anestesia.resumo ? (function () {
+      anestesia.resumo.gerar();
+      return (f.querySelector('[name="resumo_narrativo"]') || {}).value || '';
+    })() : '';
+    out.impressoDizPrevia = /prévia ao ato/.test(txt);
+    return out;
+  });
+
+  assert(r.semMarcaCriaOEvento, 'sem a marca, o acesso continua entrando como procedimento');
+  assert(r.temACaixaPrevio && r.temACaixaDaVia, 'dispositivos e via aérea ganham a marca "prévio ao ato"');
+  assert(r.previoTiraOEvento, 'marcar prévio tira o procedimento da linha do tempo');
+  assert(r.dispositivoSegueMarcado, 'sem tirar o dispositivo da ficha — ele estava lá e o registro diz isso');
+  assert(r.textoDizPrevio, 'e o texto do dispositivo passa a dizer que era prévio');
+  assert(r.desmarcarDevolve, 'desmarcar devolve o procedimento');
+  assert(r.viaCriaOEvento, 'a via aérea escolhida segue criando o evento de manejo');
+  assert(r.viaPreviaTiraOEvento, 'e marcá-la como prévia tira — intubação que ele não fez não é procedimento dele');
+  assert(r.naoRecriaComMarcaLigada, 'trocar o dispositivo com a marca ligada não recria o evento');
+  assert(r.gravouAVia && r.gravouODispositivo, 'a marca é gravada na ficha');
+  assert(r.voltouAVia && r.voltouODispositivo, 'e volta ao reabrir');
+  assert(r.impressoDizPrevia, 'o texto da ficha diz que a via aérea era prévia ao ato');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
