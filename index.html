@@ -4600,7 +4600,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-25c</b><br>
+    v7.1 · build <b id="build-tag">2026-09-25d</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -6561,6 +6561,22 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
           <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Fim da cirurgia'})">+ Fim cirurgia</button>
           <button type="button" class="btn btn-sm" onclick="anestesia.eventos.add({tipo:'Extubação'})">+ Extubação</button>
         </div>
+        <!-- EXAMES — mesma linha do tempo, mesma tabela. O exame é um evento
+             como outro qualquer: tem hora e entra na ordem em que aconteceu.
+             O que ele tem de diferente são os VALORES (uma gasometria tem
+             treze números), e esses ficam numa janela atrás do botão 🧪 da
+             própria linha, indo para os detalhes já escritos com as unidades. -->
+        <div class="quick-actions">
+          <span class="qa-label">🧪 Exames</span>
+          <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.exames.add('Gasometria arterial')">+ Gasometria arterial</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add('Gasometria venosa')">+ Gasometria venosa</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add('Hemograma')">+ Hemograma</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add('Glicemia')">+ Glicemia</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add('Eletrólitos')">+ Eletrólitos</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add('Coagulograma')">+ Coagulograma</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add('Lactato')">+ Lactato</button>
+          <button type="button" class="btn btn-sm" onclick="anestesia.exames.abrirCatalogo()" title="Todos os exames, inclusive troponina, tromboelastografia e outros">＋ outros exames…</button>
+        </div>
         <div class="dyn-table-wrap">
           <table class="dyn" id="tab-eventos">
             <thead><tr>
@@ -6575,39 +6591,6 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
         <div class="table-actions">
           <button type="button" class="btn btn-primary btn-sm" onclick="anestesia.eventos.add()">+ Adicionar evento</button>
           <button type="button" class="btn btn-danger btn-sm" onclick="anestesia.eventos.limparTabela()">🗑 Limpar eventos</button>
-        </div>
-
-        <!-- EXAMES INTRAOPERATÓRIOS
-             Diferentes dos monitores logo acima: monitor é medida CONTÍNUA de
-             um parâmetro; exame é pontual, tem hora, e traz VÁRIOS valores de
-             uma vez. Gasometria não cabe numa coluna da grade de sinais
-             vitais — tem dez números. Por isso tabela própria, com os campos
-             de cada exame numa janela. -->
-        <h3 style="font-size:.92rem;color:var(--primary-darker);margin:18px 0 8px;border-top:1px solid var(--border);padding-top:14px">🧪 Exames intraoperatórios<small style="font-weight:400;color:var(--text-mute);margin-left:8px">— gasometria, hemograma, glicemia… cada um com hora e resultado</small></h3>
-        <div class="quick-actions">
-          <span class="qa-label">Adicionar rápido</span>
-          <button type="button" class="btn btn-sm btn-primary" onclick="anestesia.exames.add({ tipo: 'Gasometria arterial' }, true)">+ Gasometria arterial</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add({ tipo: 'Gasometria venosa' }, true)">+ Gasometria venosa</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add({ tipo: 'Hemograma' }, true)">+ Hemograma</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add({ tipo: 'Glicemia' }, true)">+ Glicemia</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add({ tipo: 'Eletrólitos' }, true)">+ Eletrólitos</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add({ tipo: 'Coagulograma' }, true)">+ Coagulograma</button>
-          <button type="button" class="btn btn-sm" onclick="anestesia.exames.add({ tipo: 'Lactato' }, true)">+ Lactato</button>
-        </div>
-        <div class="dyn-table-wrap">
-          <table class="dyn" id="tab-exames">
-            <thead><tr>
-              <th style="width:80px;cursor:pointer" onclick="anestesia.ordenarPorHorario('exames-body')" title="Toque para ordenar por horário">Horário ↕</th>
-              <th style="width:190px">Exame</th>
-              <th>Resultado</th>
-              <th class="col-rm">×</th>
-            </tr></thead>
-            <tbody id="exames-body"></tbody>
-          </table>
-        </div>
-        <div class="table-actions">
-          <button type="button" class="btn btn-primary btn-sm" onclick="anestesia.exames.add()">+ Adicionar exame</button>
-          <button type="button" class="btn btn-danger btn-sm" onclick="anestesia.exames.limparTabela()">🗑 Limpar exames</button>
         </div>
 
         <!-- GRADE POR HORÁRIO — edição principal (estilo tabela), acima do gráfico -->
@@ -30780,6 +30763,11 @@ const anestesia = {
       { grupo: 'Respiratórias', itens: ['Dessaturação', 'Broncoespasmo', 'Laringoespasmo', 'Apneia', 'Disritmia ventilatória'] },
       { grupo: 'Intercorrências', itens: ['Reação alérgica', 'Anafilaxia', 'Náusea', 'Vômito', 'Sangramento importante', 'Hipotermia', 'Hipertermia maligna', 'Convulsão', 'Despertar intraoperatório', 'Embolia gasosa (CO₂)', 'Enfisema subcutâneo', 'Pneumotórax'] },
       { grupo: 'Procedimentos terapêuticos', itens: ['Transfusão', 'Manobra de recrutamento', 'Reversão BNM', 'Cardioversão / RCP', 'Antibioticoprofilaxia'] },
+      /* Exames: são eventos como os outros — têm hora e entram na ordem em que
+         aconteceram. O que muda é o botão da linha, que abre os campos daquele
+         exame em vez da descrição técnica (ver anestesia.exames). */
+      { grupo: 'Exames', itens: ['Gasometria arterial', 'Gasometria venosa', 'Hemograma', 'Glicemia',
+          'Eletrólitos', 'Coagulograma', 'Lactato', 'Troponina', 'Tromboelastografia (TEG/ROTEM)', 'Outro exame'] },
       { grupo: 'Outros', itens: ['Outro'] }
     ],
     get TIPOS() { return [].concat(...anestesia.eventos.GRUPOS.map(g => g.itens)); },
@@ -31281,7 +31269,7 @@ const anestesia = {
       tr.innerHTML = `
         <td data-label="Horário"><input type="time" name="evt_hora[]" value="${hora}" onchange="anestesia.graficoUI.validarHoraInput(this)"></td>
         <td data-label="Evento"><select name="evt_tipo[]"><option value="">— selecione —</option>${opt(anestesia.eventos.TIPOS, dados.tipo)}</select></td>
-        <td data-label="Detalhes"><div style="display:flex;gap:4px;align-items:center"><input type="text" name="evt_obs[]" value="${utils.escapeAttr(dados.obs || '')}" placeholder="Opcional" style="flex:1;min-width:0" oninput="anestesia.eventos._marcarManual(this)"><button type="button" class="btn-rm" title="Inserir descrição técnica do procedimento" onclick="anestesia.eventos.inserirDescricao(this)">📝</button></div></td>
+        <td data-label="Detalhes"><div style="display:flex;gap:4px;align-items:center"><input type="text" name="evt_obs[]" value="${utils.escapeAttr(dados.obs || '')}" placeholder="Opcional" style="flex:1;min-width:0" oninput="anestesia.eventos._marcarManual(this)"><input type="hidden" name="evt_val[]" value="${utils.escapeAttr(dados.valores && Object.keys(dados.valores).length ? JSON.stringify(dados.valores) : '')}"><button type="button" class="btn-rm" onclick="anestesia.eventos.detalhar(this)">📝</button></div></td>
         <td class="col-rm"><button type="button" class="btn-rm" onclick="this.closest('tr').remove(); anestesia.vitais.atualizarGrafico(); markDirty();">✕</button></td>
       `;
       tbody.appendChild(tr);
@@ -31293,10 +31281,32 @@ const anestesia = {
         el.addEventListener('change', () => anestesia.vitais.atualizarGrafico());
       });
       const selTipo = tr.querySelector('[name="evt_tipo[]"]');
-      if (selTipo) selTipo.addEventListener('change', () => { try { anestesia.eventos.atualizarDescricoes(); } catch (e) {} });
+      if (selTipo) selTipo.addEventListener('change', () => {
+        try { anestesia.eventos.atualizarDescricoes(); } catch (e) {}
+        try { anestesia.eventos._ajustarBotao(tr); } catch (e) {}
+      });
+      anestesia.eventos._ajustarBotao(tr);
       anestesia.vitais.atualizarGrafico();
       markDirty();
       return tr;
+    },
+    /* Um botão só na linha, com o significado do que está selecionado: no
+       exame ele abre os valores (🧪), no resto insere a descrição técnica (📝).
+       Dois botões fixos dariam um sempre inútil em cada linha. */
+    _ajustarBotao(tr) {
+      const btn = tr && tr.querySelector('td[data-label="Detalhes"] .btn-rm');
+      if (!btn) return;
+      const tipo = (tr.querySelector('[name="evt_tipo[]"]') || {}).value || '';
+      const ehExame = anestesia.exames.ehExame(tipo);
+      btn.textContent = ehExame ? '🧪' : '📝';
+      btn.title = ehExame ? 'Preencher os valores deste exame' : 'Inserir descrição técnica do procedimento';
+    },
+    detalhar(btn) {
+      const tr = btn && btn.closest('tr');
+      if (!tr) return;
+      const tipo = (tr.querySelector('[name="evt_tipo[]"]') || {}).value || '';
+      if (anestesia.exames.ehExame(tipo)) { anestesia.exames.abrir(tr); return; }
+      anestesia.eventos.inserirDescricao(btn);
     },
     limparTabela() {
       if (!confirm('Apagar todos os eventos?')) return;
@@ -31310,14 +31320,22 @@ const anestesia = {
         const hora = tr.querySelector('[name="evt_hora[]"]')?.value;
         const tipo = tr.querySelector('[name="evt_tipo[]"]')?.value;
         const obs = tr.querySelector('[name="evt_obs[]"]')?.value || '';
-        if (hora && tipo) linhas.push({ hora, tipo, observacao: obs, auto: tr.dataset.auto === '1' });
+        if (!hora || !tipo) return;
+        const linha = { hora, tipo, observacao: obs, auto: tr.dataset.auto === '1' };
+        /* valores do exame, quando a linha for um exame: o texto de detalhes é
+           só a leitura deles, e é dos números que a impressão precisa */
+        const vals = anestesia.exames._valores(tr);
+        if (Object.keys(vals).length) linha.valores = vals;
+        linhas.push(linha);
       });
       return linhas;
     },
     restaurar(arr) {
       const tbody = document.getElementById('eventos-body');
       if (tbody) tbody.innerHTML = '';
-      if (Array.isArray(arr)) arr.forEach(e => anestesia.eventos.add({ hora: e.hora, tipo: e.tipo, obs: e.observacao, auto: e.auto }));
+      if (Array.isArray(arr)) arr.forEach(e => anestesia.eventos.add({
+        hora: e.hora, tipo: e.tipo, obs: e.observacao, auto: e.auto, valores: e.valores
+      }));
     }
   },
 
@@ -31327,11 +31345,13 @@ const anestesia = {
      valores de uma vez. Uma gasometria tem treze números — não cabe numa
      célula da grade, e espalhá-la por treze colunas encheria a grade de
      espaços vazios em todos os horários em que não houve coleta.
-     Cada linha é um exame: hora, tipo e o resultado. Os números vão numa
-     janela com os campos daquele exame (a mesma ideia das técnicas do card 3),
-     e o texto da coluna "Resultado" é gerado a partir deles — continuando
-     editável à mão, e aí o sistema não mexe mais (é o que a marca "auto" da
-     linha guarda, igual aos eventos). */
+     Mas exame TEM hora e aconteceu no meio do ato, então ele mora na tabela de
+     EVENTOS, junto com indução, incisão e extubação: uma linha do tempo só,
+     que se ordena junta e conta a cirurgia na ordem em que ela correu.
+     O que este módulo acrescenta ao evento são os VALORES: o botão 🧪 da linha
+     abre os campos daquele exame, e o que for preenchido vira o texto de
+     detalhes já com as unidades — continuando editável à mão, e aí o sistema
+     não mexe mais (é o que a marca "auto" da linha guarda). */
   exames: {
     /* Campos por exame. `u` é a unidade que aparece no resumo; `p` é o valor
        de referência mostrado como dica dentro do campo — não é validação,
@@ -31427,7 +31447,7 @@ const anestesia = {
           { n: 'ly30', l: 'LY30 / ML', u: '%' }
         ]
       },
-      'Outro': {
+      'Outro exame': {
         titulo: '🧪 Outro exame',
         campos: [
           { n: 'nome', l: 'Qual exame', t: 'text', col: 12 },
@@ -31436,13 +31456,16 @@ const anestesia = {
       }
     },
     get TIPOS() { return Object.keys(anestesia.exames.ESPECS); },
+    /* Este evento é um exame? É o que decide o botão da linha e o que sai na
+       seção de exames da impressão. */
+    ehExame(tipo) { return !!(tipo && anestesia.exames.ESPECS[tipo]); },
 
     /* Uma linha de texto com o que foi preenchido. Campo vazio some — o
        resumo é do que existe, não do formulário. */
     resumo(tipo, vals) {
       const esp = anestesia.exames.ESPECS[tipo];
       if (!esp || !vals) return '';
-      if (tipo === 'Outro') {
+      if (tipo === 'Outro exame') {
         return [vals.nome, vals.resultado].filter(Boolean).join(': ');
       }
       return esp.campos
@@ -31451,66 +31474,41 @@ const anestesia = {
         .join(' · ');
     },
 
+    /* Os valores ficam num campo escondido da própria linha do evento, para
+       serem gravados e relidos com ela — o texto de detalhes é só a leitura. */
     _valores(tr) {
-      const el = tr && tr.querySelector('[name="exame_val[]"]');
+      const el = tr && tr.querySelector('[name="evt_val[]"]');
       if (!el || !el.value) return {};
       try { return JSON.parse(el.value) || {}; } catch (e) { return {}; }
     },
-    _marcarManual(input) {
-      const tr = input && input.closest('tr');
-      if (tr) delete tr.dataset.auto;
-    },
 
-    add(dados = {}, abrirJanela) {
-      const tbody = document.getElementById('exames-body');
-      if (!tbody) return null;
-      const tr = document.createElement('tr');
-      const hora = anestesia.graficoUI.clampHora(dados.hora || utils.horaAtual());
-      const vals = (dados.valores && typeof dados.valores === 'object') ? dados.valores : {};
-      const texto = dados.resultado != null ? dados.resultado : anestesia.exames.resumo(dados.tipo, vals);
-      const opt = anestesia.exames.TIPOS
-        .map(v => `<option ${v === dados.tipo ? 'selected' : ''}>${utils.escapeHTML(v)}</option>`).join('');
-      tr.innerHTML = `
-        <td data-label="Horário"><input type="time" name="exame_hora[]" value="${hora}" onchange="anestesia.graficoUI.validarHoraInput(this)"></td>
-        <td data-label="Exame"><select name="exame_tipo[]" onchange="anestesia.exames.aoTrocarTipo(this)"><option value="">— selecione —</option>${opt}</select></td>
-        <td data-label="Resultado"><div style="display:flex;gap:4px;align-items:center">
-          <input type="text" name="exame_res[]" value="${utils.escapeAttr(texto || '')}" placeholder="Preencha pelos campos do exame (🧪) ou escreva aqui" style="flex:1;min-width:0" oninput="anestesia.exames._marcarManual(this)">
-          <input type="hidden" name="exame_val[]" value="${utils.escapeAttr(Object.keys(vals).length ? JSON.stringify(vals) : '')}">
-          <button type="button" class="btn-rm" title="Preencher os valores deste exame" onclick="anestesia.exames.abrir(this)">🧪</button>
-        </div></td>
-        <td class="col-rm"><button type="button" class="btn-rm" onclick="this.closest('tr').remove(); markDirty();">✕</button></td>
-      `;
-      tbody.appendChild(tr);
-      /* "auto" = o texto do resultado foi escrito pelo sistema a partir dos
-         valores, então pode ser reescrito quando eles mudarem. Basta a pessoa
-         digitar ali para a marca cair e o que ela escreveu ficar intocável. */
-      if (dados.auto || !texto) tr.dataset.auto = '1';
-      tr.querySelectorAll('input, select').forEach(el => {
-        el.addEventListener('change', () => { try { markDirty(); } catch (e) {} });
-      });
-      markDirty();
-      if (abrirJanela && dados.tipo) {
-        setTimeout(() => { try { anestesia.exames.abrir(tr); } catch (e) {} }, 60);
-      }
+    /* Lança o exame como evento, na hora atual, e já abre os campos dele —
+       é o que a pessoa ia fazer em seguida de qualquer jeito. */
+    add(tipo) {
+      anestesia.graficoUI._contexto = 'anestesia';
+      const tr = anestesia.eventos.add({ tipo: tipo || '', hora: utils.horaAtual() });
+      if (!tr) return null;
+      if (tipo) setTimeout(() => { try { anestesia.exames.abrir(tr); } catch (e) {} }, 60);
       return tr;
     },
 
-    /* Trocar o tipo com a linha ainda em branco abre direto os campos do novo
-       exame — é o que a pessoa ia fazer em seguida de qualquer jeito. */
-    aoTrocarTipo(sel) {
-      const tr = sel && sel.closest('tr');
-      if (!tr || !sel.value) return;
-      const res = tr.querySelector('[name="exame_res[]"]');
-      const vazio = !res || !res.value.trim();
-      if (vazio) setTimeout(() => { try { anestesia.exames.abrir(tr); } catch (e) {} }, 60);
-      try { markDirty(); } catch (e) {}
+    /* Todos os exames numa janela só, para os que não têm botão de atalho */
+    abrirCatalogo() {
+      const corpo =
+        '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">O exame entra na <b>linha do tempo dos eventos</b>, com a hora atual. Em seguida abrem os campos dele para você lançar os valores.</p>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
+        anestesia.exames.TIPOS.map(t =>
+          '<button type="button" class="btn btn-sm" onclick="modal.close(); anestesia.exames.add(\'' + utils.escapeAttr(t) + '\')">' +
+          utils.escapeHTML(t) + '</button>').join('') +
+        '</div>';
+      modal.open('🧪 Exames intraoperatórios', corpo, '<button class="btn" onclick="modal.close()">Fechar</button>');
     },
 
     _linhaAberta: null,
     abrir(ref) {
       const tr = (ref && ref.closest) ? ref.closest('tr') : ref;
       if (!tr) return false;
-      const sel = tr.querySelector('[name="exame_tipo[]"]');
+      const sel = tr.querySelector('[name="evt_tipo[]"]');
       const tipo = sel ? sel.value : '';
       if (!tipo) { toast('Escolha primeiro qual é o exame.', 'warn'); if (sel) sel.focus(); return false; }
       const esp = anestesia.exames.ESPECS[tipo];
@@ -31535,7 +31533,7 @@ const anestesia = {
           '<input type="text" name="ex_' + c.n + '" value="' + utils.escapeAttr(val) + '"' +
           (c.p ? ' placeholder="' + utils.escapeAttr(c.p) + '"' : '') + '></div>';
       };
-      const hora = (tr.querySelector('[name="exame_hora[]"]') || {}).value || '';
+      const hora = (tr.querySelector('[name="evt_hora[]"]') || {}).value || '';
       const corpo =
         '<p style="font-size:.82rem;color:var(--text-mute);margin:0 0 10px">' +
         (hora ? 'Coleta das <b>' + utils.escapeHTML(hora) + '</b>. ' : '') +
@@ -31552,7 +31550,7 @@ const anestesia = {
       const tr = anestesia.exames._linhaAberta;
       const f = document.getElementById('form-exame');
       if (!tr || !f) { modal.close(); return; }
-      const sel = tr.querySelector('[name="exame_tipo[]"]');
+      const sel = tr.querySelector('[name="evt_tipo[]"]');
       const tipo = sel ? sel.value : '';
       const esp = anestesia.exames.ESPECS[tipo];
       if (!esp) { modal.close(); return; }
@@ -31561,9 +31559,9 @@ const anestesia = {
         const el = f.querySelector('[name="ex_' + c.n + '"]');
         if (el && String(el.value).trim()) d[c.n] = String(el.value).trim();
       });
-      const hid = tr.querySelector('[name="exame_val[]"]');
+      const hid = tr.querySelector('[name="evt_val[]"]');
       if (hid) hid.value = Object.keys(d).length ? JSON.stringify(d) : '';
-      const res = tr.querySelector('[name="exame_res[]"]');
+      const res = tr.querySelector('[name="evt_obs[]"]');
       /* o texto só é reescrito enquanto for do sistema: o que o anestesista
          digitou por cima é dele, e nenhuma edição de valores o apaga */
       if (res && (tr.dataset.auto === '1' || !res.value.trim())) {
@@ -31571,35 +31569,40 @@ const anestesia = {
         tr.dataset.auto = '1';
       }
       modal.close();
+      try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
       try { markDirty(); } catch (e) {}
       toast('🧪 Resultado registrado em ' + tipo.toLowerCase() + '.');
     },
 
-    limparTabela() {
-      if (!confirm('Apagar todos os exames intraoperatórios?')) return;
-      const tb = document.getElementById('exames-body');
-      if (tb) tb.innerHTML = '';
-      markDirty();
+    /* Os exames de um registro salvo, em ordem de hora. Sai daqui a seção de
+       exames da impressão e a frase do resumo narrativo — sem uma segunda
+       cópia dentro do registro, que é como os dois começam a divergir. */
+    listar(d) {
+      return ((d && d.eventos) || [])
+        .filter(e => anestesia.exames.ehExame(e.tipo))
+        .slice()
+        .sort((a, b) => (a.hora || '99:99').localeCompare(b.hora || '99:99'))
+        .map(e => ({
+          hora: e.hora || '',
+          tipo: e.tipo,
+          /* o texto da linha é o que vale; vazio, remonta dos valores para o
+             exame não sair da ficha sem resultado */
+          resultado: (e.observacao || '').trim() || anestesia.exames.resumo(e.tipo, e.valores || {}),
+          valores: e.valores || {}
+        }))
+        .filter(e => e.resultado);
     },
 
-    coletar() {
-      const linhas = [];
-      document.querySelectorAll('#exames-body tr').forEach(tr => {
-        const hora = (tr.querySelector('[name="exame_hora[]"]') || {}).value || '';
-        const tipo = (tr.querySelector('[name="exame_tipo[]"]') || {}).value || '';
-        const resultado = (tr.querySelector('[name="exame_res[]"]') || {}).value || '';
-        const valores = anestesia.exames._valores(tr);
-        if (!tipo && !resultado.trim()) return;
-        linhas.push({ hora, tipo, resultado, valores, auto: tr.dataset.auto === '1' });
-      });
-      return linhas;
-    },
-    restaurar(arr) {
-      const tb = document.getElementById('exames-body');
-      if (tb) tb.innerHTML = '';
-      if (Array.isArray(arr)) arr.forEach(e => anestesia.exames.add({
-        hora: e.hora, tipo: e.tipo, resultado: e.resultado, valores: e.valores, auto: e.auto
-      }));
+    /* Ficha gravada pela versão que teve tabela separada (build 2026-09-25c):
+       os exames voltam como eventos, na linha do tempo única. */
+    _migrarAntigos(d) {
+      if (!d || !Array.isArray(d.exames) || !d.exames.length) return [];
+      return d.exames
+        .filter(e => e.tipo || (e.resultado || '').trim())
+        .map(e => ({
+          hora: e.hora || '', tipo: e.tipo === 'Outro' ? 'Outro exame' : e.tipo,
+          observacao: e.resultado || '', valores: e.valores || {}, auto: e.auto
+        }));
     }
   },
 
@@ -36672,19 +36675,17 @@ const anestesia = {
         const evts = d.eventos
           .filter(e => e.hora && e.tipo)
           .sort((a, b) => (a.hora || '').localeCompare(b.hora || ''))
-          .map(e => `${e.hora} ${e.tipo}${e.observacao ? ' (' + e.observacao + ')' : ''}`);
+          .map(e => anestesia.exames.ehExame(e.tipo)
+            ? `${e.hora} ${e.tipo}`
+            : `${e.hora} ${e.tipo}${e.observacao ? ' (' + e.observacao + ')' : ''}`);
         if (evts.length) partes.push(`Eventos: ${evts.join('; ')}.`);
       }
 
-      /* 9b. EXAMES INTRAOPERATÓRIOS */
-      if (Array.isArray(d.exames) && d.exames.length > 0) {
-        const exs = d.exames
-          .filter(e => e.tipo || (e.resultado || '').trim())
-          .sort((a, b) => (a.hora || '99:99').localeCompare(b.hora || '99:99'))
-          .map(e => {
-            const txt = (e.resultado || '').trim() || anestesia.exames.resumo(e.tipo, e.valores || {});
-            return `${e.hora ? e.hora + ' ' : ''}${e.tipo || 'Exame'}${txt ? ' — ' + txt : ''}`;
-          });
+      /* 9b. EXAMES INTRAOPERATÓRIOS — são eventos; aqui saem com os valores
+         por extenso, que na lista de eventos acima ficariam ilegíveis */
+      {
+        const exs = anestesia.exames.listar(d)
+          .map(e => `${e.hora ? e.hora + ' ' : ''}${e.tipo} — ${e.resultado}`);
         if (exs.length) partes.push(`Exames intraoperatórios: ${exs.join('; ')}.`);
       }
 
@@ -36826,7 +36827,6 @@ const anestesia = {
         observacoes: v('posicao_obs')
       },
       eventos: anestesia.eventos.coletar(),
-      exames: anestesia.exames.coletar(),
       medicacoes: anestesia.meds.coletar(),
       fluidos: {
         /* Entradas */
@@ -37002,14 +37002,12 @@ const anestesia = {
     setRadio('posicao', po.posicao); set('posicao_obs', po.observacoes);
     setArr('protec', po.protecao);
 
-    /* Eventos cronológicos */
-    if (Array.isArray(d.eventos)) {
-      anestesia.eventos.restaurar(d.eventos);
-    }
-
-    /* Exames intraoperatórios — restaura sempre, inclusive a lista vazia:
-       trocar de ficha sem limpar deixaria os exames da anterior na tela. */
-    anestesia.exames.restaurar(Array.isArray(d.exames) ? d.exames : []);
+    /* Eventos cronológicos — inclusive os exames, que são eventos. Restaura
+       sempre, mesmo vazio: trocar de ficha sem limpar deixaria na tela a linha
+       do tempo da anterior. */
+    anestesia.eventos.restaurar(
+      (Array.isArray(d.eventos) ? d.eventos : []).concat(anestesia.exames._migrarAntigos(d))
+    );
 
     document.getElementById('medicacoes-body').innerHTML = '';
     if (Array.isArray(d.medicacoes)) {
@@ -37706,8 +37704,6 @@ const anestesia = {
     if (cb) cb.innerHTML = '';
     const eb = document.getElementById('eventos-body');
     if (eb) eb.innerHTML = '';
-    const exb = document.getElementById('exames-body');
-    if (exb) exb.innerHTML = '';
     const cco = document.getElementById('cir-combo-body');
     if (cco) cco.innerHTML = '';
     const eax = document.getElementById('equipe-aux-lista');
@@ -45210,7 +45206,10 @@ ${TAG_CLOSE_HTML}`;
           });
           if (meds.length > 0 && evts.length > 0) legendaPrint += '<br>';
           evts.forEach((e, i) => {
-            legendaPrint += `<span style="display:inline-block;margin-right:10px;margin-bottom:2px"><span style="display:inline-block;background:#1f9171;color:#fff;border-radius:3px;width:18px;height:14px;line-height:14px;text-align:center;font-size:8pt;font-weight:bold;margin-right:3px">E${i+1}</span>${e.hora} · ${utils.escapeHTML(e.tipo)}${e.observacao ? ' — ' + utils.escapeHTML(e.observacao) : ''}</span>`;
+            /* exame entra só pelo nome: os valores saem legíveis na tabela de
+               exames, e não espremidos numa linha da legenda */
+            const detalhe = anestesia.exames.ehExame(e.tipo) ? '' : (e.observacao ? ' — ' + utils.escapeHTML(e.observacao) : '');
+            legendaPrint += `<span style="display:inline-block;margin-right:10px;margin-bottom:2px"><span style="display:inline-block;background:#1f9171;color:#fff;border-radius:3px;width:18px;height:14px;line-height:14px;text-align:center;font-size:8pt;font-weight:bold;margin-right:3px">E${i+1}</span>${e.hora} · ${utils.escapeHTML(e.tipo)}${detalhe}</span>`;
           });
           legendaPrint += '</div>';
         }
@@ -45266,23 +45265,17 @@ ${TAG_CLOSE_HTML}`;
         }).join('') + '</tbody></table>'
       );
     }
-    /* Exames intraoperatórios */
+    /* Exames intraoperatórios — os eventos que são exame, em tabela: os
+       números de uma gasometria não se leem numa linha corrida da legenda */
     {
-      const exs = (d.exames || [])
-        .filter(e => e.tipo || (e.resultado || '').trim())
-        .slice()
-        .sort((a, b) => (a.hora || '99:99').localeCompare(b.hora || '99:99'));
+      const exs = anestesia.exames.listar(d);
       if (exs.length) {
         html += printPreview._section('Exames intraoperatórios',
           '<table class="pp-table"><thead><tr><th style="width:60px">Hora</th><th style="width:150px">Exame</th><th>Resultado</th></tr></thead><tbody>' +
-          exs.map(e => {
-            /* o texto da linha é o que vale; se estiver vazio, monta a partir
-               dos valores para o exame não sair da ficha sem resultado */
-            const txt = (e.resultado || '').trim() || anestesia.exames.resumo(e.tipo, e.valores || {});
-            return '<tr><td>' + utils.escapeHTML(e.hora || '') + '</td>' +
-              '<td>' + utils.escapeHTML(e.tipo || '') + '</td>' +
-              '<td>' + utils.escapeHTML(txt) + '</td></tr>';
-          }).join('') + '</tbody></table>'
+          exs.map(e => '<tr><td>' + utils.escapeHTML(e.hora) + '</td>' +
+            '<td>' + utils.escapeHTML(e.tipo) + '</td>' +
+            '<td>' + utils.escapeHTML(e.resultado) + '</td></tr>').join('') +
+          '</tbody></table>'
         );
       }
     }

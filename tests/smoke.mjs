@@ -13460,13 +13460,14 @@ await test('Pré com exames pendentes: finaliza, cobra na data da avaliação, e
   await page.close();
 });
 
-/* 199) Exames intraoperatórios na ficha de anestesia. Gasometria, hemograma,
-   glicemia: são pontuais e trazem vários valores de uma vez, então não cabem
-   na grade de sinais vitais (que é uma coluna por parâmetro contínuo). Aqui
-   se verifica o caminho inteiro: lançar, preencher os valores, o resultado
-   virar texto, sobreviver ao salvar/recarregar e sair na impressão — e que o
-   que o anestesista escreveu à mão nunca é reescrito pelo sistema. */
-await test('Ficha: exames intraoperatórios — vários valores por exame, do lançamento à impressão', async () => {
+/* 199) Exames intraoperatórios. Gasometria, hemograma, glicemia: são pontuais e
+   trazem vários valores de uma vez, então não cabem na grade de sinais vitais
+   (uma coluna por parâmetro contínuo). Mas têm hora e aconteceram no meio do
+   ato, então ficam na tabela de EVENTOS — uma linha do tempo só, que se ordena
+   junta. Aqui se verifica o caminho inteiro: lançar, preencher os valores, o
+   detalhe virar texto, sobreviver ao salvar/recarregar e sair na impressão —
+   e que o que o anestesista escreveu à mão nunca é reescrito pelo sistema. */
+await test('Ficha: exames entram na linha do tempo dos eventos, com os valores de cada um', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
@@ -13476,32 +13477,42 @@ await test('Ficha: exames intraoperatórios — vários valores por exame, do la
     await new Promise(res => setTimeout(res, 400));
     try { modal.close(); } catch (e) {}
 
-    out.temTabela = !!document.getElementById('exames-body');
+    /* 1) não há tabela separada: o exame é um evento */
+    out.semTabelaPropria = !document.getElementById('exames-body');
+    out.ehEvento = anestesia.eventos.TIPOS.indexOf('Gasometria arterial') >= 0;
 
-    /* 1) botão de atalho lança a linha já com o tipo */
-    const tr = anestesia.exames.add({ tipo: 'Gasometria arterial', hora: '09:20' });
-    out.lancou = !!tr && (tr.querySelector('[name="exame_tipo[]"]') || {}).value === 'Gasometria arterial';
+    const linhasEvt = () => document.querySelectorAll('#eventos-body tr');
+    const nAntes = linhasEvt().length;
+    const tr = anestesia.exames.add('Gasometria arterial');
+    out.lancouNaLinhaDoTempo = linhasEvt().length === nAntes + 1
+      && (tr.querySelector('[name="evt_tipo[]"]') || {}).value === 'Gasometria arterial';
+    tr.querySelector('[name="evt_hora[]"]').value = '09:20';
 
-    /* 2) a janela traz os campos DAQUELE exame — não um campo de texto solto */
-    anestesia.exames.abrir(tr);
+    /* 2) o botão da linha vira 🧪 e abre os campos DAQUELE exame */
+    const btn = tr.querySelector('td[data-label="Detalhes"] .btn-rm');
+    out.botaoViraDeExame = btn.textContent === '🧪';
+    anestesia.eventos.detalhar(btn);
     const f = document.getElementById('form-exame');
     out.abriuCamposDoExame = !!f && !!f.querySelector('[name="ex_ph"]') && !!f.querySelector('[name="ex_pco2"]')
       && !!f.querySelector('[name="ex_be"]') && !!f.querySelector('[name="ex_k"]');
-    /* hemograma não tem pH; cada exame tem os seus */
     f.querySelector('[name="ex_ph"]').value = '7,28';
     f.querySelector('[name="ex_pco2"]').value = '52';
     f.querySelector('[name="ex_k"]').value = '5,4';
     anestesia.exames.salvar();
     await new Promise(res => setTimeout(res, 200));
 
-    const res = tr.querySelector('[name="exame_res[]"]');
-    out.viroutexto = /pH 7,28/.test(res.value) && /pCO₂ 52 mmHg/.test(res.value) && /K⁺ 5,4 mEq\/L/.test(res.value);
-    /* o que ficou em branco não aparece: resumo é do que existe */
-    out.brancoNaoAparece = !/pO₂/.test(res.value) && !/undefined/.test(res.value);
+    const obs = tr.querySelector('[name="evt_obs[]"]');
+    out.viroutexto = /pH 7,28/.test(obs.value) && /pCO₂ 52 mmHg/.test(obs.value) && /K⁺ 5,4 mEq\/L/.test(obs.value);
+    out.brancoNaoAparece = !/pO₂/.test(obs.value) && !/undefined/.test(obs.value);
 
-    /* 3) segundo exame, de outro tipo, com outros campos */
-    const tr2 = anestesia.exames.add({ tipo: 'Hemograma', hora: '10:05' });
-    anestesia.exames.abrir(tr2);
+    /* 3) evento comum continua com o botão de descrição técnica */
+    const trEvt = anestesia.eventos.add({ tipo: 'Intubação', hora: '09:00' });
+    out.eventoComumSegue = trEvt.querySelector('td[data-label="Detalhes"] .btn-rm').textContent === '📝';
+
+    /* 4) segundo exame, de outro tipo, com outros campos */
+    const tr2 = anestesia.exames.add('Hemograma');
+    tr2.querySelector('[name="evt_hora[]"]').value = '10:05';
+    anestesia.eventos.detalhar(tr2.querySelector('td[data-label="Detalhes"] .btn-rm'));
     const f2 = document.getElementById('form-exame');
     out.hemogramaNaoTemPh = !f2.querySelector('[name="ex_ph"]') && !!f2.querySelector('[name="ex_hb"]');
     f2.querySelector('[name="ex_hb"]').value = '8,1';
@@ -13509,36 +13520,49 @@ await test('Ficha: exames intraoperatórios — vários valores por exame, do la
     anestesia.exames.salvar();
     await new Promise(res => setTimeout(res, 200));
 
-    /* 4) sobrevive ao salvar e ao recarregar a ficha */
-    const d = anestesia.coletarEstruturado();
-    out.coletou = Array.isArray(d.exames) && d.exames.length === 2
-      && d.exames[0].valores.ph === '7,28' && d.exames[1].valores.plaq === '96000';
+    /* 5) ordenar a linha do tempo mistura exame e evento na ordem da hora */
+    anestesia.ordenarPorHorario('eventos-body');
+    const ordem = [...linhasEvt()].map(x => (x.querySelector('[name="evt_tipo[]"]') || {}).value);
+    out.ordenaJunto = ordem.join('|') === 'Intubação|Gasometria arterial|Hemograma';
 
-    anestesia.exames.restaurar([]);
-    out.limpou = document.querySelectorAll('#exames-body tr').length === 0;
-    anestesia.exames.restaurar(d.exames);
-    const linhas = document.querySelectorAll('#exames-body tr');
-    out.restaurou = linhas.length === 2
-      && (linhas[0].querySelector('[name="exame_hora[]"]') || {}).value === '09:20'
-      && /Hb 8,1 g\/dL/.test((linhas[1].querySelector('[name="exame_res[]"]') || {}).value);
-    /* e os valores voltam editáveis, não só o texto */
-    anestesia.exames.abrir(linhas[0]);
+    /* 6) sobrevive ao salvar e ao recarregar a ficha */
+    const d = anestesia.coletarEstruturado();
+    out.semCopiaSeparada = d.exames === undefined;
+    const gaso = d.eventos.find(e => e.tipo === 'Gasometria arterial');
+    out.coletou = !!gaso && gaso.valores.ph === '7,28' && gaso.hora === '09:20'
+      && d.eventos.find(e => e.tipo === 'Hemograma').valores.plaq === '96000';
+    out.derivaOsExames = anestesia.exames.listar(d).length === 2
+      && anestesia.exames.listar(d)[0].tipo === 'Gasometria arterial';
+
+    anestesia.eventos.restaurar([]);
+    out.limpou = linhasEvt().length === 0;
+    anestesia.eventos.restaurar(d.eventos);
+    const volta = [...linhasEvt()].find(x => (x.querySelector('[name="evt_tipo[]"]') || {}).value === 'Gasometria arterial');
+    out.restaurou = !!volta && (volta.querySelector('[name="evt_hora[]"]') || {}).value === '09:20';
+    anestesia.eventos.detalhar(volta.querySelector('td[data-label="Detalhes"] .btn-rm'));
     out.valoresVoltaram = (document.querySelector('#form-exame [name="ex_pco2"]') || {}).value === '52';
     try { modal.close(); } catch (e) {}
 
-    /* 5) o que foi escrito à mão é do anestesista: mexer nos valores não apaga */
-    const r0 = linhas[0].querySelector('[name="exame_res[]"]');
-    r0.value = 'Acidose respiratória — ajustada a ventilação';
-    anestesia.exames._marcarManual(r0);
-    anestesia.exames.abrir(linhas[0]);
+    /* 7) o que foi escrito à mão é do anestesista: mexer nos valores não apaga */
+    const o0 = volta.querySelector('[name="evt_obs[]"]');
+    o0.value = 'Acidose respiratória — ajustada a ventilação';
+    anestesia.eventos._marcarManual(o0);
+    anestesia.eventos.detalhar(volta.querySelector('td[data-label="Detalhes"] .btn-rm'));
     document.querySelector('#form-exame [name="ex_pco2"]').value = '39';
     anestesia.exames.salvar();
     await new Promise(res => setTimeout(res, 200));
-    out.naoReescreveOQueEleEscreveu = r0.value === 'Acidose respiratória — ajustada a ventilação';
-    /* mas o valor novo foi guardado assim mesmo */
-    out.guardouOValorNovo = anestesia.exames.coletar()[0].valores.pco2 === '39';
+    out.naoReescreveOQueEleEscreveu = o0.value === 'Acidose respiratória — ajustada a ventilação';
+    out.guardouOValorNovo = anestesia.eventos.coletar()
+      .find(e => e.tipo === 'Gasometria arterial').valores.pco2 === '39';
 
-    /* 6) sai na ficha impressa e no resumo narrativo */
+    /* 8) ficha antiga, da versão com tabela separada, volta como evento */
+    const antiga = { eventos: [{ hora: '08:00', tipo: 'Indução' }],
+      exames: [{ hora: '08:30', tipo: 'Outro', resultado: 'Beta-HCG negativo', valores: {} }] };
+    const migrados = anestesia.exames._migrarAntigos(antiga);
+    out.migraAntiga = migrados.length === 1 && migrados[0].tipo === 'Outro exame'
+      && migrados[0].observacao === 'Beta-HCG negativo';
+
+    /* 9) sai na ficha impressa, no resumo narrativo, e a legenda não estoura */
     const html = printPreview._buildAnestesia();
     out.saiNaImpressao = /Exames intraoperat/i.test(html) && /Hemograma/.test(html) && /09:20/.test(html);
     anestesia.resumo.gerar();
@@ -13547,19 +13571,25 @@ await test('Ficha: exames intraoperatórios — vários valores por exame, do la
     return out;
   });
 
-  assert(r.temTabela, 'a ficha tem a tabela de exames intraoperatórios');
-  assert(r.lancou, 'o atalho lança o exame já com o tipo escolhido');
-  assert(r.abriuCamposDoExame, 'e abre os campos daquele exame — pH, pCO₂, BE, K⁺ na gasometria');
-  assert(r.viroutexto, 'os valores preenchidos viram o texto do resultado, com as unidades');
-  assert(r.brancoNaoAparece, 'o que ficou em branco não aparece no resultado');
+  assert(r.semTabelaPropria && r.ehEvento, 'o exame é um evento — não há segunda tabela');
+  assert(r.lancouNaLinhaDoTempo, 'o atalho lança o exame na linha do tempo, já com o tipo');
+  assert(r.botaoViraDeExame, 'e o botão da linha vira o de valores (🧪)');
+  assert(r.eventoComumSegue, 'enquanto o evento comum segue com o de descrição técnica (📝)');
+  assert(r.abriuCamposDoExame, 'a janela traz os campos daquele exame — pH, pCO₂, BE, K⁺ na gasometria');
+  assert(r.viroutexto, 'os valores viram o texto de detalhes, com as unidades');
+  assert(r.brancoNaoAparece, 'o que ficou em branco não aparece');
   assert(r.hemogramaNaoTemPh, 'cada exame tem os seus campos: o hemograma não pede pH');
+  assert(r.ordenaJunto, 'ordenar por horário mistura exame e evento na ordem em que aconteceram');
+  assert(r.semCopiaSeparada, 'o registro não guarda uma segunda cópia dos exames');
   assert(r.coletou, 'os exames entram no registro salvo, com os valores separados');
-  assert(r.limpou && r.restaurou, 'e voltam na tela ao reabrir a ficha');
+  assert(r.derivaOsExames, 'e são reconhecidos como exames quando o registro é lido');
+  assert(r.limpou && r.restaurou, 'voltam na tela ao reabrir a ficha');
   assert(r.valoresVoltaram, 'com os valores editáveis de novo, não só o texto');
   assert(r.naoReescreveOQueEleEscreveu, 'o texto escrito à mão não é reescrito pelo sistema');
   assert(r.guardouOValorNovo, 'ainda que o valor corrigido seja guardado');
+  assert(r.migraAntiga, 'ficha salva antes desta mudança volta com os exames na linha do tempo');
   assert(r.saiNaImpressao, 'e tudo sai na ficha impressa');
-  assert(r.temNarrativa, 'e entra no resumo narrativo da anestesia');
+  assert(r.temNarrativa, 'e no resumo narrativo da anestesia');
   await page.close();
 });
 
