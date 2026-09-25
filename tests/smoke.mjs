@@ -7619,7 +7619,19 @@ await test('CBHPM: fração sugerida e editável, AN 0 sem honorário e código 
     out.temCampoCodigo = !!hidden;
     cir.value = 'coleciste';
     cbhpm._abrir(cir);
-    const item = document.querySelector('#form-pre .cbhpm-box .cbhpm-item');
+    /* A lista deixou de morar dentro do formulário: o card tem overflow hidden
+       e RECORTAVA a caixa — ela abria e ninguém via. Agora, quando algum
+       ancestral recorta, ela é presa à tela e pendurada no <body>. Procurar
+       dentro de #form-pre não acha mais nada; e este teste passava enquanto o
+       usuário não enxergava a lista, porque só olhava o DOM. */
+    const item = document.querySelector('.cbhpm-box .cbhpm-item');
+    out.listaVisivelDeVerdade = (function () {
+      if (!item) return false;
+      const rb = item.getBoundingClientRect();
+      if (rb.width < 2 || rb.height < 2) return false;
+      const alvo = document.elementFromPoint(rb.left + Math.min(40, rb.width / 2), rb.top + rb.height / 2);
+      return !!alvo && (alvo === item || item.contains(alvo) || item.parentNode.contains(alvo));
+    })();
     if (item) cbhpm._escolher(item);
     out.escolheuNoTextarea = cir.value.length > 5;               /* textarea aceita a escolha */
     out.guardouCodigo = !!hidden && /^\d\.\d\d\./.test(hidden.value);
@@ -7678,6 +7690,7 @@ await test('CBHPM: fração sugerida e editável, AN 0 sem honorário e código 
   assert(r.codigoTemPrecedencia, 'preço específico do código tem precedência sobre o porte');
   assert(r.temCampoCodigo, 'todo campo CBHPM guarda o código escolhido');
   assert(r.escolheuNoTextarea, 'escolher a sugestão precisa funcionar no campo alto da cirurgia proposta');
+  assert(r.listaVisivelDeVerdade, 'a lista da CBHPM aparece de verdade na tela — o card a recortava');
   assert(r.guardouCodigo, 'e o código oficial fica guardado como chave');
   assert(r.textoTrocadoDerrubaCodigo, 'trocar a descrição à mão não pode manter o código antigo pendurado');
   assert(r.codigoInventadoMarcado, 'código que não existe na tabela precisa ficar marcado antes de virar guia');
@@ -14374,9 +14387,12 @@ await test('Paciente do cadastro em todos os módulos — e o registro segue ras
     html = historico._prontRender('CLARA MENDES SOUZA');
     out.sobreviveAoNomeDiferente = /Orçamento/.test(html) && /Artroscopia/.test(html);
 
-    /* 5) e não duplica: o mesmo registro casa por nome E por id */
-    const linhasOrc = (html.match(/Orçamento/g) || []).length;
-    out.naoDuplica = linhasOrc <= 2;   /* o chip do cabeçalho + a linha */
+    /* 5) e não duplica: o mesmo registro casa por nome E por id, e mesmo assim
+       aparece uma vez só. Conta as aberturas daquele registro pelo id — contar
+       a palavra "Orçamento" contaria também o chip do cabeçalho e o rótulo. */
+    const orcId = store.list('orcamento')[0]._id;
+    const aberturas = (html.match(new RegExp("abrirItem\\('orcamento','" + orcId + "'", 'g')) || []).length;
+    out.naoDuplica = aberturas === 1;
 
     /* 6) registro sem vínculo e com outro nome NÃO é atribuído a ela */
     store.save('orcamento', { paciente: 'OUTRA PESSOA QUALQUER', data: hoje, total_paciente: '99' });
@@ -14393,6 +14409,463 @@ await test('Paciente do cadastro em todos os módulos — e o registro segue ras
   assert(r.sobreviveAoNomeDiferente, 'o registro continua no histórico mesmo com o nome escrito diferente — o vínculo é que manda');
   assert(r.naoDuplica, 'sem duplicar quando casa pelos dois caminhos');
   assert(r.naoRoubaDosOutros, 'e sem puxar registro de outro paciente');
+  await page.close();
+});
+
+/* 209) Histórico do paciente por ATENDIMENTO. Uma linha por documento punha
+   ficha, SRPA e financeiro do mesmo ato em linhas separadas, repetindo data e
+   descrição em cada uma — e num dia com dois atos era impossível dizer qual
+   SRPA era de qual ficha. O agrupamento não é por data: é pelo vínculo que os
+   registros já carregam. Data agruparia os dois atos num bloco só. */
+await test('Histórico do paciente: registros do mesmo atendimento lado a lado, cada um clicável', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['pacientes', 'anestesia', 'recuperacao', 'financeiro', 'pre'].forEach(m => store.setList(m, []));
+    const hoje = utils.hojeISO();
+    store.save('pacientes', { nome: 'ALANA TESTE', plano: 'Unimed' });
+
+    /* DOIS atos no MESMO dia, cada um com sua ficha, sua SRPA e seu financeiro */
+    const mk = (n) => {
+      const fa = store.save('anestesia', { paciente: { nome: 'ALANA TESTE' }, _finalizado: true,
+        procedimento: { data: hoje, descricao: 'Procedimento ' + n, cirurgiao: 'Dr Souza' } });
+      const sr = store.save('recuperacao', { nome: 'ALANA TESTE', data: hoje,
+        procedimento: 'Procedimento ' + n, _finalizado: true });
+      const fi = store.save('financeiro', { paciente: 'ALANA TESTE', data_proc: hoje,
+        procedimento: 'Procedimento ' + n, valor_previsto: n === 1 ? '212.64' : '300',
+        valor_recebido: n === 1 ? '0' : '300', status: n === 1 ? 'pendente' : 'recebido',
+        pago: n !== 1, _origemId: fa._id, _origemTipo: 'anestesia' });
+      linker.link('anestesia', fa._id, 'recuperacao', sr._id);
+      return { fa, sr, fi };
+    };
+    const a1 = mk(1), a2 = mk(2);
+
+    /* 1) dois blocos, não seis linhas e não um bloco só do dia */
+    const eventos = [];
+    ['anestesia', 'recuperacao', 'financeiro'].forEach(mod => {
+      store.list(mod).forEach(it => eventos.push({ mod, it, nome: 'ALANA TESTE', data: historico._dataItem(it) }));
+    });
+    const grupos = historico._prontAgrupar(eventos);
+    out.doisBlocos = grupos.length === 2;
+    out.cadaUmComTres = grupos.every(g => g.itens.length === 3);
+
+    /* 2) cada bloco tem a SRPA e o financeiro DO SEU ato — é isto que a data
+       sozinha não conseguiria separar */
+    const bloco1 = grupos.find(g => g.itens.some(x => x.it._id === a1.fa._id));
+    out.juntouOCerto = !!bloco1
+      && bloco1.itens.some(x => x.it._id === a1.sr._id)
+      && bloco1.itens.some(x => x.it._id === a1.fi._id)
+      && !bloco1.itens.some(x => x.it._id === a2.sr._id);
+
+    /* 3) a ficha manda no título do bloco, não o lançamento financeiro */
+    out.ancoraEhAFicha = grupos.every(g => g.ancora.mod === 'anestesia');
+
+    /* 4) na tela: cabeçalho do dia uma vez, e os chips clicáveis */
+    const html = historico._prontRender('ALANA TESTE');
+    out.diaUmaVezSo = (html.match(/📅/g) || []).length === 1;
+    out.temBlocos = (html.match(/class="pront-bloco"/g) || []).length === 2;
+    out.chipsClicaveis = /pront-chip[^>]*onclick="historico\.abrirItem\('recuperacao'/.test(html)
+      && /pront-chip[^>]*onclick="historico\.abrirItem\('anestesia'/.test(html);
+
+    /* 5) o chip do financeiro diz o estado da cobrança na própria etiqueta */
+    out.chipDizOEstado = /em aberto/.test(html) && /quitado/.test(html) && /R\$ 212,64/.test(html);
+
+    /* 6) registro solto (sem vínculo) continua aparecendo, no bloco dele */
+    store.save('pre', { nome: 'ALANA TESTE', data: '2026-09-01', cirurgia: 'Avaliação isolada' });
+    const html2 = historico._prontRender('ALANA TESTE');
+    out.soltoAparece = /Avaliação isolada/.test(html2) && (html2.match(/📅/g) || []).length === 2;
+
+    /* 7) e os dois blocos do mesmo dia continuam separados */
+    out.continuaSeparado = (html2.match(/class="pront-bloco"/g) || []).length === 3;
+    return out;
+  });
+
+  assert(r.doisBlocos && r.cadaUmComTres, 'dois atos no mesmo dia dão dois blocos, cada um com seus três registros');
+  assert(r.juntouOCerto, 'cada bloco leva a SRPA e o financeiro DO SEU ato — a data sozinha não separaria');
+  assert(r.ancoraEhAFicha, 'a ficha manda no título do bloco, não o lançamento financeiro');
+  assert(r.diaUmaVezSo, 'a data aparece uma vez, como cabeçalho do dia');
+  assert(r.temBlocos && r.chipsClicaveis, 'os registros ficam lado a lado, cada um clicável para abrir e editar');
+  assert(r.chipDizOEstado, 'e o do financeiro já diz o valor e se está em aberto ou quitado');
+  assert(r.soltoAparece, 'registro sem vínculo nenhum continua aparecendo, no dia dele');
+  assert(r.continuaSeparado, 'sem embolar os dois atos do mesmo dia');
+  await page.close();
+});
+
+/* 210) A tabela de códigos TUSS do lançamento financeiro. Ela é a FONTE do
+   valor previsto — recalcular() soma as linhas e escreve o total no campo —,
+   mas nascia VAZIA. O lançamento mostrava um previsto que a tabela não
+   sustentava, e bastava tocar em qualquer coisa que dispare o recálculo para o
+   previsto virar zero. E o valor saía de uma tabela global só, igual para
+   todos os convênios. */
+await test('Financeiro: códigos TUSS já preenchidos, com o valor da tabela do plano (ou do orçamento, no particular)', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['pre', 'consulta', 'financeiro', 'orcamento', 'pacientes'].forEach(m => store.setList(m, []));
+    const hoje = utils.hojeISO();
+
+    /* 1) consulta de convênio: a linha da tabela nasce preenchida */
+    const pre1 = store.save('pre', { nome: 'TESTE UNIMED', data: hoje, convenio: 'Unimed',
+      cirurgia: 'Consulta pré-anestésica', _finalizado: true });
+    const fr1 = fin.fromDoc('pre', pre1);
+    const l1 = (fr1.item.codigos || [])[0] || {};
+    out.nasceuPreenchida = (fr1.item.codigos || []).length === 1;
+    out.temColunaPorColuna = !!l1.codigo && !!l1.descricao && l1.qtd === 1 && l1.grau === '100'
+      && l1.valor_unit != null && l1.valor_previsto != null;
+    /* Unimed, porte anestésico 2 = R$ 212,64 (é o número da tela dele) */
+    out.valorDaTabela = Number(l1.valor_previsto) === Number(fr1.item.valor_previsto);
+    out.somaBateComOPrevisto = Math.abs(Number(l1.valor_previsto) - Number(fr1.item.valor_previsto)) < 0.005;
+
+    /* 2) o que ele montou à mão não é sobrescrito quando o registro é regravado */
+    const comMao = store.save('financeiro', Object.assign({}, fr1.item, {
+      codigos: [{ codigo: '1.01.01.01-1', descricao: 'Linha minha', qtd: 1, grau: '100',
+                  valor_unit: 500, valor_previsto: 500, status: 'aguardando' }]
+    }));
+    const fr1b = fin.fromDoc('pre', store.getById('pre', pre1._id));
+    out.naoSobrescreveOManual = (store.getById('financeiro', comMao._id).codigos || [])[0].descricao === 'Linha minha';
+
+    /* 3) tabela POR CONVÊNIO. São duas por plano: o honorário anestésico se
+       calcula pelo porte anestésico e a consulta pelo cirúrgico — guardar uma
+       chave só deixaria o outro tipo caindo calado na tabela geral. */
+    const codAnest = '3.09.12.24-5';   /* código com porte anestésico */
+    const semMapa = precos.base(codAnest, 'anestesia', 'Bradesco Saúde');
+    precos.definirTabelaDoConvenio('Bradesco Saúde', 'cbhpm2015', 'anest');
+    const comMapa = precos.base(codAnest, 'anestesia', 'Bradesco Saúde');
+    out.planoEscolheATabela = comMapa.doConvenio === true
+      && semMapa.valor != null && comMapa.valor != null
+      && comMapa.valor !== semMapa.valor;
+    /* e a tabela cirúrgica é OUTRA escolha: mapear a anestésica não mexe nela */
+    const codCons = fin.CODIGO_CONSULTA;
+    const cirAntes = precos.base(codCons, 'medico', 'Bradesco Saúde');
+    out.anestNaoMexeNoCir = cirAntes.doConvenio !== true && cirAntes.valor != null;
+    precos.definirTabelaDoConvenio('Bradesco Saúde', 'cir2024_f1', 'cir');
+    const cirDepois = precos.base(codCons, 'medico', 'Bradesco Saúde');
+    out.cirTemAPropria = cirDepois.doConvenio === true && cirDepois.valor !== cirAntes.valor;
+    /* e a anestésica continua valendo — uma não apaga a outra */
+    out.asDuasConvivem = precos.base(codAnest, 'anestesia', 'Bradesco Saúde').doConvenio === true;
+    /* plano sem escolha cadastrada segue na tabela geral */
+    const outro = precos.base(codAnest, 'anestesia', 'Plano Sem Cadastro');
+    out.semEscolhaUsaAGeral = !outro.doConvenio;
+    /* e a janela de configuração oferece os convênios QUE EXISTEM */
+    /* a lista sai do que EXISTE — cadastro de pacientes e registros já feitos */
+    store.save('pacientes', { nome: 'X', plano: 'Hapvida' });
+    const usados = precos._conveniosUsados();
+    out.ofereceOsQueExistem = usados.some(c => /Hapvida/i.test(c))   /* do cadastro */
+      && usados.some(c => /Unimed/i.test(c))                          /* da pré salva acima */
+      && !usados.some(c => /Bradesco/i.test(c));                      /* nunca usado: não é oferecido */
+
+    /* 4) PARTICULAR: o valor vem do orçamento que foi passado ao paciente */
+    store.save('orcamento', { paciente: 'MARIA PARTICULAR', data: hoje, total_paciente: '1800' });
+    const pre2 = store.save('pre', { nome: 'MARIA PARTICULAR', data: hoje, convenio: 'Particular',
+      cirurgia: 'Consulta', _finalizado: true });
+    const fr2 = fin.fromDoc('pre', pre2);
+    out.particularUsaOOrcamento = Number(fr2.item.valor_previsto) === 1800
+      && Number((fr2.item.codigos || [])[0].valor_previsto) === 1800;
+
+    /* 5) orçamento velho demais não vale: preço de um ano atrás não é este preço */
+    store.setList('orcamento', []);
+    const antigo = new Date(); antigo.setMonth(antigo.getMonth() - 14);
+    store.save('orcamento', { paciente: 'JOAO VELHO', data: antigo.toISOString().slice(0, 10), total_paciente: '9999' });
+    const pre3 = store.save('pre', { nome: 'JOAO VELHO', data: hoje, convenio: 'Particular',
+      cirurgia: 'Consulta', _finalizado: true });
+    const fr3 = fin.fromDoc('pre', pre3);
+    out.orcamentoVelhoNaoVale = Number(fr3.item.valor_previsto) !== 9999;
+
+    /* 6) e orçamento de OUTRO paciente nunca vale */
+    store.setList('orcamento', []);
+    store.save('orcamento', { paciente: 'OUTRA PESSOA', data: hoje, total_paciente: '7777' });
+    const pre4 = store.save('pre', { nome: 'ANA SOZINHA', data: hoje, convenio: 'Particular',
+      cirurgia: 'Consulta', _finalizado: true });
+    const fr4 = fin.fromDoc('pre', pre4);
+    out.orcamentoDeOutroNaoVale = Number(fr4.item.valor_previsto) !== 7777;
+    return out;
+  });
+
+  assert(r.nasceuPreenchida, 'o lançamento nasce com a linha do código TUSS, não com a tabela vazia');
+  assert(r.temColunaPorColuna, 'com código, procedimento, quantidade, grau, valor unitário e previsto — uma coluna para cada');
+  assert(r.somaBateComOPrevisto && r.valorDaTabela, 'e a soma da tabela é o previsto do lançamento — antes o previsto não se sustentava na tabela');
+  assert(r.naoSobrescreveOManual, 'o que ele montou à mão não é sobrescrito ao regravar o registro de origem');
+  assert(r.planoEscolheATabela, 'cada convênio pode ter a sua tabela de valores');
+  assert(r.anestNaoMexeNoCir, 'a tabela anestésica e a cirúrgica são escolhas separadas');
+  assert(r.cirTemAPropria && r.asDuasConvivem, 'e as duas convivem — uma não apaga a outra');
+  assert(r.semEscolhaUsaAGeral, 'e o que não tiver escolha cadastrada segue na tabela geral');
+  assert(r.ofereceOsQueExistem, 'a configuração oferece só os convênios que existem nos registros, não uma lista fixa');
+  assert(r.particularUsaOOrcamento, 'no particular o valor vem do orçamento passado ao paciente');
+  assert(r.orcamentoVelhoNaoVale, 'orçamento velho demais não vale — preço de um ano atrás não é este preço');
+  assert(r.orcamentoDeOutroNaoVale, 'e orçamento de outro paciente nunca vale');
+  await page.close();
+});
+
+/* 211) Sugestão da CBHPM na tabela de códigos do Financeiro. Digitar
+   "consulta" no campo de procedimento não mostrava nada: a lista ABRIA, mas
+   era recortada pelo contêiner da tabela, que tem overflow para poder deslizar
+   na horizontal. Geometria e visibilidade não pegam isso — só perguntar quem
+   está pintado naquele ponto da tela. E escolher o código não trazia o valor,
+   que é a razão de escolher pela tabela. */
+await test('Códigos TUSS: a sugestão da CBHPM aparece de verdade, e traz o valor do convênio', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    store.setList('financeiro', []);
+    ui.navegar('financeiro');
+    await new Promise(res => setTimeout(res, 500));
+    try { modal.close(); } catch (e) {}
+    financeiro.editar(null);
+    await new Promise(res => setTimeout(res, 300));
+    document.querySelectorAll('#module-financeiro .card.collapsed').forEach(c => c.classList.remove('collapsed'));
+    const f = document.getElementById('form-financeiro');
+    f.querySelector('[name="convenio"]').value = 'Unimed';
+
+    const tr = financeiro.codigos.add();
+    const desc = tr.querySelector('[name="fin_cod_desc[]"]');
+    desc.value = 'consulta';
+    desc.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(res => setTimeout(res, 300));
+
+    const box = document.querySelector('.cbhpm-box');
+    out.abriuALista = !!box && box.querySelectorAll('.cbhpm-item').length > 0;
+
+    /* O TESTE QUE IMPORTA: o primeiro item está REALMENTE visível na tela?
+       Pergunta quem está pintado no ponto dele — a lista existia antes, com
+       tamanho e sem display:none, e mesmo assim ninguém a via. */
+    const item = box && box.querySelector('.cbhpm-item');
+    const rb = item.getBoundingClientRect();
+    const alvo = document.elementFromPoint(rb.left + Math.min(40, rb.width / 2), rb.top + rb.height / 2);
+    out.estaVisivelDeVerdade = !!alvo && (alvo === item || item.contains(alvo) || box.contains(alvo));
+    out.escapouDoRecorte = box.classList.contains('cbhpm-fixa');
+
+    /* escolher traz código, descrição, porte E valor */
+    cbhpm._escolher(item);
+    await new Promise(res => setTimeout(res, 200));
+    const g = n => (tr.querySelector('[name="' + n + '[]"]') || {}).value || '';
+    out.preencheuOCodigo = /\d/.test(g('fin_cod_codigo')) && g('fin_cod_desc').length > 3;
+    out.trouxeOValor = parseFloat(g('fin_cod_unit')) > 0 && parseFloat(g('fin_cod_previsto')) > 0;
+    /* e o campo continua editável — é sugestão, não imposição */
+    const unit = tr.querySelector('[name="fin_cod_unit[]"]');
+    out.continuaEditavel = !unit.readOnly && !unit.disabled;
+    unit.value = '999';
+    unit.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(res => setTimeout(res, 100));
+    out.ajusteManualVale = parseFloat(g('fin_cod_previsto')) === 999;
+
+    /* 2) o valor segue a tabela DO CONVÊNIO do registro */
+    const cod = g('fin_cod_codigo');
+    const comUnimed = financeiro.codigos.valorSugerido(cod);
+    precos.definirTabelaDoConvenio('Unimed', 'cir2024_f1', 'cir');
+    precos.definirTabelaDoConvenio('Unimed', 'cbhpm2015', 'anest');
+    const comOutra = financeiro.codigos.valorSugerido(cod);
+    out.segueOConvenio = comUnimed && comOutra && comUnimed.valor !== comOutra.valor;
+
+    /* 3) o botão pergunta o que fazer com as linhas que JÁ têm valor. As duas
+       respostas são testadas: o teste fixa o retorno do confirm em vez de
+       depender de como o navegador do teste responde sozinho. */
+    const confOriginal = window.confirm;
+    const tr2 = financeiro.codigos.add({ codigo: cod, descricao: 'Outra linha' });
+    window.confirm = () => false;                 /* "só as que estão em branco" */
+    financeiro.codigos.sugerirTodos();
+    await new Promise(res => setTimeout(res, 150));
+    out.naoPisaNoAjuste = parseFloat(g('fin_cod_unit')) === 999;
+    out.preencheOVazio = parseFloat((tr2.querySelector('[name="fin_cod_unit[]"]') || {}).value) > 0;
+
+    window.confirm = () => true;                  /* "refazer todas pela tabela" */
+    financeiro.codigos.sugerirTodos();
+    await new Promise(res => setTimeout(res, 150));
+    out.refazQuandoEleManda = parseFloat(g('fin_cod_unit')) !== 999
+      && parseFloat(g('fin_cod_unit')) > 0;
+    window.confirm = confOriginal;
+
+    /* 4) código sem valor na tabela não inventa número */
+    const tr3 = financeiro.codigos.add({ codigo: '9.99.99.99-9', descricao: 'Inexistente' });
+    financeiro.codigos.sugerirValor(tr3, '9.99.99.99-9');
+    out.naoInventa = String((tr3.querySelector('[name="fin_cod_unit[]"]') || {}).value || '') === '';
+    return out;
+  });
+
+  assert(r.abriuALista, 'digitar no procedimento abre a lista da CBHPM');
+  assert(r.estaVisivelDeVerdade, 'e ela aparece DE VERDADE — antes era recortada pela tabela que rola');
+  assert(r.escapouDoRecorte, 'por isso a lista passa a ser presa à tela quando o campo mora numa área que rola');
+  assert(r.preencheuOCodigo, 'escolher preenche código, descrição e porte');
+  assert(r.trouxeOValor, 'e traz o valor da tabela — que é a razão de escolher por ela');
+  assert(r.continuaEditavel && r.ajusteManualVale, 'o valor é sugestão: continua editável e o ajuste manda no previsto');
+  assert(r.segueOConvenio, 'o valor sugerido segue a tabela cadastrada para o convênio do registro');
+  assert(r.naoPisaNoAjuste, 'o botão de sugerir não pisa no valor que ele ajustou à mão');
+  assert(r.preencheOVazio, 'e preenche a linha que estava em branco');
+  assert(r.refazQuandoEleManda, 'mas refaz todas quando ele responde que quer refazer');
+  assert(r.naoInventa, 'e código sem valor na tabela não vira número inventado');
+  await page.close();
+});
+
+/* 212) O mesmo fato em três lugares que não se falavam. "Esta cobrança está
+   quitada" estava no checklist do Fluxo de faturamento, no campo status e na
+   caixinha "Pago?". Marcar Pago no fluxo não mexia no status — o dinheiro
+   seguia "a receber" em todo relatório. Marcar a caixinha não dava baixa na
+   pendência — a janela continuava cobrando. E havia código somando
+   `pago || status==='recebido'` para se defender da discordância. */
+await test('Financeiro: um fato, um lugar — status manda no "pago" e no fluxo de faturamento', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['financeiro', 'pre'].forEach(m => store.setList(m, []));
+    const hoje = utils.hojeISO();
+
+    /* 1) a caixinha "Pago?" saiu do formulário; no lugar ficou a leitura */
+    ui.navegar('financeiro');
+    await new Promise(res => setTimeout(res, 500));
+    try { modal.close(); } catch (e) {}
+    financeiro.editar(null);
+    await new Promise(res => setTimeout(res, 300));
+    const f = document.getElementById('form-financeiro');
+    out.semCaixinhaDuplicada = !f.querySelector('input[type="checkbox"][name="pago"]');
+    out.temALeitura = !!f.querySelector('[name="pago_rotulo"]')
+      && f.querySelector('[name="pago_rotulo"]').readOnly === true;
+
+    /* 2) o status manda no "pago" */
+    out.quitados = ['recebido', 'finalizado', 'cortesia'].every(s => financeiro.ehQuitado(s))
+      && !financeiro.ehQuitado('pendente') && !financeiro.ehQuitado('faturado')
+      && !financeiro.ehQuitado('glosado') && !financeiro.ehQuitado('parcial');
+
+    const sel = f.querySelector('[name="status"]');
+    sel.value = 'recebido';
+    financeiro.aoMudarStatus(sel);
+    out.rotuloSegueOStatus = /Sim/.test(f.querySelector('[name="pago_rotulo"]').value);
+    sel.value = 'pendente';
+    financeiro.aoMudarStatus(sel);
+    out.rotuloVolta = /Não/.test(f.querySelector('[name="pago_rotulo"]').value);
+
+    /* 3) salvar deriva o campo pago do status — não do que estava na tela */
+    f.querySelector('[name="paciente"]').value = 'TESTE STATUS';
+    f.querySelector('[name="data_proc"]').value = hoje;
+    sel.value = 'recebido';
+    financeiro.salvar();
+    await new Promise(res => setTimeout(res, 300));
+    const rec = store.list('financeiro').find(x => x.paciente === 'TESTE STATUS');
+    out.salvouPagoDerivado = !!rec && rec.pago === true && rec.status === 'recebido';
+
+    /* 4) MARCAR NO FLUXO CHEGA AO STATUS — era o defeito principal */
+    const alvo = store.save('financeiro', { paciente: 'FLUXO TESTE', data_proc: hoje,
+      convenio: 'Bradesco Saúde', valor_previsto: '500', status: 'pendente', pago: false });
+    pendencias.marcarStatus('financeiro', alvo._id, 'faturado', true);
+    let r1 = store.getById('financeiro', alvo._id);
+    out.fluxoFaturadoVaiProStatus = r1.status === 'faturado' && r1.pago === false;
+    pendencias.marcarStatus('financeiro', alvo._id, 'pago', true);
+    r1 = store.getById('financeiro', alvo._id);
+    out.fluxoPagoVaiProStatus = r1.status === 'recebido' && r1.pago === true;
+
+    /* 5) etapas que não dizem se o dinheiro entrou não mexem no status */
+    const alvo2 = store.save('financeiro', { paciente: 'MEIO DO CAMINHO', data_proc: hoje,
+      convenio: 'Bradesco Saúde', valor_previsto: '300', status: 'pendente', pago: false });
+    pendencias.marcarStatus('financeiro', alvo2._id, 'cobrado', true);
+    pendencias.marcarStatus('financeiro', alvo2._id, 'recorrido', true);
+    out.etapaSemRespostaNaoMexe = store.getById('financeiro', alvo2._id).status === 'pendente';
+
+    /* 6) cortesia é decisão de quem atendeu: etapa posterior não a desfaz */
+    const cort = store.save('financeiro', { paciente: 'CORTESIA TESTE', data_proc: hoje,
+      valor_previsto: '200', status: 'cortesia', pago: true });
+    pendencias.marcarStatus('financeiro', cort._id, 'faturado', true);
+    out.cortesiaNaoSeDesfaz = store.getById('financeiro', cort._id).status === 'cortesia';
+
+    /* 7) e o contrário: mudar o status na mão dá baixa na pendência */
+    const doc = store.save('pre', { nome: 'PENDENTE TESTE', data: hoje,
+      convenio: 'Bradesco Saúde', _finalizado: true });
+    const fr = fin.fromDoc('pre', doc);
+    out.nasceuPendente = pendencias.temStatus(store.getById('financeiro', fr.item._id)) === false;
+    financeiro.editar(fr.item._id);
+    await new Promise(res => setTimeout(res, 300));
+    const sel2 = document.querySelector('#form-financeiro [name="status"]');
+    sel2.value = 'recebido';
+    financeiro.aoMudarStatus(sel2);
+    await new Promise(res => setTimeout(res, 200));
+    const depois = store.getById('financeiro', fr.item._id);
+    out.statusDaBaixaNaPendencia = pendencias.temStatus(depois) === true
+      && !!depois._faturamento && !!depois._faturamento.pago;
+    return out;
+  });
+
+  assert(r.semCaixinhaDuplicada, 'a caixinha "Pago?" saiu — era o mesmo fato do status em outro controle');
+  assert(r.temALeitura, 'no lugar dela ficou a leitura, só para conferir');
+  assert(r.quitados, 'recebido, finalizado e cortesia contam como quitado; pendente, faturado, glosado e parcial não');
+  assert(r.rotuloSegueOStatus && r.rotuloVolta, 'a leitura acompanha o status nos dois sentidos');
+  assert(r.salvouPagoDerivado, 'e o campo gravado é derivado do status, não do que estava na tela');
+  assert(r.fluxoFaturadoVaiProStatus, 'marcar "Faturado" no fluxo chega ao status');
+  assert(r.fluxoPagoVaiProStatus, 'e marcar "Pago" faz o dinheiro sair de "a receber" — era o defeito principal');
+  assert(r.etapaSemRespostaNaoMexe, 'cobrado e recorrido não dizem se o dinheiro entrou: não mexem no status');
+  assert(r.cortesiaNaoSeDesfaz, 'cortesia é decisão de quem atendeu e não se desfaz por uma etapa marcada depois');
+  assert(r.statusDaBaixaNaPendencia, 'e o caminho inverso: mudar o status na mão dá baixa na pendência');
+  await page.close();
+});
+
+/* 213) Abrir o lançamento tocando na linha. O botão "Editar" existe, mas mora
+   na última coluna de uma tabela de quinze — fora da tela, alcançável só
+   rolando na horizontal. Tocar no que se está olhando é o gesto natural. */
+await test('Financeiro: tocar na linha abre o lançamento para editar', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    store.setList('financeiro', []);
+    const hoje = utils.hojeISO();
+    const a = store.save('financeiro', { paciente: 'ALVO DA LINHA', data_proc: hoje,
+      procedimento: 'Consulta', convenio: 'Unimed', valor_previsto: '212.64', status: 'pendente' });
+    store.save('financeiro', { paciente: 'OUTRO QUALQUER', data_proc: hoje,
+      procedimento: 'Cirurgia', valor_previsto: '500', status: 'pendente' });
+
+    ui.navegar('financeiro');
+    await new Promise(res => setTimeout(res, 500));
+    try { modal.close(); } catch (e) {}
+    financeiro.render();
+    await new Promise(res => setTimeout(res, 200));
+
+    const linha = [...document.querySelectorAll('#financeiro-tbody tr')]
+      .find(tr => /ALVO DA LINHA/.test(tr.textContent));
+    out.linhaEhClicavel = !!linha && linha.classList.contains('fin-linha')
+      && getComputedStyle(linha).cursor === 'pointer';
+
+    /* 1) tocar numa célula qualquer abre AQUELE lançamento */
+    const card = document.getElementById(financeiro.cardId);
+    card.style.display = 'none';
+    linha.querySelector('[data-label="Procedimento"]').click();
+    await new Promise(res => setTimeout(res, 200));
+    const f = document.getElementById('form-financeiro');
+    out.abriuOCard = card.style.display === 'block';
+    out.abriuOCerto = (f.querySelector('[name="id"]') || {}).value === a._id
+      && f.querySelector('[name="paciente"]').value === 'ALVO DA LINHA';
+
+    /* 2) clique em BOTÃO da linha continua sendo do botão — o de excluir não
+       pode virar "abrir" nem o contrário */
+    financeiro.editar(null);
+    await new Promise(res => setTimeout(res, 150));
+    let chamou = null;
+    const editarOriginal = financeiro.editar;
+    financeiro.editar = (id) => { chamou = id; };
+    const btn = linha.querySelector('.actions-cell button');
+    financeiro.abrirLinha({ target: btn }, a._id);
+    out.botaoNaoVira = chamou === null;
+
+    /* 3) selecionar texto para copiar não vira navegação */
+    const sel = window.getSelection();
+    const rng = document.createRange();
+    rng.selectNodeContents(linha.querySelector('[data-label="Paciente"]'));
+    sel.removeAllRanges(); sel.addRange(rng);
+    financeiro.abrirLinha({ target: linha.querySelector('[data-label="Paciente"]') }, a._id);
+    out.selecaoNaoVira = chamou === null;
+    sel.removeAllRanges();
+
+    /* 4) sem seleção e fora de botão, abre */
+    financeiro.abrirLinha({ target: linha.querySelector('[data-label="Convênio"]') }, a._id);
+    out.abreQuandoDeve = chamou === a._id;
+    financeiro.editar = editarOriginal;
+    return out;
+  });
+
+  assert(r.linhaEhClicavel, 'a linha do Financeiro vira clicável');
+  assert(r.abriuOCard && r.abriuOCerto, 'e tocar nela abre AQUELE lançamento para editar');
+  assert(r.botaoNaoVira, 'clique num botão da linha continua sendo do botão');
+  assert(r.selecaoNaoVira, 'e selecionar texto para copiar não vira navegação');
+  assert(r.abreQuandoDeve, 'fora disso, o toque abre');
   await page.close();
 });
 

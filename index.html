@@ -961,6 +961,13 @@ body.ficha-finalizada .lab-item input.lab-fora {
 .pac-auto-add:hover, .pac-auto-add.pac-auto-active { background: var(--primary-soft); }
 /* Dropdown de autocomplete CBHPM/TUSS — customizado (funciona no iPhone,
    ao contrário do <datalist> nativo). Aparece logo abaixo do campo. */
+/* Dentro de uma tabela que rola (.dyn-table-wrap tem overflow para poder
+   deslizar na horizontal), uma caixa "absolute" é RECORTADA pelo contêiner:
+   a lista abria e ninguém via. Aí ela passa a ser presa à tela, com as
+   coordenadas calculadas do campo — assim escapa de qualquer recorte. */
+.cbhpm-box.cbhpm-fixa {
+  position: fixed; top: auto; left: auto; right: auto; z-index: 100700;
+}
 .cbhpm-box {
   position: absolute; top: 100%; left: 0; right: 0; z-index: 60;
   background: var(--surface); border: 1px solid var(--border);
@@ -1149,6 +1156,34 @@ textarea { resize: vertical; min-height: 70px; }
    de um campo comum e cresce com o texto (utils.autoAltura). Sem isto o
    min-height de 70px o deixaria alto e vazio desde o começo. */
 textarea.campo-desc { min-height: 0; overflow-y: hidden; line-height: 1.45; }
+
+/* ---- HISTÓRICO DO PACIENTE: um bloco por atendimento --------------------
+   Os registros do mesmo ato (ficha, SRPA, financeiro) ficam lado a lado, e
+   cada um é um botão: toque abre aquele registro para ver e editar. */
+.pront-bloco {
+  border: 1px solid var(--border); border-left: 3px solid var(--primary, #2c6fb5);
+  border-radius: 6px; padding: 7px 10px; margin: 5px 0; background: var(--surface);
+}
+.pront-bloco-tit { font-size: .82rem; font-weight: 600; margin-bottom: 5px; line-height: 1.35; }
+.pront-bloco-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.pront-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: .76rem; font-family: inherit; line-height: 1.3;
+  border: 1px solid var(--border); border-radius: 14px; padding: 4px 11px;
+  background: var(--surface-alt); color: var(--text); cursor: pointer;
+  white-space: nowrap; transition: background .12s, transform .12s;
+}
+.pront-chip:hover { background: var(--primary-soft, #e8eef5); transform: translateY(-1px); }
+.pront-chip:active { transform: none; }
+
+/* Linha do Financeiro: toda ela abre o lançamento */
+tr.fin-linha { cursor: pointer; }
+tr.fin-linha:hover > td { background: var(--primary-soft, #e8eef5); }
+tr.fin-linha .actions-cell { cursor: default; }
+/* no celular a fileira vira coluna em vez de cortar os últimos */
+@media (max-width: 640px) {
+  .pront-chip { font-size: .74rem; padding: 5px 10px; }
+}
 
 .field.required input, .field.required select, .field.required textarea {
   border-left: 3px solid var(--primary);
@@ -4604,7 +4639,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-25m</b><br>
+    v7.1 · build <b id="build-tag">2026-09-25r</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -8391,6 +8426,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
           <div class="table-actions">
             <button type="button" class="btn btn-primary btn-sm" onclick="financeiro.codigos.add()">+ Adicionar código TUSS</button>
             <button type="button" class="btn btn-sm" onclick="financeiro.codigos.importarPorNome()" title="Buscar códigos da ficha de anestesia do mesmo paciente">📥 Importar da anestesia</button>
+            <button type="button" class="btn btn-sm" onclick="financeiro.codigos.sugerirTodos()" title="Preenche o valor unitário de cada linha pela tabela cadastrada para o convênio deste registro. É sugestão: tudo continua editável.">💲 Sugerir valores da tabela</button>
             <button type="button" class="btn btn-sm" onclick="financeiro.codigos.classificarGrau()" title="Maior porte → 100%; demais → 50% (mesma via). Linhas marcadas 70% (via diferente) são preservadas.">⚖️ Classificar graus</button>
             <button type="button" class="btn btn-sm" onclick="financeiro.codigos.recalcular()" title="Recalcular totais com base nos códigos">↻ Recalcular totais</button>
           </div>
@@ -8476,8 +8512,8 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <div class="field col-3"><label>Glosa total (R$) <small style="color:var(--text-mute)">auto</small></label><input type="number" name="glosa" step="0.01" min="0" oninput="financeiro.calcDif()"></div>
             <div class="field col-3"><label>Diferença (R$)</label><input type="text" name="diferenca" readonly></div>
 
-            <div class="field col-3"><label>Status geral</label>
-              <select name="status">
+            <div class="field col-3"><label>Status geral <small style="color:var(--text-mute);font-weight:400">— manda no fluxo e no "pago"</small></label>
+              <select name="status" onchange="financeiro.aoMudarStatus(this)">
                 <option value="pendente">Pendente</option>
                 <option value="faturado">Faturado</option>
                 <option value="recebido">Recebido</option>
@@ -8488,8 +8524,13 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
                 <option value="finalizado">Finalizado</option>
               </select>
             </div>
-            <div class="field col-2"><label>Pago?</label>
-              <div style="padding-top:6px"><label class="check" style="display:inline-flex"><input type="checkbox" name="pago"> <span>Pago</span></label></div>
+            <!-- "Pago?" era a mesma informação do status ("Recebido") em outro
+                 controle, e os dois podiam discordar: metade do sistema lia um,
+                 metade lia o outro, e havia código somando os dois com OR para
+                 se defender disso. Agora existe UM lugar — o status — e "pago"
+                 é derivado dele, mostrado aqui só para conferência. -->
+            <div class="field col-3"><label>Pago? <small style="color:var(--text-mute);font-weight:400">— vem do status</small></label>
+              <input type="text" name="pago_rotulo" readonly style="background:var(--surface-alt);font-weight:600" title="Recebido, Finalizado ou Cortesia contam como quitado. Para mudar, mude o status.">
             </div>
             <div class="field col-3"><label>Data do pagamento</label><input type="date" name="data_pagamento"></div>
             <div class="field col-3"><label>Meio de pagamento</label>
@@ -8648,6 +8689,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
 
             <div class="field col-6"><label>Tabela de referência <small style="color:var(--text-mute);font-weight:400">(base de valores — só uso interno)</small></label>
               <select name="tabela" id="orc-tabela" onchange="window.orcamento.recalcular()"></select>
+              <button type="button" class="btn btn-xs tpl-btn" style="margin-top:6px" onclick="precos.abrirTabelasPorConvenio()" title="Cada convênio paga pela sua tabela — diga aqui qual vale para cada um">🏷️ Tabela por convênio…</button>
             </div>
             <div class="field col-6" style="display:flex;align-items:flex-end;gap:8px">
               <label class="check" style="display:inline-flex"><input type="checkbox" name="aplicar_regra" id="orc-aplicar-regra" checked onchange="window.orcamento.recalcular()"> <span>Aplicar regra de múltiplos (principal 100%, demais 50% mesma via / 70% via diferente)</span></label>
@@ -21655,9 +21697,34 @@ const pendencias = {
     store.save(mod, r);
     pendencias._espelharNoLancamento(mod, r);
     if (statusKey === 'cortesia' && marcado) { try { pendencias._aplicarCortesia(mod, r); } catch (e) {} }
+    /* Marcar "Pago" ou "Faturado" no fluxo tem de chegar ao STATUS. Antes não
+       chegava: o fluxo dizia pago e o dinheiro seguia "a receber" em todo
+       relatório, porque quem responde por isso é o status. */
+    if (marcado) { try { pendencias._aplicarStatus(mod, r, statusKey); } catch (e) {} }
     try { pendencias.renderDashboard(); } catch (e) {}
     const rot = (pendencias.STATUS.find(s => s[0] === statusKey) || ['', statusKey])[1];
     toast('🔄 Fluxo de faturamento: ' + rot + (marcado ? ' ✓' : ' removido'));
+  },
+
+  /* Etapa do fluxo → status do lançamento. Só as etapas que têm resposta
+     clara: "cobrado" e "recorrido" não dizem se o dinheiro entrou, então não
+     mexem em status nenhum. */
+  FLUXO_STATUS: { faturado: 'faturado', pago: 'recebido', glosa: 'glosado' },
+  _aplicarStatus(mod, r, statusKey) {
+    const novo = pendencias.FLUXO_STATUS[statusKey];
+    if (!novo) return null;
+    const alvo = (mod === 'financeiro') ? r
+      : (store.list('financeiro') || []).find(f => f._origemId === r._id) || null;
+    if (!alvo) return null;
+    /* cortesia é decisão de quem atendeu e tem caminho próprio: não se desfaz
+       porque alguém marcou uma etapa depois */
+    if (String(alvo.status || '').toLowerCase() === 'cortesia') return null;
+    if (alvo.status === novo) return alvo;
+    alvo.status = novo;
+    alvo.pago = financeiro.ehQuitado(novo);
+    store.save('financeiro', alvo);
+    try { if (state.currentModule === 'financeiro' && financeiro.render) financeiro.render(); } catch (e) {}
+    return alvo;
   },
 
   /* Cortesia marcada no fluxo tem que chegar ao FINANCEIRO: senão o valor
@@ -29158,9 +29225,24 @@ const cbhpm = {
     } else {
       box.innerHTML = '<div class="cbhpm-empty">Nenhum procedimento encontrado na CBHPM ' + utils.escapeHTML(CBHPM_VERSAO) + '</div>';
     }
-    const wrap = input.closest('.field') || input.parentNode;
-    if (wrap && getComputedStyle(wrap).position === 'static') wrap.style.position = 'relative';
-    wrap.appendChild(box);
+    /* Algum ancestral recorta? (tabela que rola, card com overflow hidden)
+       Se recorta, a caixa vai para o <body> presa à tela — senão ela abre e
+       fica invisível, que foi o que aconteceu na tabela de códigos TUSS. */
+    const recortado = cbhpm._temAncestralQueRecorta(input);
+    if (recortado) {
+      box.classList.add('cbhpm-fixa');
+      document.body.appendChild(box);
+      cbhpm._posicionarFixa(input, box);
+      /* rolar a página move o campo; a lista tem de ir junto ou some do lugar */
+      const seguir = () => cbhpm._posicionarFixa(input, box);
+      box._cbhpmSeguir = seguir;
+      window.addEventListener('scroll', seguir, true);
+      window.addEventListener('resize', seguir);
+    } else {
+      const wrap = input.closest('.field') || input.parentNode;
+      if (wrap && getComputedStyle(wrap).position === 'static') wrap.style.position = 'relative';
+      wrap.appendChild(box);
+    }
     /* o campo fica guardado na própria caixa: o "cirurgia proposta" é um
        textarea, e procurar por <input> ali não achava nada — clicar na
        sugestão não fazia coisa nenhuma */
@@ -29168,8 +29250,44 @@ const cbhpm = {
     input._cbhpmBox = box;
   },
 
+  _temAncestralQueRecorta(el) {
+    let n = el && el.parentElement;
+    while (n && n !== document.body) {
+      const st = getComputedStyle(n);
+      if (st.overflow !== 'visible' || st.overflowX !== 'visible' || st.overflowY !== 'visible') return n;
+      n = n.parentElement;
+    }
+    return null;
+  },
+  _posicionarFixa(input, box) {
+    if (!input || !box || !box.isConnected) return;
+    const r = input.getBoundingClientRect();
+    /* pouco espaço embaixo: abre para cima, senão a lista nasce fora da tela */
+    const alturaMax = 300;
+    const abaixo = window.innerHeight - r.bottom;
+    const largura = Math.max(r.width, 260);
+    box.style.left = Math.max(6, Math.min(r.left, window.innerWidth - largura - 6)) + 'px';
+    box.style.width = largura + 'px';
+    if (abaixo < 160 && r.top > abaixo) {
+      box.style.top = 'auto';
+      box.style.bottom = (window.innerHeight - r.top + 2) + 'px';
+      box.style.maxHeight = Math.min(alturaMax, r.top - 10) + 'px';
+    } else {
+      box.style.bottom = 'auto';
+      box.style.top = (r.bottom + 2) + 'px';
+      box.style.maxHeight = Math.min(alturaMax, abaixo - 10) + 'px';
+    }
+  },
   _fechar(input) {
-    if (input && input._cbhpmBox) { input._cbhpmBox.remove(); input._cbhpmBox = null; }
+    if (input && input._cbhpmBox) {
+      const b = input._cbhpmBox;
+      if (b._cbhpmSeguir) {
+        window.removeEventListener('scroll', b._cbhpmSeguir, true);
+        window.removeEventListener('resize', b._cbhpmSeguir);
+      }
+      b.remove();
+      input._cbhpmBox = null;
+    }
   },
 
   _teclado(e, input) {
@@ -29496,11 +29614,52 @@ const precos = {
     try { orcamento.salvarCfg({ precoPorCodigo: mapa }); } catch (e) {}
     return mapa;
   },
+  /* ---- QUAL TABELA VALE PARA ESTE PLANO ---------------------------------
+     Cada convênio paga pela sua tabela. Havia uma só, global ("tabela ativa"),
+     e o valor saía igual para todos — o que está certo para um convênio e
+     errado para os outros. Agora o plano escolhe a tabela; sem escolha
+     cadastrada para aquele plano, vale a global, como antes. */
+  _normPlano(v) {
+    return String(v || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  },
+  tabelaPorConvenio() {
+    try { return orcamento.cfg().tabelaPorConvenio || {}; } catch (e) { return {}; }
+  },
+  /* Um convênio precisa das DUAS tabelas: o honorário anestésico se calcula
+     pelo porte anestésico e a consulta pelo porte cirúrgico. Guardar uma chave
+     só cobriria um tipo e deixaria o outro caindo calado na tabela geral. */
+  definirTabelaDoConvenio(convenio, chaveTabela, tipo) {
+    const mapa = Object.assign({}, precos.tabelaPorConvenio());
+    const k = precos._normPlano(convenio);
+    if (!k) return mapa;
+    const atual = precos._parTabelas(mapa[k]);
+    const alvo = (tipo === 'cir') ? 'cir' : 'anest';
+    atual[alvo] = chaveTabela || '';
+    if (!atual.anest && !atual.cir) delete mapa[k]; else mapa[k] = atual;
+    try { orcamento.salvarCfg({ tabelaPorConvenio: mapa }); } catch (e) {}
+    return mapa;
+  },
+  /* aceita o formato antigo (uma string), que valia para o tipo dela */
+  _parTabelas(v) {
+    if (!v) return { anest: '', cir: '' };
+    if (typeof v === 'string') {
+      let tipo = 'anest';
+      try { const t = orcamento.tabelasAnest()[v]; tipo = (t && t.tipo) || 'anest'; } catch (e) {}
+      return tipo === 'cir' ? { anest: '', cir: v } : { anest: v, cir: '' };
+    }
+    return { anest: v.anest || '', cir: v.cir || '' };
+  },
   /* Tabela de referência para o tipo de honorário pedido */
-  _tabela(tipo) {
+  _tabela(tipo, convenio) {
     let tabs = {};
     try { tabs = orcamento.tabelasAnest(); } catch (e) { return null; }
     const querido = (tipo === 'anestesia') ? 'anest' : 'cir';
+    /* 1º: a tabela cadastrada para ESTE plano, no tipo pedido */
+    const par = precos._parTabelas(precos.tabelaPorConvenio()[precos._normPlano(convenio)]);
+    const doPlano = (querido === 'cir') ? par.cir : par.anest;
+    if (doPlano && tabs[doPlano] && (tabs[doPlano].tipo || 'anest') === querido) {
+      return { chave: doPlano, tab: tabs[doPlano], doConvenio: true };
+    }
     let ativa = '';
     try { ativa = orcamento.cfg().tabelaAtiva || ''; } catch (e) {}
     if (ativa && tabs[ativa] && (tabs[ativa].tipo || 'anest') === querido) return { chave: ativa, tab: tabs[ativa] };
@@ -29509,7 +29668,7 @@ const precos = {
   },
   /* Valor-base de um código. tipo: 'medico' (porte cirúrgico) ou 'anestesia' (AN).
      Devolve { valor, origem, chave, tabela } — valor null quando não há de onde tirar. */
-  base(codigo, tipo = 'medico') {
+  base(codigo, tipo = 'medico', convenio) {
     const vazio = { valor: null, origem: '', chave: '', tabela: '' };
     const info = cbhpm.info(codigo);
     const cod = info ? info.codigo : String(codigo || '').trim();
@@ -29519,7 +29678,7 @@ const precos = {
       return { valor: Number(especifico), origem: 'codigo', chave: cod, tabela: 'preço próprio do código' };
     }
     if (!info) return vazio;
-    const t = precos._tabela(tipo);
+    const t = precos._tabela(tipo, convenio);
     if (!t || !t.tab.valores) return vazio;
     let chave;
     if (tipo === 'anestesia') {
@@ -29535,8 +29694,68 @@ const precos = {
     const v = t.tab.valores[chave];
     if (v == null) return vazio;
     return { valor: Number(v), origem: tipo === 'anestesia' ? 'porte_anest' : 'porte_cir',
-             chave: String(chave), tabela: t.tab.nome || t.chave };
+             chave: String(chave), tabela: t.tab.nome || t.chave, doConvenio: !!t.doConvenio };
   },
+  /* Onde se diz qual tabela vale para cada plano. A lista de planos sai do que
+     EXISTE — cadastro de pacientes e lançamentos já feitos —, porque oferecer
+     uma lista fixa de convênios é oferecer os que ele não atende e esconder os
+     que atende. */
+  _conveniosUsados() {
+    const set = new Map();
+    const guarda = v => {
+      const t = String(v || '').trim();
+      if (!t) return;
+      const k = precos._normPlano(t);
+      if (k && !set.has(k)) set.set(k, t);
+    };
+    try { (store.list('pacientes') || []).forEach(p => guarda(p.plano)); } catch (e) {}
+    try { (store.list('financeiro') || []).forEach(f => guarda(f.convenio)); } catch (e) {}
+    try { (store.list('pre') || []).forEach(f => guarda(f.convenio)); } catch (e) {}
+    try { (store.list('consulta') || []).forEach(f => guarda(f.convenio)); } catch (e) {}
+    return Array.from(set.values()).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  },
+  abrirTabelasPorConvenio() {
+    let tabs = {};
+    try { tabs = orcamento.tabelasAnest(); } catch (e) {}
+    const mapa = precos.tabelaPorConvenio();
+    let ativa = '';
+    try { ativa = orcamento.cfg().tabelaAtiva || ''; } catch (e) {}
+    const nomeAtiva = (tabs[ativa] && tabs[ativa].nome) || ativa || '—';
+    const convs = precos._conveniosUsados();
+    const opcoes = (tipo, sel) => '<option value="">— tabela geral —</option>' +
+      Object.keys(tabs).filter(k => (tabs[k].tipo || 'anest') === tipo)
+        .map(k => '<option value="' + utils.escapeAttr(k) + '"' + (k === sel ? ' selected' : '') + '>' +
+          utils.escapeHTML(tabs[k].nome || k) + '</option>').join('');
+    const corpo = convs.length
+      ? '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">Cada convênio paga pela sua tabela. São <b>duas</b>: o honorário anestésico se calcula pelo porte anestésico e a consulta pelo porte cirúrgico. O que ficar em branco usa a tabela geral (<b>' + utils.escapeHTML(nomeAtiva) + '</b>). Vale para o valor que o Financeiro calcula sozinho ao finalizar uma ficha, pré ou consulta.</p>' +
+        '<div style="max-height:52vh;overflow:auto">' +
+        '<div style="display:flex;gap:8px;font-size:.72rem;color:var(--text-mute);font-weight:700;text-transform:uppercase;margin-bottom:4px">' +
+        '<span style="flex:0 0 170px">Convênio</span><span style="flex:1">⚕️ Porte anestésico</span><span style="flex:1">🔪 Porte cirúrgico</span></div>' +
+        convs.map(c => {
+          const par = precos._parTabelas(mapa[precos._normPlano(c)]);
+          return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">' +
+            '<span style="flex:0 0 170px;font-size:.85rem;font-weight:600">' + utils.escapeHTML(c) + '</span>' +
+            '<select style="flex:1;min-width:0" data-conv="' + utils.escapeAttr(c) + '" data-tipo="anest">' + opcoes('anest', par.anest) + '</select>' +
+            '<select style="flex:1;min-width:0" data-conv="' + utils.escapeAttr(c) + '" data-tipo="cir">' + opcoes('cir', par.cir) + '</select>' +
+            '</div>';
+        }).join('') + '</div>'
+      : '<p style="font-size:.85rem;color:var(--text-mute)">Nenhum convênio encontrado ainda — eles aparecem aqui conforme os pacientes e lançamentos vão sendo cadastrados.</p>';
+    modal.open('🏷️ Tabela de valores por convênio', corpo,
+      (convs.length ? '<button class="btn btn-primary" onclick="precos._salvarTabelasPorConvenio()">Salvar</button>' : '') +
+      '<button class="btn" onclick="modal.close()">Fechar</button>');
+  },
+  _salvarTabelasPorConvenio() {
+    const comEscolha = new Set();
+    document.querySelectorAll('[data-conv]').forEach(sel => {
+      const conv = sel.getAttribute('data-conv');
+      precos.definirTabelaDoConvenio(conv, sel.value, sel.getAttribute('data-tipo'));
+      if (sel.value) comEscolha.add(conv);
+    });
+    modal.close();
+    toast(comEscolha.size ? '🏷️ ' + comEscolha.size + ' convênio(s) com tabela própria.'
+                          : 'Todos os convênios voltaram à tabela geral.');
+  },
+
   /* valor final = base × quantidade × fração */
   calcular(base, qtd, fracao) {
     if (base == null || base === '' || isNaN(Number(base))) return null;
@@ -39726,6 +39945,73 @@ const fin = {
      A primeira (linhaId '') é a do próprio atendimento — a que sempre existiu.
      As demais são os procedimentos realizados, cada um com o seu código, a sua
      quantidade e a sua fração. Consulta + 2 procedimentos = 3 linhas. */
+  /* ---- DE ONDE VEM O VALOR ------------------------------------------------
+     Convênio: da tabela cadastrada para AQUELE plano (e não de uma tabela
+     global só, que acerta um e erra os outros).
+     Particular: do ORÇAMENTO que foi passado ao paciente — é o valor que ele
+     combinou e é o que ele vai cobrar. Sem orçamento, cai na tabela, como antes.
+     O orçamento só vale se for do mesmo paciente e não for mais velho que o
+     atendimento em mais de seis meses: preço de um ano atrás não é este preço. */
+  _MESES_ORCAMENTO: 6,
+  _valorDoOrcamento(cab) {
+    try {
+      const norm = s => (linker._normNome ? linker._normNome(s || '') : String(s || '').toLowerCase().trim());
+      const alvo = norm(cab.paciente);
+      if (!alvo) return null;
+      const limite = new Date(cab.dataProc || utils.hojeISO());
+      if (isNaN(limite)) return null;
+      const min = new Date(limite); min.setMonth(min.getMonth() - fin._MESES_ORCAMENTO);
+      const cands = (store.list('orcamento') || [])
+        .filter(o => norm(o.paciente) === alvo)
+        .filter(o => {
+          const v = parseFloat(o.total_paciente);
+          if (isNaN(v) || v <= 0) return false;
+          const d = new Date(o.data || o.data_proc || '');
+          return isNaN(d) ? true : (d <= limite && d >= min);
+        })
+        .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
+      if (!cands.length) return null;
+      return { valor: Number(parseFloat(cands[0].total_paciente).toFixed(2)),
+               origem: 'orcamento', tabela: 'orçamento de ' + utils.formatarData(cands[0].data || ''),
+               orcamentoId: cands[0]._id };
+    } catch (e) { return null; }
+  },
+  /* A linha calculada vira uma linha da tabela de códigos do lançamento,
+     com uma coluna para cada coisa: código, procedimento, porte, quantidade,
+     grau, valor unitário e previsto. */
+  _linhaComoCodigo(l) {
+    let porte = '';
+    try {
+      const info = cbhpm.info(l.cbhpm_codigo);
+      if (info) {
+        /* honorário anestésico se lê pelo porte ANESTÉSICO (AN); o cirúrgico
+           é outro número e confundiria a conferência da guia */
+        porte = (l.tipo_honorario === 'anestesia' && info.porte_anest)
+          ? ('AN ' + info.porte_anest) : (info.porte || '');
+      }
+    } catch (e) {}
+    return {
+      codigo: l.cbhpm_codigo || '',
+      descricao: l.cbhpm_descricao || l.procedimento || '',
+      porte: porte,
+      qtd: l.quantidade || 1,
+      grau: String(l.fracao != null ? l.fracao : 100),
+      valor_unit: (l.valor_base != null) ? l.valor_base : '',
+      valor_previsto: (l.valor_final != null) ? l.valor_final : '',
+      valor_recebido: '', glosa: '',
+      status: 'aguardando',
+      observacao: ''
+    };
+  },
+  _precoDe(codigo, tipo, cab) {
+    const ehParticular = /particular/i.test(String(cab && cab.convenio || ''));
+    if (ehParticular) {
+      const orc = fin._valorDoOrcamento(cab);
+      if (orc) return orc;
+    }
+    return precos.base(codigo, tipo, cab && cab.convenio);
+  },
+
   linhasDe(modOrigem, doc) {
     const cab = fin._cabecalho(modOrigem, doc);
     const linhas = [];
@@ -39734,7 +40020,7 @@ const fin = {
       /* Consulta e pré-anestésica são atendimento de consulta: mesmo código. */
       const cod = fin.CODIGO_CONSULTA;
       const info = cbhpm.info(cod);
-      const p = precos.base(cod, 'medico');
+      const p = fin._precoDe(cod, 'medico', cab);
       linhas.push({
         linhaId: '', tipo_honorario: 'consulta',
         tipo_atendimento: cab.tipoAtendimento,
@@ -39747,7 +40033,7 @@ const fin = {
       });
     } else {
       /* Ficha de anestesia: honorário anestésico do ato */
-      const p = cab.codigo ? precos.base(cab.codigo, 'anestesia') : { valor: null, origem: '' };
+      const p = cab.codigo ? fin._precoDe(cab.codigo, 'anestesia', cab) : { valor: null, origem: '' };
       linhas.push({
         linhaId: '', tipo_honorario: 'anestesia',
         tipo_atendimento: 'procedimento',
@@ -39763,7 +40049,7 @@ const fin = {
     if (modOrigem === 'consulta' && Array.isArray(doc._procsRealizados)) {
       doc._procsRealizados.forEach((pr, i) => {
         if (!pr || (!pr.codigo && !pr.descricao)) return;
-        const base = (pr.valor_base != null) ? pr.valor_base : precos.base(pr.codigo, 'medico').valor;
+        const base = (pr.valor_base != null) ? pr.valor_base : precos.base(pr.codigo, 'medico', cab.convenio).valor;
         linhas.push({
           linhaId: pr.linhaId || ('cproc-' + i),
           tipo_honorario: 'procedimento',
@@ -39784,7 +40070,7 @@ const fin = {
           codigo_trocado_em: pr.codigo_trocado_em || '',
           valor_base: (base != null) ? base : null,
           valor_final: (pr.valor_final != null) ? pr.valor_final : precos.calcular(base, pr.quantidade, pr.fracao),
-          origem_valor: (pr.valor_base != null) ? 'manual' : precos.base(pr.codigo, 'medico').origem,
+          origem_valor: (pr.valor_base != null) ? 'manual' : precos.base(pr.codigo, 'medico', cab.convenio).origem,
           observacao: pr.observacao || ''
         });
       });
@@ -39912,7 +40198,15 @@ const fin = {
       novo.status = integral ? 'recebido' : 'parcial';
       novo.diferenca_calc = prev - val - (parseFloat(novo.glosa) || 0);
     }
+    novo.pago = financeiro.ehQuitado(novo.status);
     store.save('financeiro', novo);
+    /* o fluxo acompanha: senão a pendência segue cobrando baixa de uma
+       cobrança que acabou de ser paga na frente dele */
+    try {
+      const etapa = pendencias.FLUXO_STATUS && Object.keys(pendencias.FLUXO_STATUS)
+        .find(k => pendencias.FLUXO_STATUS[k] === novo.status);
+      if (etapa) pendencias.marcarStatus('financeiro', novo._id, etapa, true);
+    } catch (e) {}
     modal.close();
     fin._pagamentoId = null;
     try { financeiro.render(); } catch (e) {}
@@ -40003,6 +40297,15 @@ const fin = {
         _autoCriado: true
       });
       if (l.observacao && !novo.observacoes) novo.observacoes = l.observacao;
+      /* ---- A TABELA DE CÓDIGOS NASCE PREENCHIDA -------------------------
+         Ela é a FONTE do valor previsto: financeiro.codigos.recalcular() soma
+         as linhas e escreve o total no campo. Nascendo vazia, o lançamento
+         mostrava um previsto que a tabela não sustentava — e bastava tocar em
+         qualquer coisa que dispare o recálculo para o previsto virar zero.
+         Só preenche quando não há nada ali: o que ele montou à mão é dele. */
+      if (!Array.isArray(item.codigos) || !item.codigos.length) {
+        novo.codigos = [fin._linhaComoCodigo(l)];
+      }
       /* valor previsto só é sugerido enquanto ninguém digitou o dele */
       if (l.valor_final != null && (novoRegistro || !item.valor_previsto || Number(item.valor_previsto) === Number(item.valor_final))) {
         novo.valor_previsto = l.valor_final;
@@ -42228,16 +42531,8 @@ const historico = {
           '<button class="btn btn-xs" onclick="historico._prontVerDoc(\'' + a.ev.mod + '\',\'' + a.ev.it._id + '\',' + a.i + ')">👁 Ver</button>' +
           '</div>').join('');
     }
-    /* Linha do tempo */
-    const linhas = eventos.map(ev =>
-      '<tr>' +
-      '<td style="white-space:nowrap">' + historico._fmtData(ev.data) + '</td>' +
-      '<td><span style="font-size:.72rem;background:var(--primary-soft, #e8eef5);border-radius:10px;padding:2px 8px;white-space:nowrap">' + historico.MODS_PRONT[ev.mod] + '</span></td>' +
-      '<td style="font-size:.8rem">' + (historico._detalheItem(ev.mod, ev.it) || '—') +
-        ((ev.it._docs && ev.it._docs.length) ? ' <span title="anexos">📎' + ev.it._docs.length + '</span>' : '') + '</td>' +
-      '<td style="text-align:center;white-space:nowrap">' +
-        '<button class="btn btn-xs btn-primary" onclick="historico.abrirItem(\'' + ev.mod + '\',\'' + ev.it._id + '\')">📂 Abrir</button>' +
-      '</td></tr>').join('');
+    /* Linha do tempo agrupada por ATENDIMENTO */
+    const linhaDoTempo = historico._prontLinhaDoTempo(eventos);
     return `
       <div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;background:var(--surface-alt)">
         <b style="font-size:.95rem">${utils.escapeHTML(nomeTitulo)}</b>
@@ -42248,11 +42543,116 @@ const historico = {
       </div>
       ${financeiroHtml}
       ${anexosHtml}
-      <h3 style="font-size:.85rem;margin:14px 0 6px">🕐 Linha do tempo <small style="font-weight:400;color:var(--text-mute)">— todo documento feito para este paciente, com a data</small></h3>
-      <table class="dash-detail-table" style="margin-top:0">
-        <thead><tr><th style="width:86px">Data</th><th style="width:130px">Módulo</th><th>Detalhe</th><th style="width:90px;text-align:center">Ações</th></tr></thead>
-        <tbody>${linhas}</tbody>
-      </table>`;
+      ${linhaDoTempo}`;
+  },
+
+  /* ---- LINHA DO TEMPO POR ATENDIMENTO ------------------------------------
+     Uma linha por documento punha ficha, SRPA e financeiro do MESMO ato em
+     linhas separadas e distantes, repetindo a data e a descrição em cada uma.
+     Num dia com dois atos ficava impossível dizer qual SRPA era de qual ficha.
+
+     O agrupamento não é por data: é pelo VÍNCULO que os registros já carregam
+     (_links entre si, e _origemId do financeiro para o documento que o gerou).
+     Data agrupa dois atos do mesmo dia num bloco só — vínculo separa cada um
+     com o que é dele. Dia é só o cabeçalho. */
+  MOD_ICONE: {
+    pre: '🫀', consulta: '🩺', anestesia: '💉', recuperacao: '🛏', termo: '📄',
+    prescricao: '💊', documentos: '📎', risco: '⚠️', financeiro: '💰',
+    agenda: '📅', orcamento: '🧾'
+  },
+  /* Quem manda no título do bloco: a ficha descreve o ato melhor que o
+     lançamento financeiro que saiu dela. */
+  _PESO_ANCORA: { anestesia: 1, pre: 2, consulta: 3, recuperacao: 4, orcamento: 5,
+                  termo: 6, risco: 7, prescricao: 8, documentos: 9, agenda: 10, financeiro: 11 },
+
+  _prontAgrupar(eventos) {
+    const chave = ev => ev.mod + ':' + (ev.it._id || '');
+    const pai = {};
+    eventos.forEach(ev => { pai[chave(ev)] = chave(ev); });
+    const existe = new Set(Object.keys(pai));
+    const raiz = k => { while (pai[k] && pai[k] !== k) k = pai[k]; return k; };
+    const une = (a, b) => { const ra = raiz(a), rb = raiz(b); if (ra !== rb) pai[rb] = ra; };
+
+    eventos.forEach(ev => {
+      const k = chave(ev);
+      const links = ev.it._links || {};
+      Object.keys(links).forEach(campo => {
+        const mod = campo.replace(/_id$/, '');
+        const alvo = mod + ':' + links[campo];
+        if (existe.has(alvo)) une(k, alvo);
+      });
+      /* o financeiro sabe de que documento nasceu, mesmo sem _links */
+      if (ev.mod === 'financeiro' && ev.it._origemId && ev.it._origemTipo) {
+        const alvo = ev.it._origemTipo + ':' + ev.it._origemId;
+        if (existe.has(alvo)) une(k, alvo);
+      }
+    });
+
+    const porRaiz = new Map();
+    eventos.forEach(ev => {
+      const r = raiz(chave(ev));
+      if (!porRaiz.has(r)) porRaiz.set(r, []);
+      porRaiz.get(r).push(ev);
+    });
+    return Array.from(porRaiz.values()).map(itens => {
+      itens.sort((a, b) => (historico._PESO_ANCORA[a.mod] || 99) - (historico._PESO_ANCORA[b.mod] || 99));
+      const ancora = itens[0];
+      /* a data do bloco é a mais antiga: é quando o atendimento aconteceu, não
+         quando o financeiro foi lançado depois */
+      const datas = itens.map(x => x.data).filter(Boolean).sort();
+      return { itens, ancora, data: datas[0] || ancora.data || '' };
+    }).sort((a, b) => (b.data || '0').localeCompare(a.data || '0'));
+  },
+
+  _prontChip(ev) {
+    const e = utils.escapeHTML;
+    const rot = historico.MODS_PRONT[ev.mod] || ev.mod;
+    const icone = historico.MOD_ICONE[ev.mod] || '📄';
+    let extra = '', cor = 'var(--border)';
+    if (ev.mod === 'financeiro') {
+      const ab = historico._emAberto(ev.it);
+      extra = ' · ' + historico._fmtRS(ev.it.valor_previsto);
+      if (ab > 0.005) { extra += ' · em aberto'; cor = '#b3261e'; }
+      else if (historico._ehCortesia(ev.it)) { extra += ' · cortesia'; }
+      else { extra += ' · quitado'; cor = '#0f7b4f'; }
+    } else if (ev.it._finalizado) {
+      extra = ' ✓';
+      cor = '#0f7b4f';
+    } else {
+      extra = ' · rascunho';
+      cor = '#8a6d00';
+    }
+    const anexos = (ev.it._docs && ev.it._docs.length) ? ' 📎' + ev.it._docs.length : '';
+    const det = historico._detalheItem(ev.mod, ev.it) || '';
+    return '<button type="button" class="pront-chip" ' +
+      'style="border-color:' + cor + '" ' +
+      'title="' + utils.escapeAttr(rot + (det ? ' — ' + det.replace(/<[^>]*>/g, '') : '') + ' · toque para abrir e editar') + '" ' +
+      'onclick="historico.abrirItem(\'' + ev.mod + '\',\'' + ev.it._id + '\')">' +
+      icone + ' ' + e(rot) + '<small style="opacity:.8">' + e(extra) + e(anexos) + '</small></button>';
+  },
+
+  _prontLinhaDoTempo(eventos) {
+    const grupos = historico._prontAgrupar(eventos);
+    if (!grupos.length) return '';
+    const e = utils.escapeHTML;
+    let html = '<h3 style="font-size:.85rem;margin:14px 0 6px">🕐 Linha do tempo ' +
+      '<small style="font-weight:400;color:var(--text-mute)">— por atendimento: ficha, SRPA e financeiro do mesmo ato ficam juntos. Toque no que quiser abrir.</small></h3>';
+    let diaAtual = null;
+    grupos.forEach(g => {
+      const dia = g.data || '';
+      if (dia !== diaAtual) {
+        diaAtual = dia;
+        html += '<div style="font-size:.78rem;font-weight:700;color:var(--primary-darker);' +
+          'margin:12px 0 4px;border-bottom:1px solid var(--border);padding-bottom:3px">📅 ' +
+          historico._fmtData(dia) + '</div>';
+      }
+      const titulo = historico._detalheItem(g.ancora.mod, g.ancora.it) || historico.MODS_PRONT[g.ancora.mod];
+      html += '<div class="pront-bloco">' +
+        '<div class="pront-bloco-tit">' + titulo + '</div>' +
+        '<div class="pront-bloco-chips">' + g.itens.map(historico._prontChip).join('') + '</div>' +
+        '</div>';
+    });
+    return html;
   },
 
   async _prontVerDoc(mod, id, i) {
@@ -48395,10 +48795,116 @@ const financeiro = {
   },
 
   /* === SUBMÓDULO: Códigos TUSS / CBHPM === */
+  /* ---- UM FATO, UM LUGAR -------------------------------------------------
+     O mesmo fato — "esta cobrança está quitada" — estava em três lugares que
+     não se falavam: o checklist do Fluxo de faturamento (_faturamento), o
+     campo status e a caixinha pago. Marcar "Pago" no fluxo não mexia no
+     status: o dinheiro seguia "a receber" nos relatórios. Marcar a caixinha
+     não dava baixa na pendência: a janela continuava cobrando. E havia código
+     somando `pago || status==='recebido'` para se defender disso.
+     Agora o STATUS manda: "pago" é derivado dele e o fluxo é marcado junto. */
+  STATUS_QUITADO: ['recebido', 'finalizado', 'cortesia'],
+  ehQuitado(status) {
+    return financeiro.STATUS_QUITADO.indexOf(String(status || '').toLowerCase()) >= 0;
+  },
+  /* status ⇄ etapa do fluxo de faturamento (as que têm correspondência) */
+  STATUS_FLUXO: { faturado: 'faturado', recebido: 'pago', finalizado: 'pago',
+                  glosado: 'glosa', cortesia: 'cortesia' },
+  _rotuloPago(status) {
+    const st = String(status || '').toLowerCase();
+    if (st === 'cortesia') return '— cortesia, não há o que receber';
+    return financeiro.ehQuitado(st) ? '✅ Sim' : '⬜ Não';
+  },
+  _pintarPago(form, status) {
+    const el = (form || document).querySelector('[name="pago_rotulo"]');
+    if (el) el.value = financeiro._rotuloPago(status);
+  },
+  /* Mudou o status na mão: o fluxo acompanha, para a pendência não continuar
+     cobrando baixa de uma cobrança que já foi resolvida. */
+  aoMudarStatus(sel) {
+    const form = document.getElementById(financeiro.formId);
+    if (!form || !sel) return;
+    const st = sel.value;
+    financeiro._pintarPago(form, st);
+    const etapa = financeiro.STATUS_FLUXO[st];
+    const id = (form.querySelector('[name="id"]') || {}).value;
+    if (etapa && id) {
+      try { pendencias.marcarStatus('financeiro', id, etapa, true); } catch (e) {}
+      try { pendencias.renderFinanceiro(store.getById('financeiro', id)); } catch (e) {}
+    }
+    try { markDirty(); } catch (e) {}
+  },
+
   codigos: {
     /* 'cortesia' também por código: numa cirurgia com vários códigos, um deles
        pode ser cortesia sem que os outros sejam. */
     STATUS_OPCOES: ['aguardando', 'faturado', 'pago', 'glosado', 'parcial', 'negado', 'cortesia'],
+
+    /* ---- DE ONDE VEM O VALOR SUGERIDO --------------------------------
+       Da mesma régua que o Financeiro usa ao gerar o lançamento sozinho: a
+       tabela cadastrada para o convênio deste registro. Honorário anestésico
+       se calcula pelo porte anestésico; o resto, pelo cirúrgico — e é o
+       próprio código que diz qual dos dois ele tem. */
+    _convenioDoRegistro() {
+      const f = document.getElementById('form-financeiro');
+      return f ? ((f.querySelector('[name="convenio"]') || {}).value || '') : '';
+    },
+    valorSugerido(codigo) {
+      if (!codigo) return null;
+      const conv = financeiro.codigos._convenioDoRegistro();
+      let info = null;
+      try { info = cbhpm.info(codigo); } catch (e) {}
+      /* o código tem porte anestésico próprio? então o honorário é anestésico */
+      const temAN = info && (info.porte_anest || (info.anestesico && info.anestesico.porte_anest));
+      const tentar = temAN ? ['anestesia', 'medico'] : ['medico', 'anestesia'];
+      for (const tipo of tentar) {
+        const p = precos.base(codigo, tipo, conv);
+        if (p && p.valor != null) return p;
+      }
+      return null;
+    },
+    sugerirValor(tr, codigo, opts = {}) {
+      if (!tr) return null;
+      const unitEl = tr.querySelector('[name="fin_cod_unit[]"]');
+      const prevEl = tr.querySelector('[name="fin_cod_previsto[]"]');
+      if (!unitEl) return null;
+      /* o que ele digitou é dele: só preenche o que está em branco, salvo
+         quando ele pede explicitamente para refazer (botão Sugerir valores) */
+      if (!opts.forcar && String(unitEl.value).trim()) return null;
+      const p = financeiro.codigos.valorSugerido(codigo);
+      if (!p || p.valor == null) return null;
+      unitEl.value = Number(p.valor).toFixed(2);
+      unitEl.title = 'Sugerido por ' + (p.tabela || 'tabela de referência') +
+        (p.doConvenio ? ' (tabela deste convênio)' : '') + ' — pode editar';
+      if (prevEl) {
+        const qtd = (tr.querySelector('[name="fin_cod_qtd[]"]') || {}).value || 1;
+        const grau = (tr.querySelector('[name="fin_cod_grau[]"]') || {}).value || 100;
+        const v = precos.calcular(p.valor, qtd, grau);
+        if (v != null) prevEl.value = v.toFixed(2);
+      }
+      return p;
+    },
+    /* Refaz a sugestão em TODAS as linhas que têm código. Serve para o
+       lançamento antigo, que nasceu antes disso, e para quando o convênio do
+       registro muda depois das linhas já estarem lançadas. */
+    sugerirTodos() {
+      const linhas = Array.from(document.querySelectorAll('#fin-codigos-body tr'));
+      if (!linhas.length) { toast('Nenhuma linha de código para preencher.', 'warn'); return; }
+      const comValor = linhas.filter(tr => String((tr.querySelector('[name="fin_cod_unit[]"]') || {}).value || '').trim());
+      const refazer = comValor.length
+        ? confirm(comValor.length + ' linha(s) já têm valor.\n\nOK = refazer TODAS pela tabela\nCancelar = preencher só as que estão em branco')
+        : false;
+      let n = 0;
+      linhas.forEach(tr => {
+        const cod = ((tr.querySelector('[name="fin_cod_codigo[]"]') || {}).value || '').trim();
+        if (!cod) return;
+        if (financeiro.codigos.sugerirValor(tr, cod, { forcar: refazer })) n++;
+      });
+      financeiro.codigos.recalcular();
+      markDirty();
+      toast(n ? '💲 ' + n + ' linha(s) com valor da tabela — confira e ajuste o que precisar.'
+              : 'Nada a preencher: sem código na linha ou sem valor na tabela para ele.');
+    },
 
     /* Adiciona uma linha de código TUSS */
     add(dados = {}) {
@@ -48445,6 +48951,10 @@ const financeiro = {
           if (codEl) codEl.value = match[0];
           if (descEl) descEl.value = match[1];
           if (porteEl) porteEl.value = match[2];
+          /* SUGESTÃO DO VALOR: escolher o código traz o valor da tabela daquele
+             convênio. É sugestão e não imposição — o campo continua editável, e
+             o que ele já tiver digitado não é sobrescrito. */
+          financeiro.codigos.sugerirValor(tr, match[0]);
           financeiro.codigos.recalcular();
         };
         cbhpm.ligar(descEl, {
@@ -48551,7 +49061,10 @@ const financeiro = {
       const statusEl = form.querySelector('[name="status"]');
       /* Cortesia é decisão de quem atendeu, não resultado de conta: o cálculo
          automático não a desfaz. */
-      if (statusEl && statusEl.value === 'cortesia') { financeiro.calcDif(); return; }
+      if (statusEl && statusEl.value === 'cortesia') {
+        financeiro._pintarPago(form, 'cortesia');
+        financeiro.calcDif(); return;
+      }
       if (statusEl && totalLinhas > 0) {
         if (countCortesia === totalLinhas) statusEl.value = 'cortesia';
         else if (countGlosado === totalLinhas) statusEl.value = 'glosado';
@@ -48559,6 +49072,8 @@ const financeiro = {
         else if (countAguard === totalLinhas) statusEl.value = 'pendente';
         else statusEl.value = 'parcial';
       }
+      /* o status acabou de ser recalculado das linhas: "pago" acompanha */
+      if (statusEl) financeiro._pintarPago(form, statusEl.value);
       financeiro.calcDif();
     },
 
@@ -48870,9 +49385,24 @@ const financeiro = {
     return saved;
   },
 
+  /* A linha inteira abre o lançamento. O botão "Editar" existe, mas mora na
+     última coluna de uma tabela de quinze — fora da tela, e alcançá-lo exige
+     rolar na horizontal. Tocar no que se está olhando é o gesto natural.
+     Só que a linha tem botões e texto dentro: clique em botão continua sendo
+     do botão, e arrastar para selecionar texto não pode virar navegação. */
+  abrirLinha(ev, id) {
+    if (!id) return;
+    const alvo = ev && ev.target;
+    if (alvo && alvo.closest && alvo.closest('button, a, input, select, textarea, label')) return;
+    try { if (String(window.getSelection()) .trim().length > 0) return; } catch (e) {}
+    financeiro.editar(id);
+  },
   editar(id) {
     const card = document.getElementById(financeiro.cardId);
     card.style.display = 'block';
+    /* o formulário fica ACIMA da lista: aberto sem rolar, ele some da vista e
+       parece que o toque não fez nada */
+    setTimeout(() => { try { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {} }, 30);
     utils.clearForm(financeiro.formId);
     /* Limpa tabela de códigos */
     const tbody = document.getElementById('fin-codigos-body');
@@ -48892,6 +49422,7 @@ const financeiro = {
         document.getElementById('financeiro-form-titulo').textContent = 'Editar registro';
         /* Restaura códigos TUSS */
         if (Array.isArray(item.codigos)) financeiro.codigos.restaurar(item.codigos);
+        try { financeiro._pintarPago(document.getElementById(financeiro.formId), item.status); } catch (e) {}
         /* Restaura anexos */
         financeiro.anexos.restaurar(item.anexos);
         /* Anexos de suporte vindos do registro clínico de origem (foto/PDF) */
@@ -48905,6 +49436,7 @@ const financeiro = {
       try { pendencias.renderFinanceiro(null); } catch (e) {}
       document.querySelector(`#${financeiro.formId} [name="data_proc"]`).value = utils.hojeISO();
       document.querySelector(`#${financeiro.formId} [name="status"]`).value = 'pendente';
+      try { financeiro._pintarPago(document.getElementById(financeiro.formId), 'pendente'); } catch (e) {}
       const fq = s => document.querySelector(`#${financeiro.formId} [name="${s}"]`);
       if (fq('fator_acomodacao')) fq('fator_acomodacao').value = 1;
       if (fq('perc_urgencia')) fq('perc_urgencia').value = 30;
@@ -48938,6 +49470,10 @@ const financeiro = {
     const rec  = parseFloat(data.valor_recebido) || 0;
     const glo  = parseFloat(data.glosa) || 0;
     data.diferenca_calc = prev - rec - glo;
+    /* "pago" é derivado do status — um fato, um lugar. O campo continua no
+       registro porque meia dúzia de telas e relatórios o leem. */
+    data.pago = financeiro.ehQuitado(data.status);
+    delete data.pago_rotulo;
     /* Preserva o que não é campo do formulário mas tem de sobreviver à edição
        manual: anexos herdados do registro clínico, vínculos e — sobretudo — a
        RASTREABILIDADE da linha (de que registro e de que linha ela veio, com
@@ -49663,7 +50199,7 @@ const financeiro = {
           ? `<span class="fin-cod">${utils.escapeHTML(x.cbhpm_codigo)}</span> ` : '';
         const tipo = fin.TIPO_LABEL[x.tipo_atendimento] || '';
         return `
-          <tr>
+          <tr class="fin-linha" onclick="financeiro.abrirLinha(event, '${x._id}')" title="Toque na linha para abrir e editar este lançamento">
             <td data-label="Paciente">${utils.escapeHTML(x.paciente || '')}${auto}${anexoTag}</td>
             <td data-label="Senha">${x.senha ? utils.escapeHTML(x.senha) : '<span style="color:var(--text-mute)">—</span>'}</td>
             <td data-label="Procedimento">${cod}${utils.escapeHTML(x.procedimento || '')}</td>
@@ -52662,6 +53198,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.sigUI = sigUI;
   window.financeiro = financeiro; window.agenda = agenda;
   window.orcamento = orcamento;
+  window.precos = precos;   /* a janela de tabela por convênio é chamada do HTML */
   window.doses = doses;
   window.modal = modal; window.modelos = modelos; window.fin = fin;
   window.linker = linker; window.templates = templates;
