@@ -13847,6 +13847,83 @@ await test('Técnica: CAM entra na monitorização da profundidade, e a sigla n�
   await page.close();
 });
 
+/* 203) Caixa de descrição que cresce com o texto. O diagnóstico era um campo de
+   uma linha: o texto inteiro estava lá, mas só se lia o pedaço que coubesse.
+   Verifica o que importa — que ela cresce ao digitar, que cresce também quando
+   o texto vem de um botão (alergias, comorbidades) ou de um registro
+   carregado, e que tem teto: texto enorme não pode empurrar a ficha inteira
+   para fora do alcance. */
+await test('Campos de descrição crescem com o texto — digitado, colado por botão ou vindo da ficha', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    store.setList('anestesia', []);
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 600));
+    try { modal.close(); } catch (e) {}
+    document.querySelectorAll('#module-anestesia .card.collapsed').forEach(c => c.classList.remove('collapsed'));
+    const f = document.getElementById('form-anestesia');
+
+    /* 1) deixaram de ser campo de uma linha */
+    const diag = f.querySelector('[name="pre_diagnostico"]');
+    out.viraramCaixa = !!diag && diag.tagName === 'TEXTAREA'
+      && ['pre_alergias', 'pre_comorbidades', 'pre_via_aerea_obs']
+        .every(n => (f.querySelector('[name="' + n + '"]') || {}).tagName === 'TEXTAREA');
+
+    /* 2) cresce ao digitar — e começa baixa, não com o vão de um textarea longo */
+    utils.autoAltura(diag);
+    const h0 = diag.offsetHeight;
+    out.comecaBaixa = h0 < 70;
+    diag.value = 'Fratura de joelho esquerdo, evoluiu com trombose e infecção. '.repeat(6);
+    diag.dispatchEvent(new Event('input', { bubbles: true }));
+    const h1 = diag.offsetHeight;
+    out.cresceuAoDigitar = h1 > h0 + 20;
+    /* e encolhe de volta quando o texto sai */
+    diag.value = 'Artroscopia';
+    diag.dispatchEvent(new Event('input', { bubbles: true }));
+    out.encolheDeVolta = diag.offsetHeight < h1;
+
+    /* 3) texto que vem de um botão também faz crescer (os seletores disparam
+       'input' no campo — é por onde o ajuste entra) */
+    const com = f.querySelector('[name="pre_comorbidades"]');
+    utils.autoAltura(com);
+    const c0 = com.offsetHeight;
+    comorbidades.negar('#form-anestesia [name=pre_comorbidades]');
+    com.value = 'HAS, diabetes, dislipidemia, obesidade, DRC, coronariopatia, SAOS, hipotireoidismo, depressão, anticoagulação plena'.repeat(3);
+    com.dispatchEvent(new Event('input', { bubbles: true }));
+    out.cresceuPorBotao = com.offsetHeight > c0 + 20;
+
+    /* 4) teto: texto enorme não empurra a ficha para fora — passa a rolar */
+    diag.value = 'x '.repeat(4000);
+    diag.dispatchEvent(new Event('input', { bubbles: true }));
+    const teto = Math.max(140, Math.round(window.innerHeight * 0.6));
+    out.respeitaOTeto = diag.offsetHeight <= teto + 4 && diag.style.overflowY === 'auto';
+
+    /* 5) ficha carregada com o card já aberto: a caixa se ajusta sozinha */
+    diag.value = '';
+    const rec = store.save('anestesia', {
+      nome: 'TESTE ALTURA', data: utils.hojeISO(),
+      pre_anestesico: { diagnostico: 'Fratura exposta de tíbia direita com lesão vascular associada, ' +
+        'submetido a fixação externa prévia, evoluiu com trombose e infecção de partes moles. '.repeat(3) }
+    });
+    anestesia.carregar(rec);
+    await new Promise(res => setTimeout(res, 300));
+    const dg = f.querySelector('[name="pre_diagnostico"]');
+    out.ajustaAoCarregar = dg.value.length > 100 && dg.offsetHeight > 70;
+    return out;
+  });
+
+  assert(r.viraramCaixa, 'diagnóstico, alergias, comorbidades e observações da via aérea viraram caixa de texto');
+  assert(r.comecaBaixa, 'começando com a altura de um campo comum, não com um vão vazio');
+  assert(r.cresceuAoDigitar, 'e crescendo conforme se digita');
+  assert(r.encolheDeVolta, 'encolhendo de volta quando o texto sai');
+  assert(r.cresceuPorBotao, 'o texto que vem dos seletores também faz a caixa crescer');
+  assert(r.respeitaOTeto, 'com teto: texto enorme passa a rolar em vez de empurrar a ficha');
+  assert(r.ajustaAoCarregar, 'e a ficha carregada já abre com a descrição inteira à vista');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

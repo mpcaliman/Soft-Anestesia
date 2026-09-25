@@ -1145,6 +1145,10 @@ input:read-only, input[readonly] {
   background: var(--surface-alt); color: var(--text-soft);
 }
 textarea { resize: vertical; min-height: 70px; }
+/* Campo de descrição que antes era <input> de uma linha: começa com a altura
+   de um campo comum e cresce com o texto (utils.autoAltura). Sem isto o
+   min-height de 70px o deixaria alto e vazio desde o começo. */
+textarea.campo-desc { min-height: 0; overflow-y: hidden; line-height: 1.45; }
 
 .field.required input, .field.required select, .field.required textarea {
   border-left: 3px solid var(--primary);
@@ -4600,7 +4604,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-25g</b><br>
+    v7.1 · build <b id="build-tag">2026-09-25h</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -5740,23 +5744,23 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
       </div>
       <div class="card-body">
         <div class="grid">
-          <div class="field col-6"><label>Diagnóstico</label><input type="text" name="pre_diagnostico"></div>
+          <div class="field col-6"><label>Diagnóstico</label><textarea class="campo-desc" rows="1" name="pre_diagnostico"></textarea></div>
           <div class="field col-2"><label>ASA</label>
             <select name="pre_asa"><option value="">—</option><option>ASA I</option><option>ASA II</option><option>ASA III</option><option>ASA IV</option><option>ASA V</option><option>ASA VI</option><option>ASA I-E</option><option>ASA II-E</option><option>ASA III-E</option><option>ASA IV-E</option><option>ASA V-E</option></select>
           </div>
           <div class="field col-2"><label>Jejum</label><input type="text" name="pre_jejum"></div>
           <div class="field col-2"><label>Glicemia capilar (mg/dL)</label><input type="number" name="pre_glicemia" min="0"></div>
-          <div class="field col-6"><label>Alergias</label><input type="text" name="pre_alergias">
+          <div class="field col-6"><label>Alergias</label><textarea class="campo-desc" rows="1" name="pre_alergias"></textarea>
             <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.alergias.abrir('#form-anestesia [name=pre_alergias]')">⚠️ Selecionar alergias</button><button type="button" class="btn btn-xs tpl-btn" onclick="window.alergias.negarCampo('#form-anestesia [name=pre_alergias]')">🚫 Nega alergias</button></div>
           </div>
-          <div class="field col-6"><label>Comorbidades</label><input type="text" name="pre_comorbidades">
+          <div class="field col-6"><label>Comorbidades</label><textarea class="campo-desc" rows="1" name="pre_comorbidades"></textarea>
             <div class="comorb-rapidas" data-alvo="#form-anestesia [name=pre_comorbidades]"></div>
             <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.comorbidades.abrir('#form-anestesia [name=pre_comorbidades]')">➕ Mais comorbidades…</button><button type="button" class="btn btn-xs tpl-btn" onclick="window.comorbidades.negar('#form-anestesia [name=pre_comorbidades]')">🚫 Nega comorbidades</button></div>
           </div>
           <div class="field col-4"><label>Avaliação de via aérea</label>
             <select name="pre_via_aerea"><option value="">—</option><option>Mallampati I</option><option>Mallampati II</option><option>Mallampati III</option><option>Mallampati IV</option><option>Via aérea difícil prevista</option><option>Sem alterações</option></select>
           </div>
-          <div class="field col-8"><label>Observações da via aérea</label><input type="text" name="pre_via_aerea_obs"></div>
+          <div class="field col-8"><label>Observações da via aérea</label><textarea class="campo-desc" rows="1" name="pre_via_aerea_obs"></textarea></div>
           <div class="field col-6"><label>Exames relevantes</label><textarea name="pre_exames" rows="2"></textarea></div>
           <div class="field col-6"><label>Medicações em uso</label><textarea name="pre_medicacoes" rows="2"></textarea>
             <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.medicacoes.abrir('#form-anestesia [name=pre_medicacoes]')">💊 Selecionar medicações</button></div>
@@ -10674,6 +10678,29 @@ const utils = {
     });
   },
   /* Limpa um <form> */
+  /* ---- CAIXA DE TEXTO QUE CRESCE COM O TEXTO ------------------------------
+     Um campo de descrição com altura fixa esconde o que foi escrito: o
+     diagnóstico inteiro estava lá, mas só se lia o pedaço que coubesse na
+     linha. Aqui a caixa acompanha o conteúdo, até um teto (60% da altura da
+     tela) — passando disso ela rola, senão um texto muito longo empurraria o
+     resto da ficha para fora do alcance.
+     A medida só vale com o elemento VISÍVEL: escondido, scrollHeight é 0 e a
+     caixa colapsaria. Por isso a varredura roda ao abrir o módulo e ao abrir
+     o card, não uma vez só no carregamento. */
+  autoAltura(el) {
+    if (!el || el.tagName !== 'TEXTAREA') return;
+    if (!el.offsetParent && el.offsetHeight === 0) return;   /* escondido: mede errado */
+    const teto = Math.max(140, Math.round(window.innerHeight * 0.6));
+    el.style.height = 'auto';
+    const precisa = el.scrollHeight + 2;                      /* +2: bordas */
+    el.style.height = Math.min(precisa, teto) + 'px';
+    el.style.overflowY = precisa > teto ? 'auto' : 'hidden';
+  },
+  autoAlturaTodos(raiz) {
+    const base = raiz || document;
+    if (!base.querySelectorAll) return;
+    base.querySelectorAll('textarea').forEach(el => utils.autoAltura(el));
+  },
   clearForm(formId) {
     const f = document.getElementById(formId);
     if (!f) return;
@@ -13565,6 +13592,11 @@ const ui = {
   },
   toggleCard(headerEl) {
     headerEl.parentElement.classList.toggle('collapsed');
+    /* card recolhido é display:none, e aí a caixa de texto não tem como ser
+       medida. A hora de ajustar é esta, quando ele acaba de abrir. */
+    if (!headerEl.parentElement.classList.contains('collapsed')) {
+      try { utils.autoAlturaTodos(headerEl.parentElement); } catch (e) {}
+    }
   },
   /* Expande ou recolhe todos os cards de um módulo */
   expandirTodos(modName) {
@@ -13572,6 +13604,7 @@ const ui = {
     if (!mod) return;
     mod.querySelectorAll('.card').forEach(c => c.classList.remove('collapsed'));
     ui._atualizarBotaoExpandir(modName, false);
+    try { utils.autoAlturaTodos(mod); } catch (e) {}
   },
   recolherTodos(modName) {
     const mod = document.getElementById('module-' + modName);
@@ -13777,6 +13810,8 @@ const ui = {
       const target = document.getElementById('module-' + modName);
       if (!target) { ui.navegar('dashboard'); return; }
       target.classList.add('active');
+      /* módulo recém-exibido: agora as caixas podem ser medidas */
+      setTimeout(() => { try { utils.autoAlturaTodos(target); } catch (e) {} }, 0);
       /* Primeira abertura: começa com os campos recolhidos (módulos de formulário) */
       if (['pre','consulta','anestesia','recuperacao','termo','prescricao','risco'].includes(modName)) {
         ui._recolherInicial(modName);
@@ -40833,6 +40868,15 @@ ui.fecharBanner = function(bannerId) {
 
 /* Atualiza doc-status (Novo / Editando / metadados / vínculos) */
 ui.atualizarDocStatus = function(modKey, item) {
+  /* Todo módulo passa por aqui ao carregar um registro no formulário. É o
+     único ponto comum a todos, e por isso o lugar de reajustar as caixas de
+     texto: com o card já aberto, nenhuma das outras varreduras aconteceria e
+     a descrição inteira ficaria escondida atrás de uma linha. */
+  if (item) {
+    setTimeout(() => {
+      try { utils.autoAlturaTodos(document.getElementById('module-' + modKey)); } catch (e) {}
+    }, 0);
+  }
   const badge = document.getElementById('dsbadge-' + modKey);
   const meta = document.getElementById('dsmeta-' + modKey);
   const links = document.getElementById('dslinks-' + modKey);
@@ -52258,6 +52302,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* 13b. Liga autocomplete em todos os campos relevantes */
   setTimeout(() => autocomplete.ligarTudo(), 100);
+
+  /* 13b2. Caixas de texto acompanham o conteúdo. Um ouvinte só, na captura:
+     vale para o que se digita E para o que os seletores (alergias,
+     comorbidades, medicações, modelos) escrevem no campo — todos disparam
+     'input'. Campo novo criado depois entra junto, sem precisar ser ligado. */
+  document.addEventListener('input', (e) => {
+    if (e.target && e.target.tagName === 'TEXTAREA') utils.autoAltura(e.target);
+  }, true);
+  /* rede de segurança: ficha carregada com o card já aberto não passa por
+     nenhuma das varreduras — ao tocar no campo, ele se ajusta na hora */
+  document.addEventListener('focusin', (e) => {
+    if (e.target && e.target.tagName === 'TEXTAREA') utils.autoAltura(e.target);
+  }, true);
+  /* mudou a largura, mudou onde o texto quebra; e o teto vem da altura da tela */
+  let _reAlt;
+  window.addEventListener('resize', () => {
+    clearTimeout(_reAlt);
+    _reAlt = setTimeout(() => utils.autoAlturaTodos(document.querySelector('.module.active')), 150);
+  });
+  setTimeout(() => utils.autoAlturaTodos(), 300);
 
   /* 13e. Inicializa interação do gráfico (drag/touch) */
   setTimeout(() => {
