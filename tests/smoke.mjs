@@ -14479,6 +14479,112 @@ await test('Histórico do paciente: registros do mesmo atendimento lado a lado, 
   await page.close();
 });
 
+/* 210) A tabela de códigos TUSS do lançamento financeiro. Ela é a FONTE do
+   valor previsto — recalcular() soma as linhas e escreve o total no campo —,
+   mas nascia VAZIA. O lançamento mostrava um previsto que a tabela não
+   sustentava, e bastava tocar em qualquer coisa que dispare o recálculo para o
+   previsto virar zero. E o valor saía de uma tabela global só, igual para
+   todos os convênios. */
+await test('Financeiro: códigos TUSS já preenchidos, com o valor da tabela do plano (ou do orçamento, no particular)', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['pre', 'consulta', 'financeiro', 'orcamento', 'pacientes'].forEach(m => store.setList(m, []));
+    const hoje = utils.hojeISO();
+
+    /* 1) consulta de convênio: a linha da tabela nasce preenchida */
+    const pre1 = store.save('pre', { nome: 'TESTE UNIMED', data: hoje, convenio: 'Unimed',
+      cirurgia: 'Consulta pré-anestésica', _finalizado: true });
+    const fr1 = fin.fromDoc('pre', pre1);
+    const l1 = (fr1.item.codigos || [])[0] || {};
+    out.nasceuPreenchida = (fr1.item.codigos || []).length === 1;
+    out.temColunaPorColuna = !!l1.codigo && !!l1.descricao && l1.qtd === 1 && l1.grau === '100'
+      && l1.valor_unit != null && l1.valor_previsto != null;
+    /* Unimed, porte anestésico 2 = R$ 212,64 (é o número da tela dele) */
+    out.valorDaTabela = Number(l1.valor_previsto) === Number(fr1.item.valor_previsto);
+    out.somaBateComOPrevisto = Math.abs(Number(l1.valor_previsto) - Number(fr1.item.valor_previsto)) < 0.005;
+
+    /* 2) o que ele montou à mão não é sobrescrito quando o registro é regravado */
+    const comMao = store.save('financeiro', Object.assign({}, fr1.item, {
+      codigos: [{ codigo: '1.01.01.01-1', descricao: 'Linha minha', qtd: 1, grau: '100',
+                  valor_unit: 500, valor_previsto: 500, status: 'aguardando' }]
+    }));
+    const fr1b = fin.fromDoc('pre', store.getById('pre', pre1._id));
+    out.naoSobrescreveOManual = (store.getById('financeiro', comMao._id).codigos || [])[0].descricao === 'Linha minha';
+
+    /* 3) tabela POR CONVÊNIO. São duas por plano: o honorário anestésico se
+       calcula pelo porte anestésico e a consulta pelo cirúrgico — guardar uma
+       chave só deixaria o outro tipo caindo calado na tabela geral. */
+    const codAnest = '3.09.12.24-5';   /* código com porte anestésico */
+    const semMapa = precos.base(codAnest, 'anestesia', 'Bradesco Saúde');
+    precos.definirTabelaDoConvenio('Bradesco Saúde', 'cbhpm2015', 'anest');
+    const comMapa = precos.base(codAnest, 'anestesia', 'Bradesco Saúde');
+    out.planoEscolheATabela = comMapa.doConvenio === true
+      && semMapa.valor != null && comMapa.valor != null
+      && comMapa.valor !== semMapa.valor;
+    /* e a tabela cirúrgica é OUTRA escolha: mapear a anestésica não mexe nela */
+    const codCons = fin.CODIGO_CONSULTA;
+    const cirAntes = precos.base(codCons, 'medico', 'Bradesco Saúde');
+    out.anestNaoMexeNoCir = cirAntes.doConvenio !== true && cirAntes.valor != null;
+    precos.definirTabelaDoConvenio('Bradesco Saúde', 'cir2024_f1', 'cir');
+    const cirDepois = precos.base(codCons, 'medico', 'Bradesco Saúde');
+    out.cirTemAPropria = cirDepois.doConvenio === true && cirDepois.valor !== cirAntes.valor;
+    /* e a anestésica continua valendo — uma não apaga a outra */
+    out.asDuasConvivem = precos.base(codAnest, 'anestesia', 'Bradesco Saúde').doConvenio === true;
+    /* plano sem escolha cadastrada segue na tabela geral */
+    const outro = precos.base(codAnest, 'anestesia', 'Plano Sem Cadastro');
+    out.semEscolhaUsaAGeral = !outro.doConvenio;
+    /* e a janela de configuração oferece os convênios QUE EXISTEM */
+    /* a lista sai do que EXISTE — cadastro de pacientes e registros já feitos */
+    store.save('pacientes', { nome: 'X', plano: 'Hapvida' });
+    const usados = precos._conveniosUsados();
+    out.ofereceOsQueExistem = usados.some(c => /Hapvida/i.test(c))   /* do cadastro */
+      && usados.some(c => /Unimed/i.test(c))                          /* da pré salva acima */
+      && !usados.some(c => /Bradesco/i.test(c));                      /* nunca usado: não é oferecido */
+
+    /* 4) PARTICULAR: o valor vem do orçamento que foi passado ao paciente */
+    store.save('orcamento', { paciente: 'MARIA PARTICULAR', data: hoje, total_paciente: '1800' });
+    const pre2 = store.save('pre', { nome: 'MARIA PARTICULAR', data: hoje, convenio: 'Particular',
+      cirurgia: 'Consulta', _finalizado: true });
+    const fr2 = fin.fromDoc('pre', pre2);
+    out.particularUsaOOrcamento = Number(fr2.item.valor_previsto) === 1800
+      && Number((fr2.item.codigos || [])[0].valor_previsto) === 1800;
+
+    /* 5) orçamento velho demais não vale: preço de um ano atrás não é este preço */
+    store.setList('orcamento', []);
+    const antigo = new Date(); antigo.setMonth(antigo.getMonth() - 14);
+    store.save('orcamento', { paciente: 'JOAO VELHO', data: antigo.toISOString().slice(0, 10), total_paciente: '9999' });
+    const pre3 = store.save('pre', { nome: 'JOAO VELHO', data: hoje, convenio: 'Particular',
+      cirurgia: 'Consulta', _finalizado: true });
+    const fr3 = fin.fromDoc('pre', pre3);
+    out.orcamentoVelhoNaoVale = Number(fr3.item.valor_previsto) !== 9999;
+
+    /* 6) e orçamento de OUTRO paciente nunca vale */
+    store.setList('orcamento', []);
+    store.save('orcamento', { paciente: 'OUTRA PESSOA', data: hoje, total_paciente: '7777' });
+    const pre4 = store.save('pre', { nome: 'ANA SOZINHA', data: hoje, convenio: 'Particular',
+      cirurgia: 'Consulta', _finalizado: true });
+    const fr4 = fin.fromDoc('pre', pre4);
+    out.orcamentoDeOutroNaoVale = Number(fr4.item.valor_previsto) !== 7777;
+    return out;
+  });
+
+  assert(r.nasceuPreenchida, 'o lançamento nasce com a linha do código TUSS, não com a tabela vazia');
+  assert(r.temColunaPorColuna, 'com código, procedimento, quantidade, grau, valor unitário e previsto — uma coluna para cada');
+  assert(r.somaBateComOPrevisto && r.valorDaTabela, 'e a soma da tabela é o previsto do lançamento — antes o previsto não se sustentava na tabela');
+  assert(r.naoSobrescreveOManual, 'o que ele montou à mão não é sobrescrito ao regravar o registro de origem');
+  assert(r.planoEscolheATabela, 'cada convênio pode ter a sua tabela de valores');
+  assert(r.anestNaoMexeNoCir, 'a tabela anestésica e a cirúrgica são escolhas separadas');
+  assert(r.cirTemAPropria && r.asDuasConvivem, 'e as duas convivem — uma não apaga a outra');
+  assert(r.semEscolhaUsaAGeral, 'e o que não tiver escolha cadastrada segue na tabela geral');
+  assert(r.ofereceOsQueExistem, 'a configuração oferece só os convênios que existem nos registros, não uma lista fixa');
+  assert(r.particularUsaOOrcamento, 'no particular o valor vem do orçamento passado ao paciente');
+  assert(r.orcamentoVelhoNaoVale, 'orçamento velho demais não vale — preço de um ano atrás não é este preço');
+  assert(r.orcamentoDeOutroNaoVale, 'e orçamento de outro paciente nunca vale');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

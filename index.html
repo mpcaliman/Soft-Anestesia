@@ -4627,7 +4627,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-25n</b><br>
+    v7.1 · build <b id="build-tag">2026-09-25o</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -8671,6 +8671,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
 
             <div class="field col-6"><label>Tabela de referência <small style="color:var(--text-mute);font-weight:400">(base de valores — só uso interno)</small></label>
               <select name="tabela" id="orc-tabela" onchange="window.orcamento.recalcular()"></select>
+              <button type="button" class="btn btn-xs tpl-btn" style="margin-top:6px" onclick="precos.abrirTabelasPorConvenio()" title="Cada convênio paga pela sua tabela — diga aqui qual vale para cada um">🏷️ Tabela por convênio…</button>
             </div>
             <div class="field col-6" style="display:flex;align-items:flex-end;gap:8px">
               <label class="check" style="display:inline-flex"><input type="checkbox" name="aplicar_regra" id="orc-aplicar-regra" checked onchange="window.orcamento.recalcular()"> <span>Aplicar regra de múltiplos (principal 100%, demais 50% mesma via / 70% via diferente)</span></label>
@@ -29519,11 +29520,52 @@ const precos = {
     try { orcamento.salvarCfg({ precoPorCodigo: mapa }); } catch (e) {}
     return mapa;
   },
+  /* ---- QUAL TABELA VALE PARA ESTE PLANO ---------------------------------
+     Cada convênio paga pela sua tabela. Havia uma só, global ("tabela ativa"),
+     e o valor saía igual para todos — o que está certo para um convênio e
+     errado para os outros. Agora o plano escolhe a tabela; sem escolha
+     cadastrada para aquele plano, vale a global, como antes. */
+  _normPlano(v) {
+    return String(v || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  },
+  tabelaPorConvenio() {
+    try { return orcamento.cfg().tabelaPorConvenio || {}; } catch (e) { return {}; }
+  },
+  /* Um convênio precisa das DUAS tabelas: o honorário anestésico se calcula
+     pelo porte anestésico e a consulta pelo porte cirúrgico. Guardar uma chave
+     só cobriria um tipo e deixaria o outro caindo calado na tabela geral. */
+  definirTabelaDoConvenio(convenio, chaveTabela, tipo) {
+    const mapa = Object.assign({}, precos.tabelaPorConvenio());
+    const k = precos._normPlano(convenio);
+    if (!k) return mapa;
+    const atual = precos._parTabelas(mapa[k]);
+    const alvo = (tipo === 'cir') ? 'cir' : 'anest';
+    atual[alvo] = chaveTabela || '';
+    if (!atual.anest && !atual.cir) delete mapa[k]; else mapa[k] = atual;
+    try { orcamento.salvarCfg({ tabelaPorConvenio: mapa }); } catch (e) {}
+    return mapa;
+  },
+  /* aceita o formato antigo (uma string), que valia para o tipo dela */
+  _parTabelas(v) {
+    if (!v) return { anest: '', cir: '' };
+    if (typeof v === 'string') {
+      let tipo = 'anest';
+      try { const t = orcamento.tabelasAnest()[v]; tipo = (t && t.tipo) || 'anest'; } catch (e) {}
+      return tipo === 'cir' ? { anest: '', cir: v } : { anest: v, cir: '' };
+    }
+    return { anest: v.anest || '', cir: v.cir || '' };
+  },
   /* Tabela de referência para o tipo de honorário pedido */
-  _tabela(tipo) {
+  _tabela(tipo, convenio) {
     let tabs = {};
     try { tabs = orcamento.tabelasAnest(); } catch (e) { return null; }
     const querido = (tipo === 'anestesia') ? 'anest' : 'cir';
+    /* 1º: a tabela cadastrada para ESTE plano, no tipo pedido */
+    const par = precos._parTabelas(precos.tabelaPorConvenio()[precos._normPlano(convenio)]);
+    const doPlano = (querido === 'cir') ? par.cir : par.anest;
+    if (doPlano && tabs[doPlano] && (tabs[doPlano].tipo || 'anest') === querido) {
+      return { chave: doPlano, tab: tabs[doPlano], doConvenio: true };
+    }
     let ativa = '';
     try { ativa = orcamento.cfg().tabelaAtiva || ''; } catch (e) {}
     if (ativa && tabs[ativa] && (tabs[ativa].tipo || 'anest') === querido) return { chave: ativa, tab: tabs[ativa] };
@@ -29532,7 +29574,7 @@ const precos = {
   },
   /* Valor-base de um código. tipo: 'medico' (porte cirúrgico) ou 'anestesia' (AN).
      Devolve { valor, origem, chave, tabela } — valor null quando não há de onde tirar. */
-  base(codigo, tipo = 'medico') {
+  base(codigo, tipo = 'medico', convenio) {
     const vazio = { valor: null, origem: '', chave: '', tabela: '' };
     const info = cbhpm.info(codigo);
     const cod = info ? info.codigo : String(codigo || '').trim();
@@ -29542,7 +29584,7 @@ const precos = {
       return { valor: Number(especifico), origem: 'codigo', chave: cod, tabela: 'preço próprio do código' };
     }
     if (!info) return vazio;
-    const t = precos._tabela(tipo);
+    const t = precos._tabela(tipo, convenio);
     if (!t || !t.tab.valores) return vazio;
     let chave;
     if (tipo === 'anestesia') {
@@ -29558,8 +29600,68 @@ const precos = {
     const v = t.tab.valores[chave];
     if (v == null) return vazio;
     return { valor: Number(v), origem: tipo === 'anestesia' ? 'porte_anest' : 'porte_cir',
-             chave: String(chave), tabela: t.tab.nome || t.chave };
+             chave: String(chave), tabela: t.tab.nome || t.chave, doConvenio: !!t.doConvenio };
   },
+  /* Onde se diz qual tabela vale para cada plano. A lista de planos sai do que
+     EXISTE — cadastro de pacientes e lançamentos já feitos —, porque oferecer
+     uma lista fixa de convênios é oferecer os que ele não atende e esconder os
+     que atende. */
+  _conveniosUsados() {
+    const set = new Map();
+    const guarda = v => {
+      const t = String(v || '').trim();
+      if (!t) return;
+      const k = precos._normPlano(t);
+      if (k && !set.has(k)) set.set(k, t);
+    };
+    try { (store.list('pacientes') || []).forEach(p => guarda(p.plano)); } catch (e) {}
+    try { (store.list('financeiro') || []).forEach(f => guarda(f.convenio)); } catch (e) {}
+    try { (store.list('pre') || []).forEach(f => guarda(f.convenio)); } catch (e) {}
+    try { (store.list('consulta') || []).forEach(f => guarda(f.convenio)); } catch (e) {}
+    return Array.from(set.values()).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  },
+  abrirTabelasPorConvenio() {
+    let tabs = {};
+    try { tabs = orcamento.tabelasAnest(); } catch (e) {}
+    const mapa = precos.tabelaPorConvenio();
+    let ativa = '';
+    try { ativa = orcamento.cfg().tabelaAtiva || ''; } catch (e) {}
+    const nomeAtiva = (tabs[ativa] && tabs[ativa].nome) || ativa || '—';
+    const convs = precos._conveniosUsados();
+    const opcoes = (tipo, sel) => '<option value="">— tabela geral —</option>' +
+      Object.keys(tabs).filter(k => (tabs[k].tipo || 'anest') === tipo)
+        .map(k => '<option value="' + utils.escapeAttr(k) + '"' + (k === sel ? ' selected' : '') + '>' +
+          utils.escapeHTML(tabs[k].nome || k) + '</option>').join('');
+    const corpo = convs.length
+      ? '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">Cada convênio paga pela sua tabela. São <b>duas</b>: o honorário anestésico se calcula pelo porte anestésico e a consulta pelo porte cirúrgico. O que ficar em branco usa a tabela geral (<b>' + utils.escapeHTML(nomeAtiva) + '</b>). Vale para o valor que o Financeiro calcula sozinho ao finalizar uma ficha, pré ou consulta.</p>' +
+        '<div style="max-height:52vh;overflow:auto">' +
+        '<div style="display:flex;gap:8px;font-size:.72rem;color:var(--text-mute);font-weight:700;text-transform:uppercase;margin-bottom:4px">' +
+        '<span style="flex:0 0 170px">Convênio</span><span style="flex:1">⚕️ Porte anestésico</span><span style="flex:1">🔪 Porte cirúrgico</span></div>' +
+        convs.map(c => {
+          const par = precos._parTabelas(mapa[precos._normPlano(c)]);
+          return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">' +
+            '<span style="flex:0 0 170px;font-size:.85rem;font-weight:600">' + utils.escapeHTML(c) + '</span>' +
+            '<select style="flex:1;min-width:0" data-conv="' + utils.escapeAttr(c) + '" data-tipo="anest">' + opcoes('anest', par.anest) + '</select>' +
+            '<select style="flex:1;min-width:0" data-conv="' + utils.escapeAttr(c) + '" data-tipo="cir">' + opcoes('cir', par.cir) + '</select>' +
+            '</div>';
+        }).join('') + '</div>'
+      : '<p style="font-size:.85rem;color:var(--text-mute)">Nenhum convênio encontrado ainda — eles aparecem aqui conforme os pacientes e lançamentos vão sendo cadastrados.</p>';
+    modal.open('🏷️ Tabela de valores por convênio', corpo,
+      (convs.length ? '<button class="btn btn-primary" onclick="precos._salvarTabelasPorConvenio()">Salvar</button>' : '') +
+      '<button class="btn" onclick="modal.close()">Fechar</button>');
+  },
+  _salvarTabelasPorConvenio() {
+    const comEscolha = new Set();
+    document.querySelectorAll('[data-conv]').forEach(sel => {
+      const conv = sel.getAttribute('data-conv');
+      precos.definirTabelaDoConvenio(conv, sel.value, sel.getAttribute('data-tipo'));
+      if (sel.value) comEscolha.add(conv);
+    });
+    modal.close();
+    toast(comEscolha.size ? '🏷️ ' + comEscolha.size + ' convênio(s) com tabela própria.'
+                          : 'Todos os convênios voltaram à tabela geral.');
+  },
+
   /* valor final = base × quantidade × fração */
   calcular(base, qtd, fracao) {
     if (base == null || base === '' || isNaN(Number(base))) return null;
@@ -39749,6 +39851,73 @@ const fin = {
      A primeira (linhaId '') é a do próprio atendimento — a que sempre existiu.
      As demais são os procedimentos realizados, cada um com o seu código, a sua
      quantidade e a sua fração. Consulta + 2 procedimentos = 3 linhas. */
+  /* ---- DE ONDE VEM O VALOR ------------------------------------------------
+     Convênio: da tabela cadastrada para AQUELE plano (e não de uma tabela
+     global só, que acerta um e erra os outros).
+     Particular: do ORÇAMENTO que foi passado ao paciente — é o valor que ele
+     combinou e é o que ele vai cobrar. Sem orçamento, cai na tabela, como antes.
+     O orçamento só vale se for do mesmo paciente e não for mais velho que o
+     atendimento em mais de seis meses: preço de um ano atrás não é este preço. */
+  _MESES_ORCAMENTO: 6,
+  _valorDoOrcamento(cab) {
+    try {
+      const norm = s => (linker._normNome ? linker._normNome(s || '') : String(s || '').toLowerCase().trim());
+      const alvo = norm(cab.paciente);
+      if (!alvo) return null;
+      const limite = new Date(cab.dataProc || utils.hojeISO());
+      if (isNaN(limite)) return null;
+      const min = new Date(limite); min.setMonth(min.getMonth() - fin._MESES_ORCAMENTO);
+      const cands = (store.list('orcamento') || [])
+        .filter(o => norm(o.paciente) === alvo)
+        .filter(o => {
+          const v = parseFloat(o.total_paciente);
+          if (isNaN(v) || v <= 0) return false;
+          const d = new Date(o.data || o.data_proc || '');
+          return isNaN(d) ? true : (d <= limite && d >= min);
+        })
+        .sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
+      if (!cands.length) return null;
+      return { valor: Number(parseFloat(cands[0].total_paciente).toFixed(2)),
+               origem: 'orcamento', tabela: 'orçamento de ' + utils.formatarData(cands[0].data || ''),
+               orcamentoId: cands[0]._id };
+    } catch (e) { return null; }
+  },
+  /* A linha calculada vira uma linha da tabela de códigos do lançamento,
+     com uma coluna para cada coisa: código, procedimento, porte, quantidade,
+     grau, valor unitário e previsto. */
+  _linhaComoCodigo(l) {
+    let porte = '';
+    try {
+      const info = cbhpm.info(l.cbhpm_codigo);
+      if (info) {
+        /* honorário anestésico se lê pelo porte ANESTÉSICO (AN); o cirúrgico
+           é outro número e confundiria a conferência da guia */
+        porte = (l.tipo_honorario === 'anestesia' && info.porte_anest)
+          ? ('AN ' + info.porte_anest) : (info.porte || '');
+      }
+    } catch (e) {}
+    return {
+      codigo: l.cbhpm_codigo || '',
+      descricao: l.cbhpm_descricao || l.procedimento || '',
+      porte: porte,
+      qtd: l.quantidade || 1,
+      grau: String(l.fracao != null ? l.fracao : 100),
+      valor_unit: (l.valor_base != null) ? l.valor_base : '',
+      valor_previsto: (l.valor_final != null) ? l.valor_final : '',
+      valor_recebido: '', glosa: '',
+      status: 'aguardando',
+      observacao: ''
+    };
+  },
+  _precoDe(codigo, tipo, cab) {
+    const ehParticular = /particular/i.test(String(cab && cab.convenio || ''));
+    if (ehParticular) {
+      const orc = fin._valorDoOrcamento(cab);
+      if (orc) return orc;
+    }
+    return precos.base(codigo, tipo, cab && cab.convenio);
+  },
+
   linhasDe(modOrigem, doc) {
     const cab = fin._cabecalho(modOrigem, doc);
     const linhas = [];
@@ -39757,7 +39926,7 @@ const fin = {
       /* Consulta e pré-anestésica são atendimento de consulta: mesmo código. */
       const cod = fin.CODIGO_CONSULTA;
       const info = cbhpm.info(cod);
-      const p = precos.base(cod, 'medico');
+      const p = fin._precoDe(cod, 'medico', cab);
       linhas.push({
         linhaId: '', tipo_honorario: 'consulta',
         tipo_atendimento: cab.tipoAtendimento,
@@ -39770,7 +39939,7 @@ const fin = {
       });
     } else {
       /* Ficha de anestesia: honorário anestésico do ato */
-      const p = cab.codigo ? precos.base(cab.codigo, 'anestesia') : { valor: null, origem: '' };
+      const p = cab.codigo ? fin._precoDe(cab.codigo, 'anestesia', cab) : { valor: null, origem: '' };
       linhas.push({
         linhaId: '', tipo_honorario: 'anestesia',
         tipo_atendimento: 'procedimento',
@@ -39786,7 +39955,7 @@ const fin = {
     if (modOrigem === 'consulta' && Array.isArray(doc._procsRealizados)) {
       doc._procsRealizados.forEach((pr, i) => {
         if (!pr || (!pr.codigo && !pr.descricao)) return;
-        const base = (pr.valor_base != null) ? pr.valor_base : precos.base(pr.codigo, 'medico').valor;
+        const base = (pr.valor_base != null) ? pr.valor_base : precos.base(pr.codigo, 'medico', cab.convenio).valor;
         linhas.push({
           linhaId: pr.linhaId || ('cproc-' + i),
           tipo_honorario: 'procedimento',
@@ -39807,7 +39976,7 @@ const fin = {
           codigo_trocado_em: pr.codigo_trocado_em || '',
           valor_base: (base != null) ? base : null,
           valor_final: (pr.valor_final != null) ? pr.valor_final : precos.calcular(base, pr.quantidade, pr.fracao),
-          origem_valor: (pr.valor_base != null) ? 'manual' : precos.base(pr.codigo, 'medico').origem,
+          origem_valor: (pr.valor_base != null) ? 'manual' : precos.base(pr.codigo, 'medico', cab.convenio).origem,
           observacao: pr.observacao || ''
         });
       });
@@ -40026,6 +40195,15 @@ const fin = {
         _autoCriado: true
       });
       if (l.observacao && !novo.observacoes) novo.observacoes = l.observacao;
+      /* ---- A TABELA DE CÓDIGOS NASCE PREENCHIDA -------------------------
+         Ela é a FONTE do valor previsto: financeiro.codigos.recalcular() soma
+         as linhas e escreve o total no campo. Nascendo vazia, o lançamento
+         mostrava um previsto que a tabela não sustentava — e bastava tocar em
+         qualquer coisa que dispare o recálculo para o previsto virar zero.
+         Só preenche quando não há nada ali: o que ele montou à mão é dele. */
+      if (!Array.isArray(item.codigos) || !item.codigos.length) {
+        novo.codigos = [fin._linhaComoCodigo(l)];
+      }
       /* valor previsto só é sugerido enquanto ninguém digitou o dele */
       if (l.valor_final != null && (novoRegistro || !item.valor_previsto || Number(item.valor_previsto) === Number(item.valor_final))) {
         novo.valor_previsto = l.valor_final;
@@ -52782,6 +52960,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.sigUI = sigUI;
   window.financeiro = financeiro; window.agenda = agenda;
   window.orcamento = orcamento;
+  window.precos = precos;   /* a janela de tabela por convênio é chamada do HTML */
   window.doses = doses;
   window.modal = modal; window.modelos = modelos; window.fin = fin;
   window.linker = linker; window.templates = templates;
