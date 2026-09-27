@@ -13108,6 +13108,38 @@ const preLanc = {
       preLanc.sincronizarFila({ forcar: true });
     });
   },
+  /* Quem espera conferência na clínica, com o FILTRO NO SERVIDOR: desce só o
+     essencial de cada um — nome, quem enviou, quando —, nunca o registro. Num
+     dia comum são alguns poucos; baixar o módulo inteiro para contá-los era
+     pagar megabytes por uma linha de texto.
+     Devolve null quando o servidor não aceita o filtro (banco antigo), e aí
+     quem chamou decide o que fazer — em vez de um zero que parece resposta. */
+  async _pendentesNaClinica(mod) {
+    const cfg = cloudRel.MODOS[mod]; if (!cfg) return null;
+    if (!cloudRel.disponivel()) return null;
+    if (!(await cloud._garantirToken())) return null;
+    const org = await cloudRel._orgAsync(); if (!org) return null;
+    const c = cloud.config();
+    const sel = ['id', 'legacy_id', 'updated_at',
+      'nome:data->paciente->>nome', 'nome2:data->>nome',
+      'quando:data->_preLanc->>enviadoEm', 'por:data->_preLanc->>porNome',
+      'fin:data->>_finalizado'].join(',');
+    try {
+      const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
+        '&deleted_at=is.null&data->_preLanc->>estado=eq.enviado' +
+        '&select=' + encodeURIComponent(sel) + '&limit=300', { headers: cloud._headers(true) });
+      if (!r.ok) return null;
+      const rows = await r.json();
+      if (!Array.isArray(rows)) return null;
+      return rows
+        .filter(x => !(x.fin === true || x.fin === 'true'))
+        .map(x => ({
+          mod, id: x.legacy_id || ('rel_' + String(x.id || '').slice(0, 8)),
+          nome: x.nome || x.nome2 || '(sem nome)',
+          quando: x.quando || '', por: x.por || ''
+        }));
+    } catch (e) { return null; }
+  },
   async sincronizarFila(opts = {}) {
     if (!opts.forcar && Date.now() - preLanc._ultimaBusca < 60000) return null;
     /* Toque que não responde nada é indistinguível de botão quebrado. Todo
@@ -13153,25 +13185,37 @@ const preLanc = {
            e antes baixava o módulo INTEIRO — `anestesia` com as imagens em
            base64 dentro de cada registro. Dezenas de visitas por dia, quatro
            aparelhos, o acervo completo em cada uma: era assim que o egress da
-           nuvem ia embora. Agora o índice vem primeiro e só o que mudou desce.
-           A conta de quem está esperando conferência sai do que ficou gravado
-           aqui depois da mesclagem — que é a mesma informação, de graça. */
+           nuvem ia embora. Agora o índice vem primeiro e só o que mudou desce. */
         const res = await cloudRel.puxarModuloIncremental(mod);
         if (!res) continue;
         leu++;
-        res.indice.forEach(linha => {
-          const r = cloudRel.localDoIndice(mod, linha);
-          if (!r || r._finalizado || preLanc.estado(r) !== 'enviado') return;
+        novos += res.novos; atualizados += res.atualizados; naoCouberam += res.naoCouberam;
+
+        /* QUANTOS e QUEM esperam conferência NA CLÍNICA — perguntado ao
+           servidor, não deduzido do que está aqui. É o número que separa "não
+           chegou neste aparelho" de "não subiu no aparelho de quem lançou", e
+           o caso que NÃO COUBE aqui é justamente o que precisa ser contado:
+           tirar essa conta do acervo local a apagaria em silêncio. */
+        const pend = await preLanc._pendentesNaClinica(mod);
+        if (pend) {
+          naClinica += pend.length;
           /* Guarda QUEM está esperando, não só quantos. "A clínica tem 3 e aqui
              apareceram 0" é um diagnóstico; sem os nomes, não é uma saída. */
-          naClinica++;
-          naClinicaLista.push({
-            mod, id: r._id, nome: arquivo._nomeDe(r),
-            quando: (r._preLanc && r._preLanc.enviadoEm) || '',
-            por: (r._preLanc && r._preLanc.porNome) || ''
+          pend.forEach(p => naClinicaLista.push(p));
+        } else {
+          /* O servidor não soube responder ao filtro: melhor uma conta pelo
+             que está gravado aqui do que nenhuma — e sem baixar nada. */
+          res.indice.forEach(linha => {
+            const r = cloudRel.localDoIndice(mod, linha);
+            if (!r || r._finalizado || preLanc.estado(r) !== 'enviado') return;
+            naClinica++;
+            naClinicaLista.push({
+              mod, id: r._id, nome: arquivo._nomeDe(r),
+              quando: (r._preLanc && r._preLanc.enviadoEm) || '',
+              por: (r._preLanc && r._preLanc.porNome) || ''
+            });
           });
-        });
-        novos += res.novos; atualizados += res.atualizados; naoCouberam += res.naoCouberam;
+        }
       }
       if (!leu) {
         dizer('Não consegui ler a clínica agora — confira a conexão e tente de novo.', 'error');

@@ -5914,18 +5914,27 @@ await test('A fila do médico vai buscar os pré-lançamentos na clínica sozinh
 
     /* clínica de mentira: devolve um pré-lançamento enviado */
     const pedidos = [];
-    const origDisp = cloudRel.disponivel, origPuxa = cloudRel.puxarModulo, origTok = cloud._garantirToken;
+    const origDisp = cloudRel.disponivel, origIx = cloudRel.puxarIndiceModulo,
+          origIds = cloudRel.puxarPorIds, origPend = preLanc._pendentesNaClinica,
+          origTok = cloud._garantirToken;
     const origCfg = cloud.estaConfigurado, origLog = cloud.estaLogado, origExp = cloud.sessaoExpirada;
     cloudRel.disponivel = () => true;
     cloud._garantirToken = async () => true;
     cloud.estaConfigurado = () => true; cloud.estaLogado = () => true; cloud.sessaoExpirada = () => false;
-    cloudRel.puxarModulo = async (mod) => {
+    /* A leitura é INCREMENTAL: índice primeiro, conteúdo só do que mudou. O
+       módulo inteiro não desce mais a cada visita ao Painel — era o que
+       torrava a cota de download da nuvem. */
+    const oPre = { _id: 'z1', nome: 'Teste', data: '2026-08-13', _updatedAt: '2026-08-13T12:00:00.000Z',
+                   _preLanc: { estado: 'enviado', porNome: 'mpcanestesiologia', enviadoEm: '2026-08-13T12:00:00.000Z' } };
+    cloudRel.puxarIndiceModulo = async (mod) => {
       pedidos.push(mod);
       return mod === 'pre'
-        ? [{ _id: 'z1', nome: 'Teste', data: '2026-08-13', _updatedAt: '2026-08-13T12:00:00.000Z',
-             _preLanc: { estado: 'enviado', porNome: 'mpcanestesiologia', enviadoEm: '2026-08-13T12:00:00.000Z' } }]
+        ? [{ id: 'r1', legacy_id: 'z1', updated_at: '2026-08-13T12:00:00.000Z', _idLocal: 'z1', _idsPossiveis: ['z1'] }]
         : [];
     };
+    cloudRel.puxarPorIds = async (mod, ids) => (mod === 'pre' && ids.length ? [oPre] : []);
+    preLanc._pendentesNaClinica = async (mod) => (mod === 'pre'
+      ? [{ mod: 'pre', id: 'z1', nome: 'Teste', quando: '2026-08-13T12:00:00.000Z', por: 'mpcanestesiologia' }] : []);
 
     preLanc._ultimaBusca = 0;
     const res = await preLanc.sincronizarFila({ forcar: true, silent: true });
@@ -5940,7 +5949,9 @@ await test('A fila do médico vai buscar os pré-lançamentos na clínica sozinh
     await preLanc.sincronizarFila({ silent: true });
     out.naoRepete = pedidos.length === 0;
 
-    cloudRel.disponivel = origDisp; cloudRel.puxarModulo = origPuxa; cloud._garantirToken = origTok;
+    cloudRel.disponivel = origDisp; cloudRel.puxarIndiceModulo = origIx;
+    cloudRel.puxarPorIds = origIds; preLanc._pendentesNaClinica = origPend;
+    cloud._garantirToken = origTok;
     cloud.estaConfigurado = origCfg; cloud.estaLogado = origLog; cloud.sessaoExpirada = origExp;
     store.setList('pre', []); store.setList('anestesia', []);
     return out;
@@ -5960,7 +5971,9 @@ await test('Quando a conta não fecha, o app diz de que lado o pré-lançamento 
   const r = await page.evaluate(async () => {
     const out = {};
     store.setList('pre', []); store.setList('anestesia', []);
-    const origDisp = cloudRel.disponivel, origPuxa = cloudRel.puxarModulo, origTok = cloud._garantirToken;
+    const origDisp = cloudRel.disponivel, origIx = cloudRel.puxarIndiceModulo,
+          origIds = cloudRel.puxarPorIds, origPend = preLanc._pendentesNaClinica,
+          origTok = cloud._garantirToken;
     const origCfg = cloud.estaConfigurado, origLog = cloud.estaLogado, origExp = cloud.sessaoExpirada;
     cloudRel.disponivel = () => true;
     cloud._garantirToken = async () => true;
@@ -5972,7 +5985,15 @@ await test('Quando a conta não fecha, o app diz de que lado o pré-lançamento 
       _id: id, nome: 'P' + i, data: '2026-08-13', _updatedAt: '2026-08-13T12:0' + i + ':00.000Z',
       _preLanc: { estado: 'enviado', porNome: 'Sec', enviadoEm: '2026-08-13T12:00:00.000Z' }
     }));
-    cloudRel.puxarModulo = async (mod) => (mod === 'pre' ? naNuvem : []);
+    cloudRel.puxarIndiceModulo = async (mod) => (mod === 'pre'
+      ? naNuvem.map((x, i) => ({ id: 'r' + i, legacy_id: x._id, updated_at: x._updatedAt,
+                                 _idLocal: x._id, _idsPossiveis: [x._id] })) : []);
+    cloudRel.puxarPorIds = async (mod) => (mod === 'pre' ? naNuvem : []);
+    /* QUEM ESPERA CONFERÊNCIA vem do servidor, não do que está gravado aqui:
+       o caso que não couber no aparelho é justamente o que precisa ser
+       contado. Contar pelo acervo local apagaria esse número em silêncio. */
+    preLanc._pendentesNaClinica = async (mod) => (mod === 'pre'
+      ? naNuvem.map(x => ({ mod: 'pre', id: x._id, nome: x.nome, quando: '', por: 'Sec' })) : []);
     /* o aparelho aceita gravar só o primeiro (simula falta de espaço) */
     const origSet = store.setList;
     store.setList = (m, arr) => origSet.call(store, m, m === 'pre' ? (arr || []).slice(0, 1) : arr);
@@ -6002,7 +6023,9 @@ await test('Quando a conta não fecha, o app diz de que lado o pré-lançamento 
     store.setList('pre', store.list('pre').map(x => Object.assign({}, x, { _relUpdatedAt: '2026-08-13T12:00:01Z' })));
     out.paraDeCobrarDepoisDeSubir = preLanc.naoSubiram().length === 0;
 
-    cloudRel.disponivel = origDisp; cloudRel.puxarModulo = origPuxa; cloud._garantirToken = origTok;
+    cloudRel.disponivel = origDisp; cloudRel.puxarIndiceModulo = origIx;
+    cloudRel.puxarPorIds = origIds; preLanc._pendentesNaClinica = origPend;
+    cloud._garantirToken = origTok;
     cloud.estaConfigurado = origCfg; cloud.estaLogado = origLog; cloud.sessaoExpirada = origExp;
     preLanc._diag = null;
     store.setList('pre', []); store.setList('anestesia', []);
@@ -6076,18 +6099,21 @@ await test('O botão Buscar da fila responde sempre — inclusive quando não d�
     avisos.length = 0;
     cloud.estaLogado = () => true;
     const origExp = cloud.sessaoExpirada, origDisp = cloudRel.disponivel,
-          origTok = cloud._garantirToken, origPuxa = cloudRel.puxarModulo;
+          origTok = cloud._garantirToken, origIx = cloudRel.puxarIndiceModulo,
+          origPend = preLanc._pendentesNaClinica;
     cloud.sessaoExpirada = () => false;
     cloudRel.disponivel = () => true;
     cloud._garantirToken = async () => true;
-    cloudRel.puxarModulo = async () => [];
+    cloudRel.puxarIndiceModulo = async () => [];
+    preLanc._pendentesNaClinica = async () => [];
     preLanc._ultimaBusca = 0;
     await preLanc.sincronizarFila({ forcar: true });
     out.avisaQuandoNaoTemNada = avisos.some(m => /em dia/i.test(m));
 
-    /* a clínica caiu no meio: não pode ficar mudo nem mentir que está em dia */
+    /* a clínica caiu no meio: não pode ficar mudo nem mentir que está em dia.
+       O índice é a PRIMEIRA leitura — falhar nele é falhar a busca. */
     avisos.length = 0;
-    cloudRel.puxarModulo = async () => null;
+    cloudRel.puxarIndiceModulo = async () => null;
     preLanc._ultimaBusca = 0;
     await preLanc.sincronizarFila({ forcar: true });
     out.avisaFalhaDeLeitura = avisos.some(m => /não consegui ler a clínica/i.test(m));
@@ -6095,7 +6121,8 @@ await test('O botão Buscar da fila responde sempre — inclusive quando não d�
     window.toast = tOrig;
     cloud.estaConfigurado = origCfg; cloud.estaLogado = origLog; cloud.reentrar = origRe;
     cloud.sessaoExpirada = origExp; cloudRel.disponivel = origDisp;
-    cloud._garantirToken = origTok; cloudRel.puxarModulo = origPuxa;
+    cloud._garantirToken = origTok; cloudRel.puxarIndiceModulo = origIx;
+    preLanc._pendentesNaClinica = origPend;
     preLanc._diag = null;
     store.setList('pre', []); store.setList('anestesia', []);
     return out;
@@ -6265,7 +6292,8 @@ await test('O Buscar volta ao normal mesmo com duas buscas cruzadas, e "não sub
     const out = {};
     store.setList('pre', []); store.setList('anestesia', []);
     const origCfg = cloud.estaConfigurado, origLog = cloud.estaLogado, origExp = cloud.sessaoExpirada,
-          origDisp = cloudRel.disponivel, origTok = cloud._garantirToken, origPuxa = cloudRel.puxarModulo,
+          origDisp = cloudRel.disponivel, origTok = cloud._garantirToken,
+          origIx = cloudRel.puxarIndiceModulo, origPend = preLanc._pendentesNaClinica,
           origEnv = cloudRel.enviarRegistro;
     cloud.estaConfigurado = () => true; cloud.estaLogado = () => true; cloud.sessaoExpirada = () => false;
     cloudRel.disponivel = () => true; cloud._garantirToken = async () => true;
@@ -6277,7 +6305,8 @@ await test('O Buscar volta ao normal mesmo com duas buscas cruzadas, e "não sub
        busca completa acontece. */
     auth.usuarioAtual = () => ({ id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
     preLanc.renderFila();
-    cloudRel.puxarModulo = async () => [];
+    cloudRel.puxarIndiceModulo = async () => [];
+    preLanc._pendentesNaClinica = async () => [];
     const btn = document.getElementById('pl-buscar-btn');
     btn.textContent = '⏳ Buscando…';
     btn.disabled = true;
@@ -6296,7 +6325,7 @@ await test('O Buscar volta ao normal mesmo com duas buscas cruzadas, e "não sub
 
     /* e durante a busca o botão mostra que está trabalhando */
     let vistoDurante = '';
-    cloudRel.puxarModulo = async () => {
+    cloudRel.puxarIndiceModulo = async () => {
       vistoDurante = document.getElementById('pl-buscar-btn').textContent;
       return [];
     };
@@ -6328,7 +6357,8 @@ await test('O Buscar volta ao normal mesmo com duas buscas cruzadas, e "não sub
     out.limpouDepoisDeSubir = preLanc.naoSubiram().length === 0 && !preLanc._erroSubida;
 
     cloud.estaConfigurado = origCfg; cloud.estaLogado = origLog; cloud.sessaoExpirada = origExp;
-    cloudRel.disponivel = origDisp; cloud._garantirToken = origTok; cloudRel.puxarModulo = origPuxa;
+    cloudRel.disponivel = origDisp; cloud._garantirToken = origTok;
+    cloudRel.puxarIndiceModulo = origIx; preLanc._pendentesNaClinica = origPend;
     cloudRel.enviarRegistro = origEnv;
     preLanc._diag = null; preLanc._erroSubida = '';
     store.setList('pre', []); store.setList('anestesia', []);
@@ -6621,17 +6651,21 @@ await test('Dashboard conta só o que foi finalizado, e os números vêm antes d
       && pos('#kpi-grid') < pos('#pl-alerta');
 
     /* painel zerado busca a produção na clínica em vez de aceitar o zero */
-    const origDisp = cloudRel.disponivel, origTok = cloud._garantirToken, origPuxa = cloudRel.puxarModulo;
+    const origDisp = cloudRel.disponivel, origTok = cloud._garantirToken,
+          origIx = cloudRel.puxarIndiceModulo, origIds = cloudRel.puxarPorIds;
     cloudRel.disponivel = () => true;
     cloud._garantirToken = async () => true;
     let pediu = 0;
-    cloudRel.puxarModulo = async (m) => {
+    /* incremental aqui também: índice, e conteúdo só do que falta */
+    const daClinica = { _id: 'nuvem1', paciente: { nome: 'Da clínica' }, procedimento: { data: hoje },
+                        _finalizado: true, _updatedAt: new Date().toISOString(), _relUpdatedAt: '2026-08-13T12:00:00Z' };
+    cloudRel.puxarIndiceModulo = async (m) => {
       pediu++;
       return m === 'anestesia'
-        ? [{ _id: 'nuvem1', paciente: { nome: 'Da clínica' }, procedimento: { data: hoje },
-             _finalizado: true, _updatedAt: new Date().toISOString(), _relUpdatedAt: '2026-08-13T12:00:00Z' }]
+        ? [{ id: 'r1', legacy_id: 'nuvem1', updated_at: '2026-08-13T12:00:00Z', _idLocal: 'nuvem1', _idsPossiveis: ['nuvem1'] }]
         : [];
     };
+    cloudRel.puxarPorIds = async (m, ids) => (m === 'anestesia' && ids.length ? [daClinica] : []);
     store.setList('pre', []); store.setList('anestesia', []);
     dashboard._puxouVazio = false;
     await dashboard._puxarSeVazio(0);
@@ -6647,7 +6681,8 @@ await test('Dashboard conta só o que foi finalizado, e os números vêm antes d
     await dashboard._puxarSeVazio(5);
     out.naoBuscaSeTemDados = pediu === 0;
 
-    cloudRel.disponivel = origDisp; cloud._garantirToken = origTok; cloudRel.puxarModulo = origPuxa;
+    cloudRel.disponivel = origDisp; cloud._garantirToken = origTok;
+    cloudRel.puxarIndiceModulo = origIx; cloudRel.puxarPorIds = origIds;
     store.setList('anestesia', []); store.setList('pre', []);
     store.setList('consulta', []); store.setList('financeiro', []);
     return out;
@@ -15547,27 +15582,41 @@ await test('A nuvem lê o índice antes do conteúdo, e o aparelho sabe quanto b
     }]);
     store.setList('pre', []);
     chamadas = [];
-    stub(async (url) => {
+    /* Duas leituras, as duas magras: o ÍNDICE do módulo, e a lista de quem
+       espera conferência — esta com o filtro no servidor, trazendo nome, quem
+       enviou e quando, nunca o registro. */
+    const respostaFila = async (url) => {
       const u = String(url); chamadas.push(u);
-      if (/anesthesia_records/.test(u) && /select=id,legacy_id,updated_at/.test(u)) {
+      if (/anesthesia_records/.test(u) && /data->_preLanc->>estado=eq\.enviado/.test(decodeURIComponent(u))) {
+        return { ok: true, headers: { get: () => '120' }, json: async () => [
+          { id: 'r1', legacy_id: 'd1', updated_at: '2026-09-27T09:00:00.000Z', nome: 'Teste Egresso', quando: '2026-09-27T08:00:00.000Z', por: 'Secretária' }] };
+      }
+      if (/anesthesia_records/.test(u) && /select=id,legacy_id,updated_at&/.test(u)) {
         return { ok: true, headers: { get: () => '80' }, json: async () => [{ id: 'r1', legacy_id: 'd1', updated_at: '2026-09-27T09:00:00.000Z' }] };
       }
       return { ok: true, headers: { get: () => '0' }, json: async () => [] };
-    });
+    };
+    stub(respostaFila);
     preLanc._ultimaBusca = 0;
     await preLanc.sincronizarFila({ forcar: true, silent: true });
     /* O registro já está aqui nesta versão — o conteúdo não pode ser pedido */
     out.filaSoOIndice = !chamadas.some(u => /select=id,legacy_id,data/.test(decodeURIComponent(u)));
-    out.filaLeuOIndice = chamadas.some(u => /select=id,legacy_id,updated_at/.test(u));
-    /* e a conta que a tela mostra continua certa, sem ter baixado nada */
+    out.filaLeuOIndice = chamadas.some(u => /select=id,legacy_id,updated_at&/.test(u));
+    /* A conta de quem espera conferência é do SERVIDOR, não do acervo daqui:
+       o caso que não couber neste aparelho é justamente o que precisa ser
+       contado, e contá-lo pelo que está gravado aqui o apagaria em silêncio. */
+    out.filaPerguntouAoServidor = chamadas.some(u => /data->_preLanc->>estado=eq\.enviado/.test(decodeURIComponent(u)));
     out.filaContouSemBaixar = !!(preLanc._diag && preLanc._diag.naClinica === 1
-      && (preLanc._diag.lista || []).some(x => x.id === 'd1'));
+      && (preLanc._diag.lista || []).some(x => x.id === 'd1' && x.nome === 'Teste Egresso'));
 
     /* versão diferente lá: aí o conteúdo desce */
     chamadas = [];
     stub(async (url) => {
       const u = String(url); chamadas.push(u);
-      if (/anesthesia_records/.test(u) && /select=id,legacy_id,updated_at/.test(u)) {
+      if (/anesthesia_records/.test(u) && /data->_preLanc->>estado=eq\.enviado/.test(decodeURIComponent(u))) {
+        return { ok: true, headers: { get: () => '10' }, json: async () => [] };
+      }
+      if (/anesthesia_records/.test(u) && /select=id,legacy_id,updated_at&/.test(u)) {
         return { ok: true, headers: { get: () => '80' }, json: async () => [{ id: 'r1', legacy_id: 'd1', updated_at: '2026-09-27T23:00:00.000Z' }] };
       }
       if (/anesthesia_records/.test(u) && /id=in\./.test(u)) {
@@ -15610,6 +15659,7 @@ await test('A nuvem lê o índice antes do conteúdo, e o aparelho sabe quanto b
   assert(r.configAplicou, 'e o que desceu tem de ser aplicado neste aparelho');
   assert(r.filaLeuOIndice, 'a fila de pré-lançamento começa pelo índice do módulo');
   assert(r.filaSoOIndice, 'registro que já está aqui nesta versão não pode ser baixado de novo a cada visita ao Painel');
+  assert(r.filaPerguntouAoServidor, 'quem espera conferência é contado pelo servidor, com o filtro no banco');
   assert(r.filaContouSemBaixar, 'quem está esperando conferência continua sendo contado — sem baixar o acervo');
   assert(r.filaBaixouOQueMudou, 'versão mais nova na clínica desce o conteúdo, senão a fila nunca atualiza');
   assert(r.ficouArquivado, 'o preparo do caso arquivado precisa valer');
