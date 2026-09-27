@@ -15256,6 +15256,91 @@ await test('Janela de finalização: desfecho confirmado com a cirurgia à vista
   await page.close();
 });
 
+/* 217) Como se avança para a impressão depois da janela de cobrança. Antes ela
+   fechava e ele tinha de caçar o botão de imprimir noutro canto. O caminho
+   termina na janela — e imprimir dali tem um porém que o teste 60 guardava: a
+   impressão é montada do FORMULÁRIO e o rascunho é descartado ao finalizar,
+   então a folha sairia em branco. */
+await test('Depois da janela: "Gerar e imprimir" fecha o caminho, e a folha não sai em branco', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['pre', 'consulta', 'financeiro'].forEach(m => store.setList(m, []));
+    const hoje = utils.hojeISO();
+    /* a impressão é montada do módulo ABERTO: sem entrar na consulta, ela
+       montaria outra tela — como no uso real, o módulo está na frente */
+    ui.navegar('consulta');
+    await new Promise(res => setTimeout(res, 600));
+    try { modal.close(); } catch (e) {}
+    let imprimiu = 0, conteudo = '';
+    const orig = printPreview.abrir;
+    printPreview.abrir = function () {
+      imprimiu++;
+      const r2 = orig.apply(printPreview, arguments);
+      try { conteudo = (document.getElementById('ppp') || {}).innerHTML || ''; } catch (e) {}
+      try { document.getElementById('print-preview-overlay').classList.remove('show'); } catch (e) {}
+      return r2;
+    };
+
+    /* 1) o rodapé oferece os três caminhos */
+    const c1 = store.save('consulta', { nome: 'JOANA IMPRIME', data: hoje, convenio: 'Unimed',
+      queixa: 'Dor lombar', _finalizado: true });
+    fin.finalizacao.abrir('consulta', c1);
+    await new Promise(res => setTimeout(res, 350));
+    const rodape = document.getElementById('modal-footer') || document.querySelector('.modal-footer');
+    const txt = (rodape || document.body).textContent;
+    out.temOsTresCaminhos = /Não gerar/.test(txt) && /Gerar lançamento/.test(txt) && /Gerar e imprimir/.test(txt);
+
+    /* 2) "Gerar e imprimir" gera E imprime */
+    imprimiu = 0; conteudo = '';
+    fin.finalizacao.confirmar({ imprimir: true });
+    await new Promise(res => setTimeout(res, 800));
+    out.gerou = store.list('financeiro').some(x => x._origemId === c1._id);
+    out.imprimiu = imprimiu === 1;
+    /* A FOLHA NÃO PODE SAIR EM BRANCO — era o risco de imprimir depois */
+    out.folhaComConteudo = /JOANA IMPRIME/.test(conteudo);
+
+    /* 3) "Gerar lançamento" (sem imprimir) não abre a impressão */
+    const c2 = store.save('consulta', { nome: 'SEM IMPRIMIR', data: hoje, convenio: 'Unimed', _finalizado: true });
+    imprimiu = 0;
+    fin.finalizacao.abrir('consulta', c2);
+    await new Promise(res => setTimeout(res, 350));
+    fin.finalizacao.confirmar();
+    await new Promise(res => setTimeout(res, 600));
+    out.geraSemImprimir = store.list('financeiro').some(x => x._origemId === c2._id) && imprimiu === 0;
+
+    /* 4) "Não gerar" também pode terminar na impressão: o documento existe
+       mesmo sem cobrança, e ele pode querer a via do paciente */
+    const c3 = store.save('consulta', { nome: 'CORTESIA IMPRIME', data: hoje, convenio: 'Unimed', _finalizado: true });
+    imprimiu = 0; conteudo = '';
+    fin.finalizacao.abrir('consulta', c3);
+    await new Promise(res => setTimeout(res, 350));
+    document.querySelector('[name="fz_gerar"][value="0"]').checked = true;
+    fin.finalizacao.confirmar({ imprimir: true });
+    await new Promise(res => setTimeout(res, 800));
+    out.naoGeraMasImprime = !store.list('financeiro').some(x => x._origemId === c3._id)
+      && imprimiu === 1 && /CORTESIA IMPRIME/.test(conteudo);
+
+    printPreview.abrir = orig;
+
+    /* 5) os módulos que NÃO cobram dizem isso no próprio botão */
+    const tip = sel => (document.querySelector(sel) || {}).title || '';
+    out.tooltipsHonestos = /não gera cobrança/i.test(tip('[onclick="recuperacao.finalizar()"]'))
+      && /não gera cobrança/i.test(tip('[onclick="prescricao.finalizar()"]'))
+      && /janela de cobrança/i.test(tip('[onclick="pre.finalizar()"]'));
+    return out;
+  });
+
+  assert(r.temOsTresCaminhos, 'a janela oferece não gerar, gerar, e gerar e imprimir');
+  assert(r.gerou && r.imprimiu, '"Gerar e imprimir" faz as duas coisas — o caminho termina ali');
+  assert(r.folhaComConteudo, 'e a folha não sai em branco, ainda que o rascunho já tenha sido descartado');
+  assert(r.geraSemImprimir, '"Gerar lançamento" não abre a impressão');
+  assert(r.naoGeraMasImprime, 'e "Não gerar" ainda pode imprimir: o documento existe mesmo sem cobrança');
+  assert(r.tooltipsHonestos, 'os módulos que não cobram dizem isso no próprio botão, em vez de prometer o que não fazem');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

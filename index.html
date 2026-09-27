@@ -4647,7 +4647,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-27b</b><br>
+    v7.1 · build <b id="build-tag">2026-09-27c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -4854,7 +4854,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <button class="btn btn-sm" id="btn-expandir-pre" onclick="ui.alternarTodos('pre')" title="Expandir ou recolher todos os campos">⊕ Expandir tudo</button>
     <button class="btn btn-primary" onclick="pre.novo()"><span class="icon">📄</span> Novo</button>
     <button class="btn btn-success" onclick="pre.salvar()" title="Salvar dados sem finalizar"><span class="icon">💾</span> Salvar</button>
-    <button class="btn btn-finalizar" onclick="pre.finalizar()" title="Finalizar avaliação — gera lançamento financeiro"><span class="icon">✅</span> Finalizar</button>
+    <button class="btn btn-finalizar" onclick="pre.finalizar()" title="Fecha a avaliação e abre a janela de cobrança — de lá você gera o lançamento (ou não) e vai para a impressão"><span class="icon">✅</span> Finalizar</button>
     <button class="btn" onclick="pre.salvarComoNovo()" title="Salvar como novo registro"><span class="icon">📋</span> Salvar como novo</button>
     <div class="dropdown" id="dd-pre">
       <button class="btn" onclick="ui.toggleDropdown('dd-pre')"><span class="icon">📂</span> Carregar ▾</button>
@@ -5305,7 +5305,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <button class="btn btn-sm" id="btn-expandir-consulta" onclick="ui.alternarTodos('consulta')" title="Expandir ou recolher todos os campos">⊕ Expandir tudo</button>
     <button class="btn btn-primary" onclick="consulta.novo()"><span class="icon">📄</span> Novo</button>
     <button class="btn btn-success" onclick="consulta.salvar()" title="Salvar dados sem finalizar"><span class="icon">💾</span> Salvar</button>
-    <button class="btn btn-finalizar" onclick="consulta.finalizar()" title="Finalizar consulta — gera lançamento financeiro"><span class="icon">✅</span> Finalizar</button>
+    <button class="btn btn-finalizar" onclick="consulta.finalizar()" title="Fecha a consulta e abre a janela de cobrança — de lá você gera o lançamento (ou não) e vai para a impressão"><span class="icon">✅</span> Finalizar</button>
     <button class="btn" onclick="consulta.salvarComoNovo()" title="Salvar como novo registro"><span class="icon">📋</span> Salvar como novo</button>
     <div class="dropdown" id="dd-consulta">
       <button class="btn" onclick="ui.toggleDropdown('dd-consulta')"><span class="icon">📂</span> Carregar ▾</button>
@@ -5637,7 +5637,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <button class="btn btn-sm" id="btn-expandir-anestesia" onclick="ui.alternarTodos('anestesia')" title="Expandir ou recolher todos os campos">⊕ Expandir tudo</button>
     <button class="btn btn-primary" onclick="anestesia.novo()" title="Nova ficha (Ctrl+N)"><span class="icon">📄</span> Nova</button>
     <button class="btn btn-success" onclick="anestesia.salvar()" title="Salvar dados sem finalizar (Ctrl+S)"><span class="icon">💾</span> Salvar</button>
-    <button class="btn btn-finalizar" onclick="anestesia.finalizar()" title="Finalizar ficha — gera lançamento financeiro"><span class="icon">✅</span> Finalizar</button>
+    <button class="btn btn-finalizar" onclick="anestesia.finalizar()" title="Fecha a ficha e abre a janela de cobrança — de lá você gera o lançamento (ou não) e vai para a impressão"><span class="icon">✅</span> Finalizar</button>
     <button class="btn" onclick="anestesia.salvarComoNovo()" title="Salvar como novo registro"><span class="icon">📋</span> Salvar como novo</button>
     <button class="btn" onclick="anestesia.linhaTempo()" title="Ver sinais vitais, medicações, eventos e fluidos em ordem cronológica"><span class="icon">🕒</span> Linha do tempo</button>
     <div class="dropdown" id="dd-anestesia">
@@ -7169,7 +7169,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <button class="btn btn-sm" id="btn-expandir-recuperacao" onclick="ui.alternarTodos('recuperacao')" title="Expandir ou recolher todos os campos">⊕ Expandir tudo</button>
     <button class="btn btn-primary" onclick="recuperacao.novo()"><span class="icon">📄</span> Novo</button>
     <button class="btn btn-success" onclick="recuperacao.salvar()" title="Salvar dados sem finalizar"><span class="icon">💾</span> Salvar</button>
-    <button class="btn btn-finalizar" onclick="recuperacao.finalizar()" title="Finalizar recuperação"><span class="icon">✅</span> Finalizar</button>
+    <button class="btn btn-finalizar" onclick="recuperacao.finalizar()" title="Fecha a SRPA: o documento vira registro, é carimbado com a data e o PDF é guardado. Não gera cobrança — ela está na ficha de anestesia"><span class="icon">✅</span> Finalizar</button>
     <button class="btn" onclick="recuperacao.salvarComoNovo()" title="Salvar como novo"><span class="icon">📋</span> Salvar como novo</button>
     <div class="dropdown" id="dd-recuperacao">
       <button class="btn" onclick="ui.toggleDropdown('dd-recuperacao')"><span class="icon">📂</span> Carregar ▾</button>
@@ -7588,7 +7588,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <button class="btn btn-sm" id="btn-expandir-termo" onclick="ui.alternarTodos('termo')" title="Expandir ou recolher todos os campos">⊕ Expandir tudo</button>
     <button class="btn btn-primary" onclick="termo.novo()"><span class="icon">📄</span> Novo</button>
     <button class="btn btn-success" onclick="termo.salvar()" title="Salvar dados sem finalizar"><span class="icon">💾</span> Salvar</button>
-    <button class="btn btn-finalizar" onclick="termo.finalizar()" title="Finalizar termo"><span class="icon">✅</span> Finalizar</button>
+    <button class="btn btn-finalizar" onclick="termo.finalizar()" title="Fecha o termo: vira registro, é carimbado com a data, o PDF é guardado e vai para a impressão. Não gera cobrança"><span class="icon">✅</span> Finalizar</button>
     <button class="btn" onclick="termo.salvarComoNovo()" title="Salvar como novo"><span class="icon">📋</span> Salvar como novo</button>
     <div class="dropdown" id="dd-termo">
       <button class="btn" onclick="ui.toggleDropdown('dd-termo')"><span class="icon">📂</span> Carregar ▾</button>
@@ -7756,7 +7756,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <button class="btn" id="btn-voltar-prescricao" style="display:none;background:var(--primary-light);color:var(--primary-darker);border-color:var(--primary)" onclick="prescricao.voltar()" title="Voltar ao atendimento de origem"><span class="icon">←</span> Voltar ao atendimento</button>
     <button class="btn btn-primary" onclick="prescricao.novo()"><span class="icon">📄</span> Nova</button>
     <button class="btn btn-success" onclick="prescricao.salvar()" title="Salvar dados sem finalizar"><span class="icon">💾</span> Salvar</button>
-    <button class="btn btn-finalizar" onclick="prescricao.finalizar()" title="Finalizar prescrição"><span class="icon">✅</span> Finalizar</button>
+    <button class="btn btn-finalizar" onclick="prescricao.finalizar()" title="Fecha o receituário: vira registro, é carimbado com a data e o PDF é guardado. Não gera cobrança"><span class="icon">✅</span> Finalizar</button>
     <button class="btn" onclick="prescricao.salvarComoNovo()" title="Salvar como novo"><span class="icon">📋</span> Salvar como novo</button>
     <div class="dropdown" id="dd-prescricao">
       <button class="btn" onclick="ui.toggleDropdown('dd-prescricao')"><span class="icon">📂</span> Carregar ▾</button>
@@ -15313,7 +15313,11 @@ const pre = {
     if (finalizar) {
       const jaTem = store.list('financeiro').some(x => x._origemId === saved._id);
       if (!jaTem && fin.finalizacao.deveAbrir('pre', saved)) {
-        setTimeout(() => { try { fin.finalizacao.abrirQuandoLivre('pre', saved); } catch (e) {} }, 320);
+        setTimeout(() => {
+          try {
+            fin.finalizacao.abrirQuandoLivre('pre', saved);
+          } catch (e) {}
+        }, 320);
       } else {
         const fr = fin.fromDoc('pre', saved);
         if (fr && fr.isNew) ui.mostrarBanner('banner-pre', '💰 Lançamento financeiro criado automaticamente.', 'success');
@@ -16118,7 +16122,11 @@ const consulta = {
     if (finalizar) {
       const jaTem = store.list('financeiro').some(x => x._origemId === saved._id);
       if (!jaTem && fin.finalizacao.deveAbrir('consulta', saved)) {
-        setTimeout(() => { try { fin.finalizacao.abrirQuandoLivre('consulta', saved); } catch (e) {} }, 320);
+        setTimeout(() => {
+          try {
+            fin.finalizacao.abrirQuandoLivre('consulta', saved);
+          } catch (e) {}
+        }, 320);
       } else {
         const fr = fin.fromDoc('consulta', saved);
         if (fr && fr.isNew) ui.mostrarBanner('banner-consulta', '💰 Lançamento financeiro criado automaticamente.', 'success');
@@ -37807,7 +37815,11 @@ const anestesia = {
     if (finalizar) {
       const jaTem = store.list('financeiro').some(x => x._origemId === saved._id);
       if (!jaTem && fin.finalizacao.deveAbrir('anestesia', saved)) {
-        setTimeout(() => { try { fin.finalizacao.abrirQuandoLivre('anestesia', saved); } catch (e) {} }, 320);
+        setTimeout(() => {
+          try {
+            fin.finalizacao.abrirQuandoLivre('anestesia', saved);
+          } catch (e) {}
+        }, 320);
       } else {
         const fr = fin.fromDoc('anestesia', saved);
         if (fr && fr.isNew) ui.mostrarBanner('banner-anestesia', '💰 Lançamento financeiro criado automaticamente.', 'success');
@@ -40272,17 +40284,17 @@ const fin = {
        vão para a impressão, a ficha pergunta da SRPA. Abrir por cima faria uma
        das duas sumir sem aviso — e a que sumiria é justamente a da cobrança.
        Espera a vez. */
-    abrirQuandoLivre(mod, doc, tentativa) {
+    abrirQuandoLivre(mod, doc, aoFechar, tentativa) {
       let ocupado = false;
       try {
         const bd = document.getElementById('modal-backdrop');
         ocupado = (bd && bd.classList.contains('show')) || !!document.querySelector('.bloq-janela');
       } catch (e) {}
       if (ocupado) {
-        if ((tentativa || 0) < 120) setTimeout(() => fin.finalizacao.abrirQuandoLivre(mod, doc, (tentativa || 0) + 1), 800);
+        if ((tentativa || 0) < 120) setTimeout(() => fin.finalizacao.abrirQuandoLivre(mod, doc, aoFechar, (tentativa || 0) + 1), 800);
         return;
       }
-      fin.finalizacao.abrir(mod, doc);
+      fin.finalizacao.abrir(mod, doc, aoFechar);
     },
 
     abrir(mod, doc, aoFechar) {
@@ -40341,9 +40353,13 @@ const fin = {
         '<div class="adic-grid" id="fz-adicionais"></div></div>' +
         '</div>';
 
+      /* O caminho termina AQUI: gerar e já ir para a impressão, que é o que se
+         faz em seguida. Sem isto ele fechava a janela e tinha de caçar o botão
+         de imprimir noutro canto da tela. */
       modal.open('💰 Gerar financeiro?', corpo,
         '<button class="btn" onclick="fin.finalizacao.cancelar()">Não gerar</button>' +
-        '<button class="btn btn-primary" onclick="fin.finalizacao.confirmar()">Gerar lançamento</button>');
+        '<button class="btn" onclick="fin.finalizacao.confirmar()">Gerar lançamento</button>' +
+        '<button class="btn btn-primary" onclick="fin.finalizacao.confirmar({ imprimir: true })">Gerar e imprimir 🖨️</button>');
 
       setTimeout(() => {
         try {
@@ -40672,7 +40688,24 @@ const fin = {
       return out;
     },
 
-    cancelar() {
+    /* Imprimir DEPOIS da janela tem um porém que o teste 60 guardava: a
+       impressão é montada a partir do FORMULÁRIO, e ao finalizar o rascunho é
+       descartado — a tela fica limpa e a folha sai em branco. Por isso aqui o
+       registro é recarregado antes de imprimir. De quebra, sai com o desfecho
+       e o convênio que ele acabou de confirmar. */
+    _imprimir(mod, id) {
+      try {
+        const doc = store.getById(mod, id);
+        if (doc && window[mod] && typeof window[mod].carregar === 'function') {
+          window[mod].carregar(doc);
+          setTimeout(() => { try { printPreview.abrir(); } catch (e) {} }, 260);
+          return;
+        }
+      } catch (e) {}
+      try { printPreview.abrir(); } catch (e) {}
+    },
+
+    cancelar(opts) {
       const ctx = fin.finalizacao._ctx;
       fin.finalizacao._ctx = null;
       modal.close();
@@ -40685,14 +40718,17 @@ const fin = {
         }
       } catch (e) {}
       toast('Sem lançamento financeiro para este atendimento.');
-      if (ctx && ctx.aoFechar) ctx.aoFechar(null);
+      /* o botão é da janela: ela mesma imprime, não dependendo de quem a abriu */
+      if (ctx && opts && opts.imprimir) fin.finalizacao._imprimir(ctx.mod, ctx.docId);
+      if (ctx && ctx.aoFechar) ctx.aoFechar(null, opts || {});
     },
 
-    confirmar() {
+    confirmar(opts) {
+      opts = opts || {};
       const ctx = fin.finalizacao._ctx;
       if (!ctx) { modal.close(); return; }
       const gerar = (document.querySelector('[name="fz_gerar"]:checked') || {}).value !== '0';
-      if (!gerar) { fin.finalizacao.cancelar(); return; }
+      if (!gerar) { fin.finalizacao.cancelar(opts); return; }
 
       const conv = fin.finalizacao._v('fz_convenio');
       const tipo = fin.finalizacao._v('fz_tipo');
@@ -40737,7 +40773,7 @@ const fin = {
       } catch (e) {}
 
       const fr = fin.fromDoc(ctx.mod, doc);
-      if (!fr || !fr.item) { if (ctx.aoFechar) ctx.aoFechar(null); return; }
+      if (!fr || !fr.item) { if (ctx.aoFechar) ctx.aoFechar(null, opts); return; }
 
       const item = store.getById('financeiro', fr.item._id) || fr.item;
       item.convenio = conv || item.convenio;
@@ -40787,7 +40823,8 @@ const fin = {
       try { if (state.currentModule === 'financeiro') financeiro.render(); } catch (e) {}
       toast('💰 Lançamento criado — ' + historico._fmtRS(item.valor_previsto || 0) +
             (item.status === 'recebido' ? ' · recebido' : ''));
-      if (ctx.aoFechar) ctx.aoFechar(item);
+      if (opts.imprimir) fin.finalizacao._imprimir(ctx.mod, ctx.docId);
+      if (ctx.aoFechar) ctx.aoFechar(item, opts);
     }
   },
 
