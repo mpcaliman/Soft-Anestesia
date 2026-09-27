@@ -15129,7 +15129,13 @@ await test('Unimed: majoração por horário — faixa calculada, aviso sempre �
     fin.finalizacao.confirmar();
     await new Promise(res => setTimeout(res, 300));
     const l = store.list('financeiro').find(x => x._origemId === p1._id);
-    out.gravouOsFatores = !!l && Number(l.fator_acomodacao) === 3 && Number(l.perc_urgencia) === 30
+    /* A majoração chegou a ser gravada no FATOR DE ACOMODAÇÃO — este teste
+       afirmava isso. Era um defeito: apartamento (×2) e faixa de horário (×3)
+       são multiplicadores diferentes, e um paciente de apartamento operado à
+       meia-noite perderia um dos dois, calado. Cada um tem o seu campo. */
+    out.gravouOsFatores = !!l && Number(l.fator_majoracao) === 3
+      && Number(l.fator_acomodacao) === 1
+      && Number(l.perc_urgencia) === 30
       && l.majoracao_faixa === '3×' && /22h/.test(l.majoracao_motivo || '')
       && l.hora_proc === '23:00';
 
@@ -15156,7 +15162,7 @@ await test('Unimed: majoração por horário — faixa calculada, aviso sempre �
   assert(r.desmarcarVolta, 'desmarcar volta ao valor de tabela — é opção, não imposição');
   assert(r.urgenciaSomaDepois, 'a urgência é outra coisa e se soma depois da faixa');
   assert(r.contaEscrita, 'com a conta escrita na tela — um total que não se explica não se defende numa glosa');
-  assert(r.gravouOsFatores, 'e os fatores ficam gravados no lançamento, com a faixa e o motivo');
+  assert(r.gravouOsFatores, 'os fatores ficam gravados cada um no seu campo — horário e acomodação são multiplicadores diferentes');
   assert(r.semUnimedSemAviso, 'plano que não é Unimed não recebe o aviso');
   await page.close();
 });
@@ -15338,6 +15344,104 @@ await test('Depois da janela: "Gerar e imprimir" fecha o caminho, e a folha não
   assert(r.geraSemImprimir, '"Gerar lançamento" não abre a impressão');
   assert(r.naoGeraMasImprime, 'e "Não gerar" ainda pode imprimir: o documento existe mesmo sem cobrança');
   assert(r.tooltipsHonestos, 'os módulos que não cobram dizem isso no próprio botão, em vez de prometer o que não fazem');
+  await page.close();
+});
+
+/* 218) A janela é CONFIRMAÇÃO do que já existe, não um formulário em branco.
+   O que está no cadastro e na ficha tem de chegar nela puxado: os códigos da
+   ficha (todos, não só o principal), o código da consulta nos outros, a
+   acomodação, a carteirinha. E o que não for feito ali tem de poder ser feito
+   depois, no módulo Financeiro. */
+await test('Geração do financeiro puxa cadastro e ficha — e o que faltar dá para completar depois', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['pacientes', 'anestesia', 'pre', 'financeiro'].forEach(m => store.setList(m, []));
+    const hoje = utils.hojeISO();
+    store.save('pacientes', { nome: 'PEDRO APTO', plano: 'Unimed', carteirinha: '0286777',
+      cpf: '111.222.333-44', acomodacao: 'apartamento' });
+
+    /* 1) TODOS os códigos da ficha viram linha — não só o principal */
+    const an = store.save('anestesia', {
+      paciente: { nome: 'PEDRO APTO', convenio: 'Unimed' },
+      procedimento: { data: hoje, descricao: 'Artroplastia de joelho', codigo: '3.07.15.05-0',
+        cirurgias_extra: [
+          { procedimento: 'Sinovectomia', codigo: '3.07.15.15-8', grau: '50' },
+          { procedimento: 'Outro código', codigo: '3.07.15.16-6', grau: '70' }
+        ] },
+      _finalizado: true });
+    const linhasCalc = fin.linhasDe('anestesia', an);
+    out.trouxeTodosOsCodigos = linhasCalc.length === 3
+      && linhasCalc[1].cbhpm_codigo === '3.07.15.15-8' && Number(linhasCalc[1].fracao) === 50
+      && linhasCalc[2].cbhpm_codigo === '3.07.15.16-6' && Number(linhasCalc[2].fracao) === 70;
+    /* o principal entra 100% e os demais pelo grau marcado na ficha */
+    out.grauDaFichaVale = Number(linhasCalc[0].fracao) === 100;
+
+    fin.finalizacao.abrir('anestesia', an);
+    await new Promise(res => setTimeout(res, 400));
+    out.janelaMostraAsTres = document.querySelectorAll('#fz-codigos-body tr').length === 3;
+
+    /* 2) o cadastro chega junto: carteirinha e CPF à vista, e a acomodação
+       já vem marcada com o fator */
+    const corpo = document.getElementById('modal-body').textContent;
+    out.mostraACarteirinha = /0286777/.test(corpo) && /111\.222\.333-44/.test(corpo);
+    const f = document.getElementById('form-fin-final');
+    out.puxouAAcomodacao = f.querySelector('[name="fz_acomodacao"]').value === 'apartamento'
+      && Number(f.querySelector('[name="fz_fator_acom"]').value) === 2;
+
+    /* 3) acomodação e horário são multiplicadores DIFERENTES e se somam */
+    const base = [...document.querySelectorAll('#fz-codigos-body [name="fz_prev[]"]')]
+      .reduce((s2, el) => s2 + (parseFloat(el.value) || 0), 0);
+    f.querySelector('[name="fz_hora"]').value = '23:00';
+    fin.finalizacao.aoTrocarHorario();
+    await new Promise(res => setTimeout(res, 150));
+    out.osDoisMultiplicam = Math.abs(fin.finalizacao._total() - base * 2 * 3) < 0.05;
+    out.contaMostraOsDois = /× 2 \(acomodação\)/.test(document.getElementById('fz-total').innerHTML)
+      && /× 3 \(horário\)/.test(document.getElementById('fz-total').innerHTML);
+
+    fin.finalizacao.confirmar();
+    await new Promise(res => setTimeout(res, 400));
+    const l = store.list('financeiro').find(x => x._origemId === an._id && !x._origemLinhaId);
+    out.gravouSeparado = !!l && Number(l.fator_acomodacao) === 2 && Number(l.fator_majoracao) === 3
+      && l.acomodacao === 'apartamento';
+    out.levouACarteirinha = !!l && l.carteirinha === '0286777';
+    /* e cada código virou o seu lançamento */
+    out.tresLancamentos = store.list('financeiro').filter(x => x._origemId === an._id).length === 3;
+
+    /* 4) O QUE NÃO FOI FEITO NA JANELA DÁ PARA FAZER DEPOIS, no Financeiro */
+    ui.navegar('financeiro');
+    await new Promise(res => setTimeout(res, 500));
+    try { modal.close(); } catch (e) {}
+    financeiro.editar(l._id);
+    await new Promise(res => setTimeout(res, 350));
+    const ff = document.getElementById('form-financeiro');
+    out.temOsDoisFatores = !!ff.querySelector('[name="fator_acomodacao"]')
+      && !!ff.querySelector('[name="fator_majoracao"]')
+      && Number(ff.querySelector('[name="fator_majoracao"]').value) === 3;
+    out.temOsAdicionais = document.querySelectorAll('#fin-adicionais [name="fin_adic"]').length >= 5;
+    /* marcar um adicional aqui e salvar — a janela não é a única chance */
+    const ck = document.querySelector('#fin-adicionais [name="fin_adic"][value="urgencia"]');
+    ck.checked = true;
+    financeiro.salvar();
+    await new Promise(res => setTimeout(res, 400));
+    const l2 = store.getById('financeiro', l._id);
+    out.adicionalGravadoDepois = !!l2._adicionais && l2._adicionais.itens.indexOf('urgencia') >= 0;
+    return out;
+  });
+
+  assert(r.trouxeTodosOsCodigos, 'todos os códigos da ficha viram linha — não só o principal');
+  assert(r.grauDaFichaVale, 'com o grau que ele marcou na ficha: principal 100%, demais 50%/70%');
+  assert(r.janelaMostraAsTres, 'e a janela mostra as três para conferir');
+  assert(r.mostraACarteirinha, 'a carteirinha e o CPF do cadastro ficam à vista — é o que vai na guia');
+  assert(r.puxouAAcomodacao, 'a acomodação vem puxada do cadastro, já com o fator');
+  assert(r.osDoisMultiplicam, 'acomodação e horário são multiplicadores diferentes e se somam');
+  assert(r.contaMostraOsDois, 'com a conta escrita mostrando os dois');
+  assert(r.gravouSeparado, 'e cada um fica gravado no seu campo no lançamento');
+  assert(r.levouACarteirinha, 'a carteirinha vai junto para o lançamento');
+  assert(r.tresLancamentos, 'cada código vira o seu lançamento');
+  assert(r.temOsDoisFatores, 'no módulo Financeiro os dois fatores estão lá para corrigir depois');
+  assert(r.temOsAdicionais && r.adicionalGravadoDepois, 'e os adicionais também — a janela não é a única chance de registrar');
   await page.close();
 });
 

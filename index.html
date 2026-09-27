@@ -4647,7 +4647,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-27c</b><br>
+    v7.1 · build <b id="build-tag">2026-09-27d</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -8454,6 +8454,11 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             </div>
             <div class="field col-2"><label>Fator acomod. <small style="color:var(--text-mute)">edit.</small></label>
               <input type="number" name="fator_acomodacao" step="0.1" min="0" value="1" oninput="financeiro.codigos.recalcular()"></div>
+            <!-- Majoração por horário é OUTRO multiplicador. Ela chegou a
+                 gravar no fator de acomodação: um apartamento à meia-noite
+                 perderia um dos dois, calado. -->
+            <div class="field col-2"><label>Fator horário <small style="color:var(--text-mute)">Unimed</small></label>
+              <input type="number" name="fator_majoracao" step="0.5" min="1" value="1" oninput="financeiro.codigos.recalcular()" title="Multiplicador da faixa de horário (1×, 2×, 3×). Some-se ao fator de acomodação."></div>
             <div class="field col-3"><label>Urgência / horário</label>
               <div style="padding-top:6px"><label class="check" style="display:inline-flex"><input type="checkbox" name="urgencia" onchange="financeiro.codigos.recalcular()"> <span>Feriado / FDS / noturno</span></label></div>
             </div>
@@ -8466,6 +8471,14 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
                  que o convênio for Unimed: é multiplicador, não percentual, e
                  é onde mais se perde dinheiro na conciliação. -->
             <div class="field col-12" id="fin-majoracao-aviso"></div>
+            <!-- Os adicionais são marcados na janela de finalização. Quem não
+                 marcou lá — ou quem descobriu depois que o paciente estava em
+                 apartamento — tem de poder marcar AQUI: senão a única chance
+                 de registrar era no instante da finalização. -->
+            <div class="field col-12">
+              <label style="font-size:.78rem;color:var(--text-mute)">Adicionais de faturamento</label>
+              <div class="adic-grid" id="fin-adicionais"></div>
+            </div>
             <div class="field col-12"><label style="font-size:.72rem;color:var(--text-mute)">Cálculo</label>
               <input type="text" name="fatores_resumo" readonly style="font-size:.8rem;color:var(--text-soft);background:var(--surface-alt)"></div>
           </div>
@@ -40105,6 +40118,33 @@ const fin = {
         origem_valor: p.origem, observacao: ''
       });
     }
+    /* Códigos adicionais da FICHA (mesma equipe, outro código do mesmo ato).
+       Ficavam só no documento: o lançamento nascia com uma linha só e os
+       demais procedimentos não chegavam à cobrança. Entram com o GRAU que ele
+       marcou na ficha — que é exatamente a regra de múltiplos procedimentos
+       (maior porte 100%, demais 50% na mesma via, 70% em via diferente) — e
+       pelo porte ANESTÉSICO, porque o que ele cobra é a anestesia. */
+    if (modOrigem === 'anestesia') {
+      const extras = (doc.procedimento && doc.procedimento.cirurgias_extra) || [];
+      extras.forEach((ex, i) => {
+        if (!ex || !(ex.procedimento || ex.codigo)) return;
+        const cod = ex.codigo || (cbhpm.info(ex.procedimento) || {}).codigo || '';
+        const info = cod ? cbhpm.info(cod) : null;
+        const p = cod ? fin._precoDe(cod, 'anestesia', cab) : { valor: null, origem: '' };
+        const fracao = Number(ex.grau) || 50;
+        linhas.push({
+          linhaId: 'cirx-' + i,
+          tipo_honorario: 'anestesia',
+          tipo_atendimento: 'procedimento',
+          cbhpm_codigo: cod,
+          cbhpm_descricao: (info && info.descricao) || ex.procedimento || '',
+          procedimento: ex.procedimento || (info && info.descricao) || '',
+          quantidade: 1, fracao: fracao,
+          valor_base: p.valor, valor_final: precos.calcular(p.valor, 1, fracao),
+          origem_valor: p.origem, observacao: ex.obs || ''
+        });
+      });
+    }
     /* Procedimentos realizados na consulta — cada um com a sua linha */
     if (modOrigem === 'consulta' && Array.isArray(doc._procsRealizados)) {
       doc._procsRealizados.forEach((pr, i) => {
@@ -40304,6 +40344,10 @@ const fin = {
       const e = utils.escapeHTML, ea = utils.escapeAttr;
       let planos = [];
       try { planos = precos._conveniosUsados(); } catch (x) {}
+      /* O que já está preenchido no cadastro e na ficha vem PUXADO: esta
+         janela é confirmação do que existe, não um formulário em branco. */
+      const acom = fin.finalizacao._acomodacaoDe(mod, doc);
+      const cad = fin.finalizacao._cadastroDe(cab.paciente);
       const rot = { anestesia: 'Ficha de anestesia', pre: 'Avaliação pré-anestésica', consulta: 'Consulta' }[mod] || mod;
 
       const corpo =
@@ -40311,6 +40355,13 @@ const fin = {
         '<b>' + e(cab.paciente) + '</b> — ' + e(rot) +
         (cab.dataProc ? ' · ' + e(utils.formatarData(cab.dataProc)) : '') +
         (cab.procedimento ? '<br><span style="color:var(--text-mute)">' + e(cab.procedimento) + '</span>' : '') +
+        /* o que veio do cadastro, à vista: é o que vai na guia */
+        ((cad.carteirinha || cad.cpf || cab.senha)
+          ? '<br><span style="font-size:.78rem;color:var(--text-mute)">' +
+            [cad.carteirinha ? 'carteirinha ' + e(cad.carteirinha) : '',
+             cad.cpf ? 'CPF ' + e(cad.cpf) : '',
+             cab.senha ? 'senha ' + e(cab.senha) : ''].filter(Boolean).join(' · ') + '</span>'
+          : '<br><span style="font-size:.78rem;color:#8a4b1c">⚠️ Sem carteirinha no cadastro deste paciente.</span>') +
         '</div>' +
         '<div class="fin-gerar-toggle">' +
         '<label class="check"><input type="radio" name="fz_gerar" value="1" checked onchange="fin.finalizacao.alternarGerar(true)"> <span><b>Sim</b>, gerar o lançamento financeiro</span></label>' +
@@ -40333,6 +40384,13 @@ const fin = {
         '<div class="field col-3"><label>Hora <small style="color:var(--text-mute);font-weight:400">— define a faixa</small></label><input type="time" name="fz_hora" value="' + ea(fin.finalizacao._horaDe(mod, doc)) + '" onchange="fin.finalizacao.aoTrocarHorario()"></div>' +
         '<div class="field col-3"><label>Feriado?</label><div style="padding-top:6px"><label class="check" style="display:inline-flex"><input type="checkbox" name="fz_feriado" onchange="fin.finalizacao.aoTrocarHorario()"> <span>É feriado</span></label></div></div>' +
         '<div class="field col-3"><label>Urgência / emergência</label><div style="padding-top:6px"><label class="check" style="display:inline-flex"><input type="checkbox" name="fz_urgencia" onchange="fin.finalizacao._somar()"> <span>+<input type="number" name="fz_perc_urg" value="30" min="0" step="1" style="width:52px;margin:0 3px" oninput="fin.finalizacao._somar()">%</span></label></div></div>' +
+        '<div class="field col-3"><label>Acomodação <small style="color:var(--text-mute);font-weight:400">— do cadastro</small></label>' +
+        '<select name="fz_acomodacao" onchange="fin.finalizacao._somar()">' +
+        ['', 'enfermaria', 'apartamento'].map(v => '<option value="' + v + '"' + (v === acom ? ' selected' : '') + '>' +
+          (v ? (v === 'apartamento' ? 'Apartamento (×2)' : 'Enfermaria (×1)') : '—') + '</option>').join('') +
+        '</select></div>' +
+        '<div class="field col-3"><label>Fator acomod. <small style="color:var(--text-mute);font-weight:400">edit.</small></label>' +
+        '<input type="number" name="fz_fator_acom" step="0.1" min="0" value="' + (acom === 'apartamento' ? 2 : 1) + '" oninput="fin.finalizacao._somar()"></div>' +
         '<div class="field col-12" id="fz-majoracao"></div>' +
         '</div></form>' +
         '<h3 style="font-size:.86rem;color:var(--primary-darker);margin:14px 0 6px;border-top:1px solid var(--border);padding-top:12px">' +
@@ -40375,6 +40433,25 @@ const fin = {
           fin.finalizacao.aoTrocarPlano();
         } catch (x) {}
       }, 30);
+    },
+
+    /* Acomodação: a da FICHA vale mais que a do cadastro (é a desta
+       internação); sem nenhuma das duas, fica em branco em vez de supor. */
+    _acomodacaoDe(mod, doc) {
+      try {
+        const daFicha = String((doc.paciente && doc.paciente.acomodacao) || doc.acomodacao || '').toLowerCase();
+        if (daFicha === 'apartamento' || daFicha === 'enfermaria') return daFicha;
+        const nome = (doc.paciente && doc.paciente.nome) || doc.nome || '';
+        return anestesia.adicionais.acomodacaoDoPaciente(nome) || '';
+      } catch (e) { return ''; }
+    },
+    /* Carteirinha, CPF e plano do cadastro central — o que vai na guia */
+    _cadastroDe(nome) {
+      try {
+        const alvo = linker._normNome(nome || '');
+        const p = (store.list('pacientes') || []).find(x => linker._normNome(x.nome) === alvo);
+        return p ? { carteirinha: p.carteirinha || '', cpf: p.cpf || '', plano: p.plano || '' } : {};
+      } catch (e) { return {}; }
     },
 
     /* A hora que define a faixa: na ficha é o início da anestesia; na pré e na
@@ -40644,12 +40721,14 @@ const fin = {
       const maj = (majCk && majCk.checked && calc) ? calc.fator : 1;
       const urgCk = q('fz_urgencia');
       const perc = (urgCk && urgCk.checked) ? (parseFloat((q('fz_perc_urg') || {}).value) || 0) : 0;
-      return { maj, perc, calc };
+      const acomodacao = ((q('fz_acomodacao') || {}).value || '');
+      const acom = parseFloat((q('fz_fator_acom') || {}).value) || 1;
+      return { maj, perc, calc, acom, acomodacao };
     },
     _total() {
       const base = fin.finalizacao._somaLinhas();
       const fa = fin.finalizacao._fatores();
-      return Number((base * fa.maj * (1 + fa.perc / 100)).toFixed(2));
+      return Number((base * fa.acom * fa.maj * (1 + fa.perc / 100)).toFixed(2));
     },
     _somar() {
       const el = document.getElementById('fz-total');
@@ -40658,9 +40737,10 @@ const fin = {
       const fa = fin.finalizacao._fatores();
       const total = fin.finalizacao._total();
       let txt = 'Total previsto: ' + historico._fmtRS(total);
-      if (fa.maj !== 1 || fa.perc) {
+      if (fa.maj !== 1 || fa.perc || fa.acom !== 1) {
         /* a conta escrita: um total que não se explica não se defende numa glosa */
         txt = 'Códigos ' + historico._fmtRS(base) +
+          (fa.acom !== 1 ? ' × ' + fa.acom + ' (acomodação)' : '') +
           (fa.maj !== 1 ? ' × ' + fa.maj + ' (horário)' : '') +
           (fa.perc ? ' + ' + fa.perc + '% (urgência)' : '') +
           ' = <b>' + historico._fmtRS(total) + '</b>';
@@ -40784,7 +40864,9 @@ const fin = {
       if (adicionais.length) item._adicionais = { itens: adicionais, obs: '' };
       /* os fatores ficam GRAVADOS, não só aplicados: na conciliação é preciso
          poder dizer por que aquele valor é aquele */
-      item.fator_acomodacao = fa.maj;
+      item.fator_majoracao = fa.maj;
+      item.fator_acomodacao = fa.acom;
+      if (fa.acomodacao) item.acomodacao = fa.acomodacao;
       item.urgencia = fa.perc > 0;
       item.perc_urgencia = fa.perc;
       if (fa.calc && fa.maj !== 1) {
@@ -40792,6 +40874,12 @@ const fin = {
         item.majoracao_motivo = fa.calc.motivo;
       }
       item.hora_proc = fin.finalizacao._v('fz_hora');
+      /* carteirinha do cadastro no lançamento: é o que o faturamento precisa
+         e o que faltava para a guia sair completa */
+      try {
+        const cad = fin.finalizacao._cadastroDe(item.paciente);
+        if (cad.carteirinha && !item.carteirinha) item.carteirinha = cad.carteirinha;
+      } catch (e) {}
       if (obs) item.observacoes = [item.observacoes, obs].filter(Boolean).join(' · ');
       if (desfecho && pre.DESFECHOS[desfecho]) {
         item.observacoes = [item.observacoes, 'Desfecho: ' + pre.DESFECHOS[desfecho].rot +
@@ -49593,14 +49681,28 @@ const financeiro = {
           utils.escapeHTML(calc.faixa) + ' no fator</button>'
         : '') + '</div>';
   },
+  /* Os mesmos adicionais da janela de finalização, editáveis depois */
+  renderAdicionais(item) {
+    const box = document.getElementById('fin-adicionais');
+    if (!box) return;
+    const marcados = (item && item._adicionais && item._adicionais.itens) || [];
+    box.innerHTML = anestesia.adicionais.OPCOES.map(o =>
+      '<label class="adic-item"><input type="checkbox" name="fin_adic" value="' + utils.escapeAttr(o.key) + '"' +
+      (marcados.indexOf(o.key) >= 0 ? ' checked' : '') + ' onchange="markDirty()"><span>' +
+      utils.escapeHTML(o.label) + '</span></label>').join('');
+  },
+  coletarAdicionais() {
+    const itens = Array.from(document.querySelectorAll('#fin-adicionais [name="fin_adic"]:checked')).map(x => x.value);
+    return itens.length ? { itens, obs: '' } : null;
+  },
   aplicarMajoracao(fator) {
     const form = document.getElementById(financeiro.formId);
-    const el = form && form.querySelector('[name="fator_acomodacao"]');
+    const el = form && form.querySelector('[name="fator_majoracao"]');
     if (!el) return;
     el.value = fator;
     financeiro.codigos.recalcular();
     markDirty();
-    toast('⏰ Majoração ×' + fator + ' aplicada no fator — confira o cálculo.');
+    toast('⏰ Majoração ×' + fator + ' aplicada — confira o cálculo.');
   },
 
   aoMudarStatus(sel) {
@@ -49823,16 +49925,18 @@ const financeiro = {
       /* ===== FATORES DE COBRANÇA sobre o previsto =====
          Previsto final = Σ linhas × fator acomodação × (1 + % urgência) */
       const fatorAcom = parseFloat(form.querySelector('[name="fator_acomodacao"]')?.value) || 1;
+      const fatorMaj = parseFloat(form.querySelector('[name="fator_majoracao"]')?.value) || 1;
       const urg = !!form.querySelector('[name="urgencia"]')?.checked;
       const percUrg = urg ? (parseFloat(form.querySelector('[name="perc_urgencia"]')?.value) || 0) : 0;
-      const prevFinal = totalPrev * fatorAcom * (1 + percUrg / 100);
+      const prevFinal = totalPrev * fatorAcom * fatorMaj * (1 + percUrg / 100);
       setV('valor_previsto', prevFinal);
       const resumoEl = form.querySelector('[name="fatores_resumo"]');
       if (resumoEl) {
         const fmt = v => 'R$ ' + (v || 0).toFixed(2).replace('.', ',');
         let txt = 'Códigos: ' + fmt(totalPrev);
         if (fatorAcom !== 1) txt += ' × ' + fatorAcom + ' (acomodação)';
-        if (percUrg) txt += ' + ' + percUrg + '% (urgência/horário)';
+        if (fatorMaj !== 1) txt += ' × ' + fatorMaj + ' (horário)';
+        if (percUrg) txt += ' + ' + percUrg + '% (urgência)';
         txt += ' = ' + fmt(prevFinal);
         resumoEl.value = txt;
       }
@@ -50206,6 +50310,7 @@ const financeiro = {
         if (Array.isArray(item.codigos)) financeiro.codigos.restaurar(item.codigos);
         try { financeiro._pintarPago(document.getElementById(financeiro.formId), item.status); } catch (e) {}
         try { financeiro.renderMajoracao(); } catch (e) {}
+        try { financeiro.renderAdicionais(item); } catch (e) {}
         /* Restaura anexos */
         financeiro.anexos.restaurar(item.anexos);
         /* Anexos de suporte vindos do registro clínico de origem (foto/PDF) */
@@ -50221,6 +50326,7 @@ const financeiro = {
       document.querySelector(`#${financeiro.formId} [name="status"]`).value = 'pendente';
       try { financeiro._pintarPago(document.getElementById(financeiro.formId), 'pendente'); } catch (e) {}
       try { financeiro.renderMajoracao(); } catch (e) {}
+      try { financeiro.renderAdicionais(null); } catch (e) {}
       const fq = s => document.querySelector(`#${financeiro.formId} [name="${s}"]`);
       if (fq('fator_acomodacao')) fq('fator_acomodacao').value = 1;
       if (fq('perc_urgencia')) fq('perc_urgencia').value = 30;
@@ -50258,6 +50364,10 @@ const financeiro = {
        registro porque meia dúzia de telas e relatórios o leem. */
     data.pago = financeiro.ehQuitado(data.status);
     delete data.pago_rotulo;
+    /* adicionais marcados aqui valem tanto quanto os da finalização */
+    const adic = financeiro.coletarAdicionais();
+    if (adic) data._adicionais = adic; else delete data._adicionais;
+    delete data.fin_adic;
     /* Preserva o que não é campo do formulário mas tem de sobreviver à edição
        manual: anexos herdados do registro clínico, vínculos e — sobretudo — a
        RASTREABILIDADE da linha (de que registro e de que linha ela veio, com
