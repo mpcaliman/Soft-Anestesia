@@ -6339,7 +6339,10 @@ await test('Pré e Termo vão para a impressão ao finalizar, e a pré gera o fi
       return r2;
     };
     const origModal = modal.open;
-    modal.open = () => {};                       /* a pergunta do termo não interessa aqui */
+    /* O modal era desligado AQUI, para a pergunta do termo não atrapalhar. Não
+       dá mais: a cobrança da pré agora passa por uma janela, e desligar o
+       modal desliga a própria coisa que este teste verifica. Fica ligado na
+       parte da pré e é desligado só na do termo. */
 
     /* como no uso real: finaliza de dentro do módulo aberto */
     ui.navegar('pre');
@@ -6357,6 +6360,25 @@ await test('Pré e Termo vão para a impressão ao finalizar, e a pré gera o fi
     const rec = store.list('pre')[0];
     out.finalizou = !!rec && rec._finalizado === true && rec.convenio === 'Bradesco Saúde';
 
+    /* Finalizar deixou de criar o lançamento calado: abre a janela "gerar
+       financeiro?", que mostra plano, tabela e códigos antes de virar cobrança. */
+    /* A janela da cobrança espera a vez: finalizar já abre a impressão (pré,
+       termo) ou a pergunta da SRPA (ficha), e só existe uma janela no app.
+       Fecha o que estiver aberto e aguarda a da cobrança aparecer. */
+    const esperarCobranca = async (ms) => {
+      const t0 = Date.now();
+      while (Date.now() - t0 < ms) {
+        if (document.getElementById('form-fin-final')) return true;
+        try { const bd = document.getElementById('modal-backdrop');
+              if (bd && bd.classList.contains('show')) modal.close(); } catch (e) {}
+        await new Promise(r2 => setTimeout(r2, 120));
+      }
+      return false;
+    };
+    out.abriuAJanela = await esperarCobranca(6000);
+    fin.finalizacao.confirmar();
+    await new Promise(res => setTimeout(res, 300));
+
     /* financeiro criado, com pagador */
     const lanc = store.list('financeiro').filter(x => x._origemId === rec._id);
     out.gerouFinanceiro = lanc.length === 1;
@@ -6369,7 +6391,9 @@ await test('Pré e Termo vão para a impressão ao finalizar, e a pré gera o fi
     out.abriuImpressaoDaPre = imprimiu >= 1;
     out.impressaoDaPreTemConteudo = /Ana Souza/.test(conteudo) && /Colecistectomia/.test(conteudo);
 
-    /* termo: mesma coisa */
+    /* termo: mesma coisa. Daqui em diante o modal fica desligado — a pergunta
+       do termo não interessa a este teste. */
+    modal.open = () => {};
     imprimiu = 0; conteudo = '';
     ui.navegar('termo');
     const ft = document.getElementById('form-termo');
@@ -6407,7 +6431,8 @@ await test('Pré e Termo vão para a impressão ao finalizar, e a pré gera o fi
   });
   assert(r.temCampoConvenio, 'a pré-anestésica precisa ter onde guardar o convênio');
   assert(r.finalizou, 'a finalização precisa gravar o registro com o convênio');
-  assert(r.gerouFinanceiro, 'finalizar a pré tem que gerar o lançamento financeiro');
+  assert(r.abriuAJanela, 'a janela de gerar financeiro abre depois — esperando a impressão sair de cena');
+  assert(r.gerouFinanceiro, 'e confirmar ali gera o lançamento');
   assert(r.levouOConvenio && r.levouOTipo, 'o lançamento não pode nascer sem saber de quem cobrar');
   assert(r.levouOResto, 'paciente, hospital e cirurgião viajam junto');
   assert(r.abriuImpressaoDaPre, 'ao finalizar a pré, a impressão abre sozinha');
@@ -12547,7 +12572,24 @@ await test('Data de produção é a da finalização, não se move em correção
         else el.value = 'PACIENTE X';
       });
       window[mod].salvar({ finalizar: true });
-      await new Promise(res => setTimeout(res, 1000));
+      await new Promise(res => setTimeout(res, 800));
+      /* A janela da cobrança espera a vez: finalizar já abre a impressão (pré,
+         termo) ou a pergunta da SRPA (ficha), e só existe uma janela no app.
+         Fecha o que estiver aberto e aguarda a da cobrança aparecer. */
+      const esperarCobranca = async (ms) => {
+        const t0 = Date.now();
+        while (Date.now() - t0 < ms) {
+            if (document.getElementById('form-fin-final')) return true;
+            try { const bd = document.getElementById('modal-backdrop');
+                    if (bd && bd.classList.contains('show')) modal.close(); } catch (e) {}
+            await new Promise(r2 => setTimeout(r2, 120));
+        }
+        return false;
+      };
+      if (await esperarCobranca(6000)) {
+        fin.finalizacao.confirmar();
+        await new Promise(res => setTimeout(res, 400));
+      }
       try { modal.close(); } catch (e) {}
       const rec = store.list(mod).find(x => x._finalizado);
       out.finAntes = store.list('financeiro').length;
@@ -12568,7 +12610,7 @@ await test('Data de produção é a da finalização, não se move em correção
       return out;
     }, mod);
 
-    assert(r.finAntes === 1, mod + ': finalizar cria um lançamento financeiro');
+    assert(r.finAntes === 1, mod + ': confirmar na janela de finalização cria um lançamento financeiro');
     assert(r.finDepois === 1, mod + ': acrescentar depois NÃO cria um segundo lançamento (ficou com ' + r.finDepois + ')');
     assert(r.dataIgual, mod + ': e a data que a produção conta não se move');
     assert(r.umRegistroSo, mod + ': nem nasce um documento duplicado');
@@ -13433,7 +13475,24 @@ await test('Pré com exames pendentes: finaliza, cobra na data da avaliação, e
     out.escreveAConclusao = /exames/i.test(f.querySelector('[name="conclusao"]').value);
 
     pre.salvar({ finalizar: true });
-    await new Promise(res => setTimeout(res, 900));
+    await new Promise(res => setTimeout(res, 800));
+    /* A janela da cobrança espera a vez: finalizar já abre a impressão (pré,
+       termo) ou a pergunta da SRPA (ficha), e só existe uma janela no app.
+       Fecha o que estiver aberto e aguarda a da cobrança aparecer. */
+    const esperarCobranca = async (ms) => {
+      const t0 = Date.now();
+      while (Date.now() - t0 < ms) {
+        if (document.getElementById('form-fin-final')) return true;
+        try { const bd = document.getElementById('modal-backdrop');
+              if (bd && bd.classList.contains('show')) modal.close(); } catch (e) {}
+        await new Promise(r2 => setTimeout(r2, 120));
+      }
+      return false;
+    };
+    if (await esperarCobranca(6000)) {
+      fin.finalizacao.confirmar();
+      await new Promise(res => setTimeout(res, 300));
+    }
     try { modal.close(); } catch (e) {}
     const rec = store.list('pre').find(x => x._finalizado);
     out.finalizou = !!rec;
@@ -14866,6 +14925,127 @@ await test('Financeiro: tocar na linha abre o lançamento para editar', async ()
   assert(r.botaoNaoVira, 'clique num botão da linha continua sendo do botão');
   assert(r.selecaoNaoVira, 'e selecionar texto para copiar não vira navegação');
   assert(r.abreQuandoDeve, 'fora disso, o toque abre');
+  await page.close();
+});
+
+/* 214) A janela única de finalização. Eram três caminhos para a mesma decisão:
+   a ficha perguntava os adicionais numa janela, a pré e a consulta não
+   perguntavam nada e o lançamento nascia sozinho, e o particular ganhava uma
+   terceira janela depois, só para o pagamento. Nenhum deles mostrava o que ia
+   ser cobrado ANTES de cobrar. */
+await test('Finalizar: uma janela só — gerar ou não, com plano, tabela do plano, códigos e valores', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['pre', 'consulta', 'anestesia', 'financeiro', 'pacientes', 'orcamento'].forEach(m => store.setList(m, []));
+    const hoje = utils.hojeISO();
+
+    /* 1) pré: a janela abre e o código da CONSULTA já vem preenchido */
+    const pre1 = store.save('pre', { nome: 'ANA PRE', data: hoje, convenio: 'Unimed',
+      cirurgia: 'Colecistectomia', _finalizado: true });
+    fin.finalizacao.abrir('pre', pre1);
+    await new Promise(res => setTimeout(res, 300));
+    out.abriu = !!document.getElementById('form-fin-final');
+    const linhas = () => [...document.querySelectorAll('#fz-codigos-body tr')];
+    const g = (tr, n) => (tr.querySelector('[name="' + n + '[]"]') || {}).value || '';
+    out.consultaJaVemPreenchida = linhas().length === 1
+      && g(linhas()[0], 'fz_cod') === fin.CODIGO_CONSULTA
+      && g(linhas()[0], 'fz_desc').length > 5
+      && parseFloat(g(linhas()[0], 'fz_prev')) > 0;
+    /* o plano veio da pré, e a janela diz QUAL tabela vale para ele */
+    out.trouxeOPlano = document.querySelector('[name="fz_convenio"]').value === 'Unimed';
+    out.dizQualTabela = /Tabela usada para/.test(document.getElementById('fz-tabela-wrap').innerHTML)
+      && /Unimed/.test(document.getElementById('fz-tabela-wrap').innerHTML);
+
+    /* 2) trocar o plano refaz os valores pela tabela DAQUELE plano */
+    const antes = parseFloat(g(linhas()[0], 'fz_prev'));
+    precos.definirTabelaDoConvenio('Bradesco Saúde', 'cir2024_f3', 'cir');
+    const inp = document.querySelector('[name="fz_convenio"]');
+    inp.value = 'Bradesco Saúde';
+    fin.finalizacao.aoTrocarPlano();
+    await new Promise(res => setTimeout(res, 150));
+    out.trocarPlanoRefazValor = parseFloat(g(linhas()[0], 'fz_prev')) !== antes;
+
+    /* 3) tudo editável: o valor ajustado à mão é o que vale */
+    const unit = linhas()[0].querySelector('[name="fz_unit[]"]');
+    unit.value = '250'; unit.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(res => setTimeout(res, 100));
+    out.ajusteManualVale = parseFloat(g(linhas()[0], 'fz_prev')) === 250
+      && /250,00/.test(document.getElementById('fz-total').textContent);
+
+    /* 4) confirmar cria o lançamento com o que está na tela */
+    inp.value = 'Unimed';
+    fin.finalizacao.confirmar();
+    await new Promise(res => setTimeout(res, 300));
+    const l1 = store.list('financeiro').find(x => x._origemId === pre1._id);
+    out.criouComOQueEstavaNaTela = !!l1 && Number(l1.valor_previsto) === 250
+      && l1.convenio === 'Unimed' && (l1.codigos || []).length === 1
+      && l1.codigos[0].codigo === fin.CODIGO_CONSULTA;
+
+    /* 5) "Não gerar" é decisão, e não volta atrás sozinho numa gravação depois */
+    const pre2 = store.save('pre', { nome: 'SEM COBRANCA', data: hoje, convenio: 'Unimed', _finalizado: true });
+    fin.finalizacao.abrir('pre', pre2);
+    await new Promise(res => setTimeout(res, 300));
+    document.querySelector('[name="fz_gerar"][value="0"]').checked = true;
+    fin.finalizacao.alternarGerar(false);
+    out.escondeODetalhe = document.getElementById('fz-detalhe').style.display === 'none';
+    fin.finalizacao.confirmar();
+    await new Promise(res => setTimeout(res, 200));
+    out.naoGerou = !store.list('financeiro').some(x => x._origemId === pre2._id);
+    out.ficouGravadaADecisao = !!store.getById('pre', pre2._id)._semFinanceiro;
+    /* e uma gravação posterior não ressuscita a cobrança */
+    fin.fromDoc('pre', store.getById('pre', pre2._id));
+    out.naoRessuscita = !store.list('financeiro').some(x => x._origemId === pre2._id);
+
+    /* 6) particular: o acerto entra na MESMA janela, não numa terceira */
+    const pre3 = store.save('pre', { nome: 'JOAO PARTICULAR', data: hoje, convenio: 'Particular', _finalizado: true });
+    fin.finalizacao.abrir('pre', pre3);
+    await new Promise(res => setTimeout(res, 300));
+    out.tipoSegueOPlano = document.querySelector('[name="fz_tipo"]').value === 'Particular';
+    out.pedeOAcerto = !!document.querySelector('[name="fz_pago"]')
+      && !!document.querySelector('[name="fz_conta"]');
+    document.querySelector('[name="fz_forma"]').value = 'PIX';
+    document.querySelector('[name="fz_pago"]').value = 'sim';
+    fin.finalizacao._ajustarPago();
+    document.querySelector('[name="fz_conta"]').value = 'Conta PJ';
+    fin.finalizacao.confirmar();
+    await new Promise(res => setTimeout(res, 300));
+    const l3 = store.list('financeiro').find(x => x._origemId === pre3._id);
+    out.particularJaSaiQuitado = !!l3 && l3.status === 'recebido' && l3.pago === true
+      && l3.forma_pagamento === 'PIX' && l3.conta_recebeu === 'Conta PJ'
+      && Number(l3.valor_recebido) === Number(l3.valor_previsto);
+    /* e o fluxo de faturamento acompanha — a pendência não segue cobrando */
+    out.fluxoAcompanha = !!(l3._faturamento && l3._faturamento.pago);
+
+    /* 7) os adicionais da ficha passaram a morar aqui */
+    const an = store.save('anestesia', { paciente: { nome: 'CIRURGIA X', convenio: 'Unimed' },
+      procedimento: { data: hoje, descricao: 'Artroplastia', codigo: '3.07.15.05-0' }, _finalizado: true });
+    fin.finalizacao.abrir('anestesia', an);
+    await new Promise(res => setTimeout(res, 300));
+    out.temAdicionais = document.querySelectorAll('#fz-adicionais [name="fz_adic"]').length >= 5;
+    const ck = document.querySelector('#fz-adicionais [name="fz_adic"][value="urgencia"]');
+    if (ck) ck.checked = true;
+    fin.finalizacao.confirmar();
+    await new Promise(res => setTimeout(res, 300));
+    const l4 = store.list('financeiro').find(x => x._origemId === an._id);
+    out.adicionaisNoLancamento = !!l4 && !!l4._adicionais
+      && l4._adicionais.itens.indexOf('urgencia') >= 0;
+    return out;
+  });
+
+  assert(r.abriu, 'finalizar abre a janela de gerar financeiro');
+  assert(r.consultaJaVemPreenchida, 'na pré e na consulta o código da consulta já vem preenchido, com valor');
+  assert(r.trouxeOPlano && r.dizQualTabela, 'com o plano do atendimento e dizendo qual tabela vale para ele');
+  assert(r.trocarPlanoRefazValor, 'trocar o plano refaz os valores pela tabela daquele plano');
+  assert(r.ajusteManualVale, 'e tudo continua editável — o valor ajustado à mão é o que vale');
+  assert(r.criouComOQueEstavaNaTela, 'confirmar cria o lançamento com o que estava na tela');
+  assert(r.escondeODetalhe && r.naoGerou, '"Não" não gera lançamento nenhum');
+  assert(r.ficouGravadaADecisao && r.naoRessuscita, 'e fica gravado: uma gravação posterior não ressuscita a cobrança');
+  assert(r.tipoSegueOPlano && r.pedeOAcerto, 'no particular, o acerto entra na MESMA janela — não numa terceira');
+  assert(r.particularJaSaiQuitado, 'e o lançamento já sai quitado, com meio e conta');
+  assert(r.fluxoAcompanha, 'com o fluxo de faturamento acompanhando, para a pendência não seguir cobrando');
+  assert(r.temAdicionais && r.adicionaisNoLancamento, 'os adicionais da ficha passaram a morar nesta janela');
   await page.close();
 });
 
