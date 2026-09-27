@@ -4647,7 +4647,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-27a</b><br>
+    v7.1 · build <b id="build-tag">2026-09-27b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -8394,14 +8394,14 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
                 <option value="outro">Outro</option>
               </select>
             </div>
-            <div class="field col-3"><label>Data do procedimento</label><input type="date" name="data_proc"></div>
+            <div class="field col-3"><label>Data do procedimento</label><input type="date" name="data_proc" onchange="financeiro.renderMajoracao()"></div>
             <div class="field col-3"><label>Tipo de pagamento</label>
               <select name="tipo_pagamento"><option value="">—</option><option>Particular</option><option>Convênio</option><option>SUS</option><option>Cortesia</option></select>
             </div>
-            <div class="field col-6"><label>Procedimento principal <small style="color:var(--text-mute);font-weight:400">(CBHPM)</small></label><input type="text" name="procedimento" class="cbhpm-autocomplete" placeholder="Digite parte do procedimento ou o código TUSS..."></div>
+            <div class="field col-6"><label>Procedimento principal <small style="color:var(--text-mute);font-weight:400">(CBHPM — o ➕ abre outra linha de código TUSS)</small></label><input type="text" name="procedimento" class="cbhpm-autocomplete" data-mais-acao="financeiro" placeholder="Digite parte do procedimento ou o código TUSS..."></div>
             <div class="field col-6"><label>Cirurgião</label><input type="text" name="cirurgiao"></div>
             <div class="field col-6"><label>Hospital / clínica</label><input type="text" name="hospital"></div>
-            <div class="field col-6"><label>Convênio / plano</label><input type="text" name="convenio" onblur="financeiro.regras.aplicarDoConvenio(this.value)"></div>
+            <div class="field col-6"><label>Convênio / plano</label><input type="text" name="convenio" onblur="financeiro.regras.aplicarDoConvenio(this.value); financeiro.renderMajoracao()" onchange="financeiro.renderMajoracao()"></div>
           </div>
 
           <!-- 🔄 FLUXO DE FATURAMENTO (checklist — dá baixa nas pendências de convênio) -->
@@ -8462,6 +8462,10 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <div class="field col-2" style="display:flex;align-items:flex-end">
               <button type="button" class="btn btn-sm" onclick="financeiro.regras.salvarDoForm()" title="Guarda o fator de acomodação e o % de urgência como regra deste convênio — será aplicado automaticamente da próxima vez">💾 Salvar regra do convênio</button>
             </div>
+            <!-- A regra de majoração por horário da Unimed fica à vista sempre
+                 que o convênio for Unimed: é multiplicador, não percentual, e
+                 é onde mais se perde dinheiro na conciliação. -->
+            <div class="field col-12" id="fin-majoracao-aviso"></div>
             <div class="field col-12"><label style="font-size:.72rem;color:var(--text-mute)">Cálculo</label>
               <input type="text" name="fatores_resumo" readonly style="font-size:.8rem;color:var(--text-soft);background:var(--surface-alt)"></div>
           </div>
@@ -29399,18 +29403,43 @@ const cbhpm = {
     btn.type = 'button';
     btn.className = 'btn btn-xs cbhpm-mais';
     btn.textContent = '➕';
-    btn.title = (input.dataset && input.dataset.maisAcao === 'ficha')
-      ? 'Mais um código para a MESMA equipe cirúrgica — abre uma linha logo abaixo (com o seu grau %)'
-      : 'Adicionar mais um procedimento/código neste campo (use também "x2" para repetições)';
+    /* Onde existe COBRANÇA, "mais um código" tem de virar uma LINHA própria —
+       com o seu código, o seu grau e o seu valor. Concatenar " + " no mesmo
+       campo serve para descrever, não para faturar: um evento com três
+       códigos vira um texto só e o financeiro perde os valores de cada um.
+       data-mais-acao diz para onde a linha vai. */
+    const ACOES = {
+      ficha: 'Mais um código para a MESMA equipe cirúrgica — abre uma linha logo abaixo (com o seu grau %)',
+      consulta: 'Mais um procedimento realizado nesta consulta — abre uma linha com código e valor próprios',
+      financeiro: 'Mais um código TUSS neste lançamento — abre uma linha com valor próprio'
+    };
+    const acao = (input.dataset && input.dataset.maisAcao) || '';
+    btn.title = ACOES[acao] || 'Adicionar mais um procedimento/código neste campo (use também "x2" para repetições)';
     btn.addEventListener('mousedown', e => e.preventDefault());
     btn.addEventListener('click', () => {
-      if (input.dataset && input.dataset.maisAcao === 'ficha') {
+      if (acao === 'ficha') {
         try {
           /* MESMA equipe: a linha nasce enxuta (só código + grau). Quem for de
              OUTRA equipe usa "➕ Cirurgia combinada", que já pede o cirurgião. */
           const linha = anestesia.cirurgias.add({}, { mesmaEquipe: true });
           if (linha) { const i2 = linha.querySelector('[name="cir_extra_proc[]"]'); if (i2) i2.focus(); }
           toast('Mais um código para a mesma equipe — preencha na linha abaixo');
+        } catch (e) {}
+        return;
+      }
+      if (acao === 'consulta') {
+        try {
+          const linha = consulta.procs.add({});
+          if (linha) { const i2 = linha.querySelector('[name="cproc_desc[]"]'); if (i2) i2.focus(); }
+          toast('Mais um procedimento — preencha o código e o valor na linha abaixo');
+        } catch (e) {}
+        return;
+      }
+      if (acao === 'financeiro') {
+        try {
+          const linha = financeiro.codigos.add({});
+          if (linha) { const i2 = linha.querySelector('[name="fin_cod_desc[]"]'); if (i2) i2.focus(); }
+          toast('Mais um código TUSS — preencha na linha abaixo');
         } catch (e) {}
         return;
       }
@@ -40098,6 +40127,124 @@ const fin = {
   },
 
   /* ==========================================================================
+     MAJORAÇÃO POR HORÁRIO — regra da Unimed
+
+     A Unimed paga a CBHPM multiplicada conforme o dia e a hora do atendimento.
+     Não é o acréscimo percentual de urgência que já existia no sistema: é um
+     MULTIPLICADOR, e errar isso é faturar um plantão noturno pelo valor do
+     horário comercial. A regra, como ele a recebe:
+
+       1×  segunda a sexta, 07h–19h
+       2×  segunda a sexta, 19h–22h
+       3×  segunda a sexta, 22h–07h
+       1×  sábado, 07h–12h
+       3×  sábado a partir das 12h, domingos e feriados
+
+     O que o sistema faz é CALCULAR a faixa e mostrar; aplicar é decisão dele.
+     Sábado antes das 07h não está escrito na regra: fica em 3×, que é a
+     continuação da madrugada de sexta — e o aviso diz isso, para ele corrigir
+     se o plano entender diferente.
+  ========================================================================== */
+  majoracao: {
+    REGRA_TXT: [
+      ['1×', 'segunda a sexta, 07h–19h'],
+      ['2×', 'segunda a sexta, 19h–22h'],
+      ['3×', 'segunda a sexta, 22h–07h'],
+      ['1×', 'sábado, 07h–12h'],
+      ['3×', 'sábado a partir das 12h, domingos e feriados']
+    ],
+    ehUnimed(conv) { return /unimed/i.test(String(conv || '')); },
+
+    /* Páscoa (Meeus/Butcher) — de onde saem carnaval, sexta-feira santa e
+       Corpus Christi. Sem isto, "feriado" dependeria de ele lembrar. */
+    _pascoa(ano) {
+      const a = ano % 19, b = Math.floor(ano / 100), c = ano % 100;
+      const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
+      const g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+      const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7;
+      const m = Math.floor((a + 11 * h + 22 * l) / 451);
+      const mes = Math.floor((h + l - 7 * m + 114) / 31);
+      const dia = ((h + l - 7 * m + 114) % 31) + 1;
+      return new Date(ano, mes - 1, dia);
+    },
+    _fmt(d) {
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    },
+    _somarDias(d, n) { const x = new Date(d.getTime()); x.setDate(x.getDate() + n); return x; },
+    /* Feriados NACIONAIS. Os municipais e estaduais não têm como ser sabidos
+       daqui — por isso a marca de feriado continua editável na tela. */
+    feriados(ano) {
+      const p = fin.majoracao._pascoa(ano);
+      const f = fin.majoracao._fmt, som = fin.majoracao._somarDias;
+      return {
+        [ano + '-01-01']: 'Confraternização Universal',
+        [f(som(p, -48))]: 'Carnaval (segunda)',
+        [f(som(p, -47))]: 'Carnaval (terça)',
+        [f(som(p, -2))]: 'Sexta-feira Santa',
+        [ano + '-04-21']: 'Tiradentes',
+        [ano + '-05-01']: 'Dia do Trabalho',
+        [f(som(p, 60))]: 'Corpus Christi',
+        [ano + '-09-07']: 'Independência',
+        [ano + '-10-12']: 'Nossa Senhora Aparecida',
+        [ano + '-11-02']: 'Finados',
+        [ano + '-11-15']: 'Proclamação da República',
+        [ano + '-11-20']: 'Consciência Negra',
+        [ano + '-12-25']: 'Natal'
+      };
+    },
+    nomeFeriado(dataISO) {
+      if (!dataISO) return '';
+      const ano = parseInt(String(dataISO).slice(0, 4), 10);
+      if (!ano) return '';
+      return fin.majoracao.feriados(ano)[String(dataISO).slice(0, 10)] || '';
+    },
+
+    /* A faixa daquele dia e hora. opts.feriado força o 3× (feriado municipal,
+       ponto facultativo — o que o sistema não tem como saber). */
+    calcular(dataISO, hora, opts) {
+      opts = opts || {};
+      const out = { fator: 1, faixa: '', motivo: '', feriado: '' };
+      if (!dataISO) return out;
+      const partes = String(dataISO).slice(0, 10).split('-').map(Number);
+      const d = new Date(partes[0], (partes[1] || 1) - 1, partes[2] || 1);
+      if (isNaN(d)) return out;
+      const hm = String(hora || '').match(/^(\d{1,2}):(\d{2})/);
+      const min = hm ? (parseInt(hm[1], 10) * 60 + parseInt(hm[2], 10)) : null;
+      const dow = d.getDay();   /* 0 = domingo */
+      const fer = opts.feriado === true ? 'feriado' : (opts.feriado === false ? '' : fin.majoracao.nomeFeriado(dataISO));
+      out.feriado = fer;
+
+      if (fer) { out.fator = 3; out.faixa = '3×'; out.motivo = 'feriado' + (fer !== 'feriado' ? ' (' + fer + ')' : ''); return out; }
+      if (dow === 0) { out.fator = 3; out.faixa = '3×'; out.motivo = 'domingo'; return out; }
+      if (min == null) { out.motivo = 'sem horário informado — faixa não calculada'; out.faixa = '—'; return out; }
+
+      if (dow === 6) {
+        if (min >= 7 * 60 && min < 12 * 60) { out.fator = 1; out.faixa = '1×'; out.motivo = 'sábado, 07h–12h'; }
+        else if (min >= 12 * 60) { out.fator = 3; out.faixa = '3×'; out.motivo = 'sábado, a partir das 12h'; }
+        else { out.fator = 3; out.faixa = '3×'; out.motivo = 'sábado, antes das 07h (madrugada — confira com o plano)'; }
+        return out;
+      }
+      if (min >= 7 * 60 && min < 19 * 60) { out.fator = 1; out.faixa = '1×'; out.motivo = 'dia útil, 07h–19h'; }
+      else if (min >= 19 * 60 && min < 22 * 60) { out.fator = 2; out.faixa = '2×'; out.motivo = 'dia útil, 19h–22h'; }
+      else { out.fator = 3; out.faixa = '3×'; out.motivo = 'dia útil, 22h–07h'; }
+      return out;
+    },
+
+    /* O aviso da regra, para ficar sempre à vista onde se cobra da Unimed */
+    avisoHTML(calc) {
+      const e = utils.escapeHTML;
+      const linhas = fin.majoracao.REGRA_TXT
+        .map(([f, q]) => '<span style="display:inline-block;margin-right:14px;white-space:nowrap"><b>' + f + '</b> ' + e(q) + '</span>').join('');
+      const destaque = calc && calc.faixa
+        ? '<div style="margin-top:5px;font-weight:700;color:' + (calc.fator > 1 ? '#8a4b1c' : 'var(--text)') + '">' +
+          'Este atendimento: <b>' + e(calc.faixa) + '</b>' + (calc.motivo ? ' — ' + e(calc.motivo) : '') + '</div>'
+        : '';
+      return '<div style="font-size:.78rem;background:#fff8ec;border:1px solid #e3c893;border-radius:6px;padding:8px 10px;line-height:1.7">' +
+        '<b>⏰ Unimed — majoração por horário</b><br>' + linhas + destaque + '</div>';
+    }
+  },
+
+  /* ==========================================================================
      JANELA ÚNICA DE FINALIZAÇÃO — "gerar financeiro?"
 
      Havia três caminhos diferentes para a mesma decisão. A ficha de anestesia
@@ -40170,6 +40317,11 @@ const fin = {
         '<select name="fz_forma"><option value="">—</option>' +
         fin.MEIOS_PAGAMENTO.map(m => '<option>' + e(m) + '</option>').join('') + '</select></div>' +
         '<div class="field col-12" id="fz-tabela-wrap"></div>' +
+        '<div class="field col-3"><label>Data do atendimento</label><input type="date" name="fz_data" value="' + ea(cab.dataProc || utils.hojeISO()) + '" onchange="fin.finalizacao.aoTrocarHorario()"></div>' +
+        '<div class="field col-3"><label>Hora <small style="color:var(--text-mute);font-weight:400">— define a faixa</small></label><input type="time" name="fz_hora" value="' + ea(fin.finalizacao._horaDe(mod, doc)) + '" onchange="fin.finalizacao.aoTrocarHorario()"></div>' +
+        '<div class="field col-3"><label>Feriado?</label><div style="padding-top:6px"><label class="check" style="display:inline-flex"><input type="checkbox" name="fz_feriado" onchange="fin.finalizacao.aoTrocarHorario()"> <span>É feriado</span></label></div></div>' +
+        '<div class="field col-3"><label>Urgência / emergência</label><div style="padding-top:6px"><label class="check" style="display:inline-flex"><input type="checkbox" name="fz_urgencia" onchange="fin.finalizacao._somar()"> <span>+<input type="number" name="fz_perc_urg" value="30" min="0" step="1" style="width:52px;margin:0 3px" oninput="fin.finalizacao._somar()">%</span></label></div></div>' +
+        '<div class="field col-12" id="fz-majoracao"></div>' +
         '</div></form>' +
         '<h3 style="font-size:.86rem;color:var(--primary-darker);margin:14px 0 6px;border-top:1px solid var(--border);padding-top:12px">' +
         '📋 Códigos e valores <small style="font-weight:400;color:var(--text-mute)">— confira antes de virar cobrança; tudo é editável</small></h3>' +
@@ -40180,6 +40332,9 @@ const fin = {
         '<th class="col-rm">×</th></tr></thead><tbody id="fz-codigos-body"></tbody></table></div>' +
         '<div class="table-actions"><button type="button" class="btn btn-sm btn-primary" onclick="fin.finalizacao.addLinha()">+ Adicionar código</button></div>' +
         '<div id="fz-total" style="text-align:right;font-weight:700;font-size:.95rem;margin-top:6px"></div>' +
+        '<div id="fz-desfecho" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:12px"></div>' +
+        '<div class="field" style="margin-top:10px"><label>Observação deste lançamento <small style="color:var(--text-mute);font-weight:400">— o que precisa ser dito na conciliação</small></label>' +
+        '<textarea class="campo-desc" rows="2" name="fz_obs" placeholder="Ex.: guia autorizada por telefone, procedimento trocado no intra-operatório, paciente em apartamento…"></textarea></div>' +
         '<div id="fz-particular" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:12px"></div>' +
         '<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px">' +
         '<div style="font-size:.84rem;font-weight:600;color:var(--primary-darker);margin-bottom:6px">💰 Adicionais de faturamento <small style="font-weight:400;color:var(--text-mute)">— entram no lançamento para a conciliação</small></div>' +
@@ -40200,9 +40355,80 @@ const fin = {
           }));
           if (!linhas.length) fin.finalizacao.addLinha();
           fin.finalizacao._montarAdicionais(mod);
+          fin.finalizacao._montarDesfecho(mod, doc);
           fin.finalizacao.aoTrocarPlano();
         } catch (x) {}
       }, 30);
+    },
+
+    /* A hora que define a faixa: na ficha é o início da anestesia; na pré e na
+       consulta não há campo de hora, então vale a de agora — editável. */
+    _horaDe(mod, doc) {
+      try {
+        if (mod === 'anestesia') {
+          const p = doc.procedimento || {};
+          const h = p.hora_inicio || p.hora_sala_entrada || p.hora_cir_inicio;
+          if (h) return h;
+        }
+        if (doc.hora) return doc.hora;
+      } catch (e) {}
+      return utils.horaAtual();
+    },
+
+    _calcMajoracao() {
+      const conv = fin.finalizacao._v('fz_convenio');
+      if (!fin.majoracao.ehUnimed(conv)) return null;
+      const f = fin.finalizacao._f();
+      const fer = !!(f && f.querySelector('[name="fz_feriado"]') && f.querySelector('[name="fz_feriado"]').checked);
+      return fin.majoracao.calcular(fin.finalizacao._v('fz_data'), fin.finalizacao._v('fz_hora'),
+        fer ? { feriado: true } : {});
+    },
+    aoTrocarHorario() {
+      const box = document.getElementById('fz-majoracao');
+      const calc = fin.finalizacao._calcMajoracao();
+      if (box) {
+        if (!calc) { box.innerHTML = ''; }
+        else {
+          /* a marca de feriado nasce marcada quando a data É feriado nacional */
+          const f = fin.finalizacao._f();
+          const ck = f && f.querySelector('[name="fz_feriado"]');
+          if (ck && !ck.dataset.manual && calc.feriado) ck.checked = true;
+          box.innerHTML = fin.majoracao.avisoHTML(calc) +
+            (calc.fator > 1
+              ? '<label class="check" style="display:inline-flex;margin-top:6px;font-size:.84rem">' +
+                '<input type="checkbox" name="fz_majorar" checked onchange="fin.finalizacao._somar()"> ' +
+                '<span>Aplicar <b>' + calc.faixa + '</b> sobre o previsto</span></label>'
+              : '');
+        }
+      }
+      fin.finalizacao._somar();
+    },
+
+    /* Desfecho da avaliação: a pré já pergunta isso no card 6, e aqui ele
+       CONFIRMA — com a cirurgia proposta à vista, que é o que dá sentido ao
+       "liberado". Confirmar na hora de cobrar é o momento em que ele tem o
+       caso inteiro na cabeça. */
+    _montarDesfecho(mod, doc) {
+      const box = document.getElementById('fz-desfecho');
+      if (!box || (mod !== 'pre' && mod !== 'consulta')) return;
+      const e = utils.escapeHTML, ea = utils.escapeAttr;
+      const atual = (mod === 'pre') ? (pre.desfechoDe(doc) || 'liberado') : '';
+      const cirurgia = (doc.cirurgia || doc.hipotese || doc.queixa || '').trim();
+      box.style.display = '';
+      box.innerHTML =
+        '<div style="font-size:.84rem;font-weight:600;color:var(--primary-darker);margin-bottom:6px">🫀 Desfecho da avaliação <small style="font-weight:400;color:var(--text-mute)">— confirme antes de fechar</small></div>' +
+        (cirurgia
+          ? '<div style="font-size:.82rem;background:var(--surface-alt);border:1px solid var(--border);border-radius:6px;padding:7px 10px;margin-bottom:8px">' +
+            '🔪 Cirurgia proposta: <b>' + e(cirurgia) + '</b></div>'
+          : '<div style="font-size:.8rem;color:#8a4b1c;margin-bottom:8px">⚠️ Sem cirurgia proposta registrada nesta avaliação.</div>') +
+        '<div class="grid"><div class="field col-6"><label>Desfecho</label>' +
+        '<select name="fz_desfecho">' +
+        Object.keys(pre.DESFECHOS).map(k =>
+          '<option value="' + ea(k) + '"' + (k === atual ? ' selected' : '') + '>' +
+          e(pre.DESFECHOS[k].rot) + '</option>').join('') +
+        '</select></div>' +
+        '<div class="field col-6"><label>Observação do desfecho</label>' +
+        '<input type="text" name="fz_desfecho_obs" placeholder="Ex.: aguardando ecocardiograma; retorno em 15 dias"></div></div>';
     },
 
     _porteDe(l) {
@@ -40252,6 +40478,7 @@ const fin = {
       }
       fin.finalizacao._mostrarTabela(conv);
       fin.finalizacao._recalcularTudo();
+      fin.finalizacao.aoTrocarHorario();
       fin.finalizacao.aoTrocarTipo(true);
     },
     aoTrocarTipo(semMarcar) {
@@ -40384,14 +40611,47 @@ const fin = {
       document.querySelectorAll('#fz-codigos-body tr').forEach(tr => fin.finalizacao._sugerirLinha(tr, true));
       fin.finalizacao._somar();
     },
-    _total() {
+    /* Soma das linhas, ANTES dos fatores */
+    _somaLinhas() {
       let t = 0;
       document.querySelectorAll('#fz-codigos-body [name="fz_prev[]"]').forEach(el => { t += parseFloat(el.value) || 0; });
       return t;
     },
+    /* Os fatores que valem: a majoração da Unimed (multiplicador) e a urgência
+       (percentual). São coisas diferentes e se somam nesta ordem — primeiro a
+       faixa de horário sobre a tabela, depois o acréscimo de urgência. */
+    _fatores() {
+      const f = fin.finalizacao._f();
+      const q = n => f && f.querySelector('[name="' + n + '"]');
+      const majCk = document.querySelector('[name="fz_majorar"]');
+      const calc = fin.finalizacao._calcMajoracao();
+      const maj = (majCk && majCk.checked && calc) ? calc.fator : 1;
+      const urgCk = q('fz_urgencia');
+      const perc = (urgCk && urgCk.checked) ? (parseFloat((q('fz_perc_urg') || {}).value) || 0) : 0;
+      return { maj, perc, calc };
+    },
+    _total() {
+      const base = fin.finalizacao._somaLinhas();
+      const fa = fin.finalizacao._fatores();
+      return Number((base * fa.maj * (1 + fa.perc / 100)).toFixed(2));
+    },
     _somar() {
       const el = document.getElementById('fz-total');
-      if (el) el.textContent = 'Total previsto: ' + historico._fmtRS(fin.finalizacao._total());
+      if (!el) return;
+      const base = fin.finalizacao._somaLinhas();
+      const fa = fin.finalizacao._fatores();
+      const total = fin.finalizacao._total();
+      let txt = 'Total previsto: ' + historico._fmtRS(total);
+      if (fa.maj !== 1 || fa.perc) {
+        /* a conta escrita: um total que não se explica não se defende numa glosa */
+        txt = 'Códigos ' + historico._fmtRS(base) +
+          (fa.maj !== 1 ? ' × ' + fa.maj + ' (horário)' : '') +
+          (fa.perc ? ' + ' + fa.perc + '% (urgência)' : '') +
+          ' = <b>' + historico._fmtRS(total) + '</b>';
+        el.innerHTML = txt;
+        return;
+      }
+      el.textContent = txt;
     },
 
     _linhas() {
@@ -40440,6 +40700,13 @@ const fin = {
       const linhas = fin.finalizacao._linhas();
       const adicionais = Array.from(document.querySelectorAll('#fz-adicionais [name="fz_adic"]:checked')).map(x => x.value);
       const total = fin.finalizacao._total();
+      const fa = fin.finalizacao._fatores();
+      /* a caixa de observação fica FORA do <form> (vem depois da tabela de
+         códigos), então _v — que procura dentro do form — não a alcança */
+      const obs = String((document.querySelector('[name="fz_obs"]') || {}).value || '').trim();
+      const desfEl = document.querySelector('[name="fz_desfecho"]');
+      const desfecho = desfEl ? desfEl.value : '';
+      const desfObs = (document.querySelector('[name="fz_desfecho_obs"]') || {}).value || '';
       /* o acerto do particular, quando houver */
       const boxP = document.getElementById('fz-particular');
       const pg = (n) => { const el = boxP && boxP.querySelector('[name="' + n + '"]'); return el ? String(el.value || '').trim() : ''; };
@@ -40452,9 +40719,18 @@ const fin = {
          Financeiro relê o pagador nas próximas gravações */
       let doc = store.getById(ctx.mod, ctx.docId);
       try {
-        if (doc && conv) {
-          if (ctx.mod === 'anestesia') { doc.paciente = Object.assign({}, doc.paciente, { convenio: conv }); }
-          else doc.convenio = conv;
+        if (doc) {
+          if (conv) {
+            if (ctx.mod === 'anestesia') { doc.paciente = Object.assign({}, doc.paciente, { convenio: conv }); }
+            else doc.convenio = conv;
+          }
+          /* o desfecho confirmado aqui volta para a avaliação: é o mesmo campo
+             do card 6, e ter dois valores diferentes para a mesma pergunta é
+             como começam as divergências */
+          if (desfecho && (ctx.mod === 'pre' || ctx.mod === 'consulta')) {
+            doc.conclusao_status = desfecho;
+            if (desfObs) doc.conclusao_obs = desfObs;
+          }
           delete doc._semFinanceiro;
           doc = store.save(ctx.mod, doc);
         }
@@ -40470,6 +40746,21 @@ const fin = {
       if (linhas.length) item.codigos = linhas;
       if (total > 0) item.valor_previsto = Number(total.toFixed(2));
       if (adicionais.length) item._adicionais = { itens: adicionais, obs: '' };
+      /* os fatores ficam GRAVADOS, não só aplicados: na conciliação é preciso
+         poder dizer por que aquele valor é aquele */
+      item.fator_acomodacao = fa.maj;
+      item.urgencia = fa.perc > 0;
+      item.perc_urgencia = fa.perc;
+      if (fa.calc && fa.maj !== 1) {
+        item.majoracao_faixa = fa.calc.faixa;
+        item.majoracao_motivo = fa.calc.motivo;
+      }
+      item.hora_proc = fin.finalizacao._v('fz_hora');
+      if (obs) item.observacoes = [item.observacoes, obs].filter(Boolean).join(' · ');
+      if (desfecho && pre.DESFECHOS[desfecho]) {
+        item.observacoes = [item.observacoes, 'Desfecho: ' + pre.DESFECHOS[desfecho].rot +
+          (desfObs ? ' — ' + desfObs : '')].filter(Boolean).join(' · ');
+      }
       if (tipo === 'Cortesia') { item.status = 'cortesia'; item.pago = true; }
       else if (pagoOpc && pagoOpc !== 'nao') {
         const rec = parseFloat(pg('fz_recebido'));
@@ -49246,6 +49537,35 @@ const financeiro = {
   },
   /* Mudou o status na mão: o fluxo acompanha, para a pendência não continuar
      cobrando baixa de uma cobrança que já foi resolvida. */
+  /* O aviso da majoração no formulário do Financeiro, com a faixa calculada
+     da data e da hora do procedimento — e um botão que joga o multiplicador
+     no fator, para não ter de fazer a conta na mão. */
+  renderMajoracao() {
+    const box = document.getElementById('fin-majoracao-aviso');
+    if (!box) return;
+    const form = document.getElementById(financeiro.formId);
+    const v = n => ((form && form.querySelector('[name="' + n + '"]')) || {}).value || '';
+    if (!fin.majoracao.ehUnimed(v('convenio'))) { box.innerHTML = ''; return; }
+    const calc = fin.majoracao.calcular(v('data_proc'), v('hora_proc'));
+    box.innerHTML = fin.majoracao.avisoHTML(calc) +
+      '<div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+      '<label style="font-size:.78rem">Hora do procedimento <input type="time" name="hora_proc" value="' +
+      utils.escapeAttr(v('hora_proc')) + '" onchange="financeiro.renderMajoracao()" style="margin-left:4px"></label>' +
+      (calc.fator > 1
+        ? '<button type="button" class="btn btn-xs tpl-btn" onclick="financeiro.aplicarMajoracao(' + calc.fator + ')">Aplicar ' +
+          utils.escapeHTML(calc.faixa) + ' no fator</button>'
+        : '') + '</div>';
+  },
+  aplicarMajoracao(fator) {
+    const form = document.getElementById(financeiro.formId);
+    const el = form && form.querySelector('[name="fator_acomodacao"]');
+    if (!el) return;
+    el.value = fator;
+    financeiro.codigos.recalcular();
+    markDirty();
+    toast('⏰ Majoração ×' + fator + ' aplicada no fator — confira o cálculo.');
+  },
+
   aoMudarStatus(sel) {
     const form = document.getElementById(financeiro.formId);
     if (!form || !sel) return;
@@ -49848,6 +50168,7 @@ const financeiro = {
         /* Restaura códigos TUSS */
         if (Array.isArray(item.codigos)) financeiro.codigos.restaurar(item.codigos);
         try { financeiro._pintarPago(document.getElementById(financeiro.formId), item.status); } catch (e) {}
+        try { financeiro.renderMajoracao(); } catch (e) {}
         /* Restaura anexos */
         financeiro.anexos.restaurar(item.anexos);
         /* Anexos de suporte vindos do registro clínico de origem (foto/PDF) */
@@ -49862,6 +50183,7 @@ const financeiro = {
       document.querySelector(`#${financeiro.formId} [name="data_proc"]`).value = utils.hojeISO();
       document.querySelector(`#${financeiro.formId} [name="status"]`).value = 'pendente';
       try { financeiro._pintarPago(document.getElementById(financeiro.formId), 'pendente'); } catch (e) {}
+      try { financeiro.renderMajoracao(); } catch (e) {}
       const fq = s => document.querySelector(`#${financeiro.formId} [name="${s}"]`);
       if (fq('fator_acomodacao')) fq('fator_acomodacao').value = 1;
       if (fq('perc_urgencia')) fq('perc_urgencia').value = 30;

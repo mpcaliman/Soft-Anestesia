@@ -15049,6 +15049,213 @@ await test('Finalizar: uma janela só — gerar ou não, com plano, tabela do pl
   await page.close();
 });
 
+/* 215) Majoração por horário da Unimed. Não é o acréscimo percentual de
+   urgência que já existia: é um MULTIPLICADOR sobre a CBHPM, e errar isso é
+   faturar um plantão de madrugada pelo valor do horário comercial. */
+await test('Unimed: majoração por horário — faixa calculada, aviso sempre à vista, aplicação opcional', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['pre', 'financeiro', 'pacientes'].forEach(m => store.setList(m, []));
+    const M = fin.majoracao;
+    /* 2026: 15/06 segunda, 20/06 sábado, 21/06 domingo */
+    const seg = '2026-06-15', sab = '2026-06-20', dom = '2026-06-21';
+
+    /* 1) as cinco faixas da regra, nas bordas */
+    out.diaUtil = M.calcular(seg, '07:00').fator === 1
+      && M.calcular(seg, '18:59').fator === 1
+      && M.calcular(seg, '19:00').fator === 2
+      && M.calcular(seg, '21:59').fator === 2
+      && M.calcular(seg, '22:00').fator === 3
+      && M.calcular(seg, '03:00').fator === 3;
+    out.sabado = M.calcular(sab, '07:00').fator === 1
+      && M.calcular(sab, '11:59').fator === 1
+      && M.calcular(sab, '12:00').fator === 3
+      && M.calcular(sab, '20:00').fator === 3;
+    out.domingo = M.calcular(dom, '09:00').fator === 3;
+    /* sábado de madrugada não está escrito na regra: fica 3× e o motivo diz */
+    out.sabadoMadrugada = M.calcular(sab, '03:00').fator === 3
+      && /confira com o plano/.test(M.calcular(sab, '03:00').motivo);
+
+    /* 2) feriado nacional é reconhecido sozinho, inclusive os móveis */
+    out.feriadoFixo = M.nomeFeriado('2026-09-07') === 'Independência'
+      && M.calcular('2026-09-07', '10:00').fator === 3;
+    /* Páscoa 2026 = 05/04 → sexta-feira santa 03/04, Corpus Christi 04/06 */
+    out.feriadoMovel = M.nomeFeriado('2026-04-03') === 'Sexta-feira Santa'
+      && M.nomeFeriado('2026-06-04') === 'Corpus Christi';
+    out.diaComumNaoEhFeriado = M.nomeFeriado(seg) === '';
+    /* feriado municipal, que o sistema não tem como saber, é marcado à mão */
+    out.feriadoManual = M.calcular(seg, '10:00', { feriado: true }).fator === 3;
+
+    /* 3) sem horário informado, não inventa faixa */
+    const semHora = M.calcular(seg, '');
+    out.semHoraNaoInventa = semHora.fator === 1 && /sem horário/.test(semHora.motivo);
+
+    /* 4) a regra só vale para a Unimed */
+    out.soUnimed = M.ehUnimed('Unimed') && M.ehUnimed('UNIMED NACIONAL')
+      && !M.ehUnimed('Bradesco Saúde') && !M.ehUnimed('Particular');
+
+    /* 5) na janela de finalização: o aviso aparece e a aplicação é opcional */
+    const p1 = store.save('pre', { nome: 'NOTURNO', data: seg, convenio: 'Unimed', _finalizado: true });
+    fin.finalizacao.abrir('pre', p1);
+    await new Promise(res => setTimeout(res, 350));
+    const f = document.getElementById('form-fin-final');
+    f.querySelector('[name="fz_hora"]').value = '23:00';
+    fin.finalizacao.aoTrocarHorario();
+    await new Promise(res => setTimeout(res, 120));
+    const aviso = document.getElementById('fz-majoracao').innerHTML;
+    out.mostraARegra = /segunda a sexta, 22h–07h/.test(aviso) && /Este atendimento/.test(aviso);
+    out.ofereceAplicar = !!document.querySelector('[name="fz_majorar"]');
+
+    const linha = document.querySelector('#fz-codigos-body tr');
+    const base = parseFloat((linha.querySelector('[name="fz_prev[]"]') || {}).value) || 0;
+    out.totalMajorado = Math.abs(fin.finalizacao._total() - base * 3) < 0.02;
+    /* desmarcar volta ao valor de tabela — é opção, não imposição */
+    document.querySelector('[name="fz_majorar"]').checked = false;
+    fin.finalizacao._somar();
+    out.desmarcarVolta = Math.abs(fin.finalizacao._total() - base) < 0.02;
+
+    /* 6) urgência é OUTRA coisa e se soma depois da faixa */
+    document.querySelector('[name="fz_majorar"]').checked = true;
+    f.querySelector('[name="fz_urgencia"]').checked = true;
+    f.querySelector('[name="fz_perc_urg"]').value = '30';
+    fin.finalizacao._somar();
+    out.urgenciaSomaDepois = Math.abs(fin.finalizacao._total() - base * 3 * 1.3) < 0.05;
+    out.contaEscrita = /× 3 \(horário\)/.test(document.getElementById('fz-total').innerHTML)
+      && /\+ 30% \(urgência\)/.test(document.getElementById('fz-total').innerHTML);
+
+    /* 7) e fica GRAVADO no lançamento: na conciliação é preciso dizer por quê */
+    fin.finalizacao.confirmar();
+    await new Promise(res => setTimeout(res, 300));
+    const l = store.list('financeiro').find(x => x._origemId === p1._id);
+    out.gravouOsFatores = !!l && Number(l.fator_acomodacao) === 3 && Number(l.perc_urgencia) === 30
+      && l.majoracao_faixa === '3×' && /22h/.test(l.majoracao_motivo || '')
+      && l.hora_proc === '23:00';
+
+    /* 8) plano que não é Unimed não recebe o aviso */
+    const p2 = store.save('pre', { nome: 'OUTRO PLANO', data: seg, convenio: 'Bradesco Saúde', _finalizado: true });
+    fin.finalizacao.abrir('pre', p2);
+    await new Promise(res => setTimeout(res, 350));
+    out.semUnimedSemAviso = document.getElementById('fz-majoracao').innerHTML.trim() === '';
+    fin.finalizacao.cancelar();
+    return out;
+  });
+
+  assert(r.diaUtil, 'dia útil: 1× das 07h às 19h, 2× das 19h às 22h, 3× das 22h às 07h');
+  assert(r.sabado, 'sábado: 1× das 07h às 12h, 3× a partir das 12h');
+  assert(r.domingo, 'domingo é 3×');
+  assert(r.sabadoMadrugada, 'sábado antes das 07h fica 3× e o motivo manda conferir com o plano');
+  assert(r.feriadoFixo && r.feriadoMovel, 'feriado nacional é reconhecido sozinho, inclusive os móveis (Páscoa)');
+  assert(r.diaComumNaoEhFeriado, 'e dia comum não vira feriado');
+  assert(r.feriadoManual, 'feriado municipal, que o sistema não tem como saber, é marcado à mão');
+  assert(r.semHoraNaoInventa, 'sem horário informado não inventa faixa');
+  assert(r.soUnimed, 'a regra vale só para a Unimed');
+  assert(r.mostraARegra, 'a janela mostra a regra inteira e a faixa deste atendimento');
+  assert(r.ofereceAplicar && r.totalMajorado, 'e oferece aplicar o multiplicador sobre o previsto');
+  assert(r.desmarcarVolta, 'desmarcar volta ao valor de tabela — é opção, não imposição');
+  assert(r.urgenciaSomaDepois, 'a urgência é outra coisa e se soma depois da faixa');
+  assert(r.contaEscrita, 'com a conta escrita na tela — um total que não se explica não se defende numa glosa');
+  assert(r.gravouOsFatores, 'e os fatores ficam gravados no lançamento, com a faixa e o motivo');
+  assert(r.semUnimedSemAviso, 'plano que não é Unimed não recebe o aviso');
+  await page.close();
+});
+
+/* 216) O resto do pedido na mesma janela: o desfecho da avaliação confirmado
+   com a cirurgia proposta à vista, a caixa de observação do lançamento, e o ➕
+   dos campos de código criando LINHA própria onde existe cobrança — concatenar
+   " + " serve para descrever, não para faturar. */
+await test('Janela de finalização: desfecho confirmado com a cirurgia à vista, observação, e ➕ que cria linha', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['pre', 'consulta', 'financeiro'].forEach(m => store.setList(m, []));
+    const hoje = utils.hojeISO();
+
+    /* 1) pré: o desfecho aparece para confirmar, com a cirurgia proposta */
+    const p1 = store.save('pre', { nome: 'MARIA PRE', data: hoje, convenio: 'Unimed',
+      cirurgia: 'Colecistectomia videolaparoscópica', conclusao_status: 'pendente', _finalizado: true });
+    fin.finalizacao.abrir('pre', p1);
+    await new Promise(res => setTimeout(res, 350));
+    const box = document.getElementById('fz-desfecho');
+    out.pedeODesfecho = !!box && box.style.display !== 'none'
+      && !!box.querySelector('[name="fz_desfecho"]');
+    out.mostraACirurgia = /Colecistectomia videolaparoscópica/.test(box.innerHTML)
+      && /Cirurgia proposta/.test(box.innerHTML);
+    /* já vem com o que a avaliação registrou — é confirmação, não redigitação */
+    out.jaVemComOQueFoiDito = box.querySelector('[name="fz_desfecho"]').value === 'pendente';
+    /* e oferece todos os desfechos */
+    out.temAsOpcoes = box.querySelectorAll('[name="fz_desfecho"] option').length === Object.keys(pre.DESFECHOS).length;
+
+    /* 2) mudar aqui volta para a avaliação — dois valores para a mesma
+       pergunta é como começam as divergências */
+    box.querySelector('[name="fz_desfecho"]').value = 'liberado';
+    box.querySelector('[name="fz_desfecho_obs"]').value = 'exames dentro da validade';
+    document.querySelector('[name="fz_obs"]').value = 'Guia autorizada por telefone';
+    fin.finalizacao.confirmar();
+    await new Promise(res => setTimeout(res, 300));
+    const pre2 = store.getById('pre', p1._id);
+    out.voltouParaAAvaliacao = pre2.conclusao_status === 'liberado'
+      && pre2.conclusao_obs === 'exames dentro da validade';
+    const l1 = store.list('financeiro').find(x => x._origemId === p1._id);
+    out.observacaoNoLancamento = !!l1 && /Guia autorizada por telefone/.test(l1.observacoes || '')
+      && /Desfecho: Liberado/.test(l1.observacoes || '');
+
+    /* 3) sem cirurgia proposta, a janela DIZ que falta em vez de calar */
+    const p2 = store.save('pre', { nome: 'SEM CIRURGIA', data: hoje, convenio: 'Unimed', _finalizado: true });
+    fin.finalizacao.abrir('pre', p2);
+    await new Promise(res => setTimeout(res, 350));
+    out.avisaQueFalta = /Sem cirurgia proposta/.test(document.getElementById('fz-desfecho').innerHTML);
+    fin.finalizacao.cancelar();
+    await new Promise(res => setTimeout(res, 150));
+
+    /* 4) a ficha de anestesia NÃO pergunta desfecho — não é avaliação */
+    const an = store.save('anestesia', { paciente: { nome: 'CIRURGIA', convenio: 'Unimed' },
+      procedimento: { data: hoje, descricao: 'Artroplastia' }, _finalizado: true });
+    fin.finalizacao.abrir('anestesia', an);
+    await new Promise(res => setTimeout(res, 350));
+    out.fichaNaoPergunta = document.getElementById('fz-desfecho').style.display === 'none';
+
+    /* 5) o ➕ da janela cria linha nova, com código e valor próprios */
+    const antes = document.querySelectorAll('#fz-codigos-body tr').length;
+    fin.finalizacao.addLinha();
+    out.maisCriaLinha = document.querySelectorAll('#fz-codigos-body tr').length === antes + 1;
+    fin.finalizacao.cancelar();
+    await new Promise(res => setTimeout(res, 150));
+
+    /* 6) no Financeiro, o ➕ do procedimento principal abre uma LINHA de
+       código TUSS em vez de concatenar texto no mesmo campo */
+    ui.navegar('financeiro');
+    await new Promise(res => setTimeout(res, 500));
+    try { modal.close(); } catch (e) {}
+    financeiro.editar(null);
+    await new Promise(res => setTimeout(res, 250));
+    const proc = document.querySelector('#form-financeiro [name="procedimento"]');
+    out.temAAcao = proc.dataset.maisAcao === 'financeiro';
+    const nAntes = document.querySelectorAll('#fin-codigos-body tr').length;
+    proc.value = 'Colecistectomia';
+    const btn = proc.closest('.cbhpm-linha').querySelector('.cbhpm-mais');
+    btn.click();
+    await new Promise(res => setTimeout(res, 150));
+    out.abriuLinhaTuss = document.querySelectorAll('#fin-codigos-body tr').length === nAntes + 1;
+    out.naoConcatenou = proc.value === 'Colecistectomia';
+    return out;
+  });
+
+  assert(r.pedeODesfecho, 'a pré confirma o desfecho na janela de finalização');
+  assert(r.mostraACirurgia, 'com a cirurgia proposta à vista — é ela que dá sentido ao "liberado"');
+  assert(r.jaVemComOQueFoiDito && r.temAsOpcoes, 'já vindo com o que a avaliação registrou: é confirmação, não redigitação');
+  assert(r.voltouParaAAvaliacao, 'e o que se confirma ali volta para a avaliação');
+  assert(r.observacaoNoLancamento, 'a observação e o desfecho entram no lançamento, para a conciliação');
+  assert(r.avisaQueFalta, 'sem cirurgia proposta, a janela diz que falta em vez de calar');
+  assert(r.fichaNaoPergunta, 'a ficha de anestesia não pergunta desfecho — não é avaliação');
+  assert(r.maisCriaLinha, 'o ➕ da janela cria linha nova, com código e valor próprios');
+  assert(r.temAAcao && r.abriuLinhaTuss, 'no Financeiro o ➕ do procedimento abre uma linha de código TUSS');
+  assert(r.naoConcatenou, 'em vez de concatenar texto no mesmo campo — que perde o valor de cada código');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
