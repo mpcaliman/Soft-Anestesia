@@ -14086,98 +14086,109 @@ await test('Histórico do paciente: cadastro, documentos com data e o financeiro
 /* 205) Particular: o acerto é na hora. Convênio se fatura e se espera semanas;
    particular se paga na saída. Sem a pergunta no momento da finalização, o
    lançamento nasce "pendente" e ninguém volta nele — e o que entrou em PIX ou
-   dinheiro fica sem meio, sem valor e sem conta registrados. */
-await test('Particular: finalizar abre a janela de pagamento — meio, valor e conta que recebeu', async () => {
+   dinheiro fica sem meio, sem valor e sem conta registrados.
+   Este teste exercitava uma janela SÓ do particular, que existiu por alguns
+   dias e foi absorvida pela janela única de cobrança. Ele passou a exercitar a
+   janela que o app realmente abre — as regras que ele guarda são as mesmas, e
+   são elas que erram sozinhas. */
+await test('Particular: o acerto entra na janela de cobrança — meio, valor e conta, com a conta mandando', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
     try { modal.close(); } catch (e) {}
-    ['pre', 'consulta', 'anestesia', 'financeiro', 'pacientes'].forEach(m => store.setList(m, []));
+    ['pre', 'consulta', 'financeiro', 'pacientes', 'orcamento'].forEach(m => store.setList(m, []));
     const hoje = utils.hojeISO();
+    const campo = n => document.querySelector('[name="' + n + '"]');
 
-    /* 1) convênio NÃO abre a janela — lá o acerto é depois */
-    const conv = store.save('financeiro', { paciente: 'COM PLANO', convenio: 'Unimed',
-      tipo_pagamento: 'Convênio', valor_previsto: '800', data_proc: hoje, status: 'pendente' });
-    out.convenioNaoPergunta = fin.perguntarPagamento(conv) === false;
+    /* 1) convênio NÃO pede acerto — lá o dinheiro entra semanas depois */
+    const c1 = store.save('pre', { nome: 'COM PLANO', data: hoje, convenio: 'Unimed', _finalizado: true });
+    fin.finalizacao.abrir('pre', c1);
+    await new Promise(res => setTimeout(res, 350));
+    out.convenioNaoPedeAcerto = document.getElementById('fz-particular').style.display === 'none';
+    fin.finalizacao.cancelar();
+    await new Promise(res => setTimeout(res, 150));
 
-    /* 2) particular abre */
-    const part = store.save('financeiro', { paciente: 'MARIA PARTICULAR', procedimento: 'Consulta',
-      convenio: 'Particular', tipo_pagamento: 'Particular', valor_previsto: '500',
-      data_proc: hoje, status: 'pendente' });
-    out.particularPergunta = fin.perguntarPagamento(part) === true;
-    await new Promise(res => setTimeout(res, 300));
-    const f = document.getElementById('form-fin-pag');
-    out.abriuJanela = !!f;
-    out.pedeOsQuatro = !!f && ['fp_pago', 'fp_valor', 'fp_meio', 'fp_conta']
-      .every(n => !!f.querySelector('[name="' + n + '"]'));
-    out.jaVemComOPrevisto = f.querySelector('[name="fp_valor"]').value === '500.00';
+    /* 2) particular pede, com os quatro campos */
+    const p1 = store.save('pre', { nome: 'MARIA PARTICULAR', data: hoje, convenio: 'Particular', _finalizado: true });
+    fin.finalizacao.abrir('pre', p1);
+    await new Promise(res => setTimeout(res, 350));
+    out.pedeOsQuatro = ['fz_pago', 'fz_recebido', 'fz_data_pag', 'fz_conta'].every(n => !!campo(n))
+      && !!campo('fz_forma');
+    const previsto = fin.finalizacao._total();
 
-    /* 3) pago integral: vira recebido, com meio e conta gravados */
-    f.querySelector('[name="fp_meio"]').value = 'PIX';
-    f.querySelector('[name="fp_conta"]').value = 'Conta PJ Itaú';
-    fin.registrarPagamento();
-    await new Promise(res => setTimeout(res, 200));
-    const p1 = store.getById('financeiro', part._id);
-    out.gravouPagamento = p1.pago === true && p1.status === 'recebido'
-      && Number(p1.valor_recebido) === 500 && p1.forma_pagamento === 'PIX'
-      && p1.conta_recebeu === 'Conta PJ Itaú' && p1.data_pagamento === hoje;
+    /* "sim — integral" já traz o total previsto */
+    campo('fz_pago').value = 'sim';
+    fin.finalizacao._ajustarPago();
+    out.jaVemComOPrevisto = Math.abs(parseFloat(campo('fz_recebido').value) - previsto) < 0.02;
 
-    /* 4) já pago não volta a perguntar — refinalizar não reabre a janela */
-    out.pagoNaoPergunta = fin.perguntarPagamento(p1) === false;
+    campo('fz_forma').value = 'PIX';
+    campo('fz_conta').value = 'Conta PJ Itaú';
+    fin.finalizacao.confirmar();
+    await new Promise(res => setTimeout(res, 350));
+    const l1 = store.list('financeiro').find(x => x._origemId === p1._id);
+    out.gravouPagamento = !!l1 && l1.pago === true && l1.status === 'recebido'
+      && l1.forma_pagamento === 'PIX' && l1.conta_recebeu === 'Conta PJ Itaú'
+      && l1.data_pagamento === hoje;
 
-    /* 5) valor abaixo do previsto é PARCIAL, ainda que ele marque "sim":
+    /* 3) valor abaixo do previsto é PARCIAL, ainda que ele marque "sim":
        quem decide é a conta, não o clique */
-    const p2 = store.save('financeiro', { paciente: 'JOSE PARTICULAR', convenio: 'Particular',
-      tipo_pagamento: 'Particular', valor_previsto: '400', data_proc: hoje, status: 'pendente' });
-    fin.perguntarPagamento(p2);
-    await new Promise(res => setTimeout(res, 300));
-    const f2 = document.getElementById('form-fin-pag');
-    f2.querySelector('[name="fp_pago"]').value = 'sim';
-    f2.querySelector('[name="fp_valor"]').value = '150';
-    f2.querySelector('[name="fp_meio"]').value = 'Dinheiro';
-    fin.registrarPagamento();
-    await new Promise(res => setTimeout(res, 200));
-    const r2 = store.getById('financeiro', p2._id);
-    out.parcialPelaConta = r2.status === 'parcial' && r2.pago === false && Number(r2.valor_recebido) === 150;
+    const p2 = store.save('pre', { nome: 'JOSE PARTICULAR', data: hoje, convenio: 'Particular', _finalizado: true });
+    fin.finalizacao.abrir('pre', p2);
+    await new Promise(res => setTimeout(res, 350));
+    campo('fz_pago').value = 'sim';
+    fin.finalizacao._ajustarPago();
+    campo('fz_recebido').value = '10';
+    campo('fz_forma').value = 'Dinheiro';
+    fin.finalizacao.confirmar();
+    await new Promise(res => setTimeout(res, 350));
+    const l2 = store.list('financeiro').find(x => x._origemId === p2._id);
+    out.parcialPelaConta = !!l2 && l2.status === 'parcial' && l2.pago === false
+      && Number(l2.valor_recebido) === 10;
 
-    /* 6) "ainda não" deixa em aberto, sem inventar valor recebido */
-    const p3 = store.save('financeiro', { paciente: 'ANA PARTICULAR', convenio: 'Particular',
-      tipo_pagamento: 'Particular', valor_previsto: '300', data_proc: hoje, status: 'pendente' });
-    fin.perguntarPagamento(p3);
-    await new Promise(res => setTimeout(res, 300));
-    const f3 = document.getElementById('form-fin-pag');
-    f3.querySelector('[name="fp_pago"]').value = 'nao';
-    fin._pagAjustar();
-    out.escondeOsCamposDeDinheiro = f3.querySelector('[name="fp_valor"]').closest('.field').style.display === 'none';
-    fin.registrarPagamento();
-    await new Promise(res => setTimeout(res, 200));
-    const r3 = store.getById('financeiro', p3._id);
-    out.naoPagoFicaEmAberto = r3.status === 'pendente' && !r3.pago && !Number(r3.valor_recebido);
+    /* 4) "ainda não" tira de cena os campos de dinheiro e não inventa valor */
+    const p3 = store.save('pre', { nome: 'ANA PARTICULAR', data: hoje, convenio: 'Particular', _finalizado: true });
+    fin.finalizacao.abrir('pre', p3);
+    await new Promise(res => setTimeout(res, 350));
+    campo('fz_pago').value = 'nao';
+    fin.finalizacao._ajustarPago();
+    out.escondeOsCamposDeDinheiro = campo('fz_recebido').closest('.field').style.display === 'none';
+    fin.finalizacao.confirmar();
+    await new Promise(res => setTimeout(res, 350));
+    const l3 = store.list('financeiro').find(x => x._origemId === p3._id);
+    out.naoPagoFicaEmAberto = !!l3 && l3.status === 'pendente' && !l3.pago && !Number(l3.valor_recebido);
 
-    /* 7) cortesia não é cobrança — não pergunta */
-    const p4 = store.save('financeiro', { paciente: 'CORTESIA', convenio: 'Particular',
-      tipo_pagamento: 'Particular', valor_previsto: '200', data_proc: hoje, status: 'cortesia' });
-    out.cortesiaNaoPergunta = fin.perguntarPagamento(p4) === false;
+    /* 5) cortesia não é cobrança: sai quitada sem pedir acerto */
+    const p4 = store.save('pre', { nome: 'CORTESIA', data: hoje, convenio: 'Particular', _finalizado: true });
+    fin.finalizacao.abrir('pre', p4);
+    await new Promise(res => setTimeout(res, 350));
+    campo('fz_tipo').value = 'Cortesia';
+    fin.finalizacao.aoTrocarTipo();
+    out.cortesiaNaoPedeAcerto = document.getElementById('fz-particular').style.display === 'none';
+    fin.finalizacao.confirmar();
+    await new Promise(res => setTimeout(res, 350));
+    const l4 = store.list('financeiro').find(x => x._origemId === p4._id);
+    out.cortesiaSaiQuitada = !!l4 && l4.status === 'cortesia' && l4.pago === true;
 
-    /* 8) meio e conta aparecem no histórico do paciente */
+    /* 6) meio e conta aparecem no histórico do paciente, e os campos existem
+       no Financeiro para corrigir depois */
     const html = historico._prontRender('MARIA PARTICULAR');
     out.saiNoHistorico = /PIX/.test(html) && /Conta PJ Itaú/.test(html);
-    /* e o campo existe no formulário do Financeiro, para corrigir depois */
+    ui.navegar('financeiro');
+    await new Promise(res => setTimeout(res, 450));
+    try { modal.close(); } catch (e) {}
     out.temCampoNoFormulario = !!document.querySelector('#form-financeiro [name="forma_pagamento"]')
       && !!document.querySelector('#form-financeiro [name="conta_recebeu"]');
     return out;
   });
 
-  assert(r.convenioNaoPergunta, 'convênio não abre a janela — lá o acerto é depois');
-  assert(r.particularPergunta && r.abriuJanela, 'particular abre a janela ao gerar o financeiro');
-  assert(r.pedeOsQuatro, 'perguntando se foi pago, o meio, o valor e a conta que recebeu');
-  assert(r.jaVemComOPrevisto, 'já com o valor previsto preenchido');
-  assert(r.gravouPagamento, 'e grava tudo no lançamento, que vira recebido');
-  assert(r.pagoNaoPergunta, 'lançamento já pago não reabre a pergunta');
+  assert(r.convenioNaoPedeAcerto, 'convênio não pede acerto — lá o dinheiro entra semanas depois');
+  assert(r.pedeOsQuatro, 'particular pede se foi pago, o meio, o valor e a conta que recebeu');
+  assert(r.jaVemComOPrevisto, '"integral" já traz o valor previsto preenchido');
+  assert(r.gravouPagamento, 'e grava tudo no lançamento, que sai recebido');
   assert(r.parcialPelaConta, 'valor abaixo do previsto é parcial — quem decide é a conta, não o clique');
   assert(r.escondeOsCamposDeDinheiro, '"ainda não" tira de cena os campos de dinheiro');
   assert(r.naoPagoFicaEmAberto, 'e deixa em aberto, sem inventar valor recebido');
-  assert(r.cortesiaNaoPergunta, 'cortesia não é cobrança — não pergunta');
+  assert(r.cortesiaNaoPedeAcerto && r.cortesiaSaiQuitada, 'cortesia não é cobrança: sai quitada sem pedir acerto');
   assert(r.saiNoHistorico, 'meio e conta aparecem no histórico do paciente');
   assert(r.temCampoNoFormulario, 'e ficam editáveis no formulário do Financeiro');
   await page.close();

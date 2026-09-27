@@ -4647,7 +4647,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-27d</b><br>
+    v7.1 · build <b id="build-tag">2026-09-27e</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -40929,129 +40929,13 @@ const fin = {
     const c = String((item && (item.tipo_pagamento || item.convenio)) || '').toLowerCase();
     return c.indexOf('particular') >= 0;
   },
-  _pagamentoId: null,
-  perguntarPagamento(item) {
-    if (!item || !item._id) return false;
-    if (!fin.ehParticular(item)) return false;
-    if (item.pago) return false;
-    if (String(item.status || '').toLowerCase() === 'cortesia') return false;
-    fin._pagamentoId = item._id;
-    fin._abrirPagamentoQuandoLivre(0);
-    return true;
-  },
-  /* Só existe UMA janela. A finalização já abre a pergunta da SRPA, e abrir
-     por cima faria uma das duas sumir sem aviso. Espera a vez. */
-  _abrirPagamentoQuandoLivre(tentativa) {
-    let ocupado = false;
-    try {
-      const bd = document.getElementById('modal-backdrop');
-      ocupado = (bd && bd.classList.contains('show')) || !!document.querySelector('.bloq-janela');
-    } catch (e) {}
-    if (ocupado) {
-      if ((tentativa || 0) < 90) setTimeout(() => fin._abrirPagamentoQuandoLivre((tentativa || 0) + 1), 1000);
-      return;
-    }
-    fin._abrirPagamento();
-  },
-  _abrirPagamento() {
-    const item = store.getById('financeiro', fin._pagamentoId);
-    if (!item) return;
-    const prev = parseFloat(item.valor_previsto) || 0;
-    const e = utils.escapeHTML, ea = utils.escapeAttr;
-    /* contas já usadas antes: a lista cresce sozinha, sem cadastro para manter */
-    let contas = [];
-    try { contas = histAutocomplete._coletar('conta_recebeu'); } catch (x) {}
-    const corpo =
-      '<p style="font-size:.86rem;margin:0 0 10px">Atendimento <b>particular</b> de <b>' + e(item.paciente || '') + '</b>' +
-      (item.procedimento ? ' — ' + e(item.procedimento) : '') + '.<br>' +
-      '<span style="color:var(--text-mute);font-size:.82rem">O lançamento foi criado. Se o acerto já foi feito, registre agora; senão ele fica em aberto e aparece nas pendências.</span></p>' +
-      '<form id="form-fin-pag" onsubmit="return false"><div class="grid">' +
-      '<div class="field col-4"><label>Foi pago?</label><select name="fp_pago" onchange="fin._pagAjustar()">' +
-      '<option value="sim">Sim — integral</option><option value="parcial">Parcial</option><option value="nao">Ainda não</option>' +
-      '</select></div>' +
-      '<div class="field col-4"><label>Valor recebido (R$)</label><input type="number" step="0.01" min="0" name="fp_valor" value="' + (prev ? prev.toFixed(2) : '') + '"></div>' +
-      '<div class="field col-4"><label>Data do pagamento</label><input type="date" name="fp_data" value="' + ea(utils.hojeISO()) + '"></div>' +
-      '<div class="field col-6"><label>Meio de pagamento</label><select name="fp_meio"><option value="">—</option>' +
-      fin.MEIOS_PAGAMENTO.map(m => '<option>' + e(m) + '</option>').join('') + '</select></div>' +
-      '<div class="field col-6"><label>Conta que recebeu</label>' +
-      '<input type="text" name="fp_conta" list="fin-contas-lista" placeholder="ex.: Conta PJ Itaú, Caixa da clínica">' +
-      '<datalist id="fin-contas-lista">' + contas.map(c => '<option value="' + ea(c) + '">').join('') + '</datalist></div>' +
-      '<div class="field col-12" id="fp-aviso" style="font-size:.8rem;color:var(--text-mute)"></div>' +
-      '</div></form>';
-    modal.open('💵 Pagamento particular', corpo,
-      '<button class="btn" onclick="fin._pagDepois()">Depois</button>' +
-      '<button class="btn btn-primary" onclick="fin.registrarPagamento()">Registrar</button>');
-    setTimeout(() => { try { fin._pagAjustar(); } catch (x) {} }, 30);
-  },
-  _pagAjustar() {
-    const f = document.getElementById('form-fin-pag');
-    if (!f) return;
-    const pago = (f.querySelector('[name="fp_pago"]') || {}).value;
-    const item = store.getById('financeiro', fin._pagamentoId) || {};
-    const prev = parseFloat(item.valor_previsto) || 0;
-    const vEl = f.querySelector('[name="fp_valor"]');
-    const aviso = document.getElementById('fp-aviso');
-    /* "ainda não" com valor preenchido é contradição: o campo sai de cena */
-    ['fp_valor', 'fp_data', 'fp_meio', 'fp_conta'].forEach(n => {
-      const campo = f.querySelector('[name="' + n + '"]');
-      if (campo && campo.closest('.field')) campo.closest('.field').style.display = (pago === 'nao') ? 'none' : '';
-    });
-    if (pago === 'sim' && vEl && prev) vEl.value = prev.toFixed(2);
-    if (pago === 'parcial' && vEl && vEl.value && prev && parseFloat(vEl.value) >= prev) vEl.value = '';
-    if (aviso) {
-      aviso.textContent = pago === 'nao'
-        ? 'Fica como pendente, com o valor previsto de ' + historico._fmtRS(prev) + '. Dá para registrar depois no módulo Financeiro.'
-        : (prev ? 'Valor previsto: ' + historico._fmtRS(prev) + '.' : '');
-    }
-  },
-  _pagDepois() {
-    modal.close();
-    fin._pagamentoId = null;
-    toast('Deixado em aberto — o lançamento está no Financeiro.');
-  },
-  registrarPagamento() {
-    const f = document.getElementById('form-fin-pag');
-    const item = store.getById('financeiro', fin._pagamentoId);
-    if (!f || !item) { modal.close(); return; }
-    const g = n => ((f.querySelector('[name="' + n + '"]') || {}).value || '').trim();
-    const pago = g('fp_pago');
-    const prev = parseFloat(item.valor_previsto) || 0;
-    const novo = Object.assign({}, item);
-    if (pago === 'nao') {
-      novo.pago = false;
-      novo.status = 'pendente';
-    } else {
-      const val = parseFloat(g('fp_valor'));
-      if (isNaN(val) || val <= 0) { toast('Informe o valor recebido.', 'warn'); return; }
-      novo.valor_recebido = val;
-      novo.valor_pago = val;
-      novo.data_pagamento = g('fp_data') || utils.hojeISO();
-      novo.data_recebimento = novo.data_pagamento;
-      novo.forma_pagamento = g('fp_meio');
-      novo.conta_recebeu = g('fp_conta');
-      /* integral é o que cobre o previsto; abaixo disso é parcial, ainda que
-         a pessoa tenha marcado "sim" — quem decide é a conta */
-      const integral = !prev || val >= prev - 0.005;
-      novo.pago = integral;
-      novo.status = integral ? 'recebido' : 'parcial';
-      novo.diferenca_calc = prev - val - (parseFloat(novo.glosa) || 0);
-    }
-    novo.pago = financeiro.ehQuitado(novo.status);
-    store.save('financeiro', novo);
-    /* o fluxo acompanha: senão a pendência segue cobrando baixa de uma
-       cobrança que acabou de ser paga na frente dele */
-    try {
-      const etapa = pendencias.FLUXO_STATUS && Object.keys(pendencias.FLUXO_STATUS)
-        .find(k => pendencias.FLUXO_STATUS[k] === novo.status);
-      if (etapa) pendencias.marcarStatus('financeiro', novo._id, etapa, true);
-    } catch (e) {}
-    modal.close();
-    fin._pagamentoId = null;
-    try { financeiro.render(); } catch (e) {}
-    toast(pago === 'nao' ? 'Lançamento em aberto registrado.'
-      : '💵 Pagamento registrado: ' + historico._fmtRS(novo.valor_recebido) +
-        (novo.forma_pagamento ? ' · ' + novo.forma_pagamento : ''));
-  },
+  /* A pergunta do pagamento particular MORAVA AQUI, numa janela própria que
+     abria depois da finalização. Ela foi absorvida pela janela única de
+     cobrança (fin.finalizacao), que já pergunta plano, códigos, valores e o
+     acerto de uma vez. Ficar com as duas seria manter um caminho que o app
+     não percorre mais — e um teste verde em cima dele, que é pior do que não
+     ter teste. MEIOS_PAGAMENTO e ehParticular continuam, porque a janela os
+     usa. */
 
   /* Mapeia campos do documento de origem para o Financeiro.
      Uma linha financeira por linha do documento, casada por _origemLinhaId:
