@@ -5105,13 +5105,24 @@ await test('Resgate encontra o paciente no banco da clínica e no backup, e traz
 
     const daClinica = { _id: 'd21', paciente: { nome: 'Abraão Santiago' }, procedimento: { data: '2026-07-21' } };
     const doBackup = { _id: 'p9', nome: 'Abraão Santiago', data_avaliacao: '2026-07-20' };
+    /* QUEM FILTRA É O SERVIDOR. Esta busca baixava todas as linhas de todas as
+       tabelas com o registro inteiro dentro — imagens em base64 incluídas — e
+       filtrava pelo nome aqui. Um clique custava centenas de MB de egress num
+       plano de 5 GB/mês. Agora pergunta-se primeiro QUEM (tabela de pacientes,
+       algumas linhas de texto) e só então se buscam os registros DAQUELE
+       paciente. As chamadas são conferidas uma a uma. */
+    let chamadas = [];
     window.fetch = async (url) => {
       const u = String(url);
-      if (/anesthesia_records/.test(u) && /organization_id/.test(u)) {
+      chamadas.push(u);
+      if (/\/patients\?/.test(u)) {
+        return { ok: true, json: async () => (/abra/i.test(decodeURIComponent(u)) ? [{ id: 'pac-1', nome: 'Abraão Santiago' }] : []) };
+      }
+      if (/anesthesia_records/.test(u) && /patient_id=in/.test(u)) {
         return { ok: true, json: async () => [{ id: 'x', legacy_id: 'd21', data: daClinica, updated_at: '2026-07-21' }] };
       }
       if (/documentos/.test(u)) {
-        return { ok: true, json: async () => [{ modulo: 'pre', dados: doBackup }] };
+        return { ok: true, json: async () => (/abra/i.test(decodeURIComponent(u)) ? [{ modulo: 'pre', dados: doBackup }] : []) };
       }
       return { ok: true, json: async () => [] };
     };
@@ -5120,8 +5131,20 @@ await test('Resgate encontra o paciente no banco da clínica e no backup, e traz
     out.achouNosDoisCanais = achados.length === 2
       && achados.some(a => a.mod === 'anestesia' && a.item._id === 'd21')
       && achados.some(a => a.mod === 'pre' && a.item._id === 'p9');
-    /* nome que não existe não traz nada */
+
+    /* NENHUMA chamada pode varrer tabela inteira */
+    const pesadas = chamadas.filter(u =>
+      /rest\/v1\/(anesthesia_records|preanesthetic_assessments|consultations|recovery_records|consents|prescriptions|documents|risk_assessments|finance_entries|quotes)\?/.test(u)
+      && !/patient_id=in/.test(u));
+    out.nenhumaVarreduraDeTabela = pesadas.length === 0;
+    out.limitou = !chamadas.some(u => /limit=1000|limit=2000/.test(u));
+    /* o backup pessoal também filtra no servidor, pelo nome dentro do JSON */
+    out.backupFiltraNoServidor = chamadas.some(u => /documentos/.test(u) && /or=\(/.test(decodeURIComponent(u)));
+
+    /* nome que não existe não traz nada — e nem vai buscar registro nenhum */
+    chamadas = [];
     out.filtraPorNome = (await arquivo.procurarNaNuvem('zzzz')).length === 0;
+    out.semPacienteNaoBusca = !chamadas.some(u => /patient_id=in/.test(u));
 
     /* trazer de volta coloca o registro no aparelho */
     arquivo._achados = achados;
@@ -5133,7 +5156,11 @@ await test('Resgate encontra o paciente no banco da clínica e no backup, e traz
     store.setList('anestesia', []); store.setList('pre', []);
     return out;
   });
-  assert(r.achouNosDoisCanais, 'o resgate deveria varrer o banco da clínica E o backup da conta');
+  assert(r.achouNosDoisCanais, 'o resgate acha no banco da clínica E no backup da conta');
+  assert(r.nenhumaVarreduraDeTabela, 'sem varrer tabela inteira: cada leitura é filtrada pelo paciente');
+  assert(r.limitou, 'e sem os limit=1000/2000 que baixavam o acervo com as imagens dentro');
+  assert(r.backupFiltraNoServidor, 'o backup pessoal também filtra no servidor, pelo nome dentro do JSON');
+  assert(r.semPacienteNaoBusca, 'nome sem paciente correspondente não dispara busca de registro nenhum');
   assert(r.filtraPorNome, 'nome que não existe não pode trazer registro de outro paciente');
   assert(r.trouxe, 'trazer deveria colocar o registro de volta no aparelho');
   assert(r.saiuDoIndice, 'o registro trazido não pode continuar listado como arquivado');
@@ -15453,6 +15480,145 @@ await test('Geração do financeiro puxa cadastro e ficha — e o que faltar dá
   assert(r.tresLancamentos, 'cada código vira o seu lançamento');
   assert(r.temOsDoisFatores, 'no módulo Financeiro os dois fatores estão lá para corrigir depois');
   assert(r.temOsAdicionais && r.adicionalGravadoDepois, 'e os adicionais também — a janela não é a única chance de registrar');
+  await page.close();
+});
+
+/* 219) A cota de download da nuvem: o índice primeiro, e um medidor para saber
+
+   Duas leituras rodavam sozinhas, de novo e de novo, baixando tudo por inteiro:
+   os cadastros da clínica de 10 em 10 minutos (com a logomarca em base64 e a
+   tabela CBHPM dentro), e a fila de pré-lançamento a cada visita ao Painel (com
+   o módulo `anestesia` inteiro, imagens e tudo). Cada passagem pagava o acervo
+   completo para, quase sempre, descobrir que nada tinha mudado — e foi assim que
+   a cota mensal de 5 GB foi embora.
+
+   Este teste tranca as duas: primeiro o índice, e conteúdo SÓ do que mudou. E
+   confere que a informação que a tela mostra (quem está esperando conferência)
+   continua saindo certa sem o download. */
+await test('A nuvem lê o índice antes do conteúdo, e o aparelho sabe quanto baixou', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    cloud.estaConfigurado = () => true; cloud.estaLogado = () => true;
+    cloud._garantirToken = async () => true;
+    cloud.config = () => ({ url: 'https://x.supabase.co', key: 'k' });
+    cloud._headers = () => ({});
+    cloud.session = () => ({ user: { id: 'u1' } });
+    cloudRel._orgAsync = async () => 'org-1';
+    cloudRel.disponivel = () => true;
+
+    /* Trocar o fetch aqui apagaria o medidor junto — ele É um embrulho no
+       fetch. Cada troca de dublê rearma o embrulho, para medir o dublê. */
+    const stub = (fn) => { window.fetch = fn; medidorNuvem._ligado = false; medidorNuvem.ligar(); };
+    medidorNuvem.zerar();
+
+    /* ---------- a) cadastros da clínica (org_configs) ---------- */
+    /* A logomarca já está nesta versão aqui: não há nada a baixar. */
+    localStorage.setItem(clinicaSync.META_KEY, JSON.stringify({ 'medsys.v7.logoCustom': { hash: 'h', at: '2026-09-20T10:00:00.000Z' } }));
+    let chamadas = [];
+    const responder = (indiceUpdated) => async (url) => {
+      const u = String(url); chamadas.push(u);
+      if (/org_configs/.test(u) && /select=chave,updated_at/.test(u)) {
+        return { ok: true, headers: { get: () => '60' }, json: async () => [{ chave: 'logo', updated_at: indiceUpdated }] };
+      }
+      if (/org_configs/.test(u)) {
+        return { ok: true, headers: { get: () => '400000' }, json: async () => [{ chave: 'logo', dados: { valor: 'data:image/png;base64,AAAA' }, updated_at: indiceUpdated }] };
+      }
+      return { ok: true, headers: { get: () => '0' }, json: async () => [] };
+    };
+    stub(responder('2026-09-20T10:00:00.000Z'));
+    await clinicaSync.puxarAplicar({ silent: true });
+    out.configSoOIndice = chamadas.length === 1 && /select=chave,updated_at/.test(chamadas[0]);
+    out.configNaoBaixouDados = !chamadas.some(u => /select=chave,dados/.test(u));
+
+    /* Agora a clínica TEM algo mais novo: aí sim desce o conteúdo — e só dela */
+    chamadas = [];
+    stub(responder('2026-09-27T10:00:00.000Z'));
+    await clinicaSync.puxarAplicar({ silent: true });
+    out.configBaixouOQueMudou = chamadas.length === 2
+      && /select=chave,dados/.test(chamadas[1])
+      && /chave=in\.\(/.test(decodeURIComponent(chamadas[1]));
+    out.configAplicou = localStorage.getItem('medsys.v7.logoCustom') === 'data:image/png;base64,AAAA';
+
+    /* ---------- b) fila de pré-lançamento (roda a cada visita ao Painel) ---- */
+    store.setList('anestesia', [{
+      _id: 'd1', _relUpdatedAt: '2026-09-27T09:00:00.000Z',
+      paciente: { nome: 'Teste Egresso' }, _preLanc: { estado: 'enviado', porNome: 'Secretária' }
+    }]);
+    store.setList('pre', []);
+    chamadas = [];
+    stub(async (url) => {
+      const u = String(url); chamadas.push(u);
+      if (/anesthesia_records/.test(u) && /select=id,legacy_id,updated_at/.test(u)) {
+        return { ok: true, headers: { get: () => '80' }, json: async () => [{ id: 'r1', legacy_id: 'd1', updated_at: '2026-09-27T09:00:00.000Z' }] };
+      }
+      return { ok: true, headers: { get: () => '0' }, json: async () => [] };
+    });
+    preLanc._ultimaBusca = 0;
+    await preLanc.sincronizarFila({ forcar: true, silent: true });
+    /* O registro já está aqui nesta versão — o conteúdo não pode ser pedido */
+    out.filaSoOIndice = !chamadas.some(u => /select=id,legacy_id,data/.test(decodeURIComponent(u)));
+    out.filaLeuOIndice = chamadas.some(u => /select=id,legacy_id,updated_at/.test(u));
+    /* e a conta que a tela mostra continua certa, sem ter baixado nada */
+    out.filaContouSemBaixar = !!(preLanc._diag && preLanc._diag.naClinica === 1
+      && (preLanc._diag.lista || []).some(x => x.id === 'd1'));
+
+    /* versão diferente lá: aí o conteúdo desce */
+    chamadas = [];
+    stub(async (url) => {
+      const u = String(url); chamadas.push(u);
+      if (/anesthesia_records/.test(u) && /select=id,legacy_id,updated_at/.test(u)) {
+        return { ok: true, headers: { get: () => '80' }, json: async () => [{ id: 'r1', legacy_id: 'd1', updated_at: '2026-09-27T23:00:00.000Z' }] };
+      }
+      if (/anesthesia_records/.test(u) && /id=in\./.test(u)) {
+        return { ok: true, headers: { get: () => '9000' }, json: async () => [{ id: 'r1', legacy_id: 'd1', updated_at: '2026-09-27T23:00:00.000Z', data: { _id: 'd1', paciente: { nome: 'Teste Egresso' }, _preLanc: { estado: 'conferido' } } }] };
+      }
+      return { ok: true, headers: { get: () => '0' }, json: async () => [] };
+    });
+    preLanc._ultimaBusca = 0;
+    await preLanc.sincronizarFila({ forcar: true, silent: true });
+    out.filaBaixouOQueMudou = chamadas.some(u => /id=in\./.test(u) && /select=id,legacy_id,data/.test(decodeURIComponent(u)));
+
+    /* ARQUIVADO aqui não pode descer de novo: era assim que tudo o que se
+       tirou do aparelho para liberar espaço voltava a ser baixado em cada
+       passagem, só para ser descartado na chegada. */
+    store.setList('anestesia', []);
+    arquivo._gravarIndice({ anestesia: [{ id: 'd1', nome: 'Teste Egresso' }] });
+    out.ficouArquivado = arquivo.estaArquivado('anestesia', 'd1');
+    chamadas = [];
+    preLanc._ultimaBusca = 0;
+    await preLanc.sincronizarFila({ forcar: true, silent: true });
+    out.arquivadoNaoDesce = !chamadas.some(u => /id=in\./.test(u));
+    arquivo._gravarIndice({});
+
+    /* ---------- c) o medidor ---------- */
+    out.medidorContou = medidorNuvem.hoje().total > 0;
+    out.medidorSeparaPorTabela = !!(medidorNuvem.hoje().rotas || {})['anesthesia_records'];
+    out.medidorNomeiaOrgConfigs = !!(medidorNuvem.hoje().rotas || {})['org_configs'];
+    out.medidorFormata = medidorNuvem.fmt(1572864) === '1,5 MB' && medidorNuvem.fmt(2048) === '2 KB';
+    out.medidorTemPainel = /Tráfego|baixad/i.test(medidorNuvem.painelHTML());
+    medidorNuvem.zerar();
+    out.medidorZera = medidorNuvem.hoje().total === 0;
+
+    store.setList('anestesia', []); store.setList('pre', []);
+    localStorage.removeItem(clinicaSync.META_KEY);
+    return out;
+  });
+  assert(r.configSoOIndice, 'cadastro em dia deve custar UMA leitura de índice, e nada mais');
+  assert(r.configNaoBaixouDados, 'e não pode baixar o `dados` (a logomarca em base64 mora lá) para descartar depois');
+  assert(r.configBaixouOQueMudou, 'quando há algo mais novo, desce o conteúdo só das chaves que mudaram');
+  assert(r.configAplicou, 'e o que desceu tem de ser aplicado neste aparelho');
+  assert(r.filaLeuOIndice, 'a fila de pré-lançamento começa pelo índice do módulo');
+  assert(r.filaSoOIndice, 'registro que já está aqui nesta versão não pode ser baixado de novo a cada visita ao Painel');
+  assert(r.filaContouSemBaixar, 'quem está esperando conferência continua sendo contado — sem baixar o acervo');
+  assert(r.filaBaixouOQueMudou, 'versão mais nova na clínica desce o conteúdo, senão a fila nunca atualiza');
+  assert(r.ficouArquivado, 'o preparo do caso arquivado precisa valer');
+  assert(r.arquivadoNaoDesce, 'registro arquivado neste aparelho não pode ser baixado de novo a cada passagem');
+  assert(r.medidorContou, 'o medidor soma os bytes baixados da nuvem');
+  assert(r.medidorSeparaPorTabela && r.medidorNomeiaOrgConfigs, 'e diz de qual tabela vieram — é o que aponta a torneira aberta');
+  assert(r.medidorFormata, 'com os tamanhos em MB/KB e vírgula decimal');
+  assert(r.medidorTemPainel, 'e um quadro para ver isso em Ajustes');
+  assert(r.medidorZera, 'a contagem pode ser zerada para medir um período novo');
   await page.close();
 });
 
