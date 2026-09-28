@@ -4647,7 +4647,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-27e</b><br>
+    v7.1 · build <b id="build-tag">2026-09-28a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -9403,7 +9403,9 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
 
         <div class="cloud-actions" style="margin-bottom:6px">
           <button type="button" id="cloud-teste-btn" class="btn btn-sm" onclick="cloud.testarConexao()">🔌 Testar conexão com a nuvem</button>
+          <button type="button" class="btn btn-sm" onclick="medidorNuvem.abrir()">📊 Tráfego da nuvem</button>
         </div>
+        <p style="font-size:.74rem;color:var(--text-mute);margin:0 0 8px">O plano da nuvem tem uma cota mensal de <b>download</b>. <b>Tráfego da nuvem</b> mostra quanto este aparelho baixou hoje e em que tabela — é por onde se descobre um consumo fora do normal antes de a cota acabar.</p>
         <div id="cloud-teste-resultado" class="diag-box" style="display:none"></div>
 
         <details class="cloud-config-details" id="cloud-config-box">
@@ -12147,32 +12149,66 @@ const arquivo = {
         data: (typeof historico !== 'undefined' ? historico._dataItem(item) : '') || '',
         aqui: !!store.getById(mod, item._id) });
     };
-    /* 1) banco relacional da clínica (o que a equipe inteira enxerga) */
+    /* 1) banco relacional da clínica (o que a equipe inteira enxerga)
+
+       QUEM FILTRA É O SERVIDOR. Esta busca baixava TODAS as linhas de TODAS as
+       tabelas (limit 1000 cada) com o campo `data` inteiro — que é o registro
+       completo, com as imagens em base64 dentro — e só então filtrava pelo
+       nome AQUI. Um clique custava centenas de megabytes de egress, e o plano
+       tem 5 GB por mês. Era a maior torneira aberta do sistema.
+
+       O caminho certo já existia nas colunas: `patients` tem o nome e as
+       tabelas de registro têm `patient_id`. Então pergunta-se primeiro QUEM
+       (algumas linhas de texto) e só depois se buscam os registros DAQUELE
+       paciente. */
     try {
       const org = await cloudRel._orgAsync();
       if (org) {
-        for (const mod of Object.keys(cloudRel.MODOS || {})) {
-          const cfg = cloudRel.MODOS[mod];
-          if (!cfg || !cfg.tabela) continue;
-          try {
-            const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
-              '&select=' + encodeURIComponent(cloudRel._REG_SELECT) + '&limit=1000',
-              { headers: cloud._headers(true) });
-            if (!r.ok) continue;
-            (await r.json()).forEach(row => {
-              try { guardar(mod, cloudRel._rowParaRegistro(row)); } catch (e) {}
-            });
-          } catch (e) {}
+        const like = '*' + String(nome).trim().replace(/[*,()]/g, ' ') + '*';
+        const rp = await fetch(c.url + '/rest/v1/patients?organization_id=eq.' + org +
+          '&deleted_at=is.null&nome=ilike.' + encodeURIComponent(like) + '&select=id,nome&limit=50',
+          { headers: cloud._headers(true) });
+        const pacs = rp.ok ? await rp.json() : [];
+        const ids = pacs.map(x => x.id).filter(Boolean);
+        if (ids.length) {
+          const inIds = '(' + ids.join(',') + ')';
+          for (const mod of Object.keys(cloudRel.MODOS || {})) {
+            const cfg = cloudRel.MODOS[mod];
+            if (!cfg || !cfg.tabela) continue;
+            try {
+              const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
+                '&patient_id=in.' + encodeURIComponent(inIds) +
+                '&select=' + encodeURIComponent(cloudRel._REG_SELECT) + '&limit=200',
+                { headers: cloud._headers(true) });
+              if (!r.ok) continue;
+              (await r.json()).forEach(row => {
+                try { guardar(mod, cloudRel._rowParaRegistro(row)); } catch (e) {}
+              });
+            } catch (e) {}
+          }
         }
       }
     } catch (e) {}
-    /* 2) backup pessoal (canal legado) — pega o que nunca foi espelhado */
+    /* 2) backup pessoal (canal legado) — pega o que nunca foi espelhado.
+       O mesmo problema em menor escala: baixava 2000 registros INTEIROS. Esta
+       tabela não tem coluna de nome, mas o nome está dentro do JSON, e o
+       Postgres sabe filtrar por ele. O nome mora em três lugares conforme o
+       módulo, daí o `or`. Se o servidor recusar a sintaxe, este canal fica de
+       fora da busca — achar menos é melhor do que baixar o acervo inteiro. */
     try {
       const sess = cloud.session();
+      const likeJ = String(nome).trim().replace(/[*,()]/g, ' ');
+      const ors = 'or=(' + [
+        'dados->>nome.ilike.*' + likeJ + '*',
+        'dados->>paciente_nome.ilike.*' + likeJ + '*',
+        'dados->>paciente.ilike.*' + likeJ + '*',
+        'dados->paciente->>nome.ilike.*' + likeJ + '*'
+      ].join(',') + ')';
       const r = await fetch(c.url + '/rest/v1/documentos?user_id=eq.' + sess.user.id +
-        '&select=modulo,dados&limit=2000', { headers: cloud._headers(true) });
+        '&' + ors + '&select=modulo,dados&limit=100', { headers: cloud._headers(true) });
       if (r.ok) (await r.json()).forEach(row => { try { guardar(row.modulo, row.dados); } catch (e) {} });
-    } catch (e) {}
+      else arquivo._avisoBackupPessoal = true;
+    } catch (e) { arquivo._avisoBackupPessoal = true; }
     return achados;
   },
 
@@ -13072,6 +13108,38 @@ const preLanc = {
       preLanc.sincronizarFila({ forcar: true });
     });
   },
+  /* Quem espera conferência na clínica, com o FILTRO NO SERVIDOR: desce só o
+     essencial de cada um — nome, quem enviou, quando —, nunca o registro. Num
+     dia comum são alguns poucos; baixar o módulo inteiro para contá-los era
+     pagar megabytes por uma linha de texto.
+     Devolve null quando o servidor não aceita o filtro (banco antigo), e aí
+     quem chamou decide o que fazer — em vez de um zero que parece resposta. */
+  async _pendentesNaClinica(mod) {
+    const cfg = cloudRel.MODOS[mod]; if (!cfg) return null;
+    if (!cloudRel.disponivel()) return null;
+    if (!(await cloud._garantirToken())) return null;
+    const org = await cloudRel._orgAsync(); if (!org) return null;
+    const c = cloud.config();
+    const sel = ['id', 'legacy_id', 'updated_at',
+      'nome:data->paciente->>nome', 'nome2:data->>nome',
+      'quando:data->_preLanc->>enviadoEm', 'por:data->_preLanc->>porNome',
+      'fin:data->>_finalizado'].join(',');
+    try {
+      const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
+        '&deleted_at=is.null&data->_preLanc->>estado=eq.enviado' +
+        '&select=' + encodeURIComponent(sel) + '&limit=300', { headers: cloud._headers(true) });
+      if (!r.ok) return null;
+      const rows = await r.json();
+      if (!Array.isArray(rows)) return null;
+      return rows
+        .filter(x => !(x.fin === true || x.fin === 'true'))
+        .map(x => ({
+          mod, id: x.legacy_id || ('rel_' + String(x.id || '').slice(0, 8)),
+          nome: x.nome || x.nome2 || '(sem nome)',
+          quando: x.quando || '', por: x.por || ''
+        }));
+    } catch (e) { return null; }
+  },
   async sincronizarFila(opts = {}) {
     if (!opts.forcar && Date.now() - preLanc._ultimaBusca < 60000) return null;
     /* Toque que não responde nada é indistinguível de botão quebrado. Todo
@@ -13113,22 +13181,41 @@ const preLanc = {
       let novos = 0, atualizados = 0, naClinica = 0, naoCouberam = 0, leu = 0;
       const naClinicaLista = [];
       for (const mod of preLanc.MODS) {
-        const remotos = await cloudRel.puxarModulo(mod);
-        if (!Array.isArray(remotos)) continue;
+        /* ESTA BUSCA RODA A CADA VISITA AO PAINEL (ver o roteador de módulos),
+           e antes baixava o módulo INTEIRO — `anestesia` com as imagens em
+           base64 dentro de cada registro. Dezenas de visitas por dia, quatro
+           aparelhos, o acervo completo em cada uma: era assim que o egress da
+           nuvem ia embora. Agora o índice vem primeiro e só o que mudou desce. */
+        const res = await cloudRel.puxarModuloIncremental(mod);
+        if (!res) continue;
         leu++;
-        /* Quantos ENVIADOS existem na clínica, antes de qualquer filtro daqui.
-           É o número que responde "faltou chegar" x "faltou subir". */
-        const enviados = remotos.filter(r => preLanc.estado(r) === 'enviado' && !r._finalizado);
-        naClinica += enviados.length;
-        /* Guarda QUEM está esperando, não só quantos. "A clínica tem 3 e aqui
-           apareceram 0" é um diagnóstico; sem os nomes, não é uma saída. */
-        enviados.forEach(r => naClinicaLista.push({
-          mod, id: r._id, nome: arquivo._nomeDe(r),
-          quando: (r._preLanc && r._preLanc.enviadoEm) || '',
-          por: (r._preLanc && r._preLanc.porNome) || ''
-        }));
-        const m = cloudRel.mesclarLocal(mod, remotos);
-        novos += m.novos; atualizados += m.atualizados; naoCouberam += m.naoCouberam;
+        novos += res.novos; atualizados += res.atualizados; naoCouberam += res.naoCouberam;
+
+        /* QUANTOS e QUEM esperam conferência NA CLÍNICA — perguntado ao
+           servidor, não deduzido do que está aqui. É o número que separa "não
+           chegou neste aparelho" de "não subiu no aparelho de quem lançou", e
+           o caso que NÃO COUBE aqui é justamente o que precisa ser contado:
+           tirar essa conta do acervo local a apagaria em silêncio. */
+        const pend = await preLanc._pendentesNaClinica(mod);
+        if (pend) {
+          naClinica += pend.length;
+          /* Guarda QUEM está esperando, não só quantos. "A clínica tem 3 e aqui
+             apareceram 0" é um diagnóstico; sem os nomes, não é uma saída. */
+          pend.forEach(p => naClinicaLista.push(p));
+        } else {
+          /* O servidor não soube responder ao filtro: melhor uma conta pelo
+             que está gravado aqui do que nenhuma — e sem baixar nada. */
+          res.indice.forEach(linha => {
+            const r = cloudRel.localDoIndice(mod, linha);
+            if (!r || r._finalizado || preLanc.estado(r) !== 'enviado') return;
+            naClinica++;
+            naClinicaLista.push({
+              mod, id: r._id, nome: arquivo._nomeDe(r),
+              quando: (r._preLanc && r._preLanc.enviadoEm) || '',
+              por: (r._preLanc && r._preLanc.porNome) || ''
+            });
+          });
+        }
       }
       if (!leu) {
         dizer('Não consegui ler a clínica agora — confira a conexão e tente de novo.', 'error');
@@ -20706,21 +20793,54 @@ const clinicaSync = {
     } catch (e) { return 0; }
   },
 
-  /* Baixa o que estiver mais novo na clínica e aplica neste aparelho */
+  /* Baixa o que estiver mais novo na clínica e aplica neste aparelho.
+
+     DUAS ETAPAS, e a razão é o custo. Isto roda de 10 em 10 minutos em cada
+     aparelho aberto — 144 passagens por dia, vezes quatro aparelhos. Antes
+     baixava TODAS as chaves com o `dados` inteiro e só ENTÃO descartava as que
+     já estavam em dia; e a prateleira guarda a LOGOMARCA em base64, a tabela
+     CBHPM extra, os modelos de orçamento. Era o acervo de configuração
+     descendo umas 600 vezes por dia para nada.
+
+     Agora desce primeiro o índice (chave + updated_at: poucas centenas de
+     bytes), decide-se aqui o que é mais novo, e só o conteúdo dessas chaves é
+     buscado. Passagem sem mudança nenhuma custa um índice. */
   async puxarAplicar(opts = {}) {
     const org = await clinicaSync._org(); if (!org) return 0;
     const c = cloud.config();
+    const porChave = {};
+    Object.keys(clinicaSync.CHAVES).forEach(local => { porChave[clinicaSync.CHAVES[local]] = local; });
+    const meta = clinicaSync._meta();
+
+    /* ETAPA 1 — o índice */
+    let indice;
+    try {
+      const r = await fetch(c.url + '/rest/v1/org_configs?organization_id=eq.' + org + '&select=chave,updated_at',
+        { headers: cloud._headers(true) });
+      if (!r.ok) return 0;
+      indice = await r.json();
+    } catch (e) { return 0; }
+    if (!Array.isArray(indice) || !indice.length) return 0;
+
+    /* O MESMO critério de antes — "mais novo do que a última versão vista
+       aqui" —, só que aplicado ANTES de gastar rede em vez de depois. */
+    const querer = indice.filter(l => {
+      const local = porChave[l.chave]; if (!local) return false;
+      const m = meta[local] || {};
+      return !(m.at && String(l.updated_at) <= String(m.at));
+    }).map(l => l.chave);
+    if (!querer.length) return 0;
+
+    /* ETAPA 2 — o conteúdo, só das chaves que mudaram */
     let linhas;
     try {
-      const r = await fetch(c.url + '/rest/v1/org_configs?organization_id=eq.' + org + '&select=chave,dados,updated_at',
-        { headers: cloud._headers(true) });
+      const filtro = '&chave=in.(' + querer.map(encodeURIComponent).join(',') + ')';
+      const r = await fetch(c.url + '/rest/v1/org_configs?organization_id=eq.' + org + filtro +
+        '&select=chave,dados,updated_at', { headers: cloud._headers(true) });
       if (!r.ok) return 0;
       linhas = await r.json();
     } catch (e) { return 0; }
     if (!Array.isArray(linhas) || !linhas.length) return 0;
-    const porChave = {};
-    Object.keys(clinicaSync.CHAVES).forEach(local => { porChave[clinicaSync.CHAVES[local]] = local; });
-    const meta = clinicaSync._meta();
     let aplicadas = 0;
     linhas.forEach(l => {
       const local = porChave[l.chave]; if (!local) return;
@@ -21223,6 +21343,124 @@ const nuvemEstado = {
     toast('✅ Tudo atualizado — este aparelho está igual aos outros');
   }
 };
+
+/* ============================================================================
+   MEDIDOR DE TRÁFEGO DA NUVEM
+
+   O plano da nuvem cobra por BYTE BAIXADO, e o painel do provedor só mostra o
+   total do mês inteiro, um dia depois. Quando o consumo disparou não havia como
+   saber daqui QUEM estava baixando — descobrir custou ler o código linha por
+   linha. Este medidor responde isso no próprio aparelho: conta os bytes de cada
+   resposta, agrupa por tabela e guarda sete dias.
+
+   Mede pelo `content-length`, que é o tamanho JÁ COMPRIMIDO — exatamente o que
+   o provedor cobra. Sem esse cabeçalho, conta a chamada e soma zero: número
+   incompleto continua sendo diagnóstico, número inventado não.
+
+   Só observa. Nada aqui altera resposta, cabeçalho ou erro de nenhuma chamada:
+   um medidor que quebra o que mede não serve. */
+const medidorNuvem = {
+  KEY: 'medsys.v7.nuvem.trafego',
+  DIAS: 7,
+  _hoje() { try { return new Date().toISOString().slice(0, 10); } catch (e) { return '0000-00-00'; } },
+  _ler() { try { return JSON.parse(localStorage.getItem(medidorNuvem.KEY) || '{}') || {}; } catch (e) { return {}; } },
+  _gravar(m) { try { localStorage.setItem(medidorNuvem.KEY, JSON.stringify(m || {})); } catch (e) {} },
+
+  /* A rota em forma legível: a tabela do PostgREST, o bucket do Storage. É o
+     nível em que a pergunta "o que está baixando?" tem resposta útil. */
+  rota(url) {
+    const u = String(url || '');
+    let m = u.match(/\/rest\/v1\/rpc\/([A-Za-z0-9_]+)/); if (m) return 'rpc:' + m[1];
+    m = u.match(/\/rest\/v1\/([A-Za-z0-9_]+)/);          if (m) return m[1];
+    m = u.match(/\/storage\/v1\/object\/[^/]*\/?([A-Za-z0-9_.-]+)/); if (m) return 'storage:' + m[1];
+    if (/\/auth\/v1\//.test(u)) return 'auth';
+    if (/\/realtime\/v1\//.test(u)) return 'realtime';
+    return '';
+  },
+  registrar(url, bytes, ok) {
+    try {
+      const rota = medidorNuvem.rota(url); if (!rota) return;
+      const dia = medidorNuvem._hoje();
+      const m = medidorNuvem._ler();
+      const d = m[dia] = m[dia] || { total: 0, chamadas: 0, semTamanho: 0, rotas: {} };
+      d.total += (bytes || 0);
+      d.chamadas++;
+      if (!bytes) d.semTamanho++;
+      const r = d.rotas[rota] = d.rotas[rota] || { bytes: 0, n: 0 };
+      r.bytes += (bytes || 0); r.n++;
+      if (ok === false) r.erros = (r.erros || 0) + 1;
+      /* Sete dias e ponto: histórico infinito num localStorage apertado é
+         outro problema, não um recurso. */
+      const dias = Object.keys(m).sort();
+      while (dias.length > medidorNuvem.DIAS) delete m[dias.shift()];
+      medidorNuvem._gravar(m);
+    } catch (e) {}
+  },
+  hoje() { const m = medidorNuvem._ler(); return m[medidorNuvem._hoje()] || { total: 0, chamadas: 0, semTamanho: 0, rotas: {} }; },
+  dias() { const m = medidorNuvem._ler(); return Object.keys(m).sort().reverse().map(d => Object.assign({ dia: d }, m[d])); },
+  fmt(b) {
+    const n = Number(b) || 0;
+    if (n >= 1024 * 1024 * 1024) return (n / 1073741824).toFixed(2).replace('.', ',') + ' GB';
+    if (n >= 1024 * 1024) return (n / 1048576).toFixed(1).replace('.', ',') + ' MB';
+    if (n >= 1024) return (n / 1024).toFixed(0) + ' KB';
+    return n + ' B';
+  },
+  zerar() { medidorNuvem._gravar({}); },
+
+  _ligado: false,
+  ligar() {
+    if (medidorNuvem._ligado) return;
+    if (typeof window === 'undefined' || typeof window.fetch !== 'function') return;
+    medidorNuvem._ligado = true;
+    const original = window.fetch.bind(window);
+    window.fetch = function (entrada, init) {
+      const url = (typeof entrada === 'string') ? entrada : (entrada && entrada.url) || '';
+      const p = original(entrada, init);
+      try {
+        if (/\/(rest|storage|auth|realtime)\/v1\//.test(String(url))) {
+          p.then(resp => {
+            try {
+              const n = parseInt((resp && resp.headers && resp.headers.get('content-length')) || '0', 10);
+              medidorNuvem.registrar(url, isNaN(n) ? 0 : n, !!(resp && resp.ok));
+            } catch (e) {}
+          }, () => {});
+        }
+      } catch (e) {}
+      return p;
+    };
+  },
+  /* Quadro para Ajustes: o dia de hoje detalhado, e o total dos últimos dias */
+  painelHTML() {
+    const h = medidorNuvem.hoje();
+    const rotas = Object.keys(h.rotas || {}).map(k => Object.assign({ rota: k }, h.rotas[k]))
+      .sort((a, b) => b.bytes - a.bytes).slice(0, 12);
+    const E = (s) => utils.escapeHTML(String(s == null ? '' : s));
+    const dia = (d) => { try { return historico._fmtData(d); } catch (e) { return d; } };
+    const linhas = rotas.map(r => '<tr><td>' + E(r.rota) + '</td><td style="text-align:right">' + medidorNuvem.fmt(r.bytes) +
+      '</td><td style="text-align:right">' + r.n + '</td></tr>').join('');
+    const hist = medidorNuvem.dias().map(d => '<tr><td>' + E(dia(d.dia)) +
+      '</td><td style="text-align:right">' + medidorNuvem.fmt(d.total) + '</td><td style="text-align:right">' + d.chamadas + '</td></tr>').join('');
+    const tab = (cab, corpo) => '<table style="width:100%;border-collapse:collapse;font-size:.85rem"><thead><tr>' + cab +
+      '</tr></thead><tbody>' + corpo + '</tbody></table>';
+    return '<div style="font-size:.85rem;color:var(--text-mute);margin-bottom:8px">Bytes baixados da nuvem, medidos neste aparelho. ' +
+      'O plano da nuvem cobra por download: é este número que consome a cota do mês.</div>' +
+      '<div style="font-size:1.2rem;font-weight:700;margin-bottom:8px">Hoje: ' + medidorNuvem.fmt(h.total) +
+      ' <span style="font-size:.8rem;font-weight:400;color:var(--text-mute)">em ' + h.chamadas + ' chamada(s)</span></div>' +
+      (linhas ? tab('<th style="text-align:left">Tabela</th><th style="text-align:right">Baixado</th><th style="text-align:right">Chamadas</th>', linhas)
+              : '<div style="color:var(--text-mute)">Nada baixado hoje.</div>') +
+      (hist ? '<h4 style="margin:14px 0 6px">Últimos dias</h4>' + tab('<th style="text-align:left">Dia</th><th style="text-align:right">Baixado</th><th style="text-align:right">Chamadas</th>', hist) : '') +
+      (h.semTamanho ? '<div style="font-size:.8rem;color:var(--text-mute);margin-top:8px">' + h.semTamanho + ' chamada(s) sem tamanho declarado pelo servidor — contam como zero aqui.</div>' : '');
+  },
+  abrir() {
+    try {
+      modal.open('📊 Tráfego da nuvem', medidorNuvem.painelHTML(),
+        '<button class="btn ghost" onclick="medidorNuvem.zerar(); modal.close(); toast(\'Contagem zerada\')">Zerar contagem</button>' +
+        '<button class="btn" onclick="modal.close()">Fechar</button>');
+    } catch (e) { try { toast('Hoje: ' + medidorNuvem.fmt(medidorNuvem.hoje().total), 'warn'); } catch (er) {} }
+  }
+};
+/* Liga AQUI, na definição, e não no boot: o que já passou não se mede depois. */
+try { medidorNuvem.ligar(); window.medidorNuvem = medidorNuvem; } catch (e) {}
 
 const configSync = {
   /* PREFERÊNCIAS DA PESSOA (viajam entre os aparelhos DELA).
@@ -22708,6 +22946,63 @@ const cloudRel = {
       const rows = await r.json();
       return rows.map(row => cloudRel._rowParaRegistro(row));
     } catch (e) { return null; }
+  },
+
+  /* Mesclar um módulo GASTANDO SÓ O QUE MUDOU.
+
+     `puxarModulo(mod)` sem `desde` baixa o módulo INTEIRO — cada registro com
+     o campo `data`, e é lá dentro que moram as imagens em base64. Servia para
+     quem chama uma vez e vai embora; virou problema quando passou a rodar de
+     novo e de novo: a fila de pré-lançamento roda a cada visita ao Painel, e
+     `anestesia` é o módulo mais gordo do sistema. Cada visita pagava o acervo
+     completo só para descobrir que nada tinha mudado.
+
+     Aqui o índice vem primeiro (id, legacy_id, updated_at — alguns bytes por
+     registro) e o conteúdo só dos que este aparelho não tem nesta versão.
+     Passagem sem novidade custa o índice e nada mais.
+
+     Devolve null quando a leitura falhou — meia mesclagem parece sucesso e
+     esconde registro. */
+  async puxarModuloIncremental(mod) {
+    const cfg = cloudRel.MODOS[mod]; if (!cfg) return null;
+    const indice = await cloudRel.puxarIndiceModulo(mod);
+    if (!indice) return null;
+
+    /* `_relUpdatedAt` é o carimbo da versão que veio da nuvem. Bate com o de
+       lá: a cópia daqui É aquela versão. Edição local mexe em `_updatedAt`,
+       não neste — trabalho daqui não faz rebaixar o que já se tinha. */
+    const carimbo = new Map();
+    try {
+      (store.list(mod) || []).forEach(x => { if (x && x._id) carimbo.set(x._id, x._relUpdatedAt || ''); });
+    } catch (e) {}
+    /* ARQUIVADO aqui não desce de novo. Sem este filtro, tudo o que a pessoa
+       tirou do aparelho para liberar espaço voltava a ser baixado em cada
+       passagem — e descartado na chegada. O índice devolvido segue completo:
+       quem precisa saber o que existe na clínica continua sabendo. */
+    const precisam = indice
+      .filter(r => carimbo.get(r._idLocal) !== r.updated_at)
+      .filter(r => { try { return typeof arquivo === 'undefined' || !arquivo.estaArquivado(mod, r._idLocal); } catch (e) { return true; } })
+      .map(r => r.id);
+
+    let remotos = [];
+    if (precisam.length) {
+      remotos = await cloudRel.puxarPorIds(mod, precisam);
+      if (!remotos) return null;
+    }
+    const m = cloudRel.mesclarLocal(mod, remotos);
+    return { indice, baixados: precisam.length, novos: m.novos, atualizados: m.atualizados, iguais: m.iguais, naoCouberam: m.naoCouberam };
+  },
+
+  /* O registro local que uma linha do índice representa. O índice não lê
+     `data`, então a ponte é por id — e um registro antigo pode estar gravado
+     aqui com o legacy ou com o `rel_` derivado do id do banco. */
+  localDoIndice(mod, linha) {
+    try {
+      const ids = (linha && linha._idsPossiveis) || [linha && linha._idLocal];
+      const lista = store.list(mod) || [];
+      for (const id of ids) { if (!id) continue; const achou = lista.find(x => x && x._id === id); if (achou) return achou; }
+    } catch (e) {}
+    return null;
   },
 
   /* ==========================================================================
@@ -48649,10 +48944,9 @@ const dashboard = {
       dashboard._puxouVazio = true;
       let trouxe = 0;
       for (const mod of ['anestesia', 'pre', 'consulta', 'recuperacao', 'financeiro']) {
-        const remotos = await cloudRel.puxarModulo(mod);
-        if (!Array.isArray(remotos)) continue;
-        const m = cloudRel.mesclarLocal(mod, remotos);
-        trouxe += m.novos + m.atualizados;
+        const res = await cloudRel.puxarModuloIncremental(mod);
+        if (!res) continue;
+        trouxe += res.novos + res.atualizados;
       }
       if (trouxe) {
         toast('☁️ ' + trouxe + ' registro(s) trazidos da clínica para este aparelho');
