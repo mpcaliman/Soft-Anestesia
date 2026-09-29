@@ -13055,6 +13055,23 @@ await test('Baixa da nuvem é incremental — e cai para a base inteira quando p
     const k1 = cloud._marcaKey();
     cloud.session = () => ({ user: { id: 'u2' }, access_token: 't' });
     out.marcaPorUsuario = cloud._marcaKey() !== k1 && cloud._lerMarca() === '';
+
+    /* 6ª: APARELHO QUE PERTENCE A UMA CLÍNICA NÃO BAIXA ESTE CANAL.
+       `documentos` é o backup PESSOAL, indexado por usuário e não por
+       organização. Com vários ambientes ele vira um túnel: quem pertence a
+       dois traz o acervo de um para dentro do outro por aqui, passando ao
+       largo da separação por organização. Conta ligada a uma clínica lê pelo
+       canal relacional, que é separado por organização e tem tudo. */
+    cloud.session = () => ({ user: { id: 'u1' }, access_token: 't' });
+    cloudRel._lembrarOrg('org-de-teste');
+    pedidos = []; bytes = 0;
+    const r6 = await cloud._baixarTudo({ completo: true });
+    out.comClinicaNaoBaixa = (r6.porMod.pre || []).length === 0
+      && !pedidos.some(u => /documentos/.test(String(u)));
+    /* e a pergunta não pode custar rede: quem responde é o que o aparelho já
+       sabe, não uma consulta de perfil a cada sincronização */
+    out.naoConsultouPerfil = !pedidos.some(u => /profiles|organization_users/.test(String(u)));
+    cloudRel._lembrarOrg(null);
     return out;
   });
 
@@ -13066,6 +13083,8 @@ await test('Baixa da nuvem é incremental — e cai para a base inteira quando p
   assert(r.economia > 0.8, 'a economia medida passa de 80% já neste cenário (foi ' + (r.economia * 100).toFixed(0) + '%)');
   assert(r.aparelhoVazioBaixaTudo, 'aparelho sem nada gravado baixa tudo: incremental aí deixaria o app vazio e a pessoa acharia que perdeu os dados');
   assert(r.completoTrazTudo, '"completo" força a base inteira mesmo havendo marca');
+  assert(r.comClinicaNaoBaixa, 'aparelho de uma clínica não baixa o backup pessoal — era por aí que um ambiente via o acervo do outro');
+  assert(r.naoConsultouPerfil, 'e descobrir isso não pode custar uma consulta de perfil a cada sincronização');
   assert(r.marcaPorUsuario, 'a marca é por usuário — a de um não filtra a baixa do outro');
   await page.close();
 });
@@ -15854,31 +15873,33 @@ await test('Trocar de clínica limpa o aparelho, e computador compartilhado não
     const res = await ambiente.aoEntrar('org-B');
     out.trocou = res.trocou === true;
 
-    /* O ponteiro do ambiente é regravado DEPOIS da limpeza e aponta para a
-       clínica nova — não é resto da anterior. Conferido pelo valor, logo
-       abaixo, e não pela ausência. */
+    /* CONFERIR NO ARMAZENAMENTO REAL, não pela fachada do cofre.
+       A fachada só enxerga a gaveta ATIVA, então varrer por ela devolveria
+       "nada sobrou" mesmo que nada tivesse sido apagado — o teste passaria
+       enganado. A pergunta que importa num computador emprestado é outra: o
+       dado da clínica anterior ainda está GRAVADO nesta máquina? */
     const PONTEIROS = ['medsys.v7.cloud.org_id', 'medsys.v7.cloud.sem_clinica'];
     const sobrou = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
+    let bruto = '';
+    for (let i = 0; i < cofre._real.length; i++) {
+      const k = cofre._real.key(i);
       if (!k || k.indexOf('medsys.') !== 0) continue;
-      if (ambiente.CHAVES_DO_APARELHO.indexOf(k) >= 0 || PONTEIROS.indexOf(k) >= 0) continue;
+      bruto += (cofre._real.getItem(k) || '');
+      const base = k.indexOf('@') > 0 ? k.slice(0, k.indexOf('@')) : k;
+      if (cofre.DO_APARELHO.indexOf(base) >= 0 || PONTEIROS.indexOf(base) >= 0) continue;
+      if (k.indexOf('@org-B') > 0) continue;        /* a gaveta de quem entrou */
       sobrou.push(k);
     }
     out.nadaDaClinicaSobrou = sobrou.length === 0;
-    out.ponteiroApontaProNovo = localStorage.getItem('medsys.v7.cloud.org_id') === 'org-B';
+    out.ponteiroApontaProNovo = cofre._real.getItem('medsys.v7.cloud.org_id') === 'org-B';
     out.oQueSobrou = sobrou.slice(0, 6);
-    /* prova pelo conteúdo, não só pela chave: nome de paciente não pode estar
-       legível em lugar nenhum do aparelho */
-    let bruto = '';
-    for (let i = 0; i < localStorage.length; i++) { bruto += (localStorage.getItem(localStorage.key(i)) || ''); }
     out.nenhumNomeLegivel = bruto.indexOf('Paciente da Clínica A') < 0
       && bruto.indexOf('Doc da A') < 0 && bruto.indexOf('Apagado da A') < 0
       && bruto.indexOf('Rascunho da A') < 0 && bruto.indexOf('Arquivado da A') < 0;
     /* o aparelho continua sendo o aparelho */
-    out.preservouOAparelho = localStorage.getItem('medsys.v7.theme') === 'escuro'
-      && localStorage.getItem('medsys.v7.cloud.cfg') === '{"url":"x"}'
-      && localStorage.getItem('medsys.v7.auth.users') === '[{"usuario":"alguem"}]';
+    out.preservouOAparelho = cofre._real.getItem('medsys.v7.theme') === 'escuro'
+      && cofre._real.getItem('medsys.v7.cloud.cfg') === '{"url":"x"}'
+      && cofre._real.getItem('medsys.v7.auth.users') === '[{"usuario":"alguem"}]';
     out.pegouONome = ambiente.nome() === 'Clínica Carlos Pedreira';
     out.ambienteAgoraEhB = ambiente.id() === 'org-B';
 
@@ -15897,7 +15918,7 @@ await test('Trocar de clínica limpa o aparelho, e computador compartilhado não
     const saida = ambiente.aoSair();
     out.saidaLimpou = saida.limpou > 0 && (store.list('anestesia') || []).length === 0;
     out.saidaEsqueceuAClinica = !ambiente.id();
-    out.saidaPreservouLogin = localStorage.getItem('medsys.v7.auth.users') === '[{"usuario":"alguem"}]';
+    out.saidaPreservouLogin = cofre._real.getItem('medsys.v7.auth.users') === '[{"usuario":"alguem"}]';
 
     /* --- computador próprio: sair NÃO apaga o trabalho --- */
     cloudRel._lembrarOrg('org-C');
@@ -15910,7 +15931,7 @@ await test('Trocar de clínica limpa o aparelho, e computador compartilhado não
     return out;
   });
   assert(r.trocou, 'entrar com conta de outra clínica tem que ser reconhecido como troca de ambiente');
-  assert(r.nadaDaClinicaSobrou, 'nenhuma chave de dado da clínica anterior pode sobrar: ' + JSON.stringify(r.oQueSobrou));
+  assert(r.nadaDaClinicaSobrou, 'em computador compartilhado, nenhuma chave da clínica anterior pode continuar GRAVADA na máquina: ' + JSON.stringify(r.oQueSobrou));
   assert(r.nenhumNomeLegivel, 'nome de paciente da clínica anterior não pode continuar legível no aparelho');
   assert(r.preservouOAparelho, 'o que é do aparelho — login, tema, configuração da nuvem — não pode ser apagado junto');
   assert(r.pegouONome && r.ambienteAgoraEhB, 'o ambiente novo assume, com o nome da clínica à vista');
@@ -15920,6 +15941,355 @@ await test('Trocar de clínica limpa o aparelho, e computador compartilhado não
   assert(r.saidaLimpou && r.saidaEsqueceuAClinica, 'em computador compartilhado, sair não deixa dado da clínica');
   assert(r.saidaPreservouLogin, 'e mesmo assim o aparelho continua sabendo entrar');
   assert(r.proprioNaoApaga, 'em computador de uso próprio, sair NÃO pode apagar o trabalho de ninguém');
+  await page.close();
+});
+
+/* 222) Uma gaveta por clínica: o dado do outro ambiente nem é endereçável
+
+   A primeira tentativa foi LIMPAR ao trocar de clínica, e não bastou — limpeza
+   é um EVENTO, e evento falha: login offline, perfil que chega atrasado, página
+   recarregada, segunda aba. Na prática o selo já dizia "Clínica Carlos
+   Pedreira" e a tela mostrava Minha Clínica.
+
+   Agora cada ambiente escreve num conjunto de chaves próprio. O que este teste
+   tranca é a propriedade estrutural: estando na clínica B, NÃO EXISTE leitura
+   que devolva o dado da clínica A — nem pela chave, nem varrendo o
+   armazenamento, nem pelo `store`. E o contrário também: voltar para A traz o
+   trabalho de A de volta, intacto. */
+await test('Cada clínica tem a sua gaveta: o dado da outra não é endereçável', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    out.cofreInstalado = !cofre._semCofre && !!cofre._real;
+
+    /* --- clínica A trabalha --- */
+    cloudRel._lembrarOrg('org-aaaaaaaa');
+    store.setList('anestesia', [{ _id: 'a1', paciente: { nome: 'Paciente da Clinica A' } }]);
+    localStorage.setItem('medsys.v7.documentos', JSON.stringify([{ _id: 'dA', nome: 'Doc da A' }]));
+    localStorage.setItem('medsys.v7.theme', 'escuro');            /* do aparelho */
+    out.aGravou = (store.list('anestesia') || []).length === 1;
+
+    /* --- clínica B entra: mesma chave, gaveta outra --- */
+    cloudRel._lembrarOrg('org-bbbbbbbb');
+    out.bComecaVazia = (store.list('anestesia') || []).length === 0
+      && localStorage.getItem('medsys.v7.documentos') === null;
+    /* nem varrendo o armazenamento aparece a clínica A */
+    let varredura = '';
+    for (let i = 0; i < localStorage.length; i++) {
+      varredura += (localStorage.key(i) || '') + '=' + (localStorage.getItem(localStorage.key(i)) || '') + ';';
+    }
+    out.varreduraNaoVeA = varredura.indexOf('Paciente da Clinica A') < 0 && varredura.indexOf('Doc da A') < 0;
+    /* o que é do aparelho continua valendo nas duas */
+    out.aparelhoAtravessa = localStorage.getItem('medsys.v7.theme') === 'escuro';
+
+    /* B trabalha, e não encosta em A */
+    store.setList('anestesia', [{ _id: 'b1', paciente: { nome: 'Paciente da Clinica B' } }]);
+    out.bGravou = (store.list('anestesia') || []).length === 1
+      && store.list('anestesia')[0]._id === 'b1';
+
+    /* --- voltar para A: o trabalho de A está lá, inteiro --- */
+    cloudRel._lembrarOrg('org-aaaaaaaa');
+    const volta = store.list('anestesia') || [];
+    out.aVoltouInteira = volta.length === 1 && volta[0]._id === 'a1';
+    out.aNaoViuB = JSON.stringify(volta).indexOf('Clinica B') < 0;
+    out.docDeAVoltou = /Doc da A/.test(localStorage.getItem('medsys.v7.documentos') || '');
+
+    /* --- conta sem clínica nenhuma usa a gaveta crua, e não vê as clínicas --- */
+    cloudRel._lembrarOrg(null);
+    out.semClinicaNaoVeNinguem = (store.list('anestesia') || []).length === 0;
+
+    /* --- esvaziar a gaveta de uma clínica não toca na outra --- */
+    cloudRel._lembrarOrg('org-bbbbbbbb');
+    cofre.esvaziar('org-aaaaaaaa');
+    out.bIntactaDepoisDeApagarA = (store.list('anestesia') || []).length === 1;
+    cloudRel._lembrarOrg('org-aaaaaaaa');
+    out.aFoiEsvaziada = (store.list('anestesia') || []).length === 0;
+
+    cofre.esvaziar('org-bbbbbbbb');
+    cloudRel._lembrarOrg(null);
+    return out;
+  });
+  assert(r.cofreInstalado, 'sem o cofre instalado não há isolamento nenhum — isto tem que falhar alto');
+  assert(r.aGravou, 'a clínica A precisa conseguir gravar');
+  assert(r.bComecaVazia, 'entrando em outra clínica, a gaveta começa vazia — não se herda o acervo alheio');
+  assert(r.varreduraNaoVeA, 'nem varrendo o armazenamento inteiro o dado da outra clínica pode aparecer');
+  assert(r.aparelhoAtravessa, 'o que é do aparelho (tema, login, nuvem) continua valendo nos dois ambientes');
+  assert(r.bGravou, 'a clínica B grava no espaço dela');
+  assert(r.aVoltouInteira && r.aNaoViuB && r.docDeAVoltou, 'voltar para a clínica A devolve o trabalho dela, sem mistura');
+  assert(r.semClinicaNaoVeNinguem, 'conta sem clínica não enxerga a gaveta de clínica nenhuma');
+  assert(r.bIntactaDepoisDeApagarA && r.aFoiEsvaziada, 'esvaziar a gaveta de uma clínica não pode tocar na outra');
+  await page.close();
+});
+
+/* 223) Uma sugestão de cada vez: histórico e tabela CBHPM na MESMA lista
+
+   O campo "procedimento cirúrgico" recebe duas ligações — o autocomplete de
+   cadastro/histórico ("usado antes") e o da tabela CBHPM. Cada uma se achava
+   dona da tela e desenhava a sua lista no mesmo lugar, uma por cima da outra.
+   Vale para todo campo que é das duas coisas, em qualquer módulo.
+
+   A conferência é por GEOMETRIA e por PAINT ORDER, não por "existe no DOM":
+   foi justamente um teste de existência que deixou isto passar. Duas caixas
+   podem estar ambas no DOM e só uma ser visível — e podem estar ambas visíveis
+   e sobrepostas, que é o defeito. */
+await test('Histórico e tabela CBHPM aparecem numa lista só, sem uma caixa por cima da outra', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => { try { ui.showModule('anestesia'); } catch (e) {} });
+  const r = await page.evaluate(() => {
+    const out = {};
+    const inp = document.querySelector('#form-anestesia [name="procedimento"]');
+    out.achouOCampo = !!inp;
+    if (!inp) return out;
+    out.temAsDuasLigacoes = !!inp._cbhpmLigado && typeof inp._acLista === 'function';
+
+    /* histórico de mentira, com um item que casa com o que vai ser digitado */
+    inp._acLista = () => ([
+      { value: 'h1', label: 'Retirada de balão gástrico via endoscopica', meta: 'usado antes' },
+      { value: 'h2', label: 'Coisa que não casa', meta: 'usado antes' }
+    ]);
+
+    inp.value = 'retirada';
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
+    return out;
+  });
+  assert(r.achouOCampo, 'o campo de procedimento da ficha precisa existir');
+  assert(r.temAsDuasLigacoes, 'este campo é dos dois mundos — é aí que o conflito nascia');
+
+  const g = await page.evaluate(() => {
+    const out = {};
+    const vis = (el) => {
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      const st = getComputedStyle(el);
+      if (!r.width || !r.height || st.display === 'none' || st.visibility === 'hidden' || st.opacity === '0') return null;
+      return r;
+    };
+    const caixaCbhpm = vis(document.querySelector('.cbhpm-box'));
+    const caixaAc = vis(document.querySelector('.autocomplete-list.show'));
+    out.abriuUma = !!caixaCbhpm;
+    out.aOutraNaoAbriu = !caixaAc;
+    /* Mesmo se as duas abrissem: não podem se sobrepor na tela */
+    if (caixaCbhpm && caixaAc) {
+      const sobrepoe = !(caixaCbhpm.right <= caixaAc.left || caixaAc.right <= caixaCbhpm.left ||
+                         caixaCbhpm.bottom <= caixaAc.top || caixaAc.bottom <= caixaCbhpm.top);
+      out.naoSobrepoe = !sobrepoe;
+    } else out.naoSobrepoe = true;
+
+    const box = document.querySelector('.cbhpm-box');
+    const txt = box ? box.textContent : '';
+    out.temGrupoHistorico = /Já usados/i.test(txt);
+    out.temGrupoTabela = /Tabela CBHPM/i.test(txt);
+    out.trouxeOItemDoHistorico = /balão gástrico/i.test(txt);
+    out.trouxeItemDaTabela = !!box && !!box.querySelector('.cbhpm-item[data-i]');
+    out.naoTrouxeOQueNaoCasa = !/Coisa que não casa/.test(txt);
+
+    /* PAINT ORDER: o que está no topo da lista tem de ser a própria lista, e
+       não um campo do formulário atravessado por cima dela. */
+    if (box) {
+      const r = box.getBoundingClientRect();
+      const topo = document.elementFromPoint(r.left + r.width / 2, r.top + 10);
+      out.estaPorCima = !!(topo && (topo === box || box.contains(topo)));
+    }
+
+    /* escolher um item do histórico escreve no campo e fecha a lista */
+    const item = box && box.querySelector('.cbhpm-item[data-h]');
+    if (item) {
+      cbhpm._escolherHist(item);
+      const inp = document.querySelector('#form-anestesia [name="procedimento"]');
+      out.escolheuDoHistorico = /balão gástrico/i.test(inp.value || '');
+      out.fechouDepoisDeEscolher = !document.querySelector('.cbhpm-box');
+    }
+    return out;
+  });
+  assert(g.abriuUma, 'a lista unificada precisa abrir');
+  assert(g.aOutraNaoAbriu, 'a segunda caixa não pode abrir junto — era ela por cima da outra');
+  assert(g.naoSobrepoe, 'e em nenhuma hipótese duas listas de sugestão podem ocupar o mesmo lugar na tela');
+  assert(g.temGrupoHistorico && g.temGrupoTabela, 'a lista única separa as origens por título, senão vira uma sopa');
+  assert(g.trouxeOItemDoHistorico, 'o que a pessoa já usou continua sendo sugerido');
+  assert(g.trouxeItemDaTabela, 'e a tabela CBHPM também');
+  assert(g.naoTrouxeOQueNaoCasa, 'o histórico é filtrado pelo que está sendo digitado');
+  assert(g.estaPorCima, 'a lista tem que estar VISÍVEL no topo — existir no DOM não basta');
+  assert(g.escolheuDoHistorico, 'escolher um item do histórico escreve no campo');
+  assert(g.fechouDepoisDeEscolher, 'e fecha a lista');
+  await page.close();
+});
+
+/* 224) Cada ambiente com os SEUS pacientes, seu Dashboard e seu Financeiro
+
+   A gaveta por clínica resolve tudo o que passa pelo `store` — e é por ali que
+   o autocomplete de paciente, o Dashboard e o Financeiro leem. O que NÃO passa
+   pelo store é a nuvem, e lá sobrava um túnel: a tabela `documentos`, o backup
+   pessoal, indexada por USUÁRIO e não por organização. Quem pertence a dois
+   ambientes traria o acervo de um para dentro do outro por quatro caminhos —
+   a busca por nome, o resgate de um registro, "restaurar tudo" e os rascunhos.
+
+   Este teste cobre as duas metades: o que se lê daqui, e o que se traz de lá. */
+await test('Pacientes, Dashboard e Financeiro são de cada ambiente — e a nuvem não fura isso', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+
+    /* ---------- metade 1: o que se lê DAQUI ---------- */
+    cloudRel._lembrarOrg('org-aaaaaaaa');
+    store.setList('pacientes', [{ _id: 'pA', nome: 'Alzira da Clinica A', plano: 'Unimed' }]);
+    store.setList('anestesia', [{ _id: 'a1', paciente: { nome: 'Alzira da Clinica A' },
+      procedimento: { data: '2026-09-01' }, _finalizado: true }]);
+    store.setList('financeiro', [{ _id: 'fA', paciente: 'Alzira da Clinica A', valor_previsto: 1000,
+      data_proc: '2026-09-01', status: 'pendente' }]);
+
+    const nomesA = autocomplete.listaPacientes().map(x => x.label);
+    out.aVeOSeuPaciente = nomesA.some(n => /Alzira/.test(n));
+
+    cloudRel._lembrarOrg('org-bbbbbbbb');
+    const nomesB = autocomplete.listaPacientes().map(x => x.label);
+    out.bNaoVeOPacienteDeA = !nomesB.some(n => /Alzira/.test(n));
+    out.bFinanceiroVazio = (store.list('financeiro') || []).length === 0;
+    out.bDashboardVazio = (store.list('anestesia') || []).length === 0;
+
+    /* B cria o seu, e A continua com o dela */
+    store.setList('pacientes', [{ _id: 'pB', nome: 'Benedito da Clinica B' }]);
+    store.setList('financeiro', [{ _id: 'fB', paciente: 'Benedito da Clinica B', valor_previsto: 50,
+      data_proc: '2026-09-02', status: 'pendente' }]);
+    out.bVeOSeu = autocomplete.listaPacientes().some(x => /Benedito/.test(x.label));
+
+    cloudRel._lembrarOrg('org-aaaaaaaa');
+    const voltaA = autocomplete.listaPacientes().map(x => x.label);
+    out.aVoltouSemMistura = voltaA.some(n => /Alzira/.test(n)) && !voltaA.some(n => /Benedito/.test(n));
+    out.aFinanceiroIntacto = (store.list('financeiro') || []).length === 1
+      && store.list('financeiro')[0]._id === 'fA';
+
+    /* ---------- metade 2: o que se traz DE LÁ ---------- */
+    cloud.estaConfigurado = () => true; cloud.estaLogado = () => true;
+    cloud.divergencia = () => null;
+    cloud._garantirToken = async () => true;
+    cloud.config = () => ({ url: 'https://x.supabase.co', key: 'k' });
+    cloud._headers = () => ({});
+    cloud.session = () => ({ user: { id: 'u1' } });
+    cloudRel.disponivel = () => true;
+    cloudRel._orgAsync = async () => 'org-aaaaaaaa';
+
+    let chamadas = [];
+    window.fetch = async (url) => {
+      chamadas.push(String(url));
+      /* a nuvem responde com um paciente de OUTRO ambiente — se algum caminho
+         aceitar isso, ele aparece aqui dentro */
+      return { ok: true, headers: { get: () => '0' }, json: async () => ([
+        { modulo: 'anestesia', doc_id: 'zz', dados: { _id: 'zz', paciente: { nome: 'Vazou do Outro Ambiente' } } }
+      ]) };
+    };
+
+    const doPessoal = () => chamadas.filter(u => /\/documentos\?user_id=eq\./.test(u));
+
+    /* (a) busca por nome */
+    chamadas = [];
+    await arquivo.procurarNaNuvem('vazou');
+    out.buscaNaoUsaCanalPessoal = doPessoal().length === 0;
+
+    /* (b) resgate de um registro */
+    chamadas = [];
+    try { await arquivo.restaurar('anestesia', 'zz', { silent: true }); } catch (e) {}
+    out.resgateNaoUsaCanalPessoal = doPessoal().length === 0;
+
+    /* (c) restaurar tudo */
+    chamadas = [];
+    try { await cloud.restaurarTudoDaNuvem({ silent: true }); } catch (e) {}
+    out.restaurarNaoUsaCanalPessoal = doPessoal().length === 0;
+
+    /* (d) rascunhos: viajam entre APARELHOS da pessoa, mas não entre clínicas —
+       o ambiente entra na chave, e o filtro é do servidor */
+    chamadas = [];
+    try { await rascunhosSync.puxar('anestesia'); } catch (e) {}
+    const pedidoRasc = chamadas.find(u => /rascunho_anestesia/.test(decodeURIComponent(u)));
+    out.rascunhoPedeDoAmbiente = !!pedidoRasc && /rascunho_anestesia@org-aaaa/.test(decodeURIComponent(pedidoRasc));
+    /* e muda de chave quando o ambiente muda */
+    cloudRel._lembrarOrg('org-bbbbbbbb');
+    out.rascunhoMudaComOAmbiente = rascunhosSync._modulo('anestesia') !== 'rascunho_anestesia'
+      && rascunhosSync._modulo('anestesia').indexOf('@org-bbbb') > 0;
+
+    /* nada do outro ambiente entrou em lugar nenhum */
+    cloudRel._lembrarOrg('org-aaaaaaaa');
+    const tudo = JSON.stringify([store.list('anestesia'), store.list('pacientes'), store.list('financeiro')]);
+    out.nadaVazou = tudo.indexOf('Vazou do Outro Ambiente') < 0;
+
+    /* ---------- conta SEM clínica continua usando o canal pessoal ---------- */
+    cloudRel._lembrarOrg(null);
+    chamadas = [];
+    await arquivo.procurarNaNuvem('vazou');
+    out.semClinicaAindaUsaOPessoal = doPessoal().length > 0;
+
+    cofre.esvaziar('org-aaaaaaaa'); cofre.esvaziar('org-bbbbbbbb');
+    return out;
+  });
+  assert(r.aVeOSeuPaciente, 'a clínica A precisa ver os pacientes dela na busca');
+  assert(r.bNaoVeOPacienteDeA, 'a busca de paciente da clínica B NÃO pode trazer paciente da A — em módulo nenhum');
+  assert(r.bFinanceiroVazio && r.bDashboardVazio, 'Financeiro e Dashboard também são de cada ambiente');
+  assert(r.bVeOSeu, 'e a clínica B vê os seus');
+  assert(r.aVoltouSemMistura && r.aFinanceiroIntacto, 'voltar para a clínica A devolve o dela, sem nada da B');
+  assert(r.buscaNaoUsaCanalPessoal, 'procurar por nome na nuvem não pode passar pelo backup pessoal — ele é por usuário, não por clínica');
+  assert(r.resgateNaoUsaCanalPessoal, 'resgatar um registro também não');
+  assert(r.restaurarNaoUsaCanalPessoal, '"restaurar tudo" também não — despejaria o acervo das outras clínicas nesta gaveta');
+  assert(r.rascunhoPedeDoAmbiente, 'rascunho é ficha em edição, com nome de paciente: a chave dele carrega o ambiente');
+  assert(r.rascunhoMudaComOAmbiente, 'e muda quando o ambiente muda');
+  assert(r.nadaVazou, 'nenhum caminho pode ter deixado entrar registro de outro ambiente');
+  assert(r.semClinicaAindaUsaOPessoal, 'conta SEM clínica continua usando o backup pessoal — para ela não existe outro');
+  await page.close();
+});
+
+/* 225) A migração para a gaveta não pode CHUTAR de quem é o acervo
+
+   O que está gravado sem gaveta veio de antes do cofre, e o registro não diz de
+   qual clínica é — só o servidor sabe. Num aparelho de uma clínica só,
+   atribuir ao ambiente ativo é certo. Num aparelho onde duas já entraram (a
+   máquina do hospital), seria um palpite: bastaria a segunda pessoa recarregar
+   primeiro para o acervo da primeira ser carimbado como dela — o erro que o
+   cofre existe para impedir, cometido pela rotina que deveria impedi-lo. */
+await test('Migração só atribui o acervo antigo quando não há dúvida de quem é', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const R = cofre._real;
+    const limpar = () => {
+      const fora = [];
+      for (let i = 0; i < R.length; i++) { const k = R.key(i); if (k && k.indexOf('medsys.') === 0) fora.push(k); }
+      fora.forEach(k => R.removeItem(k));
+    };
+
+    /* --- caso 1: aparelho de UMA clínica só → migra, e o acervo é dela --- */
+    limpar();
+    R.setItem('medsys.v3.anestesia', JSON.stringify([{ _id: 'x1', paciente: { nome: 'Do dono do aparelho' } }]));
+    R.setItem('medsys.v7.ambiente.vistos', JSON.stringify(['org-aaaaaaaa']));
+    R.setItem('medsys.v7.cloud.org_id', 'org-aaaaaaaa');
+    out.migrou = cofre.migrar() > 0;
+    out.foiParaAGaveta = !!R.getItem('medsys.v3.anestesia@org-aaaa')
+      && R.getItem('medsys.v3.anestesia') === null;
+    out.aVeOSeu = (store.list('anestesia') || []).length === 1;
+
+    /* --- caso 2: aparelho onde DUAS clínicas já entraram → não chuta --- */
+    limpar();
+    R.setItem('medsys.v3.anestesia', JSON.stringify([{ _id: 'y1', paciente: { nome: 'De quem nao se sabe' } }]));
+    R.setItem('medsys.v7.ambiente.vistos', JSON.stringify(['org-aaaaaaaa', 'org-bbbbbbbb']));
+    R.setItem('medsys.v7.cloud.org_id', 'org-bbbbbbbb');
+    out.naoMigrou = cofre.migrar() === 0;
+    out.gavetaComecaVazia = (store.list('anestesia') || []).length === 0;
+    /* e o acervo antigo NÃO foi carimbado como de ninguém */
+    out.naoCarimbou = R.getItem('medsys.v3.anestesia@org-bbbb') === null
+      && R.getItem('medsys.v3.anestesia@org-aaaa') === null;
+    /* nem virou visível para a outra clínica */
+    R.setItem('medsys.v7.cloud.org_id', 'org-aaaaaaaa');
+    out.nemParaAOutra = (store.list('anestesia') || []).length === 0;
+
+    /* --- não repete a decisão a cada abertura --- */
+    R.setItem('medsys.v7.cloud.org_id', 'org-bbbbbbbb');
+    out.naoRefaz = cofre.migrar() === 0;
+
+    limpar();
+    return out;
+  });
+  assert(r.migrou && r.foiParaAGaveta && r.aVeOSeu, 'aparelho de uma clínica só: o acervo antigo é dela, e vai para a gaveta dela');
+  assert(r.naoMigrou, 'aparelho que já serviu duas clínicas NÃO pode atribuir o acervo antigo a nenhuma delas');
+  assert(r.gavetaComecaVazia, 'nesse caso a gaveta começa vazia e a nuvem a preenche');
+  assert(r.naoCarimbou && r.nemParaAOutra, 'e o acervo de origem desconhecida não aparece para clínica nenhuma');
+  assert(r.naoRefaz, 'a decisão fica registrada — não se refaz a cada abertura');
   await page.close();
 });
 
