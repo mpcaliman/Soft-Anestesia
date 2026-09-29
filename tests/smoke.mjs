@@ -16307,6 +16307,85 @@ await test('Acervo antigo fica de fora até alguém dizer de quem é', async () 
   await page.close();
 });
 
+/* 226) Cadastrar uma tabela de valores que o sistema não traz
+
+   O sistema vem com CBHPM 2018 e 2024/2025 de porte CIRÚRGICO, e 2015/Unimed
+   de porte ANESTÉSICO. Faltando uma — a 2015 de porte cirúrgico —, não havia
+   como acrescentá-la: o mecanismo existia nos dados, mas nenhuma tela o
+   expunha, e dependia de o programador embutir os números no código.
+
+   Os valores são digitados por quem cobra. Não há dedução possível entre
+   edições da CBHPM, e valor inventado numa tabela de cobrança vira guia
+   cobrada errado — por isso a tabela incompleta é RECUSADA, dizendo o que
+   falta, em vez de salva com buracos que sairiam como zero. */
+await test('Tabela de valores própria: entra no seletor, e incompleta é recusada', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    orcamento.salvarCfg({ tabelasAnest: {} });
+
+    /* o seletor de porte cirúrgico hoje não tem a de 2015 — é a queixa */
+    const cirAntes = Object.keys(orcamento.tabelasAnest())
+      .filter(k => orcamento.tabelasAnest()[k].tipo === 'cir');
+    out.naoTinha2015 = !cirAntes.some(k => /2015/.test(orcamento.tabelasAnest()[k].nome));
+
+    /* leitura do texto colado: tab, ponto-e-vírgula, espaço, vírgula decimal */
+    const lido = tabelasValores._ler('1A\t19,84\n1B;39.68\n2A 79,38\n3A\tR$ 202,37\nlixo\n4A\t');
+    out.leuFormatos = lido['1A'] === 19.84 && lido['1B'] === 39.68
+      && lido['2A'] === 79.38 && lido['3A'] === 202.37;
+    out.ignorouLixo = lido['4A'] === undefined && Object.keys(lido).length === 4;
+
+    /* INCOMPLETA É RECUSADA — porte sem valor sairia como zero na guia */
+    tabelasValores.editar(null);
+    document.getElementById('tv-nome').value = 'CBHPM 2015 — porte cirúrgico';
+    document.getElementById('tv-tipo').value = 'cir';
+    document.getElementById('tv-valores').value = '1A\t10,00\n1B\t20,00';
+    tabelasValores.salvar(null);
+    out.recusouIncompleta = /Faltam valores/.test((document.getElementById('tv-erro') || {}).textContent || '');
+    out.naoSalvouIncompleta = Object.keys(orcamento.cfg().tabelasAnest || {}).length === 0;
+
+    /* completa entra, e passa a existir para todo mundo */
+    const todos = tabelasValores.PORTES_CIR.map((p, i) => p + '\t' + (100 + i) + ',50').join('\n');
+    document.getElementById('tv-nome').value = 'CBHPM 2015 — porte cirúrgico';
+    document.getElementById('tv-valores').value = todos;
+    tabelasValores.salvar(null);
+    const tabs = orcamento.tabelasAnest();
+    const chave = Object.keys(tabs).find(k => tabs[k].nome === 'CBHPM 2015 — porte cirúrgico');
+    out.salvou = !!chave;
+    out.ehCirurgico = !!chave && tabs[chave].tipo === 'cir';
+    out.guardouOsValores = !!chave && tabs[chave].valores['1A'] === 100.5
+      && tabs[chave].valores['14C'] === (100 + tabelasValores.PORTES_CIR.length - 1) + 0.5;
+    /* e o preço sai por ela quando um convênio a usa */
+    try {
+      precos.definirTabelaDoConvenio('TesteConv', chave, 'cir');
+      const base = precos.base('0.00.00.00-0', 'medico', 'TesteConv');
+      out.seletorEnxerga = true;
+    } catch (e) { out.seletorEnxerga = false; }
+    out.apareceNaLista = Object.keys(orcamento.tabelasAnest())
+      .filter(k => orcamento.tabelasAnest()[k].tipo === 'cir')
+      .some(k => /2015/.test(orcamento.tabelasAnest()[k].nome));
+
+    /* remover devolve ao estado anterior */
+    const origConfirm = window.confirm; window.confirm = () => true;
+    tabelasValores.remover(chave);
+    window.confirm = origConfirm;
+    out.removeu = !Object.keys(orcamento.cfg().tabelasAnest || {}).length;
+
+    orcamento.salvarCfg({ tabelasAnest: {} });
+    try { modal.close(); } catch (e) {}
+    return out;
+  });
+  assert(r.naoTinha2015, 'o sistema realmente não traz a 2015 de porte cirúrgico — é o que falta');
+  assert(r.leuFormatos, 'aceita colar de planilha: tab, ponto-e-vírgula, espaço, vírgula decimal e R$');
+  assert(r.ignorouLixo, 'linha sem valor ou sem sentido é ignorada, não vira zero');
+  assert(r.recusouIncompleta && r.naoSalvouIncompleta, 'tabela com porte faltando é RECUSADA — porte sem valor sairia zerado na guia');
+  assert(r.salvou && r.ehCirurgico && r.guardouOsValores, 'tabela completa é salva com os valores digitados');
+  assert(r.apareceNaLista, 'e passa a aparecer na escolha de referência por convênio');
+  assert(r.seletorEnxerga, 'um convênio pode ser apontado para ela');
+  assert(r.removeu, 'e dá para remover depois');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
