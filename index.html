@@ -4605,6 +4605,10 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
       <strong>Soft Anestesia</strong>
       <small>Sistema Médico Integrado</small>
       <small style="display:block;font-size:.65rem;color:var(--text-mute);margin-top:2px">desenvolvido por Marcelo Pandolfi Caliman</small>
+      <!-- Em que clínica você está. Quem atende em dois ambientes precisa ver
+           isso sem procurar: trabalhar no banco errado é o outro jeito de
+           misturar dados. -->
+      <small id="ambiente-chip" style="display:none;font-size:.68rem;color:var(--primary-darker);background:var(--primary-soft);border-radius:10px;padding:2px 8px;margin-top:4px"></small>
     </div>
   </div>
   <div class="sidebar-section">Módulos</div>
@@ -4647,7 +4651,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-28b</b><br>
+    v7.1 · build <b id="build-tag">2026-09-29a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -9405,6 +9409,12 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
           <button type="button" id="cloud-teste-btn" class="btn btn-sm" onclick="cloud.testarConexao()">🔌 Testar conexão com a nuvem</button>
           <button type="button" class="btn btn-sm" onclick="medidorNuvem.abrir()">📊 Tráfego da nuvem</button>
         </div>
+        <label style="display:flex;align-items:flex-start;gap:8px;font-size:.82rem;margin:0 0 8px;cursor:pointer">
+          <input type="checkbox" id="amb-compartilhado" style="margin-top:3px" onchange="ambiente.definirCompartilhado(this.checked)">
+          <span><b>Este computador é compartilhado</b> (ex.: máquina do hospital) — ao desconectar, os dados da clínica
+          <b>saem deste aparelho</b> e voltam da nuvem no próximo acesso. Liga sozinho quando duas clínicas diferentes
+          usam o mesmo navegador.</span>
+        </label>
         <p style="font-size:.74rem;color:var(--text-mute);margin:0 0 8px">O plano da nuvem tem uma cota mensal de <b>download</b>. <b>Tráfego da nuvem</b> mostra quanto este aparelho baixou hoje e em que tabela — é por onde se descobre um consumo fora do normal antes de a cota acabar.</p>
         <div id="cloud-teste-resultado" class="diag-box" style="display:none"></div>
 
@@ -19107,6 +19117,13 @@ const auth = {
         u.organization_id = perfil.organization_id || u.organization_id || null;
       }
       u.uid = perfil.uid || u.uid || null;
+      /* AQUI é o único lugar em que a organização vem do SERVIDOR, conferida.
+         É por isso que a troca de ambiente acontece neste ponto e não no
+         login: trocar a gaveta por palpite é tirar de alguém o acesso ao
+         próprio trabalho. A limpeza vem ANTES de qualquer sincronização —
+         quem acabou de entrar não pode ver a clínica anterior nem por um
+         instante. */
+      try { if (u.organization_id) await ambiente.aoEntrar(u.organization_id); } catch (e) {}
       /* guarda a clínica no aparelho: se a próxima consulta falhar, ele ainda
          sabe de onde baixar (em vez de se declarar "sem organização") */
       try { if (u.organization_id) cloudRel._lembrarOrg(u.organization_id); } catch (e) {}
@@ -19128,7 +19145,13 @@ const auth = {
       const uid = s && s.user && s.user.id;
       if (!uid) return;
       const anterior = localStorage.getItem(KEY);
-      if (anterior && anterior !== uid) {
+      /* Outra PESSOA da MESMA clínica não é troca de ambiente: os registros
+         são da clínica, e perguntar a cada troca de turno só ensinava a
+         clicar em "Cancelar". Quem cuida de clínica diferente é
+         `ambiente.aoEntrar`, que limpa sem perguntar. */
+      let mesmaClinica = false;
+      try { mesmaClinica = !!ambiente.id(); } catch (e) {}
+      if (anterior && anterior !== uid && !mesmaClinica) {
         /* Contar o que está em jogo — nunca limpar "às cegas" */
         let nRegs = 0;
         try { (backupCompleto.CHAVES || []).forEach(k => { if (STORAGE[k]) nRegs += (store.list(k) || []).length; }); } catch (e) {}
@@ -20249,8 +20272,18 @@ const cloud = {
     /* A marca de baixa incremental é por usuário, mas limpá-la aqui garante
        que quem entrar depois receba a base inteira em vez de uma faixa. */
     try { cloud.esquecerMarcaBaixa(); } catch (e) {}
+    /* Computador compartilhado: sair é sair mesmo. O que ainda não subiu vai
+       num backup antes — ninguém perde trabalho por causa da privacidade de
+       outro. */
+    let saida = null;
+    try { saida = ambiente.aoSair(); } catch (e) {}
     localStorage.removeItem(cloud.SESSION_KEY);
-    if (!(opts && opts.silent)) toast('Desconectado da nuvem');
+    if (!(opts && opts.silent)) {
+      toast(saida && saida.limpou
+        ? '🚪 Desconectado — este computador é compartilhado, então nada da clínica ficou gravado aqui' +
+          (saida.backup ? ' (baixei um backup do que não tinha subido)' : '')
+        : 'Desconectado da nuvem');
+    }
     cloud._atualizarUI();
   },
 
@@ -20668,7 +20701,14 @@ const cloud = {
     if (!email || !senha) { toast('Informe email e senha', 'warn'); return; }
     await cloud.login(email, senha);
   },
-  uiLogout() { if (confirm('Desconectar da nuvem? Seus dados continuam no aparelho.')) cloud.logout(); },
+  uiLogout() {
+    let compart = false;
+    try { compart = ambiente.compartilhado(); } catch (e) {}
+    const msg = compart
+      ? 'Desconectar da nuvem?\n\nEste computador está marcado como COMPARTILHADO: ao sair, os dados da clínica saem deste aparelho (continuam na nuvem).'
+      : 'Desconectar da nuvem? Seus dados continuam no aparelho.';
+    if (confirm(msg)) cloud.logout();
+  },
   uiSincronizar() { cloud.sincronizar({ enviarTudo: true }); },
 
   /* ENTRAR DE NOVO NA NUVEM (sessão expirada) — pede só a senha, já com o
@@ -21991,6 +22031,205 @@ const configSync = {
    gestor de cada um, adiciona membros em qualquer ambiente e LIBERA ACESSO
    de leitura entre ambientes escolhidos (org_shares, por módulo).
 ============================================================================ */
+/* ============================================================================
+   AMBIENTE — cada clínica é um banco, e um aparelho só serve um por vez
+
+   No SERVIDOR isto já está resolvido desde a migração 0009: ambiente = uma
+   organização, e a RLS por organização garante que ninguém leia a linha de
+   outra clínica. O programador cria ambientes, senta o gestor de cada um e,
+   quando quer, libera leitura entre dois (org_shares) — e só ele.
+
+   O buraco era AQUI, no aparelho. Num computador de hospital, onde gente de
+   clínicas diferentes usa o mesmo navegador, tudo o que desceu da nuvem fica
+   no localStorage — e o localStorage não sabe de organização nenhuma. Quem
+   entrasse depois abria o app e via as fichas da clínica anterior. A proteção
+   que existia era uma pergunta que a própria pergunta mandava recusar
+   ("Cancelar = mantém tudo"), e a limpeza que ela fazia esquecia documentos,
+   imagens, lixeira, versões, auditoria e rascunhos.
+
+   Agora:
+   • Trocar de ambiente LIMPA o aparelho. Não é pergunta, é consequência.
+   • A limpeza é ao contrário: apaga TUDO o que é `medsys.*` menos uma lista
+     explícita do que é do aparelho (login, tema, configuração da nuvem).
+     Chave nova que eu esquecer de classificar é apagada e volta da nuvem;
+     na lista antiga, chave esquecida VAZAVA. Erra para o lado seguro.
+   • Computador compartilhado: ao sair, o aparelho não guarda nada. Liga-se
+     sozinho quando o mesmo navegador vê dois ambientes diferentes — um
+     computador que serve duas clínicas não devia depender de alguém lembrar.
+   • O ambiente ativo fica ESCRITO na tela. Trabalhar na clínica errada sem
+     perceber é o outro jeito de misturar dados.
+============================================================================ */
+const ambiente = {
+  NOME_KEY: 'medsys.v7.ambiente.nome',
+  VISTOS_KEY: 'medsys.v7.ambiente.vistos',
+  COMPART_KEY: 'medsys.v7.ambiente.compartilhado',
+
+  /* O QUE FICA NO APARELHO quando o ambiente troca. Tudo o que não estiver
+     aqui é dado de clínica e vai embora. A lista é curta de propósito: ela é
+     a exceção, não a regra. */
+  CHAVES_DO_APARELHO: [
+    'medsys.v7.cloud.cfg',            /* endereço e chave pública da nuvem */
+    'medsys.v7.cloud.session',        /* a sessão de quem está entrando */
+    'medsys.v7.cloud.last_uid',
+    'medsys.v7.auth.users',           /* espelho de login offline */
+    'medsys.v7.auth.session',
+    'medsys.v7.auth.timeout_min',     /* bloqueio de tela é do aparelho */
+    'medsys.v7.auth.sessao_dia',
+    'medsys.v7.theme',
+    'medsys.v7.grafico_modo',
+    'medsys.v7.realtime.on',
+    'medsys.v7.pdfbackup.cfg',
+    'medsys.v7.pdfbk.token',
+    'medsys.v7.configsync.meta',
+    'medsys.v7.dash.escopo',
+    'medsys.v7.dash.periodo',
+    'medsys.v7.meudia.so_finalizados',
+    'medsys.v7.ajustes.grupos_abertos',
+    'medsys.v7.ajustes.sysgrupos',
+    'medsys.v7.tutorial_grafico',
+    'medsys.v7.nuvem.trafego',        /* medição do aparelho, não da clínica */
+    'medsys.v7.modo_nuvem',
+    'medsys.v7.modo_nuvem.dias',
+    'medsys.v7.arquivo.auto',
+    'medsys.v7.demo',
+    'medsys.v7.ambiente.nome',
+    'medsys.v7.ambiente.vistos',
+    'medsys.v7.ambiente.compartilhado'
+  ],
+
+  /* ---------- quem é o ambiente ativo ---------- */
+  id() { try { return cloudRel._orgLembrada() || ''; } catch (e) { return ''; } },
+  nome() { try { return localStorage.getItem(ambiente.NOME_KEY) || ''; } catch (e) { return ''; } },
+  curto(id) { return String(id || ambiente.id() || '').slice(0, 8); },
+  definirNome(n) { try { if (n) localStorage.setItem(ambiente.NOME_KEY, n); } catch (e) {} },
+
+  /* Ambientes que JÁ entraram neste navegador. Dois = computador de passagem,
+     e um computador de passagem não pode guardar clínica nenhuma. */
+  _vistos() { try { return JSON.parse(localStorage.getItem(ambiente.VISTOS_KEY) || '[]') || []; } catch (e) { return []; } },
+  _verVisto(org) {
+    if (!org) return;
+    try {
+      const v = ambiente._vistos();
+      if (v.indexOf(org) >= 0) return;
+      v.push(org);
+      localStorage.setItem(ambiente.VISTOS_KEY, JSON.stringify(v.slice(-10)));
+      if (v.length > 1 && !ambiente.compartilhado()) {
+        ambiente.definirCompartilhado(true, { auto: true });
+      }
+    } catch (e) {}
+  },
+
+  compartilhado() { try { return localStorage.getItem(ambiente.COMPART_KEY) === '1'; } catch (e) { return false; } },
+  definirCompartilhado(lig, opts = {}) {
+    try { localStorage.setItem(ambiente.COMPART_KEY, lig ? '1' : '0'); } catch (e) {}
+    try { ambiente.pintar(); } catch (e) {}
+    if (opts.silent) return;
+    if (opts.auto && lig) {
+      toast('🔒 Este navegador já foi usado por mais de uma clínica — liguei o modo computador compartilhado: ao sair, nada fica gravado aqui.', 'warn');
+    } else {
+      toast(lig ? '🔒 Computador compartilhado: ao sair, os dados da clínica saem deste aparelho'
+                : '🔓 Computador de uso próprio: os dados ficam gravados aqui entre as sessões');
+    }
+  },
+
+  /* ---------- a limpeza ---------- */
+  /* Apaga o que é da CLÍNICA e preserva o que é do APARELHO. Ao contrário da
+     lista antiga, aqui o padrão é apagar: o que sobra está escrito acima. */
+  limparDadosLocais() {
+    let n = 0;
+    try {
+      const fora = ambiente.CHAVES_DO_APARELHO;
+      const apagar = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k || k.indexOf('medsys.') !== 0) continue;
+        if (fora.indexOf(k) >= 0) continue;
+        apagar.push(k);
+      }
+      apagar.forEach(k => { try { localStorage.removeItem(k); n++; } catch (e) {} });
+    } catch (e) {}
+    /* O que é pesado mora no IndexedDB — imagens, versões e lixeira. Sem isto,
+       a assinatura e as fotos da clínica anterior continuariam no aparelho. */
+    try { (disco.CHAVES || []).forEach(k => { try { disco.remove(k); } catch (e) {} }); } catch (e) {}
+    return n;
+  },
+
+  /* ---------- troca de ambiente ---------- */
+  /* Chamado quando uma conta entra. `org` é a organização DELA, vinda do
+     servidor — nunca de um palpite: trocar de gaveta por engano é perder o
+     acesso ao próprio trabalho. */
+  async aoEntrar(org, nomeOrg) {
+    if (!org) return { trocou: false };
+    const anterior = ambiente.id();
+    ambiente._verVisto(org);
+    if (!nomeOrg) nomeOrg = await ambiente._buscarNome(org);
+    if (!anterior || anterior === org) {
+      if (nomeOrg) ambiente.definirNome(nomeOrg);
+      try { cloudRel._lembrarOrg(org); } catch (e) {}
+      try { ambiente.pintar(); } catch (e) {}
+      return { trocou: false };
+    }
+    /* TROCOU. Aqui não se pergunta: o dado da outra clínica não pode ficar
+       visível para quem acabou de entrar. O que ainda não subiu é levado num
+       backup antes, para não sumir trabalho de ninguém. */
+    let pendentes = 0;
+    try { pendentes = (cloud._fila() || []).length; } catch (e) {}
+    if (pendentes) {
+      try { backupCompleto.exportar({ silent: true }); } catch (e) {}
+    }
+    const n = ambiente.limparDadosLocais();
+    ambiente.definirNome(nomeOrg || '');
+    try { cloudRel._lembrarOrg(org); } catch (e) {}
+    try { ambiente.pintar(); } catch (e) {}
+    toast('🔄 Outra clínica entrou neste aparelho — limpei ' + n + ' item(ns) do ambiente anterior' +
+      (pendentes ? ' (baixei um backup do que ainda não tinha subido)' : '') + '.', 'warn');
+    return { trocou: true, limpou: n, backup: !!pendentes };
+  },
+
+  /* Chamado ao sair. Em computador compartilhado, sair significa não deixar
+     nada — é o que separa "o hospital" de "o meu consultório". */
+  aoSair() {
+    if (!ambiente.compartilhado()) return { limpou: 0 };
+    let pendentes = 0;
+    try { pendentes = (cloud._fila() || []).length; } catch (e) {}
+    if (pendentes) { try { backupCompleto.exportar({ silent: true }); } catch (e) {} }
+    const n = ambiente.limparDadosLocais();
+    try { localStorage.removeItem(cloudRel.ORG_KEY); } catch (e) {}
+    try { localStorage.removeItem(ambiente.NOME_KEY); } catch (e) {}
+    return { limpou: n, backup: !!pendentes };
+  },
+
+  /* O nome da clínica, uma linha só, e só no login. Mostrar um id cortado
+     para quem trabalha em duas clínicas não ajuda ninguém a saber onde está. */
+  async _buscarNome(org) {
+    try {
+      if (!org || !cloud.estaConfigurado() || !cloud.estaLogado()) return '';
+      if (!(await cloud._garantirToken())) return '';
+      const c = cloud.config();
+      const r = await fetch(c.url + '/rest/v1/organizations?id=eq.' + encodeURIComponent(org) + '&select=nome',
+        { headers: cloud._headers(true) });
+      if (!r.ok) return '';
+      const rows = await r.json();
+      return (Array.isArray(rows) && rows[0] && rows[0].nome) || '';
+    } catch (e) { return ''; }
+  },
+
+  /* ---------- a tela diz em que clínica você está ---------- */
+  pintar() {
+    try {
+      const host = document.getElementById('ambiente-chip');
+      if (!host) return;
+      const nome = ambiente.nome();
+      const id = ambiente.id();
+      if (!id) { host.style.display = 'none'; host.textContent = ''; return; }
+      host.style.display = '';
+      host.innerHTML = '<span style="opacity:.7">Ambiente</span> <b>' +
+        utils.escapeHTML(nome || ambiente.curto(id)) + '</b>' +
+        (ambiente.compartilhado() ? ' <span title="Ao sair, nada fica gravado neste computador">🔒</span>' : '');
+    } catch (e) {}
+  }
+};
+
 const programador = {
   EMAIL: 'mpcaliman@hotmail.com',
   PAPEIS: [['gestor', 'Gestor'], ['anestesiologista', 'Anestesiologista'], ['cirurgiao', 'Cirurgião'], ['auxiliar', 'Auxiliar / Secretária'], ['financeiro', 'Financeiro'], ['empresa', 'Empresa']],
@@ -54693,6 +54932,9 @@ document.addEventListener('DOMContentLoaded', () => {
   window.globalSearch = globalSearch; window.pacientes = pacientes;
   window.ajustes = ajustes; window.autocomplete = autocomplete;
   window.mutirao = mutirao;
+  window.ambiente = ambiente;
+  try { ambiente.pintar(); } catch (e) {}
+  try { const cb = document.getElementById('amb-compartilhado'); if (cb) cb.checked = ambiente.compartilhado(); } catch (e) {}
   window.ajustesGrupos = ajustesGrupos;
   try { ajustesGrupos.montar(); } catch (e) {}
   window.configSync = configSync;
