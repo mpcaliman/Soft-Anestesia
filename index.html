@@ -4656,7 +4656,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-29e</b><br>
+    v7.1 · build <b id="build-tag">2026-09-29f</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -9414,6 +9414,11 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
           <button type="button" id="cloud-teste-btn" class="btn btn-sm" onclick="cloud.testarConexao()">🔌 Testar conexão com a nuvem</button>
           <button type="button" class="btn btn-sm" onclick="medidorNuvem.abrir()">📊 Tráfego da nuvem</button>
         </div>
+        <div class="cloud-actions" style="margin-bottom:6px">
+          <button type="button" class="btn btn-sm" onclick="ambiente.recomecarDaNuvem()">🧹 Recomeçar esta clínica a partir da nuvem</button>
+          <button type="button" class="btn btn-sm" id="amb-legado-btn" style="display:none" onclick="ambiente.perguntarLegado()">📦 Registros antigos sem clínica definida</button>
+        </div>
+        <p style="font-size:.74rem;color:var(--text-mute);margin:0 0 8px"><b>Recomeçar a partir da nuvem</b> apaga o que está gravado <i>neste aparelho</i> para a clínica aberta e baixa tudo de novo. Serve para quando o aparelho ficou com dado que não é deste ambiente — a nuvem é separada por clínica e é a fonte da verdade.</p>
         <label style="display:flex;align-items:flex-start;gap:8px;font-size:.82rem;margin:0 0 8px;cursor:pointer">
           <input type="checkbox" id="amb-compartilhado" style="margin-top:3px" onchange="ambiente.definirCompartilhado(this.checked)">
           <span><b>Este computador é compartilhado</b> (ex.: máquina do hospital) — ao desconectar, os dados da clínica
@@ -10610,45 +10615,65 @@ const cofre = {
   /* Leva o que já está gravado SEM gaveta para a gaveta da clínica atual.
      Só roda quando a organização é conhecida, e só uma vez por gaveta: mover
      dado por palpite é tirar de alguém o acesso ao próprio trabalho. */
-  migrar() {
-    const org = cofre.org();
-    if (!org) return 0;
-    let migradas = {};
-    try { migradas = JSON.parse(cofre._real.getItem(cofre.MIGRADO_KEY) || '{}') || {}; } catch (e) {}
-    const curta = String(org).slice(0, 8);
-    if (migradas[curta]) return 0;
+  /* O ACERVO ANTIGO NÃO SE ATRIBUI POR CONTA PRÓPRIA.
 
-    /* APARELHO QUE JÁ VIU MAIS DE UMA CLÍNICA NÃO MIGRA NADA.
+     O que está gravado sem gaveta veio de antes desta separação, e o registro
+     não diz de qual clínica é — só o servidor sabe. A primeira versão disto
+     movia tudo para o ambiente ativo, e a segunda tentou adivinhar pelo número
+     de ambientes já vistos neste navegador. As duas erram pelo mesmo motivo:
+     `vistos` só passou a ser gravado ontem, então um aparelho que atendeu uma
+     clínica por meses e outra uma vez parece ter visto uma só. Adivinhar aqui
+     é carimbar o prontuário de uma clínica como sendo de outra.
 
-       O que está gravado sem gaveta veio de antes desta versão, e o registro
-       não carrega de qual clínica é — só o servidor sabe. Num aparelho que
-       serviu a uma clínica só, atribuir ao ambiente ativo é certo e é o caso
-       comum. Num aparelho onde duas entraram, seria um palpite: bastaria a
-       segunda pessoa recarregar a página primeiro para o acervo da primeira
-       ser carimbado como dela — exatamente o erro que este cofre existe para
-       impedir, cometido pela rotina que deveria impedi-lo.
-
-       Então aqui a gaveta começa VAZIA e a nuvem a preenche. Custa uma
-       sincronização; a alternativa custava a separação inteira. */
-    let vistos = [];
-    try { vistos = JSON.parse(cofre._real.getItem('medsys.v7.ambiente.vistos') || '[]') || []; } catch (e) {}
-    if (vistos.length > 1) {
-      migradas[curta] = 'sem-migrar:mais-de-um-ambiente';
-      try { cofre._real.setItem(cofre.MIGRADO_KEY, JSON.stringify(migradas)); } catch (e) {}
-      return 0;
-    }
-    const mover = [];
+     Agora o padrão é NÃO MOVER. A gaveta começa vazia e a nuvem a preenche com
+     o que é daquela clínica — que é sempre correto, e custa uma sincronização.
+     O que estava solto fica intocado e invisível, e quem sabe de quem é pode
+     reivindicá-lo num clique (Ajustes → Backup e sincronização). */
+  legado() {
+    const out = [];
     try {
       for (let i = 0; i < cofre._real.length; i++) {
         const kr = cofre._real.key(i);
         if (!kr || String(kr).indexOf('medsys.') !== 0) continue;
         if (kr.indexOf('@') >= 0) continue;          /* já é de alguma gaveta */
         if (!cofre.separa(kr)) continue;             /* é do aparelho */
-        mover.push(kr);
+        out.push(kr);
       }
     } catch (e) {}
+    return out;
+  },
+  /* Quantos REGISTROS (não chaves) estão soltos — é o número que diz algo a
+     quem vai decidir. */
+  legadoRegistros() {
     let n = 0;
-    mover.forEach(kr => {
+    try {
+      Object.keys(STORAGE || {}).forEach(mod => {
+        const kr = STORAGE[mod];
+        if (!kr || cofre._real.getItem(kr) == null) return;
+        try { const v = JSON.parse(cofre._real.getItem(kr)); if (Array.isArray(v)) n += v.length; } catch (e) {}
+      });
+    } catch (e) {}
+    return n;
+  },
+  _decisoes() {
+    try { return JSON.parse(cofre._real.getItem(cofre.MIGRADO_KEY) || '{}') || {}; } catch (e) { return {}; }
+  },
+  _decidir(valor) {
+    const org = cofre.org(); if (!org) return;
+    const d = cofre._decisoes();
+    d[String(org).slice(0, 8)] = valor;
+    try { cofre._real.setItem(cofre.MIGRADO_KEY, JSON.stringify(d)); } catch (e) {}
+  },
+  decidido() {
+    const org = cofre.org(); if (!org) return true;
+    return !!cofre._decisoes()[String(org).slice(0, 8)];
+  },
+  /* Só quando a PESSOA diz que o acervo é desta clínica. */
+  reivindicar() {
+    const org = cofre.org(); if (!org) return 0;
+    const curta = String(org).slice(0, 8);
+    let n = 0;
+    cofre.legado().forEach(kr => {
       try {
         const destino = kr + '@' + curta;
         if (cofre._real.getItem(destino) == null) cofre._real.setItem(destino, cofre._real.getItem(kr));
@@ -10656,10 +10681,12 @@ const cofre = {
         n++;
       } catch (e) {}
     });
-    migradas[curta] = new Date().toISOString();
-    try { cofre._real.setItem(cofre.MIGRADO_KEY, JSON.stringify(migradas)); } catch (e) {}
+    cofre._decidir('reivindicado:' + new Date().toISOString());
     return n;
   },
+  /* Nada é apagado: só deixa de ser oferecido. O que está solto continua
+     invisível para todas as gavetas. */
+  dispensarLegado() { cofre._decidir('dispensado:' + new Date().toISOString()); },
 
   /* Apaga a gaveta INTEIRA de um ambiente (computador compartilhado). */
   esvaziar(org) {
@@ -10696,7 +10723,6 @@ const cofre = {
   }
 };
 cofre.instalar();
-try { cofre.migrar(); } catch (e) {}
 
 const DEMO_FLAG = 'medsys.v7.demo';
 const DEMO_PREFIX = 'demo:';
@@ -22475,6 +22501,56 @@ const ambiente = {
     } catch (e) { return ''; }
   },
 
+  /* ---------- acervo antigo: quem decide é quem sabe ---------- */
+  temLegadoPendente() {
+    try { return !cofre.decidido() && cofre.legado().length > 0; } catch (e) { return false; }
+  },
+  perguntarLegado() {
+    const n = cofre.legadoRegistros();
+    const nome = ambiente.nome() || 'esta clínica';
+    modal.open('📦 Registros gravados antes da separação por clínica',
+      '<p style="font-size:.88rem;margin:0 0 10px">Este aparelho tem <b>' + n + ' registro(s)</b> gravados ' +
+      'antes de o sistema separar os dados por clínica. O registro não diz de qual clínica ele é — ' +
+      '<b>só você sabe</b>.</p>' +
+      '<p style="font-size:.86rem;color:var(--text-soft);margin:0 0 10px">Se eles são de <b>' + utils.escapeHTML(nome) +
+      '</b>, traga-os para cá. Se são de outra clínica (ou você não tem certeza), deixe de fora: ' +
+      'eles continuam guardados e invisíveis, e os desta clínica descem da nuvem normalmente.</p>' +
+      '<p style="font-size:.8rem;color:var(--text-mute);margin:0">Errar aqui é misturar prontuário de uma clínica com o de outra — por isso o sistema não decide sozinho.</p>',
+      '<button class="btn" onclick="ambiente._decidirLegado(false)">Não são desta clínica</button>' +
+      '<button class="btn btn-finalizar" onclick="ambiente._decidirLegado(true)">São de ' + utils.escapeHTML(nome) + '</button>');
+  },
+  _decidirLegado(meu) {
+    if (meu) {
+      const n = cofre.reivindicar();
+      toast('📦 ' + n + ' conjunto(s) de dados agora pertencem a ' + (ambiente.nome() || 'esta clínica'));
+      try { cloud._repintarTelaAtual(); } catch (e) {}
+    } else {
+      cofre.dispensarLegado();
+      toast('Deixados de fora. Use 🔄 Atualizar tudo para trazer os desta clínica da nuvem.');
+    }
+    modal.close();
+    try { ambiente.pintar(); } catch (e) {}
+  },
+
+  /* CONSERTO DE MÃO: esvaziar o que está gravado para ESTA clínica neste
+     aparelho e trazer tudo de novo da nuvem. É a saída para quando o aparelho
+     ficou com dado que não é deste ambiente — a nuvem é a fonte da verdade, e
+     ela é separada por organização. */
+  async recomecarDaNuvem() {
+    const nome = ambiente.nome() || 'esta clínica';
+    if (!confirm('Apagar os dados de ' + nome + ' GRAVADOS NESTE APARELHO e trazer tudo de novo da nuvem?\n\n' +
+      'Os dados na nuvem não são tocados. O que ainda não tiver subido será baixado num backup .json antes.')) return;
+    let pendentes = 0;
+    try { pendentes = (cloud._fila() || []).length; } catch (e) {}
+    if (pendentes) { try { backupCompleto.exportar({ silent: true }); } catch (e) {} }
+    const n = ambiente.limparDadosLocais();
+    toast('🧹 ' + n + ' item(ns) apagados deste aparelho — buscando na nuvem…');
+    try { cloudRel._puxados = {}; } catch (e) {}
+    try { await cloudDiag.puxarTudo({ silent: true }); } catch (e) {}
+    try { cloud._repintarTelaAtual(); } catch (e) {}
+    toast('☁️ Pronto — este aparelho agora mostra o que a nuvem tem para ' + nome);
+  },
+
   /* ---------- a tela diz em que clínica você está ---------- */
   pintar() {
     try {
@@ -22487,6 +22563,10 @@ const ambiente = {
       host.innerHTML = '<span style="opacity:.7">Ambiente</span> <b>' +
         utils.escapeHTML(nome || ambiente.curto(id)) + '</b>' +
         (ambiente.compartilhado() ? ' <span title="Ao sair, nada fica gravado neste computador">🔒</span>' : '');
+      try {
+        const b = document.getElementById('amb-legado-btn');
+        if (b) b.style.display = ambiente.temLegadoPendente() ? '' : 'none';
+      } catch (e) {}
     } catch (e) {}
   }
 };
