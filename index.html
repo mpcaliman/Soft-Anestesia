@@ -4647,7 +4647,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-28a</b><br>
+    v7.1 · build <b id="build-tag">2026-09-28b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -9563,6 +9563,25 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
       </div>
     </section>
 
+    <!-- 🧮 MUTIRÃO — as duas correções do que ficou para trás -->
+    <section class="card" id="mutirao-card">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-icon">🧮</span><h2>Mutirão de correção do financeiro<small>Status que o fluxo já disse, e tabela de códigos vazia — no que ficou para trás</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <p style="font-size:.84rem;color:var(--text-soft);margin:0 0 10px;line-height:1.6">
+          Dois defeitos já consertados no caminho normal deixaram rastro nos lançamentos antigos:
+          <strong>guia marcada como paga no checklist</strong> cujo lançamento seguiu "a receber", e
+          <strong>tabela de códigos vazia</strong>, que faz o previsto virar R$ 0,00 no próximo recálculo.
+          Aqui você vê caso a caso <strong>antes</strong> de gravar, e pode <strong>desfazer</strong> depois.
+          O que o mutirão não sabe resolver — sem código TUSS, ou código sem preço na tabela do convênio —
+          sai numa lista para você decidir, em vez de receber um palpite.
+        </p>
+        <button type="button" class="btn btn-sm btn-primary" onclick="mutirao.abrir()">🧮 Conferir e corrigir</button>
+      </div>
+    </section>
+
     <section class="card" id="backup-completo-card">
       <div class="card-header" onclick="ui.toggleCard(this)">
         <div class="card-title-wrap"><span class="card-icon">💾</span><h2>Backup completo<small>Baixa TODOS os dados (fichas, pacientes, cadastros) num único arquivo</small></h2></div>
@@ -12557,6 +12576,402 @@ const duplicados = {
       try { toast('🔁 ' + n + (n === 1 ? ' registro anterior foi para a Lixeira' : ' registros anteriores foram para a Lixeira') + ' — recuperáveis por 30 dias'); } catch (e) {}
       try { if (typeof pacientes !== 'undefined' && pacientes.render) pacientes.render(); } catch (e) {}
     }
+  }
+};
+
+/* ============================================================================
+   MUTIRÃO — as duas correções de uma vez só, no que ficou para trás
+
+   Dois defeitos já consertados no caminho normal deixaram rastro nos registros
+   antigos, e registro antigo não se conserta sozinho:
+
+   1. STATUS QUE O FLUXO JÁ DISSE E O LANÇAMENTO NÃO OUVIU. O checklist de
+      faturamento (enviado, faturado, pago, glosa) não chegava ao `status` do
+      lançamento. Resultado: guia marcada como PAGA seguia "a receber" em todo
+      relatório, porque quem responde por isso é o status. Hoje marcar a etapa
+      já aplica o status; o que foi marcado ANTES continua mentindo.
+
+   2. TABELA DE CÓDIGOS VAZIA. O lançamento nascia sem a tabela de códigos, e é
+      ela a FONTE do previsto: `financeiro.codigos.recalcular()` soma as linhas
+      e escreve o total. Com a tabela vazia, bastava tocar em qualquer coisa que
+      dispare o recálculo para o previsto virar ZERO — foi o que produziu
+      lançamentos com previsto R$ 0,00.
+
+   REGRAS DESTE MUTIRÃO, porque ele mexe em dinheiro:
+   - Sempre PRÉ-VISUALIZA. Nada é gravado sem o toque de quem está olhando.
+   - Quem aplica são as funções de produção (pendencias._aplicarStatus,
+     fin._linhaComoCodigo, precos.base). Uma segunda régua daqui divergiria da
+     primeira no dia seguinte.
+   - NÃO decide no lugar de ninguém: caso sem código, ou código sem preço na
+     tabela do convênio, sai numa lista para a pessoa resolver — não recebe um
+     palpite.
+   - Valor que já existe não é alterado. Na tabela vazia com previsto na mão, o
+     mutirão faz a tabela SOMAR o que já está lá, e não o contrário.
+   - Guarda o estado anterior de cada campo que tocou. DESFAZER devolve tudo.
+============================================================================ */
+const mutirao = {
+  UNDO_KEY: 'medsys.v7.mutirao.desfazer',
+
+  /* ---------- ferramentas comuns ---------- */
+  _num(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n; },
+  _nome(r) { return (r && (r.paciente || r.paciente_nome)) || '(sem nome)'; },
+  _dia(r) { return (r && (r.data_proc || r.data)) || ''; },
+  _docOrigem(r) {
+    if (!r || !r._origemId || !r._origemTipo) return null;
+    try { return store.getById(r._origemTipo, r._origemId) || null; } catch (e) { return null; }
+  },
+
+  /* ==========================================================================
+     A) STATUS ALINHADO AO FLUXO DE FATURAMENTO
+     ========================================================================== */
+
+  /* As etapas marcadas, do lançamento E do documento que o originou — o
+     checklist podia ter sido marcado em qualquer um dos dois. */
+  _fluxoDe(r) {
+    const out = Object.assign({}, (r && r._faturamento) || {});
+    const doc = mutirao._docOrigem(r);
+    if (doc && doc._faturamento) {
+      Object.keys(doc._faturamento).forEach(k => { if (!out[k]) out[k] = doc._faturamento[k]; });
+    }
+    return out;
+  },
+
+  /* Entre as etapas que têm resposta clara sobre o dinheiro, vale a MAIS
+     RECENTE: o fluxo é cronológico, e "faturado e depois pago" acaba em pago,
+     não em faturado. "Cobrado" e "recorrido" não dizem se o dinheiro entrou —
+     ficam de fora de propósito. */
+  _decisao(fat) {
+    const mapa = Object.assign({ cortesia: 'cortesia' }, pendencias.FLUXO_STATUS);
+    let melhor = null;
+    Object.keys(mapa).forEach(chave => {
+      const quando = fat && fat[chave];
+      if (!quando) return;
+      if (!melhor || String(quando) > String(melhor.quando)) {
+        melhor = { chave, status: mapa[chave], quando: String(quando) };
+      }
+    });
+    return melhor;
+  },
+
+  /* Status que NÃO se mexe: já foi decidido por alguém. O mutirão existe para
+     o que ficou indeciso — encostar no resto seria desfazer trabalho alheio. */
+  _indeciso(status) {
+    const s = String(status || '').trim().toLowerCase();
+    return s === '' || s === 'pendente';
+  },
+
+  analisarStatus() {
+    const casos = [];
+    let jaDecididos = 0, semFluxo = 0;
+    (store.list('financeiro') || []).forEach(r => {
+      if (!r || !r._id) return;
+      const dec = mutirao._decisao(mutirao._fluxoDe(r));
+      if (!dec) { semFluxo++; return; }
+      if (!mutirao._indeciso(r.status)) { jaDecididos++; return; }
+      if (String(r.status || '').toLowerCase() === dec.status) return;
+      const rot = (pendencias.STATUS.find(s => s[0] === dec.chave) || ['', dec.chave])[1];
+      casos.push({
+        id: r._id, nome: mutirao._nome(r), dia: mutirao._dia(r),
+        de: r.status || '(vazio)', para: dec.status, etapa: rot,
+        chave: dec.chave, quando: dec.quando,
+        valor: mutirao._num(r.valor_previsto)
+      });
+    });
+    casos.sort((a, b) => String(a.dia).localeCompare(String(b.dia)));
+    return { casos, jaDecididos, semFluxo };
+  },
+
+  aplicarStatus() {
+    const { casos } = mutirao.analisarStatus();
+    if (!casos.length) return { feitos: 0, falhou: 0 };
+    const antes = [];
+    let feitos = 0, falhou = 0;
+    casos.forEach(c => {
+      const r = store.getById('financeiro', c.id);
+      if (!r) { falhou++; return; }
+      antes.push(mutirao._instantaneo(r, ['status', 'pago', 'tipo_pagamento', 'observacoes']));
+      try {
+        if (c.chave === 'cortesia') pendencias._aplicarCortesia('financeiro', r);
+        else pendencias._aplicarStatus('financeiro', r, c.chave);
+        feitos++;
+      } catch (e) { falhou++; }
+    });
+    mutirao._guardarDesfazer(antes);
+    try { if (state.currentModule === 'financeiro' && financeiro.render) financeiro.render(); } catch (e) {}
+    try { pendencias.renderDashboard(); } catch (e) {}
+    return { feitos, falhou };
+  },
+
+  /* ==========================================================================
+     B) TABELA DE CÓDIGOS VAZIA
+     ========================================================================== */
+
+  /* Os fatores que multiplicam a soma das linhas, na mesma ordem que
+     financeiro.codigos.recalcular() usa. Sem isto, a tabela somaria o previsto
+     final e o recálculo seguinte multiplicaria de novo. */
+  _fatores(r) {
+    const acom = mutirao._num(r.fator_acomodacao) || 1;
+    const maj = mutirao._num(r.fator_majoracao) || 1;
+    const urg = r.urgencia ? (mutirao._num(r.perc_urgencia) || 0) : 0;
+    return acom * maj * (1 + urg / 100);
+  },
+  _porteDe(codigo, tipoHon) {
+    try {
+      const info = cbhpm.info(codigo);
+      if (!info) return '';
+      return (tipoHon === 'anestesia' && info.porte_anest) ? ('AN ' + info.porte_anest) : (info.porte || '');
+    } catch (e) { return ''; }
+  },
+
+  analisarCodigos() {
+    const casos = [], semCodigo = [], semPreco = [];
+    let jaTemTabela = 0;
+    (store.list('financeiro') || []).forEach(r => {
+      if (!r || !r._id) return;
+      if (Array.isArray(r.codigos) && r.codigos.length) { jaTemTabela++; return; }
+      const codigo = String(r.cbhpm_codigo || '').trim();
+      const previsto = mutirao._num(r.valor_previsto);
+      const base = { id: r._id, nome: mutirao._nome(r), dia: mutirao._dia(r), convenio: r.convenio || '', previsto };
+      if (!codigo) {
+        /* Sem código não há o que preencher, e inventar um seria pior que o
+           vazio: vai para a lista de quem precisa de decisão humana. */
+        semCodigo.push(Object.assign({ procedimento: r.procedimento || '' }, base));
+        return;
+      }
+      const qtd = Math.max(1, mutirao._num(r.quantidade) || 1);
+      const grau = mutirao._num(r.fracao) || 100;
+      const fat = mutirao._fatores(r);
+      let unit = mutirao._num(r.valor_base);
+      let linhaPrev = mutirao._num(r.valor_final);
+      let origem = 'do próprio lançamento';
+
+      if (previsto > 0) {
+        /* JÁ TEM VALOR: o mutirão não mexe no dinheiro. Só faz a tabela somar
+           o que já está lá — para o próximo recálculo não zerar o previsto. */
+        linhaPrev = previsto / (fat || 1);
+        unit = precos.calcular ? (linhaPrev / qtd) * (100 / (grau || 100)) : linhaPrev;
+        origem = 'ajustado para somar o previsto que já existe';
+      } else if (!(linhaPrev > 0)) {
+        /* SEM VALOR: aí sim vale a tabela do convênio. */
+        let p = null;
+        try {
+          const tipo = (r.tipo_honorario === 'anestesia') ? 'anestesia' : 'medico';
+          p = precos.base(codigo, tipo, r.convenio);
+          if (!p || p.valor == null) {
+            const outro = (tipo === 'anestesia') ? 'medico' : 'anestesia';
+            p = precos.base(codigo, outro, r.convenio);
+          }
+        } catch (e) { p = null; }
+        if (!p || p.valor == null) {
+          semPreco.push(Object.assign({ codigo, procedimento: r.procedimento || '' }, base));
+          return;
+        }
+        unit = mutirao._num(p.valor);
+        linhaPrev = mutirao._num(precos.calcular(p.valor, qtd, grau));
+        origem = 'tabela ' + (p.tabela || 'de referência') + (p.doConvenio ? ' (deste convênio)' : '');
+      }
+
+      casos.push(Object.assign({
+        codigo, qtd, grau,
+        unit: Math.round(unit * 100) / 100,
+        linhaPrev: Math.round(linhaPrev * 100) / 100,
+        previstoNovo: Math.round(linhaPrev * fat * 100) / 100,
+        mudaDinheiro: !(previsto > 0),
+        origem
+      }, base));
+    });
+    const ord = (a, b) => String(a.dia).localeCompare(String(b.dia));
+    casos.sort(ord); semCodigo.sort(ord); semPreco.sort(ord);
+    return { casos, semCodigo, semPreco, jaTemTabela };
+  },
+
+  aplicarCodigos() {
+    const { casos } = mutirao.analisarCodigos();
+    if (!casos.length) return { feitos: 0, falhou: 0 };
+    const antes = [];
+    let feitos = 0, falhou = 0;
+    casos.forEach(c => {
+      const r = store.getById('financeiro', c.id);
+      if (!r) { falhou++; return; }
+      antes.push(mutirao._instantaneo(r, ['codigos', 'valor_previsto']));
+      try {
+        r.codigos = [{
+          codigo: c.codigo,
+          descricao: r.cbhpm_descricao || r.procedimento || '',
+          porte: mutirao._porteDe(c.codigo, r.tipo_honorario),
+          qtd: c.qtd, grau: c.grau,
+          valor_unit: c.unit,
+          valor_previsto: c.linhaPrev,
+          valor_recebido: mutirao._num(r.valor_recebido) || '',
+          glosa: mutirao._num(r.glosa) || '',
+          status: 'aguardando',
+          observacao: 'Preenchido pelo mutirão — ' + c.origem
+        }];
+        /* Previsto só muda quando não havia nenhum. Onde havia, a tabela foi
+           feita para somar exatamente aquilo. */
+        if (c.mudaDinheiro) r.valor_previsto = c.previstoNovo;
+        store.save('financeiro', r);
+        feitos++;
+      } catch (e) { falhou++; }
+    });
+    mutirao._guardarDesfazer(antes);
+    try { if (state.currentModule === 'financeiro' && financeiro.render) financeiro.render(); } catch (e) {}
+    return { feitos, falhou };
+  },
+
+  /* ==========================================================================
+     DESFAZER — mexer em dinheiro sem volta não se faz
+     ========================================================================== */
+  /* O estado anterior dos campos que vão ser tocados.
+
+     CAMPO QUE NÃO EXISTIA precisa ser gravado como "remover", não como valor
+     undefined: `JSON.stringify` descarta chave com undefined, e o desfazer
+     nunca chegava nela. Era assim que a tabela de códigos criada pelo mutirão
+     FICAVA no registro depois de desfeito — o oposto do que o botão promete. */
+  _instantaneo(r, chaves) {
+    const campos = {}, remover = [];
+    chaves.forEach(k => {
+      if (Object.prototype.hasOwnProperty.call(r, k) && r[k] !== undefined) campos[k] = r[k];
+      else remover.push(k);
+    });
+    return { id: r._id, campos, remover };
+  },
+  /* ACUMULA. Aplicar as duas varreduras chamava isto duas vezes, e a segunda
+     sobrescrevia o registro da primeira: o desfazer devolvia metade. */
+  _guardarDesfazer(antes) {
+    if (!Array.isArray(antes) || !antes.length) return;
+    let atual = null;
+    try { atual = JSON.parse(localStorage.getItem(mutirao.UNDO_KEY) || 'null'); } catch (e) {}
+    const entradas = (atual && Array.isArray(atual.entradas)) ? atual.entradas : [];
+    try {
+      localStorage.setItem(mutirao.UNDO_KEY, JSON.stringify({
+        quando: new Date().toISOString(), entradas: entradas.concat(antes)
+      }));
+    } catch (e) {}
+  },
+  temDesfazer() {
+    try { const d = JSON.parse(localStorage.getItem(mutirao.UNDO_KEY) || 'null'); return !!(d && d.entradas && d.entradas.length); }
+    catch (e) { return false; }
+  },
+  desfazer() {
+    let d = null;
+    try { d = JSON.parse(localStorage.getItem(mutirao.UNDO_KEY) || 'null'); } catch (e) {}
+    if (!d || !Array.isArray(d.entradas) || !d.entradas.length) { toast('Não há mutirão para desfazer.', 'warn'); return 0; }
+    const vistos = new Set();
+    let n = 0;
+    /* De trás para frente: se o mesmo lançamento foi tocado duas vezes, o
+       instantâneo que vale é o PRIMEIRO — o estado antes de tudo. */
+    d.entradas.slice().reverse().forEach(item => {
+      const r = store.getById('financeiro', item.id);
+      if (!r) return;
+      Object.keys(item.campos || {}).forEach(k => { r[k] = item.campos[k]; });
+      (item.remover || []).forEach(k => { delete r[k]; });
+      store.save('financeiro', r);
+      if (!vistos.has(item.id)) { vistos.add(item.id); n++; }
+    });
+    try { localStorage.removeItem(mutirao.UNDO_KEY); } catch (e) {}
+    try { if (state.currentModule === 'financeiro' && financeiro.render) financeiro.render(); } catch (e) {}
+    try { pendencias.renderDashboard(); } catch (e) {}
+    toast('↩️ Mutirão desfeito em ' + n + ' lançamento(s)');
+    return n;
+  },
+
+  /* ==========================================================================
+     A JANELA
+     ========================================================================== */
+  _E(s) { return utils.escapeHTML(String(s == null ? '' : s)); },
+  _dinheiro(v) { return (mutirao._num(v)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); },
+  _dt(d) { try { return historico._fmtData(String(d).slice(0, 10)); } catch (e) { return d || ''; } },
+  _tabela(cab, corpo) {
+    return '<div style="max-height:34vh;overflow:auto;border:1px solid var(--border);border-radius:8px">' +
+      '<table style="width:100%;border-collapse:collapse;font-size:.8rem">' +
+      '<thead style="position:sticky;top:0;background:var(--surface-alt)"><tr>' + cab + '</tr></thead>' +
+      '<tbody>' + corpo + '</tbody></table></div>';
+  },
+
+  abrir() {
+    const A = mutirao.analisarStatus();
+    const B = mutirao.analisarCodigos();
+    const E = mutirao._E;
+
+    const somaA = A.casos.filter(c => financeiro.ehQuitado(c.para)).reduce((s, c) => s + c.valor, 0);
+    const somaB = B.casos.filter(c => c.mudaDinheiro).reduce((s, c) => s + c.previstoNovo, 0);
+
+    const linhasA = A.casos.slice(0, 40).map(c =>
+      '<tr><td>' + E(mutirao._dt(c.dia)) + '</td><td>' + E(c.nome) + '</td>' +
+      '<td>' + E(c.de) + ' → <b>' + E(c.para) + '</b></td><td>' + E(c.etapa) + '</td>' +
+      '<td style="text-align:right">' + mutirao._dinheiro(c.valor) + '</td></tr>').join('');
+
+    const linhasB = B.casos.slice(0, 40).map(c =>
+      '<tr><td>' + E(mutirao._dt(c.dia)) + '</td><td>' + E(c.nome) + '</td><td>' + E(c.codigo) + '</td>' +
+      '<td style="text-align:right">' + mutirao._dinheiro(c.previstoNovo) + '</td>' +
+      '<td>' + (c.mudaDinheiro ? '<b>preenche o previsto</b>' : 'só sustenta o valor atual') + '</td></tr>').join('');
+
+    const pendentes = (store.list('financeiro') || []).filter(r => r && mutirao._indeciso(r.status)).length;
+
+    const corpo =
+      '<p style="font-size:.86rem;margin:0 0 14px;line-height:1.6">Duas correções no que ficou para trás. ' +
+      'Nada é gravado agora: isto é a <b>pré-visualização</b>. Hoje há <b>' + pendentes + '</b> lançamento(s) sem status decidido.</p>' +
+
+      '<h3 style="font-size:.95rem;margin:0 0 4px">1 · Status que o fluxo já disse</h3>' +
+      '<p style="font-size:.82rem;color:var(--text-mute);margin:0 0 8px">Guia marcada como faturada, paga, glosada ou cortesia no checklist, cujo lançamento continuou sem status. Entre etapas, vale a mais recente.</p>' +
+      (A.casos.length
+        ? '<p style="font-size:.86rem;margin:0 0 8px"><b>' + A.casos.length + '</b> lançamento(s) a corrigir' +
+          (somaA ? ' — <b>' + mutirao._dinheiro(somaA) + '</b> que hoje aparece como "a receber" e já entrou' : '') + '.</p>' +
+          mutirao._tabela('<th style="text-align:left">Data</th><th style="text-align:left">Paciente</th><th style="text-align:left">Status</th><th style="text-align:left">Pelo que foi marcado</th><th style="text-align:right">Previsto</th>', linhasA) +
+          (A.casos.length > 40 ? '<p style="font-size:.78rem;color:var(--text-mute);margin:6px 0 0">… e mais ' + (A.casos.length - 40) + '.</p>' : '')
+        : '<p style="font-size:.86rem;margin:0 0 8px">Nada a corrigir aqui.</p>') +
+      '<p style="font-size:.78rem;color:var(--text-mute);margin:8px 0 0">Não toca em quem já tem status decidido (' + A.jaDecididos + ' lançamento(s)).</p>' +
+
+      '<h3 style="font-size:.95rem;margin:18px 0 4px;border-top:1px solid var(--border);padding-top:14px">2 · Tabela de códigos vazia</h3>' +
+      '<p style="font-size:.82rem;color:var(--text-mute);margin:0 0 8px">A tabela é a fonte do previsto. Vazia, o próximo recálculo zera o valor — foi o que gerou lançamentos com R$ 0,00.</p>' +
+      (B.casos.length
+        ? '<p style="font-size:.86rem;margin:0 0 8px"><b>' + B.casos.length + '</b> lançamento(s) a preencher' +
+          (somaB ? ' — <b>' + mutirao._dinheiro(somaB) + '</b> que hoje está como R$ 0,00 e passa a ter valor de tabela' : '') + '.</p>' +
+          mutirao._tabela('<th style="text-align:left">Data</th><th style="text-align:left">Paciente</th><th style="text-align:left">Código</th><th style="text-align:right">Previsto</th><th style="text-align:left">Efeito</th>', linhasB) +
+          (B.casos.length > 40 ? '<p style="font-size:.78rem;color:var(--text-mute);margin:6px 0 0">… e mais ' + (B.casos.length - 40) + '.</p>' : '')
+        : '<p style="font-size:.86rem;margin:0 0 8px">Nada a preencher aqui.</p>') +
+      ((B.semCodigo.length || B.semPreco.length)
+        ? '<div style="margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-alt)">' +
+          '<b style="font-size:.84rem">Estes o mutirão NÃO resolve — precisam de você:</b>' +
+          (B.semCodigo.length ? '<p style="font-size:.82rem;margin:6px 0 0"><b>' + B.semCodigo.length + '</b> sem código TUSS nenhum. Inventar um seria pior que o vazio: ' +
+            E(B.semCodigo.slice(0, 6).map(c => c.nome + (c.dia ? ' (' + mutirao._dt(c.dia) + ')' : '')).join('; ')) +
+            (B.semCodigo.length > 6 ? ' …' : '') + '.</p>' : '') +
+          (B.semPreco.length ? '<p style="font-size:.82rem;margin:6px 0 0"><b>' + B.semPreco.length + '</b> com código sem preço na tabela do convênio — cadastre o valor em Tabelas por convênio: ' +
+            E(B.semPreco.slice(0, 6).map(c => c.codigo + ' · ' + (c.convenio || 'sem convênio')).join('; ')) +
+            (B.semPreco.length > 6 ? ' …' : '') + '.</p>' : '') +
+          '</div>'
+        : '') +
+      '<p style="font-size:.78rem;color:var(--text-mute);margin:10px 0 0">Valor que já existe não é alterado: onde há previsto na mão, a tabela é montada para somar exatamente aquilo. Tudo o que for gravado pode ser desfeito.</p>';
+
+    const rodape =
+      (mutirao.temDesfazer() ? '<button class="btn ghost" onclick="mutirao.desfazer(); modal.close()">↩️ Desfazer o último mutirão</button>' : '') +
+      '<button class="btn" onclick="modal.close()">Fechar</button>' +
+      (A.casos.length ? '<button class="btn" onclick="mutirao._rodar(\'status\')">Aplicar o 1</button>' : '') +
+      (B.casos.length ? '<button class="btn" onclick="mutirao._rodar(\'codigos\')">Aplicar o 2</button>' : '') +
+      ((A.casos.length && B.casos.length) ? '<button class="btn btn-finalizar" onclick="mutirao._rodar(\'ambos\')">Aplicar os dois</button>' : '');
+
+    modal.open('🧮 Mutirão de correção do financeiro', corpo, rodape);
+  },
+
+  _rodar(qual) {
+    let msg = [];
+    /* Um mutirão = um desfazer. Sem limpar aqui, "desfazer o último" acabaria
+       revertendo também o mutirão da semana passada. */
+    try { localStorage.removeItem(mutirao.UNDO_KEY); } catch (e) {}
+    if (qual === 'status' || qual === 'ambos') {
+      const r = mutirao.aplicarStatus();
+      msg.push('status: ' + r.feitos + ' corrigido(s)' + (r.falhou ? ', ' + r.falhou + ' falhou' : ''));
+    }
+    if (qual === 'codigos' || qual === 'ambos') {
+      const r = mutirao.aplicarCodigos();
+      msg.push('códigos: ' + r.feitos + ' preenchido(s)' + (r.falhou ? ', ' + r.falhou + ' falhou' : ''));
+    }
+    modal.close();
+    toast('🧮 Mutirão — ' + msg.join(' · ') + '. Dá para desfazer.');
+    /* Reabre com o resultado: quem acabou de mexer em dinheiro quer ver o que
+       ficou, não um aviso que desaparece em três segundos. */
+    setTimeout(() => { try { mutirao.abrir(); } catch (e) {} }, 400);
   }
 };
 
@@ -54277,6 +54692,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.rascunhos = rascunhos; window.rascunhosSync = rascunhosSync; window.clinicaSync = clinicaSync; window.nuvemEstado = nuvemEstado;
   window.globalSearch = globalSearch; window.pacientes = pacientes;
   window.ajustes = ajustes; window.autocomplete = autocomplete;
+  window.mutirao = mutirao;
   window.ajustesGrupos = ajustesGrupos;
   try { ajustesGrupos.montar(); } catch (e) {}
   window.configSync = configSync;

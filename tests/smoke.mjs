@@ -15672,6 +15672,139 @@ await test('A nuvem lê o índice antes do conteúdo, e o aparelho sabe quanto b
   await page.close();
 });
 
+/* 220) Mutirão: as duas correções do que ficou para trás, com volta
+
+   Isto mexe em dinheiro de registro antigo, então o que o teste tranca não é
+   "a função roda": é o que ela NÃO pode fazer. Não encostar em status já
+   decidido; não alterar valor que alguém digitou; não inventar código nem
+   preço; e desfazer devolvendo exatamente o estado anterior. */
+await test('Mutirão corrige status e tabela de códigos sem inventar valor, e dá para desfazer', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('financeiro', []); store.setList('anestesia', []);
+    try { localStorage.removeItem(mutirao.UNDO_KEY); } catch (e) {}
+
+    /* preço de tabela conhecido, para o caso do previsto zerado */
+    const origBase = precos.base;
+    precos.base = (cod, tipo, conv) => (cod === '3.01.01.01-1' ? { valor: 800, origem: 'tab', tabela: 'CBHPM', doConvenio: true } : { valor: null });
+
+    store.setList('financeiro', [
+      /* A1 — fluxo diz PAGO, status ficou pendente → tem de virar recebido */
+      { _id: 'f1', paciente: 'Pago no fluxo', data_proc: '2026-08-01', status: 'pendente',
+        valor_previsto: 1000, codigos: [{ codigo: 'x', valor_previsto: 1000 }],
+        _faturamento: { faturado: '2026-08-05T10:00:00Z', pago: '2026-08-20T10:00:00Z' } },
+      /* A2 — fluxo diz faturado e depois glosa: vale a MAIS RECENTE */
+      { _id: 'f2', paciente: 'Glosado depois', data_proc: '2026-08-02', status: '',
+        valor_previsto: 500, codigos: [{ codigo: 'x', valor_previsto: 500 }],
+        _faturamento: { faturado: '2026-08-06T10:00:00Z', glosa: '2026-09-01T10:00:00Z' } },
+      /* A3 — status JÁ DECIDIDO: não se encosta, mesmo com fluxo dizendo outra coisa */
+      { _id: 'f3', paciente: 'Já decidido', data_proc: '2026-08-03', status: 'glosado',
+        valor_previsto: 300, codigos: [{ codigo: 'x', valor_previsto: 300 }],
+        _faturamento: { pago: '2026-08-25T10:00:00Z' } },
+      /* A4 — cortesia é o fim do faturamento, não uma etapa */
+      { _id: 'f4', paciente: 'Cortesia', data_proc: '2026-08-04', status: 'pendente',
+        valor_previsto: 200, codigos: [{ codigo: 'x', valor_previsto: 200 }],
+        _faturamento: { cortesia: '2026-08-10T10:00:00Z' } },
+      /* B1 — tabela vazia e previsto ZERO: é o caso do R$ 0,00 */
+      { _id: 'f5', paciente: 'Previsto zerado', data_proc: '2026-08-05', status: 'faturado',
+        convenio: 'Unimed', cbhpm_codigo: '3.01.01.01-1', cbhpm_descricao: 'Ato anestésico',
+        tipo_honorario: 'anestesia', quantidade: 1, fracao: 100, valor_previsto: 0 },
+      /* B2 — tabela vazia MAS previsto digitado: o dinheiro não pode mudar */
+      { _id: 'f6', paciente: 'Previsto na mão', data_proc: '2026-08-06', status: 'faturado',
+        convenio: 'Unimed', cbhpm_codigo: '3.01.01.01-1', tipo_honorario: 'anestesia',
+        quantidade: 1, fracao: 100, valor_previsto: 1234.56, fator_acomodacao: 2 },
+      /* B3 — sem código nenhum: o mutirão não inventa */
+      { _id: 'f7', paciente: 'Sem código', data_proc: '2026-08-07', status: 'faturado',
+        procedimento: 'Algo', valor_previsto: 0 },
+      /* B4 — código sem preço na tabela: também não inventa */
+      { _id: 'f8', paciente: 'Sem preço', data_proc: '2026-08-08', status: 'faturado',
+        convenio: 'Plano Z', cbhpm_codigo: '9.99.99.99-9', valor_previsto: 0 }
+    ]);
+
+    /* ---------- pré-visualização ---------- */
+    const A = mutirao.analisarStatus();
+    out.achouOsTres = A.casos.length === 3
+      && A.casos.some(c => c.id === 'f1' && c.para === 'recebido')
+      && A.casos.some(c => c.id === 'f2' && c.para === 'glosado')
+      && A.casos.some(c => c.id === 'f4' && c.para === 'cortesia');
+    out.naoEncostaNoDecidido = !A.casos.some(c => c.id === 'f3') && A.jaDecididos >= 1;
+
+    const B = mutirao.analisarCodigos();
+    out.achouOsDois = B.casos.length === 2
+      && B.casos.some(c => c.id === 'f5' && c.mudaDinheiro === true)
+      && B.casos.some(c => c.id === 'f6' && c.mudaDinheiro === false);
+    out.naoInventaCodigo = B.semCodigo.length === 1 && B.semCodigo[0].id === 'f7';
+    out.naoInventaPreco = B.semPreco.length === 1 && B.semPreco[0].id === 'f8';
+    out.naoTocaQuemTemTabela = B.jaTemTabela === 4;
+
+    /* nada foi gravado só por pré-visualizar */
+    out.previewNaoGrava = store.getById('financeiro', 'f1').status === 'pendente'
+      && !store.getById('financeiro', 'f5').codigos;
+
+    /* ---------- aplicar ---------- */
+    const rA = mutirao.aplicarStatus();
+    const rB = mutirao.aplicarCodigos();
+    out.aplicou = rA.feitos === 3 && rA.falhou === 0 && rB.feitos === 2 && rB.falhou === 0;
+
+    const f1 = store.getById('financeiro', 'f1');
+    out.f1Recebido = f1.status === 'recebido' && f1.pago === true;
+    out.f2Glosado = store.getById('financeiro', 'f2').status === 'glosado';
+    out.f3Intacto = store.getById('financeiro', 'f3').status === 'glosado';
+    const f4 = store.getById('financeiro', 'f4');
+    out.f4Cortesia = f4.status === 'cortesia' && f4.pago === true;
+
+    const f5 = store.getById('financeiro', 'f5');
+    out.f5Preencheu = Array.isArray(f5.codigos) && f5.codigos.length === 1
+      && f5.codigos[0].codigo === '3.01.01.01-1' && Number(f5.codigos[0].valor_previsto) === 800;
+    out.f5GanhouValor = Number(f5.valor_previsto) === 800;
+
+    /* O previsto digitado NÃO muda, e a tabela tem de SUSTENTAR esse número:
+       soma das linhas × fatores = previsto. Aqui o fator de acomodação é 2, então
+       a linha vale a metade. Era exatamente aqui que o recálculo zerava o valor. */
+    const f6 = store.getById('financeiro', 'f6');
+    out.f6ValorIntacto = Number(f6.valor_previsto) === 1234.56;
+    const soma6 = f6.codigos.reduce((s, c) => s + Number(c.valor_previsto || 0), 0);
+    out.f6TabelaSustenta = Math.abs(soma6 * 2 - 1234.56) < 0.02;
+
+    /* ---------- desfazer ---------- */
+    out.temDesfazer = mutirao.temDesfazer();
+    mutirao.desfazer();
+    const d5 = store.getById('financeiro', 'f5');
+    out.desfezCodigos = !d5.codigos && Number(d5.valor_previsto) === 0;
+    /* As DUAS varreduras foram aplicadas: desfazer tem de devolver as duas.
+       Guardar o estado anterior sobrescrevendo devolvia só a última. */
+    const d1 = store.getById('financeiro', 'f1');
+    out.desfezStatus = d1.status === 'pendente';
+    out.naoSobrouDesfazer = !mutirao.temDesfazer();
+
+    precos.base = origBase;
+    store.setList('financeiro', []);
+    try { localStorage.removeItem(mutirao.UNDO_KEY); } catch (e) {}
+    return out;
+  });
+  assert(r.achouOsTres, 'o fluxo marcado tem que virar status: pago→recebido, glosa→glosado, cortesia→cortesia');
+  assert(r.naoEncostaNoDecidido, 'status já decidido por alguém não pode ser mexido por varredura');
+  assert(r.achouOsDois, 'tabela de códigos vazia é achada, e o mutirão sabe qual caso muda dinheiro e qual não');
+  assert(r.naoInventaCodigo, 'lançamento sem código TUSS vai para a lista de decisão humana, não recebe palpite');
+  assert(r.naoInventaPreco, 'código sem preço na tabela do convênio também não recebe palpite');
+  assert(r.naoTocaQuemTemTabela, 'quem já tem tabela de códigos fica de fora');
+  assert(r.previewNaoGrava, 'pré-visualizar não pode gravar nada');
+  assert(r.aplicou, 'aplicar precisa corrigir todos os casos previstos, sem falha');
+  assert(r.f1Recebido, 'fluxo "pago" tem que virar status recebido e sair de "a receber"');
+  assert(r.f2Glosado, 'entre etapas, vale a mais recente');
+  assert(r.f3Intacto, 'o já decidido continua como estava depois de aplicar');
+  assert(r.f4Cortesia, 'cortesia sai de "a receber" sem apagar valor');
+  assert(r.f5Preencheu && r.f5GanhouValor, 'previsto zerado ganha a tabela e o valor do convênio');
+  assert(r.f6ValorIntacto, 'valor que alguém digitou NÃO pode ser alterado pela varredura');
+  assert(r.f6TabelaSustenta, 'e a tabela tem que somar exatamente esse valor — senão o próximo recálculo zera');
+  assert(r.temDesfazer, 'mexer em dinheiro sem poder desfazer não se faz');
+  assert(r.desfezCodigos, 'desfazer tem que REMOVER a tabela que o mutirão criou, não só zerar valores');
+  assert(r.desfezStatus, 'com as duas varreduras aplicadas, desfazer devolve as duas — não só a última');
+  assert(r.naoSobrouDesfazer, 'e não fica um desfazer pendurado depois de usado');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
