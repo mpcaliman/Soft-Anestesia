@@ -4651,7 +4651,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-29a</b><br>
+    v7.1 · build <b id="build-tag">2026-09-29b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -10463,6 +10463,196 @@ const STORAGE = {
    redirecionadas para um espaço separado com prefixo 'demo:'. Assim o banco
    real do usuário fica intocado e o teste começa vazio. A sincronização com a
    nuvem também é bloqueada (ver cloud.pushDoc/sincronizar). */
+/* ============================================================================
+   COFRE — uma gaveta de armazenamento por AMBIENTE (clínica)
+
+   No servidor a separação já existia: ambiente = organização, RLS por
+   organização, e leitura entre ambientes só quando o programador libera (e por
+   módulo). O aparelho é que tinha UMA gaveta só. Enquanto foi um médico com
+   uma clínica, ninguém percebeu.
+
+   A primeira tentativa foi LIMPAR ao trocar de clínica. Não bastou, e a razão
+   é estrutural: limpeza é um EVENTO, e evento falha. Se o login for offline,
+   se o perfil com a organização chegar atrasado, se a página for recarregada,
+   se houver uma segunda aba — os dados da outra clínica continuam ali,
+   endereçáveis pela mesma chave de sempre. Foi exatamente o que aconteceu: o
+   selo já dizia "Clínica Carlos Pedreira" e a tela mostrava Minha Clínica.
+
+   Agora a separação é ESTRUTURAL. Cada ambiente escreve e lê num conjunto de
+   chaves próprio (`medsys.v3.anestesia@a1b2c3d4`), e o dado do outro ambiente
+   não é apagado nem escondido: ele simplesmente NÃO É ENDEREÇÁVEL a partir
+   daqui. Não existe evento para falhar.
+
+   Como o app inteiro fala `localStorage.getItem('medsys...')` em centenas de
+   lugares, o desvio é feito num ponto só — este — trocando o `localStorage`
+   por uma fachada que sabe em que gaveta está. Assim não há como alguém
+   escrever uma chave nova amanhã e furar o isolamento sem perceber.
+
+   A regra é AO CONTRÁRIO da lista antiga: tudo o que é `medsys.*` vai para a
+   gaveta do ambiente, MENOS uma lista explícita do que é do aparelho (login,
+   tema, endereço da nuvem). Chave nova que eu esqueça de classificar fica
+   isolada — o erro cai para o lado seguro. Na lista antiga, chave esquecida
+   vazava.
+============================================================================ */
+const cofre = {
+  ORG_KEY: 'medsys.v7.cloud.org_id',
+  MIGRADO_KEY: 'medsys.v7.cofre.migrado',
+
+  /* O que NÃO se separa por clínica: é do aparelho ou da pessoa, e tem de
+     continuar valendo quando ela troca de ambiente. Esta lista é a exceção;
+     todo o resto é da clínica. */
+  DO_APARELHO: [
+    'medsys.v7.cloud.cfg', 'medsys.v7.cloud.session', 'medsys.v7.cloud.org_id',
+    'medsys.v7.cloud.sem_clinica', 'medsys.v7.cloud.last_uid',
+    'medsys.v7.auth.users', 'medsys.v7.auth.session', 'medsys.v7.auth.timeout_min',
+    'medsys.v7.auth.sessao_dia',
+    'medsys.v7.theme', 'medsys.v7.grafico_modo', 'medsys.v7.realtime.on',
+    'medsys.v7.pdfbackup.cfg', 'medsys.v7.pdfbk.token', 'medsys.v7.configsync.meta',
+    'medsys.v7.dash.escopo', 'medsys.v7.dash.periodo', 'medsys.v7.meudia.so_finalizados',
+    'medsys.v7.ajustes.grupos_abertos', 'medsys.v7.ajustes.sysgrupos',
+    'medsys.v7.tutorial_grafico', 'medsys.v7.nuvem.trafego',
+    'medsys.v7.modo_nuvem', 'medsys.v7.modo_nuvem.dias', 'medsys.v7.arquivo.auto',
+    'medsys.v7.demo', 'medsys.v7.cofre.migrado',
+    'medsys.v7.ambiente.nome', 'medsys.v7.ambiente.vistos', 'medsys.v7.ambiente.compartilhado',
+    /* Carimbos de conversão única, valor '1'. Não guardam dado nenhum: são
+       "esta máquina já passou por tal ajuste". Numa gaveta nova a conversão
+       seria no-op de qualquer forma, e mantê-los fora da gaveta evita que
+       apareçam como resto de clínica numa conferência de vazamento. */
+    'medsys.v7.versions.compactado_v1', 'medsys.v7.blobs.dedup_v1',
+    'medsys.v7.cad.profissionais.migrado'
+  ],
+
+  _real: null,     /* o localStorage de verdade */
+
+  /* A gaveta ativa. Lida do armazenamento REAL, porque o cofre precisa saber
+     onde está antes de qualquer módulo existir. */
+  org() {
+    try { return (cofre._real && cofre._real.getItem(cofre.ORG_KEY)) || ''; }
+    catch (e) { return ''; }
+  },
+  sufixo(org) {
+    const o = (org === undefined) ? cofre.org() : org;
+    return o ? ('@' + String(o).slice(0, 8)) : '';
+  },
+  separa(k) {
+    return !!k && String(k).indexOf('medsys.') === 0 && cofre.DO_APARELHO.indexOf(k) < 0;
+  },
+  /* chave do app -> chave real no navegador */
+  real(k, org) {
+    return cofre.separa(k) ? (k + cofre.sufixo(org)) : k;
+  },
+  /* chave real -> chave do app (para quem percorre o armazenamento) */
+  app(kReal) {
+    const suf = cofre.sufixo();
+    if (suf && kReal.length > suf.length && kReal.slice(-suf.length) === suf) return kReal.slice(0, -suf.length);
+    return kReal;
+  },
+  /* As chaves VISÍVEIS desta gaveta: as do aparelho mais as desta clínica.
+     Quem percorre o armazenamento não pode topar com a clínica vizinha. */
+  chaves() {
+    const out = [];
+    const suf = cofre.sufixo();
+    try {
+      for (let i = 0; i < cofre._real.length; i++) {
+        const kr = cofre._real.key(i);
+        if (kr == null) continue;
+        if (String(kr).indexOf('medsys.') !== 0) { out.push(kr); continue; }
+        const temSuf = suf && kr.slice(-suf.length) === suf;
+        const base = temSuf ? kr.slice(0, -suf.length) : kr;
+        if (temSuf) { if (cofre.separa(base)) out.push(base); continue; }
+        /* sem sufixo: só aparece se for do aparelho — ou se não há gaveta
+           nenhuma (conta sem clínica, que usa as chaves cruas) */
+        if (!cofre.separa(kr) || !suf) out.push(kr);
+      }
+    } catch (e) {}
+    return out;
+  },
+
+  /* A fachada. Mesma API do localStorage; o app não sabe que trocou. */
+  _fachada() {
+    return {
+      getItem(k) { try { return cofre._real.getItem(cofre.real(k)); } catch (e) { return null; } },
+      setItem(k, v) { return cofre._real.setItem(cofre.real(k), v); },
+      removeItem(k) { try { return cofre._real.removeItem(cofre.real(k)); } catch (e) {} },
+      key(i) { const ks = cofre.chaves(); return i >= 0 && i < ks.length ? ks[i] : null; },
+      get length() { return cofre.chaves().length; },
+      /* `clear()` do navegador apagaria as outras clínicas junto. Aqui ele
+         limpa SÓ esta gaveta — quem quer apagar tudo tem caminho próprio. */
+      clear() { cofre.chaves().forEach(k => { try { cofre._real.removeItem(cofre.real(k)); } catch (e) {} }); }
+    };
+  },
+
+  /* Leva o que já está gravado SEM gaveta para a gaveta da clínica atual.
+     Só roda quando a organização é conhecida, e só uma vez por gaveta: mover
+     dado por palpite é tirar de alguém o acesso ao próprio trabalho. */
+  migrar() {
+    const org = cofre.org();
+    if (!org) return 0;
+    let migradas = {};
+    try { migradas = JSON.parse(cofre._real.getItem(cofre.MIGRADO_KEY) || '{}') || {}; } catch (e) {}
+    const curta = String(org).slice(0, 8);
+    if (migradas[curta]) return 0;
+    const mover = [];
+    try {
+      for (let i = 0; i < cofre._real.length; i++) {
+        const kr = cofre._real.key(i);
+        if (!kr || String(kr).indexOf('medsys.') !== 0) continue;
+        if (kr.indexOf('@') >= 0) continue;          /* já é de alguma gaveta */
+        if (!cofre.separa(kr)) continue;             /* é do aparelho */
+        mover.push(kr);
+      }
+    } catch (e) {}
+    let n = 0;
+    mover.forEach(kr => {
+      try {
+        const destino = kr + '@' + curta;
+        if (cofre._real.getItem(destino) == null) cofre._real.setItem(destino, cofre._real.getItem(kr));
+        cofre._real.removeItem(kr);
+        n++;
+      } catch (e) {}
+    });
+    migradas[curta] = new Date().toISOString();
+    try { cofre._real.setItem(cofre.MIGRADO_KEY, JSON.stringify(migradas)); } catch (e) {}
+    return n;
+  },
+
+  /* Apaga a gaveta INTEIRA de um ambiente (computador compartilhado). */
+  esvaziar(org) {
+    const suf = cofre.sufixo(org === undefined ? cofre.org() : org);
+    if (!suf) return 0;
+    const fora = [];
+    try {
+      for (let i = 0; i < cofre._real.length; i++) {
+        const kr = cofre._real.key(i);
+        if (kr && kr.length > suf.length && kr.slice(-suf.length) === suf) fora.push(kr);
+      }
+    } catch (e) {}
+    fora.forEach(k => { try { cofre._real.removeItem(k); } catch (e) {} });
+    return fora.length;
+  },
+
+  instalar() {
+    if (cofre._real) return true;
+    try {
+      const nativo = window.localStorage;
+      if (!nativo) return false;
+      cofre._real = nativo;
+      Object.defineProperty(window, 'localStorage', {
+        value: cofre._fachada(), configurable: true, writable: false
+      });
+      return true;
+    } catch (e) {
+      /* Navegador que não deixa trocar o acessor: o app segue funcionando sem
+         gaveta — e é melhor dizer isso alto do que fingir isolamento. */
+      cofre._real = cofre._real || window.localStorage;
+      cofre._semCofre = true;
+      return false;
+    }
+  }
+};
+cofre.instalar();
+try { cofre.migrar(); } catch (e) {}
+
 const DEMO_FLAG = 'medsys.v7.demo';
 const DEMO_PREFIX = 'demo:';
 (function aplicarNamespaceDemo() {
@@ -10571,9 +10761,14 @@ const disco = {
     disco._bytes = n;
   },
 
+  /* O IndexedDB guarda imagens, versões e lixeira — tudo dado de paciente.
+     Ele não passa pela fachada do localStorage, então a gaveta do ambiente é
+     aplicada aqui, na chave. Sem isto, a assinatura e as fotos de uma clínica
+     apareceriam na outra. */
+  _k(chave) { try { return cofre.real(chave); } catch (e) { return chave; } },
   get(chave) {
     if (disco._pronto && disco.ehGrande(chave)) {
-      const v = disco._mem[chave];
+      const v = disco._mem[disco._k(chave)];
       return v == null ? null : v;
     }
     try { return localStorage.getItem(chave); } catch (e) { return null; }
@@ -10582,9 +10777,9 @@ const disco = {
      assíncrona: a memória já vale na hora, e é ela que o app lê. */
   set(chave, valor) {
     if (disco._pronto && disco.ehGrande(chave)) {
-      disco._mem[chave] = String(valor);
+      disco._mem[disco._k(chave)] = String(valor);
       disco._recontar();
-      disco._agendar(chave);
+      disco._agendar(disco._k(chave));
       return true;
     }
     try { localStorage.setItem(chave, valor); return true; }
@@ -10592,9 +10787,9 @@ const disco = {
   },
   remove(chave) {
     if (disco._pronto && disco.ehGrande(chave)) {
-      delete disco._mem[chave];
+      delete disco._mem[disco._k(chave)];
       disco._recontar();
-      try { disco._tx('readwrite').delete(chave); } catch (e) {}
+      try { disco._tx('readwrite').delete(disco._k(chave)); } catch (e) {}
       return;
     }
     try { localStorage.removeItem(chave); } catch (e) {}
@@ -20574,8 +20769,10 @@ const cloud = {
   esquecerMarcaBaixa() {
     try {
       localStorage.removeItem(cloud._marcaKey());
-      /* troca de conta: limpa as marcas de todos os usuários deste aparelho */
-      Object.keys(localStorage).forEach(k => {
+      /* troca de conta: limpa as marcas de todos os usuários deste aparelho.
+         `Object.keys` não enxerga a fachada do cofre — quem lista as chaves
+         desta gaveta é o próprio cofre. */
+      cofre.chaves().forEach(k => {
         if (k.indexOf(cloud._MARCA_BAIXA) === 0) localStorage.removeItem(k);
       });
     } catch (e) {}
@@ -20608,6 +20805,20 @@ const cloud = {
 
     let maisNovo = '';
     try {
+      /* O BACKUP PESSOAL É POR USUÁRIO, NÃO POR CLÍNICA.
+         A tabela `documentos` guarda uma cópia de tudo sob o id de quem
+         gravou — ela nasceu quando havia um médico e uma clínica. Com vários
+         ambientes ela vira um túnel: quem pertence a dois traz o acervo de um
+         para dentro do outro por aqui, passando ao largo da separação por
+         organização que vale em todo o resto.
+         Conta ligada a uma clínica lê pelo canal relacional, que é separado
+         por organização e tem tudo. O backup pessoal continua RECEBENDO (é
+         rede de segurança) e continua disponível sob demanda no resgate
+         "Procurar na nuvem" e em "Restaurar tudo da nuvem" — só deixa de
+         descer sozinho. */
+      let temClinica = false;
+      try { temClinica = !!(cloudRel.disponivel() && (await cloudRel._orgAsync())); } catch (e) {}
+      if (temClinica) return { porMod: {}, marca: maisNovo || marca || '' };
       /* Paginado: sem limite, o PostgREST corta em `max-rows` e o resto some
          calado — registro que não volta é registro que parece perdido. */
       const passo = 500;
@@ -22133,24 +22344,19 @@ const ambiente = {
   },
 
   /* ---------- a limpeza ---------- */
-  /* Apaga o que é da CLÍNICA e preserva o que é do APARELHO. Ao contrário da
-     lista antiga, aqui o padrão é apagar: o que sobra está escrito acima. */
-  limparDadosLocais() {
+  /* Esvazia a gaveta de UM ambiente. Note que isto já NÃO é mais o que garante
+     o isolamento — quem garante é o cofre, separando as chaves. Aqui é
+     higiene de computador emprestado: não deixar a clínica gravada numa
+     máquina que não é dela. */
+  limparDadosLocais(org) {
     let n = 0;
-    try {
-      const fora = ambiente.CHAVES_DO_APARELHO;
-      const apagar = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (!k || k.indexOf('medsys.') !== 0) continue;
-        if (fora.indexOf(k) >= 0) continue;
-        apagar.push(k);
-      }
-      apagar.forEach(k => { try { localStorage.removeItem(k); n++; } catch (e) {} });
-    } catch (e) {}
-    /* O que é pesado mora no IndexedDB — imagens, versões e lixeira. Sem isto,
-       a assinatura e as fotos da clínica anterior continuariam no aparelho. */
-    try { (disco.CHAVES || []).forEach(k => { try { disco.remove(k); } catch (e) {} }); } catch (e) {}
+    try { n = cofre.esvaziar(org === undefined ? ambiente.id() : org); } catch (e) {}
+    /* O IndexedDB guarda imagens, versões e lixeira. Só dá para apagar as da
+       gaveta ATIVA — as outras não são endereçáveis daqui, que é justamente
+       o ponto. */
+    if (org === undefined || org === ambiente.id()) {
+      try { (disco.CHAVES || []).forEach(k => { try { disco.remove(k); } catch (e) {} }); } catch (e) {}
+    }
     return n;
   },
 
@@ -22169,21 +22375,29 @@ const ambiente = {
       try { ambiente.pintar(); } catch (e) {}
       return { trocou: false };
     }
-    /* TROCOU. Aqui não se pergunta: o dado da outra clínica não pode ficar
-       visível para quem acabou de entrar. O que ainda não subiu é levado num
-       backup antes, para não sumir trabalho de ninguém. */
-    let pendentes = 0;
-    try { pendentes = (cloud._fila() || []).length; } catch (e) {}
-    if (pendentes) {
-      try { backupCompleto.exportar({ silent: true }); } catch (e) {}
+    /* TROCOU DE CLÍNICA.
+
+       Isolar já não depende deste momento: a gaveta do ambiente anterior
+       deixa de ser endereçável assim que o ponteiro muda, e quem entrou não
+       tem como ler nada de lá nem se quiser. Por isso aqui NÃO se apaga por
+       padrão — num aparelho próprio, guardar as duas gavetas é o que evita
+       rebaixar o acervo inteiro a cada troca.
+
+       Em COMPUTADOR COMPARTILHADO a conta é outra: a clínica anterior não
+       deve ficar gravada numa máquina que não é dela, e aí a gaveta some. */
+    let limpou = 0, pendentes = 0;
+    if (ambiente.compartilhado()) {
+      try { pendentes = (cloud._fila() || []).length; } catch (e) {}
+      if (pendentes) { try { backupCompleto.exportar({ silent: true }); } catch (e) {} }
+      limpou = ambiente.limparDadosLocais(anterior);
     }
-    const n = ambiente.limparDadosLocais();
     ambiente.definirNome(nomeOrg || '');
     try { cloudRel._lembrarOrg(org); } catch (e) {}
     try { ambiente.pintar(); } catch (e) {}
-    toast('🔄 Outra clínica entrou neste aparelho — limpei ' + n + ' item(ns) do ambiente anterior' +
-      (pendentes ? ' (baixei um backup do que ainda não tinha subido)' : '') + '.', 'warn');
-    return { trocou: true, limpou: n, backup: !!pendentes };
+    toast('🔄 Você entrou em outra clínica' + (nomeOrg ? ' (' + nomeOrg + ')' : '') +
+      ' — este ambiente tem os dados dele, separados' +
+      (limpou ? '; apaguei os do ambiente anterior deste computador compartilhado' : '') + '.', 'warn');
+    return { trocou: true, limpou, backup: !!pendentes };
   },
 
   /* Chamado ao sair. Em computador compartilhado, sair significa não deixar
