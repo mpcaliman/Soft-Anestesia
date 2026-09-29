@@ -16235,6 +16235,64 @@ await test('Pacientes, Dashboard e Financeiro são de cada ambiente — e a nuve
   await page.close();
 });
 
+/* 225) A migração para a gaveta não pode CHUTAR de quem é o acervo
+
+   O que está gravado sem gaveta veio de antes do cofre, e o registro não diz de
+   qual clínica é — só o servidor sabe. Num aparelho de uma clínica só,
+   atribuir ao ambiente ativo é certo. Num aparelho onde duas já entraram (a
+   máquina do hospital), seria um palpite: bastaria a segunda pessoa recarregar
+   primeiro para o acervo da primeira ser carimbado como dela — o erro que o
+   cofre existe para impedir, cometido pela rotina que deveria impedi-lo. */
+await test('Migração só atribui o acervo antigo quando não há dúvida de quem é', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const R = cofre._real;
+    const limpar = () => {
+      const fora = [];
+      for (let i = 0; i < R.length; i++) { const k = R.key(i); if (k && k.indexOf('medsys.') === 0) fora.push(k); }
+      fora.forEach(k => R.removeItem(k));
+    };
+
+    /* --- caso 1: aparelho de UMA clínica só → migra, e o acervo é dela --- */
+    limpar();
+    R.setItem('medsys.v3.anestesia', JSON.stringify([{ _id: 'x1', paciente: { nome: 'Do dono do aparelho' } }]));
+    R.setItem('medsys.v7.ambiente.vistos', JSON.stringify(['org-aaaaaaaa']));
+    R.setItem('medsys.v7.cloud.org_id', 'org-aaaaaaaa');
+    out.migrou = cofre.migrar() > 0;
+    out.foiParaAGaveta = !!R.getItem('medsys.v3.anestesia@org-aaaa')
+      && R.getItem('medsys.v3.anestesia') === null;
+    out.aVeOSeu = (store.list('anestesia') || []).length === 1;
+
+    /* --- caso 2: aparelho onde DUAS clínicas já entraram → não chuta --- */
+    limpar();
+    R.setItem('medsys.v3.anestesia', JSON.stringify([{ _id: 'y1', paciente: { nome: 'De quem nao se sabe' } }]));
+    R.setItem('medsys.v7.ambiente.vistos', JSON.stringify(['org-aaaaaaaa', 'org-bbbbbbbb']));
+    R.setItem('medsys.v7.cloud.org_id', 'org-bbbbbbbb');
+    out.naoMigrou = cofre.migrar() === 0;
+    out.gavetaComecaVazia = (store.list('anestesia') || []).length === 0;
+    /* e o acervo antigo NÃO foi carimbado como de ninguém */
+    out.naoCarimbou = R.getItem('medsys.v3.anestesia@org-bbbb') === null
+      && R.getItem('medsys.v3.anestesia@org-aaaa') === null;
+    /* nem virou visível para a outra clínica */
+    R.setItem('medsys.v7.cloud.org_id', 'org-aaaaaaaa');
+    out.nemParaAOutra = (store.list('anestesia') || []).length === 0;
+
+    /* --- não repete a decisão a cada abertura --- */
+    R.setItem('medsys.v7.cloud.org_id', 'org-bbbbbbbb');
+    out.naoRefaz = cofre.migrar() === 0;
+
+    limpar();
+    return out;
+  });
+  assert(r.migrou && r.foiParaAGaveta && r.aVeOSeu, 'aparelho de uma clínica só: o acervo antigo é dela, e vai para a gaveta dela');
+  assert(r.naoMigrou, 'aparelho que já serviu duas clínicas NÃO pode atribuir o acervo antigo a nenhuma delas');
+  assert(r.gavetaComecaVazia, 'nesse caso a gaveta começa vazia e a nuvem a preenche');
+  assert(r.naoCarimbou && r.nemParaAOutra, 'e o acervo de origem desconhecida não aparece para clínica nenhuma');
+  assert(r.naoRefaz, 'a decisão fica registrada — não se refaz a cada abertura');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

@@ -4656,7 +4656,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-29d</b><br>
+    v7.1 · build <b id="build-tag">2026-09-29e</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -10617,6 +10617,26 @@ const cofre = {
     try { migradas = JSON.parse(cofre._real.getItem(cofre.MIGRADO_KEY) || '{}') || {}; } catch (e) {}
     const curta = String(org).slice(0, 8);
     if (migradas[curta]) return 0;
+
+    /* APARELHO QUE JÁ VIU MAIS DE UMA CLÍNICA NÃO MIGRA NADA.
+
+       O que está gravado sem gaveta veio de antes desta versão, e o registro
+       não carrega de qual clínica é — só o servidor sabe. Num aparelho que
+       serviu a uma clínica só, atribuir ao ambiente ativo é certo e é o caso
+       comum. Num aparelho onde duas entraram, seria um palpite: bastaria a
+       segunda pessoa recarregar a página primeiro para o acervo da primeira
+       ser carimbado como dela — exatamente o erro que este cofre existe para
+       impedir, cometido pela rotina que deveria impedi-lo.
+
+       Então aqui a gaveta começa VAZIA e a nuvem a preenche. Custa uma
+       sincronização; a alternativa custava a separação inteira. */
+    let vistos = [];
+    try { vistos = JSON.parse(cofre._real.getItem('medsys.v7.ambiente.vistos') || '[]') || []; } catch (e) {}
+    if (vistos.length > 1) {
+      migradas[curta] = 'sem-migrar:mais-de-um-ambiente';
+      try { cofre._real.setItem(cofre.MIGRADO_KEY, JSON.stringify(migradas)); } catch (e) {}
+      return 0;
+    }
     const mover = [];
     try {
       for (let i = 0; i < cofre._real.length; i++) {
