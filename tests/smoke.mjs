@@ -16114,6 +16114,127 @@ await test('Histórico e tabela CBHPM aparecem numa lista só, sem uma caixa por
   await page.close();
 });
 
+/* 224) Cada ambiente com os SEUS pacientes, seu Dashboard e seu Financeiro
+
+   A gaveta por clínica resolve tudo o que passa pelo `store` — e é por ali que
+   o autocomplete de paciente, o Dashboard e o Financeiro leem. O que NÃO passa
+   pelo store é a nuvem, e lá sobrava um túnel: a tabela `documentos`, o backup
+   pessoal, indexada por USUÁRIO e não por organização. Quem pertence a dois
+   ambientes traria o acervo de um para dentro do outro por quatro caminhos —
+   a busca por nome, o resgate de um registro, "restaurar tudo" e os rascunhos.
+
+   Este teste cobre as duas metades: o que se lê daqui, e o que se traz de lá. */
+await test('Pacientes, Dashboard e Financeiro são de cada ambiente — e a nuvem não fura isso', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+
+    /* ---------- metade 1: o que se lê DAQUI ---------- */
+    cloudRel._lembrarOrg('org-aaaaaaaa');
+    store.setList('pacientes', [{ _id: 'pA', nome: 'Alzira da Clinica A', plano: 'Unimed' }]);
+    store.setList('anestesia', [{ _id: 'a1', paciente: { nome: 'Alzira da Clinica A' },
+      procedimento: { data: '2026-09-01' }, _finalizado: true }]);
+    store.setList('financeiro', [{ _id: 'fA', paciente: 'Alzira da Clinica A', valor_previsto: 1000,
+      data_proc: '2026-09-01', status: 'pendente' }]);
+
+    const nomesA = autocomplete.listaPacientes().map(x => x.label);
+    out.aVeOSeuPaciente = nomesA.some(n => /Alzira/.test(n));
+
+    cloudRel._lembrarOrg('org-bbbbbbbb');
+    const nomesB = autocomplete.listaPacientes().map(x => x.label);
+    out.bNaoVeOPacienteDeA = !nomesB.some(n => /Alzira/.test(n));
+    out.bFinanceiroVazio = (store.list('financeiro') || []).length === 0;
+    out.bDashboardVazio = (store.list('anestesia') || []).length === 0;
+
+    /* B cria o seu, e A continua com o dela */
+    store.setList('pacientes', [{ _id: 'pB', nome: 'Benedito da Clinica B' }]);
+    store.setList('financeiro', [{ _id: 'fB', paciente: 'Benedito da Clinica B', valor_previsto: 50,
+      data_proc: '2026-09-02', status: 'pendente' }]);
+    out.bVeOSeu = autocomplete.listaPacientes().some(x => /Benedito/.test(x.label));
+
+    cloudRel._lembrarOrg('org-aaaaaaaa');
+    const voltaA = autocomplete.listaPacientes().map(x => x.label);
+    out.aVoltouSemMistura = voltaA.some(n => /Alzira/.test(n)) && !voltaA.some(n => /Benedito/.test(n));
+    out.aFinanceiroIntacto = (store.list('financeiro') || []).length === 1
+      && store.list('financeiro')[0]._id === 'fA';
+
+    /* ---------- metade 2: o que se traz DE LÁ ---------- */
+    cloud.estaConfigurado = () => true; cloud.estaLogado = () => true;
+    cloud.divergencia = () => null;
+    cloud._garantirToken = async () => true;
+    cloud.config = () => ({ url: 'https://x.supabase.co', key: 'k' });
+    cloud._headers = () => ({});
+    cloud.session = () => ({ user: { id: 'u1' } });
+    cloudRel.disponivel = () => true;
+    cloudRel._orgAsync = async () => 'org-aaaaaaaa';
+
+    let chamadas = [];
+    window.fetch = async (url) => {
+      chamadas.push(String(url));
+      /* a nuvem responde com um paciente de OUTRO ambiente — se algum caminho
+         aceitar isso, ele aparece aqui dentro */
+      return { ok: true, headers: { get: () => '0' }, json: async () => ([
+        { modulo: 'anestesia', doc_id: 'zz', dados: { _id: 'zz', paciente: { nome: 'Vazou do Outro Ambiente' } } }
+      ]) };
+    };
+
+    const doPessoal = () => chamadas.filter(u => /\/documentos\?user_id=eq\./.test(u));
+
+    /* (a) busca por nome */
+    chamadas = [];
+    await arquivo.procurarNaNuvem('vazou');
+    out.buscaNaoUsaCanalPessoal = doPessoal().length === 0;
+
+    /* (b) resgate de um registro */
+    chamadas = [];
+    try { await arquivo.restaurar('anestesia', 'zz', { silent: true }); } catch (e) {}
+    out.resgateNaoUsaCanalPessoal = doPessoal().length === 0;
+
+    /* (c) restaurar tudo */
+    chamadas = [];
+    try { await cloud.restaurarTudoDaNuvem({ silent: true }); } catch (e) {}
+    out.restaurarNaoUsaCanalPessoal = doPessoal().length === 0;
+
+    /* (d) rascunhos: viajam entre APARELHOS da pessoa, mas não entre clínicas —
+       o ambiente entra na chave, e o filtro é do servidor */
+    chamadas = [];
+    try { await rascunhosSync.puxar('anestesia'); } catch (e) {}
+    const pedidoRasc = chamadas.find(u => /rascunho_anestesia/.test(decodeURIComponent(u)));
+    out.rascunhoPedeDoAmbiente = !!pedidoRasc && /rascunho_anestesia@org-aaaa/.test(decodeURIComponent(pedidoRasc));
+    /* e muda de chave quando o ambiente muda */
+    cloudRel._lembrarOrg('org-bbbbbbbb');
+    out.rascunhoMudaComOAmbiente = rascunhosSync._modulo('anestesia') !== 'rascunho_anestesia'
+      && rascunhosSync._modulo('anestesia').indexOf('@org-bbbb') > 0;
+
+    /* nada do outro ambiente entrou em lugar nenhum */
+    cloudRel._lembrarOrg('org-aaaaaaaa');
+    const tudo = JSON.stringify([store.list('anestesia'), store.list('pacientes'), store.list('financeiro')]);
+    out.nadaVazou = tudo.indexOf('Vazou do Outro Ambiente') < 0;
+
+    /* ---------- conta SEM clínica continua usando o canal pessoal ---------- */
+    cloudRel._lembrarOrg(null);
+    chamadas = [];
+    await arquivo.procurarNaNuvem('vazou');
+    out.semClinicaAindaUsaOPessoal = doPessoal().length > 0;
+
+    cofre.esvaziar('org-aaaaaaaa'); cofre.esvaziar('org-bbbbbbbb');
+    return out;
+  });
+  assert(r.aVeOSeuPaciente, 'a clínica A precisa ver os pacientes dela na busca');
+  assert(r.bNaoVeOPacienteDeA, 'a busca de paciente da clínica B NÃO pode trazer paciente da A — em módulo nenhum');
+  assert(r.bFinanceiroVazio && r.bDashboardVazio, 'Financeiro e Dashboard também são de cada ambiente');
+  assert(r.bVeOSeu, 'e a clínica B vê os seus');
+  assert(r.aVoltouSemMistura && r.aFinanceiroIntacto, 'voltar para a clínica A devolve o dela, sem nada da B');
+  assert(r.buscaNaoUsaCanalPessoal, 'procurar por nome na nuvem não pode passar pelo backup pessoal — ele é por usuário, não por clínica');
+  assert(r.resgateNaoUsaCanalPessoal, 'resgatar um registro também não');
+  assert(r.restaurarNaoUsaCanalPessoal, '"restaurar tudo" também não — despejaria o acervo das outras clínicas nesta gaveta');
+  assert(r.rascunhoPedeDoAmbiente, 'rascunho é ficha em edição, com nome de paciente: a chave dele carrega o ambiente');
+  assert(r.rascunhoMudaComOAmbiente, 'e muda quando o ambiente muda');
+  assert(r.nadaVazou, 'nenhum caminho pode ter deixado entrar registro de outro ambiente');
+  assert(r.semClinicaAindaUsaOPessoal, 'conta SEM clínica continua usando o backup pessoal — para ela não existe outro');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

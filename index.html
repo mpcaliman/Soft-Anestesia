@@ -4656,7 +4656,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-29c</b><br>
+    v7.1 · build <b id="build-tag">2026-09-29d</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -10500,6 +10500,26 @@ const STORAGE = {
    vazava.
 ============================================================================ */
 const cofre = {
+  /* O CANAL PESSOAL NÃO SERVE A QUEM TEM CLÍNICA.
+
+     A tabela `documentos` guarda uma cópia de tudo sob o id de QUEM GRAVOU —
+     nasceu quando havia um médico e uma clínica. Com vários ambientes ela vira
+     um túnel: quem pertence a dois traz o acervo de um para dentro do outro por
+     ali, passando ao largo da separação por organização que vale em todo o
+     resto. Vale para a busca por nome, para o resgate de um registro, para
+     "restaurar tudo" e para os rascunhos.
+
+     Conta ligada a uma clínica lê pelo canal relacional, que é separado por
+     organização e tem tudo. Conta sem clínica (uso solo) continua usando o
+     canal pessoal normalmente — para ela não existe outro.
+
+     Responde pelo que o aparelho JÁ SABE: perguntar ao servidor a cada vez
+     seria pagar uma consulta de perfil por sincronização. */
+  temClinica() {
+    try { return !!(typeof cloudRel !== 'undefined' && cloudRel._orgLembrada()); }
+    catch (e) { return false; }
+  },
+
   ORG_KEY: 'medsys.v7.cloud.org_id',
   MIGRADO_KEY: 'medsys.v7.cofre.migrado',
 
@@ -12335,7 +12355,11 @@ const arquivo = {
         if (row) item = cloudRel._rowParaRegistro(row);
       }
     } catch (e) {}
-    if (!item || !item._id) {
+    /* Sem clínica, o backup pessoal é a última chance de achar o registro.
+       COM clínica, ele é um caminho para trazer registro de outro ambiente
+       para dentro deste — e o canal relacional, consultado acima, já tem tudo
+       o que é desta clínica. */
+    if ((!item || !item._id) && !cofre.temClinica()) {
       try {
         const c = cloud.config(); const s = cloud.session();
         const r = await fetch(c.url + '/rest/v1/documentos?user_id=eq.' + s.user.id +
@@ -12424,7 +12448,10 @@ const arquivo = {
        Postgres sabe filtrar por ele. O nome mora em três lugares conforme o
        módulo, daí o `or`. Se o servidor recusar a sintaxe, este canal fica de
        fora da busca — achar menos é melhor do que baixar o acervo inteiro. */
+    /* Aparelho de uma clínica não procura no backup pessoal: é por ali que o
+       nome de um paciente de OUTRO ambiente apareceria nesta busca. */
     try {
+      if (cofre.temClinica()) return achados;
       const sess = cloud.session();
       const likeJ = String(nome).trim().replace(/[*,()]/g, ' ');
       const ors = 'or=(' + [
@@ -20517,8 +20544,13 @@ const cloud = {
     if (!(await cloud._garantirToken())) { rel.erro = 'Sessão da nuvem expirada — saia e entre de novo.'; return rel; }
     const prog = (t) => { const el = document.getElementById('restaura-nuvem-prog'); if (el) el.textContent = t; };
 
-    /* 1) CANAL LEGADO — documentos do usuário (paginado) */
+    /* 1) CANAL LEGADO — documentos do usuário (paginado).
+       Pulado quando o aparelho pertence a uma clínica: este backup é por
+       PESSOA, e despejá-lo aqui misturaria na gaveta desta clínica tudo o que
+       a mesma pessoa gravou nas outras. O canal relacional, logo abaixo, traz
+       o que é desta clínica — que é o que se quer restaurar. */
     try {
+      if (cofre.temClinica()) throw { _pular: true };
       const c = cloud.config(); const s = cloud.session();
       let de = 0; const passo = 500; let seguir = true;
       const porMod = {};
@@ -20543,7 +20575,7 @@ const cloud = {
         const m = cloudRel.mesclarLocal(mod, porMod[mod]);
         rel.novos += m.novos; rel.atualizados += m.atualizados; rel.jaTinha += m.iguais;
       });
-    } catch (e) { rel.erro = rel.erro || ('Falha ao ler o backup: ' + e.message); }
+    } catch (e) { if (!(e && e._pular)) rel.erro = rel.erro || ('Falha ao ler o backup: ' + (e && e.message)); }
 
     /* 2) CANAL RELACIONAL — por organização (se houver clínica) */
     try {
@@ -20810,26 +20842,10 @@ const cloud = {
 
     let maisNovo = '';
     try {
-      /* O BACKUP PESSOAL É POR USUÁRIO, NÃO POR CLÍNICA.
-         A tabela `documentos` guarda uma cópia de tudo sob o id de quem
-         gravou — ela nasceu quando havia um médico e uma clínica. Com vários
-         ambientes ela vira um túnel: quem pertence a dois traz o acervo de um
-         para dentro do outro por aqui, passando ao largo da separação por
-         organização que vale em todo o resto.
-         Conta ligada a uma clínica lê pelo canal relacional, que é separado
-         por organização e tem tudo. O backup pessoal continua RECEBENDO (é
-         rede de segurança) e continua disponível sob demanda no resgate
-         "Procurar na nuvem" e em "Restaurar tudo da nuvem" — só deixa de
-         descer sozinho. */
-      /* A pergunta é respondida pelo que o APARELHO já sabe (`_orgLembrada`),
-         nunca por `_orgAsync` — que vai à rede buscar o perfil. Isto roda em
-         toda sincronização; uma consulta de perfil a cada passada é a mesma
-         torneira de tráfego que custou a cota do mês. E a organização já está
-         gravada antes da primeira sincronização (ver _espelharUsuarioNuvem),
-         então não há janela em que ela falte. */
-      let temClinica = false;
-      try { temClinica = !!cloudRel._orgLembrada(); } catch (e) {}
-      if (temClinica) return { porMod: {}, marca: maisNovo || marca || '' };
+      /* Canal pessoal: ver `cofre.temClinica`. Quem tem clínica lê pelo
+         relacional; o backup pessoal continua RECEBENDO — é rede de
+         segurança —, só deixa de descer. */
+      if (cofre.temClinica()) return { porMod: {}, marca: maisNovo || marca || '' };
       /* Paginado: sem limite, o PostgREST corta em `max-rows` e o resto some
          calado — registro que não volta é registro que parece perdido. */
       const passo = 500;
@@ -39831,7 +39847,16 @@ window.descartarAutosave = function(mod) {
    mais nova de cada um, e nenhum apaga o rascunho do outro.
 ============================================================================ */
 const rascunhosSync = {
-  _modulo(mod) { return 'rascunho_' + mod; },
+  /* O rascunho viaja entre os APARELHOS da mesma pessoa — isso é legítimo e é
+     o motivo deste canal existir. O que ele não pode é atravessar CLÍNICAS: um
+     rascunho é uma ficha em edição, com nome de paciente dentro. O ambiente
+     entra na chave `modulo`, que é coluna existente e filtrada no servidor —
+     sem migração, e sem trazer para cá o que é de outro banco. */
+  _modulo(mod) {
+    const base = 'rascunho_' + mod;
+    try { const o = cloudRel._orgLembrada(); return o ? (base + '@' + String(o).slice(0, 8)) : base; }
+    catch (e) { return base; }
+  },
   async enviar(mod) {
     try {
       if (!cloud.estaConfigurado() || !cloud.estaLogado()) return 0;
