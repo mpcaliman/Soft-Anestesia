@@ -16002,6 +16002,99 @@ await test('Cada clínica tem a sua gaveta: o dado da outra não é endereçáve
   await page.close();
 });
 
+/* 223) Uma sugestão de cada vez: histórico e tabela CBHPM na MESMA lista
+
+   O campo "procedimento cirúrgico" recebe duas ligações — o autocomplete de
+   cadastro/histórico ("usado antes") e o da tabela CBHPM. Cada uma se achava
+   dona da tela e desenhava a sua lista no mesmo lugar, uma por cima da outra.
+   Vale para todo campo que é das duas coisas, em qualquer módulo.
+
+   A conferência é por GEOMETRIA e por PAINT ORDER, não por "existe no DOM":
+   foi justamente um teste de existência que deixou isto passar. Duas caixas
+   podem estar ambas no DOM e só uma ser visível — e podem estar ambas visíveis
+   e sobrepostas, que é o defeito. */
+await test('Histórico e tabela CBHPM aparecem numa lista só, sem uma caixa por cima da outra', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => { try { ui.showModule('anestesia'); } catch (e) {} });
+  const r = await page.evaluate(() => {
+    const out = {};
+    const inp = document.querySelector('#form-anestesia [name="procedimento"]');
+    out.achouOCampo = !!inp;
+    if (!inp) return out;
+    out.temAsDuasLigacoes = !!inp._cbhpmLigado && typeof inp._acLista === 'function';
+
+    /* histórico de mentira, com um item que casa com o que vai ser digitado */
+    inp._acLista = () => ([
+      { value: 'h1', label: 'Retirada de balão gástrico via endoscopica', meta: 'usado antes' },
+      { value: 'h2', label: 'Coisa que não casa', meta: 'usado antes' }
+    ]);
+
+    inp.value = 'retirada';
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
+    return out;
+  });
+  assert(r.achouOCampo, 'o campo de procedimento da ficha precisa existir');
+  assert(r.temAsDuasLigacoes, 'este campo é dos dois mundos — é aí que o conflito nascia');
+
+  const g = await page.evaluate(() => {
+    const out = {};
+    const vis = (el) => {
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      const st = getComputedStyle(el);
+      if (!r.width || !r.height || st.display === 'none' || st.visibility === 'hidden' || st.opacity === '0') return null;
+      return r;
+    };
+    const caixaCbhpm = vis(document.querySelector('.cbhpm-box'));
+    const caixaAc = vis(document.querySelector('.autocomplete-list.show'));
+    out.abriuUma = !!caixaCbhpm;
+    out.aOutraNaoAbriu = !caixaAc;
+    /* Mesmo se as duas abrissem: não podem se sobrepor na tela */
+    if (caixaCbhpm && caixaAc) {
+      const sobrepoe = !(caixaCbhpm.right <= caixaAc.left || caixaAc.right <= caixaCbhpm.left ||
+                         caixaCbhpm.bottom <= caixaAc.top || caixaAc.bottom <= caixaCbhpm.top);
+      out.naoSobrepoe = !sobrepoe;
+    } else out.naoSobrepoe = true;
+
+    const box = document.querySelector('.cbhpm-box');
+    const txt = box ? box.textContent : '';
+    out.temGrupoHistorico = /Já usados/i.test(txt);
+    out.temGrupoTabela = /Tabela CBHPM/i.test(txt);
+    out.trouxeOItemDoHistorico = /balão gástrico/i.test(txt);
+    out.trouxeItemDaTabela = !!box && !!box.querySelector('.cbhpm-item[data-i]');
+    out.naoTrouxeOQueNaoCasa = !/Coisa que não casa/.test(txt);
+
+    /* PAINT ORDER: o que está no topo da lista tem de ser a própria lista, e
+       não um campo do formulário atravessado por cima dela. */
+    if (box) {
+      const r = box.getBoundingClientRect();
+      const topo = document.elementFromPoint(r.left + r.width / 2, r.top + 10);
+      out.estaPorCima = !!(topo && (topo === box || box.contains(topo)));
+    }
+
+    /* escolher um item do histórico escreve no campo e fecha a lista */
+    const item = box && box.querySelector('.cbhpm-item[data-h]');
+    if (item) {
+      cbhpm._escolherHist(item);
+      const inp = document.querySelector('#form-anestesia [name="procedimento"]');
+      out.escolheuDoHistorico = /balão gástrico/i.test(inp.value || '');
+      out.fechouDepoisDeEscolher = !document.querySelector('.cbhpm-box');
+    }
+    return out;
+  });
+  assert(g.abriuUma, 'a lista unificada precisa abrir');
+  assert(g.aOutraNaoAbriu, 'a segunda caixa não pode abrir junto — era ela por cima da outra');
+  assert(g.naoSobrepoe, 'e em nenhuma hipótese duas listas de sugestão podem ocupar o mesmo lugar na tela');
+  assert(g.temGrupoHistorico && g.temGrupoTabela, 'a lista única separa as origens por título, senão vira uma sopa');
+  assert(g.trouxeOItemDoHistorico, 'o que a pessoa já usou continua sendo sugerido');
+  assert(g.trouxeItemDaTabela, 'e a tabela CBHPM também');
+  assert(g.naoTrouxeOQueNaoCasa, 'o histórico é filtrado pelo que está sendo digitado');
+  assert(g.estaPorCima, 'a lista tem que estar VISÍVEL no topo — existir no DOM não basta');
+  assert(g.escolheuDoHistorico, 'escolher um item do histórico escreve no campo');
+  assert(g.fechouDepoisDeEscolher, 'e fecha a lista');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

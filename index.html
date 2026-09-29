@@ -991,6 +991,11 @@ body.ficha-finalizada .lab-item input.lab-fora {
 /* Código digitado que não existe na tabela: some da guia como glosa, então
    aparece marcado aqui antes de sair daqui. */
 input.cbhpm-cod-invalido { border-color: var(--danger, #dc2626) !important; background: rgba(220, 38, 38, .06); }
+.cbhpm-grupo {
+  padding: 6px 13px 4px; font-size: .7rem; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--text-mute); background: var(--surface-alt);
+  border-bottom: 1px solid var(--border); position: sticky; top: 0;
+}
 .cbhpm-empty { padding: 11px 13px; color: var(--text-soft); font-size: .84rem; font-style: italic; }
 .action-divider {
   width: 1px; height: 22px;
@@ -4651,7 +4656,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-29b</b><br>
+    v7.1 · build <b id="build-tag">2026-09-29c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -30392,12 +30397,30 @@ const cbhpm = {
     return { texto: String(texto || '').trim(), mult: 1 };
   },
 
+  /* O que o cadastro e o histórico do campo sugerem ("usado antes"), quando
+     este campo também tem o autocomplete comum ligado. Vem para cá em vez de
+     abrir uma segunda caixa por cima desta. */
+  _doHistorico(input, texto) {
+    try {
+      if (typeof input._acLista !== 'function') return [];
+      const q = cbhpm._norm(texto);
+      return (input._acLista() || [])
+        .filter(it => it && it.label)
+        .filter(it => !q || cbhpm._norm(it.label + ' ' + (it.meta || '')).indexOf(q) >= 0)
+        .slice(0, 8);
+    } catch (e) { return []; }
+  },
+
   _abrir(input) {
     const texto = cbhpm.parseMult(cbhpm._segmento(input.value).seg).texto;
     cbhpm._fechar(input);
-    if (texto.length < 2) return;
-    const itens = cbhpm.buscar(texto, 30);
+    const hist = cbhpm._doHistorico(input, texto);
+    const itens = texto.length >= 2 ? cbhpm.buscar(texto, 30) : [];
+    /* Campo vazio ainda mostra o que já foi usado — era o que a lista antiga
+       fazia ao receber o foco, e tirar isso seria piorar para consertar. */
+    if (!itens.length && !hist.length) return;
     input._cbhpmItens = itens;
+    input._cbhpmHist = hist;
     input._cbhpmIdx = -1;
     const box = document.createElement('div');
     box.className = 'cbhpm-box';
@@ -30407,10 +30430,20 @@ const cbhpm = {
       if (idx < 0) return utils.escapeHTML(s);
       return utils.escapeHTML(s.slice(0, idx)) + '<mark>' + utils.escapeHTML(s.slice(idx, idx + q.length)) + '</mark>' + utils.escapeHTML(s.slice(idx + q.length));
     };
+    /* GRUPO 1 — cadastro e histórico do campo. Vem primeiro porque é o que a
+       pessoa mesma já usou; a tabela oficial vem logo abaixo. */
+    let htmlHist = '';
+    if (hist.length) {
+      htmlHist = '<div class="cbhpm-grupo">Já usados / cadastro</div>' + hist.map((it, i) =>
+        `<div class="cbhpm-item" data-h="${i}" onmousedown="event.preventDefault(); cbhpm._escolherHist(this)">
+          <span class="cbhpm-desc">${marca(it.label)}</span>
+          ${it.meta ? '<span class="cbhpm-meta">' + utils.escapeHTML(it.meta) + '</span>' : ''}
+        </div>`).join('');
+    }
     if (itens.length) {
       /* CÓDIGO — DESCRIÇÃO, com porte médico e anestésico discretos embaixo.
          O código vem primeiro porque é ele que vai para a guia. */
-      box.innerHTML = itens.map((it, i) => {
+      box.innerHTML = htmlHist + (htmlHist ? '<div class="cbhpm-grupo">Tabela CBHPM ' + utils.escapeHTML(CBHPM_VERSAO) + '</div>' : '') + itens.map((it, i) => {
         const an = it.anestesico || it;
         const meta = [
           it.porte ? 'porte ' + it.porte : '',
@@ -30422,6 +30455,10 @@ const cbhpm = {
           ${meta ? '<span class="cbhpm-meta">' + utils.escapeHTML(meta) + '</span>' : ''}
         </div>`;
       }).join('');
+    } else if (htmlHist) {
+      /* Só o histórico casou: não diz "nada encontrado" em cima de uma lista
+         que tem itens — isso confundia mais do que ajudava. */
+      box.innerHTML = htmlHist;
     } else {
       box.innerHTML = '<div class="cbhpm-empty">Nenhum procedimento encontrado na CBHPM ' + utils.escapeHTML(CBHPM_VERSAO) + '</div>';
     }
@@ -30448,6 +30485,26 @@ const cbhpm = {
        sugestão não fazia coisa nenhuma */
     box._cbhpmInput = input;
     input._cbhpmBox = box;
+  },
+
+  /* Escolher um item do grupo "já usados": o texto entra no campo e a escolha
+     é devolvida a quem ligou o autocomplete (que preenche CRM, vincula
+     paciente, etc.) — sem passar pela régua da CBHPM, que não é dele. */
+  _escolherHist(el) {
+    const box = el.closest('.cbhpm-box');
+    const input = box && box._cbhpmInput;
+    if (!input) return;
+    const i = parseInt(el.getAttribute('data-h'), 10);
+    const it = (input._cbhpmHist || [])[i];
+    if (!it) return;
+    const seg = cbhpm._segmento(input.value);
+    input.value = (seg.prefixo ? seg.prefixo + ' ' : '') + it.label;
+    cbhpm._fechar(input);
+    try { if (typeof input._acEscolher === 'function') input._acEscolher(it); } catch (e) {}
+    /* o texto mudou: o código CBHPM pendurado pode não valer mais */
+    try { cbhpm._conferirCodigo(input); } catch (e) {}
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    try { markDirty(); } catch (e) {}
   },
 
   _temAncestralQueRecorta(el) {
@@ -45935,6 +45992,17 @@ const autocomplete = {
   attach(input, getList, onPick, onCreateNew) {
     if (!input || input.dataset.acAttached) return;
     input.dataset.acAttached = '1';
+    /* DUAS CAIXAS NO MESMO CAMPO, UMA POR CIMA DA OUTRA.
+       O campo "procedimento cirúrgico" recebe as duas ligações: esta, do
+       cadastro + histórico ("usado antes"), e a da tabela CBHPM. Cada uma se
+       achava dona da tela e desenhava a sua lista no mesmo lugar. Acontecia em
+       todo campo que é das duas coisas — não só na ficha.
+       Agora quem desenha é UMA lista só, a da CBHPM, com as duas origens
+       separadas por título. Este módulo passa a emprestar a sua lista e a sua
+       escolha em vez de abrir caixa própria. */
+    input._acLista = getList;
+    input._acEscolher = onPick;
+    input._acCriarNovo = onCreateNew;
     const wrap = document.createElement('div');
     wrap.className = 'autocomplete-wrap';
     input.parentNode.insertBefore(wrap, input);
@@ -45962,6 +46030,8 @@ const autocomplete = {
         html += `<div class="autocomplete-item create-new" data-idx="-1">+ Cadastrar novo "${utils.escapeHTML(input.value)}"</div>`;
       }
       list.innerHTML = html;
+      /* Campo que também é CBHPM: quem mostra é a lista unificada de lá. */
+      if (input._cbhpmLigado) { mostrar(false); try { cbhpm._abrir(input); } catch (e) {} return; }
       mostrar(items.length > 0 || (onCreateNew && q.length >= 2));
     };
     /* O CARTÃO RECORTAVA A LISTA.
