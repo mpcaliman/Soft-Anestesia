@@ -20821,8 +20821,14 @@ const cloud = {
          rede de segurança) e continua disponível sob demanda no resgate
          "Procurar na nuvem" e em "Restaurar tudo da nuvem" — só deixa de
          descer sozinho. */
+      /* A pergunta é respondida pelo que o APARELHO já sabe (`_orgLembrada`),
+         nunca por `_orgAsync` — que vai à rede buscar o perfil. Isto roda em
+         toda sincronização; uma consulta de perfil a cada passada é a mesma
+         torneira de tráfego que custou a cota do mês. E a organização já está
+         gravada antes da primeira sincronização (ver _espelharUsuarioNuvem),
+         então não há janela em que ela falte. */
       let temClinica = false;
-      try { temClinica = !!(cloudRel.disponivel() && (await cloudRel._orgAsync())); } catch (e) {}
+      try { temClinica = !!cloudRel._orgLembrada(); } catch (e) {}
       if (temClinica) return { porMod: {}, marca: maisNovo || marca || '' };
       /* Paginado: sem limite, o PostgREST corta em `max-rows` e o resto some
          calado — registro que não volta é registro que parece perdido. */

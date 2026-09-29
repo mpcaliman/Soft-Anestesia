@@ -13055,6 +13055,23 @@ await test('Baixa da nuvem é incremental — e cai para a base inteira quando p
     const k1 = cloud._marcaKey();
     cloud.session = () => ({ user: { id: 'u2' }, access_token: 't' });
     out.marcaPorUsuario = cloud._marcaKey() !== k1 && cloud._lerMarca() === '';
+
+    /* 6ª: APARELHO QUE PERTENCE A UMA CLÍNICA NÃO BAIXA ESTE CANAL.
+       `documentos` é o backup PESSOAL, indexado por usuário e não por
+       organização. Com vários ambientes ele vira um túnel: quem pertence a
+       dois traz o acervo de um para dentro do outro por aqui, passando ao
+       largo da separação por organização. Conta ligada a uma clínica lê pelo
+       canal relacional, que é separado por organização e tem tudo. */
+    cloud.session = () => ({ user: { id: 'u1' }, access_token: 't' });
+    cloudRel._lembrarOrg('org-de-teste');
+    pedidos = []; bytes = 0;
+    const r6 = await cloud._baixarTudo({ completo: true });
+    out.comClinicaNaoBaixa = (r6.porMod.pre || []).length === 0
+      && !pedidos.some(u => /documentos/.test(String(u)));
+    /* e a pergunta não pode custar rede: quem responde é o que o aparelho já
+       sabe, não uma consulta de perfil a cada sincronização */
+    out.naoConsultouPerfil = !pedidos.some(u => /profiles|organization_users/.test(String(u)));
+    cloudRel._lembrarOrg(null);
     return out;
   });
 
@@ -13066,6 +13083,8 @@ await test('Baixa da nuvem é incremental — e cai para a base inteira quando p
   assert(r.economia > 0.8, 'a economia medida passa de 80% já neste cenário (foi ' + (r.economia * 100).toFixed(0) + '%)');
   assert(r.aparelhoVazioBaixaTudo, 'aparelho sem nada gravado baixa tudo: incremental aí deixaria o app vazio e a pessoa acharia que perdeu os dados');
   assert(r.completoTrazTudo, '"completo" força a base inteira mesmo havendo marca');
+  assert(r.comClinicaNaoBaixa, 'aparelho de uma clínica não baixa o backup pessoal — era por aí que um ambiente via o acervo do outro');
+  assert(r.naoConsultouPerfil, 'e descobrir isso não pode custar uma consulta de perfil a cada sincronização');
   assert(r.marcaPorUsuario, 'a marca é por usuário — a de um não filtra a baixa do outro');
   await page.close();
 });
