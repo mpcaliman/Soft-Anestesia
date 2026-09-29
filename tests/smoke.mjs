@@ -15805,6 +15805,124 @@ await test('Mutirão corrige status e tabela de códigos sem inventar valor, e d
   await page.close();
 });
 
+/* 221) Ambientes: o computador do hospital não entrega uma clínica à outra
+
+   No servidor a RLS já separa por organização. O furo era o aparelho: num
+   navegador compartilhado, tudo o que desceu ficava no localStorage, e o
+   localStorage não sabe de organização nenhuma — quem entrasse depois abria o
+   app e via as fichas da clínica anterior. A proteção existente era uma
+   pergunta que mandava recusar ("Cancelar = mantém tudo") e uma limpeza que
+   esquecia documentos, imagens, lixeira, versões, auditoria e rascunhos.
+
+   O que este teste tranca é o vazamento, não a função: depois que outra
+   clínica entra, NADA de paciente pode continuar legível no aparelho. */
+await test('Trocar de clínica limpa o aparelho, e computador compartilhado não guarda nada', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    cloud.estaConfigurado = () => true; cloud.estaLogado = () => true;
+    cloud._garantirToken = async () => true;
+    cloud.config = () => ({ url: 'https://x.supabase.co', key: 'k' });
+    cloud._headers = () => ({});
+    window.fetch = async (url) => (/organizations/.test(String(url))
+      ? { ok: true, headers: { get: () => '0' }, json: async () => [{ nome: 'Clínica Carlos Pedreira' }] }
+      : { ok: true, headers: { get: () => '0' }, json: async () => [] });
+    try { backupCompleto.exportar = () => {}; } catch (e) {}
+
+    /* --- Clínica A trabalhou neste computador --- */
+    localStorage.setItem(ambiente.NOME_KEY, 'Minha Clínica Anestesiologia');
+    localStorage.setItem(ambiente.VISTOS_KEY, JSON.stringify(['org-A']));
+    localStorage.setItem(ambiente.COMPART_KEY, '0');
+    cloudRel._lembrarOrg('org-A');
+    store.setList('anestesia', [{ _id: 'a1', paciente: { nome: 'Paciente da Clínica A' } }]);
+    store.setList('pacientes', [{ _id: 'p1', nome: 'Cadastro da A' }]);
+    /* as gavetas que a limpeza ANTIGA esquecia — é aqui que vazava */
+    localStorage.setItem('medsys.v7.documentos', JSON.stringify([{ _id: 'd1', nome: 'Doc da A' }]));
+    localStorage.setItem('medsys.v7.lixeira', JSON.stringify([{ _id: 'x1', nome: 'Apagado da A' }]));
+    localStorage.setItem('medsys.v7.audit', JSON.stringify([{ resumo: 'Paciente da Clínica A' }]));
+    localStorage.setItem('medsys.v7.versions', JSON.stringify({ 'anestesia:a1': [{ ts: 1 }] }));
+    localStorage.setItem('medsys.v7.blobs', JSON.stringify({ img1: 'data:image/png;base64,AAA' }));
+    localStorage.setItem('medsys.v7.rascunhos.anestesia', JSON.stringify([{ nome: 'Rascunho da A' }]));
+    localStorage.setItem('medsys.v3.autosave.anestesia', JSON.stringify({ paciente: 'Autosave da A' }));
+    localStorage.setItem('medsys.v7.arquivo.indice', JSON.stringify({ anestesia: [{ id: 'a9', nome: 'Arquivado da A' }] }));
+    /* e o que é do APARELHO, que precisa SOBREVIVER */
+    localStorage.setItem('medsys.v7.theme', 'escuro');
+    localStorage.setItem('medsys.v7.cloud.cfg', '{"url":"x"}');
+    localStorage.setItem('medsys.v7.auth.users', '[{"usuario":"alguem"}]');
+
+    /* --- Clínica B entra no mesmo navegador --- */
+    const res = await ambiente.aoEntrar('org-B');
+    out.trocou = res.trocou === true;
+
+    /* O ponteiro do ambiente é regravado DEPOIS da limpeza e aponta para a
+       clínica nova — não é resto da anterior. Conferido pelo valor, logo
+       abaixo, e não pela ausência. */
+    const PONTEIROS = ['medsys.v7.cloud.org_id', 'medsys.v7.cloud.sem_clinica'];
+    const sobrou = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || k.indexOf('medsys.') !== 0) continue;
+      if (ambiente.CHAVES_DO_APARELHO.indexOf(k) >= 0 || PONTEIROS.indexOf(k) >= 0) continue;
+      sobrou.push(k);
+    }
+    out.nadaDaClinicaSobrou = sobrou.length === 0;
+    out.ponteiroApontaProNovo = localStorage.getItem('medsys.v7.cloud.org_id') === 'org-B';
+    out.oQueSobrou = sobrou.slice(0, 6);
+    /* prova pelo conteúdo, não só pela chave: nome de paciente não pode estar
+       legível em lugar nenhum do aparelho */
+    let bruto = '';
+    for (let i = 0; i < localStorage.length; i++) { bruto += (localStorage.getItem(localStorage.key(i)) || ''); }
+    out.nenhumNomeLegivel = bruto.indexOf('Paciente da Clínica A') < 0
+      && bruto.indexOf('Doc da A') < 0 && bruto.indexOf('Apagado da A') < 0
+      && bruto.indexOf('Rascunho da A') < 0 && bruto.indexOf('Arquivado da A') < 0;
+    /* o aparelho continua sendo o aparelho */
+    out.preservouOAparelho = localStorage.getItem('medsys.v7.theme') === 'escuro'
+      && localStorage.getItem('medsys.v7.cloud.cfg') === '{"url":"x"}'
+      && localStorage.getItem('medsys.v7.auth.users') === '[{"usuario":"alguem"}]';
+    out.pegouONome = ambiente.nome() === 'Clínica Carlos Pedreira';
+    out.ambienteAgoraEhB = ambiente.id() === 'org-B';
+
+    /* Dois ambientes no mesmo navegador: modo compartilhado liga sozinho.
+       Um computador que serve duas clínicas não devia depender de alguém
+       lembrar de marcar a caixinha. */
+    out.ligouCompartilhadoSozinho = ambiente.compartilhado() === true;
+
+    /* --- mesma clínica de novo NÃO limpa (secretária e médico do mesmo lugar) --- */
+    store.setList('anestesia', [{ _id: 'b1', paciente: { nome: 'Paciente da B' } }]);
+    const res2 = await ambiente.aoEntrar('org-B');
+    out.mesmaClinicaNaoLimpa = res2.trocou === false && (store.list('anestesia') || []).length === 1;
+
+    /* --- sair de computador compartilhado não deixa nada --- */
+    ambiente.definirCompartilhado(true, { silent: true });
+    const saida = ambiente.aoSair();
+    out.saidaLimpou = saida.limpou > 0 && (store.list('anestesia') || []).length === 0;
+    out.saidaEsqueceuAClinica = !ambiente.id();
+    out.saidaPreservouLogin = localStorage.getItem('medsys.v7.auth.users') === '[{"usuario":"alguem"}]';
+
+    /* --- computador próprio: sair NÃO apaga o trabalho --- */
+    cloudRel._lembrarOrg('org-C');
+    store.setList('anestesia', [{ _id: 'c1', paciente: { nome: 'Paciente da C' } }]);
+    ambiente.definirCompartilhado(false, { silent: true });
+    ambiente.aoSair();
+    out.proprioNaoApaga = (store.list('anestesia') || []).length === 1;
+
+    store.setList('anestesia', []); store.setList('pacientes', []);
+    return out;
+  });
+  assert(r.trocou, 'entrar com conta de outra clínica tem que ser reconhecido como troca de ambiente');
+  assert(r.nadaDaClinicaSobrou, 'nenhuma chave de dado da clínica anterior pode sobrar: ' + JSON.stringify(r.oQueSobrou));
+  assert(r.nenhumNomeLegivel, 'nome de paciente da clínica anterior não pode continuar legível no aparelho');
+  assert(r.preservouOAparelho, 'o que é do aparelho — login, tema, configuração da nuvem — não pode ser apagado junto');
+  assert(r.pegouONome && r.ambienteAgoraEhB, 'o ambiente novo assume, com o nome da clínica à vista');
+  assert(r.ponteiroApontaProNovo, 'e o ponteiro de organização do aparelho passa a ser o da clínica que entrou');
+  assert(r.ligouCompartilhadoSozinho, 'navegador que viu duas clínicas liga o modo compartilhado sozinho');
+  assert(r.mesmaClinicaNaoLimpa, 'outra PESSOA da mesma clínica não é troca de ambiente — não pode apagar o trabalho');
+  assert(r.saidaLimpou && r.saidaEsqueceuAClinica, 'em computador compartilhado, sair não deixa dado da clínica');
+  assert(r.saidaPreservouLogin, 'e mesmo assim o aparelho continua sabendo entrar');
+  assert(r.proprioNaoApaga, 'em computador de uso próprio, sair NÃO pode apagar o trabalho de ninguém');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
