@@ -13088,21 +13088,44 @@ await test('Baixa da nuvem é incremental — e cai para a base inteira quando p
     cloud.session = () => ({ user: { id: 'u2' }, access_token: 't' });
     out.marcaPorUsuario = cloud._marcaKey() !== k1 && cloud._lerMarca() === '';
 
-    /* 6ª: APARELHO QUE PERTENCE A UMA CLÍNICA NÃO BAIXA ESTE CANAL.
-       `documentos` é o backup PESSOAL, indexado por usuário e não por
-       organização. Com vários ambientes ele vira um túnel: quem pertence a
-       dois traz o acervo de um para dentro do outro por aqui, passando ao
-       largo da separação por organização. Conta ligada a uma clínica lê pelo
-       canal relacional, que é separado por organização e tem tudo. */
+    /* 6ª: O BACKUP PESSOAL SÓ É AMBÍGUO PARA QUEM TEM MAIS DE UMA CLÍNICA.
+
+       `documentos` é indexado por USUÁRIO, não por organização — ele não diz de
+       qual clínica é cada registro. Com DUAS clínicas isso vira um túnel: o
+       acervo de uma entra na outra, passando ao largo da separação.
+
+       Com UMA clínica não há ambiguidade nenhuma, e fechar o canal nesse caso
+       foi um erro caro: o acervo histórico deste sistema vive em boa parte
+       nele — o relacional veio depois e nem todo registro foi espelhado lá.
+       Quem tinha uma clínica só perdeu acesso ao próprio backup, e "recomeçar
+       a partir da nuvem" devolvia o Dashboard pela metade. */
     cloud.session = () => ({ user: { id: 'u1' }, access_token: 't' });
     cloudRel._lembrarOrg('org-de-teste');
+
+    /* uma clínica → o backup pessoal continua sendo dela, e desce */
+    localStorage.setItem('medsys.v7.cloud.orgs_count', '1');
     pedidos = []; bytes = 0;
-    const r6 = await cloud._baixarTudo({ completo: true });
-    out.comClinicaNaoBaixa = (r6.porMod.pre || []).length === 0
+    const r6a = await cloud._baixarTudo({ completo: true });
+    out.umaClinicaAindaBaixa = (r6a.porMod.pre || []).length > 0
+      && pedidos.some(u => /documentos/.test(String(u)));
+
+    /* duas clínicas → não desce sozinho */
+    localStorage.setItem('medsys.v7.cloud.orgs_count', '2');
+    pedidos = []; bytes = 0;
+    const r6b = await cloud._baixarTudo({ completo: true });
+    out.duasClinicasNaoBaixa = (r6b.porMod.pre || []).length === 0
       && !pedidos.some(u => /documentos/.test(String(u)));
+
+    /* ainda não se sabe quantas → NÃO privar a pessoa do próprio backup */
+    localStorage.removeItem('medsys.v7.cloud.orgs_count');
+    pedidos = [];
+    const r6c = await cloud._baixarTudo({ completo: true });
+    out.semSaberNaoPriva = pedidos.some(u => /documentos/.test(String(u)));
+
     /* e a pergunta não pode custar rede: quem responde é o que o aparelho já
        sabe, não uma consulta de perfil a cada sincronização */
     out.naoConsultouPerfil = !pedidos.some(u => /profiles|organization_users/.test(String(u)));
+    localStorage.removeItem('medsys.v7.cloud.orgs_count');
     cloudRel._lembrarOrg(null);
     return out;
   });
@@ -13115,7 +13138,9 @@ await test('Baixa da nuvem é incremental — e cai para a base inteira quando p
   assert(r.economia > 0.8, 'a economia medida passa de 80% já neste cenário (foi ' + (r.economia * 100).toFixed(0) + '%)');
   assert(r.aparelhoVazioBaixaTudo, 'aparelho sem nada gravado baixa tudo: incremental aí deixaria o app vazio e a pessoa acharia que perdeu os dados');
   assert(r.completoTrazTudo, '"completo" força a base inteira mesmo havendo marca');
-  assert(r.comClinicaNaoBaixa, 'aparelho de uma clínica não baixa o backup pessoal — era por aí que um ambiente via o acervo do outro');
+  assert(r.umaClinicaAindaBaixa, 'com UMA clínica o backup pessoal é dela — fechá-lo tirou da pessoa o próprio acervo');
+  assert(r.duasClinicasNaoBaixa, 'com DUAS clínicas o backup pessoal é ambíguo e não desce sozinho — era por aí que um ambiente via o acervo do outro');
+  assert(r.semSaberNaoPriva, 'enquanto não se sabe quantas clínicas a conta tem, não se priva ninguém do próprio backup');
   assert(r.naoConsultouPerfil, 'e descobrir isso não pode custar uma consulta de perfil a cada sincronização');
   assert(r.marcaPorUsuario, 'a marca é por usuário — a de um não filtra a baixa do outro');
   await page.close();
@@ -16210,6 +16235,12 @@ await test('Pacientes, Dashboard e Financeiro são de cada ambiente — e a nuve
       ]) };
     };
 
+    /* DUAS clínicas nesta conta: é o único caso em que o backup pessoal é
+       ambíguo, e portanto o único em que ele deve ficar de fora. Com uma só,
+       aquele backup é daquela clínica e fechá-lo tira da pessoa o próprio
+       acervo — foi o erro que apagou o Dashboard de quem tinha uma clínica. */
+    localStorage.setItem('medsys.v7.cloud.orgs_count', '2');
+
     const doPessoal = () => chamadas.filter(u => /\/documentos\?user_id=eq\./.test(u));
 
     /* (a) busca por nome */
@@ -16243,7 +16274,14 @@ await test('Pacientes, Dashboard e Financeiro são de cada ambiente — e a nuve
     const tudo = JSON.stringify([store.list('anestesia'), store.list('pacientes'), store.list('financeiro')]);
     out.nadaVazou = tudo.indexOf('Vazou do Outro Ambiente') < 0;
 
+    /* ---------- e com UMA clínica o canal pessoal volta a valer ---------- */
+    localStorage.setItem('medsys.v7.cloud.orgs_count', '1');
+    chamadas = [];
+    await arquivo.procurarNaNuvem('vazou');
+    out.umaClinicaUsaOPessoal = doPessoal().length > 0;
+
     /* ---------- conta SEM clínica continua usando o canal pessoal ---------- */
+    localStorage.removeItem('medsys.v7.cloud.orgs_count');
     cloudRel._lembrarOrg(null);
     chamadas = [];
     await arquivo.procurarNaNuvem('vazou');
@@ -16257,12 +16295,13 @@ await test('Pacientes, Dashboard e Financeiro são de cada ambiente — e a nuve
   assert(r.bFinanceiroVazio && r.bDashboardVazio, 'Financeiro e Dashboard também são de cada ambiente');
   assert(r.bVeOSeu, 'e a clínica B vê os seus');
   assert(r.aVoltouSemMistura && r.aFinanceiroIntacto, 'voltar para a clínica A devolve o dela, sem nada da B');
-  assert(r.buscaNaoUsaCanalPessoal, 'procurar por nome na nuvem não pode passar pelo backup pessoal — ele é por usuário, não por clínica');
+  assert(r.buscaNaoUsaCanalPessoal, 'conta com duas clínicas: procurar por nome não passa pelo backup pessoal, que não diz de qual clínica é cada registro');
   assert(r.resgateNaoUsaCanalPessoal, 'resgatar um registro também não');
   assert(r.restaurarNaoUsaCanalPessoal, '"restaurar tudo" também não — despejaria o acervo das outras clínicas nesta gaveta');
   assert(r.rascunhoPedeDoAmbiente, 'rascunho é ficha em edição, com nome de paciente: a chave dele carrega o ambiente');
   assert(r.rascunhoMudaComOAmbiente, 'e muda quando o ambiente muda');
   assert(r.nadaVazou, 'nenhum caminho pode ter deixado entrar registro de outro ambiente');
+  assert(r.umaClinicaUsaOPessoal, 'com UMA clínica o backup pessoal é dela e volta a ser usado — fechá-lo tirou da pessoa o próprio acervo');
   assert(r.semClinicaAindaUsaOPessoal, 'conta SEM clínica continua usando o backup pessoal — para ela não existe outro');
   await page.close();
 });

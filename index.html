@@ -4656,7 +4656,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-30a</b><br>
+    v7.1 · build <b id="build-tag">2026-09-30b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -9418,6 +9418,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
         <div class="cloud-actions" style="margin-bottom:6px">
           <button type="button" class="btn btn-sm" onclick="ambiente.recomecarDaNuvem()">🧹 Recomeçar esta clínica a partir da nuvem</button>
           <button type="button" class="btn btn-sm" id="amb-legado-btn" style="display:none" onclick="ambiente.perguntarLegado()">📦 Registros antigos sem clínica definida</button>
+          <button type="button" class="btn btn-sm" onclick="ambiente.trazerBackupPessoal()" title="Traz o backup pessoal da sua conta para o ambiente aberto">📥 Trazer do meu backup pessoal</button>
         </div>
         <p style="font-size:.74rem;color:var(--text-mute);margin:0 0 8px"><b>Recomeçar a partir da nuvem</b> apaga o que está gravado <i>neste aparelho</i> para a clínica aberta e baixa tudo de novo. Serve para quando o aparelho ficou com dado que não é deste ambiente — a nuvem é separada por clínica e é a fonte da verdade.</p>
         <label style="display:flex;align-items:flex-start;gap:8px;font-size:.82rem;margin:0 0 8px;cursor:pointer">
@@ -10525,6 +10526,35 @@ const cofre = {
     try { return !!(typeof cloudRel !== 'undefined' && cloudRel._orgLembrada()); }
     catch (e) { return false; }
   },
+  /* Quantas clínicas esta conta tem, conforme o servidor respondeu no último
+     login. null = ainda não se sabe. */
+  quantasClinicas() {
+    try {
+      const v = cofre._real.getItem('medsys.v7.cloud.orgs_count');
+      return v === null || v === '' ? null : (parseInt(v, 10) || 0);
+    } catch (e) { return null; }
+  },
+  /* O CANAL PESSOAL SÓ É AMBÍGUO PARA QUEM TEM MAIS DE UMA CLÍNICA.
+
+     Fechá-lo para todo mundo foi um erro meu, e caro: o acervo histórico deste
+     sistema vive em boa parte no canal pessoal — o relacional veio depois e nem
+     todo registro foi espelhado nele. Quem tinha UMA clínica perdeu acesso ao
+     próprio backup, e "recomeçar a partir da nuvem" devolvia só a parte
+     relacional, com o Dashboard voltando pela metade. Eu SUPUS que o relacional
+     tinha tudo, em vez de verificar.
+
+     Com uma clínica só não há ambiguidade: tudo o que está no backup pessoal
+     daquela pessoa é daquela clínica. A dúvida — e o risco de um ambiente ver o
+     acervo do outro — só existe a partir da segunda.
+
+     Enquanto o servidor não disser quantas são, trata como NÃO ambíguo: privar
+     alguém do próprio backup por uma informação que ainda não chegou é o
+     inverso de proteger. */
+  canalPessoalAmbiguo() {
+    if (!cofre.temClinica()) return false;
+    const n = cofre.quantasClinicas();
+    return n != null && n > 1;
+  },
 
   ORG_KEY: 'medsys.v7.cloud.org_id',
   MIGRADO_KEY: 'medsys.v7.cofre.migrado',
@@ -10534,7 +10564,7 @@ const cofre = {
      todo o resto é da clínica. */
   DO_APARELHO: [
     'medsys.v7.cloud.cfg', 'medsys.v7.cloud.session', 'medsys.v7.cloud.org_id',
-    'medsys.v7.cloud.sem_clinica', 'medsys.v7.cloud.last_uid',
+    'medsys.v7.cloud.sem_clinica', 'medsys.v7.cloud.last_uid', 'medsys.v7.cloud.orgs_count',
     'medsys.v7.auth.users', 'medsys.v7.auth.session', 'medsys.v7.auth.timeout_min',
     'medsys.v7.auth.sessao_dia',
     'medsys.v7.theme', 'medsys.v7.grafico_modo', 'medsys.v7.realtime.on',
@@ -12406,7 +12436,7 @@ const arquivo = {
        COM clínica, ele é um caminho para trazer registro de outro ambiente
        para dentro deste — e o canal relacional, consultado acima, já tem tudo
        o que é desta clínica. */
-    if ((!item || !item._id) && !cofre.temClinica()) {
+    if ((!item || !item._id) && !cofre.canalPessoalAmbiguo()) {
       try {
         const c = cloud.config(); const s = cloud.session();
         const r = await fetch(c.url + '/rest/v1/documentos?user_id=eq.' + s.user.id +
@@ -12498,7 +12528,7 @@ const arquivo = {
     /* Aparelho de uma clínica não procura no backup pessoal: é por ali que o
        nome de um paciente de OUTRO ambiente apareceria nesta busca. */
     try {
-      if (cofre.temClinica()) return achados;
+      if (cofre.canalPessoalAmbiguo()) return achados;
       const sess = cloud.session();
       const likeJ = String(nome).trim().replace(/[*,()]/g, ' ');
       const ors = 'or=(' + [
@@ -19397,6 +19427,7 @@ const auth = {
          próprio trabalho. A limpeza vem ANTES de qualquer sincronização —
          quem acabou de entrar não pode ver a clínica anterior nem por um
          instante. */
+      try { localStorage.setItem('medsys.v7.cloud.orgs_count', String(perfil.orgs != null ? perfil.orgs : '')); } catch (e) {}
       try { if (u.organization_id) await ambiente.aoEntrar(u.organization_id); } catch (e) {}
       /* guarda a clínica no aparelho: se a próxima consulta falhar, ele ainda
          sabe de onde baixar (em vez de se declarar "sem organização") */
@@ -20497,6 +20528,10 @@ const cloud = {
         nome: (perfil && perfil.nome) || '',
         role: (vinc && vinc.role) || (perfil && perfil.funcao) || null,
         organization_id: (vinc && vinc.organization_id) || null,
+        /* QUANTAS clínicas esta conta tem. É o que decide se o backup pessoal
+           (que é por usuário, não por organização) é ambíguo ou não: com UMA
+           clínica, tudo o que está lá é dela — sem dúvida possível. */
+        orgs: orgRows.length,
         /* personalização feita pelo gestor (0011) — vence o padrão do papel */
         permissoes: (vinc && vinc.permissoes) || null,
         ativo: perfil ? perfil.ativo !== false : true
@@ -20597,7 +20632,11 @@ const cloud = {
        a mesma pessoa gravou nas outras. O canal relacional, logo abaixo, traz
        o que é desta clínica — que é o que se quer restaurar. */
     try {
-      if (cofre.temClinica()) throw { _pular: true };
+      /* Conta com mais de uma clínica: o backup pessoal não diz de qual delas
+         é cada registro, então não desce sozinho. Mas a pessoa pode mandar —
+         ela sabe o que o sistema não tem como saber. É o que faz o botão
+         "📥 Trazer do meu backup pessoal". */
+      if (cofre.canalPessoalAmbiguo() && !opts.forcarPessoal) throw { _pular: true };
       const c = cloud.config(); const s = cloud.session();
       let de = 0; const passo = 500; let seguir = true;
       const porMod = {};
@@ -20892,7 +20931,7 @@ const cloud = {
       /* Canal pessoal: ver `cofre.temClinica`. Quem tem clínica lê pelo
          relacional; o backup pessoal continua RECEBENDO — é rede de
          segurança —, só deixa de descer. */
-      if (cofre.temClinica()) return { porMod: {}, marca: maisNovo || marca || '' };
+      if (cofre.canalPessoalAmbiguo()) return { porMod: {}, marca: maisNovo || marca || '' };
       /* Paginado: sem limite, o PostgREST corta em `max-rows` e o resto some
          calado — registro que não volta é registro que parece perdido. */
       const passo = 500;
@@ -22550,6 +22589,27 @@ const ambiente = {
     try { await cloudDiag.puxarTudo({ silent: true }); } catch (e) {}
     try { cloud._repintarTelaAtual(); } catch (e) {}
     toast('☁️ Pronto — este aparelho agora mostra o que a nuvem tem para ' + nome);
+  },
+
+  /* SAÍDA EXPLÍCITA para a conta que tem mais de uma clínica: o backup
+     pessoal não diz de qual delas é cada registro, então o sistema não o traz
+     sozinho. Quem sabe é a pessoa — e aqui ela manda trazer, avisada do que
+     isso significa. */
+  async trazerBackupPessoal() {
+    const nome = ambiente.nome() || 'a clínica aberta';
+    const n = cofre.quantasClinicas();
+    if (!confirm('Trazer o SEU backup pessoal da nuvem para ' + nome + '?\n\n' +
+      (n != null && n > 1
+        ? 'Esta conta pertence a ' + n + ' clínicas. O backup pessoal é POR PESSOA, não por clínica — ele não diz de qual delas é cada registro. Se você tiver atendido pelas duas com esta conta, registros da outra podem entrar aqui.\n\n'
+        : '') +
+      'Nada é apagado: o que vier soma-se ao que já está neste ambiente.')) return;
+    toast('☁️ Buscando o seu backup pessoal…');
+    let rel = null;
+    try { rel = await cloud.restaurarTudoDaNuvem({ silent: true, forcarPessoal: true }); } catch (e) {}
+    try { cloud._repintarTelaAtual(); } catch (e) {}
+    if (rel && rel.erro) { toast('Não consegui: ' + rel.erro, 'error'); return; }
+    const n2 = rel ? (rel.novos + rel.atualizados) : 0;
+    toast(n2 ? '📥 ' + n2 + ' registro(s) trazidos do seu backup pessoal' : 'O seu backup pessoal não tinha nada além do que já está aqui');
   },
 
   /* ---------- a tela diz em que clínica você está ---------- */
