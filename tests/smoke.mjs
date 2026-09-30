@@ -16386,6 +16386,96 @@ await test('Tabela de valores própria: entra no seletor, e incompleta é recusa
   await page.close();
 });
 
+/* 227) Registro que diz estar na nuvem, mas não está na nuvem DESTA clínica
+
+   `_relUpdatedAt` é o carimbo de que o registro foi espelhado no banco. Se ele
+   existe e o registro não aparece no índice desta organização, ele não é
+   daqui — foi espelhado na clínica de outra pessoa e veio parar nesta gaveta.
+   Foi o estrago da migração que adivinhava: parar de adivinhar não desfaz o
+   que já foi carimbado errado, e uma edição empurraria esse registro para
+   dentro da clínica errada NA NUVEM.
+
+   Duas garantias aqui, e a segunda é a que impede o remédio de virar veneno:
+   o índice tem de vir INTEIRO. O PostgREST corta em mil linhas; um índice
+   truncado faria esta mesma regra apagar do aparelho tudo o que ficou além do
+   corte. */
+await test('Registro de outra clínica sai da gaveta — e índice truncado nunca apaga nada', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    cloud.estaConfigurado = () => true; cloud.estaLogado = () => true;
+    cloud._garantirToken = async () => true;
+    cloud.config = () => ({ url: 'https://x.supabase.co', key: 'k' });
+    cloud._headers = () => ({});
+    cloud.session = () => ({ user: { id: 'u1' } });
+    cloudRel.disponivel = () => true;
+    cloudRel._orgAsync = async () => 'org-carlos';
+    cloudRel._lembrarOrg('org-carlos');
+
+    /* A gaveta do Carlos, como a migração antiga a deixou: registros de
+       Marcelo, carimbados como espelhados (mas na clínica DELE). */
+    store.setList('anestesia', [
+      { _id: 'm1', _relUpdatedAt: '2026-09-01T10:00:00Z', paciente: { nome: 'Paciente do Marcelo' } },
+      { _id: 'm2', _relUpdatedAt: '2026-09-02T10:00:00Z', paciente: { nome: 'Outro do Marcelo' } },
+      { _id: 'c1', _relUpdatedAt: '2026-09-03T10:00:00Z', paciente: { nome: 'Esse e do Carlos' } },
+      /* criado aqui e ainda NÃO sincronizado: nunca pode ser apagado */
+      { _id: 'novo', paciente: { nome: 'Digitado agora, nao subiu' } }
+    ]);
+
+    const indice = (rows) => ({ ok: true, headers: { get: () => '50' }, json: async () => rows });
+    /* a nuvem do Carlos só tem c1 */
+    const linhaC1 = { id: 'r-c1', legacy_id: 'c1', updated_at: '2026-09-03T10:00:00Z' };
+
+    window.fetch = async (url) => {
+      const u = String(url);
+      if (/anesthesia_records/.test(u) && /select=id,legacy_id,updated_at&/.test(u)) return indice([linhaC1]);
+      if (/data->_preLanc/.test(decodeURIComponent(u))) return indice([]);
+      return { ok: true, headers: { get: () => '0' }, json: async () => [] };
+    };
+    cloudRel._puxados = {};
+    await cloudRel.autoPullModulo('anestesia');
+    const ficou = (store.list('anestesia') || []).map(x => x._id).sort();
+    out.tirouOsDeOutraClinica = ficou.indexOf('m1') < 0 && ficou.indexOf('m2') < 0;
+    out.manteveODaClinica = ficou.indexOf('c1') >= 0;
+    out.naoTocouNoNaoSincronizado = ficou.indexOf('novo') >= 0;
+
+    /* ---------- ÍNDICE TRUNCADO NÃO PODE APAGAR NADA ----------
+       Mil linhas cheias = pode haver mais. A leitura tem de paginar; se a
+       segunda página falhar, o índice é incompleto e nada é removido. */
+    store.setList('anestesia', [
+      { _id: 'a1', _relUpdatedAt: '2026-09-01T10:00:00Z', paciente: { nome: 'Legitimo A' } },
+      { _id: 'a2', _relUpdatedAt: '2026-09-02T10:00:00Z', paciente: { nome: 'Legitimo B' } }
+    ]);
+    let pagina = 0;
+    const cheia = [];
+    for (let i = 0; i < 1000; i++) cheia.push({ id: 'r' + i, legacy_id: 'zz' + i, updated_at: '2026-09-01T10:00:00Z' });
+    window.fetch = async (url) => {
+      const u = String(url);
+      if (/anesthesia_records/.test(u) && /select=id,legacy_id,updated_at&/.test(u)) {
+        pagina++;
+        if (pagina === 1) return indice(cheia);     /* página cheia: há mais */
+        return { ok: false, headers: { get: () => '0' }, json: async () => [] };  /* a 2ª falha */
+      }
+      if (/data->_preLanc/.test(decodeURIComponent(u))) return indice([]);
+      return { ok: true, headers: { get: () => '0' }, json: async () => [] };
+    };
+    cloudRel._puxados = {};
+    await cloudRel.autoPullModulo('anestesia');
+    out.paginou = pagina >= 2;
+    out.truncadoNaoApagou = (store.list('anestesia') || []).length === 2;
+
+    store.setList('anestesia', []);
+    cloudRel._lembrarOrg(null);
+    return out;
+  });
+  assert(r.tirouOsDeOutraClinica, 'registro espelhado que não está na nuvem DESTA clínica não pode continuar aparecendo como dela');
+  assert(r.manteveODaClinica, 'o que é desta clínica fica');
+  assert(r.naoTocouNoNaoSincronizado, 'o que foi digitado aqui e ainda não subiu NUNCA é apagado por esta regra');
+  assert(r.paginou, 'a leitura do índice tem que paginar — o servidor corta em mil linhas e o resto some calado');
+  assert(r.truncadoNaoApagou, 'índice incompleto não apaga nada: seria a regra apagando registro legítimo além do corte');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

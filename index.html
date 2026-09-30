@@ -4656,7 +4656,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-29g</b><br>
+    v7.1 · build <b id="build-tag">2026-09-30a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -24106,18 +24106,33 @@ const cloudRel = {
     if (!(await cloud._garantirToken())) return null;
     const org = await cloudRel._orgAsync(); if (!org) return null;
     const c = cloud.config();
+    /* PAGINADO, e não é detalhe: o PostgREST corta a resposta em `max-rows`
+       (mil, por padrão) e o resto some calado. Um índice truncado diria que
+       registros existentes não estão na nuvem desta clínica — e quem usa esse
+       índice para decidir o que NÃO é daqui apagaria do aparelho tudo o que
+       ficou além do corte. Índice incompleto é pior que índice nenhum, então
+       ou vem inteiro, ou devolve null. */
+    const PASSO = 1000;
+    const out = [];
     try {
-      const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
-        '&deleted_at=is.null&select=' + cloudRel._REG_SELECT_LEVE + '&order=updated_at.desc',
-        { headers: cloud._headers(true) });
-      if (!r.ok) return null;
-      const rows = await r.json();
-      if (!Array.isArray(rows)) return null;
-      return rows.map(row => ({
-        id: row.id, legacy_id: row.legacy_id, updated_at: row.updated_at,
-        _idLocal: cloudRel._idLocalDaLinha(row),
-        _idsPossiveis: cloudRel._idsPossiveisDaLinha(row)
-      }));
+      for (let de = 0; ; de += PASSO) {
+        const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
+          '&deleted_at=is.null&select=' + cloudRel._REG_SELECT_LEVE +
+          '&order=updated_at.desc&limit=' + PASSO + '&offset=' + de,
+          { headers: cloud._headers(true) });
+        if (!r.ok) return null;
+        const rows = await r.json();
+        if (!Array.isArray(rows)) return null;
+        rows.forEach(row => out.push({
+          id: row.id, legacy_id: row.legacy_id, updated_at: row.updated_at,
+          _idLocal: cloudRel._idLocalDaLinha(row),
+          _idsPossiveis: cloudRel._idsPossiveisDaLinha(row)
+        }));
+        if (rows.length < PASSO) break;
+        /* trava de segurança: acervo absurdo não vira laço infinito */
+        if (de > 200000) return null;
+      }
+      return out;
     } catch (e) { return null; }
   },
 
@@ -24537,12 +24552,26 @@ const cloudRel = {
        NÃO voltou agora deixou de ser visível (registro de outro anestesista
        puxado antes da mudança). Remove do aparelho para convergir. Itens
        criados aqui e ainda não espelhados (sem _relUpdatedAt) ficam. */
+    /* REGISTRO QUE DIZ ESTAR NA NUVEM, MAS NÃO ESTÁ NA NUVEM DESTA CLÍNICA.
+
+       `_relUpdatedAt` é o carimbo de que o registro foi espelhado no banco.
+       Se ele existe e o registro NÃO aparece no índice desta organização, uma
+       de duas: ou ele foi removido de lá, ou ele nunca foi daqui — foi
+       espelhado na clínica de outra pessoa e veio parar nesta gaveta.
+
+       O segundo caso é justamente o estrago que a migração antiga fez ao
+       adivinhar de quem era o acervo do aparelho. Não basta parar de
+       adivinhar: o que já foi carimbado errado continua aqui, aparecendo como
+       se fosse desta clínica — e, pior, uma edição o empurraria para dentro
+       dela na nuvem.
+
+       Sai da gaveta. Não é perda: o registro continua inteiro na nuvem da
+       clínica dele. O que foi criado aqui e ainda não subiu não tem
+       `_relUpdatedAt` e nunca é tocado — trabalho não sincronizado jamais é
+       apagado por esta regra. */
     let removidos = 0;
     try {
-      const u = auth.usuarioAtual();
-      if (indicePodeIdentificarTudo
-          && typeof orgSettings !== 'undefined' && orgSettings.visibilidade() === 'proprios'
-          && u && u.role === 'anestesiologista') {
+      if (indicePodeIdentificarTudo) {
         /* idsRemotos vem do ÍNDICE COMPLETO, não do que foi baixado agora.
            Com a leitura incremental, `remotos` traz só o que mudou — usá-lo
            aqui apagaria do aparelho todo registro que continuou igual. */
@@ -24552,6 +24581,9 @@ const cloudRel = {
         }
       }
     } catch (e) {}
+    if (removidos) {
+      try { toast('🧹 ' + removidos + ' registro(s) que não são desta clínica saíram deste aparelho (continuam na clínica de origem)', 'warn'); } catch (e) {}
+    }
     if (removidos) store.setList(mod, locais);      /* a mescla já gravou o que trouxe */
     /* Chegou até aqui: a clínica respondeu por este módulo. É o carimbo que
        separa "não tem registro" de "ainda não carregou" — ver `jaPuxou`. */
