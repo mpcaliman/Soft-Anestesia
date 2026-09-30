@@ -16642,6 +16642,86 @@ await test('Auditoria: o registro carrega a clínica dele, e não é gravado em 
   await page.close();
 });
 
+/* 229) O QUE É DE CADA AMBIENTE — a lista, e a prova de que ela vale
+
+   Cada clínica tem a sua logomarca, o seu Drive, os seus pacientes, os seus
+   cadastros e os seus padrões de preenchimento. Isso já decorre da gaveta por
+   ambiente, mas "decorre" não basta: alguém acrescenta uma configuração nova
+   amanhã, esquece de classificá-la, e ela passa a atravessar as clínicas sem
+   ninguém perceber.
+
+   Este teste ENUMERA. Cada item tem de estar separado no aparelho E sincronizar
+   POR CLÍNICA (org_configs) — e não pode viajar pela sincronização por PESSOA,
+   que atravessaria os ambientes de quem atende em dois. */
+await test('Cada ambiente tem a sua logomarca, seu Drive, seus cadastros e seus padrões', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+
+    /* ---- a lista do que é DA CLÍNICA ---- */
+    const DA_CLINICA = [
+      'medsys.v7.logoCustom',            /* logomarca */
+      'medsys.v7.cad.profissionais', 'medsys.v5.cad.anestesistas', 'medsys.v5.cad.cirurgioes',
+      'medsys.v5.cad.clinicas', 'medsys.v5.cad.convenios', 'medsys.v5.cad.procedimentos',
+      'medsys.v5.cad.pagamentos', 'medsys.v7.cad.presets_med', 'medsys.v7.cad.equipamentos',
+      'medsys.v5.cad.assinaturas',       /* carimbos */
+      'medsys.v7.termo_padrao', 'medsys.v7.textos_padrao',
+      'medsys.v7.orcamento_cfg',         /* tabelas por convênio e tabelas próprias */
+      'medsys.v7.orcamento_modelos', 'medsys.v7.meds_usuario',
+      'medsys.v7.cbhpm.extras', 'medsys.v5.fin.regras_convenio'
+    ];
+    const foraDaSeparacao = DA_CLINICA.filter(k => !cofre.separa(k));
+    out.tudoSeparado = foraDaSeparacao.length === 0;
+    out.foraDaSeparacao = foraDaSeparacao;
+
+    const naoSincronizaPorClinica = DA_CLINICA.filter(k => !clinicaSync.CHAVES[k]);
+    out.tudoSincronizaPorClinica = naoSincronizaPorClinica.length === 0;
+    out.faltaSincronizar = naoSincronizaPorClinica;
+
+    const viajaPorPessoa = DA_CLINICA.filter(k => configSync.CHAVES.indexOf(k) >= 0);
+    out.nadaViajaPorPessoa = viajaPorPessoa.length === 0;
+    out.viajaPorPessoa = viajaPorPessoa;
+
+    /* o Drive é o destino dos PDFs dos pacientes: da clínica, não da pessoa */
+    out.driveDaClinica = cofre.separa('medsys.v7.pdfbk.token')
+      && cofre.separa('medsys.v7.pdfbackup.cfg')
+      && configSync.CHAVES.indexOf('medsys.v7.pdfbackup.cfg') < 0;
+
+    /* o que segue a PESSOA segue mesmo — e não é dado de clínica */
+    out.pessoaSoPreferencias = configSync.CHAVES.every(k =>
+      ['medsys.v7.theme', 'medsys.v7.grafico_modo', 'medsys.v7.realtime.on'].indexOf(k) >= 0);
+
+    /* ---- e agora a PROVA, com a logomarca ---- */
+    cloudRel._lembrarOrg('org-uma');
+    localStorage.setItem('medsys.v7.logoCustom', 'LOGO-DA-CLINICA-UM');
+    localStorage.setItem('medsys.v5.cad.convenios', JSON.stringify([{ nome: 'Convenio da Um' }]));
+    localStorage.setItem('medsys.v7.theme', 'escuro');   /* da pessoa: atravessa */
+
+    cloudRel._lembrarOrg('org-dois');
+    out.doisNaoVeALogoDeUm = localStorage.getItem('medsys.v7.logoCustom') === null;
+    out.doisNaoVeOsConvenios = localStorage.getItem('medsys.v5.cad.convenios') === null;
+    out.temaAtravessa = localStorage.getItem('medsys.v7.theme') === 'escuro';
+
+    localStorage.setItem('medsys.v7.logoCustom', 'LOGO-DA-CLINICA-DOIS');
+    cloudRel._lembrarOrg('org-uma');
+    out.umaMantemASua = localStorage.getItem('medsys.v7.logoCustom') === 'LOGO-DA-CLINICA-UM';
+    out.umaMantemConvenios = /Convenio da Um/.test(localStorage.getItem('medsys.v5.cad.convenios') || '');
+
+    cofre.esvaziar('org-uma'); cofre.esvaziar('org-dois');
+    cloudRel._lembrarOrg(null);
+    return out;
+  });
+  assert(r.tudoSeparado, 'toda configuração de clínica tem que ficar dentro da separação por ambiente: ' + JSON.stringify(r.foraDaSeparacao));
+  assert(r.tudoSincronizaPorClinica, 'e sincronizar por CLÍNICA, para valer nos aparelhos da equipe: ' + JSON.stringify(r.faltaSincronizar));
+  assert(r.nadaViajaPorPessoa, 'nada de clínica pode viajar pela sincronização por PESSOA — atravessaria os ambientes de quem atende em dois: ' + JSON.stringify(r.viajaPorPessoa));
+  assert(r.driveDaClinica, 'o Drive é o destino dos PDFs dos pacientes: é da clínica, não da pessoa');
+  assert(r.pessoaSoPreferencias, 'o que segue a pessoa tem que ser só preferência de tela, nunca dado ou configuração de clínica');
+  assert(r.doisNaoVeALogoDeUm && r.doisNaoVeOsConvenios, 'a clínica nova não herda logomarca nem cadastros da outra');
+  assert(r.temaAtravessa, 'mas a preferência da pessoa continua valendo nas duas — separar não é desconfigurar tudo');
+  assert(r.umaMantemASua && r.umaMantemConvenios, 'e voltar para a primeira clínica devolve a logomarca e os cadastros dela, intactos');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
