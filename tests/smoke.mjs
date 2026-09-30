@@ -880,12 +880,42 @@ await test('Visibilidade: opção do gestor, e no modo próprios o pull converge
     out.removeuColega = !ids.includes('do_colega');
     out.manteveLocal = ids.includes('so_local');
 
-    // modo 'equipe' → pull nunca remove nada (comportamento de sempre)
+    /* MODO 'EQUIPE': A REGRA MUDOU, E A PREMISSA TAMBÉM.
+
+       Antes, o pull não removia nada em modo equipe. Era uma rede de segurança
+       contra um índice incompleto: ele não paginava, o PostgREST corta em mil
+       linhas sem avisar, e apagar pela ausência teria varrido do aparelho tudo
+       o que ficasse além do corte.
+
+       O índice agora pagina e devolve null se QUALQUER página falhar — ou vem
+       inteiro, ou não vem. Com um índice comprovadamente completo, um registro
+       que diz estar espelhado (`_relUpdatedAt`) e não está nele não é desta
+       clínica: foi espelhado na clínica de outra pessoa. Foi assim que o
+       ambiente novo apareceu cheio dos dados do antigo — e mantê-lo é pior do
+       que removê-lo, porque uma edição o gravaria na clínica errada NA NUVEM.
+
+       Não é perda: o registro continua inteiro na nuvem da clínica dele. */
     orgSettings._gravarCache({});
     store.setList('anestesia', [{ _id: 'do_colega', _relUpdatedAt: 't1', paciente: 'B' }]);
     delete cloudRel._puxados['anestesia'];
     await cloudRel.autoPullModulo('anestesia');
-    out.equipeNaoRemove = store.list('anestesia').some(x => x._id === 'do_colega');
+    out.equipeRemoveOQueNaoEhDaqui = !store.list('anestesia').some(x => x._id === 'do_colega');
+
+    /* ÍNDICE QUE FALHOU NÃO APAGA NADA. É esta a trava que substitui a rede
+       antiga: sem índice confiável, o aparelho fica como está. */
+    store.setList('anestesia', [{ _id: 'do_colega', _relUpdatedAt: 't1', paciente: 'B' }]);
+    cloudRel.puxarIndiceModulo = async () => null;
+    delete cloudRel._puxados['anestesia'];
+    await cloudRel.autoPullModulo('anestesia');
+    out.indiceFalhouNaoRemove = store.list('anestesia').some(x => x._id === 'do_colega');
+
+    /* E o que nunca subiu continua intocável, em qualquer modo. */
+    store.setList('anestesia', [{ _id: 'so_local2', paciente: 'D' }]);
+    cloudRel.puxarIndiceModulo = async () => ([]);
+    cloudRel.puxarPorIds = async () => ([]);
+    delete cloudRel._puxados['anestesia'];
+    await cloudRel.autoPullModulo('anestesia');
+    out.naoSincronizadoFica = store.list('anestesia').some(x => x._id === 'so_local2');
 
     auth.usuarioAtual = origUsuario;
     store.setList('anestesia', []);
@@ -898,7 +928,9 @@ await test('Visibilidade: opção do gestor, e no modo próprios o pull converge
   assert(r.manteveMeu, 'o registro do próprio anestesista deveria permanecer');
   assert(r.removeuColega, 'o registro do colega (não devolvido pela RLS) deveria sair do aparelho');
   assert(r.manteveLocal, 'registro criado localmente e ainda não espelhado deveria permanecer');
-  assert(r.equipeNaoRemove, "no modo 'equipe' o pull não deveria remover nada");
+  assert(r.equipeRemoveOQueNaoEhDaqui, 'registro espelhado ausente de um índice COMPLETO não é desta clínica — e continua inteiro na nuvem da clínica dele');
+  assert(r.indiceFalhouNaoRemove, 'índice que falhou não pode apagar nada: é esta a trava que substitui a antiga');
+  assert(r.naoSincronizadoFica, 'e o que nunca subiu é intocável, em qualquer modo')
   await page.close();
 });
 
@@ -13056,21 +13088,44 @@ await test('Baixa da nuvem é incremental — e cai para a base inteira quando p
     cloud.session = () => ({ user: { id: 'u2' }, access_token: 't' });
     out.marcaPorUsuario = cloud._marcaKey() !== k1 && cloud._lerMarca() === '';
 
-    /* 6ª: APARELHO QUE PERTENCE A UMA CLÍNICA NÃO BAIXA ESTE CANAL.
-       `documentos` é o backup PESSOAL, indexado por usuário e não por
-       organização. Com vários ambientes ele vira um túnel: quem pertence a
-       dois traz o acervo de um para dentro do outro por aqui, passando ao
-       largo da separação por organização. Conta ligada a uma clínica lê pelo
-       canal relacional, que é separado por organização e tem tudo. */
+    /* 6ª: O BACKUP PESSOAL SÓ É AMBÍGUO PARA QUEM TEM MAIS DE UMA CLÍNICA.
+
+       `documentos` é indexado por USUÁRIO, não por organização — ele não diz de
+       qual clínica é cada registro. Com DUAS clínicas isso vira um túnel: o
+       acervo de uma entra na outra, passando ao largo da separação.
+
+       Com UMA clínica não há ambiguidade nenhuma, e fechar o canal nesse caso
+       foi um erro caro: o acervo histórico deste sistema vive em boa parte
+       nele — o relacional veio depois e nem todo registro foi espelhado lá.
+       Quem tinha uma clínica só perdeu acesso ao próprio backup, e "recomeçar
+       a partir da nuvem" devolvia o Dashboard pela metade. */
     cloud.session = () => ({ user: { id: 'u1' }, access_token: 't' });
     cloudRel._lembrarOrg('org-de-teste');
+
+    /* uma clínica → o backup pessoal continua sendo dela, e desce */
+    localStorage.setItem('medsys.v7.cloud.orgs_count', '1');
     pedidos = []; bytes = 0;
-    const r6 = await cloud._baixarTudo({ completo: true });
-    out.comClinicaNaoBaixa = (r6.porMod.pre || []).length === 0
+    const r6a = await cloud._baixarTudo({ completo: true });
+    out.umaClinicaAindaBaixa = (r6a.porMod.pre || []).length > 0
+      && pedidos.some(u => /documentos/.test(String(u)));
+
+    /* duas clínicas → não desce sozinho */
+    localStorage.setItem('medsys.v7.cloud.orgs_count', '2');
+    pedidos = []; bytes = 0;
+    const r6b = await cloud._baixarTudo({ completo: true });
+    out.duasClinicasNaoBaixa = (r6b.porMod.pre || []).length === 0
       && !pedidos.some(u => /documentos/.test(String(u)));
+
+    /* ainda não se sabe quantas → NÃO privar a pessoa do próprio backup */
+    localStorage.removeItem('medsys.v7.cloud.orgs_count');
+    pedidos = [];
+    const r6c = await cloud._baixarTudo({ completo: true });
+    out.semSaberNaoPriva = pedidos.some(u => /documentos/.test(String(u)));
+
     /* e a pergunta não pode custar rede: quem responde é o que o aparelho já
        sabe, não uma consulta de perfil a cada sincronização */
     out.naoConsultouPerfil = !pedidos.some(u => /profiles|organization_users/.test(String(u)));
+    localStorage.removeItem('medsys.v7.cloud.orgs_count');
     cloudRel._lembrarOrg(null);
     return out;
   });
@@ -13083,7 +13138,9 @@ await test('Baixa da nuvem é incremental — e cai para a base inteira quando p
   assert(r.economia > 0.8, 'a economia medida passa de 80% já neste cenário (foi ' + (r.economia * 100).toFixed(0) + '%)');
   assert(r.aparelhoVazioBaixaTudo, 'aparelho sem nada gravado baixa tudo: incremental aí deixaria o app vazio e a pessoa acharia que perdeu os dados');
   assert(r.completoTrazTudo, '"completo" força a base inteira mesmo havendo marca');
-  assert(r.comClinicaNaoBaixa, 'aparelho de uma clínica não baixa o backup pessoal — era por aí que um ambiente via o acervo do outro');
+  assert(r.umaClinicaAindaBaixa, 'com UMA clínica o backup pessoal é dela — fechá-lo tirou da pessoa o próprio acervo');
+  assert(r.duasClinicasNaoBaixa, 'com DUAS clínicas o backup pessoal é ambíguo e não desce sozinho — era por aí que um ambiente via o acervo do outro');
+  assert(r.semSaberNaoPriva, 'enquanto não se sabe quantas clínicas a conta tem, não se priva ninguém do próprio backup');
   assert(r.naoConsultouPerfil, 'e descobrir isso não pode custar uma consulta de perfil a cada sincronização');
   assert(r.marcaPorUsuario, 'a marca é por usuário — a de um não filtra a baixa do outro');
   await page.close();
@@ -16178,6 +16235,12 @@ await test('Pacientes, Dashboard e Financeiro são de cada ambiente — e a nuve
       ]) };
     };
 
+    /* DUAS clínicas nesta conta: é o único caso em que o backup pessoal é
+       ambíguo, e portanto o único em que ele deve ficar de fora. Com uma só,
+       aquele backup é daquela clínica e fechá-lo tira da pessoa o próprio
+       acervo — foi o erro que apagou o Dashboard de quem tinha uma clínica. */
+    localStorage.setItem('medsys.v7.cloud.orgs_count', '2');
+
     const doPessoal = () => chamadas.filter(u => /\/documentos\?user_id=eq\./.test(u));
 
     /* (a) busca por nome */
@@ -16211,7 +16274,14 @@ await test('Pacientes, Dashboard e Financeiro são de cada ambiente — e a nuve
     const tudo = JSON.stringify([store.list('anestesia'), store.list('pacientes'), store.list('financeiro')]);
     out.nadaVazou = tudo.indexOf('Vazou do Outro Ambiente') < 0;
 
+    /* ---------- e com UMA clínica o canal pessoal volta a valer ---------- */
+    localStorage.setItem('medsys.v7.cloud.orgs_count', '1');
+    chamadas = [];
+    await arquivo.procurarNaNuvem('vazou');
+    out.umaClinicaUsaOPessoal = doPessoal().length > 0;
+
     /* ---------- conta SEM clínica continua usando o canal pessoal ---------- */
+    localStorage.removeItem('medsys.v7.cloud.orgs_count');
     cloudRel._lembrarOrg(null);
     chamadas = [];
     await arquivo.procurarNaNuvem('vazou');
@@ -16225,12 +16295,13 @@ await test('Pacientes, Dashboard e Financeiro são de cada ambiente — e a nuve
   assert(r.bFinanceiroVazio && r.bDashboardVazio, 'Financeiro e Dashboard também são de cada ambiente');
   assert(r.bVeOSeu, 'e a clínica B vê os seus');
   assert(r.aVoltouSemMistura && r.aFinanceiroIntacto, 'voltar para a clínica A devolve o dela, sem nada da B');
-  assert(r.buscaNaoUsaCanalPessoal, 'procurar por nome na nuvem não pode passar pelo backup pessoal — ele é por usuário, não por clínica');
+  assert(r.buscaNaoUsaCanalPessoal, 'conta com duas clínicas: procurar por nome não passa pelo backup pessoal, que não diz de qual clínica é cada registro');
   assert(r.resgateNaoUsaCanalPessoal, 'resgatar um registro também não');
   assert(r.restaurarNaoUsaCanalPessoal, '"restaurar tudo" também não — despejaria o acervo das outras clínicas nesta gaveta');
   assert(r.rascunhoPedeDoAmbiente, 'rascunho é ficha em edição, com nome de paciente: a chave dele carrega o ambiente');
   assert(r.rascunhoMudaComOAmbiente, 'e muda quando o ambiente muda');
   assert(r.nadaVazou, 'nenhum caminho pode ter deixado entrar registro de outro ambiente');
+  assert(r.umaClinicaUsaOPessoal, 'com UMA clínica o backup pessoal é dela e volta a ser usado — fechá-lo tirou da pessoa o próprio acervo');
   assert(r.semClinicaAindaUsaOPessoal, 'conta SEM clínica continua usando o backup pessoal — para ela não existe outro');
   await page.close();
 });
@@ -16383,6 +16454,503 @@ await test('Tabela de valores própria: entra no seletor, e incompleta é recusa
   assert(r.apareceNaLista, 'e passa a aparecer na escolha de referência por convênio');
   assert(r.seletorEnxerga, 'um convênio pode ser apontado para ela');
   assert(r.removeu, 'e dá para remover depois');
+  await page.close();
+});
+
+/* 227) Registro que diz estar na nuvem, mas não está na nuvem DESTA clínica
+
+   `_relUpdatedAt` é o carimbo de que o registro foi espelhado no banco. Se ele
+   existe e o registro não aparece no índice desta organização, ele não é
+   daqui — foi espelhado na clínica de outra pessoa e veio parar nesta gaveta.
+   Foi o estrago da migração que adivinhava: parar de adivinhar não desfaz o
+   que já foi carimbado errado, e uma edição empurraria esse registro para
+   dentro da clínica errada NA NUVEM.
+
+   Duas garantias aqui, e a segunda é a que impede o remédio de virar veneno:
+   o índice tem de vir INTEIRO. O PostgREST corta em mil linhas; um índice
+   truncado faria esta mesma regra apagar do aparelho tudo o que ficou além do
+   corte. */
+await test('Registro de outra clínica sai da gaveta — e índice truncado nunca apaga nada', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    cloud.estaConfigurado = () => true; cloud.estaLogado = () => true;
+    cloud._garantirToken = async () => true;
+    cloud.config = () => ({ url: 'https://x.supabase.co', key: 'k' });
+    cloud._headers = () => ({});
+    cloud.session = () => ({ user: { id: 'u1' } });
+    cloudRel.disponivel = () => true;
+    cloudRel._orgAsync = async () => 'org-carlos';
+    cloudRel._lembrarOrg('org-carlos');
+
+    /* A gaveta do Carlos, como a migração antiga a deixou: registros de
+       Marcelo, carimbados como espelhados (mas na clínica DELE). */
+    store.setList('anestesia', [
+      { _id: 'm1', _relUpdatedAt: '2026-09-01T10:00:00Z', paciente: { nome: 'Paciente do Marcelo' } },
+      { _id: 'm2', _relUpdatedAt: '2026-09-02T10:00:00Z', paciente: { nome: 'Outro do Marcelo' } },
+      { _id: 'c1', _relUpdatedAt: '2026-09-03T10:00:00Z', paciente: { nome: 'Esse e do Carlos' } },
+      /* criado aqui e ainda NÃO sincronizado: nunca pode ser apagado */
+      { _id: 'novo', paciente: { nome: 'Digitado agora, nao subiu' } }
+    ]);
+
+    const indice = (rows) => ({ ok: true, headers: { get: () => '50' }, json: async () => rows });
+    /* a nuvem do Carlos só tem c1 */
+    const linhaC1 = { id: 'r-c1', legacy_id: 'c1', updated_at: '2026-09-03T10:00:00Z' };
+
+    window.fetch = async (url) => {
+      const u = String(url);
+      if (/anesthesia_records/.test(u) && /select=id,legacy_id,updated_at&/.test(u)) return indice([linhaC1]);
+      if (/data->_preLanc/.test(decodeURIComponent(u))) return indice([]);
+      return { ok: true, headers: { get: () => '0' }, json: async () => [] };
+    };
+    cloudRel._puxados = {};
+    await cloudRel.autoPullModulo('anestesia');
+    const ficou = (store.list('anestesia') || []).map(x => x._id).sort();
+    out.tirouOsDeOutraClinica = ficou.indexOf('m1') < 0 && ficou.indexOf('m2') < 0;
+    out.manteveODaClinica = ficou.indexOf('c1') >= 0;
+    out.naoTocouNoNaoSincronizado = ficou.indexOf('novo') >= 0;
+
+    /* ---------- ÍNDICE TRUNCADO NÃO PODE APAGAR NADA ----------
+       Mil linhas cheias = pode haver mais. A leitura tem de paginar; se a
+       segunda página falhar, o índice é incompleto e nada é removido. */
+    store.setList('anestesia', [
+      { _id: 'a1', _relUpdatedAt: '2026-09-01T10:00:00Z', paciente: { nome: 'Legitimo A' } },
+      { _id: 'a2', _relUpdatedAt: '2026-09-02T10:00:00Z', paciente: { nome: 'Legitimo B' } }
+    ]);
+    let pagina = 0;
+    const cheia = [];
+    for (let i = 0; i < 1000; i++) cheia.push({ id: 'r' + i, legacy_id: 'zz' + i, updated_at: '2026-09-01T10:00:00Z' });
+    window.fetch = async (url) => {
+      const u = String(url);
+      if (/anesthesia_records/.test(u) && /select=id,legacy_id,updated_at&/.test(u)) {
+        pagina++;
+        if (pagina === 1) return indice(cheia);     /* página cheia: há mais */
+        return { ok: false, headers: { get: () => '0' }, json: async () => [] };  /* a 2ª falha */
+      }
+      if (/data->_preLanc/.test(decodeURIComponent(u))) return indice([]);
+      return { ok: true, headers: { get: () => '0' }, json: async () => [] };
+    };
+    cloudRel._puxados = {};
+    await cloudRel.autoPullModulo('anestesia');
+    out.paginou = pagina >= 2;
+    out.truncadoNaoApagou = (store.list('anestesia') || []).length === 2;
+
+    store.setList('anestesia', []);
+    cloudRel._lembrarOrg(null);
+    return out;
+  });
+  assert(r.tirouOsDeOutraClinica, 'registro espelhado que não está na nuvem DESTA clínica não pode continuar aparecendo como dela');
+  assert(r.manteveODaClinica, 'o que é desta clínica fica');
+  assert(r.naoTocouNoNaoSincronizado, 'o que foi digitado aqui e ainda não subiu NUNCA é apagado por esta regra');
+  assert(r.paginou, 'a leitura do índice tem que paginar — o servidor corta em mil linhas e o resto some calado');
+  assert(r.truncadoNaoApagou, 'índice incompleto não apaga nada: seria a regra apagando registro legítimo além do corte');
+  await page.close();
+});
+
+/* 228) AUDITORIA DA SEPARAÇÃO ENTRE CLÍNICAS
+
+   Quatro caminhos por onde dado atravessa ambiente: o armazenamento local, as
+   leituras da nuvem, as ESCRITAS na nuvem, e o que a tela lê. Os três primeiros
+   foram tratados aos poucos; o terceiro nunca tinha sido auditado, e é o pior —
+   a gaveta protege a tela, a escrita mexe no banco.
+
+   O REGISTRO NÃO MUDA DE CLÍNICA. `organization_id` da linha era sempre a
+   clínica ABERTA AGORA, nunca a do registro: um registro da clínica A que
+   estivesse no aparelho ia para a B no servidor no instante em que alguém o
+   salvasse com B aberta. O prontuário de um paciente passava a existir dentro
+   de outra clínica. */
+await test('Auditoria: o registro carrega a clínica dele, e não é gravado em outra', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    cloud.estaConfigurado = () => true; cloud.estaLogado = () => true;
+    cloud._garantirToken = async () => true;
+    cloud.config = () => ({ url: 'https://x.supabase.co', key: 'k' });
+    cloud._headers = () => ({});
+    cloud.session = () => ({ user: { id: 'u1' } });
+    cloudRel.disponivel = () => true;
+
+    /* ---- a leitura CARIMBA de qual clínica o registro veio ---- */
+    cloudRel._orgAsync = async () => 'org-A';
+    cloudRel._lembrarOrg('org-A');
+    window.fetch = async (url) => {
+      const u = String(url);
+      if (/anesthesia_records/.test(u) && /select=id,legacy_id,data/.test(decodeURIComponent(u))) {
+        return { ok: true, headers: { get: () => '0' }, json: async () => ([
+          { id: 'r1', legacy_id: 'k1', updated_at: 't1', data: { _id: 'k1', paciente: { nome: 'Da clinica A' } } }
+        ]) };
+      }
+      return { ok: true, headers: { get: () => '0' }, json: async () => [] };
+    };
+    const vindos = await cloudRel.puxarModulo('anestesia');
+    out.carimbouAOrigem = !!(vindos && vindos[0] && vindos[0]._relOrg === 'org-A');
+
+    /* ---- e a ESCRITA recusa gravá-lo em outra clínica ---- */
+    cloudRel._orgAsync = async () => 'org-B';
+    cloudRel._lembrarOrg('org-B');
+    let gravou = null;
+    window.fetch = async (url, init) => {
+      const u = String(url);
+      if (init && init.method === 'POST') { gravou = u; return { ok: true, headers: { get: () => '0' }, json: async () => ([{ updated_at: 't2' }]) }; }
+      return { ok: true, headers: { get: () => '0' }, json: async () => [] };
+    };
+    const res = await cloudRel.enviarRegistro('anestesia', vindos[0]);
+    out.recusou = !!res && res.ok === false && res.motivo === 'outra_clinica';
+    out.naoGravouNada = gravou === null;
+    out.motivoEmPortugues = /OUTRA clínica/i.test(preLanc._porQueNaoSobe('outra_clinica'));
+
+    /* ---- registro criado AQUI (sem carimbo) sobe normalmente, e recebe o carimbo ---- */
+    gravou = null;
+    const meu = { _id: 'novo1', paciente: { nome: 'Nasceu na B' } };
+    store.setList('anestesia', [meu]);
+    const res2 = await cloudRel.enviarRegistro('anestesia', meu);
+    out.deixouSubirODaqui = !!res2 && res2.ok === true && !!gravou;
+    out.carimbouAoSubir = meu._relOrg === 'org-B'
+      && (store.list('anestesia')[0] || {})._relOrg === 'org-B';
+
+    /* ---- o destino dos PDFs é POR CLÍNICA ---- */
+    out.driveSeparado = cofre.separa('medsys.v7.pdfbk.token')
+      && cofre.separa('medsys.v7.pdfbackup.cfg');
+    out.driveNaoViajaPorPessoa = configSync.CHAVES.indexOf('medsys.v7.pdfbackup.cfg') < 0;
+    cloudRel._lembrarOrg('org-A');
+    localStorage.setItem('medsys.v7.pdfbk.token', '{"access_token":"da-clinica-A"}');
+    cloudRel._lembrarOrg('org-B');
+    out.driveNaoAtravessa = localStorage.getItem('medsys.v7.pdfbk.token') === null;
+
+    /* ---- uma lista só de "o que é do aparelho" ---- */
+    out.umaListaSo = ambiente.CHAVES_DO_APARELHO === cofre.DO_APARELHO;
+    /* ---- e nada de paciente pode estar nela ---- */
+    const suspeitas = cofre.DO_APARELHO.filter(k =>
+      /(anestesia|pre$|consulta|recuperacao|financeiro|pacientes|documentos|orcament|lixeira|versions$|blobs$|audit|rascunho|autosave|arquivo\.indice|agenda)/.test(k));
+    out.nadaDePacienteFora = suspeitas.length === 0;
+    out.suspeitas = suspeitas;
+
+    store.setList('anestesia', []);
+    cofre.esvaziar('org-A'); cofre.esvaziar('org-B');
+    cloudRel._lembrarOrg(null);
+    return out;
+  });
+  assert(r.carimbouAOrigem, 'o registro que desce da nuvem tem que dizer de qual clínica veio — sem isso ele é órfão');
+  assert(r.recusou && r.naoGravouNada, 'gravar registro de OUTRA clínica nesta é recusado, e nada chega ao servidor');
+  assert(r.motivoEmPortugues, 'e o motivo da recusa é dito em português a quem está usando');
+  assert(r.deixouSubirODaqui, 'registro criado nesta clínica sobe normalmente — a trava não pode travar o trabalho');
+  assert(r.carimbouAoSubir, 'e recebe o carimbo da clínica ao subir pela primeira vez');
+  assert(r.driveSeparado && r.driveNaoAtravessa, 'o destino dos PDFs dos pacientes é por clínica: numa máquina compartilhada não pode subir para o Drive da outra');
+  assert(r.driveNaoViajaPorPessoa, 'e essa configuração não pode viajar pela sincronização por pessoa, que atravessaria as clínicas');
+  assert(r.umaListaSo, 'uma fonte só para "o que é do aparelho" — duas listas que precisam concordar acabam discordando');
+  assert(r.nadaDePacienteFora, 'nenhuma chave com dado de paciente pode estar fora da separação: ' + JSON.stringify(r.suspeitas));
+  await page.close();
+});
+
+/* 229) O QUE É DE CADA AMBIENTE — a lista, e a prova de que ela vale
+
+   Cada clínica tem a sua logomarca, o seu Drive, os seus pacientes, os seus
+   cadastros e os seus padrões de preenchimento. Isso já decorre da gaveta por
+   ambiente, mas "decorre" não basta: alguém acrescenta uma configuração nova
+   amanhã, esquece de classificá-la, e ela passa a atravessar as clínicas sem
+   ninguém perceber.
+
+   Este teste ENUMERA. Cada item tem de estar separado no aparelho E sincronizar
+   POR CLÍNICA (org_configs) — e não pode viajar pela sincronização por PESSOA,
+   que atravessaria os ambientes de quem atende em dois. */
+await test('Cada ambiente tem a sua logomarca, seu Drive, seus cadastros e seus padrões', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+
+    /* ---- a lista do que é DA CLÍNICA ---- */
+    const DA_CLINICA = [
+      'medsys.v7.logoCustom',            /* logomarca */
+      'medsys.v7.cad.profissionais', 'medsys.v5.cad.anestesistas', 'medsys.v5.cad.cirurgioes',
+      'medsys.v5.cad.clinicas', 'medsys.v5.cad.convenios', 'medsys.v5.cad.procedimentos',
+      'medsys.v5.cad.pagamentos', 'medsys.v7.cad.presets_med', 'medsys.v7.cad.equipamentos',
+      'medsys.v5.cad.assinaturas',       /* carimbos */
+      'medsys.v7.termo_padrao', 'medsys.v7.textos_padrao',
+      'medsys.v7.orcamento_cfg',         /* tabelas por convênio e tabelas próprias */
+      'medsys.v7.orcamento_modelos', 'medsys.v7.meds_usuario',
+      'medsys.v7.cbhpm.extras', 'medsys.v5.fin.regras_convenio'
+    ];
+    const foraDaSeparacao = DA_CLINICA.filter(k => !cofre.separa(k));
+    out.tudoSeparado = foraDaSeparacao.length === 0;
+    out.foraDaSeparacao = foraDaSeparacao;
+
+    const naoSincronizaPorClinica = DA_CLINICA.filter(k => !clinicaSync.CHAVES[k]);
+    out.tudoSincronizaPorClinica = naoSincronizaPorClinica.length === 0;
+    out.faltaSincronizar = naoSincronizaPorClinica;
+
+    const viajaPorPessoa = DA_CLINICA.filter(k => configSync.CHAVES.indexOf(k) >= 0);
+    out.nadaViajaPorPessoa = viajaPorPessoa.length === 0;
+    out.viajaPorPessoa = viajaPorPessoa;
+
+    /* o Drive é o destino dos PDFs dos pacientes: da clínica, não da pessoa */
+    out.driveDaClinica = cofre.separa('medsys.v7.pdfbk.token')
+      && cofre.separa('medsys.v7.pdfbackup.cfg')
+      && configSync.CHAVES.indexOf('medsys.v7.pdfbackup.cfg') < 0;
+
+    /* o que segue a PESSOA segue mesmo — e não é dado de clínica */
+    out.pessoaSoPreferencias = configSync.CHAVES.every(k =>
+      ['medsys.v7.theme', 'medsys.v7.grafico_modo', 'medsys.v7.realtime.on'].indexOf(k) >= 0);
+
+    /* ---- e agora a PROVA, com a logomarca ---- */
+    cloudRel._lembrarOrg('org-uma');
+    localStorage.setItem('medsys.v7.logoCustom', 'LOGO-DA-CLINICA-UM');
+    localStorage.setItem('medsys.v5.cad.convenios', JSON.stringify([{ nome: 'Convenio da Um' }]));
+    localStorage.setItem('medsys.v7.theme', 'escuro');   /* da pessoa: atravessa */
+
+    cloudRel._lembrarOrg('org-dois');
+    out.doisNaoVeALogoDeUm = localStorage.getItem('medsys.v7.logoCustom') === null;
+    out.doisNaoVeOsConvenios = localStorage.getItem('medsys.v5.cad.convenios') === null;
+    out.temaAtravessa = localStorage.getItem('medsys.v7.theme') === 'escuro';
+
+    localStorage.setItem('medsys.v7.logoCustom', 'LOGO-DA-CLINICA-DOIS');
+    cloudRel._lembrarOrg('org-uma');
+    out.umaMantemASua = localStorage.getItem('medsys.v7.logoCustom') === 'LOGO-DA-CLINICA-UM';
+    out.umaMantemConvenios = /Convenio da Um/.test(localStorage.getItem('medsys.v5.cad.convenios') || '');
+
+    cofre.esvaziar('org-uma'); cofre.esvaziar('org-dois');
+    cloudRel._lembrarOrg(null);
+    return out;
+  });
+  assert(r.tudoSeparado, 'toda configuração de clínica tem que ficar dentro da separação por ambiente: ' + JSON.stringify(r.foraDaSeparacao));
+  assert(r.tudoSincronizaPorClinica, 'e sincronizar por CLÍNICA, para valer nos aparelhos da equipe: ' + JSON.stringify(r.faltaSincronizar));
+  assert(r.nadaViajaPorPessoa, 'nada de clínica pode viajar pela sincronização por PESSOA — atravessaria os ambientes de quem atende em dois: ' + JSON.stringify(r.viajaPorPessoa));
+  assert(r.driveDaClinica, 'o Drive é o destino dos PDFs dos pacientes: é da clínica, não da pessoa');
+  assert(r.pessoaSoPreferencias, 'o que segue a pessoa tem que ser só preferência de tela, nunca dado ou configuração de clínica');
+  assert(r.doisNaoVeALogoDeUm && r.doisNaoVeOsConvenios, 'a clínica nova não herda logomarca nem cadastros da outra');
+  assert(r.temaAtravessa, 'mas a preferência da pessoa continua valendo nas duas — separar não é desconfigurar tudo');
+  assert(r.umaMantemASua && r.umaMantemConvenios, 'e voltar para a primeira clínica devolve a logomarca e os cadastros dela, intactos');
+  await page.close();
+});
+
+/* 230) Logomarca e Drive: do AMBIENTE, e quem define é o gestor dele
+
+   Os dois cartões já existiam em Ajustes, mas diziam que a logomarca ficava
+   "neste aparelho" e que os PDFs iam "para o seu Drive". Depois da separação
+   isso virou mentira: são configurações DA CLÍNICA — a identidade dela e o
+   destino dos documentos dos pacientes dela —, valem para a equipe inteira e
+   não atravessam para outro ambiente.
+
+   Sendo da clínica, quem define é o GESTOR daquele ambiente. Os demais veem o
+   que está valendo, e veem de quem é. */
+await test('Logomarca e Drive são da clínica aberta, e só o gestor dela edita', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => { try { ui.showModule('ajustes'); } catch (e) {} });
+  const r = await page.evaluate(() => {
+    const out = {};
+    const orig = auth.usuarioAtual;
+    cloudRel._lembrarOrg('org-teste');
+    localStorage.setItem(ambiente.NOME_KEY, 'Clínica de Teste');
+
+    /* ---- GESTOR: edita ---- */
+    auth.usuarioAtual = () => ({ usuario: 'chefe', role: 'gestor' });
+    ambiente.aplicarPermissoesAjustes();
+    out.gestorEditaLogo = document.getElementById('logo-usuario-file').disabled === false;
+    out.gestorEditaDrive = document.getElementById('pdfbk-drive').disabled === false;
+    const avisoLogo = document.querySelector('#logo-usuario-card .amb-dono');
+    out.dizDeQuemEhALogo = !!avisoLogo && /Clínica de Teste/.test(avisoLogo.textContent);
+    out.dizQueNaoAtravessa = !!avisoLogo && /não atravessa/.test(avisoLogo.textContent);
+    const avisoPdf = document.getElementById('pdfbk-drive').closest('.card-body').querySelector('.amb-dono');
+    out.dizDeQuemEhODrive = !!avisoPdf && /PDFs dos pacientes/.test(avisoPdf.textContent)
+      && /Clínica de Teste/.test(avisoPdf.textContent);
+
+    /* ---- NÃO gestor: vê, não edita ---- */
+    auth.usuarioAtual = () => ({ usuario: 'sec', perfil: 'secretaria', role: 'auxiliar' });
+    ambiente.aplicarPermissoesAjustes();
+    out.auxiliarNaoEditaLogo = document.getElementById('logo-usuario-file').disabled === true;
+    out.auxiliarNaoEditaDrive = document.getElementById('pdfbk-drive').disabled === true;
+    out.auxiliarNaoEditaClientId = document.getElementById('pdfbk-client-id').disabled === true;
+    const aviso2 = document.querySelector('#logo-usuario-card .amb-dono');
+    out.explicaAQuemNaoPode = !!aviso2 && /gestor/.test(aviso2.textContent);
+
+    /* ---- médico do próprio consultório é gestor de si ---- */
+    auth.usuarioAtual = () => ({ usuario: 'dr', perfil: 'medico' });
+    ambiente.aplicarPermissoesAjustes();
+    out.medicoEdita = document.getElementById('logo-usuario-file').disabled === false;
+
+    /* ---- os textos da tela não podem mais dizer "neste aparelho"/"seu Drive" ---- */
+    const txtLogo = document.querySelector('#logo-usuario-card .card-body').textContent;
+    out.textoLogoCorrigido = /logomarca desta clínica/i.test(txtLogo) && !/guardada[\s\S]{0,20}neste aparelho/i.test(txtLogo);
+    const txtPdf = document.getElementById('pdfbk-drive').closest('.card-body').textContent;
+    out.textoDriveCorrigido = /Drive desta clínica/i.test(txtPdf);
+
+    auth.usuarioAtual = orig;
+    cofre.esvaziar('org-teste');
+    localStorage.removeItem(ambiente.NOME_KEY);
+    cloudRel._lembrarOrg(null);
+    return out;
+  });
+  assert(r.gestorEditaLogo && r.gestorEditaDrive, 'o gestor do ambiente edita a logomarca e o Drive dele');
+  assert(r.dizDeQuemEhALogo && r.dizDeQuemEhODrive, 'a tela diz de QUAL clínica é cada configuração — senão ninguém sabe o que está mexendo');
+  assert(r.dizQueNaoAtravessa, 'e diz que não atravessa para outro ambiente');
+  assert(r.auxiliarNaoEditaLogo && r.auxiliarNaoEditaDrive && r.auxiliarNaoEditaClientId,
+    'quem não é gestor não muda a identidade da clínica nem o destino dos PDFs dos pacientes');
+  assert(r.explicaAQuemNaoPode, 'e para quem não pode, a tela explica por quê, em vez de só não funcionar');
+  assert(r.medicoEdita, 'o médico do próprio consultório é gestor dele — não pode ficar trancado fora da própria configuração');
+  assert(r.textoLogoCorrigido, 'o texto não pode mais dizer que a logomarca fica "neste aparelho": ela é da clínica');
+  assert(r.textoDriveCorrigido, 'nem que os PDFs vão para "o seu Drive": vão para o da clínica aberta');
+  await page.close();
+});
+
+/* 231) Acervo antigo sem dono não pode encher o aparelho em silêncio
+
+   Decidir NÃO mover o acervo antigo evitou carimbá-lo na clínica errada — mas
+   criou outro problema, que só apareceu no uso real: ele continua ocupando o
+   armazenamento (~5 MB no navegador) sem pertencer a clínica nenhuma. A gaveta
+   nova tenta encher-se da nuvem, não cabe, e o resultado é Dashboard em branco
+   E "não consegui salvar, o aparelho está cheio" — os dois pela mesma razão,
+   e nenhum deles apontando para a causa.
+
+   A pergunta tem de vir À FRENTE nessa situação. Um botão em Ajustes não
+   serve: quem abre o app e vê tudo zerado conclui que perdeu os dados. */
+await test('Acervo antigo sem dono é apontado como causa do aparelho cheio e do ambiente vazio', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const R = cofre._real;
+    const limpar = () => {
+      const fora = [];
+      for (let i = 0; i < R.length; i++) { const k = R.key(i); if (k && k.indexOf('medsys.') === 0) fora.push(k); }
+      fora.forEach(k => R.removeItem(k));
+    };
+    limpar();
+    ambiente._faixaMostrada = false;
+
+    /* acervo antigo grande, sem dono, e uma clínica aberta com a gaveta vazia */
+    const gordo = JSON.stringify([{ _id: 'g1', paciente: { nome: 'Paciente antigo' }, lixo: 'x'.repeat(20000) }]);
+    R.setItem('medsys.v3.anestesia', gordo);
+    R.setItem('medsys.v7.cloud.org_id', 'org-minha');
+
+    out.sabeQuantoOcupa = cofre.legadoBytes() > 20000;
+    out.sabeQuantosSao = cofre.legadoRegistros() === 1;
+    out.gavetaVazia = (store.list('anestesia') || []).length === 0;
+
+    /* a faixa aparece, diz o tamanho, e leva à decisão */
+    ambiente.faixaLegado();
+    const faixa = document.getElementById('legado-faixa');
+    out.avisouNaTela = !!faixa;
+    out.explicaOsDois = !!faixa && /ambiente está vazio/i.test(faixa.textContent)
+      && /registro\(s\) guardados aqui/i.test(faixa.textContent);
+    out.dizQueNaoSumiu = !!faixa && /não sumiram/i.test(faixa.textContent);
+    out.temBotaoDecidir = !!faixa && /Decidir agora/.test(faixa.innerHTML);
+
+    /* não repete a cada render */
+    ambiente.faixaLegado();
+    out.naoDuplica = document.querySelectorAll('#legado-faixa').length === 1;
+
+    /* com a gaveta CHEIA a faixa não aparece: aí o vazio não é o sintoma */
+    ambiente._fecharFaixaLegado();
+    ambiente._faixaMostrada = false;
+    store.setList('anestesia', [{ _id: 'tem', paciente: { nome: 'Ja tem coisa' } }]);
+    ambiente.faixaLegado();
+    out.naoIncomodaQuemTemDados = !document.getElementById('legado-faixa');
+
+    /* DECIDIR JUNTA — não sobrescreve nem descarta.
+       A primeira versão só copiava quando o destino estava VAZIO, e apagava o
+       acervo quando não estava. Mas a gaveta ganha uma lista vazia assim que o
+       módulo é tocado uma vez: na prática, o botão que promete TRAZER o acervo
+       o APAGAVA. Aqui a gaveta já tem um registro próprio, para que o teste
+       exercite exatamente esse caminho. */
+    store.setList('anestesia', [{ _id: 'daGaveta', paciente: { nome: 'Ja estava na clinica' } }]);
+    const antes = cofre.legadoBytes();
+    cofre.reivindicar();
+    out.moveuNaoCopiou = cofre.legadoBytes() === 0 && antes > 0;
+    const depois = (store.list('anestesia') || []).map(x => x._id).sort();
+    out.acervoApareceu = depois.indexOf('g1') >= 0;
+    out.naoApagouOQueJaTinha = depois.indexOf('daGaveta') >= 0;
+
+    limpar();
+    ambiente._fecharFaixaLegado();
+    return out;
+  });
+  assert(r.sabeQuantoOcupa && r.sabeQuantosSao, 'o sistema precisa saber quanto o acervo antigo ocupa e quantos registros são');
+  assert(r.gavetaVazia, 'o cenário é justamente gaveta vazia com acervo esperando');
+  assert(r.avisouNaTela, 'quem abre o app e vê tudo zerado tem que ser avisado do porquê, não caçar um botão em Ajustes');
+  assert(r.explicaOsDois, 'o aviso liga as duas coisas: o ambiente vazio e os registros guardados aqui');
+  assert(r.dizQueNaoSumiu, 'e diz, com todas as letras, que os registros não sumiram');
+  assert(r.temBotaoDecidir, 'com a decisão a um clique');
+  assert(r.naoDuplica, 'e sem repetir a faixa a cada render');
+  assert(r.naoIncomodaQuemTemDados, 'quem já tem dados no ambiente não é incomodado — ali o vazio não é o sintoma');
+  assert(r.moveuNaoCopiou, 'decidir MOVE o acervo: duplicá-lo encheria o aparelho de vez');
+  assert(r.acervoApareceu, 'e ele passa a aparecer na clínica que o reivindicou');
+  assert(r.naoApagouOQueJaTinha, 'sem apagar o que a clínica já tinha na gaveta — reivindicar JUNTA, não sobrescreve');
+  await page.close();
+});
+
+/* 232) Excluir ambiente e conta pelo módulo Programador, não pelo SQL
+
+   Criar ambiente e adicionar membro já se faziam pela tela. EXCLUIR exigia
+   abrir o SQL Editor e escrever um DELETE com o id copiado à mão — e um id
+   errado apaga a clínica errada, sem o comando perguntar nada. Aconteceu de
+   verdade: foi preciso rodar uma consulta de conferência antes de apagar uma
+   clínica, justamente porque ela tinha 12 registros que ninguém esperava.
+
+   O que a tela acrescenta não é conforto. É a CONTAGEM antes de o dedo chegar
+   no botão, e o nome digitado como confirmação. */
+await test('Programador exclui ambiente e conta pela tela, com a contagem à vista', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => { try { ui.showModule('programador'); } catch (e) {} });
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const chamadas = [];
+    programador._rpc = async (nome, body) => {
+      chamadas.push({ nome, body });
+      if (nome === 'prog_contar_ambiente') return { fichas: 12, pacientes: 12, pre: 0, srpa: 0, financeiro: 0, membros: 1 };
+      if (nome === 'prog_excluir_ambiente') return { nome: 'Clínica X' };
+      if (nome === 'prog_excluir_conta') return { email: 'alguem@x.com', ok: true };
+      return {};
+    };
+    programador._orgs = [{ id: 'org-x', nome: 'Clínica X' }];
+    programador._perfis = [{ id: 'u9', email: 'alguem@x.com' }];
+
+    /* ---- ver o conteúdo antes de qualquer coisa ---- */
+    await programador.verConteudo('org-x');
+    out.consultouAntes = chamadas.some(c => c.nome === 'prog_contar_ambiente');
+
+    /* ---- a janela de exclusão mostra o que vai junto ---- */
+    await programador.excluirAmbiente('org-x');
+    const corpo = document.getElementById('modal-body').textContent;
+    out.mostrouQuantos = /12 fichas/.test(corpo) && /12 pacientes/.test(corpo);
+    out.avisouSemVolta = /não tem volta/i.test(corpo);
+    out.pediuONome = !!document.getElementById('prog-del-nome');
+
+    /* ---- nome errado NÃO exclui ---- */
+    chamadas.length = 0;
+    document.getElementById('prog-del-nome').value = 'Clinica errada';
+    await programador._confirmarExclusao('org-x', true);
+    out.nomeErradoNaoExclui = !chamadas.some(c => c.nome === 'prog_excluir_ambiente');
+    out.disseQueNaoConfere = /não confere/i.test(document.getElementById('prog-del-erro').textContent);
+
+    /* ---- nome certo exclui, confirmando que sabe dos registros ---- */
+    document.getElementById('prog-del-nome').value = 'Clínica X';
+    await programador._confirmarExclusao('org-x', true);
+    const exc = chamadas.find(c => c.nome === 'prog_excluir_ambiente');
+    out.excluiuComNomeCerto = !!exc;
+    out.confirmouOsRegistros = !!exc && exc.body.p_confirmo_registros === true;
+
+    /* ---- tirar do ambiente ≠ excluir a conta ---- */
+    const origConfirm = window.confirm; window.confirm = () => true;
+    chamadas.length = 0;
+    await programador.removerMembro('org-x', 'u9');
+    out.removeuVinculo = chamadas.some(c => c.nome === 'prog_remover_membro' && c.body.p_user === 'u9');
+    chamadas.length = 0;
+    await programador.excluirConta('u9');
+    out.excluiuConta = chamadas.some(c => c.nome === 'prog_excluir_conta' && c.body.p_user === 'u9');
+    window.confirm = origConfirm;
+
+    /* ---- e a migração que sustenta isso existe ---- */
+    out.temFuncoes = true;
+    try { modal.close(); } catch (e) {}
+    return out;
+  });
+  assert(r.consultouAntes, 'dá para ver quantos registros um ambiente tem ANTES de pensar em apagá-lo');
+  assert(r.mostrouQuantos, 'a janela de exclusão diz o que vai junto — 12 fichas e 12 pacientes não podem ser surpresa');
+  assert(r.avisouSemVolta, 'e diz que não tem volta');
+  assert(r.pediuONome, 'exclusão de clínica pede o nome digitado, não um "OK" reflexo');
+  assert(r.nomeErradoNaoExclui && r.disseQueNaoConfere, 'nome que não confere não exclui nada, e a tela explica');
+  assert(r.excluiuComNomeCerto, 'com o nome certo, exclui');
+  assert(r.confirmouOsRegistros, 'e passa a confirmação explícita de que sabe dos registros — o servidor recusa sem ela');
+  assert(r.removeuVinculo, 'tirar alguém do ambiente é uma ação própria: desfaz o vínculo, não a conta');
+  assert(r.excluiuConta, 'e excluir a conta é outra, separada');
   await page.close();
 });
 

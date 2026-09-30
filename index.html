@@ -4656,7 +4656,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-29g</b><br>
+    v7.1 · build <b id="build-tag">2026-09-30f</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -9418,6 +9418,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
         <div class="cloud-actions" style="margin-bottom:6px">
           <button type="button" class="btn btn-sm" onclick="ambiente.recomecarDaNuvem()">🧹 Recomeçar esta clínica a partir da nuvem</button>
           <button type="button" class="btn btn-sm" id="amb-legado-btn" style="display:none" onclick="ambiente.perguntarLegado()">📦 Registros antigos sem clínica definida</button>
+          <button type="button" class="btn btn-sm" onclick="ambiente.trazerBackupPessoal()" title="Traz o backup pessoal da sua conta para o ambiente aberto">📥 Trazer do meu backup pessoal</button>
         </div>
         <p style="font-size:.74rem;color:var(--text-mute);margin:0 0 8px"><b>Recomeçar a partir da nuvem</b> apaga o que está gravado <i>neste aparelho</i> para a clínica aberta e baixa tudo de novo. Serve para quando o aparelho ficou com dado que não é deste ambiente — a nuvem é separada por clínica e é a fonte da verdade.</p>
         <label style="display:flex;align-items:flex-start;gap:8px;font-size:.82rem;margin:0 0 8px;cursor:pointer">
@@ -9904,7 +9905,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <span><strong>📁 Google Drive</strong> (para baixar de qualquer aparelho)</span>
           </label>
           <p style="font-size:.78rem;color:var(--text-mute);margin:4px 0 6px 26px">
-            Salva os PDFs numa pasta "Soft Anestesia" no seu Drive. Exige um <strong>Client ID OAuth</strong> criado no Google Cloud Console, com o domínio da Netlify autorizado.
+            Salva os PDFs numa pasta "Soft Anestesia" no Drive <strong>desta clínica</strong> — cada ambiente tem o seu destino, e os documentos de um nunca sobem para o Drive de outro. Exige um <strong>Client ID OAuth</strong> criado no Google Cloud Console, com o domínio autorizado.
           </p>
           <div id="pdfbk-drive-cfg" style="margin-left:26px;display:none">
             <div class="field" style="max-width:520px">
@@ -9938,14 +9939,15 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
 
     <section class="card" id="logo-usuario-card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-icon">🖼️</span><h2>Logomarca<small>Sua marca aparece na tela do app e no cabeçalho de todas as impressões</small></h2></div>
+        <div class="card-title-wrap"><span class="card-icon">🖼️</span><h2>Logomarca<small>A marca desta clínica — aparece na tela e no cabeçalho de todas as impressões</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
         <div id="logo-usuario-preview" style="margin-bottom:12px"></div>
         <p style="font-size:.82rem;color:var(--text-soft);margin-bottom:10px">
-          Escolha um arquivo de imagem (PNG com fundo transparente fica melhor). A imagem é guardada
-          <strong>neste aparelho</strong> e usada automaticamente em todos os módulos ao imprimir/gerar PDF.
+          Escolha um arquivo de imagem (PNG com fundo transparente fica melhor). A imagem é a
+          <strong>logomarca desta clínica</strong>: vale para todos os aparelhos e pessoas dela, e aparece
+          automaticamente em todos os módulos ao imprimir/gerar PDF.
         </p>
         <input type="file" id="logo-usuario-file" accept="image/*" style="display:none" onchange="logoUsuario.escolher(this)">
         <div class="cloud-actions" style="margin-top:4px">
@@ -10525,6 +10527,35 @@ const cofre = {
     try { return !!(typeof cloudRel !== 'undefined' && cloudRel._orgLembrada()); }
     catch (e) { return false; }
   },
+  /* Quantas clínicas esta conta tem, conforme o servidor respondeu no último
+     login. null = ainda não se sabe. */
+  quantasClinicas() {
+    try {
+      const v = cofre._real.getItem('medsys.v7.cloud.orgs_count');
+      return v === null || v === '' ? null : (parseInt(v, 10) || 0);
+    } catch (e) { return null; }
+  },
+  /* O CANAL PESSOAL SÓ É AMBÍGUO PARA QUEM TEM MAIS DE UMA CLÍNICA.
+
+     Fechá-lo para todo mundo foi um erro meu, e caro: o acervo histórico deste
+     sistema vive em boa parte no canal pessoal — o relacional veio depois e nem
+     todo registro foi espelhado nele. Quem tinha UMA clínica perdeu acesso ao
+     próprio backup, e "recomeçar a partir da nuvem" devolvia só a parte
+     relacional, com o Dashboard voltando pela metade. Eu SUPUS que o relacional
+     tinha tudo, em vez de verificar.
+
+     Com uma clínica só não há ambiguidade: tudo o que está no backup pessoal
+     daquela pessoa é daquela clínica. A dúvida — e o risco de um ambiente ver o
+     acervo do outro — só existe a partir da segunda.
+
+     Enquanto o servidor não disser quantas são, trata como NÃO ambíguo: privar
+     alguém do próprio backup por uma informação que ainda não chegou é o
+     inverso de proteger. */
+  canalPessoalAmbiguo() {
+    if (!cofre.temClinica()) return false;
+    const n = cofre.quantasClinicas();
+    return n != null && n > 1;
+  },
 
   ORG_KEY: 'medsys.v7.cloud.org_id',
   MIGRADO_KEY: 'medsys.v7.cofre.migrado',
@@ -10534,11 +10565,15 @@ const cofre = {
      todo o resto é da clínica. */
   DO_APARELHO: [
     'medsys.v7.cloud.cfg', 'medsys.v7.cloud.session', 'medsys.v7.cloud.org_id',
-    'medsys.v7.cloud.sem_clinica', 'medsys.v7.cloud.last_uid',
+    'medsys.v7.cloud.sem_clinica', 'medsys.v7.cloud.last_uid', 'medsys.v7.cloud.orgs_count',
     'medsys.v7.auth.users', 'medsys.v7.auth.session', 'medsys.v7.auth.timeout_min',
     'medsys.v7.auth.sessao_dia',
     'medsys.v7.theme', 'medsys.v7.grafico_modo', 'medsys.v7.realtime.on',
-    'medsys.v7.pdfbackup.cfg', 'medsys.v7.pdfbk.token', 'medsys.v7.configsync.meta',
+    /* O token e a pasta do Google Drive NÃO estão aqui, de propósito: são o
+       DESTINO dos PDFs dos pacientes. Fora da separação, numa máquina
+       compartilhada, os documentos de uma clínica subiriam para o Drive
+       configurado pela outra pessoa. Cada clínica tem o seu destino. */
+    'medsys.v7.configsync.meta',
     'medsys.v7.dash.escopo', 'medsys.v7.dash.periodo', 'medsys.v7.meudia.so_finalizados',
     'medsys.v7.ajustes.grupos_abertos', 'medsys.v7.ajustes.sysgrupos',
     'medsys.v7.tutorial_grafico', 'medsys.v7.nuvem.trafego',
@@ -10643,6 +10678,15 @@ const cofre = {
     } catch (e) {}
     return out;
   },
+  /* Quanto ele OCUPA. O acervo antigo não é só invisível: ele continua
+     gastando o armazenamento do aparelho, que é de ~5 MB. Enquanto ninguém
+     decide de quem ele é, a gaveta nova tenta encher-se da nuvem e não cabe —
+     e aí não é só "o Dashboard está vazio", é "não consigo salvar". */
+  legadoBytes() {
+    let n = 0;
+    try { cofre.legado().forEach(k => { const v = cofre._real.getItem(k); if (v) n += v.length * 2; }); } catch (e) {}
+    return n;
+  },
   /* Quantos REGISTROS (não chaves) estão soltos — é o número que diz algo a
      quem vai decidir. */
   legadoRegistros() {
@@ -10669,7 +10713,34 @@ const cofre = {
     const org = cofre.org(); if (!org) return true;
     return !!cofre._decisoes()[String(org).slice(0, 8)];
   },
-  /* Só quando a PESSOA diz que o acervo é desta clínica. */
+  /* Só quando a PESSOA diz que o acervo é desta clínica.
+
+     JUNTA, não sobrescreve nem descarta. A primeira versão só copiava quando o
+     destino estava VAZIO — e apagava o acervo antigo quando não estava. Só que
+     a gaveta ganha uma lista vazia assim que o módulo é tocado uma vez: na
+     prática, o botão que promete trazer o acervo o APAGAVA. É o tipo de defeito
+     que só aparece com dado de gente de verdade dentro.
+
+     Listas de registro são unidas por `_id`, e quem já está na gaveta vence —
+     é a versão viva, possivelmente editada depois. */
+  _juntar(brutoDestino, brutoLegado) {
+    if (brutoDestino == null) return brutoLegado;
+    if (brutoLegado == null) return brutoDestino;
+    let d, l;
+    try { d = JSON.parse(brutoDestino); } catch (e) { return brutoDestino; }
+    try { l = JSON.parse(brutoLegado); } catch (e) { return brutoDestino; }
+    if (Array.isArray(d) && Array.isArray(l)) {
+      const vistos = new Set();
+      d.forEach(x => { if (x && x._id) vistos.add(x._id); });
+      const juntos = d.slice();
+      l.forEach(x => { if (!x || !x._id || vistos.has(x._id)) return; juntos.push(x); vistos.add(x._id); });
+      try { return JSON.stringify(juntos); } catch (e) { return brutoDestino; }
+    }
+    /* não é lista: vale o que já está na gaveta, se houver algo de fato */
+    const vazio = d == null || d === '' || (Array.isArray(d) && !d.length) ||
+                  (typeof d === 'object' && !Array.isArray(d) && !Object.keys(d).length);
+    return vazio ? brutoLegado : brutoDestino;
+  },
   reivindicar() {
     const org = cofre.org(); if (!org) return 0;
     const curta = String(org).slice(0, 8);
@@ -10677,7 +10748,8 @@ const cofre = {
     cofre.legado().forEach(kr => {
       try {
         const destino = kr + '@' + curta;
-        if (cofre._real.getItem(destino) == null) cofre._real.setItem(destino, cofre._real.getItem(kr));
+        const juntado = cofre._juntar(cofre._real.getItem(destino), cofre._real.getItem(kr));
+        if (juntado != null) cofre._real.setItem(destino, juntado);
         cofre._real.removeItem(kr);
         n++;
       } catch (e) {}
@@ -12406,7 +12478,7 @@ const arquivo = {
        COM clínica, ele é um caminho para trazer registro de outro ambiente
        para dentro deste — e o canal relacional, consultado acima, já tem tudo
        o que é desta clínica. */
-    if ((!item || !item._id) && !cofre.temClinica()) {
+    if ((!item || !item._id) && !cofre.canalPessoalAmbiguo()) {
       try {
         const c = cloud.config(); const s = cloud.session();
         const r = await fetch(c.url + '/rest/v1/documentos?user_id=eq.' + s.user.id +
@@ -12498,7 +12570,7 @@ const arquivo = {
     /* Aparelho de uma clínica não procura no backup pessoal: é por ali que o
        nome de um paciente de OUTRO ambiente apareceria nesta busca. */
     try {
-      if (cofre.temClinica()) return achados;
+      if (cofre.canalPessoalAmbiguo()) return achados;
       const sess = cloud.session();
       const likeJ = String(nome).trim().replace(/[*,()]/g, ' ');
       const ors = 'or=(' + [
@@ -13451,6 +13523,20 @@ const espaco = {
     } else {
       causa = 'Liberei tudo o que era seguro liberar e ainda falta espaço.';
     }
+    /* O ACERVO ANTIGO SEM DONO É O MAIOR OCUPANTE, e é o que ninguém adivinha
+       olhando a lista de módulos: ele não aparece em clínica nenhuma, mas
+       ocupa o aparelho. Decidir de quem ele é resolve o espaço e o Dashboard
+       no mesmo clique — então essa é a primeira saída oferecida. */
+    let botaoLegado = '';
+    try {
+      if (ambiente.temLegadoPendente()) {
+        const mb = armazenamento._fmt(cofre.legadoBytes());
+        causa = '<b>' + cofre.legadoRegistros() + ' registro(s) antigos</b> (' + mb + ') estão guardados aqui ' +
+                'sem clínica definida — ocupam espaço e não aparecem em ambiente nenhum. ' +
+                'Diga de qual clínica eles são e o espaço se resolve junto.';
+        botaoLegado = '<button type="button" class="btn btn-xs btn-primary" onclick="espaco.fecharFaixa(); ambiente.perguntarLegado()">📦 Dizer de quem são</button>';
+      }
+    } catch (e) {}
     const div = document.createElement('div');
     div.id = 'espaco-faixa';
     div.className = 'espaco-faixa';
@@ -13458,7 +13544,8 @@ const espaco = {
       '<span class="ef-txt"><b>⚠️ Armazenamento cheio</b> (' + armazenamento._fmt(d.total) + '). ' + causa +
       (topo ? '<br><span style="opacity:.85">Ocupando mais: ' + topo + '</span>' : '') +
       '</span>' +
-      '<button type="button" class="btn btn-xs btn-primary" onclick="espaco.irParaLimpeza()">Liberar espaço</button>' +
+      botaoLegado +
+      '<button type="button" class="btn btn-xs" onclick="espaco.irParaLimpeza()">Liberar espaço</button>' +
       '<button type="button" class="ef-x" onclick="espaco.fecharFaixa()" aria-label="Fechar">✕</button>';
     document.body.appendChild(div);
   },
@@ -13961,6 +14048,7 @@ const preLanc = {
     if (m === 'token') return 'a sessão da nuvem venceu — entre de novo';
     if (m === 'offline') return 'sem conexão com a clínica';
     if (m === 'mod') return 'módulo sem espelho na clínica';
+    if (m === 'outra_clinica') return 'este registro é de OUTRA clínica — não pode ser gravado nesta';
     if (/permission|rls|denied|403/.test(m)) return 'a clínica recusou a gravação — esta conta não tem permissão nesse registro';
     if (/duplicate|conflict|409/.test(m)) return 'já existe um registro conflitante na clínica';
     if (/failed to fetch|network/.test(m)) return 'a rede caiu no meio do envio';
@@ -14770,11 +14858,11 @@ const ui = {
 
       /* Refresh por módulo — cada um em try/catch independente para não bloquear navegação */
       try {
-        if (modName === 'dashboard') { dashboard.atualizar(); try { meuDia.render(); } catch (e) {} try { pendencias.renderDashboard(); } catch (e) {} try { pendProntuario.renderDashboard(); } catch (e) {} try { preLanc.ajustarDashboard(); } catch (e) {} try { preLanc.renderFila(); } catch (e) {} try { preLanc.sincronizarFila({ silent: true }); } catch (e) {} }
+        if (modName === 'dashboard') { try { ambiente.faixaLegado(); } catch (e) {} dashboard.atualizar(); try { meuDia.render(); } catch (e) {} try { pendencias.renderDashboard(); } catch (e) {} try { pendProntuario.renderDashboard(); } catch (e) {} try { preLanc.ajustarDashboard(); } catch (e) {} try { preLanc.renderFila(); } catch (e) {} try { preLanc.sincronizarFila({ silent: true }); } catch (e) {} }
         else if (modName === 'financeiro') financeiro.render();
         else if (modName === 'agenda') { agenda.render(); if (!agenda._puxouNestaSessao) { setTimeout(() => { try { agenda.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
-        else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); try { equipeNuvem.render(); } catch (e) {} try { auditoria.render(''); } catch (e) {} try { armazenamento.render(); } catch (e) {} logoUsuario.renderAjustes(); try { nuvemEstado.render(); } catch (e) {} try { duplicados.resumoNoCard(); } catch (e) {} const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
+        else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); try { equipeNuvem.render(); } catch (e) {} try { auditoria.render(''); } catch (e) {} try { armazenamento.render(); } catch (e) {} logoUsuario.renderAjustes(); try { ambiente.aplicarPermissoesAjustes(); } catch (e) {} try { nuvemEstado.render(); } catch (e) {} try { duplicados.resumoNoCard(); } catch (e) {} const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
         else if (modName === 'pre') { try { preLanc.renderBotao('pre'); } catch (e) {} try { pre.labs.ligar(); pre.labs.marcar(); } catch (e) {} try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} try { pre.viaAerea.render(); } catch (e) {} try { pre.meds.ligar(); } catch (e) {} }
         else if (modName === 'anestesia') { try { preLanc.renderBotao('anestesia'); } catch (e) {} anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} try { anestesia.calc.resumoTopo(); } catch (e) {} try { adendos.renderInline('anestesia'); } catch (e) {} try { anestesia.nav._wire(); anestesia.nav.render(); } catch (e) {} try { anestesia.vitais.autoAvanco.wire(); } catch (e) {} }
         else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} try { recuperacao.resumoTopo(); } catch (e) {} try { anestesia.vitais.autoAvanco.wire(); } catch (e) {} }, 60); }
@@ -19397,6 +19485,7 @@ const auth = {
          próprio trabalho. A limpeza vem ANTES de qualquer sincronização —
          quem acabou de entrar não pode ver a clínica anterior nem por um
          instante. */
+      try { localStorage.setItem('medsys.v7.cloud.orgs_count', String(perfil.orgs != null ? perfil.orgs : '')); } catch (e) {}
       try { if (u.organization_id) await ambiente.aoEntrar(u.organization_id); } catch (e) {}
       /* guarda a clínica no aparelho: se a próxima consulta falhar, ele ainda
          sabe de onde baixar (em vez de se declarar "sem organização") */
@@ -20497,6 +20586,10 @@ const cloud = {
         nome: (perfil && perfil.nome) || '',
         role: (vinc && vinc.role) || (perfil && perfil.funcao) || null,
         organization_id: (vinc && vinc.organization_id) || null,
+        /* QUANTAS clínicas esta conta tem. É o que decide se o backup pessoal
+           (que é por usuário, não por organização) é ambíguo ou não: com UMA
+           clínica, tudo o que está lá é dela — sem dúvida possível. */
+        orgs: orgRows.length,
         /* personalização feita pelo gestor (0011) — vence o padrão do papel */
         permissoes: (vinc && vinc.permissoes) || null,
         ativo: perfil ? perfil.ativo !== false : true
@@ -20597,7 +20690,11 @@ const cloud = {
        a mesma pessoa gravou nas outras. O canal relacional, logo abaixo, traz
        o que é desta clínica — que é o que se quer restaurar. */
     try {
-      if (cofre.temClinica()) throw { _pular: true };
+      /* Conta com mais de uma clínica: o backup pessoal não diz de qual delas
+         é cada registro, então não desce sozinho. Mas a pessoa pode mandar —
+         ela sabe o que o sistema não tem como saber. É o que faz o botão
+         "📥 Trazer do meu backup pessoal". */
+      if (cofre.canalPessoalAmbiguo() && !opts.forcarPessoal) throw { _pular: true };
       const c = cloud.config(); const s = cloud.session();
       let de = 0; const passo = 500; let seguir = true;
       const porMod = {};
@@ -20892,7 +20989,7 @@ const cloud = {
       /* Canal pessoal: ver `cofre.temClinica`. Quem tem clínica lê pelo
          relacional; o backup pessoal continua RECEBENDO — é rede de
          segurança —, só deixa de descer. */
-      if (cofre.temClinica()) return { porMod: {}, marca: maisNovo || marca || '' };
+      if (cofre.canalPessoalAmbiguo()) return { porMod: {}, marca: maisNovo || marca || '' };
       /* Paginado: sem limite, o PostgREST corta em `max-rows` e o resto some
          calado — registro que não volta é registro que parece perdido. */
       const passo = 500;
@@ -22208,7 +22305,10 @@ const configSync = {
      daqui e passou a viajar por clinicaSync (org_configs), para valer também
      entre USUÁRIOS diferentes do mesmo consultório. */
   CHAVES: [
-    'medsys.v7.pdfbackup.cfg',
+    /* `pdfbackup.cfg` saiu daqui: a pasta do Drive é o DESTINO dos PDFs dos
+       pacientes, e passou a ser por CLÍNICA. Sincronizá-la por pessoa levaria
+       a configuração de uma clínica para dentro da outra — pelo caminho de
+       quem atende nas duas. */
     'medsys.v7.theme',
     'medsys.v7.grafico_modo',
     'medsys.v7.realtime.on'
@@ -22352,35 +22452,11 @@ const ambiente = {
   /* O QUE FICA NO APARELHO quando o ambiente troca. Tudo o que não estiver
      aqui é dado de clínica e vai embora. A lista é curta de propósito: ela é
      a exceção, não a regra. */
-  CHAVES_DO_APARELHO: [
-    'medsys.v7.cloud.cfg',            /* endereço e chave pública da nuvem */
-    'medsys.v7.cloud.session',        /* a sessão de quem está entrando */
-    'medsys.v7.cloud.last_uid',
-    'medsys.v7.auth.users',           /* espelho de login offline */
-    'medsys.v7.auth.session',
-    'medsys.v7.auth.timeout_min',     /* bloqueio de tela é do aparelho */
-    'medsys.v7.auth.sessao_dia',
-    'medsys.v7.theme',
-    'medsys.v7.grafico_modo',
-    'medsys.v7.realtime.on',
-    'medsys.v7.pdfbackup.cfg',
-    'medsys.v7.pdfbk.token',
-    'medsys.v7.configsync.meta',
-    'medsys.v7.dash.escopo',
-    'medsys.v7.dash.periodo',
-    'medsys.v7.meudia.so_finalizados',
-    'medsys.v7.ajustes.grupos_abertos',
-    'medsys.v7.ajustes.sysgrupos',
-    'medsys.v7.tutorial_grafico',
-    'medsys.v7.nuvem.trafego',        /* medição do aparelho, não da clínica */
-    'medsys.v7.modo_nuvem',
-    'medsys.v7.modo_nuvem.dias',
-    'medsys.v7.arquivo.auto',
-    'medsys.v7.demo',
-    'medsys.v7.ambiente.nome',
-    'medsys.v7.ambiente.vistos',
-    'medsys.v7.ambiente.compartilhado'
-  ],
+  /* O que fica no aparelho quando o ambiente troca é definido em UM lugar só:
+     `cofre.DO_APARELHO`. Havia uma segunda lista aqui, e duas listas que
+     precisam concordar acabam discordando — foi assim que o token do Drive
+     ficou de fora da separação numa e dentro na outra. */
+  get CHAVES_DO_APARELHO() { return cofre.DO_APARELHO; },
 
   /* ---------- quem é o ambiente ativo ---------- */
   id() { try { return cloudRel._orgLembrada() || ''; } catch (e) { return ''; } },
@@ -22552,6 +22628,112 @@ const ambiente = {
     toast('☁️ Pronto — este aparelho agora mostra o que a nuvem tem para ' + nome);
   },
 
+  /* SAÍDA EXPLÍCITA para a conta que tem mais de uma clínica: o backup
+     pessoal não diz de qual delas é cada registro, então o sistema não o traz
+     sozinho. Quem sabe é a pessoa — e aqui ela manda trazer, avisada do que
+     isso significa. */
+  async trazerBackupPessoal() {
+    const nome = ambiente.nome() || 'a clínica aberta';
+    const n = cofre.quantasClinicas();
+    if (!confirm('Trazer o SEU backup pessoal da nuvem para ' + nome + '?\n\n' +
+      (n != null && n > 1
+        ? 'Esta conta pertence a ' + n + ' clínicas. O backup pessoal é POR PESSOA, não por clínica — ele não diz de qual delas é cada registro. Se você tiver atendido pelas duas com esta conta, registros da outra podem entrar aqui.\n\n'
+        : '') +
+      'Nada é apagado: o que vier soma-se ao que já está neste ambiente.')) return;
+    toast('☁️ Buscando o seu backup pessoal…');
+    let rel = null;
+    try { rel = await cloud.restaurarTudoDaNuvem({ silent: true, forcarPessoal: true }); } catch (e) {}
+    try { cloud._repintarTelaAtual(); } catch (e) {}
+    if (rel && rel.erro) { toast('Não consegui: ' + rel.erro, 'error'); return; }
+    const n2 = rel ? (rel.novos + rel.atualizados) : 0;
+    toast(n2 ? '📥 ' + n2 + ' registro(s) trazidos do seu backup pessoal' : 'O seu backup pessoal não tinha nada além do que já está aqui');
+  },
+
+  /* ---------- quem manda na configuração da clínica ---------- */
+  /* Logomarca e Drive não são preferência de tela: são a identidade da clínica
+     e o destino dos PDFs dos pacientes dela. Valem para a equipe inteira, e
+     por isso quem define é o GESTOR daquele ambiente. Os demais veem, e veem
+     de quem é. */
+  souGestor() {
+    try {
+      const u = auth.usuarioAtual() || {};
+      return u.perfil === 'admin' || u.perfil === 'medico' || u.role === 'gestor';
+    } catch (e) { return false; }
+  },
+  _avisoDono(host, texto) {
+    if (!host) return;
+    let el = host.querySelector('.amb-dono');
+    if (!el) {
+      el = document.createElement('p');
+      el.className = 'amb-dono';
+      el.style.cssText = 'font-size:.78rem;color:var(--text-mute);margin:0 0 10px;padding:8px 10px;border-left:3px solid var(--primary);background:var(--surface-alt);border-radius:0 6px 6px 0';
+      host.insertBefore(el, host.firstChild);
+    }
+    el.innerHTML = texto;
+  },
+  /* Chamado quando Ajustes é montado. Diz de qual clínica é cada configuração
+     e tranca para quem não é gestor dela. */
+  aplicarPermissoesAjustes() {
+    try {
+      const nome = ambiente.nome() || 'a clínica aberta';
+      const gestor = ambiente.souGestor();
+      const semClinica = !ambiente.id();
+      const daClinica = semClinica ? '' :
+        '<b>Esta configuração é de ' + utils.escapeHTML(nome) + '</b> — vale para todos os aparelhos e pessoas dessa clínica, e não atravessa para outra.';
+      const trancado = gestor ? '' :
+        ' Quem define isto é o <b>gestor</b> da clínica; aqui você vê o que está valendo.';
+
+      const logo = document.querySelector('#logo-usuario-card .card-body');
+      if (logo && !semClinica) ambiente._avisoDono(logo, daClinica + trancado);
+      ['logo-usuario-file', 'logo-usuario-remover'].forEach(id => {
+        const el = document.getElementById(id); if (el) el.disabled = !gestor;
+      });
+      const btnLogo = logo && logo.querySelector('button.btn-primary');
+      if (btnLogo) { btnLogo.disabled = !gestor; btnLogo.style.opacity = gestor ? '' : '.5'; }
+
+      const chkDrive = document.getElementById('pdfbk-drive');
+      const pdf = chkDrive ? chkDrive.closest('.card-body') : null;
+      if (pdf && !semClinica) {
+        ambiente._avisoDono(pdf, (daClinica + trancado).replace('Esta configuração é',
+          'O destino dos PDFs dos pacientes é'));
+      }
+      ['pdfbk-drive', 'pdfbk-client-id'].forEach(id => {
+        const el = document.getElementById(id); if (el) el.disabled = !gestor;
+      });
+    } catch (e) {}
+  },
+
+  /* A PERGUNTA VEM À FRENTE quando ela é a explicação do que a pessoa está
+     vendo. Gaveta vazia + acervo antigo esperando decisão = Dashboard em
+     branco e aparelho cheio, os dois pela mesma razão. Um botão escondido em
+     Ajustes não serve para isso: quem abre o app e vê tudo zerado conclui que
+     perdeu os dados, não que há uma pergunta pendente. */
+  _faixaMostrada: false,
+  faixaLegado() {
+    try {
+      if (ambiente._faixaMostrada) return;
+      if (!ambiente.temLegadoPendente()) return;
+      let vazio = true;
+      try {
+        ['anestesia', 'pre', 'consulta', 'recuperacao', 'financeiro', 'pacientes']
+          .forEach(m => { if ((store.list(m) || []).length) vazio = false; });
+      } catch (e) {}
+      if (!vazio) return;
+      ambiente._faixaMostrada = true;
+      const div = document.createElement('div');
+      div.id = 'legado-faixa';
+      div.className = 'espaco-faixa';
+      div.innerHTML =
+        '<span class="ef-txt"><b>📦 Este ambiente está vazio, e há ' + cofre.legadoRegistros() +
+        ' registro(s) guardados aqui</b> (' + armazenamento._fmt(cofre.legadoBytes()) + ') de antes da separação por clínica. ' +
+        'Eles não sumiram — só falta dizer de qual clínica são.</span>' +
+        '<button type="button" class="btn btn-xs btn-primary" onclick="ambiente._fecharFaixaLegado(); ambiente.perguntarLegado()">Decidir agora</button>' +
+        '<button type="button" class="ef-x" onclick="ambiente._fecharFaixaLegado()" aria-label="Fechar">✕</button>';
+      document.body.appendChild(div);
+    } catch (e) {}
+  },
+  _fecharFaixaLegado() { const el = document.getElementById('legado-faixa'); if (el) el.remove(); },
+
   /* ---------- a tela diz em que clínica você está ---------- */
   pintar() {
     try {
@@ -22647,8 +22829,22 @@ const programador = {
       const ativos = programador._membros.filter(m => m.organization_id === o.id && m.ativo);
       const gestores = ativos.filter(m => m.role === 'gestor').map(m => programador._emailDe(m.user_id)).join(', ');
       return '<tr><td><b>' + esc(o.nome) + '</b></td><td>' + esc(gestores || '—') + '</td><td>' + ativos.length + '</td>' +
-        '<td style="font-size:.7rem;color:var(--text-mute)">' + o.id.slice(0, 8) + '…</td></tr>';
+        '<td style="font-size:.7rem;color:var(--text-mute)">' + o.id.slice(0, 8) + '…</td>' +
+        '<td style="text-align:right;white-space:nowrap">' +
+        '<button class="btn btn-xs" onclick="programador.verConteudo(\'' + o.id + '\')" title="Quantos registros este ambiente tem">🔍</button> ' +
+        '<button class="btn btn-xs btn-danger" onclick="programador.excluirAmbiente(\'' + o.id + '\')" title="Excluir este ambiente">✕</button>' +
+        '</td></tr>';
     }).join('');
+    /* QUEM É DE ONDE — com as ações ao lado. Sem esta lista, "remover pessoa"
+       viraria outro comando de console com um id copiado à mão. */
+    const linhasMembros = programador._membros.filter(m => m.ativo).map(m =>
+      '<tr><td>' + esc(programador._emailDe(m.user_id)) + '</td>' +
+      '<td>' + esc(programador._nomeOrg(m.organization_id)) + '</td>' +
+      '<td>' + esc(m.role || '—') + '</td>' +
+      '<td style="text-align:right;white-space:nowrap">' +
+      '<button class="btn btn-xs" onclick="programador.removerMembro(\'' + m.organization_id + '\',\'' + m.user_id + '\')" title="Tira do ambiente; a conta continua existindo">↩ tirar do ambiente</button> ' +
+      '<button class="btn btn-xs btn-danger" onclick="programador.excluirConta(\'' + m.user_id + '\')" title="Apaga a conta da nuvem — só funciona se ela não pertencer a ambiente nenhum">✕ conta</button>' +
+      '</td></tr>').join('');
     const linhasShares = programador._shares.map(s =>
       '<tr><td>' + esc(programador._nomeOrg(s.org_origem)) + '</td><td>→ ' + esc(programador._nomeOrg(s.org_destino)) + '</td>' +
       '<td>' + ((s.modulos || []).length ? esc(s.modulos.join(', ')) : '<i>todos</i>') + '</td>' +
@@ -22660,8 +22856,8 @@ const programador = {
       <section class="card">
         <div class="card-header"><div class="card-title-wrap"><span class="card-icon">🏢</span><h2>Ambientes de trabalho<small>Cada ambiente é uma organização com banco, equipe e configurações independentes</small></h2></div></div>
         <div class="card-body">
-          <table class="dash-detail-table" style="margin:0 0 14px"><thead><tr><th>Ambiente</th><th>Gestor(es)</th><th>Membros ativos</th><th>ID</th></tr></thead>
-          <tbody>${linhasOrgs || '<tr><td colspan="4" style="color:var(--text-mute)">Nenhum ambiente ainda.</td></tr>'}</tbody></table>
+          <table class="dash-detail-table" style="margin:0 0 14px"><thead><tr><th>Ambiente</th><th>Gestor(es)</th><th>Membros ativos</th><th>ID</th><th></th></tr></thead>
+          <tbody>${linhasOrgs || '<tr><td colspan="5" style="color:var(--text-mute)">Nenhum ambiente ainda.</td></tr>'}</tbody></table>
           <div class="grid">
             <div class="field col-5"><label>Nome do novo ambiente</label><input type="text" id="prog-amb-nome" placeholder="Ex.: Clínica Santa Casa"></div>
             <div class="field col-5"><label>E-mail do médico gestor <small style="color:var(--text-mute);font-weight:400">(precisa já ter conta na nuvem)</small></label><input type="email" id="prog-amb-email" autocapitalize="none"></div>
@@ -22684,6 +22880,9 @@ const programador = {
             <div class="field col-2"><label>Papel</label><select id="prog-mem-role">${programador.PAPEIS.map(([v, r]) => '<option value="' + v + '">' + r + '</option>').join('')}</select></div>
             <div class="field col-2" style="align-self:end"><button class="btn btn-primary btn-sm" onclick="programador.addMembro()">➕ Adicionar</button></div>
           </div>
+          <table class="dash-detail-table" style="margin:14px 0 0"><thead><tr><th>Pessoa</th><th>Ambiente</th><th>Papel</th><th></th></tr></thead>
+          <tbody>${linhasMembros || '<tr><td colspan="4" style="color:var(--text-mute)">Ninguém vinculado ainda.</td></tr>'}</tbody></table>
+          <p style="font-size:.74rem;color:var(--text-mute);margin:8px 0 0"><b>Tirar do ambiente</b> desfaz só o vínculo — a conta continua existindo e pode ser posta em outra clínica. <b>Excluir a conta</b> apaga a conta da nuvem, e só funciona depois que ela não pertence a ambiente nenhum.</p>
         </div>
       </section>
       <section class="card">
@@ -22786,6 +22985,88 @@ const programador = {
       programador.render();
     } catch (e) { programador._mostrarErro(e.message); }
   },
+  /* ==========================================================================
+     EXCLUIR — pelo app, não pelo console de SQL
+
+     Apagar ambiente exigia abrir o SQL Editor e escrever um DELETE com o id
+     copiado à mão. Um id errado apaga a clínica errada, e o comando não
+     pergunta nada. O que a tela acrescenta não é conforto: é a CONTAGEM antes
+     do dedo chegar no botão, e o nome digitado como confirmação.
+     ========================================================================== */
+  _rotuloCont(c) {
+    const R = { fichas: 'fichas', pre: 'prés', consultas: 'consultas', srpa: 'SRPAs',
+                financeiro: 'lançamentos', pacientes: 'pacientes', documentos: 'documentos',
+                orcamentos: 'orçamentos', agenda: 'compromissos', membros: 'membros' };
+    return Object.keys(R).filter(k => Number(c[k]) > 0)
+      .map(k => c[k] + ' ' + R[k]).join(' · ');
+  },
+  async verConteudo(org) {
+    try {
+      const c = await programador._rpc('prog_contar_ambiente', { p_org: org });
+      const txt = programador._rotuloCont(c || {});
+      toast('🔍 ' + programador._nomeOrg(org) + ': ' + (txt || 'vazio — nenhum registro'), txt ? 'warn' : 'success');
+    } catch (e) { programador._mostrarErro(e.message); }
+  },
+  async excluirAmbiente(org) {
+    const nome = programador._nomeOrg(org);
+    let c = null;
+    try { c = await programador._rpc('prog_contar_ambiente', { p_org: org }); }
+    catch (e) { programador._mostrarErro(e.message); return; }
+    const detalhe = programador._rotuloCont(c || {});
+    const semMembros = Object.assign({}, c || {}); delete semMembros.membros;
+    const total = Object.keys(semMembros).reduce((n, k) => n + (Number(semMembros[k]) || 0), 0);
+
+    const corpo =
+      '<p style="font-size:.9rem;margin:0 0 10px">Excluir o ambiente <b>' + utils.escapeHTML(nome) + '</b>?</p>' +
+      (total
+        ? '<p style="font-size:.88rem;margin:0 0 10px;padding:10px;border-left:3px solid #b3261e;background:var(--surface-alt)">' +
+          '<b>Este ambiente tem ' + total + ' registro(s):</b><br>' + utils.escapeHTML(detalhe) + '<br><br>' +
+          'Tudo isso é apagado junto, e <b>não tem volta</b>. Se esses registros também existem em outra clínica, ' +
+          'apagar aqui não os perde; se não existem, perde.</p>'
+        : '<p style="font-size:.88rem;margin:0 0 10px;color:var(--text-soft)">O ambiente está <b>vazio</b> — nenhum registro clínico ou financeiro.</p>') +
+      '<div class="field"><label>Para confirmar, digite o nome do ambiente</label>' +
+      '<input type="text" id="prog-del-nome" autocomplete="off" placeholder="' + utils.escapeAttr(nome) + '"></div>' +
+      '<div id="prog-del-erro" style="color:#b3261e;font-size:.82rem;min-height:18px"></div>';
+    modal.open('🗑️ Excluir ambiente', corpo,
+      '<button class="btn" onclick="modal.close()">Cancelar</button>' +
+      '<button class="btn btn-danger" onclick="programador._confirmarExclusao(\'' + org + '\', ' + (total > 0) + ')">Excluir definitivamente</button>');
+  },
+  async _confirmarExclusao(org, temRegistros) {
+    const nome = programador._nomeOrg(org);
+    const digitado = ((document.getElementById('prog-del-nome') || {}).value || '').trim();
+    const err = document.getElementById('prog-del-erro');
+    if (digitado !== nome) {
+      if (err) err.textContent = 'O nome digitado não confere com "' + nome + '".';
+      return;
+    }
+    try {
+      const r = await programador._rpc('prog_excluir_ambiente', { p_org: org, p_confirmo_registros: !!temRegistros });
+      modal.close();
+      toast('🗑️ Ambiente "' + ((r && r.nome) || nome) + '" excluído');
+      programador.render();
+    } catch (e) {
+      if (err) err.textContent = e.message; else programador._mostrarErro(e.message);
+    }
+  },
+  async removerMembro(org, uid) {
+    const quem = programador._emailDe(uid);
+    if (!confirm('Remover ' + quem + ' do ambiente ' + programador._nomeOrg(org) + '?\n\nA conta continua existindo — sai apenas o vínculo com esta clínica.')) return;
+    try {
+      await programador._rpc('prog_remover_membro', { p_org: org, p_user: uid });
+      toast('👥 ' + quem + ' removido de ' + programador._nomeOrg(org));
+      programador.render();
+    } catch (e) { programador._mostrarErro(e.message); }
+  },
+  async excluirConta(uid) {
+    const quem = programador._emailDe(uid);
+    if (!confirm('EXCLUIR a conta de ' + quem + ' da nuvem?\n\nIsto apaga a conta em si, não só o vínculo. Não tem volta.\n\nSó funciona se a conta já não pertencer a ambiente nenhum.')) return;
+    try {
+      const r = await programador._rpc('prog_excluir_conta', { p_user: uid });
+      toast('🗑️ Conta ' + ((r && r.email) || quem) + ' excluída');
+      programador.render();
+    } catch (e) { programador._mostrarErro(e.message); }
+  },
+
   async criarShare() {
     const origem = (document.getElementById('prog-share-origem') || {}).value;
     const destino = (document.getElementById('prog-share-destino') || {}).value;
@@ -23852,11 +24133,17 @@ const cloudRel = {
     } catch (e) { return null; }
   },
 
-  _rowParaRegistro(row) {
+  /* `org` carimba de QUAL CLÍNICA o registro veio. Sem isso, o registro é um
+     órfão: o sistema só sabe que ele existe na nuvem, não em qual banco — e
+     salvá-lo com outra clínica aberta o grava na clínica errada, no servidor.
+     Ver a trava em `enviarRegistro`. */
+  _rowParaRegistro(row, org) {
     const d = row.data;
     const base = (d && typeof d === 'object' && (d._id || d.nome || d.paciente || d.paciente_nome)) ? Object.assign({}, d) : {};
     if (!base._id) base._id = row.legacy_id || ('rel_' + (row.id || '').toString().slice(0, 8));
     if (row.updated_at) base._relUpdatedAt = row.updated_at;
+    if (org) base._relOrg = org;
+    else if (row.organization_id) base._relOrg = row.organization_id;
     return base;
   },
 
@@ -23940,7 +24227,7 @@ const cloudRel = {
         { headers: cloud._headers(true) });
       if (!r.ok) return null;
       const rows = await r.json();
-      return rows.map(row => cloudRel._rowParaRegistro(row));
+      return rows.map(row => cloudRel._rowParaRegistro(row, org));
     } catch (e) { return null; }
   },
 
@@ -24106,18 +24393,33 @@ const cloudRel = {
     if (!(await cloud._garantirToken())) return null;
     const org = await cloudRel._orgAsync(); if (!org) return null;
     const c = cloud.config();
+    /* PAGINADO, e não é detalhe: o PostgREST corta a resposta em `max-rows`
+       (mil, por padrão) e o resto some calado. Um índice truncado diria que
+       registros existentes não estão na nuvem desta clínica — e quem usa esse
+       índice para decidir o que NÃO é daqui apagaria do aparelho tudo o que
+       ficou além do corte. Índice incompleto é pior que índice nenhum, então
+       ou vem inteiro, ou devolve null. */
+    const PASSO = 1000;
+    const out = [];
     try {
-      const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
-        '&deleted_at=is.null&select=' + cloudRel._REG_SELECT_LEVE + '&order=updated_at.desc',
-        { headers: cloud._headers(true) });
-      if (!r.ok) return null;
-      const rows = await r.json();
-      if (!Array.isArray(rows)) return null;
-      return rows.map(row => ({
-        id: row.id, legacy_id: row.legacy_id, updated_at: row.updated_at,
-        _idLocal: cloudRel._idLocalDaLinha(row),
-        _idsPossiveis: cloudRel._idsPossiveisDaLinha(row)
-      }));
+      for (let de = 0; ; de += PASSO) {
+        const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
+          '&deleted_at=is.null&select=' + cloudRel._REG_SELECT_LEVE +
+          '&order=updated_at.desc&limit=' + PASSO + '&offset=' + de,
+          { headers: cloud._headers(true) });
+        if (!r.ok) return null;
+        const rows = await r.json();
+        if (!Array.isArray(rows)) return null;
+        rows.forEach(row => out.push({
+          id: row.id, legacy_id: row.legacy_id, updated_at: row.updated_at,
+          _idLocal: cloudRel._idLocalDaLinha(row),
+          _idsPossiveis: cloudRel._idsPossiveisDaLinha(row)
+        }));
+        if (rows.length < PASSO) break;
+        /* trava de segurança: acervo absurdo não vira laço infinito */
+        if (de > 200000) return null;
+      }
+      return out;
     } catch (e) { return null; }
   },
 
@@ -24145,7 +24447,7 @@ const cloudRel = {
         if (!r.ok) return null;
         const rows = await r.json();
         if (!Array.isArray(rows)) return null;
-        rows.forEach(row => out.push(cloudRel._rowParaRegistro(row)));
+        rows.forEach(row => out.push(cloudRel._rowParaRegistro(row, org)));
       } catch (e) { return null; }
     }
     return out;
@@ -24169,7 +24471,7 @@ const cloudRel = {
         if (!r.ok) return null;
         const rows = await r.json();
         if (!Array.isArray(rows)) return null;
-        rows.forEach(row => out.push(cloudRel._rowParaRegistro(row)));
+        rows.forEach(row => out.push(cloudRel._rowParaRegistro(row, org)));
       } catch (e) { return null; }
     }
     return out;
@@ -24249,6 +24551,21 @@ const cloudRel = {
     if (!cloudRel.disponivel() || !item || !item._id) return { ok: false, motivo: 'offline' };
     if (!(await cloud._garantirToken())) return { ok: false, motivo: 'token' };
     const org = await cloudRel._orgAsync(); if (!org) return { ok: false, motivo: 'org' };
+    /* O REGISTRO NÃO MUDA DE CLÍNICA.
+
+       `organization_id` da linha era sempre a clínica ABERTA AGORA, nunca a do
+       registro. Um registro da clínica A que estivesse no aparelho ia para a
+       clínica B no servidor no instante em que alguém o salvasse com B aberta.
+       Não é um problema de gaveta: a gaveta protege a tela, e isto escreve no
+       banco. O prontuário de um paciente de uma clínica passava a existir
+       dentro de outra.
+
+       Com o carimbo `_relOrg`, o registro diz de onde é, e a gravação recusa.
+       Registro criado aqui (sem carimbo) é desta clínica e segue normalmente —
+       é ele que recebe o carimbo ao subir pela primeira vez. */
+    if (item._relOrg && item._relOrg !== org) {
+      return { ok: false, motivo: 'outra_clinica', outraClinica: item._relOrg };
+    }
     const legacy = item._id;
     const atual = await cloudRel._lerAtualTab(cfg.tabela, org, legacy, cloudRel._REG_SELECT);
     if (atual && !opts.force && item._relUpdatedAt && atual.updated_at && atual.updated_at !== item._relUpdatedAt) {
@@ -24265,8 +24582,9 @@ const cloudRel = {
       if (novo && novo.updated_at) {
         const lst = store.list(mod);
         const ix = lst.findIndex(x => x._id === item._id);
-        if (ix >= 0) { lst[ix]._relUpdatedAt = novo.updated_at; store.setList(mod, lst); }
+        if (ix >= 0) { lst[ix]._relUpdatedAt = novo.updated_at; lst[ix]._relOrg = org; store.setList(mod, lst); }
         item._relUpdatedAt = novo.updated_at;
+        item._relOrg = org;
       }
       return { ok: true };
     } catch (e) { return { ok: false, motivo: e.message }; }
@@ -24537,12 +24855,26 @@ const cloudRel = {
        NÃO voltou agora deixou de ser visível (registro de outro anestesista
        puxado antes da mudança). Remove do aparelho para convergir. Itens
        criados aqui e ainda não espelhados (sem _relUpdatedAt) ficam. */
+    /* REGISTRO QUE DIZ ESTAR NA NUVEM, MAS NÃO ESTÁ NA NUVEM DESTA CLÍNICA.
+
+       `_relUpdatedAt` é o carimbo de que o registro foi espelhado no banco.
+       Se ele existe e o registro NÃO aparece no índice desta organização, uma
+       de duas: ou ele foi removido de lá, ou ele nunca foi daqui — foi
+       espelhado na clínica de outra pessoa e veio parar nesta gaveta.
+
+       O segundo caso é justamente o estrago que a migração antiga fez ao
+       adivinhar de quem era o acervo do aparelho. Não basta parar de
+       adivinhar: o que já foi carimbado errado continua aqui, aparecendo como
+       se fosse desta clínica — e, pior, uma edição o empurraria para dentro
+       dela na nuvem.
+
+       Sai da gaveta. Não é perda: o registro continua inteiro na nuvem da
+       clínica dele. O que foi criado aqui e ainda não subiu não tem
+       `_relUpdatedAt` e nunca é tocado — trabalho não sincronizado jamais é
+       apagado por esta regra. */
     let removidos = 0;
     try {
-      const u = auth.usuarioAtual();
-      if (indicePodeIdentificarTudo
-          && typeof orgSettings !== 'undefined' && orgSettings.visibilidade() === 'proprios'
-          && u && u.role === 'anestesiologista') {
+      if (indicePodeIdentificarTudo) {
         /* idsRemotos vem do ÍNDICE COMPLETO, não do que foi baixado agora.
            Com a leitura incremental, `remotos` traz só o que mudou — usá-lo
            aqui apagaria do aparelho todo registro que continuou igual. */
@@ -24552,6 +24884,9 @@ const cloudRel = {
         }
       }
     } catch (e) {}
+    if (removidos) {
+      try { toast('🧹 ' + removidos + ' registro(s) que não são desta clínica saíram deste aparelho (continuam na clínica de origem)', 'warn'); } catch (e) {}
+    }
     if (removidos) store.setList(mod, locais);      /* a mescla já gravou o que trouxe */
     /* Chegou até aqui: a clínica respondeu por este módulo. É o carimbo que
        separa "não tem registro" de "ainda não carregou" — ver `jaPuxou`. */
