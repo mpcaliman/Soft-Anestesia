@@ -4656,7 +4656,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-30f</b><br>
+    v7.1 · build <b id="build-tag">2026-09-30g</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -10709,9 +10709,26 @@ const cofre = {
     d[String(org).slice(0, 8)] = valor;
     try { cofre._real.setItem(cofre.MIGRADO_KEY, JSON.stringify(d)); } catch (e) {}
   },
+  /* SÓ UMA PESSOA DECIDE. Versões anteriores gravavam aqui marcadores que não
+     são resposta de ninguém ('sem-migrar:mais-de-um-ambiente', carimbos de
+     data de uma migração automática). Contar esses marcadores como decisão
+     suprime a pergunta para sempre: o acervo antigo segue ocupando o aparelho
+     sem pertencer a clínica nenhuma, o ambiente abre vazio e o aparelho vive
+     cheio — os dois pela mesma razão, e sem saída oferecida na tela.
+     Valem apenas as duas respostas que uma pessoa pode dar. */
   decidido() {
     const org = cofre.org(); if (!org) return true;
-    return !!cofre._decisoes()[String(org).slice(0, 8)];
+    const v = String(cofre._decisoes()[String(org).slice(0, 8)] || '');
+    return /^(reivindicado|dispensado):/.test(v);
+  },
+  /* Existe acervo antigo guardado neste aparelho, decidido ou não. Quem
+     respondeu "não são desta clínica" continua com o espaço ocupado — e
+     precisa de um caminho de volta até a pergunta, não de um botão que
+     desaparece. */
+  temGuardado() {
+    /* Sem clínica aberta não existe "acervo de antes": o que está solto é o
+       dado corrente deste aparelho. */
+    try { return !!cofre.org() && cofre.legado().length > 0; } catch (e) { return false; }
   },
   /* Só quando a PESSOA diz que o acervo é desta clínica.
 
@@ -10741,20 +10758,35 @@ const cofre = {
                   (typeof d === 'object' && !Array.isArray(d) && !Object.keys(d).length);
     return vazio ? brutoLegado : brutoDestino;
   },
+  _falhasUltimaReivindicacao: 0,
   reivindicar() {
     const org = cofre.org(); if (!org) return 0;
     const curta = String(org).slice(0, 8);
-    let n = 0;
+    let n = 0, falhas = 0;
     cofre.legado().forEach(kr => {
+      const destino = kr + '@' + curta;
+      let bruto = null;
+      try { bruto = cofre._real.getItem(kr); } catch (e) { return; }
+      let juntado;
+      try { juntado = cofre._juntar(cofre._real.getItem(destino), bruto); } catch (e) { juntado = bruto; }
+      /* TIRA O ANTIGO ANTES DE GRAVAR O JUNTADO. O aparelho cheio é
+         exatamente a situação em que este botão é usado: gravar primeiro
+         estoura a cota, a exceção é engolida, o acervo fica onde estava — o
+         botão não faz nada e ninguém descobre por quê. Tirando primeiro, o
+         espaço do próprio acervo paga a gravação. Se ela falhar mesmo assim,
+         o antigo volta para o lugar e a decisão NÃO é registrada, para a
+         pergunta continuar disponível. */
+      try { cofre._real.removeItem(kr); } catch (e) {}
       try {
-        const destino = kr + '@' + curta;
-        const juntado = cofre._juntar(cofre._real.getItem(destino), cofre._real.getItem(kr));
         if (juntado != null) cofre._real.setItem(destino, juntado);
-        cofre._real.removeItem(kr);
         n++;
-      } catch (e) {}
+      } catch (e) {
+        falhas++;
+        try { if (bruto != null) cofre._real.setItem(kr, bruto); } catch (e2) {}
+      }
     });
-    cofre._decidir('reivindicado:' + new Date().toISOString());
+    cofre._falhasUltimaReivindicacao = falhas;
+    if (!falhas) cofre._decidir('reivindicado:' + new Date().toISOString());
     return n;
   },
   /* Nada é apagado: só deixa de ser oferecido. O que está solto continua
@@ -13529,12 +13561,15 @@ const espaco = {
        no mesmo clique — então essa é a primeira saída oferecida. */
     let botaoLegado = '';
     try {
-      if (ambiente.temLegadoPendente()) {
+      if (cofre.temGuardado()) {
         const mb = armazenamento._fmt(cofre.legadoBytes());
+        const pendente = ambiente.temLegadoPendente();
         causa = '<b>' + cofre.legadoRegistros() + ' registro(s) antigos</b> (' + mb + ') estão guardados aqui ' +
                 'sem clínica definida — ocupam espaço e não aparecem em ambiente nenhum. ' +
-                'Diga de qual clínica eles são e o espaço se resolve junto.';
-        botaoLegado = '<button type="button" class="btn btn-xs btn-primary" onclick="espaco.fecharFaixa(); ambiente.perguntarLegado()">📦 Dizer de quem são</button>';
+                (pendente ? 'Diga de qual clínica eles são e o espaço se resolve junto.'
+                          : 'Eles ficaram de fora numa resposta anterior; enquanto não pertencerem a uma clínica, seguem ocupando o aparelho.');
+        botaoLegado = '<button type="button" class="btn btn-xs btn-primary" onclick="espaco.fecharFaixa(); ambiente.perguntarLegado()">📦 ' +
+                      (pendente ? 'Dizer de quem são' : 'Rever de quem são') + '</button>';
       }
     } catch (e) {}
     const div = document.createElement('div');
@@ -22585,7 +22620,13 @@ const ambiente = {
   perguntarLegado() {
     const n = cofre.legadoRegistros();
     const nome = ambiente.nome() || 'esta clínica';
+    const jaRespondeu = cofre.decidido();
     modal.open('📦 Registros gravados antes da separação por clínica',
+      (jaRespondeu
+        ? '<p style="font-size:.84rem;margin:0 0 10px;padding:8px 10px;border-left:3px solid var(--primary);background:var(--surface-alt);border-radius:0 6px 6px 0">' +
+          'Você já respondeu que eles <b>não são de ' + utils.escapeHTML(nome) + '</b>. Nada foi apagado — e é por isso que eles ' +
+          'continuam ocupando <b>' + armazenamento._fmt(cofre.legadoBytes()) + '</b> deste aparelho. Se a resposta mudou, ela pode ser mudada aqui.</p>'
+        : '') +
       '<p style="font-size:.88rem;margin:0 0 10px">Este aparelho tem <b>' + n + ' registro(s)</b> gravados ' +
       'antes de o sistema separar os dados por clínica. O registro não diz de qual clínica ele é — ' +
       '<b>só você sabe</b>.</p>' +
@@ -22599,7 +22640,12 @@ const ambiente = {
   _decidirLegado(meu) {
     if (meu) {
       const n = cofre.reivindicar();
-      toast('📦 ' + n + ' conjunto(s) de dados agora pertencem a ' + (ambiente.nome() || 'esta clínica'));
+      if (cofre._falhasUltimaReivindicacao) {
+        toast('📦 ' + n + ' conjunto(s) trazidos, mas ' + cofre._falhasUltimaReivindicacao +
+              ' não couberam neste aparelho — eles continuam guardados. Libere espaço em Ajustes → Armazenamento e repita.', 'error');
+      } else {
+        toast('📦 ' + n + ' conjunto(s) de dados agora pertencem a ' + (ambiente.nome() || 'esta clínica'));
+      }
       try { cloud._repintarTelaAtual(); } catch (e) {}
     } else {
       cofre.dispensarLegado();
@@ -22748,7 +22794,10 @@ const ambiente = {
         (ambiente.compartilhado() ? ' <span title="Ao sair, nada fica gravado neste computador">🔒</span>' : '');
       try {
         const b = document.getElementById('amb-legado-btn');
-        if (b) b.style.display = ambiente.temLegadoPendente() ? '' : 'none';
+        /* Aparece sempre que o acervo antigo ESTIVER AQUI — inclusive depois de
+           ter ficado de fora. Se ele ocupa o aparelho, tem que haver caminho
+           de volta até a pergunta. */
+        if (b) b.style.display = cofre.temGuardado() ? '' : 'none';
       } catch (e) {}
     } catch (e) {}
   }

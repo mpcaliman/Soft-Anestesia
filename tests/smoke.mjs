@@ -16954,6 +16954,124 @@ await test('Programador exclui ambiente e conta pela tela, com a contagem à vis
   await page.close();
 });
 
+/* 233) A pergunta do acervo antigo não pode ser respondida pelo próprio sistema
+   — e o aparelho cheio não pode impedir a resposta
+
+   Dois defeitos meus, achados com o aparelho de verdade na mão:
+
+   1) Uma versão anterior gravava no mesmo lugar das respostas um marcador que
+      NÃO é resposta de ninguém ('sem-migrar:mais-de-um-ambiente'). Como
+      qualquer valor ali contava como decisão, a pergunta desaparecia para
+      sempre: o acervo seguia ocupando os ~5 MB do aparelho sem pertencer a
+      clínica nenhuma, o ambiente abria vazio, e não havia botão em tela
+      nenhuma. Exatamente o que apareceu no celular: "aparelho cheio" com o
+      ambiente sem dado e sem o 📦.
+
+   2) Reivindicar gravava o juntado ANTES de tirar o antigo. Num aparelho
+      cheio — que é justamente quando alguém usa esse botão — a gravação
+      estoura a cota, a exceção é engolida, e o botão não faz nada.
+
+   As duas coisas só aparecem com o armazenamento ocupado de verdade, então é
+   assim que o teste monta o cenário. */
+await test('Marcador de versão antiga não conta como decisão, e reivindicar funciona com o aparelho cheio', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const R = cofre._real;
+    const limpar = () => {
+      const fora = [];
+      for (let i = 0; i < R.length; i++) { const k = R.key(i); if (k && k.indexOf('medsys.') === 0) fora.push(k); }
+      fora.forEach(k => R.removeItem(k));
+    };
+    limpar();
+    R.setItem('medsys.v7.cloud.org_id', 'org-minha');
+    R.setItem('medsys.v3.anestesia', JSON.stringify([{ _id: 'g1', paciente: { nome: 'Paciente antigo' } }]));
+
+    /* ---- 1) o marcador da versão antiga NÃO é decisão ---- */
+    R.setItem(cofre.MIGRADO_KEY, JSON.stringify({ 'org-minh': 'sem-migrar:mais-de-um-ambiente' }));
+    out.marcadorNaoDecide = cofre.decidido() === false;
+    out.perguntaVolta = ambiente.temLegadoPendente() === true;
+    /* um carimbo de data solto, de uma migração automática, também não */
+    R.setItem(cofre.MIGRADO_KEY, JSON.stringify({ 'org-minh': '2026-09-29T12:00:00.000Z' }));
+    out.carimboNaoDecide = cofre.decidido() === false;
+
+    /* ---- as duas respostas de gente contam ---- */
+    R.setItem(cofre.MIGRADO_KEY, JSON.stringify({ 'org-minh': 'dispensado:2026-09-30T00:00:00.000Z' }));
+    out.dispensadoDecide = cofre.decidido() === true;
+    out.naoPergunta = ambiente.temLegadoPendente() === false;
+
+    /* ---- mas quem dispensou continua com o espaço ocupado: há caminho de volta ---- */
+    out.aindaGuardado = cofre.temGuardado() === true;
+    ambiente.pintar();
+    const btn = document.getElementById('amb-legado-btn');
+    out.botaoVisivelAposDispensar = !!btn && btn.style.display !== 'none';
+    ambiente.perguntarLegado();
+    const corpo = (document.getElementById('modal-body') || {}).textContent || '';
+    out.modalExplicaOEspaco = /já respondeu/i.test(corpo) && /ocupando/i.test(corpo);
+    try { modal.close(); } catch (e) {}
+
+    /* ---- e a faixa de armazenamento cheio aponta o acervo mesmo já dispensado ---- */
+    espaco.fecharFaixa();
+    espaco.mostrarFaixa(0);
+    const faixa = document.getElementById('espaco-faixa');
+    out.faixaAponta = !!faixa && /registro\(s\) antigos/.test(faixa.textContent) && /Rever de quem são/.test(faixa.innerHTML);
+    espaco.fecharFaixa();
+
+    /* ---- 2) reivindicar com o aparelho cheio ---- */
+    /* a gravação do destino falha na primeira tentativa (cota) e passa depois
+       que o antigo sai — que é o que a ordem correta garante */
+    R.setItem(cofre.MIGRADO_KEY, '{}');
+    const realSet = R.setItem.bind(R);
+    let antigoPresente = true;
+    R.setItem = (k, v) => {
+      if (k === 'medsys.v3.anestesia@org-minh' && antigoPresente) {
+        const e = new Error('QuotaExceededError'); e.name = 'QuotaExceededError'; throw e;
+      }
+      return realSet(k, v);
+    };
+    const realRemove = R.removeItem.bind(R);
+    R.removeItem = (k) => { if (k === 'medsys.v3.anestesia') antigoPresente = false; return realRemove(k); };
+
+    const n = cofre.reivindicar();
+    R.setItem = realSet; R.removeItem = realRemove;
+    out.reivindicouComAparelhoCheio = n === 1 && cofre._falhasUltimaReivindicacao === 0;
+    out.acervoChegou = (store.list('anestesia') || []).some(x => x._id === 'g1');
+    out.acervoSaiuDoAvulso = cofre.legado().length === 0;
+    out.agoraSimDecidiu = cofre.decidido() === true;
+
+    /* ---- se a gravação falhar de vez, o antigo VOLTA e a pergunta fica ---- */
+    limpar();
+    R.setItem('medsys.v7.cloud.org_id', 'org-minha');
+    R.setItem('medsys.v3.pre', JSON.stringify([{ _id: 'p1' }]));
+    const realSet2 = R.setItem.bind(R);
+    R.setItem = (k, v) => {
+      if (k === 'medsys.v3.pre@org-minh') { const e = new Error('cheio'); e.name = 'QuotaExceededError'; throw e; }
+      return realSet2(k, v);
+    };
+    cofre.reivindicar();
+    R.setItem = realSet2;
+    out.devolveuOAntigo = R.getItem('medsys.v3.pre') != null;
+    out.naoRegistrouDecisaoFalsa = cofre.decidido() === false;
+
+    limpar();
+    ambiente._fecharFaixaLegado();
+    return out;
+  });
+  assert(r.marcadorNaoDecide, "'sem-migrar:mais-de-um-ambiente' não é resposta de ninguém — não pode contar como decisão");
+  assert(r.carimboNaoDecide, 'nem um carimbo de data de migração automática');
+  assert(r.perguntaVolta, 'com o marcador antigo no lugar, a pergunta tem de voltar a ser oferecida');
+  assert(r.dispensadoDecide && r.naoPergunta, 'as duas respostas que uma pessoa dá contam, e aí a pergunta para de aparecer');
+  assert(r.aindaGuardado && r.botaoVisivelAposDispensar, 'quem dispensou continua com o espaço ocupado: o caminho de volta fica à vista');
+  assert(r.modalExplicaOEspaco, 'e a janela diz que já foi respondido e quanto aquilo ocupa');
+  assert(r.faixaAponta, 'a faixa de armazenamento cheio aponta o acervo antigo mesmo depois de dispensado');
+  assert(r.reivindicouComAparelhoCheio, 'reivindicar tem de funcionar com o aparelho cheio — é quando ele é usado');
+  assert(r.acervoChegou && r.acervoSaiuDoAvulso, 'o acervo chega à clínica e deixa de ocupar o aparelho duas vezes');
+  assert(r.agoraSimDecidiu, 'e a decisão de verdade fica registrada');
+  assert(r.devolveuOAntigo, 'se a gravação falhar mesmo assim, o acervo antigo volta para o lugar — nada se perde');
+  assert(r.naoRegistrouDecisaoFalsa, 'e a decisão não é registrada, para a pergunta continuar disponível');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
