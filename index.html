@@ -4656,7 +4656,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-30b</b><br>
+    v7.1 · build <b id="build-tag">2026-09-30c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -10568,7 +10568,11 @@ const cofre = {
     'medsys.v7.auth.users', 'medsys.v7.auth.session', 'medsys.v7.auth.timeout_min',
     'medsys.v7.auth.sessao_dia',
     'medsys.v7.theme', 'medsys.v7.grafico_modo', 'medsys.v7.realtime.on',
-    'medsys.v7.pdfbackup.cfg', 'medsys.v7.pdfbk.token', 'medsys.v7.configsync.meta',
+    /* O token e a pasta do Google Drive NÃO estão aqui, de propósito: são o
+       DESTINO dos PDFs dos pacientes. Fora da separação, numa máquina
+       compartilhada, os documentos de uma clínica subiriam para o Drive
+       configurado pela outra pessoa. Cada clínica tem o seu destino. */
+    'medsys.v7.configsync.meta',
     'medsys.v7.dash.escopo', 'medsys.v7.dash.periodo', 'medsys.v7.meudia.so_finalizados',
     'medsys.v7.ajustes.grupos_abertos', 'medsys.v7.ajustes.sysgrupos',
     'medsys.v7.tutorial_grafico', 'medsys.v7.nuvem.trafego',
@@ -13991,6 +13995,7 @@ const preLanc = {
     if (m === 'token') return 'a sessão da nuvem venceu — entre de novo';
     if (m === 'offline') return 'sem conexão com a clínica';
     if (m === 'mod') return 'módulo sem espelho na clínica';
+    if (m === 'outra_clinica') return 'este registro é de OUTRA clínica — não pode ser gravado nesta';
     if (/permission|rls|denied|403/.test(m)) return 'a clínica recusou a gravação — esta conta não tem permissão nesse registro';
     if (/duplicate|conflict|409/.test(m)) return 'já existe um registro conflitante na clínica';
     if (/failed to fetch|network/.test(m)) return 'a rede caiu no meio do envio';
@@ -22247,7 +22252,10 @@ const configSync = {
      daqui e passou a viajar por clinicaSync (org_configs), para valer também
      entre USUÁRIOS diferentes do mesmo consultório. */
   CHAVES: [
-    'medsys.v7.pdfbackup.cfg',
+    /* `pdfbackup.cfg` saiu daqui: a pasta do Drive é o DESTINO dos PDFs dos
+       pacientes, e passou a ser por CLÍNICA. Sincronizá-la por pessoa levaria
+       a configuração de uma clínica para dentro da outra — pelo caminho de
+       quem atende nas duas. */
     'medsys.v7.theme',
     'medsys.v7.grafico_modo',
     'medsys.v7.realtime.on'
@@ -22391,35 +22399,11 @@ const ambiente = {
   /* O QUE FICA NO APARELHO quando o ambiente troca. Tudo o que não estiver
      aqui é dado de clínica e vai embora. A lista é curta de propósito: ela é
      a exceção, não a regra. */
-  CHAVES_DO_APARELHO: [
-    'medsys.v7.cloud.cfg',            /* endereço e chave pública da nuvem */
-    'medsys.v7.cloud.session',        /* a sessão de quem está entrando */
-    'medsys.v7.cloud.last_uid',
-    'medsys.v7.auth.users',           /* espelho de login offline */
-    'medsys.v7.auth.session',
-    'medsys.v7.auth.timeout_min',     /* bloqueio de tela é do aparelho */
-    'medsys.v7.auth.sessao_dia',
-    'medsys.v7.theme',
-    'medsys.v7.grafico_modo',
-    'medsys.v7.realtime.on',
-    'medsys.v7.pdfbackup.cfg',
-    'medsys.v7.pdfbk.token',
-    'medsys.v7.configsync.meta',
-    'medsys.v7.dash.escopo',
-    'medsys.v7.dash.periodo',
-    'medsys.v7.meudia.so_finalizados',
-    'medsys.v7.ajustes.grupos_abertos',
-    'medsys.v7.ajustes.sysgrupos',
-    'medsys.v7.tutorial_grafico',
-    'medsys.v7.nuvem.trafego',        /* medição do aparelho, não da clínica */
-    'medsys.v7.modo_nuvem',
-    'medsys.v7.modo_nuvem.dias',
-    'medsys.v7.arquivo.auto',
-    'medsys.v7.demo',
-    'medsys.v7.ambiente.nome',
-    'medsys.v7.ambiente.vistos',
-    'medsys.v7.ambiente.compartilhado'
-  ],
+  /* O que fica no aparelho quando o ambiente troca é definido em UM lugar só:
+     `cofre.DO_APARELHO`. Havia uma segunda lista aqui, e duas listas que
+     precisam concordar acabam discordando — foi assim que o token do Drive
+     ficou de fora da separação numa e dentro na outra. */
+  get CHAVES_DO_APARELHO() { return cofre.DO_APARELHO; },
 
   /* ---------- quem é o ambiente ativo ---------- */
   id() { try { return cloudRel._orgLembrada() || ''; } catch (e) { return ''; } },
@@ -23912,11 +23896,17 @@ const cloudRel = {
     } catch (e) { return null; }
   },
 
-  _rowParaRegistro(row) {
+  /* `org` carimba de QUAL CLÍNICA o registro veio. Sem isso, o registro é um
+     órfão: o sistema só sabe que ele existe na nuvem, não em qual banco — e
+     salvá-lo com outra clínica aberta o grava na clínica errada, no servidor.
+     Ver a trava em `enviarRegistro`. */
+  _rowParaRegistro(row, org) {
     const d = row.data;
     const base = (d && typeof d === 'object' && (d._id || d.nome || d.paciente || d.paciente_nome)) ? Object.assign({}, d) : {};
     if (!base._id) base._id = row.legacy_id || ('rel_' + (row.id || '').toString().slice(0, 8));
     if (row.updated_at) base._relUpdatedAt = row.updated_at;
+    if (org) base._relOrg = org;
+    else if (row.organization_id) base._relOrg = row.organization_id;
     return base;
   },
 
@@ -24000,7 +23990,7 @@ const cloudRel = {
         { headers: cloud._headers(true) });
       if (!r.ok) return null;
       const rows = await r.json();
-      return rows.map(row => cloudRel._rowParaRegistro(row));
+      return rows.map(row => cloudRel._rowParaRegistro(row, org));
     } catch (e) { return null; }
   },
 
@@ -24220,7 +24210,7 @@ const cloudRel = {
         if (!r.ok) return null;
         const rows = await r.json();
         if (!Array.isArray(rows)) return null;
-        rows.forEach(row => out.push(cloudRel._rowParaRegistro(row)));
+        rows.forEach(row => out.push(cloudRel._rowParaRegistro(row, org)));
       } catch (e) { return null; }
     }
     return out;
@@ -24244,7 +24234,7 @@ const cloudRel = {
         if (!r.ok) return null;
         const rows = await r.json();
         if (!Array.isArray(rows)) return null;
-        rows.forEach(row => out.push(cloudRel._rowParaRegistro(row)));
+        rows.forEach(row => out.push(cloudRel._rowParaRegistro(row, org)));
       } catch (e) { return null; }
     }
     return out;
@@ -24324,6 +24314,21 @@ const cloudRel = {
     if (!cloudRel.disponivel() || !item || !item._id) return { ok: false, motivo: 'offline' };
     if (!(await cloud._garantirToken())) return { ok: false, motivo: 'token' };
     const org = await cloudRel._orgAsync(); if (!org) return { ok: false, motivo: 'org' };
+    /* O REGISTRO NÃO MUDA DE CLÍNICA.
+
+       `organization_id` da linha era sempre a clínica ABERTA AGORA, nunca a do
+       registro. Um registro da clínica A que estivesse no aparelho ia para a
+       clínica B no servidor no instante em que alguém o salvasse com B aberta.
+       Não é um problema de gaveta: a gaveta protege a tela, e isto escreve no
+       banco. O prontuário de um paciente de uma clínica passava a existir
+       dentro de outra.
+
+       Com o carimbo `_relOrg`, o registro diz de onde é, e a gravação recusa.
+       Registro criado aqui (sem carimbo) é desta clínica e segue normalmente —
+       é ele que recebe o carimbo ao subir pela primeira vez. */
+    if (item._relOrg && item._relOrg !== org) {
+      return { ok: false, motivo: 'outra_clinica', outraClinica: item._relOrg };
+    }
     const legacy = item._id;
     const atual = await cloudRel._lerAtualTab(cfg.tabela, org, legacy, cloudRel._REG_SELECT);
     if (atual && !opts.force && item._relUpdatedAt && atual.updated_at && atual.updated_at !== item._relUpdatedAt) {
@@ -24340,8 +24345,9 @@ const cloudRel = {
       if (novo && novo.updated_at) {
         const lst = store.list(mod);
         const ix = lst.findIndex(x => x._id === item._id);
-        if (ix >= 0) { lst[ix]._relUpdatedAt = novo.updated_at; store.setList(mod, lst); }
+        if (ix >= 0) { lst[ix]._relUpdatedAt = novo.updated_at; lst[ix]._relOrg = org; store.setList(mod, lst); }
         item._relUpdatedAt = novo.updated_at;
+        item._relOrg = org;
       }
       return { ok: true };
     } catch (e) { return { ok: false, motivo: e.message }; }

@@ -16547,6 +16547,101 @@ await test('Registro de outra clínica sai da gaveta — e índice truncado nunc
   await page.close();
 });
 
+/* 228) AUDITORIA DA SEPARAÇÃO ENTRE CLÍNICAS
+
+   Quatro caminhos por onde dado atravessa ambiente: o armazenamento local, as
+   leituras da nuvem, as ESCRITAS na nuvem, e o que a tela lê. Os três primeiros
+   foram tratados aos poucos; o terceiro nunca tinha sido auditado, e é o pior —
+   a gaveta protege a tela, a escrita mexe no banco.
+
+   O REGISTRO NÃO MUDA DE CLÍNICA. `organization_id` da linha era sempre a
+   clínica ABERTA AGORA, nunca a do registro: um registro da clínica A que
+   estivesse no aparelho ia para a B no servidor no instante em que alguém o
+   salvasse com B aberta. O prontuário de um paciente passava a existir dentro
+   de outra clínica. */
+await test('Auditoria: o registro carrega a clínica dele, e não é gravado em outra', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    cloud.estaConfigurado = () => true; cloud.estaLogado = () => true;
+    cloud._garantirToken = async () => true;
+    cloud.config = () => ({ url: 'https://x.supabase.co', key: 'k' });
+    cloud._headers = () => ({});
+    cloud.session = () => ({ user: { id: 'u1' } });
+    cloudRel.disponivel = () => true;
+
+    /* ---- a leitura CARIMBA de qual clínica o registro veio ---- */
+    cloudRel._orgAsync = async () => 'org-A';
+    cloudRel._lembrarOrg('org-A');
+    window.fetch = async (url) => {
+      const u = String(url);
+      if (/anesthesia_records/.test(u) && /select=id,legacy_id,data/.test(decodeURIComponent(u))) {
+        return { ok: true, headers: { get: () => '0' }, json: async () => ([
+          { id: 'r1', legacy_id: 'k1', updated_at: 't1', data: { _id: 'k1', paciente: { nome: 'Da clinica A' } } }
+        ]) };
+      }
+      return { ok: true, headers: { get: () => '0' }, json: async () => [] };
+    };
+    const vindos = await cloudRel.puxarModulo('anestesia');
+    out.carimbouAOrigem = !!(vindos && vindos[0] && vindos[0]._relOrg === 'org-A');
+
+    /* ---- e a ESCRITA recusa gravá-lo em outra clínica ---- */
+    cloudRel._orgAsync = async () => 'org-B';
+    cloudRel._lembrarOrg('org-B');
+    let gravou = null;
+    window.fetch = async (url, init) => {
+      const u = String(url);
+      if (init && init.method === 'POST') { gravou = u; return { ok: true, headers: { get: () => '0' }, json: async () => ([{ updated_at: 't2' }]) }; }
+      return { ok: true, headers: { get: () => '0' }, json: async () => [] };
+    };
+    const res = await cloudRel.enviarRegistro('anestesia', vindos[0]);
+    out.recusou = !!res && res.ok === false && res.motivo === 'outra_clinica';
+    out.naoGravouNada = gravou === null;
+    out.motivoEmPortugues = /OUTRA clínica/i.test(preLanc._porQueNaoSobe('outra_clinica'));
+
+    /* ---- registro criado AQUI (sem carimbo) sobe normalmente, e recebe o carimbo ---- */
+    gravou = null;
+    const meu = { _id: 'novo1', paciente: { nome: 'Nasceu na B' } };
+    store.setList('anestesia', [meu]);
+    const res2 = await cloudRel.enviarRegistro('anestesia', meu);
+    out.deixouSubirODaqui = !!res2 && res2.ok === true && !!gravou;
+    out.carimbouAoSubir = meu._relOrg === 'org-B'
+      && (store.list('anestesia')[0] || {})._relOrg === 'org-B';
+
+    /* ---- o destino dos PDFs é POR CLÍNICA ---- */
+    out.driveSeparado = cofre.separa('medsys.v7.pdfbk.token')
+      && cofre.separa('medsys.v7.pdfbackup.cfg');
+    out.driveNaoViajaPorPessoa = configSync.CHAVES.indexOf('medsys.v7.pdfbackup.cfg') < 0;
+    cloudRel._lembrarOrg('org-A');
+    localStorage.setItem('medsys.v7.pdfbk.token', '{"access_token":"da-clinica-A"}');
+    cloudRel._lembrarOrg('org-B');
+    out.driveNaoAtravessa = localStorage.getItem('medsys.v7.pdfbk.token') === null;
+
+    /* ---- uma lista só de "o que é do aparelho" ---- */
+    out.umaListaSo = ambiente.CHAVES_DO_APARELHO === cofre.DO_APARELHO;
+    /* ---- e nada de paciente pode estar nela ---- */
+    const suspeitas = cofre.DO_APARELHO.filter(k =>
+      /(anestesia|pre$|consulta|recuperacao|financeiro|pacientes|documentos|orcament|lixeira|versions$|blobs$|audit|rascunho|autosave|arquivo\.indice|agenda)/.test(k));
+    out.nadaDePacienteFora = suspeitas.length === 0;
+    out.suspeitas = suspeitas;
+
+    store.setList('anestesia', []);
+    cofre.esvaziar('org-A'); cofre.esvaziar('org-B');
+    cloudRel._lembrarOrg(null);
+    return out;
+  });
+  assert(r.carimbouAOrigem, 'o registro que desce da nuvem tem que dizer de qual clínica veio — sem isso ele é órfão');
+  assert(r.recusou && r.naoGravouNada, 'gravar registro de OUTRA clínica nesta é recusado, e nada chega ao servidor');
+  assert(r.motivoEmPortugues, 'e o motivo da recusa é dito em português a quem está usando');
+  assert(r.deixouSubirODaqui, 'registro criado nesta clínica sobe normalmente — a trava não pode travar o trabalho');
+  assert(r.carimbouAoSubir, 'e recebe o carimbo da clínica ao subir pela primeira vez');
+  assert(r.driveSeparado && r.driveNaoAtravessa, 'o destino dos PDFs dos pacientes é por clínica: numa máquina compartilhada não pode subir para o Drive da outra');
+  assert(r.driveNaoViajaPorPessoa, 'e essa configuração não pode viajar pela sincronização por pessoa, que atravessaria as clínicas');
+  assert(r.umaListaSo, 'uma fonte só para "o que é do aparelho" — duas listas que precisam concordar acabam discordando');
+  assert(r.nadaDePacienteFora, 'nenhuma chave com dado de paciente pode estar fora da separação: ' + JSON.stringify(r.suspeitas));
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
