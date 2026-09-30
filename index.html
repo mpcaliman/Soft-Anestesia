@@ -4656,7 +4656,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-29f</b><br>
+    v7.1 · build <b id="build-tag">2026-09-29g</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -8724,6 +8724,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <div class="field col-6"><label>Tabela de referência <small style="color:var(--text-mute);font-weight:400">(base de valores — só uso interno)</small></label>
               <select name="tabela" id="orc-tabela" onchange="window.orcamento.recalcular()"></select>
               <button type="button" class="btn btn-xs tpl-btn" style="margin-top:6px" onclick="precos.abrirTabelasPorConvenio()" title="Cada convênio paga pela sua tabela — diga aqui qual vale para cada um">🏷️ Tabela por convênio…</button>
+              <button type="button" class="btn btn-xs tpl-btn" style="margin-top:6px" onclick="tabelasValores.abrir()" title="Falta alguma edição da CBHPM? Cadastre a tabela e ela passa a aparecer aqui">📐 Tabelas de valores…</button>
             </div>
             <div class="field col-6" style="display:flex;align-items:flex-end;gap:8px">
               <label class="check" style="display:inline-flex"><input type="checkbox" name="aplicar_regra" id="orc-aplicar-regra" checked onchange="window.orcamento.recalcular()"> <span>Aplicar regra de múltiplos (principal 100%, demais 50% mesma via / 70% via diferente)</span></label>
@@ -52771,6 +52772,152 @@ const ORC_PORTE_ANEST_PADRAO = {
   cir2024_f3:   { nome: 'CBHPM 2024/2025 — Faixa III (porte cir.)',    tipo: 'cir', valores: ORC_PORTE_CIR_2024_F3 }
 };
 
+/* ============================================================================
+   TABELAS PRÓPRIAS DE VALORES — cadastrar uma edição que o sistema não traz
+
+   O sistema vem com CBHPM 2018 e 2024/2025 de porte CIRÚRGICO, e com 2015 e
+   Unimed de porte ANESTÉSICO. Faltando uma — a 2015 de porte cirúrgico, por
+   exemplo —, não havia como acrescentá-la: o mecanismo de tabela própria já
+   existia nos dados (`cfg.tabelasAnest`), mas nenhuma tela o expunha. Quem
+   precisasse de uma edição diferente dependia de o programador embutir os
+   números no código.
+
+   Aqui a pessoa cadastra a tabela dela. E é ela quem digita os valores — não
+   há dedução possível entre edições da CBHPM (de 2018 para 2024 o porte 1A
+   sobe 28% e o 3A sobe 7%; não existe fator que converta uma na outra), e
+   valor inventado numa tabela de cobrança vira guia cobrada errado.
+============================================================================ */
+const tabelasValores = {
+  PORTES_CIR: ['1A','1B','1C','2A','2B','2C','3A','3B','3C','4A','4B','4C','5A','5B','5C',
+               '6A','6B','6C','7A','7B','7C','8A','8B','8C','9A','9B','9C','10A','10B','10C',
+               '11A','11B','11C','12A','12B','12C','13A','13B','13C','14A','14B','14C'],
+  PORTES_AN: ['0','1','2','3','4','5','6','7','8'],
+
+  _proprias() {
+    try { return orcamento.cfg().tabelasAnest || {}; } catch (e) { return {}; }
+  },
+  ehPropria(chave) { return Object.prototype.hasOwnProperty.call(tabelasValores._proprias(), chave); },
+
+  abrir() {
+    const todas = orcamento.tabelasAnest();
+    const proprias = tabelasValores._proprias();
+    const linha = (k) => {
+      const t = todas[k];
+      const minha = tabelasValores.ehPropria(k);
+      return '<tr><td>' + utils.escapeHTML(t.nome) + (minha ? ' <span style="font-size:.7rem;color:var(--primary-darker)">· sua</span>' : '') +
+        '</td><td style="text-align:center">' + (t.tipo === 'cir' ? 'cirúrgico' : 'anestésico') + '</td>' +
+        '<td style="text-align:right;white-space:nowrap">' +
+        '<button class="btn btn-xs" onclick="tabelasValores.editar(\'' + k + '\')">' + (minha ? 'editar' : 'copiar e editar') + '</button>' +
+        (minha ? ' <button class="btn btn-xs btn-danger" onclick="tabelasValores.remover(\'' + k + '\')">✕</button>' : '') +
+        '</td></tr>';
+    };
+    const chaves = Object.keys(todas);
+    modal.open('📐 Tabelas de valores',
+      '<p style="font-size:.85rem;margin:0 0 10px">Estas são as tabelas que o sistema oferece ao escolher a referência de cada convênio. ' +
+      'Falta alguma edição? <b>Cadastre a sua</b> — ela passa a aparecer nos mesmos lugares.</p>' +
+      '<p style="font-size:.8rem;color:var(--text-mute);margin:0 0 12px">Os valores são digitados por você. Não existe conversão entre edições da CBHPM ' +
+      '(de 2018 para 2024 o porte 1A sobe 28% e o 3A sobe 7%), e um valor deduzido aqui viraria guia cobrada errado.</p>' +
+      '<div style="max-height:40vh;overflow:auto;border:1px solid var(--border);border-radius:8px">' +
+      '<table style="width:100%;border-collapse:collapse;font-size:.82rem">' +
+      '<thead style="position:sticky;top:0;background:var(--surface-alt)"><tr><th style="text-align:left;padding:6px 8px">Tabela</th><th>Porte</th><th></th></tr></thead>' +
+      '<tbody>' + chaves.map(linha).join('') + '</tbody></table></div>',
+      '<button class="btn" onclick="modal.close()">Fechar</button>' +
+      '<button class="btn btn-finalizar" onclick="tabelasValores.editar(null)">➕ Nova tabela</button>');
+  },
+
+  /* base = chave de uma tabela existente (copia os valores como ponto de
+     partida) ou null para começar do zero */
+  editar(base) {
+    const todas = orcamento.tabelasAnest();
+    const t = base ? todas[base] : null;
+    const tipo = (t && t.tipo) || 'cir';
+    const minha = base && tabelasValores.ehPropria(base);
+    const nome = t ? (minha ? t.nome : t.nome + ' (cópia)') : '';
+    const portes = tipo === 'cir' ? tabelasValores.PORTES_CIR : tabelasValores.PORTES_AN;
+    const texto = portes.map(p => p + '\t' + (t && t.valores && t.valores[p] != null ? String(t.valores[p]).replace('.', ',') : '')).join('\n');
+    modal.open(base ? '📐 Editar tabela' : '📐 Nova tabela de valores',
+      '<div class="grid">' +
+      '<div class="field col-8"><label>Nome da tabela</label>' +
+      '<input type="text" id="tv-nome" value="' + utils.escapeAttr(nome) + '" placeholder="Ex.: CBHPM 2015 — porte cirúrgico"></div>' +
+      '<div class="field col-4"><label>Porte</label><select id="tv-tipo" onchange="tabelasValores._trocarTipo()">' +
+      '<option value="cir"' + (tipo === 'cir' ? ' selected' : '') + '>Cirúrgico (1A–14C)</option>' +
+      '<option value="anest"' + (tipo === 'anest' ? ' selected' : '') + '>Anestésico (AN0–AN8)</option>' +
+      '</select></div>' +
+      '<div class="field col-12"><label>Valores <small style="color:var(--text-mute);font-weight:400">— um por linha: porte, TAB ou ponto-e-vírgula, valor. Dá para colar direto de uma planilha.</small></label>' +
+      '<textarea id="tv-valores" rows="12" style="font-family:ui-monospace,monospace;font-size:.8rem">' + utils.escapeHTML(texto) + '</textarea></div>' +
+      '</div>' +
+      '<div id="tv-erro" style="color:#b3261e;font-size:.82rem;min-height:18px"></div>',
+      '<button class="btn" onclick="tabelasValores.abrir()">← Voltar</button>' +
+      '<button class="btn btn-finalizar" onclick="tabelasValores.salvar(' + (minha ? '\'' + base + '\'' : 'null') + ')">Salvar tabela</button>');
+  },
+  _trocarTipo() {
+    const tipo = (document.getElementById('tv-tipo') || {}).value || 'cir';
+    const portes = tipo === 'cir' ? tabelasValores.PORTES_CIR : tabelasValores.PORTES_AN;
+    const atual = tabelasValores._ler((document.getElementById('tv-valores') || {}).value || '');
+    const el = document.getElementById('tv-valores');
+    if (el) el.value = portes.map(p => p + '\t' + (atual[p] != null ? String(atual[p]).replace('.', ',') : '')).join('\n');
+  },
+
+  /* Aceita "1A<TAB>19,84", "1A;19.84", "1A 19,84" — e ignora linha sem valor.
+     Vírgula decimal é o padrão de quem digita aqui; ponto também passa. */
+  _ler(texto) {
+    const out = {};
+    String(texto || '').split(/\r?\n/).forEach(l => {
+      const m = String(l).trim().match(/^([0-9]{1,2}[ABC]?)\s*[;,\t ]\s*(.+)$/i);
+      if (!m) return;
+      const porte = m[1].toUpperCase();
+      let bruto = m[2].trim().replace(/R\$/gi, '').replace(/\s/g, '');
+      if (!bruto) return;
+      /* "1.234,56" e "39.68" convivem: quando HÁ vírgula, ela é o decimal e o
+         ponto é milhar; quando não há, o ponto é o decimal. Apagar o ponto
+         sempre — como eu fazia — transformava 39.68 em 3968. Numa tabela de
+         cobrança, isso é uma guia com dois zeros a mais. */
+      if (bruto.indexOf(',') >= 0) bruto = bruto.replace(/\./g, '').replace(',', '.');
+      const v = Number(bruto);
+      if (!isFinite(v) || v < 0) return;
+      out[porte] = v;
+    });
+    return out;
+  },
+
+  salvar(chaveExistente) {
+    const err = document.getElementById('tv-erro');
+    const diz = (m) => { if (err) err.textContent = m; };
+    const nome = ((document.getElementById('tv-nome') || {}).value || '').trim();
+    const tipo = (document.getElementById('tv-tipo') || {}).value || 'cir';
+    if (!nome) { diz('Dê um nome à tabela.'); return; }
+    const vals = tabelasValores._ler((document.getElementById('tv-valores') || {}).value || '');
+    const portes = tipo === 'cir' ? tabelasValores.PORTES_CIR : tabelasValores.PORTES_AN;
+    const faltam = portes.filter(p => vals[p] == null);
+    /* Porte sem valor é cobrança que sai zerada e ninguém percebe. Melhor
+       recusar agora, dizendo QUAIS faltam, do que aceitar uma tabela furada. */
+    if (faltam.length) {
+      diz('Faltam valores para: ' + faltam.slice(0, 12).join(', ') + (faltam.length > 12 ? ' … (+' + (faltam.length - 12) + ')' : '') + '.');
+      return;
+    }
+    const valores = {};
+    portes.forEach(p => { valores[tipo === 'anest' ? Number(p) : p] = vals[p]; });
+    const chave = chaveExistente || ('minha_' + Date.now().toString(36));
+    const proprias = Object.assign({}, tabelasValores._proprias());
+    proprias[chave] = { nome, tipo, valores, _propria: true };
+    orcamento.salvarCfg({ tabelasAnest: proprias });
+    try { orcamento._preencherSelectTabela(); } catch (e) {}
+    toast('📐 Tabela "' + nome + '" salva — já aparece na escolha de referência de cada convênio');
+    tabelasValores.abrir();
+  },
+
+  remover(chave) {
+    const proprias = Object.assign({}, tabelasValores._proprias());
+    const t = proprias[chave];
+    if (!t) return;
+    if (!confirm('Remover a tabela "' + t.nome + '"?\n\nConvênios que estiverem usando esta tabela voltam para a tabela geral. Orçamentos e lançamentos já feitos não mudam de valor.')) return;
+    delete proprias[chave];
+    orcamento.salvarCfg({ tabelasAnest: proprias });
+    toast('Tabela removida');
+    tabelasValores.abrir();
+  }
+};
+
 const ORC_CFG_PADRAO = {
   cabecalho: {
     profissional: 'Dr. Marcelo Pandolfi Caliman',
@@ -55348,6 +55495,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.ajustes = ajustes; window.autocomplete = autocomplete;
   window.mutirao = mutirao;
   window.ambiente = ambiente;
+  window.tabelasValores = tabelasValores;
   try { ambiente.pintar(); } catch (e) {}
   try { const cb = document.getElementById('amb-compartilhado'); if (cb) cb.checked = ambiente.compartilhado(); } catch (e) {}
   window.ajustesGrupos = ajustesGrupos;
