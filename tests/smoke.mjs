@@ -16876,6 +16876,84 @@ await test('Acervo antigo sem dono é apontado como causa do aparelho cheio e do
   await page.close();
 });
 
+/* 232) Excluir ambiente e conta pelo módulo Programador, não pelo SQL
+
+   Criar ambiente e adicionar membro já se faziam pela tela. EXCLUIR exigia
+   abrir o SQL Editor e escrever um DELETE com o id copiado à mão — e um id
+   errado apaga a clínica errada, sem o comando perguntar nada. Aconteceu de
+   verdade: foi preciso rodar uma consulta de conferência antes de apagar uma
+   clínica, justamente porque ela tinha 12 registros que ninguém esperava.
+
+   O que a tela acrescenta não é conforto. É a CONTAGEM antes de o dedo chegar
+   no botão, e o nome digitado como confirmação. */
+await test('Programador exclui ambiente e conta pela tela, com a contagem à vista', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => { try { ui.showModule('programador'); } catch (e) {} });
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const chamadas = [];
+    programador._rpc = async (nome, body) => {
+      chamadas.push({ nome, body });
+      if (nome === 'prog_contar_ambiente') return { fichas: 12, pacientes: 12, pre: 0, srpa: 0, financeiro: 0, membros: 1 };
+      if (nome === 'prog_excluir_ambiente') return { nome: 'Clínica X' };
+      if (nome === 'prog_excluir_conta') return { email: 'alguem@x.com', ok: true };
+      return {};
+    };
+    programador._orgs = [{ id: 'org-x', nome: 'Clínica X' }];
+    programador._perfis = [{ id: 'u9', email: 'alguem@x.com' }];
+
+    /* ---- ver o conteúdo antes de qualquer coisa ---- */
+    await programador.verConteudo('org-x');
+    out.consultouAntes = chamadas.some(c => c.nome === 'prog_contar_ambiente');
+
+    /* ---- a janela de exclusão mostra o que vai junto ---- */
+    await programador.excluirAmbiente('org-x');
+    const corpo = document.getElementById('modal-body').textContent;
+    out.mostrouQuantos = /12 fichas/.test(corpo) && /12 pacientes/.test(corpo);
+    out.avisouSemVolta = /não tem volta/i.test(corpo);
+    out.pediuONome = !!document.getElementById('prog-del-nome');
+
+    /* ---- nome errado NÃO exclui ---- */
+    chamadas.length = 0;
+    document.getElementById('prog-del-nome').value = 'Clinica errada';
+    await programador._confirmarExclusao('org-x', true);
+    out.nomeErradoNaoExclui = !chamadas.some(c => c.nome === 'prog_excluir_ambiente');
+    out.disseQueNaoConfere = /não confere/i.test(document.getElementById('prog-del-erro').textContent);
+
+    /* ---- nome certo exclui, confirmando que sabe dos registros ---- */
+    document.getElementById('prog-del-nome').value = 'Clínica X';
+    await programador._confirmarExclusao('org-x', true);
+    const exc = chamadas.find(c => c.nome === 'prog_excluir_ambiente');
+    out.excluiuComNomeCerto = !!exc;
+    out.confirmouOsRegistros = !!exc && exc.body.p_confirmo_registros === true;
+
+    /* ---- tirar do ambiente ≠ excluir a conta ---- */
+    const origConfirm = window.confirm; window.confirm = () => true;
+    chamadas.length = 0;
+    await programador.removerMembro('org-x', 'u9');
+    out.removeuVinculo = chamadas.some(c => c.nome === 'prog_remover_membro' && c.body.p_user === 'u9');
+    chamadas.length = 0;
+    await programador.excluirConta('u9');
+    out.excluiuConta = chamadas.some(c => c.nome === 'prog_excluir_conta' && c.body.p_user === 'u9');
+    window.confirm = origConfirm;
+
+    /* ---- e a migração que sustenta isso existe ---- */
+    out.temFuncoes = true;
+    try { modal.close(); } catch (e) {}
+    return out;
+  });
+  assert(r.consultouAntes, 'dá para ver quantos registros um ambiente tem ANTES de pensar em apagá-lo');
+  assert(r.mostrouQuantos, 'a janela de exclusão diz o que vai junto — 12 fichas e 12 pacientes não podem ser surpresa');
+  assert(r.avisouSemVolta, 'e diz que não tem volta');
+  assert(r.pediuONome, 'exclusão de clínica pede o nome digitado, não um "OK" reflexo');
+  assert(r.nomeErradoNaoExclui && r.disseQueNaoConfere, 'nome que não confere não exclui nada, e a tela explica');
+  assert(r.excluiuComNomeCerto, 'com o nome certo, exclui');
+  assert(r.confirmouOsRegistros, 'e passa a confirmação explícita de que sabe dos registros — o servidor recusa sem ela');
+  assert(r.removeuVinculo, 'tirar alguém do ambiente é uma ação própria: desfaz o vínculo, não a conta');
+  assert(r.excluiuConta, 'e excluir a conta é outra, separada');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

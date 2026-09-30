@@ -4656,7 +4656,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-30e</b><br>
+    v7.1 · build <b id="build-tag">2026-09-30f</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -22829,8 +22829,22 @@ const programador = {
       const ativos = programador._membros.filter(m => m.organization_id === o.id && m.ativo);
       const gestores = ativos.filter(m => m.role === 'gestor').map(m => programador._emailDe(m.user_id)).join(', ');
       return '<tr><td><b>' + esc(o.nome) + '</b></td><td>' + esc(gestores || '—') + '</td><td>' + ativos.length + '</td>' +
-        '<td style="font-size:.7rem;color:var(--text-mute)">' + o.id.slice(0, 8) + '…</td></tr>';
+        '<td style="font-size:.7rem;color:var(--text-mute)">' + o.id.slice(0, 8) + '…</td>' +
+        '<td style="text-align:right;white-space:nowrap">' +
+        '<button class="btn btn-xs" onclick="programador.verConteudo(\'' + o.id + '\')" title="Quantos registros este ambiente tem">🔍</button> ' +
+        '<button class="btn btn-xs btn-danger" onclick="programador.excluirAmbiente(\'' + o.id + '\')" title="Excluir este ambiente">✕</button>' +
+        '</td></tr>';
     }).join('');
+    /* QUEM É DE ONDE — com as ações ao lado. Sem esta lista, "remover pessoa"
+       viraria outro comando de console com um id copiado à mão. */
+    const linhasMembros = programador._membros.filter(m => m.ativo).map(m =>
+      '<tr><td>' + esc(programador._emailDe(m.user_id)) + '</td>' +
+      '<td>' + esc(programador._nomeOrg(m.organization_id)) + '</td>' +
+      '<td>' + esc(m.role || '—') + '</td>' +
+      '<td style="text-align:right;white-space:nowrap">' +
+      '<button class="btn btn-xs" onclick="programador.removerMembro(\'' + m.organization_id + '\',\'' + m.user_id + '\')" title="Tira do ambiente; a conta continua existindo">↩ tirar do ambiente</button> ' +
+      '<button class="btn btn-xs btn-danger" onclick="programador.excluirConta(\'' + m.user_id + '\')" title="Apaga a conta da nuvem — só funciona se ela não pertencer a ambiente nenhum">✕ conta</button>' +
+      '</td></tr>').join('');
     const linhasShares = programador._shares.map(s =>
       '<tr><td>' + esc(programador._nomeOrg(s.org_origem)) + '</td><td>→ ' + esc(programador._nomeOrg(s.org_destino)) + '</td>' +
       '<td>' + ((s.modulos || []).length ? esc(s.modulos.join(', ')) : '<i>todos</i>') + '</td>' +
@@ -22842,8 +22856,8 @@ const programador = {
       <section class="card">
         <div class="card-header"><div class="card-title-wrap"><span class="card-icon">🏢</span><h2>Ambientes de trabalho<small>Cada ambiente é uma organização com banco, equipe e configurações independentes</small></h2></div></div>
         <div class="card-body">
-          <table class="dash-detail-table" style="margin:0 0 14px"><thead><tr><th>Ambiente</th><th>Gestor(es)</th><th>Membros ativos</th><th>ID</th></tr></thead>
-          <tbody>${linhasOrgs || '<tr><td colspan="4" style="color:var(--text-mute)">Nenhum ambiente ainda.</td></tr>'}</tbody></table>
+          <table class="dash-detail-table" style="margin:0 0 14px"><thead><tr><th>Ambiente</th><th>Gestor(es)</th><th>Membros ativos</th><th>ID</th><th></th></tr></thead>
+          <tbody>${linhasOrgs || '<tr><td colspan="5" style="color:var(--text-mute)">Nenhum ambiente ainda.</td></tr>'}</tbody></table>
           <div class="grid">
             <div class="field col-5"><label>Nome do novo ambiente</label><input type="text" id="prog-amb-nome" placeholder="Ex.: Clínica Santa Casa"></div>
             <div class="field col-5"><label>E-mail do médico gestor <small style="color:var(--text-mute);font-weight:400">(precisa já ter conta na nuvem)</small></label><input type="email" id="prog-amb-email" autocapitalize="none"></div>
@@ -22866,6 +22880,9 @@ const programador = {
             <div class="field col-2"><label>Papel</label><select id="prog-mem-role">${programador.PAPEIS.map(([v, r]) => '<option value="' + v + '">' + r + '</option>').join('')}</select></div>
             <div class="field col-2" style="align-self:end"><button class="btn btn-primary btn-sm" onclick="programador.addMembro()">➕ Adicionar</button></div>
           </div>
+          <table class="dash-detail-table" style="margin:14px 0 0"><thead><tr><th>Pessoa</th><th>Ambiente</th><th>Papel</th><th></th></tr></thead>
+          <tbody>${linhasMembros || '<tr><td colspan="4" style="color:var(--text-mute)">Ninguém vinculado ainda.</td></tr>'}</tbody></table>
+          <p style="font-size:.74rem;color:var(--text-mute);margin:8px 0 0"><b>Tirar do ambiente</b> desfaz só o vínculo — a conta continua existindo e pode ser posta em outra clínica. <b>Excluir a conta</b> apaga a conta da nuvem, e só funciona depois que ela não pertence a ambiente nenhum.</p>
         </div>
       </section>
       <section class="card">
@@ -22968,6 +22985,88 @@ const programador = {
       programador.render();
     } catch (e) { programador._mostrarErro(e.message); }
   },
+  /* ==========================================================================
+     EXCLUIR — pelo app, não pelo console de SQL
+
+     Apagar ambiente exigia abrir o SQL Editor e escrever um DELETE com o id
+     copiado à mão. Um id errado apaga a clínica errada, e o comando não
+     pergunta nada. O que a tela acrescenta não é conforto: é a CONTAGEM antes
+     do dedo chegar no botão, e o nome digitado como confirmação.
+     ========================================================================== */
+  _rotuloCont(c) {
+    const R = { fichas: 'fichas', pre: 'prés', consultas: 'consultas', srpa: 'SRPAs',
+                financeiro: 'lançamentos', pacientes: 'pacientes', documentos: 'documentos',
+                orcamentos: 'orçamentos', agenda: 'compromissos', membros: 'membros' };
+    return Object.keys(R).filter(k => Number(c[k]) > 0)
+      .map(k => c[k] + ' ' + R[k]).join(' · ');
+  },
+  async verConteudo(org) {
+    try {
+      const c = await programador._rpc('prog_contar_ambiente', { p_org: org });
+      const txt = programador._rotuloCont(c || {});
+      toast('🔍 ' + programador._nomeOrg(org) + ': ' + (txt || 'vazio — nenhum registro'), txt ? 'warn' : 'success');
+    } catch (e) { programador._mostrarErro(e.message); }
+  },
+  async excluirAmbiente(org) {
+    const nome = programador._nomeOrg(org);
+    let c = null;
+    try { c = await programador._rpc('prog_contar_ambiente', { p_org: org }); }
+    catch (e) { programador._mostrarErro(e.message); return; }
+    const detalhe = programador._rotuloCont(c || {});
+    const semMembros = Object.assign({}, c || {}); delete semMembros.membros;
+    const total = Object.keys(semMembros).reduce((n, k) => n + (Number(semMembros[k]) || 0), 0);
+
+    const corpo =
+      '<p style="font-size:.9rem;margin:0 0 10px">Excluir o ambiente <b>' + utils.escapeHTML(nome) + '</b>?</p>' +
+      (total
+        ? '<p style="font-size:.88rem;margin:0 0 10px;padding:10px;border-left:3px solid #b3261e;background:var(--surface-alt)">' +
+          '<b>Este ambiente tem ' + total + ' registro(s):</b><br>' + utils.escapeHTML(detalhe) + '<br><br>' +
+          'Tudo isso é apagado junto, e <b>não tem volta</b>. Se esses registros também existem em outra clínica, ' +
+          'apagar aqui não os perde; se não existem, perde.</p>'
+        : '<p style="font-size:.88rem;margin:0 0 10px;color:var(--text-soft)">O ambiente está <b>vazio</b> — nenhum registro clínico ou financeiro.</p>') +
+      '<div class="field"><label>Para confirmar, digite o nome do ambiente</label>' +
+      '<input type="text" id="prog-del-nome" autocomplete="off" placeholder="' + utils.escapeAttr(nome) + '"></div>' +
+      '<div id="prog-del-erro" style="color:#b3261e;font-size:.82rem;min-height:18px"></div>';
+    modal.open('🗑️ Excluir ambiente', corpo,
+      '<button class="btn" onclick="modal.close()">Cancelar</button>' +
+      '<button class="btn btn-danger" onclick="programador._confirmarExclusao(\'' + org + '\', ' + (total > 0) + ')">Excluir definitivamente</button>');
+  },
+  async _confirmarExclusao(org, temRegistros) {
+    const nome = programador._nomeOrg(org);
+    const digitado = ((document.getElementById('prog-del-nome') || {}).value || '').trim();
+    const err = document.getElementById('prog-del-erro');
+    if (digitado !== nome) {
+      if (err) err.textContent = 'O nome digitado não confere com "' + nome + '".';
+      return;
+    }
+    try {
+      const r = await programador._rpc('prog_excluir_ambiente', { p_org: org, p_confirmo_registros: !!temRegistros });
+      modal.close();
+      toast('🗑️ Ambiente "' + ((r && r.nome) || nome) + '" excluído');
+      programador.render();
+    } catch (e) {
+      if (err) err.textContent = e.message; else programador._mostrarErro(e.message);
+    }
+  },
+  async removerMembro(org, uid) {
+    const quem = programador._emailDe(uid);
+    if (!confirm('Remover ' + quem + ' do ambiente ' + programador._nomeOrg(org) + '?\n\nA conta continua existindo — sai apenas o vínculo com esta clínica.')) return;
+    try {
+      await programador._rpc('prog_remover_membro', { p_org: org, p_user: uid });
+      toast('👥 ' + quem + ' removido de ' + programador._nomeOrg(org));
+      programador.render();
+    } catch (e) { programador._mostrarErro(e.message); }
+  },
+  async excluirConta(uid) {
+    const quem = programador._emailDe(uid);
+    if (!confirm('EXCLUIR a conta de ' + quem + ' da nuvem?\n\nIsto apaga a conta em si, não só o vínculo. Não tem volta.\n\nSó funciona se a conta já não pertencer a ambiente nenhum.')) return;
+    try {
+      const r = await programador._rpc('prog_excluir_conta', { p_user: uid });
+      toast('🗑️ Conta ' + ((r && r.email) || quem) + ' excluída');
+      programador.render();
+    } catch (e) { programador._mostrarErro(e.message); }
+  },
+
   async criarShare() {
     const origem = (document.getElementById('prog-share-origem') || {}).value;
     const destino = (document.getElementById('prog-share-destino') || {}).value;
