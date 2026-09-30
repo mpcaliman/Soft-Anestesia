@@ -880,12 +880,42 @@ await test('Visibilidade: opção do gestor, e no modo próprios o pull converge
     out.removeuColega = !ids.includes('do_colega');
     out.manteveLocal = ids.includes('so_local');
 
-    // modo 'equipe' → pull nunca remove nada (comportamento de sempre)
+    /* MODO 'EQUIPE': A REGRA MUDOU, E A PREMISSA TAMBÉM.
+
+       Antes, o pull não removia nada em modo equipe. Era uma rede de segurança
+       contra um índice incompleto: ele não paginava, o PostgREST corta em mil
+       linhas sem avisar, e apagar pela ausência teria varrido do aparelho tudo
+       o que ficasse além do corte.
+
+       O índice agora pagina e devolve null se QUALQUER página falhar — ou vem
+       inteiro, ou não vem. Com um índice comprovadamente completo, um registro
+       que diz estar espelhado (`_relUpdatedAt`) e não está nele não é desta
+       clínica: foi espelhado na clínica de outra pessoa. Foi assim que o
+       ambiente novo apareceu cheio dos dados do antigo — e mantê-lo é pior do
+       que removê-lo, porque uma edição o gravaria na clínica errada NA NUVEM.
+
+       Não é perda: o registro continua inteiro na nuvem da clínica dele. */
     orgSettings._gravarCache({});
     store.setList('anestesia', [{ _id: 'do_colega', _relUpdatedAt: 't1', paciente: 'B' }]);
     delete cloudRel._puxados['anestesia'];
     await cloudRel.autoPullModulo('anestesia');
-    out.equipeNaoRemove = store.list('anestesia').some(x => x._id === 'do_colega');
+    out.equipeRemoveOQueNaoEhDaqui = !store.list('anestesia').some(x => x._id === 'do_colega');
+
+    /* ÍNDICE QUE FALHOU NÃO APAGA NADA. É esta a trava que substitui a rede
+       antiga: sem índice confiável, o aparelho fica como está. */
+    store.setList('anestesia', [{ _id: 'do_colega', _relUpdatedAt: 't1', paciente: 'B' }]);
+    cloudRel.puxarIndiceModulo = async () => null;
+    delete cloudRel._puxados['anestesia'];
+    await cloudRel.autoPullModulo('anestesia');
+    out.indiceFalhouNaoRemove = store.list('anestesia').some(x => x._id === 'do_colega');
+
+    /* E o que nunca subiu continua intocável, em qualquer modo. */
+    store.setList('anestesia', [{ _id: 'so_local2', paciente: 'D' }]);
+    cloudRel.puxarIndiceModulo = async () => ([]);
+    cloudRel.puxarPorIds = async () => ([]);
+    delete cloudRel._puxados['anestesia'];
+    await cloudRel.autoPullModulo('anestesia');
+    out.naoSincronizadoFica = store.list('anestesia').some(x => x._id === 'so_local2');
 
     auth.usuarioAtual = origUsuario;
     store.setList('anestesia', []);
@@ -898,7 +928,9 @@ await test('Visibilidade: opção do gestor, e no modo próprios o pull converge
   assert(r.manteveMeu, 'o registro do próprio anestesista deveria permanecer');
   assert(r.removeuColega, 'o registro do colega (não devolvido pela RLS) deveria sair do aparelho');
   assert(r.manteveLocal, 'registro criado localmente e ainda não espelhado deveria permanecer');
-  assert(r.equipeNaoRemove, "no modo 'equipe' o pull não deveria remover nada");
+  assert(r.equipeRemoveOQueNaoEhDaqui, 'registro espelhado ausente de um índice COMPLETO não é desta clínica — e continua inteiro na nuvem da clínica dele');
+  assert(r.indiceFalhouNaoRemove, 'índice que falhou não pode apagar nada: é esta a trava que substitui a antiga');
+  assert(r.naoSincronizadoFica, 'e o que nunca subiu é intocável, em qualquer modo')
   await page.close();
 });
 
