@@ -4656,7 +4656,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-30c</b><br>
+    v7.1 · build <b id="build-tag">2026-09-30d</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -9905,7 +9905,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <span><strong>📁 Google Drive</strong> (para baixar de qualquer aparelho)</span>
           </label>
           <p style="font-size:.78rem;color:var(--text-mute);margin:4px 0 6px 26px">
-            Salva os PDFs numa pasta "Soft Anestesia" no seu Drive. Exige um <strong>Client ID OAuth</strong> criado no Google Cloud Console, com o domínio da Netlify autorizado.
+            Salva os PDFs numa pasta "Soft Anestesia" no Drive <strong>desta clínica</strong> — cada ambiente tem o seu destino, e os documentos de um nunca sobem para o Drive de outro. Exige um <strong>Client ID OAuth</strong> criado no Google Cloud Console, com o domínio autorizado.
           </p>
           <div id="pdfbk-drive-cfg" style="margin-left:26px;display:none">
             <div class="field" style="max-width:520px">
@@ -9939,14 +9939,15 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
 
     <section class="card" id="logo-usuario-card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-icon">🖼️</span><h2>Logomarca<small>Sua marca aparece na tela do app e no cabeçalho de todas as impressões</small></h2></div>
+        <div class="card-title-wrap"><span class="card-icon">🖼️</span><h2>Logomarca<small>A marca desta clínica — aparece na tela e no cabeçalho de todas as impressões</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
         <div id="logo-usuario-preview" style="margin-bottom:12px"></div>
         <p style="font-size:.82rem;color:var(--text-soft);margin-bottom:10px">
-          Escolha um arquivo de imagem (PNG com fundo transparente fica melhor). A imagem é guardada
-          <strong>neste aparelho</strong> e usada automaticamente em todos os módulos ao imprimir/gerar PDF.
+          Escolha um arquivo de imagem (PNG com fundo transparente fica melhor). A imagem é a
+          <strong>logomarca desta clínica</strong>: vale para todos os aparelhos e pessoas dela, e aparece
+          automaticamente em todos os módulos ao imprimir/gerar PDF.
         </p>
         <input type="file" id="logo-usuario-file" accept="image/*" style="display:none" onchange="logoUsuario.escolher(this)">
         <div class="cloud-actions" style="margin-top:4px">
@@ -14809,7 +14810,7 @@ const ui = {
         else if (modName === 'financeiro') financeiro.render();
         else if (modName === 'agenda') { agenda.render(); if (!agenda._puxouNestaSessao) { setTimeout(() => { try { agenda.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
-        else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); try { equipeNuvem.render(); } catch (e) {} try { auditoria.render(''); } catch (e) {} try { armazenamento.render(); } catch (e) {} logoUsuario.renderAjustes(); try { nuvemEstado.render(); } catch (e) {} try { duplicados.resumoNoCard(); } catch (e) {} const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
+        else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); try { equipeNuvem.render(); } catch (e) {} try { auditoria.render(''); } catch (e) {} try { armazenamento.render(); } catch (e) {} logoUsuario.renderAjustes(); try { ambiente.aplicarPermissoesAjustes(); } catch (e) {} try { nuvemEstado.render(); } catch (e) {} try { duplicados.resumoNoCard(); } catch (e) {} const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
         else if (modName === 'pre') { try { preLanc.renderBotao('pre'); } catch (e) {} try { pre.labs.ligar(); pre.labs.marcar(); } catch (e) {} try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} try { pre.viaAerea.render(); } catch (e) {} try { pre.meds.ligar(); } catch (e) {} }
         else if (modName === 'anestesia') { try { preLanc.renderBotao('anestesia'); } catch (e) {} anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} try { anestesia.calc.resumoTopo(); } catch (e) {} try { adendos.renderInline('anestesia'); } catch (e) {} try { anestesia.nav._wire(); anestesia.nav.render(); } catch (e) {} try { anestesia.vitais.autoAvanco.wire(); } catch (e) {} }
         else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} try { recuperacao.resumoTopo(); } catch (e) {} try { anestesia.vitais.autoAvanco.wire(); } catch (e) {} }, 60); }
@@ -22594,6 +22595,60 @@ const ambiente = {
     if (rel && rel.erro) { toast('Não consegui: ' + rel.erro, 'error'); return; }
     const n2 = rel ? (rel.novos + rel.atualizados) : 0;
     toast(n2 ? '📥 ' + n2 + ' registro(s) trazidos do seu backup pessoal' : 'O seu backup pessoal não tinha nada além do que já está aqui');
+  },
+
+  /* ---------- quem manda na configuração da clínica ---------- */
+  /* Logomarca e Drive não são preferência de tela: são a identidade da clínica
+     e o destino dos PDFs dos pacientes dela. Valem para a equipe inteira, e
+     por isso quem define é o GESTOR daquele ambiente. Os demais veem, e veem
+     de quem é. */
+  souGestor() {
+    try {
+      const u = auth.usuarioAtual() || {};
+      return u.perfil === 'admin' || u.perfil === 'medico' || u.role === 'gestor';
+    } catch (e) { return false; }
+  },
+  _avisoDono(host, texto) {
+    if (!host) return;
+    let el = host.querySelector('.amb-dono');
+    if (!el) {
+      el = document.createElement('p');
+      el.className = 'amb-dono';
+      el.style.cssText = 'font-size:.78rem;color:var(--text-mute);margin:0 0 10px;padding:8px 10px;border-left:3px solid var(--primary);background:var(--surface-alt);border-radius:0 6px 6px 0';
+      host.insertBefore(el, host.firstChild);
+    }
+    el.innerHTML = texto;
+  },
+  /* Chamado quando Ajustes é montado. Diz de qual clínica é cada configuração
+     e tranca para quem não é gestor dela. */
+  aplicarPermissoesAjustes() {
+    try {
+      const nome = ambiente.nome() || 'a clínica aberta';
+      const gestor = ambiente.souGestor();
+      const semClinica = !ambiente.id();
+      const daClinica = semClinica ? '' :
+        '<b>Esta configuração é de ' + utils.escapeHTML(nome) + '</b> — vale para todos os aparelhos e pessoas dessa clínica, e não atravessa para outra.';
+      const trancado = gestor ? '' :
+        ' Quem define isto é o <b>gestor</b> da clínica; aqui você vê o que está valendo.';
+
+      const logo = document.querySelector('#logo-usuario-card .card-body');
+      if (logo && !semClinica) ambiente._avisoDono(logo, daClinica + trancado);
+      ['logo-usuario-file', 'logo-usuario-remover'].forEach(id => {
+        const el = document.getElementById(id); if (el) el.disabled = !gestor;
+      });
+      const btnLogo = logo && logo.querySelector('button.btn-primary');
+      if (btnLogo) { btnLogo.disabled = !gestor; btnLogo.style.opacity = gestor ? '' : '.5'; }
+
+      const chkDrive = document.getElementById('pdfbk-drive');
+      const pdf = chkDrive ? chkDrive.closest('.card-body') : null;
+      if (pdf && !semClinica) {
+        ambiente._avisoDono(pdf, (daClinica + trancado).replace('Esta configuração é',
+          'O destino dos PDFs dos pacientes é'));
+      }
+      ['pdfbk-drive', 'pdfbk-client-id'].forEach(id => {
+        const el = document.getElementById(id); if (el) el.disabled = !gestor;
+      });
+    } catch (e) {}
   },
 
   /* ---------- a tela diz em que clínica você está ---------- */

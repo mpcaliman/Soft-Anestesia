@@ -16722,6 +16722,75 @@ await test('Cada ambiente tem a sua logomarca, seu Drive, seus cadastros e seus 
   await page.close();
 });
 
+/* 230) Logomarca e Drive: do AMBIENTE, e quem define é o gestor dele
+
+   Os dois cartões já existiam em Ajustes, mas diziam que a logomarca ficava
+   "neste aparelho" e que os PDFs iam "para o seu Drive". Depois da separação
+   isso virou mentira: são configurações DA CLÍNICA — a identidade dela e o
+   destino dos documentos dos pacientes dela —, valem para a equipe inteira e
+   não atravessam para outro ambiente.
+
+   Sendo da clínica, quem define é o GESTOR daquele ambiente. Os demais veem o
+   que está valendo, e veem de quem é. */
+await test('Logomarca e Drive são da clínica aberta, e só o gestor dela edita', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => { try { ui.showModule('ajustes'); } catch (e) {} });
+  const r = await page.evaluate(() => {
+    const out = {};
+    const orig = auth.usuarioAtual;
+    cloudRel._lembrarOrg('org-teste');
+    localStorage.setItem(ambiente.NOME_KEY, 'Clínica de Teste');
+
+    /* ---- GESTOR: edita ---- */
+    auth.usuarioAtual = () => ({ usuario: 'chefe', role: 'gestor' });
+    ambiente.aplicarPermissoesAjustes();
+    out.gestorEditaLogo = document.getElementById('logo-usuario-file').disabled === false;
+    out.gestorEditaDrive = document.getElementById('pdfbk-drive').disabled === false;
+    const avisoLogo = document.querySelector('#logo-usuario-card .amb-dono');
+    out.dizDeQuemEhALogo = !!avisoLogo && /Clínica de Teste/.test(avisoLogo.textContent);
+    out.dizQueNaoAtravessa = !!avisoLogo && /não atravessa/.test(avisoLogo.textContent);
+    const avisoPdf = document.getElementById('pdfbk-drive').closest('.card-body').querySelector('.amb-dono');
+    out.dizDeQuemEhODrive = !!avisoPdf && /PDFs dos pacientes/.test(avisoPdf.textContent)
+      && /Clínica de Teste/.test(avisoPdf.textContent);
+
+    /* ---- NÃO gestor: vê, não edita ---- */
+    auth.usuarioAtual = () => ({ usuario: 'sec', perfil: 'secretaria', role: 'auxiliar' });
+    ambiente.aplicarPermissoesAjustes();
+    out.auxiliarNaoEditaLogo = document.getElementById('logo-usuario-file').disabled === true;
+    out.auxiliarNaoEditaDrive = document.getElementById('pdfbk-drive').disabled === true;
+    out.auxiliarNaoEditaClientId = document.getElementById('pdfbk-client-id').disabled === true;
+    const aviso2 = document.querySelector('#logo-usuario-card .amb-dono');
+    out.explicaAQuemNaoPode = !!aviso2 && /gestor/.test(aviso2.textContent);
+
+    /* ---- médico do próprio consultório é gestor de si ---- */
+    auth.usuarioAtual = () => ({ usuario: 'dr', perfil: 'medico' });
+    ambiente.aplicarPermissoesAjustes();
+    out.medicoEdita = document.getElementById('logo-usuario-file').disabled === false;
+
+    /* ---- os textos da tela não podem mais dizer "neste aparelho"/"seu Drive" ---- */
+    const txtLogo = document.querySelector('#logo-usuario-card .card-body').textContent;
+    out.textoLogoCorrigido = /logomarca desta clínica/i.test(txtLogo) && !/guardada[\s\S]{0,20}neste aparelho/i.test(txtLogo);
+    const txtPdf = document.getElementById('pdfbk-drive').closest('.card-body').textContent;
+    out.textoDriveCorrigido = /Drive desta clínica/i.test(txtPdf);
+
+    auth.usuarioAtual = orig;
+    cofre.esvaziar('org-teste');
+    localStorage.removeItem(ambiente.NOME_KEY);
+    cloudRel._lembrarOrg(null);
+    return out;
+  });
+  assert(r.gestorEditaLogo && r.gestorEditaDrive, 'o gestor do ambiente edita a logomarca e o Drive dele');
+  assert(r.dizDeQuemEhALogo && r.dizDeQuemEhODrive, 'a tela diz de QUAL clínica é cada configuração — senão ninguém sabe o que está mexendo');
+  assert(r.dizQueNaoAtravessa, 'e diz que não atravessa para outro ambiente');
+  assert(r.auxiliarNaoEditaLogo && r.auxiliarNaoEditaDrive && r.auxiliarNaoEditaClientId,
+    'quem não é gestor não muda a identidade da clínica nem o destino dos PDFs dos pacientes');
+  assert(r.explicaAQuemNaoPode, 'e para quem não pode, a tela explica por quê, em vez de só não funcionar');
+  assert(r.medicoEdita, 'o médico do próprio consultório é gestor dele — não pode ficar trancado fora da própria configuração');
+  assert(r.textoLogoCorrigido, 'o texto não pode mais dizer que a logomarca fica "neste aparelho": ela é da clínica');
+  assert(r.textoDriveCorrigido, 'nem que os PDFs vão para "o seu Drive": vão para o da clínica aberta');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
