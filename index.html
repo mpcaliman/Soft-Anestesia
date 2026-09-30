@@ -4656,7 +4656,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-30d</b><br>
+    v7.1 · build <b id="build-tag">2026-09-30e</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -10678,6 +10678,15 @@ const cofre = {
     } catch (e) {}
     return out;
   },
+  /* Quanto ele OCUPA. O acervo antigo não é só invisível: ele continua
+     gastando o armazenamento do aparelho, que é de ~5 MB. Enquanto ninguém
+     decide de quem ele é, a gaveta nova tenta encher-se da nuvem e não cabe —
+     e aí não é só "o Dashboard está vazio", é "não consigo salvar". */
+  legadoBytes() {
+    let n = 0;
+    try { cofre.legado().forEach(k => { const v = cofre._real.getItem(k); if (v) n += v.length * 2; }); } catch (e) {}
+    return n;
+  },
   /* Quantos REGISTROS (não chaves) estão soltos — é o número que diz algo a
      quem vai decidir. */
   legadoRegistros() {
@@ -10704,7 +10713,34 @@ const cofre = {
     const org = cofre.org(); if (!org) return true;
     return !!cofre._decisoes()[String(org).slice(0, 8)];
   },
-  /* Só quando a PESSOA diz que o acervo é desta clínica. */
+  /* Só quando a PESSOA diz que o acervo é desta clínica.
+
+     JUNTA, não sobrescreve nem descarta. A primeira versão só copiava quando o
+     destino estava VAZIO — e apagava o acervo antigo quando não estava. Só que
+     a gaveta ganha uma lista vazia assim que o módulo é tocado uma vez: na
+     prática, o botão que promete trazer o acervo o APAGAVA. É o tipo de defeito
+     que só aparece com dado de gente de verdade dentro.
+
+     Listas de registro são unidas por `_id`, e quem já está na gaveta vence —
+     é a versão viva, possivelmente editada depois. */
+  _juntar(brutoDestino, brutoLegado) {
+    if (brutoDestino == null) return brutoLegado;
+    if (brutoLegado == null) return brutoDestino;
+    let d, l;
+    try { d = JSON.parse(brutoDestino); } catch (e) { return brutoDestino; }
+    try { l = JSON.parse(brutoLegado); } catch (e) { return brutoDestino; }
+    if (Array.isArray(d) && Array.isArray(l)) {
+      const vistos = new Set();
+      d.forEach(x => { if (x && x._id) vistos.add(x._id); });
+      const juntos = d.slice();
+      l.forEach(x => { if (!x || !x._id || vistos.has(x._id)) return; juntos.push(x); vistos.add(x._id); });
+      try { return JSON.stringify(juntos); } catch (e) { return brutoDestino; }
+    }
+    /* não é lista: vale o que já está na gaveta, se houver algo de fato */
+    const vazio = d == null || d === '' || (Array.isArray(d) && !d.length) ||
+                  (typeof d === 'object' && !Array.isArray(d) && !Object.keys(d).length);
+    return vazio ? brutoLegado : brutoDestino;
+  },
   reivindicar() {
     const org = cofre.org(); if (!org) return 0;
     const curta = String(org).slice(0, 8);
@@ -10712,7 +10748,8 @@ const cofre = {
     cofre.legado().forEach(kr => {
       try {
         const destino = kr + '@' + curta;
-        if (cofre._real.getItem(destino) == null) cofre._real.setItem(destino, cofre._real.getItem(kr));
+        const juntado = cofre._juntar(cofre._real.getItem(destino), cofre._real.getItem(kr));
+        if (juntado != null) cofre._real.setItem(destino, juntado);
         cofre._real.removeItem(kr);
         n++;
       } catch (e) {}
@@ -13486,6 +13523,20 @@ const espaco = {
     } else {
       causa = 'Liberei tudo o que era seguro liberar e ainda falta espaço.';
     }
+    /* O ACERVO ANTIGO SEM DONO É O MAIOR OCUPANTE, e é o que ninguém adivinha
+       olhando a lista de módulos: ele não aparece em clínica nenhuma, mas
+       ocupa o aparelho. Decidir de quem ele é resolve o espaço e o Dashboard
+       no mesmo clique — então essa é a primeira saída oferecida. */
+    let botaoLegado = '';
+    try {
+      if (ambiente.temLegadoPendente()) {
+        const mb = armazenamento._fmt(cofre.legadoBytes());
+        causa = '<b>' + cofre.legadoRegistros() + ' registro(s) antigos</b> (' + mb + ') estão guardados aqui ' +
+                'sem clínica definida — ocupam espaço e não aparecem em ambiente nenhum. ' +
+                'Diga de qual clínica eles são e o espaço se resolve junto.';
+        botaoLegado = '<button type="button" class="btn btn-xs btn-primary" onclick="espaco.fecharFaixa(); ambiente.perguntarLegado()">📦 Dizer de quem são</button>';
+      }
+    } catch (e) {}
     const div = document.createElement('div');
     div.id = 'espaco-faixa';
     div.className = 'espaco-faixa';
@@ -13493,7 +13544,8 @@ const espaco = {
       '<span class="ef-txt"><b>⚠️ Armazenamento cheio</b> (' + armazenamento._fmt(d.total) + '). ' + causa +
       (topo ? '<br><span style="opacity:.85">Ocupando mais: ' + topo + '</span>' : '') +
       '</span>' +
-      '<button type="button" class="btn btn-xs btn-primary" onclick="espaco.irParaLimpeza()">Liberar espaço</button>' +
+      botaoLegado +
+      '<button type="button" class="btn btn-xs" onclick="espaco.irParaLimpeza()">Liberar espaço</button>' +
       '<button type="button" class="ef-x" onclick="espaco.fecharFaixa()" aria-label="Fechar">✕</button>';
     document.body.appendChild(div);
   },
@@ -14806,7 +14858,7 @@ const ui = {
 
       /* Refresh por módulo — cada um em try/catch independente para não bloquear navegação */
       try {
-        if (modName === 'dashboard') { dashboard.atualizar(); try { meuDia.render(); } catch (e) {} try { pendencias.renderDashboard(); } catch (e) {} try { pendProntuario.renderDashboard(); } catch (e) {} try { preLanc.ajustarDashboard(); } catch (e) {} try { preLanc.renderFila(); } catch (e) {} try { preLanc.sincronizarFila({ silent: true }); } catch (e) {} }
+        if (modName === 'dashboard') { try { ambiente.faixaLegado(); } catch (e) {} dashboard.atualizar(); try { meuDia.render(); } catch (e) {} try { pendencias.renderDashboard(); } catch (e) {} try { pendProntuario.renderDashboard(); } catch (e) {} try { preLanc.ajustarDashboard(); } catch (e) {} try { preLanc.renderFila(); } catch (e) {} try { preLanc.sincronizarFila({ silent: true }); } catch (e) {} }
         else if (modName === 'financeiro') financeiro.render();
         else if (modName === 'agenda') { agenda.render(); if (!agenda._puxouNestaSessao) { setTimeout(() => { try { agenda.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
@@ -22650,6 +22702,37 @@ const ambiente = {
       });
     } catch (e) {}
   },
+
+  /* A PERGUNTA VEM À FRENTE quando ela é a explicação do que a pessoa está
+     vendo. Gaveta vazia + acervo antigo esperando decisão = Dashboard em
+     branco e aparelho cheio, os dois pela mesma razão. Um botão escondido em
+     Ajustes não serve para isso: quem abre o app e vê tudo zerado conclui que
+     perdeu os dados, não que há uma pergunta pendente. */
+  _faixaMostrada: false,
+  faixaLegado() {
+    try {
+      if (ambiente._faixaMostrada) return;
+      if (!ambiente.temLegadoPendente()) return;
+      let vazio = true;
+      try {
+        ['anestesia', 'pre', 'consulta', 'recuperacao', 'financeiro', 'pacientes']
+          .forEach(m => { if ((store.list(m) || []).length) vazio = false; });
+      } catch (e) {}
+      if (!vazio) return;
+      ambiente._faixaMostrada = true;
+      const div = document.createElement('div');
+      div.id = 'legado-faixa';
+      div.className = 'espaco-faixa';
+      div.innerHTML =
+        '<span class="ef-txt"><b>📦 Este ambiente está vazio, e há ' + cofre.legadoRegistros() +
+        ' registro(s) guardados aqui</b> (' + armazenamento._fmt(cofre.legadoBytes()) + ') de antes da separação por clínica. ' +
+        'Eles não sumiram — só falta dizer de qual clínica são.</span>' +
+        '<button type="button" class="btn btn-xs btn-primary" onclick="ambiente._fecharFaixaLegado(); ambiente.perguntarLegado()">Decidir agora</button>' +
+        '<button type="button" class="ef-x" onclick="ambiente._fecharFaixaLegado()" aria-label="Fechar">✕</button>';
+      document.body.appendChild(div);
+    } catch (e) {}
+  },
+  _fecharFaixaLegado() { const el = document.getElementById('legado-faixa'); if (el) el.remove(); },
 
   /* ---------- a tela diz em que clínica você está ---------- */
   pintar() {

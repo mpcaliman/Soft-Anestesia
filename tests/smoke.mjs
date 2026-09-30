@@ -16791,6 +16791,91 @@ await test('Logomarca e Drive são da clínica aberta, e só o gestor dela edita
   await page.close();
 });
 
+/* 231) Acervo antigo sem dono não pode encher o aparelho em silêncio
+
+   Decidir NÃO mover o acervo antigo evitou carimbá-lo na clínica errada — mas
+   criou outro problema, que só apareceu no uso real: ele continua ocupando o
+   armazenamento (~5 MB no navegador) sem pertencer a clínica nenhuma. A gaveta
+   nova tenta encher-se da nuvem, não cabe, e o resultado é Dashboard em branco
+   E "não consegui salvar, o aparelho está cheio" — os dois pela mesma razão,
+   e nenhum deles apontando para a causa.
+
+   A pergunta tem de vir À FRENTE nessa situação. Um botão em Ajustes não
+   serve: quem abre o app e vê tudo zerado conclui que perdeu os dados. */
+await test('Acervo antigo sem dono é apontado como causa do aparelho cheio e do ambiente vazio', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const R = cofre._real;
+    const limpar = () => {
+      const fora = [];
+      for (let i = 0; i < R.length; i++) { const k = R.key(i); if (k && k.indexOf('medsys.') === 0) fora.push(k); }
+      fora.forEach(k => R.removeItem(k));
+    };
+    limpar();
+    ambiente._faixaMostrada = false;
+
+    /* acervo antigo grande, sem dono, e uma clínica aberta com a gaveta vazia */
+    const gordo = JSON.stringify([{ _id: 'g1', paciente: { nome: 'Paciente antigo' }, lixo: 'x'.repeat(20000) }]);
+    R.setItem('medsys.v3.anestesia', gordo);
+    R.setItem('medsys.v7.cloud.org_id', 'org-minha');
+
+    out.sabeQuantoOcupa = cofre.legadoBytes() > 20000;
+    out.sabeQuantosSao = cofre.legadoRegistros() === 1;
+    out.gavetaVazia = (store.list('anestesia') || []).length === 0;
+
+    /* a faixa aparece, diz o tamanho, e leva à decisão */
+    ambiente.faixaLegado();
+    const faixa = document.getElementById('legado-faixa');
+    out.avisouNaTela = !!faixa;
+    out.explicaOsDois = !!faixa && /ambiente está vazio/i.test(faixa.textContent)
+      && /registro\(s\) guardados aqui/i.test(faixa.textContent);
+    out.dizQueNaoSumiu = !!faixa && /não sumiram/i.test(faixa.textContent);
+    out.temBotaoDecidir = !!faixa && /Decidir agora/.test(faixa.innerHTML);
+
+    /* não repete a cada render */
+    ambiente.faixaLegado();
+    out.naoDuplica = document.querySelectorAll('#legado-faixa').length === 1;
+
+    /* com a gaveta CHEIA a faixa não aparece: aí o vazio não é o sintoma */
+    ambiente._fecharFaixaLegado();
+    ambiente._faixaMostrada = false;
+    store.setList('anestesia', [{ _id: 'tem', paciente: { nome: 'Ja tem coisa' } }]);
+    ambiente.faixaLegado();
+    out.naoIncomodaQuemTemDados = !document.getElementById('legado-faixa');
+
+    /* DECIDIR JUNTA — não sobrescreve nem descarta.
+       A primeira versão só copiava quando o destino estava VAZIO, e apagava o
+       acervo quando não estava. Mas a gaveta ganha uma lista vazia assim que o
+       módulo é tocado uma vez: na prática, o botão que promete TRAZER o acervo
+       o APAGAVA. Aqui a gaveta já tem um registro próprio, para que o teste
+       exercite exatamente esse caminho. */
+    store.setList('anestesia', [{ _id: 'daGaveta', paciente: { nome: 'Ja estava na clinica' } }]);
+    const antes = cofre.legadoBytes();
+    cofre.reivindicar();
+    out.moveuNaoCopiou = cofre.legadoBytes() === 0 && antes > 0;
+    const depois = (store.list('anestesia') || []).map(x => x._id).sort();
+    out.acervoApareceu = depois.indexOf('g1') >= 0;
+    out.naoApagouOQueJaTinha = depois.indexOf('daGaveta') >= 0;
+
+    limpar();
+    ambiente._fecharFaixaLegado();
+    return out;
+  });
+  assert(r.sabeQuantoOcupa && r.sabeQuantosSao, 'o sistema precisa saber quanto o acervo antigo ocupa e quantos registros são');
+  assert(r.gavetaVazia, 'o cenário é justamente gaveta vazia com acervo esperando');
+  assert(r.avisouNaTela, 'quem abre o app e vê tudo zerado tem que ser avisado do porquê, não caçar um botão em Ajustes');
+  assert(r.explicaOsDois, 'o aviso liga as duas coisas: o ambiente vazio e os registros guardados aqui');
+  assert(r.dizQueNaoSumiu, 'e diz, com todas as letras, que os registros não sumiram');
+  assert(r.temBotaoDecidir, 'com a decisão a um clique');
+  assert(r.naoDuplica, 'e sem repetir a faixa a cada render');
+  assert(r.naoIncomodaQuemTemDados, 'quem já tem dados no ambiente não é incomodado — ali o vazio não é o sintoma');
+  assert(r.moveuNaoCopiou, 'decidir MOVE o acervo: duplicá-lo encheria o aparelho de vez');
+  assert(r.acervoApareceu, 'e ele passa a aparecer na clínica que o reivindicou');
+  assert(r.naoApagouOQueJaTinha, 'sem apagar o que a clínica já tinha na gaveta — reivindicar JUNTA, não sobrescreve');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
