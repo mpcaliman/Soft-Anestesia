@@ -17223,6 +17223,80 @@ await test('Servidor fora do ar: o app diz que não é a senha, e não manda nin
   await page.close();
 });
 
+/* 235) Entrar no app sem entrar na nuvem — o estado que ninguém percebe
+
+   Relato: "a conta consegue entrar no sistema, mas não consegue logar na
+   nuvem". Não é contradição, é o espelho local. O aparelho guarda uma cópia
+   da conta para funcionar offline, com a senha que valia quando ela foi
+   gravada. Se a senha da nuvem mudou depois, a senha antiga ABRE O APP e a
+   nuvem recusa — e o app não tentava nem avisava, porque só realinhava a
+   nuvem quando ela estava logada em OUTRA conta. Com a nuvem deslogada,
+   silêncio: a tela abre igual e nada sobe nem desce.
+
+   Nada mais parece "o sistema está funcionando" do que um aparelho que
+   trabalha o dia inteiro gravando só para si mesmo. */
+await test('Entrou no app pelo espelho local: o app tenta a nuvem e diz por que não entrou', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const avisos = [];
+    const origToast = window.toast;
+    window.toast = (t) => avisos.push(String(t));
+    const resp = (status, corpo) => ({
+      ok: status >= 200 && status < 300, status,
+      json: async () => corpo, text: async () => '', headers: { get: () => '0' }
+    });
+    const origFetch = window.fetch;
+    cloud.config = () => ({ url: 'https://exemplo.supabase.co', key: 'k' });
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => false;
+    cloud.emailLogado = () => '';
+
+    /* senha ANTIGA no espelho, senha NOVA na nuvem */
+    let tentou = 0;
+    window.fetch = async () => { tentou++; return resp(400, { error_description: 'Invalid login credentials' }); };
+    await auth._garantirNuvemDaConta('secretaria@exemplo.com', 'senha-antiga');
+    out.tentouANuvem = tentou === 1;
+    out.avisouQueNaoEntrou = avisos.some(t => /NÃO na nuvem/.test(t));
+    out.explicouOEspelho = avisos.some(t => /senha ANTIGA guardada aqui/.test(t));
+    out.deuOCaminho = avisos.some(t => /Esqueci minha senha/.test(t));
+    out.semToastDuplicado = avisos.length === 1;
+
+    /* servidor fora: a frase é outra — não manda trocar senha nenhuma */
+    avisos.length = 0;
+    window.fetch = async () => resp(503, { message: 'Service unavailable' });
+    await auth._garantirNuvemDaConta('secretaria@exemplo.com', 'qualquer');
+    out.quedaNaoViraSenha = avisos.some(t => /não está respondendo/i.test(t))
+      && !avisos.some(t => /senha ANTIGA/.test(t));
+
+    /* já logado na MESMA conta: não tenta de novo */
+    avisos.length = 0; tentou = 0;
+    cloud.estaLogado = () => true;
+    cloud.emailLogado = () => 'secretaria@exemplo.com';
+    window.fetch = async () => { tentou++; return resp(200, {}); };
+    await auth._garantirNuvemDaConta('secretaria@exemplo.com', 'x');
+    out.naoRefazQuandoJaEsta = tentou === 0 && avisos.length === 0;
+
+    /* usuário local puro (sem e-mail) não tem nuvem a tentar */
+    avisos.length = 0; tentou = 0;
+    cloud.estaLogado = () => false;
+    await auth._garantirNuvemDaConta('recepcao', 'x');
+    out.ignoraUsuarioLocal = tentou === 0 && avisos.length === 0;
+
+    window.fetch = origFetch;
+    window.toast = origToast;
+    return out;
+  });
+  assert(r.tentouANuvem, 'entrar pelo espelho local tem de TENTAR a nuvem com a mesma senha — antes nem tentava');
+  assert(r.avisouQueNaoEntrou, 'e, falhando, dizer que entrou no app mas não na nuvem: é o estado que ninguém percebe');
+  assert(r.explicouOEspelho && r.deuOCaminho, 'nomeando a causa (senha antiga guardada aqui) e a saída');
+  assert(r.semToastDuplicado, 'com um aviso só — dois avisos sobre a mesma coisa viram ruído');
+  assert(r.quedaNaoViraSenha, 'servidor fora do ar não pode virar conselho de trocar senha');
+  assert(r.naoRefazQuandoJaEsta, 'quem já está na nuvem com a mesma conta não é incomodado nem gasta uma chamada');
+  assert(r.ignoraUsuarioLocal, 'usuário local sem e-mail não tem conta de nuvem a tentar');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

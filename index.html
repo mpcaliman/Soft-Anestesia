@@ -4656,7 +4656,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-01b</b><br>
+    v7.1 · build <b id="build-tag">2026-10-01c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -19310,6 +19310,7 @@ const auth = {
         /* o login LOCAL não mexe na nuvem — se ela estiver conectada em OUTRA
            conta, realinha antes de sincronizar qualquer coisa */
         try { await auth._alinharNuvem(id, senha); } catch (e) {}
+        try { await auth._garantirNuvemDaConta(id, senha); } catch (e) {}
         try { cloud.autoSyncAoEntrar(); } catch (e) {}
         return;
       }
@@ -19365,6 +19366,42 @@ const auth = {
     /* 3) não é e-mail e não há usuário local com esse login */
     auth._registrarFalha();
     errEl.textContent = 'Usuário ou senha inválidos.';
+  },
+
+  /* ENTRAR NO APP E NÃO ENTRAR NA NUVEM é o pior estado possível, porque
+     ninguém o percebe: a tela abre igualzinha e simplesmente nada sobe nem
+     desce. Acontece quando o aparelho guarda um ESPELHO com a senha ANTIGA —
+     o app aceita essa senha (o espelho existe para funcionar offline), e a
+     nuvem recusa, porque lá a senha é outra.
+
+     O app tentava realinhar a nuvem só quando ela estava logada em OUTRA
+     conta. Com a nuvem simplesmente DESLOGADA, não tentava nada e não dizia
+     nada. Agora tenta com a mesma senha digitada e, se não der, diz qual é o
+     motivo — inclusive o caso em que a culpa é do espelho velho daqui. */
+  async _garantirNuvemDaConta(id, senha) {
+    if (!id || id.indexOf('@') < 0) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    let configurado = false;
+    try { configurado = cloud.estaConfigurado(); } catch (e) { return; }
+    if (!configurado) return;
+    try {
+      if (cloud.estaLogado() && String(cloud.emailLogado() || '').toLowerCase() === id) return;
+    } catch (e) {}
+    let ok = false;
+    try { ok = await cloud.login(id, senha, { silent: true }); } catch (e) { ok = false; }
+    if (ok) { try { cloud._atualizarUI(); } catch (e) {} return; }
+    let f = null;
+    try { f = cloud._ultimaFalha; } catch (e) {}
+    const tipo = (f && f.tipo) || '';
+    let frase;
+    if (tipo === 'credencial') {
+      frase = 'Este aparelho aceitou uma senha ANTIGA guardada aqui — na nuvem a senha é outra. ' +
+        'Use "Esqueci minha senha" na tela de entrada e entre com a nova.';
+    } else {
+      try { frase = cloud.motivoUltimaFalha(); } catch (e) { frase = ''; }
+      frase = frase || 'Veja Ajustes → Nuvem e backups.';
+    }
+    toast('⚠️ Você entrou no app, mas NÃO na nuvem: nada vai subir nem descer. ' + frase, 'error');
   },
 
   /* Depois de um login pelo ESPELHO local, a sessão da nuvem pode ter ficado
@@ -20641,8 +20678,10 @@ const cloud = {
     return 'Falha no login: ' + (f.detalhe || 'verifique e-mail e senha');
   },
 
-  async login(email, senha) {
-    if (!cloud.estaConfigurado()) { toast('Configure a nuvem primeiro (URL + chave)', 'warn'); return false; }
+  async login(email, senha, opts) {
+    const calado = !!(opts && opts.silent);
+    const diga = (t, k) => { if (!calado) toast(t, k); };
+    if (!cloud.estaConfigurado()) { diga('Configure a nuvem primeiro (URL + chave)', 'warn'); return false; }
     const c = cloud.config();
     try {
       const r = await fetch(c.url + '/auth/v1/token?grant_type=password', {
@@ -20655,7 +20694,7 @@ const cloud = {
         const f = cloud._classificarFalhaAuth(r, data);
         cloud._ultimaFalha = f;
         cloud._servidorFora = f.tipo === 'fora';
-        toast(cloud._frasePelaFalha(f), 'error');
+        diga(cloud._frasePelaFalha(f), 'error');
         return false;
       }
       cloud._ultimaFalha = null;
@@ -20667,7 +20706,7 @@ const cloud = {
         expires_at: Date.now() + (data.expires_in || 3600) * 1000
       };
       localStorage.setItem(cloud.SESSION_KEY, JSON.stringify(sess));
-      toast('✅ Conectado como ' + (data.user && data.user.email || email));
+      diga('✅ Conectado como ' + (data.user && data.user.email || email));
       cloud._atualizarUI();
       /* Sincroniza assim que loga */
       setTimeout(() => cloud.sincronizar(), 300);
@@ -20677,7 +20716,7 @@ const cloud = {
          não está no ar. Em nenhum dos dois casos a senha é o problema. */
       cloud._servidorFora = true;
       cloud._ultimaFalha = { tipo: 'fora', detalhe: e.message };
-      toast('🔌 Não consegui falar com o servidor da clínica' +
+      diga('🔌 Não consegui falar com o servidor da clínica' +
         (navigator && navigator.onLine === false ? ' — este aparelho está sem internet' : '') +
         '. NÃO é a sua senha. Continue trabalhando: tudo fica gravado aqui e sobe sozinho. (' + e.message + ')', 'error');
       return false;
