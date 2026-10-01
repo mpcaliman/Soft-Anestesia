@@ -17297,6 +17297,156 @@ await test('Entrou no app pelo espelho local: o app tenta a nuvem e diz por que 
   await page.close();
 });
 
+/* 236) Finalizado e sem financeiro: a tela dizia que o Finalizar cria sozinho
+
+   Relato com paciente de verdade: pré FINALIZADA e nenhum lançamento. No
+   "Meu dia" a linha mostrava só "— financeiro", com um title explicando que
+   "o Finalizar do documento cria automaticamente" — exatamente o que NÃO
+   aconteceu ali. Era um beco: a tela afirmava algo contrariado pelo próprio
+   caso que estava mostrando, e não havia caminho nenhum para resolver.
+
+   A janela da cobrança pode não ter chegado a abrir (ela espera a vez quando
+   há outra janela por cima, e desistia em silêncio depois de 96 s) ou ter
+   sido fechada sem escolha. Nos dois casos o atendimento fica sem cobrança
+   sem ninguém saber — que é a pior falha possível num módulo financeiro. */
+await test('Documento finalizado sem lançamento: o Meu dia oferece gerar, em vez de explicar errado', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+
+    /* ---- rascunho: a explicação antiga continua certa ---- */
+    const emRascunho = meuDia._chipFin({ pre: { _id: 'p1', _finalizado: false } });
+    out.rascunhoExplica = /falta finalizar/.test(emRascunho) && !/gerar financeiro/.test(emRascunho);
+
+    /* ---- FINALIZADO e sem financeiro: vira ação ---- */
+    const finalizado = meuDia._chipFin({ pre: { _id: 'p2', _finalizado: true } });
+    out.ofereceGerar = /gerar financeiro/.test(finalizado);
+    out.ehBotao = /<button/.test(finalizado) && /meuDia\.gerarFinanceiro\('pre','p2'\)/.test(finalizado);
+    out.naoMenteMais = !/cria automaticamente/.test(finalizado);
+
+    /* ---- a ficha de anestesia tem precedência sobre a pré ---- */
+    const comFicha = meuDia._chipFin({ pre: { _id: 'p3', _finalizado: true }, ficha: { _id: 'f3', _finalizado: true } });
+    out.preferiuAFicha = /gerarFinanceiro\('anestesia','f3'\)/.test(comFicha);
+
+    /* ---- já tendo lançamento, nada muda ---- */
+    const comFin = meuDia._chipFin({ pre: { _id: 'p4', _finalizado: true }, fin: { _id: 'x', status: 'recebido' } });
+    out.comFinNaoOferece = !/gerar financeiro/.test(comFin) && /Fin ✓/.test(comFin);
+
+    /* ---- o botão abre a janela da cobrança para aquele documento ---- */
+    const doc = { _id: 'p5', _finalizado: true, paciente_nome: 'Sabrina Coelho' };
+    store.setList('pre', [doc]);
+    store.setList('financeiro', []);
+    let abriu = null;
+    const orig = fin.finalizacao.abrirQuandoLivre;
+    fin.finalizacao.abrirQuandoLivre = (mod, d) => { abriu = { mod, id: d && d._id }; };
+    meuDia.gerarFinanceiro('pre', 'p5');
+    out.abriuAJanela = !!abriu && abriu.mod === 'pre' && abriu.id === 'p5';
+
+    /* ---- e não duplica a cobrança de quem já tem ---- */
+    store.setList('financeiro', [{ _id: 'f9', _origemId: 'p5' }]);
+    abriu = null;
+    meuDia.gerarFinanceiro('pre', 'p5');
+    out.naoDuplica = abriu === null;
+    fin.finalizacao.abrirQuandoLivre = orig;
+
+    /* ---- desistir de esperar a vez não pode ser em silêncio ---- */
+    const avisos = [];
+    const origToast = window.toast;
+    window.toast = (t) => avisos.push(String(t));
+    const bd = document.getElementById('modal-backdrop') ||
+      (() => { const d = document.createElement('div'); d.id = 'modal-backdrop'; document.body.appendChild(d); return d; })();
+    bd.classList.add('show');
+    fin.finalizacao.abrirQuandoLivre('pre', doc, null, 120);   /* última tentativa */
+    out.avisouAoDesistir = avisos.some(t => /gerar financeiro/.test(t) && /está salvo/.test(t));
+    bd.classList.remove('show');
+    window.toast = origToast;
+
+    store.setList('pre', []); store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.rascunhoExplica, 'documento em rascunho continua explicando que falta finalizar — ali a frase está certa');
+  assert(r.ofereceGerar && r.ehBotao, 'finalizado e sem lançamento vira um botão que GERA, não um texto morto');
+  assert(r.naoMenteMais, 'e para de afirmar que "o Finalizar cria automaticamente" no caso em que isso não aconteceu');
+  assert(r.preferiuAFicha, 'havendo ficha de anestesia finalizada, é dela que a cobrança sai');
+  assert(r.comFinNaoOferece, 'quem já tem lançamento não ganha botão de gerar');
+  assert(r.abriuAJanela, 'o botão abre a MESMA janela de finalização — nada de uma segunda forma de cobrar');
+  assert(r.naoDuplica, 'e não cria um segundo lançamento para o mesmo atendimento');
+  assert(r.avisouAoDesistir, 'desistir de esperar a vez tem de avisar: em silêncio, o atendimento fica sem cobrança e ninguém sabe');
+  await page.close();
+});
+
+/* 237) O código do que foi executado, na linha do paciente
+
+   Pedido depois de olhar o plantão real: "no Meu dia deve aparecer o código
+   TUSS do que foi executado — para a Sabrina e o Olival, é a consulta".
+   Sem isso, saber sob qual código cada atendimento está sendo cobrado exige
+   abrir um por um, e a conferência vira uma segunda passada pelo dia inteiro.
+
+   O ponto delicado é NÃO criar uma segunda verdade sobre cobrança: o código
+   mostrado aqui sai de onde a cobrança sai. Com lançamento, é o código dele;
+   sem lançamento, é o que `fin.linhasDe` — a mesma função que gera o
+   lançamento — produziria, e vai marcado como previsto. */
+await test('Meu dia mostra o código do atendimento, e separa o cobrado do previsto', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+
+    /* ---- pré/consulta sem lançamento: código de consulta, como PREVISTO ---- */
+    const cods = meuDia._codigos({ pre: { _id: 'p1', _finalizado: true, paciente_nome: 'Sabrina' } });
+    out.achouOCodigoDaConsulta = cods.length >= 1 && cods[0].codigo === fin.CODIGO_CONSULTA;
+    out.marcouComoPrevisto = cods.length >= 1 && cods[0].previsto === true;
+    const html = meuDia._linhaCodigos({ pre: { _id: 'p1', _finalizado: true } });
+    out.apareceNaLinha = html.indexOf(fin.CODIGO_CONSULTA) >= 0 && /previsto/.test(html);
+
+    /* ---- com lançamento: vale o código DELE, e não é previsto ---- */
+    const comFin = meuDia._codigos({
+      pre: { _id: 'p2', _finalizado: true },
+      fins: [{ cbhpm_codigo: '1.01.01.01-2', cbhpm_descricao: 'Consulta', _origemLinhaId: '' }]
+    });
+    out.usouOLancamento = comFin.length === 1 && comFin[0].codigo === '1.01.01.01-2' && comFin[0].previsto === false;
+
+    /* ---- várias linhas de cobrança: todos os códigos aparecem ---- */
+    const varios = meuDia._codigos({
+      ficha: { _id: 'f1', _finalizado: true },
+      fins: [
+        { cbhpm_codigo: '3.07.01.01-0', cbhpm_descricao: 'Principal', _origemLinhaId: '' },
+        { cbhpm_codigo: '3.07.02.02-5', cbhpm_descricao: 'Extra', _origemLinhaId: 'cirx-0' }
+      ]
+    });
+    out.mostraTodosOsCodigos = varios.length === 2
+      && varios.map(x => x.codigo).join(',') === '3.07.01.01-0,3.07.02.02-5';
+
+    /* ---- repetido não vira duas tarjas ---- */
+    const repetido = meuDia._codigos({
+      fins: [{ cbhpm_codigo: '1.01.01.01-2' }, { cbhpm_codigo: '1.01.01.01-2' }]
+    });
+    out.naoRepete = repetido.length === 1;
+
+    /* ---- sem código nenhum: não inventa nada ---- */
+    out.semCodigoNaoInventa = meuDia._codigos({ agenda: { _id: 'a1' } }).length === 0
+      && meuDia._linhaCodigos({ agenda: { _id: 'a1' } }) === '';
+
+    /* ---- o lançamento PRINCIPAL é o que fica em c.fin ---- */
+    store.setList('financeiro', [
+      { _id: 'x1', paciente: 'Zé', data_proc: utils.hojeISO(), _origemLinhaId: 'cirx-0', cbhpm_codigo: 'B' },
+      { _id: 'x2', paciente: 'Zé', data_proc: utils.hojeISO(), _origemLinhaId: '', cbhpm_codigo: 'A' }
+    ]);
+    const caso = meuDia.coletar().find(c => c.nome === 'Zé');
+    out.juntouAsDuasLinhas = !!caso && caso.fins.length === 2;
+    out.principalEhALinhaMae = !!caso && caso.fin._id === 'x2';
+    store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.achouOCodigoDaConsulta, 'uma pré/consulta mostra o código de consulta que o próprio financeiro usaria');
+  assert(r.marcouComoPrevisto && r.apareceNaLinha, 'e, sem lançamento, vai marcado como PREVISTO — não é cobrança ainda');
+  assert(r.usouOLancamento, 'havendo lançamento, o código mostrado é o dele: é esse que vai ser cobrado');
+  assert(r.mostraTodosOsCodigos, 'atendimento com várias linhas mostra todos os códigos — guardar só a última escondia os demais');
+  assert(r.naoRepete, 'código repetido não vira duas tarjas');
+  assert(r.semCodigoNaoInventa, 'sem código nenhum, não inventa nada — tarja vazia seria pior que ausência');
+  assert(r.juntouAsDuasLinhas && r.principalEhALinhaMae, 'o caso guarda todas as linhas, e a principal continua sendo a linha-mãe');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
