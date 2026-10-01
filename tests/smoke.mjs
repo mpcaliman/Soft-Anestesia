@@ -17375,6 +17375,78 @@ await test('Documento finalizado sem lançamento: o Meu dia oferece gerar, em ve
   await page.close();
 });
 
+/* 237) O código do que foi executado, na linha do paciente
+
+   Pedido depois de olhar o plantão real: "no Meu dia deve aparecer o código
+   TUSS do que foi executado — para a Sabrina e o Olival, é a consulta".
+   Sem isso, saber sob qual código cada atendimento está sendo cobrado exige
+   abrir um por um, e a conferência vira uma segunda passada pelo dia inteiro.
+
+   O ponto delicado é NÃO criar uma segunda verdade sobre cobrança: o código
+   mostrado aqui sai de onde a cobrança sai. Com lançamento, é o código dele;
+   sem lançamento, é o que `fin.linhasDe` — a mesma função que gera o
+   lançamento — produziria, e vai marcado como previsto. */
+await test('Meu dia mostra o código do atendimento, e separa o cobrado do previsto', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+
+    /* ---- pré/consulta sem lançamento: código de consulta, como PREVISTO ---- */
+    const cods = meuDia._codigos({ pre: { _id: 'p1', _finalizado: true, paciente_nome: 'Sabrina' } });
+    out.achouOCodigoDaConsulta = cods.length >= 1 && cods[0].codigo === fin.CODIGO_CONSULTA;
+    out.marcouComoPrevisto = cods.length >= 1 && cods[0].previsto === true;
+    const html = meuDia._linhaCodigos({ pre: { _id: 'p1', _finalizado: true } });
+    out.apareceNaLinha = html.indexOf(fin.CODIGO_CONSULTA) >= 0 && /previsto/.test(html);
+
+    /* ---- com lançamento: vale o código DELE, e não é previsto ---- */
+    const comFin = meuDia._codigos({
+      pre: { _id: 'p2', _finalizado: true },
+      fins: [{ cbhpm_codigo: '1.01.01.01-2', cbhpm_descricao: 'Consulta', _origemLinhaId: '' }]
+    });
+    out.usouOLancamento = comFin.length === 1 && comFin[0].codigo === '1.01.01.01-2' && comFin[0].previsto === false;
+
+    /* ---- várias linhas de cobrança: todos os códigos aparecem ---- */
+    const varios = meuDia._codigos({
+      ficha: { _id: 'f1', _finalizado: true },
+      fins: [
+        { cbhpm_codigo: '3.07.01.01-0', cbhpm_descricao: 'Principal', _origemLinhaId: '' },
+        { cbhpm_codigo: '3.07.02.02-5', cbhpm_descricao: 'Extra', _origemLinhaId: 'cirx-0' }
+      ]
+    });
+    out.mostraTodosOsCodigos = varios.length === 2
+      && varios.map(x => x.codigo).join(',') === '3.07.01.01-0,3.07.02.02-5';
+
+    /* ---- repetido não vira duas tarjas ---- */
+    const repetido = meuDia._codigos({
+      fins: [{ cbhpm_codigo: '1.01.01.01-2' }, { cbhpm_codigo: '1.01.01.01-2' }]
+    });
+    out.naoRepete = repetido.length === 1;
+
+    /* ---- sem código nenhum: não inventa nada ---- */
+    out.semCodigoNaoInventa = meuDia._codigos({ agenda: { _id: 'a1' } }).length === 0
+      && meuDia._linhaCodigos({ agenda: { _id: 'a1' } }) === '';
+
+    /* ---- o lançamento PRINCIPAL é o que fica em c.fin ---- */
+    store.setList('financeiro', [
+      { _id: 'x1', paciente: 'Zé', data_proc: utils.hojeISO(), _origemLinhaId: 'cirx-0', cbhpm_codigo: 'B' },
+      { _id: 'x2', paciente: 'Zé', data_proc: utils.hojeISO(), _origemLinhaId: '', cbhpm_codigo: 'A' }
+    ]);
+    const caso = meuDia.coletar().find(c => c.nome === 'Zé');
+    out.juntouAsDuasLinhas = !!caso && caso.fins.length === 2;
+    out.principalEhALinhaMae = !!caso && caso.fin._id === 'x2';
+    store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.achouOCodigoDaConsulta, 'uma pré/consulta mostra o código de consulta que o próprio financeiro usaria');
+  assert(r.marcouComoPrevisto && r.apareceNaLinha, 'e, sem lançamento, vai marcado como PREVISTO — não é cobrança ainda');
+  assert(r.usouOLancamento, 'havendo lançamento, o código mostrado é o dele: é esse que vai ser cobrado');
+  assert(r.mostraTodosOsCodigos, 'atendimento com várias linhas mostra todos os códigos — guardar só a última escondia os demais');
+  assert(r.naoRepete, 'código repetido não vira duas tarjas');
+  assert(r.semCodigoNaoInventa, 'sem código nenhum, não inventa nada — tarja vazia seria pior que ausência');
+  assert(r.juntouAsDuasLinhas && r.principalEhALinhaMae, 'o caso guarda todas as linhas, e a principal continua sendo a linha-mãe');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

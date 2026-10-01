@@ -2233,6 +2233,13 @@ path.dash-clickable:hover { opacity: .8; }
 .md-hora { font-size: .82rem; font-weight: 800; color: var(--primary-darker); font-variant-numeric: tabular-nums; flex-shrink: 0; }
 .md-nome { font-size: .88rem; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .md-proc { font-size: .74rem; color: var(--text-mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.md-cods { display: inline-flex; flex-wrap: wrap; gap: 5px; align-items: baseline; }
+.md-cod { font-size: .7rem; color: var(--text-soft); background: var(--surface-alt); border: 1px solid var(--border);
+          border-radius: 5px; padding: 1px 6px; white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+.md-cod-d { color: var(--text-mute); }
+.md-cod-prev { border-style: dashed; }
+.md-cod-p { color: #7a4b12; }
+@media (max-width: 768px) { .md-cod { max-width: 190px; } }
 .md-chips { display: flex; gap: 5px; flex-shrink: 0; }
 .md-chip {
   font-size: .74rem; font-weight: 700; line-height: 1;
@@ -4656,7 +4663,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-01d</b><br>
+    v7.1 · build <b id="build-tag">2026-10-01e</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -49681,7 +49688,7 @@ const meuDia = {
     const caso = (nome) => {
       const k = meuDia._norm(nome);
       if (!k) return null;
-      if (!casos[k]) casos[k] = { nome, hora: '', procedimento: '', agenda: null, ficha: null, srpa: null, fin: null, consulta: null, pre: null };
+      if (!casos[k]) casos[k] = { nome, hora: '', procedimento: '', agenda: null, ficha: null, srpa: null, fin: null, fins: [], consulta: null, pre: null };
       return casos[k];
     };
     /* Data e nome saem dos MESMOS auxiliares que o resto do sistema usa
@@ -49738,10 +49745,60 @@ const meuDia = {
     });
     store.list('financeiro').filter(x => x.data_proc === hoje).forEach(x => {
       const c = caso(x.paciente); if (!c) return;
-      c.fin = x;
+      /* UM ATENDIMENTO PODE TER VÁRIAS LINHAS de cobrança (procedimentos
+         extras da ficha, procedimentos feitos na consulta). Guardar só a
+         última escondia os demais códigos — e é o conjunto deles que responde
+         "o que foi executado". O principal segue sendo o da linha-mãe. */
+      c.fins.push(x);
+      if (!c.fin || (x._origemLinhaId === '' && c.fin._origemLinhaId !== '')) c.fin = x;
       if (!c.procedimento) c.procedimento = x.procedimento || '';
     });
     return Object.values(casos).sort((a, b) => (a.hora || '99:99').localeCompare(b.hora || '99:99'));
+  },
+
+  /* O CÓDIGO DO QUE FOI EXECUTADO, na linha do paciente.
+
+     Olhar o plantão e não saber sob qual código cada atendimento está sendo
+     cobrado é o que faz a conferência virar uma segunda passada por todos os
+     registros. Duas fontes, nesta ordem:
+
+     1) há lançamento → o código DELE, que é o que vai ser cobrado de fato;
+     2) não há → o que SERIA cobrado, pela mesmíssima função que gera a
+        cobrança (`fin.linhasDe`), marcado como `previsto`. Usar outra regra
+        aqui criaria uma segunda verdade sobre cobrança, que é exatamente o
+        tipo de divergência que ninguém descobre a tempo. */
+  _codigos(c) {
+    const vistos = new Set();
+    const out = [];
+    const add = (cod, desc, previsto) => {
+      const k = String(cod || '').trim();
+      if (!k || vistos.has(k)) return;
+      vistos.add(k);
+      out.push({ codigo: k, descricao: desc || '', previsto: !!previsto });
+    };
+    const fins = (c.fins && c.fins.length) ? c.fins : (c.fin ? [c.fin] : []);
+    fins.forEach(f => add(f.cbhpm_codigo, f.cbhpm_descricao || f.procedimento, false));
+    if (out.length) return out;
+    const fonte = c.ficha ? ['anestesia', c.ficha]
+                : c.pre ? ['pre', c.pre]
+                : c.consulta ? ['consulta', c.consulta] : null;
+    if (!fonte) return out;
+    let linhas = [];
+    try { linhas = fin.linhasDe(fonte[0], fonte[1]) || []; } catch (e) { linhas = []; }
+    linhas.forEach(l => add(l.cbhpm_codigo, l.cbhpm_descricao, true));
+    return out;
+  },
+  _linhaCodigos(c) {
+    const cods = meuDia._codigos(c);
+    if (!cods.length) return '';
+    const E = utils.escapeHTML, A = utils.escapeAttr;
+    return '<span class="md-cods">' + cods.map(x =>
+      '<span class="md-cod' + (x.previsto ? ' md-cod-prev' : '') + '" title="' +
+      A((x.descricao || 'Sem descrição') + (x.previsto
+        ? ' — PREVISTO: este código ainda não virou lançamento financeiro'
+        : ' — já lançado no financeiro')) + '">🏷 ' + E(x.codigo) +
+      (x.descricao ? ' <span class="md-cod-d">' + E(x.descricao) + '</span>' : '') +
+      (x.previsto ? ' <span class="md-cod-p">previsto</span>' : '') + '</span>').join('') + '</span>';
   },
 
   /* Chips de etapa: cor/ação conforme o estado */
@@ -49906,6 +49963,7 @@ const meuDia = {
           <span class="md-hora">${utils.escapeHTML(c.hora || '—')}</span>
           <span class="md-nome">${utils.escapeHTML(c.nome)}</span>
           <span class="md-proc">${utils.escapeHTML(c.procedimento || '')}</span>
+          ${meuDia._linhaCodigos(c)}
         </div>
         <div class="md-chips">${meuDia._chipPre(c)}${meuDia._chipConsulta(c)}${meuDia._chipFicha(c)}${meuDia._chipSrpa(c)}${meuDia._chipFin(c)}</div>
       </div>`).join('');
