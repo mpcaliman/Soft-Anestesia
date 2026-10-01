@@ -17128,6 +17128,13 @@ await test('Servidor fora do ar: o app diz que não é a senha, e não manda nin
     await cloud.login('a@b.com', 'x');
     out.disseEsperar = avisos.some(t => /Muitas tentativas/i.test(t));
 
+    /* ---- 3b) e-mail nunca confirmado: a senha pode estar certa ---- */
+    avisos.length = 0;
+    window.fetch = async () => resp(400, { error_description: 'Email not confirmed' });
+    await cloud.login('a@b.com', 'x');
+    out.naoConfirmadoTemFraseePropria = avisos.some(t => /CONFIRMAR o e-mail/i.test(t))
+      && avisos.some(t => /Trocar a senha não resolve/i.test(t));
+
     /* ---- 4) corpo que não é JSON (página de erro do provedor) ---- */
     avisos.length = 0;
     window.fetch = async () => resp(502, undefined);
@@ -17150,6 +17157,21 @@ await test('Servidor fora do ar: o app diz que não é a senha, e não manda nin
     window.fetch = async () => resp(401, { error: 'invalid_grant' });
     await cloud._garantirToken();
     out.expiradaDeVerdade = cloud.sessaoExpirada() === true && cloud.servidorFora() === false;
+
+    /* ---- 6b) a TELA DE ENTRADA repete o motivo, não "E-mail ou senha inválidos" ---- */
+    /* Era aqui que a verdade se perdia: o login descobria o motivo e a tela
+       escrevia por cima a única hipótese que acusa a pessoa. */
+    window.fetch = async () => resp(503, { message: 'Service unavailable' });
+    await cloud.login('a@b.com', 'x');
+    out.telaSabeDoServidor = /não está respondendo/i.test(cloud.motivoUltimaFalha());
+    window.fetch = async () => resp(400, { error_description: 'Invalid login credentials' });
+    await cloud.login('a@b.com', 'x');
+    out.telaSabeDaSenha = /Invalid login credentials/.test(cloud.motivoUltimaFalha());
+    window.fetch = async () => resp(200, {
+      access_token: 't', refresh_token: 'r', expires_in: 3600, user: { email: 'a@b.com' }
+    });
+    await cloud.login('a@b.com', 'certa');
+    out.limpaOMotivoAoEntrar = cloud.motivoUltimaFalha() === '';
 
     /* ---- 7) a linha de estado não oferece "Entrar de novo" com o servidor fora ---- */
     cloud._servidorFora = true;
@@ -17186,6 +17208,9 @@ await test('Servidor fora do ar: o app diz que não é a senha, e não manda nin
   assert(r.naoCulpouOServidor && r.limpouAMarca, 'e não culpa o servidor nem deixa a marca pendurada');
   assert(r.disseEsperar, '429 é rajada de tentativas, não queda: a frase é esperar um minuto');
   assert(r.corpoEstranhoEhServidor, 'resposta que não é JSON (página de erro do provedor) é servidor, não senha');
+  assert(r.naoConfirmadoTemFraseePropria, 'e-mail nunca confirmado tem frase própria — trocar a senha não resolve esse caso');
+  assert(r.telaSabeDoServidor && r.telaSabeDaSenha, 'a TELA DE ENTRADA tem de repetir o motivo real, não "E-mail ou senha inválidos" para tudo');
+  assert(r.limpaOMotivoAoEntrar, 'e o motivo some assim que alguém entra');
   assert(r.tokenFalhou && r.naoAcusouSessaoVencida, '503 na renovação NÃO vence a sessão de ninguém');
   assert(r.sabeQueEhOServidor && r.fraseCerta, 'e a frase única usada em todo o app diz qual dos dois problemas é');
   assert(r.sessaoIntacta, 'a sessão continua gravada durante a queda — é ela que permite voltar sem senha');
@@ -17195,6 +17220,80 @@ await test('Servidor fora do ar: o app diz que não é a senha, e não manda nin
   assert(r.qualquerRotaDetecta, 'a queda é detectada por qualquer conversa com o servidor, não só pelo login');
   assert(r.voltaSozinhoQuandoResponde, 'e o aviso sai sozinho quando ele volta a responder');
   assert(r.quatroCentoNaoConta, 'um 404 de tabela não pode ser lido como servidor fora do ar');
+  await page.close();
+});
+
+/* 235) Entrar no app sem entrar na nuvem — o estado que ninguém percebe
+
+   Relato: "a conta consegue entrar no sistema, mas não consegue logar na
+   nuvem". Não é contradição, é o espelho local. O aparelho guarda uma cópia
+   da conta para funcionar offline, com a senha que valia quando ela foi
+   gravada. Se a senha da nuvem mudou depois, a senha antiga ABRE O APP e a
+   nuvem recusa — e o app não tentava nem avisava, porque só realinhava a
+   nuvem quando ela estava logada em OUTRA conta. Com a nuvem deslogada,
+   silêncio: a tela abre igual e nada sobe nem desce.
+
+   Nada mais parece "o sistema está funcionando" do que um aparelho que
+   trabalha o dia inteiro gravando só para si mesmo. */
+await test('Entrou no app pelo espelho local: o app tenta a nuvem e diz por que não entrou', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const avisos = [];
+    const origToast = window.toast;
+    window.toast = (t) => avisos.push(String(t));
+    const resp = (status, corpo) => ({
+      ok: status >= 200 && status < 300, status,
+      json: async () => corpo, text: async () => '', headers: { get: () => '0' }
+    });
+    const origFetch = window.fetch;
+    cloud.config = () => ({ url: 'https://exemplo.supabase.co', key: 'k' });
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => false;
+    cloud.emailLogado = () => '';
+
+    /* senha ANTIGA no espelho, senha NOVA na nuvem */
+    let tentou = 0;
+    window.fetch = async () => { tentou++; return resp(400, { error_description: 'Invalid login credentials' }); };
+    await auth._garantirNuvemDaConta('secretaria@exemplo.com', 'senha-antiga');
+    out.tentouANuvem = tentou === 1;
+    out.avisouQueNaoEntrou = avisos.some(t => /NÃO na nuvem/.test(t));
+    out.explicouOEspelho = avisos.some(t => /senha ANTIGA guardada aqui/.test(t));
+    out.deuOCaminho = avisos.some(t => /Esqueci minha senha/.test(t));
+    out.semToastDuplicado = avisos.length === 1;
+
+    /* servidor fora: a frase é outra — não manda trocar senha nenhuma */
+    avisos.length = 0;
+    window.fetch = async () => resp(503, { message: 'Service unavailable' });
+    await auth._garantirNuvemDaConta('secretaria@exemplo.com', 'qualquer');
+    out.quedaNaoViraSenha = avisos.some(t => /não está respondendo/i.test(t))
+      && !avisos.some(t => /senha ANTIGA/.test(t));
+
+    /* já logado na MESMA conta: não tenta de novo */
+    avisos.length = 0; tentou = 0;
+    cloud.estaLogado = () => true;
+    cloud.emailLogado = () => 'secretaria@exemplo.com';
+    window.fetch = async () => { tentou++; return resp(200, {}); };
+    await auth._garantirNuvemDaConta('secretaria@exemplo.com', 'x');
+    out.naoRefazQuandoJaEsta = tentou === 0 && avisos.length === 0;
+
+    /* usuário local puro (sem e-mail) não tem nuvem a tentar */
+    avisos.length = 0; tentou = 0;
+    cloud.estaLogado = () => false;
+    await auth._garantirNuvemDaConta('recepcao', 'x');
+    out.ignoraUsuarioLocal = tentou === 0 && avisos.length === 0;
+
+    window.fetch = origFetch;
+    window.toast = origToast;
+    return out;
+  });
+  assert(r.tentouANuvem, 'entrar pelo espelho local tem de TENTAR a nuvem com a mesma senha — antes nem tentava');
+  assert(r.avisouQueNaoEntrou, 'e, falhando, dizer que entrou no app mas não na nuvem: é o estado que ninguém percebe');
+  assert(r.explicouOEspelho && r.deuOCaminho, 'nomeando a causa (senha antiga guardada aqui) e a saída');
+  assert(r.semToastDuplicado, 'com um aviso só — dois avisos sobre a mesma coisa viram ruído');
+  assert(r.quedaNaoViraSenha, 'servidor fora do ar não pode virar conselho de trocar senha');
+  assert(r.naoRefazQuandoJaEsta, 'quem já está na nuvem com a mesma conta não é incomodado nem gasta uma chamada');
+  assert(r.ignoraUsuarioLocal, 'usuário local sem e-mail não tem conta de nuvem a tentar');
   await page.close();
 });
 
