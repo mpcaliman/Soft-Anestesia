@@ -17072,6 +17072,132 @@ await test('Marcador de versão antiga não conta como decisão, e reivindicar f
   await page.close();
 });
 
+/* 234) Servidor fora do ar não é senha errada, e não é sessão vencida
+
+   Aconteceu com a equipe inteira ao mesmo tempo: ninguém conseguia acessar a
+   nuvem. O app dizia, para todos, "Falha no login: verifique email/senha" —
+   porque o código lia só `error_description`/`msg`/`error` e um 503 não traz
+   nenhum deles. Quem tentou "resolver" saindo da nuvem ficou pior: sair APAGA
+   a sessão local, e não há como obter outra enquanto o servidor não voltar.
+
+   A renovação do token tinha o mesmo defeito ao contrário: qualquer falha
+   virava "sessão expirada", e a tela mandava justamente sair e entrar de novo.
+
+   Três coisas diferentes, três saídas diferentes:
+   • senha errada        → corrigir a senha;
+   • sessão vencida      → entrar de novo;
+   • servidor fora do ar → NÃO fazer nada, continuar atendendo, esperar.
+   Confundir a terceira com as duas primeiras é o que transforma uma queda
+   temporária em perda de acesso. */
+await test('Servidor fora do ar: o app diz que não é a senha, e não manda ninguém sair da nuvem', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const resp = (status, corpo) => ({
+      ok: status >= 200 && status < 300, status,
+      json: async () => { if (corpo === undefined) throw new Error('não é JSON'); return corpo; },
+      text: async () => JSON.stringify(corpo || ''),
+      headers: { get: () => '0' }
+    });
+    const avisos = [];
+    const origToast = window.toast;
+    window.toast = (t) => avisos.push(String(t));
+    const origFetch = window.fetch;
+    cloud.config = () => ({ url: 'https://exemplo.supabase.co', key: 'k' });
+    cloud.estaConfigurado = () => true;
+
+    /* ---- 1) projeto pausado / acima do limite: 503 ---- */
+    window.fetch = async () => resp(503, { message: 'Service unavailable' });
+    out.loginFora = (await cloud.login('a@b.com', 'x')) === false;
+    out.disseQueNaoEhSenha = avisos.some(t => /não é a sua senha/i.test(t));
+    out.disseParaContinuar = avisos.some(t => /sobe sozinho/i.test(t));
+    out.disseParaNaoSair = avisos.some(t => /não saia da nuvem/i.test(t));
+    out.marcouServidorFora = cloud.servidorFora() === true;
+
+    /* ---- 2) senha errada de verdade: 400 com motivo ---- */
+    avisos.length = 0;
+    window.fetch = async () => resp(400, { error_description: 'Invalid login credentials' });
+    out.loginSenha = (await cloud.login('a@b.com', 'errada')) === false;
+    out.disseQueEhCredencial = avisos.some(t => /Falha no login/.test(t) && /Invalid login credentials/.test(t));
+    out.naoCulpouOServidor = !avisos.some(t => /não está respondendo/i.test(t));
+    out.limpouAMarca = cloud.servidorFora() === false;
+
+    /* ---- 3) rajada de tentativas: 429 tem frase própria ---- */
+    avisos.length = 0;
+    window.fetch = async () => resp(429, { msg: 'too many requests' });
+    await cloud.login('a@b.com', 'x');
+    out.disseEsperar = avisos.some(t => /Muitas tentativas/i.test(t));
+
+    /* ---- 4) corpo que não é JSON (página de erro do provedor) ---- */
+    avisos.length = 0;
+    window.fetch = async () => resp(502, undefined);
+    await cloud.login('a@b.com', 'x');
+    out.corpoEstranhoEhServidor = avisos.some(t => /não é a sua senha/i.test(t));
+
+    /* ---- 5) renovação de token: 503 NÃO vence a sessão de ninguém ---- */
+    localStorage.setItem(cloud.SESSION_KEY, JSON.stringify({
+      access_token: 't', refresh_token: 'r', user: { email: 'a@b.com' }, expires_at: Date.now() - 1000
+    }));
+    window.fetch = async () => resp(503, { message: 'Service unavailable' });
+    out.tokenFalhou = (await cloud._garantirToken()) === false;
+    out.naoAcusouSessaoVencida = cloud.sessaoExpirada() === false;
+    out.sabeQueEhOServidor = cloud.servidorFora() === true;
+    out.fraseCerta = /não é a sua sessão/i.test(cloud.motivoSemToken()) && /Não saia da nuvem/i.test(cloud.motivoSemToken());
+    /* a sessão continua gravada: sair é o que não tem volta durante a queda */
+    out.sessaoIntacta = !!cloud.session();
+
+    /* ---- 6) refresh REALMENTE recusado (401) é sessão vencida ---- */
+    window.fetch = async () => resp(401, { error: 'invalid_grant' });
+    await cloud._garantirToken();
+    out.expiradaDeVerdade = cloud.sessaoExpirada() === true && cloud.servidorFora() === false;
+
+    /* ---- 7) a linha de estado não oferece "Entrar de novo" com o servidor fora ---- */
+    cloud._servidorFora = true;
+    cloud._tokenFalhou = true;      /* as duas coisas marcadas: fora tem de vencer */
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    const linha = document.getElementById('nuvem-estado-linha') ||
+      (() => { const d = document.createElement('div'); d.id = 'nuvem-estado-linha'; document.body.appendChild(d); return d; })();
+    nuvemEstado.render();
+    out.linhaFalaDoServidor = /não está respondendo/i.test(linha.textContent);
+    out.linhaNaoMandaSair = !/Entrar de novo/.test(linha.innerHTML);
+    out.linhaAcalma = /Nada foi perdido/i.test(linha.textContent) && /sobe sozinho/i.test(linha.textContent);
+
+    /* ---- 8) qualquer módulo descobre a queda, não só o login ---- */
+    cloud._servidorFora = false;
+    cloud._observarResposta({ status: 503, ok: false });
+    out.qualquerRotaDetecta = cloud.servidorFora() === true;
+    cloud._observarResposta({ status: 200, ok: true });
+    out.voltaSozinhoQuandoResponde = cloud.servidorFora() === false;
+    /* 404 de tabela inexistente não pode ser confundido com servidor fora */
+    cloud._observarResposta({ status: 404, ok: false });
+    out.quatroCentoNaoConta = cloud.servidorFora() === false;
+
+    window.fetch = origFetch;
+    window.toast = origToast;
+    localStorage.removeItem(cloud.SESSION_KEY);
+    return out;
+  });
+  assert(r.loginFora && r.disseQueNaoEhSenha, 'com o servidor fora, a mensagem tem de dizer que NÃO é a senha — era isso que a equipe inteira estava lendo errado');
+  assert(r.disseParaContinuar, 'e tem de dizer que o trabalho continua e sobe sozinho');
+  assert(r.disseParaNaoSair, 'e avisar para não sair da nuvem — sair é a única ação que piora de verdade');
+  assert(r.marcouServidorFora, 'o app precisa guardar que o servidor está fora, para as outras telas não mentirem');
+  assert(r.loginSenha && r.disseQueEhCredencial, 'senha errada continua sendo dita como senha errada, com o motivo do servidor');
+  assert(r.naoCulpouOServidor && r.limpouAMarca, 'e não culpa o servidor nem deixa a marca pendurada');
+  assert(r.disseEsperar, '429 é rajada de tentativas, não queda: a frase é esperar um minuto');
+  assert(r.corpoEstranhoEhServidor, 'resposta que não é JSON (página de erro do provedor) é servidor, não senha');
+  assert(r.tokenFalhou && r.naoAcusouSessaoVencida, '503 na renovação NÃO vence a sessão de ninguém');
+  assert(r.sabeQueEhOServidor && r.fraseCerta, 'e a frase única usada em todo o app diz qual dos dois problemas é');
+  assert(r.sessaoIntacta, 'a sessão continua gravada durante a queda — é ela que permite voltar sem senha');
+  assert(r.expiradaDeVerdade, 'refresh recusado com 401 continua sendo sessão vencida de verdade');
+  assert(r.linhaFalaDoServidor && r.linhaAcalma, 'a linha de estado explica a queda em vez de acusar a sessão');
+  assert(r.linhaNaoMandaSair, 'e não oferece "Entrar de novo" enquanto o servidor não responde');
+  assert(r.qualquerRotaDetecta, 'a queda é detectada por qualquer conversa com o servidor, não só pelo login');
+  assert(r.voltaSozinhoQuandoResponde, 'e o aviso sai sozinho quando ele volta a responder');
+  assert(r.quatroCentoNaoConta, 'um 404 de tabela não pode ser lido como servidor fora do ar');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
