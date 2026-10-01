@@ -17297,6 +17297,84 @@ await test('Entrou no app pelo espelho local: o app tenta a nuvem e diz por que 
   await page.close();
 });
 
+/* 236) Finalizado e sem financeiro: a tela dizia que o Finalizar cria sozinho
+
+   Relato com paciente de verdade: pré FINALIZADA e nenhum lançamento. No
+   "Meu dia" a linha mostrava só "— financeiro", com um title explicando que
+   "o Finalizar do documento cria automaticamente" — exatamente o que NÃO
+   aconteceu ali. Era um beco: a tela afirmava algo contrariado pelo próprio
+   caso que estava mostrando, e não havia caminho nenhum para resolver.
+
+   A janela da cobrança pode não ter chegado a abrir (ela espera a vez quando
+   há outra janela por cima, e desistia em silêncio depois de 96 s) ou ter
+   sido fechada sem escolha. Nos dois casos o atendimento fica sem cobrança
+   sem ninguém saber — que é a pior falha possível num módulo financeiro. */
+await test('Documento finalizado sem lançamento: o Meu dia oferece gerar, em vez de explicar errado', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+
+    /* ---- rascunho: a explicação antiga continua certa ---- */
+    const emRascunho = meuDia._chipFin({ pre: { _id: 'p1', _finalizado: false } });
+    out.rascunhoExplica = /falta finalizar/.test(emRascunho) && !/gerar financeiro/.test(emRascunho);
+
+    /* ---- FINALIZADO e sem financeiro: vira ação ---- */
+    const finalizado = meuDia._chipFin({ pre: { _id: 'p2', _finalizado: true } });
+    out.ofereceGerar = /gerar financeiro/.test(finalizado);
+    out.ehBotao = /<button/.test(finalizado) && /meuDia\.gerarFinanceiro\('pre','p2'\)/.test(finalizado);
+    out.naoMenteMais = !/cria automaticamente/.test(finalizado);
+
+    /* ---- a ficha de anestesia tem precedência sobre a pré ---- */
+    const comFicha = meuDia._chipFin({ pre: { _id: 'p3', _finalizado: true }, ficha: { _id: 'f3', _finalizado: true } });
+    out.preferiuAFicha = /gerarFinanceiro\('anestesia','f3'\)/.test(comFicha);
+
+    /* ---- já tendo lançamento, nada muda ---- */
+    const comFin = meuDia._chipFin({ pre: { _id: 'p4', _finalizado: true }, fin: { _id: 'x', status: 'recebido' } });
+    out.comFinNaoOferece = !/gerar financeiro/.test(comFin) && /Fin ✓/.test(comFin);
+
+    /* ---- o botão abre a janela da cobrança para aquele documento ---- */
+    const doc = { _id: 'p5', _finalizado: true, paciente_nome: 'Sabrina Coelho' };
+    store.setList('pre', [doc]);
+    store.setList('financeiro', []);
+    let abriu = null;
+    const orig = fin.finalizacao.abrirQuandoLivre;
+    fin.finalizacao.abrirQuandoLivre = (mod, d) => { abriu = { mod, id: d && d._id }; };
+    meuDia.gerarFinanceiro('pre', 'p5');
+    out.abriuAJanela = !!abriu && abriu.mod === 'pre' && abriu.id === 'p5';
+
+    /* ---- e não duplica a cobrança de quem já tem ---- */
+    store.setList('financeiro', [{ _id: 'f9', _origemId: 'p5' }]);
+    abriu = null;
+    meuDia.gerarFinanceiro('pre', 'p5');
+    out.naoDuplica = abriu === null;
+    fin.finalizacao.abrirQuandoLivre = orig;
+
+    /* ---- desistir de esperar a vez não pode ser em silêncio ---- */
+    const avisos = [];
+    const origToast = window.toast;
+    window.toast = (t) => avisos.push(String(t));
+    const bd = document.getElementById('modal-backdrop') ||
+      (() => { const d = document.createElement('div'); d.id = 'modal-backdrop'; document.body.appendChild(d); return d; })();
+    bd.classList.add('show');
+    fin.finalizacao.abrirQuandoLivre('pre', doc, null, 120);   /* última tentativa */
+    out.avisouAoDesistir = avisos.some(t => /gerar financeiro/.test(t) && /está salvo/.test(t));
+    bd.classList.remove('show');
+    window.toast = origToast;
+
+    store.setList('pre', []); store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.rascunhoExplica, 'documento em rascunho continua explicando que falta finalizar — ali a frase está certa');
+  assert(r.ofereceGerar && r.ehBotao, 'finalizado e sem lançamento vira um botão que GERA, não um texto morto');
+  assert(r.naoMenteMais, 'e para de afirmar que "o Finalizar cria automaticamente" no caso em que isso não aconteceu');
+  assert(r.preferiuAFicha, 'havendo ficha de anestesia finalizada, é dela que a cobrança sai');
+  assert(r.comFinNaoOferece, 'quem já tem lançamento não ganha botão de gerar');
+  assert(r.abriuAJanela, 'o botão abre a MESMA janela de finalização — nada de uma segunda forma de cobrar');
+  assert(r.naoDuplica, 'e não cria um segundo lançamento para o mesmo atendimento');
+  assert(r.avisouAoDesistir, 'desistir de esperar a vez tem de avisar: em silêncio, o atendimento fica sem cobrança e ninguém sabe');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

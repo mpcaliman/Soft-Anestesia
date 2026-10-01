@@ -4656,7 +4656,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-01c</b><br>
+    v7.1 · build <b id="build-tag">2026-10-01d</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -42256,7 +42256,15 @@ const fin = {
         ocupado = (bd && bd.classList.contains('show')) || !!document.querySelector('.bloq-janela');
       } catch (e) {}
       if (ocupado) {
-        if ((tentativa || 0) < 120) setTimeout(() => fin.finalizacao.abrirQuandoLivre(mod, doc, aoFechar, (tentativa || 0) + 1), 800);
+        if ((tentativa || 0) < 120) { setTimeout(() => fin.finalizacao.abrirQuandoLivre(mod, doc, aoFechar, (tentativa || 0) + 1), 800); return; }
+        /* DESISTIR EM SILÊNCIO é perder a cobrança sem ninguém saber: o
+           atendimento fica finalizado, sem lançamento, e a tela não diz nada.
+           Noventa e seis segundos esperando a vez é tempo de mais para supor
+           que a janela ainda vai aparecer. */
+        try {
+          toast('💰 Não consegui abrir a janela do financeiro (havia outra janela aberta o tempo todo). ' +
+            'O atendimento está salvo — gere o lançamento no Dashboard, no botão "gerar financeiro" da linha do paciente.', 'warn');
+        } catch (e) {}
         return;
       }
       fin.finalizacao.abrir(mod, doc, aoFechar);
@@ -49808,10 +49816,37 @@ const meuDia = {
           'title="O lançamento financeiro é criado ao FINALIZAR o documento. Este ainda está em rascunho.">' +
           '— financeiro · falta finalizar</span>';
       }
+      /* DOCUMENTO FINALIZADO E SEM LANÇAMENTO é outra coisa, e era aqui que a
+         tela mentia por omissão: dizia que "o Finalizar cria automaticamente"
+         para um atendimento que JÁ foi finalizado e não gerou nada. A janela
+         da cobrança pode não ter chegado a abrir (havia outra janela por cima)
+         ou ter sido fechada sem escolha — e aí o atendimento fica sem cobrança
+         sem ninguém ficar sabendo. Agora o chip diz isso e GERA num clique. */
+      const fonte = (c.ficha && c.ficha._finalizado) ? ['anestesia', c.ficha]
+                  : (c.pre && c.pre._finalizado) ? ['pre', c.pre]
+                  : (c.consulta && c.consulta._finalizado) ? ['consulta', c.consulta] : null;
+      if (fonte) {
+        return '<button type="button" class="md-chip md-falta" onclick="meuDia.gerarFinanceiro(\'' + fonte[0] + '\',\'' + fonte[1]._id + '\')" ' +
+          'title="Finalizado, mas sem lançamento financeiro. Clique para abrir a janela da cobrança deste atendimento.">💰 gerar financeiro</button>';
+      }
       return '<span class="md-chip md-nada" title="Nenhum lançamento financeiro hoje — o Finalizar do documento cria automaticamente">— financeiro</span>';
     }
     const ok = !!c.fin.pago || c.fin.status === 'recebido' || c.fin.status === 'finalizado';
     return '<button type="button" class="md-chip ' + (ok ? 'md-ok' : 'md-meio') + '" onclick="dashboard._abrirFicha(\'financeiro\',\'' + c.fin._id + '\')" title="' + (ok ? 'Financeiro ok — abrir' : 'Financeiro pendente — abrir') + '">💰 ' + (ok ? 'Fin ✓' : 'Fin…') + '</button>';
+  },
+
+  /* Abre a MESMA janela de finalização, depois do fato. O caminho normal é no
+     Finalizar; isto é a rede embaixo dele, para o atendimento que passou. */
+  gerarFinanceiro(mod, id) {
+    let doc = null;
+    try { doc = store.getById(mod, id); } catch (e) {}
+    if (!doc) { toast('Não achei o documento deste atendimento', 'error'); return; }
+    let jaTem = false;
+    try { jaTem = (store.list('financeiro') || []).some(x => x._origemId === id); } catch (e) {}
+    if (jaTem) { toast('Este atendimento já tem lançamento financeiro'); try { meuDia.render(); } catch (e) {} return; }
+    try {
+      fin.finalizacao.abrirQuandoLivre(mod, doc, () => { try { meuDia.render(); } catch (e) {} });
+    } catch (e) { toast('Não consegui abrir a janela do financeiro: ' + e.message, 'error'); }
   },
 
   /* ---- Ver só o que foi finalizado ----
