@@ -4656,7 +4656,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-01a</b><br>
+    v7.1 · build <b id="build-tag">2026-10-01b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -19345,7 +19345,16 @@ const auth = {
           return;
         }
         auth._registrarFalha();
-        errEl.textContent = 'E-mail ou senha inválidos.';
+        /* A MENSAGEM VERDADEIRA NÃO PODE SER SOBRESCRITA AQUI. O login já
+           descobriu o que o servidor respondeu — servidor fora, e-mail não
+           confirmado, rajada de tentativas — e esta linha jogava tudo fora e
+           escrevia "E-mail ou senha inválidos.", que é a única das hipóteses
+           que acusa a pessoa. Foi o que a equipe inteira leu durante a queda,
+           cada uma trocando a senha de uma conta que estava certa. */
+        errEl.textContent = (() => {
+          try { return cloud.motivoUltimaFalha() || 'E-mail ou senha inválidos.'; }
+          catch (e) { return 'E-mail ou senha inválidos.'; }
+        })();
         return;
       }
       /* e-mail, mas sem internet/nuvem e sem espelho local desta conta */
@@ -20603,11 +20612,24 @@ const cloud = {
     const status = (r && r.status) || 0;
     const texto = String((data && (data.error_description || data.msg || data.message || data.error)) || '');
     if (/paus|suspend|exceed|quota|over.?limit/i.test(texto)) return { tipo: 'fora', detalhe: texto };
+    /* E-MAIL NUNCA CONFIRMADO é o caso que mais parece senha errada e menos é:
+       a senha pode estar certa, e trocá-la não resolve nada. */
+    if (/not.?confirmed|confirma/i.test(texto)) return { tipo: 'nao_confirmado', detalhe: texto };
     if (status === 429) return { tipo: 'excesso', detalhe: texto };
     if (!data || status === 0 || status >= 500 || status === 408) return { tipo: 'fora', detalhe: texto || ('HTTP ' + status) };
     return { tipo: 'credencial', detalhe: texto };
   },
+  /* A última falha fica guardada para a TELA de entrada poder dizer o mesmo
+     que o aviso — antes ela escrevia "E-mail ou senha inválidos." por cima. */
+  _ultimaFalha: null,
+  motivoUltimaFalha() {
+    return cloud._ultimaFalha ? cloud._frasePelaFalha(cloud._ultimaFalha) : '';
+  },
   _frasePelaFalha(f) {
+    if (f.tipo === 'nao_confirmado') {
+      return '📧 A conta existe e a senha pode estar certa: o que falta é CONFIRMAR o e-mail. ' +
+        'Abra o link que o servidor enviou para esse endereço (confira o spam). Trocar a senha não resolve este caso.';
+    }
     if (f.tipo === 'fora') {
       return '🔌 O servidor da clínica não está respondendo' + (f.detalhe ? ' (' + f.detalhe + ')' : '') +
         '. NÃO é a sua senha. Continue trabalhando: tudo fica gravado neste aparelho e sobe sozinho quando ele voltar. ' +
@@ -20631,10 +20653,12 @@ const cloud = {
       try { data = await r.json(); } catch (e) { data = null; }
       if (!r.ok || !data || !data.access_token) {
         const f = cloud._classificarFalhaAuth(r, data);
+        cloud._ultimaFalha = f;
         cloud._servidorFora = f.tipo === 'fora';
         toast(cloud._frasePelaFalha(f), 'error');
         return false;
       }
+      cloud._ultimaFalha = null;
       cloud._servidorFora = false;
       const sess = {
         access_token: data.access_token,
@@ -20652,6 +20676,7 @@ const cloud = {
       /* Não houve resposta nenhuma: ou o aparelho está sem rede, ou o servidor
          não está no ar. Em nenhum dos dois casos a senha é o problema. */
       cloud._servidorFora = true;
+      cloud._ultimaFalha = { tipo: 'fora', detalhe: e.message };
       toast('🔌 Não consegui falar com o servidor da clínica' +
         (navigator && navigator.onLine === false ? ' — este aparelho está sem internet' : '') +
         '. NÃO é a sua senha. Continue trabalhando: tudo fica gravado aqui e sobe sozinho. (' + e.message + ')', 'error');

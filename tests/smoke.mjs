@@ -17128,6 +17128,13 @@ await test('Servidor fora do ar: o app diz que não é a senha, e não manda nin
     await cloud.login('a@b.com', 'x');
     out.disseEsperar = avisos.some(t => /Muitas tentativas/i.test(t));
 
+    /* ---- 3b) e-mail nunca confirmado: a senha pode estar certa ---- */
+    avisos.length = 0;
+    window.fetch = async () => resp(400, { error_description: 'Email not confirmed' });
+    await cloud.login('a@b.com', 'x');
+    out.naoConfirmadoTemFraseePropria = avisos.some(t => /CONFIRMAR o e-mail/i.test(t))
+      && avisos.some(t => /Trocar a senha não resolve/i.test(t));
+
     /* ---- 4) corpo que não é JSON (página de erro do provedor) ---- */
     avisos.length = 0;
     window.fetch = async () => resp(502, undefined);
@@ -17150,6 +17157,21 @@ await test('Servidor fora do ar: o app diz que não é a senha, e não manda nin
     window.fetch = async () => resp(401, { error: 'invalid_grant' });
     await cloud._garantirToken();
     out.expiradaDeVerdade = cloud.sessaoExpirada() === true && cloud.servidorFora() === false;
+
+    /* ---- 6b) a TELA DE ENTRADA repete o motivo, não "E-mail ou senha inválidos" ---- */
+    /* Era aqui que a verdade se perdia: o login descobria o motivo e a tela
+       escrevia por cima a única hipótese que acusa a pessoa. */
+    window.fetch = async () => resp(503, { message: 'Service unavailable' });
+    await cloud.login('a@b.com', 'x');
+    out.telaSabeDoServidor = /não está respondendo/i.test(cloud.motivoUltimaFalha());
+    window.fetch = async () => resp(400, { error_description: 'Invalid login credentials' });
+    await cloud.login('a@b.com', 'x');
+    out.telaSabeDaSenha = /Invalid login credentials/.test(cloud.motivoUltimaFalha());
+    window.fetch = async () => resp(200, {
+      access_token: 't', refresh_token: 'r', expires_in: 3600, user: { email: 'a@b.com' }
+    });
+    await cloud.login('a@b.com', 'certa');
+    out.limpaOMotivoAoEntrar = cloud.motivoUltimaFalha() === '';
 
     /* ---- 7) a linha de estado não oferece "Entrar de novo" com o servidor fora ---- */
     cloud._servidorFora = true;
@@ -17186,6 +17208,9 @@ await test('Servidor fora do ar: o app diz que não é a senha, e não manda nin
   assert(r.naoCulpouOServidor && r.limpouAMarca, 'e não culpa o servidor nem deixa a marca pendurada');
   assert(r.disseEsperar, '429 é rajada de tentativas, não queda: a frase é esperar um minuto');
   assert(r.corpoEstranhoEhServidor, 'resposta que não é JSON (página de erro do provedor) é servidor, não senha');
+  assert(r.naoConfirmadoTemFraseePropria, 'e-mail nunca confirmado tem frase própria — trocar a senha não resolve esse caso');
+  assert(r.telaSabeDoServidor && r.telaSabeDaSenha, 'a TELA DE ENTRADA tem de repetir o motivo real, não "E-mail ou senha inválidos" para tudo');
+  assert(r.limpaOMotivoAoEntrar, 'e o motivo some assim que alguém entra');
   assert(r.tokenFalhou && r.naoAcusouSessaoVencida, '503 na renovação NÃO vence a sessão de ninguém');
   assert(r.sabeQueEhOServidor && r.fraseCerta, 'e a frase única usada em todo o app diz qual dos dois problemas é');
   assert(r.sessaoIntacta, 'a sessão continua gravada durante a queda — é ela que permite voltar sem senha');
