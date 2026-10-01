@@ -4656,7 +4656,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-09-30g</b><br>
+    v7.1 · build <b id="build-tag">2026-10-01a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -12496,7 +12496,7 @@ const arquivo = {
   async restaurar(mod, id, opts = {}) {
     const aviso = (m, t) => { if (!opts.silent) toast(m, t); };
     if (!cloudRel.disponivel()) { aviso('Sem internet para trazer da nuvem — tente online', 'warn'); return false; }
-    if (!(await cloud._garantirToken())) { aviso('Sessão expirada — entre de novo', 'warn'); return false; }
+    if (!(await cloud._garantirToken())) { aviso(cloud.motivoSemToken(), 'warn'); return false; }
     let item = null;
     try {
       const cfg = cloudRel.MODOS[mod];
@@ -12539,7 +12539,7 @@ const arquivo = {
     const alvo = String(nome || '').toLowerCase().trim();
     if (!alvo) { toast('Escreva parte do nome do paciente', 'warn'); return []; }
     if (!cloud.estaConfigurado() || !cloud.estaLogado()) { toast('Conecte-se à nuvem primeiro', 'warn'); return []; }
-    if (!(await cloud._garantirToken())) { toast('Sessão da nuvem expirada — entre de novo', 'warn'); return []; }
+    if (!(await cloud._garantirToken())) { toast(cloud.motivoSemToken(), 'warn'); return []; }
     const c = cloud.config();
     const achados = [];
     const vistos = new Set();
@@ -20557,6 +20557,68 @@ const cloud = {
     }
   },
 
+  /* SERVIDOR FORA DO AR ≠ SENHA ERRADA ≠ SESSÃO VENCIDA.
+     Os três davam na mesma frase, e a frase acusava a pessoa: "verifique
+     email/senha". Quando o servidor da clínica está fora, a equipe inteira
+     recebe isso ao mesmo tempo, troca de senha às cegas, sai da nuvem — e sair
+     é a única ação que piora de verdade, porque apaga a sessão que ainda era
+     boa e não há como obter outra enquanto o servidor não voltar.
+
+     Classificar não é conforto de mensagem: é o que impede a equipe de
+     destruir o próprio acesso durante uma queda. */
+  _servidorFora: false,
+  servidorFora() { return !!cloud._servidorFora; },
+  /* O app descobre que o servidor caiu por QUALQUER conversa com ele, não só
+     pelo login: o medidor de tráfego já envolve todo fetch do Supabase, então
+     é dali que vem o aviso. Sem isto, só quem tentasse entrar ou renovar a
+     sessão veria a verdade — quem já estava dentro via "erro" genérico em cada
+     módulo e concluía que o sistema quebrou. */
+  _observarResposta(resp) {
+    if (!resp) return;
+    const fora = resp.status >= 500 || resp.status === 540;
+    if (fora === !!cloud._servidorFora) return;
+    /* 4xx não diz nada sobre o servidor estar de pé — só 5xx e sucesso. */
+    if (!fora && !resp.ok) return;
+    cloud._servidorFora = fora;
+    try { cloud._atualizarUI(); } catch (e) {}
+    try { nuvemEstado.render(); } catch (e) {}
+  },
+  _observarFalhaRede() {
+    /* Aparelho sem internet não é servidor fora: a frase e a saída são outras. */
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    if (cloud._servidorFora) return;
+    cloud._servidorFora = true;
+    try { cloud._atualizarUI(); } catch (e) {}
+    try { nuvemEstado.render(); } catch (e) {}
+  },
+  /* Uma frase só, usada em todo lugar que descobre que não tem token: ela tem
+     de dizer QUAL dos dois problemas é, porque a saída é oposta. */
+  motivoSemToken() {
+    if (cloud.servidorFora()) {
+      return '🔌 O servidor da clínica não está respondendo — não é a sua sessão. Continue trabalhando: tudo fica gravado aqui e sobe sozinho. Não saia da nuvem.';
+    }
+    return 'Sessão da nuvem expirada — entre de novo.';
+  },
+  _classificarFalhaAuth(r, data) {
+    const status = (r && r.status) || 0;
+    const texto = String((data && (data.error_description || data.msg || data.message || data.error)) || '');
+    if (/paus|suspend|exceed|quota|over.?limit/i.test(texto)) return { tipo: 'fora', detalhe: texto };
+    if (status === 429) return { tipo: 'excesso', detalhe: texto };
+    if (!data || status === 0 || status >= 500 || status === 408) return { tipo: 'fora', detalhe: texto || ('HTTP ' + status) };
+    return { tipo: 'credencial', detalhe: texto };
+  },
+  _frasePelaFalha(f) {
+    if (f.tipo === 'fora') {
+      return '🔌 O servidor da clínica não está respondendo' + (f.detalhe ? ' (' + f.detalhe + ')' : '') +
+        '. NÃO é a sua senha. Continue trabalhando: tudo fica gravado neste aparelho e sobe sozinho quando ele voltar. ' +
+        'Não saia da nuvem — isso apagaria a sua sessão.';
+    }
+    if (f.tipo === 'excesso') {
+      return '⏳ Muitas tentativas seguidas. O servidor pediu uma pausa — espere um minuto e tente de novo. A senha pode estar certa.';
+    }
+    return 'Falha no login: ' + (f.detalhe || 'verifique e-mail e senha');
+  },
+
   async login(email, senha) {
     if (!cloud.estaConfigurado()) { toast('Configure a nuvem primeiro (URL + chave)', 'warn'); return false; }
     const c = cloud.config();
@@ -20565,11 +20627,15 @@ const cloud = {
         method: 'POST', headers: cloud._headers(false),
         body: JSON.stringify({ email: email.trim(), password: senha })
       });
-      const data = await r.json();
-      if (!r.ok || !data.access_token) {
-        toast('Falha no login: ' + (data.error_description || data.msg || data.error || 'verifique email/senha'), 'error');
+      let data = null;
+      try { data = await r.json(); } catch (e) { data = null; }
+      if (!r.ok || !data || !data.access_token) {
+        const f = cloud._classificarFalhaAuth(r, data);
+        cloud._servidorFora = f.tipo === 'fora';
+        toast(cloud._frasePelaFalha(f), 'error');
         return false;
       }
+      cloud._servidorFora = false;
       const sess = {
         access_token: data.access_token,
         refresh_token: data.refresh_token,
@@ -20583,7 +20649,12 @@ const cloud = {
       setTimeout(() => cloud.sincronizar(), 300);
       return true;
     } catch (e) {
-      toast('Erro de conexão (você está online?): ' + e.message, 'error');
+      /* Não houve resposta nenhuma: ou o aparelho está sem rede, ou o servidor
+         não está no ar. Em nenhum dos dois casos a senha é o problema. */
+      cloud._servidorFora = true;
+      toast('🔌 Não consegui falar com o servidor da clínica' +
+        (navigator && navigator.onLine === false ? ' — este aparelho está sem internet' : '') +
+        '. NÃO é a sua senha. Continue trabalhando: tudo fica gravado aqui e sobe sozinho. (' + e.message + ')', 'error');
       return false;
     }
   },
@@ -20640,8 +20711,18 @@ const cloud = {
         method: 'POST', headers: cloud._headers(false),
         body: JSON.stringify({ refresh_token: s.refresh_token })
       });
-      const data = await r.json();
-      if (!r.ok || !data.access_token) return false;
+      let data = null;
+      try { data = await r.json(); } catch (e) { data = null; }
+      if (!r.ok || !data || !data.access_token) {
+        /* QUEM FALHOU: a sessão ou o servidor? Um 503 tratado como "sessão
+           vencida" manda a equipe inteira sair e entrar de novo durante uma
+           queda — e aí ninguém mais entra. O refresh_token continua válido:
+           basta esperar o servidor. */
+        const f = cloud._classificarFalhaAuth(r, data);
+        cloud._servidorFora = f.tipo !== 'credencial';
+        return false;
+      }
+      cloud._servidorFora = false;
       const sess = {
         access_token: data.access_token,
         refresh_token: data.refresh_token,
@@ -20650,7 +20731,7 @@ const cloud = {
       };
       localStorage.setItem(cloud.SESSION_KEY, JSON.stringify(sess));
       return true;
-    } catch (e) { return false; }
+    } catch (e) { cloud._servidorFora = true; return false; }
   },
   /* Quando a renovação do token falha (sessão velha demais), TODA consulta à
      nuvem passa a voltar 401 e o app parecia "sem clínica". Guardamos esse
@@ -20663,7 +20744,9 @@ const cloud = {
     if (!s) return false;
     if (s.expires_at && Date.now() > s.expires_at - 60000) {
       const ok = await cloud._renovarToken();
-      cloud._tokenFalhou = !ok;
+      /* Só é "sessão vencida" quando o servidor RESPONDEU recusando a sessão.
+         Servidor fora do ar não vence sessão de ninguém. */
+      cloud._tokenFalhou = !ok && !cloud._servidorFora;
       if (!ok) { try { cloud._atualizarUI(); } catch (e) {} }
       return ok;
     }
@@ -20716,7 +20799,7 @@ const cloud = {
     const rel = { legado: {}, relacional: {}, novos: 0, jaTinha: 0, atualizados: 0, erro: null };
     if (!cloud.estaConfigurado()) { rel.erro = 'A nuvem não está configurada neste aparelho.'; return rel; }
     if (!cloud.estaLogado()) { rel.erro = 'Entre na nuvem para restaurar (Ajustes → Backup e sincronização).'; return rel; }
-    if (!(await cloud._garantirToken())) { rel.erro = 'Sessão da nuvem expirada — saia e entre de novo.'; return rel; }
+    if (!(await cloud._garantirToken())) { rel.erro = cloud.motivoSemToken(); return rel; }
     const prog = (t) => { const el = document.getElementById('restaura-nuvem-prog'); if (el) el.textContent = t; };
 
     /* 1) CANAL LEGADO — documentos do usuário (paginado).
@@ -21445,6 +21528,20 @@ const cloud = {
         } else if (r.ok || r.status === 404 || r.status === 400 || r.status === 403 || r.status === 406) {
           chaveOk = true;
           add('ok', 'Servidor respondeu e a chave pública foi aceita.');
+        } else if (r.status >= 500 || r.status === 540 || r.status === 429) {
+          /* 503/540 é o que o Supabase devolve quando o projeto está PAUSADO ou
+             com o uso acima do limite do plano. Antes isto caía em "inesperado,
+             mas está no ar" e o diagnóstico seguia como se a nuvem estivesse
+             boa — a tela dizia "tudo certo" durante uma queda. */
+          let corpo = '';
+          try { corpo = (await r.text() || '').slice(0, 200); } catch (e) {}
+          add('erro', 'O servidor respondeu <b>HTTP ' + r.status + '</b> — ou seja, ele existe mas NÃO está atendendo. ' +
+            'No Supabase isso é projeto <b>pausado</b> ou <b>uso acima do limite do plano</b> (egress/armazenamento). ' +
+            'Abra o painel do Supabase: se houver aviso de limite excedido ou projeto pausado, é essa a causa — e ela se resolve lá, não aqui.' +
+            (corpo ? '<br><span style="opacity:.8">Resposta: ' + utils.escapeHTML(corpo) + '</span>' : ''));
+          add('ok', 'Enquanto isso, NADA se perde: o que vocês fizerem fica gravado em cada aparelho e sobe sozinho quando o servidor voltar. ' +
+            '<b>Ninguém deve sair da nuvem</b> — sair apaga a sessão do aparelho, e não há como entrar de novo até o servidor voltar.');
+          return;
         } else {
           add('aviso', 'Servidor respondeu com status ' + r.status + ' (inesperado, mas está no ar).');
           chaveOk = true;
@@ -21468,7 +21565,9 @@ const cloud = {
       const tokOk = await cloud._garantirToken();
       linhas.pop(); render();
       if (!tokOk) {
-        add('erro', 'Sua sessão EXPIROU e não foi possível renovar. Faça login novamente (Desconectar → Conectar).');
+        add('erro', cloud.servidorFora()
+          ? 'O servidor da clínica NÃO está respondendo. A sua sessão continua válida — NÃO desconecte (isso apagaria a sessão, e não haveria como entrar de novo até o servidor voltar). Continue atendendo: tudo fica gravado no aparelho e sobe sozinho.'
+          : 'Sua sessão EXPIROU e não foi possível renovar. Faça login novamente (Desconectar → Conectar).');
         return;
       }
       add('ok', 'Sessão válida.');
@@ -22130,6 +22229,16 @@ const nuvemEstado = {
         'Conecte em <b>Nuvem e backups</b>, logo abaixo.</span>';
       return;
     }
+    /* A ORDEM IMPORTA: servidor fora vem ANTES de sessão vencida, porque o
+       botão "Entrar de novo" é exatamente a ação errada numa queda — ela apaga
+       a sessão boa e não há como obter outra até o servidor voltar. */
+    if (cloud.servidorFora()) {
+      el.innerHTML = '<span style="color:#b3392a">🔌 <b>O servidor da clínica não está respondendo.</b> ' +
+        'Nada foi perdido e nada para de funcionar: continue atendendo, tudo fica gravado aqui e sobe sozinho quando ele voltar. ' +
+        '<b>Não saia da nuvem</b> — a sua sessão continua boa.</span> ' +
+        '<button class="btn btn-xs" onclick="nuvemEstado.atualizarTudo()">Tentar agora</button>';
+      return;
+    }
     if (cloud.sessaoExpirada()) {
       el.innerHTML = '<span style="color:#b3392a">🔑 <b>Sessão da nuvem vencida.</b> Nada foi perdido — entre de novo para voltar a sincronizar.</span> ' +
         '<button class="btn btn-xs btn-primary" onclick="cloud.reentrar()">Entrar de novo</button>';
@@ -22158,6 +22267,10 @@ const nuvemEstado = {
     if (!cloud.estaConfigurado() || !cloud.estaLogado()) {
       toast('Este aparelho não está conectado à nuvem. Entre com o seu e-mail e senha para sincronizar.', 'warn');
       try { cloud.reentrar(); } catch (e) {}
+      return;
+    }
+    if (cloud.servidorFora()) {
+      toast('🔌 O servidor da clínica não está respondendo. Não é a sua senha nem a sua sessão — continue atendendo, tudo fica gravado aqui e sobe sozinho quando ele voltar.', 'warn');
       return;
     }
     if (cloud.sessaoExpirada()) { try { cloud.reentrar(); } catch (e) {} return; }
@@ -22295,7 +22408,8 @@ const medidorNuvem = {
               const n = parseInt((resp && resp.headers && resp.headers.get('content-length')) || '0', 10);
               medidorNuvem.registrar(url, isNaN(n) ? 0 : n, !!(resp && resp.ok));
             } catch (e) {}
-          }, () => {});
+            try { cloud._observarResposta(resp); } catch (e) {}
+          }, () => { try { cloud._observarFalhaRede(); } catch (e) {} });
         }
       } catch (e) {}
       return p;
@@ -24567,7 +24681,7 @@ const cloudRel = {
      nada — o que já estiver lá é atualizado. */
   async enviarTudoParaClinica(opts = {}) {
     if (!cloudRel.disponivel()) { toast('Conecte-se à nuvem primeiro', 'warn'); return null; }
-    if (!(await cloud._garantirToken())) { toast('Sessão da nuvem expirada — entre de novo', 'warn'); return null; }
+    if (!(await cloud._garantirToken())) { toast(cloud.motivoSemToken(), 'warn'); return null; }
     const org = await cloudRel._orgAsync();
     if (!org) { toast('Esta conta ainda não tem clínica na nuvem — crie em Ajustes → Equipe da nuvem', 'warn'); return null; }
     const mods = Object.keys(cloudRel.MODOS);
@@ -25064,7 +25178,11 @@ const cloudDiag = {
       const semVinculoDeVerdade = !!(perfil && perfil.semVinculo);
       const expirada = cloud.sessaoExpirada();
       let msg;
-      if (semVinculoDeVerdade) {
+      if (cloud.servidorFora()) {
+        msg = '<p class="diag-linha diag-erro">🔌 <b>O servidor da clínica não está respondendo.</b> Não é a sua conta, não é a sua senha e não é a sua clínica — ' +
+          'é o servidor. <b>Seus dados estão aqui</b> e sobem sozinhos quando ele voltar. <b>Não saia da nuvem</b>: a sua sessão continua boa, e sair apagaria ela.</p>' +
+          '<button class="btn btn-sm btn-primary" onclick="cloudDiag.rodar()">🔄 Tentar de novo</button>';
+      } else if (semVinculoDeVerdade) {
         msg = '<p class="diag-linha diag-erro">Sua conta não está vinculada a nenhuma clínica no banco. Abra <b>Equipe da nuvem</b> e crie ou entre numa clínica.</p>';
       } else if (expirada) {
         msg = '<p class="diag-linha diag-erro">🔑 <b>A sua sessão da nuvem expirou.</b> Nada foi perdido — o aparelho só precisa entrar de novo para voltar a conversar com a clínica.</p>' +
@@ -25400,7 +25518,7 @@ const orgSettings = {
   async salvar(patch) {
     const s = Object.assign({}, orgSettings.local(), patch || {});
     if (!cloudRel.disponivel()) { toast('Sem internet — tente de novo online', 'warn'); return false; }
-    if (!(await cloud._garantirToken())) { toast('Sessão expirada — entre de novo', 'warn'); return false; }
+    if (!(await cloud._garantirToken())) { toast(cloud.motivoSemToken(), 'warn'); return false; }
     const org = await cloudRel._orgAsync(); if (!org) { toast('Organização não encontrada', 'warn'); return false; }
     const c = cloud.config();
     try {
@@ -25462,7 +25580,7 @@ const equipeNuvem = {
     const nome = prompt('Nome da sua clínica na nuvem:', sug);
     if (nome === null) return;
     try {
-      if (!(await cloud._garantirToken())) throw new Error('Sessão da nuvem expirada — entre de novo.');
+      if (!(await cloud._garantirToken())) throw new Error(cloud.motivoSemToken());
       const c = cloud.config();
       const r = await fetch(c.url + '/rest/v1/rpc/criar_minha_organizacao', {
         method: 'POST',
@@ -25535,6 +25653,13 @@ const equipeNuvem = {
       /* Sessão vencida ≠ conta sem clínica: com o token velho, TODA consulta
          volta 401 e a tela acusava falta de vínculo que não existe. */
       const expirada = (() => { try { return cloud.sessaoExpirada(); } catch (e) { return false; } })();
+      if ((() => { try { return cloud.servidorFora(); } catch (e) { return false; } })()) {
+        host.innerHTML =
+          '<p style="font-size:.86rem;margin:0 0 10px">🔌 <b>O servidor da clínica não está respondendo.</b> Por isso não dá para confirmar a equipe agora — ' +
+          '<b>nada foi perdido</b>, e a sua sessão continua boa. Não saia da nuvem.</p>';
+        if (addBox) addBox.style.display = 'none';
+        return;
+      }
       if (expirada) {
         host.innerHTML =
           '<p style="font-size:.86rem;margin:0 0 10px">🔑 <b>A sua sessão da nuvem expirou neste aparelho.</b> Por isso não dá para confirmar a sua clínica agora — <b>nada foi perdido</b>.</p>' +
