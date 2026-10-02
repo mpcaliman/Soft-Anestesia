@@ -4681,7 +4681,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-02f</b><br>
+    v7.1 · build <b id="build-tag">2026-10-02h</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -9962,39 +9962,27 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
       </div>
     </section>
 
-    <section class="card" id="logo-usuario-card">
-      <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-icon">🖼️</span><h2>Logomarca<small>A marca desta clínica — vai no cabeçalho dos documentos dos pacientes</small></h2></div>
-        <div class="card-actions"><span class="toggle-icon">▾</span></div>
-      </div>
-      <div class="card-body">
-        <div id="logo-usuario-preview" style="margin-bottom:12px"></div>
-        <p style="font-size:.82rem;color:var(--text-soft);margin-bottom:10px">
-          Escolha um arquivo de imagem (PNG com fundo transparente fica melhor). A imagem é a
-          <strong>logomarca desta clínica</strong>: vale para todos os aparelhos e pessoas dela, e aparece
-          automaticamente em todos os módulos ao imprimir/gerar PDF.
-          <br>Cada ambiente tem a sua: um ambiente novo nasce <strong>sem logomarca</strong>, e quem a define é o gestor dele.
-          A marca do Soft Anestesia continua sendo a do programa — ela não vai no documento do paciente.
-        </p>
-        <input type="file" id="logo-usuario-file" accept="image/*" style="display:none" onchange="logoUsuario.escolher(this)">
-        <div class="cloud-actions" style="margin-top:4px">
-          <button type="button" class="btn btn-primary btn-sm" onclick="document.getElementById('logo-usuario-file').click()">📁 Escolher logomarca</button>
-          <button type="button" class="btn btn-ghost btn-sm" id="logo-usuario-remover" onclick="logoUsuario.remover()" style="display:none">↺ Remover logomarca</button>
-        </div>
-      </div>
-    </section>
-
     <section class="card" id="clinica-identidade-card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-icon">🏥</span><h2>Identidade da clínica<small>Nome, endereço e contato — aparecem no alto das impressões</small></h2></div>
+        <div class="card-title-wrap"><span class="card-icon">🏥</span><h2>Identidade da clínica<small>Logomarca, nome, endereço e contato — aparecem no alto de TODAS as impressões</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
         <p style="font-size:.82rem;color:var(--text-soft);margin-bottom:10px">
-          O que você escrever aqui vai no cabeçalho de <strong>consulta, pré-anestésica, ficha de anestesia, SRPA,
-          termo, receituário, documentos, orçamentos e relatórios</strong> — ao lado da logomarca.
+          A logomarca e o que você escrever aqui vão no cabeçalho de <strong>consulta, pré-anestésica, ficha de anestesia, SRPA,
+          termo, receituário, documentos, orçamentos e relatórios</strong>.
           É o endereço e o telefone que o paciente procura depois, no papel que levou para casa.
           <br>Vale para <strong>esta clínica</strong>: todos os aparelhos e pessoas dela imprimem igual, e não atravessa para outro ambiente.
+        </p>
+        <div id="logo-usuario-preview" style="margin-bottom:10px"></div>
+        <input type="file" id="logo-usuario-file" accept="image/*" style="display:none" onchange="logoUsuario.escolher(this)">
+        <div class="cloud-actions" style="margin:0 0 14px">
+          <button type="button" class="btn btn-primary btn-sm" id="logo-usuario-escolher" onclick="document.getElementById('logo-usuario-file').click()">📁 Escolher logomarca</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="logo-usuario-remover" onclick="logoUsuario.remover()" style="display:none">↺ Remover logomarca</button>
+        </div>
+        <p style="font-size:.78rem;color:var(--text-mute);margin:0 0 12px">
+          Esta é a <strong>logomarca desta clínica</strong> — vale para todos os aparelhos e pessoas dela.
+          PNG com fundo transparente fica melhor. A marca do Soft Anestesia é do programa e <strong>não</strong> entra em documento de paciente.
         </p>
         <div id="clinica-identidade-campos"></div>
         <div class="cloud-actions" style="margin-top:4px">
@@ -12167,13 +12155,27 @@ const armazenamento = {
   /* Uso do espaço APERTADO (localStorage, ~5 MB). O que mudou de casa para o
      disco grande não conta aqui — é justamente o objetivo — mas continua
      listado, com a marca de onde está, senão a tela mentiria por omissão. */
+  /* MEDE O APARELHO, NÃO A GAVETA.
+
+     Isto percorria `localStorage` — que, desde a separação por clínica, é a
+     FACHADA: ela só enxerga a gaveta aberta. O resultado foi uma tela que
+     dizia "Armazenamento cheio (520 KB)" num computador com quase 8 MB
+     gravados, e uma lista de maiores ocupantes que não mencionava o maior de
+     todos. Pior: "Liberar espaço" não conseguia nem ver o que estava
+     entupindo o aparelho.
+
+     A cota que estoura é a do navegador, que conta TUDO — as outras gavetas e
+     o acervo antigo inclusive. Então é tudo que precisa ser medido, e cada
+     coisa nomeada pelo que é. */
   uso() {
     const itens = []; let total = 0;
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      const v = localStorage.getItem(k) || '';
-      const bytes = (k.length + v.length) * 2;   /* UTF-16 */
-      total += bytes; itens.push({ k, bytes });
+    const R = (typeof cofre !== 'undefined' && cofre._real) ? cofre._real : localStorage;
+    for (let i = 0; i < R.length; i++) {
+      const kr = R.key(i);
+      const v = R.getItem(kr) || '';
+      const bytes = (String(kr).length + v.length) * 2;   /* UTF-16 */
+      total += bytes;
+      itens.push({ k: kr, bytes, escopo: armazenamento._escopo(kr) });
     }
     let grande = 0;
     try {
@@ -12187,7 +12189,23 @@ const armazenamento = {
     itens.sort((a, b) => b.bytes - a.bytes);
     return { total, grande, itens };
   },
-  _rotulo(k) {
+  /* De quem é esta chave: desta clínica, de outra, do acervo antigo sem dono,
+     ou do próprio aparelho. */
+  _escopo(kr) {
+    try {
+      const k = String(kr);
+      const i = k.lastIndexOf('@');
+      if (i > 0) return k.slice(i) === cofre.sufixo() ? 'minha' : 'outra';
+      /* sem sufixo: ou é chave do próprio aparelho (lista explícita do cofre),
+         ou é acervo de antes da separação */
+      return cofre.separa(k) ? 'legado' : 'aparelho';
+    } catch (e) { return 'aparelho'; }
+  },
+  _rotulo(k, escopo) {
+    if (escopo === 'outra') return '🏥 Outra clínica neste aparelho';
+    if (escopo === 'legado') return '📦 Acervo antigo sem clínica definida';
+    /* tira o sufixo da gaveta para reconhecer a chave do módulo */
+    try { if (typeof cofre !== 'undefined' && cofre.app) k = cofre.app(k); } catch (e) {}
     if (k === store.BLOBS_KEY) return '🖼 Carimbos e imagens (guardados 1×)';
     if (k === 'medsys.v7.versions') return '🕓 Histórico de versões';
     if (k === 'medsys.v7.lixeira') return '🗑 Lixeira (30 dias)';
@@ -13569,7 +13587,7 @@ const espaco = {
       d.total = u.total;
       const porRotulo = {};
       u.itens.forEach(it => {
-        const r = armazenamento._rotulo(it.k);
+        const r = armazenamento._rotulo(it.k, it.escopo);
         porRotulo[r] = (porRotulo[r] || 0) + it.bytes;
       });
       d.topo = Object.entries(porRotulo).sort((a, b) => b[1] - a[1]).slice(0, 3);
@@ -23074,13 +23092,11 @@ const ambiente = {
       const trancado = gestor ? '' :
         ' Quem define isto é o <b>gestor</b> da clínica; aqui você vê o que está valendo.';
 
-      const logo = document.querySelector('#logo-usuario-card .card-body');
-      if (logo && !semClinica) ambiente._avisoDono(logo, daClinica + trancado);
-      ['logo-usuario-file', 'logo-usuario-remover'].forEach(id => {
+      ['logo-usuario-file', 'logo-usuario-remover', 'logo-usuario-escolher'].forEach(id => {
         const el = document.getElementById(id); if (el) el.disabled = !gestor;
       });
-      const btnLogo = logo && logo.querySelector('button.btn-primary');
-      if (btnLogo) { btnLogo.disabled = !gestor; btnLogo.style.opacity = gestor ? '' : '.5'; }
+      const btnLogo = document.getElementById('logo-usuario-escolher');
+      if (btnLogo) btnLogo.style.opacity = gestor ? '' : '.5';
 
       /* Identidade da clínica é da CLÍNICA, como a logomarca: quem define é o
          gestor, e os demais veem de quem é. */
@@ -56486,9 +56502,9 @@ const ajustesGrupos = {
     { id: 'equipe', titulo: '🔐 Usuários, equipe e permissões',
       desc: 'Quem entra no sistema, o que cada um pode ver e o registro de quem fez o quê',
       cards: ['usuarios-card', 'equipe-nuvem-card', 'auditoria-card'] },
-    { id: 'modelos', titulo: '📄 Modelos, logomarca e procedimentos',
-      desc: 'Termo de consentimento padrão, textos padrão por campo, logomarca e a sua tabela CBHPM',
-      cards: ['termo-padrao-card', 'textos-padrao-card', 'logo-usuario-card', 'cbhpm-card'] },
+    { id: 'modelos', titulo: '📄 Identidade da clínica, modelos e procedimentos',
+      desc: 'Logomarca, nome e contato da clínica no cabeçalho das impressões; termo de consentimento padrão, textos padrão por campo e a sua tabela CBHPM',
+      cards: ['clinica-identidade-card', 'termo-padrao-card', 'textos-padrao-card', 'cbhpm-card'] },
     { id: 'avancado', titulo: '🛠️ Avançado', avancado: true,
       desc: 'Ferramentas técnicas. No uso normal você não precisa abrir isto — só se algo der errado e for pedido',
       cards: ['clouddiag-card', 'fase4-card'] }

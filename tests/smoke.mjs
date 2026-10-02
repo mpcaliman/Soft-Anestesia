@@ -1718,7 +1718,7 @@ await test('Ajustes: cards do sistema viram grupos recolhíveis (o técnico em "
     out.cardsDentro = document.getElementById('ajg-nuvem').contains(document.getElementById('cloud-card'))
       && document.getElementById('ajg-nuvem').contains(document.getElementById('armazenamento-card'))
       && document.getElementById('ajg-equipe').contains(document.getElementById('equipe-nuvem-card'))
-      && document.getElementById('ajg-modelos').contains(document.getElementById('logo-usuario-card'));
+      && document.getElementById('ajg-modelos').contains(document.getElementById('clinica-identidade-card'));
     /* o que é técnico saiu da frente: diagnóstico e migração só em "Avançado" */
     out.tecnicoEmAvancado = document.getElementById('ajg-avancado').contains(document.getElementById('clouddiag-card'))
       && document.getElementById('ajg-avancado').contains(document.getElementById('fase4-card'))
@@ -16760,7 +16760,7 @@ await test('Logomarca e Drive são da clínica aberta, e só o gestor dela edita
     ambiente.aplicarPermissoesAjustes();
     out.gestorEditaLogo = document.getElementById('logo-usuario-file').disabled === false;
     out.gestorEditaDrive = document.getElementById('pdfbk-drive').disabled === false;
-    const avisoLogo = document.querySelector('#logo-usuario-card .amb-dono');
+    const avisoLogo = document.querySelector('#clinica-identidade-card .amb-dono');
     out.dizDeQuemEhALogo = !!avisoLogo && /Clínica de Teste/.test(avisoLogo.textContent);
     out.dizQueNaoAtravessa = !!avisoLogo && /não atravessa/.test(avisoLogo.textContent);
     const avisoPdf = document.getElementById('pdfbk-drive').closest('.card-body').querySelector('.amb-dono');
@@ -16773,7 +16773,9 @@ await test('Logomarca e Drive são da clínica aberta, e só o gestor dela edita
     out.auxiliarNaoEditaLogo = document.getElementById('logo-usuario-file').disabled === true;
     out.auxiliarNaoEditaDrive = document.getElementById('pdfbk-drive').disabled === true;
     out.auxiliarNaoEditaClientId = document.getElementById('pdfbk-client-id').disabled === true;
-    const aviso2 = document.querySelector('#logo-usuario-card .amb-dono');
+    /* a logomarca passou a morar no card "Identidade da clínica" (teste 245):
+       são a mesma coisa — o que identifica a clínica no papel */
+    const aviso2 = document.querySelector('#clinica-identidade-card .amb-dono');
     out.explicaAQuemNaoPode = !!aviso2 && /gestor/.test(aviso2.textContent);
 
     /* ---- médico do próprio consultório é gestor de si ---- */
@@ -16782,7 +16784,7 @@ await test('Logomarca e Drive são da clínica aberta, e só o gestor dela edita
     out.medicoEdita = document.getElementById('logo-usuario-file').disabled === false;
 
     /* ---- os textos da tela não podem mais dizer "neste aparelho"/"seu Drive" ---- */
-    const txtLogo = document.querySelector('#logo-usuario-card .card-body').textContent;
+    const txtLogo = document.querySelector('#clinica-identidade-card .card-body').textContent;
     out.textoLogoCorrigido = /logomarca desta clínica/i.test(txtLogo) && !/guardada[\s\S]{0,20}neste aparelho/i.test(txtLogo);
     const txtPdf = document.getElementById('pdfbk-drive').closest('.card-body').textContent;
     out.textoDriveCorrigido = /Drive desta clínica/i.test(txtPdf);
@@ -18025,6 +18027,139 @@ await test('Identidade da clínica no cabeçalho de todas as impressões, por am
   assert(r.voltouIntacta, 'e o primeiro continua com a dele');
   assert(r.sincronizaNaClinica, 'viaja para os outros aparelhos DA CLÍNICA — a secretária imprime igual sem redigitar');
   assert(r.naoEhPreferenciaPessoal, 'e não viaja como preferência de pessoa, que a levaria para dentro de outra clínica');
+  await page.close();
+});
+
+/* 244) A tela de armazenamento media a gaveta, não o aparelho
+
+   Foto da tela, num computador em uso: "⚠️ Armazenamento cheio (520 KB)" —
+   e, na mesma faixa, "975 registros antigos (7,6 MB) estão guardados aqui".
+   Os dois números na mesma frase, um desmentindo o outro.
+
+   A causa: `armazenamento.uso()` percorria `localStorage`, que desde a
+   separação por clínica é a FACHADA do cofre — ela só enxerga a gaveta
+   aberta. Media-se a gaveta e anunciava-se o aparelho.
+
+   Não era só número feio: a lista de "maiores ocupantes" não mencionava o
+   maior de todos, e o "Liberar espaço" não conseguia nem VER o que estava
+   entupindo a máquina. A cota que estoura é a do navegador, e ela conta tudo:
+   as outras gavetas e o acervo antigo inclusive. */
+await test('Armazenamento mede o aparelho inteiro, e diz de quem é cada pedaço', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const R = cofre._real;
+    const limpar = () => {
+      const fora = [];
+      for (let i = 0; i < R.length; i++) { const k = R.key(i); if (k && k.indexOf('medsys.') === 0) fora.push(k); }
+      fora.forEach(k => R.removeItem(k));
+    };
+    limpar();
+    R.setItem('medsys.v7.cloud.org_id', 'org-aaaa');
+
+    const encher = (n) => 'x'.repeat(n);
+    R.setItem('medsys.v5.pacientes@org-aaaa', encher(10000));   /* desta clínica */
+    R.setItem('medsys.v3.anestesia@org-bbbb', encher(40000));   /* de outra */
+    R.setItem('medsys.v3.pre', encher(80000));                  /* acervo antigo */
+    R.setItem('medsys.v7.theme', 'escuro');                     /* do aparelho */
+
+    const u = armazenamento.uso();
+    /* a gaveta sozinha tem ~10 mil caracteres; o aparelho tem ~130 mil */
+    out.mediuOAparelho = u.total > 250000;
+    out.naoMediuSoAGaveta = u.total > 200000;
+
+    const porEscopo = {};
+    u.itens.forEach(it => { porEscopo[it.escopo] = (porEscopo[it.escopo] || 0) + it.bytes; });
+    out.achouAsQuatro = ['minha', 'outra', 'legado', 'aparelho'].every(k => porEscopo[k] > 0);
+    out.legadoEhOMaior = porEscopo.legado > porEscopo.outra && porEscopo.outra > porEscopo.minha;
+
+    /* e cada pedaço aparece com NOME, não como "configurações e outros" */
+    const d = espaco.diagnostico();
+    const rotulos = d.topo.map(([r]) => r).join(' | ');
+    out.nomeiaOAcervo = /Acervo antigo sem clínica/.test(rotulos);
+    out.nomeiaAOutraClinica = /Outra clínica neste aparelho/.test(rotulos);
+    out.totalBate = d.total === u.total;
+
+    /* a chave desta clínica continua sendo reconhecida pelo módulo dela */
+    out.reconheceOModulo = armazenamento._rotulo('medsys.v5.pacientes@org-aaaa', 'minha').indexOf('Pacientes') >= 0;
+
+    limpar();
+    return out;
+  });
+  assert(r.mediuOAparelho && r.naoMediuSoAGaveta, 'o total tem de ser o do APARELHO — é a cota dele que estoura, não a da gaveta');
+  assert(r.achouAsQuatro, 'e separar o que é desta clínica, de outra, do acervo antigo e do próprio aparelho');
+  assert(r.legadoEhOMaior, 'com os tamanhos certos de cada um');
+  assert(r.nomeiaOAcervo, 'o acervo antigo aparece NOMEADO entre os maiores ocupantes — ele era justamente o que sumia da lista');
+  assert(r.nomeiaAOutraClinica, 'e a gaveta da outra clínica também, em vez de virar "configurações e outros"');
+  assert(r.totalBate, 'a faixa e o painel contam a mesma coisa');
+  assert(r.reconheceOModulo, 'e a chave desta clínica continua sendo reconhecida pelo módulo a que pertence');
+  await page.close();
+});
+
+/* 245) O lugar de pôr a logomarca tem de EXISTIR na tela
+
+   Relato curto e certeiro: "falta o lugar para colocar a logomarca da clínica
+   para aparecer nas impressões, todas!".
+
+   Duas falhas minhas, somadas:
+
+   1) o card novo "Identidade da clínica" não foi incluído em nenhum grupo de
+      Ajustes. Os grupos MOVEM os cards listados para dentro deles — o que não
+      está na lista não vai para lugar nenhum da tela. O card existia no HTML
+      e era invisível para quem usa;
+   2) a logomarca continuava num card separado, longe, enquanto a identidade
+      da clínica estava em outro. São a mesma coisa: o que identifica a
+      clínica no papel. Procurar em dois lugares para montar um cabeçalho só
+      é trabalho que o programa deveria poupar, não criar. */
+await test('Logomarca e identidade da clínica no mesmo lugar, e esse lugar aparece em Ajustes', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => { try { ui.showModule('ajustes'); ajustes.render(); } catch (e) {} });
+  const r = await page.evaluate(() => {
+    const out = {};
+    /* ---- o card existe e está DENTRO de um grupo de Ajustes ---- */
+    const card = document.getElementById('clinica-identidade-card');
+    out.cardExiste = !!card;
+    out.estaNumGrupo = !!card && !!card.closest('[id^="ajg-"]');
+    const grupo = (ajustesGrupos.GRUPOS || []).find(g => (g.cards || []).indexOf('clinica-identidade-card') >= 0);
+    out.listadoNoGrupo = !!grupo;
+    out.grupoFalaDaLogomarca = !!grupo && /logomarca/i.test(grupo.titulo + ' ' + grupo.desc);
+
+    /* ---- a logomarca mora DENTRO dele ---- */
+    out.logoNoMesmoCard = !!card && !!card.querySelector('#logo-usuario-preview')
+                                 && !!card.querySelector('#logo-usuario-escolher');
+    out.semCardSolto = !document.getElementById('logo-usuario-card');
+
+    /* ---- e os campos de texto também ---- */
+    clinicaIdentidade.renderAjustes();
+    out.camposNoMesmoCard = !!card && clinicaIdentidade.CAMPOS.every(([k]) => !!card.querySelector('#ci-' + k));
+
+    /* ---- o card diz que vale para TODAS as impressões ---- */
+    const txt = card ? card.textContent : '';
+    out.dizTodasAsImpressoes = /ficha de anestesia/i.test(txt) && /orçamentos/i.test(txt) && /relatórios/i.test(txt);
+
+    /* ---- só o gestor edita: logomarca e campos juntos ---- */
+    const souGestorOrig = ambiente.souGestor;
+    ambiente.souGestor = () => false;
+    ambiente.aplicarPermissoesAjustes();
+    out.naoGestorTrancado = document.getElementById('logo-usuario-escolher').disabled === true
+      && document.getElementById('ci-nome').disabled === true
+      && document.getElementById('clinica-identidade-salvar').disabled === true;
+    ambiente.souGestor = () => true;
+    ambiente.aplicarPermissoesAjustes();
+    out.gestorEdita = document.getElementById('logo-usuario-escolher').disabled === false
+      && document.getElementById('ci-nome').disabled === false;
+    ambiente.souGestor = souGestorOrig;
+    return out;
+  });
+  assert(r.cardExiste, 'o card da identidade da clínica tem de existir');
+  assert(r.listadoNoGrupo && r.estaNumGrupo, 'e estar num grupo de Ajustes — card fora da lista não vai para lugar nenhum da tela, e foi assim que ele ficou invisível');
+  assert(r.grupoFalaDaLogomarca, 'com o grupo dizendo que a logomarca está ali, para quem procura por ela achar');
+  assert(r.logoNoMesmoCard, 'a logomarca mora no mesmo card da identidade: são a mesma coisa, o que identifica a clínica no papel');
+  assert(r.semCardSolto, 'e não sobrou um card de logomarca solto em outro canto');
+  assert(r.camposNoMesmoCard, 'nome, endereço, contato e linha livre no mesmo lugar');
+  assert(r.dizTodasAsImpressoes, 'e o card diz em que impressões isso aparece — todas');
+  assert(r.naoGestorTrancado, 'quem não é gestor vê e não edita, logomarca e campos juntos');
+  assert(r.gestorEdita, 'e o gestor edita os dois');
   await page.close();
 });
 
