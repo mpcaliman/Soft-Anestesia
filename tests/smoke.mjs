@@ -18417,6 +18417,113 @@ await test('Nuvem é a fonte: o aparelho se esvazia sozinho e sai vazio, sem per
   await page.close();
 });
 
+/* 249) Sem internet, a tela diz; e o digitado não se perde em módulo nenhum
+
+   Dois pedidos do mesmo parágrafo:
+
+   "Se sem internet, gravar local. Mas com aviso e tarja de sem internet.
+   (...) não desligar."
+   "Ao digitar algo em qualquer campo de qualquer módulo essa ação deve ficar
+   gravada atrelada ao usuário. E mesmo sem salvar ou finalizar, não se perde
+   o editado."
+
+   O primeiro existe porque, com a nuvem como fonte, ficar offline deixou de
+   ser invisível: o atendimento continua sendo gravado, mas só aqui. Quem não
+   sabe disso desliga a máquina e perde o que fez.
+
+   O segundo tapa um buraco antigo: o auto-save cobria quatro módulos. Em
+   termo, receituário, risco, documentos, orçamento, financeiro e agenda, o
+   que estava digitado e não salvo existia SÓ na tela. */
+await test('Tarja de sem internet, e o que foi digitado sobrevive em qualquer módulo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const origOffline = conexao.offline;
+    const origPend = conexao.pendentes;
+
+    /* ---- tudo em ordem: nenhuma tarja ---- */
+    conexao.offline = () => false; conexao.pendentes = () => 0;
+    conexao.pintar();
+    out.semTarjaQuandoTudoOk = !document.getElementById(conexao.ID);
+
+    /* ---- sem internet: tarja fixa, com o número e o pedido de não desligar ---- */
+    conexao.offline = () => true; conexao.pendentes = () => 3;
+    conexao.pintar();
+    const t = document.getElementById(conexao.ID);
+    out.apareceu = !!t;
+    out.dizSemInternet = !!t && /SEM INTERNET/.test(t.textContent);
+    out.dizQuantos = !!t && /3 atendimento/.test(t.textContent);
+    out.dizSoNesteAparelho = !!t && /só neste aparelho/i.test(t.textContent);
+    out.pedeNaoDesligar = !!t && /não feche nem desligue/i.test(t.textContent);
+    out.dizQueSobemSozinhos = !!t && /sobem sozinhos/i.test(t.textContent);
+
+    /* ---- internet voltou mas ainda há registro preso aqui: o aviso CONTINUA ---- */
+    conexao.offline = () => false; conexao.pendentes = () => 2;
+    conexao.pintar();
+    const t2 = document.getElementById(conexao.ID);
+    out.continuaEnquantoNaoSobe = !!t2 && /Enviando para a nuvem/i.test(t2.textContent)
+      && /Não desligue/i.test(t2.textContent);
+
+    /* ---- subiu tudo: some sozinha ---- */
+    conexao.pendentes = () => 0;
+    conexao.pintar();
+    out.someQuandoAcaba = !document.getElementById(conexao.ID);
+    conexao.offline = origOffline; conexao.pendentes = origPend;
+
+    /* ---- EDIÇÃO VIVA nos módulos que não tinham nada ---- */
+    out.cobreOsQueFaltavam = ['termo', 'prescricao', 'risco', 'documentos', 'orcamento', 'financeiro', 'agenda']
+      .every(m => edicaoViva.MODS.indexOf(m) >= 0);
+
+    const f = document.getElementById('form-termo');
+    out.temOFormulario = !!f;
+    if (f) {
+      edicaoViva.descartar('termo');
+      const campo = f.querySelector('input[name], textarea[name]');
+      campo.value = 'Texto que ninguém salvou';
+      edicaoViva.guardar('termo');
+      const g = edicaoViva.ler('termo');
+      out.guardouODigitado = !!g && JSON.stringify(g.dados).indexOf('ninguém salvou') >= 0;
+      out.atreladoAoUsuario = !!g && typeof g.quem === 'string';
+      out.temCarimboDeHora = !!g && !!g.em;
+
+      /* a tela some (como ao fechar a aba) e o que foi digitado volta */
+      campo.value = '';
+      out.restaurou = edicaoViva.restaurar('termo') === true && campo.value === 'Texto que ninguém salvou';
+      const aviso = document.getElementById('edicao-viva-aviso');
+      out.avisouQueRecuperou = !!aviso && /Recuperei o que você estava digitando/.test(aviso.textContent);
+      out.ofereceDescartar = !!aviso && /Descartar/.test(aviso.textContent);
+
+      /* NÃO sobrescreve o que está sendo digitado agora */
+      campo.value = 'O que estou escrevendo agora';
+      out.naoSobrescreve = edicaoViva.restaurar('termo') === false
+        && campo.value === 'O que estou escrevendo agora';
+
+      /* formulário em branco não vira rascunho de nada */
+      campo.value = '';
+      edicaoViva.guardar('termo');
+      out.vazioNaoGuarda = edicaoViva.ler('termo') === null;
+
+      edicaoViva.descartar('termo');
+      const a2 = document.getElementById('edicao-viva-aviso'); if (a2) a2.remove();
+    }
+    return out;
+  });
+  assert(r.semTarjaQuandoTudoOk, 'com internet e nada preso aqui, nenhuma tarja — aviso que fica sempre deixa de ser lido');
+  assert(r.apareceu && r.dizSemInternet, 'sem internet, a tarja aparece e diz isso com todas as letras');
+  assert(r.dizQuantos && r.dizSoNesteAparelho, 'dizendo QUANTOS atendimentos existem só ali — é a resposta a "o que eu perco se desligar"');
+  assert(r.pedeNaoDesligar && r.dizQueSobemSozinhos, 'pede para não desligar, e tranquiliza: sobem sozinhos quando voltar');
+  assert(r.continuaEnquantoNaoSobe, 'internet de volta não basta: enquanto um registro estiver preso aqui, o aviso continua');
+  assert(r.someQuandoAcaba, 'e some sozinha quando o último chega à nuvem');
+  assert(r.cobreOsQueFaltavam, 'a edição viva cobre justamente os módulos que não tinham auto-save nenhum');
+  assert(r.temOFormulario && r.guardouODigitado, 'o que foi digitado e não salvo fica guardado');
+  assert(r.atreladoAoUsuario && r.temCarimboDeHora, 'atrelado a quem digitou e a quando');
+  assert(r.restaurou && r.avisouQueRecuperou, 'e volta ao abrir o módulo, avisando que foi recuperado — não aparece como se a pessoa tivesse digitado agora');
+  assert(r.ofereceDescartar, 'com saída para descartar: rascunho que não se consegue dispensar vira estorvo');
+  assert(r.naoSobrescreve, 'e NUNCA substitui o que está sendo digitado neste momento');
+  assert(r.vazioNaoGuarda, 'formulário em branco não vira rascunho — senão o sistema oferece recuperar o nada');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

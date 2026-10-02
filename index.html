@@ -4131,6 +4131,13 @@ body.dash-auxiliar #module-dashboard #pendencias-card[data-detail] { display: bl
 @media print{ .acoes-cab, .acoes-rodape{ display:none !important; } }
 
 /* Faixa de armazenamento cheio — avisa sem tomar a tela */
+.faixa-sem-net{
+  position: fixed; left: 0; right: 0; top: 0; z-index: 9998;
+  background: #8a1c1c; color: #fff; font-size: .82rem; line-height: 1.45;
+  padding: 9px 14px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,.22);
+}
+.faixa-sem-net-subindo{ background: #7a4b12; }
+@media print{ .faixa-sem-net{ display: none !important; } }
 .espaco-faixa{
   position: fixed; left: 10px; right: 10px; bottom: 84px; z-index: 950;
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -4688,7 +4695,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-02k</b><br>
+    v7.1 · build <b id="build-tag">2026-10-02l</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -13684,6 +13691,190 @@ const espaco = {
 };
 
 /* ============================================================================
+   SEM INTERNET — a tarja que diz a verdade enquanto ela dura
+
+   Com a nuvem como fonte, ficar sem internet deixou de ser invisível: o
+   atendimento continua sendo gravado NESTE aparelho, mas por enquanto existe
+   só aqui. Quem não sabe disso fecha a aba, desliga o computador ou troca de
+   máquina — e perde o que fez.
+
+   Por isso a tarja fica FIXA enquanto durar, diz quantos atendimentos ainda
+   não subiram e pede explicitamente para não desligar. E ela não some quando a
+   internet volta: some quando o último registro preso aqui chega à nuvem.
+   Enquanto houver um só aqui, o aviso continua — é o que ele está avisando.
+============================================================================ */
+const conexao = {
+  ID: 'faixa-sem-internet',
+  offline() {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+      return !!(typeof cloud !== 'undefined' && cloud.servidorFora && cloud.servidorFora());
+    } catch (e) { return false; }
+  },
+  /* Quantos atendimentos existem SÓ neste aparelho. Não é a fila técnica: é a
+     resposta à pergunta "o que eu perco se desligar isto agora?". */
+  pendentes() {
+    let n = 0;
+    try { n += (cloud._fila() || []).length; } catch (e) {}
+    try {
+      Object.keys(arquivo.PRAZOS || {}).forEach(mod => {
+        (store.list(mod) || []).forEach(it => { if (it && it._id && !it._relUpdatedAt) n++; });
+      });
+    } catch (e) {}
+    return n;
+  },
+  pintar() {
+    try {
+      const fora = conexao.offline();
+      const pend = conexao.pendentes();
+      const el = document.getElementById(conexao.ID);
+      if (!fora && !pend) { if (el) el.remove(); return; }
+      const div = el || document.createElement('div');
+      div.id = conexao.ID;
+      div.className = 'faixa-sem-net' + (fora ? '' : ' faixa-sem-net-subindo');
+      const quanto = pend
+        ? '<b>' + pend + '</b> atendimento(s) estão gravados <b>só neste aparelho</b>.'
+        : 'O que você fizer agora fica gravado <b>só neste aparelho</b>.';
+      div.innerHTML = fora
+        ? '<span>📴 <b>SEM INTERNET</b> — pode continuar trabalhando, nada se perde aqui. ' + quanto +
+          ' Sobem sozinhos quando a internet voltar: <b>não feche nem desligue até lá</b>.</span>'
+        : '<span>⏳ <b>Enviando para a nuvem…</b> ' + quanto + ' <b>Não desligue</b> até este aviso sumir.</span>';
+      if (!el) document.body.appendChild(div);
+    } catch (e) {}
+  },
+  iniciar() {
+    try {
+      conexao.pintar();
+      window.addEventListener('online', () => { conexao.pintar(); setTimeout(conexao.pintar, 4000); });
+      window.addEventListener('offline', conexao.pintar);
+      /* a fila esvazia sem disparar evento nenhum; o relógio é o que faz a
+         tarja sumir no instante certo em vez de ficar mentindo na tela */
+      setInterval(conexao.pintar, 5000);
+    } catch (e) {}
+  }
+};
+
+/* ============================================================================
+   EDIÇÃO VIVA — o que foi digitado não se perde, em módulo nenhum
+
+   O auto-save cobria quatro módulos (pré, consulta, ficha, SRPA). Nos outros
+   — termo, receituário, risco, documentos, orçamento, financeiro, agenda — o
+   que estava digitado e não salvo existia só na tela: fechar a aba, acabar a
+   bateria ou tocar em Voltar apagava tudo, sem aviso.
+
+   Aqui qualquer tecla em qualquer formulário é guardada, atrelada à PESSOA, e
+   viaja com ela: começar no celular e terminar no computador passa a valer
+   para o sistema inteiro.
+
+   Duas travas que fazem isso ser seguro:
+   • restaura só em formulário VAZIO — o que você está digitando agora nunca é
+     substituído pelo que ficou de ontem;
+   • o aviso traz um botão de descartar, porque rascunho que não se consegue
+     dispensar vira estorvo.
+============================================================================ */
+const edicaoViva = {
+  KEY: 'medsys.v7.edicao.',
+  /* Os quatro grandes já têm abas de rascunho próprias, com nuvem e tudo.
+     Aqui ficam os que não tinham nada. */
+  MODS: ['termo', 'prescricao', 'risco', 'documentos', 'orcamento', 'financeiro', 'agenda'],
+  FORMS: {
+    termo: 'form-termo', prescricao: 'form-prescricao', risco: 'form-risco',
+    documentos: 'form-documentos', orcamento: 'form-orcamento',
+    financeiro: 'form-financeiro', agenda: 'form-agenda'
+  },
+
+  _form(mod) { return document.getElementById(edicaoViva.FORMS[mod] || ''); },
+  _ler(f) {
+    const d = {};
+    f.querySelectorAll('input, select, textarea').forEach(el => {
+      if (!el.name || el.type === 'file' || el.type === 'password') return;
+      d[el.name] = (el.type === 'checkbox' || el.type === 'radio') ? el.checked : el.value;
+    });
+    return d;
+  },
+  /* Tem algo digitado de verdade? Formulário em branco não vira rascunho —
+     senão o sistema oferece recuperar o nada. */
+  temConteudo(d) {
+    try {
+      return Object.keys(d || {}).some(k => {
+        if (k.indexOf('_id') === 0) return false;
+        const v = d[k];
+        if (v === true) return true;
+        return typeof v === 'string' && v.trim() !== '';
+      });
+    } catch (e) { return false; }
+  },
+  guardar(mod) {
+    try {
+      const f = edicaoViva._form(mod); if (!f) return false;
+      const dados = edicaoViva._ler(f);
+      if (!edicaoViva.temConteudo(dados)) { edicaoViva.descartar(mod); return false; }
+      localStorage.setItem(edicaoViva.KEY + mod, JSON.stringify({
+        mod, dados, em: new Date().toISOString(),
+        quem: (() => { try { return (auth.usuarioAtual() || {}).usuario || ''; } catch (e) { return ''; } })()
+      }));
+      return true;
+    } catch (e) { return false; }
+  },
+  ler(mod) {
+    try { return JSON.parse(localStorage.getItem(edicaoViva.KEY + mod) || 'null'); } catch (e) { return null; }
+  },
+  descartar(mod) {
+    try { localStorage.removeItem(edicaoViva.KEY + mod); } catch (e) {}
+  },
+
+  /* Restaura ao abrir o módulo — SÓ se a tela estiver vazia. */
+  restaurar(mod) {
+    try {
+      const g = edicaoViva.ler(mod);
+      if (!g || !g.dados) return false;
+      const f = edicaoViva._form(mod); if (!f) return false;
+      if (edicaoViva.temConteudo(edicaoViva._ler(f))) return false;   /* já há coisa na tela */
+      let n = 0;
+      Object.keys(g.dados).forEach(nome => {
+        let el = null;
+        try { el = f.querySelector('[name="' + nome.replace(/"/g, '\\"') + '"]'); } catch (e) { el = null; }
+        if (!el) return;
+        if (el.type === 'checkbox' || el.type === 'radio') el.checked = !!g.dados[nome];
+        else el.value = g.dados[nome];
+        n++;
+      });
+      if (n) edicaoViva._avisar(mod, g.em);
+      return n > 0;
+    } catch (e) { return false; }
+  },
+  _avisar(mod, quando) {
+    try {
+      const f = edicaoViva._form(mod); if (!f) return;
+      const velho = document.getElementById('edicao-viva-aviso');
+      if (velho) velho.remove();
+      const el = document.createElement('div');
+      el.id = 'edicao-viva-aviso';
+      el.style.cssText = 'background:#fff8ec;border:1px solid #e3c893;border-radius:8px;padding:9px 12px;font-size:.82rem;margin:0 0 10px';
+      let h = '';
+      try { h = new Date(quando).toLocaleString('pt-BR'); } catch (e) {}
+      el.innerHTML = '✍️ <b>Recuperei o que você estava digitando</b>' + (h ? ' (de ' + utils.escapeHTML(h) + ')' : '') +
+        ' — nada tinha sido salvo ainda. Confira antes de continuar. ' +
+        '<button type="button" class="btn btn-xs" onclick="edicaoViva.descartar(\'' + mod + '\'); var a=document.getElementById(\'edicao-viva-aviso\'); if(a) a.remove();">Descartar</button>';
+      f.insertBefore(el, f.firstChild);
+    } catch (e) {}
+  },
+
+  /* Liga o ouvinte em TODOS os formulários da lista, uma vez só por tela. */
+  ligar() {
+    edicaoViva.MODS.forEach(mod => {
+      const f = edicaoViva._form(mod);
+      if (!f || f.dataset.edicaoViva === '1') return;
+      f.dataset.edicaoViva = '1';
+      let t = null;
+      const guardar = () => { clearTimeout(t); t = setTimeout(() => edicaoViva.guardar(mod), 1200); };
+      f.addEventListener('input', guardar);
+      f.addEventListener('change', guardar);
+    });
+  }
+};
+
+/* ============================================================================
    MODO NUVEM — o aparelho guarda só o que está em uso
    O sistema nasceu offline-first: tudo morava no aparelho e a nuvem era cópia.
    Num celular isso não cabe. Aqui a relação se inverte: a NUVEM é a fonte, e o
@@ -13778,7 +13969,11 @@ const modoNuvem = {
     if (!modoNuvem.ligado() || !modoNuvem.podeLigar()) return 0;
     const emUso = modoNuvem._emUso();
     const dias = (opts.dias != null) ? opts.dias : modoNuvem.dias();
-    const corte = Date.now() - dias * 86400000;
+    /* Janela ZERO (ao sair) quer dizer "tudo o que tem espelho pode ir". Com
+       o corte exatamente em `agora`, o registro salvo no mesmo milissegundo
+       ficava para trás por causa do `<` — e ao sair isso é justamente o
+       atendimento que acabou de ser finalizado. */
+    const corte = (dias <= 0) ? (Date.now() + 1000) : (Date.now() - dias * 86400000);
     const ix = arquivo._indice();
     let n = 0;
     Object.keys(arquivo.PRAZOS).forEach(mod => {
@@ -14995,6 +15190,7 @@ const ui = {
 
       /* Refresh por módulo — cada um em try/catch independente para não bloquear navegação */
       try {
+        try { edicaoViva.ligar(); if (edicaoViva.MODS.indexOf(modName) >= 0) edicaoViva.restaurar(modName); } catch (e) {}
         if (modName === 'dashboard') { try { ambiente.faixaLegado(); } catch (e) {} dashboard.atualizar(); try { meuDia.render(); } catch (e) {} try { pendencias.renderDashboard(); } catch (e) {} try { pendProntuario.renderDashboard(); } catch (e) {} try { preLanc.ajustarDashboard(); } catch (e) {} try { preLanc.renderFila(); } catch (e) {} try { preLanc.sincronizarFila({ silent: true }); } catch (e) {} }
         else if (modName === 'financeiro') financeiro.render();
         else if (modName === 'agenda') { agenda.render(); if (!agenda._puxouNestaSessao) { setTimeout(() => { try { agenda.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
@@ -21669,6 +21865,7 @@ const cloud = {
       /* A partir daqui o aparelho se acerta sozinho, de minuto em minuto, sem
          ninguém tocar em nada (ver sincronia). */
       try { sincronia.iniciar(); } catch (e) {}
+      try { conexao.iniciar(); } catch (e) {}
       /* rascunhos: ficha começada no celular aparece no computador */
       setTimeout(() => {
         try { rascunhosSync.enviarTodos(); } catch (e) {}
