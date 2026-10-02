@@ -4681,7 +4681,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-02f</b><br>
+    v7.1 · build <b id="build-tag">2026-10-02g</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -12167,13 +12167,27 @@ const armazenamento = {
   /* Uso do espaço APERTADO (localStorage, ~5 MB). O que mudou de casa para o
      disco grande não conta aqui — é justamente o objetivo — mas continua
      listado, com a marca de onde está, senão a tela mentiria por omissão. */
+  /* MEDE O APARELHO, NÃO A GAVETA.
+
+     Isto percorria `localStorage` — que, desde a separação por clínica, é a
+     FACHADA: ela só enxerga a gaveta aberta. O resultado foi uma tela que
+     dizia "Armazenamento cheio (520 KB)" num computador com quase 8 MB
+     gravados, e uma lista de maiores ocupantes que não mencionava o maior de
+     todos. Pior: "Liberar espaço" não conseguia nem ver o que estava
+     entupindo o aparelho.
+
+     A cota que estoura é a do navegador, que conta TUDO — as outras gavetas e
+     o acervo antigo inclusive. Então é tudo que precisa ser medido, e cada
+     coisa nomeada pelo que é. */
   uso() {
     const itens = []; let total = 0;
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      const v = localStorage.getItem(k) || '';
-      const bytes = (k.length + v.length) * 2;   /* UTF-16 */
-      total += bytes; itens.push({ k, bytes });
+    const R = (typeof cofre !== 'undefined' && cofre._real) ? cofre._real : localStorage;
+    for (let i = 0; i < R.length; i++) {
+      const kr = R.key(i);
+      const v = R.getItem(kr) || '';
+      const bytes = (String(kr).length + v.length) * 2;   /* UTF-16 */
+      total += bytes;
+      itens.push({ k: kr, bytes, escopo: armazenamento._escopo(kr) });
     }
     let grande = 0;
     try {
@@ -12187,7 +12201,23 @@ const armazenamento = {
     itens.sort((a, b) => b.bytes - a.bytes);
     return { total, grande, itens };
   },
-  _rotulo(k) {
+  /* De quem é esta chave: desta clínica, de outra, do acervo antigo sem dono,
+     ou do próprio aparelho. */
+  _escopo(kr) {
+    try {
+      const k = String(kr);
+      const i = k.lastIndexOf('@');
+      if (i > 0) return k.slice(i) === cofre.sufixo() ? 'minha' : 'outra';
+      /* sem sufixo: ou é chave do próprio aparelho (lista explícita do cofre),
+         ou é acervo de antes da separação */
+      return cofre.separa(k) ? 'legado' : 'aparelho';
+    } catch (e) { return 'aparelho'; }
+  },
+  _rotulo(k, escopo) {
+    if (escopo === 'outra') return '🏥 Outra clínica neste aparelho';
+    if (escopo === 'legado') return '📦 Acervo antigo sem clínica definida';
+    /* tira o sufixo da gaveta para reconhecer a chave do módulo */
+    try { if (typeof cofre !== 'undefined' && cofre.app) k = cofre.app(k); } catch (e) {}
     if (k === store.BLOBS_KEY) return '🖼 Carimbos e imagens (guardados 1×)';
     if (k === 'medsys.v7.versions') return '🕓 Histórico de versões';
     if (k === 'medsys.v7.lixeira') return '🗑 Lixeira (30 dias)';
@@ -13569,7 +13599,7 @@ const espaco = {
       d.total = u.total;
       const porRotulo = {};
       u.itens.forEach(it => {
-        const r = armazenamento._rotulo(it.k);
+        const r = armazenamento._rotulo(it.k, it.escopo);
         porRotulo[r] = (porRotulo[r] || 0) + it.bytes;
       });
       d.topo = Object.entries(porRotulo).sort((a, b) => b[1] - a[1]).slice(0, 3);

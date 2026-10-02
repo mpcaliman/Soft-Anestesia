@@ -18028,6 +18028,72 @@ await test('Identidade da clínica no cabeçalho de todas as impressões, por am
   await page.close();
 });
 
+/* 244) A tela de armazenamento media a gaveta, não o aparelho
+
+   Foto da tela, num computador em uso: "⚠️ Armazenamento cheio (520 KB)" —
+   e, na mesma faixa, "975 registros antigos (7,6 MB) estão guardados aqui".
+   Os dois números na mesma frase, um desmentindo o outro.
+
+   A causa: `armazenamento.uso()` percorria `localStorage`, que desde a
+   separação por clínica é a FACHADA do cofre — ela só enxerga a gaveta
+   aberta. Media-se a gaveta e anunciava-se o aparelho.
+
+   Não era só número feio: a lista de "maiores ocupantes" não mencionava o
+   maior de todos, e o "Liberar espaço" não conseguia nem VER o que estava
+   entupindo a máquina. A cota que estoura é a do navegador, e ela conta tudo:
+   as outras gavetas e o acervo antigo inclusive. */
+await test('Armazenamento mede o aparelho inteiro, e diz de quem é cada pedaço', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const R = cofre._real;
+    const limpar = () => {
+      const fora = [];
+      for (let i = 0; i < R.length; i++) { const k = R.key(i); if (k && k.indexOf('medsys.') === 0) fora.push(k); }
+      fora.forEach(k => R.removeItem(k));
+    };
+    limpar();
+    R.setItem('medsys.v7.cloud.org_id', 'org-aaaa');
+
+    const encher = (n) => 'x'.repeat(n);
+    R.setItem('medsys.v5.pacientes@org-aaaa', encher(10000));   /* desta clínica */
+    R.setItem('medsys.v3.anestesia@org-bbbb', encher(40000));   /* de outra */
+    R.setItem('medsys.v3.pre', encher(80000));                  /* acervo antigo */
+    R.setItem('medsys.v7.theme', 'escuro');                     /* do aparelho */
+
+    const u = armazenamento.uso();
+    /* a gaveta sozinha tem ~10 mil caracteres; o aparelho tem ~130 mil */
+    out.mediuOAparelho = u.total > 250000;
+    out.naoMediuSoAGaveta = u.total > 200000;
+
+    const porEscopo = {};
+    u.itens.forEach(it => { porEscopo[it.escopo] = (porEscopo[it.escopo] || 0) + it.bytes; });
+    out.achouAsQuatro = ['minha', 'outra', 'legado', 'aparelho'].every(k => porEscopo[k] > 0);
+    out.legadoEhOMaior = porEscopo.legado > porEscopo.outra && porEscopo.outra > porEscopo.minha;
+
+    /* e cada pedaço aparece com NOME, não como "configurações e outros" */
+    const d = espaco.diagnostico();
+    const rotulos = d.topo.map(([r]) => r).join(' | ');
+    out.nomeiaOAcervo = /Acervo antigo sem clínica/.test(rotulos);
+    out.nomeiaAOutraClinica = /Outra clínica neste aparelho/.test(rotulos);
+    out.totalBate = d.total === u.total;
+
+    /* a chave desta clínica continua sendo reconhecida pelo módulo dela */
+    out.reconheceOModulo = armazenamento._rotulo('medsys.v5.pacientes@org-aaaa', 'minha').indexOf('Pacientes') >= 0;
+
+    limpar();
+    return out;
+  });
+  assert(r.mediuOAparelho && r.naoMediuSoAGaveta, 'o total tem de ser o do APARELHO — é a cota dele que estoura, não a da gaveta');
+  assert(r.achouAsQuatro, 'e separar o que é desta clínica, de outra, do acervo antigo e do próprio aparelho');
+  assert(r.legadoEhOMaior, 'com os tamanhos certos de cada um');
+  assert(r.nomeiaOAcervo, 'o acervo antigo aparece NOMEADO entre os maiores ocupantes — ele era justamente o que sumia da lista');
+  assert(r.nomeiaAOutraClinica, 'e a gaveta da outra clínica também, em vez de virar "configurações e outros"');
+  assert(r.totalBate, 'a faixa e o painel contam a mesma coisa');
+  assert(r.reconheceOModulo, 'e a chave desta clínica continua sendo reconhecida pelo módulo a que pertence');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
