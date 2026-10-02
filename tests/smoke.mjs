@@ -17836,6 +17836,94 @@ await test('Ambiente novo nasce sem logomarca e sem dados da clínica anterior',
   await page.close();
 });
 
+/* 242) Formulário não escolhe clínica por quem preenche
+
+   Aconteceu duas vezes com a mesma conta: o Dr. Carlos entrou e caiu dentro
+   de "Minha Clínica de Anestesia". Da primeira vez a causa foi o ponteiro do
+   ambiente (teste 240). Da segunda foi pior, porque fui eu quem criou:
+
+   o <select> "Ambiente" do card de criar conta não tinha opção vazia. Um
+   <select> sem opção vazia vem preenchido com o PRIMEIRO item — e o primeiro
+   item ali é uma clínica de verdade, com pacientes de verdade. Criar a conta
+   sem tocar naquele campo vinculava a pessoa à clínica de outro médico, em
+   silêncio, e o login depois estava apenas obedecendo.
+
+   Vincular alguém a uma clínica é dar a ela acesso a prontuário. Decisão
+   dessas não tem padrão. */
+await test('Criar conta não vincula a ninguém por descuido do formulário', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => { try { ui.showModule('programador'); } catch (e) {} });
+  const r = await page.evaluate(async () => {
+    const out = {};
+    localStorage.setItem(cloud.SESSION_KEY, JSON.stringify({
+      access_token: 'tok', refresh_token: 'r',
+      user: { id: 'u-prog', email: programador.EMAIL }, expires_at: Date.now() + 3600000
+    }));
+    cloud.config = () => ({ url: 'https://exemplo.supabase.co', key: 'k' });
+    cloud.estaConfigurado = () => true;
+    programador._orgs = [{ id: 'org-marcelo', nome: 'Minha Clínica de Anestesia' }, { id: 'org-b', nome: 'Outra' }];
+    programador._perfis = []; programador._membros = []; programador._shares = [];
+    programador._renderConteudo(document.getElementById('prog-conteudo'));
+
+    /* ---- o campo NÃO vem com uma clínica escolhida ---- */
+    const sel = document.getElementById('prog-nc-org');
+    out.padraoVazio = sel.value === '';
+    out.explicaOVazio = /nenhum/i.test(sel.options[0].textContent);
+
+    /* ---- criar sem escolher ambiente NÃO vincula a ninguém ---- */
+    const rpcs = [];
+    programador._rpc = async (nome, body) => { rpcs.push({ nome, body }); return {}; };
+    const origFetch = window.fetch;
+    window.fetch = async (url) => {
+      if (/functions\/v1\/contas/.test(String(url))) {
+        return { ok: true, status: 200, json: async () => ({ ok: true, user_id: 'u-carlos', email: 'ch@x.com', senha: 'Abcdef234' }), headers: { get: () => '0' } };
+      }
+      return { ok: true, status: 200, json: async () => ([]), headers: { get: () => '0' } };
+    };
+    document.getElementById('prog-nc-email').value = 'ch@x.com';
+    await programador.criarConta();
+    out.naoVinculouSozinho = !rpcs.some(c => c.nome === 'prog_add_member');
+    const res = (document.getElementById('prog-nc-resultado') || {}).textContent || '';
+    out.disseQueFicouSemClinica = /sem vínculo com clínica nenhuma/i.test(res);
+
+    /* ---- escolhendo o ambiente, aí sim vincula, e a tela diz onde ----
+       (o render de dentro de criarConta buscou a lista no servidor, que aqui
+       está dublado e devolve vazio — repõe antes de redesenhar) */
+    programador._orgs = [{ id: 'org-marcelo', nome: 'Minha Clínica de Anestesia' }, { id: 'org-b', nome: 'Outra' }];
+    programador._renderConteudo(document.getElementById('prog-conteudo'));
+    rpcs.length = 0;
+    document.getElementById('prog-nc-email').value = 'sec@x.com';
+    document.getElementById('prog-nc-org').value = 'org-marcelo';
+    document.getElementById('prog-nc-role').value = 'auxiliar';
+    await programador.criarConta();
+    out.vinculouQuandoEscolhido = rpcs.some(c => c.nome === 'prog_add_member' && c.body.p_org === 'org-marcelo');
+    const res2 = (document.getElementById('prog-nc-resultado') || {}).textContent || '';
+    out.disseOndeFicou = /vinculada a/i.test(res2) && /vai ver os pacientes/i.test(res2);
+
+    /* ---- adicionar a um ambiente também não tem padrão ---- */
+    programador._orgs = [{ id: 'org-marcelo', nome: 'Minha Clínica de Anestesia' }, { id: 'org-b', nome: 'Outra' }];
+    programador._renderConteudo(document.getElementById('prog-conteudo'));
+    out.addMembroSemPadrao = document.getElementById('prog-mem-org').value === '';
+    rpcs.length = 0;
+    document.getElementById('prog-mem-email').value = 'x@y.com';
+    await programador.addMembro();
+    out.recusouSemAmbiente = !rpcs.length &&
+      /não há padrão para isso/i.test((document.getElementById('prog-erro') || {}).textContent || '');
+
+    window.fetch = origFetch;
+    localStorage.removeItem(cloud.SESSION_KEY);
+    return out;
+  });
+  assert(r.padraoVazio, 'o campo Ambiente NÃO pode vir com uma clínica já escolhida — foi assim que o Dr. Carlos entrou na clínica de outro médico');
+  assert(r.explicaOVazio, 'e a opção vazia diz o que ela significa');
+  assert(r.naoVinculouSozinho, 'criar conta sem escolher ambiente não vincula a pessoa a clínica nenhuma');
+  assert(r.disseQueFicouSemClinica, 'e a tela diz isso com todas as letras, em vez de deixar quem criou supondo');
+  assert(r.vinculouQuandoEscolhido, 'escolhendo o ambiente, o vínculo é feito');
+  assert(r.disseOndeFicou, 'e a tela diz a que clínica a pessoa foi, e o que ela passa a ver');
+  assert(r.addMembroSemPadrao && r.recusouSemAmbiente, 'adicionar a um ambiente também exige escolha consciente');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
