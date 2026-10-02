@@ -18,8 +18,17 @@
 // mãos de outra pessoa não pode continuar valendo.
 //
 // Rotas (via ?op=):
-//   GET  ?op=health                                  → a função está no ar?
-//   POST ?op=criar  { email, nome?, senha? }         → cria a conta (só programador)
+//   GET  ?op=health                                   → a função está no ar?
+//   POST ?op=criar  { email, nome?, senha? }          → cria a conta (só programador)
+//   POST ?op=acesso { user_id, ativo, org? }          → bloqueia/libera o acesso
+//
+// BLOQUEAR NÃO É APAGAR, e num prontuário a diferença é grande. A autoria de
+// um registro clínico não pode ser apagada: as colunas `created_by` apontam
+// para `auth.users` SEM `on delete cascade`, então o banco RECUSA apagar quem
+// já gravou alguma coisa — de propósito. Para essas contas (que são quase
+// todas, depois do primeiro dia de uso) o que existe é bloquear: a pessoa
+// deixa de entrar e deixa de ver os dados, e o que ela assinou continua
+// assinado por ela.
 //
 // Deploy:
 //   supabase functions deploy contas
@@ -142,6 +151,39 @@ Deno.serve(async (req) => {
       senha,
       provisoria: !informada,
     });
+  }
+
+  if (op === "acesso") {
+    const guarda = await exigirProgramador(req);
+    if ("erro" in guarda) return json({ ok: false, erro: guarda.erro }, guarda.status);
+    const sb = guarda.sb;
+
+    let corpo: any = {};
+    try { corpo = await req.json(); } catch { corpo = {}; }
+    const userId = String(corpo.user_id || "").trim();
+    const ativo = corpo.ativo === true;
+    const org = String(corpo.org || "").trim();
+    if (!userId) return json({ ok: false, erro: "Informe de quem é o acesso." }, 400);
+    if (userId === guarda.user.id && !ativo) {
+      return json({ ok: false, erro: "Você não pode bloquear o seu próprio acesso." }, 400);
+    }
+
+    /* DOIS LUGARES, e os dois importam:
+       - `organization_users.ativo` é o que a RLS consulta: é a tranca de
+         verdade, no banco, que impede até uma chamada direta à API;
+       - `profiles.ativo` é o que o app lê ao entrar, para dizer à pessoa o que
+         está acontecendo em vez de mostrar uma tela vazia.
+       Mexer só no primeiro bloqueia sem explicar; só no segundo explica sem
+       bloquear. */
+    let q = sb.from("organization_users").update({ ativo }).eq("user_id", userId);
+    if (org) q = q.eq("organization_id", org);
+    const { error: e1 } = await q;
+    if (e1) return json({ ok: false, erro: "Não consegui mudar o vínculo: " + e1.message }, 400);
+
+    const { error: e2 } = await sb.from("profiles").update({ ativo }).eq("id", userId);
+    if (e2) return json({ ok: false, erro: "Vínculo alterado, mas o perfil não: " + e2.message }, 400);
+
+    return json({ ok: true, user_id: userId, ativo });
   }
 
   return json({ ok: false, erro: "Operação desconhecida: " + op }, 400);

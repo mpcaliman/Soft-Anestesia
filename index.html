@@ -4663,7 +4663,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-02a</b><br>
+    v7.1 · build <b id="build-tag">2026-10-02b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -23126,13 +23126,20 @@ const programador = {
     }).join('');
     /* QUEM É DE ONDE — com as ações ao lado. Sem esta lista, "remover pessoa"
        viraria outro comando de console com um id copiado à mão. */
-    const linhasMembros = programador._membros.filter(m => m.ativo).map(m =>
-      '<tr><td>' + esc(programador._emailDe(m.user_id)) + '</td>' +
+    /* MOSTRA TAMBÉM QUEM ESTÁ BLOQUEADO. A lista filtrava por `ativo`, então um
+       membro bloqueado sumia da tela — e sumindo não havia como liberá-lo de
+       volta. Bloqueio sem caminho de volta é bloqueio que vira chamado. */
+    const linhasMembros = programador._membros.map(m =>
+      '<tr' + (m.ativo ? '' : ' style="opacity:.6"') + '><td>' + esc(programador._emailDe(m.user_id)) +
+      (m.ativo ? '' : ' <span class="ui-badge" style="background:#fdeaea;color:#8a1c1c">bloqueado</span>') + '</td>' +
       '<td>' + esc(programador._nomeOrg(m.organization_id)) + '</td>' +
       '<td>' + esc(m.role || '—') + '</td>' +
       '<td style="text-align:right;white-space:nowrap">' +
+      '<button class="btn btn-xs" onclick="programador.definirAcesso(\'' + m.user_id + '\',\'' + m.organization_id + '\',' + (m.ativo ? 'false' : 'true') + ')" title="' +
+        (m.ativo ? 'Tira o acesso sem apagar nada — o que ela assinou continua dela' : 'Devolve o acesso a esta pessoa') + '">' +
+        (m.ativo ? '🚫 bloquear' : '✅ liberar') + '</button> ' +
       '<button class="btn btn-xs" onclick="programador.removerMembro(\'' + m.organization_id + '\',\'' + m.user_id + '\')" title="Tira do ambiente; a conta continua existindo">↩ tirar do ambiente</button> ' +
-      '<button class="btn btn-xs btn-danger" onclick="programador.excluirConta(\'' + m.user_id + '\')" title="Apaga a conta da nuvem — só funciona se ela não pertencer a ambiente nenhum">✕ conta</button>' +
+      '<button class="btn btn-xs btn-danger" onclick="programador.excluirConta(\'' + m.user_id + '\')" title="Apaga a conta da nuvem — só funciona se ela não pertencer a ambiente nenhum E nunca tiver gravado registro">✕ conta</button>' +
       '</td></tr>').join('');
     const linhasShares = programador._shares.map(s =>
       '<tr><td>' + esc(programador._nomeOrg(s.org_origem)) + '</td><td>→ ' + esc(programador._nomeOrg(s.org_destino)) + '</td>' +
@@ -23448,14 +23455,61 @@ const programador = {
       programador.render();
     } catch (e) { programador._mostrarErro(e.message); }
   },
+  /* BLOQUEAR O ACESSO — o que se faz em 99% dos casos reais.
+     A pessoa deixa de entrar e deixa de ver os dados da clínica, e tudo o que
+     ela gravou continua no lugar, com o nome dela. Passa pela Edge Function
+     porque são DUAS tabelas e o programador só tem permissão de leitura em
+     `profiles`: a função usa a chave do servidor, depois de conferir quem
+     está pedindo. */
+  async definirAcesso(uid, org, ativo) {
+    const quem = programador._emailDe(uid);
+    if (!ativo && !confirm('Bloquear o acesso de ' + quem + '?\n\nEla deixa de entrar e de ver os dados da clínica. NADA é apagado: o que ela registrou continua lá, com o nome dela.\n\nDá para liberar de volta a qualquer momento.')) return;
+    if (!(await cloud._garantirToken())) { programador._mostrarErro(cloud.motivoSemToken()); return; }
+    const s = cloud.session();
+    let r, d;
+    try {
+      r = await fetch(programador._urlFuncao('contas') + '?op=acesso', {
+        method: 'POST',
+        headers: Object.assign({}, cloud._headers(false), { 'Authorization': 'Bearer ' + s.access_token, 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ user_id: uid, org: org || '', ativo: !!ativo })
+      });
+      d = await r.json().catch(() => ({}));
+    } catch (e) { programador._mostrarErro('Não consegui falar com a função de contas: ' + e.message); return; }
+    if (r.status === 404) {
+      programador._mostrarErro('A função "contas" ainda não foi publicada neste projeto (ou está com outro nome). ' +
+        'Publique-a com o nome "contas" para usar bloquear/liberar.');
+      return;
+    }
+    if (!r.ok || !d || !d.ok) { programador._mostrarErro((d && d.erro) || ('HTTP ' + r.status)); return; }
+    toast(ativo ? '✅ Acesso liberado para ' + quem : '🚫 Acesso bloqueado para ' + quem);
+    /* AGUARDA o redesenho. Solto, ele termina depois e reescreve o painel por
+       cima de um aviso de erro escrito em seguida — o aviso pisca e some, e
+       quem clicou conclui que o botão não fez nada. */
+    try { await programador.render(); } catch (e) {}
+  },
+
   async excluirConta(uid) {
     const quem = programador._emailDe(uid);
-    if (!confirm('EXCLUIR a conta de ' + quem + ' da nuvem?\n\nIsto apaga a conta em si, não só o vínculo. Não tem volta.\n\nSó funciona se a conta já não pertencer a ambiente nenhum.')) return;
+    if (!confirm('EXCLUIR a conta de ' + quem + ' da nuvem?\n\nIsto apaga a conta em si, não só o vínculo. Não tem volta.\n\nSó funciona se a conta não pertencer a ambiente nenhum E nunca tiver gravado registro — a autoria de um prontuário não se apaga.\n\nNa dúvida, use 🚫 bloquear: tira o acesso sem apagar nada.')) return;
     try {
       const r = await programador._rpc('prog_excluir_conta', { p_user: uid });
       toast('🗑️ Conta ' + ((r && r.email) || quem) + ' excluída');
-      programador.render();
-    } catch (e) { programador._mostrarErro(e.message); }
+      try { await programador.render(); } catch (e) {}
+    } catch (e) {
+      /* O BANCO RECUSA APAGAR QUEM JÁ GRAVOU, de propósito: as colunas de
+         autoria (`created_by`, `finalized_by`…) apontam para a conta sem
+         cascade. O erro cru do Postgres fala de "foreign key constraint" e não
+         diz nada a quem está na tela — vira "o sistema deu erro". Aqui ele
+         vira a explicação e o caminho. */
+      const msg = String(e.message || '');
+      if (/foreign key|violates|viola/i.test(msg)) {
+        programador._mostrarErro('Esta conta não pode ser apagada porque ela ASSINOU registros — fichas, avaliações, lançamentos. ' +
+          'Apagá-la deixaria prontuário sem autor, e o banco recusa isso de propósito. ' +
+          'Use 🚫 bloquear: a pessoa perde o acesso e o que ela registrou continua com o nome dela.');
+        return;
+      }
+      programador._mostrarErro(msg);
+    }
   },
 
   async criarShare() {

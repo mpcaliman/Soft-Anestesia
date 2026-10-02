@@ -17585,6 +17585,90 @@ await test('Conta criada por quem autoriza, com senha provisória que morre no p
   await page.close();
 });
 
+/* 239) Bloquear o acesso ≠ apagar a conta
+
+   Pergunta de quem administra a clínica: "para deletar contas ou impedir o
+   acesso, como será?". As duas coisas existem, mas a segunda é a que serve
+   quase sempre — e por um motivo de banco, não de conforto:
+
+   as colunas de autoria (`created_by`, `finalized_by`…) apontam para a conta
+   SEM `on delete cascade`. O banco RECUSA apagar quem já gravou qualquer
+   coisa, para não deixar prontuário sem autor. Ou seja: depois do primeiro
+   dia de uso, "apagar a conta" quase sempre devolve um erro de chave
+   estrangeira — que, cru, não diz nada a quem está na tela.
+
+   E a lista de membros filtrava por `ativo`: quem fosse bloqueado SUMIA da
+   tela, e sumindo não havia como liberá-lo de volta. */
+await test('Bloquear acesso: tira a entrada sem apagar nada, e dá caminho de volta', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => { try { ui.showModule('programador'); } catch (e) {} });
+  const r = await page.evaluate(async () => {
+    const out = {};
+    localStorage.setItem(cloud.SESSION_KEY, JSON.stringify({
+      access_token: 'tok', refresh_token: 'r',
+      user: { id: 'u-prog', email: programador.EMAIL }, expires_at: Date.now() + 3600000
+    }));
+    cloud.config = () => ({ url: 'https://exemplo.supabase.co', key: 'k' });
+    cloud.estaConfigurado = () => true;
+    programador._orgs = [{ id: 'org-1', nome: 'Minha Clínica' }];
+    programador._perfis = [{ id: 'u-sec', email: 'secretaria@x.com' }];
+    programador._membros = [
+      { organization_id: 'org-1', user_id: 'u-sec', role: 'auxiliar', ativo: true },
+      { organization_id: 'org-1', user_id: 'u-old', role: 'auxiliar', ativo: false }
+    ];
+    programador._shares = [];
+    programador._renderConteudo(document.getElementById('prog-conteudo'));
+    const html = document.getElementById('prog-conteudo').innerHTML;
+
+    out.mostraBloqueado = /bloqueado/.test(html);
+    out.ofereceBloquear = /🚫 bloquear/.test(html);
+    out.ofereceLiberar = /✅ liberar/.test(html);
+
+    /* ---- bloquear passa pela função, com o token, e não apaga nada ---- */
+    let pedido = null;
+    const origFetch = window.fetch;
+    const origConfirm = window.confirm; window.confirm = () => true;
+    window.fetch = async (url, init) => {
+      if (/functions\/v1\/contas/.test(String(url))) {
+        pedido = { url: String(url), body: JSON.parse(init.body) };
+        return { ok: true, status: 200, json: async () => ({ ok: true, user_id: 'u-sec', ativo: false }), headers: { get: () => '0' } };
+      }
+      return { ok: true, status: 200, json: async () => ([]), headers: { get: () => '0' } };
+    };
+    await programador.definirAcesso('u-sec', 'org-1', false);
+    out.chamouAcesso = !!pedido && /\?op=acesso$/.test(pedido.url);
+    out.mandouODado = !!pedido && pedido.body.user_id === 'u-sec' && pedido.body.ativo === false && pedido.body.org === 'org-1';
+
+    /* ---- apagar quem já gravou: o erro cru vira explicação ---- */
+    programador._rpc = async () => {
+      throw new Error('update or delete on table "users" violates foreign key constraint "anesthesia_records_created_by_fkey"');
+    };
+    await programador.excluirConta('u-sec');
+    const erro = (document.getElementById('prog-erro') || {}).textContent || '';
+    out.explicouAAutoria = /ASSINOU registros/.test(erro) && /sem autor/.test(erro);
+    out.indicouOBloqueio = /bloquear/.test(erro);
+    out.semJargao = !/foreign key/i.test(erro);
+
+    /* ---- erro de outra natureza continua sendo mostrado como veio ---- */
+    programador._rpc = async () => { throw new Error('Apenas o programador pode excluir contas.'); };
+    await programador.excluirConta('u-sec');
+    const erro2 = (document.getElementById('prog-erro') || {}).textContent || '';
+    out.naoEngoleOutrosErros = /Apenas o programador/.test(erro2);
+
+    window.fetch = origFetch; window.confirm = origConfirm;
+    localStorage.removeItem(cloud.SESSION_KEY);
+    return out;
+  });
+  assert(r.mostraBloqueado, 'membro bloqueado continua na lista, marcado — sumindo, não haveria como liberá-lo de volta');
+  assert(r.ofereceBloquear && r.ofereceLiberar, 'e cada linha oferece a ação do estado dela: bloquear quem está ativo, liberar quem não está');
+  assert(r.chamouAcesso && r.mandouODado, 'bloquear passa pela função com a chave do servidor — o programador não tem permissão de escrita em profiles');
+  assert(r.explicouAAutoria, 'apagar quem já gravou devolve a RAZÃO: prontuário sem autor é o que o banco recusa');
+  assert(r.indicouOBloqueio, 'e aponta a saída que existe de verdade');
+  assert(r.semJargao, 'sem jogar "foreign key constraint" na cara de quem está administrando a clínica');
+  assert(r.naoEngoleOutrosErros, 'erro de outra natureza continua aparecendo como veio — a tradução vale só para o caso que ela explica');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
