@@ -4695,7 +4695,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-02l</b><br>
+    v7.1 · build <b id="build-tag">2026-10-02m</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -9509,28 +9509,6 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </section>
 
     <!-- ☁️ MIGRAÇÃO FASE 4 — dados atuais → banco relacional -->
-    <section class="card" id="fase4-card">
-      <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-icon">🗄️</span><h2>Migração para o banco relacional<small>Leva seus dados atuais para as novas tabelas (pacientes, atendimentos, fichas…)</small></h2></div>
-        <div class="card-actions"><span class="toggle-icon">▾</span></div>
-      </div>
-      <div class="card-body">
-        <p style="font-size:.84rem;color:var(--text-soft);margin:0 0 10px;line-height:1.6">
-          Organiza os registros em <strong>pacientes únicos</strong> e <strong>atendimentos (encounters)</strong> no
-          banco relacional criado nas fases anteriores. É <strong>seguro</strong>: sempre há
-          pré-visualização, é <strong>idempotente</strong> (rodar de novo não duplica) e <strong>não apaga</strong> nada
-          — seus dados locais e a sincronização atual continuam intactos.
-        </p>
-        <ol style="font-size:.8rem;color:var(--text-mute);margin:0 0 12px;padding-left:18px;line-height:1.7">
-          <li>No Supabase → SQL Editor, rode <code>database/migrations/0003_migration_targets.sql</code> (uma vez).</li>
-          <li>Esteja <strong>conectado à nuvem</strong> (logado) aqui no app.</li>
-          <li>Clique em <strong>Pré-visualizar</strong> e confira os números; depois <strong>Migrar</strong>.</li>
-        </ol>
-        <button type="button" class="btn btn-sm" onclick="migracaoFase4.uiPreVisualizar()">🔍 Pré-visualizar migração</button>
-        <div id="fase4-resultado" class="diag-box" style="display:none;margin-top:12px"></div>
-      </div>
-    </section>
-
     <!-- 🩺 DIAGNÓSTICO DA NUVEM -->
     <section class="card" id="clouddiag-card">
       <div class="card-header" onclick="ui.toggleCard(this)">
@@ -9737,23 +9715,15 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
 
     <section class="card" id="usuarios-card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-icon">🔒</span><h2>Usuários e segurança<small>Login por usuário/senha, perfis e permissões de acesso</small></h2></div>
+        <div class="card-title-wrap"><span class="card-icon">🔒</span><h2>Bloqueio de tela<small>Depois de quanto tempo sem uso este aparelho pede a senha de novo</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
         <p style="font-size:.8rem;color:var(--text-soft);margin-bottom:12px">
-          O sistema pede usuário e senha ao abrir e bloqueia automaticamente por inatividade.
-          Cada usuário tem um perfil (Administrador, Médico ou Secretária/Auxiliar) que define quais módulos pode acessar.
+          Quem entra no sistema e o que cada um acessa é definido em <b>Equipe da nuvem</b>, logo abaixo — vale em todos os aparelhos.
+          Aqui fica só o que é <b>deste aparelho</b>: de quanto em quanto tempo ele volta a pedir a senha.
         </p>
-        <div style="font-size:.74rem;color:var(--text-mute);background:var(--surface-alt);padding:9px 12px;border-radius:7px;margin-bottom:14px">
-          ⚠️ Esta é uma trava de acesso local (as senhas ficam guardadas em hash neste aparelho). Para segurança real dos dados, mantenha a senha/biometria do próprio dispositivo ativada.
-        </div>
-        <div style="font-size:.76rem;color:var(--text-soft);background:var(--surface-alt);padding:9px 12px;border-radius:7px;margin-bottom:14px">
-          👥 Esta lista é <b>deste aparelho</b>. Para conferir ou mudar o que a sua secretária (ou qualquer pessoa da equipe)
-          acessa <b>em todos os aparelhos</b>, use <b>Equipe da nuvem → ✏️ Acesso</b>, logo abaixo.
-        </div>
 
-        <!-- 🔐 Bloqueio de tela -->
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:14px;padding:11px 12px;background:var(--surface-alt);border-radius:8px">
           <div style="flex:1;min-width:180px">
             <label for="seg-timeout" style="font-size:.8rem;font-weight:600;display:block;margin-bottom:3px">🔒 Bloqueio automático por inatividade</label>
@@ -9771,12 +9741,6 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
           <button type="button" class="btn btn-sm" onclick="auth.bloquearAgora()" title="Sair e pedir a senha imediatamente">🔒 Bloquear agora</button>
         </div>
 
-        <div id="usuarios-lista"></div>
-
-        <!-- Criação de usuário LOCAL desativada (por enquanto): as contas agora são
-             da NUVEM — crie/convide em "Equipe da nuvem", assim tudo sincroniza e
-             fica igual em qualquer aparelho. -->
-        <p style="font-size:.76rem;color:var(--text-mute);margin-top:12px">➕ Para adicionar alguém, use <b>Equipe da nuvem</b> (logo abaixo) — contas da nuvem funcionam em qualquer aparelho e sincronizam tudo. A criação de usuário <i>apenas local</i> foi desativada.</p>
       </div>
     </section>
 
@@ -56970,16 +56934,21 @@ const ajustesGrupos = {
   GRUPOS: [
     { id: 'nuvem', titulo: '☁️ Nuvem, backup e espaço',
       desc: 'A sincronização acontece sozinha. Aqui: entrar na nuvem, cópia de segurança em arquivo, PDFs e espaço do aparelho',
-      cards: ['cloud-card', 'duplicados-card', 'backup-completo-card', 'pdf-backup-card', 'armazenamento-card'] },
+      cards: ['cloud-card', 'backup-completo-card', 'pdf-backup-card', 'armazenamento-card'] },
     { id: 'equipe', titulo: '🔐 Usuários, equipe e permissões',
       desc: 'Quem entra no sistema, o que cada um pode ver e o registro de quem fez o quê',
       cards: ['usuarios-card', 'equipe-nuvem-card', 'auditoria-card'] },
     { id: 'modelos', titulo: '📄 Identidade da clínica, modelos e procedimentos',
       desc: 'Logomarca, nome e contato da clínica no cabeçalho das impressões; termo de consentimento padrão, textos padrão por campo e a sua tabela CBHPM',
       cards: ['clinica-identidade-card', 'termo-padrao-card', 'textos-padrao-card', 'cbhpm-card'] },
-    { id: 'avancado', titulo: '🛠️ Avançado', avancado: true,
-      desc: 'Ferramentas técnicas. No uso normal você não precisa abrir isto — só se algo der errado e for pedido',
-      cards: ['clouddiag-card', 'fase4-card'] }
+    /* CONSERTOS DO PASSADO moram aqui. Eles nasceram para resolver um
+       problema específico que já foi corrigido no caminho normal — e passar o
+       dia esbarrando numa ferramenta de mutirão é o que faz Ajustes parecer
+       maior e mais assustador do que é. Continuam a um clique para quem
+       precisar; só deixam de disputar atenção com o uso diário. */
+    { id: 'avancado', titulo: '🛠️ Avançado e consertos pontuais', avancado: true,
+      desc: 'Diagnóstico da nuvem e mutirões de correção do que ficou para trás. No uso normal você não precisa abrir isto',
+      cards: ['clouddiag-card', 'duplicados-card', 'mutirao-card'] }
   ],
   _salvos() { try { return JSON.parse(localStorage.getItem(ajustesGrupos.KEY) || '{}'); } catch (e) { return {}; } },
   _aberto(id) { return !!ajustesGrupos._salvos()[id]; },   /* fechado por padrão */

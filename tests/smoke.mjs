@@ -1719,9 +1719,15 @@ await test('Ajustes: cards do sistema viram grupos recolhíveis (o técnico em "
       && document.getElementById('ajg-nuvem').contains(document.getElementById('armazenamento-card'))
       && document.getElementById('ajg-equipe').contains(document.getElementById('equipe-nuvem-card'))
       && document.getElementById('ajg-modelos').contains(document.getElementById('clinica-identidade-card'));
-    /* o que é técnico saiu da frente: diagnóstico e migração só em "Avançado" */
+    /* O QUE É TÉCNICO SAI DA FRENTE. O card da migração "fase 4" foi removido
+       de vez — era ferramenta de uma migração concluída, com instruções de
+       rodar SQL à mão. No lugar dele, em "Avançado", ficam os mutirões de
+       conserto do que ficou para trás: eles existem para quem precisar e
+       param de disputar atenção com o uso diário. */
     out.tecnicoEmAvancado = document.getElementById('ajg-avancado').contains(document.getElementById('clouddiag-card'))
-      && document.getElementById('ajg-avancado').contains(document.getElementById('fase4-card'))
+      && document.getElementById('ajg-avancado').contains(document.getElementById('duplicados-card'))
+      && document.getElementById('ajg-avancado').contains(document.getElementById('mutirao-card'))
+      && !document.getElementById('fase4-card')
       && document.getElementById('ajg-cab-avancado').classList.contains('ajg-avancado');
     /* fechados por padrão (tela compacta) */
     localStorage.removeItem(ajustesGrupos.KEY);
@@ -1757,7 +1763,7 @@ await test('Ajustes: cards do sistema viram grupos recolhíveis (o técnico em "
   });
   assert(r.grupos, 'os grupos (nuvem/equipe/modelos/avancado) deveriam existir em Ajustes');
   assert(r.cardsDentro, 'os cards do sistema deveriam estar DENTRO dos grupos');
-  assert(r.tecnicoEmAvancado, 'diagnóstico e migração deveriam ficar no grupo "Avançado", fora do caminho do dia a dia');
+  assert(r.tecnicoEmAvancado, 'diagnóstico e os mutirões de conserto ficam em "Avançado", fora do caminho do dia a dia');
   assert(r.fechadoPadrao, 'os grupos deveriam vir fechados por padrão (tela compacta)');
   assert(r.abriu && r.fechou, 'o toque no cabeçalho deveria abrir/fechar e lembrar a escolha');
   assert(r.abrirPara, 'abrirPara deveria abrir o grupo que contém o card e devolvê-lo');
@@ -2404,29 +2410,17 @@ await test('Usuários: editar funciona nos espelhos da nuvem, só um "(você)", 
       && auth._lerUsuarios().every(u => !!u.id)
       && new Set(auth._lerUsuarios().map(u => u.id)).size === 2;
 
-    /* sessão = primeiro usuário → só ele é "(você)" */
+    /* A LISTA LOCAL DE USUÁRIOS SAIU DE AJUSTES (limpeza do módulo): ela era a
+       segunda forma de fazer o que "Equipe da nuvem → ✏️ Acesso" já faz, e
+       pior — valia só naquele aparelho, enquanto a da nuvem vale em todos. O
+       próprio card avisava isso em duas caixas de texto, que é o sintoma de
+       uma tela que não deveria existir. O que continua testado aqui é o que
+       continua existindo: o conserto dos espelhos antigos e o caminho da
+       equipe na nuvem. */
     auth._definirSessao(auth._lerUsuarios()[0]);
     location.hash = '#ajustes';
     await new Promise(r => setTimeout(r, 500));
-    ajustesUsuarios.render();
-    const html = document.getElementById('usuarios-lista').innerHTML;
-    out.umVoce = (html.match(/\(você\)/g) || []).length === 1;
-
-    /* ✏️ abre o modal do usuário CERTO (era o bug: id undefined → sem ação) */
-    const users = auth._lerUsuarios();
-    modal.close();
-    ajustesUsuarios.editar(users[1].id);
-    await new Promise(r => setTimeout(r, 150));
-    out.editarAbre = document.getElementById('modal-backdrop').classList.contains('show')
-      && (document.getElementById('modal-body').innerHTML || '').includes('mpcanestesiologia@gmail.com');
-    out.avisoNuvem = (document.getElementById('modal-body').innerHTML || '').includes('conta da nuvem');
-    /* trocar para Secretária/Auxiliar aplica as permissões restritas */
-    document.getElementById('user-perfil').value = 'secretaria';
-    ajustesUsuarios._sincronizarPerfil(false);
-    await ajustesUsuarios.salvarEdicao(users[1].id);
-    await new Promise(r => setTimeout(r, 200));
-    const dep = auth._lerUsuarios().find(u => u.usuario === 'mpcanestesiologia@gmail.com');
-    out.virouSecretaria = dep.perfil === 'secretaria' && !dep.modulos.includes('anestesia') && !dep.modulos.includes('ajustes');
+    out.semListaLocal = !document.getElementById('usuarios-lista');
 
     /* Equipe da nuvem sem gestor: em vez de aviso morto, botões de ação */
     cloud.estaConfigurado = () => true;
@@ -2456,10 +2450,7 @@ await test('Usuários: editar funciona nos espelhos da nuvem, só um "(você)", 
     return out;
   });
   assert(r.reparou, 'espelhos antigos sem id deveriam ganhar ids únicos');
-  assert(r.umVoce, 'apenas o usuário logado deveria aparecer como "(você)"');
-  assert(r.editarAbre, 'o ✏️ deveria abrir o modal do usuário certo');
-  assert(r.avisoNuvem, 'editar conta da nuvem deveria avisar que o papel definitivo é o da nuvem');
-  assert(r.virouSecretaria, 'mudar para Secretária deveria restringir os módulos');
+  assert(r.semListaLocal, 'a lista local de usuários saiu de Ajustes — quem define acesso é Equipe da nuvem, e vale em todos os aparelhos');
   assert(r.temCaminho, 'sem gestor, a Equipe da nuvem deveria oferecer criar clínica / atualizar papel');
   assert(r.rpcCerta, 'criar clínica deveria chamar a RPC criar_minha_organizacao');
   assert(r.virouGestor, 'após criar a clínica, o usuário deveria virar gestor no aparelho');
