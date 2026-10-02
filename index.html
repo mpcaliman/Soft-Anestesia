@@ -4688,7 +4688,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-02j</b><br>
+    v7.1 · build <b id="build-tag">2026-10-02k</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -13698,7 +13698,24 @@ const modoNuvem = {
   DIAS_KEY: 'medsys.v7.modo_nuvem.dias',
   DIAS_PADRAO: 7,
 
-  ligado() { return localStorage.getItem(modoNuvem.KEY) === '1'; },
+  /* LIGADO POR PADRÃO quando há nuvem. A relação entre aparelho e nuvem foi
+     invertida de vez: a nuvem é a dona dos registros, e o aparelho guarda só
+     a janela de trabalho — o que está aberto, o que ainda não subiu e os
+     últimos dias. Era isto que faltava para acabar com o aparelho cheio, o
+     dado preso numa máquina e o "de quem é este acervo".
+
+     Continua desligável: quem precisa do histórico inteiro no aparelho (uma
+     máquina sem internet confiável, por exemplo) desliga e ele volta todo.
+     E só age com a nuvem conectada — sem ela, tirar registro do aparelho
+     seria perdê-lo, não arquivá-lo. */
+  ligado() {
+    const v = localStorage.getItem(modoNuvem.KEY);
+    if (v === '0') return false;
+    if (v === '1') return true;
+    return modoNuvem.podeLigar();
+  },
+  /* Nunca foi escolhido por ninguém: está valendo o padrão. */
+  noPadrao() { const v = localStorage.getItem(modoNuvem.KEY); return v !== '0' && v !== '1'; },
   dias() {
     const n = parseInt(localStorage.getItem(modoNuvem.DIAS_KEY) || '', 10);
     return (n > 0 && n < 400) ? n : modoNuvem.DIAS_PADRAO;
@@ -13735,6 +13752,14 @@ const modoNuvem = {
     try { armazenamento.render(); } catch (e) {}
   },
 
+  /* Ao sair, a janela de trabalho não existe mais: tudo o que tem espelho na
+     nuvem pode sair do aparelho. O que está pendente de envio fica — é a
+     única cópia. */
+  aoSair() {
+    if (!modoNuvem.ligado() || !modoNuvem.podeLigar()) return 0;
+    return modoNuvem.manutencao({ silent: true, dias: 0 });
+  },
+
   /* Ids abertos AGORA na tela — nunca podem sair daqui no meio do trabalho */
   _emUso() {
     const ids = new Set();
@@ -13752,7 +13777,8 @@ const modoNuvem = {
   manutencao(opts = {}) {
     if (!modoNuvem.ligado() || !modoNuvem.podeLigar()) return 0;
     const emUso = modoNuvem._emUso();
-    const corte = Date.now() - modoNuvem.dias() * 86400000;
+    const dias = (opts.dias != null) ? opts.dias : modoNuvem.dias();
+    const corte = Date.now() - dias * 86400000;
     const ix = arquivo._indice();
     let n = 0;
     Object.keys(arquivo.PRAZOS).forEach(mod => {
@@ -20971,6 +20997,12 @@ const cloud = {
     /* A marca de baixa incremental é por usuário, mas limpá-la aqui garante
        que quem entrar depois receba a base inteira em vez de uma faixa. */
     try { cloud.esquecerMarcaBaixa(); } catch (e) {}
+    /* SAIR DEVOLVE O APARELHO VAZIO. Com a nuvem como fonte, não há razão
+       para o registro de um atendimento continuar neste aparelho depois que a
+       pessoa saiu: ele está na nuvem e volta sozinho quando ela entrar. O que
+       ainda NÃO subiu fica — ali o aparelho é a única cópia que existe, e
+       apagar seria perder. */
+    try { modoNuvem.aoSair(); } catch (e) {}
     /* Computador compartilhado: sair é sair mesmo. O que ainda não subiu vai
        num backup antes — ninguém perde trabalho por causa da privacidade de
        outro. */
@@ -21623,6 +21655,17 @@ const cloud = {
       /* O que foi salvo enquanto a clínica não era conhecida sobe agora — sem
          isso, o registro de um usuário nunca chegava aos outros do consultório */
       setTimeout(() => { try { cloudRel.empurrarPendentes({ silent: true }); } catch (e) {} }, 2600);
+      /* O APARELHO SE ESVAZIA SOZINHO. A nuvem é a dona: depois que o que
+         estava pendente subiu, o que já tem espelho confirmado e saiu da
+         janela de trabalho não precisa mais ocupar lugar aqui. Sem este passo
+         automático, "modo nuvem" dependia de alguém lembrar de um botão — e
+         ninguém lembra de um botão de limpeza antes do aparelho encher. */
+      setTimeout(() => {
+        try {
+          const n = modoNuvem.manutencao({ silent: true });
+          if (n) { try { armazenamento.render(); } catch (e) {} }
+        } catch (e) {}
+      }, 4000);
       /* A partir daqui o aparelho se acerta sozinho, de minuto em minuto, sem
          ninguém tocar em nada (ver sincronia). */
       try { sincronia.iniciar(); } catch (e) {}

@@ -18329,6 +18329,94 @@ await test('Lado operado chega à linha de cobrança, na janela e na tabela do F
   await page.close();
 });
 
+/* 248) A nuvem é a fonte; o aparelho é janela de trabalho
+
+   Decisão do dono do sistema: "o sistema tem que rodar 100% em nuvem, nada
+   local". A leitura literal — não gravar nada no aparelho — foi recusada por
+   um motivo clínico: dentro do centro cirúrgico a internet cai, e um sistema
+   que não grava offline deixa o anestesista sem registrar uma anestesia em
+   andamento, que é obrigação legal dele.
+
+   O que ficou valendo inverte a RELAÇÃO sem perder a segurança: a nuvem é a
+   dona dos registros, e o aparelho guarda apenas a janela de trabalho — o que
+   está aberto, o que ainda não subiu e os últimos dias. Era isso que faltava
+   para acabar com o aparelho cheio e o dado preso numa máquina.
+
+   O módulo `modoNuvem` já fazia exatamente isso. Ele estava DESLIGADO por
+   padrão e dependia de alguém lembrar de um botão de limpeza — e ninguém
+   lembra de um botão de limpeza antes do aparelho encher. */
+await test('Nuvem é a fonte: o aparelho se esvazia sozinho e sai vazio, sem perder o que não subiu', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const origPode = modoNuvem.podeLigar;
+
+    /* ---- ligado por padrão quando há nuvem; sem nuvem, não age ---- */
+    localStorage.removeItem(modoNuvem.KEY);
+    modoNuvem.podeLigar = () => true;
+    out.ligadoPorPadrao = modoNuvem.ligado() === true && modoNuvem.noPadrao() === true;
+    modoNuvem.podeLigar = () => false;
+    out.semNuvemNaoAge = modoNuvem.ligado() === false;
+    /* escolha explícita vence o padrão nos dois sentidos */
+    localStorage.setItem(modoNuvem.KEY, '1');
+    out.escolhaLigadaVence = modoNuvem.ligado() === true && modoNuvem.noPadrao() === false;
+    localStorage.setItem(modoNuvem.KEY, '0');
+    modoNuvem.podeLigar = () => true;
+    out.escolhaDesligadaVence = modoNuvem.ligado() === false;
+
+    /* ---- o que sai e o que fica ---- */
+    localStorage.removeItem(modoNuvem.KEY);
+    const velho = new Date(Date.now() - 90 * 86400000).toISOString();
+    store.setList('pre', [
+      { _id: 'a', nome: 'Com espelho e antigo', _updatedAt: velho, _relUpdatedAt: velho },
+      { _id: 'b', nome: 'Sem espelho (não subiu)', _updatedAt: velho },
+      { _id: 'c', nome: 'Recente', _updatedAt: new Date().toISOString(), _relUpdatedAt: new Date().toISOString() }
+    ]);
+    modoNuvem.manutencao({ silent: true });
+    const ficou = (store.list('pre') || []).map(x => x._id).sort();
+    out.tirouOAntigoConfirmado = ficou.indexOf('a') < 0;
+    out.manteveOQueNaoSubiu = ficou.indexOf('b') >= 0;
+    out.manteveORecente = ficou.indexOf('c') >= 0;
+    /* o que saiu continua localizável: saiu do aparelho, não da clínica */
+    out.ficouNoIndice = (arquivo._indice().pre || []).some(e => e.id === 'a');
+
+    /* ---- o registro ABERTO na tela nunca sai ---- */
+    store.setList('pre', [{ _id: 'aberto', nome: 'Em uso', _updatedAt: velho, _relUpdatedAt: velho }]);
+    const f = document.getElementById('form-pre');
+    let hid = f.querySelector('[name="_id"]');
+    if (!hid) { hid = document.createElement('input'); hid.type = 'hidden'; hid.name = '_id'; f.appendChild(hid); }
+    hid.value = 'aberto';
+    modoNuvem.manutencao({ silent: true });
+    out.naoTiraOQueEstaAberto = (store.list('pre') || []).some(x => x._id === 'aberto');
+    hid.value = '';
+
+    /* ---- ao SAIR, a janela é zero: tudo que tem espelho sai ---- */
+    store.setList('pre', [
+      { _id: 'hoje', nome: 'De hoje, já na nuvem', _updatedAt: new Date().toISOString(), _relUpdatedAt: new Date().toISOString() },
+      { _id: 'pend', nome: 'De hoje, não subiu', _updatedAt: new Date().toISOString() }
+    ]);
+    modoNuvem.aoSair();
+    const depoisDeSair = (store.list('pre') || []).map(x => x._id);
+    out.sairEsvazia = depoisDeSair.indexOf('hoje') < 0;
+    out.sairPreservaPendente = depoisDeSair.indexOf('pend') >= 0;
+
+    modoNuvem.podeLigar = origPode;
+    store.setList('pre', []);
+    return out;
+  });
+  assert(r.ligadoPorPadrao, 'com nuvem conectada, o aparelho passa a ser janela de trabalho por padrão — sem depender de alguém achar um botão');
+  assert(r.semNuvemNaoAge, 'sem nuvem não age: tirar registro do aparelho sem ter onde buscá-lo depois é perder, não arquivar');
+  assert(r.escolhaLigadaVence && r.escolhaDesligadaVence, 'e a escolha explícita de quem usa vence o padrão, nos dois sentidos');
+  assert(r.tirouOAntigoConfirmado, 'o que está confirmado na nuvem e fora da janela sai do aparelho');
+  assert(r.manteveOQueNaoSubiu, 'o que NÃO subiu fica — ali o aparelho é a única cópia que existe');
+  assert(r.manteveORecente, 'e o recente fica, que é a janela de trabalho');
+  assert(r.ficouNoIndice, 'o que saiu continua no índice: saiu do aparelho, não da clínica');
+  assert(r.naoTiraOQueEstaAberto, 'o registro aberto na tela nunca sai do aparelho no meio do trabalho');
+  assert(r.sairEsvazia, 'ao sair, o aparelho devolve tudo o que já está na nuvem');
+  assert(r.sairPreservaPendente, 'menos o que ainda não subiu — sair não pode apagar a única cópia de um atendimento');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
