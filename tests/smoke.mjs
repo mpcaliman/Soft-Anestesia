@@ -18515,6 +18515,103 @@ await test('Tarja de sem internet, e o que foi digitado sobrevive em qualquer m�
   await page.close();
 });
 
+/* 250) Nada do que foi feito hoje atravessa de um ambiente para o outro
+
+   Lembrete do dono do sistema, depois de uma semana inteira caçando
+   vazamento entre clínicas: "lembrar de também não permitir mistura de um
+   ambiente com o outro".
+
+   Isto não se responde com garantia — se responde com teste. Cada coisa
+   construída hoje é verificada aqui com DUAS clínicas no mesmo aparelho:
+   identidade da clínica, rascunho vivo, acervo arquivado, contagem do que
+   está preso no aparelho e a cirurgia lida da pré.
+
+   E há um segundo eixo, que o cofre não cobre: dentro da MESMA clínica, um
+   computador de consultório é usado por mais de uma pessoa. O que o médico
+   estava digitando num termo não é para aparecer na tela da secretária. */
+await test('Isolamento entre ambientes (e entre pessoas) no que foi construído hoje', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const R = cofre._real;
+    const limpar = () => {
+      const fora = [];
+      for (let i = 0; i < R.length; i++) { const k = R.key(i); if (k && k.indexOf('medsys.') === 0) fora.push(k); }
+      fora.forEach(k => R.removeItem(k));
+    };
+    const entrar = (org) => R.setItem('medsys.v7.cloud.org_id', org);
+    limpar();
+
+    /* ================= CLÍNICA A ================= */
+    entrar('org-aaaa');
+    clinicaIdentidade.salvar({ nome: 'Clínica A', endereco: 'Rua A', contato: '1111', extra: '' });
+    store.setList('pre', [{
+      _id: 'preA', nome: 'Paciente A', _updatedAt: new Date().toISOString(),
+      _procsExtra: [{ codigo: '1.1', descricao: 'Cirurgia da clínica A', lateralidade: 'direita' }]
+    }]);
+    /* um registro preso só neste aparelho (sem espelho na nuvem) */
+    store.setList('anestesia', [{ _id: 'fA', paciente: { nome: 'Paciente A' }, _updatedAt: new Date().toISOString() }]);
+    /* um rascunho vivo, digitado por mim */
+    const f = document.getElementById('form-termo');
+    const campo = f && f.querySelector('input[name], textarea[name]');
+    const origUser = auth.usuarioAtual;
+    auth.usuarioAtual = () => ({ usuario: 'medico@a.com' });
+    if (campo) { campo.value = 'Termo em edição na clínica A'; edicaoViva.guardar('termo'); }
+    /* e algo arquivado pelo modo nuvem */
+    const velho = new Date(Date.now() - 90 * 86400000).toISOString();
+    store.setList('consulta', [{ _id: 'cA', nome: 'Antigo A', _updatedAt: velho, _relUpdatedAt: velho }]);
+    const origPode = modoNuvem.podeLigar; modoNuvem.podeLigar = () => true;
+    modoNuvem.manutencao({ silent: true });
+    out.arquivouEmA = (arquivo._indice().consulta || []).some(e => e.id === 'cA');
+    out.presoEmA = conexao.pendentes() >= 1;
+
+    /* ================= CLÍNICA B, mesmo aparelho ================= */
+    entrar('org-bbbb');
+    out.identidadeNaoAtravessa = clinicaIdentidade.vazia() === true
+      && clinicaIdentidade.nome() !== 'Clínica A';
+    out.preNaoAtravessa = (store.list('pre') || []).length === 0
+      && cirurgia.daPre('Paciente A').length === 0;
+    out.fichaNaoAtravessa = (store.list('anestesia') || []).length === 0;
+    out.arquivoNaoAtravessa = !((arquivo._indice().consulta || []).some(e => e.id === 'cA'));
+    out.contagemNaoAtravessa = conexao.pendentes() === 0;
+    if (campo) { campo.value = ''; out.rascunhoNaoAtravessa = edicaoViva.restaurar('termo') === false; }
+
+    /* ================= de volta à A: tudo intacto ================= */
+    entrar('org-aaaa');
+    out.aIntacta = clinicaIdentidade.nome() === 'Clínica A'
+      && (store.list('anestesia') || []).length === 1
+      && cirurgia.daPre('Paciente A').length === 1;
+    if (campo) {
+      campo.value = '';
+      out.rascunhoVoltaParaDono = edicaoViva.restaurar('termo') === true
+        && campo.value === 'Termo em edição na clínica A';
+    }
+
+    /* ======= mesma clínica, OUTRA pessoa: o rascunho não é dela ======= */
+    if (campo) {
+      campo.value = '';
+      auth.usuarioAtual = () => ({ usuario: 'secretaria@a.com' });
+      out.outraPessoaNaoVe = edicaoViva.restaurar('termo') === false && campo.value === '';
+    }
+
+    auth.usuarioAtual = origUser;
+    modoNuvem.podeLigar = origPode;
+    const av = document.getElementById('edicao-viva-aviso'); if (av) av.remove();
+    limpar();
+    return out;
+  });
+  assert(r.arquivouEmA && r.presoEmA, 'o cenário monta a clínica A com acervo arquivado e registro preso no aparelho');
+  assert(r.identidadeNaoAtravessa, 'a identidade da clínica (logomarca, nome, endereço, contato) não atravessa para o outro ambiente');
+  assert(r.preNaoAtravessa, 'a pré e a cirurgia lida dela não atravessam — nem pelo nome do paciente');
+  assert(r.fichaNaoAtravessa, 'as fichas não atravessam');
+  assert(r.arquivoNaoAtravessa, 'o índice do que foi arquivado pelo modo nuvem é de cada clínica');
+  assert(r.contagemNaoAtravessa, '"o que está preso neste aparelho" conta só o ambiente aberto — senão a tarja acusaria pendência da outra clínica');
+  assert(r.rascunhoNaoAtravessa, 'o rascunho vivo não atravessa: ele tem nome de paciente dentro');
+  assert(r.aIntacta && r.rascunhoVoltaParaDono, 'e o ambiente de origem continua inteiro — separar não é apagar');
+  assert(r.outraPessoaNaoVe, 'dentro da MESMA clínica, o rascunho de uma pessoa não aparece para outra no mesmo computador');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

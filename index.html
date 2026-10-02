@@ -4695,7 +4695,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-02m</b><br>
+    v7.1 · build <b id="build-tag">2026-10-02n</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -13792,6 +13792,12 @@ const edicaoViva = {
     try {
       const g = edicaoViva.ler(mod);
       if (!g || !g.dados) return false;
+      /* DE QUEM É ESTE RASCUNHO. O cofre já separa por CLÍNICA, mas dentro da
+         mesma clínica um computador é usado por mais de uma pessoa — a
+         secretária e o médico na mesma máquina do consultório. O que ele
+         estava digitando num termo não é para aparecer na tela dela. */
+      const euSou = (() => { try { return (auth.usuarioAtual() || {}).usuario || ''; } catch (e) { return ''; } })();
+      if (g.quem && euSou && g.quem !== euSou) return false;
       const f = edicaoViva._form(mod); if (!f) return false;
       if (edicaoViva.temConteudo(edicaoViva._ler(f))) return false;   /* já há coisa na tela */
       let n = 0;
