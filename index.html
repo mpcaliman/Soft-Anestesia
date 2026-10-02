@@ -4663,7 +4663,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-02c</b><br>
+    v7.1 · build <b id="build-tag">2026-10-02d</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -9946,7 +9946,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
 
     <section class="card" id="logo-usuario-card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-icon">🖼️</span><h2>Logomarca<small>A marca desta clínica — aparece na tela e no cabeçalho de todas as impressões</small></h2></div>
+        <div class="card-title-wrap"><span class="card-icon">🖼️</span><h2>Logomarca<small>A marca desta clínica — vai no cabeçalho dos documentos dos pacientes</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
@@ -9955,11 +9955,13 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
           Escolha um arquivo de imagem (PNG com fundo transparente fica melhor). A imagem é a
           <strong>logomarca desta clínica</strong>: vale para todos os aparelhos e pessoas dela, e aparece
           automaticamente em todos os módulos ao imprimir/gerar PDF.
+          <br>Cada ambiente tem a sua: um ambiente novo nasce <strong>sem logomarca</strong>, e quem a define é o gestor dele.
+          A marca do Soft Anestesia continua sendo a do programa — ela não vai no documento do paciente.
         </p>
         <input type="file" id="logo-usuario-file" accept="image/*" style="display:none" onchange="logoUsuario.escolher(this)">
         <div class="cloud-actions" style="margin-top:4px">
           <button type="button" class="btn btn-primary btn-sm" onclick="document.getElementById('logo-usuario-file').click()">📁 Escolher logomarca</button>
-          <button type="button" class="btn btn-ghost btn-sm" id="logo-usuario-remover" onclick="logoUsuario.remover()" style="display:none">↺ Usar logomarca padrão</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="logo-usuario-remover" onclick="logoUsuario.remover()" style="display:none">↺ Remover logomarca</button>
         </div>
       </div>
     </section>
@@ -30959,16 +30961,27 @@ const logoUsuario = {
       document.querySelectorAll('img[data-logo="horizontal"]').forEach(el => el.src = LOGOS.horizontal);
     } catch (e) { console.warn('logos:', e); }
   },
-  /* Lê a chave salva e substitui LOGOS (custom sobrepõe padrão em app + impressão) */
+  /* DUAS IDENTIDADES, QUE NÃO SE MISTURAM.
+
+     A do SISTEMA (barra lateral, tela de entrada) é do Soft Anestesia e não
+     muda: é o programa que a pessoa está usando.
+
+     A da CLÍNICA é o que vai no documento do paciente — ficha, pré,
+     receituário, termo, orçamento. Esse papel sai da clínica, não do
+     fabricante do programa: carimbar a marca do sistema no documento de um
+     paciente é dizer que o atendimento é nosso, e não é.
+
+     Antes era tudo a mesma coisa: a logomarca escolhida substituía também a
+     do sistema, e — pior — uma clínica SEM logomarca imprimia com a do Soft
+     Anestesia. Ambiente novo nasce sem logomarca nenhuma; até o gestor subir
+     a dele, o documento sai sem imagem (e com o nome do profissional, que é
+     o que identifica de verdade). */
+  daClinica() { return this.atual() || ''; },
   carregar() {
-    const custom = this.atual();
-    if (custom) {
-      LOGOS.horizontal = custom; LOGOS.icone = custom; LOGOS.icone_grande = custom;
-    } else {
-      LOGOS.horizontal = LOGOS_DEFAULT.horizontal;
-      LOGOS.icone = LOGOS_DEFAULT.icone;
-      LOGOS.icone_grande = LOGOS_DEFAULT.icone_grande;
-    }
+    /* o sistema é sempre o sistema */
+    LOGOS.horizontal = LOGOS_DEFAULT.horizontal;
+    LOGOS.icone = LOGOS_DEFAULT.icone;
+    LOGOS.icone_grande = LOGOS_DEFAULT.icone_grande;
     this.aplicarDOM();
   },
   /* Recebe o <input type=file>, reduz a imagem e salva como data URL */
@@ -31022,15 +31035,18 @@ const logoUsuario = {
     const host = document.getElementById('logo-usuario-preview');
     if (!host) return;
     const custom = this.atual();
-    const src = custom || LOGOS_DEFAULT.horizontal;
     host.innerHTML =
       '<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">' +
-        '<div style="background:#fff;border:1px solid var(--border, #d0d5db);border-radius:8px;padding:8px;min-width:120px;text-align:center">' +
-          '<img src="' + src + '" alt="Logomarca atual" style="max-height:80px;max-width:260px;object-fit:contain;display:block;margin:0 auto">' +
+        '<div style="background:#fff;border:1px solid var(--border, #d0d5db);border-radius:8px;padding:8px;min-width:120px;min-height:64px;display:flex;align-items:center;justify-content:center;text-align:center">' +
+          (custom
+            ? '<img src="' + custom + '" alt="Logomarca desta clínica" style="max-height:80px;max-width:260px;object-fit:contain;display:block;margin:0 auto">'
+            : '<span style="font-size:.8rem;color:var(--text-mute)">sem logomarca</span>') +
         '</div>' +
         '<div style="font-size:.82rem;color:var(--text-soft)">' +
-          (custom ? '<b>Logomarca personalizada ativa.</b>' : 'Usando a logomarca padrão do Soft Anestesia.') +
-          '<br>Aparece na tela do app e no cabeçalho de <b>todas as impressões</b>.' +
+          (custom
+            ? '<b>Logomarca desta clínica.</b> Aparece no cabeçalho dos documentos dos pacientes.'
+            : '<b>Esta clínica ainda não tem logomarca.</b> Os documentos saem sem imagem, identificados pelo nome do profissional.') +
+          '<br><span style="color:var(--text-mute)">A marca do Soft Anestesia é do programa e não entra em documento de paciente.</span>' +
         '</div>' +
       '</div>';
     const btnRem = document.getElementById('logo-usuario-remover');
@@ -48319,7 +48335,8 @@ ${TAG_CLOSE_HTML}`;
   ------------------------------------------------------------------ */
   _logoPDF(doc, x, y, maxW, maxH) {
     try {
-      const src = (typeof LOGOS !== 'undefined' && LOGOS.horizontal) || '';
+      /* Documento de paciente leva a marca da CLÍNICA, nunca a do sistema. */
+      const src = (typeof logoUsuario !== 'undefined' && logoUsuario.daClinica()) || '';
       if (!src || src.indexOf('data:image') !== 0) return y;
       let prop = null;
       try { prop = doc.getImageProperties ? doc.getImageProperties(src) : null; } catch (e) { prop = null; }
@@ -48418,7 +48435,7 @@ ${TAG_CLOSE_HTML}`;
     return `
       <div class="pp-header">
         <div class="pp-header-top">
-          <img class="pp-logo" src="${LOGOS.horizontal}" alt="">
+          ${logoUsuario.daClinica() ? `<img class="pp-logo" src="${logoUsuario.daClinica()}" alt="">` : ''}
           ${nomeProf ? `<div class="pp-prof">
             <div class="pp-prof-nome">${utils.escapeHTML(nomeProf)}</div>
             ${linhaReg.length ? `<div class="pp-prof-reg">${utils.escapeHTML(linhaReg.join(' · '))}</div>` : ''}
@@ -55577,7 +55594,9 @@ const orcamento = {
       '.assin{margin-top:18px;}.rodape{color:#555;font-size:9pt;}' +
       '@media print{.pp-voltar-bar{display:none!important}}.pp-voltar-bar{position:sticky;top:0;z-index:9999;background:#1a2332;padding:10px;display:flex;gap:10px;justify-content:center}.pp-voltar-bar button{font-size:15px;padding:10px 16px;border-radius:8px;border:0;font-family:inherit}</style></head><body>' +
       '<div class="pp-voltar-bar"><button type="button" style="background:#fff;color:#1a2332;font-weight:700" onclick="window.close();setTimeout(function(){if(!window.closed){history.back();}},250);">← Voltar ao SisAnestesia</button><button type="button" style="background:#2e7d52;color:#fff" onclick="window.print()">🖨️ Imprimir</button></div>' +
-      '<img src="' + LOGOS.horizontal + '" alt="" style="max-height:72px;max-width:360px;object-fit:contain;display:block;margin:0 0 6px">' +
+      (logoUsuario.daClinica()
+        ? '<img src="' + logoUsuario.daClinica() + '" alt="" style="max-height:72px;max-width:360px;object-fit:contain;display:block;margin:0 0 6px">'
+        : '') +
       '<h1>' + esc(cab.profissional || 'Honorários anestésicos') + '</h1>' +
       '<div class="sub">' + esc(cab.especialidade || '') + '</div>' +
       '<div class="reg">' + reg.join(' · ') + '</div><hr>' +
