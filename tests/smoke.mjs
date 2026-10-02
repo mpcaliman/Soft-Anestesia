@@ -17924,6 +17924,110 @@ await test('Criar conta não vincula a ninguém por descuido do formulário', as
   await page.close();
 });
 
+/* 243) A clínica aparece no papel que o paciente leva para casa
+
+   Pedido: "em cada ambiente, poder editar logomarca, nome da clínica,
+   endereço, contato e algo a mais que o gestor queira — para aparecer nas
+   impressões de consulta, pré, ficha de anestesia, documentos, orçamentos,
+   relatórios etc."
+
+   O cabeçalho trazia só o profissional: nome, CRM, endereço dele. Mas o
+   documento sai de uma CLÍNICA, e é a clínica que o paciente procura depois —
+   para marcar retorno, mandar o exame, perguntar da conta. Papel sem o
+   telefone de onde foi feito obriga o paciente a caçar o contato em outro
+   lugar; às vezes ele não caça.
+
+   Um lugar só alimenta todos os cabeçalhos: inventar um segundo seria a
+   garantia de que um dia eles divergem. */
+await test('Identidade da clínica no cabeçalho de todas as impressões, por ambiente', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const R = cofre._real;
+    const limpar = () => {
+      const fora = [];
+      for (let i = 0; i < R.length; i++) { const k = R.key(i); if (k && k.indexOf('medsys.') === 0) fora.push(k); }
+      fora.forEach(k => R.removeItem(k));
+    };
+    limpar();
+    R.setItem('medsys.v7.cloud.org_id', 'org-aaaa');
+
+    /* vazio: o cabeçalho não ganha bloco nenhum — nada de moldura vazia */
+    out.comecaVazia = clinicaIdentidade.vazia() === true;
+    out.semBlocoQuandoVazia = clinicaIdentidade.cabecalhoHTML() === '';
+
+    clinicaIdentidade.salvar({
+      nome: 'Clínica Carlos Pedreira',
+      endereco: 'Av. das Flores, 100 — Vitória/ES',
+      contato: '(27) 3333-4444 · contato@ccp.com.br',
+      extra: 'CNPJ 00.000.000/0001-00'
+    });
+
+    /* ---- o cabeçalho único de TODAS as impressões ---- */
+    const cab = printPreview._header('FICHA DE ANESTESIA', '');
+    out.temNome = cab.indexOf('Clínica Carlos Pedreira') >= 0;
+    out.temEndereco = cab.indexOf('Av. das Flores, 100') >= 0;
+    out.temContato = cab.indexOf('3333-4444') >= 0;
+    out.temLivre = cab.indexOf('CNPJ 00.000.000') >= 0;
+
+    /* e vale para os documentos, um a um, porque o cabeçalho é o mesmo */
+    const docs = {
+      pre: printPreview._header('AVALIAÇÃO PRÉ-ANESTÉSICA', ''),
+      consulta: printPreview._header('CONSULTA / AVALIAÇÃO DE DOR', ''),
+      relatorio: printPreview._header('RELATÓRIO FINANCEIRO', '')
+    };
+    out.valeParaTodos = Object.keys(docs).every(k => docs[k].indexOf('Clínica Carlos Pedreira') >= 0);
+
+    /* ---- campo vazio não vira linha vazia ---- */
+    clinicaIdentidade.salvar({ nome: 'Só o nome', endereco: '', contato: '', extra: '' });
+    out.semLinhaVazia = clinicaIdentidade.linhas().length === 0
+      && printPreview._header('X', '').indexOf('pp-clinica-linha') < 0;
+
+    /* ---- PDF: funciona COM e SEM logomarca ---- */
+    const textos = [];
+    const docFake = {
+      getFontSize: () => 10, setFontSize() {}, setFont() {},
+      text: (t, x, y) => textos.push(String(t)),
+      addImage() {}, getImageProperties: () => ({ width: 900, height: 300 })
+    };
+    clinicaIdentidade.salvar({ nome: 'Clínica Carlos Pedreira', endereco: 'Av. das Flores, 100', contato: '(27) 3333-4444', extra: '' });
+    localStorage.removeItem(logoUsuario.KEY);
+    const yA = printPreview._logoPDF(docFake, 20, 16, 62, 22);
+    out.pdfSemLogoAindaImprime = textos.some(t => /Carlos Pedreira/.test(t)) && yA > 16;
+    textos.length = 0;
+    localStorage.setItem(logoUsuario.KEY, 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
+    const yB = printPreview._logoPDF(docFake, 20, 16, 62, 22);
+    out.pdfComLogoTambem = textos.some(t => /Carlos Pedreira/.test(t)) && yB > 16;
+
+    /* ---- é POR AMBIENTE ---- */
+    R.setItem('medsys.v7.cloud.org_id', 'org-bbbb');
+    out.outroAmbienteVazio = clinicaIdentidade.vazia() === true
+      && printPreview._header('X', '').indexOf('Carlos Pedreira') < 0;
+    R.setItem('medsys.v7.cloud.org_id', 'org-aaaa');
+    out.voltouIntacta = clinicaIdentidade.nome() === 'Clínica Carlos Pedreira';
+
+    /* ---- viaja para os outros aparelhos DA MESMA clínica ---- */
+    out.sincronizaNaClinica = Object.keys(clinicaSync.CHAVES).indexOf(clinicaIdentidade.KEY) >= 0;
+    /* ---- e não é preferência de pessoa ---- */
+    out.naoEhPreferenciaPessoal = configSync.CHAVES.indexOf(clinicaIdentidade.KEY) < 0;
+
+    limpar();
+    return out;
+  });
+  assert(r.comecaVazia && r.semBlocoQuandoVazia, 'ambiente novo começa sem identidade, e sem identidade o cabeçalho não ganha moldura vazia');
+  assert(r.temNome && r.temEndereco && r.temContato, 'nome, endereço e contato da clínica entram no cabeçalho');
+  assert(r.temLivre, 'e a linha livre também — CNPJ, site, horário: o que o gestor quiser');
+  assert(r.valeParaTodos, 'vale para pré, consulta, ficha, relatório: o cabeçalho é um só, e por isso não diverge');
+  assert(r.semLinhaVazia, 'campo em branco não vira linha em branco no papel');
+  assert(r.pdfSemLogoAindaImprime, 'no PDF, clínica SEM logomarca ainda imprime nome e contato — antes o cabeçalho sumia junto com a imagem');
+  assert(r.pdfComLogoTambem, 'e com logomarca os dois aparecem');
+  assert(r.outroAmbienteVazio, 'outro ambiente no mesmo aparelho não herda a identidade');
+  assert(r.voltouIntacta, 'e o primeiro continua com a dele');
+  assert(r.sincronizaNaClinica, 'viaja para os outros aparelhos DA CLÍNICA — a secretária imprime igual sem redigitar');
+  assert(r.naoEhPreferenciaPessoal, 'e não viaja como preferência de pessoa, que a levaria para dentro de outra clínica');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

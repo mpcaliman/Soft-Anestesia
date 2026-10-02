@@ -3268,6 +3268,24 @@ body.tem-modal .fab-dial, body.tem-modal .cronometros-wrap { display: none !impo
   object-fit: contain;
   flex-shrink: 0;
 }
+.print-preview-paper .pp-ident {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.print-preview-paper .pp-clinica { line-height: 1.22; min-width: 0; }
+.print-preview-paper .pp-clinica-nome {
+  font-size: calc(11pt * var(--pp-esc, 1));
+  font-weight: 700;
+  color: #1a2332;
+  letter-spacing: .2px;
+}
+.print-preview-paper .pp-clinica-linha {
+  font-size: calc(8.5pt * var(--pp-esc, 1));
+  color: #5a6472;
+  margin-top: 1px;
+}
 .print-preview-paper .pp-prof {
   text-align: right;
   line-height: 1.22;
@@ -4663,7 +4681,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-02e</b><br>
+    v7.1 · build <b id="build-tag">2026-10-02f</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -9966,6 +9984,25 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
       </div>
     </section>
 
+    <section class="card" id="clinica-identidade-card">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-icon">🏥</span><h2>Identidade da clínica<small>Nome, endereço e contato — aparecem no alto das impressões</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <p style="font-size:.82rem;color:var(--text-soft);margin-bottom:10px">
+          O que você escrever aqui vai no cabeçalho de <strong>consulta, pré-anestésica, ficha de anestesia, SRPA,
+          termo, receituário, documentos, orçamentos e relatórios</strong> — ao lado da logomarca.
+          É o endereço e o telefone que o paciente procura depois, no papel que levou para casa.
+          <br>Vale para <strong>esta clínica</strong>: todos os aparelhos e pessoas dela imprimem igual, e não atravessa para outro ambiente.
+        </p>
+        <div id="clinica-identidade-campos"></div>
+        <div class="cloud-actions" style="margin-top:4px">
+          <button type="button" class="btn btn-primary btn-sm" id="clinica-identidade-salvar" onclick="clinicaIdentidade.salvarDoFormulario()">💾 Salvar identidade</button>
+        </div>
+      </div>
+    </section>
+
     <div class="cadastro-grid">
       <div class="cadastro-categories" id="ajustes-cats"></div>
       <div class="cadastro-content" id="ajustes-content">
@@ -14906,7 +14943,7 @@ const ui = {
         else if (modName === 'financeiro') financeiro.render();
         else if (modName === 'agenda') { agenda.render(); if (!agenda._puxouNestaSessao) { setTimeout(() => { try { agenda.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
         else if (modName === 'pacientes') { pacientes.render(); if (!pacientes._puxouNestaSessao) { setTimeout(() => { try { pacientes.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
-        else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); try { equipeNuvem.render(); } catch (e) {} try { auditoria.render(''); } catch (e) {} try { armazenamento.render(); } catch (e) {} logoUsuario.renderAjustes(); try { ambiente.aplicarPermissoesAjustes(); } catch (e) {} try { nuvemEstado.render(); } catch (e) {} try { duplicados.resumoNoCard(); } catch (e) {} const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
+        else if (modName === 'ajustes') { ajustes.render(); setTimeout(() => { try { cloud._atualizarUI(); termoPadrao.uiCarregarNoEditor(); textosPadrao.renderAjustes(); pdfBackup.carregarUI(); ajustesUsuarios.render(); try { equipeNuvem.render(); } catch (e) {} try { auditoria.render(''); } catch (e) {} try { armazenamento.render(); } catch (e) {} logoUsuario.renderAjustes(); try { clinicaIdentidade.renderAjustes(); } catch (e) {} try { ambiente.aplicarPermissoesAjustes(); } catch (e) {} try { nuvemEstado.render(); } catch (e) {} try { duplicados.resumoNoCard(); } catch (e) {} const rb = document.getElementById('backup-completo-resumo'); if (rb) rb.textContent = `Você tem ${backupCompleto.resumo()} documento(s) registrado(s) no total.`; ui.recolherTodos('ajustes'); } catch (e) {} }, 80); }
         else if (modName === 'pre') { try { preLanc.renderBotao('pre'); } catch (e) {} try { pre.labs.ligar(); pre.labs.marcar(); } catch (e) {} try { pre._calcIMC(); } catch (e) {} try { comorbidades.renderRapidas(); alergias.renderRapidas(); comorbidades.syncRapidas(); } catch (e) {} try { pre.viaAerea.render(); } catch (e) {} try { pre.meds.ligar(); } catch (e) {} }
         else if (modName === 'anestesia') { try { preLanc.renderBotao('anestesia'); } catch (e) {} anestesia.graficoUI._contexto = 'anestesia'; anestesia.vitais.atualizarGrafico(); try { anestesia.meds.renderPresetsCustom(); } catch (e) {} try { anestesia.checagem.rodar(); } catch (e) {} try { anestesia.equip.render(); } catch (e) {} try { anestesia.vitais.aplicarMonitores(); } catch (e) {} try { anestesia.calc.resumoTopo(); } catch (e) {} try { adendos.renderInline('anestesia'); } catch (e) {} try { anestesia.nav._wire(); anestesia.nav.render(); } catch (e) {} try { anestesia.vitais.autoAvanco.wire(); } catch (e) {} }
         else if (modName === 'recuperacao') { anestesia.graficoUI._contexto = 'recuperacao'; setTimeout(() => { try { recuperacao.grafico.atualizar(); } catch (e) {} try { recuperacao.resumoTopo(); } catch (e) {} try { anestesia.vitais.autoAvanco.wire(); } catch (e) {} }, 60); }
@@ -21854,6 +21891,7 @@ const clinicaSync = {
     'medsys.v7.termo_padrao': 'termo_padrao',
     'medsys.v7.textos_padrao': 'textos_padrao',
     'medsys.v7.logoCustom': 'logo',
+    'medsys.v7.clinica.identidade': 'clinica_identidade',
     'medsys.v7.orcamento_cfg': 'orcamento_cfg',
     'medsys.v7.orcamento_modelos': 'orcamento_modelos',
     'medsys.v7.meds_usuario': 'meds_usuario',
@@ -23043,6 +23081,16 @@ const ambiente = {
       });
       const btnLogo = logo && logo.querySelector('button.btn-primary');
       if (btnLogo) { btnLogo.disabled = !gestor; btnLogo.style.opacity = gestor ? '' : '.5'; }
+
+      /* Identidade da clínica é da CLÍNICA, como a logomarca: quem define é o
+         gestor, e os demais veem de quem é. */
+      const ident = document.querySelector('#clinica-identidade-card .card-body');
+      if (ident && !semClinica) ambiente._avisoDono(ident, daClinica + trancado);
+      clinicaIdentidade.CAMPOS.forEach(([k]) => {
+        const el = document.getElementById('ci-' + k); if (el) el.disabled = !gestor;
+      });
+      const btnIdent = document.getElementById('clinica-identidade-salvar');
+      if (btnIdent) { btnIdent.disabled = !gestor; btnIdent.style.opacity = gestor ? '' : '.5'; }
 
       const chkDrive = document.getElementById('pdfbk-drive');
       const pdf = chkDrive ? chkDrive.closest('.card-body') : null;
@@ -30959,6 +31007,80 @@ const LOGOS = {
    Guarda a imagem (data URL) no aparelho e substitui a logo do app E de todas
    as impressões (o cabeçalho de impressão usa LOGOS.horizontal em tempo real). */
 const LOGOS_DEFAULT = { icone: LOGOS.icone, icone_grande: LOGOS.icone_grande, horizontal: LOGOS.horizontal };
+/* ============================================================================
+   IDENTIDADE DA CLÍNICA — o que vai no alto do papel
+
+   O cabeçalho das impressões trazia só o profissional: nome, CRM, endereço
+   dele. Mas o documento sai de uma CLÍNICA, e é a clínica que o paciente
+   procura depois — para marcar retorno, mandar o exame, reclamar da conta. Um
+   papel sem o nome e o contato de onde foi feito obriga o paciente a procurar
+   o telefone em outro lugar, e às vezes ele não procura.
+
+   É por ambiente, como tudo mais: o cofre particiona a chave, e `clinicaSync`
+   leva para os outros aparelhos DA MESMA clínica — a secretária imprime com o
+   mesmo cabeçalho sem ninguém redigitar nada. Quem edita é o gestor.
+============================================================================ */
+const clinicaIdentidade = {
+  KEY: 'medsys.v7.clinica.identidade',
+  CAMPOS: [
+    ['nome', 'Nome da clínica', 'Ex.: Clínica Carlos Pedreira'],
+    ['endereco', 'Endereço', 'Rua, número, bairro — cidade/UF'],
+    ['contato', 'Contato', 'Telefone, WhatsApp, e-mail'],
+    ['extra', 'Linha livre', 'CNPJ, site, horário de atendimento… o que o gestor quiser']
+  ],
+  ler() {
+    try { const v = JSON.parse(localStorage.getItem(clinicaIdentidade.KEY) || '{}'); return (v && typeof v === 'object') ? v : {}; }
+    catch (e) { return {}; }
+  },
+  salvar(d) {
+    try { localStorage.setItem(clinicaIdentidade.KEY, JSON.stringify(d || {})); } catch (e) {}
+    try { clinicaSync.enviar(); } catch (e) {}
+  },
+  vazia() {
+    const d = clinicaIdentidade.ler();
+    return !clinicaIdentidade.CAMPOS.some(([k]) => String(d[k] || '').trim());
+  },
+  /* As linhas de baixo do nome, na ordem em que fazem sentido lidas em voz
+     alta. Campo vazio não vira linha vazia. */
+  linhas() {
+    const d = clinicaIdentidade.ler();
+    return ['endereco', 'contato', 'extra'].map(k => String(d[k] || '').trim()).filter(Boolean);
+  },
+  nome() { return String(clinicaIdentidade.ler().nome || '').trim(); },
+  cabecalhoHTML() {
+    const E = utils.escapeHTML;
+    const nome = clinicaIdentidade.nome();
+    const linhas = clinicaIdentidade.linhas();
+    if (!nome && !linhas.length) return '';
+    return '<div class="pp-clinica">' +
+      (nome ? '<div class="pp-clinica-nome">' + E(nome) + '</div>' : '') +
+      linhas.map(l => '<div class="pp-clinica-linha">' + E(l) + '</div>').join('') +
+      '</div>';
+  },
+
+  /* ---- Ajustes ---- */
+  renderAjustes() {
+    const host = document.getElementById('clinica-identidade-campos');
+    if (!host) return;
+    const d = clinicaIdentidade.ler();
+    const A = utils.escapeAttr, E = utils.escapeHTML;
+    host.innerHTML = '<div class="grid">' + clinicaIdentidade.CAMPOS.map(([k, rot, dica]) =>
+      '<div class="field col-6"><label>' + E(rot) + '</label>' +
+      '<input type="text" id="ci-' + k + '" value="' + A(d[k] || '') + '" placeholder="' + A(dica) + '"></div>'
+    ).join('') + '</div>';
+  },
+  salvarDoFormulario() {
+    const d = {};
+    clinicaIdentidade.CAMPOS.forEach(([k]) => {
+      const el = document.getElementById('ci-' + k);
+      d[k] = el ? String(el.value || '').trim() : '';
+    });
+    clinicaIdentidade.salvar(d);
+    toast('🏥 Identidade da clínica salva — já vale nas impressões');
+    try { clinicaIdentidade.renderAjustes(); } catch (e) {}
+  }
+};
+
 const logoUsuario = {
   KEY: 'medsys.v7.logoCustom',
   atual() { try { return localStorage.getItem(this.KEY) || ''; } catch (e) { return ''; } },
@@ -48346,19 +48468,48 @@ ${TAG_CLOSE_HTML}`;
      jsPDF não a desenhava — todo documento saía sem identidade visual.
      Desenha a logo no topo e devolve o novo "y" (ou o mesmo, se não der).
   ------------------------------------------------------------------ */
+  /* Nome e contato da clínica ao lado da logo. Devolve a altura ocupada —
+     quem chama precisa saber onde continuar, e esse número não pode sair de
+     um palpite sobre quantas linhas havia. */
+  _clinicaPDF(doc, x, y) {
+    let alt = 0;
+    try {
+      if (typeof clinicaIdentidade === 'undefined') return 0;
+      const nome = clinicaIdentidade.nome();
+      const linhas = clinicaIdentidade.linhas();
+      if (!nome && !linhas.length) return 0;
+      const fonte = doc.getFontSize ? doc.getFontSize() : 10;
+      if (nome) {
+        doc.setFont(undefined, 'bold'); doc.setFontSize(10);
+        doc.text(String(nome), x, y + 3.2);
+        alt = 4.4;
+      }
+      doc.setFont(undefined, 'normal'); doc.setFontSize(7.6);
+      linhas.forEach(l => { doc.text(String(l), x, y + 3.2 + alt); alt += 3.4; });
+      doc.setFontSize(fonte);
+    } catch (e) {}
+    return alt;
+  },
   _logoPDF(doc, x, y, maxW, maxH) {
     try {
       /* Documento de paciente leva a marca da CLÍNICA, nunca a do sistema. */
       const src = (typeof logoUsuario !== 'undefined' && logoUsuario.daClinica()) || '';
-      if (!src || src.indexOf('data:image') !== 0) return y;
-      let prop = null;
-      try { prop = doc.getImageProperties ? doc.getImageProperties(src) : null; } catch (e) { prop = null; }
-      const nw = (prop && prop.width) || 3, nh = (prop && prop.height) || 1;
-      let w = maxW, h = w * nh / nw;
-      if (h > maxH) { h = maxH; w = h * nw / nh; }
-      const fmt = /^data:image\/jpe?g/i.test(src) ? 'JPEG' : 'PNG';
-      doc.addImage(src, fmt, x, y, w, h);
-      return y + h + 3;
+      let w = 0, h = 0;
+      if (src && src.indexOf('data:image') === 0) {
+        let prop = null;
+        try { prop = doc.getImageProperties ? doc.getImageProperties(src) : null; } catch (e) { prop = null; }
+        const nw = (prop && prop.width) || 3, nh = (prop && prop.height) || 1;
+        w = maxW; h = w * nh / nw;
+        if (h > maxH) { h = maxH; w = h * nw / nh; }
+        const fmt = /^data:image\/jpe?g/i.test(src) ? 'JPEG' : 'PNG';
+        doc.addImage(src, fmt, x, y, w, h);
+      }
+      /* SEM LOGO O CABEÇALHO NÃO DESAPARECE. A versão anterior desistia antes
+         de chegar aqui quando não havia imagem — e uma clínica que preencheu
+         nome, endereço e telefone imprimia o PDF sem nada disso. */
+      const altTexto = printPreview._clinicaPDF(doc, w ? (x + w + 4) : x, y + (w ? 3 : 0));
+      const usado = Math.max(h, altTexto);
+      return usado ? y + usado + 3 : y;
     } catch (e) { return y; }
   },
   /* Duração entre dois horários HH:MM (vira o dia se o fim for menor) */
@@ -48445,10 +48596,16 @@ ${TAG_CLOSE_HTML}`;
     if (prof.especialidade) linhaReg.push(prof.especialidade);
     if (prof.crm) linhaReg.push('CRM ' + prof.crm);
     if (prof.rqe) linhaReg.push('RQE ' + prof.rqe);
+    /* Lado esquerdo: a CLÍNICA (logo + nome + contato). Lado direito: o
+       PROFISSIONAL. São coisas diferentes e o papel precisa das duas. */
+    const daClinica = clinicaIdentidade.cabecalhoHTML();
     return `
       <div class="pp-header">
         <div class="pp-header-top">
-          ${logoUsuario.daClinica() ? `<img class="pp-logo" src="${logoUsuario.daClinica()}" alt="">` : ''}
+          <div class="pp-ident">
+            ${logoUsuario.daClinica() ? `<img class="pp-logo" src="${logoUsuario.daClinica()}" alt="">` : ''}
+            ${daClinica}
+          </div>
           ${nomeProf ? `<div class="pp-prof">
             <div class="pp-prof-nome">${utils.escapeHTML(nomeProf)}</div>
             ${linhaReg.length ? `<div class="pp-prof-reg">${utils.escapeHTML(linhaReg.join(' · '))}</div>` : ''}
@@ -55609,6 +55766,14 @@ const orcamento = {
       '<div class="pp-voltar-bar"><button type="button" style="background:#fff;color:#1a2332;font-weight:700" onclick="window.close();setTimeout(function(){if(!window.closed){history.back();}},250);">← Voltar ao SisAnestesia</button><button type="button" style="background:#2e7d52;color:#fff" onclick="window.print()">🖨️ Imprimir</button></div>' +
       (logoUsuario.daClinica()
         ? '<img src="' + logoUsuario.daClinica() + '" alt="" style="max-height:72px;max-width:360px;object-fit:contain;display:block;margin:0 0 6px">'
+        : '') +
+      /* o orçamento é o papel que o paciente mais guarda e mais consulta
+         depois: sem o contato da clínica ele liga para quem? */
+      (clinicaIdentidade.nome() || clinicaIdentidade.linhas().length
+        ? '<div style="margin:0 0 8px;line-height:1.3">' +
+          (clinicaIdentidade.nome() ? '<div style="font-weight:700">' + esc(clinicaIdentidade.nome()) + '</div>' : '') +
+          clinicaIdentidade.linhas().map(l => '<div style="font-size:9pt;color:#555">' + esc(l) + '</div>').join('') +
+          '</div>'
         : '') +
       '<h1>' + esc(cab.profissional || 'Honorários anestésicos') + '</h1>' +
       '<div class="sub">' + esc(cab.especialidade || '') + '</div>' +
