@@ -1719,9 +1719,15 @@ await test('Ajustes: cards do sistema viram grupos recolhíveis (o técnico em "
       && document.getElementById('ajg-nuvem').contains(document.getElementById('armazenamento-card'))
       && document.getElementById('ajg-equipe').contains(document.getElementById('equipe-nuvem-card'))
       && document.getElementById('ajg-modelos').contains(document.getElementById('clinica-identidade-card'));
-    /* o que é técnico saiu da frente: diagnóstico e migração só em "Avançado" */
+    /* O QUE É TÉCNICO SAI DA FRENTE. O card da migração "fase 4" foi removido
+       de vez — era ferramenta de uma migração concluída, com instruções de
+       rodar SQL à mão. No lugar dele, em "Avançado", ficam os mutirões de
+       conserto do que ficou para trás: eles existem para quem precisar e
+       param de disputar atenção com o uso diário. */
     out.tecnicoEmAvancado = document.getElementById('ajg-avancado').contains(document.getElementById('clouddiag-card'))
-      && document.getElementById('ajg-avancado').contains(document.getElementById('fase4-card'))
+      && document.getElementById('ajg-avancado').contains(document.getElementById('duplicados-card'))
+      && document.getElementById('ajg-avancado').contains(document.getElementById('mutirao-card'))
+      && !document.getElementById('fase4-card')
       && document.getElementById('ajg-cab-avancado').classList.contains('ajg-avancado');
     /* fechados por padrão (tela compacta) */
     localStorage.removeItem(ajustesGrupos.KEY);
@@ -1757,7 +1763,7 @@ await test('Ajustes: cards do sistema viram grupos recolhíveis (o técnico em "
   });
   assert(r.grupos, 'os grupos (nuvem/equipe/modelos/avancado) deveriam existir em Ajustes');
   assert(r.cardsDentro, 'os cards do sistema deveriam estar DENTRO dos grupos');
-  assert(r.tecnicoEmAvancado, 'diagnóstico e migração deveriam ficar no grupo "Avançado", fora do caminho do dia a dia');
+  assert(r.tecnicoEmAvancado, 'diagnóstico e os mutirões de conserto ficam em "Avançado", fora do caminho do dia a dia');
   assert(r.fechadoPadrao, 'os grupos deveriam vir fechados por padrão (tela compacta)');
   assert(r.abriu && r.fechou, 'o toque no cabeçalho deveria abrir/fechar e lembrar a escolha');
   assert(r.abrirPara, 'abrirPara deveria abrir o grupo que contém o card e devolvê-lo');
@@ -2404,29 +2410,17 @@ await test('Usuários: editar funciona nos espelhos da nuvem, só um "(você)", 
       && auth._lerUsuarios().every(u => !!u.id)
       && new Set(auth._lerUsuarios().map(u => u.id)).size === 2;
 
-    /* sessão = primeiro usuário → só ele é "(você)" */
+    /* A LISTA LOCAL DE USUÁRIOS SAIU DE AJUSTES (limpeza do módulo): ela era a
+       segunda forma de fazer o que "Equipe da nuvem → ✏️ Acesso" já faz, e
+       pior — valia só naquele aparelho, enquanto a da nuvem vale em todos. O
+       próprio card avisava isso em duas caixas de texto, que é o sintoma de
+       uma tela que não deveria existir. O que continua testado aqui é o que
+       continua existindo: o conserto dos espelhos antigos e o caminho da
+       equipe na nuvem. */
     auth._definirSessao(auth._lerUsuarios()[0]);
     location.hash = '#ajustes';
     await new Promise(r => setTimeout(r, 500));
-    ajustesUsuarios.render();
-    const html = document.getElementById('usuarios-lista').innerHTML;
-    out.umVoce = (html.match(/\(você\)/g) || []).length === 1;
-
-    /* ✏️ abre o modal do usuário CERTO (era o bug: id undefined → sem ação) */
-    const users = auth._lerUsuarios();
-    modal.close();
-    ajustesUsuarios.editar(users[1].id);
-    await new Promise(r => setTimeout(r, 150));
-    out.editarAbre = document.getElementById('modal-backdrop').classList.contains('show')
-      && (document.getElementById('modal-body').innerHTML || '').includes('mpcanestesiologia@gmail.com');
-    out.avisoNuvem = (document.getElementById('modal-body').innerHTML || '').includes('conta da nuvem');
-    /* trocar para Secretária/Auxiliar aplica as permissões restritas */
-    document.getElementById('user-perfil').value = 'secretaria';
-    ajustesUsuarios._sincronizarPerfil(false);
-    await ajustesUsuarios.salvarEdicao(users[1].id);
-    await new Promise(r => setTimeout(r, 200));
-    const dep = auth._lerUsuarios().find(u => u.usuario === 'mpcanestesiologia@gmail.com');
-    out.virouSecretaria = dep.perfil === 'secretaria' && !dep.modulos.includes('anestesia') && !dep.modulos.includes('ajustes');
+    out.semListaLocal = !document.getElementById('usuarios-lista');
 
     /* Equipe da nuvem sem gestor: em vez de aviso morto, botões de ação */
     cloud.estaConfigurado = () => true;
@@ -2456,10 +2450,7 @@ await test('Usuários: editar funciona nos espelhos da nuvem, só um "(você)", 
     return out;
   });
   assert(r.reparou, 'espelhos antigos sem id deveriam ganhar ids únicos');
-  assert(r.umVoce, 'apenas o usuário logado deveria aparecer como "(você)"');
-  assert(r.editarAbre, 'o ✏️ deveria abrir o modal do usuário certo');
-  assert(r.avisoNuvem, 'editar conta da nuvem deveria avisar que o papel definitivo é o da nuvem');
-  assert(r.virouSecretaria, 'mudar para Secretária deveria restringir os módulos');
+  assert(r.semListaLocal, 'a lista local de usuários saiu de Ajustes — quem define acesso é Equipe da nuvem, e vale em todos os aparelhos');
   assert(r.temCaminho, 'sem gestor, a Equipe da nuvem deveria oferecer criar clínica / atualizar papel');
   assert(r.rpcCerta, 'criar clínica deveria chamar a RPC criar_minha_organizacao');
   assert(r.virouGestor, 'após criar a clínica, o usuário deveria virar gestor no aparelho');
@@ -18326,6 +18317,298 @@ await test('Lado operado chega à linha de cobrança, na janela e na tabela do F
   assert(r.brancoSegueBranco, 'em branco continua em branco: "não se aplica" não pode virar dado inventado');
   assert(r.janelaTemColuna && r.janelaVeioMarcada, 'a janela "gerar financeiro" tem a mesma coluna, preenchida');
   assert(r.janelaColeta, 'e leva o lado para o lançamento que ela cria');
+  await page.close();
+});
+
+/* 248) A nuvem é a fonte; o aparelho é janela de trabalho
+
+   Decisão do dono do sistema: "o sistema tem que rodar 100% em nuvem, nada
+   local". A leitura literal — não gravar nada no aparelho — foi recusada por
+   um motivo clínico: dentro do centro cirúrgico a internet cai, e um sistema
+   que não grava offline deixa o anestesista sem registrar uma anestesia em
+   andamento, que é obrigação legal dele.
+
+   O que ficou valendo inverte a RELAÇÃO sem perder a segurança: a nuvem é a
+   dona dos registros, e o aparelho guarda apenas a janela de trabalho — o que
+   está aberto, o que ainda não subiu e os últimos dias. Era isso que faltava
+   para acabar com o aparelho cheio e o dado preso numa máquina.
+
+   O módulo `modoNuvem` já fazia exatamente isso. Ele estava DESLIGADO por
+   padrão e dependia de alguém lembrar de um botão de limpeza — e ninguém
+   lembra de um botão de limpeza antes do aparelho encher. */
+await test('Nuvem é a fonte: o aparelho se esvazia sozinho e sai vazio, sem perder o que não subiu', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const origPode = modoNuvem.podeLigar;
+
+    /* ---- ligado por padrão quando há nuvem; sem nuvem, não age ---- */
+    localStorage.removeItem(modoNuvem.KEY);
+    modoNuvem.podeLigar = () => true;
+    out.ligadoPorPadrao = modoNuvem.ligado() === true && modoNuvem.noPadrao() === true;
+    modoNuvem.podeLigar = () => false;
+    out.semNuvemNaoAge = modoNuvem.ligado() === false;
+    /* escolha explícita vence o padrão nos dois sentidos */
+    localStorage.setItem(modoNuvem.KEY, '1');
+    out.escolhaLigadaVence = modoNuvem.ligado() === true && modoNuvem.noPadrao() === false;
+    localStorage.setItem(modoNuvem.KEY, '0');
+    modoNuvem.podeLigar = () => true;
+    out.escolhaDesligadaVence = modoNuvem.ligado() === false;
+
+    /* ---- o que sai e o que fica ---- */
+    localStorage.removeItem(modoNuvem.KEY);
+    const velho = new Date(Date.now() - 90 * 86400000).toISOString();
+    store.setList('pre', [
+      { _id: 'a', nome: 'Com espelho e antigo', _updatedAt: velho, _relUpdatedAt: velho },
+      { _id: 'b', nome: 'Sem espelho (não subiu)', _updatedAt: velho },
+      { _id: 'c', nome: 'Recente', _updatedAt: new Date().toISOString(), _relUpdatedAt: new Date().toISOString() }
+    ]);
+    modoNuvem.manutencao({ silent: true });
+    const ficou = (store.list('pre') || []).map(x => x._id).sort();
+    out.tirouOAntigoConfirmado = ficou.indexOf('a') < 0;
+    out.manteveOQueNaoSubiu = ficou.indexOf('b') >= 0;
+    out.manteveORecente = ficou.indexOf('c') >= 0;
+    /* o que saiu continua localizável: saiu do aparelho, não da clínica */
+    out.ficouNoIndice = (arquivo._indice().pre || []).some(e => e.id === 'a');
+
+    /* ---- o registro ABERTO na tela nunca sai ---- */
+    store.setList('pre', [{ _id: 'aberto', nome: 'Em uso', _updatedAt: velho, _relUpdatedAt: velho }]);
+    const f = document.getElementById('form-pre');
+    let hid = f.querySelector('[name="_id"]');
+    if (!hid) { hid = document.createElement('input'); hid.type = 'hidden'; hid.name = '_id'; f.appendChild(hid); }
+    hid.value = 'aberto';
+    modoNuvem.manutencao({ silent: true });
+    out.naoTiraOQueEstaAberto = (store.list('pre') || []).some(x => x._id === 'aberto');
+    hid.value = '';
+
+    /* ---- ao SAIR, a janela é zero: tudo que tem espelho sai ---- */
+    store.setList('pre', [
+      { _id: 'hoje', nome: 'De hoje, já na nuvem', _updatedAt: new Date().toISOString(), _relUpdatedAt: new Date().toISOString() },
+      { _id: 'pend', nome: 'De hoje, não subiu', _updatedAt: new Date().toISOString() }
+    ]);
+    modoNuvem.aoSair();
+    const depoisDeSair = (store.list('pre') || []).map(x => x._id);
+    out.sairEsvazia = depoisDeSair.indexOf('hoje') < 0;
+    out.sairPreservaPendente = depoisDeSair.indexOf('pend') >= 0;
+
+    modoNuvem.podeLigar = origPode;
+    store.setList('pre', []);
+    return out;
+  });
+  assert(r.ligadoPorPadrao, 'com nuvem conectada, o aparelho passa a ser janela de trabalho por padrão — sem depender de alguém achar um botão');
+  assert(r.semNuvemNaoAge, 'sem nuvem não age: tirar registro do aparelho sem ter onde buscá-lo depois é perder, não arquivar');
+  assert(r.escolhaLigadaVence && r.escolhaDesligadaVence, 'e a escolha explícita de quem usa vence o padrão, nos dois sentidos');
+  assert(r.tirouOAntigoConfirmado, 'o que está confirmado na nuvem e fora da janela sai do aparelho');
+  assert(r.manteveOQueNaoSubiu, 'o que NÃO subiu fica — ali o aparelho é a única cópia que existe');
+  assert(r.manteveORecente, 'e o recente fica, que é a janela de trabalho');
+  assert(r.ficouNoIndice, 'o que saiu continua no índice: saiu do aparelho, não da clínica');
+  assert(r.naoTiraOQueEstaAberto, 'o registro aberto na tela nunca sai do aparelho no meio do trabalho');
+  assert(r.sairEsvazia, 'ao sair, o aparelho devolve tudo o que já está na nuvem');
+  assert(r.sairPreservaPendente, 'menos o que ainda não subiu — sair não pode apagar a única cópia de um atendimento');
+  await page.close();
+});
+
+/* 249) Sem internet, a tela diz; e o digitado não se perde em módulo nenhum
+
+   Dois pedidos do mesmo parágrafo:
+
+   "Se sem internet, gravar local. Mas com aviso e tarja de sem internet.
+   (...) não desligar."
+   "Ao digitar algo em qualquer campo de qualquer módulo essa ação deve ficar
+   gravada atrelada ao usuário. E mesmo sem salvar ou finalizar, não se perde
+   o editado."
+
+   O primeiro existe porque, com a nuvem como fonte, ficar offline deixou de
+   ser invisível: o atendimento continua sendo gravado, mas só aqui. Quem não
+   sabe disso desliga a máquina e perde o que fez.
+
+   O segundo tapa um buraco antigo: o auto-save cobria quatro módulos. Em
+   termo, receituário, risco, documentos, orçamento, financeiro e agenda, o
+   que estava digitado e não salvo existia SÓ na tela. */
+await test('Tarja de sem internet, e o que foi digitado sobrevive em qualquer módulo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const origOffline = conexao.offline;
+    const origPend = conexao.pendentes;
+
+    /* ---- tudo em ordem: nenhuma tarja ---- */
+    conexao.offline = () => false; conexao.pendentes = () => 0;
+    conexao.pintar();
+    out.semTarjaQuandoTudoOk = !document.getElementById(conexao.ID);
+
+    /* ---- sem internet: tarja fixa, com o número e o pedido de não desligar ---- */
+    conexao.offline = () => true; conexao.pendentes = () => 3;
+    conexao.pintar();
+    const t = document.getElementById(conexao.ID);
+    out.apareceu = !!t;
+    out.dizSemInternet = !!t && /SEM INTERNET/.test(t.textContent);
+    out.dizQuantos = !!t && /3 atendimento/.test(t.textContent);
+    out.dizSoNesteAparelho = !!t && /só neste aparelho/i.test(t.textContent);
+    out.pedeNaoDesligar = !!t && /não feche nem desligue/i.test(t.textContent);
+    out.dizQueSobemSozinhos = !!t && /sobem sozinhos/i.test(t.textContent);
+
+    /* ---- internet voltou mas ainda há registro preso aqui: o aviso CONTINUA ---- */
+    conexao.offline = () => false; conexao.pendentes = () => 2;
+    conexao.pintar();
+    const t2 = document.getElementById(conexao.ID);
+    out.continuaEnquantoNaoSobe = !!t2 && /Enviando para a nuvem/i.test(t2.textContent)
+      && /Não desligue/i.test(t2.textContent);
+
+    /* ---- subiu tudo: some sozinha ---- */
+    conexao.pendentes = () => 0;
+    conexao.pintar();
+    out.someQuandoAcaba = !document.getElementById(conexao.ID);
+    conexao.offline = origOffline; conexao.pendentes = origPend;
+
+    /* ---- EDIÇÃO VIVA nos módulos que não tinham nada ---- */
+    out.cobreOsQueFaltavam = ['termo', 'prescricao', 'risco', 'documentos', 'orcamento', 'financeiro', 'agenda']
+      .every(m => edicaoViva.MODS.indexOf(m) >= 0);
+
+    const f = document.getElementById('form-termo');
+    out.temOFormulario = !!f;
+    if (f) {
+      edicaoViva.descartar('termo');
+      const campo = f.querySelector('input[name], textarea[name]');
+      campo.value = 'Texto que ninguém salvou';
+      edicaoViva.guardar('termo');
+      const g = edicaoViva.ler('termo');
+      out.guardouODigitado = !!g && JSON.stringify(g.dados).indexOf('ninguém salvou') >= 0;
+      out.atreladoAoUsuario = !!g && typeof g.quem === 'string';
+      out.temCarimboDeHora = !!g && !!g.em;
+
+      /* a tela some (como ao fechar a aba) e o que foi digitado volta */
+      campo.value = '';
+      out.restaurou = edicaoViva.restaurar('termo') === true && campo.value === 'Texto que ninguém salvou';
+      const aviso = document.getElementById('edicao-viva-aviso');
+      out.avisouQueRecuperou = !!aviso && /Recuperei o que você estava digitando/.test(aviso.textContent);
+      out.ofereceDescartar = !!aviso && /Descartar/.test(aviso.textContent);
+
+      /* NÃO sobrescreve o que está sendo digitado agora */
+      campo.value = 'O que estou escrevendo agora';
+      out.naoSobrescreve = edicaoViva.restaurar('termo') === false
+        && campo.value === 'O que estou escrevendo agora';
+
+      /* formulário em branco não vira rascunho de nada */
+      campo.value = '';
+      edicaoViva.guardar('termo');
+      out.vazioNaoGuarda = edicaoViva.ler('termo') === null;
+
+      edicaoViva.descartar('termo');
+      const a2 = document.getElementById('edicao-viva-aviso'); if (a2) a2.remove();
+    }
+    return out;
+  });
+  assert(r.semTarjaQuandoTudoOk, 'com internet e nada preso aqui, nenhuma tarja — aviso que fica sempre deixa de ser lido');
+  assert(r.apareceu && r.dizSemInternet, 'sem internet, a tarja aparece e diz isso com todas as letras');
+  assert(r.dizQuantos && r.dizSoNesteAparelho, 'dizendo QUANTOS atendimentos existem só ali — é a resposta a "o que eu perco se desligar"');
+  assert(r.pedeNaoDesligar && r.dizQueSobemSozinhos, 'pede para não desligar, e tranquiliza: sobem sozinhos quando voltar');
+  assert(r.continuaEnquantoNaoSobe, 'internet de volta não basta: enquanto um registro estiver preso aqui, o aviso continua');
+  assert(r.someQuandoAcaba, 'e some sozinha quando o último chega à nuvem');
+  assert(r.cobreOsQueFaltavam, 'a edição viva cobre justamente os módulos que não tinham auto-save nenhum');
+  assert(r.temOFormulario && r.guardouODigitado, 'o que foi digitado e não salvo fica guardado');
+  assert(r.atreladoAoUsuario && r.temCarimboDeHora, 'atrelado a quem digitou e a quando');
+  assert(r.restaurou && r.avisouQueRecuperou, 'e volta ao abrir o módulo, avisando que foi recuperado — não aparece como se a pessoa tivesse digitado agora');
+  assert(r.ofereceDescartar, 'com saída para descartar: rascunho que não se consegue dispensar vira estorvo');
+  assert(r.naoSobrescreve, 'e NUNCA substitui o que está sendo digitado neste momento');
+  assert(r.vazioNaoGuarda, 'formulário em branco não vira rascunho — senão o sistema oferece recuperar o nada');
+  await page.close();
+});
+
+/* 250) Nada do que foi feito hoje atravessa de um ambiente para o outro
+
+   Lembrete do dono do sistema, depois de uma semana inteira caçando
+   vazamento entre clínicas: "lembrar de também não permitir mistura de um
+   ambiente com o outro".
+
+   Isto não se responde com garantia — se responde com teste. Cada coisa
+   construída hoje é verificada aqui com DUAS clínicas no mesmo aparelho:
+   identidade da clínica, rascunho vivo, acervo arquivado, contagem do que
+   está preso no aparelho e a cirurgia lida da pré.
+
+   E há um segundo eixo, que o cofre não cobre: dentro da MESMA clínica, um
+   computador de consultório é usado por mais de uma pessoa. O que o médico
+   estava digitando num termo não é para aparecer na tela da secretária. */
+await test('Isolamento entre ambientes (e entre pessoas) no que foi construído hoje', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const R = cofre._real;
+    const limpar = () => {
+      const fora = [];
+      for (let i = 0; i < R.length; i++) { const k = R.key(i); if (k && k.indexOf('medsys.') === 0) fora.push(k); }
+      fora.forEach(k => R.removeItem(k));
+    };
+    const entrar = (org) => R.setItem('medsys.v7.cloud.org_id', org);
+    limpar();
+
+    /* ================= CLÍNICA A ================= */
+    entrar('org-aaaa');
+    clinicaIdentidade.salvar({ nome: 'Clínica A', endereco: 'Rua A', contato: '1111', extra: '' });
+    store.setList('pre', [{
+      _id: 'preA', nome: 'Paciente A', _updatedAt: new Date().toISOString(),
+      _procsExtra: [{ codigo: '1.1', descricao: 'Cirurgia da clínica A', lateralidade: 'direita' }]
+    }]);
+    /* um registro preso só neste aparelho (sem espelho na nuvem) */
+    store.setList('anestesia', [{ _id: 'fA', paciente: { nome: 'Paciente A' }, _updatedAt: new Date().toISOString() }]);
+    /* um rascunho vivo, digitado por mim */
+    const f = document.getElementById('form-termo');
+    const campo = f && f.querySelector('input[name], textarea[name]');
+    const origUser = auth.usuarioAtual;
+    auth.usuarioAtual = () => ({ usuario: 'medico@a.com' });
+    if (campo) { campo.value = 'Termo em edição na clínica A'; edicaoViva.guardar('termo'); }
+    /* e algo arquivado pelo modo nuvem */
+    const velho = new Date(Date.now() - 90 * 86400000).toISOString();
+    store.setList('consulta', [{ _id: 'cA', nome: 'Antigo A', _updatedAt: velho, _relUpdatedAt: velho }]);
+    const origPode = modoNuvem.podeLigar; modoNuvem.podeLigar = () => true;
+    modoNuvem.manutencao({ silent: true });
+    out.arquivouEmA = (arquivo._indice().consulta || []).some(e => e.id === 'cA');
+    out.presoEmA = conexao.pendentes() >= 1;
+
+    /* ================= CLÍNICA B, mesmo aparelho ================= */
+    entrar('org-bbbb');
+    out.identidadeNaoAtravessa = clinicaIdentidade.vazia() === true
+      && clinicaIdentidade.nome() !== 'Clínica A';
+    out.preNaoAtravessa = (store.list('pre') || []).length === 0
+      && cirurgia.daPre('Paciente A').length === 0;
+    out.fichaNaoAtravessa = (store.list('anestesia') || []).length === 0;
+    out.arquivoNaoAtravessa = !((arquivo._indice().consulta || []).some(e => e.id === 'cA'));
+    out.contagemNaoAtravessa = conexao.pendentes() === 0;
+    if (campo) { campo.value = ''; out.rascunhoNaoAtravessa = edicaoViva.restaurar('termo') === false; }
+
+    /* ================= de volta à A: tudo intacto ================= */
+    entrar('org-aaaa');
+    out.aIntacta = clinicaIdentidade.nome() === 'Clínica A'
+      && (store.list('anestesia') || []).length === 1
+      && cirurgia.daPre('Paciente A').length === 1;
+    if (campo) {
+      campo.value = '';
+      out.rascunhoVoltaParaDono = edicaoViva.restaurar('termo') === true
+        && campo.value === 'Termo em edição na clínica A';
+    }
+
+    /* ======= mesma clínica, OUTRA pessoa: o rascunho não é dela ======= */
+    if (campo) {
+      campo.value = '';
+      auth.usuarioAtual = () => ({ usuario: 'secretaria@a.com' });
+      out.outraPessoaNaoVe = edicaoViva.restaurar('termo') === false && campo.value === '';
+    }
+
+    auth.usuarioAtual = origUser;
+    modoNuvem.podeLigar = origPode;
+    const av = document.getElementById('edicao-viva-aviso'); if (av) av.remove();
+    limpar();
+    return out;
+  });
+  assert(r.arquivouEmA && r.presoEmA, 'o cenário monta a clínica A com acervo arquivado e registro preso no aparelho');
+  assert(r.identidadeNaoAtravessa, 'a identidade da clínica (logomarca, nome, endereço, contato) não atravessa para o outro ambiente');
+  assert(r.preNaoAtravessa, 'a pré e a cirurgia lida dela não atravessam — nem pelo nome do paciente');
+  assert(r.fichaNaoAtravessa, 'as fichas não atravessam');
+  assert(r.arquivoNaoAtravessa, 'o índice do que foi arquivado pelo modo nuvem é de cada clínica');
+  assert(r.contagemNaoAtravessa, '"o que está preso neste aparelho" conta só o ambiente aberto — senão a tarja acusaria pendência da outra clínica');
+  assert(r.rascunhoNaoAtravessa, 'o rascunho vivo não atravessa: ele tem nome de paciente dentro');
+  assert(r.aIntacta && r.rascunhoVoltaParaDono, 'e o ambiente de origem continua inteiro — separar não é apagar');
+  assert(r.outraPessoaNaoVe, 'dentro da MESMA clínica, o rascunho de uma pessoa não aparece para outra no mesmo computador');
   await page.close();
 });
 

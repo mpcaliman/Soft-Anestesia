@@ -4131,6 +4131,13 @@ body.dash-auxiliar #module-dashboard #pendencias-card[data-detail] { display: bl
 @media print{ .acoes-cab, .acoes-rodape{ display:none !important; } }
 
 /* Faixa de armazenamento cheio — avisa sem tomar a tela */
+.faixa-sem-net{
+  position: fixed; left: 0; right: 0; top: 0; z-index: 9998;
+  background: #8a1c1c; color: #fff; font-size: .82rem; line-height: 1.45;
+  padding: 9px 14px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,.22);
+}
+.faixa-sem-net-subindo{ background: #7a4b12; }
+@media print{ .faixa-sem-net{ display: none !important; } }
 .espaco-faixa{
   position: fixed; left: 10px; right: 10px; bottom: 84px; z-index: 950;
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -4688,7 +4695,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-02j</b><br>
+    v7.1 · build <b id="build-tag">2026-10-02n</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -9502,28 +9509,6 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </section>
 
     <!-- ☁️ MIGRAÇÃO FASE 4 — dados atuais → banco relacional -->
-    <section class="card" id="fase4-card">
-      <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-icon">🗄️</span><h2>Migração para o banco relacional<small>Leva seus dados atuais para as novas tabelas (pacientes, atendimentos, fichas…)</small></h2></div>
-        <div class="card-actions"><span class="toggle-icon">▾</span></div>
-      </div>
-      <div class="card-body">
-        <p style="font-size:.84rem;color:var(--text-soft);margin:0 0 10px;line-height:1.6">
-          Organiza os registros em <strong>pacientes únicos</strong> e <strong>atendimentos (encounters)</strong> no
-          banco relacional criado nas fases anteriores. É <strong>seguro</strong>: sempre há
-          pré-visualização, é <strong>idempotente</strong> (rodar de novo não duplica) e <strong>não apaga</strong> nada
-          — seus dados locais e a sincronização atual continuam intactos.
-        </p>
-        <ol style="font-size:.8rem;color:var(--text-mute);margin:0 0 12px;padding-left:18px;line-height:1.7">
-          <li>No Supabase → SQL Editor, rode <code>database/migrations/0003_migration_targets.sql</code> (uma vez).</li>
-          <li>Esteja <strong>conectado à nuvem</strong> (logado) aqui no app.</li>
-          <li>Clique em <strong>Pré-visualizar</strong> e confira os números; depois <strong>Migrar</strong>.</li>
-        </ol>
-        <button type="button" class="btn btn-sm" onclick="migracaoFase4.uiPreVisualizar()">🔍 Pré-visualizar migração</button>
-        <div id="fase4-resultado" class="diag-box" style="display:none;margin-top:12px"></div>
-      </div>
-    </section>
-
     <!-- 🩺 DIAGNÓSTICO DA NUVEM -->
     <section class="card" id="clouddiag-card">
       <div class="card-header" onclick="ui.toggleCard(this)">
@@ -9730,23 +9715,15 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
 
     <section class="card" id="usuarios-card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-icon">🔒</span><h2>Usuários e segurança<small>Login por usuário/senha, perfis e permissões de acesso</small></h2></div>
+        <div class="card-title-wrap"><span class="card-icon">🔒</span><h2>Bloqueio de tela<small>Depois de quanto tempo sem uso este aparelho pede a senha de novo</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
         <p style="font-size:.8rem;color:var(--text-soft);margin-bottom:12px">
-          O sistema pede usuário e senha ao abrir e bloqueia automaticamente por inatividade.
-          Cada usuário tem um perfil (Administrador, Médico ou Secretária/Auxiliar) que define quais módulos pode acessar.
+          Quem entra no sistema e o que cada um acessa é definido em <b>Equipe da nuvem</b>, logo abaixo — vale em todos os aparelhos.
+          Aqui fica só o que é <b>deste aparelho</b>: de quanto em quanto tempo ele volta a pedir a senha.
         </p>
-        <div style="font-size:.74rem;color:var(--text-mute);background:var(--surface-alt);padding:9px 12px;border-radius:7px;margin-bottom:14px">
-          ⚠️ Esta é uma trava de acesso local (as senhas ficam guardadas em hash neste aparelho). Para segurança real dos dados, mantenha a senha/biometria do próprio dispositivo ativada.
-        </div>
-        <div style="font-size:.76rem;color:var(--text-soft);background:var(--surface-alt);padding:9px 12px;border-radius:7px;margin-bottom:14px">
-          👥 Esta lista é <b>deste aparelho</b>. Para conferir ou mudar o que a sua secretária (ou qualquer pessoa da equipe)
-          acessa <b>em todos os aparelhos</b>, use <b>Equipe da nuvem → ✏️ Acesso</b>, logo abaixo.
-        </div>
 
-        <!-- 🔐 Bloqueio de tela -->
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:14px;padding:11px 12px;background:var(--surface-alt);border-radius:8px">
           <div style="flex:1;min-width:180px">
             <label for="seg-timeout" style="font-size:.8rem;font-weight:600;display:block;margin-bottom:3px">🔒 Bloqueio automático por inatividade</label>
@@ -9764,12 +9741,6 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
           <button type="button" class="btn btn-sm" onclick="auth.bloquearAgora()" title="Sair e pedir a senha imediatamente">🔒 Bloquear agora</button>
         </div>
 
-        <div id="usuarios-lista"></div>
-
-        <!-- Criação de usuário LOCAL desativada (por enquanto): as contas agora são
-             da NUVEM — crie/convide em "Equipe da nuvem", assim tudo sincroniza e
-             fica igual em qualquer aparelho. -->
-        <p style="font-size:.76rem;color:var(--text-mute);margin-top:12px">➕ Para adicionar alguém, use <b>Equipe da nuvem</b> (logo abaixo) — contas da nuvem funcionam em qualquer aparelho e sincronizam tudo. A criação de usuário <i>apenas local</i> foi desativada.</p>
       </div>
     </section>
 
@@ -13684,6 +13655,196 @@ const espaco = {
 };
 
 /* ============================================================================
+   SEM INTERNET — a tarja que diz a verdade enquanto ela dura
+
+   Com a nuvem como fonte, ficar sem internet deixou de ser invisível: o
+   atendimento continua sendo gravado NESTE aparelho, mas por enquanto existe
+   só aqui. Quem não sabe disso fecha a aba, desliga o computador ou troca de
+   máquina — e perde o que fez.
+
+   Por isso a tarja fica FIXA enquanto durar, diz quantos atendimentos ainda
+   não subiram e pede explicitamente para não desligar. E ela não some quando a
+   internet volta: some quando o último registro preso aqui chega à nuvem.
+   Enquanto houver um só aqui, o aviso continua — é o que ele está avisando.
+============================================================================ */
+const conexao = {
+  ID: 'faixa-sem-internet',
+  offline() {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+      return !!(typeof cloud !== 'undefined' && cloud.servidorFora && cloud.servidorFora());
+    } catch (e) { return false; }
+  },
+  /* Quantos atendimentos existem SÓ neste aparelho. Não é a fila técnica: é a
+     resposta à pergunta "o que eu perco se desligar isto agora?". */
+  pendentes() {
+    let n = 0;
+    try { n += (cloud._fila() || []).length; } catch (e) {}
+    try {
+      Object.keys(arquivo.PRAZOS || {}).forEach(mod => {
+        (store.list(mod) || []).forEach(it => { if (it && it._id && !it._relUpdatedAt) n++; });
+      });
+    } catch (e) {}
+    return n;
+  },
+  pintar() {
+    try {
+      const fora = conexao.offline();
+      const pend = conexao.pendentes();
+      const el = document.getElementById(conexao.ID);
+      if (!fora && !pend) { if (el) el.remove(); return; }
+      const div = el || document.createElement('div');
+      div.id = conexao.ID;
+      div.className = 'faixa-sem-net' + (fora ? '' : ' faixa-sem-net-subindo');
+      const quanto = pend
+        ? '<b>' + pend + '</b> atendimento(s) estão gravados <b>só neste aparelho</b>.'
+        : 'O que você fizer agora fica gravado <b>só neste aparelho</b>.';
+      div.innerHTML = fora
+        ? '<span>📴 <b>SEM INTERNET</b> — pode continuar trabalhando, nada se perde aqui. ' + quanto +
+          ' Sobem sozinhos quando a internet voltar: <b>não feche nem desligue até lá</b>.</span>'
+        : '<span>⏳ <b>Enviando para a nuvem…</b> ' + quanto + ' <b>Não desligue</b> até este aviso sumir.</span>';
+      if (!el) document.body.appendChild(div);
+    } catch (e) {}
+  },
+  iniciar() {
+    try {
+      conexao.pintar();
+      window.addEventListener('online', () => { conexao.pintar(); setTimeout(conexao.pintar, 4000); });
+      window.addEventListener('offline', conexao.pintar);
+      /* a fila esvazia sem disparar evento nenhum; o relógio é o que faz a
+         tarja sumir no instante certo em vez de ficar mentindo na tela */
+      setInterval(conexao.pintar, 5000);
+    } catch (e) {}
+  }
+};
+
+/* ============================================================================
+   EDIÇÃO VIVA — o que foi digitado não se perde, em módulo nenhum
+
+   O auto-save cobria quatro módulos (pré, consulta, ficha, SRPA). Nos outros
+   — termo, receituário, risco, documentos, orçamento, financeiro, agenda — o
+   que estava digitado e não salvo existia só na tela: fechar a aba, acabar a
+   bateria ou tocar em Voltar apagava tudo, sem aviso.
+
+   Aqui qualquer tecla em qualquer formulário é guardada, atrelada à PESSOA, e
+   viaja com ela: começar no celular e terminar no computador passa a valer
+   para o sistema inteiro.
+
+   Duas travas que fazem isso ser seguro:
+   • restaura só em formulário VAZIO — o que você está digitando agora nunca é
+     substituído pelo que ficou de ontem;
+   • o aviso traz um botão de descartar, porque rascunho que não se consegue
+     dispensar vira estorvo.
+============================================================================ */
+const edicaoViva = {
+  KEY: 'medsys.v7.edicao.',
+  /* Os quatro grandes já têm abas de rascunho próprias, com nuvem e tudo.
+     Aqui ficam os que não tinham nada. */
+  MODS: ['termo', 'prescricao', 'risco', 'documentos', 'orcamento', 'financeiro', 'agenda'],
+  FORMS: {
+    termo: 'form-termo', prescricao: 'form-prescricao', risco: 'form-risco',
+    documentos: 'form-documentos', orcamento: 'form-orcamento',
+    financeiro: 'form-financeiro', agenda: 'form-agenda'
+  },
+
+  _form(mod) { return document.getElementById(edicaoViva.FORMS[mod] || ''); },
+  _ler(f) {
+    const d = {};
+    f.querySelectorAll('input, select, textarea').forEach(el => {
+      if (!el.name || el.type === 'file' || el.type === 'password') return;
+      d[el.name] = (el.type === 'checkbox' || el.type === 'radio') ? el.checked : el.value;
+    });
+    return d;
+  },
+  /* Tem algo digitado de verdade? Formulário em branco não vira rascunho —
+     senão o sistema oferece recuperar o nada. */
+  temConteudo(d) {
+    try {
+      return Object.keys(d || {}).some(k => {
+        if (k.indexOf('_id') === 0) return false;
+        const v = d[k];
+        if (v === true) return true;
+        return typeof v === 'string' && v.trim() !== '';
+      });
+    } catch (e) { return false; }
+  },
+  guardar(mod) {
+    try {
+      const f = edicaoViva._form(mod); if (!f) return false;
+      const dados = edicaoViva._ler(f);
+      if (!edicaoViva.temConteudo(dados)) { edicaoViva.descartar(mod); return false; }
+      localStorage.setItem(edicaoViva.KEY + mod, JSON.stringify({
+        mod, dados, em: new Date().toISOString(),
+        quem: (() => { try { return (auth.usuarioAtual() || {}).usuario || ''; } catch (e) { return ''; } })()
+      }));
+      return true;
+    } catch (e) { return false; }
+  },
+  ler(mod) {
+    try { return JSON.parse(localStorage.getItem(edicaoViva.KEY + mod) || 'null'); } catch (e) { return null; }
+  },
+  descartar(mod) {
+    try { localStorage.removeItem(edicaoViva.KEY + mod); } catch (e) {}
+  },
+
+  /* Restaura ao abrir o módulo — SÓ se a tela estiver vazia. */
+  restaurar(mod) {
+    try {
+      const g = edicaoViva.ler(mod);
+      if (!g || !g.dados) return false;
+      /* DE QUEM É ESTE RASCUNHO. O cofre já separa por CLÍNICA, mas dentro da
+         mesma clínica um computador é usado por mais de uma pessoa — a
+         secretária e o médico na mesma máquina do consultório. O que ele
+         estava digitando num termo não é para aparecer na tela dela. */
+      const euSou = (() => { try { return (auth.usuarioAtual() || {}).usuario || ''; } catch (e) { return ''; } })();
+      if (g.quem && euSou && g.quem !== euSou) return false;
+      const f = edicaoViva._form(mod); if (!f) return false;
+      if (edicaoViva.temConteudo(edicaoViva._ler(f))) return false;   /* já há coisa na tela */
+      let n = 0;
+      Object.keys(g.dados).forEach(nome => {
+        let el = null;
+        try { el = f.querySelector('[name="' + nome.replace(/"/g, '\\"') + '"]'); } catch (e) { el = null; }
+        if (!el) return;
+        if (el.type === 'checkbox' || el.type === 'radio') el.checked = !!g.dados[nome];
+        else el.value = g.dados[nome];
+        n++;
+      });
+      if (n) edicaoViva._avisar(mod, g.em);
+      return n > 0;
+    } catch (e) { return false; }
+  },
+  _avisar(mod, quando) {
+    try {
+      const f = edicaoViva._form(mod); if (!f) return;
+      const velho = document.getElementById('edicao-viva-aviso');
+      if (velho) velho.remove();
+      const el = document.createElement('div');
+      el.id = 'edicao-viva-aviso';
+      el.style.cssText = 'background:#fff8ec;border:1px solid #e3c893;border-radius:8px;padding:9px 12px;font-size:.82rem;margin:0 0 10px';
+      let h = '';
+      try { h = new Date(quando).toLocaleString('pt-BR'); } catch (e) {}
+      el.innerHTML = '✍️ <b>Recuperei o que você estava digitando</b>' + (h ? ' (de ' + utils.escapeHTML(h) + ')' : '') +
+        ' — nada tinha sido salvo ainda. Confira antes de continuar. ' +
+        '<button type="button" class="btn btn-xs" onclick="edicaoViva.descartar(\'' + mod + '\'); var a=document.getElementById(\'edicao-viva-aviso\'); if(a) a.remove();">Descartar</button>';
+      f.insertBefore(el, f.firstChild);
+    } catch (e) {}
+  },
+
+  /* Liga o ouvinte em TODOS os formulários da lista, uma vez só por tela. */
+  ligar() {
+    edicaoViva.MODS.forEach(mod => {
+      const f = edicaoViva._form(mod);
+      if (!f || f.dataset.edicaoViva === '1') return;
+      f.dataset.edicaoViva = '1';
+      let t = null;
+      const guardar = () => { clearTimeout(t); t = setTimeout(() => edicaoViva.guardar(mod), 1200); };
+      f.addEventListener('input', guardar);
+      f.addEventListener('change', guardar);
+    });
+  }
+};
+
+/* ============================================================================
    MODO NUVEM — o aparelho guarda só o que está em uso
    O sistema nasceu offline-first: tudo morava no aparelho e a nuvem era cópia.
    Num celular isso não cabe. Aqui a relação se inverte: a NUVEM é a fonte, e o
@@ -13698,7 +13859,24 @@ const modoNuvem = {
   DIAS_KEY: 'medsys.v7.modo_nuvem.dias',
   DIAS_PADRAO: 7,
 
-  ligado() { return localStorage.getItem(modoNuvem.KEY) === '1'; },
+  /* LIGADO POR PADRÃO quando há nuvem. A relação entre aparelho e nuvem foi
+     invertida de vez: a nuvem é a dona dos registros, e o aparelho guarda só
+     a janela de trabalho — o que está aberto, o que ainda não subiu e os
+     últimos dias. Era isto que faltava para acabar com o aparelho cheio, o
+     dado preso numa máquina e o "de quem é este acervo".
+
+     Continua desligável: quem precisa do histórico inteiro no aparelho (uma
+     máquina sem internet confiável, por exemplo) desliga e ele volta todo.
+     E só age com a nuvem conectada — sem ela, tirar registro do aparelho
+     seria perdê-lo, não arquivá-lo. */
+  ligado() {
+    const v = localStorage.getItem(modoNuvem.KEY);
+    if (v === '0') return false;
+    if (v === '1') return true;
+    return modoNuvem.podeLigar();
+  },
+  /* Nunca foi escolhido por ninguém: está valendo o padrão. */
+  noPadrao() { const v = localStorage.getItem(modoNuvem.KEY); return v !== '0' && v !== '1'; },
   dias() {
     const n = parseInt(localStorage.getItem(modoNuvem.DIAS_KEY) || '', 10);
     return (n > 0 && n < 400) ? n : modoNuvem.DIAS_PADRAO;
@@ -13735,6 +13913,14 @@ const modoNuvem = {
     try { armazenamento.render(); } catch (e) {}
   },
 
+  /* Ao sair, a janela de trabalho não existe mais: tudo o que tem espelho na
+     nuvem pode sair do aparelho. O que está pendente de envio fica — é a
+     única cópia. */
+  aoSair() {
+    if (!modoNuvem.ligado() || !modoNuvem.podeLigar()) return 0;
+    return modoNuvem.manutencao({ silent: true, dias: 0 });
+  },
+
   /* Ids abertos AGORA na tela — nunca podem sair daqui no meio do trabalho */
   _emUso() {
     const ids = new Set();
@@ -13752,7 +13938,12 @@ const modoNuvem = {
   manutencao(opts = {}) {
     if (!modoNuvem.ligado() || !modoNuvem.podeLigar()) return 0;
     const emUso = modoNuvem._emUso();
-    const corte = Date.now() - modoNuvem.dias() * 86400000;
+    const dias = (opts.dias != null) ? opts.dias : modoNuvem.dias();
+    /* Janela ZERO (ao sair) quer dizer "tudo o que tem espelho pode ir". Com
+       o corte exatamente em `agora`, o registro salvo no mesmo milissegundo
+       ficava para trás por causa do `<` — e ao sair isso é justamente o
+       atendimento que acabou de ser finalizado. */
+    const corte = (dias <= 0) ? (Date.now() + 1000) : (Date.now() - dias * 86400000);
     const ix = arquivo._indice();
     let n = 0;
     Object.keys(arquivo.PRAZOS).forEach(mod => {
@@ -14969,6 +15160,7 @@ const ui = {
 
       /* Refresh por módulo — cada um em try/catch independente para não bloquear navegação */
       try {
+        try { edicaoViva.ligar(); if (edicaoViva.MODS.indexOf(modName) >= 0) edicaoViva.restaurar(modName); } catch (e) {}
         if (modName === 'dashboard') { try { ambiente.faixaLegado(); } catch (e) {} dashboard.atualizar(); try { meuDia.render(); } catch (e) {} try { pendencias.renderDashboard(); } catch (e) {} try { pendProntuario.renderDashboard(); } catch (e) {} try { preLanc.ajustarDashboard(); } catch (e) {} try { preLanc.renderFila(); } catch (e) {} try { preLanc.sincronizarFila({ silent: true }); } catch (e) {} }
         else if (modName === 'financeiro') financeiro.render();
         else if (modName === 'agenda') { agenda.render(); if (!agenda._puxouNestaSessao) { setTimeout(() => { try { agenda.sincronizarNuvem({ silent: true }); } catch (e) {} }, 400); } }
@@ -20971,6 +21163,12 @@ const cloud = {
     /* A marca de baixa incremental é por usuário, mas limpá-la aqui garante
        que quem entrar depois receba a base inteira em vez de uma faixa. */
     try { cloud.esquecerMarcaBaixa(); } catch (e) {}
+    /* SAIR DEVOLVE O APARELHO VAZIO. Com a nuvem como fonte, não há razão
+       para o registro de um atendimento continuar neste aparelho depois que a
+       pessoa saiu: ele está na nuvem e volta sozinho quando ela entrar. O que
+       ainda NÃO subiu fica — ali o aparelho é a única cópia que existe, e
+       apagar seria perder. */
+    try { modoNuvem.aoSair(); } catch (e) {}
     /* Computador compartilhado: sair é sair mesmo. O que ainda não subiu vai
        num backup antes — ninguém perde trabalho por causa da privacidade de
        outro. */
@@ -21623,9 +21821,21 @@ const cloud = {
       /* O que foi salvo enquanto a clínica não era conhecida sobe agora — sem
          isso, o registro de um usuário nunca chegava aos outros do consultório */
       setTimeout(() => { try { cloudRel.empurrarPendentes({ silent: true }); } catch (e) {} }, 2600);
+      /* O APARELHO SE ESVAZIA SOZINHO. A nuvem é a dona: depois que o que
+         estava pendente subiu, o que já tem espelho confirmado e saiu da
+         janela de trabalho não precisa mais ocupar lugar aqui. Sem este passo
+         automático, "modo nuvem" dependia de alguém lembrar de um botão — e
+         ninguém lembra de um botão de limpeza antes do aparelho encher. */
+      setTimeout(() => {
+        try {
+          const n = modoNuvem.manutencao({ silent: true });
+          if (n) { try { armazenamento.render(); } catch (e) {} }
+        } catch (e) {}
+      }, 4000);
       /* A partir daqui o aparelho se acerta sozinho, de minuto em minuto, sem
          ninguém tocar em nada (ver sincronia). */
       try { sincronia.iniciar(); } catch (e) {}
+      try { conexao.iniciar(); } catch (e) {}
       /* rascunhos: ficha começada no celular aparece no computador */
       setTimeout(() => {
         try { rascunhosSync.enviarTodos(); } catch (e) {}
@@ -56730,16 +56940,21 @@ const ajustesGrupos = {
   GRUPOS: [
     { id: 'nuvem', titulo: '☁️ Nuvem, backup e espaço',
       desc: 'A sincronização acontece sozinha. Aqui: entrar na nuvem, cópia de segurança em arquivo, PDFs e espaço do aparelho',
-      cards: ['cloud-card', 'duplicados-card', 'backup-completo-card', 'pdf-backup-card', 'armazenamento-card'] },
+      cards: ['cloud-card', 'backup-completo-card', 'pdf-backup-card', 'armazenamento-card'] },
     { id: 'equipe', titulo: '🔐 Usuários, equipe e permissões',
       desc: 'Quem entra no sistema, o que cada um pode ver e o registro de quem fez o quê',
       cards: ['usuarios-card', 'equipe-nuvem-card', 'auditoria-card'] },
     { id: 'modelos', titulo: '📄 Identidade da clínica, modelos e procedimentos',
       desc: 'Logomarca, nome e contato da clínica no cabeçalho das impressões; termo de consentimento padrão, textos padrão por campo e a sua tabela CBHPM',
       cards: ['clinica-identidade-card', 'termo-padrao-card', 'textos-padrao-card', 'cbhpm-card'] },
-    { id: 'avancado', titulo: '🛠️ Avançado', avancado: true,
-      desc: 'Ferramentas técnicas. No uso normal você não precisa abrir isto — só se algo der errado e for pedido',
-      cards: ['clouddiag-card', 'fase4-card'] }
+    /* CONSERTOS DO PASSADO moram aqui. Eles nasceram para resolver um
+       problema específico que já foi corrigido no caminho normal — e passar o
+       dia esbarrando numa ferramenta de mutirão é o que faz Ajustes parecer
+       maior e mais assustador do que é. Continuam a um clique para quem
+       precisar; só deixam de disputar atenção com o uso diário. */
+    { id: 'avancado', titulo: '🛠️ Avançado e consertos pontuais', avancado: true,
+      desc: 'Diagnóstico da nuvem e mutirões de correção do que ficou para trás. No uso normal você não precisa abrir isto',
+      cards: ['clouddiag-card', 'duplicados-card', 'mutirao-card'] }
   ],
   _salvos() { try { return JSON.parse(localStorage.getItem(ajustesGrupos.KEY) || '{}'); } catch (e) { return {}; } },
   _aberto(id) { return !!ajustesGrupos._salvos()[id]; },   /* fechado por padrão */
