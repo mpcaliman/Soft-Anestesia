@@ -18163,6 +18163,172 @@ await test('Logomarca e identidade da clínica no mesmo lugar, e esse lugar apar
   await page.close();
 });
 
+/* 246) A cirurgia é definida na pré e atravessa inteira
+
+   Pedido: "todos os campos de cirurgia prevista/realizada, de todos os
+   documentos, devem puxar do pré-anestésico. Código, descrição, quantidade e
+   lateralidade (direita, esquerda, bilateral) — ou deixar em branco quando
+   não se aplica."
+
+   Cada módulo guardava a cirurgia do seu jeito, e NENHUM registrava de que
+   lado. Lateralidade não é detalhe: "artroscopia de ombro" sem o lado é o
+   dado que falta justamente quando ele decide alguma coisa — o bloqueio, o
+   posicionamento, a glosa do convênio.
+
+   Duas regras que o teste fixa:
+   • a pré é a FONTE, e o que viaja é código + descrição + quantidade + lado;
+   • puxar PREENCHE, não tranca: o realizado pode diferir do previsto, e um
+     sistema que impede corrigir isso faz registrar errado ou registrar fora. */
+await test('Cirurgia definida na pré atravessa os documentos com código, quantidade e lado', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    /* ---- o modelo único ---- */
+    const c = cirurgia.normalizar({ codigo: '3.07.22.01-0', descricao: 'Artroscopia de ombro', quantidade: '2', lateralidade: 'direita' });
+    out.normalizou = c.codigo === '3.07.22.01-0' && c.quantidade === 2 && c.lateralidade === 'direita';
+    out.texto = cirurgia.texto(c) === 'Artroscopia de ombro (3.07.22.01-0) — 2× · Direita';
+
+    /* "não se aplica" sai como NADA, não como "1× —" */
+    const simples = cirurgia.normalizar({ descricao: 'Colecistectomia' });
+    out.semRuido = cirurgia.texto(simples) === 'Colecistectomia';
+    out.ladoInvalidoViraBranco = cirurgia.normalizar({ descricao: 'X', lateralidade: 'sei lá' }).lateralidade === '';
+    out.qtdInvalidaViraUm = cirurgia.normalizar({ descricao: 'X', quantidade: '0' }).quantidade === 1;
+
+    /* ---- a pré é a fonte ---- */
+    store.setList('pre', [{
+      _id: 'pre1', nome: 'Olival Jose Covre', data: '2026-10-02',
+      _updatedAt: '2026-10-02T10:00:00.000Z',
+      _procsExtra: [
+        { codigo: '3.07.22.01-0', descricao: 'Artroscopia de ombro', quantidade: 1, lateralidade: 'direita' },
+        { codigo: '3.07.11.02-5', descricao: 'Ressecção da clavícula', quantidade: 1, lateralidade: 'direita' }
+      ]
+    }]);
+    const daPre = cirurgia.daPre('olival jose covre');
+    out.achouPelaPre = daPre.length === 2 && daPre[0].lateralidade === 'direita';
+    out.ignoraPacienteDesconhecido = cirurgia.daPre('Quem Não Existe').length === 0;
+
+    /* pré que só preencheu o campo principal não fica de fora */
+    out.campoSoltoConta = cirurgia.daPreDoc({ cirurgia: 'Colecistectomia videolaparoscópica' }).length === 1;
+
+    /* ---- a ficha PUXA ---- */
+    try { ui.showModule('anestesia'); } catch (e) {}
+    const f = document.getElementById('form-anestesia');
+    f.querySelector('[name="paciente_nome"]').value = 'Olival Jose Covre';
+    f.querySelector('[name="procedimento"]').value = '';
+    const n = anestesia.puxarDaPre();
+    out.puxou = n >= 1 && /Artroscopia de ombro/.test(f.querySelector('[name="procedimento"]').value);
+    out.trouxeOLado = f.querySelector('[name="lateralidade"]').value === 'direita';
+    out.trouxeOsDemais = document.querySelectorAll('[name="cir_extra_proc[]"]').length >= 1;
+
+    /* ---- puxar NÃO sobrescreve o que foi digitado (modo silencioso) ---- */
+    f.querySelector('[name="procedimento"]').value = 'Outra coisa feita de verdade';
+    const n2 = anestesia.puxarDaPre({ silent: true });
+    out.naoSobrescreveu = n2 === 0 && f.querySelector('[name="procedimento"]').value === 'Outra coisa feita de verdade';
+
+    /* ---- e o que atravessa para os outros documentos leva lado e código ---- */
+    const txt = modelos._cirurgiaTexto('pre', store.getById('pre', 'pre1'));
+    out.atravessaInteira = /Artroscopia de ombro/.test(txt) && /Direita/.test(txt) && /3\.07\.22\.01-0/.test(txt);
+
+    const daFicha = modelos._cirurgiaTexto('anestesia', {
+      procedimento: {
+        codigo: '3.07.22.01-0', descricao: 'Artroscopia de ombro', lateralidade: 'esquerda',
+        cirurgias_extra: [{ procedimento: 'Ressecção da clavícula', lateralidade: 'esquerda', quantidade: 1 }]
+      }
+    });
+    out.fichaAtravessaInteira = /Artroscopia/.test(daFicha) && /Esquerda/.test(daFicha) && /Ressecção/.test(daFicha);
+
+    store.setList('pre', []);
+    return out;
+  });
+  assert(r.normalizou && r.texto, 'o modelo único guarda código, descrição, quantidade e lado, e sabe escrevê-los');
+  assert(r.semRuido, 'quantidade 1 e lado em branco não viram texto: "não se aplica" sai como nada');
+  assert(r.ladoInvalidoViraBranco && r.qtdInvalidaViraUm, 'valor sem sentido vira o seguro, não vai para o prontuário como veio');
+  assert(r.achouPelaPre, 'a cirurgia é lida da PRÉ daquele paciente — ela é a fonte');
+  assert(r.ignoraPacienteDesconhecido, 'e sem pré não inventa cirurgia nenhuma');
+  assert(r.campoSoltoConta, 'pré que preencheu só o campo principal também conta — ninguém perde o que escreveu');
+  assert(r.puxou && r.trouxeOLado, 'a ficha puxa descrição E lado: era o lado que não existia em lugar nenhum');
+  assert(r.trouxeOsDemais, 'e os procedimentos adicionais vêm junto');
+  assert(r.naoSobrescreveu, 'puxar automático NUNCA sobrescreve o que já foi digitado — o realizado pode diferir do previsto');
+  assert(r.atravessaInteira, 'o que viaja entre documentos leva código e lado, não só a descrição');
+  assert(r.fichaAtravessaInteira, 'inclusive partindo da ficha, com os procedimentos adicionais');
+  await page.close();
+});
+
+/* 247) O lado chega até a cobrança
+
+   "Fazer igual à de gerar financeiro. Só incluir lateralidade."
+
+   A tabela de códigos do Financeiro já tinha o formato certo — código,
+   descrição, porte, quantidade, grau, valores. Faltava UMA coluna, e é a que
+   o convênio glosa quando falta: o lado.
+
+   O dado já existia desde a pré. Ele morria no caminho: `fin.linhasDe`
+   montava a linha de cobrança sem ele, então a guia saía dizendo
+   "artroscopia de ombro" sem dizer qual. */
+await test('Lado operado chega à linha de cobrança, na janela e na tabela do Financeiro', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+
+    /* ---- da FICHA: o lado entra na linha de cobrança ---- */
+    const ficha = {
+      _id: 'f1', _finalizado: true,
+      paciente: { nome: 'Olival Jose Covre' },
+      procedimento: {
+        descricao: 'Artroscopia de ombro', codigo: '3.07.22.01-0',
+        lateralidade: 'direita', data: utils.hojeISO(),
+        cirurgias_extra: [{ procedimento: 'Ressecção da clavícula', codigo: '3.07.11.02-5', lateralidade: 'direita', grau: '50' }]
+      }
+    };
+    const linhas = fin.linhasDe('anestesia', ficha);
+    out.principalComLado = linhas[0] && linhas[0].lateralidade === 'direita';
+    out.extraComLado = linhas[1] && linhas[1].lateralidade === 'direita';
+
+    /* ---- a linha vira a linha da TABELA de códigos, com o lado ---- */
+    const comoCodigo = fin._linhaComoCodigo(linhas[0]);
+    out.tabelaRecebeOLado = comoCodigo.lateralidade === 'direita'
+      && comoCodigo.qtd === 1 && !!comoCodigo.codigo;
+
+    /* ---- a tabela do Financeiro tem a coluna, e ela coleta ---- */
+    try { ui.showModule('financeiro'); } catch (e) {}
+    const tb = document.getElementById('fin-codigos-body');
+    if (tb) tb.innerHTML = '';
+    financeiro.codigos.add({ codigo: '3.07.22.01-0', descricao: 'Artroscopia de ombro', qtd: 1, lateralidade: 'esquerda' });
+    const sel = document.querySelector('#fin-codigos-body [name="fin_cod_lado[]"]');
+    out.colunaExiste = !!sel;
+    out.veioMarcado = !!sel && sel.value === 'esquerda';
+    const colhido = financeiro.codigos.coletar();
+    out.coletouOLado = colhido.length === 1 && colhido[0].lateralidade === 'esquerda';
+    /* em branco continua sendo em branco: "não se aplica" não vira dado */
+    sel.value = '';
+    out.brancoSegueBranco = financeiro.codigos.coletar()[0].lateralidade === '';
+    if (tb) tb.innerHTML = '';
+
+    /* ---- a janela "gerar financeiro" tem a mesma coluna ---- */
+    fin.finalizacao._ctx = null;
+    fin.isAutoEnabled = () => true;
+    fin.finalizacao.abrir('anestesia', ficha);
+    return new Promise(ok => setTimeout(() => {
+      const cab = (document.getElementById('fz-codigos') || {}).textContent || '';
+      out.janelaTemColuna = /Lado/.test(cab);
+      const selJanela = document.querySelector('#fz-codigos-body [name="fz_lado[]"]');
+      out.janelaVeioMarcada = !!selJanela && selJanela.value === 'direita';
+      out.janelaColeta = fin.finalizacao._linhas().some(l => l.lateralidade === 'direita');
+      try { modal.close(); } catch (e) {}
+      ok(out);
+    }, 220));
+  });
+  assert(r.principalComLado, 'a linha de cobrança do procedimento principal leva o lado — era aí que ele morria');
+  assert(r.extraComLado, 'e a dos procedimentos adicionais também');
+  assert(r.tabelaRecebeOLado, 'a linha vira linha da tabela de códigos com o lado junto');
+  assert(r.colunaExiste && r.veioMarcado, 'a tabela do Financeiro tem a coluna Lado, já marcada pelo que veio da ficha');
+  assert(r.coletouOLado, 'e o lado é gravado no lançamento');
+  assert(r.brancoSegueBranco, 'em branco continua em branco: "não se aplica" não pode virar dado inventado');
+  assert(r.janelaTemColuna && r.janelaVeioMarcada, 'a janela "gerar financeiro" tem a mesma coluna, preenchida');
+  assert(r.janelaColeta, 'e leva o lado para o lançamento que ela cria');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

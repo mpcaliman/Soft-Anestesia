@@ -929,6 +929,13 @@ body.ficha-finalizada .lab-item input.lab-fora {
    do cartão. Daí a linha de procedimento adicional aparecer quebrada. */
 .pre-proc-row .pre-proc-cod { flex: 0 0 130px; width: 130px; font-size: .84rem; }
 .pre-proc-row .pre-proc-desc { flex: 1 1 auto; width: auto; min-width: 0; font-size: .84rem; }
+.pre-proc-row .pre-proc-qtd { flex: 0 0 62px; width: 62px; font-size: .84rem; }
+.pre-proc-row .pre-proc-lado { flex: 0 0 112px; width: 112px; font-size: .84rem; }
+@media (max-width: 640px) {
+  .pre-proc-row { flex-wrap: wrap; }
+  .pre-proc-row .pre-proc-cod { flex: 1 1 120px; width: auto; }
+  .pre-proc-row .pre-proc-desc { flex: 1 1 100%; }
+}
 .pre-proc-row .btn-rm {
   flex-shrink: 0; width: 30px; height: 30px; border: 1px solid var(--border);
   background: var(--surface); border-radius: 6px; cursor: pointer; color: var(--danger, #c92a52);
@@ -4681,7 +4688,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-02h</b><br>
+    v7.1 · build <b id="build-tag">2026-10-02j</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -5760,7 +5767,11 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             </div>
             <div id="equipe-aux-lista"></div>
           </div>
-          <div class="field col-6"><label>Procedimento cirúrgico <small style="color:var(--text-mute);font-weight:400">(CBHPM — principal, entra 100%; mais códigos logo abaixo)</small></label><input type="text" name="procedimento" class="cbhpm-autocomplete" data-mais-acao="ficha" placeholder="Digite parte do procedimento ou o código TUSS..."></div>
+          <div class="field col-6"><label>Procedimento cirúrgico <small style="color:var(--text-mute);font-weight:400">(CBHPM — principal, entra 100%; mais códigos logo abaixo)</small>
+            <button type="button" class="btn btn-xs" style="float:right" onclick="anestesia.puxarDaPre()" title="Traz a cirurgia definida na avaliação pré-anestésica deste paciente">📥 Puxar da pré</button></label>
+            <input type="text" name="procedimento" class="cbhpm-autocomplete" data-mais-acao="ficha" placeholder="Digite parte do procedimento ou o código TUSS..."></div>
+          <div class="field col-2"><label>Lado <small style="color:var(--text-mute);font-weight:400">(em branco = não se aplica)</small></label>
+            <select name="lateralidade"><option value="">—</option><option value="direita">Direita</option><option value="esquerda">Esquerda</option><option value="bilateral">Bilateral</option></select></div>
           <div class="field col-2"><label>Sala</label><input type="text" name="sala"></div>
         </div>
 
@@ -8453,6 +8464,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
                 <th style="min-width:240px">Procedimento (CBHPM)</th>
                 <th style="width:60px">Porte</th>
                 <th style="width:58px" title="Número de vezes que o código foi executado">Qtd ×</th>
+                <th style="width:98px" title="Lado operado. Em branco quando não se aplica — o convênio glosa procedimento lateral sem o lado declarado">Lado</th>
                 <th style="width:70px" title="Hierarquia: o código de MAIOR PORTE é o principal (100%); os demais da MESMA VIA entram 50%; VIA DIFERENTE entra 70% (ajuste manual). Use ⚖️ Classificar graus para aplicar automaticamente.">Grau</th>
                 <th style="width:105px" title="Valor unitário do código">Vlr unit. (R$)</th>
                 <th style="width:110px">Previsto (R$)</th>
@@ -15811,9 +15823,12 @@ const pre = {
       if (!host) return;
       const row = document.createElement('div');
       row.className = 'pre-proc-row';
+      const n = cirurgia.normalizar(dados) || { codigo: '', descricao: '', quantidade: 1, lateralidade: '' };
       row.innerHTML = `
         <input type="text" name="pre_proc_codigo[]" value="${utils.escapeAttr(dados.codigo || '')}" placeholder="Código CBHPM" class="pre-proc-cod" oninput="pre.procs._onCodigo(this)">
         <input type="text" name="pre_proc_desc[]" value="${utils.escapeAttr(dados.descricao || '')}" placeholder="Nome do procedimento (CBHPM)" class="pre-proc-desc" oninput="pre.procs._onDesc(this)">
+        <input type="number" name="pre_proc_qtd[]" value="${utils.escapeAttr(String(n.quantidade || 1))}" min="1" step="1" class="pre-proc-qtd" title="Quantidade" oninput="markDirty()">
+        <select name="pre_proc_lado[]" class="pre-proc-lado" title="Lateralidade — deixe em branco quando não se aplica" onchange="markDirty()">${cirurgia.opcoesLado(n.lateralidade)}</select>
         <button type="button" class="btn-rm" onclick="this.closest('.pre-proc-row').remove(); markDirty();" title="Remover">✕</button>
       `;
       host.appendChild(row);
@@ -15860,7 +15875,9 @@ const pre = {
       host.querySelectorAll('.pre-proc-row').forEach(r => {
         const codigo = (r.querySelector('.pre-proc-cod') || {}).value || '';
         const descricao = (r.querySelector('.pre-proc-desc') || {}).value || '';
-        if (codigo || descricao) rows.push({ codigo, descricao });
+        const quantidade = (r.querySelector('.pre-proc-qtd') || {}).value || '';
+        const lateralidade = (r.querySelector('.pre-proc-lado') || {}).value || '';
+        if (codigo || descricao) rows.push(cirurgia.normalizar({ codigo, descricao, quantidade, lateralidade }));
       });
       return rows;
     },
@@ -31097,6 +31114,107 @@ const clinicaIdentidade = {
   }
 };
 
+/* ============================================================================
+   CIRURGIA — um jeito só de dizer qual é
+
+   Cada módulo guardava a cirurgia do seu jeito: a pré em `_procsExtra`
+   {codigo, descricao}; a ficha em `cirurgias_extra` {procedimento, grau}; a
+   consulta em `_procsRealizados`; o financeiro em `cbhpm_codigo`. Quatro
+   formas de escrever o mesmo fato — e nenhuma delas registrava DE QUE LADO.
+
+   Lateralidade não é detalhe: "artroscopia de ombro" sem dizer o lado é o
+   dado que falta justamente quando ele decide alguma coisa — o bloqueio, o
+   posicionamento, a glosa do convênio. Quantidade idem.
+
+   A fonte é a PRÉ-ANESTÉSICA: é nela que a cirurgia é definida antes de
+   qualquer coisa acontecer. Os outros documentos puxam dali. Puxar, não
+   trancar: o que foi REALIZADO pode diferir do previsto, e um sistema que
+   impede de corrigir isso faz o profissional registrar errado ou registrar
+   fora dele.
+============================================================================ */
+const cirurgia = {
+  LATERALIDADES: [
+    ['', '—'],
+    ['direita', 'Direita'],
+    ['esquerda', 'Esquerda'],
+    ['bilateral', 'Bilateral']
+  ],
+  _rotuloLado(v) {
+    const achou = cirurgia.LATERALIDADES.find(([k]) => k === String(v || ''));
+    return (achou && achou[0]) ? achou[1] : '';
+  },
+  /* Normaliza qualquer um dos formatos antigos para o modelo único. */
+  normalizar(x) {
+    if (!x) return null;
+    const codigo = String(x.codigo || x.cbhpm_codigo || '').trim();
+    const descricao = String(x.descricao || x.cbhpm_descricao || x.procedimento || '').trim();
+    if (!codigo && !descricao) return null;
+    let q = parseInt(x.quantidade, 10);
+    if (!(q > 0)) q = 1;
+    const lado = String(x.lateralidade || x.lado || '').trim().toLowerCase();
+    return {
+      codigo, descricao, quantidade: q,
+      lateralidade: cirurgia.LATERALIDADES.some(([k]) => k === lado) ? lado : ''
+    };
+  },
+  lista(arr) { return (arr || []).map(cirurgia.normalizar).filter(Boolean); },
+
+  /* Como a cirurgia aparece no papel. Quantidade 1 e lado em branco não viram
+     texto: "não se aplica" tem de sair como nada, não como "1× —". */
+  texto(c) {
+    const n = cirurgia.normalizar(c);
+    if (!n) return '';
+    const partes = [n.descricao || n.codigo];
+    if (n.codigo && n.descricao) partes.push('(' + n.codigo + ')');
+    const extra = [];
+    if (n.quantidade > 1) extra.push(n.quantidade + '×');
+    const lado = cirurgia._rotuloLado(n.lateralidade);
+    if (lado) extra.push(lado);
+    return partes.join(' ') + (extra.length ? ' — ' + extra.join(' · ') : '');
+  },
+  textoLista(arr) { return cirurgia.lista(arr).map(cirurgia.texto).filter(Boolean).join(' · '); },
+
+  /* A CIRURGIA DEFINIDA NA PRÉ daquele paciente. Procura a pré mais recente
+     com o mesmo nome — a mesma identidade que o resto do sistema usa para
+     cruzar documentos. Sem pré, devolve lista vazia: não inventa. */
+  daPre(nomePaciente) {
+    try {
+      const alvo = String(nomePaciente || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+      if (!alvo) return [];
+      const nomeDe = (x) => {
+        try { const n = arquivo._nomeDe(x); return n === '(sem nome)' ? '' : n; } catch (e) { return ''; }
+      };
+      const candidatas = (store.list('pre') || []).filter(x => {
+        const n = String(nomeDe(x) || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+        return n === alvo;
+      });
+      if (!candidatas.length) return [];
+      candidatas.sort((a, b) => String(b._updatedAt || b.data || '').localeCompare(String(a._updatedAt || a.data || '')));
+      return cirurgia.daPreDoc(candidatas[0]);
+    } catch (e) { return []; }
+  },
+  /* A lista de uma pré específica: os procedimentos da tabela, e — se ela não
+     tiver nenhum — a cirurgia escrita no campo principal, para não perder o
+     dado de quem preencheu só ele. */
+  daPreDoc(doc) {
+    if (!doc) return [];
+    const lista = cirurgia.lista(doc._procsExtra);
+    if (lista.length) return lista;
+    const solto = cirurgia.normalizar({
+      codigo: doc.procedimento_codigo || '',
+      descricao: doc.cirurgia || doc.procedimento_proposto || '',
+      quantidade: 1,
+      lateralidade: doc.lateralidade || ''
+    });
+    return solto ? [solto] : [];
+  },
+  /* Os <option> de lateralidade, para qualquer tela que precise do campo. */
+  opcoesLado(sel) {
+    return cirurgia.LATERALIDADES.map(([k, r]) =>
+      '<option value="' + k + '"' + (String(sel || '') === k ? ' selected' : '') + '>' + r + '</option>').join('');
+  }
+};
+
 const logoUsuario = {
   KEY: 'medsys.v7.logoCustom',
   atual() { try { return localStorage.getItem(this.KEY) || ''; } catch (e) { return ''; } },
@@ -34521,6 +34639,51 @@ const anestesia = {
   },
 
   /* ---- CIRURGIAS COMBINADAS ---- */
+  /* A CIRURGIA VEM DA PRÉ. Ela é definida lá, antes de qualquer coisa
+     acontecer; redigitar na ficha é repetir trabalho e abrir espaço para as
+     duas versões divergirem — e quando divergem, ninguém sabe qual vale.
+
+     PREENCHE, não tranca: o que foi REALIZADO pode diferir do previsto (o
+     cirurgião mudou a via, achou outra coisa, cancelou um tempo). Um sistema
+     que impede corrigir isso faz o profissional registrar errado, ou
+     registrar fora dele. Por isso só preenche o que está VAZIO, a não ser que
+     a pessoa peça a substituição no botão. */
+  puxarDaPre(opts = {}) {
+    const f = document.getElementById(anestesia.formId || 'form-anestesia');
+    if (!f) return 0;
+    const nome = (f.querySelector('[name="paciente_nome"]') || {}).value || '';
+    const lista = cirurgia.daPre(nome);
+    if (!lista.length) {
+      if (!opts.silent) toast(nome ? 'Não achei avaliação pré-anestésica com cirurgia definida para ' + nome : 'Preencha o nome do paciente primeiro', 'warn');
+      return 0;
+    }
+    const principal = lista[0];
+    const campoProc = f.querySelector('[name="procedimento"]');
+    const campoLado = f.querySelector('[name="lateralidade"]');
+    const vazio = !((campoProc || {}).value || '').trim();
+    if (!vazio && opts.silent) return 0;     /* automático nunca sobrescreve */
+    if (!vazio && !opts.silent &&
+        !confirm('A ficha já tem um procedimento preenchido.\n\nSubstituir pelo que está na pré-anestésica?\n\n' + cirurgia.texto(principal))) return 0;
+    if (campoProc) campoProc.value = principal.descricao || principal.codigo || '';
+    if (campoLado) campoLado.value = principal.lateralidade || '';
+    /* os demais procedimentos da pré viram as linhas adicionais, sem duplicar
+       o que já estiver lá */
+    let add = 0;
+    const jaTem = new Set();
+    document.querySelectorAll('[name="cir_extra_proc[]"]').forEach(el => jaTem.add(String(el.value || '').toLowerCase().trim()));
+    lista.slice(1).forEach(c => {
+      const txt = (c.descricao || c.codigo || '').toLowerCase().trim();
+      if (!txt || jaTem.has(txt)) return;
+      anestesia.cirurgias.add({ procedimento: c.descricao || c.codigo, lateralidade: c.lateralidade, quantidade: c.quantidade, grau: '50' }, { mesmaEquipe: true });
+      jaTem.add(txt); add++;
+    });
+    markDirty();
+    if (!opts.silent) {
+      toast('📥 Cirurgia trazida da pré: ' + cirurgia.texto(principal) + (add ? ' (+' + add + ' procedimento(s))' : ''));
+    }
+    return 1 + add;
+  },
+
   cirurgias: {
     /* opts.mesmaEquipe = linha enxuta criada pelo ➕ do campo principal:
        é outro CÓDIGO do mesmo ato, com a mesma equipe cirúrgica. Os campos de
@@ -34542,6 +34705,8 @@ const anestesia = {
         <div class="field col-3 cir-extra-detalhe"><label>Cirurgião <small style="color:var(--text-mute);font-weight:400">(vazio = mesma equipe)</small></label><input type="text" name="cir_extra_cir[]" value="${utils.escapeAttr(dados.cirurgiao || '')}"></div>
         <div class="field col-2"><label>Grau <small style="color:var(--text-mute);font-weight:400" title="Hierarquia de cobrança: o procedimento de MAIOR PORTE é o principal (100%); os demais da MESMA VIA entram 50%; VIA DIFERENTE entra 70% (ajuste manual)">%</small></label>
           <select name="cir_extra_grau[]">${['100', '70', '50'].map(g => `<option value="${g}" ${g === grauSel ? 'selected' : ''}>${g}%</option>`).join('')}</select></div>
+        <div class="field col-2"><label>Lado</label><select name="cir_extra_lado[]">${cirurgia.opcoesLado(dados.lateralidade)}</select></div>
+        <div class="field col-1"><label>Qtd</label><input type="number" name="cir_extra_qtd[]" min="1" step="1" value="${utils.escapeAttr(String(dados.quantidade || 1))}"></div>
         <div class="field col-2 cir-extra-detalhe"><label>Início</label><input type="time" name="cir_extra_inicio[]" value="${utils.escapeAttr(dados.inicio || '')}"></div>
         <div class="field col-1" style="align-self:end"><button type="button" class="btn btn-xs btn-danger" onclick="this.closest('.grid').remove(); markDirty();" title="Remover esta linha">✕</button></div>
         <div class="field col-3 cir-extra-detalhe"><label>Fim</label><input type="time" name="cir_extra_fim[]" value="${utils.escapeAttr(dados.fim || '')}"></div>
@@ -34575,6 +34740,8 @@ const anestesia = {
             procedimento: el.value,
             cirurgiao: $('cir_extra_cir'),
             grau: $('cir_extra_grau') || '50',
+            lateralidade: $('cir_extra_lado'),
+            quantidade: parseInt($('cir_extra_qtd'), 10) || 1,
             inicio: $('cir_extra_inicio'),
             fim: $('cir_extra_fim'),
             obs: $('cir_extra_obs')
@@ -39826,6 +39993,9 @@ const anestesia = {
         descricao: v('procedimento'),
         /* código CBHPM escolhido no campo (o que vale na guia é ele) */
         codigo: v('procedimento_cbhpm'),
+        /* DE QUE LADO. Sem isto, "artroscopia de ombro" não diz o que o
+           bloqueio, o posicionamento e a guia do convênio precisam saber. */
+        lateralidade: v('lateralidade'),
         cirurgiao: v('cirurgiao'),
         auxiliares: anestesia.equipeAux.coletar(),
         hospital: v('local_hospital'), sala: v('sala'),
@@ -39996,6 +40166,7 @@ const anestesia = {
     set('hora_sala_saida', pr.hora_sala_saida);
     set('hora_inicio', pr.hora_inicio); set('hora_fim', pr.hora_fim);
     set('hora_cir_inicio', pr.hora_cir_inicio); set('hora_cir_fim', pr.hora_cir_fim);
+    set('lateralidade', pr.lateralidade);
     anestesia.cirurgias.restaurar(pr.cirurgias_extra);
 
     const pa = d.pre_anestesico || {};
@@ -42046,6 +42217,27 @@ const linker = {
     setSe('paciente_prontuario', pre.prontuario);
     setSe('cirurgiao', pre.cirurgiao);
     setSe('local_hospital', pre.hospital || pre.local);
+    /* A CIRURGIA VEM DA PRÉ — e era justamente o campo que não vinha. O
+       médico redigitava o procedimento a cada ficha, e o lado nem existia
+       para ser redigitado. Código, descrição, quantidade e lateralidade
+       atravessam juntos; `setSe` só preenche o que está vazio, então o que
+       foi REALIZADO continua podendo ser corrigido na ficha. */
+    try {
+      const cirs = cirurgia.daPreDoc(pre);
+      if (cirs.length) {
+        setSe('procedimento', cirs[0].descricao || cirs[0].codigo);
+        setSe('lateralidade', cirs[0].lateralidade);
+        const jaTem = new Set();
+        document.querySelectorAll('[name="cir_extra_proc[]"]').forEach(el => jaTem.add(String(el.value || '').toLowerCase().trim()));
+        const principal = String(cirs[0].descricao || cirs[0].codigo || '').toLowerCase().trim();
+        cirs.slice(1).forEach(c => {
+          const txt = String(c.descricao || c.codigo || '').toLowerCase().trim();
+          if (!txt || txt === principal || jaTem.has(txt)) return;
+          anestesia.cirurgias.add({ procedimento: c.descricao || c.codigo, lateralidade: c.lateralidade, quantidade: c.quantidade, grau: '50' }, { mesmaEquipe: true });
+          jaTem.add(txt);
+        });
+      }
+    } catch (e) {}
     setSe('pre_diagnostico', pre.cirurgia);
     setSe('pre_comorbidades', pre.comorbidades);
     setSe('pre_alergias', pre.alergias);
@@ -42443,6 +42635,7 @@ const fin = {
       descricao: l.cbhpm_descricao || l.procedimento || '',
       porte: porte,
       qtd: l.quantidade || 1,
+      lateralidade: l.lateralidade || '',
       grau: String(l.fracao != null ? l.fracao : 100),
       valor_unit: (l.valor_base != null) ? l.valor_base : '',
       valor_previsto: (l.valor_final != null) ? l.valor_final : '',
@@ -42473,6 +42666,7 @@ const fin = {
         linhaId: '', tipo_honorario: 'consulta',
         tipo_atendimento: cab.tipoAtendimento,
         cbhpm_codigo: cod,
+        lateralidade: '',
         cbhpm_descricao: info ? info.descricao : 'Consulta',
         procedimento: cab.procedimento || (info ? info.descricao : 'Consulta'),
         quantidade: 1, fracao: 100,
@@ -42486,6 +42680,9 @@ const fin = {
         linhaId: '', tipo_honorario: 'anestesia',
         tipo_atendimento: 'procedimento',
         cbhpm_codigo: cab.codigo || '',
+        /* o lado atravessa a pré, a ficha e chega à cobrança: é na guia que
+           ele vira glosa quando falta */
+        lateralidade: (doc.procedimento && doc.procedimento.lateralidade) || '',
         cbhpm_descricao: cab.procedimento,
         procedimento: cab.procedimento,
         quantidade: 1, fracao: 100,
@@ -42512,6 +42709,7 @@ const fin = {
           tipo_honorario: 'anestesia',
           tipo_atendimento: 'procedimento',
           cbhpm_codigo: cod,
+          lateralidade: ex.lateralidade || '',
           cbhpm_descricao: (info && info.descricao) || ex.procedimento || '',
           procedimento: ex.procedimento || (info && info.descricao) || '',
           quantidade: 1, fracao: fracao,
@@ -42780,7 +42978,7 @@ const fin = {
         '📋 Códigos e valores <small style="font-weight:400;color:var(--text-mute)">— confira antes de virar cobrança; tudo é editável</small></h3>' +
         '<div class="dyn-table-wrap"><table class="dyn" id="fz-codigos"><thead><tr>' +
         '<th style="width:130px">Código</th><th>Procedimento</th><th style="width:60px">Porte</th>' +
-        '<th style="width:54px">Qtd</th><th style="width:76px">Grau</th>' +
+        '<th style="width:54px">Qtd</th><th style="width:92px" title="Lado operado — em branco quando não se aplica">Lado</th><th style="width:76px">Grau</th>' +
         '<th style="width:110px">Vlr unit. (R$)</th><th style="width:110px">Previsto (R$)</th>' +
         '<th class="col-rm">×</th></tr></thead><tbody id="fz-codigos-body"></tbody></table></div>' +
         '<div class="table-actions"><button type="button" class="btn btn-sm btn-primary" onclick="fin.finalizacao.addLinha()">+ Adicionar código</button></div>' +
@@ -42807,6 +43005,7 @@ const fin = {
           linhas.forEach(l => fin.finalizacao.addLinha({
             codigo: l.cbhpm_codigo, descricao: l.cbhpm_descricao || l.procedimento,
             porte: fin.finalizacao._porteDe(l), qtd: l.quantidade || 1,
+            lateralidade: l.lateralidade || '',
             grau: String(l.fracao != null ? l.fracao : 100),
             unit: l.valor_base, previsto: l.valor_final
           }));
@@ -43026,6 +43225,7 @@ const fin = {
         '<td data-label="Procedimento"><input type="text" name="fz_desc[]" value="' + ea(d.descricao || '') + '" placeholder="digite para buscar na CBHPM"></td>' +
         '<td data-label="Porte"><input type="text" name="fz_porte[]" value="' + ea(d.porte || '') + '" style="width:52px"></td>' +
         '<td data-label="Qtd"><input type="number" min="1" step="1" name="fz_qtd[]" value="' + ea(d.qtd || 1) + '" style="width:48px" oninput="fin.finalizacao._recalcularLinha(this)"></td>' +
+        '<td data-label="Lado"><select name="fz_lado[]">' + cirurgia.opcoesLado(d.lateralidade) + '</select></td>' +
         '<td data-label="Grau"><select name="fz_grau[]" onchange="fin.finalizacao._recalcularLinha(this)">' +
         ['100', '70', '50'].map(g => '<option value="' + g + '"' + (g === String(d.grau || '100') ? ' selected' : '') + '>' + g + '%</option>').join('') +
         '</select></td>' +
@@ -43142,6 +43342,7 @@ const fin = {
         out.push({
           codigo, descricao, porte: g('fz_porte'),
           qtd: parseInt(g('fz_qtd'), 10) || 1,
+          lateralidade: g('fz_lado'),
           grau: String(g('fz_grau')).replace('%', '') || '100',
           valor_unit: g('fz_unit') === '' ? '' : Number(g('fz_unit')),
           valor_previsto: g('fz_prev') === '' ? '' : Number(g('fz_prev')),
@@ -43383,6 +43584,7 @@ const fin = {
         _origemDescricao: 'Auto: ' + rotulo + (ehPrincipal ? '' : ' — procedimento realizado'),
         cbhpm_codigo: l.cbhpm_codigo || '',
         cbhpm_descricao: l.cbhpm_descricao || '',
+        lateralidade: l.lateralidade || item.lateralidade || '',
         cbhpm_versao: CBHPM_VERSAO,
         quantidade: l.quantidade,
         fracao: l.fracao,
@@ -44482,10 +44684,30 @@ const modelos = {
     } else if (srcMod === 'recuperacao') {
       setV('paciente_nome', src.nome);
       setV('procedimento', src.procedimento);
+      try { anestesia.puxarDaPre({ silent: true }); } catch (e) {}
       ui.mostrarBanner('banner-anestesia', '✅ Dados importados da Recuperação.', 'success');
     }
     /* Recalcula automáticos */
     anestesia.calc.idade(); anestesia.calc.imc();
+  },
+
+  /* A CIRURGIA ATRAVESSA OS MÓDULOS INTEIRA. Quando um documento puxa do
+     outro, o que viaja não é só o nome do procedimento: é código, lado e
+     quantidade. Mandar só a descrição é fazer o lado se perder na primeira
+     cópia — e ele some justamente nos documentos que vão para a mão de outra
+     pessoa (SRPA, termo, orçamento). */
+  _cirurgiaTexto(srcMod, src) {
+    try {
+      if (!src) return '';
+      if (srcMod === 'pre') return cirurgia.textoLista(cirurgia.daPreDoc(src));
+      if (srcMod === 'anestesia') {
+        const pr = src.procedimento || {};
+        const principal = cirurgia.texto({ codigo: pr.codigo, descricao: pr.descricao, lateralidade: pr.lateralidade });
+        const extras = cirurgia.textoLista(pr.cirurgias_extra);
+        return [principal, extras].filter(Boolean).join(' · ');
+      }
+      return String(src.procedimento || src.cirurgia || '');
+    } catch (e) { return ''; }
   },
 
   _importarParaPre(srcMod, src) {
@@ -44496,7 +44718,7 @@ const modelos = {
       setV('sexo', src.paciente && src.paciente.sexo);
       setV('peso', src.paciente && src.paciente.peso);
       setV('altura', src.paciente && src.paciente.altura);
-      setV('cirurgia', src.procedimento && src.procedimento.descricao);
+      setV('cirurgia', modelos._cirurgiaTexto('anestesia', src) || (src.procedimento && src.procedimento.descricao));
       setV('cirurgiao', src.procedimento && src.procedimento.cirurgiao);
       setV('hospital', src.procedimento && src.procedimento.hospital);
       setV('asa', src.pre_anestesico && src.pre_anestesico.asa);
@@ -44565,13 +44787,13 @@ const modelos = {
     const setV = (n, v) => modelos._setSeVazio('form-recuperacao', n, v);
     if (srcMod === 'anestesia') {
       setV('nome', src.paciente && src.paciente.nome);
-      setV('procedimento', src.procedimento && src.procedimento.descricao);
+      setV('procedimento', modelos._cirurgiaTexto('anestesia', src) || (src.procedimento && src.procedimento.descricao));
       setV('tipo_anestesia', (src.tecnica && src.tecnica.tipos || []).join(', '));
       ui.mostrarBanner('banner-recuperacao', '✅ Dados importados da Ficha de Anestesia.', 'success');
       recuperacao._linkPendente = { mod: 'anestesia', id: src._id };
     } else if (srcMod === 'pre') {
       setV('nome', src.nome);
-      setV('procedimento', src.cirurgia);
+      setV('procedimento', modelos._cirurgiaTexto('pre', src) || src.cirurgia);
     }
   },
 
@@ -49097,7 +49319,12 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._field('Sala', pr.sala)}
         ${printPreview._field('Data', utils.formatarData(pr.data))}
       </div>
-      ${printPreview._field('Procedimento', pr.descricao, true)}
+      ${printPreview._field('Procedimento', cirurgia.texto({
+        codigo: pr.codigo, descricao: pr.descricao, lateralidade: pr.lateralidade, quantidade: 1
+      }) || pr.descricao, true)}
+      ${(pr.cirurgias_extra || []).length
+        ? printPreview._field('Procedimentos adicionais', cirurgia.textoLista(pr.cirurgias_extra), true)
+        : ''}
       <div class="pp-grid cols-3">
         ${printPreview._field('Início (entrada em sala)', pr.hora_sala_entrada, false, true)}
         ${printPreview._field('Término (saída de sala)', pr.hora_sala_saida, false, true)}
@@ -52205,6 +52432,7 @@ const financeiro = {
         </td>
         <td data-label="Porte"><input type="text" name="fin_cod_porte[]" value="${utils.escapeAttr(dados.porte || '')}" placeholder="—" style="width:50px"></td>
         <td data-label="Qtd ×"><input type="number" name="fin_cod_qtd[]" step="1" min="1" value="${utils.escapeAttr(dados.qtd || 1)}" style="width:48px" oninput="financeiro.codigos._onQtdUnit(this)"></td>
+        <td data-label="Lado"><select name="fin_cod_lado[]" onchange="markDirty()">${cirurgia.opcoesLado(dados.lateralidade)}</select></td>
         <td data-label="Grau"><select name="fin_cod_grau[]" title="Maior porte 100%; mesma via 50%; via diferente 70% (manual)" onchange="financeiro.codigos._onQtdUnit(this)">${['100', '70', '50'].map(g => `<option value="${g}" ${g === String(dados.grau || '100') ? 'selected' : ''}>${g}%</option>`).join('')}</select></td>
         <td data-label="Vlr unit."><input type="number" name="fin_cod_unit[]" step="0.01" min="0" value="${utils.escapeAttr(dados.valor_unit || '')}" oninput="financeiro.codigos._onQtdUnit(this)"></td>
         <td data-label="Previsto"><input type="number" name="fin_cod_previsto[]" step="0.01" min="0" value="${utils.escapeAttr(dados.valor_previsto || '')}" oninput="financeiro.codigos._onPrevisto(this)"></td>
@@ -52415,6 +52643,10 @@ const financeiro = {
           descricao:     q('fin_cod_desc'),
           porte:         q('fin_cod_porte'),
           qtd:           Math.max(1, parseFloat(q('fin_cod_qtd')) || 1),
+          /* DE QUE LADO. Procedimento lateral cobrado sem o lado declarado é
+             glosa na certa — e o dado já existe desde a pré; só não chegava
+             até aqui. */
+          lateralidade:  q('fin_cod_lado'),
           grau:          parseFloat(q('fin_cod_grau')) || 100,
           valor_unit:    parseFloat(q('fin_cod_unit')) || 0,
           valor_previsto: parseFloat(q('fin_cod_previsto')) || 0,
@@ -52744,7 +52976,7 @@ const financeiro = {
     data.anexos = financeiro.anexos.coletar();
     /* Limpa campos array que vieram do formData mas vivem em data.codigos */
     delete data.fin_cod_codigo;  delete data.fin_cod_desc;  delete data.fin_cod_porte;
-    delete data.fin_cod_qtd;     delete data.fin_cod_unit;
+    delete data.fin_cod_qtd;     delete data.fin_cod_unit;  delete data.fin_cod_lado;
     delete data.fin_cod_previsto; delete data.fin_cod_recebido; delete data.fin_cod_glosa;
     delete data.fin_cod_status;  delete data.fin_cod_obs;
     try { data._docs_troca = prontuario.coletar('fintroca'); } catch (e) {}
