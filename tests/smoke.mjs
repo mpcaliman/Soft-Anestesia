@@ -18254,6 +18254,81 @@ await test('Cirurgia definida na pré atravessa os documentos com código, quant
   await page.close();
 });
 
+/* 247) O lado chega até a cobrança
+
+   "Fazer igual à de gerar financeiro. Só incluir lateralidade."
+
+   A tabela de códigos do Financeiro já tinha o formato certo — código,
+   descrição, porte, quantidade, grau, valores. Faltava UMA coluna, e é a que
+   o convênio glosa quando falta: o lado.
+
+   O dado já existia desde a pré. Ele morria no caminho: `fin.linhasDe`
+   montava a linha de cobrança sem ele, então a guia saía dizendo
+   "artroscopia de ombro" sem dizer qual. */
+await test('Lado operado chega à linha de cobrança, na janela e na tabela do Financeiro', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+
+    /* ---- da FICHA: o lado entra na linha de cobrança ---- */
+    const ficha = {
+      _id: 'f1', _finalizado: true,
+      paciente: { nome: 'Olival Jose Covre' },
+      procedimento: {
+        descricao: 'Artroscopia de ombro', codigo: '3.07.22.01-0',
+        lateralidade: 'direita', data: utils.hojeISO(),
+        cirurgias_extra: [{ procedimento: 'Ressecção da clavícula', codigo: '3.07.11.02-5', lateralidade: 'direita', grau: '50' }]
+      }
+    };
+    const linhas = fin.linhasDe('anestesia', ficha);
+    out.principalComLado = linhas[0] && linhas[0].lateralidade === 'direita';
+    out.extraComLado = linhas[1] && linhas[1].lateralidade === 'direita';
+
+    /* ---- a linha vira a linha da TABELA de códigos, com o lado ---- */
+    const comoCodigo = fin._linhaComoCodigo(linhas[0]);
+    out.tabelaRecebeOLado = comoCodigo.lateralidade === 'direita'
+      && comoCodigo.qtd === 1 && !!comoCodigo.codigo;
+
+    /* ---- a tabela do Financeiro tem a coluna, e ela coleta ---- */
+    try { ui.showModule('financeiro'); } catch (e) {}
+    const tb = document.getElementById('fin-codigos-body');
+    if (tb) tb.innerHTML = '';
+    financeiro.codigos.add({ codigo: '3.07.22.01-0', descricao: 'Artroscopia de ombro', qtd: 1, lateralidade: 'esquerda' });
+    const sel = document.querySelector('#fin-codigos-body [name="fin_cod_lado[]"]');
+    out.colunaExiste = !!sel;
+    out.veioMarcado = !!sel && sel.value === 'esquerda';
+    const colhido = financeiro.codigos.coletar();
+    out.coletouOLado = colhido.length === 1 && colhido[0].lateralidade === 'esquerda';
+    /* em branco continua sendo em branco: "não se aplica" não vira dado */
+    sel.value = '';
+    out.brancoSegueBranco = financeiro.codigos.coletar()[0].lateralidade === '';
+    if (tb) tb.innerHTML = '';
+
+    /* ---- a janela "gerar financeiro" tem a mesma coluna ---- */
+    fin.finalizacao._ctx = null;
+    fin.isAutoEnabled = () => true;
+    fin.finalizacao.abrir('anestesia', ficha);
+    return new Promise(ok => setTimeout(() => {
+      const cab = (document.getElementById('fz-codigos') || {}).textContent || '';
+      out.janelaTemColuna = /Lado/.test(cab);
+      const selJanela = document.querySelector('#fz-codigos-body [name="fz_lado[]"]');
+      out.janelaVeioMarcada = !!selJanela && selJanela.value === 'direita';
+      out.janelaColeta = fin.finalizacao._linhas().some(l => l.lateralidade === 'direita');
+      try { modal.close(); } catch (e) {}
+      ok(out);
+    }, 220));
+  });
+  assert(r.principalComLado, 'a linha de cobrança do procedimento principal leva o lado — era aí que ele morria');
+  assert(r.extraComLado, 'e a dos procedimentos adicionais também');
+  assert(r.tabelaRecebeOLado, 'a linha vira linha da tabela de códigos com o lado junto');
+  assert(r.colunaExiste && r.veioMarcado, 'a tabela do Financeiro tem a coluna Lado, já marcada pelo que veio da ficha');
+  assert(r.coletouOLado, 'e o lado é gravado no lançamento');
+  assert(r.brancoSegueBranco, 'em branco continua em branco: "não se aplica" não pode virar dado inventado');
+  assert(r.janelaTemColuna && r.janelaVeioMarcada, 'a janela "gerar financeiro" tem a mesma coluna, preenchida');
+  assert(r.janelaColeta, 'e leva o lado para o lançamento que ela cria');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

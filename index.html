@@ -4688,7 +4688,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-02i</b><br>
+    v7.1 · build <b id="build-tag">2026-10-02j</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -8464,6 +8464,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
                 <th style="min-width:240px">Procedimento (CBHPM)</th>
                 <th style="width:60px">Porte</th>
                 <th style="width:58px" title="Número de vezes que o código foi executado">Qtd ×</th>
+                <th style="width:98px" title="Lado operado. Em branco quando não se aplica — o convênio glosa procedimento lateral sem o lado declarado">Lado</th>
                 <th style="width:70px" title="Hierarquia: o código de MAIOR PORTE é o principal (100%); os demais da MESMA VIA entram 50%; VIA DIFERENTE entra 70% (ajuste manual). Use ⚖️ Classificar graus para aplicar automaticamente.">Grau</th>
                 <th style="width:105px" title="Valor unitário do código">Vlr unit. (R$)</th>
                 <th style="width:110px">Previsto (R$)</th>
@@ -42634,6 +42635,7 @@ const fin = {
       descricao: l.cbhpm_descricao || l.procedimento || '',
       porte: porte,
       qtd: l.quantidade || 1,
+      lateralidade: l.lateralidade || '',
       grau: String(l.fracao != null ? l.fracao : 100),
       valor_unit: (l.valor_base != null) ? l.valor_base : '',
       valor_previsto: (l.valor_final != null) ? l.valor_final : '',
@@ -42664,6 +42666,7 @@ const fin = {
         linhaId: '', tipo_honorario: 'consulta',
         tipo_atendimento: cab.tipoAtendimento,
         cbhpm_codigo: cod,
+        lateralidade: '',
         cbhpm_descricao: info ? info.descricao : 'Consulta',
         procedimento: cab.procedimento || (info ? info.descricao : 'Consulta'),
         quantidade: 1, fracao: 100,
@@ -42677,6 +42680,9 @@ const fin = {
         linhaId: '', tipo_honorario: 'anestesia',
         tipo_atendimento: 'procedimento',
         cbhpm_codigo: cab.codigo || '',
+        /* o lado atravessa a pré, a ficha e chega à cobrança: é na guia que
+           ele vira glosa quando falta */
+        lateralidade: (doc.procedimento && doc.procedimento.lateralidade) || '',
         cbhpm_descricao: cab.procedimento,
         procedimento: cab.procedimento,
         quantidade: 1, fracao: 100,
@@ -42703,6 +42709,7 @@ const fin = {
           tipo_honorario: 'anestesia',
           tipo_atendimento: 'procedimento',
           cbhpm_codigo: cod,
+          lateralidade: ex.lateralidade || '',
           cbhpm_descricao: (info && info.descricao) || ex.procedimento || '',
           procedimento: ex.procedimento || (info && info.descricao) || '',
           quantidade: 1, fracao: fracao,
@@ -42971,7 +42978,7 @@ const fin = {
         '📋 Códigos e valores <small style="font-weight:400;color:var(--text-mute)">— confira antes de virar cobrança; tudo é editável</small></h3>' +
         '<div class="dyn-table-wrap"><table class="dyn" id="fz-codigos"><thead><tr>' +
         '<th style="width:130px">Código</th><th>Procedimento</th><th style="width:60px">Porte</th>' +
-        '<th style="width:54px">Qtd</th><th style="width:76px">Grau</th>' +
+        '<th style="width:54px">Qtd</th><th style="width:92px" title="Lado operado — em branco quando não se aplica">Lado</th><th style="width:76px">Grau</th>' +
         '<th style="width:110px">Vlr unit. (R$)</th><th style="width:110px">Previsto (R$)</th>' +
         '<th class="col-rm">×</th></tr></thead><tbody id="fz-codigos-body"></tbody></table></div>' +
         '<div class="table-actions"><button type="button" class="btn btn-sm btn-primary" onclick="fin.finalizacao.addLinha()">+ Adicionar código</button></div>' +
@@ -42998,6 +43005,7 @@ const fin = {
           linhas.forEach(l => fin.finalizacao.addLinha({
             codigo: l.cbhpm_codigo, descricao: l.cbhpm_descricao || l.procedimento,
             porte: fin.finalizacao._porteDe(l), qtd: l.quantidade || 1,
+            lateralidade: l.lateralidade || '',
             grau: String(l.fracao != null ? l.fracao : 100),
             unit: l.valor_base, previsto: l.valor_final
           }));
@@ -43217,6 +43225,7 @@ const fin = {
         '<td data-label="Procedimento"><input type="text" name="fz_desc[]" value="' + ea(d.descricao || '') + '" placeholder="digite para buscar na CBHPM"></td>' +
         '<td data-label="Porte"><input type="text" name="fz_porte[]" value="' + ea(d.porte || '') + '" style="width:52px"></td>' +
         '<td data-label="Qtd"><input type="number" min="1" step="1" name="fz_qtd[]" value="' + ea(d.qtd || 1) + '" style="width:48px" oninput="fin.finalizacao._recalcularLinha(this)"></td>' +
+        '<td data-label="Lado"><select name="fz_lado[]">' + cirurgia.opcoesLado(d.lateralidade) + '</select></td>' +
         '<td data-label="Grau"><select name="fz_grau[]" onchange="fin.finalizacao._recalcularLinha(this)">' +
         ['100', '70', '50'].map(g => '<option value="' + g + '"' + (g === String(d.grau || '100') ? ' selected' : '') + '>' + g + '%</option>').join('') +
         '</select></td>' +
@@ -43333,6 +43342,7 @@ const fin = {
         out.push({
           codigo, descricao, porte: g('fz_porte'),
           qtd: parseInt(g('fz_qtd'), 10) || 1,
+          lateralidade: g('fz_lado'),
           grau: String(g('fz_grau')).replace('%', '') || '100',
           valor_unit: g('fz_unit') === '' ? '' : Number(g('fz_unit')),
           valor_previsto: g('fz_prev') === '' ? '' : Number(g('fz_prev')),
@@ -43574,6 +43584,7 @@ const fin = {
         _origemDescricao: 'Auto: ' + rotulo + (ehPrincipal ? '' : ' — procedimento realizado'),
         cbhpm_codigo: l.cbhpm_codigo || '',
         cbhpm_descricao: l.cbhpm_descricao || '',
+        lateralidade: l.lateralidade || item.lateralidade || '',
         cbhpm_versao: CBHPM_VERSAO,
         quantidade: l.quantidade,
         fracao: l.fracao,
@@ -52421,6 +52432,7 @@ const financeiro = {
         </td>
         <td data-label="Porte"><input type="text" name="fin_cod_porte[]" value="${utils.escapeAttr(dados.porte || '')}" placeholder="—" style="width:50px"></td>
         <td data-label="Qtd ×"><input type="number" name="fin_cod_qtd[]" step="1" min="1" value="${utils.escapeAttr(dados.qtd || 1)}" style="width:48px" oninput="financeiro.codigos._onQtdUnit(this)"></td>
+        <td data-label="Lado"><select name="fin_cod_lado[]" onchange="markDirty()">${cirurgia.opcoesLado(dados.lateralidade)}</select></td>
         <td data-label="Grau"><select name="fin_cod_grau[]" title="Maior porte 100%; mesma via 50%; via diferente 70% (manual)" onchange="financeiro.codigos._onQtdUnit(this)">${['100', '70', '50'].map(g => `<option value="${g}" ${g === String(dados.grau || '100') ? 'selected' : ''}>${g}%</option>`).join('')}</select></td>
         <td data-label="Vlr unit."><input type="number" name="fin_cod_unit[]" step="0.01" min="0" value="${utils.escapeAttr(dados.valor_unit || '')}" oninput="financeiro.codigos._onQtdUnit(this)"></td>
         <td data-label="Previsto"><input type="number" name="fin_cod_previsto[]" step="0.01" min="0" value="${utils.escapeAttr(dados.valor_previsto || '')}" oninput="financeiro.codigos._onPrevisto(this)"></td>
@@ -52631,6 +52643,10 @@ const financeiro = {
           descricao:     q('fin_cod_desc'),
           porte:         q('fin_cod_porte'),
           qtd:           Math.max(1, parseFloat(q('fin_cod_qtd')) || 1),
+          /* DE QUE LADO. Procedimento lateral cobrado sem o lado declarado é
+             glosa na certa — e o dado já existe desde a pré; só não chegava
+             até aqui. */
+          lateralidade:  q('fin_cod_lado'),
           grau:          parseFloat(q('fin_cod_grau')) || 100,
           valor_unit:    parseFloat(q('fin_cod_unit')) || 0,
           valor_previsto: parseFloat(q('fin_cod_previsto')) || 0,
@@ -52960,7 +52976,7 @@ const financeiro = {
     data.anexos = financeiro.anexos.coletar();
     /* Limpa campos array que vieram do formData mas vivem em data.codigos */
     delete data.fin_cod_codigo;  delete data.fin_cod_desc;  delete data.fin_cod_porte;
-    delete data.fin_cod_qtd;     delete data.fin_cod_unit;
+    delete data.fin_cod_qtd;     delete data.fin_cod_unit;  delete data.fin_cod_lado;
     delete data.fin_cod_previsto; delete data.fin_cod_recebido; delete data.fin_cod_glosa;
     delete data.fin_cod_status;  delete data.fin_cod_obs;
     try { data._docs_troca = prontuario.coletar('fintroca'); } catch (e) {}
