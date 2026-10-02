@@ -1822,8 +1822,12 @@ await test('Configurações sobem para a nuvem, descem ao entrar (vence a mais n
     /* 5) tela de login: sem modo demonstração e sem usuário local */
     auth._render();
     const foot = (document.getElementById('auth-foot') || {}).innerHTML || '';
+    /* "Criar conta" saiu daqui depois: num sistema de prontuário, quem decide
+       quem entra na clínica é quem responde por ela, não quem chega. As contas
+       nascem no módulo Programador (teste 238). O que a tela deve ter é o
+       caminho de quem está sem acesso — senão vira um beco. */
     out.loginLimpo = !/demonstra/i.test(foot) && !/usuário local/i.test(foot)
-      && /Criar conta/i.test(foot);
+      && !/Criar conta/i.test(foot) && /Peça ao responsável/i.test(foot);
 
     /* 6) criação de usuário local desativada na tela de Usuários */
     out.semCriarLocal = !document.querySelector('#usuarios-card button[onclick="ajustesUsuarios.abrirNovo()"]');
@@ -1833,7 +1837,7 @@ await test('Configurações sobem para a nuvem, descem ao entrar (vence a mais n
   assert(r.aplicou, 'ao entrar, configurações mais novas da nuvem deveriam ser aplicadas no aparelho');
   assert(r.localVence, 'configuração local mais nova deveria vencer e ser reenviada para a nuvem');
   assert(r.foraDoSyncNormal, 'config_sync não deve entrar no pull normal de módulos');
-  assert(r.loginLimpo, 'a tela de login não deveria mais oferecer demonstração nem usuário local');
+  assert(r.loginLimpo, 'a tela de login não oferece demonstração, usuário local nem criação de conta — e diz a quem pedir acesso');
   assert(r.semCriarLocal, 'o botão de criar usuário local deveria ter saído de Usuários e segurança');
   await page.close();
 });
@@ -17444,6 +17448,140 @@ await test('Meu dia mostra o código do atendimento, e separa o cobrado do previ
   assert(r.naoRepete, 'código repetido não vira duas tarjas');
   assert(r.semCodigoNaoInventa, 'sem código nenhum, não inventa nada — tarja vazia seria pior que ausência');
   assert(r.juntouAsDuasLinhas && r.principalEhALinhaMae, 'o caso guarda todas as linhas, e a principal continua sendo a linha-mãe');
+  await page.close();
+});
+
+/* 238) Quem decide quem entra é quem responde pela clínica
+
+   A tela de entrada tinha "Criar conta (novo administrador)": qualquer pessoa
+   com o endereço do app abria uma conta sozinha, e o gestor só descobria
+   depois — se descobrisse. Num sistema de prontuário isso é o avesso do que
+   deve ser.
+
+   Agora a conta nasce no módulo Programador, por quem autoriza. A chave de
+   administrador do Supabase NÃO entra no app (ela abriria o banco inteiro a
+   quem lesse o código-fonte): quem cria é uma Edge Function, que confere no
+   banco se quem pediu é programador.
+
+   E a senha provisória morre no primeiro uso: ela foi escolhida por outra
+   pessoa e ditada por telefone ou mensagem. */
+await test('Conta criada por quem autoriza, com senha provisória que morre no primeiro acesso', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => { try { ui.showModule('programador'); } catch (e) {} });
+  const r = await page.evaluate(async () => {
+    const out = {};
+
+    /* ---- a porta pública foi fechada ---- */
+    out.semCadastroPublico = typeof auth._mostrarSignup === 'undefined'
+                          && typeof auth._executarSignup === 'undefined';
+    auth._render();
+    const rodape = (document.getElementById('auth-foot') || {}).innerHTML || '';
+    out.telaNaoOferece = !/Criar conta/i.test(rodape);
+    out.telaDizQuemLibera = /Peça ao responsável/i.test(rodape);
+
+    /* ---- criar conta: o app PEDE à função, com o token de quem pediu ---- */
+    cloud.config = () => ({ url: 'https://exemplo.supabase.co', key: 'k' });
+    cloud.estaConfigurado = () => true;
+    localStorage.setItem(cloud.SESSION_KEY, JSON.stringify({
+      access_token: 'tok-do-programador', refresh_token: 'r',
+      user: { id: 'u1', email: programador.EMAIL }, expires_at: Date.now() + 3600000
+    }));
+    let pedido = null;
+    const origFetch = window.fetch;
+    window.fetch = async (url, init) => {
+      if (/functions\/v1\/contas/.test(String(url))) {
+        pedido = { url: String(url), init };
+        return {
+          ok: true, status: 200,
+          json: async () => ({ ok: true, user_id: 'novo', email: 'maria@x.com', senha: 'Kpqrst472', provisoria: true }),
+          headers: { get: () => '0' }
+        };
+      }
+      return { ok: true, status: 200, json: async () => ([]), headers: { get: () => '0' } };
+    };
+    const rpcs = [];
+    programador._rpc = async (nome, body) => { rpcs.push({ nome, body }); return {}; };
+    programador._orgs = [{ id: 'org-1', nome: 'Minha Clínica' }];
+    programador._perfis = [];
+    programador._renderConteudo(document.getElementById('prog-conteudo'));
+    document.getElementById('prog-nc-nome').value = 'Maria Silva';
+    document.getElementById('prog-nc-email').value = 'Maria@X.com ';
+    document.getElementById('prog-nc-org').value = 'org-1';
+    document.getElementById('prog-nc-role').value = 'auxiliar';
+    await programador.criarConta();
+
+    out.chamouAFuncao = !!pedido && /\/functions\/v1\/contas\?op=criar$/.test(pedido.url);
+    out.mandouOToken = !!pedido && /Bearer tok-do-programador/.test(pedido.init.headers['Authorization'] || '');
+    out.normalizouOEmail = !!pedido && JSON.parse(pedido.init.body).email === 'maria@x.com';
+    out.vinculouAoAmbiente = rpcs.some(c => c.nome === 'prog_add_member' && c.body.p_org === 'org-1' && c.body.p_role === 'auxiliar');
+
+    const res = (document.getElementById('prog-nc-resultado') || {}).textContent || '';
+    out.mostrouASenhaUmaVez = /Kpqrst472/.test(res) && /só aparece agora/i.test(res);
+    out.avisouDaTroca = /obriga a trocar/i.test(res);
+
+    /* a senha NÃO pode ficar guardada em lugar nenhum do aparelho */
+    let vazou = false;
+    for (let i = 0; i < localStorage.length; i++) {
+      const v = localStorage.getItem(localStorage.key(i)) || '';
+      if (v.indexOf('Kpqrst472') >= 0) vazou = true;
+    }
+    out.naoGuardouASenha = !vazou;
+
+    /* ---- a marca de senha provisória vale em qualquer aparelho ---- */
+    localStorage.setItem(cloud.SESSION_KEY, JSON.stringify({
+      access_token: 't', refresh_token: 'r', expires_at: Date.now() + 3600000,
+      user: { id: 'u2', email: 'maria@x.com', user_metadata: { deve_trocar_senha: true } }
+    }));
+    out.sabeQueEhProvisoria = cloud.deveTrocarSenha() === true;
+    out.exigiuATroca = auth.exigirTrocaDeSenha() === true;
+    const corpo = (document.getElementById('modal-body') || {}).textContent || '';
+    out.janelaExplica = /senha provisória/i.test(corpo) && /deixa de valer/i.test(corpo);
+
+    /* senha curta e senhas diferentes são recusadas ANTES de ir ao servidor */
+    let putFeito = 0;
+    window.fetch = async (url, init) => {
+      if (/\/auth\/v1\/user/.test(String(url)) && init && init.method === 'PUT') {
+        putFeito++;
+        return { ok: true, status: 200, json: async () => ({ id: 'u2', user_metadata: { deve_trocar_senha: false } }), headers: { get: () => '0' } };
+      }
+      return { ok: true, status: 200, json: async () => ({}), headers: { get: () => '0' } };
+    };
+    document.getElementById('tso-1').value = '123';
+    document.getElementById('tso-2').value = '123';
+    await auth._salvarTrocaObrigatoria();
+    out.recusaSenhaCurta = putFeito === 0 && /ao menos 6/.test((document.getElementById('tso-erro') || {}).textContent || '');
+    document.getElementById('tso-1').value = 'senhaboa1';
+    document.getElementById('tso-2').value = 'senhaboa2';
+    await auth._salvarTrocaObrigatoria();
+    out.recusaDiferentes = putFeito === 0 && /não conferem/.test((document.getElementById('tso-erro') || {}).textContent || '');
+
+    /* troca válida: sobe para o servidor e a marca cai */
+    document.getElementById('tso-1').value = 'senhaboa1';
+    document.getElementById('tso-2').value = 'senhaboa1';
+    await auth._salvarTrocaObrigatoria();
+    out.trocou = putFeito === 1;
+    out.marcaCaiu = cloud.deveTrocarSenha() === false;
+    out.naoPergunaDeNovo = auth.exigirTrocaDeSenha() === false;
+
+    window.fetch = origFetch;
+    localStorage.removeItem(cloud.SESSION_KEY);
+    try { modal.close(); } catch (e) {}
+    return out;
+  });
+  assert(r.semCadastroPublico, 'a tela de cadastro público não pode existir mais no código — porta fechada é porta sem fechadura');
+  assert(r.telaNaoOferece, 'e a tela de entrada não oferece "Criar conta"');
+  assert(r.telaDizQuemLibera, 'dizendo, no lugar, a quem pedir acesso — senão vira um beco');
+  assert(r.chamouAFuncao, 'criar conta passa pela Edge Function: a chave de administrador não entra no app');
+  assert(r.mandouOToken, 'e vai com o token de quem pediu, para o servidor conferir que é o programador');
+  assert(r.normalizouOEmail, 'e-mail normalizado — "Maria@X.com " e "maria@x.com" são a mesma pessoa');
+  assert(r.vinculouAoAmbiente, 'criar a conta e vinculá-la ao ambiente são dois passos, e os dois acontecem');
+  assert(r.mostrouASenhaUmaVez, 'a senha provisória aparece uma vez, dito com todas as letras');
+  assert(r.avisouDaTroca, 'avisando que a pessoa vai ser obrigada a trocar');
+  assert(r.naoGuardouASenha, 'e NÃO fica gravada no aparelho — lista de senhas em texto claro é o que não pode existir');
+  assert(r.sabeQueEhProvisoria, 'a marca vem nos metadados da conta, então vale em qualquer aparelho');
+  assert(r.exigiuATroca && r.janelaExplica, 'e a troca é exigida logo depois de entrar, explicando por quê');
+  assert(r.recusaSenhaCurta && r.recusaDiferentes, 'senha curta ou repetida errado é recusada antes de ir ao servidor');
+  assert(r.trocou && r.marcaCaiu && r.naoPergunaDeNovo, 'trocada, a marca cai e a exigência não volta a cada tela');
   await page.close();
 });
 
