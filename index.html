@@ -4663,7 +4663,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-01e</b><br>
+    v7.1 · build <b id="build-tag">2026-10-02a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -19281,8 +19281,14 @@ const auth = {
       <button type="submit" class="auth-btn">Entrar</button>`;
     form.onsubmit = (e) => { e.preventDefault(); auth.tentarLoginNuvem(); };
     foot.innerHTML =
-      '<a href="javascript:void(0)" onclick="auth._mostrarSignup()" style="color:var(--primary);font-size:.85rem">Criar conta (novo administrador)</a><br>' +
+      /* "Criar conta" SAIU daqui. Quem decide quem entra na clínica é quem
+         responde por ela — e a porta aberta fazia o contrário: qualquer pessoa
+         com o endereço do app abria uma conta, e o gestor só descobria depois,
+         se descobrisse. Agora a conta é criada no módulo Programador.
+         (Tirar o link é tirar a maçaneta: a tranca é desligar o cadastro
+         público no painel do Supabase — está dito no README da função.) */
       '<a href="javascript:void(0)" onclick="auth._socorro()" style="color:var(--text-mute);font-size:.8rem">Problemas para entrar?</a>' +
+      '<div style="margin-top:6px;font-size:.78rem;color:var(--text-mute)">Não tem acesso? Peça ao responsável pela clínica — as contas são criadas por ele.</div>' +
       '<div style="margin-top:12px;font-size:.72rem;color:var(--text-mute);line-height:1.55;text-align:center">' +
         '🔒 Acesso restrito a profissionais de saúde autorizados. As informações de pacientes são <strong>confidenciais</strong>, armazenadas de forma criptografada e individual por profissional, em conformidade com a <strong>LGPD</strong> e o sigilo médico.' +
       '</div>';
@@ -19348,6 +19354,7 @@ const auth = {
           auth._definirSessao(u);
           document.getElementById('auth-pass').value = '';
           auth._desbloquear();
+          try { auth.exigirTrocaDeSenha(); } catch (e) {}
           auth._limparFalhas();
           try { cloud.autoSyncAoEntrar(); } catch (e) {}
           return;
@@ -19657,50 +19664,64 @@ const auth = {
       '<a href="javascript:void(0)" onclick="auth._socorro()" style="color:var(--text-mute);font-size:.85rem">Problemas para entrar?</a>';
   },
 
-  /* ---------- Criar conta na nuvem (novo administrador) ---------- */
-  _mostrarSignup() {
-    const sub = document.getElementById('auth-sub');
-    const form = document.getElementById('auth-form');
-    const foot = document.getElementById('auth-foot');
-    sub.textContent = 'Criar conta — novo administrador';
-    form.innerHTML = `
-      <div class="auth-field"><label>E-mail</label><input type="email" id="auth-su-email" autocapitalize="none" placeholder="seu@email.com"></div>
-      <div class="auth-field"><label>Senha</label><input type="password" id="auth-su-pass" placeholder="Mínimo 6 caracteres"></div>
-      <div class="auth-field"><label>Confirmar senha</label><input type="password" id="auth-su-pass2" placeholder="Repita a senha"></div>
-      <div class="auth-error" id="auth-error"></div>
-      <button type="submit" class="auth-btn">Criar conta e entrar</button>`;
-    form.onsubmit = (e) => { e.preventDefault(); auth._executarSignup(); };
-    foot.innerHTML = 'Cada conta é um banco de dados separado na nuvem — o novo administrador não vê os seus dados.<br>' +
-      '<a href="javascript:void(0)" onclick="auth._render()" style="color:var(--primary);font-size:.85rem">← Voltar ao login</a>';
+  /* A exigência aparece DEPOIS de entrar, não antes: a pessoa já está dentro,
+     com a conta dela, e o que falta é só trocar a senha que outra pessoa
+     escolheu. Barrar a entrada aqui seria transformar uma troca de senha num
+     segundo login — e quem não conseguisse concluir ficaria sem acesso. */
+  exigirTrocaDeSenha() {
+    if (!cloud.deveTrocarSenha()) return false;
+    auth._abrirTrocaObrigatoria();
+    return true;
+  },
+  _abrirTrocaObrigatoria() {
+    modal.open('🔑 Defina a sua senha',
+      '<p style="font-size:.88rem;margin:0 0 10px">Você entrou com uma <b>senha provisória</b>, criada por quem liberou o seu acesso. ' +
+      'Escolha agora a sua senha — a provisória deixa de valer.</p>' +
+      '<div class="grid">' +
+      '<div class="field col-12"><label>Nova senha</label><input type="password" id="tso-1" autocomplete="new-password" placeholder="mínimo 6 caracteres"></div>' +
+      '<div class="field col-12"><label>Repita a nova senha</label><input type="password" id="tso-2" autocomplete="new-password"></div>' +
+      '</div><div id="tso-erro" style="color:#b3261e;font-size:.82rem;min-height:16px"></div>',
+      '<button class="btn btn-primary" onclick="auth._salvarTrocaObrigatoria()">Salvar e continuar</button>');
+    setTimeout(() => { const el = document.getElementById('tso-1'); if (el) el.focus(); }, 120);
+  },
+  async _salvarTrocaObrigatoria() {
+    const a = (document.getElementById('tso-1') || {}).value || '';
+    const b = (document.getElementById('tso-2') || {}).value || '';
+    const err = document.getElementById('tso-erro');
+    const dizer = (t) => { if (err) err.textContent = t; };
+    if (a.length < 6) { dizer('A senha deve ter ao menos 6 caracteres.'); return; }
+    if (a !== b) { dizer('As senhas não conferem.'); return; }
+    dizer('Salvando…');
+    const r = await cloud.trocarSenhaLogado(a);
+    if (!r.ok) { dizer(r.erro || 'Não consegui trocar a senha agora.'); return; }
+    /* o espelho deste aparelho tem de aceitar a senha NOVA offline — senão a
+       pessoa troca a senha e fica trancada fora na primeira vez que ficar sem
+       internet, com a senha que ela mesma acabou de definir */
+    try {
+      const u = auth.usuarioAtual();
+      if (u && u.usuario) {
+        const lista = auth._lerUsuarios();
+        const i = lista.findIndex(x => x.usuario === u.usuario);
+        if (i >= 0) { lista[i].senhaHash = await auth._hash(a); auth._salvarUsuarios(lista); }
+      }
+    } catch (e) {}
+    modal.close();
+    toast('🔑 Senha definida. É com ela que você entra a partir de agora.');
   },
 
-  async _executarSignup() {
-    const email = (document.getElementById('auth-su-email').value || '').trim().toLowerCase();
-    const s1 = document.getElementById('auth-su-pass').value || '';
-    const s2 = document.getElementById('auth-su-pass2').value || '';
-    const errEl = document.getElementById('auth-error');
-    errEl.textContent = '';
-    if (!email || !s1) { errEl.textContent = 'Preencha e-mail e senha.'; return; }
-    if (s1.length < 6) { errEl.textContent = 'A senha deve ter ao menos 6 caracteres.'; return; }
-    if (s1 !== s2) { errEl.textContent = 'As senhas não conferem.'; return; }
-    if (!navigator.onLine) { errEl.textContent = 'Criar conta exige internet.'; return; }
-    errEl.textContent = 'Criando conta na nuvem…';
-    const r = await cloud.signup(email, s1);
-    if (!r.ok) { errEl.textContent = r.erro || 'Não foi possível criar a conta.'; return; }
-    if (r.precisaConfirmar) {
-      errEl.textContent = '';
-      document.getElementById('auth-form').innerHTML =
-        '<p style="font-size:.9rem">📬 Enviamos um e-mail de confirmação para <b>' + utils.escapeHTML(email) + '</b>.<br>Confirme e depois volte aqui para entrar.</p>' +
-        '<button type="button" class="auth-btn" onclick="auth._render()">← Voltar ao login</button>';
-      return;
-    }
-    /* sessão já veio: entra direto */
-    await auth._protegerTrocaDeConta();
-    const u = await auth._espelharUsuarioNuvem(email, s1);
-    auth._definirSessao(u);
-    auth._desbloquear();
-    toast('🎉 Conta criada — bem-vindo!');
-  },
+  /* ---------- Cadastro público: REMOVIDO ----------
+     Havia aqui uma tela "Criar conta (novo administrador)" aberta a qualquer
+     pessoa que soubesse o endereço do app. Num sistema de prontuário isso é o
+     avesso do que deve ser: quem decide quem entra na clínica é quem responde
+     por ela. As contas passam a nascer no módulo Programador, por quem
+     autoriza, com senha provisória e troca obrigatória no primeiro acesso.
+
+     `cloud.signup()` continua existindo (é a chamada crua ao servidor) mas
+     não tem mais nenhum caminho de tela — e o cadastro público é desligado
+     no painel do Supabase, que é a tranca de verdade:
+       Authentication → Sign In / Providers → Email → "Allow new users to sign up" OFF
+     Sem desligar lá, o endereço /auth/v1/signup segue aceitando a chave
+     pública, e tirar o botão daqui é tirar só a maçaneta. */
 
   /* ---------- Recuperação de acesso local ----------
      Mostra os logins cadastrados e permite recriar o acesso local.
@@ -20533,6 +20554,40 @@ const cloud = {
   },
 
   /* A troca em si, usada pelas duas telas. */
+  /* SENHA PROVISÓRIA TEM DE MORRER NO PRIMEIRO USO. Ela foi criada por outra
+     pessoa, ditada por telefone ou mandada por mensagem — continuar valendo é
+     deixar o acesso ao prontuário na mão de quem já a viu. A marca vem nos
+     metadados da própria conta, então vale em QUALQUER aparelho: trocar de
+     computador não contorna a exigência. */
+  deveTrocarSenha() {
+    try {
+      const s = cloud.session();
+      const m = s && s.user && (s.user.user_metadata || s.user.raw_user_meta_data);
+      return !!(m && m.deve_trocar_senha);
+    } catch (e) { return false; }
+  },
+  async trocarSenhaLogado(nova) {
+    if (!(await cloud._garantirToken())) return { ok: false, erro: cloud.motivoSemToken() };
+    const c = cloud.config(); const s = cloud.session();
+    try {
+      const r = await fetch(c.url + '/auth/v1/user', {
+        method: 'PUT',
+        headers: Object.assign({}, cloud._headers(false), { 'Authorization': 'Bearer ' + s.access_token }),
+        body: JSON.stringify({ password: nova, data: { deve_trocar_senha: false } })
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return { ok: false, erro: d.msg || d.message || d.error_description || ('HTTP ' + r.status) };
+      /* a sessão guardada tem de refletir a troca, senão a exigência volta a
+         cada tela que pergunta */
+      try {
+        const nova2 = Object.assign({}, s, { user: d && d.id ? d : s.user });
+        if (nova2.user && nova2.user.user_metadata) nova2.user.user_metadata.deve_trocar_senha = false;
+        localStorage.setItem(cloud.SESSION_KEY, JSON.stringify(nova2));
+      } catch (e) {}
+      return { ok: true };
+    } catch (e) { return { ok: false, erro: 'Falha de rede: ' + e.message }; }
+  },
+
   async trocarSenhaComToken(nova) {
     if (!cloud._tokenRecuperacao) return false;
     const c = cloud.config();
@@ -23099,14 +23154,30 @@ const programador = {
           </div>
           <div id="prog-erro"></div>
           <p style="font-size:.78rem;color:var(--text-mute);margin:10px 0 0">
-            O médico gestor precisa <b>já ter conta na nuvem</b>. Ele mesmo cria, no app: tela de entrada → <b>Criar conta</b>.
-            Criar a conta de outra pessoa pelo painel exigiria a chave de administrador do Supabase dentro do programa —
-            e quem tivesse o app teria o banco inteiro na mão.
+            O médico gestor precisa <b>já ter conta</b>. Se ainda não tiver, crie acima em <b>Criar conta de acesso</b> e depois
+            informe o e-mail dele aqui. Ninguém abre conta sozinho pela tela de entrada: quem autoriza o acesso à clínica é você.
           </p>
         </div>
       </section>
       <section class="card">
-        <div class="card-header"><div class="card-title-wrap"><span class="card-icon">👥</span><h2>Adicionar usuário a um ambiente<small>Você define o papel e os limites de acesso (a RLS do servidor obedece)</small></h2></div></div>
+        <div class="card-header"><div class="card-title-wrap"><span class="card-icon">🆕</span><h2>Criar conta de acesso<small>Quem decide quem entra é você — a pessoa não abre conta sozinha</small></h2></div></div>
+        <div class="card-body">
+          <div class="grid">
+            <div class="field col-3"><label>Nome da pessoa</label><input type="text" id="prog-nc-nome" placeholder="Ex.: Maria Silva"></div>
+            <div class="field col-3"><label>E-mail (será o login)</label><input type="email" id="prog-nc-email" autocapitalize="none" spellcheck="false"></div>
+            <div class="field col-2"><label>Ambiente</label><select id="prog-nc-org">${opcoesOrg}</select></div>
+            <div class="field col-2"><label>Papel</label><select id="prog-nc-role">${programador.PAPEIS.map(([v, r]) => '<option value="' + v + '">' + r + '</option>').join('')}</select></div>
+            <div class="field col-2" style="align-self:end"><button type="button" class="btn btn-primary btn-sm" onclick="programador.criarConta()">🆕 Criar conta</button></div>
+          </div>
+          <div id="prog-nc-resultado"></div>
+          <p style="font-size:.78rem;color:var(--text-mute);margin:10px 0 0">
+            A conta nasce com uma <b>senha provisória</b> que aparece aqui uma única vez, para você passar à pessoa.
+            No primeiro acesso ela é <b>obrigada a trocar</b> — senha que passou pela mão de outra pessoa não continua valendo.
+          </p>
+        </div>
+      </section>
+      <section class="card">
+        <div class="card-header"><div class="card-title-wrap"><span class="card-icon">👥</span><h2>Adicionar usuário a um ambiente<small>Quem JÁ tem conta — você define o papel e os limites (a RLS do servidor obedece)</small></h2></div></div>
         <div class="card-body">
           <div class="grid">
             <div class="field col-4"><label>Ambiente</label><select id="prog-mem-org">${opcoesOrg}</select></div>
@@ -23207,6 +23278,92 @@ const programador = {
       programador.render();
     } catch (e) { programador._mostrarErro(e.message); }
   },
+  /* ---- CRIAR CONTA (Edge Function: a chave de administrador fica no servidor)
+     O app não tem como criar conta de terceiro sozinho — e é bom que não
+     tenha. Ele PEDE à função, que confere no banco se quem pediu é
+     programador antes de fazer qualquer coisa. */
+  _urlFuncao(nome) {
+    const c = cloud.config();
+    return String(c.url || '').replace(/\/$/, '') + '/functions/v1/' + nome;
+  },
+  async criarConta() {
+    const nome = ((document.getElementById('prog-nc-nome') || {}).value || '').trim();
+    const email = ((document.getElementById('prog-nc-email') || {}).value || '').trim().toLowerCase();
+    const org = (document.getElementById('prog-nc-org') || {}).value;
+    const role = (document.getElementById('prog-nc-role') || {}).value;
+    const eh = document.getElementById('prog-erro'); if (eh) eh.innerHTML = '';
+    const host = document.getElementById('prog-nc-resultado'); if (host) host.innerHTML = '';
+    if (!email || email.indexOf('@') < 0) { programador._mostrarErro('Informe o e-mail da pessoa — é com ele que ela vai entrar.'); return; }
+    if (!(await cloud._garantirToken())) { programador._mostrarErro(cloud.motivoSemToken()); return; }
+    const s = cloud.session();
+    let r, d;
+    try {
+      r = await fetch(programador._urlFuncao('contas') + '?op=criar', {
+        method: 'POST',
+        headers: Object.assign({}, cloud._headers(false), { 'Authorization': 'Bearer ' + s.access_token, 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ email: email, nome: nome })
+      });
+      d = await r.json().catch(() => ({}));
+    } catch (e) {
+      programador._mostrarErro('Não consegui falar com a função de contas: ' + e.message);
+      return;
+    }
+    if (r.status === 404) {
+      programador._mostrarErro('A função "contas" ainda não foi publicada neste projeto. ' +
+        'No terminal, dentro da pasta do projeto: supabase functions deploy contas');
+      return;
+    }
+    if (!r.ok || !d || !d.ok) { programador._mostrarErro((d && d.erro) || ('HTTP ' + r.status)); return; }
+
+    /* Conta criada; agora o vínculo com a clínica — são dois passos porque são
+       duas coisas: existir no sistema e pertencer a um ambiente. */
+    let vinculou = false, erroVinc = '';
+    if (org) {
+      try { await programador._rpc('prog_add_member', { p_org: org, p_email: email, p_role: role }); vinculou = true; }
+      catch (e) { erroVinc = e.message; }
+    }
+    /* A ORDEM IMPORTA: `render()` reescreve o painel inteiro. Mostrar a senha
+       antes dele era mostrá-la e apagá-la no mesmo instante — e ela só existe
+       uma vez. Redesenha primeiro, escreve a senha depois. */
+    try { await programador.render(); } catch (e) {}
+    programador._mostrarSenhaProvisoria(email, d.senha, vinculou ? programador._nomeOrg(org) : '', erroVinc);
+    ['prog-nc-nome', 'prog-nc-email'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  },
+  /* A senha aparece UMA VEZ. Guardá-la na tela ou num registro seria criar uma
+     lista de senhas em texto claro — exatamente o que não pode existir. */
+  _mostrarSenhaProvisoria(email, senha, nomeOrg, erroVinc) {
+    const host = document.getElementById('prog-nc-resultado');
+    const E = utils.escapeHTML;
+    const html =
+      '<div style="background:#eef7f0;border:1px solid #b7dcc3;border-radius:8px;padding:12px 14px;margin-top:12px">' +
+      '<div style="font-size:.88rem;margin-bottom:8px">✅ Conta criada para <b>' + E(email) + '</b>' +
+      (nomeOrg ? ' em <b>' + E(nomeOrg) + '</b>' : '') + '.</div>' +
+      '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+      '<span style="font-size:.82rem">Senha provisória:</span>' +
+      '<code id="prog-nc-senha" style="font-size:1.05rem;font-weight:700;letter-spacing:.06em;background:#fff;border:1px solid #b7dcc3;border-radius:6px;padding:5px 10px">' + E(senha) + '</code>' +
+      '<button type="button" class="btn btn-xs" onclick="programador._copiarSenha()">📋 Copiar</button>' +
+      '</div>' +
+      '<p style="font-size:.78rem;color:var(--text-mute);margin:10px 0 0">Passe esta senha à pessoa. ' +
+      'Ela <b>só aparece agora</b> — não fica guardada em lugar nenhum. No primeiro acesso o sistema obriga a trocar.</p>' +
+      (erroVinc ? '<p style="font-size:.8rem;color:#8a1c1c;margin:8px 0 0">A conta foi criada, mas o vínculo com o ambiente falhou: ' +
+        E(erroVinc) + ' — use "Adicionar usuário a um ambiente" com este e-mail.</p>' : '') +
+      '</div>';
+    if (host) host.innerHTML = html; else alert('Senha provisória de ' + email + ': ' + senha);
+  },
+  _copiarSenha() {
+    const el = document.getElementById('prog-nc-senha');
+    if (!el) return;
+    const txt = el.textContent || '';
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(txt); toast('📋 Senha copiada'); return; }
+    } catch (e) {}
+    try {
+      const r = document.createRange(); r.selectNodeContents(el);
+      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      document.execCommand('copy'); toast('📋 Senha copiada');
+    } catch (e) { toast('Copie a senha à mão: ' + txt, 'warn'); }
+  },
+
   async addMembro() {
     const org = (document.getElementById('prog-mem-org') || {}).value;
     const email = ((document.getElementById('prog-mem-email') || {}).value || '').trim();
