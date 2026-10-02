@@ -2919,7 +2919,10 @@ await test('Logomarca aparece no PDF do orçamento, nos documentos e no receitu�
       getImageProperties: () => ({ width: 900, height: 300 })
     };
 
-    /* helper desenha e devolve y avançado */
+    /* helper desenha e devolve y avançado. A logo do PDF é a DA CLÍNICA: a
+       marca do sistema não entra em documento de paciente (teste 241). */
+    const LOGO_CLINICA = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    localStorage.setItem(logoUsuario.KEY, LOGO_CLINICA);
     const y1 = printPreview._logoPDF(docFake, 20, 16, 62, 22);
     out.desenhou = imagens.length === 1 && imagens[0].src.indexOf('data:image') === 0;
     out.proporcao = imagens.length === 1 && Math.abs(imagens[0].w / imagens[0].h - 3) < 0.05;   /* 900x300 */
@@ -2932,13 +2935,12 @@ await test('Logomarca aparece no PDF do orçamento, nos documentos e no receitu�
     printPreview._logoPDF(docFake, 20, 16, 62, 22);
     out.respeitaAltura = imagens.length === 1 && imagens[0].h <= 22;
 
-    /* sem logo utilizável, não quebra nem avança */
+    /* clínica sem logomarca: não quebra, não avança e não cai na do sistema */
     imagens.length = 0;
-    const orig = LOGOS.horizontal;
-    LOGOS.horizontal = '';
+    localStorage.removeItem(logoUsuario.KEY);
     const y2 = printPreview._logoPDF(docFake, 20, 16, 62, 22);
     out.semLogoSeguro = imagens.length === 0 && y2 === 16;
-    LOGOS.horizontal = orig;
+    localStorage.setItem(logoUsuario.KEY, LOGO_CLINICA);
 
     /* o PDF do orçamento chama o helper */
     let chamou = 0;
@@ -2985,10 +2987,17 @@ await test('Ficha: procedimento começa na entrada e termina na saída de sala; 
     set('hora_fim', '09:00');
     set('hora_sala_saida', '09:10');
 
-    /* cabeçalho enxuto: logo + só o título centralizado */
+    /* cabeçalho enxuto: logo DA CLÍNICA + só o título centralizado.
+       A marca do sistema não entra em documento de paciente (teste 241), então
+       aqui a clínica precisa ter a dela para a logo aparecer. */
     store.setList('cad_assinaturas', [{ _id: 'a1', nomeProfissional: 'Dr. Marcelo Caliman', crm: '1234', especialidade: 'Anestesiologia' }]);
+    localStorage.setItem(logoUsuario.KEY,
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
     const htmlH = printPreview._buildAnestesia();
     out.temLogo = htmlH.indexOf('pp-logo') >= 0;
+    /* e sem logomarca da clínica, o cabeçalho sai sem imagem */
+    localStorage.removeItem(logoUsuario.KEY);
+    out.semLogoDaClinicaNaoImprimeNada = printPreview._buildAnestesia().indexOf('pp-logo') < 0;
     out.temTitulo = htmlH.indexOf('FICHA DE ANESTESIA') >= 0;
     out.semProfNoTopo = htmlH.indexOf('pp-prof-nome') < 0 && htmlH.indexOf('pp-prof-reg') < 0;
     out.semMetaNoTopo = htmlH.indexOf('pp-doc-meta') < 0;
@@ -3042,7 +3051,8 @@ await test('Ficha: procedimento começa na entrada e termina na saída de sala; 
     return out;
   });
   assert(r.dur && r.durVirada && r.durVazia, 'o cálculo de duração deveria cobrir virada de dia e campo vazio');
-  assert(r.temLogo && r.temTitulo, 'o topo deveria ter a logo e o título da ficha');
+  assert(r.temLogo && r.temTitulo, 'o topo deveria ter a logo DA CLÍNICA e o título da ficha');
+  assert(r.semLogoDaClinicaNaoImprimeNada, 'sem logomarca da clínica o documento sai sem imagem — nunca com a marca do sistema');
   assert(r.semProfNoTopo, 'nome e CRM não devem se repetir no topo da ficha');
   assert(r.semMetaNoTopo, 'o topo deveria ter apenas o título centralizado');
   assert(r.nomeNaIdentificacao, 'o nome do paciente continua na identificação');
@@ -17582,6 +17592,247 @@ await test('Conta criada por quem autoriza, com senha provisória que morre no p
   assert(r.exigiuATroca && r.janelaExplica, 'e a troca é exigida logo depois de entrar, explicando por quê');
   assert(r.recusaSenhaCurta && r.recusaDiferentes, 'senha curta ou repetida errado é recusada antes de ir ao servidor');
   assert(r.trocou && r.marcaCaiu && r.naoPergunaDeNovo, 'trocada, a marca cai e a exigência não volta a cada tela');
+  await page.close();
+});
+
+/* 239) Bloquear o acesso ≠ apagar a conta
+
+   Pergunta de quem administra a clínica: "para deletar contas ou impedir o
+   acesso, como será?". As duas coisas existem, mas a segunda é a que serve
+   quase sempre — e por um motivo de banco, não de conforto:
+
+   as colunas de autoria (`created_by`, `finalized_by`…) apontam para a conta
+   SEM `on delete cascade`. O banco RECUSA apagar quem já gravou qualquer
+   coisa, para não deixar prontuário sem autor. Ou seja: depois do primeiro
+   dia de uso, "apagar a conta" quase sempre devolve um erro de chave
+   estrangeira — que, cru, não diz nada a quem está na tela.
+
+   E a lista de membros filtrava por `ativo`: quem fosse bloqueado SUMIA da
+   tela, e sumindo não havia como liberá-lo de volta. */
+await test('Bloquear acesso: tira a entrada sem apagar nada, e dá caminho de volta', async () => {
+  const page = await novaPagina();
+  await page.evaluate(() => { try { ui.showModule('programador'); } catch (e) {} });
+  const r = await page.evaluate(async () => {
+    const out = {};
+    localStorage.setItem(cloud.SESSION_KEY, JSON.stringify({
+      access_token: 'tok', refresh_token: 'r',
+      user: { id: 'u-prog', email: programador.EMAIL }, expires_at: Date.now() + 3600000
+    }));
+    cloud.config = () => ({ url: 'https://exemplo.supabase.co', key: 'k' });
+    cloud.estaConfigurado = () => true;
+    programador._orgs = [{ id: 'org-1', nome: 'Minha Clínica' }];
+    programador._perfis = [{ id: 'u-sec', email: 'secretaria@x.com' }];
+    programador._membros = [
+      { organization_id: 'org-1', user_id: 'u-sec', role: 'auxiliar', ativo: true },
+      { organization_id: 'org-1', user_id: 'u-old', role: 'auxiliar', ativo: false }
+    ];
+    programador._shares = [];
+    programador._renderConteudo(document.getElementById('prog-conteudo'));
+    const html = document.getElementById('prog-conteudo').innerHTML;
+
+    out.mostraBloqueado = /bloqueado/.test(html);
+    out.ofereceBloquear = /🚫 bloquear/.test(html);
+    out.ofereceLiberar = /✅ liberar/.test(html);
+
+    /* ---- bloquear passa pela função, com o token, e não apaga nada ---- */
+    let pedido = null;
+    const origFetch = window.fetch;
+    const origConfirm = window.confirm; window.confirm = () => true;
+    window.fetch = async (url, init) => {
+      if (/functions\/v1\/contas/.test(String(url))) {
+        pedido = { url: String(url), body: JSON.parse(init.body) };
+        return { ok: true, status: 200, json: async () => ({ ok: true, user_id: 'u-sec', ativo: false }), headers: { get: () => '0' } };
+      }
+      return { ok: true, status: 200, json: async () => ([]), headers: { get: () => '0' } };
+    };
+    await programador.definirAcesso('u-sec', 'org-1', false);
+    out.chamouAcesso = !!pedido && /\?op=acesso$/.test(pedido.url);
+    out.mandouODado = !!pedido && pedido.body.user_id === 'u-sec' && pedido.body.ativo === false && pedido.body.org === 'org-1';
+
+    /* ---- apagar quem já gravou: o erro cru vira explicação ---- */
+    programador._rpc = async () => {
+      throw new Error('update or delete on table "users" violates foreign key constraint "anesthesia_records_created_by_fkey"');
+    };
+    await programador.excluirConta('u-sec');
+    const erro = (document.getElementById('prog-erro') || {}).textContent || '';
+    out.explicouAAutoria = /ASSINOU registros/.test(erro) && /sem autor/.test(erro);
+    out.indicouOBloqueio = /bloquear/.test(erro);
+    out.semJargao = !/foreign key/i.test(erro);
+
+    /* ---- erro de outra natureza continua sendo mostrado como veio ---- */
+    programador._rpc = async () => { throw new Error('Apenas o programador pode excluir contas.'); };
+    await programador.excluirConta('u-sec');
+    const erro2 = (document.getElementById('prog-erro') || {}).textContent || '';
+    out.naoEngoleOutrosErros = /Apenas o programador/.test(erro2);
+
+    window.fetch = origFetch; window.confirm = origConfirm;
+    localStorage.removeItem(cloud.SESSION_KEY);
+    return out;
+  });
+  assert(r.mostraBloqueado, 'membro bloqueado continua na lista, marcado — sumindo, não haveria como liberá-lo de volta');
+  assert(r.ofereceBloquear && r.ofereceLiberar, 'e cada linha oferece a ação do estado dela: bloquear quem está ativo, liberar quem não está');
+  assert(r.chamouAcesso && r.mandouODado, 'bloquear passa pela função com a chave do servidor — o programador não tem permissão de escrita em profiles');
+  assert(r.explicouAAutoria, 'apagar quem já gravou devolve a RAZÃO: prontuário sem autor é o que o banco recusa');
+  assert(r.indicouOBloqueio, 'e aponta a saída que existe de verdade');
+  assert(r.semJargao, 'sem jogar "foreign key constraint" na cara de quem está administrando a clínica');
+  assert(r.naoEngoleOutrosErros, 'erro de outra natureza continua aparecendo como veio — a tradução vale só para o caso que ela explica');
+  await page.close();
+});
+
+/* 240) Conta sem clínica NÃO herda a clínica de quem entrou antes
+
+   Relato, com conta de verdade: uma conta recém-criada, sem vínculo nenhum,
+   entrou e caiu dentro de "Minha Clínica de Anestesia" — com os pacientes de
+   outro médico à vista. Num computador compartilhado isso é o pior defeito
+   possível neste sistema.
+
+   A causa era um `if` com só o ramo verdadeiro:
+
+       if (u.organization_id) await ambiente.aoEntrar(u.organization_id);
+
+   Quem TINHA clínica trocava o ponteiro do ambiente; quem NÃO tinha não mexia
+   nele — e o ponteiro continuava apontando para a clínica da pessoa anterior
+   naquele aparelho. O servidor respondia "esta conta não pertence a clínica
+   nenhuma" e o aparelho abria a gaveta da última que passou por ali.
+
+   Ausência de clínica é uma RESPOSTA, não um silêncio. */
+await test('Conta sem clínica não cai na clínica de quem usou o aparelho antes', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const R = cofre._real;
+    const limpar = () => {
+      const fora = [];
+      for (let i = 0; i < R.length; i++) { const k = R.key(i); if (k && k.indexOf('medsys.') === 0) fora.push(k); }
+      fora.forEach(k => R.removeItem(k));
+    };
+    limpar();
+
+    /* o aparelho estava com a clínica da pessoa anterior, com dados dela */
+    R.setItem('medsys.v7.cloud.org_id', 'org-marcelo');
+    store.setList('pacientes', [{ _id: 'p1', nome: 'Paciente do Marcelo' }]);
+    out.tinhaDadosAntes = (store.list('pacientes') || []).length === 1;
+    out.gavetaEraDoOutro = cofre.org() === 'org-marcelo';
+
+    /* entra a conta nova, que o servidor confirmou NÃO ter clínica */
+    await ambiente.aoEntrarSemClinica();
+
+    out.ponteiroApagado = cofre.org() === null || cofre.org() === '';
+    out.naoVeOsDadosDoOutro = (store.list('pacientes') || []).length === 0;
+    out.nomeDaClinicaSumiu = !ambiente.nome();
+
+    /* e o dado do outro NÃO foi apagado — ele continua na gaveta dele,
+       inacessível para esta conta, intacto para quando ela voltar */
+    out.dadoDoOutroIntacto = !!R.getItem('medsys.v5.pacientes@org-marc');
+
+    /* a tela explica, em vez de aparecer vazia sem motivo */
+    const faixa = document.getElementById('semclinica-faixa');
+    out.avisouNaTela = !!faixa && /não está em nenhuma clínica/i.test(faixa.textContent);
+    out.dizQueNaoEhFalha = !!faixa && /não é falha/i.test(faixa.textContent);
+
+    /* e oferece os dois caminhos, que são diferentes */
+    ambiente.resolverSemClinica();
+    const corpo = (document.getElementById('modal-body') || {}).textContent || '';
+    out.caminhoPedir = /peça ao responsável/i.test(corpo);
+    out.caminhoCriar = /A clínica é sua/i.test(corpo);
+    out.dizQueNinguemEntraSozinho = /ninguém entra numa clínica por conta própria/i.test(corpo);
+    try { modal.close(); } catch (e) {}
+
+    /* escrever agora NÃO pode cair na gaveta da outra clínica */
+    store.setList('pacientes', [{ _id: 'novo', nome: 'Paciente da conta nova' }]);
+    const naGavetaDoOutro = JSON.parse(R.getItem('medsys.v5.pacientes@org-marc') || '[]');
+    out.escritaNaoVazaParaOOutro = !naGavetaDoOutro.some(x => x._id === 'novo');
+
+    limpar();
+    ambiente._fecharSemClinica();
+    return out;
+  });
+  assert(r.tinhaDadosAntes && r.gavetaEraDoOutro, 'o cenário é o aparelho já com a clínica de outra pessoa aberta');
+  assert(r.ponteiroApagado, 'entrar sem clínica tem de APAGAR o ponteiro do ambiente, não deixá-lo como estava');
+  assert(r.naoVeOsDadosDoOutro, 'e a conta nova não enxerga nada da clínica anterior — era isto que estava acontecendo');
+  assert(r.nomeDaClinicaSumiu, 'nem o nome dela fica na tela, dizendo que você está onde não está');
+  assert(r.dadoDoOutroIntacto, 'sem apagar o que é do outro: inacessível não é destruído');
+  assert(r.avisouNaTela && r.dizQueNaoEhFalha, 'a tela explica por que está vazia — senão a pessoa conclui que perdeu os dados');
+  assert(r.caminhoPedir && r.caminhoCriar, 'e oferece os dois caminhos: ser vinculado a uma clínica, ou criar a sua');
+  assert(r.dizQueNinguemEntraSozinho, 'deixando claro que ninguém se vincula sozinho a uma clínica existente');
+  assert(r.escritaNaoVazaParaOOutro, 'e o que esta conta gravar não entra na gaveta da clínica anterior');
+  await page.close();
+});
+
+/* 241) Ambiente novo nasce em branco, e a marca do sistema não é a da clínica
+
+   Pedido de quem administra: "cada ambiente novo deve vir sem logomarca e
+   dados relativos; endereço etc. devem ser criados do zero pelo novo gestor.
+   Logomarca da clínica deles, e não do Soft. Do sistema continuam os mesmos."
+
+   São duas identidades que estavam coladas:
+
+   • a do SISTEMA (barra lateral, tela de entrada) é do programa e não muda;
+   • a da CLÍNICA é o que vai no documento do paciente.
+
+   Antes, a logomarca escolhida substituía também a do sistema — e, pior, uma
+   clínica SEM logomarca imprimia o documento do paciente com a marca do Soft
+   Anestesia. Carimbar a marca do fabricante do programa no documento de um
+   paciente é dizer que o atendimento é nosso. Não é. */
+await test('Ambiente novo nasce sem logomarca e sem dados da clínica anterior', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const R = cofre._real;
+    const limpar = () => {
+      const fora = [];
+      for (let i = 0; i < R.length; i++) { const k = R.key(i); if (k && k.indexOf('medsys.') === 0) fora.push(k); }
+      fora.forEach(k => R.removeItem(k));
+    };
+    limpar();
+
+    /* clínica A: tem logomarca e dados do profissional */
+    R.setItem('medsys.v7.cloud.org_id', 'org-aaaa');
+    const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    localStorage.setItem(logoUsuario.KEY, PNG);
+    store.setList('cad_profissionais', [{ _id: 'pr1', nome: 'Dr. A', endereco: 'Rua A, 100', crm: '111' }]);
+    out.clinicaATemLogo = logoUsuario.daClinica() === PNG;
+    out.clinicaATemDados = (store.list('cad_profissionais') || []).length === 1;
+
+    /* clínica B, recém-criada no MESMO aparelho */
+    R.setItem('medsys.v7.cloud.org_id', 'org-bbbb');
+    out.clinicaBSemLogo = logoUsuario.daClinica() === '';
+    out.clinicaBSemDados = (store.list('cad_profissionais') || []).length === 0;
+
+    /* o documento do paciente sai SEM imagem — nunca com a do sistema */
+    logoUsuario.carregar();
+    out.sistemaIntacto = LOGOS.icone === LOGOS_DEFAULT.icone
+                      && LOGOS.horizontal === LOGOS_DEFAULT.horizontal;
+    out.documentoSemLogo = logoUsuario.daClinica() === '';
+
+    /* e a tela de Ajustes diz isso, em vez de mostrar a marca do Soft como se
+       fosse da clínica */
+    const host = document.getElementById('logo-usuario-preview') ||
+      (() => { const d = document.createElement('div'); d.id = 'logo-usuario-preview'; document.body.appendChild(d); return d; })();
+    logoUsuario.renderAjustes();
+    out.ajustesDizSemLogo = /sem logomarca/i.test(host.textContent)
+      && /não entra em documento de paciente/i.test(host.textContent);
+
+    /* a clínica A continua com a dela: separar não é apagar */
+    R.setItem('medsys.v7.cloud.org_id', 'org-aaaa');
+    out.clinicaAIntacta = logoUsuario.daClinica() === PNG
+      && (store.list('cad_profissionais') || []).length === 1;
+
+    /* com logomarca própria, a do SISTEMA continua sendo a do sistema */
+    logoUsuario.carregar();
+    out.customNaoInvadeOSistema = LOGOS.icone === LOGOS_DEFAULT.icone;
+
+    limpar();
+    return out;
+  });
+  assert(r.clinicaATemLogo && r.clinicaATemDados, 'o cenário é uma clínica já montada, com logomarca e cadastro');
+  assert(r.clinicaBSemLogo, 'ambiente novo no mesmo aparelho nasce SEM logomarca');
+  assert(r.clinicaBSemDados, 'e sem os dados do profissional da outra — endereço, CRM, nada');
+  assert(r.documentoSemLogo, 'sem logomarca própria, o documento do paciente sai sem imagem');
+  assert(r.sistemaIntacto, 'e a marca do sistema continua sendo a do sistema, intocada');
+  assert(r.ajustesDizSemLogo, 'a tela diz que a clínica ainda não tem logomarca — em vez de exibir a do Soft como se fosse dela');
+  assert(r.clinicaAIntacta, 'a clínica anterior continua com tudo: separar ambientes não é apagar nada');
+  assert(r.customNaoInvadeOSistema, 'logomarca de clínica não substitui a identidade do programa');
   await page.close();
 });
 
