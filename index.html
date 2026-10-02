@@ -4663,7 +4663,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-02b</b><br>
+    v7.1 · build <b id="build-tag">2026-10-02c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -19582,6 +19582,20 @@ const auth = {
          instante. */
       try { localStorage.setItem('medsys.v7.cloud.orgs_count', String(perfil.orgs != null ? perfil.orgs : '')); } catch (e) {}
       try { if (u.organization_id) await ambiente.aoEntrar(u.organization_id); } catch (e) {}
+      /* CONTA SEM CLÍNICA NÃO HERDA A DE QUEM ENTROU ANTES.
+         Este `if` tinha só o ramo verdadeiro: quem não tem clínica não mexia
+         no ponteiro do ambiente — e o ponteiro continuava apontando para a
+         clínica da pessoa anterior naquele computador. Resultado real: uma
+         conta recém-criada, sem vínculo nenhum, entrou e caiu dentro de
+         "Minha Clínica de Anestesia", com os pacientes de outro médico à
+         vista. O servidor dizia "esta conta não pertence a clínica nenhuma" e
+         o aparelho respondia abrindo a gaveta da última que passou por ali.
+
+         Ausência de clínica é uma RESPOSTA, não um silêncio: ela tem de
+         apagar o ponteiro, não deixá-lo como estava. */
+      try {
+        if (!u.organization_id && perfil.semVinculo) await ambiente.aoEntrarSemClinica();
+      } catch (e) {}
       /* guarda a clínica no aparelho: se a próxima consulta falhar, ele ainda
          sabe de onde baixar (em vez de se declarar "sem organização") */
       try { if (u.organization_id) cloudRel._lembrarOrg(u.organization_id); } catch (e) {}
@@ -22789,6 +22803,57 @@ const ambiente = {
   /* Chamado quando uma conta entra. `org` é a organização DELA, vinda do
      servidor — nunca de um palpite: trocar de gaveta por engano é perder o
      acesso ao próprio trabalho. */
+  /* Entrou uma conta que o SERVIDOR confirmou não pertencer a clínica nenhuma.
+     O ponteiro do ambiente é apagado: a partir daqui não existe gaveta de
+     clínica aberta, e nada do que estava gravado para outra pessoa é
+     endereçável. É isolamento por construção, não por aviso. */
+  async aoEntrarSemClinica() {
+    const anterior = ambiente.id();
+    try { cloudRel._lembrarOrg(null); } catch (e) {}
+    try { cloudRel._marcarSemClinica(true); } catch (e) {}
+    try { ambiente.definirNome(''); } catch (e) {}
+    /* Computador compartilhado: a clínica anterior não fica gravada numa
+       máquina onde outra pessoa acabou de entrar. */
+    if (anterior && ambiente.compartilhado()) {
+      try { ambiente.limparDadosLocais(anterior); } catch (e) {}
+    }
+    try { ambiente.pintar(); } catch (e) {}
+    try { ambiente.faixaSemClinica(); } catch (e) {}
+    return { trocou: !!anterior, semClinica: true };
+  },
+
+  /* A pessoa precisa SABER por que a tela está vazia, e o que fazer. Sem isto
+     ela conclui que perdeu os dados — ou pior, acha que o sistema é assim. */
+  _faixaSemClinicaMostrada: false,
+  faixaSemClinica() {
+    try {
+      if (document.getElementById('semclinica-faixa')) return;
+      const div = document.createElement('div');
+      div.id = 'semclinica-faixa';
+      div.className = 'espaco-faixa';
+      div.innerHTML =
+        '<span class="ef-txt"><b>🏢 Esta conta ainda não está em nenhuma clínica.</b> ' +
+        'Por isso não há dado nenhum na tela — e não é falha: você não vê os dados de outra clínica, ' +
+        'nem quando usa o mesmo computador que alguém dela.</span>' +
+        '<button type="button" class="btn btn-xs btn-primary" onclick="ambiente._fecharSemClinica(); ambiente.resolverSemClinica()">O que fazer</button>' +
+        '<button type="button" class="ef-x" onclick="ambiente._fecharSemClinica()" aria-label="Fechar">✕</button>';
+      document.body.appendChild(div);
+    } catch (e) {}
+  },
+  _fecharSemClinica() { const el = document.getElementById('semclinica-faixa'); if (el) el.remove(); },
+  resolverSemClinica() {
+    modal.open('🏢 Esta conta ainda não está em nenhuma clínica',
+      '<p style="font-size:.88rem;margin:0 0 10px">Uma conta sozinha não vê dado nenhum: os registros pertencem a uma <b>clínica</b>, ' +
+      'e é o vínculo com ela que dá acesso. Há dois caminhos, e eles são diferentes:</p>' +
+      '<p style="font-size:.86rem;margin:0 0 8px"><b>1. Você vai trabalhar na clínica de outra pessoa</b> — peça ao responsável por ela ' +
+      'para vincular o seu e-mail. Só ele pode fazer isso, e é assim de propósito: ninguém entra numa clínica por conta própria.</p>' +
+      '<p style="font-size:.86rem;margin:0 0 10px"><b>2. A clínica é sua</b> — crie a sua agora e você passa a ser o gestor dela. ' +
+      'Ela nasce vazia e separada: não tem relação com a clínica de ninguém.</p>' +
+      '<p style="font-size:.8rem;color:var(--text-mute);margin:0">Nada do que estava neste aparelho antes é acessível para esta conta.</p>',
+      '<button class="btn" onclick="modal.close()">Agora não</button>' +
+      '<button class="btn btn-finalizar" onclick="modal.close(); equipeNuvem.criarMinhaClinica()">🏢 Criar a minha clínica</button>');
+  },
+
   async aoEntrar(org, nomeOrg) {
     if (!org) return { trocou: false };
     const anterior = ambiente.id();

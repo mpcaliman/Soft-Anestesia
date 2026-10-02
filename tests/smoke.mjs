@@ -17669,6 +17669,86 @@ await test('Bloquear acesso: tira a entrada sem apagar nada, e dá caminho de vo
   await page.close();
 });
 
+/* 240) Conta sem clínica NÃO herda a clínica de quem entrou antes
+
+   Relato, com conta de verdade: uma conta recém-criada, sem vínculo nenhum,
+   entrou e caiu dentro de "Minha Clínica de Anestesia" — com os pacientes de
+   outro médico à vista. Num computador compartilhado isso é o pior defeito
+   possível neste sistema.
+
+   A causa era um `if` com só o ramo verdadeiro:
+
+       if (u.organization_id) await ambiente.aoEntrar(u.organization_id);
+
+   Quem TINHA clínica trocava o ponteiro do ambiente; quem NÃO tinha não mexia
+   nele — e o ponteiro continuava apontando para a clínica da pessoa anterior
+   naquele aparelho. O servidor respondia "esta conta não pertence a clínica
+   nenhuma" e o aparelho abria a gaveta da última que passou por ali.
+
+   Ausência de clínica é uma RESPOSTA, não um silêncio. */
+await test('Conta sem clínica não cai na clínica de quem usou o aparelho antes', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const R = cofre._real;
+    const limpar = () => {
+      const fora = [];
+      for (let i = 0; i < R.length; i++) { const k = R.key(i); if (k && k.indexOf('medsys.') === 0) fora.push(k); }
+      fora.forEach(k => R.removeItem(k));
+    };
+    limpar();
+
+    /* o aparelho estava com a clínica da pessoa anterior, com dados dela */
+    R.setItem('medsys.v7.cloud.org_id', 'org-marcelo');
+    store.setList('pacientes', [{ _id: 'p1', nome: 'Paciente do Marcelo' }]);
+    out.tinhaDadosAntes = (store.list('pacientes') || []).length === 1;
+    out.gavetaEraDoOutro = cofre.org() === 'org-marcelo';
+
+    /* entra a conta nova, que o servidor confirmou NÃO ter clínica */
+    await ambiente.aoEntrarSemClinica();
+
+    out.ponteiroApagado = cofre.org() === null || cofre.org() === '';
+    out.naoVeOsDadosDoOutro = (store.list('pacientes') || []).length === 0;
+    out.nomeDaClinicaSumiu = !ambiente.nome();
+
+    /* e o dado do outro NÃO foi apagado — ele continua na gaveta dele,
+       inacessível para esta conta, intacto para quando ela voltar */
+    out.dadoDoOutroIntacto = !!R.getItem('medsys.v5.pacientes@org-marc');
+
+    /* a tela explica, em vez de aparecer vazia sem motivo */
+    const faixa = document.getElementById('semclinica-faixa');
+    out.avisouNaTela = !!faixa && /não está em nenhuma clínica/i.test(faixa.textContent);
+    out.dizQueNaoEhFalha = !!faixa && /não é falha/i.test(faixa.textContent);
+
+    /* e oferece os dois caminhos, que são diferentes */
+    ambiente.resolverSemClinica();
+    const corpo = (document.getElementById('modal-body') || {}).textContent || '';
+    out.caminhoPedir = /peça ao responsável/i.test(corpo);
+    out.caminhoCriar = /A clínica é sua/i.test(corpo);
+    out.dizQueNinguemEntraSozinho = /ninguém entra numa clínica por conta própria/i.test(corpo);
+    try { modal.close(); } catch (e) {}
+
+    /* escrever agora NÃO pode cair na gaveta da outra clínica */
+    store.setList('pacientes', [{ _id: 'novo', nome: 'Paciente da conta nova' }]);
+    const naGavetaDoOutro = JSON.parse(R.getItem('medsys.v5.pacientes@org-marc') || '[]');
+    out.escritaNaoVazaParaOOutro = !naGavetaDoOutro.some(x => x._id === 'novo');
+
+    limpar();
+    ambiente._fecharSemClinica();
+    return out;
+  });
+  assert(r.tinhaDadosAntes && r.gavetaEraDoOutro, 'o cenário é o aparelho já com a clínica de outra pessoa aberta');
+  assert(r.ponteiroApagado, 'entrar sem clínica tem de APAGAR o ponteiro do ambiente, não deixá-lo como estava');
+  assert(r.naoVeOsDadosDoOutro, 'e a conta nova não enxerga nada da clínica anterior — era isto que estava acontecendo');
+  assert(r.nomeDaClinicaSumiu, 'nem o nome dela fica na tela, dizendo que você está onde não está');
+  assert(r.dadoDoOutroIntacto, 'sem apagar o que é do outro: inacessível não é destruído');
+  assert(r.avisouNaTela && r.dizQueNaoEhFalha, 'a tela explica por que está vazia — senão a pessoa conclui que perdeu os dados');
+  assert(r.caminhoPedir && r.caminhoCriar, 'e oferece os dois caminhos: ser vinculado a uma clínica, ou criar a sua');
+  assert(r.dizQueNinguemEntraSozinho, 'deixando claro que ninguém se vincula sozinho a uma clínica existente');
+  assert(r.escritaNaoVazaParaOOutro, 'e o que esta conta gravar não entra na gaveta da clínica anterior');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
