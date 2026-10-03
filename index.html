@@ -4695,7 +4695,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-03b</b><br>
+    v7.1 · build <b id="build-tag">2026-10-03c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -13707,6 +13707,32 @@ const conexao = {
       if (!el) document.body.appendChild(div);
     } catch (e) {}
   },
+  /* NINGUÉM CLICA EM "SAIR" NUM COMPUTADOR DE HOSPITAL. A pessoa fecha a aba,
+     desliga o monitor, ou simplesmente levanta. Toda a limpeza que dependia
+     do botão Sair nunca acontecia justamente na máquina em que ela mais
+     importa.
+
+     Duas redes, porque nenhuma das duas sozinha dá conta:
+     • `pagehide` cobre fechar a aba e trocar de app (é o evento que o iOS
+       respeita; `beforeunload` ele ignora);
+     • a limpeza NA ABERTURA cobre o resto — queda de energia, navegador
+       morto, aba restaurada dias depois. Antes de mostrar qualquer coisa, o
+       que já está na nuvem sai da máquina. */
+  blindarCompartilhado() {
+    try {
+      if (!ambiente.compartilhado()) return 0;
+      /* na abertura: nada do atendimento anterior fica à vista */
+      const n = modoNuvem.manutencao({ silent: true, dias: 0 });
+      const sair = () => {
+        try { if (!ambiente.compartilhado()) return; } catch (e) { return; }
+        try { modoNuvem.manutencao({ silent: true, dias: 0 }); } catch (e) {}
+      };
+      window.addEventListener('pagehide', sair);
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') sair(); });
+      return n;
+    } catch (e) { return 0; }
+  },
+
   iniciar() {
     try {
       conexao.pintar();
@@ -20712,6 +20738,7 @@ const cloud = {
     try { cloud.esquecerMarcaBaixa(); } catch (e) {}
     localStorage.removeItem(cloud.CFG_KEY);
     localStorage.removeItem(cloud.SESSION_KEY);
+    try { if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(cloud.SESSION_KEY); } catch (e) {}
     toast('Configuração da nuvem removida');
   },
 
@@ -20727,8 +20754,30 @@ const cloud = {
      Aqui a gravação insiste: se não couber, libera espaço e tenta de novo.
      Se ainda assim não couber, avisa — porque continuar em silêncio é
      prometer uma sessão que não existe. */
+  /* ONDE A SESSÃO MORA.
+
+     Em aparelho compartilhado ela vai para o `sessionStorage`: morre quando a
+     aba/navegador fecha. É o ponto que faltava para "funcionar em computador
+     compartilhado" de verdade — não adianta apagar os dados da clínica e
+     deixar a credencial do médico gravada, porque a próxima pessoa que
+     abrisse o navegador entraria como ele e baixaria tudo de novo.
+
+     Em aparelho declarado como pessoal, continua no `localStorage`: é o que
+     faz o celular do dono não pedir senha toda vez. */
+  _lojaSessao() {
+    try { if (!ambiente.compartilhado()) return localStorage; } catch (e) {}
+    try { return (typeof sessionStorage !== 'undefined' && sessionStorage) ? sessionStorage : localStorage; }
+    catch (e) { return localStorage; }
+  },
   _gravarSessao(sess) {
     const txt = JSON.stringify(sess);
+    const loja = cloud._lojaSessao();
+    if (loja !== localStorage) {
+      /* numa máquina compartilhada, nada de deixar resto na gaveta do
+         navegador que sobrevive ao fechamento */
+      try { localStorage.removeItem(cloud.SESSION_KEY); } catch (e) {}
+      try { loja.setItem(cloud.SESSION_KEY, txt); return true; } catch (e) { return false; }
+    }
     try { localStorage.setItem(cloud.SESSION_KEY, txt); return true; } catch (e) {}
     /* `socorro` recebe a função de regravar e para assim que ela passa */
     let ok = false;
@@ -20745,7 +20794,7 @@ const cloud = {
   },
 
   session() {
-    try { return JSON.parse(localStorage.getItem(cloud.SESSION_KEY) || 'null'); }
+    try { return JSON.parse(cloud._lojaSessao().getItem(cloud.SESSION_KEY) || localStorage.getItem(cloud.SESSION_KEY) || 'null'); }
     catch { return null; }
   },
   estaLogado() {
@@ -21198,12 +21247,14 @@ const cloud = {
        ainda NÃO subiu fica — ali o aparelho é a única cópia que existe, e
        apagar seria perder. */
     try { modoNuvem.aoSair(); } catch (e) {}
+    try { cloud._lojaSessao().removeItem(cloud.SESSION_KEY); } catch (e) {}
     /* Computador compartilhado: sair é sair mesmo. O que ainda não subiu vai
        num backup antes — ninguém perde trabalho por causa da privacidade de
        outro. */
     let saida = null;
     try { saida = ambiente.aoSair(); } catch (e) {}
     localStorage.removeItem(cloud.SESSION_KEY);
+    try { if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(cloud.SESSION_KEY); } catch (e) {}
     if (!(opts && opts.silent)) {
       toast(saida && saida.limpou
         ? '🚪 Desconectado — este computador é compartilhado, então nada da clínica ficou gravado aqui' +
@@ -21865,6 +21916,7 @@ const cloud = {
          ninguém tocar em nada (ver sincronia). */
       try { sincronia.iniciar(); } catch (e) {}
       try { conexao.iniciar(); } catch (e) {}
+      try { conexao.blindarCompartilhado(); } catch (e) {}
       /* rascunhos: ficha começada no celular aparece no computador */
       setTimeout(() => {
         try { rascunhosSync.enviarTodos(); } catch (e) {}
@@ -23088,29 +23140,44 @@ const ambiente = {
          O que caracteriza máquina compartilhada é OUTRA PESSOA usar — e isso
          quem sabe é quem está ali. Então agora se pergunta, uma vez, em vez
          de decidir por ele. */
-      if (v.length > 1 && !ambiente.compartilhado() && !ambiente._jaPerguntouCompart()) {
+      /* A pergunta não depende mais do estado atual (que agora nasce
+         protegido): depende de ninguém ter respondido ainda. */
+      if (v.length > 1 && !ambiente._jaPerguntouCompart()) {
         ambiente._perguntarCompartilhado();
       }
     } catch (e) {}
   },
 
-  compartilhado() { try { return localStorage.getItem(ambiente.COMPART_KEY) === '1'; } catch (e) { return false; } },
+  /* COMPARTILHADO É O PADRÃO.
+
+     O sistema roda em computador de hospital, de secretaria, de centro
+     cirúrgico — máquinas que passam de mão em mão o dia inteiro. Supor que
+     cada aparelho é de uso pessoal e só apertar a segurança quando alguém
+     avisa é supor o caso mais raro e deixar o comum desprotegido: basta
+     ninguém marcar nada para o prontuário de uma clínica ficar gravado numa
+     máquina que não é dela.
+
+     Então a regra é: todo aparelho é compartilhado, até que a pessoa diga
+     que aquele é DELA. Quem diz ganha a comodidade (os dados ficam, a senha
+     da nuvem não é pedida toda vez); quem não diz fica protegido. */
+  compartilhado() {
+    try { return localStorage.getItem(ambiente.COMPART_KEY) !== '0'; } catch (e) { return true; }
+  },
   PERGUNTOU_KEY: 'medsys.v7.ambiente.compart_perguntado',
   _jaPerguntouCompart() { try { return localStorage.getItem(ambiente.PERGUNTOU_KEY) === '1'; } catch (e) { return false; } },
   _perguntarCompartilhado() {
     try { localStorage.setItem(ambiente.PERGUNTOU_KEY, '1'); } catch (e) {}
     setTimeout(() => {
       try {
-        modal.open('🔒 Este aparelho é de uso compartilhado?',
-          '<p style="font-size:.88rem;margin:0 0 10px">Você já abriu <b>mais de uma clínica</b> neste aparelho. ' +
-          'Isso é normal para quem trabalha em duas — e não quer dizer, por si só, que a máquina seja compartilhada.</p>' +
-          '<p style="font-size:.86rem;margin:0 0 8px"><b>É meu (celular, meu computador)</b> — os dados ficam gravados aqui entre as sessões, ' +
-          'e você não precisa entrar na nuvem toda vez.</p>' +
-          '<p style="font-size:.86rem;margin:0 0 10px"><b>É compartilhado (hospital, secretaria)</b> — ao sair, os dados da clínica saem do aparelho. ' +
-          'Mais seguro, e exige entrar na nuvem a cada vez.</p>' +
-          '<p style="font-size:.8rem;color:var(--text-mute);margin:0">Dá para mudar depois em Ajustes → Nuvem.</p>',
-          '<button class="btn" onclick="ambiente.definirCompartilhado(true); modal.close()">É compartilhado</button>' +
-          '<button class="btn btn-finalizar" onclick="ambiente.definirCompartilhado(false); modal.close()">É meu</button>');
+        modal.open('🔒 Este aparelho é seu?',
+          '<p style="font-size:.88rem;margin:0 0 10px">Por segurança, o sistema trata <b>todo aparelho como compartilhado</b>: ' +
+          'ao sair, os dados da clínica saem dele, e a senha da nuvem é pedida a cada vez. ' +
+          'É o certo num computador de hospital ou da secretaria — que é onde ele mais roda.</p>' +
+          '<p style="font-size:.86rem;margin:0 0 10px">Se este aparelho é <b>seu</b> (seu celular, seu computador), dá para afrouxar: ' +
+          'os dados ficam gravados aqui entre as sessões e você não precisa entrar na nuvem toda vez.</p>' +
+          '<p style="font-size:.8rem;color:var(--text-mute);margin:0">Na dúvida, deixe como está. Dá para mudar depois em Ajustes → Nuvem.</p>',
+          '<button class="btn" onclick="ambiente.definirCompartilhado(true); modal.close()">É compartilhado (deixar como está)</button>' +
+          '<button class="btn btn-finalizar" onclick="ambiente.definirCompartilhado(false); modal.close()">É meu, pode guardar</button>');
       } catch (e) {}
     }, 1500);
   },
