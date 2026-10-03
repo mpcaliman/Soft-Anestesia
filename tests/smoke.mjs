@@ -15931,7 +15931,14 @@ await test('Trocar de clínica limpa o aparelho, e computador compartilhado não
     localStorage.setItem('medsys.v7.cloud.cfg', '{"url":"x"}');
     localStorage.setItem('medsys.v7.auth.users', '[{"usuario":"alguem"}]');
 
-    /* --- Clínica B entra no mesmo navegador --- */
+    /* --- Clínica B entra no mesmo navegador ---
+       O modo "computador compartilhado" deixou de LIGAR SOZINHO ao ver a
+       segunda clínica: ver duas clínicas é a vida normal de quem trabalha em
+       duas, e o celular do próprio médico estava sendo marcado como máquina
+       de hospital — apagando os dados a cada saída e pedindo a senha da nuvem
+       toda vez. Agora o sistema PERGUNTA. Aqui o teste responde "é
+       compartilhado", que é o cenário que ele existe para verificar. */
+    ambiente.definirCompartilhado(true, { silent: true });
     const res = await ambiente.aoEntrar('org-B');
     out.trocou = res.trocou === true;
 
@@ -17701,6 +17708,13 @@ await test('Conta sem clínica não cai na clínica de quem usou o aparelho ante
     };
     limpar();
 
+    /* COMPARTILHADO passou a ser o padrão do sistema (ele roda em computador
+       de hospital). Aqui o aparelho é declarado PESSOAL, porque é nesse caso
+       que vale a promessa "inacessível não é destruído": a clínica anterior
+       continua gravada, só deixa de ser endereçável. No compartilhado a
+       promessa é outra — e mais forte — e está verificada ao final. */
+    ambiente.definirCompartilhado(false, { silent: true });
+
     /* o aparelho estava com a clínica da pessoa anterior, com dados dela */
     R.setItem('medsys.v7.cloud.org_id', 'org-marcelo');
     store.setList('pacientes', [{ _id: 'p1', nome: 'Paciente do Marcelo' }]);
@@ -17717,6 +17731,15 @@ await test('Conta sem clínica não cai na clínica de quem usou o aparelho ante
     /* e o dado do outro NÃO foi apagado — ele continua na gaveta dele,
        inacessível para esta conta, intacto para quando ela voltar */
     out.dadoDoOutroIntacto = !!R.getItem('medsys.v5.pacientes@org-marc');
+
+    /* ---- em MÁQUINA COMPARTILHADA, a promessa é outra: a gaveta anterior
+       não fica gravada numa máquina que não é dela ---- */
+    R.setItem('medsys.v7.cloud.org_id', 'org-marcelo');
+    store.setList('pacientes', [{ _id: 'p2', nome: 'Outro paciente' }]);
+    ambiente.definirCompartilhado(true, { silent: true });
+    await ambiente.aoEntrarSemClinica();
+    out.compartilhadoApaga = !R.getItem('medsys.v5.pacientes@org-marc');
+    ambiente.definirCompartilhado(false, { silent: true });
 
     /* a tela explica, em vez de aparecer vazia sem motivo */
     const faixa = document.getElementById('semclinica-faixa');
@@ -17744,7 +17767,8 @@ await test('Conta sem clínica não cai na clínica de quem usou o aparelho ante
   assert(r.ponteiroApagado, 'entrar sem clínica tem de APAGAR o ponteiro do ambiente, não deixá-lo como estava');
   assert(r.naoVeOsDadosDoOutro, 'e a conta nova não enxerga nada da clínica anterior — era isto que estava acontecendo');
   assert(r.nomeDaClinicaSumiu, 'nem o nome dela fica na tela, dizendo que você está onde não está');
-  assert(r.dadoDoOutroIntacto, 'sem apagar o que é do outro: inacessível não é destruído');
+  assert(r.dadoDoOutroIntacto, 'em aparelho PESSOAL, sem apagar o que é do outro: inacessível não é destruído');
+  assert(r.compartilhadoApaga, 'em máquina COMPARTILHADA, a gaveta anterior sai mesmo — ela não fica gravada numa máquina que não é dela');
   assert(r.avisouNaTela && r.dizQueNaoEhFalha, 'a tela explica por que está vazia — senão a pessoa conclui que perdeu os dados');
   assert(r.caminhoPedir && r.caminhoCriar, 'e oferece os dois caminhos: ser vinculado a uma clínica, ou criar a sua');
   assert(r.dizQueNinguemEntraSozinho, 'deixando claro que ninguém se vincula sozinho a uma clínica existente');
@@ -18691,6 +18715,172 @@ await test('CPF e dados do cadastro aparecem no TCLE, no receituário e no orça
   assert(r.orcHtml, 'e o bloco impresso traz o que foi levantado');
   assert(r.semCadastroNaoInventa, 'paciente sem cadastro não gera bloco nenhum — não se inventa identificação');
   assert(r.campoVazioNaoVira, 'campo que o cadastro não tem não vira linha vazia no papel');
+  await page.close();
+});
+
+/* 252) O aparelho do médico não é o computador do hospital
+
+   Foto da tela, no celular dele: "Entrar na nuvem — este aparelho ainda não
+   está conectado". Toda vez. E, logo abaixo, o aviso que explica tudo:
+   "apaguei os do ambiente anterior deste COMPUTADOR COMPARTILHADO".
+
+   Duas causas minhas, somadas:
+
+   1) a regra que ligava o modo compartilhado sozinho dizia: este navegador já
+      viu duas clínicas, logo é uma máquina compartilhada. Está errada — e
+      erra justamente com quem TEM duas clínicas e abre as duas no próprio
+      celular. Ver duas clínicas é a vida normal dele. O que caracteriza
+      máquina compartilhada é OUTRA PESSOA usar, e isso quem sabe é ele;
+
+   2) a sessão da nuvem é regravada a cada renovação de token (o servidor
+      rotaciona o refresh_token). Num aparelho sem espaço — e o dele estava
+      cheio — essa gravação falhava CALADA, e o aparelho ficava com um token
+      que o servidor já tinha invalidado. */
+await test('Compartilhado é o padrão; aparelho declarado seu guarda a sessão', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const R = cofre._real;
+    const limpar = () => {
+      const fora = [];
+      for (let i = 0; i < R.length; i++) { const k = R.key(i); if (k && k.indexOf('medsys.') === 0) fora.push(k); }
+      fora.forEach(k => R.removeItem(k));
+    };
+    limpar();
+
+    /* ---- COMPARTILHADO É O PADRÃO ----
+       O sistema roda em computador de hospital, de secretaria, de centro
+       cirúrgico. Supor uso pessoal e só apertar a segurança quando alguém
+       avisa é proteger o caso raro e deixar o comum aberto. */
+    out.padraoEhCompartilhado = ambiente.compartilhado() === true;
+
+    /* ver a segunda clínica não decide nada sozinho: pergunta, uma vez */
+    ambiente._verVisto('org-aaaa');
+    ambiente._verVisto('org-bbbb');
+    out.perguntouUmaVez = ambiente._jaPerguntouCompart() === true;
+    out.continuaCompartilhado = ambiente.compartilhado() === true;
+
+    /* ---- quem diz "este aparelho é meu" ganha a comodidade ---- */
+    ambiente.definirCompartilhado(false, { silent: true });
+    out.escolhaPessoalVale = ambiente.compartilhado() === false;
+    out.sessaoPessoalFicaGravada = cloud._lojaSessao() === localStorage;
+
+    /* ---- e no compartilhado a sessão morre com o navegador ---- */
+    ambiente.definirCompartilhado(true, { silent: true });
+    out.escolhaCompartilhadaVale = ambiente.compartilhado() === true;
+    out.sessaoCompartilhadaNaoPersiste = cloud._lojaSessao() === sessionStorage;
+    const sessC = { access_token: 't', refresh_token: 'r', user: { email: 'x@y.com' }, expires_at: Date.now() + 3600000 };
+    cloud._gravarSessao(sessC);
+    out.naoDeixouRestoNoNavegador = localStorage.getItem(cloud.SESSION_KEY) === null
+      && !!sessionStorage.getItem(cloud.SESSION_KEY);
+    sessionStorage.removeItem(cloud.SESSION_KEY);
+    ambiente.definirCompartilhado(false, { silent: true });
+
+    /* ---- a sessão insiste quando o aparelho está cheio ---- */
+    const sess = { access_token: 't', refresh_token: 'r', user: { email: 'a@b.com' }, expires_at: Date.now() + 3600000 };
+    const real = localStorage.setItem.bind(localStorage);
+    let tentativas = 0;
+    localStorage.setItem = (k, v) => {
+      if (k === cloud.SESSION_KEY) {
+        tentativas++;
+        if (tentativas === 1) { const e = new Error('cheio'); e.name = 'QuotaExceededError'; throw e; }
+      }
+      return real(k, v);
+    };
+    const gravou = cloud._gravarSessao(sess);
+    localStorage.setItem = real;
+    out.insistiu = tentativas >= 2;
+    out.gravouNaSegunda = gravou === true && !!cloud.session();
+
+    /* ---- se não couber de jeito nenhum, avisa em vez de calar ---- */
+    const avisos = [];
+    const origToast = window.toast;
+    window.toast = (t) => avisos.push(String(t));
+    localStorage.setItem = (k, v) => {
+      if (k === cloud.SESSION_KEY) { const e = new Error('cheio'); e.name = 'QuotaExceededError'; throw e; }
+      return real(k, v);
+    };
+    const gravou2 = cloud._gravarSessao(sess);
+    localStorage.setItem = real;
+    window.toast = origToast;
+    out.avisouQuandoNaoCoube = gravou2 === false
+      && avisos.some(t => /sem espaço/i.test(t) && /pede a senha da nuvem toda vez/i.test(t));
+
+    limpar();
+    try { modal.close(); } catch (e) {}
+    return out;
+  });
+  assert(r.padraoEhCompartilhado, 'todo aparelho nasce COMPARTILHADO: o sistema roda em máquina de hospital, e o padrão tem de proteger o caso comum');
+  assert(r.perguntouUmaVez && r.continuaCompartilhado, 'ver duas clínicas faz o sistema PERGUNTAR, não decidir — e até a resposta ele segue protegido');
+  assert(r.escolhaPessoalVale && r.sessaoPessoalFicaGravada, 'quem diz "este aparelho é meu" ganha a comodidade: a sessão fica gravada e a senha não é pedida toda vez');
+  assert(r.escolhaCompartilhadaVale && r.sessaoCompartilhadaNaoPersiste, 'no compartilhado a sessão morre com o navegador');
+  assert(r.naoDeixouRestoNoNavegador, 'e não sobra credencial na gaveta que sobrevive ao fechamento — senão a próxima pessoa entraria como o médico');
+  assert(r.insistiu, 'a sessão da nuvem insiste quando a primeira gravação não cabe — é ela que evita pedir a senha de novo');
+  assert(r.gravouNaSegunda, 'e fica gravada depois de liberar espaço');
+  assert(r.avisouQuandoNaoCoube, 'não cabendo de jeito nenhum, DIZ o motivo — senão a pessoa só vê a senha sendo pedida todo dia, sem explicação');
+  await page.close();
+});
+
+/* 253) Computador compartilhado: ninguém clica em "Sair"
+
+   "O sistema tem que ser pensado e estruturado para funcionar 100% em
+   computadores compartilhados."
+
+   Toda a limpeza dependia do botão Sair — e num computador de hospital
+   ninguém clica em Sair. A pessoa fecha a aba, troca de app, desliga o
+   monitor, ou simplesmente levanta e vai operar. A máquina em que a limpeza
+   mais importa era exatamente aquela em que ela nunca acontecia.
+
+   Duas redes, porque nenhuma sozinha dá conta: `pagehide` (o evento que o
+   iOS respeita, ao contrário de `beforeunload`) e a limpeza NA ABERTURA, que
+   cobre queda de energia, navegador morto e aba restaurada dias depois. */
+await test('Em máquina compartilhada, fechar a aba e reabrir não deixa o atendimento anterior à vista', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const R = cofre._real;
+    const limpar = () => {
+      const fora = [];
+      for (let i = 0; i < R.length; i++) { const k = R.key(i); if (k && k.indexOf('medsys.') === 0) fora.push(k); }
+      fora.forEach(k => R.removeItem(k));
+    };
+    limpar();
+    R.setItem('medsys.v7.cloud.org_id', 'org-aaaa');
+    ambiente.definirCompartilhado(true, { silent: true });
+    const origPode = modoNuvem.podeLigar; modoNuvem.podeLigar = () => true;
+
+    const agora = new Date().toISOString();
+    store.setList('pre', [
+      { _id: 'subiu', nome: 'Atendimento já na nuvem', _updatedAt: agora, _relUpdatedAt: agora },
+      { _id: 'naoSubiu', nome: 'Ainda não subiu', _updatedAt: agora }
+    ]);
+
+    /* ---- ABERTURA: o que já está na nuvem não fica à vista ---- */
+    conexao.blindarCompartilhado();
+    const depois = (store.list('pre') || []).map(x => x._id);
+    out.abriuLimpo = depois.indexOf('subiu') < 0;
+    out.naoPerdeuOQueNaoSubiu = depois.indexOf('naoSubiu') >= 0;
+
+    /* ---- FECHAR A ABA (pagehide) limpa também ---- */
+    store.setList('pre', [{ _id: 'novo', nome: 'Feito agora', _updatedAt: agora, _relUpdatedAt: agora }]);
+    window.dispatchEvent(new Event('pagehide'));
+    out.fecharAbaLimpa = !(store.list('pre') || []).some(x => x._id === 'novo');
+
+    /* ---- em aparelho DECLARADO SEU, nada disso acontece ---- */
+    ambiente.definirCompartilhado(false, { silent: true });
+    store.setList('pre', [{ _id: 'meu', nome: 'No meu celular', _updatedAt: agora, _relUpdatedAt: agora }]);
+    window.dispatchEvent(new Event('pagehide'));
+    out.pessoalNaoLimpa = (store.list('pre') || []).some(x => x._id === 'meu');
+    out.blindagemNaoAgeNoPessoal = conexao.blindarCompartilhado() === 0;
+
+    modoNuvem.podeLigar = origPode;
+    limpar();
+    return out;
+  });
+  assert(r.abriuLimpo, 'na ABERTURA de uma máquina compartilhada, o que já está na nuvem sai antes de aparecer na tela');
+  assert(r.naoPerdeuOQueNaoSubiu, 'e o que ainda não subiu continua ali — é a única cópia que existe, apagá-la seria perder atendimento');
+  assert(r.fecharAbaLimpa, 'fechar a aba limpa também: num computador de hospital ninguém clica em Sair');
+  assert(r.pessoalNaoLimpa && r.blindagemNaoAgeNoPessoal, 'no aparelho que a pessoa declarou como seu, nada disso acontece — lá a comodidade é o certo');
   await page.close();
 });
 
