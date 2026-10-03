@@ -15931,7 +15931,14 @@ await test('Trocar de clínica limpa o aparelho, e computador compartilhado não
     localStorage.setItem('medsys.v7.cloud.cfg', '{"url":"x"}');
     localStorage.setItem('medsys.v7.auth.users', '[{"usuario":"alguem"}]');
 
-    /* --- Clínica B entra no mesmo navegador --- */
+    /* --- Clínica B entra no mesmo navegador ---
+       O modo "computador compartilhado" deixou de LIGAR SOZINHO ao ver a
+       segunda clínica: ver duas clínicas é a vida normal de quem trabalha em
+       duas, e o celular do próprio médico estava sendo marcado como máquina
+       de hospital — apagando os dados a cada saída e pedindo a senha da nuvem
+       toda vez. Agora o sistema PERGUNTA. Aqui o teste responde "é
+       compartilhado", que é o cenário que ele existe para verificar. */
+    ambiente.definirCompartilhado(true, { silent: true });
     const res = await ambiente.aoEntrar('org-B');
     out.trocou = res.trocou === true;
 
@@ -18691,6 +18698,100 @@ await test('CPF e dados do cadastro aparecem no TCLE, no receituário e no orça
   assert(r.orcHtml, 'e o bloco impresso traz o que foi levantado');
   assert(r.semCadastroNaoInventa, 'paciente sem cadastro não gera bloco nenhum — não se inventa identificação');
   assert(r.campoVazioNaoVira, 'campo que o cadastro não tem não vira linha vazia no papel');
+  await page.close();
+});
+
+/* 252) O aparelho do médico não é o computador do hospital
+
+   Foto da tela, no celular dele: "Entrar na nuvem — este aparelho ainda não
+   está conectado". Toda vez. E, logo abaixo, o aviso que explica tudo:
+   "apaguei os do ambiente anterior deste COMPUTADOR COMPARTILHADO".
+
+   Duas causas minhas, somadas:
+
+   1) a regra que ligava o modo compartilhado sozinho dizia: este navegador já
+      viu duas clínicas, logo é uma máquina compartilhada. Está errada — e
+      erra justamente com quem TEM duas clínicas e abre as duas no próprio
+      celular. Ver duas clínicas é a vida normal dele. O que caracteriza
+      máquina compartilhada é OUTRA PESSOA usar, e isso quem sabe é ele;
+
+   2) a sessão da nuvem é regravada a cada renovação de token (o servidor
+      rotaciona o refresh_token). Num aparelho sem espaço — e o dele estava
+      cheio — essa gravação falhava CALADA, e o aparelho ficava com um token
+      que o servidor já tinha invalidado. */
+await test('Não marca o aparelho como compartilhado sozinho, e a sessão sobrevive a aparelho cheio', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const R = cofre._real;
+    const limpar = () => {
+      const fora = [];
+      for (let i = 0; i < R.length; i++) { const k = R.key(i); if (k && k.indexOf('medsys.') === 0) fora.push(k); }
+      fora.forEach(k => R.removeItem(k));
+    };
+    limpar();
+
+    /* ---- ver a SEGUNDA clínica não marca mais o aparelho ---- */
+    ambiente._verVisto('org-aaaa');
+    out.umaClinicaNaoMarca = ambiente.compartilhado() === false;
+    ambiente._verVisto('org-bbbb');
+    out.duasClinicasNaoMarcamSozinho = ambiente.compartilhado() === false;
+    out.perguntouUmaVez = ambiente._jaPerguntouCompart() === true;
+
+    /* e não insiste: a pergunta é uma só */
+    localStorage.removeItem('medsys.v7.ambiente.vistos');
+    ambiente._verVisto('org-cccc');
+    ambiente._verVisto('org-dddd');
+    out.naoInsiste = ambiente.compartilhado() === false;
+
+    /* ---- quem responde "é compartilhado" continua tendo o comportamento ---- */
+    ambiente.definirCompartilhado(true, { silent: true });
+    out.escolhaValeTrue = ambiente.compartilhado() === true;
+    ambiente.definirCompartilhado(false, { silent: true });
+    out.escolhaValeFalse = ambiente.compartilhado() === false;
+
+    /* ---- a sessão insiste quando o aparelho está cheio ---- */
+    const sess = { access_token: 't', refresh_token: 'r', user: { email: 'a@b.com' }, expires_at: Date.now() + 3600000 };
+    const real = localStorage.setItem.bind(localStorage);
+    let tentativas = 0;
+    localStorage.setItem = (k, v) => {
+      if (k === cloud.SESSION_KEY) {
+        tentativas++;
+        if (tentativas === 1) { const e = new Error('cheio'); e.name = 'QuotaExceededError'; throw e; }
+      }
+      return real(k, v);
+    };
+    const gravou = cloud._gravarSessao(sess);
+    localStorage.setItem = real;
+    out.insistiu = tentativas >= 2;
+    out.gravouNaSegunda = gravou === true && !!cloud.session();
+
+    /* ---- se não couber de jeito nenhum, avisa em vez de calar ---- */
+    const avisos = [];
+    const origToast = window.toast;
+    window.toast = (t) => avisos.push(String(t));
+    localStorage.setItem = (k, v) => {
+      if (k === cloud.SESSION_KEY) { const e = new Error('cheio'); e.name = 'QuotaExceededError'; throw e; }
+      return real(k, v);
+    };
+    const gravou2 = cloud._gravarSessao(sess);
+    localStorage.setItem = real;
+    window.toast = origToast;
+    out.avisouQuandoNaoCoube = gravou2 === false
+      && avisos.some(t => /sem espaço/i.test(t) && /pede a senha da nuvem toda vez/i.test(t));
+
+    limpar();
+    try { modal.close(); } catch (e) {}
+    return out;
+  });
+  assert(r.umaClinicaNaoMarca, 'uma clínica não marca o aparelho como compartilhado');
+  assert(r.duasClinicasNaoMarcamSozinho, 'e DUAS também não — quem tem duas clínicas usa as duas no próprio celular');
+  assert(r.perguntouUmaVez, 'o sistema pergunta, em vez de decidir por quem está ali');
+  assert(r.naoInsiste, 'e pergunta uma vez só: insistir vira estorvo');
+  assert(r.escolhaValeTrue && r.escolhaValeFalse, 'quem responde continua mandando, nos dois sentidos');
+  assert(r.insistiu, 'a sessão da nuvem insiste quando a primeira gravação não cabe — é ela que evita pedir a senha de novo');
+  assert(r.gravouNaSegunda, 'e fica gravada depois de liberar espaço');
+  assert(r.avisouQuandoNaoCoube, 'não cabendo de jeito nenhum, DIZ o motivo — senão a pessoa só vê a senha sendo pedida todo dia, sem explicação');
   await page.close();
 });
 
