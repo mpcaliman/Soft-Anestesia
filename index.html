@@ -4695,7 +4695,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-02n</b><br>
+    v7.1 · build <b id="build-tag">2026-10-03a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -31425,6 +31425,42 @@ const cirurgia = {
   }
 };
 
+/* Quem é o paciente, pelo CADASTRO — para os documentos que não têm campo
+   onde guardar isso. O orçamento e o TCLE vão para a mão do paciente e, às
+   vezes, para a do convênio: sem CPF e sem convênio, o papel não identifica
+   ninguém, e quem recebe devolve pedindo. O dado já está cadastrado; só não
+   chegava até aqui. */
+const identificacaoPaciente = {
+  dados(nome) {
+    try {
+      if (!nome) return {};
+      const info = linker._dadosMaisRecentes(nome, null);
+      return (info && info.dados) || {};
+    } catch (e) { return {}; }
+  },
+  /* As linhas que entram embaixo do nome, na ordem em que se lê um documento.
+     Campo que não existe no cadastro não vira linha vazia. */
+  linhas(nome) {
+    const d = identificacaoPaciente.dados(nome);
+    const out = [];
+    const add = (rot, v) => { const t = String(v == null ? '' : v).trim(); if (t) out.push(rot + ': ' + t); };
+    add('CPF', d.cpf);
+    add('RG', d.rg);
+    add('Nascimento', d.nascimento ? (utils.formatarData(d.nascimento) || d.nascimento) : '');
+    add('Convênio', d.convenio);
+    add('Carteirinha', d.carteirinha || d.matricula);
+    add('Telefone', d.telefone);
+    return out;
+  },
+  html(nome, estilo) {
+    const linhas = identificacaoPaciente.linhas(nome);
+    if (!linhas.length) return '';
+    const E = utils.escapeHTML;
+    return '<div style="' + (estilo || 'font-size:9pt;color:#555;margin:0 0 8px') + '">' +
+      linhas.map(E).join(' · ') + '</div>';
+  }
+};
+
 const logoUsuario = {
   KEY: 'medsys.v7.logoCustom',
   atual() { try { return localStorage.getItem(this.KEY) || ''; } catch (e) { return ''; } },
@@ -42326,7 +42362,11 @@ const linker = {
     if (mod === 'termo') {
       return {
         nome: 'nome', nascimento: 'nascimento', idade: 'idade',
-        sexo: 'sexo', convenio: 'convenio', cirurgia: 'procedimento', procedimento: 'procedimento'
+        sexo: 'sexo', convenio: 'convenio', cirurgia: 'procedimento', procedimento: 'procedimento',
+        /* O TCLE TEM campo "Documento (RG/CPF)" desde sempre, e ele nunca era
+           preenchido: o mapa não o citava. Num termo de consentimento o
+           documento não é enfeite — é o que identifica quem assinou. */
+        cpf: ['documento', 'cpf'], rg: ['documento', 'rg']
       };
     }
     /* pre, consulta, recuperacao, prescricao usam mesmos nomes simples.
@@ -42337,7 +42377,10 @@ const linker = {
     return {
       nome: 'nome', nascimento: ['nascimento', 'nasc', 'data_nascimento'], idade: 'idade',
       sexo: 'sexo', peso: 'peso', altura: 'altura',
-      cpf: 'cpf', prontuario: 'prontuario',
+      /* `prescricao` e `documentos` chamam o campo de `documento`; `pre` e
+         `consulta` chamam de `cpf`. Aceitar os dois apelidos é o que faz o
+         dado do cadastro chegar nos três. */
+      cpf: ['cpf', 'documento'], prontuario: 'prontuario',
       convenio: 'convenio', plano: 'plano', matricula: 'matricula',
       carteirinha: 'carteirinha',
       acomodacao: ['acomodacao', 'origem'],
@@ -56237,7 +56280,8 @@ const orcamento = {
       '<div class="sub">' + esc(cab.especialidade || '') + '</div>' +
       '<div class="reg">' + reg.join(' · ') + '</div><hr>' +
       '<div class="titulo">ORÇAMENTO — HONORÁRIOS ANESTÉSICOS</div>' +
-      (d.paciente ? '<p>Ao(À) Sr(a). ' + esc(d.paciente) + ',</p>' : '') +
+      (d.paciente ? '<p>Ao(À) Sr(a). ' + esc(d.paciente) + ',</p>' +
+        identificacaoPaciente.html(d.paciente) : '') +
       '<p>Encaminhamos orçamento referente aos honorários anestésicos para o procedimento de <strong>' + esc(info.procTexto) + '</strong>' + (dataProc ? (', com previsão de realização em <strong>' + esc(dataProc) + '</strong>') : '') + '.</p>' +
       procsHtml +
       (d.cirurgiao ? '<p><strong>Cirurgião responsável:</strong> ' + esc(d.cirurgiao) + '</p>' : '') +

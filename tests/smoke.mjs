@@ -18612,6 +18612,88 @@ await test('Isolamento entre ambientes (e entre pessoas) no que foi construído 
   await page.close();
 });
 
+/* 251) O cadastro do paciente chega ao TCLE e ao orçamento
+
+   "Os dados que tem no cadastro, incluindo o número do documento pessoal
+   (CPF), devem — ao selecionar paciente cadastrado — aparecer no orçamento,
+   TCLE etc."
+
+   Dois buracos diferentes, com causas diferentes:
+
+   • o TCLE TEM um campo "Documento (RG/CPF)" desde sempre, e ele nunca era
+     preenchido: o mapa de campos do paciente simplesmente não o citava. Num
+     termo de consentimento o documento não é enfeite — é o que identifica
+     quem assinou;
+   • o ORÇAMENTO não tem campo nenhum de paciente além do nome. Ali o dado
+     não cabia no formulário: tinha de sair na impressão, que é o papel que o
+     paciente leva e às vezes entrega ao convênio. */
+await test('CPF e dados do cadastro aparecem no TCLE, no receituário e no orçamento', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('pacientes', [{
+      _id: 'p1', nome: 'Sabrina Coelho Teixeira Vilaca',
+      cpf: '123.456.789-00', nascimento: '1980-05-10', sexo: 'F',
+      convenio: 'Unimed', carteirinha: '9988', telefone: '(27) 99999-0000',
+      _updatedAt: new Date().toISOString()
+    }]);
+
+    /* ---- TCLE: o campo que existia e nunca era preenchido ---- */
+    try { ui.showModule('termo'); } catch (e) {}
+    const ft = document.getElementById('form-termo');
+    ft.querySelectorAll('input, select, textarea').forEach(el => { if (el.name) el.value = ''; });
+    ft.querySelector('[name="nome"]').value = 'Sabrina Coelho Teixeira Vilaca';
+    linker.autoPreencherDadosPaciente('Sabrina Coelho Teixeira Vilaca', 'termo');
+    await new Promise(r2 => setTimeout(r2, 120));
+    out.tcleDocumento = ft.querySelector('[name="documento"]').value === '123.456.789-00';
+    out.tcleConvenio = ft.querySelector('[name="convenio"]').value === 'Unimed';
+    out.tcleNascimento = !!ft.querySelector('[name="nascimento"]').value;
+
+    /* NÃO sobrescreve o que já está digitado */
+    ft.querySelector('[name="documento"]').value = 'RG 123 (digitado à mão)';
+    linker.autoPreencherDadosPaciente('Sabrina Coelho Teixeira Vilaca', 'termo');
+    await new Promise(r2 => setTimeout(r2, 120));
+    out.naoSobrescreve = ft.querySelector('[name="documento"]').value === 'RG 123 (digitado à mão)';
+
+    /* ---- receituário: o mesmo campo, com outro apelido ---- */
+    try { ui.showModule('prescricao'); } catch (e) {}
+    const fp = document.getElementById('form-prescricao');
+    fp.querySelectorAll('input, select, textarea').forEach(el => { if (el.name) el.value = ''; });
+    linker.autoPreencherDadosPaciente('Sabrina Coelho Teixeira Vilaca', 'prescricao');
+    await new Promise(r2 => setTimeout(r2, 120));
+    out.receituarioDocumento = fp.querySelector('[name="documento"]').value === '123.456.789-00';
+
+    /* ---- orçamento: não tem campo; sai na IMPRESSÃO ---- */
+    const linhas = identificacaoPaciente.linhas('Sabrina Coelho Teixeira Vilaca');
+    out.orcTemCpf = linhas.some(l => /^CPF: 123\.456\.789-00$/.test(l));
+    out.orcTemConvenio = linhas.some(l => /^Convênio: Unimed$/.test(l));
+    out.orcTemCarteirinha = linhas.some(l => /9988/.test(l));
+    const html = identificacaoPaciente.html('Sabrina Coelho Teixeira Vilaca');
+    out.orcHtml = html.indexOf('123.456.789-00') >= 0 && html.indexOf('Unimed') >= 0;
+
+    /* ---- paciente sem cadastro não vira linha vazia ---- */
+    out.semCadastroNaoInventa = identificacaoPaciente.linhas('Quem Não Existe').length === 0
+      && identificacaoPaciente.html('Quem Não Existe') === '';
+    /* ---- cadastro sem CPF: a linha do CPF simplesmente não existe ---- */
+    store.setList('pacientes', [{ _id: 'p2', nome: 'Sem Documento', convenio: 'Particular', _updatedAt: new Date().toISOString() }]);
+    const l2 = identificacaoPaciente.linhas('Sem Documento');
+    out.campoVazioNaoVira = l2.length === 1 && /Convênio/.test(l2[0]);
+
+    store.setList('pacientes', []);
+    return out;
+  });
+  assert(r.tcleDocumento, 'o campo "Documento (RG/CPF)" do TCLE passa a vir do cadastro — ele existia e nunca era preenchido');
+  assert(r.tcleConvenio && r.tcleNascimento, 'junto com convênio e nascimento, que já vinham');
+  assert(r.naoSobrescreve, 'e nada disso sobrescreve o que foi digitado à mão');
+  assert(r.receituarioDocumento, 'o receituário chama o campo pelo outro apelido, e também passa a receber');
+  assert(r.orcTemCpf && r.orcTemConvenio, 'no orçamento, que não tem campo nenhum para isso, os dados saem na impressão');
+  assert(r.orcTemCarteirinha, 'incluindo a carteirinha — é o que o convênio pede quando devolve o papel');
+  assert(r.orcHtml, 'e o bloco impresso traz o que foi levantado');
+  assert(r.semCadastroNaoInventa, 'paciente sem cadastro não gera bloco nenhum — não se inventa identificação');
+  assert(r.campoVazioNaoVira, 'campo que o cadastro não tem não vira linha vazia no papel');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
