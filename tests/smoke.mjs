@@ -12,13 +12,17 @@
  * Uso: `npm test`  (ou `node tests/smoke.mjs`)
  */
 import { chromium } from 'playwright';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const APP_URL = 'file://' + resolve(__dirname, '..', 'index.html');
+const rootArgument = process.argv.find(argument => argument.startsWith('--app-root='));
+const APP_ROOT = rootArgument
+  ? resolve(process.cwd(), rootArgument.slice('--app-root='.length))
+  : resolve(__dirname, '..');
+const APP_URL = pathToFileURL(resolve(APP_ROOT, 'index.html')).href;
 
 /* Erros de rede são esperados offline (Supabase, Google Fonts) e não contam.
    O aviso de 'beforeunload' bloqueado é o guard de alterações não salvas
@@ -36,7 +40,7 @@ function assert(cond, msg) {
 /* Filtro por trecho do nome: `node tests/smoke.mjs impressão` roda só o que
    casa. A suíte inteira leva minutos; consertar um teste sem poder rodá-lo
    isolado custa muito mais caro do que estas quatro linhas. */
-const FILTRO = (process.argv[2] || '').toLowerCase();
+const FILTRO = (process.argv.slice(2).find(argument => !argument.startsWith('--')) || '').toLowerCase();
 
 async function test(name, fn) {
   if (FILTRO && name.toLowerCase().indexOf(FILTRO) < 0) return;
@@ -53,7 +57,14 @@ async function test(name, fn) {
   }
 }
 
-const browser = await chromium.launch();
+/* O caminho opcional permite usar um Chromium já instalado em ambientes com
+   download restrito. Na CI ele fica vazio e o navegador gerenciado pelo
+   Playwright continua sendo usado normalmente. */
+const browser = await chromium.launch(
+  process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+    ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
+    : {}
+);
 
 async function novaPagina() {
   const page = await browser.newPage();
@@ -591,7 +602,7 @@ await test('Meu dia: casos de hoje cruzados por paciente com estados de cada eta
 /* 18) Service worker — o app abre OFFLINE depois da primeira visita (http) */
 await test('Offline: service worker cacheia o app e o reload sem rede funciona', async () => {
   /* servidor estático mínimo do repositório (index.html + sw.js) */
-  const raiz = resolve(__dirname, '..');
+  const raiz = APP_ROOT;
   const server = createServer(async (req, res) => {
     const p = req.url.split('?')[0];
     const arquivo = p === '/' ? '/index.html' : p;
