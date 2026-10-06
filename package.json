@@ -3,10 +3,24 @@
   "version": "1.0.0",
   "private": true,
   "description": "Soft Anestesia — sistema médico de anestesiologia (SPA single-file). Testes de fumaça com Playwright.",
+  "packageManager": "npm@11.17.0",
+  "engines": {
+    "node": "24.19.0",
+    "npm": "11.17.0"
+  },
   "scripts": {
-    "test": "node tests/smoke.mjs"
+    "build": "node scripts/build.mjs",
+    "test": "node tests/smoke.mjs",
+    "test:dist": "node tests/smoke.mjs --app-root=dist",
+    "test:ci": "node scripts/validate-repository.mjs && node scripts/validate-migrations.mjs && node scripts/build.mjs && node scripts/validate-dist.mjs && node tests/smoke.mjs --app-root=dist",
+    "validate": "node scripts/validate-repository.mjs && node scripts/validate-migrations.mjs",
+    "validate:repo": "node scripts/validate-repository.mjs",
+    "validate:migrations": "node scripts/validate-migrations.mjs",
+    "validate:dist": "node scripts/validate-dist.mjs",
+    "supabase": "supabase"
   },
   "devDependencies": {
-    "playwright": "^1.48.0"
+    "playwright": "1.63.0",
+    "supabase": "2.119.0"
   }
 }
