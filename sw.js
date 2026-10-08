@@ -5,7 +5,8 @@
    como fallback quando a rede falha (wifi de hospital, avião, elevador).
    Só intercepta GET do próprio domínio — Supabase e afins passam direto.
 ============================================================================ */
-const CACHE = 'soft-anestesia-v1';
+/* v2 invalida o HTML que continha o bundle antigo do jsPDF. */
+const CACHE = 'soft-anestesia-v2';
 
 self.addEventListener('install', () => { self.skipWaiting(); });
 

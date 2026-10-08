@@ -17,16 +17,19 @@ Navegador (index.html)                Supabase                     Provedor (Saf
       (sem segredo)                   (guarda segredo)                (chave no HSM do provedor)
                                           │
                                           └── tabela `assinaturas` (registro imutável)
-                                              view `assinaturas_publicas` (validação pública)
+                                              view `assinaturas_publicas` (somente service_role)
+                                              Edge Function (validação pública mínima)
 ```
 Padrão de API: **CSC — Cloud Signature Consortium v1** (o que ITI/gov.br,
 Certillion e provedores BR expõem).
 
 ## Deploy
 1. Crie/pegue um projeto Supabase (o app já tem campo de URL nos Ajustes).
-2. Rode a migração:
+2. Depois da homologação e de autorização G3, rode as migrações `0001` e
+   `0002` pelo fluxo reconciliado. A CLI permanece bloqueada no repositório
+   enquanto essa autorização não existir:
    ```bash
-   supabase db push        # aplica supabase/migrations/0001_assinaturas.sql
+   supabase db push        # aplica a sequência reconciliada 0001 + 0002
    ```
 3. Publique a função:
    ```bash
@@ -83,6 +86,13 @@ certificado real e ligamos o 1‑clique. Até lá, o fluxo **gov.br / SafeID‑a
 ## Segurança / LGPD
 - Segredo do provedor só na Edge Function (secrets).
 - A tabela `assinaturas` é **append‑only** (trigger bloqueia UPDATE/DELETE).
-- A validação pública lê a **view `assinaturas_publicas`** — sem dado clínico;
-  paciente só por **iniciais**.
+- A corrente por clínica rejeita dois sucessores para o mesmo registro; em
+  concorrência, a Edge Function relê e recalcula antes de gravar.
+- A validação pública passa pela Edge Function, que lê a
+  **view `assinaturas_publicas`** com `service_role`; `anon` e `authenticated`
+  não consultam tabela/view diretamente. A resposta não contém conteúdo
+  clínico e identifica o paciente só por **iniciais**.
+- Emissor, titular e confirmação da cadeia não são aceitos do navegador. Ficam
+  vazios até o driver da API SafeID obter esses dados diretamente do provedor
+  na homologação.
 - PIN/chave nunca tocam o nosso backend.
