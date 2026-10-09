@@ -73,6 +73,14 @@ try {
   assert.deepEqual(outcome.violations,[],'boot, rendering and clicks must not violate the deployed CSP');
   assert.deepEqual(errors,[],'deployed app must not produce JavaScript errors');
   // Inspect the real print popup with inherited CSP and external actions/styles.
+  const popupErrors=[], popupRequests=[];
+  context.on('page', opened => {
+    if (opened === page) return;
+    opened.on('pageerror',error=>popupErrors.push('PAGEERROR: '+error.message));
+    opened.on('console',message=>{if(message.type()==='error')popupErrors.push(message.text());});
+    opened.on('requestfailed',request=>popupRequests.push({url:request.url(),failed:request.failure()?.errorText}));
+    opened.on('response',response=>popupRequests.push({url:response.url(),status:response.status()}));
+  });
   const popupPromise=page.waitForEvent('popup');
   await page.evaluate(payload=>{
     const original=window.open.bind(window);
@@ -83,27 +91,26 @@ try {
     printPreview.imprimir();
   },payload);
   const popup=await popupPromise;
-  const popupErrors=[];
-  popup.on('pageerror',error=>popupErrors.push('PAGEERROR: '+error.message));
-  popup.on('console',message=>{if(message.type()==='error')popupErrors.push(message.text());});
   // The initial about:blank load can finish before document.write's external scripts.
   // Wait for the actual print DOM and registry, not that earlier navigation event.
   try {
     await popup.waitForFunction(()=>document.body && window.SoftActions
-      && document.querySelector('[data-soft-name-click="window.print"]')
+      && document.querySelector('.pp-print-btn[data-soft-onclick][data-soft-name-click="print"]')
       && document.readyState==='complete');
+    await popup.evaluate(()=>window.softDocumentReady);
   } catch(error) {
     const diagnostic=await popup.evaluate(()=>({url:location.href,base:document.baseURI,title:document.title,
       ready:document.readyState,body:document.body?.innerHTML?.slice(0,900)||null,
+      actions:typeof window.SoftActions,documentReady:!!window.softDocumentReady,
       scripts:[...document.scripts].map(script=>script.src),violations:window.__cspViolations||[]})).catch(()=>({closed:popup.isClosed()}));
-    throw new Error('Print document failed to load: '+JSON.stringify({diagnostic,popupErrors}),{cause:error});
+    throw new Error('Print document failed to load: '+JSON.stringify({diagnostic,popupErrors,popupRequests}),{cause:error});
   }
   const printed=await popup.evaluate(()=>({inline:document.querySelectorAll('[onclick],[onload],style').length,text:document.body.textContent,
-    violations:window.__cspViolations||[],button:!!document.querySelector('[data-soft-name-click="window.print"]')}));
+    violations:window.__cspViolations||[],button:!!document.querySelector('.pp-print-btn[data-soft-name-click="print"]')}));
   assert.equal(printed.inline,0);assert(printed.text.includes(payload));assert(printed.button);assert.deepEqual(printed.violations,[]);
   const clickWorked=await popup.evaluate(()=>{
     const before=window.__printCalls;
-    document.querySelector('[data-soft-name-click="window.print"]').click();
+    document.querySelector('.pp-print-btn[data-soft-name-click="print"]').click();
     return window.__printCalls===before+1;
   });
   assert(clickWorked,'external compiled print action must invoke window.print');

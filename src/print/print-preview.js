@@ -364,11 +364,13 @@ ${TAG_CLOSE_HTML}`;
       const win = window.open('', '_blank');
       if (win && win.document) {
         win.document.open();
-        win.addEventListener('load', () => { setTimeout(() => { win.focus(); win.print(); }, 300); }, { once: true });
         win.addEventListener('afterprint', () => { setTimeout(() => win.close(), 400); }, { once: true });
-        win.document.write(fullHTML);
+        const documentReady = win.document.write(fullHTML);
         win.document.close();
         win.document.title = titulo;
+        Promise.resolve(documentReady).then(() => {
+          setTimeout(() => { win.focus(); win.print(); }, 300);
+        }).catch(() => toast('O documento não carregou. Tente imprimir novamente.', 'error'));
         toast('Diálogo de impressão sendo aberto — escolha a impressora ou "Salvar em PDF".', 'success');
         return;
       }

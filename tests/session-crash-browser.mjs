@@ -74,6 +74,7 @@ const appUrl = 'http://127.0.0.1:' + server.address().port + '/index.html';
 const apiUrl = 'http://127.0.0.1:' + server.address().port + '/mock-supabase';
 let child;
 let browser;
+let cdpEndpoint;
 const poll = async (fn, timeout = 20000) => {
   const started = Date.now();
   while (Date.now() - started < timeout) {
@@ -83,20 +84,8 @@ const poll = async (fn, timeout = 20000) => {
   }
   throw new Error('Tempo esgotado ao iniciar Chromium');
 };
-const launch = async () => {
-  let stderr = '';
-  child = spawn(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || chromium.executablePath(), [
-    '--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--no-first-run', '--no-default-browser-check',
-    '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1',
-    '--remote-debugging-port=0', '--user-data-dir=' + profile, '--restore-last-session', appUrl
-  ], { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
-  child.stderr.on('data', data => { stderr = (stderr + String(data)).slice(-3000); });
-  const port = await poll(async () => {
-    if (child.exitCode !== null || child.signalCode !== null) throw new Error('Chromium encerrou antes do teste: ' + stderr);
-    try { return Number((await readFile(resolve(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0]); }
-    catch { return null; }
-  });
-  browser = await chromium.connectOverCDP('http://127.0.0.1:' + port);
+const attach = async () => {
+  browser = await chromium.connectOverCDP(cdpEndpoint);
   const context = browser.contexts()[0];
   await context.route('**/*', route => {
     const url = new URL(route.request().url());
@@ -113,6 +102,22 @@ const launch = async () => {
   await page.waitForFunction(() => typeof auth !== 'undefined' && typeof cloud !== 'undefined' &&
     typeof filaCifrada !== 'undefined' && typeof persistenciaCloudFirst !== 'undefined');
   return { page, context };
+};
+const launch = async () => {
+  let stderr = '';
+  child = spawn(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || chromium.executablePath(), [
+    '--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--no-first-run', '--no-default-browser-check',
+    '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1',
+    '--remote-debugging-port=0', '--user-data-dir=' + profile, '--restore-last-session', appUrl
+  ], { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
+  child.stderr.on('data', data => { stderr = (stderr + String(data)).slice(-3000); });
+  const port = await poll(async () => {
+    if (child.exitCode !== null || child.signalCode !== null) throw new Error('Chromium encerrou antes do teste: ' + stderr);
+    try { return Number((await readFile(resolve(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0]); }
+    catch { return null; }
+  });
+  cdpEndpoint = 'http://127.0.0.1:' + port;
+  return attach();
 };
 const stopAbruptly = async () => {
   const exited = once(child, 'exit');
@@ -162,7 +167,8 @@ try {
   let { page, context } = await launch();
   await locked(page);
   await login(page);
-  await context.setOffline(true);
+  /* A API confirma indisponibilidade com 503. Isso cria WAL real sem deixar
+     uma emulação de rede vinculada ao renderer que será derrubado. */
   await page.evaluate(async () => {
     const pending = await persistenciaCloudFirst.salvar('pre', {
       _id: 'registro-pendente', paciente_nome: 'Caso sintético secreto'
@@ -176,6 +182,9 @@ try {
   const encrypted = await ciphertexts(page);
   assert.equal(encrypted.length, 1);
   assert.doesNotMatch(JSON.stringify(encrypted), /Caso sintético secreto/);
+  /* Nenhum interceptor do cliente antigo pode bloquear o reload posterior ao
+     crash. O processo mantém a barreira DNS para destinos externos. */
+  await context.unroute('**/*');
   const cdp = await context.newCDPSession(page);
   const crashed = once(page, 'crash');
   cdp.send('Page.crash').catch(() => {});
@@ -183,9 +192,16 @@ try {
   try {
     await Promise.race([crashed, new Promise((_, reject) => { crashTimeout = setTimeout(() => reject(new Error('Renderer não caiu')), 10000); })]);
   } finally { clearTimeout(crashTimeout); }
-  await context.setOffline(false);
   const requestsBeforeReload = credentialRequests;
-  await page.reload();
+  /* O objeto Page do Playwright fica permanentemente marcado como crashed.
+     O CDPSession separado ainda fala com o browser e recarrega o MESMO target,
+     conservando sua sessionStorage. Fechar a conexão CDP só desconecta o
+     cliente: o Chromium lançado por spawn permanece vivo. */
+  await cdp.send('Page.reload', { ignoreCache: true });
+  await browser.close();
+  assert.equal(child.exitCode, null, 'reconectar CDP não pode encerrar o navegador');
+  assert.equal(child.signalCode, null);
+  ({ page, context } = await attach());
   await page.waitForFunction(() => typeof auth !== 'undefined' && document.getElementById('auth-overlay').style.display === 'flex');
   assert.equal(await page.evaluate(() => sessionStorage.getItem('__crash_marker')), 'documento-anterior',
     'o renderer deve realmente ter recebido a sessionStorage do documento que caiu');

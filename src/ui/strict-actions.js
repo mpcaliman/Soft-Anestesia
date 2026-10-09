@@ -70,7 +70,12 @@ window.SoftActions = (() => {
       script.src = new URL(path, document.baseURI).href;
       doc.head.appendChild(script);
     });
-    const ready = load('src/ui/strict-actions.js').then(() => load('src/ui/strict-actions.generated.js'));
+    // Callers close the newly written document in the same turn. Inserting a script
+    // before that close can leave its fetch attached to the old parser and prevent
+    // its load event. Start loading after the caller has closed the document.
+    const ready = Promise.resolve().then(() => load('src/ui/strict-actions.js'))
+      .then(() => load('src/ui/strict-actions.generated.js'));
+    win.softDocumentReady = ready;
     ready.catch(error => console.error('Documento de impressão não carregou', error));
     return ready;
   }

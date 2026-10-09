@@ -45859,9 +45859,10 @@ const orcamento = {
     const w = window.open('', '_blank');
     if (!w) { toast('Permita pop-ups para imprimir, ou use Gerar PDF', 'warn'); return; }
     w.document.open();
-    w.addEventListener('load', () => setTimeout(() => w.print(), 250), { once: true });
     w.addEventListener('afterprint', () => setTimeout(() => w.close(), 400), { once: true });
-    w.document.write(html); w.document.close();
+    const documentReady = w.document.write(html); w.document.close();
+    Promise.resolve(documentReady).then(() => setTimeout(() => w.print(), 250))
+      .catch(() => toast('O documento não carregou. Tente imprimir novamente.', 'error'));
   }
 };
 

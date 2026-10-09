@@ -2064,6 +2064,8 @@ await test('Programador: aba só para a conta dele; ambientes, membros e acesso 
 
     /* — render com nuvem simulada — */
     const chamadas = [];
+    const justificativaShare = 'Revisão administrativa autorizada pelo programador';
+    const expiraShare = new Date(Date.now() + 86400000).toISOString();
     programador._req = async (path, opts) => {
       chamadas.push({ path, opts });
       if (path.startsWith('organizations')) return [{ id: 'org-a', nome: 'Ambiente A' }, { id: 'org-b', nome: 'Ambiente B' }];
@@ -2071,7 +2073,11 @@ await test('Programador: aba só para a conta dele; ambientes, membros e acesso 
         { organization_id: 'org-a', user_id: 'u-med', role: 'gestor', ativo: true },
         { organization_id: 'org-b', user_id: 'u-prog', role: 'gestor', ativo: true }];
       if (path.startsWith('profiles')) return [{ id: 'u-med', nome: 'Medico', email: 'medico@ex.com' }, { id: 'u-prog', email: 'mpcaliman@hotmail.com' }];
-      if (path.startsWith('rpc/prog_list_org_shares')) return [{ id: 'sh1', org_origem: 'org-a', org_destino: 'org-b', modulos: ['anestesia'] }];
+      if (path === 'rpc/prog_list_org_shares') return [{
+        id: 'sh1', org_origem: 'org-a', org_destino: 'org-b', modulos: ['anestesia'],
+        ativo: true, acesso: 'leitura', motivo: justificativaShare, expira_em: expiraShare,
+        autorizado_por: 'u-prog', autorizado_em: new Date().toISOString()
+      }];
       return [];
     };
     location.hash = '#programador';
@@ -2084,7 +2090,23 @@ await test('Programador: aba só para a conta dele; ambientes, membros e acesso 
     const html = document.getElementById('prog-conteudo').innerHTML;
     out.moduloAtivo = document.getElementById('module-programador').classList.contains('active');
     out.listouAmbientes = html.includes('Ambiente A') && html.includes('Ambiente B') && html.includes('medico@ex.com');
-    out.listouShare = html.includes('anestesia') && html.includes('Liberar acesso');
+    out.consultouSharePorRPC = chamadas.some(c => c.path === 'rpc/prog_list_org_shares'
+      && c.opts.method === 'POST' && Object.keys(c.opts.body).length === 0);
+    const linhaShare = Array.from(document.querySelectorAll('#prog-conteudo tbody tr'))
+      .find(tr => tr.textContent.includes(justificativaShare));
+    const celulasShare = linhaShare ? Array.from(linhaShare.querySelectorAll('td')) : [];
+    out.listouShare = celulasShare.length === 7
+      && celulasShare[0].textContent === 'Ambiente A' && celulasShare[1].textContent === '→ Ambiente B'
+      && celulasShare[2].textContent === 'anestesia' && celulasShare[3].textContent === justificativaShare
+      && celulasShare[4].textContent === new Date(expiraShare).toLocaleString('pt-BR')
+      && celulasShare[5].textContent === 'Somente leitura';
+    const acao = b => b.getAttribute('data-soft-name-click') || b.getAttribute('onclick') || '';
+    out.podeRevogarShare = !!linhaShare && Array.from(linhaShare.querySelectorAll('button'))
+      .some(b => /programador\.removerShare/.test(acao(b)) && b.textContent === 'Revogar');
+    out.autorizaLeitura = Array.from(document.querySelectorAll('#prog-conteudo button'))
+      .some(b => /programador\.criarShare/.test(acao(b)) && /Autorizar leitura/.test(b.textContent))
+      && !!document.getElementById('prog-share-motivo') && !!document.getElementById('prog-share-expira')
+      && document.querySelectorAll('.prog-share-mod:checked').length === 0;
     out.temFormularios = !!document.getElementById('prog-amb-nome') && !!document.getElementById('prog-mem-org') && !!document.getElementById('prog-share-origem');
 
     /* — criar ambiente chama a RPC certa — */
@@ -2115,7 +2137,9 @@ await test('Programador: aba só para a conta dele; ambientes, membros e acesso 
   assert(r.souProg && r.navAparece && r.podeAcessar, 'a conta do programador deveria ver e acessar a aba');
   assert(r.moduloAtivo, 'navegar para #programador deveria abrir o módulo');
   assert(r.listouAmbientes, 'a tela deveria listar os ambientes com seus gestores');
-  assert(r.listouShare, 'a tela deveria listar os acessos entre ambientes');
+  assert(r.consultouSharePorRPC, 'a lista de acessos entre ambientes vem da RPC autorizada');
+  assert(r.listouShare && r.podeRevogarShare, 'a linha lista origem, destino, módulo, motivo, prazo e somente leitura, com revogação');
+  assert(r.autorizaLeitura, 'autorizar leitura exige módulos explícitos, motivo e prazo');
   assert(r.temFormularios, 'deveria haver formulários de ambiente, membro e compartilhamento');
   assert(r.rpcCriar, 'criar ambiente deveria chamar a RPC prog_criar_ambiente');
   assert(r.bloqueiaMesmoAmbiente, 'origem = destino não deveria gerar chamada');
