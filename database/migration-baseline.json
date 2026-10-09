@@ -8,7 +8,8 @@
     "Inventário local registrado sem renomear, mover ou executar SQL.",
     "database/migrations e supabase/migrations representam históricos divergentes.",
     "G3 foi autorizado em 2026-10-08; a reconciliação ainda exige identificar o projeto exato e reconstruir homologação vazia antes de liberar aplicação remota.",
-    "Correções 0018–0031 permanecem propostas revisáveis; status remoto depende da homologação independente registrada, sem produção alterada."
+    "Correções 0018–0031 permanecem propostas revisáveis; status remoto depende da homologação independente registrada, sem produção alterada.",
+    "0032 amplia o guard do original para UPDATE e DELETE, inclusive cascades administrativos; fonte revisável, sem aplicação remota demonstrada."
   ],
   "files": {
     "database/apply_all.sql": "c60001d4b2fe2514620060c9b5219fa3be5646e848c3ffe5993d6a56804ba811",
@@ -47,7 +48,8 @@
     "database/seeds/cbhpm_2022.sql": "3931e21750b0906f1f5a552a79788b1b519b7db1c7820cd60e52eb7201dacaae",
     "supabase/migrations/0001_assinaturas.sql": "bc37f0a1517c9367fe5ac9badfb77f5adaea6d791f9152d613f7428039509195",
     "supabase/migrations/0002_assinaturas_hardening.sql": "00e0a39f4f2c20a5f4e4b87b6e5373efc5327bb7a87d8a86bb786882ca35fef2",
-    "database/migrations/0031_append_only_retification_cas.sql": "caf6ce1392b1becd33bc57a08077f232363ef8093dbe9eddd92725e0188840e5"
+    "database/migrations/0031_append_only_retification_cas.sql": "caf6ce1392b1becd33bc57a08077f232363ef8093dbe9eddd92725e0188840e5",
+    "database/migrations/0032_finalized_delete_guard.sql": "d98ee075288ee6f5c0d889de22d62c3e22bdd945ed26db2fb7e9908bf41934f0"
   },
   "implementationAuthorization": "2026-10-09: Implemente modificações para obedecer ao planejamento"
 }

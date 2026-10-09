@@ -71,4 +71,26 @@ assert.match(fixture,/original from retification_original_snapshot/);
 assert.match(fixture,/foreign organization wrote proposal/);
 assert.match(fixture,/conflicting proposal was not retained/);
 assert.match(fixture,/rollback;/i);
+// DELETE do pai polimórfico não pode deixar a cadeia append-only órfã.
+const deleteGuard = await readFile(new URL('../database/migrations/0032_finalized_delete_guard.sql',import.meta.url),'utf8');
+const deleteFixture = await readFile(new URL('./sql/finalized-delete-security.sql',import.meta.url),'utf8');
+assert.match(deleteGuard,/create or replace function app\.guard_finalized\(\)/i);
+assert.match(deleteGuard,/old\.finalized_at is not null[\s\S]*using errcode = 'check_violation'/);
+assert.match(deleteGuard,/if tg_op = 'DELETE' then return old; end if;/);
+assert.match(deleteGuard,/create trigger trg_guard before update or delete/);
+assert.match(deleteGuard,/enable always trigger trg_guard/);
+assert.doesNotMatch(deleteGuard,/auth\.uid\(\)|app\.eh_programador\(\)|security definer|drop policy|disable trigger|delete from public\./i,
+  'não existe bypass de papel nem remoção de evidência na migração');
+for(const table of ['preanesthetic_assessments','consultations','anesthesia_records','recovery_records','risk_assessments','consents','prescriptions','documents','cash_closings']) {
+  assert(deleteGuard.includes("'"+table+"'"),'guard de exclusão obrigatório em '+table);
+  assert(deleteFixture.includes("'"+table+"'"),'fixture de exclusão cobre '+table);
+}
+assert.match(deleteFixture,/set local role authenticated/i);
+assert.match(deleteFixture,/authenticated DELETE removed finalized original/);
+assert.match(deleteFixture,/administrative DELETE removed finalized original/);
+assert.match(deleteFixture,/organization cascade removed finalized original/);
+assert.match(deleteFixture,/authorized draft DELETE silently canceled/);
+assert.match(deleteFixture,/original changed or disappeared/);
+assert.match(deleteFixture,/cascade lost retained addendum/);
+assert.match(deleteFixture,/rollback;/i);
 console.log('✓ contrato SQL append-only: cabeça e CAS com revisão servidor, isolamento, idempotência e fixtures reais preparados; execução PostgreSQL permanece pendente');

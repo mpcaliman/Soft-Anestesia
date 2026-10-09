@@ -10,26 +10,30 @@ clínicos, nomes ou credenciais da produção.
 
 ## Estado da execução
 
-As leituras agregadas por `execute_sql` feitas por este agente ficaram sem
-resposta e foram interrompidas. A contagem de `auth.users` não foi obtida.
-Depois, o agente principal conseguiu aplicar migrações ao alvo confirmado.
+Após a autorização expressa **“Pode fazer tudo”**, o agente principal retomou
+a homologação. Uma consulta agregada confirmou zero usuários Auth,
+organizações e pacientes antes das fixtures. As extensões `unaccent` e
+`pg_trgm` estavam ausentes; a `0014` criou a estrutura vazia de medicamentos.
 
-O histórico remoto foi consultado e confirma 16 novas migrações: `0001`–`0013`
-e `0015`–`0017`. Somando a migração pré-existente `0001_assinaturas`, são 17
-entradas. A aplicação de `0014_medicamentos_anvisa` foi recusada na etapa de
-aprovação da ferramenta; `0018` não aparece no histórico verificado. As
-migrações seguintes não comprovam que a lacuna `0014` esteja resolvida.
+O histórico consultado às 22:24:20 UTC confirma 18 novas migrações:
+`0001`–`0018`, além da pré-existente `0001_assinaturas` (19 entradas).
+`0014` foi confirmada na versão `20261009211312` e `0018` na versão
+`20261009212903`. A recusa anterior da `0014` foi superada por essa aplicação.
 
-Todas as mutações foram interrompidas após a orientação do usuário sobre os
-pedidos repetidos de aprovação. A reconstrução permanece parcial e não será
-retomada automaticamente. Nenhuma fixture foi criada e o runner não foi
-implantado nem executado. Nenhum SQL foi enviado à produção.
+A tentativa de aplicar `0019` retornou `INVALID_ARGUMENT`, com a mensagem
+**“Invalid or expired requestState”**. Ela permanece ausente do histórico.
+A reconstrução está parcial e as novas aplicações foram interrompidas após
+a repetição do erro do conector. A autorização permanece válida; o bloqueio
+é de execução, não uma necessidade de renovar consentimento. Nenhuma fixture
+foi criada, o runner não foi implantado ou executado e nenhum SQL foi enviado
+à produção. `0019` e todas as migrações posteriores continuam pendentes.
 
 O inventário de fontes, hashes e estados está em
 `STAGING-MIGRATION-EVIDENCE.json`. Ele descreve a execução parcial; não é uma
-baseline reconciliada da produção nem uma aprovação para completar o plano.
-Antes de qualquer retomada autorizada, comparar schema e histórico atual,
-resolver a lacuna `0014` e verificar as condições ainda pendentes.
+baseline reconciliada da produção nem uma prova de homologação completa.
+Antes de retomar a execução, recuperar a conexão, comparar schema e histórico
+atual e verificar as condições ainda pendentes. A autorização já inclui essa
+continuidade; não se deve repetir solicitações rotineiras.
 
 ## Plano reproduzível
 
@@ -38,8 +42,9 @@ plano fechado ao alvo de homologação, sem executar SQL. O programa valida os
 hashes de cada fonte contra `database/migration-baseline.json` e registra o
 hash de cada SQL que seria aplicado.
 
-A ordem consiste nas 31 migrações numeradas de `database/migrations`, seguidas
-de `supabase/migrations/0002_assinaturas_hardening.sql`. São 32 operações.
+A ordem consiste nas migrações numeradas de `database/migrations`, seguidas
+de `supabase/migrations/0002_assinaturas_hardening.sql`. A contagem e os hashes
+exatos são produzidos pelo gerador; uma nova proteção de exclusão sucede `0031`.
 O histórico existente `0001_assinaturas` permanece intacto. Os nomes das novas
 migrações começam por `staging_rebuild_`, para não confundir os dois arquivos
 históricos chamados `0001`. A ferramenta de aplicação gera as versões
@@ -82,17 +87,24 @@ PostgREST, Storage e WebSocket:
 - compartilhamento autorizado somente pelo programador, leitura limitada ao
   módulo e bloqueio imediato após revogação;
 - upload próprio e negação de upload/leitura de Storage entre organizações;
-- dois tópicos Realtime, atualização recebida, filtro por clínica e renovação
-  do token em ambos os tópicos.
+- corrida de duas propostas de retificação `0031`, idempotência, autoria,
+  auditoria, preservação do original e bloqueio de exclusão direta/cascade;
+- três tópicos Realtime (`patients`, `encounters`, `addenda`), heartbeat,
+  atualização recebida, inscrição maliciosa entre clínicas e renovação do
+  token em todos os tópicos assinados.
 
 Tabela legada ausente recebe resultado pendente, nunca aprovação automática.
 Quando ela existe, o teste primeiro verifica o contrato correto (`dados`) e
 exige negação por autorização, evitando confundir coluna errada ou recurso
 ausente com RLS funcionando.
 
-O retorno contém somente nomes dos testes, estado, códigos de diagnóstico e
-contagens. A limpeza de objetos de Storage fica em `finally`; usuários e
-organizações são excluídos apenas pelos UUIDs sintéticos gerados na execução.
+O retorno contém nomes dos testes, estado, códigos de diagnóstico, contagens
+e UUIDs de evidência sintética. `failed` e `pending` precisam ser zero: HTTP
+200 sozinho não demonstra aprovação. A limpeza de objetos de Storage fica
+em `finally`. Organizações, Auth e registros sintéticos permanecem como
+evidência; acesso é bloqueado desativando vínculos/perfis/organizações,
+removendo privilégios da fixture, revogando sessões/compartilhamentos,
+banindo as contas e substituindo suas senhas por valores aleatórios.
 Depois de capturar a evidência, substituir o runner remoto por uma função
 fechada, sem privilégio administrativo, ou removê-lo pelo painel.
 
@@ -120,7 +132,9 @@ permanecem pendentes.
 
 Essa corrida deve usar homologação exclusiva, com contas e registros sintéticos.
 Os adendos são append-only mesmo em DELETE por cascade administrativo; não se
-deve enfraquecer esse guard para a limpeza de testes. Antes de executar um
-teste concorrente que confirme transações, definir retenção da evidência e o
-encerramento ou a recriação explícita desse ambiente. O runner atual não cria
-adendos e não recebeu uma etapa automática que apagasse essa evidência.
+deve enfraquecer esse guard para limpeza. O runner atualizado cria adendos e
+mantém essa evidência bloqueada, sem excluir as organizações ou contas Auth.
+A proteção adicional de exclusão de pais finalizados deve estar aplicada
+antes dessa execução; a revisão encontrou que o guard histórico só cobria
+UPDATE. Os testes locais do runner verificam falhas induzidas e não substituem
+a execução no PostgreSQL/Supabase real.

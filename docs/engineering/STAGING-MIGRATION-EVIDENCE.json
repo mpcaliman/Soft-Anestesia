@@ -3,14 +3,16 @@
   "recordedAt": "2026-10-09",
   "targetProject": "yqqrfgbvoexricjdxpis",
   "parentProductionProject": "zbpbrnalamjrcfbscjkt",
-  "status": "partial_reconstruction_stopped",
+  "status": "partial_reconstruction_connector_blocked",
   "productionChanged": false,
-  "confirmedNewMigrations": 16,
+  "confirmedNewMigrations": 18,
   "preservedMigration": "0001_assinaturas",
-  "confirmedHistoryEntries": 17,
+  "confirmedHistoryEntries": 19,
   "historyEvidenceSource": "Supabase list_migrations independently fetched by root after mutations stopped",
-  "gap": "0014_medicamentos_anvisa approval declined; do not infer it was applied from later migrations",
-  "stoppedAt": "0018 not present in independently checked migration history",
+  "gap": "0014 previous declined attempt superseded by confirmed application after renewed explicit authorization",
+  "stoppedAt": "0019 failed with INVALID_ARGUMENT: Invalid or expired requestState; absent from history checked at 2026-10-09T22:24:20Z",
+  "ownerAuthorization": "2026-10-09: Pode fazer tudo — remaining stages authorized subject to prior verification",
+  "executionBlock": "connector request state failure; authorization does not establish successful execution",
   "furtherMutationsAllowed": false,
   "syntheticFixturesExecuted": false,
   "integrationRunnerDeployed": false,
@@ -123,9 +125,11 @@
     {
       "source": "database/migrations/0014_medicamentos_anvisa.sql",
       "sourceSha256": "be7479633ce3aa2dfc97b1d6db6fd40499b196af2cc69351fdf28cb833700bcf",
-      "appliedSha256": null,
-      "state": "approval_declined",
-      "remoteVersion": null
+      "appliedSha256": "be7479633ce3aa2dfc97b1d6db6fd40499b196af2cc69351fdf28cb833700bcf",
+      "state": "applied_confirmed",
+      "previousAttempt": "approval_declined",
+      "remoteVersion": "20261009211312",
+      "remoteMigrationName": "staging_rebuild_0014_medicamentos_anvisa"
     },
     {
       "source": "database/migrations/0015_realtime_modulos_restantes.sql",
@@ -154,9 +158,10 @@
     {
       "source": "database/migrations/0018_stop_legacy_writes.sql",
       "sourceSha256": "747d0a2a713be4e7bde20995abe183fac05d8ad61f255a5fbed9c0746bd1c6fe",
-      "appliedSha256": null,
-      "state": "not_applied",
-      "remoteVersion": null
+      "appliedSha256": "747d0a2a713be4e7bde20995abe183fac05d8ad61f255a5fbed9c0746bd1c6fe",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261009212903",
+      "remoteMigrationName": "staging_rebuild_0018_stop_legacy_writes"
     },
     {
       "source": "database/migrations/0019_optimistic_concurrency.sql",
@@ -248,6 +253,13 @@
       "appliedSha256": null,
       "state": "not_applied",
       "remoteVersion": null
+    },
+    {
+      "source": "database/migrations/0032_finalized_delete_guard.sql",
+      "sourceSha256": "d98ee075288ee6f5c0d889de22d62c3e22bdd945ed26db2fb7e9908bf41934f0",
+      "appliedSha256": null,
+      "state": "not_applied",
+      "remoteVersion": null
     }
   ],
   "remoteHistory": [
@@ -318,7 +330,23 @@
     {
       "version": "20261009183003",
       "name": "staging_rebuild_0017_programador_excluir"
+    },
+    {
+      "version": "20261009211312",
+      "name": "staging_rebuild_0014_medicamentos_anvisa"
+    },
+    {
+      "version": "20261009212903",
+      "name": "staging_rebuild_0018_stop_legacy_writes"
     }
   ],
-  "remoteHistorySha256": "a8ebfe39365af6d58fc9ca032aa3b3e21398d45deaf97945bdb9a66a8a4bda12"
+  "remoteHistorySha256": "1e7717303abf7db7fc9290771e33e5237ba03e3999cfc0076b5b2733031341a9",
+  "remoteHistorySerialization": "JSON UTF-8; sorted object keys; compact separators; original array order",
+  "preFixtureEvidence": {
+    "recordedAt": "2026-10-09",
+    "authUsers": 0,
+    "organizations": 0,
+    "patients": 0,
+    "source": "root execute_sql aggregate only; no clinical content"
+  }
 }

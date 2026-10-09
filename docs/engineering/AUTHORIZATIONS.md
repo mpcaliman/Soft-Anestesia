@@ -1,6 +1,6 @@
 # Registro de autorizações técnicas
 
-Este registro aplica a Regra de Ouro 3: cada portão exige autorização expressa de Marcelo. Uma autorização não se transfere automaticamente ao portão seguinte.
+Este registro aplica a Regra de Ouro 3: cada portão exige autorização expressa de Marcelo. Uma autorização pode abranger vários portões quando isso for explícito; a execução continua condicionada à verificação da etapa anterior.
 
 | Data (UTC) | Cartão | Portão autorizado | Evidência/resultado | Ainda não autorizado |
 |---|---|---|---|---|
@@ -34,6 +34,15 @@ Este registro aplica a Regra de Ouro 3: cada portão exige autorização express
 | 2026-10-09 | Conformidade estrita da auditoria v2 | Implementação no branch de teste e validação | Instrução expressa: “Implemente modificações para obedecer ao planejamento”; armazenamento online sem persistência clínica, sessão restaurada bloqueada, Realtime completo, exceções com prazo/escopo, CSP e controles de aprovação | Produção condicionada à homologação real e evidência de aprovação do diff; sem inferir clínica do legado |
 
 ## Portões
+
+Em 9 de outubro de 2026, após o relato da CI aprovada e das pendências de
+homologação, governança e produção, Marcelo respondeu **“Pode fazer tudo”**.
+Essa instrução autoriza a continuidade de G3–G6 no escopo da auditoria v2,
+incluindo correções necessárias, homologação, integração e publicação após
+validação. Não se exige nova confirmação rotineira para etapas já incluídas.
+Ela não resolve erros do conector, concede privilégios administrativos ou
+substitui evidência de testes; tampouco autoriza inferir a clínica de dados
+legados, falsificar comentários/revisões ou ignorar falhas de homologação.
 
 - **G0:** planejar e auditar, sem modificar código.
 - **G1:** implementar e testar localmente; pode gerar commit local quando autorizado.

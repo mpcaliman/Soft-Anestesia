@@ -3,9 +3,11 @@
 > **Atualização de estado — 9 de outubro de 2026.** O corpo abaixo é um
 > retrato histórico e não representa o estado atual da execução. A branch de
 > teste foi publicada no PR [225](https://github.com/mpcaliman/Soft-Anestesia/pull/225).
-> A homologação registra 16 novas migrações (`0001`–`0013` e `0015`–`0017`),
-> além da pré-existente `0001_assinaturas`; `0014` foi recusada e `0018`–`0031`
-> permanecem ausentes. O runner de integração real não foi implantado nem
+> A homologação registra 18 novas migrações (`0001`–`0018`),
+> além da pré-existente `0001_assinaturas`; `0014` e `0018` foram confirmadas
+> após a autorização “Pode fazer tudo”. `0019` falhou por estado inválido ou
+> expirado do conector; ela e as migrações posteriores permanecem ausentes.
+> O runner de integração real não foi implantado nem
 > executado. A proteção remota de `main` permanece inativa; os controles
 > propostos no branch ainda não demonstram sua imposição em produção. Consulte
 > [o estado atual da homologação](STAGING-REBUILD-PLAN.md) e
