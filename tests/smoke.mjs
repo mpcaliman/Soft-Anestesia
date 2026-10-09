@@ -2516,6 +2516,7 @@ await test('Usuários: editar funciona nos espelhos da nuvem, só um "(você)", 
     out.reparou = auth._repararIds() === true
       && auth._lerUsuarios().every(u => !!u.id)
       && new Set(auth._lerUsuarios().map(u => u.id)).size === 2;
+    const espelhosAntigos = auth._lerUsuarios();
 
     /* A LISTA LOCAL DE USUÁRIOS SAIU DE AJUSTES (limpeza do módulo): ela era a
        segunda forma de fazer o que "Equipe da nuvem → ✏️ Acesso" já faz, e
@@ -2535,6 +2536,7 @@ await test('Usuários: editar funciona nos espelhos da nuvem, só um "(você)", 
     cloud.session = () => ({ access_token: 'smoke-token', user: { id: 'u1', email: 'mpcaliman@hotmail.com' } });
     auth._definirSessao(Object.assign({}, auth._lerUsuarios()[0], { role: null, uid: 'u1' }));
     __smokeBindNoOrg('u1');
+    auth._salvarUsuarios(espelhosAntigos);
     cloud.session = () => JSON.parse(sessionStorage.getItem(cloud.SESSION_KEY));
     await equipeNuvem.render();
     const eq = document.getElementById('equipe-nuvem-lista').innerHTML;
@@ -2717,14 +2719,16 @@ await test('Sem clínica vinculada = acesso restrito; o papel do gestor rebaixa 
     cloud.estaLogado = () => true;
 
     /* espelho ANTIGO da secretária, criado como Administrador */
-    auth._salvarUsuarios([
+    const espelhosAntigos = [
       { id: 'u_1', usuario: 'mpcaliman@hotmail.com', nome: 'dono', perfil: 'admin', senhaHash: 'x', nuvem: true, role: 'gestor' },
       { id: 'u_2', usuario: 'mpcanestesiologia@gmail.com', nome: 'secre', perfil: 'admin', senhaHash: 'x', nuvem: true,
         modulos: auth.MODULOS.map(m => m.key), soImpressao: [] }
-    ]);
+    ];
+    auth._salvarUsuarios(espelhosAntigos);
     auth._definirSessao(Object.assign({}, auth._lerUsuarios()[1], { uid: 'u2' }));
     sessionStorage.setItem(cloud.SESSION_KEY, JSON.stringify({ access_token: 't', user: { id: 'u2', email: 'mpcanestesiologia@gmail.com' } }));
     __smokeBindNoOrg('u2');
+    auth._salvarUsuarios(espelhosAntigos);
     out.antesAdmin = auth.usuarioAtual().perfil === 'admin' && auth.podeAcessar('anestesia') === true;
 
     /* a nuvem responde: conta existe, mas NÃO pertence a nenhuma clínica */
@@ -2751,6 +2755,7 @@ await test('Sem clínica vinculada = acesso restrito; o papel do gestor rebaixa 
     auth._definirSessao(Object.assign({}, auth._lerUsuarios()[0], { uid: 'u1' }));
     sessionStorage.setItem(cloud.SESSION_KEY, JSON.stringify({ access_token: 't', user: { id: 'u1', email: 'mpcaliman@hotmail.com' } }));
     __smokeBindNoOrg('u1');
+    auth._salvarUsuarios([auth.usuarioAtual()]);
     cloud.buscarPerfil = async () => ({ semVinculo: true, uid: 'u1', email: 'mpcaliman@hotmail.com', role: null, organization_id: null, ativo: true });
     const dono = await auth.atualizarPapelDaNuvem();
     out.programadorIntacto = dono && dono.perfil === 'admin';
@@ -4222,9 +4227,11 @@ await test('Equipe da nuvem mostra e edita o acesso de cada pessoa (vale em todo
     let corpo = null, alvo = '';
     const fetchOrig = window.fetch;
     window.fetch = async (url, opts) => {
-      alvo = String(url);
-      try { corpo = JSON.parse(opts.body); } catch (e) {}
-      return { ok: true, status: 200, json: async () => ({}) };
+      if (/organization_users/.test(String(url)) && opts && opts.method === 'PATCH') {
+        alvo = String(url);
+        corpo = JSON.parse(opts.body);
+      }
+      return { ok: true, status: 200, json: async () => [] };
     };
     const sel = sels.find(s => s.dataset.mod === 'financeiro'); if (sel) sel.value = 'edit';
     await equipeNuvem.salvarAcesso('uid-sec');
@@ -10281,7 +10288,8 @@ await test('Nuvem: conta sem clínica é dita em vez de fingir "em dia"', async 
     out.titulo = (document.getElementById('modal-title') || {}).textContent || '';
     out.dizQuemResolve = /Equipe da nuvem/.test(corpo) && /gestor/.test(corpo);
     out.nomeiaConta = /secretaria@teste\.com/.test(corpo);
-    out.explicaConsequencia = /m[ée]dico n[ãa]o v[êe]/.test(corpo);
+    out.explicaConsequencia = /módulos clínicos permanecem bloqueados/.test(corpo)
+      && /organização autorizada/.test(corpo);
     try { modal.close(); } catch (e) {}
 
     /* --- ícone próprio: não pode passar por "tudo certo" ---------------- */
@@ -10297,7 +10305,7 @@ await test('Nuvem: conta sem clínica é dita em vez de fingir "em dia"', async 
   assert(r.marcaLimpa, 'achar clínica desfaz a marca');
   assert(r.voltaAoNormal, 'e o indicador volta ao normal');
   assert(/n[ãa]o est[áa] ligada a nenhuma cl[íi]nica/i.test(r.titulo), 'o toque abre a explicação — deu "' + r.titulo + '"');
-  assert(r.explicaConsequencia, 'que diz o que deixa de funcionar, inclusive o pré-lançamento');
+  assert(r.explicaConsequencia, 'que diz que os módulos clínicos ficam bloqueados sem uma clínica autorizada');
   assert(r.dizQuemResolve, 'e quem resolve: o gestor, em Equipe da nuvem');
   assert(r.nomeiaConta, 'nomeando a conta, para o gestor saber qual adicionar');
   assert(r.icone === '🏥', 'com ícone próprio no menu — deu "' + r.icone + '"');
@@ -11102,9 +11110,10 @@ await test('O Ajustes decide sozinho — inclusive para tirar de um admin', asyn
     let pediu = false;
     cloud.estaConfigurado = () => true;
     cloud.estaLogado = () => true;
-    cloud.buscarPerfil = async () => { pediu = true; return { uid: 'u9', role: 'auxiliar',
+    cloud.buscarPerfil = async () => { pediu = true; return { uid: 'u9', organization_id: 'org-1', role: 'auxiliar',
       permissoes: { perfil: 'secretaria', modulos: ['dashboard','financeiro'], soImpressao: [] } }; };
-    entrar({ uid: 'u9', perfil: 'secretaria', role: 'auxiliar', modulos: ['dashboard'], soImpressao: [] });
+    entrar({ uid: 'u9', organization_id: 'org-1', perfil: 'secretaria', role: 'auxiliar', modulos: ['dashboard'], soImpressao: [] });
+    __smokeBindOrg('org-1', 'u9');
     await auth.revalidarAcesso({ silencioso: true });
     out.consultouANuvem = pediu;
     out.acessoNovoValeJa = auth.podeAcessar('financeiro') === true;
@@ -11447,8 +11456,7 @@ await test('Dashboard completa os gráficos trazendo só os arquivados do perío
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
-    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
-      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor', entrouEm: Date.now() }));
+    __smokeBindOrg('org-dashboard', 'm1');
 
     const hoje = new Date();
     const diasAtras = (n) => { const d = new Date(hoje); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
@@ -13630,7 +13638,7 @@ await test('Busca acha a ficha guardada na nuvem, e oferece varrer a nuvem quand
     store.setList('anestesia', []);
     /* o cenário real: a ficha saiu do aparelho (socorro de espaço arquiva o
        que tem mais de 7 dias) e só existe no índice + na nuvem */
-    arquivo._gravar({
+    arquivo._gravarIndice({
       anestesia: [{ id: 'f-jaime', nome: 'JAIME ROLANDO PEIXOTO', data: '2026-08-13', fin: true }]
     });
 
@@ -13663,7 +13671,7 @@ await test('Busca acha a ficha guardada na nuvem, e oferece varrer a nuvem quand
     out.usaOTermoDigitado = termo === 'jaime' && !usouPrompt;
 
     try { modal.close(); } catch (e) {}
-    arquivo._gravar({});
+    arquivo._gravarIndice({});
     store.setList('anestesia', []);
     return out;
   });
@@ -15421,6 +15429,10 @@ await test('Financeiro: tocar na linha abre o lançamento para editar', async ()
 await test('Finalizar: uma janela só — gerar ou não, com plano, tabela do plano, códigos e valores', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
+    /* Decisões e correções são atos de um profissional autenticado.
+       O helper prepara o contexto e o cofre real com servidor de chaves simulado. */
+    await __smokePrepareQueue('org-finalizacao', 'medico-finalizacao');
+    const autorEsperado = auth.usuarioAtual().nome || auth.usuarioAtual().usuario;
     const out = {};
     try { modal.close(); } catch (e) {}
     ['pre', 'consulta', 'anestesia', 'financeiro', 'pacientes', 'orcamento'].forEach(m => store.setList(m, []));
@@ -15483,7 +15495,7 @@ await test('Finalizar: uma janela só — gerar ou não, com plano, tabela do pl
     const semCobranca = store.getById('pre', pre2._id);
     out.originalPreservadoAoNaoGerar = adendos.diffRegistro(pre2, semCobranca).length === 0
       && (semCobranca._adendos || []).some(ad => ad.motivo === 'decisao_financeira'
-        && ad.texto === fin.finalizacao.DECISAO_NAO && !!ad.autor && !!ad.data);
+        && ad.texto === fin.finalizacao.DECISAO_NAO && ad.autor === autorEsperado && !Number.isNaN(Date.parse(ad.data)));
     const recarregado = JSON.parse(JSON.stringify(semCobranca));
     delete recarregado._semFinanceiro;
     out.ficouGravadaADecisao = fin.fromDoc('pre', recarregado) === null;
@@ -15668,6 +15680,10 @@ await test('Unimed: majoração por horário — faixa calculada, aviso sempre �
 await test('Janela de finalização: desfecho confirmado com a cirurgia à vista, observação, e ➕ que cria linha', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
+    /* Decisões e correções são atos de um profissional autenticado.
+       O helper prepara o contexto e o cofre real com servidor de chaves simulado. */
+    await __smokePrepareQueue('org-finalizacao', 'medico-finalizacao');
+    const autorEsperado = auth.usuarioAtual().nome || auth.usuarioAtual().usuario;
     const out = {};
     try { modal.close(); } catch (e) {}
     ['pre', 'consulta', 'financeiro'].forEach(m => store.setList(m, []));
@@ -15700,7 +15716,7 @@ await test('Janela de finalização: desfecho confirmado com a cirurgia à vista
       && pre2._finalizadoEm === p1._finalizadoEm;
     out.voltouParaAAvaliacao = (pre2._adendos || []).some(ad => ad.motivo === 'correcao'
       && /CORREÇÃO/.test(ad.texto) && /liberado/.test(ad.texto)
-      && /exames dentro da validade/.test(ad.texto) && !!ad.autor && !!ad.data);
+      && /exames dentro da validade/.test(ad.texto) && ad.autor === autorEsperado && !Number.isNaN(Date.parse(ad.data)));
     const l1 = store.list('financeiro').find(x => x._origemId === p1._id);
     out.observacaoNoLancamento = !!l1 && /Guia autorizada por telefone/.test(l1.observacoes || '')
       && /Desfecho: Liberado/.test(l1.observacoes || '');
