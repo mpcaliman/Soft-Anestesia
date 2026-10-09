@@ -5,10 +5,14 @@
    como fallback quando a rede falha (wifi de hospital, avião, elevador).
    Só intercepta GET do próprio domínio — Supabase e afins passam direto.
 ============================================================================ */
-/* v2 invalida o HTML que continha o bundle antigo do jsPDF. */
-const CACHE = 'soft-anestesia-v3-strict';
-
-self.addEventListener('install', () => { self.skipWaiting(); });
+const CACHE = 'soft-anestesia-v4-print-shell';
+// Assets públicos: nenhuma ficha ou conteúdo clínico é pré-carregado.
+const PRINT_ASSETS = ['print-shell.html', 'src/print/print-shell.js',
+  'src/ui/strict-actions.js', 'src/ui/strict-actions.generated.js'];
+self.addEventListener('install', event => {
+  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(PRINT_ASSETS))
+    .then(() => self.skipWaiting()));
+});
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(

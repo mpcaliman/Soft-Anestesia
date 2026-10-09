@@ -3,6 +3,7 @@ import { compiledAssetPaths } from './strict-csp.mjs';
 // validação rejeita qualquer arquivo extra ou ausente em dist/.
 export const publicAssets = Object.freeze([
   'index.html',
+  'print-shell.html',
   ...compiledAssetPaths,
   'medicamentos-base.js',
   'sw.js',
@@ -28,6 +29,7 @@ export const publicAssets = Object.freeze([
   'src/ui/autocomplete.js',
   'src/ui/quick-actions.js',
   'src/print/print-preview.js',
+  'src/print/print-shell.js',
   'src/ui/meu-dia.js',
   'src/ui/dashboard.js',
   'src/ui/agenda-view.js',

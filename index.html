@@ -4695,7 +4695,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-03c</b><br>
+    v7.1 · build <b id="build-tag">2026-10-09a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -21643,9 +21643,15 @@ const adendos = {
   htmlParaImpressao(rec) {
     const lista = (rec && rec._adendos) || [];
     if (!lista.length) return '';
-    return '<div class="print-adendos" style="margin-top:10px;border-top:1px solid #999;padding-top:6px">' +
-      '<h3 style="font-size:8pt;margin:0 0 4px">ADENDOS / CORREÇÕES</h3>' +
-      lista.map(ad => '<div style="font-size:7.5pt;margin-bottom:3px"><b>' + utils.escapeHTML(adendos._fmtData(ad.data)) + ' — ' + utils.escapeHTML(ad.autor || '') + ':</b> ' + utils.escapeHTML(ad.texto || '') + '</div>').join('') +
+    /* TAMANHO DE LEITURA, não de rodapé. O que vem aqui é conteúdo clínico —
+       exames que chegaram depois, correção de dose, de lado. Imprimir isso em
+       7,5pt é esconder com elegância. */
+    return '<div class="print-adendos" style="margin-top:14px;border:1px solid #8a1c1c;border-radius:6px;padding:8px 10px">' +
+      '<h3 style="font-size:10pt;margin:0 0 2px;color:#8a1c1c">⚠️ ADENDOS / CORREÇÕES — ' + lista.length + '</h3>' +
+      '<div style="font-size:8pt;color:#555;margin:0 0 6px">O registro acima é o original, preservado. O que mudou depois está aqui, datado e assinado.</div>' +
+      lista.map(ad => '<div style="font-size:9pt;margin-bottom:5px;line-height:1.45;white-space:pre-wrap"><b>' +
+        utils.escapeHTML(adendos._fmtData(ad.data)) + ' — ' + utils.escapeHTML(ad.autor || '') + ':</b> ' +
+        utils.escapeHTML(ad.texto || '') + '</div>').join('') +
       '</div>';
   }
 };

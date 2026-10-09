@@ -27,11 +27,26 @@ try {
   await context.addInitScript(()=>{
     window.__cspViolations=[];
     document.addEventListener('securitypolicyviolation',event=>window.__cspViolations.push({directive:event.effectiveDirective,blocked:event.blockedURI}));
+    if (window.opener) {
+      window.__printCalls=0;
+      window.print=()=>{window.__printCalls++;};
+      window.close=()=>{};
+    }
   });
   const errors=[],page=await context.newPage();
   page.on('pageerror',error=>errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}/`,{waitUntil:'load'});
   await page.waitForFunction(()=>window.pacientes && window.historico && window.printPreview);
+  // Synthetic account/organization use the real tab-context API, never clinical production data.
+  await page.evaluate(()=>{
+    const original=cloud.session;
+    cloud.session=()=>({user:{id:'csp-user'}});
+    try {
+      contextoAba.prepararUsuario('csp-user');
+      if (!contextoAba.vincular({uid:'csp-user',organization_id:'csp-org',role:'anestesiologista'}))
+        throw new Error('Synthetic print context did not bind');
+    } finally {cloud.session=original;}
+  });
   const payload=`O'Connor & "Filhos" </button><img src=x onerror="window.__clinicalXss=1">\u2028');window.__clinicalXss=2;//`;
   const outcome=await page.evaluate(payload=>{
     const patient={_id:payload,nome:payload,cpf:payload,plano:payload,carteirinha:payload,telefone:payload};
@@ -83,25 +98,21 @@ try {
   });
   const popupPromise=page.waitForEvent('popup');
   await page.evaluate(payload=>{
-    const original=window.open.bind(window);
-    window.open=(...args)=>{const popup=original(...args);if(popup){popup.__printCalls=0;popup.print=()=>{popup.__printCalls++;};popup.close=()=>{};popup.__cspViolations=[];const docOpen=popup.document.open.bind(popup.document);popup.document.open=(...args)=>{const result=docOpen(...args);popup.document.addEventListener('securitypolicyviolation',event=>popup.__cspViolations.push(event.effectiveDirective));return result;};}return popup;};
     document.getElementById('print-preview-overlay').classList.add('show');
     document.getElementById('ppp').textContent=payload;
     printPreview._gerarNomeArquivo=()=> 'Documento de teste';
     printPreview.imprimir();
   },payload);
   const popup=await popupPromise;
-  // The initial about:blank load can finish before document.write's external scripts.
-  // Wait for the actual print DOM and registry, not that earlier navigation event.
+  // Wait for the real shell navigation and its authenticated document acknowledgement.
   try {
     await popup.waitForFunction(()=>document.body && window.SoftActions
       && document.querySelector('.pp-print-btn[data-soft-onclick][data-soft-name-click="print"]')
-      && document.readyState==='complete');
-    await popup.evaluate(()=>window.softDocumentReady);
+      && document.readyState==='complete' && window.softPrintRendered===true);
   } catch(error) {
     const diagnostic=await popup.evaluate(()=>({url:location.href,base:document.baseURI,title:document.title,
       ready:document.readyState,body:document.body?.innerHTML?.slice(0,900)||null,
-      actions:typeof window.SoftActions,documentReady:!!window.softDocumentReady,
+      actions:typeof window.SoftActions,documentReady:window.softPrintRendered===true,
       scripts:[...document.scripts].map(script=>script.src),violations:window.__cspViolations||[]})).catch(()=>({closed:popup.isClosed()}));
     throw new Error('Print document failed to load: '+JSON.stringify({diagnostic,popupErrors,popupRequests}),{cause:error});
   }
@@ -115,6 +126,12 @@ try {
   });
   assert(clickWorked,'external compiled print action must invoke window.print');
   assert.deepEqual(popupErrors,[],'print document must not produce JavaScript or CSP errors');
+  assert(new URL(popup.url()).pathname.endsWith('/print-shell.html'), 'print actions must load through an actual same-origin navigation');
+  await page.evaluate(()=>contextoAba.limpar());
+  await popup.waitForFunction(()=>document.body.textContent==='' && window.softPrintRendered===false);
+  const cleared=await popup.evaluate(()=>({text:document.body.textContent,actions:document.querySelectorAll('[data-soft-onclick]').length}));
+  assert.equal(cleared.text,'');assert.equal(cleared.actions,0,'changing the parent user/context must remove all clinical print content and actions');
+  assert.deepEqual(popupErrors,[]);assert.deepEqual(errors,[]);
   console.log('✓ Chromium/CSP: boot, stored patient/history fields, compiled edit/save clicks and print popup pass without inline code or policy violations');
 } finally {
   if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));

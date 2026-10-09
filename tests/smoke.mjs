@@ -63,11 +63,8 @@ async function test(name, fn) {
 /* O caminho opcional permite usar um Chromium já instalado em ambientes com
    download restrito. Na CI ele fica vazio e o navegador gerenciado pelo
    Playwright continua sendo usado normalmente. */
-const browser = await chromium.launch(
-  process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
-    ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
-    : {}
-);
+const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || process.env.PW_CHROMIUM;
+const browser = await chromium.launch(chromiumPath ? { executablePath: chromiumPath } : {});
 
 async function novaPagina() {
   const page = await browser.newPage();
@@ -19062,6 +19059,102 @@ await test('Em máquina compartilhada, fechar a aba e reabrir não deixa o atend
   assert(r.fecharAbaLimpa, 'fechar a aba limpa também: num computador de hospital ninguém clica em Sair');
   assert(r.naoDesativou && r.tentativaPessoalTambemLimpa,
     'declarar o aparelho como pessoal não pode desativar a proteção multiusuário');
+  await page.close();
+});
+
+/* 255) Adendos/correções devem chegar à impressão do registro aberto,
+   inclusive ao arquivo único ficha + SRPA, sem modificar o original assinado. */
+await test('Adendos e correções saem na impressão, e a folha avisa que existem', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    await __smokePrepareQueue('org-impressao-adendos', 'medico-impressao-adendos');
+    auth._desbloquear();
+    const out = {};
+    const nome = 'Paciente Sintético';
+    const dataAdendo = '2026-10-09T12:00:00Z';
+    const autor = 'Médico de teste';
+    const vinculo = { _patientRef: 'paciente-impressao-adendos', _caseId: 'caso-impressao-adendos' };
+    const adendo = (id, texto) => ({ id, data: dataAdendo, autor, texto });
+    const registroPre = Object.assign({
+      _id: 'pre-impressao-adendos', nome, data: utils.hojeISO(), _finalizado: true,
+      exames_compl: 'Exames sintéticos disponíveis na avaliação original.',
+      _adendos: [adendo('ad-pre', 'CORREÇÃO: exames sintéticos posteriores — Hb 13,2; ECG sem alterações.')]
+    }, vinculo);
+    const outroPre = { _id: 'pre-outro-paciente', nome: 'Outro Paciente Sintético', _finalizado: true,
+      _adendos: [adendo('ad-outro', 'Conteúdo reservado ao outro paciente sintético.')] };
+    const registroAnestesia = Object.assign({
+      _id: 'anestesia-impressao-adendos', _finalizado: true,
+      paciente: { nome }, procedimento: { data: utils.hojeISO(), descricao: 'Procedimento sintético' },
+      _adendos: [adendo('ad-anestesia', 'CORREÇÃO: registro sintético intraoperatório conferido.')]
+    }, vinculo);
+    const registroSrpa = Object.assign({
+      _id: 'srpa-impressao-adendos', nome, data: utils.hojeISO(), _finalizado: true,
+      observacoes: 'Observação sintética original de recuperação.',
+      _adendos: [adendo('ad-srpa', 'CORREÇÃO: observação sintética de recuperação complementada.')]
+    }, vinculo);
+    store.setList('pre', [registroPre, outroPre]);
+    store.setList('anestesia', [registroAnestesia]);
+    store.setList('recuperacao', [registroSrpa]);
+    const originais = ['pre', 'anestesia', 'recuperacao'].map(mod => JSON.stringify(store.list(mod)));
+
+    ui.navegar('pre');
+    pre.carregar(store.getById('pre', registroPre._id));
+    out.achouORegistro = printPreview._registroDoFormulario('pre')._id === registroPre._id;
+    printPreview.abrir();
+    const ppp = document.getElementById('ppp');
+    const bloco = ppp.querySelector('.print-adendos');
+    const texto = bloco ? bloco.textContent : '';
+    out.temBloco = ppp.querySelectorAll('.print-adendos').length === 1 && /ADENDOS \/ CORREÇÕES/.test(texto);
+    out.temOConteudo = texto.includes('Hb 13,2') && texto.includes('ECG sem alterações');
+    const dataExibida = adendos._fmtData(dataAdendo);
+    out.temAutorEData = !!dataExibida && texto.includes(dataExibida) && texto.includes(autor);
+    out.dizQueOOriginalEhODeCima = /original, preservado/i.test(texto);
+    out.contaQuantos = /CORREÇÕES — 1/.test(texto);
+    const linhaAdendo = bloco && bloco.querySelector('div:last-child');
+    out.tamanhoDeLeitura = !!linhaAdendo && parseFloat(getComputedStyle(linhaAdendo).fontSize) >= 11.9;
+    out.originalNaFolha = ppp.textContent.includes(registroPre.exames_compl) && ppp.textContent.includes(nome);
+    out.somentePacienteAberto = !ppp.textContent.includes(outroPre._adendos[0].texto);
+    printPreview.fechar();
+
+    /* O mesmo conteúdo deve seguir as duas partes do arquivo único real. */
+    anestesia.carregar(store.getById('anestesia', registroAnestesia._id));
+    recuperacao.carregar(store.getById('recuperacao', registroSrpa._id));
+    linker.aplicarContextoPaciente('anestesia', registroAnestesia);
+    linker.aplicarContextoPaciente('recuperacao', registroSrpa);
+    linker.aplicarContextoCaso('anestesia', registroAnestesia);
+    linker.aplicarContextoCaso('recuperacao', registroSrpa);
+    printPreview.abrirConjunto();
+    const blocosConjunto = Array.from(ppp.querySelectorAll('.print-adendos'));
+    out.conjuntoTemAmbos = blocosConjunto.length === 2
+      && blocosConjunto[0].textContent.includes(registroAnestesia._adendos[0].texto)
+      && blocosConjunto[1].textContent.includes(registroSrpa._adendos[0].texto)
+      && blocosConjunto.every(b => b.textContent.includes(autor) && b.textContent.includes(dataExibida)
+        && /original, preservado/i.test(b.textContent)
+        && parseFloat(getComputedStyle(b.querySelector('div:last-child')).fontSize) >= 11.9)
+      && ppp.textContent.includes(nome) && ppp.textContent.includes('2ª parte — Recuperação pós-anestésica');
+    out.conjuntoSemOutroPaciente = !ppp.textContent.includes(outroPre._adendos[0].texto)
+      && !ppp.textContent.includes(registroPre._adendos[0].texto);
+    printPreview.fechar();
+    out.originaisPreservados = ['pre', 'anestesia', 'recuperacao']
+      .every((mod, i) => JSON.stringify(store.list(mod)) === originais[i]);
+
+    /* Sem adendo ou sem registro aberto, nenhum bloco é acrescentado. */
+    store.setList('pre', [Object.assign({}, registroPre, { _adendos: [] })]);
+    out.semAdendoNaoPoluiu = printPreview._adendosDoFormulario('pre') === '';
+    document.querySelector('#form-pre [name="_id"]').value = '';
+    out.semRegistroNaoQuebra = printPreview._adendosDoFormulario('pre') === '';
+    ['pre', 'anestesia', 'recuperacao'].forEach(mod => store.setList(mod, []));
+    return out;
+  });
+  assert(r.achouORegistro, 'a impressão acha o registro aberto pelo id do formulário');
+  assert(r.temBloco && r.temOConteudo, 'abrir impressão inclui a seção de adendos e o conteúdo da correção');
+  assert(r.temAutorEData, 'a correção impressa conserva data e autoria');
+  assert(r.dizQueOOriginalEhODeCima && r.contaQuantos, 'a folha distingue o original preservado e informa o número de correções');
+  assert(r.tamanhoDeLeitura, 'o conteúdo do adendo renderiza com pelo menos 9pt, também no pacote CSP');
+  assert(r.originalNaFolha && r.somentePacienteAberto, 'a folha traz o original e somente as correções do paciente aberto');
+  assert(r.conjuntoTemAmbos && r.conjuntoSemOutroPaciente, 'o arquivo único inclui os adendos da ficha e da SRPA corretas');
+  assert(r.originaisPreservados, 'imprimir não modifica os registros assinados nem seus adendos');
+  assert(r.semAdendoNaoPoluiu && r.semRegistroNaoQuebra, 'sem adendo ou registro aberto nenhum bloco é acrescentado');
   await page.close();
 });
 

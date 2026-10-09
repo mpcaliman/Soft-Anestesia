@@ -994,6 +994,77 @@ assert.equal(testedPrint._durEntre('07:30', '09:05'), '1h 35min');
 assert.equal(testedPrint._durEntre('23:40', '00:20'), '0h 40min');
 assert.equal(testedPrint._viaAereaImpressa(''), '');
 
+/* Correções precisam atravessar a composição real do preview e a janela de
+   impressão; testar apenas o gerador de bloco não comprova que saem no papel. */
+const addendaStart = html.indexOf('const adendos = {');
+const addendaEnd = html.indexOf('\n};', addendaStart);
+assert(addendaStart >= 0 && addendaEnd > addendaStart);
+const printRecords = new Map();
+const printForms = new Map();
+const printNodes = new Map(['ppp', 'ppt-signature-select', 'ppt-info', 'ppt-filename']
+  .map(id => [id, { innerHTML: '', textContent: '' }]));
+printNodes.set('print-preview-overlay', { classList: classes() });
+const hostileAddendum = 'Exames posteriores: Hb 13,2\n<img src=x onerror="alert(1)">';
+const hostileAuthor = 'Dr. O\'Connor <svg onload="alert(2)">';
+const escaped = value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+for (const mod of ['pre', 'consulta', 'anestesia', 'recuperacao', 'risco', 'termo']) {
+  const id = mod + '-aberto';
+  const fields = { _id: { value: id }, nome: { value: 'Paciente A' }, paciente_nome: { value: 'Paciente A' } };
+  const form = { id: 'form-' + mod, querySelector: selector => fields[selector.match(/name="([^"]+)"/)?.[1]] || null };
+  printForms.set(mod, fields); printNodes.set(form.id, form);
+  printRecords.set(mod + '|' + id, { _id: id, _finalizado: true, nome: 'Original ' + mod,
+    _adendos: [{ id: mod + '-adendo', data: '2026-10-09T12:00:00Z', autor: hostileAuthor,
+      texto: mod + ': ' + hostileAddendum }] });
+}
+const recordsBeforePrinting = JSON.stringify([...printRecords]);
+let printedDocument = '';
+const popupWriter = { document: { open() { printedDocument = ''; }, close() {}, write(value) { printedDocument = value; } },
+  addEventListener() {}, focus() {}, print() {}, close() {} };
+const actualPrintSandbox = { SoftActions, console,
+  state: { currentModule: 'pre' }, ajustes: { list: () => [] },
+  utils: { escapeHTML: escaped },
+  store: { getById: (mod, id) => printRecords.get(mod + '|' + id),
+    save() { throw new Error('Impressão não pode regravar o original'); } },
+  document: { getElementById: id => printNodes.get(id) || null, querySelector: () => null },
+  window: { open: () => popupWriter }, setTimeout: () => 1,
+  toast(message, type) { if (type === 'error') throw new Error(message); },
+  anestesia: { coletarEstruturado: () => ({ paciente: { nome: 'Paciente A' } }) },
+  linker: { contextoPaciente: () => ({ patientRef: 'paciente-a', identityKey: 'id-a' }),
+    contextoCaso: () => ({ caseId: 'caso-a' }) }
+};
+vm.runInNewContext(html.slice(addendaStart, addendaEnd + 3) + '\n' + printSource
+  + '\nglobalThis.testedPrint = printPreview;', actualPrintSandbox, { filename: 'actual-addenda-print.js' });
+const actualPrint = actualPrintSandbox.testedPrint;
+actualPrint._gerarNomeArquivo = () => 'Documento'; actualPrint._infoLabel = mod => mod;
+actualPrint._sanitizarPaciente = () => 'Paciente'; actualPrint._dataCriacao = () => '2026-10-09';
+actualPrint.refreshSignature = () => {};
+for (const [mod, builder] of [['pre', '_buildPre'], ['consulta', '_buildConsulta'], ['anestesia', '_buildAnestesia'],
+  ['recuperacao', '_buildRecuperacao'], ['risco', '_buildRisco'], ['termo', '_buildTermo']]) {
+  actualPrint[builder] = () => '<section>Original ' + mod + '</section>';
+}
+for (const mod of ['pre', 'consulta', 'anestesia', 'recuperacao', 'risco']) {
+  actualPrintSandbox.state.currentModule = mod;
+  actualPrint.abrir(); actualPrint.imprimir();
+  assert(printedDocument.includes('Original ' + mod));
+  assert(printedDocument.includes(escaped(mod + ': ' + hostileAddendum)), mod + ': adendo deve chegar à impressão real');
+  assert(printedDocument.includes(escaped(hostileAuthor)), mod + ': autoria precisa estar escapada');
+  assert(printedDocument.includes('2026') && /ADENDOS \/ CORREÇÕES/.test(printedDocument));
+  assert.doesNotMatch(printedDocument, /<(?:img|svg)\b/, 'adendos não podem introduzir HTML executável');
+  assert(!printedDocument.includes('consulta: ' + escaped(hostileAddendum)) || mod === 'consulta',
+    'somente os adendos do módulo/registro aberto são impressos');
+}
+actualPrint.abrirPreTermo(); actualPrint.imprimir();
+assert(printedDocument.includes('Original pre') && printedDocument.includes('Original termo'));
+assert(printedDocument.includes(escaped('pre: ' + hostileAddendum)), 'conjunto pré+termo conserva as correções da pré');
+actualPrint.abrirConjunto(); actualPrint.imprimir();
+assert(printedDocument.includes(escaped('anestesia: ' + hostileAddendum))
+  && printedDocument.includes(escaped('recuperacao: ' + hostileAddendum)), 'conjunto anestesia+SRPA imprime os adendos de ambas as fichas');
+printForms.get('pre')._id.value = '';
+actualPrintSandbox.state.currentModule = 'pre'; actualPrint.abrir(); actualPrint.imprimir();
+assert(!/ADENDOS \/ CORREÇÕES/.test(printedDocument), 'formulário novo não pode herdar os adendos da impressão anterior');
+assert.equal(JSON.stringify([...printRecords]), recordsBeforePrinting, 'preview e impressão preservam o original e sua autoria');
+
 const meuDiaSandbox = { SoftActions,
   linker: { _chavePaciente: item => item._patientKey || '' },
   store: { getById: () => null }

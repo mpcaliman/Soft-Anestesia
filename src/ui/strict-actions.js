@@ -3,6 +3,8 @@
 window.SoftActions = (() => {
   let templates = [], handlers = Object.create(null), buildToken;
   const bound = new WeakMap();
+  const printWindows = new Map();
+  let printTracking = false, printSweep;
   let eventSelector = '[data-soft-onclick],[data-soft-onchange],[data-soft-oninput],[data-soft-onsubmit]';
   const escape = value => String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -55,27 +57,61 @@ window.SoftActions = (() => {
     const doc = win.document;
     // Non-DOM writers are unit-test doubles; they never parse or execute HTML.
     if (doc.nodeType !== 9 || typeof doc.createElement !== 'function') { doc.write(sanitizeHTML(value)); return Promise.resolve(); }
-    const parsed = new DOMParser().parseFromString(sanitizeHTML(value), 'text/html');
-    // No script is parser-inserted by document.write. Clinical HTML cannot supply executable scripts.
-    parsed.querySelectorAll('script').forEach(script => script.remove());
-    parsed.querySelectorAll('link[href]').forEach(link => {
-      link.setAttribute('href', new URL(link.getAttribute('href'), document.baseURI).href);
+    if (typeof contextoAba === 'undefined' || !contextoAba.operational())
+      return Promise.reject(new Error('Confirme o usuário e a clínica antes de imprimir'));
+    const context = contextoAba.capturar(), origin = location.origin;
+    if (origin === 'null') return Promise.reject(new Error('Abra o aplicativo pelo seu endereço para imprimir'));
+    const targetOrigin = origin;
+    const nonce = crypto.randomUUID();
+    const shell = new URL('print-shell.html', document.baseURI);
+    if (shell.origin !== origin) return Promise.reject(new Error('Origem de impressão inválida'));
+    shell.hash = nonce;
+    if (!printTracking) {
+      printTracking = true;
+      contextoAba.aoMudar(() => {
+        for (const entry of printWindows.values())
+          if (!contextoAba.corresponde(entry.context)) entry.invalidate();
+      });
+      window.addEventListener('pagehide', () => {
+        for (const entry of printWindows.values()) entry.invalidate();
+      });
+    }
+    const ready = new Promise((resolve, reject) => {
+      let sent = false, settled = false;
+      const cleanup = () => { clearTimeout(timer); window.removeEventListener('message', receive); };
+      const finish = error => {
+        if (settled) return;
+        settled = true; cleanup();
+        if (error) { printWindows.delete(win); reject(error); } else resolve();
+      };
+      const invalidate = () => {
+        try { win.postMessage({type:'soft-print-invalidate',nonce}, targetOrigin); } catch (e) {}
+        try { win.document.body?.replaceChildren(); win.document.adoptedStyleSheets = []; win.document.title = 'Impressão encerrada'; } catch (e) {}
+        try { win.close(); } catch (e) {}
+        printWindows.delete(win);
+        finish(new Error('A sessão de impressão foi encerrada'));
+      };
+      const receive = event => {
+        const data = event.data;
+        if (event.source !== win || event.origin !== origin || !data || data.nonce !== nonce) return;
+        if (!contextoAba.corresponde(context)) { invalidate(); return; }
+        if (data.type === 'soft-print-ready' && !sent) {
+          sent = true;
+          win.postMessage({type:'soft-print-document',nonce,html:sanitizeHTML(value),build:buildToken}, targetOrigin);
+        } else if (data.type === 'soft-print-rendered' && sent) finish();
+        else if (data.type === 'soft-print-failed') finish(new Error('Falha ao montar o documento de impressão'));
+      };
+      const timer = setTimeout(() => { invalidate(); }, 15000);
+      printWindows.set(win, {context,nonce,invalidate});
+      window.addEventListener('message', receive);
+      try { win.location.replace(shell.href); }
+      catch (error) { invalidate(); }
     });
-    doc.write('<!DOCTYPE html>' + parsed.documentElement.outerHTML);
-    const load = path => new Promise((resolve, reject) => {
-      const script = doc.createElement('script');
-      script.async = false;
-      script.addEventListener('load', resolve, {once:true});
-      script.addEventListener('error', () => reject(new Error('Falha ao carregar ações do documento')), {once:true});
-      script.src = new URL(path, document.baseURI).href;
-      doc.head.appendChild(script);
-    });
-    // Callers close the newly written document in the same turn. Inserting a script
-    // before that close can leave its fetch attached to the old parser and prevent
-    // its load event. Start loading after the caller has closed the document.
-    const ready = Promise.resolve().then(() => load('src/ui/strict-actions.js'))
-      .then(() => load('src/ui/strict-actions.generated.js'));
-    win.softDocumentReady = ready;
+    if (!printSweep) printSweep = setInterval(() => {
+      for (const [popup, entry] of printWindows) if (popup.closed) entry.invalidate();
+      if (!printWindows.size) { clearInterval(printSweep); printSweep = null; }
+    }, 1000);
+    // This promise lives in the opener: navigation replaces the popup's global.
     ready.catch(error => console.error('Documento de impressão não carregou', error));
     return ready;
   }
@@ -165,5 +201,10 @@ window.SoftActions = (() => {
     templates=nextTemplates; handlers=nextHandlers;
     if (events) eventSelector=events.map(event => '[data-soft-on' + event + ']').join(',');
     scan(document);
+  }, isBuild: token => token === buildToken,
+  isPrintCurrent(win, nonce) {
+    const entry = printWindows.get(win);
+    return !!entry && entry.nonce === nonce && !win.closed &&
+      typeof contextoAba !== 'undefined' && contextoAba.corresponde(entry.context);
   }, html, scan, createStylesheet, sanitizeHTML, writeDocument});
 })();

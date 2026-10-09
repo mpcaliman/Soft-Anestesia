@@ -67,5 +67,11 @@ assert(buildInfo.csp?.actions > 1000, 'build precisa registrar a compilação de
 const actions = await readFile(resolve(distDir, 'src/ui/strict-actions.js'), 'utf8');
 assert.doesNotMatch(actions, /\beval\s*\(|\b(?:new\s+)?Function\s*\(/,
   'dispatcher não pode compilar dados em JavaScript');
+const printShell = await readFile(resolve(distDir, 'print-shell.html'), 'utf8');
+assert.match(printShell, /Content-Security-Policy/, 'shell de impressão precisa declarar sua própria CSP');
+assert.doesNotMatch(printShell, /unsafe-inline|unsafe-eval|\son[a-z]+\s*=|<style\b/i,
+  'shell não pode depender de scripts, eventos ou estilos inline');
+for (const match of printShell.matchAll(/<script\b([^>]*)>/gi))
+  assert.match(match[1], /\bsrc=/i, 'scripts do shell precisam ser arquivos externos');
 
 console.log('✓ dist/ contém somente os artefatos públicos esperados e íntegros');

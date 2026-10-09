@@ -6,6 +6,24 @@
    PRINT PREVIEW — pré-visualização de impressão
 ============================================================================ */
 const printPreview = {
+  /* Adendos pertencem ao registro aberto, não aos campos editáveis do formulário. */
+  _registroDoFormulario(mod) {
+    try {
+      const formId = { pre: 'form-pre', consulta: 'form-consulta', anestesia: 'form-anestesia',
+        recuperacao: 'form-recuperacao', risco: 'form-risco' }[mod];
+      if (!formId) return null;
+      const form = document.getElementById(formId);
+      if (!form) return null;
+      const id = (form.querySelector('[name="_id"]') || {}).value ||
+        (form.querySelector('[name="id"]') || {}).value || '';
+      return id ? store.getById(mod, id) : null;
+    } catch (e) { return null; }
+  },
+  _adendosDoFormulario(mod) {
+    const registro = printPreview._registroDoFormulario(mod);
+    if (!registro) return '';
+    try { return adendos.htmlParaImpressao(registro) || ''; } catch (e) { return ''; }
+  },
   abrir() {
     try {
       printPreview._nomeArquivoOverride = null;
@@ -30,7 +48,7 @@ const printPreview = {
       const formMapVer = { pre: 'form-pre', consulta: 'form-consulta', anestesia: 'form-anestesia', recuperacao: 'form-recuperacao', termo: 'form-termo', prescricao: 'form-prescricao', risco: 'form-risco' };
       printPreview._verCtx = formMapVer[mod] ? { mod, formId: formMapVer[mod] } : null;
 
-      const html = builder();
+      const html = builder() + printPreview._adendosDoFormulario(mod);
       const ppp = document.getElementById('ppp');
       if (!ppp) { toast('Erro: container de preview não encontrado', 'error'); return; }
       ppp.innerHTML = html;
@@ -151,7 +169,7 @@ const printPreview = {
       if (!temPre && !temTermo) { toast('Nada para imprimir', 'warn'); return; }
 
       const partes = [];
-      if (temPre) partes.push(printPreview._buildPre());
+      if (temPre) partes.push(printPreview._buildPre() + printPreview._adendosDoFormulario('pre'));
       if (temTermo) {
         if (partes.length) {
           partes.push('<div class="pp-quebra" style="page-break-before:always;break-before:page"></div>');
@@ -201,8 +219,8 @@ const printPreview = {
           return;
         }
       }
-      const htmlFicha = printPreview._buildAnestesia();
-      const htmlSrpa = printPreview._buildRecuperacao();
+      const htmlFicha = printPreview._buildAnestesia() + printPreview._adendosDoFormulario('anestesia');
+      const htmlSrpa = printPreview._buildRecuperacao() + printPreview._adendosDoFormulario('recuperacao');
       printPreview._verCtx = { mod: 'anestesia', formId: 'form-anestesia' };
       const ppp = document.getElementById('ppp');
       if (!ppp) { toast('Erro: container de preview não encontrado', 'error'); return; }
@@ -369,7 +387,7 @@ ${TAG_CLOSE_HTML}`;
         win.document.close();
         win.document.title = titulo;
         Promise.resolve(documentReady).then(() => {
-          setTimeout(() => { win.focus(); win.print(); }, 300);
+          setTimeout(() => { if (!win.closed) { win.focus(); win.print(); } }, 300);
         }).catch(() => toast('O documento não carregou. Tente imprimir novamente.', 'error'));
         toast('Diálogo de impressão sendo aberto — escolha a impressora ou "Salvar em PDF".', 'success');
         return;
