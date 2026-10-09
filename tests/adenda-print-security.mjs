@@ -132,6 +132,37 @@ assert.equal(submitted._retificacao.campos._patientRef,undefined);
 assert.equal(submitted._retificacao.campos.assinatura_dataurl,undefined);
 assert.equal(engine.vigente('pre',records[0]).lab_hb,'15,0','in-flight data is not a confirmed clinical value');
 
+// Reopen/save round trips may populate empty rows and recalculate summaries.
+// Neither action is a new clinical decision. Real fluid input and long-note
+// changes still create complete append-only proposals.
+const originalRecord=records[0];
+const roundtrip={_id:'synthetic-roundtrip',_finalizado:true,
+  paciente:{nome:'Paciente Sintético',peso:70},
+  fluidos:{cristaloides:'1000',observacoes:'Fluidoterapia sintética original'},
+  conclusao:{descricao_livre:'A'.repeat(240)},_labExtras:[{nome:'Exame sintético',valor:'1'}],_adendos:[]};
+records[0]=roundtrip;
+const restored={...roundtrip,paciente:{nome:'Paciente Sintético',peso:'70',nascimento:''},
+  monitorizacao:{monitores:[],dispositivos:[]},medicacoes:[{hora:'',nome:'',dose:''}],
+  fluidos:{...roundtrip.fluidos,total_entradas:'1000 mL',total_saidas:'0 mL',balanco:'1000 mL',
+    total_infundido:'1000 mL',deficit_acum:'0 mL',reposicao_sug:'sem déficit relevante',insens_total:''}};
+const noticesBefore=cloudNotifications;
+engine.salvarComoCorrecao('anestesia',roundtrip,restored);
+assert.equal(roundtrip._adendos.length,0,'reopening and saving unchanged data does not create a correction');
+assert.equal(cloudNotifications,noticesBefore);
+engine.salvarComoCorrecao('anestesia',roundtrip,{...restored,
+  fluidos:{...restored.fluidos,cristaloides:'1500',hidratacao:[{hora:'12:00',tipo:'Cristaloide',volume:'500'}],
+    observacoes:'Volume clínico sintético revisto',total_entradas:'1500 mL'},
+  conclusao:{descricao_livre:'B'.repeat(240)},_labExtras:[{nome:'Exame sintético',valor:2}]});
+assert.equal(roundtrip._adendos.length,1);
+const changedClinical=roundtrip._adendos[0]._retificacao.campos;
+assert.equal(changedClinical.fluidos.cristaloides,'1500');assert.equal(changedClinical.fluidos.total_entradas,'1500 mL');
+assert.equal(changedClinical.fluidos.hidratacao[0].volume,'500');
+assert.equal(changedClinical.conclusao.descricao_livre,'B'.repeat(240),
+  'long notes must be compared in full, never through a truncated display diff');
+assert.equal(changedClinical._labExtras[0].valor,2,'structured clinical extras preserve their JSON types');
+assert.equal(roundtrip.fluidos.cristaloides,'1000');assert.equal(roundtrip.conclusao.descricao_livre,'A'.repeat(240));
+records[0]=originalRecord;
+
 const forged={...first,id:'forged-new',_retificacao:{...first._retificacao,campos:{lab_hb:'forged-value'}}};
 assert.equal(engine.vigente('pre',{...signed,_adendos:[forged]}).lab_hb,'13,2',
   'serialized parent JSON cannot confer server receipt authority');

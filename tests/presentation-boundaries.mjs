@@ -1178,6 +1178,57 @@ assert.equal((printedDocument.match(/VERSÃO ATUAL — RETIFICADA/g) || []).leng
 actualPrint.abrirConjunto(); actualPrint.imprimir();
 assert(printedDocument.includes('Paciente sintético vigente anestesia') && printedDocument.includes('Paciente sintético vigente recuperacao'));
 assert.equal((printedDocument.match(/VERSÃO ATUAL — RETIFICADA/g) || []).length, 2);
+
+/* Fichas finalizadas antigas guardavam somente as seções preenchidas. A
+   impressão conjunta real deve preservar esses campos/adendos e deixar as
+   seções ausentes vazias, mesmo com outro conteúdo no formulário aberto. */
+for (const complemento of [{}, { pre_anestesico: null, tecnica: null, monitorizacao: null,
+  fluidos: null, intercorrencias: null, transferencia: null, conclusao: null,
+  eventos: null, medicacoes: null, sinais_vitais: null }]) {
+  const ficha = freezePrintRecord({ _id: 'ficha-finalizada-esparsa', _finalizado: true,
+    paciente: { nome: 'Paciente sintético de ficha antiga' }, procedimento: { data: '2026-10-09', descricao: 'Procedimento sintético antigo' },
+    _adendos: [{ id: 'adendo-ficha-esparsa', autor: 'Autor sintético da ficha', data: '2026-10-09T12:00:00Z',
+      texto: 'Complementação sintética da ficha antiga' }], ...complemento });
+  const srpa = freezePrintRecord({ _id: 'srpa-finalizada-esparsa', _finalizado: true,
+    nome: 'Paciente sintético de ficha antiga', observacoes: 'Observação sintética original da SRPA',
+    _adendos: [{ id: 'adendo-srpa-esparsa', autor: 'Autor sintético da SRPA', data: '2026-10-09T12:01:00Z',
+      texto: 'Complementação sintética da SRPA antiga' }] });
+  printRecords.set('anestesia|' + ficha._id, ficha);
+  printRecords.set('recuperacao|' + srpa._id, srpa);
+  printForms.get('anestesia')._id.value = ficha._id;
+  printForms.get('recuperacao')._id.value = srpa._id;
+  const antes = JSON.stringify([ficha, srpa]);
+  renderingCurrentVersion = true;
+  try { actualPrint.abrirConjunto(); actualPrint.imprimir(); } finally { renderingCurrentVersion = false; }
+  assert(printedDocument.includes('Paciente sintético de ficha antiga') && printedDocument.includes('Procedimento sintético antigo'),
+    'conjunto deve imprimir dados efetivamente presentes na ficha finalizada esparsa');
+  assert(printedDocument.includes('Complementação sintética da ficha antiga') && printedDocument.includes('Complementação sintética da SRPA antiga'),
+    'ficha esparsa não pode impedir a composição dos dois adendos corretos');
+  assert(printedDocument.includes('Autor sintético da ficha') && printedDocument.includes('Autor sintético da SRPA'));
+  assert(printedDocument.includes('Observação sintética original da SRPA') && printedDocument.includes('2ª parte — Recuperação pós-anestésica'));
+  assert.equal((printedDocument.match(/ADENDOS \/ CORREÇÕES/g) || []).length, 2);
+  assert(!printedDocument.includes('Paciente A') && !printedDocument.includes('VERSÃO ATUAL — RETIFICADA'),
+    'seções ausentes não podem herdar paciente do formulário nem retificações de outro registro');
+  assert.equal(JSON.stringify([ficha, srpa]), antes, 'normalização de apresentação preserva os originais esparsos');
+}
+/* As duas conversões já existentes na restauração da ficha devem chegar ao
+   papel também pela leitura direta, sem passar pelo formulário. */
+const legacyExamStart = html.indexOf('  exames: {', html.indexOf('const anestesia = {'));
+const legacyExamEnd = html.indexOf('\n  },', legacyExamStart);
+assert(legacyExamStart >= 0 && legacyExamEnd > legacyExamStart);
+vm.runInNewContext('anestesia.exames = ' + html.slice(legacyExamStart + '  exames: '.length, legacyExamEnd + '\n  }'.length) + ';',
+  actualPrintSandbox, { filename: 'real-legacy-exam-provider.js' });
+const legacyFicha = freezePrintRecord({ _id: 'ficha-com-exames-antigos', _finalizado: true,
+  paciente: { nome: 'Paciente sintético de registro legado', origem: 'Procedência sintética legada' },
+  exames: [{ hora: '08:10', tipo: 'Gasometria arterial', resultado: 'Resultado sintético legado: pH 7,40' }] });
+printRecords.set('anestesia|' + legacyFicha._id, legacyFicha);
+printForms.get('anestesia')._id.value = legacyFicha._id;
+const legacyBeforePrinting = JSON.stringify(legacyFicha);
+const legacyPrinted = actualPrint._comporDocumento('anestesia', realPrintBuilders.get('anestesia').builder);
+assert(legacyPrinted.includes('Procedência sintética legada'), 'alias paciente.origem conhecido deve conservar a procedência no papel');
+assert(legacyPrinted.includes('Gasometria arterial') && legacyPrinted.includes('Resultado sintético legado: pH 7,40'),
+  'provider real _migrarAntigos/listar deve conservar os exames da versão com tabela separada');
+assert.equal(JSON.stringify(legacyFicha), legacyBeforePrinting, 'migração de apresentação não pode alterar o registro legado');
 printForms.get('pre')._id.value = '';
 actualPrintSandbox.utils.formData = () => ({ nome: 'Paciente sintético ainda não salvo' });
 actualPrintSandbox.state.currentModule = 'pre'; actualPrint.abrir(); actualPrint.imprimir();

@@ -1453,7 +1453,18 @@ ${TAG_CLOSE_HTML}`;
   },
 
   _buildAnestesia() {
-    const d = printPreview._dadosDoFormulario('anestesia', () => anestesia.coletarEstruturado());
+    const d = { ...printPreview._dadosDoFormulario('anestesia', () => anestesia.coletarEstruturado()) };
+    /* Fichas antigas podem guardar apenas as seções preenchidas. Ausência
+       permanece vazia no papel; nunca se completa com o formulário editável. */
+    for (const key of ['paciente', 'procedimento', 'pre_anestesico', 'tecnica',
+      'monitorizacao', 'fluidos', 'intercorrencias', 'transferencia', 'conclusao']) {
+      if (!d[key] || typeof d[key] !== 'object' || Array.isArray(d[key])) d[key] = {};
+    }
+    for (const key of ['eventos', 'medicacoes', 'sinais_vitais']) {
+      if (!Array.isArray(d[key])) d[key] = [];
+    }
+    d.paciente = { ...d.paciente, acomodacao: d.paciente.acomodacao || d.paciente.origem };
+    if (Array.isArray(d.exames) && d.exames.length) d.eventos = d.eventos.concat(anestesia.exames._migrarAntigos(d));
     const p = d.paciente, pr = d.procedimento, pa = d.pre_anestesico, tc = d.tecnica, mn = d.monitorizacao;
     /* Topo enxuto: logo à esquerda e, centralizado, só o título. Paciente,
        data e procedimento ficam nas seções de identificação/procedimento —

@@ -21490,13 +21490,44 @@ const adendos = (() => {
     form.dataset.retificacaoRegistro = String(rec && rec._id || '');
     form.dataset.retificacaoBaseId = estado.headId;
   },
+  _clinicoComparavel(valor) {
+    if (valor == null) return '';
+    if (typeof valor !== 'object') return String(valor).trim() ? String(valor) : '';
+    if (Array.isArray(valor)) return valor.map(adendos._clinicoComparavel).filter(v =>
+      v !== '' && (typeof v !== 'object' || Object.keys(v).length));
+    const normalizado = {};
+    for (const k of Object.keys(valor).sort()) {
+      const v = adendos._clinicoComparavel(valor[k]);
+      if (v !== '' && (typeof v !== 'object' || Object.keys(v).length)) normalizado[k] = v;
+    }
+    return normalizado;
+  },
+  _mudouCampoClinico(chave, antes, depois) {
+    if (chave.startsWith('_')) {
+      const vazio = v => v == null || v === '' || typeof v === 'object' && !Object.keys(v).length;
+      return !(vazio(antes) && vazio(depois)) && !adendos._igualJson(antes, depois);
+    }
+    /* A restauração recalcula estes sete resumos sem nova conduta clínica.
+       Volumes digitados, perdas, hidratação e demais dados continuam comparados. */
+    const resumir = valor => {
+      if (chave !== 'fluidos' || !valor || typeof valor !== 'object') return valor;
+      const copia = Object.assign({}, valor);
+      ['insens_total', 'total_entradas', 'total_saidas', 'balanco', 'total_infundido', 'deficit_acum', 'reposicao_sug']
+        .forEach(k => delete copia[k]);
+      return copia;
+    };
+    const a = adendos._clinicoComparavel(resumir(antes));
+    const b = adendos._clinicoComparavel(resumir(depois));
+    const vazio = v => v === '' || typeof v === 'object' && !Object.keys(v).length;
+    return !(vazio(a) && vazio(b)) && !adendos._igualJson(a, b);
+  },
   _camposRetificacao(vigente, novo) {
     const campos = {};
     for (const k of Object.keys(novo || {})) {
       if (adendos._campoProtegido(k)) continue;
       try {
         const valor = adendos._jsonClinico(novo[k], 1);
-        if (!adendos._igualJson(vigente[k], valor)) campos[k] = valor;
+        if (adendos._mudouCampoClinico(k, vigente[k], valor)) campos[k] = valor;
       } catch (e) { /* Metadados aninhados não fazem parte de uma retificação. */ }
     }
     return campos;
