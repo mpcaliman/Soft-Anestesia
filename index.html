@@ -4695,7 +4695,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-09a</b><br>
+    v7.1 · build <b id="build-tag">2026-10-09b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -26078,6 +26078,10 @@ const adendos = {
     toast('📝 Adendo adicionado');
   },
 
+  _autor() {
+    try { const u = auth.usuarioAtual(); return (u && (u.nome || u.usuario)) || ''; } catch (e) { return ''; }
+  },
+
   /* Anexa um adendo por código (usado pelo modal e pela CORREÇÃO automática) */
   registrarTexto(mod, id, texto) {
     const lista = store.list(mod);
@@ -26138,43 +26142,32 @@ const adendos = {
     });
     return linhas;
   },
-  /* ---- IDENTIFICAÇÃO: erro de digitação se CORRIGE, não se "adenda" ----
-     O conteúdo clínico de um registro finalizado é imutável (a correção vira
-     adendo). Mas nome, nascimento, CPF, prontuário e convênio são a etiqueta
-     do documento: se o nome saiu "Maria dajida" em vez de "Maria dajuda",
-     manter o erro no original espalha o engano — o cadastro fica errado, a
-     ficha carrega errada e o histórico da paciente se divide em duas pessoas.
-     Estes campos são corrigidos no próprio registro, e a mudança fica
-     registrada no adendo do mesmo jeito. */
-  CAMPOS_IDENT: ['nome', 'paciente_nome', 'nascimento', 'paciente_nasc', 'cpf', 'paciente_cpf',
-                 'prontuario', 'convenio', 'plano', 'carteirinha', 'nome_mae', 'sexo', 'paciente_sexo'],
-  _ehIdent(chave) { return adendos.CAMPOS_IDENT.indexOf(String(chave)) >= 0; },
-  /* Copia para `orig` os campos de identificação que mudaram em `novo`.
-     Devolve as linhas "campo: antes → depois" do que foi corrigido. */
-  _aplicarIdentificacao(orig, novo, prefixo) {
-    const aplicadas = [];
-    if (!orig || !novo || typeof orig !== 'object' || typeof novo !== 'object') return aplicadas;
-    Object.keys(novo).forEach(k => {
-      if (k.startsWith('_')) return;
-      const vn = novo[k], vo = orig[k];
-      const rot = (prefixo ? prefixo + ' · ' : '') + k.replace(/_/g, ' ');
-      if (vn && typeof vn === 'object' && !Array.isArray(vn)) {
-        if (vo && typeof vo === 'object') aplicadas.push(...adendos._aplicarIdentificacao(vo, vn, rot));
-        return;
-      }
-      if (!adendos._ehIdent(k)) return;
-      const a = vo == null ? '' : String(vo), b = vn == null ? '' : String(vn);
-      if (a === b || !b.trim()) return;
-      orig[k] = vn;
-      aplicadas.push('• ' + rot + ': "' + (a || '—') + '" → "' + b + '"');
-    });
-    return aplicadas;
-  },
+  /* Houve aqui uma lista de campos de "identificação" (nome, CPF, convênio…)
+     que eram os ÚNICOS corrigidos no próprio registro, enquanto o conteúdo
+     clínico ficava congelado e a mudança virava texto de adendo. A divisão
+     não se sustentou: um hemoglobina velho no campo é tão perigoso quanto um
+     nome errado na etiqueta. Hoje a retificação atualiza o documento inteiro
+     e o que mudou fica no histórico, então a exceção não tem mais objeto. */
   _nomeDoRegistro(rec) {
     if (!rec) return '';
     return (rec.paciente && rec.paciente.nome) || rec.paciente_nome || rec.nome || '';
   },
 
+  /* RETIFICAR NÃO É ANEXAR UM LOG AO DOCUMENTO.
+
+     A versão anterior guardava o registro congelado e jogava as mudanças num
+     adendo com o diff campo a campo. Com isso, exames que chegaram depois da
+     pré ficavam escritos como `lab hb: "13,2" → "14,6"` no fim da folha, e os
+     campos de laboratório continuavam mostrando o valor velho. Quem lê a
+     folha antes de anestesiar precisa dos valores ATUAIS no lugar deles, não
+     de um extrato de alterações para conferir à mão.
+
+     A regra correta de prontuário não é "o documento não muda": é "nada se
+     perde e tudo fica datado e assinado". Isso continua valendo, por outro
+     caminho — cada gravação cria uma VERSÃO (store._saveVersion), a auditoria
+     registra quem fez, e a retificação vira uma linha no histórico com autor
+     e hora. O que muda é que o corpo do documento passa a mostrar o que vale
+     hoje. */
   salvarComoCorrecao(mod, previo, dataNovo) {
     const linhas = adendos.diffRegistro(previo, dataNovo);
     try { markClean(); } catch (e) {}
@@ -26182,44 +26175,37 @@ const adendos = {
       toast('Nenhuma alteração em relação ao registro original — nada a corrigir.', 'warn');
       return true;
     }
-    /* 1) identificação: corrige no próprio registro (e propaga o nome) */
     const nomeAntes = adendos._nomeDoRegistro(previo);
-    const lista = store.list(mod);
-    const rec = lista.find(x => x._id === previo._id) || previo;
-    const aplicadas = adendos._aplicarIdentificacao(rec, dataNovo, '');
-    let propagou = null;
-    if (aplicadas.length) {
-      store.setList(mod, lista);
-      try { store.save(mod, rec); } catch (e) {}            /* sobe para a nuvem */
+    /* 1) O REGISTRO PASSA A VALER COM OS DADOS NOVOS. A versão anterior fica
+       guardada pelo versionamento, que é o que garante o "nada se perde". */
+    const atualizado = Object.assign({}, previo, dataNovo);
+    atualizado._id = previo._id;
+    atualizado._finalizado = true;
+    atualizado._retificadoEm = new Date().toISOString();
+    atualizado._retificadoPor = adendos._autor();
+    atualizado._retificacoes = (previo._retificacoes || 0) + 1;
+    let rec = atualizado;
+    try { rec = store.save(mod, atualizado); } catch (e) {}
+    /* nome corrigido acompanha o cadastro e os demais registros */
+    try {
       const nomeDepois = adendos._nomeDoRegistro(rec);
       if (nomeAntes && nomeDepois && nomeAntes !== nomeDepois) {
-        try { propagou = pacientes.renomear(nomeAntes, nomeDepois, { exceto: { mod, id: rec._id } }); } catch (e) {}
+        pacientes.renomear(nomeAntes, nomeDepois, { exceto: { mod, id: rec._id } });
       }
-      /* O conteúdo clínico é imutável, mas a identificação corrigida vale
-         também para a cobrança: a linha financeira já vinculada acompanha a
-         correção, em vez de ficar com o dado errado. Não cria linha nova —
-         só atualiza o que já existe. */
-      try {
-        if (store.list('financeiro').some(x => x._origemId === rec._id)) fin.fromDoc(mod, rec);
-      } catch (e) {}
-    }
-    /* 2) o resto vira adendo, com o original preservado */
+    } catch (e) {}
+    /* a cobrança já vinculada acompanha a retificação, sem criar linha nova */
+    try {
+      if (store.list('financeiro').some(x => x._origemId === rec._id)) fin.fromDoc(mod, rec);
+    } catch (e) {}
+
+    /* 2) o QUE mudou fica no histórico — na tela, não no corpo da folha */
     const MAX = 40;
     const corpo = linhas.slice(0, MAX).join('\n') +
       (linhas.length > MAX ? '\n… e mais ' + (linhas.length - MAX) + ' alteração(ões).' : '');
-    const cabecalho = aplicadas.length
-      ? 'CORREÇÃO (o conteúdo clínico original permanece como estava; os dados de identificação abaixo foram corrigidos no registro):\n' +
-        aplicadas.join('\n') + '\n— demais alterações registradas:\n'
-      : 'CORREÇÃO (edição direta sobre o registro finalizado — o original permanece como estava):\n';
-    adendos.registrarTexto(mod, previo._id, cabecalho + corpo);
-    if (aplicadas.length) {
-      const extra = (propagou && (propagou.registros || propagou.cadastro))
-        ? ' (nome atualizado também no cadastro e em ' + (propagou.registros || 0) + ' registro(s))' : '';
-      toast('✅ Identificação corrigida' + extra + ' — o conteúdo clínico virou CORREÇÃO abaixo do original');
-    } else {
-      toast('📝 Original preservado — as alterações foram salvas como CORREÇÃO abaixo do registro');
-    }
-    try { setSavedStatus('Correção registrada às ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })); } catch (e) {}
+    adendos.registrarTexto(mod, previo._id,
+      'RETIFICAÇÃO (o documento passou a valer com os dados abaixo; a versão anterior fica no histórico):\n' + corpo);
+    toast('✅ Registro retificado — os campos passam a mostrar os dados novos, e o que mudou fica no histórico');
+    try { setSavedStatus('Retificado às ' + new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })); } catch (e) {}
     return true;
   },
   async _push(mod, rec, ad) {
@@ -26248,7 +26234,7 @@ const adendos = {
     if (!host) return;
     const rec = adendos._rec(mod);
     const lista = (rec && rec._adendos) || [];
-    host.innerHTML = lista.length ? lista.map(adendos._render).join('') : '<span class="no-print" style="font-size:.8rem;color:var(--text-mute)">Nenhum adendo. Use “Adicionar adendo/correção” para incluir uma correção sem alterar o registro original.</span>';
+    host.innerHTML = lista.length ? lista.map(adendos._render).join('') : '<span class="no-print" style="font-size:.8rem;color:var(--text-mute)">Nenhum adendo. Use “Adicionar adendo/correção” para escrever uma observação à parte; para corrigir um campo, edite-o e salve — o campo passa a valer e a alteração entra aqui.</span>';
     const sec = document.getElementById('sec-adendos-' + mod);
     if (sec) sec.classList.toggle('sem-adendos', lista.length === 0);
   },
@@ -48457,10 +48443,22 @@ const printPreview = {
       return id ? store.getById(mod, id) : null;
     } catch (e) { return null; }
   },
-  _adendosDoFormulario(mod) {
+  /* Uma linha, no rodapé: o documento foi retificado, quando e por quem.
+     Não é o conteúdo da retificação — esse já está nos campos acima. É o
+     aviso de que a folha não é a primeira versão, que é o que um documento
+     clínico precisa declarar. */
+  _carimboRetificacao(mod) {
     const rec = printPreview._registroDoFormulario(mod);
-    if (!rec) return '';
-    try { return adendos.htmlParaImpressao(rec) || ''; } catch (e) { return ''; }
+    if (!rec || !rec._retificadoEm) return '';
+    const E = utils.escapeHTML;
+    let quando = '';
+    try { quando = new Date(rec._retificadoEm).toLocaleString('pt-BR'); } catch (e) {}
+    const n = rec._retificacoes || 1;
+    return '<div class="print-retificado" style="margin-top:10px;padding-top:5px;border-top:1px solid #bbb;font-size:7.5pt;color:#555">' +
+      'Documento retificado em ' + E(quando) +
+      (rec._retificadoPor ? ' por ' + E(rec._retificadoPor) : '') +
+      (n > 1 ? ' · ' + n + ' retificações' : '') +
+      '. Os dados acima são os vigentes; o histórico das alterações está no sistema.</div>';
   },
 
   abrir() {
@@ -48488,18 +48486,20 @@ const printPreview = {
       printPreview._verCtx = formMapVer[mod] ? { mod, formId: formMapVer[mod] } : null;
 
       let html = builder();
-      /* OS ADENDOS TÊM DE SAIR NO PAPEL.
+      /* A FOLHA É UNIFORME.
 
-         Editar um registro FINALIZADO não altera o original — vira CORREÇÃO,
-         como manda um prontuário. Só que a correção nunca chegava à
-         impressão: `adendos.htmlParaImpressao` existia e não era chamada por
-         ninguém. A janela de adendos prometia, com todas as letras, que o
-         adendo "aparece na ficha e no PDF"; não aparecia.
+         Tentei antes resolver isto anexando o histórico de alterações ao fim
+         da impressão. Ficou pior: a folha saía com os campos de laboratório
+         mostrando o valor velho e, no rodapé, uma lista de
+         `lab hb: "13,2" → "14,6"` para o leitor conferir à mão. Ninguém lê
+         uma pré-anestésica assim — e quem está prestes a anestesiar menos
+         ainda.
 
-         O resultado era o pior possível num documento clínico: a folha saía
-         com a versão antiga e SEM dizer que havia mais. Caso real — exames que
-         chegaram depois da pré ficaram de fora da folha que a equipe lê. */
-      try { html += printPreview._adendosDoFormulario(mod); } catch (e) {}
+         O documento mostra o que VALE HOJE, cada dado no seu campo. A
+         retificação não some: ela vira uma linha discreta no rodapé dizendo
+         que existe e quando foi, e o histórico completo fica na tela, com
+         autor e hora, além das versões guardadas. */
+      try { html += printPreview._carimboRetificacao(mod); } catch (e) {}
       const ppp = document.getElementById('ppp');
       if (!ppp) { toast('Erro: container de preview não encontrado', 'error'); return; }
       ppp.innerHTML = html;
@@ -48599,7 +48599,7 @@ const printPreview = {
       if (!temPre && !temTermo) { toast('Nada para imprimir', 'warn'); return; }
 
       const partes = [];
-      if (temPre) partes.push(printPreview._buildPre() + printPreview._adendosDoFormulario('pre'));
+      if (temPre) partes.push(printPreview._buildPre() + printPreview._carimboRetificacao('pre'));
       if (temTermo) {
         if (partes.length) {
           partes.push('<div class="pp-quebra" style="page-break-before:always;break-before:page"></div>');

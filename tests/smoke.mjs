@@ -2338,8 +2338,16 @@ await test('Rascunhos: zera após finalizar+imprimir e nunca capturam registro f
   await page.close();
 });
 
-/* 45) Editar registro FINALIZADO → salva como CORREÇÃO (só o diff), original intacto */
-await test('Correção: editar e salvar um registro finalizado gera adendo com o diff; original não muda', async () => {
+/* 45) Editar registro FINALIZADO → RETIFICA: o campo passa a valer, o anterior fica no histórico
+   ------------------------------------------------------------------------------
+   Este teste exigia o contrário: que o registro NÃO mudasse e a correção
+   vivesse só como adendo. Era uma leitura errada da regra de prontuário.
+   A regra é "nada se perde e tudo fica datado e assinado" — não "nada muda".
+   Guardar o valor novo apenas no rodapé faz o campo mentir: quem abre a ficha
+   para anestesiar lê `alergias: Nega` de um paciente que tem alergia a
+   dipirona. Agora o campo passa a valer, e o valor anterior fica no histórico
+   (com autor e hora) e nas versões. */
+await test('Retificar registro finalizado: o campo passa a valer, o anterior fica no histórico', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
@@ -2352,13 +2360,18 @@ await test('Correção: editar e salvar um registro finalizado gera adendo com o
       && linhas.some(l => l.includes('campo novo') && l.includes('—') && l.includes('"apareceu"'))
       && !linhas.some(l => l.includes('• nome:'));
 
-    /* — salvarComoCorrecao: original intacto + adendo CORREÇÃO — */
+    /* — salvarComoCorrecao: o campo passa a valer + histórico com o que mudou — */
     adendos.salvarComoCorrecao('pre', reg, Object.assign({}, JSON.parse(JSON.stringify(reg)), { alergias: 'Dipirona' }));
     const depois = store.getById('pre', reg._id);
-    out.originalIntacto = depois.alergias === 'Nega' && depois._finalizado === true;
-    out.adendoCorrecao = (depois._adendos || []).length === 1
-      && /CORREÇÃO/.test(depois._adendos[0].texto)
+    out.campoPassouAValer = depois.alergias === 'Dipirona' && depois._finalizado === true;
+    out.marcadoComoRetificado = !!depois._retificadoEm && depois._retificacoes === 1;
+    out.historicoDoQueMudou = (depois._adendos || []).length === 1
+      && /RETIFICA/.test(depois._adendos[0].texto)
+      && depois._adendos[0].texto.includes('Nega')
       && depois._adendos[0].texto.includes('Dipirona');
+    let versoes = [];
+    try { versoes = store.listVersions('pre', reg._id) || []; } catch (e) { versoes = []; }
+    out.versaoAnterior = versoes.some(v => (v.snapshot || v || {}).alergias === 'Nega');
 
     /* — fluxo real na FICHA: finaliza, reabre, edita e clica Salvar — */
     location.hash = '#anestesia';
@@ -2377,11 +2390,11 @@ await test('Correção: editar e salvar um registro finalizado gera adendo com o
     anestesia.salvar();
     await new Promise(r => setTimeout(r, 300));
     const ficha = store.getById('anestesia', fichaId);
-    out.fichaOriginalIntacta = ficha.procedimento.descricao === 'Colecistectomia videolaparoscópica';
-    out.fichaCorrecao = (ficha._adendos || []).some(a => /CORREÇÃO/.test(a.texto)
+    out.fichaAtualizada = ficha.procedimento.descricao === 'Colecistectomia + biópsia hepática';
+    out.fichaHistorico = (ficha._adendos || []).some(a => /RETIFICA/.test(a.texto)
       && a.texto.includes('biópsia hepática') && a.texto.includes('descricao'));
 
-    /* — salvar SEM mudar nada não cria correção — */
+    /* — salvar SEM mudar nada não retifica nada — */
     anestesia.carregar(store.getById('anestesia', fichaId));
     await new Promise(r => setTimeout(r, 300));
     const nAntes = (store.getById('anestesia', fichaId)._adendos || []).length;
@@ -2394,11 +2407,13 @@ await test('Correção: editar e salvar um registro finalizado gera adendo com o
     return out;
   });
   assert(r.diff, 'o diff deveria listar só os campos alterados, com antes → depois');
-  assert(r.originalIntacto, 'o registro original deveria permanecer intacto');
-  assert(r.adendoCorrecao, 'as mudanças deveriam virar um adendo CORREÇÃO');
-  assert(r.fichaOriginalIntacta, 'no fluxo real, salvar uma ficha finalizada editada não pode sobrescrevê-la');
-  assert(r.fichaCorrecao, 'a edição da ficha deveria virar CORREÇÃO com o campo alterado');
-  assert(r.semMudancaSemCorrecao, 'salvar sem mudar nada não deveria criar correção');
+  assert(r.campoPassouAValer, 'o campo retificado tem de passar a valer — e o documento continua finalizado');
+  assert(r.marcadoComoRetificado, 'o registro fica marcado como retificado, com data e autor');
+  assert(r.historicoDoQueMudou, 'o que mudou (de → para) fica no histórico');
+  assert(r.versaoAnterior, 'a versão anterior continua guardada: nada se perde');
+  assert(r.fichaAtualizada, 'no fluxo real, salvar a ficha finalizada editada atualiza o campo dela');
+  assert(r.fichaHistorico, 'e o que mudou na ficha entra no histórico, datado e assinado');
+  assert(r.semMudancaSemCorrecao, 'salvar sem mudar nada não deveria criar retificação');
   await page.close();
 });
 
@@ -3661,13 +3676,16 @@ await test('Correção de identificação vale no registro, no cadastro e nas ou
     /* identificação: corrigida no próprio registro */
     out.nomeCorrigido = salvo.paciente.nome === certo;
     out.prontuarioCorrigido = salvo.paciente.prontuario === '12345';
-    /* conteúdo clínico: original preservado */
-    out.clinicoPreservado = salvo.pre_anestesico.asa === 'II';
-    /* tudo fica registrado no adendo */
+    /* conteúdo clínico: também passa a valer no campo dele */
+    out.clinicoAtualizado = salvo.pre_anestesico.asa === 'III';
+    /* o que havia antes continua guardado */
+    let versoes = [];
+    try { versoes = store.listVersions('anestesia', ficha._id) || []; } catch (e) { versoes = []; }
+    out.versaoAnterior = versoes.some(v => (((v.snapshot || v) || {}).pre_anestesico || {}).asa === 'II');
+    /* tudo fica registrado no histórico */
     const ad = (salvo._adendos || [])[0];
-    out.adendoRegistra = !!ad && /CORREÇÃO/.test(ad.texto) &&
+    out.adendoRegistra = !!ad && /RETIFICA/.test(ad.texto) &&
       ad.texto.indexOf(certo) >= 0 && /asa/i.test(ad.texto);
-    out.adendoExplica = !!ad && /identifica/i.test(ad.texto);
 
     /* cadastro e as outras fichas passam a usar o nome certo */
     out.cadastroCorrigido = (store.list('pacientes')[0] || {}).nome === certo;
@@ -3693,9 +3711,9 @@ await test('Correção de identificação vale no registro, no cadastro e nas ou
   });
   assert(r.nomeCorrigido, 'o nome deveria ser corrigido no próprio registro');
   assert(r.prontuarioCorrigido, 'os demais dados de identificação também');
-  assert(r.clinicoPreservado, 'o conteúdo clínico original deve permanecer intacto');
-  assert(r.adendoRegistra, 'o adendo deveria registrar a correção e a mudança clínica');
-  assert(r.adendoExplica, 'o adendo deveria explicar que a identificação foi corrigida no registro');
+  assert(r.clinicoAtualizado, 'a mudança clínica também passa a valer no campo dela, não só no rodapé');
+  assert(r.versaoAnterior, 'e o que havia antes continua guardado nas versões');
+  assert(r.adendoRegistra, 'o histórico deveria registrar a correção do nome e a mudança clínica');
   assert(r.cadastroCorrigido, 'o cadastro do paciente deveria passar a ter o nome certo');
   assert(r.outraFichaCorrigida, 'as outras fichas do paciente também');
   assert(r.umPacienteSo, 'a correção não pode criar um segundo paciente');
@@ -18890,76 +18908,86 @@ await test('Em máquina compartilhada, fechar a aba e reabrir não deixa o atend
   await page.close();
 });
 
-/* 254) A correção tem de sair no papel
+/* 254) Retificar é atualizar o documento, não anexar um log a ele
 
-   Caso real, com nome e tudo: "fiz o pré, ele enviou exames posteriormente,
-   aparece o histórico de alterações, mas na impressão está a versão antiga".
+   Primeiro eu fiz errado. O relato era: "fiz o pré, ele enviou exames
+   posteriormente, aparece o histórico de alterações, mas na impressão está a
+   versão antiga". Resolvi anexando o histórico ao fim da folha — e ficou
+   pior: os campos de laboratório continuavam com o valor velho e, no rodapé,
+   saía uma lista de `lab hb: "13,2" → "14,6"` para o leitor conferir à mão.
 
-   Editar um registro FINALIZADO não altera o original — vira CORREÇÃO, como
-   manda um prontuário, e isso está certo. O defeito é que a correção nunca
-   chegava à impressão: `adendos.htmlParaImpressao` existia no código e NÃO
-   ERA CHAMADA POR NINGUÉM. A janela de adendos prometia, com todas as
-   letras, que o adendo "aparece na ficha e no PDF".
+   A resposta dele foi certeira: "a impressão deve aparecer uniforme, com as
+   informações nos campos correspondentes". Ninguém lê uma pré-anestésica
+   como extrato de alterações — e quem está prestes a anestesiar menos ainda.
 
-   O resultado era o pior possível num documento clínico: a folha saía com a
-   versão antiga e SEM dizer que havia mais. No caso dele, os exames que
-   chegaram depois ficaram de fora da folha que a equipe lê. */
-await test('Adendos e correções saem na impressão, e a folha avisa que existem', async () => {
+   A regra de prontuário não é "o documento não muda": é "nada se perde e
+   tudo fica datado e assinado". O corpo passa a mostrar o que vale hoje; o
+   que mudou fica no histórico (na tela, com autor e hora) e nas versões; e a
+   folha declara, numa linha, que foi retificada. */
+await test('Retificação atualiza os campos do documento, e a folha sai uniforme', async () => {
   const page = await novaPagina();
-  const r = await page.evaluate(() => {
+  const r = await page.evaluate(async () => {
     const out = {};
-    store.setList('pre', [{
+    const original = {
       _id: 'preJ', nome: 'JOTENILDO JOSE PAIRANA DE SENA', _finalizado: true,
-      data: utils.hojeISO(),
-      _adendos: [{
-        id: 'ad1', data: new Date().toISOString(), autor: 'Dr. Marcelo',
-        texto: 'CORREÇÃO: exames trazidos depois — Hb 13,2; Plaq 210.000; ECG sem alterações.'
-      }]
-    }]);
+      data: utils.hojeISO(), lab_hb: '13,2', lab_ht: '39,6', lab_creat: '1,4'
+    };
+    store.setList('pre', [original]);
 
-    /* a tela abre o registro */
+    /* exames que chegaram depois */
+    const novos = Object.assign({}, original, {
+      lab_hb: '14,6', lab_ht: '43,5', lab_creat: '0,90',
+      lab_eco: 'FEVE 69%', lab_ecg: 'Ritmo sinusal'
+    });
+    adendos.salvarComoCorrecao('pre', original, novos);
+
+    /* ---- o REGISTRO passa a valer com os dados novos ---- */
+    const rec = store.getById('pre', 'preJ');
+    out.campoAtualizado = rec.lab_hb === '14,6' && rec.lab_ht === '43,5' && rec.lab_creat === '0,90';
+    out.campoNovoEntrou = rec.lab_eco === 'FEVE 69%' && rec.lab_ecg === 'Ritmo sinusal';
+    out.continuaFinalizado = rec._finalizado === true;
+    out.marcouRetificacao = !!rec._retificadoEm && rec._retificacoes === 1;
+
+    /* ---- nada se perde: a versão anterior fica guardada ---- */
+    let versoes = [];
+    try { versoes = store.listVersions('pre', 'preJ') || []; } catch (e) { versoes = []; }
+    out.versaoAnteriorGuardada = versoes.some(v => {
+      const snap = v.snapshot || v;
+      return snap && snap.lab_hb === '13,2';
+    });
+
+    /* ---- e o que mudou fica no histórico, datado e assinado ---- */
+    const ad = (rec._adendos || [])[0];
+    out.historicoRegistrado = !!ad && /RETIFICAÇÃO/.test(ad.texto) && /lab hb/.test(ad.texto);
+    out.historicoTemAutorEData = !!ad && !!ad.data;
+
+    /* ---- A FOLHA: campos atualizados, sem cartão de log ---- */
     try { ui.showModule('pre'); } catch (e) {}
     const f = document.getElementById('form-pre');
     let hid = f.querySelector('[name="_id"]');
     if (!hid) { hid = document.createElement('input'); hid.type = 'hidden'; hid.name = '_id'; f.appendChild(hid); }
     hid.value = 'preJ';
+    const carimbo = printPreview._carimboRetificacao('pre');
+    out.semCartaoDeLog = carimbo.indexOf('→') < 0 && !/ADENDOS \/ CORREÇÕES/.test(carimbo);
+    out.declaraQueFoiRetificado = /Documento retificado em/.test(carimbo)
+      && /dados acima são os vigentes/.test(carimbo);
 
-    /* ---- o registro é achado a partir do formulário ---- */
-    const rec = printPreview._registroDoFormulario('pre');
-    out.achouORegistro = !!rec && rec._id === 'preJ';
-
-    /* ---- e o bloco de adendos é montado ---- */
-    const bloco = printPreview._adendosDoFormulario('pre');
-    out.temBloco = bloco.indexOf('ADENDOS / CORREÇÕES') >= 0;
-    out.temOConteudo = bloco.indexOf('Hb 13,2') >= 0 && bloco.indexOf('ECG sem alterações') >= 0;
-    out.temAutorEData = bloco.indexOf('Dr. Marcelo') >= 0;
-    out.dizQueOOriginalEhODeCima = /original, preservado/i.test(bloco);
-    out.contaQuantos = /CORREÇÕES — 1/.test(bloco);
-
-    /* legível, não escondido em letra de rodapé: era 7,5pt */
-    const m = bloco.match(/font-size:(\d+(?:\.\d+)?)pt;margin-bottom:5px/);
-    out.tamanhoDeLeitura = !!m && parseFloat(m[1]) >= 9;
-
-    /* ---- sem adendo, nada é acrescentado ---- */
-    store.setList('pre', [{ _id: 'preJ', nome: 'Sem adendo', _finalizado: true }]);
-    out.semAdendoNaoPoluiu = printPreview._adendosDoFormulario('pre') === '';
-
-    /* ---- registro novo (sem id na tela) não quebra ---- */
-    hid.value = '';
-    out.semRegistroNaoQuebra = printPreview._adendosDoFormulario('pre') === '';
+    /* documento nunca retificado não ganha carimbo nenhum */
+    store.setList('pre', [{ _id: 'preJ', nome: 'Sem retificação', _finalizado: true }]);
+    out.semRetificacaoSemCarimbo = printPreview._carimboRetificacao('pre') === '';
 
     store.setList('pre', []);
     return out;
   });
-  assert(r.achouORegistro, 'a impressão precisa achar o registro aberto para buscar nele o que não mora no formulário');
-  assert(r.temBloco, 'a folha passa a ter a seção de ADENDOS / CORREÇÕES — ela existia no código e não era chamada por ninguém');
-  assert(r.temOConteudo, 'com o conteúdo da correção: eram os exames que chegaram depois');
-  assert(r.temAutorEData, 'datada e assinada, como manda um prontuário');
-  assert(r.dizQueOOriginalEhODeCima, 'e dizendo que o texto acima é o original preservado — senão parece contradição');
-  assert(r.contaQuantos, 'com o número de correções à vista no título');
-  assert(r.tamanhoDeLeitura, 'em tamanho de leitura: imprimir exame em 7,5pt é esconder com elegância');
-  assert(r.semAdendoNaoPoluiu, 'sem adendo, nada é acrescentado à folha');
-  assert(r.semRegistroNaoQuebra, 'e registro novo, ainda sem id, não quebra a impressão');
+  assert(r.campoAtualizado, 'os exames que chegaram depois passam a valer NO CAMPO deles — era isso que faltava');
+  assert(r.campoNovoEntrou, 'inclusive os que não existiam antes (ECO, ECG)');
+  assert(r.continuaFinalizado, 'e o documento continua finalizado: retificar não o reabre');
+  assert(r.marcouRetificacao, 'o registro fica marcado como retificado, com data e autor');
+  assert(r.versaoAnteriorGuardada, 'a versão anterior continua guardada — "nada se perde" é a regra, não "nada muda"');
+  assert(r.historicoRegistrado && r.historicoTemAutorEData, 'o que mudou fica no histórico, datado e assinado');
+  assert(r.semCartaoDeLog, 'a FOLHA não leva cartão de log nem lista de "de → para": ninguém lê uma pré assim');
+  assert(r.declaraQueFoiRetificado, 'ela declara, numa linha, que foi retificada e que os dados acima são os vigentes');
+  assert(r.semRetificacaoSemCarimbo, 'documento nunca retificado não ganha carimbo nenhum');
   await page.close();
 });
 
