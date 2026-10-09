@@ -4,7 +4,7 @@
 > retrato histórico e não representa o estado atual da execução. A branch de
 > teste foi publicada no PR [225](https://github.com/mpcaliman/Soft-Anestesia/pull/225).
 > A homologação registra 16 novas migrações (`0001`–`0013` e `0015`–`0017`),
-> além da pré-existente `0001_assinaturas`; `0014` foi recusada e `0018`–`0030`
+> além da pré-existente `0001_assinaturas`; `0014` foi recusada e `0018`–`0031`
 > permanecem ausentes. O runner de integração real não foi implantado nem
 > executado. A proteção remota de `main` permanece inativa; os controles
 > propostos no branch ainda não demonstram sua imposição em produção. Consulte

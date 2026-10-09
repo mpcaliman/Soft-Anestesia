@@ -6,11 +6,13 @@
    PRINT PREVIEW — pré-visualização de impressão
 ============================================================================ */
 const printPreview = {
+  _formularioPorModulo: { pre: 'form-pre', consulta: 'form-consulta', anestesia: 'form-anestesia',
+    recuperacao: 'form-recuperacao', risco: 'form-risco', termo: 'form-termo',
+    prescricao: 'form-prescricao', documentos: 'form-documentos' },
   /* Adendos pertencem ao registro aberto, não aos campos editáveis do formulário. */
   _registroDoFormulario(mod) {
     try {
-      const formId = { pre: 'form-pre', consulta: 'form-consulta', anestesia: 'form-anestesia',
-        recuperacao: 'form-recuperacao', risco: 'form-risco' }[mod];
+      const formId = printPreview._formularioPorModulo[mod];
       if (!formId) return null;
       const form = document.getElementById(formId);
       if (!form) return null;
@@ -22,7 +24,52 @@ const printPreview = {
   _adendosDoFormulario(mod) {
     const registro = printPreview._registroDoFormulario(mod);
     if (!registro) return '';
-    try { return adendos.htmlParaImpressao(registro) || ''; } catch (e) { return ''; }
+    try { return adendos.htmlParaImpressao(registro._finalizado ? adendos.vigente(mod, registro) : registro) || ''; } catch (e) { return ''; }
+  },
+  _registroFinalizado(mod) {
+    const registro = printPreview._registroDoFormulario(mod);
+    return registro && registro._finalizado ? registro : null;
+  },
+  /* Documento finalizado usa apenas a projeção dos adendos aceitos. O texto
+     ainda editável na tela não é uma nova versão assinada. */
+  _dadosDoFormulario(mod, coletar) {
+    const registro = printPreview._registroFinalizado(mod);
+    if (registro) return adendos.vigente(mod, registro);
+    return typeof coletar === 'function' ? coletar() : utils.formData(printPreview._formularioPorModulo[mod]);
+  },
+  _nomePacienteDoFormulario(mod) {
+    const finalizado = printPreview._registroFinalizado(mod);
+    if (finalizado) {
+      const vigente = adendos.vigente(mod, finalizado);
+      return mod === 'anestesia' ? (vigente.paciente || {}).nome || '' : vigente.nome || vigente.paciente_nome || '';
+    }
+    const form = document.getElementById(printPreview._formularioPorModulo[mod] || 'form-' + mod);
+    return (form && (form.querySelector('[name="nome"]') || form.querySelector('[name="paciente_nome"]')) || {}).value || '';
+  },
+  _versaoAtualDoFormulario(mod) {
+    const registro = printPreview._registroFinalizado(mod);
+    if (!registro || typeof adendos.estadoRetificacoes !== 'function') return '';
+    const estado = adendos.estadoRetificacoes(registro, mod);
+    const aplicadas = estado.aplicadas || [], conflitos = estado.conflitos || [], pendentes = estado.pendentes || [];
+    if (!aplicadas.length && !conflitos.length && !pendentes.length) return '';
+    const head = (registro._adendos || []).find(ad => ad && ad.id === estado.headId);
+    const data = head && (head._serverCreatedAt || head.data);
+    const autoria = head ? [head._authorId || head.autor || '', data ? adendos._fmtData(data) : ''].filter(Boolean).join(' · ') : '';
+    const titulo = aplicadas.length ? 'VERSÃO ATUAL — RETIFICADA' : 'VERSÃO ORIGINAL — RETIFICAÇÃO NÃO APLICADA';
+    const aviso = [conflitos.length ? conflitos.length + ' retificação(ões) em conflito' : '',
+      pendentes.length ? pendentes.length + ' retificação(ões) pendente(s) de confirmação' : ''].filter(Boolean).join('; ');
+    return '<div class="pp-retificacao' + (aviso ? ' pp-retificacao-alerta' : '') + '" style="border:1px solid #64748b;padding:6px 8px;margin:0 0 10px;font-size:9pt;line-height:1.4;break-inside:avoid">' +
+      '<strong>' + utils.escapeHTML(titulo) + '</strong>' +
+      (autoria ? '<div>' + utils.escapeHTML(autoria) + '</div>' : '') +
+      '<div>O registro original e o histórico de adendos permanecem preservados.</div>' +
+      (aviso ? '<div><strong>' + utils.escapeHTML(aviso) + '.</strong> Esses campos não foram incorporados ao documento.</div>' : '') + '</div>';
+  },
+  _comporDocumento(mod, builder) {
+    const anterior = printPreview._verCtx;
+    printPreview._verCtx = printPreview._formularioPorModulo[mod]
+      ? { mod, formId: printPreview._formularioPorModulo[mod] } : null;
+    try { return printPreview._versaoAtualDoFormulario(mod) + builder() + printPreview._adendosDoFormulario(mod); }
+    finally { printPreview._verCtx = anterior; }
   },
   abrir() {
     try {
@@ -45,10 +92,10 @@ const printPreview = {
       if (!builder) { toast('Pré-visualização não disponível neste módulo', 'warn'); return; }
 
       /* Contexto de versão p/ o carimbo do rodapé (só módulos de documento). */
-      const formMapVer = { pre: 'form-pre', consulta: 'form-consulta', anestesia: 'form-anestesia', recuperacao: 'form-recuperacao', termo: 'form-termo', prescricao: 'form-prescricao', risco: 'form-risco' };
+      const formMapVer = printPreview._formularioPorModulo;
       printPreview._verCtx = formMapVer[mod] ? { mod, formId: formMapVer[mod] } : null;
 
-      const html = builder() + printPreview._adendosDoFormulario(mod);
+      const html = printPreview._comporDocumento(mod, builder);
       const ppp = document.getElementById('ppp');
       if (!ppp) { toast('Erro: container de preview não encontrado', 'error'); return; }
       ppp.innerHTML = html;
@@ -61,7 +108,7 @@ const printPreview = {
       ];
       /* Tenta detectar profissional do form atual pelo _profissional_id ou pelo nome */
       let profissionalAtual = null;
-      const formMap = { pre: 'form-pre', consulta: 'form-consulta', anestesia: 'form-anestesia', recuperacao: 'form-recuperacao', termo: 'form-termo', prescricao: 'form-prescricao' };
+      const formMap = printPreview._formularioPorModulo;
       const formId = formMap[mod];
       if (formId) {
         const formEl = document.getElementById(formId);
@@ -128,7 +175,7 @@ const printPreview = {
       if (!ppp) { toast('Erro: container de preview não encontrado', 'error'); return; }
       const fPre = document.getElementById('form-pre');
       const fTermo = document.getElementById('form-termo');
-      const nomeDe = (f) => (f && f.querySelector('[name="nome"]') || {}).value || '';
+      const nomeDe = (f) => f ? printPreview._nomePacienteDoFormulario(f.id === 'form-pre' ? 'pre' : 'termo') : '';
       let nome = nomeDe(fPre) || nomeDe(fTermo);
       if (!nome) { toast('Preencha o nome do paciente antes de imprimir o conjunto', 'warn'); return; }
       const ctxPre = linker.contextoPaciente('pre');
@@ -169,13 +216,13 @@ const printPreview = {
       if (!temPre && !temTermo) { toast('Nada para imprimir', 'warn'); return; }
 
       const partes = [];
-      if (temPre) partes.push(printPreview._buildPre() + printPreview._adendosDoFormulario('pre'));
+      if (temPre) partes.push(printPreview._comporDocumento('pre', printPreview._buildPre));
       if (temTermo) {
         if (partes.length) {
           partes.push('<div class="pp-quebra" style="page-break-before:always;break-before:page"></div>');
           partes.push('<div class="pp-capitulo" style="margin:0 0 12px;padding:9px 14px;background:#eef2f7;border-left:5px solid #3b5b7e;font-weight:700;font-size:13pt;color:#22384f">2ª parte — Termo de consentimento (TCLE)</div>');
         }
-        partes.push(printPreview._buildTermo());
+        partes.push(printPreview._comporDocumento('termo', printPreview._buildTermo));
       }
       ppp.innerHTML = partes.join('');
       printPreview._verCtx = { mod: temPre ? 'pre' : 'termo', formId: temPre ? 'form-pre' : 'form-termo' };
@@ -200,8 +247,8 @@ const printPreview = {
     try {
       const fAna = document.getElementById('form-anestesia');
       const fSrpa = document.getElementById('form-recuperacao');
-      const nomeAna = (fAna && fAna.querySelector('[name="paciente_nome"]') || {}).value || '';
-      const nomeSrpa = (fSrpa && fSrpa.querySelector('[name="nome"]') || {}).value || '';
+      const nomeAna = printPreview._nomePacienteDoFormulario('anestesia');
+      const nomeSrpa = printPreview._nomePacienteDoFormulario('recuperacao');
       if (nomeAna && nomeSrpa) {
         const pacAna = linker.contextoPaciente('anestesia');
         const pacSrpa = linker.contextoPaciente('recuperacao');
@@ -219,8 +266,8 @@ const printPreview = {
           return;
         }
       }
-      const htmlFicha = printPreview._buildAnestesia() + printPreview._adendosDoFormulario('anestesia');
-      const htmlSrpa = printPreview._buildRecuperacao() + printPreview._adendosDoFormulario('recuperacao');
+      const htmlFicha = printPreview._comporDocumento('anestesia', printPreview._buildAnestesia);
+      const htmlSrpa = printPreview._comporDocumento('recuperacao', printPreview._buildRecuperacao);
       printPreview._verCtx = { mod: 'anestesia', formId: 'form-anestesia' };
       const ppp = document.getElementById('ppp');
       if (!ppp) { toast('Erro: container de preview não encontrado', 'error'); return; }
@@ -232,11 +279,7 @@ const printPreview = {
         '<div class="pp-capitulo" style="margin:14px 0 12px;padding:9px 14px;background:#eef2f7;border-left:5px solid #3b5b7e;font-weight:700;font-size:13pt;color:#22384f;break-inside:avoid;page-break-inside:avoid;page-break-after:avoid;break-after:avoid">2ª parte — Recuperação pós-anestésica (SRPA)</div>' +
         htmlSrpa;
       /* Nome do arquivo: Paciente_Ficha-Anestesia+SRPA_data de criação (hoje) */
-      let paciente = '';
-      try {
-        const d = anestesia.coletarEstruturado();
-        paciente = (d.paciente && d.paciente.nome) || '';
-      } catch (e) {}
+      const paciente = printPreview._nomePacienteDoFormulario('anestesia');
       printPreview._nomeArquivoOverride = printPreview._sanitizarPaciente(paciente) + '_Ficha-Anestesia+SRPA_' + printPreview._dataCriacao();
       /* Dropdown de carimbos (mesma lógica do abrir normal) */
       const sel = document.getElementById('ppt-signature-select');
@@ -571,6 +614,69 @@ ${TAG_CLOSE_HTML}`;
     try { if (canvas.width > 10 && canvas.height > 10) dataURL = canvas.toDataURL('image/png'); } catch (e) {}
     return (dataURL && dataURL.length > 100) ? dataURL : '';
   },
+  /* Gráfico de documento finalizado: desenha em um canvas separado, em
+     memória, com as mesmas séries da versão vigente usada pelas tabelas. */
+  _graficoDaVersao(vitais) {
+    try {
+      const series = [['pas', 'PAS', '#2563eb'], ['pad', 'PAD', '#7c3aed'],
+        ['pam', 'PAM', '#0891b2'], ['fc', 'FC', '#dc2626'],
+        ['spo2', 'SpO₂', '#16a34a'], ['etco2', 'EtCO₂', '#d97706']];
+      let dia = 0, ultimo = -1;
+      const pontos = (vitais || []).filter(v => /^\d{2}:\d{2}$/.test(v.hora || '')).map(v => {
+        const partes = v.hora.split(':').map(Number);
+        const minuto = partes[0] * 60 + partes[1];
+        if (minuto < ultimo) dia += 1440;
+        ultimo = minuto;
+        const ponto = Object.assign({}, v, { t: minuto + dia });
+        if ((!ponto.pas || !ponto.pad) && ponto.pa) {
+          const pa = String(ponto.pa).match(/(\d+)\s*\/\s*(\d+)/);
+          if (pa) { ponto.pas = ponto.pas || pa[1]; ponto.pad = ponto.pad || pa[2]; }
+        }
+        if (!ponto.pam && ponto.pas && ponto.pad) ponto.pam = Math.round((Number(ponto.pas) + 2 * Number(ponto.pad)) / 3);
+        return ponto;
+      });
+      const valor = (p, key) => p[key] === '' || p[key] == null ? NaN : Number(p[key]);
+      const ativas = series.filter(s => pontos.some(p => Number.isFinite(valor(p, s[0]))));
+      if (!pontos.length || !ativas.length) return '';
+      const canvas = document.createElement('canvas');
+      canvas.width = 960; canvas.height = 260;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return '';
+      const inicio = pontos[0].t, fim = Math.max(inicio + 5, pontos[pontos.length - 1].t);
+      const valores = pontos.flatMap(p => ativas.map(s => valor(p, s[0]))).filter(Number.isFinite);
+      const min = Math.min(0, ...valores), max = Math.max(200, Math.ceil((Math.max(...valores) + 10) / 20) * 20);
+      const x = t => 42 + (t - inicio) * 900 / (fim - inicio);
+      const y = v => 210 - (v - min) * 180 / (max - min);
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 960, 260);
+      ctx.font = '12px sans-serif'; ctx.lineWidth = 1;
+      for (let i = 0; i <= 4; i++) {
+        const v = min + (max - min) * i / 4;
+        ctx.strokeStyle = '#dbe2ea'; ctx.beginPath(); ctx.moveTo(42, y(v)); ctx.lineTo(942, y(v)); ctx.stroke();
+        ctx.fillStyle = '#334155'; ctx.fillText(String(Math.round(v)), 4, y(v) + 4);
+      }
+      ativas.forEach((s, i) => {
+        ctx.strokeStyle = s[2]; ctx.fillStyle = s[2]; ctx.lineWidth = 2;
+        ctx.fillText(s[1], 42 + i * 100, 17);
+        ctx.beginPath(); let conectado = false;
+        pontos.forEach(p => {
+          const v = valor(p, s[0]);
+          if (!Number.isFinite(v)) { conectado = false; return; }
+          if (conectado) ctx.lineTo(x(p.t), y(v)); else ctx.moveTo(x(p.t), y(v));
+          conectado = true;
+        });
+        ctx.stroke();
+        pontos.forEach(p => {
+          const v = valor(p, s[0]); if (!Number.isFinite(v)) return;
+          ctx.beginPath(); ctx.arc(x(p.t), y(v), 2.5, 0, Math.PI * 2); ctx.fill();
+        });
+      });
+      ctx.fillStyle = '#334155';
+      const passo = Math.max(1, Math.ceil(pontos.length / 10));
+      pontos.forEach((p, i) => { if (i % passo === 0 || i === pontos.length - 1) ctx.fillText(p.hora, x(p.t) - 16, 234); });
+      const dataUrl = canvas.toDataURL('image/png');
+      return '<div style="text-align:center;margin:8px 0"><img class="pp-grafico-img" src="' + dataUrl + '" style="max-width:100%;border:1px solid #ccc" alt="Gráfico dos sinais vitais da versão vigente"></div>';
+    } catch (e) { return ''; }
+  },
 
   /* Gera nome sugerido do arquivo: paciente_tipo_ddmmaaaa */
   /* --------------------------------------------------------------------------
@@ -606,6 +712,8 @@ ${TAG_CLOSE_HTML}`;
   },
   _tipoDoDocumento(mod) {
     if (mod === 'prescricao') {
+      const finalizado = printPreview._registroFinalizado(mod);
+      if (finalizado) return printPreview.TIPOS_PRESCRICAO[adendos.vigente(mod, finalizado).modelo || 'simples'] || 'Receita';
       const r = document.querySelector('#form-prescricao [name="modelo"]:checked');
       return printPreview.TIPOS_PRESCRICAO[(r && r.value) || 'simples'] || 'Receita';
     }
@@ -639,21 +747,51 @@ ${TAG_CLOSE_HTML}`;
   /* --------------------------------------------------------------------------
      UNICIDADE NO DIA
      Dois documentos DIFERENTES não podem sair com o mesmo nome no mesmo dia.
-     O registro guarda, por dia, que documento reservou cada nome:
+     A memória desta aba guarda, por dia, que documento reservou cada nome:
        - mesmo documento pedindo de novo  → devolve o nome que ele já tinha;
        - documento diferente, nome ocupado → recebe _2, _3, …
      Só o dia de hoje é mantido; o resto é descartado a cada uso.
   -------------------------------------------------------------------------- */
   _KEY_NOMES: 'medsys.v7.nomes_arquivo',
+  _reservasDeNomes: null,
+  _contextoReservaNomes() {
+    let contexto = null, demonstracao = false;
+    try { if (typeof contextoAba !== 'undefined') contexto = contextoAba.capturar(); } catch (e) {}
+    try { demonstracao = typeof demo !== 'undefined' && demo.ativo(); } catch (e) {}
+    return JSON.stringify([demonstracao ? 'demo' : 'real', contexto && contexto.tabId || '',
+      contexto && contexto.deviceId || '', contexto && contexto.userId || '',
+      contexto && contexto.organizationId || '', contexto && contexto.generation || '',
+      !!(contexto && contexto.verified)]);
+  },
   _lerReserva() {
-    try {
-      const o = JSON.parse(localStorage.getItem(printPreview._KEY_NOMES) || '{}');
-      const hoje = printPreview._dataCriacao();
-      return (o && o.dia === hoje && o.nomes) ? o : { dia: hoje, nomes: {} };
-    } catch (e) { return { dia: printPreview._dataCriacao(), nomes: {} }; }
+    const hoje = printPreview._dataCriacao(), contexto = printPreview._contextoReservaNomes();
+    const reserva = printPreview._reservasDeNomes;
+    if (!reserva || reserva.contexto !== contexto || reserva.dia !== hoje) {
+      printPreview._reservasDeNomes = { contexto, dia: hoje, nomes: {} };
+    }
+    return { dia: hoje, nomes: { ...printPreview._reservasDeNomes.nomes } };
   },
   _gravarReserva(r) {
-    try { localStorage.setItem(printPreview._KEY_NOMES, JSON.stringify(r)); } catch (e) {}
+    printPreview._reservasDeNomes = { contexto: printPreview._contextoReservaNomes(),
+      dia: r.dia, nomes: { ...r.nomes } };
+  },
+  /* Reservas antigas tinham nomes clínicos em claro. Nunca são restauradas;
+     remove apenas essa chave legada em todas as gavetas e no namespace demo. */
+  _purgarReservasLegadas() {
+    const lojas = [];
+    try { if (typeof cofre !== 'undefined' && cofre._real) lojas.push(cofre._real); } catch (e) {}
+    try { if (window.localStorage) lojas.push(window.localStorage); } catch (e) {}
+    try { if (window.sessionStorage) lojas.push(window.sessionStorage); } catch (e) {}
+    for (const loja of new Set(lojas)) {
+      try {
+        const chaves = [];
+        for (let i = 0; i < loja.length; i++) {
+          const chave = loja.key(i);
+          if (/^(?:demo:)?medsys\.v7\.nomes_arquivo(?:@.*)?$/.test(chave || '')) chaves.push(chave);
+        }
+        chaves.forEach(chave => { try { loja.removeItem(chave); } catch (e) {} });
+      } catch (e) {}
+    }
   },
   _nomeUnico(base, chave) {
     const r = printPreview._lerReserva();
@@ -672,7 +810,25 @@ ${TAG_CLOSE_HTML}`;
   },
   /* Esquece as reservas (usado pelos testes e por quem quiser recomeçar) */
   _limparReservaNomes() {
-    try { localStorage.removeItem(printPreview._KEY_NOMES); } catch (e) {}
+    printPreview._reservasDeNomes = null;
+    printPreview._purgarReservasLegadas();
+  },
+  _limparContextoImpressao() {
+    printPreview._limparReservaNomes();
+    printPreview._nomeArquivoOverride = null;
+    printPreview._verCtx = null;
+    printPreview._zerarFichaAoFechar = false;
+    try {
+      for (const id of ['ppp', 'ppt-signature-select']) {
+        const el = document.getElementById(id); if (el) el.innerHTML = '';
+      }
+      for (const id of ['ppt-filename', 'ppt-info']) {
+        const el = document.getElementById(id); if (el) el.textContent = '';
+      }
+      const overlay = document.getElementById('print-preview-overlay');
+      if (overlay) overlay.classList.remove('show');
+      if (document.body) document.body.classList.remove('printing-preview');
+    } catch (e) {}
   },
 
   /* Para quem desenha o PDF direto, sem passar pela pré-visualização (receita,
@@ -693,13 +849,7 @@ ${TAG_CLOSE_HTML}`;
       chave = 'combinado:' + printPreview._chaveDocumento(mod);
     } else {
       const tipo = printPreview._tipoDoDocumento(mod);
-      let paciente = '';
-      if (mod === 'anestesia') {
-        try { const d = anestesia.coletarEstruturado(); paciente = (d.paciente && d.paciente.nome) || ''; } catch (e) {}
-      } else {
-        const f = document.getElementById('form-' + mod);
-        if (f) paciente = (f.querySelector('[name="nome"]') || f.querySelector('[name="paciente_nome"]') || {}).value || '';
-      }
+      const paciente = printPreview._nomePacienteDoFormulario(mod);
       /* Ordem fixa: Paciente_Tipo_Data — a data é SEMPRE a de criação do
          arquivo (hoje), porque é ela que ordena a pasta. */
       base = printPreview._sanitizarPaciente(paciente) + '_' + tipo + '_' + printPreview._dataCriacao();
@@ -1044,8 +1194,10 @@ ${TAG_CLOSE_HTML}`;
 
   /* === Builders por módulo === */
   _buildPre() {
-    const d = utils.formData('form-pre');
-    try { d._labExtras = labExtra.coletar('pre-lab-extras'); } catch (e) {}
+    const d = printPreview._dadosDoFormulario('pre');
+    if (!printPreview._registroFinalizado('pre')) {
+      try { d._labExtras = labExtra.coletar('pre-lab-extras'); } catch (e) {}
+    }
     /* Nome do paciente — tolerante a chaves alternativas para nunca sair vazio */
     const nomePac = (d.nome || d.paciente_nome || d.paciente || '').trim();
     /* Topo: só o título. O nome do paciente aparece uma vez, na identificação
@@ -1206,6 +1358,7 @@ ${TAG_CLOSE_HTML}`;
               : [];
         if (candidatos.length === 1) alvo = candidatos[0];
       }
+      if (alvo && alvo._finalizado) alvo = adendos.vigente('risco', alvo);
       if (!alvo || !alvo.incluir_impressao || !alvo._resumo) return '';
       const tabela = risco.resumoCompactoHTML({ _resumo: alvo._resumo });
       if (!tabela) return '';
@@ -1215,10 +1368,13 @@ ${TAG_CLOSE_HTML}`;
   },
 
   _buildConsulta() {
-    const d = utils.formData('form-consulta');
-    try { d._labExtras = labExtra.coletar('consulta-lab-extras'); } catch (e) {}
-    let segs = [];
-    try { segs = consulta.seguimento.coletar(); } catch (e) {}
+    const d = printPreview._dadosDoFormulario('consulta');
+    const finalizado = !!printPreview._registroFinalizado('consulta');
+    if (!finalizado) {
+      try { d._labExtras = labExtra.coletar('consulta-lab-extras'); } catch (e) {}
+    }
+    let segs = finalizado ? d._seguimentos || [] : [];
+    if (!finalizado) { try { segs = consulta.seguimento.coletar(); } catch (e) {} }
     /* Calcula retorno conforme tipo */
     let retornoDesc = '—';
     if (d.retorno_tipo === 'data' && d.retorno) retornoDesc = utils.formatarData(d.retorno);
@@ -1243,8 +1399,8 @@ ${TAG_CLOSE_HTML}`;
     /* Procedimentos realizados: o documento tem de dizer o que foi feito, com
        o código. Fração e valor são conta interna e ficam fora da impressão. */
     let procHtml = '';
-    let procs = [];
-    try { procs = consulta.procs.coletar(); } catch (e) {}
+    let procs = finalizado ? d._procsRealizados || [] : [];
+    if (!finalizado) { try { procs = consulta.procs.coletar(); } catch (e) {} }
     const procValidos = procs.filter(p => p.codigo || p.descricao);
     if (procValidos.length) {
       procHtml = printPreview._section('Procedimentos realizados nesta consulta',
@@ -1297,7 +1453,7 @@ ${TAG_CLOSE_HTML}`;
   },
 
   _buildAnestesia() {
-    const d = anestesia.coletarEstruturado();
+    const d = printPreview._dadosDoFormulario('anestesia', () => anestesia.coletarEstruturado());
     const p = d.paciente, pr = d.procedimento, pa = d.pre_anestesico, tc = d.tecnica, mn = d.monitorizacao;
     /* Topo enxuto: logo à esquerda e, centralizado, só o título. Paciente,
        data e procedimento ficam nas seções de identificação/procedimento —
@@ -1687,8 +1843,9 @@ ${TAG_CLOSE_HTML}`;
       /* Captura do gráfico de sinais vitais para incluir no print — com
          redesenho forçado no contexto da ficha (funciona mesmo com o módulo
          oculto, ex.: impressão conjunta ficha+SRPA a partir da SRPA) */
-      let graficoHTML = '';
-      try {
+      let graficoHTML = printPreview._registroFinalizado('anestesia')
+        ? printPreview._graficoDaVersao(d.sinais_vitais) : '';
+      if (!printPreview._registroFinalizado('anestesia')) try {
         const ctxAnterior = anestesia.graficoUI._contexto;
         anestesia.graficoUI._contexto = 'anestesia';
         const dataURL = printPreview._capturarGrafico('vitals-chart', 'module-anestesia',
@@ -1895,7 +2052,7 @@ ${TAG_CLOSE_HTML}`;
   },
 
   _buildRecuperacao() {
-    const d = utils.formData('form-recuperacao');
+    const d = printPreview._dadosDoFormulario('recuperacao');
     /* mesmo padrão da ficha: topo só com logo e título (a data está logo
        abaixo, na identificação) */
     return printPreview._header('RECUPERAÇÃO PÓS-ANESTÉSICA', '', { semProfissional: true }) +
@@ -1969,25 +2126,25 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._field('Resumo de alta', d.resumo_alta, true)}
         ${printPreview._field('Observações', d.observacoes, true)}
       `) +
-      printPreview._buildGraficoSRPA() +
+      printPreview._buildGraficoSRPA(printPreview._registroFinalizado('recuperacao') ? d.grafico || { vitais: [], eventos: [], medicacoes: [] } : null) +
       printPreview._signature(d.responsavel, d.registro || '', d) +
       printPreview._footer('Recuperação pós-anestésica');
   },
 
   /* Monta a seção de gráfico + tabelas da SRPA para impressão */
-  _buildGraficoSRPA() {
-    let g;
-    try { g = recuperacao.grafico.coletar(); } catch (e) { g = { vitais: [], eventos: [], medicacoes: [] }; }
+  _buildGraficoSRPA(versaoSalva) {
+    let g = versaoSalva;
+    if (!g) { try { g = recuperacao.grafico.coletar(); } catch (e) { g = { vitais: [], eventos: [], medicacoes: [] }; } }
     const temVitais = (g.vitais || []).some(v => v.hora);
     const temEventos = (g.eventos || []).some(e => e.hora && e.tipo);
     const temMeds = (g.medicacoes || []).some(m => m.hora && m.nome);
     if (!temVitais && !temEventos && !temMeds) return '';
 
-    let html = '';
+    let html = versaoSalva ? printPreview._graficoDaVersao(g.vitais) : '';
     /* Captura a imagem do gráfico (canvas) — com redesenho forçado no contexto
        da SRPA e restauração (funciona mesmo com o módulo oculto) */
     try {
-      if (temVitais || temEventos || temMeds) {
+      if (!versaoSalva && (temVitais || temEventos || temMeds)) {
         const ctxAnterior = anestesia.graficoUI._contexto;
         anestesia.graficoUI._contexto = 'recuperacao';
         const dataUrl = printPreview._capturarGrafico('srpa-vitals-chart', 'module-recuperacao',
@@ -2052,7 +2209,7 @@ ${TAG_CLOSE_HTML}`;
   },
 
   _buildTermo() {
-    const d = utils.formData('form-termo');
+    const d = printPreview._dadosDoFormulario('termo');
     const meta = `${utils.formatarData(d.data) || new Date().toLocaleDateString('pt-BR')}`;
     /* Texto do termo em parágrafos */
     const textoHtml = (d.texto || '').split('\n').filter(l => l.trim())
@@ -2138,13 +2295,13 @@ ${TAG_CLOSE_HTML}`;
   },
 
   _buildPrescricao() {
-    const d = utils.formData('form-prescricao');
+    const d = printPreview._dadosDoFormulario('prescricao');
     const modelo = d.modelo || (d.tipo === 'especial' ? 'especial' : 'simples');
     if (modelo === 'atestado') return printPreview._buildAtestado(d);
     if (modelo === 'declaracao') return printPreview._buildDeclaracao(d);
     if (modelo === 'laudo') return printPreview._buildLaudo(d);
 
-    const itens = prescricao._coletarItens();
+    const itens = printPreview._registroFinalizado('prescricao') ? d.itens || [] : prescricao._coletarItens();
     const duasVias = (modelo === 'especial' || modelo === 'antimicrobiano');
     const especial = modelo === 'especial';
     const meta = `${utils.formatarData(d.data) || new Date().toLocaleDateString('pt-BR')}`;
@@ -2228,7 +2385,7 @@ ${TAG_CLOSE_HTML}`;
   },
   /* Módulo Documentos (atestado/declaração/laudo) — usa os mesmos geradores */
   _buildDocumento() {
-    const d = utils.formData('form-documentos');
+    const d = printPreview._dadosDoFormulario('documentos');
     const modelo = d.modelo || 'atestado';
     const meta = `${utils.formatarData(d.data) || new Date().toLocaleDateString('pt-BR')}`;
     if (modelo === 'declaracao') {
@@ -2253,10 +2410,11 @@ ${TAG_CLOSE_HTML}`;
   },
 
   _buildRisco() {
-    const d = utils.formData('form-risco');
-    try { risco.atualizar(); } catch (e) {}
+    const d = printPreview._dadosDoFormulario('risco');
+    const finalizado = !!printPreview._registroFinalizado('risco');
+    if (!finalizado) { try { risco.atualizar(); } catch (e) {} }
     const meta = `${new Date().toLocaleDateString('pt-BR')}`;
-    const tabela = risco.resumoCompactoHTML({ _resumo: risco._ultimoResumo });
+    const tabela = risco.resumoCompactoHTML({ _resumo: finalizado ? d._resumo : risco._ultimoResumo });
     const proc = d.procBusca ? `<div class="pp-grid"><div><span class="pp-label">Procedimento</span><span class="pp-value">${utils.escapeHTML(d.procBusca)}</span></div></div>` : '';
     return printPreview._header('AVALIAÇÃO DE RISCO PERIOPERATÓRIO', meta) +
       printPreview._section('Identificação', `
@@ -2391,5 +2549,13 @@ ${TAG_CLOSE_HTML}`;
     return html;
   }
 };
+
+/* Limpeza na entrada é verificável mesmo depois de queda/restauração da aba;
+   o evento de contexto encerra também as reservas de usuário, clínica e demo. */
+printPreview._limparContextoImpressao();
+try {
+  if (typeof contextoAba !== 'undefined') contextoAba.aoMudar(() => printPreview._limparContextoImpressao());
+} catch (e) {}
+try { window.addEventListener('pagehide', () => printPreview._limparContextoImpressao()); } catch (e) {}
 
 /* FIM DA CAMADA CENTRAL DE IMPRESSÃO */

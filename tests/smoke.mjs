@@ -19158,6 +19158,78 @@ await test('Adendos e correções saem na impressão, e a folha avisa que existe
   await page.close();
 });
 
+/* 256) Retificação mantém pai assinado e usa somente cadeia aceita pelo
+   servidor; o cenário injeta eventos Realtime sintéticos, sem banco real. */
+await test('Retificação: valores confirmados entram nos campos e na impressão, sem alterar o original', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    await __smokePrepareQueue('org-retificacao-sintetica', 'medico-retificacao-sintetica');
+    auth._desbloquear();
+    const contexto = contextoAba.capturar();
+    const original = { _id: 'pre-retificacao-sintetica', _relOrg: contexto.organizationId,
+      _relId: 'pai-retificacao-sintetica', _relVersion: 7, _finalizado: true,
+      nome: 'Paciente Sintético Original', cpf: '11111111111', data: '2026-10-09', lab_hb: '13,2',
+      _patientRef: 'paciente-retificacao-sintetica', _patientKey: 'chave-paciente-sintetica',
+      _caseId: 'caso-retificacao-sintetica', assinatura_dataurl: '', _adendos: [] };
+    const outro = { _id: 'pre-retificacao-outro', nome: 'Paciente Sintético Independente', lab_hb: '12,0' };
+    store.setList('pre', [original, outro]);
+    ui.navegar('pre'); pre.carregar(original);
+    const form = document.getElementById('form-pre');
+    const baseAberta = form.dataset.retificacaoBaseId;
+    const linha = { organization_id: contexto.organizationId, parent_table: 'preanesthetic_assessments',
+      parent_id: original._relId, parent_legacy_id: original._id, legacy_id: 'retificacao-sintetica-1',
+      reason: 'correcao', texto: 'CORREÇÃO / RETIFICAÇÃO: exames sintéticos atualizados.',
+      author_id: contexto.userId, created_at: '2026-10-09T15:00:00Z', retification_revision: 1,
+      data: { autor_exibicao: 'RÓTULO FORJADO NÃO CONFIÁVEL', retificacao: { schema: 1, baseAdendoId: '',
+        campos: { nome: 'Paciente Sintético Atual', cpf: '00000000000', lab_hb: '14,6' },
+        status: 'accepted', revisao: 1, baseAtualId: '' } } };
+    adendos.receberLinha(linha);
+    const salvo = store.getById('pre', original._id);
+    const vigente = adendos.vigente('pre', salvo);
+    const out = { originalPreservado: salvo.lab_hb === '13,2' && salvo.nome === 'Paciente Sintético Original'
+        && salvo.cpf === '11111111111' && salvo._relVersion === 7,
+      valoresAtuais: vigente.lab_hb === '14,6' && vigente.nome === 'Paciente Sintético Atual' && vigente.cpf === '00000000000',
+      vinculosPreservados: vigente._patientRef === original._patientRef && vigente._patientKey === original._patientKey
+        && vigente._caseId === original._caseId && vigente._relId === original._relId,
+      baseAbertaNaoFoiTrocada: baseAberta === '' && form.dataset.retificacaoBaseId === '',
+      outroPacienteIntacto: store.getById('pre', outro._id).nome === outro.nome };
+    pre.carregar(salvo);
+    out.formularioAtual = form.querySelector('[name="lab_hb"]').value === '14,6'
+      && form.querySelector('[name="nome"]').value === 'Paciente Sintético Atual'
+      && form.dataset.retificacaoBaseId === linha.legacy_id;
+    form.querySelector('[name="lab_hb"]').value = 'VALOR NÃO CONFIRMADO';
+    printPreview.abrir();
+    const texto = document.getElementById('ppp').textContent;
+    out.impressaoAtual = texto.includes('14,6') && !texto.includes('VALOR NÃO CONFIRMADO')
+      && texto.includes('VERSÃO ATUAL — RETIFICADA') && texto.includes(contexto.userId)
+      && !texto.includes('RÓTULO FORJADO NÃO CONFIÁVEL');
+    printPreview.fechar();
+    const falso = JSON.parse(JSON.stringify(salvo));
+    falso._adendos = [{ ...falso._adendos[0], id: 'evento-forjado-sintetico',
+      _retificacao: { ...falso._adendos[0]._retificacao, campos: { lab_hb: 'FALSO RECIBO' } } }];
+    out.jsonNaoAutoriza = adendos.vigente('pre', falso).lab_hb === '13,2';
+    const op = { contexto, payload: { transport: persistenciaCloudFirst.TRANSPORTE_ADENDO,
+      parentModule: 'pre', parentTable: linha.parent_table, parentLegacyId: original._id,
+      adendo: { id: linha.legacy_id, texto: linha.texto, motivo: 'correcao', _retificacao: linha.data.retificacao } } };
+    out.reciboValido = persistenciaCloudFirst._reciboValido(op, { ok: true, row: linha });
+    out.reciboProtegeAutorEPai = !persistenciaCloudFirst._reciboValido(op,
+      { ok: true, row: { ...linha, author_id: 'outro-autor' } })
+      && !persistenciaCloudFirst._reciboValido(op, { ok: true, row: { ...linha, parent_table: 'consultations' } })
+      && !persistenciaCloudFirst._reciboValido(op, { ok: true, row: { ...linha, created_at: 'horario-invalido' } });
+    const anterior = JSON.parse(JSON.stringify(salvo));
+    await __smokePrepareQueue('org-retificacao-outra', 'medico-retificacao-outro');
+    out.contextoNaoHerdeProva = adendos.vigente('pre', anterior).lab_hb === '13,2';
+    return out;
+  });
+  assert(r.originalPreservado && r.valoresAtuais, 'a versão vigente aplica o evento aceito e preserva o original assinado');
+  assert(r.vinculosPreservados && r.outroPacienteIntacto, 'novos nome/CPF não mudam UUIDs, caso ou outro cadastro');
+  assert(r.baseAbertaNaoFoiTrocada && r.formularioAtual, 'cada edição conserva sua base e reabrir carrega a revisão vigente');
+  assert(r.impressaoAtual, 'a folha traz os valores confirmados e autoria canônica, mesmo com edição pendente no formulário');
+  assert(r.jsonNaoAutoriza && r.reciboValido && r.reciboProtegeAutorEPai && r.contextoNaoHerdeProva,
+    'JSON pai, autor/pai inválido e troca de contexto não conferem recibo de retificação');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

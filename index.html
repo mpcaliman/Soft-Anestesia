@@ -4695,7 +4695,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-09a</b><br>
+    v7.1 · build <b id="build-tag">2026-10-09c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -10232,6 +10232,13 @@ const utils = {
   fillForm(formId, data, arrCheckGroups = [], radioFields = []) {
     if (!data) return;
     const f = document.getElementById(formId);
+    try {
+      const mod = String(formId).replace(/^form-/, '');
+      if (data._finalizado && typeof adendos !== 'undefined' && adendos.MODS[mod]) {
+        data = adendos.vigente(mod, data);
+        adendos._marcarBaseFormulario(mod, data, f);
+      }
+    } catch (e) {}
     /* Reidrata também a identidade forte que não tem campo visual. Assim,
        abrir uma ficha antiga para editar não volta a vincular só pelo nome. */
     try {
@@ -15768,6 +15775,7 @@ const pre = {
   carregar(item) {
     if (!item) item = store.last('pre');
     if (!item) { toast('Nenhum registro salvo', 'warn'); return; }
+    item = adendos.vigente('pre', item);
     utils.clearForm(pre.formId);
     utils.fillForm(pre.formId, item);
     let f = document.getElementById(pre.formId);
@@ -16404,6 +16412,7 @@ const consulta = {
   carregar(item) {
     if (!item) item = store.last('consulta');
     if (!item) { toast('Nenhum registro salvo', 'warn'); return; }
+    item = adendos.vigente('consulta', item);
     utils.clearForm(consulta.formId);
     utils.fillForm(consulta.formId, item);
     let f = document.getElementById(consulta.formId);
@@ -16807,6 +16816,7 @@ const recuperacao = {
   carregar(item) {
     if (!item) item = store.last('recuperacao');
     if (!item) { toast('Nenhum registro salvo', 'warn'); return; }
+    item = adendos.vigente('recuperacao', item);
     utils.clearForm(recuperacao.formId);
     utils.fillForm(recuperacao.formId, item);
     let f = document.getElementById(recuperacao.formId);
@@ -17469,6 +17479,7 @@ const termo = {
   carregar(item) {
     if (!item) item = store.last('termo');
     if (!item) { toast('Nenhum termo salvo', 'warn'); return; }
+    item = adendos.vigente('termo', item);
     utils.clearForm(termo.formId);
     utils.fillForm(termo.formId, item);
     let f = document.getElementById(termo.formId);
@@ -18108,6 +18119,7 @@ const prescricao = {
   carregar(item) {
     if (!item) item = store.last('prescricao');
     if (!item) { toast('Nenhuma prescrição salva', 'warn'); return; }
+    item = adendos.vigente('prescricao', item);
     utils.clearForm(prescricao.formId);
     document.getElementById('prescricao-body').innerHTML = '';
     utils.fillForm(prescricao.formId, item);
@@ -21321,12 +21333,184 @@ const cloudDiag = {
    local (_adendos, para offline/impressão) e sobe para a tabela `addenda`
    (append-only, idempotente por legacy_id). Aparece na tela e no PDF.
 ============================================================================ */
-const adendos = {
+const adendos = (() => {
+  /* Provas de origem ficam fora dos objetos serializáveis do prontuário.
+     Um JSON em parent.data._adendos jamais cria um recibo de servidor. */
+  const provas = new Map();
+  let contextoProvas = '';
+  const contextoAtual = () => {
+    try {
+      const ctx = contextoAba.capturar();
+      if (!ctx || !ctx.verified || !ctx.organizationId || !ctx.userId || !contextoAba.corresponde(ctx)) return null;
+      return ctx;
+    } catch (e) { return null; }
+  };
+  const escopoProvas = () => {
+    const ctx = contextoAtual();
+    const key = ctx ? JSON.stringify([ctx.tabId, ctx.deviceId, ctx.organizationId, ctx.userId, ctx.generation]) : '';
+    if (key !== contextoProvas) { provas.clear(); contextoProvas = key; }
+    return key;
+  };
+  const chaveProva = (mod, parentId, adId) => JSON.stringify([escopoProvas(), mod, String(parentId || ''), String(adId || '')]);
+  const registrarProva = (mod, row, contexto) => {
+    const escopo = escopoProvas();
+    if (!escopo || !contexto || !contextoAba.corresponde(contexto) || !row ||
+        row.organization_id !== contexto.organizationId || row.parent_table !== adendos.MODS[mod] ||
+        !row.parent_id || !row.parent_legacy_id || !row.legacy_id || !row.author_id ||
+        !Number.isFinite(Date.parse(row.created_at))) return false;
+    const ret = adendos._normalizarRetificacao(row.data && row.data.retificacao, row);
+    if (!ret) return false;
+    provas.set(chaveProva(mod, row.parent_legacy_id, row.legacy_id), {
+      ret: JSON.parse(JSON.stringify(ret)), authorId: row.author_id, createdAt: row.created_at,
+      parentId: row.parent_id, texto: row.texto, motivo: row.reason || 'correcao'
+    });
+    return true;
+  };
+  const temProva = (mod, rec, ad) => {
+    const ctx = contextoAtual();
+    if (!ctx || !mod || !rec || !ad || (rec._relOrg && rec._relOrg !== ctx.organizationId)) return false;
+    const prova = provas.get(chaveProva(mod, rec._id, ad.id));
+    return !!prova && (!rec._relId || rec._relId === prova.parentId) &&
+      prova.authorId === ad._authorId && prova.createdAt === ad._serverCreatedAt &&
+      prova.texto === ad.texto && prova.motivo === ad.motivo &&
+      adendos._igualJson(prova.ret, ad._retificacao);
+  };
+  try { contextoAba.aoMudar(() => { provas.clear(); contextoProvas = ''; }); } catch (e) {}
+  try { window.addEventListener('pagehide', () => { provas.clear(); contextoProvas = ''; }); } catch (e) {}
+  return {
   _pendentesCofre: new Map(),
   MODS: {
     anestesia: 'anesthesia_records', pre: 'preanesthetic_assessments',
     recuperacao: 'recovery_records', consulta: 'consultations', risco: 'risk_assessments',
     termo: 'consents', prescricao: 'prescriptions', documentos: 'documents'
+  },
+  /* Retificação é um evento append-only. A projeção nunca substitui o pai
+     finalizado; só recibos canônicos do servidor alteram os campos vigentes. */
+  CAMPOS_CLINICOS_INTERNOS: ['_medsLista', '_procsExtra', '_labExtras', '_premedSel', '_seguimentos', '_procsRealizados', '_resumo'],
+  CAMPOS_PROTEGIDOS: ['id', 'patient_id', 'patientid', 'patientref', 'patientkey', 'caseid', 'casekey',
+    'encounter_id', 'encounterid', 'organization_id', 'organizationid', 'orgid', 'legacy_id', 'version',
+    'created_by', 'created_at', 'updated_at', 'updated_by', 'finalized_at', 'signed_at', 'signed_by', 'finalized_by', 'author_id', 'authorid',
+    'user_id', 'userid', 'uid', 'deviceid', 'tabid', 'sessionid', 'access_token', 'refresh_token',
+    'dataurl', 'carimbo', 'sig_dataurl', '__proto__', 'constructor', 'prototype'],
+  _campoProtegido(chave, nivel = 0) {
+    const k = String(chave), lower = k.toLowerCase();
+    return adendos.CAMPOS_PROTEGIDOS.includes(lower) || /^(assinatura|signature|data_assinatura)/i.test(k) ||
+      (k.startsWith('_') && !(nivel === 0 && adendos.CAMPOS_CLINICOS_INTERNOS.includes(k)));
+  },
+  _jsonClinico(valor, nivel = 0) {
+    if (nivel > 16) throw new Error('retificacao_invalida');
+    if (valor === null || typeof valor === 'string' || typeof valor === 'boolean') return valor;
+    if (typeof valor === 'number' && Number.isFinite(valor)) return valor;
+    if (!valor || typeof valor !== 'object') throw new Error('retificacao_invalida');
+    if (Array.isArray(valor)) return valor.map(v => adendos._jsonClinico(v, nivel + 1));
+    const out = {};
+    for (const k of Object.keys(valor)) {
+      if (adendos._campoProtegido(k, nivel)) throw new Error('retificacao_campo_protegido');
+      out[k] = adendos._jsonClinico(valor[k], nivel + 1);
+    }
+    return out;
+  },
+  _normalizarRetificacao(valor, row = null) {
+    try {
+      if (!valor || valor.schema !== 1 || typeof valor.baseAdendoId !== 'string' ||
+          valor.baseAdendoId.length > 180 || !valor.campos || Array.isArray(valor.campos) ||
+          typeof valor.campos !== 'object' || !Object.keys(valor.campos).length) return null;
+      const ret = { schema: 1, baseAdendoId: valor.baseAdendoId, campos: adendos._jsonClinico(valor.campos) };
+      if (row) {
+        if (!['accepted', 'conflict'].includes(valor.status) || typeof valor.baseAtualId !== 'string' ||
+            !Number.isInteger(valor.revisao) || valor.revisao < 0) return null;
+        if (valor.status === 'accepted' && (valor.revisao < 1 ||
+            Number(row.retification_revision) !== valor.revisao || valor.baseAtualId !== valor.baseAdendoId)) return null;
+        if (valor.status === 'conflict' && row.retification_revision != null) return null;
+        ret.status = valor.status; ret.revisao = valor.revisao; ret.baseAtualId = valor.baseAtualId;
+      }
+      return ret;
+    } catch (e) { return null; }
+  },
+  _igualJson(a, b) {
+    if (a === b) return true;
+    if (!a || !b || typeof a !== 'object' || typeof b !== 'object' || Array.isArray(a) !== Array.isArray(b)) return false;
+    const ka = Object.keys(a).sort(), kb = Object.keys(b).sort();
+    return ka.length === kb.length && ka.every((k, i) => k === kb[i] && adendos._igualJson(a[k], b[k]));
+  },
+  _fundirCampos(atual, campos) {
+    const resultado = Object.assign({}, atual);
+    for (const k of Object.keys(campos)) {
+      const v = campos[k], anterior = atual && atual[k];
+      resultado[k] = v && anterior && typeof v === 'object' && typeof anterior === 'object' &&
+        !Array.isArray(v) && !Array.isArray(anterior)
+        ? adendos._fundirCampos(anterior, v) : JSON.parse(JSON.stringify(v));
+    }
+    return resultado;
+  },
+  propostaRetificacaoIgual(proposta, recebido, row) {
+    if (!proposta) return recebido == null;
+    const a = adendos._normalizarRetificacao(proposta);
+    const b = adendos._normalizarRetificacao(recebido, row);
+    return !!a && !!b && a.baseAdendoId === b.baseAdendoId && adendos._igualJson(a.campos, b.campos);
+  },
+  estadoRetificacoes(rec, mod) {
+    const vigente = JSON.parse(JSON.stringify(rec || {}));
+    delete vigente._retificadoEm; delete vigente._retificadoPor; delete vigente._retificacoes;
+    const lista = (rec && Array.isArray(rec._adendos)) ? rec._adendos : [];
+    const aplicadas = [], conflitos = [], pendentes = [], naoComprovadas = [];
+    const candidatos = [];
+    for (const ad of lista) {
+      if (!ad || (!ad._retificacao && !ad._retificacaoInvalida)) continue;
+      if (!ad._pushed) { pendentes.push(ad); continue; }
+      if (!temProva(mod, rec, ad)) { naoComprovadas.push(ad); conflitos.push(ad); continue; }
+      const ret = ad._retificacao;
+      if (!ret || ret.status !== 'accepted' || !adendos._normalizarRetificacao(ret,
+          { retification_revision: ad._retificacaoRevisao })) { conflitos.push(ad); continue; }
+      candidatos.push(ad);
+    }
+    let headId = '';
+    while (candidatos.length) {
+      const seguintes = candidatos.filter(ad => ad._retificacao.baseAdendoId === headId);
+      if (seguintes.length !== 1 || seguintes[0]._retificacao.revisao !== aplicadas.length + 1) break;
+      const ad = seguintes[0]; candidatos.splice(candidatos.indexOf(ad), 1);
+      Object.assign(vigente, adendos._fundirCampos(vigente, ad._retificacao.campos));
+      headId = String(ad.id); aplicadas.push(ad);
+    }
+    conflitos.push(...candidatos);
+    if (aplicadas.length) {
+      const ultimo = aplicadas[aplicadas.length - 1];
+      vigente._retificadoEm = ultimo._serverCreatedAt || ultimo.data;
+      vigente._retificadoPor = ultimo._authorId || '';
+      vigente._retificacoes = aplicadas.length;
+    }
+    return { vigente, headId, aplicadas, conflitos, pendentes, naoComprovadas };
+  },
+  vigente(mod, rec) {
+    return rec && rec._finalizado && adendos.MODS[mod] ? adendos.estadoRetificacoes(rec, mod).vigente : rec;
+  },
+  _marcarBaseFormulario(mod, rec, form) {
+    if (!form || !form.dataset) return;
+    const estado = adendos.estadoRetificacoes(rec, mod);
+    form.dataset.retificacaoRegistro = String(rec && rec._id || '');
+    form.dataset.retificacaoBaseId = estado.headId;
+  },
+  _camposRetificacao(vigente, novo) {
+    const campos = {};
+    for (const k of Object.keys(novo || {})) {
+      if (adendos._campoProtegido(k)) continue;
+      try {
+        const valor = adendos._jsonClinico(novo[k], 1);
+        if (!adendos._igualJson(vigente[k], valor)) campos[k] = valor;
+      } catch (e) { /* Metadados aninhados não fazem parte de uma retificação. */ }
+    }
+    return campos;
+  },
+  _firmaFormulario(mod) {
+    try {
+      if (mod === 'anestesia') return JSON.stringify(anestesia.coletarEstruturado());
+      const dados = utils.formData('form-' + mod);
+      if (mod === 'pre') Object.assign(dados, { _medsLista: pre.meds._lista, _procsExtra: pre.procs.coletar(),
+        _labExtras: labExtra.coletar('pre-lab-extras'), _premedSel: pre.premed.coletar() });
+      if (mod === 'consulta') Object.assign(dados, { _labExtras: labExtra.coletar('consulta-lab-extras'),
+        _seguimentos: consulta.seguimento.coletar(), _procsRealizados: consulta.procs.coletar() });
+      return JSON.stringify(dados);
+    } catch (e) { return ''; }
   },
   _idAtual(mod) {
     const f = document.getElementById('form-' + mod);
@@ -21335,9 +21519,20 @@ const adendos = {
   },
   _rec(mod) { const id = adendos._idAtual(mod); return id ? store.getById(mod, id) : null; },
   _fmtData(iso) { try { return new Date(iso).toLocaleString('pt-BR'); } catch (e) { return ''; } },
-  _render(ad) {
+  _render(ad, estado) {
+    const estruturado = ad._retificacao || ad._retificacaoInvalida;
+    const naoComprovado = estruturado && ad._pushed && (!estado ||
+      (estado.naoComprovadas || []).some(a => a.id === ad.id));
+    const status = ad._retificacao || ad._retificacaoInvalida
+      ? (naoComprovado ? 'Origem não confirmada — campos não aplicados'
+        : estado && estado.aplicadas && estado.aplicadas.some(a => a.id === ad.id)
+        ? 'Retificação confirmada' : ad._pushed ? 'Conflito — proposta preservada, campos não aplicados'
+          : 'Retificação pendente — campos ainda não confirmados') : '';
     return '<div style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:6px;background:var(--surface-alt)">' +
-      '<div style="font-size:.72rem;color:var(--text-mute)">' + (ad._pushed ? '☁️' : '🔐') + ' ' + utils.escapeHTML(ad.autor || '—') + ' · ' + adendos._fmtData(ad.data) + '</div>' +
+      '<div style="font-size:.72rem;color:var(--text-mute)">' + (ad._pushed && !naoComprovado ? '☁️' : '⏳') + ' ' +
+      utils.escapeHTML(estruturado && ad._pushed ? ad._authorId || 'Origem não confirmada' : ad.autor || '—') +
+      ' · ' + utils.escapeHTML(adendos._fmtData(estruturado && ad._pushed ? ad._serverCreatedAt || '' : ad.data)) + '</div>' +
+      (status ? '<div style="font-size:.78rem;font-weight:700;margin:4px 0">' + utils.escapeHTML(status) + '</div>' : '') +
       '<div style="font-size:.86rem;white-space:pre-wrap;margin-top:2px">' + utils.escapeHTML(ad.texto || '') + '</div></div>';
   },
   abrir(mod) {
@@ -21348,7 +21543,7 @@ const adendos = {
     const lista = rec._adendos || [];
     const corpo =
       '<p style="font-size:.82rem;color:var(--text-mute);margin:0 0 10px">O registro original é <b>preservado</b>. O adendo é datado e assinado com o seu nome, e aparece na ficha e no PDF.</p>' +
-      (lista.length ? '<div style="max-height:32vh;overflow:auto;margin-bottom:10px">' + lista.map(adendos._render).join('') + '</div>' : '<p style="font-size:.82rem;color:var(--text-mute)">Nenhum adendo ainda.</p>') +
+      (lista.length ? '<div style="max-height:32vh;overflow:auto;margin-bottom:10px">' + lista.map(ad => adendos._render(ad, adendos.estadoRetificacoes(rec, mod))).join('') + '</div>' : '<p style="font-size:.82rem;color:var(--text-mute)">Nenhum adendo ainda.</p>') +
       '<div class="field"><label>Motivo</label><select id="adendo-motivo"><option value="correcao">Correção</option><option value="complementacao">Complementação</option><option value="esclarecimento">Esclarecimento</option></select></div>' +
       '<div class="field"><label>Novo adendo / correção</label><textarea id="adendo-texto" rows="4" placeholder="Ex.: onde se lê X, leia-se Y; ou complementação do registro…"></textarea></div>';
     modal.open('📝 Adendos e correções', corpo,
@@ -21368,7 +21563,7 @@ const adendos = {
   },
 
   /* Anexa um adendo por código (usado pelo modal e pela CORREÇÃO automática) */
-  registrarTexto(mod, id, texto, motivo = 'correcao') {
+  registrarTexto(mod, id, texto, motivo = 'correcao', retificacao = null) {
     const lista = store.list(mod);
     const rec = lista.find(x => x._id === id);
     if (!rec || !rec._finalizado) return null;
@@ -21376,6 +21571,12 @@ const adendos = {
     const u = (typeof auth !== 'undefined' && auth.usuarioAtual) ? auth.usuarioAtual() : null;
     const ad = { id: utils.uid(), texto, motivo,
       autor: (u && (u.nome || u.usuario)) || '', data: new Date().toISOString(), _pushed: false };
+    if (retificacao) {
+      const ret = adendos._normalizarRetificacao(retificacao);
+      if (!ret) return null;
+      ad._retificacao = ret;
+      ad._firmaFormulario = adendos._firmaFormulario(mod);
+    }
     rec._adendos.push(ad);
     /* Mesma janela de segurança do save clínico: até o WAL cifrado confirmar
        a operação, o pai fica marcado como pendente e sobrevive a uma queda
@@ -21433,22 +21634,56 @@ const adendos = {
     return linhas;
   },
   salvarComoCorrecao(mod, previo, dataNovo) {
-    const linhas = adendos.diffRegistro(previo, dataNovo);
-    try { markClean(); } catch (e) {}
-    if (!linhas.length) {
-      toast('Nenhuma alteração em relação ao registro original — nada a corrigir.', 'warn');
+    const original = store.getById(mod, previo && previo._id) || previo;
+    if (!original || !original._finalizado) return false;
+    const estado = adendos.estadoRetificacoes(original, mod);
+    const campos = adendos._camposRetificacao(estado.vigente, dataNovo);
+    if (!Object.keys(campos).length) {
+      toast('Nenhum campo clínico mudou. Identificadores e assinaturas permanecem preservados.', 'warn');
       return true;
     }
-    /* Nenhum campo — nem mesmo identificação — reabre o registro canônico.
-       Corrigir o cadastro do paciente é uma operação separada; a ficha já
-       finalizada conserva exatamente o que foi assinado e recebe o adendo. */
+    const linhas = adendos.diffRegistro(estado.vigente, Object.assign({}, estado.vigente, campos));
+    Object.keys(campos).filter(k => k.startsWith('_')).forEach(k => linhas.push('• ' + k.slice(1) + ': conteúdo clínico atualizado'));
+    const form = document.getElementById('form-' + mod);
+    const baseAdendoId = form && form.dataset && form.dataset.retificacaoRegistro === String(original._id)
+      ? (form.dataset.retificacaoBaseId || '') : estado.headId;
     const MAX = 40;
     const corpo = linhas.slice(0, MAX).join('\n') +
       (linhas.length > MAX ? '\n… e mais ' + (linhas.length - MAX) + ' alteração(ões).' : '');
-    const cabecalho = 'CORREÇÃO (edição sobre registro finalizado — o original permanece integralmente como estava):\n';
-    const ad = adendos.registrarTexto(mod, previo._id, cabecalho + corpo, 'correcao');
-    if (ad) store.notificarNuvem(ad, 'Correção do registro finalizado');
+    const ad = adendos.registrarTexto(mod, original._id,
+      'CORREÇÃO / RETIFICAÇÃO (o original permanece integralmente preservado; os campos vigentes só mudam após confirmação da nuvem):\n' + corpo,
+      'correcao', { schema: 1, baseAdendoId, campos });
+    if (ad) store.notificarNuvem(ad, 'Retificação do registro finalizado');
     return true;
+  },
+  abrirConflito(mod, id, adId) {
+    const rec = store.getById(mod, id);
+    const estado = adendos.estadoRetificacoes(rec, mod);
+    const ad = estado.conflitos.find(a => a && a.id === adId && a._retificacao &&
+      !estado.naoComprovadas.some(n => n.id === a.id));
+    if (!rec || !ad) { toast('A proposta não está disponível para revisão.', 'warn'); return; }
+    const proposta = adendos._fundirCampos(estado.vigente, ad._retificacao.campos);
+    const linhas = adendos.diffRegistro(estado.vigente, proposta);
+    const texto = '<p>A proposta abaixo foi preservada. Os campos vigentes serão alterados somente se você a confirmar e a nuvem aceitar a revisão atual.</p>' +
+      '<div style="white-space:pre-wrap">' + utils.escapeHTML(linhas.join('\n') || 'Atualização de conteúdo clínico estruturado') + '</div>';
+    modal.open('Revisar retificação em conflito', texto,
+      '<button class="btn btn-primary" onclick="adendos.aplicarConflito(' + utils.jsArg(mod) + ',' + utils.jsArg(id) + ',' +
+        utils.jsArg(adId) + ',' + utils.jsArg(estado.headId) + ')">Aplicar proposta após revisão</button>' +
+      '<button class="btn" onclick="modal.close()">Manter campos vigentes</button>');
+  },
+  aplicarConflito(mod, id, adId, headEsperada) {
+    const rec = store.getById(mod, id);
+    const estado = adendos.estadoRetificacoes(rec, mod);
+    const ad = estado.conflitos.find(a => a && a.id === adId && a._retificacao &&
+      !estado.naoComprovadas.some(n => n.id === a.id));
+    if (!rec || !ad || estado.headId !== headEsperada) {
+      toast('A versão vigente mudou durante a revisão. Compare as versões novamente.', 'warn'); return false;
+    }
+    const novo = adendos.registrarTexto(mod, id,
+      'RESOLUÇÃO DE CONFLITO: proposta ' + adId + ' revisada e reapresentada sobre a versão ' + (headEsperada || 'original') + '.\n' + ad.texto,
+      'correcao', { schema: 1, baseAdendoId: headEsperada, campos: ad._retificacao.campos });
+    if (!novo) return false;
+    modal.close(); store.notificarNuvem(novo, 'Decisão sobre a retificação'); return true;
   },
   async _push(mod, rec, ad) {
     const tabela = adendos.MODS[mod];
@@ -21483,8 +21718,13 @@ const adendos = {
       legacy_id: ad.id, texto: ad.texto, reason: ad.motivo || 'correcao',
       data: { autor_exibicao: ad.autor, criado_no_aparelho_em: ad.data }
     };
+    if (ad._retificacao) {
+      const ret = adendos._normalizarRetificacao(ad._retificacao);
+      if (!ret) return { ok: false, motivo: 'retificacao_invalida' };
+      row.data.retificacao = ret;
+    }
     const c = cloud.config();
-    const select = 'id,organization_id,legacy_id,reason,texto,data,author_id,created_at,parent_legacy_id';
+    const select = 'id,organization_id,legacy_id,reason,texto,data,author_id,created_at,parent_table,parent_id,parent_legacy_id,retification_revision';
     const rq = await fetch(c.url + '/rest/v1/addenda?on_conflict=organization_id,legacy_id&select=' + select, {
       method: 'POST', headers: Object.assign({}, cloud._headers(true), {
         'Content-Type': 'application/json', 'Prefer': 'resolution=ignore-duplicates,return=representation'
@@ -21501,11 +21741,18 @@ const adendos = {
       rows = await ex.json().catch(() => []);
       if (!cloudRel._contextoValido(contexto, org)) return { ok: false, motivo: 'contexto_trocado' };
     }
+    if (rows[0] && (rows[0].parent_id !== parent.id || rows[0].parent_table !== p.parentTable)) {
+      return { ok: false, motivo: 'recibo_pai_divergente' };
+    }
     return rows[0] ? { ok: true, row: rows[0] } : { ok: false, motivo: 'recibo_ausente' };
   },
   confirmarOperacao(op, confirmado) {
     const p = op && op.payload;
-    if (!p || p.transport !== persistenciaCloudFirst.TRANSPORTE_ADENDO || !confirmado) return false;
+    if (!p || p.transport !== persistenciaCloudFirst.TRANSPORTE_ADENDO || !confirmado ||
+        !op.contexto || !contextoAba.corresponde(op.contexto)) return false;
+    if (p.adendo && p.adendo._retificacao && (!adendos.propostaRetificacaoIgual(p.adendo._retificacao,
+        confirmado.data && confirmado.data.retificacao, confirmado) ||
+        confirmado.author_id !== op.contexto.userId || !registrarProva(p.parentModule, confirmado, op.contexto))) return false;
     adendos._pendentesCofre.delete(String(p.adendo && p.adendo.id || ''));
     try { store.confirmarRemoto(p.parentModule, p.parentLegacyId); } catch (e) {}
     const lst = store.list(p.parentModule);
@@ -21514,9 +21761,15 @@ const adendos = {
     r._adendos = r._adendos || [];
     let a = r._adendos.find(x => x && x.id === p.adendo.id);
     if (!a) { a = Object.assign({}, p.adendo); r._adendos.push(a); }
-    a._pushed = true; a._authorId = confirmado.author_id;
-    a._serverCreatedAt = confirmado.created_at; a.data = confirmado.created_at || a.data;
-    a.motivo = confirmado.reason || a.motivo;
+    Object.assign(a, adendos._daLinha(confirmado));
+    if (a._retificacao && a._retificacao.status === 'accepted') {
+      const form = document.getElementById('form-' + p.parentModule);
+      if (form && form.dataset && form.dataset.retificacaoRegistro === String(r._id) &&
+          a._firmaFormulario && a._firmaFormulario === adendos._firmaFormulario(p.parentModule)) {
+        adendos._marcarBaseFormulario(p.parentModule, r, form);
+        try { markClean(); } catch (e) {}
+      }
+    }
     store.setList(p.parentModule, lst);
     try { if (state.currentModule === p.parentModule) adendos.renderInline(p.parentModule); } catch (e) {}
     return true;
@@ -21565,9 +21818,16 @@ const adendos = {
   },
   _daLinha(row) {
     const d = (row && row.data) || {};
-    return { id: row.legacy_id, texto: row.texto, motivo: row.reason || 'correcao',
+    const ad = { id: row.legacy_id, texto: row.texto, motivo: row.reason || 'correcao',
       autor: d.autor_exibicao || d.autor || row.author_id || '', data: row.created_at,
       _authorId: row.author_id || null, _serverCreatedAt: row.created_at, _pushed: true };
+    if (d.retificacao != null) {
+      ad.autor = row.author_id || '';
+      ad._retificacao = adendos._normalizarRetificacao(d.retificacao, row);
+      ad._retificacaoInvalida = !ad._retificacao;
+      ad._retificacaoRevisao = row.retification_revision;
+    }
+    return ad;
   },
   async puxarModulo(mod) {
     const tabela = adendos.MODS[mod];
@@ -21584,7 +21844,7 @@ const adendos = {
         if (!cloudRel._contextoValido(contexto, org)) return 0;
         const rq = await fetch(c.url + '/rest/v1/addenda?organization_id=eq.' + encodeURIComponent(org) +
           '&parent_table=eq.' + encodeURIComponent(tabela) +
-          '&select=organization_id,legacy_id,parent_legacy_id,reason,texto,data,author_id,created_at' +
+          '&select=organization_id,legacy_id,parent_table,parent_id,parent_legacy_id,reason,texto,data,author_id,created_at,retification_revision' +
           '&order=created_at.asc&limit=' + PASSO + '&offset=' + offset, { headers: cloud._headers(true) });
         if (!rq.ok) return 0;
         const lote = await rq.json().catch(() => []);
@@ -21599,6 +21859,7 @@ const adendos = {
       let novos = 0;
       rows.forEach(row => {
         const rec = porId.get(row.parent_legacy_id); if (!rec || !row.legacy_id) return;
+        registrarProva(mod, row, contexto);
         rec._adendos = rec._adendos || [];
         const i = rec._adendos.findIndex(x => x && x.id === row.legacy_id);
         const ad = adendos._daLinha(row);
@@ -21622,6 +21883,7 @@ const adendos = {
     if (!org || row.organization_id !== org) return;
     const mod = Object.keys(adendos.MODS).find(m => adendos.MODS[m] === row.parent_table);
     if (!mod) return;
+    registrarProva(mod, row, contextoAtual());
     const lista = store.list(mod); const rec = lista.find(x => x && x._id === row.parent_legacy_id);
     if (!rec) return;
     rec._adendos = rec._adendos || [];
@@ -21629,32 +21891,48 @@ const adendos = {
     if (i >= 0) rec._adendos[i] = Object.assign({}, rec._adendos[i], ad); else rec._adendos.push(ad);
     store.setList(mod, lista);
     try { if (state.currentModule === mod) adendos.renderInline(mod); } catch (e) {}
+    try {
+      if (state.currentModule === mod && adendos._idAtual(mod) === String(rec._id) && ad._retificacao) {
+        toast(ad._retificacao.status === 'accepted'
+          ? '☁️ Retificação recebida. A impressão usa os campos confirmados; reabra o registro para revisar a versão vigente.'
+          : '⚠️ Retificação em conflito recebida. As propostas foram preservadas para revisão.', 'warn');
+      }
+    } catch (e) {}
   },
   renderInline(mod) {
     const host = document.getElementById(mod + '-adendos-lista');
     if (!host) return;
     const rec = adendos._rec(mod);
     const lista = (rec && rec._adendos) || [];
-    host.innerHTML = lista.length ? lista.map(adendos._render).join('') : '<span class="no-print" style="font-size:.8rem;color:var(--text-mute)">Nenhum adendo. Use “Adicionar adendo/correção” para incluir uma correção sem alterar o registro original.</span>';
+    const estado = adendos.estadoRetificacoes(rec, mod);
+    host.innerHTML = lista.length ? lista.map(ad => adendos._render(ad, estado) +
+      (estado.conflitos.some(a => a && a.id === ad.id && a._retificacao) &&
+        !estado.naoComprovadas.some(a => a.id === ad.id)
+        ? '<button class="btn btn-sm no-print" onclick="adendos.abrirConflito(' + utils.jsArg(mod) + ',' +
+          utils.jsArg(rec._id) + ',' + utils.jsArg(ad.id) + ')">Revisar esta proposta em conflito</button>' : '')).join('')
+      : '<span class="no-print" style="font-size:.8rem;color:var(--text-mute)">Para corrigir campos, edite e salve. A nuvem confirma a retificação, conserva o original e atualiza a versão vigente.</span>';
     const sec = document.getElementById('sec-adendos-' + mod);
     if (sec) sec.classList.toggle('sem-adendos', lista.length === 0);
   },
   /* HTML dos adendos para o PDF/impressão (ou '' se não houver) */
   htmlParaImpressao(rec) {
-    const lista = (rec && rec._adendos) || [];
+    const lista = ((rec && rec._adendos) || []).filter(ad => ad && !ad._retificacao && !ad._retificacaoInvalida);
     if (!lista.length) return '';
     /* TAMANHO DE LEITURA, não de rodapé. O que vem aqui é conteúdo clínico —
        exames que chegaram depois, correção de dose, de lado. Imprimir isso em
        7,5pt é esconder com elegância. */
     return '<div class="print-adendos" style="margin-top:14px;border:1px solid #8a1c1c;border-radius:6px;padding:8px 10px">' +
       '<h3 style="font-size:10pt;margin:0 0 2px;color:#8a1c1c">⚠️ ADENDOS / CORREÇÕES — ' + lista.length + '</h3>' +
-      '<div style="font-size:8pt;color:#555;margin:0 0 6px">O registro acima é o original, preservado. O que mudou depois está aqui, datado e assinado.</div>' +
+      '<div style="font-size:8pt;color:#555;margin:0 0 6px">' +
+      (rec._retificadoEm ? 'Os campos acima são os vigentes confirmados. O registro original e as retificações permanecem no histórico; os adendos de texto estão abaixo.'
+        : 'O registro acima é o original, preservado. O que mudou depois está aqui, datado e assinado.') + '</div>' +
       lista.map(ad => '<div style="font-size:9pt;margin-bottom:5px;line-height:1.45;white-space:pre-wrap"><b>' +
         utils.escapeHTML(adendos._fmtData(ad.data)) + ' — ' + utils.escapeHTML(ad.autor || '') + ':</b> ' +
         utils.escapeHTML(ad.texto || '') + '</div>').join('') +
       '</div>';
   }
-};
+  };
+})();
 try { contextoAba.aoMudar(() => adendos._pendentesCofre.clear()); } catch (e) {}
 
 /* ============================================================================
@@ -24882,6 +25160,7 @@ const documentos = {
   carregar(item) {
     if (!item) item = store.last('documentos');
     if (!item) { toast('Nenhum documento salvo', 'warn'); return; }
+    item = adendos.vigente('documentos', item);
     utils.clearForm('form-documentos');
     utils.fillForm('form-documentos', item);
     const f = document.getElementById('form-documentos');
@@ -25222,6 +25501,7 @@ const risco = {
   carregar(item) {
     if (!item) item = store.last('risco');
     if (!item) { toast('Nenhum cálculo salvo', 'warn'); return; }
+    item = adendos.vigente('risco', item);
     utils.clearForm(risco.formId);
     utils.fillForm(risco.formId, item);
     let f = document.getElementById(risco.formId);
@@ -26844,7 +27124,7 @@ const pdfBackup = {
       const guardado = ppp.innerHTML;
       let doc, nomeArq;
       try {
-        ppp.innerHTML = builder();
+        ppp.innerHTML = printPreview._comporDocumento(mod, builder);
         doc = printPreview._gerarDocDeTexto(J, ppp);
         nomeArq = printPreview._gerarNomeArquivo().replace(/[^\w.\-]+/g, '_') + '.pdf';
       } finally { ppp.innerHTML = guardado; }
@@ -27001,7 +27281,7 @@ const pdfBackup = {
       state.currentModule = mod;
       const guardado = ppp.innerHTML;
       try {
-        ppp.innerHTML = builder();
+        ppp.innerHTML = printPreview._comporDocumento(mod, builder);
         const doc = printPreview._gerarDocDeTexto(J, ppp);
         const nomeArq = printPreview._gerarNomeArquivo().replace(/[^\w.\-]+/g, '_') + '.pdf';
         return { doc, nomeArq };
@@ -36260,6 +36540,8 @@ const anestesia = {
   },
 
   restaurarEstruturado(d) {
+    if (d && d._finalizado) d = adendos.vigente('anestesia', d);
+    try { adendos._marcarBaseFormulario('anestesia', d, document.getElementById('form-anestesia')); } catch (e) {}
     /* CONTEXTO: as linhas de vitais/meds/eventos são inseridas no contexto
        ativo do motor de gráfico. Se ele ficou em 'recuperacao' (ex.: após
        gerar/carregar uma SRPA), os dados da FICHA cairiam nas tabelas da
@@ -37023,6 +37305,7 @@ const anestesia = {
   carregar(item) {
     if (!item) item = store.last('anestesia');
     if (!item) { toast('Nenhuma ficha salva', 'warn'); return; }
+    item = adendos.vigente('anestesia', item);
     anestesia.limparSilencioso();
     anestesia.restaurarEstruturado(item);
     try { prontuario.restaurar('anestesia', item._docs); } catch (e) {}

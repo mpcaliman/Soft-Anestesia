@@ -380,7 +380,11 @@ const persistenciaCloudFirst = {
         String(row.legacy_id || '') === String(ad.id || '') &&
         String(row.parent_legacy_id || '') === String(op.payload.parentLegacyId || '') &&
         String(row.texto || '') === String(ad.texto || '') &&
-        String(row.reason || '') === String(ad.motivo || 'correcao');
+        String(row.reason || '') === String(ad.motivo || 'correcao') &&
+        (ad._retificacao || (row.data && row.data.retificacao) != null
+          ? typeof adendos !== 'undefined' && row.author_id === op.contexto.userId &&
+            Number.isFinite(Date.parse(row.created_at)) && row.parent_table === op.payload.parentTable && !!row.parent_id &&
+            adendos.propostaRetificacaoIgual(ad._retificacao, row.data && row.data.retificacao, row) : true);
     }
     const legacy = ['delete','restore'].indexOf(op.payload.action) >= 0
       ? op.payload.legacyId : cloudRel.chaveLegada(op.module, op.payload.item);

@@ -38,8 +38,8 @@ plano fechado ao alvo de homologação, sem executar SQL. O programa valida os
 hashes de cada fonte contra `database/migration-baseline.json` e registra o
 hash de cada SQL que seria aplicado.
 
-A ordem consiste nas 30 migrações numeradas de `database/migrations`, seguidas
-de `supabase/migrations/0002_assinaturas_hardening.sql`. São 31 operações.
+A ordem consiste nas 31 migrações numeradas de `database/migrations`, seguidas
+de `supabase/migrations/0002_assinaturas_hardening.sql`. São 32 operações.
 O histórico existente `0001_assinaturas` permanece intacto. Os nomes das novas
 migrações começam por `staging_rebuild_`, para não confundir os dois arquivos
 históricos chamados `0001`. A ferramenta de aplicação gera as versões
@@ -101,3 +101,26 @@ vencimento natural do JWT e não substitui a integração de duas abas e queda
 abrupta do navegador. A suíte de navegador da CI e uma sessão atravessando o
 vencimento do JWT devem produzir evidências próprias antes de declarar essas
 garantias verificadas.
+
+## Retificação estruturada de documentos finalizados
+
+A proposta local `0031_append_only_retification_cas.sql` preserva o registro
+original e cria uma cadeia de retificações por INSERT em `addenda`. O servidor
+serializa o CAS por organização/tabela/UUID, carimba a revisão aceita e mantém
+a proposta concorrente como adendo `conflict`. Rótulos clínicos corrigidos
+podem ser projetados na tela e no PDF; FKs, autoria e assinatura permanecem
+inalteradas. A migração não foi aplicada e não libera publicação.
+
+`tests/sql/retification-cas-security.sql` contém uma fixture PostgreSQL com
+rollback para autorização, isolamento, idempotência, cadeia aceita, conflito
+preservado e imutabilidade integral do pai. O teste Node verifica o contrato
+das fontes; a fixture SQL ainda não foi executada em um banco reconciliado.
+A corrida de duas sessões reais e a assinatura Realtime desta cadeia também
+permanecem pendentes.
+
+Essa corrida deve usar homologação exclusiva, com contas e registros sintéticos.
+Os adendos são append-only mesmo em DELETE por cascade administrativo; não se
+deve enfraquecer esse guard para a limpeza de testes. Antes de executar um
+teste concorrente que confirme transações, definir retenção da evidência e o
+encerramento ou a recriação explícita desse ambiente. O runner atual não cria
+adendos e não recebeu uma etapa automática que apagasse essa evidência.

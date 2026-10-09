@@ -13,10 +13,11 @@ const html = await readAppSource(appRoot);
 const SoftActions = await readCompiledActions(appRoot);
 const storeSource = await readFile(resolve(appRoot, 'src/platform/clinical-store.js'), 'utf8');
 function objectSource(name) {
-  const start = html.indexOf('const ' + name + ' = {');
-  const end = html.indexOf('\n};', start);
+  const wrapped = name === 'adendos';
+  const start = html.indexOf('const ' + name + ' = ' + (wrapped ? '(() => {' : '{'));
+  const end = html.indexOf(wrapped ? '\n})();' : '\n};', start);
   assert(start >= 0 && end > start, name + ' deve existir');
-  return html.slice(start, end + 3);
+  return html.slice(start, end + (wrapped ? 6 : 3));
 }
 const values = new Map();
 const localStorage = {

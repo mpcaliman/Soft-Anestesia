@@ -241,6 +241,13 @@
       "appliedSha256": null,
       "state": "not_applied",
       "remoteVersion": null
+    },
+    {
+      "source": "database/migrations/0031_append_only_retification_cas.sql",
+      "sourceSha256": "caf6ce1392b1becd33bc57a08077f232363ef8093dbe9eddd92725e0188840e5",
+      "appliedSha256": null,
+      "state": "not_applied",
+      "remoteVersion": null
     }
   ],
   "remoteHistory": [

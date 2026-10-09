@@ -996,8 +996,8 @@ assert.equal(testedPrint._viaAereaImpressa(''), '');
 
 /* Correções precisam atravessar a composição real do preview e a janela de
    impressão; testar apenas o gerador de bloco não comprova que saem no papel. */
-const addendaStart = html.indexOf('const adendos = {');
-const addendaEnd = html.indexOf('\n};', addendaStart);
+const addendaStart = html.indexOf('const adendos = (() => {');
+const addendaEnd = html.indexOf('\n})();', addendaStart);
 assert(addendaStart >= 0 && addendaEnd > addendaStart);
 const printRecords = new Map();
 const printForms = new Map();
@@ -1008,7 +1008,7 @@ const hostileAddendum = 'Exames posteriores: Hb 13,2\n<img src=x onerror="alert(
 const hostileAuthor = 'Dr. O\'Connor <svg onload="alert(2)">';
 const escaped = value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;')
   .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-for (const mod of ['pre', 'consulta', 'anestesia', 'recuperacao', 'risco', 'termo']) {
+for (const mod of ['pre', 'consulta', 'anestesia', 'recuperacao', 'risco', 'termo', 'prescricao', 'documentos']) {
   const id = mod + '-aberto';
   const fields = { _id: { value: id }, nome: { value: 'Paciente A' }, paciente_nome: { value: 'Paciente A' } };
   const form = { id: 'form-' + mod, querySelector: selector => fields[selector.match(/name="([^"]+)"/)?.[1]] || null };
@@ -1033,17 +1033,25 @@ const actualPrintSandbox = { SoftActions, console,
   linker: { contextoPaciente: () => ({ patientRef: 'paciente-a', identityKey: 'id-a' }),
     contextoCaso: () => ({ caseId: 'caso-a' }) }
 };
-vm.runInNewContext(html.slice(addendaStart, addendaEnd + 3) + '\n' + printSource
-  + '\nglobalThis.testedPrint = printPreview;', actualPrintSandbox, { filename: 'actual-addenda-print.js' });
+const actualPrintContext = Object.freeze({ userId: 'autor-sintetico', organizationId: 'clinica-sintetica',
+  tabId: 'aba-sintetica', deviceId: 'dispositivo-sintetico', generation: 1, verified: true });
+actualPrintSandbox.contextoAba = { capturar: () => actualPrintContext, atual: () => actualPrintContext,
+  organizationId: () => actualPrintContext.organizationId, aoMudar() {},
+  corresponde: contexto => contexto === actualPrintContext || JSON.stringify(contexto) === JSON.stringify(actualPrintContext) };
+vm.runInNewContext(html.slice(addendaStart, addendaEnd + '\n})();'.length) + '\n' + printSource
+  + '\nglobalThis.testedPrint = printPreview; globalThis.testedAddenda = adendos;', actualPrintSandbox, { filename: 'actual-addenda-print.js' });
 const actualPrint = actualPrintSandbox.testedPrint;
+const realPrintBuilders = new Map([['pre', '_buildPre'], ['consulta', '_buildConsulta'], ['anestesia', '_buildAnestesia'],
+  ['recuperacao', '_buildRecuperacao'], ['risco', '_buildRisco'], ['termo', '_buildTermo'],
+  ['prescricao', '_buildPrescricao'], ['documentos', '_buildDocumento']]
+  .map(([mod, method]) => [mod, { method, builder: actualPrint[method] }]));
 actualPrint._gerarNomeArquivo = () => 'Documento'; actualPrint._infoLabel = mod => mod;
 actualPrint._sanitizarPaciente = () => 'Paciente'; actualPrint._dataCriacao = () => '2026-10-09';
 actualPrint.refreshSignature = () => {};
-for (const [mod, builder] of [['pre', '_buildPre'], ['consulta', '_buildConsulta'], ['anestesia', '_buildAnestesia'],
-  ['recuperacao', '_buildRecuperacao'], ['risco', '_buildRisco'], ['termo', '_buildTermo']]) {
-  actualPrint[builder] = () => '<section>Original ' + mod + '</section>';
+for (const [mod, { method }] of realPrintBuilders) {
+  actualPrint[method] = () => '<section>Original ' + mod + '</section>';
 }
-for (const mod of ['pre', 'consulta', 'anestesia', 'recuperacao', 'risco']) {
+for (const mod of realPrintBuilders.keys()) {
   actualPrintSandbox.state.currentModule = mod;
   actualPrint.abrir(); actualPrint.imprimir();
   assert(printedDocument.includes('Original ' + mod));
@@ -1057,6 +1065,7 @@ for (const mod of ['pre', 'consulta', 'anestesia', 'recuperacao', 'risco']) {
 actualPrint.abrirPreTermo(); actualPrint.imprimir();
 assert(printedDocument.includes('Original pre') && printedDocument.includes('Original termo'));
 assert(printedDocument.includes(escaped('pre: ' + hostileAddendum)), 'conjunto pré+termo conserva as correções da pré');
+assert(printedDocument.includes(escaped('termo: ' + hostileAddendum)), 'conjunto pré+termo conserva as correções do termo');
 actualPrint.abrirConjunto(); actualPrint.imprimir();
 assert(printedDocument.includes(escaped('anestesia: ' + hostileAddendum))
   && printedDocument.includes(escaped('recuperacao: ' + hostileAddendum)), 'conjunto anestesia+SRPA imprime os adendos de ambas as fichas');
@@ -1064,6 +1073,196 @@ printForms.get('pre')._id.value = '';
 actualPrintSandbox.state.currentModule = 'pre'; actualPrint.abrir(); actualPrint.imprimir();
 assert(!/ADENDOS \/ CORREÇÕES/.test(printedDocument), 'formulário novo não pode herdar os adendos da impressão anterior');
 assert.equal(JSON.stringify([...printRecords]), recordsBeforePrinting, 'preview e impressão preservam o original e sua autoria');
+
+/* Executa os builders reais com uma retificação aceita pelo servidor e outra
+   concorrente recusada. Nenhum deles pode ler alterações ainda não salvas do
+   formulário, nem misturar tabelas/gráficos de versões diferentes. */
+const unsavedClinicalRead = () => { throw new Error('Leitura clínica do formulário finalizado'); };
+Object.assign(actualPrintSandbox.utils, { formData: unsavedClinicalRead, formatarData: value => value || '',
+  getCarimboDoProfissional: () => null });
+Object.assign(actualPrintSandbox, {
+  labExtra: { coletar: unsavedClinicalRead },
+  consulta: { seguimento: { coletar: unsavedClinicalRead }, procs: { coletar: unsavedClinicalRead } },
+  recuperacao: { grafico: { coletar: unsavedClinicalRead } },
+  prescricao: { _coletarItens: unsavedClinicalRead },
+  risco: { atualizar: unsavedClinicalRead, resumoCompactoHTML: data => escaped(JSON.stringify(data._resumo || {})) },
+  cirurgia: { texto: data => data.descricao || '', textoLista: () => '' }
+});
+actualPrintSandbox.anestesia.coletarEstruturado = unsavedClinicalRead;
+actualPrintSandbox.anestesia.exames = { listar: () => [], ehExame: () => false };
+actualPrintSandbox.store.list = mod => [...printRecords].filter(([key]) => key.startsWith(mod + '|')).map(([, rec]) => rec);
+let renderingCurrentVersion = false;
+actualPrintSandbox.store.setList = () => { if (renderingCurrentVersion) throw new Error('Impressão não pode regravar o original'); };
+actualPrint._header = titulo => '<h1>' + escaped(titulo) + '</h1>';
+actualPrint._signature = () => ''; actualPrint._signatureAnestesia = () => '';
+actualPrint._footer = label => '<footer>' + escaped(label) + '</footer>';
+const plottedPoints = [];
+actualPrintSandbox.document.createElement = tag => {
+  assert.equal(tag, 'canvas', 'gráfico vigente deve usar canvas separado do formulário');
+  const context = { fillRect() {}, fillText() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {}, fill() {},
+    arc(x, y) { plottedPoints.push({ x, y }); } };
+  return { getContext: () => context, toDataURL: () => 'data:image/png;base64,' + 'A'.repeat(160) };
+};
+const freezePrintRecord = value => {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.values(value).forEach(freezePrintRecord); Object.freeze(value);
+  }
+  return value;
+};
+for (const [mod, { method, builder }] of realPrintBuilders) {
+  actualPrint[method] = builder;
+  printForms.get(mod)._id.value = mod + '-aberto';
+  const original = printRecords.get(mod + '|' + mod + '-aberto');
+  Object.assign(original, { nome: 'Paciente sintético original ' + mod, texto: 'Texto original',
+    alergias: 'Alergia original', atestado_texto: 'Atestado original', itens: [], grafico: {},
+    paciente: { nome: 'Paciente sintético original ' + mod }, procedimento: {}, pre_anestesico: {},
+    tecnica: {}, monitorizacao: {}, fluidos: {}, intercorrencias: {}, transferencia: {},
+    conclusao: {}, assinatura: {}, sinais_vitais: [], _labExtras: [], _seguimentos: [], _procsRealizados: [], _resumo: {} });
+  const nome = 'Paciente sintético vigente ' + mod;
+  const campos = { nome, alergias: 'Alergia aceita ' + mod, texto: 'Texto aceito ' + mod,
+    atestado_texto: 'Atestado aceito ' + mod, itens: [{ nome: 'Medicamento aceito ' + mod, pos: 'Posologia aceita' }],
+    _labExtras: [{ label: 'Exame aceito', valor: 'Resultado aceito ' + mod }],
+    _seguimentos: [{ texto: 'Seguimento aceito ' + mod }],
+    _procsRealizados: [{ codigo: 'SINTETICO', descricao: 'Procedimento aceito ' + mod }],
+    _resumo: { aceito: 'Estimativa aceita ' + mod },
+    paciente: { nome }, sinais_vitais: [{ hora: '08:00', fc: '80' }],
+    grafico: { vitais: [{ hora: '08:00', fc: '80', observacao: 'Vital aceito ' + mod }], eventos: [], medicacoes: [] } };
+  const linhaBase = { id: '00000000-0000-4000-8000-000000000001',
+    organization_id: actualPrintContext.organizationId, parent_table: actualPrintSandbox.testedAddenda.MODS[mod],
+    parent_id: '00000000-0000-4000-8000-000000000002', parent_legacy_id: original._id };
+  actualPrintSandbox.testedAddenda.receberLinha({ ...linhaBase, legacy_id: mod + '-retificacao',
+    author_id: 'autor-sintetico', created_at: '2026-10-09T13:00:00Z', retification_revision: 1,
+    texto: 'Diff aceito do registro', data: { autor_exibicao: 'RÓTULO DE AUTOR FORJADO',
+      retificacao: { schema: 1, baseAdendoId: '', campos, status: 'accepted', baseAtualId: '', revisao: 1 } } });
+  actualPrintSandbox.testedAddenda.receberLinha({ ...linhaBase, id: '00000000-0000-4000-8000-000000000003',
+    legacy_id: mod + '-conflito', author_id: 'autor-concorrente',
+    created_at: '2026-10-09T13:00:01Z', retification_revision: null,
+    texto: 'Diff em conflito', data: { autor_exibicao: 'Autor concorrente',
+      retificacao: { schema: 1, baseAdendoId: '',
+        campos: { nome: 'CONFLITO NÃO APLICADO', texto: 'CONFLITO NÃO APLICADO' },
+        status: 'conflict', baseAtualId: mod + '-retificacao', revisao: 1 } } });
+  original._adendos.push(
+  { id: mod + '-pendente', autor: 'Autor offline', data: '2026-10-09T13:01:00Z', _pushed: false,
+    texto: 'Diff ainda pendente', _retificacao: { schema: 1, baseAdendoId: mod + '-retificacao',
+      campos: { nome: 'PENDENTE NÃO APLICADO', texto: 'PENDENTE NÃO APLICADO' }, status: 'pending' } });
+  freezePrintRecord(original);
+  const before = JSON.stringify(original);
+  actualPrintSandbox.state.currentModule = mod;
+  renderingCurrentVersion = true;
+  try { actualPrint.abrir(); actualPrint.imprimir(); } finally { renderingCurrentVersion = false; }
+  if (mod !== 'documentos') assert(printedDocument.includes(escaped(nome)), mod + ': identificação deve vir da versão aceita');
+  assert(printedDocument.includes('VERSÃO ATUAL — RETIFICADA') && printedDocument.includes('autor-sintetico'),
+    mod + ': documento precisa identificar a retificação aceita e sua autoria');
+  assert(!printedDocument.includes('RÓTULO DE AUTOR FORJADO'), mod + ': carimbo retificado deve usar autoria canônica do servidor');
+  assert(printedDocument.includes('retificação(ões) em conflito') && printedDocument.includes('pendente(s) de confirmação'),
+    mod + ': conflito e pendência devem ser explícitos');
+  assert(!printedDocument.includes('CONFLITO NÃO APLICADO') && !printedDocument.includes('PENDENTE NÃO APLICADO'),
+    mod + ': campos não aceitos jamais entram no documento');
+  assert(printedDocument.includes(escaped(mod + ': ' + hostileAddendum)), mod + ': adendos de texto continuam legíveis');
+  if (mod === 'pre' || mod === 'consulta') {
+    assert(printedDocument.includes('Alergia aceita ' + mod) && printedDocument.includes('Resultado aceito ' + mod));
+  }
+  if (mod === 'consulta') assert(printedDocument.includes('Seguimento aceito consulta') && printedDocument.includes('Procedimento aceito consulta'));
+  if (mod === 'termo') assert(printedDocument.includes('Texto aceito termo'));
+  if (mod === 'prescricao') assert(printedDocument.includes('Medicamento aceito prescricao') && printedDocument.includes('Posologia aceita'));
+  if (mod === 'documentos') assert(printedDocument.includes('Atestado aceito documentos'));
+  if (mod === 'risco') assert(printedDocument.includes('Estimativa aceita risco'));
+  if (mod === 'anestesia' || mod === 'recuperacao') assert(printedDocument.includes('Gráfico dos sinais vitais da versão vigente'));
+  assert.equal(JSON.stringify(original), before, mod + ': projeção e impressão não regravam o registro original');
+}
+assert.equal(plottedPoints.length, 2, 'ficha e SRPA desenham somente o ponto vigente confirmado');
+for (const point of plottedPoints) assert.equal(point.y, 138, 'FC 80 confirmada deve alimentar o gráfico, sem coleta do formulário');
+actualPrint.abrirPreTermo(); actualPrint.imprimir();
+assert(printedDocument.includes('Texto aceito termo') && printedDocument.includes('Alergia aceita pre'));
+assert.equal((printedDocument.match(/VERSÃO ATUAL — RETIFICADA/g) || []).length, 2, 'cada parte do conjunto identifica sua própria revisão aceita');
+actualPrint.abrirConjunto(); actualPrint.imprimir();
+assert(printedDocument.includes('Paciente sintético vigente anestesia') && printedDocument.includes('Paciente sintético vigente recuperacao'));
+assert.equal((printedDocument.match(/VERSÃO ATUAL — RETIFICADA/g) || []).length, 2);
+printForms.get('pre')._id.value = '';
+actualPrintSandbox.utils.formData = () => ({ nome: 'Paciente sintético ainda não salvo' });
+actualPrintSandbox.state.currentModule = 'pre'; actualPrint.abrir(); actualPrint.imprimir();
+assert(printedDocument.includes('Paciente sintético ainda não salvo') && !printedDocument.includes('VERSÃO ATUAL — RETIFICADA'),
+  'documento novo lê seu formulário sem herdar a projeção do paciente anterior');
+
+/* O nome do PDF também contém dado clínico. As reservas só existem na memória
+   da aba/contexto; legado em claro é eliminado sem ser lido ou restaurado. */
+const legacyPrintKeys = ['medsys.v7.nomes_arquivo', 'medsys.v7.nomes_arquivo@clinica-a',
+  'medsys.v7.nomes_arquivo@clinica-b', 'demo:medsys.v7.nomes_arquivo@demo'];
+let reservationStorageWrites = 0, reservationClinicalReads = 0;
+function reservationStorage() {
+  const data = new Map(legacyPrintKeys.map(key => [key, JSON.stringify({ nomes: { Paciente_Anterior: 'documento-anterior' } })]));
+  data.set('medsys.offline.cifrada', 'AES-GCM-sintetico');
+  return { data, get length() { return data.size; }, key: index => [...data.keys()][index] || null,
+    getItem(key) {
+      if (/nomes_arquivo/.test(key)) { reservationClinicalReads++; throw new Error('Não restaurar nomes clínicos'); }
+      return data.get(key) || null;
+    },
+    setItem() { reservationStorageWrites++; throw new Error('Reservas não podem persistir no navegador'); },
+    removeItem(key) { data.delete(key); } };
+}
+const printLocalStorage = reservationStorage(), printSessionStorage = reservationStorage();
+const reservationListeners = [], reservationPageEvents = new Map();
+const reservationPreviewNodes = new Map(['ppp', 'ppt-signature-select', 'ppt-filename', 'ppt-info']
+  .map(id => [id, { innerHTML: 'Paciente sintético anterior', textContent: 'Nome clínico anterior' }]));
+reservationPreviewNodes.set('print-preview-overlay', { classList: classes() });
+let reservationDemo = false, reservationDay = '2026-10-09';
+let reservationContext = { tabId: 'tab-a', deviceId: 'dispositivo-a', userId: 'usuario-a',
+  organizationId: 'clinica-a', generation: 1, verified: true };
+const reservationSandbox = { SoftActions,
+  localStorage: printLocalStorage, cofre: { _real: printLocalStorage },
+  window: { localStorage: printLocalStorage, sessionStorage: printSessionStorage,
+    addEventListener: (event, fn) => reservationPageEvents.set(event, fn) },
+  document: { getElementById: id => reservationPreviewNodes.get(id) || null, body: { classList: classes() } },
+  demo: { ativo: () => reservationDemo },
+  contextoAba: { capturar: () => ({ ...reservationContext }), aoMudar: fn => reservationListeners.push(fn) } };
+vm.runInNewContext(printSource + '\nglobalThis.printReservations = printPreview;', reservationSandbox,
+  { filename: 'print-reservations-security.js' });
+const reservationPrint = reservationSandbox.printReservations;
+reservationPrint._dataCriacao = () => reservationDay;
+assert.equal(reservationPreviewNodes.get('ppp').innerHTML, '', 'boot remove conteúdo anterior de impressão');
+assert.equal(reservationPreviewNodes.get('ppt-filename').textContent, '', 'boot remove nome clínico anterior');
+for (const storage of [printLocalStorage, printSessionStorage]) {
+  assert(legacyPrintKeys.every(key => !storage.data.has(key)), 'boot deve remover reservas antigas de todas as clínicas e demo');
+  assert.equal(storage.data.get('medsys.offline.cifrada'), 'AES-GCM-sintetico', 'limpeza não pode apagar pendências cifradas');
+}
+reservationPrint._gravarReserva({ dia: reservationDay, nomes: { Paciente_Sintetico_APA: 'pre:a' } });
+assert.equal(reservationPrint._lerReserva().nomes.Paciente_Sintetico_APA, 'pre:a', 'API pública deve reservar apenas em memória');
+assert.equal(reservationPrint._nomeUnico('Paciente_Sintetico_APA', 'pre:b'), 'Paciente_Sintetico_APA_2');
+assert.equal(reservationPrint._nomeUnico('Paciente_Sintetico_APA', 'pre:b'), 'Paciente_Sintetico_APA_2', 'mesmo documento conserva nome nesta aba');
+reservationContext = { ...reservationContext, organizationId: 'clinica-b', generation: 2 };
+assert.equal(Object.keys(reservationPrint._lerReserva().nomes).length, 0, 'contexto diferente limpa reservas mesmo sem listener');
+reservationPrint._gravarReserva({ dia: reservationDay, nomes: { Outra_Clinica: 'pre:c' } });
+reservationPrint._nomeArquivoOverride = 'Paciente_Anterior_Conjunto';
+reservationPrint._verCtx = { mod: 'pre', formId: 'form-pre' };
+reservationPreviewNodes.get('ppp').innerHTML = 'Conteúdo clínico da sessão anterior';
+reservationPreviewNodes.get('ppt-filename').textContent = 'Paciente_Anterior_Conjunto.pdf';
+reservationPreviewNodes.get('print-preview-overlay').classList.add('show');
+reservationContext = { ...reservationContext, userId: 'usuario-b', generation: 3 };
+reservationListeners.forEach(fn => fn());
+assert.equal(Object.keys(reservationPrint._lerReserva().nomes).length, 0, 'troca de usuário encerra nomes do usuário anterior');
+assert.equal(reservationPrint._nomeArquivoOverride, null, 'troca de usuário encerra o nome do documento combinado');
+assert.equal(reservationPrint._verCtx, null, 'troca de usuário encerra o contexto de versão');
+assert.equal(reservationPreviewNodes.get('ppp').innerHTML, '', 'troca de usuário remove o preview clínico anterior');
+assert.equal(reservationPreviewNodes.get('ppt-filename').textContent, '', 'troca de usuário remove o nome clínico anterior');
+assert(!reservationPreviewNodes.get('print-preview-overlay').classList.contains('show'), 'troca de usuário fecha o preview anterior');
+reservationPrint._gravarReserva({ dia: reservationDay, nomes: { Paciente_Real: 'pre:real' } });
+reservationDemo = true;
+assert.equal(Object.keys(reservationPrint._lerReserva().nomes).length, 0, 'demo não pode ler nomes clínicos do contexto real');
+reservationPrint._gravarReserva({ dia: reservationDay, nomes: { Paciente_Demo: 'pre:demo' } });
+reservationDemo = false;
+assert.equal(Object.keys(reservationPrint._lerReserva().nomes).length, 0, 'sair de demo não recupera suas reservas nem as reais anteriores');
+reservationPrint._gravarReserva({ dia: reservationDay, nomes: { Documento_Dia: 'pre:dia' } });
+reservationDay = '2026-10-10';
+assert.equal(Object.keys(reservationPrint._lerReserva().nomes).length, 0, 'reservas vencem ao mudar de dia');
+reservationPrint._gravarReserva({ dia: reservationDay, nomes: { Documento_Aberto: 'pre:aberto' } });
+reservationPageEvents.get('pagehide')();
+assert.equal(Object.keys(reservationPrint._lerReserva().nomes).length, 0, 'fechar/ocultar documento encerra reserva em memória');
+reservationPrint._gravarReserva({ dia: reservationDay, nomes: { Documento_Antes_Logout: 'pre:antes' } });
+reservationContext = { ...reservationContext, userId: '', organizationId: '', verified: false, generation: 4 };
+reservationListeners.forEach(fn => fn());
+assert.equal(Object.keys(reservationPrint._lerReserva().nomes).length, 0, 'logout não libera nomes do usuário anterior');
+assert.equal(reservationStorageWrites, 0, 'nenhuma reserva pode escrever em localStorage ou sessionStorage');
+assert.equal(reservationClinicalReads, 0, 'nenhum nome clínico legado pode ser restaurado');
 
 const meuDiaSandbox = { SoftActions,
   linker: { _chavePaciente: item => item._patientKey || '' },

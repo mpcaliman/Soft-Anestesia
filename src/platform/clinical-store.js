@@ -252,6 +252,11 @@ const store = {
     Promise.resolve(confirmacao).then(res => {
       if (!avisoAtual()) return res;
       if (res && (res.remoteConfirmed === true || res.ok === true)) {
+        if (res.row && res.row.data && res.row.data.retificacao && res.row.data.retificacao.status === 'conflict') {
+          try { if (typeof setSavedStatus === 'function') setSavedStatus('Conflito preservado na nuvem'); } catch (e) {}
+          if (!opts.silencioso) { try { toast('⚠️ Outra retificação foi confirmada primeiro. Sua proposta foi preservada na nuvem; revise as versões antes de aplicar.', 'warn'); } catch (e) {} }
+          return res;
+        }
         try { if (typeof setSavedStatus === 'function') setSavedStatus('Confirmado na nuvem às ' + hora()); } catch (e) {}
         if (!opts.silencioso) { try { toast('☁️ ' + rotulo + ' confirmado na nuvem', 'success'); } catch (e) {} }
         return res;
