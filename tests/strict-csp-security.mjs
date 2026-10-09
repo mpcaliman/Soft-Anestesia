@@ -5,8 +5,48 @@ import vm from 'node:vm';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compileStrictAssets } from '../scripts/strict-csp.mjs';
+import { bindSyntheticPrintContext } from './helpers/bind-print-context.mjs';
 const repo=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const runtime=await readFile(resolve(repo,'src/ui/strict-actions.js'),'utf8');
+const sessionVault=await readFile(resolve(repo,'src/platform/session-vault.js'),'utf8');
+const cloudClient=await readFile(resolve(repo,'src/platform/cloud-client.js'),'utf8');
+const authClient=await readFile(resolve(repo,'src/platform/auth.js'),'utf8');
+class PrintSessionStorage {
+  constructor(){this.values=new Map();}
+  get length(){return this.values.size;}
+  key(index){return [...this.values.keys()][index]??null;}
+  getItem(key){return this.values.get(String(key))??null;}
+  setItem(key,value){this.values.set(String(key),String(value));}
+  removeItem(key){this.values.delete(String(key));}
+  clear(){this.values.clear();}
+}
+const realSessionFixture={console,btoa,sessionStorage:new PrintSessionStorage(),localStorage:new PrintSessionStorage(),
+  crypto:{randomUUID:()=> 'a09dce89-4b31-45ef-87c3-32b8014c999a'},setInterval:()=>1,
+  addEventListener(){}};
+realSessionFixture.window=realSessionFixture;
+const realSessionVm=vm.createContext(realSessionFixture);
+const contextStart=sessionVault.indexOf('const contextoAba = (() => {');
+const contextEnd=sessionVault.indexOf('\nconst cofre = {',contextStart);
+assert(contextStart>=0&&contextEnd>contextStart);
+vm.runInContext(sessionVault.slice(contextStart,contextEnd)+'\n'+cloudClient+'\n'+authClient+
+  '\nglobalThis.printContext={contextoAba,cloud,auth};',realSessionVm);
+const realPrintContext=realSessionFixture.printContext;
+assert.equal(realPrintContext.contextoAba.operational(),false);
+const actualCloudSession=realPrintContext.cloud.session;
+realPrintContext.cloud.session=()=>({user:{id:'csp-user'}});
+realPrintContext.contextoAba.prepararUsuario('csp-user');
+assert.equal(realPrintContext.contextoAba.vincular({uid:'csp-user',organization_id:'csp-org'}),false,
+  'a cloud.session mock cannot authorize printing without a post-boot CLOUD_KEY session');
+realPrintContext.cloud.session=actualCloudSession;
+const confirmedPrintContext=vm.runInContext('('+bindSyntheticPrintContext.toString()+')()',realSessionVm);
+assert.equal(confirmedPrintContext.organizationId,'csp-org');
+assert(realPrintContext.contextoAba.corresponde(confirmedPrintContext));
+assert(realPrintContext.contextoAba.compativelComSessoes(realPrintContext.cloud.session(),realPrintContext.auth.usuarioAtual()));
+const mismatchedAuth={...realPrintContext.auth.usuarioAtual(),uid:'other-user',id:'other-user'};
+realSessionFixture.sessionStorage.setItem(realPrintContext.auth.SESSION_KEY,JSON.stringify(mismatchedAuth));
+assert.equal(realPrintContext.contextoAba.restaurarDeSessoes(),false);
+assert.equal(realPrintContext.contextoAba.operational(),false,'mismatched accounts must invalidate the synthetic print context');
+console.log('✓ CSP browser fixture: real post-boot cloud/auth sessions bind; mock-only and mismatched accounts remain blocked');
 const payload=`O'Connor & "Filhos" </button><img src=x onerror="globalThis.__xss=1">\u2028');globalThis.__xss=2;//`;
 const fixture = `globalThis.fixture = '<button style="color:red" onclick="capture(' + utils.jsArg(value) + ',this,event); return false">OK</button>';\n`
   + 'globalThis.literal = `<button onclick="capture(${false ? \'true\' : \'false\'},${\'42\'})">literal</button>`;\n'
@@ -99,6 +139,10 @@ const clinicalMarkup='<html><head><title>Synthetic clinical print</title>'
   +'<script>globalThis.__printXss=3</script></body></html>';
 function shellHarness(origin=printOrigin){
   const replies=[],shellEvents=events(),timers=new Map(),styles=[];let timer=0,mounts=0,current=true;
+  const inheritedSession=new PrintSessionStorage();
+  inheritedSession.setItem('medsys.v7.cloud.session','copied-cloud-credential');
+  inheritedSession.setItem('medsys.v7.auth.session','copied-auth-credential');
+  inheritedSession.setItem('old-clinical-draft','copied-clinical-data');
   const opener={closed:false,postMessage:(data,target)=>replies.push({data,target}),
     SoftActions:{isPrintCurrent:(win,nonce)=>current&&win===shellWindow&&nonce===printNonce}};
   const document={nodeType:9,baseURI:printOrigin+'/app/print-shell.html',title:'Shell',
@@ -110,7 +154,7 @@ function shellHarness(origin=printOrigin){
       return{nodeType:1,tagName:'BODY',attributes:[],hasAttribute:()=>false,querySelectorAll:()=>[],
         innerHTML:node.innerHTML,replaceChildren(){this.innerHTML='';}};}};
   const shellWindow={...shellEvents,opener,closed:false,close(){this.closed=true;}};
-  const context=vm.createContext({window:shellWindow,document,Element,ShadowRoot,MutationObserver,
+  const context=vm.createContext({window:shellWindow,document,sessionStorage:inheritedSession,Element,ShadowRoot,MutationObserver,
     location:{origin,href:document.baseURI+'#'+printNonce,hash:'#'+printNonce,
       pathname:'/app/print-shell.html',search:''},
     history:{replaceState(){}},URL,DOMParser:PrintDOMParser,console,Promise,
@@ -119,11 +163,12 @@ function shellHarness(origin=printOrigin){
   vm.runInContext(runtime,context);context.SoftActions=shellWindow.SoftActions;
   vm.runInContext(compiled.sources.get('src/ui/strict-actions.generated.js'),context);
   vm.runInContext(printShellSource,context);
-  return{replies,events:shellEvents,timers,styles,opener,document,window:shellWindow,context,
+  return{replies,events:shellEvents,timers,styles,opener,document,sessionStorage:inheritedSession,window:shellWindow,context,
     get mounts(){return mounts;},setCurrent(value){current=value;},
     send(data){shellEvents.emit('message',{source:opener,origin,data});}};
 }
 const shell=shellHarness();
+assert.equal(shell.sessionStorage.length,0,'print-shell boot must discard copied credentials and clinical session data');
 const {replies:shellReplies,events:shellEvents,opener,document:shellDocument,window:shellWindow,context:shellContext}=shell;
 assert(shellReplies.some(({data,target})=>data.type==='soft-print-ready'&&data.nonce===printNonce&&target===printOrigin));
 const printMessage={type:'soft-print-document',nonce:printNonce,html:clinicalMarkup,build:compiled.statistics.buildToken};

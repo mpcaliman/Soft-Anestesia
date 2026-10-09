@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, resolve, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { bindSyntheticPrintContext } from './helpers/bind-print-context.mjs';
 const repo=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const arg=process.argv.find(value=>value.startsWith('--app-root='));
 const root=arg?resolve(process.cwd(),arg.slice('--app-root='.length)):resolve(repo,'dist');
@@ -38,15 +39,7 @@ try {
   await page.goto(`http://127.0.0.1:${server.address().port}/`,{waitUntil:'load'});
   await page.waitForFunction(()=>window.pacientes && window.historico && window.printPreview);
   // Synthetic account/organization use the real tab-context API, never clinical production data.
-  await page.evaluate(()=>{
-    const original=cloud.session;
-    cloud.session=()=>({user:{id:'csp-user'}});
-    try {
-      contextoAba.prepararUsuario('csp-user');
-      if (!contextoAba.vincular({uid:'csp-user',organization_id:'csp-org',role:'anestesiologista'}))
-        throw new Error('Synthetic print context did not bind');
-    } finally {cloud.session=original;}
-  });
+  await page.evaluate(bindSyntheticPrintContext);
   const payload=`O'Connor & "Filhos" </button><img src=x onerror="window.__clinicalXss=1">\u2028');window.__clinicalXss=2;//`;
   const outcome=await page.evaluate(payload=>{
     const patient={_id:payload,nome:payload,cpf:payload,plano:payload,carteirinha:payload,telefone:payload};
@@ -117,8 +110,12 @@ try {
     throw new Error('Print document failed to load: '+JSON.stringify({diagnostic,popupErrors,popupRequests}),{cause:error});
   }
   const printed=await popup.evaluate(()=>({inline:document.querySelectorAll('[onclick],[onload],style').length,text:document.body.textContent,
-    violations:window.__cspViolations||[],button:!!document.querySelector('.pp-print-btn[data-soft-name-click="print"]')}));
+    violations:window.__cspViolations||[],sessionKeys:Object.keys(sessionStorage),
+    button:!!document.querySelector('.pp-print-btn[data-soft-name-click="print"]')}));
   assert.equal(printed.inline,0);assert(printed.text.includes(payload));assert(printed.button);assert.deepEqual(printed.violations,[]);
+  assert.deepEqual(printed.sessionKeys,[],'print shell must discard the sessionStorage copy inherited from its opener');
+  assert(await page.evaluate(()=>contextoAba.compativelComSessoes(cloud.session(),auth.usuarioAtual())),
+    'clearing copied popup credentials must preserve the opener authenticated context');
   const clickWorked=await popup.evaluate(()=>{
     const before=window.__printCalls;
     document.querySelector('.pp-print-btn[data-soft-name-click="print"]').click();
@@ -132,6 +129,8 @@ try {
   const cleared=await popup.evaluate(()=>({text:document.body.textContent,actions:document.querySelectorAll('[data-soft-onclick]').length}));
   assert.equal(cleared.text,'');assert.equal(cleared.actions,0,'changing the parent user/context must remove all clinical print content and actions');
   assert.deepEqual(popupErrors,[]);assert.deepEqual(errors,[]);
+  assert.deepEqual(await page.evaluate(()=>window.__cspViolations),[],
+    'asynchronously dispatched CSP violations must remain empty after all rendering and print exercises');
   console.log('✓ Chromium/CSP: boot, stored patient/history fields, compiled edit/save clicks and print popup pass without inline code or policy violations');
 } finally {
   if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));

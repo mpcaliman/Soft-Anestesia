@@ -1,6 +1,9 @@
 'use strict';
 /* The shell receives one document from its opener. It never stores clinical data. */
 (() => {
+  // A new popup receives an initial copy of the opener's sessionStorage.
+  // Printing needs only the live opener lease; copied credentials must not survive here.
+  try { sessionStorage.clear(); } catch (error) {}
   const owner = window.opener, origin = location.origin;
   const targetOrigin = origin;
   const nonce = location.hash.slice(1);
