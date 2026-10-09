@@ -1,17 +1,15 @@
 'use strict';
 
 /* ============================================================================
-   STORE — gestor genérico de listas em localStorage
+   STORE — listas clínicas transitórias e leitura de legado
 ============================================================================ */
 const store = {
   _confirmacoes: new WeakMap(),
   _confirmacoesPorId: new Map(),
-  /* Registros clínicos confirmados vivem somente na memória desta aba.
-     A única cópia durável criada pelo navegador é a operação pendente do
-     write-ahead log cifrado (`filaCifrada`). Durante os poucos milissegundos
-     anteriores à cifragem, uma gravação nova continua no cache legado para
-     sobreviver a uma queda abrupta; `_estagiar` a retira assim que o cofre
-     confirma a operação. */
+  /* Registros e intenções novas vivem somente na memória da aba. Não existe
+     cópia intermediária em claro: online, a confirmação vem do servidor;
+     indisponibilidade autoriza apenas o WAL cifrado. Legado já existente é
+     lido para migração e removido somente após proteção/recibo verificável. */
   _memoria: new Map(),
   _ownerKey: '',
   _pendentesLocais: new Set(),
@@ -45,7 +43,7 @@ const store = {
   _cloudManaged(modKey) {
     return ['pacientes','agenda','pre','consulta','anestesia','recuperacao',
       'risco','termo','prescricao','documentos','financeiro','fin_fechamentos',
-      'orcamento'].indexOf(modKey) >= 0;
+      'orcamento','orcamentos','assinaturas'].indexOf(modKey) >= 0;
   },
   cloudOnlyAtivo(modKey) {
     if (modKey && !store._cloudManaged(modKey)) return false;
@@ -67,29 +65,29 @@ const store = {
     store._garantirContexto();
     store._memoria.set(modKey, store._clone(Array.isArray(arr) ? arr : []));
   },
+  _semPersistenciaClinica(modKey) {
+    if (modKey && !store._cloudManaged(modKey)) return false;
+    try {
+      if (localStorage.getItem('medsys.v7.demo') !== '1') return true;
+      /* A flag isolada não transforma dados reais em demonstração. Somente
+         o namespace demo criado no boot pode persistir amostras sintéticas. */
+      const chaves = modKey ? [STORAGE[modKey]] : Object.keys(STORAGE)
+        .filter(mod => store._cloudManaged(mod)).map(mod => STORAGE[mod]);
+      return !chaves.length || !chaves.every(chave => typeof chave === 'string' && chave.indexOf('demo:') === 0);
+    } catch (e) { return true; }
+  },
   _duraveis(modKey, arr) {
     if (!Array.isArray(arr)) return arr;
-    if (!store.cloudOnlyAtivo(modKey)) return arr.map(it => store._desidratar(it));
-    return arr.filter(it => {
-      if (!it || !it._id) return false;
-      const chave = store._chavePendente(modKey, it._id);
-      if (store._protegidosCofre.has(chave)) return false;
-      /* Legado sem recibo continua preservado até ser cifrado/migrado. */
-      return store._pendentesLocais.has(chave) || !it._relUpdatedAt;
-    }).map(it => store._desidratar(it));
+    return store._semPersistenciaClinica(modKey) ? [] : arr.map(it => store._desidratar(it));
   },
   _persistirSomente(modKey, arr) {
+    /* Não regrava nem amplia o legado: ele já existia antes desta versão e
+       precisa sobreviver até migrar, mas nunca recebe uma intenção nova. */
+    if (store._semPersistenciaClinica(modKey)) return true;
     const chave = STORAGE[modKey];
     if (!chave) return false;
-    const duraveis = store._duraveis(modKey, arr);
-    try {
-      if (Array.isArray(duraveis) && !duraveis.length && store.cloudOnlyAtivo(modKey)) {
-        localStorage.removeItem(chave);
-      } else {
-        localStorage.setItem(chave, JSON.stringify(duraveis));
-      }
-      return true;
-    } catch (e) { store._ultimoErroPersistencia = e; return false; }
+    try { localStorage.setItem(chave, JSON.stringify(store._duraveis(modKey, arr))); return true; }
+    catch (e) { store._ultimoErroPersistencia = e; return false; }
   },
   _retirarDuravel(modKey, id) {
     if (!id || !STORAGE[modKey]) return false;
@@ -239,6 +237,12 @@ const store = {
      formulários clínicos: confirma nuvem, declara fila offline cifrada ou
      informa falha sem chamar nenhum desses estados de "salvo" antes da hora. */
   notificarNuvem(item, rotulo = 'Registro', opts = {}) {
+    const contextoAviso = (() => { try { return contextoAba.capturar(); } catch (e) { return null; } })();
+    const chaveAviso = store._contextoKey();
+    const avisoAtual = () => {
+      try { return contextoAviso ? contextoAba.corresponde(contextoAviso) : store._contextoKey() === chaveAviso; }
+      catch (e) { return false; }
+    };
     const hora = () => new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     try { if (typeof setSavedStatus === 'function') setSavedStatus('Enviando para a nuvem…'); } catch (e) {}
     if (!opts.silencioso) {
@@ -246,6 +250,7 @@ const store = {
     }
     const confirmacao = store.aguardarNuvem(item);
     Promise.resolve(confirmacao).then(res => {
+      if (!avisoAtual()) return res;
       if (res && (res.remoteConfirmed === true || res.ok === true)) {
         try { if (typeof setSavedStatus === 'function') setSavedStatus('Confirmado na nuvem às ' + hora()); } catch (e) {}
         if (!opts.silencioso) { try { toast('☁️ ' + rotulo + ' confirmado na nuvem', 'success'); } catch (e) {} }
@@ -265,6 +270,7 @@ const store = {
       if (!opts.silencioso) { try { toast('Não foi possível proteger nem confirmar ' + rotulo.toLowerCase() + '. Tente novamente.', 'error'); } catch (e) {} }
       return res;
     }).catch(() => {
+      if (!avisoAtual()) return;
       try { if (typeof setSavedStatus === 'function') setSavedStatus('Não confirmado'); } catch (e) {}
       if (!opts.silencioso) { try { toast('A nuvem não confirmou ' + rotulo.toLowerCase() + '. Tente novamente.', 'error'); } catch (e) {} }
     });
@@ -275,7 +281,7 @@ const store = {
      com timestamp, módulo, ação, _id e snapshot resumido. */
   _audit(acao, modKey, item) {
     try {
-      if (store.cloudOnlyAtivo(modKey)) {
+      if (store._semPersistenciaClinica(modKey)) {
         store._auditoriaMemoria.unshift({
           ts: new Date().toISOString(),
           usuario: localStorage.getItem('medsys.v7.usuario') || 'local',
@@ -333,7 +339,7 @@ const store = {
   _saveVersion(modKey, prev) {
     if (!prev || !prev._id) return;
     try {
-      if (store.cloudOnlyAtivo(modKey)) {
+      if (store._semPersistenciaClinica(modKey)) {
         const k = modKey + ':' + prev._id;
         const lista = store._versoesMemoria.get(k) || [];
         lista.unshift({ ts: new Date().toISOString(), snapshot: store._sanitizarSnapshot(prev) });
@@ -356,7 +362,7 @@ const store = {
   },
   listVersions(modKey, id) {
     try {
-      if (store.cloudOnlyAtivo(modKey)) {
+      if (store._semPersistenciaClinica(modKey)) {
         return store._clone(store._versoesMemoria.get(modKey + ':' + id) || []);
       }
       const all = JSON.parse(disco.get('medsys.v7.versions') || '{}');
@@ -368,7 +374,7 @@ const store = {
       store._garantirContexto();
       /* Cadastros também recebem escritas diretas de clinicaSync. Só os
          prontuários cloud-only usam a memória como fonte da lista. */
-      if (store.cloudOnlyAtivo(modKey) && store._memoria.has(modKey)) return store._clone(store._memoria.get(modKey));
+      if (store._semPersistenciaClinica(modKey) && store._memoria.has(modKey)) return store._clone(store._memoria.get(modKey));
       const arr = JSON.parse(localStorage.getItem(STORAGE[modKey]) || '[]');
       if (!Array.isArray(arr) || !arr.length) {
         store._lembrar(modKey, Array.isArray(arr) ? arr : []);
@@ -408,7 +414,7 @@ const store = {
     return 'blob:' + (h1 >>> 0).toString(36) + (h2 >>> 0).toString(36) + '.' + s.length;
   },
   _guardarBlob(dataurl) {
-    if (store.cloudOnlyAtivo()) {
+    if (store._semPersistenciaClinica()) {
       const refMemoria = store._refDe(dataurl);
       store._blobsMemoria[refMemoria] = dataurl;
       return refMemoria;
@@ -429,7 +435,7 @@ const store = {
     if (!obj || typeof obj !== 'object') return obj;
     /* No modo cloud-only, imagens acompanham o registro apenas em memória ou
        dentro do WAL cifrado; nunca criam um segundo arquivo local em claro. */
-    if (store.cloudOnlyAtivo()) return store._clone(obj);
+    if (store._semPersistenciaClinica()) return store._clone(obj);
     const walk = (o) => {
       if (Array.isArray(o)) { o.forEach(walk); return; }
       if (o && typeof o === 'object') {
@@ -633,7 +639,7 @@ const store = {
         else preLanc.aoSalvar(modKey, item);
       }
     } catch (e) {}
-    const gravouLocal = store.setList(modKey, list);
+    store.setList(modKey, list);
     store._audit(isNew ? 'create' : 'update', modKey, item);
     /* Sincronização em background pelo canal RELACIONAL da clínica. O antigo
        espelho pessoal, sem organization_id, foi encerrado: toda operação nova
@@ -655,13 +661,6 @@ const store = {
         }
       }
     } catch (e) {}
-    /* Não coube no aparelho: o registro ainda vai para a nuvem, mas dizer
-       "Salvo" seria mentira. A pessoa precisa saber onde ele está. */
-    if (gravouLocal === false) {
-      try {
-        toast('⚠️ Não coube no armazenamento temporário. Aguarde a confirmação do cofre/nuvem antes de fechar esta tela.', 'error');
-      } catch (e) {}
-    }
     /* Clicou em Salvar: o RASCUNHO daquele módulo sobe na hora — é o que
        permite continuar em outro aparelho sem esperar nada. */
     try {
@@ -716,7 +715,7 @@ const store = {
               atuais.unshift(prev);
               store.setList(modKey, atuais);
             }
-            toast('A exclusão não pôde ser protegida no aparelho e foi desfeita. Libere espaço ou entre novamente.', 'error');
+            toast('A exclusão não foi confirmada pela nuvem nem protegida offline e foi desfeita.', 'error');
           }).catch(() => {
             if (!mesmoContextoExclusao()) return;
             const atuais = store.list(modKey);
@@ -724,7 +723,7 @@ const store = {
               atuais.unshift(prev);
               store.setList(modKey, atuais);
             }
-            toast('A exclusão não pôde ser protegida no aparelho e foi desfeita.', 'error');
+            toast('A exclusão não foi confirmada pela nuvem nem protegida offline e foi desfeita.', 'error');
           });
         } else if (typeof cloudRel !== 'undefined' && cloudRel.remover) {
           /* Compatibilidade somente durante a carga de uma versão antiga. */

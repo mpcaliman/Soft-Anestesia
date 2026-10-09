@@ -6,7 +6,7 @@
    Só intercepta GET do próprio domínio — Supabase e afins passam direto.
 ============================================================================ */
 /* v2 invalida o HTML que continha o bundle antigo do jsPDF. */
-const CACHE = 'soft-anestesia-v2';
+const CACHE = 'soft-anestesia-v3-strict';
 
 self.addEventListener('install', () => { self.skipWaiting(); });
 
@@ -23,7 +23,10 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   let url;
   try { url = new URL(req.url); } catch (err) { return; }
-  if (url.origin !== self.location.origin) return;
+  if (url.origin !== self.location.origin || !/^https?:$/.test(url.protocol)) return;
+  // Somente código/estilos do app; endpoints e arquivos clínicos nunca entram.
+  if (/\/(?:rest|auth|storage|functions)\/v1(?:\/|$)/.test(url.pathname)) return;
+  if (!req.mode || (req.mode !== 'navigate' && !/\.(?:js|css|html|webmanifest|svg|png|ico)$/.test(url.pathname))) return;
 
   e.respondWith(
     fetch(req)

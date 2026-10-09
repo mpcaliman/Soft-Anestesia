@@ -1,3 +1,4 @@
+import { readRuntimeComposition, readCompiledActions } from './helpers/read-app-source.mjs';
 /** F1d: apresentação isolada sem decidir autorização, estado clínico ou mutações de transporte. */
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -11,6 +12,8 @@ const repo = resolve(here, '..');
 const rootArg = process.argv.find(arg => arg.startsWith('--app-root='));
 const appRoot = rootArg ? resolve(process.cwd(), rootArg.slice('--app-root='.length)) : repo;
 
+const SoftActions = await readCompiledActions(appRoot);
+
 const [html, feedbackSource, anesthesiaEventCommandsSource, anesthesiaTimeToolsSource,
   syncStatusSource,
   modalSource, searchSource, patientsViewSource, autocompleteSource,
@@ -20,7 +23,7 @@ const [html, feedbackSource, anesthesiaEventCommandsSource, anesthesiaTimeToolsS
   anesthesiaPatientBarSource, anesthesiaDosePanelSource, dashboardTodaySource,
   agendaTimelineSource, formSteppersSource, anesthesiaVitalsPanelSource,
   globalCommandSearchSource, runbook] = await Promise.all([
-  readFile(resolve(appRoot, 'index.html'), 'utf8'),
+  readRuntimeComposition(appRoot),
   readFile(resolve(appRoot, 'src/ui/feedback.js'), 'utf8'),
   readFile(resolve(appRoot, 'src/domain/anesthesia-event-commands.js'), 'utf8'),
   readFile(resolve(appRoot, 'src/ui/anesthesia-time-tools.js'), 'utf8'),
@@ -364,7 +367,7 @@ assert.doesNotMatch(dashboardSource, /store\.(?:save|delete|setList)\s*\(/,
   'dashboard não pode gravar prontuários diretamente');
 assert.match(agendaViewSource, /^'use strict';/);
 assert.match(agendaViewSource, /const agendaView\s*=\s*\{/);
-assert.match(agendaViewSource, /agenda\.cal\.abrirDia\(\$\{utils\.jsArg\(iso\)\}\)/,
+assert.match(agendaViewSource, /(?:agenda\.cal\.abrirDia\(\$\{utils\.jsArg\(iso\)\}\)|SoftActions\.html\([^\n]+utils\.jsArg\(iso\))/,
   'dias do calendário devem continuar usando argumento JavaScript seguro');
 assert.match(agendaViewSource, /return list\.filter\(x =>/);
 assert.match(agendaViewSource, /FIM DA APRESENTAÇÃO DA AGENDA/);
@@ -422,7 +425,7 @@ assert.match(dashboardTodaySource, /store\.list\('agenda'\)/,
   'resumo de hoje deve continuar lendo a Agenda canônica');
 assert.match(dashboardTodaySource, /FIM DO RESUMO DE HOJE DO DASHBOARD/);
 assert.match(agendaTimelineSource, /window\.agTimeline\s*=\s*\{/);
-assert.match(agendaTimelineSource, /agenda\.editar\('\+utils\.jsArg\(a\._id\|\|''\)\+'\)/,
+assert.match(agendaTimelineSource, /(?:agenda\.editar\('\+utils\.jsArg\(a\._id\|\|''\)\+'\)|SoftActions\.html\([^\n]+utils\.jsArg\(a\._id\|\|''\))/,
   'linha do tempo deve abrir o compromisso por argumento JavaScript seguro');
 assert.match(agendaTimelineSource, /FIM DA LINHA DO TEMPO DA AGENDA/);
 assert.match(formSteppersSource, /select\.dispatchEvent\(new Event\('change'/,
@@ -494,7 +497,7 @@ const classes = () => {
 
 let anesthesiaStamped = null;
 let recoveryStamped = null;
-const eventCommandSandbox = {
+const eventCommandSandbox = { SoftActions,
   utils: { horaAtual: () => '10:20' },
   anestesia: {
     graficoUI: { _contexto: '' },
@@ -529,7 +532,7 @@ const timeToolElements = {
 };
 let delegatedStampModule = null;
 let timeToolToast = '';
-const timeToolSandbox = {
+const timeToolSandbox = { SoftActions,
   state: { currentModule: 'anestesia' },
   document: {
     addEventListener: (name, handler) => { timeToolListeners[name] = handler; },
@@ -581,7 +584,7 @@ const syncFixture = {
   encrypted: 0,
   conflicts: 0
 };
-const syncStatusSandbox = {
+const syncStatusSandbox = { SoftActions,
   document: {
     getElementById: id => id === 'saved-text' ? syncVisual : (id === 'saved-badge' ? syncBadge : null)
   },
@@ -677,7 +680,7 @@ const printMetaDocument = {
     : (printMetaFields[selector] || null),
   getElementById: id => printMetaElements[id] || null
 };
-const printMetaSandbox = {
+const printMetaSandbox = { SoftActions,
   document: printMetaDocument,
   window: {
     addEventListener: (name, handler) => { printMetaListeners[name] = handler; }
@@ -719,7 +722,7 @@ const document = {
   querySelector: () => null,
   addEventListener: (name, handler) => { listeners[name] = handler; }
 };
-const sandbox = { document };
+const sandbox = { SoftActions, document };
 vm.runInNewContext(modalSource + '\nglobalThis.__testedModal = modal;', sandbox, {
   filename: 'modal.js'
 });
@@ -734,7 +737,7 @@ assert(document.body.classList.contains('tem-modal'));
 listeners.click({ target: elements['modal-backdrop'] });
 assert(!elements['modal-backdrop'].classList.contains('show'));
 
-const autocompleteSandbox = {};
+const autocompleteSandbox = { SoftActions,};
 vm.runInNewContext(
   autocompleteSource + '\nglobalThis.__testedAutocomplete = autocomplete;',
   autocompleteSandbox,
@@ -746,7 +749,7 @@ assert.equal(testedAutocomplete._modPorForm('form-financeiro'), 'financeiro');
 assert.equal(testedAutocomplete._modPorForm('form-inexistente'), '');
 assert(testedAutocomplete._MODS_NOME.includes('risco'));
 
-const searchSandbox = {};
+const searchSandbox = { SoftActions,};
 vm.runInNewContext(
   searchSource + '\nglobalThis.__testedHistorico = historico; globalThis.__testedGlobalSearch = globalSearch;',
   searchSandbox,
@@ -765,7 +768,7 @@ const patientFilters = {
   'pac-f-plano': { value: 'Unimed' },
   'pac-f-ordem': { value: 'nome' }
 };
-const patientsViewSandbox = {
+const patientsViewSandbox = { SoftActions,
   pacientes: {
     list: () => patientRows,
     ORDENS: { nome: (a, b) => a.nome.localeCompare(b.nome) }
@@ -801,7 +804,7 @@ const agendaFilters = {
   'ag-f-status': { value: 'confirmado' },
   'ag-f-busca': { value: 'maria' }
 };
-const agendaViewSandbox = {
+const agendaViewSandbox = { SoftActions,
   store: { list: mod => mod === 'agenda' ? agendaRows : [] },
   document: { getElementById: id => agendaFilters[id] || null }
 };
@@ -820,7 +823,7 @@ assert.deepEqual(agendaRows.map(item => item._id), ['a', 'b', 'c'],
   'ordenar a apresentação da Agenda deve preservar a lista original');
 
 const layoutStorage = new Map();
-const layoutSandbox = {
+const layoutSandbox = { SoftActions,
   window: {},
   localStorage: {
     getItem: key => layoutStorage.has(key) ? layoutStorage.get(key) : null,
@@ -844,7 +847,7 @@ let quickDose = null;
 let quickVitals = null;
 let quickDirty = 0;
 let quickGraphRenders = 0;
-const quickCommandSandbox = {
+const quickCommandSandbox = { SoftActions,
   utils: { horaAtual: () => '10:15' },
   markDirty: () => { quickDirty++; },
   anestesia: {
@@ -892,7 +895,7 @@ const doseElements = {
   'dose-sheet': { classList: classes() }
 };
 let delegatedDose = null;
-const dosePanelSandbox = {
+const dosePanelSandbox = { SoftActions,
   document: {
     getElementById: id => doseElements[id] || null,
     querySelectorAll: () => []
@@ -920,7 +923,7 @@ const vitalsElements = {
   'vit-sheet': { classList: classes() }
 };
 let delegatedVitals = null;
-const vitalsPanelSandbox = {
+const vitalsPanelSandbox = { SoftActions,
   document: {
     getElementById: id => vitalsElements[id] || null,
     querySelectorAll: () => []
@@ -957,7 +960,7 @@ const commandDocument = {
   createElement: () => ({}),
   addEventListener() {}
 };
-const commandSandbox = {
+const commandSandbox = { SoftActions,
   document: commandDocument,
   location: { hash: '' },
   setTimeout: () => 1,
@@ -980,7 +983,7 @@ assert.match(commandElements['gs-results'].innerHTML, /&lt;img src=x onerror=ale
 assert.doesNotMatch(commandElements['gs-results'].innerHTML, /<img/,
   'busca global não pode reintroduzir HTML armazenado');
 
-const printSandbox = {};
+const printSandbox = { SoftActions,};
 vm.runInNewContext(
   printSource + '\nglobalThis.__testedPrintPreview = printPreview;',
   printSandbox,
@@ -991,7 +994,7 @@ assert.equal(testedPrint._durEntre('07:30', '09:05'), '1h 35min');
 assert.equal(testedPrint._durEntre('23:40', '00:20'), '0h 40min');
 assert.equal(testedPrint._viaAereaImpressa(''), '');
 
-const meuDiaSandbox = {
+const meuDiaSandbox = { SoftActions,
   linker: { _chavePaciente: item => item._patientKey || '' },
   store: { getById: () => null }
 };
@@ -1012,7 +1015,7 @@ assert.notEqual(
   'um caseId nunca pode unir pacientes fortes diferentes'
 );
 
-const dashboardSandbox = {
+const dashboardSandbox = { SoftActions,
   linker: { _chavePaciente: item => item._patientKey || '' }
 };
 vm.runInNewContext(
@@ -1052,7 +1055,7 @@ const toastDocument = {
     className: '', innerHTML: '', classList: classes(), remove() {}
   })
 };
-const feedbackSandbox = {
+const feedbackSandbox = { SoftActions,
   document: toastDocument,
   console: { log() {} },
   requestAnimationFrame: callback => callback(),

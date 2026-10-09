@@ -442,6 +442,13 @@ const auth = {
     setTimeout(() => { const el = document.getElementById(auth.temUsuarios() ? 'auth-user' : 'auth-user'); if (el) el.focus(); }, 100);
   },
   _desbloquear() {
+    /* Ter um espelho de sessão do app não prova a identidade ou a clínica.
+       A restauração de uma aba nunca passa por uma autenticação nova. */
+    const demonstracao = typeof demo !== 'undefined' && demo.ativo();
+    if (!demonstracao && !contextoAba.compativelComSessoes(cloud.session(), auth.usuarioAtual())) {
+      auth._bloquear();
+      return false;
+    }
     const ov = document.getElementById('auth-overlay');
     const app = document.querySelector('.app');
     if (ov) ov.style.display = 'none';
@@ -1024,8 +1031,8 @@ const auth = {
     if (parcialSel) { try { el.querySelectorAll(parcialSel).forEach(x => x.classList.add('campo-liberado')); } catch (e) {} }
 
     el.querySelectorAll('.action-bar .btn').forEach(b => {
-      const oc = (b.getAttribute('onclick') || '').toLowerCase();
-      const muta = /\.salvar|\.finalizar|\.novo\(|\.nova\(|\.excluir|\.limpar\(|\.duplicar|\.salvarcomonovo|importarjson|actions\.importar|abrirnovo|assinar/.test(oc);
+      const oc = (b.getAttribute('data-soft-name-click') || b.getAttribute('onclick') || '').toLowerCase();
+      const muta = /\.salvar|\.finalizar|\.novo\b|\.nova\b|\.excluir|\.limpar\b|\.duplicar|\.salvarcomonovo|importarjson|actions\.importar|abrirnovo|assinar/.test(oc);
       if (!muta) return;
       if (leitura) { b.style.display = 'none'; return; }
       if (parcialSel) {
@@ -1041,7 +1048,7 @@ const auth = {
       try { return typeof preLanc !== 'undefined' && preLanc.ehAuxiliar(); } catch (e) { return false; }
     })();
     el.querySelectorAll('.btn, button').forEach(b => {
-      const oc = ((b.getAttribute('onclick') || '') + ' ' + (b.textContent || '')).toLowerCase();
+      const oc = ((b.getAttribute('data-soft-name-click') || b.getAttribute('onclick') || '') + ' ' + (b.textContent || '')).toLowerCase();
       const ehFinalizar = /\.finalizar|assinar/.test(oc) && !/lançamento|lancamento/.test(oc);
       if (!ehFinalizar) return;
       b.style.display = soPreLanca ? 'none' : '';
@@ -1204,11 +1211,11 @@ const auth = {
       demo._mostrarBanner();
       return;
     }
-    /* Nunca reabre a aplicação por um espelho local. Uma nova aba precisa da
-       identidade Supabase; se a aba já estava aberta, sua sessão continua em
-       sessionStorage e o trabalho offline permanece disponível normalmente. */
+    /* O bootstrap de contexto já descartou credenciais de qualquer documento
+       anterior, inclusive restauração após queda sem pagehide. Uma aba aberta
+       continua trabalhando offline; recarregar ou restaurar exige login novo. */
     try { auth._restaurarSessaoDiaria(); } catch (e) {}
-    if (auth.estaLogado()) {
+    if (auth.estaLogado() && contextoAba.compativelComSessoes(cloud.session(), auth.usuarioAtual())) {
       auth._desbloquear();
     } else {
       auth._bloquear();

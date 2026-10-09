@@ -1,3 +1,4 @@
+import { readAppSource, readCompiledActions } from './helpers/read-app-source.mjs';
 /** Regressão: conclusão de WAL/exclusão não pode alterar a clínica seguinte. */
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
@@ -13,8 +14,9 @@ const root = rootArgument
 const [engineSource, storeSource, htmlSource] = await Promise.all([
   readFile(resolve(root, 'src/platform/cloud-first.js'), 'utf8'),
   readFile(resolve(root, 'src/platform/clinical-store.js'), 'utf8'),
-  readFile(resolve(root, 'index.html'), 'utf8')
+  readAppSource(root)
 ]);
+const SoftActions = await readCompiledActions(root);
 const deferred = () => {
   let resolvePromise, rejectPromise;
   const promise = new Promise((resolve, reject) => { resolvePromise = resolve; rejectPromise = reject; });
@@ -73,6 +75,7 @@ const storeRuntime = {
 };
 storeRuntime.window = storeRuntime;
 storeRuntime.globalThis = storeRuntime;
+storeRuntime.SoftActions = SoftActions;
 vm.createContext(storeRuntime);
 vm.runInContext(`${storeSource}\nglobalThis.__store = store;`, storeRuntime);
 const store = storeRuntime.__store;
@@ -149,3 +152,43 @@ assert.equal(localStorage.getItem('records.pre'), null);
 assert.equal(store.getById('pre', 'confirmado').nome, 'Paciente na memória',
   'a atualização dos cadastros mantém os prontuários confirmados em memória');
 console.log('  ✓ cadastros refletem org_configs; prontuários confirmados continuam só em memória');
+
+/* Even the success toast from an earlier account is isolated. A delayed
+   receipt cannot announce a clinical save inside the next user's session. */
+const savedStatuses = [];
+storeRuntime.setSavedStatus = status => savedStatuses.push(status);
+const notification = deferred();
+const notificationItem = { _id: 'late-notification' };
+store._registrarConfirmacao(notificationItem, notification.promise);
+store.notificarNuvem(notificationItem, 'Ficha');
+const beforeStatuses = savedStatuses.length, beforeWarnings = warnings.length;
+generation++; organizationId = 'next-user-clinic';
+notification.resolve({ ok: true, remoteConfirmed: true });
+await flush();
+assert.equal(savedStatuses.length, beforeStatuses);
+assert.equal(warnings.length, beforeWarnings, 'recibo anterior não pode renderizar toast para o usuário atual');
+
+/* A drain may finish encryption removal and then await a fresh queue read.
+   If the context changes in that window, its old confirmed ID must not clear
+   the next clinic's pending marker for an identical record ID. */
+let drainGate = deferred(), listReads = 0, remoteClears = 0;
+engineRuntime.navigator = { onLine: true };
+engineRuntime.cloudRel.disponivel = () => true;
+engineRuntime.filaCifrada._donoKey = context => context.organizationId + ':' + context.userId;
+engineRuntime.filaCifrada.listar = async () => {
+  listReads++;
+  if (listReads === 1) return [{ ...operation, contexto: snapshot(), checksum: 'vault-checksum' }];
+  return drainGate.promise;
+};
+engineRuntime.filaCifrada.confirmar = async () => true;
+engineRuntime.store.confirmarRemoto = () => { remoteClears++; };
+engine._enviar = async () => ({ ok: true, row: { version: 2 } });
+engine._reciboValido = () => true;
+const draining = engine.drenar();
+for (let attempt = 0; attempt < 30 && listReads < 2; attempt++) await Promise.resolve();
+assert.equal(listReads, 2);
+generation++; organizationId = 'other-clinic-after-drain';
+drainGate.resolve([]);
+assert.equal((await draining).motivo, 'contexto_trocado');
+assert.equal(remoteClears, 0, 'conclusão da fila anterior não pode limpar pendência do novo dono');
+console.log('  ✓ notificações e confirmação tardia da drenagem não atravessam usuários/clínicas');

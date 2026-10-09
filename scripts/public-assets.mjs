@@ -1,11 +1,14 @@
+import { compiledAssetPaths } from './strict-csp.mjs';
 // Única allowlist do pacote público. O build copia apenas estes caminhos e a
 // validação rejeita qualquer arquivo extra ou ausente em dist/.
 export const publicAssets = Object.freeze([
   'index.html',
+  ...compiledAssetPaths,
   'medicamentos-base.js',
   'sw.js',
   'vendor/jspdf.umd.min.js',
   'src/domain/encounter-identity.js',
+  'src/platform/network-privacy.js',
   'src/platform/session-vault.js',
   'src/ui/feedback.js',
   'src/platform/clinical-store.js',

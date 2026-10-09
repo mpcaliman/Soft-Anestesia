@@ -40,8 +40,14 @@ assert.doesNotMatch(legacySentinel, /fetch\s*\(/,
   'sentinela do canal antigo não pode fazer I/O');
 
 const drafts = between('const rascunhosSync = {', 'const rascunhos = {');
-assert.match(drafts, /\/rest\/v1\/drafts\?on_conflict=organization_id,user_id,module,doc_id/,
-  'rascunhos devem usar chave organizacional completa');
+assert.match(drafts, /['"]\?on_conflict=organization_id,user_id,module,doc_id['"]/,
+  'inserção de rascunho deve preservar exatamente a chave organizacional completa');
+assert.match(drafts, /fetch\(c\.url \+ '\/rest\/v1\/drafts' \+ filtro \+ select/,
+  'filtro composto deve ser aplicado à tabela drafts na requisição real');
+assert.match(drafts, /user_id:\s*contexto\.userId[\s\S]*module:\s*mod[\s\S]*doc_id:\s*r\.id/,
+  'payload deve usar usuário capturado, módulo e identidade do rascunho');
+assert.match(drafts, /linha\.organization_id === org[\s\S]*linha\.user_id === contexto\.userId[\s\S]*linha\.doc_id === r\.id && linha\.module === mod/,
+  'recibo deve repetir toda a identidade esperada antes de confirmar sucesso');
 assert.match(drafts, /organization_id:\s*org/,
   'payload de rascunho deve carregar a organização autenticada');
 assert.doesNotMatch(drafts, /\/rest\/v1\/documentos/,

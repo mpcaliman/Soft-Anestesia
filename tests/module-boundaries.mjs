@@ -1,3 +1,4 @@
+import { readRuntimeComposition } from './helpers/read-app-source.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
@@ -12,7 +13,7 @@ const appRoot = resolve(repo, appArg ? appArg.slice('--app-root='.length) : '.')
 
 const [html, encounterIdentity, platform, clinicalStore, auth, cloudClient, syncRuntime, relational, cloudFirst, realtimeCompat,
   encounterLinker, qr, signature, contracts, runbook] = await Promise.all([
-  readFile(resolve(appRoot, 'index.html'), 'utf8'),
+  readRuntimeComposition(appRoot),
   readFile(resolve(appRoot, 'src/domain/encounter-identity.js'), 'utf8'),
   readFile(resolve(appRoot, 'src/platform/session-vault.js'), 'utf8'),
   readFile(resolve(appRoot, 'src/platform/clinical-store.js'), 'utf8'),

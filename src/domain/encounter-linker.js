@@ -22,6 +22,68 @@ const rascunhosSync = {
      chave contém organização + usuário + módulo + documento e cuja RLS exige
      vínculo com a clínica. */
   _modulo(mod) { return String(mod || ''); },
+  _indisponivel(res, erro) {
+    try { return persistenciaCloudFirst.indisponivel(res, erro); }
+    catch (e) { return typeof navigator !== 'undefined' && navigator.onLine === false; }
+  },
+  _erroLeitura(code, mensagem, status, cause) {
+    const erro = new Error(mensagem || code);
+    erro.name = 'CloudReadError'; erro.code = code;
+    if (Number.isFinite(Number(status)) && Number(status) > 0) erro.status = Number(status);
+    if (cause) erro.cause = cause;
+    return erro;
+  },
+  async _linhasDaResposta(rq) {
+    let linhas;
+    try { linhas = await rq.json(); }
+    catch (erro) { throw rascunhosSync._erroLeitura('resposta_invalida', 'resposta_invalida', rq.status, erro); }
+    if (!Array.isArray(linhas) || linhas.length > 1 ||
+        linhas.some(linha => !linha || typeof linha !== 'object' || Array.isArray(linha))) {
+      throw rascunhosSync._erroLeitura('resposta_invalida', 'resposta_invalida', rq.status);
+    }
+    return linhas;
+  },
+  async gravarUnico(mod, r, contextoEsperado) {
+    const contexto = contextoEsperado || cloudRel._capturarContexto();
+    if (!contexto || !cloudRel._contextoValido(contexto, contexto.organizationId)) return { ok: false, motivo: 'contexto' };
+    if (rascunhosSync._indisponivel()) return { ok: false, indisponivel: true, motivo: 'offline' };
+    try {
+      if (!(await cloud._garantirToken())) return { ok: false, motivo: 'token',
+        indisponivel: rascunhosSync._indisponivel({ motivo: 'token' }) };
+      if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return { ok: false, motivo: 'contexto' };
+      const c = cloud.config(), org = contexto.organizationId;
+      const atualizado = Number(r._draftVersion) > 0;
+      const select = '&select=id,organization_id,user_id,module,doc_id,data,version,updated_by,updated_at';
+      const filtro = atualizado
+        ? '?organization_id=eq.' + encodeURIComponent(org) + '&user_id=eq.' + encodeURIComponent(contexto.userId) +
+          '&module=eq.' + encodeURIComponent(mod) + '&doc_id=eq.' + encodeURIComponent(r.id) + '&version=eq.' + Number(r._draftVersion)
+        : '?on_conflict=organization_id,user_id,module,doc_id';
+      const row = { organization_id: org, user_id: contexto.userId, module: mod, doc_id: r.id, data: rascunhosSync._limpo(r) };
+      const rq = await fetch(c.url + '/rest/v1/drafts' + filtro + select, {
+        method: atualizado ? 'PATCH' : 'POST',
+        headers: Object.assign({}, cloud._headers(true), { 'Content-Type': 'application/json',
+          'Prefer': atualizado ? 'return=representation' : 'resolution=ignore-duplicates,return=representation' }),
+        body: JSON.stringify(atualizado ? { data: row.data } : [row])
+      });
+      if (!cloudRel._contextoValido(contexto, org)) return { ok: false, motivo: 'contexto' };
+      if (!rq.ok) return { ok: false, motivo: 'http_' + rq.status,
+        indisponivel: rascunhosSync._indisponivel({ status: rq.status }) };
+      const rows = await rascunhosSync._linhasDaResposta(rq);
+      if (!cloudRel._contextoValido(contexto, org)) return { ok: false, motivo: 'contexto' };
+      const linha = rows[0];
+      if (linha && linha.organization_id === org && linha.user_id === contexto.userId &&
+          linha.doc_id === r.id && linha.module === mod && Number(linha.version) > 0 &&
+          rascunhosSync._iguais(r, rascunhosSync._daLinha(linha, org))) return { ok: true, remoteConfirmed: true, linha };
+      const atual = await rascunhosSync._lerAtual(mod, r.id, org, contexto.userId, contexto);
+      if (!cloudRel._contextoValido(contexto, org)) return { ok: false, motivo: 'contexto' };
+      if (atual && rascunhosSync._iguais(r, rascunhosSync._daLinha(atual, org))) return { ok: true, remoteConfirmed: true, linha: atual };
+      return { ok: false, motivo: atual ? 'conflict' : 'recibo_invalido', linha: atual };
+    } catch (erro) {
+      return { ok: false, motivo: erro && (erro.code || erro.message) || 'rede',
+        code: erro && erro.code || null, status: erro && erro.status || null,
+        indisponivel: rascunhosSync._indisponivel(null, erro) };
+    }
+  },
   _limpo(r) {
     const x = cloudRel._clone(r || {});
     ['_draftVersion','_draftUpdatedAt','_draftUpdatedBy','_draftOrg','_draftSyncedLocalAt'].forEach(k => { delete x[k]; });
@@ -41,23 +103,39 @@ const rascunhosSync = {
     try { return JSON.stringify(rascunhosSync._limpo(a)) === JSON.stringify(rascunhosSync._limpo(b)); }
     catch (e) { return false; }
   },
+  /* null significa somente ausência confirmada em GET válido e escopado.
+     Falha de rede/autorização jamais equivale a rascunho ausente. */
   async _lerAtual(mod, id, org, userId, contextoEsperado) {
     const contexto = contextoEsperado || cloudRel._capturarContexto();
-    if (!contexto || contexto.userId !== userId || !cloudRel._contextoValido(contexto, org)) return null;
+    if (!contexto || contexto.userId !== userId || !cloudRel._contextoValido(contexto, org)) {
+      throw rascunhosSync._erroLeitura('contexto_trocado', 'contexto_trocado');
+    }
     const c = cloud.config();
+    let rq;
     try {
-      const rq = await fetch(c.url + '/rest/v1/drafts?organization_id=eq.' + encodeURIComponent(org) +
+      rq = await fetch(c.url + '/rest/v1/drafts?organization_id=eq.' + encodeURIComponent(org) +
         '&user_id=eq.' + encodeURIComponent(userId) +
         '&module=eq.' + encodeURIComponent(rascunhosSync._modulo(mod)) +
         '&doc_id=eq.' + encodeURIComponent(id) +
         '&select=id,organization_id,user_id,module,doc_id,data,version,updated_by,updated_at',
         { headers: cloud._headers(true) });
-      if (!rq.ok) return null;
-      const rows = await rq.json().catch(() => []);
-      if (!cloudRel._contextoValido(contexto, org)) return null;
-      const row = rows[0] || null;
-      return row && row.organization_id === org && row.user_id === userId ? row : null;
-    } catch (e) { return null; }
+    } catch (erro) { throw rascunhosSync._erroLeitura('network', 'network', null, erro); }
+    if (!rq.ok) throw rascunhosSync._erroLeitura('http_error', 'HTTP ' + rq.status, rq.status);
+    if (typeof rq.status === 'number' && rq.status !== 200) {
+      throw rascunhosSync._erroLeitura('resposta_invalida', 'resposta_invalida', rq.status);
+    }
+    const rows = await rascunhosSync._linhasDaResposta(rq);
+    if (!cloudRel._contextoValido(contexto, org)) {
+      throw rascunhosSync._erroLeitura('contexto_trocado', 'contexto_trocado');
+    }
+    const row = rows[0] || null;
+    if (row && (row.organization_id !== org || row.user_id !== userId ||
+        row.module !== rascunhosSync._modulo(mod) || row.doc_id !== id ||
+        !Number.isInteger(Number(row.version)) || Number(row.version) < 1 ||
+        !row.data || typeof row.data !== 'object' || Array.isArray(row.data))) {
+      throw rascunhosSync._erroLeitura('resposta_invalida', 'resposta_invalida', rq.status);
+    }
+    return row;
   },
   _aplicarLinhaLocal(mod, id, linha, org) {
     const lista = rascunhos.list(mod); const i = lista.findIndex(x => x && x.id === id);
@@ -98,9 +176,13 @@ const rascunhosSync = {
     try {
       const contexto = contextoEsperado || cloudRel._capturarContexto();
       if (!contexto) return 0;
-      await rascunhos.aguardarPersistencia(mod);
+      try { await rascunhos.aguardarPersistencia(mod); }
+      catch (erro) { if (rascunhosSync._indisponivel()) return 0; }
       if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return 0;
-      if (!(await cloud._garantirToken())) return 0;
+      if (!(await cloud._garantirToken())) {
+        if (rascunhosSync._indisponivel({ motivo: 'token' })) await rascunhos._persistirCifrado(mod, { indisponivel: true });
+        return 0;
+      }
       const c = cloud.config(); const s = cloud.session();
       const org = contexto.organizationId;
       if (!s || !s.user || s.user.id !== contexto.userId ||
@@ -118,48 +200,24 @@ const rascunhosSync = {
       for (const r of lista) {
         if (!cloudRel._contextoValido(contexto, org)) return enviados;
         if (r._draftOrg && r._draftOrg !== org) continue;
-        const row = { organization_id: org, user_id: contexto.userId,
-          module: rascunhosSync._modulo(mod), doc_id: r.id, data: rascunhosSync._limpo(r) };
-        let retorno = null;
-        if (Number(r._draftVersion) > 0) {
-          const rq = await fetch(c.url + '/rest/v1/drafts?organization_id=eq.' + encodeURIComponent(org) +
-            '&user_id=eq.' + encodeURIComponent(contexto.userId) +
-            '&module=eq.' + encodeURIComponent(rascunhosSync._modulo(mod)) +
-            '&doc_id=eq.' + encodeURIComponent(r.id) + '&version=eq.' + Number(r._draftVersion) +
-            '&select=id,organization_id,user_id,module,doc_id,data,version,updated_by,updated_at', {
-            method: 'PATCH', headers: Object.assign({}, cloud._headers(true), {
-              'Content-Type': 'application/json', 'Prefer': 'return=representation'
-            }), body: JSON.stringify({ data: row.data })
-          });
-          if (!cloudRel._contextoValido(contexto, org)) return enviados;
-          if (rq.ok) {
-            const rows = await rq.json().catch(() => []);
-            if (!cloudRel._contextoValido(contexto, org)) return enviados;
-            retorno = rows[0] || null;
-          }
-        } else {
-          const rq = await fetch(c.url + '/rest/v1/drafts?on_conflict=organization_id,user_id,module,doc_id' +
-            '&select=id,organization_id,user_id,module,doc_id,data,version,updated_by,updated_at', {
-            method: 'POST', headers: Object.assign({}, cloud._headers(true), {
-              'Content-Type': 'application/json', 'Prefer': 'resolution=ignore-duplicates,return=representation'
-            }), body: JSON.stringify([row])
-          });
-          if (!cloudRel._contextoValido(contexto, org)) return enviados;
-          if (rq.ok) {
-            const rows = await rq.json().catch(() => []);
-            if (!cloudRel._contextoValido(contexto, org)) return enviados;
-            retorno = rows[0] || null;
-          }
-        }
-        if (retorno) { rascunhosSync._aplicarLinhaLocal(mod, r.id, retorno, org); enviados++; continue; }
-        const atual = await rascunhosSync._lerAtual(mod, r.id, org, contexto.userId, contexto);
+        if (!rascunhos._pendente(r)) continue;
+        const resultado = await rascunhosSync.gravarUnico(rascunhosSync._modulo(mod), r, contexto);
         if (!cloudRel._contextoValido(contexto, org)) return enviados;
-        if (!atual) continue;
-        const remoto = rascunhosSync._daLinha(atual, org);
-        if (rascunhosSync._iguais(r, remoto)) {
-          rascunhosSync._aplicarLinhaLocal(mod, r.id, atual, org); enviados++; continue;
+        if (resultado.remoteConfirmed) {
+          const atual = rascunhos.list(mod).find(x => x && x.id === r.id);
+          /* O recibo desta revisão não confirma digitação posterior. */
+          if (atual && rascunhosSync._iguais(atual, r)) {
+            rascunhosSync._aplicarLinhaLocal(mod, r.id, resultado.linha, org);
+            await rascunhos._confirmarSnapshot(mod, r.id); enviados++;
+          }
+          continue;
         }
-        rascunhosSync._preservarConflito(mod, r, remoto, { organizationId: org });
+        if (resultado.indisponivel) {
+          await rascunhos._persistirCifrado(mod, { indisponivel: true });
+          break;
+        }
+        if (resultado.linha) rascunhosSync._preservarConflito(mod, r,
+          rascunhosSync._daLinha(resultado.linha, org), { organizationId: org });
       }
       return enviados;
     } catch (e) { return 0; }
@@ -226,9 +284,10 @@ const rascunhosSync = {
   /* Rascunho fechado some da nuvem também — senão o pull seguinte o traria
      de volta e o usuário teria que fechar duas vezes. */
   async apagar(mod, id, baseVersion, opts = {}) {
+    const contextoDaOperacao = opts.contexto || cloudRel._capturarContexto();
     try {
       if (!id) return false;
-      const contexto = opts.contexto || cloudRel._capturarContexto();
+      const contexto = contextoDaOperacao;
       if (!contexto) return false;
       await rascunhos.aguardarPersistencia(mod);
       if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return false;
@@ -257,7 +316,7 @@ const rascunhosSync = {
         '&module=eq.' + encodeURIComponent(rascunhosSync._modulo(mod)) +
         '&doc_id=eq.' + encodeURIComponent(id) + '&version=eq.' + versao + '&select=id,version',
         { method: 'DELETE', headers: Object.assign({}, cloud._headers(true), { 'Prefer': 'return=representation' }) });
-      if (!rq.ok) return false;
+      if (!rq.ok) throw rascunhosSync._erroLeitura('http_error', 'HTTP ' + rq.status, rq.status);
       const rows = await rq.json().catch(() => []);
       if (!cloudRel._contextoValido(contexto, org)) return false;
       if (rows.length) return true;
@@ -271,7 +330,14 @@ const rascunhosSync = {
         { tabela: 'drafts', legacyId: id, operation: 'draft_delete', organizationId: org,
           baseVersion: versao, serverVersion: Number(mudou.version), motivo: 'exclusao_de_rascunho_divergente' });
       return true;
-    } catch (e) { return false; }
+    } catch (erro) {
+      if (rascunhos.MODS.indexOf(mod) >= 0 && contextoDaOperacao &&
+          cloudRel._contextoValido(contextoDaOperacao, contextoDaOperacao.organizationId) &&
+          rascunhosSync._indisponivel(null, erro)) {
+        await rascunhos._persistirCifrado(mod, { indisponivel: true });
+      }
+      return false;
+    }
   },
   /* Rascunho fechado aqui e ainda vivo na nuvem: tenta apagar de novo. Sem
      isso, uma falha de rede no momento do fechamento fazia a aba voltar. */
@@ -325,6 +391,7 @@ const rascunhos = {
   _persistencias: new Map(),
   _erroPersistencia: new Map(),
   _ownerKey: '',
+  _duraveis: new Map(),
   _clone(v) { try { return JSON.parse(JSON.stringify(v)); } catch (e) { return v; } },
   _contextoKey() {
     try {
@@ -341,6 +408,7 @@ const rascunhos = {
     rascunhos._memLapides.clear();
     rascunhos._persistencias.clear();
     rascunhos._erroPersistencia.clear();
+    rascunhos._duraveis.clear();
   },
   _cloudOnly() {
     try { return typeof store !== 'undefined' && store.cloudOnlyAtivo(); }
@@ -358,26 +426,40 @@ const rascunhos = {
     return !!(r && r.id && String(r.updatedAt || '') !== String(r._draftSyncedLocalAt || ''));
   },
   _snapshot(mod) {
-    return {
-      lista: rascunhos._clone(rascunhos._memList.get(mod) || []),
-      ativo: rascunhos._memAtivo.get(mod) || null,
-      lapides: rascunhos._clone(rascunhos._memLapides.get(mod) || [])
-    };
+    const lista = rascunhos._clone(rascunhos._memList.get(mod) || [])
+      .filter(r => rascunhos._pendente(r) && rascunhos.temConteudo(mod, r));
+    return { lista, ativo: lista.some(r => r.id === rascunhos._memAtivo.get(mod)) ? rascunhos._memAtivo.get(mod) : null,
+      lapides: rascunhos._clone(rascunhos._memLapides.get(mod) || []).filter(x => x && x.naNuvem !== false) };
+  },
+  async _confirmarSnapshot(mod, id) {
+    const anterior = rascunhos._duraveis.get(mod);
+    if (!anterior) return { ok: true, durable: false, remoteConfirmed: true };
+    const restante = rascunhos._clone(anterior);
+    restante.lista = (restante.lista || []).filter(r => r.id !== id);
+    restante.lapides = (restante.lapides || []).filter(r => r.id !== id);
+    if (restante.ativo === id) restante.ativo = null;
+    return rascunhos._persistirCifrado(mod, { limpeza: restante });
   },
   _limparLegadoDoMesmoDono(mod) {
     [rascunhos.KEY_LIST, rascunhos.KEY_ATIVO, rascunhos.LAPIDES_KEY].forEach(prefixo => {
       try { localStorage.removeItem(rascunhos._key(prefixo, mod)); } catch (e) {}
     });
   },
-  _persistirCifrado(mod) {
+  _persistirCifrado(mod, opts = {}) {
     if (!rascunhos._cloudOnly()) return Promise.resolve({ ok: true, durable: true, legacy: true });
+    const offline = opts.indisponivel === true || rascunhosSync._indisponivel();
+    if (!offline && !opts.limpeza) return Promise.resolve({ ok: true, durable: false, volatile: true });
+    const snapshot = opts.limpeza || rascunhos._snapshot(mod);
+    const vazio = !snapshot.lista.length && !snapshot.lapides.length;
     let escrita;
     try {
       if (typeof filaCifrada === 'undefined' || !filaCifrada.salvarSnapshot) {
         throw new Error('cofre cifrado indisponível');
       }
       /* A chamada captura o dono antes de devolver a Promise. */
-      escrita = filaCifrada.salvarSnapshot('drafts', mod, rascunhos._snapshot(mod));
+      escrita = vazio ? filaCifrada.removerSnapshot('drafts', mod)
+        : filaCifrada.salvarSnapshot('drafts', mod, snapshot);
+      rascunhos._duraveis.set(mod, rascunhos._clone(snapshot));
     } catch (e) { escrita = Promise.reject(e); }
     const acompanhada = Promise.resolve(escrita).then(res => {
       if (!res || res.durable !== true) throw new Error('snapshot de rascunho não durável');
@@ -398,7 +480,7 @@ const rascunhos = {
     while (rascunhos._persistencias.get(mod) && rascunhos._persistencias.get(mod) !== vista) {
       vista = rascunhos._persistencias.get(mod);
       const res = await vista;
-      if (!res || res.durable !== true) {
+      if (!res || (res.durable !== true && res.volatile !== true)) {
         throw rascunhos._erroPersistencia.get(mod) || new Error('Rascunho não protegido no cofre cifrado.');
       }
     }
@@ -413,17 +495,23 @@ const rascunhos = {
     if (!contextoAba.corresponde(contexto)) return 0;
     const encontrados = new Set();
     let restaurados = 0;
-    (snapshots || []).forEach(snap => {
+    for (const snap of snapshots || []) {
       const mod = snap && snap.key;
-      if (rascunhos.MODS.indexOf(mod) < 0) return;
+      if (rascunhos.MODS.indexOf(mod) < 0) continue;
       encontrados.add(mod);
-      const dados = snap.payload && typeof snap.payload === 'object' ? snap.payload : {};
-      if (!rascunhos._memList.has(mod)) rascunhos._memList.set(mod, rascunhos._clone(dados.lista || []));
-      if (!rascunhos._memAtivo.has(mod)) rascunhos._memAtivo.set(mod, dados.ativo || null);
-      if (!rascunhos._memLapides.has(mod)) rascunhos._memLapides.set(mod, rascunhos._clone(dados.lapides || []));
+      const bruto = snap.payload && typeof snap.payload === 'object' ? snap.payload : {};
+      const dados = { lista: (bruto.lista || []).filter(r => rascunhos._pendente(r) && rascunhos.temConteudo(mod, r)),
+        ativo: bruto.ativo || null, lapides: (bruto.lapides || []).filter(x => x && x.naNuvem !== false) };
+      if (!dados.lista.some(r => r.id === dados.ativo)) dados.ativo = null;
+      if (!rascunhos._memList.has(mod)) rascunhos._memList.set(mod, rascunhos._clone(dados.lista));
+      if (!rascunhos._memAtivo.has(mod)) rascunhos._memAtivo.set(mod, dados.ativo);
+      if (!rascunhos._memLapides.has(mod)) rascunhos._memLapides.set(mod, rascunhos._clone(dados.lapides));
+      rascunhos._duraveis.set(mod, rascunhos._clone(dados));
+      if (JSON.stringify(bruto) !== JSON.stringify(dados)) await rascunhos._persistirCifrado(mod, { limpeza: dados });
+      if (!contextoAba.corresponde(contexto)) return 0;
       rascunhos._limparLegadoDoMesmoDono(mod);
-      restaurados++;
-    });
+      if (dados.lista.length || dados.lapides.length) restaurados++;
+    }
 
     /* Migra somente chaves que já carregam o UID exato. A chave histórica
        sem usuário permanece em quarentena: não existe base segura para
@@ -443,7 +531,8 @@ const rascunhos = {
         rascunhos._memList.set(mod, Array.isArray(lista) ? rascunhos._clone(lista) : []);
         rascunhos._memAtivo.set(mod, localStorage.getItem(activeKey) || null);
         rascunhos._memLapides.set(mod, Array.isArray(lapides) ? rascunhos._clone(lapides) : []);
-        const res = await rascunhos._persistirCifrado(mod);
+        /* Resgate de resíduo legado: cifras somente pendências, nunca confirmado. */
+        const res = await rascunhos._persistirCifrado(mod, { limpeza: rascunhos._snapshot(mod) });
         if (res && res.durable === true) restaurados++;
       } catch (e) { rascunhos._erroPersistencia.set(mod, e); }
     }
@@ -526,14 +615,14 @@ const rascunhos = {
           : JSON.parse(localStorage.getItem(rascunhos._key(rascunhos.LAPIDES_KEY, mod)) || '[]');
       if (!Array.isArray(arr)) return [];
       const limite = Date.now() - rascunhos.DIAS_LAPIDE * 24 * 3600 * 1000;
-      const validas = arr.filter(x => x && x.id && (!x.em || new Date(x.em).getTime() > limite));
+      const validas = arr.filter(x => x && x.id && (x.naNuvem !== false || !x.em || new Date(x.em).getTime() > limite));
       rascunhos._memLapides.set(mod, rascunhos._clone(validas));
       if (rascunhos._cloudOnly() && validas.length !== arr.length) rascunhos._persistirCifrado(mod);
       return validas;
     } catch (e) { return []; }
   },
   _gravarLapides(mod, arr) {
-    const lista = (arr || []).slice(-300);
+    const lista = (arr || []).slice();
     rascunhos._memLapides.set(mod, rascunhos._clone(lista));
     if (rascunhos._cloudOnly()) {
       rascunhos._persistirCifrado(mod);
@@ -564,6 +653,7 @@ const rascunhos = {
   marcarApagado(mod, id) {
     const arr = rascunhos.lapides(mod).map(x => x.id === id ? Object.assign({}, x, { naNuvem: false }) : x);
     rascunhos._gravarLapides(mod, arr);
+    rascunhos._confirmarSnapshot(mod, id).catch(() => {});
   },
   pendentesDeApagar(mod) {
     return rascunhos.lapides(mod).filter(x => x.naNuvem !== false).map(x => x.id);
@@ -645,7 +735,9 @@ const rascunhos = {
     const list = rascunhos.list(mod);
     const r = list.find(x => x.id === id);
     if (!r) return;
-    r.dados = rascunhos._coletar(mod);
+    const dados = rascunhos._coletar(mod);
+    if (JSON.stringify(r.dados || {}) === JSON.stringify(dados || {})) return;
+    r.dados = dados;
     r.updatedAt = new Date().toISOString();
     /* Auto-renomeia com base no nome do paciente */
     const pacNome = rascunhos._extrairNomePaciente(mod, r.dados);
@@ -664,7 +756,7 @@ const rascunhos = {
       if (opts.agora) { rascunhosSync.enviar(mod); return; }
       rascunhos._timers[mod] = setTimeout(() => {
         try { rascunhosSync.enviar(mod); } catch (e) {}
-      }, 4000);
+      }, 750);
     } catch (e) {}
   },
 

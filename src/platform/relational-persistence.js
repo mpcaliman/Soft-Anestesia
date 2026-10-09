@@ -128,20 +128,53 @@ const cloudRel = {
     } catch (e) { return null; }
   },
 
-  /* Lê o estado atual de uma linha (por legacy_id) numa tabela, ou null. */
+  _erroLeitura(code, message, status, cause) {
+    const erro = new Error(message || code);
+    erro.name = 'CloudReadError'; erro.code = code;
+    if (Number.isFinite(Number(status)) && Number(status) > 0) erro.status = Number(status);
+    if (cause) erro.cause = cause;
+    return erro;
+  },
+  _falhaTipada(erro) {
+    return { ok: false, motivo: erro && (erro.message || erro.code) || 'rede',
+      code: erro && erro.code || null, status: erro && erro.status || null };
+  },
+  async _linhasValidas(r) {
+    let linhas;
+    try { linhas = await r.json(); }
+    catch (e) { throw cloudRel._erroLeitura('resposta_invalida', 'resposta_invalida', r.status, e); }
+    if (!Array.isArray(linhas) || linhas.length > 1 ||
+        linhas.some(linha => !linha || typeof linha !== 'object' || Array.isArray(linha))) {
+      throw cloudRel._erroLeitura('resposta_invalida', 'resposta_invalida', r.status);
+    }
+    return linhas;
+  },
+  /* null significa SOMENTE um GET bem-sucedido, válido e escopado com []:
+     HTTP negado, falha de rede, JSON inválido e contexto trocado são erros.
+     Confundir indisponibilidade com ausência apagaria a única cópia do WAL. */
   async _lerAtualTab(tabela, org, key, select) {
     const contexto = cloudRel._capturarContexto();
-    if (!contexto || !cloudRel._contextoValido(contexto, org)) return null;
+    if (!contexto || !cloudRel._contextoValido(contexto, org)) {
+      throw cloudRel._erroLeitura('contexto_trocado', 'contexto_trocado');
+    }
     const c = cloud.config();
-    try {
-      const r = await fetch(c.url + '/rest/v1/' + tabela + '?organization_id=eq.' + org +
-        '&legacy_id=eq.' + encodeURIComponent(key) + '&select=' + select,
-        { headers: cloud._headers(true) });
-      if (!r.ok) return null;
-      const arr = await r.json();
-      if (!cloudRel._contextoValido(contexto, org)) return null;
-      return arr[0] || null;
-    } catch (e) { return null; }
+    const r = await fetch(c.url + '/rest/v1/' + tabela + '?organization_id=eq.' + encodeURIComponent(org) +
+      '&legacy_id=eq.' + encodeURIComponent(key) + '&select=' + select,
+      { headers: cloud._headers(true) });
+    if (!r.ok) throw cloudRel._erroLeitura('http_error', 'http ' + r.status, r.status);
+    if (typeof r.status === 'number' && r.status !== 200) {
+      throw cloudRel._erroLeitura('resposta_invalida', 'resposta_invalida', r.status);
+    }
+    const linhas = await cloudRel._linhasValidas(r);
+    if (!cloudRel._contextoValido(contexto, org)) {
+      throw cloudRel._erroLeitura('contexto_trocado', 'contexto_trocado');
+    }
+    const atual = linhas[0] || null;
+    if (atual && (atual.organization_id != null && String(atual.organization_id) !== String(org) ||
+        atual.legacy_id != null && String(atual.legacy_id) !== String(key))) {
+      throw cloudRel._erroLeitura('resposta_invalida', 'resposta_invalida', r.status);
+    }
+    return atual;
   },
   _lerAtual(org, key) { return cloudRel._lerAtualTab('patients', org, key, cloudRel._SELECT); },
 
@@ -155,7 +188,7 @@ const cloudRel = {
        a última barreira defensiva; enviarRegistro faz o upload obrigatório
        antes de chegar aqui. */
     try { if (typeof prontuario !== 'undefined') dados = prontuario.sanitizarParaNuvem(dados); } catch (e) {}
-    ['_relVersion','_relUpdatedAt','_relUpdatedBy','_relOrg',
+    ['_relVersion','_relUpdatedAt','_relUpdatedBy','_relOrg','_relId','_relEncounterId',
       'last_operation_id','last_operation_checksum'].forEach(k => { delete dados[k]; });
     return dados;
   },
@@ -190,7 +223,7 @@ const cloudRel = {
       if (rows && rows[0]) return { ok: true, row: rows[0], inserted: true };
       const atual = await cloudRel._lerAtualTab(tabela, org, legacy, select);
       return atual ? { ok: true, row: atual, inserted: false } : { ok: false, motivo: 'nao_encontrado_ou_sem_acesso' };
-    } catch (e) { return { ok: false, motivo: e.message || 'rede' }; }
+    } catch (e) { return cloudRel._falhaTipada(e); }
   },
 
   /* UPDATE condicional em UMA instrução SQL. Não há janela entre "ler" e
@@ -286,13 +319,15 @@ const cloudRel = {
         cloudUpdatedAt: atual.updated_at,
         motivo: 'versao_divergente'
       };
-    } catch (e) { return { ok: false, motivo: e.message || 'rede' }; }
+    } catch (e) { return cloudRel._falhaTipada(e); }
   },
 
   _aplicarMetaLocal(mod, item, row, org) {
     if (!item || !row) return;
     if (org && org !== cloudRel._org()) return;
     const meta = {};
+    if (row.id) meta._relId = row.id;
+    if (row.encounter_id) meta._relEncounterId = row.encounter_id;
     const versao = Number(row.version);
     if (Number.isInteger(versao) && versao > 0) meta._relVersion = versao;
     if (row.updated_at) meta._relUpdatedAt = row.updated_at;
@@ -309,6 +344,18 @@ const cloudRel = {
   /* Cache de ids resolvidos nesta sessão (evita GETs repetidos em auto-saves) */
   _cachePac: {}, _cacheEnc: {},
 
+  _erroDependencia(res, dependencia) {
+    const e = new Error((res && res.motivo) || dependencia + '_nao_confirmada');
+    e.code = (res && res.code) || 'dependencia_nao_confirmada';
+    e.status = Number(res && (res.status || res.statusCode)) ||
+      Number((e.message.match(/http\s+(\d{3})\b/i) || [])[1]) || 0;
+    return e;
+  },
+  _falhaDeEnvio(e, fallback) {
+    return { ok: false, motivo: [e && e.code, e && e.message].filter(Boolean).join(' — ') || fallback,
+      status: Number(e && e.status) || 0 };
+  },
+
   /* id (uuid) de um paciente na nuvem pela chave de nome; cria minimamente se
      ainda não existir (para o agendamento/registro poder referenciá-lo). */
   async _garantirPaciente(org, item) {
@@ -323,12 +370,11 @@ const cloudRel = {
        item.paciente é o OBJETO inteiro e não pode ir para a coluna nome. */
     const row = { organization_id: org, legacy_id: key, nome: id.nome || 'Sem nome',
       cpf: id.cpf || null, convenio: id.convenio || item.convenio || null, data: { origem: 'auto' } };
-    try {
-      const ret = await cloudRel._inserirSemSobrescrever('patients', org, key, row, 'id,legacy_id,version');
-      const pid = ret && ret.ok && ret.row ? ret.row.id : null;
-      if (pid && org === cloudRel._org()) cloudRel._cachePac[cacheKey] = pid;
-      return pid;
-    } catch (e) { return null; }
+    const ret = await cloudRel._inserirSemSobrescrever('patients', org, key, row, 'id,legacy_id,version');
+    const pid = ret && ret.ok && ret.row ? ret.row.id : null;
+    if (!pid) throw cloudRel._erroDependencia(ret, 'paciente');
+    if (org === cloudRel._org()) cloudRel._cachePac[cacheKey] = pid;
+    return pid;
   },
 
   /* Grava paciente com compare-and-swap por version. */
@@ -399,7 +445,9 @@ const cloudRel = {
     if (!cloudRel._contextoValido(contexto, org)) return { ok: false, motivo: 'contexto_trocado' };
     if (item._relOrg && item._relOrg !== org) return { ok: false, motivo: 'outra_clinica', outraClinica: item._relOrg };
     const legacy = item._id;
-    const patientId = await cloudRel._garantirPaciente(org, item);
+    let patientId;
+    try { patientId = await cloudRel._garantirPaciente(org, item); }
+    catch (e) { return cloudRel._falhaDeEnvio(e, 'paciente_nao_confirmado'); }
     if (!cloudRel._contextoValido(contexto, org)) return { ok: false, motivo: 'contexto_trocado' };
     const hora = (item.hora && /^\d{1,2}:\d{2}/.test(item.hora)) ? item.hora : '09:00';
     const sched = migracaoFase4._dataISO(item.data) ? (item.data + 'T' + hora + ':00') : null;
@@ -447,7 +495,7 @@ const cloudRel = {
     }
     return item._id || '';
   },
-  _REG_SELECT: 'id,organization_id,legacy_id,status,finalized_at,finalized_by,data,version,updated_by,updated_at,deleted_at,last_operation_id,last_operation_checksum',
+  _REG_SELECT: 'id,organization_id,legacy_id,encounter_id,status,finalized_at,finalized_by,data,version,updated_by,updated_at,deleted_at,last_operation_id,last_operation_checksum',
   /* O MESMO registro SEM o campo `data` — que é o registro inteiro, com as
      imagens em base64 dentro. Ler só isto custa ~60 bytes por linha em vez de
      alguns KB, e é o que permite descobrir o que mudou sem baixar nada. */
@@ -473,12 +521,11 @@ const cloudRel = {
       data_prevista: migracaoFase4._dataISO(item.data),
       status: 'ativo', data: { origem: 'fase6' }
     };
-    try {
-      const ret = await cloudRel._inserirSemSobrescrever('encounters', org, encKey, row, 'id,legacy_id,version');
-      const eid = ret && ret.ok && ret.row ? ret.row.id : null;
-      if (eid && org === cloudRel._org()) cloudRel._cacheEnc[cacheKey] = eid;
-      return eid;
-    } catch (e) { return null; }
+    const ret = await cloudRel._inserirSemSobrescrever('encounters', org, encKey, row, 'id,legacy_id,version');
+    const eid = ret && ret.ok && ret.row ? ret.row.id : null;
+    if (!eid) throw cloudRel._erroDependencia(ret, 'atendimento');
+    if (org === cloudRel._org()) cloudRel._cacheEnc[cacheKey] = eid;
+    return eid;
   },
 
   /* `org` carimba de QUAL CLÍNICA o registro veio. Sem isso, o registro é um
@@ -489,6 +536,8 @@ const cloudRel = {
     const d = row.data;
     const base = (d && typeof d === 'object' && (d._id || d.nome || d.paciente || d.paciente_nome)) ? Object.assign({}, d) : {};
     if (!base._id) base._id = row.legacy_id || ('rel_' + (row.id || '').toString().slice(0, 8));
+    if (row.id) base._relId = row.id;
+    if (row.encounter_id) base._relEncounterId = row.encounter_id;
     if (row.finalized_at) {
       base._finalizado = true;
       base._finalizadoEm = base._finalizadoEm || row.finalized_at;
@@ -975,14 +1024,18 @@ const cloudRel = {
     try {
       preparo = await prontuario.prepararParaNuvem(mod, item, { organizationId: org });
     } catch (e) {
-      return { ok: false, motivo: 'anexo', detalhe: e && e.message || 'falha ao preparar anexo' };
+      return Object.assign(cloudRel._falhaDeEnvio(e, 'anexo'), {
+        detalhe: e && e.message || 'falha ao preparar anexo'
+      });
     }
     if (!cloudRel._contextoValido(contexto, org)) return { ok: false, motivo: 'contexto_trocado' };
     const legacy = item._id;
-    const patientId = await cloudRel._garantirPaciente(org, item);
-    if (!cloudRel._contextoValido(contexto, org)) return { ok: false, motivo: 'contexto_trocado' };
-    let encounterId = null;
-    if (cfg.enc) { try { encounterId = await cloudRel._garantirEncounter(org, patientId, item); } catch (e) {} }
+    let patientId, encounterId = null;
+    try {
+      patientId = await cloudRel._garantirPaciente(org, item);
+      if (!cloudRel._contextoValido(contexto, org)) return { ok: false, motivo: 'contexto_trocado' };
+      if (cfg.enc) encounterId = await cloudRel._garantirEncounter(org, patientId, item);
+    } catch (e) { return cloudRel._falhaDeEnvio(e, 'dependencia_nao_confirmada'); }
     if (!cloudRel._contextoValido(contexto, org)) return { ok: false, motivo: 'contexto_trocado' };
     if (preparo.contexto && !prontuario._contextoAindaAtivo(preparo.contexto)) {
       return { ok: false, motivo: 'contexto_trocado' };
@@ -1026,11 +1079,13 @@ const cloudRel = {
 
      O modal não é armazenamento. Antes, "Decidir depois" fechava a única
      cópia organizada do conflito e um reload apagava o contexto. Agora os dois
-     lados são primeiro guardados no aparelho e em `sync_conflicts`; só a
-     decisão muda o status. O servidor mantém a evidência mesmo depois de
-     resolvida.
+     lados ficam em memória e em `sync_conflicts`; só a decisão muda o status.
+     Indisponibilidade confirmada permite um snapshot cifrado do conflito
+     ainda não recebido pelo servidor. O recibo remove essa cópia offline.
   ========================================================================== */
   CONFLITOS_KEY: 'medsys.v7.rel.conflitos',
+  _conflitosMemoria: [], _contextoConflitos: null,
+  _persistenciasConflitos: new Map(),
   _clone(v) {
     try { return JSON.parse(JSON.stringify(v == null ? {} : v)); }
     catch (e) { return Object.assign({}, v || {}); }
@@ -1040,12 +1095,76 @@ const cloudRel = {
     catch (e) { return ''; }
   },
   _conflitosTodos() {
-    try { const a = JSON.parse(disco.get(cloudRel.CONFLITOS_KEY) || '[]'); return Array.isArray(a) ? a : []; }
-    catch (e) { return []; }
+    if (!contextoAba.operational()) { cloudRel._limparConflitosMemoria(); return []; }
+    if (!contextoAba.corresponde(cloudRel._contextoConflitos)) {
+      cloudRel._limparConflitosMemoria(); cloudRel._contextoConflitos = contextoAba.capturar();
+    }
+    return cloudRel._conflitosMemoria;
   },
   _conflitosGravar(a) {
-    try { disco.set(cloudRel.CONFLITOS_KEY, JSON.stringify(a || [])); return true; }
-    catch (e) { return false; }
+    cloudRel._conflitosTodos();
+    if (!contextoAba.corresponde(cloudRel._contextoConflitos)) return false;
+    cloudRel._conflitosMemoria = (a || []).filter(x => x && x.organizationId === cloudRel._org());
+    return true;
+  },
+  _limparConflitosMemoria() {
+    cloudRel._conflitosMemoria = []; cloudRel._contextoConflitos = null;
+    cloudRel._persistenciasConflitos.clear();
+  },
+  _persistirConflitoOffline(entry, contexto, opts = {}) {
+    if (!entry || (entry.synced && !opts.resolutionOnly) || !contextoAba.corresponde(contexto)) return Promise.resolve(false);
+    /* Uma decisão ainda não confirmada é uma intenção; as versões clínicas
+       já recebidas pelo servidor não precisam ser copiadas de volta ao disco. */
+    const payload = opts.resolutionOnly ? {
+      clientId: entry.clientId, ownerId: entry.ownerId, organizationId: entry.organizationId,
+      mod: entry.mod, tabela: entry.tabela, legacyId: entry.legacyId, operation: entry.operation,
+      status: 'pending', synced: true, serverId: entry.serverId,
+      resolutionRequested: cloudRel._clone(entry.resolutionRequested), snapshotType: 'resolution'
+    } : cloudRel._clone(entry);
+    let escrita;
+    try { escrita = filaCifrada.salvarSnapshot('conflicts', entry.clientId, payload); }
+    catch (e) { escrita = Promise.reject(e); }
+    const tarefa = Promise.resolve(escrita).then(res => {
+      if (contextoAba.corresponde(contexto)) entry.offlineDurable = !!(res && res.durable);
+      return !!(res && res.durable);
+    }).catch(() => {
+      if (contextoAba.corresponde(contexto)) {
+        entry.offlineDurable = false;
+        try { toast('O conflito está apenas em memória: o cofre offline não confirmou proteção.', 'warn'); } catch (e) {}
+      }
+      return false;
+    });
+    cloudRel._persistenciasConflitos.set(entry.clientId, tarefa);
+    return tarefa;
+  },
+  async _removerConflitoOffline(clientId, contexto) {
+    if (!contextoAba.corresponde(contexto)) return false;
+    try {
+      /* Tombstone monotônico impede uma cifragem em voo de recriar o payload
+         depois do recibo. A evidência canônica já pertence ao servidor. */
+      await filaCifrada.removerSnapshot('conflicts', clientId);
+      if (!contextoAba.corresponde(contexto)) return false;
+      cloudRel._persistenciasConflitos.delete(clientId);
+      return true;
+    } catch (e) { return false; }
+  },
+  async restaurarConflitosOffline() {
+    if (!contextoAba.operational()) return 0;
+    const contexto = contextoAba.capturar();
+    cloudRel._conflitosTodos();
+    const snapshots = await filaCifrada.listarSnapshots('conflicts');
+    if (!contextoAba.corresponde(contexto)) return 0;
+    let restaurados = 0;
+    for (const snap of snapshots || []) {
+      const entry = snap && snap.payload;
+      if (!entry || entry.clientId !== snap.key || entry.organizationId !== contexto.organizationId ||
+          entry.ownerId !== contexto.userId) continue;
+      const lista = cloudRel._conflitosTodos();
+      if (lista.some(x => x.clientId === entry.clientId)) continue;
+      entry.offlineDurable = true; lista.push(entry); restaurados++;
+    }
+    try { nuvemEstado.renderMenu(); } catch (e) {}
+    return restaurados;
   },
   _conflitosLer() {
     const dono = cloudRel._donoConflitos();
@@ -1064,11 +1183,17 @@ const cloudRel = {
     const i = a.findIndex(x => x && x.clientId === entry.clientId);
     if (i >= 0) a[i] = entry; else a.push(entry);
     cloudRel._conflitosGravar(a);
+    if (!entry.synced && typeof navigator !== 'undefined' && navigator.onLine === false) {
+      cloudRel._persistirConflitoOffline(entry, contextoAba.capturar());
+    } else if (entry.resolutionRequested && typeof navigator !== 'undefined' && navigator.onLine === false) {
+      cloudRel._persistirConflitoOffline(entry, contextoAba.capturar(), { resolutionOnly: true });
+    }
     try { nuvemEstado.renderMenu(); } catch (e) {}
     try { syncStatus.refresh(); } catch (e) {}
   },
   _conflitoRemover(clientId) {
     cloudRel._conflitosGravar(cloudRel._conflitosTodos().filter(x => x && x.clientId !== clientId));
+    cloudRel._removerConflitoOffline(clientId, contextoAba.capturar());
     try { nuvemEstado.renderMenu(); } catch (e) {}
   },
   _hashConflito(v) {
@@ -1083,13 +1208,15 @@ const cloudRel = {
       const legacy = opts.legacyId || cloudRel.chaveLegada(mod, local) || (local && (local.id || local._id));
       if (!mod || !tabela || !legacy) return null;
       const ownerId = cloudRel._donoConflitos();
-      const baseVersion = opts.baseVersion || cloudRel._versao(local) || null;
-      const serverVersion = opts.serverVersion || cloudRel._versao(nuvem) || null;
+      const baseVersion = opts.baseVersion || (tabela === 'drafts' && local && local._draftVersion) || cloudRel._versao(local) || null;
+      const serverVersion = opts.serverVersion || (tabela === 'drafts' && nuvem && nuvem._draftVersion) || cloudRel._versao(nuvem) || null;
       const operation = opts.operation || 'upsert';
       const fingerprint = [mod, tabela, legacy, operation, baseVersion || '', serverVersion || '',
         cloudRel._hashConflito(local), cloudRel._hashConflito(nuvem)].join('|');
       const existente = cloudRel._conflitosLer().find(x => x.status === 'pending' && x.fingerprint === fingerprint);
       if (existente) { cloudRel._enviarConflito(existente); return existente; }
+      const changedFields = Array.from(new Set(Object.keys(local || {}).concat(Object.keys(nuvem || {}))))
+        .filter(k => k[0] !== '_' && JSON.stringify(local && local[k]) !== JSON.stringify(nuvem && nuvem[k]));
       const entry = {
         clientId: utils.uid(), ownerId,
         organizationId: opts.organizationId || (local && local._relOrg) || (nuvem && nuvem._relOrg) || cloudRel._org() || null,
@@ -1098,13 +1225,16 @@ const cloudRel = {
         proposed: cloudRel._clone(local), canonical: cloudRel._clone(nuvem),
         metadata: { cloudUpdatedAt: opts.cloudUpdatedAt || (nuvem && nuvem._relUpdatedAt) || null,
           motivo: opts.motivo || 'versao_divergente',
+          proposedBy: ownerId, canonicalBy: (nuvem && nuvem._relUpdatedBy) || null,
+          receivedAt: new Date().toISOString(), changedFields,
+          draftModule: tabela === 'drafts' ? (opts.draftModule || (String(legacy).startsWith('live_') ? 'live:' + mod : mod)) : null,
           /* `cash_closings` usa a permissão pública `financeiro` no banco,
              mas conserva a chave técnica local para repintar a coleção certa. */
           clientModule: mod === 'fin_fechamentos' ? mod : null },
         status: 'pending', createdAt: new Date().toISOString(), synced: false,
         fingerprint
       };
-      cloudRel._conflitoSalvar(entry);       // primeiro o aparelho; depois a rede
+      cloudRel._conflitoSalvar(entry);       // memória primeiro; servidor é a evidência online
       cloudRel._enviarConflito(entry);
       return entry;
     } catch (e) { return null; }
@@ -1140,7 +1270,12 @@ const cloudRel = {
         }),
         body: JSON.stringify([row])
       });
-      if (!r.ok) return false;
+      if (!r.ok) {
+        if (persistenciaCloudFirst.indisponivel({ status: r.status })) {
+          await cloudRel._persistirConflitoOffline(entry, contexto);
+        }
+        return false;
+      }
       const rows = await r.json().catch(() => []);
       if (!cloudRel._contextoValido(contexto, org)) return false;
       let confirmado = rows && rows[0] ? rows[0] : null;
@@ -1152,7 +1287,12 @@ const cloudRel = {
         const q = await fetch(c.url + '/rest/v1/sync_conflicts?organization_id=eq.' + encodeURIComponent(org) +
           '&client_conflict_id=eq.' + encodeURIComponent(entry.clientId) + '&select=id,status',
           { headers: cloud._headers(true) });
-        if (!q.ok) return false;
+        if (!q.ok) {
+          if (persistenciaCloudFirst.indisponivel({ status: q.status })) {
+            await cloudRel._persistirConflitoOffline(entry, contexto);
+          }
+          return false;
+        }
         const existentes = await q.json().catch(() => []);
         if (!cloudRel._contextoValido(contexto, org)) return false;
         confirmado = existentes && existentes[0] ? existentes[0] : null;
@@ -1160,31 +1300,42 @@ const cloudRel = {
       if (!confirmado) return false;
       entry.synced = true;
       entry.serverId = confirmado.id;
+      await cloudRel._removerConflitoOffline(entry.clientId, contexto);
+      if (!cloudRel._contextoValido(contexto, org)) return false;
       if (confirmado.status && confirmado.status !== 'pending') {
         cloudRel._conflitoRemover(entry.clientId);
         return true;
       }
       cloudRel._conflitoSalvar(entry);
-      if (entry.status !== 'pending') return cloudRel._resolverConflitoServidor(entry);
+      if (entry.resolutionRequested || entry.status !== 'pending') return cloudRel._resolverConflitoServidor(entry);
       return true;
-    } catch (e) { return false; }
+    } catch (e) {
+      if (persistenciaCloudFirst.indisponivel(null, e)) await cloudRel._persistirConflitoOffline(entry, contexto);
+      return false;
+    }
   },
   async _resolverConflitoServidor(entry) {
-    if (!entry || !entry.synced || entry.status === 'pending' || !cloudRel.disponivel()) return false;
+    if (!entry || !entry.synced || (!entry.resolutionRequested && entry.status === 'pending') || !cloudRel.disponivel()) return false;
     const contexto = cloudRel._capturarContexto();
     if (!contexto) return false;
     if (!(await cloud._garantirToken())) return false;
     const org = contexto.organizationId;
     if (!cloudRel._contextoValido(contexto, org) || entry.organizationId !== org) return false;
+    const decisao = entry.resolutionRequested || { status: entry.status, resolution: entry.resolution || {} };
     const c = cloud.config();
     try {
       const r = await fetch(c.url + '/rest/v1/sync_conflicts?organization_id=eq.' + encodeURIComponent(org) +
         '&client_conflict_id=eq.' + encodeURIComponent(entry.clientId) + '&status=eq.pending&select=id,status', {
         method: 'PATCH',
         headers: Object.assign({}, cloud._headers(true), { 'Content-Type': 'application/json', 'Prefer': 'return=representation' }),
-        body: JSON.stringify({ status: entry.status, resolution: entry.resolution || {} })
+        body: JSON.stringify({ status: decisao.status, resolution: decisao.resolution || {} })
       });
-      if (!r.ok) return false;
+      if (!r.ok) {
+        if (persistenciaCloudFirst.indisponivel({ status: r.status })) {
+          await cloudRel._persistirConflitoOffline(entry, contexto, { resolutionOnly: true });
+        }
+        return false;
+      }
       const alteradas = await r.json().catch(() => []);
       if (!cloudRel._contextoValido(contexto, org)) return false;
       let confirmado = !!(alteradas && alteradas[0] && alteradas[0].status !== 'pending');
@@ -1199,20 +1350,29 @@ const cloudRel = {
           const rows = await q.json().catch(() => []);
           if (!cloudRel._contextoValido(contexto, org)) return false;
           confirmado = !!(rows && rows[0] && rows[0].status !== 'pending');
+        } else if (persistenciaCloudFirst.indisponivel({ status: q.status })) {
+          await cloudRel._persistirConflitoOffline(entry, contexto, { resolutionOnly: true });
         }
       }
       if (!confirmado) return false;
       cloudRel._conflitoRemover(entry.clientId); // evidência permanece no servidor
       return true;
-    } catch (e) { return false; }
+    } catch (e) {
+      if (persistenciaCloudFirst.indisponivel(null, e)) {
+        await cloudRel._persistirConflitoOffline(entry, contexto, { resolutionOnly: true });
+      }
+      return false;
+    }
   },
   resolverConflito(clientId, escolha, dados) {
     const entry = cloudRel._conflitosLer().find(x => x && x.clientId === clientId);
     const org = contextoAba.organizationId();
     if (!entry || !org || entry.organizationId !== org) return false;
     const mapa = { local: 'resolved_local', remote: 'resolved_remote', merged: 'resolved_merged' };
-    entry.status = mapa[escolha] || escolha || 'resolved_merged';
-    entry.resolution = { escolha: escolha || 'merged', dados: cloudRel._clone(dados || {}), em: new Date().toISOString() };
+    entry.resolutionRequested = {
+      status: mapa[escolha] || escolha || 'resolved_merged',
+      resolution: { escolha: escolha || 'merged', dados: cloudRel._clone(dados || {}), em: new Date().toISOString() }
+    };
     cloudRel._conflitoSalvar(entry);
     if (entry.synced) cloudRel._resolverConflitoServidor(entry);
     else cloudRel._enviarConflito(entry);
@@ -1247,7 +1407,10 @@ const cloudRel = {
       cloudRel._conflitoRemover(entry.clientId);
       return true;
     }
+    const local = cloudRel._conflitosTodos().find(x => x.clientId === entry.clientId);
+    if (local && local.resolutionRequested) entry.resolutionRequested = local.resolutionRequested;
     cloudRel._conflitoSalvar(entry);
+    if (!entry.resolutionRequested) cloudRel._removerConflitoOffline(entry.clientId, contextoAba.capturar());
     return true;
   },
   async puxarConflitos() {
@@ -1279,6 +1442,8 @@ const cloudRel = {
     if (!cloudRel.disponivel()) return null;
     const contexto = cloudRel._capturarContexto();
     if (!contexto) return null;
+    try { await cloudRel.restaurarConflitosOffline(); } catch (e) {}
+    if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return null;
     let enviados = 0;
     for (const entry of cloudRel._conflitosLer().slice(0, 40)) {
       if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return null;
@@ -1317,6 +1482,9 @@ const cloudRel = {
       return;
     }
     if (e.tabela === 'drafts') {
+      if (e.metadata && String(e.metadata.draftModule || '').startsWith('live:')) {
+        cloudRel._abrirConflitoEdicaoViva(e); return;
+      }
       modal.open('📝 Conflito de rascunho preservado',
         '<p>As duas versões foram mantidas em abas separadas; nenhuma digitação foi descartada.</p>',
         '<button class="btn btn-primary" onclick="cloudRel.resolverConflito(' + utils.jsArg(e.clientId) + ',\'merged\');modal.close()">Entendi</button>');
@@ -1326,6 +1494,78 @@ const cloudRel = {
     if (e.mod === 'pacientes') pacientes._resolverConflito(e.proposed, e.canonical, e.metadata.cloudUpdatedAt, e.clientId);
     else if (e.mod === 'agenda') agenda._resolverConflito(e.proposed, e.canonical, e.metadata.cloudUpdatedAt, e.clientId);
     else cloudRel._resolverConflitoRegistro(e.mod, e.proposed, e.canonical, e.metadata.cloudUpdatedAt, e.clientId);
+  },
+  _abrirConflitoEdicaoViva(entry) {
+    const contexto = contextoAba.capturar();
+    if (!contextoAba.corresponde(contexto) || entry.organizationId !== contexto.organizationId) return;
+    modal.open('⚠️ Duas edições do formulário preservadas',
+      '<div id="live-draft-conflict-review"></div>', '');
+    const corpo = document.getElementById('live-draft-conflict-review');
+    if (!corpo) return;
+    const texto = document.createElement('p');
+    texto.textContent = 'Escolha a versão de recuperação. A digitação posterior continua protegida, e a decisão só termina após confirmação da nuvem.';
+    corpo.appendChild(texto);
+    for (const [titulo, dados] of [['Sua edição', entry.proposed], ['Versão da nuvem', entry.canonical]]) {
+      const label = document.createElement('strong'); label.textContent = titulo; corpo.appendChild(label);
+      const detalhe = document.createElement('pre'); detalhe.style.whiteSpace = 'pre-wrap';
+      detalhe.textContent = JSON.stringify((dados && dados.dados) || {}, null, 2); corpo.appendChild(detalhe);
+    }
+    for (const [escolha, titulo] of [['local', 'Preservar minha edição na nuvem'], ['remote', 'Usar a versão da nuvem']]) {
+      const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn'; btn.textContent = titulo;
+      btn.addEventListener('click', async () => {
+        if (!contextoAba.corresponde(contexto)) return;
+        btn.disabled = true;
+        try {
+          const ok = await cloudRel._resolverConflitoEdicaoViva(entry.clientId, escolha, contexto);
+          if (ok && contextoAba.corresponde(contexto)) modal.close();
+        } catch (e) {
+          if (contextoAba.corresponde(contexto)) {
+            toast('A nuvem não confirmou a escolha; as versões continuam preservadas.', 'warn');
+          }
+        } finally { if (contextoAba.corresponde(contexto)) btn.disabled = false; }
+      });
+      corpo.appendChild(btn);
+    }
+  },
+  async _resolverConflitoEdicaoViva(clientId, escolha, contextoEsperado) {
+    const contexto = contextoEsperado || cloudRel._capturarContexto();
+    const entry = cloudRel._conflitosLer().find(x => x.clientId === clientId && x.status === 'pending');
+    if (!entry || !contexto || !cloudRel._contextoValido(contexto, entry.organizationId) ||
+        entry.ownerId !== contexto.userId || !entry.metadata ||
+        entry.metadata.draftModule !== 'live:' + entry.mod ||
+        !Number.isInteger(Number(entry.serverVersion)) || Number(entry.serverVersion) < 1) return false;
+    if (escolha !== 'local' && escolha !== 'remote') return false;
+    let escolhida;
+    if (escolha === 'local') {
+      const payload = Object.assign({}, cloudRel._clone(entry.proposed), {
+        id: entry.legacyId, _draftVersion: Number(entry.serverVersion), _draftOrg: contexto.organizationId
+      });
+      const res = await rascunhosSync.gravarUnico(entry.metadata.draftModule, payload, contexto);
+      if (!cloudRel._contextoValido(contexto, entry.organizationId)) return false;
+      if (!res || !res.remoteConfirmed) {
+        if (res && res.linha) {
+          const novo = cloudRel.registrarConflito(entry.mod, payload, rascunhosSync._daLinha(res.linha, contexto.organizationId),
+            { tabela: 'drafts', legacyId: entry.legacyId, draftModule: entry.metadata.draftModule,
+              operation: 'draft_upsert', motivo: 'rascunho_mudou_durante_resolucao' });
+          try { realtime._avisarConflito(entry.mod, novo, contexto); } catch (e) {}
+        }
+        return false;
+      }
+      escolhida = rascunhosSync._daLinha(res.linha, contexto.organizationId);
+    } else {
+      const linha = await rascunhosSync._lerAtual(entry.metadata.draftModule, entry.legacyId,
+        contexto.organizationId, contexto.userId, contexto);
+      if (!cloudRel._contextoValido(contexto, entry.organizationId) || !linha) return false;
+      escolhida = rascunhosSync._daLinha(linha, contexto.organizationId);
+    }
+    const adotada = await edicaoViva.adotarVersaoConflito(entry.mod, escolhida, contexto, { proposto: entry.proposed });
+    if (!cloudRel._contextoValido(contexto, entry.organizationId) || !adotada || !adotada.ok) return false;
+    if (!adotada.laterEditingPreserved) {
+      await edicaoViva.aguardarPersistencia(entry.mod);
+      if (!cloudRel._contextoValido(contexto, entry.organizationId)) return false;
+    }
+    return cloudRel.resolverConflito(clientId, escolha, { version: escolhida._draftVersion,
+      preservedLaterEditing: !!adotada.laterEditingPreserved });
   },
   async _conflitoConfirmarExclusao(clientId) {
     const e = cloudRel._conflitosLer().find(x => x.clientId === clientId);
@@ -1638,6 +1878,7 @@ const cloudRel = {
            cego. Se a linha ainda existe, preserva-se como conflito. */
         if ([400, 409, 412].includes(r.status)) {
           const rejeitado = await cloudRel._lerAtualTab(tabela, org, legacyId, sel);
+          if (!cloudRel._contextoValido(contexto, org)) return { ok: false, motivo: 'contexto_trocado' };
           if (jaConfirmada(rejeitado)) {
             cloudRel._filaDelTirar(tabela, legacyId);
             return { ok: true, row: rejeitado, replayed: true };
@@ -1648,10 +1889,11 @@ const cloudRel = {
         if (!ctx.semFilaLegada) cloudRel._filaDelPor(tabela, legacyId, filaCtx);
         return { ok: false, motivo: 'http ' + r.status };
       }
-      const rows = await r.json().catch(() => []);
+      const rows = await cloudRel._linhasValidas(r);
       if (!cloudRel._contextoValido(contexto, org)) return { ok: false, motivo: 'contexto_trocado', remotoConfirmado: !!(rows && rows[0]) };
       if (rows && rows[0]) { cloudRel._filaDelTirar(tabela, legacyId); return { ok: true, row: rows[0] }; }
       const atual = await cloudRel._lerAtualTab(tabela, org, legacyId, sel);
+      if (!cloudRel._contextoValido(contexto, org)) return { ok: false, motivo: 'contexto_trocado' };
       if (!atual) { cloudRel._filaDelTirar(tabela, legacyId); return { ok: true, ausente: true }; }
       if (jaConfirmada(atual)) {
         cloudRel._filaDelTirar(tabela, legacyId);
@@ -1660,7 +1902,7 @@ const cloudRel = {
       return conflitoDe(atual, 'versao_divergente');
     } catch (e) {
       if (!ctx.semFilaLegada) cloudRel._filaDelPor(tabela, legacyId, filaCtx);
-      return { ok: false, motivo: 'rede' };
+      return cloudRel._falhaTipada(e);
     }
   },
   async restaurarNaClinica(tabela, legacyId, item, ctx = {}) {
@@ -1743,7 +1985,7 @@ const cloudRel = {
         }
         return { ok: false, motivo: 'http ' + r.status };
       }
-      const rows = await r.json().catch(() => []);
+      const rows = await cloudRel._linhasValidas(r);
       if (!cloudRel._contextoValido(contexto, org)) {
         return { ok: false, motivo: 'contexto_trocado', remotoConfirmado: !!(rows && rows[0]) };
       }
@@ -1758,7 +2000,7 @@ const cloudRel = {
         return { ok: true, row: mudou, replayed: true };
       }
       return mudou ? conflitoDe(mudou, 'versao_divergente') : { ok: false, motivo: 'nao_encontrado_ou_sem_acesso' };
-    } catch (e) { return { ok: false, motivo: e.message || 'rede' }; }
+    } catch (e) { return cloudRel._falhaTipada(e); }
   },
   async drenarFilaDel() {
     const contexto = cloudRel._capturarContexto();
@@ -2157,5 +2399,15 @@ const cloudRel = {
     cloudRel._conflito = null;
   }
 };
+
+/* As chaves destes índices incluem identidade do paciente/caso. A memória
+   também pertence à sessão, inclusive quando outro usuário entra na mesma
+   clínica sem recarregar o documento. */
+try {
+  contextoAba.aoMudar(() => {
+    cloudRel._cachePac = {};
+    cloudRel._cacheEnc = {};
+  });
+} catch (e) {}
 
 /* FIM DA PERSISTÊNCIA RELACIONAL */

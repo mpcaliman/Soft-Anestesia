@@ -10068,6 +10068,7 @@ const STORAGE = {
 };
 
 </script>
+<script src="src/platform/network-privacy.js"></script>
 <script src="src/platform/session-vault.js"></script>
 <script>
 'use strict';
@@ -12291,6 +12292,8 @@ const edicaoViva = {
   _persistencias: new Map(),
   _erroPersistencia: new Map(),
   _ownerKey: '',
+  _baselines: new Map(),
+  _timers: new Map(),
   _pagehideLigado: false,
   _contextoKey() {
     try {
@@ -12328,6 +12331,8 @@ const edicaoViva = {
     edicaoViva._mem.clear();
     edicaoViva._persistencias.clear();
     edicaoViva._erroPersistencia.clear();
+    edicaoViva._baselines.clear();
+    edicaoViva._timers.forEach(t => clearTimeout(t)); edicaoViva._timers.clear();
   },
   _cloudOnly() {
     try { return typeof store !== 'undefined' && store.cloudOnlyAtivo(); }
@@ -12343,8 +12348,11 @@ const edicaoViva = {
       if (legado && String(legado.uid || '') === uid) localStorage.removeItem(key);
     } catch (e) {}
   },
-  _persistirCifrado(mod, rascunho) {
+  _persistirCifrado(mod, rascunho, opts = {}) {
     if (!edicaoViva._cloudOnly()) return Promise.resolve({ ok: true, durable: true, legacy: true });
+    if (rascunho && !opts.resgate && !opts.indisponivel && !rascunhosSync._indisponivel()) {
+      return Promise.resolve({ ok: true, durable: false, volatile: true });
+    }
     let escrita;
     try {
       if (typeof filaCifrada === 'undefined' || !filaCifrada.salvarSnapshot) {
@@ -12352,7 +12360,8 @@ const edicaoViva = {
       }
       /* `salvarSnapshot` captura clínica/usuário/dispositivo nesta chamada,
          antes que uma troca de sessão possa acontecer. */
-      escrita = filaCifrada.salvarSnapshot('live-edit', mod, rascunho);
+      escrita = rascunho ? filaCifrada.salvarSnapshot('live-edit', mod, rascunho)
+        : filaCifrada.removerSnapshot('live-edit', mod);
     } catch (e) { escrita = Promise.reject(e); }
     const acompanhada = Promise.resolve(escrita).then(res => {
       if (!res || res.durable !== true) throw new Error('edição não protegida no cofre cifrado');
@@ -12373,7 +12382,7 @@ const edicaoViva = {
     while (edicaoViva._persistencias.get(mod) && edicaoViva._persistencias.get(mod) !== vista) {
       vista = edicaoViva._persistencias.get(mod);
       const res = await vista;
-      if (!res || res.durable !== true) {
+      if (!res || (res.durable !== true && res.volatile !== true)) {
         throw edicaoViva._erroPersistencia.get(mod) || new Error('Edição não protegida no cofre cifrado.');
       }
     }
@@ -12388,14 +12397,20 @@ const edicaoViva = {
     if (!contextoAba.corresponde(contexto)) return 0;
     const encontrados = new Set();
     let n = 0;
-    (snapshots || []).forEach(snap => {
+    for (const snap of snapshots || []) {
       const mod = snap && snap.key;
-      if (edicaoViva.MODS.indexOf(mod) < 0) return;
+      if (edicaoViva.MODS.indexOf(mod) < 0) continue;
       encontrados.add(mod);
-      if (!edicaoViva._mem.has(mod)) edicaoViva._mem.set(mod, snap.payload || null);
+      const p = snap.payload;
+      if (!p || p.remoteConfirmed === true) {
+        await filaCifrada.removerSnapshot('live-edit', mod);
+        if (!contextoAba.corresponde(contexto)) return 0;
+        continue;
+      }
+      if (!edicaoViva._mem.has(mod)) edicaoViva._mem.set(mod, p);
       edicaoViva._limparLegadoSeguro(mod, contexto);
       if (snap.payload) n++;
-    });
+    }
     for (const mod of edicaoViva.MODS) {
       if (encontrados.has(mod) || !contextoAba.corresponde(contexto)) continue;
       let proprio = null, legado = null;
@@ -12404,8 +12419,132 @@ const edicaoViva = {
       const rascunho = proprio || legado;
       if (!rascunho) continue;
       edicaoViva._mem.set(mod, rascunho);
-      const res = await edicaoViva._persistirCifrado(mod, rascunho);
+      const res = await edicaoViva._persistirCifrado(mod, rascunho, { resgate: true });
       if (res && res.durable === true) n++;
+    }
+    if (!rascunhosSync._indisponivel()) {
+      let leituraFalhou = false;
+      for (const mod of edicaoViva.MODS) {
+        if (!contextoAba.corresponde(contexto)) return 0;
+        let linha;
+        try {
+          linha = await rascunhosSync._lerAtual('live:' + mod, 'live_' + mod,
+            contexto.organizationId, contexto.userId, contexto);
+        } catch (e) { leituraFalhou = true; continue; }
+        if (!contextoAba.corresponde(contexto)) return 0;
+        if (!edicaoViva._mem.has(mod) && linha && linha.data && linha.data.dados) {
+          const r = rascunhosSync._daLinha(linha, contexto.organizationId);
+          r.mod = mod; r.em = r.updatedAt; r.uid = contexto.userId; r.remoteConfirmed = true;
+          edicaoViva._mem.set(mod, r); n++;
+        }
+      }
+      if (leituraFalhou && contextoAba.corresponde(contexto)) {
+        try { syncStatus.cloudState('error'); } catch (e) {}
+      }
+    }
+    return n;
+  },
+  async _enviar(mod, esperado) {
+    const contexto = contextoAba.capturar();
+    const r = esperado || edicaoViva._mem.get(mod);
+    if (!r || !contextoAba.corresponde(contexto)) return false;
+    if (r.remoteConfirmed === true && r._draftSyncedLocalAt === r.em) {
+      await edicaoViva._persistirCifrado(mod, null);
+      return contextoAba.corresponde(contexto);
+    }
+    const payload = Object.assign({}, r, { id: 'live_' + mod, updatedAt: r.em });
+    delete payload.remoteConfirmed;
+    const res = await rascunhosSync.gravarUnico('live:' + mod, payload, contexto);
+    if (!contextoAba.corresponde(contexto) || edicaoViva._mem.get(mod) !== r) return false;
+    if (res.remoteConfirmed) {
+      const meta = rascunhosSync._daLinha(res.linha, contexto.organizationId);
+      Object.assign(r, { _draftVersion: meta._draftVersion, _draftOrg: contexto.organizationId,
+        _draftSyncedLocalAt: r.em, remoteConfirmed: true });
+      await filaCifrada.removerSnapshot('live-edit', mod);
+      return true;
+    }
+    if (res.indisponivel) await edicaoViva._persistirCifrado(mod, r, { indisponivel: true });
+    else if (res.linha) {
+      cloudRel.registrarConflito(mod, payload, rascunhosSync._daLinha(res.linha, contexto.organizationId),
+        { tabela: 'drafts', legacyId: payload.id, operation: 'draft_upsert', organizationId: contexto.organizationId });
+    }
+    return false;
+  },
+  adotarVersaoConflito(mod, versao, contexto, opts = {}) {
+    if (!contextoAba.corresponde(contexto) || edicaoViva.MODS.indexOf(mod) < 0 || !versao ||
+        versao._draftOrg !== contexto.organizationId || Number(versao._draftVersion) < 1) return { ok: false };
+    edicaoViva._garantirContexto();
+    const form = edicaoViva._form(mod);
+    const ativo = typeof state !== 'undefined' && state.currentModule === mod;
+    const digitado = ativo && form ? edicaoViva._ler(form) : null;
+    const proposto = (opts.proposto && opts.proposto.dados) || {};
+    if (digitado && JSON.stringify(digitado) !== JSON.stringify(proposto)) {
+      const posterior = Object.assign({}, edicaoViva._mem.get(mod) || opts.proposto || {}, {
+        id: 'live_' + mod, mod, uid: contexto.userId, dados: digitado,
+        em: new Date().toISOString(), updatedAt: new Date().toISOString(), remoteConfirmed: false
+      });
+      edicaoViva._mem.set(mod, posterior);
+      const conflito = cloudRel.registrarConflito(mod, posterior, versao, {
+        tabela: 'drafts', legacyId: 'live_' + mod, draftModule: 'live:' + mod,
+        operation: 'draft_upsert', motivo: 'digitacao_posterior_ao_conflito'
+      });
+      try { realtime._avisarConflito(mod, conflito, contexto); } catch (e) {}
+      return { ok: true, laterEditingPreserved: true };
+    }
+    const escolhida = Object.assign({}, versao, { mod, uid: contexto.userId,
+      em: versao.updatedAt || versao.em || new Date().toISOString(), remoteConfirmed: true });
+    escolhida._draftSyncedLocalAt = escolhida.em;
+    edicaoViva._mem.set(mod, escolhida);
+    clearTimeout(edicaoViva._timers.get(mod));
+    edicaoViva._persistirCifrado(mod, null);
+    if (digitado && form) {
+      edicaoViva._preencherForm(form, escolhida.dados || {});
+      state.dirty = true;
+    }
+    return { ok: true, adopted: true };
+  },
+  receberLinha(linha, contexto) {
+    const modulo = String(linha && linha.module || '');
+    const mod = modulo.startsWith('live:') ? modulo.slice(5) : '';
+    if (!contextoAba.corresponde(contexto) || !linha || linha.organization_id !== contexto.organizationId ||
+        linha.user_id !== contexto.userId || linha.doc_id !== 'live_' + mod ||
+        edicaoViva.MODS.indexOf(mod) < 0 || Number(linha.version) < 1) return false;
+    edicaoViva._garantirContexto();
+    const local = edicaoViva._mem.get(mod);
+    if (local && Number(local._draftVersion) >= Number(linha.version)) return false;
+    const remoto = rascunhosSync._daLinha(linha, contexto.organizationId);
+    const form = edicaoViva._form(mod);
+    const ativo = typeof state !== 'undefined' && state.currentModule === mod;
+    const digitado = ativo && form ? edicaoViva._ler(form) : null;
+    if ((local && local.remoteConfirmed !== true) || (digitado && edicaoViva.temConteudo(digitado))) {
+      const proposto = Object.assign({}, local || {}, { id: 'live_' + mod, mod, uid: contexto.userId,
+        dados: digitado || (local && local.dados) || {} });
+      if (JSON.stringify(proposto.dados || {}) === JSON.stringify(remoto.dados || {})) {
+        edicaoViva.adotarVersaoConflito(mod, remoto, contexto, { proposto });
+        return true;
+      }
+      const conflito = cloudRel.registrarConflito(mod, proposto, remoto, {
+        tabela: 'drafts', legacyId: 'live_' + mod, draftModule: modulo,
+        operation: 'draft_upsert', motivo: 'realtime_com_edicao_aberta'
+      });
+      try { realtime._avisarConflito(mod, conflito, contexto); } catch (e) {}
+      return true;
+    }
+    edicaoViva.adotarVersaoConflito(mod, remoto, contexto, { proposto: { dados: digitado || {} } });
+    return true;
+  },
+  _agendarEnvio(mod, r) {
+    clearTimeout(edicaoViva._timers.get(mod));
+    if (rascunhosSync._indisponivel()) return;
+    edicaoViva._timers.set(mod, setTimeout(() => {
+      edicaoViva._enviar(mod, r).catch(() => {});
+    }, 750));
+  },
+  async enviarTodos() {
+    const contexto = contextoAba.capturar(); let n = 0;
+    for (const mod of edicaoViva.MODS) {
+      if (!contextoAba.corresponde(contexto)) break;
+      if (edicaoViva._mem.get(mod) && await edicaoViva._enviar(mod)) n++;
     }
     return n;
   },
@@ -12415,9 +12554,35 @@ const edicaoViva = {
     const d = {};
     f.querySelectorAll('input, select, textarea').forEach(el => {
       if (!el.name || el.type === 'file' || el.type === 'password') return;
-      d[el.name] = (el.type === 'checkbox' || el.type === 'radio') ? el.checked : el.value;
+      if (el.type === 'radio') {
+        if (!Object.prototype.hasOwnProperty.call(d, el.name)) d[el.name] = '';
+        if (el.checked) d[el.name] = el.value;
+      } else if (el.multiple && el.options) {
+        d[el.name] = Array.from(el.options).filter(op => op.selected).map(op => op.value);
+      } else if (el.name.endsWith('[]')) {
+        if (!d[el.name]) d[el.name] = [];
+        if (el.type !== 'checkbox' || el.checked) d[el.name].push(el.value);
+      } else d[el.name] = el.type === 'checkbox' ? el.checked : el.value;
     });
     return d;
+  },
+  _preencherForm(form, dados) {
+    const indices = {};
+    let n = 0;
+    form.querySelectorAll('input, select, textarea').forEach(el => {
+      if (!el.name || el.type === 'password' || el.type === 'file') return;
+      const val = dados[el.name];
+      if (el.type === 'checkbox') el.checked = Array.isArray(val) ? val.includes(el.value) : val === true;
+      else if (el.type === 'radio') el.checked = val === true || String(val || '') === String(el.value);
+      else if (el.multiple && el.options) {
+        Array.from(el.options).forEach(op => { op.selected = Array.isArray(val) && val.includes(op.value); });
+      } else if (Array.isArray(val)) {
+        const indice = indices[el.name] || 0; indices[el.name] = indice + 1;
+        el.value = val[indice] == null ? '' : String(val[indice]);
+      } else el.value = val == null ? '' : String(val);
+      if (Object.prototype.hasOwnProperty.call(dados, el.name)) n++;
+    });
+    return n;
   },
   /* Tem algo digitado de verdade? Formulário em branco não vira rascunho —
      senão o sistema oferece recuperar o nada. */
@@ -12431,13 +12596,22 @@ const edicaoViva = {
       });
     } catch (e) { return false; }
   },
-  guardar(mod) {
+  guardar(mod, opts = {}) {
     try {
       edicaoViva._garantirContexto();
       const f = edicaoViva._form(mod); if (!f) return false;
       const dados = edicaoViva._ler(f);
+      const anterior = edicaoViva._mem.get(mod);
+      const reg = dados._id && store.getById ? store.getById(mod, dados._id) : null;
+      /* Abrir/imprimir um original confirmado não cria cópia local nem draft. */
+      if (reg && reg._finalizado) return false;
+      const assinatura = JSON.stringify(dados || {});
+      if (anterior && JSON.stringify(anterior.dados || {}) === assinatura) return true;
+      if (!opts.mudou && !anterior &&
+          (edicaoViva._baselines.get(mod) === assinatura || (typeof state !== 'undefined' && !state.dirty))) return false;
       if (!edicaoViva.temConteudo(dados)) { edicaoViva.descartar(mod); return false; }
       const rascunho = {
+        _draftVersion: anterior && anterior._draftVersion, _draftOrg: anterior && anterior._draftOrg,
         mod, dados, em: new Date().toISOString(),
         quem: (() => { try { return (auth.usuarioAtual() || {}).usuario || ''; } catch (e) { return ''; } })(),
         uid: (() => { try { return contextoAba.atual().userId || ''; } catch (e) { return ''; } })()
@@ -12445,6 +12619,7 @@ const edicaoViva = {
       edicaoViva._mem.set(mod, rascunho);
       if (edicaoViva._cloudOnly()) edicaoViva._persistirCifrado(mod, rascunho);
       else localStorage.setItem(edicaoViva._key(mod), JSON.stringify(rascunho));
+      edicaoViva._agendarEnvio(mod, rascunho);
       return true;
     } catch (e) { return false; }
   },
@@ -12471,6 +12646,7 @@ const edicaoViva = {
   },
   descartar(mod) {
     edicaoViva._mem.set(mod, null);
+    clearTimeout(edicaoViva._timers.get(mod));
     if (edicaoViva._cloudOnly()) return edicaoViva._persistirCifrado(mod, null);
     try { localStorage.removeItem(edicaoViva._key(mod)); } catch (e) {}
     return Promise.resolve({ ok: true, durable: true, legacy: true });
@@ -12511,7 +12687,12 @@ const edicaoViva = {
         edicaoViva.guardar(mod);
         return false;
       }
+      const contexto = contextoAba.capturar();
+      const versao = capturado._draftVersion;
       const lapide = edicaoViva.descartar(mod);
+      if (res.remoteConfirmed === true && versao) {
+        rascunhosSync.apagar('live:' + mod, 'live_' + mod, versao, { contexto }).catch(() => {});
+      }
       await Promise.resolve(lapide);
       return true;
     } catch (e) { return false; }
@@ -12530,15 +12711,7 @@ const edicaoViva = {
       if (g.quem && euSou && g.quem !== euSou) return false;
       const f = edicaoViva._form(mod); if (!f) return false;
       if (edicaoViva.temConteudo(edicaoViva._ler(f))) return false;   /* já há coisa na tela */
-      let n = 0;
-      Object.keys(g.dados).forEach(nome => {
-        let el = null;
-        try { el = f.querySelector('[name="' + nome.replace(/"/g, '\\"') + '"]'); } catch (e) { el = null; }
-        if (!el) return;
-        if (el.type === 'checkbox' || el.type === 'radio') el.checked = !!g.dados[nome];
-        else el.value = g.dados[nome];
-        n++;
-      });
+      const n = edicaoViva._preencherForm(f, g.dados);
       if (n) edicaoViva._avisar(mod, g.em);
       return n > 0;
     } catch (e) { return false; }
@@ -12566,9 +12739,10 @@ const edicaoViva = {
       const f = edicaoViva._form(mod);
       if (!f || f.dataset.edicaoViva === '1') return;
       f.dataset.edicaoViva = '1';
+      edicaoViva._baselines.set(mod, JSON.stringify(edicaoViva._ler(f)));
       let t = null;
-      const guardarDepois = () => { clearTimeout(t); t = setTimeout(() => edicaoViva.guardar(mod), 250); };
-      const guardarAgora = () => { clearTimeout(t); edicaoViva.guardar(mod); };
+      const guardarDepois = () => { clearTimeout(t); t = setTimeout(() => edicaoViva.guardar(mod, { mudou: true }), 250); };
+      const guardarAgora = () => { clearTimeout(t); edicaoViva.guardar(mod, { mudou: true }); };
       f.addEventListener('input', guardarDepois);
       f.addEventListener('change', guardarAgora);
     });
@@ -14278,7 +14452,7 @@ const prontuario = {
     });
     if (!r.ok) {
       const txt = await r.text().catch(() => '');
-      throw new Error('HTTP ' + r.status + (txt ? ' — ' + txt.slice(0, 120) : ''));
+      throw Object.assign(new Error('HTTP ' + r.status + (txt ? ' — ' + txt.slice(0, 120) : '')), { status: r.status });
     }
     if (!prontuario._contextoAindaAtivo(ctx)) throw new Error('usuário ou clínica mudou durante o envio');
     return { path, hash, attachmentId, mime };
@@ -14300,6 +14474,8 @@ const prontuario = {
   },
 
   adicionar(mod, fileList) {
+    const contexto = contextoAba.capturar();
+    if (!contextoAba.corresponde(contexto)) return;
     const files = Array.from(fileList || []);
     if (files.length && !prontuario._nuvemOk()) {
       toast('📴 Sem conexão agora: anexos ficam protegidos com o registro e sobem automaticamente após a reconexão.', 'warn');
@@ -14314,7 +14490,11 @@ const prontuario = {
       }
       const reader = new FileReader();
       reader.onload = () => {
-        const processa = (dataurl, bytes, mime, thumb) => prontuario._registrar(mod, file.name, ehPdf ? 'pdf' : 'imagem', dataurl, bytes, mime, thumb);
+        if (!contextoAba.corresponde(contexto)) return;
+        const processa = (dataurl, bytes, mime, thumb) => {
+          if (!contextoAba.corresponde(contexto)) return;
+          return prontuario._registrar(mod, file.name, ehPdf ? 'pdf' : 'imagem', dataurl, bytes, mime, thumb, { contexto });
+        };
         if (ehPdf) { processa(reader.result, file.size, 'application/pdf', null); return; }
         const img = new Image();
         img.onload = () => {
@@ -14339,7 +14519,9 @@ const prontuario = {
     });
   },
 
-  async _registrar(mod, nome, tipo, dataurl, bytes, mime, thumb) {
+  async _registrar(mod, nome, tipo, dataurl, bytes, mime, thumb, opts = {}) {
+    const contexto = opts.contexto || contextoAba.capturar();
+    if (!contextoAba.corresponde(contexto)) return false;
     const doc = { attachment_id: prontuario._novoId(), nome, tipo, mime_type: mime,
       categoria: 'Exame', tamanho: bytes, data: new Date().toISOString().slice(0, 10), dataurl };
     if (thumb) doc.thumb = thumb;
@@ -14348,6 +14530,7 @@ const prontuario = {
         toast('☁️ Enviando ' + nome + '…');
         const up = await prontuario._upload(prontuario._dataurlParaBlob(dataurl, mime), nome, mime,
           { attachmentId: doc.attachment_id });
+        if (!contextoAba.corresponde(contexto)) return false;
         doc.storage_path = up.path; doc.hash = up.hash || null;
         prontuario._lista(mod).push(doc);
         prontuario.render(mod); markDirty();
@@ -14357,7 +14540,9 @@ const prontuario = {
         toast('⚠️ Falha no envio (' + e.message + ') — protegendo para envio automático', 'warn');
       }
     }
-    /* Fallback local */
+    /* Apenas memória da edição. O motor cifra os bytes se o salvamento
+       encontrar indisponibilidade; autenticação/permissão nunca vira offline. */
+    if (!contextoAba.corresponde(contexto)) return false;
     if (prontuario._bytesLocais(mod) + bytes > prontuario.MAX_LOCAL_TOTAL) {
       toast('Limite local (~3 MB) atingido. Conecte-se à nuvem ou remova anexos.', 'warn'); return;
     }
@@ -14367,19 +14552,24 @@ const prontuario = {
 
   /* Sobe para a nuvem os anexos que ficaram locais (offline na hora) */
   async subirPendentes(mod) {
+    const contexto = contextoAba.capturar();
+    if (!contextoAba.corresponde(contexto)) return;
     if (!prontuario._nuvemOk()) { toast('Conecte-se à nuvem primeiro (Ajustes → Backup)', 'warn'); return; }
     const docs = prontuario._lista(mod).filter(d => d.dataurl && !d.storage_path);
     if (!docs.length) { toast('Nenhum anexo pendente'); return; }
     for (const d of docs) {
+      if (!contextoAba.corresponde(contexto)) return;
       try {
         const mime = prontuario._mime(d);
         d.attachment_id = d.attachment_id || prontuario._novoId();
         d.mime_type = mime;
         const up = await prontuario._upload(prontuario._dataurlParaBlob(d.dataurl, mime), d.nome, mime,
           { attachmentId: d.attachment_id, hash: d.hash });
+        if (!contextoAba.corresponde(contexto)) return;
         d.storage_path = up.path; d.hash = up.hash || d.hash || null;
       } catch (e) { toast('Falha ao subir ' + d.nome + ': ' + e.message, 'warn'); }
     }
+    if (!contextoAba.corresponde(contexto)) return;
     prontuario.render(mod); markDirty();
     toast('☁️ Arquivos enviados — a cópia offline só sai após salvar e confirmar o registro');
   },
@@ -19479,7 +19669,7 @@ const programador = {
         programador._req('organizations?select=id,nome&order=nome'),
         programador._req('organization_users?select=organization_id,user_id,role,ativo'),
         programador._req('profiles?select=id,nome,email').catch(() => []),
-        programador._req('org_shares?select=id,org_origem,org_destino,modulos').catch(() => [])
+        programador._rpc('prog_list_org_shares', {}).catch(() => [])
       ]);
       programador._orgs = orgs || []; programador._membros = membros || [];
       programador._perfis = perfis || []; programador._shares = shares || [];
@@ -19538,10 +19728,16 @@ const programador = {
       '<button class="btn btn-xs" onclick="programador.removerMembro(' + utils.jsArg(m.organization_id) + ',' + utils.jsArg(m.user_id) + ')" title="Tira do ambiente; a conta continua existindo">↩ tirar do ambiente</button> ' +
       '<button class="btn btn-xs btn-danger" onclick="programador.excluirConta(' + utils.jsArg(m.user_id) + ')" title="Apaga a conta da nuvem — só funciona se ela não pertencer a ambiente nenhum E nunca tiver gravado registro">✕ conta</button>' +
       '</td></tr>').join('');
-    const linhasShares = programador._shares.map(s =>
-      '<tr><td>' + esc(programador._nomeOrg(s.org_origem)) + '</td><td>→ ' + esc(programador._nomeOrg(s.org_destino)) + '</td>' +
-      '<td>' + ((s.modulos || []).length ? esc(s.modulos.join(', ')) : '<i>todos</i>') + '</td>' +
-      '<td><button class="btn btn-xs btn-danger" onclick="programador.removerShare(' + utils.jsArg(s.id) + ')">✕</button></td></tr>').join('');
+    const linhasShares = programador._shares.map(s => {
+      const expira = Date.parse(s.expira_em || '');
+      const ativa = !!s.ativo && Number.isFinite(expira) && expira > Date.now();
+      const status = ativa ? 'Somente leitura' : (s.revogado_em ? 'Revogado' : (s.expirado_em || (Number.isFinite(expira) && expira <= Date.now()) ? 'Expirado' : 'Inativo — exige reaprovação'));
+      const prazo = Number.isFinite(expira) ? new Date(expira).toLocaleString('pt-BR') : 'Sem prazo autorizado';
+      return '<tr><td>' + esc(programador._nomeOrg(s.org_origem)) + '</td><td>→ ' + esc(programador._nomeOrg(s.org_destino)) + '</td>' +
+        '<td>' + esc((s.modulos || []).join(', ') || 'Sem escopo autorizado') + '</td>' +
+        '<td>' + esc(s.motivo || 'Sem justificativa autorizada') + '</td><td>' + esc(prazo) + '</td><td>' + esc(status) + '</td>' +
+        '<td>' + (ativa ? '<button class="btn btn-xs btn-danger" onclick="programador.removerShare(' + utils.jsArg(s.id) + ')">Revogar</button>' : '') + '</td></tr>';
+    }).join('');
     const chipsModulos = programador.MODULOS_SHARE.map(([k, rot]) =>
       '<label style="display:inline-flex;align-items:center;gap:5px;border:1px solid var(--border);border-radius:14px;padding:4px 10px;font-size:.78rem;cursor:pointer"><input type="checkbox" class="prog-share-mod" value="' + k + '">' + rot + '</label>').join(' ');
     box.innerHTML = `
@@ -19599,14 +19795,17 @@ const programador = {
       <section class="card">
         <div class="card-header"><div class="card-title-wrap"><span class="card-icon">🔗</span><h2>Acesso entre ambientes<small>O ambiente de DESTINO passa a LER os dados do de ORIGEM (só leitura, módulos à sua escolha)</small></h2></div></div>
         <div class="card-body">
-          <table class="dash-detail-table" style="margin:0 0 14px"><thead><tr><th>Origem (dona dos dados)</th><th>Destino (passa a ver)</th><th>Módulos</th><th></th></tr></thead>
-          <tbody>${linhasShares || '<tr><td colspan="4" style="color:var(--text-mute)">Nenhum acesso liberado entre ambientes.</td></tr>'}</tbody></table>
+          <table class="dash-detail-table" style="margin:0 0 14px"><thead><tr><th>Origem (dona dos dados)</th><th>Destino (passa a ver)</th><th>Módulos</th><th>Justificativa</th><th>Válido até</th><th>Estado</th><th></th></tr></thead>
+          <tbody>${linhasShares || '<tr><td colspan="7" style="color:var(--text-mute)">Nenhum acesso liberado entre ambientes.</td></tr>'}</tbody></table>
           <div class="grid">
             <div class="field col-4"><label>Origem (dona dos dados)</label><select id="prog-share-origem">${opcoesOrgEscolha}</select></div>
             <div class="field col-4"><label>Destino (passa a ver)</label><select id="prog-share-destino">${opcoesOrgEscolha}</select></div>
-            <div class="field col-12"><label>Módulos liberados <small style="color:var(--text-mute);font-weight:400">(nenhum marcado = todos)</small></label>
+            <div class="field col-12"><label>Módulos liberados <small style="color:var(--text-mute);font-weight:400">(selecione explicitamente ao menos um; somente leitura)</small></label>
               <div style="display:flex;flex-wrap:wrap;gap:6px">${chipsModulos}</div></div>
-            <div class="field col-3"><button class="btn btn-primary btn-sm" onclick="programador.criarShare()">🔗 Liberar acesso</button></div>
+            <div class="field col-8"><label>Justificativa administrativa</label><input type="text" id="prog-share-motivo" minlength="12" maxlength="500" placeholder="Motivo deste acesso, sem dados clínicos"></div>
+            <div class="field col-4"><label>Válido até (máximo de 90 dias)</label><input type="datetime-local" id="prog-share-expira" required></div>
+            <div class="field col-3"><button class="btn btn-primary btn-sm" onclick="programador.criarShare()">🔗 Autorizar leitura</button></div>
+            <p class="col-12" style="font-size:.78rem;color:var(--text-mute)">A decisão e a revogação ficam auditadas. Acesso sem motivo, prazo ou módulos não é autorizado; exceções antigas precisam de nova autorização manual.</p>
           </div>
         </div>
       </section>
@@ -20138,28 +20337,40 @@ const programador = {
   },
 
   async criarShare() {
+    if (!programador.souProgramador()) { toast('Acesso restrito ao programador', 'warn'); return; }
     const origem = (document.getElementById('prog-share-origem') || {}).value;
     const destino = (document.getElementById('prog-share-destino') || {}).value;
-    if (!origem || !destino) return;
+    if (!origem || !destino) { toast('Escolha a clínica de origem e a de destino', 'warn'); return; }
     if (origem === destino) { toast('Origem e destino precisam ser ambientes diferentes', 'warn'); return; }
-    const modulos = Array.from(document.querySelectorAll('.prog-share-mod:checked')).map(c => c.value);
+    const modulos = Array.from(new Set(Array.from(document.querySelectorAll('.prog-share-mod:checked')).map(c => c.value)));
+    const permitidos = new Set(programador.MODULOS_SHARE.map(([k]) => k));
+    if (!modulos.length || modulos.some(k => !permitidos.has(k))) { toast('Selecione explicitamente ao menos um módulo válido', 'warn'); return; }
+    const motivo = String((document.getElementById('prog-share-motivo') || {}).value || '').trim();
+    if (motivo.length < 12 || motivo.length > 500) { toast('Informe justificativa de 12 a 500 caracteres, sem dados clínicos', 'warn'); return; }
+    const prazo = Date.parse((document.getElementById('prog-share-expira') || {}).value || '');
+    const agora = Date.now();
+    if (!Number.isFinite(prazo) || prazo <= agora || prazo > agora + 90 * 86400000) { toast('Informe um prazo futuro de até 90 dias', 'warn'); return; }
+    if (!confirm('Autorizar somente leitura de ' + modulos.join(', ') + ' de ' + programador._nomeOrg(origem) + ' para ' + programador._nomeOrg(destino) + ' até ' + new Date(prazo).toLocaleString('pt-BR') + '?\n\nA justificativa e sua identidade serão registradas na auditoria.')) return;
     try {
-      await programador._req('org_shares?on_conflict=org_origem,org_destino', {
-        method: 'POST',
-        prefer: 'resolution=merge-duplicates,return=minimal',
-        body: [{ org_origem: origem, org_destino: destino, modulos }]
+      await programador._rpc('prog_authorize_org_share', {
+        p_org_origem: origem, p_org_destino: destino, p_modulos: modulos,
+        p_motivo: motivo, p_expira_em: new Date(prazo).toISOString()
       });
-      toast('🔗 ' + programador._nomeOrg(destino) + ' agora LÊ ' + (modulos.length ? modulos.join(', ') : 'todos os módulos') + ' de ' + programador._nomeOrg(origem));
-      programador.render();
-    } catch (e) { toast('Erro: ' + e.message, 'error'); }
+      toast('🔗 Leitura autorizada até ' + new Date(prazo).toLocaleString('pt-BR'));
+      await programador.render();
+    } catch (e) { programador._mostrarErro(e.message); }
   },
   async removerShare(id) {
-    if (!confirm('Remover este acesso entre ambientes?')) return;
+    if (!programador.souProgramador()) { toast('Acesso restrito ao programador', 'warn'); return; }
+    const motivo = String(prompt('Justificativa administrativa da revogação (12 a 500 caracteres, sem dados clínicos):') || '').trim();
+    if (!motivo) return;
+    if (motivo.length < 12 || motivo.length > 500) { toast('Informe justificativa de 12 a 500 caracteres', 'warn'); return; }
+    if (!confirm('Revogar imediatamente este acesso entre ambientes? A decisão ficará auditada.')) return;
     try {
-      await programador._req('org_shares?id=eq.' + encodeURIComponent(id), { method: 'DELETE' });
-      toast('Acesso removido');
-      programador.render();
-    } catch (e) { toast('Erro: ' + e.message, 'error'); }
+      await programador._rpc('prog_revoke_org_share', { p_share_id: id, p_motivo: motivo });
+      toast('Acesso revogado; histórico preservado');
+      await programador.render();
+    } catch (e) { programador._mostrarErro(e.message); }
   }
 };
 
@@ -25955,99 +26166,124 @@ const pdfFila = {
     return db.transaction(pdfFila.LOJA, modo).objectStore(pdfFila.LOJA);
   },
 
-  /* Guarda um PDF que não conseguiu subir. `destino` é 'drive' ou 'supabase':
-     um PDF pode falhar num e ter ido bem no outro, e só o que falhou espera. */
-  async guardar(blob, nomeArq, destino, meta) {
-    if (!pdfFila.suportado() || !blob) return false;
+  NS: 'pdf-offline',
+  _migrados: new Set(),
+  _migrando: new Map(),
+  async _serializarBlob(blob) {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let bin = ''; for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+  },
+  _blob(payload) {
+    const bin = atob(payload.blob64 || ''); const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], { type: payload.mime || 'application/pdf' });
+  },
+  _contexto(dono) {
     try {
-      const dono = (meta && meta._pdfOwner) || pdfFila._identidadeAtual();
-      /* Sem dono verificável, persistir o PDF criaria uma gaveta que a próxima
-         pessoa poderia herdar. O documento-fonte continua salvo no sistema. */
-      if (!dono.organizationId || (!dono.cloudUserId && !dono.localUserId)) return false;
-      const loja = await pdfFila._loja('readwrite');
-      const item = {
-        id: 'pdf_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
-        nomeArq: nomeArq || 'documento.pdf',
-        destino: destino,
-        blob: blob,
-        bytes: blob.size || 0,
-        em: new Date().toISOString(),
-        tentativas: 0,
-        mod: (meta && meta.mod) || '',
-        paciente: (meta && meta.paciente) || '',
-        receiptKey: (meta && meta.receiptKey) || '',
-        organizationId: dono.organizationId,
-        cloudUserId: dono.cloudUserId || '',
-        localUserId: dono.localUserId || '',
-        deviceId: dono.deviceId || '',
-        tabId: dono.tabId || ''
-      };
-      const gravou = await new Promise(ok => {
-        const tx = loja.transaction;
-        tx.oncomplete = () => ok(true);
-        tx.onabort = tx.onerror = () => ok(false);
-        try { const r = loja.put(item); r.onerror = () => ok(false); }
-        catch (e) { ok(false); }
-      });
-      if (!gravou) return false;
-      await pdfFila._podar(dono);
-      return true;
+      const ctx = contextoAba.capturar();
+      return ctx && contextoAba.corresponde(ctx) && dono.organizationId === ctx.organizationId &&
+        dono.cloudUserId === ctx.userId ? ctx : null;
+    } catch (e) { return null; }
+  },
+  async _cifrar(item, contexto) {
+    const copia = Object.assign({}, item, { blob64: await pdfFila._serializarBlob(item.blob), mime: item.blob.type });
+    delete copia.blob;
+    if (!contextoAba.corresponde(contexto)) return false;
+    const res = await filaCifrada.salvarSnapshot(pdfFila.NS, item.id, copia);
+    return !!(res && res.durable === true);
+  },
+  async _migrarLegado(dono) {
+    const ctx = pdfFila._contexto(dono); if (!ctx) return;
+    const ownerKey = [dono.organizationId, dono.cloudUserId, dono.deviceId].join('|');
+    if (pdfFila._migrados.has(ownerKey)) return;
+    if (pdfFila._migrando.has(ownerKey)) return pdfFila._migrando.get(ownerKey);
+    const tarefa = (async () => {
+      const loja = await pdfFila._loja('readonly');
+      const todos = await new Promise((ok, fail) => { const r = loja.getAll();
+        r.onsuccess = () => ok(r.result || []); r.onerror = () => fail(r.error); });
+      if (!contextoAba.corresponde(ctx)) return;
+      /* Só pendências do dono verificável são resgatadas. As demais permanecem
+         bloqueadas e entram no inventário para classificação manual. */
+      for (const item of todos.filter(x => pdfFila._mesmoDono(x, dono))) {
+        if (!contextoAba.corresponde(ctx)) return;
+        if (!item.blob || !await pdfFila._cifrar(item, ctx)) throw new Error('PDF legado não protegido no cofre');
+        if (!contextoAba.corresponde(ctx)) return;
+        const escrita = await pdfFila._loja('readwrite');
+        await new Promise((ok, fail) => {
+          const tx = escrita.transaction; tx.oncomplete = () => ok(true); tx.onabort = tx.onerror = () => fail(tx.error);
+          escrita.delete(item.id);
+        });
+      }
+      pdfFila._migrados.add(ownerKey);
+    })();
+    pdfFila._migrando.set(ownerKey, tarefa);
+    try { await tarefa; } finally { pdfFila._migrando.delete(ownerKey); }
+  },
+  /* A fila nasce apenas após indisponibilidade confirmada. Nome, paciente,
+     bytes e metadados vivem exclusivamente no envelope AES-GCM do dono. */
+  async guardar(blob, nomeArq, destino, meta = {}) {
+    if (!pdfFila.suportado() || !blob) return false;
+    const dono = meta._pdfOwner || pdfFila._identidadeAtual();
+    const ctx = pdfFila._contexto(dono); if (!ctx) return false;
+    if (!meta._offlineConfirmado && !rascunhosSync._indisponivel()) return false;
+    try {
+      const atuais = await pdfFila.listar({ dono });
+      if (!contextoAba.corresponde(ctx)) return false;
+      if (atuais.length >= pdfFila.MAX_ITENS || atuais.reduce((n, i) => n + (i.bytes || 0), 0) + blob.size > pdfFila.MAX_BYTES) {
+        toast('Fila de PDFs cheia: nenhuma pendência foi descartada. Reconecte para enviar antes de adicionar outra cópia.', 'error');
+        return false;
+      }
+      const item = { id: 'pdf_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10),
+        nomeArq: nomeArq || 'documento.pdf', destino, blob, bytes: blob.size || 0,
+        em: new Date().toISOString(), tentativas: 0, mod: meta.mod || '', paciente: meta.paciente || '',
+        receiptKey: meta.receiptKey || '', organizationId: dono.organizationId, cloudUserId: dono.cloudUserId,
+        localUserId: dono.localUserId || '', deviceId: dono.deviceId || '', tabId: dono.tabId || '' };
+      return await pdfFila._cifrar(item, ctx);
     } catch (e) { console.warn('pdfFila.guardar', e); return false; }
   },
-
   async listar(opts = {}) {
     if (!pdfFila.suportado()) return [];
+    const dono = opts.dono || pdfFila._identidadeAtual(), ctx = pdfFila._contexto(dono);
+    if (!ctx) return [];
+    await pdfFila._migrarLegado(dono);
+    if (!contextoAba.corresponde(ctx)) return [];
+    const snaps = await filaCifrada.listarSnapshots(pdfFila.NS);
+    if (!contextoAba.corresponde(ctx)) return [];
+    const todos = (snaps || []).filter(s => s && s.payload).map(s => s.payload);
+    const visiveis = todos.filter(x => pdfFila._mesmoDono(x, dono));
+    return visiveis.map(item => Object.assign({}, item, { blob: pdfFila._blob(item), blob64: undefined }))
+      .sort((a, b) => String(a.em).localeCompare(String(b.em)));
+  },
+  async remover(id) {
+    if (!pdfFila.suportado() || !id) return false;
+    const dono = pdfFila._identidadeAtual(), ctx = pdfFila._contexto(dono);
+    if (!ctx) return false;
+    const res = await filaCifrada.removerSnapshot(pdfFila.NS, id);
+    return !!(res && res.durable === true);
+  },
+  async limpar() {
+    const atuais = await pdfFila.listar();
+    for (const item of atuais) await pdfFila.remover(item.id);
+  },
+  async removerAmbiente(org, opts = {}) {
+    if (!org || org !== pdfFila._identidadeAtual().organizationId) return 0;
+    const atuais = await pdfFila.listar();
+    for (const item of atuais) await pdfFila.remover(item.id);
+    return atuais.length;
+  },
+  async resumo() {
+    const l = await pdfFila.listar();
+    let legados = 0;
+    /* A interface mostra apenas contagem de resíduos não atribuíveis. */
     try {
       const loja = await pdfFila._loja('readonly');
       const todos = await new Promise((ok) => { const r = loja.getAll(); r.onsuccess = () => ok(r.result || []); r.onerror = () => ok([]); });
-      const visiveis = opts.todos ? todos : todos.filter(x => pdfFila._mesmoDono(x, opts.dono));
-      return visiveis.sort((a, b) => String(a.em).localeCompare(String(b.em)));
-    } catch (e) { return []; }
-  },
-
-  async remover(id) {
-    if (!pdfFila.suportado()) return;
-    try {
-      const loja = await pdfFila._loja('readwrite');
-      await new Promise((ok) => { const r = loja.delete(id); r.onsuccess = () => ok(true); r.onerror = () => ok(false); });
+      legados = todos.filter(x => x && !x.organizationId).length;
     } catch (e) {}
+    return { n: l.length, bytes: l.reduce((n, i) => n + (i.bytes || 0), 0), legados };
   },
-
-  async limpar() {
-    if (!pdfFila.suportado()) return;
-    try {
-      const atuais = await pdfFila.listar();
-      for (const item of atuais) await pdfFila.remover(item.id);
-    } catch (e) {}
-  },
-
-  async removerAmbiente(org, opts = {}) {
-    if (!pdfFila.suportado() || !org) return 0;
-    const todos = await pdfFila.listar({ todos: true });
-    const alvos = todos.filter(x => x && (x.organizationId === org || (opts.incluirLegado && !x.organizationId)));
-    for (const item of alvos) await pdfFila.remover(item.id);
-    return alvos.length;
-  },
-
-  /* Quantos esperam, e quanto pesam — é o que a tela de Ajustes mostra. */
-  async resumo() {
-    const l = await pdfFila.listar();
-    const todos = await pdfFila.listar({ todos: true });
-    const legados = todos.filter(x => x && !x.organizationId).length;
-    return { n: l.length, bytes: l.reduce((s, i) => s + (i.bytes || 0), 0), legados };
-  },
-
-  async _podar(dono) {
-    const l = await pdfFila.listar({ dono });
-    let bytes = l.reduce((s, i) => s + (i.bytes || 0), 0);
-    let i = 0;
-    while (i < l.length && (l.length - i > pdfFila.MAX_ITENS || bytes > pdfFila.MAX_BYTES)) {
-      bytes -= (l[i].bytes || 0);
-      await pdfFila.remover(l[i].id);
-      i++;
-    }
-    if (i) console.warn('pdfFila: ' + i + ' PDF(s) antigos descartados por limite de espaço');
-  }
+  async _podar() { return false; } /* Nenhum limite elimina trabalho pendente. */
 };
 try { window.pdfFila = pdfFila; } catch (e) {}
 
@@ -26100,22 +26336,27 @@ const pdfBackup = {
     if (!contexto) return { ok: false, durable: false, motivo: 'contexto' };
     const proms = [];
     const enviar = async (destino, tentativa) => {
-      let remoto = false;
-      try { remoto = (await tentativa()) === true; } catch (e) { console.warn(destino + ' pdf', e); }
+      let remoto = false, falha;
+      const offline = rascunhosSync._indisponivel();
+      try { if (!offline) remoto = (await tentativa(e => { falha = e; })) === true; }
+      catch (e) { falha = e; console.warn(destino + ' pdf', e); }
       if (!pdfBackup._contextoOperacao(filaMeta._pdfOwner, contexto)) {
         return { destino, remoto: false, queued: false, durable: false };
       }
       if (remoto) return { destino, remoto: true, queued: false, durable: true };
-      const queued = (await pdfFila.guardar(blob, nomeArq, destino, filaMeta)) === true;
+      const indisponivel = offline || rascunhosSync._indisponivel(null, falha);
+      const queued = indisponivel && (await pdfFila.guardar(blob, nomeArq, destino,
+        Object.assign({}, filaMeta, { _offlineConfirmado: true }))) === true;
+      if (!queued) toast('PDF ainda não confirmado em ' + destino + '. Corrija a conexão ou autorização e tente novamente.', 'warn');
       return { destino, remoto: false, queued,
         durable: queued && !!pdfBackup._contextoOperacao(filaMeta._pdfOwner, contexto) };
     };
     if (c.supabase !== false && cloud.estaLogado()) {
-      proms.push(enviar('supabase', () => pdfBackup.enviarSupabase(blob, nomeArq, filaMeta._pdfOwner)));
+      proms.push(enviar('supabase', falha => pdfBackup.enviarSupabase(blob, nomeArq, filaMeta._pdfOwner, { falha })));
     }
     if (c.drive === true) {
-      proms.push(enviar('drive', () => pdfBackup.enviarDrive(blob, nomeArq, false,
-        { contexto, dono: filaMeta._pdfOwner, cfg: c })));
+      proms.push(enviar('drive', falha => pdfBackup.enviarDrive(blob, nomeArq, false,
+        { contexto, dono: filaMeta._pdfOwner, cfg: c, falha })));
     }
     const destinos = await Promise.all(proms);
     if (!pdfBackup._contextoOperacao(filaMeta._pdfOwner, contexto)) {
@@ -26218,7 +26459,7 @@ const pdfBackup = {
      organização, porque é ela que a policy lê. Ver o comentário longo em
      `prontuario` — este módulo apontava para o mesmo bucket inexistente. */
   BUCKET: 'clinical-attachments',
-  async enviarSupabase(blob, nomeArq, dono = {}) {
+  async enviarSupabase(blob, nomeArq, dono = {}, operacao = {}) {
     try {
       const ctx = await prontuario._contextoUpload(dono.organizationId || null);
       if (dono.cloudUserId && dono.cloudUserId !== ctx.userId) return false;
@@ -26235,6 +26476,7 @@ const pdfBackup = {
       }
       return false;
     } catch (e) {
+      if (operacao.falha) operacao.falha(e);
       console.warn('enviarSupabase', e);
       if (/404|bucket/i.test(String(e && e.message))) {
         toast('⚠️ Bucket "clinical-attachments" ausente — rode a migração 0002 no Supabase', 'warn');
@@ -26404,9 +26646,11 @@ const pdfBackup = {
         if (pdfBackup._contextoOperacao(operacao.dono, contexto)) toast('📁 PDF salvo no Google Drive');
         return true;
       }
+      if (operacao.falha) operacao.falha(Object.assign(new Error('HTTP ' + r.status), { status: r.status }));
       if (pdfBackup._contextoOperacao(operacao.dono, contexto)) toast('⚠️ Não foi possível salvar no Google Drive', 'warn');
       return false;
     } catch (e) {
+      if (operacao.falha) operacao.falha(e);
       console.warn('enviarDrive', e);
       return false;
     }
@@ -26640,23 +26884,29 @@ const pdfBackup = {
       const fila = await pdfFila.listar();
       if (!pdfBackup._contextoOperacao(null, ctx)) return false;
       const recibos = new Map();
-      (snaps || []).forEach(snap => {
+      for (const snap of snaps || []) {
         const p = snap && snap.payload;
-        if (!p || !p.assinatura || p.organizationId !== ctx.organizationId || p.userId !== ctx.userId) return;
+        if (!p || !p.assinatura || p.organizationId !== ctx.organizationId || p.userId !== ctx.userId) continue;
+        if (p.assinatura !== snap.key) {
+          /* Remove conteúdo clínico dos recibos de versões anteriores. */
+          p.assinatura = snap.key;
+          await filaCifrada.salvarSnapshot(pdfBackup.regen.RECIBOS_NS, snap.key, p);
+          if (!pdfBackup._contextoOperacao(null, ctx)) return false;
+        }
         /* Recibo remoto é definitivo. Recibo de fila só impede repetição
            enquanto a cópia durável ainda existe; descartar a fila nunca
            transforma uma tentativa perdida em upload confirmado. */
         if (p.remoto === true || (p.queued === true && fila.some(it => it.receiptKey === snap.key))) {
           recibos.set(p.assinatura, p);
         }
-      });
+      }
       pdfBackup.regen._recibos = recibos;
       pdfBackup.regen._recibosContexto = chaveContexto;
       return true;
     },
     async _guardarRecibo(ctx, assinatura, key, resultado) {
       if (!resultado || resultado.durable !== true || !pdfBackup._contextoOperacao(null, ctx)) return false;
-      const payload = { assinatura, organizationId: ctx.organizationId, userId: ctx.userId,
+      const payload = { assinatura: key, organizationId: ctx.organizationId, userId: ctx.userId,
         remoto: resultado.ok === true, queued: resultado.queued > 0,
         destinos: (resultado.destinos || []).map(d => ({ destino: d.destino, remoto: d.remoto === true })) };
       const gravado = await filaCifrada.salvarSnapshot(pdfBackup.regen.RECIBOS_NS, key, payload);
@@ -26788,6 +27038,7 @@ const pdfBackup = {
             const assinatura = pdfBackup.regen._assinaturaRecibo(it.mod, it.rec);
             const key = await filaCifrada._sha256(assinatura);
             if (!ativo()) return;
+            if (!opts.forcar && pdfBackup.regen._recibos.has(key)) continue;
             const g = await pdfBackup.regen._gerar(it.mod, it.rec, contexto);
             if (!ativo()) return;
             if (!g) { falhou++; continue; }

@@ -3,14 +3,14 @@
 /* ============================================================================
    PERSISTÊNCIA CLOUD-FIRST — diário cifrado + confirmação verificável
 
-   Cada mutação recebe um UUID e um checksum. Antes do envio, ela entra no
-   IndexedDB cifrado como write-ahead log: isso fecha a janela entre o clique e
-   uma queda da aba. Online, o Postgres continua sendo o destino primário e a
-   operação local só sai depois que a linha devolvida contém o mesmo recibo.
-   Sem rede confirmada, o diário simplesmente permanece para o reconnect.
+   Cada mutação recebe um UUID e um checksum em memória. Online, ela é
+   enviada ao servidor antes de qualquer persistência clínica no aparelho.
+   Somente indisponibilidade confirmada autoriza o diário cifrado offline;
+   erros de autorização, validação ou conflito continuam apenas em memória.
+   Um recibo verificável remove a intenção offline após a reconexão.
 
    As filas antigas em localStorage são apenas fontes de migração para este
-   diário; nenhuma gravação nova que passe por `cloudRel.mirror` entra nelas.
+   diário; nenhuma gravação clínica nova cria uma cópia local em claro.
 ============================================================================ */
 const persistenciaCloudFirst = {
   TRANSPORTE: 'cloud-rel-v1',
@@ -20,6 +20,7 @@ const persistenciaCloudFirst = {
   _drenando: false,
   _acoesAtivas: new Map(),
   _relogioCausal: new Map(),
+  _intencoesMemoria: new Map(),
 
   _chave(mod, id) { return String(mod || '') + ':' + String(id || ''); },
   _instanteCausal(mod, id, sugerido) {
@@ -275,6 +276,9 @@ const persistenciaCloudFirst = {
       action: op.action, baseVersion: op.baseVersion, dependsOn: op.dependsOn,
       createdAt: op.createdAt, payload: op.payload
     });
+    if (!salvo || salvo.durable !== true) {
+      throw filaCifrada._erro('fila_indisponivel', 'A transação cifrada não confirmou a proteção offline.');
+    }
     /* O commit pode terminar depois de a pessoa mudar de clínica. A cópia
        cifrada continua pertencendo ao dono capturado pelo WAL; não marque
        como protegido um registro de mesmo ID na nova sessão. */
@@ -340,17 +344,27 @@ const persistenciaCloudFirst = {
   },
   _classeFalha(res, erro) {
     if (res && res.conflict) return 'conflict';
-    if (!persistenciaCloudFirst._online()) return 'outage';
     const motivo = String((res && res.motivo) || (erro && (erro.code || erro.message)) || '').toLowerCase();
-    if (/contexto_trocado|outra_clinica/.test(motivo)) return 'context';
-    if (/\b(rede|network|failed to fetch|load failed|timeout|timed out)\b/.test(motivo) ||
-        /http\s+(408|425|429|5\d\d)\b/.test(motivo)) return 'outage';
+    const status = Number((res && (res.status || res.statusCode)) || (erro && erro.status)) ||
+      Number((motivo.match(/http\s+(\d{3})\b/) || [])[1]) || 0;
+    /* Falhas explícitas do servidor prevalecem sobre navigator.onLine. Uma
+       resposta 403 não se torna "offline" se o sinal muda logo após o fetch. */
+    if (/contexto_trocado|outra_clinica|contexto_nao_confirmado/.test(motivo)) return 'context';
+    if (status === 401 || status === 403 || /unauthorized|forbidden|permissao|não autorizado|nao autorizado/.test(motivo)) return 'auth';
+    if (status === 409 || /versao_divergente|conflict/.test(motivo)) return 'conflict';
+    if (status >= 400 && status < 500 && [408,425,429].indexOf(status) < 0) return 'rejected';
+    if ([408,425,429].indexOf(status) >= 0 || status >= 500 && status < 600) return 'outage';
     if (/token/.test(motivo)) {
       try { if (cloud.servidorFora()) return 'outage'; } catch (e) {}
       return 'auth';
     }
+    if (/\b(rede|network|failed to fetch|load failed|timeout|timed out)\b/.test(motivo)) return 'outage';
+    if (!persistenciaCloudFirst._online() && !erro &&
+        (!res || /^offline$/.test(motivo))) return 'outage';
+    if (!res && !persistenciaCloudFirst._online() && erro && erro.name === 'TypeError') return 'outage';
     return 'rejected';
   },
+  indisponivel(res, erro) { return persistenciaCloudFirst._classeFalha(res, erro) === 'outage'; },
   _reciboValido(op, res) {
     if (!op || !res || !res.ok) return false;
     /* Excluir algo que comprovadamente não existe mais também é convergência.
@@ -389,160 +403,108 @@ const persistenciaCloudFirst = {
       }); } catch (er) {}
     }
   },
-  async salvar(mod, item) {
-    let op;
-    try { op = await persistenciaCloudFirst._montar(mod, item); }
-    catch (e) { return { ok: false, motivo: e.code || e.message || 'operacao_invalida', durable: false }; }
-
+  async _protegerOffline(op, motivo, res) {
     let diario;
     try { diario = await persistenciaCloudFirst._estagiar(op); }
     catch (e) {
       if (contextoAba.corresponde(op.contexto)) {
         try { syncStatus.cloudState('error'); } catch (er) {}
       }
-      return { ok: false, motivo: e.code || e.message || 'fila_indisponivel', durable: e.durable === true };
+      return { ok: false, blocked: true, queued: false,
+        motivo: e.code || e.message || 'fila_indisponivel', durable: e.durable === true,
+        operationId: op.operationId };
     }
-
-    if (!persistenciaCloudFirst._online()) {
-      try { await filaCifrada.marcarEstado(op.operationId, 'offline'); } catch (e) {}
+    try { await filaCifrada.marcarEstado(op.operationId, 'offline', motivo); } catch (e) {}
+    if (contextoAba.corresponde(op.contexto)) {
       try { syncStatus.cloudState('offline'); } catch (e) {}
-      return { ok: false, queued: true, durable: true, motivo: 'offline',
-        operationId: op.operationId, checksum: diario.checksum };
-    }
-
-    try { syncStatus.cloudSyncing(); } catch (e) {}
-    try { await filaCifrada.marcarEstado(op.operationId, 'sending'); } catch (e) {}
-    let res = null, falha = null;
-    try { res = await persistenciaCloudFirst._enviar(op, item); }
-    catch (e) { falha = e; }
-
-    if (persistenciaCloudFirst._reciboValido(op, res)) {
-      try {
-        const retirou = await filaCifrada.confirmar(op.operationId, {
-          remoteConfirmed: true, checksum: diario.checksum
-        });
-        if (!retirou) throw filaCifrada._erro('contexto_trocado',
-          'O recibo chegou depois da troca de usuário; a operação ficou protegida para o dono original.');
-        await persistenciaCloudFirst._reindexar();
-        try {
-          if (!persistenciaCloudFirst.temPendente(op.module, op.entityId) &&
-              typeof store !== 'undefined' && store.confirmarRemoto) {
-            store.confirmarRemoto(op.module, op.entityId);
-          }
-        } catch (er) {}
-      } catch (e) {
-        try { await filaCifrada.registrarFalha(op.operationId, e); } catch (er) {}
-        try { syncStatus.cloudDone(false); } catch (er) {}
-        return { ok: false, queued: true, durable: true, motivo: 'recibo_local_pendente',
-          remotoConfirmado: true, row: res && res.row };
+      if (op.payload.transport === persistenciaCloudFirst.TRANSPORTE_ADENDO) {
+        try { store.protegidoNoCofre(op.payload.parentModule, op.payload.parentLegacyId); } catch (e) {}
       }
+    }
+    return Object.assign({}, res || {}, { ok: false, queued: true, durable: true,
+      motivo, operationId: op.operationId, checksum: diario.checksum });
+  },
+  async _executar(op, item, exec = {}) {
+    if (!op || !op.contexto || !contextoAba.corresponde(op.contexto)) {
+      return { ok: false, motivo: 'contexto_trocado', durable: false };
+    }
+    const chave = persistenciaCloudFirst._chaveExecucao(op.module, op.entityId);
+    persistenciaCloudFirst._intencoesMemoria.set(chave, op);
+    if (!persistenciaCloudFirst._online()) {
+      return persistenciaCloudFirst._protegerOffline(op, 'offline');
+    }
+    /* Primeiro resolve a história offline desta entidade. Uma edição online
+       nova não pode ultrapassar uma intenção antiga ainda sem recibo. */
+    if (persistenciaCloudFirst.temPendente(op.module, op.entityId)) {
+      const drenagem = await persistenciaCloudFirst.drenar({ limite: Number.MAX_SAFE_INTEGER });
+      if (!contextoAba.corresponde(op.contexto)) {
+        return { ok: false, motivo: 'contexto_trocado', durable: false };
+      }
+      if (persistenciaCloudFirst.temPendente(op.module, op.entityId)) {
+        if (drenagem && drenagem.indisponivel === true) {
+          return persistenciaCloudFirst._protegerOffline(op, 'rede');
+        }
+        return { ok: false, blocked: true, durable: false, motivo: 'operacao_anterior_pendente',
+          operationId: op.operationId };
+      }
+      const anterior = drenagem && drenagem.confirmados && drenagem.confirmados.find(x =>
+        x.mod === op.module && x.id === op.entityId);
+      if (anterior && Number.isInteger(anterior.version) && anterior.version > 0) {
+        exec = Object.assign({}, exec, { baseVersionOverride: anterior.version });
+      }
+    }
+    try { syncStatus.cloudSyncing(); } catch (e) {}
+    let res = null, falha = null;
+    try { res = await persistenciaCloudFirst._enviar(op, item, exec); }
+    catch (e) { falha = e; }
+    if (persistenciaCloudFirst._reciboValido(op, res)) {
+      if (!contextoAba.corresponde(op.contexto)) {
+        return Object.assign({}, res, { ok: false, durable: true, remoteConfirmed: true,
+          motivo: 'contexto_trocado', operationId: op.operationId });
+      }
+      persistenciaCloudFirst._intencoesMemoria.delete(chave);
+      try {
+        if (op.payload.transport === persistenciaCloudFirst.TRANSPORTE_ADENDO) {
+          if (typeof adendos !== 'undefined') adendos.confirmarOperacao(op, res.row);
+        } else if (!persistenciaCloudFirst.temPendente(op.module, op.entityId) &&
+                   typeof store !== 'undefined' && store.confirmarRemoto) {
+          store.confirmarRemoto(op.module, op.entityId);
+        }
+      } catch (e) {}
       try { syncStatus.cloudDone(true); } catch (e) {}
       return Object.assign({}, res, { durable: true, remoteConfirmed: true,
-        operationId: op.operationId, checksum: diario.checksum });
+        operationId: op.operationId, checksum: op.payload.requestChecksum });
     }
-
     const classe = persistenciaCloudFirst._classeFalha(res, falha);
-    if (classe === 'conflict' && res) persistenciaCloudFirst._preservarConflito(op, res);
-    try { await filaCifrada.marcarEstado(op.operationId,
-      classe === 'conflict' ? 'conflict' : classe === 'outage' ? 'offline' : 'blocked',
-      (res && res.motivo) || (falha && falha.message) || classe); } catch (e) {}
-    try { await filaCifrada.registrarFalha(op.operationId,
-      (res && res.motivo) || falha || classe); } catch (e) {}
-    try {
-      if (classe === 'outage') syncStatus.cloudDone(false);
-      else { syncStatus.cloudDone(false); syncStatus.cloudState('error'); }
-    } catch (e) {}
-    return Object.assign({}, res || {}, {
-      ok: false, queued: classe === 'outage', blocked: classe !== 'outage',
-      conflictPreserved: classe === 'conflict',
-      durable: true, motivo: (res && res.motivo) || (falha && falha.message) || classe,
-      operationId: op.operationId, checksum: diario.checksum
-    });
+    if (classe === 'outage') {
+      return persistenciaCloudFirst._protegerOffline(op,
+        (res && res.motivo) || (falha && falha.message) || 'rede', res);
+    }
+    if (contextoAba.corresponde(op.contexto)) {
+      if (classe === 'conflict' && res) persistenciaCloudFirst._preservarConflito(op, res);
+      try { syncStatus.cloudDone(false); syncStatus.cloudState('error'); } catch (e) {}
+    }
+    return Object.assign({}, res || {}, { ok: false, queued: false, blocked: true,
+      conflictPreserved: classe === 'conflict', durable: false,
+      motivo: (res && res.motivo) || (falha && falha.message) || 'recibo_invalido',
+      operationId: op.operationId, checksum: op.payload.requestChecksum });
+  },
+  async salvar(mod, item) {
+    let op;
+    try { op = await persistenciaCloudFirst._montar(mod, item); }
+    catch (e) { return { ok: false, motivo: e.code || e.message || 'operacao_invalida', durable: false }; }
+    return persistenciaCloudFirst._executar(op, item);
   },
   async salvarAdendo(mod, rec, ad, tabela) {
     let op;
     try { op = await persistenciaCloudFirst._montarAdendo(mod, rec, ad, tabela); }
     catch (e) { return { ok: false, motivo: e.code || e.message || 'operacao_invalida', durable: false }; }
-
-    let diario;
-    try { diario = await persistenciaCloudFirst._estagiar(op); }
-    catch (e) {
-      if (contextoAba.corresponde(op.contexto)) {
-        try { syncStatus.cloudState('error'); } catch (er) {}
-      }
-      return { ok: false, motivo: e.code || e.message || 'fila_indisponivel', durable: e.durable === true };
-    }
-    try {
-      if (typeof store !== 'undefined' && store.protegidoNoCofre) {
-        store.protegidoNoCofre(mod, rec._id);
-      }
-    } catch (e) {}
-    if (!persistenciaCloudFirst._online()) {
-      try { await filaCifrada.marcarEstado(op.operationId, 'offline'); } catch (e) {}
-      try { syncStatus.cloudState('offline'); } catch (e) {}
-      return { ok: false, queued: true, durable: true, motivo: 'offline',
-        operationId: op.operationId, checksum: diario.checksum };
-    }
-
-    try { syncStatus.cloudSyncing(); } catch (e) {}
-    try { await filaCifrada.marcarEstado(op.operationId, 'sending'); } catch (e) {}
-    let res = null, falha = null;
-    try { res = await persistenciaCloudFirst._enviar(op); }
-    catch (e) { falha = e; }
-    if (persistenciaCloudFirst._reciboValido(op, res)) {
-      try {
-        const retirou = await filaCifrada.confirmar(op.operationId, {
-          remoteConfirmed: true, checksum: diario.checksum
-        });
-        if (!retirou) throw filaCifrada._erro('contexto_trocado', 'O adendo ficou protegido para o dono original.');
-        await persistenciaCloudFirst._reindexar();
-        try { if (typeof adendos !== 'undefined') adendos.confirmarOperacao(op, res.row); } catch (e) {}
-      } catch (e) {
-        try { await filaCifrada.registrarFalha(op.operationId, e); } catch (er) {}
-        try { syncStatus.cloudDone(false); } catch (er) {}
-        return { ok: false, queued: true, durable: true, motivo: 'recibo_local_pendente',
-          remotoConfirmado: true, row: res && res.row };
-      }
-      try { syncStatus.cloudDone(true); } catch (e) {}
-      return Object.assign({}, res, { durable: true, remoteConfirmed: true,
-        operationId: op.operationId, checksum: diario.checksum });
-    }
-
-    const classe = persistenciaCloudFirst._classeFalha(res, falha);
-    try { await filaCifrada.marcarEstado(op.operationId,
-      classe === 'outage' ? 'offline' : 'blocked',
-      (res && res.motivo) || (falha && falha.message) || classe); } catch (e) {}
-    try { await filaCifrada.registrarFalha(op.operationId,
-      (res && res.motivo) || falha || classe); } catch (e) {}
-    try { syncStatus.cloudDone(false); if (classe !== 'outage') syncStatus.cloudState('error'); } catch (e) {}
-    return Object.assign({}, res || {}, {
-      ok: false, queued: classe === 'outage', blocked: classe !== 'outage', durable: true,
-      motivo: (res && res.motivo) || (falha && falha.message) || classe,
-      operationId: op.operationId, checksum: diario.checksum
-    });
+    return persistenciaCloudFirst._executar(op);
   },
   async _removerAgora(mod, item) {
     let op;
     try { op = await persistenciaCloudFirst._montarDelete(mod, item); }
     catch (e) { return { ok: false, motivo: e.code || e.message || 'operacao_invalida', durable: false }; }
-
-    let diario;
-    try { diario = await persistenciaCloudFirst._estagiar(op); }
-    catch (e) {
-      if (contextoAba.corresponde(op.contexto)) {
-        try { syncStatus.cloudState('error'); } catch (er) {}
-      }
-      return { ok: false, motivo: e.code || e.message || 'fila_indisponivel', durable: e.durable === true };
-    }
-    if (!persistenciaCloudFirst._online()) {
-      try { await filaCifrada.marcarEstado(op.operationId, 'offline'); } catch (e) {}
-      try { syncStatus.cloudState('offline'); } catch (e) {}
-      return { ok: false, queued: true, durable: true, motivo: 'offline',
-        operationId: op.operationId, checksum: diario.checksum };
-    }
-
-    try { syncStatus.cloudSyncing(); } catch (e) {}
-    try { await filaCifrada.marcarEstado(op.operationId, 'sending'); } catch (e) {}
     let baseVersionOverride = null;
     try {
       if (cloudRel._envioAtivo(mod, item && item._id)) {
@@ -551,50 +513,7 @@ const persistenciaCloudFirst = {
         if (Number.isInteger(v) && v > 0) baseVersionOverride = v;
       }
     } catch (e) {}
-
-    let res = null, falha = null;
-    try { res = await persistenciaCloudFirst._enviar(op, null, { baseVersionOverride }); }
-    catch (e) { falha = e; }
-    if (persistenciaCloudFirst._reciboValido(op, res)) {
-      try {
-        const retirou = await filaCifrada.confirmar(op.operationId, {
-          remoteConfirmed: true, checksum: diario.checksum
-        });
-        if (!retirou) throw filaCifrada._erro('contexto_trocado', 'A exclusão ficou protegida para o dono original.');
-        await persistenciaCloudFirst._reindexar();
-        try {
-          if (!persistenciaCloudFirst.temPendente(op.module, op.entityId) &&
-              typeof store !== 'undefined' && store.confirmarRemoto) {
-            store.confirmarRemoto(op.module, op.entityId);
-          }
-        } catch (er) {}
-      } catch (e) {
-        try { await filaCifrada.registrarFalha(op.operationId, e); } catch (er) {}
-        try { syncStatus.cloudDone(false); } catch (er) {}
-        return { ok: false, queued: true, durable: true, motivo: 'recibo_local_pendente',
-          remotoConfirmado: true, row: res && res.row };
-      }
-      try { syncStatus.cloudDone(true); } catch (e) {}
-      return Object.assign({}, res, { durable: true, remoteConfirmed: true,
-        operationId: op.operationId, checksum: diario.checksum });
-    }
-
-    const classe = persistenciaCloudFirst._classeFalha(res, falha);
-    try { await filaCifrada.marcarEstado(op.operationId,
-      classe === 'conflict' ? 'conflict' : classe === 'outage' ? 'offline' : 'blocked',
-      (res && res.motivo) || (falha && falha.message) || classe); } catch (e) {}
-    try { await filaCifrada.registrarFalha(op.operationId,
-      (res && res.motivo) || falha || classe); } catch (e) {}
-    try {
-      if (classe === 'outage') syncStatus.cloudDone(false);
-      else { syncStatus.cloudDone(false); syncStatus.cloudState('error'); }
-    } catch (e) {}
-    return Object.assign({}, res || {}, {
-      ok: false, queued: classe === 'outage', blocked: classe !== 'outage',
-      conflictPreserved: classe === 'conflict', durable: true,
-      motivo: (res && res.motivo) || (falha && falha.message) || classe,
-      operationId: op.operationId, checksum: diario.checksum
-    });
+    return persistenciaCloudFirst._executar(op, null, { baseVersionOverride });
   },
   remover(mod, item) {
     const id = item && item._id;
@@ -606,68 +525,7 @@ const persistenciaCloudFirst = {
     let op;
     try { op = await persistenciaCloudFirst._montarRestore(mod, item); }
     catch (e) { return { ok: false, motivo: e.code || e.message || 'operacao_invalida', durable: false }; }
-
-    let diario;
-    try { diario = await persistenciaCloudFirst._estagiar(op); }
-    catch (e) {
-      if (contextoAba.corresponde(op.contexto)) {
-        try { syncStatus.cloudState('error'); } catch (er) {}
-      }
-      return { ok: false, motivo: e.code || e.message || 'fila_indisponivel', durable: e.durable === true };
-    }
-    if (!persistenciaCloudFirst._online()) {
-      try { await filaCifrada.marcarEstado(op.operationId, 'offline'); } catch (e) {}
-      try { syncStatus.cloudState('offline'); } catch (e) {}
-      return { ok: false, queued: true, durable: true, motivo: 'offline',
-        operationId: op.operationId, checksum: diario.checksum };
-    }
-
-    try { syncStatus.cloudSyncing(); } catch (e) {}
-    try { await filaCifrada.marcarEstado(op.operationId, 'sending'); } catch (e) {}
-    let res = null, falha = null;
-    try { res = await persistenciaCloudFirst._enviar(op); }
-    catch (e) { falha = e; }
-    if (persistenciaCloudFirst._reciboValido(op, res)) {
-      try {
-        const retirou = await filaCifrada.confirmar(op.operationId, {
-          remoteConfirmed: true, checksum: diario.checksum
-        });
-        if (!retirou) throw filaCifrada._erro('contexto_trocado', 'A restauração ficou protegida para o dono original.');
-        await persistenciaCloudFirst._reindexar();
-        try {
-          if (!persistenciaCloudFirst.temPendente(op.module, op.entityId) &&
-              typeof store !== 'undefined' && store.confirmarRemoto) {
-            store.confirmarRemoto(op.module, op.entityId);
-          }
-        } catch (er) {}
-      } catch (e) {
-        try { await filaCifrada.registrarFalha(op.operationId, e); } catch (er) {}
-        try { syncStatus.cloudDone(false); } catch (er) {}
-        return { ok: false, queued: true, durable: true, motivo: 'recibo_local_pendente',
-          remotoConfirmado: true, row: res && res.row };
-      }
-      try { syncStatus.cloudDone(true); } catch (e) {}
-      return Object.assign({}, res, { durable: true, remoteConfirmed: true,
-        operationId: op.operationId, checksum: diario.checksum });
-    }
-
-    const classe = persistenciaCloudFirst._classeFalha(res, falha);
-    if (classe === 'conflict' && res) persistenciaCloudFirst._preservarConflito(op, res);
-    try { await filaCifrada.marcarEstado(op.operationId,
-      classe === 'conflict' ? 'conflict' : classe === 'outage' ? 'offline' : 'blocked',
-      (res && res.motivo) || (falha && falha.message) || classe); } catch (e) {}
-    try { await filaCifrada.registrarFalha(op.operationId,
-      (res && res.motivo) || falha || classe); } catch (e) {}
-    try {
-      if (classe === 'outage') syncStatus.cloudDone(false);
-      else { syncStatus.cloudDone(false); syncStatus.cloudState('error'); }
-    } catch (e) {}
-    return Object.assign({}, res || {}, {
-      ok: false, queued: classe === 'outage', blocked: classe !== 'outage',
-      conflictPreserved: classe === 'conflict', durable: true,
-      motivo: (res && res.motivo) || (falha && falha.message) || classe,
-      operationId: op.operationId, checksum: diario.checksum
-    });
+    return persistenciaCloudFirst._executar(op);
   },
   restaurar(mod, item) {
     const id = item && item._id;
@@ -842,7 +700,7 @@ const persistenciaCloudFirst = {
     const contexto = persistenciaCloudFirst._contexto();
     if (!contexto || !cloudRel.disponivel()) return null;
     persistenciaCloudFirst._drenando = true;
-    let enviados = 0, conflitos = 0, bloqueados = 0;
+    let enviados = 0, conflitos = 0, bloqueados = 0, indisponivel = false;
     const confirmados = new Map();
     try {
       const ops = await filaCifrada.listar();
@@ -875,15 +733,29 @@ const persistenciaCloudFirst = {
         catch (e) { falha = e; }
         if (!contextoAba.corresponde(contexto)) break;
         if (persistenciaCloudFirst._reciboValido(Object.assign({}, op, { contexto }), res)) {
-          await filaCifrada.confirmar(op.operationId, {
-            remoteConfirmed: true, checksum: op.checksum
-          });
+          try {
+            const retirou = await filaCifrada.confirmar(op.operationId, {
+              remoteConfirmed: true, checksum: op.checksum
+            });
+            if (!retirou) throw filaCifrada._erro('recibo_local_pendente',
+              'O servidor confirmou, mas a intenção cifrada ainda não pôde ser removida.');
+          } catch (e) {
+            bloqueados++;
+            try { await filaCifrada.registrarFalha(op.operationId, e); } catch (er) {}
+            break;
+          }
+          if (!contextoAba.corresponde(contexto)) break;
+          const chaveMemoria = persistenciaCloudFirst._chaveExecucao(op.module, op.entityId);
+          const intencaoMemoria = persistenciaCloudFirst._intencoesMemoria.get(chaveMemoria);
+          if (intencaoMemoria && intencaoMemoria.operationId === op.operationId) {
+            persistenciaCloudFirst._intencoesMemoria.delete(chaveMemoria);
+          }
           if (op.payload && op.payload.transport === persistenciaCloudFirst.TRANSPORTE_ADENDO) {
             try { if (typeof adendos !== 'undefined') adendos.confirmarOperacao(op, res.row); } catch (e) {}
           }
           const versao = Number(res && res.row && res.row.version);
           if (Number.isInteger(versao) && versao > 0) versoesConfirmadas.set(entidade, versao);
-          confirmados.set(entidade, { mod: op.module, id: op.entityId });
+          confirmados.set(entidade, { mod: op.module, id: op.entityId, version: versao });
           enviados++;
           continue;
         }
@@ -899,9 +771,15 @@ const persistenciaCloudFirst = {
           (res && res.motivo) || (falha && falha.message) || classe); } catch (e) {}
         try { await filaCifrada.registrarFalha(op.operationId,
           (res && res.motivo) || falha || classe); } catch (e) {}
-        if (classe === 'outage') break;
+        if (classe === 'outage') { indisponivel = true; break; }
+      }
+      if (!contextoAba.corresponde(contexto)) {
+        return { enviados, conflitos, bloqueados, motivo: 'contexto_trocado', confirmados: [] };
       }
       await persistenciaCloudFirst._reindexar();
+      if (!contextoAba.corresponde(contexto)) {
+        return { enviados, conflitos, bloqueados, motivo: 'contexto_trocado', confirmados: [] };
+      }
       confirmados.forEach(alvo => {
         try {
           if (!persistenciaCloudFirst.temPendente(alvo.mod, alvo.id) &&
@@ -911,7 +789,8 @@ const persistenciaCloudFirst = {
         } catch (e) {}
       });
       try { syncStatus.cloudState(persistenciaCloudFirst._pendentes.size ? 'queued' : 'synced'); } catch (e) {}
-      return { enviados, conflitos, bloqueados, restantes: persistenciaCloudFirst._pendentes.size };
+      return { enviados, conflitos, bloqueados, indisponivel,
+        confirmados: Array.from(confirmados.values()), restantes: persistenciaCloudFirst._pendentes.size };
     } finally { persistenciaCloudFirst._drenando = false; }
   },
   _tempoDesde(iso) {
@@ -959,6 +838,7 @@ const persistenciaCloudFirst = {
   bloquear() {
     persistenciaCloudFirst._pendentes.clear();
     persistenciaCloudFirst._ownerKey = '';
+    persistenciaCloudFirst._intencoesMemoria.clear();
     try { persistenciaCloudFirst.renderPainel(); } catch (e) {}
   }
 };

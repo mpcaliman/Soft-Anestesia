@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readAppSource } from './helpers/read-app-source.mjs';
+import vm from 'node:vm';
+import { readAppSource, readCompiledActions } from './helpers/read-app-source.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, '..');
@@ -150,8 +151,24 @@ assert.doesNotMatch(rollback, /delete\s+from/i, 'reversão automática não pode
 
 /* A tela expõe o fluxo completo sem abrir o JSON clínico. */
 assert.match(source, /Migração segura do legado/);
-assert.match(source, /id="prog-legado-org">\$\{opcoesOrgEscolha\}/,
-  'seletor de organização deve começar sem clínica padrão');
+const programadorStart = source.indexOf('const programador = {');
+const programadorEnd = source.indexOf('\n};', programadorStart);
+assert(programadorStart >= 0 && programadorEnd > programadorStart);
+const escaping = value => String(value ?? '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const uiSandbox = vm.createContext({
+  SoftActions: await readCompiledActions(appRoot),
+  utils: { escapeHTML:escaping, escapeAttr:escaping, jsArg:value => escaping(JSON.stringify(String(value))) },
+  window: {}, document: {}
+});
+vm.runInContext(source.slice(programadorStart, programadorEnd + 3) + '\nglobalThis.__programador = programador;', uiSandbox);
+uiSandbox.__programador._orgs = [{id:'clinic-fixture', nome:'Clínica de teste'}];
+uiSandbox.__programador._membros=[]; uiSandbox.__programador._shares=[];
+const uiBox={innerHTML:''};
+uiSandbox.__programador._renderConteudo(uiBox);
+const legacySelect=uiBox.innerHTML.match(/<select id="prog-legado-org">([\s\S]*?)<\/select>/)?.[1];
+assert(legacySelect, 'seletor de classificação manual precisa existir no HTML renderizado');
+assert.match(legacySelect, /^<option value="">/, 'seletor deve começar sem clínica padrão mesmo havendo uma clínica real na lista');
+assert.doesNotMatch(legacySelect, /<option[^>]+selected/i, 'nenhuma clínica pode chegar pré-selecionada');
 for (const rpc of [
   'prog_inventory_legacy_documents', 'prog_classify_legacy_documents',
   'prog_copy_legacy_documents', 'prog_validate_legacy_documents',

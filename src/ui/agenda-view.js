@@ -58,7 +58,7 @@ const agendaView = {
           dots = '<div class="ag-cal-dots">' + uniq.map(s => `<span style="background:${cores[s] || '#888'}"></span>`).join('') + '</div>';
         }
         const badge = items.length ? `<span class="ag-cal-badge">${items.length}</span>` : '';
-        cells += `<div class="ag-cal-cell${isHoje ? ' hoje' : ''}${aberto ? ' aberto' : ''}${items.length ? ' tem' : ''}" onclick="agenda.cal.abrirDia(${utils.jsArg(iso)})">
+        cells += `<div class="ag-cal-cell${isHoje ? ' hoje' : ''}${aberto ? ' aberto' : ''}${items.length ? ' tem' : ''}" data-ag-day="${utils.escapeAttr(iso)}" onclick="agenda.cal.abrirDia(${utils.jsArg(iso)})">
           <span class="ag-cal-num">${d}</span>${badge}${dots}
         </div>`;
       }
@@ -74,7 +74,7 @@ const agendaView = {
     abrirDia(iso) {
       agenda.cal._diaAberto = iso;
       document.querySelectorAll('.ag-cal-cell').forEach(c => {
-        c.classList.toggle('aberto', c.getAttribute('onclick') === `agenda.cal.abrirDia('${iso}')`);
+        c.classList.toggle('aberto', c.getAttribute('data-ag-day') === iso);
       });
       const box = document.getElementById('ag-cal-dia');
       if (!box) return;

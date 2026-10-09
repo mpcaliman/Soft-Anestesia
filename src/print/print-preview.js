@@ -364,10 +364,9 @@ ${TAG_CLOSE_HTML}`;
       const win = window.open('', '_blank');
       if (win && win.document) {
         win.document.open();
-        win.document.write(fullHTML + TAG_OPEN_SCRIPT +
-          'window.onload=function(){setTimeout(function(){window.focus();window.print();},300);};' +
-          'window.onafterprint=function(){setTimeout(function(){window.close();},400);};' +
-          TAG_CLOSE_SCRIPT);
+        win.addEventListener('load', () => { setTimeout(() => { win.focus(); win.print(); }, 300); }, { once: true });
+        win.addEventListener('afterprint', () => { setTimeout(() => win.close(), 400); }, { once: true });
+        win.document.write(fullHTML);
         win.document.close();
         win.document.title = titulo;
         toast('Diálogo de impressão sendo aberto — escolha a impressora ou "Salvar em PDF".', 'success');

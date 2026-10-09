@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { publicAssets } from './public-assets.mjs';
+import { compileStrictAssets, compiledAssetPaths } from './strict-csp.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(scriptDir, '..');
@@ -22,18 +23,24 @@ if (uniqueAssets.size !== publicAssets.length) {
   throw new Error('A allowlist pública contém caminhos duplicados.');
 }
 
+const generatedPaths = new Set(compiledAssetPaths.filter(path => path !== 'src/ui/strict-actions.js'));
+const sourceBytes = new Map();
+for (const relativePath of publicAssets) {
+  if (generatedPaths.has(relativePath)) continue;
+  sourceBytes.set(relativePath, await readFile(resolve(rootDir, relativePath)));
+}
+const javascriptSources = new Map([...sourceBytes].filter(([path]) => path.endsWith('.js')).map(([path,bytes]) => [path,bytes.toString('utf8')]));
+const compiled = compileStrictAssets(sourceBytes.get('index.html').toString('utf8'), javascriptSources);
 for (const relativePath of publicAssets) {
   if (!relativePath || relativePath.startsWith('/') || relativePath.split('/').includes('..')) {
     throw new Error(`Caminho público inválido: ${relativePath}`);
   }
-  const source = resolve(rootDir, relativePath);
   const destination = resolve(distDir, relativePath);
-  if (!source.startsWith(rootDir + sep) || !destination.startsWith(distDir + sep)) {
-    throw new Error(`Caminho público fora do projeto: ${relativePath}`);
-  }
+  if (!destination.startsWith(distDir + sep)) throw new Error(`Caminho público fora do projeto: ${relativePath}`);
+  const bytes = compiled.sources.has(relativePath) ? Buffer.from(compiled.sources.get(relativePath),'utf8') : sourceBytes.get(relativePath);
+  if (!bytes) throw new Error(`Artefato público sem fonte: ${relativePath}`);
   await mkdir(dirname(destination), { recursive: true });
-  await copyFile(source, destination);
-  const bytes = await readFile(source);
+  await writeFile(destination, bytes);
   assets[relativePath] = createHash('sha256').update(bytes).digest('hex');
 }
 
@@ -49,6 +56,7 @@ try {
 
 const buildInfo = {
   schema: 1,
+  csp: { policy: compiled.policy, ...compiled.statistics },
   sourceCommit,
   runtime: {
     node: packageJson.engines.node,

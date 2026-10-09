@@ -36,10 +36,7 @@ const shared = new MemoryStorage({
 const contextSource = between('const contextoAba = (() => {', "const DEMO_FLAG = 'medsys.v7.demo';");
 let nextId = 0;
 const abrirAba = (uid, org) => {
-  const sessionStorage = new MemoryStorage({
-    'medsys.v7.auth.session': JSON.stringify({ uid, organization_id: org }),
-    'medsys.v7.cloud.session': JSON.stringify({ access_token: 't-' + uid, user: { id: uid } })
-  });
+  const sessionStorage = new MemoryStorage();
   const sandbox = {
     console, sessionStorage,
     crypto: { randomUUID: () => `00000000-0000-4000-8000-${String(++nextId).padStart(12, '0')}` },
@@ -53,6 +50,8 @@ const abrirAba = (uid, org) => {
   Object.defineProperty(sandbox, 'localStorage', { value: shared, configurable: true, writable: true });
   vm.createContext(sandbox);
   vm.runInContext(`${contextSource}\nglobalThis.__d2 = { contextoAba, cofre };`, sandbox);
+  sessionStorage.setItem('medsys.v7.auth.session', JSON.stringify({ uid, organization_id: org }));
+  sessionStorage.setItem('medsys.v7.cloud.session', JSON.stringify({ access_token: 't-' + uid, user: { id: uid } }));
   assert.equal(sandbox.__d2.contextoAba.vincular({ uid, organization_id: org, role: 'gestor' }, ''), true);
   return sandbox;
 };
@@ -123,6 +122,10 @@ const draftVault = {
   async listarSnapshots(namespace) {
     const ownerKey = draftOwnerKey(draftOwner) + ':' + namespace + ':';
     return Array.from(draftSnapshots.entries()).filter(([key]) => key.startsWith(ownerKey)).map(([, value]) => structuredClone(value));
+  },
+  async removerSnapshot(namespace, key) {
+    draftSnapshots.delete(draftOwnerKey(draftOwner) + ':' + namespace + ':' + key);
+    return { ok: true, durable: true };
   }
 };
 const draftRuntime = {
@@ -134,13 +137,14 @@ const draftRuntime = {
     aoMudar() {}
   },
   store: { cloudOnlyAtivo: () => true },
+  rascunhosSync: { _indisponivel: () => true },
   toast() {}
 };
 draftRuntime.window = draftRuntime;
 draftRuntime.globalThis = draftRuntime;
 vm.createContext(draftRuntime);
 vm.runInContext(`${draftsSource}\nglobalThis.__draftsD2 = rascunhos;`, draftRuntime);
-draftRuntime.__draftsD2.setList('pre', [{ id: 'draft-a', updatedAt: '2026-10-07T10:00:00.000Z' }]);
+draftRuntime.__draftsD2.setList('pre', [{ id: 'draft-a', dados: { paciente_nome: 'Paciente do médico A' }, updatedAt: '2026-10-07T10:00:00.000Z' }]);
 await draftRuntime.__draftsD2.aguardarPersistencia('pre');
 assert.equal(draftStorage.getItem('medsys.v7.rascunhos.pre.u.medico-a'), null,
   'rascunho cloud-only não pode persistir prontuário em texto claro');
@@ -148,7 +152,7 @@ draftOwner = { generation: 2, userId: 'secretaria-b', organizationId: 'clinica-a
   deviceId: 'computador-1', tabId: 'tab-b', verified: true };
 assert.deepEqual(Array.from(draftRuntime.__draftsD2.list('pre')), [],
   'segunda pessoa da mesma clínica não pode herdar o rascunho local da primeira');
-draftRuntime.__draftsD2.setList('pre', [{ id: 'draft-b', updatedAt: '2026-10-07T10:01:00.000Z' }]);
+draftRuntime.__draftsD2.setList('pre', [{ id: 'draft-b', dados: { paciente_nome: 'Paciente da pessoa B' }, updatedAt: '2026-10-07T10:01:00.000Z' }]);
 await draftRuntime.__draftsD2.aguardarPersistencia('pre');
 draftOwner = { generation: 3, userId: 'medico-a', organizationId: 'clinica-a',
   deviceId: 'computador-1', tabId: 'tab-c', verified: true };
@@ -182,6 +186,10 @@ const liveVault = {
   async listarSnapshots(namespace) {
     const prefix = liveOwnerKey(liveOwner) + ':' + namespace + ':';
     return Array.from(liveSnapshots.entries()).filter(([key]) => key.startsWith(prefix)).map(([, value]) => structuredClone(value));
+  },
+  async removerSnapshot(namespace, key) {
+    liveSnapshots.delete(liveOwnerKey(liveOwner) + ':' + namespace + ':' + key);
+    return { ok: true, durable: true };
   }
 };
 const liveListeners = [];
@@ -194,7 +202,10 @@ const liveForm = {
 };
 const liveRuntime = {
   console, structuredClone, localStorage: liveStorage, filaCifrada: liveVault,
+  setTimeout: () => 1, clearTimeout() {},
   store: { cloudOnlyAtivo: () => true },
+  state: { dirty: true },
+  rascunhosSync: { _indisponivel: () => true, _lerAtual: async () => null, gravarUnico: async () => ({ ok: false, offline: true }) },
   auth: { usuarioAtual: () => ({ usuario: liveOwner.userId }) },
   contextoAba: {
     atual: () => liveOwner, capturar: () => structuredClone(liveOwner),
@@ -218,7 +229,7 @@ const trocarLive = async next => {
 };
 
 liveField.value = 'Texto do médico A';
-assert.equal(live.guardar('termo'), true);
+assert.equal(live.guardar('termo', { mudou: true }), true);
 await live.aguardarPersistencia('termo');
 assert.equal(liveStorage.getItem('medsys.v7.edicao.termo.u.medico-a'), null,
   'formulário cloud-only não pode usar localStorage nem quando ainda não foi salvo');
@@ -226,14 +237,14 @@ await trocarLive({ generation: 2, userId: 'secretaria-b', organizationId: 'clini
   deviceId: 'computador-1', tabId: 'live-b', verified: true });
 assert.equal(live.ler('termo'), null, 'usuário seguinte não pode abrir a edição do anterior');
 liveField.value = 'Texto da pessoa B';
-live.guardar('termo');
+live.guardar('termo', { mudou: true });
 await live.aguardarPersistencia('termo');
 await trocarLive({ generation: 3, userId: 'medico-a', organizationId: 'clinica-a',
   deviceId: 'computador-1', tabId: 'live-a-2', verified: true });
 assert.equal(live.ler('termo').dados.paciente_nome, 'Texto do médico A');
 
 liveField.value = 'Versão enviada';
-live.guardar('termo');
+live.guardar('termo', { mudou: true });
 await live.aguardarPersistencia('termo');
 let confirmarRecibo;
 const reciboTardio = new Promise(resolve => { confirmarRecibo = resolve; });

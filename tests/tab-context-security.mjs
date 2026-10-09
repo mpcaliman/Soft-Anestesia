@@ -41,12 +41,6 @@ let nextId = 0;
 
 const abrirAba = ({ uid, org } = {}) => {
   const session = new MemoryStorage();
-  if (uid) {
-    session.setItem('medsys.v7.auth.session', JSON.stringify({ uid, organization_id: org || '' }));
-    session.setItem('medsys.v7.cloud.session', JSON.stringify({
-      access_token: `token-${uid}`, user: { id: uid, email: `${uid}@teste.local` }
-    }));
-  }
   const events = new Map();
   const sandbox = {
     console,
@@ -69,6 +63,12 @@ const abrirAba = ({ uid, org } = {}) => {
   vm.createContext(sandbox);
   vm.runInContext(`${contextSource}\nglobalThis.__d1 = { contextoAba, cofre };`, sandbox);
   if (uid && org) {
+    /* Um login novo acontece após o bootstrap, nunca por credenciais de uma
+       aba que o navegador recuperou de um processo anterior. */
+    session.setItem('medsys.v7.auth.session', JSON.stringify({ uid, organization_id: org }));
+    session.setItem('medsys.v7.cloud.session', JSON.stringify({
+      access_token: `token-${uid}`, user: { id: uid, email: `${uid}@teste.local` }
+    }));
     assert.equal(sandbox.__d1.contextoAba.vincular({ uid, organization_id: org, role: 'gestor', orgs: 1 }, org), true);
   }
   return sandbox;
@@ -158,8 +158,10 @@ assert.match(realtime, /linha\.organization_id[\s\S]*contexto\.organizationId/,
   'cada evento Realtime deve ser conferido no cliente');
 
 const realtimeBeta = between('const cloudRealtime = {', '/* Uma troca controlada invalida sockets');
-assert.match(realtimeBeta, /filter:\s*'organization_id=eq\.'\s*\+\s*contexto\.organizationId/,
-  'Realtime beta também deve filtrar a organização no servidor');
+assert.match(realtimeBeta, /conectar\(\)\s*\{\s*return realtime\.conectar\(\)/,
+  'compatibilidade Realtime deve delegar ao cliente obrigatório com filtro por organização');
+assert.doesNotMatch(realtimeBeta, /new WebSocket|_ultimoEnvioTs/,
+  'um segundo transporte não pode descartar eventos concorrentes durante a janela de eco');
 
 const syncLoop = between('const sincronia = {', 'try { window.sincronia = sincronia;');
 assert.match(syncLoop, /const contextoValido = \(\) => cloudRel\._contextoValido[\s\S]*await cloudRel\.drenarFila\(\);[\s\S]*if \(!contextoValido\(\)\) return/,

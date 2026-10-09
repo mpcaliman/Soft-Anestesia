@@ -403,7 +403,7 @@ window.assinaturaDigital = (function () {
   function injetarBotoes() {
     document.querySelectorAll('.action-bar').forEach(bar => {
       if (bar._adBtn) return;
-      const temImprimir = Array.from(bar.querySelectorAll('button')).some(b => /printPreview\.abrir/.test(b.getAttribute('onclick') || ''));
+      const temImprimir = Array.from(bar.querySelectorAll('button')).some(b => /printPreview\.abrir/.test(b.getAttribute('data-soft-name-click') || b.getAttribute('onclick') || ''));
       if (!temImprimir) return;
       /* "Tem Imprimir" não é o mesmo que "é assinável". Dashboard e Agenda
          imprimem e não são documentos: ali o botão só conseguia dar o aviso
@@ -418,7 +418,7 @@ window.assinaturaDigital = (function () {
       b.style.cssText = 'background:#14532d;color:#fff;border-color:#0f3d21';
       b.innerHTML = '<span class="icon">🔏</span> Assinar digitalmente';
       b.onclick = () => assinaturaDigital.iniciar();
-      const imp = Array.from(bar.querySelectorAll('button')).find(x => /printPreview\.abrir/.test(x.getAttribute('onclick') || ''));
+      const imp = Array.from(bar.querySelectorAll('button')).find(x => /printPreview\.abrir/.test(x.getAttribute('data-soft-name-click') || x.getAttribute('onclick') || ''));
       if (imp && imp.parentNode) imp.parentNode.insertBefore(b, imp.nextSibling); else bar.appendChild(b);
       bar._adBtn = true;
     });

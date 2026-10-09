@@ -1,3 +1,4 @@
+import { readAppSource, readCompiledActions } from './helpers/read-app-source.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
@@ -8,7 +9,8 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const rootArg = process.argv.find(arg => arg.startsWith('--app-root='));
 const appRoot = rootArg ? resolve(process.cwd(), rootArg.slice('--app-root='.length)) : repo;
 const indexPath = resolve(appRoot, 'index.html');
-const html = await readFile(indexPath, 'utf8');
+const html = await readAppSource(appRoot);
+const SoftActions = await readCompiledActions(appRoot);
 const storeSource = await readFile(resolve(appRoot, 'src/platform/clinical-store.js'), 'utf8');
 function objectSource(name) {
   const start = html.indexOf('const ' + name + ' = {');
@@ -25,7 +27,7 @@ const localStorage = {
 let sequence = 0;
 let context = { generation: 1, userId: 'doctor-1', organizationId: 'org-1', tabId: 'tab-1' };
 const staged = [];
-const sandbox = vm.createContext({
+const sandbox = vm.createContext({ SoftActions,
   console, setTimeout, clearTimeout, localStorage,
   HISTORY_MAX: 100,
   STORAGE: {pre:'pre', consulta:'consulta', anestesia:'anestesia', financeiro:'financeiro'},

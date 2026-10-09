@@ -1754,7 +1754,7 @@ await test('Eventos: catálogo agrupado com multiseleção adiciona à tabela co
       && tipos.includes('Intubação') && tipos.includes('Outro') && tipos.length >= 50;
 
     /* botão existe na seção de eventos */
-    out.temBotao = !!document.querySelector('button[onclick="anestesia.eventos.abrirCatalogo()"]');
+    out.temBotao = !!document.querySelector('button[data-soft-name-click="anestesia.eventos.abrirCatalogo"], [onclick="anestesia.eventos.abrirCatalogo()"]');
 
     /* abre o catálogo, filtra e confirma uma multiseleção */
     document.getElementById('eventos-body').innerHTML = '';
@@ -1941,7 +1941,7 @@ await test('Configurações sobem para a nuvem, descem ao entrar (vence a mais n
       && !/Criar conta/i.test(foot) && /Peça ao responsável/i.test(foot);
 
     /* 6) criação de usuário local desativada na tela de Usuários */
-    out.semCriarLocal = !document.querySelector('#usuarios-card button[onclick="ajustesUsuarios.abrirNovo()"]');
+    out.semCriarLocal = !document.querySelector('#usuarios-card button[data-soft-name-click="ajustesUsuarios.abrirNovo"], [onclick="ajustesUsuarios.abrirNovo()"]');
     return out;
   });
   assert(r.subiu, 'mudar uma configuração deveria subir user_preferences com organização e usuário');
@@ -2156,8 +2156,8 @@ await test('Impressão: gráfico de vitais sai no conjunto (módulo oculto) e Ho
     /* — clicar em "Horário" ordena eventos e medicações (crescente; sem hora vai pro fim) — */
     location.hash = '#anestesia';
     await new Promise(r => setTimeout(r, 300));
-    out.thClicavel = !!document.querySelector('#tab-eventos th[onclick*="ordenarPorHorario"]')
-      && !!document.querySelector('#tab-medicacoes th[onclick*="ordenarPorHorario"]');
+    out.thClicavel = !!document.querySelector('#tab-eventos th[data-soft-name-click*="ordenarPorHorario"], [onclick*="ordenarPorHorario"]')
+      && !!document.querySelector('#tab-medicacoes th[data-soft-name-click*="ordenarPorHorario"], [onclick*="ordenarPorHorario"]');
     document.getElementById('eventos-body').innerHTML = '';
     anestesia.eventos.add({ tipo: 'Extubação', hora: '12:30' });
     anestesia.eventos.add({ tipo: 'Indução', hora: '09:10' });
@@ -2349,7 +2349,7 @@ await test('Impressão: medicações saem completas (Tipo, Diluição, Fluxo, FI
     await new Promise(r => setTimeout(r, 120));
     const menu = document.getElementById('dd-anestesia-menu');
     out.ddNome = menu.innerHTML.includes('Fulano Objeto') && !menu.innerHTML.includes('object Object');
-    menu.querySelector('.dropdown-item').onclick();
+    menu.querySelector('.dropdown-item').click();
     await new Promise(r => setTimeout(r, 200));
     out.ddFechaAoEscolher = !document.querySelector('.dropdown-menu.open');
     ui.toggleDropdown('dd-anestesia');
@@ -2695,7 +2695,7 @@ await test('Restaurar tudo da nuvem: traz só dados relacionais da clínica, sem
     modal.close();
 
     /* botão na tela de armazenamento */
-    out.temBotao = !!document.querySelector('button[onclick="cloud.restaurarTudoDaNuvem()"]');
+    out.temBotao = !!document.querySelector('button[data-soft-name-click="cloud.restaurarTudoDaNuvem"], [onclick="cloud.restaurarTudoDaNuvem()"]');
 
     ['anestesia', 'pre', 'consulta'].forEach(m => store.setList(m, []));
     return out;
@@ -3361,8 +3361,8 @@ await test('Pré finalizada oferece o Termo; pré + termo saem num arquivo únic
     out.semNomeNaoAbre = !document.getElementById('print-preview-overlay').classList.contains('show');
 
     /* o botão está nas duas barras de ação */
-    out.botaoPre = !!document.querySelector('#module-pre [onclick="printPreview.abrirPreTermo()"]');
-    out.botaoTermo = !!document.querySelector('#module-termo [onclick="printPreview.abrirPreTermo()"]');
+    out.botaoPre = !!document.querySelector('#module-pre [data-soft-name-click="printPreview.abrirPreTermo"], [onclick="printPreview.abrirPreTermo()"]');
+    out.botaoTermo = !!document.querySelector('#module-termo [data-soft-name-click="printPreview.abrirPreTermo"], [onclick="printPreview.abrirPreTermo()"]');
 
     store.setList('pre', []); store.setList('termo', []);
     return out;
@@ -5562,7 +5562,8 @@ await test('Ao entrar, o app abre no Dashboard (ou no primeiro módulo permitido
     const out = {};
     auth._aplicarPermissoesUI = () => {};
     auth._iniciarTimer = () => {};
-    auth.usuarioAtual = () => ({ id: 'u', nome: 'Teste', perfil: 'admin' });
+    __smokeBindOrg('org-1', 'u');
+    auth.usuarioAtual = () => ({ id: 'u', uid: 'u', organization_id: 'org-1', nome: 'Teste', perfil: 'admin' });
 
     /* estava noutro módulo antes de entrar: vai para o Dashboard mesmo assim */
     location.hash = '#anestesia';
@@ -11157,7 +11158,11 @@ await test('Entrar pede a senha antes de mostrar o app; o menu leva ao Dashboard
     out.temFormularioPronto = !!document.getElementById('auth-form')
       && !!ov.querySelector('input[type="password"]');
     out.estaVisivel = !!ov && getComputedStyle(ov).display !== 'none';
-    /* e desbloquear continua sendo o que a tira da frente */
+    /* Sem identidade/clínica confirmadas, nem uma chamada interna abre o app. */
+    auth._desbloquear();
+    out.sessaoIncompletaBloqueada = ov.style.display !== 'none';
+    __smokeBindOrg('org-1', 'm1');
+    /* Uma sessão recém-autenticada da mesma clínica tira a tela da frente. */
     auth._desbloquear();
     out.desbloquearEsconde = ov.style.display === 'none';
 
@@ -11206,6 +11211,7 @@ await test('Entrar pede a senha antes de mostrar o app; o menu leva ao Dashboard
 
   assert(r.overlayExiste && r.temFormularioPronto, 'a tela de login existe pronta no HTML');
   assert(r.semDisplayNoneNoHTML && r.estaVisivel, 'e nasce visível — o app não pode aparecer antes da senha');
+  assert(r.sessaoIncompletaBloqueada, 'sessão ausente ou parcial nunca desbloqueia a apresentação clínica');
   assert(r.desbloquearEsconde, 'quem tem sessão válida passa direto');
   assert(r.naoViajaEntreAparelhos, 'o bloqueio de tela não viaja entre aparelhos');
   assert(r.valorLegadoRecusado, 'valor antigo de login diário deve voltar ao bloqueio seguro de 5 minutos');
@@ -11226,6 +11232,7 @@ await test('Orçamento: incluir ou não a avaliação pré-anestésica muda o te
     const out = {};
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
       perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor', entrouEm: Date.now() }));
+    __smokeBindOrg('org-1', 'm1');
     auth._desbloquear();
     ui.navegar('orcamento');
     await new Promise(res => setTimeout(res, 300));
@@ -11305,6 +11312,7 @@ await test('Impressão pelo celular sai com conteúdo, não em branco', async ()
     const out = {};
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
       perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor', entrouEm: Date.now() }));
+    __smokeBindOrg('org-1', 'm1');
     auth._desbloquear();
     ui.navegar('recuperacao');
     await new Promise(res => setTimeout(res, 300));
@@ -11767,6 +11775,7 @@ await test('Pacientes: ordenação, filtro por plano e a linha inteira cabendo n
     const out = {};
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
       perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor', entrouEm: Date.now() }));
+    __smokeBindOrg('org-1', 'm1');
     auth._desbloquear();
     store.setList('pacientes', [
       { _id: 'p1', nome: 'ZULEICA ROCHA',  nascimento: '1950-03-02', plano: 'Unimed',    cpf: '111', carteirinha: '0286220300557', telefone: '73 98134-0232', _createdAt: '2026-01-01T10:00:00.000Z' },
@@ -12076,6 +12085,7 @@ await test('Cada técnica pede seus detalhes numa janela, e o que se responde vi
     const out = {};
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
       perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor', entrouEm: Date.now() }));
+    __smokeBindOrg('org-1', 'm1');
     auth._desbloquear();
     /* o tutorial do gráfico abre uma janela 600 ms depois de entrar na ficha;
        aqui ele só atrapalharia a leitura do teste */
@@ -12201,6 +12211,7 @@ await test('Via aérea e acessos também abrem em janela, com os campos ainda de
     const out = {};
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
       perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor', entrouEm: Date.now() }));
+    __smokeBindOrg('org-1', 'm1');
     auth._desbloquear();
     localStorage.setItem('medsys.v7.tutorial_grafico', '1');
     ui.navegar('anestesia');
@@ -15846,9 +15857,9 @@ await test('Depois da janela: "Gerar e imprimir" fecha o caminho, e a folha não
 
     /* 5) os módulos que NÃO cobram dizem isso no próprio botão */
     const tip = sel => (document.querySelector(sel) || {}).title || '';
-    out.tooltipsHonestos = /não gera cobrança/i.test(tip('[onclick="recuperacao.finalizar()"]'))
-      && /não gera cobrança/i.test(tip('[onclick="prescricao.finalizar()"]'))
-      && /janela de cobrança/i.test(tip('[onclick="pre.finalizar()"]'));
+    out.tooltipsHonestos = /não gera cobrança/i.test(tip('[data-soft-name-click="recuperacao.finalizar"], [onclick="recuperacao.finalizar()"]'))
+      && /não gera cobrança/i.test(tip('[data-soft-name-click="prescricao.finalizar"], [onclick="prescricao.finalizar()"]'))
+      && /janela de cobrança/i.test(tip('[data-soft-name-click="pre.finalizar"], [onclick="pre.finalizar()"]'));
     return out;
   });
 

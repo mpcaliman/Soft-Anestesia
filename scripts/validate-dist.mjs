@@ -54,4 +54,18 @@ const bootstrap = await readFile(resolve(distDir, 'src/app/bootstrap.js'), 'utf8
 assert.match(bootstrap, /serviceWorker\.register\('sw\.js'\)/,
   'bootstrap deve registrar o service worker público');
 
+const policy = html.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/i)?.[1];
+assert(policy, 'dist deve declarar CSP antes de carregar o app');
+assert.doesNotMatch(policy, /unsafe-inline|unsafe-eval/, 'nenhuma diretiva CSP pode liberar código inline ou eval');
+assert.match(policy, /object-src &#39;none&#39;/, 'CSP deve bloquear plugins');
+assert.doesNotMatch(html, /\s(?:on[a-z]+|style)\s*=/i, 'HTML servido não pode incluir eventos ou estilos inline');
+assert.doesNotMatch(html, /<style\b/i, 'folhas principais precisam ser arquivos externos');
+for (const match of html.matchAll(/<script\b([^>]*)>/gi)) {
+  assert.match(match[1], /\bsrc=/i, 'todo script servido precisa ter origem externa');
+}
+assert(buildInfo.csp?.actions > 1000, 'build precisa registrar a compilação de todas as ações legadas');
+const actions = await readFile(resolve(distDir, 'src/ui/strict-actions.js'), 'utf8');
+assert.doesNotMatch(actions, /\beval\s*\(|\b(?:new\s+)?Function\s*\(/,
+  'dispatcher não pode compilar dados em JavaScript');
+
 console.log('✓ dist/ contém somente os artefatos públicos esperados e íntegros');

@@ -1,7 +1,7 @@
 /** Regressão D3b: nuvem primária, WAL cifrado e recibo idempotente. */
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import { createHash } from 'node:crypto';
+import { createHash, webcrypto } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,7 +36,7 @@ assert.match(legacyMigration,
   /await persistenciaCloudFirst\._importar(?:Upsert|Delete)[\s\S]*localStorage\.setItem\(cloud\.QUEUE_KEY/,
   'a chave legada só pode ser regravada depois da cópia para o cofre cifrado');
 assert.match(engine, /await filaCifrada\.enfileirar/,
-  'a mutação precisa ficar durável antes do envio');
+  'a indisponibilidade precisa poder proteger a intenção com cifragem');
 assert.match(engine, /_reciboValido[\s\S]*last_operation|_mesmoRecibo/,
   'a remoção local depende do recibo idempotente da própria linha');
 assert.match(engine, /_montarRestore[\s\S]*action:\s*'restore'/,
@@ -89,6 +89,7 @@ const contextoAba = {
 
 const queue = new Map();
 let uuidN = 1;
+let durableWrites = 0;
 const stable = value => {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return '[' + value.map(stable).join(',') + ']';
@@ -103,6 +104,7 @@ const filaCifrada = {
   _donoKey: dono => JSON.stringify([dono.organizationId, dono.userId, dono.deviceId]),
   async preparar() { return { ownerKey: this._donoKey(current) }; },
   async enfileirar(op) {
+    durableWrites++;
     assert.equal(queue.has(op.operationId), false, 'operação de teste não deve colidir');
     const checksum = 'vault-' + op.operationId;
     queue.set(op.operationId, structuredClone({ ...op, checksum }));
@@ -176,7 +178,10 @@ const cloudRel = {
   async enviarAgenda(item, opts) { return this.enviarRegistro('agenda', item, opts); },
   async enviarRegistro(_mod, item, opts) {
     sends++;
-    assert.equal(queue.size > 0, true, 'WAL cifrado deve existir antes do fetch');
+    if (!persistence.temPendente(_mod, item._id)) {
+      assert.equal(Array.from(queue.values()).some(x => x.entityId === item._id), false,
+        'online, nenhuma cópia clínica local pode anteceder a tentativa remota');
+    }
     const op = opts.operation;
     const existing = remote.get(item._id);
     if (existing && this._mesmoRecibo(existing, op)) {
@@ -184,6 +189,8 @@ const cloudRel = {
     }
     if (mode === 'outage') return { ok: false, motivo: 'rede' };
     if (mode === 'forbidden') return { ok: false, motivo: 'http 403' };
+    if (mode === 'server-down') return { ok: false, status: 503, motivo: 'temporariamente indisponível' };
+    if (mode === 'unexpected') throw new Error('erro interno de programação');
     if (mode === 'conflict') return { ok: false, conflict: true, motivo: 'versao_divergente',
       cloud: { _id: item._id, nome: 'Versão remota' }, cloudUpdatedAt: '2026-10-07T13:00:00Z' };
     const row = {
@@ -192,6 +199,7 @@ const cloudRel = {
     };
     remote.set(item._id, structuredClone(row));
     if (mode === 'lost-response') return { ok: false, motivo: 'rede' };
+    if (mode === 'bad-receipt') return { ok: true, row: { ...row, last_operation_checksum: 'outro' } };
     return { ok: true, row };
   },
   async apagarNaClinica(_table, legacyId, ctx) {
@@ -235,7 +243,7 @@ const ordemCausal = persistence._ordenar([
 ]).filter(op => op.entityId === 'mesmo').map(op => op.action);
 assert.deepEqual(Array.from(ordemCausal), ['upsert', 'delete', 'restore']);
 
-/* Online: primeiro WAL, depois nuvem, depois recibo remove a cópia local. */
+/* Online: a operação é enviada e confirmada sem qualquer escrita clínica local. */
 mode = 'success';
 const online = await persistence.salvar('pre', {
   _id: 'pre-online', _relVersion: 1, nome: 'Paciente A', data: '2026-10-07'
@@ -243,11 +251,10 @@ const online = await persistence.salvar('pre', {
 assert.equal(online.ok, true);
 assert.equal(online.remoteConfirmed, true);
 assert.equal(queue.size, 0);
+assert.equal(durableWrites, 0, 'sucesso online deve produzir zero escrita no WAL');
 assert.equal(persistence.temPendente('pre', 'pre-online'), false);
 
-/* Restaurar não pode ser apenas reintroduzir o objeto na memória: primeiro
-   nasce um WAL `restore`, depois o soft-delete remoto volta a NULL e o recibo
-   exato remove a intenção cifrada. */
+/* Restaurar online depende do recibo remoto, sem criar uma cópia no aparelho. */
 const restored = await persistence.restaurar('pre', {
   _id: 'pre-restored', _relVersion: 2, _relOrg: current.organizationId,
   nome: 'Paciente Restaurado', data: '2026-10-07'
@@ -256,6 +263,7 @@ assert.equal(restored.ok, true);
 assert.equal(restored.remoteConfirmed, true);
 assert.equal(restored.row.deleted_at, null);
 assert.equal(queue.size, 0);
+assert.equal(durableWrites, 0);
 
 /* Resposta perdida: a operação permanece; reconnect usa o MESMO UUID/checksum
    e reconhece a linha que o servidor já havia confirmado. */
@@ -273,16 +281,17 @@ assert.equal(drained.enviados, 1);
 assert.equal(sends, sentBeforeDrain + 1);
 assert.equal(queue.size, 0, 'recibo repetido deve retirar a WAL sem duplicar');
 
-/* Falha de autorização não pode ser rotulada como falta de internet. A única
-   cópia continua cifrada e bloqueada para correção/reautenticação. */
+/* Falha de autorização não é indisponibilidade: intenção só em memória. */
 mode = 'forbidden';
 const forbidden = await persistence.salvar('pre', {
   _id: 'pre-forbidden', _relVersion: 1, nome: 'Paciente C', data: '2026-10-07'
 });
 assert.equal(forbidden.queued, false);
 assert.equal(forbidden.blocked, true);
-assert.equal(forbidden.durable, true);
-assert.equal(queue.size, 1);
+assert.equal(forbidden.durable, false);
+assert.equal(queue.size, 0);
+assert.ok(Array.from(persistence._intencoesMemoria.values()).some(x => x.entityId === 'pre-forbidden'),
+  'erro de autorização preserva a intenção transitória sem alegar durabilidade');
 
 /* Offline confirmado não tenta fetch e deixa a operação no cofre. */
 navigator.onLine = false;
@@ -295,7 +304,7 @@ assert.equal(offline.durable, true);
 assert.equal(sends, beforeOffline);
 navigator.onLine = true;
 
-/* Conflito mantém os dois lados e não apaga a operação sem recibo. */
+/* Conflito preserva as duas versões em memória e não inventa persistência offline. */
 mode = 'conflict';
 const conflict = await persistence.salvar('pre', {
   _id: 'pre-conflict', _relVersion: 1, nome: 'Paciente E', data: '2026-10-07'
@@ -303,10 +312,10 @@ const conflict = await persistence.salvar('pre', {
 assert.equal(conflict.blocked, true);
 assert.equal(conflict.queued, false);
 assert.equal(conflitos.length > 0, true);
-assert.equal(queue.size, 3);
+assert.equal(conflict.durable, false);
+assert.equal(queue.size, 1);
 
-/* Adendo de prontuário finalizado usa o MESMO WAL cifrado antes do INSERT
-   append-only; não pode ficar apenas na memória quando a rede cai. */
+/* Adendo online é append-only remoto. Offline confirmado usa o WAL cifrado. */
 mode = 'success';
 const addendum = await persistence.salvarAdendo('pre', {
   _id: 'pre-finalizado', _relOrg: current.organizationId, _finalizado: true
@@ -341,4 +350,178 @@ assert.equal(persistence._reciboValido({ ...queuedAddendum, contexto: snapshot()
 }), false, 'colisão de ID com conteúdo diferente nunca pode confirmar o WAL');
 navigator.onLine = true;
 
-console.log('  ✓ D3b: nuvem primária, WAL cifrado, recibo idempotente e falhas honestas');
+/* Autorizar uma cópia offline exige indisponibilidade comprovada, não uma
+   rejeição de negócio, um recibo incorreto ou um erro de programação. */
+assert.equal(persistence.indisponivel(), false);
+for (const statusCode of [400, 401, 403, 404, 409, 422]) {
+  navigator.onLine = false;
+  assert.equal(persistence.indisponivel({ ok: false, status: statusCode }), false,
+    `HTTP ${statusCode} explícito não pode autorizar persistência offline`);
+}
+assert.equal(persistence.indisponivel(), true);
+assert.equal(persistence.indisponivel({ conflict: true, motivo: 'versao_divergente' }), false);
+navigator.onLine = true;
+for (const statusCode of [408, 425, 429, 500, 503, 504]) {
+  assert.equal(persistence.indisponivel({ ok: false, status: statusCode }), true);
+}
+assert.equal(persistence.indisponivel(null, new TypeError('Failed to fetch')), true);
+assert.equal(persistence.indisponivel(null, new Error('erro interno')), false);
+assert.equal(persistence.indisponivel({ ok: false, motivo: 'token' }), false);
+
+for (const failure of ['unexpected', 'bad-receipt']) {
+  mode = failure;
+  const writesBefore = durableWrites;
+  const result = await persistence.salvar('pre', { _id: failure, _relVersion: 1, nome: 'Em memória' });
+  assert.equal(result.ok, false);
+  assert.equal(result.durable, false);
+  assert.equal(durableWrites, writesBefore, `${failure} não pode criar WAL`);
+}
+mode = 'server-down';
+const serverBefore = durableWrites;
+const serverDown = await persistence.salvar('pre', { _id: 'server-down', _relVersion: 1, nome: 'Servidor indisponível' });
+assert.equal(serverDown.queued, true);
+assert.equal(serverDown.durable, true);
+assert.equal(durableWrites, serverBefore + 1);
+
+/* Quota offline preserva a intenção em memória e informa falha; nunca afirma
+   proteção quando a transação cifrada não concluiu. */
+const oldStage = filaCifrada.enfileirar;
+filaCifrada.enfileirar = async () => { throw filaCifrada._erro('quota', 'sem espaço'); };
+navigator.onLine = false;
+const noSpace = await persistence.salvar('pre', { _id: 'sem-espaco', nome: 'Não confirmado' });
+assert.equal(noSpace.durable, false);
+assert.equal(noSpace.queued, false);
+assert.ok(Array.from(persistence._intencoesMemoria.values()).some(x => x.entityId === 'sem-espaco'));
+filaCifrada.enfileirar = oldStage;
+navigator.onLine = true;
+
+/* Exercise the real AES-GCM vault with a driver boundary, rather than
+   accepting the fake queue's "encrypted" label as proof. Only ciphertext
+   operation rows may cross the durable storage boundary after an outage. */
+const vaultSource = between('const filaCifrada = {', '\n\n/* FIM DA PLATAFORMA DE CONTEXTO E FILA OFFLINE */');
+const envelopesReal = new Map(), operationsReal = new Map(), metadataReal = new Map();
+const storageEvents = [];
+const copy = value => value == null ? value : structuredClone(value);
+const driverReal = {
+  getEnvelope: async key => copy(envelopesReal.get(key) || null),
+  async addEnvelope(value) { envelopesReal.set(value.ownerKey, copy(value)); return true; },
+  getOperation: async key => copy(operationsReal.get(key) || null),
+  async addOperation(value) {
+    storageEvents.push(['add', copy(value)]);
+    assert.ok(value.ciphertext && value.iv, 'a transação offline recebe somente o envelope cifrado');
+    assert.equal(Object.hasOwn(value, 'payload'), false);
+    assert.doesNotMatch(JSON.stringify(value), /Segredo clínico|Nome confidencial/);
+    operationsReal.set(value.operationId, copy(value)); return true;
+  },
+  listOperations: async ownerKey => Array.from(operationsReal.values()).filter(x => x.ownerKey === ownerKey).map(copy),
+  async deleteOperation(key) { storageEvents.push(['delete', key]); operationsReal.delete(key); },
+  async updateOperation(key, patch) {
+    const value = operationsReal.get(key);
+    if (!value) return null;
+    storageEvents.push(['update', copy(patch)]);
+    const updated = { ...value, ...copy(patch) }; operationsReal.set(key, updated); return copy(updated);
+  },
+  getMeta: async ownerKey => copy(metadataReal.get(ownerKey) || null),
+  async putMeta(value) { metadataReal.set(value.ownerKey, copy(value)); }
+};
+let realMode = 'success', realSends = 0;
+const transportReal = {
+  ...cloudRel,
+  async enviarRegistro(_mod, item, opts) {
+    realSends++;
+    if (realMode === 'outage') return { ok: false, motivo: 'rede' };
+    if (realMode === 'auth') return { ok: false, status: 403, motivo: 'permissão negada' };
+    return { ok: true, row: { organization_id: current.organizationId, legacy_id: item._id,
+      version: Number(item._relVersion || 0) + 1,
+      last_operation_id: opts.operation.id, last_operation_checksum: opts.operation.checksum } };
+  }
+};
+const realRuntime = {
+  console, crypto: webcrypto, TextEncoder, TextDecoder, atob, btoa, Uint8Array, ArrayBuffer,
+  Set, Map, Date, JSON, Promise, structuredClone, navigator,
+  contextoAba: { ...contextoAba, donoFila: () => snapshot() },
+  cloudRel: transportReal, migracaoFase4, syncStatus, cloud, pacientes, agenda
+};
+realRuntime.window = realRuntime; realRuntime.globalThis = realRuntime;
+vm.createContext(realRuntime);
+vm.runInContext(`${vaultSource}\n${engine}\nglobalThis.__vault = filaCifrada; globalThis.__transport = persistenciaCloudFirst;`, realRuntime);
+const realVault = realRuntime.__vault, realTransport = realRuntime.__transport;
+realVault._definirDriverParaTeste(driverReal);
+realVault._buscarKekServidor = async () => ({ material: Uint8Array.from({ length: 32 }, (_, i) => i + 1), keyVersion: 1 });
+await realVault.preparar();
+const realOnline = await realTransport.salvar('pre', { _id: 'real-online', nome: 'Nome confidencial', texto: 'Segredo clínico' });
+assert.equal(realOnline.remoteConfirmed, true);
+assert.equal(storageEvents.length, 0, 'online o driver não pode receber nem escrita nem remoção de prontuário');
+realMode = 'auth';
+const realAuth = await realTransport.salvar('pre', { _id: 'real-auth', nome: 'Nome confidencial' });
+assert.equal(realAuth.durable, false);
+assert.equal(storageEvents.length, 0, 'negação de acesso não autoriza o driver cifrado');
+realMode = 'outage';
+const realOutage = await realTransport.salvar('pre', { _id: 'real-offline', nome: 'Nome confidencial', texto: 'Segredo clínico' });
+assert.equal(realOutage.durable, true);
+assert.equal(operationsReal.size, 1);
+assert.equal((await realVault.listar())[0].payload.item.texto, 'Segredo clínico');
+realMode = 'success';
+assert.equal((await realTransport.drenar()).enviados, 1);
+assert.equal(operationsReal.size, 0, 'recibo comprovado deve remover a única cópia cifrada');
+assert.equal(storageEvents.filter(([event]) => event === 'delete').length, 1);
+assert.equal(realSends, 4);
+
+/* A newly online edit must not leap ahead of its older offline intent. The
+   old version is confirmed first; the new one uses that causal receipt and
+   must not create an additional WAL while the server is available. */
+navigator.onLine = false;
+await realTransport.salvar('pre', { _id: 'causal-online', _relVersion: 1, nome: 'Primeira edição' });
+const writesBeforeCausal = storageEvents.filter(([event]) => event === 'add').length;
+navigator.onLine = true;
+const causalOnline = await realTransport.salvar('pre', { _id: 'causal-online', _relVersion: 1, nome: 'Segunda edição' });
+assert.equal(causalOnline.remoteConfirmed, true);
+assert.equal(causalOnline.row.version, 3, 'nova intenção usa o recibo da anterior, sem sobrepor a história');
+assert.equal(storageEvents.filter(([event]) => event === 'add').length, writesBeforeCausal);
+assert.equal(operationsReal.size, 0);
+
+/* Token-renewal failures must carry the same strict availability semantics.
+   In particular, an empty 403 body or an unconfirmed email is not an outage. */
+const clientSource = await readFile(resolve(root, 'src/platform/cloud-client.js'), 'utf8');
+const authStart = clientSource.indexOf('  _classificarFalhaAuth(r, data) {');
+const authEnd = clientSource.indexOf('  /* A última falha', authStart);
+const classifyAuth = vm.runInNewContext('({' + clientSource.slice(authStart, authEnd) + '})')._classificarFalhaAuth;
+assert.equal(classifyAuth({ status: 403 }, null).tipo, 'credencial');
+assert.equal(classifyAuth({ status: 401 }, null).tipo, 'credencial');
+assert.equal(classifyAuth({ status: 422 }, null).tipo, 'credencial');
+assert.equal(classifyAuth({ status: 200 }, null).tipo, 'protocolo');
+assert.equal(classifyAuth({ status: 503 }, null).tipo, 'fora');
+const renewStart = clientSource.indexOf('  async _renovarToken() {');
+const renewEnd = clientSource.indexOf('  /* Quando a renovação do token falha', renewStart);
+let renewalCase = { status: 403, data: null };
+const renewalCloud = {
+  _refreshPromise: null, _servidorFora: false,
+  config: () => ({ url: 'https://nuvem.test' }),
+  session: () => ({ refresh_token: 'r', user: { id: current.userId } }),
+  _headers: () => ({}), _classificarFalhaAuth: classifyAuth
+};
+const renewalRuntime = {
+  cloud: renewalCloud, contextoAba, persistenciaCloudFirst: persistence,
+  async fetch() {
+    if (renewalCase.error) throw renewalCase.error;
+    return { status: renewalCase.status, ok: renewalCase.status < 400, json: async () => renewalCase.data };
+  }
+};
+const renewToken = vm.runInNewContext('({' + clientSource.slice(renewStart, renewEnd) + '})', renewalRuntime)._renovarToken;
+for (const candidate of [
+  { status: 403, data: null, outage: false },
+  { status: 401, data: null, outage: false },
+  { status: 400, data: { message: 'Email not confirmed' }, outage: false },
+  { status: 200, data: null, outage: false },
+  { status: 503, data: null, outage: true },
+  { status: 429, data: null, outage: true },
+  { error: new TypeError('Failed to fetch'), outage: true },
+  { error: new Error('erro interno'), outage: false }
+]) {
+  renewalCase = candidate;
+  assert.equal(await renewToken(), false);
+  assert.equal(renewalCloud._servidorFora, candidate.outage,
+    'a renovação só pode permitir WAL clínico quando a indisponibilidade foi comprovada');
+}
+
+console.log('  ✓ D3b: online sem escrita durável, outage AES-GCM, recibo idempotente e rejeições só em memória');

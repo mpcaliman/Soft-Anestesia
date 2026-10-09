@@ -1,3 +1,4 @@
+import { readAppSource, readCompiledActions } from './helpers/read-app-source.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
@@ -9,7 +10,8 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const rootArg = process.argv.find(arg => arg.startsWith('--app-root='));
 const appRoot = rootArg ? resolve(process.cwd(), rootArg.slice('--app-root='.length)) : repo;
 const indexArg = process.argv.find(arg => arg.startsWith('--index='));
-const html = await readFile(indexArg ? indexArg.slice('--index='.length) : resolve(appRoot, 'index.html'), 'utf8');
+const html = indexArg ? await readFile(indexArg.slice('--index='.length), 'utf8') : await readAppSource(appRoot);
+const SoftActions = await readCompiledActions(appRoot);
 const vaultSource = await readFile(resolve(appRoot, 'src/platform/session-vault.js'), 'utf8');
 function objectSource(text, name) {
   const start = text.indexOf('const ' + name + ' = {');
@@ -34,7 +36,7 @@ let nextBlobId = 0;
 let wakeGenerator;
 let generatorStarted;
 const waitingForGenerator = () => new Promise(resolve => {generatorStarted = resolve;});
-const sandbox = vm.createContext({
+const sandbox = vm.createContext({ SoftActions,
   console,crypto:webcrypto,TextEncoder,TextDecoder,Uint8Array,ArrayBuffer,Blob,atob,btoa,structuredClone,
   localStorage: {
     getItem: key => cfg.get(context.organizationId + '|' + key) ?? null,
@@ -54,6 +56,7 @@ const sandbox = vm.createContext({
   contextoAba:{capturar:current,atual:current,donoFila:current,operational:() => true,
     corresponde:matches,tabAtiva:() => false},
   cloudRel:{_contextoValido:matches},
+  rascunhosSync:{_indisponivel:(res,error) => !!error && /network|failed to fetch/i.test(error.message || '')},
   cloud:{estaConfigurado:() => true,estaLogado:() => true},
   historico:{_dataItem:rec => rec.data},arquivo:{_nomeDe:rec => rec.nome},
   store:{list:mod => structuredClone(records.get(context.organizationId + '|' + mod) || []),
@@ -68,7 +71,10 @@ const {filaCifrada:vault,pdfFila:queue,pdfBackup:backup} = sandbox.api;
 /* Run the actual AES-GCM snapshot implementation. The driver is in memory;
    only authentication/key retrieval is replaced at this test boundary. */
 vault._driverAtual = () => ({
-  async putSnapshot(value) {snapshots.set(value.snapshotId,structuredClone(value)); return true;},
+  async putSnapshot(value) {
+    if(abortNext){abortNext=false;throw new Error('IndexedDB transaction aborted');}
+    const old=snapshots.get(value.snapshotId);if(old && old.updatedAt > value.updatedAt)return false;
+    snapshots.set(value.snapshotId,structuredClone(value)); return true;},
   async listSnapshots(ownerKey) {return [...snapshots.values()].filter(s => s.ownerKey === ownerKey).map(value => structuredClone(value));}
 });
 vault.preparar = async () => {
@@ -76,6 +82,7 @@ vault.preparar = async () => {
   if (!keys.has(ownerKey)) keys.set(ownerKey,await webcrypto.subtle.generateKey({name:'AES-GCM',length:256},true,['encrypt','decrypt']));
   return {ownerKey,key:keys.get(ownerKey)};
 };
+queue._migrarLegado = async () => {};
 /* The fake IDB deliberately permits request success followed by transaction
    abort, which must NEVER be advertised as a durable PDF. */
 queue._loja = async () => {
@@ -124,7 +131,7 @@ assert.equal(sent,1,'segunda passada/restauração não repete upload confirmado
 await backup.regen.rodar({de:'2026-09-01',ate:'2026-09-30',forcar:true});
 assert.equal(sent,2,'forçar permite repetir deliberadamente');
 
-backup.enviarSupabase = async () => {sent++;return false;};
+backup.enviarSupabase = async (blob,name,owner,operation={}) => {sent++;operation.falha?.(new TypeError('Failed to fetch'));return false;};
 await backup.regen.rodar({de:'2026-09-01',ate:'2026-09-30',forcar:true});
 assert.equal((await queue.listar()).length,1);
 const queuedReceipt = (await vault.listarSnapshots(backup.regen.RECIBOS_NS))[0].payload;
@@ -132,7 +139,7 @@ assert.equal(queuedReceipt.remoto,false,'fila durável não é confirmação de 
 assert.equal(queuedReceipt.queued,true);
 await backup.regen.rodar({de:'2026-09-01',ate:'2026-09-30'});
 assert.equal(sent,3,'cópia pendente já durável não é regenerada à toa');
-blobs.clear();
+await queue.limpar();
 await backup.regen.rodar({de:'2026-09-01',ate:'2026-09-30'});
 assert.equal(sent,4,'fila descartada não impede recuperar um PDF ainda não enviado');
 
@@ -164,8 +171,8 @@ assert.equal(sent,countAfterDrain,'recibo remoto reidratado não repete PDF já 
 /* With two expected destinations, discarding Drive is not evidence that
    Drive received it. Only Supabase's later confirmed upload is promoted. */
 backup.salvarCfg({supabase:true,drive:true,driveClientId:'test-drive'});
-backup.enviarSupabase = async () => {sent++;return false;};
-backup.enviarDrive = async () => false;
+backup.enviarSupabase = async (blob,name,owner,operation={}) => {sent++;operation.falha?.(new TypeError('Failed to fetch'));return false;};
+backup.enviarDrive = async (blob,name,interactive,operation={}) => {operation.falha?.(new TypeError('Failed to fetch'));return false;};
 await backup.regen.rodar({de:'2026-09-01',ate:'2026-09-30',forcar:true});
 const bothQueued = await queue.listar();
 assert.equal(bothQueued.length,2);

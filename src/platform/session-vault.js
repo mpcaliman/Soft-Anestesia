@@ -43,8 +43,10 @@
    `localStorage` é compartilhado por todas as abas da origem. Por isso ele
    nunca pode decidir qual usuário ou clínica recebe uma leitura/escrita: uma
    aba poderia mudar o ponteiro enquanto outra ainda salva uma ficha. O
-   contexto operacional mora em `sessionStorage`, é confirmado pelo perfil da
-   sessão Supabase e recebe uma geração nova em cada troca controlada.
+   contexto operacional pertence ao documento autenticado, é confirmado pelo
+   perfil Supabase e recebe uma geração nova em cada troca controlada. Uma
+   cópia em `sessionStorage` serve ao documento em execução; nunca autoriza um
+   documento novo, pois o navegador pode restaurá-la mesmo após uma queda.
 
    O identificador do aparelho é não clínico e serve somente para devolver a
    fila offline ao mesmo aparelho. O BroadcastChannel transporta apenas
@@ -64,12 +66,26 @@ const contextoAba = (() => {
   let real = null;
 
   try { real = window.localStorage; } catch (e) { real = null; }
-  /* Limpa credenciais persistentes deixadas por versões antigas antes de a
-     fachada por clínica ser instalada. Sessões válidas vivem exclusivamente
-     em sessionStorage e nunca podem ser herdadas por outra pessoa. */
-  try {
-    if (real) [AUTH_KEY, AUTH_DAY_KEY, CLOUD_KEY].forEach(k => real.removeItem(k));
-  } catch (e) {}
+  /* A fronteira de acesso é o boot, não o evento de fechamento. Chromium pode
+     recuperar sessionStorage ao restaurar uma aba após SIGKILL, sem disparar
+     pagehide. Não há credencial do documento anterior que autorize este.
+     Não tocamos no IndexedDB: pendências cifradas continuam pertencendo ao
+     usuário/clínica/aparelho e exigem uma nova autenticação para abrir. */
+  const limparCredenciais = loja => {
+    if (!loja) return;
+    const credenciais = [AUTH_KEY, AUTH_DAY_KEY, CLOUD_KEY, 'medsys.v7.pdfbk.token'];
+    const chaves = [];
+    try {
+      for (let i = 0; i < loja.length; i++) {
+        const k = loja.key(i);
+        if (k && credenciais.some(base => k === base || k.startsWith(base + '@'))) chaves.push(k);
+      }
+      credenciais.concat(chaves).forEach(k => { try { loja.removeItem(k); } catch (e) {} });
+      loja.removeItem(CONTEXT_KEY);
+    } catch (e) {}
+  };
+  limparCredenciais(real);
+  try { limparCredenciais(sessionStorage); } catch (e) {}
 
   const idNovo = (prefixo) => {
     try { if (crypto && crypto.randomUUID) return prefixo + crypto.randomUUID(); } catch (e) {}
@@ -90,20 +106,19 @@ const contextoAba = (() => {
     }
   } catch (e) { deviceId = idNovo('dev-efemero-'); }
 
-  const salvo = lerJSON(typeof sessionStorage !== 'undefined' ? sessionStorage : null, CONTEXT_KEY);
   let estado = {
     version: 1,
     tabId: idNovo('tab-'),
     deviceId,
-    userId: salvo && salvo.userId || '',
-    organizationId: salvo && salvo.organizationId || '',
-    role: salvo && salvo.role || '',
-    organizationName: salvo && salvo.organizationName || '',
-    organizationsCount: salvo && Number.isInteger(salvo.organizationsCount) ? salvo.organizationsCount : null,
-    semOrganizationConfirmed: !!(salvo && salvo.semOrganizationConfirmed),
-    verified: !!(salvo && salvo.verified),
-    generation: Math.max(0, Number(salvo && salvo.generation) || 0),
-    boundAt: salvo && salvo.boundAt || ''
+    userId: '',
+    organizationId: '',
+    role: '',
+    organizationName: '',
+    organizationsCount: null,
+    semOrganizationConfirmed: false,
+    verified: false,
+    generation: 0,
+    boundAt: ''
   };
 
   const copia = () => Object.freeze(Object.assign({}, estado));
@@ -136,7 +151,8 @@ const contextoAba = (() => {
   const sessaoCloudDisponivel = () =>
     lerJSON(typeof sessionStorage !== 'undefined' ? sessionStorage : null, CLOUD_KEY);
 
-  /* Restauração/migração só aceita a interseção das duas identidades. Um
+  /* Somente sessões criadas depois deste boot podem ser combinadas. As
+     credenciais restauradas pelo navegador já foram removidas acima; um
      ponteiro legado isolado nunca abre uma clínica. */
   const restaurarDeSessoes = () => {
     const a = sessaoAuthDisponivel();
@@ -199,7 +215,6 @@ const contextoAba = (() => {
     try { real.setItem(LEASES_KEY, JSON.stringify(lerLeases().filter(x => x.tabId !== estado.tabId))); } catch (e) {}
   };
 
-  restaurarDeSessoes();
   salvar();
   atualizarLease();
   try { setInterval(atualizarLease, 15000); } catch (e) {}
@@ -1139,6 +1154,23 @@ const filaCifrada = {
         namespace: ns, key: chave, updatedAt, checksum };
     })();
   },
+  /* A remoção conserva só uma barreira de revisão sem conteúdo clínico.
+     Uma cifragem iniciada antes do recibo nunca pode ressuscitar o payload. */
+  removerSnapshot(namespace, key) {
+    const dono = filaCifrada._dono();
+    const ownerKey = filaCifrada._donoKey(dono);
+    const ns = String(namespace || ''), chave = String(key || '');
+    if (!ns || !chave || ns.length > 100 || chave.length > 200) {
+      return Promise.reject(filaCifrada._erro('snapshot_invalido', 'Identificador de recuperação inválido.'));
+    }
+    const reg = { snapshotId: filaCifrada._snapshotId(ownerKey, ns, chave), ownerKey,
+      namespace: ns, key: chave, updatedAt: filaCifrada._snapshotClock(ownerKey), deleted: true };
+    const driver = filaCifrada._driverAtual();
+    if (typeof driver.putSnapshot !== 'function') return Promise.reject(
+      filaCifrada._erro('snapshot_indisponivel', 'O armazenamento cifrado de recuperação não está disponível.'));
+    return Promise.resolve(driver.putSnapshot(reg)).then(gravou => ({ ok: true, durable: true,
+      removed: true, superseded: gravou === false, namespace: ns, key: chave }));
+  },
   async _decifrarSnapshot(reg, chave) {
     if (!reg || !reg.snapshotId || !reg.ciphertext || !reg.iv || !reg.aad) {
       throw filaCifrada._erro('snapshot_corrompido', 'Snapshot cifrado incompleto.');
@@ -1181,7 +1213,7 @@ const filaCifrada = {
     if (!contextoAba.corresponde(contexto)) {
       throw filaCifrada._erro('contexto_trocado', 'O usuário mudou durante a leitura dos snapshots.');
     }
-    const filtrados = (regs || []).filter(reg => !namespace || reg.namespace === String(namespace));
+    const filtrados = (regs || []).filter(reg => !reg.deleted && (!namespace || reg.namespace === String(namespace)));
     filtrados.sort((a, b) => String(a.updatedAt || '').localeCompare(String(b.updatedAt || '')) ||
       String(a.snapshotId || '').localeCompare(String(b.snapshotId || '')));
     const out = [];

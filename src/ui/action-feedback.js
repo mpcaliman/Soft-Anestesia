@@ -2,7 +2,7 @@
    Não declara sucesso: a confirmação real continua no estado canônico da
    nuvem, depois do recibo, ou no aviso explícito de trabalho offline. */
 (function () {
-  const PADRAO_ONCLICK = /\.(salvar|salvarComoNovo|atualizar|recalcular)\s*\(/i;
+  const PADRAO_ONCLICK = /\.(salvar|salvarComoNovo|atualizar|recalcular)\b/i;
   const PADRAO_TEXTO = /\b(salvar|atualizar|recalcular)\b/i;
 
   function flash(btn, label) {
@@ -25,7 +25,7 @@
   document.addEventListener('click', function (e) {
     const btn = e.target && e.target.closest ? e.target.closest('button') : null;
     if (!btn || btn.disabled || btn._flashAtivo) return;
-    const oc = btn.getAttribute('onclick') || '';
+    const oc = btn.getAttribute('data-soft-name-click') || btn.getAttribute('onclick') || '';
     const txt = (btn.textContent || '').toLowerCase();
     if (!(PADRAO_ONCLICK.test(oc) || PADRAO_TEXTO.test(txt))) return;
     const salvar = /salvar/i.test(oc) || /\bsalv/i.test(txt);

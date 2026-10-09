@@ -385,14 +385,19 @@ const cloud = {
     return 'Sessão da nuvem expirada — entre de novo.';
   },
   _classificarFalhaAuth(r, data) {
-    const status = (r && r.status) || 0;
+    const status = Number(r && r.status) || 0;
     const texto = String((data && (data.error_description || data.msg || data.message || data.error)) || '');
-    if (/paus|suspend|exceed|quota|over.?limit/i.test(texto)) return { tipo: 'fora', detalhe: texto };
-    /* E-MAIL NUNCA CONFIRMADO é o caso que mais parece senha errada e menos é:
-       a senha pode estar certa, e trocá-la não resolve nada. */
+    /* Uma rejeição explícita nunca autoriza a criação de uma cópia offline,
+       mesmo quando a resposta não contém JSON. */
+    if (status === 401 || status === 403) return { tipo: 'credencial', detalhe: texto || ('HTTP ' + status) };
     if (/not.?confirmed|confirma/i.test(texto)) return { tipo: 'nao_confirmado', detalhe: texto };
     if (status === 429) return { tipo: 'excesso', detalhe: texto };
-    if (!data || status === 0 || status >= 500 || status === 408) return { tipo: 'fora', detalhe: texto || ('HTTP ' + status) };
+    if ([408,425].indexOf(status) >= 0 || status >= 500 && status < 600) {
+      return { tipo: 'fora', detalhe: texto || ('HTTP ' + status) };
+    }
+    if (status >= 400 && status < 500) return { tipo: 'credencial', detalhe: texto || ('HTTP ' + status) };
+    if (status === 0) return { tipo: 'fora', detalhe: texto || 'Sem resposta do servidor' };
+    if (!data || !data.access_token) return { tipo: 'protocolo', detalhe: texto || 'Resposta de autenticação incompleta' };
     return { tipo: 'credencial', detalhe: texto };
   },
   /* A última falha fica guardada para a TELA de entrada poder dizer o mesmo
@@ -575,7 +580,7 @@ const cloud = {
         try { data = await r.json(); } catch (e) { data = null; }
         if (!r.ok || !data || !data.access_token) {
           const f = cloud._classificarFalhaAuth(r, data);
-          cloud._servidorFora = f.tipo !== 'credencial';
+          cloud._servidorFora = f.tipo === 'fora' || f.tipo === 'excesso';
           return false;
         }
         cloud._servidorFora = false;
@@ -593,7 +598,11 @@ const cloud = {
            token antigo por cima de uma sessão mais nova da mesma pessoa. */
         if (atual.refresh_token && atual.refresh_token !== s.refresh_token) return true;
         return cloud._gravarSessao(sess);
-      } catch (e) { cloud._servidorFora = true; return false; }
+      } catch (e) {
+        try { cloud._servidorFora = persistenciaCloudFirst.indisponivel(null, e); }
+        catch (er) { cloud._servidorFora = /failed to fetch|network|load failed|timeout|timed out/i.test(String(e && e.message || '')); }
+        return false;
+      }
     })();
     try { return await cloud._refreshPromise; }
     finally { cloud._refreshPromise = null; }
@@ -1219,6 +1228,7 @@ const cloud = {
       /* rascunhos: ficha começada no celular aparece no computador */
       agendar(() => {
         try { rascunhosSync.enviarTodos(); } catch (e) {}
+        try { edicaoViva.enviarTodos(); } catch (e) {}
         try { rascunhosSync.puxarTodos({ silent: true }); } catch (e) {}
       }, 3000);
       /* cadastros e modelos DA CLÍNICA: equipe, convênios, hospitais,

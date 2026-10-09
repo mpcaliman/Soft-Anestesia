@@ -14,9 +14,9 @@ const storeSource = await readFile(resolve(root, 'src/platform/clinical-store.js
 const cashMigration = await readFile(resolve(here, '../database/migrations/0027_cloud_only_cash_closings.sql'), 'utf8');
 
 class MemoryStorage {
-  constructor() { this.values = new Map(); }
+  constructor() { this.values = new Map(); this.writes = []; }
   getItem(key) { return this.values.has(String(key)) ? this.values.get(String(key)) : null; }
-  setItem(key, value) { this.values.set(String(key), String(value)); }
+  setItem(key, value) { this.writes.push(String(key)); this.values.set(String(key), String(value)); }
   removeItem(key) { this.values.delete(String(key)); }
 }
 
@@ -63,12 +63,21 @@ assert.equal(store.list('pre')[0].nome, 'Paciente Nuvem', 'a tela aberta continu
 const pendente = { _id: 'pendente', nome: 'Paciente Offline' };
 store._marcarPendente('pre', pendente._id);
 store.setList('pre', [store.list('pre')[0], pendente]);
-assert.deepEqual(JSON.parse(localStorage.getItem('records.pre')).map(x => x._id), ['pendente'],
-  'antes da cifragem, somente a alteração ainda não protegida pode sobreviver a uma queda');
+assert.equal(localStorage.getItem('records.pre'), null,
+  'a intenção ainda não cifrada continua somente em memória, sem janela em claro');
+assert.equal(localStorage.writes.filter(key => key === 'records.pre').length, 1,
+  'setList não pode criar nenhuma gravação clínica nova, online ou offline');
 store.protegidoNoCofre('pre', pendente._id);
 assert.equal(localStorage.getItem('records.pre'), null,
-  'depois que o WAL cifra a operação, a cópia clínica em claro deve desaparecer');
+  'a proteção cifrada não cria cópia clínica em claro');
 assert.equal(store.list('pre').length, 2, 'a remoção durável não pode apagar a memória da aba');
+
+/* A runtime demo flag cannot authorize plaintext clinical data in real
+   storage. Demo persistence is restricted to its synthetic boot namespace. */
+localStorage.setItem('medsys.v7.demo', '1');
+store.setList('pre', [{ _id: 'runtime-demo', nome: 'Dado real não vira demo' }]);
+assert.equal(localStorage.getItem('records.pre'), null);
+localStorage.removeItem('medsys.v7.demo');
 
 generation++;
 organizationId = 'bbbbbbbb-2222-4222-8222-222222222222';

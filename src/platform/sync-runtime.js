@@ -46,6 +46,8 @@ const realtime = {
        está publicada no Realtime desde a 0002 — faltava escutá-la. */
     appointments: 'agenda',
     patients: 'pacientes',
+    encounters: '__encounters__',
+    anesthesia_timeline_events: '__timeline__',
     preanesthetic_assessments: 'pre',
     anesthesia_records: 'anestesia',
     recovery_records: 'recuperacao',
@@ -66,6 +68,7 @@ const realtime = {
 
   _ws: null, _ref: 0, _hb: null, _timer: null, _tentativa: 0, _ligado: false,
   _org: null, _contexto: null, _recebidos: 0, _ultimoEvento: 0,
+  _canais: new Map(), _relacionados: new Map(), _avisos: new Map(), _renovando: null,
 
   ativo() { return !!(realtime._ws && realtime._ws.readyState === 1 && realtime._ligado); },
   _proxRef() { return String(++realtime._ref); },
@@ -105,12 +108,21 @@ const realtime = {
       const ws = new WebSocket(url);
       realtime._ws = ws;
       ws.onopen = () => {
+        if (realtime._ws !== ws) return;
         if (!contextoAba.corresponde(contexto)) { realtime._encerrar(true); return; }
-        realtime._tentativa = 0; realtime._entrarNosCanais(s.access_token, contexto); realtime._baterCoracao();
-        realtime._setStatus('ativo', 'var(--success,#16a34a)');
+        const atual = cloud.session();
+        if (!atual || !atual.user || atual.user.id !== contexto.userId || !atual.access_token) {
+          realtime._encerrar(true); return;
+        }
+        realtime._tentativa = 0; realtime._entrarNosCanais(atual.access_token, contexto); realtime._baterCoracao();
+        realtime._setStatus('assinando canais…', 'var(--text-mute)');
       };
-      ws.onmessage = (ev) => { try { realtime._receber(JSON.parse(ev.data), contexto); } catch (e) {} };
+      ws.onmessage = (ev) => {
+        if (realtime._ws !== ws) return;
+        try { realtime._receber(JSON.parse(ev.data), contexto); } catch (e) {}
+      };
       ws.onclose = () => {
+        if (realtime._ws !== ws) return;
         realtime._encerrar(false);
         realtime._setStatus('reconectando…', '#7a4b12');
         realtime._reagendar();
@@ -127,9 +139,13 @@ const realtime = {
 
   _entrarNosCanais(token, contexto) {
     if (!contextoAba.corresponde(contexto)) return;
+    realtime._canais.clear();
     Object.keys(realtime.TABELAS).forEach(tabela => {
+      const topic = 'realtime:public:' + tabela;
+      const ref = realtime._proxRef();
+      realtime._canais.set(topic, { ref, confirmado: false });
       realtime._enviar({
-        topic: 'realtime:public:' + tabela,
+        topic,
         event: 'phx_join',
         /* filtro por organização no servidor: o aparelho não recebe (nem gasta
            banda com) mudança de clínica que não é a dele */
@@ -140,7 +156,7 @@ const realtime = {
           },
           access_token: token
         },
-        ref: realtime._proxRef()
+        ref, join_ref: ref
       });
     });
     realtime._ligado = true;
@@ -157,35 +173,85 @@ const realtime = {
       if (!realtime._ws || realtime._ws.readyState !== 1) return;
       if (!contextoAba.corresponde(realtime._contexto)) { realtime._encerrar(true); return; }
       realtime._enviar({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: realtime._proxRef() });
-      /* o token expira antes do socket: renova em voo, senão o servidor passa
-         a recusar as mudanças por RLS e o silêncio parece "nada mudou" */
-      try {
-        const s = cloud.session();
-        if (s && s.access_token && s.user && realtime._contexto && s.user.id === realtime._contexto.userId) {
-          realtime._enviar({ topic: 'realtime:public:' + Object.keys(realtime.TABELAS)[0],
-            event: 'access_token', payload: { access_token: s.access_token }, ref: realtime._proxRef() });
-        }
-      } catch (e) {}
+      realtime._renovarToken();
     }, realtime.HEARTBEAT);
+  },
+
+  _renovarToken() {
+    if (realtime._renovando) return realtime._renovando;
+    const contexto = realtime._contexto;
+    const ws = realtime._ws;
+    const renovar = async () => {
+      try {
+        if (!contextoAba.corresponde(contexto) || !ws || ws.readyState !== 1) return false;
+        /* A autenticação pertence a cada canal Phoenix. Atualizar só o primeiro
+           deixa os demais com o JWT vencido durante atendimentos longos. */
+        const ok = await cloud._garantirToken();
+        if (realtime._ws !== ws || !contextoAba.corresponde(contexto)) return false;
+        const s = cloud.session();
+        if (!ok || !s || !s.access_token || !s.user || s.user.id !== contexto.userId) {
+          realtime._encerrar(true); realtime._reagendar(); return false;
+        }
+        for (const [topic, canal] of realtime._canais) {
+          realtime._enviar({ topic, event: 'access_token',
+            payload: { access_token: s.access_token }, ref: realtime._proxRef(), join_ref: canal.ref });
+        }
+        return true;
+      } catch (e) {
+        if (realtime._ws === ws && contextoAba.corresponde(contexto)) {
+          realtime._encerrar(true); realtime._reagendar();
+        }
+        return false;
+      }
+    };
+    const tarefa = renovar();
+    realtime._renovando = tarefa;
+    tarefa.finally(() => { if (realtime._renovando === tarefa) realtime._renovando = null; });
+    return tarefa;
   },
 
   _receber(msg, contexto) {
     if (!contextoAba.corresponde(contexto) || !contextoAba.corresponde(realtime._contexto)) return;
+    if (msg && realtime._canais.has(msg.topic)) {
+      const canal = realtime._canais.get(msg.topic);
+      if (msg.event === 'phx_reply' && msg.ref === canal.ref && msg.payload && msg.payload.status === 'ok') {
+        canal.confirmado = true;
+        if (Array.from(realtime._canais.values()).every(c => c.confirmado)) {
+          realtime._setStatus('ativo', 'var(--success,#16a34a)');
+        }
+        return;
+      }
+      if (msg.event === 'phx_error' || msg.event === 'phx_close' ||
+          (msg.event === 'phx_reply' && msg.payload && msg.payload.status === 'error') ||
+          (msg.event === 'system' && msg.payload && msg.payload.status === 'error')) {
+        realtime._setStatus('canal indisponível — reconectando…', '#b3261e');
+        realtime._encerrar(true); realtime._reagendar(); return;
+      }
+    }
     if (!msg || msg.event !== 'postgres_changes') return;
     const d = msg.payload && msg.payload.data;
     if (!d) return;
     const mod = realtime.TABELAS[d.table];
     if (!mod) return;
+    if ((d.schema && d.schema !== 'public') ||
+        (msg.topic && msg.topic !== 'realtime:public:' + d.table)) return;
     const linha = d.record || d.old_record;
     if (!linha || !linha.id) return;
     if (String(linha.organization_id || '') !== String(contexto.organizationId || '')) return;
+    if (mod === '__encounters__' || mod === '__timeline__') {
+      realtime._receberRelacionado(d.table, linha, d.type, contexto);
+      realtime._marcarMudanca(); return;
+    }
     if (mod === '__addenda__') {
       if (d.type !== 'DELETE') { try { adendos.receberLinha(linha); } catch (e) {} }
       realtime._marcarMudanca(); return;
     }
     if (mod === '__drafts__') {
       if (d.type !== 'DELETE' && linha.module) {
-        try { rascunhosSync.puxar(linha.module); } catch (e) {}
+        try {
+          if (String(linha.module).startsWith('live:')) edicaoViva.receberLinha(linha, contexto);
+          else rascunhosSync.puxar(linha.module);
+        } catch (e) {}
       }
       realtime._marcarMudanca(); return;
     }
@@ -206,16 +272,135 @@ const realtime = {
           ? cloudRel._rowParaAgenda(linha, contexto.organizationId)
           : cloudRel._rowParaRegistro(linha, contexto.organizationId);
       if (!reg || !reg._id) return;
+      if (realtime._preservarEdicaoAberta(mod, reg, contexto)) {
+        realtime._marcarMudanca(); return;
+      }
       /* mesclarLocal já decide por carimbo: o que chega mais velho que o
          daqui é descartado, e o que está aberto na tela não é sobrescrito */
       const r = cloudRel.mesclarLocal(mod, [reg]);
       realtime._recebidos += (r.novos + r.atualizados);
       if (r.novos || r.atualizados) realtime._repintar(mod);
+      if (r.adiados) realtime._avisarConflito(mod, null, contexto);
     } catch (e) {}
     realtime._marcarMudanca();
   },
 
   _marcarMudanca() { realtime._ultimoEvento = Date.now(); },
+
+  _preservarEdicaoAberta(mod, remoto, contexto) {
+    if (!cloudRel._abertoNaTela(remoto._id, mod)) return false;
+    const local = store.getById(mod, remoto._id);
+    if (!local) return false;
+    const vr = cloudRel._versao(remoto), vl = cloudRel._versao(local);
+    const maisNovo = vr && vl ? vr > vl : vr && !vl ? true
+      : cloudRel._quando(remoto) > cloudRel._quando(local);
+    if (!maisNovo) return false;
+    let digitado = {};
+    try { digitado = rascunhos._coletar(mod) || {}; } catch (e) {}
+    /* A versão proposta contém a digitação atual, inclusive campos ainda não
+       salvos. O formulário e sua revisão-base continuam intactos. */
+    const proposto = Object.assign({}, local, digitado, {
+      _id: local._id, _relOrg: contexto.organizationId,
+      _relVersion: local._relVersion, _relUpdatedAt: local._relUpdatedAt
+    });
+    const conflito = cloudRel.registrarConflito(mod, proposto, remoto, { motivo: 'realtime_com_edicao_aberta' });
+    realtime._avisarConflito(mod, conflito, contexto);
+    return true;
+  },
+
+  _avisarConflito(mod, conflito, contexto) {
+    if (!contextoAba.corresponde(contexto)) return;
+    try { syncStatus.refresh(); nuvemEstado.renderMenu(); } catch (e) {}
+    const chave = 'conflito:' + mod;
+    const aviso = realtime._painel(chave, mod,
+      '⚠️ Outra pessoa alterou este registro. Sua digitação e a versão da nuvem foram preservadas.', contexto);
+    if (aviso) {
+      const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn btn-primary';
+      btn.textContent = 'Comparar versões';
+      btn.addEventListener('click', () => {
+        if (!contextoAba.corresponde(contexto)) return;
+        if (conflito && conflito.clientId) cloudRel._abrirConflito(conflito.clientId);
+        else cloudRel.abrirConflitosPendentes();
+      });
+      aviso.appendChild(btn);
+    }
+    try { toast('⚠️ Alteração recebida: compare as versões preservadas.', 'warn'); } catch (e) {}
+  },
+
+  _painel(chave, mod, texto, contexto) {
+    try {
+      if (!contextoAba.corresponde(contexto) || state.currentModule !== mod) return null;
+      const form = document.getElementById('form-' + mod);
+      if (!form) return null;
+      const anterior = realtime._avisos.get(chave); if (anterior) anterior.remove();
+      const painel = document.createElement('section'); painel.className = 'card';
+      painel.setAttribute('role', 'status'); painel.setAttribute('data-clinical-update', chave);
+      painel.style.border = '2px solid var(--warning,#b7791f)';
+      const titulo = document.createElement('p'); titulo.textContent = texto;
+      painel.appendChild(titulo); form.insertBefore(painel, form.firstChild);
+      realtime._avisos.set(chave, painel);
+      return painel;
+    } catch (e) { return null; }
+  },
+
+  relacionados(tabela, filtro = {}) {
+    /* Encontros e eventos possuem colunas próprias; jamais são convertidos
+       para um módulo clínico inexistente ou gravados em localStorage. */
+    if (!contextoAba.corresponde(realtime._contexto)) return [];
+    return Array.from(realtime._relacionados.values())
+      .filter(x => x.tabela === tabela && Object.entries(filtro).every(([k, v]) => String(x.linha[k] || '') === String(v)))
+      .map(x => cloudRel._clone(x));
+  },
+
+  _receberRelacionado(tabela, linha, tipo, contexto) {
+    const chave = tabela + ':' + linha.id;
+    const anterior = realtime._relacionados.get(chave);
+    if (anterior && tipo !== 'DELETE') {
+      const va = Number(anterior.linha.version), vn = Number(linha.version);
+      if ((va && vn && vn <= va) || ((!va || !vn) && linha.updated_at &&
+          String(linha.updated_at) <= String(anterior.linha.updated_at || ''))) return;
+    }
+    const mudanca = { tabela, tipo, linha: cloudRel._clone(linha) };
+    realtime._relacionados.set(chave, mudanca);
+    if (tabela === 'encounters') {
+      const cache = contexto.organizationId + ':' + linha.legacy_id;
+      delete cloudRel._cacheEnc[cache];
+    }
+    /* A linha da operação fica disponível imediatamente em memória e numa
+       notificação visível. Não se substitui uma ficha clínica com dados de
+       encounter/event, nem se altera o formulário em que alguém digita. */
+    try {
+      const mod = state.currentModule;
+      const form = document.getElementById('form-' + mod);
+      const valor = nome => { const el = form && form.querySelector('[name="' + nome + '"]'); return el ? String(el.value || '') : ''; };
+      const item = store.getById(mod, valor('_id'));
+      const casos = [valor('_caseId'), item && item._relEncounterId].filter(Boolean).map(String);
+      const casoKey = valor('_caseKey');
+      const corresponde = tabela === 'encounters'
+        ? casos.includes(String(linha.id)) || (casoKey && casoKey === String(linha.legacy_id || ''))
+        : mod === 'anestesia' && item && String(item._relId || '') === String(linha.anesthesia_record_id || '');
+      if (corresponde) {
+        const painel = realtime._painel(chave, mod, tabela === 'encounters'
+          ? '🔄 O atendimento foi atualizado na clínica. Confira a atualização antes de continuar.'
+          : '🔄 A linha do tempo foi atualizada na clínica. Sua ficha em edição foi preservada.', contexto);
+        if (painel) {
+          const detalhe = document.createElement('pre'); detalhe.style.whiteSpace = 'pre-wrap';
+          detalhe.textContent = JSON.stringify(tabela === 'encounters'
+            ? { procedimento: linha.procedimento, data: linha.data_prevista, horario: linha.hora_prevista,
+                status: linha.status, convenio: linha.convenio, versao: linha.version,
+                atualizadoPor: linha.updated_by, atualizadoEm: linha.updated_at, excluido: tipo === 'DELETE' || !!linha.deleted_at }
+            : { hora: linha.ts, tipo: linha.type, subtipo: linha.subtype, valores: linha.payload,
+                atualizadoEm: linha.updated_at, excluido: tipo === 'DELETE' || !!linha.deleted_at }, null, 2);
+          painel.appendChild(detalhe);
+        }
+      }
+      window.dispatchEvent(new CustomEvent('soft:clinical-related-change', { detail: {
+        organizationId: contexto.organizationId, tabela, id: linha.id, tipo
+      } }));
+    } catch (e) {}
+    realtime._recebidos++;
+    realtime._repintar(tabela === 'encounters' ? 'agenda' : 'anestesia');
+  },
 
   _repintar(mod) {
     try { if (typeof preLanc !== 'undefined') preLanc.renderFila(); } catch (e) {}
@@ -242,6 +427,10 @@ const realtime = {
     realtime._ws = null;
     realtime._org = null;
     realtime._contexto = null;
+    realtime._canais.clear(); realtime._relacionados.clear();
+    realtime._renovando = null;
+    realtime._avisos.forEach(painel => { try { painel.remove(); } catch (e) {} });
+    realtime._avisos.clear();
   },
 
   _reagendar() {
@@ -290,7 +479,8 @@ const sincronia = {
   INTERVALO: 60000,
   MAX_ESPERA: 600000,
   MARCAS_KEY: 'medsys.v7.sync.marcas',
-  MODS: ['pre', 'anestesia', 'recuperacao', 'consulta', 'financeiro', 'risco', 'termo', 'prescricao'],
+  MODS: ['pre', 'anestesia', 'recuperacao', 'consulta', 'financeiro', 'fin_fechamentos',
+    'risco', 'termo', 'prescricao', 'documentos', 'orcamento'],
   _timer: null, _rodando: false, _espera: 60000, _ultimo: 0, _ligado: false,
 
   _marcas() { try { return JSON.parse(localStorage.getItem(sincronia.MARCAS_KEY) || '{}'); } catch (e) { return {}; } },
@@ -363,6 +553,10 @@ const sincronia = {
       try { await cloudRel.drenarConflitos(); } catch (e) {}
       if (!contextoValido()) return;
       try { await adendos.enviarPendentes(); } catch (e) {}
+      if (!contextoValido()) return;
+      try { await rascunhosSync.enviarTodos(); } catch (e) {}
+      if (!contextoValido()) return;
+      try { if (typeof edicaoViva !== 'undefined') await edicaoViva.enviarTodos(); } catch (e) {}
       if (!contextoValido()) return;
       /* 1d) e os PDFs que não subiram — mesma ideia, outro tipo de carga */
       try { await pdfBackup.drenarFila(); } catch (e) {}
@@ -609,6 +803,8 @@ const nuvemEstado = {
     try { await cloudDiag.puxarTudo({ silent: true }); } catch (e) {}
     if (!valido()) return;
     try { await rascunhosSync.enviarTodos(); } catch (e) {}
+    if (!valido()) return;
+    try { if (typeof edicaoViva !== 'undefined') await edicaoViva.enviarTodos(); } catch (e) {}
     if (!valido()) return;
     try { await rascunhosSync.puxarTodos({ silent: true }); } catch (e) {}
     if (!valido()) return;

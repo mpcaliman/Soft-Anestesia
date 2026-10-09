@@ -34,12 +34,12 @@ class MemoryStorage {
 const classList = () => ({ remove() {}, add() {} });
 const shared = new MemoryStorage();
 const channels = [];
-function runtime() {
+function runtime(restored = {}) {
   const events = new Map();
   const timers = new Map();
-  const snapshots = new Map();
-  const envelopes = new Map();
-  const operations = new Map();
+  const snapshots = restored.snapshots || new Map();
+  const envelopes = restored.envelopes || new Map();
+  const operations = restored.operations || new Map();
   const clone = x => x == null ? x : structuredClone(x);
   const field = { tagName: 'INPUT', type: 'text', value: '', defaultValue: '',
     dataset: { patientIdentityWatch: '1', patientKey: '' } };
@@ -71,7 +71,7 @@ function runtime() {
     }
   };
   const sandbox = {
-    console, document, sessionStorage: new MemoryStorage(),
+    console, document, sessionStorage: restored.sessionStorage || new MemoryStorage(),
     crypto: webcrypto, TextEncoder, TextDecoder, atob, btoa, structuredClone,
     navigator: { onLine: true }, location: { hash: '#dashboard' },
     STORAGE: { pre: 'medsys.v7.pre', pacientes: 'medsys.v7.pacientes' }, HISTORY_MAX: 300,
@@ -166,7 +166,7 @@ function runtime() {
     assert.equal(overlay.style.display, 'flex');
   };
   return { sandbox, auth, cloud, vault, store, contextoAba, login, assertClosed, pendingSnapshots,
-    operations, snapshots, get captureOwner() { return captureOwner; }, events, timers };
+    operations, snapshots, envelopes, overlay, field, get captureOwner() { return captureOwner; }, events, timers };
 }
 
 const r = runtime();
@@ -229,4 +229,30 @@ resolveProfile({ uid: 'user-a', role: 'auxiliar' });
 assert.equal(await revalidation, false);
 r.assertClosed();
 await Promise.all(r.pendingSnapshots);
-console.log('  ✓ D4: logout, bloqueio, inatividade, evento entre abas e BFCache limpam acesso/DOM sem perder WAL cifrado');
+
+/* Queda sem pagehide: o navegador devolve toda a sessionStorage do processo
+   anterior. Nenhum evento de logout foi disparado e o JWT continua válido. */
+await r.login();
+const crashSession = new MemoryStorage();
+r.sandbox.sessionStorage.values.forEach((v, k) => crashSession.setItem(k, v));
+crashSession.setItem('medsys.v7.pdfbk.token@aaaaaaaa', 'drive-restaurado');
+const ciphertext = structuredClone(r.operations.get('wal-pendente'));
+const restored = runtime({ sessionStorage: crashSession, envelopes: r.envelopes,
+  operations: r.operations, snapshots: r.snapshots });
+assert.equal(restored.auth.usuarioAtual(), null, 'espelho recuperado após crash nunca autentica novo documento');
+assert.equal(restored.cloud.session(), null, 'access/refresh token recuperados não podem voltar a ser usados');
+assert.equal(restored.contextoAba.operational(), false);
+assert.equal(restored.contextoAba.atual().verified, false);
+assert.equal(restored.overlay.style.display, 'flex', 'documento restaurado permanece na tela de autenticação');
+assert.equal(restored.vault._chaves.size, 0, 'nenhuma chave clínica passa de um documento para outro');
+assert.equal(restored.sandbox.sessionStorage.getItem('medsys.v7.pdfbk.token'), null);
+assert.equal(restored.sandbox.sessionStorage.getItem('medsys.v7.pdfbk.token@aaaaaaaa'), null);
+assert.deepEqual(restored.operations.get('wal-pendente'), ciphertext, 'boot não apaga pendências offline cifradas');
+await assert.rejects(restored.vault.listar(), e => e.code === 'contexto_nao_confirmado');
+await restored.login('user-b');
+assert.equal((await restored.vault.listar()).length, 0, 'outro usuário não recupera a pendência após crash');
+await restored.login();
+assert.equal((await restored.vault.listar())[0].payload.nome, 'Paciente Sigiloso', 'o proprietário recupera seu WAL após autenticação nova');
+restored.sandbox.navigator.onLine = false;
+assert.equal((await restored.vault.listar())[0].payload.nome, 'Paciente Sigiloso', 'a sessão deste documento continua funcionando ao perder conexão');
+console.log('  ✓ D4: logout, bloqueio, BFCache e restauração após crash fecham acesso/DOM sem perder WAL cifrado');
