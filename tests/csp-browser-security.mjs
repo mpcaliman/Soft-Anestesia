@@ -65,17 +65,38 @@ try {
   const popupPromise=page.waitForEvent('popup');
   await page.evaluate(payload=>{
     const original=window.open.bind(window);
-    window.open=(...args)=>{const popup=original(...args);if(popup){popup.print=()=>{};popup.close=()=>{};popup.__cspViolations=[];const docOpen=popup.document.open.bind(popup.document);popup.document.open=(...args)=>{const result=docOpen(...args);popup.document.addEventListener('securitypolicyviolation',event=>popup.__cspViolations.push(event.effectiveDirective));return result;};}return popup;};
+    window.open=(...args)=>{const popup=original(...args);if(popup){popup.__printCalls=0;popup.print=()=>{popup.__printCalls++;};popup.close=()=>{};popup.__cspViolations=[];const docOpen=popup.document.open.bind(popup.document);popup.document.open=(...args)=>{const result=docOpen(...args);popup.document.addEventListener('securitypolicyviolation',event=>popup.__cspViolations.push(event.effectiveDirective));return result;};}return popup;};
     document.getElementById('print-preview-overlay').classList.add('show');
     document.getElementById('ppp').textContent=payload;
     printPreview._gerarNomeArquivo=()=> 'Documento de teste';
     printPreview.imprimir();
   },payload);
-  const popup=await popupPromise;await popup.waitForLoadState('load');
+  const popup=await popupPromise;
+  const popupErrors=[];
+  popup.on('pageerror',error=>popupErrors.push('PAGEERROR: '+error.message));
+  popup.on('console',message=>{if(message.type()==='error')popupErrors.push(message.text());});
+  // The initial about:blank load can finish before document.write's external scripts.
+  // Wait for the actual print DOM and registry, not that earlier navigation event.
+  try {
+    await popup.waitForFunction(()=>document.body && window.SoftActions
+      && document.querySelector('[data-soft-name-click="window.print"]')
+      && document.readyState==='complete');
+  } catch(error) {
+    const diagnostic=await popup.evaluate(()=>({url:location.href,base:document.baseURI,title:document.title,
+      ready:document.readyState,body:document.body?.innerHTML?.slice(0,900)||null,
+      scripts:[...document.scripts].map(script=>script.src),violations:window.__cspViolations||[]})).catch(()=>({closed:popup.isClosed()}));
+    throw new Error('Print document failed to load: '+JSON.stringify({diagnostic,popupErrors}),{cause:error});
+  }
   const printed=await popup.evaluate(()=>({inline:document.querySelectorAll('[onclick],[onload],style').length,text:document.body.textContent,
     violations:window.__cspViolations||[],button:!!document.querySelector('[data-soft-name-click="window.print"]')}));
   assert.equal(printed.inline,0);assert(printed.text.includes(payload));assert(printed.button);assert.deepEqual(printed.violations,[]);
-  await popup.evaluate(()=>document.querySelector('[data-soft-name-click="window.print"]').click());
+  const clickWorked=await popup.evaluate(()=>{
+    const before=window.__printCalls;
+    document.querySelector('[data-soft-name-click="window.print"]').click();
+    return window.__printCalls===before+1;
+  });
+  assert(clickWorked,'external compiled print action must invoke window.print');
+  assert.deepEqual(popupErrors,[],'print document must not produce JavaScript or CSP errors');
   console.log('✓ Chromium/CSP: boot, stored patient/history fields, compiled edit/save clicks and print popup pass without inline code or policy violations');
 } finally {
   if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));
