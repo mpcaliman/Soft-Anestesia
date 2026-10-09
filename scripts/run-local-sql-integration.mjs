@@ -308,11 +308,14 @@ commit;
     b.end();
     // The authenticated INSERT already exercised RLS. Restore the stock local
     // admin only for lock observation; no authenticated ACL is widened.
-    a.end(`reset role;
+    const barrierSql = `reset role;
 do $barrier$
 declare observed boolean := false;
 begin
   for attempt in 1..200 loop
+    -- PostgreSQL snapshots backend activity on first access in a transaction.
+    -- Refresh it so a newly started writer B can be observed on later polls.
+    perform pg_stat_clear_snapshot();
     select exists (
       select 1 from pg_locks waiting
       join pg_locks held on held.locktype=waiting.locktype
@@ -330,10 +333,13 @@ end $barrier$;
 \\echo LOCAL_SQL_RACE_OVERLAP
 commit;
 \\q
-`);
+`;
+    a.end(barrierSql);
     const [resultA, resultB] = await Promise.all([a.done, b.done]);
-    assertCommandSuccess(resultA, 'sessão concorrente A');
-    assertCommandSuccess(resultB, 'sessão concorrente B');
+    // If B failed before waiting, retain that SQLSTATE instead of reporting
+    // only the consequent observer timeout in A.
+    assertCommandSuccess(resultB, 'sessão concorrente B', raceWriter(1));
+    assertCommandSuccess(resultA, 'sessão concorrente A', barrierSql);
     if (!resultA.stdout.includes('LOCAL_SQL_RACE_OVERLAP')) fail('Barreira de concorrência não foi observada.');
   } finally {
     a?.kill(); b?.kill();

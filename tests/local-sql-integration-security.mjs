@@ -261,6 +261,7 @@ await check('corrida exige duas sessões, barreira observada, original e auditor
   assert.deepEqual(await runConcurrentRetification(db), { accepted: 1, conflict: 1, blockedSessions: 1 });
   assert.equal(opens, 2);
   assert.match(finalSql, /pg_locks waiting/); assert.match(finalSql, /not waiting\.granted/);
+  assert.ok(finalSql.indexOf('perform pg_stat_clear_snapshot();') < finalSql.indexOf('pg_locks waiting'));
   assert.ok(finalSql.indexOf('reset role;') < finalSql.indexOf('pg_locks waiting'));
   assert.match(finalSql, /held\.pid=pg_backend_pid\(\)/);
   assert.ok(finalSql.indexOf('if observed is distinct from true') < finalSql.indexOf('commit;'));
