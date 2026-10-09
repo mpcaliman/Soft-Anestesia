@@ -10,7 +10,7 @@ import {
 } from '../scripts/run-local-sql-integration.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const projectId = `soft-anestesia-sql-${'a'.repeat(24)}`;
+const projectId = `soft-as-sql-${'a'.repeat(24)}`;
 const containerId = 'b'.repeat(64);
 const localEnv = { DOCKER_HOST: 'unix:///var/run/docker.sock' };
 const status = { DB_URL: 'postgresql://postgres:synthetic-password@127.0.0.1:54322/postgres' };
@@ -51,7 +51,9 @@ await check('URLs externas, portas, bancos, credenciais e overrides são recusad
 
 await check('nome, label, identidade e porta do container são obrigatórios', () => {
   const inspection = inspectionFor(projectId);
+  assert.ok(projectId.length <= 40, 'CLI não pode truncar a identidade do projeto');
   assert.equal(assertProjectContainer(inspection, projectId), containerId);
+  assert.throws(() => assertProjectContainer(inspection, `soft-anestesia-sql-${'a'.repeat(24)}`));
   const mutations = [
     value => { value[0].Name = '/supabase_db_shared'; },
     value => { value[0].Config.Labels['com.supabase.cli.project'] = 'shared'; },
@@ -61,9 +63,10 @@ await check('nome, label, identidade e porta do container são obrigatórios', (
     value => { value[0].NetworkSettings.Ports['5432/tcp'][0].HostPort = '6543'; },
     value => { value.push(value[0]); }
   ];
-  for (const mutate of mutations) {
+  const guards = ['container-name','container-project-label','container-project-label','container-id','container-running','container-port','container-shape'];
+  for (const [index, mutate] of mutations.entries()) {
     const value = structuredClone(inspection); mutate(value);
-    assert.throws(() => assertProjectContainer(value, projectId));
+    assert.throws(() => assertProjectContainer(value, projectId), error => error.guard === guards[index]);
   }
   assert.throws(() => assertProjectContainer(inspection, 'production'));
 });
@@ -179,7 +182,8 @@ try {
           const config = await readFile(join(temporaryWorkdir, 'supabase/config.toml'), 'utf8');
           project = config.match(/^project_id = "([^"]+)"/)[1];
           assert.notEqual(temporaryWorkdir, root);
-          assert.match(project, /^soft-anestesia-sql-[a-f0-9]{24}$/);
+          assert.match(project, /^soft-as-sql-[a-f0-9]{24}$/);
+          assert.ok(project.length <= 40, 'project_id excede o limite da CLI fixada');
           if (mode === 'startup-failure') return { code: 1, stdout: 'synthetic-cli-secret', stderr: 'synthetic-cli-secret' };
           return result('synthetic-cli-secret');
         }

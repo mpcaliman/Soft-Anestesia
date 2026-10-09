@@ -7,11 +7,17 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const PROJECT_PATTERN = /^soft-anestesia-sql-[a-f0-9]{24}$/;
+// CLI 2.119.0 truncates project_id at 40 characters. Keep the entire 96-bit
+// random suffix intact so the config, Docker name and project label agree.
+const PROJECT_PATTERN = /^soft-as-sql-[a-f0-9]{24}$/;
 const CLI_VERSION = '2.119.0';
 const FIXTURES = ['tests/sql/retification-cas-security.sql', 'tests/sql/finalized-delete-security.sql'];
 const hash = value => createHash('sha256').update(value).digest('hex');
-const fail = message => { throw new Error(message); };
+const fail = (message, guard) => {
+  const error = new Error(message);
+  if (guard) error.guard = guard;
+  throw error;
+};
 
 // No inherited database, Docker context or Supabase account can select a target.
 export function assertSafeEnvironment(env) {
@@ -39,12 +45,13 @@ export function assertLocalDatabaseUrl(raw) {
 export function assertProjectContainer(inspection, projectId) {
   if (!PROJECT_PATTERN.test(projectId)) fail('Identidade do projeto efêmero inválida.');
   const entry = Array.isArray(inspection) && inspection.length === 1 ? inspection[0] : null;
-  if (!entry || entry.Name !== `/supabase_db_${projectId}`
-    || entry.Config?.Labels?.['com.supabase.cli.project'] !== projectId
-    || entry.State?.Running !== true || !/^[a-f0-9]{64}$/.test(entry.Id)
-    || !entry.NetworkSettings?.Ports?.['5432/tcp']?.some(binding => binding.HostPort === '54322')) {
-    fail('Container PostgreSQL não pertence ao projeto local efêmero esperado.');
-  }
+  const reject = guard => fail('Container PostgreSQL não pertence ao projeto local efêmero esperado.', guard);
+  if (!entry) reject('container-shape');
+  if (entry.Name !== `/supabase_db_${projectId}`) reject('container-name');
+  if (entry.Config?.Labels?.['com.supabase.cli.project'] !== projectId) reject('container-project-label');
+  if (entry.State?.Running !== true) reject('container-running');
+  if (!/^[a-f0-9]{64}$/.test(entry.Id)) reject('container-id');
+  if (!entry.NetworkSettings?.Ports?.['5432/tcp']?.some(binding => binding.HostPort === '54322')) reject('container-port');
   return entry.Id;
 }
 
@@ -376,7 +383,7 @@ export async function runLocalSqlIntegration({ repoDir = rootDir, inheritedEnv =
   const cli = join(repoDir, 'node_modules/.bin/supabase');
   await access(cli);
   const workdir = await mkdtemp(join(tmpdir(), 'soft-anestesia-sql-'));
-  const projectId = `soft-anestesia-sql-${randomBytes(12).toString('hex')}`;
+  const projectId = `soft-as-sql-${randomBytes(12).toString('hex')}`;
   const env = { PATH: inheritedEnv.PATH, HOME: inheritedEnv.HOME, TMPDIR: workdir, LANG: 'C.UTF-8',
     DOCKER_HOST: 'unix:///var/run/docker.sock', DOCKER_CONFIG: join(workdir, 'docker-config'),
     SUPABASE_SKIP_UPDATE_CHECK: 'true', SUPABASE_TELEMETRY_DISABLED: 'true' };
@@ -441,8 +448,9 @@ export async function runLocalSqlIntegration({ repoDir = rootDir, inheritedEnv =
   } catch (error) {
     const sqlState = /^[0-9A-Z]{5}$/.test(error.sqlState ?? '') ? ` (SQLSTATE ${error.sqlState})` : '';
     const assertion = error.assertion ? ` [${error.assertion}]` : '';
-    failure = new Error(`Integração SQL local falhou em ${stage}${sqlState}${assertion}; nenhuma verificação remota foi declarada.`);
-    evidence.tests.push({ name: stage, passed: false });
+    const guard = ['container-shape','container-name','container-project-label','container-running','container-id','container-port'].includes(error.guard) ? error.guard : undefined;
+    failure = new Error(`Integração SQL local falhou em ${stage}${sqlState}${assertion}${guard ? ` [${guard}]` : ''}; nenhuma verificação remota foi declarada.`);
+    evidence.tests.push({ name: stage, passed: false, ...(guard ? { guard } : {}) });
   } finally {
     if (startAttempted) {
       try {
