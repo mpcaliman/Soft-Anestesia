@@ -106,7 +106,12 @@ const launch = async () => {
   const page = context.pages().find(p => p.url().startsWith(appUrl)) || await context.newPage();
   page.on('dialog', dialog => dialog.accept());
   if (!page.url().startsWith(appUrl)) await page.goto(appUrl);
-  await page.waitForFunction(() => typeof auth !== 'undefined' && typeof filaCifrada !== 'undefined');
+  /* CDP pode se conectar enquanto o Chromium ainda analisa os scripts. Auth
+     e cofre aparecem antes do adaptador cloud; esperar só os dois permite
+     que a primeira inspeção leia uma variável ainda não declarada. */
+  await page.waitForLoadState('load');
+  await page.waitForFunction(() => typeof auth !== 'undefined' && typeof cloud !== 'undefined' &&
+    typeof filaCifrada !== 'undefined' && typeof persistenciaCloudFirst !== 'undefined');
   return { page, context };
 };
 const stopAbruptly = async () => {

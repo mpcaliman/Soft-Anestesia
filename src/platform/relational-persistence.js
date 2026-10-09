@@ -1640,18 +1640,55 @@ const cloudRel = {
       return Array.isArray(q) ? q : [];
     } catch (e) { return []; }
   },
+  _recusarAtualizacaoFila(chave, motivo, contexto) {
+    if (contexto && !contextoAba.corresponde(contexto)) return false;
+    cloudRel._ultimoMotivo = motivo;
+    cloudRel._ultimoErroFila = { chave, motivo, timestamp: Date.now() };
+    if (contexto && contextoAba.corresponde(contexto)) {
+      const mensagem = motivo === 'fila_legada_cheia'
+        ? 'A fila antiga atingiu o limite. A nova pendência não foi protegida; as anteriores foram mantidas. Aguarde a sincronização antes de continuar.'
+        : motivo === 'fila_legada_invalida'
+          ? 'A fila antiga não pôde ser validada. Nenhuma pendência foi descartada; peça suporte antes de continuar.'
+          : 'Não foi possível atualizar a fila antiga neste aparelho. A nova pendência não foi protegida; as anteriores continuam preservadas.';
+      try { toast(mensagem, 'error'); } catch (e) {}
+      try { syncStatus.cloudState('error'); syncStatus.refresh(); } catch (e) {}
+    }
+    return false;
+  },
   _filaMesclarDono(chave, q, ordemInicio) {
     const dono = cloudRel._donoFila();
-    if (!dono) return false;
-    const outras = cloudRel._filaTodas(chave).filter(x => !cloudRel._mesmoDonoFila(x, dono));
-    const proprias = (Array.isArray(q) ? q : []).map(x => Object.assign({}, x, {
+    if (!dono) { cloudRel._ultimoMotivo = 'contexto não confirmado'; return false; }
+    const contexto = (() => { try { return contextoAba.capturar(); } catch (e) { return null; } })();
+    let anteriores;
+    try {
+      anteriores = JSON.parse(localStorage.getItem(chave) || '[]');
+      if (!Array.isArray(anteriores) || !Array.isArray(q)) throw new Error('formato inválido');
+    } catch (e) { return cloudRel._recusarAtualizacaoFila(chave, 'fila_legada_invalida', contexto); }
+    const outras = anteriores.filter(x => !cloudRel._mesmoDonoFila(x, dono));
+    const antigas = anteriores.filter(x => cloudRel._mesmoDonoFila(x, dono));
+    const identidade = x => {
+      const modulo = chave === cloudRel.FILA_DEL_KEY ? x && x.tabela : x && x.mod;
+      return modulo && x.id ? JSON.stringify([String(modulo), String(x.id)]) : null;
+    };
+    if (q.some(x => !identidade(x))) return cloudRel._recusarAtualizacaoFila(chave, 'fila_legada_invalida', contexto);
+    const proprias = q.map(x => Object.assign({}, x, {
       organizationId: dono.organizationId, userId: dono.userId,
       deviceId: dono.deviceId, tabId: x.tabId || dono.tabId
     }));
-    /* O limite vale por dono; nunca descarte a fila de outra pessoa para
-       caber a desta. */
-    const limitadas = ordemInicio ? proprias.slice(0, cloudRel.MAX_FILA) : proprias.slice(-cloudRel.MAX_FILA);
-    try { localStorage.setItem(chave, JSON.stringify(outras.concat(limitadas))); return true; } catch (e) { return false; }
+    const chavesAntigas = new Set(antigas.map(identidade));
+    const chavesNovas = new Set(proprias.map(identidade));
+    const adicionou = Array.from(chavesNovas).some(id => !chavesAntigas.has(id));
+    /* Nunca corte a fila. Legado acima do teto pode ser atualizado/drenado;
+       uma nova identidade só entra se o conjunto final couber no limite. */
+    if (adicionou && chavesNovas.size > cloudRel.MAX_FILA) {
+      return cloudRel._recusarAtualizacaoFila(chave, 'fila_legada_cheia', contexto);
+    }
+    if (contexto && !contextoAba.corresponde(contexto)) return false;
+    try {
+      localStorage.setItem(chave, JSON.stringify(outras.concat(proprias)));
+      cloudRel._ultimoErroFila = null;
+      return true;
+    } catch (e) { return cloudRel._recusarAtualizacaoFila(chave, 'fila_legada_armazenamento', contexto); }
   },
   _filaLer() {
     const dono = cloudRel._donoFila();
@@ -1670,27 +1707,30 @@ const cloudRel = {
   /* Uma entrada por documento: o que importa é que ELE suba, não quantas vezes
      foi editado enquanto estava offline. */
   _filaPor(mod, id, motivo) {
-    if (!mod || !id) return;
+    if (!mod || !id) return false;
     const dono = cloudRel._donoFila();
-    if (!dono) { cloudRel._ultimoMotivo = 'contexto não confirmado'; return; }
+    if (!dono) { cloudRel._ultimoMotivo = 'contexto não confirmado'; return false; }
     const q = cloudRel._filaLer().filter(x => !(x.mod === mod && x.id === id));
     const antes = cloudRel._filaLer().find(x => x.mod === mod && x.id === id);
     q.push({ mod: mod, id: id, ts: Date.now(),
              tentativas: ((antes && antes.tentativas) || 0) + 1, motivo: motivo || '',
              organizationId: dono.organizationId, userId: dono.userId,
              deviceId: dono.deviceId, tabId: dono.tabId });
-    cloudRel._filaGravar(q);
+    const persistiu = cloudRel._filaGravar(q);
+    if (!persistiu) return false;
     /* O motivo vale desde a PRIMEIRA falha, não só depois de drenar: é ele que
        transforma "1 registro aguardando envio" em "1 registro aguardando envio
        · org" — a diferença entre um número e uma explicação. */
     if (motivo) cloudRel._ultimoMotivo = motivo;
     try { ui.repintarNuvemAtual(); } catch (e) {}
     try { syncStatus.refresh(); } catch (e) {}
+    return true;
   },
   _filaTirar(mod, id) {
-    cloudRel._filaGravar(cloudRel._filaLer().filter(x => !(x.mod === mod && x.id === id)));
+    const persistiu = cloudRel._filaGravar(cloudRel._filaLer().filter(x => !(x.mod === mod && x.id === id)));
     try { syncStatus.refresh(); } catch (e) {}
     try { ui.repintarNuvemAtual(); } catch (e) {}
+    return persistiu;
   },
 
   /* Drena a fila. Só uma execução por vez; falha mantém na fila e conta a
@@ -1768,11 +1808,11 @@ const cloudRel = {
   },
   _filaDelGravar(q) { return cloudRel._filaMesclarDono(cloudRel.FILA_DEL_KEY, q, true); },
   _filaDelPor(tabela, id, ctx = {}) {
-    if (!tabela || !id) return;
+    if (!tabela || !id) return false;
     const dono = cloudRel._donoFila();
-    if (!dono) { cloudRel._ultimoMotivo = 'contexto não confirmado'; return; }
+    if (!dono) { cloudRel._ultimoMotivo = 'contexto não confirmado'; return false; }
     const orgPedido = ctx.organizationId || ctx._relOrg || null;
-    if (orgPedido && orgPedido !== dono.organizationId) { cloudRel._ultimoMotivo = 'outra_clinica'; return; }
+    if (orgPedido && orgPedido !== dono.organizationId) { cloudRel._ultimoMotivo = 'outra_clinica'; return false; }
     const anterior = cloudRel._filaDelLer().find(x => x.tabela === tabela && x.id === id);
     const q = cloudRel._filaDelLer().filter(x => !(x.tabela === tabela && x.id === id));
     q.push({
@@ -1788,10 +1828,10 @@ const cloudRel = {
       tentativas: ((anterior && anterior.tentativas) || 0) + 1,
       em: new Date().toISOString()
     });
-    cloudRel._filaDelGravar(q);
+    return cloudRel._filaDelGravar(q);
   },
   _filaDelTirar(tabela, id) {
-    cloudRel._filaDelGravar(cloudRel._filaDelLer().filter(x => !(x.tabela === tabela && x.id === id)));
+    return cloudRel._filaDelGravar(cloudRel._filaDelLer().filter(x => !(x.tabela === tabela && x.id === id)));
   },
   _selectConflito(mod) {
     if (mod === 'pacientes') return cloudRel._SELECT;

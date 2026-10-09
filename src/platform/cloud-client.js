@@ -699,14 +699,16 @@ const cloud = {
     return cloud._filaTodas().filter(x => cloud._mesmoDonoFila(x, dono));
   },
   _enfileirar(op) {
-    const dono = cloud._donoFila(); if (!dono) return false;
-    const q = cloud._fila();
-    /* dedup: mantém só a última operação por modulo+doc_id */
-    const filtrada = q.filter(x => !(x.modulo === op.modulo && x.doc_id === op.doc_id));
-    filtrada.push(Object.assign({}, op, { organizationId: dono.organizationId,
-      userId: dono.userId, deviceId: dono.deviceId, tabId: dono.tabId }));
-    const outras = cloud._filaTodas().filter(x => !cloud._mesmoDonoFila(x, dono));
-    try { localStorage.setItem(cloud.QUEUE_KEY, JSON.stringify(outras.concat(filtrada.slice(-500)))); return true; } catch (e) { return false; }
+    /* Canal pessoal encerrado: nem metadados novos nem payload clínico podem
+       voltar à fila sem organização. O legado permanece intacto para a
+       migração auditada; não há deduplicação/corte sobre seus registros. */
+    cloud._ultimaFalhaFila = 'canal_pessoal_encerrado';
+    const contexto = (() => { try { return contextoAba.capturar(); } catch (e) { return null; } })();
+    if (contexto && contexto.verified && contextoAba.corresponde(contexto)) {
+      try { toast('O canal pessoal antigo está encerrado. Esta operação não foi protegida; use o salvamento da clínica.', 'error'); } catch (e) {}
+      try { syncStatus.cloudState('error'); } catch (e) {}
+    }
+    return false;
   },
   _limparFila() {
     const dono = cloud._donoFila(); if (!dono) return false;

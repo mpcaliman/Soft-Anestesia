@@ -29,12 +29,12 @@ const context=vm.createContext({window:{},document,Element,ShadowRoot,MutationOb
 vm.runInContext(runtime,context);context.SoftActions=context.window.SoftActions;
 let handlers;
 const original=context.SoftActions;
-context.SoftActions={...original,install(templates,registry,events){handlers=registry;original.install(templates,registry,events);}};
+context.SoftActions={...original,install(templates,registry,events,token){handlers=registry;original.install(templates,registry,events,token);}};
 vm.runInContext(compiled.sources.get('src/ui/strict-actions.generated.js'),context);
 vm.runInContext(compiled.sources.get('src/app/runtime-01.js'),context);
 const self={id:'button'}, event={type:'click'};
 for(const key of ['fixture','raw','nested']) {
-  const output=context[key];
+  const output=original.sanitizeHTML(context[key]);
   assert.doesNotMatch(output.replace(/"[^"]*"/g, '""'),/\son(?:click|error)=/i);
   const id=output.match(/data-soft-onclick="([^"]+)"/)[1];
   const args=JSON.parse(decode(output.match(/data-soft-args-click="([^"]+)"/)[1]));
@@ -48,5 +48,12 @@ const literalArgs=JSON.parse(decode(context.literal.match(/data-soft-args-click=
 handlers[literalId].call(self,event,literalArgs);
 assert.equal(captures.at(-1)[0], false, 'bloquear conta deve passar boolean false, nunca texto truthy');
 assert.equal(captures.at(-1)[1], 42);
+const serialized = '<span style=\'font-family:"Arial";color:red\' onerror="evil()" data-note="onerror=&quot;stored value&quot;">OK</span>';
+const sanitized = original.sanitizeHTML(serialized);
+assert(sanitized.includes('data-soft-style=\'font-family:"Arial";color:red\''));
+assert(sanitized.includes('data-note="onerror=&quot;stored value&quot;"'));
+assert(!sanitized.includes('onerror="evil()"'));
+assert.throws(() => original.html(0, [payload], 'another-release'), /versões diferentes/,
+  'mistura de assets não pode despachar ações ou templates da versão errada');
 assert.equal(compiled.statistics.actions,5);
 console.log('✓ CSP estrita: valores hostis, strings, templates aninhados, this/event e return false preservados sem compilar dados');

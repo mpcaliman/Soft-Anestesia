@@ -1,5 +1,6 @@
 /** Build-time compilation only. Patient values never become JavaScript source. */
 import vm from 'node:vm';
+import { createHash } from 'node:crypto';
 const acornModule = { exports: {} };
 vm.runInNewContext(process.binding('natives')['internal/deps/acorn/acorn/dist/acorn'],
   { exports: acornModule.exports, module: acornModule });
@@ -20,6 +21,7 @@ export const compiledAssetPaths = Object.freeze([
 ]);
 
 export function compileStrictAssets(sourceHtml, sources) {
+  const buildToken = createHash('sha256').update(sourceHtml + JSON.stringify([...sources])).digest('hex');
   const actions = [], templates = [], styles = [];
   const events = new Set();
   const styleIds = new Map(), compiledSources = new Map(sources);
@@ -73,14 +75,10 @@ export function compileStrictAssets(sourceHtml, sources) {
       const action = compileHandler(code, valueExpressions, location);
       const event = attr.toLowerCase().slice(2), item = args.length; events.add(event);
       args.push({...action,event});
-      return `data-soft-on${event}="${action.id}" data-soft-name-${event}="${escape(action.name)}"`
+      return `data-soft-build="${buildToken}" data-soft-on${event}="${action.id}" data-soft-name-${event}="${escape(action.name)}"`
         + (action.indices.length ? ` data-soft-args-${event}="__SOFT_ARGS_${item}__"` : '');
     });
-    out = out.replace(stylePattern, (_all,_quote,css) => {
-      if (/__SOFT_VALUE_/.test(css)) return `data-soft-style="${css}"`;
-      // A separate attribute lets the runtime merge a generated class into an existing class attribute.
-      return `data-soft-class="${addStyle(css)}"`;
-    });
+    out = out.replace(stylePattern, (_all,quote,css) => `data-soft-style=${quote}${css}${quote}`);
     out = out.replace(/href\s*=\s*(["'])javascript:[\s\S]*?\1/gi, 'href="#" data-soft-prevent-default="true"');
     if (location !== 'HTML' && /<html\b/i.test(out)) out = out.replace(/<head>/i, '<head><meta charset="UTF-8"><link rel="stylesheet" href="src/styles/strict-generated.css"><script src="src/ui/strict-actions.js"></script><script src="src/ui/strict-actions.generated.js"></script>');
     out = out.replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gi, (_all,css) => `<template data-soft-stylesheet>${css}</template>`);
@@ -103,6 +101,13 @@ export function compileStrictAssets(sourceHtml, sources) {
     function walk(node) {
       if(!node || typeof node !== 'object') return;
       if (node.type === 'CallExpression' && node.callee.type === 'MemberExpression'
+        && node.callee.property.name === 'write' && node.callee.object.type === 'MemberExpression'
+        && node.callee.object.property.name === 'document' && node.arguments.length === 1) {
+        const owner = text.slice(node.callee.object.object.start,node.callee.object.object.end);
+        const arg = text.slice(node.arguments[0].start,node.arguments[0].end);
+        replacements.push({start:node.start,end:node.end,text:`SoftActions.writeDocument(${owner}, ${compileJs(`(${arg})`,path)})`}); return;
+      }
+      if (node.type === 'CallExpression' && node.callee.type === 'MemberExpression'
         && node.callee.object.name === 'document' && node.callee.property.name === 'createElement'
         && node.arguments[0]?.type === 'Literal' && node.arguments[0].value === 'style') {
         replacements.push({start:node.start,end:node.end,text:'SoftActions.createStylesheet()'}); return;
@@ -116,7 +121,7 @@ export function compileStrictAssets(sourceHtml, sources) {
           const compiled=transformHtml(html,values,path);
           if(compiled.html!==html) {
             const id=templates.length; templates.push(compiled);
-            replacements.push({start:node.start,end:node.end,text:`SoftActions.html(${id}, [${compiledValues.join(', ')}])`});
+            replacements.push({start:node.start,end:node.end,text:`SoftActions.html(${id}, [${compiledValues.join(', ')}], ${JSON.stringify(buildToken)})`});
             // Expressions may contain their own HTML; compile them separately in another pass.
             return;
           }
@@ -151,7 +156,7 @@ export function compileStrictAssets(sourceHtml, sources) {
     }
   }
   const registry = `'use strict';\nSoftActions.install(${JSON.stringify(templates)}, {\n`
-    + actions.map(action=>`${JSON.stringify(action.id)}: function(event, data) {\n${action.body}\n}`).join(',\n')+`\n}, ${JSON.stringify([...events])});\n`;
+    + actions.map(action=>`${JSON.stringify(action.id)}: function(event, data) {\n${action.body}\n}`).join(',\n')+`\n}, ${JSON.stringify([...events])}, ${JSON.stringify(buildToken)});\n`;
   const safeRegistry = registry.replace(/<\/script/gi, '<\\/script');
   compiledSources.set('src/ui/strict-actions.generated.js',safeRegistry);
   compiledSources.set('src/styles/strict-generated.css',styles.join('\n'));
@@ -159,5 +164,5 @@ export function compileStrictAssets(sourceHtml, sources) {
   html=html.replace(/<meta\s+charset=[^>]+>/i, '');
   html=html.replace(/<head>/i, `<head>\n<meta charset="UTF-8">\n<meta http-equiv="Content-Security-Policy" content="${escape(policy)}">\n<link rel="stylesheet" href="src/styles/strict-generated.css">\n<script src="src/ui/strict-actions.js"></script>\n<script src="src/ui/strict-actions.generated.js"></script>`);
   compiledSources.set('index.html',html);
-  return {sources:compiledSources, statistics:{actions:actions.length,templates:templates.length,styles:styles.length}, policy};
+  return {sources:compiledSources, statistics:{actions:actions.length,templates:templates.length,styles:styles.length,buildToken}, policy};
 }

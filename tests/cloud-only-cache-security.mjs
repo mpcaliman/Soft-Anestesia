@@ -174,6 +174,33 @@ assert.equal(localStorage.getItem('medsys.v7.arquivo.auto'), null);
 assert.equal(diskValues.has('medsys.v7.versions'), false);
 assert.deepEqual(Object.keys(JSON.parse(diskValues.get('medsys.v7.blobs'))), ['blob:manter']);
 
+/* A limpeza do legado nunca pode transformar um blob transitório em arquivo
+   clínico durável. Mesmo se uma referência histórica tiver o mesmo hash, só
+   os blobs que já estavam no disco participam dessa manutenção. */
+const cleanupStart = source.indexOf('  limparImagensOrfas() {');
+const cleanupEnd = source.indexOf('\n  compactarVersoes()', cleanupStart);
+assert.notEqual(cleanupStart, -1);
+assert.notEqual(cleanupEnd, -1);
+vm.runInContext(`globalThis.__imageCleanupD4 = ({${source.slice(cleanupStart, cleanupEnd)} });`, sandbox);
+sandbox.lixeira = { KEY: 'records.trash' };
+const memoryImage = 'data:image/png;base64,imagem-clinica-transitoria';
+const memoryReference = store._guardarBlob(memoryImage);
+localStorage.setItem('records.pre', JSON.stringify([
+  { _id: 'legado-pendente', foto: 'blob:manter' },
+  { _id: 'referencia-historica', foto: memoryReference }
+]));
+diskValues.set('medsys.v7.blobs', JSON.stringify({
+  'blob:manter': 'data:image/png;base64,pendente',
+  'blob:orfao': 'data:image/png;base64,orfao'
+}));
+assert(sandbox.__imageCleanupD4.limparImagensOrfas() > 0);
+assert.deepEqual(Object.keys(JSON.parse(diskValues.get('medsys.v7.blobs'))), ['blob:manter'],
+  'limpeza remove só o órfão durável e não publica o blob de memória referenciado');
+assert.equal(store._blobsMemoria[memoryReference], memoryImage,
+  'manutenção do legado não destrói a imagem transitória usada pela aba');
+assert.equal(sandbox.__imageCleanupD4.limparImagensOrfas(), 0,
+  'sem órfãos duráveis, a manutenção não deve produzir uma nova gravação');
+
 const start = source.indexOf('const modoNuvem = {');
 const end = source.indexOf('\n};\n\n/* ============================================================================\n   PRÉ-LANÇAMENTO', start);
 assert.notEqual(start, -1);

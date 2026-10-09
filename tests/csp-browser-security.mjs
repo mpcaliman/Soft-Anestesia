@@ -47,14 +47,25 @@ try {
     document.querySelector('#hist-tbody [data-soft-name-click="historico.abrirItem"]').click();
     pre.salvar=()=>captures.push(['save']);
     document.querySelector('#module-pre [data-soft-name-click="pre.salvar"]').click();
+    // CSSOM styles become style= when serialized; copying that HTML must remain CSP-safe.
+    const source = document.createElement('div');
+    source.innerHTML = '<span style="color:rgb(12, 34, 56);display:none">reuse</span>';
+    const copy = document.createElement('div'); copy.innerHTML = source.innerHTML;
+    document.body.appendChild(copy);
+    const reused = copy.firstElementChild;
+    const styleReused = reused.style.color === 'rgb(12, 34, 56)';
+    reused.style.display = '';
+    const hiddenCanClear = getComputedStyle(reused).display !== 'none';
+    copy.remove();
     const elements=[...document.querySelectorAll('*')];
     const inline=elements.flatMap(element=>[...element.attributes].filter(attr=>/^on[a-z]/i.test(attr.name)).map(attr=>attr.name));
     const patientText=document.getElementById('pacientes-tbody').textContent;
     const historyText=document.getElementById('hist-tbody').textContent;
-    return {captures,inline,patientText,historyText,xss:window.__clinicalXss||null,violations:window.__cspViolations,
+    return {captures,inline,patientText,historyText,styleReused,hiddenCanClear,xss:window.__clinicalXss||null,violations:window.__cspViolations,
       scripts:[...document.scripts].every(script=>!!script.src),styleBlocks:document.querySelectorAll('style').length};
   },payload);
   assert.equal(outcome.xss,null);assert.deepEqual(outcome.inline,[]);assert(outcome.scripts);assert.equal(outcome.styleBlocks,0);
+  assert(outcome.styleReused && outcome.hiddenCanClear, 'copied CSSOM styles must keep color and permit clearing display:none');
   assert(outcome.patientText.includes(payload) && outcome.historyText.includes(payload));
   assert(outcome.captures.some(row=>row[0]==='patient' && row[1]===payload && row[2]===payload));
   assert(outcome.captures.some(row=>row[0]==='edit' && row[1]==='pre' && row[2]===payload));

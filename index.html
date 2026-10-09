@@ -10844,7 +10844,12 @@ const armazenamento = {
      Varre todos os registros, junta as referências vivas e descarta o resto. */
   limparImagensOrfas() {
     let b;
-    try { b = store._blobs(); } catch (e) { return 0; }
+    try {
+      /* A limpeza só regrava blobs que já existiam no legado. Misturar os
+         blobs transitórios de memória criaria uma cópia clínica em claro. */
+      b = store._semPersistenciaClinica()
+        ? JSON.parse(disco.get(store.BLOBS_KEY) || '{}') : store._blobs();
+    } catch (e) { return 0; }
     const refs = Object.keys(b);
     if (!refs.length) return 0;
     const vivas = new Set();
@@ -45177,6 +45182,8 @@ const orcamento = {
     f.querySelector('[name="id"]').value = '';
     f.querySelector('[name="data"]').value = utils.hojeISO();
     f.querySelector('[name="aplicar_regra"]').checked = true;
+    const incluiPre = document.getElementById('orc-inclui-pre');
+    if (incluiPre) incluiPre.checked = true;
     document.getElementById('orc-form-titulo').textContent = 'Novo orçamento';
     document.getElementById('orcamento-body').innerHTML = '';
     orcamento._totalManual = false;
@@ -45184,9 +45191,9 @@ const orcamento = {
     orcamento.setTipoPorte(orcamento._tipoPorte);
     orcamento._preencherSelectTabela();
     const cfg = orcamento.cfg();
-    /* f.reset() já devolve a caixa ao padrão do HTML (marcada). O texto sai
-       daí, não do contrário — senão um "sem avaliação" do orçamento anterior
-       ficaria valendo no seguinte. */
+    /* A saída segura apaga também os padrões dos campos. Cada orçamento
+       novo restabelece sua proposta: avaliação incluída, sem herdar a opção
+       do paciente ou da sessão anterior. */
     document.getElementById('orc-observacoes').value = orcamento._obsDe(orcamento._incluiPre());
     document.getElementById('orc-pgto-detalhe').value = cfg.pagamentoPadrao || '';
     orcamento.addProc();
@@ -45848,10 +45855,13 @@ const orcamento = {
       '<p>Permanecemos à disposição para esclarecimentos adicionais.</p>' +
       '<div class="assin"><p>Atenciosamente,<br><strong>Equipe ' + esc(cab.profissional || '') + '</strong><br>' + esc(cab.especialidade || '') + '</p>' +
       '<p class="rodape">' + reg.join(' | ') + (cab.whatsapp ? ('<br>WhatsApp: ' + esc(cab.whatsapp)) : '') + (cab.endereco ? ('<br>' + esc(cab.endereco)) : '') + '</p></div>' +
-      '<scr' + 'ipt>window.onload=function(){setTimeout(function(){window.print();},250);};window.onafterprint=function(){setTimeout(function(){window.close();},400);};</scr' + 'ipt></body></html>';
+      '</body></html>';
     const w = window.open('', '_blank');
     if (!w) { toast('Permita pop-ups para imprimir, ou use Gerar PDF', 'warn'); return; }
-    w.document.open(); w.document.write(html); w.document.close();
+    w.document.open();
+    w.addEventListener('load', () => setTimeout(() => w.print(), 250), { once: true });
+    w.addEventListener('afterprint', () => setTimeout(() => w.close(), 400), { once: true });
+    w.document.write(html); w.document.close();
   }
 };
 

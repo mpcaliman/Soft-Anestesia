@@ -893,7 +893,7 @@ await test('Cadastros: sobem para org_configs com organization_id e sem fila leg
     cloud.session = () => ({ user: { id: 'u-cfg' } });
     __smokeBindOrg('org-1');
     cloud.session = () => JSON.parse(sessionStorage.getItem(cloud.SESSION_KEY));
-    cloud.config = () => ({ url: 'http://nuvem.teste', anonKey: 'k' });
+    cloud.config = () => ({ url: 'https://nuvem-teste.supabase.co', anonKey: 'k' });
     cloud._headers = () => ({});
     clinicaSync._org = async () => 'org-1';
     const pedidos = [];
@@ -1878,7 +1878,7 @@ await test('Configurações sobem para a nuvem, descem ao entrar (vence a mais n
     cloud.estaConfigurado = () => true;
     cloud.estaLogado = () => true;
     cloud._garantirToken = async () => true;
-    cloud.config = () => ({ url: 'http://nuvem.teste', anonKey: 'k' });
+    cloud.config = () => ({ url: 'https://nuvem-teste.supabase.co', anonKey: 'k' });
     cloud.session = () => ({ user: { id: 'u-cfg' } });
     __smokeBindOrg('org-1');
     cloud.session = () => JSON.parse(sessionStorage.getItem(cloud.SESSION_KEY));
@@ -2071,7 +2071,7 @@ await test('Programador: aba só para a conta dele; ambientes, membros e acesso 
         { organization_id: 'org-a', user_id: 'u-med', role: 'gestor', ativo: true },
         { organization_id: 'org-b', user_id: 'u-prog', role: 'gestor', ativo: true }];
       if (path.startsWith('profiles')) return [{ id: 'u-med', nome: 'Medico', email: 'medico@ex.com' }, { id: 'u-prog', email: 'mpcaliman@hotmail.com' }];
-      if (path.startsWith('org_shares')) return [{ id: 'sh1', org_origem: 'org-a', org_destino: 'org-b', modulos: ['anestesia'] }];
+      if (path.startsWith('rpc/prog_list_org_shares')) return [{ id: 'sh1', org_origem: 'org-a', org_destino: 'org-b', modulos: ['anestesia'] }];
       return [];
     };
     location.hash = '#programador';
@@ -2545,7 +2545,7 @@ await test('Usuários: editar funciona nos espelhos da nuvem, só um "(você)", 
     /* criar clínica chama a RPC certa e o papel vira gestor no aparelho */
     const chamadas = [];   /* acumula: o render seguinte também usa fetch */
     cloud._garantirToken = async () => true;
-    cloud.config = () => ({ url: 'http://nuvem.teste', anonKey: 'k' });
+    cloud.config = () => ({ url: 'https://nuvem-teste.supabase.co', anonKey: 'k' });
     cloud._headers = () => ({});
     window.prompt = () => 'Clinica Teste';
     window.fetch = async (url, opts) => { chamadas.push({ url: String(url), body: (opts && opts.body) || '' }); return { ok: true, json: async () => 'org-1' }; };
@@ -2601,7 +2601,7 @@ await test('Recuperação: restaurar todos os arquivados, enviar tudo p/ a clín
     /* — restaurarTodos traz de volta em lote (da nuvem) — */
     cloudRel.disponivel = () => true;
     cloud._garantirToken = async () => true;
-    cloud.config = () => ({ url: 'http://nuvem.teste', anonKey: 'k' });
+    cloud.config = () => ({ url: 'https://nuvem-teste.supabase.co', anonKey: 'k' });
     cloud.session = () => ({ user: { id: 'u1', email: 'mpcaliman@hotmail.com' } });
     cloud._headers = () => ({});
     cloudRel._orgAsync = async () => 'org-1';
@@ -2660,7 +2660,7 @@ await test('Restaurar tudo da nuvem: traz só dados relacionais da clínica, sem
     cloud.estaConfigurado = () => true;
     cloud.estaLogado = () => true;
     cloud._garantirToken = async () => true;
-    cloud.config = () => ({ url: 'http://nuvem.teste', anonKey: 'k' });
+    cloud.config = () => ({ url: 'https://nuvem-teste.supabase.co', anonKey: 'k' });
     cloud.session = () => ({ user: { id: 'u1', email: 'mpcaliman@hotmail.com' } });
     cloud._headers = () => ({});
     const pedidos = [];
@@ -3017,7 +3017,7 @@ await test('Auxiliar preenche a ficha inteira; finalizar continua sendo do médi
       && !mod.classList.contains('somente-impressao');
     /* mas Finalizar some para quem só pré-lança */
     const fin = Array.from(mod.querySelectorAll('.btn, button'))
-      .filter(b => /\.finalizar/i.test(b.getAttribute('onclick') || ''));
+      .filter(b => /\.finalizar/i.test(b.getAttribute('data-soft-name-click') || b.getAttribute('onclick') || ''));
     out.qtdFin = fin.length;
     out.finalizarEscondido = fin.length > 0 && fin.every(b => b.style.display === 'none');
 
@@ -3025,7 +3025,7 @@ await test('Auxiliar preenche a ficha inteira; finalizar continua sendo do médi
     auth.usuarioAtual = () => ({ id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
     auth._aplicarLeitura('pre');
     const fin2 = Array.from(mod.querySelectorAll('.btn, button'))
-      .filter(b => /\.finalizar/i.test(b.getAttribute('onclick') || ''));
+      .filter(b => /\.finalizar/i.test(b.getAttribute('data-soft-name-click') || b.getAttribute('onclick') || ''));
     out.medicoFinaliza = fin2.some(b => b.style.display !== 'none');
     return out;
   });
@@ -3743,7 +3743,7 @@ await test('Sessão vencida: o app diz a verdade e oferece entrar de novo', asyn
     equipeNuvem.ehGestor = () => false;
     await equipeNuvem.render();
     const lista = document.getElementById('equipe-nuvem-lista').innerHTML;
-    out.equipeFala = /sess[aã]o da nuvem expirou/i.test(lista) && lista.indexOf('cloud.reentrar()') >= 0;
+    out.equipeFala = /sess[aã]o da nuvem expirou/i.test(lista) && !!document.querySelector('#equipe-nuvem-lista [data-soft-name-click="cloud.reentrar"]');
     out.equipeNaoAcusa = lista.indexOf('não está vinculada') < 0;
 
     /* Diagnóstico: idem, com botão de entrar de novo */
@@ -3752,7 +3752,7 @@ await test('Sessão vencida: o app diz a verdade e oferece entrar de novo', asyn
     cloud.buscarPerfil = async () => null;   /* consulta falhou */
     await cloudDiag.rodar();
     const diag = document.getElementById('clouddiag-tab').innerHTML;
-    out.diagFala = /sess[aã]o da nuvem expirou/i.test(diag) && diag.indexOf('cloud.reentrar()') >= 0;
+    out.diagFala = /sess[aã]o da nuvem expirou/i.test(diag) && !!document.querySelector('#clouddiag-tab [data-soft-name-click="cloud.reentrar"]');
     out.diagMostraLocal = diag.indexOf('o que existe neste aparelho') >= 0 || diag.indexOf('Módulo') >= 0;
 
     /* a janela de reentrada já vem com o e-mail em uso */
@@ -3986,7 +3986,7 @@ await test('Rascunhos viajam entre aparelhos, juntando pelo mais recente', async
     out.naoRegride = rascunhos.list('anestesia')[0].dados.procedimento.descricao === 'Colecistectomia videolaparoscópica';
 
     /* versão mais nova na nuvem entra no lugar */
-    naNuvem = [{ organization_id: 'org-1', user_id: 'u1', version: 2, doc_id: 'rasc_1', data: { id: 'rasc_1', label: 'Maria', updatedAt: '2026-08-07T18:00:00Z',
+    naNuvem = [{ organization_id: 'org-1', user_id: 'u1', module: 'anestesia', version: 2, doc_id: 'rasc_1', data: { id: 'rasc_1', label: 'Maria', updatedAt: '2026-08-07T18:00:00Z',
       dados: { paciente: { nome: 'Maria' }, procedimento: { descricao: 'Versão do outro aparelho' } } } }];
     await rascunhosSync.puxar('anestesia');
     out.aceitaMaisNovo = rascunhos.list('anestesia').some(r => r.id === 'rasc_1' && r.dados.procedimento.descricao === 'Versão do outro aparelho');
@@ -4007,7 +4007,7 @@ await test('Rascunhos viajam entre aparelhos, juntando pelo mais recente', async
     /* o botão da barra ABRE o rascunho que chegou (não basta trazer calado) */
     rascunhos.setList('anestesia', []);
     rascunhos.setAtivo('anestesia', null);
-    naNuvem = [{ organization_id: 'org-1', user_id: 'u1', version: 1, doc_id: 'rasc_9', data: { id: 'rasc_9', label: 'Ana Vinda do Celular', updatedAt: '2026-08-07T20:00:00Z',
+    naNuvem = [{ organization_id: 'org-1', user_id: 'u1', module: 'anestesia', version: 1, doc_id: 'rasc_9', data: { id: 'rasc_9', label: 'Ana Vinda do Celular', updatedAt: '2026-08-07T20:00:00Z',
       dados: { paciente: { nome: 'Ana Vinda do Celular' }, procedimento: { descricao: 'Hernioplastia' } } } }];
     await rascunhos.buscarNaNuvem('anestesia');
     out.abriuNaTela = rascunhos.ativo('anestesia') === 'rasc_9';
@@ -4046,9 +4046,9 @@ await test('PDF automático ao finalizar cobre todos os módulos e pode ser exig
   const r = await page.evaluate(() => {
     const out = {};
     /* módulos que chamam o backup ao finalizar (o "em qualquer módulo") */
-    const fonte = document.documentElement.innerHTML;
-    out.modulosLigados = ['pre', 'consulta', 'recuperacao', 'termo', 'anestesia', 'prescricao']
-      .every(m => fonte.indexOf("pdfBackup.autoAoFinalizar('" + m + "')") >= 0);
+    const modulos = { pre, consulta, recuperacao, termo, anestesia, prescricao };
+    out.modulosLigados = Object.entries(modulos)
+      .every(([nome, modulo]) => String(modulo.salvar).includes("pdfBackup.autoAoFinalizar('" + nome + "')"));
 
     /* preferência individual manda quando a clínica não exige */
     localStorage.setItem(orgSettings.CACHE_KEY, JSON.stringify({}));
@@ -4123,7 +4123,7 @@ await test('Cadastros da clínica sobem e descem por org_configs, valendo entre 
       !!clinicaSync.CHAVES['medsys.v7.logoCustom'] &&
       configSync.CHAVES.indexOf('medsys.v7.theme') >= 0;   /* tema continua pessoal */
 
-    cloud.config = () => ({ url: 'http://nuvem.teste', anonKey: 'k' });
+    cloud.config = () => ({ url: 'https://nuvem-teste.supabase.co', anonKey: 'k' });
     /* nuvem de mentira para org_configs */
     let tabela = [];
     const fetchOrig = window.fetch;
@@ -4398,25 +4398,27 @@ await test('Ao finalizar, registro repetido do mesmo paciente e dia pergunta: su
 /* 72) Menu no celular: a barra de baixo tapava o fim da lista (Sair, nuvem) */
 await test('Com o menu aberto, a barra de baixo sai da frente e o fim da lista fica alcançável', async () => {
   const page = await novaPagina();
+  await page.setViewportSize({ width: 390, height: 844 });
   const r = await page.evaluate(() => {
     const out = {};
     document.body.classList.remove('menu-aberto');
+    document.getElementById('sidebar').classList.remove('open');
+    const nav = document.getElementById('bottom-nav');
+    out.barraAntes = getComputedStyle(nav).display !== 'none';
     ui.toggleSidebar();
     out.abriu = document.getElementById('sidebar').classList.contains('open')
       && document.body.classList.contains('menu-aberto');
+    out.regraBarra = getComputedStyle(nav).display === 'none';
+    out.regraFolga = parseFloat(getComputedStyle(document.getElementById('sidebar')).paddingBottom) >= 88;
     ui.toggleSidebar();
     out.fechou = !document.getElementById('sidebar').classList.contains('open')
       && !document.body.classList.contains('menu-aberto');
-    /* a regra de CSS que tira a barra e a folga no fim do menu existem */
-    const css = Array.from(document.styleSheets)
-      .flatMap(s => { try { return Array.from(s.cssRules); } catch (e) { return []; } })
-      .map(r => r.cssText).join('\n');
-    out.regraBarra = /body\.menu-aberto\s+\.bottom-nav/.test(css);
-    out.regraFolga = /\.sidebar\s*\{[^}]*padding-bottom:\s*calc\(env\(safe-area-inset-bottom/.test(css);
+    out.barraVoltou = getComputedStyle(nav).display !== 'none';
     return out;
   });
   assert(r.abriu, 'abrir o menu deveria marcar o body, para a barra de baixo poder sair');
   assert(r.fechou, 'fechar o menu deveria devolver a barra de baixo');
+  assert(r.barraAntes && r.barraVoltou, 'a barra móvel deve aparecer antes e depois do menu');
   assert(r.regraBarra, 'deveria existir a regra que esconde a barra de baixo com o menu aberto');
   assert(r.regraFolga, 'o menu deveria ter folga no fim para o último item não ficar sob a barra');
   await page.close();
@@ -4655,93 +4657,45 @@ await test('Gráfico: cada sinal vital tem cor e símbolo próprios, na ficha e 
   await page.close();
 });
 
-/* 76) Aparelho cheio: o app libera espaço sozinho e SALVA, em vez de engolir o
-   erro e abrir uma janela a cada toque em Salvar. */
-await test('Armazenamento cheio: libera espaço sozinho, salva de verdade e não bloqueia a tela', async () => {
+/* 76) Quota local não impede confirmação online. Offline, a falha de proteção
+   deve manter a intenção na tela e declarar que ainda não ficou durável. */
+await test('Armazenamento cheio: quota offline não finge proteção; online confirma sem persistir prontuário', async () => {
   const page = await novaPagina();
-  const r = await page.evaluate(() => {
-    const out = {};
-    const setItemOrig = Storage.prototype.setItem;
-
-    /* --- 1) a gravação que falha volta FALSE (antes engolia e devolvia nada) --- */
-    let permitir = false;
-    Storage.prototype.setItem = function (k, v) {
-      if (!permitir && String(k).indexOf('medsys.v3.pre') === 0) {
-        const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e;
-      }
-      return setItemOrig.call(this, k, v);
-    };
-    /* trava também o socorro: nenhuma etapa consegue destravar */
-    const etapasOrig = espaco.ETAPAS.slice();
-    espaco.ETAPAS = [{ nome: 'nada', fn: () => 0 }];
-    localStorage.removeItem(espaco.AVISO_KEY);
-    out.falhaVoltaFalse = store.setList('pre', [{ _id: 'x' }]) === false;
-    /* e avisa numa FAIXA, não numa janela modal que bloqueia o trabalho.
-       (Confere pelo TÍTULO: outra janela do app aberta na hora não é o que
-       este teste mede — o que não pode é o aviso de espaço virar modal.) */
-    const bdEsp = document.getElementById('modal-backdrop');
-    const tituloModal = ((document.getElementById('modal-title') || {}).textContent || '');
-    out.faixaNaoModal = !!document.getElementById('espaco-faixa') &&
-      !(bdEsp.classList.contains('show') && /espa|armazenam|memória/i.test(tituloModal));
-    /* segundo aviso dentro de 6 h não repete a faixa */
-    espaco.fecharFaixa();
-    store.setList('pre', [{ _id: 'x' }]);
-    out.naoRepete = !document.getElementById('espaco-faixa');
-
-    /* --- 2) socorro real: a etapa libera e a gravação passa --- */
-    espaco.ETAPAS = [
-      { nome: 'etapa que não resolve', fn: () => 10 },
-      { nome: 'etapa que resolve', fn: () => { permitir = true; return 2048; } },
-      { nome: 'etapa que nem deveria rodar', fn: () => { out.foiLonge = true; return 1; } }
-    ];
-    espaco.fecharFaixa();
-    out.socorroSalvou = store.setList('pre', [{ _id: 'y' }]) === true;
-    out.parouNaEtapaCerta = out.foiLonge !== true;
-    out.semFaixaQuandoResolve = !document.getElementById('espaco-faixa');
-
-    Storage.prototype.setItem = setItemOrig;
-    espaco.ETAPAS = etapasOrig;
-
-    /* --- 3) as etapas reais existem e vão da mais segura para a menos --- */
-    const nomes = espaco.ETAPAS.map(e => e.nome);
-    out.ordemSegura = nomes[0].includes('versões')
-      && nomes.indexOf('lixeira vencida') < nomes.indexOf('lixeira')
-      && nomes.some(n => n.includes('nuvem'));
-
-    /* --- 4) só sai do aparelho o que está CONFIRMADO na nuvem --- */
-    store.setList('pre', []);
-    const antigo = '2020-01-01T00:00:00.000Z';
-    store.setList('pre', [
-      { _id: 'confirmado', nome: 'A', _updatedAt: antigo, _relUpdatedAt: antigo },
-      { _id: 'so-local',   nome: 'B', _updatedAt: antigo }        /* nunca subiu */
-    ]);
-    localStorage.removeItem(arquivo.INDEX_KEY);
-    espaco._arquivarAte(30);
-    const restaram = store.list('pre').map(x => x._id);
-    out.guardaOnaoSincronizado = restaram.includes('so-local') && !restaram.includes('confirmado');
-    out.indiceLembra = arquivo.estaArquivado('pre', 'confirmado');
-
-    /* --- 5) preventiva não arquiva nada: só mexe no que é descartável --- */
-    store.setList('pre', [{ _id: 'recente', nome: 'C', _updatedAt: new Date().toISOString(), _relUpdatedAt: antigo }]);
-    espaco.preventiva();
-    out.preventivaNaoArquiva = store.list('pre').length === 1;
-
-    store.setList('pre', []);
-    localStorage.removeItem(arquivo.INDEX_KEY);
-    localStorage.removeItem(espaco.AVISO_KEY);
-    espaco.fecharFaixa();
-    return out;
+  const r = await page.evaluate(async () => {
+    await __smokePrepareQueue();
+    sincronia.agora = () => {}; rascunhos._agendarEnvio = () => {};
+    cloudRel.enviarRegistro = async (mod, item, opts) => __smokeCloudReceipt(mod, item, opts);
+    const driver = filaCifrada._driverAtual(), originalDriver = filaCifrada._driver;
+    let writes = 0;
+    filaCifrada._driver = Object.assign({}, driver, { addOperation: async () => {
+      writes++; throw Object.assign(new Error('quota'), { name: 'QuotaExceededError' });
+    } });
+    const online = store.save('pre', { nome: 'Confirmado apesar de disco cheio', data: utils.hojeISO() });
+    const receipt = await store.aguardarNuvem(online);
+    const onlineNoStorage = receipt.remoteConfirmed === true && writes === 0 && localStorage.getItem(STORAGE.pre) === null;
+    cloudRel.enviarRegistro = async () => ({ ok: false, motivo: 'rede' });
+    const offline = store.save('pre', { nome: 'Intenção sem espaço', data: utils.hojeISO() });
+    const failure = await store.aguardarNuvem(offline);
+    const notices = [], originalToast = window.toast;
+    window.toast = text => notices.push(String(text));
+    await store.notificarNuvem(offline, 'Ficha');
+    await Promise.resolve(); window.toast = originalToast;
+    const rejected = failure.durable === false && failure.queued === false && writes === 1;
+    const inMemory = store.getById('pre', offline._id).nome === 'Intenção sem espaço';
+    const honest = notices.some(text => /Não foi possível proteger nem confirmar/.test(text));
+    const noPlaintext = localStorage.getItem(STORAGE.pre) === null && (await driver.listOperations(filaCifrada._donoKey(contextoAba.capturar()))).length === 0;
+    filaCifrada._driver = originalDriver;
+    const protectedLater = await persistenciaCloudFirst.salvar('pre', store.getById('pre', offline._id));
+    const recovered = (await filaCifrada.listar()).find(op => op.entityId === offline._id);
+    const encrypted = (await driver.listOperations(filaCifrada._donoKey(contextoAba.capturar())))[0];
+    return { onlineNoStorage, rejected, inMemory, honest, noPlaintext,
+      protectedLater: protectedLater.durable === true && !!recovered,
+      ciphertext: !!encrypted.ciphertext && !JSON.stringify(encrypted).includes('Intenção sem espaço') };
   });
-  assert(r.falhaVoltaFalse, 'gravação que não coube tem que voltar false, não fingir sucesso');
-  assert(r.faixaNaoModal, 'o aviso deveria ser uma faixa, não uma janela que bloqueia a tela');
-  assert(r.naoRepete, 'o aviso não pode reaparecer a cada gravação');
-  assert(r.socorroSalvou, 'o socorro deveria liberar espaço e conseguir salvar');
-  assert(r.parouNaEtapaCerta, 'o socorro deveria parar assim que a gravação passar, sem liberar demais');
-  assert(r.semFaixaQuandoResolve, 'resolvendo sozinho, não deveria incomodar ninguém');
-  assert(r.ordemSegura, 'as etapas deveriam ir da mais segura para a menos');
-  assert(r.guardaOnaoSincronizado, 'registro que ainda não subiu para a nuvem NUNCA pode sair do aparelho');
-  assert(r.indiceLembra, 'o que foi arquivado tem que ficar no índice, para poder voltar');
-  assert(r.preventivaNaoArquiva, 'a manutenção preventiva não pode arquivar registro nenhum');
+  assert(r.onlineNoStorage, 'disco cheio não impede recibo remoto e não autoriza uma cópia local online');
+  assert(r.rejected && r.inMemory && r.honest, 'quota offline mantém o trabalho na tela e informa que ainda não ficou protegido');
+  assert(r.noPlaintext, 'falha de cifragem não pode criar uma saída clínica em claro');
+  assert(r.protectedLater && r.ciphertext, 'após liberar espaço, a mesma intenção entra no WAL AES-GCM real');
   await page.close();
 });
 
@@ -4969,129 +4923,71 @@ await test('Cloud-only: confirmado sai do disco, pendente fica protegido e a tel
   await page.close();
 });
 
-/* 81) O carimbo do profissional era copiado inteiro dentro de CADA ficha
-   (~149 KB por registro). Guardar uma vez só. */
-await test('Carimbo repetido é guardado uma vez só, sem o resto do app perceber', async () => {
+/* 81) Imagens confirmadas pertencem à nuvem. A projeção em memória preserva
+   cada carimbo sem introduzir deduplicação clínica durável no aparelho. */
+await test('Carimbos das fichas online ficam só em memória; trocar uma imagem preserva as demais', async () => {
   const page = await novaPagina();
-  const r = await page.evaluate(() => {
-    const out = {};
-    localStorage.setItem('medsys.v7.demo', '1');
-    localStorage.removeItem(store.BLOBS_KEY);
-    localStorage.removeItem(armazenamento.FLAG_DEDUP);
-    const carimbo = 'data:image/png;base64,' + 'K'.repeat(60000);   /* o mesmo em todas */
-    const outro   = 'data:image/png;base64,' + 'Z'.repeat(60000);   /* de outro profissional */
-
-    store.setList('pre', [
-      { _id: 'f1', nome: 'A', assinatura_dataurl: carimbo },
-      { _id: 'f2', nome: 'B', assinatura_dataurl: carimbo },
-      { _id: 'f3', nome: 'C', assinatura_dataurl: carimbo },
-      { _id: 'f4', nome: 'D', assinatura_dataurl: outro }
-    ]);
-
-    /* na guarda: referência, não a imagem */
-    const cru = localStorage.getItem(STORAGE.pre);
-    out.naoGuardaRepetido = cru.indexOf('KKKKKKKKKK') < 0 && /blob:/.test(cru);
-    /* duas imagens distintas = dois blobs; três fichas iguais compartilham um */
-    out.umBlobPorImagem = Object.keys(store._blobs()).length === 2;
-    /* o peso caiu de ~4 cópias para 2 */
-    out.encolheu = cru.length * 2 < 40000;
-
-    /* na leitura: a imagem inteira volta, o resto do app não muda nada */
-    const lidos = store.list('pre');
-    out.leituraIntacta = lidos[0].assinatura_dataurl === carimbo
-      && lidos[2].assinatura_dataurl === carimbo
-      && lidos[3].assinatura_dataurl === outro;
-    out.getByIdIntacto = store.getById('pre', 'f2').assinatura_dataurl === carimbo;
-
-    /* trocar o carimbo depois NÃO altera ficha antiga (chave é o conteúdo) */
-    const l = store.list('pre');
-    l[0].assinatura_dataurl = outro;
-    store.setList('pre', l);
-    out.naoContaminaAntigas = store.getById('pre', 'f2').assinatura_dataurl === carimbo
-      && store.getById('pre', 'f1').assinatura_dataurl === outro;
-
-    /* texto pequeno continua inteiro — não vale referenciar tudo */
-    store.setList('consulta', [{ _id: 'c1', obs: 'anotação curta', foto: 'data:image/png;base64,AAA' }]);
-    out.ignoraPequeno = /data:image\/png;base64,AAA/.test(localStorage.getItem(STORAGE.consulta));
-
-    /* migração do que já estava duplicado */
-    localStorage.setItem(STORAGE.pre, JSON.stringify([
-      { _id: 'v1', nome: 'Velho A', assinatura_dataurl: carimbo },
-      { _id: 'v2', nome: 'Velho B', assinatura_dataurl: carimbo }
-    ]));
-    store._memoria.delete('pre');
-    localStorage.removeItem(armazenamento.FLAG_DEDUP);
-    const ganho = armazenamento.deduplicarImagens({ forcar: true });
-    out.migrou = ganho > 50000 && localStorage.getItem(STORAGE.pre).indexOf('KKKKKKKKKK') < 0;
-    out.migradoAindaLe = store.getById('pre', 'v2').assinatura_dataurl === carimbo;
-    out.rodaUmaVez = armazenamento.deduplicarImagens() === 0;
-
-    ['pre', 'consulta'].forEach(m => store.setList(m, []));
-    localStorage.removeItem(store.BLOBS_KEY);
-    return out;
+  const r = await page.evaluate(async () => {
+    await __smokePrepareQueue();
+    sincronia.agora = () => {}; rascunhos._agendarEnvio = () => {};
+    cloudRel.enviarRegistro = async (mod, item, opts) => __smokeCloudReceipt(mod, item, opts);
+    const carimbo = 'data:image/png;base64,' + 'K'.repeat(60000), outro = 'data:image/png;base64,' + 'Z'.repeat(60000);
+    const records = [];
+    for (let i = 0; i < 4; i++) {
+      const rec = store.save('pre', { nome: 'Imagem ' + i, assinatura_dataurl: i === 3 ? outro : carimbo });
+      const assertSafeReceipt = await store.aguardarNuvem(rec);
+      if (!assertSafeReceipt.remoteConfirmed) throw new Error('Recibo da imagem não confirmado');
+      records.push(rec);
+    }
+    const original = store.getById('pre', records[1]._id).assinatura_dataurl;
+    const changed = store.save('pre', Object.assign({}, store.getById('pre', records[0]._id), { assinatura_dataurl: outro }));
+    await store.aguardarNuvem(changed);
+    const result = {
+      onlyMemory: localStorage.getItem(STORAGE.pre) === null && !disco.get(store.BLOBS_KEY) && (await filaCifrada.listar()).length === 0,
+      intact: store.getById('pre', records[2]._id).assinatura_dataurl === carimbo && store.getById('pre', records[3]._id).assinatura_dataurl === outro,
+      isolatedChange: store.getById('pre', records[1]._id).assinatura_dataurl === original && store.getById('pre', records[0]._id).assinatura_dataurl === outro
+    };
+    const short = store.save('consulta', { nome: 'Imagem curta', foto: 'data:image/png;base64,AAA' });
+    cloudRel.enviarRegistro = async (mod, item, opts) => __smokeCloudReceipt(mod, item, opts);
+    await store.aguardarNuvem(short);
+    result.shortIntact = store.getById('consulta', short._id).foto === 'data:image/png;base64,AAA' && localStorage.getItem(STORAGE.consulta) === null;
+    return result;
   });
-  assert(r.naoGuardaRepetido, 'a imagem grande não pode ser gravada dentro do registro');
-  assert(r.umBlobPorImagem, 'imagens iguais deveriam compartilhar um único blob');
-  assert(r.encolheu, 'o módulo deveria encolher de verdade, não só trocar de forma');
-  assert(r.leituraIntacta && r.getByIdIntacto, 'na leitura a imagem tem que voltar inteira — nada no app pode notar');
-  assert(r.naoContaminaAntigas, 'trocar o carimbo hoje não pode alterar a ficha assinada ontem');
-  assert(r.ignoraPequeno, 'imagem pequena não precisa virar referência');
-  assert(r.migrou && r.migradoAindaLe, 'a migração deveria desduplicar o que já estava gravado, sem perder nada');
-  assert(r.rodaUmaVez, 'a migração não deveria repetir a cada abertura do app');
+  assert(r.onlyMemory, 'imagem confirmada não cria blobs, cache clínico ou WAL durável no aparelho');
+  assert(r.intact && r.isolatedChange, 'leitura e troca do carimbo preservam integralmente a imagem das outras fichas');
+  assert(r.shortIntact, 'imagem curta também permanece íntegra na memória, sem persistência clínica');
   await page.close();
 });
 
-/* 82) Carimbo trocado deixa a imagem velha guardada para sempre. Tem que sair. */
-await test('Imagem que nenhum registro usa mais é descartada, e a que está em uso nunca', async () => {
+/* 82) A manutenção de blobs legados não pode publicar imagens de memória nem
+   destruir a evidência necessária para reenvio de uma exclusão offline. */
+await test('Limpeza de imagens não publica memória em claro nem remove imagem de exclusão offline', async () => {
   const page = await novaPagina();
-  const r = await page.evaluate(() => {
-    const out = {};
-    localStorage.removeItem(store.BLOBS_KEY);
-    const velho = 'data:image/png;base64,' + 'V'.repeat(60000);
-    const novo  = 'data:image/png;base64,' + 'N'.repeat(60000);
-
-    store.setList('pre', [{ _id: 'x', nome: 'A', assinatura_dataurl: velho }]);
-    out.guardouUm = Object.keys(store._blobs()).length === 1;
-
-    /* troca o carimbo: o antigo fica órfão */
-    store.setList('pre', [{ _id: 'x', nome: 'A', assinatura_dataurl: novo }]);
-    out.doisGuardados = Object.keys(store._blobs()).length === 2;
-
-    const liberto = armazenamento.limparImagensOrfas();
-    const restantes = Object.keys(store._blobs());
-    out.tirouOrfa = liberto > 50000 && restantes.length === 1;
-    out.manteveEmUso = store.getById('pre', 'x').assinatura_dataurl === novo;
-
-    /* imagem citada só pela LIXEIRA não é órfã: o registro ainda pode voltar */
-    store.setList('pre', [{ _id: 'y', nome: 'B', assinatura_dataurl: velho }]);
-    store.delete('pre', 'y');                       /* vai para a lixeira */
-    store.setList('pre', []);                       /* nada mais referencia nada */
-    const refVelho = store._refDe(velho);
+  const r = await page.evaluate(async () => {
+    await __smokePrepareQueue();
+    sincronia.agora = () => {}; rascunhos._agendarEnvio = () => {};
+    const image = 'data:image/png;base64,' + 'V'.repeat(60000);
+    const cachedReference = store._guardarBlob(image);
     armazenamento.limparImagensOrfas();
-    out.respeitaLixeira = !!store._blobs()[refVelho];
-    /* e o registro volta da lixeira com a imagem inteira */
-    out.lixeiraDevolveInteiro = (lixeira._ler().find(e => e.item && e.item._id === 'y') || {}).item.assinatura_dataurl === velho;
-
-    /* rodar de novo sem nada a fazer não custa nem quebra */
-    out.idempotente = armazenamento.limparImagensOrfas() === 0;
-    /* e é uma etapa de liberação de espaço */
-    out.ehEtapa = espaco.ETAPAS.some(e => e.nome === 'imagens que ninguém mais usa');
-    /* a prateleira aparece com nome próprio, não some em "Configurações e outros" */
-    out.temRotulo = /Carimbos e imagens/.test(armazenamento._rotulo(store.BLOBS_KEY));
-
-    localStorage.removeItem(store.BLOBS_KEY);
-    localStorage.removeItem(lixeira.KEY);
-    store.setList('pre', []);
-    return out;
+    const noClearBlob = !disco.get(store.BLOBS_KEY) && localStorage.getItem(store.BLOBS_KEY) === null;
+    cloudRel.apagarNaClinica = async () => ({ ok: false, motivo: 'rede' });
+    store.setList('pre', [{ _id: 'imagem-offline', nome: 'Imagem preservada', assinatura_dataurl: image, _relVersion: 1, _relOrg: 'org-1' }]);
+    const removed = store.delete('pre', 'imagem-offline');
+    const result = await store.aguardarNuvem({ _id: 'imagem-offline' });
+    armazenamento.limparImagensOrfas();
+    const pending = (await filaCifrada.listar()).find(op => op.entityId === 'imagem-offline');
+    const trash = lixeira._ler().find(entry => entry.item && entry.item._id === 'imagem-offline');
+    const raw = (await filaCifrada._driverAtual().listOperations(filaCifrada._donoKey(contextoAba.capturar())))[0];
+    return { noClearBlob, removed, durable: result.durable === true,
+      preserved: !!pending && pending.payload.item.assinatura_dataurl === image,
+      trashIntact: !!trash && trash.item.assinatura_dataurl === image,
+      noPlaintext: localStorage.getItem(STORAGE.pre) === null && !JSON.stringify(raw).includes('VVVVVVVVVV'),
+      cacheIntact: store._blobsMemoria[cachedReference] === image,
+      label: /Carimbos e imagens/.test(armazenamento._rotulo(store.BLOBS_KEY)) };
   });
-  assert(r.guardouUm && r.doisGuardados, 'cada imagem distinta deveria ocupar um lugar');
-  assert(r.tirouOrfa, 'a imagem que ninguém mais referencia deveria ser descartada');
-  assert(r.manteveEmUso, 'a imagem em uso não pode ser tocada');
-  assert(r.respeitaLixeira, 'imagem citada pela lixeira ainda é necessária — não é órfã');
-  assert(r.lixeiraDevolveInteiro, 'o registro na lixeira tem que voltar com a imagem inteira');
-  assert(r.idempotente, 'rodar de novo sem órfãs não deveria fazer nada');
-  assert(r.ehEtapa, 'limpar imagens órfãs deveria ser uma etapa de liberação de espaço');
-  assert(r.temRotulo, 'a prateleira de imagens precisa de nome próprio na lista de armazenamento');
+  assert(r.noClearBlob, 'limpeza não pode persistir uma imagem que existe somente na memória');
+  assert(r.removed && r.durable && r.preserved && r.trashIntact, 'exclusão offline mantém a imagem no WAL cifrado e na projeção transitória da lixeira');
+  assert(r.noPlaintext && r.cacheIntact && r.label, 'limpeza preserva a imagem necessária e não recria blob clínico em claro');
   await page.close();
 });
 
@@ -6391,54 +6287,41 @@ await test('O botão Buscar da fila responde sempre — inclusive quando não d�
 
 
 
-/* 106) O teto de 5 MB do localStorage não se resolve com faxina: é limite do
-   navegador. O que é pesado — imagens, versões, lixeira — mudou de casa para o
-   IndexedDB, que trabalha na casa de centenas de MB. */
-await test('O que é pesado sai do localStorage e vai para o disco grande do aparelho', async () => {
+/* 106) A imagem offline cabe no IndexedDB somente dentro do WAL AES-GCM,
+   vinculada ao dono e à clínica; o recibo remoto encerra sua persistência. */
+await test('Imagem pesada offline entra cifrada no IndexedDB, isolada por dono, e sai após o recibo', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
-    const out = {};
-    localStorage.setItem('medsys.v7.demo', '1');
-    cloudRel.mirror = () => null;
-    sincronia.agora = () => {};
-    rascunhos._agendarEnvio = () => {};
-    out.abriu = disco._pronto === true;
-    out.saoAsPesadas = disco.CHAVES.indexOf('medsys.v7.blobs') >= 0
-      && disco.CHAVES.indexOf('medsys.v7.versions') >= 0
-      && disco.CHAVES.indexOf('medsys.v7.lixeira') >= 0;
-
-    /* imagem grande num registro: o registro guarda só a referência, e a
-       imagem não ocupa uma vírgula do localStorage */
-    const img = 'data:image/png;base64,' + 'A'.repeat(60000);
-    store.setList('pre', []);
-    const rec = store.save('pre', { nome: 'Com carimbo', data: '2026-08-13', carimbo: img });
-    const cru = localStorage.getItem(STORAGE['pre']) || '';
-    out.registroFicouLeve = cru.length < 5000 && /blob:/.test(cru);
-    out.imagemForaDoLocalStorage = (localStorage.getItem('medsys.v7.blobs') || '') === '';
-    out.imagemNoDiscoGrande = (disco.get('medsys.v7.blobs') || '').length > 50000;
-    /* e o app continua enxergando a imagem inteira, sem saber de nada disso */
-    out.appVeAImagemInteira = (store.getById('pre', rec._id) || {}).carimbo === img;
-
-    /* a gravação chega mesmo ao IndexedDB, não só à memória */
-    await new Promise(r2 => setTimeout(r2, 700));
-    const doDisco = await disco._ler(disco._k('medsys.v7.blobs'));
-    out.gravouNoIndexedDB = typeof doDisco === 'string' && doDisco.length > 50000;
-
-    /* a tela de armazenamento não pode mentir por omissão */
-    const u = armazenamento.uso();
-    out.contaSeparado = u.grande > 50000 && u.itens.some(it => it.noDiscoGrande);
-
-    store.setList('pre', []);
+    await __smokePrepareQueue('org-1', 'image-owner');
+    sincronia.agora = () => {}; rascunhos._agendarEnvio = () => {};
+    cloudRel.enviarRegistro = async () => ({ ok: false, motivo: 'rede' });
+    const image = 'data:image/png;base64,' + 'A'.repeat(60000);
+    const rec = store.save('pre', { nome: 'Imagem pesada confidencial', data: '2026-08-13', carimbo: image });
+    const result = await store.aguardarNuvem(rec);
+    const owner = contextoAba.capturar(), driver = filaCifrada._driverAtual();
+    const raw = (await driver.listOperations(filaCifrada._donoKey(owner)))[0];
+    const pending = (await filaCifrada.listar())[0];
+    await persistenciaCloudFirst.renderPainel();
+    const panel = (document.getElementById('fila-cifrada-painel') || {}).textContent || '';
+    const out = { durable: result.durable === true,
+      actualIDB: !!raw && raw.ciphertext.length > 60000 && !raw.payload,
+      noPlaintext: !JSON.stringify(raw).includes('Imagem pesada confidencial') && !JSON.stringify(raw).includes('AAAAAAAAAA') && localStorage.getItem(STORAGE.pre) === null && !disco.get(store.BLOBS_KEY),
+      intact: pending.payload.item.carimbo === image && store.getById('pre', rec._id).carimbo === image,
+      visiblePending: /1 operação/.test(panel) };
+    await __smokePrepareQueue('org-1', 'other-image-owner');
+    out.otherOwnerBlocked = (await filaCifrada.listar()).length === 0 && store.getById('pre', rec._id) == null;
+    await __smokePrepareQueue('org-1', 'image-owner');
+    const recovered = await filaCifrada.listar(); store.restaurarDoCofre(recovered);
+    out.sameOwnerRecovers = store.getById('pre', rec._id).carimbo === image;
+    cloudRel.enviarRegistro = async (mod, item, opts) => __smokeCloudReceipt(mod, item, opts);
+    const drained = await persistenciaCloudFirst.drenar();
+    out.removedAfterAck = drained.enviados === 1 && (await driver.listOperations(filaCifrada._donoKey(owner))).length === 0 && localStorage.getItem(STORAGE.pre) === null;
     return out;
   });
-  assert(r.abriu, 'o disco grande precisa abrir no boot');
-  assert(r.saoAsPesadas, 'imagens, versões e lixeira são o que pesa — é o que muda de casa');
-  assert(r.registroFicouLeve, 'o registro guarda a referência, não a imagem');
-  assert(r.imagemForaDoLocalStorage, 'a imagem não pode mais ocupar o espaço apertado de 5 MB');
-  assert(r.imagemNoDiscoGrande, 'a imagem tem que estar no disco grande');
-  assert(r.appVeAImagemInteira, 'para o resto do app nada muda: a imagem volta inteira');
-  assert(r.gravouNoIndexedDB, 'a gravação precisa chegar ao IndexedDB, não parar na memória');
-  assert(r.contaSeparado, 'a tela de armazenamento precisa mostrar o que está no disco grande');
+  assert(r.durable && r.actualIDB && r.noPlaintext && r.intact, 'imagem offline chega de fato ao IndexedDB somente como ciphertext AES-GCM, sem perda de conteúdo');
+  assert(r.visiblePending, 'o painel informa a existência da operação cifrada');
+  assert(r.otherOwnerBlocked && r.sameOwnerRecovers, 'somente o dono autenticado da mesma clínica recupera o conteúdo');
+  assert(r.removedAfterAck, 'a imagem cifrada sai do aparelho somente após recibo verificável da nuvem');
   await page.close();
 });
 
@@ -8156,7 +8039,11 @@ await test('Rascunhos: fechar não deixa a aba voltar, e aba em branco não se m
       { id: 'a4', label: 'LAIS', dados: { paciente: { nome: 'LAIS' } }, updatedAt: '2026-08-14T12:30:00Z' }
     ]);
     rascunhos.setAtivo(M, 'a4');
+    const apagarOriginal = rascunhosSync.apagar;
+    rascunhosSync.apagar = async () => false; /* tentativa inicial indisponível */
     rascunhos.limparVazios(M);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    rascunhosSync.apagar = apagarOriginal;
     const ids = rascunhos.list(M).map(x => x.id);
     out.sobrouUmaEmBranco = ids.length === 2 && ids.indexOf('a4') >= 0;
     out.oTrabalhoFicou = !!rascunhos.list(M).find(x => x.id === 'a4');
@@ -8167,14 +8054,14 @@ await test('Rascunhos: fechar não deixa a aba voltar, e aba em branco não se m
     cloud.estaConfigurado = () => true;
     cloud.estaLogado = () => true;
     cloud._garantirToken = async () => true;
-    cloud.config = () => ({ url: 'http://nuvem.teste', anonKey: 'k' });
+    cloud.config = () => ({ url: 'https://nuvem-teste.supabase.co', anonKey: 'k' });
     cloud.session = () => ({ user: { id: 'u1' } });
     cloud._headers = () => ({});
     const enviados = [];
     const apagados = [];
     const fetchOriginal = window.fetch;
     let naNuvem = ['a1', 'a2', 'b9', 'a4'].map(id => ({
-      organization_id: 'org-1', user_id: 'u1', doc_id: id, version: 1,
+      organization_id: 'org-1', user_id: 'u1', module: M, doc_id: id, version: 1,
       data: { id, label: id === 'a4' ? 'LAIS' : 'Rascunho 1',
         dados: id === 'a4' ? { paciente: { nome: 'LAIS' } } : vazio,
         updatedAt: '2026-08-14T12:30:00Z' }
@@ -8847,10 +8734,12 @@ await test('Termo: modelo jurídico entra íntegro, com o nome do paciente e at�
     out.naOrdem = termoBiblioteca.ordem.indexOf('juridico') >= 0;
     out.rotulo = termoBiblioteca.MODELOS.juridico.label === 'Jurídico';
     /* o botão nos dois lugares: no módulo e no editor de Ajustes */
-    const botoes = Array.from(document.querySelectorAll('button'))
-      .map(b => b.getAttribute('onclick') || '');
-    out.botaoTermo = botoes.some(o => o.indexOf("termo.aplicarModelo('juridico')") >= 0);
-    out.botaoAjustes = botoes.some(o => o.indexOf("termoPadrao.uiCarregarModelo('juridico')") >= 0);
+    const botoes = Array.from(document.querySelectorAll('button'));
+    const acao = b => b.getAttribute('data-soft-name-click') || b.getAttribute('onclick') || '';
+    const botaoTermo = botoes.find(b => /termo\.aplicarModelo/.test(acao(b)) && /Jurídico/.test(b.textContent));
+    const botaoAjustes = botoes.find(b => /termoPadrao\.uiCarregarModelo/.test(acao(b)) && /Jurídico/.test(b.textContent));
+    out.botaoTermo = !!botaoTermo && !!botaoTermo.closest('#module-termo');
+    out.botaoAjustes = !!botaoAjustes && !!botaoAjustes.closest('#module-ajustes');
 
     ui.navegar('termo');
     const f = document.getElementById('form-termo');
@@ -8858,7 +8747,7 @@ await test('Termo: modelo jurídico entra íntegro, com o nome do paciente e at�
     set('nome', 'Joaquim Menezes Barbosa');
     set('procedimento', 'Orquidopexia unilateral');
     set('texto', '');
-    termo.aplicarModelo('juridico');
+    botaoTermo.click();
     const txt = (f.querySelector('[name="texto"]') || {}).value || '';
 
     out.nomeEntrou = txt.indexOf('Eu, Joaquim Menezes Barbosa, declaro que fui devidamente informado') >= 0;
@@ -9511,7 +9400,7 @@ await test('Financeiro: botão de filtrar com contagem e filtro por planos de sa
 
     /* --- o botão existe e devolve resposta ------------------------------- */
     const btnFiltrar = Array.from(document.querySelectorAll('#financeiro .filter-actions button, .filter-actions button'))
-      .find(b => /filtrar/i.test(b.textContent) && /financeiro\.aplicarFiltros/.test(b.getAttribute('onclick') || ''));
+      .find(b => /filtrar/i.test(b.textContent) && /financeiro\.aplicarFiltros/.test(b.getAttribute('data-soft-name-click') || b.getAttribute('onclick') || ''));
     out.temBotao = !!btnFiltrar;
     financeiro.aplicarFiltros();
     out.contagemTotal = (document.getElementById('fin-f-resultado') || {}).textContent || '';
@@ -10340,7 +10229,9 @@ await test('Pré-lançamento: o que ficou preso no aparelho mostra o motivo e co
     preLanc.renderFila();
     out.avisa = /vieram só deste aparelho/.test(corpo());
     out.mostraMotivo = /Motivo:/.test(corpo()) && /Equipe da nuvem/.test(corpo());
-    out.temBotaoSubir = /subirPendentes\(\)/.test(corpo());
+    const temBotaoSubir = () => Array.from(document.querySelectorAll('#pl-fila-lista button'))
+      .some(b => /preLanc\.subirPendentes/.test(b.getAttribute('data-soft-name-click') || b.getAttribute('onclick') || ''));
+    out.temBotaoSubir = temBotaoSubir();
 
     /* o que JÁ subiu não ganha botão nenhum */
     limpar();
@@ -10349,7 +10240,7 @@ await test('Pré-lançamento: o que ficou preso no aparelho mostra o motivo e co
       _preLanc: { estado: 'enviado', porNome: 'Aux', enviadoEm: new Date().toISOString() } });
     preLanc._diag = { naClinica: 1, naoCouberam: 0 };
     preLanc.renderFila();
-    out.semPresoSemBotao = !/subirPendentes\(\)/.test(corpo());
+    out.semPresoSemBotao = !temBotaoSubir();
     preLanc._diag = null; preLanc._erroSubida = '';
     return out;
   });
@@ -10450,10 +10341,13 @@ const page = await novaPagina();
     const retomou = await persistenciaCloudFirst.drenar();
     out.sobeMesmoSemProjecao = retomou.enviados === 1 && (await filaCifrada.listar()).length === 0;
 
-    /* Um ok sem UUID/checksum não é recibo. */
-    cloudRel.enviarRegistro = async () => ({ ok: true });
+    /* Primeiro nasce uma intenção offline real; um ok incompleto no replay
+       não pode apagar sua única cópia cifrada. */
+    cloudRel.enviarRegistro = async () => ({ ok: false, motivo: 'rede' });
     const semRecibo = store.save('pre', { nome: 'Sem recibo verificável' });
     await store.aguardarNuvem(semRecibo);
+    cloudRel.enviarRegistro = async () => ({ ok: true });
+    await persistenciaCloudFirst.drenar();
     out.okIncompletoNaoApaga = (await filaCifrada.listar()).some(op => op.entityId === semRecibo._id);
     cloudRel.enviarRegistro = async () => ({ ok: false, conflict: true,
       motivo: 'versao_divergente', cloud: { _id: semRecibo._id, nome: 'Versão remota', _relVersion: 2 } });
@@ -11242,6 +11136,9 @@ await test('Orçamento: incluir ou não a avaliação pré-anestésica muda o te
     out.temCaixa = !!chk && !!ta;
     if (!out.temCaixa) return out;
 
+    /* Sair apaga os padrões do DOM para isolar a próxima pessoa. Novo
+       precisa restabelecer sua proposta mesmo depois dessa limpeza. */
+    chk.checked = false; chk.defaultChecked = false;
     orcamento.novo();
     out.nasceMarcado = chk.checked === true;
     out.textoInclui = /incluindo avalia/i.test(ta.value);
@@ -12427,7 +12324,7 @@ await test('PDF que não sobe fica esperando na fila, e sobe quando a autorizaç
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
-    __smokeBindOrg('org-1', 'u1');
+    await __smokePrepareQueue('org-1', 'u1');
     await pdfFila.limpar();
     const docFalso = { output: () => new Blob(['%PDF-1.4 teste'], { type: 'application/pdf' }) };
 
@@ -12435,19 +12332,23 @@ await test('PDF que não sobe fica esperando na fila, e sobe quando a autorizaç
     pdfBackup.salvarCfg({ supabase: true, drive: true, driveClientId: 'x.apps.googleusercontent.com' });
     cloud.estaLogado = () => true;
     let tentouSupa = 0, tentouDrive = 0;
-    pdfBackup.enviarSupabase = async () => { tentouSupa++; return false; };
-    pdfBackup.enviarDrive = async () => { tentouDrive++; return false; };
+    pdfBackup.enviarSupabase = async (blob, nome, dono, operacao = {}) => { tentouSupa++; operacao.falha?.(new TypeError('Failed to fetch')); return false; };
+    pdfBackup.enviarDrive = async (blob, nome, interativo, operacao = {}) => { tentouDrive++; operacao.falha?.(new TypeError('Failed to fetch')); return false; };
     await pdfBackup.enviarTodos(docFalso, 'FICHA_MARIA.pdf', { mod: 'anestesia', paciente: 'MARIA' });
     const espera = await pdfFila.listar();
     out.guardouOsDois = espera.length === 2
       && espera.some(i => i.destino === 'supabase') && espera.some(i => i.destino === 'drive');
     out.guardouOBlob = espera.every(i => i.blob && i.blob.size > 0);
     out.guardouOContexto = espera.every(i => i.nomeArq === 'FICHA_MARIA.pdf' && i.paciente === 'MARIA');
+    const protegidos = await filaCifrada._driverAtual().listSnapshots(filaCifrada._donoKey(filaCifrada._dono()));
+    const pdfsCifrados = protegidos.filter(i => i.namespace === pdfFila.NS && !i.deleted);
+    out.cifradoSemClinico = pdfsCifrados.length === 2 && pdfsCifrados.every(i => i.ciphertext && i.iv && !i.blob && !i.payload)
+      && !/FICHA_MARIA|MARIA|%PDF-1.4 teste/.test(JSON.stringify(pdfsCifrados));
 
     /* --- (b) o que subiu num destino não espera por ele --- */
     await pdfFila.limpar();
     pdfBackup.enviarSupabase = async () => true;      /* nuvem ok */
-    pdfBackup.enviarDrive = async () => false;        /* Drive deslogado */
+    pdfBackup.enviarDrive = async (blob, nome, interativo, operacao = {}) => { operacao.falha?.(new TypeError('Failed to fetch')); return false; }; /* indisponibilidade confirmada */
     await pdfBackup.enviarTodos(docFalso, 'PRE_JOAO.pdf', { mod: 'pre' });
     const so1 = await pdfFila.listar();
     out.soOQueFalhouEspera = so1.length === 1 && so1[0].destino === 'drive';
@@ -12462,12 +12363,19 @@ await test('PDF que não sobe fica esperando na fila, e sobe quando a autorizaç
     /* --- (d) porta ainda fechada: tenta uma vez por destino, não 40 --- */
     await pdfFila.limpar();
     pdfBackup.enviarDrive = async () => false;
-    for (let i = 0; i < 4; i++) await pdfFila.guardar(docFalso.output(), 'D' + i + '.pdf', 'drive', {});
+    for (let i = 0; i < 4; i++) await pdfFila.guardar(docFalso.output(), 'D' + i + '.pdf', 'drive', { _offlineConfirmado: true });
     let tentativas = 0;
     pdfBackup.enviarDrive = async () => { tentativas++; return false; };
     const res2 = await pdfBackup.drenarFila();
     out.naoInsiste = tentativas === 1 && res2.enviados === 0;
     out.continuamEsperando = (await pdfFila.listar()).length === 4;
+
+    /* Uma autorização negada online não cria cópia durável no aparelho. */
+    await pdfFila.limpar();
+    pdfBackup.enviarSupabase = async () => true;
+    pdfBackup.enviarDrive = async () => false;
+    const negado = await pdfBackup.enviarTodos(docFalso, 'AUTH_NEGADA.pdf');
+    out.authNaoViraOffline = negado.durable === false && negado.queued === 0 && (await pdfFila.listar()).length === 0;
 
     /* --- (e) conectar o Drive drena sozinho, sem ninguém pedir --- */
     out.conectarDrena = /drenarFila/.test(String(pdfBackup.conectarDrive));
@@ -12484,6 +12392,8 @@ await test('PDF que não sobe fica esperando na fila, e sobe quando a autorizaç
   assert(r.filaVazia, 'e sai da fila');
   assert(r.naoInsiste, 'com a porta ainda fechada, tenta uma vez por destino — não uma por arquivo');
   assert(r.continuamEsperando, 'e nada é descartado por ter falhado');
+  assert(r.authNaoViraOffline, 'falha de autorização online não cria cópia clínica durável');
+  assert(r.cifradoSemClinico, 'bytes, nome e paciente ficam somente em envelopes cifrados');
   assert(r.conectarDrena, 'conectar o Drive drena a fila sozinho');
   await page.close();
 });
@@ -12582,11 +12492,11 @@ await test('O que se preenche nas janelas fica na ficha, sobrevive ao recarregar
   await page.reload();
   await page.waitForTimeout(1200);
   /* Reabrir a aba exige uma nova sessão; pagehide encerra a anterior. */
-  await page.evaluate(() => {
+  await page.evaluate(async () => {
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
       perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
       organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
-    __smokeBindOrg('org1', 'u1');
+    await __smokePrepareQueue('org1', 'u1');
     auth._desbloquear();
   });
   await page.evaluate(() => { try { modal.close(); } catch (e) {} ui.navegar('anestesia'); });
@@ -12669,6 +12579,8 @@ await test('O que se preenche nas janelas fica na ficha, sobrevive ao recarregar
     const rec = store.last('anestesia');
     out.salvou = !!rec;
     if (!rec) return out;
+    const confirmacao = await store.aguardarNuvem(rec);
+    out.protegido = !!(confirmacao && (confirmacao.remoteConfirmed === true || confirmacao.durable === true));
 
     /* --- zerar e recarregar do registro --- */
     anestesia.limparSilencioso();
@@ -12705,6 +12617,7 @@ await test('O que se preenche nas janelas fica na ficha, sobrevive ao recarregar
 
   assert(r.nCampos >= 40, 'o teste preenche todos os campos de todas as janelas (achou ' + r.nCampos + ')');
   assert(r.salvou, 'a ficha com as janelas preenchidas salva');
+  assert(r.protegido, 'os dados das janelas têm confirmação remota ou fila offline cifrada durável');
   assert(r.naoZeraram.length === 0, 'a limpeza zera tudo antes de recarregar — senão o teste se engana sozinho: ' + r.naoZeraram.join(', '));
   assert(r.perdidos.length === 0, 'todo campo de janela sobrevive a salvar e recarregar: ' + r.perdidos.join(', '));
   assert(r.nDistintos >= 15, 'há valores distintos suficientes para cobrar na impressão');
@@ -12853,7 +12766,7 @@ await test('Regenerar PDFs de documentos já finalizados, sem repetir os que já
 
     /* o que falhar no envio vai para a fila, não some */
     await pdfFila.limpar();
-    pdfBackup.enviarSupabase = async () => false;
+    pdfBackup.enviarSupabase = async (blob, nome, dono, operacao = {}) => { operacao.falha?.(new TypeError('Failed to fetch')); return false; };
     markClean();
     await pdfBackup.regen.rodar({ de: '2026-09-01', ate: '2026-09-30', forcar: true });
     out.naFila = (await pdfFila.listar()).length;
@@ -13413,8 +13326,17 @@ await test('Canal legado fica sem I/O e sua fila antiga migra para filas relacio
     const recusa = await cloud.pushDoc('pre', { _id: 'novo' }, 'upsert');
     const envioDireto = await cloud._enviarOp(cloud._novaOp('pre', { _id: 'novo' }, 'upsert'));
 
-    cloud._enfileirar(cloud._novaOp('pre', { _id: 'pendente-1' }, 'upsert'));
-    cloud._enfileirar(cloud._novaOp('consulta', { _id: 'apagado-1' }, 'delete'));
+    /* Fixture criada por uma versão antiga: a API pessoal atual está fechada
+       e não pode ser usada para fabricar novas pendências no teste. */
+    const donoLegado = cloud._donoFila();
+    const acervoLegado = [
+      cloud._novaOp('pre', { _id: 'pendente-1' }, 'upsert'),
+      cloud._novaOp('consulta', { _id: 'apagado-1' }, 'delete')
+    ].map(op => Object.assign({}, op, {
+      organizationId: donoLegado.organizationId, userId: donoLegado.userId,
+      deviceId: donoLegado.deviceId, tabId: donoLegado.tabId
+    }));
+    localStorage.setItem(cloud.QUEUE_KEY, JSON.stringify(acervoLegado));
     const res = await persistenciaCloudFirst.migrarLegado();
     const migradas = res.migradas;
     const filaRel = await filaCifrada.listar();
@@ -13657,7 +13579,18 @@ await test('Busca acha a ficha guardada na nuvem, e oferece varrer a nuvem quand
     const so = historico._renderLinhas('anestesia', 'jaime');
     out.achouSozinho = /JAIME ROLANDO PEIXOTO/.test(so);
     out.dizOndeEsta = /guardado na nuvem/.test(so);
-    out.temComoAbrir = /_abrirRegistro/.test(so);
+    /* A ação pode ter vários passos: conferir o clique exige executar o
+       botão, em vez de depender do texto de um handler inline. */
+    const tabela = document.createElement('table');
+    tabela.innerHTML = '<tbody>' + so + '</tbody>';
+    document.body.appendChild(tabela);
+    const abrir = Array.from(tabela.querySelectorAll('button')).find(b => /Abrir/.test(b.textContent));
+    const abrirOriginal = dashboard._abrirRegistro;
+    let pedidoAbrir = null;
+    dashboard._abrirRegistro = (mod, id) => { pedidoAbrir = { mod, id }; };
+    try { if (abrir) abrir.click(); }
+    finally { dashboard._abrirRegistro = abrirOriginal; tabela.remove(); }
+    out.temComoAbrir = !!pedidoAbrir && pedidoAbrir.mod === 'anestesia' && pedidoAbrir.id === 'f-jaime';
 
     /* (b) continua aparecendo quando há resultado local junto */
     store.save('anestesia', { paciente: { nome: 'OUTRA PESSOA' }, procedimento: { data: '2026-09-20' } });
@@ -15706,7 +15639,7 @@ await test('Janela de finalização: desfecho confirmado com a cirurgia à vista
     fin.finalizacao.abrir('pre', p1);
     await new Promise(res => setTimeout(res, 350));
     const box = document.getElementById('fz-desfecho');
-    out.pedeODesfecho = !!box && box.style.display !== 'none'
+    out.pedeODesfecho = !!box && getComputedStyle(box).display !== 'none'
       && !!box.querySelector('[name="fz_desfecho"]');
     out.mostraACirurgia = /Colecistectomia videolaparoscópica/.test(box.innerHTML)
       && /Cirurgia proposta/.test(box.innerHTML);
@@ -15745,7 +15678,7 @@ await test('Janela de finalização: desfecho confirmado com a cirurgia à vista
       procedimento: { data: hoje, descricao: 'Artroplastia' }, _finalizado: true });
     fin.finalizacao.abrir('anestesia', an);
     await new Promise(res => setTimeout(res, 350));
-    out.fichaNaoPergunta = document.getElementById('fz-desfecho').style.display === 'none';
+    out.fichaNaoPergunta = getComputedStyle(document.getElementById('fz-desfecho')).display === 'none';
 
     /* 5) o ➕ da janela cria linha nova, com código e valor próprios */
     const antes = document.querySelectorAll('#fz-codigos-body tr').length;
@@ -16278,108 +16211,81 @@ await test('Computador compartilhado isola a clínica anterior sem apagar trabal
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
-    cloud.estaConfigurado = () => true; cloud.estaLogado = () => true;
-    cloud._garantirToken = async () => true;
-    cloud.config = () => ({ url: 'https://x.supabase.co', key: 'k' });
-    cloud._headers = () => ({});
-    window.fetch = async (url) => (/organizations/.test(String(url))
-      ? { ok: true, headers: { get: () => '0' }, json: async () => [{ nome: 'Clínica Carlos Pedreira' }] }
-      : { ok: true, headers: { get: () => '0' }, json: async () => [] });
-    /* --- Clínica A trabalhou neste computador --- */
-    localStorage.setItem(ambiente.NOME_KEY, 'Minha Clínica Anestesiologia');
-    localStorage.setItem(ambiente.VISTOS_KEY, JSON.stringify(['org-A']));
-    localStorage.setItem(ambiente.COMPART_KEY, '0');
-    __smokeBindOrg('org-A');
-    store.setList('anestesia', [{ _id: 'a1', paciente: { nome: 'Paciente da Clínica A' } }]);
-    store.setList('pacientes', [{ _id: 'p1', nome: 'Cadastro da A' }]);
-    /* as gavetas que a limpeza ANTIGA esquecia — é aqui que vazava */
-    localStorage.setItem('medsys.v7.documentos', JSON.stringify([{ _id: 'd1', nome: 'Doc da A' }]));
-    localStorage.setItem('medsys.v7.lixeira', JSON.stringify([{ _id: 'x1', nome: 'Apagado da A' }]));
-    localStorage.setItem('medsys.v7.audit', JSON.stringify([{ resumo: 'Paciente da Clínica A' }]));
-    localStorage.setItem('medsys.v7.versions', JSON.stringify({ 'anestesia:a1': [{ ts: 1 }] }));
-    localStorage.setItem('medsys.v7.blobs', JSON.stringify({ img1: 'data:image/png;base64,AAA' }));
-    localStorage.setItem('medsys.v7.rascunhos.anestesia', JSON.stringify([{ nome: 'Rascunho da A' }]));
-    localStorage.setItem('medsys.v3.autosave.anestesia', JSON.stringify({ paciente: 'Autosave da A' }));
-    localStorage.setItem('medsys.v7.arquivo.indice', JSON.stringify({ anestesia: [{ id: 'a9', nome: 'Arquivado da A' }] }));
-    /* e o que é do APARELHO, que precisa SOBREVIVER */
+    await __smokePrepareQueue('org-A', 'owner-A');
+    cloudRel.enviarRegistro = async () => ({ ok: false, motivo: 'rede' });
+    cloudRel.enviarPaciente = async () => ({ ok: false, motivo: 'rede' });
+    sincronia.agora = () => {};
+    const salvar = async (mod, item) => {
+      const salvo = store.save(mod, item);
+      const recibo = await store.aguardarNuvem(salvo);
+      if (!recibo.queued || !recibo.durable) throw new Error('Fixture clínica sem proteção cifrada');
+      return salvo;
+    };
+    await salvar('anestesia', { _id: 'a1', paciente: { nome: 'Paciente da Clínica A' } });
+    await salvar('pacientes', { _id: 'p1', nome: 'Cadastro da A' });
+    await salvar('documentos', { _id: 'd1', nome: 'Doc da A' });
     localStorage.setItem('medsys.v7.theme', 'escuro');
     localStorage.setItem('medsys.v7.cloud.cfg', '{"url":"x"}');
     localStorage.setItem('medsys.v7.auth.users', '[{"usuario":"alguem"}]');
+    const opsA = await filaCifrada.listar();
+    out.aFoiProtegida = opsA.length === 3 && localStorage.getItem(STORAGE.anestesia) === null;
 
-    /* --- Clínica B entra no mesmo navegador ---
-       O modo "computador compartilhado" deixou de LIGAR SOZINHO ao ver a
-       segunda clínica: ver duas clínicas é a vida normal de quem trabalha em
-       duas, e o celular do próprio médico estava sendo marcado como máquina
-       de hospital — apagando os dados a cada saída e pedindo a senha da nuvem
-       toda vez. Agora o sistema PERGUNTA. Aqui o teste responde "é
-       compartilhado", que é o cenário que ele existe para verificar. */
     ambiente.definirCompartilhado(true, { silent: true });
-    const res = await ambiente.aoEntrar('org-B');
+    window.fetch = async url => new Response(JSON.stringify(/ensure_offline_keyring/.test(String(url))
+      ? [{ wrap_key: btoa('q'.repeat(32)), key_version: 1 }]
+      : /organizations/.test(String(url)) ? [{ nome: 'Clínica Carlos Pedreira' }] : []), { status: 200 });
+    const sessao = auth.usuarioAtual(); sessao.organization_id = 'org-B';
+    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify(sessao));
+    const res = await ambiente.aoEntrar('org-B', '', { uid: 'owner-A', role: 'gestor' });
     out.trocou = res.trocou === true;
-
-    /* Sem recibo da nuvem, a gaveta A precisa continuar fisicamente guardada.
-       A garantia ao usuário B é que a fachada não consegue endereçá-la. */
-    const preservadas = [];
-    let bruto = '';
-    for (let i = 0; i < cofre._real.length; i++) {
-      const k = cofre._real.key(i);
-      if (!k || k.indexOf('medsys.') !== 0) continue;
-      if (k.indexOf('@org-A') > 0) {
-        preservadas.push(k);
-        bruto += (cofre._real.getItem(k) || '');
-      }
-    }
-    out.preservouOffline = res.preservou === true && preservadas.length > 0
-      && bruto.indexOf('Paciente da Clínica A') >= 0;
-    out.bNaoEnderecoA = (store.list('anestesia') || []).length === 0
-      && (store.list('pacientes') || []).length === 0
-      && localStorage.getItem('medsys.v7.documentos') === null;
+    await filaCifrada.preparar();
+    out.bNaoEnderecoA = store.list('anestesia').length === 0
+      && store.list('pacientes').length === 0 && localStorage.getItem(STORAGE.documentos) === null
+      && (await filaCifrada.listar()).length === 0;
     out.metadadosDaEquipeNaoVazam = localStorage.getItem('medsys.v7.auth.users') === null;
-    /* o aparelho continua sendo o aparelho */
     out.preservouOAparelho = cofre._real.getItem('medsys.v7.theme') === 'escuro'
       && cofre._real.getItem('medsys.v7.cloud.cfg') === '{"url":"x"}';
     out.pegouONome = ambiente.nome() === 'Clínica Carlos Pedreira';
     out.ambienteAgoraEhB = ambiente.id() === 'org-B';
-
     out.respeitouModoCompartilhado = ambiente.compartilhado() === true;
 
-    /* --- mesma clínica de novo NÃO limpa (secretária e médico do mesmo lugar) --- */
-    store.setList('anestesia', [{ _id: 'b1', paciente: { nome: 'Paciente da B' } }]);
-    const res2 = await ambiente.aoEntrar('org-B');
-    out.mesmaClinicaNaoLimpa = res2.trocou === false && (store.list('anestesia') || []).length === 1;
-
-    /* --- sair preserva B enquanto ainda não há recibo; sem contexto, a
-       próxima pessoa não consegue ler a gaveta --- */
-    ambiente.definirCompartilhado(true, { silent: true });
-    const saida = ambiente.aoSair();
-    out.saidaPreservouOffline = saida.preservou === true && (store.list('anestesia') || []).length === 1;
+    await salvar('anestesia', { _id: 'b1', paciente: { nome: 'Paciente da B' } });
+    const res2 = await ambiente.aoEntrar('org-B', '', { uid: 'owner-A', role: 'gestor' });
+    out.mesmaClinicaNaoLimpa = res2.trocou === false && store.list('anestesia').length === 1;
+    ambiente.aoSair();
     __smokeClearContext();
-    out.saidaBloqueouLeitura = (store.list('anestesia') || []).length === 0;
+    out.saidaBloqueouLeitura = store.list('anestesia').length === 0;
+    await __smokePrepareQueue('org-B', 'owner-A');
+    await persistenciaCloudFirst.aquecer();
+    out.saidaPreservouOffline = store.list('anestesia').some(x => x._id === 'b1');
+    await __smokePrepareQueue('org-A', 'owner-A');
+    await persistenciaCloudFirst.aquecer();
+    out.preservouOffline = store.list('anestesia').some(x => x._id === 'a1')
+      && store.list('pacientes').some(x => x._id === 'p1')
+      && store.list('documentos').some(x => x._id === 'd1') && (await filaCifrada.listar()).length === 3;
 
-    /* --- a proteção não pode ser desligada; uma pendência ainda sem recibo
-       continua preservada e isolada mesmo depois de sair --- */
-    __smokeBindOrg('org-C');
-    store.setList('anestesia', [{ _id: 'c1', paciente: { nome: 'Paciente da C' } }]);
+    await __smokePrepareQueue('org-C', 'owner-A');
+    await salvar('anestesia', { _id: 'c1', paciente: { nome: 'Paciente da C' } });
     ambiente.definirCompartilhado(false, { silent: true });
     out.naoDesligouProtecao = ambiente.compartilhado() === true;
     ambiente.aoSair();
-    out.pendentePreservado = (store.list('anestesia') || []).length === 1;
-
-    store.setList('anestesia', []); store.setList('pacientes', []);
-    cofre.esvaziar('org-A'); cofre.esvaziar('org-B'); cofre.esvaziar('org-C');
     __smokeClearContext();
+    await __smokePrepareQueue('org-C', 'owner-A');
+    await persistenciaCloudFirst.aquecer();
+    out.pendentePreservado = store.list('anestesia').some(x => x._id === 'c1');
     return out;
   });
+  assert(r.aFoiProtegida, 'as fichas offline recebem commit cifrado sem texto clínico em localStorage');
   assert(r.trocou, 'entrar com conta de outra clínica tem que ser reconhecido como troca de ambiente');
   assert(r.preservouOffline, 'trabalho sem recibo não pode ser apagado ao trocar de usuário');
-  assert(r.bNaoEnderecoA, 'a clínica nova não pode endereçar dado clínico da anterior');
+  assert(r.bNaoEnderecoA, 'a clínica nova não pode endereçar dado clínico da anterior, nem abrir seu WAL');
   assert(r.metadadosDaEquipeNaoVazam, 'nomes, e-mails e papéis da equipe anterior também ficam na gaveta dela');
   assert(r.preservouOAparelho, 'tema e configuração técnica do aparelho não podem ser apagados junto');
   assert(r.pegouONome && r.ambienteAgoraEhB, 'o ambiente novo assume, com o nome da clínica à vista');
   assert(r.respeitouModoCompartilhado, 'a escolha de computador compartilhado precisa continuar ativa');
-  assert(r.mesmaClinicaNaoLimpa, 'outra PESSOA da mesma clínica não é troca de ambiente — não pode apagar o trabalho');
+  assert(r.mesmaClinicaNaoLimpa, 'reconfirmar a mesma sessão não apaga o trabalho em memória');
   assert(r.saidaPreservouOffline && r.saidaBloqueouLeitura,
-    'sair conserva a única cópia offline, mas nenhuma sessão seguinte consegue lê-la sem o contexto original');
+    'sair conserva a cópia cifrada, recuperável somente pelo dono e contexto originais');
   assert(r.naoDesligouProtecao && r.pendentePreservado,
     'a proteção multiusuário é obrigatória, mas nunca apaga a única cópia offline');
   await page.close();
@@ -16399,66 +16305,63 @@ await test('Computador compartilhado isola a clínica anterior sem apagar trabal
    trabalho de A de volta, intacto. */
 await test('Cada clínica tem a sua gaveta: o dado da outra não é endereçável', async () => {
   const page = await novaPagina();
-  const r = await page.evaluate(() => {
+  const r = await page.evaluate(async () => {
     const out = {};
     out.cofreInstalado = !cofre._semCofre && !!cofre._real;
-
-    /* --- clínica A trabalha --- */
-    __smokeBindOrg('org-aaaaaaaa');
-    store.setList('anestesia', [{ _id: 'a1', paciente: { nome: 'Paciente da Clinica A' } }]);
-    localStorage.setItem('medsys.v7.documentos', JSON.stringify([{ _id: 'dA', nome: 'Doc da A' }]));
-    localStorage.setItem('medsys.v7.theme', 'escuro');            /* do aparelho */
-    out.aGravou = (store.list('anestesia') || []).length === 1;
-
-    /* --- clínica B entra: mesma chave, gaveta outra --- */
-    __smokeBindOrg('org-bbbbbbbb');
-    out.bComecaVazia = (store.list('anestesia') || []).length === 0
-      && localStorage.getItem('medsys.v7.documentos') === null;
-    /* nem varrendo o armazenamento aparece a clínica A */
+    cloudRel.enviarRegistro = async () => ({ ok: false, motivo: 'rede' });
+    sincronia.agora = () => {};
+    const salvar = async (mod, item) => {
+      const salvo = store.save(mod, item);
+      const recibo = await store.aguardarNuvem(salvo);
+      if (!recibo.queued || !recibo.durable) throw new Error('Fixture clínica sem proteção cifrada');
+    };
+    await __smokePrepareQueue('org-aaaaaaaa', 'user-A');
+    await salvar('anestesia', { _id: 'a1', paciente: { nome: 'Paciente da Clinica A' } });
+    await salvar('documentos', { _id: 'dA', nome: 'Doc da A' });
+    clinicaIdentidade.salvar({ nome: 'Identidade A' });
+    localStorage.setItem('medsys.v7.theme', 'escuro');
+    out.aGravou = store.list('anestesia').length === 1 && (await filaCifrada.listar()).length === 2;
+    await __smokePrepareQueue('org-bbbbbbbb', 'user-B');
+    await persistenciaCloudFirst.aquecer();
+    out.bComecaVazia = store.list('anestesia').length === 0
+      && localStorage.getItem(STORAGE.documentos) === null && (await filaCifrada.listar()).length === 0;
     let varredura = '';
     for (let i = 0; i < localStorage.length; i++) {
-      varredura += (localStorage.key(i) || '') + '=' + (localStorage.getItem(localStorage.key(i)) || '') + ';';
+      const key = localStorage.key(i); varredura += key + '=' + (localStorage.getItem(key) || '') + ';';
     }
-    out.varreduraNaoVeA = varredura.indexOf('Paciente da Clinica A') < 0 && varredura.indexOf('Doc da A') < 0;
-    /* o que é do aparelho continua valendo nas duas */
+    out.varreduraNaoVeA = !/Paciente da Clinica A|Doc da A/.test(varredura);
     out.aparelhoAtravessa = localStorage.getItem('medsys.v7.theme') === 'escuro';
-
-    /* B trabalha, e não encosta em A */
-    store.setList('anestesia', [{ _id: 'b1', paciente: { nome: 'Paciente da Clinica B' } }]);
-    out.bGravou = (store.list('anestesia') || []).length === 1
-      && store.list('anestesia')[0]._id === 'b1';
-
-    /* --- voltar para A: o trabalho de A está lá, inteiro --- */
-    __smokeBindOrg('org-aaaaaaaa');
-    const volta = store.list('anestesia') || [];
+    await salvar('anestesia', { _id: 'b1', paciente: { nome: 'Paciente da Clinica B' } });
+    clinicaIdentidade.salvar({ nome: 'Identidade B' });
+    out.bGravou = store.list('anestesia').length === 1 && store.list('anestesia')[0]._id === 'b1';
+    await __smokePrepareQueue('org-aaaaaaaa', 'user-A');
+    await persistenciaCloudFirst.aquecer();
+    const volta = store.list('anestesia');
     out.aVoltouInteira = volta.length === 1 && volta[0]._id === 'a1';
-    out.aNaoViuB = JSON.stringify(volta).indexOf('Clinica B') < 0;
-    out.docDeAVoltou = /Doc da A/.test(localStorage.getItem('medsys.v7.documentos') || '');
-
-    /* --- conta sem clínica nenhuma usa a gaveta crua, e não vê as clínicas --- */
+    out.aNaoViuB = !/Clinica B/.test(JSON.stringify(volta));
+    out.docDeAVoltou = store.list('documentos').some(x => x._id === 'dA');
     __smokeClearContext();
-    out.semClinicaNaoVeNinguem = (store.list('anestesia') || []).length === 0;
-
-    /* --- esvaziar a gaveta de uma clínica não toca na outra --- */
-    __smokeBindOrg('org-bbbbbbbb');
+    out.semClinicaNaoVeNinguem = store.list('anestesia').length === 0;
+    await __smokePrepareQueue('org-bbbbbbbb', 'user-B');
+    await persistenciaCloudFirst.aquecer();
     cofre.esvaziar('org-aaaaaaaa');
-    out.bIntactaDepoisDeApagarA = (store.list('anestesia') || []).length === 1;
-    __smokeBindOrg('org-aaaaaaaa');
-    out.aFoiEsvaziada = (store.list('anestesia') || []).length === 0;
-
-    cofre.esvaziar('org-bbbbbbbb');
-    __smokeClearContext();
+    out.bIntactaDepoisDeApagarA = store.list('anestesia').length === 1 && clinicaIdentidade.nome() === 'Identidade B';
+    await __smokePrepareQueue('org-aaaaaaaa', 'user-A');
+    await persistenciaCloudFirst.aquecer();
+    out.aFoiEsvaziada = clinicaIdentidade.vazia();
+    out.limpezaNaoApagaWAL = store.list('anestesia').some(x => x._id === 'a1');
     return out;
   });
   assert(r.cofreInstalado, 'sem o cofre instalado não há isolamento nenhum — isto tem que falhar alto');
-  assert(r.aGravou, 'a clínica A precisa conseguir gravar');
+  assert(r.aGravou, 'a clínica A precisa conseguir proteger seu trabalho offline');
   assert(r.bComecaVazia, 'entrando em outra clínica, a gaveta começa vazia — não se herda o acervo alheio');
-  assert(r.varreduraNaoVeA, 'nem varrendo o armazenamento inteiro o dado da outra clínica pode aparecer');
-  assert(r.aparelhoAtravessa, 'o que é do aparelho (tema, login, nuvem) continua valendo nos dois ambientes');
-  assert(r.bGravou, 'a clínica B grava no espaço dela');
-  assert(r.aVoltouInteira && r.aNaoViuB && r.docDeAVoltou, 'voltar para a clínica A devolve o trabalho dela, sem mistura');
+  assert(r.varreduraNaoVeA, 'nem varrendo o armazenamento inteiro o texto da outra clínica pode aparecer');
+  assert(r.aparelhoAtravessa, 'o tema do aparelho continua valendo nos dois ambientes');
+  assert(r.bGravou, 'a clínica B grava no espaço do seu usuário');
+  assert(r.aVoltouInteira && r.aNaoViuB && r.docDeAVoltou, 'o dono recupera pelo WAL o trabalho de A, sem mistura');
   assert(r.semClinicaNaoVeNinguem, 'conta sem clínica não enxerga a gaveta de clínica nenhuma');
-  assert(r.bIntactaDepoisDeApagarA && r.aFoiEsvaziada, 'esvaziar a gaveta de uma clínica não pode tocar na outra');
+  assert(r.bIntactaDepoisDeApagarA && r.aFoiEsvaziada, 'esvaziar configurações de A não pode tocar na clínica B');
+  assert(r.limpezaNaoApagaWAL, 'limpeza de configurações nunca apaga a única cópia clínica offline');
   await page.close();
 });
 
@@ -16570,18 +16473,32 @@ await test('Pacientes, Dashboard e Financeiro são de cada ambiente — e a nuve
   const r = await page.evaluate(async () => {
     const out = {};
 
-    /* ---------- metade 1: o que se lê DAQUI ---------- */
-    __smokeBindOrg('org-aaaaaaaa');
+    /* ---------- leitura e recuperação de trabalho offline por dono ---------- */
+    await __smokePrepareQueue('org-aaaaaaaa', 'u1');
+    cloudRel.enviarRegistro = async () => ({ ok: false, motivo: 'rede' });
+    cloudRel.enviarPaciente = async () => ({ ok: false, motivo: 'rede' });
+    sincronia.agora = () => {};
+    const protegerLista = async mod => {
+      const itens = store.list(mod);
+      store.setList(mod, []);
+      for (const item of itens) {
+        const salvo = store.save(mod, item);
+        const recibo = await store.aguardarNuvem(salvo);
+        if (!recibo.queued || !recibo.durable) throw new Error('Fixture clínica sem proteção cifrada');
+      }
+    };
     store.setList('pacientes', [{ _id: 'pA', nome: 'Alzira da Clinica A', plano: 'Unimed' }]);
     store.setList('anestesia', [{ _id: 'a1', paciente: { nome: 'Alzira da Clinica A' },
       procedimento: { data: '2026-09-01' }, _finalizado: true }]);
     store.setList('financeiro', [{ _id: 'fA', paciente: 'Alzira da Clinica A', valor_previsto: 1000,
       data_proc: '2026-09-01', status: 'pendente' }]);
 
+    await Promise.all(['pacientes','anestesia','financeiro'].map(protegerLista));
     const nomesA = autocomplete.listaPacientes().map(x => x.label);
     out.aVeOSeuPaciente = nomesA.some(n => /Alzira/.test(n));
 
-    __smokeBindOrg('org-bbbbbbbb');
+    await __smokePrepareQueue('org-bbbbbbbb', 'u1');
+    await persistenciaCloudFirst.aquecer();
     const nomesB = autocomplete.listaPacientes().map(x => x.label);
     out.bNaoVeOPacienteDeA = !nomesB.some(n => /Alzira/.test(n));
     out.bFinanceiroVazio = (store.list('financeiro') || []).length === 0;
@@ -16591,9 +16508,11 @@ await test('Pacientes, Dashboard e Financeiro são de cada ambiente — e a nuve
     store.setList('pacientes', [{ _id: 'pB', nome: 'Benedito da Clinica B' }]);
     store.setList('financeiro', [{ _id: 'fB', paciente: 'Benedito da Clinica B', valor_previsto: 50,
       data_proc: '2026-09-02', status: 'pendente' }]);
+    await Promise.all(['pacientes','financeiro'].map(protegerLista));
     out.bVeOSeu = autocomplete.listaPacientes().some(x => /Benedito/.test(x.label));
 
-    __smokeBindOrg('org-aaaaaaaa');
+    await __smokePrepareQueue('org-aaaaaaaa', 'u1');
+    await persistenciaCloudFirst.aquecer();
     const voltaA = autocomplete.listaPacientes().map(x => x.label);
     out.aVoltouSemMistura = voltaA.some(n => /Alzira/.test(n)) && !voltaA.some(n => /Benedito/.test(n));
     out.aFinanceiroIntacto = (store.list('financeiro') || []).length === 1
@@ -17860,7 +17779,10 @@ await test('Conta criada por quem autoriza, com senha provisória que morre no p
       return { ok: true, status: 200, json: async () => ([]), text: async () => '[]', headers: { get: () => '0' } };
     };
     const rpcs = [];
-    programador._rpc = async (nome, body) => { rpcs.push({ nome, body }); return {}; };
+    programador._rpc = async (nome, body) => {
+      rpcs.push({ nome, body });
+      return nome === 'prog_list_org_shares' ? [] : {};
+    };
     programador._orgs = [{ id: 'org-1', nome: 'Minha Clínica' }];
     programador._perfis = [];
     programador._renderConteudo(document.getElementById('prog-conteudo'));
@@ -18055,80 +17977,59 @@ await test('Conta sem clínica não cai na clínica de quem usou o aparelho ante
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
-    const R = cofre._real;
-    const limpar = () => {
-      const fora = [];
-      for (let i = 0; i < R.length; i++) { const k = R.key(i); if (k && k.indexOf('medsys.') === 0) fora.push(k); }
-      fora.forEach(k => R.removeItem(k));
+    await __smokePrepareQueue('org-marcelo', 'marcelo');
+    cloudRel.enviarPaciente = async () => ({ ok: false, motivo: 'rede' });
+    sincronia.agora = () => {};
+    const guardar = async item => {
+      const salvo = store.save('pacientes', item);
+      const res = await store.aguardarNuvem(salvo);
+      if (!res.queued || !res.durable) throw new Error('Fixture clínica sem proteção cifrada');
     };
-    limpar();
-
-    /* A política multiusuário é obrigatória. A gaveta anterior pode ser
-       preservada somente quando contém a única cópia offline; mesmo assim ela
-       fica inacessível para a conta sem clínica. */
     ambiente.definirCompartilhado(true, { silent: true });
-
-    /* o aparelho estava com a clínica da pessoa anterior, com dados dela */
-    __smokeBindOrg('org-marcelo');
-    store.setList('pacientes', [{ _id: 'p1', nome: 'Paciente do Marcelo' }]);
-    out.tinhaDadosAntes = (store.list('pacientes') || []).length === 1;
+    await guardar({ _id: 'p1', nome: 'Paciente do Marcelo' });
+    out.tinhaDadosAntes = store.list('pacientes').length === 1;
     out.gavetaEraDoOutro = cofre.org() === 'org-marcelo';
-
-    /* entra a conta nova, que o servidor confirmou NÃO ter clínica */
-    await ambiente.aoEntrarSemClinica();
-
-    out.ponteiroApagado = cofre.org() === null || cofre.org() === '';
-    out.naoVeOsDadosDoOutro = (store.list('pacientes') || []).length === 0;
+    __smokeBindNoOrg('conta-nova');
+    await ambiente.aoEntrarSemClinica({ uid: 'conta-nova', semVinculo: true });
+    out.ponteiroApagado = !cofre.org();
+    out.naoVeOsDadosDoOutro = store.list('pacientes').length === 0;
     out.nomeDaClinicaSumiu = !ambiente.nome();
-
-    /* e o dado do outro NÃO foi apagado — ele continua na gaveta dele,
-       inacessível para esta conta, intacto para quando ela voltar */
-    out.dadoDoOutroIntacto = !!R.getItem('medsys.v5.pacientes@org-marc');
-
-    /* ---- em MÁQUINA COMPARTILHADA, trabalho sem recibo continua guardado,
-       mas a conta seguinte não consegue endereçá-lo ---- */
-    __smokeBindOrg('org-marcelo');
-    store.setList('pacientes', [{ _id: 'p2', nome: 'Outro paciente' }]);
-    ambiente.definirCompartilhado(true, { silent: true });
-    const semClinica = await ambiente.aoEntrarSemClinica();
-    out.compartilhadoPreservaOffline = semClinica.preservou === true
-      && !!R.getItem('medsys.v5.pacientes@org-marc')
-      && (store.list('pacientes') || []).length === 0;
-    ambiente.definirCompartilhado(true, { silent: true });
-
-    /* a tela explica, em vez de aparecer vazia sem motivo */
+    out.cofreFechado = filaCifrada._chaves.size === 0;
+    await __smokePrepareQueue('org-marcelo', 'marcelo');
+    await persistenciaCloudFirst.aquecer();
+    out.dadoDoOutroIntacto = store.list('pacientes').some(x => x._id === 'p1');
+    await guardar({ _id: 'p2', nome: 'Outro paciente' });
+    __smokeBindNoOrg('conta-nova');
+    await ambiente.aoEntrarSemClinica({ uid: 'conta-nova', semVinculo: true });
+    out.compartilhadoIsolaOffline = store.list('pacientes').length === 0 && filaCifrada._chaves.size === 0;
     const faixa = document.getElementById('semclinica-faixa');
     out.avisouNaTela = !!faixa && /não está em nenhuma clínica/i.test(faixa.textContent);
     out.dizQueNaoEhFalha = !!faixa && /não é falha/i.test(faixa.textContent);
-
-    /* e oferece os dois caminhos, que são diferentes */
     ambiente.resolverSemClinica();
     const corpo = (document.getElementById('modal-body') || {}).textContent || '';
     out.caminhoPedir = /peça ao responsável/i.test(corpo);
     out.caminhoCriar = /A clínica é sua/i.test(corpo);
     out.dizQueNinguemEntraSozinho = /ninguém entra numa clínica por conta própria/i.test(corpo);
     try { modal.close(); } catch (e) {}
-
-    /* escrever agora NÃO pode cair na gaveta da outra clínica */
     store.setList('pacientes', [{ _id: 'novo', nome: 'Paciente da conta nova' }]);
-    const naGavetaDoOutro = JSON.parse(R.getItem('medsys.v5.pacientes@org-marc') || '[]');
-    out.escritaNaoVazaParaOOutro = !naGavetaDoOutro.some(x => x._id === 'novo');
-
-    limpar();
-    ambiente._fecharSemClinica();
+    await __smokePrepareQueue('org-marcelo', 'marcelo');
+    await persistenciaCloudFirst.aquecer();
+    const doMarcelo = store.list('pacientes');
+    out.compartilhadoPreservaOffline = doMarcelo.length === 2 && doMarcelo.some(x => x._id === 'p2');
+    out.escritaNaoVazaParaOOutro = !doMarcelo.some(x => x._id === 'novo');
     return out;
   });
   assert(r.tinhaDadosAntes && r.gavetaEraDoOutro, 'o cenário é o aparelho já com a clínica de outra pessoa aberta');
   assert(r.ponteiroApagado, 'entrar sem clínica tem de APAGAR o ponteiro do ambiente, não deixá-lo como estava');
-  assert(r.naoVeOsDadosDoOutro, 'e a conta nova não enxerga nada da clínica anterior — era isto que estava acontecendo');
+  assert(r.naoVeOsDadosDoOutro && r.cofreFechado, 'a conta nova não enxerga fichas nem recebe a chave offline do usuário anterior');
   assert(r.nomeDaClinicaSumiu, 'nem o nome dela fica na tela, dizendo que você está onde não está');
-  assert(r.dadoDoOutroIntacto, 'a única cópia offline da clínica anterior fica preservada, porém inacessível');
-  assert(r.compartilhadoPreservaOffline,
-    'em máquina COMPARTILHADA, a única cópia offline fica protegida e inacessível, não apagada');
+  assert(r.dadoDoOutroIntacto, 'a única cópia offline da clínica anterior fica recuperável pelo dono');
+  assert(r.compartilhadoIsolaOffline && r.compartilhadoPreservaOffline,
+    'em máquina COMPARTILHADA, pendências permanecem cifradas e inacessíveis à conta sem clínica');
   assert(r.avisouNaTela && r.dizQueNaoEhFalha, 'a tela explica por que está vazia — senão a pessoa conclui que perdeu os dados');
   assert(r.caminhoPedir && r.caminhoCriar, 'e oferece os dois caminhos: ser vinculado a uma clínica, ou criar a sua');
   assert(r.dizQueNinguemEntraSozinho, 'deixando claro que ninguém se vincula sozinho a uma clínica existente');
-  assert(r.escritaNaoVazaParaOOutro, 'e o que esta conta gravar não entra na gaveta da clínica anterior');
+  assert(r.escritaNaoVazaParaOOutro, 'o que esta conta digitou sem contexto não entra no WAL da clínica anterior');
   await page.close();
 });
 
@@ -18246,7 +18147,10 @@ await test('Criar conta não vincula a ninguém por descuido do formulário', as
 
     /* ---- criar sem escolher ambiente NÃO vincula a ninguém ---- */
     const rpcs = [];
-    programador._rpc = async (nome, body) => { rpcs.push({ nome, body }); return {}; };
+    programador._rpc = async (nome, body) => {
+      rpcs.push({ nome, body });
+      return nome === 'prog_list_org_shares' ? [] : {};
+    };
     const origFetch = window.fetch;
     window.fetch = async (url) => {
       if (/functions\/v1\/contas/.test(String(url))) {
@@ -18874,6 +18778,8 @@ const page = await novaPagina();
     await __smokePrepareQueue('org-aaaa', 'medico-a');
     sincronia.agora = () => {};
     rascunhos._agendarEnvio = () => {};
+    edicaoViva._agendarEnvio = () => {};
+    rascunhosSync._indisponivel = () => true;
     cloudRel.enviarRegistro = async () => ({ ok: false, motivo: 'rede' });
     const out = {};
     clinicaIdentidade.salvar({ nome: 'Clínica A', endereco: 'Rua A', contato: '1111', extra: '' });
@@ -18889,7 +18795,7 @@ const page = await novaPagina();
     });
     limparForm();
     campo.value = 'Termo em edição na clínica A';
-    edicaoViva.guardar('termo');
+    edicaoViva.guardar('termo', { mudou: true });
     await edicaoViva.aguardarPersistencia('termo');
     const agora = new Date().toISOString();
     store.setList('consulta', [{ _id: 'cA', nome: 'Confirmado A', _relOrg: 'org-aaaa', _relUpdatedAt: agora }]);
