@@ -1,4 +1,4 @@
--- Integração PostgreSQL em baseline isolada reconciliada até 0031.
+-- Integração PostgreSQL em baseline isolada reconciliada até 0032 e hardening local.
 -- psql -v ON_ERROR_STOP=1 -f tests/sql/retification-cas-security.sql
 -- Dados inteiramente sintéticos; rollback desfaz também os adendos append-only.
 -- Este arquivo prova CAS sequencial/RLS/invariantes. A corrida entre sessões
@@ -29,7 +29,10 @@ create temporary table retification_original_snapshot as
 do $test$
 declare a public.addenda%rowtype; attempted jsonb; n integer;
 begin
-  if not app.valid_retification_fields('{"nome":"Corrected synthetic label","paciente":{"nome":"Synthetic nested name"},"_labExtras":[{"nome":"Synthetic Hb","valor":"13.2"}],"_medsLista":[{"nome":"Synthetic medication"}]}') then
+  if (select count(*) from retification_original_snapshot) is distinct from 1 then
+    raise exception 'signed parent snapshot was absent';
+  end if;
+  if app.valid_retification_fields('{"nome":"Corrected synthetic label","paciente":{"nome":"Synthetic nested name"},"_labExtras":[{"nome":"Synthetic Hb","valor":"13.2"}],"_medsLista":[{"nome":"Synthetic medication"}]}') is distinct from true then
     raise exception 'clinical labels or permitted clinical arrays were blocked';
   end if;
   foreach attempted in array array[
@@ -42,7 +45,7 @@ begin
     '{"data_assinatura2":"1900-01-01"}'::jsonb,
     '{"nested":{"access_token":"forged"}}'::jsonb
   ] loop
-    if app.valid_retification_fields(attempted) then raise exception 'internal field was authorized'; end if;
+    if app.valid_retification_fields(attempted) is distinct from false then raise exception 'internal field was authorized'; end if;
     begin
       insert into public.addenda(organization_id,parent_table,parent_id,legacy_id,texto,reason,data)
       values ('fb220000-0000-4000-8000-000000000001','preanesthetic_assessments',
@@ -59,16 +62,16 @@ begin
   values ('fb220000-0000-4000-8000-000000000001','preanesthetic_assessments',
    'fb330000-0000-4000-8000-000000000001','fixture-plain','Synthetic plain addendum',999)
   returning * into a;
-  if a.retification_revision is not null then raise exception 'client forged revision'; end if;
+  if a.id is null or a.retification_revision is not null then raise exception 'client forged revision or plain addendum was absent'; end if;
   insert into public.addenda(organization_id,parent_table,parent_id,legacy_id,texto,reason,data,author_id,created_at)
   values ('fb220000-0000-4000-8000-000000000001','preanesthetic_assessments',
    'fb330000-0000-4000-8000-000000000001','fixture-retification-a','Synthetic proposed A','correcao',
    '{"autor_exibicao":"Forged outsider label","retificacao":{"schema":1,"baseAdendoId":"","campos":{"nome":"Synthetic accepted A","alergias":"Synthetic allergy A"}}}',
    'fb110000-0000-4000-8000-000000000003','1900-01-01') returning * into a;
-  if a.data#>>'{retificacao,status}' <> 'accepted' or a.retification_revision <> 1
-     or a.author_id <> auth.uid() or a.created_at < transaction_timestamp()
-     or a.data->>'autor_exibicao' = 'Forged outsider label'
-     or a.parent_legacy_id <> 'fixture-finalized-original' then
+  if a.data#>>'{retificacao,status}' is distinct from 'accepted' or a.retification_revision is distinct from 1
+     or a.author_id is distinct from auth.uid() or a.created_at is distinct from transaction_timestamp()
+     or a.data->>'autor_exibicao' is distinct from auth.uid()::text
+     or a.parent_legacy_id is distinct from 'fixture-finalized-original' then
     raise exception 'accepted proposal lacked server authority';
   end if;
   -- Same identity and same proposal replay is a no-op; another proposal is refused.
@@ -78,7 +81,7 @@ begin
    '{"retificacao":{"schema":1,"baseAdendoId":"","campos":{"nome":"Synthetic accepted A","alergias":"Synthetic allergy A"}}}')
   on conflict (organization_id,legacy_id) do nothing;
   select count(*) into n from public.addenda where legacy_id = 'fixture-retification-a';
-  if n <> 1 then raise exception 'idempotent replay duplicated proposal'; end if;
+  if n is distinct from 1 then raise exception 'idempotent replay duplicated proposal'; end if;
   begin
     insert into public.addenda(organization_id,parent_table,parent_id,legacy_id,texto,reason,data)
     values ('fb220000-0000-4000-8000-000000000001','preanesthetic_assessments',
@@ -109,16 +112,16 @@ begin
   values ('fb220000-0000-4000-8000-000000000001','preanesthetic_assessments',
    'fb330000-0000-4000-8000-000000000001','fixture-retification-b','Synthetic stale proposal B','correcao',
    '{"retificacao":{"schema":1,"baseAdendoId":"","campos":{"alergias":"Synthetic conflict B"}}}') returning * into a;
-  if a.data#>>'{retificacao,status}' <> 'conflict' or a.retification_revision is not null
-     or a.data#>>'{retificacao,baseAtualId}' <> 'fixture-retification-a'
-     or a.data#>>'{retificacao,campos,alergias}' <> 'Synthetic conflict B'
-     or a.author_id <> auth.uid() then raise exception 'conflicting proposal was not retained'; end if;
+  if a.data#>>'{retificacao,status}' is distinct from 'conflict' or a.retification_revision is not null
+     or a.data#>>'{retificacao,baseAtualId}' is distinct from 'fixture-retification-a'
+     or a.data#>>'{retificacao,campos,alergias}' is distinct from 'Synthetic conflict B'
+     or a.author_id is distinct from auth.uid() then raise exception 'conflicting proposal was not retained'; end if;
 
   insert into public.addenda(organization_id,parent_table,parent_id,legacy_id,texto,reason,data)
   values ('fb220000-0000-4000-8000-000000000001','preanesthetic_assessments',
    'fb330000-0000-4000-8000-000000000001','fixture-retification-c','Synthetic rebased C','correcao',
    '{"retificacao":{"schema":1,"baseAdendoId":"fixture-retification-a","campos":{"alergias":"Synthetic accepted C"}}}') returning * into a;
-  if a.data#>>'{retificacao,status}' <> 'accepted' or a.retification_revision <> 2 then
+  if a.data#>>'{retificacao,status}' is distinct from 'accepted' or a.retification_revision is distinct from 2 then
     raise exception 'conflict incorrectly advanced accepted head';
   end if;
   if (select to_jsonb(p) from public.preanesthetic_assessments p
