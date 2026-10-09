@@ -229,6 +229,7 @@ const auth = {
     let podeIr = false;
     try { podeIr = navigator.onLine && cloud.estaConfigurado() && cloud.estaLogado(); } catch (e) { podeIr = false; }
     if (!podeIr) return false;
+    const contexto = (() => { try { return contextoAba.capturar(); } catch (e) { return null; } })();
     auth._revalidando = true;
     try {
       let perfil = null;
@@ -237,6 +238,12 @@ const auth = {
          por causa de um 4G ruim seria pior que a informação velha. */
       if (!perfil) return false;
       if (perfil.uid && sess.uid && perfil.uid !== sess.uid) return false;
+      /* A resposta pertence à sessão capturada. Um logout ou outra entrada
+         durante o fetch não pode ressuscitar a conta anterior. */
+      const sessaoAtual = auth.usuarioAtual();
+      if (!sessaoAtual || sessaoAtual.uid !== sess.uid ||
+          sessaoAtual.organization_id !== sess.organization_id ||
+          (contexto && !contextoAba.corresponde(contexto))) return false;
       const novo = auth._permsPersonalizadas(perfil) || auth._permsDoPapel(perfil.role);
       if (!novo) return false;
       const mods = (novo.modulos || []).slice().sort();
@@ -255,7 +262,7 @@ const auth = {
           auth._salvarUsuarios(lista);
         }
       } catch (e) {}
-      const atual = auth.usuarioAtual() || sess;
+      const atual = sessaoAtual;
       auth._definirSessao(Object.assign({}, atual, {
         perfil: novo.perfil, modulos: mods.slice(), soImpressao: so.slice(),
         role: perfil.role || atual.role
@@ -272,6 +279,8 @@ const auth = {
       auth._timerRevalida = setInterval(() => {
         auth.revalidarAcesso({ silencioso: false });
       }, auth.REVALIDA_MS);
+      if (auth._ouvindoRevalidacao) return;
+      auth._ouvindoRevalidacao = true;
       window.addEventListener('online', () => auth.revalidarAcesso({ silencioso: false }));
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden) auth.revalidarAcesso({ silencioso: false });
@@ -313,16 +322,112 @@ const auth = {
     auth._render();
   },
 
-  logout() {
-    sessionStorage.removeItem(auth.SESSION_KEY);
-    try { contextoAba.bloquearOutrasAbas(); } catch (e) {}
-    /* Sair/Bloquear sempre descarta qualquer marcador diário legado — a
-       próxima entrada exige autenticação na nuvem. */
-    try { localStorage.removeItem(auth.DIA_KEY); } catch (e) {}
-    /* quem entrar depois merece ver o aviso de pendências uma vez */
-    try { pendencias.esquecerMostrada(); } catch (e) {}
-    auth._pararTimer();
-    auth._bloquear();
+  logout(opts = {}) {
+    if (auth._encerrando) return;
+    auth._encerrando = true;
+    try {
+      /* Capture e preserve o trabalho enquanto as duas identidades e a chave
+         do cofre ainda pertencem à pessoa que está saindo. O adaptador da nuvem
+         remove somente cache confirmado; WAL e snapshots cifrados ficam. */
+      if (opts.broadcast !== false) { try { contextoAba.bloquearOutrasAbas(); } catch (e) {} }
+      try { cloud.logout({ silent: true }); } catch (e) {}
+      try { sessionStorage.removeItem(auth.SESSION_KEY); } catch (e) {}
+      try { sessionStorage.removeItem(cloud.SESSION_KEY); } catch (e) {}
+      /* Mesmo se algum módulo opcional falhar no logout, nenhuma autorização
+         ou chave aberta pode continuar utilizável nesta aba. */
+      try {
+        if (typeof pdfBackup !== 'undefined') {
+          pdfBackup._accessToken = null; pdfBackup._tokenExpira = 0;
+          sessionStorage.removeItem(pdfBackup.TOKEN_KEY);
+        }
+      } catch (e) {}
+      try {
+        const c = contextoAba.atual();
+        if (c.userId || c.organizationId || c.verified) contextoAba.limpar();
+      } catch (e) {}
+      try { filaCifrada.bloquearTudo(); } catch (e) {}
+      /* Sair/Bloquear sempre descarta qualquer marcador diário legado — a
+         próxima entrada exige autenticação na nuvem. */
+      try { localStorage.removeItem(auth.DIA_KEY); } catch (e) {}
+      /* quem entrar depois merece ver o aviso de pendências uma vez */
+      try { pendencias.esquecerMostrada(); } catch (e) {}
+      auth._pararTimer();
+      clearInterval(auth._timerRevalida); auth._timerRevalida = null;
+      auth._limparDadosDaTela();
+      auth._bloquear();
+    } finally { auth._encerrando = false; }
+  },
+
+  _limparDadosDaTela() {
+    /* Desfocar não remove prontuários do DOM. Limpa apenas a apresentação e
+       os buffers de edição, sem chamar Novo/Descartar, que alterariam o WAL
+       ou a recuperação cifrada do dono anterior. */
+    try {
+      document.querySelectorAll('.module input, .module select, .module textarea').forEach(el => {
+        if (el.type === 'checkbox' || el.type === 'radio') {
+          el.checked = false; el.defaultChecked = false;
+        } else {
+          el.value = '';
+          if (el.tagName !== 'SELECT') el.defaultValue = '';
+          else Array.from(el.options || []).forEach(op => { op.selected = false; op.defaultSelected = false; });
+        }
+        Object.keys(el.dataset || {}).forEach(k => {
+          if (/patient|paciente|case|encounter|record|document|signature|rascunho|finalizado/i.test(k) && !/watch|wire|bound|ligad/i.test(k)) delete el.dataset[k];
+        });
+      });
+      document.querySelectorAll('.module form').forEach(f => {
+        Object.keys(f.dataset || {}).forEach(k => {
+          if (/patient|paciente|case|encounter|record|document|signature|rascunho|finalizado/i.test(k) && !/watch|wire|bound|ligad/i.test(k)) delete f.dataset[k];
+        });
+      });
+      document.querySelectorAll('.module tbody, .module .dropdown-menu, .module .print-meta, .module .ficha-resumo, .module .banner, .module [id$="-docs-lista"], .module [id$="-adendos-lista"], .module [id$="-lab-extras"]').forEach(el => { el.textContent = ''; });
+      ['meu-dia-lista','pl-fila-lista','orcamento-lista','ag-cal-dia','ag-cal-grid',
+        'pre-med-lista','pre-procs-lista','pre-premed-lista','consulta-procs-resumo',
+        'fin-anexos-lista','equipe-aux-lista','disp-detalhes-body','ficha-topbar',
+        'auditoria-lista','equipe-nuvem-lista','global-search-results',
+        'modal-title','modal-body','modal-footer','ppp'].forEach(id => {
+        const el = document.getElementById(id); if (el) el.textContent = '';
+      });
+      document.querySelectorAll('.module canvas, #print-preview-overlay canvas, #sig-overlay canvas').forEach(canvas => {
+        const ctx = canvas.getContext('2d'); if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+      });
+      document.querySelectorAll('.signature-preview, .sig-preview').forEach(el => { el.textContent = ''; });
+      const preview = document.getElementById('print-preview-overlay'); if (preview) preview.classList.remove('show');
+      const badge = document.getElementById('dirty-badge'); if (badge) badge.classList.remove('show');
+      try { modal.close(); } catch (e) {}
+      try { ui.fecharDropdowns(); } catch (e) {}
+      try { sigUI.fechar(false); sigUI._temConteudo = false; } catch (e) {}
+    } catch (e) {}
+    try {
+      state.dirty = false; state.importTarget = null; state.sigDrawing = false;
+    } catch (e) {}
+    try { prontuario._docs = {}; } catch (e) {}
+    try { linker._preBuscadaNaNuvem = {}; } catch (e) {}
+    try {
+      Object.keys(escritaContinua._timers || {}).forEach(k => clearTimeout(escritaContinua._timers[k]));
+      escritaContinua._timers = {};
+    } catch (e) {}
+    /* Estes campos são buffers clínicos; catálogos, constantes e listeners
+       permanecem disponíveis para o próximo login. */
+    const limparBuffers = (obj, nivel = 0) => {
+      if (!obj || typeof obj !== 'object' || nivel > 3) return;
+      ['_lista','_dados','_sel','_linkPendente','_selecao','_ctx'].forEach(k => {
+        if (!Object.prototype.hasOwnProperty.call(obj, k) || typeof obj[k] === 'function') return;
+        obj[k] = k === '_lista' ? [] : (k === '_dados' || k === '_sel' ? {} : null);
+      });
+      Object.keys(obj).forEach(k => {
+        if (obj[k] && typeof obj[k] === 'object' && !Array.isArray(obj[k]) && !/^[A-Z_]+$/.test(k)) limparBuffers(obj[k], nivel + 1);
+      });
+    };
+    ['pre','consulta','anestesia','recuperacao','termo','prescricao','documentos','risco','financeiro','orcamento','captura'].forEach(k => { try { limparBuffers(window[k]); } catch (e) {} });
+    try { pacientes._onSaveCallback = null; } catch (e) {}
+    try { fin.finalizacao._ctx = null; } catch (e) {}
+    try { printPreview._verCtx = null; printPreview._nomeArquivoOverride = null; } catch (e) {}
+    try { equipeNuvem._ultimaLista = null; } catch (e) {}
+    try {
+      programador._orgs = []; programador._membros = []; programador._perfis = [];
+      programador._shares = []; programador._legacySummary = []; programador._legacyItems = [];
+    } catch (e) {}
   },
 
   /* ---------- Bloqueio/desbloqueio da UI ---------- */
@@ -1072,12 +1177,15 @@ const auth = {
         window.addEventListener('medsys:auth-event', ev => {
           const tipo = ev && ev.detail && ev.detail.type;
           if (!/^(lock|logout)$/.test(tipo || '')) return;
-          try { sessionStorage.removeItem(auth.SESSION_KEY); } catch (e) {}
-          if (tipo === 'logout') {
-            try { sessionStorage.removeItem(cloud.SESSION_KEY); } catch (e) {}
-            try { contextoAba.limpar(); } catch (e) {}
-          }
-          try { auth._pararTimer(); auth._bloquear(); } catch (e) {}
+          auth.logout({ broadcast: false });
+        });
+        /* pagehide também cobre BFCache: voltar à página exige autenticação,
+           enquanto a fila cifrada já persistida continua na gaveta do dono.
+           Fechar uma aba não encerra o trabalho das outras abas da conta. */
+        window.addEventListener('pagehide', () => auth.logout({ broadcast: false }));
+        contextoAba.aoMudar((atual, anterior) => {
+          if (anterior && anterior.userId &&
+              (atual.userId !== anterior.userId || atual.organizationId !== anterior.organizationId)) auth._limparDadosDaTela();
         });
       } catch (e) {}
     }

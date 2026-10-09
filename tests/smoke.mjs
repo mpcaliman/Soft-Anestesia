@@ -41,9 +41,12 @@ function assert(cond, msg) {
    casa. A suíte inteira leva minutos; consertar um teste sem poder rodá-lo
    isolado custa muito mais caro do que estas quatro linhas. */
 const FILTRO = (process.argv.slice(2).find(argument => !argument.startsWith('--')) || '').toLowerCase();
+const grepArgument = process.argv.find(argument => argument.startsWith('--grep='));
+const GREP = grepArgument ? new RegExp(grepArgument.slice('--grep='.length), 'i') : null;
 
 async function test(name, fn) {
   if (FILTRO && name.toLowerCase().indexOf(FILTRO) < 0) return;
+  if (GREP && !GREP.test(name)) return;
   currentErrors = [];
   try {
     await fn();
@@ -78,13 +81,11 @@ async function novaPagina() {
   page.on('console', m => { if (m.type() === 'error') currentErrors.push(m.text()); });
   page.on('pageerror', e => currentErrors.push('PAGEERROR: ' + e.message));
   page.on('dialog', d => d.accept());
-  await page.goto(APP_URL);
-  await page.waitForTimeout(900);
   /* Os testes antigos mudavam um ponteiro global de clínica. Desde D1 isso é
      deliberadamente impossível: contexto é a interseção das sessões desta
      aba com o perfil confirmado. Este helper existe somente no harness e
      monta essa interseção real, sem reabrir uma porta no código de produção. */
-  await page.evaluate(() => {
+  await page.addInitScript(() => {
     window.__smokeBindOrg = (organizationId, requestedUid) => {
       const cloudNow = (() => { try { return cloud.session(); } catch (e) { return null; } })();
       const authNow = (() => { try { return auth.usuarioAtual(); } catch (e) { return null; } })();
@@ -111,6 +112,41 @@ async function novaPagina() {
       contextoAba.prepararUsuario(uid, { forcar: true });
       return contextoAba.vincular({ uid, organization_id: organizationId,
         role: authSession.role, orgs: 1 }, 'Clínica de teste');
+    };
+    /* Aquece o WAL pelo RPC mockado, mantendo WebCrypto e IndexedDB reais. */
+    window.__smokePrepareQueue = async (organizationId = 'org-1', uid = 'u1') => {
+      __smokeBindOrg(organizationId, uid);
+      cloud.estaConfigurado = () => true;
+      cloud.estaLogado = () => true;
+      cloud.sessaoExpirada = () => false;
+      cloud.divergencia = () => null;
+      cloud._garantirToken = async () => true;
+      cloud.config = () => ({ url: 'https://smoke.supabase.co', anonKey: 'smoke-key' });
+      const originalFetch = window.fetch;
+      window.fetch = async (url, opts) => String(url).includes('/rpc/ensure_offline_keyring')
+        ? new Response(JSON.stringify([{ wrap_key: btoa('q'.repeat(32)), key_version: 1 }]),
+            { status: 200, headers: { 'Content-Type': 'application/json' } })
+        : originalFetch(url, opts);
+      try { await filaCifrada.preparar(); }
+      finally { window.fetch = originalFetch; }
+      return contextoAba.capturar();
+    };
+    window.__smokeCloudReceipt = (mod, item, opts, extra = {}) => {
+      const operation = opts && opts.operation;
+      if (!operation) throw new Error('Mock de recibo sem identidade da operação');
+      const row = Object.assign({
+        id: 'remote-' + item._id, organization_id: contextoAba.atual().organizationId,
+        legacy_id: cloudRel.chaveLegada(mod, item), data: store._clone(item),
+        version: Number(item._relVersion || 0) + 1,
+        updated_at: '2026-08-26T12:00:00Z', deleted_at: null,
+        last_operation_id: operation.id, last_operation_checksum: operation.checksum
+      }, extra);
+      const lista = store.list(mod); const ix = lista.findIndex(x => x._id === item._id);
+      if (ix >= 0 && !row.deleted_at) {
+        lista[ix]._relUpdatedAt = row.updated_at; lista[ix]._relVersion = row.version;
+        lista[ix]._relOrg = row.organization_id; store.setList(mod, lista);
+      }
+      return { ok: true, row };
     };
     window.__smokeClearContext = () => {
       try { contextoAba.limpar(); } catch (e) {}
@@ -139,6 +175,8 @@ async function novaPagina() {
         role: null, orgs: 0 }, '');
     };
   });
+  await page.goto(APP_URL);
+  await page.waitForTimeout(900);
   return page;
 }
 
@@ -433,6 +471,7 @@ await test('RBAC: papel governa podeAcessar/podeEditar (admin, secretária só-i
 await test('Sync: fila relacional dedupa por documento e preserva retentativas', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(() => {
+    __smokeBindOrg('org-1', 'u-sync');
     cloudRel._filaGravar([]);
     cloudRel._filaPor('pre', 'x', 'rede');
     cloudRel._filaPor('pre', 'x', 'rede');
@@ -457,10 +496,13 @@ await test('Sync: fila relacional dedupa por documento e preserva retentativas',
   await page.close();
 });
 
+
+
 /* 14) O canal legado é uma sentinela sem I/O; o relacional drena offline */
 await test('Sync: canal pessoal não faz I/O e fila relacional drena ao reconectar', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
+    __smokeBindOrg('org-1', 'u-sync');
     let rede = 0;
     window.fetch = async () => { rede++; throw new Error('não deveria chamar a rede'); };
     cloud._limparFila();
@@ -481,6 +523,8 @@ await test('Sync: canal pessoal não faz I/O e fila relacional drena ao reconect
   assert(r.drenou && r.drenou.enviados === 1 && r.restantes === 0, 'a fila relacional deveria drenar ao reconectar');
   await page.close();
 });
+
+
 
 /* 15) Ficha — modo cirurgia: nav de seções + FAB de tempos + FAB de medicação */
 await test('Ficha: nav de seções com contadores, FAB tempos carimba e FAB med existe', async () => {
@@ -721,13 +765,14 @@ await test('Armazenamento: histórico sem base64, compactação e liberação de
 
     // 3) liberar anexos: doc com dataurl + storage_path perde o dataurl; pendente (sem path) fica
     store.setList('anestesia', [{ _id: 'ax', paciente_nome: 'X', _docs: [
-      { nome: 'exame.jpg', storage_path: 'uid/anexos/exame.jpg', dataurl: GORDO },
+      { nome: 'exame.jpg', storage_path: 'uid/anexos/exame.jpg', cloud_confirmed_at: '2026-10-07T10:00:00Z', dataurl: GORDO },
+      { nome: 'sem-recibo.jpg', storage_path: 'uid/anexos/sem-recibo.jpg', dataurl: GORDO },
       { nome: 'pendente.jpg', dataurl: GORDO }
     ] }]);
     armazenamento.liberarAnexos();
     const rec = store.getById('anestesia', 'ax');
     out.liberou = !rec._docs[0].dataurl && rec._docs[0].storage_path === 'uid/anexos/exame.jpg';
-    out.pendenteFicou = rec._docs[1].dataurl === GORDO;
+    out.pendenteFicou = rec._docs[1].dataurl === GORDO && rec._docs[2].dataurl === GORDO;
 
     // 4) uso() responde com total e rótulos amigáveis
     const u = armazenamento.uso();
@@ -739,7 +784,7 @@ await test('Armazenamento: histórico sem base64, compactação e liberação de
   assert(r.docIntacto, 'o documento atual NÃO deveria ser alterado pelo saneamento');
   assert(r.compactou, 'compactarVersoes deveria limitar a 3 e remover base64, reduzindo o tamanho');
   assert(r.liberou, 'anexo já na nuvem deveria perder a cópia local');
-  assert(r.pendenteFicou, 'anexo pendente (sem storage_path) deveria ser preservado');
+  assert(r.pendenteFicou, 'anexo sem recibo remoto deve ser preservado, inclusive se já recebeu storage_path');
   assert(r.usoOk && r.rotuloVersoes, 'uso() e rótulos deveriam funcionar');
   await page.close();
 });
@@ -839,12 +884,15 @@ await test('Cadastros: grupos recolhíveis — só o ativo aberto, toggle persis
 await test('Cadastros: sobem para org_configs com organization_id e sem fila legada', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
+    __smokeBindOrg('org-1', 'u-cfg');
     cloud._limparFila();
     localStorage.removeItem(clinicaSync.META_KEY);
     localStorage.setItem('medsys.v5.cad.anestesistas', JSON.stringify([
       { _id: 'an-teste', nome: 'Dr. Teste', crm: '12345' }
     ]));
     cloud.session = () => ({ user: { id: 'u-cfg' } });
+    __smokeBindOrg('org-1');
+    cloud.session = () => JSON.parse(sessionStorage.getItem(cloud.SESSION_KEY));
     cloud.config = () => ({ url: 'http://nuvem.teste', anonKey: 'k' });
     cloud._headers = () => ({});
     clinicaSync._org = async () => 'org-1';
@@ -878,11 +926,14 @@ await test('Cadastros: sobem para org_configs com organization_id e sem fila leg
   await page.close();
 });
 
+
+
 /* 23) Visibilidade dos registros — gestor escolhe 'equipe' × 'proprios' */
 await test('Visibilidade: opção do gestor, e no modo próprios o pull converge o aparelho', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
+    __smokeBindOrg('org-1', 'smoke-user');
     // padrão: sem configuração → 'equipe' (comportamento atual)
     localStorage.removeItem(orgSettings.CACHE_KEY);
     out.padrao = orgSettings.visibilidade();
@@ -890,10 +941,10 @@ await test('Visibilidade: opção do gestor, e no modo próprios o pull converge
     // UI: a opção existe e só aparece para o gestor
     out.temBox = !!document.getElementById('visibilidade-registros');
     const origUsuario = auth.usuarioAtual;
-    auth.usuarioAtual = () => ({ usuario: 'dr', role: 'anestesiologista' });
+    auth.usuarioAtual = () => ({ uid: 'smoke-user', organization_id: 'org-1', usuario: 'dr', role: 'anestesiologista' });
     orgSettings.renderVisibilidade();
     out.escondeNaoGestor = document.getElementById('visibilidade-registros').style.display === 'none';
-    auth.usuarioAtual = () => ({ usuario: 'chefe', role: 'gestor' });
+    auth.usuarioAtual = () => ({ uid: 'smoke-user', organization_id: 'org-1', usuario: 'chefe', role: 'gestor' });
     orgSettings._gravarCache({ visibilidade_registros: 'proprios' });
     orgSettings.renderVisibilidade();
     const box = document.getElementById('visibilidade-registros');
@@ -902,7 +953,7 @@ await test('Visibilidade: opção do gestor, e no modo próprios o pull converge
 
     // convergência no pull: modo 'proprios' + papel anestesiologista →
     // o que veio da nuvem (_relUpdatedAt) e a RLS não devolveu mais é removido
-    auth.usuarioAtual = () => ({ usuario: 'dr', role: 'anestesiologista' });
+    auth.usuarioAtual = () => ({ uid: 'smoke-user', organization_id: 'org-1', usuario: 'dr', role: 'anestesiologista' });
     store.setList('anestesia', [
       { _id: 'meu',       _relUpdatedAt: 't1', paciente: 'A' },
       { _id: 'do_colega', _relUpdatedAt: 't1', paciente: 'B' },
@@ -919,7 +970,7 @@ await test('Visibilidade: opção do gestor, e no modo próprios o pull converge
     cloudRel.puxarIndiceModulo = async () => ([
       { id: 'id-meu', legacy_id: 'meu', updated_at: 't2', _idLocal: 'meu' }
     ]);
-    cloudRel.puxarPorIds = async () => ([{ _id: 'meu', _relUpdatedAt: 't2', paciente: 'A' }]);
+    cloudRel.puxarPorIds = async () => ([{ _relOrg: 'org-1', _id: 'meu', _relUpdatedAt: 't2', paciente: 'A' }]);
     delete cloudRel._puxados['anestesia'];
     await cloudRel.autoPullModulo('anestesia');
     const ids = store.list('anestesia').map(x => x._id);
@@ -980,6 +1031,8 @@ await test('Visibilidade: opção do gestor, e no modo próprios o pull converge
   assert(r.naoSincronizadoFica, 'e o que nunca subiu é intocável, em qualquer modo')
   await page.close();
 });
+
+
 
 /* 24) Ficha — editar horário fora do intervalo de sala AVISA mas não sobrescreve */
 await test('Ficha: horário fora do intervalo de sala é mantido como digitado (avisa, não trava)', async () => {
@@ -1123,6 +1176,8 @@ await test('Arquivamento: antigos+sincronizados saem, prazos por módulo, pull n
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
+    __smokeBindOrg('org1', 'u1');
+    cloud._garantirToken = async () => true;
     localStorage.removeItem(arquivo.INDEX_KEY);
     const D = n => new Date(Date.now() - n * 86400000).toISOString();
     store.setList('anestesia', [
@@ -1142,7 +1197,7 @@ await test('Arquivamento: antigos+sincronizados saem, prazos por módulo, pull n
 
     // pull relacional NÃO traz o arquivado de volta
     cloudRel.disponivel = () => true;
-    cloudRel.puxarModulo = async () => ([{ _id: 'velho_sync', _relUpdatedAt: 't2', paciente: { nome: 'Antigo Sincronizado' } }]);
+    cloudRel.puxarModulo = async () => ([{ _id: 'velho_sync', _relOrg: 'org1', _relUpdatedAt: 't2', paciente: { nome: 'Antigo Sincronizado' } }]);
     delete cloudRel._puxados['anestesia'];
     await cloudRel.autoPullModulo('anestesia');
     out.pullNaoVolta = !store.list('anestesia').some(x => x._id === 'velho_sync');
@@ -1150,7 +1205,7 @@ await test('Arquivamento: antigos+sincronizados saem, prazos por módulo, pull n
     // restaurar (nuvem mockada) → volta ao aparelho e sai do índice
     cloud._garantirToken = async () => true;
     cloudRel._orgAsync = async () => 'org1';
-    cloudRel._lerAtualTab = async () => ({ id: 'u1', legacy_id: 'velho_sync',
+    cloudRel._lerAtualTab = async () => ({ id: 'u1', organization_id: 'org1', legacy_id: 'velho_sync',
       data: { _id: 'velho_sync', paciente: { nome: 'Antigo Sincronizado' } }, updated_at: 't3' });
     const ok = await arquivo.restaurar('anestesia', 'velho_sync');
     out.restaurou = ok && store.list('anestesia').some(x => x._id === 'velho_sync')
@@ -1645,6 +1700,9 @@ await test('Drive: importador navega pastas (ano a ano) e entende os nomes novos
     out.antigaFicha = a.nome === 'Luzinete de Jesus Aguiar' && a.dataISO === '2026-07-22' && !a.ehAPA;
 
     /* UI: modal tem o botão de pastas; navegação lista pastas e os PDFs da pasta */
+    __smokeBindOrg('org-drive-import', 'drive-user');
+    cloud.estaConfigurado = () => true;
+    cloud.divergencia = () => null;
     pdfBackup.clientId = () => 'cid-teste';
     cloud.estaLogado = () => true;
     driveImport._tokenLeitura = async () => 'tk-teste';
@@ -1745,6 +1803,7 @@ await test('Ajustes: cards do sistema viram grupos recolhíveis (o técnico em "
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
+    __smokeBindOrg('org-1', 'smoke-user');
     /* — grupos montados: cabeçalhos + cards movidos para dentro dos wrappers — */
     ajustesGrupos.montar();   /* idempotente (já montou no boot) */
     out.grupos = ['nuvem', 'equipe', 'modelos', 'avancado'].every(id =>
@@ -1807,6 +1866,8 @@ await test('Ajustes: cards do sistema viram grupos recolhíveis (o técnico em "
   await page.close();
 });
 
+
+
 /* 38) Configurações na nuvem (configSync) + login sem demo/usuário local */
 await test('Configurações sobem para a nuvem, descem ao entrar (vence a mais nova) e o login fica só com a conta da nuvem', async () => {
   const page = await novaPagina();
@@ -1819,6 +1880,8 @@ await test('Configurações sobem para a nuvem, descem ao entrar (vence a mais n
     cloud._garantirToken = async () => true;
     cloud.config = () => ({ url: 'http://nuvem.teste', anonKey: 'k' });
     cloud.session = () => ({ user: { id: 'u-cfg' } });
+    __smokeBindOrg('org-1');
+    cloud.session = () => JSON.parse(sessionStorage.getItem(cloud.SESSION_KEY));
     cloud._headers = () => ({});
     cloudRel._orgAsync = async () => 'org-1';
     const pedidos = [];
@@ -1889,6 +1952,8 @@ await test('Configurações sobem para a nuvem, descem ao entrar (vence a mais n
   assert(r.semCriarLocal, 'o botão de criar usuário local deveria ter saído de Usuários e segurança');
   await page.close();
 });
+
+
 
 /* 39) CBHPM em todo campo: segmentos com ➕, multiplicador xN e auxiliares do cirurgião */
 await test('CBHPM: vários códigos no mesmo campo (➕/x2) em todo o app e auxiliares do cirurgião na ficha', async () => {
@@ -2467,8 +2532,10 @@ await test('Usuários: editar funciona nos espelhos da nuvem, só um "(você)", 
     /* Equipe da nuvem sem gestor: em vez de aviso morto, botões de ação */
     cloud.estaConfigurado = () => true;
     cloud.estaLogado = () => true;
-    cloud.session = () => ({ user: { id: 'u1', email: 'mpcaliman@hotmail.com' } });
-    auth._definirSessao(Object.assign({}, auth._lerUsuarios()[0], { role: null }));
+    cloud.session = () => ({ access_token: 'smoke-token', user: { id: 'u1', email: 'mpcaliman@hotmail.com' } });
+    auth._definirSessao(Object.assign({}, auth._lerUsuarios()[0], { role: null, uid: 'u1' }));
+    __smokeBindNoOrg('u1');
+    cloud.session = () => JSON.parse(sessionStorage.getItem(cloud.SESSION_KEY));
     await equipeNuvem.render();
     const eq = document.getElementById('equipe-nuvem-lista').innerHTML;
     out.temCaminho = eq.includes('criarMinhaClinica') && eq.includes('atualizarMeuPapel');
@@ -2499,11 +2566,17 @@ await test('Usuários: editar funciona nos espelhos da nuvem, só um "(você)", 
   await page.close();
 });
 
+
+
 /* 47) Recuperação em lote, transferir para a clínica e conta nova SEM acesso total */
 await test('Recuperação: restaurar todos os arquivados, enviar tudo p/ a clínica e conta nova entra restrita', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
+    __smokeBindOrg('org-1', 'u1');
+    cloudRel.mirror = () => null;
+    sincronia.agora = () => {};
+    rascunhos._agendarEnvio = () => {};
 
     /* — arquivamento automático agora é OPT-IN (padrão desligado) — */
     localStorage.removeItem(arquivo.AUTO_KEY);
@@ -2530,7 +2603,7 @@ await test('Recuperação: restaurar todos os arquivados, enviar tudo p/ a clín
     cloud.session = () => ({ user: { id: 'u1', email: 'mpcaliman@hotmail.com' } });
     cloud._headers = () => ({});
     cloudRel._orgAsync = async () => 'org-1';
-    cloudRel._lerAtualTab = async () => ({ legacy_id: antigo._id, data: { _id: antigo._id, paciente: { nome: 'Caso Antigo' } }, updated_at: '2020-01-10T10:00:00Z' });
+    cloudRel._lerAtualTab = async () => ({ organization_id: 'org-1', legacy_id: antigo._id, data: { _id: antigo._id, paciente: { nome: 'Caso Antigo' } }, updated_at: '2020-01-10T10:00:00Z' });
     cloudRel._rowParaRegistro = (row) => Object.assign({}, row.data, { _relUpdatedAt: row.updated_at });
     const res = await arquivo.restaurarTodos({ silent: true });
     out.restaurouTodos = res.ok === 1 && store.list('anestesia').length === 1 && arquivo.total() === 0;
@@ -2545,16 +2618,16 @@ await test('Recuperação: restaurar todos os arquivados, enviar tudo p/ a clín
 
     /* — SEGURANÇA: conta NOVA num aparelho que já tem usuário NÃO vira admin — */
     auth._salvarUsuarios([{ id: 'u_1', usuario: 'mpcaliman@hotmail.com', nome: 'dono', perfil: 'admin', senhaHash: 'x', nuvem: true, role: 'gestor' }]);
-    const nova = await auth._espelharUsuarioNuvem('mpcanestesiologia@gmail.com', 'senha123', null);
+    const nova = await auth._espelharUsuarioNuvem('mpcanestesiologia@gmail.com', null);
     out.novaRestrita = nova.perfil === 'secretaria'
       && !nova.modulos.includes('anestesia') && !nova.modulos.includes('ajustes') && !nova.modulos.includes('financeiro') === false;
     /* e o papel do SERVIDOR sempre manda (mesmo com espelho antigo permissivo) */
-    const comPapel = await auth._espelharUsuarioNuvem('mpcanestesiologia@gmail.com', 'senha123', { role: 'auxiliar', uid: 'u2', organization_id: 'org-1' });
+    const comPapel = await auth._espelharUsuarioNuvem('mpcanestesiologia@gmail.com', { role: 'auxiliar', uid: 'u2', organization_id: 'org-1' });
     out.papelDoServidorManda = comPapel.perfil === 'secretaria' && comPapel.role === 'auxiliar'
       && !comPapel.modulos.includes('anestesia');
     /* primeira conta do aparelho continua sendo o dono (admin) */
     auth._salvarUsuarios([]);
-    const dono = await auth._espelharUsuarioNuvem('mpcaliman@hotmail.com', 'senha123', null);
+    const dono = await auth._espelharUsuarioNuvem('mpcaliman@hotmail.com', null);
     out.donoAdmin = dono.perfil === 'admin';
 
     auth._salvarUsuarios([]);
@@ -2577,9 +2650,10 @@ await test('Restaurar tudo da nuvem: traz só dados relacionais da clínica, sem
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
+    __smokeBindOrg('org-1', 'u1');
     ['anestesia', 'pre', 'consulta'].forEach(m => store.setList(m, []));
     /* já existe 1 consulta no aparelho — não pode duplicar */
-    store.setList('consulta', [{ _id: 'c-0', nome: 'Já tinha', _relUpdatedAt: '2026-01-01' }]);
+    store.setList('consulta', [{ _id: 'c-0', nome: 'Já tinha', _relUpdatedAt: '2026-01-01', _relOrg: 'org-1' }]);
 
     cloud.estaConfigurado = () => true;
     cloud.estaLogado = () => true;
@@ -2648,7 +2722,9 @@ await test('Sem clínica vinculada = acesso restrito; o papel do gestor rebaixa 
       { id: 'u_2', usuario: 'mpcanestesiologia@gmail.com', nome: 'secre', perfil: 'admin', senhaHash: 'x', nuvem: true,
         modulos: auth.MODULOS.map(m => m.key), soImpressao: [] }
     ]);
-    auth._definirSessao(auth._lerUsuarios()[1]);
+    auth._definirSessao(Object.assign({}, auth._lerUsuarios()[1], { uid: 'u2' }));
+    sessionStorage.setItem(cloud.SESSION_KEY, JSON.stringify({ access_token: 't', user: { id: 'u2', email: 'mpcanestesiologia@gmail.com' } }));
+    __smokeBindNoOrg('u2');
     out.antesAdmin = auth.usuarioAtual().perfil === 'admin' && auth.podeAcessar('anestesia') === true;
 
     /* a nuvem responde: conta existe, mas NÃO pertence a nenhuma clínica */
@@ -2672,7 +2748,9 @@ await test('Sem clínica vinculada = acesso restrito; o papel do gestor rebaixa 
     out.viraAuxiliar = u2 && u2.role === 'auxiliar' && u2.perfil === 'secretaria';
 
     /* o PROGRAMADOR nunca é rebaixado por falta de vínculo */
-    auth._definirSessao(auth._lerUsuarios()[0]);
+    auth._definirSessao(Object.assign({}, auth._lerUsuarios()[0], { uid: 'u1' }));
+    sessionStorage.setItem(cloud.SESSION_KEY, JSON.stringify({ access_token: 't', user: { id: 'u1', email: 'mpcaliman@hotmail.com' } }));
+    __smokeBindNoOrg('u1');
     cloud.buscarPerfil = async () => ({ semVinculo: true, uid: 'u1', email: 'mpcaliman@hotmail.com', role: null, organization_id: null, ativo: true });
     const dono = await auth.atualizarPapelDaNuvem();
     out.programadorIntacto = dono && dono.perfil === 'admin';
@@ -2688,6 +2766,8 @@ await test('Sem clínica vinculada = acesso restrito; o papel do gestor rebaixa 
   assert(r.programadorIntacto, 'o programador não pode ser rebaixado por falta de vínculo');
   await page.close();
 });
+
+
 
 /* 50) Contas diferentes (app × nuvem): detecta, bloqueia a sync e corrige em um toque */
 await test('App em uma conta e nuvem em outra: sincronização travada + correção em um toque', async () => {
@@ -2786,13 +2866,13 @@ await test('Pacientes duplicados: diagnóstico não acusa pendência falsa e a f
     store.setList('pacientes', []);
     store.setList('anestesia', []);
 
-    const a = store.save('pacientes', { nome: 'Andrea Soares Santos', telefone: '27999990000' });
-    const b = store.save('pacientes', { nome: 'ANDREA SOARES SANTOS', cpf: '12345678901', plano: 'Unimed' });
+    const a = store.save('pacientes', { nome: 'Andrea Soares Santos', cpf: '52998224725', telefone: '27999990000' });
+    const b = store.save('pacientes', { nome: 'ANDREA SOARES SANTOS', cpf: '52998224725', plano: 'Unimed' });
     const c = store.save('pacientes', { nome: 'Joao da Silva' });
-    const ficha = store.save('anestesia', { paciente: { nome: 'Andrea Soares Santos' }, _paciente_id: b._id });
+    const ficha = store.save('anestesia', { paciente: { nome: 'Andrea Soares Santos' }, _paciente_id: b._id, _patientRef: b._id });
 
     out.tresCadastros = store.list('pacientes').length === 3;
-    out.doisDistintos = pacientes.contarUnicos() === 2;         /* a nuvem verá 2 */
+    out.doisDistintos = pacientes.contarUnicos() === 2;         /* duas cópias com o mesmo CPF válido */
     out.achaGrupo = pacientes.duplicados().length === 1;
 
     const res = pacientes.mesclarDuplicados({ silent: true });
@@ -2802,15 +2882,22 @@ await test('Pacientes duplicados: diagnóstico não acusa pendência falsa e a f
     out.sobraramDois = lst.length === 2;
     const andrea = lst.find(p => /andrea/i.test(p.nome || ''));
     /* o cadastro que fica herda o que faltava no outro */
-    out.herdouCampos = !!andrea && andrea.cpf === '12345678901' && andrea.plano === 'Unimed' && andrea.telefone === '27999990000';
+    out.herdouCampos = !!andrea && andrea.cpf === '52998224725' && andrea.plano === 'Unimed' && andrea.telefone === '27999990000';
     /* a ficha continua ligada a um cadastro que existe */
     const f2 = store.getById('anestesia', ficha._id);
-    out.fichaReligada = !!f2 && f2._paciente_id === andrea._id && !!store.getById('pacientes', f2._paciente_id);
+    out.fichaReligada = !!f2 && f2._paciente_id === andrea._id && f2._patientRef === andrea._id && !!store.getById('pacientes', f2._paciente_id);
     /* nada some do histórico clínico */
     out.fichaIntacta = store.list('anestesia').length === 1;
     /* rodar de novo não faz nada */
     const res2 = pacientes.mesclarDuplicados({ silent: true });
     out.idempotente = res2 && res2.grupos === 0 && res2.removidos === 0;
+
+    /* Homônimos fracos continuam separados; nome não autoriza fusão. */
+    store.setList('pacientes', []);
+    store.save('pacientes', { nome: 'Andrea Sem Documento' });
+    store.save('pacientes', { nome: 'ANDREA SEM DOCUMENTO' });
+    out.homonimosPreservados = pacientes.contarUnicos() === 2 && pacientes.duplicados().length === 0
+      && pacientes.mesclarDuplicados({ silent: true }).removidos === 0;
 
     store.setList('pacientes', []); store.setList('anestesia', []);
     return out;
@@ -2824,6 +2911,7 @@ await test('Pacientes duplicados: diagnóstico não acusa pendência falsa e a f
   assert(r.fichaReligada, 'a ficha deveria passar a apontar para o cadastro que ficou');
   assert(r.fichaIntacta, 'nenhuma ficha pode sumir na fusão');
   assert(r.idempotente, 'rodar a fusão de novo não deveria mexer em nada');
+  assert(r.homonimosPreservados, 'nome igual sem identidade forte não pode fundir cadastros');
   await page.close();
 });
 
@@ -2832,6 +2920,7 @@ await test('Permissões personalizadas sobem para a nuvem e vencem o padrão do 
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
+    __smokeBindOrg('org-1', 'uid-gestor');
     cloud.estaConfigurado = () => true;
     cloud.estaLogado = () => true;
     cloud._garantirToken = async () => true;
@@ -2865,10 +2954,13 @@ await test('Permissões personalizadas sobem para a nuvem e vencem o padrão do 
       permissoes: { perfil: 'secretaria', modulos: ['pacientes', 'agenda'], soImpressao: ['pre'] }
     };
     auth._salvarUsuarios([]);
-    const esp = await auth._espelharUsuarioNuvem('secretaria@ex.com', 'senha', perfilNuvem);
+    const esp = await auth._espelharUsuarioNuvem('secretaria@ex.com', perfilNuvem);
     out.loginRespeita = esp && !esp.modulos.includes('dashboard') && esp.modulos.includes('pacientes')
       && esp.soImpressao.includes('pre');
     auth._definirSessao(esp);
+    sessionStorage.setItem(cloud.SESSION_KEY, JSON.stringify({ access_token: 't', user: { id: 'uid-2', email: 'secretaria@ex.com' } }));
+    __smokeBindOrg('org-1', 'uid-2');
+
     out.uiBloqueia = auth.podeAcessar('dashboard') === false && auth.podeAcessar('pacientes') === true;
 
     /* o papel sozinho daria Dashboard — a personalização é que manda */
@@ -2895,6 +2987,8 @@ await test('Permissões personalizadas sobem para a nuvem e vencem o padrão do 
   assert(r.semPersonalizacao, 'sem personalização, o padrão do papel volta a valer');
   await page.close();
 });
+
+
 
 /* 53) Pré: o que a secretária pode preencher (edição parcial por seção) */
 await test('Auxiliar preenche a ficha inteira; finalizar continua sendo do médico', async () => {
@@ -3162,16 +3256,17 @@ await test('CBHPM: procedimentos próprios entram na busca e no financeiro; paci
     out.exclusivos = enf.checked && !apt.checked;
 
     store.setList('pacientes', []);
-    store.save('pacientes', { nome: 'Paciente Enfermaria', enfermaria: '1' });
-    store.save('pacientes', { nome: 'Paciente Apartamento', apartamento: '1' });
-    out.acomEnf = anestesia.adicionais.acomodacaoDoPaciente('Paciente Enfermaria') === 'enfermaria';
-    out.acomApt = anestesia.adicionais.acomodacaoDoPaciente('Paciente Apartamento') === 'apartamento';
-    out.acomVazia = anestesia.adicionais.acomodacaoDoPaciente('Nao Cadastrado') === '';
+    const pacEnf = store.save('pacientes', { nome: 'Paciente Enfermaria', enfermaria: '1' });
+    const pacApt = store.save('pacientes', { nome: 'Paciente Apartamento', apartamento: '1' });
+    out.acomEnf = anestesia.adicionais.acomodacaoDoPaciente('Paciente Enfermaria', { patientRef: pacEnf._id }) === 'enfermaria';
+    out.acomApt = anestesia.adicionais.acomodacaoDoPaciente('Paciente Apartamento', { patientRef: pacApt._id }) === 'apartamento';
+    out.acomVazia = anestesia.adicionais.acomodacaoDoPaciente('Nao Cadastrado', { patientRef: 'cadastro-inexistente' }) === '';
     /* enfermaria NÃO vira adicional de faturamento */
     const f = document.getElementById('form-anestesia');
-    f.querySelector('[name="paciente_nome"]').value = 'Paciente Enfermaria';
+    autocomplete._aplicarPaciente('form-anestesia', pacEnf);
     out.enfSemAdicional = anestesia.adicionais._doCadastroPaciente().length === 0;
-    f.querySelector('[name="paciente_nome"]').value = 'Paciente Apartamento';
+    f.querySelector('[name="origem"]').value = '';
+    autocomplete._aplicarPaciente('form-anestesia', pacApt);
     out.aptComAdicional = anestesia.adicionais._doCadastroPaciente().includes('apartamento');
 
     localStorage.removeItem(cbhpm.EXTRA_KEY); cbhpm._cache = null;
@@ -3211,7 +3306,9 @@ await test('Pré finalizada oferece o Termo; pré + termo saem num arquivo únic
     document.getElementById('print-preview-overlay').classList.remove('show');
 
     /* ---- ao finalizar a pré, a janela oferece avançar/imprimir junto ---- */
-    const docPre = store.save('pre', { nome: 'Maria das Dores', cirurgia: 'Colecistectomia', data: utils.hojeISO() });
+    const pac = store.save('pacientes', { nome: 'Maria das Dores', nascimento: '1980-03-15' });
+    const vinculo = { _patientKey: linker._chavePaciente(pac), _patientRef: pac._id, _caseId: 'caso-maria-pre-termo' };
+    const docPre = store.save('pre', { ...vinculo, nome: pac.nome, cirurgia: 'Colecistectomia', data: utils.hojeISO() });
     pre._perguntarTermo(docPre);
     const corpo = document.getElementById('modal-body');
     out.ofereceTermo = /Avançar para o Termo/i.test(corpo.textContent);
@@ -3225,11 +3322,13 @@ await test('Pré finalizada oferece o Termo; pré + termo saem num arquivo únic
     out.esperaAVez = document.getElementById('modal-title').textContent === 'Outra coisa';
     modal.close();
 
-    /* ---- conjunto: pré no formulário + termo buscado pelo nome ---- */
+    /* ---- conjunto: pré no formulário + termo do paciente/caso selecionado ---- */
+    utils.fillForm('form-pre', docPre);
     document.querySelector('#form-pre [name="nome"]').value = 'Maria das Dores';
     document.querySelector('#form-pre [name="cirurgia"]').value = 'Colecistectomia';
-    store.save('termo', { nome: 'Maria das Dores', procedimento: 'Colecistectomia', data: utils.hojeISO() });
+    store.save('termo', { ...vinculo, nome: 'Maria das Dores', procedimento: 'Colecistectomia', data: utils.hojeISO() });
     document.querySelector('#form-termo [name="nome"]').value = '';
+    linker.limparContextoPaciente('termo');
 
     printPreview.abrirPreTermo();
     const ppp = document.getElementById('ppp');
@@ -3243,7 +3342,7 @@ await test('Pré finalizada oferece o Termo; pré + termo saem num arquivo únic
     /* só o termo cadastrado (sem pré) → imprime só o termo, sem quebrar */
     store.setList('pre', []);
     document.querySelector('#form-pre [name="nome"]').value = '';
-    document.querySelector('#form-termo [name="nome"]').value = 'Maria das Dores';
+    utils.fillForm('form-termo', store.last('termo'));
     printPreview.abrirPreTermo();
     out.soTermo = /TERMO/i.test(ppp.innerHTML) && ppp.innerHTML.indexOf('pp-quebra') < 0;
     out.nomeSoTermo = printPreview._gerarNomeArquivo().indexOf('_Termo_') >= 0;
@@ -3251,6 +3350,7 @@ await test('Pré finalizada oferece o Termo; pré + termo saem num arquivo únic
 
     /* sem nome nenhum, avisa e não abre */
     document.querySelector('#form-termo [name="nome"]').value = '';
+    linker.limparContextoPaciente('termo');
     document.getElementById('print-preview-overlay').classList.remove('show');
     printPreview.abrirPreTermo();
     out.semNomeNaoAbre = !document.getElementById('print-preview-overlay').classList.contains('show');
@@ -3344,6 +3444,8 @@ await test('Dashboard e prontuário mostram a ficha de anestesia junto da SRPA',
     const out = {};
     store.setList('anestesia', []); store.setList('recuperacao', []); store.setList('financeiro', []);
     const hoje = utils.hojeISO();
+    const pac = store.save('pacientes', { nome: 'João Teste', nascimento: '1970-05-20' });
+    autocomplete._aplicarPaciente('form-anestesia', pac);
     const f = document.getElementById('form-anestesia');
     const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el) el.value = v; };
     set('paciente_nome', 'João Teste'); set('data_anestesia', hoje);
@@ -3375,6 +3477,7 @@ await test('Dashboard e prontuário mostram a ficha de anestesia junto da SRPA',
     out.filtraData = meuDia.coletar().length === 1;
 
     /* --- Prontuário: linha da ficha com data e procedimento certos --- */
+    historico._prontContext = { patientRef: pac._id, identityKey: linker._chavePaciente(pac) };
     const html = historico._prontRender('João');
     out.prontTemFicha = html.indexOf('Ficha de Anestesia') >= 0;
     out.prontSemObjeto = html.indexOf('[object Object]') < 0;
@@ -3411,6 +3514,7 @@ await test('Voltar para o app baixa o que foi feito em outro aparelho (com inter
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
+    __smokeBindOrg('org-1', 'smoke-user');
     cloud.estaConfigurado = () => true;
     cloud.estaLogado = () => true;
     cloud.divergencia = () => null;
@@ -3473,6 +3577,8 @@ await test('Voltar para o app baixa o que foi feito em outro aparelho (com inter
   assert(r.vigiaUmaVez, 'os gatilhos deveriam ser registrados uma única vez');
   await page.close();
 });
+
+
 
 /* 61) Falha de rede não pode virar "conta sem clínica" (celular perdia a sync) */
 await test('Consulta falha ≠ conta sem clínica: o aparelho lembra a clínica e não rebaixa ninguém', async () => {
@@ -3558,6 +3664,9 @@ await test('Registros pendentes sobem para a clínica sozinhos (o que a secretá
     cloud._garantirToken = async () => true;
     cloud.divergencia = () => null;
     __smokeBindOrg('org-1');
+    cloudRel.mirror = () => null;
+    sincronia.agora = () => {};
+    rascunhos._agendarEnvio = () => {};
 
     /* salvos enquanto o aparelho não conhecia a clínica → sem _relUpdatedAt */
     store.save('pacientes', { nome: 'Paciente da Secretária' });
@@ -3670,7 +3779,7 @@ await test('Sessão vencida: o app diz a verdade e oferece entrar de novo', asyn
 });
 
 /* 64) Corrigir nome errado numa ficha finalizada conserta de verdade */
-await test('Correção de identificação vale no registro, no cadastro e nas outras fichas', async () => {
+await test('Correção de identificação preserva a ficha assinada; cadastro e fichas abertas usam a referência escolhida', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(() => {
     const out = {};
@@ -3678,9 +3787,11 @@ await test('Correção de identificação vale no registro, no cadastro e nas ou
 
     /* cenário: nome digitado errado em toda parte */
     const errado = 'Maria dajida Machado', certo = 'Maria dajuda Machado';
-    store.save('pacientes', { nome: errado, convenio: 'Unimed' });
-    const outraFicha = store.save('pre', { nome: errado, data: utils.hojeISO(), cirurgia: 'Colecistectomia' });
-    const ficha = store.save('anestesia', {
+    const pac = store.save('pacientes', { nome: errado, convenio: 'Unimed', nascimento: '1970-04-12' });
+    const vinculo = { _patientKey: linker._chavePaciente(pac), _patientRef: pac._id };
+    store.save('pacientes', { nome: errado, nascimento: '1990-02-10' });
+    const outraFicha = store.save('pre', { ...vinculo, nome: errado, data: utils.hojeISO(), cirurgia: 'Colecistectomia' });
+    const ficha = store.save('anestesia', { ...vinculo,
       paciente: { nome: errado, prontuario: '' },
       procedimento: { data: utils.hojeISO(), descricao: 'Colecistectomia' },
       pre_anestesico: { asa: 'II' },
@@ -3695,47 +3806,54 @@ await test('Correção de identificação vale no registro, no cadastro e nas ou
     adendos.salvarComoCorrecao('anestesia', ficha, novo);
 
     const salvo = store.getById('anestesia', ficha._id);
-    /* identificação: corrigida no próprio registro */
-    out.nomeCorrigido = salvo.paciente.nome === certo;
-    out.prontuarioCorrigido = salvo.paciente.prontuario === '12345';
+    /* Identificação assinada é imutável: a correção acompanha o original como adendo. */
+    out.nomePreservado = salvo.paciente.nome === errado;
+    out.prontuarioPreservado = salvo.paciente.prontuario === '';
     /* conteúdo clínico: original preservado */
     out.clinicoPreservado = salvo.pre_anestesico.asa === 'II';
     /* tudo fica registrado no adendo */
     const ad = (salvo._adendos || [])[0];
     out.adendoRegistra = !!ad && /CORREÇÃO/.test(ad.texto) &&
       ad.texto.indexOf(certo) >= 0 && /asa/i.test(ad.texto);
-    out.adendoExplica = !!ad && /identifica/i.test(ad.texto);
+    out.adendoExplica = !!ad && /original permanece integralmente/i.test(ad.texto);
+    out.cadastroAindaOriginal = store.getById('pacientes', pac._id).nome === errado;
+
+    /* Corrigir o cadastro é uma operação explícita, limitada à pessoa selecionada. */
+    const resPac = pacientes.renomear(errado, certo, { patient: pac, patientRef: pac._id, patientKey: linker._chavePaciente(pac) });
+    out.homonimoIntacto = store.list('pacientes').some(p => p._id !== pac._id && p.nome === errado);
+    out.fichaAssinadaIntacta = store.getById('anestesia', ficha._id).paciente.nome === errado;
 
     /* cadastro e as outras fichas passam a usar o nome certo */
-    out.cadastroCorrigido = (store.list('pacientes')[0] || {}).nome === certo;
+    out.cadastroCorrigido = store.getById('pacientes', pac._id).nome === certo;
     out.outraFichaCorrigida = (store.getById('pre', outraFicha._id) || {}).nome === certo;
     /* e o paciente deixa de aparecer duplicado no histórico */
-    out.umPacienteSo = store.list('pacientes').length === 1;
+    out.semNovoCadastro = store.list('pacientes').length === 2;
 
     /* correção direta pela tela de Pacientes */
     store.setList('pacientes', []); store.setList('pre', []);
-    store.save('pacientes', { nome: 'Joao Errado' });
-    store.save('pre', { nome: 'Joao Errado', data: utils.hojeISO() });
-    const res = pacientes.renomear('Joao Errado', 'João Certo');
+    const joao = store.save('pacientes', { nome: 'Joao Errado' });
+    store.save('pre', { nome: 'Joao Errado', _patientRef: joao._id, data: utils.hojeISO() });
+    const res = pacientes.renomear('Joao Errado', 'João Certo', { patient: joao, patientRef: joao._id });
     out.renomeouTudo = res.cadastro === 1 && res.registros === 1 &&
       store.list('pacientes')[0].nome === 'João Certo' &&
       store.list('pre')[0].nome === 'João Certo';
     /* nome vazio ou igual não mexe em nada */
-    const nada = pacientes.renomear('João Certo', '   ');
+    const nada = pacientes.renomear('João Certo', '   ', { patient: joao, patientRef: joao._id });
     out.ignoraVazio = nada.cadastro === 0 && nada.registros === 0 &&
       store.list('pacientes')[0].nome === 'João Certo';
 
     store.setList('pacientes', []); store.setList('anestesia', []); store.setList('pre', []);
     return out;
   });
-  assert(r.nomeCorrigido, 'o nome deveria ser corrigido no próprio registro');
-  assert(r.prontuarioCorrigido, 'os demais dados de identificação também');
+  assert(r.nomePreservado, 'o nome da ficha assinada permanece como no original');
+  assert(r.prontuarioPreservado, 'os demais dados de identificação assinados também permanecem intactos');
   assert(r.clinicoPreservado, 'o conteúdo clínico original deve permanecer intacto');
   assert(r.adendoRegistra, 'o adendo deveria registrar a correção e a mudança clínica');
-  assert(r.adendoExplica, 'o adendo deveria explicar que a identificação foi corrigida no registro');
+  assert(r.adendoExplica && r.cadastroAindaOriginal, 'o adendo explica a imutabilidade e não renomeia o cadastro por conta própria');
   assert(r.cadastroCorrigido, 'o cadastro do paciente deveria passar a ter o nome certo');
   assert(r.outraFichaCorrigida, 'as outras fichas do paciente também');
-  assert(r.umPacienteSo, 'a correção não pode criar um segundo paciente');
+  assert(r.semNovoCadastro, 'a correção não pode criar outro cadastro');
+  assert(r.homonimoIntacto && r.fichaAssinadaIntacta, 'renomear não altera homônimos nem a ficha assinada');
   assert(r.renomeouTudo, 'renomear pela tela de Pacientes deveria valer em tudo');
   assert(r.ignoraVazio, 'nome vazio não pode apagar o cadastro');
   await page.close();
@@ -3800,6 +3918,8 @@ await test('Rascunhos viajam entre aparelhos, juntando pelo mais recente', async
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
+    await __smokePrepareQueue('org-1', 'u1');
+    rascunhos._agendarEnvio = () => {};
     cloud.estaConfigurado = () => true;
     cloud.estaLogado = () => true;
     cloud._garantirToken = async () => true;
@@ -3809,22 +3929,34 @@ await test('Rascunhos viajam entre aparelhos, juntando pelo mais recente', async
     /* nuvem de mentira: guarda o que sobe e devolve no pull */
     let naNuvem = [];
     const fetchOrig = window.fetch;
-    window.fetch = async (url, opts) => {
-      const u = String(url);
-      if (u.indexOf('/documentos') < 0) return fetchOrig(url, opts);
-      if (opts && opts.method === 'DELETE') {
-        const m = u.match(/doc_id=eq\.([^&]+)/);
-        if (m) naNuvem = naNuvem.filter(x => x.doc_id !== decodeURIComponent(m[1]));
-        return { ok: true, json: async () => [] };
+    const pedidos = [];
+    const resposta = rows => new Response(JSON.stringify(rows), { status: 200,
+      headers: { 'Content-Type': 'application/json' } });
+    window.fetch = async (url, opts = {}) => {
+      const u = new URL(String(url));
+      if (!u.pathname.endsWith('/drafts')) return fetchOrig(url, opts);
+      pedidos.push(String(url));
+      const id = (u.searchParams.get('doc_id') || '').replace(/^eq\./, '');
+      const version = Number((u.searchParams.get('version') || '').replace(/^eq\./, ''));
+      const linhas = naNuvem.filter(row => !id || row.doc_id === id);
+      if (opts.method === 'DELETE') {
+        const apagadas = linhas.filter(row => row.version === version);
+        naNuvem = naNuvem.filter(row => !apagadas.includes(row));
+        return resposta(apagadas);
       }
-      if (opts && opts.method === 'POST') {
-        JSON.parse(opts.body).forEach(row => {
-          naNuvem = naNuvem.filter(x => x.doc_id !== row.doc_id);
-          naNuvem.push(row);
-        });
-        return { ok: true, json: async () => [] };
+      if (opts.method === 'PATCH') {
+        const row = linhas.find(row => row.version === version);
+        if (!row) return resposta([]);
+        row.data = JSON.parse(opts.body).data; row.version++;
+        return resposta([row]);
       }
-      return { ok: true, json: async () => naNuvem.map(x => ({ doc_id: x.doc_id, dados: x.dados })) };
+      if (opts.method === 'POST') {
+        const rows = JSON.parse(opts.body).map(row => Object.assign({}, row,
+          { id: 'cloud-' + row.doc_id, version: 1, updated_at: row.data.updatedAt }));
+        rows.forEach(row => { naNuvem = naNuvem.filter(x => x.doc_id !== row.doc_id); naNuvem.push(row); });
+        return resposta(rows);
+      }
+      return resposta(linhas);
     };
 
     /* ---- "celular": um rascunho pela metade ---- */
@@ -3849,26 +3981,28 @@ await test('Rascunhos viajam entre aparelhos, juntando pelo mais recente', async
     out.naoRegride = rascunhos.list('anestesia')[0].dados.procedimento.descricao === 'Colecistectomia videolaparoscópica';
 
     /* versão mais nova na nuvem entra no lugar */
-    naNuvem = [{ doc_id: 'rasc_1', dados: { id: 'rasc_1', label: 'Maria', updatedAt: '2026-08-07T18:00:00Z',
+    naNuvem = [{ organization_id: 'org-1', user_id: 'u1', version: 2, doc_id: 'rasc_1', data: { id: 'rasc_1', label: 'Maria', updatedAt: '2026-08-07T18:00:00Z',
       dados: { paciente: { nome: 'Maria' }, procedimento: { descricao: 'Versão do outro aparelho' } } } }];
     await rascunhosSync.puxar('anestesia');
-    out.aceitaMaisNovo = rascunhos.list('anestesia')[0].dados.procedimento.descricao === 'Versão do outro aparelho';
+    out.aceitaMaisNovo = rascunhos.list('anestesia').some(r => r.id === 'rasc_1' && r.dados.procedimento.descricao === 'Versão do outro aparelho');
+    out.edicaoConcorrentePreservada = rascunhos.list('anestesia').some(r => r._draftConflictOf === 'rasc_1'
+      && r.dados.procedimento.descricao === 'Colecistectomia videolaparoscópica');
 
     /* rascunho de outro aparelho não apaga o daqui */
     rascunhos.setList('anestesia', rascunhos.list('anestesia').concat([
       { id: 'rasc_2', label: 'Só daqui', updatedAt: '2026-08-07T19:00:00Z', dados: { paciente: { nome: 'João' } } }
     ]));
     await rascunhosSync.puxar('anestesia');
-    out.preservaLocal = rascunhos.list('anestesia').length === 2;
+    out.preservaLocal = rascunhos.list('anestesia').some(r => r.id === 'rasc_2');
 
     /* fechar apaga na nuvem também (senão o pull o ressuscitaria) */
-    await rascunhosSync.apagar('anestesia', 'rasc_1');
+    await rascunhosSync.apagar('anestesia', 'rasc_1', 2);
     out.apagouNaNuvem = naNuvem.every(x => x.doc_id !== 'rasc_1');
 
     /* o botão da barra ABRE o rascunho que chegou (não basta trazer calado) */
     rascunhos.setList('anestesia', []);
     rascunhos.setAtivo('anestesia', null);
-    naNuvem = [{ doc_id: 'rasc_9', dados: { id: 'rasc_9', label: 'Ana Vinda do Celular', updatedAt: '2026-08-07T20:00:00Z',
+    naNuvem = [{ organization_id: 'org-1', user_id: 'u1', version: 1, doc_id: 'rasc_9', data: { id: 'rasc_9', label: 'Ana Vinda do Celular', updatedAt: '2026-08-07T20:00:00Z',
       dados: { paciente: { nome: 'Ana Vinda do Celular' }, procedimento: { descricao: 'Hernioplastia' } } } }];
     await rascunhos.buscarNaNuvem('anestesia');
     out.abriuNaTela = rascunhos.ativo('anestesia') === 'rasc_9';
@@ -3881,6 +4015,7 @@ await test('Rascunhos viajam entre aparelhos, juntando pelo mais recente', async
     out.divergenciaBloqueia = (await rascunhosSync.enviar('anestesia')) === 0;
     cloud.divergencia = () => null;
 
+    out.semLegado = pedidos.every(url => !url.includes('/documentos'));
     window.fetch = fetchOrig;
     rascunhos.setList('anestesia', []);
     return out;
@@ -3889,6 +4024,8 @@ await test('Rascunhos viajam entre aparelhos, juntando pelo mais recente', async
   assert(r.desceu, 'e descer no outro aparelho, com os dados preenchidos');
   assert(r.naoRegride, 'versão antiga da nuvem não pode sobrescrever a mais nova daqui');
   assert(r.aceitaMaisNovo, 'versão mais nova do outro aparelho deveria entrar');
+  assert(r.edicaoConcorrentePreservada, 'uma revisão remota concorrente não pode apagar a edição local ainda não enviada');
+  assert(r.semLegado, 'rascunho clínico usa drafts com organização e usuário, nunca documentos pessoais');
   assert(r.preservaLocal, 'o rascunho só deste aparelho não pode sumir');
   assert(r.apagouNaNuvem, 'fechar o rascunho deveria apagá-lo na nuvem');
   assert(r.abaVisivel, 'a aba do rascunho trazido deveria aparecer na barra');
@@ -3981,6 +4118,7 @@ await test('Cadastros da clínica sobem e descem por org_configs, valendo entre 
       !!clinicaSync.CHAVES['medsys.v7.logoCustom'] &&
       configSync.CHAVES.indexOf('medsys.v7.theme') >= 0;   /* tema continua pessoal */
 
+    cloud.config = () => ({ url: 'http://nuvem.teste', anonKey: 'k' });
     /* nuvem de mentira para org_configs */
     let tabela = [];
     const fetchOrig = window.fetch;
@@ -4042,6 +4180,8 @@ await test('Cadastros da clínica sobem e descem por org_configs, valendo entre 
   await page.close();
 });
 
+
+
 /* 69) Acesso da secretária conferido e editado pelo médico DE QUALQUER APARELHO.
    Antes só dava para mexer em "Usuários e segurança" — lista local: no
    computador novo do médico a secretária nem aparecia. */
@@ -4049,13 +4189,14 @@ await test('Equipe da nuvem mostra e edita o acesso de cada pessoa (vale em todo
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
+    __smokeBindOrg('org-1', 'uid-medico');
     cloud.estaConfigurado = () => true;
     cloud.estaLogado = () => true;
     cloud._garantirToken = async () => true;
     cloud.config = () => ({ url: 'https://x.supabase.co', key: 'k' });
     cloud._headers = () => ({});
     cloudRel._orgAsync = async () => 'org-1';
-    auth.usuarioAtual = () => ({ uid: 'uid-medico', role: 'gestor' });
+    auth.usuarioAtual = () => ({ uid: 'uid-medico', organization_id: 'org-1', role: 'gestor' });
 
     /* Sem personalização: a tela mostra o padrão do papel */
     const semPerso = { uid: 'uid-sec', role: 'auxiliar', ativo: true, nome: 'Secretária', email: 's@x.com', permissoes: null };
@@ -4101,12 +4242,15 @@ await test('Equipe da nuvem mostra e edita o acesso de cada pessoa (vale em todo
   await page.close();
 });
 
+
+
 /* 70) Atualizar a nuvem tem que estar no MENU: quem não acessa Ajustes (a
    secretária) ficava sem nenhum caminho para sincronizar o aparelho dela. */
 await test('Botão de atualizar a nuvem fica no menu e sobrevive às permissões (secretária sem Ajustes)', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
+    __smokeBindOrg('org-1', 'u1');
     const btn = document.getElementById('sidebar-nuvem-btn');
     out.existe = !!btn;
     /* fora de #sidebar-nav de propósito — é o que impede a regra de permissão
@@ -4160,6 +4304,8 @@ await test('Botão de atualizar a nuvem fica no menu e sobrevive às permissões
   await page.close();
 });
 
+
+
 /* 71) Finalizar com registro do mesmo paciente/dia: substituir ou gravar nova.
    Era assim que apareciam 4 "Ficha de anestesia" do mesmo dia no prontuário. */
 await test('Ao finalizar, registro repetido do mesmo paciente e dia pergunta: substituir ou gravar como nova', async () => {
@@ -4168,22 +4314,24 @@ await test('Ao finalizar, registro repetido do mesmo paciente e dia pergunta: su
     const out = {};
     ['pre', 'anestesia', 'recuperacao'].forEach(m => store.setList(m, []));
 
-    /* Um registro já finalizado da Maria, hoje */
+    /* Uma cópia ainda aberta da Maria, hoje — assinados são permanentes. */
     const hoje = '2026-08-07';
-    const antigo = store.save('pre', { paciente_nome: 'Maria da Silva', data_avaliacao: hoje, _finalizado: true, obs: 'primeira' });
+    const maria = store.save('pacientes', { nome: 'Maria da Silva' });
+    const ana = store.save('pacientes', { nome: 'Ana Lima' });
+    const antigo = store.save('pre', { _patientRef: maria._id, paciente_nome: 'Maria da Silva', data_avaliacao: hoje, obs: 'primeira' });
 
     /* Mesmo paciente + mesmo dia → acha; outro dia ou outro nome → não acha */
-    out.acha = duplicados.achar('pre', { paciente_nome: 'MARIA DA SILVA', data_avaliacao: hoje }).length === 1;
-    out.diaDiferente = duplicados.achar('pre', { paciente_nome: 'Maria da Silva', data_avaliacao: '2026-08-06' }).length === 0;
+    out.acha = duplicados.achar('pre', { _patientRef: maria._id, paciente_nome: 'MARIA DA SILVA', data_avaliacao: hoje }).length === 1;
+    out.diaDiferente = duplicados.achar('pre', { _patientRef: maria._id, paciente_nome: 'Maria da Silva', data_avaliacao: '2026-08-06' }).length === 0;
     out.outroPaciente = duplicados.achar('pre', { paciente_nome: 'João Souza', data_avaliacao: hoje }).length === 0;
     /* o próprio registro sendo re-salvo não conta como duplicado */
-    out.naoSeAcusa = duplicados.achar('pre', { _id: antigo._id, paciente_nome: 'Maria da Silva', data_avaliacao: hoje }).length === 0;
-    /* sem nome ou sem data não dá para afirmar nada — não incomoda */
+    out.naoSeAcusa = duplicados.achar('pre', { _id: antigo._id, _patientRef: maria._id, paciente_nome: 'Maria da Silva', data_avaliacao: hoje }).length === 0;
+    /* sem identidade selecionada não dá para afirmar duplicidade */
     out.semDadosNaoPergunta = duplicados.achar('pre', { paciente_nome: '', data_avaliacao: hoje }).length === 0;
 
     /* A pergunta aparece e traz as duas saídas */
     let seguiu = null;
-    const abriu = duplicados.perguntar('pre', { paciente_nome: 'Maria da Silva', data_avaliacao: hoje }, (modo) => { seguiu = modo; });
+    const abriu = duplicados.perguntar('pre', { _patientRef: maria._id, paciente_nome: 'Maria da Silva', data_avaliacao: hoje }, (modo) => { seguiu = modo; });
     const txt = document.getElementById('modal-body').textContent;
     out.perguntou = abriu === true
       && document.getElementById('modal-backdrop').classList.contains('show')
@@ -4195,24 +4343,30 @@ await test('Ao finalizar, registro repetido do mesmo paciente e dia pergunta: su
     /* GRAVAR COMO NOVA: os dois convivem */
     duplicados._escolher('nova');
     out.seguiuNova = seguiu === 'nova' && duplicados._pendente === null;
-    store.save('pre', { paciente_nome: 'Maria da Silva', data_avaliacao: hoje, _finalizado: true, obs: 'segunda' });
+    store.save('pre', { _patientRef: maria._id, paciente_nome: 'Maria da Silva', data_avaliacao: hoje, obs: 'segunda' });
     out.duasFicam = store.list('pre').length === 2;
 
-    /* SUBSTITUIR: grava a nova e manda as anteriores para a Lixeira */
+    /* SUBSTITUIR: finaliza a nova e manda cópias abertas anteriores para a Lixeira */
     localStorage.removeItem(lixeira.KEY);
-    duplicados.perguntar('pre', { paciente_nome: 'Maria da Silva', data_avaliacao: hoje }, () => {});
+    duplicados.perguntar('pre', { _patientRef: maria._id, paciente_nome: 'Maria da Silva', data_avaliacao: hoje }, () => {});
     duplicados._escolher('substituir');
     out.marcouPendente = !!duplicados._pendente && duplicados._pendente.ids.length === 2;
-    const nova = store.save('pre', { paciente_nome: 'Maria da Silva', data_avaliacao: hoje, _finalizado: true, obs: 'terceira' });
+    const nova = store.save('pre', { _patientRef: maria._id, paciente_nome: 'Maria da Silva', data_avaliacao: hoje, _finalizado: true, obs: 'terceira' });
     const restantes = store.list('pre');
     out.sobrouSoUma = restantes.length === 1 && restantes[0]._id === nova._id && restantes[0].obs === 'terceira';
     out.foramParaLixeira = lixeira._ler().filter(e => e.mod === 'pre').length === 2;
     out.limpou = duplicados._pendente === null;
 
+    /* O mesmo comando não pode apagar nem anunciar que apagou a assinada. */
+    duplicados._pendente = { mod: 'pre', ids: [nova._id] };
+    const novaCopia = store.save('pre', { _patientRef: maria._id, paciente_nome: 'Maria da Silva', data_avaliacao: hoje, obs: 'cópia aberta' });
+    out.assinadaPermanente = !!store.getById('pre', nova._id) && !!store.getById('pre', novaCopia._id)
+      && lixeira._ler().filter(e => e.mod === 'pre').length === 2;
+
     /* Vale para a ficha de anestesia, que guarda a data dentro de procedimento */
-    const f1 = store.save('anestesia', { paciente: { nome: 'Ana Lima' }, procedimento: { data: hoje, nome: 'Mastopexia' }, _finalizado: true });
-    out.fichaAcha = duplicados.achar('anestesia', { paciente: { nome: 'Ana Lima' }, procedimento: { data: hoje } }).length === 1
-      && duplicados.achar('anestesia', { _id: f1._id, paciente: { nome: 'Ana Lima' }, procedimento: { data: hoje } }).length === 0;
+    const f1 = store.save('anestesia', { _patientRef: ana._id, paciente: { nome: 'Ana Lima' }, procedimento: { data: hoje, nome: 'Mastopexia' }, _finalizado: true });
+    out.fichaAcha = duplicados.achar('anestesia', { _patientRef: ana._id, paciente: { nome: 'Ana Lima' }, procedimento: { data: hoje } }).length === 1
+      && duplicados.achar('anestesia', { _id: f1._id, _patientRef: ana._id, paciente: { nome: 'Ana Lima' }, procedimento: { data: hoje } }).length === 0;
 
     ['pre', 'anestesia', 'recuperacao'].forEach(m => store.setList(m, []));
     localStorage.removeItem(lixeira.KEY);
@@ -4229,6 +4383,7 @@ await test('Ao finalizar, registro repetido do mesmo paciente e dia pergunta: su
   assert(r.sobrouSoUma, 'depois de substituir deveria ficar só o registro mais atual');
   assert(r.foramParaLixeira, 'os anteriores têm que ir para a Lixeira, não sumir');
   assert(r.limpou, 'a marcação não pode sobrar e apagar registros da próxima gravação');
+  assert(r.assinadaPermanente, 'substituir cópias não pode remover a ficha assinada');
   assert(r.fichaAcha, 'a ficha de anestesia guarda a data em procedimento.data e também deveria ser coberta');
   await page.close();
 });
@@ -4269,17 +4424,19 @@ await test('Varredura acha o que já está repetido, mantém o mais recente na L
     ['pre', 'anestesia', 'financeiro', 'recuperacao'].forEach(m => store.setList(m, []));
     localStorage.removeItem(lixeira.KEY);
     const dia = '2026-08-07';
+    const pac = store.save('pacientes', { nome: 'Vivienne Braga' });
 
-    /* O caso da vida real: 4 fichas + 2 financeiros do mesmo paciente no mesmo dia */
+    /* Quatro cópias abertas e dois financeiros com o paciente escolhido.
+       Fichas assinadas são permanentes e não podem ser removidas por limpeza. */
     const fichas = [];
     for (let i = 1; i <= 4; i++) {
-      const f = store.save('anestesia', { paciente: { nome: 'Vivienne Braga' }, procedimento: { data: dia, nome: 'Mastopexia' }, _finalizado: true, marca: i });
+      const f = store.save('anestesia', { _patientRef: pac._id, paciente: { nome: 'Vivienne Braga' }, procedimento: { data: dia, nome: 'Mastopexia' }, marca: i });
       f._updatedAt = '2026-08-07T1' + i + ':00:00.000Z';
       fichas.push(f);
     }
     store.setList('anestesia', fichas.slice().reverse());
     const fins = [1, 2].map(i => {
-      const x = store.save('financeiro', { paciente_nome: 'Vivienne Braga', data_proc: dia, procedimento: 'Mastopexia', marca: i });
+      const x = store.save('financeiro', { _patientRef: pac._id, paciente_nome: 'Vivienne Braga', data_proc: dia, procedimento: 'Mastopexia', marca: i });
       x._updatedAt = '2026-08-07T1' + i + ':30:00.000Z';
       return x;
     });
@@ -4296,13 +4453,13 @@ await test('Varredura acha o que já está repetido, mantém o mais recente na L
     out.naoPegaSolitario = !grupos.some(g => g.mod === 'pre');
 
     /* Limpar um grupo: fica o mais recente, os outros vão para a Lixeira */
-    const saiu = duplicados.manterUltimo('anestesia', 'Vivienne Braga', dia);
+    const saiu = duplicados.manterUltimo('anestesia', duplicados._pacienteToken(fichas[0]), dia);
     const fichasRestantes = store.list('anestesia');
     out.limpouGrupo = saiu === 3 && fichasRestantes.length === 1 && fichasRestantes[0].marca === 4;
     out.foramParaLixeira = lixeira._ler().filter(e => e.mod === 'anestesia').length === 3;
 
     /* Financeiro: idem, fica o último */
-    duplicados.manterUltimo('financeiro', 'Vivienne Braga', dia);
+    duplicados.manterUltimo('financeiro', duplicados._pacienteToken(fins[0]), dia);
     const finRestante = store.list('financeiro');
     out.financeiroSoUm = finRestante.length === 1 && finRestante[0].marca === 2;
 
@@ -4659,7 +4816,7 @@ await test('Armazenamento mostra o que pesa DENTRO do módulo e o que já dá pa
     const imagem = 'data:image/png;base64,' + 'A'.repeat(4000);
     store.setList('pre', [
       { _id: 'p1', nome: 'Paciente Pesado', data_avaliacao: '2026-08-01',
-        _docs: [{ nome: 'ECG', dataurl: imagem, storage_path: 'org/1/ecg.png' }],   /* já na nuvem */
+        _docs: [{ nome: 'ECG', dataurl: imagem, storage_path: 'org/1/ecg.png', cloud_confirmed_at: '2026-10-07T10:00:00Z' }],   /* já na nuvem */
         assinatura_dataurl: imagem },                                               /* nunca sai */
       { _id: 'p2', nome: 'Paciente Leve', data_avaliacao: '2026-08-02', obs: 'texto curto' }
     ]);
@@ -4746,10 +4903,7 @@ await test('Cloud-only: confirmado sai do disco, pendente fica protegido e a tel
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
-    const origPode = modoNuvem.podeLigar;
-    const origCloudOnly = store.cloudOnlyAtivo;
-    modoNuvem.podeLigar = () => true;
-    store.cloudOnlyAtivo = mod => !mod || store._cloudManaged(mod);
+    await __smokePrepareQueue();
 
     const quando = new Date().toISOString();
     localStorage.setItem(STORAGE.pre, JSON.stringify([
@@ -4761,10 +4915,11 @@ await test('Cloud-only: confirmado sai do disco, pendente fica protegido e a tel
     const removidos = modoNuvem.manutencao();
     const duraveis = JSON.parse(localStorage.getItem(STORAGE.pre) || '[]').map(x => x._id);
     const naTela = store.list('pre').map(x => x._id);
-    out.confirmadoSaiuDoDisco = removidos === 1 && !duraveis.includes('confirmado');
+    out.confirmadoSaiuDoDisco = removidos >= 1 && !duraveis.includes('confirmado');
     out.pendenteFicouAteOCofre = duraveis.includes('pendente');
     out.memoriaDaAbaContinua = antes.length === 2 && naTela.includes('confirmado') && naTela.includes('pendente');
-    store.protegidoNoCofre('pre', 'pendente');
+    const protecao = await persistenciaCloudFirst.salvar('pre', store.getById('pre', 'pendente'));
+    out.cofreDuravel = protecao.durable === true && (await filaCifrada.listar()).some(op => op.entityId === 'pendente');
     out.cofreRemoveTextoClaro = localStorage.getItem(STORAGE.pre) === null;
     out.naoPodeDesligar = (await modoNuvem.alternar(false)) === false && modoNuvem.ligado() === true;
     out.semJanelaDeDias = modoNuvem.dias() === 0 && modoNuvem.definirDias(30) === 0;
@@ -4793,14 +4948,13 @@ await test('Cloud-only: confirmado sai do disco, pendente fica protegido e a tel
     window.toast = toastOrig;
     out.avisaQuandoNaoAcha = /nem aqui, nem na nuvem/.test(erro);
 
-    modoNuvem.podeLigar = origPode;
-    store.cloudOnlyAtivo = origCloudOnly;
     store.setList('pre', []);
     return out;
   });
   assert(r.confirmadoSaiuDoDisco, 'registro confirmado não pode continuar persistido no aparelho');
   assert(r.pendenteFicouAteOCofre, 'trabalho sem recibo precisa sobreviver até o WAL cifrado assumir');
   assert(r.memoriaDaAbaContinua, 'limpar o disco não pode apagar a tela em uso');
+  assert(r.cofreDuravel, 'a cópia offline precisa estar cifrada e durável antes de liberar o texto claro');
   assert(r.cofreRemoveTextoClaro, 'depois da cifragem não pode restar payload clínico em claro');
   assert(r.naoPodeDesligar && r.semJanelaDeDias, 'a política cloud-only não pode ser desligada nem ganhar retenção local');
   assert(r.buscouSozinho, 'abrir um registro ausente deveria buscar da nuvem sem o usuário pedir');
@@ -4814,6 +4968,7 @@ await test('Carimbo repetido é guardado uma vez só, sem o resto do app percebe
   const page = await novaPagina();
   const r = await page.evaluate(() => {
     const out = {};
+    localStorage.setItem('medsys.v7.demo', '1');
     localStorage.removeItem(store.BLOBS_KEY);
     localStorage.removeItem(armazenamento.FLAG_DEDUP);
     const carimbo = 'data:image/png;base64,' + 'K'.repeat(60000);   /* o mesmo em todas */
@@ -4857,6 +5012,7 @@ await test('Carimbo repetido é guardado uma vez só, sem o resto do app percebe
       { _id: 'v1', nome: 'Velho A', assinatura_dataurl: carimbo },
       { _id: 'v2', nome: 'Velho B', assinatura_dataurl: carimbo }
     ]));
+    store._memoria.delete('pre');
     localStorage.removeItem(armazenamento.FLAG_DEDUP);
     const ganho = armazenamento.deduplicarImagens({ forcar: true });
     out.migrou = ganho > 50000 && localStorage.getItem(STORAGE.pre).indexOf('KKKKKKKKKK') < 0;
@@ -5165,10 +5321,12 @@ await test('Busca mostra também o que está na nuvem, e a limpeza de duplicados
 });
 
 /* 87) Resgate: procurar um paciente na nuvem inteira, não só no índice local */
-await test('Resgate encontra o paciente no banco da clínica e no backup, e traz de volta', async () => {
+await test('Resgate encontra o paciente no banco da clínica, preserva a quarentena do backup e carrega na sessão', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
+    __smokeBindOrg('org-1', 'u1');
+    cloudRel.disponivel = () => true;
     store.setList('anestesia', []); store.setList('pre', []);
     cloud.estaConfigurado = () => true; cloud.estaLogado = () => true;
     cloud._garantirToken = async () => true;
@@ -5193,7 +5351,7 @@ await test('Resgate encontra o paciente no banco da clínica e no backup, e traz
         return { ok: true, json: async () => (/abra/i.test(decodeURIComponent(u)) ? [{ id: 'pac-1', nome: 'Abraão Santiago' }] : []) };
       }
       if (/anesthesia_records/.test(u) && /patient_id=in/.test(u)) {
-        return { ok: true, json: async () => [{ id: 'x', legacy_id: 'd21', data: daClinica, updated_at: '2026-07-21' }] };
+        return { ok: true, json: async () => [{ id: 'x', organization_id: 'org-1', legacy_id: 'd21', data: daClinica, updated_at: '2026-07-21' }] };
       }
       if (/documentos/.test(u)) {
         return { ok: true, json: async () => (/abra/i.test(decodeURIComponent(u)) ? [{ modulo: 'pre', dados: doBackup }] : []) };
@@ -5202,9 +5360,8 @@ await test('Resgate encontra o paciente no banco da clínica e no backup, e traz
     };
 
     const achados = await arquivo.procurarNaNuvem('abraão');
-    out.achouNosDoisCanais = achados.length === 2
-      && achados.some(a => a.mod === 'anestesia' && a.item._id === 'd21')
-      && achados.some(a => a.mod === 'pre' && a.item._id === 'p9');
+    out.achouNaClinica = achados.length === 1
+      && achados.some(a => a.mod === 'anestesia' && a.item._id === 'd21' && a.item._relOrg === 'org-1');
 
     /* NENHUMA chamada pode varrer tabela inteira */
     const pesadas = chamadas.filter(u =>
@@ -5213,7 +5370,7 @@ await test('Resgate encontra o paciente no banco da clínica e no backup, e traz
     out.nenhumaVarreduraDeTabela = pesadas.length === 0;
     out.limitou = !chamadas.some(u => /limit=1000|limit=2000/.test(u));
     /* o backup pessoal também filtra no servidor, pelo nome dentro do JSON */
-    out.backupFiltraNoServidor = chamadas.some(u => /documentos/.test(u) && /or=\(/.test(decodeURIComponent(u)));
+    out.backupLegadoNaoLido = !chamadas.some(u => /\/documentos(?:\?|$)/.test(u));
 
     /* nome que não existe não traz nada — e nem vai buscar registro nenhum */
     chamadas = [];
@@ -5223,17 +5380,17 @@ await test('Resgate encontra o paciente no banco da clínica e no backup, e traz
     /* trazer de volta carrega o registro na memória desta sessão */
     arquivo._achados = achados;
     arquivo.trazerTodosAchados();
-    out.trouxe = !!store.getById('anestesia', 'd21') && !!store.getById('pre', 'p9');
+    out.trouxe = !!store.getById('anestesia', 'd21') && !store.getById('pre', 'p9');
     /* e some do índice de arquivados, para não aparecer duplicado */
     out.saiuDoIndice = !arquivo.estaArquivado('anestesia', 'd21');
 
     store.setList('anestesia', []); store.setList('pre', []);
     return out;
   });
-  assert(r.achouNosDoisCanais, 'o resgate acha no banco da clínica E no backup da conta');
+  assert(r.achouNaClinica, 'o resgate deve encontrar apenas dados com dono confirmado na clínica aberta');
   assert(r.nenhumaVarreduraDeTabela, 'sem varrer tabela inteira: cada leitura é filtrada pelo paciente');
   assert(r.limitou, 'e sem os limit=1000/2000 que baixavam o acervo com as imagens dentro');
-  assert(r.backupFiltraNoServidor, 'o backup pessoal também filtra no servidor, pelo nome dentro do JSON');
+  assert(r.backupLegadoNaoLido, 'a busca nunca deve ler o backup pessoal sem organização');
   assert(r.semPacienteNaoBusca, 'nome sem paciente correspondente não dispara busca de registro nenhum');
   assert(r.filtraPorNome, 'nome que não existe não pode trazer registro de outro paciente');
   assert(r.trouxe, 'trazer deveria carregar o registro na memória desta sessão');
@@ -5522,10 +5679,10 @@ await test('Dashboard soma os registros que estão na nuvem e avisa o que não e
     const out = {};
     const hoje = utils.hojeISO();
     const antigo = '2020-03-01';
-    localStorage.setItem(arquivo.INDEX_KEY, JSON.stringify({
+    arquivo._gravarIndice({
       anestesia: [{ id: 'n1', nome: 'A', data: hoje }, { id: 'n2', nome: 'B', data: antigo }],
       pre: [{ id: 'n3', nome: 'C', data: hoje }]
-    }));
+    });
 
     /* respeita o período: só o de hoje entra em "Hoje" */
     const hojeN = dashboard._naNuvem('hoje', 'clinica');
@@ -5544,7 +5701,7 @@ await test('Dashboard soma os registros que estão na nuvem e avisa o que não e
     dashboard._avisoNuvem({ porMod: {}, total: 0 });
     out.somenteQuandoPreciso = av.style.display === 'none';
 
-    localStorage.removeItem(arquivo.INDEX_KEY);
+    arquivo._gravarIndice({});
     out.semIndiceZero = dashboard._naNuvem('all', 'clinica').total === 0;
     return out;
   });
@@ -5926,6 +6083,7 @@ await test('O que já existe no aparelho também se atualiza — a versão mais 
   const page = await novaPagina();
   const r = await page.evaluate(() => {
     const out = {};
+    __smokeBindOrg('org-1', 'm1');
     store.setList('pre', []);
     const f = document.getElementById('form-pre');
     const setId = v => {
@@ -5937,15 +6095,15 @@ await test('O que já existe no aparelho também se atualiza — a versão mais 
 
     /* o aparelho dele tem a versão rascunho; a clínica tem a versão enviada */
     store.setList('pre', [
-      { _id: 'a', nome: 'Ana', _updatedAt: '2026-08-13T10:00:00.000Z',
+      { _relOrg: 'org-1', _id: 'a', nome: 'Ana', _relUpdatedAt: '2026-08-13T10:00:00.000Z', _updatedAt: '2026-08-13T10:00:00.000Z',
         _preLanc: { estado: 'rascunho', porNome: 'Sec' } },
-      { _id: 'b', nome: 'Bia', _updatedAt: '2026-08-13T12:00:00.000Z', obs: 'editei aqui agora' }
+      { _relOrg: 'org-1', _id: 'b', nome: 'Bia', _relUpdatedAt: '2026-08-13T12:00:00.000Z', _updatedAt: '2026-08-13T12:00:00.000Z', obs: 'editei aqui agora' }
     ]);
     const m = cloudRel.mesclarLocal('pre', [
-      { _id: 'a', nome: 'Ana', _updatedAt: '2026-08-13T11:00:00.000Z',
+      { _relOrg: 'org-1', _id: 'a', nome: 'Ana', _relUpdatedAt: '2026-08-13T11:00:00.000Z', _updatedAt: '2026-08-13T11:00:00.000Z',
         _preLanc: { estado: 'enviado', porNome: 'Sec' } },                 /* mais nova: entra */
-      { _id: 'b', nome: 'Bia', _updatedAt: '2026-08-13T09:00:00.000Z' },   /* mais velha: não */
-      { _id: 'c', nome: 'Caio', _updatedAt: '2026-08-13T11:30:00.000Z' }   /* nova: insere */
+      { _relOrg: 'org-1', _id: 'b', nome: 'Bia', _relUpdatedAt: '2026-08-13T09:00:00.000Z', _updatedAt: '2026-08-13T09:00:00.000Z' },   /* mais velha: não */
+      { _relOrg: 'org-1', _id: 'c', nome: 'Caio', _relUpdatedAt: '2026-08-13T11:30:00.000Z', _updatedAt: '2026-08-13T11:30:00.000Z' }   /* nova: insere */
     ]);
     out.contou = m.novos === 1 && m.atualizados === 1 && m.iguais === 1;
     out.atualizouOEnviado = preLanc.estado(store.getById('pre', 'a')) === 'enviado';
@@ -5960,7 +6118,7 @@ await test('O que já existe no aparelho também se atualiza — a versão mais 
     ui.navegar('pre');
     setId('a');
     const m2 = cloudRel.mesclarLocal('pre', [
-      { _id: 'a', nome: 'Ana', _updatedAt: '2026-08-13T13:00:00.000Z', obs: 'da nuvem' }
+      { _relOrg: 'org-1', _id: 'a', nome: 'Ana', _relUpdatedAt: '2026-08-13T13:00:00.000Z', _updatedAt: '2026-08-13T13:00:00.000Z', obs: 'da nuvem' }
     ]);
     out.adiouOAberto = m2.adiados === 1 && (store.getById('pre', 'a') || {}).obs !== 'da nuvem';
     setId('');
@@ -5977,14 +6135,19 @@ await test('O que já existe no aparelho também se atualiza — a versão mais 
   await page.close();
 });
 
+
+
+
+
 /* 103) A fila é lida do que está NESTE aparelho — então ela precisa ir buscar
    sozinha, senão o médico espera um envio que já aconteceu. */
 await test('A fila do médico vai buscar os pré-lançamentos na clínica sozinha', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
+    __smokeBindOrg('org-1', 'm1');
     store.setList('pre', []); store.setList('anestesia', []);
-    auth.usuarioAtual = () => ({ id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
+    auth.usuarioAtual = () => ({ uid: 'm1', organization_id: 'org-1', id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
 
     /* clínica de mentira: devolve um pré-lançamento enviado */
     const pedidos = [];
@@ -5998,7 +6161,7 @@ await test('A fila do médico vai buscar os pré-lançamentos na clínica sozinh
     /* A leitura é INCREMENTAL: índice primeiro, conteúdo só do que mudou. O
        módulo inteiro não desce mais a cada visita ao Painel — era o que
        torrava a cota de download da nuvem. */
-    const oPre = { _id: 'z1', nome: 'Teste', data: '2026-08-13', _updatedAt: '2026-08-13T12:00:00.000Z',
+    const oPre = { _relOrg: 'org-1', _id: 'z1', nome: 'Teste', data: '2026-08-13', _updatedAt: '2026-08-13T12:00:00.000Z',
                    _preLanc: { estado: 'enviado', porNome: 'mpcanestesiologia', enviadoEm: '2026-08-13T12:00:00.000Z' } };
     cloudRel.puxarIndiceModulo = async (mod) => {
       pedidos.push(mod);
@@ -6037,6 +6200,8 @@ await test('A fila do médico vai buscar os pré-lançamentos na clínica sozinh
   await page.close();
 });
 
+
+
 /* 104) "Era pra aparecer 13 e aparecem 8." Sem conferir as contas, não dá para
    saber se o que falta não CHEGOU aqui ou não SUBIU no aparelho de quem
    lançou. O app tem os dois números — então que ele diga. */
@@ -6044,6 +6209,7 @@ await test('Quando a conta não fecha, o app diz de que lado o pré-lançamento 
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
+    __smokeBindOrg('org-1', 'm1');
     store.setList('pre', []); store.setList('anestesia', []);
     const origDisp = cloudRel.disponivel, origIx = cloudRel.puxarIndiceModulo,
           origIds = cloudRel.puxarPorIds, origPend = preLanc._pendentesNaClinica,
@@ -6054,9 +6220,9 @@ await test('Quando a conta não fecha, o app diz de que lado o pré-lançamento 
     cloud.estaConfigurado = () => true; cloud.estaLogado = () => true; cloud.sessaoExpirada = () => false;
 
     /* LADO DELE: a clínica tem 3 enviados, mas só 1 coube no aparelho */
-    auth.usuarioAtual = () => ({ id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
+    auth.usuarioAtual = () => ({ uid: 'm1', organization_id: 'org-1', id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
     const naNuvem = ['n1', 'n2', 'n3'].map((id, i) => ({
-      _id: id, nome: 'P' + i, data: '2026-08-13', _updatedAt: '2026-08-13T12:0' + i + ':00.000Z',
+      _relOrg: 'org-1', _id: id, nome: 'P' + i, data: '2026-08-13', _updatedAt: '2026-08-13T12:0' + i + ':00.000Z',
       _preLanc: { estado: 'enviado', porNome: 'Sec', enviadoEm: '2026-08-13T12:00:00.000Z' }
     }));
     cloudRel.puxarIndiceModulo = async (mod) => (mod === 'pre'
@@ -6115,6 +6281,8 @@ await test('Quando a conta não fecha, o app diz de que lado o pré-lançamento 
   await page.close();
 });
 
+
+
 /* 105) Botão que não responde nada é indistinguível de botão quebrado. O
    "Buscar" saía calado em todo caminho de erro — sem nuvem, sem sessão, sem
    clínica. Agora todo caminho fala, e o clique é ligado no próprio botão. */
@@ -6122,8 +6290,9 @@ await test('O botão Buscar da fila responde sempre — inclusive quando não d�
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
+    __smokeBindOrg('org-1', 'm1');
     store.setList('pre', []); store.setList('anestesia', []);
-    auth.usuarioAtual = () => ({ id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
+    auth.usuarioAtual = () => ({ uid: 'm1', organization_id: 'org-1', id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
     preLanc.renderFila();
     const btn = document.getElementById('pl-buscar-btn');
     out.existe = !!btn;
@@ -6212,6 +6381,8 @@ await test('O botão Buscar da fila responde sempre — inclusive quando não d�
   await page.close();
 });
 
+
+
 /* 106) O teto de 5 MB do localStorage não se resolve com faxina: é limite do
    navegador. O que é pesado — imagens, versões, lixeira — mudou de casa para o
    IndexedDB, que trabalha na casa de centenas de MB. */
@@ -6219,6 +6390,10 @@ await test('O que é pesado sai do localStorage e vai para o disco grande do apa
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
+    localStorage.setItem('medsys.v7.demo', '1');
+    cloudRel.mirror = () => null;
+    sincronia.agora = () => {};
+    rascunhos._agendarEnvio = () => {};
     out.abriu = disco._pronto === true;
     out.saoAsPesadas = disco.CHAVES.indexOf('medsys.v7.blobs') >= 0
       && disco.CHAVES.indexOf('medsys.v7.versions') >= 0
@@ -6238,7 +6413,7 @@ await test('O que é pesado sai do localStorage e vai para o disco grande do apa
 
     /* a gravação chega mesmo ao IndexedDB, não só à memória */
     await new Promise(r2 => setTimeout(r2, 700));
-    const doDisco = await disco._ler('medsys.v7.blobs');
+    const doDisco = await disco._ler(disco._k('medsys.v7.blobs'));
     out.gravouNoIndexedDB = typeof doDisco === 'string' && doDisco.length > 50000;
 
     /* a tela de armazenamento não pode mentir por omissão */
@@ -6266,6 +6441,7 @@ await test('O corte local nunca derruba o que ainda não subiu, e a sincronia ro
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
+    __smokeBindOrg('org-1', 'u1');
     /* --- poda --- */
     const lista = [];
     for (let i = 0; i < HISTORY_MAX + 5; i++) {
@@ -6296,7 +6472,7 @@ await test('O corte local nunca derruba o que ainda não subiu, e a sincronia ro
       pedidos.push({ mod, desde: (opts || {}).desde || '' });
       return mod === 'pre'
         ? [{ _id: 'auto1', nome: 'Vindo sozinho', _updatedAt: '2026-08-13T12:00:00.000Z',
-             _relUpdatedAt: '2026-08-13T12:00:05.000Z',
+             _relUpdatedAt: '2026-08-13T12:00:05.000Z', _relOrg: 'org-1',
              _preLanc: { estado: 'enviado', porNome: 'Sec' } }]
         : [];
     };
@@ -6364,6 +6540,7 @@ await test('O Buscar volta ao normal mesmo com duas buscas cruzadas, e "não sub
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
+    __smokeBindOrg('org-1', 'm1');
     store.setList('pre', []); store.setList('anestesia', []);
     const origCfg = cloud.estaConfigurado, origLog = cloud.estaLogado, origExp = cloud.sessaoExpirada,
           origDisp = cloudRel.disponivel, origTok = cloud._garantirToken,
@@ -6377,7 +6554,7 @@ await test('O Buscar volta ao normal mesmo com duas buscas cruzadas, e "não sub
        normal. Reproduzir isso não exige corrida (que aqui só tornava o teste
        instável): basta o botão já estar com o texto de ocupado quando uma
        busca completa acontece. */
-    auth.usuarioAtual = () => ({ id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
+    auth.usuarioAtual = () => ({ uid: 'm1', organization_id: 'org-1', id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
     preLanc.renderFila();
     cloudRel.puxarIndiceModulo = async () => [];
     preLanc._pendentesNaClinica = async () => [];
@@ -6408,7 +6585,10 @@ await test('O Buscar volta ao normal mesmo com duas buscas cruzadas, e "não sub
     out.mostraOcupado = vistoDurante.indexOf('Buscando') >= 0;
 
     /* motivo da recusa em português, na tela de quem lançou */
-    auth.usuarioAtual = () => ({ id: 's1', nome: 'Sec', perfil: 'secretaria', role: 'auxiliar' });
+    auth.usuarioAtual = () => ({ uid: 's1', organization_id: 'org-1', id: 's1', nome: 'Sec', perfil: 'secretaria', role: 'auxiliar' });
+    sessionStorage.setItem(cloud.SESSION_KEY, JSON.stringify({ access_token: 't', user: { id: 's1', email: 'secretaria@teste.local' } }));
+    __smokeBindOrg('org-1', 's1');
+
     store.setList('pre', [{
       _id: 'p1', nome: 'Ana', data: '2026-08-13', _updatedAt: '2026-08-13T12:00:00.000Z',
       _preLanc: { estado: 'enviado', por: 's1', porNome: 'Sec', enviadoEm: '2026-08-13T12:00:00.000Z' }
@@ -6448,6 +6628,8 @@ await test('O Buscar volta ao normal mesmo com duas buscas cruzadas, e "não sub
   assert(r.limpouDepoisDeSubir, 'depois que sobe, o aviso e o motivo somem');
   await page.close();
 });
+
+
 
 /* 109) Ao finalizar, o passo seguinte é o papel: pré e termo vão direto para a
    impressão. E a pré tem que gerar o financeiro COM o pagador — sem convênio o
@@ -6692,7 +6874,7 @@ await test('Dashboard conta só o que foi finalizado, e os números vêm antes d
     const out = {};
     store.setList('anestesia', []); store.setList('pre', []);
     store.setList('consulta', []); store.setList('financeiro', []);
-    auth.usuarioAtual = () => ({ id: 'm1', nome: 'Dr.', perfil: 'admin', role: 'gestor' });
+    __smokeBindOrg('org-dashboard', 'm1');
     const hoje = new Date().toISOString().slice(0, 10);
 
     /* uma finalizada, um rascunho e um pré-lançamento enviado (não conferido) */
@@ -6732,7 +6914,7 @@ await test('Dashboard conta só o que foi finalizado, e os números vêm antes d
     let pediu = 0;
     /* incremental aqui também: índice, e conteúdo só do que falta */
     const daClinica = { _id: 'nuvem1', paciente: { nome: 'Da clínica' }, procedimento: { data: hoje },
-                        _finalizado: true, _updatedAt: new Date().toISOString(), _relUpdatedAt: '2026-08-13T12:00:00Z' };
+                        _finalizado: true, _updatedAt: new Date().toISOString(), _relUpdatedAt: '2026-08-13T12:00:00Z', _relOrg: 'org-dashboard' };
     cloudRel.puxarIndiceModulo = async (m) => {
       pediu++;
       return m === 'anestesia'
@@ -6845,12 +7027,12 @@ await test('O que está na nuvem soma em todos os cartões e completa o período
 
     /* índice de arquivados: 2 finalizados e 1 rascunho em cada módulo */
     const entrada = (i, fin) => ({ id: 'arq' + i, nome: 'P' + i, data: hoje, fin });
-    localStorage.setItem(arquivo.INDEX_KEY, JSON.stringify({
+    arquivo._gravarIndice({
       pre: [entrada(1, true), entrada(2, true), entrada(3, false)],
       consulta: [entrada(4, true)],
       recuperacao: [entrada(5, true)],
       anestesia: [entrada(6, true)]
-    }));
+    });
     document.getElementById('dash-escopo').value = 'clinica';
     document.getElementById('dash-periodo').value = 'hoje';
     dashboard.atualizar();
@@ -6861,7 +7043,7 @@ await test('O que está na nuvem soma em todos os cartões e completa o período
     out.anestesiaSomou = valor('anestesia') === '1';
 
     /* entrada antiga, sem a marca, continua contando (não esconder produção) */
-    localStorage.setItem(arquivo.INDEX_KEY, JSON.stringify({ pre: [{ id: 'velho', nome: 'V', data: hoje }] }));
+    arquivo._gravarIndice({ pre: [{ id: 'velho', nome: 'V', data: hoje }] });
     dashboard.atualizar();
     out.entradaAntigaConta = valor('pre') === '1';
 
@@ -6878,7 +7060,7 @@ await test('O que está na nuvem soma em todos os cartões e completa o período
     arquivo.restaurarPeriodo = origRest;
     out.completouPeriodo = restaurou === 1;
 
-    localStorage.removeItem(arquivo.INDEX_KEY);
+    arquivo._gravarIndice({});
     ['anestesia', 'pre', 'consulta', 'recuperacao', 'financeiro'].forEach(m => store.setList(m, []));
     return out;
   });
@@ -7609,7 +7791,9 @@ await test('Consulta → Financeiro: 1 linha da consulta + 1 por procedimento, s
   const r = await page.evaluate(async () => {
     const out = {};
     store.setList('financeiro', []); store.setList('consulta', []); store.setList('pre', []);
+    const pacConsulta = store.save('pacientes', { nome: 'Paciente da Consulta' });
     ui.navegar('consulta');
+    autocomplete._aplicarPaciente('form-consulta', pacConsulta);
     const f = document.getElementById('form-consulta');
     f.querySelector('[name="nome"]').value = 'Paciente da Consulta';
     f.querySelector('[name="data"]').value = utils.hojeISO();
@@ -7686,7 +7870,8 @@ await test('Consulta → Financeiro: 1 linha da consulta + 1 por procedimento, s
        a rastreabilidade — se apagar, o registro clínico salvo depois não
        reconhece a linha, cria outra e o valor corrigido vira duplicata */
     store.setList('financeiro', []); store.setList('consulta', []);
-    const docEd = store.save('consulta', { nome: 'Paciente Edição', data: utils.hojeISO(),
+    const pacEd = store.save('pacientes', { nome: 'Paciente Edição' });
+    const docEd = store.save('consulta', { _patientRef: pacEd._id, nome: 'Paciente Edição', data: utils.hojeISO(),
       _procsRealizados: [{ linhaId: 'cproc-0', codigo: '3.10.05.12-8', descricao: 'Colecistectomia sem colangiografia', quantidade: 1, fracao: 100 }] });
     fin.fromDoc('consulta', docEd);
     const alvoEd = store.list('financeiro').find(x => x._origemLinhaId === 'cproc-0');
@@ -7698,6 +7883,8 @@ await test('Consulta → Financeiro: 1 linha da consulta + 1 por procedimento, s
     await new Promise(res => setTimeout(res, 250));
     const depoisEd = store.getById('financeiro', alvoEd._id);
     out.edicaoManualMantemVinculo = depoisEd._origemLinhaId === 'cproc-0' &&
+      depoisEd._origemId === docEd._id && depoisEd._origemTipo === 'consulta' &&
+      depoisEd._patientRef === pacEd._id && depoisEd._caseId === docEd._caseId &&
       depoisEd.cbhpm_codigo === '3.10.05.12-8' && depoisEd.tipo_honorario === 'procedimento' &&
       Number(depoisEd.valor_recebido) === 250;
     fin.fromDoc('consulta', store.getById('consulta', docEd._id));
@@ -7947,14 +8134,16 @@ await test('Rascunhos: fechar não deixa a aba voltar, e aba em branco não se m
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
+    await __smokePrepareQueue('org-1', 'u1');
+    rascunhos._agendarEnvio = () => {};
     const M = 'anestesia';
     const vazio = { paciente: { nome: '' }, procedimento: { data: '2026-08-14' } };
     localStorage.removeItem(rascunhos.LAPIDES_KEY + M);
 
     /* o que se vê na tela: três abas "Rascunho 1" em branco + a do paciente */
     rascunhos.setList(M, [
-      { id: 'a1', label: 'Rascunho 1', dados: vazio, updatedAt: '2026-08-14T10:00:00Z' },
-      { id: 'a2', label: 'Rascunho 1', dados: vazio, updatedAt: '2026-08-14T11:00:00Z' },
+      { id: 'a1', _draftVersion: 1, _draftOrg: 'org-1', label: 'Rascunho 1', dados: vazio, updatedAt: '2026-08-14T10:00:00Z' },
+      { id: 'a2', _draftVersion: 1, _draftOrg: 'org-1', label: 'Rascunho 1', dados: vazio, updatedAt: '2026-08-14T11:00:00Z' },
       { id: 'a3', label: 'Rascunho 1', dados: vazio, updatedAt: '2026-08-14T12:00:00Z' },
       { id: 'a4', label: 'LAIS', dados: { paciente: { nome: 'LAIS' } }, updatedAt: '2026-08-14T12:30:00Z' }
     ]);
@@ -7976,16 +8165,34 @@ await test('Rascunhos: fechar não deixa a aba voltar, e aba em branco não se m
     const enviados = [];
     const apagados = [];
     const fetchOriginal = window.fetch;
-    window.fetch = async (url, opts) => {
-      const o = opts || {};
-      if (o.method === 'DELETE') { apagados.push(String(url)); return { ok: true, json: async () => [] }; }
-      if (o.method === 'POST') { enviados.push(JSON.parse(o.body || '[]')); return { ok: true, json: async () => [] }; }
-      /* pull: a nuvem ainda tem o fechado e um vazio de outro aparelho */
-      return { ok: true, json: async () => ([
-        { doc_id: 'a1', dados: { id: 'a1', label: 'Rascunho 1', dados: vazio, updatedAt: '2026-08-14T10:00:00Z' } },
-        { doc_id: 'b9', dados: { id: 'b9', label: 'Rascunho 1', dados: vazio, updatedAt: '2026-08-14T13:00:00Z' } },
-        { doc_id: 'a4', dados: { id: 'a4', label: 'LAIS', dados: { paciente: { nome: 'LAIS' } }, updatedAt: '2026-08-14T12:30:00Z' } }
-      ]) };
+    let naNuvem = ['a1', 'a2', 'b9', 'a4'].map(id => ({
+      organization_id: 'org-1', user_id: 'u1', doc_id: id, version: 1,
+      data: { id, label: id === 'a4' ? 'LAIS' : 'Rascunho 1',
+        dados: id === 'a4' ? { paciente: { nome: 'LAIS' } } : vazio,
+        updatedAt: '2026-08-14T12:30:00Z' }
+    }));
+    window.fetch = async (url, opts = {}) => {
+      const u = new URL(String(url));
+      const id = (u.searchParams.get('doc_id') || '').replace(/^eq\./, '');
+      const version = Number((u.searchParams.get('version') || '').replace(/^eq\./, ''));
+      const linhas = naNuvem.filter(row => !id || row.doc_id === id);
+      const resposta = rows => new Response(JSON.stringify(rows), { status: 200,
+        headers: { 'Content-Type': 'application/json' } });
+      if (opts.method === 'DELETE') {
+        apagados.push(String(url));
+        const deletadas = linhas.filter(row => row.version === version);
+        naNuvem = naNuvem.filter(row => !deletadas.includes(row));
+        return resposta(deletadas);
+      }
+      if (opts.method === 'POST') {
+        const rows = JSON.parse(opts.body); enviados.push(rows);
+        rows.forEach(row => {
+          naNuvem = naNuvem.filter(x => x.doc_id !== row.doc_id);
+          naNuvem.push(Object.assign({}, row, { version: 1 }));
+        });
+        return resposta(rows.map(row => Object.assign({}, row, { version: 1 })));
+      }
+      return resposta(linhas);
     };
     await rascunhosSync.enviar(M);
     const subiram = (enviados[0] || []).map(x => x.doc_id);
@@ -8493,9 +8700,10 @@ await test('Ficha: pré importada ao escolher o paciente, acomodação vinda do 
   const r = await page.evaluate(() => {
     const out = {};
     const NOME = 'Zulmira Importacao Pre';
-    store.save('pacientes', { nome: NOME, apartamento: true, prontuario: 'ZZPRONTZZ' });
+    const pac = store.save('pacientes', { nome: NOME, apartamento: true, prontuario: 'ZZPRONTZZ', nascimento: '1960-05-22' });
     store.save('pre', {
-      nome: NOME, data: '2026-08-10',
+      _patientRef: pac._id, _patientKey: linker._chavePaciente(pac), _caseId: 'caso-zulmira-pre',
+      nome: NOME, nasc: pac.nascimento, data: '2026-08-10',
       cirurgia: 'Colecistectomia videolaparoscópica',
       cirurgiao: 'Dr. ZZCIRZZ', hospital: 'Hospital ZZHOSPZZ',
       convenio: 'Unimed', senha: 'ZZSENHAZZ',
@@ -8519,6 +8727,8 @@ await test('Ficha: pré importada ao escolher o paciente, acomodação vinda do 
     autocomplete._aplicarPaciente('form-anestesia', p);
 
     out.nome = v('paciente_nome') === NOME;
+    out.vinculoImportado = linker.contextoPaciente('anestesia').patientRef === pac._id
+      && linker.contextoCaso('anestesia').caseId === 'caso-zulmira-pre';
     out.cirurgiao = v('cirurgiao') === 'Dr. ZZCIRZZ';
     out.hospital = v('local_hospital') === 'Hospital ZZHOSPZZ';
     out.convenio = v('paciente_convenio') === 'Unimed';
@@ -8561,6 +8771,7 @@ await test('Ficha: pré importada ao escolher o paciente, acomodação vinda do 
   });
   assert(r.temCadastro, 'o paciente de teste precisa existir no cadastro');
   assert(r.nome, 'o nome escolhido na lista vai para a ficha');
+  assert(r.vinculoImportado, 'a pré importada precisa preservar paciente e atendimento');
   assert(r.cirurgiao, 'o cirurgião da pré precisa vir para a ficha');
   assert(r.hospital, 'o hospital da pré precisa vir para a ficha');
   assert(r.convenio, 'o convênio da pré precisa vir para a ficha (é um select)');
@@ -9664,6 +9875,7 @@ await test('Sync: o índice primeiro, o conteúdo só do que mudou — e nada é
   const r = await page.evaluate(async () => {
     const out = {};
     const ORG = '11111111-1111-1111-1111-111111111111';
+    __smokeBindOrg(ORG, 'u1');
 
     /* --- servidor de mentira que conta o que sairia pela rede ----------- */
     let linhas = [];
@@ -9672,7 +9884,7 @@ await test('Sync: o índice primeiro, o conteúdo só do que mudou — e nada é
       for (let i = 0; i < n; i++) {
         linhas.push({
           id: '00000000-0000-0000-0000-' + String(i).padStart(12, '0'),
-          legacy_id: 'doc-' + i,
+          organization_id: ORG, legacy_id: 'doc-' + i,
           updated_at: '2026-08-0' + (1 + (i % 9)) + 'T10:00:00Z',
           /* registro realista: com imagem em base64 dentro, que é o que pesa */
           data: { _id: 'doc-' + i, nome: 'Paciente ' + i, convenio: 'Unimed',
@@ -9742,7 +9954,7 @@ await test('Sync: o índice primeiro, o conteúdo só do que mudou — e nada é
     out.conteudoChegou = (store.list('financeiro').find(x => x._id === 'doc-7') || {}).nome;
 
     /* --- 4ª: registro novo na nuvem ------------------------------------ */
-    linhas.push({ id: '00000000-0000-0000-0000-999999999999', legacy_id: 'doc-novo',
+    linhas.push({ organization_id: ORG, id: '00000000-0000-0000-0000-999999999999', legacy_id: 'doc-novo',
       updated_at: '2026-08-21T09:00:00Z', data: { _id: 'doc-novo', nome: 'Chegou Agora' } });
     await puxar();
     out.novoChegou = !!store.list('financeiro').find(x => x._id === 'doc-novo');
@@ -9754,7 +9966,7 @@ await test('Sync: o índice primeiro, o conteúdo só do que mudou — e nada é
        incremental apagaria todo registro que continuou igual — quase tudo. */
     const realUsuario = auth.usuarioAtual;
     const realVis = (typeof orgSettings !== 'undefined') ? orgSettings.visibilidade : null;
-    auth.usuarioAtual = () => ({ id: 'u1', role: 'anestesiologista', perfil: 'medico' });
+    auth.usuarioAtual = () => ({ uid: 'u1', organization_id: ORG, id: 'u1', role: 'anestesiologista', perfil: 'medico' });
     if (typeof orgSettings !== 'undefined') orgSettings.visibilidade = () => 'proprios';
     /* todos os locais precisam ter carimbo da nuvem para entrar na regra */
     const antes = store.list('financeiro').length;
@@ -9834,6 +10046,9 @@ await test('Sync: o índice primeiro, o conteúdo só do que mudou — e nada é
   assert(r.arquivadoNaoDesce, 'registro arquivado não é baixado de novo');
   await page.close();
 });
+
+
+
 
 
 /* 149) Coxim, proteção ocular, botas pneumáticas e manta térmica eram
@@ -10039,7 +10254,7 @@ await test('Nuvem: conta sem clínica é dita em vez de fingir "em dia"', async 
     cloud.sessaoExpirada = () => false;
     cloud.divergencia = () => null;
     cloud._fila = () => [];
-    auth.usuarioAtual = () => ({ id: 'u1', usuario: 'secretaria@teste.com',
+    auth.usuarioAtual = () => ({ uid: 'u1', organization_id: contextoAba.organizationId(), id: 'u1', usuario: 'secretaria@teste.com',
       role: 'auxiliar', perfil: 'secretaria' });
 
     /* --- ainda não perguntei ao servidor: acusar seria alarme falso ------ */
@@ -10050,7 +10265,7 @@ await test('Nuvem: conta sem clínica é dita em vez de fingir "em dia"', async 
     __smokeBindNoOrg('u1');
     const s = nuvemEstado.situacao();
     out.confirmadoAcusa = s.estado === 'semClinica';
-    out.msgDizQueNadaSincroniza = /nada sincroniza/.test(s.msg || '');
+    out.msgDizQueNadaSincroniza = /módulos clínicos bloqueados/.test(s.msg || '');
 
     /* --- achar clínica desfaz a marca nos dois sentidos ------------------ */
     __smokeBindOrg('11111111-1111-1111-1111-111111111111');
@@ -10088,6 +10303,9 @@ await test('Nuvem: conta sem clínica é dita em vez de fingir "em dia"', async 
   assert(r.icone === '🏥', 'com ícone próprio no menu — deu "' + r.icone + '"');
   await page.close();
 });
+
+
+
 
 
 /* 153) Pré-lançamento preso NESTE aparelho: existe aqui, não existe na
@@ -10180,88 +10398,73 @@ await test('Pré-lançamento: enviar fecha a aba do paciente, não só o formul�
    (`.catch(() => {})`). Era assim que um pré-lançamento "enviado" nunca
    chegava ao médico. */
 await test('Sync: gravação que não sobe entra em fila durável e sobe sozinha depois', async () => {
-  const page = await novaPagina();
+const page = await novaPagina();
   const r = await page.evaluate(async () => {
-    const out = {};
-    const esperar = () => new Promise(res => setTimeout(res, 60));
-    localStorage.removeItem(cloudRel.FILA_KEY);
-    store.setList('pre', []);
+    await __smokePrepareQueue();
     cloudRel.disponivel = () => true;
-    cloud._garantirToken = async () => true;
+    sincronia.agora = () => {};
+    rascunhos._agendarEnvio = () => {};
     cloudRel.registrarAnexos = () => {};
-    const falha = motivo => { cloudRel.enviarRegistro = async () => ({ ok: false, motivo: motivo }); };
-    let recebido = null;
-    const sucesso = () => { cloudRel.enviarRegistro = async (m, it) => { recebido = it; return { ok: true }; }; };
-
-    /* --- gravar com a nuvem fora ENFILEIRA (antes sumia no catch) -------- */
-    falha('org');
+    cloudRel.enviarRegistro = async () => ({ ok: false, motivo: 'rede' });
     const rec = store.save('pre', { nome: 'Linalva Fila Silva', data: utils.hojeISO() });
-    await esperar();
-    out.enfileirou = cloudRel.filaPendentes() === 1;
-    out.guardaMotivo = (cloudRel._filaLer()[0] || {}).motivo === 'org';
-
-    /* --- editar de novo não duplica: uma entrada por documento ---------- */
-    store.save('pre', Object.assign({}, store.getById('pre', rec._id), { idade: '70 anos' }));
-    await esperar();
-    out.naoDuplica = cloudRel.filaPendentes() === 1;
-
-    /* --- a nuvem volta: drena e limpa ----------------------------------- */
-    sucesso();
-    const d = await cloudRel.drenarFila();
-    out.drenou = !!d && d.enviados === 1 && cloudRel.filaPendentes() === 0;
-
-    /* --- o que sobe é a versão MAIS NOVA (a fila guarda id, não cópia) --- */
-    falha('rede');
+    const falhou = await store.aguardarNuvem(rec);
+    const primeira = await filaCifrada.listar();
+    const out = {
+      enfileirou: falhou.durable === true && primeira.length === 1,
+      guardaMotivo: primeira[0].queue.lastError === 'rede',
+      semTextoClaro: localStorage.getItem(STORAGE.pre) === null && cloudRel._filaLer().length === 0
+    };
     store.save('pre', Object.assign({}, store.getById('pre', rec._id), { idade: '81 anos' }));
-    await esperar();
-    recebido = null; sucesso();
-    await cloudRel.drenarFila();
-    out.sobeVersaoNova = !!recebido && recebido.idade === '81 anos';
+    await store.aguardarNuvem({ _id: rec._id });
+    const edicoes = await filaCifrada.listar();
+    out.cadeiaPreservada = edicoes.length === 2
+      && new Set(edicoes.map(op => op.entityId)).size === 1
+      && new Set(edicoes.map(op => op.operationId)).size === 2;
+    const recebidos = [];
+    cloudRel.enviarRegistro = async (mod, item, opts) => {
+      recebidos.push(store._clone(item));
+      return __smokeCloudReceipt(mod, item, opts);
+    };
+    const drenou = await persistenciaCloudFirst.drenar();
+    out.drenou = drenou.enviados === 2 && (await filaCifrada.listar()).length === 0;
+    out.sobeVersaoNova = recebidos.length === 2 && recebidos[1].idade === '81 anos';
 
-    /* --- registro apagado sai da fila sem travar o resto ---------------- */
-    falha('rede');
-    const r2 = store.save('pre', { nome: 'Sera Apagado Souza', data: utils.hojeISO() });
-    await esperar();
-    const antes = cloudRel.filaPendentes();
-    store.setList('pre', store.list('pre').filter(x => x._id !== r2._id));
-    sucesso();
-    await cloudRel.drenarFila();
-    out.apagadoSaiDaFila = antes > 0 && cloudRel.filaPendentes() === 0;
+    /* Remover só a projeção de memória não pode descartar uma intenção
+       ainda sem recibo: o WAL contém o snapshot completo da gravação. */
+    cloudRel.enviarRegistro = async () => ({ ok: false, motivo: 'rede' });
+    const oculto = store.save('pre', { nome: 'Trabalho ainda protegido', data: utils.hojeISO() });
+    await store.aguardarNuvem(oculto);
+    store.setList('pre', store.list('pre').filter(x => x._id !== oculto._id));
+    out.snapshotSobrevive = (await filaCifrada.listar()).some(op =>
+      op.entityId === oculto._id && op.payload.item.nome === 'Trabalho ainda protegido');
+    cloudRel.enviarRegistro = async (mod, item, opts) => __smokeCloudReceipt(mod, item, opts);
+    const retomou = await persistenciaCloudFirst.drenar();
+    out.sobeMesmoSemProjecao = retomou.enviados === 1 && (await filaCifrada.listar()).length === 0;
 
-    /* --- conflito não é falha de entrega: sai da fila ------------------- */
-    cloudRel.enviarRegistro = async () => ({ ok: false, conflict: true, cloud: {}, cloudUpdatedAt: 'x' });
+    /* Um ok sem UUID/checksum não é recibo. */
+    cloudRel.enviarRegistro = async () => ({ ok: true });
+    const semRecibo = store.save('pre', { nome: 'Sem recibo verificável' });
+    await store.aguardarNuvem(semRecibo);
+    out.okIncompletoNaoApaga = (await filaCifrada.listar()).some(op => op.entityId === semRecibo._id);
+    cloudRel.enviarRegistro = async () => ({ ok: false, conflict: true,
+      motivo: 'versao_divergente', cloud: { _id: semRecibo._id, nome: 'Versão remota', _relVersion: 2 } });
     cloudRel._resolverConflitoRegistro = () => {};
-    falha('rede');
-    store.save('pre', Object.assign({}, store.getById('pre', rec._id), { idade: '82 anos' }));
-    await esperar();
-    cloudRel.enviarRegistro = async () => ({ ok: false, conflict: true, cloud: {}, cloudUpdatedAt: 'x' });
-    await cloudRel.drenarFila();
-    out.conflitoSaiDaFila = cloudRel.filaPendentes() === 0;
-
-    /* --- o indicador de nuvem CONTA essa fila e diz o motivo ------------ */
-    cloud.estaConfigurado = () => true; cloud.estaLogado = () => true;
-    cloud.sessaoExpirada = () => false; cloud.divergencia = () => null;
-    cloud._fila = () => [];
-    cloudRel._org = () => 'org-x';
-    falha('org');
-    store.save('pre', { nome: 'Conta No Indicador Lima', data: utils.hojeISO() });
-    await esperar();
-    const s = nuvemEstado.situacao();
-    out.indicadorConta = s.estado === 'pendente' && s.filaRel >= 1;
-    out.indicadorDizMotivo = /org/.test(s.msg || '');
-    localStorage.removeItem(cloudRel.FILA_KEY);
+    await persistenciaCloudFirst.drenar();
+    const conflito = (await filaCifrada.listar()).find(op => op.entityId === semRecibo._id);
+    out.conflitoPreservado = !!conflito && conflito.queue.state === 'conflict'
+      && conflito.payload.item.nome === 'Sem recibo verificável';
+    const estado = nuvemEstado.situacao();
+    out.indicadorConta = estado.estado === 'pendente' && estado.fila >= 1;
     return out;
   });
-
-  assert(r.enfileirou, 'gravação que não sobe TEM de entrar na fila — antes morria num catch vazio');
-  assert(r.guardaMotivo, 'com o motivo da falha guardado');
-  assert(r.naoDuplica, 'uma entrada por documento, por mais que seja editado offline');
-  assert(r.drenou, 'com a nuvem de volta, a fila drena e esvazia');
-  assert(r.sobeVersaoNova, 'e o que sobe é a versão mais nova, não a do momento da falha');
-  assert(r.apagadoSaiDaFila, 'registro que sumiu do aparelho sai da fila sem travar as outras');
-  assert(r.conflitoSaiDaFila, 'conflito não é falha de entrega — sai da fila e vira decisão de quem está na tela');
-  assert(r.indicadorConta, 'o indicador de nuvem precisa CONTAR essa fila');
-  assert(r.indicadorDizMotivo, 'e dizer o motivo — número sem explicação não resolve nada');
+  assert(r.enfileirou && r.guardaMotivo, 'falha precisa deixar intenção durável com motivo no WAL');
+  assert(r.semTextoClaro, 'a nova fila não pode conservar payload clínico nem retry em localStorage');
+  assert(r.cadeiaPreservada, 'cada edição tem identidade imutável, preservando a ordem causal do documento');
+  assert(r.drenou && r.sobeVersaoNova, 'ao reconectar todas as intenções sobem em ordem e prevalece a edição mais nova');
+  assert(r.snapshotSobrevive && r.sobeMesmoSemProjecao, 'tirar da tela não pode perder um registro ainda sem recibo');
+  assert(r.okIncompletoNaoApaga, 'sucesso sem o recibo exato nunca pode limpar o WAL');
+  assert(r.conflitoPreservado, 'conflito continua cifrado até a decisão explícita do dono');
+  assert(r.indicadorConta, 'o indicador de nuvem deve contar o WAL pendente');
   await page.close();
 });
 
@@ -10418,83 +10621,65 @@ await test('Nuvem: o link do e-mail abre a definição de nova senha e não vira
    chegado à clínica — que é o que decide se o outro aparelho vai vê-los — era
    outra história, e não havia onde ler essa história. */
 await test('Ficha: o selo diz se o registro chegou à clínica, não só se foi salvo aqui', async () => {
-  const page = await novaPagina();
+const page = await novaPagina();
   const r = await page.evaluate(async () => {
-    const out = {};
-    const esperar = () => new Promise(res => setTimeout(res, 60));
-    localStorage.removeItem(cloudRel.FILA_KEY);
-    store.setList('pre', []);
+    await __smokePrepareQueue();
     cloudRel.disponivel = () => true;
-    cloud._garantirToken = async () => true;
+    sincronia.agora = () => {};
+    rascunhos._agendarEnvio = () => {};
     cloudRel.registrarAnexos = () => {};
+    ui.navegar('pre');
     const selo = () => {
       const e = document.getElementById('dsnuvem-pre');
       return e ? { cls: e.className, txt: e.textContent, tit: e.title } : null;
     };
-    ui.navegar('pre');
-
-    /* --- aparelho sem nuvem não ganha alerta permanente ----------------- */
+    const out = {};
     cloud.estaConfigurado = () => false;
     ui.atualizarDocStatus('pre', { _id: 'x1', nome: 'Sem Nuvem' });
     out.semNuvemSemSelo = selo() === null;
     cloud.estaConfigurado = () => true;
-
-    /* --- a nuvem recusou: ⚠️ com o motivo em português ------------------ */
-    cloudRel.enviarRegistro = async () => ({ ok: false, motivo: 'org' });
+    cloudRel.enviarRegistro = async () => ({ ok: false, motivo: 'rede' });
     const rec = store.save('pre', { nome: 'Linalva Selo Silva', data: utils.hojeISO() });
-    await esperar();
+    await store.aguardarNuvem(rec);
     ui.atualizarDocStatus('pre', store.getById('pre', rec._id));
     const parado = selo();
-    out.paradoMarca = !!parado && /parado/.test(parado.cls) && /não subiu/.test(parado.txt);
-    out.paradoDizMotivo = !!parado && /conta sem clínica/.test(parado.tit);
-    /* e tranquiliza: não subiu ≠ perdeu */
-    out.paradoTranquiliza = !!parado && /não se perde/.test(parado.tit);
-
-    /* --- drenou: ✓ na nuvem --------------------------------------------- */
-    cloudRel.enviarRegistro = async (m, it) => {
-      const l = store.list('pre'); const i = l.findIndex(x => x._id === it._id);
-      if (i >= 0) { l[i]._relUpdatedAt = '2026-08-26T12:00:00Z'; store.setList('pre', l); }
-      return { ok: true };
-    };
-    await cloudRel.drenarFila();
+    out.paradoMarca = !!parado && /parado/.test(parado.cls) && /pendente|não subiu|protegido/.test(parado.txt);
+    out.paradoTranquiliza = !!parado && /protegido|cifrado|fila/.test(parado.tit);
+    out.motivoPreservado = (await filaCifrada.listar()).some(op => op.entityId === rec._id && op.queue.lastError === 'rede');
+    cloudRel.enviarRegistro = async (mod, item, opts) => __smokeCloudReceipt(mod, item, opts);
+    await persistenciaCloudFirst.drenar();
     ui.atualizarDocStatus('pre', store.getById('pre', rec._id));
     const ok = selo();
     out.confirmado = !!ok && /ok/.test(ok.cls) && /na nuvem/.test(ok.txt);
     out.confirmadoTemQuando = !!ok && /26\/08\/2026/.test(ok.tit);
-
-    /* --- gravado e ainda sem confirmação: ⏳ ----------------------------- */
     ui.atualizarDocStatus('pre', { _id: 'sem-carimbo', nome: 'Aguardando Souza' });
-    const sub = selo();
-    out.subindo = !!sub && /subindo/.test(sub.cls);
-
-    /* --- ficha nova não mostra selo nenhum ------------------------------ */
+    out.subindo = /subindo/.test((selo() || {}).cls || '');
     ui.atualizarDocStatus('pre', null);
     out.novoSemSelo = selo() === null;
 
-    /* --- e o selo se repinta sozinho quando a fila muda ----------------- */
+    /* A confirmação da revisão anterior não confirma a edição de agora. */
     const f = document.getElementById('form-pre');
-    let h = f.querySelector('[name="_id"]');
-    if (!h) { h = document.createElement('input'); h.type = 'hidden'; h.name = '_id'; f.appendChild(h); }
-    h.value = rec._id;
-    cloudRel._filaPor('pre', rec._id, 'rede');
+    let id = f.querySelector('[name="_id"]');
+    if (!id) { id = document.createElement('input'); id.type = 'hidden'; id.name = '_id'; f.appendChild(id); }
+    id.value = rec._id;
+    cloudRel.enviarRegistro = async () => ({ ok: false, motivo: 'rede' });
+    const editado = store.save('pre', Object.assign({}, store.getById('pre', rec._id), { idade: '81 anos' }));
+    ui.atualizarDocStatus('pre', editado);
+    out.edicaoNaoUsaReciboAntigo = !/ok/.test((selo() || {}).cls || '');
+    await store.aguardarNuvem(editado);
     out.repintouSozinho = /parado/.test((selo() || {}).cls || '');
-    cloudRel._filaTirar('pre', rec._id);
+    cloudRel.enviarRegistro = async (mod, item, opts) => __smokeCloudReceipt(mod, item, opts);
+    await persistenciaCloudFirst.drenar();
     out.repintouDeVolta = /ok/.test((selo() || {}).cls || '');
-
-    localStorage.removeItem(cloudRel.FILA_KEY);
     return out;
   });
-
-  assert(r.semNuvemSemSelo, 'quem escolheu rodar local não precisa de alerta permanente');
-  assert(r.paradoMarca, 'registro que não subiu precisa dizer isso na ficha');
-  assert(r.paradoDizMotivo, 'com o motivo em português, não um código');
-  assert(r.paradoTranquiliza, 'e deixando claro que não se perde — senão vira pânico');
-  assert(r.confirmado, 'confirmado pela clínica, o selo muda para "na nuvem"');
-  assert(r.confirmadoTemQuando, 'dizendo quando foi confirmado');
-  assert(r.subindo, 'gravado e sem confirmação ainda é "subindo"');
-  assert(r.novoSemSelo, 'ficha nova não mostra selo');
-  assert(r.repintouSozinho, 'a ficha aberta não pode continuar dizendo "na nuvem" depois de falhar');
-  assert(r.repintouDeVolta, 'nem "não subiu" depois de subir');
+  assert(r.semNuvemSemSelo, 'sem nuvem configurada não há selo de confirmação');
+  assert(r.paradoMarca && r.paradoTranquiliza, 'o selo mostra envio pendente e proteção cifrada');
+  assert(r.motivoPreservado, 'o WAL conserva o motivo da falha');
+  assert(r.confirmado && r.confirmadoTemQuando, 'o recibo da clínica confirma a ficha com data');
+  assert(r.subindo && r.novoSemSelo, 'gravação ainda sem confirmação e ficha nova têm estados distintos');
+  assert(r.edicaoNaoUsaReciboAntigo, 'editar um confirmado invalida o selo antes do primeiro await');
+  assert(r.repintouSozinho && r.repintouDeVolta, 'o selo acompanha automaticamente o estado do WAL e seu recibo');
   await page.close();
 });
 
@@ -10531,6 +10716,10 @@ await test('Escrita contínua: pausou de digitar, grava — sem criar ficha do n
 
     /* --- depois da primeira gravação, digitar sobe sozinho -------------- */
     pre.salvar();
+    /* A primeira gravação manual ainda pode estar confirmando em background.
+       Espere seu resultado antes de observar os avisos da escrita automática. */
+    await store.aguardarNuvem(store.getById('pre', campo('_id').value));
+    await esperar(0);
     toasts = [];
     const id = campo('_id').value;
     digitar('idade', '73 anos');
@@ -10550,8 +10739,16 @@ await test('Escrita contínua: pausou de digitar, grava — sem criar ficha do n
     rec._finalizado = true; store.save('pre', rec);
     digitar('altura', '1,70');
     await esperar(300);
-    out.finalizadaIntacta = (store.getById('pre', id) || {}).altura !== '1,70';
-    rec._finalizado = false; store.save('pre', rec);
+    const fechada = store.getById('pre', id);
+    out.finalizadaIntacta = fechada._finalizado === true && fechada.altura !== '1,70'
+      && !(fechada._adendos || []).length;
+
+    /* Os casos de formulário limpo/inválido usam OUTRO rascunho: um
+       prontuário finalizado nunca é reaberto para continuar o teste. */
+    const rascunho = store.save('pre', { nome: 'RASCUNHO PARA VALIDAR', data: utils.hojeISO() });
+    campo('_id').value = rascunho._id;
+    await store.aguardarNuvem(rascunho);
+    await esperar(0);
 
     /* --- sem alteração pendente, não grava à toa ------------------------ */
     markClean();
@@ -10591,6 +10788,8 @@ await test('Realtime: mudança na clínica chega ao aparelho na hora, sem espera
     cloudRel._orgAsync = async () => 'org-abc';
     cloud.config = () => ({ url: 'https://xyz.supabase.co', anonKey: 'ANON' });
     cloud.session = () => ({ access_token: 'JWT1', user: { id: 'u1' } });
+    __smokeBindOrg('org-abc');
+    cloud.session = () => JSON.parse(sessionStorage.getItem(cloud.SESSION_KEY));
     store.setList('pre', []);
 
     let inst = null;
@@ -10622,7 +10821,7 @@ await test('Realtime: mudança na clínica chega ao aparelho na hora, sem espera
 
     /* --- a mudança chega e entra no aparelho ---------------------------- */
     msg({ table: 'preanesthetic_assessments', type: 'INSERT',
-          record: { id: 'uuid-1', legacy_id: 'doc-linalva', updated_at: '2026-08-26T15:00:00Z',
+          record: { organization_id: 'org-abc', id: 'uuid-1', legacy_id: 'doc-linalva', updated_at: '2026-08-26T15:00:00Z',
                     data: { _id: 'doc-linalva', nome: 'Linalva Realtime Silva', data: '2026-08-26' } } });
     out.chegouSemCiclo = !!store.list('pre').find(x => x._id === 'doc-linalva');
 
@@ -10631,7 +10830,7 @@ await test('Realtime: mudança na clínica chega ao aparelho na hora, sem espera
     l[0]._updatedAt = '2026-08-26T18:00:00Z'; l[0].nome = 'Editado Aqui Depois';
     store.setList('pre', l);
     msg({ table: 'preanesthetic_assessments', type: 'UPDATE',
-          record: { id: 'uuid-1', legacy_id: 'doc-linalva', updated_at: '2026-08-26T15:00:00Z',
+          record: { organization_id: 'org-abc', id: 'uuid-1', legacy_id: 'doc-linalva', updated_at: '2026-08-26T15:00:00Z',
                     data: { _id: 'doc-linalva', nome: 'Versao Velha', _updatedAt: '2026-08-26T15:00:00Z' } } });
     out.naoRebaixa = (store.list('pre').find(x => x._id === 'doc-linalva') || {}).nome === 'Editado Aqui Depois';
 
@@ -10642,7 +10841,7 @@ await test('Realtime: mudança na clínica chega ao aparelho na hora, sem espera
     /* --- DELETE não apaga sozinho: remoção é da reconciliação, que tem a
            lista completa na mão. Apagar por evento solto é perder registro. */
     msg({ table: 'preanesthetic_assessments', type: 'DELETE',
-          old_record: { id: 'uuid-1', legacy_id: 'doc-linalva' } });
+          old_record: { organization_id: 'org-abc', id: 'uuid-1', legacy_id: 'doc-linalva' } });
     out.deleteNaoApaga = !!store.list('pre').find(x => x._id === 'doc-linalva');
 
     /* --- socket cai: desliga e reagenda com recuo ----------------------- */
@@ -10669,6 +10868,9 @@ await test('Realtime: mudança na clínica chega ao aparelho na hora, sem espera
   assert(r.recuoCresce, 'com recuo crescente, para não martelar a rede do hospital');
   await page.close();
 });
+
+
+
 
 
 /* 161) ETAPA 4 — "vazio" e "não carregado" são coisas diferentes.
@@ -11252,13 +11454,13 @@ await test('Dashboard completa os gráficos trazendo só os arquivados do perío
     const diasAtras = (n) => { const d = new Date(hoje); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
 
     /* índice de arquivados: um deste mês, dois de mais de um ano atrás */
-    localStorage.setItem(arquivo.INDEX_KEY, JSON.stringify({
+    arquivo._gravarIndice({
       anestesia: [
         { id: 'a_recente', nome: 'Recente',  data: diasAtras(10),  fin: true },
         { id: 'a_velho1',  nome: 'Velho 1',  data: diasAtras(400), fin: true },
         { id: 'a_velho2',  nome: 'Velho 2',  data: diasAtras(500), fin: true }
       ]
-    }));
+    });
 
     const pedidos = [];
     arquivo.restaurar = async (mod, id) => { pedidos.push(mod + ':' + id); return true; };
@@ -11290,7 +11492,7 @@ await test('Dashboard completa os gráficos trazendo só os arquivados do perío
     await dashboard._completarGraficos();
     out.completarSegueOPeriodo = pedidos.length === 1 && pedidos[0] === 'anestesia:a_recente';
 
-    localStorage.removeItem(arquivo.INDEX_KEY);
+    arquivo._gravarIndice({});
     return out;
   });
 
@@ -11388,6 +11590,8 @@ await test('Pré-lançamento que ficou na clínica: a atualização deixa de ser
     const out = {};
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
       perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor', entrouEm: Date.now() }));
+    __smokeBindOrg('org-1', 'm1');
+
 
     /* ---- (a) a atualização era descartada na porta ----
        `_abertoNaTela` varria os formulários da PÁGINA INTEIRA, e no app todos
@@ -11402,11 +11606,11 @@ await test('Pré-lançamento que ficou na clínica: a atualização deixa de ser
     if (!hid) { hid = document.createElement('input'); hid.type = 'hidden'; hid.name = '_id'; formPre.appendChild(hid); }
     hid.value = 'p_adilson';
 
-    store.setList('pre', [{ _id: 'p_adilson', nome: 'ADILSON NUNES', data: '2026-09-01',
-      _updatedAt: '2026-09-01T10:00:00.000Z', _preLanc: { estado: 'rascunho' } }]);
+    store.setList('pre', [{ _relOrg: 'org-1', _id: 'p_adilson', nome: 'ADILSON NUNES', data: '2026-09-01',
+      _relUpdatedAt: '2026-09-01T10:00:00.000Z', _updatedAt: '2026-09-01T10:00:00.000Z', _preLanc: { estado: 'rascunho' } }]);
 
     /* a mesma ficha, agora ENVIADA, chegando da clínica */
-    const daClinica = [{ _id: 'p_adilson', nome: 'ADILSON NUNES', data: '2026-09-01',
+    const daClinica = [{ _relOrg: 'org-1', _id: 'p_adilson', nome: 'ADILSON NUNES', data: '2026-09-01',
       _updatedAt: '2026-09-01T11:00:00.000Z',
       _preLanc: { estado: 'enviado', porNome: 'Secretaria', enviadoEm: '2026-09-01T11:00:00.000Z' } }];
 
@@ -11450,7 +11654,7 @@ await test('Pré-lançamento que ficou na clínica: a atualização deixa de ser
     out.temBuscaPorLegacy = typeof cloudRel.puxarPorLegacy === 'function';
     let pediu = null;
     cloudRel.disponivel = () => true;
-    cloudRel.puxarPorLegacy = async (mod, ids) => { pediu = { mod, ids }; return [{ _id: ids[0],
+    cloudRel.puxarPorLegacy = async (mod, ids) => { pediu = { mod, ids }; return [{ _relOrg: 'org-1', _id: ids[0],
       nome: 'ADILSON NUNES', data: '2026-09-01', _preLanc: { estado: 'enviado' } }]; };
     await preLanc.trazerDaClinica('pre', 'p_adilson');
     out.buscouOCerto = !!pediu && pediu.mod === 'pre' && pediu.ids[0] === 'p_adilson';
@@ -11473,6 +11677,8 @@ await test('Pré-lançamento que ficou na clínica: a atualização deixa de ser
   assert(r.gravouAqui && r.entrouNaFila, 'grava aqui e entra na fila de conferência');
   await page.close();
 });
+
+
 
 /* 172) Painel do médico zerado com 173 registros no período. Não era conta
    errada: "Pessoal" queria dizer "quem digitou", e num consultório onde a
@@ -12069,89 +12275,69 @@ await test('Via aérea e acessos também abrem em janela, com os campos ainda de
    dispara-e-esquece, nunca apagava lá, e o que mudava no outro aparelho não
    chegava. Sincronizava — mal. */
 await test('Agenda: fila durável, exclusão que chega aos outros aparelhos, e mudança que desce', async () => {
-  const page = await novaPagina();
+const page = await novaPagina();
   const r = await page.evaluate(async () => {
-    const out = {};
-    sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
-      perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
-      organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
-    store.setList('agenda', []);
-    localStorage.removeItem(cloudRel.FILA_KEY);
-    localStorage.removeItem(cloudRel.FILA_DEL_KEY);
-
-    /* --- (a) gravação que não sobe entra na fila, em vez de sumir --- */
+    await __smokePrepareQueue();
     cloudRel.disponivel = () => true;
-    cloud._garantirToken = async () => true;   /* sem isso a fila nem chega a drenar */
+    sincronia.agora = () => {};
     cloudRel.enviarAgenda = async () => ({ ok: false, motivo: 'rede' });
     const ag = store.save('agenda', { paciente: 'MARIA AGENDA', data: '2026-09-20', hora: '08:00' });
-    agenda._espelhar(ag);
-    await new Promise(res => setTimeout(res, 120));
-    out.entrouNaFila = cloudRel._filaLer().some(x => x.mod === 'agenda' && x.id === ag._id);
-
-    /* e a fila sabe subir a agenda pelo caminho dela (colunas scheduled_at e
-       status), não pelo envio genérico que deixaria as duas em branco */
+    await store.aguardarNuvem(ag);
+    const out = {};
+    out.entrouNaFila = (await filaCifrada.listar()).some(op => op.module === 'agenda' && op.entityId === ag._id);
+    out.semFilaLegada = cloudRel._filaLer().length === 0 && localStorage.getItem(STORAGE.agenda) === null;
     let usouEnvioDaAgenda = false, usouGenerico = false;
-    cloudRel.enviarAgenda = async () => { usouEnvioDaAgenda = true; return { ok: true }; };
+    cloudRel.enviarAgenda = async (item, opts) => {
+      usouEnvioDaAgenda = true; return __smokeCloudReceipt('agenda', item, opts);
+    };
     cloudRel.enviarRegistro = async () => { usouGenerico = true; return { ok: true }; };
-    await cloudRel.drenarFila();
+    await persistenciaCloudFirst.drenar();
     out.drenouPeloCaminhoCerto = usouEnvioDaAgenda && !usouGenerico;
-    out.saiuDaFila = !cloudRel._filaLer().some(x => x.mod === 'agenda');
+    out.saiuDaFila = (await filaCifrada.listar()).length === 0;
 
-    /* --- (b) excluir chega à clínica --- */
-    let apagou = null;
-    cloudRel.apagarNaClinica = async (tab, id) => { apagou = { tab, id }; return { ok: true }; };
+    /* Exclusão fica no mesmo WAL com snapshot, mesmo sem registro na tela. */
+    cloudRel.apagarNaClinica = async () => ({ ok: false, motivo: 'rede' });
     window.confirm = () => true;
     agenda.excluir(ag._id);
-    out.pediuParaApagarLa = !!apagou && apagou.tab === 'appointments' && apagou.id === ag._id;
+    await store.aguardarNuvem({ _id: ag._id });
+    const exclusao = (await filaCifrada.listar()).find(op => op.entityId === ag._id && op.payload.action === 'delete');
+    out.exclusaoDuravel = !!exclusao && exclusao.payload.table === 'appointments'
+      && exclusao.payload.item.paciente === 'MARIA AGENDA';
     out.sumiuDaqui = !store.getById('agenda', ag._id);
+    let apagou = null;
+    cloudRel.apagarNaClinica = async (tab, id, opts) => {
+      apagou = { tab, id };
+      return __smokeCloudReceipt('agenda', exclusao.payload.item, opts,
+        { deleted_at: '2026-09-20T12:00:00Z' });
+    };
+    await persistenciaCloudFirst.drenar();
+    out.pediuParaApagarLa = !!apagou && apagou.tab === 'appointments' && apagou.id === ag._id;
+    out.exclusaoConfirmada = (await filaCifrada.listar()).length === 0;
 
-    /* a exclusão tem fila própria: relê do aparelho não serve para o que já
-       foi apagado dele */
-    out.temFilaDeExclusao = typeof cloudRel._filaDelPor === 'function'
-      && typeof cloudRel.drenarFilaDel === 'function';
-    cloudRel._filaDelPor('appointments', 'x1');
-    out.guardouAExclusao = cloudRel._filaDelLer().some(x => x.id === 'x1');
-    cloudRel._filaDelTirar('appointments', 'x1');
-    out.tirouDaFila = !cloudRel._filaDelLer().some(x => x.id === 'x1');
-
-    /* --- (c) o que muda na clínica desce, e o apagado lá some daqui --- */
     store.setList('agenda', [
-      { _id: 'a1', paciente: 'ANA', data: '2026-09-21', hora: '09:00', _relUpdatedAt: '2026-09-01T10:00:00Z' },
-      { _id: 'a2', paciente: 'BIA', data: '2026-09-22', hora: '10:00', _relUpdatedAt: '2026-09-01T10:00:00Z' },
-      { _id: 'a3', paciente: 'SO DAQUI', data: '2026-09-23', hora: '11:00' }
+      { _id: 'a1', paciente: 'ANA', data: '2026-09-21', hora: '09:00', _relOrg: 'org-1', _relUpdatedAt: '2026-09-01T10:00:00Z' },
+      { _id: 'a2', paciente: 'BIA', data: '2026-09-22', hora: '10:00', _relOrg: 'org-1', _relUpdatedAt: '2026-09-01T10:00:00Z' },
+      { _id: 'a3', paciente: 'SO DAQUI', data: '2026-09-23', hora: '11:00', _relOrg: 'org-1' }
     ]);
-    cloudRel.puxarAgenda = async () => ([
-      /* ANA foi remarcada na secretaria */
-      { _id: 'a1', paciente: 'ANA', data: '2026-09-21', hora: '14:30', _relUpdatedAt: '2026-09-05T10:00:00Z' }
-      /* BIA foi cancelada lá — não vem mais */
-    ]);
+    cloudRel.puxarAgenda = async () => [
+      { _id: 'a1', paciente: 'ANA', data: '2026-09-21', hora: '14:30', _relOrg: 'org-1', _relUpdatedAt: '2026-09-05T10:00:00Z' }
+    ];
     agenda._puxouNestaSessao = false;
     await agenda.sincronizarNuvem({ silent: true });
-    const lst = store.list('agenda');
-    out.mudancaDesceu = (lst.find(x => x._id === 'a1') || {}).hora === '14:30';
-    out.canceladoSumiu = !lst.find(x => x._id === 'a2');
-    /* o que nunca subiu NÃO pode ser confundido com "apagado por alguém" */
-    out.oQueNuncaSubiuFica = !!lst.find(x => x._id === 'a3');
-
-    /* --- (d) Realtime escuta a agenda --- */
+    const lista = store.list('agenda');
+    out.mudancaDesceu = (lista.find(x => x._id === 'a1') || {}).hora === '14:30';
+    out.canceladoSumiu = !lista.find(x => x._id === 'a2');
+    out.oQueNuncaSubiuFica = !!lista.find(x => x._id === 'a3');
     out.realtimeEscuta = realtime.TABELAS.appointments === 'agenda';
-
-    store.setList('agenda', []);
-    localStorage.removeItem(cloudRel.FILA_KEY);
-    localStorage.removeItem(cloudRel.FILA_DEL_KEY);
     return out;
   });
-
-  assert(r.entrouNaFila, 'compromisso que não subiu entra na fila durável, em vez de sumir no catch vazio');
-  assert(r.drenouPeloCaminhoCerto, 'e a fila o sobe pelo envio da agenda — o genérico deixaria horário e status em branco');
-  assert(r.saiuDaFila, 'subiu, saiu da fila');
-  assert(r.pediuParaApagarLa && r.sumiuDaqui, 'excluir aqui apaga também na clínica');
-  assert(r.temFilaDeExclusao, 'a exclusão tem fila própria — a normal relê do aparelho, e o apagado não está mais lá');
-  assert(r.guardouAExclusao && r.tirouDaFila, 'que guarda e libera a chave');
-  assert(r.mudancaDesceu, 'remarcar num aparelho chega ao outro');
-  assert(r.canceladoSumiu, 'e cancelar na clínica remove daqui');
-  assert(r.oQueNuncaSubiuFica, 'mas o que ainda não subiu não é confundido com apagado');
-  assert(r.realtimeEscuta, 'a agenda passa a chegar na hora, pelo Realtime');
+  assert(r.entrouNaFila && r.semFilaLegada, 'compromisso pendente fica exclusivamente no WAL cifrado');
+  assert(r.drenouPeloCaminhoCerto && r.saiuDaFila, 'a agenda recebe recibo pelo envio que mantém horário e status');
+  assert(r.exclusaoDuravel && r.sumiuDaqui, 'excluir cria snapshot e intenção cifrada antes de pedir a exclusão remota');
+  assert(r.pediuParaApagarLa && r.exclusaoConfirmada, 'a exclusão chega à clínica e só o recibo elimina sua intenção');
+  assert(r.mudancaDesceu && r.canceladoSumiu, 'remarcação e cancelamento remotos convergem no aparelho');
+  assert(r.oQueNuncaSubiuFica, 'o que ainda não subiu não pode ser confundido com apagado');
+  assert(r.realtimeEscuta, 'a agenda recebe mudanças pelo Realtime');
   await page.close();
 });
 
@@ -12222,6 +12408,7 @@ await test('PDF que não sobe fica esperando na fila, e sobe quando a autorizaç
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
+    __smokeBindOrg('org-1', 'u1');
     await pdfFila.limpar();
     const docFalso = { output: () => new Blob(['%PDF-1.4 teste'], { type: 'application/pdf' }) };
 
@@ -12293,13 +12480,16 @@ await test('PDF que não sobe fica esperando na fila, e sobe quando a autorizaç
    passava por cima do app inteiro. */
 await test('As janelas da ficha abrem NA FRENTE do fundo — e o clique cai nelas, não nele', async () => {
   const page = await novaPagina();
+  await page.reload();
+  await page.waitForTimeout(1200);
+  /* Reabrir a aba exige uma nova sessão; pagehide encerra a anterior. */
   await page.evaluate(() => {
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
       perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
       organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+    __smokeBindOrg('org1', 'u1');
+    auth._desbloquear();
   });
-  await page.reload();
-  await page.waitForTimeout(1200);
   await page.evaluate(() => { try { modal.close(); } catch (e) {} ui.navegar('anestesia'); });
   await page.waitForTimeout(1500);
 
@@ -12370,13 +12560,16 @@ await test('As janelas da ficha abrem NA FRENTE do fundo — e o clique cai nela
    saía no documento. */
 await test('O que se preenche nas janelas fica na ficha, sobrevive ao recarregar e sai na impressão', async () => {
   const page = await novaPagina();
+  await page.reload();
+  await page.waitForTimeout(1200);
+  /* Reabrir a aba exige uma nova sessão; pagehide encerra a anterior. */
   await page.evaluate(() => {
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
       perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
       organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+    __smokeBindOrg('org1', 'u1');
+    auth._desbloquear();
   });
-  await page.reload();
-  await page.waitForTimeout(1200);
   await page.evaluate(() => { try { modal.close(); } catch (e) {} ui.navegar('anestesia'); });
   await page.waitForTimeout(1600);
 
@@ -12507,13 +12700,16 @@ await test('O que se preenche nas janelas fica na ficha, sobrevive ao recarregar
    pré-anestésica nunca vai ter. */
 await test('Meu dia enxerga a pré-anestésica — e não cobra ficha de quem veio para consulta ou pré', async () => {
   const page = await novaPagina();
+  await page.reload();
+  await page.waitForTimeout(1000);
+  /* Reabrir a aba exige uma nova sessão; pagehide encerra a anterior. */
   await page.evaluate(() => {
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
       perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
       organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+    __smokeBindOrg('org1', 'u1');
+    auth._desbloquear();
   });
-  await page.reload();
-  await page.waitForTimeout(1000);
 
   const r = await page.evaluate(() => {
     const hoje = utils.hojeISO();
@@ -12579,16 +12775,24 @@ await test('Meu dia enxerga a pré-anestésica — e não cobra ficha de quem ve
    está salvo, então dá para montar o PDF de novo a partir dele. */
 await test('Regenerar PDFs de documentos já finalizados, sem repetir os que já subiram', async () => {
   const page = await novaPagina();
-  await page.evaluate(() => {
+  await page.reload();
+  await page.waitForTimeout(1200);
+  /* Reabrir a aba exige uma nova sessão; pagehide encerra a anterior. */
+  await page.evaluate(async () => {
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
       perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
       organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+    __smokeBindOrg('org1', 'u1');
+    filaCifrada._buscarKekServidor = async () => ({ material: new Uint8Array(32).fill(9), keyVersion: 1 });
+    await filaCifrada.preparar();
+    auth._desbloquear();
   });
-  await page.reload();
-  await page.waitForTimeout(1200);
 
   const r = await page.evaluate(async () => {
     const out = {};
+    /* Servidor de chaves simulado apenas neste teste: exercita os snapshots
+       AES-GCM reais sem chamar a RPC pela rede. */
+    filaCifrada._buscarKekServidor = async () => ({ material: new Uint8Array(32).fill(9), keyVersion: 1 });
     try { modal.close(); } catch (e) {}
     ['pre', 'consulta', 'anestesia'].forEach(m => store.setList(m, []));
     await pdfFila.limpar();
@@ -12598,7 +12802,9 @@ await test('Regenerar PDFs de documentos já finalizados, sem repetir os que já
     store.save('consulta', { nome: 'CLARA', data_consulta: '2026-09-04', motivo: 'Dor', _finalizado: true });
     store.save('anestesia', { paciente: { nome: 'DINA' }, procedimento: { data: '2026-08-20' }, _finalizado: true }); /* fora do período */
 
-    out.candidatos = pdfBackup.regen.candidatos('2026-09-01', '2026-09-30', false).map(x => x.mod + ':' + x.nome);
+    const originais = pdfBackup.regen.candidatos('2026-09-01', '2026-09-30', false)
+      .map(x => ({ mod: x.mod, rec: JSON.parse(JSON.stringify(x.rec)) }));
+    out.candidatos = originais.map(x => x.mod + ':' + arquivo._nomeDe(x.rec));
 
     pdfBackup.salvarCfg({ supabase: true, drive: false });
     cloud.estaConfigurado = () => true; cloud.estaLogado = () => true;
@@ -12609,6 +12815,12 @@ await test('Regenerar PDFs de documentos já finalizados, sem repetir os que já
     await pdfBackup.regen.rodar({ de: '2026-09-01', ate: '2026-09-30' });
     out.enviados = enviados.map(e => e.nome);
     out.temConteudo = enviados.every(e => e.bytes > 1000);
+    out.finalizadosIntactos = originais.every(({ mod, rec }) => {
+      const atual = store.getById(mod, rec._id);
+      return atual && adendos.diffRegistro(rec, atual).length === 0
+        && atual._finalizadoEm === rec._finalizadoEm
+        && (atual._adendos || []).length === (rec._adendos || []).length;
+    });
 
     /* segunda passada não repete: cada registro fica marcado */
     const antes = enviados.length;
@@ -12643,6 +12855,7 @@ await test('Regenerar PDFs de documentos já finalizados, sem repetir os que já
   assert(r.enviados.length === 3 && r.temConteudo, 'os três são regenerados com conteúdo de verdade');
   assert(r.enviados.some(n => /^ANA-PRE_APA/.test(n)) && r.enviados.some(n => /^CLARA_Consulta/.test(n)),
     'cada PDF sai com o nome do SEU paciente e do SEU tipo — não com o do módulo aberto na hora: ' + r.enviados.join(', '));
+  assert(r.finalizadosIntactos, 'regenerar o PDF não altera conteúdo ou data do prontuário finalizado nem cria adendo artificial');
   assert(r.segundaPassada === 0, 'rodar de novo não duplica: quem já subiu por aqui fica marcado');
   assert(r.comForcar === 3, 'e "incluir os já enviados" repete de propósito');
   assert(r.naFila === 3, 'o que falha no envio vai para a fila, em vez de sumir');
@@ -12656,13 +12869,16 @@ await test('Regenerar PDFs de documentos já finalizados, sem repetir os que já
    que não batiam com os que acabara de olhar. */
 await test('O Dashboard impresso conta o mesmo que a tela: finalizados, mesmo período, mesmo escopo', async () => {
   const page = await novaPagina();
+  await page.reload();
+  await page.waitForTimeout(1200);
+  /* Reabrir a aba exige uma nova sessão; pagehide encerra a anterior. */
   await page.evaluate(() => {
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
       perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
       organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+    __smokeBindOrg('org1', 'u1');
+    auth._desbloquear();
   });
-  await page.reload();
-  await page.waitForTimeout(1200);
 
   const r = await page.evaluate(async () => {
     const out = {};
@@ -12716,13 +12932,16 @@ await test('O Dashboard impresso conta o mesmo que a tela: finalizados, mesmo pe
    contado, nem gerar uma segunda cobrança pelo mesmo atendimento. */
 await test('Data de produção é a da finalização, não se move em correção, e não nasce financeiro novo', async () => {
   const page = await novaPagina();
+  await page.reload();
+  await page.waitForTimeout(1200);
+  /* Reabrir a aba exige uma nova sessão; pagehide encerra a anterior. */
   await page.evaluate(() => {
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
       perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
       organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+    __smokeBindOrg('org1', 'u1');
+    auth._desbloquear();
   });
-  await page.reload();
-  await page.waitForTimeout(1200);
 
   /* (a) o carimbo, em todos os módulos que finalizam documento */
   const a = await page.evaluate(async () => {
@@ -12740,27 +12959,38 @@ await test('Data de produção é a da finalização, não se move em correção
     const carimbo = r1._finalizadoEm;
     await new Promise(res => setTimeout(res, 30));
     const r2 = store.save('pre', Object.assign({}, store.getById('pre', r1._id), { cirurgia: 'ACRESCENTADO' }));
-    out.naoSeMoveu = r2._finalizadoEm === carimbo && r2.cirurgia === 'ACRESCENTADO';
+    const aposCorrecao = store.getById('pre', r1._id);
+    out.naoSeMoveu = r2._finalizadoEm === carimbo && aposCorrecao._finalizadoEm === carimbo
+      && !aposCorrecao.cirurgia;
+    out.acrescimoVirouAdendo = (aposCorrecao._adendos || []).some(ad =>
+      ad.motivo === 'correcao' && /CORREÇÃO/.test(ad.texto) && /ACRESCENTADO/.test(ad.texto)
+      && !!ad.autor && !!ad.data);
     /* nem quando o formulário devolve o registro sem os metadados internos —
        que é o caso real: o form não carrega campos que começam com "_" */
     const r3 = store.save('pre', { _id: r1._id, nome: 'ANA', data_avaliacao: '2026-09-01', _finalizado: true, obs: 'mais' });
-    out.sobreviveuAoForm = r3._finalizadoEm === carimbo;
+    const aposForm = store.getById('pre', r1._id);
+    out.sobreviveuAoForm = r3._finalizadoEm === carimbo && aposForm._finalizadoEm === carimbo
+      && !aposForm.obs && (aposForm._adendos || []).some(ad => /mais/.test(ad.texto));
     /* a produção conta por ele — e registro sem carimbo cai na data clínica */
     out.producaoUsaCarimbo = dashboard._dataClinica(
       { data_avaliacao: '2020-01-05', _finalizado: true, _finalizadoEm: '2026-09-10T10:00:00.000Z' }) === '2026-09-10T10:00:00.000Z';
     out.antigoUsaDataClinica = String(dashboard._dataClinica({ data_avaliacao: '2020-01-05' })).startsWith('2020-01-05');
-    /* Documento JÁ finalizado antes de existir o carimbo, reaberto e salvo
-       hoje: não pode pular para o mês corrente e inflar a produção do mês com
-       trabalho de meses atrás. O carimbo nasce onde o relatório já o contava. */
+    /* Documento antigo sem carimbo recebe a correção por adendo. Seu
+       conteúdo canônico não é regravado só para fabricar metadados: a produção
+       continua usando a data clínica original. */
     store.setList('pre', [{ _id: 'velho1', nome: 'VELHO', data_avaliacao: '2020-01-05', _finalizado: true }]);
     const velho = store.save('pre', { _id: 'velho1', nome: 'VELHO', data_avaliacao: '2020-01-05', _finalizado: true, obs: 'reaberto hoje' });
-    out.antigoNaoPulaParaHoje = String(velho._finalizadoEm).startsWith('2020-01-05');
+    const antigo = store.getById('pre', 'velho1');
+    out.antigoNaoPulaParaHoje = !velho._finalizadoEm && !antigo._finalizadoEm
+      && String(dashboard._dataClinica(antigo)).startsWith('2020-01-05')
+      && !antigo.obs && (antigo._adendos || []).some(ad => /reaberto hoje/.test(ad.texto));
     return out;
   });
 
   assert(Object.keys(a.porModulo).length === 7 && Object.values(a.porModulo).every(Boolean),
     'todo módulo que finaliza documento carimba a data da finalização, e só na finalização: ' + JSON.stringify(a.porModulo));
-  assert(a.naoSeMoveu, 'gravar de novo não move o carimbo — mas grava o que foi acrescentado');
+  assert(a.naoSeMoveu, 'corrigir não move o carimbo nem substitui o conteúdo clínico finalizado');
+  assert(a.acrescimoVirouAdendo, 'o acréscimo fica em adendo com motivo, autoria e data');
   assert(a.sobreviveuAoForm, 'e ele sobrevive quando o formulário devolve o registro sem os metadados internos');
   assert(a.producaoUsaCarimbo, 'a produção conta pela data da finalização');
   assert(a.antigoUsaDataClinica, 'registro sem carimbo (anterior a isto, ou em rascunho) segue pela data clínica');
@@ -12806,10 +13036,14 @@ await test('Data de produção é a da finalização, não se move em correção
       out.finAntes = store.list('financeiro').length;
       out.dataAntes = dashboard._dataClinica(rec);
 
-      /* acrescenta num campo que estava vazio, e salva */
+      const original = JSON.parse(JSON.stringify(rec));
+      const adendosAntes = (rec._adendos || []).length;
+      /* acrescenta num campo que estava vazio, e salva como correção */
       window[mod].carregar(store.getById(mod, rec._id));
       await new Promise(res => setTimeout(res, 900));
       const obs = [...document.getElementById('form-' + mod).querySelectorAll('textarea')].find(t => !t.value && t.name);
+      out.temCampoParaCorrecao = !!obs;
+      const campoObs = obs && obs.name;
       if (obs) obs.value = 'ACRESCENTADO DEPOIS DE FINALIZAR';
       window[mod].salvar();
       await new Promise(res => setTimeout(res, 1000));
@@ -12818,6 +13052,10 @@ await test('Data de produção é a da finalização, não se move em correção
       out.finDepois = store.list('financeiro').length;
       out.dataIgual = dashboard._dataClinica(rec2) === out.dataAntes;
       out.umRegistroSo = store.list(mod).length === 1;
+      out.originalIntacto = adendos.diffRegistro(original, rec2).length === 0;
+      out.correcaoRegistrada = !!campoObs && (rec2._adendos || []).length === adendosAntes + 1
+        && rec2._adendos.some(ad => /CORREÇÃO/.test(ad.texto)
+          && /ACRESCENTADO DEPOIS DE FINALIZAR/.test(ad.texto) && !!ad.autor && !!ad.data);
       return out;
     }, mod);
 
@@ -12825,6 +13063,8 @@ await test('Data de produção é a da finalização, não se move em correção
     assert(r.finDepois === 1, mod + ': acrescentar depois NÃO cria um segundo lançamento (ficou com ' + r.finDepois + ')');
     assert(r.dataIgual, mod + ': e a data que a produção conta não se move');
     assert(r.umRegistroSo, mod + ': nem nasce um documento duplicado');
+    assert(r.temCampoParaCorrecao && r.originalIntacto && r.correcaoRegistrada,
+      mod + ': o formulário preserva o original e registra a correção em um adendo com autoria e data');
   }
   await page.close();
 });
@@ -12836,13 +13076,16 @@ await test('Data de produção é a da finalização, não se move em correção
    dar baixa nas duas para o caso sumir. */
 await test('Pendência de convênio é uma linha por cobrança, não uma por documento', async () => {
   const page = await novaPagina();
+  await page.reload();
+  await page.waitForTimeout(1000);
+  /* Reabrir a aba exige uma nova sessão; pagehide encerra a anterior. */
   await page.evaluate(() => {
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
       perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
       organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+    __smokeBindOrg('org1', 'u1');
+    auth._desbloquear();
   });
-  await page.reload();
-  await page.waitForTimeout(1000);
 
   const r = await page.evaluate(() => {
     const out = {};
@@ -12899,13 +13142,16 @@ await test('Pendência de convênio é uma linha por cobrança, não uma por doc
    convênio ilegível. Este é o cartão clínico, par do financeiro. */
 await test('Pendências de prontuário: rascunho de dia passado e cirurgia sem ficha — e nada além disso', async () => {
   const page = await novaPagina();
+  await page.reload();
+  await page.waitForTimeout(1000);
+  /* Reabrir a aba exige uma nova sessão; pagehide encerra a anterior. */
   await page.evaluate(() => {
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
       perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
       organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+    __smokeBindOrg('org1', 'u1');
+    auth._desbloquear();
   });
-  await page.reload();
-  await page.waitForTimeout(1000);
 
   const r = await page.evaluate(async () => {
     const out = {};
@@ -12979,13 +13225,16 @@ await test('Pendências de prontuário: rascunho de dia passado e cirurgia sem f
    do painel do médico a produção que é dele. */
 await test('Pessoal = Clínica quando há um anestesista só — e volta a separar quando há sócio', async () => {
   const page = await novaPagina();
+  await page.reload();
+  await page.waitForTimeout(1000);
+  /* Reabrir a aba exige uma nova sessão; pagehide encerra a anterior. */
   await page.evaluate(() => {
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'mpcaliman@x',
       nome: 'Marcelo Pandolfi Caliman', perfil: 'admin', modulos: auth.MODULOS.map(m => m.key),
       soImpressao: [], role: 'gestor', organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+    __smokeBindOrg('org1', 'u1');
+    auth._desbloquear();
   });
-  await page.reload();
-  await page.waitForTimeout(1000);
 
   const r = await page.evaluate(() => {
     const out = {};
@@ -13049,13 +13298,16 @@ await test('Pessoal = Clínica quando há um anestesista só — e volta a separ
    O ícone 🧾 junta tudo numa janela — e diz o que está faltando. */
 await test('Detalhamento para faturamento junta plano, carteirinha, horários e códigos — e acusa o que falta', async () => {
   const page = await novaPagina();
+  await page.reload();
+  await page.waitForTimeout(1000);
+  /* Reabrir a aba exige uma nova sessão; pagehide encerra a anterior. */
   await page.evaluate(() => {
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
       perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
       organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+    __smokeBindOrg('org1', 'u1');
+    auth._desbloquear();
   });
-  await page.reload();
-  await page.waitForTimeout(1000);
 
   const r = await page.evaluate(async () => {
     const out = {};
@@ -13066,13 +13318,13 @@ await test('Detalhamento para faturamento junta plano, carteirinha, horários e 
     store.setList('pacientes', [{ _id: 'pa1', nome: 'MARIA DAS GRACAS', carteirinha: '0123456789',
       plano: 'Bradesco Saúde', apartamento: true }]);
     /* os horários moram SÓ na ficha */
-    const ficha = store.save('anestesia', {
+    const ficha = store.save('anestesia', { _patientRef: 'pa1',
       paciente: { nome: 'MARIA DAS GRACAS', convenio: 'Bradesco Saúde', senha: 'K3EK7V7' },
       procedimento: { data: sabado, descricao: 'Colecistectomia', hora_sala_entrada: '07:30',
                       hora_sala_saida: '09:45', hora_inicio: '07:40', hora_fim: '09:35',
                       duracao: '1h55', cirurgiao: 'Dr. Fulano', hospital: 'Hospital X' },
       _finalizado: true });
-    const lanc = store.save('financeiro', {
+    const lanc = store.save('financeiro', { _patientRef: 'pa1',
       paciente: 'MARIA DAS GRACAS', convenio: 'Bradesco Saúde', senha: 'K3EK7V7',
       data_proc: sabado, procedimento: 'Colecistectomia', hospital: 'Hospital X', cirurgiao: 'Dr. Fulano',
       acomodacao: 'apartamento', fator_acomodacao: '2', urgencia: true, perc_urgencia: '30',
@@ -13131,6 +13383,7 @@ await test('Detalhamento para faturamento junta plano, carteirinha, horários e 
 await test('Canal legado fica sem I/O e sua fila antiga migra para filas relacionais', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
+    await __smokePrepareQueue('org-1', 'u1');
     let rede = 0;
     window.fetch = async () => { rede++; throw new Error('o legado não pode acessar a rede'); };
 
@@ -13143,18 +13396,18 @@ await test('Canal legado fica sem I/O e sua fila antiga migra para filas relacio
 
     cloud._enfileirar(cloud._novaOp('pre', { _id: 'pendente-1' }, 'upsert'));
     cloud._enfileirar(cloud._novaOp('consulta', { _id: 'apagado-1' }, 'delete'));
-    const migradas = await cloud._migrarFilaLegada();
-
-    const filaRel = cloudRel._filaLer();
-    const filaDel = cloudRel._filaDelLer();
+    const res = await persistenciaCloudFirst.migrarLegado();
+    const migradas = res.migradas;
+    const filaRel = await filaCifrada.listar();
+    const filaDel = filaRel;
     const out = {
       recusa: recusa && recusa.motivo,
       envioDireto,
       rede,
       migradas,
       legadoVazio: cloud._fila().length === 0,
-      upsertConvertido: filaRel.some(x => x.mod === 'pre' && x.id === 'pendente-1'),
-      deleteConvertido: filaDel.some(x => x.tabela === 'consultations' && x.id === 'apagado-1')
+      upsertConvertido: filaRel.some(x => x.module === 'pre' && x.entityId === 'pendente-1' && x.payload.action === 'upsert'),
+      deleteConvertido: filaDel.some(x => x.payload.table === 'consultations' && x.entityId === 'apagado-1' && x.payload.action === 'delete')
     };
     cloudRel._filaGravar([]);
     cloudRel._filaDelGravar([]);
@@ -13166,7 +13419,7 @@ await test('Canal legado fica sem I/O e sua fila antiga migra para filas relacio
   assert(r.rede === 0, 'o canal legado não deveria fazer nenhuma chamada de rede');
   assert(r.migradas === 2 && r.legadoVazio, 'as duas pendências antigas deveriam ser convertidas e a fila legada esvaziada');
   assert(r.upsertConvertido && r.deleteConvertido,
-    'upsert e delete antigos deveriam chegar às filas relacionais equivalentes');
+    'upsert e delete antigos deveriam chegar às operações equivalentes no WAL cifrado do mesmo dono');
   await page.close();
 });
 
@@ -13177,13 +13430,16 @@ await test('Canal legado fica sem I/O e sua fila antiga migra para filas relacio
    risco. Lá só havia o preenchimento no onblur, que exige o nome exato. */
 await test('Autocomplete de paciente também no atestado, receituário, termo e risco', async () => {
   const page = await novaPagina();
+  await page.reload();
+  await page.waitForTimeout(1400);
+  /* Reabrir a aba exige uma nova sessão; pagehide encerra a anterior. */
   await page.evaluate(() => {
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
       perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
       organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+    __smokeBindOrg('org1', 'u1');
+    auth._desbloquear();
   });
-  await page.reload();
-  await page.waitForTimeout(1400);
 
   const r = await page.evaluate(async () => {
     const out = {};
@@ -13255,19 +13511,23 @@ await test('Autocomplete de paciente também no atestado, receituário, termo e 
    discordam quando a semente da migração 0009 rodou antes de a conta existir. */
 await test('Aba do programador diz por que criar ambiente falhou, e não deixa o erro sumir', async () => {
   const page = await novaPagina();
+  await page.reload();
+  await page.waitForTimeout(1200);
+  /* Reabrir a aba exige uma nova sessão; pagehide encerra a anterior. */
   await page.evaluate(() => {
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
       perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
       organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+    __smokeBindOrg('org1', 'u1');
+    auth._desbloquear();
   });
-  await page.reload();
-  await page.waitForTimeout(1200);
 
   const r = await page.evaluate(async () => {
     const out = {};
     try { modal.close(); } catch (e) {}
     cloud.config = () => ({ url: 'https://fake.supabase.co', anonKey: 'k' });
     cloud.session = () => ({ user: { id: 'u1', email: 'mpcaliman@hotmail.com' }, access_token: 't' });
+    __smokeBindOrg('org1', 'u1');
     cloud._garantirToken = async () => true;
     cloud._headers = () => ({});
     out.appLibera = programador.souProgramador();
@@ -13277,13 +13537,13 @@ await test('Aba do programador diz por que criar ambiente falhou, e não deixa o
     window.fetch = async (url) => {
       const u = String(url);
       if (/app_programmers/.test(u)) {
-        if (modoProg === 'sem_tabela') return { ok: false, status: 404, json: async () => ({ message: 'Could not find the table public.app_programmers in the schema cache' }) };
-        return { ok: true, json: async () => (modoProg === 'ok' ? [{ user_id: 'u1' }] : []) };
+        if (modoProg === 'sem_tabela') return { ok: false, status: 404, json: async () => ({ message: 'Could not find the table public.app_programmers in the schema cache' }), text: async () => JSON.stringify({ message: 'Could not find the table public.app_programmers in the schema cache' }) };
+        return { ok: true, json: async () => (modoProg === 'ok' ? [{ user_id: 'u1' }] : []), text: async () => JSON.stringify(modoProg === 'ok' ? [{ user_id: 'u1' }] : []) };
       }
       if (/rpc\/prog_criar_ambiente/.test(u)) {
-        return { ok: false, status: 400, json: async () => ({ message: 'Apenas o programador pode criar ambientes.' }) };
+        return { ok: false, status: 400, json: async () => ({ message: 'Apenas o programador pode criar ambientes.' }), text: async () => JSON.stringify({ message: 'Apenas o programador pode criar ambientes.' }) };
       }
-      return { ok: true, json: async () => [] };
+      return { ok: true, json: async () => [], text: async () => '[]' };
     };
 
     ui.navegar('programador');
@@ -13342,6 +13602,8 @@ await test('Aba do programador diz por que criar ambiente falhou, e não deixa o
   await page.close();
 });
 
+
+
 /* 194) "Essa ficha foi feita no sistema, mas ao buscar hoje não aparece nada."
    Aparecia zero com a ficha inteira guardada na nuvem: as linhas do que está
    arquivado eram acrescentadas no FIM de _renderLinhas, e o `return` de lista
@@ -13351,13 +13613,16 @@ await test('Aba do programador diz por que criar ambiente falhou, e não deixa o
    pronta, sem ser chamada de lugar nenhum. */
 await test('Busca acha a ficha guardada na nuvem, e oferece varrer a nuvem quando não acha nada', async () => {
   const page = await novaPagina();
+  await page.reload();
+  await page.waitForTimeout(1200);
+  /* Reabrir a aba exige uma nova sessão; pagehide encerra a anterior. */
   await page.evaluate(() => {
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
       perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
       organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+    __smokeBindOrg('org1', 'u1');
+    auth._desbloquear();
   });
-  await page.reload();
-  await page.waitForTimeout(1200);
 
   const r = await page.evaluate(async () => {
     const out = {};
@@ -13365,9 +13630,9 @@ await test('Busca acha a ficha guardada na nuvem, e oferece varrer a nuvem quand
     store.setList('anestesia', []);
     /* o cenário real: a ficha saiu do aparelho (socorro de espaço arquiva o
        que tem mais de 7 dias) e só existe no índice + na nuvem */
-    localStorage.setItem(arquivo.INDEX_KEY, JSON.stringify({
+    arquivo._gravar({
       anestesia: [{ id: 'f-jaime', nome: 'JAIME ROLANDO PEIXOTO', data: '2026-08-13', fin: true }]
-    }));
+    });
 
     /* (a) busca por um nome que SÓ existe na nuvem — antes dava "nenhum registro" */
     const so = historico._renderLinhas('anestesia', 'jaime');
@@ -13398,7 +13663,7 @@ await test('Busca acha a ficha guardada na nuvem, e oferece varrer a nuvem quand
     out.usaOTermoDigitado = termo === 'jaime' && !usouPrompt;
 
     try { modal.close(); } catch (e) {}
-    localStorage.removeItem(arquivo.INDEX_KEY);
+    arquivo._gravar({});
     store.setList('anestesia', []);
     return out;
   });
@@ -13418,13 +13683,16 @@ await test('Busca acha a ficha guardada na nuvem, e oferece varrer a nuvem quand
    "— financeiro" sozinho, com a explicação num `title` invisível no celular. */
 await test('Meu dia diz POR QUE não há financeiro quando o documento está em rascunho', async () => {
   const page = await novaPagina();
+  await page.reload();
+  await page.waitForTimeout(1000);
+  /* Reabrir a aba exige uma nova sessão; pagehide encerra a anterior. */
   await page.evaluate(() => {
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
       perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
       organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+    __smokeBindOrg('org1', 'u1');
+    auth._desbloquear();
   });
-  await page.reload();
-  await page.waitForTimeout(1000);
 
   const r = await page.evaluate(() => {
     const out = {};
@@ -13466,13 +13734,16 @@ await test('Meu dia diz POR QUE não há financeiro quando o documento está em 
    terminado — então é um interruptor, e a escolha fica lembrada. */
 await test('Meu dia: interruptor "só finalizados" — sem perder a lista do que falta', async () => {
   const page = await novaPagina();
+  await page.reload();
+  await page.waitForTimeout(1200);
+  /* Reabrir a aba exige uma nova sessão; pagehide encerra a anterior. */
   await page.evaluate(() => {
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
       perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
       organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+    __smokeBindOrg('org1', 'u1');
+    auth._desbloquear();
   });
-  await page.reload();
-  await page.waitForTimeout(1200);
 
   const r = await page.evaluate(async () => {
     const out = {};
@@ -13526,13 +13797,16 @@ await test('Meu dia: interruptor "só finalizados" — sem perder a lista do que
    que roubavam o clique. Medido antes: 3 dos 4 itens visíveis inalcançáveis. */
 await test('Lista do autocomplete não é recortada pelo cartão nem coberta pelos campos de baixo', async () => {
   const page = await novaPagina();
+  await page.reload();
+  await page.waitForTimeout(1300);
+  /* Reabrir a aba exige uma nova sessão; pagehide encerra a anterior. */
   await page.evaluate(() => {
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
       perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
       organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+    __smokeBindOrg('org1', 'u1');
+    auth._desbloquear();
   });
-  await page.reload();
-  await page.waitForTimeout(1300);
 
   const r = await page.evaluate(async () => {
     const out = {};
@@ -13602,13 +13876,16 @@ await test('Lista do autocomplete não é recortada pelo cartão nem coberta pel
    sumir do radar. */
 await test('Pré com exames pendentes: finaliza, cobra na data da avaliação, e segue como pendência', async () => {
   const page = await novaPagina();
+  await page.reload();
+  await page.waitForTimeout(1300);
+  /* Reabrir a aba exige uma nova sessão; pagehide encerra a anterior. */
   await page.evaluate(() => {
     sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: 'm1', usuario: 'dr@t', nome: 'Dr',
       perfil: 'admin', modulos: auth.MODULOS.map(m => m.key), soImpressao: [], role: 'gestor',
       organization_id: 'org1', uid: 'u1', entrouEm: Date.now() }));
+    __smokeBindOrg('org1', 'u1');
+    auth._desbloquear();
   });
-  await page.reload();
-  await page.waitForTimeout(1300);
 
   const r = await page.evaluate(async () => {
     const out = {};
@@ -14176,17 +14453,17 @@ await test('Histórico do paciente: cadastro, documentos com data e o financeiro
     ['pacientes', 'anestesia', 'pre', 'financeiro', 'consulta', 'termo'].forEach(m => store.setList(m, []));
     const hoje = utils.hojeISO();
 
-    store.save('pacientes', { nome: 'JOANA PEREIRA LIMA', cpf: '111.222.333-44',
+    const pac = store.save('pacientes', { nome: 'JOANA PEREIRA LIMA', cpf: '111.222.333-44',
       nascimento: '1970-03-12', plano: 'Unimed', carteirinha: '0286123', telefone: '73 99999-0000' });
-    store.save('pre', { nome: 'JOANA PEREIRA LIMA', data: hoje, cirurgia: 'Artroplastia de joelho' });
-    store.save('anestesia', { paciente: { nome: 'JOANA PEREIRA LIMA' },
+    store.save('pre', { _patientRef: pac._id, _patientKey: linker._chavePaciente(pac), nome: 'JOANA PEREIRA LIMA', data: hoje, cirurgia: 'Artroplastia de joelho' });
+    store.save('anestesia', { _patientRef: pac._id, _patientKey: linker._chavePaciente(pac), paciente: { nome: 'JOANA PEREIRA LIMA' },
       procedimento: { data: hoje, descricao: 'Artroplastia total de joelho', cirurgiao: 'Dr. Souza' } });
     /* três cobranças: uma paga, uma parcialmente glosada, uma nem faturada */
-    store.save('financeiro', { paciente: 'JOANA PEREIRA LIMA', data_proc: hoje, procedimento: 'Artroplastia',
+    store.save('financeiro', { _patientRef: pac._id, _patientKey: linker._chavePaciente(pac), paciente: 'JOANA PEREIRA LIMA', data_proc: hoje, procedimento: 'Artroplastia',
       convenio: 'Unimed', valor_previsto: '1000', valor_recebido: '1000', glosa: '0', status: 'recebido', pago: true });
-    store.save('financeiro', { paciente: 'JOANA PEREIRA LIMA', data_proc: hoje, procedimento: 'Consulta pré',
+    store.save('financeiro', { _patientRef: pac._id, _patientKey: linker._chavePaciente(pac), paciente: 'JOANA PEREIRA LIMA', data_proc: hoje, procedimento: 'Consulta pré',
       convenio: 'Unimed', valor_previsto: '300', valor_recebido: '100', glosa: '50', status: 'parcial', pago: false });
-    store.save('financeiro', { paciente: 'JOANA PEREIRA LIMA', data_proc: hoje, procedimento: 'Visita SRPA',
+    store.save('financeiro', { _patientRef: pac._id, _patientKey: linker._chavePaciente(pac), paciente: 'JOANA PEREIRA LIMA', data_proc: hoje, procedimento: 'Visita SRPA',
       convenio: 'Unimed', valor_previsto: '200', valor_recebido: '0', glosa: '0', status: 'pendente', pago: false });
 
     /* 1) o botão existe na linha do paciente e abre por ele */
@@ -14205,6 +14482,7 @@ await test('Histórico do paciente: cadastro, documentos com data e o financeiro
     out.abrePeloPaciente = !!btn && nomeAberto === 'JOANA PEREIRA LIMA'
       && btn.dataset.pacAction === 'historico' && !btn.hasAttribute('onclick');
 
+    historico._prontContext = { patientRef: pac._id, identityKey: linker._chavePaciente(pac) };
     const html = historico._prontRender('JOANA PEREIRA LIMA');
 
     /* 2) cadastro: quem é e desde quando */
@@ -14224,7 +14502,7 @@ await test('Histórico do paciente: cadastro, documentos com data e o financeiro
     out.mostraStatus = /Recebido/.test(html) && /Parcial/.test(html) && /Pendente/.test(html);
 
     /* 5) cortesia não conta como dívida — não foi cobrado de ninguém */
-    store.save('financeiro', { paciente: 'JOANA PEREIRA LIMA', data_proc: hoje, procedimento: 'Retorno',
+    store.save('financeiro', { _patientRef: pac._id, _patientKey: linker._chavePaciente(pac), paciente: 'JOANA PEREIRA LIMA', data_proc: hoje, procedimento: 'Retorno',
       valor_previsto: '400', valor_recebido: '0', glosa: '0', status: 'cortesia' });
     const html2 = historico._prontRender('JOANA PEREIRA LIMA');
     out.cortesiaNaoEhDivida = /R\$ 350,00/.test(html2) && !/R\$ 750,00/.test(html2);
@@ -14232,6 +14510,7 @@ await test('Histórico do paciente: cadastro, documentos com data e o financeiro
     /* 6) paciente cadastrado e ainda sem documento: a pergunta "desde quando"
        tem resposta mesmo assim */
     store.save('pacientes', { nome: 'NOVO SEM DOCUMENTO', cpf: '999.888.777-66' });
+    historico._prontContext = null;
     const html3 = historico._prontRender('NOVO SEM DOCUMENTO');
     out.novoAparece = /999\.888\.777-66/.test(html3) && /Cadastrado em/.test(html3)
       && !/Nenhum registro encontrado/.test(html3);
@@ -14277,7 +14556,8 @@ await test('Particular: o acerto entra na janela de cobrança — meio, valor e 
     await new Promise(res => setTimeout(res, 150));
 
     /* 2) particular pede, com os quatro campos */
-    const p1 = store.save('pre', { nome: 'MARIA PARTICULAR', data: hoje, convenio: 'Particular', _finalizado: true });
+    const pac = store.save('pacientes', { nome: 'MARIA PARTICULAR' });
+    const p1 = store.save('pre', { _patientRef: pac._id, nome: 'MARIA PARTICULAR', data: hoje, convenio: 'Particular', _finalizado: true });
     fin.finalizacao.abrir('pre', p1);
     await new Promise(res => setTimeout(res, 350));
     out.pedeOsQuatro = ['fz_pago', 'fz_recebido', 'fz_data_pag', 'fz_conta'].every(n => !!campo(n))
@@ -14339,6 +14619,7 @@ await test('Particular: o acerto entra na janela de cobrança — meio, valor e 
 
     /* 6) meio e conta aparecem no histórico do paciente, e os campos existem
        no Financeiro para corrigir depois */
+    historico._prontContext = { patientRef: pac._id };
     const html = historico._prontRender('MARIA PARTICULAR');
     out.saiNoHistorico = /PIX/.test(html) && /Conta PJ Itaú/.test(html);
     ui.navegar('financeiro');
@@ -14609,11 +14890,12 @@ await test('Paciente do cadastro em todos os módulos — e o registro segue ras
 
     /* 3) o que foi salvo aparece no histórico daquele paciente */
     const hoje = utils.hojeISO();
-    store.save('orcamento', { paciente: 'CLARA MENDES SOUZA', _paciente_id: pac._id, data: hoje,
+    store.save('orcamento', { paciente: 'CLARA MENDES SOUZA', _paciente_id: pac._id, _patientRef: pac._id, _patientKey: linker._chavePaciente(pac), data: hoje,
       total_paciente: '1200', procedimentos: [{ descricao: 'Artroscopia' }] });
-    store.save('documentos', { nome: 'CLARA MENDES SOUZA', _paciente_id: pac._id, data: hoje, modelo: 'atestado' });
-    store.save('financeiro', { paciente: 'CLARA MENDES SOUZA', _paciente_id: pac._id, data_proc: hoje,
+    store.save('documentos', { nome: 'CLARA MENDES SOUZA', _paciente_id: pac._id, _patientRef: pac._id, _patientKey: linker._chavePaciente(pac), data: hoje, modelo: 'atestado' });
+    store.save('financeiro', { paciente: 'CLARA MENDES SOUZA', _paciente_id: pac._id, _patientRef: pac._id, _patientKey: linker._chavePaciente(pac), data_proc: hoje,
       procedimento: 'Artroscopia', valor_previsto: '1200', valor_recebido: '1200', status: 'recebido', pago: true });
+    historico._prontContext = { patientRef: pac._id, identityKey: linker._chavePaciente(pac) };
     let html = historico._prontRender('CLARA MENDES SOUZA');
     out.tudoNoHistorico = /Orçamento/.test(html) && /Documentos/.test(html) && /Financeiro/.test(html)
       && /Artroscopia/.test(html);
@@ -14670,15 +14952,16 @@ await test('Histórico do paciente: registros do mesmo atendimento lado a lado, 
     try { modal.close(); } catch (e) {}
     ['pacientes', 'anestesia', 'recuperacao', 'financeiro', 'pre'].forEach(m => store.setList(m, []));
     const hoje = utils.hojeISO();
-    store.save('pacientes', { nome: 'ALANA TESTE', plano: 'Unimed' });
+    const pac = store.save('pacientes', { nome: 'ALANA TESTE', plano: 'Unimed' });
 
     /* DOIS atos no MESMO dia, cada um com sua ficha, sua SRPA e seu financeiro */
     const mk = (n) => {
-      const fa = store.save('anestesia', { paciente: { nome: 'ALANA TESTE' }, _finalizado: true,
+      const vinculo = { _patientRef: pac._id, _caseId: 'caso-alana-' + n };
+      const fa = store.save('anestesia', { ...vinculo, paciente: { nome: 'ALANA TESTE' }, _finalizado: true,
         procedimento: { data: hoje, descricao: 'Procedimento ' + n, cirurgiao: 'Dr Souza' } });
-      const sr = store.save('recuperacao', { nome: 'ALANA TESTE', data: hoje,
+      const sr = store.save('recuperacao', { ...vinculo, nome: 'ALANA TESTE', data: hoje,
         procedimento: 'Procedimento ' + n, _finalizado: true });
-      const fi = store.save('financeiro', { paciente: 'ALANA TESTE', data_proc: hoje,
+      const fi = store.save('financeiro', { ...vinculo, paciente: 'ALANA TESTE', data_proc: hoje,
         procedimento: 'Procedimento ' + n, valor_previsto: n === 1 ? '212.64' : '300',
         valor_recebido: n === 1 ? '0' : '300', status: n === 1 ? 'pendente' : 'recebido',
         pago: n !== 1, _origemId: fa._id, _origemTipo: 'anestesia' });
@@ -14708,6 +14991,7 @@ await test('Histórico do paciente: registros do mesmo atendimento lado a lado, 
     out.ancoraEhAFicha = grupos.every(g => g.ancora.mod === 'anestesia');
 
     /* 4) na tela: cabeçalho do dia uma vez, e os chips clicáveis */
+    historico._prontContext = { patientRef: pac._id };
     const html = historico._prontRender('ALANA TESTE');
     out.diaUmaVezSo = (html.match(/📅/g) || []).length === 1;
     out.temBlocos = (html.match(/class="pront-bloco"/g) || []).length === 2;
@@ -14727,8 +15011,8 @@ await test('Histórico do paciente: registros do mesmo atendimento lado a lado, 
     /* 5) o chip do financeiro diz o estado da cobrança na própria etiqueta */
     out.chipDizOEstado = /em aberto/.test(html) && /quitado/.test(html) && /R\$ 212,64/.test(html);
 
-    /* 6) registro solto (sem vínculo) continua aparecendo, no bloco dele */
-    store.save('pre', { nome: 'ALANA TESTE', data: '2026-09-01', cirurgia: 'Avaliação isolada' });
+    /* 6) registro com paciente identificado, mas sem vínculo com os outros atendimentos continua aparecendo, no bloco dele */
+    store.save('pre', { _patientRef: pac._id, nome: 'ALANA TESTE', data: '2026-09-01', cirurgia: 'Avaliação isolada' });
     const html2 = historico._prontRender('ALANA TESTE');
     out.soltoAparece = /Avaliação isolada/.test(html2) && (html2.match(/📅/g) || []).length === 2;
 
@@ -14743,7 +15027,7 @@ await test('Histórico do paciente: registros do mesmo atendimento lado a lado, 
   assert(r.diaUmaVezSo, 'a data aparece uma vez, como cabeçalho do dia');
   assert(r.temBlocos && r.chipsClicaveis, 'os registros ficam lado a lado, cada um clicável para abrir e editar');
   assert(r.chipDizOEstado, 'e o do financeiro já diz o valor e se está em aberto ou quitado');
-  assert(r.soltoAparece, 'registro sem vínculo nenhum continua aparecendo, no dia dele');
+  assert(r.soltoAparece, 'registro vinculado ao paciente, sem vínculo a outro caso, continua no dia dele');
   assert(r.continuaSeparado, 'sem embolar os dois atos do mesmo dia');
   await page.close();
 });
@@ -14813,8 +15097,9 @@ await test('Financeiro: códigos TUSS já preenchidos, com o valor da tabela do 
       && !usados.some(c => /Bradesco/i.test(c));                      /* nunca usado: não é oferecido */
 
     /* 4) PARTICULAR: o valor vem do orçamento que foi passado ao paciente */
-    store.save('orcamento', { paciente: 'MARIA PARTICULAR', data: hoje, total_paciente: '1800' });
-    const pre2 = store.save('pre', { nome: 'MARIA PARTICULAR', data: hoje, convenio: 'Particular',
+    const maria = store.save('pacientes', { nome: 'MARIA PARTICULAR' });
+    store.save('orcamento', { _patientRef: maria._id, paciente: 'MARIA PARTICULAR', data: hoje, total_paciente: '1800' });
+    const pre2 = store.save('pre', { _patientRef: maria._id, nome: 'MARIA PARTICULAR', data: hoje, convenio: 'Particular',
       cirurgia: 'Consulta', _finalizado: true });
     const fr2 = fin.fromDoc('pre', pre2);
     out.particularUsaOOrcamento = Number(fr2.item.valor_previsto) === 1800
@@ -14823,16 +15108,19 @@ await test('Financeiro: códigos TUSS já preenchidos, com o valor da tabela do 
     /* 5) orçamento velho demais não vale: preço de um ano atrás não é este preço */
     store.setList('orcamento', []);
     const antigo = new Date(); antigo.setMonth(antigo.getMonth() - 14);
-    store.save('orcamento', { paciente: 'JOAO VELHO', data: antigo.toISOString().slice(0, 10), total_paciente: '9999' });
-    const pre3 = store.save('pre', { nome: 'JOAO VELHO', data: hoje, convenio: 'Particular',
+    const joao = store.save('pacientes', { nome: 'JOAO VELHO' });
+    store.save('orcamento', { _patientRef: joao._id, paciente: 'JOAO VELHO', data: antigo.toISOString().slice(0, 10), total_paciente: '9999' });
+    const pre3 = store.save('pre', { _patientRef: joao._id, nome: 'JOAO VELHO', data: hoje, convenio: 'Particular',
       cirurgia: 'Consulta', _finalizado: true });
     const fr3 = fin.fromDoc('pre', pre3);
     out.orcamentoVelhoNaoVale = Number(fr3.item.valor_previsto) !== 9999;
 
     /* 6) e orçamento de OUTRO paciente nunca vale */
     store.setList('orcamento', []);
-    store.save('orcamento', { paciente: 'OUTRA PESSOA', data: hoje, total_paciente: '7777' });
-    const pre4 = store.save('pre', { nome: 'ANA SOZINHA', data: hoje, convenio: 'Particular',
+    const ana = store.save('pacientes', { nome: 'ANA SOZINHA' });
+    const homonima = store.save('pacientes', { nome: 'ANA SOZINHA' });
+    store.save('orcamento', { _patientRef: homonima._id, paciente: 'ANA SOZINHA', data: hoje, total_paciente: '7777' });
+    const pre4 = store.save('pre', { _patientRef: ana._id, nome: 'ANA SOZINHA', data: hoje, convenio: 'Particular',
       cirurgia: 'Consulta', _finalizado: true });
     const fr4 = fin.fromDoc('pre', pre4);
     out.orcamentoDeOutroNaoVale = Number(fr4.item.valor_previsto) !== 7777;
@@ -15190,7 +15478,15 @@ await test('Finalizar: uma janela só — gerar ou não, com plano, tabela do pl
     fin.finalizacao.confirmar();
     await new Promise(res => setTimeout(res, 200));
     out.naoGerou = !store.list('financeiro').some(x => x._origemId === pre2._id);
-    out.ficouGravadaADecisao = !!store.getById('pre', pre2._id)._semFinanceiro;
+    /* A decisão financeira é independente do documento assinado. Recarregar
+       um clone sem o antigo marcador não pode fazer a cobrança ressuscitar. */
+    const semCobranca = store.getById('pre', pre2._id);
+    out.originalPreservadoAoNaoGerar = adendos.diffRegistro(pre2, semCobranca).length === 0
+      && (semCobranca._adendos || []).some(ad => ad.motivo === 'decisao_financeira'
+        && ad.texto === fin.finalizacao.DECISAO_NAO && !!ad.autor && !!ad.data);
+    const recarregado = JSON.parse(JSON.stringify(semCobranca));
+    delete recarregado._semFinanceiro;
+    out.ficouGravadaADecisao = fin.fromDoc('pre', recarregado) === null;
     /* e uma gravação posterior não ressuscita a cobrança */
     fin.fromDoc('pre', store.getById('pre', pre2._id));
     out.naoRessuscita = !store.list('financeiro').some(x => x._origemId === pre2._id);
@@ -15238,6 +15534,7 @@ await test('Finalizar: uma janela só — gerar ou não, com plano, tabela do pl
   assert(r.ajusteManualVale, 'e tudo continua editável — o valor ajustado à mão é o que vale');
   assert(r.criouComOQueEstavaNaTela, 'confirmar cria o lançamento com o que estava na tela');
   assert(r.escondeODetalhe && r.naoGerou, '"Não" não gera lançamento nenhum');
+  assert(r.originalPreservadoAoNaoGerar, 'decidir não cobrar preserva o documento e registra um evento financeiro com autoria e data');
   assert(r.ficouGravadaADecisao && r.naoRessuscita, 'e fica gravado: uma gravação posterior não ressuscita a cobrança');
   assert(r.tipoSegueOPlano && r.pedeOAcerto, 'no particular, o acerto entra na MESMA janela — não numa terceira');
   assert(r.particularJaSaiQuitado, 'e o lançamento já sai quitado, com meio e conta');
@@ -15391,16 +15688,19 @@ await test('Janela de finalização: desfecho confirmado com a cirurgia à vista
     /* e oferece todos os desfechos */
     out.temAsOpcoes = box.querySelectorAll('[name="fz_desfecho"] option').length === Object.keys(pre.DESFECHOS).length;
 
-    /* 2) mudar aqui volta para a avaliação — dois valores para a mesma
-       pergunta é como começam as divergências */
+    /* 2) confirmar um desfecho diferente gera correção auditável na avaliação
+       finalizada, e o Financeiro usa o desfecho confirmado para esta cobrança. */
     box.querySelector('[name="fz_desfecho"]').value = 'liberado';
     box.querySelector('[name="fz_desfecho_obs"]').value = 'exames dentro da validade';
     document.querySelector('[name="fz_obs"]').value = 'Guia autorizada por telefone';
     fin.finalizacao.confirmar();
     await new Promise(res => setTimeout(res, 300));
     const pre2 = store.getById('pre', p1._id);
-    out.voltouParaAAvaliacao = pre2.conclusao_status === 'liberado'
-      && pre2.conclusao_obs === 'exames dentro da validade';
+    out.originalPreservado = pre2.conclusao_status === 'pendente' && !pre2.conclusao_obs
+      && pre2._finalizadoEm === p1._finalizadoEm;
+    out.voltouParaAAvaliacao = (pre2._adendos || []).some(ad => ad.motivo === 'correcao'
+      && /CORREÇÃO/.test(ad.texto) && /liberado/.test(ad.texto)
+      && /exames dentro da validade/.test(ad.texto) && !!ad.autor && !!ad.data);
     const l1 = store.list('financeiro').find(x => x._origemId === p1._id);
     out.observacaoNoLancamento = !!l1 && /Guia autorizada por telefone/.test(l1.observacoes || '')
       && /Desfecho: Liberado/.test(l1.observacoes || '');
@@ -15449,7 +15749,8 @@ await test('Janela de finalização: desfecho confirmado com a cirurgia à vista
   assert(r.pedeODesfecho, 'a pré confirma o desfecho na janela de finalização');
   assert(r.mostraACirurgia, 'com a cirurgia proposta à vista — é ela que dá sentido ao "liberado"');
   assert(r.jaVemComOQueFoiDito && r.temAsOpcoes, 'já vindo com o que a avaliação registrou: é confirmação, não redigitação');
-  assert(r.voltouParaAAvaliacao, 'e o que se confirma ali volta para a avaliação');
+  assert(r.originalPreservado, 'confirmar desfecho não sobrescreve a avaliação assinada nem muda a data da finalização');
+  assert(r.voltouParaAAvaliacao, 'o novo desfecho fica na avaliação como adendo de correção com autoria e data');
   assert(r.observacaoNoLancamento, 'a observação e o desfecho entram no lançamento, para a conciliação');
   assert(r.avisaQueFalta, 'sem cirurgia proposta, a janela diz que falta em vez de calar');
   assert(r.fichaNaoPergunta, 'a ficha de anestesia não pergunta desfecho — não é avaliação');
@@ -15556,11 +15857,11 @@ await test('Geração do financeiro puxa cadastro e ficha — e o que faltar dá
     try { modal.close(); } catch (e) {}
     ['pacientes', 'anestesia', 'pre', 'financeiro'].forEach(m => store.setList(m, []));
     const hoje = utils.hojeISO();
-    store.save('pacientes', { nome: 'PEDRO APTO', plano: 'Unimed', carteirinha: '0286777',
+    const pac = store.save('pacientes', { nome: 'PEDRO APTO', plano: 'Unimed', carteirinha: '0286777',
       cpf: '111.222.333-44', acomodacao: 'apartamento' });
 
     /* 1) TODOS os códigos da ficha viram linha — não só o principal */
-    const an = store.save('anestesia', {
+    const an = store.save('anestesia', { _patientRef: pac._id,
       paciente: { nome: 'PEDRO APTO', convenio: 'Unimed' },
       procedimento: { data: hoje, descricao: 'Artroplastia de joelho', codigo: '3.07.15.05-0',
         cirurgias_extra: [
@@ -15658,11 +15959,14 @@ await test('A nuvem lê o índice antes do conteúdo, e o aparelho sabe quanto b
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
+    const leuConteudo = u => new URL(u).searchParams.get('select') === cloudRel._REG_SELECT;
     cloud.estaConfigurado = () => true; cloud.estaLogado = () => true;
     cloud._garantirToken = async () => true;
     cloud.config = () => ({ url: 'https://x.supabase.co', key: 'k' });
     cloud._headers = () => ({});
     cloud.session = () => ({ user: { id: 'u1' } });
+    __smokeBindOrg('org-1');
+    cloud.session = () => JSON.parse(sessionStorage.getItem(cloud.SESSION_KEY));
     cloudRel._orgAsync = async () => 'org-1';
     cloudRel.disponivel = () => true;
 
@@ -15724,7 +16028,7 @@ await test('A nuvem lê o índice antes do conteúdo, e o aparelho sabe quanto b
     preLanc._ultimaBusca = 0;
     await preLanc.sincronizarFila({ forcar: true, silent: true });
     /* O registro já está aqui nesta versão — o conteúdo não pode ser pedido */
-    out.filaSoOIndice = !chamadas.some(u => /legacy_id,data,version/.test(decodeURIComponent(u)));
+    out.filaSoOIndice = !chamadas.some(u => leuConteudo(u));
     out.filaLeuOIndice = chamadas.some(u => /select=id,legacy_id,version,updated_by,updated_at&/.test(u));
     /* A conta de quem espera conferência é do SERVIDOR, não do acervo daqui:
        o caso que não couber neste aparelho é justamente o que precisa ser
@@ -15750,7 +16054,7 @@ await test('A nuvem lê o índice antes do conteúdo, e o aparelho sabe quanto b
     });
     preLanc._ultimaBusca = 0;
     await preLanc.sincronizarFila({ forcar: true, silent: true });
-    out.filaBaixouOQueMudou = chamadas.some(u => /id=in\./.test(u) && /legacy_id,data,version/.test(decodeURIComponent(u)));
+    out.filaBaixouOQueMudou = chamadas.some(u => /id=in\./.test(u) && leuConteudo(u));
 
     /* ARQUIVADO aqui não pode descer de novo: era assim que tudo o que se
        tirou do aparelho para liberar espaço voltava a ser baixado em cada
@@ -15795,6 +16099,8 @@ await test('A nuvem lê o índice antes do conteúdo, e o aparelho sabe quanto b
   assert(r.medidorZera, 'a contagem pode ser zerada para medir um período novo');
   await page.close();
 });
+
+
 
 /* 220) Mutirão: as duas correções do que ficou para trás, com volta
 
@@ -16272,7 +16578,8 @@ await test('Pacientes, Dashboard e Financeiro são de cada ambiente — e a nuve
     cloud._garantirToken = async () => true;
     cloud.config = () => ({ url: 'https://x.supabase.co', key: 'k' });
     cloud._headers = () => ({});
-    cloud.session = () => ({ user: { id: 'u1' } });
+    cloud.session = () => ({ access_token: 't', user: { id: 'u1' } });
+    __smokeBindOrg('org-aaaaaaaa', 'u1');
     cloudRel.disponivel = () => true;
     cloudRel._orgAsync = async () => 'org-aaaaaaaa';
 
@@ -16312,12 +16619,16 @@ await test('Pacientes, Dashboard e Financeiro são de cada ambiente — e a nuve
        o ambiente entra na chave, e o filtro é do servidor */
     chamadas = [];
     try { await rascunhosSync.puxar('anestesia'); } catch (e) {}
-    const pedidoRasc = chamadas.find(u => /rascunho_anestesia/.test(decodeURIComponent(u)));
-    out.rascunhoPedeDoAmbiente = !!pedidoRasc && /rascunho_anestesia@org-aaaa/.test(decodeURIComponent(pedidoRasc));
+    const pedidoRasc = chamadas.find(u => /\/drafts\?/.test(u));
+    out.rascunhoPedeDoAmbiente = !!pedidoRasc && /organization_id=eq.org-aaaaaaaa/.test(pedidoRasc)
+      && /user_id=eq.u1/.test(pedidoRasc) && /module=eq.anestesia/.test(pedidoRasc);
     /* e muda de chave quando o ambiente muda */
     __smokeBindOrg('org-bbbbbbbb');
-    out.rascunhoMudaComOAmbiente = rascunhosSync._modulo('anestesia') !== 'rascunho_anestesia'
-      && rascunhosSync._modulo('anestesia').indexOf('@org-bbbb') > 0;
+    chamadas = [];
+    await rascunhosSync.puxar('anestesia');
+    const pedidoB = chamadas.find(u => /\/drafts\?/.test(u));
+    out.rascunhoMudaComOAmbiente = !!pedidoB && /organization_id=eq.org-bbbbbbbb/.test(pedidoB)
+      && /user_id=eq.u1/.test(pedidoB) && !/organization_id=eq.org-aaaaaaaa/.test(pedidoB);
 
     /* nada do outro ambiente entrou em lugar nenhum */
     __smokeBindOrg('org-aaaaaaaa');
@@ -16349,7 +16660,7 @@ await test('Pacientes, Dashboard e Financeiro são de cada ambiente — e a nuve
   assert(r.resgateNaoUsaCanalPessoal, 'resgatar um registro também não');
   assert(r.restaurarNaoUsaCanalPessoal, '"restaurar tudo" também não — despejaria o acervo das outras clínicas nesta gaveta');
   assert(r.rascunhoPedeDoAmbiente, 'rascunho é ficha em edição, com nome de paciente: a chave dele carrega o ambiente');
-  assert(r.rascunhoMudaComOAmbiente, 'e muda quando o ambiente muda');
+  assert(r.rascunhoMudaComOAmbiente, 'o filtro de organização muda quando o ambiente muda');
   assert(r.nadaVazou, 'nenhum caminho pode ter deixado entrar registro de outro ambiente');
   assert(r.umaClinicaNaoUsaOPessoal, 'uma clínica não basta para atribuir automaticamente linha histórica sem organization_id');
   assert(r.semClinicaNaoUsaOPessoal, 'sem clínica não existe destino autorizado para o canal pessoal legado');
@@ -16617,7 +16928,7 @@ await test('Auditoria: o registro carrega a clínica dele, e não é gravado em 
     cloud._garantirToken = async () => true;
     cloud.config = () => ({ url: 'https://x.supabase.co', key: 'k' });
     cloud._headers = () => ({});
-    cloud.session = () => ({ user: { id: 'u1' } });
+    cloud.session = () => ({ access_token: 't', user: { id: 'u1' } });
     cloudRel.disponivel = () => true;
 
     /* ---- a leitura CARIMBA de qual clínica o registro veio ---- */
@@ -16625,7 +16936,7 @@ await test('Auditoria: o registro carrega a clínica dele, e não é gravado em 
     __smokeBindOrg('org-A');
     window.fetch = async (url) => {
       const u = String(url);
-      if (/anesthesia_records/.test(u) && /legacy_id,data,version/.test(decodeURIComponent(u))) {
+      if (/anesthesia_records/.test(u) && new URL(u).searchParams.get('select') === cloudRel._REG_SELECT) {
         return { ok: true, headers: { get: () => '0' }, json: async () => ([
           { id: 'r1', organization_id: 'org-A', legacy_id: 'k1', version: 1,
             updated_at: 't1', data: { _id: 'k1', paciente: { nome: 'Da clinica A' } } }
@@ -16642,7 +16953,13 @@ await test('Auditoria: o registro carrega a clínica dele, e não é gravado em 
     let gravou = null;
     window.fetch = async (url, init) => {
       const u = String(url);
-      if (init && init.method === 'POST') { gravou = u; return { ok: true, headers: { get: () => '0' }, json: async () => ([{ version: 1, updated_at: 't2' }]) }; }
+      if (init && init.method === 'POST') {
+        gravou = u;
+        const enviado = JSON.parse(init.body)[0];
+        return { ok: true, headers: { get: () => '0' }, json: async () => ([Object.assign({}, enviado, {
+          id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', version: 1, updated_at: '2026-09-30T10:00:00.000Z'
+        })]) };
+      }
       return { ok: true, headers: { get: () => '0' }, json: async () => [] };
     };
     const res = await cloudRel.enviarRegistro('anestesia', vindos[0]);
@@ -16692,6 +17009,8 @@ await test('Auditoria: o registro carrega a clínica dele, e não é gravado em 
   assert(r.nadaDePacienteFora, 'nenhuma chave com dado de paciente pode estar fora da separação: ' + JSON.stringify(r.suspeitas));
   await page.close();
 });
+
+
 
 /* 229) O QUE É DE CADA AMBIENTE — a lista, e a prova de que ela vale
 
@@ -16790,7 +17109,7 @@ await test('Logomarca e Drive são da clínica aberta, e só o gestor dela edita
     const out = {};
     const orig = auth.usuarioAtual;
     __smokeBindOrg('org-teste');
-    localStorage.setItem(ambiente.NOME_KEY, 'Clínica de Teste');
+    ambiente.definirNome('Clínica de Teste');
 
     /* ---- GESTOR: edita ---- */
     auth.usuarioAtual = () => ({ usuario: 'chefe', role: 'gestor' });
@@ -16866,6 +17185,7 @@ await test('Acervo antigo sem dono é apontado como causa do aparelho cheio e do
       fora.forEach(k => R.removeItem(k));
     };
     limpar();
+    ambiente._fecharFaixaLegado();
     ambiente._faixaMostrada = false;
 
     /* acervo antigo grande, sem dono, e uma clínica aberta com a gaveta vazia */
@@ -16891,6 +17211,7 @@ await test('Acervo antigo sem dono é apontado como causa do aparelho cheio e do
     out.naoDuplica = document.querySelectorAll('#legado-faixa').length === 1;
 
     /* com a gaveta CHEIA a faixa não aparece: aí o vazio não é o sintoma */
+    ambiente._fecharFaixaLegado();
     ambiente._fecharFaixaLegado();
     ambiente._faixaMostrada = false;
     store.setList('anestesia', [{ _id: 'tem', paciente: { nome: 'Ja tem coisa' } }]);
@@ -17038,7 +17359,7 @@ await test('Marcadores antigos e aparelho cheio não furam a quarentena B2', asy
     out.botaoVisivel = !!btn && btn.style.display !== 'none' && /quarentena/i.test(btn.textContent);
     ambiente.perguntarLegado();
     const corpo = (document.getElementById('modal-body') || {}).textContent || '';
-    out.modalExplica = /somente o programador/i.test(corpo) && /Nada será movido ou apagado/i.test(corpo);
+    out.modalExplica = /Programador.*Migração segura do legado/i.test(corpo) && /Nada será movido ou apagado/i.test(corpo);
     try { modal.close(); } catch (e) {}
 
     /* Armazenamento cheio aponta a causa sem oferecer adoção. */
@@ -17110,7 +17431,7 @@ await test('Servidor fora do ar: o app diz que não é a senha, e não manda nin
     window.fetch = async () => resp(503, { message: 'Service unavailable' });
     out.loginFora = (await cloud.login('a@b.com', 'x')) === false;
     out.disseQueNaoEhSenha = avisos.some(t => /não é a sua senha/i.test(t));
-    out.disseParaContinuar = avisos.some(t => /sobe sozinho/i.test(t));
+    out.disseParaContinuar = avisos.some(t => /sobe sozinh[oa]|subir automaticamente/i.test(t));
     out.disseParaNaoSair = avisos.some(t => /não saia da nuvem/i.test(t));
     out.marcouServidorFora = cloud.servidorFora() === true;
 
@@ -17143,7 +17464,7 @@ await test('Servidor fora do ar: o app diz que não é a senha, e não manda nin
 
     /* ---- 5) renovação de token: 503 NÃO vence a sessão de ninguém ---- */
     sessionStorage.setItem(cloud.SESSION_KEY, JSON.stringify({
-      access_token: 't', refresh_token: 'r', user: { email: 'a@b.com' }, expires_at: Date.now() - 1000
+      access_token: 't', refresh_token: 'r', user: { id: 'u-auth', email: 'a@b.com' }, expires_at: Date.now() - 1000
     }));
     window.fetch = async () => resp(503, { message: 'Service unavailable' });
     out.tokenFalhou = (await cloud._garantirToken()) === false;
@@ -17168,7 +17489,7 @@ await test('Servidor fora do ar: o app diz que não é a senha, e não manda nin
     await cloud.login('a@b.com', 'x');
     out.telaSabeDaSenha = /Invalid login credentials/.test(cloud.motivoUltimaFalha());
     window.fetch = async () => resp(200, {
-      access_token: 't', refresh_token: 'r', expires_in: 3600, user: { email: 'a@b.com' }
+      access_token: 't', refresh_token: 'r', expires_in: 3600, user: { id: 'u-auth', email: 'a@b.com' }
     });
     await cloud.login('a@b.com', 'certa');
     out.limpaOMotivoAoEntrar = cloud.motivoUltimaFalha() === '';
@@ -17183,7 +17504,7 @@ await test('Servidor fora do ar: o app diz que não é a senha, e não manda nin
     nuvemEstado.render();
     out.linhaFalaDoServidor = /não está respondendo/i.test(linha.textContent);
     out.linhaNaoMandaSair = !/Entrar de novo/.test(linha.innerHTML);
-    out.linhaAcalma = /Nada foi perdido/i.test(linha.textContent) && /sobe sozinho/i.test(linha.textContent);
+    out.linhaAcalma = /fila cifrada/i.test(linha.textContent) && /sobe sozinh[oa]|subir automaticamente/i.test(linha.textContent);
 
     /* ---- 8) qualquer módulo descobre a queda, não só o login ---- */
     cloud._servidorFora = false;
@@ -17222,6 +17543,8 @@ await test('Servidor fora do ar: o app diz que não é a senha, e não manda nin
   assert(r.quatroCentoNaoConta, 'um 404 de tabela não pode ser lido como servidor fora do ar');
   await page.close();
 });
+
+
 
 /* 235) Entrar no app sem entrar na nuvem — o estado que ninguém percebe
 
@@ -17495,6 +17818,7 @@ await test('Conta criada por quem autoriza, com senha provisória que morre no p
       access_token: 'tok-do-programador', refresh_token: 'r',
       user: { id: 'u1', email: programador.EMAIL }, expires_at: Date.now() + 3600000
     }));
+    __smokeBindNoOrg('u1');
     let pedido = null;
     const origFetch = window.fetch;
     window.fetch = async (url, init) => {
@@ -17506,7 +17830,7 @@ await test('Conta criada por quem autoriza, com senha provisória que morre no p
           headers: { get: () => '0' }
         };
       }
-      return { ok: true, status: 200, json: async () => ([]), headers: { get: () => '0' } };
+      return { ok: true, status: 200, json: async () => ([]), text: async () => '[]', headers: { get: () => '0' } };
     };
     const rpcs = [];
     programador._rpc = async (nome, body) => { rpcs.push({ nome, body }); return {}; };
@@ -17594,6 +17918,8 @@ await test('Conta criada por quem autoriza, com senha provisória que morre no p
   await page.close();
 });
 
+
+
 /* 239) Bloquear o acesso ≠ apagar a conta
 
    Pergunta de quem administra a clínica: "para deletar contas ou impedir o
@@ -17619,6 +17945,7 @@ await test('Bloquear acesso: tira a entrada sem apagar nada, e dá caminho de vo
     }));
     cloud.config = () => ({ url: 'https://exemplo.supabase.co', key: 'k' });
     cloud.estaConfigurado = () => true;
+    __smokeBindNoOrg();
     programador._orgs = [{ id: 'org-1', nome: 'Minha Clínica' }];
     programador._perfis = [{ id: 'u-sec', email: 'secretaria@x.com' }];
     programador._membros = [
@@ -17642,7 +17969,7 @@ await test('Bloquear acesso: tira a entrada sem apagar nada, e dá caminho de vo
         pedido = { url: String(url), body: JSON.parse(init.body) };
         return { ok: true, status: 200, json: async () => ({ ok: true, user_id: 'u-sec', ativo: false }), headers: { get: () => '0' } };
       }
-      return { ok: true, status: 200, json: async () => ([]), headers: { get: () => '0' } };
+      return { ok: true, status: 200, json: async () => ([]), text: async () => '[]', headers: { get: () => '0' } };
     };
     await programador.definirAcesso('u-sec', 'org-1', false);
     out.chamouAcesso = !!pedido && /\?op=acesso$/.test(pedido.url);
@@ -17677,6 +18004,8 @@ await test('Bloquear acesso: tira a entrada sem apagar nada, e dá caminho de vo
   assert(r.naoEngoleOutrosErros, 'erro de outra natureza continua aparecendo como veio — a tradução vale só para o caso que ela explica');
   await page.close();
 });
+
+
 
 /* 240) Conta sem clínica NÃO herda a clínica de quem entrou antes
 
@@ -17878,6 +18207,7 @@ await test('Criar conta não vincula a ninguém por descuido do formulário', as
     }));
     cloud.config = () => ({ url: 'https://exemplo.supabase.co', key: 'k' });
     cloud.estaConfigurado = () => true;
+    __smokeBindNoOrg();
     programador._orgs = [{ id: 'org-marcelo', nome: 'Minha Clínica de Anestesia' }, { id: 'org-b', nome: 'Outra' }];
     programador._perfis = []; programador._membros = []; programador._shares = [];
     programador._renderConteudo(document.getElementById('prog-conteudo'));
@@ -17895,7 +18225,7 @@ await test('Criar conta não vincula a ninguém por descuido do formulário', as
       if (/functions\/v1\/contas/.test(String(url))) {
         return { ok: true, status: 200, json: async () => ({ ok: true, user_id: 'u-carlos', email: 'ch@x.com', senha: 'Abcdef234' }), headers: { get: () => '0' } };
       }
-      return { ok: true, status: 200, json: async () => ([]), headers: { get: () => '0' } };
+      return { ok: true, status: 200, json: async () => ([]), text: async () => '[]', headers: { get: () => '0' } };
     };
     document.getElementById('prog-nc-email').value = 'ch@x.com';
     await programador.criarConta();
@@ -17940,6 +18270,8 @@ await test('Criar conta não vincula a ninguém por descuido do formulário', as
   assert(r.addMembroSemPadrao && r.recusouSemAmbiente, 'adicionar a um ambiente também exige escolha consciente');
   await page.close();
 });
+
+
 
 /* 243) A clínica aparece no papel que o paciente leva para casa
 
@@ -18510,83 +18842,68 @@ await test('Tarja de sem internet, e o que foi digitado sobrevive em qualquer m�
    computador de consultório é usado por mais de uma pessoa. O que o médico
    estava digitando num termo não é para aparecer na tela da secretária. */
 await test('Isolamento entre ambientes (e entre pessoas) no que foi construído hoje', async () => {
-  const page = await novaPagina();
-  const r = await page.evaluate(() => {
+const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    await __smokePrepareQueue('org-aaaa', 'medico-a');
+    sincronia.agora = () => {};
+    rascunhos._agendarEnvio = () => {};
+    cloudRel.enviarRegistro = async () => ({ ok: false, motivo: 'rede' });
     const out = {};
-    const R = cofre._real;
-    const limpar = () => {
-      const fora = [];
-      for (let i = 0; i < R.length; i++) { const k = R.key(i); if (k && k.indexOf('medsys.') === 0) fora.push(k); }
-      fora.forEach(k => R.removeItem(k));
-    };
-    const entrar = (org) => __smokeBindOrg(org);
-    limpar();
-
-    /* ================= CLÍNICA A ================= */
-    entrar('org-aaaa');
     clinicaIdentidade.salvar({ nome: 'Clínica A', endereco: 'Rua A', contato: '1111', extra: '' });
-    store.setList('pre', [{
-      _id: 'preA', nome: 'Paciente A', _updatedAt: new Date().toISOString(),
-      _procsExtra: [{ codigo: '1.1', descricao: 'Cirurgia da clínica A', lateralidade: 'direita' }]
-    }]);
-    /* um registro preso só neste aparelho (sem espelho na nuvem) */
-    store.setList('anestesia', [{ _id: 'fA', paciente: { nome: 'Paciente A' }, _updatedAt: new Date().toISOString() }]);
-    /* um rascunho vivo, digitado por mim */
+    const preA = store.save('pre', { _id: 'preA', nome: 'Paciente A',
+      _procsExtra: [{ codigo: '1.1', descricao: 'Cirurgia da clínica A', lateralidade: 'direita' }] });
+    const fichaA = store.save('anestesia', { _id: 'fA', paciente: { nome: 'Paciente A' } });
+    await Promise.all([store.aguardarNuvem(preA), store.aguardarNuvem(fichaA)]);
     const f = document.getElementById('form-termo');
-    const campo = f && f.querySelector('input[name], textarea[name]');
-    const origUser = auth.usuarioAtual;
-    auth.usuarioAtual = () => ({ usuario: 'medico@a.com' });
-    if (campo) { campo.value = 'Termo em edição na clínica A'; edicaoViva.guardar('termo'); }
-    /* confirmado fica na nuvem/memória, não em uma gaveta compartilhada */
+    const campo = f.querySelector('[name="nome"]');
+    const limparForm = () => Array.from(f.elements).forEach(el => {
+      if (el.type === 'checkbox' || el.type === 'radio') el.checked = false;
+      else if (el.name) el.value = '';
+    });
+    limparForm();
+    campo.value = 'Termo em edição na clínica A';
+    edicaoViva.guardar('termo');
+    await edicaoViva.aguardarPersistencia('termo');
     const agora = new Date().toISOString();
-    store.setList('consulta', [{ _id: 'cA', nome: 'Confirmado A', _updatedAt: agora, _relUpdatedAt: agora }]);
+    store.setList('consulta', [{ _id: 'cA', nome: 'Confirmado A', _relOrg: 'org-aaaa', _relUpdatedAt: agora }]);
     out.confirmadoNaoPersistiu = localStorage.getItem(STORAGE.consulta) === null;
     out.presoEmA = conexao.pendentes() >= 1;
+    out.semTextoClaro = localStorage.getItem(STORAGE.pre) === null
+      && localStorage.getItem(STORAGE.anestesia) === null;
 
-    /* ================= CLÍNICA B, mesmo aparelho ================= */
-    entrar('org-bbbb');
-    out.identidadeNaoAtravessa = clinicaIdentidade.vazia() === true
-      && clinicaIdentidade.nome() !== 'Clínica A';
-    out.preNaoAtravessa = (store.list('pre') || []).length === 0
-      && cirurgia.daPre('Paciente A').length === 0;
-    out.fichaNaoAtravessa = (store.list('anestesia') || []).length === 0;
-    out.confirmadoNaoAtravessa = (store.list('consulta') || []).length === 0;
+    await __smokePrepareQueue('org-bbbb', 'medico-a');
+    await persistenciaCloudFirst.aquecer();
+    out.identidadeNaoAtravessa = clinicaIdentidade.vazia() && clinicaIdentidade.nome() !== 'Clínica A';
+    out.preNaoAtravessa = store.list('pre').length === 0 && cirurgia.daPre('Paciente A').length === 0;
+    out.fichaNaoAtravessa = store.list('anestesia').length === 0;
+    out.confirmadoNaoAtravessa = store.list('consulta').length === 0;
     out.contagemNaoAtravessa = conexao.pendentes() === 0;
-    if (campo) { campo.value = ''; out.rascunhoNaoAtravessa = edicaoViva.restaurar('termo') === false; }
+    limparForm();
+    out.rascunhoNaoAtravessa = edicaoViva.restaurar('termo') === false;
 
-    /* ================= de volta à A: tudo intacto ================= */
-    entrar('org-aaaa');
+    await __smokePrepareQueue('org-aaaa', 'medico-a');
+    await persistenciaCloudFirst.aquecer();
     out.aIntacta = clinicaIdentidade.nome() === 'Clínica A'
-      && (store.list('anestesia') || []).length === 1
-      && cirurgia.daPre('Paciente A').length === 1;
-    if (campo) {
-      campo.value = '';
-      out.rascunhoVoltaParaDono = edicaoViva.restaurar('termo') === true
-        && campo.value === 'Termo em edição na clínica A';
-    }
+      && store.list('anestesia').length === 1 && cirurgia.daPre('Paciente A').length === 1;
+    limparForm();
+    out.rascunhoVoltaParaDono = edicaoViva.restaurar('termo') === true
+      && campo.value === 'Termo em edição na clínica A';
 
-    /* ======= mesma clínica, OUTRA pessoa: o rascunho não é dela ======= */
-    if (campo) {
-      campo.value = '';
-      auth.usuarioAtual = () => ({ usuario: 'secretaria@a.com' });
-      out.outraPessoaNaoVe = edicaoViva.restaurar('termo') === false && campo.value === '';
-    }
-
-    auth.usuarioAtual = origUser;
-    const av = document.getElementById('edicao-viva-aviso'); if (av) av.remove();
-    limpar();
+    await __smokePrepareQueue('org-aaaa', 'secretaria-a');
+    await persistenciaCloudFirst.aquecer();
+    limparForm();
+    out.outraPessoaNaoVe = edicaoViva.restaurar('termo') === false && campo.value === '';
+    out.outraPessoaNaoVeFila = (await filaCifrada.listar()).length === 0;
     return out;
   });
-  assert(r.confirmadoNaoPersistiu && r.presoEmA,
-    'o cenário monta a clínica A com confirmado só na nuvem e trabalho ainda pendente');
-  assert(r.identidadeNaoAtravessa, 'a identidade da clínica (logomarca, nome, endereço, contato) não atravessa para o outro ambiente');
-  assert(r.preNaoAtravessa, 'a pré e a cirurgia lida dela não atravessam — nem pelo nome do paciente');
-  assert(r.fichaNaoAtravessa, 'as fichas não atravessam');
-  assert(r.confirmadoNaoAtravessa, 'o cache confirmado da clínica A não atravessa para a clínica B');
-  assert(r.contagemNaoAtravessa, '"o que está preso neste aparelho" conta só o ambiente aberto — senão a tarja acusaria pendência da outra clínica');
-  assert(r.rascunhoNaoAtravessa, 'o rascunho vivo não atravessa: ele tem nome de paciente dentro');
-  assert(r.aIntacta && r.rascunhoVoltaParaDono, 'e o ambiente de origem continua inteiro — separar não é apagar');
-  assert(r.outraPessoaNaoVe, 'dentro da MESMA clínica, o rascunho de uma pessoa não aparece para outra no mesmo computador');
+  assert(r.confirmadoNaoPersistiu && r.presoEmA && r.semTextoClaro,
+    'a clínica A tem confirmado só em memória e trabalho pendente cifrado, sem prontuário em texto claro');
+  assert(r.identidadeNaoAtravessa, 'identidade da clínica não atravessa para outro ambiente');
+  assert(r.preNaoAtravessa && r.fichaNaoAtravessa, 'pré, cirurgia e ficha não atravessam para a clínica B');
+  assert(r.confirmadoNaoAtravessa, 'cache confirmado também fica limitado à clínica original');
+  assert(r.contagemNaoAtravessa && r.rascunhoNaoAtravessa, 'contagem e rascunho vivo são do dono e ambiente abertos');
+  assert(r.aIntacta && r.rascunhoVoltaParaDono, 'voltar à clínica original recupera seu trabalho pelo cofre cifrado');
+  assert(r.outraPessoaNaoVe && r.outraPessoaNaoVeFila, 'outro usuário na mesma clínica não pode abrir drafts nem o WAL do médico');
   await page.close();
 });
 
@@ -18740,7 +19057,7 @@ await test('Proteção multiusuário é obrigatória e token da nuvem fica somen
    cobre queda de energia, navegador morto e aba restaurada dias depois. */
 await test('Em máquina compartilhada, fechar a aba e reabrir não deixa o atendimento anterior à vista', async () => {
   const page = await novaPagina();
-  const r = await page.evaluate(() => {
+  const r = await page.evaluate(async () => {
     const out = {};
     const R = cofre._real;
     const limpar = () => {
@@ -18749,15 +19066,16 @@ await test('Em máquina compartilhada, fechar a aba e reabrir não deixa o atend
       fora.forEach(k => R.removeItem(k));
     };
     limpar();
-    __smokeBindOrg('org-aaaa');
+    await __smokePrepareQueue('org-aaaa');
     ambiente.definirCompartilhado(true, { silent: true });
     const origPode = modoNuvem.podeLigar; modoNuvem.podeLigar = () => true;
 
     const agora = new Date().toISOString();
-    store.setList('pre', [
+    localStorage.setItem(STORAGE.pre, JSON.stringify([
       { _id: 'subiu', nome: 'Atendimento já na nuvem', _updatedAt: agora, _relUpdatedAt: agora },
       { _id: 'naoSubiu', nome: 'Ainda não subiu', _updatedAt: agora }
-    ]);
+    ]));
+    store._memoria.delete('pre');
 
     /* ---- ABERTURA: o que já está na nuvem não fica à vista ---- */
     conexao.blindarCompartilhado();
@@ -18773,6 +19091,7 @@ await test('Em máquina compartilhada, fechar a aba e reabrir não deixa o atend
     /* ---- tentar declarar o aparelho como pessoal não desliga a proteção ---- */
     ambiente.definirCompartilhado(false, { silent: true });
     out.naoDesativou = ambiente.compartilhado() === true;
+    await __smokePrepareQueue('org-aaaa');
     store.setList('pre', [{ _id: 'meu', nome: 'Registro confirmado', _updatedAt: agora, _relUpdatedAt: agora }]);
     window.dispatchEvent(new Event('pagehide'));
     out.tentativaPessoalTambemLimpa = !(store.list('pre') || []).some(x => x._id === 'meu');

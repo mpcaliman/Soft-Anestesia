@@ -181,6 +181,84 @@ assert.equal(hiddenContext['[name="_caseKey"]'].value, '');
 assert.equal(hiddenContext['[name="paciente_nome"], [name="nome"], [name="paciente"]']
   .dataset.patientSelectedName, undefined);
 
+/* Uma resposta da nuvem não pode devolver ao formulário o homônimo ou o
+   caso que já foi substituído durante a busca assíncrona. O nome permanece
+   exatamente igual, portanto a defesa precisa conferir os vínculos. */
+const importacoesPre = [];
+const importarOriginal = testedLinker.importarPreParaAnestesia;
+testedLinker.importarPreParaAnestesia = (nome, opts) => importacoesPre.push({ nome, opts });
+const formBuscaPre = {
+  '[name="paciente_nome"]': { value: homonimoA.nome },
+  '[name="_patientKey"]': { value: keyA },
+  '[name="_patientRef"]': { value: 'pac-a' },
+  '[name="_caseId"]': { value: 'caso-a' },
+  '[name="_caseKey"]': { value: '' }
+};
+sandbox.document = { getElementById: id => id === 'form-anestesia'
+  ? { querySelector: selector => formBuscaPre[selector] || null } : null };
+sandbox.store.list = mod => mod === 'pre' ? [{ _id: 'pre-nuvem-a', nome: homonimoA.nome,
+  _patientKey: keyA, _patientRef: 'pac-a', _caseId: 'caso-a' }] : [];
+let concluirBuscaPre;
+let geracaoBuscaPre = 1;
+sandbox.contextoAba = {
+  capturar: () => ({ generation: geracaoBuscaPre, organizationId: 'org-busca', userId: 'usuario-busca' }),
+  corresponde: contexto => !!contexto && contexto.generation === geracaoBuscaPre
+};
+sandbox.cloudRel = {
+  disponivel: () => true,
+  _puxados: {},
+  autoPullModulo: () => new Promise(resolve => { concluirBuscaPre = resolve; })
+};
+const buscarPre = () => {
+  testedLinker._preBuscadaNaNuvem = {};
+  testedLinker._buscarPreNaNuvem(homonimoA.nome, {
+    identityKey: keyA, patientRef: 'pac-a', caseId: 'caso-a'
+  });
+};
+buscarPre();
+formBuscaPre['[name="_patientKey"]'].value = keyB;
+formBuscaPre['[name="_patientRef"]'].value = 'pac-b';
+formBuscaPre['[name="_caseId"]'].value = 'caso-b';
+concluirBuscaPre();
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(importacoesPre.length, 0,
+  'trocar para um homônimo com o mesmo nome invalida o preenchimento pendente');
+
+formBuscaPre['[name="_patientKey"]'].value = keyA;
+formBuscaPre['[name="_patientRef"]'].value = 'pac-a';
+formBuscaPre['[name="_caseId"]'].value = 'caso-a';
+buscarPre();
+formBuscaPre['[name="_caseId"]'].value = 'outro-atendimento-da-mesma-pessoa';
+concluirBuscaPre();
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(importacoesPre.length, 0,
+  'trocar apenas o atendimento também invalida a importação pendente');
+
+formBuscaPre['[name="_caseId"]'].value = 'caso-a';
+buscarPre();
+concluirBuscaPre();
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(importacoesPre.length, 1,
+  'mantendo paciente e atendimento, a pré da nuvem continua sendo importada');
+
+buscarPre();
+geracaoBuscaPre++;
+concluirBuscaPre();
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(importacoesPre.length, 1,
+  'trocar a geração da sessão impede a importação mesmo com os mesmos IDs de paciente e caso');
+
+/* A tentativa feita na sessão anterior não pode impedir a nova clínica de
+   buscar seus próprios dados com referências locais coincidentes. */
+testedLinker._buscarPreNaNuvem(homonimoA.nome, {
+  identityKey: keyA, patientRef: 'pac-a', caseId: 'caso-a'
+});
+concluirBuscaPre();
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(importacoesPre.length, 2,
+  'o cache de tentativas de busca deve ser separado por geração, usuário e clínica');
+testedLinker.importarPreParaAnestesia = importarOriginal;
+
 assert.match(appSource, /SoftEncounterIdentity\.fromRecord\(it\)/);
 assert.match(appSource, /SoftEncounterIdentity\.legacyPatientKey\(id\)/);
 assert.match(appSource, /SoftEncounterIdentity\.legacyEncounterKey\(patKey, it\)/);

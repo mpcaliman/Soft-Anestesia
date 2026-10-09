@@ -237,6 +237,7 @@ const persistenciaCloudFirst = {
     });
     persistenciaCloudFirst._pendentes = set;
     persistenciaCloudFirst._ownerKey = ownerKey;
+    try { if (typeof ui !== 'undefined') ui.repintarNuvemAtual(); } catch (e) {}
     try { syncStatus.refresh(); } catch (e) {}
     try { persistenciaCloudFirst.renderPainel(); } catch (e) {}
     return ops;
@@ -274,16 +275,33 @@ const persistenciaCloudFirst = {
       action: op.action, baseVersion: op.baseVersion, dependsOn: op.dependsOn,
       createdAt: op.createdAt, payload: op.payload
     });
+    /* O commit pode terminar depois de a pessoa mudar de clínica. A cópia
+       cifrada continua pertencendo ao dono capturado pelo WAL; não marque
+       como protegido um registro de mesmo ID na nova sessão. */
+    if (!contextoAba.corresponde(op.contexto)) {
+      const erro = filaCifrada._erro('contexto_trocado', 'A operação ficou protegida para a conta anterior.');
+      erro.durable = !!(salvo && salvo.durable);
+      throw erro;
+    }
     persistenciaCloudFirst._pendentes.add(persistenciaCloudFirst._chave(op.module, op.entityId));
     try { await filaCifrada.marcarEstado(op.operationId, 'staged'); } catch (e) {}
+    if (!contextoAba.corresponde(op.contexto)) {
+      const erro = filaCifrada._erro('contexto_trocado', 'A operação ficou protegida para a conta anterior.');
+      erro.durable = !!(salvo && salvo.durable);
+      throw erro;
+    }
     try {
       if (typeof store !== 'undefined' && store.protegidoNoCofre) {
         store.protegidoNoCofre(op.module, op.entityId);
       }
     } catch (e) {}
+    try { if (typeof ui !== 'undefined') ui.repintarNuvemAtual(); } catch (e) {}
     return salvo;
   },
   async _enviar(op, itemAtual, exec = {}) {
+    if (!op || !op.contexto || !contextoAba.corresponde(op.contexto)) {
+      return { ok: false, motivo: 'contexto_trocado' };
+    }
     const p = op && op.payload;
     if (p && p.transport === persistenciaCloudFirst.TRANSPORTE_ADENDO) {
       if (typeof adendos === 'undefined' || !adendos.enviarOperacao) {
@@ -379,8 +397,10 @@ const persistenciaCloudFirst = {
     let diario;
     try { diario = await persistenciaCloudFirst._estagiar(op); }
     catch (e) {
-      try { syncStatus.cloudState('error'); } catch (er) {}
-      return { ok: false, motivo: e.code || e.message || 'fila_indisponivel', durable: false };
+      if (contextoAba.corresponde(op.contexto)) {
+        try { syncStatus.cloudState('error'); } catch (er) {}
+      }
+      return { ok: false, motivo: e.code || e.message || 'fila_indisponivel', durable: e.durable === true };
     }
 
     if (!persistenciaCloudFirst._online()) {
@@ -447,8 +467,10 @@ const persistenciaCloudFirst = {
     let diario;
     try { diario = await persistenciaCloudFirst._estagiar(op); }
     catch (e) {
-      try { syncStatus.cloudState('error'); } catch (er) {}
-      return { ok: false, motivo: e.code || e.message || 'fila_indisponivel', durable: false };
+      if (contextoAba.corresponde(op.contexto)) {
+        try { syncStatus.cloudState('error'); } catch (er) {}
+      }
+      return { ok: false, motivo: e.code || e.message || 'fila_indisponivel', durable: e.durable === true };
     }
     try {
       if (typeof store !== 'undefined' && store.protegidoNoCofre) {
@@ -507,8 +529,10 @@ const persistenciaCloudFirst = {
     let diario;
     try { diario = await persistenciaCloudFirst._estagiar(op); }
     catch (e) {
-      try { syncStatus.cloudState('error'); } catch (er) {}
-      return { ok: false, motivo: e.code || e.message || 'fila_indisponivel', durable: false };
+      if (contextoAba.corresponde(op.contexto)) {
+        try { syncStatus.cloudState('error'); } catch (er) {}
+      }
+      return { ok: false, motivo: e.code || e.message || 'fila_indisponivel', durable: e.durable === true };
     }
     if (!persistenciaCloudFirst._online()) {
       try { await filaCifrada.marcarEstado(op.operationId, 'offline'); } catch (e) {}
@@ -586,8 +610,10 @@ const persistenciaCloudFirst = {
     let diario;
     try { diario = await persistenciaCloudFirst._estagiar(op); }
     catch (e) {
-      try { syncStatus.cloudState('error'); } catch (er) {}
-      return { ok: false, motivo: e.code || e.message || 'fila_indisponivel', durable: false };
+      if (contextoAba.corresponde(op.contexto)) {
+        try { syncStatus.cloudState('error'); } catch (er) {}
+      }
+      return { ok: false, motivo: e.code || e.message || 'fila_indisponivel', durable: e.durable === true };
     }
     if (!persistenciaCloudFirst._online()) {
       try { await filaCifrada.marcarEstado(op.operationId, 'offline'); } catch (e) {}

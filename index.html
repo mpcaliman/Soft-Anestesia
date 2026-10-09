@@ -11429,7 +11429,7 @@ const duplicados = {
       .find(x => x.token === pacienteToken && x.dia === dia);
     if (!g) return 0;
     let n = 0;
-    g.itens.slice(1).forEach(r => { try { store.delete(mod, r._id); n++; } catch (e) {} });
+    g.itens.slice(1).forEach(r => { try { if (store.delete(mod, r._id) !== false) n++; } catch (e) {} });
     return n;
   },
 
@@ -11520,7 +11520,7 @@ const duplicados = {
     let n = 0;
     p.ids.forEach(id => {
       if (id === item._id) return;
-      try { store.delete(mod, id); n++; } catch (e) {}
+      try { if (store.delete(mod, id) !== false) n++; } catch (e) {}
     });
     if (n) {
       try { toast('🔁 ' + n + (n === 1 ? ' registro anterior foi para a Lixeira' : ' registros anteriores foram para a Lixeira') + ' — recuperáveis por 30 dias'); } catch (e) {}
@@ -13553,14 +13553,19 @@ const ui = {
     try { if (typeof cloud === 'undefined' || !cloud.estaConfigurado()) return null; } catch (e) {}
     try { if (!cloudRel.ehModuloRegistro || !cloudRel.ehModuloRegistro(modKey)) return null; } catch (e) {}
     let naFila = null;
+    let pendenteCifrado = false;
+    try {
+      pendenteCifrado = persistenciaCloudFirst.temPendente(modKey, item._id) ||
+        store.temPendenteLocal(modKey, item._id);
+    } catch (e) {}
     try {
       naFila = cloudRel._filaLer().find(x => x.mod === modKey && x.id === item._id) || null;
     } catch (e) {}
-    if (naFila) {
-      const motivo = ui.NUVEM_ROTULOS[naFila.motivo] || naFila.motivo || '';
+    if (naFila || pendenteCifrado) {
+      const motivo = naFila ? (ui.NUVEM_ROTULOS[naFila.motivo] || naFila.motivo || '') : 'aguardando confirmação da nuvem';
       return { cls: 'parado', txt: '⚠️ não subiu',
                tit: 'Este registro ainda não chegou à clínica' + (motivo ? ' — ' + motivo : '') +
-                    '. Ele não se perde: sobe sozinho quando der.' };
+                    '. Acompanhe a pendência na fila de sincronização; o envio é retomado automaticamente.' };
     }
     if (item._relUpdatedAt) {
       return { cls: 'ok', txt: '✓ na nuvem',
@@ -19336,6 +19341,7 @@ const ambiente = {
   _faixaMostrada: false,
   faixaLegado() {
     try {
+      if (document.getElementById('legado-faixa')) { ambiente._faixaMostrada = true; return; }
       if (ambiente._faixaMostrada) return;
       if (!ambiente.temLegadoPendente()) return;
       let vazio = true;
@@ -25969,13 +25975,21 @@ const pdfFila = {
         tentativas: 0,
         mod: (meta && meta.mod) || '',
         paciente: (meta && meta.paciente) || '',
+        receiptKey: (meta && meta.receiptKey) || '',
         organizationId: dono.organizationId,
         cloudUserId: dono.cloudUserId || '',
         localUserId: dono.localUserId || '',
         deviceId: dono.deviceId || '',
         tabId: dono.tabId || ''
       };
-      await new Promise((ok) => { const r = loja.put(item); r.onsuccess = () => ok(true); r.onerror = () => ok(false); });
+      const gravou = await new Promise(ok => {
+        const tx = loja.transaction;
+        tx.oncomplete = () => ok(true);
+        tx.onabort = tx.onerror = () => ok(false);
+        try { const r = loja.put(item); r.onerror = () => ok(false); }
+        catch (e) { ok(false); }
+      });
+      if (!gravou) return false;
       await pdfFila._podar(dono);
       return true;
     } catch (e) { console.warn('pdfFila.guardar', e); return false; }
@@ -26070,6 +26084,10 @@ const pdfBackup = {
     pdfBackup._tokenExpira = 0;
     pdfBackup._tokenClient = null;
     try { sessionStorage.removeItem(pdfBackup.TOKEN_KEY); } catch (e) {}
+    try {
+      pdfBackup.regen._recibos.clear(); pdfBackup.regen._recibosContexto = '';
+      pdfBackup.regen._operacaoAtiva = null; pdfBackup.regen._rodando = false;
+    } catch (e) {}
   },
 
   /* Dispara os dois backups habilitados, em paralelo.
@@ -26077,24 +26095,36 @@ const pdfBackup = {
   async enviarTodos(doc, nomeArq, meta) {
     const blob = doc.output('blob');
     const c = Object.assign({}, pdfBackup.cfg());
-    const proms = [];
     const filaMeta = Object.assign({}, meta || {}, { _pdfOwner: pdfFila._identidadeAtual() });
     const contexto = pdfBackup._contextoOperacao(filaMeta._pdfOwner);
-    if (!contexto) return;
-    /* Supabase: por padrão ligado se a nuvem estiver logada */
+    if (!contexto) return { ok: false, durable: false, motivo: 'contexto' };
+    const proms = [];
+    const enviar = async (destino, tentativa) => {
+      let remoto = false;
+      try { remoto = (await tentativa()) === true; } catch (e) { console.warn(destino + ' pdf', e); }
+      if (!pdfBackup._contextoOperacao(filaMeta._pdfOwner, contexto)) {
+        return { destino, remoto: false, queued: false, durable: false };
+      }
+      if (remoto) return { destino, remoto: true, queued: false, durable: true };
+      const queued = (await pdfFila.guardar(blob, nomeArq, destino, filaMeta)) === true;
+      return { destino, remoto: false, queued,
+        durable: queued && !!pdfBackup._contextoOperacao(filaMeta._pdfOwner, contexto) };
+    };
     if (c.supabase !== false && cloud.estaLogado()) {
-      proms.push(pdfBackup.enviarSupabase(blob, nomeArq, filaMeta._pdfOwner)
-        .catch(e => { console.warn('supabase pdf', e); return false; })
-        .then(ok => { if (!ok) return pdfFila.guardar(blob, nomeArq, 'supabase', filaMeta); }));
+      proms.push(enviar('supabase', () => pdfBackup.enviarSupabase(blob, nomeArq, filaMeta._pdfOwner)));
     }
-    /* Google Drive: só se o usuário ativou e conectou */
     if (c.drive === true) {
-      proms.push(pdfBackup.enviarDrive(blob, nomeArq, false,
-        { contexto, dono: filaMeta._pdfOwner, cfg: c })
-        .catch(e => { console.warn('drive pdf', e); return false; })
-        .then(ok => { if (!ok) return pdfFila.guardar(blob, nomeArq, 'drive', filaMeta); }));
+      proms.push(enviar('drive', () => pdfBackup.enviarDrive(blob, nomeArq, false,
+        { contexto, dono: filaMeta._pdfOwner, cfg: c })));
     }
-    if (proms.length) await Promise.all(proms);
+    const destinos = await Promise.all(proms);
+    if (!pdfBackup._contextoOperacao(filaMeta._pdfOwner, contexto)) {
+      return { ok: false, durable: false, motivo: 'contexto_trocado' };
+    }
+    return { ok: destinos.length > 0 && destinos.every(d => d.remoto),
+      durable: destinos.length > 0 && destinos.every(d => d.durable),
+      enviados: destinos.filter(d => d.remoto).length,
+      queued: destinos.filter(d => d.queued).length, destinos };
   },
 
   /* ---------- DRENAR A FILA ----------
@@ -26128,15 +26158,27 @@ const pdfBackup = {
               { contexto, dono, cfg })
             : await pdfBackup.enviarSupabase(it.blob, it.nomeArq, it);
         } catch (e) { console.warn('drenarFila', e); }
-        if (ok) { await pdfFila.remover(it.id); enviados++; }
-        else { bloqueado[it.destino] = true; }
+        if (!cloudRel._contextoValido(contexto, contexto.organizationId)) break;
+        if (ok === true) {
+          /* Só o resultado remoto deste destino promove o recibo cifrado.
+             A ausência de um item na fila nunca serve de confirmação. */
+          if (it.receiptKey) {
+            try { await pdfBackup.regen._confirmarDestino(contexto, it.receiptKey, it.destino); }
+            catch (e) { console.warn('recibo pdf', e); }
+          }
+          if (!cloudRel._contextoValido(contexto, contexto.organizationId)) break;
+          await pdfFila.remover(it.id);
+          if (!cloudRel._contextoValido(contexto, contexto.organizationId)) break;
+          enviados++;
+        } else { bloqueado[it.destino] = true; }
       }
     } finally { pdfBackup._drenando = false; }
     if (!cloudRel._contextoValido(contexto, contexto.organizationId)) {
       return { enviados, restam: -1 };
     }
     const resumo = await pdfFila.resumo();
-    if (enviados && cloudRel._contextoValido(contexto, contexto.organizationId)) toast('📤 ' + enviados + ' PDF(s) que estavam esperando foram enviados' +
+    if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return { enviados, restam: -1 };
+    if (enviados) toast('📤 ' + enviados + ' PDF(s) que estavam esperando foram enviados' +
       (resumo.n ? ' — ainda faltam ' + resumo.n : ''));
     try { pdfBackup.renderFila(); } catch (e) {}
     return { enviados, restam: resumo.n };
@@ -26577,6 +26619,74 @@ const pdfBackup = {
     MODS: ['pre', 'consulta', 'anestesia', 'recuperacao', 'termo', 'risco', 'prescricao'],
     _rodando: false,
     _parar: false,
+    _operacaoAtiva: null,
+    _recibos: new Map(),
+    _recibosContexto: '',
+    RECIBOS_NS: 'pdf-backup-receipts',
+
+    _contextoKey(ctx) { return JSON.stringify([ctx.userId, ctx.organizationId, ctx.tabId, ctx.generation]); },
+    _assinaturaRecibo(mod, rec) {
+      const c = pdfBackup.cfg();
+      const adendosPDF = (rec._adendos || []).map(ad => [ad.id || '', ad.texto || ''])
+        .sort((a, b) => a[0].localeCompare(b[0]));
+      return JSON.stringify([mod, rec._id || '', rec._patientRef || '', rec._caseId || '',
+        rec._finalizadoEm || '', adendosPDF,
+        c.supabase !== false, c.drive === true, c.driveClientId || '', c.driveFolderId || '']);
+    },
+    async _carregarRecibos(ctx) {
+      const chaveContexto = pdfBackup.regen._contextoKey(ctx);
+      const snaps = await filaCifrada.listarSnapshots(pdfBackup.regen.RECIBOS_NS);
+      if (!pdfBackup._contextoOperacao(null, ctx)) return false;
+      const fila = await pdfFila.listar();
+      if (!pdfBackup._contextoOperacao(null, ctx)) return false;
+      const recibos = new Map();
+      (snaps || []).forEach(snap => {
+        const p = snap && snap.payload;
+        if (!p || !p.assinatura || p.organizationId !== ctx.organizationId || p.userId !== ctx.userId) return;
+        /* Recibo remoto é definitivo. Recibo de fila só impede repetição
+           enquanto a cópia durável ainda existe; descartar a fila nunca
+           transforma uma tentativa perdida em upload confirmado. */
+        if (p.remoto === true || (p.queued === true && fila.some(it => it.receiptKey === snap.key))) {
+          recibos.set(p.assinatura, p);
+        }
+      });
+      pdfBackup.regen._recibos = recibos;
+      pdfBackup.regen._recibosContexto = chaveContexto;
+      return true;
+    },
+    async _guardarRecibo(ctx, assinatura, key, resultado) {
+      if (!resultado || resultado.durable !== true || !pdfBackup._contextoOperacao(null, ctx)) return false;
+      const payload = { assinatura, organizationId: ctx.organizationId, userId: ctx.userId,
+        remoto: resultado.ok === true, queued: resultado.queued > 0,
+        destinos: (resultado.destinos || []).map(d => ({ destino: d.destino, remoto: d.remoto === true })) };
+      const gravado = await filaCifrada.salvarSnapshot(pdfBackup.regen.RECIBOS_NS, key, payload);
+      if (!pdfBackup._contextoOperacao(null, ctx)) return false;
+      if (!gravado || gravado.durable !== true) return false;
+      pdfBackup.regen._recibos.set(assinatura, payload);
+      pdfBackup.regen._recibosContexto = pdfBackup.regen._contextoKey(ctx);
+      return true;
+    },
+
+    async _confirmarDestino(ctx, key, destino) {
+      if (!key || !['supabase', 'drive'].includes(destino) || !pdfBackup._contextoOperacao(null, ctx)) return false;
+      const snapshots = await filaCifrada.listarSnapshots(pdfBackup.regen.RECIBOS_NS);
+      if (!pdfBackup._contextoOperacao(null, ctx)) return false;
+      const snap = (snapshots || []).find(s => s && s.key === key);
+      const anterior = snap && snap.payload;
+      if (!anterior || !anterior.assinatura || anterior.organizationId !== ctx.organizationId ||
+          anterior.userId !== ctx.userId || !Array.isArray(anterior.destinos) ||
+          !anterior.destinos.length || !anterior.destinos.some(d => d && d.destino === destino)) return false;
+      const destinos = anterior.destinos.map(d => ({ destino: d.destino,
+        remoto: d.destino === destino || d.remoto === true }));
+      const remoto = destinos.every(d => d.remoto === true);
+      const payload = Object.assign({}, anterior, { destinos, remoto, queued: !remoto });
+      const gravado = await filaCifrada.salvarSnapshot(pdfBackup.regen.RECIBOS_NS, key, payload);
+      if (!pdfBackup._contextoOperacao(null, ctx)) return false;
+      if (!gravado || gravado.durable !== true) return false;
+      pdfBackup.regen._recibos.set(payload.assinatura, payload);
+      pdfBackup.regen._recibosContexto = pdfBackup.regen._contextoKey(ctx);
+      return true;
+    },
 
     _dataDe(x) { try { return String(historico._dataItem(x) || '').slice(0, 10); } catch (e) { return ''; } },
 
@@ -26592,7 +26702,10 @@ const pdfBackup = {
           const d = pdfBackup.regen._dataDe(x);
           if (de && d < de) return;
           if (ate && d > ate) return;
-          if (!forcar && x[pdfBackup.MARCA]) return;
+          const ctx = pdfBackup._contextoOperacao();
+          const temRecibo = ctx && pdfBackup.regen._recibosContexto === pdfBackup.regen._contextoKey(ctx)
+            && pdfBackup.regen._recibos.has(pdfBackup.regen._assinaturaRecibo(mod, x));
+          if (!forcar && (x[pdfBackup.MARCA] || temRecibo)) return; /* marca histórica: só leitura */
           out.push({ mod, rec: x, data: d, nome: (function(){ try { return arquivo._nomeDe(x); } catch(e){ return ''; } })() });
         });
       });
@@ -26600,7 +26713,9 @@ const pdfBackup = {
     },
 
     /* Monta o PDF de UM registro. Devolve {doc, nomeArq} ou null. */
-    async _gerar(mod, rec) {
+    async _gerar(mod, rec, contexto) {
+      const ctx = contexto || pdfBackup._contextoOperacao();
+      if (!ctx || !pdfBackup._contextoOperacao(null, ctx)) return null;
       const J = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
       const builders = {
         pre: printPreview._buildPre, consulta: printPreview._buildConsulta,
@@ -26614,6 +26729,7 @@ const pdfBackup = {
       window[mod].carregar(rec);
       /* alguns módulos repõem partes do formulário em setTimeout */
       await new Promise(res => setTimeout(res, 700));
+      if (!pdfBackup._contextoOperacao(null, ctx)) return null;
       printPreview._nomeArquivoOverride = null;
       printPreview._verCtx = { mod, formId: 'form-' + mod };
       /* O nome do arquivo sai de state.currentModule — quem chama isto está
@@ -26628,7 +26744,11 @@ const pdfBackup = {
         const doc = printPreview._gerarDocDeTexto(J, ppp);
         const nomeArq = printPreview._gerarNomeArquivo().replace(/[^\w.\-]+/g, '_') + '.pdf';
         return { doc, nomeArq };
-      } finally { ppp.innerHTML = guardado; state.currentModule = modAntes; }
+      } finally {
+        if (pdfBackup._contextoOperacao(null, ctx)) {
+          ppp.innerHTML = guardado; state.currentModule = modAntes;
+        }
+      }
     },
 
     async rodar(opts) {
@@ -26642,44 +26762,72 @@ const pdfBackup = {
       const temDrive = c.drive === true && !!c.driveClientId;
       const temSupa = c.supabase !== false && (typeof cloud !== 'undefined' && cloud.estaConfigurado() && cloud.estaLogado());
       if (!temDrive && !temSupa) { toast('⚠️ Nenhum destino de PDF ativo — ligue o Supabase Storage ou o Drive antes', 'warn'); return; }
+      const contexto = pdfBackup._contextoOperacao();
+      if (!contexto) { toast('Confirme a conta e a clínica antes de regenerar os PDFs.', 'warn'); return; }
 
-      const lista = pdfBackup.regen.candidatos(opts.de, opts.ate, opts.forcar);
-      if (!lista.length) { toast('Nenhum documento finalizado no período — ou todos já foram enviados'); return; }
-
+      const operacao = {};
+      pdfBackup.regen._operacaoAtiva = operacao;
       pdfBackup.regen._rodando = true;
       pdfBackup.regen._parar = false;
       const prog = document.getElementById('pdfbk-regen-prog');
-      let ok = 0, falhou = 0;
-      const dizer = (txt) => { if (prog) prog.innerHTML = txt; };
+      let lista = [], ok = 0, falhou = 0;
+      const ativo = () => pdfBackup.regen._operacaoAtiva === operacao && !!pdfBackup._contextoOperacao(null, contexto);
+      const dizer = txt => { if (ativo() && prog) prog.innerHTML = txt; };
       try {
+        await pdfBackup.regen._carregarRecibos(contexto);
+        if (!ativo()) return;
+        lista = pdfBackup.regen.candidatos(opts.de, opts.ate, opts.forcar);
+        if (!lista.length) { toast('Nenhum documento finalizado no período — ou todos já foram enviados por este usuário neste aparelho'); return; }
         for (let i = 0; i < lista.length; i++) {
+          if (!ativo()) return;
           if (pdfBackup.regen._parar) { dizer('⏹ Interrompido em ' + i + ' de ' + lista.length + '.'); break; }
           const it = lista[i];
           dizer('⏳ ' + (i + 1) + ' de ' + lista.length + ' — ' + utils.escapeHTML(it.nome || '(sem nome)') +
                 ' <small style="color:var(--text-mute)">(' + it.mod + ')</small>');
           try {
-            const g = await pdfBackup.regen._gerar(it.mod, it.rec);
+            const assinatura = pdfBackup.regen._assinaturaRecibo(it.mod, it.rec);
+            const key = await filaCifrada._sha256(assinatura);
+            if (!ativo()) return;
+            const g = await pdfBackup.regen._gerar(it.mod, it.rec, contexto);
+            if (!ativo()) return;
             if (!g) { falhou++; continue; }
-            await pdfBackup.enviarTodos(g.doc, g.nomeArq, { mod: it.mod, paciente: it.nome });
-            /* marca no registro para uma segunda passada não repetir */
-            const atual = store.getById(it.mod, it.rec._id);
-            if (atual) { atual[pdfBackup.MARCA] = new Date().toISOString(); store.save(it.mod, atual); }
+            const resultado = await pdfBackup.enviarTodos(g.doc, g.nomeArq,
+              { mod: it.mod, paciente: it.nome, receiptKey: key });
+            if (!ativo()) return;
+            if (!resultado || resultado.durable !== true) { falhou++; continue; }
+            /* Recibo operacional cifrado: jamais regrava o prontuário
+               finalizado. Deduplica por dono/aparelho, sem prometer uma
+               confirmação remota para o que ainda aguarda na fila. */
+            await pdfBackup.regen._guardarRecibo(contexto,
+              pdfBackup.regen._assinaturaRecibo(it.mod, it.rec), key, resultado);
+            if (!ativo()) return;
             ok++;
           } catch (e) { console.warn('regen', it.mod, e); falhou++; }
         }
+        if (!ativo()) return;
+        const resumo = '✅ ' + ok + ' documento(s) processado(s)' + (falhou ? ' · ⚠️ ' + falhou + ' com erro' : '');
+        const r = await pdfFila.resumo();
+        if (!ativo()) return;
+        dizer(resumo + (r.n ? ' · ' + r.n + ' aguardando na fila (sobem quando a autorização voltar)' : ''));
+        toast('📄 ' + resumo);
+        try { pdfBackup.renderFila(); } catch (e) {}
+      } catch (e) {
+        if (ativo()) toast('Não foi possível consultar os recibos cifrados de PDF. Entre novamente antes de regenerar.', 'warn');
+        console.warn('regen receipts', e);
       } finally {
-        pdfBackup.regen._rodando = false;
-        /* devolve o formulário ao estado limpo: nada de um paciente pode
-           sobrar na tela para o próximo */
-        try { window[lista[0].mod] && utils.clearForm('form-' + lista[0].mod); } catch (e) {}
-        try { anestesia.limparSilencioso(); } catch (e) {}
-        markClean();
+        /* Uma resposta da sessão anterior não limpa nem restaura o formulário
+           que outra pessoa abriu depois, e não encerra uma nova operação. */
+        if (ativo()) {
+          new Set(lista.map(it => it.mod)).forEach(mod => {
+            try { utils.clearForm('form-' + mod); } catch (e) {}
+          });
+          try { anestesia.limparSilencioso(); } catch (e) {}
+          markClean();
+        }
+        if (pdfBackup.regen._operacaoAtiva === operacao) {
+          pdfBackup.regen._operacaoAtiva = null; pdfBackup.regen._rodando = false;
+        }
       }
-      const resumo = '✅ ' + ok + ' documento(s) processado(s)' + (falhou ? ' · ⚠️ ' + falhou + ' com erro' : '');
-      const r = await pdfFila.resumo();
-      dizer(resumo + (r.n ? ' · ' + r.n + ' aguardando na fila (sobem quando a autorização voltar)' : ''));
-      toast('📄 ' + resumo);
-      try { pdfBackup.renderFila(); } catch (e) {}
     },
 
     parar() { pdfBackup.regen._parar = true; },
@@ -37323,6 +37471,32 @@ const fin = {
   ========================================================================== */
   finalizacao: {
     _ctx: null,
+    DECISAO_NAO: 'DECISÃO FINANCEIRA: NÃO GERAR',
+    DECISAO_SIM: 'DECISÃO FINANCEIRA: GERAR',
+
+    /* A decisão de cobrança é um evento auditável, transportado pelo mesmo
+       WAL dos adendos. O documento clínico assinado permanece imutável. */
+    decisaoDe(doc) {
+      if (!doc) return null;
+      const eventos = (doc._adendos || []).filter(ad => ad && ad.motivo === 'decisao_financeira'
+        && (ad.texto === fin.finalizacao.DECISAO_NAO || ad.texto === fin.finalizacao.DECISAO_SIM));
+      eventos.sort((a, b) => String(a._serverCreatedAt || a.data || '')
+        .localeCompare(String(b._serverCreatedAt || b.data || '')));
+      const ultimo = eventos[eventos.length - 1];
+      if (ultimo) return ultimo.texto === fin.finalizacao.DECISAO_SIM;
+      return doc._semFinanceiro ? false : null; /* decisão histórica */
+    },
+    registrarDecisao(mod, id, gerar) {
+      const doc = store.getById(mod, id);
+      if (!doc || !doc._finalizado) return null;
+      if (doc._relOrg && doc._relOrg !== cloudRel._org()) return null;
+      if (fin.finalizacao.decisaoDe(doc) === gerar) return doc;
+      const ad = adendos.registrarTexto(mod, id,
+        gerar ? fin.finalizacao.DECISAO_SIM : fin.finalizacao.DECISAO_NAO, 'decisao_financeira');
+      if (!ad) return null;
+      store.notificarNuvem(ad, 'Decisão de cobrança');
+      return store.getById(mod, id);
+    },
 
     /* Vale a pena perguntar? Sem paciente não há o que cobrar, e com o
        auto-financeiro desligado a resposta já é "não". */
@@ -37821,8 +37995,7 @@ const fin = {
          lançamento não nascer sozinho numa gravação posterior. */
       try {
         if (ctx) {
-          const d = store.getById(ctx.mod, ctx.docId);
-          if (d) { d._semFinanceiro = new Date().toISOString(); store.save(ctx.mod, d); }
+          fin.finalizacao.registrarDecisao(ctx.mod, ctx.docId, false);
         }
       } catch (e) {}
       toast('Sem lançamento financeiro para este atendimento.');
@@ -37880,6 +38053,9 @@ const fin = {
         }
       } catch (e) {}
 
+      /* Uma escolha explícita de gerar revoga uma decisão anterior de não
+         cobrar, também por evento; não reabre nem regrava o prontuário. */
+      doc = fin.finalizacao.registrarDecisao(ctx.mod, ctx.docId, true) || doc;
       const fr = fin.fromDoc(ctx.mod, doc);
       if (!fr || !fr.item) { if (ctx.aoFechar) ctx.aoFechar(null, opts); return; }
 
@@ -37973,9 +38149,12 @@ const fin = {
   fromDoc(modOrigem, doc) {
     if (!fin.isAutoEnabled()) return null;
     if (!doc || !doc._id) return null;
+    if (doc._relOrg && doc._relOrg !== cloudRel._org()) return null;
     /* "Não gerar" foi uma decisão dele na finalização: uma gravação posterior
        não pode ressuscitar a cobrança por conta própria. */
-    if (doc._semFinanceiro && !store.list('financeiro').some(f => f._origemId === doc._id)) return null;
+    const atual = store.getById(modOrigem, doc._id) || doc;
+    if (fin.finalizacao.decisaoDe(atual) === false &&
+        !store.list('financeiro').some(f => f._origemId === doc._id)) return null;
 
     const cab = fin._cabecalho(modOrigem, doc);
     /* Não cria se nem nome do paciente existe */

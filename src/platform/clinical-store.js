@@ -59,6 +59,10 @@ const store = {
     if (!id || !store.cloudOnlyAtivo(modKey)) return;
     store._pendentesLocais.add(store._chavePendente(modKey, id));
   },
+  temPendenteLocal(modKey, id) {
+    store._garantirContexto();
+    return store._pendentesLocais.has(store._chavePendente(modKey, id));
+  },
   _lembrar(modKey, arr) {
     store._garantirContexto();
     store._memoria.set(modKey, store._clone(Array.isArray(arr) ? arr : []));
@@ -111,7 +115,9 @@ const store = {
     const chave = store._chavePendente(modKey, id);
     store._pendentesLocais.delete(chave);
     store._protegidosCofre.delete(chave);
-    return store._retirarDuravel(modKey, id);
+    const retirou = store._retirarDuravel(modKey, id);
+    try { if (typeof ui !== 'undefined') ui.repintarNuvemAtual(); } catch (e) {}
+    return retirou;
   },
   restaurarDoCofre(ops) {
     store._garantirContexto();
@@ -360,7 +366,9 @@ const store = {
   list(modKey) {
     try {
       store._garantirContexto();
-      if (store._memoria.has(modKey)) return store._clone(store._memoria.get(modKey));
+      /* Cadastros também recebem escritas diretas de clinicaSync. Só os
+         prontuários cloud-only usam a memória como fonte da lista. */
+      if (store.cloudOnlyAtivo(modKey) && store._memoria.has(modKey)) return store._clone(store._memoria.get(modKey));
       const arr = JSON.parse(localStorage.getItem(STORAGE[modKey]) || '[]');
       if (!Array.isArray(arr) || !arr.length) {
         store._lembrar(modKey, Array.isArray(arr) ? arr : []);
@@ -671,6 +679,13 @@ const store = {
   },
   delete(modKey, id) {
     const prev = store.getById(modKey, id);
+    const contextoExclusao = (() => {
+      try { return contextoAba.capturar(); } catch (e) { return null; }
+    })();
+    const mesmoContextoExclusao = () => {
+      try { return contextoExclusao && contextoAba.corresponde(contextoExclusao); }
+      catch (e) { return false; }
+    };
     /* O mesmo limite do banco vale offline: excluir uma ficha finalizada seria
        alterar o prontuário canônico. Ela permanece e qualquer correção entra
        como adendo auditável. */
@@ -695,6 +710,7 @@ const store = {
              operação continua normalmente mesmo offline. */
           Promise.resolve(exclusao).then(res => {
             if (res && res.durable !== false) return;
+            if (!mesmoContextoExclusao()) return;
             const atuais = store.list(modKey);
             if (!atuais.some(x => x && x._id === prev._id)) {
               atuais.unshift(prev);
@@ -702,6 +718,7 @@ const store = {
             }
             toast('A exclusão não pôde ser protegida no aparelho e foi desfeita. Libere espaço ou entre novamente.', 'error');
           }).catch(() => {
+            if (!mesmoContextoExclusao()) return;
             const atuais = store.list(modKey);
             if (!atuais.some(x => x && x._id === prev._id)) {
               atuais.unshift(prev);

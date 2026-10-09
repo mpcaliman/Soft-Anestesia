@@ -1592,20 +1592,35 @@ const linker = {
   _buscarPreNaNuvem(nomePaciente, opts) {
     try {
       opts = opts || {};
-      const chave = (opts.identityKey || '') + '|' + (opts.patientRef || '') + '|' +
+      const contextoAoBuscar = contextoAba.capturar();
+      if (!contextoAba.corresponde(contextoAoBuscar)) return;
+      const chave = contextoAoBuscar.organizationId + '|' + contextoAoBuscar.userId + '|' +
+        contextoAoBuscar.generation + '|' + (opts.identityKey || '') + '|' + (opts.patientRef || '') + '|' +
         (opts.caseId || '') + '|' + linker._normNome(nomePaciente);
       if (!chave || linker._preBuscadaNaNuvem[chave]) return;
       if (typeof cloudRel === 'undefined' || !cloudRel.autoPullModulo || !cloudRel.disponivel || !cloudRel.disponivel()) return;
+      /* O nome pode continuar igual quando a pessoa troca para um homônimo,
+         e o atendimento pode mudar sem trocar de paciente. A resposta só
+         pode preencher o mesmo contexto do formulário que pediu a busca. */
+      const pacienteAoBuscar = linker.contextoPaciente('anestesia');
+      const casoAoBuscar = linker.contextoCaso('anestesia');
       linker._preBuscadaNaNuvem[chave] = true;
       /* o pull do módulo só roda uma vez por sessão; aqui queremos de fato ir
          buscar, senão a chamada volta vazia sem tocar no servidor */
       try { cloudRel._puxados['pre'] = false; } catch (e) {}
       Promise.resolve(cloudRel.autoPullModulo('pre')).then(() => {
+        if (!contextoAba.corresponde(contextoAoBuscar)) return;
         if (!linker.ultimoPorNome('pre', nomePaciente, opts)) return;
         /* o médico pode ter trocado de paciente enquanto a nuvem respondia */
         const f = document.getElementById('form-anestesia');
         const atual = f ? (f.querySelector('[name="paciente_nome"]') || {}).value : '';
         if (linker._normNome(atual) !== linker._normNome(nomePaciente)) return;
+        const pacienteAtual = linker.contextoPaciente('anestesia');
+        const casoAtual = linker.contextoCaso('anestesia');
+        if (pacienteAtual.identityKey !== pacienteAoBuscar.identityKey ||
+            pacienteAtual.patientRef !== pacienteAoBuscar.patientRef ||
+            casoAtual.caseId !== casoAoBuscar.caseId ||
+            casoAtual.caseKey !== casoAoBuscar.caseKey) return;
         linker.importarPreParaAnestesia(nomePaciente, Object.assign({}, opts, { _semNuvem: true }));
       }).catch(() => {});
     } catch (e) {}
