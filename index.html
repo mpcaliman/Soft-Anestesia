@@ -4695,7 +4695,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-03c</b><br>
+    v7.1 · build <b id="build-tag">2026-10-09a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -26256,9 +26256,15 @@ const adendos = {
   htmlParaImpressao(rec) {
     const lista = (rec && rec._adendos) || [];
     if (!lista.length) return '';
-    return '<div class="print-adendos" style="margin-top:10px;border-top:1px solid #999;padding-top:6px">' +
-      '<h3 style="font-size:8pt;margin:0 0 4px">ADENDOS / CORREÇÕES</h3>' +
-      lista.map(ad => '<div style="font-size:7.5pt;margin-bottom:3px"><b>' + utils.escapeHTML(adendos._fmtData(ad.data)) + ' — ' + utils.escapeHTML(ad.autor || '') + ':</b> ' + utils.escapeHTML(ad.texto || '') + '</div>').join('') +
+    /* TAMANHO DE LEITURA, não de rodapé. O que vem aqui é conteúdo clínico —
+       exames que chegaram depois, correção de dose, de lado. Imprimir isso em
+       7,5pt é esconder com elegância. */
+    return '<div class="print-adendos" style="margin-top:14px;border:1px solid #8a1c1c;border-radius:6px;padding:8px 10px">' +
+      '<h3 style="font-size:10pt;margin:0 0 2px;color:#8a1c1c">⚠️ ADENDOS / CORREÇÕES — ' + lista.length + '</h3>' +
+      '<div style="font-size:8pt;color:#555;margin:0 0 6px">O registro acima é o original, preservado. O que mudou depois está aqui, datado e assinado.</div>' +
+      lista.map(ad => '<div style="font-size:9pt;margin-bottom:5px;line-height:1.45;white-space:pre-wrap"><b>' +
+        utils.escapeHTML(adendos._fmtData(ad.data)) + ' — ' + utils.escapeHTML(ad.autor || '') + ':</b> ' +
+        utils.escapeHTML(ad.texto || '') + '</div>').join('') +
       '</div>';
   }
 };
@@ -48439,6 +48445,24 @@ const protocoloJejum = {
    PRINT PREVIEW — pré-visualização de impressão
 ============================================================================ */
 const printPreview = {
+  /* O registro que está aberto na tela, para buscar nele o que não mora no
+     formulário (os adendos). */
+  _registroDoFormulario(mod) {
+    try {
+      const formId = { pre: 'form-pre', consulta: 'form-consulta', anestesia: 'form-anestesia',
+                       recuperacao: 'form-recuperacao', risco: 'form-risco' }[mod];
+      if (!formId) return null;
+      const f = document.getElementById(formId); if (!f) return null;
+      const id = (f.querySelector('[name="_id"]') || {}).value || (f.querySelector('[name="id"]') || {}).value || '';
+      return id ? store.getById(mod, id) : null;
+    } catch (e) { return null; }
+  },
+  _adendosDoFormulario(mod) {
+    const rec = printPreview._registroDoFormulario(mod);
+    if (!rec) return '';
+    try { return adendos.htmlParaImpressao(rec) || ''; } catch (e) { return ''; }
+  },
+
   abrir() {
     try {
       printPreview._nomeArquivoOverride = null;
@@ -48463,7 +48487,19 @@ const printPreview = {
       const formMapVer = { pre: 'form-pre', consulta: 'form-consulta', anestesia: 'form-anestesia', recuperacao: 'form-recuperacao', termo: 'form-termo', prescricao: 'form-prescricao', risco: 'form-risco' };
       printPreview._verCtx = formMapVer[mod] ? { mod, formId: formMapVer[mod] } : null;
 
-      const html = builder();
+      let html = builder();
+      /* OS ADENDOS TÊM DE SAIR NO PAPEL.
+
+         Editar um registro FINALIZADO não altera o original — vira CORREÇÃO,
+         como manda um prontuário. Só que a correção nunca chegava à
+         impressão: `adendos.htmlParaImpressao` existia e não era chamada por
+         ninguém. A janela de adendos prometia, com todas as letras, que o
+         adendo "aparece na ficha e no PDF"; não aparecia.
+
+         O resultado era o pior possível num documento clínico: a folha saía
+         com a versão antiga e SEM dizer que havia mais. Caso real — exames que
+         chegaram depois da pré ficaram de fora da folha que a equipe lê. */
+      try { html += printPreview._adendosDoFormulario(mod); } catch (e) {}
       const ppp = document.getElementById('ppp');
       if (!ppp) { toast('Erro: container de preview não encontrado', 'error'); return; }
       ppp.innerHTML = html;
@@ -48563,7 +48599,7 @@ const printPreview = {
       if (!temPre && !temTermo) { toast('Nada para imprimir', 'warn'); return; }
 
       const partes = [];
-      if (temPre) partes.push(printPreview._buildPre());
+      if (temPre) partes.push(printPreview._buildPre() + printPreview._adendosDoFormulario('pre'));
       if (temTermo) {
         if (partes.length) {
           partes.push('<div class="pp-quebra" style="page-break-before:always;break-before:page"></div>');
