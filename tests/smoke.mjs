@@ -53,7 +53,13 @@ async function test(name, fn) {
   }
 }
 
-const browser = await chromium.launch();
+/* Em máquinas que já trazem o Chromium instalado (o container desta sessão
+   traz, em /opt/pw-browsers), apontar para ele evita baixar outro — e evita
+   o erro de versão quando o Playwright do package.json não é o mesmo que
+   baixou aquele navegador. No CI a variável não existe e nada muda. */
+const browser = await chromium.launch(
+  process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {}
+);
 
 async function novaPagina() {
   const page = await browser.newPage();
@@ -18881,6 +18887,79 @@ await test('Em máquina compartilhada, fechar a aba e reabrir não deixa o atend
   assert(r.naoPerdeuOQueNaoSubiu, 'e o que ainda não subiu continua ali — é a única cópia que existe, apagá-la seria perder atendimento');
   assert(r.fecharAbaLimpa, 'fechar a aba limpa também: num computador de hospital ninguém clica em Sair');
   assert(r.pessoalNaoLimpa && r.blindagemNaoAgeNoPessoal, 'no aparelho que a pessoa declarou como seu, nada disso acontece — lá a comodidade é o certo');
+  await page.close();
+});
+
+/* 254) A correção tem de sair no papel
+
+   Caso real, com nome e tudo: "fiz o pré, ele enviou exames posteriormente,
+   aparece o histórico de alterações, mas na impressão está a versão antiga".
+
+   Editar um registro FINALIZADO não altera o original — vira CORREÇÃO, como
+   manda um prontuário, e isso está certo. O defeito é que a correção nunca
+   chegava à impressão: `adendos.htmlParaImpressao` existia no código e NÃO
+   ERA CHAMADA POR NINGUÉM. A janela de adendos prometia, com todas as
+   letras, que o adendo "aparece na ficha e no PDF".
+
+   O resultado era o pior possível num documento clínico: a folha saía com a
+   versão antiga e SEM dizer que havia mais. No caso dele, os exames que
+   chegaram depois ficaram de fora da folha que a equipe lê. */
+await test('Adendos e correções saem na impressão, e a folha avisa que existem', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('pre', [{
+      _id: 'preJ', nome: 'JOTENILDO JOSE PAIRANA DE SENA', _finalizado: true,
+      data: utils.hojeISO(),
+      _adendos: [{
+        id: 'ad1', data: new Date().toISOString(), autor: 'Dr. Marcelo',
+        texto: 'CORREÇÃO: exames trazidos depois — Hb 13,2; Plaq 210.000; ECG sem alterações.'
+      }]
+    }]);
+
+    /* a tela abre o registro */
+    try { ui.showModule('pre'); } catch (e) {}
+    const f = document.getElementById('form-pre');
+    let hid = f.querySelector('[name="_id"]');
+    if (!hid) { hid = document.createElement('input'); hid.type = 'hidden'; hid.name = '_id'; f.appendChild(hid); }
+    hid.value = 'preJ';
+
+    /* ---- o registro é achado a partir do formulário ---- */
+    const rec = printPreview._registroDoFormulario('pre');
+    out.achouORegistro = !!rec && rec._id === 'preJ';
+
+    /* ---- e o bloco de adendos é montado ---- */
+    const bloco = printPreview._adendosDoFormulario('pre');
+    out.temBloco = bloco.indexOf('ADENDOS / CORREÇÕES') >= 0;
+    out.temOConteudo = bloco.indexOf('Hb 13,2') >= 0 && bloco.indexOf('ECG sem alterações') >= 0;
+    out.temAutorEData = bloco.indexOf('Dr. Marcelo') >= 0;
+    out.dizQueOOriginalEhODeCima = /original, preservado/i.test(bloco);
+    out.contaQuantos = /CORREÇÕES — 1/.test(bloco);
+
+    /* legível, não escondido em letra de rodapé: era 7,5pt */
+    const m = bloco.match(/font-size:(\d+(?:\.\d+)?)pt;margin-bottom:5px/);
+    out.tamanhoDeLeitura = !!m && parseFloat(m[1]) >= 9;
+
+    /* ---- sem adendo, nada é acrescentado ---- */
+    store.setList('pre', [{ _id: 'preJ', nome: 'Sem adendo', _finalizado: true }]);
+    out.semAdendoNaoPoluiu = printPreview._adendosDoFormulario('pre') === '';
+
+    /* ---- registro novo (sem id na tela) não quebra ---- */
+    hid.value = '';
+    out.semRegistroNaoQuebra = printPreview._adendosDoFormulario('pre') === '';
+
+    store.setList('pre', []);
+    return out;
+  });
+  assert(r.achouORegistro, 'a impressão precisa achar o registro aberto para buscar nele o que não mora no formulário');
+  assert(r.temBloco, 'a folha passa a ter a seção de ADENDOS / CORREÇÕES — ela existia no código e não era chamada por ninguém');
+  assert(r.temOConteudo, 'com o conteúdo da correção: eram os exames que chegaram depois');
+  assert(r.temAutorEData, 'datada e assinada, como manda um prontuário');
+  assert(r.dizQueOOriginalEhODeCima, 'e dizendo que o texto acima é o original preservado — senão parece contradição');
+  assert(r.contaQuantos, 'com o número de correções à vista no título');
+  assert(r.tamanhoDeLeitura, 'em tamanho de leitura: imprimir exame em 7,5pt é esconder com elegância');
+  assert(r.semAdendoNaoPoluiu, 'sem adendo, nada é acrescentado à folha');
+  assert(r.semRegistroNaoQuebra, 'e registro novo, ainda sem id, não quebra a impressão');
   await page.close();
 });
 
