@@ -15,8 +15,8 @@ a homologação. Uma consulta agregada confirmou zero usuários Auth,
 organizações e pacientes antes das fixtures. As extensões `unaccent` e
 `pg_trgm` estavam ausentes; a `0014` criou a estrutura vazia de medicamentos.
 
-O histórico consultado em 10/10 às 00:42:32 UTC confirma 19 novas migrações:
-`0001`–`0019`, além da pré-existente `0001_assinaturas` (20 entradas).
+O histórico consultado novamente em 10/10 confirma 20 novas migrações:
+`0001`–`0020`, além da pré-existente `0001_assinaturas` (21 entradas).
 `0014` foi confirmada na versão `20261009211312` e `0018` na versão
 `20261009212903`. A recusa anterior da `0014` foi superada por essa aplicação.
 
@@ -25,13 +25,24 @@ na versão `20261010002555`. A conferência independente encontrou três colunas
 de versão, 13 guardas de organização, três guardas de versão e 13 tabelas com
 RLS forçada. Quinze contagens agregadas estavam zeradas antes das fixtures.
 
-A tentativa de aplicar `0020` retornou `INVALID_ARGUMENT`, com a mensagem
-**“Invalid or expired requestState”**. Ela permanece ausente do histórico.
-A reconstrução está parcial e as novas aplicações foram interrompidas após
-a repetição do erro do conector. A autorização permanece válida; o bloqueio
-é de execução, não uma necessidade de renovar consentimento. Nenhuma fixture
-foi criada, o runner não foi implantado ou executado e nenhum SQL foi enviado
-à produção. `0020` e todas as migrações posteriores continuam pendentes.
+A falha anterior de `0020` foi superada: a aplicação isolada foi confirmada
+na versão `20261010124332`, com SHA-256 de fonte e SQL aplicado
+`43ee4eb96a50abcbc3a53c460ed76c11d676417e407bd18c6d9e20dcd7bb95a7`.
+Uma nova consulta independente do histórico confirmou essa entrada.
+
+`0021` retornou **“Invalid or expired requestState”** na tentativa inicial
+e na tentativa isolada, sem diagnóstico SQL. O histórico consultado após a
+segunda falha confirma que ela não foi aplicada. Novas aplicações foram
+interrompidas. A autorização permanece válida; o bloqueio é de execução.
+Nenhuma fixture foi criada, o runner não foi implantado ou executado e nenhum
+SQL foi enviado à produção. `0021` e as migrações posteriores estão pendentes.
+
+A captura complementar do catálogo legado também não produziu evidência:
+a primeira consulta ficou pendente e foi cancelada; zero das 19 consultas
+preparadas foram concluídas. O catálogo parcial existente não contém todas
+as constraints, policies, índices e permissões necessárias para reconstruir
+fielmente `public.documentos` e `public.pacientes`. Essa lacuna não pode ser
+substituída por DDL inventado ou por classificação automática de clínica.
 
 O inventário de fontes, hashes e estados está em
 `STAGING-MIGRATION-EVIDENCE.json`. Ele descreve a execução parcial; não é uma
@@ -131,9 +142,10 @@ inalteradas. A migração não foi aplicada e não libera publicação.
 `tests/sql/retification-cas-security.sql` contém uma fixture PostgreSQL com
 rollback para autorização, isolamento, idempotência, cadeia aceita, conflito
 preservado e imutabilidade integral do pai. O teste Node verifica o contrato
-das fontes; a fixture SQL ainda não foi executada em um banco reconciliado.
-A corrida de duas sessões reais e a assinatura Realtime desta cadeia também
-permanecem pendentes.
+das fontes. A fixture SQL foi executada na CI PostgreSQL local do commit
+`fff59e2`, com rollback e corrida real de duas conexões. Isso não comprova
+Auth, RLS, Realtime ou Storage no Supabase hospedado. A corrida de duas
+sessões autenticadas e a assinatura Realtime desta cadeia estão pendentes.
 
 Essa corrida deve usar homologação exclusiva, com contas e registros sintéticos.
 Os adendos são append-only mesmo em DELETE por cascade administrativo; não se

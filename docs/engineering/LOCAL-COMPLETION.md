@@ -3,14 +3,17 @@
 > **Atualização de estado — 10 de outubro de 2026.** O corpo abaixo é um
 > retrato histórico e não representa o estado atual da execução. A branch de
 > teste foi publicada no PR [225](https://github.com/mpcaliman/Soft-Anestesia/pull/225).
-> A homologação registra 19 novas migrações (`0001`–`0019`),
+> A homologação registra 20 novas migrações (`0001`–`0020`),
 > além da pré-existente `0001_assinaturas`; a aplicação de `0019` superou o
-> bloqueio anterior e foi conferida no histórico e no catálogo. `0020` falhou
-> por estado inválido ou expirado do conector e continua ausente, assim como
-> as migrações posteriores.
+> bloqueio anterior e foi conferida no histórico e no catálogo. `0020` foi
+> aplicada na versão `20261010124332` e confirmada no histórico. `0021` falhou
+> duas vezes por estado inválido ou expirado do conector e continua ausente,
+> assim como as migrações posteriores.
 > O runner de integração real não foi implantado nem
-> executado. A proteção remota de `main` permanece inativa; os controles
-> propostos no branch ainda não demonstram sua imposição em produção. Consulte
+> executado. A proteção remota de `main` permanece inativa: a credencial
+> recebeu HTTP 403 ao tentar configurá-la e ao mudar a origem do Pages.
+> O workflow antigo foi desativado, mas o Pages ainda publica pela branch
+> `main`; por isso a integração está bloqueada. Consulte
 > [o estado atual da homologação](STAGING-REBUILD-PLAN.md) e
 > [a evidência das migrações](STAGING-MIGRATION-EVIDENCE.json). Nenhum SQL desta
 > execução foi enviado à produção. A reconstrução está parcial e interrompida.

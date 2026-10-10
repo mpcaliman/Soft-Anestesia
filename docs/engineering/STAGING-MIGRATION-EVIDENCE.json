@@ -5,12 +5,12 @@
   "parentProductionProject": "zbpbrnalamjrcfbscjkt",
   "status": "partial_reconstruction_connector_blocked",
   "productionChanged": false,
-  "confirmedNewMigrations": 19,
+  "confirmedNewMigrations": 20,
   "preservedMigration": "0001_assinaturas",
-  "confirmedHistoryEntries": 20,
+  "confirmedHistoryEntries": 21,
   "historyEvidenceSource": "Supabase list_migrations independently fetched by root after mutations stopped",
-  "gap": "0014 and 0019 previously failed connector attempts superseded by verified application; all 0001–0019 now confirmed",
-  "stoppedAt": "0020 failed with INVALID_ARGUMENT: Invalid or expired requestState; absent from history independently checked at 2026-10-10T00:42:32Z",
+  "gap": "0001–0020 independently confirmed; 0021 and later migrations pending",
+  "stoppedAt": "0021 failed twice with Invalid or expired requestState, including a serialized single-call retry; absent from independently checked history after the second failure",
   "ownerAuthorization": "2026-10-09: Pode fazer tudo — remaining stages authorized subject to prior verification",
   "executionBlock": "connector request state failure; authorization does not establish successful execution",
   "furtherMutationsAllowed": false,
@@ -174,16 +174,19 @@
     {
       "source": "database/migrations/0020_conflict_preservation_and_immutability.sql",
       "sourceSha256": "43ee4eb96a50abcbc3a53c460ed76c11d676417e407bd18c6d9e20dcd7bb95a7",
-      "appliedSha256": null,
-      "state": "not_applied",
-      "remoteVersion": null
+      "appliedSha256": "43ee4eb96a50abcbc3a53c460ed76c11d676417e407bd18c6d9e20dcd7bb95a7",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261010124332",
+      "remoteMigrationName": "staging_rebuild_0020_conflict_preservation_and_immutability"
     },
     {
       "source": "database/migrations/0021_safe_attachment_lifecycle.sql",
       "sourceSha256": "e33a90b38270746bc77e525fc5612f44e4bd760bbf5e2e893ea9bf6de45f3131",
       "appliedSha256": null,
       "state": "not_applied",
-      "remoteVersion": null
+      "remoteVersion": null,
+      "attempts": 2,
+      "lastError": "Invalid or expired requestState; no SQL diagnostic"
     },
     {
       "source": "database/migrations/0022_encrypted_offline_keyrings.sql",
@@ -343,9 +346,13 @@
     {
       "version": "20261010002555",
       "name": "staging_rebuild_0019_optimistic_concurrency"
+    },
+    {
+      "version": "20261010124332",
+      "name": "staging_rebuild_0020_conflict_preservation_and_immutability"
     }
   ],
-  "remoteHistorySha256": "32b5369bc583f6b72c808b48d861faaacb84f7a19a3d18044925fab6314f6566",
+  "remoteHistorySha256": "cdf94cff2b12fe6c21bf0e4ab1816d81e003e364709d3a46d670f12f2867116b",
   "remoteHistorySerialization": "JSON UTF-8; sorted object keys; compact separators; original array order",
   "preFixtureEvidence": {
     "recordedAt": "2026-10-10",
@@ -355,18 +362,25 @@
     "source": "root execute_sql aggregate only; no clinical content",
     "all15AggregateTargetsZero": true
   },
-  "remoteHistoryVerifiedAt": "2026-10-10T00:42:32Z",
   "resumeEvidence": {
     "readProbeSucceeded": true,
     "target": "yqqrfgbvoexricjdxpis",
     "migration0019Applied": true,
-    "migration0020Applied": false,
+    "migration0020Applied": true,
     "confirmedCatalog": {
       "versionColumns": 3,
       "organizationGuards": 13,
       "versionGuards": 3,
       "forcedRlsTables": 13
     },
-    "productionMutated": false
-  }
+    "productionMutated": false,
+    "migration0021Applied": false,
+    "legacyMetadataCapture": {
+      "completedQueries": 0,
+      "plannedQueries": 19,
+      "firstQueryCancelled": true,
+      "completeBaseline": false
+    }
+  },
+  "remoteHistoryVerifiedDate": "2026-10-10; independently checked after the serialized 0021 failure"
 }
