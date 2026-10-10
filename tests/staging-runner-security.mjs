@@ -7,23 +7,45 @@ import vm from 'node:vm';
 const source = await readFile(new URL('../scripts/staging-integration-runner.ts', import.meta.url), 'utf8');
 const capability = 'synthetic-operator-capability-for-boundary-test';
 const capabilityHash = createHash('sha256').update(capability).digest('hex');
+const runId = 'b4bf5c3d-74c2-41ae-b9cc-c8f44d341058';
+const activeWindow = () => ({ issuedAt: new Date(Date.now() - 1000).toISOString(),
+  expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString() });
 
-function runner(projectUrl) {
+function runner(projectUrl, options = {}) {
   let handler;
   let networkCalls = 0;
+  const calls = [];
+  const claims = options.claims || new Map();
+  const window = { ...activeWindow(), ...options.window };
   const environment = { SUPABASE_URL: projectUrl, SUPABASE_SERVICE_ROLE_KEY: 'synthetic-private-admin-token',
     SUPABASE_ANON_KEY: 'synthetic-public-key' };
   const context = vm.createContext({
     Deno: { env: { get: key => environment[key] }, serve: callback => { handler = callback; } },
     crypto: webcrypto, TextEncoder, Uint8Array, Request, Response, AbortSignal,
     setTimeout, clearTimeout, setInterval, clearInterval, WebSocket: class {},
-    fetch: async () => { networkCalls++; throw new Error('synthetic-private-admin-token'); }
+    fetch: async (target, request) => {
+      networkCalls++; calls.push(target);
+      if (options.acceptClaims && target.endsWith('/rest/v1/staging_audit_run_claims')) {
+        const row = JSON.parse(request.body);
+        assert.equal(request.headers.Authorization, 'Bearer synthetic-private-admin-token');
+        if (claims.has(row.capability_sha256) || [...claims.values()].some(item => item.run_id === row.run_id))
+          return Response.json({ code: '23505' }, { status: 409 });
+        const claim = { ...row, claimed_at: new Date().toISOString() };
+        claims.set(row.capability_sha256, claim);
+        if (options.loseClaimResponse) throw new Error('fetch_failed');
+        return Response.json([claim], { status: 201 });
+      }
+      throw new Error('synthetic-private-admin-token');
+    }
   });
-  const code = stripTypeScriptTypes(source.replace('__RUN_CAPABILITY_SHA256__', capabilityHash));
+  const deployed = source.replace('__RUN_CAPABILITY_SHA256__', capabilityHash)
+    .replace('__RUN_UUID__', runId).replace('__RUN_ISSUED_AT__', window.issuedAt).replace('__RUN_EXPIRES_AT__', window.expiresAt);
+  const code = stripTypeScriptTypes(deployed);
   new vm.Script(code, { filename: 'staging-integration-runner.ts' }).runInContext(context);
-  const request = (token = capability, method = 'POST') => new Request('https://operator.invalid/run',
-    { method, headers: { 'x-audit-capability': token } });
-  return { handle: (token, method) => handler(request(token, method)), calls: () => networkCalls };
+  const request = (token = capability, method = 'POST', boundId = runId) => new Request('https://operator.invalid/run',
+    { method, headers: { 'x-audit-capability': token, 'Content-Type': 'application/json' },
+      ...(method === 'POST' ? { body: JSON.stringify({ runId: boundId }) } : {}) });
+  return { handle: (token, method, boundId) => handler(request(token, method, boundId)), calls: () => networkCalls, paths: () => calls };
 }
 
 const production = runner('https://zbpbrnalamjrcfbscjkt.supabase.co');
@@ -37,18 +59,60 @@ assert.equal(unknownProject.calls(), 0);
 const staging = runner('https://yqqrfgbvoexricjdxpis.supabase.co');
 assert.equal((await staging.handle('wrong-capability')).status, 403);
 assert.equal((await staging.handle(capability, 'GET')).status, 403);
+assert.equal((await staging.handle(capability, 'POST', '49f818c2-d080-4e56-9c3a-a1dc57359068')).status, 400);
 assert.equal(staging.calls(), 0, 'capacidade inválida não pode provisionar fixtures');
+
+for (const window of [
+  { issuedAt: new Date(Date.now() - 60000).toISOString(), expiresAt: new Date(Date.now() - 1).toISOString() },
+  { issuedAt: new Date(Date.now() + 60000).toISOString(), expiresAt: new Date(Date.now() + 120000).toISOString() },
+  { issuedAt: new Date(Date.now() - 1000).toISOString(), expiresAt: new Date(Date.now() + 16 * 60000).toISOString() },
+  { issuedAt: 'invalid', expiresAt: new Date(Date.now() + 60000).toISOString() }
+]) {
+  const expired = runner('https://yqqrfgbvoexricjdxpis.supabase.co', { window });
+  assert.equal((await expired.handle()).status, 403, 'prazo expirado, futuro, excessivo ou inválido não executa');
+  assert.equal(expired.calls(), 0);
+}
 
 const result = await (await staging.handle()).json();
 assert.equal(staging.calls(), 1);
 assert.equal(result.failed, 1, 'falha de provisionamento continua sendo falha');
-assert.equal(result.checks[0].name, 'required_retification_schema');
+assert.equal(result.runId, runId, 'identidade conhecida pelo operador aparece mesmo quando o claim falha');
+assert.equal(result.checks[0].name, 'durable_invocation_claim');
 assert.equal(result.checks[0].diagnostic, 'unexpected_error');
 assert.ok(!JSON.stringify(result).includes('synthetic-private-admin-token'), 'diagnóstico não revela segredo recebido em erro');
 assert.equal((await staging.handle()).status, 403, 'mesma instância não aceita executar duas vezes');
 assert.equal(staging.calls(), 1);
 
-console.log('✓ runner de homologação bloqueia produção, alvo desconhecido e capacidade inválida sem chamadas administrativas; erro não expõe token');
+const sharedClaims = new Map();
+const firstIsolate = runner('https://yqqrfgbvoexricjdxpis.supabase.co', { acceptClaims: true, claims: sharedClaims });
+const firstResult = await (await firstIsolate.handle()).json();
+assert.equal(firstResult.checks[0].name, 'durable_invocation_claim');
+assert.equal(firstResult.checks[0].passed, true);
+assert.ok(firstResult.checks.some(check => check.name === 'required_retification_schema' && !check.passed));
+assert.equal(firstIsolate.paths().filter(path => path.includes('/auth/')).length, 0);
+const secondIsolate = runner('https://yqqrfgbvoexricjdxpis.supabase.co', { acceptClaims: true, claims: sharedClaims });
+assert.equal((await secondIsolate.handle()).status, 409, 'segundo isolate não repete capacidade persistida');
+assert.equal(secondIsolate.calls(), 1, 'duplicação termina no claim, antes de qualquer schema/Auth');
+
+const racingClaims = new Map();
+const racingIsolates = [0, 1].map(() => runner('https://yqqrfgbvoexricjdxpis.supabase.co',
+  { acceptClaims: true, claims: racingClaims }));
+const racingResponses = await Promise.all(racingIsolates.map(isolate => isolate.handle()));
+assert.deepEqual(racingResponses.map(response => response.status).sort(), [200, 409],
+  'duas invocações simultâneas têm exatamente um claim aceito');
+assert.equal(racingClaims.size, 1);
+assert.ok(racingIsolates.every(isolate => !isolate.paths().some(path => path.includes('/auth/'))));
+
+const uncertainClaims = new Map();
+const lostReply = runner('https://yqqrfgbvoexricjdxpis.supabase.co',
+  { acceptClaims: true, loseClaimResponse: true, claims: uncertainClaims });
+const lostReplyResult = await (await lostReply.handle()).json();
+assert.equal(lostReplyResult.failed, 1);
+assert.equal(lostReply.calls(), 1, 'claim sem resposta não pode criar contas');
+const afterLostReply = runner('https://yqqrfgbvoexricjdxpis.supabase.co', { acceptClaims: true, claims: uncertainClaims });
+assert.equal((await afterLostReply.handle()).status, 409, 'resposta perdida conserva bloqueio persistente entre isolates');
+
+console.log('✓ runner bloqueia produção, prazo inválido, UUID incorreto e repetição entre isolates; claim perdido não cria Auth e erro não expõe token');
 
 const { exerciseRunner } = await import('./helpers/staging-runner-fixture.mjs');
 const passing = await exerciseRunner(source, capability, capabilityHash);

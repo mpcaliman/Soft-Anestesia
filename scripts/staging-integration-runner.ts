@@ -1,8 +1,13 @@
 // Executar somente como Edge Function efêmera de homologação. Não é asset público.
-// Antes do deploy, substituir o marcador pelo SHA-256 de uma capacidade aleatória
-// guardada fora do Git. A gateway JWT deve permanecer habilitada.
+// Antes do deploy, substituir os marcadores pela capacidade SHA-256, UUID da
+// execução e janela UTC de no máximo 15 minutos. A capacidade aleatória fica
+// fora do Git; apenas seu hash é publicado. A gateway JWT permanece habilitada.
 const TARGET = 'yqqrfgbvoexricjdxpis';
 const CAPABILITY_HASH = '__RUN_CAPABILITY_SHA256__';
+const DEPLOYMENT_RUN_ID = '__RUN_UUID__';
+const RUN_ISSUED_AT = '__RUN_ISSUED_AT__';
+const RUN_EXPIRES_AT = '__RUN_EXPIRES_AT__';
+const MAX_RUN_WINDOW_MS = 15 * 60 * 1000;
 // Evidência sintética é permanente: não apagar organizações, Auth, prontuários
 // ou auditoria. Ao encerrar, revogar sessões e desativar todo acesso da fixture.
 const RETENTION_POLICY = 'retain-blocked-synthetic-evidence';
@@ -19,8 +24,26 @@ Deno.serve(async request => {
   const hash = hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(capability)));
   if (request.method !== 'POST' || hash !== CAPABILITY_HASH || consumed)
     return new Response('audit_capability_denied', { status: 403 });
+  const issuedAt = Date.parse(RUN_ISSUED_AT), expiresAt = Date.parse(RUN_EXPIRES_AT);
+  if (!/^[a-f0-9]{64}$/.test(CAPABILITY_HASH)
+      || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(DEPLOYMENT_RUN_ID)
+      || !Number.isFinite(issuedAt) || !Number.isFinite(expiresAt)
+      || expiresAt <= issuedAt || expiresAt - issuedAt > MAX_RUN_WINDOW_MS
+      || Date.now() < issuedAt || Date.now() >= expiresAt)
+    return new Response('audit_run_window_denied', { status: 403 });
+  let body: any;
+  try {
+    if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json')
+      return new Response('audit_run_binding_denied', { status: 400 });
+    const raw = await request.text();
+    if (raw.length > 128) return new Response('audit_run_binding_denied', { status: 400 });
+    body = JSON.parse(raw);
+  } catch { return new Response('audit_run_binding_denied', { status: 400 }); }
+  if (!body || typeof body !== 'object' || Array.isArray(body)
+      || Object.keys(body).length !== 1 || body.runId !== DEPLOYMENT_RUN_ID)
+    return new Response('audit_run_binding_denied', { status: 400 });
   consumed = true;
-  const runId = crypto.randomUUID();
+  const runId = DEPLOYMENT_RUN_ID;
   const checks: { name: string; passed: boolean | null; diagnostic?: string }[] = [];
   const users: { id: string; email: string; password: string; access_token: string; refresh_token: string }[] = [];
   const orgs: string[] = [];
@@ -37,7 +60,7 @@ Deno.serve(async request => {
   let programmerId: string | null = null;
   let shareId: string | null = null;
   let shareActive = false;
-  let phase = 'required_retification_schema';
+  let phase = 'durable_invocation_claim';
   const diagnostic = (error: unknown) => {
     const value = error instanceof Error ? error.message : 'unknown_error';
     return /^(http_[0-9]{3}|assertion_failed|websocket_timeout|websocket_error|fetch_failed)$/.test(value)
@@ -84,8 +107,26 @@ Deno.serve(async request => {
   };
   const remember = (table: string, row: any) => { expect(row && typeof row.id === 'string'); retainedRecords.push({ table, id: row.id }); return row; };
   try {
+    // O PK no banco protege contra outro isolate ou outro deploy com a mesma
+    // capacidade. Esta tabela é infraestrutura exclusiva de homologação;
+    // não existe policy nem privilégio para anon/authenticated. Uma resposta
+    // perdida nunca autoriza retry: o claim e o UUID conhecido permitem
+    // reconciliar esta execução sem criar um segundo conjunto de fixtures.
+    const claim = await call('/rest/v1/staging_audit_run_claims', adminKey, 'POST', {
+      capability_sha256: CAPABILITY_HASH, run_id: runId,
+      issued_at: RUN_ISSUED_AT, expires_at: RUN_EXPIRES_AT
+    });
+    if (claim.status === 409 && claim.data?.code === '23505')
+      return new Response('audit_invocation_already_claimed', { status: 409 });
+    if (!claim.ok) throw new Error(`http_${claim.status}`);
+    expect(Array.isArray(claim.data) && claim.data.length === 1
+      && claim.data[0].capability_sha256 === CAPABILITY_HASH && claim.data[0].run_id === runId
+      && Date.parse(claim.data[0].issued_at) === issuedAt && Date.parse(claim.data[0].expires_at) === expiresAt
+      && Date.parse(claim.data[0].claimed_at) >= issuedAt && Date.parse(claim.data[0].claimed_at) < expiresAt);
+    checks.push({ name: 'durable_invocation_claim', passed: true });
     // Não criar contas numa homologação parcialmente migrada. Coluna ausente,
     // erro de schema ou payload errado devem ser falhas, nunca prova de RLS.
+    phase = 'required_retification_schema';
     await accepted('/rest/v1/addenda?select=id,retification_revision,parent_legacy_id,reason,author_id&limit=0', adminKey);
     checks.push({ name: 'required_retification_schema', passed: true });
     phase = 'fixture_auth_create';

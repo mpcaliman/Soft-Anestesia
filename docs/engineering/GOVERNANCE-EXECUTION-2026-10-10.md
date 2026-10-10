@@ -1,5 +1,19 @@
 # Execução da governança — 10 de outubro de 2026
 
+> **Atualização remota às 23:40 UTC.** O bootstrap v2 foi publicado no
+> PR [228](https://github.com/mpcaliman/Soft-Anestesia/pull/228), commit
+> `c23e6313e883680c93f758ccfb2fa97d091ee123`, árvore
+> `c2e00f10187ff6682bb9ab576912f0f66d12af8a`. A atualização da branch usou
+> lease no HEAD anterior `2f2fa71c8d1c14c2fa3b8e88f77e415d6358b0cb`, sem
+> force push. A preparação offline e seu manifesto abaixo permanecem
+> preservados como snapshot anterior à publicação. O resultado remoto é
+> registrado separadamente; nenhum status ou aprovação foi fabricado.
+> A nova CI ainda precisa ser conferida. A leitura remota de `main` retornou
+> `protected: false`, e a lista de rulesets estava vazia; sua proteção não
+> está demonstrada. A configuração atual de Pages não pôde ser consultada,
+> e a última evidência era `legacy main /`. Esses controles continuam
+> necessários antes de integrar o bootstrap ou o PR de correções em `main`.
+
 Esta revisão corrige os controles propostos para corresponder à Regra de Ouro 3:
 Marcelo deve autorizar a mudança. A autorização ampla já registrada em
 [AUTHORIZATIONS.md](AUTHORIZATIONS.md) abrange a continuidade de G3–G6, sujeita

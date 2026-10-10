@@ -7,6 +7,9 @@ import vm from 'node:vm';
 
 export async function exerciseRunner(source, capability, capabilityHash, defects = {}) {
   const accounts = [], memberships = [], subscriptions = [], records = new Map();
+  const runId = webcrypto.randomUUID();
+  const issuedAt = new Date(Date.now() - 1000).toISOString();
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
   let handle, auditOrClinicalDeletionCommitted = false, failedLogin = false;
   const rows = table => records.get(table) || [];
   const put = (table, row) => {
@@ -55,6 +58,13 @@ export async function exerciseRunner(source, capability, capabilityHash, defects
     const admin = bearer === 'synthetic-private-admin-token';
     const user = tokenUser(bearer);
     const body = typeof options.body === 'string' && (headers['Content-Type'] || '').includes('application/json') ? JSON.parse(options.body) : options.body;
+    if (path === '/rest/v1/staging_audit_run_claims' && method === 'POST') {
+      if (!admin) return error(403);
+      if (rows('staging_audit_run_claims').some(row => row.capability_sha256 === body.capability_sha256 || row.run_id === body.run_id))
+        return error(409, '23505');
+      const row = put('staging_audit_run_claims', { ...body, claimed_at: new Date().toISOString() });
+      return response([clone(row)], 201);
+    }
     if (path === '/auth/v1/admin/users' && method === 'POST') {
       const account = { id: webcrypto.randomUUID(), email: body.email, password: body.password,
         token: `synthetic-access-${accounts.length}`, refresh: `synthetic-refresh-${accounts.length}`, blocked: false, sessionsRevoked: false };
@@ -183,8 +193,10 @@ export async function exerciseRunner(source, capability, capabilityHash, defects
     crypto: webcrypto, TextEncoder, Uint8Array, Request, Response, AbortSignal,
     setTimeout, clearTimeout, setInterval, clearInterval, WebSocket: FixtureWebSocket, fetch: fetchFixture
   });
-  new vm.Script(stripTypeScriptTypes(source.replace('__RUN_CAPABILITY_SHA256__', capabilityHash))).runInContext(context);
+  const deployed = source.replace('__RUN_CAPABILITY_SHA256__', capabilityHash)
+    .replace('__RUN_UUID__', runId).replace('__RUN_ISSUED_AT__', issuedAt).replace('__RUN_EXPIRES_AT__', expiresAt);
+  new vm.Script(stripTypeScriptTypes(deployed)).runInContext(context);
   const result = await (await handle(new Request('https://operator.invalid/run', { method: 'POST',
-    headers: { 'x-audit-capability': capability } }))).json();
+    headers: { 'x-audit-capability': capability, 'Content-Type': 'application/json' }, body: JSON.stringify({ runId }) }))).json();
   return { result, accounts, memberships, auditOrClinicalDeletionCommitted, programmerPrivileges: rows('app_programmers') };
 }

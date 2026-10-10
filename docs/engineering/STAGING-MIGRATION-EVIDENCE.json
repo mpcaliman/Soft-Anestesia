@@ -3,16 +3,16 @@
   "recordedAt": "2026-10-10",
   "targetProject": "yqqrfgbvoexricjdxpis",
   "parentProductionProject": "zbpbrnalamjrcfbscjkt",
-  "status": "partial_reconstruction_connector_blocked",
+  "status": "partial_reconstruction_0025_connector_blocked_after_reconnect",
   "productionChanged": false,
-  "confirmedNewMigrations": 20,
+  "confirmedNewMigrations": 24,
   "preservedMigration": "0001_assinaturas",
-  "confirmedHistoryEntries": 21,
+  "confirmedHistoryEntries": 26,
   "historyEvidenceSource": "Supabase list_migrations independently fetched by root after mutations stopped",
-  "gap": "0001–0020 independently confirmed; 0021 and later migrations pending",
-  "stoppedAt": "0021 failed twice with Invalid or expired requestState, including a serialized single-call retry; absent from independently checked history after the second failure",
+  "gap": "0001–0024 and the empty two-table legacy reconstruction confirmed; 0025–0032 and signature hardening pending",
+  "stoppedAt": "0025 source-transfer truncation was diagnosed and corrected; two subsequent full-SHA-verified single-call applications returned Invalid or expired requestState; independently checked history confirms absence",
   "ownerAuthorization": "2026-10-09: Pode fazer tudo — remaining stages authorized subject to prior verification",
-  "executionBlock": "connector request state failure; authorization does not establish successful execution",
+  "executionBlock": "connector request state failure on 0025 despite reconnection and source integrity verification",
   "furtherMutationsAllowed": false,
   "syntheticFixturesExecuted": false,
   "integrationRunnerDeployed": false,
@@ -182,39 +182,51 @@
     {
       "source": "database/migrations/0021_safe_attachment_lifecycle.sql",
       "sourceSha256": "e33a90b38270746bc77e525fc5612f44e4bd760bbf5e2e893ea9bf6de45f3131",
-      "appliedSha256": null,
-      "state": "not_applied",
-      "remoteVersion": null,
+      "appliedSha256": "e33a90b38270746bc77e525fc5612f44e4bd760bbf5e2e893ea9bf6de45f3131",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261010224615",
       "attempts": 2,
-      "lastError": "Invalid or expired requestState; no SQL diagnostic"
+      "remoteMigrationName": "staging_rebuild_0021_safe_attachment_lifecycle",
+      "previousExecutionBlock": "Two request-state errors before owner reconnected Supabase; now overcome by confirmed application"
     },
     {
       "source": "database/migrations/0022_encrypted_offline_keyrings.sql",
       "sourceSha256": "5b6b93106f157156c70da7f144f6324815aa6679e7f8bbb1a0b18baa4468f968",
-      "appliedSha256": null,
-      "state": "not_applied",
-      "remoteVersion": null
+      "appliedSha256": "5b6b93106f157156c70da7f144f6324815aa6679e7f8bbb1a0b18baa4468f968",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261010224628",
+      "remoteMigrationName": "staging_rebuild_0022_encrypted_offline_keyrings"
     },
     {
       "source": "database/migrations/0023_idempotent_cloud_receipts.sql",
       "sourceSha256": "af8d293db5cb8a4bbaecb0969ac67afe02d293a7b6d45240884a14a1c37a81f4",
-      "appliedSha256": null,
-      "state": "not_applied",
-      "remoteVersion": null
+      "appliedSha256": "af8d293db5cb8a4bbaecb0969ac67afe02d293a7b6d45240884a14a1c37a81f4",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261010224635",
+      "remoteMigrationName": "staging_rebuild_0023_idempotent_cloud_receipts"
     },
     {
       "source": "database/migrations/0024_legacy_quarantine_migration.sql",
       "sourceSha256": "6d9b5d3eca5ab2880d2294976d2a8baf113892ad0a5fa351d5a2c8a3e13f6c87",
-      "appliedSha256": null,
-      "state": "not_applied",
-      "remoteVersion": null
+      "appliedSha256": "6d9b5d3eca5ab2880d2294976d2a8baf113892ad0a5fa351d5a2c8a3e13f6c87",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261010225526",
+      "remoteMigrationName": "staging_rebuild_0024_legacy_quarantine_migration"
     },
     {
       "source": "database/migrations/0025_supabase_hardening.sql",
       "sourceSha256": "4847547686c59b50d066801d93a9229b617c8363d7287e401c76066d41a3c4c5",
       "appliedSha256": null,
       "state": "not_applied",
-      "remoteVersion": null
+      "remoteVersion": null,
+      "attemptsAfterReconnection": 3,
+      "sourceTransferFailure": "Initial tool output truncated the SQL; rejected with 42601; source file and baseline hash unchanged",
+      "verifiedFullSqlAttempts": 2,
+      "lastError": "Invalid or expired requestState",
+      "verifiedSourceBytes": 44293,
+      "verifiedSourceCharacters": 44146,
+      "verifiedSourceLfCount": 1048,
+      "verifiedTransmittedSha256": "4847547686c59b50d066801d93a9229b617c8363d7287e401c76066d41a3c4c5"
     },
     {
       "source": "database/migrations/0026_e1_performance_indexes.sql",
@@ -350,9 +362,29 @@
     {
       "version": "20261010124332",
       "name": "staging_rebuild_0020_conflict_preservation_and_immutability"
+    },
+    {
+      "version": "20261010224615",
+      "name": "staging_rebuild_0021_safe_attachment_lifecycle"
+    },
+    {
+      "version": "20261010224628",
+      "name": "staging_rebuild_0022_encrypted_offline_keyrings"
+    },
+    {
+      "version": "20261010224635",
+      "name": "staging_rebuild_0023_idempotent_cloud_receipts"
+    },
+    {
+      "version": "20261010225526",
+      "name": "staging_rebuild_0024_legacy_quarantine_migration"
+    },
+    {
+      "version": "20261010230832",
+      "name": "staging_rebuild_legacy_empty_baseline_20261010"
     }
   ],
-  "remoteHistorySha256": "cdf94cff2b12fe6c21bf0e4ab1816d81e003e364709d3a46d670f12f2867116b",
+  "remoteHistorySha256": "e30e4fbecdb66c83aa71940d33a7a6b340f8319f7b7a3ca8d6c4720f5890998f",
   "remoteHistorySerialization": "JSON UTF-8; sorted object keys; compact separators; original array order",
   "preFixtureEvidence": {
     "recordedAt": "2026-10-10",
@@ -360,7 +392,15 @@
     "organizations": 0,
     "patients": 0,
     "source": "root execute_sql aggregate only; no clinical content",
-    "all15AggregateTargetsZero": true
+    "all15AggregateTargetsZero": true,
+    "postReconnectAuthUsers": 0,
+    "postReconnectOrganizations": 0,
+    "postReconnectPatients": 0,
+    "postReconnectEncounters": 0,
+    "postReconnectLegacyDocuments": 0,
+    "postReconnectLegacyPatients": 0,
+    "pgNetInstalled": true,
+    "runnerClaimsTablePresent": false
   },
   "resumeEvidence": {
     "readProbeSucceeded": true,
@@ -374,13 +414,46 @@
       "forcedRlsTables": 13
     },
     "productionMutated": false,
-    "migration0021Applied": false,
+    "migration0021Applied": true,
     "legacyMetadataCapture": {
-      "completedQueries": 0,
+      "completedQueries": 19,
       "plannedQueries": 19,
       "firstQueryCancelled": true,
-      "completeBaseline": false
-    }
+      "completeBaseline": false,
+      "scope": "Both legacy table metadata groups plus schema ACL; not a full production baseline",
+      "capture": "LEGACY-TABLE-CATALOG-2026-10-10.json",
+      "supplement": "LEGACY-TABLE-CATALOG-SUPPLEMENT-2026-10-10.json",
+      "exactBigintSequenceValuesRecapturedAsText": true
+    },
+    "migration0022Applied": true,
+    "migration0023Applied": true,
+    "migration0024Applied": true,
+    "migration0025Applied": false,
+    "securityAdvisorsEvidence": "STAGING-SECURITY-ADVISORS-2026-10-10.json"
   },
-  "remoteHistoryVerifiedDate": "2026-10-10; independently checked after the serialized 0021 failure"
+  "remoteHistoryVerifiedDate": "2026-10-10; independently checked after both full-SHA-verified 0025 request-state errors",
+  "authorizationStillValid": true,
+  "pauseReason": "Runtime failure, not a new owner-approval requirement; verify history before resuming",
+  "signatureHardening": {
+    "source": "supabase/migrations/0002_assinaturas_hardening.sql",
+    "sourceSha256": "00e0a39f4f2c20a5f4e4b87b6e5373efc5327bb7a87d8a86bb786882ca35fef2",
+    "migrationName": "staging_rebuild_0002_assinaturas_hardening",
+    "state": "not_applied",
+    "remoteVersion": null,
+    "appliedSha256": null
+  },
+  "legacyEmptyBaseline": {
+    "state": "applied_confirmed",
+    "remoteVersion": "20261010230832",
+    "remoteMigrationName": "staging_rebuild_legacy_empty_baseline_20261010",
+    "appliedSha256": "6d8bac0d9a4786e1b158b3ed8cafc7e8f2f05830aed8aa8866a0835787300752",
+    "evidence": "LEGACY-BASELINE-RECONSTRUCTION-2026-10-10.json",
+    "tables": [
+      "public.documentos",
+      "public.pacientes"
+    ],
+    "rowsCopied": 0,
+    "organizationInferred": false,
+    "completeProductionBaseline": false
+  }
 }

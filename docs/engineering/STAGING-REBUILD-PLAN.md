@@ -10,46 +10,47 @@ clínicos, nomes ou credenciais da produção.
 
 ## Estado da execução
 
-Após a autorização expressa **“Pode fazer tudo”**, o agente principal retomou
-a homologação. Uma consulta agregada confirmou zero usuários Auth,
-organizações e pacientes antes das fixtures. As extensões `unaccent` e
-`pg_trgm` estavam ausentes; a `0014` criou a estrutura vazia de medicamentos.
+A reconexão do Supabase permitiu aplicar e confirmar `0021`–`0024`.
+O histórico independente contém agora 26 entradas: a pré-existente
+`0001_assinaturas`, as 24 migrações `0001`–`0024` e a reconstrução vazia do
+legado `staging_rebuild_legacy_empty_baseline_20261010`, versão
+`20261010230832`. Nenhum SQL foi aplicado à produção.
 
-O histórico consultado novamente em 10/10 confirma 20 novas migrações:
-`0001`–`0020`, além da pré-existente `0001_assinaturas` (21 entradas).
-`0014` foi confirmada na versão `20261009211312` e `0018` na versão
-`20261009212903`. A recusa anterior da `0014` foi superada por essa aplicação.
+As 19 categorias de metadados das duas tabelas legadas foram capturadas.
+Um complemento registrou o helper de timestamp e os limites de sequência
+como texto, preservando o bigint sem arredondamento. O SQL derivado foi
+aplicado integralmente na homologação, com zero linhas copiadas, FORCE RLS,
+revogação de privilégios e veto restritivo a clientes na mesma transação.
+O relatório `LEGACY-BASELINE-RECONSTRUCTION-2026-10-10.json` registra os
+hashes e a verificação independente: `documentos` tem seis colunas e
+`pacientes` tem quinze; ambas têm três índices, cinco policies e zero linhas.
+Essa captura cobre somente duas tabelas e não reconcilia toda a produção.
 
-A tentativa anterior de aplicar `0019` foi superada por aplicação confirmada
-na versão `20261010002555`. A conferência independente encontrou três colunas
-de versão, 13 guardas de organização, três guardas de versão e 13 tabelas com
-RLS forçada. Quinze contagens agregadas estavam zeradas antes das fixtures.
+A primeira transferência da fonte `0025` foi truncada pelo limite de saída
+da ferramenta, embora o JSON permanecesse parsável. O Supabase rejeitou
+esse SQL com `42601`. A fonte histórica não foi alterada. A transferência
+foi corrigida com chunks e verificação SHA-256 antes do envio: 44.293 bytes,
+44.146 caracteres, 1.048 quebras LF e hash
+`4847547686c59b50d066801d93a9229b617c8363d7287e401c76066d41a3c4c5`.
+As duas aplicações isoladas subsequentes retornaram **“Invalid or expired
+requestState”**. O histórico consultado após cada falha confirma ausência de
+`0025`; `0026`–`0032` e o endurecimento das assinaturas também permanecem
+pendentes. A falha atual é de execução do conector; a autorização continua
+válida. Não se presume aplicação por sucesso de leitura ou reconexão.
 
-A falha anterior de `0020` foi superada: a aplicação isolada foi confirmada
-na versão `20261010124332`, com SHA-256 de fonte e SQL aplicado
-`43ee4eb96a50abcbc3a53c460ed76c11d676417e407bd18c6d9e20dcd7bb95a7`.
-Uma nova consulta independente do histórico confirmou essa entrada.
+Uma consulta agregada após as falhas confirmou zero usuários Auth,
+organizações, pacientes, atendimentos e linhas nas duas tabelas legadas.
+Nenhuma fixture foi criada e o runner não foi implantado ou executado.
+O Advisor de segurança foi capturado antes de `0025` em
+`STAGING-SECURITY-ADVISORS-2026-10-10.json`; seus achados pendentes não são
+uma aprovação de homologação. A baseline completa, os testes hospedados e
+as condições de governança continuam bloqueando publicação.
 
-`0021` retornou **“Invalid or expired requestState”** na tentativa inicial
-e na tentativa isolada, sem diagnóstico SQL. O histórico consultado após a
-segunda falha confirma que ela não foi aplicada. Novas aplicações foram
-interrompidas. A autorização permanece válida; o bloqueio é de execução.
-Nenhuma fixture foi criada, o runner não foi implantado ou executado e nenhum
-SQL foi enviado à produção. `0021` e as migrações posteriores estão pendentes.
-
-A captura complementar do catálogo legado também não produziu evidência:
-a primeira consulta ficou pendente e foi cancelada; zero das 19 consultas
-preparadas foram concluídas. O catálogo parcial existente não contém todas
-as constraints, policies, índices e permissões necessárias para reconstruir
-fielmente `public.documentos` e `public.pacientes`. Essa lacuna não pode ser
-substituída por DDL inventado ou por classificação automática de clínica.
-
-O inventário de fontes, hashes e estados está em
-`STAGING-MIGRATION-EVIDENCE.json`. Ele descreve a execução parcial; não é uma
-baseline reconciliada da produção nem uma prova de homologação completa.
-Antes de retomar a execução, recuperar a conexão, comparar schema e histórico
-atual e verificar as condições ainda pendentes. A autorização já inclui essa
-continuidade; não se deve repetir solicitações rotineiras.
+O inventário de fontes, hashes, versões e estados está em
+`STAGING-MIGRATION-EVIDENCE.json`. Antes de retomar, confirmar o alvo e o
+histórico atual, conferir o hash da string efetivamente enviada e aplicar
+`0025` inteira em uma única transação. Não repetir uma mutação após erro
+incerto sem consultar seu resultado no histórico.
 
 ## Plano reproduzível
 
@@ -89,8 +90,17 @@ esta homologação não reconcilia automaticamente a deriva da produção.
 `scripts/staging-integration-runner.ts` é um runner de Edge Function efêmera.
 Ele rejeita qualquer `SUPABASE_URL` diferente do alvo exato e exige a gateway
 JWT habilitada e uma capacidade aleatória adicional, verificada por SHA-256.
-O marcador de capacidade deve ser substituído fora do Git antes do deploy;
-nenhum token ou senha pode aparecer em logs, código versionado ou resultado.
+Antes do deploy, substituir fora do Git o hash da capacidade, UUID da
+execução e horários UTC, com janela máxima de quinze minutos. O POST deve
+conter apenas esse UUID. A função reivindica primeiro uma chave única no
+banco, impedindo nova execução em outro isolate ou após resposta perdida.
+`scripts/staging-only/runner-invocation-claims.sql` define a infraestrutura
+exclusiva desta homologação, fora das migrações e dos assets de produção.
+A tabela deve ter FORCE RLS, zero policies, nenhum acesso anon/authenticated
+e somente SELECT/INSERT para service_role; não há UPDATE/DELETE para o
+runner. Nenhuma dessas condições foi aplicada ou verificada remotamente
+nesta retomada. Nenhum token ou senha pode aparecer em logs, código
+versionado ou resultado.
 
 O runner cria quatro contas Auth sintéticas com senhas aleatórias, faz login
 real por senha e cria duas organizações. Os testes usam esses JWTs em

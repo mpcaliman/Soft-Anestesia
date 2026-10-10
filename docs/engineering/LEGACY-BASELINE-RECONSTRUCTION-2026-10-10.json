@@ -1,0 +1,118 @@
+{
+  "format": 1,
+  "date": "2026-10-10",
+  "status": "applied_to_fixed_staging_and_independently_verified_by_root",
+  "scope": "Empty staging reconstruction of production catalog metadata for public.documentos and public.pacientes only; not a complete production baseline.",
+  "sourceProject": "zbpbrnalamjrcfbscjkt",
+  "targetProject": "yqqrfgbvoexricjdxpis",
+  "productionApplyAllowed": false,
+  "clinicalRowsReadOrCopiedByThisPreparation": false,
+  "organizationInferred": false,
+  "completeProductionBaseline": false,
+  "generator": "scripts/prepare-legacy-empty-staging-baseline.mjs",
+  "tests": "tests/legacy-empty-staging-baseline-security.mjs",
+  "sourceCaptureSha256": "c32a2021e39a8b18269f2b07194cd102128643b70fb3d10427594c47f180896d",
+  "sourceSupplementSha256": "3e092d7b0a156e589d62ff71243454bce1998828225cffb99aa1a901751aa73b",
+  "proposedSqlSha256": "6d8bac0d9a4786e1b158b3ed8cafc7e8f2f05830aed8aa8866a0835787300752",
+  "tables": [
+    {
+      "table": "public.documentos",
+      "columns": 6,
+      "constraints": 3,
+      "indexes": 3,
+      "userTriggers": 0,
+      "sourcePolicies": 4,
+      "localRowsCopied": 0,
+      "organizationInferred": false
+    },
+    {
+      "table": "public.pacientes",
+      "columns": 15,
+      "constraints": 2,
+      "indexes": 3,
+      "userTriggers": 1,
+      "sourcePolicies": 4,
+      "localRowsCopied": 0,
+      "organizationInferred": false
+    }
+  ],
+  "transformations": [
+    "force_rls_on_both_legacy_tables",
+    "deny_legacy_client_access_in_same_transaction",
+    "retain_captured_policies_with_restrictive_client_veto",
+    "never_restore_client_table_column_or_sequence_grants"
+  ],
+  "prerequisites": [
+    "Fixed staging target independently verified by the operator.",
+    "Both legacy tables and public.set_updated_at() absent.",
+    "No Auth users, organizations, patients or encounters before fixture provisioning.",
+    "Apply the entire SQL transaction; never split CREATE statements from the final privilege and RLS guards."
+  ],
+  "validation": {
+    "javascriptSyntax": "passed",
+    "positiveAndNegativeGeneratorTests": "passed",
+    "migrationSourcesUnchanged": "verified",
+    "independentLocalReview": "no_material_blocker_found",
+    "postgres17ExecutedLocally": false,
+    "hostedAuthorizationVerified": false,
+    "hostedBaselineTransactionAndMetadataVerified": true,
+    "versionedCatalogReproducesAppliedSqlByteForByte": true
+  },
+  "limitations": [
+    "The two-table catalog is not the baseline of the full database.",
+    "PostgreSQL CLI was unavailable and local Docker socket access was denied. Root subsequently applied the transaction in the fixed staging branch and verified metadata/privileges; real hosted Auth/RLS/Realtime/Storage fixtures remain separate pending validation.",
+    "Captured source client policies remain in the structure, but restrictive false policies plus revoked table/column/sequence privileges deny anon/authenticated access in the same transaction.",
+    "The integer range of the identity sequence was recaptured as text to avoid JSON rounding."
+  ],
+  "nextOperation": "Continue reviewed staging migrations 0025 onward, then validate hosted authorization and realtime/storage integration with synthetic fixtures. The two-table baseline does not satisfy the full-production reconstruction and deployment gates.",
+  "remoteAppliedByRoot": true,
+  "artifactPaths": {
+    "capture": "docs/engineering/LEGACY-TABLE-CATALOG-2026-10-10.json",
+    "supplement": "docs/engineering/LEGACY-TABLE-CATALOG-SUPPLEMENT-2026-10-10.json",
+    "sql": "docs/engineering/LEGACY-EMPTY-STAGING-BASELINE-2026-10-10.sql",
+    "manifest": "docs/engineering/LEGACY-EMPTY-STAGING-BASELINE-2026-10-10.manifest.json"
+  },
+  "reproduceCommand": "node scripts/prepare-legacy-empty-staging-baseline.mjs docs/engineering/LEGACY-TABLE-CATALOG-2026-10-10.json docs/engineering/LEGACY-TABLE-CATALOG-SUPPLEMENT-2026-10-10.json /tmp/soft-legacy-empty-staging-reproduced.sql",
+  "remoteExecution": {
+    "project": "yqqrfgbvoexricjdxpis",
+    "migrationName": "staging_rebuild_legacy_empty_baseline_20261010",
+    "migrationVersion": "20261010230832",
+    "appliedSqlSha256": "6d8bac0d9a4786e1b158b3ed8cafc7e8f2f05830aed8aa8866a0835787300752",
+    "productionAltered": false,
+    "evidenceSource": "Root confirmed migration execution and subsequent independent staging metadata/aggregate/privilege queries on 2026-10-10.",
+    "checks": {
+      "public.documentos": {
+        "rows": 0,
+        "columns": 6,
+        "indexes": 3,
+        "policies": 5,
+        "rlsEnabled": true,
+        "forceRls": true,
+        "anonSelect": false,
+        "anonInsert": false,
+        "authenticatedSelect": false,
+        "authenticatedInsert": false
+      },
+      "public.pacientes": {
+        "rows": 0,
+        "columns": 15,
+        "indexes": 3,
+        "policies": 5,
+        "rlsEnabled": true,
+        "forceRls": true,
+        "anonSelect": false,
+        "anonInsert": false,
+        "authenticatedSelect": false,
+        "authenticatedInsert": false
+      },
+      "public.documentos_id_seq": {
+        "maxvalueText": "9223372036854775807",
+        "anonUsage": false,
+        "authenticatedUsage": false
+      },
+      "authUsers": 0,
+      "organizations": 0
+    },
+    "verificationPhase": "Immediately after the empty legacy baseline, before migration 0025 and synthetic hosted fixtures."
+  }
+}

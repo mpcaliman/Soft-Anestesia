@@ -1,0 +1,287 @@
+{
+  "format": 1,
+  "recordedAt": "2026-10-10",
+  "projectId": "yqqrfgbvoexricjdxpis",
+  "phase": "Before migration 0025; staging partially reconstructed; no Auth or clinical fixtures",
+  "completeHomologation": false,
+  "lints": [
+    {
+      "name": "rls_enabled_no_policy",
+      "level": "INFO",
+      "count": 2,
+      "remediation": "https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy",
+      "objects": [
+        {
+          "schema": "app",
+          "name": "offline_keyrings",
+          "type": "table",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "assinaturas",
+          "type": "table",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        }
+      ]
+    },
+    {
+      "name": "security_definer_view",
+      "level": "ERROR",
+      "count": 1,
+      "remediation": "https://supabase.com/docs/guides/database/database-linter?lint=0010_security_definer_view",
+      "objects": [
+        {
+          "schema": "public",
+          "name": "assinaturas_publicas",
+          "type": "view",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        }
+      ]
+    },
+    {
+      "name": "function_search_path_mutable",
+      "level": "WARN",
+      "count": 6,
+      "remediation": "https://supabase.com/docs/guides/database/database-linter?lint=0011_function_search_path_mutable",
+      "objects": [
+        {
+          "schema": "public",
+          "name": "assinaturas_no_mutate",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "app",
+          "name": "set_updated_at",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "app",
+          "name": "stamp_created",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "med_unaccent",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "med_normalizar",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "set_updated_at",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        }
+      ]
+    },
+    {
+      "name": "extension_in_public",
+      "level": "WARN",
+      "count": 2,
+      "remediation": "https://supabase.com/docs/guides/database/database-linter?lint=0014_extension_in_public",
+      "objects": [
+        {
+          "schema": "public",
+          "name": "unaccent",
+          "type": "extension",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "pg_trgm",
+          "type": "extension",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        }
+      ]
+    },
+    {
+      "name": "materialized_view_in_api",
+      "level": "WARN",
+      "count": 1,
+      "remediation": "https://supabase.com/docs/guides/database/database-linter?lint=0016_materialized_view_in_api",
+      "objects": [
+        {
+          "schema": "public",
+          "name": "medicamentos_clinicos",
+          "type": "materialized view",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        }
+      ]
+    },
+    {
+      "name": "anon_security_definer_function_executable",
+      "level": "WARN",
+      "count": 8,
+      "remediation": "https://supabase.com/docs/guides/database/database-linter?lint=0028_anon_security_definer_function_executable",
+      "objects": [
+        {
+          "schema": "public",
+          "name": "add_member",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "criar_minha_organizacao",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "prog_add_member",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "prog_contar_ambiente",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "prog_criar_ambiente",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "prog_excluir_ambiente",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "prog_excluir_conta",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "prog_remover_membro",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        }
+      ]
+    },
+    {
+      "name": "authenticated_security_definer_function_executable",
+      "level": "WARN",
+      "count": 17,
+      "remediation": "https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable",
+      "objects": [
+        {
+          "schema": "public",
+          "name": "add_member",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "criar_minha_organizacao",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "ensure_offline_keyring",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "prog_ack_legacy_source_change",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "prog_add_member",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "prog_classify_legacy_documents",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "prog_contar_ambiente",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "prog_copy_legacy_documents",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "prog_criar_ambiente",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "prog_excluir_ambiente",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "prog_excluir_conta",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "prog_inventory_legacy_documents",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "prog_legacy_migration_summary",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "prog_list_legacy_documents",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "prog_remover_membro",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "prog_rollback_legacy_documents",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        },
+        {
+          "schema": "public",
+          "name": "prog_validate_legacy_documents",
+          "type": "function",
+          "observedAt": "2026-10-10T23:30:50.092Z"
+        }
+      ]
+    }
+  ]
+}

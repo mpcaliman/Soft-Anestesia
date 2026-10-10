@@ -1,22 +1,22 @@
 # Fechamento local da auditoria técnica
 
 > **Atualização de estado — 10 de outubro de 2026.** O corpo abaixo é um
-> retrato histórico e não representa o estado atual da execução. A branch de
-> teste foi publicada no PR [225](https://github.com/mpcaliman/Soft-Anestesia/pull/225).
-> A homologação registra 20 novas migrações (`0001`–`0020`),
-> além da pré-existente `0001_assinaturas`; a aplicação de `0019` superou o
-> bloqueio anterior e foi conferida no histórico e no catálogo. `0020` foi
-> aplicada na versão `20261010124332` e confirmada no histórico. `0021` falhou
-> duas vezes por estado inválido ou expirado do conector e continua ausente,
-> assim como as migrações posteriores.
-> O runner de integração real não foi implantado nem
-> executado. A proteção remota de `main` permanece inativa: a credencial
-> recebeu HTTP 403 ao tentar configurá-la e ao mudar a origem do Pages.
-> O workflow antigo foi desativado, mas o Pages ainda publica pela branch
-> `main`; por isso a integração está bloqueada. Consulte
-> [o estado atual da homologação](STAGING-REBUILD-PLAN.md) e
-> [a evidência das migrações](STAGING-MIGRATION-EVIDENCE.json). Nenhum SQL desta
-> execução foi enviado à produção. A reconstrução está parcial e interrompida.
+> retrato histórico. O PR [225](https://github.com/mpcaliman/Soft-Anestesia/pull/225)
+> mantém a versão publicada `a073abbc`, com os quatro checks de CI aprovados.
+> Após a reconexão, a homologação confirmou `0001`–`0024` e a reconstrução
+> vazia das duas tabelas legadas: 26 entradas, incluindo `0001_assinaturas`.
+> A fonte íntegra de `0025` retornou duas vezes estado inválido ou expirado
+> do conector e permanece ausente do histórico. As migrações seguintes e o
+> endurecimento de assinaturas continuam pendentes. Nenhuma fixture Auth foi
+> criada; o runner não foi implantado nem executado. A nova proteção local
+> do runner usa claim persistente, UUID e prazo, com testes locais aprovados;
+> esse diff ainda precisa de publicação e CI no GitHub.
+> A leitura remota confirmou `main` sem proteção e zero rulesets ativos.
+> A configuração atual do Pages não pôde ser confirmada; a última evidência
+> era publicação pela branch `main`, e o workflow antigo foi desativado.
+> Nenhum SQL desta retomada foi enviado à produção. Consulte
+> [o estado da homologação](STAGING-REBUILD-PLAN.md) e
+> [a evidência das migrações](STAGING-MIGRATION-EVIDENCE.json).
 
 ## Retrato histórico preservado
 
