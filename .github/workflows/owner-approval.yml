@@ -15,6 +15,10 @@ permissions:
   issues: read
   statuses: write
 
+concurrency:
+  group: owner-authorization-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
 jobs:
   owner-authorization:
     if: (github.event_name != 'issue_comment' || github.event.issue.pull_request) && (github.event_name == 'issue_comment' || github.event.pull_request.base.ref == 'main')
@@ -28,7 +32,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version-file: .nvmrc
+          node-version: '24.19.0'
       - name: Verificar decisão e publicar status no SHA avaliado
         env:
           GH_TOKEN: ${{ github.token }}

@@ -19,4 +19,14 @@ assert.throws(() => authorizationFor({ ...input, comments: [comment, {
 assert.throws(() => authorizationFor({ ...input, comments: [{ ...comment, body: 'Exemplo\n' + comment.body }] }));
 assert.throws(() => authorizationFor({ ...input, reviews: [{ ...comment, state: 'APPROVED', commit_id: sha }] }));
 assert.throws(() => authorizationFor({ ...input, scope: 'deploy', comments: [comment] }));
+const tiedRevocation = { ...comment, body: comment.body.replace('SOFT-AUTORIZACAO', 'SOFT-REVOGACAO') };
+for (const comments of [[comment, tiedRevocation], [tiedRevocation, comment]]) {
+  assert.throws(() => authorizationFor({ ...input, comments }));
+}
+assert.equal(authorizationFor({ ...input, comments: [tiedRevocation, {
+  ...comment, updated_at: '2026-10-09T10:00:01Z'
+}] }).owner, 'mpcaliman');
+for (const scope of ['__proto__', 'constructor', 'toString']) {
+  assert.throws(() => authorizationFor({ ...input, scope, comments: [comment] }), /SHA\/escopo inválido/);
+}
 console.log('  ✓ autorização do proprietário exige identidade, escopo e SHA exatos; revogação invalida');

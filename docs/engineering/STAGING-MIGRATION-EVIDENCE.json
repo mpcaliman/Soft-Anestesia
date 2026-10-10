@@ -1,16 +1,16 @@
 {
   "format": 1,
-  "recordedAt": "2026-10-09",
+  "recordedAt": "2026-10-10",
   "targetProject": "yqqrfgbvoexricjdxpis",
   "parentProductionProject": "zbpbrnalamjrcfbscjkt",
   "status": "partial_reconstruction_connector_blocked",
   "productionChanged": false,
-  "confirmedNewMigrations": 18,
+  "confirmedNewMigrations": 19,
   "preservedMigration": "0001_assinaturas",
-  "confirmedHistoryEntries": 19,
+  "confirmedHistoryEntries": 20,
   "historyEvidenceSource": "Supabase list_migrations independently fetched by root after mutations stopped",
-  "gap": "0014 previous declined attempt superseded by confirmed application after renewed explicit authorization",
-  "stoppedAt": "0019 failed with INVALID_ARGUMENT: Invalid or expired requestState; absent from history checked at 2026-10-09T22:24:20Z",
+  "gap": "0014 and 0019 previously failed connector attempts superseded by verified application; all 0001–0019 now confirmed",
+  "stoppedAt": "0020 failed with INVALID_ARGUMENT: Invalid or expired requestState; absent from history independently checked at 2026-10-10T00:42:32Z",
   "ownerAuthorization": "2026-10-09: Pode fazer tudo — remaining stages authorized subject to prior verification",
   "executionBlock": "connector request state failure; authorization does not establish successful execution",
   "furtherMutationsAllowed": false,
@@ -166,9 +166,10 @@
     {
       "source": "database/migrations/0019_optimistic_concurrency.sql",
       "sourceSha256": "a340557ff0387c497da76d362a8b02be09b3fd53340024ce517eb2ff6a2c0ce6",
-      "appliedSha256": null,
-      "state": "not_applied",
-      "remoteVersion": null
+      "appliedSha256": "a340557ff0387c497da76d362a8b02be09b3fd53340024ce517eb2ff6a2c0ce6",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261010002555",
+      "remoteMigrationName": "staging_rebuild_0019_optimistic_concurrency"
     },
     {
       "source": "database/migrations/0020_conflict_preservation_and_immutability.sql",
@@ -338,15 +339,34 @@
     {
       "version": "20261009212903",
       "name": "staging_rebuild_0018_stop_legacy_writes"
+    },
+    {
+      "version": "20261010002555",
+      "name": "staging_rebuild_0019_optimistic_concurrency"
     }
   ],
-  "remoteHistorySha256": "1e7717303abf7db7fc9290771e33e5237ba03e3999cfc0076b5b2733031341a9",
+  "remoteHistorySha256": "32b5369bc583f6b72c808b48d861faaacb84f7a19a3d18044925fab6314f6566",
   "remoteHistorySerialization": "JSON UTF-8; sorted object keys; compact separators; original array order",
   "preFixtureEvidence": {
-    "recordedAt": "2026-10-09",
+    "recordedAt": "2026-10-10",
     "authUsers": 0,
     "organizations": 0,
     "patients": 0,
-    "source": "root execute_sql aggregate only; no clinical content"
+    "source": "root execute_sql aggregate only; no clinical content",
+    "all15AggregateTargetsZero": true
+  },
+  "remoteHistoryVerifiedAt": "2026-10-10T00:42:32Z",
+  "resumeEvidence": {
+    "readProbeSucceeded": true,
+    "target": "yqqrfgbvoexricjdxpis",
+    "migration0019Applied": true,
+    "migration0020Applied": false,
+    "confirmedCatalog": {
+      "versionColumns": 3,
+      "organizationGuards": 13,
+      "versionGuards": 3,
+      "forcedRlsTables": 13
+    },
+    "productionMutated": false
   }
 }

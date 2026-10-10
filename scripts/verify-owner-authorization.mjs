@@ -6,7 +6,7 @@ const GATES = { merge: 'G4', deploy: 'G5', migration: 'G3' };
 // A referência em um arquivo/PR não é autorização. A evidência deve vir da
 // identidade autenticada do proprietário no GitHub e nomear o SHA completo.
 export function authorizationFor({ sha, scope, reference, comments = [], reviews = [] }) {
-  if (!/^[0-9a-f]{40}$/.test(sha || '') || !GATES[scope]) throw new Error('SHA/escopo inválido');
+  if (!/^[0-9a-f]{40}$/.test(sha || '') || !Object.hasOwn(GATES, scope)) throw new Error('SHA/escopo inválido');
   const gate = GATES[scope];
   if (!new RegExp(`^${gate}-[A-Za-z0-9._/-]+$`).test(reference || '')) throw new Error('Referência inválida');
   const token = `SOFT-AUTORIZACAO ${reference} ${sha} ${scope}`;
@@ -14,7 +14,9 @@ export function authorizationFor({ sha, scope, reference, comments = [], reviews
   const decisions = comments.filter(c => c.user?.login === OWNER && !c.user?.type?.includes('Bot'))
     .map(c => ({ line: String(c.body || '').trim(), date: c.updated_at || c.created_at, url: c.html_url }))
     .filter(c => c.line === token || c.line === revoke);
-  decisions.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  // GitHub timestamps have second precision: a tied revocation wins.
+  decisions.sort((a, b) => String(a.date).localeCompare(String(b.date)) ||
+    Number(a.line === revoke) - Number(b.line === revoke));
   const last = decisions.at(-1);
   if (!last || last.line !== token) throw new Error(`Falta autorização ${reference} de ${OWNER} para ${scope} no SHA ${sha}`);
   return { owner: OWNER, sha, scope, reference, evidence: last.url, authorizedAt: last.date };

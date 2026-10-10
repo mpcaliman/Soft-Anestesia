@@ -1,4 +1,4 @@
-# Reconstrução e integração de homologação — 9 de outubro de 2026
+# Reconstrução e integração de homologação — 10 de outubro de 2026
 
 Alvo exclusivo: `yqqrfgbvoexricjdxpis`, branch Supabase
 `audit-remediation-v2`, parent `zbpbrnalamjrcfbscjkt`. A identidade, o estado
@@ -15,18 +15,23 @@ a homologação. Uma consulta agregada confirmou zero usuários Auth,
 organizações e pacientes antes das fixtures. As extensões `unaccent` e
 `pg_trgm` estavam ausentes; a `0014` criou a estrutura vazia de medicamentos.
 
-O histórico consultado às 22:24:20 UTC confirma 18 novas migrações:
-`0001`–`0018`, além da pré-existente `0001_assinaturas` (19 entradas).
+O histórico consultado em 10/10 às 00:42:32 UTC confirma 19 novas migrações:
+`0001`–`0019`, além da pré-existente `0001_assinaturas` (20 entradas).
 `0014` foi confirmada na versão `20261009211312` e `0018` na versão
 `20261009212903`. A recusa anterior da `0014` foi superada por essa aplicação.
 
-A tentativa de aplicar `0019` retornou `INVALID_ARGUMENT`, com a mensagem
+A tentativa anterior de aplicar `0019` foi superada por aplicação confirmada
+na versão `20261010002555`. A conferência independente encontrou três colunas
+de versão, 13 guardas de organização, três guardas de versão e 13 tabelas com
+RLS forçada. Quinze contagens agregadas estavam zeradas antes das fixtures.
+
+A tentativa de aplicar `0020` retornou `INVALID_ARGUMENT`, com a mensagem
 **“Invalid or expired requestState”**. Ela permanece ausente do histórico.
 A reconstrução está parcial e as novas aplicações foram interrompidas após
 a repetição do erro do conector. A autorização permanece válida; o bloqueio
 é de execução, não uma necessidade de renovar consentimento. Nenhuma fixture
 foi criada, o runner não foi implantado ou executado e nenhum SQL foi enviado
-à produção. `0019` e todas as migrações posteriores continuam pendentes.
+à produção. `0020` e todas as migrações posteriores continuam pendentes.
 
 O inventário de fontes, hashes e estados está em
 `STAGING-MIGRATION-EVIDENCE.json`. Ele descreve a execução parcial; não é uma
