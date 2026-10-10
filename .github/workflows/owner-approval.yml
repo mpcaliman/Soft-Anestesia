@@ -1,0 +1,97 @@
+name: Autorização do proprietário
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('SOFT-AUTORIZACAO {0} {1} merge', inputs.authorization, inputs.source_sha) || format('Verificar G4 PR {0}', github.event.pull_request.number || github.event.issue.number) }}
+
+# O verificador e este workflow vêm de main/base, nunca do diff avaliado.
+# O status é publicado no HEAD real do PR, inclusive em issue_comment.
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Número do PR aberto e pronto para main"
+        required: true
+        type: string
+      source_sha:
+        description: "SHA completo do HEAD que Marcelo autoriza mesclar"
+        required: true
+        type: string
+      authorization:
+        description: "Referência exata G4-PR-N, usando o número acima"
+        required: true
+        type: string
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+  issue_comment:
+    types: [created, edited, deleted]
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+  issues: read
+  statuses: write
+
+concurrency:
+  group: owner-authorization-${{ inputs.pr_number || github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  owner-authorization:
+    if: (github.event_name == 'workflow_dispatch' && github.actor == 'mpcaliman' && github.triggering_actor == 'mpcaliman' && github.ref == 'refs/heads/main') || (github.event_name == 'issue_comment' && github.event.issue.pull_request) || (github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main')
+    name: Verificar autorização registrada
+    runs-on: ubuntu-latest
+    steps:
+      - name: Carregar somente o verificador da base confiável
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ (github.event_name == 'workflow_dispatch' && github.sha) || github.event.pull_request.base.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.19.0'
+      - name: Verificar decisão e publicar status no SHA avaliado
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number || github.event.pull_request.number || github.event.issue.number }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          AUTHORIZATION: ${{ inputs.authorization }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+          EVENT_ACTOR: ${{ github.actor }}
+          EVENT_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: |
+          node --input-type=module <<'JS'
+          import { verifyGitHubAuthorization } from './scripts/verify-owner-authorization.mjs';
+          const repository = process.env.GITHUB_REPOSITORY;
+          const pr = process.env.PR_NUMBER;
+          if (repository !== 'mpcaliman/Soft-Anestesia' || !/^[1-9]\d*$/.test(pr || '')) throw new Error('Repositório/PR inválido');
+          const headers = { Authorization: `Bearer ${process.env.GH_TOKEN}`, Accept: 'application/vnd.github+json',
+            'Content-Type': 'application/json', 'X-GitHub-Api-Version': '2022-11-28' };
+          const response = await fetch(`https://api.github.com/repos/${repository}/pulls/${pr}`, { headers });
+          if (!response.ok) throw new Error('PR indisponível');
+          const pull = await response.json();
+          let state = 'pending', description = 'Diff em preparação: aprovação do proprietário pendente', error, evidence;
+          if (!pull.draft || process.env.EVENT_NAME === 'workflow_dispatch') {
+            try {
+              const isDispatch = process.env.EVENT_NAME === 'workflow_dispatch';
+              evidence = await verifyGitHubAuthorization({repository, pr,
+                sha: isDispatch ? process.env.SOURCE_SHA : pull.head.sha,
+                scope: 'merge', reference: isDispatch ? process.env.AUTHORIZATION : `G4-PR-${pr}`, token: process.env.GH_TOKEN,
+                ...(isDispatch ? {dispatch: {event: process.env.EVENT_NAME, ref: process.env.EVENT_REF,
+                  actor: process.env.EVENT_ACTOR, triggeringActor: process.env.EVENT_TRIGGERING_ACTOR,
+                  runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT,
+                  workflowSha: process.env.GITHUB_SHA}} : {})});
+              console.log(evidence);
+              state = 'success'; description = 'Proprietário autorizou este SHA e escopo de merge';
+            } catch (e) { state = 'failure'; description = 'Falta autorização válida do proprietário para este SHA'; error = e; }
+          }
+          const statusSha = evidence?.sha || pull.head.sha;
+          if (!/^[0-9a-f]{40}$/.test(statusSha || '')) throw new Error('HEAD do PR inválido');
+          const status = await fetch(`https://api.github.com/repos/${repository}/statuses/${statusSha}`, {
+            method: 'POST', headers, body: JSON.stringify({state, description,
+              context: 'Autorização G4 do proprietário',
+              target_url: evidence?.evidence || `https://github.com/${repository}/actions/runs/${process.env.GITHUB_RUN_ID}`})
+          });
+          if (!status.ok) throw new Error('Não foi possível publicar status no HEAD do PR');
+          if (error) throw error;
+          JS
