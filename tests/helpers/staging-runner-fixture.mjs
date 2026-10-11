@@ -27,6 +27,7 @@ export async function exerciseRunner(source, capability, capabilityHash, defects
   // Match the configured Auth policy at the API boundary, before any account
   // creation or password/ban mutation. Weak rotation must not partially ban.
   const validPassword = password => typeof password === 'string' && password.length >= 12
+    && new TextEncoder().encode(password).length <= 72
     && /[a-z]/.test(password) && /[A-Z]/.test(password) && /[0-9]/.test(password) && /[^a-zA-Z0-9]/.test(password);
   const tokenUser = token => accounts.find(user => [user.token, user.previousToken].includes(token));
   const canRead = (user, org) => memberships.some(membership => membership.user_id === user?.id && membership.organization_id === org && membership.ativo);

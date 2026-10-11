@@ -141,6 +141,19 @@ assert.equal(weakRotation.result.checks.filter(check => check.name === 'syntheti
   && check.diagnostic === 'http_422').length, 4, 'a API rejeita todas as rotações sem maiúscula');
 assert.ok(weakRotation.accounts.every(user => !user.blocked), 'rotação recusada não produz falso bloqueio Auth');
 
+// Exercise an oversized request at Auth, rather than just checking the source
+// expression: prefixed UUIDs with their separators require 76 UTF-8 bytes.
+const compactPassword = "'Aa1!' + crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '')";
+const oversizedPassword = "'Aa1!' + crypto.randomUUID() + crypto.randomUUID()";
+const longCreation = await exerciseRunner(source.replace(`const password = ${compactPassword}`, `const password = ${oversizedPassword}`), capability, capabilityHash);
+assert.equal(longCreation.accounts.length, 0, 'Auth rejeita senha de 76 bytes antes de criar a conta');
+assert.ok(longCreation.result.checks.some(check => check.name === 'fixture_auth_create' && !check.passed && check.diagnostic === 'http_422'));
+const longRotation = await exerciseRunner(source.replace(`{ password: ${compactPassword}`, `{ password: ${oversizedPassword}`), capability, capabilityHash);
+assert.equal(longRotation.accounts.length, 4, 'regressão de comprimento somente na rotação conserva quatro contas');
+assert.equal(longRotation.result.checks.filter(check => check.name === 'synthetic_auth_banned_password_rotated' && !check.passed
+  && check.diagnostic === 'http_422').length, 4, 'Auth rejeita todas as rotações de 76 bytes');
+assert.ok(longRotation.accounts.every(user => !user.blocked), 'rotação longa rejeitada não marca falso bloqueio Auth');
+
 const lostUpdate = await exerciseRunner(source, capability, capabilityHash, { bothAccepted: true });
 assert.ok(lostUpdate.result.checks.some(check => check.name === 'retification_atomic_race_two_real_sessions_preserves_both_proposals' && !check.passed),
   'duas propostas aceitas contra a mesma base devem reprovar a homologação');
