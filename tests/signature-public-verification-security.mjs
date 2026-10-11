@@ -269,12 +269,16 @@ function attachmentUi() {
       currentForm = { querySelector: selector => replacement.get(selector.match(/name="([^"]+)"/)?.[1]) || null };
       return replacement;
     },
-    attach(file) {
-      currentInput = { files: [file], value: 'file', isConnected: true };
+    startModal() {
+      currentInput = { files: [], value: '', isConnected: true };
       app.context.window.assinaturaDigital.iniciar();
       dialogs.length = 0;
+    },
+    selectFile(file) {
+      currentInput.files = [file]; currentInput.value = 'file';
       return app.context.window.assinaturaDigital.registrar(currentInput);
     },
+    attach(file) { this.startModal(); return this.selectFile(file); },
   };
 }
 
@@ -338,9 +342,10 @@ await check('same-owner DOM replacement, reused document ID, case and patient ch
 
 await check('two simultaneous attachments retain both cloned-list entries with a valid sequential hash chain', async () => {
   const app = attachmentUi();
+  app.startModal();
   await Promise.all([
-    app.attach(new File(['%PDF-synthetic-A'], 'synthetic-A.pdf', { type: 'application/pdf' })),
-    app.attach(new File(['%PDF-synthetic-B'], 'synthetic-B.pdf', { type: 'application/pdf' })),
+    app.selectFile(new File(['%PDF-synthetic-A'], 'synthetic-A.pdf', { type: 'application/pdf' })),
+    app.selectFile(new File(['%PDF-synthetic-B'], 'synthetic-B.pdf', { type: 'application/pdf' })),
   ]);
   assert.equal(app.saved.length, 2);
   const records = app.records;
@@ -355,6 +360,105 @@ await check('two simultaneous attachments retain both cloned-list entries with a
     assert.equal(Buffer.from(digest).toString('hex'), record.selfHash);
     assert.equal(record.centralReceiptConfirmed, false);
   }
+  assert.equal(app.dialogs.length, 1, 'one receipt opens only after both selections finish');
+  assert.equal(app.notices.length, 0);
+});
+
+await check('modal cancellation invalidates an in-flight attachment after file reading and both hashing awaits', async () => {
+  for (const event of ['soft:modal-close', 'soft:modal-open']) {
+    for (const stage of ['file-read', 'file-hash', 'metadata-hash']) {
+      const app = attachmentUi();
+      let release, reached;
+      const pause = new Promise(resolve => { release = resolve; });
+      const barrier = new Promise(resolve => { reached = resolve; });
+      let hashes = 0;
+      app.context.crypto = {
+        randomUUID: () => crypto.randomUUID(), getRandomValues: values => crypto.getRandomValues(values),
+        subtle: { async digest(algorithm, bytes) {
+          hashes++;
+          if ((stage === 'file-hash' && hashes === 1) || (stage === 'metadata-hash' && hashes === 2)) {
+            reached(); await pause;
+          }
+          return crypto.subtle.digest(algorithm, bytes);
+        } },
+      };
+      const operation = app.attach({ type: 'application/pdf', name: 'synthetic-cancelled.pdf', async arrayBuffer() {
+        if (stage === 'file-read') { reached(); await pause; }
+        return new TextEncoder().encode('%PDF-synthetic-cancelled').buffer;
+      } });
+      await barrier;
+      app.context.window.dispatchEvent(new Event(event));
+      release(); await operation;
+      assert.equal(app.saved.length, 0, event + ': ' + stage);
+      assert.equal(app.dialogs.length, 0, event + ': ' + stage);
+      assert.equal(app.fields.get('assinatura_meta').value, '', event + ': ' + stage);
+      assert.equal(app.fields.get('assinatura_tipo').value, '', event + ': ' + stage);
+      assert.match(app.notices[0], /anexação foi cancelada/, event + ': ' + stage);
+    }
+  }
+});
+
+await check('reopening a modal for the same unchanged document cancels its old read without cancelling the new selection', async () => {
+  const app = attachmentUi();
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const oldOperation = app.attach({ type: 'application/pdf', name: 'synthetic-old.pdf', arrayBuffer: () => pending });
+  const currentOperation = app.attach(new File(['%PDF-synthetic-new'], 'synthetic-new.pdf', { type: 'application/pdf' }));
+  release(new TextEncoder().encode('%PDF-synthetic-old').buffer);
+  await Promise.all([oldOperation, currentOperation]);
+  assert.equal(app.records.length, 1);
+  assert.equal(app.records[0].arquivo, 'synthetic-new.pdf');
+  assert.equal(app.saved.length, 1);
+  assert.equal(app.dialogs.length, 1);
+  assert.equal(JSON.parse(app.fields.get('assinatura_meta').value).arquivo, 'synthetic-new.pdf');
+  assert.match(app.notices[0], /anexação foi cancelada/);
+});
+
+await check('a completed selection keeps the modal active until its second legitimate selection finishes', async () => {
+  const app = attachmentUi();
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  app.startModal();
+  const first = app.selectFile(new File(['%PDF-synthetic-fast'], 'synthetic-fast.pdf', { type: 'application/pdf' }));
+  const second = app.selectFile({ type: 'application/pdf', name: 'synthetic-slow.pdf', arrayBuffer: () => pending });
+  await first;
+  assert.equal(app.saved.length, 1);
+  assert.equal(app.dialogs.length, 0, 'receipt cannot replace the modal of an in-flight selection');
+  release(new TextEncoder().encode('%PDF-synthetic-slow').buffer); await second;
+  assert.equal(app.records.length, 2);
+  assert.equal(app.records[1].prevHash, app.records[0].selfHash);
+  assert.deepEqual(app.records.map(record => record.versao), [1, 2]);
+  assert.equal(app.dialogs.length, 1);
+  assert.equal(app.notices.length, 0);
+});
+
+await check('cancellation also blocks a second attachment queued behind the first metadata hash', async () => {
+  const app = attachmentUi();
+  let release, reached;
+  const pause = new Promise(resolve => { release = resolve; });
+  const barrier = new Promise(resolve => { reached = resolve; });
+  app.context.crypto = {
+    randomUUID: () => crypto.randomUUID(), getRandomValues: values => crypto.getRandomValues(values),
+    subtle: { async digest(algorithm, bytes) {
+      const text = new TextDecoder().decode(bytes);
+      if (text.startsWith('{')) { reached(); await pause; }
+      return crypto.subtle.digest(algorithm, bytes);
+    } },
+  };
+  app.startModal();
+  const operations = [
+    app.selectFile(new File(['%PDF-synthetic-first'], 'synthetic-first.pdf', { type: 'application/pdf' })),
+    app.selectFile(new File(['%PDF-synthetic-second'], 'synthetic-second.pdf', { type: 'application/pdf' })),
+  ];
+  await barrier;
+  app.context.window.dispatchEvent(new Event('soft:modal-close'));
+  release(); await Promise.all(operations);
+  assert.equal(app.saved.length, 0);
+  assert.equal(app.records.length, 0);
+  assert.equal(app.fields.get('assinatura_meta').value, '');
+  assert.equal(app.dialogs.length, 0);
+  assert.equal(app.notices.length, 2);
+  assert(app.notices.every(notice => /anexação foi cancelada/.test(notice)));
 });
 
 await check('closing/replacing a modal and switching modules clear stale pending attachment context', async () => {

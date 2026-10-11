@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   assertCommandSuccess, assertLocalDatabaseUrl, assertProjectContainer, assertSafeEnvironment,
-  createPsqlExecutor, MANAGED_EXTENSION_RELOCATION_PROBE, isolatedConfig, loadMigrationPlan, migrationSqlForEmptyDatabase,
+  createPsqlExecutor, MANAGED_EXTENSION_RELOCATION_PROBE, MANAGED_STORAGE_REALTIME_PROBE, isolatedConfig, loadMigrationPlan, migrationSqlForEmptyDatabase,
   readPlatformMigrationCapabilityDiagnostics, reconciledPermissionFixtureEvidence,runConcurrentRetification, runLocalSqlIntegration, verifyPlatformMigrationCapabilities
 } from '../scripts/run-local-sql-integration.mjs';
 
@@ -19,8 +19,14 @@ const platformCapabilities = {roleVerified:true,adminDefaultsAuthorized:true,ext
   storagePoliciesAuthorized:true,realtimePublicationAuthorized:true};
 const extensionResults = facts => facts.extensions.map(x=>({name:x.name,moveRequired:x.moveRequired,
   relocationExecuted:x.moveRequired,relocationAuthorized:x.moveRequired?true:null,statePreserved:true}));
-const capabilityDb = (facts=platformCapabilities, relocations=extensionResults(facts)) => ({
-  runMigrationAsPostgres:async sql=>({stdout:JSON.stringify(sql===MANAGED_EXTENSION_RELOCATION_PROBE?relocations:facts)})
+const managedOperationResults = {storageObjectsPolicy:{createExecuted:true,alterExecuted:true,dropExecuted:true,
+  authorized:true,statePreserved:true,deniedSqlState:null},
+  storageBucketInsert:{insertExecuted:true,authorized:true,rowRolledBack:true,statePreserved:true,deniedSqlState:null},
+  realtimePublication:{createTableExecuted:true,replicaIdentityExecuted:true,addExecuted:true,dropExecuted:true,
+    authorized:true,statePreserved:true,deniedSqlState:null}};
+const capabilityDb = (facts=platformCapabilities, relocations=extensionResults(facts), managed=managedOperationResults) => ({
+  runMigrationAsPostgres:async sql=>({stdout:JSON.stringify(sql===MANAGED_EXTENSION_RELOCATION_PROBE?relocations:
+    sql===MANAGED_STORAGE_REALTIME_PROBE?managed:facts)})
 });
 const historicalFacts={verified:true,historicalOriginals:455,historicalAdenda:2,historicalSignatures:1,
   authRows:3,patientRows:1,encounterRows:1,addendaRows:2,signatureRows:1,clinicalRows:459,
@@ -182,7 +188,7 @@ await check('diagnóstico publica somente a asserção literal; valores substitu
     managedRoleDefaultDenied42501:false}),deniedAdminAuthority));
   for(const mutate of [x=>{x.roleVerified='true';},x=>{x.adminDefaultsAuthorized='false';},
     x=>{x.extensionSchemaCreateAuthorized=false;},x=>{x.extensions[0]=null;},x=>{x.extensions[0].moveAuthorized='false';},
-    x=>{x.storagePoliciesAuthorized=false;},x=>{x.realtimePublicationAuthorized=false;}]) {
+    x=>{x.storagePoliciesAuthorized='false';},x=>{x.realtimePublicationAuthorized='false';}]) {
     const unauthorized=structuredClone(platformCapabilities);mutate(unauthorized);
     await assert.rejects(verifyPlatformMigrationCapabilities(capabilityDb(unauthorized,extensionResults(platformCapabilities))),error=>{
       assert.match(error.platformPrerequisite,/^(?:postgres-role|supabase-admin-default-privileges|extension-schema-create|required-extension-inventory|extension-owner|storage-policy-owner|realtime-publication-owner)$/);
@@ -217,6 +223,28 @@ await check('diagnóstico publica somente a asserção literal; valores substitu
     privateRuntimeContent:'synthetic-secret-do-not-export'}));
   assert.equal(initialOwnership.extensions[0].owner,'supabase_admin');
   assert.doesNotMatch(JSON.stringify(initialOwnership),/synthetic-secret|privateRuntimeContent/);
+  const inheritedStorageDenied={...platformCapabilities,storagePoliciesAuthorized:false,realtimePublicationAuthorized:false};
+  const actualManaged=await verifyPlatformMigrationCapabilities(capabilityDb(inheritedStorageDenied));
+  assert.equal(actualManaged.storagePolicyInheritedOwnerAuthority,false);
+  assert.equal(actualManaged.realtimePublicationInheritedOwnerAuthority,false);
+  assert.equal(actualManaged.storagePoliciesAuthorized,true);
+  assert.equal(actualManaged.realtimePublicationAuthorized,true);
+  assert.equal(actualManaged.managedStorageRealtimeAuthorityVerifiedBy,'actual-operation-rollback');
+  for(const [name,result]of Object.entries(managedOperationResults)) {
+    for(const key of Object.keys(result)) {
+      const rejected=structuredClone(managedOperationResults);
+      rejected[name][key]=key==='deniedSqlState'?'42501':false;
+      rejected[name].privateRuntimeContent='synthetic-secret-do-not-export';
+      await assert.rejects(verifyPlatformMigrationCapabilities(capabilityDb(inheritedStorageDenied,
+        extensionResults(platformCapabilities),rejected)),error=>{
+        assert.equal(error.platformPrerequisite,name==='realtimePublication'?'realtime-publication-owner':'storage-policy-owner');
+        assert.doesNotMatch(JSON.stringify(error),/synthetic-secret|privateRuntimeContent/);return true;
+      });
+    }
+  }
+  for(const malformed of [null,[],{},'synthetic-secret-do-not-export'])await assert.rejects(
+    verifyPlatformMigrationCapabilities(capabilityDb(inheritedStorageDenied,extensionResults(platformCapabilities),malformed)),
+    error=>!error.message.includes('synthetic-secret'));
   assert.throws(() => assertCommandSuccess({ code: 3, stderr:
     'ERROR:  P0001: Unknown message with synthetic-secret@example.invalid' }, 'fixture', sql), error => {
     assert.equal(error.assertion, undefined); return true;
@@ -246,6 +274,16 @@ await check('baseline fechada usa os hashes registrados, sem reescrever CONCURRE
   assert.match(MANAGED_EXTENSION_RELOCATION_PROBE,/before_state is distinct from after_state/);
   assert.match(MANAGED_EXTENSION_RELOCATION_PROBE,/rollback;\s*$/);
   assert.doesNotMatch(MANAGED_EXTENSION_RELOCATION_PROBE,/alter\s+(?:extension\s+[^;]+\s+owner|role|user)|\bgrant\b|create extension/i);
+  assert.match(MANAGED_STORAGE_REALTIME_PROBE,/current_user<>'postgres'/);
+  assert.match(MANAGED_STORAGE_REALTIME_PROBE,/as restrictive for select to public using\(false\)/);
+  assert.match(MANAGED_STORAGE_REALTIME_PROBE,/alter policy soft_as_managed_policy_probe on storage\.objects to public using\(false\)/);
+  assert.match(MANAGED_STORAGE_REALTIME_PROBE,/drop policy soft_as_managed_policy_probe on storage\.objects/);
+  assert.match(MANAGED_STORAGE_REALTIME_PROBE,/values\('soft-as-ci-capability-probe','soft-as-ci-capability-probe',false\)/);
+  assert.match(MANAGED_STORAGE_REALTIME_PROBE,/replica identity full/);
+  assert.match(MANAGED_STORAGE_REALTIME_PROBE,/alter publication supabase_realtime add table public\.soft_as_managed_publication_probe/);
+  assert.match(MANAGED_STORAGE_REALTIME_PROBE,/before_state is distinct from after_state/);
+  assert.match(MANAGED_STORAGE_REALTIME_PROBE,/rollback;\s*$/);
+  assert.doesNotMatch(MANAGED_STORAGE_REALTIME_PROBE,/alter\s+(?:role|user|[^;]+\s+owner)|\bgrant\b|using\(true\)/i);
   assert.equal(plan.length, 36);
   assert.equal(plan[0].path, 'supabase/migrations/0001_assinaturas.sql');
   assert.match(plan.at(-3).path, /^database\/migrations\/0033_[a-z0-9_]+\.sql$/);
@@ -309,6 +347,7 @@ try {
           SERVICE_ROLE_KEY: 'synthetic-cli-secret', ANON_KEY: 'synthetic-cli-secret'
         }));
         if (args[0] === 'inspect') return result(JSON.stringify(inspectionFor(project)));
+        if (args[0] === 'exec' && options.input===MANAGED_STORAGE_REALTIME_PROBE) return result(JSON.stringify(managedOperationResults));
         if (args[0] === 'exec' && options.input===MANAGED_EXTENSION_RELOCATION_PROBE) return result(JSON.stringify(extensionResults(platformCapabilities)));
         if (args[0] === 'exec' && options.input.includes('adminDefaultsAuthorized')) return result(JSON.stringify(platformCapabilities));
         if (args[0] === 'exec' && options.input.includes('backfillFinalizationAuditRows')) return result(JSON.stringify(historicalFacts));

@@ -277,9 +277,152 @@ select current_setting('soft_as.extension_probe')::jsonb;
 rollback;
 `;
 
+// Match the operations in 0002/0021 and the Realtime migrations without
+// touching existing policies, bucket rows or published tables. Every operation
+// uses the real postgres connection and is rolled back in a subtransaction.
+export const MANAGED_STORAGE_REALTIME_PROBE = `begin;
+set local lock_timeout='5s';
+set local statement_timeout='30s';
+do $storage_realtime_probe$
+declare before_state jsonb; after_state jsonb; bucket_count bigint;
+ create_ok boolean:=false; alter_ok boolean:=false; drop_ok boolean:=false;
+ insert_ok boolean:=false; table_ok boolean:=false; replica_ok boolean:=false;
+ add_ok boolean:=false; publication_drop_ok boolean:=false;
+ authorized boolean; results jsonb:='{}'::jsonb;
+begin
+ if current_database()<>'postgres' or current_user<>'postgres' or session_user<>'postgres'
+  or current_setting('server_version_num')::integer/10000<>17 then
+  raise exception 'Managed operation probe requires the verified application executor'; end if;
+ if to_regclass('storage.objects') is null or to_regclass('storage.buckets') is null then
+  raise exception 'Managed operation probe requires the fixed Storage inventory'; end if;
+ if exists(select 1 from pg_policy where polrelid='storage.objects'::regclass
+  and polname='soft_as_managed_policy_probe') then
+  raise exception 'Managed policy probe name already exists'; end if;
+ select jsonb_build_object('table',to_jsonb(c),'policies',coalesce((select jsonb_agg(to_jsonb(p) order by p.oid)
+  from pg_policy p where p.polrelid=c.oid),'[]'::jsonb)) into before_state
+  from pg_class c where c.oid='storage.objects'::regclass;
+ authorized:=false;
+ begin
+  create policy soft_as_managed_policy_probe on storage.objects as restrictive for select to public using(false);
+  create_ok:=true;
+  if not exists(select 1 from pg_policy where polrelid='storage.objects'::regclass
+   and polname='soft_as_managed_policy_probe' and not polpermissive and polcmd='r'
+   and pg_get_expr(polqual,polrelid)='false') then
+   raise exception 'Managed restrictive false policy creation was not observed'; end if;
+  alter policy soft_as_managed_policy_probe on storage.objects to public using(false);
+  alter_ok:=true;
+  drop policy soft_as_managed_policy_probe on storage.objects;
+  drop_ok:=true;
+  if exists(select 1 from pg_policy where polrelid='storage.objects'::regclass
+   and polname='soft_as_managed_policy_probe') then
+   raise exception 'Managed policy drop was not observed'; end if;
+  raise exception using errcode='PZ001',message='managed_operation_probe_rollback';
+ exception
+  when sqlstate 'PZ001' then
+   if not(create_ok and alter_ok and drop_ok) then raise; end if;
+   authorized:=true;
+  when insufficient_privilege then authorized:=false;
+ end;
+ select jsonb_build_object('table',to_jsonb(c),'policies',coalesce((select jsonb_agg(to_jsonb(p) order by p.oid)
+  from pg_policy p where p.polrelid=c.oid),'[]'::jsonb)) into after_state
+  from pg_class c where c.oid='storage.objects'::regclass;
+ if before_state is distinct from after_state then
+  raise exception 'Managed policy probe changed owner ACL or policy definitions'; end if;
+ results:=results||jsonb_build_object('storageObjectsPolicy',jsonb_build_object(
+  'createExecuted',create_ok,'alterExecuted',alter_ok,'dropExecuted',drop_ok,
+  'authorized',authorized,'statePreserved',true,'deniedSqlState',case when not authorized then '42501' else null end));
+ if exists(select 1 from storage.buckets where id='soft-as-ci-capability-probe') then
+  raise exception 'Managed bucket probe name already exists'; end if;
+ select count(*) into bucket_count from storage.buckets;
+ select jsonb_build_object('table',to_jsonb(c),'policies',coalesce((select jsonb_agg(to_jsonb(p) order by p.oid)
+  from pg_policy p where p.polrelid=c.oid),'[]'::jsonb)) into before_state
+  from pg_class c where c.oid='storage.buckets'::regclass;
+ authorized:=false;
+ begin
+  insert into storage.buckets(id,name,public)
+   values('soft-as-ci-capability-probe','soft-as-ci-capability-probe',false) on conflict(id) do nothing;
+  insert_ok:=true;
+  if not exists(select 1 from storage.buckets where id='soft-as-ci-capability-probe' and public=false) then
+   raise exception 'Managed private bucket insert was not observed'; end if;
+  raise exception using errcode='PZ001',message='managed_operation_probe_rollback';
+ exception
+  when sqlstate 'PZ001' then
+   if not insert_ok then raise; end if;
+   authorized:=true;
+  when insufficient_privilege then authorized:=false;
+ end;
+ select jsonb_build_object('table',to_jsonb(c),'policies',coalesce((select jsonb_agg(to_jsonb(p) order by p.oid)
+  from pg_policy p where p.polrelid=c.oid),'[]'::jsonb)) into after_state
+  from pg_class c where c.oid='storage.buckets'::regclass;
+ if before_state is distinct from after_state or exists(select 1 from storage.buckets where id='soft-as-ci-capability-probe')
+  or (select count(*) from storage.buckets)<>bucket_count then
+  raise exception 'Managed bucket probe changed metadata or retained a row'; end if;
+ results:=results||jsonb_build_object('storageBucketInsert',jsonb_build_object('insertExecuted',insert_ok,
+  'authorized',authorized,'rowRolledBack',true,'statePreserved',true,
+  'deniedSqlState',case when not authorized then '42501' else null end));
+ if to_regclass('public.soft_as_managed_publication_probe') is not null
+  or not exists(select 1 from pg_publication where pubname='supabase_realtime') then
+  raise exception 'Managed publication probe inventory differs'; end if;
+ select jsonb_build_object('publication',to_jsonb(p),
+  'relations',coalesce((select jsonb_agg(to_jsonb(r) order by r.oid) from pg_publication_rel r
+   where r.prpubid=p.oid),'[]'::jsonb),
+  'namespaces',coalesce((select jsonb_agg(to_jsonb(n) order by n.oid) from pg_publication_namespace n
+   where n.pnpubid=p.oid),'[]'::jsonb)) into before_state
+  from pg_publication p where p.pubname='supabase_realtime';
+ authorized:=false;
+ begin
+  create table public.soft_as_managed_publication_probe(id bigint primary key);
+  table_ok:=true;
+  alter table public.soft_as_managed_publication_probe replica identity full;
+  replica_ok:=true;
+  if not exists(select 1 from pg_class where oid='public.soft_as_managed_publication_probe'::regclass
+   and relreplident='f' and relowner=(select oid from pg_roles where rolname=current_user)) then
+   raise exception 'Managed probe table owner or replica identity differs'; end if;
+  alter publication supabase_realtime add table public.soft_as_managed_publication_probe;
+  add_ok:=true;
+  if not exists(select 1 from pg_publication_rel r join pg_publication p on p.oid=r.prpubid
+   where p.pubname='supabase_realtime' and r.prrelid='public.soft_as_managed_publication_probe'::regclass) then
+   raise exception 'Managed publication table addition was not observed'; end if;
+  alter publication supabase_realtime drop table public.soft_as_managed_publication_probe;
+  publication_drop_ok:=true;
+  if exists(select 1 from pg_publication_rel r join pg_publication p on p.oid=r.prpubid
+   where p.pubname='supabase_realtime' and r.prrelid='public.soft_as_managed_publication_probe'::regclass) then
+   raise exception 'Managed publication table removal was not observed'; end if;
+  raise exception using errcode='PZ001',message='managed_operation_probe_rollback';
+ exception
+  when sqlstate 'PZ001' then
+   if not(table_ok and replica_ok and add_ok and publication_drop_ok) then raise; end if;
+   authorized:=true;
+  when insufficient_privilege then authorized:=false;
+ end;
+ select jsonb_build_object('publication',to_jsonb(p),
+  'relations',coalesce((select jsonb_agg(to_jsonb(r) order by r.oid) from pg_publication_rel r
+   where r.prpubid=p.oid),'[]'::jsonb),
+  'namespaces',coalesce((select jsonb_agg(to_jsonb(n) order by n.oid) from pg_publication_namespace n
+   where n.pnpubid=p.oid),'[]'::jsonb)) into after_state
+  from pg_publication p where p.pubname='supabase_realtime';
+ if before_state is distinct from after_state or to_regclass('public.soft_as_managed_publication_probe') is not null then
+  raise exception 'Managed publication probe changed owner definition or retained a table'; end if;
+ results:=results||jsonb_build_object('realtimePublication',jsonb_build_object('createTableExecuted',table_ok,
+  'replicaIdentityExecuted',replica_ok,'addExecuted',add_ok,'dropExecuted',publication_drop_ok,
+  'authorized',authorized,'statePreserved',true,'deniedSqlState',case when not authorized then '42501' else null end));
+ perform set_config('soft_as.storage_realtime_probe',results::text,true);
+end $storage_realtime_probe$;
+select current_setting('soft_as.storage_realtime_probe')::jsonb;
+rollback;
+`;
+
 export function safePlatformCapabilityDiagnostics(facts) {
   const owners=['postgres','supabase_admin','supabase_auth_admin','supabase_storage_admin'];
   const boolean=key=>typeof facts?.[key]==='boolean'?facts[key]:null;
+  const operations={};
+  for(const [name,keys] of Object.entries({storageObjectsPolicy:['createExecuted','alterExecuted','dropExecuted','authorized','statePreserved'],
+    storageBucketInsert:['insertExecuted','authorized','rowRolledBack','statePreserved'],
+    realtimePublication:['createTableExecuted','replicaIdentityExecuted','addExecuted','dropExecuted','authorized','statePreserved']})) {
+    const raw=facts?.managedOperations?.[name];if(!raw||typeof raw!=='object')continue;
+    operations[name]=Object.fromEntries(keys.map(key=>[key,typeof raw[key]==='boolean'?raw[key]:null]));
+    operations[name].deniedSqlState=raw.deniedSqlState==='42501'?'42501':null;
+  }
   return {roleVerified:boolean('roleVerified'),adminDefaultsAuthorized:boolean('adminDefaultsAuthorized'),
     extensionSchemaCreateAuthorized:boolean('extensionSchemaCreateAuthorized'),
     extensions:(Array.isArray(facts?.extensions)?facts.extensions:[])
@@ -292,8 +435,10 @@ export function safePlatformCapabilityDiagnostics(facts) {
         relocationExecuted:typeof x.relocationExecuted==='boolean'?x.relocationExecuted:null,
         relocationAuthorized:typeof x.relocationAuthorized==='boolean'?x.relocationAuthorized:null,
         statePreserved:typeof x.statePreserved==='boolean'?x.statePreserved:null})),
+    storagePolicyInheritedOwnerAuthority:boolean('storagePolicyInheritedOwnerAuthority'),
+    realtimePublicationInheritedOwnerAuthority:boolean('realtimePublicationInheritedOwnerAuthority'),
     storagePoliciesAuthorized:boolean('storagePoliciesAuthorized'),
-    realtimePublicationAuthorized:boolean('realtimePublicationAuthorized')};
+    realtimePublicationAuthorized:boolean('realtimePublicationAuthorized'),managedOperations:operations};
 }
 
 export async function readPlatformMigrationCapabilityDiagnostics(db) {
@@ -337,15 +482,33 @@ export async function verifyPlatformMigrationCapabilities(db) {
     Object.assign(extension,{relocationExecuted:result.relocationExecuted,
       relocationAuthorized:result.relocationAuthorized,statePreserved:result.statePreserved});
   }
-  if(facts.storagePoliciesAuthorized!==true)denied('storage-policy-owner');
-  if(facts.realtimePublicationAuthorized!==true)denied('realtime-publication-owner');
+  if(typeof facts.storagePoliciesAuthorized!=='boolean')denied('storage-policy-owner');
+  if(typeof facts.realtimePublicationAuthorized!=='boolean')denied('realtime-publication-owner');
+  facts.storagePolicyInheritedOwnerAuthority=facts.storagePoliciesAuthorized;
+  facts.realtimePublicationInheritedOwnerAuthority=facts.realtimePublicationAuthorized;
+  const managedProbe=await db.runMigrationAsPostgres(MANAGED_STORAGE_REALTIME_PROBE,'managed Storage and Realtime rollback probe');
+  let managed;try{managed=JSON.parse(managedProbe.stdout.trim());}catch{denied('storage-policy-owner');}
+  if(!managed||typeof managed!=='object'||Array.isArray(managed))denied('storage-policy-owner');
+  facts.managedOperations=managed;
+  for(const [name,keys,prerequisite] of [
+    ['storageObjectsPolicy',['createExecuted','alterExecuted','dropExecuted','authorized','statePreserved'],'storage-policy-owner'],
+    ['storageBucketInsert',['insertExecuted','authorized','rowRolledBack','statePreserved'],'storage-policy-owner'],
+    ['realtimePublication',['createTableExecuted','replicaIdentityExecuted','addExecuted','dropExecuted','authorized','statePreserved'],'realtime-publication-owner']]) {
+    if(!managed[name]||typeof managed[name]!=='object'||keys.some(key=>managed[name][key]!==true)
+      ||managed[name].deniedSqlState!==null)denied(prerequisite);
+  }
+  facts.storagePoliciesAuthorized=true;facts.realtimePublicationAuthorized=true;
   return {verified:true,role:'postgres',adminDefaultsAuthorized:facts.adminDefaultsAuthorized,
     hostedPostgresAdminDefaultAuthority:false,
     adminDefaultAuthorityMatchesHosted:!facts.adminDefaultsAuthorized,
     supplierDefaultsMustRemainUnmodified:true,supplierDefaultPrivilegesPending:true,
     extensionSchemaCreateAuthorized:true,
     extensions:safePlatformCapabilityDiagnostics(facts).extensions,extensionAuthorityVerifiedBy:'actual-relocation-rollback',
-    storagePoliciesAuthorized:true,realtimePublicationAuthorized:true,privilegesAdded:false,ownersChanged:false};
+    storagePoliciesAuthorized:true,realtimePublicationAuthorized:true,
+    storagePolicyInheritedOwnerAuthority:facts.storagePolicyInheritedOwnerAuthority,
+    realtimePublicationInheritedOwnerAuthority:facts.realtimePublicationInheritedOwnerAuthority,
+    managedOperations:safePlatformCapabilityDiagnostics(facts).managedOperations,
+    managedStorageRealtimeAuthorityVerifiedBy:'actual-operation-rollback',privilegesAdded:false,ownersChanged:false};
 }
 
 export function reconciledPermissionFixtureEvidence(stdout,capabilities) {

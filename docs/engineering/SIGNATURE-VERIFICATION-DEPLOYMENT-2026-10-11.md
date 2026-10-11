@@ -109,8 +109,14 @@ mesmo DOM para outro documento ou mudar caso/paciente impede a aplicação
 dos metadados antigos. No componente antigo, o alvo também é fixado antes
 de abrir o seletor de arquivo.
 
-Os appends à lista de metadados são serializados: dois PDFs recebidos
-simultaneamente preservam ambos os registros, versões sequenciais e a
-corrente de hashes. Fechar/substituir o modal, trocar usuário/clínica ou
-módulo limpa o contexto pendente. Os eventos de ciclo de vida em modal.js
-são apenas apresentação; não decidem autorização ou persistência.
+Os appends à lista de metadados são serializados: dois PDFs selecionados
+no mesmo modal preservam ambos os registros, versões sequenciais e a
+corrente de hashes. O comprovante só substitui esse modal depois que todas
+as seleções em andamento terminam. Fechar/substituir o modal, trocar
+usuário/clínica ou módulo invalida a capacidade daquela instância; uma
+leitura ou cálculo de hash que retorna depois do cancelamento não pode
+gravar metadados ou abrir um comprovante. Reabrir o mesmo documento cria
+uma capacidade nova, sem reativar a operação anterior. Os eventos de ciclo
+de vida em modal.js são apenas apresentação; não decidem autorização ou
+persistência. Os testes interrompem a leitura do arquivo, seu hash e o
+hash da corrente, além de cancelar uma segunda operação na fila.

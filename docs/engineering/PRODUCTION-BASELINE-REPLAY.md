@@ -114,6 +114,20 @@ Diagnósticos exportam somente nomes fixos de extensão, schema e proprietário
 de papéis de plataforma reconhecidos e booleans; nomes inesperados são
 substituídos por um marcador. A autoridade sobre defaults de `supabase_admin`
 continua separada: uma tentativa real em homologação foi recusada com `42501`.
+No CI `37c09fb`, as três relocações reais passaram com owners preservados;
+a checagem por associação ao owner de Storage ainda recusou o ensaio antes das
+migrações. O runner também substitui essa inferência por operações reais:
+CREATE/ALTER/DROP de uma policy restritiva `USING(false)` em `storage.objects`,
+INSERT de um bucket privado próprio e vazio em `storage.buckets`, e criação de
+uma tabela própria vazia com REPLICA IDENTITY FULL e ADD/DROP na publicação
+`supabase_realtime`. São as capacidades necessárias às fontes `0002`, `0021` e
+às migrações Realtime; nenhuma fonte exige policy DDL em `storage.buckets`.
+Cada sondagem usa `postgres`, reverte sua subtransação por `PZ001`, comprova
+owners/ACL/definições de policies/publicação invariáveis e verifica ausência do
+bucket e da tabela próprios após reversão. Metadados de herança continuam
+registrados separadamente. Uma recusa real `42501` ou operação incompleta
+bloqueia o ensaio; diagnósticos publicam apenas flags e esse SQLSTATE literal.
+O ensaio não altera policies existentes nem transfere propriedades.
 A migração fecha os defaults de `postgres` e preserva integralmente os defaults
 do fornecedor. A condição do fornecedor permanece pendente; o ensaio não
 afirma fechamento universal. Não concede associação a papéis privilegiados

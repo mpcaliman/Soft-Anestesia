@@ -168,9 +168,15 @@ window.assinaturaDigital = (function () {
   function captureTarget(ctx) {
     const formNode = document.getElementById(ctx.form);
     if (!formNode) throw new Error('Contexto do documento perdido — reabra e tente de novo.');
-    return Object.assign({}, ctx, { owner: contextoAba.capturar(), formNode, parentIdentity: parentIdentity(formNode) });
+    return Object.assign({}, ctx, {
+      owner: contextoAba.capturar(), formNode, parentIdentity: parentIdentity(formNode),
+      // This capability belongs to one modal instance. Clearing only the
+      // pending pointer would leave an already awaited file/hash usable.
+      lifecycle: { active: true, inFlight: 0, lastReceipt: null }
+    });
   }
   function requireTarget(target) {
+    if (!target.lifecycle.active) throw new Error('A anexação foi cancelada. Reabra o documento antes de anexar.');
     if (!contextoAba.corresponde(target.owner)) throw new Error('O usuário ou a clínica mudou. Reabra o documento antes de anexar.');
     const current = ctxAtual();
     if (!current || current.modulo !== target.modulo || current.form !== target.form
@@ -211,6 +217,10 @@ window.assinaturaDigital = (function () {
 
   /* ---- fluxo de assinatura (guiado / externo) ---- */
   let _ctxPendente = null;
+  function cancelPendingTarget() {
+    if (_ctxPendente) _ctxPendente.lifecycle.active = false;
+    _ctxPendente = null;
+  }
 
   function iniciar() {
     const ctx = ctxAtual();
@@ -264,10 +274,13 @@ window.assinaturaDigital = (function () {
     if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) { toast('Anexe o PDF assinado (.pdf)', 'warn'); return; }
     const ctx = input && input._softSignatureTarget || _ctxPendente;
     if (!ctx) { toast('Contexto do documento perdido — reabra e tente de novo', 'error'); return; }
+    let started = false;
     try {
       if (_ctxPendente !== ctx) throw new Error('Contexto do documento perdido — reabra e tente de novo.');
       if (input.isConnected === false) throw new Error('Contexto do documento perdido — reabra e tente de novo.');
       requireTarget(ctx);
+      ctx.lifecycle.inFlight++;
+      started = true;
       const buf = await file.arrayBuffer();
       requireTarget(ctx);
       const hashDoc = await sha256Buf(buf);
@@ -294,11 +307,28 @@ window.assinaturaDigital = (function () {
       // Existing finalized records remain protected by their clinical guards.
       try { if (typeof markDirty === 'function') markDirty(); } catch (e) {}
 
-      modal.close();
-      AD.mostrarComprovante(reg);
+      ctx.lifecycle.lastReceipt = reg;
     } catch (e) {
-      if (_ctxPendente === ctx) _ctxPendente = null;
+      if (_ctxPendente === ctx) cancelPendingTarget();
       toast('Erro ao registrar assinatura: ' + e.message, 'error');
+    } finally {
+      if (started) {
+        ctx.lifecycle.inFlight--;
+        // A successful attachment must not close its modal while another
+        // legitimate selection from that same modal is still awaiting I/O.
+        if (ctx.lifecycle.active && ctx.lifecycle.inFlight === 0
+            && ctx.lifecycle.lastReceipt && _ctxPendente === ctx) {
+          try {
+            requireTarget(ctx);
+            const receipt = ctx.lifecycle.lastReceipt;
+            modal.close();
+            AD.mostrarComprovante(receipt);
+          } catch (e) {
+            if (_ctxPendente === ctx) cancelPendingTarget();
+            toast('Erro ao registrar assinatura: ' + e.message, 'error');
+          }
+        }
+      }
     }
   }
 
@@ -511,12 +541,12 @@ window.assinaturaDigital = (function () {
   };
   window.addEventListener('DOMContentLoaded', () => { try { injetarBotoes(); _checarHash(); } catch (e) {} });
   window.addEventListener('hashchange', _checarHash);
-  window.addEventListener('soft:modal-open', () => { _ctxPendente = null; });
-  window.addEventListener('soft:modal-close', () => { _ctxPendente = null; });
-  try { contextoAba.aoMudar(() => { _ctxPendente = null; }); } catch (e) {}
+  window.addEventListener('soft:modal-open', cancelPendingTarget);
+  window.addEventListener('soft:modal-close', cancelPendingTarget);
+  try { contextoAba.aoMudar(cancelPendingTarget); } catch (e) {}
   /* reinjeta ao trocar de módulo (barras podem ser recriadas) */
   setInterval(() => {
-    if (_ctxPendente) { try { requireTarget(_ctxPendente); } catch (e) { _ctxPendente = null; } }
+    if (_ctxPendente) { try { requireTarget(_ctxPendente); } catch (e) { cancelPendingTarget(); } }
     try { injetarBotoes(); } catch (e) {}
   }, 1500);
   return AD;
