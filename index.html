@@ -19615,6 +19615,7 @@ const programador = {
     if (!sou) {
       programador._orgs = []; programador._membros = []; programador._perfis = [];
       programador._shares = []; programador._legacySummary = []; programador._legacyItems = [];
+      if (typeof window !== 'undefined' && window.SoftLegacyProvenance) window.SoftLegacyProvenance.clear();
       const box = document.getElementById('prog-conteudo');
       if (box) box.innerHTML = '<p style="color:var(--text-mute)">Acesso restrito ao programador.</p>';
     }
@@ -19827,12 +19828,12 @@ const programador = {
         </div>
       </section>
       <section class="card" id="prog-legado-card">
-        <div class="card-header"><div class="card-title-wrap"><span class="card-icon">🔒</span><h2>Migração segura do legado<small>Quarentena → classificação manual → cópia → validação; a origem nunca é apagada</small></h2></div></div>
+        <div class="card-header"><div class="card-title-wrap"><span class="card-icon">🔒</span><h2>Migração segura do legado<small>Quarentena → proveniência comprovada → classificação → cópia → validação; a origem nunca é apagada</small></h2></div></div>
         <div class="card-body">
           <div style="background:#fff4e5;border:1px solid #f0c890;color:#6f4617;border-radius:8px;padding:10px 12px;font-size:.82rem;margin-bottom:12px">
             <b>Nenhuma clínica é presumida.</b> Nem mesmo quando a pessoa hoje pertence a um único ambiente.
             A tela mostra somente metadados, contagens e hashes — nunca o conteúdo do prontuário.
-            Associação manual exige clínica e justificativa; divergências ficam bloqueadas para revisão.
+            Associação exige conta, clínica, declaração do proprietário e manifesto revisados; divergências ficam bloqueadas para revisão.
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
             <button type="button" class="btn btn-sm btn-primary" onclick="programador.inventariarLegado()">🔎 Inventariar origem congelada</button>
@@ -19851,15 +19852,19 @@ const programador = {
             <div class="field col-4"><label>Clínica confirmada <small style="color:var(--text-mute);font-weight:400">(sem valor padrão)</small></label><select id="prog-legado-org">${opcoesOrgEscolha}</select></div>
             <div class="field col-8"><label>Justificativa operacional <small style="color:var(--text-mute);font-weight:400">(não escreva informação clínica)</small></label><input type="text" id="prog-legado-reason" maxlength="500" placeholder="Ex.: conferido pelo programador com o responsável da clínica"></div>
           </div>
+          <div id="prog-legado-proveniencia"></div>
           <div style="display:flex;gap:7px;flex-wrap:wrap;margin-top:10px">
-            <button type="button" class="btn btn-sm btn-primary" onclick="programador.classificarLegado()">1. Classificar selecionados</button>
-            <button type="button" class="btn btn-sm" onclick="programador.copiarLegado()">2. Copiar sem sobrescrever</button>
-            <button type="button" class="btn btn-sm" onclick="programador.validarLegado()">3. Validar hashes e vínculos</button>
+            <button type="button" class="btn btn-sm btn-primary" onclick="programador.classificarLegado()">3. Classificar selecionados</button>
+            <button type="button" class="btn btn-sm" onclick="programador.copiarLegado()">4. Copiar sem sobrescrever</button>
+            <button type="button" class="btn btn-sm" onclick="programador.validarLegado()">5. Validar hashes e vínculos</button>
             <button type="button" class="btn btn-sm btn-danger" onclick="programador.reverterLegado()">↩ Reverter na janela</button>
           </div>
           <div id="prog-legado-resultado" style="margin-top:10px"></div>
         </div>
       </section>`;
+    if (typeof window !== 'undefined' && window.SoftLegacyProvenance) window.SoftLegacyProvenance.mount({
+      programador, cloud, contextoAba, document, confirm: message => confirm(message)
+    });
   },
 
   _legacyStatus: {
@@ -19997,36 +20002,21 @@ const programador = {
   _legacySelecionados() { return Array.from(document.querySelectorAll('.prog-legado-check:checked')).map(x => x.value).filter(Boolean); },
   _legacyJustificativa() { return ((document.getElementById('prog-legado-reason') || {}).value || '').trim(); },
   async classificarLegado() {
-    const ids = programador._legacySelecionados();
-    const org = (document.getElementById('prog-legado-org') || {}).value || '';
-    const reason = programador._legacyJustificativa();
-    if (!ids.length) return programador._legacyErro('Selecione ao menos uma linha visível.');
-    if (!org) return programador._legacyErro('Escolha explicitamente a clínica confirmada.');
-    if (reason.length < 12) return programador._legacyErro('A justificativa precisa ter pelo menos 12 caracteres e não deve conter informação clínica.');
-    if (!confirm('Associar ' + ids.length + ' linha(s) a "' + programador._nomeOrg(org) + '"?\n\nEsta é uma decisão de isolamento. Ela ficará auditada com sua justificativa; ainda não copia nem apaga dados.')) return;
     try {
-      const rep = await programador._rpc('prog_classify_legacy_documents', { p_registry_ids: ids, p_org: org, p_reason: reason });
-      programador._legacyResultado('Classificação registrada', rep);
-      await programador.carregarResumoLegado(true); await programador.carregarItensLegado(programador._legacyOffset);
+      if (typeof window === 'undefined' || !window.SoftLegacyProvenance) throw new Error('Abra novamente a área Programador para conferir a proveniência.');
+      await window.SoftLegacyProvenance.perform('classify');
     } catch (e) { programador._legacyErro(e.message); }
   },
   async copiarLegado() {
-    const ids = programador._legacySelecionados();
-    if (!ids.length) return programador._legacyErro('Selecione ao menos uma linha classificada.');
-    if (!confirm('Copiar ' + ids.length + ' linha(s) classificadas para o banco relacional?\n\nA origem ficará intacta. Destino divergente não será sobrescrito. A janela padrão de reversão será de 7 dias.')) return;
     try {
-      const rep = await programador._rpc('prog_copy_legacy_documents', { p_registry_ids: ids, p_rollback_hours: 168 });
-      programador._legacyResultado('Cópia concluída', rep);
-      await programador.carregarResumoLegado(true); await programador.carregarItensLegado(programador._legacyOffset);
+      if (typeof window === 'undefined' || !window.SoftLegacyProvenance) throw new Error('Abra novamente a área Programador para conferir a proveniência.');
+      await window.SoftLegacyProvenance.perform('copy');
     } catch (e) { programador._legacyErro(e.message); }
   },
   async validarLegado() {
-    const ids = programador._legacySelecionados();
-    if (!ids.length) return programador._legacyErro('Selecione ao menos uma linha copiada.');
     try {
-      const rep = await programador._rpc('prog_validate_legacy_documents', { p_registry_ids: ids });
-      programador._legacyResultado('Validação concluída', rep);
-      await programador.carregarResumoLegado(true); await programador.carregarItensLegado(programador._legacyOffset);
+      if (typeof window === 'undefined' || !window.SoftLegacyProvenance) throw new Error('Abra novamente a área Programador para conferir a proveniência.');
+      await window.SoftLegacyProvenance.perform('validate');
     } catch (e) { programador._legacyErro(e.message); }
   },
   async reverterLegado() {
@@ -40273,10 +40263,10 @@ const assinatura = {
               </div>
             </div>
 
-            <!-- Aba: Certificado digital ICP-Brasil (fluxo válido para o CFM) -->
+            <!-- PDF externo: seleção e hash não verificam assinatura criptográfica. -->
             <div class="sig-pane" id="${utils.escapeAttr(prefixo)}-pane-cert" style="display:none">
               <div style="padding:14px;background:var(--surface-alt);border-radius:8px;font-size:.85rem;line-height:1.5">
-                <p style="margin:0 0 8px"><strong>🔐 Assinatura digital ICP-Brasil</strong> <span style="font-size:.74rem;color:var(--text-mute)">— padrão aceito pelo CFM (PAdES, verificável no validador oficial)</span></p>
+                <p style="margin:0 0 8px"><strong>📎 PDF assinado externamente</strong> <span style="font-size:.74rem;color:var(--text-mute)">— anexação sem verificação criptográfica ou confirmação da nuvem</span></p>
                 <div id="${utils.escapeAttr(prefixo)}-icp-status"></div>
                 <ol style="margin:8px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:12px">
                   <li><strong>Gere o PDF</strong> do documento.<br>
@@ -40287,8 +40277,8 @@ const assinatura = {
                     <a class="btn btn-sm" href="https://assinaturadigital.cfm.org.br/" target="_blank" rel="noopener">⚕️ Certificado CFM</a>
                     <div style="font-size:.76rem;color:var(--text-mute);margin-top:4px">Médicos adimplentes com o CRM têm certificado ICP-Brasil gratuito pelo CFM.</div>
                   </li>
-                  <li><strong>Anexe o PDF já assinado</strong> — o sistema registra a assinatura (arquivo, assinante, data e hash SHA-256) e marca o documento como assinado.<br>
-                    <input type="file" id="${utils.escapeAttr(prefixo)}-icp-file" accept="application/pdf" style="display:none" onchange="assinatura._icpRegistrar(${utils.jsArg(prefixo)}, this)">
+                  <li><strong>Valide no provedor e anexe o PDF</strong> — o app registra o hash e os metadados; não verifica a assinatura nem confirma o envio. Salve o registro e confirme o arquivo em Anexos.<br>
+                    <input type="file" id="${utils.escapeAttr(prefixo)}-icp-file" accept="application/pdf" style="display:none" onclick="assinatura._icpPreparar(${utils.jsArg(prefixo)}, this)" onchange="assinatura._icpRegistrar(${utils.jsArg(prefixo)}, this)">
                     <button type="button" class="btn btn-sm btn-primary" onclick="document.getElementById(${utils.jsArg(prefixo + '-icp-file')}).click()">📎 Anexar PDF assinado</button>
                     <a class="btn btn-sm" href="https://validar.iti.gov.br/" target="_blank" rel="noopener">✅ Validar assinatura</a>
                   </li>
@@ -40461,7 +40451,32 @@ const assinatura = {
     return { 'sig-pre': 'pre', 'sig-anest': 'anestesia', 'sig-anest2': 'anestesia', 'sig-consulta': 'consulta' }[prefixo];
   },
 
-  /* ===== ICP-BRASIL: fluxo guiado (válido para o CFM) ===== */
+  _icpAlvo(prefixo) {
+    const formId = assinatura._formIdDe(prefixo);
+    const form = document.getElementById(formId);
+    if (!form) throw new Error('Contexto do documento perdido — reabra e tente de novo.');
+    if ('form-' + state.currentModule !== formId) throw new Error('O documento mudou. Reabra o documento antes de anexar.');
+    const names = ['_id', '_patientKey', '_patientRef', '_caseId', '_caseKey',
+      'nome', 'paciente', 'paciente_nome', 'profissional', 'anestesiologista',
+      'anestesiologista2', 'responsavel', 'crm', 'crm2'];
+    const identity = () => JSON.stringify(names.map(name => {
+      const field = form.querySelector('[name="' + name + '"]');
+      return [name, field ? String(field.value || '') : null];
+    }));
+    return { prefixo, formId, form, owner: contextoAba.capturar(), module: state.currentModule,
+      identity, expected: identity() };
+  },
+  _icpExigirAlvo(target) {
+    if (!contextoAba.corresponde(target.owner)) throw new Error('O usuário ou a clínica mudou. Reabra o documento antes de anexar.');
+    if (document.getElementById(target.formId) !== target.form || state.currentModule !== target.module
+        || target.identity() !== target.expected) throw new Error('O documento mudou. Reabra o documento antes de anexar.');
+    return target.form;
+  },
+  _icpPreparar(prefixo, input) {
+    if (input) input._softSignatureLegacyTarget = assinatura._icpAlvo(prefixo);
+  },
+
+  /* ===== PDF externo: a anexação não verifica assinatura ou certificado ===== */
   _icpGerarPDF(prefixo) {
     try {
       printPreview.abrir();
@@ -40476,19 +40491,23 @@ const assinatura = {
     if (!file) return;
     if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) { toast('Anexe o PDF assinado (.pdf)', 'warn'); return; }
     const sfx = (prefixo === 'sig-anest2') ? '2' : '';
-    const form = document.getElementById(assinatura._formIdDe(prefixo));
-    if (!form) return;
     try {
+      if (input.isConnected === false) throw new Error('Contexto do documento perdido — reabra e tente de novo.');
+      const target = input._softSignatureLegacyTarget || assinatura._icpAlvo(prefixo);
+      if (target.prefixo !== prefixo) throw new Error('O documento mudou. Reabra o documento antes de anexar.');
+      const form = assinatura._icpExigirAlvo(target);
       const buf = await file.arrayBuffer();
+      assinatura._icpExigirAlvo(target);
       const hashBuf = await crypto.subtle.digest('SHA-256', buf);
+      assinatura._icpExigirAlvo(target);
       const hex = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
       const ts = new Date().toISOString();
       const assinante = (form.querySelector('[name="anestesiologista' + sfx + '"], [name="profissional"], [name="responsavel"]') || {}).value || '';
-      const meta = { tipo: 'icp', hash: hex, ts, arquivo: file.name, assinante };
+      const meta = { tipo: 'pdf_anexado', hash: hex, ts, arquivo: file.name, assinante,
+        signatureVerified: false, centralReceiptConfirmed: false };
       const setV = (n, v) => { const el = form.querySelector('[name="' + n + '"]'); if (el) el.value = v; };
-      setV('assinatura_tipo' + sfx, 'icp');
+      setV('assinatura_tipo' + sfx, 'pdf_anexado');
       setV('assinatura_meta' + sfx, JSON.stringify(meta));
-      assinatura.carimbarDataHora(prefixo);
       /* Guarda o PDF assinado nos anexos do registro, quando o módulo suporta */
       const mod = assinatura._moduloComAnexos(prefixo);
       if (mod && document.getElementById(mod + '-docs-lista')) {
@@ -40496,7 +40515,7 @@ const assinatura = {
       }
       assinatura._icpRenderStatus(prefixo, meta);
       markDirty();
-      toast('🔐 PDF assinado registrado (ICP-Brasil) — salve o registro');
+      toast('📎 PDF selecionado — assinatura não verificada. Salve o registro e confirme o envio em Anexos.');
     } catch (e) {
       toast('Erro ao registrar assinatura: ' + e.message, 'error');
     }
@@ -40504,12 +40523,13 @@ const assinatura = {
   _icpRenderStatus(prefixo, meta) {
     const box = document.getElementById(prefixo + '-icp-status');
     if (!box) return;
-    if (!meta || meta.tipo !== 'icp') { box.innerHTML = ''; return; }
+    if (!meta || (meta.tipo !== 'icp' && meta.tipo !== 'pdf_anexado')) { box.innerHTML = ''; return; }
     box.innerHTML =
       '<div style="margin:4px 0 6px;padding:8px 10px;border:1px solid #b9e0c6;background:#eaf7ef;border-radius:8px;color:#1c6b3f;font-size:.82rem;line-height:1.5">' +
-        '✅ <strong>Assinado digitalmente (ICP-Brasil)</strong><br>' +
+        '📎 <strong>PDF anexado — assinatura não verificada</strong><br>' +
         'Arquivo: ' + utils.escapeHTML(meta.arquivo || '—') + '<br>' +
-        (meta.assinante ? 'Assinante: ' + utils.escapeHTML(meta.assinante) + '<br>' : '') +
+        (meta.assinante ? 'Profissional informado: ' + utils.escapeHTML(meta.assinante) + '<br>' : '') +
+        'Confirme a assinatura criptográfica em validar.iti.gov.br.<br>' +
         'Registrado em: ' + utils.escapeHTML(String(meta.ts || '').replace('T', ' ').slice(0, 16)) + '<br>' +
         '<span style="font-family:monospace;font-size:.66rem;word-break:break-all">SHA-256: ' + utils.escapeHTML(meta.hash || '') + '</span>' +
       '</div>';
@@ -40523,7 +40543,7 @@ const assinatura = {
       const metaEl = form.querySelector('[name="assinatura_meta' + sfx + '"]');
       if (!metaEl || !metaEl.value) return;
       const meta = JSON.parse(metaEl.value);
-      if (meta && meta.tipo === 'icp') assinatura._icpRenderStatus(prefixo, meta);
+      if (meta && (meta.tipo === 'icp' || meta.tipo === 'pdf_anexado')) assinatura._icpRenderStatus(prefixo, meta);
     } catch (e) {}
   },
 
@@ -46670,6 +46690,7 @@ const agenda = {
 <script src="src/ui/agenda-timeline.js"></script>
 
 <script src="src/ui/form-steppers.js"></script>
+<script src="src/ui/legacy-provenance.js"></script>
 
 <div class="dose-overlay" id="vit-overlay" onclick="vitaisRapidos.fechar()"></div>
 <div class="dose-sheet" id="vit-sheet">

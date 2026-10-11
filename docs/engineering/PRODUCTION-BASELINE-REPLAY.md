@@ -51,7 +51,7 @@ O executor cria uma nova identidade aleatória de projeto, valida container,
 label, porta e socket Docker, exige PostgreSQL 17, aplicação vazia e zero linhas
 de Auth/Storage, e nunca aceita URL ou argumento de alvo externo. Recria a
 estrutura capturada e compara definições, RLS, triggers e grants efetivos antes
-de aplicar as atualizações `0018`–`0032` e o hardening de assinaturas. A fonte `0026` é
+de aplicar as atualizações `0018`–`0034` e o hardening de assinaturas. A fonte `0026` é
 executada intacta via `psql --file`, com cada comando top-level em autocommit;
 `CREATE INDEX CONCURRENTLY` não é reescrito nesse ensaio. Nenhuma linha do
 histórico formal de migrações é inserida ou reparada.
@@ -62,7 +62,7 @@ da aplicação e de Storage, mas encontrou `42P01` na original `0025`.
 `0018`–`0024`; a `0025`, linha 894, exige a tabela no GRANT incondicional.
 A reconciliação agora executa **a original `0013_cbhpm_2022.sql`**, com hash
 `0b996505d48930b2498548808277a0a7c69a664eae2b4c22cc5d88c4262ad8d8`, depois da
-comparação exata do baseline e antes das 16 atualizações. Essa adição não é
+comparação exata do baseline e antes das 18 atualizações. Essa adição não é
 apresentada como parte do esquema originalmente capturado. O executor verifica
 23 colunas, duas constraints, cinco índices CBHPM, dois índices financeiros,
 RLS, a policy SELECT e zero códigos carregados. Qualquer alteração em objeto
@@ -76,6 +76,67 @@ finais; somente após `0025` exige que `anon`/PUBLIC não tenham grants e que
 e de serviço também são registrados, sem afirmar que são SELECT-only.
 Essa reconciliação deve constar no plano específico de transição de produção;
 não foi aplicada ao banco hospedado nem altera o histórico original.
+
+O restore e a fixture gerenciada usam o administrador local apenas para
+reconstruir e verificar a origem. As migrações são executadas em conexão
+Docker-local fixa como `postgres`. Antes de ler cada fonte, no mesmo processo
+psql, um comando separado exige `current_user = session_user = postgres`,
+PostgreSQL 17 e banco `postgres`. O arquivo SQL de stdin permanece intacto;
+não há transação envolvente ou mudança nos bytes de `0013`/`0026`.
+Owners e defaults intermediários são verificados para esse papel. A `0033`
+é uma adição ao histórico, não uma alteração das fontes anteriores. O relatório
+mantém integralmente a comparação com o catálogo histórico de homologação,
+identificando sua data de captura; diferenças não são filtradas para aprovar.
+Antes das migrações, um diagnóstico exclusivamente de catálogo prova a
+autoridade sobre extensões que precisam mover, policies de Storage e publicação
+Realtime. A autoridade sobre defaults de `supabase_admin` é registrada
+separadamente: uma tentativa real em homologação foi recusada com `42501`.
+A migração fecha os defaults de `postgres` e preserva integralmente os defaults
+do fornecedor. A condição do fornecedor permanece pendente; o ensaio não
+afirma fechamento universal. Não concede associação a papéis privilegiados
+nem muda owners para fazer a CI passar. Uma imagem local com autoridade
+diferente da hospedada registra essa divergência explicitamente.
+O catálogo imediatamente antes e depois de `0033` deve preservar todo CRUD
+existente de `service_role` e não conceder DELETE adicional. O ensaio rejeita
+TRUNCATE da aplicação, grants de cliente no legado e exposição da RPC de
+autoprovisionamento. Uma fixture com ROLLBACK cria tabelas, sequências e funções
+em `public`/`app`, verificando permissões efetivas e a combinação de defaults
+globais e por schema. Para `postgres`, exige fechamento. Para `supabase_admin`,
+registra os direitos residuais e prova a recusa `42501` quando a autoridade local
+também é negada; não tenta corrigir os defaults internos do fornecedor.
+
+Depois da comparação vazia e do pré-requisito `0013`, antes da original `0018`,
+o ensaio carrega 455 registros históricos sintéticos (92 pré, 167 anestesias,
+143 recuperações, 53 consentimentos). Também inclui vínculos, dois adendos e
+uma assinatura históricos. A original `0020` deve converter a finalização
+preservando payload, autoria, horário e vínculos, incrementando a revisão e
+registrando exatamente 455 eventos de finalização. Os adendos antigos não
+viram cabeças CAS, e a assinatura permanece sem atribuição presumida.
+As fases SEED/VERIFY têm hashes separados, sem envolver as migrações originais
+em outra transação. Esse conjunto é verificado depois de `0033` e do hardening
+de assinaturas, antes da seed adicional de `0034`: registra 459 linhas clínicas
+sintéticas, três usuários e uma assinatura; o baseline comparado inicialmente
+continua sem registros. Somente o projeto efêmero é removido.
+
+Imediatamente antes de `0034`, outra fixture acrescenta 12 documentos legados,
+cinco contas sintéticas e oito registros canônicos de referência. A `0034`
+exige uma coorte e clínica aprovadas explicitamente pelo programador, separa
+autoria/data da importação das alegações históricas e preserva fonte, pacientes
+e casos existentes. A verificação com ROLLBACK testa isolamento entre donos e
+stamps, vínculos manuais, conflito sem sobrescrita, recibos imutáveis e repetição
+idempotente. O preflight rejeita cópias antigas sem retrofit de proveniência
+revisado. Contagens agregadas reais antes das fixtures seguintes devem mostrar
+467 registros nas oito tabelas canônicas declaradas, oito contas, 12 documentos
+legados e uma assinatura; os dados continuam inteiramente sintéticos.
+
+Três pares autenticados exercitam concorrência de importação com o mesmo CPF,
+cadastro comum com o mesmo CPF e declarações contraditórias sobre a clínica de
+uma coorte. Cada primeiro escritor mantém a transação aberta até observar o
+segundo aguardando seu advisory lock em `pg_locks`; só então faz COMMIT.
+O teste exige um resultado vencedor e uma rejeição preservada em cada par.
+Transações REPEATABLE READ são rejeitadas nos caminhos que exigem uma leitura
+atualizada. Essa evidência não promete ausência geral de deadlocks ou deduplicação
+por nomes; timeout e erro SQL reprovam o ensaio sem ocultar a falha.
 
 Depois, roda os testes de imutabilidade/finalização e CAS de retificação com
 duas sessões reais de PostgreSQL. Auth/Storage são fornecidos pela instalação
@@ -172,7 +233,7 @@ Nenhuma linha foi lida clinicamente, classificada, copiada ou movida.
 
 Antes da aplicação na produção:
 
-1. Executar e revisar o replay da estrutura atual com as 16 fontes novas.
+1. Executar e revisar o replay da estrutura atual com as 18 fontes novas.
    Resolver divergências, preservar buckets e validar todos os grants e policies.
 2. Obter backup operacional verificável e ponto de retorno, distinto deste
    artefato sem dados; definir janela e métricas de locks/duração para índices.

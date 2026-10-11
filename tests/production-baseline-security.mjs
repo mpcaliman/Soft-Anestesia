@@ -2,10 +2,34 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { compareCatalogs, validateCatalog } from '../scripts/compare-application-catalog.mjs';
 import { prepareProductionApplicationBaseline } from '../scripts/prepare-production-application-baseline.mjs';
-import { replayFailureDetails, replayProductionBaseline, runProductionBaselineReplay, verifyCbhpmPrerequisite } from '../scripts/run-production-baseline-replay.mjs';
+import { replayFailureDetails, replayProductionBaseline, runProductionBaselineReplay, verifyCbhpmPrerequisite,
+  verifyReconciledPermissions } from '../scripts/run-production-baseline-replay.mjs';
 import { compareManagedSecurityDependencies, prepareManagedSecurityFixture } from '../scripts/production-managed-security-fixture.mjs';
+import { historicalFixtureEvidence, historicalFixtureSections, loadHistoricalUpgradeFixture } from '../scripts/historical-upgrade-fixture.mjs';
 
 const read = path => readFile(new URL('../'+path, import.meta.url), 'utf8');
+const historicalSource=await read('tests/sql/historical-upgrade-preconditions-security.sql');
+const historical=await loadHistoricalUpgradeFixture(new URL('../',import.meta.url).pathname);
+assert.equal(historicalFixtureSections(historicalSource).sha256,historical.sha256);
+for(const source of [historicalSource+'\n-- BEGIN HISTORICAL SEED',
+  historicalSource.replace('-- END HISTORICAL VERIFY','-- incomplete'),
+  historicalSource.replace('commit;\n-- END HISTORICAL SEED','rollback;\n-- END HISTORICAL SEED')])
+  assert.throws(()=>historicalFixtureSections(source));
+const historicalFacts={verified:true,historicalOriginals:455,historicalAdenda:2,historicalSignatures:1,
+  authRows:3,patientRows:1,encounterRows:1,addendaRows:2,signatureRows:1,clinicalRows:459,
+  backfillFinalizationAuditRows:455,priorAuditRowsRetained:455,
+  payloadAndLinksPreserved:true,historicalTimestampAndAuthorPreserved:true,historicalAdendaNotCasHeads:true,
+  historicalSignaturesUnassignedAndImmutable:true,administrativeFinalizedDeletionDenied:true,
+  replicaFinalizedDeletionDenied:true,productionMutated:false,
+  sourceDistribution:{preanesthetic_assessments:92,anesthesia_records:167,recovery_records:143,consents:53},
+  timestampCases:{valid_timestamp:149,invalid_timestamp:153,absent_timestamp:153}};
+assert.equal(historicalFixtureEvidence(JSON.stringify({...historicalFacts,privateRuntimeContent:'do-not-export'}),historical).clinicalRows,459);
+assert.ok(!JSON.stringify(historicalFixtureEvidence(JSON.stringify({...historicalFacts,privateRuntimeContent:'do-not-export'}),historical)).includes('do-not-export'));
+for(const mutate of [x=>{x.backfillFinalizationAuditRows=454;},x=>{x.payloadAndLinksPreserved=false;},
+  x=>{x.authRows=0;},x=>{x.sourceDistribution.consents=52;}]) {
+  const unsafe=structuredClone(historicalFacts);mutate(unsafe);
+  assert.throws(()=>historicalFixtureEvidence(JSON.stringify(unsafe),historical));
+}
 const source = JSON.parse(await read('docs/engineering/PRODUCTION-APPLICATION-CATALOG-2026-10-11.json'));
 const extraCoverage = JSON.parse(await read('docs/engineering/PRODUCTION-APPLICATION-COVERAGE-2026-10-11.json'));
 assert.equal(extraCoverage.metadataOnly,true);
@@ -153,11 +177,11 @@ for (const category of ['relations','columns','constraints','indexes','policies'
   reconciledReference.catalog[category].push(...stage.catalog[category].filter(x => x.schema === 'public' &&
     (x.name === 'cbhpm_codigos' || x.relation === 'cbhpm_codigos' || category === 'indexes' && ['idx_fin_origem','idx_fin_cbhpm'].includes(x.name))).map(x=>structuredClone(x)));
 }
-reconciledReference.catalog.relations.find(x=>x.name==='cbhpm_codigos').owner='supabase_admin';
+reconciledReference.catalog.relations.find(x=>x.name==='cbhpm_codigos').owner='postgres';
 reconciledReference.catalog.effective_grants=reconciledReference.catalog.effective_grants.filter(x=>x.name!=='cbhpm_codigos');
-for(const grantee of ['supabase_admin','postgres','anon','authenticated','service_role'])for(const privilege of tablePrivileges)
+for(const grantee of ['postgres','anon','authenticated','service_role'])for(const privilege of tablePrivileges)
   reconciledReference.catalog.effective_grants.push({kind:'relation',schema:'public',relation:null,name:'cbhpm_codigos',arguments:null,
-    grantee,grantor:'supabase_admin',privilege,grantable:false});
+    grantee,grantor:'postgres',privilege,grantable:false});
 assert.equal(verifyCbhpmPrerequisite(source, reconciledReference, stage).counts.indexes.added, 7);
 for (const mutate of [
   x => { x.catalog.relations.find(r=>r.name==='patients').rls=false; },
@@ -176,6 +200,44 @@ assert.deepEqual(replayFailureDetails({ replayPhase:'application-upgrade', sqlSt
   migrationPath:'database/migrations/0025_supabase_hardening.sql', message:'private' }, 'prepare'),
   {operation:'application-upgrade',sqlState:'42P01',migrationPath:'database/migrations/0025_supabase_hardening.sql',missingRelation:'public.cbhpm_codigos',sourceLine:894});
 assert.equal(replayFailureDetails({missingRelation:'public.private@example.invalid',sourceLine:NaN},'prepare').missingRelation,undefined);
+assert.equal(replayFailureDetails({replayPhase:'managed-platform-migration-capabilities',
+  platformPrerequisite:'extension-owner',message:'private'},'prepare').platformPrerequisite,'extension-owner');
+assert.equal(replayFailureDetails({platformPrerequisite:'private arbitrary value'},'prepare').platformPrerequisite,undefined);
+const permissionsBefore = structuredClone(source), permissionsAfter = structuredClone(source);
+permissionsAfter.catalog.effective_grants = permissionsAfter.catalog.effective_grants.filter(x=>!(
+  ['public','app'].includes(x.schema)&&x.kind==='relation'&&x.privilege==='TRUNCATE'
+  &&['PUBLIC','anon','authenticated','service_role'].includes(x.grantee))&&!(
+  x.schema==='public'&&x.kind==='relation'&&['documentos','pacientes'].includes(x.name)
+  &&['PUBLIC','anon','authenticated'].includes(x.grantee))&&!(
+  x.schema==='public'&&x.kind==='sequence'&&x.name==='documentos_id_seq'
+  &&['PUBLIC','anon','authenticated'].includes(x.grantee)));
+assert.equal(verifyReconciledPermissions(permissionsBefore,permissionsAfter).existingServiceCrudPreserved,true);
+const serviceDelete = permissionsBefore.catalog.effective_grants.find(x=>x.kind==='relation'&&x.schema==='public'
+  &&x.grantee==='service_role'&&x.privilege==='DELETE');
+assert.ok(serviceDelete);
+for (const mutate of [
+  x=>{x.catalog.relations[0].owner='supabase_admin';},
+  x=>{x.catalog.functions[0].owner='supabase_admin';},
+  x=>{x.catalog.effective_grants.push({...serviceDelete,privilege:'TRUNCATE'});},
+  x=>{x.catalog.effective_grants.find(g=>g.grantee==='service_role').grantable=true;},
+  x=>{x.catalog.default_privileges.find(g=>g.owner==='supabase_admin').acl='{supabase_admin=X/supabase_admin}';},
+  x=>{x.catalog.effective_grants.push({...serviceDelete,kind:'sequence',name:'documentos_id_seq',privilege:'USAGE',grantee:'anon'});},
+  x=>{x.catalog.effective_grants.push({...serviceDelete,name:'documentos',privilege:'SELECT',grantee:'authenticated'});},
+  x=>{x.catalog.effective_grants.push({...serviceDelete,kind:'function',name:'prog_read_legacy_documents',
+    privilege:'EXECUTE',grantee:'authenticated'});},
+  x=>{x.catalog.effective_grants.push({...serviceDelete,kind:'function',name:'criar_minha_organizacao',
+    arguments:'p_nome text',privilege:'EXECUTE',grantee:'authenticated'});},
+  x=>{x.catalog.effective_grants=x.catalog.effective_grants.filter(g=>g!==x.catalog.effective_grants.find(
+    g=>g.kind==='relation'&&g.grantee==='service_role'&&g.privilege==='SELECT'));}
+]) {
+  const unsafe = structuredClone(permissionsAfter); mutate(unsafe);
+  assert.throws(()=>verifyReconciledPermissions(permissionsBefore,unsafe));
+}
+const withoutPriorDelete = structuredClone(permissionsBefore);
+withoutPriorDelete.catalog.effective_grants = withoutPriorDelete.catalog.effective_grants.filter(x=>!(
+  x.kind===serviceDelete.kind&&x.schema===serviceDelete.schema&&x.name===serviceDelete.name
+  &&x.grantee==='service_role'&&x.privilege==='DELETE'));
+assert.throws(()=>verifyReconciledPermissions(withoutPriorDelete,permissionsAfter),/must not add service DELETE/);
 const candidates = JSON.parse(await read('docs/engineering/LEGACY-METADATA-CANDIDATES-2026-10-11.json'));
 assert.equal(candidates.automaticAssignmentAllowed, false);
 assert.equal(candidates.clinicalPayloadRead, false);

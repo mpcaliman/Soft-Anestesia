@@ -1143,25 +1143,25 @@ ${TAG_CLOSE_HTML}`;
       </div>
     `;
   },
-  /* Selo textual de assinatura ICP-Brasil para impressão (a partir do meta salvo) */
+  /* Metadados de PDF anexado não são validação criptográfica ou prova ICP. */
   _icpSelo(metaRaw) {
     let m = metaRaw;
     try { if (typeof metaRaw === 'string') m = metaRaw ? JSON.parse(metaRaw) : null; } catch (e) { m = null; }
-    if (!m || m.tipo !== 'icp') return '';
+    if (!m || (m.tipo !== 'icp' && m.tipo !== 'pdf_anexado')) return '';
     const dt = String(m.ts || '').replace('T', ' ').slice(0, 16);
     let qr = '';
-    try { if (m.validar && window.SoftQR) qr = window.SoftQR.svg(m.validar, { px: 88, ecl: 'M' }); } catch (e) { qr = ''; }
+    try { if (m.centralReceiptConfirmed === true && m.validar && window.SoftQR) qr = window.SoftQR.svg(m.validar, { px: 88, ecl: 'M' }); } catch (e) { qr = ''; }
     const qrCol = qr
       ? `<div style="flex:0 0 auto;text-align:center"><div style="background:#fff;border:1px solid #cfe8d8;padding:2px;display:inline-block">${qr}</div><div style="font-size:6pt;color:#3b7a5a;margin-top:1px">Aponte a câmera</div></div>`
       : '';
     const info = `<div style="flex:1 1 auto;min-width:0">` +
-      `✔ Assinado digitalmente com certificado ICP-Brasil` + (m.arquivo ? ' — ' + utils.escapeHTML(m.arquivo) : '') +
-      (m.assinante ? '<br>Assinante: ' + utils.escapeHTML(m.assinante) : '') +
+      `PDF anexado — assinatura não verificada` + (m.arquivo ? ' — ' + utils.escapeHTML(m.arquivo) : '') +
+      (m.assinante ? '<br>Profissional informado: ' + utils.escapeHTML(m.assinante) : '') +
       (dt ? '<br>Registro: ' + utils.escapeHTML(dt) : '') +
       `<br>SHA-256: <span style="font-family:monospace;word-break:break-all">${utils.escapeHTML((m.hash || '').slice(0, 48))}…</span>` +
-      (m.codigo ? `<br>Código de validação: <b>${utils.escapeHTML(m.codigo)}</b>` : '') +
-      (m.validar ? `<br>Validar em: ${utils.escapeHTML(m.validar)}` : '') +
-      `<br>Cadeia ICP-Brasil verificável em validar.iti.gov.br</div>`;
+      (m.codigo ? `<br>${m.centralReceiptConfirmed === true ? 'Código do comprovante' : 'Referência informada'}: <b>${utils.escapeHTML(m.codigo)}</b>` : '') +
+      (m.centralReceiptConfirmed === true && m.validar ? `<br>Consultar registro: ${utils.escapeHTML(m.validar)}` : '<br>Comprovante central não confirmado por esta anexação.') +
+      `<br>Confira a assinatura criptográfica do PDF em validar.iti.gov.br</div>`;
     return `<div style="margin-top:4px;font-size:7.5pt;color:#1c6b3f;border:1px solid #b9e0c6;background:#eaf7ef;border-radius:4px;padding:4px 6px;line-height:1.35;text-align:left;display:flex;gap:8px;align-items:flex-start">` +
       qrCol + info + `</div>`;
   },

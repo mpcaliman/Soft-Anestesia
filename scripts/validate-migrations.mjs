@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { assertMigrationBaselineState } from './migration-baseline-gate.mjs';
 import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, relative, resolve } from 'node:path';
@@ -21,8 +22,7 @@ async function sqlFilesUnder(directory) {
   return files;
 }
 
-assert.equal(manifest.status, 'blocked_pending_staging_reconciliation');
-assert.equal(manifest.remoteApplyAllowed, false, 'aplicação remota deve permanecer bloqueada na E0');
+const baselineState = assertMigrationBaselineState(manifest);
 assert.match(
   supabaseConfig,
   /\[db\.migrations\][\s\S]*?\nenabled = false(?:\n|$)/,
@@ -62,4 +62,4 @@ assert.ok(
   'histórico paralelo de supabase/migrations deve permanecer explícito até a reconciliação'
 );
 
-console.log('✓ baseline SQL íntegra; aplicação remota continua bloqueada até homologação autorizada');
+console.log(`✓ baseline SQL íntegra; estado registrado: ${baselineState.status}; CLI remota permanece desativada`);

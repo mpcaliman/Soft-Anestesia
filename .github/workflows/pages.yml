@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   build:
-    if: github.actor == 'mpcaliman' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.actor == 'mpcaliman' && github.triggering_actor == 'mpcaliman' && github.ref == 'refs/heads/main' && github.run_attempt == 1
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
@@ -55,12 +55,12 @@ jobs:
           test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
           node --input-type=module <<'JS'
           import { readFileSync } from 'node:fs';
+          import { assertMigrationBaselineState, assertPublicationDispatch } from './scripts/migration-baseline-gate.mjs';
+          assertPublicationDispatch({ eventName: process.env.GITHUB_EVENT_NAME, ref: process.env.GITHUB_REF,
+            actor: process.env.GITHUB_ACTOR, triggeringActor: process.env.GITHUB_TRIGGERING_ACTOR,
+            runAttempt: process.env.GITHUB_RUN_ATTEMPT, repository: process.env.GITHUB_REPOSITORY });
           const baseline = JSON.parse(readFileSync('database/migration-baseline.json', 'utf8'));
-          if (baseline.status !== 'staging_verified' || baseline.remoteApplyAllowed !== true ||
-              !baseline.stagingEvidence?.matrixPassed || !baseline.stagingEvidence?.authenticatedSessionsPassed ||
-              !baseline.stagingEvidence?.schemaHash || !baseline.stagingEvidence?.workflowUrl) {
-            throw new Error('Publicação bloqueada: falta homologação real autenticada e reconciliação reproduzível');
-          }
+          assertMigrationBaselineState(baseline, { purpose: 'publication' });
           console.log(JSON.stringify({ owner: process.env.GITHUB_ACTOR, sha: process.env.SOURCE_SHA,
             gate: process.env.AUTHORIZATION, proof: `https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` }));
           JS
@@ -91,6 +91,7 @@ jobs:
         with:
           path: dist
   deploy:
+    if: github.event_name == 'workflow_dispatch' && github.actor == 'mpcaliman' && github.triggering_actor == 'mpcaliman' && github.ref == 'refs/heads/main' && github.run_attempt == 1
     needs: build
     runs-on: ubuntu-latest
     environment:

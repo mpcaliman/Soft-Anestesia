@@ -16,7 +16,7 @@
 //   POST ?op=cert-info   { access_token, credentialID }
 //   POST ?op=sign        { access_token, credentialID, sad, pdf_base64, meta }
 //                                           → assina (PAdES) e grava o registro imutável
-//   GET  ?op=validar&codigo=... | &hash=... → validação pública (view assinaturas_publicas)
+//   ?op=validar → encerrado; consulta pública em `assinatura-validacao`
 //
 // Deploy:
 //   supabase functions deploy assinatura --no-verify-jwt
@@ -63,11 +63,12 @@ function isPdf(bytes: Uint8Array): boolean {
   const head = new TextDecoder("ascii").decode(bytes.subarray(0, Math.min(1024, bytes.length)));
   return head.includes("%PDF-");
 }
-function configurado() { return !!(CSC_BASE && CSC_ID && CSC_SECRET); }
+// Provider placeholders are not a homologated signature implementation.
+// Secrets alone must not enable real signing or advertise ICP validity.
+const DRIVER_HOMOLOGADO = false;
+function configurado() { return DRIVER_HOMOLOGADO && !!(CSC_BASE && CSC_ID && CSC_SECRET); }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const CODIGO_RE = /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/;
-const HASH_RE = /^[0-9a-f]{64}$/;
 const MODULOS = new Set([
   "pre", "consulta", "anestesia", "recuperacao", "risco", "termo",
   "prescricao", "documentos", "financeiro", "orcamento",
@@ -191,21 +192,10 @@ Deno.serve(async (req) => {
       return json({ ok: true, provider: PROVIDER, configurado: configurado() });
     }
 
-    // ---- validação pública (não exige nada do provedor) ----
+    // Consulta pública foi separada para não publicar este driver incompleto
+    // como requisito da validação nem expor campos pessoais da view legada.
     if (op === "validar") {
-      const codigo = (url.searchParams.get("codigo") || "").trim().toUpperCase();
-      const hash = (url.searchParams.get("hash") || "").trim().toLowerCase();
-      if (codigo && !CODIGO_RE.test(codigo)) return json({ erro: "codigo invalido" }, 400);
-      if (hash && !HASH_RE.test(hash)) return json({ erro: "hash invalido" }, 400);
-      const client = sb();
-      let q = client.from("assinaturas_publicas").select("*").limit(1);
-      if (codigo) q = q.eq("codigo", codigo);
-      else if (hash) q = q.eq("hash_doc", hash);
-      else return json({ erro: "informe codigo ou hash" }, 400);
-      const { data, error } = await q;
-      if (error) return json({ erro: "Não foi possível consultar a validação agora." }, 500);
-      if (!data || !data.length) return json({ encontrado: false });
-      return json({ encontrado: true, registro: data[0] });
+      return json({ erro: "Use a consulta pública assinatura-validacao." }, 410);
     }
 
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};

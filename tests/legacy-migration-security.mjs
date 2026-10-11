@@ -174,7 +174,7 @@ for (const rpc of [
   'prog_copy_legacy_documents', 'prog_validate_legacy_documents',
   'prog_rollback_legacy_documents'
 ]) {
-  assert.match(source, new RegExp(`_rpc\\('${rpc}'`));
+  assert.match(source, new RegExp(`(?:_rpc|rpc)\\('${rpc}'`));
 }
 assert.doesNotMatch(source, /_rpc\('prog_read_legacy_documents'/,
   'UI operacional não deve baixar conteúdo clínico legado');

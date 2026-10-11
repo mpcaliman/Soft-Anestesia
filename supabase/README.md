@@ -1,98 +1,75 @@
-# Assinatura digital ICP‑Brasil em nuvem (Opção B) — backend
+# Comprovantes de documentos e driver de assinatura
 
-Backend leve para o **1‑clique real** com certificado em nuvem (SafeID/Certillion),
-sem que o app estático precise guardar segredo. O app (`index.html`) chama a
-Edge Function; o segredo do provedor fica só no servidor.
+O backend entrega uma consulta pública de registros e hashes através da função
+assinatura-validacao. O driver CSC de assinatura em nuvem permanece incompleto
+até a homologação da API real do provedor. Configurar segredos não habilita
+assinatura nem comprova validade ICP-Brasil.
 
-## Por que precisa de backend
-Um app estático (GitHub Pages) **não pode guardar o `client_secret` OAuth** — qualquer
-um leria no JavaScript. A Edge Function guarda o segredo e orquestra a assinatura
-com a API do provedor. O **PIN/senha do certificado nunca passa pelo nosso lado**:
-o usuário aprova a operação no app do provedor (push/OTP/biometria).
+## Consulta pública independente
 
-## Arquitetura
-```
-Navegador (index.html)                Supabase                     Provedor (SafeID/Certillion)
-  adaptador safeid_cloud  ──HTTPS──►  Edge Function  ──OAuth2/CSC──►  API de assinatura em nuvem
-      (sem segredo)                   (guarda segredo)                (chave no HSM do provedor)
-                                          │
-                                          └── tabela `assinaturas` (registro imutável)
-                                              view `assinaturas_publicas` (somente service_role)
-                                              Edge Function (validação pública mínima)
-```
-Padrão de API: **CSC — Cloud Signature Consortium v1** (o que ITI/gov.br,
-Certillion e provedores BR expõem).
+A interface chama POST /functions/v1/assinatura-validacao com chave pública
+apenas no cabeçalho apikey e um código aleatório ou hash SHA-256 completo no
+corpo. A resposta confirma somente registro, hash, algoritmo, versão e horário.
+Não divulga paciente, profissional, clínica, título livre ou certificado e não
+atesta a assinatura criptográfica. Consulte o PDF no validador oficial
+https://validar.iti.gov.br para essa verificação.
 
-## Deploy
-1. Crie/pegue um projeto Supabase (o app já tem campo de URL nos Ajustes).
-2. Depois da homologação e de autorização G3, rode as migrações `0001` e
-   `0002` pelo fluxo reconciliado. A CLI permanece bloqueada no repositório
-   enquanto essa autorização não existir:
-   ```bash
-   supabase db push        # aplica a sequência reconciliada 0001 + 0002
-   ```
-3. Publique a função:
-   ```bash
-   supabase functions deploy assinatura --no-verify-jwt
-   ```
-4. Configure os segredos (nunca no app):
-   ```bash
-   supabase secrets set \
-     SIGN_PROVIDER=safeid \
-     CSC_BASE_URL="https://<host-do-provedor>/csc/v1" \
-     CSC_CLIENT_ID="<client_id>" \
-     CSC_CLIENT_SECRET="<client_secret>" \
-     CSC_SCOPE="service"
-   ```
-5. No app: **Ajustes → nuvem** informe a URL do Supabase. O adaptador
-   `safeid_cloud` passa a ficar "disponível" e o 1‑clique é liberado.
+A função utiliza segredos apenas no servidor, não escreve e não contém
+comandos clínicos ou chamadas ao provedor. O JWT da sessão do usuário não é
+enviado pela interface durante a consulta pública. O gateway usa
+verify_jwt=false exclusivamente para essa função de leitura.
 
-## O que a função expõe (`?op=`)
-- `health` — checa se o provedor está configurado.
-- `cert-list` / `cert-info` — lista/《detalha》 os certificados do usuário (CSC).
-- `sign` — recebe o PDF (base64) + credencial + SAD, assina em **PAdES**, calcula
-  o **SHA‑256**, grava o **registro imutável** e devolve o PDF assinado + código.
-- `validar` — validação pública por `codigo` ou `hash` (lê só a view não sensível).
+A ordem de implantação e os testes reais exigidos estão em
+[Contrato de implantação](../docs/engineering/SIGNATURE-VERIFICATION-DEPLOYMENT-2026-10-11.md).
+Publique e verifique a função em staging, depois em produção, antes de aplicar
+o endurecimento que revoga a leitura direta da view. Este documento não
+autoriza ignorar as condições e controles de migração ou publicação do projeto.
+Não use db push enquanto a baseline e a aplicação remota permanecerem bloqueadas.
 
-## Provedor: SafeID (Safeweb)
-O certificado em uso é um **e‑CPF em nuvem da Safeweb**, operado pelo app **SafeID**
-(aprovação de cada assinatura pela aba **"Autorizar"** = SAD/push). Para o
-1‑clique programático é preciso a **API de assinatura remota da Safeweb** —
-disponibilizada pelo **programa de integração/desenvolvedor da Safeweb**
-(habilitação comercial da conta). A tela de "Detalhes" do app mostra o
-certificado, **não** as credenciais de API.
+## Driver de assinatura em nuvem
 
-Como obter (você): abrir um chamado com a **Safeweb** (suporte/comercial ou o
-portal do desenvolvedor) pedindo **acesso à API de assinatura remota (SafeID)**
-para integração própria, e solicitar as credenciais + documentação.
+O arquivo functions/assinatura/index.ts é um scaffold CSC com endpoints do
+provedor ainda marcados para ajuste. DRIVER_HOMOLOGADO permanece false, e a
+função não anuncia disponibilidade nem executa assinatura apenas porque
+CSC_BASE_URL, CSC_CLIENT_ID e CSC_CLIENT_SECRET existem. Não publique esse
+scaffold para habilitar a consulta pública.
 
-## ⚠️ O que EU preciso da Safeweb para finalizar e testar
-A orquestração está pronta no **padrão CSC**; ao receber a doc da Safeweb, ajusto
-os pontos `>>> AJUSTAR CONFORME O PROVEDOR <<<` no `index.ts`. Preciso de:
+As rotas protegidas preservam validação real do JWT em Auth e vínculo clínico
+ativo por organização antes de responder que o driver está indisponível.
+A rota antiga assinatura?op=validar foi encerrada com HTTP 410; a interface
+usa a função independente de leitura.
 
-1. **Base URL** da API de assinatura remota da Safeweb (o host/caminho reais).
-2. **Fluxo OAuth** aceito: `client_credentials` (app) ou `authorization_code`+PKCE
-   (o médico autoriza) — e as URLs de `token`/`authorize`.
-3. **Credenciais**: `client_id` e `client_secret` (ficam só nos secrets).
-4. **Endpoint de assinatura**: é **por documento** (envia PDF → recebe PDF assinado)
-   ou **por hash** (`signHash` + embutir PAdES no nosso lado)? E o **formato exato**
-   de request/response.
-5. Como chega o **SAD/OTP** (a aprovação na aba "Autorizar" do app SafeID).
+Para homologar futuramente o driver SafeID/Safeweb, são necessários:
 
-Com isso eu ajusto o driver (2–3 funções pequenas e isoladas), testamos com o seu
-certificado real e ligamos o 1‑clique. Até lá, o fluxo **gov.br / SafeID‑app
-(guiado)** já entrega assinatura ICP‑Brasil real e verificável com o seu e‑CPF.
+1. URL e documentação da API real do provedor.
+2. Fluxo OAuth e contratos das URLs de autorização e token.
+3. Credenciais de servidor em secrets, sem segredo no app.
+4. Contrato de assinatura por PDF ou hash e formato PAdES de resposta.
+5. Autorização SAD/OTP e evidência de cadeia, revogação e carimbo de tempo.
+6. Teste real do resultado criptográfico, escopo da organização, concorrência
+   e recibo imutável antes de habilitar a operação na interface.
 
-## Segurança / LGPD
-- Segredo do provedor só na Edge Function (secrets).
-- A tabela `assinaturas` é **append‑only** (trigger bloqueia UPDATE/DELETE).
-- A corrente por clínica rejeita dois sucessores para o mesmo registro; em
-  concorrência, a Edge Function relê e recalcula antes de gravar.
-- A validação pública passa pela Edge Function, que lê a
-  **view `assinaturas_publicas`** com `service_role`; `anon` e `authenticated`
-  não consultam tabela/view diretamente. A resposta não contém conteúdo
-  clínico e identifica o paciente só por **iniciais**.
-- Emissor, titular e confirmação da cadeia não são aceitos do navegador. Ficam
-  vazios até o driver da API SafeID obter esses dados diretamente do provedor
-  na homologação.
-- PIN/chave nunca tocam o nosso backend.
+Nenhum desses itens é substituído pela simples criação de um hash do arquivo.
+Não há integração pronta de um clique anunciada neste estado.
+
+## PDF assinado externamente
+
+O usuário pode assinar e validar o PDF no provedor externo e anexá-lo no app.
+A anexação recebe o rótulo “PDF anexado — assinatura não verificada”. A UI e a
+impressão não tratam o arquivo, o hash ou metadados legados como prova ICP.
+
+O fluxo assinaturaDigital conserva metadados na memória da sessão, sem recibo
+central e sem upload automático desse PDF. Ele orienta manter o original,
+salvar o registro e confirmar o envio em Anexos. Nos módulos que possuem
+Anexos, o componente antigo pode enviar o arquivo através de prontuario;
+seleção e hash, sozinhos, não confirmam upload ou assinatura. O contrato de
+escrita central de comprovantes externos ainda precisa ser concluído.
+
+## Segurança do banco
+
+A tabela assinaturas é append-only; UPDATE e DELETE são rejeitados. O
+endurecimento original adiciona organização e autor obrigatórios para novas
+linhas, unicidade da posição da corrente e uma view security invoker sem
+acesso direto de anon/authenticated. A função de consulta lê somente uma
+allowlist de campos por correspondência exata com service_role, sem retornar
+conteúdo clínico ou dados pessoais. As migrações existentes permanecem intactas.

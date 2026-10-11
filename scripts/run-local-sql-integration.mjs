@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { assertMigrationBaselineState } from './migration-baseline-gate.mjs';
+import { historicalFixtureEvidence, loadHistoricalUpgradeFixture } from './historical-upgrade-fixture.mjs';
+import { captureSyntheticFixtureCounts, legacyFixtureEvidence, loadLegacyUpgradeFixture, runConcurrentLegacyProvenance } from './legacy-upgrade-fixture.mjs';
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -11,7 +14,8 @@ const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // random suffix intact so the config, Docker name and project label agree.
 const PROJECT_PATTERN = /^soft-as-sql-[a-f0-9]{24}$/;
 const CLI_VERSION = '2.119.0';
-const FIXTURES = ['tests/sql/retification-cas-security.sql', 'tests/sql/finalized-delete-security.sql'];
+const FIXTURES = ['tests/sql/retification-cas-security.sql', 'tests/sql/finalized-delete-security.sql',
+  'tests/sql/reconciled-permissions-security.sql'];
 const hash = value => createHash('sha256').update(value).digest('hex');
 const fail = (message, guard) => {
   const error = new Error(message);
@@ -96,14 +100,15 @@ export function migrationSqlForEmptyDatabase(path, sql, emptyVerified) {
 
 export async function loadMigrationPlan(repoDir = rootDir) {
   const manifest = JSON.parse(await readFile(join(repoDir, 'database/migration-baseline.json'), 'utf8'));
-  assert.equal(manifest.remoteApplyAllowed, false, 'baseline deve continuar bloqueando aplicação remota');
+  assertMigrationBaselineState(manifest, { purpose: 'local-sql' });
   const files = (await readdir(join(repoDir, 'database/migrations')))
     .filter(name => /^\d{4}_.+\.sql$/.test(name)).sort();
-  assert.equal(files.length, 32, 'executor exige exatamente a baseline 0001–0032');
+  assert.equal(files.length, 34, 'executor exige exatamente a baseline 0001–0034');
   files.forEach((file, i) => assert.equal(file.slice(0, 4), String(i + 1).padStart(4, '0')));
   const paths = ['supabase/migrations/0001_assinaturas.sql',
-    ...files.map(file => `database/migrations/${file}`),
-    'supabase/migrations/0002_assinaturas_hardening.sql'];
+    ...files.slice(0, 33).map(file => `database/migrations/${file}`),
+    'supabase/migrations/0002_assinaturas_hardening.sql',
+    ...files.slice(33).map(file => `database/migrations/${file}`)];
   const supabaseFiles = (await readdir(join(repoDir, 'supabase/migrations'))).filter(name => name.endsWith('.sql')).sort();
   assert.deepEqual(supabaseFiles, ['0001_assinaturas.sql', '0002_assinaturas_hardening.sql']);
   const plan = [];
@@ -201,9 +206,74 @@ function openProcess(command, args, { env, cwd, timeoutMs = 120000, input, keepO
 
 async function runProcess(command, args, options) { return openProcess(command, args, options).done; }
 
-const psqlArgs = containerId => ['exec', '--user', 'postgres', '-i', containerId, 'psql',
-  '--no-psqlrc', '--host=/var/run/postgresql', '--port=5432', '--username=supabase_admin', '--dbname=postgres',
+const psqlArgs = (containerId, postgresMigration = false) => ['exec', '--user', 'postgres', '-i', containerId, 'psql',
+  '--no-psqlrc', '--host=/var/run/postgresql', '--port=5432', postgresMigration ? '--username=postgres' : '--username=supabase_admin', '--dbname=postgres',
   '--set=ON_ERROR_STOP=1', '--set=VERBOSITY=verbose', '--quiet', '--tuples-only', '--no-align', '--file=-'];
+
+const MIGRATION_ROLE_GUARD = `do $migration_role_guard$ begin
+ if current_database()<>'postgres' or current_user<>'postgres' or session_user<>'postgres'
+  or current_setting('server_version_num')::integer/10000<>17 then
+  raise exception 'Migration requires the verified local PostgreSQL 17 postgres role'; end if;
+end $migration_role_guard$;`;
+
+const PLATFORM_MIGRATION_CAPABILITIES = `select jsonb_build_object(
+ 'roleVerified',current_user='postgres' and session_user='postgres',
+ 'adminDefaultsAuthorized',pg_has_role(current_user,'supabase_admin','USAGE'),
+ 'extensionSchemaCreateAuthorized',has_schema_privilege(current_user,'extensions','CREATE'),
+ 'extensions',coalesce((select jsonb_agg(jsonb_build_object('name',e.extname,
+  'moveRequired',n.nspname<>'extensions','moveAuthorized',pg_has_role(current_user,e.extowner,'USAGE')) order by e.extname)
+  from pg_extension e join pg_namespace n on n.oid=e.extnamespace
+  where e.extname in ('pgcrypto','unaccent','pg_trgm')),'[]'::jsonb),
+ 'storagePoliciesAuthorized',(select count(*)=2 and bool_and(pg_has_role(current_user,c.relowner,'USAGE'))
+  from pg_class c join pg_namespace n on n.oid=c.relnamespace
+  where n.nspname='storage' and c.relname in ('objects','buckets')),
+ 'realtimePublicationAuthorized',coalesce((select pg_has_role(current_user,pubowner,'USAGE')
+  from pg_publication where pubname='supabase_realtime'),false));`;
+
+export async function verifyPlatformMigrationCapabilities(db) {
+  const result=await db.runMigrationAsPostgres(PLATFORM_MIGRATION_CAPABILITIES,'managed platform migration prerequisites');
+  let facts;try{facts=JSON.parse(result.stdout.trim());}catch{fail('Platform migration capability response is invalid.');}
+  if(!facts||typeof facts!=='object'||Array.isArray(facts))fail('Platform migration capability response is invalid.');
+  const denied = prerequisite => {
+    const error=new Error('Required stock platform migration authority is unavailable.');
+    error.platformPrerequisite=prerequisite;throw error;
+  };
+  if(facts.roleVerified!==true)denied('postgres-role');
+  if(typeof facts.adminDefaultsAuthorized!=='boolean')denied('supabase-admin-default-privileges');
+  if(facts.extensionSchemaCreateAuthorized!==true)denied('extension-schema-create');
+  if(!Array.isArray(facts.extensions)||facts.extensions.length!==3
+    ||facts.extensions.some(x=>!x||typeof x!=='object'||!['pgcrypto','unaccent','pg_trgm'].includes(x.name))
+    ||new Set(facts.extensions.map(x=>x.name)).size!==3)denied('required-extension-inventory');
+  if(facts.extensions.some(x=>typeof x.moveRequired!=='boolean'||typeof x.moveAuthorized!=='boolean'
+    ||x.moveRequired&&!x.moveAuthorized))denied('extension-owner');
+  if(facts.storagePoliciesAuthorized!==true)denied('storage-policy-owner');
+  if(facts.realtimePublicationAuthorized!==true)denied('realtime-publication-owner');
+  return {verified:true,role:'postgres',adminDefaultsAuthorized:facts.adminDefaultsAuthorized,
+    hostedPostgresAdminDefaultAuthority:false,
+    adminDefaultAuthorityMatchesHosted:!facts.adminDefaultsAuthorized,
+    supplierDefaultsMustRemainUnmodified:true,supplierDefaultPrivilegesPending:true,
+    extensionSchemaCreateAuthorized:true,
+    extensions:facts.extensions.map(({name,moveRequired,moveAuthorized})=>({name,moveRequired,moveAuthorized})),
+    storagePoliciesAuthorized:true,realtimePublicationAuthorized:true,privilegesAdded:false,ownersChanged:false};
+}
+
+export function reconciledPermissionFixtureEvidence(stdout,capabilities) {
+  let raw;try{raw=JSON.parse(stdout.trim());}catch{fail('Permission fixture must return one safe JSON result.');}
+  assert.ok(raw&&typeof raw==='object'&&!Array.isArray(raw));
+  const evidence={};
+  for(const [key,expected] of Object.entries({verified:true,applicationExecutorDefaultPrivilegesClosed:true,
+    supplierDefaultPrivilegesPending:true,supplierPrivilegesAdded:false,supplierOwnersChanged:false})) {
+    assert.equal(raw[key],expected,'Permission fixture criterion failed');evidence[key]=expected;
+  }
+  assert.equal(typeof raw.supplierDefaultPrivilegesClosed,'boolean');
+  const denied=!capabilities.adminDefaultsAuthorized;
+  for(const key of ['managedRoleDeniedAttemptTested','managedRoleDefaultDenied42501','adminDefaultAuthorityMatchesHosted']) {
+    assert.equal(raw[key],denied,'Managed-role denial must reflect actual local authority');evidence[key]=raw[key];
+  }
+  return {...evidence,localSupplierDefaultPrivilegesClosed:raw.supplierDefaultPrivilegesClosed,
+    supplierDefaultPrivilegesClosed:false,supplierDefaultsChangeAuthorized:false,
+    universalDefaultPrivilegesClosureVerified:false,productionApplied:false};
+}
 
 // Validation returns a capability for exactly one Docker-local DB. The CLI's
 // connection string is only checked, never passed to psql or written to disk.
@@ -225,6 +295,15 @@ export function createPsqlExecutor({ status, inspection, projectId, inheritedEnv
     async run(sql, label) {
       await validate();
       return assertCommandSuccess(await execute('docker', psqlArgs(containerId), { env, cwd, input: sql }), label, sql);
+    },
+    async runMigrationAsPostgres(sql, label) {
+      await validate();
+      const args = psqlArgs(containerId, true);
+      // psql processes --command then --file on the same connection, each in
+      // autocommit. Source stdin stays byte-for-byte unchanged, preserving
+      // transaction boundaries, CONCURRENTLY and original source line numbers.
+      args.splice(args.length-1, 0, '--command='+MIGRATION_ROLE_GUARD);
+      return assertCommandSuccess(await execute('docker', args, { env, cwd, input: sql }), label, sql+'\n'+MIGRATION_ROLE_GUARD);
     },
     async open(sql) {
       await validate();
@@ -387,6 +466,8 @@ commit;
 export async function runLocalSqlIntegration({ repoDir = rootDir, inheritedEnv = process.env, execute = runProcess } = {}) {
   assertSafeEnvironment(inheritedEnv);
   const plan = await loadMigrationPlan(repoDir);
+  const historicalFixture=await loadHistoricalUpgradeFixture(repoDir);
+  const legacyFixture=await loadLegacyUpgradeFixture(repoDir);
   const fixtures = [];
   for (const path of FIXTURES) {
     const sql = await readFile(join(repoDir, path), 'utf8');
@@ -402,7 +483,7 @@ export async function runLocalSqlIntegration({ repoDir = rootDir, inheritedEnv =
     SUPABASE_SKIP_UPDATE_CHECK: 'true', SUPABASE_TELEMETRY_DISABLED: 'true' };
   const evidence = {
     schema: 1,
-    hashes: Object.fromEntries([...plan, ...fixtures].map(entry => [entry.path, entry.sha256])),
+    hashes: Object.fromEntries([...plan, ...fixtures,historicalFixture,legacyFixture,legacyFixture.race].map(entry => [entry.path, entry.sha256])),
     tests: [],
     counters: { migrations: 0, fixtures: 0, accepted: 0, conflict: 0, blockedSessions: 0 },
     localSqlVerified: false, stagingVerified: false, realAuthApiVerified: false, productionVerified: false
@@ -435,9 +516,23 @@ export async function runLocalSqlIntegration({ repoDir = rootDir, inheritedEnv =
     stage = 'empty-local-baseline-and-extension-schemas';
     await db.run(EMPTY_BASELINE_SQL, stage);
     evidence.tests.push({ name: 'empty-local-baseline-and-extension-schemas', passed: true });
+    stage='managed-platform-migration-capabilities';
+    evidence.platformMigrationCapabilities=await verifyPlatformMigrationCapabilities(db);
     for (const entry of plan) {
+      if(entry.path.startsWith('database/migrations/0018_')) {
+        stage='historical-upgrade-seed';
+        await db.run(historicalFixture.seed.sql,'synthetic historical pre0018 seed');
+      }
+      if(entry.path.startsWith('database/migrations/0034_')) {
+        stage='historical-upgrade-preservation';
+        const historicalResult=await db.run(historicalFixture.verify.sql,'synthetic historical upgrade verification');
+        evidence.historicalUpgrade=historicalFixtureEvidence(historicalResult.stdout,historicalFixture);
+        evidence.tests.push({name:stage,passed:true});
+        stage='legacy-provenance-seed';
+        await db.run(legacyFixture.seed.sql,'synthetic legacy pre0034 seed');
+      }
       stage = entry.path;
-      await db.run(`set search_path=public,extensions;\n${migrationSqlForEmptyDatabase(entry.path, entry.sql, true)}`, entry.path);
+      await db.runMigrationAsPostgres(`set search_path=public,extensions;\n${migrationSqlForEmptyDatabase(entry.path, entry.sql, true)}`, entry.path);
       evidence.counters.migrations++;
     }
     stage = 'hardened-extension-schemas';
@@ -447,23 +542,39 @@ export async function runLocalSqlIntegration({ repoDir = rootDir, inheritedEnv =
         raise exception 'Hardened extension schemas were not preserved';
       end if;
     end $verify$;`, 'schemas finais das extensões');
-    evidence.tests.push({ name: 'ordered-migrations-0001-through-0032-and-signature-hardening', passed: true });
+    evidence.tests.push({ name: 'ordered-migrations-0001-through-0034-and-signature-hardening', passed: true });
+    evidence.migrationExecutionRole = 'postgres'; evidence.migrationRoleGuardVerified = true;
+    assert.equal(evidence.historicalUpgrade?.verified,true,'Historical upgrade must be verified before the additive legacy seed');
+    stage='legacy-provenance-preservation';
+    const legacyResult=await db.run(legacyFixture.verify.sql,'synthetic legacy upgrade verification');
+    evidence.legacyProvenance=legacyFixtureEvidence(legacyResult.stdout,legacyFixture);
+    evidence.tests.push({name:stage,passed:true});
+    stage='synthetic-fixture-counts';
+    evidence.beforeTransactionFixtureCounts=await captureSyntheticFixtureCounts(db);
     for (const fixture of fixtures) {
       stage = fixture.path;
-      await db.run(fixture.sql, fixture.path);
+      const result=await db.run(fixture.sql, fixture.path);
+      if(fixture.path==='tests/sql/reconciled-permissions-security.sql')
+        evidence.reconciledPermissions=reconciledPermissionFixtureEvidence(result.stdout,evidence.platformMigrationCapabilities);
       evidence.counters.fixtures++;
       evidence.tests.push({ name: fixture.path, passed: true });
     }
     stage = 'two-session-retification-cas-observed-advisory-lock';
     Object.assign(evidence.counters, await runConcurrentRetification(db));
     evidence.tests.push({ name: 'two-session-retification-cas-observed-advisory-lock', passed: true });
+    stage='legacy-three-pair-observed-advisory-locks';
+    evidence.legacyConcurrency=await runConcurrentLegacyProvenance(db,legacyFixture,assertCommandSuccess);
+    evidence.tests.push({name:stage,passed:true});
     evidence.localSqlVerified = true;
   } catch (error) {
     const sqlState = /^[0-9A-Z]{5}$/.test(error.sqlState ?? '') ? ` (SQLSTATE ${error.sqlState})` : '';
     const assertion = error.assertion ? ` [${error.assertion}]` : '';
     const guard = ['container-shape','container-name','container-project-label','container-running','container-id','container-port'].includes(error.guard) ? error.guard : undefined;
-    failure = new Error(`Integração SQL local falhou em ${stage}${sqlState}${assertion}${guard ? ` [${guard}]` : ''}; nenhuma verificação remota foi declarada.`);
-    evidence.tests.push({ name: stage, passed: false, ...(guard ? { guard } : {}) });
+    const platformPrerequisite=['postgres-role','supabase-admin-default-privileges','extension-schema-create',
+      'required-extension-inventory','extension-owner','storage-policy-owner','realtime-publication-owner'].includes(error.platformPrerequisite)
+      ? error.platformPrerequisite : undefined;
+    failure = new Error(`Integração SQL local falhou em ${stage}${sqlState}${assertion}${guard ? ` [${guard}]` : ''}${platformPrerequisite ? ` [${platformPrerequisite}]` : ''}; nenhuma verificação remota foi declarada.`);
+    evidence.tests.push({ name: stage, passed: false, ...(guard ? { guard } : {}),...(platformPrerequisite?{platformPrerequisite}:{}) });
   } finally {
     if (startAttempted) {
       try {

@@ -4,6 +4,7 @@
    pelos handlers legados e não decide autorização, persistência ou clínica. */
 const modal = {
   open(title, bodyHTML, footerHTML = '') {
+    try { window.dispatchEvent(new Event('soft:modal-open')); } catch (e) {}
     document.getElementById('modal-title').textContent = title;
     document.getElementById('modal-body').innerHTML = bodyHTML;
     document.getElementById('modal-footer').innerHTML = footerHTML;
@@ -12,6 +13,7 @@ const modal = {
     document.body.classList.add('tem-modal');
   },
   close() {
+    try { window.dispatchEvent(new Event('soft:modal-close')); } catch (e) {}
     document.getElementById('modal-backdrop').classList.remove('show');
     document.body.classList.remove('tem-modal');
   }

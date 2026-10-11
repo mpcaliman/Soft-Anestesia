@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import {
   assertCommandSuccess, assertLocalDatabaseUrl, assertProjectContainer, assertSafeEnvironment,
   createPsqlExecutor, isolatedConfig, loadMigrationPlan, migrationSqlForEmptyDatabase,
-  runConcurrentRetification, runLocalSqlIntegration
+  reconciledPermissionFixtureEvidence,runConcurrentRetification, runLocalSqlIntegration, verifyPlatformMigrationCapabilities
 } from '../scripts/run-local-sql-integration.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -14,6 +14,17 @@ const projectId = `soft-as-sql-${'a'.repeat(24)}`;
 const containerId = 'b'.repeat(64);
 const localEnv = { DOCKER_HOST: 'unix:///var/run/docker.sock' };
 const status = { DB_URL: 'postgresql://postgres:synthetic-password@127.0.0.1:54322/postgres' };
+const platformCapabilities = {roleVerified:true,adminDefaultsAuthorized:true,extensionSchemaCreateAuthorized:true,
+  extensions:['pgcrypto','pg_trgm','unaccent'].map(name=>({name,moveRequired:true,moveAuthorized:true})),
+  storagePoliciesAuthorized:true,realtimePublicationAuthorized:true};
+const historicalFacts={verified:true,historicalOriginals:455,historicalAdenda:2,historicalSignatures:1,
+  authRows:3,patientRows:1,encounterRows:1,addendaRows:2,signatureRows:1,clinicalRows:459,
+  backfillFinalizationAuditRows:455,priorAuditRowsRetained:455,payloadAndLinksPreserved:true,
+  historicalTimestampAndAuthorPreserved:true,historicalAdendaNotCasHeads:true,
+  historicalSignaturesUnassignedAndImmutable:true,administrativeFinalizedDeletionDenied:true,
+  replicaFinalizedDeletionDenied:true,productionMutated:false,
+  sourceDistribution:{preanesthetic_assessments:92,anesthesia_records:167,recovery_records:143,consents:53},
+  timestampCases:{valid_timestamp:149,invalid_timestamp:153,absent_timestamp:153}};
 const inspectionFor = project => [{
   Id: containerId, Name: `/supabase_db_${project}`,
   Config: { Labels: { 'com.supabase.cli.project': project } }, State: { Running: true },
@@ -111,9 +122,32 @@ await check('psql usa socket e argumentos fixos; uma recusa RLS falha a execuç�
   }
   assert.ok(!calls[1].args.some(arg => /postgres(?:ql)?:\/\//.test(arg)));
   assert.throws(() => assertCommandSuccess({ code: 1, stderr: 'permission denied' }, 'RLS'));
+  const migrationCalls=[];
+  const migrationDb=createPsqlExecutor({status,inspection:inspectionFor(projectId),projectId,env:localEnv,
+    execute:async(command,args,options)=>{
+      migrationCalls.push({command,args,options});
+      return args[0]==='inspect'?{code:0,stdout:JSON.stringify(inspectionFor(projectId)),stderr:''}:{code:0,stdout:'',stderr:''};
+    }});
+  const original='create index concurrently reviewed_original_idx on public.reviewed_original(id);\n';
+  await migrationDb.runMigrationAsPostgres(original,'original migration');
+  const invocation=migrationCalls[1];
+  assert.equal(invocation.options.input,original,'Source stdin and transaction boundaries must remain unchanged');
+  assert.ok(invocation.args.includes('--username=postgres'));
+  assert.ok(!invocation.args.includes('--username=supabase_admin'));
+  const guard=invocation.args.find(x=>x.startsWith('--command='));
+  assert.match(guard,/current_user<>'postgres'/);assert.match(guard,/session_user<>'postgres'/);
+  assert.match(guard,/server_version_num/);
+  assert.ok(invocation.args.indexOf(guard)<invocation.args.indexOf('--file=-'));
+  assert.ok(!invocation.args.includes('--single-transaction')&&!invocation.args.includes('-1'));
+  const refused=createPsqlExecutor({status,inspection:inspectionFor(projectId),projectId,env:localEnv,
+    execute:async(command,args)=>args[0]==='inspect'?{code:0,stdout:JSON.stringify(inspectionFor(projectId)),stderr:''}:
+      {code:3,stdout:'',stderr:'ERROR:  P0001: Migration requires the verified local PostgreSQL 17 postgres role\nprivate runtime content'}});
+  await assert.rejects(refused.runMigrationAsPostgres(original,'migration role guard'),error=>{
+    assert.equal(error.sqlState,'P0001');assert.doesNotMatch(JSON.stringify(error),/private runtime content/);return true;
+  });
 });
 
-await check('diagnóstico publica somente a asserção literal; valores substituídos ficam privados', () => {
+await check('diagnóstico publica somente a asserção literal; valores substituídos ficam privados', async () => {
   const sql = `do $t$ begin raise exception 'Signed original changed: %'; end $t$;`;
   assert.throws(() => assertCommandSuccess({ code: 3, stderr:
     'psql:<stdin>:1: ERROR:  P0001: Signed original changed: synthetic-secret@example.invalid\nCONTEXT: private content' }, 'fixture', sql), error => {
@@ -122,6 +156,37 @@ await check('diagnóstico publica somente a asserção literal; valores substitu
     assert.doesNotMatch(error.message, /synthetic-secret|private content/);
     return true;
   });
+  assert.equal((await verifyPlatformMigrationCapabilities({runMigrationAsPostgres:async()=>({
+    stdout:JSON.stringify(platformCapabilities)})})).verified,true);
+  const safeCapabilities=await verifyPlatformMigrationCapabilities({runMigrationAsPostgres:async()=>({
+    stdout:JSON.stringify({...platformCapabilities,privateRuntimeContent:'synthetic-secret-do-not-export'})})});
+  assert.doesNotMatch(JSON.stringify(safeCapabilities),/synthetic-secret|privateRuntimeContent/);
+  await assert.rejects(verifyPlatformMigrationCapabilities({runMigrationAsPostgres:async()=>({
+    stdout:'private runtime content'})}),error=>!/private runtime content/.test(error.message));
+  for(const stdout of ['null','[]','42'])await assert.rejects(verifyPlatformMigrationCapabilities({
+    runMigrationAsPostgres:async()=>({stdout})}),/Platform migration capability response is invalid/);
+  const deniedAdminAuthority=await verifyPlatformMigrationCapabilities({runMigrationAsPostgres:async()=>({
+    stdout:JSON.stringify({...platformCapabilities,adminDefaultsAuthorized:false})})});
+  assert.equal(deniedAdminAuthority.adminDefaultsAuthorized,false);
+  assert.equal(deniedAdminAuthority.supplierDefaultPrivilegesPending,true);
+  assert.equal(deniedAdminAuthority.adminDefaultAuthorityMatchesHosted,true);
+  const permissionFacts={verified:true,applicationExecutorDefaultPrivilegesClosed:true,
+    supplierDefaultPrivilegesClosed:false,supplierDefaultPrivilegesPending:true,supplierPrivilegesAdded:false,
+    supplierOwnersChanged:false,managedRoleDeniedAttemptTested:true,managedRoleDefaultDenied42501:true,
+    adminDefaultAuthorityMatchesHosted:true};
+  assert.equal(reconciledPermissionFixtureEvidence(JSON.stringify(permissionFacts),deniedAdminAuthority).universalDefaultPrivilegesClosureVerified,false);
+  assert.throws(()=>reconciledPermissionFixtureEvidence(JSON.stringify({...permissionFacts,
+    managedRoleDefaultDenied42501:false}),deniedAdminAuthority));
+  for(const mutate of [x=>{x.roleVerified='true';},x=>{x.adminDefaultsAuthorized='false';},
+    x=>{x.extensionSchemaCreateAuthorized=false;},x=>{x.extensions[0]=null;},x=>{x.extensions[0].moveAuthorized=false;},
+    x=>{x.storagePoliciesAuthorized=false;},x=>{x.realtimePublicationAuthorized=false;}]) {
+    const unauthorized=structuredClone(platformCapabilities);mutate(unauthorized);
+    await assert.rejects(verifyPlatformMigrationCapabilities({runMigrationAsPostgres:async()=>({
+      stdout:JSON.stringify(unauthorized)})}),error=>{
+      assert.match(error.platformPrerequisite,/^(?:postgres-role|supabase-admin-default-privileges|extension-schema-create|required-extension-inventory|extension-owner|storage-policy-owner|realtime-publication-owner)$/);
+      return true;
+    });
+  }
   assert.throws(() => assertCommandSuccess({ code: 3, stderr:
     'ERROR:  P0001: Unknown message with synthetic-secret@example.invalid' }, 'fixture', sql), error => {
     assert.equal(error.assertion, undefined); return true;
@@ -141,10 +206,11 @@ await check('diagnóstico publica somente a asserção literal; valores substitu
 
 await check('baseline fechada usa os hashes registrados, sem reescrever CONCURRENTLY', async () => {
   const plan = await loadMigrationPlan(root);
-  assert.equal(plan.length, 34);
+  assert.equal(plan.length, 36);
   assert.equal(plan[0].path, 'supabase/migrations/0001_assinaturas.sql');
-  assert.equal(plan.at(-2).path, 'database/migrations/0032_finalized_delete_guard.sql');
-  assert.equal(plan.at(-1).path, 'supabase/migrations/0002_assinaturas_hardening.sql');
+  assert.match(plan.at(-3).path, /^database\/migrations\/0033_[a-z0-9_]+\.sql$/);
+  assert.equal(plan.at(-2).path, 'supabase/migrations/0002_assinaturas_hardening.sql');
+  assert.match(plan.at(-1).path, /^database\/migrations\/0034_[a-z0-9_]+\.sql$/);
   const source = plan.find(entry => entry.path.endsWith('0026_e1_performance_indexes.sql'));
   assert.throws(() => migrationSqlForEmptyDatabase(source.path, source.sql, false));
   const derived = migrationSqlForEmptyDatabase(source.path, source.sql, true);
@@ -203,6 +269,15 @@ try {
           SERVICE_ROLE_KEY: 'synthetic-cli-secret', ANON_KEY: 'synthetic-cli-secret'
         }));
         if (args[0] === 'inspect') return result(JSON.stringify(inspectionFor(project)));
+        if (args[0] === 'exec' && options.input.includes('adminDefaultsAuthorized')) return result(JSON.stringify(platformCapabilities));
+        if (args[0] === 'exec' && options.input.includes('backfillFinalizationAuditRows')) return result(JSON.stringify(historicalFacts));
+        if (args[0] === 'exec' && options.input.includes("'legacyProvenanceFixture'")) return result(JSON.stringify({
+          legacyProvenanceFixture:{passed:true,syntheticSourceRows:12,validatedSources:6,divergentTargetPreserved:true,
+            sourceFrozenAndPreserved:true,ownerAndStampIsolation:true,explicitPatientAndCaseMapping:true,
+            historicalClaimsSeparatedFromImportAudit:true,repeatedCopyIdempotent:true,verificationRolledBack:true}}));
+        if (args[0] === 'exec' && options.input.includes("'legacySourceRows'")) return result(JSON.stringify({
+          authRows:8,legacySourceRows:12,signatureRows:1,tableRows:{patients:6,encounters:3,preanesthetic_assessments:93,
+            anesthesia_records:167,recovery_records:143,consents:53,addenda:2,appointments:0}}));
         if (args[0] === 'exec' && options.input.includes('fb110000-')) {
           return { code: 3, stdout: '', stderr: 'ERROR:  42501\nsynthetic-cli-secret' };
         }
@@ -230,7 +305,7 @@ try {
       for (const key of ['localSqlVerified', 'stagingVerified', 'realAuthApiVerified', 'productionVerified']) assert.equal(evidence[key], false);
       assert.ok(evidence.tests.some(test => test.passed === false));
       assert.ok(evidence.tests.some(test => test.name === 'ephemeral-project-cleanup' && test.passed));
-      assert.equal(evidence.counters.migrations, mode === 'rls-fixture-failure' ? 34 : 0);
+      assert.equal(evidence.counters.migrations, mode === 'rls-fixture-failure' ? 36 : 0);
       await assert.rejects(readFile(join(temporaryWorkdir, 'supabase/config.toml')));
     });
   }

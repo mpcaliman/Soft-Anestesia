@@ -42,6 +42,7 @@ export const publicAssets = Object.freeze([
   'src/domain/anesthesia-quick-commands.js',
   'src/ui/anesthesia-patient-bar.js',
   'src/ui/anesthesia-dose-panel.js',
+  'src/ui/legacy-provenance.js',
   'src/ui/dashboard-today.js',
   'src/ui/agenda-timeline.js',
   'src/ui/form-steppers.js',

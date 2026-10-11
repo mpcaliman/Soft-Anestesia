@@ -12,6 +12,7 @@ import { mkdtemp, readFile, writeFile, rm, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { chromium } from 'playwright';
+import { observeRedacted, authStateRedacted } from './browser-diagnostics.mjs';
 
 const TARGET = 'yqqrfgbvoexricjdxpis';
 const args = process.argv.slice(2);
@@ -37,7 +38,7 @@ const report = { target: TARGET, runId: fixture.runId, startedAt: new Date().toI
   actualBrowser: 'chromium', API: 'hosted_without_mocks', checks, jwt: [],
   productionAccessed: false, independentRecoveryRequired: true, recoveryVerified: false,
   executionFailed: false, naturalExpirationUsesTrustedMouseActivity: true,
-  realtimePositiveDeliveryTables: ['patients'], realtimeOtherJoinedTablesDeliveryNotProven: true };
+  realtimePositiveDeliveryTables: ['patients'], realtimeOtherJoinedTablesDeliveryNotProven: true, authDiagnostics: [] };
 const saveReport = () => writeFile(reportPath, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
 const check = async (name, work) => {
   process.stdout.write(JSON.stringify({ phase: name, status: 'running' }) + '\n');
@@ -130,12 +131,18 @@ const observe = page => {
 };
 const login = async (page, index) => {
   const user = fixture.users[index];
-  await page.locator('#auth-email').fill(user.email); await page.locator('#auth-pass').fill(user.password);
-  await page.evaluate(() => auth.tentarLoginNuvem());
-  await page.waitForFunction(({ uid, org }) => auth.estaLogado() && contextoAba.operational()
-    && contextoAba.organizationId() === org && cloud.session()?.user?.id === uid,
-  { uid: user.id, org: fixture.organizations[user.organizationIndex] }, { timeout: 45000 });
-  await page.evaluate(() => filaCifrada.preparar());
+  const diagnostic = { userIndex: index }; report.authDiagnostics.push(diagnostic); observeRedacted(page, TARGET, diagnostic);
+  try {
+    await page.locator('#auth-email').fill(user.email); await page.locator('#auth-pass').fill(user.password);
+    await page.evaluate(() => auth.tentarLoginNuvem());
+    await page.waitForFunction(({ uid, org }) => auth.estaLogado() && contextoAba.operational()
+      && contextoAba.organizationId() === org && cloud.session()?.user?.id === uid,
+    { uid: user.id, org: fixture.organizations[user.organizationIndex] }, { timeout: 45000 });
+    await page.evaluate(() => filaCifrada.preparar());
+  } finally {
+    diagnostic.authState = await authStateRedacted(page, { target: TARGET, uid: user.id, org: fixture.organizations[user.organizationIndex] });
+    await saveReport();
+  }
 };
 const claims = page => page.evaluate(() => {
   const token = cloud.session()?.access_token;
@@ -188,7 +195,8 @@ try {
   const a = await context.newPage(), b = await context.newPage(), peer = await context.newPage();
   [a, b, peer].forEach(observe); await Promise.all([a, b, peer].map(boot));
   await check('real_auth_two_clinics_same_browser_three_tabs', async () => {
-    await Promise.all([login(a, 0), login(b, 2), login(peer, 1)]);
+    const results = await Promise.allSettled([login(a, 0), login(b, 2), login(peer, 1)]);
+    assert.ok(results.every(result => result.status === 'fulfilled'), 'all_three_real_auth_logins_required');
     const rows = await Promise.all([readOwn(a, 0), readOwn(b, 1), readOwn(peer, 0)]);
     assert.equal(rows[0].organizationId, fixture.organizations[0]); assert.equal(rows[1].organizationId, fixture.organizations[1]);
     await b.evaluate(otherOrg => localStorage.setItem('medsys.v7.cloud.org_id', otherOrg), fixture.organizations[1]);

@@ -31,17 +31,16 @@ window.assinaturaDigital = (function () {
      Trocar/adicionar fornecedor = registrar outro objeto aqui, sem tocar no resto.
   ========================================================================= */
   const PROVIDERS = {
-    /* gov.br / SafeID-app / Assinador — assinatura REAL feita fora do app.
-       O Soft Anestesia gera o PDF, você assina com seu certificado ICP-Brasil
-       e reanexa; o app registra e verifica integridade. Funciona hoje. */
+    /* O PDF pode ser assinado fora do app. A anexação e o hash aqui não
+       validam o certificado ou a assinatura criptográfica desse arquivo. */
     govbr: {
-      id: 'govbr', label: 'gov.br / SafeID / Assinador (ICP-Brasil)', tipo: 'externo',
+      id: 'govbr', label: 'gov.br / SafeID / Assinador externo', tipo: 'externo',
       disponivel() { return true; },
       instrucoesHTML() {
         return '<ol style="margin:0;padding-left:18px;line-height:1.6;font-size:.9rem">'
           + '<li><b>Gere o PDF definitivo</b> do documento (botão abaixo).</li>'
           + '<li><b>Assine com seu certificado ICP-Brasil</b> no <a href="https://assinador.iti.br" target="_blank" rel="noopener">Assinador gov.br</a>, no app <b>SafeID</b> ou no software do seu provedor (A1/A3/token/nuvem).</li>'
-          + '<li><b>Reanexe o PDF já assinado</b> — o sistema registra a assinatura (arquivo, assinante, data, <b>SHA-256</b>), gera um <b>código de validação</b> e trava o documento.</li>'
+          + '<li><b>Valide a assinatura</b> em <a href="https://validar.iti.gov.br" target="_blank" rel="noopener">validar.iti.gov.br</a> e reanexe o PDF. Aqui, a anexação registra o hash e os metadados; não verifica a assinatura nem confirma envio à nuvem.</li>'
           + '</ol>';
       },
       listarCertificados() { return Promise.resolve([]); },  /* seleção ocorre fora */
@@ -49,25 +48,31 @@ window.assinaturaDigital = (function () {
       async assinar() { return { modo: 'externo' }; },        /* fluxo guiado pela UI */
       status() { return 'externo'; }
     },
-    /* SafeID em nuvem (1-clique via API) — chama a Edge Function do Supabase
-       (que guarda o segredo). Fica "disponível" só quando a função responde que
-       o provedor está configurado. Nunca finge assinar. */
+    /* Driver de assinatura em nuvem: indisponível até homologação real da
+       API do provedor. A configuração de segredos, sozinha, não o habilita. */
     safeid_cloud: {
       id: 'safeid_cloud', label: 'SafeID / Safeweb — em nuvem (1 clique)', tipo: 'nuvem',
       _health: null,   /* null=desconhecido, true=configurado, false=indisponível */
       _base() {
         try {
           const cfg = JSON.parse(localStorage.getItem('medsys.v7.cloud.cfg') || 'null');
-          const url = (cfg && cfg.url) || '';
+          const url = (cfg && cfg.url) || cloud.DEFAULT_URL || '';
           return url ? url.replace(/\/$/, '') + '/functions/v1/assinatura' : '';
         } catch (e) { return ''; }
       },
-      _anonKey() { try { return (JSON.parse(localStorage.getItem('medsys.v7.cloud.cfg') || 'null') || {}).anonKey || ''; } catch (e) { return ''; } },
+      _anonKey() {
+        try {
+          const key = (JSON.parse(localStorage.getItem('medsys.v7.cloud.cfg') || 'null') || {}).anonKey || cloud.DEFAULT_KEY || '';
+          if (key.indexOf('sb_publishable_') === 0) return key;
+          const claims = JSON.parse(atob(key.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+          return claims.role === 'anon' ? key : '';
+        } catch (e) { return ''; }
+      },
       async verificar() {
         const base = this._base();
         if (!base) { this._health = false; return false; }
         try {
-          const r = await fetch(base + '?op=health', { headers: this._anonKey() ? { apikey: this._anonKey(), authorization: 'Bearer ' + this._anonKey() } : {} });
+          const r = await fetch(base + '?op=health', { headers: this._anonKey() ? { apikey: this._anonKey() } : {} });
           const j = await r.json();
           this._health = !!(j && j.configurado);
           return this._health;
@@ -91,7 +96,7 @@ window.assinaturaDigital = (function () {
         };
       },
       instrucoesHTML() {
-        const est = this._health === true ? '<b style="color:#14755a">✔ backend configurado — 1 clique disponível</b>'
+        const est = this._health === true ? '<b style="color:#14755a">✔ driver homologado</b>'
           : this._health === false ? '<b style="color:#b3392a">backend não configurado</b> (ver supabase/README.md)'
           : 'verificando backend…';
         return '<p style="font-size:.88rem;color:var(--text-soft)">Assinatura em nuvem de 1 clique (padrão Portal CFM/Certillion), via <b>Edge Function</b> do Supabase que guarda o segredo do provedor. Status: ' + est
@@ -113,9 +118,8 @@ window.assinaturaDigital = (function () {
       },
       async assinar() {
         if (!this.disponivel()) throw this._naoConfig();
-        /* Fluxo 1-clique completo (OAuth do provedor + seleção de certificado +
-           SAD/OTP + signDoc) é habilitado ao conectar a doc da API do provedor.
-           Até lá, a função responde configurado apenas após os secrets CSC_*. */
+        /* Este driver ainda depende da homologação da API do provedor.
+           A configuração de segredos não é prova de funcionamento. */
         const e = new Error('Backend pronto. Falta plugar a documentação da API do provedor para liberar o 1-clique (ver supabase/README.md).');
         e.code = 'AGUARDANDO_API'; throw e;
       },
@@ -153,19 +157,56 @@ window.assinaturaDigital = (function () {
     };
   }
 
+  const PARENT_FIELDS = ['_id', '_patientKey', '_patientRef', '_caseId', '_caseKey',
+    'nome', 'paciente', 'paciente_nome', 'profissional', 'anestesiologista', 'responsavel', 'crm'];
+  function parentIdentity(form) {
+    return JSON.stringify(PARENT_FIELDS.map(name => {
+      const field = form.querySelector('[name="' + name + '"]');
+      return [name, field ? String(field.value || '') : null];
+    }));
+  }
+  function captureTarget(ctx) {
+    const formNode = document.getElementById(ctx.form);
+    if (!formNode) throw new Error('Contexto do documento perdido — reabra e tente de novo.');
+    return Object.assign({}, ctx, { owner: contextoAba.capturar(), formNode, parentIdentity: parentIdentity(formNode) });
+  }
+  function requireTarget(target) {
+    if (!contextoAba.corresponde(target.owner)) throw new Error('O usuário ou a clínica mudou. Reabra o documento antes de anexar.');
+    const current = ctxAtual();
+    if (!current || current.modulo !== target.modulo || current.form !== target.form
+        || current.docId !== target.docId || document.getElementById(target.form) !== target.formNode
+        || parentIdentity(target.formNode) !== target.parentIdentity) {
+      throw new Error('O documento mudou. Reabra o documento antes de anexar.');
+    }
+    return target.formNode;
+  }
+
   /* ---- armazenamento imutável (append-only, encadeado por hash) ---- */
   function listaAssin() { try { return store.list('assinaturas') || []; } catch (e) { return []; } }
-  function salvarLista(arr) { try { store.setList('assinaturas', arr); } catch (e) {} }
+  function salvarLista(arr) { return store.setList('assinaturas', arr); }
 
-  async function registrarImutavel(reg) {
-    const arr = listaAssin();
-    const anterior = arr.length ? arr[arr.length - 1] : null;
-    reg.prevHash = anterior ? anterior.selfHash : null;   /* corrente global à prova de adulteração */
-    reg.versao = arr.filter(r => r.docId && r.docId === reg.docId).length + 1;
-    reg.selfHash = await sha256Txt(canon(Object.assign({}, reg, { selfHash: undefined })));
-    arr.push(reg);
-    salvarLista(arr);
-    return reg;
+  let _metadataAppend = Promise.resolve();
+  function registrarImutavel(reg, target) {
+    // Serialize the real cloned-list read/hash/write cycle. Two simultaneous
+    // attachments must retain both entries and a single valid hash chain.
+    const operation = _metadataAppend.then(async () => {
+      requireTarget(target);
+      const arr = listaAssin();
+      const anterior = arr.length ? arr[arr.length - 1] : null;
+      reg.prevHash = anterior ? anterior.selfHash : null;
+      // Session metadata is neither a server receipt nor a verified signature.
+      reg.centralReceiptConfirmed = false;
+      reg.signatureVerified = false;
+      reg.registroEscopo = 'memoria_da_sessao';
+      reg.versao = arr.filter(r => r.docId && r.docId === reg.docId && r.modulo === reg.modulo).length + 1;
+      reg.selfHash = await sha256Txt(canon(Object.assign({}, reg, { selfHash: undefined })));
+      requireTarget(target);
+      arr.push(reg);
+      if (salvarLista(arr) !== true) throw new Error('Não foi possível registrar os metadados nesta sessão.');
+      return reg;
+    });
+    _metadataAppend = operation.catch(() => {});
+    return operation;
   }
 
   /* ---- fluxo de assinatura (guiado / externo) ---- */
@@ -175,7 +216,7 @@ window.assinaturaDigital = (function () {
     const ctx = ctxAtual();
     if (!ctx) { toast('Abra um documento assinável (Pré, Ficha, Consulta, Termo, Prescrição...)', 'warn'); return; }
     if (!ctx.paciente) { toast('Preencha ao menos o nome do paciente antes de assinar', 'warn'); return; }
-    _ctxPendente = ctx;
+    const target = captureTarget(ctx);
     const prov = PROVIDERS.govbr;
     const body = ''
       + '<div style="font-size:.9rem;color:var(--text-soft);margin-bottom:10px">Documento: <b>' + AD.esc(ctx.titulo) + '</b> — ' + AD.esc(ctx.paciente) + '</div>'
@@ -187,12 +228,15 @@ window.assinaturaDigital = (function () {
       + '<div id="ad-passos" style="margin-top:14px;display:flex;flex-wrap:wrap;gap:8px">'
       + '<button type="button" class="btn btn-sm btn-primary" onclick="assinaturaDigital.gerarPDF()">📄 Gerar PDF definitivo</button>'
       + '<label class="btn btn-sm" style="cursor:pointer;background:#1f9171;color:#fff;border-color:#14755a">📎 Anexar PDF assinado'
-      + '<input type="file" accept="application/pdf" style="display:none" onchange="assinaturaDigital.registrar(this)"></label>'
+      + '<input id="ad-pdf-input" type="file" accept="application/pdf" style="display:none" onchange="assinaturaDigital.registrar(this)"></label>'
       + '</div>'
-      + '<p style="font-size:.72rem;color:var(--text-mute);margin-top:12px">🔒 O Soft Anestesia nunca guarda seu PIN/senha do certificado. A assinatura criptográfica ocorre no gov.br/app do provedor; aqui registramos o arquivo assinado, o hash SHA-256 e os metadados, e travamos o documento.</p>';
+      + '<p style="font-size:.72rem;color:var(--text-mute);margin-top:12px">O PDF é assinado e validado no provedor externo. Esta anexação registra somente hash e metadados nesta sessão; salve o registro e confirme o arquivo em Anexos para guardá-lo na nuvem.</p>';
     const footer = '<button class="btn" onclick="assinaturaDigital.abrirValidacao()">🔎 Validar um documento</button>'
       + '<button class="btn btn-primary" onclick="modal.close()">Fechar</button>';
-    modal.open('🔏 Assinar digitalmente (ICP-Brasil)', body, footer);
+    modal.open('🔏 Assinar fora do app e anexar o PDF', body, footer);
+    _ctxPendente = target;
+    const fileInput = document.getElementById('ad-pdf-input');
+    if (fileInput) fileInput._softSignatureTarget = target;
   }
 
   function _trocarProvedor(id) {
@@ -218,11 +262,16 @@ window.assinaturaDigital = (function () {
     if (input) input.value = '';
     if (!file) return;
     if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) { toast('Anexe o PDF assinado (.pdf)', 'warn'); return; }
-    const ctx = _ctxPendente || ctxAtual();
+    const ctx = input && input._softSignatureTarget || _ctxPendente;
     if (!ctx) { toast('Contexto do documento perdido — reabra e tente de novo', 'error'); return; }
     try {
+      if (_ctxPendente !== ctx) throw new Error('Contexto do documento perdido — reabra e tente de novo.');
+      if (input.isConnected === false) throw new Error('Contexto do documento perdido — reabra e tente de novo.');
+      requireTarget(ctx);
       const buf = await file.arrayBuffer();
+      requireTarget(ctx);
       const hashDoc = await sha256Buf(buf);
+      requireTarget(ctx);
       const id = uuid(), codigo = codigoValidacao(), ts = new Date().toISOString();
       const provId = (document.getElementById('ad-prov') || {}).value || 'govbr';
       const reg = {
@@ -230,26 +279,25 @@ window.assinaturaDigital = (function () {
         titulo: ctx.titulo, paciente: ctx.paciente, profissional: ctx.profissional, crm: ctx.crm,
         hashDoc: hashDoc, algoritmo: 'SHA-256', provider: provId,
         provedorLabel: (PROVIDERS[provId] || PROVIDERS.govbr).label,
-        arquivo: file.name, status: 'assinado', ts: ts
+        arquivo: file.name, status: 'pdf_anexado_nao_verificado', ts: ts
       };
-      await registrarImutavel(reg);
+      await registrarImutavel(reg, ctx);
+      const f = requireTarget(ctx);
 
       /* Reusa o selo/campos existentes: grava meta no formulário do documento */
-      const f = document.getElementById(ctx.form);
-      const meta = { tipo: 'icp', hash: hashDoc, ts: ts, arquivo: file.name, assinante: ctx.profissional,
-        uuid: id, codigo: codigo, algoritmo: 'SHA-256', provider: provId, validar: AD.urlValidacao(codigo) };
+      const meta = { tipo: 'pdf_anexado', hash: hashDoc, ts: ts, arquivo: file.name, assinante: ctx.profissional,
+        uuid: id, codigo: codigo, algoritmo: 'SHA-256', provider: provId,
+        signatureVerified: false, centralReceiptConfirmed: false };
       const setV = (n, v) => { const el = f && f.querySelector('[name="' + n + '"]'); if (el) el.value = v; };
-      setV('assinatura_tipo', 'icp'); setV('assinatura_meta', JSON.stringify(meta));
-      /* trava o documento (imutabilidade) */
-      const h = f && f.querySelector('[name="_assinado"]');
-      if (f && !h) { const i = document.createElement('input'); i.type = 'hidden'; i.name = '_assinado'; i.value = '1'; f.appendChild(i); }
-      else if (h) h.value = '1';
+      setV('assinatura_tipo', 'pdf_anexado'); setV('assinatura_meta', JSON.stringify(meta));
+      // An attached PDF is not a verified signature or a finalization receipt.
+      // Existing finalized records remain protected by their clinical guards.
       try { if (typeof markDirty === 'function') markDirty(); } catch (e) {}
-      try { assinatura.carimbarDataHora && assinatura.carimbarDataHora('sig-' + ctx.modulo); } catch (e) {}
 
       modal.close();
       AD.mostrarComprovante(reg);
     } catch (e) {
+      if (_ctxPendente === ctx) _ctxPendente = null;
       toast('Erro ao registrar assinatura: ' + e.message, 'error');
     }
   }
@@ -259,20 +307,17 @@ window.assinaturaDigital = (function () {
   }
 
   function mostrarComprovante(reg) {
-    const url = urlValidacao(reg.codigo);
     const body = ''
-      + '<div style="text-align:center;margin-bottom:10px"><div style="font-size:2rem">✅</div>'
-      + '<div style="font-weight:700;color:#14755a">Documento assinado e registrado</div></div>'
+      + '<div style="text-align:center;margin-bottom:10px"><div style="font-size:2rem">📎</div>'
+      + '<div style="font-weight:700;color:#8a5a15">PDF anexado — assinatura não verificada</div></div>'
       + AD.seloHTML(reg, true)
-      + '<p style="font-size:.78rem;color:var(--text-soft);margin-top:10px">Guarde o <b>código de validação</b>. Qualquer pessoa pode conferir a autenticidade em '
-      + '<a href="' + AD.esc(url) + '" target="_blank" rel="noopener">' + AD.esc(url) + '</a>. '
-      + 'A validade jurídica da cadeia ICP-Brasil também pode ser confirmada no validador oficial '
+      + '<p style="font-size:.78rem;color:var(--text-soft);margin-top:10px">A nuvem ainda não confirmou este comprovante. Mantenha o PDF original e confira sua assinatura criptográfica no validador oficial '
       + '<a href="https://validar.iti.gov.br" target="_blank" rel="noopener">validar.iti.gov.br</a>.</p>'
-      + '<p style="font-size:.72rem;color:var(--text-mute);margin-top:6px">Lembre de <b>Salvar / Finalizar</b> o registro para persistir os metadados da assinatura.</p>';
-    modal.open('🔐 Comprovante de assinatura', body, '<button class="btn btn-primary" onclick="modal.close()">Concluir</button>');
+      + '<p style="font-size:.72rem;color:var(--text-mute);margin-top:6px"><b>Salve o registro</b> e aguarde a confirmação da nuvem. Confirme o envio em Anexos para guardar também o arquivo PDF.</p>';
+    modal.open('📎 Metadados do PDF anexado', body, '<button class="btn btn-primary" onclick="modal.close()">Concluir</button>');
   }
 
-  /* ---- selo visual (informativo, vinculado à assinatura criptográfica) ---- */
+  /* Informative attachment label; no client metadata proves ICP validity. */
   function seloHTML(reg, tela) {
     const url = urlValidacao(reg.codigo);
     const dt = String(reg.ts || '').replace('T', ' ').slice(0, 16);
@@ -280,26 +325,27 @@ window.assinaturaDigital = (function () {
       ? 'border:1px solid #b9e0c6;background:#eef8f1;border-radius:8px;padding:10px 12px'
       : 'border:1px solid #b9e0c6;background:#f2faf5;border-radius:6px;padding:8px 10px';
     let qr = '';
-    try { qr = window.SoftQR ? window.SoftQR.svg(url, { px: tela ? 104 : 92, ecl: 'M' }) : ''; } catch (e) { qr = ''; }
+    try { qr = reg.centralReceiptConfirmed === true && window.SoftQR ? window.SoftQR.svg(url, { px: tela ? 104 : 92, ecl: 'M' }) : ''; } catch (e) { qr = ''; }
     const qrCol = qr
       ? '<div style="flex:0 0 auto;text-align:center">'
         + '<div style="background:#fff;border:1px solid #cfe8d8;border-radius:6px;padding:4px;display:inline-block">' + qr + '</div>'
         + '<div style="font-size:.62rem;color:#3b7a5a;margin-top:2px">Aponte a câmera</div></div>'
       : '';
     const info = '<div style="flex:1 1 auto;min-width:0">'
-      + '<div style="font-weight:700">✔ Assinado digitalmente — ICP-Brasil</div>'
+      + '<div style="font-weight:700">PDF anexado — assinatura não verificada</div>'
       + (reg.profissional ? '<div>' + AD.esc(reg.profissional) + (reg.crm ? ' · CRM ' + AD.esc(reg.crm) : '') + '</div>' : '')
       + '<div>Data/hora: ' + AD.esc(dt) + ' · Método: ' + AD.esc(reg.provedorLabel || '') + '</div>'
       + '<div>Algoritmo: ' + AD.esc(reg.algoritmo || 'SHA-256') + ' · Versão: ' + AD.esc(String(reg.versao || 1)) + '</div>'
       + '<div style="font-family:monospace;font-size:.7rem;word-break:break-all">SHA-256: ' + AD.esc((reg.hashDoc || '').slice(0, 48)) + '…</div>'
-      + '<div style="margin-top:4px"><b>Código de validação:</b> <span style="font-family:monospace;font-weight:700">' + AD.esc(reg.codigo) + '</span></div>'
-      + '<div style="word-break:break-all">Validar em: <a href="' + AD.esc(url) + '" target="_blank" rel="noopener">' + AD.esc(url) + '</a></div>'
+      + '<div style="margin-top:4px"><b>' + (reg.centralReceiptConfirmed === true ? 'Código do comprovante' : 'Referência desta sessão') + ':</b> <span style="font-family:monospace;font-weight:700">' + AD.esc(reg.codigo) + '</span></div>'
+      + (reg.centralReceiptConfirmed === true ? '<div style="word-break:break-all">Consultar registro: <a href="' + AD.esc(url) + '" target="_blank" rel="noopener">' + AD.esc(url) + '</a></div>' : '<div>Comprovante central ainda não confirmado.</div>')
       + '</div>';
     return '<div style="' + box + ';font-size:.78rem;line-height:1.5;color:#14532d;text-align:left;display:flex;gap:12px;align-items:flex-start">'
       + qrCol + info + '</div>';
   }
 
   /* ---- validação pública (integridade + metadados; cadeia ICP no validador oficial) ---- */
+  let _validacaoPedido = 0;
   function validar(query) {
     const q = String(query || '').trim().toUpperCase().replace(/\s/g, '');
     if (!q) return null;
@@ -332,7 +378,7 @@ window.assinaturaDigital = (function () {
       + '<div class="ad-validar-card">'
       + '<button type="button" class="ad-validar-x" onclick="assinaturaDigital.fecharValidacao()">✕</button>'
       + '<h2 style="margin:0 0 4px">🔎 Validação de documento — Soft Anestesia</h2>'
-      + '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 12px">Informe o <b>código de validação</b>, o UUID ou o hash SHA-256 do documento.</p>'
+      + '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 12px">Informe o <b>código de validação</b> ou o hash SHA-256 do documento. O UUID consulta somente o registro desta sessão.</p>'
       + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
       + '<input id="ad-validar-inp" placeholder="Ex.: ABCD-2345-EFGH" style="flex:1;min-width:200px;padding:9px;border:1px solid var(--border);border-radius:8px;font-family:monospace">'
       + '<button class="btn btn-primary" onclick="assinaturaDigital._fazerValidacao()">Validar</button>'
@@ -343,27 +389,41 @@ window.assinaturaDigital = (function () {
     host.classList.add('show');
     if (codigoInicial) { const i = document.getElementById('ad-validar-inp'); if (i) { i.value = codigoInicial; _fazerValidacao(); } }
   }
-  function fecharValidacao() { const h = document.getElementById('ad-validar-overlay'); if (h) h.classList.remove('show'); if (location.hash.indexOf('validar') >= 0) { try { history.replaceState(null, '', location.pathname); } catch (e) {} } }
+  function fecharValidacao() { _validacaoPedido++; const h = document.getElementById('ad-validar-overlay'); if (h) h.classList.remove('show'); if (location.hash.indexOf('validar') >= 0) { try { history.replaceState(null, '', location.pathname); } catch (e) {} } }
 
-  /* Validação central (Edge Function) — usada quando o backend estiver publicado */
+  /* Consulta pública mínima, separada do driver de assinatura. O comprovante
+     vai no corpo; nenhuma sessão de usuário ou chave pública vira Bearer. */
   async function _validarCentral(q) {
-    try {
-      const base = PROVIDERS.safeid_cloud._base(); if (!base) return null;
-      const key = PROVIDERS.safeid_cloud._anonKey();
-      const param = /^[0-9a-f]{64}$/i.test(q) ? 'hash=' + q.toLowerCase() : 'codigo=' + encodeURIComponent(q.toUpperCase());
-      const r = await fetch(base + '?op=validar&' + param, { headers: key ? { apikey: key, authorization: 'Bearer ' + key } : {} });
-      const j = await r.json();
-      if (j && j.encontrado && j.registro) {
-        const g = j.registro;
-        return { central: true, titulo: g.titulo, profissional: g.profissional, crm: g.crm, ts: g.assinado_em,
-          provedorLabel: g.provedor, algoritmo: g.algoritmo, versao: g.versao, codigo: g.codigo, _id: '(central)',
-          hashDoc: g.hash_doc, cadeia_icp: g.cadeia_icp, cert_emissor: g.cert_emissor, cert_serial: g.cert_serial };
+    const base = PROVIDERS.safeid_cloud._base();
+    const key = PROVIDERS.safeid_cloud._anonKey();
+    if (!base || !key || key.indexOf('sb_secret_') === 0) throw new Error('A consulta central está indisponível.');
+    const proof = /^[0-9a-f]{64}$/i.test(q) ? { hash: q.toLowerCase() } : { codigo: q.toUpperCase() };
+    const r = await fetch(base.replace(/\/assinatura$/, '/assinatura-validacao'), {
+      method: 'POST', headers: { apikey: key, 'content-type': 'application/json' },
+      body: JSON.stringify(proof), cache: 'no-store', credentials: 'omit',
+      redirect: 'error', signal: AbortSignal.timeout(8000)
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j && j.erro || 'Não foi possível consultar o comprovante agora.');
+    if (j && j.encontrado && j.registro && j.escopo === 'registro_e_hash') {
+      const g = j.registro;
+      if (j.validacao_criptografica !== 'nao_verificada_por_esta_consulta'
+          || !/^[0-9a-f]{64}$/.test(g.hash_doc) || g.algoritmo !== 'SHA-256'
+          || !Number.isInteger(g.versao) || g.versao < 1
+          || typeof g.assinado_em !== 'string' || !Number.isFinite(Date.parse(g.assinado_em))
+          || (proof.codigo ? g.codigo !== proof.codigo : g.hash_doc !== proof.hash)) {
+        throw new Error('A consulta central não confirmou este comprovante.');
       }
-    } catch (e) {}
+      return { central: true, titulo: 'Documento registrado', ts: g.assinado_em,
+        algoritmo: g.algoritmo, versao: g.versao, codigo: g.codigo || 'Consulta pelo hash',
+        _id: '(consulta central)', hashDoc: g.hash_doc };
+    }
+    if (!j || j.encontrado !== false) throw new Error('A consulta central não confirmou o resultado.');
     return null;
   }
 
   async function _fazerValidacao() {
+    const pedido = ++_validacaoPedido;
     const inp = document.getElementById('ad-validar-inp');
     const res = document.getElementById('ad-validar-res');
     if (!res) return;
@@ -371,25 +431,38 @@ window.assinaturaDigital = (function () {
     res.innerHTML = '<div class="ad-res">⏳ Verificando…</div>';
     let reg = validar(q);
     let central = false;
-    if (!reg) { const c = await _validarCentral(q); if (c) { reg = c; central = true; } }
     if (!reg) {
-      res.innerHTML = '<div class="ad-res ad-res-erro">❌ <b>Não encontrado.</b> Nenhum documento assinado corresponde a esse código/UUID/hash.<br><span style="font-size:.76rem">A base local vale para este dispositivo; a validação central depende da Edge Function publicada (Opção B).</span></div>';
+      try {
+        const c = await _validarCentral(q);
+        if (pedido !== _validacaoPedido) return;
+        if (c) { reg = c; central = true; }
+      }
+      catch (e) {
+        if (pedido !== _validacaoPedido) return;
+        res.innerHTML = '<div class="ad-res ad-res-erro">⚠️ <b>Consulta não concluída.</b> '
+          + AD.esc(e.message || 'Tente novamente quando houver conexão.') + '</div>';
+        return;
+      }
+    }
+    if (!reg) {
+      res.innerHTML = '<div class="ad-res ad-res-erro">❌ <b>Não encontrado.</b> Nenhum comprovante central corresponde a esse código/hash. Confira o código no comprovante do documento.</div>';
       return;
     }
     const ok = central ? true : await _integridadeCorrente(reg);
-    const fonte = central ? ' <span style="font-weight:400;font-size:.78rem">(verificado na base central)</span>' : ' <span style="font-weight:400;font-size:.78rem">(base local)</span>';
+    if (pedido !== _validacaoPedido) return;
+    const fonte = central ? '' : ' <span style="font-weight:400;font-size:.78rem">(registro desta sessão)</span>';
     const dt = String(reg.ts || '').replace('T', ' ').slice(0, 16);
     res.innerHTML = '<div class="ad-res ' + (ok ? 'ad-res-ok' : 'ad-res-alerta') + '">'
-      + (ok ? '✅ <b>Registro de assinatura íntegro.</b>' + fonte : '⚠️ <b>Registro possivelmente adulterado</b> (o hash do registro não confere).')
+      + (central ? '✅ <b>Registro correspondente encontrado na nuvem.</b>' : ok ? '📎 <b>Metadados íntegros nesta sessão — assinatura não verificada.</b>' + fonte : '⚠️ <b>Registro possivelmente adulterado</b> (o hash do registro não confere).')
       + '<table style="width:100%;border-collapse:collapse;margin-top:8px;font-size:.82rem">'
       + AD._linha('Documento', reg.titulo)
-      + AD._linha('Profissional', (reg.profissional || '—') + (reg.crm ? ' · CRM ' + reg.crm : ''))
-      + AD._linha('Assinado em', dt)
-      + AD._linha('Método/Provedor', reg.provedorLabel || reg.provider)
+      + (central ? '' : AD._linha('Profissional informado', (reg.profissional || '—') + (reg.crm ? ' · CRM ' + reg.crm : '')))
+      + AD._linha(central ? 'Registrado em' : 'Assinado em', dt)
+      + (central ? '' : AD._linha('Método informado', reg.provedorLabel || reg.provider))
       + AD._linha('Algoritmo', reg.algoritmo || 'SHA-256')
       + AD._linha('Versão do documento', String(reg.versao || 1))
       + AD._linha('Código de validação', reg.codigo)
-      + AD._linha('UUID', reg._id)
+      + (central ? '' : AD._linha('UUID', reg._id))
       + AD._linha('SHA-256 do PDF', '<span style="font-family:monospace;font-size:.72rem;word-break:break-all">' + AD.esc(reg.hashDoc || '') + '</span>', true)
       + '</table>'
       + '<p style="font-size:.74rem;margin-top:8px;color:#555">A cadeia ICP-Brasil do certificado é confirmada em <a href="https://validar.iti.gov.br" target="_blank" rel="noopener">validar.iti.gov.br</a> com o PDF assinado.</p>'
@@ -438,7 +511,13 @@ window.assinaturaDigital = (function () {
   };
   window.addEventListener('DOMContentLoaded', () => { try { injetarBotoes(); _checarHash(); } catch (e) {} });
   window.addEventListener('hashchange', _checarHash);
+  window.addEventListener('soft:modal-open', () => { _ctxPendente = null; });
+  window.addEventListener('soft:modal-close', () => { _ctxPendente = null; });
+  try { contextoAba.aoMudar(() => { _ctxPendente = null; }); } catch (e) {}
   /* reinjeta ao trocar de módulo (barras podem ser recriadas) */
-  setInterval(() => { try { injetarBotoes(); } catch (e) {} }, 1500);
+  setInterval(() => {
+    if (_ctxPendente) { try { requireTarget(_ctxPendente); } catch (e) { _ctxPendente = null; } }
+    try { injetarBotoes(); } catch (e) {}
+  }, 1500);
   return AD;
 })();
