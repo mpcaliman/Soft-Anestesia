@@ -10,8 +10,15 @@ export async function exerciseRunner(source, capability, capabilityHash, defects
   const runId = webcrypto.randomUUID();
   const issuedAt = new Date(Date.now() - 1000).toISOString();
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-  let handle, auditOrClinicalDeletionCommitted = false, failedLogin = false;
+  let handle, auditOrClinicalDeletionCommitted = false, failedLogin = false, lostAuthReply = false, elapsed = 0;
+  class FixtureDate extends Date { static now() { return Date.now() + elapsed; } }
   const rows = table => records.get(table) || [];
+  const adminKey = defects.legacyApiKeys ? 'synthetic-private-admin-token' : 'sb_secret_synthetic_admin';
+  const anonKey = defects.legacyApiKeys ? 'synthetic-public-key' : 'sb_publishable_synthetic_anon';
+  const environment = { SUPABASE_URL: 'https://yqqrfgbvoexricjdxpis.supabase.co',
+    SUPABASE_SERVICE_ROLE_KEY: 'synthetic-private-admin-token', SUPABASE_ANON_KEY: 'synthetic-public-key',
+    ...(defects.legacyApiKeys ? {} : { SUPABASE_SECRET_KEYS: JSON.stringify({ default: adminKey }),
+      SUPABASE_PUBLISHABLE_KEYS: JSON.stringify({ default: anonKey }) }) };
   const put = (table, row) => {
     if (!records.has(table)) records.set(table, []); records.get(table).push(row);
     if (['patients','encounters','preanesthetic_assessments','addenda'].includes(table)) {
@@ -29,11 +36,12 @@ export async function exerciseRunner(source, capability, capabilityHash, defects
   const validPassword = password => typeof password === 'string' && password.length >= 12
     && new TextEncoder().encode(password).length <= 72
     && /[a-z]/.test(password) && /[A-Z]/.test(password) && /[0-9]/.test(password) && /[^a-zA-Z0-9]/.test(password);
-  const tokenUser = token => accounts.find(user => [user.token, user.previousToken].includes(token));
+  const tokenUser = token => typeof token === 'string' ? accounts.find(user => [user.token, user.previousToken].includes(token)) : undefined;
   const canRead = (user, org) => memberships.some(membership => membership.user_id === user?.id && membership.organization_id === org && membership.ativo);
   const emit = (table, row) => {
-    for (const subscription of subscriptions) if (subscription.table === table && subscription.org === row.organization_id
-        && canRead(tokenUser(subscription.token), row.organization_id)) {
+    for (const subscription of subscriptions) if (subscription.ready && subscription.table === table && subscription.org === row.organization_id
+        && (defects.leakForeignRealtime || canRead(tokenUser(subscription.token), row.organization_id))) {
+      if (defects.dropEncounterRealtime && table === 'encounters') continue;
       subscription.socket.onmessage?.({ data: JSON.stringify({ topic: subscription.topic, event: 'postgres_changes',
         payload: { data: { table, type: 'UPDATE', record: clone(row) } } }) });
     }
@@ -46,10 +54,19 @@ export async function exerciseRunner(source, capability, capabilityHash, defects
       if (message.event === 'phx_join') {
         if (!message.join_ref || message.join_ref !== message.ref) throw new Error('invalid join reference');
         const change = message.payload.config.postgres_changes[0];
-        subscriptions.push({ socket: this, topic: message.topic, table: change.table,
-          org: change.filter.replace('organization_id=eq.', ''), token: message.payload.access_token, joinRef: message.join_ref });
+        const subscription = { socket: this, topic: message.topic, table: change.table,
+          org: change.filter.replace('organization_id=eq.', ''), token: message.payload.access_token, joinRef: message.join_ref, ready: false };
+        subscriptions.push(subscription);
         queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ topic: message.topic, event: 'phx_reply',
           payload: { status: 'ok' }, ref: message.ref }) }));
+        const ready = () => {
+          if (defects.missingRealtimeReadiness) return;
+          subscription.ready = true;
+          this.onmessage?.({ data: JSON.stringify({ topic: message.topic, event: 'system',
+            payload: { extension: 'postgres_changes', status: 'ok', message: 'Subscribed to PostgreSQL' } }) });
+        };
+        if (defects.delayedRealtimeReadiness) setTimeout(ready, 250);
+        else queueMicrotask(ready);
       } else if (message.event === 'access_token') {
         for (const subscription of subscriptions) if (subscription.socket === this && subscription.topic === message.topic)
           { if (message.join_ref !== subscription.joinRef) throw new Error('refresh lost join reference'); subscription.token = message.payload.access_token; }
@@ -60,8 +77,10 @@ export async function exerciseRunner(source, capability, capabilityHash, defects
   const fetchFixture = async (target, options = {}) => {
     const url = new URL(target), path = url.pathname, method = options.method || 'GET';
     const headers = options.headers || {}, bearer = headers.Authorization?.replace('Bearer ', '');
-    const admin = bearer === 'synthetic-private-admin-token';
+    const admin = headers.apikey === adminKey && (defects.legacyApiKeys ? bearer === adminKey : !headers.Authorization);
     const user = tokenUser(bearer);
+    const publicRequest = headers.apikey === anonKey && (defects.legacyApiKeys ? bearer === anonKey : !headers.Authorization);
+    if (!admin && !(headers.apikey === anonKey && user) && !publicRequest) return error(401, 'PGRST301');
     const body = typeof options.body === 'string' && (headers['Content-Type'] || '').includes('application/json') ? JSON.parse(options.body) : options.body;
     if (path === '/rest/v1/staging_audit_run_claims' && method === 'POST') {
       if (!admin) return error(403);
@@ -73,8 +92,11 @@ export async function exerciseRunner(source, capability, capabilityHash, defects
     if (path === '/auth/v1/admin/users' && method === 'POST') {
       if (!validPassword(body.password)) return error(422, 'weak_password');
       const account = { id: webcrypto.randomUUID(), email: body.email, password: body.password,
-        token: `synthetic-access-${accounts.length}`, refresh: `synthetic-refresh-${accounts.length}`, blocked: false, sessionsRevoked: false };
+        app_metadata: clone(body.app_metadata), token: `synthetic-access-${accounts.length}`,
+        refresh: `synthetic-refresh-${accounts.length}`, blocked: false, sessionsRevoked: false };
       accounts.push(account);
+      if (defects.exhaustRuntimeBudgetAtAuthCreate) elapsed = 95000;
+      if (defects.loseAuthCreationResponse && !lostAuthReply) { lostAuthReply = true; throw new Error('fetch_failed'); }
       return response({ id: account.id });
     }
     if (path === '/auth/v1/token') {
@@ -101,6 +123,7 @@ export async function exerciseRunner(source, capability, capabilityHash, defects
     }
     if (path.startsWith('/storage/')) {
       if (path === '/storage/v1/object/clinical-attachments' && method === 'DELETE') {
+        if (!admin && defects.storageDeleteUnavailable) return error(503, 'storage_unavailable');
         for (const prefix of body.prefixes) if (admin) records.delete(`storage:${prefix}`);
         return response([]);
       }
@@ -112,17 +135,46 @@ export async function exerciseRunner(source, capability, capabilityHash, defects
       return object === undefined ? error(404) : new Response(object, { status: 200 });
     }
     if (path.startsWith('/rest/v1/rpc/')) {
+      if (/\/staging_audit_(recovery_inventory|block_fixture|verify_recovery)$/.test(path)) {
+        if (!admin) return error(403);
+        const claim = rows('staging_audit_run_claims').find(item => item.run_id === body.p_run_id);
+        if (!claim) return error(400, '22023');
+        const scopedUsers = accounts.filter(account => account.app_metadata.synthetic_audit === body.p_run_id);
+        const userIds = scopedUsers.map(account => account.id);
+        const scopedOrgs = rows('organizations').filter(org => ['0', '1'].some(index => org.nome === `synthetic-${body.p_run_id}-${index}`));
+        const orgIds = scopedOrgs.map(org => org.id);
+        if (path.endsWith('block_fixture')) {
+          for (const membership of memberships) if (userIds.includes(membership.user_id) || orgIds.includes(membership.organization_id)) membership.ativo = false;
+          for (const profile of rows('profiles')) if (userIds.includes(profile.id)) profile.ativo = false;
+          for (const org of scopedOrgs) org.ativo = false;
+          records.set('app_programmers', rows('app_programmers').filter(item => !userIds.includes(item.user_id)));
+          for (const share of rows('org_shares')) if (share.ativo && Date.parse(share.expira_em) <= FixtureDate.now()
+            && (orgIds.includes(share.org_origem) || orgIds.includes(share.org_destino))) share.ativo = false;
+        }
+        return response({ runId: body.p_run_id, claimedAt: claim.claimed_at, authUserIds: userIds, organizationIds: orgIds,
+          activeMemberships: memberships.filter(item => item.ativo && (userIds.includes(item.user_id) || orgIds.includes(item.organization_id))).length,
+          activeProfiles: rows('profiles').filter(item => userIds.includes(item.id) && item.ativo).length,
+          activeOrganizations: scopedOrgs.filter(item => item.ativo).length,
+          programmerPrivileges: rows('app_programmers').filter(item => userIds.includes(item.user_id)).length,
+          bannedAuthUsers: scopedUsers.filter(item => item.blocked).length,
+          activeSharesPendingClosure: rows('org_shares').filter(item => item.ativo && (orgIds.includes(item.org_origem) || orgIds.includes(item.org_destino))).length });
+      }
       const programmer = rows('app_programmers').some(item => item.user_id === user?.id);
       if (!programmer) return error(defects.permissionInfrastructureError ? 503 : 403);
       if (path.endsWith('prog_authorize_org_share')) {
         const id = webcrypto.randomUUID(); put('org_shares', { id, ...body,
-          org_origem: body.p_org_origem, org_destino: body.p_org_destino, ativo: true }); return response(id);
+          org_origem: body.p_org_origem, org_destino: body.p_org_destino, expira_em: body.p_expira_em, ativo: true }); return response(id);
       }
       const share = rows('org_shares').find(item => item.id === body.p_share_id);
       if (share) share.ativo = false;
       return response(!!share);
     }
     const table = path.replace('/rest/v1/', '');
+    if (admin && defects.serverPrivileges) {
+      const privileges = defects.serverPrivileges[`public.${table}`] || [];
+      const operation = ({ GET: 'SELECT', POST: 'INSERT', PATCH: 'UPDATE', DELETE: 'DELETE' })[method];
+      if (!privileges.includes(operation) || (method !== 'GET' && !privileges.includes('SELECT'))) return error(403);
+    }
     if (table === 'documentos') return error(404, 'PGRST205');
     const matches = row => [...url.searchParams].every(([key, value]) => {
       if (!value.startsWith('eq.')) return true;
@@ -194,11 +246,11 @@ export async function exerciseRunner(source, capability, capabilityHash, defects
     return response(clone(selected));
   };
   const context = vm.createContext({
-    Deno: { env: { get: key => ({ SUPABASE_URL: 'https://yqqrfgbvoexricjdxpis.supabase.co',
-      SUPABASE_SERVICE_ROLE_KEY: 'synthetic-private-admin-token', SUPABASE_ANON_KEY: 'synthetic-public-key' })[key] },
+    Deno: { env: { get: key => environment[key] },
       serve: callback => { handle = callback; } },
-    crypto: webcrypto, TextEncoder, Uint8Array, Request, Response, AbortSignal,
-    setTimeout, clearTimeout, setInterval, clearInterval, WebSocket: FixtureWebSocket, fetch: fetchFixture
+    crypto: webcrypto, TextEncoder, Uint8Array, Request, Response, AbortSignal, Date: FixtureDate,
+    setTimeout: (callback, delay, ...args) => setTimeout(callback, defects.fastRealtimeWaits && delay === 100 ? 0 : delay, ...args),
+    clearTimeout, setInterval, clearInterval, WebSocket: FixtureWebSocket, fetch: fetchFixture
   });
   const deployed = source.replace('__RUN_CAPABILITY_SHA256__', capabilityHash)
     .replace('__RUN_UUID__', runId).replace('__RUN_ISSUED_AT__', issuedAt).replace('__RUN_EXPIRES_AT__', expiresAt);

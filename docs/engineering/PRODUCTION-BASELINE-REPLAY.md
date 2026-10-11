@@ -74,14 +74,32 @@ somente a representação equivalente `NULL`/ACL explícito. A única tabela de
 controle excluída é `public.staging_audit_run_claims`; não há whitelist ampla
 de dados, clínicas, funções, policies ou diferenças futuras. Versões e grants
 gerenciados da plataforma ficam fora da equivalência da aplicação e exigem
-verificação separada. O executor faz essa comparação separada para owners/grants
-dos schemas Auth/Storage/extensions e RLS/ACL das tabelas gerenciadas de Storage;
-divergência reprova o ensaio. Ele recusa defaults globais ainda não implementados
+verificação separada. O executor compara owners/grants dos schemas
+Auth/Storage/extensions e privilégios efetivos, grantors, grant options e RLS das
+oito tabelas Storage capturadas. Antes dessa comparação, a fixture local reproduz
+os privilégios dessas oito dependências como `supabase_storage_admin`, sem copiar
+DDL, mudar owners ou alterar o serviço hospedado. Isso evita depender dos defaults
+de outra versão da imagem local. `NULL` e ACL explícito podem representar a mesma
+autorização; a comparação dos privilégios efetivos permanece obrigatória.
+
+A CLI 2.119 também cria `iceberg_namespaces` e `iceberg_tables`, ausentes no
+catálogo de produção. Essas duas tabelas são registradas separadamente na
+evidência. O executor exige RLS ativo, nenhuma policy, zero linhas, apenas SELECT
+sem grant option para `anon`/`authenticated`, roles sem BYPASSRLS ou vínculo ao
+papel proprietário, owner `supabase_storage_admin` e o inventário revisado de
+18 grants por tabela. Consulta ambas com esses dois papéis e mantém
+seu DDL e seus owners. Qualquer tabela extra diferente, policy ou privilégio
+mais amplo reprova o ensaio. A equivalência declarada cobre as dependências
+capturadas; não significa que as versões completas da plataforma são idênticas.
+
+Divergência reprova o ensaio. Ele recusa defaults globais ainda não implementados
 ou ACLs efetivos vazios em objetos próprios, evitando restaurar privilégios
 implícitos sem querer. Os owners de `public`, `app` e `extensions` são restaurados
 explicitamente. Essas comparações não incluem configurações de Auth API,
 segredos ou ACLs alterados manualmente em objetos membros de extensões; estes
 exigem o inventário operacional da plataforma antes de uma restauração integral.
+Falhas registram a fase, SQLSTATE, código de assertion e contagens de diferenças;
+não publicam logs brutos, valores substituídos, credenciais ou conteúdo clínico.
 
 ## Storage já existente deve ser preservado
 

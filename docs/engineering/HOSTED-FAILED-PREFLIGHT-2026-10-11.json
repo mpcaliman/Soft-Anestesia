@@ -1,0 +1,109 @@
+{
+  "format": 1,
+  "target": "yqqrfgbvoexricjdxpis",
+  "runId": "5596fcfc-6ab2-4dc3-a049-106a4b12bd8b",
+  "status": "failed_before_claim_and_fixtures",
+  "runnerSourceSha256": "6113eb105ed563b0c77d8f9b4ef982feb7bbc9bd319aed4f3adab51a4f0538d1",
+  "runnerRenderedSha256": "61e0a35764da358b452f4d75c8fdf4f3956e732fca317f02cc17ab6a46de5933",
+  "report": {
+    "target": "yqqrfgbvoexricjdxpis",
+    "runId": "5596fcfc-6ab2-4dc3-a049-106a4b12bd8b",
+    "checks": [
+      {
+        "name": "durable_invocation_claim",
+        "passed": false,
+        "diagnostic": "http_401"
+      }
+    ],
+    "passed": 0,
+    "failed": 1,
+    "pending": 0,
+    "retention": {
+      "policy": "retain-blocked-synthetic-evidence",
+      "organizationIds": [],
+      "authUserIds": [],
+      "records": [],
+      "capturedAuditRows": 0,
+      "clinicalRowsDeleted": null,
+      "auditRowsDeleted": null,
+      "authUsersDeleted": null
+    },
+    "limitations": [
+      "JWT lifetime expiry not accelerated",
+      "browser two tabs/crash belongs to browser integration suite",
+      "RLS CRUD covers patients/addenda/Storage; Realtime payloads cover patients/encounters/addenda, not every role/table",
+      "Unacknowledged Auth creation must be reconciled only by exact runId app_metadata synthetic_audit"
+    ]
+  },
+  "independentPostRunCounts": {
+    "claims": 0,
+    "authUsers": 0,
+    "organizations": 0
+  },
+  "diagnosticProbe": {
+    "target": "yqqrfgbvoexricjdxpis",
+    "runId": "5596fcfc-6ab2-4dc3-a049-106a4b12bd8b",
+    "legacyAdmin": {
+      "present": true,
+      "kind": "secret",
+      "jwtProjectMatchesTarget": null,
+      "jwtIsServiceRole": null,
+      "jwtExpired": null
+    },
+    "legacyAnon": {
+      "present": true,
+      "kind": "publishable",
+      "jwtProjectMatchesTarget": null,
+      "jwtIsServiceRole": null,
+      "jwtExpired": null
+    },
+    "secret": {
+      "present": true,
+      "kind": "secret",
+      "jwtProjectMatchesTarget": null,
+      "jwtIsServiceRole": null,
+      "jwtExpired": null
+    },
+    "publishable": {
+      "present": true,
+      "kind": "publishable",
+      "jwtProjectMatchesTarget": null,
+      "jwtIsServiceRole": null,
+      "jwtExpired": null
+    },
+    "probes": [
+      {
+        "name": "legacy_admin_anon_apikey",
+        "status": 401,
+        "rows": null,
+        "code": "PGRST301",
+        "classification": "jwt_error"
+      },
+      {
+        "name": "legacy_admin_admin_apikey",
+        "status": 200,
+        "rows": 0,
+        "code": null,
+        "classification": null
+      },
+      {
+        "name": "modern_secret_apikey_only",
+        "status": 200,
+        "rows": 0,
+        "code": null,
+        "classification": null
+      },
+      {
+        "name": "modern_publishable_apikey_only",
+        "status": 401,
+        "rows": null,
+        "code": "42501",
+        "classification": "permission_denied"
+      }
+    ],
+    "noMutations": true
+  },
+  "functionsReplacedWithClosedCode": true,
+  "productionChanged": false,
+  "retryOriginalInvocation": false
+}

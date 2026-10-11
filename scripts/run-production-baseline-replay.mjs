@@ -7,6 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { compareCatalogs } from './compare-application-catalog.mjs';
 import { prepareProductionApplicationBaseline } from './prepare-production-application-baseline.mjs';
+import { compareManagedSecurityDependencies, prepareManagedSecurityFixture } from './production-managed-security-fixture.mjs';
 import { assertCommandSuccess, assertLocalDatabaseUrl, assertSafeEnvironment, createPsqlExecutor,
   isolatedConfig, loadMigrationPlan, runConcurrentRetification } from './run-local-sql-integration.mjs';
 
@@ -16,6 +17,20 @@ const restorePath = 'docs/engineering/PRODUCTION-APPLICATION-BASELINE-2026-10-11
 const manifestPath = 'docs/engineering/PRODUCTION-APPLICATION-BASELINE-2026-10-11.manifest.json';
 const stagePath = 'docs/engineering/STAGING-APPLICATION-CATALOG-2026-10-11.json';
 const hash = value => createHash('sha256').update(value).digest('hex');
+const replayPhases = ['source-artifacts', 'empty-history', 'application-restore', 'managed-security-fixture',
+  'supplementary-coverage', 'application-comparison', 'managed-security-comparison', 'record-free-baseline',
+  'application-upgrade', 'upgrade-comparison', 'transaction-fixtures', 'concurrent-retification'];
+
+export function replayFailureDetails(error, fallbackOperation) {
+  const operation = replayPhases.includes(error.replayPhase) ? error.replayPhase : fallbackOperation;
+  const sqlState = /^[0-9A-Z]{5}$/.test(error.sqlState ?? '') ? error.sqlState : undefined;
+  const migrationPath = /^database\/migrations\/00(?:1[89]|2\d|3[0-2])_[a-z0-9_]+\.sql$|^supabase\/migrations\/0002_assinaturas_hardening\.sql$/.test(error.migrationPath ?? '')
+    ? error.migrationPath : undefined;
+  const assertionCode = error.catalogDifference ? 'CATALOG_DIFFERENCE' : error.code === 'ERR_ASSERTION' ? 'NODE_ASSERTION' : error.assertion ? 'SQL_RAISE' : undefined;
+  return { operation, ...(sqlState ? { sqlState } : {}), ...(migrationPath ? { migrationPath } : {}),
+    ...(assertionCode ? { assertionCode } : {}), ...(error.catalogDifference ? {
+      changedObjects: error.catalogDifference.changes.length, comparisonCounts: error.catalogDifference.counts } : {}) };
+}
 
 async function execute(command, args, { env, cwd, timeoutMs = 120000, input } = {}) {
   const child = spawn(command, args, { env, cwd, stdio: ['pipe', 'pipe', 'pipe'], shell: false });
@@ -39,6 +54,8 @@ async function execute(command, args, { env, cwd, timeoutMs = 120000, input } = 
 }
 
 export async function replayProductionBaseline(db, repoDir = rootDir) {
+  let phase = 'source-artifacts', migrationPath;
+  try {
   const source = JSON.parse(await readFile(join(repoDir, sourcePath), 'utf8'));
   const extraCoverage = JSON.parse(await readFile(join(repoDir, 'docs/engineering/PRODUCTION-APPLICATION-COVERAGE-2026-10-11.json'), 'utf8'));
   assert.equal(extraCoverage.sourceProject, source.projectRef);
@@ -62,34 +79,40 @@ export async function replayProductionBaseline(db, repoDir = rootDir) {
   };
   // This empty platform fixture permits history metadata capture when the stock
   // local image does not create schema_migrations. No history rows are inserted.
+  phase = 'empty-history';
   await db.run(`create schema if not exists supabase_migrations;
 create table if not exists supabase_migrations.schema_migrations(version text primary key,statements text[],name text);`, 'empty local migration metadata fixture');
   const originalHistory = (await snapshot()).catalog.migration_history;
   assert.deepEqual(originalHistory, [], 'Reference database must have no application migration history');
+  phase = 'application-restore';
   await db.run(`set application_name='soft_as_production_baseline_replay';\n${storedRestore}`, 'captured production application restore');
+  phase = 'managed-security-fixture';
+  const preFixture = await snapshot();
+  const managedFixture = prepareManagedSecurityFixture(source, preFixture);
+  await db.run(managedFixture.query, 'isolated managed Storage security fixture');
   const restored = await snapshot();
+  // Revalidate the platform-only extras after mutation, rather than hiding
+  // unknown/new tables or authorization drift behind a comparison filter.
+  prepareManagedSecurityFixture(source, restored);
+  phase = 'supplementary-coverage';
   const coverageSql = await readFile(join(repoDir, 'scripts/check-application-catalog-coverage.sql'), 'utf8');
   const localCoverage = await db.run(`select coalesce(jsonb_agg(to_jsonb(q)), '[]'::jsonb) from (${coverageSql.replace(/^--.*$/gm,'').trim().replace(/;$/,'')}) q;`, 'supplementary application coverage');
   const coverageOrder = (a,b) => a.check_name.localeCompare(b.check_name);
   assert.deepEqual(JSON.parse(localCoverage.stdout.trim()).sort(coverageOrder), [...extraCoverage.checks].sort(coverageOrder),
     'Supplementary application dependency coverage differs');
+  phase = 'application-comparison';
   const baselineComparison = compareCatalogs(source, restored, { applicationOnly: true });
   if (!baselineComparison.equal) {
     const error = new Error(`Restored application differs from captured production in ${baselineComparison.changes.length} objects`);
-    error.catalogDifference = baselineComparison; throw error;
+    error.catalogDifference = baselineComparison; error.comparisonKind = 'baselineComparison'; throw error;
   }
-  const managedSecurityDocument = document => {
-    const copy = structuredClone(document);
-    copy.catalog.schemas = copy.catalog.schemas.filter(x => ['auth', 'storage', 'extensions'].includes(x.schema));
-    copy.catalog.effective_grants = copy.catalog.effective_grants.filter(x => ['auth', 'storage', 'extensions'].includes(x.schema));
-    return copy;
-  };
-  const managedSecurityComparison = compareCatalogs(managedSecurityDocument(source), managedSecurityDocument(restored),
-    { categories: ['schemas', 'effective_grants', 'storage_relation_security'] });
+  phase = 'managed-security-comparison';
+  const managedSecurityComparison = compareManagedSecurityDependencies(source, restored);
   if (!managedSecurityComparison.equal) {
     const error = new Error('Managed Auth/Storage/extension schema authorization differs from captured prerequisites');
-    error.catalogDifference = managedSecurityComparison; throw error;
+    error.catalogDifference = managedSecurityComparison; error.comparisonKind = 'managedSecurityComparison'; throw error;
   }
+  phase = 'record-free-baseline';
   await db.run(`do $empty$ declare r record; n bigint; begin
  if exists(select 1 from auth.users) or exists(select 1 from storage.objects) then raise exception 'Reference platform must remain record-free'; end if;
  for r in select n.nspname,c.relname from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname in ('public','app') and c.relkind in ('r','p') loop
@@ -101,28 +124,41 @@ create table if not exists supabase_migrations.schema_migrations(version text pr
   assert.equal(plan.length, 16, 'Exactly 0018–0032 and signature hardening must be rehearsed');
   // psql --file executes each top-level command in autocommit. The original
   // transaction-free 0026 therefore exercises CONCURRENTLY without rewriting it.
-  for (const entry of plan) await db.run(entry.sql, entry.path);
+  phase = 'application-upgrade';
+  for (const entry of plan) { migrationPath = entry.path; await db.run(entry.sql, entry.path); }
+  migrationPath = undefined; phase = 'upgrade-comparison';
   const upgraded = await snapshot();
   assert.deepEqual(upgraded.catalog.migration_history, originalHistory, 'Replay must not repair/rewrite formal migration history');
   const stagingComparison = compareCatalogs(expectedStage, upgraded, { applicationOnly: true });
   // Preserve all real-source differences for review; no wildcard whitelist or
   // asserted staging equivalence. This reference includes retained documentos-pdf.
   const fixtures = ['tests/sql/retification-cas-security.sql', 'tests/sql/finalized-delete-security.sql'];
+  phase = 'transaction-fixtures';
   for (const path of fixtures) {
     const sql = await readFile(join(repoDir, path), 'utf8');
     assert.match(sql, /^begin\b/im); assert.match(sql, /rollback;\s*$/i);
     await db.run(sql, path);
   }
+  phase = 'concurrent-retification';
   const race = await runConcurrentRetification(db);
   return { format: 1, baselineReplayVerified: true, productionCatalogCapturedAt: source.capturedAt,
     baselineCatalogSha256: prepared.manifest.catalogSha256, baselineRestoreSqlSha256: hash(storedRestore),
-    applicationDefinitionAndGrantsEquivalent: true, managedSecurityDependenciesEquivalent: true, applicationUpgradeVerified: true,
+    applicationDefinitionAndGrantsEquivalent: true, capturedManagedSecurityDependenciesEquivalent: true, applicationUpgradeVerified: true,
+    managedSecurityFixture: { capturedStorageTables: managedFixture.capturedStorageTables,
+      extraPlatformTables: managedFixture.extraPlatformTables, extraPlatformIsolationVerified: true,
+      managedTableStructuresChanged: false, managedOwnersChanged: false,
+      managedSecurityAdjustedLocally: true, productionApplied: false },
     migrationHashes: Object.fromEntries(plan.map(x => [x.path, x.sha256])), migrationsRehearsed: plan.length,
     performanceIndexesAppliedConcurrently: true, sourceMigrationsChanged: false,
     migrationHistoryRewritten: false, beforeFixturesClinicalRows: 0, beforeFixturesAuthRows: 0,
     retainedPrivateBuckets: source.catalog.storage_buckets.map(x => x.id), fixtures, race,
     baselineComparison, managedSecurityComparison, stagingComparison, stagingCatalogEqual: stagingComparison.equal,
     hostedIntegrationVerified: false, productionVerified: false, productionApplyAllowed: false };
+  } catch (error) {
+    error.replayPhase = phase;
+    if (migrationPath) error.migrationPath = migrationPath;
+    throw error;
+  }
 }
 
 export async function runProductionBaselineReplay({ repoDir = rootDir, inheritedEnv = process.env, run = execute } = {}) {
@@ -157,10 +193,9 @@ export async function runProductionBaselineReplay({ repoDir = rootDir, inherited
     evidence = await replayProductionBaseline(db, repoDir);
   } catch (error) {
     evidence.baselineReplayVerified = false;
-    if (error.catalogDifference) evidence.baselineComparison = error.catalogDifference;
-    const sqlState = /^[0-9A-Z]{5}$/.test(error.sqlState ?? '') ? error.sqlState : undefined;
-    evidence.failure = { operation, ...(sqlState ? { sqlState } : {}) };
-    failure = new Error(`Production reference replay failed at ${operation}${sqlState ? ` (SQLSTATE ${sqlState})` : ''}; no remote verification claimed.`);
+    if (error.catalogDifference && ['baselineComparison', 'managedSecurityComparison'].includes(error.comparisonKind)) evidence[error.comparisonKind] = error.catalogDifference;
+    evidence.failure = replayFailureDetails(error, operation);
+    failure = new Error(`Production reference replay failed at ${evidence.failure.operation}${evidence.failure.migrationPath ? ' ['+evidence.failure.migrationPath+']' : ''}${evidence.failure.sqlState ? ` (SQLSTATE ${evidence.failure.sqlState})` : ''}${evidence.failure.assertionCode ? ' ['+evidence.failure.assertionCode+']' : ''}; no remote verification claimed.`);
   } finally {
     if (startAttempted) {
       try {

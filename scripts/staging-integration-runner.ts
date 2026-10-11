@@ -12,8 +12,20 @@ const MAX_RUN_WINDOW_MS = 15 * 60 * 1000;
 // ou auditoria. Ao encerrar, revogar sessões e desativar todo acesso da fixture.
 const RETENTION_POLICY = 'retain-blocked-synthetic-evidence';
 const url = Deno.env.get('SUPABASE_URL') || '';
-const adminKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-const anonKey = Deno.env.get('SUPABASE_ANON_KEY') || '';
+const projectKey = (dictionary: string, fallback: string) => {
+  try {
+    const configured = JSON.parse(Deno.env.get(dictionary) || '{}');
+    if (typeof configured?.default === 'string' && configured.default) return configured.default;
+  } catch { /* a legacy project may not provide key dictionaries */ }
+  return Deno.env.get(fallback) || '';
+};
+const adminKey = projectKey('SUPABASE_SECRET_KEYS', 'SUPABASE_SERVICE_ROLE_KEY');
+const anonKey = projectKey('SUPABASE_PUBLISHABLE_KEYS', 'SUPABASE_ANON_KEY');
+const apiHeaders = (token: string): Record<string, string> => {
+  const apiKey = token === adminKey ? adminKey : anonKey;
+  const modern = token.startsWith('sb_secret_') || token.startsWith('sb_publishable_');
+  return { apikey: apiKey, ...(modern ? {} : { Authorization: `Bearer ${token}` }) };
+};
 const hex = (bytes: ArrayBuffer) => [...new Uint8Array(bytes)].map(b => b.toString(16).padStart(2, '0')).join('');
 let consumed = false;
 
@@ -44,7 +56,17 @@ Deno.serve(async request => {
     return new Response('audit_run_binding_denied', { status: 400 });
   consumed = true;
   const runId = DEPLOYMENT_RUN_ID;
+  const activeDeadline = Date.now() + 90000;
+  const cleanupDeadline = activeDeadline + 50000;
+  let cleanupPhase = false;
+  let claimConfirmed = false;
+  const remainingBudget = () => {
+    const remaining = (cleanupPhase ? cleanupDeadline : activeDeadline) - Date.now();
+    if (remaining <= 0) throw new Error('audit_runtime_budget');
+    return remaining;
+  };
   const checks: { name: string; passed: boolean | null; diagnostic?: string }[] = [];
+  const realtimeDiagnostics: Record<string, Record<string, boolean | number>> = {};
   const users: { id: string; email: string; password: string; access_token: string; refresh_token: string }[] = [];
   const orgs: string[] = [];
   const memberships: { organization_id: string; user_id: string; role: string }[] = [];
@@ -63,20 +85,25 @@ Deno.serve(async request => {
   let phase = 'durable_invocation_claim';
   const diagnostic = (error: unknown) => {
     const value = error instanceof Error ? error.message : 'unknown_error';
-    return /^(http_[0-9]{3}|assertion_failed|websocket_timeout|websocket_error|fetch_failed)$/.test(value)
+    return /^(http_[0-9]{3}|assertion_failed|websocket_timeout|websocket_error|fetch_failed|audit_runtime_budget)$/.test(value)
       ? value : 'unexpected_error';
   };
   const test = async (name: string, fn: () => Promise<void>) => {
+    if (!cleanupPhase) remainingBudget();
     try { await fn(); checks.push({ name, passed: true }); }
-    catch (error) { checks.push({ name, passed: false, diagnostic: diagnostic(error) }); }
+    catch (error) {
+      if (!cleanupPhase && error instanceof Error && error.message === 'audit_runtime_budget') throw error;
+      checks.push({ name, passed: false, diagnostic: diagnostic(error) });
+    }
   };
   const expect = (condition: unknown) => { if (!condition) throw new Error('assertion_failed'); };
   const call = async (path: string, token: string, method = 'GET', body?: unknown,
     headers: Record<string, string> = {}) => {
     const response = await fetch(url + path, {
-      method, headers: { apikey: anonKey, Authorization: `Bearer ${token}`,
+      method, headers: { ...apiHeaders(token),
         'Content-Type': 'application/json', Prefer: 'return=representation', ...headers },
-      body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store', signal: AbortSignal.timeout(20000)
+      body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store',
+      signal: AbortSignal.timeout(Math.min(cleanupPhase ? 10000 : 20000, remainingBudget()))
     });
     const text = await response.text();
     let data: any; try { data = JSON.parse(text); } catch { data = null; }
@@ -123,7 +150,13 @@ Deno.serve(async request => {
       && claim.data[0].capability_sha256 === CAPABILITY_HASH && claim.data[0].run_id === runId
       && Date.parse(claim.data[0].issued_at) === issuedAt && Date.parse(claim.data[0].expires_at) === expiresAt
       && Date.parse(claim.data[0].claimed_at) >= issuedAt && Date.parse(claim.data[0].claimed_at) < expiresAt);
+    claimConfirmed = true;
     checks.push({ name: 'durable_invocation_claim', passed: true });
+    phase = 'required_independent_recovery';
+    const recovery = await accepted('/rest/v1/rpc/staging_audit_recovery_inventory', adminKey, 'POST', { p_run_id: runId });
+    expect(recovery.runId === runId && Array.isArray(recovery.authUserIds) && recovery.authUserIds.length === 0
+      && Array.isArray(recovery.organizationIds) && recovery.organizationIds.length === 0);
+    checks.push({ name: 'required_independent_recovery', passed: true });
     // Não criar contas numa homologação parcialmente migrada. Coluna ausente,
     // erro de schema ou payload errado devem ser falhas, nunca prova de RLS.
     phase = 'required_retification_schema';
@@ -244,7 +277,7 @@ Deno.serve(async request => {
     await test('programmer_share_explicit_read_only_scope', async () => {
       shareId = await accepted('/rest/v1/rpc/prog_authorize_org_share', programmer.access_token, 'POST',
         { p_org_origem: orgs[0], p_org_destino: orgs[1], p_modulos: ['pacientes'],
-          p_motivo: 'Synthetic isolation audit', p_expira_em: new Date(Date.now() + 3600000).toISOString() });
+          p_motivo: 'Synthetic isolation audit', p_expira_em: new Date(Date.now() + 120000).toISOString() });
       shareActive = true;
       expect((await accepted(`/rest/v1/patients?id=eq.${patient.id}&select=id`, b.access_token)).length === 1);
       const write = await call(`/rest/v1/patients?id=eq.${patient.id}`, b.access_token, 'PATCH', { nome: 'Synthetic Forbidden' });
@@ -252,8 +285,8 @@ Deno.serve(async request => {
     });
     await test('revoked_share_immediately_denies_read', async () => {
       expect(shareId);
-      await accepted('/rest/v1/rpc/prog_revoke_org_share', programmer.access_token, 'POST',
-        { p_share_id: shareId, p_motivo: 'Synthetic isolation audit complete' });
+      expect(await accepted('/rest/v1/rpc/prog_revoke_org_share', programmer.access_token, 'POST',
+        { p_share_id: shareId, p_motivo: 'Synthetic isolation audit complete' }) === true);
       shareActive = false;
       expect((await accepted(`/rest/v1/patients?id=eq.${patient.id}&select=id`, b.access_token)).length === 0);
     });
@@ -292,20 +325,26 @@ Deno.serve(async request => {
     });
     await test('storage_cross_org_delete_denied', async () => {
       // Storage pode devolver 200 [] para objetos invisíveis ao usuário.
-      await call('/storage/v1/object/clinical-attachments', b.access_token, 'DELETE', { prefixes: [storagePath] });
+      const result = await call('/storage/v1/object/clinical-attachments', b.access_token, 'DELETE', { prefixes: [storagePath] });
+      expect((result.ok && Array.isArray(result.data) && result.data.length === 0)
+        || (result.status === 403 && ['42501','AccessDenied','accessdenied','Unauthorized','unauthorized'].includes(String(result.data?.code || result.data?.error))));
       const own = await fetch(`${url}/storage/v1/object/authenticated/clinical-attachments/${storagePath}`,
         { headers: { apikey: anonKey, Authorization: `Bearer ${a.access_token}` }, signal: AbortSignal.timeout(20000) });
       expect(own.ok && await own.text() === 'synthetic audit fixture');
     });
     const events: any[] = [];
     const joined = new Set<string>();
+    const subscribed = new Set<string>();
+    let subscriptionErrors = 0;
+    let channelErrors = 0;
+    let malformedMessages = 0;
     const joinRefs = new Map<string, string>();
     const ownTables = ['patients', 'encounters', 'addenda'];
     const topics = [...ownTables.map(table => ({ table, org: orgs[0], suffix: table })),
       { table: 'patients', org: orgs[1], suffix: 'forbidden-patients' }];
     const eventRecord = (event: any) => event.payload?.data?.record;
     const waitFor = async (predicate: () => boolean) => {
-      for (let step = 0; step < 100 && !predicate(); step++) await sleep(100);
+      for (let step = 0; step < 100 && !predicate(); step++) { remainingBudget(); await sleep(100); }
       expect(predicate());
     };
     let socket: WebSocket | null = null;
@@ -313,9 +352,23 @@ Deno.serve(async request => {
       socket = new WebSocket(`wss://${TARGET}.supabase.co/realtime/v1/websocket?apikey=${encodeURIComponent(anonKey)}&vsn=1.0.0`);
       sockets.push(socket);
       socket.onmessage = event => {
-        const message = JSON.parse(String(event.data));
-        if (message.event === 'phx_reply' && message.payload.status === 'ok'
-            && topics.some(topic => message.topic === `realtime:audit-${runId}-${topic.suffix}`)) joined.add(message.topic);
+        let message: any;
+        try { message = JSON.parse(String(event.data)); }
+        catch { malformedMessages++; return; }
+        if (!message || typeof message !== 'object' || Array.isArray(message)
+            || typeof message.topic !== 'string' || typeof message.event !== 'string') {
+          malformedMessages++; return;
+        }
+        if (!topics.some(topic => message.topic === `realtime:audit-${runId}-${topic.suffix}`)) return;
+        if (message.event === 'phx_reply' && message.payload?.status === 'ok'
+            && message.ref === joinRefs.get(message.topic)) joined.add(message.topic);
+        if (message.event === 'system' && message.payload?.extension === 'postgres_changes') {
+          if (message.payload.status === 'ok') subscribed.add(message.topic);
+          else { subscriptionErrors++; subscribed.delete(message.topic); }
+        }
+        if (['phx_error', 'phx_close'].includes(message.event)) {
+          channelErrors++; joined.delete(message.topic); subscribed.delete(message.topic);
+        }
         if (message.event === 'postgres_changes') events.push(message);
       };
       await new Promise<void>((resolve, reject) => {
@@ -335,10 +388,22 @@ Deno.serve(async request => {
           payload: { access_token: a.access_token, config: { broadcast: { self: false }, presence: { enabled: false },
             postgres_changes: [{ event: '*', schema: 'public', table: topic.table, filter: `organization_id=eq.${topic.org}` }] } } }));
       }
-      await waitFor(() => joined.size === topics.length);
+      // O ack Phoenix confirma o canal; system/postgres_changes confirma CDC
+      // ativo. Escrever antes desse segundo sinal pode perder os primeiros eventos.
+      await waitFor(() => joined.size === topics.length && subscribed.size === topics.length);
     });
+    const snapshotRealtime = (step: string) => {
+      realtimeDiagnostics[step] = {
+        expectedTopics: topics.length, joinedTopics: joined.size, subscribedTopics: subscribed.size,
+        subscriptionErrors, channelErrors, malformedMessages, changeEvents: events.length,
+        ownPatientSeen: events.some(event => eventRecord(event)?.id === patient.id),
+        ownEncounterSeen: events.some(event => eventRecord(event)?.id === encounter.id),
+        foreignOrganizationSeen: events.some(event => eventRecord(event)?.organization_id === orgs[1])
+      };
+    };
+    snapshotRealtime('initial_subscription');
     await test('realtime_own_update_and_cross_org_filter', async () => {
-      expect(socket && joined.size === topics.length);
+      expect(socket && joined.size === topics.length && subscribed.size === topics.length);
       await accepted(`/rest/v1/patients?id=eq.${betaPatient.id}`, b.access_token, 'PATCH', { nome: 'Synthetic Beta Update' });
       await accepted(`/rest/v1/patients?id=eq.${patient.id}`, a2.access_token, 'PATCH', { nome: 'Synthetic Realtime Update' });
       await accepted(`/rest/v1/encounters?id=eq.${encounter.id}`, a2.access_token, 'PATCH', { procedimento: 'Synthetic Realtime Case Update' });
@@ -348,6 +413,7 @@ Deno.serve(async request => {
       // mesmo quando o cliente pede esse organization_id explicitamente.
       expect(!events.some(event => eventRecord(event)?.organization_id === orgs[1]));
     });
+    snapshotRealtime('first_updates');
     const proposals = [a, a2].map((user, index) => ({ user, body: {
       organization_id: orgs[0], parent_table: 'preanesthetic_assessments', parent_id: parent.id,
       legacy_id: `audit-retification-${runId}-${index}`, texto: `Synthetic clinical correction ${index}`, reason: 'correcao',
@@ -384,6 +450,7 @@ Deno.serve(async request => {
       expect(acceptedCorrection && conflictCorrection);
       await waitFor(() => [acceptedCorrection.id, conflictCorrection.id].every(id => events.some(event => eventRecord(event)?.id === id)));
     });
+    snapshotRealtime('retification_updates');
     await test('retification_exact_replay_idempotent_and_other_proposal_denied', async () => {
       expect(acceptedCorrection);
       const proposal = proposals.find(item => item.body.legacy_id === acceptedCorrection.legacy_id)!;
@@ -435,7 +502,7 @@ Deno.serve(async request => {
       }
     });
     await test('realtime_refresh_every_joined_topic', async () => {
-      expect(socket && joined.size === topics.length && acceptedCorrection);
+      expect(socket && joined.size === topics.length && subscribed.size === topics.length && acceptedCorrection);
       const renewed = await accepted('/auth/v1/token?grant_type=refresh_token', anonKey, 'POST', { refresh_token: a.refresh_token });
       a.access_token = renewed.access_token;
       a.refresh_token = renewed.refresh_token;
@@ -454,9 +521,11 @@ Deno.serve(async request => {
       expect(!events.some(event => eventRecord(event)?.organization_id === orgs[1]));
       expect(canonical((await accepted(`/rest/v1/preanesthetic_assessments?id=eq.${parent.id}`, a.access_token))[0]) === originalParent);
     });
+    snapshotRealtime('token_refresh');
   } catch (error) {
     checks.push({ name: phase, passed: false, diagnostic: diagnostic(error) });
   } finally {
+    cleanupPhase = true;
     if (heartbeat !== null) clearInterval(heartbeat);
     for (const socket of sockets) try { socket.close(); } catch { /* no token logs */ }
     if (storagePaths.size) await test('storage_fixture_cleanup', async () => {
@@ -472,6 +541,18 @@ Deno.serve(async request => {
           { p_share_id: share.id, p_motivo: 'Synthetic fixture access shutdown' });
       shareActive = false;
       expect((await accepted(`/rest/v1/org_shares?${selector}&select=id,ativo`, adminKey)).every((share: any) => !share.ativo));
+    });
+    if (claimConfirmed) await test('synthetic_independent_database_containment', async () => {
+      const result = await accepted('/rest/v1/rpc/staging_audit_block_fixture', adminKey, 'POST', { p_run_id: runId });
+      expect(result.runId === runId && result.activeMemberships === 0 && result.activeProfiles === 0
+        && result.activeOrganizations === 0 && result.programmerPrivileges === 0);
+      // Confirmação Auth pode ter ocorrido sem resposta e sem registro em
+      // `users`. Inventário estrito recupera essas identidades pelo runId.
+      for (const id of result.authUserIds) if (!users.some(user => user.id === id)) {
+        const blocked = await accepted(`/auth/v1/admin/users/${id}`, adminKey, 'PUT',
+          { password: 'Aa1!' + crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', ''), ban_duration: '876000h' });
+        expect(blocked.id === id && Date.parse(blocked.banned_until) > Date.now());
+      }
     });
     // Somente UUIDs criados nesta execução; não listar usuários ou registros.
     // Retenção da evidência é compatível com autoria/FKs e guards append-only.
@@ -542,6 +623,7 @@ Deno.serve(async request => {
   }
   const result = { target: TARGET, runId, checks, passed: checks.filter(c => c.passed === true).length,
     failed: checks.filter(c => c.passed === false).length, pending: checks.filter(c => c.passed === null).length,
+    realtime: realtimeDiagnostics,
     retention: { policy: RETENTION_POLICY, organizationIds: orgs, authUserIds: users.map(user => user.id), records: retainedRecords,
       capturedAuditRows: capturedAuditIds.size, clinicalRowsDeleted: clinicalEvidenceRetained === null ? null : !clinicalEvidenceRetained,
       auditRowsDeleted: auditEvidenceRetained === null ? null : !auditEvidenceRetained,

@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { compareCatalogs, validateCatalog } from '../scripts/compare-application-catalog.mjs';
 import { prepareProductionApplicationBaseline } from '../scripts/prepare-production-application-baseline.mjs';
-import { runProductionBaselineReplay } from '../scripts/run-production-baseline-replay.mjs';
+import { replayFailureDetails, replayProductionBaseline, runProductionBaselineReplay } from '../scripts/run-production-baseline-replay.mjs';
+import { compareManagedSecurityDependencies, prepareManagedSecurityFixture } from '../scripts/production-managed-security-fixture.mjs';
 
 const read = path => readFile(new URL('../'+path, import.meta.url), 'utf8');
 const source = JSON.parse(await read('docs/engineering/PRODUCTION-APPLICATION-CATALOG-2026-10-11.json'));
@@ -88,6 +89,65 @@ for (const key of ['PGHOST', 'DATABASE_URL', 'SUPABASE_URL', 'DOCKER_CONTEXT']) 
   await assert.rejects(runProductionBaselineReplay({ inheritedEnv: { [key]: 'forbidden' }, run: async () => { calls++; } }));
 }
 assert.equal(calls, 0, 'No local or remote command may run with a target override');
+
+const localPlatform = structuredClone(source); localPlatform.projectRef = 'local-disposable';
+const tablePrivileges = ['DELETE', 'INSERT', 'MAINTAIN', 'REFERENCES', 'SELECT', 'TRIGGER', 'TRUNCATE', 'UPDATE'];
+for (const name of ['iceberg_namespaces', 'iceberg_tables']) {
+  localPlatform.catalog.storage_relation_security.push({ name, rls: true, force_rls: false, acl: null });
+  for (const grantee of ['anon', 'authenticated', 'service_role', 'supabase_storage_admin']) {
+    for (const privilege of ['anon', 'authenticated'].includes(grantee) ? ['SELECT'] : tablePrivileges) {
+      localPlatform.catalog.effective_grants.push({ kind: 'relation', schema: 'storage', relation: null, name,
+        arguments: null, grantor: 'supabase_storage_admin', grantee, privilege, grantable: false });
+    }
+  }
+}
+const managedFixture = prepareManagedSecurityFixture(source, localPlatform);
+assert.equal(managedFixture.capturedStorageTables.length, 8);
+assert.equal(managedFixture.extraPlatformTables.length, 2);
+assert.equal(managedFixture.managedTableStructuresChanged, false);
+assert.equal(managedFixture.managedOwnersChanged, false);
+assert.equal(managedFixture.managedSecurityAdjustedLocally, true);
+assert.match(managedFixture.query, /set local role "supabase_storage_admin"/);
+assert.match(managedFixture.query, /grant MAINTAIN on table storage\."objects" to "anon";/);
+assert.match(managedFixture.query, /grant SELECT on table storage\."objects" to "postgres" with grant option;/);
+assert.match(managedFixture.query, /rolsuper or rolbypassrls/);
+assert.match(managedFixture.query, /pg_has_role\('anon','supabase_storage_admin','MEMBER'\)/);
+assert.match(managedFixture.query, /pg_has_role\('authenticated','supabase_storage_admin','MEMBER'\)/);
+assert.match(managedFixture.query, /Extra managed Storage owner differs/);
+assert.match(managedFixture.query, /Extra managed Storage table must have no policies/);
+assert.match(managedFixture.query, /set local role "authenticated"/);
+assert.ok(!/(?:create|drop)\s+table|owner\s+to|(?:^|\n)\s*(?:insert\s+into|update\s+|delete\s+from)/i.test(managedFixture.query),
+  'Managed fixture only reconciles permissions and RLS; it must not copy DDL, owners or data');
+assert.equal(compareManagedSecurityDependencies(source, localPlatform).equal, true);
+for (const mutate of [
+  x => { x.catalog.storage_relation_security = x.catalog.storage_relation_security.filter(t => t.name !== 'objects'); },
+  x => { x.catalog.storage_relation_security.find(t => t.name === 'iceberg_tables').rls = false; },
+  x => { x.catalog.storage_relation_security.push({ name: 'unreviewed_table', rls: true, force_rls: false, acl: null }); },
+  x => { x.catalog.policies.push({ schema: 'storage', relation: 'iceberg_tables', name: 'unsafe_policy', roles: ['anon'], command: 'SELECT', permissive: 'PERMISSIVE', using_expression: 'true', check_expression: null }); },
+  x => { x.catalog.effective_grants.find(g => g.name === 'iceberg_tables' && g.grantee === 'anon').privilege = 'INSERT'; },
+  x => { x.catalog.effective_grants.find(g => g.name === 'iceberg_tables' && g.grantee === 'authenticated').grantable = true; },
+  x => { x.catalog.effective_grants.find(g => g.schema === 'storage' && g.name === 'objects').grantor = 'unreviewed_grantor'; }
+]) {
+  const unsafe = structuredClone(localPlatform); mutate(unsafe);
+  assert.throws(() => prepareManagedSecurityFixture(source, unsafe), 'A managed platform difference must be reviewed before it can be scoped out');
+}
+const changedRequiredPrivilege = structuredClone(localPlatform);
+changedRequiredPrivilege.catalog.effective_grants = changedRequiredPrivilege.catalog.effective_grants.filter(g => !(g.schema === 'storage' && g.name === 'objects' && g.grantee === 'authenticated' && g.privilege === 'SELECT'));
+assert.equal(compareManagedSecurityDependencies(source, changedRequiredPrivilege).equal, false, 'Captured Storage permissions remain an exact comparison');
+const explicitDefaultAcl = structuredClone(localPlatform);
+explicitDefaultAcl.catalog.storage_relation_security.find(t => t.name === 'migrations').acl = '{supabase_storage_admin=arwdDxtm/supabase_storage_admin}';
+assert.equal(compareManagedSecurityDependencies(source, explicitDefaultAcl).equal, true, 'ACL spelling may differ only while all effective privileges match');
+const changedStorageRls = structuredClone(localPlatform);
+changedStorageRls.catalog.storage_relation_security.find(t => t.name === 'objects').rls = false;
+assert.equal(compareManagedSecurityDependencies(source, changedStorageRls).equal, false);
+
+const privateFailure = Object.assign(new Error('private token and arbitrary error content must never be exported'), {
+  sqlState: '42501', assertion: 'private substituted runtime content' });
+await assert.rejects(replayProductionBaseline({ run: async () => { throw privateFailure; } }), error => error === privateFailure);
+const diagnostic = replayFailureDetails(privateFailure, 'prepare');
+assert.deepEqual(diagnostic, { operation: 'empty-history', sqlState: '42501', assertionCode: 'SQL_RAISE' });
+assert.ok(!JSON.stringify(diagnostic).includes('private'));
+assert.equal(replayFailureDetails({ replayPhase: 'arbitrary private content', migrationPath: 'https://private.invalid', sqlState: 'invalid' }, 'prepare').operation, 'prepare');
 const candidates = JSON.parse(await read('docs/engineering/LEGACY-METADATA-CANDIDATES-2026-10-11.json'));
 assert.equal(candidates.automaticAssignmentAllowed, false);
 assert.equal(candidates.clinicalPayloadRead, false);
@@ -96,4 +156,4 @@ assert.equal(candidates.totals.one_candidate_organization, 864);
 assert.equal(candidates.totals.no_relational_match, 292);
 assert.equal(candidates.totals.multiple_candidate_organizations, 0);
 assert.ok(candidates.modules.every(x => !x.module.includes('@')), 'User-scoped module suffixes must not be published');
-console.log('✓ production DDL baseline deterministic; grants/RLS/guards drift detected; no records, unsafe target, or automatic legacy classification');
+console.log('✓ production DDL baseline deterministic; managed Storage grants/RLS and platform extras fail closed; phase diagnostics contain no runtime content; no automatic legacy classification');

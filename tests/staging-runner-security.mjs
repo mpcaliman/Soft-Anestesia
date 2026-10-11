@@ -18,7 +18,8 @@ function runner(projectUrl, options = {}) {
   const claims = options.claims || new Map();
   const window = { ...activeWindow(), ...options.window };
   const environment = { SUPABASE_URL: projectUrl, SUPABASE_SERVICE_ROLE_KEY: 'synthetic-private-admin-token',
-    SUPABASE_ANON_KEY: 'synthetic-public-key' };
+    SUPABASE_ANON_KEY: 'synthetic-public-key', SUPABASE_SECRET_KEYS: JSON.stringify({ default: 'sb_secret_synthetic_admin' }),
+    SUPABASE_PUBLISHABLE_KEYS: JSON.stringify({ default: 'sb_publishable_synthetic_anon' }) };
   const context = vm.createContext({
     Deno: { env: { get: key => environment[key] }, serve: callback => { handler = callback; } },
     crypto: webcrypto, TextEncoder, Uint8Array, Request, Response, AbortSignal,
@@ -27,7 +28,8 @@ function runner(projectUrl, options = {}) {
       networkCalls++; calls.push(target);
       if (options.acceptClaims && target.endsWith('/rest/v1/staging_audit_run_claims')) {
         const row = JSON.parse(request.body);
-        assert.equal(request.headers.Authorization, 'Bearer synthetic-private-admin-token');
+        assert.equal(request.headers.apikey, 'sb_secret_synthetic_admin');
+        assert.equal(request.headers.Authorization, undefined, 'secret moderno não é JWT Bearer');
         if (claims.has(row.capability_sha256) || [...claims.values()].some(item => item.run_id === row.run_id))
           return Response.json({ code: '23505' }, { status: 409 });
         const claim = { ...row, claimed_at: new Date().toISOString() };
@@ -88,7 +90,7 @@ const firstIsolate = runner('https://yqqrfgbvoexricjdxpis.supabase.co', { accept
 const firstResult = await (await firstIsolate.handle()).json();
 assert.equal(firstResult.checks[0].name, 'durable_invocation_claim');
 assert.equal(firstResult.checks[0].passed, true);
-assert.ok(firstResult.checks.some(check => check.name === 'required_retification_schema' && !check.passed));
+assert.ok(firstResult.checks.some(check => check.name === 'required_independent_recovery' && !check.passed));
 assert.equal(firstIsolate.paths().filter(path => path.includes('/auth/')).length, 0);
 const secondIsolate = runner('https://yqqrfgbvoexricjdxpis.supabase.co', { acceptClaims: true, claims: sharedClaims });
 assert.equal((await secondIsolate.handle()).status, 409, 'segundo isolate não repete capacidade persistida');
@@ -129,13 +131,99 @@ assert.equal(passing.result.retention.authUsersDeleted, false);
 assert.ok(passing.accounts.every(user => user.blocked && user.sessionsRevoked), 'contas retidas ficam bloqueadas');
 assert.ok(passing.memberships.every(membership => !membership.ativo), 'JWT emitido não conserva vínculo ativo');
 assert.ok(passing.result.checks.some(check => check.name === 'realtime_refresh_every_joined_topic' && check.passed));
+assert.equal(passing.result.realtime.initial_subscription.joinedTopics, 4);
+assert.equal(passing.result.realtime.initial_subscription.subscribedTopics, 4);
+assert.equal(passing.result.realtime.first_updates.ownPatientSeen, true);
+assert.equal(passing.result.realtime.first_updates.ownEncounterSeen, true);
+assert.equal(passing.result.realtime.first_updates.foreignOrganizationSeen, false);
+for (const snapshot of Object.values(passing.result.realtime))
+  assert.ok(Object.values(snapshot).every(value => ['boolean', 'number'].includes(typeof value)), 'diagnóstico Realtime só contém contadores/booleans, nunca payload/JWT/nome');
+const lateReadiness = await exerciseRunner(source, capability, capabilityHash, { delayedRealtimeReadiness: true });
+assert.equal(lateReadiness.result.failed, 0, 'ack Phoenix antecipado aguarda confirmação CDC antes das primeiras gravações');
+const ackOnlyRunner = source.replaceAll(' && subscribed.size === topics.length', '');
+const prematureUpdates = await exerciseRunner(ackOnlyRunner, capability, capabilityHash, { delayedRealtimeReadiness: true, fastRealtimeWaits: true });
+assert.ok(prematureUpdates.result.checks.some(check => check.name === 'realtime_own_update_and_cross_org_filter' && !check.passed),
+  'a versão que confunde ack com CDC perde os primeiros eventos e reprova sob o mesmo servidor');
+const noReadiness = await exerciseRunner(source, capability, capabilityHash, { missingRealtimeReadiness: true, fastRealtimeWaits: true });
+assert.ok(noReadiness.result.checks.some(check => check.name === 'realtime_authenticated_operational_and_addenda_topics' && !check.passed));
+assert.equal(noReadiness.result.realtime.initial_subscription.joinedTopics, 4);
+assert.equal(noReadiness.result.realtime.initial_subscription.subscribedTopics, 0, 'canal sem CDC vivo jamais é aceito');
+const missingEncounterEvents = await exerciseRunner(source, capability, capabilityHash, { dropEncounterRealtime: true, fastRealtimeWaits: true });
+assert.ok(missingEncounterEvents.result.checks.some(check => check.name === 'realtime_own_update_and_cross_org_filter' && !check.passed));
+assert.equal(missingEncounterEvents.result.realtime.first_updates.ownPatientSeen, true);
+assert.equal(missingEncounterEvents.result.realtime.first_updates.ownEncounterSeen, false, 'diagnóstico distingue tabela sem entrega');
+const foreignRealtime = await exerciseRunner(source, capability, capabilityHash, { leakForeignRealtime: true });
+assert.ok(foreignRealtime.result.checks.some(check => check.name === 'realtime_own_update_and_cross_org_filter' && !check.passed));
+assert.equal(foreignRealtime.result.realtime.first_updates.foreignOrganizationSeen, true, 'vazamento entre organizações reprova, sem revelar o payload');
+const fixtureRightsSql = await readFile(new URL('../scripts/staging-only/fixture-server-rights.sql', import.meta.url), 'utf8');
+function grantedServerPrivileges(sql) {
+  const privilegesByTable = {};
+  for (const match of sql.replace(/^--.*$/gm, '').matchAll(/\bgrant\s+([a-z,\s]+?)\s+on\s+table\s+([a-z0-9_.,\s]+?)\s+to\s+service_role\s*;/gi)) {
+    const privileges = match[1].split(',').map(value => value.trim().toUpperCase());
+    for (const table of match[2].split(',').map(value => value.trim())) privilegesByTable[table] = privileges;
+  }
+  return privilegesByTable;
+}
+const serverPrivileges = grantedServerPrivileges(fixtureRightsSql);
+const explicitRights = await exerciseRunner(source, capability, capabilityHash, { serverPrivileges });
+assert.equal(explicitRights.result.failed, 0, 'a matriz SQL mínima permite o runner completo sem privilégios clínicos de escrita do servidor');
+for (const table of ['public.patients', 'public.encounters', 'public.preanesthetic_assessments', 'public.addenda', 'public.audit_logs'])
+  assert.deepEqual(serverPrivileges[table], ['SELECT'], 'o backend de fixtures só lê evidência clínica; criação usa JWT real');
+assert.equal(serverPrivileges['public.staging_audit_recoveries'], undefined, 'nenhum CRUD direto de recovery é concedido');
+assert.equal(serverPrivileges['public.staging_audit_run_claims'], undefined, 'claims mantém contrato separado SELECT/INSERT');
+const hardeningSql = await readFile(new URL('../scripts/staging-only/fixture-server-rights-hardening.sql', import.meta.url), 'utf8');
+const normalizedPrivileges = grantedServerPrivileges(hardeningSql);
+const expectedBackendMatrix = {
+  'public.patients': ['SELECT'], 'public.encounters': ['SELECT'],
+  'public.preanesthetic_assessments': ['SELECT'], 'public.addenda': ['SELECT'],
+  'public.audit_logs': ['SELECT'], 'public.documentos': ['SELECT'], 'public.org_shares': ['SELECT'],
+  'public.organizations': ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
+  'public.profiles': ['SELECT', 'INSERT', 'UPDATE'],
+  'public.organization_users': ['SELECT', 'INSERT', 'UPDATE'],
+  'public.app_programmers': ['SELECT', 'INSERT', 'DELETE'],
+  'public.staging_audit_run_claims': ['SELECT', 'INSERT']
+};
+assert.deepEqual(normalizedPrivileges, expectedBackendMatrix, 'DDL normaliza exatamente os privilégios necessários, sem escrita clínica ou de legado');
+const revokedAllTargets = [...hardeningSql.replace(/^--.*$/gm, '').matchAll(/\brevoke\s+all\s+on\s+table\s+([a-z0-9_.,\s]+?)\s+from\s+service_role\s*;/gi)]
+  .flatMap(match => match[1].split(',').map(value => value.trim())).sort();
+assert.deepEqual(revokedAllTargets, [...Object.keys(expectedBackendMatrix), 'public.staging_audit_recoveries'].sort(),
+  'antes do grant mínimo, todos os direitos prévios dos treze alvos são retirados');
+assert.match(hardeningSql, /execute format\('revoke truncate on table public\.%I from service_role', r\.relname\)/);
+assert.match(hardeningSql, /c\.relkind in \('r','p'\)[\s\S]*has_table_privilege\('service_role',c\.oid,'TRUNCATE'\)/,
+  'pós-condição verifica TRUNCATE efetivo no catálogo público inteiro, incluindo herança');
+const hardenedRunner = await exerciseRunner(source, capability, capabilityHash, { serverPrivileges: normalizedPrivileges });
+assert.equal(hardenedRunner.result.failed, 0, 'runner completo funciona com a matriz normalizada extraída do DDL aplicado');
+assert.equal(hardenedRunner.auditOrClinicalDeletionCommitted, false);
+const missingServerSelect = structuredClone(normalizedPrivileges);
+missingServerSelect['public.addenda'] = [];
+const unavailableServer = await exerciseRunner(source, capability, capabilityHash, { serverPrivileges: missingServerSelect });
+assert.equal(unavailableServer.accounts.length, 0, 'ausência de SELECT servidor interrompe antes de criar qualquer Auth');
+assert.ok(unavailableServer.result.checks.some(check => check.name === 'required_retification_schema' && !check.passed && check.diagnostic === 'http_403'));
+assert.ok(unavailableServer.result.checks.some(check => check.name === 'synthetic_independent_database_containment' && check.passed),
+  'RPC independente SECURITY DEFINER contém acesso sem grant de tabela ao servidor');
+const legacyKeys = await exerciseRunner(source, capability, capabilityHash, { legacyApiKeys: true });
+assert.equal(legacyKeys.result.failed, 0, 'fallback legacy preserva apikey/admin Bearer e sessões dos usuários');
+const badAdminBearer = await exerciseRunner(source.replace("token.startsWith('sb_secret_')", 'false'), capability, capabilityHash);
+assert.equal(badAdminBearer.accounts.length, 0);
+assert.ok(badAdminBearer.result.checks.some(check => check.name === 'durable_invocation_claim' && !check.passed && check.diagnostic === 'http_401'),
+  'chave sb_secret em Bearer é recusada antes de claim/fixtures');
+const wrongAdminApiKey = await exerciseRunner(source.replace('const apiKey = token === adminKey ? adminKey : anonKey;', 'const apiKey = anonKey;'), capability, capabilityHash);
+assert.equal(wrongAdminApiKey.accounts.length, 0);
+assert.ok(wrongAdminApiKey.result.checks.some(check => check.name === 'durable_invocation_claim' && !check.passed
+  && ['http_401', 'http_403'].includes(check.diagnostic)),
+  'apikey anon não autentica chamada administrativa moderna');
+const badPublishableBearer = await exerciseRunner(source.replace("token.startsWith('sb_publishable_')", 'false'), capability, capabilityHash);
+assert.equal(badPublishableBearer.accounts.length, 1);
+assert.ok(badPublishableBearer.accounts[0].blocked, 'falha de login público conserva limpeza administrativa');
+assert.ok(badPublishableBearer.result.checks.some(check => check.name === 'fixture_auth_password_login' && !check.passed && check.diagnostic === 'http_401'),
+  'chave sb_publishable em Bearer é recusada pelo Auth');
 assert.equal(passing.result.checks.filter(check => check.name === 'synthetic_auth_banned_password_rotated' && check.passed).length, 4,
   'as quatro rotações passam pela política Auth e bloqueiam as contas');
 
 const weakCreation = await exerciseRunner(source.replace("const password = 'Aa1!' + ", 'const password = '), capability, capabilityHash);
 assert.equal(weakCreation.accounts.length, 0, 'Auth rejeita criação sem maiúscula antes de persistir uma conta');
 assert.ok(weakCreation.result.checks.some(check => check.name === 'fixture_auth_create' && !check.passed && check.diagnostic === 'http_422'));
-const weakRotation = await exerciseRunner(source.replace("{ password: 'Aa1!' + ", '{ password: '), capability, capabilityHash);
+const weakRotation = await exerciseRunner(source.replaceAll("{ password: 'Aa1!' + ", '{ password: '), capability, capabilityHash);
 assert.equal(weakRotation.accounts.length, 4, 'regressão somente na rotação ainda cria as quatro contas');
 assert.equal(weakRotation.result.checks.filter(check => check.name === 'synthetic_auth_banned_password_rotated' && !check.passed
   && check.diagnostic === 'http_422').length, 4, 'a API rejeita todas as rotações sem maiúscula');
@@ -148,11 +236,24 @@ const oversizedPassword = "'Aa1!' + crypto.randomUUID() + crypto.randomUUID()";
 const longCreation = await exerciseRunner(source.replace(`const password = ${compactPassword}`, `const password = ${oversizedPassword}`), capability, capabilityHash);
 assert.equal(longCreation.accounts.length, 0, 'Auth rejeita senha de 76 bytes antes de criar a conta');
 assert.ok(longCreation.result.checks.some(check => check.name === 'fixture_auth_create' && !check.passed && check.diagnostic === 'http_422'));
-const longRotation = await exerciseRunner(source.replace(`{ password: ${compactPassword}`, `{ password: ${oversizedPassword}`), capability, capabilityHash);
+const longRotation = await exerciseRunner(source.replaceAll(`{ password: ${compactPassword}`, `{ password: ${oversizedPassword}`), capability, capabilityHash);
 assert.equal(longRotation.accounts.length, 4, 'regressão de comprimento somente na rotação conserva quatro contas');
 assert.equal(longRotation.result.checks.filter(check => check.name === 'synthetic_auth_banned_password_rotated' && !check.passed
   && check.diagnostic === 'http_422').length, 4, 'Auth rejeita todas as rotações de 76 bytes');
 assert.ok(longRotation.accounts.every(user => !user.blocked), 'rotação longa rejeitada não marca falso bloqueio Auth');
+
+const budgetExceeded = await exerciseRunner(source, capability, capabilityHash, { exhaustRuntimeBudgetAtAuthCreate: true });
+assert.equal(budgetExceeded.accounts.length, 1, 'fim do orçamento interrompe novas contas e testes');
+assert.ok(budgetExceeded.accounts[0].blocked, 'reserva de encerramento ainda bloqueia a primeira identidade');
+assert.ok(budgetExceeded.result.checks.some(check => !check.passed && check.diagnostic === 'audit_runtime_budget'));
+assert.ok(budgetExceeded.result.checks.some(check => check.name === 'synthetic_independent_database_containment' && check.passed));
+const lostAuthCreation = await exerciseRunner(source, capability, capabilityHash, { loseAuthCreationResponse: true });
+assert.equal(lostAuthCreation.accounts.length, 1);
+assert.ok(lostAuthCreation.accounts[0].blocked, 'inventário recupera e bloqueia Auth confirmado sem resposta antes do users.push');
+assert.ok(lostAuthCreation.result.checks.some(check => check.name === 'synthetic_independent_database_containment' && check.passed));
+const storageUnavailable = await exerciseRunner(source, capability, capabilityHash, { storageDeleteUnavailable: true });
+assert.ok(storageUnavailable.result.checks.some(check => check.name === 'storage_cross_org_delete_denied' && !check.passed),
+  '503 no DELETE Storage não prova isolamento, mesmo quando o objeto original permanece intacto');
 
 const lostUpdate = await exerciseRunner(source, capability, capabilityHash, { bothAccepted: true });
 assert.ok(lostUpdate.result.checks.some(check => check.name === 'retification_atomic_race_two_real_sessions_preserves_both_proposals' && !check.passed),
@@ -184,3 +285,4 @@ const erasedOriginal = await exerciseRunner(source, capability, capabilityHash, 
 assert.ok(erasedOriginal.result.checks.some(check => check.name === 'retification_parent_update_delete_and_org_cascade_denied' && !check.passed));
 assert.equal(erasedOriginal.result.retention.clinicalRowsDeleted, true, 'relatório deve admitir perda detectada, sem flags falsas constantes');
 console.log('✓ runner exige CAS com um vencedor e conflito preservado, pai imutável, eventos em todos os tópicos e retém evidência com contas bloqueadas mesmo após falha');
+await import('./staging-fixture-recovery-security.mjs');
