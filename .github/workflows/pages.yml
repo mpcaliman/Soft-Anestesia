@@ -1,13 +1,23 @@
 name: Publicar no GitHub Pages
+run-name: Publicar ${{ inputs.source_sha }} — ${{ inputs.authorization }}
 
-# Publica o app de anestesia (raiz do repositório) no GitHub Pages.
+# Publica somente o pacote público por autorização G5 explícita. O commit deve
+# estar em main e ter uma execução push da CI concluída com sucesso.
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
+    inputs:
+      source_sha:
+        description: "SHA completo (40 caracteres) já aprovado pela CI em main"
+        required: true
+        type: string
+      authorization:
+        description: "Referência da autorização de Marcelo (formato G5-cartao)"
+        required: true
+        type: string
 
 permissions:
+  actions: read
   contents: read
   pages: write
   id-token: write
@@ -18,15 +28,68 @@ concurrency:
 
 jobs:
   build:
+    if: github.actor == 'mpcaliman' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      AUTHORIZATION: ${{ inputs.authorization }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
+      - name: Baixar exatamente o commit autorizado
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+      - name: Confirmar autorização, main e CI aprovada
+        shell: bash
+        run: |
+          if [[ ! "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "source_sha deve ser um SHA completo em minúsculas" >&2
+            exit 1
+          fi
+          if [[ ! "$AUTHORIZATION" =~ ^G5-[A-Za-z0-9._/-]+$ ]]; then
+            echo "authorization deve seguir o formato G5-cartao" >&2
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
+          node --input-type=module <<'JS'
+          import { readFileSync } from 'node:fs';
+          const baseline = JSON.parse(readFileSync('database/migration-baseline.json', 'utf8'));
+          if (baseline.status !== 'staging_verified' || baseline.remoteApplyAllowed !== true ||
+              !baseline.stagingEvidence?.matrixPassed || !baseline.stagingEvidence?.authenticatedSessionsPassed ||
+              !baseline.stagingEvidence?.schemaHash || !baseline.stagingEvidence?.workflowUrl) {
+            throw new Error('Publicação bloqueada: falta homologação real autenticada e reconciliação reproduzível');
+          }
+          console.log(JSON.stringify({ owner: process.env.GITHUB_ACTOR, sha: process.env.SOURCE_SHA,
+            gate: process.env.AUTHORIZATION, proof: `https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` }));
+          JS
+          approved_runs="$(gh api --method GET \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+            -f head_sha="$SOURCE_SHA" \
+            -f branch=main \
+            -f event=push \
+            -f status=success \
+            -f per_page=1 \
+            --jq '.total_count')"
+          test "$approved_runs" -gt 0
+      - name: Configurar Node fixado
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Instalar dependências pelo lockfile
+        run: npm ci
+      - name: Gerar e validar o pacote público
+        run: npm run build && npm run validate:dist
+      - name: Configurar GitHub Pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # actions/configure-pages@v5
         with:
           enablement: true
-      - uses: actions/upload-pages-artifact@v3
+      - name: Enviar somente o pacote público
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # actions/upload-pages-artifact@v3
         with:
-          path: '.'
+          path: dist
   deploy:
     needs: build
     runs-on: ubuntu-latest
@@ -35,4 +98,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # actions/deploy-pages@v4

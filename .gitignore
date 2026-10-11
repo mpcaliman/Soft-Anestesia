@@ -1,7 +1,12 @@
 node_modules
-package-lock.json
+dist/
 test-results/
 playwright-report/
+
+# Estado local da CLI Supabase. Migrações, configuração e funções continuam
+# versionadas; credenciais, branches vinculadas e artefatos temporários não.
+supabase/.branches/
+supabase/.temp/
 
 # Seed gerado da base Anvisa/CMED (12,8 MB). Não vai para o repositório: é
 # grande demais para colar no editor SQL do Supabase (que é o único motivo de

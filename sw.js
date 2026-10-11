@@ -5,9 +5,14 @@
    como fallback quando a rede falha (wifi de hospital, avião, elevador).
    Só intercepta GET do próprio domínio — Supabase e afins passam direto.
 ============================================================================ */
-const CACHE = 'soft-anestesia-v1';
-
-self.addEventListener('install', () => { self.skipWaiting(); });
+const CACHE = 'soft-anestesia-v4-print-shell';
+// Assets públicos: nenhuma ficha ou conteúdo clínico é pré-carregado.
+const PRINT_ASSETS = ['print-shell.html', 'src/print/print-shell.js',
+  'src/ui/strict-actions.js', 'src/ui/strict-actions.generated.js'];
+self.addEventListener('install', event => {
+  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(PRINT_ASSETS))
+    .then(() => self.skipWaiting()));
+});
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(
@@ -22,7 +27,10 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   let url;
   try { url = new URL(req.url); } catch (err) { return; }
-  if (url.origin !== self.location.origin) return;
+  if (url.origin !== self.location.origin || !/^https?:$/.test(url.protocol)) return;
+  // Somente código/estilos do app; endpoints e arquivos clínicos nunca entram.
+  if (/\/(?:rest|auth|storage|functions)\/v1(?:\/|$)/.test(url.pathname)) return;
+  if (!req.mode || (req.mode !== 'navigate' && !/\.(?:js|css|html|webmanifest|svg|png|ico)$/.test(url.pathname))) return;
 
   e.respondWith(
     fetch(req)

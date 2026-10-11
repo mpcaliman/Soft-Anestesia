@@ -1,0 +1,3 @@
+# Preserve the applied catalog-derived SQL bytes, including captured CRLF
+# inside the timestamp helper; the manifest hashes this exact artifact.
+docs/engineering/LEGACY-EMPTY-STAGING-BASELINE-2026-10-10.sql -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

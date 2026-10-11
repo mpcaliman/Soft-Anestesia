@@ -1,0 +1,6430 @@
+{
+  "format": 1,
+  "recordedAt": "2026-10-09",
+  "project": "zbpbrnalamjrcfbscjkt",
+  "source": "Supabase list_tables verbose; schema metadata only",
+  "clinicalRowsRead": false,
+  "completeBaseline": false,
+  "limits": [
+    "No unique indexes, full constraints, policies, grants or function definitions; rows is the tool-reported catalog value, not independently verified COUNT(*)"
+  ],
+  "tables": [
+    {
+      "name": "public.pacientes",
+      "rls_enabled": true,
+      "rows": 0,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "user_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "auth.uid()"
+        },
+        {
+          "name": "nome",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "cpf",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "data_nascimento",
+          "data_type": "date",
+          "format": "date",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "telefone",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "email",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "convenio",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "numero_carteirinha",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "alergias",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "comorbidades",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "medicamentos_uso",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "observacoes",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "pacientes_user_id_fkey",
+          "source_table": "public.pacientes",
+          "source_columns": [
+            "user_id"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.documentos",
+      "rls_enabled": true,
+      "rows": 1152,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "bigint",
+          "format": "int8",
+          "options": [
+            "identity",
+            "updatable"
+          ],
+          "identity_generation": "BY DEFAULT"
+        },
+        {
+          "name": "user_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "modulo",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "doc_id",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "dados",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'{}'::jsonb"
+        },
+        {
+          "name": "atualizado_em",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "documentos_user_id_fkey",
+          "source_table": "public.documentos",
+          "source_columns": [
+            "user_id"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.assinaturas",
+      "rls_enabled": true,
+      "rows": 0,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "codigo",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable",
+            "unique"
+          ]
+        },
+        {
+          "name": "modulo",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "doc_id",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "titulo",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "paciente_ini",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "profissional",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "crm",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "hash_doc",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "algoritmo",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'SHA-256'::text"
+        },
+        {
+          "name": "provedor",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "cert_emissor",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "cert_serial",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "cert_titular",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "cadeia_icp",
+          "data_type": "boolean",
+          "format": "bool",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "versao",
+          "data_type": "integer",
+          "format": "int4",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "1"
+        },
+        {
+          "name": "prev_hash",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "self_hash",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "assinado_em",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "criado_em",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ]
+    },
+    {
+      "name": "public.organizations",
+      "rls_enabled": true,
+      "rows": 2,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "nome",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "cnpj",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "endereco",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "ativo",
+          "data_type": "boolean",
+          "format": "bool",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "true"
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "settings",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'{}'::jsonb"
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "equipment_organization_id_fkey",
+          "source_table": "public.equipment",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "prescriptions_organization_id_fkey",
+          "source_table": "public.prescriptions",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "documents_organization_id_fkey",
+          "source_table": "public.documents",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "finance_entries_organization_id_fkey",
+          "source_table": "public.finance_entries",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "anesthesia_timeline_events_organization_id_fkey",
+          "source_table": "public.anesthesia_timeline_events",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "addenda_organization_id_fkey",
+          "source_table": "public.addenda",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "attachments_organization_id_fkey",
+          "source_table": "public.attachments",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "templates_organization_id_fkey",
+          "source_table": "public.templates",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "standard_texts_organization_id_fkey",
+          "source_table": "public.standard_texts",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "consultations_organization_id_fkey",
+          "source_table": "public.consultations",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "quotes_organization_id_fkey",
+          "source_table": "public.quotes",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "appointments_organization_id_fkey",
+          "source_table": "public.appointments",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "org_configs_organization_id_fkey",
+          "source_table": "public.org_configs",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "org_shares_org_origem_fkey",
+          "source_table": "public.org_shares",
+          "source_columns": [
+            "org_origem"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "org_shares_org_destino_fkey",
+          "source_table": "public.org_shares",
+          "source_columns": [
+            "org_destino"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "organization_users_organization_id_fkey",
+          "source_table": "public.organization_users",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "hospitals_organization_id_fkey",
+          "source_table": "public.hospitals",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "rooms_organization_id_fkey",
+          "source_table": "public.rooms",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "patients_organization_id_fkey",
+          "source_table": "public.patients",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "encounters_organization_id_fkey",
+          "source_table": "public.encounters",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "preanesthetic_assessments_organization_id_fkey",
+          "source_table": "public.preanesthetic_assessments",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "anesthesia_records_organization_id_fkey",
+          "source_table": "public.anesthesia_records",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "recovery_records_organization_id_fkey",
+          "source_table": "public.recovery_records",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "risk_assessments_organization_id_fkey",
+          "source_table": "public.risk_assessments",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "consents_organization_id_fkey",
+          "source_table": "public.consents",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.profiles",
+      "rls_enabled": true,
+      "rows": 2,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "nome",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "email",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "celular",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "crm",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "crm_uf",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "funcao",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "organizacao",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "hospital_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "ativo",
+          "data_type": "boolean",
+          "format": "bool",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "true"
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "profiles_hospital_id_fkey",
+          "source_table": "public.profiles",
+          "source_columns": [
+            "hospital_id"
+          ],
+          "target_table": "public.hospitals",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "profiles_id_fkey",
+          "source_table": "public.profiles",
+          "source_columns": [
+            "id"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.organization_users",
+      "rls_enabled": true,
+      "rows": 2,
+      "columns": [
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "user_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "role",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "check": "role = ANY (ARRAY['gestor'::text, 'anestesiologista'::text, 'cirurgiao'::text, 'auxiliar'::text, 'financeiro'::text, 'empresa'::text])"
+        },
+        {
+          "name": "ativo",
+          "data_type": "boolean",
+          "format": "bool",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "true"
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "permissoes",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "nullable",
+            "updatable"
+          ],
+          "comment": "Permissões personalizadas pelo gestor: {perfil, modulos[], soImpressao[]}. Nulo = padrão do papel."
+        }
+      ],
+      "primary_keys": [
+        "organization_id",
+        "user_id",
+        "role"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "organization_users_user_id_fkey",
+          "source_table": "public.organization_users",
+          "source_columns": [
+            "user_id"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "organization_users_organization_id_fkey",
+          "source_table": "public.organization_users",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.hospitals",
+      "rls_enabled": true,
+      "rows": 0,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "nome",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "cnpj",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "endereco",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "ativo",
+          "data_type": "boolean",
+          "format": "bool",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "true"
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "rooms_hospital_id_fkey",
+          "source_table": "public.rooms",
+          "source_columns": [
+            "hospital_id"
+          ],
+          "target_table": "public.hospitals",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "profiles_hospital_id_fkey",
+          "source_table": "public.profiles",
+          "source_columns": [
+            "hospital_id"
+          ],
+          "target_table": "public.hospitals",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "encounters_hospital_id_fkey",
+          "source_table": "public.encounters",
+          "source_columns": [
+            "hospital_id"
+          ],
+          "target_table": "public.hospitals",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "equipment_hospital_id_fkey",
+          "source_table": "public.equipment",
+          "source_columns": [
+            "hospital_id"
+          ],
+          "target_table": "public.hospitals",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "hospitals_organization_id_fkey",
+          "source_table": "public.hospitals",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.rooms",
+      "rls_enabled": true,
+      "rows": 0,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "hospital_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "nome",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "ativo",
+          "data_type": "boolean",
+          "format": "bool",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "true"
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "encounters_room_id_fkey",
+          "source_table": "public.encounters",
+          "source_columns": [
+            "room_id"
+          ],
+          "target_table": "public.rooms",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "rooms_hospital_id_fkey",
+          "source_table": "public.rooms",
+          "source_columns": [
+            "hospital_id"
+          ],
+          "target_table": "public.hospitals",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "rooms_organization_id_fkey",
+          "source_table": "public.rooms",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.equipment",
+      "rls_enabled": true,
+      "rows": 0,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "hospital_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "nome",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "tipo",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "ativo",
+          "data_type": "boolean",
+          "format": "bool",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "true"
+        },
+        {
+          "name": "data",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'{}'::jsonb"
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "equipment_hospital_id_fkey",
+          "source_table": "public.equipment",
+          "source_columns": [
+            "hospital_id"
+          ],
+          "target_table": "public.hospitals",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "equipment_organization_id_fkey",
+          "source_table": "public.equipment",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.patients",
+      "rls_enabled": true,
+      "rows": 259,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "nome",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "nome_social",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "nascimento",
+          "data_type": "date",
+          "format": "date",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "sexo",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "cpf",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "prontuario",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "telefone",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "email",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "endereco",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "responsavel",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "responsavel_tel",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "convenio",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "carteirinha",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "observacoes",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "data",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'{}'::jsonb"
+        },
+        {
+          "name": "created_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "updated_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "deleted_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "legacy_id",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "consultations_patient_id_fkey",
+          "source_table": "public.consultations",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "patients_organization_id_fkey",
+          "source_table": "public.patients",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "patients_created_by_fkey",
+          "source_table": "public.patients",
+          "source_columns": [
+            "created_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "patients_updated_by_fkey",
+          "source_table": "public.patients",
+          "source_columns": [
+            "updated_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "encounters_patient_id_fkey",
+          "source_table": "public.encounters",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "preanesthetic_assessments_patient_id_fkey",
+          "source_table": "public.preanesthetic_assessments",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "anesthesia_records_patient_id_fkey",
+          "source_table": "public.anesthesia_records",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "recovery_records_patient_id_fkey",
+          "source_table": "public.recovery_records",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "risk_assessments_patient_id_fkey",
+          "source_table": "public.risk_assessments",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "consents_patient_id_fkey",
+          "source_table": "public.consents",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "prescriptions_patient_id_fkey",
+          "source_table": "public.prescriptions",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "documents_patient_id_fkey",
+          "source_table": "public.documents",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "finance_entries_patient_id_fkey",
+          "source_table": "public.finance_entries",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "addenda_patient_id_fkey",
+          "source_table": "public.addenda",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "attachments_patient_id_fkey",
+          "source_table": "public.attachments",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "quotes_patient_id_fkey",
+          "source_table": "public.quotes",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "appointments_patient_id_fkey",
+          "source_table": "public.appointments",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.encounters",
+      "rls_enabled": true,
+      "rows": 759,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "patient_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "hospital_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "room_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "surgeon_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "anesthesiologist_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "procedimento",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "tuss",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "diagnostico",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "lateralidade",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "carater",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ],
+          "check": "(carater = ANY (ARRAY['eletivo'::text, 'urgencia'::text, 'emergencia'::text])) OR carater IS NULL"
+        },
+        {
+          "name": "data_prevista",
+          "data_type": "date",
+          "format": "date",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "hora_prevista",
+          "data_type": "time without time zone",
+          "format": "time",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "status",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'agendado'::text"
+        },
+        {
+          "name": "senha",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "convenio",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "guia",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "acomodacao",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "data",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'{}'::jsonb"
+        },
+        {
+          "name": "created_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "updated_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "deleted_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "legacy_id",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "encounters_patient_id_fkey",
+          "source_table": "public.encounters",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "quotes_encounter_id_fkey",
+          "source_table": "public.quotes",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "appointments_encounter_id_fkey",
+          "source_table": "public.appointments",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "encounters_updated_by_fkey",
+          "source_table": "public.encounters",
+          "source_columns": [
+            "updated_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "encounters_created_by_fkey",
+          "source_table": "public.encounters",
+          "source_columns": [
+            "created_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "encounters_anesthesiologist_id_fkey",
+          "source_table": "public.encounters",
+          "source_columns": [
+            "anesthesiologist_id"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "encounters_surgeon_id_fkey",
+          "source_table": "public.encounters",
+          "source_columns": [
+            "surgeon_id"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "encounters_room_id_fkey",
+          "source_table": "public.encounters",
+          "source_columns": [
+            "room_id"
+          ],
+          "target_table": "public.rooms",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "encounters_organization_id_fkey",
+          "source_table": "public.encounters",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "encounters_hospital_id_fkey",
+          "source_table": "public.encounters",
+          "source_columns": [
+            "hospital_id"
+          ],
+          "target_table": "public.hospitals",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "consultations_encounter_id_fkey",
+          "source_table": "public.consultations",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "attachments_encounter_id_fkey",
+          "source_table": "public.attachments",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "addenda_encounter_id_fkey",
+          "source_table": "public.addenda",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "anesthesia_timeline_events_encounter_id_fkey",
+          "source_table": "public.anesthesia_timeline_events",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "finance_entries_encounter_id_fkey",
+          "source_table": "public.finance_entries",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "documents_encounter_id_fkey",
+          "source_table": "public.documents",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "prescriptions_encounter_id_fkey",
+          "source_table": "public.prescriptions",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "consents_encounter_id_fkey",
+          "source_table": "public.consents",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "risk_assessments_encounter_id_fkey",
+          "source_table": "public.risk_assessments",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "recovery_records_encounter_id_fkey",
+          "source_table": "public.recovery_records",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "anesthesia_records_encounter_id_fkey",
+          "source_table": "public.anesthesia_records",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "preanesthetic_assessments_encounter_id_fkey",
+          "source_table": "public.preanesthetic_assessments",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.preanesthetic_assessments",
+      "rls_enabled": true,
+      "rows": 112,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "patient_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "encounter_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "status",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'draft'::text"
+        },
+        {
+          "name": "version",
+          "data_type": "integer",
+          "format": "int4",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "1"
+        },
+        {
+          "name": "data",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'{}'::jsonb"
+        },
+        {
+          "name": "content_hash",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "finalized_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "finalized_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "updated_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "deleted_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "device_id",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "legacy_id",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "preanesthetic_assessments_organization_id_fkey",
+          "source_table": "public.preanesthetic_assessments",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "preanesthetic_assessments_patient_id_fkey",
+          "source_table": "public.preanesthetic_assessments",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "preanesthetic_assessments_encounter_id_fkey",
+          "source_table": "public.preanesthetic_assessments",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "preanesthetic_assessments_finalized_by_fkey",
+          "source_table": "public.preanesthetic_assessments",
+          "source_columns": [
+            "finalized_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "preanesthetic_assessments_created_by_fkey",
+          "source_table": "public.preanesthetic_assessments",
+          "source_columns": [
+            "created_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "preanesthetic_assessments_updated_by_fkey",
+          "source_table": "public.preanesthetic_assessments",
+          "source_columns": [
+            "updated_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "anesthesia_records_preanesthetic_assessment_id_fkey",
+          "source_table": "public.anesthesia_records",
+          "source_columns": [
+            "preanesthetic_assessment_id"
+          ],
+          "target_table": "public.preanesthetic_assessments",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.anesthesia_records",
+      "rls_enabled": true,
+      "rows": 194,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "patient_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "encounter_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "preanesthetic_assessment_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "preanesthetic_version",
+          "data_type": "integer",
+          "format": "int4",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "imported_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "imported_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "imported_snapshot",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "status",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'draft'::text"
+        },
+        {
+          "name": "version",
+          "data_type": "integer",
+          "format": "int4",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "1"
+        },
+        {
+          "name": "data",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'{}'::jsonb"
+        },
+        {
+          "name": "content_hash",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "finalized_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "finalized_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "updated_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "deleted_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "device_id",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "legacy_id",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "anesthesia_records_patient_id_fkey",
+          "source_table": "public.anesthesia_records",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "anesthesia_records_organization_id_fkey",
+          "source_table": "public.anesthesia_records",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "anesthesia_records_encounter_id_fkey",
+          "source_table": "public.anesthesia_records",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "anesthesia_records_preanesthetic_assessment_id_fkey",
+          "source_table": "public.anesthesia_records",
+          "source_columns": [
+            "preanesthetic_assessment_id"
+          ],
+          "target_table": "public.preanesthetic_assessments",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "anesthesia_records_imported_by_fkey",
+          "source_table": "public.anesthesia_records",
+          "source_columns": [
+            "imported_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "anesthesia_records_finalized_by_fkey",
+          "source_table": "public.anesthesia_records",
+          "source_columns": [
+            "finalized_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "anesthesia_records_created_by_fkey",
+          "source_table": "public.anesthesia_records",
+          "source_columns": [
+            "created_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "anesthesia_records_updated_by_fkey",
+          "source_table": "public.anesthesia_records",
+          "source_columns": [
+            "updated_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "recovery_records_anesthesia_record_id_fkey",
+          "source_table": "public.recovery_records",
+          "source_columns": [
+            "anesthesia_record_id"
+          ],
+          "target_table": "public.anesthesia_records",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "anesthesia_timeline_events_anesthesia_record_id_fkey",
+          "source_table": "public.anesthesia_timeline_events",
+          "source_columns": [
+            "anesthesia_record_id"
+          ],
+          "target_table": "public.anesthesia_records",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.recovery_records",
+      "rls_enabled": true,
+      "rows": 143,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "patient_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "encounter_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "anesthesia_record_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "status",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'draft'::text"
+        },
+        {
+          "name": "version",
+          "data_type": "integer",
+          "format": "int4",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "1"
+        },
+        {
+          "name": "data",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'{}'::jsonb"
+        },
+        {
+          "name": "content_hash",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "finalized_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "finalized_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "updated_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "deleted_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "device_id",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "legacy_id",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "recovery_records_organization_id_fkey",
+          "source_table": "public.recovery_records",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "recovery_records_updated_by_fkey",
+          "source_table": "public.recovery_records",
+          "source_columns": [
+            "updated_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "recovery_records_created_by_fkey",
+          "source_table": "public.recovery_records",
+          "source_columns": [
+            "created_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "recovery_records_finalized_by_fkey",
+          "source_table": "public.recovery_records",
+          "source_columns": [
+            "finalized_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "recovery_records_anesthesia_record_id_fkey",
+          "source_table": "public.recovery_records",
+          "source_columns": [
+            "anesthesia_record_id"
+          ],
+          "target_table": "public.anesthesia_records",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "recovery_records_encounter_id_fkey",
+          "source_table": "public.recovery_records",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "recovery_records_patient_id_fkey",
+          "source_table": "public.recovery_records",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.risk_assessments",
+      "rls_enabled": true,
+      "rows": 0,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "patient_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "encounter_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "status",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'draft'::text"
+        },
+        {
+          "name": "version",
+          "data_type": "integer",
+          "format": "int4",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "1"
+        },
+        {
+          "name": "data",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'{}'::jsonb"
+        },
+        {
+          "name": "content_hash",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "finalized_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "finalized_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "updated_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "deleted_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "legacy_id",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "risk_assessments_updated_by_fkey",
+          "source_table": "public.risk_assessments",
+          "source_columns": [
+            "updated_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "risk_assessments_created_by_fkey",
+          "source_table": "public.risk_assessments",
+          "source_columns": [
+            "created_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "risk_assessments_finalized_by_fkey",
+          "source_table": "public.risk_assessments",
+          "source_columns": [
+            "finalized_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "risk_assessments_encounter_id_fkey",
+          "source_table": "public.risk_assessments",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "risk_assessments_patient_id_fkey",
+          "source_table": "public.risk_assessments",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "risk_assessments_organization_id_fkey",
+          "source_table": "public.risk_assessments",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.consents",
+      "rls_enabled": true,
+      "rows": 53,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "patient_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "encounter_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "status",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'draft'::text"
+        },
+        {
+          "name": "version",
+          "data_type": "integer",
+          "format": "int4",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "1"
+        },
+        {
+          "name": "data",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'{}'::jsonb"
+        },
+        {
+          "name": "content_hash",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "finalized_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "finalized_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "updated_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "deleted_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "legacy_id",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "consents_created_by_fkey",
+          "source_table": "public.consents",
+          "source_columns": [
+            "created_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "consents_finalized_by_fkey",
+          "source_table": "public.consents",
+          "source_columns": [
+            "finalized_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "consents_encounter_id_fkey",
+          "source_table": "public.consents",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "consents_patient_id_fkey",
+          "source_table": "public.consents",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "consents_organization_id_fkey",
+          "source_table": "public.consents",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "consents_updated_by_fkey",
+          "source_table": "public.consents",
+          "source_columns": [
+            "updated_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.prescriptions",
+      "rls_enabled": true,
+      "rows": 0,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "patient_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "encounter_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "modelo",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "status",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'draft'::text"
+        },
+        {
+          "name": "version",
+          "data_type": "integer",
+          "format": "int4",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "1"
+        },
+        {
+          "name": "data",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'{}'::jsonb"
+        },
+        {
+          "name": "content_hash",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "finalized_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "finalized_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "updated_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "deleted_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "legacy_id",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "prescriptions_updated_by_fkey",
+          "source_table": "public.prescriptions",
+          "source_columns": [
+            "updated_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "prescriptions_created_by_fkey",
+          "source_table": "public.prescriptions",
+          "source_columns": [
+            "created_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "prescriptions_finalized_by_fkey",
+          "source_table": "public.prescriptions",
+          "source_columns": [
+            "finalized_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "prescriptions_encounter_id_fkey",
+          "source_table": "public.prescriptions",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "prescriptions_patient_id_fkey",
+          "source_table": "public.prescriptions",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "prescriptions_organization_id_fkey",
+          "source_table": "public.prescriptions",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.documents",
+      "rls_enabled": true,
+      "rows": 0,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "patient_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "encounter_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "modelo",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "status",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'draft'::text"
+        },
+        {
+          "name": "version",
+          "data_type": "integer",
+          "format": "int4",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "1"
+        },
+        {
+          "name": "data",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'{}'::jsonb"
+        },
+        {
+          "name": "content_hash",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "finalized_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "finalized_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "updated_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "deleted_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "legacy_id",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "documents_organization_id_fkey",
+          "source_table": "public.documents",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "documents_patient_id_fkey",
+          "source_table": "public.documents",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "documents_encounter_id_fkey",
+          "source_table": "public.documents",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "documents_finalized_by_fkey",
+          "source_table": "public.documents",
+          "source_columns": [
+            "finalized_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "documents_created_by_fkey",
+          "source_table": "public.documents",
+          "source_columns": [
+            "created_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "documents_updated_by_fkey",
+          "source_table": "public.documents",
+          "source_columns": [
+            "updated_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.finance_entries",
+      "rls_enabled": true,
+      "rows": 259,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "patient_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "encounter_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "status",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'rascunho'::text"
+        },
+        {
+          "name": "version",
+          "data_type": "integer",
+          "format": "int4",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "1"
+        },
+        {
+          "name": "data",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'{}'::jsonb"
+        },
+        {
+          "name": "created_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "updated_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "deleted_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "legacy_id",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "finance_entries_updated_by_fkey",
+          "source_table": "public.finance_entries",
+          "source_columns": [
+            "updated_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "finance_entries_patient_id_fkey",
+          "source_table": "public.finance_entries",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "finance_entries_organization_id_fkey",
+          "source_table": "public.finance_entries",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "finance_entries_encounter_id_fkey",
+          "source_table": "public.finance_entries",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "finance_entries_created_by_fkey",
+          "source_table": "public.finance_entries",
+          "source_columns": [
+            "created_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.anesthesia_timeline_events",
+      "rls_enabled": true,
+      "rows": 0,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "encounter_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "anesthesia_record_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "ts",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "type",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "check": "type = ANY (ARRAY['vital'::text, 'medication'::text, 'fluid'::text, 'blood_product'::text, 'event'::text, 'procedure'::text, 'airway'::text, 'ventilation'::text, 'note'::text, 'urine_output'::text, 'blood_loss'::text, 'position_change'::text, 'antibiotic'::text, 'neuromuscular_monitoring'::text])"
+        },
+        {
+          "name": "subtype",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "payload",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'{}'::jsonb"
+        },
+        {
+          "name": "created_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "deleted_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "anesthesia_timeline_events_encounter_id_fkey",
+          "source_table": "public.anesthesia_timeline_events",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "anesthesia_timeline_events_anesthesia_record_id_fkey",
+          "source_table": "public.anesthesia_timeline_events",
+          "source_columns": [
+            "anesthesia_record_id"
+          ],
+          "target_table": "public.anesthesia_records",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "anesthesia_timeline_events_created_by_fkey",
+          "source_table": "public.anesthesia_timeline_events",
+          "source_columns": [
+            "created_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "anesthesia_timeline_events_organization_id_fkey",
+          "source_table": "public.anesthesia_timeline_events",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.addenda",
+      "rls_enabled": true,
+      "rows": 13,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "parent_table",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "parent_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "encounter_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "patient_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "texto",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "data",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'{}'::jsonb"
+        },
+        {
+          "name": "created_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "legacy_id",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "addenda_encounter_id_fkey",
+          "source_table": "public.addenda",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "addenda_patient_id_fkey",
+          "source_table": "public.addenda",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "addenda_created_by_fkey",
+          "source_table": "public.addenda",
+          "source_columns": [
+            "created_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "addenda_organization_id_fkey",
+          "source_table": "public.addenda",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.attachments",
+      "rls_enabled": true,
+      "rows": 0,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "patient_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "encounter_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "module",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "storage_path",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "filename",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "mime_type",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "size",
+          "data_type": "bigint",
+          "format": "int8",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "hash",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "uploaded_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "uploaded_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "deleted_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "attachments_uploaded_by_fkey",
+          "source_table": "public.attachments",
+          "source_columns": [
+            "uploaded_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "attachments_patient_id_fkey",
+          "source_table": "public.attachments",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "attachments_organization_id_fkey",
+          "source_table": "public.attachments",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "attachments_encounter_id_fkey",
+          "source_table": "public.attachments",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.templates",
+      "rls_enabled": true,
+      "rows": 0,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "owner_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "categoria",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "nome",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "favorito",
+          "data_type": "boolean",
+          "format": "bool",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "padrao",
+          "data_type": "boolean",
+          "format": "bool",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "compartilhado",
+          "data_type": "boolean",
+          "format": "bool",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "data",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'{}'::jsonb"
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "deleted_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "templates_organization_id_fkey",
+          "source_table": "public.templates",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "templates_owner_id_fkey",
+          "source_table": "public.templates",
+          "source_columns": [
+            "owner_id"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.standard_texts",
+      "rls_enabled": true,
+      "rows": 0,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "owner_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "chave",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "texto",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "data",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'{}'::jsonb"
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "standard_texts_owner_id_fkey",
+          "source_table": "public.standard_texts",
+          "source_columns": [
+            "owner_id"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "standard_texts_organization_id_fkey",
+          "source_table": "public.standard_texts",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.audit_logs",
+      "rls_enabled": true,
+      "rows": 6649,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "user_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "patient_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "encounter_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "module",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "record_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "action",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "field_name",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "previous_value",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "new_value",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "device_id",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "ip",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "user_agent",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ]
+    },
+    {
+      "name": "public.consultations",
+      "rls_enabled": true,
+      "rows": 0,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "patient_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "encounter_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "status",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'draft'::text"
+        },
+        {
+          "name": "version",
+          "data_type": "integer",
+          "format": "int4",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "1"
+        },
+        {
+          "name": "data",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'{}'::jsonb"
+        },
+        {
+          "name": "content_hash",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "finalized_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "finalized_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "updated_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "deleted_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "device_id",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "legacy_id",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "consultations_updated_by_fkey",
+          "source_table": "public.consultations",
+          "source_columns": [
+            "updated_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "consultations_organization_id_fkey",
+          "source_table": "public.consultations",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "consultations_patient_id_fkey",
+          "source_table": "public.consultations",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "consultations_encounter_id_fkey",
+          "source_table": "public.consultations",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "consultations_finalized_by_fkey",
+          "source_table": "public.consultations",
+          "source_columns": [
+            "finalized_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "consultations_created_by_fkey",
+          "source_table": "public.consultations",
+          "source_columns": [
+            "created_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.quotes",
+      "rls_enabled": true,
+      "rows": 8,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "patient_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "encounter_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "status",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'draft'::text"
+        },
+        {
+          "name": "version",
+          "data_type": "integer",
+          "format": "int4",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "1"
+        },
+        {
+          "name": "data",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'{}'::jsonb"
+        },
+        {
+          "name": "created_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "updated_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "deleted_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "legacy_id",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "quotes_organization_id_fkey",
+          "source_table": "public.quotes",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "quotes_updated_by_fkey",
+          "source_table": "public.quotes",
+          "source_columns": [
+            "updated_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "quotes_created_by_fkey",
+          "source_table": "public.quotes",
+          "source_columns": [
+            "created_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "quotes_encounter_id_fkey",
+          "source_table": "public.quotes",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "quotes_patient_id_fkey",
+          "source_table": "public.quotes",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.appointments",
+      "rls_enabled": true,
+      "rows": 0,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "patient_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "encounter_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "scheduled_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "status",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'agendado'::text"
+        },
+        {
+          "name": "data",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'{}'::jsonb"
+        },
+        {
+          "name": "created_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "updated_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "created_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "deleted_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "legacy_id",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "appointments_organization_id_fkey",
+          "source_table": "public.appointments",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "appointments_updated_by_fkey",
+          "source_table": "public.appointments",
+          "source_columns": [
+            "updated_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "appointments_created_by_fkey",
+          "source_table": "public.appointments",
+          "source_columns": [
+            "created_by"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "appointments_encounter_id_fkey",
+          "source_table": "public.appointments",
+          "source_columns": [
+            "encounter_id"
+          ],
+          "target_table": "public.encounters",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "appointments_patient_id_fkey",
+          "source_table": "public.appointments",
+          "source_columns": [
+            "patient_id"
+          ],
+          "target_table": "public.patients",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.org_configs",
+      "rls_enabled": true,
+      "rows": 3,
+      "comment": "Cadastros e configurações compartilhados da clínica (equipe, convênios, modelos, logomarca). Uma linha por chave.",
+      "columns": [
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "chave",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "dados",
+          "data_type": "jsonb",
+          "format": "jsonb",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'{}'::jsonb"
+        },
+        {
+          "name": "updated_at",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "updated_by",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        }
+      ],
+      "primary_keys": [
+        "organization_id",
+        "chave"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "org_configs_organization_id_fkey",
+          "source_table": "public.org_configs",
+          "source_columns": [
+            "organization_id"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.medicamentos",
+      "rls_enabled": true,
+      "rows": 0,
+      "comment": "Base oficial Anvisa/CMED. Identificação, apresentação, forma e via. Não é tabela de preço nem de posologia.",
+      "columns": [
+        {
+          "name": "ggrem",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "id_apresentacao",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "nome_comercial",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "nome_generico",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "principio_ativo",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "principio_base",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text",
+          "comment": "Raiz do princípio ativo, sem sal nem hidrato. É a chave clínica: regra de anticoagulante vale para a rivaroxabana, não para \"Xarelto\"."
+        },
+        {
+          "name": "concentracao",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "forma_farmaceutica",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "via_administracao",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "vias",
+          "data_type": "ARRAY",
+          "format": "_text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'{}'::text[]"
+        },
+        {
+          "name": "via_definida",
+          "data_type": "boolean",
+          "format": "bool",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "injetavel_sem_via",
+          "data_type": "boolean",
+          "format": "bool",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "false",
+          "comment": "A CMED diz apenas \"injetável\". IV, IM ou SC seria invenção nossa — a tela pede a via ao médico."
+        },
+        {
+          "name": "origem_via",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "apresentacao_original_anvisa",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "laboratorio",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "tipo_medicamento",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text",
+          "comment": "referencia (a CMED chama de \"Novo\"), generico, similar, biologico, especifico, fitoterapico, terapia_avancada, radiofarmaco."
+        },
+        {
+          "name": "tipo_entrada",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "registro_anvisa",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "ean",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "ean2",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "ean3",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "classe_terapeutica",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "regime_preco",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "comercializado",
+          "data_type": "boolean",
+          "format": "bool",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "true"
+        },
+        {
+          "name": "fonte",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "ativo",
+          "data_type": "boolean",
+          "format": "bool",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "true"
+        },
+        {
+          "name": "criado_em",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "atualizado_em",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "nome_comercial_norm",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "generated",
+            "nullable",
+            "updatable"
+          ],
+          "default_value": "med_normalizar(nome_comercial)"
+        },
+        {
+          "name": "nome_generico_norm",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "generated",
+            "nullable",
+            "updatable"
+          ],
+          "default_value": "med_normalizar(nome_generico)"
+        },
+        {
+          "name": "principio_norm",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "generated",
+            "nullable",
+            "updatable"
+          ],
+          "default_value": "med_normalizar(principio_ativo)"
+        },
+        {
+          "name": "busca_norm",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "generated",
+            "nullable",
+            "updatable"
+          ],
+          "default_value": "((((med_normalizar(nome_comercial) || ' '::text) || med_normalizar(principio_ativo)) || ' '::text) || med_normalizar(nome_generico))"
+        }
+      ],
+      "primary_keys": [
+        "ggrem"
+      ]
+    },
+    {
+      "name": "public.medicamentos_regras_anestesicas",
+      "rls_enabled": true,
+      "rows": 0,
+      "comment": "Conduta peri-operatória por princípio ativo. Vazia de propósito: conteúdo clínico entra revisado, não por importação.",
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "principio_base",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "comment": "Casa com medicamentos.principio_base. Nunca com nome comercial — senão a mesma regra teria de ser repetida para cada marca."
+        },
+        {
+          "name": "categoria",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "impacto_anestesico",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "orientacao_suspensao",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "dias_suspensao",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "orientacao_reinicio",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "alerta",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "gravidade",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'informativo'::text"
+        },
+        {
+          "name": "fonte",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "ultima_revisao",
+          "data_type": "date",
+          "format": "date",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "revisado_por",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "ativo",
+          "data_type": "boolean",
+          "format": "bool",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "true"
+        },
+        {
+          "name": "organization_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "criado_em",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "atualizado_em",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ]
+    },
+    {
+      "name": "public.medicamentos_base_versao",
+      "rls_enabled": true,
+      "rows": 0,
+      "comment": "Qual base oficial está carregada e quando entrou. Sem isto não há como responder \"esta prescrição foi feita sobre que versão da Anvisa?\".",
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "fonte",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "versao",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "data_base",
+          "data_type": "date",
+          "format": "date",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "quantidade_registros",
+          "data_type": "integer",
+          "format": "int4",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "0"
+        },
+        {
+          "name": "arquivo_origem",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "novos",
+          "data_type": "integer",
+          "format": "int4",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "atualizados",
+          "data_type": "integer",
+          "format": "int4",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "ignorados",
+          "data_type": "integer",
+          "format": "int4",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "erros",
+          "data_type": "integer",
+          "format": "int4",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "importado_em",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        },
+        {
+          "name": "importado_por",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        },
+        {
+          "name": "observacoes",
+          "data_type": "text",
+          "format": "text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "''::text"
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ]
+    },
+    {
+      "name": "public.app_programmers",
+      "rls_enabled": true,
+      "rows": 0,
+      "columns": [
+        {
+          "name": "user_id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "criado_em",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        }
+      ],
+      "primary_keys": [
+        "user_id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "app_programmers_user_id_fkey",
+          "source_table": "public.app_programmers",
+          "source_columns": [
+            "user_id"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "public.org_shares",
+      "rls_enabled": true,
+      "rows": 0,
+      "columns": [
+        {
+          "name": "id",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "gen_random_uuid()"
+        },
+        {
+          "name": "org_origem",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "org_destino",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "updatable"
+          ]
+        },
+        {
+          "name": "modulos",
+          "data_type": "ARRAY",
+          "format": "_text",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "'{}'::text[]"
+        },
+        {
+          "name": "criado_por",
+          "data_type": "uuid",
+          "format": "uuid",
+          "options": [
+            "nullable",
+            "updatable"
+          ]
+        },
+        {
+          "name": "criado_em",
+          "data_type": "timestamp with time zone",
+          "format": "timestamptz",
+          "options": [
+            "updatable"
+          ],
+          "default_value": "now()"
+        }
+      ],
+      "primary_keys": [
+        "id"
+      ],
+      "foreign_key_constraints": [
+        {
+          "name": "org_shares_org_destino_fkey",
+          "source_table": "public.org_shares",
+          "source_columns": [
+            "org_destino"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "org_shares_criado_por_fkey",
+          "source_table": "public.org_shares",
+          "source_columns": [
+            "criado_por"
+          ],
+          "target_table": "auth.users",
+          "target_columns": [
+            "id"
+          ]
+        },
+        {
+          "name": "org_shares_org_origem_fkey",
+          "source_table": "public.org_shares",
+          "source_columns": [
+            "org_origem"
+          ],
+          "target_table": "public.organizations",
+          "target_columns": [
+            "id"
+          ]
+        }
+      ]
+    }
+  ]
+}

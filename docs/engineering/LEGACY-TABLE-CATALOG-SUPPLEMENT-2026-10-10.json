@@ -1,0 +1,30 @@
+{
+  "functions": [
+    {
+      "acl": "{=X/postgres,postgres=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres}",
+      "definition": "CREATE OR REPLACE FUNCTION public.set_updated_at()\n RETURNS trigger\n LANGUAGE plpgsql\nAS $function$\r\nbegin\r\n  new.updated_at = now();\r\n  return new;\r\nend;\r\n$function$\n",
+      "owner_role": "postgres",
+      "schema_name": "public",
+      "configuration": null,
+      "function_name": "set_updated_at",
+      "security_definer": false,
+      "identity_arguments": "",
+      "total_metadata_rows": 1
+    }
+  ],
+  "sequences": [
+    {
+      "seqmax": "9223372036854775807",
+      "seqmin": "1",
+      "seqcache": "1",
+      "seqcycle": false,
+      "seqstart": "1",
+      "owner_role": "postgres",
+      "seqincrement": "1",
+      "sequence_name": "documentos_id_seq",
+      "sequence_type": "bigint",
+      "sequence_schema": "public",
+      "total_metadata_rows": 1
+    }
+  ]
+}

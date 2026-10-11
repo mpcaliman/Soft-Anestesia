@@ -44,7 +44,9 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS, "content-type": "application/json" } });
 }
 function sb() {
-  return createClient(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"));
+  return createClient(env("SUPABASE_URL"), env("SUPABASE_SERVICE_ROLE_KEY"), {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
 }
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const d = await crypto.subtle.digest("SHA-256", bytes);
@@ -56,7 +58,51 @@ function b64ToBytes(b64: string): Uint8Array {
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
   return out;
 }
+function isPdf(bytes: Uint8Array): boolean {
+  if (bytes.length < 5) return false;
+  const head = new TextDecoder("ascii").decode(bytes.subarray(0, Math.min(1024, bytes.length)));
+  return head.includes("%PDF-");
+}
 function configurado() { return !!(CSC_BASE && CSC_ID && CSC_SECRET); }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const CODIGO_RE = /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/;
+const HASH_RE = /^[0-9a-f]{64}$/;
+const MODULOS = new Set([
+  "pre", "consulta", "anestesia", "recuperacao", "risco", "termo",
+  "prescricao", "documentos", "financeiro", "orcamento",
+]);
+
+/* `--no-verify-jwt` é necessário porque `validar` é público. Todas as rotas
+   que falam com o provedor ou escrevem usam esta verificação explícita e
+   consultam o vínculo ativo no banco; nenhum papel vem de user_metadata. */
+async function exigirClinico(req: Request, requestedOrg = "") {
+  const authHeader = req.headers.get("Authorization") || "";
+  const jwt = authHeader.replace(/^Bearer\s+/i, "").trim();
+  if (!jwt) return { erro: "Entre na nuvem antes de assinar.", status: 401 };
+
+  const client = sb();
+  const { data, error } = await client.auth.getUser(jwt);
+  if (error || !data?.user) return { erro: "Sessão inválida ou vencida.", status: 401 };
+
+  let q = client
+    .from("organization_users")
+    .select("organization_id,role")
+    .eq("user_id", data.user.id)
+    .eq("ativo", true)
+    .in("role", ["gestor", "anestesiologista"]);
+  if (requestedOrg) q = q.eq("organization_id", requestedOrg);
+  const { data: memberships, error: membershipError } = await q.limit(1);
+  if (membershipError) return { erro: "Não foi possível confirmar a autorização.", status: 500 };
+  if (!memberships?.length) {
+    return { erro: "A assinatura em nuvem exige vínculo clínico ativo.", status: 403 };
+  }
+  return {
+    client,
+    user: data.user,
+    organizationId: memberships[0].organization_id as string,
+  };
+}
 
 // --- token de serviço do provedor (client_credentials). Se o provedor usar
 //     authorization_code + PKCE (usuário autoriza no app do certificado), este
@@ -147,24 +193,37 @@ Deno.serve(async (req) => {
 
     // ---- validação pública (não exige nada do provedor) ----
     if (op === "validar") {
-      const codigo = url.searchParams.get("codigo");
-      const hash = url.searchParams.get("hash");
+      const codigo = (url.searchParams.get("codigo") || "").trim().toUpperCase();
+      const hash = (url.searchParams.get("hash") || "").trim().toLowerCase();
+      if (codigo && !CODIGO_RE.test(codigo)) return json({ erro: "codigo invalido" }, 400);
+      if (hash && !HASH_RE.test(hash)) return json({ erro: "hash invalido" }, 400);
       const client = sb();
       let q = client.from("assinaturas_publicas").select("*").limit(1);
-      if (codigo) q = q.eq("codigo", codigo.toUpperCase());
-      else if (hash) q = q.eq("hash_doc", hash.toLowerCase());
+      if (codigo) q = q.eq("codigo", codigo);
+      else if (hash) q = q.eq("hash_doc", hash);
       else return json({ erro: "informe codigo ou hash" }, 400);
       const { data, error } = await q;
-      if (error) return json({ erro: error.message }, 500);
+      if (error) return json({ erro: "Não foi possível consultar a validação agora." }, 500);
       if (!data || !data.length) return json({ encontrado: false });
       return json({ encontrado: true, registro: data[0] });
     }
 
-    // ---- daqui pra baixo exige provedor configurado ----
-    if (!configurado()) {
-      return json({ erro: "Provedor de assinatura em nuvem ainda não configurado (defina os secrets CSC_*).", code: "NAO_CONFIGURADO" }, 501);
-    }
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
+    const requestedOrg = String(body.organization_id || body.meta?.organizationId || "").trim();
+    if (requestedOrg && !UUID_RE.test(requestedOrg)) {
+      return json({ erro: "Ambiente inválido." }, 400);
+    }
+    if (op === "sign" && !requestedOrg) {
+      return json({ erro: "Informe o ambiente do documento." }, 400);
+    }
+
+    const guarda = await exigirClinico(req, requestedOrg);
+    if ("erro" in guarda) return json({ erro: guarda.erro }, guarda.status);
+
+    // ---- daqui pra baixo exige usuário autorizado e provedor configurado ----
+    if (!configurado()) {
+      return json({ erro: "Provedor de assinatura em nuvem ainda não configurado.", code: "NAO_CONFIGURADO" }, 501);
+    }
 
     if (op === "cert-list") {
       const token = body.access_token || (await providerToken());
@@ -177,43 +236,90 @@ Deno.serve(async (req) => {
       return json(info);
     }
     if (op === "sign") {
-      const token = body.access_token || (await providerToken());
+      const credentialID = String(body.credentialID || "").trim();
+      const sad = String(body.sad || "").trim();
+      if (!credentialID || !sad || !body.pdf_base64) {
+        return json({ erro: "Credencial, autorização e PDF são obrigatórios." }, 400);
+      }
+      if (credentialID.length > 500 || sad.length > 4_096) {
+        return json({ erro: "Credencial ou autorização fora do limite permitido." }, 400);
+      }
+      if (String(body.pdf_base64).length > 28_000_000) {
+        return json({ erro: "PDF excede o limite de 20 MiB." }, 413);
+      }
+      const suppliedToken = String(body.access_token || "").trim();
+      if (suppliedToken.length > 16_384) return json({ erro: "Token do provedor inválido." }, 400);
+      const token = suppliedToken || (await providerToken());
       const pdf = b64ToBytes(body.pdf_base64);
-      const signed = await providerSignPdf(token, body.credentialID, body.sad, pdf);
+      if (pdf.length > 20 * 1024 * 1024) return json({ erro: "PDF excede o limite de 20 MiB." }, 413);
+      if (!isPdf(pdf)) return json({ erro: "O arquivo enviado não é um PDF válido." }, 400);
+      const signed = await providerSignPdf(token, credentialID, sad, pdf);
+      if (signed.length > 25 * 1024 * 1024) throw new Error("O PDF assinado excedeu o limite de resposta.");
+      if (!isPdf(signed)) throw new Error("O provedor não devolveu um PDF assinado válido.");
       const hashDoc = await sha256Hex(signed);
       const meta = body.meta || {};
 
-      // grava o registro imutável (a view pública expõe só o mínimo)
-      const client = sb();
-      const { data: prev } = await client.from("assinaturas").select("self_hash").order("criado_em", { ascending: false }).limit(1);
-      const prevHash = prev && prev.length ? prev[0].self_hash : null;
-      const reg: Record<string, unknown> = {
-        codigo: codigoValidacao(),
-        modulo: meta.modulo || "",
-        doc_id: meta.docId || null,
-        titulo: meta.titulo || "Documento",
-        paciente_ini: meta.pacienteIni || null,
-        profissional: meta.profissional || null,
-        crm: meta.crm || null,
-        hash_doc: hashDoc,
-        algoritmo: "SHA-256",
-        provedor: PROVIDER,
-        cert_emissor: meta.certEmissor || null,
-        cert_serial: meta.certSerial || null,
-        cert_titular: meta.certTitular || null,
-        cadeia_icp: true,
-        versao: meta.versao || 1,
-        prev_hash: prevHash,
-      };
-      reg.self_hash = await sha256Hex(new TextEncoder().encode(JSON.stringify(reg, Object.keys(reg).sort())));
-      const { data: ins, error } = await client.from("assinaturas").insert(reg).select("codigo").single();
-      if (error) return json({ erro: error.message }, 500);
+      const modulo = String(meta.modulo || "").trim();
+      if (!MODULOS.has(modulo)) return json({ erro: "Módulo não autorizado para assinatura." }, 400);
+      const docId = String(meta.docId || "").trim().slice(0, 200) || null;
+
+      const { data: profile } = await guarda.client
+        .from("profiles")
+        .select("nome,crm,crm_uf")
+        .eq("id", guarda.user.id)
+        .maybeSingle();
+
+      // Grava o registro imutável (a view pública expõe só o mínimo). Dados do
+      // certificado não são aceitos do navegador: serão preenchidos somente
+      // pelo driver do provedor quando a API SafeID real for homologada.
+      const client = guarda.client;
+      let ins: { codigo: string } | null = null;
+      for (let attempt = 0; attempt < 3 && !ins; attempt++) {
+        const { data: prev, error: prevError } = await client
+          .from("assinaturas")
+          .select("self_hash")
+          .eq("organization_id", guarda.organizationId)
+          .order("criado_em", { ascending: false })
+          .limit(1);
+        if (prevError) return json({ erro: "Não foi possível preparar o registro da assinatura." }, 500);
+
+        const reg: Record<string, unknown> = {
+          codigo: codigoValidacao(),
+          organization_id: guarda.organizationId,
+          signed_by: guarda.user.id,
+          modulo,
+          doc_id: docId,
+          titulo: String(meta.titulo || "Documento").slice(0, 160),
+          paciente_ini: String(meta.pacienteIni || "").slice(0, 16) || null,
+          profissional: String(profile?.nome || guarda.user.email || "Profissional autenticado").slice(0, 160),
+          crm: profile?.crm ? `${profile.crm}${profile.crm_uf ? "/" + profile.crm_uf : ""}`.slice(0, 40) : null,
+          hash_doc: hashDoc,
+          algoritmo: "SHA-256",
+          provedor: PROVIDER,
+          cert_emissor: null,
+          cert_serial: null,
+          cert_titular: null,
+          cadeia_icp: null,
+          versao: Math.max(1, Math.min(Number(meta.versao) || 1, 1_000_000)),
+          prev_hash: prev && prev.length ? prev[0].self_hash : null,
+        };
+        reg.self_hash = await sha256Hex(new TextEncoder().encode(JSON.stringify(reg, Object.keys(reg).sort())));
+        const result = await client.from("assinaturas").insert(reg).select("codigo").single();
+        if (!result.error) {
+          ins = result.data;
+        } else if (result.error.code !== "23505") {
+          return json({ erro: "Não foi possível registrar a assinatura." }, 500);
+        }
+      }
+      if (!ins) {
+        return json({ erro: "Outra assinatura foi registrada ao mesmo tempo; tente novamente." }, 409);
+      }
 
       return json({ ok: true, codigo: ins.codigo, hash: hashDoc, pdf_assinado_base64: base64(signed) });
     }
 
     return json({ erro: "op desconhecida" }, 400);
-  } catch (e) {
-    return json({ erro: String((e as Error).message || e) }, 500);
+  } catch (_) {
+    return json({ erro: "Falha interna na operação de assinatura." }, 500);
   }
 });

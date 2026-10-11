@@ -1,0 +1,39 @@
+{
+  "format": 1,
+  "targetProject": "yqqrfgbvoexricjdxpis",
+  "sourceProject": "zbpbrnalamjrcfbscjkt",
+  "productionApplyAllowed": false,
+  "completeProductionBaseline": false,
+  "clinicalRowsCopied": false,
+  "transformations": [
+    "force_rls_on_both_legacy_tables",
+    "deny_legacy_client_access_in_same_transaction",
+    "retain_captured_policies_with_restrictive_client_veto",
+    "never_restore_client_table_column_or_sequence_grants"
+  ],
+  "tables": [
+    {
+      "table": "public.documentos",
+      "columns": 6,
+      "constraints": 3,
+      "indexes": 3,
+      "userTriggers": 0,
+      "sourcePolicies": 4,
+      "localRowsCopied": 0,
+      "organizationInferred": false
+    },
+    {
+      "table": "public.pacientes",
+      "columns": 15,
+      "constraints": 2,
+      "indexes": 3,
+      "userTriggers": 1,
+      "sourcePolicies": 4,
+      "localRowsCopied": 0,
+      "organizationInferred": false
+    }
+  ],
+  "captureSha256": "c32a2021e39a8b18269f2b07194cd102128643b70fb3d10427594c47f180896d",
+  "supplementSha256": "3e092d7b0a156e589d62ff71243454bce1998828225cffb99aa1a901751aa73b",
+  "appliedSha256": "6d8bac0d9a4786e1b158b3ed8cafc7e8f2f05830aed8aa8866a0835787300752"
+}

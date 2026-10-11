@@ -1,0 +1,79 @@
+# Fechamento local da auditoria técnica
+
+> **Atualização de estado — 10 de outubro de 2026.** O corpo abaixo é um
+> retrato histórico. O PR [225](https://github.com/mpcaliman/Soft-Anestesia/pull/225)
+> mantém a versão publicada `a073abbc`, com os quatro checks de CI aprovados.
+> Após a reconexão, a homologação confirmou `0001`–`0024` e a reconstrução
+> vazia das duas tabelas legadas: 26 entradas, incluindo `0001_assinaturas`.
+> A fonte íntegra de `0025` retornou duas vezes estado inválido ou expirado
+> do conector e permanece ausente do histórico. As migrações seguintes e o
+> endurecimento de assinaturas continuam pendentes. Nenhuma fixture Auth foi
+> criada; o runner não foi implantado nem executado. A nova proteção local
+> do runner usa claim persistente, UUID e prazo, com testes locais aprovados;
+> esse diff ainda precisa de publicação e CI no GitHub.
+> A leitura remota confirmou `main` sem proteção e zero rulesets ativos.
+> A configuração atual do Pages não pôde ser confirmada; a última evidência
+> era publicação pela branch `main`, e o workflow antigo foi desativado.
+> Nenhum SQL desta retomada foi enviado à produção. Consulte
+> [o estado da homologação](STAGING-REBUILD-PLAN.md) e
+> [a evidência das migrações](STAGING-MIGRATION-EVIDENCE.json).
+
+## Retrato histórico preservado
+
+Data: 2026-10-08  
+Branch: `codex/audit-remediation-v2`
+
+## Resultado
+
+O escopo técnico executável localmente da auditoria foi concluído. Os portões
+G2–G6 foram autorizados em sequência em 2026-10-08, mas isso não é evidência de
+produção: nenhuma branch foi publicada, nenhuma migração foi aplicada a
+Supabase remoto e nenhum deploy foi feito neste fechamento local.
+
+## Regras de ouro verificadas no código
+
+| Regra | Implementação local |
+|---|---|
+| Edição simultânea | compare-and-swap por `version`, conflito durável com os dois lados e Realtime sem sobrescrita silenciosa |
+| Isolamento por ambiente | contexto imutável por aba, `organization_id` obrigatório, RLS e filas vinculadas a clínica + usuário + dispositivo |
+| Autorização de mudança | portões G0–G6 documentados; G2–G6 agora estão autorizados sequencialmente, sem permissão para pular evidências ou adivinhar o alvo remoto |
+| Nuvem e offline | Supabase é a fonte canônica; confirmado fica apenas na nuvem/memória; operações e recuperação de texto não salvo ficam cifradas em AES-GCM e reenviam automaticamente |
+| Computador multiusuário | token e sessão vivem somente na aba; bloqueio por inatividade é obrigatório; memória, rascunho, fila, anexos e conflitos são isolados; troca de contexto limpa a visão sem apagar trabalho pendente do dono anterior |
+
+## Fechamentos deste incremento
+
+- feedback de sucesso condicionado a recibo remoto verificável;
+- cache clínico confirmado removido do armazenamento durável do navegador;
+- restauração “1× por dia”, token persistente e exceção de aparelho pessoal
+  removidos; conta sem clínica acessa apenas Ajustes até obter `organization_id`;
+- caixa diário incorporado ao motor relacional versionado;
+- adendos append-only protegidos no WAL cifrado antes do envio;
+- rascunhos e edição ainda não salva usam snapshots AES-GCM por
+  clínica/usuário/dispositivo; lápides cifradas impedem que um recibo tardio
+  apague caracteres digitados depois do clique;
+- restaurar da lixeira agora é uma operação cloud-first causal, com WAL,
+  compare-and-swap, recibo idempotente e reversão efetiva de `deleted_at`;
+- pacientes, agenda, documentos, prescrições, orçamentos, caixa, adendos,
+  rascunhos e conflitos cobertos pela publicação Realtime preparada em `0027`;
+- testes de segurança ampliados para cloud-only, recibo de adendo, conflito,
+  isolamento de aba, sessão por aba, computador compartilhado e reconciliação
+  offline.
+
+## Evidência necessária fora do repositório
+
+Estas etapas não podem ser concluídas por teste local. Estão autorizadas em
+sequência, mas cada uma continua condicionada à evidência da anterior:
+
+1. **G2:** publicar a branch e abrir/revisar o PR;
+2. **G3:** identificar explicitamente o projeto Supabase de homologação,
+   reconciliar os dois históricos SQL e criar/reconstruir homologação vazia;
+3. aplicar `0018`–`0027` somente na homologação autorizada;
+4. executar matriz RLS com duas clínicas e múltiplos papéis;
+5. testar duas sessões reais, Realtime, conflito, queda/reconexão e troca de
+   usuário no mesmo computador;
+6. inventariar e classificar manualmente o acervo legado, sem inferir clínica;
+7. somente após evidências aprovadas: G4 merge, G5 deploy e G6 confirmação de produção.
+
+Privacidade, termos, suporte, cobrança, observabilidade operacional e a escolha
+PWA/TWA/híbrido permanecem no estágio comercial F1e; não devem ser declarados
+prontos apenas porque o núcleo técnico local foi corrigido.
