@@ -1,16 +1,16 @@
 # E0 — baseline de migrações
 
-> **Atualização de estado — 9 de outubro de 2026.** O corpo abaixo é um
-> retrato histórico e não representa o estado atual da execução. A branch de
-> teste foi publicada no PR [225](https://github.com/mpcaliman/Soft-Anestesia/pull/225).
-> A homologação registra 16 novas migrações (`0001`–`0013` e `0015`–`0017`),
-> além da pré-existente `0001_assinaturas`; `0014` foi recusada e `0018`–`0031`
-> permanecem ausentes. O runner de integração real não foi implantado nem
-> executado. A proteção remota de `main` permanece inativa; os controles
-> propostos no branch ainda não demonstram sua imposição em produção. Consulte
-> [o estado atual da homologação](STAGING-REBUILD-PLAN.md) e
-> [a evidência das migrações](STAGING-MIGRATION-EVIDENCE.json). Nenhum SQL desta
-> execução foi enviado à produção. A reconstrução está parcial e interrompida.
+> **Atualização de estado — 11 de outubro de 2026.** O corpo abaixo é um retrato
+> histórico. As 32 fontes da aplicação e o hardening de assinaturas foram
+> reconstruídos na homologação, com 35 entradas formais confirmadas antes da
+> infraestrutura adicional do runner. Produção continua sem SQL desta execução.
+> Seu catálogo completo da aplicação foi capturado somente em leitura e possui
+> um artefato determinístico de replay sem dados; gerar esse artefato não comprova
+> restauração. Consulte [o ensaio da transição de produção](PRODUCTION-BASELINE-REPLAY.md),
+> [o estado da homologação](STAGING-REBUILD-PLAN.md) e
+> [a evidência das migrações](STAGING-MIGRATION-EVIDENCE.json). Teste hospedado,
+> governança remota e publicação têm evidências próprias e não são presumidos
+> por este inventário.
 
 ## Retrato histórico preservado
 

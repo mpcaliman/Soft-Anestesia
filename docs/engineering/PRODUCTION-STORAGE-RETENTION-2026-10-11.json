@@ -1,0 +1,73 @@
+{
+  "format": 1,
+  "capturedAt": "2026-10-11T12:26:38.312Z",
+  "sourceProject": "zbpbrnalamjrcfbscjkt",
+  "method": "Storage policy catalog plus aggregate bucket object counts only",
+  "objectNamesPathsContentRead": false,
+  "productionMutated": false,
+  "buckets": [
+    {
+      "bucket": "clinical-attachments",
+      "public": false,
+      "object_count": 280
+    },
+    {
+      "bucket": "documentos-pdf",
+      "public": false,
+      "object_count": 0
+    }
+  ],
+  "policyCatalog": [
+    {
+      "name": "clin_att_del",
+      "roles": [
+        "public"
+      ],
+      "schema": "storage",
+      "command": "DELETE",
+      "relation": "objects",
+      "permissive": "PERMISSIVE",
+      "check_expression": null,
+      "using_expression": "((bucket_id = 'clinical-attachments'::text) AND app.has_role(((storage.foldername(name))[1])::uuid, ARRAY['gestor'::text]))"
+    },
+    {
+      "name": "clin_att_ins",
+      "roles": [
+        "public"
+      ],
+      "schema": "storage",
+      "command": "INSERT",
+      "relation": "objects",
+      "permissive": "PERMISSIVE",
+      "check_expression": "((bucket_id = 'clinical-attachments'::text) AND (((storage.foldername(name))[1])::uuid IN ( SELECT app.org_ids() AS org_ids)) AND app.has_role(((storage.foldername(name))[1])::uuid, ARRAY['gestor'::text, 'anestesiologista'::text, 'auxiliar'::text]))",
+      "using_expression": null
+    },
+    {
+      "name": "clin_att_sel",
+      "roles": [
+        "public"
+      ],
+      "schema": "storage",
+      "command": "SELECT",
+      "relation": "objects",
+      "permissive": "PERMISSIVE",
+      "check_expression": null,
+      "using_expression": "((bucket_id = 'clinical-attachments'::text) AND (((storage.foldername(name))[1])::uuid IN ( SELECT app.org_ids() AS org_ids)))"
+    },
+    {
+      "name": "clin_att_upd",
+      "roles": [
+        "public"
+      ],
+      "schema": "storage",
+      "command": "UPDATE",
+      "relation": "objects",
+      "permissive": "PERMISSIVE",
+      "check_expression": null,
+      "using_expression": "((bucket_id = 'clinical-attachments'::text) AND (((storage.foldername(name))[1])::uuid IN ( SELECT app.org_ids() AS org_ids)) AND app.has_role(((storage.foldername(name))[1])::uuid, ARRAY['gestor'::text, 'anestesiologista'::text, 'auxiliar'::text]))"
+    }
+  ],
+  "pdfBucketMatchingPolicies": 0,
+  "retention": "Preserve both private bucket configurations and all existing Storage objects; no file deletion or copying authorized by metadata classification.",
+  "productionApplyAllowed": false
+}

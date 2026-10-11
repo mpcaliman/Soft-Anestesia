@@ -2,12 +2,17 @@
 
 ## Estado deste cartão
 
-A infraestrutura foi implementada e testada localmente sob G1. A migração
-`0024_legacy_quarantine_migration.sql` **não foi aplicada a nenhum Supabase** e
-nenhuma das 1.075 linhas reais foi lida, classificada ou movida.
+A `0024_legacy_quarantine_migration.sql` foi aplicada à homologação reconciliada;
+produção não foi alterada. Nenhum conteúdo clínico real foi lido, classificado
+ou movido. Em 11 de outubro, consultas somente de metadados agregados contaram
+1.156 linhas legadas, em vez das 1.075 da auditoria. Há 864 candidatos por chave
+relacional única, 292 sem correspondência e 113 candidatos com criador diferente.
+Esses números não autorizam atribuição automática de clínica.
 
-Aplicar a `0024`, inventariar dados reais ou fazer uma classificação exige G3
-explícito e ambiente de homologação reconciliado. Produção continua bloqueada.
+O proprietário autorizou concluir as correções. A execução real depende dos
+controles técnicos e da proveniência dos lotes: replay do estado atual, backup
+operacional, congelamento verificado, inventário definitivo e classificação pelo
+programador. Consulte [a evidência atual e o plano da transição](PRODUCTION-BASELINE-REPLAY.md).
 
 ## Invariantes
 
@@ -29,7 +34,7 @@ explícito e ambiente de homologação reconciliado. Produção continua bloquea
    janela, com o mesmo hash e versão e sem dependentes. Registro finalizado é
    imutável e bloqueia a reversão automática. A origem não é tocada.
 
-## Sequência de homologação — requer autorização G3
+## Sequência para o inventário definitivo
 
 1. Criar snapshot/backup verificável do banco e registrar ponto de retorno.
 2. Reconciliar os dois históricos de migração antes de aplicar qualquer SQL.
@@ -37,8 +42,9 @@ explícito e ambiente de homologação reconciliado. Produção continua bloquea
    produção.
 4. Na área **Programador → Migração segura do legado**, executar
    **Inventariar origem congelada**.
-5. Confirmar total esperado de 1.075 linhas e comparar contagens por conta e
-   módulo. Diferença interrompe o cartão; nenhum dado é classificado.
+5. Registrar o total da fonte congelada e comparar com o manifesto de inventário
+   aprovado e contagens por conta/módulo. A leitura de 11/10 encontrou 1.156, mas
+   esse número pode mudar até o congelamento; diferença interrompe o lote.
 6. Tratar `unsupported`, `source_changed` e `source_missing` como bloqueios.
 7. Classificar um lote pequeno e conhecido, sempre com comprovação externa e
    justificativa sem informação clínica. Processar `pacientes` antes dos
@@ -63,7 +69,7 @@ explícito e ambiente de homologação reconciliado. Produção continua bloquea
 
 ## Parada obrigatória
 
-Interromper imediatamente se a origem mudar após o inventário, se o total não
-for 1.075, se houver organização duvidosa, hash divergente, destino já editado,
+Interromper imediatamente se a origem mudar após o inventário, se o total
+divergir do inventário congelado aprovado, se houver organização duvidosa, hash divergente, destino já editado,
 vínculo inesperado ou qualquer conteúdo clínico aparecer em relatório/log.
 Esses casos não são resolvidos por inferência automática.

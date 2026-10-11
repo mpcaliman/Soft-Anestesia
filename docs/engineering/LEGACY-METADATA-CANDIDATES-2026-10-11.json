@@ -1,0 +1,197 @@
+{
+  "format": 1,
+  "capturedAt": "2026-10-11T12:08:46.962Z",
+  "sourceProject": "zbpbrnalamjrcfbscjkt",
+  "method": "read-only aggregate query using only legacy ownership/module/key/timestamp and relational legacy_id/organization_id/created_by; no payload or identity outputs",
+  "clinicalPayloadRead": false,
+  "identityValuesIncluded": false,
+  "productionMutated": false,
+  "totalLegacyRows": 1156,
+  "distinctOwnerCount": 5,
+  "organizationCount": 3,
+  "changedAfterAuditDay": 100,
+  "missingKeyCount": 0,
+  "totals": {
+    "source_rows": 1156,
+    "no_relational_match": 292,
+    "one_candidate_organization": 864,
+    "multiple_candidate_organizations": 0,
+    "multiple_records": 0,
+    "unique_candidate_with_matching_creator": 751,
+    "unique_candidate_without_matching_creator": 113
+  },
+  "modules": [
+    {
+      "module": "anestesia",
+      "source_rows": 180,
+      "no_relational_match": 0,
+      "one_candidate_organization": 180,
+      "multiple_candidate_organizations": 0,
+      "multiple_records": 0,
+      "unique_candidate_with_matching_creator": 176,
+      "unique_candidate_without_matching_creator": 4
+    },
+    {
+      "module": "cad_anestesistas",
+      "source_rows": 2,
+      "no_relational_match": 2,
+      "one_candidate_organization": 0,
+      "multiple_candidate_organizations": 0,
+      "multiple_records": 0,
+      "unique_candidate_with_matching_creator": 0,
+      "unique_candidate_without_matching_creator": 0
+    },
+    {
+      "module": "cad_assinaturas",
+      "source_rows": 2,
+      "no_relational_match": 2,
+      "one_candidate_organization": 0,
+      "multiple_candidate_organizations": 0,
+      "multiple_records": 0,
+      "unique_candidate_with_matching_creator": 0,
+      "unique_candidate_without_matching_creator": 0
+    },
+    {
+      "module": "cad_clinicas",
+      "source_rows": 10,
+      "no_relational_match": 10,
+      "one_candidate_organization": 0,
+      "multiple_candidate_organizations": 0,
+      "multiple_records": 0,
+      "unique_candidate_with_matching_creator": 0,
+      "unique_candidate_without_matching_creator": 0
+    },
+    {
+      "module": "cad_equipamentos",
+      "source_rows": 6,
+      "no_relational_match": 6,
+      "one_candidate_organization": 0,
+      "multiple_candidate_organizations": 0,
+      "multiple_records": 0,
+      "unique_candidate_with_matching_creator": 0,
+      "unique_candidate_without_matching_creator": 0
+    },
+    {
+      "module": "cad_profissionais",
+      "source_rows": 4,
+      "no_relational_match": 4,
+      "one_candidate_organization": 0,
+      "multiple_candidate_organizations": 0,
+      "multiple_records": 0,
+      "unique_candidate_with_matching_creator": 0,
+      "unique_candidate_without_matching_creator": 0
+    },
+    {
+      "module": "config_sync",
+      "source_rows": 5,
+      "no_relational_match": 5,
+      "one_candidate_organization": 0,
+      "multiple_candidate_organizations": 0,
+      "multiple_records": 0,
+      "unique_candidate_with_matching_creator": 0,
+      "unique_candidate_without_matching_creator": 0
+    },
+    {
+      "module": "documentos",
+      "source_rows": 1,
+      "no_relational_match": 0,
+      "one_candidate_organization": 1,
+      "multiple_candidate_organizations": 0,
+      "multiple_records": 0,
+      "unique_candidate_with_matching_creator": 1,
+      "unique_candidate_without_matching_creator": 0
+    },
+    {
+      "module": "financeiro",
+      "source_rows": 267,
+      "no_relational_match": 0,
+      "one_candidate_organization": 267,
+      "multiple_candidate_organizations": 0,
+      "multiple_records": 0,
+      "unique_candidate_with_matching_creator": 258,
+      "unique_candidate_without_matching_creator": 9
+    },
+    {
+      "module": "orcamento",
+      "source_rows": 9,
+      "no_relational_match": 0,
+      "one_candidate_organization": 9,
+      "multiple_candidate_organizations": 0,
+      "multiple_records": 0,
+      "unique_candidate_with_matching_creator": 8,
+      "unique_candidate_without_matching_creator": 1
+    },
+    {
+      "module": "pacientes",
+      "source_rows": 243,
+      "no_relational_match": 243,
+      "one_candidate_organization": 0,
+      "multiple_candidate_organizations": 0,
+      "multiple_records": 0,
+      "unique_candidate_with_matching_creator": 0,
+      "unique_candidate_without_matching_creator": 0
+    },
+    {
+      "module": "pre",
+      "source_rows": 211,
+      "no_relational_match": 0,
+      "one_candidate_organization": 211,
+      "multiple_candidate_organizations": 0,
+      "multiple_records": 0,
+      "unique_candidate_with_matching_creator": 112,
+      "unique_candidate_without_matching_creator": 99
+    },
+    {
+      "module": "rascunho_anestesia",
+      "source_rows": 11,
+      "no_relational_match": 11,
+      "one_candidate_organization": 0,
+      "multiple_candidate_organizations": 0,
+      "multiple_records": 0,
+      "unique_candidate_with_matching_creator": 0,
+      "unique_candidate_without_matching_creator": 0
+    },
+    {
+      "module": "rascunho_consulta",
+      "source_rows": 3,
+      "no_relational_match": 3,
+      "one_candidate_organization": 0,
+      "multiple_candidate_organizations": 0,
+      "multiple_records": 0,
+      "unique_candidate_with_matching_creator": 0,
+      "unique_candidate_without_matching_creator": 0
+    },
+    {
+      "module": "rascunho_pre",
+      "source_rows": 6,
+      "no_relational_match": 6,
+      "one_candidate_organization": 0,
+      "multiple_candidate_organizations": 0,
+      "multiple_records": 0,
+      "unique_candidate_with_matching_creator": 0,
+      "unique_candidate_without_matching_creator": 0
+    },
+    {
+      "module": "recuperacao",
+      "source_rows": 143,
+      "no_relational_match": 0,
+      "one_candidate_organization": 143,
+      "multiple_candidate_organizations": 0,
+      "multiple_records": 0,
+      "unique_candidate_with_matching_creator": 143,
+      "unique_candidate_without_matching_creator": 0
+    },
+    {
+      "module": "termo",
+      "source_rows": 53,
+      "no_relational_match": 0,
+      "one_candidate_organization": 53,
+      "multiple_candidate_organizations": 0,
+      "multiple_records": 0,
+      "unique_candidate_with_matching_creator": 53,
+      "unique_candidate_without_matching_creator": 0
+    }
+  ],
+  "assessment": "Candidates only. Exact key matches do not establish historical provenance or payload equivalence; current organization membership cannot authorize assignment. No row was classified.",
+  "automaticAssignmentAllowed": false
+}
