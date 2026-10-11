@@ -12,6 +12,19 @@ const networkErrors = new Set(['net::ERR_CERT_AUTHORITY_INVALID', 'net::ERR_CERT
   'net::ERR_CONNECTION_CLOSED', 'net::ERR_CONNECTION_REFUSED', 'net::ERR_NAME_NOT_RESOLVED',
   'net::ERR_TIMED_OUT', 'net::ERR_FAILED', 'net::ERR_ABORTED', 'net::ERR_BLOCKED_BY_CLIENT']);
 export const networkErrorEnum = text => networkErrors.has(text) ? text : 'other_transport_error';
+export const browserDocumentKind = (url, appURL) => {
+  if (url === 'about:blank') return 'blank';
+  if (url.startsWith(appURL)) return 'application';
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'chrome-error:') return 'browser_error';
+    if (parsed.protocol === 'chrome:' && ['newtab', 'new-tab-page'].includes(parsed.hostname)) return 'browser_new_tab';
+    if (parsed.protocol === 'chrome:' && parsed.hostname === 'profile-picker') return 'browser_profile_picker';
+    if (parsed.protocol === 'chrome:') return 'browser_internal_other';
+    if (parsed.hostname === '127.0.0.1') return 'local_other';
+    return 'external_other';
+  } catch { return 'unknown_document'; }
+};
 export const routeEnum = (url, target) => {
   try { const parsed = new URL(url); return parsed.hostname === `${target}.supabase.co`
     ? routes.get(parsed.pathname) || 'other_stage_route' : 'non_stage_route'; }
@@ -27,15 +40,16 @@ export const scriptErrorEnum = error => {
 };
 export const observeRedacted = (page, target, state) => {
   state.network = []; state.scriptErrors = [];
+  const append = (array, value) => { array.push(value); if (array.length > 256) array.shift(); };
   page.on('response', response => {
     const route = routeEnum(response.url(), target);
-    if (route !== 'non_stage_route') state.network.push({ route, status: response.status() });
+    if (route !== 'non_stage_route') append(state.network, { route, status: response.status() });
   });
   page.on('requestfailed', request => {
     const route = routeEnum(request.url(), target);
-    if (route !== 'non_stage_route') state.network.push({ route, error: networkErrorEnum(request.failure()?.errorText) });
+    if (route !== 'non_stage_route') append(state.network, { route, error: networkErrorEnum(request.failure()?.errorText) });
   });
-  page.on('pageerror', error => state.scriptErrors.push(scriptErrorEnum(error)));
+  page.on('pageerror', error => append(state.scriptErrors, scriptErrorEnum(error)));
 };
 export const authStateRedacted = async (page, expected) => {
   try { return await page.evaluate(({ target, uid, org }) => {
@@ -59,6 +73,56 @@ export const authStateRedacted = async (page, expected) => {
       contextVerified: !!context?.verified, contextOperational: typeof contextoAba !== 'undefined' && contextoAba.operational(),
       contextUserMatches: context?.userId === uid, contextOrganizationMatches: context?.organizationId === org,
       cloudFailureKind: ['fora', 'credencial', 'nao_confirmado', 'excesso', 'protocolo'].includes(failure) ? failure : failure ? 'other' : 'none',
-      authUI: ui, overlayVisible: document.getElementById('auth-overlay')?.style.display !== 'none' };
+      authUI: ui, overlayVisible: !!document.getElementById('auth-overlay') && document.getElementById('auth-overlay').style.display !== 'none' };
   }, expected); } catch { return { diagnosticUnavailable: true }; }
+};
+
+export const crashPageStateRedacted = async page => {
+  try { return await page.evaluate(async () => {
+    const hasAuth = typeof auth !== 'undefined', hasCloud = typeof cloud !== 'undefined';
+    const hasContext = typeof contextoAba !== 'undefined', hasVault = typeof filaCifrada !== 'undefined';
+    const hasStore = typeof store !== 'undefined', hasNative = typeof cofre !== 'undefined' && !!cofre._real;
+    const credentials = /^(medsys\.v7\.auth\.(session|sessao_dia)|medsys\.v7\.cloud\.session|medsys\.v7\.pdfbk\.token)(@|$)/;
+    const containsCredentials = storage => {
+      if (!storage) return false;
+      for (let index = 0; index < storage.length; index++) {
+        const key = storage.key(index); if (credentials.test(key) && storage.getItem(key)) return true;
+      }
+      return false;
+    };
+    const state = { hasAuth, hasCloud, hasContext, hasVault, hasStore, hasNative,
+      ownerMarkerPresent: sessionStorage.getItem('__hosted_crash_marker') === 'original-document',
+      appAuthenticated: hasAuth && auth.estaLogado(), cloudSessionPresent: hasCloud && !!cloud.session(),
+      contextOperational: hasContext && contextoAba.operational(), contextVerified: hasContext && !!contextoAba.atual()?.verified,
+      inMemoryVaultKeyCount: hasVault ? filaCifrada._chaves.size : null,
+      sessionCredentialsPresent: containsCredentials(sessionStorage), nativeCredentialsPresent: hasNative && containsCredentials(cofre._real),
+      confirmedPatientsVisible: hasStore && store.list('pacientes').length > 0,
+      offlineDatabasePresent: false, operationsStorePresent: false, envelopesStorePresent: false,
+      operationsCount: null, envelopesCount: null, ciphertextOnly: null, operationOwnerKeysPresent: null, wrappedEnvelopeKeysPresent: null };
+    if (!hasVault || typeof indexedDB.databases !== 'function') return state;
+    const databases = await indexedDB.databases(); state.offlineDatabasePresent = databases.some(database => database.name === filaCifrada.DB);
+    if (!state.offlineDatabasePresent) return state;
+    const db = await new Promise((ok, fail) => {
+      const request = indexedDB.open(filaCifrada.DB, filaCifrada.DB_VERSION);
+      request.onsuccess = () => ok(request.result); request.onerror = () => fail(request.error);
+    });
+    try {
+      state.operationsStorePresent = db.objectStoreNames.contains(filaCifrada.STORE_OPERACOES);
+      state.envelopesStorePresent = db.objectStoreNames.contains(filaCifrada.STORE_ENVELOPES);
+      const records = async name => new Promise((ok, fail) => {
+        const tx = db.transaction(name, 'readonly'), request = tx.objectStore(name).getAll(); let rows;
+        request.onsuccess = () => { rows = request.result; }; tx.oncomplete = () => ok(rows); tx.onerror = () => fail(tx.error);
+      });
+      if (state.operationsStorePresent) {
+        const rows = await records(filaCifrada.STORE_OPERACOES); state.operationsCount = rows.length;
+        state.ciphertextOnly = rows.every(row => !!row.ciphertext && !Object.hasOwn(row, 'payload'));
+        state.operationOwnerKeysPresent = rows.every(row => typeof row.ownerKey === 'string' && !!row.ownerKey);
+      }
+      if (state.envelopesStorePresent) {
+        const rows = await records(filaCifrada.STORE_ENVELOPES); state.envelopesCount = rows.length;
+        state.wrappedEnvelopeKeysPresent = rows.every(row => !!row.wrappedKey && !Object.hasOwn(row, 'wrapKey'));
+      }
+    } finally { db.close(); }
+    return state;
+  }); } catch { return { crashDiagnosticUnavailable: true }; }
 };

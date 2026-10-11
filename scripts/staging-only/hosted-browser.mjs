@@ -5,20 +5,35 @@
  * by the root after this exits, with the SAME run UUID and a fresh recovery cap.
  */
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, writeFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm, stat, lstat, readdir } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
 import { chromium } from 'playwright';
-import { observeRedacted, authStateRedacted } from './browser-diagnostics.mjs';
+import { observeRedacted, authStateRedacted, crashPageStateRedacted, browserDocumentKind } from './browser-diagnostics.mjs';
+import { prepareRestorableProfile, browserStartupArguments, removeTransientDebugPort, connectLocalCdp, htmlCommitParts, readRestorePreferences, nativeRestoreTarget, originalSessionProof, nativeGuiError } from './browser-restore-profile.mjs';
 
 const TARGET = 'yqqrfgbvoexricjdxpis';
 const args = process.argv.slice(2);
 const arg = name => args.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3);
 const credentialsPath = arg('credentials'), reportPath = arg('report');
 if (!credentialsPath || !reportPath) throw new Error('credentials_and_report_paths_required');
+const nativeRestore = args.includes('--native-crash-restore');
+const nativeDisplay = arg('native-display'), nativeScreenshot = arg('native-restore-screenshot'), nativeAck = arg('native-restore-ack');
+if (nativeRestore) {
+  assert.match(nativeDisplay || '', /^:(?:[7-9][0-9]|1[0-9]{2})$/, 'task_owned_xvfb_display_required');
+  assert.ok(nativeScreenshot && nativeAck, 'native_restore_control_paths_required');
+  for (const path of [nativeScreenshot, nativeAck]) {
+    assert.equal(resolve(path).startsWith(resolve(process.cwd()) + sep), false, 'native_control_paths_must_be_outside_repository');
+    assert.notEqual(resolve(path), resolve(credentialsPath), 'native_control_path_must_not_overwrite_credentials');
+    assert.notEqual(resolve(path), resolve(reportPath), 'native_control_path_must_not_overwrite_report');
+  }
+  assert.notEqual(resolve(nativeScreenshot), resolve(nativeAck), 'native_control_paths_must_be_distinct');
+}
 const root = resolve(arg('app-root') || 'dist');
 assert.notEqual(resolve(credentialsPath).startsWith(resolve(process.cwd()) + sep), true, 'credentials_must_be_outside_repository');
 assert.equal((await stat(credentialsPath)).mode & 0o077, 0, 'credentials_must_be_private');
@@ -36,9 +51,10 @@ fixture.users.forEach((user, index) => {
 const checks = [];
 const report = { target: TARGET, runId: fixture.runId, startedAt: new Date().toISOString(),
   actualBrowser: 'chromium', API: 'hosted_without_mocks', checks, jwt: [],
+  nativeCrashRestoreMode: nativeRestore ? 'headed_operator_verified_native_popup' : 'automatic_startup',
   productionAccessed: false, independentRecoveryRequired: true, recoveryVerified: false,
   executionFailed: false, naturalExpirationUsesTrustedMouseActivity: true,
-  realtimePositiveDeliveryTables: ['patients'], realtimeOtherJoinedTablesDeliveryNotProven: true, authDiagnostics: [] };
+  realtimePositiveDeliveryTables: ['patients'], realtimeOtherJoinedTablesDeliveryNotProven: true, authDiagnostics: [], crashDiagnostics: [], chromiumLaunchDiagnostics: [] };
 const saveReport = () => writeFile(reportPath, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
 const check = async (name, work) => {
   process.stdout.write(JSON.stringify({ phase: name, status: 'running' }) + '\n');
@@ -55,38 +71,66 @@ const wait = async (work, milliseconds = 45000) => {
   throw new Error('bounded_wait_failed');
 };
 const profile = await mkdtemp(resolve(tmpdir(), 'soft-hosted-browser-'));
+await prepareRestorableProfile(profile);
+report.continuePreviousBrowserSessionConfiguredBeforeFirstLaunch = true;
 let restoreBarrier = null, releaseRestore = null;
 const server = createServer(async (request, response) => {
   try {
     const pathname = new URL(request.url, 'http://localhost').pathname;
     const file = resolve(root, '.' + (pathname === '/' ? '/index.html' : decodeURIComponent(pathname)));
     if (!file.startsWith(root + sep)) throw new Error('invalid_path');
-    // Hold restored documents until request observation and stage config are
-    // attached. This makes the zero-credential-requests counter meaningful.
-    if (pathname === '/index.html' && restoreBarrier) await restoreBarrier;
     const content = await readFile(file);
+    const commitBarrier = pathname === '/index.html' ? restoreBarrier : null;
+    const parts = commitBarrier ? htmlCommitParts(content) : null;
     response.writeHead(200, { 'Content-Type': ({ '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
       '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png' })[extname(file)] || 'application/octet-stream',
       'Cache-Control': 'no-store',
       // Supplements the built application's strict CSP; this also blocks the
       // production default URL during restore before Playwright attaches.
       'Content-Security-Policy': `connect-src 'self' https://${TARGET}.supabase.co wss://${TARGET}.supabase.co` });
-    response.end(content);
+    if (commitBarrier) {
+      // Playwright waits for the initial navigation to commit while attaching
+      // CDP. Send only original HTML preceding the FIRST script; hold all app
+      // scripts until observation/configuration is installed. This preserves
+      // the document/session itself without a CDP/navigation deadlock.
+      response.write(parts.before);
+      report.restoreHtmlCommitPrefixCount = (report.restoreHtmlCommitPrefixCount || 0) + 1;
+      await commitBarrier;
+      response.end(parts.after);
+    } else response.end(content);
   } catch { response.writeHead(404); response.end(); }
 });
 server.listen(0, '127.0.0.1'); await once(server, 'listening');
 const appURL = `http://127.0.0.1:${server.address().port}/index.html`;
 let child, browser, context;
+let launchCount = 0;
 const events = new Map();
 let authenticatedRequests = 0;
-const attach = async () => {
-  let port;
-  await wait(async () => {
-    try { port = Number((await readFile(resolve(profile, 'DevToolsActivePort'), 'utf8')).split('\n')[0]); return port > 0; }
-    catch { return false; }
-  }, 20000);
-  browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+let clinicalWriteRequests = 0;
+const configureStage = ({ url, publicKey }) => {
+  globalThis.__hostedRawStorage = localStorage;
+  localStorage.setItem('medsys.v7.cloud.cfg', JSON.stringify({ url, anonKey: publicKey }));
+};
+const publicConfiguration = { url: `https://${TARGET}.supabase.co`, publicKey: fixture.publicKey };
+const configureOriginalDocuments = async () => {
+  const originals = context.pages().filter(page => page.url().startsWith(appURL));
+  report.restoredOwnerMarkerCountBeforeAppScripts = (await Promise.all(originals.map(page =>
+    page.evaluate(() => sessionStorage.getItem('__hosted_crash_marker') === 'original-document')))).filter(Boolean).length;
+  await Promise.all(originals.map(page => page.evaluate(configureStage, publicConfiguration)));
+  report.restoredStageConfigurationBeforeAppScripts = originals.length;
+};
+const nativeGUI = (action, ...extra) => new Promise((ok, fail) => execFile('python',
+  [fileURLToPath(new URL('./browser-native-restore.py', import.meta.url)), action, nativeDisplay, ...extra],
+  { timeout: 10000, maxBuffer: 2048 }, (error, stdout, stderr) => {
+    if (!error) return ok();
+    const code = nativeGuiError(stderr); report.nativeGuiFailure = code; fail(new Error(code));
+  }));
+const attach = async (diagnostic, processState) => {
+  browser = await connectLocalCdp({ profile, connect: (endpoint, options) => chromium.connectOverCDP(endpoint, options),
+    diagnostic, processState });
   context = browser.contexts()[0];
+  if (!context) { diagnostic.state = 'default_context_missing'; throw new Error('chromium_default_context_missing'); }
+  report.actualChromeVersion = /^\d+\.\d+\.\d+\.\d+$/.test(browser.version()) ? browser.version() : 'unknown';
   await context.route('**/*', route => {
     const url = new URL(route.request().url());
     if (url.hostname === `${TARGET}.supabase.co` || url.hostname === '127.0.0.1' || url.protocol === 'data:' || url.protocol === 'blob:') return route.continue();
@@ -94,23 +138,36 @@ const attach = async () => {
     return route.abort();
   });
   context.on('request', request => {
-    if (new URL(request.url()).hostname === `${TARGET}.supabase.co` && request.headers().authorization) authenticatedRequests++;
+    const url = new URL(request.url());
+    if (url.hostname !== `${TARGET}.supabase.co`) return;
+    if (request.headers().authorization) authenticatedRequests++;
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())
+      && (url.pathname.startsWith('/storage/v1/') || (url.pathname.startsWith('/rest/v1/')
+        && url.pathname !== '/rest/v1/rpc/ensure_offline_keyring'))) clinicalWriteRequests++;
   });
-  await context.addInitScript(({ url, publicKey }) => {
-    globalThis.__hostedRawStorage = localStorage;
-    localStorage.setItem('medsys.v7.cloud.cfg', JSON.stringify({ url, anonKey: publicKey }));
-  }, { url: `https://${TARGET}.supabase.co`, publicKey: fixture.publicKey });
+  await context.addInitScript(configureStage, publicConfiguration);
+  if (releaseRestore) await configureOriginalDocuments();
 };
 const launch = async () => {
+  const diagnostic = { launchIndex: launchCount, transientDebugPortRemovedBeforeLaunch: false, state: 'starting',
+    profileBeforeSpawn: await readRestorePreferences(profile) };
+  report.chromiumLaunchDiagnostics.push(diagnostic);
+  await removeTransientDebugPort(profile);
+  diagnostic.transientDebugPortRemovedBeforeLaunch = true;
   const executable = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || chromium.executablePath();
-  const launchArgs = ['--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--no-first-run', '--no-default-browser-check',
-    '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--restore-last-session', 'about:blank'];
+  const launchArgs = [...(nativeRestore ? [] : ['--headless=new']), '--no-sandbox', '--disable-dev-shm-usage', '--no-first-run', '--no-default-browser-check', '--lang=en-US',
+    '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--restore-last-session', ...browserStartupArguments(launchCount > 0)];
+  launchCount++;
   if (process.env.HTTPS_PROXY || process.env.HTTP_PROXY) launchArgs.push(`--proxy-server=${process.env.HTTPS_PROXY || process.env.HTTP_PROXY}`);
-  child = spawn(executable, launchArgs, { detached: true, stdio: ['ignore', 'ignore', 'ignore'] });
+  child = spawn(executable, launchArgs, { detached: true, stdio: ['ignore', 'ignore', 'ignore'],
+    env: nativeRestore ? { ...process.env, DISPLAY: nativeDisplay } : process.env });
   // Never print browser stderr: a transport diagnostic may contain a URL/key.
-  child.on('error', () => {});
-  await attach();
-  if (releaseRestore) { releaseRestore(); restoreBarrier = null; releaseRestore = null; }
+  let spawnFailed = false;
+  child.on('error', () => { spawnFailed = true; });
+  try {
+    await attach(diagnostic, () => ({ exited: spawnFailed || child.exitCode !== null || child.signalCode !== null,
+      exitCode: child.exitCode, signal: child.signalCode }));
+  } finally { await saveReport(); }
 };
 const boot = async page => {
   page.on('dialog', dialog => dialog.accept());
@@ -170,7 +227,13 @@ const locked = page => page.evaluate(() => {
       if (reusable.test(key) && storage.getItem(key)) return false;
     }
   }
-  return !auth.usuarioAtual() && !cloud.session() && !contextoAba.operational() && filaCifrada._chaves.size === 0;
+  const overlay = document.getElementById('auth-overlay'), app = document.querySelector('.app');
+  const clinicalModules = ['pacientes', 'agenda', 'pre', 'consulta', 'anestesia', 'recuperacao', 'risco', 'termo',
+    'prescricao', 'documentos', 'financeiro', 'fin_fechamentos', 'orcamento'];
+  return !auth.usuarioAtual() && !cloud.session() && !contextoAba.operational() && filaCifrada._chaves.size === 0
+    && !!overlay && getComputedStyle(overlay).display !== 'none'
+    && !!app && getComputedStyle(app).pointerEvents === 'none'
+    && clinicalModules.every(module => store.list(module).length === 0);
 });
 const ciphertexts = page => page.evaluate(async () => {
   const db = await new Promise((ok, fail) => {
@@ -189,11 +252,42 @@ const kill = async () => {
   const exited = once(child, 'exit'); process.kill(-child.pid, 'SIGKILL'); await exited; child = null;
   await rm(resolve(profile, 'DevToolsActivePort'), { force: true });
 };
+const recordCrash = async phase => {
+  const pages = context?.pages() || [];
+  const preferences = await readRestorePreferences(profile);
+  let persistedSessionFileCount = null, persistedSessionFiles = [];
+  try {
+    const directory = resolve(profile, 'Default/Sessions');
+    const names = (await readdir(directory)).filter(name => /^(Session_|Tabs_)\d+$/.test(name));
+    persistedSessionFileCount = names.length;
+    persistedSessionFiles = await Promise.all(names.map(async name => {
+      const metadata = await stat(resolve(directory, name));
+      return { kind: name.startsWith('Session_') ? 'session' : 'tabs', sizeBytes: metadata.size,
+        lastWriteAgeMs: Math.max(0, Math.round(Date.now() - metadata.mtimeMs)) };
+    }));
+  } catch {}
+  report.crashDiagnostics.push({ phase, contextCount: browser?.contexts().length || 0, pageCount: pages.length,
+    persistedRestorePreference: preferences.continuePreviousSession, persistedSessionExitType: preferences.exitType,
+    persistedExitedCleanly: preferences.exitedCleanly, persistedSessionFileCount, persistedSessionFiles,
+    appDocumentCount: pages.filter(page => page.url().startsWith(appURL)).length,
+    blankDocumentCount: pages.filter(page => page.url() === 'about:blank').length,
+    authenticatedRequestCount: authenticatedRequests,
+    pages: await Promise.all(pages.map(async page => ({ appDocument: page.url().startsWith(appURL),
+      documentKind: browserDocumentKind(page.url(), appURL),
+      ...(await crashPageStateRedacted(page)) }))) });
+  await saveReport();
+};
 let failure = false;
 try {
   await launch();
   const a = await context.newPage(), b = await context.newPage(), peer = await context.newPage();
   [a, b, peer].forEach(observe); await Promise.all([a, b, peer].map(boot));
+  // Set the original-document marker before hosted Auth and the other checks,
+  // allowing Chrome's normal sessionStorage persistence time to elapse. Never
+  // inject this marker into a document created after the browser is killed.
+  await a.evaluate(() => sessionStorage.setItem('__hosted_crash_marker', 'original-document'));
+  const ownerMarkerWrittenAt = Date.now();
+  report.ownerMarkerWrittenBeforeHostedAuth = true;
   await check('real_auth_two_clinics_same_browser_three_tabs', async () => {
     const results = await Promise.allSettled([login(a, 0), login(b, 2), login(peer, 1)]);
     assert.ok(results.every(result => result.status === 'fulfilled'), 'all_three_real_auth_logins_required');
@@ -255,27 +349,95 @@ try {
     assert.equal(events.get(b).some(event => event.id === own.id), false);
   });
   else checks.push({ name: 'real_session_crosses_original_jwt_expiration_automatic_refresh_and_realtime', passed: null, diagnostic: 'natural_expiry_not_requested' });
-  const offlineName = `Synthetic Offline ${fixture.runId}`, offlineId = `offline-${fixture.runId}`;
-  let encrypted;
+  const attemptId = randomUUID(); report.attemptId = attemptId;
+  const offlineName = `Synthetic Offline ${fixture.runId} ${attemptId}`, offlineId = `offline-${attemptId}`;
+  let encrypted, offlineLegacyId, offlineOperationId;
   await check('real_offline_wal_ciphertext_and_zero_plaintext_local_storage', async () => {
+    offlineLegacyId = await a.evaluate(({ id, name }) => migracaoFase4._patKey(migracaoFase4._ident({ _id: id, nome: name })),
+      { id: offlineId, name: offlineName });
+    assert.ok(offlineLegacyId, 'offline_synthetic_patient_identity_required');
+    assert.equal(await a.evaluate(async legacy => {
+      const query = new URLSearchParams({ organization_id: 'eq.' + contextoAba.organizationId(), legacy_id: 'eq.' + legacy, select: 'id' });
+      const response = await fetch(cloud.config().url + '/rest/v1/patients?' + query, { headers: cloud._headers(true) });
+      return response.ok && (await response.json()).length === 0;
+    }, offlineLegacyId), true, 'unique_attempt_patient_must_not_already_exist');
+    report.offlinePatientAbsentBeforeQueue = true;
     await context.setOffline(true);
     const result = await a.evaluate(async ({ id, name }) => {
       const r = await persistenciaCloudFirst.salvar('pacientes', { _id: id, nome: name });
-      return { queued: !!r.queued, durable: !!r.durable };
-    }, { id: offlineId, name: offlineName }); assert.deepEqual(result, { queued: true, durable: true });
+      return { queued: !!r.queued, durable: !!r.durable, operationId: r.operationId };
+    }, { id: offlineId, name: offlineName });
+    assert.equal(result.queued, true); assert.equal(result.durable, true);
+    assert.match(result.operationId, /^[a-f0-9-]{36}$/i); offlineOperationId = result.operationId;
     encrypted = await ciphertexts(a); assert.ok(encrypted.length >= 1); assert.doesNotMatch(JSON.stringify(encrypted), new RegExp(offlineName));
+    assert.equal(encrypted.filter(row => row.operationId === offlineOperationId && row.entityId === offlineId
+      && row.organizationId === fixture.organizations[0] && row.userId === fixture.users[0].id).length, 1);
     assert.equal(await a.evaluate(name => {
       const native = cofre._real;
       for (let index = 0; index < native.length; index++) if ((native.getItem(native.key(index)) || '').includes(name)) return false;
       return true;
     }, offlineName), true);
-    await a.evaluate(() => sessionStorage.setItem('__hosted_crash_marker', 'original-document'));
   });
   await check('real_sigkill_restore_locks_hosted_session_retains_encrypted_wal', async () => {
+    // SIGKILL cannot flush an immediately preceding sessionStorage write.
+    // Keep the real browser running for at least 30s after the ORIGINAL write;
+    // no browser clock, storage file or restored document is manipulated.
+    const remainingMarkerPersistenceTime = Math.max(0, 30000 - (Date.now() - ownerMarkerWrittenAt));
+    if (remainingMarkerPersistenceTime) await new Promise(done => setTimeout(done, remainingMarkerPersistenceTime));
+    report.ownerMarkerAgeBeforeSigkillMs = Date.now() - ownerMarkerWrittenAt;
     const requestsBeforeRestore = authenticatedRequests;
+    report.requestsBeforeRestore = requestsBeforeRestore;
+    await recordCrash('before_sigkill');
     restoreBarrier = new Promise(done => { releaseRestore = done; });
-    await kill(); await launch();
-    await wait(() => context.pages().filter(page => page.url().startsWith(appURL)).length === 3, 20000);
+    await kill(); await launch(); await recordCrash('after_launch_before_restore_wait');
+    if (nativeRestore && context.pages().filter(page => page.url().startsWith(appURL)).length === 0) {
+      const nativePages = context.pages().filter(page => browserDocumentKind(page.url(), appURL) === 'browser_new_tab');
+      assert.equal(nativePages.length, 1, 'unique_post_crash_native_new_tab_required');
+      assert.equal(context.pages().length, 1, 'native_ui_capture_requires_only_the_new_tab_document');
+      await nativePages[0].bringToFront();
+      await new Promise(done => setTimeout(done, 500));
+      assert.equal(context.pages().length, 1, 'native_ui_capture_requires_only_the_new_tab_document');
+      assert.equal(browserDocumentKind(context.pages()[0].url(), appURL), 'browser_new_tab', 'native_ui_capture_requires_new_tab');
+      const capturedAt = Date.now(); await nativeGUI('capture', nativeScreenshot);
+      if (context.pages().length !== 1 || browserDocumentKind(context.pages()[0].url(), appURL) !== 'browser_new_tab') {
+        await rm(nativeScreenshot, { force: true }); throw new Error('native_capture_document_changed');
+      }
+      process.stdout.write(JSON.stringify({ phase: 'native_restore_bubble_operator_inspection_required',
+        screenshot: nativeScreenshot, acknowledgement: nativeAck, runId: fixture.runId }) + '\n');
+      let restoreButton;
+      await wait(async () => {
+        try {
+          const metadata = await lstat(nativeAck), captureMetadata = await lstat(nativeScreenshot);
+          if (!metadata.isFile() || metadata.isSymbolicLink() || (metadata.mode & 0o077) !== 0 || metadata.mtimeMs < capturedAt
+              || !captureMetadata.isFile() || captureMetadata.isSymbolicLink() || (captureMetadata.mode & 0o077) !== 0) return false;
+          const acknowledgement = JSON.parse(await readFile(nativeAck, 'utf8'));
+          restoreButton = nativeRestoreTarget({ acknowledgement, screenshot: await readFile(nativeScreenshot), runId: fixture.runId });
+          return true;
+        } catch { return false; }
+      }, 120000);
+      assert.equal(context.pages().length, 1, 'native_restore_click_requires_only_the_new_tab_document');
+      assert.equal(browserDocumentKind(context.pages()[0].url(), appURL), 'browser_new_tab', 'native_restore_click_requires_new_tab');
+      report.nativeRestoreBubbleObservedByOperator = true;
+      report.nativeRestoreScreenshotHashVerified = true;
+      await nativeGUI('restore', String(restoreButton.x), String(restoreButton.y)); report.nativeRestoreRequestedViaOperatingSystem = true;
+      await recordCrash('after_native_restore_request');
+    }
+    try { await wait(() => context.pages().filter(page => page.url().startsWith(appURL)).length === 3, 20000); }
+    catch { await recordCrash('restore_document_wait_failed'); throw new Error('restore_document_wait_failed'); }
+    await configureOriginalDocuments();
+    const expectedSessions = [0, 1, 2].map(index => ({ userId: fixture.users[index].id,
+      organizationId: fixture.organizations[fixture.users[index].organizationIndex] }));
+    const originalProofs = await Promise.all(context.pages().filter(page => page.url().startsWith(appURL))
+      .map(page => page.evaluate(originalSessionProof, expectedSessions)));
+    report.originalSessionProofsBeforeAppScripts = originalProofs;
+    assert.equal(originalProofs.length, 3);
+    assert.deepEqual(originalProofs.map(proof => proof.fixtureIndex).sort(), [0, 1, 2], 'three_original_user_sessions_must_actually_restore');
+    assert.ok(originalProofs.every(proof => proof.originalCredentialsPresent && proof.applicationNotStarted),
+      'original_reusable_credentials_must_be_observed_before_boot_clears_them');
+    assert.equal(originalProofs.filter(proof => proof.ownerMarkerPresent).length, 1, 'one_original_owner_marker_required_before_scripts');
+    await recordCrash('original_sessions_observed_before_app_scripts');
+    releaseRestore(); restoreBarrier = null; releaseRestore = null;
+    await recordCrash('after_restore_document_wait');
     const restoredPages = context.pages().filter(page => page.url().startsWith(appURL));
     assert.equal(restoredPages.length, 3, 'all_three_tabs_must_actually_restore');
     let restored;
@@ -283,24 +445,51 @@ try {
       await page.waitForLoadState('load');
       await page.waitForFunction(() => typeof auth !== 'undefined' && typeof cloud !== 'undefined'
         && typeof filaCifrada !== 'undefined' && typeof persistenciaCloudFirst !== 'undefined');
+      await recordCrash('restored_app_ready');
       assert.equal(await locked(page), true);
       const marker = await page.evaluate(() => sessionStorage.getItem('__hosted_crash_marker'));
       if (marker === 'original-document') { assert.equal(restored, undefined); restored = page; }
     }
     assert.ok(restored, 'original_owner_tab_marker_must_restore');
-    assert.deepEqual(await ciphertexts(restored), encrypted);
+    const restoredCiphertexts = await ciphertexts(restored);
+    report.walCiphertextCountMatches = restoredCiphertexts.length === encrypted.length;
+    report.walCiphertextsMatch = JSON.stringify(restoredCiphertexts) === JSON.stringify(encrypted);
+    await recordCrash('before_wal_comparison');
+    assert.deepEqual(restoredCiphertexts, encrypted);
     report.restoredAuthenticatedRequests = authenticatedRequests - requestsBeforeRestore;
     assert.equal(report.restoredAuthenticatedRequests, 0, 'restored_tabs_must_not_reuse_hosted_credentials');
-    await login(restored, 2); assert.equal(await restored.evaluate(async () => (await filaCifrada.listar()).length), 0);
-    await restored.evaluate(() => auth.logout({ broadcast: false })); await login(restored, 0);
+    for (const userIndex of [1, 2]) {
+      const writesBefore = clinicalWriteRequests;
+      await login(restored, userIndex); await recordCrash(userIndex === 1 ? 'same_clinic_other_user_reauthenticated' : 'foreign_clinic_user_reauthenticated');
+      assert.equal(await restored.evaluate(async () => (await filaCifrada.listar()).length), 0);
+      assert.deepEqual(await ciphertexts(restored), encrypted, 'other_user_must_not_change_owner_ciphertext');
+      assert.equal(clinicalWriteRequests - writesBefore, 0, 'other_user_must_not_send_clinical_writes');
+      await restored.evaluate(() => auth.logout({ broadcast: false }));
+      assert.deepEqual(await ciphertexts(restored), encrypted, 'other_user_logout_must_preserve_owner_ciphertext');
+      assert.equal(clinicalWriteRequests - writesBefore, 0, 'other_user_logout_must_not_send_clinical_writes');
+    }
+    report.otherUserAndClinicLeftCiphertextUnchangedWithoutClinicalWrites = true;
+    await login(restored, 0); await recordCrash('owner_reauthenticated');
     // Re-login is a real Auth request. The original user's successful online
     // key unwrap automatically unlocks and drains the encrypted offline WAL.
-    await wait(async () => await restored.evaluate(async () => (await filaCifrada.listar()).length === 0), 60000);
-    const uploaded = await restored.evaluate(async name => {
-      const url = cloud.config().url + '/rest/v1/patients?organization_id=eq.' + contextoAba.organizationId()
-        + '&nome=eq.' + encodeURIComponent(name) + '&select=id';
-      const r = await fetch(url, { headers: cloud._headers(true) }); return r.ok && (await r.json()).length === 1;
-    }, offlineName); assert.equal(uploaded, true);
+    try { await wait(async () => await restored.evaluate(async () => (await filaCifrada.listar()).length === 0), 60000); }
+    catch { await recordCrash('owner_wal_drain_wait_failed'); throw new Error('owner_wal_drain_wait_failed'); }
+    await recordCrash('owner_wal_drained');
+    const uploaded = await restored.evaluate(async ({ legacyId, organizationId, userId, operationId, entityId, name }) => {
+      const query = new URLSearchParams({ organization_id: 'eq.' + organizationId, legacy_id: 'eq.' + legacyId,
+        select: 'id,legacy_id,organization_id,updated_by,last_operation_id,nome,data' });
+      const response = await fetch(cloud.config().url + '/rest/v1/patients?' + query, { headers: cloud._headers(true) });
+      if (!response.ok) return false;
+      const rows = await response.json();
+      return rows.length === 1 && rows[0].legacy_id === legacyId && rows[0].organization_id === organizationId
+        && rows[0].updated_by === userId && rows[0].last_operation_id === operationId
+        && rows[0].nome === name && rows[0].data?._id === entityId;
+    }, { legacyId: offlineLegacyId, organizationId: fixture.organizations[0], userId: fixture.users[0].id,
+      operationId: offlineOperationId, entityId: offlineId, name: offlineName });
+    assert.equal(uploaded, true, 'server_receipt_must_identify_exact_attempt_operation_and_owner');
+    assert.equal((await ciphertexts(restored)).some(row => row.operationId === offlineOperationId || row.entityId === offlineId), false,
+      'confirmed_operation_must_be_physically_removed_from_indexeddb');
+    report.ownerUploadReceiptVerifiedAndCiphertextPhysicallyRemoved = true;
   });
 } catch (error) {
   failure = true; report.executionFailed = true;

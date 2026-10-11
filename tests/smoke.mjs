@@ -66,6 +66,16 @@ async function test(name, fn) {
 const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || process.env.PW_CHROMIUM;
 const browser = await chromium.launch(chromiumPath ? { executablePath: chromiumPath } : {});
 
+async function isolarWebSocketsDaNuvem(page) {
+  /* page.route intercepta HTTP, mas NÃO o upgrade WebSocket. Os testes usam
+     contas/chaves fictícias e precisam manter esse transporte local também.
+     Sem connectToServer, Playwright não abre conexão externa. O fechamento
+     explícito preserva o caminho de desconexão/recuo do app; o teste funcional
+     de Realtime continua controlando seus próprios frames e sua reconexão. */
+  await page.routeWebSocket(/^wss?:\/\/[^/]+\.supabase\.co(?::\d+)?\//, socket =>
+    socket.close({ code: 4000, reason: 'smoke offline transport' }));
+}
+
 async function novaPagina() {
   const page = await browser.newPage();
   /* NENHUM teste fala com a internet: salvar um registro dispara espelho na
@@ -73,6 +83,7 @@ async function novaPagina() {
      job. Cortadas na origem, falham na hora — que é o que o app espera de um
      aparelho offline. */
   await page.route('**://*.supabase.co/**', route => route.abort());
+  await isolarWebSocketsDaNuvem(page);
   await page.route('**://accounts.google.com/**', route => route.abort());
   await page.route('**://*.googleapis.com/**', route => route.abort());
   page.on('console', m => { if (m.type() === 'error') currentErrors.push(m.text()); });
@@ -188,6 +199,26 @@ await test('App carrega sem erros de JS e mostra a tela de acesso', async () => 
   assert(temOverlay, 'overlay de autenticação deveria existir');
   assert(objetosGlobais, 'objetos globais dos módulos deveriam estar definidos');
   await page.close();
+});
+
+await test('Harness offline fecha WebSockets fictícios sem handshake externo nem erro escondido', async () => {
+  const page = await novaPagina();
+  const cdp = await page.context().newCDPSession(page);
+  let handshakes = 0;
+  await cdp.send('Network.enable');
+  cdp.on('Network.webSocketWillSendHandshakeRequest', () => handshakes++);
+  try {
+    const closed = await page.evaluate(async () => Promise.all(['smoke', 'nuvem-teste', 'x'].map(host => new Promise((ok, fail) => {
+      const timeout = setTimeout(() => fail(new Error('synthetic_websocket_did_not_close_locally')), 5000);
+      const socket = new WebSocket(`wss://${host}.supabase.co/realtime/v1/websocket?apikey=synthetic-key&vsn=1.0.0`);
+      socket.onmessage = () => { clearTimeout(timeout); fail(new Error('unexpected_synthetic_websocket_message')); };
+      socket.onerror = () => { clearTimeout(timeout); fail(new Error('synthetic_websocket_transport_escaped')); };
+      socket.onclose = event => { clearTimeout(timeout); ok({ code: event.code, reason: event.reason }); };
+    }))));
+    assert(closed.length === 3 && closed.every(event => event.code === 4000 && event.reason === 'smoke offline transport'),
+      'os três hosts fictícios devem terminar na fronteira local do harness');
+    assert(handshakes === 0, 'nenhum handshake WebSocket pode sair para a rede real');
+  } finally { await cdp.detach(); await page.close(); }
 });
 
 /* 2) Modo demonstração desbloqueia o app (recarrega a página) */
@@ -704,6 +735,7 @@ await test('Offline: service worker cacheia o app e o reload sem rede funciona',
   const ctx = await browser.newContext();
   try {
     const page = await ctx.newPage();
+    await isolarWebSocketsDaNuvem(page);
     page.on('console', m => { if (m.type() === 'error') currentErrors.push(m.text()); });
     page.on('pageerror', e => currentErrors.push('PAGEERROR: ' + e.message));
     page.on('dialog', d => d.accept());
@@ -10462,6 +10494,7 @@ await test('Nuvem: dá para recuperar a senha pela própria janela de entrar', a
    clica, cai no sistema e não acontece nada. */
 await test('Nuvem: o link do e-mail abre a definição de nova senha e não vira nome de módulo', async () => {
   const page = await browser.newPage();
+  await isolarWebSocketsDaNuvem(page);
   await page.route('**://*.supabase.co/**', route => route.abort());
   page.on('dialog', d => d.dismiss());
   await page.goto(APP_URL + '#access_token=TOK123&expires_in=3600&type=recovery');
