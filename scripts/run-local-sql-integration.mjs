@@ -221,6 +221,7 @@ const PLATFORM_MIGRATION_CAPABILITIES = `select jsonb_build_object(
  'adminDefaultsAuthorized',pg_has_role(current_user,'supabase_admin','USAGE'),
  'extensionSchemaCreateAuthorized',has_schema_privilege(current_user,'extensions','CREATE'),
  'extensions',coalesce((select jsonb_agg(jsonb_build_object('name',e.extname,
+  'schema',n.nspname,'owner',pg_get_userbyid(e.extowner),
   'moveRequired',n.nspname<>'extensions','moveAuthorized',pg_has_role(current_user,e.extowner,'USAGE')) order by e.extname)
   from pg_extension e join pg_namespace n on n.oid=e.extnamespace
   where e.extname in ('pgcrypto','unaccent','pg_trgm')),'[]'::jsonb),
@@ -230,13 +231,86 @@ const PLATFORM_MIGRATION_CAPABILITIES = `select jsonb_build_object(
  'realtimePublicationAuthorized',coalesce((select pg_has_role(current_user,pubowner,'USAGE')
   from pg_publication where pubname='supabase_realtime'),false));`;
 
+// Supabase utility hooks can authorize ALTER EXTENSION without role inheritance.
+// Test precisely the relocation used by 0025; the deliberate exception rolls
+// back every successful ALTER in its own subtransaction before exporting facts.
+export const MANAGED_EXTENSION_RELOCATION_PROBE = `begin;
+set local lock_timeout='5s';
+set local statement_timeout='30s';
+do $extension_probe$
+declare r record; before_state jsonb; after_state jsonb; executed boolean;
+ authorized boolean; results jsonb:='[]'::jsonb;
+begin
+ if current_database()<>'postgres' or current_user<>'postgres' or session_user<>'postgres'
+  or current_setting('server_version_num')::integer/10000<>17 then
+  raise exception 'Extension probe requires the verified application executor'; end if;
+ if (select count(*) from pg_extension where extname in ('pgcrypto','unaccent','pg_trgm'))<>3 then
+  raise exception 'Extension probe requires the complete fixed inventory'; end if;
+ for r in select e.extname,n.nspname from pg_extension e join pg_namespace n on n.oid=e.extnamespace
+  where e.extname in ('pgcrypto','unaccent','pg_trgm') order by e.extname loop
+  select jsonb_build_object('oid',e.oid,'owner',e.extowner,'namespace',e.extnamespace,'version',e.extversion)
+   into before_state from pg_extension e where e.extname=r.extname;
+  executed:=false; authorized:=null;
+  if r.nspname<>'extensions' then
+   begin
+    execute format('alter extension %I set schema extensions',r.extname);
+    executed:=true;
+    raise exception using errcode='PZ001',message='managed_extension_probe_rollback';
+   exception
+    when sqlstate 'PZ001' then
+     if not executed then raise; end if;
+     authorized:=true;
+    when insufficient_privilege then executed:=false; authorized:=false;
+   end;
+  end if;
+  select jsonb_build_object('oid',e.oid,'owner',e.extowner,'namespace',e.extnamespace,'version',e.extversion)
+   into after_state from pg_extension e where e.extname=r.extname;
+  if before_state is distinct from after_state then
+   raise exception 'Extension probe changed persistent extension metadata'; end if;
+  results:=results||jsonb_build_array(jsonb_build_object('name',r.extname,
+   'moveRequired',r.nspname<>'extensions','relocationExecuted',executed,
+   'relocationAuthorized',authorized,'statePreserved',true));
+ end loop;
+ perform set_config('soft_as.extension_probe',results::text,true);
+end $extension_probe$;
+select current_setting('soft_as.extension_probe')::jsonb;
+rollback;
+`;
+
+export function safePlatformCapabilityDiagnostics(facts) {
+  const owners=['postgres','supabase_admin','supabase_auth_admin','supabase_storage_admin'];
+  const boolean=key=>typeof facts?.[key]==='boolean'?facts[key]:null;
+  return {roleVerified:boolean('roleVerified'),adminDefaultsAuthorized:boolean('adminDefaultsAuthorized'),
+    extensionSchemaCreateAuthorized:boolean('extensionSchemaCreateAuthorized'),
+    extensions:(Array.isArray(facts?.extensions)?facts.extensions:[])
+      .filter(x=>x&&['pgcrypto','pg_trgm','unaccent'].includes(x.name))
+      .map(x=>({name:x.name,schema:['public','extensions'].includes(x.schema)?x.schema:'unreviewed-schema',
+        owner:owners.includes(x.owner)?x.owner:'unreviewed-role',
+        moveRequired:typeof x.moveRequired==='boolean'?x.moveRequired:null,
+        inheritedOwnerAuthority:typeof x.inheritedOwnerAuthority==='boolean'?x.inheritedOwnerAuthority:
+          (typeof x.moveAuthorized==='boolean'?x.moveAuthorized:null),
+        relocationExecuted:typeof x.relocationExecuted==='boolean'?x.relocationExecuted:null,
+        relocationAuthorized:typeof x.relocationAuthorized==='boolean'?x.relocationAuthorized:null,
+        statePreserved:typeof x.statePreserved==='boolean'?x.statePreserved:null})),
+    storagePoliciesAuthorized:boolean('storagePoliciesAuthorized'),
+    realtimePublicationAuthorized:boolean('realtimePublicationAuthorized')};
+}
+
+export async function readPlatformMigrationCapabilityDiagnostics(db) {
+  const result=await db.runMigrationAsPostgres(PLATFORM_MIGRATION_CAPABILITIES,'platform extension ownership metadata');
+  let facts;try{facts=JSON.parse(result.stdout.trim());}catch{fail('Platform migration capability response is invalid.');}
+  if(!facts||typeof facts!=='object'||Array.isArray(facts))fail('Platform migration capability response is invalid.');
+  return safePlatformCapabilityDiagnostics(facts);
+}
+
 export async function verifyPlatformMigrationCapabilities(db) {
   const result=await db.runMigrationAsPostgres(PLATFORM_MIGRATION_CAPABILITIES,'managed platform migration prerequisites');
   let facts;try{facts=JSON.parse(result.stdout.trim());}catch{fail('Platform migration capability response is invalid.');}
   if(!facts||typeof facts!=='object'||Array.isArray(facts))fail('Platform migration capability response is invalid.');
   const denied = prerequisite => {
     const error=new Error('Required stock platform migration authority is unavailable.');
-    error.platformPrerequisite=prerequisite;throw error;
+    error.platformPrerequisite=prerequisite;
+    error.platformCapabilityDiagnostics=safePlatformCapabilityDiagnostics(facts);throw error;
   };
   if(facts.roleVerified!==true)denied('postgres-role');
   if(typeof facts.adminDefaultsAuthorized!=='boolean')denied('supabase-admin-default-privileges');
@@ -244,8 +318,25 @@ export async function verifyPlatformMigrationCapabilities(db) {
   if(!Array.isArray(facts.extensions)||facts.extensions.length!==3
     ||facts.extensions.some(x=>!x||typeof x!=='object'||!['pgcrypto','unaccent','pg_trgm'].includes(x.name))
     ||new Set(facts.extensions.map(x=>x.name)).size!==3)denied('required-extension-inventory');
-  if(facts.extensions.some(x=>typeof x.moveRequired!=='boolean'||typeof x.moveAuthorized!=='boolean'
-    ||x.moveRequired&&!x.moveAuthorized))denied('extension-owner');
+  if(facts.extensions.some(x=>typeof x.moveRequired!=='boolean'||typeof x.moveAuthorized!=='boolean'))
+    denied('extension-owner');
+  const probe=await db.runMigrationAsPostgres(MANAGED_EXTENSION_RELOCATION_PROBE,'managed extension relocation rollback probe');
+  let relocations;try{relocations=JSON.parse(probe.stdout.trim());}catch{denied('extension-owner');}
+  if(!Array.isArray(relocations)||relocations.length!==3||new Set(relocations.map(x=>x?.name)).size!==3)
+    denied('extension-owner');
+  for(const extension of facts.extensions) {
+    const result=relocations.find(x=>x?.name===extension.name);
+    if(!result||result.moveRequired!==extension.moveRequired||result.statePreserved!==true
+      ||typeof result.relocationExecuted!=='boolean'
+      ||(extension.moveRequired?(result.relocationExecuted!==true||result.relocationAuthorized!==true)
+        :(result.relocationExecuted!==false||result.relocationAuthorized!==null))) {
+      if(result)Object.assign(extension,{relocationExecuted:result.relocationExecuted,
+        relocationAuthorized:result.relocationAuthorized,statePreserved:result.statePreserved});
+      denied('extension-owner');
+    }
+    Object.assign(extension,{relocationExecuted:result.relocationExecuted,
+      relocationAuthorized:result.relocationAuthorized,statePreserved:result.statePreserved});
+  }
   if(facts.storagePoliciesAuthorized!==true)denied('storage-policy-owner');
   if(facts.realtimePublicationAuthorized!==true)denied('realtime-publication-owner');
   return {verified:true,role:'postgres',adminDefaultsAuthorized:facts.adminDefaultsAuthorized,
@@ -253,7 +344,7 @@ export async function verifyPlatformMigrationCapabilities(db) {
     adminDefaultAuthorityMatchesHosted:!facts.adminDefaultsAuthorized,
     supplierDefaultsMustRemainUnmodified:true,supplierDefaultPrivilegesPending:true,
     extensionSchemaCreateAuthorized:true,
-    extensions:facts.extensions.map(({name,moveRequired,moveAuthorized})=>({name,moveRequired,moveAuthorized})),
+    extensions:safePlatformCapabilityDiagnostics(facts).extensions,extensionAuthorityVerifiedBy:'actual-relocation-rollback',
     storagePoliciesAuthorized:true,realtimePublicationAuthorized:true,privilegesAdded:false,ownersChanged:false};
 }
 
@@ -573,6 +664,8 @@ export async function runLocalSqlIntegration({ repoDir = rootDir, inheritedEnv =
     const platformPrerequisite=['postgres-role','supabase-admin-default-privileges','extension-schema-create',
       'required-extension-inventory','extension-owner','storage-policy-owner','realtime-publication-owner'].includes(error.platformPrerequisite)
       ? error.platformPrerequisite : undefined;
+    if(error.platformCapabilityDiagnostics)
+      evidence.platformMigrationCapabilityDiagnostics=safePlatformCapabilityDiagnostics(error.platformCapabilityDiagnostics);
     failure = new Error(`Integração SQL local falhou em ${stage}${sqlState}${assertion}${guard ? ` [${guard}]` : ''}${platformPrerequisite ? ` [${platformPrerequisite}]` : ''}; nenhuma verificação remota foi declarada.`);
     evidence.tests.push({ name: stage, passed: false, ...(guard ? { guard } : {}),...(platformPrerequisite?{platformPrerequisite}:{}) });
   } finally {

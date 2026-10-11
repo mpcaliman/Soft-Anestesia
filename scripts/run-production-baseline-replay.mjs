@@ -12,7 +12,7 @@ import { historicalFixtureEvidence, loadHistoricalUpgradeFixture } from './histo
 import { captureSyntheticFixtureCounts, legacyFixtureEvidence, loadLegacyUpgradeFixture, runConcurrentLegacyProvenance } from './legacy-upgrade-fixture.mjs';
 import { assertCommandSuccess, assertLocalDatabaseUrl, assertSafeEnvironment, createPsqlExecutor,
   isolatedConfig, loadMigrationPlan, reconciledPermissionFixtureEvidence, runConcurrentRetification,
-  verifyPlatformMigrationCapabilities } from './run-local-sql-integration.mjs';
+  readPlatformMigrationCapabilityDiagnostics, safePlatformCapabilityDiagnostics, verifyPlatformMigrationCapabilities } from './run-local-sql-integration.mjs';
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const sourcePath = 'docs/engineering/PRODUCTION-APPLICATION-CATALOG-2026-10-11.json';
@@ -164,7 +164,7 @@ async function execute(command, args, { env, cwd, timeoutMs = 120000, input } = 
 }
 
 export async function replayProductionBaseline(db, repoDir = rootDir) {
-  let phase = 'source-artifacts', migrationPath;
+  let phase = 'source-artifacts', migrationPath, initialPlatformMigrationCapabilityDiagnostics;
   try {
   const source = JSON.parse(await readFile(join(repoDir, sourcePath), 'utf8'));
   const extraCoverage = JSON.parse(await readFile(join(repoDir, 'docs/engineering/PRODUCTION-APPLICATION-COVERAGE-2026-10-11.json'), 'utf8'));
@@ -194,6 +194,7 @@ export async function replayProductionBaseline(db, repoDir = rootDir) {
 create table if not exists supabase_migrations.schema_migrations(version text primary key,statements text[],name text);`, 'empty local migration metadata fixture');
   const originalHistory = (await snapshot()).catalog.migration_history;
   assert.deepEqual(originalHistory, [], 'Reference database must have no application migration history');
+  initialPlatformMigrationCapabilityDiagnostics=await readPlatformMigrationCapabilityDiagnostics(db);
   phase = 'application-restore';
   await db.run(`set application_name='soft_as_production_baseline_replay';\n${storedRestore}`, 'captured production application restore');
   phase = 'managed-security-fixture';
@@ -328,6 +329,7 @@ create table if not exists supabase_migrations.schema_migrations(version text pr
     migrationHashes: Object.fromEntries(plan.map(x => [x.path, x.sha256])), migrationsRehearsed: plan.length,
     migrationExecutionRole: 'postgres', migrationRoleGuardVerified: true, migrationSqlInputUnchanged: true,
     platformMigrationCapabilities,
+    initialPlatformMigrationCapabilityDiagnostics,
     historicalUpgrade,
     legacyProvenance,legacyConcurrency,beforeTransactionFixtureCounts,
     permissionReconciliation,
@@ -341,6 +343,8 @@ create table if not exists supabase_migrations.schema_migrations(version text pr
     hostedIntegrationVerified: false, productionVerified: false, productionApplyAllowed: false };
   } catch (error) {
     error.replayPhase = phase;
+    if(initialPlatformMigrationCapabilityDiagnostics&&!error.platformCapabilityDiagnostics)
+      error.platformCapabilityDiagnostics=initialPlatformMigrationCapabilityDiagnostics;
     if (migrationPath) error.migrationPath = migrationPath;
     throw error;
   }
@@ -378,6 +382,8 @@ export async function runProductionBaselineReplay({ repoDir = rootDir, inherited
     evidence = await replayProductionBaseline(db, repoDir);
   } catch (error) {
     evidence.baselineReplayVerified = false;
+    if(error.platformCapabilityDiagnostics)
+      evidence.platformMigrationCapabilityDiagnostics=safePlatformCapabilityDiagnostics(error.platformCapabilityDiagnostics);
     if (error.catalogDifference && ['baselineComparison', 'managedSecurityComparison'].includes(error.comparisonKind)) evidence[error.comparisonKind] = error.catalogDifference;
     evidence.failure = replayFailureDetails(error, operation);
     failure = new Error(`Production reference replay failed at ${evidence.failure.operation}${evidence.failure.migrationPath ? ' ['+evidence.failure.migrationPath+']' : ''}${evidence.failure.sqlState ? ` (SQLSTATE ${evidence.failure.sqlState})` : ''}${evidence.failure.missingRelation ? ' [relation '+evidence.failure.missingRelation+']' : ''}${evidence.failure.sourceLine ? ' [source line '+evidence.failure.sourceLine+']' : ''}${evidence.failure.assertionCode ? ' ['+evidence.failure.assertionCode+']' : ''}; no remote verification claimed.`);

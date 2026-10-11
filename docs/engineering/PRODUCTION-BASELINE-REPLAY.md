@@ -87,10 +87,33 @@ Owners e defaults intermediários são verificados para esse papel. A `0033`
 é uma adição ao histórico, não uma alteração das fontes anteriores. O relatório
 mantém integralmente a comparação com o catálogo histórico de homologação,
 identificando sua data de captura; diferenças não são filtradas para aprovar.
-Antes das migrações, um diagnóstico exclusivamente de catálogo prova a
-autoridade sobre extensões que precisam mover, policies de Storage e publicação
-Realtime. A autoridade sobre defaults de `supabase_admin` é registrada
-separadamente: uma tentativa real em homologação foi recusada com `42501`.
+Antes das migrações, o ensaio registra owners e associação a papéis,
+verifica a autoridade sobre policies de Storage e publicação Realtime e executa
+um teste real da relocação exigida por `0025`. A associação ao papel proprietário
+não basta para concluir a capacidade: hooks do Supabase podem autorizar
+`ALTER EXTENSION` ao executor `postgres` sem essa associação.
+O CI `2e85ba6` recusou `extension-owner` ao interpretar associação ausente como
+recusa da operação. A prova nativa em homologação
+[`MANAGED-EXTENSION-CAPABILITY-PROBE-2026-10-11.sql`](./MANAGED-EXTENSION-CAPABILITY-PROBE-2026-10-11.sql)
+executou a relocação de `unaccent`, propriedade de `supabase_admin`, como
+`postgres`, reverteu-a por uma exceção deliberada e comprovou owner e namespace
+invariáveis. A prova e seus limites estão em
+[`MANAGED-EXTENSION-CAPABILITY-2026-10-11.json`](./MANAGED-EXTENSION-CAPABILITY-2026-10-11.json);
+nenhuma operação foi executada em produção.
+O runner agora testa as três extensões fixas que precisam sair do schema
+histórico. Cada `ALTER EXTENSION ... SET SCHEMA extensions` fica dentro de uma
+subtransação revertida pela exceção `PZ001`; uma recusa real `42501` permanece
+bloqueadora. O ensaio exige a execução observada, owner/namespace/versão/OID
+invariáveis depois da reversão e a mesma necessidade de relocação registrada
+nos metadados. Extensões já no schema alvo não são movidas e não recebem uma
+afirmação de autoridade que não tenha sido testada. Outros erros continuam
+falhando o ensaio. O `ROLLBACK` externo impede persistir qualquer ajuste da
+sondagem. Criação histórica e baseline SQL congelado conservam seus executores
+e bytes originais; o ensaio não troca owners nem concede papéis para passar.
+Diagnósticos exportam somente nomes fixos de extensão, schema e proprietário
+de papéis de plataforma reconhecidos e booleans; nomes inesperados são
+substituídos por um marcador. A autoridade sobre defaults de `supabase_admin`
+continua separada: uma tentativa real em homologação foi recusada com `42501`.
 A migração fecha os defaults de `postgres` e preserva integralmente os defaults
 do fornecedor. A condição do fornecedor permanece pendente; o ensaio não
 afirma fechamento universal. Não concede associação a papéis privilegiados
