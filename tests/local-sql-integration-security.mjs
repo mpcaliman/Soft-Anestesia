@@ -270,18 +270,24 @@ await check('corrida exige duas sessões, barreira observada, original e auditor
   await assert.rejects(runConcurrentRetification(db), /auditoria/);
 });
 
-await check('workflow tem permissões mínimas, timeout e somente artefato de evidência', async () => {
+await check('workflow tem permissões mínimas, timeout e somente as duas evidências SQL revisadas', async () => {
   const workflow = await readFile(join(root, '.github/workflows/sql-integration.yml'), 'utf8');
   const ci = await readFile(join(root, '.github/workflows/ci.yml'), 'utf8');
   assert.match(workflow, /contents: read/); assert.doesNotMatch(workflow, /contents: write|secrets\.|environment:/);
-  assert.match(workflow, /persist-credentials: false/); assert.match(workflow, /timeout-minutes: 25/);
+  assert.match(workflow, /persist-credentials: false/);
+  // Two independently disposable Supabase projects now run in this job. Keep
+  // their combined deadline fixed, rather than allowing an unbounded workflow.
+  assert.match(workflow, /^\s+timeout-minutes: 40\s*$/m);
   assert.match(workflow, /branches: \[ 'codex\/\*\*' \]/); assert.match(workflow, /branches: \[ main \]/);
   assert.match(workflow, /run: npm ci/); assert.match(workflow, /run: node tests\/local-sql-integration-security\.mjs/);
   assert.match(workflow, /run: node scripts\/run-local-sql-integration\.mjs/);
+  assert.match(workflow, /run: node tests\/production-baseline-security\.mjs/);
+  assert.match(workflow, /run: node scripts\/run-production-baseline-replay\.mjs/);
   const actions = [...workflow.matchAll(/uses:\s*([^\s]+)@([a-f0-9]{40})/g)];
-  assert.equal(actions.length, 3);
+  assert.equal(actions.length, 4);
   for (const [, name, sha] of actions) assert.ok(ci.includes(`${name}@${sha}`));
-  assert.deepEqual([...workflow.matchAll(/^\s+path:\s*(.+)$/gm)].map(match => match[1]), ['artifacts/local-sql-integration-evidence.json']);
+  assert.deepEqual([...workflow.matchAll(/^\s+path:\s*(.+)$/gm)].map(match => match[1]),
+    ['artifacts/local-sql-integration-evidence.json', 'artifacts/production-baseline-replay-evidence.json']);
 });
 
 console.log(`✓ ${checks} grupos de segurança do executor SQL local; PostgreSQL real é verificado pelo workflow Docker.`);
