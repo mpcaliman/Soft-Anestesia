@@ -357,6 +357,7 @@ export async function runProductionBaselineReplay({ repoDir = rootDir, inherited
   const projectId = `soft-as-sql-${randomBytes(12).toString('hex')}`;
   const env = { PATH: inheritedEnv.PATH, HOME: inheritedEnv.HOME, TMPDIR: workdir, LANG: 'C.UTF-8',
     DOCKER_HOST: 'unix:///var/run/docker.sock', DOCKER_CONFIG: join(workdir, 'docker-config'),
+    SUPABASE_HOME: join(workdir, 'supabase-home'),
     SUPABASE_SKIP_UPDATE_CHECK: 'true', SUPABASE_TELEMETRY_DISABLED: 'true' };
   let startAttempted = false, evidence = { format: 1, baselineReplayVerified: false,
     hostedIntegrationVerified: false, productionVerified: false, productionApplyAllowed: false };
@@ -366,6 +367,7 @@ export async function runProductionBaselineReplay({ repoDir = rootDir, inherited
   };
   try {
     await mkdir(join(workdir, 'supabase')); await mkdir(env.DOCKER_CONFIG);
+    await mkdir(env.SUPABASE_HOME, { mode: 0o700 });
     await writeFile(join(workdir, 'supabase/config.toml'), isolatedConfig(projectId), { mode: 0o600 });
     assert.equal((await checked(cli, ['--version'], 'CLI version')).stdout.trim(), '2.119.0');
     const help = (await checked(cli, ['--help'], 'CLI help')).stdout;

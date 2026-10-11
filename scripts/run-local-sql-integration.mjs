@@ -8,6 +8,7 @@ import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:f
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { catalogCategories, catalogHash, compareCatalogs, validateCatalog } from './compare-application-catalog.mjs';
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // CLI 2.119.0 truncates project_id at 40 characters. Keep the entire 96-bit
@@ -600,6 +601,44 @@ begin
 end $verify$;
 `;
 
+const LEGACY_SCHEMA_PREREQUISITE_PATH='tests/sql/historical-legacy-source-schema.sql';
+const LEGACY_SCHEMA_PREREQUISITE_SHA256='098ae1a2d69bac77f13cd29476a456f25e7adf98ade302296560a880c6a96111';
+const LEGACY_SOURCE_CATALOG_PATH='docs/engineering/PRODUCTION-APPLICATION-CATALOG-2026-10-11.json';
+
+export function legacySourceSchemaCatalogScope(document) {
+  validateCatalog(document);
+  const tables=['documentos','pacientes'], objects=[...tables,'documentos_id_seq'];
+  const scoped=Object.fromEntries(catalogCategories.map(name=>[name,[]]));
+  for(const name of ['relations','sequences'])scoped[name]=document.catalog[name].filter(row=>
+    row.schema==='public'&&objects.includes(row.name));
+  for(const name of ['columns','constraints','indexes','policies','triggers','rules','table_inheritance'])
+    scoped[name]=document.catalog[name].filter(row=>row.schema==='public'&&tables.includes(row.relation));
+  scoped.functions=document.catalog.functions.filter(row=>row.schema==='public'&&row.name==='set_updated_at');
+  scoped.effective_grants=document.catalog.effective_grants.filter(row=>row.schema==='public'&&
+    ((['relation','sequence'].includes(row.kind)&&objects.includes(row.name))||
+     (row.kind==='function'&&row.name==='set_updated_at')));
+  return {...document,catalog:scoped};
+}
+
+export async function loadLegacySourceSchemaPrerequisite(repoDir) {
+  const sql=await readFile(join(repoDir,LEGACY_SCHEMA_PREREQUISITE_PATH),'utf8');
+  assert.equal(hash(sql),LEGACY_SCHEMA_PREREQUISITE_SHA256,'Historical legacy schema fixture hash differs');
+  const source=JSON.parse(await readFile(join(repoDir,LEGACY_SOURCE_CATALOG_PATH),'utf8'));
+  const scope=legacySourceSchemaCatalogScope(source);
+  const expected={relations:3,columns:21,constraints:5,indexes:6,policies:8,triggers:1,functions:1,sequences:1,effective_grants:81};
+  for(const [name,count]of Object.entries(expected))assert.equal(scope.catalog[name].length,count,'Historical legacy source coverage differs');
+  return {path:LEGACY_SCHEMA_PREREQUISITE_PATH,sql,sha256:hash(sql),source:scope,
+    sourceScopeSha256:catalogHash(scope.catalog),counts:expected};
+}
+
+export function verifyLegacySourceSchemaPrerequisite(source,actual) {
+  const comparison=compareCatalogs(legacySourceSchemaCatalogScope(source),legacySourceSchemaCatalogScope(actual));
+  assert.equal(comparison.equal,true,'Historical legacy schema fixture differs from captured production metadata');
+  return {verified:true,sourceScopeSha256:comparison.expectedCatalogSha256,
+    actualScopeSha256:comparison.actualCatalogSha256,metadataDifferenceCount:comparison.changes.length,
+    clinicalRows:0,authRows:0,executionRole:'postgres',sourceMigrationsChanged:false,productionApplied:false};
+}
+
 const RACE_ORG = 'fc220000-0000-4000-8000-000000000001';
 const RACE_PARENT = 'fc330000-0000-4000-8000-000000000001';
 const RACE_USERS = ['fc110000-0000-4000-8000-000000000001', 'fc110000-0000-4000-8000-000000000002'];
@@ -721,6 +760,7 @@ export async function runLocalSqlIntegration({ repoDir = rootDir, inheritedEnv =
   assertSafeEnvironment(inheritedEnv);
   const plan = await loadMigrationPlan(repoDir);
   const historicalFixture=await loadHistoricalUpgradeFixture(repoDir);
+  const legacySourceSchema=await loadLegacySourceSchemaPrerequisite(repoDir);
   const legacyFixture=await loadLegacyUpgradeFixture(repoDir);
   const fixtures = [];
   for (const path of FIXTURES) {
@@ -734,6 +774,7 @@ export async function runLocalSqlIntegration({ repoDir = rootDir, inheritedEnv =
   const projectId = `soft-as-sql-${randomBytes(12).toString('hex')}`;
   const env = { PATH: inheritedEnv.PATH, HOME: inheritedEnv.HOME, TMPDIR: workdir, LANG: 'C.UTF-8',
     DOCKER_HOST: 'unix:///var/run/docker.sock', DOCKER_CONFIG: join(workdir, 'docker-config'),
+    SUPABASE_HOME: join(workdir, 'supabase-home'),
     SUPABASE_SKIP_UPDATE_CHECK: 'true', SUPABASE_TELEMETRY_DISABLED: 'true' };
   const evidence = {
     schema: 1,
@@ -750,6 +791,7 @@ export async function runLocalSqlIntegration({ repoDir = rootDir, inheritedEnv =
   try {
     await mkdir(join(workdir, 'supabase'));
     await mkdir(env.DOCKER_CONFIG);
+    await mkdir(env.SUPABASE_HOME, { mode: 0o700 });
     await writeFile(join(workdir, 'supabase/config.toml'), isolatedConfig(projectId), { mode: 0o600 });
     const version = await checked(cli, ['--version'], 'versão da CLI');
     assert.equal(version.stdout.trim(), CLI_VERSION, 'CLI deve usar a versão fixada no lockfile');
@@ -772,6 +814,24 @@ export async function runLocalSqlIntegration({ repoDir = rootDir, inheritedEnv =
     evidence.tests.push({ name: 'empty-local-baseline-and-extension-schemas', passed: true });
     stage='managed-platform-migration-capabilities';
     evidence.platformMigrationCapabilities=await verifyPlatformMigrationCapabilities(db);
+    stage='historical-legacy-source-schema-prerequisite';
+    await db.runMigrationAsPostgres(legacySourceSchema.sql,stage);
+    // The CLI has migrations disabled and can omit its metadata table. This
+    // empty local prerequisite only enables the shared catalog query; it never
+    // inserts/repairs migration rows or claims a production baseline history.
+    await db.run(`create schema if not exists supabase_migrations;
+create table if not exists supabase_migrations.schema_migrations(version text primary key,statements text[],name text);
+do $empty_history$ begin
+ if exists(select 1 from supabase_migrations.schema_migrations) then
+  raise exception 'Empty integration requires zero formal migration history rows'; end if;
+end $empty_history$;`,'empty local migration metadata fixture');
+    const catalogSql=await readFile(join(repoDir,'scripts/capture-application-catalog.sql'),'utf8');
+    const legacyCatalog=await db.run(`begin read only;\n${catalogSql}\ncommit;`,'historical legacy schema metadata verification');
+    const actualLegacyCatalog={format:1,kind:'supabase_application_catalog',projectRef:'local-disposable',
+      capturedAt:new Date().toISOString(),dataIncluded:false,secretValuesIncluded:false,catalog:JSON.parse(legacyCatalog.stdout.trim())};
+    evidence.legacySourceSchemaPrerequisite={...verifyLegacySourceSchemaPrerequisite(legacySourceSchema.source,actualLegacyCatalog),
+      fixturePath:legacySourceSchema.path,fixtureSha256:legacySourceSchema.sha256,counts:legacySourceSchema.counts};
+    evidence.tests.push({name:stage,passed:true});
     for (const entry of plan) {
       if(entry.path.startsWith('database/migrations/0018_')) {
         stage='historical-upgrade-seed';

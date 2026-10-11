@@ -76,9 +76,12 @@ try {
   ]);
   await mkdir(join(shadow, 'scripts'));
   for (const name of ['migration-baseline-gate.mjs', 'historical-upgrade-fixture.mjs', 'legacy-upgrade-fixture.mjs',
-    'run-local-sql-integration.mjs', 'validate-migrations.mjs']) {
+    'run-local-sql-integration.mjs', 'validate-migrations.mjs','compare-application-catalog.mjs','capture-application-catalog.sql']) {
     await cp(join(repository, 'scripts', name), join(shadow, 'scripts', name));
   }
+  await mkdir(join(shadow,'docs/engineering'),{recursive:true});
+  await cp(join(repository,'docs/engineering/PRODUCTION-APPLICATION-CATALOG-2026-10-11.json'),
+    join(shadow,'docs/engineering/PRODUCTION-APPLICATION-CATALOG-2026-10-11.json'));
   const runnerSource = await readFile(join(shadow, 'scripts/run-local-sql-integration.mjs'), 'utf8');
   assert.match(runnerSource, /assertMigrationBaselineState\(manifest, \{ purpose: 'local-sql' \}\)/);
   const validatorSource = await readFile(join(shadow, 'scripts/validate-migrations.mjs'), 'utf8');

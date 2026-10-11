@@ -128,6 +128,28 @@ bucket e da tabela próprios após reversão. Metadados de herança continuam
 registrados separadamente. Uma recusa real `42501` ou operação incompleta
 bloqueia o ensaio; diagnósticos publicam apenas flags e esse SQLSTATE literal.
 O ensaio não altera policies existentes nem transfere propriedades.
+No CI `9576ae7`, essas capacidades reais de Storage e Realtime passaram.
+A trilha de banco vazio encontrou então a pré-condição correta de `0033`:
+`public.documentos` e `public.pacientes` pertencem à produção capturada, mas
+nenhuma migração numerada as cria. A fixture local
+[`historical-legacy-source-schema.sql`](../../tests/sql/historical-legacy-source-schema.sql)
+reconstitui essas duas tabelas vazias, sua sequence, helper, constraints,
+índices, policies e trigger antes de `0001`. Seus 141 fragmentos foram
+extraídos byte a byte do baseline congelado, incluindo os CRLF do helper.
+Ela exige executor real `postgres`, aplicação sem essas relações/helper e
+Auth/Storage vazios; comprova owners reais e ausência de dados. Os 81 grants
+capturados, inclusive direitos inseguros legados, permanecem nessa fixture
+anterior às correções para que `0018`/`0033` provem sua contenção. Um comparador
+exato exige todas as 127 identidades de metadados da origem antes de executar
+a trilha. Não altera `0033`, seu guard ou as fontes históricas.
+Como a CLI está com migrações desativadas, a consulta compartilhada pode
+precisar de `supabase_migrations.schema_migrations` vazia. O ensaio cria somente
+essa estrutura local e exige zero linhas; não insere nem repara histórico.
+A CLI recebe um `SUPABASE_HOME` privado, criado com modo 0700 dentro do workdir
+efêmero e removido na limpeza. O `HOME` original permanece; um override
+`SUPABASE_HOME` herdado continua proibido. Essa configuração permite executar
+a CLI 2.119.0 em um ambiente cujo diretório pessoal não seja gravável sem
+consultar ou criar configuração compartilhada do Supabase.
 A migração fecha os defaults de `postgres` e preserva integralmente os defaults
 do fornecedor. A condição do fornecedor permanece pendente; o ensaio não
 afirma fechamento universal. Não concede associação a papéis privilegiados

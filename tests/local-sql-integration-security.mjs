@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import {
   assertCommandSuccess, assertLocalDatabaseUrl, assertProjectContainer, assertSafeEnvironment,
   createPsqlExecutor, MANAGED_EXTENSION_RELOCATION_PROBE, MANAGED_STORAGE_REALTIME_PROBE, isolatedConfig, loadMigrationPlan, migrationSqlForEmptyDatabase,
+  legacySourceSchemaCatalogScope, loadLegacySourceSchemaPrerequisite, verifyLegacySourceSchemaPrerequisite,
   readPlatformMigrationCapabilityDiagnostics, reconciledPermissionFixtureEvidence,runConcurrentRetification, runLocalSqlIntegration, verifyPlatformMigrationCapabilities
 } from '../scripts/run-local-sql-integration.mjs';
 
@@ -65,7 +66,7 @@ await check('URLs externas, portas, bancos, credenciais e overrides são recusad
   ];
   for (const raw of invalid) assert.throws(() => assertLocalDatabaseUrl(raw));
   for (const key of ['DB_URL', 'DATABASE_URL', 'PGHOST', 'PGSERVICE', 'PGOPTIONS', 'POSTGRES_PASSWORD',
-    'SUPABASE_URL', 'SUPABASE_ACCESS_TOKEN', 'DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CONFIG']) {
+    'SUPABASE_URL', 'SUPABASE_ACCESS_TOKEN', 'SUPABASE_HOME', 'DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CONFIG']) {
     assert.throws(() => assertSafeEnvironment({ [key]: 'forbidden' }));
   }
   assert.doesNotThrow(() => assertSafeEnvironment({ PATH: '/usr/bin', HOME: '/home/runner', GITHUB_ACTIONS: 'true' }));
@@ -264,6 +265,19 @@ await check('diagnóstico publica somente a asserção literal; valores substitu
 
 await check('baseline fechada usa os hashes registrados, sem reescrever CONCURRENTLY', async () => {
   const plan = await loadMigrationPlan(root);
+  const legacySchema=await loadLegacySourceSchemaPrerequisite(root);
+  assert.equal(legacySchema.source.catalog.relations.length,3);
+  assert.equal(legacySchema.source.catalog.effective_grants.length,81);
+  assert.equal(verifyLegacySourceSchemaPrerequisite(legacySchema.source,legacySchema.source).verified,true);
+  for(const [category,change]of [
+    ['columns',row=>{row.type='private-wrong-type';}],['policies',row=>{row.permissive='PERMISSIVE';row.using_expression='true';}],
+    ['functions',row=>{row.security_definer=true;}],['relations',row=>{row.owner='supabase_admin';}],
+    ['indexes',row=>{row.definition+=' WHERE false';}],['effective_grants',row=>{row.grantee='ci_unreviewed_role';}]]) {
+    const altered=structuredClone(legacySchema.source);change(altered.catalog[category][0]);
+    assert.throws(()=>verifyLegacySourceSchemaPrerequisite(legacySchema.source,altered));
+  }
+  const missingLegacy=structuredClone(legacySchema.source);missingLegacy.catalog.constraints.pop();
+  assert.throws(()=>verifyLegacySourceSchemaPrerequisite(legacySchema.source,missingLegacy));
   assert.match(MANAGED_EXTENSION_RELOCATION_PROBE,/current_user<>'postgres'/);
   assert.match(MANAGED_EXTENSION_RELOCATION_PROBE,/session_user<>'postgres'/);
   assert.match(MANAGED_EXTENSION_RELOCATION_PROBE,/alter extension %I set schema extensions/);
@@ -305,6 +319,11 @@ try {
   await cp(join(root, 'database'), join(testRoot, 'database'), { recursive: true });
   await cp(join(root, 'supabase/migrations'), join(testRoot, 'supabase/migrations'), { recursive: true });
   await cp(join(root, 'tests/sql'), join(testRoot, 'tests/sql'), { recursive: true });
+  await mkdir(join(testRoot,'docs/engineering'),{recursive:true});
+  await cp(join(root,'docs/engineering/PRODUCTION-APPLICATION-CATALOG-2026-10-11.json'),
+    join(testRoot,'docs/engineering/PRODUCTION-APPLICATION-CATALOG-2026-10-11.json'));
+  await mkdir(join(testRoot,'scripts'),{recursive:true});
+  await cp(join(root,'scripts/capture-application-catalog.sql'),join(testRoot,'scripts/capture-application-catalog.sql'));
   await mkdir(join(testRoot, 'node_modules/.bin'), { recursive: true });
   await writeFile(join(testRoot, 'node_modules/.bin/supabase'), 'unused mock CLI');
 
@@ -329,6 +348,7 @@ try {
         assert.equal(options.env.DOCKER_HOST, 'unix:///var/run/docker.sock');
         assert.equal(options.env.HOME, '/home/synthetic-runner', 'HOME deve ser preservado');
         assert.ok(options.env.DOCKER_CONFIG.startsWith(options.cwd));
+        assert.equal(options.env.SUPABASE_HOME,join(options.cwd,'supabase-home'));
         const result = stdout => ({ code: 0, stdout, stderr: '' });
         if (args[0] === '--version') return result('2.119.0\n');
         if (args.includes('--help')) return result('--workdir --output --no-backup');
@@ -348,6 +368,10 @@ try {
         }));
         if (args[0] === 'inspect') return result(JSON.stringify(inspectionFor(project)));
         if (args[0] === 'exec' && options.input===MANAGED_STORAGE_REALTIME_PROBE) return result(JSON.stringify(managedOperationResults));
+        if (args[0] === 'exec' && options.input.includes("'migration_history'")) {
+          const source=JSON.parse(await readFile(join(testRoot,'docs/engineering/PRODUCTION-APPLICATION-CATALOG-2026-10-11.json'),'utf8'));
+          return result(JSON.stringify(source.catalog));
+        }
         if (args[0] === 'exec' && options.input===MANAGED_EXTENSION_RELOCATION_PROBE) return result(JSON.stringify(extensionResults(platformCapabilities)));
         if (args[0] === 'exec' && options.input.includes('adminDefaultsAuthorized')) return result(JSON.stringify(platformCapabilities));
         if (args[0] === 'exec' && options.input.includes('backfillFinalizationAuditRows')) return result(JSON.stringify(historicalFacts));
@@ -386,6 +410,9 @@ try {
         const adminSql=psqlCalls.filter(call=>call.args.includes('--username=supabase_admin')).map(call=>call.options.input).join('\n');
         assert.match(adminSql,/create extension if not exists unaccent with schema public/i,
           'Historical fixture preserves the managed extension creator rather than changing owners to satisfy the guard');
+        assert.match(adminSql,/create table if not exists supabase_migrations\.schema_migrations/);
+        assert.match(adminSql,/if exists\(select 1 from supabase_migrations\.schema_migrations\)/);
+        assert.doesNotMatch(adminSql,/insert\s+into\s+supabase_migrations\.schema_migrations/i);
       }
       const raw = await readFile(join(testRoot, 'artifacts/local-sql-integration-evidence.json'), 'utf8');
       assert.doesNotMatch(raw, /synthetic-cli-secret|synthetic-password|DB_URL|SERVICE_ROLE|ANON_KEY|postgresql:\/\//);
