@@ -132,7 +132,7 @@ Deno.serve(async request => {
     phase = 'fixture_auth_create';
     for (let index = 0; index < 4; index++) {
       const email = `audit-${runId}-${index}@example.invalid`;
-      const password = crypto.randomUUID() + crypto.randomUUID();
+      const password = 'Aa1!' + crypto.randomUUID() + crypto.randomUUID();
       const created = await accepted('/auth/v1/admin/users', adminKey, 'POST',
         { email, password, email_confirm: true, app_metadata: { synthetic_audit: runId } });
       // Registrar a identidade imediatamente: um login falho também precisa
@@ -491,7 +491,7 @@ Deno.serve(async request => {
       });
       await test('synthetic_auth_banned_password_rotated', async () => {
         const blocked = await accepted(`/auth/v1/admin/users/${user.id}`, adminKey, 'PUT',
-          { password: crypto.randomUUID() + crypto.randomUUID(), ban_duration: '876000h' });
+          { password: 'Aa1!' + crypto.randomUUID() + crypto.randomUUID(), ban_duration: '876000h' });
         expect(blocked.id === user.id && Date.parse(blocked.banned_until) > Date.now());
         const oldLogin = await call('/auth/v1/token?grant_type=password', anonKey, 'POST', { email: user.email, password: user.password });
         expect(authDenied(oldLogin, ['user_banned','invalid_credentials']));

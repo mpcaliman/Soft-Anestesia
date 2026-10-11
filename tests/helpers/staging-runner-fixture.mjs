@@ -24,6 +24,10 @@ export async function exerciseRunner(source, capability, capabilityHash, defects
   const clone = value => JSON.parse(JSON.stringify(value));
   const response = (value, status = 200) => status === 204 ? new Response(null, { status }) : Response.json(value, { status });
   const error = (status, code = '42501') => response({ code, message: 'synthetic controlled server response' }, status);
+  // Match the configured Auth policy at the API boundary, before any account
+  // creation or password/ban mutation. Weak rotation must not partially ban.
+  const validPassword = password => typeof password === 'string' && password.length >= 12
+    && /[a-z]/.test(password) && /[A-Z]/.test(password) && /[0-9]/.test(password) && /[^a-zA-Z0-9]/.test(password);
   const tokenUser = token => accounts.find(user => [user.token, user.previousToken].includes(token));
   const canRead = (user, org) => memberships.some(membership => membership.user_id === user?.id && membership.organization_id === org && membership.ativo);
   const emit = (table, row) => {
@@ -66,6 +70,7 @@ export async function exerciseRunner(source, capability, capabilityHash, defects
       return response([clone(row)], 201);
     }
     if (path === '/auth/v1/admin/users' && method === 'POST') {
+      if (!validPassword(body.password)) return error(422, 'weak_password');
       const account = { id: webcrypto.randomUUID(), email: body.email, password: body.password,
         token: `synthetic-access-${accounts.length}`, refresh: `synthetic-refresh-${accounts.length}`, blocked: false, sessionsRevoked: false };
       accounts.push(account);
@@ -89,6 +94,7 @@ export async function exerciseRunner(source, capability, capabilityHash, defects
       const account = accounts.find(item => item.id === path.split('/').at(-1));
       if (method === 'DELETE') { auditOrClinicalDeletionCommitted = true; return response(null, 204); }
       if (method === 'GET') return response({ id: account.id, banned_until: account.blocked ? '2126-01-01T00:00:00Z' : null });
+      if (!validPassword(body.password)) return error(422, 'weak_password');
       account.blocked = true; account.password = body.password;
       return response({ id: account.id, banned_until: '2126-01-01T00:00:00Z' });
     }

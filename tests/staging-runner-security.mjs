@@ -129,6 +129,17 @@ assert.equal(passing.result.retention.authUsersDeleted, false);
 assert.ok(passing.accounts.every(user => user.blocked && user.sessionsRevoked), 'contas retidas ficam bloqueadas');
 assert.ok(passing.memberships.every(membership => !membership.ativo), 'JWT emitido não conserva vínculo ativo');
 assert.ok(passing.result.checks.some(check => check.name === 'realtime_refresh_every_joined_topic' && check.passed));
+assert.equal(passing.result.checks.filter(check => check.name === 'synthetic_auth_banned_password_rotated' && check.passed).length, 4,
+  'as quatro rotações passam pela política Auth e bloqueiam as contas');
+
+const weakCreation = await exerciseRunner(source.replace("const password = 'Aa1!' + ", 'const password = '), capability, capabilityHash);
+assert.equal(weakCreation.accounts.length, 0, 'Auth rejeita criação sem maiúscula antes de persistir uma conta');
+assert.ok(weakCreation.result.checks.some(check => check.name === 'fixture_auth_create' && !check.passed && check.diagnostic === 'http_422'));
+const weakRotation = await exerciseRunner(source.replace("{ password: 'Aa1!' + ", '{ password: '), capability, capabilityHash);
+assert.equal(weakRotation.accounts.length, 4, 'regressão somente na rotação ainda cria as quatro contas');
+assert.equal(weakRotation.result.checks.filter(check => check.name === 'synthetic_auth_banned_password_rotated' && !check.passed
+  && check.diagnostic === 'http_422').length, 4, 'a API rejeita todas as rotações sem maiúscula');
+assert.ok(weakRotation.accounts.every(user => !user.blocked), 'rotação recusada não produz falso bloqueio Auth');
 
 const lostUpdate = await exerciseRunner(source, capability, capabilityHash, { bothAccepted: true });
 assert.ok(lostUpdate.result.checks.some(check => check.name === 'retification_atomic_race_two_real_sessions_preserves_both_proposals' && !check.passed),

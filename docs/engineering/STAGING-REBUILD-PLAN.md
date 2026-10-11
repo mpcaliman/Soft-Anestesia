@@ -10,47 +10,39 @@ clínicos, nomes ou credenciais da produção.
 
 ## Estado da execução
 
-A reconexão do Supabase permitiu aplicar e confirmar `0021`–`0024`.
-O histórico independente contém agora 26 entradas: a pré-existente
-`0001_assinaturas`, as 24 migrações `0001`–`0024` e a reconstrução vazia do
-legado `staging_rebuild_legacy_empty_baseline_20261010`, versão
-`20261010230832`. Nenhum SQL foi aplicado à produção.
+Atualizado em 11 de outubro de 2026: as migrações numeradas `0001`–`0032`,
+o endurecimento de assinaturas e a reconstrução vazia das duas tabelas
+legadas estão confirmados. O histórico consultado independentemente contém
+35 entradas: 32 numeradas, a assinatura original, seu endurecimento e o
+baseline legado vazio. Nenhum SQL foi aplicado à produção.
 
-As 19 categorias de metadados das duas tabelas legadas foram capturadas.
-Um complemento registrou o helper de timestamp e os limites de sequência
-como texto, preservando o bigint sem arredondamento. O SQL derivado foi
-aplicado integralmente na homologação, com zero linhas copiadas, FORCE RLS,
-revogação de privilégios e veto restritivo a clientes na mesma transação.
-O relatório `LEGACY-BASELINE-RECONSTRUCTION-2026-10-10.json` registra os
-hashes e a verificação independente: `documentos` tem seis colunas e
-`pacientes` tem quinze; ambas têm três índices, cinco policies e zero linhas.
-Essa captura cobre somente duas tabelas e não reconcilia toda a produção.
+O bloco preparado para copiar no celular falhou com `0A000` porque sua
+extração dependia da formatação das quebras de linha e deixou um comando
+transacional no `EXECUTE`. Após a falha, o histórico continuava em 28 e
+`cash_closings` não existia. O formato efetivamente colado não foi capturado;
+CRLF, CR e ausência de quebra final reproduzem o defeito. A extração corrigida
+passou em quatro variantes no PostgreSQL, em transação somente leitura.
+Depois, o conector aplicou as sete fontes originais restantes individualmente
+e o histórico foi confirmado novamente. O bloco de recuperação antigo fica
+obsoleto e seu guard recusa um histórico diferente do original de 28 entradas.
 
-A primeira transferência da fonte `0025` foi truncada pelo limite de saída
-da ferramenta, embora o JSON permanecesse parsável. O Supabase rejeitou
-esse SQL com `42601`. A fonte histórica não foi alterada. A transferência
-foi corrigida com chunks e verificação SHA-256 antes do envio: 44.293 bytes,
-44.146 caracteres, 1.048 quebras LF e hash
-`4847547686c59b50d066801d93a9229b617c8363d7287e401c76066d41a3c4c5`.
-As duas aplicações isoladas subsequentes retornaram **“Invalid or expired
-requestState”**. O histórico consultado após cada falha confirma ausência de
-`0025`; `0026`–`0032` e o endurecimento das assinaturas também permanecem
-pendentes. A falha atual é de execução do conector; a autorização continua
-válida. Não se presume aplicação por sucesso de leitura ou reconexão.
+As verificações de catálogo confirmaram FORCE RLS no fechamento de caixa,
+a coluna CAS de retificação, nove guards ALWAYS contra alteração/exclusão
+de finalizados, os três tópicos Realtime adicionais, a view de assinaturas
+como security invoker/barrier, nenhum SELECT de cliente na tabela de
+assinaturas e o guard do compartilhamento manual. Auth, organizações,
+pacientes e atendimentos continuam vazios; nenhuma fixture foi criada.
 
-Uma consulta agregada após as falhas confirmou zero usuários Auth,
-organizações, pacientes, atendimentos e linhas nas duas tabelas legadas.
-Nenhuma fixture foi criada e o runner não foi implantado ou executado.
-O Advisor de segurança foi capturado antes de `0025` em
-`STAGING-SECURITY-ADVISORS-2026-10-10.json`; seus achados pendentes não são
-uma aprovação de homologação. A baseline completa, os testes hospedados e
-as condições de governança continuam bloqueando publicação.
+A baseline legada vazia preserva as definições capturadas, com FORCE RLS,
+policies restritivas e nenhum grant de cliente. Não copia ou classifica
+registros; a captura cobre apenas duas tabelas e não reconcilia toda a
+produção. O Advisor de 10/10 é evidência histórica anterior ao endurecimento,
+nunca aprovação atual de homologação.
 
 O inventário de fontes, hashes, versões e estados está em
-`STAGING-MIGRATION-EVIDENCE.json`. Antes de retomar, confirmar o alvo e o
-histórico atual, conferir o hash da string efetivamente enviada e aplicar
-`0025` inteira em uma única transação. Não repetir uma mutação após erro
-incerto sem consultar seu resultado no histórico.
+`STAGING-MIGRATION-EVIDENCE.json`. O runner e sua tabela de claims ainda não
+foram implantados/aplicados. Os testes hospedados, a baseline completa de
+produção e as condições de governança continuam pendentes.
 
 ## Plano reproduzível
 
@@ -102,7 +94,7 @@ runner. Nenhuma dessas condições foi aplicada ou verificada remotamente
 nesta retomada. Nenhum token ou senha pode aparecer em logs, código
 versionado ou resultado.
 
-O runner cria quatro contas Auth sintéticas com senhas aleatórias, faz login
+O runner cria quatro contas Auth sintéticas com senhas aleatórias que satisfazem os quatro grupos exigidos pela política, faz login
 real por senha e cria duas organizações. Os testes usam esses JWTs em
 PostgREST, Storage e WebSocket:
 
@@ -147,7 +139,7 @@ original e cria uma cadeia de retificações por INSERT em `addenda`. O servidor
 serializa o CAS por organização/tabela/UUID, carimba a revisão aceita e mantém
 a proposta concorrente como adendo `conflict`. Rótulos clínicos corrigidos
 podem ser projetados na tela e no PDF; FKs, autoria e assinatura permanecem
-inalteradas. A migração não foi aplicada e não libera publicação.
+inalteradas. A migração está aplicada na homologação; isso não executa os testes clínicos nem libera publicação.
 
 `tests/sql/retification-cas-security.sql` contém uma fixture PostgreSQL com
 rollback para autorização, isolamento, idempotência, cadeia aceita, conflito
