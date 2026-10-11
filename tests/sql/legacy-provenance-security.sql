@@ -326,15 +326,15 @@ end
 $programmer$;
 reset role;
 do $receipt_and_preservation$
-declare v_target jsonb; r record; p public.legacy_import_provenance%rowtype; v_finalized uuid;
+declare v_target jsonb; v_original record; p public.legacy_import_provenance%rowtype; v_finalized uuid;
 begin
   if exists((select * from public.documentos except select * from legacy_provenance_fixture.source_originals))
     or exists((select * from legacy_provenance_fixture.source_originals except select * from public.documentos)) then
     raise exception 'Legacy source bytes or metadata changed';
   end if;
-  for r in select * from legacy_provenance_fixture.destination_originals loop
-    execute format('select to_jsonb(t) from public.%I t where id=$1',r.table_name) into v_target using r.id;
-    if v_target is distinct from r.original then raise exception 'Existing canonical target changed during legacy copy'; end if;
+  for v_original in select * from legacy_provenance_fixture.destination_originals loop
+    execute format('select to_jsonb(t) from public.%I t where id=$1',v_original.table_name) into v_target using v_original.id;
+    if v_target is distinct from v_original.original then raise exception 'Existing canonical target changed during legacy copy'; end if;
   end loop;
   select i.* into p from public.legacy_import_provenance i join public.legacy_document_registry r on r.id=i.registry_id
     where r.source_doc_id='legacy-finalized';
