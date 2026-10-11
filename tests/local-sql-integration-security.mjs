@@ -126,6 +126,17 @@ await check('diagnóstico publica somente a asserção literal; valores substitu
     'ERROR:  P0001: Unknown message with synthetic-secret@example.invalid' }, 'fixture', sql), error => {
     assert.equal(error.assertion, undefined); return true;
   });
+  const ddl = 'begin;\ngrant select on table public.cbhpm_codigos to authenticated;\ncommit;';
+  assert.throws(() => assertCommandSuccess({ code: 3, stderr:
+    'psql:<stdin>:2: ERROR:  42P01: relation "public.cbhpm_codigos" does not exist\nDETAIL: private content\nCONTEXT: private content' }, 'fixture', ddl), error => {
+    assert.equal(error.missingRelation, 'public.cbhpm_codigos'); assert.equal(error.sourceLine, 2);
+    assert.doesNotMatch(JSON.stringify(error), /private content/); return true;
+  });
+  for (const relation of ['public.unreviewed_table', 'public.private@example.invalid', 'https://private.invalid', 'public.'+'a'.repeat(64)]) {
+    assert.throws(() => assertCommandSuccess({ code: 3, stderr: `psql:<stdin>:999: ERROR:  42P01: relation "${relation}" does not exist` }, 'fixture', ddl), error => {
+      assert.equal(error.missingRelation, undefined); assert.equal(error.sourceLine, undefined); return true;
+    });
+  }
 });
 
 await check('baseline fechada usa os hashes registrados, sem reescrever CONCURRENTLY', async () => {

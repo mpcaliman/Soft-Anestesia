@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "recordedAt": "2026-10-11T13:08:00Z",
+  "recordedAt": "2026-10-11T14:10:35Z",
   "scope": "staging-only",
   "target": "yqqrfgbvoexricjdxpis",
   "productionMutated": false,
@@ -419,28 +419,43 @@
           "Unacknowledged Auth creation must be reconciled only by exact runId app_metadata synthetic_audit"
         ]
       }
+    },
+    {
+      "runId": "4fd02f10-dd82-4566-92df-f2edf45878af",
+      "target": "yqqrfgbvoexricjdxpis",
+      "phase": "hosted-integration",
+      "status": "passed",
+      "passed": 60,
+      "failed": 0,
+      "pending": 0,
+      "independentRecoveryVerified": true,
+      "evidencePath": "docs/engineering/HOSTED-REAL-INTEGRATION-2026-10-11.json",
+      "sourceSha256": "79f2d173a18b0184dcfeae2728502e6d5327dbea4ea6573326dfc9a4b03ea912"
+    },
+    {
+      "runId": "8796c7fd-d6c4-49dc-8ede-4e10237f5985",
+      "target": "yqqrfgbvoexricjdxpis",
+      "phase": "browser-bootstrap",
+      "status": "interrupted-before-claim",
+      "inventorySqlState": "22023",
+      "durableClaimCreated": false,
+      "fixturesCreated": false,
+      "browserExecuted": false,
+      "bootstrapClosed410Version": 2,
+      "recoveryClosed410Version": 9
     }
   ],
   "latestRunIndependentClosure": {
-    "runId": "ab5fbd73-e29a-42b5-a06e-af79e54060c4",
-    "claimedAt": "2026-10-11T13:03:54.068133+00:00",
-    "authUserIds": [
-      "240e7088-b805-464f-8c8e-add748213cda",
-      "68250377-acbd-4912-a679-aab8e4937481",
-      "968a4b86-89fa-425a-af59-756075cd1a63",
-      "96e4154e-4af0-46df-8f58-ceca703eecab"
-    ],
-    "activeProfiles": 0,
-    "bannedAuthUsers": 4,
-    "organizationIds": [
-      "5463e15f-2d0f-477b-882b-4d6c9d7fb3a0",
-      "ee2990da-c01f-4684-bef0-42503ebb6af9"
-    ],
+    "runId": "4fd02f10-dd82-4566-92df-f2edf45878af",
+    "verified": true,
+    "authUsersBanned": 4,
+    "organizationsInactive": 2,
     "activeMemberships": 0,
+    "activeProfiles": 0,
     "activeOrganizations": 0,
-    "programmerPrivileges": 0,
-    "latestActiveShareExpiry": null,
-    "activeSharesPendingClosure": 0
+    "activeProgrammerPrivileges": 0,
+    "activeSharesPendingClosure": 0,
+    "retention": "retain-blocked-synthetic-evidence"
   },
   "verifiedFixtureBackendRights": {
     "guards": 9,
@@ -538,21 +553,28 @@
     "truncatableServiceTables": 0
   },
   "ephemeralFunctionsClosed": {
-    "names": [
-      "soft-audit-runner",
-      "soft-audit-key-preflight",
-      "soft-audit-recovery"
-    ],
-    "version": 5,
-    "responseStatus": 410,
-    "verifyJwt": true
+    "runner": {
+      "status": 410,
+      "version": 7,
+      "verifyJwt": true
+    },
+    "recovery": {
+      "status": 410,
+      "version": 9,
+      "verifyJwt": true
+    },
+    "browserBootstrap": {
+      "status": 410,
+      "version": 2,
+      "verifyJwt": true
+    }
   },
   "releaseApproved": false,
   "pending": [
-    "One real Realtime test failed; CDC readiness needs diagnosis and another real run",
-    "Captured application restore passed; managed Storage prerequisites differ in CI",
-    "Real browser two tabs and natural JWT expiry remain pending",
-    "GitHub ruleset not yet saved at last read",
-    "Production legacy provenance classification remains pending"
-  ]
+    "Captured-production upgrade replay failed at original 0025 (42P01); original 0013 prerequisite reconciliation is locally reviewed, pending real CI.",
+    "Real hosted browser multi-tab, natural JWT expiry and SIGKILL/offline recovery tests.",
+    "Historical legacy provenance, final checks, final-SHA owner authorization and production release."
+  ],
+  "governanceBootstrapMerged": true,
+  "applicationMainMerged": false
 }

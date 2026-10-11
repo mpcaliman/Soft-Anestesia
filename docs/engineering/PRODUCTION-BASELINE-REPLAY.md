@@ -51,10 +51,31 @@ O executor cria uma nova identidade aleatória de projeto, valida container,
 label, porta e socket Docker, exige PostgreSQL 17, aplicação vazia e zero linhas
 de Auth/Storage, e nunca aceita URL ou argumento de alvo externo. Recria a
 estrutura capturada e compara definições, RLS, triggers e grants efetivos antes
-de aplicar somente `0018`–`0032` e o hardening de assinaturas. A fonte `0026` é
+de aplicar as atualizações `0018`–`0032` e o hardening de assinaturas. A fonte `0026` é
 executada intacta via `psql --file`, com cada comando top-level em autocommit;
 `CREATE INDEX CONCURRENTLY` não é reescrito nesse ensaio. Nenhuma linha do
 histórico formal de migrações é inserida ou reparada.
+
+O replay real do commit `0350623` restaurou o catálogo e superou as comparações
+da aplicação e de Storage, mas encontrou `42P01` na original `0025`.
+`public.cbhpm_codigos` está ausente no catálogo de produção e não é criada por
+`0018`–`0024`; a `0025`, linha 894, exige a tabela no GRANT incondicional.
+A reconciliação agora executa **a original `0013_cbhpm_2022.sql`**, com hash
+`0b996505d48930b2498548808277a0a7c69a664eae2b4c22cc5d88c4262ad8d8`, depois da
+comparação exata do baseline e antes das 16 atualizações. Essa adição não é
+apresentada como parte do esquema originalmente capturado. O executor verifica
+23 colunas, duas constraints, cinco índices CBHPM, dois índices financeiros,
+RLS, a policy SELECT e zero códigos carregados. Qualquer alteração em objeto
+anterior ou adição não prevista reprova; nenhuma seed é executada.
+
+A original `0013` herda defaults de privilégios amplos, incluindo TRUNCATE,
+que não é restringido por RLS. Essa fase intermediária existe apenas no
+container isolado e vazio. A evidência registra os grants intermediários e
+finais; somente após `0025` exige que `anon`/PUBLIC não tenham grants e que
+`authenticated` tenha apenas SELECT sem grant option. Direitos administrativos
+e de serviço também são registrados, sem afirmar que são SELECT-only.
+Essa reconciliação deve constar no plano específico de transição de produção;
+não foi aplicada ao banco hospedado nem altera o histórico original.
 
 Depois, roda os testes de imutabilidade/finalização e CAS de retificação com
 duas sessões reais de PostgreSQL. Auth/Storage são fornecidos pela instalação

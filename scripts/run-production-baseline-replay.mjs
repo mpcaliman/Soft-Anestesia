@@ -5,7 +5,7 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { compareCatalogs } from './compare-application-catalog.mjs';
+import { catalogIdentity, compareCatalogs, stableJson } from './compare-application-catalog.mjs';
 import { prepareProductionApplicationBaseline } from './prepare-production-application-baseline.mjs';
 import { compareManagedSecurityDependencies, prepareManagedSecurityFixture } from './production-managed-security-fixture.mjs';
 import { assertCommandSuccess, assertLocalDatabaseUrl, assertSafeEnvironment, createPsqlExecutor,
@@ -19,17 +19,76 @@ const stagePath = 'docs/engineering/STAGING-APPLICATION-CATALOG-2026-10-11.json'
 const hash = value => createHash('sha256').update(value).digest('hex');
 const replayPhases = ['source-artifacts', 'empty-history', 'application-restore', 'managed-security-fixture',
   'supplementary-coverage', 'application-comparison', 'managed-security-comparison', 'record-free-baseline',
-  'application-upgrade', 'upgrade-comparison', 'transaction-fixtures', 'concurrent-retification'];
+  'prerequisite-reconciliation', 'prerequisite-verification', 'application-upgrade', 'upgrade-comparison', 'transaction-fixtures', 'concurrent-retification'];
+const prerequisitePath = 'database/migrations/0013_cbhpm_2022.sql';
 
 export function replayFailureDetails(error, fallbackOperation) {
   const operation = replayPhases.includes(error.replayPhase) ? error.replayPhase : fallbackOperation;
   const sqlState = /^[0-9A-Z]{5}$/.test(error.sqlState ?? '') ? error.sqlState : undefined;
-  const migrationPath = /^database\/migrations\/00(?:1[89]|2\d|3[0-2])_[a-z0-9_]+\.sql$|^supabase\/migrations\/0002_assinaturas_hardening\.sql$/.test(error.migrationPath ?? '')
+  const migrationPath = error.migrationPath === prerequisitePath || /^database\/migrations\/00(?:1[89]|2\d|3[0-2])_[a-z0-9_]+\.sql$|^supabase\/migrations\/0002_assinaturas_hardening\.sql$/.test(error.migrationPath ?? '')
     ? error.migrationPath : undefined;
+  const missingRelation = /^(?:public|app)\.[a-z_][a-z0-9_]{0,62}$/.test(error.missingRelation ?? '') ? error.missingRelation : undefined;
+  const sourceLine = Number.isInteger(error.sourceLine) && error.sourceLine > 0 && error.sourceLine <= 1000000 ? error.sourceLine : undefined;
   const assertionCode = error.catalogDifference ? 'CATALOG_DIFFERENCE' : error.code === 'ERR_ASSERTION' ? 'NODE_ASSERTION' : error.assertion ? 'SQL_RAISE' : undefined;
   return { operation, ...(sqlState ? { sqlState } : {}), ...(migrationPath ? { migrationPath } : {}),
+    ...(missingRelation ? { missingRelation } : {}), ...(sourceLine ? { sourceLine } : {}),
     ...(assertionCode ? { assertionCode } : {}), ...(error.catalogDifference ? {
       changedObjects: error.catalogDifference.changes.length, comparisonCounts: error.catalogDifference.counts } : {}) };
+}
+
+export function verifyCbhpmPrerequisite(before, after, reference) {
+  assert.ok(!before.catalog.relations.some(x => x.schema === 'public' && x.name === 'cbhpm_codigos'),
+    'The prerequisite must be identified as absent before reconciliation');
+  const relation = after.catalog.relations.find(x => x.schema === 'public' && x.name === 'cbhpm_codigos');
+  assert.ok(relation); assert.equal(relation.kind, 'r'); assert.equal(relation.rls, true); assert.equal(relation.force_rls, false);
+  assert.equal(relation.owner, 'supabase_admin', 'Reference executor must own the table created by the original SQL');
+  assert.equal(after.catalog.columns.filter(x => x.schema === 'public' && x.relation === 'cbhpm_codigos').length, 23);
+  const policy = after.catalog.policies.find(x => x.schema === 'public' && x.relation === 'cbhpm_codigos');
+  assert.ok(policy); assert.equal(policy.name, 'cbhpm_sel'); assert.equal(policy.command, 'SELECT');
+  assert.deepEqual(policy.roles, ['authenticated']); assert.equal(policy.using_expression, 'true');
+  const delta = compareCatalogs(before, after, { applicationOnly: true });
+  const permittedCategory = ['relations', 'columns', 'constraints', 'indexes', 'policies', 'effective_grants'];
+  for (const change of delta.changes) {
+    assert.equal(change.status, 'added', 'Prerequisite may not change/remove an existing captured object');
+    const row = after.catalog[change.category]?.find(x => change.identity === catalogIdentity(change.category, x));
+    assert.ok(row && permittedCategory.includes(change.category), 'Unexpected prerequisite metadata category');
+    assert.equal(row.schema, 'public');
+    if (change.category === 'indexes' && row.relation === 'finance_entries') {
+      assert.ok(['idx_fin_origem', 'idx_fin_cbhpm'].includes(row.name), 'Unreviewed financial index');
+    } else assert.equal(['relations','effective_grants'].includes(change.category) ? row.name : row.relation, 'cbhpm_codigos',
+      'Prerequisite must not add unrelated application objects');
+  }
+  for (const [category, count] of Object.entries({ relations: 1, columns: 23, constraints: 2, indexes: 7, policies: 1 }))
+    assert.equal(delta.counts[category].added, count, 'Original CBHPM prerequisite object inventory differs');
+  assert.deepEqual(after.catalog.indexes.filter(x => x.schema === 'public' && x.relation === 'cbhpm_codigos').map(x => x.name).sort(),
+    ['cbhpm_codigos_codigo_numerico_key','cbhpm_codigos_pkey','idx_cbhpm_codigo_numerico','idx_cbhpm_descricao_lower','idx_cbhpm_selecionavel']);
+  const scopedRows = (document, category) => document.catalog[category].filter(x => x.schema === 'public' &&
+    (x.relation === 'cbhpm_codigos' || category === 'indexes' && x.relation === 'finance_entries' && ['idx_fin_origem','idx_fin_cbhpm'].includes(x.name)))
+    .map(x => { const row = {...x}; if (category === 'columns') delete row.acl; return row; })
+    .sort((a,b)=>catalogIdentity(category,a).localeCompare(catalogIdentity(category,b)));
+  for (const category of ['columns','constraints','indexes','policies'])
+    assert.equal(stableJson(scopedRows(after,category)),stableJson(scopedRows(reference,category)), 'Original CBHPM prerequisite structure differs from its verified reference');
+  // The captured defaults contain broad permissions. Reconstruct that exact
+  // intermediate contract instead of mistaking a SELECT policy for an ACL.
+  const defaults = before.catalog.default_privileges.find(x=>x.owner==='supabase_admin'&&x.schema==='public'&&x.object_type==='r');
+  assert.ok(defaults && typeof defaults.acl==='string');
+  const codePrivileges = {a:'INSERT',r:'SELECT',w:'UPDATE',d:'DELETE',D:'TRUNCATE',x:'REFERENCES',t:'TRIGGER',m:'MAINTAIN'};
+  const inherited = new Map(Object.values(codePrivileges).map(privilege=>['supabase_admin|'+privilege,{grantee:'supabase_admin',privilege,grantable:false}]));
+  for (const entry of defaults.acl.slice(1,-1).split(',')) {
+    const parts=entry.match(/^([a-z_][a-z0-9_]*)=([arwdDxtm*]+)\/supabase_admin$/);
+    assert.ok(parts,'Unreviewed CBHPM default privilege syntax');
+    for (let i=0;i<parts[2].length;i++) {
+      const privilege=codePrivileges[parts[2][i]]; assert.ok(privilege);
+      const grantable=parts[2][i+1]==='*'; if(grantable)i++;
+      inherited.set(parts[1]+'|'+privilege,{grantee:parts[1],privilege,grantable});
+    }
+  }
+  if(!inherited.has('authenticated|SELECT'))inherited.set('authenticated|SELECT',{grantee:'authenticated',privilege:'SELECT',grantable:false});
+  const expectedGrants=[...inherited.values()].map(x=>({kind:'relation',schema:'public',relation:null,name:'cbhpm_codigos',arguments:null,grantor:'supabase_admin',...x}));
+  const sortedGrants=rows=>rows.sort((a,b)=>catalogIdentity('effective_grants',a).localeCompare(catalogIdentity('effective_grants',b)));
+  assert.equal(stableJson(sortedGrants(after.catalog.effective_grants.filter(x=>x.schema==='public'&&x.name==='cbhpm_codigos'))),
+    stableJson(sortedGrants(expectedGrants)), 'CBHPM grants must exactly inherit the captured defaults and original SELECT grant');
+  return delta;
 }
 
 async function execute(command, args, { env, cwd, timeoutMs = 120000, input } = {}) {
@@ -119,7 +178,21 @@ create table if not exists supabase_migrations.schema_migrations(version text pr
   execute format('select count(*) from %I.%I',r.nspname,r.relname) into n;
   if n<>0 then raise exception 'Reference application must remain record-free'; end if;
  end loop; end $empty$;`, 'record-free captured baseline');
-  const plan = (await loadMigrationPlan(repoDir)).filter(x => x.path.startsWith('database/migrations/') && Number(x.path.split('/').at(-1).slice(0, 4)) >= 18
+  const allMigrations = await loadMigrationPlan(repoDir);
+  const prerequisite = allMigrations.find(x => x.path === prerequisitePath);
+  assert.ok(prerequisite, 'The original verified CBHPM migration is required');
+  // The exact captured baseline comparison precedes this declared additive
+  // prerequisite. It is not presented as part of the original production schema.
+  phase = 'prerequisite-reconciliation'; migrationPath = prerequisite.path;
+  await db.run(prerequisite.sql, prerequisite.path);
+  phase = 'prerequisite-verification'; migrationPath = undefined;
+  const reconciled = await snapshot();
+  const prerequisiteComparison = verifyCbhpmPrerequisite(restored, reconciled, expectedStage);
+  await db.run(`do $reference_guard$ begin
+ if exists(select 1 from public.cbhpm_codigos) then raise exception 'CBHPM prerequisite must remain unseeded'; end if;
+ end $reference_guard$;`, 'unseeded CBHPM prerequisite');
+  assert.deepEqual(reconciled.catalog.migration_history, originalHistory, 'Prerequisite must not rewrite formal history');
+  const plan = allMigrations.filter(x => x.path.startsWith('database/migrations/') && Number(x.path.split('/').at(-1).slice(0, 4)) >= 18
     || x.path === 'supabase/migrations/0002_assinaturas_hardening.sql');
   assert.equal(plan.length, 16, 'Exactly 0018–0032 and signature hardening must be rehearsed');
   // psql --file executes each top-level command in autocommit. The original
@@ -128,6 +201,11 @@ create table if not exists supabase_migrations.schema_migrations(version text pr
   for (const entry of plan) { migrationPath = entry.path; await db.run(entry.sql, entry.path); }
   migrationPath = undefined; phase = 'upgrade-comparison';
   const upgraded = await snapshot();
+  const cbhpmFinalGrants = upgraded.catalog.effective_grants.filter(x => x.schema === 'public' && x.name === 'cbhpm_codigos');
+  assert.ok(!cbhpmFinalGrants.some(x => ['PUBLIC','anon'].includes(x.grantee)), 'CBHPM must deny anonymous/public client privileges after hardening');
+  const authenticatedCbhpm = cbhpmFinalGrants.filter(x => x.grantee === 'authenticated');
+  assert.equal(authenticatedCbhpm.length, 1); assert.equal(authenticatedCbhpm[0].privilege, 'SELECT');
+  assert.equal(authenticatedCbhpm[0].grantable, false);
   assert.deepEqual(upgraded.catalog.migration_history, originalHistory, 'Replay must not repair/rewrite formal migration history');
   const stagingComparison = compareCatalogs(expectedStage, upgraded, { applicationOnly: true });
   // Preserve all real-source differences for review; no wildcard whitelist or
@@ -148,6 +226,12 @@ create table if not exists supabase_migrations.schema_migrations(version text pr
       extraPlatformTables: managedFixture.extraPlatformTables, extraPlatformIsolationVerified: true,
       managedTableStructuresChanged: false, managedOwnersChanged: false,
       managedSecurityAdjustedLocally: true, productionApplied: false },
+    prerequisiteReconciliation: { path: prerequisite.path, sha256: prerequisite.sha256,
+      absentFromCapturedProduction: ['public.cbhpm_codigos'], requiredBy: 'database/migrations/0025_supabase_hardening.sql',
+      originalSqlExecuted: true, seededRows: 0, verified: true, comparison: prerequisiteComparison,
+      intermediateEffectiveGrants: reconciled.catalog.effective_grants.filter(x => x.schema === 'public' && x.name === 'cbhpm_codigos'),
+      finalEffectiveGrants: cbhpmFinalGrants,
+      productionApplied: false, migrationHistoryRewritten: false },
     migrationHashes: Object.fromEntries(plan.map(x => [x.path, x.sha256])), migrationsRehearsed: plan.length,
     performanceIndexesAppliedConcurrently: true, sourceMigrationsChanged: false,
     migrationHistoryRewritten: false, beforeFixturesClinicalRows: 0, beforeFixturesAuthRows: 0,
@@ -195,7 +279,7 @@ export async function runProductionBaselineReplay({ repoDir = rootDir, inherited
     evidence.baselineReplayVerified = false;
     if (error.catalogDifference && ['baselineComparison', 'managedSecurityComparison'].includes(error.comparisonKind)) evidence[error.comparisonKind] = error.catalogDifference;
     evidence.failure = replayFailureDetails(error, operation);
-    failure = new Error(`Production reference replay failed at ${evidence.failure.operation}${evidence.failure.migrationPath ? ' ['+evidence.failure.migrationPath+']' : ''}${evidence.failure.sqlState ? ` (SQLSTATE ${evidence.failure.sqlState})` : ''}${evidence.failure.assertionCode ? ' ['+evidence.failure.assertionCode+']' : ''}; no remote verification claimed.`);
+    failure = new Error(`Production reference replay failed at ${evidence.failure.operation}${evidence.failure.migrationPath ? ' ['+evidence.failure.migrationPath+']' : ''}${evidence.failure.sqlState ? ` (SQLSTATE ${evidence.failure.sqlState})` : ''}${evidence.failure.missingRelation ? ' [relation '+evidence.failure.missingRelation+']' : ''}${evidence.failure.sourceLine ? ' [source line '+evidence.failure.sourceLine+']' : ''}${evidence.failure.assertionCode ? ' ['+evidence.failure.assertionCode+']' : ''}; no remote verification claimed.`);
   } finally {
     if (startAttempted) {
       try {

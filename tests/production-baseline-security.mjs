@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { compareCatalogs, validateCatalog } from '../scripts/compare-application-catalog.mjs';
 import { prepareProductionApplicationBaseline } from '../scripts/prepare-production-application-baseline.mjs';
-import { replayFailureDetails, replayProductionBaseline, runProductionBaselineReplay } from '../scripts/run-production-baseline-replay.mjs';
+import { replayFailureDetails, replayProductionBaseline, runProductionBaselineReplay, verifyCbhpmPrerequisite } from '../scripts/run-production-baseline-replay.mjs';
 import { compareManagedSecurityDependencies, prepareManagedSecurityFixture } from '../scripts/production-managed-security-fixture.mjs';
 
 const read = path => readFile(new URL('../'+path, import.meta.url), 'utf8');
@@ -148,6 +148,34 @@ const diagnostic = replayFailureDetails(privateFailure, 'prepare');
 assert.deepEqual(diagnostic, { operation: 'empty-history', sqlState: '42501', assertionCode: 'SQL_RAISE' });
 assert.ok(!JSON.stringify(diagnostic).includes('private'));
 assert.equal(replayFailureDetails({ replayPhase: 'arbitrary private content', migrationPath: 'https://private.invalid', sqlState: 'invalid' }, 'prepare').operation, 'prepare');
+const reconciledReference = structuredClone(source);
+for (const category of ['relations','columns','constraints','indexes','policies','effective_grants']) {
+  reconciledReference.catalog[category].push(...stage.catalog[category].filter(x => x.schema === 'public' &&
+    (x.name === 'cbhpm_codigos' || x.relation === 'cbhpm_codigos' || category === 'indexes' && ['idx_fin_origem','idx_fin_cbhpm'].includes(x.name))).map(x=>structuredClone(x)));
+}
+reconciledReference.catalog.relations.find(x=>x.name==='cbhpm_codigos').owner='supabase_admin';
+reconciledReference.catalog.effective_grants=reconciledReference.catalog.effective_grants.filter(x=>x.name!=='cbhpm_codigos');
+for(const grantee of ['supabase_admin','postgres','anon','authenticated','service_role'])for(const privilege of tablePrivileges)
+  reconciledReference.catalog.effective_grants.push({kind:'relation',schema:'public',relation:null,name:'cbhpm_codigos',arguments:null,
+    grantee,grantor:'supabase_admin',privilege,grantable:false});
+assert.equal(verifyCbhpmPrerequisite(source, reconciledReference, stage).counts.indexes.added, 7);
+for (const mutate of [
+  x => { x.catalog.relations.find(r=>r.name==='patients').rls=false; },
+  x => { const column=x.catalog.columns.find(r=>r.relation==='cbhpm_codigos'&&r.not_null); column.not_null=false; },
+  x => { x.catalog.columns.find(r=>r.relation==='cbhpm_codigos').type='boolean'; },
+  x => { x.catalog.indexes = x.catalog.indexes.filter(r=>r.name!=='idx_fin_cbhpm'); },
+  x => { x.catalog.indexes.find(r=>r.name==='idx_fin_cbhpm').definition='CREATE INDEX idx_fin_cbhpm ON public.finance_entries USING btree(id)'; },
+  x => { x.catalog.policies.find(r=>r.relation==='cbhpm_codigos').command='ALL'; },
+  x => { x.catalog.policies.push({...x.catalog.policies.find(r=>r.relation==='cbhpm_codigos'),name:'unsafe_extra_policy',command:'ALL'}); },
+  x => { x.catalog.effective_grants.push({...x.catalog.effective_grants.find(r=>r.name==='cbhpm_codigos'),grantee:'unexpected_role'}); }
+]) {
+  const badPrerequisite=structuredClone(reconciledReference); mutate(badPrerequisite);
+  assert.throws(()=>verifyCbhpmPrerequisite(source,badPrerequisite,stage));
+}
+assert.deepEqual(replayFailureDetails({ replayPhase:'application-upgrade', sqlState:'42P01', missingRelation:'public.cbhpm_codigos', sourceLine:894,
+  migrationPath:'database/migrations/0025_supabase_hardening.sql', message:'private' }, 'prepare'),
+  {operation:'application-upgrade',sqlState:'42P01',migrationPath:'database/migrations/0025_supabase_hardening.sql',missingRelation:'public.cbhpm_codigos',sourceLine:894});
+assert.equal(replayFailureDetails({missingRelation:'public.private@example.invalid',sourceLine:NaN},'prepare').missingRelation,undefined);
 const candidates = JSON.parse(await read('docs/engineering/LEGACY-METADATA-CANDIDATES-2026-10-11.json'));
 assert.equal(candidates.automaticAssignmentAllowed, false);
 assert.equal(candidates.clinicalPayloadRead, false);

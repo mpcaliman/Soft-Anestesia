@@ -64,6 +64,13 @@ export function assertCommandSuccess(result, label, sql = '') {
     if (code) error.sqlState = code[1];
     const message = result?.stderr?.match(/\bERROR:\s+[0-9A-Z]{5}:\s*([^\r\n]*)/)?.[1];
     if (message && typeof sql === 'string') {
+      // Only a bounded application identifier that occurs literally in the
+      // reviewed SQL may leave stderr. Never export a detail/context/query.
+      const missingRelation = message.match(/^relation "((?:public|app)\.[a-z_][a-z0-9_]{0,62})" does not exist$/)?.[1];
+      if (error.sqlState === '42P01' && missingRelation
+        && new RegExp(`\\b${missingRelation.replace('.', '\\.')}\\b`).test(sql)) error.missingRelation = missingRelation;
+      const sourceLine = result.stderr.match(/^psql:<stdin>:(\d{1,7}):\s+ERROR:\s+[0-9A-Z]{5}:/m)?.[1];
+      if (sourceLine && Number(sourceLine) >= 1 && Number(sourceLine) <= sql.split('\n').length) error.sourceLine = Number(sourceLine);
       const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       for (const match of sql.matchAll(/\braise\s+exception\s+'((?:''|[^'])*)'/gi)) {
         const literal = match[1].replaceAll("''", "'");
