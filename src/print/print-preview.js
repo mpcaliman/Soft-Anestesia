@@ -58,7 +58,8 @@ const printPreview = {
     const titulo = aplicadas.length ? 'VERSÃO ATUAL — RETIFICADA' : 'VERSÃO ORIGINAL — RETIFICAÇÃO NÃO APLICADA';
     const aviso = [conflitos.length ? conflitos.length + ' retificação(ões) em conflito' : '',
       pendentes.length ? pendentes.length + ' retificação(ões) pendente(s) de confirmação' : ''].filter(Boolean).join('; ');
-    return '<div class="pp-retificacao' + (aviso ? ' pp-retificacao-alerta' : '') + '" style="border:1px solid #64748b;padding:6px 8px;margin:0 0 10px;font-size:9pt;line-height:1.4;break-inside:avoid">' +
+    /* margem em cima, não embaixo: agora ele fecha a folha em vez de abri-la */
+    return '<div class="pp-retificacao' + (aviso ? ' pp-retificacao-alerta' : '') + '" style="border:1px solid #64748b;padding:6px 8px;margin:10px 0 0;font-size:9pt;line-height:1.4;break-inside:avoid">' +
       '<strong>' + utils.escapeHTML(titulo) + '</strong>' +
       (autoria ? '<div>' + utils.escapeHTML(autoria) + '</div>' : '') +
       '<div>O registro original e o histórico de adendos permanecem preservados.</div>' +
@@ -68,7 +69,13 @@ const printPreview = {
     const anterior = printPreview._verCtx;
     printPreview._verCtx = printPreview._formularioPorModulo[mod]
       ? { mod, formId: printPreview._formularioPorModulo[mod] } : null;
-    try { return printPreview._versaoAtualDoFormulario(mod) + builder() + printPreview._adendosDoFormulario(mod); }
+    /* O SELO DE RETIFICAÇÃO VAI NO FIM, DEPOIS DE TUDO.
+       Ele abria o documento, e com isso a primeira coisa que a equipe lia,
+       antes do nome do paciente, era um UUID e uma nota de versionamento.
+       Quem pega uma pré-anestésica quer o paciente, a cirurgia e os exames;
+       de onde aquela versão veio é informação de procedência, e procedência
+       se assina no rodapé. A ordem é: conteúdo, adendos, e então o selo. */
+    try { return builder() + printPreview._adendosDoFormulario(mod) + printPreview._versaoAtualDoFormulario(mod); }
     finally { printPreview._verCtx = anterior; }
   },
   abrir() {

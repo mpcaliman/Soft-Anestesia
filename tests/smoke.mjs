@@ -19236,6 +19236,11 @@ await test('Retificação: valores confirmados entram nos campos e na impressão
     out.impressaoAtual = texto.includes('14,6') && !texto.includes('VALOR NÃO CONFIRMADO')
       && texto.includes('VERSÃO ATUAL — RETIFICADA') && texto.includes(contexto.userId)
       && !texto.includes('RÓTULO FORJADO NÃO CONFIÁVEL');
+    /* O SELO FECHA A FOLHA, NÃO A ABRE. Ele saía em cima, e a primeira coisa
+       que a equipe lia — antes do nome do paciente — era um UUID e uma nota de
+       versionamento. Procedência se assina no rodapé. Vale para todo documento:
+       a ordem é montada num lugar só (printPreview._comporDocumento). */
+    out.seloNoFim = texto.indexOf('VERSÃO ATUAL — RETIFICADA') > texto.indexOf('Paciente Sintético Atual');
     printPreview.fechar();
     const falso = JSON.parse(JSON.stringify(salvo));
     falso._adendos = [{ ...falso._adendos[0], id: 'evento-forjado-sintetico',
@@ -19258,6 +19263,7 @@ await test('Retificação: valores confirmados entram nos campos e na impressão
   assert(r.vinculosPreservados && r.outroPacienteIntacto, 'novos nome/CPF não mudam UUIDs, caso ou outro cadastro');
   assert(r.baseAbertaNaoFoiTrocada && r.formularioAtual, 'cada edição conserva sua base e reabrir carrega a revisão vigente');
   assert(r.impressaoAtual, 'a folha traz os valores confirmados e autoria canônica, mesmo com edição pendente no formulário');
+  assert(r.seloNoFim, 'o selo de retificação sai DEPOIS do conteúdo: quem lê a pré quer o paciente primeiro, não o UUID da versão');
   assert(r.jsonNaoAutoriza && r.reciboValido && r.reciboProtegeAutorEPai && r.contextoNaoHerdeProva,
     'JSON pai, autor/pai inválido e troca de contexto não conferem recibo de retificação');
   await page.close();
