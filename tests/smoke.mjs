@@ -17322,6 +17322,50 @@ await test('Programador exclui ambiente e conta pela tela, com a contagem à vis
   await page.close();
 });
 
+/* CONFLITO PRESSUPÕE DIVERGÊNCIA.
+   ---------------------------------------------------------------------------
+   Depois de retificar a mesma pré três vezes, o app abriu "Conflitos
+   preservados (3)". A evidência no servidor dizia o que tinha acontecido:
+   motivo `pull_com_edicao_local`, e `changedFields` vazio nas três linhas. Ou
+   seja, a nuvem e o aparelho tinham exatamente o mesmo conteúdo, e a janela
+   pedia que se escolhesse entre uma coisa e ela mesma.
+
+   A proteção original está certa: nunca sobrescrever um registro aberto na
+   tela com o que desce da nuvem. O que faltava era perguntar se havia o que
+   decidir. Não havendo campo divergente, fica a versão da nuvem — que é a que
+   traz o carimbo de versão. Havendo UM campo diferente, os dois lados
+   continuam preservados como antes. */
+await test('Versões idênticas não viram conflito ao descer da nuvem', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const base = { _id: 'preC1', nome: 'Paciente Conflito', _finalizado: true,
+      data: utils.hojeISO(), lab_hb: '13,2' };
+
+    /* mesmo conteúdo clínico; só os carimbos técnicos diferem */
+    const local = Object.assign({}, base);
+    const nuvem = Object.assign({}, base, { _relVersion: 53, _relUpdatedAt: new Date().toISOString() });
+    out.semDivergencia = cloudRel._camposDivergentes(local, nuvem).length === 0;
+
+    /* um campo clínico diferente continua sendo divergência */
+    const nuvemOutra = Object.assign({}, nuvem, { lab_hb: '14,6' });
+    out.comDivergencia = cloudRel._camposDivergentes(local, nuvemOutra).join() === 'lab_hb';
+
+    /* e a mesma conta é a que descreve o conflito registrado */
+    const reg = cloudRel.registrarConflito('pre', local, nuvemOutra, { motivo: 'teste' });
+    out.conflitoDescreveOCampo = !!reg && (reg.metadata.changedFields || []).join() === 'lab_hb';
+    /* os DOIS lados ficam retidos: é isso que "conflito preservado" quer dizer */
+    out.guardaOsDoisLados = !!reg && reg.proposed.lab_hb === '13,2' && reg.canonical.lab_hb === '14,6';
+
+    return out;
+  });
+  assert(r.semDivergencia, 'carimbo de versão e hora do servidor não são divergência clínica');
+  assert(r.comDivergencia, 'um exame diferente é divergência, e tem de ser apontado pelo nome do campo');
+  assert(r.conflitoDescreveOCampo, 'o conflito registrado descreve o mesmo campo que o detectou');
+  assert(r.guardaOsDoisLados, 'e divergência de verdade continua retendo os dois lados, sem escolher por ninguém');
+  await page.close();
+});
+
 /* CHAVE VAZIA NÃO É ACERVO.
    ---------------------------------------------------------------------------
    Um usuário recém-criado, que nunca gravou nada, abriu o sistema e foi
