@@ -19263,6 +19263,58 @@ await test('Retificação: valores confirmados entram nos campos e na impressão
   await page.close();
 });
 
+/* A TELA DE ENTRADA PRECISA SER TESTADA PELA TELA, NÃO PELA FUNÇÃO.
+   ------------------------------------------------------------------------
+   O app subiu em produção com o login quebrado para TODO MUNDO, e a suíte
+   inteira passou. O motivo: havia teste para `cloud.login()` e nenhum para o
+   ato de digitar e clicar em Entrar.
+
+   O defeito: o build endurecido por CSP converte cada atributo `onsubmit`
+   do HTML em `addEventListener`. O formulário estático trazia um onsubmit
+   herdado apontando para `auth.tentarLogin()` — o login local antigo. Um
+   listener registrado assim NÃO é substituído por `form.onsubmit = ...`, que
+   é como `auth._render()` instala o login da nuvem. Os dois disparavam: o
+   antigo primeiro, chamando `_render()`, que REFAZ o formulário e apaga o que
+   foi digitado; e então o da nuvem lia campo vazio e respondia "Preencha
+   e-mail e senha", com a pessoa olhando para o que acabara de escrever.
+
+   Este teste encosta onde o dedo encosta: digita, clica, e exige que o que
+   foi digitado continue lá. */
+await test('Entrar: o que foi digitado sobrevive ao clique, e o erro não culpa a senha', async () => {
+  const page = await novaPagina();
+
+  const campos = await page.evaluate(() => ({
+    temEmail: !!document.getElementById('auth-email'),
+    quantosPass: document.querySelectorAll('#auth-pass').length,
+    overlayVisivel: (document.getElementById('auth-overlay') || {}).style?.display !== 'none'
+  }));
+  assert(campos.temEmail, 'a tela de entrada tem de apresentar o campo de e-mail da conta da nuvem');
+  assert(campos.quantosPass === 1, 'só pode existir UM campo de senha: id repetido faz o código ler o campo errado');
+  assert(campos.overlayVisivel, 'sem sessão, a tela de entrada tem de estar à vista');
+
+  await page.fill('#auth-email', 'mpcaliman@hotmail.com');
+  await page.fill('#auth-pass', 'senhaDeTeste123');
+  await page.click('.auth-btn');
+  await page.waitForTimeout(1500);
+
+  const r = await page.evaluate(() => ({
+    email: (document.getElementById('auth-email') || {}).value || '',
+    tamSenha: ((document.getElementById('auth-pass') || {}).value || '').length,
+    erro: (document.getElementById('auth-error') || {}).textContent || ''
+  }));
+
+  assert(r.email === 'mpcaliman@hotmail.com', 'o e-mail digitado não pode sumir ao clicar em Entrar');
+  assert(r.tamSenha === 15, 'a senha digitada não pode ser apagada antes de ser lida');
+  assert(!/Preencha e-mail e senha/.test(r.erro),
+    'pedir para preencher o que já está preenchido foi o defeito que derrubou o login em produção');
+  /* Nos testes a nuvem é cortada na origem: o certo é dizer que o servidor não
+     respondeu — e deixar explícito que a senha da pessoa não está em questão. */
+  assert(/não está respondendo|NÃO é a sua senha|sem internet/i.test(r.erro),
+    'sem servidor, a tela explica que é o servidor — nunca insinua que a senha está errada');
+
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

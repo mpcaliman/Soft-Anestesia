@@ -439,7 +439,10 @@ const auth = {
     if (app) app.style.pointerEvents = 'none';
     /* primeira execução: modo cadastro do admin */
     auth._render();
-    setTimeout(() => { const el = document.getElementById(auth.temUsuarios() ? 'auth-user' : 'auth-user'); if (el) el.focus(); }, 100);
+    /* O cursor ia para 'auth-user', campo do login local que _render() já
+       substituiu — os dois lados do ternário eram idênticos, então ele nunca
+       caía em lugar nenhum. A tela de entrada começa pelo e-mail. */
+    setTimeout(() => { const el = document.getElementById('auth-email'); if (el) el.focus(); }, 100);
   },
   _desbloquear() {
     /* Ter um espelho de sessão do app não prova a identidade ou a clínica.
