@@ -4621,7 +4621,19 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <div class="auth-logo"><img id="auth-logo-img" alt="" style="width:64px;height:64px;object-fit:contain"></div>
     <h1 class="auth-title">Soft Anestesia</h1>
     <p class="auth-sub" id="auth-sub">Acesso restrito — identifique-se</p>
-    <form id="auth-form" onsubmit="event.preventDefault(); auth.tentarLogin();" autocomplete="off">
+    <!-- SEM onsubmit AQUI, E ISSO É DE PROPÓSITO.
+         Este formulário é sempre reconstruído por auth._render() (chamado por
+         _bloquear()), que instala o handler certo em form.onsubmit — o login
+         pela nuvem. O onsubmit que existia aqui apontava para auth.tentarLogin(),
+         o login LOCAL antigo, que já não tem tela própria.
+         Enquanto era atributo do HTML, não fazia mal: form.onsubmit = ... o
+         substituía. Mas o build endurecido por CSP converte todo atributo
+         onsubmit/onclick em addEventListener — e um listener desses NÃO é
+         substituído por form.onsubmit. Os dois passavam a disparar: primeiro o
+         antigo, que chama _render() e REFAZ o formulário (apagando o que a
+         pessoa digitou), e em seguida o da nuvem, que lia os campos já vazios e
+         respondia "Preencha e-mail e senha". Ninguém conseguia entrar. -->
+    <form id="auth-form" autocomplete="off">
       <div class="auth-field">
         <label>Usuário</label>
         <input type="text" id="auth-user" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Seu usuário">
@@ -4695,7 +4707,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-09c</b><br>
+    v7.1 · build <b id="build-tag">2026-10-12a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
