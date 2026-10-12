@@ -1,0 +1,56 @@
+name: SQL local isolado
+
+on:
+  push:
+    branches: [ 'codex/**' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sql-local-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sql-local:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Configurar Node fixado
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Instalar dependências pelo lockfile
+        run: npm ci
+      - name: Validar isolamento do executor
+        run: node tests/local-sql-integration-security.mjs
+      - name: Aplicar baseline e testar SQL em Supabase efêmero
+        run: node scripts/run-local-sql-integration.mjs
+      - name: Validar reprodução do catálogo capturado
+        run: node tests/production-baseline-security.mjs
+      - name: Reconstruir catálogo de produção vazio e ensaiar atualização
+        run: node scripts/run-production-baseline-replay.mjs
+      - name: Guardar somente evidência sem credenciais
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # actions/upload-artifact@v4
+        with:
+          name: local-sql-integration-evidence
+          path: artifacts/local-sql-integration-evidence.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Guardar evidência da reconstrução sem dados
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # actions/upload-artifact@v4
+        with:
+          name: production-baseline-replay-evidence
+          path: artifacts/production-baseline-replay-evidence.json
+          if-no-files-found: error
+          retention-days: 7

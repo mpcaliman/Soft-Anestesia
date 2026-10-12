@@ -1,0 +1,580 @@
+{
+  "format": 1,
+  "recordedAt": "2026-10-11T14:10:35Z",
+  "scope": "staging-only",
+  "target": "yqqrfgbvoexricjdxpis",
+  "productionMutated": false,
+  "mainMerged": false,
+  "attempts": [
+    {
+      "deployment": {
+        "target": "yqqrfgbvoexricjdxpis",
+        "runId": "5596fcfc-6ab2-4dc3-a049-106a4b12bd8b",
+        "issuedAt": "2026-10-11T12:13:04.768Z",
+        "expiresAt": "2026-10-11T12:28:04.768Z",
+        "directory": "/tmp/soft-hosted-5596fcfc-6ab2-4dc3-a049-106a4b12bd8b",
+        "runnerCapabilitySha256": "45286e73370b2fad87463003835d235bff1ce0ebad3634caa401061a2d699326",
+        "runnerRenderedSha256": "61e0a35764da358b452f4d75c8fdf4f3956e732fca317f02cc17ab6a46de5933",
+        "recoveryCapabilitySha256": "4e9f134670c4d50e9ee67b511a68a31b9a2d241c8e6dbf95721384fccdf038f8",
+        "recoveryRenderedSha256": "88a795099159177a7e0f2e831fcea762d02eaee4a987cdd99bd8b580c6abe451"
+      },
+      "report": {
+        "target": "yqqrfgbvoexricjdxpis",
+        "runId": "5596fcfc-6ab2-4dc3-a049-106a4b12bd8b",
+        "checks": [
+          {
+            "name": "durable_invocation_claim",
+            "passed": false,
+            "diagnostic": "http_401"
+          }
+        ],
+        "passed": 0,
+        "failed": 1,
+        "pending": 0,
+        "retention": {
+          "policy": "retain-blocked-synthetic-evidence",
+          "organizationIds": [],
+          "authUserIds": [],
+          "records": [],
+          "capturedAuditRows": 0,
+          "clinicalRowsDeleted": null,
+          "auditRowsDeleted": null,
+          "authUsersDeleted": null
+        },
+        "limitations": [
+          "JWT lifetime expiry not accelerated",
+          "browser two tabs/crash belongs to browser integration suite",
+          "RLS CRUD covers patients/addenda/Storage; Realtime payloads cover patients/encounters/addenda, not every role/table",
+          "Unacknowledged Auth creation must be reconciled only by exact runId app_metadata synthetic_audit"
+        ]
+      }
+    },
+    {
+      "deployment": {
+        "target": "yqqrfgbvoexricjdxpis",
+        "runId": "6b94f2ef-3216-4b4a-b6c8-3c0e58efaf15",
+        "issuedAt": "2026-10-11T12:26:25.912Z",
+        "expiresAt": "2026-10-11T12:41:25.912Z",
+        "directory": "/tmp/soft-hosted-6b94f2ef-3216-4b4a-b6c8-3c0e58efaf15",
+        "runnerCapabilitySha256": "56c0ec698b48fe124a8161456927b5930b12c0b8aed99925d5197347123e651f",
+        "runnerRenderedSha256": "81a0580ba7c4e1e1f2135487400eee4e8177bd356f719d8ac6dfb7bee0fb87ce",
+        "recoveryCapabilitySha256": "87420dceddc258f559c481f865d4c3bd03bf6bab56ccd589132bb9be583a00dd",
+        "recoveryRenderedSha256": "f98ddbf3f47c0741a8de1b4cec77602c486b7209ec7bf1d64a4214da86b16f2e"
+      },
+      "report": {
+        "target": "yqqrfgbvoexricjdxpis",
+        "runId": "6b94f2ef-3216-4b4a-b6c8-3c0e58efaf15",
+        "checks": [
+          {
+            "name": "durable_invocation_claim",
+            "passed": true
+          },
+          {
+            "name": "required_independent_recovery",
+            "passed": true
+          },
+          {
+            "name": "required_retification_schema",
+            "passed": false,
+            "diagnostic": "http_403"
+          },
+          {
+            "name": "synthetic_independent_database_containment",
+            "passed": true
+          }
+        ],
+        "passed": 3,
+        "failed": 1,
+        "pending": 0,
+        "retention": {
+          "policy": "retain-blocked-synthetic-evidence",
+          "organizationIds": [],
+          "authUserIds": [],
+          "records": [],
+          "capturedAuditRows": 0,
+          "clinicalRowsDeleted": null,
+          "auditRowsDeleted": null,
+          "authUsersDeleted": null
+        },
+        "limitations": [
+          "JWT lifetime expiry not accelerated",
+          "browser two tabs/crash belongs to browser integration suite",
+          "RLS CRUD covers patients/addenda/Storage; Realtime payloads cover patients/encounters/addenda, not every role/table",
+          "Unacknowledged Auth creation must be reconciled only by exact runId app_metadata synthetic_audit"
+        ]
+      }
+    },
+    {
+      "deployment": {
+        "target": "yqqrfgbvoexricjdxpis",
+        "runId": "ab5fbd73-e29a-42b5-a06e-af79e54060c4",
+        "issuedAt": "2026-10-11T13:02:21.511Z",
+        "expiresAt": "2026-10-11T13:17:21.511Z",
+        "runnerRenderedSha256": "a8b27e8368a2368e4d385c15d480a9c40e591d89e41f61be0c0e62b76716e34f",
+        "runnerSourceSha256": "779dc26dda73eb26f466794d48818ddc5046d216399ea50453e55f13fd3558a8",
+        "recoveryRenderedSha256": "8ed8d0e11d7c7d4ece94f7688b6d284bab2520652020b56f03c1f4086e03d5ea",
+        "recoverySourceSha256": "04b0bcdf83a7f2aa05f8a1d36ef49049fc63fc202df7044a3393309db566cdf0",
+        "probeRenderedSha256": "216c600d88fdea681d4c7c844fc56def90e6b12cfebff83a6664f41c370b7b09"
+      },
+      "report": {
+        "target": "yqqrfgbvoexricjdxpis",
+        "runId": "ab5fbd73-e29a-42b5-a06e-af79e54060c4",
+        "checks": [
+          {
+            "name": "durable_invocation_claim",
+            "passed": true
+          },
+          {
+            "name": "required_independent_recovery",
+            "passed": true
+          },
+          {
+            "name": "required_retification_schema",
+            "passed": true
+          },
+          {
+            "name": "finalization_server_author_time_and_original_snapshot",
+            "passed": true
+          },
+          {
+            "name": "auth_four_distinct_real_sessions",
+            "passed": true
+          },
+          {
+            "name": "anonymous_clinical_read_denied",
+            "passed": true
+          },
+          {
+            "name": "cross_org_read_denied",
+            "passed": true
+          },
+          {
+            "name": "cross_org_create_denied",
+            "passed": true
+          },
+          {
+            "name": "cross_org_update_denied",
+            "passed": true
+          },
+          {
+            "name": "cross_org_delete_denied",
+            "passed": true
+          },
+          {
+            "name": "organization_scope_immutable",
+            "passed": true
+          },
+          {
+            "name": "atomic_compare_and_swap_two_real_sessions",
+            "passed": true
+          },
+          {
+            "name": "personal_legacy_channel_write_denied",
+            "passed": true
+          },
+          {
+            "name": "ordinary_user_cannot_authorize_share",
+            "passed": true
+          },
+          {
+            "name": "programmer_share_explicit_read_only_scope",
+            "passed": true
+          },
+          {
+            "name": "revoked_share_immediately_denies_read",
+            "passed": true
+          },
+          {
+            "name": "storage_owned_upload",
+            "passed": true
+          },
+          {
+            "name": "storage_cross_org_read_denied",
+            "passed": true
+          },
+          {
+            "name": "storage_cross_org_upload_denied",
+            "passed": true
+          },
+          {
+            "name": "storage_cross_org_update_denied",
+            "passed": true
+          },
+          {
+            "name": "storage_cross_org_delete_denied",
+            "passed": true
+          },
+          {
+            "name": "realtime_authenticated_operational_and_addenda_topics",
+            "passed": true
+          },
+          {
+            "name": "realtime_own_update_and_cross_org_filter",
+            "passed": false,
+            "diagnostic": "assertion_failed"
+          },
+          {
+            "name": "retification_atomic_race_two_real_sessions_preserves_both_proposals",
+            "passed": true
+          },
+          {
+            "name": "retification_realtime_preserves_accepted_and_conflict",
+            "passed": true
+          },
+          {
+            "name": "retification_exact_replay_idempotent_and_other_proposal_denied",
+            "passed": true
+          },
+          {
+            "name": "retification_foreign_org_cannot_read_or_create",
+            "passed": true
+          },
+          {
+            "name": "retification_each_proposal_has_server_audit",
+            "passed": true
+          },
+          {
+            "name": "retification_parent_update_delete_and_org_cascade_denied",
+            "passed": true
+          },
+          {
+            "name": "retification_accepted_and_conflict_append_only",
+            "passed": true
+          },
+          {
+            "name": "realtime_refresh_every_joined_topic",
+            "passed": true
+          },
+          {
+            "name": "storage_fixture_cleanup",
+            "passed": true
+          },
+          {
+            "name": "synthetic_share_revocation",
+            "passed": true
+          },
+          {
+            "name": "synthetic_independent_database_containment",
+            "passed": true
+          },
+          {
+            "name": "synthetic_programmer_privilege_removed",
+            "passed": true
+          },
+          {
+            "name": "synthetic_membership_disabled",
+            "passed": true
+          },
+          {
+            "name": "synthetic_membership_disabled",
+            "passed": true
+          },
+          {
+            "name": "synthetic_membership_disabled",
+            "passed": true
+          },
+          {
+            "name": "synthetic_membership_disabled",
+            "passed": true
+          },
+          {
+            "name": "synthetic_all_sessions_revoked",
+            "passed": true
+          },
+          {
+            "name": "synthetic_auth_banned_password_rotated",
+            "passed": true
+          },
+          {
+            "name": "synthetic_profile_disabled",
+            "passed": true
+          },
+          {
+            "name": "synthetic_expiring_jwt_cannot_access_retained_evidence",
+            "passed": true
+          },
+          {
+            "name": "synthetic_all_sessions_revoked",
+            "passed": true
+          },
+          {
+            "name": "synthetic_auth_banned_password_rotated",
+            "passed": true
+          },
+          {
+            "name": "synthetic_profile_disabled",
+            "passed": true
+          },
+          {
+            "name": "synthetic_expiring_jwt_cannot_access_retained_evidence",
+            "passed": true
+          },
+          {
+            "name": "synthetic_all_sessions_revoked",
+            "passed": true
+          },
+          {
+            "name": "synthetic_auth_banned_password_rotated",
+            "passed": true
+          },
+          {
+            "name": "synthetic_profile_disabled",
+            "passed": true
+          },
+          {
+            "name": "synthetic_expiring_jwt_cannot_access_retained_evidence",
+            "passed": true
+          },
+          {
+            "name": "synthetic_all_sessions_revoked",
+            "passed": true
+          },
+          {
+            "name": "synthetic_auth_banned_password_rotated",
+            "passed": true
+          },
+          {
+            "name": "synthetic_profile_disabled",
+            "passed": true
+          },
+          {
+            "name": "synthetic_expiring_jwt_cannot_access_retained_evidence",
+            "passed": true
+          },
+          {
+            "name": "synthetic_organization_disabled_evidence_retained",
+            "passed": true
+          },
+          {
+            "name": "synthetic_organization_disabled_evidence_retained",
+            "passed": true
+          },
+          {
+            "name": "synthetic_confirmed_clinical_evidence_retained",
+            "passed": true
+          },
+          {
+            "name": "synthetic_captured_audit_evidence_retained",
+            "passed": true
+          },
+          {
+            "name": "synthetic_auth_identity_retained_for_audit_fk",
+            "passed": true
+          }
+        ],
+        "passed": 59,
+        "failed": 1,
+        "pending": 0,
+        "retention": {
+          "policy": "retain-blocked-synthetic-evidence",
+          "organizationIds": [
+            "5463e15f-2d0f-477b-882b-4d6c9d7fb3a0",
+            "ee2990da-c01f-4684-bef0-42503ebb6af9"
+          ],
+          "authUserIds": [
+            "240e7088-b805-464f-8c8e-add748213cda",
+            "968a4b86-89fa-425a-af59-756075cd1a63",
+            "68250377-acbd-4912-a679-aab8e4937481",
+            "96e4154e-4af0-46df-8f58-ceca703eecab"
+          ],
+          "records": [
+            {
+              "table": "patients",
+              "id": "a398cba7-7f4c-4b8a-a885-862fee2cfce1"
+            },
+            {
+              "table": "patients",
+              "id": "916f9d81-d84e-45c6-8881-253bbc4ce533"
+            },
+            {
+              "table": "encounters",
+              "id": "2d8349ab-78e6-4469-ab91-a9ae6df398c5"
+            },
+            {
+              "table": "preanesthetic_assessments",
+              "id": "5df37498-b0a2-4df4-9857-f59c35e34124"
+            },
+            {
+              "table": "addenda",
+              "id": "61afd471-51cd-4feb-854b-586aeb07e422"
+            },
+            {
+              "table": "addenda",
+              "id": "e84c165f-a936-47f0-9b30-fbdcd24056a5"
+            },
+            {
+              "table": "addenda",
+              "id": "a4bfcd37-38ae-4e1a-94a7-702993ea5a2c"
+            }
+          ],
+          "capturedAuditRows": 10,
+          "clinicalRowsDeleted": false,
+          "auditRowsDeleted": false,
+          "authUsersDeleted": false
+        },
+        "limitations": [
+          "JWT lifetime expiry not accelerated",
+          "browser two tabs/crash belongs to browser integration suite",
+          "RLS CRUD covers patients/addenda/Storage; Realtime payloads cover patients/encounters/addenda, not every role/table",
+          "Unacknowledged Auth creation must be reconciled only by exact runId app_metadata synthetic_audit"
+        ]
+      }
+    },
+    {
+      "runId": "4fd02f10-dd82-4566-92df-f2edf45878af",
+      "target": "yqqrfgbvoexricjdxpis",
+      "phase": "hosted-integration",
+      "status": "passed",
+      "passed": 60,
+      "failed": 0,
+      "pending": 0,
+      "independentRecoveryVerified": true,
+      "evidencePath": "docs/engineering/HOSTED-REAL-INTEGRATION-2026-10-11.json",
+      "sourceSha256": "79f2d173a18b0184dcfeae2728502e6d5327dbea4ea6573326dfc9a4b03ea912"
+    },
+    {
+      "runId": "8796c7fd-d6c4-49dc-8ede-4e10237f5985",
+      "target": "yqqrfgbvoexricjdxpis",
+      "phase": "browser-bootstrap",
+      "status": "interrupted-before-claim",
+      "inventorySqlState": "22023",
+      "durableClaimCreated": false,
+      "fixturesCreated": false,
+      "browserExecuted": false,
+      "bootstrapClosed410Version": 2,
+      "recoveryClosed410Version": 9
+    }
+  ],
+  "latestRunIndependentClosure": {
+    "runId": "4fd02f10-dd82-4566-92df-f2edf45878af",
+    "verified": true,
+    "authUsersBanned": 4,
+    "organizationsInactive": 2,
+    "activeMemberships": 0,
+    "activeProfiles": 0,
+    "activeOrganizations": 0,
+    "activeProgrammerPrivileges": 0,
+    "activeSharesPendingClosure": 0,
+    "retention": "retain-blocked-synthetic-evidence"
+  },
+  "verifiedFixtureBackendRights": {
+    "guards": 9,
+    "matrix": [
+      {
+        "table": "addenda",
+        "privileges": [
+          "SELECT"
+        ]
+      },
+      {
+        "table": "app_programmers",
+        "privileges": [
+          "DELETE",
+          "INSERT",
+          "SELECT"
+        ]
+      },
+      {
+        "table": "audit_logs",
+        "privileges": [
+          "SELECT"
+        ]
+      },
+      {
+        "table": "documentos",
+        "privileges": [
+          "SELECT"
+        ]
+      },
+      {
+        "table": "encounters",
+        "privileges": [
+          "SELECT"
+        ]
+      },
+      {
+        "table": "org_shares",
+        "privileges": [
+          "SELECT"
+        ]
+      },
+      {
+        "table": "organization_users",
+        "privileges": [
+          "INSERT",
+          "SELECT",
+          "UPDATE"
+        ]
+      },
+      {
+        "table": "organizations",
+        "privileges": [
+          "DELETE",
+          "INSERT",
+          "SELECT",
+          "UPDATE"
+        ]
+      },
+      {
+        "table": "patients",
+        "privileges": [
+          "SELECT"
+        ]
+      },
+      {
+        "table": "preanesthetic_assessments",
+        "privileges": [
+          "SELECT"
+        ]
+      },
+      {
+        "table": "profiles",
+        "privileges": [
+          "INSERT",
+          "SELECT",
+          "UPDATE"
+        ]
+      },
+      {
+        "table": "staging_audit_recoveries",
+        "privileges": null
+      },
+      {
+        "table": "staging_audit_run_claims",
+        "privileges": [
+          "INSERT",
+          "SELECT"
+        ]
+      }
+    ],
+    "history": 39,
+    "authUsers": 0,
+    "organizations": 0,
+    "truncatableServiceTables": 0
+  },
+  "ephemeralFunctionsClosed": {
+    "runner": {
+      "status": 410,
+      "version": 7,
+      "verifyJwt": true
+    },
+    "recovery": {
+      "status": 410,
+      "version": 9,
+      "verifyJwt": true
+    },
+    "browserBootstrap": {
+      "status": 410,
+      "version": 2,
+      "verifyJwt": true
+    }
+  },
+  "releaseApproved": false,
+  "pending": [
+    "Captured-production upgrade replay failed at original 0025 (42P01); original 0013 prerequisite reconciliation is locally reviewed, pending real CI.",
+    "Real hosted browser multi-tab, natural JWT expiry and SIGKILL/offline recovery tests.",
+    "Historical legacy provenance, final checks, final-SHA owner authorization and production release."
+  ],
+  "governanceBootstrapMerged": true,
+  "applicationMainMerged": false
+}

@@ -1,0 +1,38 @@
+{
+  "format": 1,
+  "sourceProject": "zbpbrnalamjrcfbscjkt",
+  "capturedAt": "2026-10-11T12:29:09.760Z",
+  "metadataOnly": true,
+  "productionMutated": false,
+  "checks": [
+    {
+      "check_name": "application_collations",
+      "total": 0
+    },
+    {
+      "check_name": "application_text_search_configs",
+      "total": 0
+    },
+    {
+      "check_name": "application_text_search_dictionaries",
+      "total": 0
+    },
+    {
+      "check_name": "application_text_search_parsers",
+      "total": 0
+    },
+    {
+      "check_name": "application_text_search_templates",
+      "total": 0
+    },
+    {
+      "check_name": "application_casts",
+      "total": 0
+    },
+    {
+      "check_name": "application_event_triggers",
+      "total": 0
+    }
+  ],
+  "assessment": "No unsupported application collations, casts, text search objects or event triggers found outside extension membership. Platform extension-member definitions are prerequisites and not exported."
+}

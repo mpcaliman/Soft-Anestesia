@@ -1,18 +1,102 @@
-name: GitHub Pages — bloqueado para bootstrap
+name: Publicar no GitHub Pages
+run-name: Publicar ${{ inputs.source_sha }} — ${{ inputs.authorization }}
 
-# Não publica nem executa código do repositório. Substituir somente depois de
-# integrar e validar o workflow completo, a CI e a homologação autenticada.
+# Publica somente o pacote público por autorização G5 explícita. O commit deve
+# estar em main e ter uma execução push da CI concluída com sucesso.
+
 on:
   workflow_dispatch:
+    inputs:
+      source_sha:
+        description: "SHA completo (40 caracteres) já aprovado pela CI em main"
+        required: true
+        type: string
+      authorization:
+        description: "Referência da autorização de Marcelo (formato G5-cartao)"
+        required: true
+        type: string
 
-permissions: {}
+permissions:
+  actions: read
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
 
 jobs:
-  publication-blocked:
-    name: Publicação bloqueada durante bootstrap
+  build:
+    if: github.event_name == 'workflow_dispatch' && github.actor == 'mpcaliman' && github.triggering_actor == 'mpcaliman' && github.ref == 'refs/heads/main' && github.run_attempt == 1
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      AUTHORIZATION: ${{ inputs.authorization }}
     steps:
-      - name: Impedir publicação antes dos portões completos
+      - name: Baixar exatamente o commit autorizado
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+      - name: Confirmar autorização, main e CI aprovada
+        shell: bash
         run: |
-          echo "Publicação bloqueada: concluir governança, integração e homologação antes de substituir este stub."
-          exit 1
+          if [[ ! "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "source_sha deve ser um SHA completo em minúsculas" >&2
+            exit 1
+          fi
+          if [[ ! "$AUTHORIZATION" =~ ^G5-[A-Za-z0-9._/-]+$ ]]; then
+            echo "authorization deve seguir o formato G5-cartao" >&2
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
+          node --input-type=module <<'JS'
+          import { readFileSync } from 'node:fs';
+          import { assertMigrationBaselineState, assertPublicationDispatch } from './scripts/migration-baseline-gate.mjs';
+          assertPublicationDispatch({ eventName: process.env.GITHUB_EVENT_NAME, ref: process.env.GITHUB_REF,
+            actor: process.env.GITHUB_ACTOR, triggeringActor: process.env.GITHUB_TRIGGERING_ACTOR,
+            runAttempt: process.env.GITHUB_RUN_ATTEMPT, repository: process.env.GITHUB_REPOSITORY });
+          const baseline = JSON.parse(readFileSync('database/migration-baseline.json', 'utf8'));
+          assertMigrationBaselineState(baseline, { purpose: 'publication' });
+          console.log(JSON.stringify({ owner: process.env.GITHUB_ACTOR, sha: process.env.SOURCE_SHA,
+            gate: process.env.AUTHORIZATION, proof: `https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` }));
+          JS
+          approved_runs="$(gh api --method GET \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+            -f head_sha="$SOURCE_SHA" \
+            -f branch=main \
+            -f event=push \
+            -f status=success \
+            -f per_page=1 \
+            --jq '.total_count')"
+          test "$approved_runs" -gt 0
+      - name: Configurar Node fixado
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Instalar dependências pelo lockfile
+        run: npm ci
+      - name: Gerar e validar o pacote público
+        run: npm run build && npm run validate:dist
+      - name: Configurar GitHub Pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # actions/configure-pages@v5
+        with:
+          enablement: true
+      - name: Enviar somente o pacote público
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # actions/upload-pages-artifact@v3
+        with:
+          path: dist
+  deploy:
+    if: github.event_name == 'workflow_dispatch' && github.actor == 'mpcaliman' && github.triggering_actor == 'mpcaliman' && github.ref == 'refs/heads/main' && github.run_attempt == 1
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # actions/deploy-pages@v4

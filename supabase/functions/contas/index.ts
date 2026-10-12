@@ -67,12 +67,21 @@ function senhaProvisoria(): string {
   const letras = "abcdefghijkmnpqrstuvwxyz";
   const maius = "ABCDEFGHJKLMNPQRSTUVWXYZ";
   const nums = "23456789";
+  const simbolos = "!@#$%*-_";
   const pick = (s: string, n: number) => {
     const b = new Uint32Array(n);
     crypto.getRandomValues(b);
     return [...b].map((x) => s[x % s.length]).join("");
   };
-  return pick(maius, 1) + pick(letras, 5) + pick(nums, 3);
+  return pick(maius, 2) + pick(letras, 8) + pick(nums, 3) + pick(simbolos, 3);
+}
+
+function erroSenha(senha: string): string {
+  if (senha.length < 12) return "A senha precisa de ao menos 12 caracteres.";
+  if (!/[a-z]/.test(senha) || !/[A-Z]/.test(senha) || !/[0-9]/.test(senha) || !/[^A-Za-z0-9]/.test(senha)) {
+    return "Use letra minúscula, maiúscula, número e símbolo.";
+  }
+  return "";
 }
 
 /* Quem está pedindo? Só passa programador cadastrado no banco. O papel NÃO é
@@ -112,8 +121,9 @@ Deno.serve(async (req) => {
     if (!email || email.indexOf("@") < 0) return json({ ok: false, erro: "Informe um e-mail válido." }, 400);
 
     const informada = String(corpo.senha || "");
-    if (informada && informada.length < 6) {
-      return json({ ok: false, erro: "A senha precisa de ao menos 6 caracteres." }, 400);
+    const senhaInvalida = informada ? erroSenha(informada) : "";
+    if (senhaInvalida) {
+      return json({ ok: false, erro: senhaInvalida }, 400);
     }
     const senha = informada || senhaProvisoria();
 

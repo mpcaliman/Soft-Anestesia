@@ -1,0 +1,543 @@
+{
+  "format": 1,
+  "recordedAt": "2026-10-11",
+  "targetProject": "yqqrfgbvoexricjdxpis",
+  "parentProductionProject": "zbpbrnalamjrcfbscjkt",
+  "status": "migration_reconstruction_confirmed_hosted_integration_pending",
+  "productionChanged": false,
+  "confirmedNewMigrations": 32,
+  "preservedMigration": "0001_assinaturas",
+  "confirmedHistoryEntries": 35,
+  "historyEvidenceSource": "root execute_sql independent metadata query after seven successful native apply_migration calls",
+  "gap": "All numbered migrations 0001–0032, empty legacy baseline and signature hardening confirmed; hosted integration and complete production baseline remain pending",
+  "stoppedAt": null,
+  "ownerAuthorization": "2026-10-09: Pode fazer tudo — remaining stages authorized subject to prior verification",
+  "executionBlock": null,
+  "furtherMutationsAllowed": true,
+  "syntheticFixturesExecuted": false,
+  "integrationRunnerDeployed": false,
+  "realIntegrationPassed": false,
+  "migrations": [
+    {
+      "source": "database/migrations/0001_foundation.sql",
+      "sourceSha256": "1df86ceb1c2d25147c4af79a3bd83846d70ff792691156a9050033e05092da1f",
+      "appliedSha256": "1df86ceb1c2d25147c4af79a3bd83846d70ff792691156a9050033e05092da1f",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261009182638",
+      "remoteMigrationName": "staging_rebuild_0001_foundation"
+    },
+    {
+      "source": "database/migrations/0002_storage_realtime.sql",
+      "sourceSha256": "d4ee37bba6436c4ce70307e2aa5e91c6139627bd6e9c838441504041675f635d",
+      "appliedSha256": "d4ee37bba6436c4ce70307e2aa5e91c6139627bd6e9c838441504041675f635d",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261009182819",
+      "remoteMigrationName": "staging_rebuild_0002_storage_realtime"
+    },
+    {
+      "source": "database/migrations/0003_migration_targets.sql",
+      "sourceSha256": "3ac7b06b87fc7ce5907c28453b072db0a7e28eb1f99062b8a9b76ec84f58b50c",
+      "appliedSha256": "3ac7b06b87fc7ce5907c28453b072db0a7e28eb1f99062b8a9b76ec84f58b50c",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261009182823",
+      "remoteMigrationName": "staging_rebuild_0003_migration_targets"
+    },
+    {
+      "source": "database/migrations/0004_attachments_index.sql",
+      "sourceSha256": "e7a86a8681d5ba3baae43343954d37cb25eb8d8a34c1d85d39955ac76f7707be",
+      "appliedSha256": "e7a86a8681d5ba3baae43343954d37cb25eb8d8a34c1d85d39955ac76f7707be",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261009182824",
+      "remoteMigrationName": "staging_rebuild_0004_attachments_index"
+    },
+    {
+      "source": "database/migrations/0005_addenda_index.sql",
+      "sourceSha256": "72beb779861bd79c6d4b51560ab0628906958a2b53253adba515b0b31ee16292",
+      "appliedSha256": "72beb779861bd79c6d4b51560ab0628906958a2b53253adba515b0b31ee16292",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261009182825",
+      "remoteMigrationName": "staging_rebuild_0005_addenda_index"
+    },
+    {
+      "source": "database/migrations/0006_team_rpc.sql",
+      "sourceSha256": "8f7ddc76bd7ec759de10cd30bf4a0888474b517a87182bd448df73053b968361",
+      "appliedSha256": "8f7ddc76bd7ec759de10cd30bf4a0888474b517a87182bd448df73053b968361",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261009182826",
+      "remoteMigrationName": "staging_rebuild_0006_team_rpc"
+    },
+    {
+      "source": "database/migrations/0007_secretaria_clinico.sql",
+      "sourceSha256": "a07232e0f2c09e3c65f76a4894b54f725989a78fb86439b5b17c13b6f58408dc",
+      "appliedSha256": "a07232e0f2c09e3c65f76a4894b54f725989a78fb86439b5b17c13b6f58408dc",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261009182830",
+      "remoteMigrationName": "staging_rebuild_0007_secretaria_clinico"
+    },
+    {
+      "source": "database/migrations/0008_visibilidade_registros.sql",
+      "sourceSha256": "106bdeb4770b898ebb58915c8aa6ae68ecfb6c3d3a5252dba0d8cf438eee9aaa",
+      "appliedSha256": "106bdeb4770b898ebb58915c8aa6ae68ecfb6c3d3a5252dba0d8cf438eee9aaa",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261009182835",
+      "remoteMigrationName": "staging_rebuild_0008_visibilidade_registros"
+    },
+    {
+      "source": "database/migrations/0009_programador_ambientes.sql",
+      "sourceSha256": "bd6980111def753f4c29d3edcd8107a6b858bdb3f078c3e635cadda32f5fc9eb",
+      "appliedSha256": "bd6980111def753f4c29d3edcd8107a6b858bdb3f078c3e635cadda32f5fc9eb",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261009182840",
+      "remoteMigrationName": "staging_rebuild_0009_programador_ambientes"
+    },
+    {
+      "source": "database/migrations/0010_minha_organizacao.sql",
+      "sourceSha256": "88320b6451604c2b195702f835e945203dd382127ff1912622c58a9136327599",
+      "appliedSha256": "88320b6451604c2b195702f835e945203dd382127ff1912622c58a9136327599",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261009182843",
+      "remoteMigrationName": "staging_rebuild_0010_minha_organizacao"
+    },
+    {
+      "source": "database/migrations/0011_permissoes_por_usuario.sql",
+      "sourceSha256": "ac7e457252c7e8fce4281094038fcd5127399fd977b4ce06e2aa0ab41de27dcd",
+      "appliedSha256": "ac7e457252c7e8fce4281094038fcd5127399fd977b4ce06e2aa0ab41de27dcd",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261009182844",
+      "remoteMigrationName": "staging_rebuild_0011_permissoes_por_usuario"
+    },
+    {
+      "source": "database/migrations/0012_configs_da_clinica.sql",
+      "sourceSha256": "eaba9a0fdca51a8013c71d0cffb63405d9605b2fb06deb7ee9cf25dab16349f8",
+      "appliedSha256": "eaba9a0fdca51a8013c71d0cffb63405d9605b2fb06deb7ee9cf25dab16349f8",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261009182918",
+      "remoteMigrationName": "staging_rebuild_0012_configs_da_clinica"
+    },
+    {
+      "source": "database/migrations/0013_cbhpm_2022.sql",
+      "sourceSha256": "0b996505d48930b2498548808277a0a7c69a664eae2b4c22cc5d88c4262ad8d8",
+      "appliedSha256": "0b996505d48930b2498548808277a0a7c69a664eae2b4c22cc5d88c4262ad8d8",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261009182926",
+      "remoteMigrationName": "staging_rebuild_0013_cbhpm_2022"
+    },
+    {
+      "source": "database/migrations/0014_medicamentos_anvisa.sql",
+      "sourceSha256": "be7479633ce3aa2dfc97b1d6db6fd40499b196af2cc69351fdf28cb833700bcf",
+      "appliedSha256": "be7479633ce3aa2dfc97b1d6db6fd40499b196af2cc69351fdf28cb833700bcf",
+      "state": "applied_confirmed",
+      "previousAttempt": "approval_declined",
+      "remoteVersion": "20261009211312",
+      "remoteMigrationName": "staging_rebuild_0014_medicamentos_anvisa"
+    },
+    {
+      "source": "database/migrations/0015_realtime_modulos_restantes.sql",
+      "sourceSha256": "d3b3c48d5ae536a3385e11259b3884f7a1509c48b3910418346dde0e752389bd",
+      "appliedSha256": "d3b3c48d5ae536a3385e11259b3884f7a1509c48b3910418346dde0e752389bd",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261009182949",
+      "remoteMigrationName": "staging_rebuild_0015_realtime_modulos_restantes"
+    },
+    {
+      "source": "database/migrations/0016_permissoes_por_modulo.sql",
+      "sourceSha256": "e82bdadc1ac2ebb58d2f63bdff422c1ca33768fd216c352d159d68719d76320c",
+      "appliedSha256": "e82bdadc1ac2ebb58d2f63bdff422c1ca33768fd216c352d159d68719d76320c",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261009182957",
+      "remoteMigrationName": "staging_rebuild_0016_permissoes_por_modulo"
+    },
+    {
+      "source": "database/migrations/0017_programador_excluir.sql",
+      "sourceSha256": "e73e8ce2d496a78bb1e14a9728e7d2b57790024432ab0b4825c139de21d04bf9",
+      "appliedSha256": "e73e8ce2d496a78bb1e14a9728e7d2b57790024432ab0b4825c139de21d04bf9",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261009183003",
+      "remoteMigrationName": "staging_rebuild_0017_programador_excluir"
+    },
+    {
+      "source": "database/migrations/0018_stop_legacy_writes.sql",
+      "sourceSha256": "747d0a2a713be4e7bde20995abe183fac05d8ad61f255a5fbed9c0746bd1c6fe",
+      "appliedSha256": "747d0a2a713be4e7bde20995abe183fac05d8ad61f255a5fbed9c0746bd1c6fe",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261009212903",
+      "remoteMigrationName": "staging_rebuild_0018_stop_legacy_writes"
+    },
+    {
+      "source": "database/migrations/0019_optimistic_concurrency.sql",
+      "sourceSha256": "a340557ff0387c497da76d362a8b02be09b3fd53340024ce517eb2ff6a2c0ce6",
+      "appliedSha256": "a340557ff0387c497da76d362a8b02be09b3fd53340024ce517eb2ff6a2c0ce6",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261010002555",
+      "remoteMigrationName": "staging_rebuild_0019_optimistic_concurrency"
+    },
+    {
+      "source": "database/migrations/0020_conflict_preservation_and_immutability.sql",
+      "sourceSha256": "43ee4eb96a50abcbc3a53c460ed76c11d676417e407bd18c6d9e20dcd7bb95a7",
+      "appliedSha256": "43ee4eb96a50abcbc3a53c460ed76c11d676417e407bd18c6d9e20dcd7bb95a7",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261010124332",
+      "remoteMigrationName": "staging_rebuild_0020_conflict_preservation_and_immutability"
+    },
+    {
+      "source": "database/migrations/0021_safe_attachment_lifecycle.sql",
+      "sourceSha256": "e33a90b38270746bc77e525fc5612f44e4bd760bbf5e2e893ea9bf6de45f3131",
+      "appliedSha256": "e33a90b38270746bc77e525fc5612f44e4bd760bbf5e2e893ea9bf6de45f3131",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261010224615",
+      "attempts": 2,
+      "remoteMigrationName": "staging_rebuild_0021_safe_attachment_lifecycle",
+      "previousExecutionBlock": "Two request-state errors before owner reconnected Supabase; now overcome by confirmed application"
+    },
+    {
+      "source": "database/migrations/0022_encrypted_offline_keyrings.sql",
+      "sourceSha256": "5b6b93106f157156c70da7f144f6324815aa6679e7f8bbb1a0b18baa4468f968",
+      "appliedSha256": "5b6b93106f157156c70da7f144f6324815aa6679e7f8bbb1a0b18baa4468f968",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261010224628",
+      "remoteMigrationName": "staging_rebuild_0022_encrypted_offline_keyrings"
+    },
+    {
+      "source": "database/migrations/0023_idempotent_cloud_receipts.sql",
+      "sourceSha256": "af8d293db5cb8a4bbaecb0969ac67afe02d293a7b6d45240884a14a1c37a81f4",
+      "appliedSha256": "af8d293db5cb8a4bbaecb0969ac67afe02d293a7b6d45240884a14a1c37a81f4",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261010224635",
+      "remoteMigrationName": "staging_rebuild_0023_idempotent_cloud_receipts"
+    },
+    {
+      "source": "database/migrations/0024_legacy_quarantine_migration.sql",
+      "sourceSha256": "6d9b5d3eca5ab2880d2294976d2a8baf113892ad0a5fa351d5a2c8a3e13f6c87",
+      "appliedSha256": "6d9b5d3eca5ab2880d2294976d2a8baf113892ad0a5fa351d5a2c8a3e13f6c87",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261010225526",
+      "remoteMigrationName": "staging_rebuild_0024_legacy_quarantine_migration"
+    },
+    {
+      "source": "database/migrations/0025_supabase_hardening.sql",
+      "sourceSha256": "4847547686c59b50d066801d93a9229b617c8363d7287e401c76066d41a3c4c5",
+      "appliedSha256": "4847547686c59b50d066801d93a9229b617c8363d7287e401c76066d41a3c4c5",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261011000746",
+      "attemptsAfterReconnection": 3,
+      "sourceTransferFailure": "Initial tool output truncated the SQL; rejected with 42601; source file and baseline hash unchanged",
+      "verifiedFullSqlAttempts": 2,
+      "verifiedSourceBytes": 44293,
+      "verifiedSourceCharacters": 44146,
+      "verifiedSourceLfCount": 1048,
+      "verifiedTransmittedSha256": "4847547686c59b50d066801d93a9229b617c8363d7287e401c76066d41a3c4c5",
+      "remoteMigrationName": "staging_rebuild_0025_supabase_hardening",
+      "previousError": "Invalid or expired requestState"
+    },
+    {
+      "source": "database/migrations/0026_e1_performance_indexes.sql",
+      "sourceSha256": "759c4866f73c6d652ba73151f0a72bce1408bc8fbd95cc12bfe049c449eb5e1e",
+      "appliedSha256": "d7ede0570c69d6ce9196848a90a2c55e75cc669720f7ae273526c31936b9974a",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261011000852",
+      "remoteMigrationName": "staging_rebuild_0026_e1_performance_indexes",
+      "derivation": "Non-concurrent index creation exclusively on verified empty staging; original source unchanged"
+    },
+    {
+      "source": "database/migrations/0027_cloud_only_cash_closings.sql",
+      "sourceSha256": "15a4a4c24d4451ed8fab87a3e7b683f85b9b18cd903bebbd230d1e16a6e232fc",
+      "appliedSha256": "15a4a4c24d4451ed8fab87a3e7b683f85b9b18cd903bebbd230d1e16a6e232fc",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261011020018",
+      "remoteMigrationName": "staging_rebuild_0027_cloud_only_cash_closings"
+    },
+    {
+      "source": "database/migrations/0028_programmer_scoped_org_shares.sql",
+      "sourceSha256": "5eef46743c77c751d3871ef1213d7a5042ae0cbfc8734b1386b8a7f98bae2474",
+      "appliedSha256": "5eef46743c77c751d3871ef1213d7a5042ae0cbfc8734b1386b8a7f98bae2474",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261011020151",
+      "remoteMigrationName": "staging_rebuild_0028_programmer_scoped_org_shares"
+    },
+    {
+      "source": "database/migrations/0029_cloud_live_draft_modules.sql",
+      "sourceSha256": "730c8b3cbf57917b58a701fbc7008120015b117cfd57537bbeb6e8a83ef9e37c",
+      "appliedSha256": "730c8b3cbf57917b58a701fbc7008120015b117cfd57537bbeb6e8a83ef9e37c",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261011020208",
+      "remoteMigrationName": "staging_rebuild_0029_cloud_live_draft_modules"
+    },
+    {
+      "source": "database/migrations/0030_complete_case_realtime.sql",
+      "sourceSha256": "aa2674326cfd71e5541ed97dad381ba35592eeb5484b2bde8f0efc6900a49365",
+      "appliedSha256": "aa2674326cfd71e5541ed97dad381ba35592eeb5484b2bde8f0efc6900a49365",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261011020214",
+      "remoteMigrationName": "staging_rebuild_0030_complete_case_realtime"
+    },
+    {
+      "source": "database/migrations/0031_append_only_retification_cas.sql",
+      "sourceSha256": "caf6ce1392b1becd33bc57a08077f232363ef8093dbe9eddd92725e0188840e5",
+      "appliedSha256": "caf6ce1392b1becd33bc57a08077f232363ef8093dbe9eddd92725e0188840e5",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261011020329",
+      "remoteMigrationName": "staging_rebuild_0031_append_only_retification_cas"
+    },
+    {
+      "source": "database/migrations/0032_finalized_delete_guard.sql",
+      "sourceSha256": "d98ee075288ee6f5c0d889de22d62c3e22bdd945ed26db2fb7e9908bf41934f0",
+      "appliedSha256": "d98ee075288ee6f5c0d889de22d62c3e22bdd945ed26db2fb7e9908bf41934f0",
+      "state": "applied_confirmed",
+      "remoteVersion": "20261011020346",
+      "remoteMigrationName": "staging_rebuild_0032_finalized_delete_guard"
+    }
+  ],
+  "remoteHistory": [
+    {
+      "version": "0001",
+      "name": "assinaturas"
+    },
+    {
+      "version": "20261009182638",
+      "name": "staging_rebuild_0001_foundation"
+    },
+    {
+      "version": "20261009182819",
+      "name": "staging_rebuild_0002_storage_realtime"
+    },
+    {
+      "version": "20261009182823",
+      "name": "staging_rebuild_0003_migration_targets"
+    },
+    {
+      "version": "20261009182824",
+      "name": "staging_rebuild_0004_attachments_index"
+    },
+    {
+      "version": "20261009182825",
+      "name": "staging_rebuild_0005_addenda_index"
+    },
+    {
+      "version": "20261009182826",
+      "name": "staging_rebuild_0006_team_rpc"
+    },
+    {
+      "version": "20261009182830",
+      "name": "staging_rebuild_0007_secretaria_clinico"
+    },
+    {
+      "version": "20261009182835",
+      "name": "staging_rebuild_0008_visibilidade_registros"
+    },
+    {
+      "version": "20261009182840",
+      "name": "staging_rebuild_0009_programador_ambientes"
+    },
+    {
+      "version": "20261009182843",
+      "name": "staging_rebuild_0010_minha_organizacao"
+    },
+    {
+      "version": "20261009182844",
+      "name": "staging_rebuild_0011_permissoes_por_usuario"
+    },
+    {
+      "version": "20261009182918",
+      "name": "staging_rebuild_0012_configs_da_clinica"
+    },
+    {
+      "version": "20261009182926",
+      "name": "staging_rebuild_0013_cbhpm_2022"
+    },
+    {
+      "version": "20261009182949",
+      "name": "staging_rebuild_0015_realtime_modulos_restantes"
+    },
+    {
+      "version": "20261009182957",
+      "name": "staging_rebuild_0016_permissoes_por_modulo"
+    },
+    {
+      "version": "20261009183003",
+      "name": "staging_rebuild_0017_programador_excluir"
+    },
+    {
+      "version": "20261009211312",
+      "name": "staging_rebuild_0014_medicamentos_anvisa"
+    },
+    {
+      "version": "20261009212903",
+      "name": "staging_rebuild_0018_stop_legacy_writes"
+    },
+    {
+      "version": "20261010002555",
+      "name": "staging_rebuild_0019_optimistic_concurrency"
+    },
+    {
+      "version": "20261010124332",
+      "name": "staging_rebuild_0020_conflict_preservation_and_immutability"
+    },
+    {
+      "version": "20261010224615",
+      "name": "staging_rebuild_0021_safe_attachment_lifecycle"
+    },
+    {
+      "version": "20261010224628",
+      "name": "staging_rebuild_0022_encrypted_offline_keyrings"
+    },
+    {
+      "version": "20261010224635",
+      "name": "staging_rebuild_0023_idempotent_cloud_receipts"
+    },
+    {
+      "version": "20261010225526",
+      "name": "staging_rebuild_0024_legacy_quarantine_migration"
+    },
+    {
+      "version": "20261010230832",
+      "name": "staging_rebuild_legacy_empty_baseline_20261010"
+    },
+    {
+      "version": "20261011000746",
+      "name": "staging_rebuild_0025_supabase_hardening"
+    },
+    {
+      "version": "20261011000852",
+      "name": "staging_rebuild_0026_e1_performance_indexes"
+    },
+    {
+      "version": "20261011020018",
+      "name": "staging_rebuild_0027_cloud_only_cash_closings"
+    },
+    {
+      "version": "20261011020151",
+      "name": "staging_rebuild_0028_programmer_scoped_org_shares"
+    },
+    {
+      "version": "20261011020208",
+      "name": "staging_rebuild_0029_cloud_live_draft_modules"
+    },
+    {
+      "version": "20261011020214",
+      "name": "staging_rebuild_0030_complete_case_realtime"
+    },
+    {
+      "version": "20261011020329",
+      "name": "staging_rebuild_0031_append_only_retification_cas"
+    },
+    {
+      "version": "20261011020346",
+      "name": "staging_rebuild_0032_finalized_delete_guard"
+    },
+    {
+      "version": "20261011020351",
+      "name": "staging_rebuild_0002_assinaturas_hardening"
+    }
+  ],
+  "remoteHistorySha256": "d19bfd8f4afcb9ba4921de7f407dfea72dbe2e905a78d707b93951e1ba15e6ac",
+  "remoteHistorySerialization": "JSON UTF-8; sorted object keys; compact separators; original array order",
+  "preFixtureEvidence": {
+    "recordedAt": "2026-10-10",
+    "authUsers": 0,
+    "organizations": 0,
+    "patients": 0,
+    "source": "root execute_sql aggregate only; no clinical content",
+    "all15AggregateTargetsZero": true,
+    "postReconnectAuthUsers": 0,
+    "postReconnectOrganizations": 0,
+    "postReconnectPatients": 0,
+    "postReconnectEncounters": 0,
+    "postReconnectLegacyDocuments": 0,
+    "postReconnectLegacyPatients": 0,
+    "pgNetInstalled": true,
+    "runnerClaimsTablePresent": false
+  },
+  "resumeEvidence": {
+    "readProbeSucceeded": true,
+    "target": "yqqrfgbvoexricjdxpis",
+    "migration0019Applied": true,
+    "migration0020Applied": true,
+    "confirmedCatalog": {
+      "versionColumns": 3,
+      "organizationGuards": 13,
+      "versionGuards": 3,
+      "forcedRlsTables": 13
+    },
+    "productionMutated": false,
+    "migration0021Applied": true,
+    "legacyMetadataCapture": {
+      "completedQueries": 19,
+      "plannedQueries": 19,
+      "firstQueryCancelled": true,
+      "completeBaseline": false,
+      "scope": "Both legacy table metadata groups plus schema ACL; not a full production baseline",
+      "capture": "LEGACY-TABLE-CATALOG-2026-10-10.json",
+      "supplement": "LEGACY-TABLE-CATALOG-SUPPLEMENT-2026-10-10.json",
+      "exactBigintSequenceValuesRecapturedAsText": true
+    },
+    "migration0022Applied": true,
+    "migration0023Applied": true,
+    "migration0024Applied": true,
+    "migration0025Applied": true,
+    "securityAdvisorsEvidence": "STAGING-SECURITY-ADVISORS-2026-10-10.json",
+    "migration0026Applied": true,
+    "migration0027Applied": true,
+    "migration0028Applied": true,
+    "migration0029Applied": true,
+    "migration0030Applied": true,
+    "migration0031Applied": true,
+    "migration0032Applied": true
+  },
+  "remoteHistoryVerifiedDate": "2026-10-11",
+  "authorizationStillValid": true,
+  "pauseReason": null,
+  "signatureHardening": {
+    "source": "supabase/migrations/0002_assinaturas_hardening.sql",
+    "sourceSha256": "00e0a39f4f2c20a5f4e4b87b6e5373efc5327bb7a87d8a86bb786882ca35fef2",
+    "migrationName": "staging_rebuild_0002_assinaturas_hardening",
+    "state": "applied_confirmed",
+    "remoteVersion": "20261011020351",
+    "appliedSha256": "00e0a39f4f2c20a5f4e4b87b6e5373efc5327bb7a87d8a86bb786882ca35fef2"
+  },
+  "legacyEmptyBaseline": {
+    "state": "applied_confirmed",
+    "remoteVersion": "20261010230832",
+    "remoteMigrationName": "staging_rebuild_legacy_empty_baseline_20261010",
+    "appliedSha256": "6d8bac0d9a4786e1b158b3ed8cafc7e8f2f05830aed8aa8866a0835787300752",
+    "evidence": "LEGACY-BASELINE-RECONSTRUCTION-2026-10-10.json",
+    "tables": [
+      "public.documentos",
+      "public.pacientes"
+    ],
+    "rowsCopied": 0,
+    "organizationInferred": false,
+    "completeProductionBaseline": false
+  },
+  "mutationScope": "Fixed staging only; hosted fixtures require claims, verified privileges and independent recovery first",
+  "postMigrationCatalogEvidence": {
+    "history_entries": 35,
+    "auth_users": 0,
+    "organizations": 0,
+    "patients": 0,
+    "encounters": 0,
+    "cash_closings_forced_rls": true,
+    "retification_revision_exists": true,
+    "finalized_always_guards": 9,
+    "required_extra_realtime_tables": 3,
+    "signature_view_hardened": true,
+    "anon_signature_select": false,
+    "authenticated_signature_select": false,
+    "manual_share_guard_exists": true
+  },
+  "inlineFailureRecovery": {
+    "reportedError": "0A000 EXECUTE of transaction commands is not implemented",
+    "failedHistoryEntries": 28,
+    "firstMigrationTableAbsentAfterFailure": true,
+    "cause": "The inline extractor depended on exact newline formatting; transaction control reached EXECUTE",
+    "actualPastedLineEndingUnknown": true,
+    "readOnlyPostgresRuntimeVariantsPassed": 4,
+    "formats": [
+      "LF",
+      "CRLF",
+      "CR",
+      "no final newline"
+    ],
+    "resolution": "Native apply_migration of seven unchanged original sources; no re-execution of inline block",
+    "productionMutated": false
+  }
+}

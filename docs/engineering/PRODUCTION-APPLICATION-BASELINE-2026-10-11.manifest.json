@@ -1,0 +1,41 @@
+{
+  "format": 1,
+  "sourceProject": "zbpbrnalamjrcfbscjkt",
+  "sourceCapturedAt": "2026-10-11T12:05:11.333Z",
+  "catalogSha256": "9de18868fc6f60fffaf18e714d4f80db26e17a718b964a4852e6e9da2f363701",
+  "restoreSqlSha256": "7741fca35aa32bd6090432aa1140eb4fb87db40c4f267c9d4e4450de187c3594",
+  "applicationRelations": 37,
+  "tables": 34,
+  "functions": 31,
+  "policies": 100,
+  "triggers": 68,
+  "clinicalRowsCopied": false,
+  "authRowsCopied": false,
+  "storageObjectsCopied": false,
+  "authStorageManagedDDLIncluded": false,
+  "migrationHistoryRewritten": false,
+  "restoreVerified": false,
+  "productionApplyAllowed": false,
+  "target": "disposable Docker-local Supabase PostgreSQL 17 only",
+  "platformDependencies": [
+    "Supabase managed roles",
+    "auth.users + auth.uid()",
+    "managed storage.buckets/objects",
+    "server/extension versions and managed grants from captured catalog; verify separately"
+  ],
+  "excluded": [
+    "patient/clinical/account/Auth records",
+    "user emails/names/identifiers",
+    "Storage object names/paths/content",
+    "secrets/passwords/keys",
+    "extension-member definitions",
+    "platform Auth/Realtime/Storage internals"
+  ],
+  "sourceHistory": [
+    {
+      "name": "assinaturas",
+      "version": "0001",
+      "statement_count": 10
+    }
+  ]
+}

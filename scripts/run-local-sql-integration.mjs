@@ -1,0 +1,918 @@
+import assert from 'node:assert/strict';
+import { assertMigrationBaselineState } from './migration-baseline-gate.mjs';
+import { historicalFixtureEvidence, loadHistoricalUpgradeFixture } from './historical-upgrade-fixture.mjs';
+import { captureSyntheticFixtureCounts, legacyFixtureEvidence, loadLegacyUpgradeFixture, runConcurrentLegacyProvenance } from './legacy-upgrade-fixture.mjs';
+import { spawn } from 'node:child_process';
+import { createHash, randomBytes } from 'node:crypto';
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { catalogCategories, catalogHash, compareCatalogs, validateCatalog } from './compare-application-catalog.mjs';
+
+const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+// CLI 2.119.0 truncates project_id at 40 characters. Keep the entire 96-bit
+// random suffix intact so the config, Docker name and project label agree.
+const PROJECT_PATTERN = /^soft-as-sql-[a-f0-9]{24}$/;
+const CLI_VERSION = '2.119.0';
+const FIXTURES = ['tests/sql/retification-cas-security.sql', 'tests/sql/finalized-delete-security.sql',
+  'tests/sql/reconciled-permissions-security.sql'];
+const hash = value => createHash('sha256').update(value).digest('hex');
+const fail = (message, guard) => {
+  const error = new Error(message);
+  if (guard) error.guard = guard;
+  throw error;
+};
+
+// No inherited database, Docker context or Supabase account can select a target.
+export function assertSafeEnvironment(env) {
+  for (const [key, value] of Object.entries(env)) {
+    if (value && (/^(?:SUPABASE_|PG|DOCKER_)/i.test(key)
+      || /^(?:DB_URL|DATABASE_URL|DB_HOST|DB_PORT|DB_NAME|DB_USER|DB_PASSWORD|POSTGRES_.*)$/i.test(key))) {
+      fail('Ambiente contém configuração de alvo ou credencial proibida.');
+    }
+  }
+}
+
+export function assertLocalDatabaseUrl(raw) {
+  if (typeof raw !== 'string' || !/^(?:postgres|postgresql):\/\/postgres:[^@/?#\s]+@(?:127\.0\.0\.1|localhost|\[::1\]):54322\/postgres$/.test(raw)) {
+    fail('DB_URL da CLI deve apontar exclusivamente para o PostgreSQL local esperado.');
+  }
+  const url = new URL(raw);
+  if (!['postgres:', 'postgresql:'].includes(url.protocol)
+    || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)
+    || url.port !== '54322' || url.pathname !== '/postgres'
+    || url.username !== 'postgres' || !url.password || url.search || url.hash) {
+    fail('DB_URL local inválida.');
+  }
+}
+
+export function assertProjectContainer(inspection, projectId) {
+  if (!PROJECT_PATTERN.test(projectId)) fail('Identidade do projeto efêmero inválida.');
+  const entry = Array.isArray(inspection) && inspection.length === 1 ? inspection[0] : null;
+  const reject = guard => fail('Container PostgreSQL não pertence ao projeto local efêmero esperado.', guard);
+  if (!entry) reject('container-shape');
+  if (entry.Name !== `/supabase_db_${projectId}`) reject('container-name');
+  if (entry.Config?.Labels?.['com.supabase.cli.project'] !== projectId) reject('container-project-label');
+  if (entry.State?.Running !== true) reject('container-running');
+  if (!/^[a-f0-9]{64}$/.test(entry.Id)) reject('container-id');
+  if (!entry.NetworkSettings?.Ports?.['5432/tcp']?.some(binding => binding.HostPort === '54322')) reject('container-port');
+  return entry.Id;
+}
+
+export function assertCommandSuccess(result, label, sql = '') {
+  if (!result || result.code !== 0) {
+    const error = new Error(`Comando local falhou: ${label}.`);
+    // Expose only SQLSTATE and a known RAISE literal from the reviewed source.
+    // Substituted values, status JSON, SQL input, environment and raw logs stay private.
+    const code = result?.stderr?.match(/\bERROR:\s+([0-9A-Z]{5})\b/);
+    if (code) error.sqlState = code[1];
+    const message = result?.stderr?.match(/\bERROR:\s+[0-9A-Z]{5}:\s*([^\r\n]*)/)?.[1];
+    if (message && typeof sql === 'string') {
+      // Only a bounded application identifier that occurs literally in the
+      // reviewed SQL may leave stderr. Never export a detail/context/query.
+      const missingRelation = message.match(/^relation "((?:public|app)\.[a-z_][a-z0-9_]{0,62})" does not exist$/)?.[1];
+      if (error.sqlState === '42P01' && missingRelation
+        && new RegExp(`\\b${missingRelation.replace('.', '\\.')}\\b`).test(sql)) error.missingRelation = missingRelation;
+      const sourceLine = result.stderr.match(/^psql:<stdin>:(\d{1,7}):\s+ERROR:\s+[0-9A-Z]{5}:/m)?.[1];
+      if (sourceLine && Number(sourceLine) >= 1 && Number(sourceLine) <= sql.split('\n').length) error.sourceLine = Number(sourceLine);
+      const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      for (const match of sql.matchAll(/\braise\s+exception\s+'((?:''|[^'])*)'/gi)) {
+        const literal = match[1].replaceAll("''", "'");
+        const pattern = new RegExp(`^${literal.split('%').map(escapeRegex).join('.*')}$`);
+        if (pattern.test(message) && !/(?:[a-z]+:\/\/|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}|eyJ[a-z0-9_-]{20})/i.test(literal)) {
+          error.assertion = literal.replace(/\s+/g, ' ').slice(0, 120);
+          break;
+        }
+      }
+    }
+    throw error;
+  }
+  return result;
+}
+
+export function migrationSqlForEmptyDatabase(path, sql, emptyVerified) {
+  if (path !== 'database/migrations/0026_e1_performance_indexes.sql') return sql;
+  if (emptyVerified !== true) fail('Derivação de índices requer baseline local vazia verificada.');
+  // Only a disposable, initially empty database uses this derivative. Original
+  // source and its recorded SHA are never rewritten; production retains CONCURRENTLY.
+  return sql.replace(/\bcreate index concurrently\b/gi, 'create index');
+}
+
+export async function loadMigrationPlan(repoDir = rootDir) {
+  const manifest = JSON.parse(await readFile(join(repoDir, 'database/migration-baseline.json'), 'utf8'));
+  assertMigrationBaselineState(manifest, { purpose: 'local-sql' });
+  const files = (await readdir(join(repoDir, 'database/migrations')))
+    .filter(name => /^\d{4}_.+\.sql$/.test(name)).sort();
+  assert.equal(files.length, 34, 'executor exige exatamente a baseline 0001–0034');
+  files.forEach((file, i) => assert.equal(file.slice(0, 4), String(i + 1).padStart(4, '0')));
+  const paths = ['supabase/migrations/0001_assinaturas.sql',
+    ...files.slice(0, 33).map(file => `database/migrations/${file}`),
+    'supabase/migrations/0002_assinaturas_hardening.sql',
+    ...files.slice(33).map(file => `database/migrations/${file}`)];
+  const supabaseFiles = (await readdir(join(repoDir, 'supabase/migrations'))).filter(name => name.endsWith('.sql')).sort();
+  assert.deepEqual(supabaseFiles, ['0001_assinaturas.sql', '0002_assinaturas_hardening.sql']);
+  const plan = [];
+  for (const path of paths) {
+    const sql = await readFile(join(repoDir, path), 'utf8');
+    const sha256 = hash(sql);
+    assert.equal(sha256, manifest.files[path], `Fonte SQL divergiu da baseline: ${path}`);
+    plan.push({ path, sql, sha256 });
+  }
+  return plan;
+}
+
+export function isolatedConfig(projectId) {
+  if (!PROJECT_PATTERN.test(projectId)) fail('Identidade do projeto efêmero inválida.');
+  return `project_id = "${projectId}"
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+auto_expose_new_tables = false
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 17
+[db.pooler]
+enabled = false
+[db.migrations]
+enabled = false
+schema_paths = []
+[db.seed]
+enabled = false
+sql_paths = []
+[realtime]
+enabled = true
+[studio]
+enabled = true
+port = 54323
+api_url = "http://127.0.0.1"
+[local_smtp]
+enabled = true
+port = 54324
+[storage]
+enabled = true
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:3000"
+enable_signup = false
+[analytics]
+enabled = false
+[edge_runtime]
+enabled = true
+`;
+}
+
+function openProcess(command, args, { env, cwd, timeoutMs = 120000, input, keepOpen = false } = {}) {
+  const child = spawn(command, args, { env, cwd, stdio: ['pipe', 'pipe', 'pipe'], shell: false });
+  let stdout = ''; let stderr = ''; let size = 0;
+  const waiters = new Set();
+  const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
+  for (const [stream, name] of [[child.stdout, 'stdout'], [child.stderr, 'stderr']]) {
+    stream.setEncoding('utf8');
+    stream.on('data', chunk => {
+      size += Buffer.byteLength(chunk);
+      if (size > 16 * 1024 * 1024) { child.kill('SIGKILL'); return; }
+      if (name === 'stdout') stdout += chunk; else stderr += chunk;
+      for (const waiter of waiters) if (stdout.includes(waiter.marker)) { waiter.resolve(); waiters.delete(waiter); }
+    });
+  }
+  // psql may exit while its peer is still writing. This is a failure, not an
+  // unhandled EPIPE or a reason to downgrade a security assertion.
+  child.stdin.on('error', () => {});
+  const done = new Promise(resolveDone => {
+    let settled = false;
+    const settle = code => {
+      if (settled) return; settled = true; clearTimeout(timer);
+      for (const waiter of waiters) waiter.reject(new Error('Sessão SQL terminou antes da barreira.'));
+      waiters.clear(); resolveDone({ code, stdout, stderr });
+    };
+    child.on('error', () => settle(-1));
+    child.on('close', code => settle(code ?? -1));
+  });
+  if (input) child.stdin.write(input);
+  if (!keepOpen) child.stdin.end();
+  return {
+    done,
+    write: sql => child.stdin.write(sql),
+    end: sql => child.stdin.end(sql),
+    kill: () => child.kill('SIGKILL'),
+    waitFor: marker => stdout.includes(marker) ? Promise.resolve() : new Promise((resolveWait, reject) => {
+      waiters.add({ marker, resolve: resolveWait, reject });
+    })
+  };
+}
+
+async function runProcess(command, args, options) { return openProcess(command, args, options).done; }
+
+const psqlArgs = (containerId, postgresMigration = false) => ['exec', '--user', 'postgres', '-i', containerId, 'psql',
+  '--no-psqlrc', '--host=/var/run/postgresql', '--port=5432', postgresMigration ? '--username=postgres' : '--username=supabase_admin', '--dbname=postgres',
+  '--set=ON_ERROR_STOP=1', '--set=VERBOSITY=verbose', '--quiet', '--tuples-only', '--no-align', '--file=-'];
+
+const MIGRATION_ROLE_GUARD = `do $migration_role_guard$ begin
+ if current_database()<>'postgres' or current_user<>'postgres' or session_user<>'postgres'
+  or current_setting('server_version_num')::integer/10000<>17 then
+  raise exception 'Migration requires the verified local PostgreSQL 17 postgres role'; end if;
+end $migration_role_guard$;`;
+
+const PLATFORM_MIGRATION_CAPABILITIES = `select jsonb_build_object(
+ 'roleVerified',current_user='postgres' and session_user='postgres',
+ 'adminDefaultsAuthorized',pg_has_role(current_user,'supabase_admin','USAGE'),
+ 'extensionSchemaCreateAuthorized',has_schema_privilege(current_user,'extensions','CREATE'),
+ 'extensions',coalesce((select jsonb_agg(jsonb_build_object('name',e.extname,
+  'schema',n.nspname,'owner',pg_get_userbyid(e.extowner),
+  'moveRequired',n.nspname<>'extensions','moveAuthorized',pg_has_role(current_user,e.extowner,'USAGE')) order by e.extname)
+  from pg_extension e join pg_namespace n on n.oid=e.extnamespace
+  where e.extname in ('pgcrypto','unaccent','pg_trgm')),'[]'::jsonb),
+ 'storagePoliciesAuthorized',(select count(*)=2 and bool_and(pg_has_role(current_user,c.relowner,'USAGE'))
+  from pg_class c join pg_namespace n on n.oid=c.relnamespace
+  where n.nspname='storage' and c.relname in ('objects','buckets')),
+ 'realtimePublicationAuthorized',coalesce((select pg_has_role(current_user,pubowner,'USAGE')
+  from pg_publication where pubname='supabase_realtime'),false));`;
+
+// Supabase utility hooks can authorize ALTER EXTENSION without role inheritance.
+// Test precisely the relocation used by 0025; the deliberate exception rolls
+// back every successful ALTER in its own subtransaction before exporting facts.
+export const MANAGED_EXTENSION_RELOCATION_PROBE = `begin;
+set local lock_timeout='5s';
+set local statement_timeout='30s';
+do $extension_probe$
+declare r record; before_state jsonb; after_state jsonb; executed boolean;
+ authorized boolean; results jsonb:='[]'::jsonb;
+begin
+ if current_database()<>'postgres' or current_user<>'postgres' or session_user<>'postgres'
+  or current_setting('server_version_num')::integer/10000<>17 then
+  raise exception 'Extension probe requires the verified application executor'; end if;
+ if (select count(*) from pg_extension where extname in ('pgcrypto','unaccent','pg_trgm'))<>3 then
+  raise exception 'Extension probe requires the complete fixed inventory'; end if;
+ for r in select e.extname,n.nspname from pg_extension e join pg_namespace n on n.oid=e.extnamespace
+  where e.extname in ('pgcrypto','unaccent','pg_trgm') order by e.extname loop
+  select jsonb_build_object('oid',e.oid,'owner',e.extowner,'namespace',e.extnamespace,'version',e.extversion)
+   into before_state from pg_extension e where e.extname=r.extname;
+  executed:=false; authorized:=null;
+  if r.nspname<>'extensions' then
+   begin
+    execute format('alter extension %I set schema extensions',r.extname);
+    executed:=true;
+    raise exception using errcode='PZ001',message='managed_extension_probe_rollback';
+   exception
+    when sqlstate 'PZ001' then
+     if not executed then raise; end if;
+     authorized:=true;
+    when insufficient_privilege then executed:=false; authorized:=false;
+   end;
+  end if;
+  select jsonb_build_object('oid',e.oid,'owner',e.extowner,'namespace',e.extnamespace,'version',e.extversion)
+   into after_state from pg_extension e where e.extname=r.extname;
+  if before_state is distinct from after_state then
+   raise exception 'Extension probe changed persistent extension metadata'; end if;
+  results:=results||jsonb_build_array(jsonb_build_object('name',r.extname,
+   'moveRequired',r.nspname<>'extensions','relocationExecuted',executed,
+   'relocationAuthorized',authorized,'statePreserved',true));
+ end loop;
+ perform set_config('soft_as.extension_probe',results::text,true);
+end $extension_probe$;
+select current_setting('soft_as.extension_probe')::jsonb;
+rollback;
+`;
+
+// Match the operations in 0002/0021 and the Realtime migrations without
+// touching existing policies, bucket rows or published tables. Every operation
+// uses the real postgres connection and is rolled back in a subtransaction.
+export const MANAGED_STORAGE_REALTIME_PROBE = `begin;
+set local lock_timeout='5s';
+set local statement_timeout='30s';
+do $storage_realtime_probe$
+declare before_state jsonb; after_state jsonb; bucket_count bigint;
+ create_ok boolean:=false; alter_ok boolean:=false; drop_ok boolean:=false;
+ insert_ok boolean:=false; table_ok boolean:=false; replica_ok boolean:=false;
+ add_ok boolean:=false; publication_drop_ok boolean:=false;
+ authorized boolean; results jsonb:='{}'::jsonb;
+begin
+ if current_database()<>'postgres' or current_user<>'postgres' or session_user<>'postgres'
+  or current_setting('server_version_num')::integer/10000<>17 then
+  raise exception 'Managed operation probe requires the verified application executor'; end if;
+ if to_regclass('storage.objects') is null or to_regclass('storage.buckets') is null then
+  raise exception 'Managed operation probe requires the fixed Storage inventory'; end if;
+ if exists(select 1 from pg_policy where polrelid='storage.objects'::regclass
+  and polname='soft_as_managed_policy_probe') then
+  raise exception 'Managed policy probe name already exists'; end if;
+ select jsonb_build_object('table',to_jsonb(c),'policies',coalesce((select jsonb_agg(to_jsonb(p) order by p.oid)
+  from pg_policy p where p.polrelid=c.oid),'[]'::jsonb)) into before_state
+  from pg_class c where c.oid='storage.objects'::regclass;
+ authorized:=false;
+ begin
+  create policy soft_as_managed_policy_probe on storage.objects as restrictive for select to public using(false);
+  create_ok:=true;
+  if not exists(select 1 from pg_policy where polrelid='storage.objects'::regclass
+   and polname='soft_as_managed_policy_probe' and not polpermissive and polcmd='r'
+   and pg_get_expr(polqual,polrelid)='false') then
+   raise exception 'Managed restrictive false policy creation was not observed'; end if;
+  alter policy soft_as_managed_policy_probe on storage.objects to public using(false);
+  alter_ok:=true;
+  drop policy soft_as_managed_policy_probe on storage.objects;
+  drop_ok:=true;
+  if exists(select 1 from pg_policy where polrelid='storage.objects'::regclass
+   and polname='soft_as_managed_policy_probe') then
+   raise exception 'Managed policy drop was not observed'; end if;
+  raise exception using errcode='PZ001',message='managed_operation_probe_rollback';
+ exception
+  when sqlstate 'PZ001' then
+   if not(create_ok and alter_ok and drop_ok) then raise; end if;
+   authorized:=true;
+  when insufficient_privilege then authorized:=false;
+ end;
+ select jsonb_build_object('table',to_jsonb(c),'policies',coalesce((select jsonb_agg(to_jsonb(p) order by p.oid)
+  from pg_policy p where p.polrelid=c.oid),'[]'::jsonb)) into after_state
+  from pg_class c where c.oid='storage.objects'::regclass;
+ if before_state is distinct from after_state then
+  raise exception 'Managed policy probe changed owner ACL or policy definitions'; end if;
+ results:=results||jsonb_build_object('storageObjectsPolicy',jsonb_build_object(
+  'createExecuted',create_ok,'alterExecuted',alter_ok,'dropExecuted',drop_ok,
+  'authorized',authorized,'statePreserved',true,'deniedSqlState',case when not authorized then '42501' else null end));
+ if exists(select 1 from storage.buckets where id='soft-as-ci-capability-probe') then
+  raise exception 'Managed bucket probe name already exists'; end if;
+ select count(*) into bucket_count from storage.buckets;
+ select jsonb_build_object('table',to_jsonb(c),'policies',coalesce((select jsonb_agg(to_jsonb(p) order by p.oid)
+  from pg_policy p where p.polrelid=c.oid),'[]'::jsonb)) into before_state
+  from pg_class c where c.oid='storage.buckets'::regclass;
+ authorized:=false;
+ begin
+  insert into storage.buckets(id,name,public)
+   values('soft-as-ci-capability-probe','soft-as-ci-capability-probe',false) on conflict(id) do nothing;
+  insert_ok:=true;
+  if not exists(select 1 from storage.buckets where id='soft-as-ci-capability-probe' and public=false) then
+   raise exception 'Managed private bucket insert was not observed'; end if;
+  raise exception using errcode='PZ001',message='managed_operation_probe_rollback';
+ exception
+  when sqlstate 'PZ001' then
+   if not insert_ok then raise; end if;
+   authorized:=true;
+  when insufficient_privilege then authorized:=false;
+ end;
+ select jsonb_build_object('table',to_jsonb(c),'policies',coalesce((select jsonb_agg(to_jsonb(p) order by p.oid)
+  from pg_policy p where p.polrelid=c.oid),'[]'::jsonb)) into after_state
+  from pg_class c where c.oid='storage.buckets'::regclass;
+ if before_state is distinct from after_state or exists(select 1 from storage.buckets where id='soft-as-ci-capability-probe')
+  or (select count(*) from storage.buckets)<>bucket_count then
+  raise exception 'Managed bucket probe changed metadata or retained a row'; end if;
+ results:=results||jsonb_build_object('storageBucketInsert',jsonb_build_object('insertExecuted',insert_ok,
+  'authorized',authorized,'rowRolledBack',true,'statePreserved',true,
+  'deniedSqlState',case when not authorized then '42501' else null end));
+ if to_regclass('public.soft_as_managed_publication_probe') is not null
+  or not exists(select 1 from pg_publication where pubname='supabase_realtime') then
+  raise exception 'Managed publication probe inventory differs'; end if;
+ select jsonb_build_object('publication',to_jsonb(p),
+  'relations',coalesce((select jsonb_agg(to_jsonb(r) order by r.oid) from pg_publication_rel r
+   where r.prpubid=p.oid),'[]'::jsonb),
+  'namespaces',coalesce((select jsonb_agg(to_jsonb(n) order by n.oid) from pg_publication_namespace n
+   where n.pnpubid=p.oid),'[]'::jsonb)) into before_state
+  from pg_publication p where p.pubname='supabase_realtime';
+ authorized:=false;
+ begin
+  create table public.soft_as_managed_publication_probe(id bigint primary key);
+  table_ok:=true;
+  alter table public.soft_as_managed_publication_probe replica identity full;
+  replica_ok:=true;
+  if not exists(select 1 from pg_class where oid='public.soft_as_managed_publication_probe'::regclass
+   and relreplident='f' and relowner=(select oid from pg_roles where rolname=current_user)) then
+   raise exception 'Managed probe table owner or replica identity differs'; end if;
+  alter publication supabase_realtime add table public.soft_as_managed_publication_probe;
+  add_ok:=true;
+  if not exists(select 1 from pg_publication_rel r join pg_publication p on p.oid=r.prpubid
+   where p.pubname='supabase_realtime' and r.prrelid='public.soft_as_managed_publication_probe'::regclass) then
+   raise exception 'Managed publication table addition was not observed'; end if;
+  alter publication supabase_realtime drop table public.soft_as_managed_publication_probe;
+  publication_drop_ok:=true;
+  if exists(select 1 from pg_publication_rel r join pg_publication p on p.oid=r.prpubid
+   where p.pubname='supabase_realtime' and r.prrelid='public.soft_as_managed_publication_probe'::regclass) then
+   raise exception 'Managed publication table removal was not observed'; end if;
+  raise exception using errcode='PZ001',message='managed_operation_probe_rollback';
+ exception
+  when sqlstate 'PZ001' then
+   if not(table_ok and replica_ok and add_ok and publication_drop_ok) then raise; end if;
+   authorized:=true;
+  when insufficient_privilege then authorized:=false;
+ end;
+ select jsonb_build_object('publication',to_jsonb(p),
+  'relations',coalesce((select jsonb_agg(to_jsonb(r) order by r.oid) from pg_publication_rel r
+   where r.prpubid=p.oid),'[]'::jsonb),
+  'namespaces',coalesce((select jsonb_agg(to_jsonb(n) order by n.oid) from pg_publication_namespace n
+   where n.pnpubid=p.oid),'[]'::jsonb)) into after_state
+  from pg_publication p where p.pubname='supabase_realtime';
+ if before_state is distinct from after_state or to_regclass('public.soft_as_managed_publication_probe') is not null then
+  raise exception 'Managed publication probe changed owner definition or retained a table'; end if;
+ results:=results||jsonb_build_object('realtimePublication',jsonb_build_object('createTableExecuted',table_ok,
+  'replicaIdentityExecuted',replica_ok,'addExecuted',add_ok,'dropExecuted',publication_drop_ok,
+  'authorized',authorized,'statePreserved',true,'deniedSqlState',case when not authorized then '42501' else null end));
+ perform set_config('soft_as.storage_realtime_probe',results::text,true);
+end $storage_realtime_probe$;
+select current_setting('soft_as.storage_realtime_probe')::jsonb;
+rollback;
+`;
+
+export function safePlatformCapabilityDiagnostics(facts) {
+  const owners=['postgres','supabase_admin','supabase_auth_admin','supabase_storage_admin'];
+  const boolean=key=>typeof facts?.[key]==='boolean'?facts[key]:null;
+  const operations={};
+  for(const [name,keys] of Object.entries({storageObjectsPolicy:['createExecuted','alterExecuted','dropExecuted','authorized','statePreserved'],
+    storageBucketInsert:['insertExecuted','authorized','rowRolledBack','statePreserved'],
+    realtimePublication:['createTableExecuted','replicaIdentityExecuted','addExecuted','dropExecuted','authorized','statePreserved']})) {
+    const raw=facts?.managedOperations?.[name];if(!raw||typeof raw!=='object')continue;
+    operations[name]=Object.fromEntries(keys.map(key=>[key,typeof raw[key]==='boolean'?raw[key]:null]));
+    operations[name].deniedSqlState=raw.deniedSqlState==='42501'?'42501':null;
+  }
+  return {roleVerified:boolean('roleVerified'),adminDefaultsAuthorized:boolean('adminDefaultsAuthorized'),
+    extensionSchemaCreateAuthorized:boolean('extensionSchemaCreateAuthorized'),
+    extensions:(Array.isArray(facts?.extensions)?facts.extensions:[])
+      .filter(x=>x&&['pgcrypto','pg_trgm','unaccent'].includes(x.name))
+      .map(x=>({name:x.name,schema:['public','extensions'].includes(x.schema)?x.schema:'unreviewed-schema',
+        owner:owners.includes(x.owner)?x.owner:'unreviewed-role',
+        moveRequired:typeof x.moveRequired==='boolean'?x.moveRequired:null,
+        inheritedOwnerAuthority:typeof x.inheritedOwnerAuthority==='boolean'?x.inheritedOwnerAuthority:
+          (typeof x.moveAuthorized==='boolean'?x.moveAuthorized:null),
+        relocationExecuted:typeof x.relocationExecuted==='boolean'?x.relocationExecuted:null,
+        relocationAuthorized:typeof x.relocationAuthorized==='boolean'?x.relocationAuthorized:null,
+        statePreserved:typeof x.statePreserved==='boolean'?x.statePreserved:null})),
+    storagePolicyInheritedOwnerAuthority:boolean('storagePolicyInheritedOwnerAuthority'),
+    realtimePublicationInheritedOwnerAuthority:boolean('realtimePublicationInheritedOwnerAuthority'),
+    storagePoliciesAuthorized:boolean('storagePoliciesAuthorized'),
+    realtimePublicationAuthorized:boolean('realtimePublicationAuthorized'),managedOperations:operations};
+}
+
+export async function readPlatformMigrationCapabilityDiagnostics(db) {
+  const result=await db.runMigrationAsPostgres(PLATFORM_MIGRATION_CAPABILITIES,'platform extension ownership metadata');
+  let facts;try{facts=JSON.parse(result.stdout.trim());}catch{fail('Platform migration capability response is invalid.');}
+  if(!facts||typeof facts!=='object'||Array.isArray(facts))fail('Platform migration capability response is invalid.');
+  return safePlatformCapabilityDiagnostics(facts);
+}
+
+export async function verifyPlatformMigrationCapabilities(db) {
+  const result=await db.runMigrationAsPostgres(PLATFORM_MIGRATION_CAPABILITIES,'managed platform migration prerequisites');
+  let facts;try{facts=JSON.parse(result.stdout.trim());}catch{fail('Platform migration capability response is invalid.');}
+  if(!facts||typeof facts!=='object'||Array.isArray(facts))fail('Platform migration capability response is invalid.');
+  const denied = prerequisite => {
+    const error=new Error('Required stock platform migration authority is unavailable.');
+    error.platformPrerequisite=prerequisite;
+    error.platformCapabilityDiagnostics=safePlatformCapabilityDiagnostics(facts);throw error;
+  };
+  if(facts.roleVerified!==true)denied('postgres-role');
+  if(typeof facts.adminDefaultsAuthorized!=='boolean')denied('supabase-admin-default-privileges');
+  if(facts.extensionSchemaCreateAuthorized!==true)denied('extension-schema-create');
+  if(!Array.isArray(facts.extensions)||facts.extensions.length!==3
+    ||facts.extensions.some(x=>!x||typeof x!=='object'||!['pgcrypto','unaccent','pg_trgm'].includes(x.name))
+    ||new Set(facts.extensions.map(x=>x.name)).size!==3)denied('required-extension-inventory');
+  if(facts.extensions.some(x=>typeof x.moveRequired!=='boolean'||typeof x.moveAuthorized!=='boolean'))
+    denied('extension-owner');
+  const probe=await db.runMigrationAsPostgres(MANAGED_EXTENSION_RELOCATION_PROBE,'managed extension relocation rollback probe');
+  let relocations;try{relocations=JSON.parse(probe.stdout.trim());}catch{denied('extension-owner');}
+  if(!Array.isArray(relocations)||relocations.length!==3||new Set(relocations.map(x=>x?.name)).size!==3)
+    denied('extension-owner');
+  for(const extension of facts.extensions) {
+    const result=relocations.find(x=>x?.name===extension.name);
+    if(!result||result.moveRequired!==extension.moveRequired||result.statePreserved!==true
+      ||typeof result.relocationExecuted!=='boolean'
+      ||(extension.moveRequired?(result.relocationExecuted!==true||result.relocationAuthorized!==true)
+        :(result.relocationExecuted!==false||result.relocationAuthorized!==null))) {
+      if(result)Object.assign(extension,{relocationExecuted:result.relocationExecuted,
+        relocationAuthorized:result.relocationAuthorized,statePreserved:result.statePreserved});
+      denied('extension-owner');
+    }
+    Object.assign(extension,{relocationExecuted:result.relocationExecuted,
+      relocationAuthorized:result.relocationAuthorized,statePreserved:result.statePreserved});
+  }
+  if(typeof facts.storagePoliciesAuthorized!=='boolean')denied('storage-policy-owner');
+  if(typeof facts.realtimePublicationAuthorized!=='boolean')denied('realtime-publication-owner');
+  facts.storagePolicyInheritedOwnerAuthority=facts.storagePoliciesAuthorized;
+  facts.realtimePublicationInheritedOwnerAuthority=facts.realtimePublicationAuthorized;
+  const managedProbe=await db.runMigrationAsPostgres(MANAGED_STORAGE_REALTIME_PROBE,'managed Storage and Realtime rollback probe');
+  let managed;try{managed=JSON.parse(managedProbe.stdout.trim());}catch{denied('storage-policy-owner');}
+  if(!managed||typeof managed!=='object'||Array.isArray(managed))denied('storage-policy-owner');
+  facts.managedOperations=managed;
+  for(const [name,keys,prerequisite] of [
+    ['storageObjectsPolicy',['createExecuted','alterExecuted','dropExecuted','authorized','statePreserved'],'storage-policy-owner'],
+    ['storageBucketInsert',['insertExecuted','authorized','rowRolledBack','statePreserved'],'storage-policy-owner'],
+    ['realtimePublication',['createTableExecuted','replicaIdentityExecuted','addExecuted','dropExecuted','authorized','statePreserved'],'realtime-publication-owner']]) {
+    if(!managed[name]||typeof managed[name]!=='object'||keys.some(key=>managed[name][key]!==true)
+      ||managed[name].deniedSqlState!==null)denied(prerequisite);
+  }
+  facts.storagePoliciesAuthorized=true;facts.realtimePublicationAuthorized=true;
+  return {verified:true,role:'postgres',adminDefaultsAuthorized:facts.adminDefaultsAuthorized,
+    hostedPostgresAdminDefaultAuthority:false,
+    adminDefaultAuthorityMatchesHosted:!facts.adminDefaultsAuthorized,
+    supplierDefaultsMustRemainUnmodified:true,supplierDefaultPrivilegesPending:true,
+    extensionSchemaCreateAuthorized:true,
+    extensions:safePlatformCapabilityDiagnostics(facts).extensions,extensionAuthorityVerifiedBy:'actual-relocation-rollback',
+    storagePoliciesAuthorized:true,realtimePublicationAuthorized:true,
+    storagePolicyInheritedOwnerAuthority:facts.storagePolicyInheritedOwnerAuthority,
+    realtimePublicationInheritedOwnerAuthority:facts.realtimePublicationInheritedOwnerAuthority,
+    managedOperations:safePlatformCapabilityDiagnostics(facts).managedOperations,
+    managedStorageRealtimeAuthorityVerifiedBy:'actual-operation-rollback',privilegesAdded:false,ownersChanged:false};
+}
+
+export function reconciledPermissionFixtureEvidence(stdout,capabilities) {
+  let raw;try{raw=JSON.parse(stdout.trim());}catch{fail('Permission fixture must return one safe JSON result.');}
+  assert.ok(raw&&typeof raw==='object'&&!Array.isArray(raw));
+  const evidence={};
+  for(const [key,expected] of Object.entries({verified:true,applicationExecutorDefaultPrivilegesClosed:true,
+    supplierDefaultPrivilegesPending:true,supplierPrivilegesAdded:false,supplierOwnersChanged:false})) {
+    assert.equal(raw[key],expected,'Permission fixture criterion failed');evidence[key]=expected;
+  }
+  assert.equal(typeof raw.supplierDefaultPrivilegesClosed,'boolean');
+  const denied=!capabilities.adminDefaultsAuthorized;
+  for(const key of ['managedRoleDeniedAttemptTested','managedRoleDefaultDenied42501','adminDefaultAuthorityMatchesHosted']) {
+    assert.equal(raw[key],denied,'Managed-role denial must reflect actual local authority');evidence[key]=raw[key];
+  }
+  return {...evidence,localSupplierDefaultPrivilegesClosed:raw.supplierDefaultPrivilegesClosed,
+    supplierDefaultPrivilegesClosed:false,supplierDefaultsChangeAuthorized:false,
+    universalDefaultPrivilegesClosureVerified:false,productionApplied:false};
+}
+
+// Validation returns a capability for exactly one Docker-local DB. The CLI's
+// connection string is only checked, never passed to psql or written to disk.
+export function createPsqlExecutor({ status, inspection, projectId, inheritedEnv = {}, env, cwd,
+  execute = runProcess, open = openProcess }) {
+  assertSafeEnvironment(inheritedEnv);
+  if (env?.DOCKER_HOST !== 'unix:///var/run/docker.sock'
+    || Object.keys(env).some(key => /^DOCKER_/i.test(key) && !['DOCKER_HOST', 'DOCKER_CONFIG'].includes(key))) {
+    fail('Executor exige exclusivamente o socket Docker local.');
+  }
+  assertLocalDatabaseUrl(status?.DB_URL);
+  const containerId = assertProjectContainer(inspection, projectId);
+  const validate = async () => {
+    const result = assertCommandSuccess(await execute('docker', ['inspect', '--type', 'container', `supabase_db_${projectId}`], { env, cwd }), 'identidade do container');
+    let current; try { current = JSON.parse(result.stdout); } catch { fail('Inspeção Docker inválida.'); }
+    assert.equal(assertProjectContainer(current, projectId), containerId, 'container foi substituído durante o teste');
+  };
+  return {
+    async run(sql, label) {
+      await validate();
+      return assertCommandSuccess(await execute('docker', psqlArgs(containerId), { env, cwd, input: sql }), label, sql);
+    },
+    async runMigrationAsPostgres(sql, label) {
+      await validate();
+      const args = psqlArgs(containerId, true);
+      // psql processes --command then --file on the same connection, each in
+      // autocommit. Source stdin stays byte-for-byte unchanged, preserving
+      // transaction boundaries, CONCURRENTLY and original source line numbers.
+      args.splice(args.length-1, 0, '--command='+MIGRATION_ROLE_GUARD);
+      return assertCommandSuccess(await execute('docker', args, { env, cwd, input: sql }), label, sql+'\n'+MIGRATION_ROLE_GUARD);
+    },
+    async open(sql) {
+      await validate();
+      return open('docker', psqlArgs(containerId), { env, cwd, input: sql, keepOpen: true, timeoutMs: 45000 });
+    }
+  };
+}
+
+const EMPTY_BASELINE_SQL = `do $verify$
+begin
+  if current_database() is distinct from 'postgres' or current_user is distinct from 'supabase_admin'
+     or current_setting('server_version_num')::integer / 10000 <> 17 then
+    raise exception 'Unexpected local database identity';
+  end if;
+  if (select rolsuper from pg_roles where rolname=current_user) is distinct from true
+     or not exists (select 1 from pg_roles where rolname='authenticated' and not rolsuper and not rolbypassrls)
+     or not exists (select 1 from pg_roles where rolname='postgres') then
+    raise exception 'Stock local admin and authenticated role capabilities unavailable';
+  end if;
+  if exists (select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace
+             where n.nspname='public' and c.relkind in ('r','p','v','m','f','S'))
+     or exists (select 1 from auth.users) then
+    raise exception 'Disposable baseline must be empty';
+  end if;
+end $verify$;
+create schema if not exists extensions;
+create extension if not exists pgcrypto with schema public;
+alter extension pgcrypto set schema public;
+create extension if not exists unaccent with schema public;
+alter extension unaccent set schema public;
+create extension if not exists pg_trgm with schema public;
+alter extension pg_trgm set schema public;
+do $verify$
+begin
+  if to_regprocedure('public.digest(text,text)') is null
+     or to_regprocedure('public.unaccent(regdictionary,text)') is null
+     or to_regprocedure('public.similarity(text,text)') is null then
+    raise exception 'Historical extension schema prerequisites unavailable';
+  end if;
+end $verify$;
+`;
+
+const LEGACY_SCHEMA_PREREQUISITE_PATH='tests/sql/historical-legacy-source-schema.sql';
+const LEGACY_SCHEMA_PREREQUISITE_SHA256='098ae1a2d69bac77f13cd29476a456f25e7adf98ade302296560a880c6a96111';
+const LEGACY_SOURCE_CATALOG_PATH='docs/engineering/PRODUCTION-APPLICATION-CATALOG-2026-10-11.json';
+
+export function legacySourceSchemaCatalogScope(document) {
+  validateCatalog(document);
+  const tables=['documentos','pacientes'], objects=[...tables,'documentos_id_seq'];
+  const scoped=Object.fromEntries(catalogCategories.map(name=>[name,[]]));
+  for(const name of ['relations','sequences'])scoped[name]=document.catalog[name].filter(row=>
+    row.schema==='public'&&objects.includes(row.name));
+  for(const name of ['columns','constraints','indexes','policies','triggers','rules','table_inheritance'])
+    scoped[name]=document.catalog[name].filter(row=>row.schema==='public'&&tables.includes(row.relation));
+  scoped.functions=document.catalog.functions.filter(row=>row.schema==='public'&&row.name==='set_updated_at');
+  scoped.effective_grants=document.catalog.effective_grants.filter(row=>row.schema==='public'&&
+    ((['relation','sequence'].includes(row.kind)&&objects.includes(row.name))||
+     (row.kind==='function'&&row.name==='set_updated_at')));
+  return {...document,catalog:scoped};
+}
+
+export async function loadLegacySourceSchemaPrerequisite(repoDir) {
+  const sql=await readFile(join(repoDir,LEGACY_SCHEMA_PREREQUISITE_PATH),'utf8');
+  assert.equal(hash(sql),LEGACY_SCHEMA_PREREQUISITE_SHA256,'Historical legacy schema fixture hash differs');
+  const source=JSON.parse(await readFile(join(repoDir,LEGACY_SOURCE_CATALOG_PATH),'utf8'));
+  const scope=legacySourceSchemaCatalogScope(source);
+  const expected={relations:3,columns:21,constraints:5,indexes:6,policies:8,triggers:1,functions:1,sequences:1,effective_grants:81};
+  for(const [name,count]of Object.entries(expected))assert.equal(scope.catalog[name].length,count,'Historical legacy source coverage differs');
+  return {path:LEGACY_SCHEMA_PREREQUISITE_PATH,sql,sha256:hash(sql),source:scope,
+    sourceScopeSha256:catalogHash(scope.catalog),counts:expected};
+}
+
+export function verifyLegacySourceSchemaPrerequisite(source,actual) {
+  const comparison=compareCatalogs(legacySourceSchemaCatalogScope(source),legacySourceSchemaCatalogScope(actual));
+  assert.equal(comparison.equal,true,'Historical legacy schema fixture differs from captured production metadata');
+  return {verified:true,sourceScopeSha256:comparison.expectedCatalogSha256,
+    actualScopeSha256:comparison.actualCatalogSha256,metadataDifferenceCount:comparison.changes.length,
+    clinicalRows:0,authRows:0,executionRole:'postgres',sourceMigrationsChanged:false,productionApplied:false};
+}
+
+const RACE_ORG = 'fc220000-0000-4000-8000-000000000001';
+const RACE_PARENT = 'fc330000-0000-4000-8000-000000000001';
+const RACE_USERS = ['fc110000-0000-4000-8000-000000000001', 'fc110000-0000-4000-8000-000000000002'];
+
+function raceWriter(index) {
+  const actor = RACE_USERS[index]; const letter = index === 0 ? 'a' : 'b';
+  return `begin isolation level read committed;
+set local statement_timeout='30s';
+set local lock_timeout='20s';
+set local application_name='soft_anestesia_sql_race_${letter}';
+select set_config('request.jwt.claim.sub','${actor}',true);
+select set_config('request.jwt.claims','{"sub":"${actor}","role":"authenticated"}',true);
+set local role authenticated;
+insert into public.addenda(organization_id,parent_table,parent_id,legacy_id,texto,reason,data)
+values ('${RACE_ORG}','preanesthetic_assessments','${RACE_PARENT}','local-race-${letter}',
+ 'Synthetic concurrent ${letter}','correcao',
+ '{"retificacao":{"schema":1,"baseAdendoId":"","campos":{"alergias":"Synthetic ${letter}"}}}');
+`;
+}
+
+export async function runConcurrentRetification(db) {
+  await db.run(`begin;
+insert into auth.users(id,email) values
+ ('${RACE_USERS[0]}','local-race-a@example.invalid'),('${RACE_USERS[1]}','local-race-b@example.invalid');
+insert into public.organizations(id,nome) values ('${RACE_ORG}','Synthetic concurrent organization');
+insert into public.organization_users(organization_id,user_id,role,ativo) values
+ ('${RACE_ORG}','${RACE_USERS[0]}','gestor',true),('${RACE_ORG}','${RACE_USERS[1]}','gestor',true);
+select set_config('request.jwt.claim.sub','${RACE_USERS[0]}',true);
+select set_config('request.jwt.claims','{"sub":"${RACE_USERS[0]}","role":"authenticated"}',true);
+set local role authenticated;
+insert into public.preanesthetic_assessments(id,organization_id,legacy_id,status,data)
+values ('${RACE_PARENT}','${RACE_ORG}','local-race-parent','finalized',
+ '{"nome":"Synthetic concurrent original","_finalizado":true}');
+commit;
+`, 'setup sintético da concorrência');
+  const before = await db.run(`select jsonb_build_object('parent',to_jsonb(p),'audit',
+ (select coalesce(jsonb_agg(to_jsonb(a) order by a.id),'[]'::jsonb) from public.audit_logs a where a.record_id=p.id))
+ from public.preanesthetic_assessments p where p.id='${RACE_PARENT}';`, 'snapshot do original');
+  let snapshot; try { snapshot = JSON.parse(before.stdout.trim()); } catch { fail('Snapshot do original ausente.'); }
+  if (!snapshot?.parent?.finalized_at || !Array.isArray(snapshot.audit) || snapshot.audit.length !== 1) fail('Original finalizado ou auditoria inicial ausente.');
+  let a; let b;
+  try {
+    a = await db.open(`${raceWriter(0)}\\echo LOCAL_SQL_RACE_A_HELD\n`);
+    await a.waitFor('LOCAL_SQL_RACE_A_HELD');
+    b = await db.open(`${raceWriter(1)}commit;\n\\q\n`);
+    b.end();
+    // The authenticated INSERT already exercised RLS. Restore the stock local
+    // admin only for lock observation; no authenticated ACL is widened.
+    const barrierSql = `reset role;
+do $barrier$
+declare observed boolean := false;
+begin
+  for attempt in 1..200 loop
+    -- PostgreSQL snapshots backend activity on first access in a transaction.
+    -- Refresh it so a newly started writer B can be observed on later polls.
+    perform pg_stat_clear_snapshot();
+    select exists (
+      select 1 from pg_locks waiting
+      join pg_locks held on held.locktype=waiting.locktype
+       and held.database is not distinct from waiting.database
+       and held.classid=waiting.classid and held.objid=waiting.objid and held.objsubid=waiting.objsubid
+      join pg_stat_activity activity on activity.pid=waiting.pid
+      where waiting.locktype='advisory' and not waiting.granted and held.granted
+       and held.pid=pg_backend_pid() and activity.application_name='soft_anestesia_sql_race_b'
+    ) into observed;
+    exit when observed;
+    perform pg_sleep(0.05);
+  end loop;
+  if observed is distinct from true then raise exception 'Concurrent writer never waited on the held advisory lock'; end if;
+end $barrier$;
+\\echo LOCAL_SQL_RACE_OVERLAP
+commit;
+\\q
+`;
+    a.end(barrierSql);
+    const [resultA, resultB] = await Promise.all([a.done, b.done]);
+    // If B failed before waiting, retain that SQLSTATE instead of reporting
+    // only the consequent observer timeout in A.
+    assertCommandSuccess(resultB, 'sessão concorrente B', raceWriter(1));
+    assertCommandSuccess(resultA, 'sessão concorrente A', barrierSql);
+    if (!resultA.stdout.includes('LOCAL_SQL_RACE_OVERLAP')) fail('Barreira de concorrência não foi observada.');
+  } finally {
+    a?.kill(); b?.kill();
+    await Promise.allSettled([a?.done, b?.done].filter(Boolean));
+  }
+  const after = await db.run(`select jsonb_build_object('parent',to_jsonb(p),'audit',
+ (select coalesce(jsonb_agg(to_jsonb(a) order by a.id),'[]'::jsonb) from public.audit_logs a where a.record_id=p.id),
+ 'addenda',(select jsonb_agg(to_jsonb(a) order by a.legacy_id) from public.addenda a where a.parent_id=p.id),
+ 'addendaAudit',(select jsonb_agg(to_jsonb(l) order by l.record_id) from public.audit_logs l
+  where l.record_id in (select id from public.addenda where parent_id=p.id)))
+ from public.preanesthetic_assessments p where p.id='${RACE_PARENT}';`, 'invariantes após concorrência');
+  let result; try { result = JSON.parse(after.stdout.trim()); } catch { fail('Resultado da concorrência ausente.'); }
+  assert.deepEqual(result.parent, snapshot.parent, 'original finalizado foi alterado');
+  assert.deepEqual(result.audit, snapshot.audit, 'auditoria do original foi alterada');
+  assert.equal(result.addenda?.length, 2, 'ambas as propostas devem ser preservadas');
+  assert.equal(result.addendaAudit?.length, 2, 'ambas as propostas exigem auditoria');
+  const accepted = result.addenda.filter(row => row.data?.retificacao?.status === 'accepted');
+  const conflict = result.addenda.filter(row => row.data?.retificacao?.status === 'conflict');
+  assert.equal(accepted.length, 1); assert.equal(conflict.length, 1);
+  assert.equal(accepted[0].retification_revision, 1);
+  assert.equal(accepted[0].data.retificacao.baseAdendoId, '');
+  assert.equal(conflict[0].retification_revision, null);
+  assert.equal(conflict[0].data.retificacao.baseAtualId, accepted[0].legacy_id);
+  assert.equal(conflict[0].data.retificacao.baseAdendoId, '');
+  for (let i = 0; i < 2; i++) {
+    const row = result.addenda[i]; const letter = i === 0 ? 'a' : 'b';
+    assert.equal(row.legacy_id, `local-race-${letter}`);
+    assert.equal(row.author_id, RACE_USERS[i]);
+    assert.equal(row.parent_id, RACE_PARENT); assert.equal(row.organization_id, RACE_ORG);
+    assert.equal(row.data.retificacao.campos.alergias, `Synthetic ${letter}`);
+    const audit = result.addendaAudit.find(entry => entry.record_id === row.id);
+    assert.ok(audit); assert.equal(audit.action, 'insert'); assert.equal(audit.user_id, row.author_id);
+    assert.deepEqual(audit.new_value, row, 'auditoria deve preservar a proposta inteira');
+  }
+  return { accepted: 1, conflict: 1, blockedSessions: 1 };
+}
+
+export async function runLocalSqlIntegration({ repoDir = rootDir, inheritedEnv = process.env, execute = runProcess } = {}) {
+  assertSafeEnvironment(inheritedEnv);
+  const plan = await loadMigrationPlan(repoDir);
+  const historicalFixture=await loadHistoricalUpgradeFixture(repoDir);
+  const legacySourceSchema=await loadLegacySourceSchemaPrerequisite(repoDir);
+  const legacyFixture=await loadLegacyUpgradeFixture(repoDir);
+  const fixtures = [];
+  for (const path of FIXTURES) {
+    const sql = await readFile(join(repoDir, path), 'utf8');
+    if (!/^begin\b/im.test(sql) || !/\brollback;\s*$/i.test(sql)) fail('Fixture SQL deve usar transação com ROLLBACK.');
+    fixtures.push({ path, sql, sha256: hash(sql) });
+  }
+  const cli = join(repoDir, 'node_modules/.bin/supabase');
+  await access(cli);
+  const workdir = await mkdtemp(join(tmpdir(), 'soft-anestesia-sql-'));
+  const projectId = `soft-as-sql-${randomBytes(12).toString('hex')}`;
+  const env = { PATH: inheritedEnv.PATH, HOME: inheritedEnv.HOME, TMPDIR: workdir, LANG: 'C.UTF-8',
+    DOCKER_HOST: 'unix:///var/run/docker.sock', DOCKER_CONFIG: join(workdir, 'docker-config'),
+    SUPABASE_HOME: join(workdir, 'supabase-home'),
+    SUPABASE_SKIP_UPDATE_CHECK: 'true', SUPABASE_TELEMETRY_DISABLED: 'true' };
+  const evidence = {
+    schema: 1,
+    hashes: Object.fromEntries([...plan, ...fixtures,historicalFixture,legacyFixture,legacyFixture.race].map(entry => [entry.path, entry.sha256])),
+    tests: [],
+    counters: { migrations: 0, fixtures: 0, accepted: 0, conflict: 0, blockedSessions: 0 },
+    localSqlVerified: false, stagingVerified: false, realAuthApiVerified: false, productionVerified: false
+  };
+  let startAttempted = false; let failure; let stage = 'prepare-local-project';
+  const checked = async (command, args, label, options = {}) => {
+    stage = label;
+    return assertCommandSuccess(await execute(command, args, { env, cwd: workdir, ...options }), label);
+  };
+  try {
+    await mkdir(join(workdir, 'supabase'));
+    await mkdir(env.DOCKER_CONFIG);
+    await mkdir(env.SUPABASE_HOME, { mode: 0o700 });
+    await writeFile(join(workdir, 'supabase/config.toml'), isolatedConfig(projectId), { mode: 0o600 });
+    const version = await checked(cli, ['--version'], 'versão da CLI');
+    assert.equal(version.stdout.trim(), CLI_VERSION, 'CLI deve usar a versão fixada no lockfile');
+    const top = await checked(cli, ['--help'], 'help da CLI');
+    if (!top.stdout.includes('--workdir')) fail('CLI não documentou isolamento por workdir.');
+    const help = {};
+    for (const command of ['start', 'status', 'stop']) help[command] = (await checked(cli, [command, '--help'], `help de ${command}`)).stdout;
+    if (!(help.status.includes('--output') || top.stdout.includes('--output')) || !help.stop.includes('--no-backup')) fail('CLI não documentou flags locais necessárias.');
+    await checked('docker', ['info', '--format', '{{.ServerVersion}}'], 'Docker local');
+    startAttempted = true;
+    await checked(cli, ['start', '--workdir', workdir], 'inicialização do Supabase local', { timeoutMs: 12 * 60 * 1000 });
+    const raw = await checked(cli, ['status', '--workdir', workdir, '--output', 'json'], 'status local');
+    let status; try { status = JSON.parse(raw.stdout); } catch { fail('Status JSON da CLI inválido.'); }
+    assertLocalDatabaseUrl(status.DB_URL);
+    const inspected = await checked('docker', ['inspect', '--type', 'container', `supabase_db_${projectId}`], 'identidade PostgreSQL');
+    let inspection; try { inspection = JSON.parse(inspected.stdout); } catch { fail('Inspeção Docker inválida.'); }
+    const db = createPsqlExecutor({ status, inspection, projectId, inheritedEnv, env, cwd: workdir, execute });
+    stage = 'empty-local-baseline-and-extension-schemas';
+    await db.run(EMPTY_BASELINE_SQL, stage);
+    evidence.tests.push({ name: 'empty-local-baseline-and-extension-schemas', passed: true });
+    stage='managed-platform-migration-capabilities';
+    evidence.platformMigrationCapabilities=await verifyPlatformMigrationCapabilities(db);
+    stage='historical-legacy-source-schema-prerequisite';
+    await db.runMigrationAsPostgres(legacySourceSchema.sql,stage);
+    // The CLI has migrations disabled and can omit its metadata table. This
+    // empty local prerequisite only enables the shared catalog query; it never
+    // inserts/repairs migration rows or claims a production baseline history.
+    await db.run(`create schema if not exists supabase_migrations;
+create table if not exists supabase_migrations.schema_migrations(version text primary key,statements text[],name text);
+do $empty_history$ begin
+ if exists(select 1 from supabase_migrations.schema_migrations) then
+  raise exception 'Empty integration requires zero formal migration history rows'; end if;
+end $empty_history$;`,'empty local migration metadata fixture');
+    const catalogSql=await readFile(join(repoDir,'scripts/capture-application-catalog.sql'),'utf8');
+    const legacyCatalog=await db.run(`begin read only;\n${catalogSql}\ncommit;`,'historical legacy schema metadata verification');
+    const actualLegacyCatalog={format:1,kind:'supabase_application_catalog',projectRef:'local-disposable',
+      capturedAt:new Date().toISOString(),dataIncluded:false,secretValuesIncluded:false,catalog:JSON.parse(legacyCatalog.stdout.trim())};
+    evidence.legacySourceSchemaPrerequisite={...verifyLegacySourceSchemaPrerequisite(legacySourceSchema.source,actualLegacyCatalog),
+      fixturePath:legacySourceSchema.path,fixtureSha256:legacySourceSchema.sha256,counts:legacySourceSchema.counts};
+    evidence.tests.push({name:stage,passed:true});
+    for (const entry of plan) {
+      if(entry.path.startsWith('database/migrations/0018_')) {
+        stage='historical-upgrade-seed';
+        await db.run(historicalFixture.seed.sql,'synthetic historical pre0018 seed');
+      }
+      if(entry.path.startsWith('database/migrations/0034_')) {
+        stage='historical-upgrade-preservation';
+        const historicalResult=await db.run(historicalFixture.verify.sql,'synthetic historical upgrade verification');
+        evidence.historicalUpgrade=historicalFixtureEvidence(historicalResult.stdout,historicalFixture);
+        evidence.tests.push({name:stage,passed:true});
+        stage='legacy-provenance-seed';
+        await db.run(legacyFixture.seed.sql,'synthetic legacy pre0034 seed');
+      }
+      stage = entry.path;
+      await db.runMigrationAsPostgres(`set search_path=public,extensions;\n${migrationSqlForEmptyDatabase(entry.path, entry.sql, true)}`, entry.path);
+      evidence.counters.migrations++;
+    }
+    stage = 'hardened-extension-schemas';
+    await db.run(`do $verify$ begin
+      if (select count(*) from pg_extension e join pg_namespace n on n.oid=e.extnamespace
+          where e.extname in ('pgcrypto','unaccent','pg_trgm') and n.nspname='extensions') <> 3 then
+        raise exception 'Hardened extension schemas were not preserved';
+      end if;
+    end $verify$;`, 'schemas finais das extensões');
+    evidence.tests.push({ name: 'ordered-migrations-0001-through-0034-and-signature-hardening', passed: true });
+    evidence.migrationExecutionRole = 'postgres'; evidence.migrationRoleGuardVerified = true;
+    assert.equal(evidence.historicalUpgrade?.verified,true,'Historical upgrade must be verified before the additive legacy seed');
+    stage='legacy-provenance-preservation';
+    const legacyResult=await db.run(legacyFixture.verify.sql,'synthetic legacy upgrade verification');
+    evidence.legacyProvenance=legacyFixtureEvidence(legacyResult.stdout,legacyFixture);
+    evidence.tests.push({name:stage,passed:true});
+    stage='synthetic-fixture-counts';
+    evidence.beforeTransactionFixtureCounts=await captureSyntheticFixtureCounts(db);
+    for (const fixture of fixtures) {
+      stage = fixture.path;
+      const result=await db.run(fixture.sql, fixture.path);
+      if(fixture.path==='tests/sql/reconciled-permissions-security.sql')
+        evidence.reconciledPermissions=reconciledPermissionFixtureEvidence(result.stdout,evidence.platformMigrationCapabilities);
+      evidence.counters.fixtures++;
+      evidence.tests.push({ name: fixture.path, passed: true });
+    }
+    stage = 'two-session-retification-cas-observed-advisory-lock';
+    Object.assign(evidence.counters, await runConcurrentRetification(db));
+    evidence.tests.push({ name: 'two-session-retification-cas-observed-advisory-lock', passed: true });
+    stage='legacy-three-pair-observed-advisory-locks';
+    evidence.legacyConcurrency=await runConcurrentLegacyProvenance(db,legacyFixture,assertCommandSuccess);
+    evidence.tests.push({name:stage,passed:true});
+    evidence.localSqlVerified = true;
+  } catch (error) {
+    const sqlState = /^[0-9A-Z]{5}$/.test(error.sqlState ?? '') ? ` (SQLSTATE ${error.sqlState})` : '';
+    const assertion = error.assertion ? ` [${error.assertion}]` : '';
+    const guard = ['container-shape','container-name','container-project-label','container-running','container-id','container-port'].includes(error.guard) ? error.guard : undefined;
+    const platformPrerequisite=['postgres-role','supabase-admin-default-privileges','extension-schema-create',
+      'required-extension-inventory','extension-owner','storage-policy-owner','realtime-publication-owner'].includes(error.platformPrerequisite)
+      ? error.platformPrerequisite : undefined;
+    if(error.platformCapabilityDiagnostics)
+      evidence.platformMigrationCapabilityDiagnostics=safePlatformCapabilityDiagnostics(error.platformCapabilityDiagnostics);
+    failure = new Error(`Integração SQL local falhou em ${stage}${sqlState}${assertion}${guard ? ` [${guard}]` : ''}${platformPrerequisite ? ` [${platformPrerequisite}]` : ''}; nenhuma verificação remota foi declarada.`);
+    evidence.tests.push({ name: stage, passed: false, ...(guard ? { guard } : {}),...(platformPrerequisite?{platformPrerequisite}:{}) });
+  } finally {
+    if (startAttempted) {
+      try {
+        await checked(cli, ['stop', '--workdir', workdir, '--no-backup'], 'limpeza exclusiva do projeto efêmero', { timeoutMs: 90000 });
+        evidence.tests.push({ name: 'ephemeral-project-cleanup', passed: true });
+      } catch {
+        evidence.localSqlVerified = false;
+        evidence.tests.push({ name: 'ephemeral-project-cleanup', passed: false });
+        failure = new Error('Limpeza do projeto SQL efêmero falhou.');
+      }
+    }
+    await rm(workdir, { recursive: true, force: true });
+    await mkdir(join(repoDir, 'artifacts'), { recursive: true });
+    await writeFile(join(repoDir, 'artifacts/local-sql-integration-evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`, { mode: 0o600 });
+  }
+  if (failure) throw failure;
+  return evidence;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  if (process.argv.length !== 2) fail('Executor local não aceita argumentos ou configuração de alvo.');
+  runLocalSqlIntegration().then(evidence => {
+    console.log(`✓ SQL local: ${evidence.counters.migrations} migrações, ${evidence.counters.fixtures} fixtures e concorrência 1 accepted / 1 conflict.`);
+  }).catch(error => { console.error(error.message); process.exitCode = 1; });
+}

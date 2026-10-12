@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "target": "yqqrfgbvoexricjdxpis",
+  "runId": "ced3e490-8266-4954-9454-19effae496a4",
+  "executedAt": "2026-10-11T17:16:24Z",
+  "transport": "pg_net real HTTPS to deployed Edge function without Auth bearer",
+  "syntheticOnly": true,
+  "productionAccessed": false,
+  "syntheticEvidenceRetained": true,
+  "entrypointSha256": "8a45944a3a6442bac22fbff4cb3b6cd52781ec09f2ff12253542a7eb1987f988",
+  "handlerSha256": "18465aa99e0bdadc1e5c14c627e2c656255db41d8b2c41f38d004aa03b01731f",
+  "checks": [
+    {
+      "name": "code_positive",
+      "httpStatus": 200,
+      "passed": true,
+      "responseExposedOnlyApprovedFields": true
+    },
+    {
+      "name": "hash_positive",
+      "httpStatus": 200,
+      "passed": true,
+      "responseExposedOnlyApprovedFields": true
+    },
+    {
+      "name": "bad_proof_rejected",
+      "httpStatus": 400,
+      "passed": true,
+      "responseExposedOnlyApprovedFields": true
+    },
+    {
+      "name": "missing_proof",
+      "httpStatus": 200,
+      "passed": true,
+      "responseExposedOnlyApprovedFields": true
+    }
+  ],
+  "passed": 4,
+  "failed": 0,
+  "digitalCertificateValidated": false
+}

@@ -6,10 +6,14 @@ relacional (organizações, perfis, pacientes, encounters, tabelas clínicas com
 versão/status/finalização, linha do tempo, auditoria, anexos), com **RLS por
 papel/organização**, triggers e Realtime.
 
-> As migrações são **aditivas, idempotentes e não-destrutivas**. Não apagam nem
-> alteram a tabela legada `documentos` (a sincronização atual do app continua
-> funcionando durante a transição). **Nenhum dado é migrado por estes scripts** —
-> a migração dos JSON atuais será uma etapa posterior, testada à parte.
+> As migrações são **aditivas, idempotentes e não-destrutivas**. A `0018` não
+> apaga nem move a tabela legada `documentos`: apenas congela o acesso direto do
+> app. A `0024` acrescenta o fluxo controlado para inventariar, classificar,
+> copiar, validar e reverter o acervo, sempre pelo programador. A origem
+> permanece intacta e nenhuma linha recebe clínica por inferência. A `0027`
+> acrescenta o fechamento de caixa relacional e completa a publicação
+> Realtime; nenhum desses arquivos deve ser aplicado fora de homologação sem
+> o portão técnico correspondente.
 
 ## Como aplicar
 
@@ -18,7 +22,7 @@ No painel do Supabase → **SQL Editor**, rode nesta ordem:
 1. `migrations/0001_foundation.sql` — tabelas, funções, triggers, RLS.
 2. `migrations/0002_storage_realtime.sql` — bucket privado de anexos + Realtime.
 3. **Seed inicial** (abaixo) — cria sua organização e te vincula como `gestor`.
-4. `migrations/0003` … `0014` — na ordem do número.
+4. `migrations/0003` … `0027` — na ordem do número.
 5. `seeds/cbhpm_2022.sql` — carrega os códigos da CBHPM 2022 (depois da 0013).
 6. Base de medicamentos (depois da 0014) — pelo importador, não por seed:
    veja "Carregar e atualizar a base da Anvisa" no fim deste arquivo.
@@ -102,15 +106,21 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
 - **Segurança:** RLS em todas as tabelas + funções `app.org_ids()`,
   `app.has_role()`, `app.can_read_clinical()`, `app.can_write_clinical()`.
 - **Storage:** bucket privado `clinical-attachments` com policies por org.
-- **Realtime:** publicação nas tabelas de edição ao vivo.
+- **Realtime:** publicação de todas as tabelas gerenciadas, incluindo
+  pacientes, agenda, documentos, orçamentos, caixa, adendos, rascunhos e
+  conflitos.
 
 ## Roadmap (próximas fases — feitas no app, sem quebrar o atual)
 
-- **Fase 2 — Camada de serviços + sync honesto:** um serviço central
-  (`services/db`, `services/sync`) torna o Supabase a fonte; localStorage vira
-  cache/fila. Status reais (Salvando / Salvo localmente / Sincronizando /
-  Sincronizado / Offline / Pendente / Erro / Conflito). Fila idempotente com
-  `operation_id` (UUID) + `base_version` + `retry_count`.
+- **Fase 2 — Camada de serviços + sync honesto:** ✅ o motor cloud-first usa o
+  Supabase como destino primário e mantém uma WAL transacional no IndexedDB,
+  cifrada por clínica/usuário/dispositivo. Cada envio carrega UUID, checksum e
+  versão-base; a `0023` grava o recibo na própria linha para que resposta
+  perdida possa ser repetida sem duplicação nem conflito falso. A operação só
+  sai do aparelho depois da confirmação verificável do servidor. Rascunhos e
+  edição ainda não salva usam snapshots AES-GCM no mesmo cofre, nunca texto
+  clínico em `localStorage`; restaurar da lixeira também entra no WAL e desfaz
+  o soft-delete com compare-and-swap antes de confirmar sucesso.
 - **Fase 3 — Auth unificada (em andamento):** ✅ o login já é único (Supabase
   Auth, com fallback local offline) e, ao entrar, o app **puxa o papel do
   servidor** (`organization_users.role` + `profiles`) e deriva as permissões da
@@ -136,6 +146,15 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   **idempotente** (`legacy_id`) e **aditiva**. Sempre há **pré-visualização**
   (dry-run) antes de qualquer escrita. Próximo: relatório persistido e
   reconciliação de anexos no Storage.
+- **B2 — acervo pessoal legado:** ✅ a `0024` cria uma quarentena operacional
+  cujo inventário não duplica JSON clínico: conta/módulo/data/tamanho/SHA-256,
+  classificação manual exclusiva do programador (clínica sem valor padrão e
+  justificativa obrigatória), cópia idempotente sem sobrescrever destino
+  divergente, validação de hash/organização/vínculos e janela de reversão por
+  soft-delete. A tabela `documentos` nunca é alterada ou apagada. Módulos sem
+  destino, fonte alterada/ausente e colisões permanecem bloqueados. A tela do
+  Programador retorna somente metadados e contagens; nenhum prontuário aparece
+  no relatório.
 - **Fase 6 — Módulos lendo/gravando do relacional:** ✅ **Pacientes**, ✅ **Agenda**
   e ✅ **todos os módulos de registro** (pré, consulta, ficha de anestesia,
   recuperação, risco, termo, receituário, documentos, financeiro, orçamento) já
@@ -145,34 +164,59 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   identidade da migração (idempotente, atualiza as linhas migradas). Pull
   automático 1×/sessão ao abrir cada módulo. Detecção de conflito (Fase 5) em
   todos, com diálogo genérico. Cache de ids na sessão evita GETs repetidos.
-  localStorage segue como cache/offline.
-- **Fase 5 — Conflitos + Realtime:** ✅ concorrência otimista em todos os
-  módulos — ao salvar, o app confere se a linha mudou na nuvem (`updated_at`)
-  desde que foi carregada; se mudou, abre resolução de conflito (comparar *meu*
-  × *nuvem*, manter/usar/adiar) em vez de sobrescrever cego. ✅ **Tempo real
-  (beta, opt-in)** via Supabase Realtime: escuta mudanças no banco e atualiza o
-  módulo aberto; best-effort/silent-fail, com status visível no Diagnóstico.
-- **Anexos no Storage:** ✅ os anexos já sobem ao Storage; agora seus **metadados
-  são registrados na tabela `attachments`** (idempotente por `storage_path`,
-  índice em `0004_attachments_index.sql`), vinculados a paciente/encounter.
+  registros confirmados ficam somente na nuvem e na memória isolada da aba;
+  não permanecem como cache clínico durável. Novas operações pendentes usam
+  exclusivamente o diário cifrado. As filas antigas são
+  convertidas de forma idempotente para o cofre, por usuário/clínica/aparelho,
+  e cada entrada original só sai depois que a cópia cifrada fica durável.
+  Reconnect respeita a ordem paciente → agenda/registro clínico → financeiro →
+  exclusão, encadeia versões do mesmo registro e bloqueia dependentes quando
+  paciente ou atendimento não foram confirmados. O cartão da nuvem mostra
+  quantidade, idade, tentativas, erros e última confirmação sem expor dados do
+  prontuário.
+- **Fase 5 — Conflitos + Realtime:** ✅ concorrência otimista atômica em todos
+  os módulos — cada `PATCH` exige a `version` que o aparelho abriu, no mesmo
+  comando que grava; se outra pessoa já avançou essa versão, zero linhas são
+  alteradas e abre-se a resolução (comparar *meu* × *nuvem*, manter/usar/adiar)
+  em vez de sobrescrever. A `0020` preserva os dois lados primeiro no aparelho
+  e depois em `sync_conflicts`, inclusive quando a decisão fica para mais
+  tarde. Rascunhos também usam versão atômica; edição simultânea cria uma aba
+  preservada em vez de descartar digitação. O banco incrementa `version`,
+  carimba `updated_by` e impede mudar `organization_id`. No aparelho, a fila
+  de conflitos fica no IndexedDB com chave por organização e é removida junto
+  com a gaveta anterior em computador compartilhado. ✅ **Tempo real
+  obrigatório** via Supabase Realtime: o cliente primário conecta
+  automaticamente depois da confirmação de usuário + clínica, reconecta no
+  retorno da rede e mantém o ciclo incremental como rede de segurança. O
+  Diagnóstico mostra o estado do canal; o ouvinte beta antigo permanece apenas
+  como compatibilidade para instalações que já o tinham ativado.
+- **Anexos no Storage:** ✅ o binário sobe antes do registro, com identidade e
+  hash estáveis; retentativas convergem para o mesmo caminho. A cópia offline
+  só sai depois do recibo atômico da linha pai, e remover no formulário apenas
+  desfaz o vínculo — não destrói um objeto que outro editor ainda usa. A `0021`
+  valida organização + autor no caminho, carimba os metadados no servidor,
+  inclui comprovantes financeiros/PDFs automáticos e revoga exclusão física no
+  navegador. A fila de PDFs do IndexedDB também é isolada por clínica/usuário.
 - **Diagnóstico da nuvem:** ✅ tela em Ajustes compara, tabela a tabela, o que
   está no aparelho × no banco relacional, com fila pendente, última sync e
   saúde da conexão.
 - **Segurança do login (Ajustes → Usuários e segurança):** ✅ bloqueio de tela
-  por inatividade **configurável** (2/5/10/15/30 min ou *Nunca*, padrão 5),
+  por inatividade **obrigatório e configurável** (2/5/10/15/30 min, padrão 5),
   botão **Bloquear agora** e **anti-força-bruta**: após 5 senhas erradas o
-  login trava por 30 s (nos dois fluxos — nuvem e local). Tudo no aparelho, sem
-  SQL novo.
+  login trava por 30 s. Token Supabase e sessão da interface vivem somente na
+  aba; não existe restauração local “1× por dia”.
 - **Auditoria (Ajustes → Registro de auditoria):** ✅ tela read-only lê a
   `audit_logs` (populada pelos triggers) e mostra **quem** criou/editou/
   finalizou/excluiu **o quê** e **quando**, com filtro por módulo. Gestor vê a
   organização inteira; os demais veem os próprios eventos (RLS `audit_sel`).
   Não requer SQL novo — a tabela já vem da fundação.
 - **Adendos / correções (medicina-legal):** ✅ correções após finalizar vão para
-  a tabela `addenda` (append-only, idempotente por `legacy_id` — `0005`), sem
-  alterar o registro original. Datadas e assinadas, aparecem na ficha e no PDF,
-  e ficam locais (`_adendos`) para offline. Piloto na ficha de anestesia
-  (`adendos.*`); o helper já suporta pré/consulta/recuperação/risco.
+  a tabela `addenda` (append-only, idempotente por `legacy_id`), sem alterar o
+  registro original. Autor e horário canônicos vêm do servidor; adendos
+  aparecem na ficha/PDF e, quando não há rede, ficam no mesmo WAL cifrado e
+  isolado por clínica/usuário/dispositivo. A cópia em claro sai assim que o
+  cofre confirma a operação. A proteção vale para todos os módulos clínicos
+  finalizáveis.
 - **Linha do tempo unificada (visão):** ✅ botão na ficha de anestesia mostra
   sinais vitais + medicações + eventos + fluidos numa **única lista
   cronológica** (revisão do caso). Lê os dados que já estão na ficha — não muda
@@ -250,9 +294,11 @@ values ('<ORG_ID>', '<USER_ID_DA_BETE>', 'auxiliar', true);
   resumo por data (padrão hoje): **recebido no dia** (por data de
   pagamento/recebimento), **realizado** (por data do procedimento), **glosa** e
   **a receber**, com quebra por **forma de pagamento** e por **convênio**.
-  Permite **salvar um snapshot** persistente (um por data, com observação e quem
-  fechou) e lista os fechamentos anteriores. Entra no backup completo
-  (`fin_fechamentos`). Conciliação por código TUSS, status por lançamento,
+  Permite **salvar um snapshot** por data, com observação e quem fechou, e lista
+  os fechamentos anteriores. A `0027` o leva a `cash_closings`, com RLS por
+  clínica, versão atômica, recibo idempotente, auditoria, soft-delete e
+  Realtime; dois fechamentos concorrentes preservam conflito em vez de se
+  sobrescrever. Conciliação por código TUSS, status por lançamento,
   regras por convênio e relatório mensal em PDF já existiam.
 - **Testes automatizados + CI:** ✅ uma suíte de **smoke tests** (Playwright,
   `tests/smoke.mjs`) roda o app num Chromium headless e verifica os fluxos
@@ -421,8 +467,9 @@ Três coisas que valem saber ao atualizar:
 - **A chave é o GGREM**, não o "ID apresentação": há um caso de dois GGREM
   com o mesmo ID, e usar o ID como chave perderia um registro.
 - **A matview precisa ser atualizada** depois da carga (o importador faz isso
-  sozinho pela RPC `refresh_medicamentos_clinicos`; no editor SQL é
-  `refresh materialized view public.medicamentos_clinicos;`). Sem isso a busca
+  sozinho pela RPC `refresh_medicamentos_clinicos`; depois da migração 0025 a
+  materialized view fica em `app.medicamentos_clinicos` e não deve ser exposta
+  nem atualizada pelo navegador). Sem isso a busca
   continua respondendo a base anterior.
 
 O seed em SQL (`seeds/medicamentos_anvisa.sql`, 12,8 MB) é gerado pelo mesmo

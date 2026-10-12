@@ -1,0 +1,219 @@
+{
+  "format": 1,
+  "metadataOnly": true,
+  "capturedProductionProject": "zbpbrnalamjrcfbscjkt",
+  "capturedStagingProject": "yqqrfgbvoexricjdxpis",
+  "stagingCatalogEqual": false,
+  "catalogComparatorChanged": false,
+  "differencesIgnored": false,
+  "definitionsAnalyzed": 19,
+  "counts": {
+    "line_endings_only": 18,
+    "line_endings_and_from_where_alignment": 1
+  },
+  "functions": [
+    {
+      "identity": "app|audit_row|",
+      "classification": "line_endings_only",
+      "hashMatchedReconstruction": "captured_production_function",
+      "expectedSha256": "d6acf1feee6051cccde0bf010e3d7cab489b66f06317795d5a73429a53c2be9e",
+      "actualSha256": "5ee9c35afdcfa320c4dbf57f99bdf1faeedbcca1f8de9583c7b8637196fe87ca",
+      "preservedProductionBody": true,
+      "normalizationAppliedToSource": false,
+      "authorizationReviewRequired": true
+    },
+    {
+      "identity": "app|can_read_clinical|p_org uuid, p_surgeon uuid",
+      "classification": "line_endings_only",
+      "hashMatchedReconstruction": "captured_production_function",
+      "expectedSha256": "d25176f8771257ad7336c735a569e6f41747c9f76b5e26f76e5a7a33c2549d8b",
+      "actualSha256": "714167d7f886a3e0f59a8f4354c2bfbc34d4626b99ccc27125f800ce617b68f7",
+      "preservedProductionBody": true,
+      "normalizationAppliedToSource": false,
+      "authorizationReviewRequired": true
+    },
+    {
+      "identity": "app|can_write_clinical|p_org uuid",
+      "classification": "line_endings_only",
+      "hashMatchedReconstruction": "captured_production_function",
+      "expectedSha256": "f6afd3805e61dd5be5bdd43dbfe6680e590bfe724aa228f6874d6ddf619f78b7",
+      "actualSha256": "69881e850f70f17137c3b1e0eb22a03fee2476e2eee93e1b0eae2bf4d4dd581c",
+      "preservedProductionBody": true,
+      "normalizationAppliedToSource": false,
+      "authorizationReviewRequired": true
+    },
+    {
+      "identity": "app|eh_programador|",
+      "classification": "line_endings_only",
+      "hashMatchedReconstruction": "captured_production_function",
+      "expectedSha256": "e35a49a18b01a09e5a841832b7483e9ac28843f20115a95be2092c907a3550af",
+      "actualSha256": "1bab22be68750e7d3c800b3361bee47aff1f47967c20eeb06be7012b38909617",
+      "preservedProductionBody": true,
+      "normalizationAppliedToSource": false,
+      "authorizationReviewRequired": true
+    },
+    {
+      "identity": "app|has_role|p_org uuid, p_roles text[]",
+      "classification": "line_endings_only",
+      "hashMatchedReconstruction": "captured_production_function",
+      "expectedSha256": "5071967380f6e8f9eb4f4ce1b87ea47eb0529e9d820a119cf35b8a35d0d618b0",
+      "actualSha256": "cddde3873fe935cfb40ce76660c2ed843e8344f998903911912b14d4a65979a8",
+      "preservedProductionBody": true,
+      "normalizationAppliedToSource": false,
+      "authorizationReviewRequired": true
+    },
+    {
+      "identity": "app|org_ids|",
+      "classification": "line_endings_only",
+      "hashMatchedReconstruction": "captured_production_function",
+      "expectedSha256": "7da8973834912cf6baa07ad32490b6ed68e873c166575e1c9268e355a31240d1",
+      "actualSha256": "105a7c3627604788ef76e822ea3faae75f25754f12c515ce7ae90cd99037f88f",
+      "preservedProductionBody": true,
+      "normalizationAppliedToSource": false,
+      "authorizationReviewRequired": true
+    },
+    {
+      "identity": "app|pode_ver_registro|p_org uuid, p_creator uuid",
+      "classification": "line_endings_only",
+      "hashMatchedReconstruction": "captured_production_function",
+      "expectedSha256": "895fb919dfa3a92bd1d4b761b804cd406a669edaebfac7dc6490d5a9fc4704bb",
+      "actualSha256": "48af6ad5082a55124ea11a24b944b9bc030ebf975952327cf8cc476d58171f95",
+      "preservedProductionBody": true,
+      "normalizationAppliedToSource": false,
+      "authorizationReviewRequired": true
+    },
+    {
+      "identity": "app|set_updated_at|",
+      "classification": "line_endings_only",
+      "hashMatchedReconstruction": "staging_header_preserved_production_body",
+      "expectedSha256": "a1dcf78a8a854d25d3f80f834cd70d3cdd8eec9d42a7f8da41af2306aff0e199",
+      "actualSha256": "2dcb5f7a077958f264415ba4f61830bbeb97fecc0965d2fb7c59a7f743b5da3e",
+      "preservedProductionBody": true,
+      "normalizationAppliedToSource": false,
+      "authorizationReviewRequired": true
+    },
+    {
+      "identity": "app|tem_config|p_org uuid",
+      "classification": "line_endings_only",
+      "hashMatchedReconstruction": "captured_production_function",
+      "expectedSha256": "3d327eae3ddb4d96c606e8796f9d58922ef1f40d53bbea5f8e5d2ff81341ec01",
+      "actualSha256": "87b02a525edddb0143d5f7f981e9d13152953697a2c1b5611c51dc98b570eba5",
+      "preservedProductionBody": true,
+      "normalizationAppliedToSource": false,
+      "authorizationReviewRequired": true
+    },
+    {
+      "identity": "app|visibilidade_registros|p_org uuid",
+      "classification": "line_endings_only",
+      "hashMatchedReconstruction": "captured_production_function",
+      "expectedSha256": "079f5d3c5f64f452d1c802a131c7ae5e6c27658a58d9a7a542e2921223058c3b",
+      "actualSha256": "b6867dd921ee4e15e5674f1c99a002c2ef6d00c6501ed879dc436aa2f17c27e5",
+      "preservedProductionBody": true,
+      "normalizationAppliedToSource": false,
+      "authorizationReviewRequired": true
+    },
+    {
+      "identity": "public|add_member|p_org uuid, p_email text, p_role text",
+      "classification": "line_endings_only",
+      "hashMatchedReconstruction": "captured_production_function",
+      "expectedSha256": "61323fa2468aba8fa3ba4d705e219fc7c79c5a320571c6634040a59b51a7ba6c",
+      "actualSha256": "7e832646c6ef4dac8e71255712fe4b13ba6b8959e53170fd0ef6958c1f49bf2a",
+      "preservedProductionBody": true,
+      "normalizationAppliedToSource": false,
+      "authorizationReviewRequired": true
+    },
+    {
+      "identity": "public|apresentacoes_do_principio|p_principio_base text, p_tipo text, p_limite integer",
+      "classification": "line_endings_only",
+      "hashMatchedReconstruction": "captured_production_function",
+      "expectedSha256": "06f3d9825480b356d5f8b7b45fcfbfd4ade0c11bd4ab367d332c38b27d32592a",
+      "actualSha256": "6feae9b4b07ad80e7a339af896e1914fd925517416ac75172efa2d45eeb20e44",
+      "preservedProductionBody": true,
+      "normalizationAppliedToSource": false,
+      "authorizationReviewRequired": true
+    },
+    {
+      "identity": "public|buscar_medicamentos|p_termo text, p_tipo text, p_limite integer, p_so_comercializados boolean",
+      "classification": "line_endings_only",
+      "hashMatchedReconstruction": "staging_header_preserved_production_body",
+      "expectedSha256": "2ca2cc7f927b1721c40a46317cc0b9c8c72ddd89309f235a355858a8cd5d39db",
+      "actualSha256": "2f695c58fdd05f66d0ed3e93db84e22d622ba34efd336df06bf4d9374fb2ac4e",
+      "preservedProductionBody": true,
+      "normalizationAppliedToSource": false,
+      "authorizationReviewRequired": true
+    },
+    {
+      "identity": "public|prog_add_member|p_org uuid, p_email text, p_role text",
+      "classification": "line_endings_only",
+      "hashMatchedReconstruction": "captured_production_function",
+      "expectedSha256": "c22c8d3f030f308db51f36b2ade80142b138870a5a0c43c02f949484a6ce0bd9",
+      "actualSha256": "c5601cc72f5dfe525749302cfadcc2e6a7019476dad021079477929c44f770cb",
+      "preservedProductionBody": true,
+      "normalizationAppliedToSource": false,
+      "authorizationReviewRequired": true
+    },
+    {
+      "identity": "public|prog_contar_ambiente|p_org uuid",
+      "classification": "line_endings_and_from_where_alignment",
+      "hashMatchedReconstruction": "captured_production_function",
+      "expectedSha256": "04560ff0382485e62618c8a702ccbc64cfd0b473a5b7447d584d4a31dd6a87cb",
+      "actualSha256": "4632865ceb0f48417643a7dd5995e084678ee436d28e8dfb1027a311064e191c",
+      "preservedProductionBody": true,
+      "normalizationAppliedToSource": false,
+      "alignmentLines": [
+        13,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22
+      ],
+      "authorizationReviewRequired": true
+    },
+    {
+      "identity": "public|prog_criar_ambiente|p_nome text, p_email_gestor text",
+      "classification": "line_endings_only",
+      "hashMatchedReconstruction": "captured_production_function",
+      "expectedSha256": "fb4be0dcc6e7fbf179dabfeba9688aa8f22f33a6d13aa43b2b8aac306cbb4053",
+      "actualSha256": "607974dabe838b1a7bd806a6b7700e4288cbfd281666b92b422c323594416840",
+      "preservedProductionBody": true,
+      "normalizationAppliedToSource": false,
+      "authorizationReviewRequired": true
+    },
+    {
+      "identity": "public|prog_excluir_ambiente|p_org uuid, p_confirmo_registros boolean",
+      "classification": "line_endings_only",
+      "hashMatchedReconstruction": "captured_production_function",
+      "expectedSha256": "2f04c044f197ef7e9576aeda07cd6dd5329960898797e54103205ae711612034",
+      "actualSha256": "bf38a6e30ed3c624bcc775a826561b8d3e28c48f20c09c4ddd8f77704b1ad66c",
+      "preservedProductionBody": true,
+      "normalizationAppliedToSource": false,
+      "authorizationReviewRequired": true
+    },
+    {
+      "identity": "public|prog_excluir_conta|p_user uuid",
+      "classification": "line_endings_only",
+      "hashMatchedReconstruction": "captured_production_function",
+      "expectedSha256": "3e13b389a95a557626bb14e46bf0f3c809b1f239ec0b1fe046b91f1a6c7ffda2",
+      "actualSha256": "5525add5a5c084ac50ac68305cfb37c9e37218e6c2a18fd52518794174b45f78",
+      "preservedProductionBody": true,
+      "normalizationAppliedToSource": false,
+      "authorizationReviewRequired": true
+    },
+    {
+      "identity": "public|prog_remover_membro|p_org uuid, p_user uuid",
+      "classification": "line_endings_only",
+      "hashMatchedReconstruction": "captured_production_function",
+      "expectedSha256": "92e99ea6fcde44380adab297988d5e17e4598c2f31ab3e0ea6aae2fef20aa0ba",
+      "actualSha256": "95160f79d5e007c625a95574d96cdc8c2226d677332aa27481c4e90615a2db29",
+      "preservedProductionBody": true,
+      "normalizationAppliedToSource": false,
+      "authorizationReviewRequired": true
+    }
+  ],
+  "authorizationEquivalent": false,
+  "productionApplyAllowed": false
+}

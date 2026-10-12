@@ -1,0 +1,340 @@
+{
+  "format": 1,
+  "kind": "g3_staging_verified_evidence_summary",
+  "recordedAtUtc": "2026-10-12T01:14:34.335201Z",
+  "state": "staging_verified",
+  "scope": "Registro de homologação técnica executada; não é aplicação, autorização G4/G5 nem publicação de produção.",
+  "testedRepositoryHead": "370a18508cf020b316d09e669c2eefa58bc0e39c",
+  "stagingProjectRef": "yqqrfgbvoexricjdxpis",
+  "schemaHash": "564df22433b02968d4b9093db336dea36b1e555adb2e84f9a9e7cde46a74280d",
+  "schemaHashSource": "SHA-256 canônico do JSON de metadados do catálogo HOSPEDADO capturado após0034 e contrato ANVISA. Não é hash do SQL DDL, dos bytes do arquivo nem do catálogo do replay local.",
+  "matrixPassed": true,
+  "authenticatedSessionsPassed": true,
+  "ci": {
+    "executionKind": "GitHub Actions: bancos locais efêmeros e navegador local; sem atribuir testes hospedados à CI.",
+    "allFourWorkflowsPassed": true,
+    "workflowUrl": "https://github.com/mpcaliman/Soft-Anestesia/actions/runs/38179983955",
+    "workflowUrls": [
+      {
+        "suite": "validate",
+        "event": "push",
+        "url": "https://github.com/mpcaliman/Soft-Anestesia/actions/runs/38179983926"
+      },
+      {
+        "suite": "validate",
+        "event": "pull_request",
+        "url": "https://github.com/mpcaliman/Soft-Anestesia/actions/runs/38179987194"
+      },
+      {
+        "suite": "sql-local",
+        "event": "push",
+        "url": "https://github.com/mpcaliman/Soft-Anestesia/actions/runs/38179983955"
+      },
+      {
+        "suite": "sql-local",
+        "event": "pull_request",
+        "url": "https://github.com/mpcaliman/Soft-Anestesia/actions/runs/38179987164"
+      }
+    ],
+    "smokePassed": 257,
+    "smokeTotal": 257,
+    "securityScripts": 47,
+    "publicAppFiles": 66,
+    "sql": {
+      "emptyMigrations": 36,
+      "rollbackFixtures": 3,
+      "productionCapturedBaselineUpgradeSources": 18,
+      "original0013PrerequisiteAdditional": true,
+      "historicalOriginals": 455,
+      "historicalCanonicalRows": 459,
+      "historicalSignatureRowsSeparate": 1,
+      "legacyProvenanceAndConcurrencyPassed": true,
+      "observedAdvisoryWaitPairs": 3,
+      "repeatableReadRejected": true,
+      "productionMutated": false
+    }
+  },
+  "hostedBrowser": {
+    "executionKind": "Navegador Chromium real contra Supabase de homologação, executado fora da CI.",
+    "passed": 6,
+    "failed": 0,
+    "pending": 0,
+    "checks": [
+      {
+        "name": "real_auth_two_clinics_same_browser_three_tabs",
+        "passed": true
+      },
+      {
+        "name": "real_realtime_own_delivery_and_cross_clinic_absence",
+        "passed": true
+      },
+      {
+        "name": "real_concurrent_same_revision_exactly_one_winner",
+        "passed": true
+      },
+      {
+        "name": "real_session_crosses_original_jwt_expiration_automatic_refresh_and_realtime",
+        "passed": true
+      },
+      {
+        "name": "real_offline_wal_ciphertext_and_zero_plaintext_local_storage",
+        "passed": true
+      },
+      {
+        "name": "real_sigkill_restore_locks_hosted_session_retains_encrypted_wal",
+        "passed": true
+      }
+    ],
+    "naturalJwtExpirationAndAutomaticRenewalObserved": true,
+    "nativeSigkillRestoreAndEncryptedWalOwnerRecoveryObserved": true,
+    "allOperationalRealtimeTablesPositiveDeliveryNotProved": true,
+    "noGeneralPromiseOfCollaborativeFieldMerge": true
+  },
+  "hostedStorage": {
+    "executionKind": "APIs Auth/Storage reais na homologação; relatório de reteste revisado, fora da CI.",
+    "passed": 12,
+    "failed": 0,
+    "checks": [
+      {
+        "name": "retest_exact_five_object_state_and_owner_move_recovery",
+        "passed": true
+      },
+      {
+        "name": "own_upsert_requires_actual_select_insert_update",
+        "passed": true
+      },
+      {
+        "name": "same_clinic_collaborative_read_list_and_short_signed_url",
+        "passed": true
+      },
+      {
+        "name": "own_move_roundtrip_confirms_real_update_api",
+        "passed": true
+      },
+      {
+        "name": "peer_cannot_insert_or_replace_another_author_path",
+        "passed": true
+      },
+      {
+        "name": "other_clinic_cannot_read_list_sign_create_or_replace",
+        "passed": true
+      },
+      {
+        "name": "owner_cannot_change_organization_or_use_invalid_path",
+        "passed": true
+      },
+      {
+        "name": "platform_programmer_without_membership_has_no_clinical_storage_access",
+        "passed": true
+      },
+      {
+        "name": "no_client_can_physically_delete_clinical_object",
+        "passed": true
+      },
+      {
+        "name": "anonymous_and_public_endpoint_cannot_access_private_clinical_object",
+        "passed": true
+      },
+      {
+        "name": "legacy_pdf_bucket_denies_all_client_read_write_sign_and_delete",
+        "passed": true
+      },
+      {
+        "name": "independent_admin_inspection_proves_canary_preservation_and_no_forbidden_objects",
+        "passed": true
+      }
+    ],
+    "earlierFailedAttemptRetainedAndNotRelabelledAsPass": true,
+    "providerCdnHistoricalResponsesNotRetrospectivelyProved": true
+  },
+  "hostedLegacy": {
+    "executionKind": "Conexões PostgreSQL reais usando SET ROLE e claims de identidades Auth reais, via executor de homologação. Não são dois clientes REST/JWT simultâneos; a corrida REST/JWT é demonstrada pelo navegador.",
+    "identityRacePairsPassed": 3,
+    "ordinaryWriterAndOwnerCohortRacesPassed": true,
+    "repeatableReadRejected": true,
+    "syntheticSourceAndAuditRetentionProved": true,
+    "noUniversalDedupeByNameOrDeadlockFreedomClaim": true,
+    "authHttpBoundary": {
+      "executionKind": "Chamadas HTTP/Auth reais separadas das sessões SQL concorrentes.",
+      "checksPassed": 20,
+      "checksTotal": 20,
+      "failed": 0,
+      "artifact": "legacy-hosted-api-boundary-result.json",
+      "sha256": "d9c37c6e3f853033cf272c99f3c11da504b3e53b91585082c1066ee38a2a5052"
+    }
+  },
+  "serviceContract": {
+    "newRequiredStagingEntries": 8,
+    "existingProductAndFixtureRequiredRightsAlreadyPresent": true,
+    "realNormalizerGeneratedColumnsUpsertVersionAndRefreshPassed": true,
+    "rolledBackSyntheticMedicationVersionAndMatviewRowsRemaining": 0,
+    "allCapturedDefaultsUnchanged": true,
+    "eightImporterRightsAlreadyPresentInCapturedProduction": true,
+    "stagingCorrectionIsNotAdditionalProductionGrantProposal": true
+  },
+  "reconciliation": {
+    "comparisonReference": "Actual empty captured-production replay of the immutable18 upgrade sources plus original0013.",
+    "fullPinnedCatalogEquality": false,
+    "pinnedDifferencesRetained": 253,
+    "unfilteredAclDifferencesRetainedIncludingClaimLedger": 228,
+    "missingReplayServiceAclEntriesRetained": 203,
+    "missingCrudEntries": 152,
+    "missingExecuteEntries": 20,
+    "missingMaintainReferencesTriggerEntries": 31,
+    "missingAclEntriesNotRequiredByExaminedOperationalCallers": true,
+    "externalConsumersNotProvedAbsent": true,
+    "noBlanketGrantOrProductionRevocationAuthorized": true,
+    "noMissingTargetStructuresOrFunctions": true,
+    "formatOnlyPriorFunctionDifferencesRetained": 19,
+    "additionalLegacyForceRlsAndRestrictivePoliciesPreserved": true,
+    "recoveryFixtureDifferencesExplicitlyRetained": true,
+    "privatePdfBucketConfigurationPreserved": true,
+    "catalogComparatorChanged": false,
+    "supplierAdminDefaultsBroadUnchangedAndPending": true,
+    "applicationDdlExecutorMustRemainPostgres": true,
+    "universalDefaultPrivilegeClosureProved": false
+  },
+  "syntheticRecovery": {
+    "authPassed": 7,
+    "authFailed": 0,
+    "authPending": 0,
+    "retainedBannedIdentities": 4,
+    "activeProfilesMembershipsOrganizationsProgrammerScopes": 0,
+    "oldAccessJwtCryptographicRevocationNotClaimed": true,
+    "dataDatasetsCountAndShaEqual": 17,
+    "metadataDatasetsCountAndShaEqual": 15,
+    "allDifferences": 0,
+    "clinicalSourceOrAuditRowsDeleted": false,
+    "authUsersDeleted": false,
+    "storageCleanupChecksPassed": 3,
+    "syntheticObjectsRemoved": 5,
+    "enumeratedPathsConfirmedAbsent": 17,
+    "unenumeratedObjectsAndProviderPhysicalErasureNotCovered": true
+  },
+  "releaseSeparation": {
+    "productionPackageApplied": false,
+    "productionReadinessDeclared": false,
+    "G4ApprovedByThisSummary": false,
+    "G5ApprovedByThisSummary": false,
+    "remoteApplyAllowedMeaning": "Flag de estado exigido pelo gate existente; não confere capacidade de banco nem libera produção por si só.",
+    "supabaseCliMigrationsAndSeedsRemainDisabled": true,
+    "stillRequiredBeforeProduction": [
+      "Plano de corte e clientes antigos/pêndencias preservadas.",
+      "Execução0026 top-level autocommit; nenhum wrapper transacional.",
+      "Ponto de retorno cobrindo dados recentes; backup físico diário observado foi de2026-10-11T08:01:49Z, com PITR desativado; cobertura posterior não demonstrada.",
+      "Storage excluído do backup de banco; manter seus binários e política de retenção.",
+      "Registro G4 do diff final e fluxo G5 do main/CI por proprietário."
+    ],
+    "databaseBackupRestoreNotPerformed": true,
+    "productionClinicalContentNotExported": true,
+    "backupObservation": {
+      "physicalBackupObservedUtc": "2026-10-11T08:01:49Z",
+      "PITREnabled": false,
+      "restoreTestPerformed": false,
+      "logicalBackupCreatedByThisExecution": false,
+      "storageObjectsIncluded": false,
+      "laterDataCoverageNotAssumed": true
+    }
+  },
+  "provenance": {
+    "sourceFilesUnmodified": true,
+    "historicalMigrationInventoryHashesPreserved": true,
+    "rawCredentialsEmailsPatientIdsAndClinicalPayloadExcludedFromSummary": true,
+    "artifacts": [
+      {
+        "artifact": "ci-evidence-370a185.json",
+        "bytes": 9829,
+        "sha256": "9b2bd99c1f394942afc25fa2c324c30be22ec51ddaa4064dc391d58ce2a6314c",
+        "location": "Session evidence workspace; hash identifies the retained original. Raw fixture credential files are excluded."
+      },
+      {
+        "artifact": "370a185-local-sql-integration-evidence.json",
+        "bytes": 14900,
+        "sha256": "9f0da7e0e58bb8b2cd9c2373a88f5730a8693e187bd7ae71e6385f347e4b076e",
+        "location": "Session evidence workspace; hash identifies the retained original. Raw fixture credential files are excluded."
+      },
+      {
+        "artifact": "370a185-production-baseline-replay-evidence.json",
+        "bytes": 203227,
+        "sha256": "d89dee20d036635e6e4949991f9c3b37342adcde26163a687f3f30f5e74e7091",
+        "location": "Session evidence workspace; hash identifies the retained original. Raw fixture credential files are excluded."
+      },
+      {
+        "artifact": "hosted-browser-12-report.json",
+        "bytes": 121524,
+        "sha256": "dd8b49e3223cbe2a6c1b47079dac7e0db49643b798e6ac6ec277a728ea7f08b7",
+        "location": "Session evidence workspace; hash identifies the retained original. Raw fixture credential files are excluded."
+      },
+      {
+        "artifact": "hosted-browser-12-independent-review.json",
+        "bytes": 1576,
+        "sha256": "feb0d36bb2fef16e0e80115a89075a586ffb9acd305b5b013031052dc9dcce98",
+        "location": "Session evidence workspace; hash identifies the retained original. Raw fixture credential files are excluded."
+      },
+      {
+        "artifact": "legacy-hosted-storage-retest-v3-report.json",
+        "bytes": 18270,
+        "sha256": "32c4c08a86c550e1cacb97729244381a48d328202af34d9eaa0f26e3d1c178cc",
+        "location": "Session evidence workspace; hash identifies the retained original. Raw fixture credential files are excluded."
+      },
+      {
+        "artifact": "storage-hosted-v3-final-lifecycle-independent-review.json",
+        "bytes": 3714,
+        "sha256": "6b8820159258220514258d5b7739a74c3a839c25f2a1fd31438e10312a877518",
+        "location": "Session evidence workspace; hash identifies the retained original. Raw fixture credential files are excluded."
+      },
+      {
+        "artifact": "legacy-hosted-edge/independent-all-three-review.json",
+        "bytes": 5211,
+        "sha256": "aba1b1655232589aa0391a36120a75a724a62e64d248321b6406dc7c318a2790",
+        "location": "Session evidence workspace; hash identifies the retained original. Raw fixture credential files are excluded."
+      },
+      {
+        "artifact": "legacy-hosted-retention-independent-review.json",
+        "bytes": 4651,
+        "sha256": "3f33af76dd9671479d34bfeee3c27962984b689f874f7728d133ed656e658f82",
+        "location": "Session evidence workspace; hash identifies the retained original. Raw fixture credential files are excluded."
+      },
+      {
+        "artifact": "legacy-hosted-preservation-snapshots-independent-review.json",
+        "bytes": 18378,
+        "sha256": "4ec1e4eb5618148b84fa0a17bcb837256682ee67f1b692354df660a3336a4b1b",
+        "location": "Session evidence workspace; hash identifies the retained original. Raw fixture credential files are excluded."
+      },
+      {
+        "artifact": "service-role-contract-native-runtime-review.json",
+        "bytes": 4055,
+        "sha256": "b41bbca7d37ca202852d4a94930db79ce802fd50caa3d54390ea3b914e6547bd",
+        "location": "Session evidence workspace; hash identifies the retained original. Raw fixture credential files are excluded."
+      },
+      {
+        "artifact": "staging-after-0034-service-contract-reconciliation-review.json",
+        "bytes": 92861,
+        "sha256": "6d13b767829965dd6847c22bbe1b3a4f07c77126448a58a2ebc0504fc0ea7bc6",
+        "location": "Session evidence workspace; hash identifies the retained original. Raw fixture credential files are excluded."
+      },
+      {
+        "artifact": "STAGING-APPLICATION-CATALOG-AFTER-0034-SERVICE-CONTRACT.json",
+        "bytes": 1272420,
+        "sha256": "4865b335116624644ee3acfa3792709902d370552c186ec11dabea07d768e5fe",
+        "location": "Session evidence workspace; hash identifies the retained original. Raw fixture credential files are excluded."
+      }
+    ]
+  },
+  "schemaHashProvenance": {
+    "algorithm": "scripts/compare-application-catalog.mjs: catalogHash(validateCatalog(document)) usa stableJson dos21 arrays de catálogo com chaves de objetos ordenadas.",
+    "metadataCatalogCanonicalSha256": "564df22433b02968d4b9093db336dea36b1e555adb2e84f9a9e7cde46a74280d",
+    "rawHostedArtifact": "staging-catalog-after-0034-service-contract.json",
+    "rawHostedArtifactBytesSha256": "f9abffb839b7a03057484add56258a96ec3f5e6d451b91b97083f4ef9eb6b191",
+    "normalizedHostedDocument": "STAGING-APPLICATION-CATALOG-AFTER-0034-SERVICE-CONTRACT.json",
+    "normalizedHostedDocumentBytesSha256": "4865b335116624644ee3acfa3792709902d370552c186ec11dabea07d768e5fe",
+    "queryArtifact": "capture-staging-catalog-after-0034-service-contract.sql",
+    "queryBytesSha256": "251f4381025771bf64828958d15860d75ce573f03d5b975b11c756f4447d1efd",
+    "captureProjectRef": "yqqrfgbvoexricjdxpis",
+    "captureRecordedCompletionUtc": "2026-10-11T23:54:30.478652Z",
+    "captureTimeMeaning": "Local raw artifact mtime records capture completion; not server transaction start.",
+    "execution": "Captura read-only nativa realizada pelo agente principal; sem linhas clínicas/Auth ou caminhos de objetos.",
+    "privateSyntheticFixtureSchemaOutsideApplicationCatalog": true,
+    "laterStructuralRetentionProof": "32 conjuntos iguais antes/depois da recuperação; não substitui nova captura integral do histórico."
+  }
+}

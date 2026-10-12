@@ -1,0 +1,1432 @@
+{
+  "sourceProject": "zbpbrnalamjrcfbscjkt",
+  "capturedAt": "2026-10-10",
+  "scope": "Metadata only for two legacy tables; no clinical rows read; not a full production baseline",
+  "catalog": {
+    "production.public.10_schema_grants": [
+      {
+        "schema_name": "public",
+        "grantee_role": "PUBLIC",
+        "grantor_role": "pg_database_owner",
+        "is_grantable": false,
+        "privilege_type": "USAGE",
+        "has_explicit_acl": true,
+        "schema_owner_role": "pg_database_owner",
+        "total_metadata_rows": 7
+      },
+      {
+        "schema_name": "public",
+        "grantee_role": "anon",
+        "grantor_role": "pg_database_owner",
+        "is_grantable": false,
+        "privilege_type": "USAGE",
+        "has_explicit_acl": true,
+        "schema_owner_role": "pg_database_owner",
+        "total_metadata_rows": 7
+      },
+      {
+        "schema_name": "public",
+        "grantee_role": "authenticated",
+        "grantor_role": "pg_database_owner",
+        "is_grantable": false,
+        "privilege_type": "USAGE",
+        "has_explicit_acl": true,
+        "schema_owner_role": "pg_database_owner",
+        "total_metadata_rows": 7
+      },
+      {
+        "schema_name": "public",
+        "grantee_role": "pg_database_owner",
+        "grantor_role": "pg_database_owner",
+        "is_grantable": false,
+        "privilege_type": "CREATE",
+        "has_explicit_acl": true,
+        "schema_owner_role": "pg_database_owner",
+        "total_metadata_rows": 7
+      },
+      {
+        "schema_name": "public",
+        "grantee_role": "pg_database_owner",
+        "grantor_role": "pg_database_owner",
+        "is_grantable": false,
+        "privilege_type": "USAGE",
+        "has_explicit_acl": true,
+        "schema_owner_role": "pg_database_owner",
+        "total_metadata_rows": 7
+      },
+      {
+        "schema_name": "public",
+        "grantee_role": "postgres",
+        "grantor_role": "pg_database_owner",
+        "is_grantable": false,
+        "privilege_type": "USAGE",
+        "has_explicit_acl": true,
+        "schema_owner_role": "pg_database_owner",
+        "total_metadata_rows": 7
+      },
+      {
+        "schema_name": "public",
+        "grantee_role": "service_role",
+        "grantor_role": "pg_database_owner",
+        "is_grantable": false,
+        "privilege_type": "USAGE",
+        "has_explicit_acl": true,
+        "schema_owner_role": "pg_database_owner",
+        "total_metadata_rows": 7
+      }
+    ],
+    "production.public.pacientes.02_columns": [
+      {
+        "not_null": true,
+        "data_type": "uuid",
+        "attislocal": true,
+        "attoptions": null,
+        "attinhcount": 0,
+        "column_name": "id",
+        "storage_code": "p",
+        "identity_code": "",
+        "collation_name": null,
+        "generated_code": "",
+        "collation_schema": null,
+        "ordinal_position": 1,
+        "statistics_target": null,
+        "total_metadata_rows": 15,
+        "default_or_generated_expression": "gen_random_uuid()"
+      },
+      {
+        "not_null": true,
+        "data_type": "uuid",
+        "attislocal": true,
+        "attoptions": null,
+        "attinhcount": 0,
+        "column_name": "user_id",
+        "storage_code": "p",
+        "identity_code": "",
+        "collation_name": null,
+        "generated_code": "",
+        "collation_schema": null,
+        "ordinal_position": 2,
+        "statistics_target": null,
+        "total_metadata_rows": 15,
+        "default_or_generated_expression": "auth.uid()"
+      },
+      {
+        "not_null": true,
+        "data_type": "text",
+        "attislocal": true,
+        "attoptions": null,
+        "attinhcount": 0,
+        "column_name": "nome",
+        "storage_code": "x",
+        "identity_code": "",
+        "collation_name": "default",
+        "generated_code": "",
+        "collation_schema": "pg_catalog",
+        "ordinal_position": 3,
+        "statistics_target": null,
+        "total_metadata_rows": 15,
+        "default_or_generated_expression": null
+      },
+      {
+        "not_null": false,
+        "data_type": "text",
+        "attislocal": true,
+        "attoptions": null,
+        "attinhcount": 0,
+        "column_name": "cpf",
+        "storage_code": "x",
+        "identity_code": "",
+        "collation_name": "default",
+        "generated_code": "",
+        "collation_schema": "pg_catalog",
+        "ordinal_position": 4,
+        "statistics_target": null,
+        "total_metadata_rows": 15,
+        "default_or_generated_expression": null
+      },
+      {
+        "not_null": false,
+        "data_type": "date",
+        "attislocal": true,
+        "attoptions": null,
+        "attinhcount": 0,
+        "column_name": "data_nascimento",
+        "storage_code": "p",
+        "identity_code": "",
+        "collation_name": null,
+        "generated_code": "",
+        "collation_schema": null,
+        "ordinal_position": 5,
+        "statistics_target": null,
+        "total_metadata_rows": 15,
+        "default_or_generated_expression": null
+      },
+      {
+        "not_null": false,
+        "data_type": "text",
+        "attislocal": true,
+        "attoptions": null,
+        "attinhcount": 0,
+        "column_name": "telefone",
+        "storage_code": "x",
+        "identity_code": "",
+        "collation_name": "default",
+        "generated_code": "",
+        "collation_schema": "pg_catalog",
+        "ordinal_position": 6,
+        "statistics_target": null,
+        "total_metadata_rows": 15,
+        "default_or_generated_expression": null
+      },
+      {
+        "not_null": false,
+        "data_type": "text",
+        "attislocal": true,
+        "attoptions": null,
+        "attinhcount": 0,
+        "column_name": "email",
+        "storage_code": "x",
+        "identity_code": "",
+        "collation_name": "default",
+        "generated_code": "",
+        "collation_schema": "pg_catalog",
+        "ordinal_position": 7,
+        "statistics_target": null,
+        "total_metadata_rows": 15,
+        "default_or_generated_expression": null
+      },
+      {
+        "not_null": false,
+        "data_type": "text",
+        "attislocal": true,
+        "attoptions": null,
+        "attinhcount": 0,
+        "column_name": "convenio",
+        "storage_code": "x",
+        "identity_code": "",
+        "collation_name": "default",
+        "generated_code": "",
+        "collation_schema": "pg_catalog",
+        "ordinal_position": 8,
+        "statistics_target": null,
+        "total_metadata_rows": 15,
+        "default_or_generated_expression": null
+      },
+      {
+        "not_null": false,
+        "data_type": "text",
+        "attislocal": true,
+        "attoptions": null,
+        "attinhcount": 0,
+        "column_name": "numero_carteirinha",
+        "storage_code": "x",
+        "identity_code": "",
+        "collation_name": "default",
+        "generated_code": "",
+        "collation_schema": "pg_catalog",
+        "ordinal_position": 9,
+        "statistics_target": null,
+        "total_metadata_rows": 15,
+        "default_or_generated_expression": null
+      },
+      {
+        "not_null": false,
+        "data_type": "text",
+        "attislocal": true,
+        "attoptions": null,
+        "attinhcount": 0,
+        "column_name": "alergias",
+        "storage_code": "x",
+        "identity_code": "",
+        "collation_name": "default",
+        "generated_code": "",
+        "collation_schema": "pg_catalog",
+        "ordinal_position": 10,
+        "statistics_target": null,
+        "total_metadata_rows": 15,
+        "default_or_generated_expression": null
+      },
+      {
+        "not_null": false,
+        "data_type": "text",
+        "attislocal": true,
+        "attoptions": null,
+        "attinhcount": 0,
+        "column_name": "comorbidades",
+        "storage_code": "x",
+        "identity_code": "",
+        "collation_name": "default",
+        "generated_code": "",
+        "collation_schema": "pg_catalog",
+        "ordinal_position": 11,
+        "statistics_target": null,
+        "total_metadata_rows": 15,
+        "default_or_generated_expression": null
+      },
+      {
+        "not_null": false,
+        "data_type": "text",
+        "attislocal": true,
+        "attoptions": null,
+        "attinhcount": 0,
+        "column_name": "medicamentos_uso",
+        "storage_code": "x",
+        "identity_code": "",
+        "collation_name": "default",
+        "generated_code": "",
+        "collation_schema": "pg_catalog",
+        "ordinal_position": 12,
+        "statistics_target": null,
+        "total_metadata_rows": 15,
+        "default_or_generated_expression": null
+      },
+      {
+        "not_null": false,
+        "data_type": "text",
+        "attislocal": true,
+        "attoptions": null,
+        "attinhcount": 0,
+        "column_name": "observacoes",
+        "storage_code": "x",
+        "identity_code": "",
+        "collation_name": "default",
+        "generated_code": "",
+        "collation_schema": "pg_catalog",
+        "ordinal_position": 13,
+        "statistics_target": null,
+        "total_metadata_rows": 15,
+        "default_or_generated_expression": null
+      },
+      {
+        "not_null": true,
+        "data_type": "timestamp with time zone",
+        "attislocal": true,
+        "attoptions": null,
+        "attinhcount": 0,
+        "column_name": "created_at",
+        "storage_code": "p",
+        "identity_code": "",
+        "collation_name": null,
+        "generated_code": "",
+        "collation_schema": null,
+        "ordinal_position": 14,
+        "statistics_target": null,
+        "total_metadata_rows": 15,
+        "default_or_generated_expression": "now()"
+      },
+      {
+        "not_null": true,
+        "data_type": "timestamp with time zone",
+        "attislocal": true,
+        "attoptions": null,
+        "attinhcount": 0,
+        "column_name": "updated_at",
+        "storage_code": "p",
+        "identity_code": "",
+        "collation_name": null,
+        "generated_code": "",
+        "collation_schema": null,
+        "ordinal_position": 15,
+        "statistics_target": null,
+        "total_metadata_rows": 15,
+        "default_or_generated_expression": "now()"
+      }
+    ],
+    "production.public.pacientes.04_indexes": [
+      {
+        "indnatts": 1,
+        "indislive": true,
+        "index_name": "pacientes_nome_idx",
+        "indisready": true,
+        "indisvalid": true,
+        "reloptions": null,
+        "indisunique": false,
+        "indnkeyatts": 1,
+        "indimmediate": true,
+        "indisprimary": false,
+        "indisclustered": false,
+        "indisexclusion": false,
+        "indisreplident": false,
+        "tablespace_name": null,
+        "index_definition": "CREATE INDEX pacientes_nome_idx ON public.pacientes USING btree (nome)",
+        "total_metadata_rows": 3
+      },
+      {
+        "indnatts": 1,
+        "indislive": true,
+        "index_name": "pacientes_pkey",
+        "indisready": true,
+        "indisvalid": true,
+        "reloptions": null,
+        "indisunique": true,
+        "indnkeyatts": 1,
+        "indimmediate": true,
+        "indisprimary": true,
+        "indisclustered": false,
+        "indisexclusion": false,
+        "indisreplident": false,
+        "tablespace_name": null,
+        "index_definition": "CREATE UNIQUE INDEX pacientes_pkey ON public.pacientes USING btree (id)",
+        "total_metadata_rows": 3
+      },
+      {
+        "indnatts": 1,
+        "indislive": true,
+        "index_name": "pacientes_user_id_idx",
+        "indisready": true,
+        "indisvalid": true,
+        "reloptions": null,
+        "indisunique": false,
+        "indnkeyatts": 1,
+        "indimmediate": true,
+        "indisprimary": false,
+        "indisclustered": false,
+        "indisexclusion": false,
+        "indisreplident": false,
+        "tablespace_name": null,
+        "index_definition": "CREATE INDEX pacientes_user_id_idx ON public.pacientes USING btree (user_id)",
+        "total_metadata_rows": 3
+      }
+    ],
+    "production.public.documentos.02_columns": [
+      {
+        "not_null": true,
+        "data_type": "bigint",
+        "attislocal": true,
+        "attoptions": null,
+        "attinhcount": 0,
+        "column_name": "id",
+        "storage_code": "p",
+        "identity_code": "d",
+        "collation_name": null,
+        "generated_code": "",
+        "collation_schema": null,
+        "ordinal_position": 1,
+        "statistics_target": null,
+        "total_metadata_rows": 6,
+        "default_or_generated_expression": null
+      },
+      {
+        "not_null": true,
+        "data_type": "uuid",
+        "attislocal": true,
+        "attoptions": null,
+        "attinhcount": 0,
+        "column_name": "user_id",
+        "storage_code": "p",
+        "identity_code": "",
+        "collation_name": null,
+        "generated_code": "",
+        "collation_schema": null,
+        "ordinal_position": 2,
+        "statistics_target": null,
+        "total_metadata_rows": 6,
+        "default_or_generated_expression": null
+      },
+      {
+        "not_null": true,
+        "data_type": "text",
+        "attislocal": true,
+        "attoptions": null,
+        "attinhcount": 0,
+        "column_name": "modulo",
+        "storage_code": "x",
+        "identity_code": "",
+        "collation_name": "default",
+        "generated_code": "",
+        "collation_schema": "pg_catalog",
+        "ordinal_position": 3,
+        "statistics_target": null,
+        "total_metadata_rows": 6,
+        "default_or_generated_expression": null
+      },
+      {
+        "not_null": true,
+        "data_type": "text",
+        "attislocal": true,
+        "attoptions": null,
+        "attinhcount": 0,
+        "column_name": "doc_id",
+        "storage_code": "x",
+        "identity_code": "",
+        "collation_name": "default",
+        "generated_code": "",
+        "collation_schema": "pg_catalog",
+        "ordinal_position": 4,
+        "statistics_target": null,
+        "total_metadata_rows": 6,
+        "default_or_generated_expression": null
+      },
+      {
+        "not_null": true,
+        "data_type": "jsonb",
+        "attislocal": true,
+        "attoptions": null,
+        "attinhcount": 0,
+        "column_name": "dados",
+        "storage_code": "x",
+        "identity_code": "",
+        "collation_name": null,
+        "generated_code": "",
+        "collation_schema": null,
+        "ordinal_position": 5,
+        "statistics_target": null,
+        "total_metadata_rows": 6,
+        "default_or_generated_expression": "'{}'::jsonb"
+      },
+      {
+        "not_null": true,
+        "data_type": "timestamp with time zone",
+        "attislocal": true,
+        "attoptions": null,
+        "attinhcount": 0,
+        "column_name": "atualizado_em",
+        "storage_code": "p",
+        "identity_code": "",
+        "collation_name": null,
+        "generated_code": "",
+        "collation_schema": null,
+        "ordinal_position": 6,
+        "statistics_target": null,
+        "total_metadata_rows": 6,
+        "default_or_generated_expression": "now()"
+      }
+    ],
+    "production.public.documentos.04_indexes": [
+      {
+        "indnatts": 1,
+        "indislive": true,
+        "index_name": "documentos_pkey",
+        "indisready": true,
+        "indisvalid": true,
+        "reloptions": null,
+        "indisunique": true,
+        "indnkeyatts": 1,
+        "indimmediate": true,
+        "indisprimary": true,
+        "indisclustered": false,
+        "indisexclusion": false,
+        "indisreplident": false,
+        "tablespace_name": null,
+        "index_definition": "CREATE UNIQUE INDEX documentos_pkey ON public.documentos USING btree (id)",
+        "total_metadata_rows": 3
+      },
+      {
+        "indnatts": 3,
+        "indislive": true,
+        "index_name": "documentos_user_id_modulo_doc_id_key",
+        "indisready": true,
+        "indisvalid": true,
+        "reloptions": null,
+        "indisunique": true,
+        "indnkeyatts": 3,
+        "indimmediate": true,
+        "indisprimary": false,
+        "indisclustered": false,
+        "indisexclusion": false,
+        "indisreplident": false,
+        "tablespace_name": null,
+        "index_definition": "CREATE UNIQUE INDEX documentos_user_id_modulo_doc_id_key ON public.documentos USING btree (user_id, modulo, doc_id)",
+        "total_metadata_rows": 3
+      },
+      {
+        "indnatts": 2,
+        "indislive": true,
+        "index_name": "documentos_user_idx",
+        "indisready": true,
+        "indisvalid": true,
+        "reloptions": null,
+        "indisunique": false,
+        "indnkeyatts": 2,
+        "indimmediate": true,
+        "indisprimary": false,
+        "indisclustered": false,
+        "indisexclusion": false,
+        "indisreplident": false,
+        "tablespace_name": null,
+        "index_definition": "CREATE INDEX documentos_user_idx ON public.documentos USING btree (user_id, modulo)",
+        "total_metadata_rows": 3
+      }
+    ],
+    "production.public.pacientes.01_relation": [
+      {
+        "relkind": "r",
+        "owner_role": "postgres",
+        "reloptions": null,
+        "table_name": "pacientes",
+        "schema_name": "public",
+        "relation_oid": "17600",
+        "relreplident": "d",
+        "partition_key": null,
+        "relispartition": false,
+        "relpersistence": "p",
+        "relrowsecurity": true,
+        "partition_bound": null,
+        "relforcerowsecurity": false,
+        "total_metadata_rows": 1
+      }
+    ],
+    "production.public.pacientes.06_triggers": [
+      {
+        "is_internal": false,
+        "enabled_code": "O",
+        "tgdeferrable": false,
+        "trigger_name": "set_pacientes_updated_at",
+        "function_name": "set_updated_at",
+        "constraint_oid": "0",
+        "tginitdeferred": false,
+        "function_schema": "public",
+        "trigger_definition": "CREATE TRIGGER set_pacientes_updated_at BEFORE UPDATE ON public.pacientes FOR EACH ROW EXECUTE FUNCTION set_updated_at()",
+        "total_metadata_rows": 3,
+        "function_identity_arguments": ""
+      },
+      {
+        "is_internal": true,
+        "enabled_code": "O",
+        "tgdeferrable": false,
+        "trigger_name": "RI_ConstraintTrigger_c_17614",
+        "function_name": "RI_FKey_check_ins",
+        "constraint_oid": "17611",
+        "tginitdeferred": false,
+        "function_schema": "pg_catalog",
+        "trigger_definition": "CREATE CONSTRAINT TRIGGER \"RI_ConstraintTrigger_c_17614\" AFTER INSERT ON public.pacientes FROM auth.users NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
+        "total_metadata_rows": 3,
+        "function_identity_arguments": ""
+      },
+      {
+        "is_internal": true,
+        "enabled_code": "O",
+        "tgdeferrable": false,
+        "trigger_name": "RI_ConstraintTrigger_c_17615",
+        "function_name": "RI_FKey_check_upd",
+        "constraint_oid": "17611",
+        "tginitdeferred": false,
+        "function_schema": "pg_catalog",
+        "trigger_definition": "CREATE CONSTRAINT TRIGGER \"RI_ConstraintTrigger_c_17615\" AFTER UPDATE ON public.pacientes FROM auth.users NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
+        "total_metadata_rows": 3,
+        "function_identity_arguments": ""
+      }
+    ],
+    "production.public.pacientes.07_policies": [
+      {
+        "roles": [
+          "PUBLIC"
+        ],
+        "command": "UPDATE",
+        "permissive": true,
+        "policy_name": "Usuário atualiza apenas seus pacientes",
+        "using_expression": "(auth.uid() = user_id)",
+        "total_metadata_rows": 4,
+        "with_check_expression": "(auth.uid() = user_id)"
+      },
+      {
+        "roles": [
+          "PUBLIC"
+        ],
+        "command": "INSERT",
+        "permissive": true,
+        "policy_name": "Usuário cria apenas seus pacientes",
+        "using_expression": null,
+        "total_metadata_rows": 4,
+        "with_check_expression": "(auth.uid() = user_id)"
+      },
+      {
+        "roles": [
+          "PUBLIC"
+        ],
+        "command": "DELETE",
+        "permissive": true,
+        "policy_name": "Usuário exclui apenas seus pacientes",
+        "using_expression": "(auth.uid() = user_id)",
+        "total_metadata_rows": 4,
+        "with_check_expression": null
+      },
+      {
+        "roles": [
+          "PUBLIC"
+        ],
+        "command": "SELECT",
+        "permissive": true,
+        "policy_name": "Usuário vê apenas seus pacientes",
+        "using_expression": "(auth.uid() = user_id)",
+        "total_metadata_rows": 4,
+        "with_check_expression": null
+      }
+    ],
+    "production.public.documentos.01_relation": [
+      {
+        "relkind": "r",
+        "owner_role": "postgres",
+        "reloptions": null,
+        "table_name": "documentos",
+        "schema_name": "public",
+        "relation_oid": "17733",
+        "relreplident": "d",
+        "partition_key": null,
+        "relispartition": false,
+        "relpersistence": "p",
+        "relrowsecurity": true,
+        "partition_bound": null,
+        "relforcerowsecurity": false,
+        "total_metadata_rows": 1
+      }
+    ],
+    "production.public.documentos.06_triggers": [
+      {
+        "is_internal": true,
+        "enabled_code": "O",
+        "tgdeferrable": false,
+        "trigger_name": "RI_ConstraintTrigger_c_17747",
+        "function_name": "RI_FKey_check_ins",
+        "constraint_oid": "17744",
+        "tginitdeferred": false,
+        "function_schema": "pg_catalog",
+        "trigger_definition": "CREATE CONSTRAINT TRIGGER \"RI_ConstraintTrigger_c_17747\" AFTER INSERT ON public.documentos FROM auth.users NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_ins\"()",
+        "total_metadata_rows": 2,
+        "function_identity_arguments": ""
+      },
+      {
+        "is_internal": true,
+        "enabled_code": "O",
+        "tgdeferrable": false,
+        "trigger_name": "RI_ConstraintTrigger_c_17748",
+        "function_name": "RI_FKey_check_upd",
+        "constraint_oid": "17744",
+        "tginitdeferred": false,
+        "function_schema": "pg_catalog",
+        "trigger_definition": "CREATE CONSTRAINT TRIGGER \"RI_ConstraintTrigger_c_17748\" AFTER UPDATE ON public.documentos FROM auth.users NOT DEFERRABLE INITIALLY IMMEDIATE FOR EACH ROW EXECUTE FUNCTION \"RI_FKey_check_upd\"()",
+        "total_metadata_rows": 2,
+        "function_identity_arguments": ""
+      }
+    ],
+    "production.public.documentos.07_policies": [
+      {
+        "roles": [
+          "authenticated"
+        ],
+        "command": "DELETE",
+        "permissive": true,
+        "policy_name": "documentos_delete_proprio",
+        "using_expression": "(auth.uid() = user_id)",
+        "total_metadata_rows": 4,
+        "with_check_expression": null
+      },
+      {
+        "roles": [
+          "authenticated"
+        ],
+        "command": "INSERT",
+        "permissive": true,
+        "policy_name": "documentos_insert_proprio",
+        "using_expression": null,
+        "total_metadata_rows": 4,
+        "with_check_expression": "(auth.uid() = user_id)"
+      },
+      {
+        "roles": [
+          "authenticated"
+        ],
+        "command": "SELECT",
+        "permissive": true,
+        "policy_name": "documentos_select_proprio",
+        "using_expression": "(auth.uid() = user_id)",
+        "total_metadata_rows": 4,
+        "with_check_expression": null
+      },
+      {
+        "roles": [
+          "authenticated"
+        ],
+        "command": "UPDATE",
+        "permissive": true,
+        "policy_name": "documentos_update_proprio",
+        "using_expression": "(auth.uid() = user_id)",
+        "total_metadata_rows": 4,
+        "with_check_expression": "(auth.uid() = user_id)"
+      }
+    ],
+    "production.public.pacientes.08_table_grants": [
+      {
+        "grantee_role": "anon",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "DELETE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "anon",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "INSERT",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "anon",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "MAINTAIN",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "anon",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "REFERENCES",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "anon",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "SELECT",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "anon",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "TRIGGER",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "anon",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "TRUNCATE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "anon",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "UPDATE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "authenticated",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "DELETE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "authenticated",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "INSERT",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "authenticated",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "MAINTAIN",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "authenticated",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "REFERENCES",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "authenticated",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "SELECT",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "authenticated",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "TRIGGER",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "authenticated",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "TRUNCATE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "authenticated",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "UPDATE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "postgres",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "DELETE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "postgres",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "INSERT",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "postgres",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "MAINTAIN",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "postgres",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "REFERENCES",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "postgres",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "SELECT",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "postgres",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "TRIGGER",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "postgres",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "TRUNCATE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "postgres",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "UPDATE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "service_role",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "DELETE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "service_role",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "INSERT",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "service_role",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "MAINTAIN",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "service_role",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "REFERENCES",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "service_role",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "SELECT",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "service_role",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "TRIGGER",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "service_role",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "TRUNCATE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "service_role",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "UPDATE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      }
+    ],
+    "production.public.documentos.08_table_grants": [
+      {
+        "grantee_role": "anon",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "DELETE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "anon",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "INSERT",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "anon",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "MAINTAIN",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "anon",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "REFERENCES",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "anon",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "SELECT",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "anon",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "TRIGGER",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "anon",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "TRUNCATE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "anon",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "UPDATE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "authenticated",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "DELETE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "authenticated",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "INSERT",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "authenticated",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "MAINTAIN",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "authenticated",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "REFERENCES",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "authenticated",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "SELECT",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "authenticated",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "TRIGGER",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "authenticated",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "TRUNCATE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "authenticated",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "UPDATE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "postgres",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "DELETE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "postgres",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "INSERT",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "postgres",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "MAINTAIN",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "postgres",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "REFERENCES",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "postgres",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "SELECT",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "postgres",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "TRIGGER",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "postgres",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "TRUNCATE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "postgres",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "UPDATE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "service_role",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "DELETE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "service_role",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "INSERT",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "service_role",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "MAINTAIN",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "service_role",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "REFERENCES",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "service_role",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "SELECT",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "service_role",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "TRIGGER",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "service_role",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "TRUNCATE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      },
+      {
+        "grantee_role": "service_role",
+        "grantor_role": "postgres",
+        "is_grantable": false,
+        "privilege_type": "UPDATE",
+        "has_explicit_acl": true,
+        "total_metadata_rows": 32
+      }
+    ],
+    "production.public.pacientes.09_column_grants": [],
+    "production.public.documentos.09_column_grants": [],
+    "production.public.pacientes.05_owned_sequences": [],
+    "production.public.documentos.05_owned_sequences": [
+      {
+        "seqmax": 9223372036854776000,
+        "seqmin": 1,
+        "seqcache": 1,
+        "seqcycle": false,
+        "seqstart": 1,
+        "column_name": "id",
+        "seqincrement": 1,
+        "sequence_acl": [
+          "postgres=rwU/postgres",
+          "anon=rwU/postgres",
+          "authenticated=rwU/postgres",
+          "service_role=rwU/postgres"
+        ],
+        "identity_code": "d",
+        "sequence_name": "documentos_id_seq",
+        "dependency_type": "i",
+        "sequence_schema": "public",
+        "sequence_data_type": "bigint",
+        "sequence_owner_role": "postgres",
+        "total_metadata_rows": 1
+      }
+    ],
+    "production.public.pacientes.03_constraints_and_fk_dependencies": [
+      {
+        "on_delete": null,
+        "on_update": null,
+        "conislocal": true,
+        "match_type": null,
+        "condeferred": false,
+        "coninhcount": 0,
+        "conparentid": "0",
+        "connoinherit": true,
+        "convalidated": true,
+        "condeferrable": false,
+        "column_attnums": [
+          1
+        ],
+        "constraint_name": "pacientes_pkey",
+        "constraint_type": "p",
+        "belongs_to_target": true,
+        "references_target": false,
+        "total_metadata_rows": 2,
+        "constraint_definition": "PRIMARY KEY (id)",
+        "constraint_table_name": "pacientes",
+        "referenced_table_name": null,
+        "constraint_table_schema": "public",
+        "referenced_table_schema": null,
+        "referenced_column_attnums": null
+      },
+      {
+        "on_delete": "CASCADE",
+        "on_update": "NO ACTION",
+        "conislocal": true,
+        "match_type": "SIMPLE",
+        "condeferred": false,
+        "coninhcount": 0,
+        "conparentid": "0",
+        "connoinherit": true,
+        "convalidated": true,
+        "condeferrable": false,
+        "column_attnums": [
+          2
+        ],
+        "constraint_name": "pacientes_user_id_fkey",
+        "constraint_type": "f",
+        "belongs_to_target": true,
+        "references_target": false,
+        "total_metadata_rows": 2,
+        "constraint_definition": "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE",
+        "constraint_table_name": "pacientes",
+        "referenced_table_name": "users",
+        "constraint_table_schema": "public",
+        "referenced_table_schema": "auth",
+        "referenced_column_attnums": [
+          2
+        ]
+      }
+    ],
+    "production.public.documentos.03_constraints_and_fk_dependencies": [
+      {
+        "on_delete": null,
+        "on_update": null,
+        "conislocal": true,
+        "match_type": null,
+        "condeferred": false,
+        "coninhcount": 0,
+        "conparentid": "0",
+        "connoinherit": true,
+        "convalidated": true,
+        "condeferrable": false,
+        "column_attnums": [
+          1
+        ],
+        "constraint_name": "documentos_pkey",
+        "constraint_type": "p",
+        "belongs_to_target": true,
+        "references_target": false,
+        "total_metadata_rows": 3,
+        "constraint_definition": "PRIMARY KEY (id)",
+        "constraint_table_name": "documentos",
+        "referenced_table_name": null,
+        "constraint_table_schema": "public",
+        "referenced_table_schema": null,
+        "referenced_column_attnums": null
+      },
+      {
+        "on_delete": "CASCADE",
+        "on_update": "NO ACTION",
+        "conislocal": true,
+        "match_type": "SIMPLE",
+        "condeferred": false,
+        "coninhcount": 0,
+        "conparentid": "0",
+        "connoinherit": true,
+        "convalidated": true,
+        "condeferrable": false,
+        "column_attnums": [
+          2
+        ],
+        "constraint_name": "documentos_user_id_fkey",
+        "constraint_type": "f",
+        "belongs_to_target": true,
+        "references_target": false,
+        "total_metadata_rows": 3,
+        "constraint_definition": "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE",
+        "constraint_table_name": "documentos",
+        "referenced_table_name": "users",
+        "constraint_table_schema": "public",
+        "referenced_table_schema": "auth",
+        "referenced_column_attnums": [
+          2
+        ]
+      },
+      {
+        "on_delete": null,
+        "on_update": null,
+        "conislocal": true,
+        "match_type": null,
+        "condeferred": false,
+        "coninhcount": 0,
+        "conparentid": "0",
+        "connoinherit": true,
+        "convalidated": true,
+        "condeferrable": false,
+        "column_attnums": [
+          2,
+          3,
+          4
+        ],
+        "constraint_name": "documentos_user_id_modulo_doc_id_key",
+        "constraint_type": "u",
+        "belongs_to_target": true,
+        "references_target": false,
+        "total_metadata_rows": 3,
+        "constraint_definition": "UNIQUE (user_id, modulo, doc_id)",
+        "constraint_table_name": "documentos",
+        "referenced_table_name": null,
+        "constraint_table_schema": "public",
+        "referenced_table_schema": null,
+        "referenced_column_attnums": null
+      }
+    ]
+  }
+}
