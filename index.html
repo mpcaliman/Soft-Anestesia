@@ -19437,8 +19437,17 @@ const ambiente = {
   },
 
   /* ---------- acervo antigo: quarentena até classificação auditada ---------- */
+  /* QUARENTENA SÓ EXISTE SE HOUVER O QUE ATRIBUIR.
+     Isto perguntava por CHAVES antigas no aparelho (`cofre.legado().length`),
+     não por registros. Um aparelho pode ter sobrado com as chaves vazias —
+     `medsys.v7.pre = []` e companhia, uns poucos KB de casca — e aí um usuário
+     recém-criado, que nunca gravou nada, era recebido por uma tarja vermelha e
+     uma janela anunciando prontuários em quarentena. A própria janela se
+     entregava: "Este aparelho tem 0 registro(s)".
+     Alarme de prontuário não atribuído tem de contar PRONTUÁRIO. Sem registro
+     dentro, não há de quem perguntar nem o que decidir. */
   temLegadoPendente() {
-    try { return !cofre.decidido() && cofre.legado().length > 0; } catch (e) { return false; }
+    try { return !cofre.decidido() && cofre.legadoRegistros() > 0; } catch (e) { return false; }
   },
   perguntarLegado() {
     const n = cofre.legadoRegistros();

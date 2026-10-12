@@ -17322,6 +17322,48 @@ await test('Programador exclui ambiente e conta pela tela, com a contagem à vis
   await page.close();
 });
 
+/* CHAVE VAZIA NÃO É ACERVO.
+   ---------------------------------------------------------------------------
+   Um usuário recém-criado, que nunca gravou nada, abriu o sistema e foi
+   recebido por uma tarja vermelha e uma janela anunciando "Registros antigos
+   em quarentena" — prontuários sem dono, guardados no aparelho dele. A própria
+   janela se entregava: "Este aparelho tem 0 registro(s)".
+
+   A pergunta estava errada. O alarme contava CHAVES antigas no armazenamento,
+   e um aparelho pode ter sobrado com as chaves presentes e vazias
+   (`medsys.v7.pre = []`), uns KB de casca. Alarme sobre prontuário não
+   atribuído tem de contar prontuário: sem registro dentro, não há de quem
+   perguntar nem o que decidir. */
+await test('Casca vazia do acervo antigo não vira alarme de quarentena', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const R = cofre._real;
+    const limpar = () => Object.keys(STORAGE || {}).forEach(m => { try { R.removeItem(STORAGE[m]); } catch (e) {} });
+    limpar();
+    try { R.removeItem(cofre.MIGRADO_KEY); } catch (e) {}
+
+    /* chaves antigas PRESENTES, porém sem nenhum registro dentro */
+    R.setItem(STORAGE.pre, '[]');
+    R.setItem(STORAGE.anestesia, '[]');
+    out.chavesExistem = cofre.legado().length > 0;
+    out.registrosZero = cofre.legadoRegistros() === 0;
+    out.naoAlarma = ambiente.temLegadoPendente() === false;
+
+    /* um registro de verdade sem dono continua levantando a quarentena */
+    R.setItem(STORAGE.pre, JSON.stringify([{ _id: 'orfao1', nome: 'Paciente Sem Clínica' }]));
+    out.registroContado = cofre.legadoRegistros() === 1;
+    out.alarmaComRegistro = ambiente.temLegadoPendente() === true;
+
+    limpar();
+    return out;
+  });
+  assert(r.chavesExistem && r.registrosZero, 'o cenário exige chaves antigas presentes e vazias');
+  assert(r.naoAlarma, 'chave vazia não pode anunciar prontuário em quarentena a quem nunca gravou nada');
+  assert(r.registroContado && r.alarmaComRegistro, 'e um registro órfão de verdade continua levantando a quarentena');
+  await page.close();
+});
+
 /* 233) Nenhum marcador ou ação local substitui a classificação B2
 
    Marcadores de versões antigas não comprovam a organização. Mesmo com o
