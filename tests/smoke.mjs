@@ -1320,7 +1320,12 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
       const t = (document.getElementById('modal-title') || {}).textContent || '';
       if (t) vistos.push(t);
       if (/Fechamento do atendimento/i.test(t)) break;
-      try { modal.close(); } catch (e) {}
+      /* A janela da cobrança NÃO se fecha por fora, e está certo: decidir se
+         cobra ou não é uma decisão, não algo que se dispensa com um clique
+         fora. Dispensá-la aqui a fazia reabrir em laço. Toma-se a decisão —
+         "não gerar", que é a neutra para este teste. */
+      if (/Gerar financeiro/i.test(t)) { try { fin.finalizacao.cancelar(); } catch (e) {} }
+      else { try { modal.close(); } catch (e) {} }
     }
     out.vistos = vistos.join(' | ');
     const iCobranca = vistos.findIndex(t => /financeiro/i.test(t));
