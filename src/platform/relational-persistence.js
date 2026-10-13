@@ -790,6 +790,19 @@ const cloudRel = {
   porQueVazio(mod) {
     try {
       if (typeof demo !== 'undefined' && demo.ativo()) return '';
+      /* O ACERVO EM QUARENTENA VEM ANTES DE TUDO.
+         "Os registros estão zerados, e devia conter os registros feitos."
+         Estavam lá — 187 deles —, guardados neste aparelho de antes da
+         separação por clínica, invisíveis até alguém dizer de quem são. A
+         sincronização tinha funcionado, então a tela concluía "vazio é vazio" e
+         não dizia nada. Lista vazia com acervo em quarentena ao lado não é
+         resposta: é a pergunta pendente, e ela tem de aparecer onde a pessoa
+         estranha a ausência, não só numa janela que ela fechou. */
+      try {
+        const presos = cofre.legadoRegistros();
+        if (presos > 0) return presos + ' registro(s) deste aparelho estão em quarentena, de antes da separação ' +
+          'por clínica, e por isso não aparecem aqui. Resolva em Programador → Migração segura do legado.';
+      } catch (e) {}
       if (!cloud.estaConfigurado()) return '';
       if (cloudRel.jaPuxou(mod)) return '';           /* falou com a clínica: vazio é vazio */
       const d = cloud.divergencia();

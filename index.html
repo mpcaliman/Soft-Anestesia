@@ -1110,6 +1110,42 @@ body.dark .dropdown-menu { background: var(--surface); border-color: var(--borde
   transition: box-shadow .15s;
 }
 .card:hover { box-shadow: var(--shadow-sm); }
+
+/* ===== PAINEL DE AÇÃO =====
+   O que se abre pelos botões da barra (Novo registro, Novo paciente, Novo
+   compromisso) era um `.card` igual aos da lista logo abaixo. Aberto, ele
+   simplesmente descia no meio do histórico: nada dizia onde terminava a coisa
+   que você mandou abrir e onde começava o que já estava na tela — e, fechado o
+   assunto, continuava lá, empilhando.
+   Painel de ação não é conteúdo da página: é uma coisa que você abriu e vai
+   fechar. Então ele se destaca (barra de acento, fundo próprio, sombra) e
+   carrega o ✕ no cabeçalho, perto do título, e não só um "Cancelar" no fim de
+   um formulário longo. */
+.card.painel-acao {
+  border: 1px solid var(--primary);
+  border-left: 4px solid var(--primary);
+  box-shadow: 0 6px 20px -8px rgba(0,0,0,.28);
+  margin-bottom: 22px;
+}
+.card.painel-acao > .card-header {
+  background: var(--primary-soft);
+  border-bottom: 1px solid var(--primary);
+}
+.card.painel-acao > .card-header:hover { background: var(--primary-soft); }
+.card.painel-acao > .card-header h2 { color: var(--primary-darker); }
+.painel-acao-fechar {
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-soft); border-radius: 6px; cursor: pointer;
+  font-size: .82rem; font-weight: 600; padding: 4px 10px; line-height: 1.3;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.painel-acao-fechar:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
+/* A separação precisa existir também para quem está rolando a página e não
+   viu o cabeçalho: o fim do painel é uma linha, não um palpite. */
+.card.painel-acao::after {
+  content: ''; display: block; height: 3px;
+  background: linear-gradient(90deg, var(--primary) 0%, transparent 100%);
+}
 .card-header {
   padding: 13px 18px;
   background: linear-gradient(180deg, #fbfcfd 0%, #f4f7fa 100%);
@@ -8521,7 +8557,8 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <button class="btn btn-primary" onclick="financeiro.conciliar()" title="Buscar evento por paciente, conferir previsto × recebido × glosa e classificar"><span class="icon">🔄</span> Conciliação</button>
     <button class="btn btn-success" onclick="financeiro.relatorios()" title="Relatórios de conciliação detalhada por código TUSS"><span class="icon">📊</span> Relatórios</button>
     <button class="btn" onclick="financeiro.caixa.abrir()" title="Fechamento de caixa do dia: recebido, realizado e a receber, por convênio e forma de pagamento"><span class="icon">🧾</span> Fechar caixa</button>
-    <button class="btn btn-success" onclick="financeiro.relatorioMensal()" title="Relatório mensal consolidado em PDF"><span class="icon">📄</span> Relatório mensal (PDF)</button>
+    <button class="btn btn-success" onclick="financeiro.relatorioAuditoria()" title="Relatório de um período qualquer, por data de registro ou de procedimento, em planilha (CSV) ou PDF — para enviar à auditoria"><span class="icon">📤</span> Relatório do período</button>
+    <button class="btn" onclick="financeiro.relatorioMensal()" title="Relatório de um mês fechado, pela data do procedimento, em PDF"><span class="icon">📄</span> Relatório mensal (PDF)</button>
     <button class="btn" onclick="historico.abrir('financeiro')"><span class="icon">🔍</span> Buscar / Histórico</button>
     <button class="btn" onclick="printPreview.abrir()"><span class="icon">🖨️</span> Visualizar / Imprimir</button>
     <button class="btn" onclick="financeiro.exportar()"><span class="icon">⬇️</span> Exportar JSON</button>
@@ -13949,6 +13986,60 @@ const ui = {
        mesmo — o menu tem tudo. */
     document.body.classList.toggle('menu-aberto', aberta);
   },
+  /* ---------- PAINEL DE AÇÃO ----------
+     "Ao clicar nos botões da barra superior ele desce um cartão. Dessa forma
+      fica confuso, pois não separa bem o histórico da aba do que se pretendeu
+      abrir. (...) E ao acabar com a ação a aba não some, ficando poluída a
+      tela."
+
+     Três coisas distintas no mesmo relato, e as três têm a mesma origem: o que
+     se abre pela barra era um `.card` idêntico aos da lista, sem moldura
+     própria, sem fechar à mão e sem exclusividade.
+       1. não se distingue  → ganha moldura, acento e cabeçalho próprios;
+       2. não dá para fechar → ganha ✕ no cabeçalho, ao lado do título, e não
+          só um "Cancelar" no fim de um formulário de duas telas;
+       3. acumula            → abrir um painel FECHA o que estiver aberto.
+     O fechamento chama o `cancelar()` do próprio módulo, para o formulário ser
+     limpo como sempre foi — o painel governa a moldura, não as regras de cada
+     tela. */
+  painel: {
+    _aberto: null,
+    _aoFechar: {},
+    abrir(cardId, aoFechar) {
+      if (ui.painel._aberto && ui.painel._aberto !== cardId) ui.painel.fechar(ui.painel._aberto);
+      const card = document.getElementById(cardId);
+      if (!card) return null;
+      if (typeof aoFechar === 'function') ui.painel._aoFechar[cardId] = aoFechar;
+      card.classList.add('painel-acao');
+      card.style.display = 'block';
+      ui.painel._botaoFechar(card, cardId);
+      ui.painel._aberto = cardId;
+      setTimeout(() => { try { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {} }, 30);
+      return card;
+    },
+    _botaoFechar(card, cardId) {
+      const head = card.querySelector('.card-header');
+      if (!head || head.querySelector('.painel-acao-fechar')) return;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'painel-acao-fechar';
+      b.textContent = '✕ Fechar';
+      b.title = 'Fecha este painel e volta à lista';
+      b.addEventListener('click', ev => { ev.stopPropagation(); ui.painel.fechar(cardId); });
+      head.appendChild(b);
+    },
+    fechar(cardId) {
+      const id = cardId || ui.painel._aberto;
+      if (!id) return;
+      if (ui.painel._aberto === id) ui.painel._aberto = null;
+      const card = document.getElementById(id);
+      if (card) card.style.display = 'none';
+      const fn = ui.painel._aoFechar[id];
+      if (typeof fn === 'function') { try { fn(); } catch (e) {} }
+    },
+    estaAberto(cardId) { return ui.painel._aberto === cardId; }
+  },
+
   toggleCard(headerEl) {
     headerEl.parentElement.classList.toggle('collapsed');
     /* card recolhido é display:none, e aí a caixa de texto não tem como ser
@@ -41455,9 +41546,8 @@ const pacientes = {
 
   editar(id, onSaveCb = null) {
     try {
-      const card = document.getElementById(pacientes.cardId);
+      const card = ui.painel.abrir(pacientes.cardId, () => pacientes.cancelar());
       if (!card) { toast('Erro: card de paciente não encontrado', 'error'); return; }
-      card.style.display = 'block';
       utils.clearForm(pacientes.formId);
       pacientes._onSaveCallback = onSaveCb;
       if (id) {
@@ -41478,7 +41568,6 @@ const pacientes = {
           if (inp) inp.focus();
         }, 100);
       }
-      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (e) {
       console.error('Erro ao abrir editor de paciente:', e);
       toast('Erro ao abrir: ' + (e.message || ''), 'error');
@@ -43699,11 +43788,10 @@ const financeiro = {
     financeiro.editar(id);
   },
   editar(id) {
-    const card = document.getElementById(financeiro.cardId);
-    card.style.display = 'block';
-    /* o formulário fica ACIMA da lista: aberto sem rolar, ele some da vista e
-       parece que o toque não fez nada */
-    setTimeout(() => { try { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {} }, 30);
+    /* Painel de ação: moldura própria, ✕ no cabeçalho e exclusividade — não é
+       mais um cartão a mais no meio do histórico. */
+    const card = ui.painel.abrir(financeiro.cardId, () => financeiro.cancelar());
+    if (!card) return;
     utils.clearForm(financeiro.formId);
     /* Limpa tabela de códigos */
     const tbody = document.getElementById('fin-codigos-body');
@@ -43749,7 +43837,6 @@ const financeiro = {
       try { prontuario.limpar('fintroca'); } catch (e) {}
       document.getElementById('financeiro-form-titulo').textContent = 'Novo registro financeiro';
     }
-    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
   },
   cancelar() {
     document.getElementById(financeiro.cardId).style.display = 'none';
@@ -44698,28 +44785,178 @@ const financeiro = {
     toast('JSON exportado');
   },
   /* Relatório mensal consolidado em PDF (via jsPDF) */
-  relatorioMensal() {
+  /* ==========================================================================
+     RELATÓRIO DE PERÍODO — PARA MANDAR À AUDITORIA
+     --------------------------------------------------------------------------
+     "Se eu quiser emitir relatório do que foi REGISTRADO no último mês eu não
+      consigo. Quero emitir um para enviar à auditoria independente."
+
+     Faltavam três coisas, e cada uma sozinha já impedia:
+
+     • PERÍODO. Só dava para pedir um mês do calendário, por um `prompt` de
+       MM/AAAA. "Últimos 30 dias", "do dia 15 ao dia 15", um trimestre — nada
+       disso cabia. Auditoria pede intervalo, não mês fechado.
+
+     • O QUE É "DO MÊS". O filtro olhava a DATA DO PROCEDIMENTO. Mas o pedido é
+       pelo que foi REGISTRADO no período — coisa diferente, e a diferença é
+       justamente o que uma auditoria procura: o lançamento feito em outubro de
+       uma cirurgia de agosto. As duas leituras são legítimas e servem a
+       perguntas distintas, então agora se escolhe qual.
+
+     • FORMATO. Saía só PDF. Auditor confere em planilha: ele soma, ordena,
+       cruza. Mandar PDF é obrigá-lo a redigitar — e redigitação é erro. Sai
+       CSV também, uma linha por lançamento, com os códigos e os valores.
+  ========================================================================== */
+  _periodoPadraoAuditoria() {
     const hoje = new Date();
-    const mesAtual = String(hoje.getMonth() + 1).padStart(2, '0');
-    const anoAtual = hoje.getFullYear();
-    const ref = prompt('Relatório de qual mês/ano? (formato MM/AAAA)', mesAtual + '/' + anoAtual);
-    if (!ref) return;
-    const m = ref.match(/^(\d{1,2})\s*\/\s*(\d{4})$/);
-    if (!m) { toast('Formato inválido — use MM/AAAA', 'warn'); return; }
-    const mes = parseInt(m[1], 10), ano = parseInt(m[2], 10);
-    if (mes < 1 || mes > 12) { toast('Mês inválido', 'warn'); return; }
+    const primeiroDesteMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+    const fimMesPassado = new Date(primeiroDesteMes.getTime() - 86400000);
+    const inicioMesPassado = new Date(fimMesPassado.getFullYear(), fimMesPassado.getMonth(), 1);
+    const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    return { de: iso(inicioMesPassado), ate: iso(fimMesPassado) };
+  },
+  /* A data que vale, conforme a base escolhida. `data_proc` é quando o ato
+     aconteceu; `_createdAt` é quando entrou no sistema. */
+  _dataDoLancamento(x, base) {
+    if (base === 'registro') {
+      const c = x._createdAt || x._updatedAt || '';
+      return c ? String(c).slice(0, 10) : '';
+    }
+    const d = x.data_proc || x.data || (x._createdAt ? String(x._createdAt).slice(0, 10) : '');
+    return d ? String(d).slice(0, 10) : '';
+  },
+  lancamentosDoPeriodo(de, ate, base) {
+    const d0 = String(de || ''), d1 = String(ate || '');
+    return (store.list('financeiro') || []).filter(x => {
+      const d = financeiro._dataDoLancamento(x, base);
+      if (!d) return false;
+      if (d0 && d < d0) return false;
+      if (d1 && d > d1) return false;
+      return true;
+    }).sort((a, b) => financeiro._dataDoLancamento(a, base).localeCompare(financeiro._dataDoLancamento(b, base)));
+  },
+  relatorioAuditoria() {
+    const p = financeiro._periodoPadraoAuditoria();
+    modal.open('📤 Relatório de período — para auditoria',
+      '<div class="grid" style="margin:0">' +
+      '<div class="field col-6"><label>De</label><input type="date" id="aud-de" value="' + p.de + '"></div>' +
+      '<div class="field col-6"><label>Até</label><input type="date" id="aud-ate" value="' + p.ate + '"></div>' +
+      '<div class="field col-12"><label>Contar pelo quê</label>' +
+      '<select id="aud-base">' +
+      '<option value="registro">Data em que foi REGISTRADO no sistema</option>' +
+      '<option value="proc">Data do procedimento</option>' +
+      '</select></div></div>' +
+      '<p style="font-size:.8rem;color:var(--text-soft);margin:6px 0 0">' +
+      'As duas leituras são legítimas e respondem a perguntas diferentes: um ato de agosto lançado em outubro ' +
+      'entra em outubro pela primeira e em agosto pela segunda. O relatório diz qual foi usada.</p>' +
+      '<div id="aud-previa" style="font-size:.84rem;margin-top:10px"></div>',
+      '<button class="btn btn-primary" onclick="financeiro._auditoria(\'csv\')">📊 Planilha (CSV)</button>' +
+      '<button class="btn" onclick="financeiro._auditoria(\'pdf\')">📄 PDF</button>' +
+      '<button class="btn btn-ghost" onclick="modal.close()">Cancelar</button>');
+    const atualizar = () => {
+      const n = financeiro.lancamentosDoPeriodo(
+        (document.getElementById('aud-de') || {}).value,
+        (document.getElementById('aud-ate') || {}).value,
+        (document.getElementById('aud-base') || {}).value).length;
+      const el = document.getElementById('aud-previa');
+      if (el) el.innerHTML = n
+        ? '<b>' + n + '</b> lançamento(s) no período.'
+        : '<span style="color:var(--danger)">Nenhum lançamento neste período.</span>';
+    };
+    ['aud-de', 'aud-ate', 'aud-base'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.addEventListener('change', atualizar);
+    });
+    atualizar();
+  },
+  _auditoria(formato) {
+    const de = (document.getElementById('aud-de') || {}).value || '';
+    const ate = (document.getElementById('aud-ate') || {}).value || '';
+    const base = (document.getElementById('aud-base') || {}).value || 'registro';
+    if (de && ate && de > ate) { toast('A data inicial é posterior à final.', 'warn'); return; }
+    const lista = financeiro.lancamentosDoPeriodo(de, ate, base);
+    if (!lista.length) { toast('Nenhum lançamento no período escolhido.', 'warn'); return; }
+    modal.close();
+    if (formato === 'csv') financeiro.csvAuditoria(lista, de, ate, base);
+    else financeiro.relatorioMensal({ de, ate, base, lista });
+  },
+  csvAuditoria(lista, de, ate, base) {
+    const num = v => parseFloat(v) || 0;
+    const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+    const linhas = [[
+      'Data do registro', 'Data do procedimento', 'Paciente', 'Convênio', 'Senha',
+      'Procedimento', 'Códigos TUSS', 'Cirurgião', 'Hospital',
+      'Previsto', 'Recebido', 'Glosa', 'A receber', 'Status', 'Pago', 'Data do pagamento'
+    ].map(q).join(';')];
+    let tp = 0, tr = 0, tg = 0;
+    lista.forEach(x => {
+      const prev = num(x.valor_previsto), rec = num(x.valor_recebido), glo = num(x.glosa);
+      tp += prev; tr += rec; tg += glo;
+      const codigos = Array.isArray(x.codigos)
+        ? x.codigos.map(c => [c.codigo, c.descricao].filter(Boolean).join(' ')).filter(Boolean).join(' | ') : '';
+      linhas.push([
+        financeiro._dataDoLancamento(x, 'registro'), financeiro._dataDoLancamento(x, 'proc'),
+        x.paciente || '', x.convenio || x.plano || '', x.senha || '',
+        x.procedimento || '', codigos, x.cirurgiao || '', x.hospital || '',
+        /* Vírgula decimal: a planilha brasileira soma a coluna sem conversão. */
+        prev.toFixed(2).replace('.', ','), rec.toFixed(2).replace('.', ','), glo.toFixed(2).replace('.', ','),
+        (prev - rec - glo).toFixed(2).replace('.', ','),
+        x.status || '', x.pago ? 'Sim' : 'Não', x.data_pagamento || ''
+      ].map(q).join(';'));
+    });
+    linhas.push('');
+    linhas.push([q('TOTAIS'), q(''), q(''), q(''), q(''), q(''), q(''), q(''), q(''),
+      q(tp.toFixed(2).replace('.', ',')), q(tr.toFixed(2).replace('.', ',')),
+      q(tg.toFixed(2).replace('.', ',')), q((tp - tr - tg).toFixed(2).replace('.', ','))].join(';'));
+    linhas.push('');
+    linhas.push(q('Período: ' + (de || 'início') + ' a ' + (ate || 'hoje') +
+      ' · contado pela data ' + (base === 'registro' ? 'de registro no sistema' : 'do procedimento') +
+      ' · emitido em ' + new Date().toLocaleString('pt-BR')));
+    /* BOM na frente: sem ele o Excel abre os acentos errados, e um relatório de
+       auditoria com "convênio" ilegível volta como pendência. */
+    const blob = new Blob(['﻿' + linhas.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'financeiro_' + (de || 'inicio') + '_a_' + (ate || 'hoje') + '.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast('📊 ' + lista.length + ' lançamento(s) exportados em CSV');
+  },
+
+  relatorioMensal(opts) {
+    let mes, ano, ref, doMes, rotuloPeriodo, sufixoArquivo;
+    const porPeriodo = !!(opts && (opts.de || opts.ate));
+    if (porPeriodo) {
+      doMes = opts.lista || financeiro.lancamentosDoPeriodo(opts.de, opts.ate, opts.base);
+      const br = s => s ? String(s).split('-').reverse().join('/') : '';
+      rotuloPeriodo = 'PERÍODO ' + (br(opts.de) || 'início') + ' A ' + (br(opts.ate) || 'hoje') +
+        ' — POR DATA ' + (opts.base === 'registro' ? 'DE REGISTRO' : 'DO PROCEDIMENTO');
+      sufixoArquivo = (opts.de || 'inicio') + '_a_' + (opts.ate || 'hoje');
+      ref = rotuloPeriodo;
+    } else {
+      const hoje = new Date();
+      const mesAtual = String(hoje.getMonth() + 1).padStart(2, '0');
+      const anoAtual = hoje.getFullYear();
+      ref = prompt('Relatório de qual mês/ano? (formato MM/AAAA)', mesAtual + '/' + anoAtual);
+      if (!ref) return;
+      const m = ref.match(/^(\d{1,2})\s*\/\s*(\d{4})$/);
+      if (!m) { toast('Formato inválido — use MM/AAAA', 'warn'); return; }
+      mes = parseInt(m[1], 10); ano = parseInt(m[2], 10);
+      if (mes < 1 || mes > 12) { toast('Mês inválido', 'warn'); return; }
+      const todos = store.list('financeiro');
+      doMes = todos.filter(x => {
+        const dstr = x.data_proc || x.data || (x._createdAt ? x._createdAt.slice(0, 10) : '');
+        if (!dstr) return false;
+        const d = new Date(dstr.length > 10 ? dstr : dstr + 'T12:00:00');
+        return d.getMonth() + 1 === mes && d.getFullYear() === ano;
+      });
+      const meses = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+      rotuloPeriodo = meses[mes - 1].toUpperCase() + ' / ' + ano;
+      sufixoArquivo = ano + '-' + String(mes).padStart(2, '0');
+    }
 
     const J = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
     if (!J) { toast('Biblioteca de PDF não carregada', 'error'); return; }
-
-    /* Filtra lançamentos do mês pela data_proc (fallback _createdAt) */
-    const todos = store.list('financeiro');
-    const doMes = todos.filter(x => {
-      const dstr = x.data_proc || x.data || (x._createdAt ? x._createdAt.slice(0, 10) : '');
-      if (!dstr) return false;
-      const d = new Date(dstr.length > 10 ? dstr : dstr + 'T12:00:00');
-      return d.getMonth() + 1 === mes && d.getFullYear() === ano;
-    });
     if (!doMes.length) { toast('Nenhum lançamento encontrado em ' + ref, 'warn'); return; }
 
     const num = v => parseFloat(v) || 0;
@@ -44746,9 +44983,8 @@ const financeiro = {
     doc.setTextColor(0);
     y += 1; doc.setDrawColor(180); doc.line(M, y, W - M, y); y += 7;
 
-    const meses = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
     doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
-    doc.text('RELATÓRIO FINANCEIRO — ' + meses[mes - 1].toUpperCase() + ' / ' + ano, W / 2, y, { align: 'center' }); y += 8;
+    doc.text('RELATÓRIO FINANCEIRO — ' + rotuloPeriodo, W / 2, y, { align: 'center' }); y += 8;
 
     /* Bloco de totais */
     doc.setFontSize(9.5);
@@ -44813,7 +45049,7 @@ const financeiro = {
     doc.text('Gerado por Soft Anestesia em ' + new Date().toLocaleDateString('pt-BR') + ' — documento de uso interno.', M, y);
     doc.setTextColor(0);
 
-    const nomeArq = 'relatorio_financeiro_' + ano + '-' + String(mes).padStart(2, '0') + '.pdf';
+    const nomeArq = 'relatorio_financeiro_' + sufixoArquivo + '.pdf';
     doc.save(nomeArq);
     toast('Relatório de ' + ref + ' gerado');
   },
@@ -47021,8 +47257,8 @@ const agenda = {
   cal: agendaView.cal,
 
   editar(id, dataPre) {
-    const card = document.getElementById(agenda.cardId);
-    card.style.display = 'block';
+    const card = ui.painel.abrir(agenda.cardId, () => agenda.cancelar());
+    if (!card) return;
     utils.clearForm(agenda.formId);
     if (id) {
       const item = store.getById('agenda', id);
@@ -47036,7 +47272,6 @@ const agenda = {
       document.querySelector(`#${agenda.formId} [name="status"]`).value = 'agendado';
       document.getElementById('agenda-form-titulo').textContent = 'Novo compromisso';
     }
-    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
   },
   cancelar() {
     document.getElementById(agenda.cardId).style.display = 'none';
