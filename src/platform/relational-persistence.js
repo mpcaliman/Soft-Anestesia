@@ -1403,6 +1403,30 @@ const cloudRel = {
     else cloudRel._enviarConflito(entry);
     return true;
   },
+  /* ---- LIMPEZA DO QUE NUNCA FOI CONFLITO ----
+     Os defeitos de laço fabricaram centenas de "conflitos preservados" cujo
+     `changedFields` é VAZIO: nuvem e aparelho com exatamente o mesmo conteúdo.
+     Abrir 764 janelas para escolher entre uma coisa e ela mesma não é decisão,
+     é castigo — e enquanto a lista estiver cheia de ruído, um conflito de
+     verdade fica invisível no meio dela.
+     Esta limpeza toca SOMENTE os que não têm campo divergente, e a divergência
+     é RECALCULADA aqui, não lida do que ficou gravado: se o registro mudou
+     depois, ele não entra. Havendo um campo diferente, o item permanece
+     esperando decisão, como antes. A escolha aplicada é 'remote', que é a
+     versão que traz o carimbo de versão — a mesma saída dos consertos de pull. */
+  conflitosSemDivergencia() {
+    return cloudRel._conflitosLer().filter(x =>
+      x && x.status === 'pending' && !x.resolutionRequested &&
+      x.operation !== 'delete' && x.operation !== 'draft_delete' &&
+      !cloudRel._camposDivergentes(x.proposed, x.canonical).length);
+  },
+  limparConflitosSemDivergencia() {
+    const alvo = cloudRel.conflitosSemDivergencia();
+    let n = 0;
+    alvo.forEach(x => { if (cloudRel.resolverConflito(x.clientId, 'remote')) n++; });
+    return n;
+  },
+
   _conflitoDaLinha(row) {
     if (!row || !row.client_conflict_id) return null;
     const metadata = cloudRel._clone(row.metadata);
@@ -1485,12 +1509,24 @@ const cloudRel = {
   abrirConflitosPendentes() {
     const lista = cloudRel._conflitosLer().filter(x => x.status === 'pending');
     if (!lista.length) { toast('Não há conflitos pendentes.'); return; }
-    const corpo = '<p style="font-size:.86rem;color:var(--text-soft)">As duas versões estão preservadas. Abra cada item e escolha com calma.</p>' +
+    const vazios = cloudRel.conflitosSemDivergencia().length;
+    const aviso = vazios ? '<div style="background:#fff4e5;border:1px solid #f0c890;color:#6f4617;border-radius:8px;padding:9px 11px;font-size:.82rem;margin:0 0 10px">' +
+      '<b>' + vazios + ' destes ' + lista.length + ' não têm nenhum campo divergente.</b> São sobra dos laços já consertados: ' +
+      'a nuvem e este aparelho têm o mesmo conteúdo, e não há o que escolher. Limpá-los deixa à vista o que de fato precisa de decisão.' +
+      '<div style="margin-top:7px"><button class="btn btn-sm btn-primary" onclick="cloudRel._limparVaziosEReabrir()">🧹 Limpar os ' + vazios + ' sem divergência</button></div></div>' : '';
+    const corpo = aviso +
+      '<p style="font-size:.86rem;color:var(--text-soft)">As duas versões estão preservadas. Abra cada item e escolha com calma.</p>' +
       '<div style="max-height:55vh;overflow:auto">' + lista.map(x =>
         '<button class="btn" style="display:flex;width:100%;justify-content:space-between;margin:5px 0" onclick="cloudRel._abrirConflito(' + utils.jsArg(x.clientId) + ')">' +
         '<span>⚠️ ' + utils.escapeHTML(x.mod) + ' · ' + utils.escapeHTML(x.operation === 'delete' || x.operation === 'draft_delete' ? 'exclusão' : 'edição') + '</span>' +
         '<small>' + utils.escapeHTML(utils.formatarDataHora(x.createdAt)) + '</small></button>').join('') + '</div>';
     modal.open('Conflitos preservados (' + lista.length + ')', corpo, '<button class="btn" onclick="modal.close()">Fechar</button>');
+  },
+  _limparVaziosEReabrir() {
+    const n = cloudRel.limparConflitosSemDivergencia();
+    toast(n ? '🧹 ' + n + ' conflito(s) sem divergência resolvidos pela versão da nuvem' : 'Nada a limpar.', n ? 'success' : 'info');
+    try { modal.close(); } catch (e) {}
+    try { cloudRel.abrirConflitosPendentes(); } catch (e) {}
   },
   _abrirConflito(clientId) {
     const e = cloudRel._conflitosLer().find(x => x.clientId === clientId && x.status === 'pending');

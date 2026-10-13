@@ -19856,6 +19856,84 @@ await test('Acervo preso só neste aparelho: declaração move, ausência dela n
   await page.close();
 });
 
+/* 267) Pacientes e agenda tinham a própria rota — e ela não tinha a trava
+
+   O contador de conflitos continuou subindo (~3/min) com TODOS os aparelhos já
+   no build que consertou os registros e os rascunhos. Faltavam dois caminhos:
+   `pacientes.sincronizarNuvem` e `agenda.sincronizarNuvem` trazem a nuvem por
+   rota própria, escrita à parte, e nenhuma delas perguntava se havia o que
+   decidir antes de preservar os dois lados.
+
+   E ali era pior do que nos outros: a condição inclui "cadastro local sem
+   carimbo de versão", e registrar o conflito NÃO adotava a versão remota — o
+   carimbo nunca chegava, e a sincronização seguinte repetia tudo. Cada ciclo
+   reproduzia os mesmos conflitos, para sempre, sem ninguém digitar nada.
+
+   Este teste cobra as duas coisas: a trava nos dois pulls, e a limpeza em
+   massa do que o defeito já fabricou — que só pode tocar no que não diverge. */
+await test('Conflito vazio não nasce em pacientes/agenda, e o que já nasceu sai em massa', async () => {
+  /* A trava tem de estar nas DUAS rotas próprias, no pacote publicável. */
+  const fonte = await readFile(resolve(APP_ROOT, 'index.html'), 'utf8');
+  const trecho = (marca) => {
+    const i = fonte.indexOf(marca);
+    assert(i > 0, 'rota não encontrada: ' + marca);
+    return fonte.slice(i, i + 1400);
+  };
+  for (const [marca, quem] of [
+    ["cloudRel._temPendente('pacientes'", 'pacientes'],
+    ["cloudRel._temPendente('agenda'", 'agenda']
+  ]) {
+    const t = trecho(marca);
+    const guarda = t.indexOf('_camposDivergentes');
+    const registra = t.indexOf('registrarConflito');
+    assert(guarda > 0 && registra > 0 && guarda < registra,
+      'o pull de ' + quem + ' precisa conferir divergência ANTES de preservar conflito');
+  }
+
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    __smokeBindOrg('org-conf');
+    /* Zera a lista para o cenário ser só o que este teste põe nela. */
+    try { cofre._real.removeItem(cloudRel.CONFLITOS_KEY + '@org-conf'); } catch (e) {}
+    try { cloudRel._limparConflitosMemoria(); } catch (e) {}
+
+    /* 1) Igual dos dois lados a menos do carimbo: não há o que decidir. */
+    const base = { _id: 'pac-1', nome: 'Paciente Igual', nascimento: '1980-01-01' };
+    cloudRel.registrarConflito('pacientes',
+      Object.assign({}, base, { _relUpdatedAt: '2026-10-13T10:00:00.000Z' }),
+      Object.assign({}, base, { _relUpdatedAt: '2026-10-13T10:05:00.000Z', _relVersion: 7 }),
+      { motivo: 'pull_com_edicao_local' });
+    /* 2) Um campo realmente diferente: isso é decisão de gente. */
+    cloudRel.registrarConflito('agenda',
+      { _id: 'ag-1', paciente: 'Fulano', hora: '08:00' },
+      { _id: 'ag-1', paciente: 'Fulano', hora: '09:30', _relVersion: 3 },
+      { motivo: 'pull_com_edicao_local' });
+
+    const pend = () => cloudRel._conflitosLer().filter(x => x.status === 'pending' && !x.resolutionRequested);
+    out.doisPendentes = pend().length === 2;
+    const vazios = cloudRel.conflitosSemDivergencia();
+    out.soUmEhVazio = vazios.length === 1 && vazios[0].mod === 'pacientes';
+
+    const n = cloudRel.limparConflitosSemDivergencia();
+    out.limpouUm = n === 1;
+    const restam = pend();
+    out.sobrouOReal = restam.length === 1 && restam[0].mod === 'agenda' &&
+      (restam[0].metadata.changedFields || []).indexOf('hora') >= 0;
+    out.nadaMaisALimpar = cloudRel.limparConflitosSemDivergencia() === 0;
+
+    try { cofre._real.removeItem(cloudRel.CONFLITOS_KEY + '@org-conf'); } catch (e) {}
+    try { cloudRel._limparConflitosMemoria(); } catch (e) {}
+    return out;
+  });
+  assert(r.doisPendentes, 'o cenário exige um conflito vazio e um de verdade');
+  assert(r.soUmEhVazio, 'só conta como vazio quem não tem NENHUM campo divergente');
+  assert(r.limpouUm, 'a limpeza em massa resolve o que nunca foi conflito');
+  assert(r.sobrouOReal, 'e nunca encosta no que tem campo divergente — esse continua esperando decisão');
+  assert(r.nadaMaisALimpar, 'rodar de novo não faz nada: a limpeza não é um varredor de lista');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
