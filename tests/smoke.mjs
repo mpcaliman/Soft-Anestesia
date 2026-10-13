@@ -17322,6 +17322,63 @@ await test('Programador exclui ambiente e conta pela tela, com a contagem à vis
   await page.close();
 });
 
+/* A CÓPIA PRESERVADA NÃO PODE FABRICAR A PRÓXIMA.
+   ---------------------------------------------------------------------------
+   Foto da tela, num computador em uso: centenas de abas "CELINA ALVES DOS
+   SANTOS" abrindo sozinhas, uma atrás da outra, e 167 conflitos preservados.
+   O nome denunciava o mecanismo: "— edição preservada — edição preserv…", o
+   sufixo empilhado sobre si mesmo.
+
+   O laço: quando a nuvem traz outra versão de um rascunho aberto, o app guarda
+   uma CÓPIA local do que estava aqui, para a pessoa comparar. Essa cópia era
+   tratada como rascunho comum — subia para a nuvem, voltava no pull seguinte,
+   era comparada com o que estava aberto, virava conflito, e gerava OUTRA
+   cópia. Cada geração fabricava a próxima.
+
+   Duas travas, porque uma só não bastava: a cópia não sobe (não tem
+   contrapartida no servidor, e não deveria ter), e uma cópia nunca é
+   preservada de novo (seria o retrato de um retrato). */
+await test('Cópia preservada não gera outra cópia: o laço das abas infinitas', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const mod = 'anestesia';
+    rascunhos.setList(mod, [{ id: 'r1', label: 'CELINA ALVES DOS SANTOS',
+      dados: { paciente_nome: 'CELINA' }, _draftVersion: 1 }]);
+    const local = rascunhos.list(mod)[0];
+    const remoto = Object.assign({}, local, { _draftVersion: 2, dados: { paciente_nome: 'CELINA X' } });
+
+    /* a primeira preservação é legítima e tem de acontecer: o trabalho desta
+       aba não pode ser descartado porque a nuvem trouxe outra versão */
+    rascunhosSync._preservarConflito(mod, local, remoto);
+    let lista = rascunhos.list(mod);
+    const copia = lista.find(x => x && x._draftConflictOf);
+    out.preservouUmaVez = lista.length === 2 && !!copia;
+    out.rotuloComUmSufixo = !!copia &&
+      copia.label.split('edição preservada').length === 2;
+
+    /* e a cadeia PARA: preservar a cópia não cria uma terceira */
+    const r2 = rascunhosSync._preservarConflito(mod, copia, Object.assign({}, copia, { _draftVersion: 9 }));
+    lista = rascunhos.list(mod);
+    out.recusouACopia = r2 === null;
+    out.naoCresceu = lista.length === 2;
+
+    /* a cópia é local: não entra na fila de envio, senão volta pelo pull */
+    out.copiaNaoSobe = (() => {
+      const enviaveis = (rascunhos.list(mod) || [])
+        .filter(x => x && x.id && x.dados && !x._draftConflictOf);
+      return !enviaveis.some(x => x._draftConflictOf) &&
+        enviaveis.length === 1 && enviaveis[0].id === 'r1';
+    })();
+    return out;
+  });
+  assert(r.preservouUmaVez, 'a primeira preservação continua acontecendo: o trabalho da aba não pode ser descartado');
+  assert(r.rotuloComUmSufixo, 'o rótulo leva o sufixo UMA vez, não um por geração');
+  assert(r.recusouACopia && r.naoCresceu, 'preservar uma cópia não pode criar outra — era isso que enchia a tela de abas');
+  assert(r.copiaNaoSobe, 'a cópia é local e não sobe: subindo, ela voltava pelo pull e reiniciava o ciclo');
+  await page.close();
+});
+
 /* QUEM ACOMPANHOU A CONSULTA É DADO CLÍNICO E JURÍDICO.
    ---------------------------------------------------------------------------
    Quem estava na sala ouviu a orientação de jejum, vai lembrar da medicação da
