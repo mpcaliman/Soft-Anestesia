@@ -19795,11 +19795,18 @@ await test('Acervo preso só neste aparelho: declaração move, ausência dela n
     programador.pintarLegadoLocal();
     out.telaLista = /medsys\.v3\.anestesia/.test(host.textContent) && /medsys\.v5\.pacientes/.test(host.textContent);
     out.telaSemAvisoDeDuas = !/clínicas já usaram este navegador/i.test(host.textContent);
-    /* Duas gavetas no mesmo navegador: o aviso tem de ser impossível de não ver. */
+    /* DUAS gavetas no mesmo navegador: o aviso tem de ser impossível de não
+       ver. (A limpeza acima apagou todas as chaves `medsys.`, inclusive as com
+       sufixo, então o cenário começa sem gaveta nenhuma — e é preciso criar as
+       duas, não uma.) */
+    out.gavetasAntes = cofre.gavetasNoAparelho().length;
     R.setItem('medsys.v3.anestesia@aabbccdd', '[]');
+    R.setItem('medsys.v3.anestesia@eeff0011', '[]');
+    out.duasGavetasVistas = cofre.gavetasNoAparelho().length === 2;
     programador.pintarLegadoLocal();
     out.avisoDeDuasGavetas = /clínicas já usaram este navegador/i.test(host.textContent);
     R.removeItem('medsys.v3.anestesia@aabbccdd');
+    R.removeItem('medsys.v3.anestesia@eeff0011');
 
     /* SEM declaração, nada se move — em nenhuma das portas. */
     const intacto = () => R.getItem('medsys.v3.anestesia') !== null && R.getItem('medsys.v5.pacientes') !== null;
@@ -19843,6 +19850,8 @@ await test('Acervo preso só neste aparelho: declaração move, ausência dela n
   });
   assert(r.quarentenaAberta, 'o cenário exige acervo de verdade em quarentena');
   assert(r.telaLista, 'quem vai declarar precisa ver, chave a chave, o que está declarando');
+  assert(r.gavetasAntes === 0 && r.duasGavetasVistas,
+    'a contagem de gavetas tem de enxergar identificador de clínica que não seja hexadecimal');
   assert(r.telaSemAvisoDeDuas && r.avisoDeDuasGavetas,
     'o aviso de várias clínicas no mesmo navegador só aparece quando é o caso — e aparece');
   assert(r.recusaSemDeclaracao, 'sem a declaração marcada, nada pode ser movido');
@@ -20000,6 +20009,71 @@ await test('Doses: escolher o paciente traz o dado mais recente, com a procedên
   assert(r.sexo && r.idadeDerivada, 'sexo e idade entram junto; idade vem do nascimento quando não está escrita');
   assert(r.mostraProcedencia, 'numa conta de dose, de quando é o peso faz parte da informação');
   assert(r.avisaQueFalta, 'faltando peso, a tela diz que falta em vez de deixar a conta sair pela metade');
+  await page.close();
+});
+
+/* 269) O PDF que vai para o Drive é o mesmo documento, não um despejo de texto
+
+   Foto do arquivo salvo: título três vezes, logomarca com o título escrito por
+   cima, "Nome::", "Idade::", "Risco::" com dois-pontos dobrados em toda linha
+   da identificação, e os exames um por linha em vez da grade.
+
+   A impressão na tela sai certa porque usa o motor do navegador; o PDF do
+   backup é montado por um percurso do DOM, e era ele que estava quebrado. Três
+   defeitos independentes, um deles grave:
+
+   • `querySelectorAll` devolve ANCESTRAL E DESCENDENTE quando os dois batem com
+     a lista, e `.pp-doc-title` é uma div que contém um h1, `.pp-block` contém
+     um p. Cada nó era impresso pelo seu innerText, então o texto do filho saía
+     junto com o do pai e depois outra vez sozinho — blocos inteiros em
+     duplicata. Era a causa principal do "completamente desconfigurado";
+   • o rótulo já traz os dois-pontos do HTML e o código acrescentava outros;
+   • sem `getImageProperties`, a altura da logomarca era estimada por uma
+     proporção 3:1 inventada, e marca mais alta que isso ficava sob o texto. */
+await test('PDF do backup: cada texto uma vez, rótulo sem dois-pontos dobrados, exames em grade', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const ppp = document.getElementById('ppp');
+    const guardado = ppp.innerHTML;
+    ppp.innerHTML =
+      '<div class="pp-doc-title"><h1>AVALIAÇÃO PRÉ-ANESTÉSICA</h1></div>' +
+      '<div class="pp-field"><span class="pp-label">Nome:</span>' +
+      '<span class="pp-value">JAILDETE FERRAZ OLIVEIRA RAMOS</span></div>' +
+      '<div class="pp-block"><div class="pp-label">Comorbidades:</div>' +
+      '<p class="pp-value">HAS (Hipertensão arterial), Arritmia / FA</p></div>' +
+      '<div class="pp-lab-grid">' +
+      ['Hb 14,6', 'Ht 44,5', 'Hm 5,04', 'Leuco 7210', 'Plt 262000', 'Ureia 51,9', 'Creat 0,55', 'K 4,15']
+        .map(t => '<span class="pp-lab-item">' + t + '</span>').join('') + '</div>';
+
+    const J = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+    out.temJsPDF = !!J;
+    if (!J) { ppp.innerHTML = guardado; return out; }
+    const doc = printPreview._gerarDocDeTexto(J, ppp);
+    ppp.innerHTML = guardado;
+
+    /* Lê o texto de volta do PDF gerado, que é o que o paciente recebe. */
+    const bruto = doc.output('datauristring');
+    const texto = decodeURIComponent(escape(atob(bruto.split(',')[1] || '')));
+    out.paginas = doc.getNumberOfPages();
+
+    const conta = (alvo) => {
+      let n = 0, i = 0;
+      for (;;) { const j = texto.indexOf(alvo, i); if (j < 0) break; n++; i = j + alvo.length; }
+      return n;
+    };
+    out.tituloUmaVez = conta('AVALIA') <= 2;        /* título + eventual rótulo de página */
+    out.semDoisPontosDobrados = texto.indexOf('Nome::') < 0;
+    out.nomeSaiu = texto.indexOf('JAILDETE') >= 0;
+    out.comorbidadeUmaVez = conta('Arritmia') === 1;
+    out.examesSairam = texto.indexOf('14,6') >= 0 && texto.indexOf('262000') >= 0;
+    return out;
+  });
+  assert(r.temJsPDF, 'o cenário exige a biblioteca de PDF carregada');
+  assert(r.nomeSaiu && r.examesSairam, 'o conteúdo clínico tem de chegar ao PDF');
+  assert(r.semDoisPontosDobrados, 'documento de paciente não sai com "Nome::"');
+  assert(r.comorbidadeUmaVez, 'texto de bloco não pode sair duas vezes — pai e filho batiam com o mesmo seletor');
+  assert(r.tituloUmaVez, 'o título do documento não se repete três vezes');
   await page.close();
 });
 

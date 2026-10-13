@@ -8858,6 +8858,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <!-- Tabela -->
     <div class="card no-collapse">
       <div class="card-header"><div class="card-title-wrap"><h2>Registros</h2></div></div>
+      <div id="fin-contexto" style="display:none;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:9px 18px;background:var(--primary-soft);border-bottom:1px solid var(--primary);font-size:.84rem;color:var(--primary-darker)"></div>
       <div class="card-body" style="padding:0">
         <div style="overflow-x:auto">
           <table class="data" id="financeiro-table">
@@ -43767,6 +43768,8 @@ const financeiro = {
     };
     if (codigos.length) data.codigos = codigos;
     const saved = store.save('financeiro', data);
+    /* a lista de baixo passa a mostrar o que ESTE lançamento criou */
+    try { financeiro.marcarContexto('avulso', 'lançados agora por \u201cLançamento rápido\u201d', saved && saved._id); } catch (e) {}
     modal.close();
     try { financeiro.render(); } catch (e) {}
     store.notificarNuvem(saved, 'Lançamento de ' + data.paciente +
@@ -43895,6 +43898,8 @@ const financeiro = {
     }
     const saved = store.save('financeiro', data);
     store.notificarNuvem(saved, 'Registro financeiro');
+    /* mesma regra do lançamento rápido: a lista mostra o que esta ação tocou */
+    try { financeiro.marcarContexto('form', 'criados ou editados agora', saved && saved._id); } catch (e) {}
     financeiro.cancelar();
     financeiro.render();
   },
@@ -44438,7 +44443,16 @@ const financeiro = {
     const planosSel = financeiro.planos._selecao;   /* null = todos */
     const fProc = getVal('fin-f-procedimento').toLowerCase();
     const fForma = getVal('fin-f-forma');
+    const ctx = financeiro._contexto;
     return list.filter(x => {
+      /* CONTEXTO DA AÇÃO. "Ao clicar em lançamento, esses registros abaixo
+         devem ser o lançamento que fiz, para eu saber o que fiz e até usar
+         como conferência."
+         A lista de baixo era sempre a geral, independentemente do que a pessoa
+         tivesse acabado de fazer na barra de cima — então o trabalho recém-
+         feito se dissolvia no meio de tudo, e não havia como conferir. Com um
+         contexto ativo, a lista mostra o que AQUELA ação tocou. */
+      if (ctx && ctx.ids && ctx.ids.length && ctx.ids.indexOf(x._id) < 0) return false;
       if (fStatus && x.status !== fStatus) return false;
       if (fPago === 'sim' && !x.pago) return false;
       if (fPago === 'nao' && x.pago) return false;
@@ -44578,8 +44592,37 @@ const financeiro = {
     }
   },
 
+  /* ---------- O QUE VOCÊ ACABOU DE FAZER ----------
+     Não é um filtro inventado por mim: é o conjunto de registros que a ação
+     aberta na barra criou ou alterou AGORA. Fica anunciado em cima da lista,
+     com a contagem e um botão para voltar à lista geral — contexto que não se
+     anuncia e não se desfaz é pior do que contexto nenhum, porque a pessoa
+     passa a achar que perdeu registro. */
+  _contexto: null,
+  marcarContexto(chave, rotulo, id) {
+    const c = financeiro._contexto;
+    if (c && c.chave === chave) {
+      if (id && c.ids.indexOf(id) < 0) c.ids.push(id);
+    } else {
+      financeiro._contexto = { chave, rotulo, ids: id ? [id] : [] };
+    }
+    financeiro.render();
+  },
+  limparContexto() { financeiro._contexto = null; financeiro.render(); },
+  _pintarContexto() {
+    const host = document.getElementById('fin-contexto');
+    if (!host) return;
+    const c = financeiro._contexto;
+    if (!c || !c.ids.length) { host.style.display = 'none'; host.innerHTML = ''; return; }
+    host.style.display = '';
+    host.innerHTML = '<span><b>Mostrando ' + c.ids.length + ' registro(s) ' + utils.escapeHTML(c.rotulo) +
+      '</b> — e não a lista inteira.</span>' +
+      '<button type="button" class="btn btn-xs" onclick="financeiro.limparContexto()">Ver todos os registros</button>';
+  },
+
   render() {
     const list = financeiro.filtrar();
+    try { financeiro._pintarContexto(); } catch (e) {}
     /* O botão de planos e a contagem seguem o que a lista está mostrando —
        inclusive quando a tela é redesenhada por outro caminho (registro novo,
        sincronização), e não só quando alguém aperta Filtrar. */
