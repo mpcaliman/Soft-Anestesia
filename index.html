@@ -27378,6 +27378,28 @@ const fechamento = {
     const anterior = fechamento._ler();
     const feitos = (anterior && anterior.mod === mod && anterior.id === id) ? (anterior.feitos || {}) : {};
     fechamento._gravar({ mod, id, nome: fechamento._nomeDe(mod, doc), feitos, em: new Date().toISOString() });
+    /* ESPERA A VEZ, E É O ÚNICO QUE ESPERA.
+       A cobrança abre sozinha ao finalizar, e tem de continuar abrindo: foi ela
+       que o automático existe para não deixar esquecida. O painel entra depois.
+       O defeito antigo era DUAS janelas disputando o mesmo lugar, cada uma com
+       seu laço — sem ordem definida, ganhava quem acordasse primeiro. Com um só
+       esperando, a ordem é sempre a mesma e não há corrida.
+       Nunca ficando livre, a faixa do rodapé permanece: o fechamento não se
+       perde, é retomado por lá. */
+    fechamento._renderQuandoLivre();
+  },
+  _renderQuandoLivre(tentativa) {
+    let ocupado = false;
+    try {
+      const bd = document.getElementById('modal-backdrop');
+      const pp = document.getElementById('print-preview-overlay');
+      ocupado = (bd && bd.classList.contains('show')) ||
+                (pp && pp.classList.contains('show')) || !!document.querySelector('.bloq-janela');
+    } catch (e) {}
+    if (ocupado) {
+      if ((tentativa || 0) < 150) { setTimeout(() => fechamento._renderQuandoLivre((tentativa || 0) + 1), 700); }
+      return;
+    }
     fechamento._render();
   },
   reabrir() { const st = fechamento._ler(); if (st) fechamento._render(); },
@@ -39031,12 +39053,14 @@ const fin = {
        das duas sumir sem aviso — e a que sumiria é justamente a da cobrança.
        Espera a vez. */
     abrirQuandoLivre(mod, doc, aoFechar, tentativa) {
-      /* NÃO SE DISPUTA MAIS A JANELA. Enquanto houver um fechamento aberto para
-         este atendimento, a cobrança é um ITEM dele — e quem decide a ordem é a
-         pessoa, não qual laço de espera acordar primeiro. Era essa corrida
-         entre duas janelas (esta, 120 tentativas de 800 ms; a do termo/SRPA, 40
-         de 1500 ms) que fazia o encaminhamento "às vezes não ir". */
-      try { if (fechamento.ativo()) return; } catch (e) {}
+      /* ESTA JANELA CONTINUA ABRINDO SOZINHA, E É DE PROPÓSITO.
+         A primeira versão deste conserto a transformou em item do fechamento, e
+         com isso o lançamento financeiro deixou de nascer: finalizar passou a
+         não cobrar nada até alguém lembrar de clicar. A cobrança esquecida é
+         justamente o prejuízo que o automático existe para evitar.
+         A corrida que causava o "às vezes não vai" era entre DUAS janelas
+         disputando um lugar. Agora há uma ordem: a cobrança abre, e o painel de
+         fechamento espera a vez — um só esperando não é corrida. */
       let ocupado = false;
       try {
         const bd = document.getElementById('modal-backdrop');

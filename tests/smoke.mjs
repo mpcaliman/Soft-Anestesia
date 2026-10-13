@@ -1305,10 +1305,15 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
     set('hora_sala_saida', '12:00'); set('anestesiologista', 'Dr. Fluxo');
     anestesia.vitais.add(false, { hora: '11:50', pas: '120', pad: '80', fc: '72', spo2: '98' });
 
-    // finalizar → o modal oferece a SRPA automática (agora em TODA finalização sem SRPA)
+    /* Finalizar abre o FECHAMENTO DO ATENDIMENTO, que substituiu a cascata de
+       janelas disputando o mesmo lugar. A SRPA continua oferecida — agora como
+       item da lista, e a um clique da versão automática, que é exercitada
+       logo abaixo. */
     anestesia.salvar({ finalizar: true });
-    await new Promise(r => setTimeout(r, 600));
-    out.modalOferece = document.body.textContent.includes('SRPA automática s/ intercorrências');
+    await new Promise(r => setTimeout(r, 2000));
+    const corpoPos = document.body.textContent || '';
+    out.modalOferece = corpoPos.includes('Fechamento do atendimento') &&
+      /Recupera..o p.s-anest.sica \(SRPA\)/i.test(corpoPos);
     /* ao finalizar o rascunho fecha e o form é limpo — o id vive no registro */
     const fichaId = store.list('anestesia')[0]._id;
     modal.close();
@@ -1401,7 +1406,7 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
     store.setList('anestesia', []); store.setList('recuperacao', []);
     return out;
   });
-  assert(r.modalOferece, 'ao finalizar deveria oferecer a SRPA automática');
+  assert(r.modalOferece, 'ao finalizar, o fechamento do atendimento tem de oferecer a SRPA');
   assert(r.entradaPrefill, 'entrada da SRPA deveria vir pré-preenchida com a saída de sala');
   assert(r.srpaFinalizada, 'a SRPA automática deveria nascer FINALIZADA');
   assert(r.dadosCertos, 'nome/horários/procedência/Aldrete 10 deveriam estar preenchidos');
