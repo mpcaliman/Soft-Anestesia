@@ -298,11 +298,16 @@ await check('baseline fechada usa os hashes registrados, sem reescrever CONCURRE
   assert.match(MANAGED_STORAGE_REALTIME_PROBE,/before_state is distinct from after_state/);
   assert.match(MANAGED_STORAGE_REALTIME_PROBE,/rollback;\s*$/);
   assert.doesNotMatch(MANAGED_STORAGE_REALTIME_PROBE,/alter\s+(?:role|user|[^;]+\s+owner)|\bgrant\b|using\(true\)/i);
-  assert.equal(plan.length, 36);
+  /* 0035 acrescentou os exames em série à allowlist clínica da retificação:
+     o plano cresce em um, e a cauda passa a terminar nela. A posição das duas
+     migrações do Supabase (0001 na frente, 0002 antes da cauda) continua sendo
+     o que este teste guarda. */
+  assert.equal(plan.length, 37);
   assert.equal(plan[0].path, 'supabase/migrations/0001_assinaturas.sql');
-  assert.match(plan.at(-3).path, /^database\/migrations\/0033_[a-z0-9_]+\.sql$/);
-  assert.equal(plan.at(-2).path, 'supabase/migrations/0002_assinaturas_hardening.sql');
-  assert.match(plan.at(-1).path, /^database\/migrations\/0034_[a-z0-9_]+\.sql$/);
+  assert.match(plan.at(-4).path, /^database\/migrations\/0033_[a-z0-9_]+\.sql$/);
+  assert.equal(plan.at(-3).path, 'supabase/migrations/0002_assinaturas_hardening.sql');
+  assert.match(plan.at(-2).path, /^database\/migrations\/0034_[a-z0-9_]+\.sql$/);
+  assert.match(plan.at(-1).path, /^database\/migrations\/0035_[a-z0-9_]+\.sql$/);
   const source = plan.find(entry => entry.path.endsWith('0026_e1_performance_indexes.sql'));
   assert.throws(() => migrationSqlForEmptyDatabase(source.path, source.sql, false));
   const derived = migrationSqlForEmptyDatabase(source.path, source.sql, true);
@@ -420,7 +425,8 @@ try {
       for (const key of ['localSqlVerified', 'stagingVerified', 'realAuthApiVerified', 'productionVerified']) assert.equal(evidence[key], false);
       assert.ok(evidence.tests.some(test => test.passed === false));
       assert.ok(evidence.tests.some(test => test.name === 'ephemeral-project-cleanup' && test.passed));
-      assert.equal(evidence.counters.migrations, mode === 'rls-fixture-failure' ? 36 : 0);
+      /* o contador acompanha o plano, que cresceu com a 0035 */
+      assert.equal(evidence.counters.migrations, mode === 'rls-fixture-failure' ? 37 : 0);
       await assert.rejects(readFile(join(temporaryWorkdir, 'supabase/config.toml')));
     });
   }

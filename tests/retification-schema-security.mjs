@@ -3,13 +3,19 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const sql = await readFile(new URL('../database/migrations/0031_append_only_retification_cas.sql', import.meta.url),'utf8');
+/* A 0035 redefine `app.valid_retification_fields` para admitir os exames em
+   série (`_labSeries`, `_exameSeries`). A allowlist que vale é a da ÚLTIMA
+   migração que define a função — comparar o cliente com a 0031 reprovaria por
+   estar olhando uma versão superada. O resto do contrato continua sendo
+   conferido contra a 0031, que é quem o estabelece. */
+const sqlAllowlist = await readFile(new URL('../database/migrations/0035_retificacao_exames_em_serie.sql', import.meta.url),'utf8');
 const fixture = await readFile(new URL('./sql/retification-cas-security.sql', import.meta.url),'utf8');
 const historical = await readFile(new URL('../database/migrations/0020_conflict_preservation_and_immutability.sql', import.meta.url),'utf8');
 const client = await readFile(new URL('../index.html', import.meta.url),'utf8');
 const names = text => [...text.matchAll(/'([^']+)'/g)].map(m => m[1]).sort();
 const sqlProtected = sql.match(/lower\(k\) = any\(array\[([\s\S]*?)\]\)/)?.[1];
 const clientProtected = client.match(/CAMPOS_PROTEGIDOS:\s*\[([\s\S]*?)\]/)?.[1];
-const sqlClinical = sql.match(/p_depth = 0 and k = any\(array\[([\s\S]*?)\]/)?.[1];
+const sqlClinical = sqlAllowlist.match(/p_depth = 0 and k = any\(array\[([\s\S]*?)\]/)?.[1];
 const clientClinical = client.match(/CAMPOS_CLINICOS_INTERNOS:\s*\[([\s\S]*?)\]/)?.[1];
 assert(sqlProtected && clientProtected && sqlClinical && clientClinical);
 assert.deepEqual(names(sqlProtected),names(clientProtected),'cliente e servidor devem proteger as mesmas identidades, assinaturas e credenciais');

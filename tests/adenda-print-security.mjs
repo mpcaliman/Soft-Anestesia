@@ -31,7 +31,7 @@ vm.runInContext(activeRegistry,sandbox);
 vm.runInContext(appRoot===repo?compiled.sources.get('src/app/runtime-01.js'):fixture,sandbox);
 const before=JSON.stringify(record);const rendered=sandbox.renderAdenda(record);
 assert.equal(JSON.stringify(record),before,'rendering cannot mutate the signed original or its corrections');
-assert.match(rendered,/ADENDOS \/ CORREÇÕES — 2/);assert.match(rendered,/original, preservado/);
+assert.match(rendered,/INFORMAÇÕES ACRESCENTADAS APÓS A FINALIZAÇÃO — 2/);assert.match(rendered,/original permanece preservado/);
 assert.match(rendered,/Synthetic author &amp; &lt;script&gt;/);
 assert.match(rendered,/&lt;img src=x onerror=&quot;/);assert.match(rendered,/&lt;script&gt;/);
 assert.match(rendered,/Second correction: synthetic laboratory result\./);

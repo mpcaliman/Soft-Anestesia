@@ -22189,7 +22189,13 @@ const adendos = (() => {
           '<div class="pp-value">' + E(c.valor) + '</div></div>').join('');
       }
       if (texto) {
-        corpo += '<div class="pp-block" style="margin:3px 0"><div class="pp-value">' + E(texto) + '</div></div>';
+        /* TAMANHO DE LEITURA, NÃO DE RODAPÉ. Aqui vai conteúdo clínico escrito
+           à mão — exame que chegou depois, correção de dose, de lado. Já saiu
+           em 7,5pt uma vez, e imprimir isso em letra de rodapé é esconder com
+           elegância. Os 9pt ficam declarados, não herdados, para que a garantia
+           sobreviva a mudanças de folha. */
+        corpo += '<div class="pp-block" style="margin:3px 0"><div class="pp-value" ' +
+          'style="font-size:9pt;line-height:1.45;white-space:pre-wrap">' + E(texto) + '</div></div>';
       }
       if (!corpo) corpo = '<div class="pp-value" style="color:#777">(sem conteúdo)</div>';
       return '<div style="margin-bottom:8px;padding-top:5px;border-top:1px dashed #cfd5dc">' +
