@@ -17322,6 +17322,65 @@ await test('Programador exclui ambiente e conta pela tela, com a contagem à vis
   await page.close();
 });
 
+/* CADA COLETA COM A SUA DATA.
+   ---------------------------------------------------------------------------
+   A ficha tinha um único conjunto de exames e uma única data. Mas o paciente
+   chega com os exames de agosto e volta com os de outubro, e os dois importam:
+   o que diz alguma coisa não é a creatinina de hoje, é a creatinina de hoje AO
+   LADO da de dois meses atrás. Antes era preciso escolher uma — ou amontoar
+   tudo num campo de observação, onde a informação se perde.
+
+   O bloco principal continua sendo o que sempre foi (nenhuma ficha antiga
+   muda); o ➕ abre quantas coletas forem necessárias, cada uma com data
+   própria, e a folha imprime todas no mesmo formato, para a comparação
+   existir na mesma página. */
+await test('Exames em série: cada coleta com a sua data, da tela até a folha', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('pre');
+    labSerie.add('pre-lab-series', { data: '2026-08-15', hb: '11,2', creat: '1,8', k: '4,0' });
+    labSerie.add('pre-lab-series', { data: '2026-10-02', hb: '14,6', creat: '0,90' });
+    exameSerie.add('pre-exame-series', { tipo: 'RX de tórax', descricao: 'Sem consolidações', data: '2026-09-30' });
+
+    out.doisBlocos = document.querySelectorAll('#pre-lab-series .lab-serie').length === 2;
+    const col = labSerie.coletar('pre-lab-series');
+    out.coletaCerta = col.length === 2 && col[0].hb === '11,2' && col[0].data === '2026-08-15'
+      && col[1].creat === '0,90';
+    /* coleta em branco não vira registro: campo aberto por engano não polui a ficha */
+    labSerie.add('pre-lab-series', {});
+    out.vazioNaoEntra = labSerie.coletar('pre-lab-series').length === 2;
+    /* ida e volta: o que foi salvo reabre igual */
+    labSerie.restaurar('pre-lab-series', col);
+    out.idaEVolta = labSerie.coletar('pre-lab-series').length === 2
+      && document.querySelector('#pre-lab-series .ls-data').value === '2026-08-15';
+
+    const d = { nome: 'Teste', _labSeries: col, _exameSeries: exameSerie.coletar('pre-exame-series') };
+    const folha = document.createElement('div');
+    folha.innerHTML = printPreview._labSeriesGrid(d) + printPreview._exameSeriesBloco(d);
+    const t = folha.textContent;
+    out.duasDatasNaFolha = t.includes('15/08/2026') && t.includes('02/10/2026');
+    out.valoresNaFolha = t.includes('11,2') && t.includes('14,6') && t.includes('0,90');
+    out.exameNaFolha = t.includes('RX de tórax') && t.includes('30/09/2026');
+    out.mesmaGradeDaPrincipal = /pp-lab-grid/.test(printPreview._labSeriesGrid(d));
+    /* ficha sem série nenhuma não ganha bloco vazio */
+    out.semSerieNadaSai = printPreview._labSeriesGrid({}) === '' && printPreview._exameSeriesBloco({}) === '';
+
+    /* comorbidades, alergias e medicações ganharam fronteira própria */
+    out.anamneseSeparada = document.querySelectorAll('#pre-sec-anamnese .bloco-anamnese').length === 3;
+    return out;
+  });
+  assert(r.doisBlocos && r.coletaCerta, 'cada ➕ abre uma coleta com data própria, e o que foi digitado é o que se coleta');
+  assert(r.vazioNaoEntra, 'coleta aberta por engano e deixada em branco não vira registro na ficha');
+  assert(r.idaEVolta, 'o que foi salvo reabre igual — senão a série se perde no primeiro recarregamento');
+  assert(r.duasDatasNaFolha && r.valoresNaFolha, 'a folha traz as duas coletas com as suas datas: é a comparação que vale');
+  assert(r.mesmaGradeDaPrincipal, 'e na MESMA grade da coleta principal, para a leitura ser uma só');
+  assert(r.exameNaFolha, 'exame de imagem em série sai com descrição e data');
+  assert(r.semSerieNadaSai, 'ficha sem série nenhuma não ganha bloco vazio');
+  assert(r.anamneseSeparada, 'comorbidades, alergias e medicações passam a ter fronteira visual própria');
+  await page.close();
+});
+
 /* EXAME QUE CHEGOU DEPOIS SAI COMO EXAME, NÃO COMO EXTRATO DE ALTERAÇÕES.
    ---------------------------------------------------------------------------
    A folha do Jotenildo saía com `Hb 13,2` no campo e, no fim, vinte linhas no

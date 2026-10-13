@@ -659,6 +659,50 @@ html[data-theme="dark"] .theme-toggle:hover {
 /* === EXAMES LABORATORIAIS EXTRAS (campo livre) === */
 .lab-extras-wrap { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .lab-extra { flex-direction: row !important; align-items: center; gap: 6px; }
+
+/* === EXAMES EM SÉRIE — cada coleta com a sua data ===
+   A moldura e a barra lateral existem para que uma coleta não se confunda com
+   a seguinte: lendo de relance, a data manda, e os valores abaixo dela são os
+   daquele dia. Sem a separação, vinte e seis campos repetidos viram um muro. */
+.lab-series-wrap, .exame-series-wrap { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.lab-serie {
+  border: 1px solid var(--border); border-left: 3px solid var(--primary);
+  border-radius: 8px; padding: 10px 12px; background: var(--surface);
+}
+.lab-serie-topo { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.lab-serie-topo label { font-size: .8rem; font-weight: 600; color: var(--text-mute); margin: 0; }
+.lab-serie-topo .ls-data {
+  padding: 5px 8px; border: 1px solid var(--border); border-radius: 5px; font-size: .84rem; width: auto;
+}
+.lab-serie-topo .lab-extra-rm { margin-left: auto; }
+.exame-serie {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  border: 1px solid var(--border); border-left: 3px solid var(--primary);
+  border-radius: 8px; padding: 8px 10px; background: var(--surface);
+}
+.exame-serie .es-tipo { flex: 0 1 190px; }
+.exame-serie .es-desc { flex: 1 1 260px; }
+.exame-serie .es-data { flex: 0 0 auto; width: auto; }
+@media (max-width: 640px) {
+  .exame-serie .es-tipo, .exame-serie .es-desc, .exame-serie .es-data { flex: 1 1 100%; }
+}
+
+/* === ANAMNESE: comorbidades, alergias e medicações precisam de fronteira ===
+   Os três são caixas de texto seguidas de chips e de botões de atalho. Sem
+   moldura, o fim de um e o começo do outro ficam no mesmo plano visual e o
+   bloco inteiro "embola" — a reclamação foi exatamente essa. Cada um passa a
+   ter a sua moldura e um título destacado, para a vista achar o que procura
+   sem precisar ler tudo. */
+.bloco-anamnese {
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px 12px; background: var(--surface-alt, var(--surface));
+}
+.bloco-anamnese > label {
+  display: block; font-size: .82rem; font-weight: 700; letter-spacing: .2px;
+  color: var(--primary-darker); margin: 0 0 7px; padding-bottom: 5px;
+  border-bottom: 1px solid var(--border);
+}
+.bloco-anamnese .field-templates { margin-top: 7px; }
 /* Itens de seguimento (consultas de retorno datadas) */
 .seg-item {
   border: 1px solid var(--border); border-left: 3px solid var(--primary);
@@ -4729,7 +4773,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-13b</b><br>
+    v7.1 · build <b id="build-tag">2026-10-13c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -5045,16 +5089,16 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
       </div>
       <div class="card-body" data-sec-edit>
         <div class="grid">
-          <div class="field col-6" data-sec-edit><label>Comorbidades</label>
+          <div class="field col-6 bloco-anamnese" data-sec-edit><label>Comorbidades</label>
             <textarea name="comorbidades" rows="2"></textarea>
             <div class="comorb-rapidas" data-alvo="#form-pre [name=comorbidades]"></div>
             <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.comorbidades.abrir('#form-pre [name=comorbidades]')">➕ Mais comorbidades…</button><button type="button" class="btn btn-xs tpl-btn" onclick="window.comorbidades.negar('#form-pre [name=comorbidades]')">🚫 Nega comorbidades</button></div>
           </div>
-          <div class="field col-6"><label>Alergias</label><textarea name="alergias" rows="2"></textarea>
+          <div class="field col-6 bloco-anamnese"><label>Alergias</label><textarea name="alergias" rows="2"></textarea>
             <div class="alerg-rapidas" data-alvo="#form-pre [name=alergias]"></div>
             <div class="field-templates"><button type="button" class="btn btn-xs tpl-btn" onclick="window.alergias.abrir('#form-pre [name=alergias]')">⚠️ Mais alergias…</button><button type="button" class="btn btn-xs tpl-btn" onclick="window.alergias.negarCampo('#form-pre [name=alergias]')">🚫 Nega alergias</button></div>
           </div>
-          <div class="field col-12" data-sec-edit>
+          <div class="field col-12 bloco-anamnese" data-sec-edit>
             <label>Medicações em uso</label>
             <div class="med-pre-wrap">
               <div class="med-pre-add" style="position:relative">
@@ -5138,6 +5182,13 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             </div>
             <div class="lab-extras-wrap" id="pre-lab-extras"></div>
             <button type="button" class="btn btn-xs" style="margin-top:6px" onclick="labExtra.add('pre-lab-extras')">➕ Adicionar exame</button>
+
+            <!-- OUTRAS COLETAS, cada uma com a sua data. O bloco acima continua
+                 sendo o principal; aqui entram as demais, quantas forem. -->
+            <div class="lab-series-wrap" id="pre-lab-series"></div>
+            <button type="button" class="btn btn-xs" style="margin-top:8px" onclick="labSerie.add('pre-lab-series')"
+              title="Exames de sangue de outra data — a comparação entre coletas é o que diz alguma coisa">➕ Outra coleta de sangue (com data)</button>
+
             <div class="grid" style="margin-top:8px">
               <div class="field col-9"><label style="font-size:.78rem">ECG</label><input type="text" name="lab_ecg" placeholder="Ex.: Ritmo sinusal, sem outros achados"></div>
               <div class="field col-3"><label style="font-size:.78rem">📅 Data do ECG</label><input type="date" name="lab_ecg_data"></div>
@@ -5146,6 +5197,11 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
               <div class="field col-9"><label style="font-size:.78rem">Outros exames / observações</label><textarea name="exames_compl" rows="2"></textarea></div>
               <div class="field col-3"><label style="font-size:.78rem">📅 Data destes exames</label><input type="date" name="exames_compl_data"></div>
             </div>
+
+            <!-- Demais exames (ECG, ECO, RX, TC, laudos), cada um com a sua data -->
+            <div class="exame-series-wrap" id="pre-exame-series"></div>
+            <button type="button" class="btn btn-xs" style="margin-top:8px" onclick="exameSerie.add('pre-exame-series')"
+              title="Outro exame de imagem, traçado ou laudo, com a data em que foi feito">➕ Outro exame (com data)</button>
 
             <!-- ANEXOS DE EXAMES (fotos e PDFs) -->
             <h3 style="font-size:.88rem;color:var(--primary-darker);margin:16px 0 6px;border-top:1px solid var(--border);padding-top:12px">
@@ -15551,6 +15607,8 @@ const pre = {
     try { pre.meds.limpar(); } catch (e) {}
     try { pre.procs.limpar(); } catch (e) {}
     try { const c = document.getElementById('pre-lab-extras'); if (c) c.innerHTML = ''; } catch (e) {}
+    try { const c = document.getElementById('pre-lab-series'); if (c) c.innerHTML = ''; } catch (e) {}
+    try { const c = document.getElementById('pre-exame-series'); if (c) c.innerHTML = ''; } catch (e) {}
     document.querySelector(`#${pre.formId} [name="data"]`).value = utils.hojeISO();
     try { pre.labs.limpar(); } catch (e) {}
     pre._linkPendente = null;
@@ -15574,6 +15632,8 @@ const pre = {
     try { data._medsLista = pre.meds._lista.slice(); } catch (e) {}
     try { data._procsExtra = pre.procs.coletar(); } catch (e) {}
     try { data._labExtras = labExtra.coletar('pre-lab-extras'); } catch (e) {}
+    try { data._labSeries = labSerie.coletar('pre-lab-series'); } catch (e) {}
+    try { data._exameSeries = exameSerie.coletar('pre-exame-series'); } catch (e) {}
     try { data._docs = prontuario.coletar('pre'); } catch (e) {}
     try { data._premedSel = pre.premed.coletar(); } catch (e) {}
     const f = document.getElementById(pre.formId);
@@ -15822,6 +15882,8 @@ const pre = {
     try { pre.meds.restaurar(item); } catch (e) {}
     try { pre.procs.restaurar(item._procsExtra); } catch (e) {}
     try { labExtra.restaurar('pre-lab-extras', item._labExtras); } catch (e) {}
+    try { labSerie.restaurar('pre-lab-series', item._labSeries); } catch (e) {}
+    try { exameSerie.restaurar('pre-exame-series', item._exameSeries); } catch (e) {}
     /* marca os exames fora da faixa — e, se a ficha já está finalizada, tira
        a marca: o documento assinado mostra os valores, sem grifo do sistema */
     try { pre.labs.ligar(); pre.labs.marcar(f); } catch (e) {}
@@ -21431,7 +21493,7 @@ const adendos = (() => {
   },
   /* Retificação é um evento append-only. A projeção nunca substitui o pai
      finalizado; só recibos canônicos do servidor alteram os campos vigentes. */
-  CAMPOS_CLINICOS_INTERNOS: ['_medsLista', '_procsExtra', '_labExtras', '_premedSel', '_seguimentos', '_procsRealizados', '_resumo'],
+  CAMPOS_CLINICOS_INTERNOS: ['_medsLista', '_procsExtra', '_labExtras', '_premedSel', '_seguimentos', '_procsRealizados', '_resumo', '_labSeries', '_exameSeries'],
   CAMPOS_PROTEGIDOS: ['id', 'patient_id', 'patientid', 'patientref', 'patientkey', 'caseid', 'casekey',
     'encounter_id', 'encounterid', 'organization_id', 'organizationid', 'orgid', 'legacy_id', 'version',
     'created_by', 'created_at', 'updated_at', 'updated_by', 'finalized_at', 'signed_at', 'signed_by', 'finalized_by', 'author_id', 'authorid',
@@ -21582,7 +21644,8 @@ const adendos = (() => {
       if (mod === 'anestesia') return JSON.stringify(anestesia.coletarEstruturado());
       const dados = utils.formData('form-' + mod);
       if (mod === 'pre') Object.assign(dados, { _medsLista: pre.meds._lista, _procsExtra: pre.procs.coletar(),
-        _labExtras: labExtra.coletar('pre-lab-extras'), _premedSel: pre.premed.coletar() });
+        _labExtras: labExtra.coletar('pre-lab-extras'), _premedSel: pre.premed.coletar(),
+        _labSeries: labSerie.coletar('pre-lab-series'), _exameSeries: exameSerie.coletar('pre-exame-series') });
       if (mod === 'consulta') Object.assign(dados, { _labExtras: labExtra.coletar('consulta-lab-extras'),
         _seguimentos: consulta.seguimento.coletar(), _procsRealizados: consulta.procs.coletar() });
       return JSON.stringify(dados);
@@ -24565,6 +24628,117 @@ const labExtra = {
     if (!cont) return;
     cont.innerHTML = '';
     (arr || []).forEach(x => labExtra.add(containerId, x.label, x.valor));
+  }
+};
+
+/* ============================================================================
+   EXAMES EM SÉRIE — cada coleta com a SUA data
+   ----------------------------------------------------------------------------
+   A ficha tinha um único conjunto de exames e uma única data. Mas paciente
+   chega com exames de 15/08 e volta com os de 02/10, e os dois importam: o que
+   diz alguma coisa não é a creatinina de hoje, é a creatinina de hoje AO LADO
+   da de dois meses atrás. Antes, para registrar os dois, era preciso escolher
+   um — ou amontoar tudo num campo de observação, onde a informação se perde.
+   Agora cada coleta é um bloco com data própria, e o ➕ abre quantos forem
+   necessários. O bloco de cima continua sendo o principal (o que já existia e
+   o que já está gravado em toda ficha antiga); estes são os demais.
+============================================================================ */
+const labSerie = {
+  /* mesma lista e mesmos rótulos da grade principal — uma fonte só, para as
+     duas não divergirem quando alguma mudar */
+  CAMPOS: [
+    ['hb', 'Hb', 'decimal'], ['ht', 'Ht', 'decimal'], ['hm', 'Hm', 'decimal'],
+    ['leuco', 'Leuco', 'numeric'], ['plt', 'Plt', 'numeric'], ['fibrinogenio', 'Fibrin.', ''],
+    ['tc', 'TC', ''], ['ts', 'TS', ''], ['tp', 'TP', ''], ['inr', 'INR', 'decimal'],
+    ['ttpa', 'TTPa', ''], ['ativprot', 'Ativ Prot', ''],
+    ['ureia', 'Uréia', 'numeric'], ['creat', 'Creat', 'decimal'], ['na', 'Na', 'numeric'],
+    ['k', 'K', 'decimal'], ['ca', 'Ca', 'decimal'], ['mg', 'Mg', 'decimal'],
+    ['glicemia', 'Glicemia', 'numeric'], ['hba1c', 'HbA1c', ''], ['tsh', 'TSH', 'decimal'],
+    ['t4l', 'T4 livre', 'decimal'], ['ast', 'AST/TGO', 'numeric'], ['alt', 'ALT/TGP', 'numeric'],
+    ['bilirrubinas', 'Bilirr.', ''], ['proteinas', 'Proteínas', '']
+  ],
+  add(containerId, dados) {
+    const cont = document.getElementById(containerId);
+    if (!cont) return;
+    const d = dados || {};
+    const bloco = document.createElement('div');
+    bloco.className = 'lab-serie';
+    const celulas = labSerie.CAMPOS.map(([k, rot, modo]) =>
+      '<div class="lab-item"><span>' + utils.escapeHTML(rot) + '</span>' +
+      '<input type="text" class="ls-campo" data-campo="' + k + '"' +
+      (modo ? ' inputmode="' + modo + '"' : '') +
+      ' value="' + utils.escapeAttr(d[k] || '') + '" oninput="markDirty()"></div>').join('');
+    bloco.innerHTML =
+      '<div class="lab-serie-topo">' +
+        '<label>📅 Coleta de</label>' +
+        '<input type="date" class="ls-data" value="' + utils.escapeAttr(d.data || '') + '" oninput="markDirty()">' +
+        '<button type="button" class="lab-extra-rm" title="Remover esta coleta" ' +
+        'onclick="this.closest(\'.lab-serie\').remove(); markDirty();">✕</button>' +
+      '</div>' +
+      '<div class="lab-grid">' + celulas + '</div>';
+    cont.appendChild(bloco);
+    const dt = bloco.querySelector('.ls-data');
+    if (dt && !d.data) dt.focus();
+    try { markDirty(); } catch (e) {}
+  },
+  /* [{data, hb, ht, ...}] — só as coletas com algum valor preenchido */
+  coletar(containerId) {
+    const cont = document.getElementById(containerId);
+    if (!cont) return [];
+    return Array.from(cont.querySelectorAll('.lab-serie')).map(b => {
+      const item = { data: (b.querySelector('.ls-data') || {}).value || '' };
+      b.querySelectorAll('.ls-campo').forEach(i => {
+        const v = (i.value || '').trim();
+        if (v) item[i.dataset.campo] = v;
+      });
+      return item;
+    }).filter(x => Object.keys(x).some(k => k !== 'data' && x[k]));
+  },
+  restaurar(containerId, arr) {
+    const cont = document.getElementById(containerId);
+    if (!cont) return;
+    cont.innerHTML = '';
+    (arr || []).forEach(x => labSerie.add(containerId, x));
+  }
+};
+
+/* Mesma ideia para os exames que não são de sangue (ECG, ECO, RX, laudos):
+   descrição + data, quantos forem necessários. */
+const exameSerie = {
+  add(containerId, dados) {
+    const cont = document.getElementById(containerId);
+    if (!cont) return;
+    const d = dados || {};
+    const row = document.createElement('div');
+    row.className = 'exame-serie';
+    row.innerHTML =
+      '<input type="text" class="es-tipo" placeholder="Exame (ECG, ECO, RX, TC…)" ' +
+      'value="' + utils.escapeAttr(d.tipo || '') + '" oninput="markDirty()">' +
+      '<input type="text" class="es-desc" placeholder="Resultado / laudo resumido" ' +
+      'value="' + utils.escapeAttr(d.descricao || '') + '" oninput="markDirty()">' +
+      '<input type="date" class="es-data" title="Data do exame" ' +
+      'value="' + utils.escapeAttr(d.data || '') + '" oninput="markDirty()">' +
+      '<button type="button" class="lab-extra-rm" title="Remover" ' +
+      'onclick="this.closest(\'.exame-serie\').remove(); markDirty();">✕</button>';
+    cont.appendChild(row);
+    const t = row.querySelector('.es-tipo');
+    if (t && !d.tipo) t.focus();
+    try { markDirty(); } catch (e) {}
+  },
+  coletar(containerId) {
+    const cont = document.getElementById(containerId);
+    if (!cont) return [];
+    return Array.from(cont.querySelectorAll('.exame-serie')).map(r => ({
+      tipo: (r.querySelector('.es-tipo') || {}).value || '',
+      descricao: (r.querySelector('.es-desc') || {}).value || '',
+      data: (r.querySelector('.es-data') || {}).value || ''
+    })).filter(x => x.tipo || x.descricao);
+  },
+  restaurar(containerId, arr) {
+    const cont = document.getElementById(containerId);
+    if (!cont) return;
+    cont.innerHTML = '';
+    (arr || []).forEach(x => exameSerie.add(containerId, x));
   }
 };
 
