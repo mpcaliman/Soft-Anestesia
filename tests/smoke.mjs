@@ -17322,6 +17322,45 @@ await test('Programador exclui ambiente e conta pela tela, com a contagem à vis
   await page.close();
 });
 
+/* O IDENTIFICADOR DO GOOGLE É DA CLÍNICA, NÃO DO APARELHO.
+   ---------------------------------------------------------------------------
+   O Client ID do Drive morava só no localStorage. Some a cada aparelho novo e
+   some de novo no mesmo aparelho sempre que a gaveta local é limpa — que
+   passou a ser a regra quando todo computador virou compartilhado. Quem usa
+   precisava reconfigurar o Drive toda vez, e acabou guardando o identificador
+   dentro de um CADASTRO DE PACIENTE, porque paciente sincroniza e configuração
+   não sincronizava. A gambiarra era a parte sã da história: ela aponta
+   exatamente onde estava o buraco.
+
+   Agora a configuração entra no sync por clínica — cadastrada uma vez,
+   acompanha o ambiente em qualquer aparelho. O TOKEN continua fora: ele é a
+   credencial de quem entrou, não um dado da clínica, e tem de morrer com a
+   sessão. */
+await test('Configuração do Drive acompanha a clínica; o token nunca sai do aparelho', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const mapa = clinicaSync.CHAVES || {};
+    const chaves = Object.keys(mapa);
+    return {
+      cfgSincroniza: chaves.includes(pdfBackup.CFG_KEY),
+      nomeNaNuvem: mapa[pdfBackup.CFG_KEY] || '',
+      tokenNaoSincroniza: !chaves.includes(pdfBackup.TOKEN_KEY),
+      chavesDiferentes: pdfBackup.CFG_KEY !== pdfBackup.TOKEN_KEY,
+      /* o campo da tela lê da configuração: trazida pelo sync, ela reaparece */
+      campoLeDaConfig: (() => {
+        pdfBackup.salvarCfg({ driveClientId: '123-abc.apps.googleusercontent.com' });
+        return pdfBackup.cfg().driveClientId === '123-abc.apps.googleusercontent.com';
+      })()
+    };
+  });
+  assert(r.cfgSincroniza, 'a configuração do Drive precisa sincronizar por clínica — era isso que faltava');
+  assert(r.nomeNaNuvem === 'pdfbackup_cfg', 'e chegar à nuvem com nome próprio');
+  assert(r.chavesDiferentes && r.tokenNaoSincroniza,
+    'o token de acesso NÃO acompanha a clínica: credencial é de quem entrou e morre com a sessão');
+  assert(r.campoLeDaConfig, 'o identificador guardado é o que a tela de Ajustes lê de volta');
+  await page.close();
+});
+
 /* CONFLITO PRESSUPÕE DIVERGÊNCIA.
    ---------------------------------------------------------------------------
    Depois de retificar a mesma pré três vezes, o app abriu "Conflitos

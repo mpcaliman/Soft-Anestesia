@@ -1384,13 +1384,35 @@ table.data .empty-row td {
 @media (min-width: 769px) {
   #pacientes-table { min-width: 1040px; }
   #pacientes-table th, #pacientes-table td { white-space: nowrap; }
-  /* o nome pode ser longo: é ele que ganha o espaço que sobra */
-  #pacientes-table th:first-child, #pacientes-table td:first-child { white-space: normal; min-width: 210px; }
+  /* O nome pode ser longo: é ele que ganha o espaço que sobra.
+     `white-space: normal` quebra nos ESPAÇOS, e isso basta para nome de gente.
+     Não bastou para o que apareceu no cadastro real: uma linha cujo "nome" era
+     um identificador do Google de 68 caracteres sem um espaço sequer. Sem onde
+     quebrar, a coluna esticou até empurrar os botões Editar/Excluir para fora
+     da tela — de novo, o mesmo sintoma que esta regra existia para resolver.
+     `overflow-wrap: anywhere` deixa quebrar DENTRO da palavra quando não há
+     alternativa; nomes normais continuam quebrando só nos espaços. A tabela
+     não pode depender de ninguém digitar coisa sensata no cadastro. */
+  #pacientes-table th:first-child, #pacientes-table td:first-child {
+    white-space: normal; min-width: 210px; max-width: 420px; overflow-wrap: anywhere;
+  }
   /* colunas de números ficam compactas: elas não precisam do espaço, o nome sim */
   #pacientes-table th, #pacientes-table td { padding-left: 9px; padding-right: 9px; }
   #pacientes-table td.actions-cell .btn { padding-left: 7px; padding-right: 7px; }
   #pacientes-table td.actions-cell { flex-wrap: nowrap; justify-content: flex-end; }
   #pacientes-table td.actions-cell .btn { flex: 0 0 auto; }
+  /* AS AÇÕES FICAM PRESAS À DIREITA.
+     A tabela é mais larga que o cartão de propósito — a rolagem horizontal
+     existe para alcançar as colunas do meio. Mas Editar e Excluir não são
+     coluna do meio: são o que se faz com a linha, e ficavam fora da tela,
+     exigindo rolar em TODA linha para chegar nelas. Presas aqui, acompanham
+     a rolagem e estão sempre ao alcance. O fundo é obrigatório: sem ele o
+     conteúdo das outras colunas passa por baixo e fica ilegível. */
+  #pacientes-table th:last-child, #pacientes-table td.actions-cell {
+    position: sticky; right: 0; z-index: 1; background: var(--surface);
+    box-shadow: -6px 0 6px -6px rgba(0,0,0,.18);
+  }
+  #pacientes-table tbody tr:hover td.actions-cell { background: var(--surface-alt, var(--surface)); }
 }
 /* cabeçalho clicável para ordenar */
 #pacientes-table th[data-ord] { cursor: pointer; user-select: none; }
@@ -4707,7 +4729,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-12b</b><br>
+    v7.1 · build <b id="build-tag">2026-10-13a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -18572,7 +18594,19 @@ const clinicaSync = {
     'medsys.v7.orcamento_modelos': 'orcamento_modelos',
     'medsys.v7.meds_usuario': 'meds_usuario',
     'medsys.v7.cbhpm.extras': 'cbhpm_extras',
-    'medsys.v5.fin.regras_convenio': 'fin_regras_convenio'
+    'medsys.v5.fin.regras_convenio': 'fin_regras_convenio',
+    /* O IDENTIFICADOR DO GOOGLE É DA CLÍNICA, NÃO DO APARELHO.
+       Ele morava só no localStorage, e por isso se perdia: a cada aparelho
+       novo, e de novo no mesmo aparelho sempre que a gaveta local era limpa
+       — o que passou a ser a regra quando todo computador virou compartilhado.
+       Quem usa era obrigado a reconfigurar o Drive toda vez, e chegou a
+       guardar o identificador num CADASTRO DE PACIENTE para que sobrevivesse,
+       porque paciente sincroniza e configuração não sincronizava.
+       Entrando aqui, ele é cadastrado uma vez por ambiente e acompanha a
+       clínica em qualquer aparelho — que é o que ele sempre foi. O token de
+       acesso continua FORA daqui, de propósito: credencial é de quem entrou,
+       não da clínica, e tem de morrer com a sessão. */
+    'medsys.v7.pdfbackup.cfg': 'pdfbackup_cfg'
   },
   META_KEY: 'medsys.v7.clinicasync.meta',
   _meta() { try { return JSON.parse(localStorage.getItem(clinicaSync.META_KEY) || '{}'); } catch (e) { return {}; } },
