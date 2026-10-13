@@ -615,8 +615,12 @@ const cofre = {
         if (!kr || String(kr).indexOf('medsys.') !== 0) continue;
         const at = kr.lastIndexOf('@');
         if (at < 0) continue;
+        /* O sufixo é `'@' + org.slice(0,8)`, e `org` é um identificador da
+           clínica — não necessariamente hexadecimal. Exigir hex deixava de ver
+           gavetas reais, que é justamente o erro perigoso aqui: não ver uma
+           clínica vizinha é não avisar quem vai declarar o acervo como seu. */
         const suf = kr.slice(at + 1);
-        if (/^[0-9a-fA-F]{8}$/.test(suf)) out.add(suf);
+        if (suf && suf.length <= 8 && /^[A-Za-z0-9_-]+$/.test(suf)) out.add(suf);
       }
     } catch (e) {}
     return Array.from(out);

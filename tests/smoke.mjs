@@ -16,6 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { readAppSource } from './helpers/read-app-source.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootArgument = process.argv.find(argument => argument.startsWith('--app-root='));
@@ -19872,8 +19873,10 @@ await test('Acervo preso só neste aparelho: declaração move, ausência dela n
    Este teste cobra as duas coisas: a trava nos dois pulls, e a limpeza em
    massa do que o defeito já fabricou — que só pode tocar no que não diverge. */
 await test('Conflito vazio não nasce em pacientes/agenda, e o que já nasceu sai em massa', async () => {
-  /* A trava tem de estar nas DUAS rotas próprias, no pacote publicável. */
-  const fonte = await readFile(resolve(APP_ROOT, 'index.html'), 'utf8');
+  /* A trava tem de estar nas DUAS rotas próprias, no pacote publicável. O
+     build extrai os scripts do HTML, então a fonte é recomposta pelo helper —
+     do contrário o teste passaria no repositório e não veria o que se publica. */
+  const fonte = await readAppSource(APP_ROOT);
   const trecho = (marca) => {
     const i = fonte.indexOf(marca);
     assert(i > 0, 'rota não encontrada: ' + marca);
@@ -19931,6 +19934,72 @@ await test('Conflito vazio não nasce em pacientes/agenda, e o que já nasceu sa
   assert(r.limpouUm, 'a limpeza em massa resolve o que nunca foi conflito');
   assert(r.sobrouOReal, 'e nunca encosta no que tem campo divergente — esse continua esperando decisão');
   assert(r.nadaMaisALimpar, 'rodar de novo não faz nada: a limpeza não é um varredor de lista');
+  await page.close();
+});
+
+/* 268) A calculadora de doses escolhe o paciente, não a ficha aberta
+
+   "Puxar da ficha" só funcionava com a Ficha de Anestesia daquele paciente
+   aberta na outra tela. Mas a calculadora é consultada ANTES de abrir ficha
+   nenhuma — e aí ficava vazia, com o peso sendo digitado de novo ou chutado,
+   que numa conta de dose é o pior dos dois.
+
+   Escolhendo a pessoa, o que entra é, campo a campo, o valor mais recente que
+   exista em QUALQUER registro dela. E a procedência vai junto na tela: peso de
+   hoje e peso de três meses atrás pesam diferente numa dose. */
+await test('Doses: escolher o paciente traz o dado mais recente, com a procedência à vista', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    __smokeBindOrg('org-doses');
+    ['pacientes', 'pre', 'anestesia', 'consulta', 'recuperacao'].forEach(m => store.setList(m, []));
+
+    /* Cadastro antigo: altura e sexo. Ficha recente: peso novo. O certo é
+       combinar os dois, campo a campo, e não escolher um registro só. */
+    store.setList('pacientes', [{
+      _id: 'pac-d1', nome: 'Antonia Ribeiro', nascimento: '1960-05-10',
+      sexo: 'Feminino', altura: '158', peso: '70',
+      _updatedAt: '2026-01-10T10:00:00.000Z', _createdAt: '2026-01-10T10:00:00.000Z'
+    }]);
+    store.setList('anestesia', [{
+      _id: 'an-d1', _patientRef: 'pac-d1',
+      paciente: { nome: 'Antonia Ribeiro', nasc: '1960-05-10', peso: '64', sexo: 'Feminino' },
+      _updatedAt: '2026-10-01T10:00:00.000Z', _createdAt: '2026-10-01T10:00:00.000Z'
+    }]);
+
+    ui.navegar('doses');
+    doses.escolherPaciente();
+    const lista = (document.getElementById('dose-pac-lista') || {}).textContent || '';
+    out.apareceNaLista = /Antonia Ribeiro/.test(lista);
+
+    doses._usarPaciente('Antonia Ribeiro');
+    const v = id => (document.getElementById(id) || {}).value || '';
+    out.pesoDaFichaNova = v('dose-peso') === '64';
+    out.alturaDoCadastro = v('dose-altura') === '158';
+    out.sexo = v('dose-sexo') === 'F';
+    out.idadeDerivada = Number(v('dose-idade')) >= 60;
+
+    const fonte = document.getElementById('dose-paciente-fonte');
+    out.mostraProcedencia = !!fonte && fonte.style.display !== 'none' &&
+      /Antonia Ribeiro/.test(fonte.textContent) && /peso:/.test(fonte.textContent);
+
+    /* Paciente sem peso em lugar nenhum: a tela DIZ que falta, em vez de
+       deixar o campo vazio e a conta sair pela metade sem explicação. */
+    store.setList('pacientes', [{ _id: 'pac-d2', nome: 'Benedito Sem Peso',
+      nascimento: '1975-02-02', _updatedAt: '2026-09-01T10:00:00.000Z' }]);
+    store.setList('anestesia', []);
+    doses._usarPaciente('Benedito Sem Peso');
+    out.avisaQueFalta = /sem peso/i.test((document.getElementById('dose-paciente-fonte') || {}).textContent || '');
+
+    ['pacientes', 'pre', 'anestesia', 'consulta', 'recuperacao'].forEach(m => store.setList(m, []));
+    return out;
+  });
+  assert(r.apareceNaLista, 'o paciente registrado precisa aparecer para ser escolhido');
+  assert(r.pesoDaFichaNova, 'o peso tem de vir da ficha MAIS RECENTE, não do cadastro antigo');
+  assert(r.alturaDoCadastro, 'e a altura, do cadastro, porque a ficha nova não a tem — é campo a campo');
+  assert(r.sexo && r.idadeDerivada, 'sexo e idade entram junto; idade vem do nascimento quando não está escrita');
+  assert(r.mostraProcedencia, 'numa conta de dose, de quando é o peso faz parte da informação');
+  assert(r.avisaQueFalta, 'faltando peso, a tela diz que falta em vez de deixar a conta sair pela metade');
   await page.close();
 });
 

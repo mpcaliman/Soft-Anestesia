@@ -9020,9 +9020,13 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <section class="card">
       <div class="card-header no-collapse">
         <div class="card-title-wrap"><span class="card-icon">&#129485;</span><h2>Paciente</h2></div>
-        <div class="card-actions"><button type="button" class="btn btn-xs" onclick="doses.puxarPaciente(false)" title="Preenche peso, altura, idade e sexo a partir da Ficha de Anestesia ativa">👤 Puxar da ficha</button></div>
+        <div class="card-actions">
+          <button type="button" class="btn btn-xs btn-primary" onclick="doses.escolherPaciente()" title="Escolhe o paciente e usa o peso, a altura, a idade e o sexo mais recentes que existirem em qualquer ficha dele">👤 Escolher paciente</button>
+          <button type="button" class="btn btn-xs" onclick="doses.puxarPaciente(false)" title="Preenche a partir da Ficha de Anestesia aberta agora">📄 Da ficha aberta</button>
+        </div>
       </div>
       <div class="card-body">
+        <div id="dose-paciente-fonte" style="display:none;font-size:.8rem;color:var(--text-soft);background:var(--surface-alt);border-left:3px solid var(--primary);border-radius:0 6px 6px 0;padding:7px 10px;margin:0 0 10px"></div>
         <div class="grid">
           <div class="field col-3"><label>Peso (kg)</label><input type="number" id="dose-peso" min="0.4" max="300" step="0.1" inputmode="decimal" placeholder="ex.: 70" oninput="doses.recalcular()"></div>
           <div class="field col-3"><label>Idade</label>
@@ -45568,6 +45572,95 @@ const doses = {
 
   /* Puxa peso/altura/idade/sexo do paciente da Ficha de Anestesia ativa,
      evitando redigitar. soSeVazio=true só preenche campos ainda em branco. */
+  /* ---- ESCOLHER O PACIENTE, EM VEZ DE DEPENDER DA FICHA ABERTA ----
+     "Puxar da ficha" só servia com a Ficha de Anestesia DAQUELE paciente
+     aberta na outra tela. Mas a calculadora é consultada antes de abrir ficha
+     nenhuma — na visita, no corredor, no telefone — e aí ela ficava vazia, com
+     o peso sendo digitado de novo (ou chutado, que é pior numa conta de dose).
+
+     Agora se escolhe a pessoa. E o que entra não é o que está numa ficha
+     específica: é, CAMPO A CAMPO, o valor mais recente que exista em qualquer
+     registro dela — `linker._dadosMaisRecentes`, o mesmo motor que preenche os
+     formulários. Peso da ficha de setembro e altura do cadastro convivem sem
+     problema, porque cada campo carrega a sua procedência, e a tela mostra de
+     onde veio cada um. Numa conta de dose, saber que o peso é de três meses
+     atrás é parte da informação. */
+  escolherPaciente() {
+    const vistos = new Map();
+    const push = (nome, quando) => {
+      const n = String(nome || '').trim();
+      if (n.length < 2) return;
+      const chave = n.toLowerCase();
+      const ts = new Date(quando || 0).getTime() || 0;
+      const atual = vistos.get(chave);
+      if (!atual || ts > atual.ts) vistos.set(chave, { nome: n, ts });
+    };
+    (store.list('pacientes') || []).forEach(p => push(p && p.nome, p && (p._updatedAt || p._createdAt)));
+    ['pre', 'consulta', 'anestesia', 'recuperacao'].forEach(m => {
+      (store.list(m) || []).forEach(it => {
+        if (!it) return;
+        push((it.paciente && it.paciente.nome) || it.paciente_nome || it.nome, it._updatedAt || it._createdAt);
+      });
+    });
+    const lista = Array.from(vistos.values()).sort((a, b) => b.ts - a.ts);
+    if (!lista.length) { toast('Nenhum paciente registrado ainda neste ambiente.', 'warn'); return; }
+    doses._pacientes = lista;
+    modal.open('👤 Qual paciente?',
+      '<input type="text" id="dose-pac-busca" class="input" placeholder="Digite parte do nome…" ' +
+      'oninput="doses._filtrarPacientes()" style="width:100%;margin:0 0 9px" autocomplete="off">' +
+      '<div id="dose-pac-lista" style="max-height:52vh;overflow:auto"></div>',
+      '<button class="btn" onclick="modal.close()">Cancelar</button>');
+    doses._filtrarPacientes();
+    try { const b = document.getElementById('dose-pac-busca'); if (b) b.focus(); } catch (e) {}
+  },
+  _pacientes: [],
+  _filtrarPacientes() {
+    const host = document.getElementById('dose-pac-lista'); if (!host) return;
+    const termo = String((document.getElementById('dose-pac-busca') || {}).value || '').trim().toLowerCase();
+    const achados = (doses._pacientes || [])
+      .filter(p => !termo || p.nome.toLowerCase().indexOf(termo) >= 0)
+      .slice(0, 60);
+    if (!achados.length) { host.innerHTML = '<p style="font-size:.84rem;color:var(--text-mute)">Nenhum paciente com esse nome.</p>'; return; }
+    host.innerHTML = achados.map(p =>
+      '<button type="button" class="btn" style="display:flex;width:100%;justify-content:space-between;margin:4px 0;text-align:left" ' +
+      'onclick="doses._usarPaciente(' + utils.jsArg(p.nome) + ')"><span>' + utils.escapeHTML(p.nome) + '</span>' +
+      '<small style="color:var(--text-mute)">' + (p.ts ? utils.escapeHTML(new Date(p.ts).toLocaleDateString('pt-BR')) : '') + '</small></button>').join('');
+  },
+  _usarPaciente(nome) {
+    const r = linker._dadosMaisRecentes(nome, null, {}) || {};
+    const d = r.dados || {}, f = r.fontes || {};
+    modal.close();
+    if (r.ambiguous) {
+      toast('⚠️ Há mais de uma pessoa com esse nome e os registros não permitem distinguir. Abra a ficha do paciente certo e use "Da ficha aberta".', 'warn');
+      return;
+    }
+    const num = v => { const m = String(v == null ? '' : v).replace(',', '.').match(/[\d.]+/); return m ? m[0] : ''; };
+    const idade = num(d.idade);
+    const sexo = /^m/i.test(String(d.sexo || '')) ? 'M' : (/^f/i.test(String(d.sexo || '')) ? 'F' : '');
+    const set = (id, val) => { const el = document.getElementById(id); if (el && val !== '' && val != null) el.value = val; };
+    set('dose-peso', num(d.peso));
+    set('dose-altura', num(d.altura));
+    if (idade) { const un = document.getElementById('dose-idade-un'); if (un) un.value = 'anos'; set('dose-idade', idade); }
+    set('dose-sexo', sexo);
+    doses.recalcular();
+    /* A PROCEDÊNCIA VAI JUNTO. Peso de hoje e peso de três meses atrás pesam
+       diferente numa conta de dose, e quem calcula tem de poder ver a diferença
+       sem sair da tela. */
+    const proc = ['peso', 'altura', 'idade'].filter(k => d[k] && f[k]).map(k => k + ': ' + f[k]);
+    const faltando = ['peso', 'altura'].filter(k => !num(d[k]));
+    const host = document.getElementById('dose-paciente-fonte');
+    if (host) {
+      host.innerHTML = proc.length
+        ? '<b>' + utils.escapeHTML(nome) + '</b> — ' + utils.escapeHTML(proc.join(' · ')) +
+          (faltando.length ? ' · <span style="color:var(--danger)">sem ' + faltando.join(' e ') + ' registrado</span>' : '')
+        : '<b>' + utils.escapeHTML(nome) + '</b> — nenhum peso, altura ou idade registrado em ficha nenhuma.';
+      host.style.display = '';
+    }
+    toast(faltando.length
+      ? '👤 ' + nome + ' — falta ' + faltando.join(' e ') + ' no cadastro e nas fichas'
+      : '👤 Dados mais recentes de ' + nome + ' carregados');
+  },
+
   puxarPaciente(soSeVazio) {
     const fa = document.getElementById('form-anestesia');
     if (!fa) return;
