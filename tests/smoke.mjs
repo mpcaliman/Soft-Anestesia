@@ -17322,6 +17322,72 @@ await test('Programador exclui ambiente e conta pela tela, com a contagem à vis
   await page.close();
 });
 
+/* EXAME QUE CHEGOU DEPOIS SAI COMO EXAME, NÃO COMO EXTRATO DE ALTERAÇÕES.
+   ---------------------------------------------------------------------------
+   A folha do Jotenildo saía com `Hb 13,2` no campo e, no fim, vinte linhas no
+   formato `• lab hb: "13,2" → "14,6"`. O exame que chegou depois da
+   finalização ficava perdido num log que ninguém lê antes de anestesiar.
+
+   "Um exame laboratorial deve ficar como os demais previamente digitados.
+   Pode até ser como um cartão novo, mas tem que ser dentro da ficha e com
+   campo em sequência, pra informação não ficar perdida."
+
+   O adendo passa a ser TRADUZIDO na impressão: a chave técnica (`lab_hb`)
+   vira o rótulo de sempre (`Hb`), exames vão para a mesma grade dos que já
+   estavam na ficha, o resto vira rótulo + valor em sequência, e o texto livre
+   continua texto. Vale para os adendos novos (que trazem os campos
+   estruturados) e para os antigos como o do Jotenildo, que só têm o texto. */
+await test('Adendo sai formatado como campo da ficha, não como lista de diferenças', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    /* o texto exato gravado pelo build que gerou a folha do relato */
+    const texto = 'CORREÇÃO (edição direta sobre o registro finalizado — o original permanece como estava):\n'
+      + '• lab creat: "1,4" → "0,90"\n'
+      + '• lab hb: "13,2" → "14,6"\n'
+      + '• lab ht: "39,6" → "43,5"\n'
+      + '• lab eco: — → "FEVE 69%"\n'
+      + '• procedimento · descricao: "A" → "B"\n'
+      + 'Observação livre do médico.';
+    const ad = { id: 'a1', data: '2026-10-12T15:45:04Z', autor: 'mpcanestesiologia', texto };
+    const rec = { _id: 'j1', _finalizado: true, nome: 'JOTENILDO', _adendos: [ad] };
+
+    const m = adendos.mudancasDoAdendo(ad);
+    const porRotulo = {};
+    m.campos.forEach(c => { porRotulo[c.rotulo] = c.valor; });
+
+    const html = adendos.htmlParaImpressao(rec);
+    const d = document.createElement('div'); d.innerHTML = html;
+    const visivel = d.textContent;
+
+    return {
+      rotulosTraduzidos: porRotulo['Hb'] === '14,6' && porRotulo['Ht'] === '43,5' && porRotulo['Creat'] === '0,90',
+      campoAninhado: porRotulo['Descricao'] === 'B',
+      examesNaGrade: /pp-lab-grid/.test(html) && /pp-lab-k/.test(html),
+      /* o que o leitor NÃO pode ver: seta de diff, valor antigo, chave técnica */
+      semSeta: visivel.indexOf('→') < 0,
+      semValorAntigo: !/13,2|39,6/.test(visivel),
+      semChaveTecnica: !/lab_hb|lab hb/.test(visivel),
+      semPreambulo: !/edição direta sobre o registro/.test(visivel),
+      textoLivrePreservado: /Observação livre do médico/.test(visivel),
+      /* adendo sem nenhum campo continua saindo como texto, não some */
+      soTexto: (() => {
+        const t = adendos.htmlParaImpressao({ _id: 'j2', _finalizado: true,
+          _adendos: [{ id: 'b1', data: '2026-10-12T16:00:00Z', texto: 'Paciente relatou dor lombar.' }] });
+        return /Paciente relatou dor lombar/.test(t);
+      })()
+    };
+  });
+  assert(r.rotulosTraduzidos, 'Hb, Ht e Creat têm de sair com o rótulo da ficha e o valor NOVO');
+  assert(r.campoAninhado, 'campo aninhado (procedimento · descricao) também é traduzido');
+  assert(r.examesNaGrade, 'exames saem na MESMA grade dos que já estavam digitados');
+  assert(r.semSeta && r.semValorAntigo, 'a folha não traz seta de diferença nem o valor antigo: isso é histórico, não documento');
+  assert(r.semChaveTecnica, 'nem a chave técnica do campo — quem lê a folha não programa');
+  assert(r.semPreambulo, 'nem o preâmbulo burocrático que existia só para anunciar a lista');
+  assert(r.textoLivrePreservado, 'o que o médico escreveu à mão continua inteiro');
+  assert(r.soTexto, 'adendo que é só texto continua saindo como texto');
+  await page.close();
+});
+
 /* O IDENTIFICADOR DO GOOGLE É DA CLÍNICA, NÃO DO APARELHO.
    ---------------------------------------------------------------------------
    O Client ID do Drive morava só no localStorage. Some a cada aparelho novo e
@@ -19262,12 +19328,16 @@ await test('Adendos e correções saem na impressão, e a folha avisa que existe
     const ppp = document.getElementById('ppp');
     const bloco = ppp.querySelector('.print-adendos');
     const texto = bloco ? bloco.textContent : '';
-    out.temBloco = ppp.querySelectorAll('.print-adendos').length === 1 && /ADENDOS \/ CORREÇÕES/.test(texto);
+    /* O título mudou com o formato: o bloco deixou de ser um log de
+       "ADENDOS / CORREÇÕES" e passou a ser o que o leitor precisa entender —
+       informação que chegou depois e faz parte da avaliação. */
+    out.temBloco = ppp.querySelectorAll('.print-adendos').length === 1
+      && /INFORMAÇÕES ACRESCENTADAS APÓS A FINALIZAÇÃO/.test(texto);
     out.temOConteudo = texto.includes('Hb 13,2') && texto.includes('ECG sem alterações');
     const dataExibida = adendos._fmtData(dataAdendo);
     out.temAutorEData = !!dataExibida && texto.includes(dataExibida) && texto.includes(autor);
-    out.dizQueOOriginalEhODeCima = /original, preservado/i.test(texto);
-    out.contaQuantos = /CORREÇÕES — 1/.test(texto);
+    out.dizQueOOriginalEhODeCima = /original permanece preservado/i.test(texto);
+    out.contaQuantos = /FINALIZAÇÃO — 1/.test(texto);
     const linhaAdendo = bloco && bloco.querySelector('div:last-child');
     out.tamanhoDeLeitura = !!linhaAdendo && parseFloat(getComputedStyle(linhaAdendo).fontSize) >= 11.9;
     out.originalNaFolha = ppp.textContent.includes(registroPre.exames_compl) && ppp.textContent.includes(nome);
@@ -19287,7 +19357,7 @@ await test('Adendos e correções saem na impressão, e a folha avisa que existe
       && blocosConjunto[0].textContent.includes(registroAnestesia._adendos[0].texto)
       && blocosConjunto[1].textContent.includes(registroSrpa._adendos[0].texto)
       && blocosConjunto.every(b => b.textContent.includes(autor) && b.textContent.includes(dataExibida)
-        && /original, preservado/i.test(b.textContent)
+        && /original permanece preservado/i.test(b.textContent)
         && parseFloat(getComputedStyle(b.querySelector('div:last-child')).fontSize) >= 11.9)
       && ppp.textContent.includes(nome) && ppp.textContent.includes('2ª parte — Recuperação pós-anestésica');
     out.conjuntoSemOutroPaciente = !ppp.textContent.includes(outroPre._adendos[0].texto)

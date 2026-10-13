@@ -4729,7 +4729,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-13a</b><br>
+    v7.1 · build <b id="build-tag">2026-10-13b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -21991,20 +21991,121 @@ const adendos = (() => {
     if (sec) sec.classList.toggle('sem-adendos', lista.length === 0);
   },
   /* HTML dos adendos para o PDF/impressão (ou '' se não houver) */
+  /* ---- O ADENDO SAI COMO CAMPO, NÃO COMO LISTA DE DIFERENÇAS ----
+     A folha do Jotenildo saía com `Hb 13,2` no campo e, lá embaixo, uma lista
+     de 20 linhas no formato `• lab hb: "13,2" → "14,6"`. O exame que chegou
+     depois ficava perdido num extrato de alterações que ninguém lê antes de
+     anestesiar — e um exame de sangue tem de aparecer como exame de sangue,
+     ao lado dos seus pares, com o mesmo rótulo que o resto da ficha usa.
+     Daqui para baixo o adendo é traduzido: a chave técnica (`lab_hb`) vira o
+     rótulo de sempre (`Hb`), e os valores vão para uma grade igual à dos
+     exames já digitados. O texto livre continua texto. */
+  ROTULOS: {
+    lab_hb: 'Hb', lab_ht: 'Ht', lab_hm: 'Hm', lab_leuco: 'Leuco', lab_plt: 'Plt',
+    lab_fibrinogenio: 'Fibrin.', lab_tc: 'TC', lab_ts: 'TS', lab_tp: 'TP', lab_inr: 'INR',
+    lab_ttpa: 'TTPa', lab_ativprot: 'Ativ Prot', lab_ureia: 'Uréia', lab_creat: 'Creat',
+    lab_na: 'Na', lab_k: 'K', lab_ca: 'Ca', lab_mg: 'Mg', lab_glicemia: 'Glicemia',
+    lab_hba1c: 'HbA1c', lab_tsh: 'TSH', lab_t4l: 'T4 livre', lab_ast: 'AST/TGO',
+    lab_alt: 'ALT/TGP', lab_bilirrubinas: 'Bilirr.', lab_proteinas: 'Proteínas',
+    lab_ecg: 'ECG', lab_ecg_data: 'Data do ECG', lab_eco: 'Ecocardiograma',
+    lab_eco_data: 'Data do ECO', lab_rx: 'RX de tórax', lab_outros: 'Outros exames',
+    lab_data: 'Data dos exames',
+    peso: 'Peso', altura: 'Altura', pa: 'PA', fc: 'FC', fr: 'FR', spo2: 'SpO₂',
+    asa: 'ASA', risco: 'Risco', mallampati: 'Mallampati', via_aerea: 'Via aérea',
+    comorbidades: 'Comorbidades', alergias: 'Alergias', medicacoes: 'Medicações em uso',
+    cirurgias_previas: 'Cirurgias prévias', antecedentes_anestesicos: 'Antecedentes anestésicos',
+    jejum: 'Jejum', orientacoes: 'Orientações', conclusao: 'Conclusão',
+    cirurgia: 'Cirurgia', cirurgiao: 'Cirurgião', convenio: 'Convênio', nome: 'Nome'
+  },
+  /* Campos de exame laboratorial vão para a GRADE; o resto vira linha própria,
+     porque um texto de conclusão não cabe numa célula de 6 colunas. */
+  _ehLab(chave) { return /^lab_/.test(chave) && !/_data$|^lab_ecg$|^lab_eco$|^lab_rx$|^lab_outros$/.test(chave); },
+  _rotuloCampo(chave) {
+    if (adendos.ROTULOS[chave]) return adendos.ROTULOS[chave];
+    const limpo = String(chave).replace(/_/g, ' ').trim();
+    return limpo ? limpo.charAt(0).toUpperCase() + limpo.slice(1) : '';
+  },
+  /* As mudanças de um adendo, já traduzidas. Dois formatos convivem:
+     • os adendos novos trazem `_retificacao.campos` — mapa campo → valor;
+     • os antigos (anteriores à retificação estruturada) só têm o texto, com
+       linhas `• lab hb: "13,2" → "14,6"`. O registro do Jotenildo é desses, e
+       jogá-los fora deixaria exames fora da folha. Então o texto é lido.
+     Devolve { campos: [{chave, rotulo, valor, ehLab}], texto: 'o que sobrou' } */
+  mudancasDoAdendo(ad) {
+    const campos = [];
+    const vistos = new Set();
+    const juntar = (chave, valor) => {
+      const c = String(chave || '').trim();
+      const v = (valor == null ? '' : String(valor)).trim();
+      if (!c || !v || v === '—' || vistos.has(c)) return;
+      vistos.add(c);
+      campos.push({ chave: c, rotulo: adendos._rotuloCampo(c), valor: v, ehLab: adendos._ehLab(c) });
+    };
+    const ret = ad && ad._retificacao && ad._retificacao.campos;
+    if (ret && typeof ret === 'object') {
+      Object.keys(ret).forEach(k => {
+        const v = ret[k];
+        if (v && typeof v === 'object') return;   /* aninhado: fica no texto */
+        juntar(k, v);
+      });
+    }
+    const linhasTexto = [];
+    String((ad && ad.texto) || '').split('\n').forEach(linha => {
+      const l = linha.trim();
+      /* `• rótulo: "antes" → "depois"` — o que interessa é o DEPOIS */
+      const m = l.match(/^•\s*(.+?):\s*(?:"([^"]*)"|—)\s*(?:→|->)\s*(?:"([\s\S]*)"|—)\s*$/);
+      if (!m) {
+        /* o preâmbulo burocrático do adendo ("CORREÇÃO (…):") explicava a lista
+           que vinha abaixo; sem a lista, ele vira ruído na folha */
+        if (l && !/^(CORREÇÃO|RETIFICAÇÃO|RESOLUÇÃO DE CONFLITO)\b.*:\s*$/i.test(l)) linhasTexto.push(linha);
+        return;
+      }
+      /* o rótulo bruto veio de `chave.replace(/_/g,' ')`; o caminho aninhado
+         usa ' · ', e o que nomeia o campo é o último trecho */
+      const bruto = m[1].split('·').pop().trim();
+      juntar(bruto.replace(/\s+/g, '_'), m[3]);
+    });
+    return { campos, texto: linhasTexto.join('\n').trim() };
+  },
   htmlParaImpressao(rec) {
     const lista = ((rec && rec._adendos) || []).filter(ad => ad && !ad._retificacao && !ad._retificacaoInvalida);
     if (!lista.length) return '';
     /* TAMANHO DE LEITURA, não de rodapé. O que vem aqui é conteúdo clínico —
        exames que chegaram depois, correção de dose, de lado. Imprimir isso em
        7,5pt é esconder com elegância. */
+    const E = utils.escapeHTML;
+    const bloco = (ad) => {
+      const { campos, texto } = adendos.mudancasDoAdendo(ad);
+      const labs = campos.filter(c => c.ehLab);
+      const outros = campos.filter(c => !c.ehLab);
+      let corpo = '';
+      /* exames vão para a MESMA grade dos que já estavam na ficha */
+      if (labs.length) {
+        corpo += '<div class="pp-block" style="margin:4px 0 6px"><span class="pp-label">Exames laboratoriais</span>' +
+          '<div class="pp-lab-grid">' + labs.map(c =>
+            '<div class="pp-lab-item"><span class="pp-lab-k">' + E(c.rotulo) + '</span> ' +
+            '<span class="pp-lab-v">' + E(c.valor) + '</span></div>').join('') + '</div></div>';
+      }
+      /* o resto vira rótulo + valor, em sequência, como no corpo da ficha */
+      if (outros.length) {
+        corpo += outros.map(c =>
+          '<div class="pp-block" style="margin:3px 0"><span class="pp-label">' + E(c.rotulo) + '</span>' +
+          '<div class="pp-value">' + E(c.valor) + '</div></div>').join('');
+      }
+      if (texto) {
+        corpo += '<div class="pp-block" style="margin:3px 0"><div class="pp-value">' + E(texto) + '</div></div>';
+      }
+      if (!corpo) corpo = '<div class="pp-value" style="color:#777">(sem conteúdo)</div>';
+      return '<div style="margin-bottom:8px;padding-top:5px;border-top:1px dashed #cfd5dc">' +
+        '<div style="font-size:8pt;color:#555;margin:0 0 3px">' +
+        E(adendos._fmtData(ad.data)) + (ad.autor ? ' — ' + E(ad.autor) : '') + '</div>' + corpo + '</div>';
+    };
     return '<div class="print-adendos" style="margin-top:14px;border:1px solid #8a1c1c;border-radius:6px;padding:8px 10px">' +
-      '<h3 style="font-size:10pt;margin:0 0 2px;color:#8a1c1c">⚠️ ADENDOS / CORREÇÕES — ' + lista.length + '</h3>' +
-      '<div style="font-size:8pt;color:#555;margin:0 0 6px">' +
-      (rec._retificadoEm ? 'Os campos acima são os vigentes confirmados. O registro original e as retificações permanecem no histórico; os adendos de texto estão abaixo.'
-        : 'O registro acima é o original, preservado. O que mudou depois está aqui, datado e assinado.') + '</div>' +
-      lista.map(ad => '<div style="font-size:9pt;margin-bottom:5px;line-height:1.45;white-space:pre-wrap"><b>' +
-        utils.escapeHTML(adendos._fmtData(ad.data)) + ' — ' + utils.escapeHTML(ad.autor || '') + ':</b> ' +
-        utils.escapeHTML(ad.texto || '') + '</div>').join('') +
+      '<h3 style="font-size:10pt;margin:0 0 2px;color:#8a1c1c">INFORMAÇÕES ACRESCENTADAS APÓS A FINALIZAÇÃO — ' + lista.length + '</h3>' +
+      '<div style="font-size:8pt;color:#555;margin:0 0 4px">' +
+      'Chegaram depois que o documento foi finalizado e fazem parte desta avaliação. ' +
+      'O registro original permanece preservado no histórico.</div>' +
+      lista.map(bloco).join('') +
       '</div>';
   }
   };
