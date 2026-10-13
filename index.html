@@ -4773,7 +4773,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-13c</b><br>
+    v7.1 · build <b id="build-tag">2026-10-13d</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -5089,6 +5089,27 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
       </div>
       <div class="card-body" data-sec-edit>
         <div class="grid">
+          <!-- DESCRIÇÃO CLÍNICA: o texto corrido que nenhum campo estruturado
+               comporta. Comorbidade é lista; a história do paciente não é. Fica
+               ao lado das comorbidades porque é lida junto com elas. -->
+          <div class="field col-12 bloco-anamnese" data-sec-edit>
+            <label>Descrição clínica</label>
+            <textarea name="descricao_clinica" rows="3" placeholder="História, evolução, estado geral, particularidades do caso — o que não cabe nos campos acima."></textarea>
+          </div>
+          <!-- QUEM ACOMPANHOU: clínico e jurídico ao mesmo tempo. É quem ouviu
+               a orientação de jejum, e quem assina o consentimento quando o
+               paciente é menor ou não tem autonomia. Vem do cadastro com um
+               toque, e a mesma frase vai para o termo. -->
+          <div class="field col-12 bloco-anamnese" data-sec-edit>
+            <label>Acompanhantes presentes na consulta</label>
+            <textarea name="acompanhantes" rows="2" placeholder="Ex.: Maria da Silva (mãe); João da Silva (pai)"></textarea>
+            <div class="field-templates">
+              <button type="button" class="btn btn-xs tpl-btn"
+                onclick="acompanhantes.doCadastro('#form-pre [name=acompanhantes]', '#form-pre [name=nome]')"
+                title="Traz mãe, pai e responsável legal do cadastro do paciente">👥 Buscar do cadastro</button>
+            </div>
+            <small style="display:block;color:var(--text-mute);margin-top:4px">Vai para a folha da pré e para o Termo de Consentimento.</small>
+          </div>
           <div class="field col-6 bloco-anamnese" data-sec-edit><label>Comorbidades</label>
             <textarea name="comorbidades" rows="2"></textarea>
             <div class="comorb-rapidas" data-alvo="#form-pre [name=comorbidades]"></div>
@@ -9424,6 +9445,18 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             </div>
             <div class="field col-3"><label>Carteirinha</label><input type="text" name="carteirinha"></div>
           <div class="field col-3"><label>Prontuário / Registro</label><input type="text" name="prontuario"></div>
+            <!-- FILIAÇÃO E RESPONSÁVEL — cadastrados uma vez, usados sempre.
+                 Quem acompanha a consulta é quase sempre quem já está aqui: a
+                 mãe, o pai, o responsável. Digitar o nome de novo a cada
+                 consulta é refazer um trabalho já feito, e é como nome sai
+                 escrito de três jeitos diferentes em três documentos. Com o
+                 cadastro preenchido, a pré e o termo de consentimento buscam
+                 daqui. Em menor de idade ou paciente sem autonomia, é também
+                 quem assina o consentimento. -->
+            <div class="field col-6"><label>Nome da mãe</label><input type="text" name="nome_mae" autocomplete="off"></div>
+            <div class="field col-6"><label>Nome do pai</label><input type="text" name="nome_pai" autocomplete="off"></div>
+            <div class="field col-8"><label>Responsável legal <small style="color:var(--text-mute)">(menor de idade ou paciente sem autonomia)</small></label><input type="text" name="responsavel_legal" autocomplete="off"></div>
+            <div class="field col-4"><label>Parentesco do responsável</label><input type="text" name="responsavel_parentesco" placeholder="Mãe, pai, filho(a), cônjuge…" autocomplete="off"></div>
             <div class="field col-12">
               <label>Acomodação (faturamento)</label>
               <div style="display:flex;flex-wrap:wrap;gap:8px">
@@ -27968,6 +28001,62 @@ const identificacaoPaciente = {
     const E = utils.escapeHTML;
     return '<div style="' + (estilo || 'font-size:9pt;color:#555;margin:0 0 8px') + '">' +
       linhas.map(E).join(' · ') + '</div>';
+  },
+  /* QUEM PODE TER ACOMPANHADO, segundo o cadastro.
+     Não afirma que a pessoa esteve presente — isso quem sabe é quem atendeu.
+     Devolve os candidatos para que o campo da consulta seja preenchido com um
+     toque, em vez de digitado de novo (e escrito de três jeitos diferentes em
+     três documentos). */
+  acompanhantesPossiveis(nome, opts) {
+    const d = identificacaoPaciente.dados(nome, opts);
+    const out = [];
+    const add = (quem, papel) => {
+      const t = String(quem == null ? '' : quem).trim();
+      if (t && !out.some(x => x.nome.toLowerCase() === t.toLowerCase())) out.push({ nome: t, papel });
+    };
+    add(d.responsavel_legal, String(d.responsavel_parentesco || 'responsável legal').trim() || 'responsável legal');
+    add(d.nome_mae, 'mãe');
+    add(d.nome_pai, 'pai');
+    return out;
+  },
+  /* "Maria da Silva (mãe); João da Silva (pai)" */
+  textoAcompanhantes(lista) {
+    return (lista || []).map(x => x.nome + (x.papel ? ' (' + x.papel + ')' : '')).join('; ');
+  }
+};
+
+/* ============================================================================
+   ACOMPANHANTES NA CONSULTA
+   ----------------------------------------------------------------------------
+   Quem estava na sala no dia da avaliação é informação clínica e também
+   jurídica: é quem ouviu a orientação de jejum, quem vai lembrar da medicação
+   da manhã, e — em menor de idade ou paciente sem autonomia — quem assina o
+   consentimento. Até aqui não havia onde registrar, e o nome acabava solto num
+   campo de observação, ou escrito de novo no termo com outra grafia.
+   Aqui o campo existe uma vez, é preenchido a partir do cadastro com um toque,
+   e a mesma frase atravessa a pré e o termo de consentimento.
+============================================================================ */
+const acompanhantes = {
+  /* preenche o campo da pré com quem o cadastro conhece, sem apagar o que já
+     foi escrito à mão — acrescenta só quem ainda não está lá */
+  doCadastro(seletorCampo, seletorNome) {
+    const campo = document.querySelector(seletorCampo);
+    const elNome = seletorNome ? document.querySelector(seletorNome) : null;
+    if (!campo) return;
+    const nome = (elNome && elNome.value) || '';
+    if (!nome.trim()) { toast('Escolha o paciente primeiro — os acompanhantes vêm do cadastro dele.', 'warn'); return; }
+    const possiveis = identificacaoPaciente.acompanhantesPossiveis(nome);
+    if (!possiveis.length) {
+      toast('O cadastro deste paciente ainda não tem mãe, pai ou responsável. Preencha em Pacientes e volte aqui.', 'warn');
+      return;
+    }
+    const atual = String(campo.value || '').trim();
+    const faltando = possiveis.filter(x => atual.toLowerCase().indexOf(x.nome.toLowerCase()) < 0);
+    if (!faltando.length) { toast('Os acompanhantes do cadastro já estão no campo.', 'info'); return; }
+    const texto = identificacaoPaciente.textoAcompanhantes(faltando);
+    campo.value = atual ? atual.replace(/[;\s]+$/, '') + '; ' + texto : texto;
+    try { markDirty(); } catch (e) {}
+    toast('👥 ' + faltando.length + ' acompanhante(s) do cadastro adicionado(s)');
   }
 };
 

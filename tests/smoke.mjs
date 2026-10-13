@@ -17322,6 +17322,97 @@ await test('Programador exclui ambiente e conta pela tela, com a contagem à vis
   await page.close();
 });
 
+/* QUEM ACOMPANHOU A CONSULTA É DADO CLÍNICO E JURÍDICO.
+   ---------------------------------------------------------------------------
+   Quem estava na sala ouviu a orientação de jejum, vai lembrar da medicação da
+   manhã e — em menor de idade ou paciente sem autonomia — é quem assina o
+   consentimento. Não havia onde registrar: o nome acabava solto num campo de
+   observação, ou redigitado no termo com outra grafia.
+
+   Agora o campo existe uma vez, na pré; é preenchido A PARTIR DO CADASTRO com
+   um toque (mãe, pai, responsável legal); e a mesma frase atravessa a folha da
+   pré e o Termo de Consentimento.
+
+   O caminho do cadastro até o formulário tem DUAS listas brancas em série
+   (`_normalizarCadastro` e `_CAMPOS_PACIENTE`). Campo que falte em qualquer
+   uma é descartado em silêncio — foi exatamente o que aconteceu na primeira
+   tentativa. Este teste atravessa o caminho inteiro, não as peças. */
+await test('Acompanhantes vêm do cadastro, entram na pré e chegam ao termo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('pacientes', [{
+      _id: 'p-acomp', nome: 'ANA PAULA SOUZA', cpf: '111.222.333-44',
+      nome_mae: 'MARIA SOUZA', nome_pai: 'JOSE SOUZA',
+      responsavel_legal: 'MARIA SOUZA', responsavel_parentesco: 'mãe',
+      _updatedAt: new Date().toISOString()
+    }]);
+
+    /* o cadastro chega inteiro ao formulário — as duas listas brancas */
+    const d = identificacaoPaciente.dados('ANA PAULA SOUZA');
+    out.cadastroChega = d.nome_mae === 'MARIA SOUZA' && d.nome_pai === 'JOSE SOUZA'
+      && d.responsavel_legal === 'MARIA SOUZA';
+
+    const poss = identificacaoPaciente.acompanhantesPossiveis('ANA PAULA SOUZA');
+    /* a mãe é também a responsável legal: aparece UMA vez, com o papel declarado */
+    out.semDuplicar = poss.filter(x => x.nome === 'MARIA SOUZA').length === 1;
+    out.temPapeis = poss.some(x => x.nome === 'MARIA SOUZA' && x.papel === 'mãe')
+      && poss.some(x => x.nome === 'JOSE SOUZA' && x.papel === 'pai');
+
+    /* os dois campos novos existem na pré */
+    ui.navegar('pre');
+    const f = document.getElementById('form-pre');
+    out.camposExistem = !!f.querySelector('[name="descricao_clinica"]') && !!f.querySelector('[name="acompanhantes"]');
+
+    /* o botão preenche a partir do cadastro, e clicar de novo não duplica */
+    f.querySelector('[name="nome"]').value = 'ANA PAULA SOUZA';
+    acompanhantes.doCadastro('#form-pre [name=acompanhantes]', '#form-pre [name=nome]');
+    const v1 = f.querySelector('[name="acompanhantes"]').value;
+    acompanhantes.doCadastro('#form-pre [name=acompanhantes]', '#form-pre [name=nome]');
+    out.preencheu = /MARIA SOUZA \(mãe\)/.test(v1) && /JOSE SOUZA \(pai\)/.test(v1);
+    out.naoDuplica = f.querySelector('[name="acompanhantes"]').value === v1;
+
+    /* o que já estava escrito à mão não é apagado */
+    f.querySelector('[name="acompanhantes"]').value = 'Vizinha Joana';
+    acompanhantes.doCadastro('#form-pre [name=acompanhantes]', '#form-pre [name=nome]');
+    out.naoApagaOQueFoiEscrito = /Vizinha Joana/.test(f.querySelector('[name="acompanhantes"]').value)
+      && /MARIA SOUZA/.test(f.querySelector('[name="acompanhantes"]').value);
+
+    /* a pré impressa traz os dois campos. Os construtores leem do FORMULÁRIO,
+       não de um objeto — então o teste preenche a tela, que é o que a pessoa
+       faz, em vez de injetar dados por baixo. */
+    f.querySelector('[name="acompanhantes"]').value = 'MARIA SOUZA (mãe)';
+    f.querySelector('[name="descricao_clinica"]').value = 'Paciente hígida, boa reserva funcional.';
+    const folhaPre = document.createElement('div');
+    folhaPre.innerHTML = printPreview._buildPre();
+    out.naFolhaDaPre = /Descrição clínica/.test(folhaPre.textContent)
+      && /boa reserva funcional/.test(folhaPre.textContent)
+      && /Acompanhantes presentes/.test(folhaPre.textContent)
+      && /MARIA SOUZA/.test(folhaPre.textContent);
+
+    /* e o TERMO busca da pré, sem ninguém redigitar */
+    store.setList('pre', [{ _id: 'pre-acomp', nome: 'ANA PAULA SOUZA',
+      acompanhantes: 'MARIA SOUZA (mãe)', _updatedAt: new Date().toISOString() }]);
+    ui.navegar('termo');
+    const ft = document.getElementById('form-termo');
+    ft.querySelector('[name="nome"]').value = 'ANA PAULA SOUZA';
+    const txt = ft.querySelector('[name="texto"]'); if (txt) txt.value = 'Termo de teste.';
+    const folhaTermo = document.createElement('div');
+    folhaTermo.innerHTML = printPreview._buildTermo();
+    out.noTermo = /Acompanhantes presentes/.test(folhaTermo.textContent)
+      && /MARIA SOUZA/.test(folhaTermo.textContent);
+    return out;
+  });
+  assert(r.cadastroChega, 'filiação e responsável precisam atravessar AS DUAS listas brancas até o formulário');
+  assert(r.semDuplicar && r.temPapeis, 'a mãe que também é responsável aparece uma vez, com o papel declarado');
+  assert(r.camposExistem, 'descrição clínica e acompanhantes existem na pré, junto da anamnese');
+  assert(r.preencheu && r.naoDuplica, 'o botão traz do cadastro e clicar de novo não repete ninguém');
+  assert(r.naoApagaOQueFoiEscrito, 'e nunca apaga o que foi escrito à mão: quem atendeu sabe quem estava lá');
+  assert(r.naFolhaDaPre, 'os dois campos saem na folha da pré');
+  assert(r.noTermo, 'e o termo busca os acompanhantes da pré — redigitar é como o mesmo nome ganha duas grafias');
+  await page.close();
+});
+
 /* CADA COLETA COM A SUA DATA.
    ---------------------------------------------------------------------------
    A ficha tinha um único conjunto de exames e uma única data. Mas o paciente
@@ -17366,8 +17457,13 @@ await test('Exames em série: cada coleta com a sua data, da tela até a folha',
     /* ficha sem série nenhuma não ganha bloco vazio */
     out.semSerieNadaSai = printPreview._labSeriesGrid({}) === '' && printPreview._exameSeriesBloco({}) === '';
 
-    /* comorbidades, alergias e medicações ganharam fronteira própria */
-    out.anamneseSeparada = document.querySelectorAll('#pre-sec-anamnese .bloco-anamnese').length === 3;
+    /* comorbidades, alergias e medicações ganharam fronteira própria.
+       Conferido POR CAMPO, não por contagem: contar blocos quebrava assim que
+       um campo novo entrasse na anamnese — e entrou. */
+    out.anamneseSeparada = ['comorbidades', 'alergias', 'medicacoes'].every(n => {
+      const el = document.querySelector('#pre-sec-anamnese [name="' + n + '"]');
+      return !!(el && el.closest('.bloco-anamnese'));
+    });
     return out;
   });
   assert(r.doisBlocos && r.coletaCerta, 'cada ➕ abre uma coleta com data própria, e o que foi digitado é o que se coleta');

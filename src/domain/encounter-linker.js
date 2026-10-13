@@ -1422,10 +1422,16 @@ const linker = {
   /* Todos os módulos que podem conter dados de paciente */
   _MODS_PACIENTE: ['anestesia', 'pre', 'consulta', 'recuperacao', 'termo', 'prescricao', 'risco', 'financeiro', 'orcamento'],
 
-  /* Campos de paciente rastreados no per-campo-mais-recente */
+  /* Campos de paciente rastreados no per-campo-mais-recente.
+     É a SEGUNDA lista branca do caminho: `_normalizarCadastro` decide o que sai
+     do cadastro, e esta decide o que chega aos formulários. Campo que falte em
+     qualquer uma das duas é descartado em silêncio, por mais que esteja
+     gravado — foi o que aconteceu com filiação e responsável quando entraram
+     só na primeira. Mantenha as duas juntas ao acrescentar um campo. */
   _CAMPOS_PACIENTE: ['nome', 'nascimento', 'idade', 'sexo', 'peso', 'altura', 'imc',
     'cpf', 'rg', 'prontuario', 'convenio', 'plano', 'matricula', 'carteirinha',
-    'telefone', 'email', 'endereco', 'acomodacao'],
+    'telefone', 'email', 'endereco', 'acomodacao',
+    'nome_mae', 'nome_pai', 'responsavel_legal', 'responsavel_parentesco'],
 
   /* === PER-CAMPO MAIS RECENTE ===
      Reúne TODOS os registros do paciente (todos os módulos + cadastro),
@@ -1576,6 +1582,14 @@ const linker = {
       convenio: p.convenio || p.plano, plano: p.plano || p.convenio,
       matricula: p.matricula || p.carteirinha, carteirinha: p.carteirinha || p.matricula,
       telefone: p.telefone, email: p.email,
+      /* FILIAÇÃO E RESPONSÁVEL. Só chega aos formulários o que passa por aqui:
+         campo ausente desta lista é descartado no caminho, por mais que esteja
+         gravado no cadastro. Estes quatro existem para que o campo de
+         acompanhantes da pré e o termo de consentimento sejam preenchidos a
+         partir do cadastro, em vez de redigitados a cada consulta — que é como
+         o mesmo nome acaba com duas grafias em dois documentos do mesmo dia. */
+      nome_mae: p.nome_mae, nome_pai: p.nome_pai,
+      responsavel_legal: p.responsavel_legal, responsavel_parentesco: p.responsavel_parentesco,
       /* No cadastro a acomodação são duas caixas (apartamento / enfermaria);
          aqui vira um dado só, do jeito que os formulários esperam. */
       acomodacao: linker._acomodacaoDoCadastro(p)
