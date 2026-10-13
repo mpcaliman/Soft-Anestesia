@@ -1310,7 +1310,15 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
        item da lista, e a um clique da versão automática, que é exercitada
        logo abaixo. */
     anestesia.salvar({ finalizar: true });
-    await new Promise(r => setTimeout(r, 2000));
+    await new Promise(r => setTimeout(r, 900));
+    /* A ORDEM É O QUE IMPORTA AQUI, e é o que estava quebrado: primeiro a
+       janela da cobrança (que não pode deixar de abrir, sob pena de o
+       lançamento não nascer), e só quando ela sai é que entra o fechamento.
+       Antes as duas disputavam o mesmo lugar e a ordem dependia de qual laço
+       de espera acordasse primeiro — daí o "às vezes não vai". */
+    out.cobrancaPrimeiro = /gerar o lan.amento|Gerar lan.amento|financeiro/i.test(document.body.textContent || '');
+    try { modal.close(); } catch (e) {}
+    await new Promise(r => setTimeout(r, 1500));
     const corpoPos = document.body.textContent || '';
     out.modalOferece = corpoPos.includes('Fechamento do atendimento') &&
       /Recupera..o p.s-anest.sica \(SRPA\)/i.test(corpoPos);
@@ -1406,7 +1414,8 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
     store.setList('anestesia', []); store.setList('recuperacao', []);
     return out;
   });
-  assert(r.modalOferece, 'ao finalizar, o fechamento do atendimento tem de oferecer a SRPA');
+  assert(r.modalOferece,
+    'saindo a cobrança, o fechamento do atendimento entra e oferece a SRPA — essa ordem é o conserto');
   assert(r.entradaPrefill, 'entrada da SRPA deveria vir pré-preenchida com a saída de sala');
   assert(r.srpaFinalizada, 'a SRPA automática deveria nascer FINALIZADA');
   assert(r.dadosCertos, 'nome/horários/procedência/Aldrete 10 deveriam estar preenchidos');

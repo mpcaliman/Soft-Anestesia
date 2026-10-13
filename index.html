@@ -15840,12 +15840,18 @@ const pre = {
       if (!jaTem && fin.finalizacao.deveAbrir('pre', saved)) {
         setTimeout(() => {
           try {
-            fin.finalizacao.abrirQuandoLivre('pre', saved);
+            /* O fechamento entra QUANDO A COBRANÇA SAI, e não por espera: o
+               encadeamento é determinístico, que é o contrário do defeito que
+               estamos consertando. */
+            fin.finalizacao.abrirQuandoLivre('pre', saved,
+              () => { try { fechamento.abrir('pre', saved._id); } catch (e) {} });
           } catch (e) {}
         }, 320);
       } else {
         const fr = fin.fromDoc('pre', saved);
         if (fr && fr.isNew) ui.mostrarBanner('banner-pre', '💰 Lançamento financeiro criado automaticamente.', 'success');
+        /* Sem janela de cobrança a abrir, o fechamento não tem o que esperar. */
+        try { fechamento.abrir('pre', saved._id); } catch (e) {}
       }
     }
     /* atualiza id hidden */
@@ -16679,7 +16685,11 @@ const consulta = {
       if (!jaTem && fin.finalizacao.deveAbrir('consulta', saved)) {
         setTimeout(() => {
           try {
-            fin.finalizacao.abrirQuandoLivre('consulta', saved);
+            /* O fechamento entra QUANDO A COBRANÇA SAI, e não por espera: o
+               encadeamento é determinístico, que é o contrário do defeito que
+               estamos consertando. */
+            fin.finalizacao.abrirQuandoLivre('consulta', saved,
+              () => { try { fechamento.abrir('consulta', saved._id); } catch (e) {} });
           } catch (e) {}
         }, 320);
       } else {
@@ -37784,7 +37794,11 @@ const anestesia = {
       if (!jaTem && fin.finalizacao.deveAbrir('anestesia', saved)) {
         setTimeout(() => {
           try {
-            fin.finalizacao.abrirQuandoLivre('anestesia', saved);
+            /* O fechamento entra QUANDO A COBRANÇA SAI, e não por espera: o
+               encadeamento é determinístico, que é o contrário do defeito que
+               estamos consertando. */
+            fin.finalizacao.abrirQuandoLivre('anestesia', saved,
+              () => { try { fechamento.abrir('anestesia', saved._id); } catch (e) {} });
           } catch (e) {}
         }, 320);
       } else {
