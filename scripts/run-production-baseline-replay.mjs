@@ -253,7 +253,9 @@ create table if not exists supabase_migrations.schema_migrations(version text pr
   await db.run(historicalFixture.seed.sql,'synthetic historical pre0018 seed');
   const plan = allMigrations.filter(x => x.path.startsWith('database/migrations/') && Number(x.path.split('/').at(-1).slice(0, 4)) >= 18
     || x.path === 'supabase/migrations/0002_assinaturas_hardening.sql');
-  assert.equal(plan.length, 18, 'Exactly 0018–0034 and signature hardening must be rehearsed');
+  // 0035 entrou depois da 0034: ela acrescenta os exames em série à allowlist
+  // clínica da retificação. O ensaio cobre de 0018 em diante, então cresce com ela.
+  assert.equal(plan.length, 19, 'Exactly 0018–0035 and signature hardening must be rehearsed');
   // psql --file executes each top-level command in autocommit. The original
   // transaction-free 0026 therefore exercises CONCURRENTLY without rewriting it.
   phase = 'application-upgrade';

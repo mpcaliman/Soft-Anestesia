@@ -12,7 +12,8 @@
     "0032 amplia o guard do original para UPDATE e DELETE, inclusive cascades administrativos; fonte revisável, sem aplicação remota demonstrada.",
     "0033 fecha direitos atuais e defaults do executor postgres, preservando CRUD do servidor e defaults supabase_admin; condição do fornecedor pendente, sem fechamento universal nem aplicação remota demonstrada.",
     "0034 exige proveniência explícita por dono/coorte/clínica e vínculos manuais de paciente/caso; preserva fonte e recibos históricos, rejeita importações anteriores sem retrofit revisado e depende de replay real descartável antes da aplicação.",
-    "2026-10-12: G3 registra homologação técnica executada no projeto yqqrfgbvoexricjdxpis, com evidência sanitizada e hashes em docs/engineering/G3-STAGING-VERIFIED-2026-10-12.json. CI local/efêmera e testes hospedados são separados; diferenças ACL, defaults do fornecedor e portões de produção/G4/G5 permanecem explícitos. Nenhuma fonte SQL ou produção foi alterada por esse registro."
+    "2026-10-12: G3 registra homologação técnica executada no projeto yqqrfgbvoexricjdxpis, com evidência sanitizada e hashes em docs/engineering/G3-STAGING-VERIFIED-2026-10-12.json. CI local/efêmera e testes hospedados são separados; diferenças ACL, defaults do fornecedor e portões de produção/G4/G5 permanecem explícitos. Nenhuma fonte SQL ou produção foi alterada por esse registro.",
+    "0035 acrescenta _labSeries e _exameSeries à allowlist clínica da 0031, para que exames que chegam DEPOIS da finalização possam ser retificados nos campos. Redefine uma função; não toca em dado, tabela ou permissão. Fonte revisável; aplicação remota segue o mesmo portão das demais."
   ],
   "files": {
     "database/apply_all.sql": "c60001d4b2fe2514620060c9b5219fa3be5646e848c3ffe5993d6a56804ba811",
@@ -54,7 +55,8 @@
     "database/migrations/0031_append_only_retification_cas.sql": "caf6ce1392b1becd33bc57a08077f232363ef8093dbe9eddd92725e0188840e5",
     "database/migrations/0032_finalized_delete_guard.sql": "d98ee075288ee6f5c0d889de22d62c3e22bdd945ed26db2fb7e9908bf41934f0",
     "database/migrations/0033_reconciled_permissions.sql": "9d5604084d832b6e958c83286d7bc282d183b5e57eb111d61bfb263427bba9e5",
-    "database/migrations/0034_legacy_provenance_scope_and_import_receipts.sql": "a56cc04e73a1a4892100d20eb04d735958e9fb13ece5d1349dae09fca15553d8"
+    "database/migrations/0034_legacy_provenance_scope_and_import_receipts.sql": "a56cc04e73a1a4892100d20eb04d735958e9fb13ece5d1349dae09fca15553d8",
+    "database/migrations/0035_retificacao_exames_em_serie.sql": "418e468f60fc3fbf70576c81e3d7f7863cdc2d3c33af587e243e00d6d6b06258"
   },
   "implementationAuthorization": "2026-10-09: Implemente modificações para obedecer ao planejamento",
   "stagingEvidence": {

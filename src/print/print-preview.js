@@ -1116,6 +1116,37 @@ ${TAG_CLOSE_HTML}`;
     ).join('');
     return `<div class="pp-block"><span class="pp-label">Exames laboratoriais</span><div class="pp-lab-grid">${cells}</div></div>`;
   },
+  /* COLETAS ANTERIORES, CADA UMA COM A SUA DATA.
+     Uma creatinina isolada diz pouco; ao lado da de dois meses atrás, diz
+     muito. Cada coleta sai na mesma grade da principal, com a data em cima —
+     é a comparação que a folha precisa permitir, e ela só existe se as duas
+     estiverem na mesma página, no mesmo formato. */
+  _labSeriesGrid(d) {
+    const series = (d && d._labSeries) || [];
+    if (!series.length || typeof labSerie === 'undefined') return '';
+    const blocos = series.map(s => {
+      const cells = labSerie.CAMPOS
+        .filter(([k]) => s[k] && String(s[k]).trim() !== '')
+        .map(([k, rot]) =>
+          `<div class="pp-lab-item"><span class="pp-lab-k">${utils.escapeHTML(rot)}</span> <span class="pp-lab-v">${utils.escapeHTML(s[k])}</span></div>`)
+        .join('');
+      if (!cells) return '';
+      const quando = s.data ? utils.formatarData(s.data) : 'sem data';
+      return `<div class="pp-block"><span class="pp-label">Exames laboratoriais — coleta de ${utils.escapeHTML(quando)}</span>` +
+        `<div class="pp-lab-grid">${cells}</div></div>`;
+    }).join('');
+    return blocos;
+  },
+  /* Demais exames datados (ECG, ECO, RX, laudos) acrescentados em série */
+  _exameSeriesBloco(d) {
+    const lista = (d && d._exameSeries) || [];
+    const linhas = lista.filter(x => x && (x.tipo || x.descricao)).map(x => {
+      const quando = x.data ? ' — realizado em ' + utils.formatarData(x.data) : '';
+      return `<div class="pp-block" style="margin:3px 0"><span class="pp-label">${utils.escapeHTML(x.tipo || 'Exame')}</span>` +
+        `<div class="pp-value">${utils.escapeHTML(x.descricao || '')}${utils.escapeHTML(quando)}</div></div>`;
+    }).join('');
+    return linhas;
+  },
   _section(title, content) {
     /* Omite seções vazias */
     if (!content || String(content).trim() === '') return '';
@@ -1204,6 +1235,10 @@ ${TAG_CLOSE_HTML}`;
     const d = printPreview._dadosDoFormulario('pre');
     if (!printPreview._registroFinalizado('pre')) {
       try { d._labExtras = labExtra.coletar('pre-lab-extras'); } catch (e) {}
+      /* as coletas datadas ainda não salvas também precisam aparecer na
+         pré-visualização: quem confere antes de imprimir confere o que digitou */
+      try { d._labSeries = labSerie.coletar('pre-lab-series'); } catch (e) {}
+      try { d._exameSeries = exameSerie.coletar('pre-exame-series'); } catch (e) {}
     }
     /* Nome do paciente — tolerante a chaves alternativas para nunca sair vazio */
     const nomePac = (d.nome || d.paciente_nome || d.paciente || '').trim();
@@ -1231,20 +1266,24 @@ ${TAG_CLOSE_HTML}`;
         </div>
       `) +
       printPreview._section('Anamnese', `
+        ${printPreview._field('Descrição clínica', d.descricao_clinica, true)}
         ${printPreview._field('Comorbidades', d.comorbidades, true)}
         ${printPreview._field('Alergias', d.alergias, true)}
         ${printPreview._field('Medicações em uso', d.medicacoes, true)}
         ${printPreview._field('Cirurgias prévias', d.cirurgias_previas, true)}
         ${printPreview._field('Antecedentes anestésicos', d.antecedentes, true)}
+        ${printPreview._field('Acompanhantes presentes', d.acompanhantes, true)}
       `) +
       printPreview._section('Sinais vitais e exames', `
         ${printPreview._vitaisPre(d)}
         ${printPreview._field('Exame físico', d.exame_fisico, true)}
         ${printPreview._labGrid(d)}
         ${printPreview._field('Data dos exames laboratoriais', utils.formatarData(d.lab_data))}
+        ${printPreview._labSeriesGrid(d)}
         ${printPreview._field('ECG', printPreview._comData(d.lab_ecg, d.lab_ecg_data), true)}
         ${printPreview._field('ECO', printPreview._comData(d.lab_eco, d.lab_eco_data), true)}
         ${printPreview._field('Outros exames', printPreview._comData(d.exames_compl, d.exames_compl_data), true)}
+        ${printPreview._exameSeriesBloco(d)}
       `) +
       printPreview._section('Pareceres de outras clínicas', `
         ${printPreview._field('Cardiológico / risco cardíaco', d.parecer_cardio, true)}
@@ -1442,9 +1481,11 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._field('Exame físico', d.exame_fisico, true)}
         ${printPreview._labGrid(d)}
         ${printPreview._field('Data dos exames laboratoriais', utils.formatarData(d.lab_data))}
+        ${printPreview._labSeriesGrid(d)}
         ${printPreview._field('ECG', printPreview._comData(d.lab_ecg, d.lab_ecg_data), true)}
         ${printPreview._field('ECO', printPreview._comData(d.lab_eco, d.lab_eco_data), true)}
         ${printPreview._field('Outros exames', printPreview._comData(d.exames_compl, d.exames_compl_data), true)}
+        ${printPreview._exameSeriesBloco(d)}
         ${printPreview._field('Hipótese diagnóstica', d.hipotese, true)}
         ${printPreview._field('Conduta', d.conduta, true)}
         ${printPreview._field('Prescrição / orientações', d.prescricao, true)}
@@ -2233,6 +2274,25 @@ ${TAG_CLOSE_HTML}`;
     const textoHtml = (d.texto || '').split('\n').filter(l => l.trim())
       .map(l => `<p style="margin:0 0 8px;text-align:justify;font-size:calc(10pt * var(--pp-esc, 1));line-height:1.5">${utils.escapeHTML(l)}</p>`).join('');
 
+    /* QUEM ACOMPANHOU A CONSULTA ENTRA NO TERMO.
+       Quem estava na sala ouviu a orientação e, em menor de idade ou paciente
+       sem autonomia, é quem assina. Registrar isso no termo é o que faz a
+       assinatura ter contexto meses depois. O dado é digitado uma vez, na pré,
+       e vem de lá — redigitar aqui é como o mesmo nome sai com duas grafias
+       em dois documentos do mesmo atendimento. O campo próprio do termo, se
+       preenchido, tem precedência: quem está com o termo aberto sabe mais. */
+    const acompanhantesTermo = (() => {
+      const proprio = String(d.acompanhantes || '').trim();
+      if (proprio) return proprio;
+      try {
+        const pre = linker.ultimoPorNome('pre', d.nome, linker.contextoPaciente('termo'));
+        return String((pre && pre.acompanhantes) || '').trim();
+      } catch (e) { return ''; }
+    })();
+    const acompHtml = acompanhantesTermo
+      ? printPreview._section('Acompanhantes presentes', printPreview._field('', acompanhantesTermo, true))
+      : '';
+
     let respHtml = '';
     if (d.tem_responsavel) {
       respHtml = printPreview._section('Responsável legal', `
@@ -2270,6 +2330,7 @@ ${TAG_CLOSE_HTML}`;
           ${printPreview._field('Procedimento', d.procedimento)}
           ${printPreview._field('Técnica anestésica', d.tecnica)}
         </div>`) +
+      acompHtml +
       respHtml +
       printPreview._section('Termo', textoHtml +
         (d.riscos ? `<p style="margin:10px 0 0;font-size:calc(10pt * var(--pp-esc, 1))"><strong>Riscos específicos discutidos:</strong> ${utils.escapeHTML(d.riscos)}</p>` : '') +

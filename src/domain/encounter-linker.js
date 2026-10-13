@@ -89,6 +89,23 @@ const rascunhosSync = {
     ['_draftVersion','_draftUpdatedAt','_draftUpdatedBy','_draftOrg','_draftSyncedLocalAt'].forEach(k => { delete x[k]; });
     return x;
   },
+  /* O CONTEÚDO, sem nenhum carimbo de tempo.
+     `_limpo` tira as marcas `_draft*` e mantém `updatedAt` — e faz bem, porque
+     em outros lugares essa hora é parte do recibo. Mas para decidir se existe
+     CONFLITO ela atrapalha: dois aparelhos com exatamente o mesmo rascunho têm
+     horas diferentes, e comparar incluindo a hora declarava divergência onde
+     não havia. Era o que preservava cópia atrás de cópia e fazia o contador de
+     conflitos subir sozinho — 167, depois 304, sem ninguém digitar nada.
+     Conflito se decide pelo que está escrito: o rótulo e os dados. */
+  _mesmoConteudo(a, b) {
+    const corpo = r => {
+      try {
+        return JSON.stringify({ label: (r && r.label) || '', dados: (r && r.dados) || {} });
+      } catch (e) { return null; }
+    };
+    const x = corpo(a), y = corpo(b);
+    return x !== null && x === y;
+  },
   _daLinha(l, org) {
     const r = cloudRel._clone((l && l.data) || {});
     if (!r.id && l && l.doc_id) r.id = l.doc_id;
@@ -144,16 +161,35 @@ const rascunhosSync = {
     ['_draftVersion','_draftUpdatedAt','_draftUpdatedBy','_draftOrg','_draftSyncedLocalAt'].forEach(k => { lista[i][k] = meta[k]; });
     rascunhos.setList(mod, lista);
   },
+  SUFIXO_PRESERVADA: ' — edição preservada',
   _preservarConflito(mod, local, remoto, opts = {}) {
     const lista = opts.lista || rascunhos.list(mod);
     const atual = lista.find(x => x && x.id === local.id);
     if (!atual) return null;
+    /* UMA CÓPIA PRESERVADA NÃO SE PRESERVA DE NOVO.
+       Ela já é o retrato de um momento; preservá-la produziria o retrato de um
+       retrato, com o sufixo empilhado no nome, e cada geração fabricando a
+       seguinte. Chegando aqui, a cadeia para. */
+    if (local._draftConflictOf) return null;
+    /* CONTEÚDO IGUAL NÃO É CONFLITO, venha de onde vier.
+       A trava está AQUI, e não só em quem chama, porque são dois caminhos — o
+       envio e a descida — e o segundo também preservava sem olhar. Não há o
+       que a pessoa decidir entre uma versão e ela mesma; a da nuvem fica, com
+       o carimbo que faltava, e o ciclo encerra. */
+    if (rascunhosSync._mesmoConteudo(local, remoto)) {
+      const i0 = lista.indexOf(atual);
+      if (i0 >= 0) { lista[i0] = remoto; rascunhos.setList(mod, lista); }
+      return null;
+    }
     const marca = [local.id, local._draftVersion || '', remoto._draftVersion || '', cloudRel._hashConflito(local)].join('|');
     let copia = lista.find(x => x && x._draftConflictFingerprint === marca);
     if (!copia) {
       copia = rascunhosSync._limpo(local);
       copia.id = 'rasc_conflito_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
-      copia.label = ((local.label || 'Rascunho') + ' — edição preservada').slice(0, 60);
+      /* o sufixo entra UMA vez: rótulo que já o tenha não ganha outro */
+      const base = String(local.label || 'Rascunho');
+      copia.label = (base.endsWith(rascunhosSync.SUFIXO_PRESERVADA)
+        ? base : base + rascunhosSync.SUFIXO_PRESERVADA).slice(0, 60);
       copia.updatedAt = new Date().toISOString();
       copia._draftConflictFingerprint = marca;
       copia._draftConflictOf = local.id;
@@ -193,8 +229,17 @@ const rascunhosSync = {
       if (!cloudRel._contextoValido(contexto, org)) return 0;
       /* Rascunho em branco não sobe: era assim que cada aparelho mandava o seu
          "Rascunho 1" vazio e todos acabavam com três abas iguais. */
+      /* A CÓPIA PRESERVADA NÃO SOBE, E É O QUE IMPEDE O LAÇO.
+         Ela é uma fotografia local do que esta aba tinha antes de a nuvem
+         trazer outra versão: existe para a pessoa comparar e decidir, e não
+         tem — nem deve ter — contrapartida no servidor. Subindo, ela voltava
+         no pull seguinte como rascunho alheio, era comparada com o que estava
+         aberto aqui, virava conflito, e gerava OUTRA cópia. Daí as abas se
+         multiplicarem sozinhas, cada uma com mais um " — edição preservada"
+         grudado no nome, até a tela encher. */
       const lista = (rascunhos.list(mod) || [])
-        .filter(r => r && r.id && r.dados && rascunhos.temConteudo(mod, r) && !rascunhos.fechadoAqui(mod, r.id));
+        .filter(r => r && r.id && r.dados && !r._draftConflictOf &&
+          rascunhos.temConteudo(mod, r) && !rascunhos.fechadoAqui(mod, r.id));
       if (!lista.length) return 0;
       let enviados = 0;
       for (const r of lista) {
@@ -259,9 +304,22 @@ const rascunhosSync = {
           return;
         }
         const vr = Number(r._draftVersion) || 0, vl = Number(local._draftVersion) || 0;
-        const sujo = vl > 0
+        /* PRESERVAR PRESSUPÕE DIVERGÊNCIA — a mesma lição do conflito de
+           registro, que aqui faltava.
+           `sujo` olhava só a HORA: `updatedAt` diferente de
+           `_draftSyncedLocalAt` significa "mexeram aqui depois do último
+           envio". Só que a hora é tocada por muita coisa que não muda
+           conteúdo, e aí todo pull com versão remota maior preservava uma
+           cópia — de um rascunho idêntico ao que já estava na nuvem. A cópia
+           subia, voltava, preservava outra, e o contador de conflitos subia
+           sozinho: 167, depois 304, sem ninguém digitar nada.
+           Conteúdo igual não é conflito: não há o que a pessoa decidir entre
+           uma coisa e ela mesma. Fica a versão da nuvem, que traz o carimbo
+           que faltava e encerra o ciclo. Havendo UMA diferença real, preserva
+           como sempre preservou. */
+        const sujo = !rascunhosSync._mesmoConteudo(local, r) && (vl > 0
           ? String(local.updatedAt || '') !== String(local._draftSyncedLocalAt || '')
-          : !rascunhosSync._iguais(local, r);
+          : true);
         if (vr > vl && sujo) {
           rascunhosSync._preservarConflito(mod, local, r, { organizationId: org, lista: locais }); conflitos++;
           rascunhosSync._chegaram.push({ id: r.id, label: r.label || '', updatedAt: r.updatedAt || '' });
@@ -1422,10 +1480,16 @@ const linker = {
   /* Todos os módulos que podem conter dados de paciente */
   _MODS_PACIENTE: ['anestesia', 'pre', 'consulta', 'recuperacao', 'termo', 'prescricao', 'risco', 'financeiro', 'orcamento'],
 
-  /* Campos de paciente rastreados no per-campo-mais-recente */
+  /* Campos de paciente rastreados no per-campo-mais-recente.
+     É a SEGUNDA lista branca do caminho: `_normalizarCadastro` decide o que sai
+     do cadastro, e esta decide o que chega aos formulários. Campo que falte em
+     qualquer uma das duas é descartado em silêncio, por mais que esteja
+     gravado — foi o que aconteceu com filiação e responsável quando entraram
+     só na primeira. Mantenha as duas juntas ao acrescentar um campo. */
   _CAMPOS_PACIENTE: ['nome', 'nascimento', 'idade', 'sexo', 'peso', 'altura', 'imc',
     'cpf', 'rg', 'prontuario', 'convenio', 'plano', 'matricula', 'carteirinha',
-    'telefone', 'email', 'endereco', 'acomodacao'],
+    'telefone', 'email', 'endereco', 'acomodacao',
+    'nome_mae', 'nome_pai', 'responsavel_legal', 'responsavel_parentesco'],
 
   /* === PER-CAMPO MAIS RECENTE ===
      Reúne TODOS os registros do paciente (todos os módulos + cadastro),
@@ -1576,6 +1640,14 @@ const linker = {
       convenio: p.convenio || p.plano, plano: p.plano || p.convenio,
       matricula: p.matricula || p.carteirinha, carteirinha: p.carteirinha || p.matricula,
       telefone: p.telefone, email: p.email,
+      /* FILIAÇÃO E RESPONSÁVEL. Só chega aos formulários o que passa por aqui:
+         campo ausente desta lista é descartado no caminho, por mais que esteja
+         gravado no cadastro. Estes quatro existem para que o campo de
+         acompanhantes da pré e o termo de consentimento sejam preenchidos a
+         partir do cadastro, em vez de redigitados a cada consulta — que é como
+         o mesmo nome acaba com duas grafias em dois documentos do mesmo dia. */
+      nome_mae: p.nome_mae, nome_pai: p.nome_pai,
+      responsavel_legal: p.responsavel_legal, responsavel_parentesco: p.responsavel_parentesco,
       /* No cadastro a acomodação são duas caixas (apartamento / enfermaria);
          aqui vira um dado só, do jeito que os formulários esperam. */
       acomodacao: linker._acomodacaoDoCadastro(p)

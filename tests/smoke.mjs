@@ -17322,6 +17322,350 @@ await test('Programador exclui ambiente e conta pela tela, com a contagem à vis
   await page.close();
 });
 
+/* A CÓPIA PRESERVADA NÃO PODE FABRICAR A PRÓXIMA.
+   ---------------------------------------------------------------------------
+   Foto da tela, num computador em uso: centenas de abas "CELINA ALVES DOS
+   SANTOS" abrindo sozinhas, uma atrás da outra, e 167 conflitos preservados.
+   O nome denunciava o mecanismo: "— edição preservada — edição preserv…", o
+   sufixo empilhado sobre si mesmo.
+
+   O laço: quando a nuvem traz outra versão de um rascunho aberto, o app guarda
+   uma CÓPIA local do que estava aqui, para a pessoa comparar. Essa cópia era
+   tratada como rascunho comum — subia para a nuvem, voltava no pull seguinte,
+   era comparada com o que estava aberto, virava conflito, e gerava OUTRA
+   cópia. Cada geração fabricava a próxima.
+
+   Duas travas, porque uma só não bastava: a cópia não sobe (não tem
+   contrapartida no servidor, e não deveria ter), e uma cópia nunca é
+   preservada de novo (seria o retrato de um retrato). */
+await test('Cópia preservada não gera outra cópia: o laço das abas infinitas', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const mod = 'anestesia';
+    rascunhos.setList(mod, [{ id: 'r1', label: 'CELINA ALVES DOS SANTOS',
+      dados: { paciente_nome: 'CELINA' }, _draftVersion: 1 }]);
+    const local = rascunhos.list(mod)[0];
+    const remoto = Object.assign({}, local, { _draftVersion: 2, dados: { paciente_nome: 'CELINA X' } });
+
+    /* a primeira preservação é legítima e tem de acontecer: o trabalho desta
+       aba não pode ser descartado porque a nuvem trouxe outra versão */
+    rascunhosSync._preservarConflito(mod, local, remoto);
+    let lista = rascunhos.list(mod);
+    const copia = lista.find(x => x && x._draftConflictOf);
+    out.preservouUmaVez = lista.length === 2 && !!copia;
+    out.rotuloComUmSufixo = !!copia &&
+      copia.label.split('edição preservada').length === 2;
+
+    /* e a cadeia PARA: preservar a cópia não cria uma terceira */
+    const r2 = rascunhosSync._preservarConflito(mod, copia, Object.assign({}, copia, { _draftVersion: 9 }));
+    lista = rascunhos.list(mod);
+    out.recusouACopia = r2 === null;
+    out.naoCresceu = lista.length === 2;
+
+    /* E A RAIZ: conteúdo igual não é conflito.
+       A comparação incluía `updatedAt` — carimbo de tempo, não conteúdo — e
+       dois aparelhos com exatamente o mesmo rascunho têm horas diferentes.
+       Toda descida com versão remota maior preservava uma cópia de algo
+       idêntico ao que já estava na nuvem, e o contador subia sozinho. */
+    rascunhos.setList(mod, [{ id: 'r9', label: 'CELINA', dados: { paciente_nome: 'CELINA' },
+      _draftVersion: 1, updatedAt: '2026-10-13T10:00:00Z', _draftSyncedLocalAt: '2026-10-13T09:00:00Z' }]);
+    const base = rascunhos.list(mod)[0];
+    const soAHoraMudou = Object.assign({}, base, { _draftVersion: 2, updatedAt: '2026-10-13T11:00:00Z' });
+    const semConflito = rascunhosSync._preservarConflito(mod, base, soAHoraMudou);
+    out.horaNaoEhConflito = semConflito === null &&
+      !rascunhos.list(mod).some(x => x && x._draftConflictOf);
+    out.adotouACloud = (rascunhos.list(mod)[0] || {})._draftVersion === 2;
+
+    /* uma diferença REAL continua preservando os dois lados */
+    rascunhos.setList(mod, [{ id: 'r8', label: 'CELINA', dados: { paciente_nome: 'CELINA' },
+      _draftVersion: 1, updatedAt: '2026-10-13T10:00:00Z', _draftSyncedLocalAt: '2026-10-13T09:00:00Z' }]);
+    const base2 = rascunhos.list(mod)[0];
+    rascunhosSync._preservarConflito(mod, base2,
+      Object.assign({}, base2, { _draftVersion: 2, dados: { paciente_nome: 'OUTRO NOME' } }));
+    out.divergenciaRealPreserva = rascunhos.list(mod).some(x => x && x._draftConflictOf);
+
+    rascunhos.setList(mod, [{ id: 'r1', label: 'CELINA ALVES DOS SANTOS',
+      dados: { paciente_nome: 'CELINA' }, _draftVersion: 1 }]);
+    /* a cópia é local: não entra na fila de envio, senão volta pelo pull */
+    out.copiaNaoSobe = (() => {
+      const enviaveis = (rascunhos.list(mod) || [])
+        .filter(x => x && x.id && x.dados && !x._draftConflictOf);
+      return !enviaveis.some(x => x._draftConflictOf) &&
+        enviaveis.length === 1 && enviaveis[0].id === 'r1';
+    })();
+    return out;
+  });
+  assert(r.preservouUmaVez, 'a primeira preservação continua acontecendo: o trabalho da aba não pode ser descartado');
+  assert(r.rotuloComUmSufixo, 'o rótulo leva o sufixo UMA vez, não um por geração');
+  assert(r.recusouACopia && r.naoCresceu, 'preservar uma cópia não pode criar outra — era isso que enchia a tela de abas');
+  assert(r.copiaNaoSobe, 'a cópia é local e não sobe: subindo, ela voltava pelo pull e reiniciava o ciclo');
+  assert(r.horaNaoEhConflito && r.adotouACloud,
+    'hora diferente com o MESMO conteúdo não é conflito: era a raiz do contador subindo sozinho');
+  assert(r.divergenciaRealPreserva, 'e uma diferença de verdade continua preservando os dois lados');
+  await page.close();
+});
+
+/* QUEM ACOMPANHOU A CONSULTA É DADO CLÍNICO E JURÍDICO.
+   ---------------------------------------------------------------------------
+   Quem estava na sala ouviu a orientação de jejum, vai lembrar da medicação da
+   manhã e — em menor de idade ou paciente sem autonomia — é quem assina o
+   consentimento. Não havia onde registrar: o nome acabava solto num campo de
+   observação, ou redigitado no termo com outra grafia.
+
+   Agora o campo existe uma vez, na pré; é preenchido A PARTIR DO CADASTRO com
+   um toque (mãe, pai, responsável legal); e a mesma frase atravessa a folha da
+   pré e o Termo de Consentimento.
+
+   O caminho do cadastro até o formulário tem DUAS listas brancas em série
+   (`_normalizarCadastro` e `_CAMPOS_PACIENTE`). Campo que falte em qualquer
+   uma é descartado em silêncio — foi exatamente o que aconteceu na primeira
+   tentativa. Este teste atravessa o caminho inteiro, não as peças. */
+await test('Acompanhantes vêm do cadastro, entram na pré e chegam ao termo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    store.setList('pacientes', [{
+      _id: 'p-acomp', nome: 'ANA PAULA SOUZA', cpf: '111.222.333-44',
+      nome_mae: 'MARIA SOUZA', nome_pai: 'JOSE SOUZA',
+      responsavel_legal: 'MARIA SOUZA', responsavel_parentesco: 'mãe',
+      _updatedAt: new Date().toISOString()
+    }]);
+
+    /* o cadastro chega inteiro ao formulário — as duas listas brancas */
+    const d = identificacaoPaciente.dados('ANA PAULA SOUZA');
+    out.cadastroChega = d.nome_mae === 'MARIA SOUZA' && d.nome_pai === 'JOSE SOUZA'
+      && d.responsavel_legal === 'MARIA SOUZA';
+
+    const poss = identificacaoPaciente.acompanhantesPossiveis('ANA PAULA SOUZA');
+    /* a mãe é também a responsável legal: aparece UMA vez, com o papel declarado */
+    out.semDuplicar = poss.filter(x => x.nome === 'MARIA SOUZA').length === 1;
+    out.temPapeis = poss.some(x => x.nome === 'MARIA SOUZA' && x.papel === 'mãe')
+      && poss.some(x => x.nome === 'JOSE SOUZA' && x.papel === 'pai');
+
+    /* os dois campos novos existem na pré */
+    ui.navegar('pre');
+    const f = document.getElementById('form-pre');
+    out.camposExistem = !!f.querySelector('[name="descricao_clinica"]') && !!f.querySelector('[name="acompanhantes"]');
+
+    /* o botão preenche a partir do cadastro, e clicar de novo não duplica */
+    f.querySelector('[name="nome"]').value = 'ANA PAULA SOUZA';
+    acompanhantes.doCadastro('#form-pre [name=acompanhantes]', '#form-pre [name=nome]');
+    const v1 = f.querySelector('[name="acompanhantes"]').value;
+    acompanhantes.doCadastro('#form-pre [name=acompanhantes]', '#form-pre [name=nome]');
+    out.preencheu = /MARIA SOUZA \(mãe\)/.test(v1) && /JOSE SOUZA \(pai\)/.test(v1);
+    out.naoDuplica = f.querySelector('[name="acompanhantes"]').value === v1;
+
+    /* o que já estava escrito à mão não é apagado */
+    f.querySelector('[name="acompanhantes"]').value = 'Vizinha Joana';
+    acompanhantes.doCadastro('#form-pre [name=acompanhantes]', '#form-pre [name=nome]');
+    out.naoApagaOQueFoiEscrito = /Vizinha Joana/.test(f.querySelector('[name="acompanhantes"]').value)
+      && /MARIA SOUZA/.test(f.querySelector('[name="acompanhantes"]').value);
+
+    /* a pré impressa traz os dois campos. Os construtores leem do FORMULÁRIO,
+       não de um objeto — então o teste preenche a tela, que é o que a pessoa
+       faz, em vez de injetar dados por baixo. */
+    f.querySelector('[name="acompanhantes"]').value = 'MARIA SOUZA (mãe)';
+    f.querySelector('[name="descricao_clinica"]').value = 'Paciente hígida, boa reserva funcional.';
+    const folhaPre = document.createElement('div');
+    folhaPre.innerHTML = printPreview._buildPre();
+    out.naFolhaDaPre = /Descrição clínica/.test(folhaPre.textContent)
+      && /boa reserva funcional/.test(folhaPre.textContent)
+      && /Acompanhantes presentes/.test(folhaPre.textContent)
+      && /MARIA SOUZA/.test(folhaPre.textContent);
+
+    /* e o TERMO busca da pré, sem ninguém redigitar */
+    store.setList('pre', [{ _id: 'pre-acomp', nome: 'ANA PAULA SOUZA',
+      acompanhantes: 'MARIA SOUZA (mãe)', _updatedAt: new Date().toISOString() }]);
+    ui.navegar('termo');
+    const ft = document.getElementById('form-termo');
+    ft.querySelector('[name="nome"]').value = 'ANA PAULA SOUZA';
+    const txt = ft.querySelector('[name="texto"]'); if (txt) txt.value = 'Termo de teste.';
+    const folhaTermo = document.createElement('div');
+    folhaTermo.innerHTML = printPreview._buildTermo();
+    out.noTermo = /Acompanhantes presentes/.test(folhaTermo.textContent)
+      && /MARIA SOUZA/.test(folhaTermo.textContent);
+    return out;
+  });
+  assert(r.cadastroChega, 'filiação e responsável precisam atravessar AS DUAS listas brancas até o formulário');
+  assert(r.semDuplicar && r.temPapeis, 'a mãe que também é responsável aparece uma vez, com o papel declarado');
+  assert(r.camposExistem, 'descrição clínica e acompanhantes existem na pré, junto da anamnese');
+  assert(r.preencheu && r.naoDuplica, 'o botão traz do cadastro e clicar de novo não repete ninguém');
+  assert(r.naoApagaOQueFoiEscrito, 'e nunca apaga o que foi escrito à mão: quem atendeu sabe quem estava lá');
+  assert(r.naFolhaDaPre, 'os dois campos saem na folha da pré');
+  assert(r.noTermo, 'e o termo busca os acompanhantes da pré — redigitar é como o mesmo nome ganha duas grafias');
+  await page.close();
+});
+
+/* CADA COLETA COM A SUA DATA.
+   ---------------------------------------------------------------------------
+   A ficha tinha um único conjunto de exames e uma única data. Mas o paciente
+   chega com os exames de agosto e volta com os de outubro, e os dois importam:
+   o que diz alguma coisa não é a creatinina de hoje, é a creatinina de hoje AO
+   LADO da de dois meses atrás. Antes era preciso escolher uma — ou amontoar
+   tudo num campo de observação, onde a informação se perde.
+
+   O bloco principal continua sendo o que sempre foi (nenhuma ficha antiga
+   muda); o ➕ abre quantas coletas forem necessárias, cada uma com data
+   própria, e a folha imprime todas no mesmo formato, para a comparação
+   existir na mesma página. */
+await test('Exames em série: cada coleta com a sua data, da tela até a folha', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    ui.navegar('pre');
+    labSerie.add('pre-lab-series', { data: '2026-08-15', hb: '11,2', creat: '1,8', k: '4,0' });
+    labSerie.add('pre-lab-series', { data: '2026-10-02', hb: '14,6', creat: '0,90' });
+    exameSerie.add('pre-exame-series', { tipo: 'RX de tórax', descricao: 'Sem consolidações', data: '2026-09-30' });
+
+    out.doisBlocos = document.querySelectorAll('#pre-lab-series .lab-serie').length === 2;
+    const col = labSerie.coletar('pre-lab-series');
+    out.coletaCerta = col.length === 2 && col[0].hb === '11,2' && col[0].data === '2026-08-15'
+      && col[1].creat === '0,90';
+    /* coleta em branco não vira registro: campo aberto por engano não polui a ficha */
+    labSerie.add('pre-lab-series', {});
+    out.vazioNaoEntra = labSerie.coletar('pre-lab-series').length === 2;
+    /* ida e volta: o que foi salvo reabre igual */
+    labSerie.restaurar('pre-lab-series', col);
+    out.idaEVolta = labSerie.coletar('pre-lab-series').length === 2
+      && document.querySelector('#pre-lab-series .ls-data').value === '2026-08-15';
+
+    const d = { nome: 'Teste', _labSeries: col, _exameSeries: exameSerie.coletar('pre-exame-series') };
+    const folha = document.createElement('div');
+    folha.innerHTML = printPreview._labSeriesGrid(d) + printPreview._exameSeriesBloco(d);
+    const t = folha.textContent;
+    out.duasDatasNaFolha = t.includes('15/08/2026') && t.includes('02/10/2026');
+    out.valoresNaFolha = t.includes('11,2') && t.includes('14,6') && t.includes('0,90');
+    out.exameNaFolha = t.includes('RX de tórax') && t.includes('30/09/2026');
+    out.mesmaGradeDaPrincipal = /pp-lab-grid/.test(printPreview._labSeriesGrid(d));
+    /* ficha sem série nenhuma não ganha bloco vazio */
+    out.semSerieNadaSai = printPreview._labSeriesGrid({}) === '' && printPreview._exameSeriesBloco({}) === '';
+
+    /* comorbidades, alergias e medicações ganharam fronteira própria.
+       Conferido POR CAMPO, não por contagem: contar blocos quebrava assim que
+       um campo novo entrasse na anamnese — e entrou. */
+    out.anamneseSeparada = ['comorbidades', 'alergias', 'medicacoes'].every(n => {
+      const el = document.querySelector('#pre-sec-anamnese [name="' + n + '"]');
+      return !!(el && el.closest('.bloco-anamnese'));
+    });
+    return out;
+  });
+  assert(r.doisBlocos && r.coletaCerta, 'cada ➕ abre uma coleta com data própria, e o que foi digitado é o que se coleta');
+  assert(r.vazioNaoEntra, 'coleta aberta por engano e deixada em branco não vira registro na ficha');
+  assert(r.idaEVolta, 'o que foi salvo reabre igual — senão a série se perde no primeiro recarregamento');
+  assert(r.duasDatasNaFolha && r.valoresNaFolha, 'a folha traz as duas coletas com as suas datas: é a comparação que vale');
+  assert(r.mesmaGradeDaPrincipal, 'e na MESMA grade da coleta principal, para a leitura ser uma só');
+  assert(r.exameNaFolha, 'exame de imagem em série sai com descrição e data');
+  assert(r.semSerieNadaSai, 'ficha sem série nenhuma não ganha bloco vazio');
+  assert(r.anamneseSeparada, 'comorbidades, alergias e medicações passam a ter fronteira visual própria');
+  await page.close();
+});
+
+/* EXAME QUE CHEGOU DEPOIS SAI COMO EXAME, NÃO COMO EXTRATO DE ALTERAÇÕES.
+   ---------------------------------------------------------------------------
+   A folha do Jotenildo saía com `Hb 13,2` no campo e, no fim, vinte linhas no
+   formato `• lab hb: "13,2" → "14,6"`. O exame que chegou depois da
+   finalização ficava perdido num log que ninguém lê antes de anestesiar.
+
+   "Um exame laboratorial deve ficar como os demais previamente digitados.
+   Pode até ser como um cartão novo, mas tem que ser dentro da ficha e com
+   campo em sequência, pra informação não ficar perdida."
+
+   O adendo passa a ser TRADUZIDO na impressão: a chave técnica (`lab_hb`)
+   vira o rótulo de sempre (`Hb`), exames vão para a mesma grade dos que já
+   estavam na ficha, o resto vira rótulo + valor em sequência, e o texto livre
+   continua texto. Vale para os adendos novos (que trazem os campos
+   estruturados) e para os antigos como o do Jotenildo, que só têm o texto. */
+await test('Adendo sai formatado como campo da ficha, não como lista de diferenças', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    /* o texto exato gravado pelo build que gerou a folha do relato */
+    const texto = 'CORREÇÃO (edição direta sobre o registro finalizado — o original permanece como estava):\n'
+      + '• lab creat: "1,4" → "0,90"\n'
+      + '• lab hb: "13,2" → "14,6"\n'
+      + '• lab ht: "39,6" → "43,5"\n'
+      + '• lab eco: — → "FEVE 69%"\n'
+      + '• procedimento · descricao: "A" → "B"\n'
+      + 'Observação livre do médico.';
+    const ad = { id: 'a1', data: '2026-10-12T15:45:04Z', autor: 'mpcanestesiologia', texto };
+    const rec = { _id: 'j1', _finalizado: true, nome: 'JOTENILDO', _adendos: [ad] };
+
+    const m = adendos.mudancasDoAdendo(ad);
+    const porRotulo = {};
+    m.campos.forEach(c => { porRotulo[c.rotulo] = c.valor; });
+
+    const html = adendos.htmlParaImpressao(rec);
+    const d = document.createElement('div'); d.innerHTML = html;
+    const visivel = d.textContent;
+
+    return {
+      rotulosTraduzidos: porRotulo['Hb'] === '14,6' && porRotulo['Ht'] === '43,5' && porRotulo['Creat'] === '0,90',
+      campoAninhado: porRotulo['Descricao'] === 'B',
+      examesNaGrade: /pp-lab-grid/.test(html) && /pp-lab-k/.test(html),
+      /* o que o leitor NÃO pode ver: seta de diff, valor antigo, chave técnica */
+      semSeta: visivel.indexOf('→') < 0,
+      semValorAntigo: !/13,2|39,6/.test(visivel),
+      semChaveTecnica: !/lab_hb|lab hb/.test(visivel),
+      semPreambulo: !/edição direta sobre o registro/.test(visivel),
+      textoLivrePreservado: /Observação livre do médico/.test(visivel),
+      /* adendo sem nenhum campo continua saindo como texto, não some */
+      soTexto: (() => {
+        const t = adendos.htmlParaImpressao({ _id: 'j2', _finalizado: true,
+          _adendos: [{ id: 'b1', data: '2026-10-12T16:00:00Z', texto: 'Paciente relatou dor lombar.' }] });
+        return /Paciente relatou dor lombar/.test(t);
+      })()
+    };
+  });
+  assert(r.rotulosTraduzidos, 'Hb, Ht e Creat têm de sair com o rótulo da ficha e o valor NOVO');
+  assert(r.campoAninhado, 'campo aninhado (procedimento · descricao) também é traduzido');
+  assert(r.examesNaGrade, 'exames saem na MESMA grade dos que já estavam digitados');
+  assert(r.semSeta && r.semValorAntigo, 'a folha não traz seta de diferença nem o valor antigo: isso é histórico, não documento');
+  assert(r.semChaveTecnica, 'nem a chave técnica do campo — quem lê a folha não programa');
+  assert(r.semPreambulo, 'nem o preâmbulo burocrático que existia só para anunciar a lista');
+  assert(r.textoLivrePreservado, 'o que o médico escreveu à mão continua inteiro');
+  assert(r.soTexto, 'adendo que é só texto continua saindo como texto');
+  await page.close();
+});
+
+/* O IDENTIFICADOR DO GOOGLE É DA CLÍNICA, NÃO DO APARELHO.
+   ---------------------------------------------------------------------------
+   O Client ID do Drive morava só no localStorage. Some a cada aparelho novo e
+   some de novo no mesmo aparelho sempre que a gaveta local é limpa — que
+   passou a ser a regra quando todo computador virou compartilhado. Quem usa
+   precisava reconfigurar o Drive toda vez, e acabou guardando o identificador
+   dentro de um CADASTRO DE PACIENTE, porque paciente sincroniza e configuração
+   não sincronizava. A gambiarra era a parte sã da história: ela aponta
+   exatamente onde estava o buraco.
+
+   Agora a configuração entra no sync por clínica — cadastrada uma vez,
+   acompanha o ambiente em qualquer aparelho. O TOKEN continua fora: ele é a
+   credencial de quem entrou, não um dado da clínica, e tem de morrer com a
+   sessão. */
+await test('Configuração do Drive acompanha a clínica; o token nunca sai do aparelho', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const mapa = clinicaSync.CHAVES || {};
+    const chaves = Object.keys(mapa);
+    return {
+      cfgSincroniza: chaves.includes(pdfBackup.CFG_KEY),
+      nomeNaNuvem: mapa[pdfBackup.CFG_KEY] || '',
+      tokenNaoSincroniza: !chaves.includes(pdfBackup.TOKEN_KEY),
+      chavesDiferentes: pdfBackup.CFG_KEY !== pdfBackup.TOKEN_KEY,
+      /* o campo da tela lê da configuração: trazida pelo sync, ela reaparece */
+      campoLeDaConfig: (() => {
+        pdfBackup.salvarCfg({ driveClientId: '123-abc.apps.googleusercontent.com' });
+        return pdfBackup.cfg().driveClientId === '123-abc.apps.googleusercontent.com';
+      })()
+    };
+  });
+  assert(r.cfgSincroniza, 'a configuração do Drive precisa sincronizar por clínica — era isso que faltava');
+  assert(r.nomeNaNuvem === 'pdfbackup_cfg', 'e chegar à nuvem com nome próprio');
+  assert(r.chavesDiferentes && r.tokenNaoSincroniza,
+    'o token de acesso NÃO acompanha a clínica: credencial é de quem entrou e morre com a sessão');
+  assert(r.campoLeDaConfig, 'o identificador guardado é o que a tela de Ajustes lê de volta');
+  await page.close();
+});
+
 /* CONFLITO PRESSUPÕE DIVERGÊNCIA.
    ---------------------------------------------------------------------------
    Depois de retificar a mesma pré três vezes, o app abriu "Conflitos
@@ -19223,12 +19567,16 @@ await test('Adendos e correções saem na impressão, e a folha avisa que existe
     const ppp = document.getElementById('ppp');
     const bloco = ppp.querySelector('.print-adendos');
     const texto = bloco ? bloco.textContent : '';
-    out.temBloco = ppp.querySelectorAll('.print-adendos').length === 1 && /ADENDOS \/ CORREÇÕES/.test(texto);
+    /* O título mudou com o formato: o bloco deixou de ser um log de
+       "ADENDOS / CORREÇÕES" e passou a ser o que o leitor precisa entender —
+       informação que chegou depois e faz parte da avaliação. */
+    out.temBloco = ppp.querySelectorAll('.print-adendos').length === 1
+      && /INFORMAÇÕES ACRESCENTADAS APÓS A FINALIZAÇÃO/.test(texto);
     out.temOConteudo = texto.includes('Hb 13,2') && texto.includes('ECG sem alterações');
     const dataExibida = adendos._fmtData(dataAdendo);
     out.temAutorEData = !!dataExibida && texto.includes(dataExibida) && texto.includes(autor);
-    out.dizQueOOriginalEhODeCima = /original, preservado/i.test(texto);
-    out.contaQuantos = /CORREÇÕES — 1/.test(texto);
+    out.dizQueOOriginalEhODeCima = /original permanece preservado/i.test(texto);
+    out.contaQuantos = /FINALIZAÇÃO — 1/.test(texto);
     const linhaAdendo = bloco && bloco.querySelector('div:last-child');
     out.tamanhoDeLeitura = !!linhaAdendo && parseFloat(getComputedStyle(linhaAdendo).fontSize) >= 11.9;
     out.originalNaFolha = ppp.textContent.includes(registroPre.exames_compl) && ppp.textContent.includes(nome);
@@ -19248,7 +19596,7 @@ await test('Adendos e correções saem na impressão, e a folha avisa que existe
       && blocosConjunto[0].textContent.includes(registroAnestesia._adendos[0].texto)
       && blocosConjunto[1].textContent.includes(registroSrpa._adendos[0].texto)
       && blocosConjunto.every(b => b.textContent.includes(autor) && b.textContent.includes(dataExibida)
-        && /original, preservado/i.test(b.textContent)
+        && /original permanece preservado/i.test(b.textContent)
         && parseFloat(getComputedStyle(b.querySelector('div:last-child')).fontSize) >= 11.9)
       && ppp.textContent.includes(nome) && ppp.textContent.includes('2ª parte — Recuperação pós-anestésica');
     out.conjuntoSemOutroPaciente = !ppp.textContent.includes(outroPre._adendos[0].texto)

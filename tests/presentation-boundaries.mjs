@@ -1057,7 +1057,10 @@ for (const mod of realPrintBuilders.keys()) {
   assert(printedDocument.includes('Original ' + mod));
   assert(printedDocument.includes(escaped(mod + ': ' + hostileAddendum)), mod + ': adendo deve chegar à impressão real');
   assert(printedDocument.includes(escaped(hostileAuthor)), mod + ': autoria precisa estar escapada');
-  assert(printedDocument.includes('2026') && /ADENDOS \/ CORREÇÕES/.test(printedDocument));
+  /* O bloco deixou de ser um log ("ADENDOS / CORREÇÕES") e passou a trazer o
+     conteúdo traduzido em campos. O que este teste garante continua igual: o
+     adendo CHEGA à impressão, datado. */
+  assert(printedDocument.includes('2026') && /INFORMAÇÕES ACRESCENTADAS APÓS A FINALIZAÇÃO/.test(printedDocument));
   assert.doesNotMatch(printedDocument, /<(?:img|svg)\b/, 'adendos não podem introduzir HTML executável');
   assert(!printedDocument.includes('consulta: ' + escaped(hostileAddendum)) || mod === 'consulta',
     'somente os adendos do módulo/registro aberto são impressos');
@@ -1071,7 +1074,7 @@ assert(printedDocument.includes(escaped('anestesia: ' + hostileAddendum))
   && printedDocument.includes(escaped('recuperacao: ' + hostileAddendum)), 'conjunto anestesia+SRPA imprime os adendos de ambas as fichas');
 printForms.get('pre')._id.value = '';
 actualPrintSandbox.state.currentModule = 'pre'; actualPrint.abrir(); actualPrint.imprimir();
-assert(!/ADENDOS \/ CORREÇÕES/.test(printedDocument), 'formulário novo não pode herdar os adendos da impressão anterior');
+assert(!/INFORMAÇÕES ACRESCENTADAS APÓS A FINALIZAÇÃO/.test(printedDocument), 'formulário novo não pode herdar os adendos da impressão anterior');
 assert.equal(JSON.stringify([...printRecords]), recordsBeforePrinting, 'preview e impressão preservam o original e sua autoria');
 
 /* Executa os builders reais com uma retificação aceita pelo servidor e outra
@@ -1206,7 +1209,7 @@ for (const complemento of [{}, { pre_anestesico: null, tecnica: null, monitoriza
     'ficha esparsa não pode impedir a composição dos dois adendos corretos');
   assert(printedDocument.includes('Autor sintético da ficha') && printedDocument.includes('Autor sintético da SRPA'));
   assert(printedDocument.includes('Observação sintética original da SRPA') && printedDocument.includes('2ª parte — Recuperação pós-anestésica'));
-  assert.equal((printedDocument.match(/ADENDOS \/ CORREÇÕES/g) || []).length, 2);
+  assert.equal((printedDocument.match(/INFORMAÇÕES ACRESCENTADAS APÓS A FINALIZAÇÃO/g) || []).length, 2);
   assert(!printedDocument.includes('Paciente A') && !printedDocument.includes('VERSÃO ATUAL — RETIFICADA'),
     'seções ausentes não podem herdar paciente do formulário nem retificações de outro registro');
   assert.equal(JSON.stringify([ficha, srpa]), antes, 'normalização de apresentação preserva os originais esparsos');
