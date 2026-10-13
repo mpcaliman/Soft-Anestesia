@@ -1310,17 +1310,24 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
        item da lista, e a um clique da versão automática, que é exercitada
        logo abaixo. */
     anestesia.salvar({ finalizar: true });
-    await new Promise(r => setTimeout(r, 900));
-    /* A ORDEM É O QUE IMPORTA AQUI, e é o que estava quebrado: primeiro a
-       janela da cobrança (que não pode deixar de abrir, sob pena de o
-       lançamento não nascer), e só quando ela sai é que entra o fechamento.
-       Antes as duas disputavam o mesmo lugar e a ordem dependia de qual laço
-       de espera acordasse primeiro — daí o "às vezes não vai". */
-    out.cobrancaPrimeiro = /gerar o lan.amento|Gerar lan.amento|financeiro/i.test(document.body.textContent || '');
-    try { modal.close(); } catch (e) {}
-    await new Promise(r => setTimeout(r, 1500));
+    /* A ORDEM É O QUE IMPORTA, e é o que estava quebrado. Finalizar abre uma
+       fila de janelas (tutorial do gráfico, cobrança) e o fechamento entra
+       DEPOIS delas — nunca disputando o lugar. O teste faz o que a pessoa faz:
+       vai fechando o que está na frente e anota o que viu, em ordem. */
+    const vistos = [];
+    for (let i = 0; i < 8; i++) {
+      await new Promise(r => setTimeout(r, 700));
+      const t = (document.getElementById('modal-title') || {}).textContent || '';
+      if (t) vistos.push(t);
+      if (/Fechamento do atendimento/i.test(t)) break;
+      try { modal.close(); } catch (e) {}
+    }
+    out.vistos = vistos.join(' | ');
+    const iCobranca = vistos.findIndex(t => /financeiro/i.test(t));
+    const iFecha = vistos.findIndex(t => /Fechamento do atendimento/i.test(t));
+    out.cobrancaPrimeiro = iCobranca >= 0 && iFecha > iCobranca;
     const corpoPos = document.body.textContent || '';
-    out.modalOferece = corpoPos.includes('Fechamento do atendimento') &&
+    out.modalOferece = iFecha >= 0 &&
       /Recupera..o p.s-anest.sica \(SRPA\)/i.test(corpoPos);
     /* ao finalizar o rascunho fecha e o form é limpo — o id vive no registro */
     const fichaId = store.list('anestesia')[0]._id;
@@ -1414,8 +1421,10 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
     store.setList('anestesia', []); store.setList('recuperacao', []);
     return out;
   });
+  assert(r.cobrancaPrimeiro,
+    'a cobrança abre ANTES do fechamento — ela é a que não pode faltar (vistos: ' + r.vistos + ')');
   assert(r.modalOferece,
-    'saindo a cobrança, o fechamento do atendimento entra e oferece a SRPA — essa ordem é o conserto');
+    'e o fechamento entra depois, oferecendo a SRPA (vistos: ' + r.vistos + ')');
   assert(r.entradaPrefill, 'entrada da SRPA deveria vir pré-preenchida com a saída de sala');
   assert(r.srpaFinalizada, 'a SRPA automática deveria nascer FINALIZADA');
   assert(r.dadosCertos, 'nome/horários/procedência/Aldrete 10 deveriam estar preenchidos');
