@@ -16,6 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { readAppSource } from './helpers/read-app-source.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootArgument = process.argv.find(argument => argument.startsWith('--app-root='));
@@ -1304,10 +1305,35 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
     set('hora_sala_saida', '12:00'); set('anestesiologista', 'Dr. Fluxo');
     anestesia.vitais.add(false, { hora: '11:50', pas: '120', pad: '80', fc: '72', spo2: '98' });
 
-    // finalizar → o modal oferece a SRPA automática (agora em TODA finalização sem SRPA)
+    /* Finalizar abre o FECHAMENTO DO ATENDIMENTO, que substituiu a cascata de
+       janelas disputando o mesmo lugar. A SRPA continua oferecida — agora como
+       item da lista, e a um clique da versão automática, que é exercitada
+       logo abaixo. */
     anestesia.salvar({ finalizar: true });
-    await new Promise(r => setTimeout(r, 600));
-    out.modalOferece = document.body.textContent.includes('SRPA automática s/ intercorrências');
+    /* A ORDEM É O QUE IMPORTA, e é o que estava quebrado. Finalizar abre uma
+       fila de janelas (tutorial do gráfico, cobrança) e o fechamento entra
+       DEPOIS delas — nunca disputando o lugar. O teste faz o que a pessoa faz:
+       vai fechando o que está na frente e anota o que viu, em ordem. */
+    const vistos = [];
+    for (let i = 0; i < 8; i++) {
+      await new Promise(r => setTimeout(r, 700));
+      const t = (document.getElementById('modal-title') || {}).textContent || '';
+      if (t) vistos.push(t);
+      if (/Fechamento do atendimento/i.test(t)) break;
+      /* A janela da cobrança NÃO se fecha por fora, e está certo: decidir se
+         cobra ou não é uma decisão, não algo que se dispensa com um clique
+         fora. Dispensá-la aqui a fazia reabrir em laço. Toma-se a decisão —
+         "não gerar", que é a neutra para este teste. */
+      if (/Gerar financeiro/i.test(t)) { try { fin.finalizacao.cancelar(); } catch (e) {} }
+      else { try { modal.close(); } catch (e) {} }
+    }
+    out.vistos = vistos.join(' | ');
+    const iCobranca = vistos.findIndex(t => /financeiro/i.test(t));
+    const iFecha = vistos.findIndex(t => /Fechamento do atendimento/i.test(t));
+    out.cobrancaPrimeiro = iCobranca >= 0 && iFecha > iCobranca;
+    const corpoPos = document.body.textContent || '';
+    out.modalOferece = iFecha >= 0 &&
+      /Recupera..o p.s-anest.sica \(SRPA\)/i.test(corpoPos);
     /* ao finalizar o rascunho fecha e o form é limpo — o id vive no registro */
     const fichaId = store.list('anestesia')[0]._id;
     modal.close();
@@ -1400,7 +1426,10 @@ await test('SRPA automática: gera finalizada e vinculada a partir da ficha; imp
     store.setList('anestesia', []); store.setList('recuperacao', []);
     return out;
   });
-  assert(r.modalOferece, 'ao finalizar deveria oferecer a SRPA automática');
+  assert(r.cobrancaPrimeiro,
+    'a cobrança abre ANTES do fechamento — ela é a que não pode faltar (vistos: ' + r.vistos + ')');
+  assert(r.modalOferece,
+    'e o fechamento entra depois, oferecendo a SRPA (vistos: ' + r.vistos + ')');
   assert(r.entradaPrefill, 'entrada da SRPA deveria vir pré-preenchida com a saída de sala');
   assert(r.srpaFinalizada, 'a SRPA automática deveria nascer FINALIZADA');
   assert(r.dadosCertos, 'nome/horários/procedência/Aldrete 10 deveriam estar preenchidos');
@@ -19752,6 +19781,330 @@ await test('Entrar: o que foi digitado sobrevive ao clique, e o erro não culpa 
   assert(/não está respondendo|NÃO é a sua senha|sem internet/i.test(r.erro),
     'sem servidor, a tela explica que é o servidor — nunca insinua que a senha está errada');
 
+  await page.close();
+});
+
+/* 266) O acervo preso só neste aparelho ganha a saída que a quarentena prometia
+
+   A janela de quarentena sempre disse: "Se este lote existir apenas neste
+   aparelho... o programador tratar essa exceção separadamente." O fluxo
+   auditado do programador lê a origem congelada NA NUVEM, então um lote que
+   nunca subiu não aparecia lá — e não havia tela nenhuma onde tratá-lo. Ficava
+   presa, invisível, ocupando o aparelho, sem saída possível.
+
+   O que faltava não era adivinhação, e este teste exige exatamente isso: sem
+   declaração escrita e marcada, NADA se move; com ela, o acervo é arquivado
+   sob a clínica declarada sem sobrescrever o que a clínica já tinha, e fica
+   recibo com contagem e hash. */
+await test('Acervo preso só neste aparelho: declaração move, ausência dela não', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const R = cofre._real;
+    const limpar = () => {
+      const fora = [];
+      for (let i = 0; i < R.length; i++) { const k = R.key(i); if (k && k.indexOf('medsys.') === 0) fora.push(k); }
+      fora.forEach(k => R.removeItem(k));
+    };
+    limpar();
+    __smokeBindOrg('org-minha');
+
+    /* Acervo de antes da separação: sem gaveta, sem dono declarado. */
+    R.setItem('medsys.v3.anestesia', JSON.stringify([
+      { _id: 'g1', paciente: { nome: 'Paciente antigo 1' } },
+      { _id: 'g2', paciente: { nome: 'Paciente antigo 2' } }
+    ]));
+    R.setItem('medsys.v5.pacientes', JSON.stringify([{ _id: 'p1', nome: 'Cadastro antigo' }]));
+    out.quarentenaAberta = ambiente.temLegadoPendente() === true && cofre.legadoRegistros() === 3;
+
+    /* A tela mostra o que será declarado, chave a chave. */
+    let host = document.getElementById('prog-legado-local');
+    if (!host) { host = document.createElement('div'); host.id = 'prog-legado-local'; document.body.appendChild(host); }
+    programador.pintarLegadoLocal();
+    out.telaLista = /medsys\.v3\.anestesia/.test(host.textContent) && /medsys\.v5\.pacientes/.test(host.textContent);
+    out.telaSemAvisoDeDuas = !/clínicas já usaram este navegador/i.test(host.textContent);
+    /* DUAS gavetas no mesmo navegador: o aviso tem de ser impossível de não
+       ver. (A limpeza acima apagou todas as chaves `medsys.`, inclusive as com
+       sufixo, então o cenário começa sem gaveta nenhuma — e é preciso criar as
+       duas, não uma.) */
+    out.gavetasAntes = cofre.gavetasNoAparelho().length;
+    R.setItem('medsys.v3.anestesia@aabbccdd', '[]');
+    R.setItem('medsys.v3.anestesia@eeff0011', '[]');
+    out.duasGavetasVistas = cofre.gavetasNoAparelho().length === 2;
+    programador.pintarLegadoLocal();
+    out.avisoDeDuasGavetas = /clínicas já usaram este navegador/i.test(host.textContent);
+    R.removeItem('medsys.v3.anestesia@aabbccdd');
+    R.removeItem('medsys.v3.anestesia@eeff0011');
+
+    /* SEM declaração, nada se move — em nenhuma das portas. */
+    const intacto = () => R.getItem('medsys.v3.anestesia') !== null && R.getItem('medsys.v5.pacientes') !== null;
+    const semNada = await cofre.adotarLegadoDeclarado({});
+    out.recusaSemDeclaracao = semNada.ok === false && semNada.motivo === 'sem_declaracao' && intacto();
+    const semTexto = await cofre.adotarLegadoDeclarado({ confirmado: true, justificativa: 'curta' });
+    out.recusaSemJustificativa = semTexto.ok === false && semTexto.motivo === 'sem_justificativa' && intacto();
+    /* E a porta da interface exige a conta do programador, que aqui não é a ativa. */
+    document.body.insertAdjacentHTML('beforeend',
+      '<input id="prog-legado-local-motivo" value="declaração escrita do proprietário do acervo">' +
+      '<input type="checkbox" id="prog-legado-local-conf" checked><div id="prog-legado-local-resultado"></div>');
+    await programador.adotarLegadoLocal();
+    out.recusaSemProgramador = intacto() &&
+      /conta do programador/i.test((document.getElementById('prog-legado-local-resultado') || {}).textContent || '');
+
+    /* O que a clínica JÁ tem não pode ser sobrescrito pela declaração. */
+    R.setItem('medsys.v3.anestesia@org-minh', JSON.stringify([{ _id: 'g1', paciente: { nome: 'Versão da clínica' } }]));
+
+    const feito = await cofre.adotarLegadoDeclarado({
+      confirmado: true,
+      justificativa: 'acervo deste consultório, produzido integralmente por esta clínica antes da separação',
+      orgNome: 'Minha Clínica de Anestesia', porEmail: 'dono@teste.local'
+    });
+    out.moveu = feito.ok === true && feito.registros >= 3;
+    out.origemSaiu = R.getItem('medsys.v3.anestesia') === null && R.getItem('medsys.v5.pacientes') === null;
+    const naGaveta = JSON.parse(R.getItem('medsys.v3.anestesia@org-minh') || '[]');
+    out.naoSobrescreveu = (naGaveta.find(x => x._id === 'g1') || {}).paciente.nome === 'Versão da clínica';
+    out.somouOQueFaltava = !!naGaveta.find(x => x._id === 'g2');
+    out.visivelAgora = (store.list('anestesia') || []).some(x => x._id === 'g2') &&
+                       (store.list('pacientes') || []).some(x => x._id === 'p1');
+    out.quarentenaEncerrada = ambiente.temLegadoPendente() === false;
+
+    const recibos = cofre.declaracoesLegado();
+    const ult = recibos[recibos.length - 1] || {};
+    out.recibo = recibos.length === 1 && ult.orgNome === 'Minha Clínica de Anestesia' &&
+      ult.porEmail === 'dono@teste.local' && /consultório/.test(ult.justificativa || '') &&
+      (ult.chaves || []).length >= 2 && (ult.chaves || []).every(c => /^(sha256|fnv):/.test(c.hash || ''));
+
+    limpar();
+    return out;
+  });
+  assert(r.quarentenaAberta, 'o cenário exige acervo de verdade em quarentena');
+  assert(r.telaLista, 'quem vai declarar precisa ver, chave a chave, o que está declarando');
+  assert(r.gavetasAntes === 0 && r.duasGavetasVistas,
+    'a contagem de gavetas tem de enxergar identificador de clínica que não seja hexadecimal');
+  assert(r.telaSemAvisoDeDuas && r.avisoDeDuasGavetas,
+    'o aviso de várias clínicas no mesmo navegador só aparece quando é o caso — e aparece');
+  assert(r.recusaSemDeclaracao, 'sem a declaração marcada, nada pode ser movido');
+  assert(r.recusaSemJustificativa, 'sem a declaração escrita, nada pode ser movido');
+  assert(r.recusaSemProgramador, 'a interface exige a conta do programador, como a quarentena sempre disse');
+  assert(r.moveu && r.origemSaiu, 'com a declaração completa, o acervo passa a ser arquivado sob a clínica');
+  assert(r.naoSobrescreveu, 'declarar a origem não autoriza apagar o que a clínica já tinha');
+  assert(r.somouOQueFaltava, 'o que faltava na clínica é somado');
+  assert(r.visivelAgora, 'e o acervo volta a ser visível para quem o produziu');
+  assert(r.quarentenaEncerrada, 'resolvida a atribuição, a quarentena se encerra');
+  assert(r.recibo, 'fica recibo com quem declarou, o que declarou e o hash de cada chave');
+  await page.close();
+});
+
+/* 267) Pacientes e agenda tinham a própria rota — e ela não tinha a trava
+
+   O contador de conflitos continuou subindo (~3/min) com TODOS os aparelhos já
+   no build que consertou os registros e os rascunhos. Faltavam dois caminhos:
+   `pacientes.sincronizarNuvem` e `agenda.sincronizarNuvem` trazem a nuvem por
+   rota própria, escrita à parte, e nenhuma delas perguntava se havia o que
+   decidir antes de preservar os dois lados.
+
+   E ali era pior do que nos outros: a condição inclui "cadastro local sem
+   carimbo de versão", e registrar o conflito NÃO adotava a versão remota — o
+   carimbo nunca chegava, e a sincronização seguinte repetia tudo. Cada ciclo
+   reproduzia os mesmos conflitos, para sempre, sem ninguém digitar nada.
+
+   Este teste cobra as duas coisas: a trava nos dois pulls, e a limpeza em
+   massa do que o defeito já fabricou — que só pode tocar no que não diverge. */
+await test('Conflito vazio não nasce em pacientes/agenda, e o que já nasceu sai em massa', async () => {
+  /* A trava tem de estar nas DUAS rotas próprias, no pacote publicável. O
+     build extrai os scripts do HTML, então a fonte é recomposta pelo helper —
+     do contrário o teste passaria no repositório e não veria o que se publica. */
+  const fonte = await readAppSource(APP_ROOT);
+  const trecho = (marca) => {
+    const i = fonte.indexOf(marca);
+    assert(i > 0, 'rota não encontrada: ' + marca);
+    return fonte.slice(i, i + 1400);
+  };
+  for (const [marca, quem] of [
+    ["cloudRel._temPendente('pacientes'", 'pacientes'],
+    ["cloudRel._temPendente('agenda'", 'agenda']
+  ]) {
+    const t = trecho(marca);
+    const guarda = t.indexOf('_camposDivergentes');
+    const registra = t.indexOf('registrarConflito');
+    assert(guarda > 0 && registra > 0 && guarda < registra,
+      'o pull de ' + quem + ' precisa conferir divergência ANTES de preservar conflito');
+  }
+
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    __smokeBindOrg('org-conf');
+    /* Zera a lista para o cenário ser só o que este teste põe nela. */
+    try { cofre._real.removeItem(cloudRel.CONFLITOS_KEY + '@org-conf'); } catch (e) {}
+    try { cloudRel._limparConflitosMemoria(); } catch (e) {}
+
+    /* 1) Igual dos dois lados a menos do carimbo: não há o que decidir. */
+    const base = { _id: 'pac-1', nome: 'Paciente Igual', nascimento: '1980-01-01' };
+    cloudRel.registrarConflito('pacientes',
+      Object.assign({}, base, { _relUpdatedAt: '2026-10-13T10:00:00.000Z' }),
+      Object.assign({}, base, { _relUpdatedAt: '2026-10-13T10:05:00.000Z', _relVersion: 7 }),
+      { motivo: 'pull_com_edicao_local' });
+    /* 2) Um campo realmente diferente: isso é decisão de gente. */
+    cloudRel.registrarConflito('agenda',
+      { _id: 'ag-1', paciente: 'Fulano', hora: '08:00' },
+      { _id: 'ag-1', paciente: 'Fulano', hora: '09:30', _relVersion: 3 },
+      { motivo: 'pull_com_edicao_local' });
+
+    const pend = () => cloudRel._conflitosLer().filter(x => x.status === 'pending' && !x.resolutionRequested);
+    out.doisPendentes = pend().length === 2;
+    const vazios = cloudRel.conflitosSemDivergencia();
+    out.soUmEhVazio = vazios.length === 1 && vazios[0].mod === 'pacientes';
+
+    const n = cloudRel.limparConflitosSemDivergencia();
+    out.limpouUm = n === 1;
+    const restam = pend();
+    out.sobrouOReal = restam.length === 1 && restam[0].mod === 'agenda' &&
+      (restam[0].metadata.changedFields || []).indexOf('hora') >= 0;
+    out.nadaMaisALimpar = cloudRel.limparConflitosSemDivergencia() === 0;
+
+    try { cofre._real.removeItem(cloudRel.CONFLITOS_KEY + '@org-conf'); } catch (e) {}
+    try { cloudRel._limparConflitosMemoria(); } catch (e) {}
+    return out;
+  });
+  assert(r.doisPendentes, 'o cenário exige um conflito vazio e um de verdade');
+  assert(r.soUmEhVazio, 'só conta como vazio quem não tem NENHUM campo divergente');
+  assert(r.limpouUm, 'a limpeza em massa resolve o que nunca foi conflito');
+  assert(r.sobrouOReal, 'e nunca encosta no que tem campo divergente — esse continua esperando decisão');
+  assert(r.nadaMaisALimpar, 'rodar de novo não faz nada: a limpeza não é um varredor de lista');
+  await page.close();
+});
+
+/* 268) A calculadora de doses escolhe o paciente, não a ficha aberta
+
+   "Puxar da ficha" só funcionava com a Ficha de Anestesia daquele paciente
+   aberta na outra tela. Mas a calculadora é consultada ANTES de abrir ficha
+   nenhuma — e aí ficava vazia, com o peso sendo digitado de novo ou chutado,
+   que numa conta de dose é o pior dos dois.
+
+   Escolhendo a pessoa, o que entra é, campo a campo, o valor mais recente que
+   exista em QUALQUER registro dela. E a procedência vai junto na tela: peso de
+   hoje e peso de três meses atrás pesam diferente numa dose. */
+await test('Doses: escolher o paciente traz o dado mais recente, com a procedência à vista', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    __smokeBindOrg('org-doses');
+    ['pacientes', 'pre', 'anestesia', 'consulta', 'recuperacao'].forEach(m => store.setList(m, []));
+
+    /* Cadastro antigo: altura e sexo. Ficha recente: peso novo. O certo é
+       combinar os dois, campo a campo, e não escolher um registro só. */
+    store.setList('pacientes', [{
+      _id: 'pac-d1', nome: 'Antonia Ribeiro', nascimento: '1960-05-10',
+      sexo: 'Feminino', altura: '158', peso: '70',
+      _updatedAt: '2026-01-10T10:00:00.000Z', _createdAt: '2026-01-10T10:00:00.000Z'
+    }]);
+    store.setList('anestesia', [{
+      _id: 'an-d1', _patientRef: 'pac-d1',
+      paciente: { nome: 'Antonia Ribeiro', nasc: '1960-05-10', peso: '64', sexo: 'Feminino' },
+      _updatedAt: '2026-10-01T10:00:00.000Z', _createdAt: '2026-10-01T10:00:00.000Z'
+    }]);
+
+    ui.navegar('doses');
+    doses.escolherPaciente();
+    const lista = (document.getElementById('dose-pac-lista') || {}).textContent || '';
+    out.apareceNaLista = /Antonia Ribeiro/.test(lista);
+
+    doses._usarPaciente('Antonia Ribeiro');
+    const v = id => (document.getElementById(id) || {}).value || '';
+    out.pesoDaFichaNova = v('dose-peso') === '64';
+    out.alturaDoCadastro = v('dose-altura') === '158';
+    out.sexo = v('dose-sexo') === 'F';
+    out.idadeDerivada = Number(v('dose-idade')) >= 60;
+
+    const fonte = document.getElementById('dose-paciente-fonte');
+    out.mostraProcedencia = !!fonte && fonte.style.display !== 'none' &&
+      /Antonia Ribeiro/.test(fonte.textContent) && /peso:/.test(fonte.textContent);
+
+    /* Paciente sem peso em lugar nenhum: a tela DIZ que falta, em vez de
+       deixar o campo vazio e a conta sair pela metade sem explicação. */
+    store.setList('pacientes', [{ _id: 'pac-d2', nome: 'Benedito Sem Peso',
+      nascimento: '1975-02-02', _updatedAt: '2026-09-01T10:00:00.000Z' }]);
+    store.setList('anestesia', []);
+    doses._usarPaciente('Benedito Sem Peso');
+    out.avisaQueFalta = /sem peso/i.test((document.getElementById('dose-paciente-fonte') || {}).textContent || '');
+
+    ['pacientes', 'pre', 'anestesia', 'consulta', 'recuperacao'].forEach(m => store.setList(m, []));
+    return out;
+  });
+  assert(r.apareceNaLista, 'o paciente registrado precisa aparecer para ser escolhido');
+  assert(r.pesoDaFichaNova, 'o peso tem de vir da ficha MAIS RECENTE, não do cadastro antigo');
+  assert(r.alturaDoCadastro, 'e a altura, do cadastro, porque a ficha nova não a tem — é campo a campo');
+  assert(r.sexo && r.idadeDerivada, 'sexo e idade entram junto; idade vem do nascimento quando não está escrita');
+  assert(r.mostraProcedencia, 'numa conta de dose, de quando é o peso faz parte da informação');
+  assert(r.avisaQueFalta, 'faltando peso, a tela diz que falta em vez de deixar a conta sair pela metade');
+  await page.close();
+});
+
+/* 269) O PDF que vai para o Drive é o mesmo documento, não um despejo de texto
+
+   Foto do arquivo salvo: título três vezes, logomarca com o título escrito por
+   cima, "Nome::", "Idade::", "Risco::" com dois-pontos dobrados em toda linha
+   da identificação, e os exames um por linha em vez da grade.
+
+   A impressão na tela sai certa porque usa o motor do navegador; o PDF do
+   backup é montado por um percurso do DOM, e era ele que estava quebrado. Três
+   defeitos independentes, um deles grave:
+
+   • `querySelectorAll` devolve ANCESTRAL E DESCENDENTE quando os dois batem com
+     a lista, e `.pp-doc-title` é uma div que contém um h1, `.pp-block` contém
+     um p. Cada nó era impresso pelo seu innerText, então o texto do filho saía
+     junto com o do pai e depois outra vez sozinho — blocos inteiros em
+     duplicata. Era a causa principal do "completamente desconfigurado";
+   • o rótulo já traz os dois-pontos do HTML e o código acrescentava outros;
+   • sem `getImageProperties`, a altura da logomarca era estimada por uma
+     proporção 3:1 inventada, e marca mais alta que isso ficava sob o texto. */
+await test('PDF do backup: cada texto uma vez, rótulo sem dois-pontos dobrados, exames em grade', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const ppp = document.getElementById('ppp');
+    const guardado = ppp.innerHTML;
+    ppp.innerHTML =
+      '<div class="pp-doc-title"><h1>AVALIAÇÃO PRÉ-ANESTÉSICA</h1></div>' +
+      '<div class="pp-field"><span class="pp-label">Nome:</span>' +
+      '<span class="pp-value">JAILDETE FERRAZ OLIVEIRA RAMOS</span></div>' +
+      '<div class="pp-block"><div class="pp-label">Comorbidades:</div>' +
+      '<p class="pp-value">HAS (Hipertensão arterial), Arritmia / FA</p></div>' +
+      '<div class="pp-lab-grid">' +
+      ['Hb 14,6', 'Ht 44,5', 'Hm 5,04', 'Leuco 7210', 'Plt 262000', 'Ureia 51,9', 'Creat 0,55', 'K 4,15']
+        .map(t => '<span class="pp-lab-item">' + t + '</span>').join('') + '</div>';
+
+    const J = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+    out.temJsPDF = !!J;
+    if (!J) { ppp.innerHTML = guardado; return out; }
+    const doc = printPreview._gerarDocDeTexto(J, ppp);
+    ppp.innerHTML = guardado;
+
+    /* Lê o texto de volta do PDF gerado, que é o que o paciente recebe. */
+    /* O conteúdo do PDF é binário: decodificar como UTF-8 estoura em
+       "URI malformed". Lê-se byte a byte, que é o bastante para procurar os
+       trechos de texto que interessam. */
+    const bruto = doc.output('datauristring');
+    const texto = atob(bruto.split(',')[1] || '');
+    out.paginas = doc.getNumberOfPages();
+
+    const conta = (alvo) => {
+      let n = 0, i = 0;
+      for (;;) { const j = texto.indexOf(alvo, i); if (j < 0) break; n++; i = j + alvo.length; }
+      return n;
+    };
+    out.tituloUmaVez = conta('AVALIA') <= 2;        /* título + eventual rótulo de página */
+    out.semDoisPontosDobrados = texto.indexOf('Nome::') < 0;
+    out.nomeSaiu = texto.indexOf('JAILDETE') >= 0;
+    out.comorbidadeUmaVez = conta('Arritmia') === 1;
+    out.examesSairam = texto.indexOf('14,6') >= 0 && texto.indexOf('262000') >= 0;
+    return out;
+  });
+  assert(r.temJsPDF, 'o cenário exige a biblioteca de PDF carregada');
+  assert(r.nomeSaiu && r.examesSairam, 'o conteúdo clínico tem de chegar ao PDF');
+  assert(r.semDoisPontosDobrados, 'documento de paciente não sai com "Nome::"');
+  assert(r.comorbidadeUmaVez, 'texto de bloco não pode sair duas vezes — pai e filho batiam com o mesmo seletor');
+  assert(r.tituloUmaVez, 'o título do documento não se repete três vezes');
   await page.close();
 });
 

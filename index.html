@@ -1110,6 +1110,42 @@ body.dark .dropdown-menu { background: var(--surface); border-color: var(--borde
   transition: box-shadow .15s;
 }
 .card:hover { box-shadow: var(--shadow-sm); }
+
+/* ===== PAINEL DE AÇÃO =====
+   O que se abre pelos botões da barra (Novo registro, Novo paciente, Novo
+   compromisso) era um `.card` igual aos da lista logo abaixo. Aberto, ele
+   simplesmente descia no meio do histórico: nada dizia onde terminava a coisa
+   que você mandou abrir e onde começava o que já estava na tela — e, fechado o
+   assunto, continuava lá, empilhando.
+   Painel de ação não é conteúdo da página: é uma coisa que você abriu e vai
+   fechar. Então ele se destaca (barra de acento, fundo próprio, sombra) e
+   carrega o ✕ no cabeçalho, perto do título, e não só um "Cancelar" no fim de
+   um formulário longo. */
+.card.painel-acao {
+  border: 1px solid var(--primary);
+  border-left: 4px solid var(--primary);
+  box-shadow: 0 6px 20px -8px rgba(0,0,0,.28);
+  margin-bottom: 22px;
+}
+.card.painel-acao > .card-header {
+  background: var(--primary-soft);
+  border-bottom: 1px solid var(--primary);
+}
+.card.painel-acao > .card-header:hover { background: var(--primary-soft); }
+.card.painel-acao > .card-header h2 { color: var(--primary-darker); }
+.painel-acao-fechar {
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-soft); border-radius: 6px; cursor: pointer;
+  font-size: .82rem; font-weight: 600; padding: 4px 10px; line-height: 1.3;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.painel-acao-fechar:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
+/* A separação precisa existir também para quem está rolando a página e não
+   viu o cabeçalho: o fim do painel é uma linha, não um palpite. */
+.card.painel-acao::after {
+  content: ''; display: block; height: 3px;
+  background: linear-gradient(90deg, var(--primary) 0%, transparent 100%);
+}
 .card-header {
   padding: 13px 18px;
   background: linear-gradient(180deg, #fbfcfd 0%, #f4f7fa 100%);
@@ -4773,7 +4809,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-13f</b><br>
+    v7.1 · build <b id="build-tag">2026-10-13i</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -4863,7 +4899,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <div class="print-only print-header">
       <div>
         <h1>RELATÓRIO — DASHBOARD</h1>
-        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · desenvolvido por Marcelo Pandolfi Caliman</div>
+        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · Desenvolvido por Marcelo Pandolfi Caliman</div>
       </div>
       <div class="print-meta" id="print-meta-dashboard"></div>
     </div>
@@ -4990,6 +5026,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <div class="action-divider"></div>
     <button class="btn" onclick="printPreview.abrir()"><span class="icon">🖨️</span> Visualizar / Imprimir</button>
     <button class="btn" onclick="printPreview.abrirPreTermo()" title="Imprime a avaliação pré-anestésica e o termo de consentimento num arquivo único"><span class="icon">📑</span> Pré + Termo juntos</button>
+    <button class="btn btn-primary" onclick="pre.irParaFicha()" title="Abre a ficha de anestesia já preenchida com este paciente e esta cirurgia"><span class="icon">➡️</span> Ir para a ficha</button>
     <button class="btn" onclick="pre.exportar()"><span class="icon">⬇️</span> Exportar</button>
     <button class="btn btn-ghost" onclick="actions.importarJSONPara('pre')"><span class="icon">⬆️</span> Importar</button>
     <div class="action-divider"></div>
@@ -5000,7 +5037,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <div class="print-only print-header">
       <div>
         <h1>AVALIAÇÃO PRÉ-ANESTÉSICA</h1>
-        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · desenvolvido por Marcelo Pandolfi Caliman</div>
+        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · Desenvolvido por Marcelo Pandolfi Caliman</div>
       </div>
       <div class="print-meta" id="print-meta-pre"></div>
     </div>
@@ -5483,7 +5520,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <div class="print-only print-header">
       <div>
         <h1>CONSULTA / AVALIAÇÃO DE DOR</h1>
-        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · desenvolvido por Marcelo Pandolfi Caliman</div>
+        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · Desenvolvido por Marcelo Pandolfi Caliman</div>
       </div>
       <div class="print-meta" id="print-meta-consulta"></div>
     </div>
@@ -5817,7 +5854,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <div class="print-only print-header">
       <div>
         <h1>FICHA DE ANESTESIA</h1>
-        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · desenvolvido por Marcelo Pandolfi Caliman</div>
+        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · Desenvolvido por Marcelo Pandolfi Caliman</div>
       </div>
       <div class="print-meta" id="print-meta-anestesia"></div>
     </div>
@@ -7352,7 +7389,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <div class="print-only print-header">
       <div>
         <h1>RECUPERAÇÃO PÓS-ANESTÉSICA</h1>
-        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · desenvolvido por Marcelo Pandolfi Caliman</div>
+        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · Desenvolvido por Marcelo Pandolfi Caliman</div>
       </div>
       <div class="print-meta" id="print-meta-recuperacao"></div>
     </div>
@@ -7824,7 +7861,11 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
           <div class="field col-12">
             <label class="check-inline"><input type="checkbox" name="tem_responsavel" onchange="termo.toggleResponsavel(this)"> Paciente representado por responsável legal</label>
           </div>
-          <div class="field col-6" data-resp style="display:none"><label>Nome do responsável</label><input type="text" name="resp_nome"></div>
+          <div class="field col-6" data-resp style="display:none"><label>Nome do responsável
+            <button type="button" class="btn btn-xs" style="margin-left:6px;padding:1px 7px;font-weight:600"
+              title="Preencher com a mãe, o pai ou o responsável legal do cadastro deste paciente"
+              onclick="acompanhantes.responsavelDoCadastro()">👪 Do cadastro</button></label>
+            <input type="text" name="resp_nome"></div>
           <div class="field col-3" data-resp style="display:none"><label>Documento</label><input type="text" name="resp_documento"></div>
           <div class="field col-3" data-resp style="display:none"><label>Grau de parentesco / vínculo</label><input type="text" name="resp_vinculo" placeholder="Pai, mãe, filho(a), tutor..."></div>
           <div class="field col-6" data-resp style="display:none"><label>Motivo da representação</label>
@@ -8516,7 +8557,8 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <button class="btn btn-primary" onclick="financeiro.conciliar()" title="Buscar evento por paciente, conferir previsto × recebido × glosa e classificar"><span class="icon">🔄</span> Conciliação</button>
     <button class="btn btn-success" onclick="financeiro.relatorios()" title="Relatórios de conciliação detalhada por código TUSS"><span class="icon">📊</span> Relatórios</button>
     <button class="btn" onclick="financeiro.caixa.abrir()" title="Fechamento de caixa do dia: recebido, realizado e a receber, por convênio e forma de pagamento"><span class="icon">🧾</span> Fechar caixa</button>
-    <button class="btn btn-success" onclick="financeiro.relatorioMensal()" title="Relatório mensal consolidado em PDF"><span class="icon">📄</span> Relatório mensal (PDF)</button>
+    <button class="btn btn-success" onclick="financeiro.relatorioAuditoria()" title="Relatório de um período qualquer, por data de registro ou de procedimento, em planilha (CSV) ou PDF — para enviar à auditoria"><span class="icon">📤</span> Relatório do período</button>
+    <button class="btn" onclick="financeiro.relatorioMensal()" title="Relatório de um mês fechado, pela data do procedimento, em PDF"><span class="icon">📄</span> Relatório mensal (PDF)</button>
     <button class="btn" onclick="historico.abrir('financeiro')"><span class="icon">🔍</span> Buscar / Histórico</button>
     <button class="btn" onclick="printPreview.abrir()"><span class="icon">🖨️</span> Visualizar / Imprimir</button>
     <button class="btn" onclick="financeiro.exportar()"><span class="icon">⬇️</span> Exportar JSON</button>
@@ -8527,7 +8569,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <div class="print-only print-header">
       <div>
         <h1>RELATÓRIO FINANCEIRO</h1>
-        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · desenvolvido por Marcelo Pandolfi Caliman</div>
+        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · Desenvolvido por Marcelo Pandolfi Caliman</div>
       </div>
       <div class="print-meta" id="print-meta-financeiro"></div>
     </div>
@@ -8686,9 +8728,13 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <small style="color:var(--text-mute);font-weight:400;margin-left:8px">— fotos de guias, senhas, comprovantes (auxiliam a conciliação)</small>
           </h3>
           <div>
-            <input type="file" id="fin-anexo-input" accept="image/*" multiple style="display:none" onchange="financeiro.anexos.adicionarArquivos(this.files); this.value=''">
-            <button type="button" class="btn btn-sm" onclick="document.getElementById('fin-anexo-input').click()">📷 Adicionar foto / arquivo</button>
-            <span style="font-size:.76rem;color:var(--text-mute);margin-left:8px">Imagens até 2 MB cada (redimensionadas automaticamente)</span>
+            <input type="file" id="fin-anexo-input" accept="image/*,application/pdf" multiple style="display:none" onchange="financeiro.anexos.adicionarArquivos(this.files); this.value=''">
+            <!-- Entrada separada só para a câmera: `capture` num input único
+                 FORÇARIA a câmera e tiraria a opção de escolher arquivo. -->
+            <input type="file" id="fin-anexo-camera" accept="image/*" capture="environment" style="display:none" onchange="financeiro.anexos.adicionarArquivos(this.files); this.value=''">
+            <button type="button" class="btn btn-sm" onclick="document.getElementById('fin-anexo-input').click()">📎 Anexar arquivo (PDF ou imagem)</button>
+            <button type="button" class="btn btn-sm" onclick="document.getElementById('fin-anexo-camera').click()">📷 Tirar foto</button>
+            <span style="font-size:.76rem;color:var(--text-mute);margin-left:8px">Imagens até 2 MB (redimensionadas) · PDF até 8 MB</span>
             <div id="fin-anexos-lista" class="fin-anexos-lista"></div>
             <div id="fin-docs-origem"></div>
           </div>
@@ -8816,6 +8862,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <!-- Tabela -->
     <div class="card no-collapse">
       <div class="card-header"><div class="card-title-wrap"><h2>Registros</h2></div></div>
+      <div id="fin-contexto" style="display:none;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:9px 18px;background:var(--primary-soft);border-bottom:1px solid var(--primary);font-size:.84rem;color:var(--primary-darker)"></div>
       <div class="card-body" style="padding:0">
         <div style="overflow-x:auto">
           <table class="data" id="financeiro-table">
@@ -9015,9 +9062,13 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <section class="card">
       <div class="card-header no-collapse">
         <div class="card-title-wrap"><span class="card-icon">&#129485;</span><h2>Paciente</h2></div>
-        <div class="card-actions"><button type="button" class="btn btn-xs" onclick="doses.puxarPaciente(false)" title="Preenche peso, altura, idade e sexo a partir da Ficha de Anestesia ativa">👤 Puxar da ficha</button></div>
+        <div class="card-actions">
+          <button type="button" class="btn btn-xs btn-primary" onclick="doses.escolherPaciente()" title="Escolhe o paciente e usa o peso, a altura, a idade e o sexo mais recentes que existirem em qualquer ficha dele">👤 Escolher paciente</button>
+          <button type="button" class="btn btn-xs" onclick="doses.puxarPaciente(false)" title="Preenche a partir da Ficha de Anestesia aberta agora">📄 Da ficha aberta</button>
+        </div>
       </div>
       <div class="card-body">
+        <div id="dose-paciente-fonte" style="display:none;font-size:.8rem;color:var(--text-soft);background:var(--surface-alt);border-left:3px solid var(--primary);border-radius:0 6px 6px 0;padding:7px 10px;margin:0 0 10px"></div>
         <div class="grid">
           <div class="field col-3"><label>Peso (kg)</label><input type="number" id="dose-peso" min="0.4" max="300" step="0.1" inputmode="decimal" placeholder="ex.: 70" oninput="doses.recalcular()"></div>
           <div class="field col-3"><label>Idade</label>
@@ -9265,7 +9316,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <div class="print-only print-header">
       <div>
         <h1>AGENDA</h1>
-        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · desenvolvido por Marcelo Pandolfi Caliman</div>
+        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · Desenvolvido por Marcelo Pandolfi Caliman</div>
       </div>
       <div class="print-meta" id="print-meta-agenda"></div>
     </div>
@@ -13940,6 +13991,101 @@ const ui = {
        mesmo — o menu tem tudo. */
     document.body.classList.toggle('menu-aberto', aberta);
   },
+  /* ---------- PAINEL DE AÇÃO ----------
+     "Ao clicar nos botões da barra superior ele desce um cartão. Dessa forma
+      fica confuso, pois não separa bem o histórico da aba do que se pretendeu
+      abrir. (...) E ao acabar com a ação a aba não some, ficando poluída a
+      tela."
+
+     Três coisas distintas no mesmo relato, e as três têm a mesma origem: o que
+     se abre pela barra era um `.card` idêntico aos da lista, sem moldura
+     própria, sem fechar à mão e sem exclusividade.
+       1. não se distingue  → ganha moldura, acento e cabeçalho próprios;
+       2. não dá para fechar → ganha ✕ no cabeçalho, ao lado do título, e não
+          só um "Cancelar" no fim de um formulário de duas telas;
+       3. acumula            → abrir um painel FECHA o que estiver aberto.
+     O fechamento chama o `cancelar()` do próprio módulo, para o formulário ser
+     limpo como sempre foi — o painel governa a moldura, não as regras de cada
+     tela. */
+  painel: {
+    _aberto: null,
+    _aoFechar: {},
+    abrir(cardId, aoFechar) {
+      if (ui.painel._aberto && ui.painel._aberto !== cardId) ui.painel.fechar(ui.painel._aberto);
+      const card = document.getElementById(cardId);
+      if (!card) return null;
+      if (typeof aoFechar === 'function') ui.painel._aoFechar[cardId] = aoFechar;
+      card.classList.add('painel-acao');
+      card.style.display = 'block';
+      ui.painel._botaoFechar(card, cardId);
+      ui.painel._aberto = cardId;
+      setTimeout(() => { try { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {} }, 30);
+      return card;
+    },
+    _botaoFechar(card, cardId) {
+      const head = card.querySelector('.card-header');
+      if (!head || head.querySelector('.painel-acao-fechar')) return;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'painel-acao-fechar';
+      b.textContent = '✕ Fechar';
+      b.title = 'Fecha este painel e volta à lista';
+      b.addEventListener('click', ev => { ev.stopPropagation(); ui.painel.fechar(cardId); });
+      head.appendChild(b);
+    },
+    fechar(cardId) {
+      const id = cardId || ui.painel._aberto;
+      if (!id) return;
+      if (ui.painel._aberto === id) ui.painel._aberto = null;
+      const card = document.getElementById(id);
+      if (card) card.style.display = 'none';
+      const fn = ui.painel._aoFechar[id];
+      if (typeof fn === 'function') { try { fn(); } catch (e) {} }
+    },
+    estaAberto(cardId) { return ui.painel._aberto === cardId; }
+  },
+
+  /* ---------- ESPERAR A TELA EXISTIR, EM VEZ DE APOSTAR UM TEMPO ----------
+     "O fluxo Consulta → finalizar que encaminha para financeiro e/ou
+      impressão, assim como o da ficha de anestesia para gerar financeiro,
+      imprimir, encaminhar para TCLE, está ruim... ÀS VEZES NÃO VAI."
+
+     O "às vezes" é a assinatura do defeito. Esses encaminhamentos trocam de
+     módulo e, logo depois, preenchem o formulário de destino — mas a troca de
+     módulo não é instantânea, e o código esperava um tempo FIXO (150 ms, 200
+     ms) na esperança de que a tela já estivesse montada. Quando o aparelho está
+     mais lento, quando o módulo cresceu, quando a sincronização disputa o
+     processador, o prazo vence antes: o formulário ainda não existe, o
+     preenchimento não encontra onde escrever e NÃO ACONTECE NADA. Sem erro, sem
+     aviso — exatamente "às vezes não vai".
+
+     Prazo fixo é aposta. Aqui se espera o elemento APARECER, verificando a cada
+     quadro, com teto de tempo. Aparecendo, segue na hora (mais rápido do que os
+     200 ms de antes, no caso normal). Não aparecendo, DIZ que não foi, em vez
+     de deixar a pessoa achando que foi. */
+  quandoPronto(seletor, acao, opts = {}) {
+    const limite = opts.limiteMs || 4000;
+    const inicio = Date.now();
+    const tentar = () => {
+      let el = null;
+      try { el = document.querySelector(seletor); } catch (e) { el = null; }
+      if (el) { try { acao(el); } catch (e) { console.warn('quandoPronto', e); } return; }
+      if (Date.now() - inicio >= limite) {
+        /* Silêncio aqui é o defeito que estamos consertando. */
+        try { toast('A tela de destino não abriu a tempo — nada foi preenchido. Tente de novo.', 'warn'); } catch (e) {}
+        return;
+      }
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(tentar);
+      else setTimeout(tentar, 30);
+    };
+    tentar();
+  },
+  /* Navegar e, assim que o destino existir de verdade, agir. */
+  irEEntao(modulo, seletor, acao, opts = {}) {
+    ui.navegar(modulo);
+    ui.quandoPronto(seletor, acao, opts);
+  },
+
   toggleCard(headerEl) {
     headerEl.parentElement.classList.toggle('collapsed');
     /* card recolhido é display:none, e aí a caixa de texto não tem como ser
@@ -15694,12 +15840,18 @@ const pre = {
       if (!jaTem && fin.finalizacao.deveAbrir('pre', saved)) {
         setTimeout(() => {
           try {
-            fin.finalizacao.abrirQuandoLivre('pre', saved);
+            /* O fechamento entra QUANDO A COBRANÇA SAI, e não por espera: o
+               encadeamento é determinístico, que é o contrário do defeito que
+               estamos consertando. */
+            fin.finalizacao.abrirQuandoLivre('pre', saved,
+              () => { try { fechamento.abrir('pre', saved._id); } catch (e) {} });
           } catch (e) {}
         }, 320);
       } else {
         const fr = fin.fromDoc('pre', saved);
         if (fr && fr.isNew) ui.mostrarBanner('banner-pre', '💰 Lançamento financeiro criado automaticamente.', 'success');
+        /* Sem janela de cobrança a abrir, o fechamento não tem o que esperar. */
+        try { fechamento.abrir('pre', saved._id); } catch (e) {}
       }
     }
     /* atualiza id hidden */
@@ -15727,7 +15879,7 @@ const pre = {
     store.notificarNuvem(saved, finalizar ? 'Avaliação finalizada' : 'Avaliação', { silencioso: !!opts.auto });
     /* A pergunta do Termo espera a impressão sair da frente (ela já sabe
        esperar janela aberta, ver _perguntarTermo). */
-    if (finalizar) setTimeout(() => pre._perguntarTermo(saved), 700);
+    if (finalizar) { try { fechamento.abrir('pre', saved._id); } catch (e) {} }
   },
   /* ---------- Navegação por seções + status de completude ---------- */
   nav: {
@@ -15875,11 +16027,12 @@ const pre = {
   /* Inicia o Termo pré-preenchido com dados da Pré-anestésica */
   _iniciarTermo(preId) {
     const docPre = store.getById('pre', preId);
-    ui.navegar('termo');
-    setTimeout(() => {
+    if (!docPre) { toast('Não encontrei a pré-anestésica para levar ao termo.', 'warn'); return; }
+    /* Esperar o formulário existir, em vez de apostar 200 ms — ver ui.quandoPronto. */
+    ui.irEEntao('termo', '#form-termo', () => {
       termo.novo();
       const f = document.getElementById('form-termo');
-      if (!f || !docPre) return;
+      if (!f) return;
       const set = (name, val) => { const el = f.querySelector(`[name="${name}"]`); if (el && val) el.value = val; };
       set('nome', docPre.nome);
       set('nascimento', docPre.nascimento);
@@ -15890,7 +16043,30 @@ const pre = {
       /* Marca vínculo Pré → Termo */
       termo._linkPendente = { mod: 'pre', id: preId };
       toast('📝 Termo pré-preenchido com os dados do paciente');
-    }, 200);
+    });
+  },
+  /* AVANÇAR PARA A FICHA DE ANESTESIA.
+     A pré e a ficha são o mesmo paciente no mesmo dia, e até aqui ir de uma
+     para a outra era: abrir o menu, criar ficha nova, redigitar o nome e
+     esperar o preenchimento automático. O caminho já existia — é exatamente o
+     que acontece ao digitar o nome e sair do campo (`autoPreencherDadosPaciente`
+     mais `importarPreParaAnestesia`). O botão só percorre esse caminho pela
+     pessoa, para não haver uma segunda cópia da regra de importação que possa
+     divergir da primeira. */
+  irParaFicha() {
+    const f = document.getElementById(pre.formId);
+    const nome = String(((f && f.querySelector('[name="nome"]')) || {}).value || '').trim();
+    if (!nome) { toast('Preencha o nome do paciente antes de avançar para a ficha.', 'warn'); return; }
+    ui.irEEntao('anestesia', '#form-anestesia [name="paciente_nome"]', (campo) => {
+      try { anestesia.novo(); } catch (e) {}
+      const campo2 = document.querySelector('#form-anestesia [name="paciente_nome"]') || campo;
+      if (!campo2) return;
+      campo2.value = nome;
+      try { linker.autoPreencherDadosPaciente(nome, 'anestesia'); } catch (e) {}
+      try { linker.importarPreParaAnestesia(nome); } catch (e) {}
+      try { rascunhos.renomearAba('anestesia'); } catch (e) {}
+      toast('➡️ Ficha de anestesia aberta para ' + nome);
+    });
   },
   salvarComoNovo() {
     /* Remove _id para forçar criação */
@@ -16509,7 +16685,11 @@ const consulta = {
       if (!jaTem && fin.finalizacao.deveAbrir('consulta', saved)) {
         setTimeout(() => {
           try {
-            fin.finalizacao.abrirQuandoLivre('consulta', saved);
+            /* O fechamento entra QUANDO A COBRANÇA SAI, e não por espera: o
+               encadeamento é determinístico, que é o contrário do defeito que
+               estamos consertando. */
+            fin.finalizacao.abrirQuandoLivre('consulta', saved,
+              () => { try { fechamento.abrir('consulta', saved._id); } catch (e) {} });
           } catch (e) {}
         }, 320);
       } else {
@@ -19588,9 +19768,13 @@ const ambiente = {
       'A associação a uma clínica só pode ser feita na área <b>Programador → Migração segura do legado</b>, ' +
       'com seleção explícita, justificativa, hash, validação e trilha de auditoria.</p>' +
       '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">Essa área inventaria somente registros que já chegaram à origem congelada na nuvem. ' +
-      'Se este lote existir apenas neste aparelho, ele continuará em quarentena e o aparelho não deve ser limpo até o programador tratar essa exceção separadamente.</p>' +
+      'Se este lote existir apenas neste aparelho, ele continuará em quarentena e o aparelho não deve ser limpo até o programador tratar essa exceção separadamente — ' +
+      'no bloco <b>📦 Acervo que existe só neste aparelho</b>, da mesma área, mediante declaração escrita de quem é dono do acervo.</p>' +
       '<p style="font-size:.8rem;color:var(--text-mute);margin:0">Ocupação atual: <b>' +
       armazenamento._fmt(cofre.legadoBytes()) + '</b>. Nada será movido ou apagado por esta tela.</p>',
+      (programador.souProgramador()
+        ? '<a class="btn btn-primary" href="#programador" onclick="modal.close()">Abrir a área do programador</a>'
+        : '') +
       '<button class="btn" onclick="ambiente._decidirLegado()">Fechar e manter em quarentena</button>');
   },
   _decidirLegado() {
@@ -20010,11 +20194,128 @@ const programador = {
             <button type="button" class="btn btn-sm btn-danger" onclick="programador.reverterLegado()">↩ Reverter na janela</button>
           </div>
           <div id="prog-legado-resultado" style="margin-top:10px"></div>
+
+          <div style="margin-top:16px;border-top:2px solid var(--border);padding-top:13px">
+            <h3 style="font-size:.95rem;margin:0 0 6px">📦 Acervo que existe só neste aparelho</h3>
+            <p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">
+              O inventário acima lê a <b>origem congelada na nuvem</b>. Um lote gravado antes da separação por
+              clínica e que nunca subiu não aparece lá — é a exceção que a janela de quarentena diz caber ao
+              programador tratar separadamente. É esta tela.
+              <b>Nada é adivinhado:</b> a clínica vem da declaração de quem é dono do acervo, por escrito, e o
+              recibo fica guardado. O conteúdo não é alterado — passa a ser arquivado sob a clínica declarada,
+              e o que a clínica já tem nunca é sobrescrito.
+            </p>
+            <div id="prog-legado-local"></div>
+            <div class="grid" style="margin-top:10px">
+              <div class="field col-12">
+                <label>Declaração do proprietário <small style="color:var(--text-mute);font-weight:400">(não escreva informação clínica)</small></label>
+                <input type="text" id="prog-legado-local-motivo" maxlength="500" placeholder="Ex.: acervo deste consultório, produzido integralmente por esta clínica antes da separação">
+              </div>
+            </div>
+            <label style="display:flex;gap:8px;align-items:flex-start;font-size:.82rem;margin:4px 0 10px">
+              <input type="checkbox" id="prog-legado-local-conf" style="margin-top:3px">
+              <span id="prog-legado-local-frase">Declaro, como proprietário, que este acervo é da clínica aberta.</span>
+            </label>
+            <button type="button" class="btn btn-sm btn-primary" onclick="programador.adotarLegadoLocal()">📥 Arquivar sob a clínica declarada</button>
+            <div id="prog-legado-local-resultado" style="margin-top:10px"></div>
+          </div>
         </div>
       </section>`;
     if (typeof window !== 'undefined' && window.SoftLegacyProvenance) window.SoftLegacyProvenance.mount({
       programador, cloud, contextoAba, document, confirm: message => confirm(message)
     });
+    try { programador.pintarLegadoLocal(); } catch (e) {}
+  },
+
+  /* ---------- o lote que só existe neste aparelho ----------
+     Ver antes de declarar: chave a chave, quantos registros, quanto ocupa — e,
+     acima de tudo, QUANTAS CLÍNICAS já abriram gaveta neste navegador. Uma
+     declaração de "tudo isto é da clínica X" vale quando só a X passou por
+     aqui; quando passou mais de uma, o aviso precisa ser impossível de não
+     ver, porque é exatamente aí que se carimba o prontuário de uma como sendo
+     de outra. */
+  pintarLegadoLocal() {
+    const host = document.getElementById('prog-legado-local'); if (!host) return;
+    const esc = utils.escapeHTML;
+    const itens = cofre.legadoPorChave();
+    const frase = document.getElementById('prog-legado-local-frase');
+    const nome = ambiente.nome() || '';
+    const aberta = ambiente.id();
+    if (frase) {
+      frase.innerHTML = aberta
+        ? 'Declaro, como proprietário do acervo, que os registros em quarentena neste aparelho pertencem integralmente a <b>' +
+          esc(nome || ambiente.curto(aberta)) + '</b>, e autorizo que sejam arquivados sob essa clínica.'
+        : 'Nenhuma clínica está aberta nesta aba — abra o ambiente da clínica dona do acervo antes de declarar.';
+    }
+    const recibos = cofre.declaracoesLegado();
+    const historico = recibos.length
+      ? '<p style="font-size:.78rem;color:var(--text-mute);margin:8px 0 0">Recibos já registrados nesta clínica: ' +
+        recibos.map(r => esc(String(r.em || '').slice(0, 10)) + ' · ' + Number(r.registros || 0) + ' registro(s)').join(' · ') + '</p>'
+      : '';
+    if (!itens.length) {
+      host.innerHTML = '<p style="font-size:.82rem;color:var(--text-mute);margin:0">Não há acervo em quarentena neste aparelho.</p>' + historico;
+      return;
+    }
+    const gavetas = cofre.gavetasNoAparelho();
+    const totR = itens.reduce((n, i) => n + i.registros, 0);
+    const totB = itens.reduce((n, i) => n + i.bytes, 0);
+    const alerta = gavetas.length > 1
+      ? '<div style="background:#fdecea;border:1px solid #e9a69e;color:#7b241c;border-radius:8px;padding:9px 11px;font-size:.82rem;margin:0 0 9px">' +
+        '<b>⚠️ ' + gavetas.length + ' clínicas já usaram este navegador.</b> O acervo em quarentena é anterior à separação e ' +
+        'não diz de qual delas é. Declarar que é todo de uma só vai arquivar, sob ela, o que porventura seja da outra. ' +
+        'Só prossiga se souber que este aparelho atendeu uma clínica apenas.</div>'
+      : '';
+    host.innerHTML = alerta +
+      '<div style="max-height:220px;overflow:auto"><table class="dash-detail-table" style="margin:0"><thead><tr>' +
+      '<th>Chave guardada</th><th style="text-align:right">Registros</th><th style="text-align:right">Tamanho</th>' +
+      '</tr></thead><tbody>' +
+      itens.map(i => '<tr><td><code style="font-size:.74rem">' + esc(i.chave) + '</code></td><td style="text-align:right">' +
+        i.registros + '</td><td style="text-align:right">' + armazenamento._fmt(i.bytes) + '</td></tr>').join('') +
+      '</tbody><tfoot><tr><th>Total</th><th style="text-align:right">' + totR + '</th><th style="text-align:right">' +
+      armazenamento._fmt(totB) + '</th></tr></tfoot></table></div>' + historico;
+  },
+
+  async adotarLegadoLocal() {
+    const alvo = document.getElementById('prog-legado-local-resultado');
+    const dizer = (html, erro) => { if (alvo) alvo.innerHTML = '<div class="diag-linha ' + (erro ? 'diag-erro' : 'diag-ok') + '">' + html + '</div>'; };
+    if (!programador.souProgramador()) { dizer('❌ Esta operação é da conta do programador.', true); return; }
+    const org = ambiente.id();
+    if (!org) { dizer('❌ Abra o ambiente da clínica dona do acervo antes de declarar.', true); return; }
+    const motivo = String((document.getElementById('prog-legado-local-motivo') || {}).value || '').trim();
+    if (motivo.length < 10) { dizer('❌ Escreva a declaração do proprietário (mínimo 10 caracteres).', true); return; }
+    const conf = document.getElementById('prog-legado-local-conf');
+    if (!conf || !conf.checked) { dizer('❌ Marque a declaração. Sem ela nada é movido.', true); return; }
+    const itens = cofre.legadoPorChave();
+    if (!itens.length) { dizer('Não há acervo em quarentena neste aparelho.', true); return; }
+    const totR = itens.reduce((n, i) => n + i.registros, 0);
+    const nome = ambiente.nome() || ambiente.curto(org);
+    if (!confirm('Arquivar ' + totR + ' registro(s) em quarentena sob ' + nome + '?\n\n' +
+      'O conteúdo não é alterado e o que a clínica já tem não é sobrescrito. Fica um recibo com contagem e hash de cada chave.')) return;
+    const s = cloud.session() || {};
+    const u = (s && s.user) || {};
+    const r = await cofre.adotarLegadoDeclarado({
+      confirmado: true, justificativa: motivo, orgNome: nome,
+      porEmail: String(u.email || ''), porUid: String(u.id || '')
+    });
+    if (!r || !r.ok) {
+      const porque = {
+        sem_clinica: 'nenhuma clínica aberta nesta aba',
+        sem_declaracao: 'a declaração não foi marcada',
+        sem_justificativa: 'falta a declaração escrita',
+        nada_em_quarentena: 'não há acervo em quarentena'
+      }[(r && r.motivo) || ''] || 'operação recusada';
+      dizer('❌ Nada foi movido — ' + utils.escapeHTML(porque) + '.', true);
+      return;
+    }
+    conf.checked = false;
+    const falhou = (r.falhas || []).length;
+    dizer('✅ ' + r.registros + ' registro(s) de ' + r.movidas.length + ' chave(s) arquivados sob ' +
+      utils.escapeHTML(nome) + ' (' + armazenamento._fmt(r.bytes) + ').' +
+      (falhou ? ' <b>' + falhou + ' chave(s) ficaram onde estavam</b> — veja o recibo.' : ''), false);
+    toast('📦 ' + r.registros + ' registro(s) arquivados sob ' + nome, falhou ? 'warn' : 'success');
+    try { programador.pintarLegadoLocal(); } catch (e) {}
+    try { cloud._repintarTelaAtual(); } catch (e) {}
+    try { ambiente.pintar(); } catch (e) {}
   },
 
   _legacyStatus: {
@@ -26975,6 +27276,211 @@ try { window.pdfFila = pdfFila; } catch (e) {}
    Ambos são "best-effort" na geração — nunca bloqueiam a impressão. Mas o que
    falha agora ESPERA na fila (pdfFila) em vez de sumir.
 ============================================================================ */
+/* ============================================================================
+   FECHAMENTO DO ATENDIMENTO — UMA LINHA, ATÉ ACABAR
+   ----------------------------------------------------------------------------
+   "O fluxo Consulta → finalizar que encaminha para financeiro e/ou impressão,
+    assim como o da ficha de anestesia para gerar financeiro, imprimir,
+    encaminhar para TCLE, está ruim... às vezes não vai."
+   "Tem que seguir uma linha até finalizar tudo, pois para um paciente pode ser
+    necessário fazer mais de um item da lista."
+
+   A CAUSA, que não era de desenho e sim de disputa:
+
+   Ao finalizar, o app disparava DUAS janelas ao mesmo tempo — a da cobrança
+   (`fin.finalizacao.abrirQuandoLivre`) e a do próximo passo clínico (termo na
+   pré, SRPA na ficha). Só existe UM espaço de janela no app, então cada uma
+   ficava num laço perguntando "já está livre?": a da cobrança tentava 120 vezes
+   a cada 800 ms, a do termo 40 vezes a cada 1500 ms. Quem perdesse a corrida ou
+   esperava um minuto e meio, ou desistia. E, pior, a ORDEM dependia de qual
+   laço acordasse primeiro — por isso "às vezes" ia e às vezes não.
+
+   Duas janelas competindo por um lugar não se conserta com mais espera. Se são
+   dois passos do mesmo fechamento, eles não são duas janelas: são dois itens de
+   uma lista.
+
+   O QUE ESTA TELA É
+
+   Um painel único por atendimento, que fica ATÉ ACABAR. Lista o que falta
+   fazer naquele caso, mostra o que já foi feito (conferindo no registro, não na
+   lembrança de ter clicado), e sobrevive à navegação: fazer um item leva a
+   outra tela, e ao voltar o painel continua lá, com o item anterior marcado.
+   Enquanto houver fechamento aberto, uma faixa discreta no rodapé diz de quem é
+   e quanto falta — para ninguém esquecer um atendimento pela metade.
+
+   Fechar o painel não cancela nada: só o esconde. "Concluído" é uma decisão
+   explícita, e é a única coisa que encerra.
+============================================================================ */
+const fechamento = {
+  KEY: 'medsys.v7.fechamento.atual',
+
+  _ler() {
+    try { const v = JSON.parse(localStorage.getItem(fechamento.KEY) || 'null'); return v && v.mod && v.id ? v : null; }
+    catch (e) { return null; }
+  },
+  _gravar(st) {
+    try { st ? localStorage.setItem(fechamento.KEY, JSON.stringify(st)) : localStorage.removeItem(fechamento.KEY); }
+    catch (e) {}
+    fechamento._pintarFaixa();
+  },
+  ativo() { return !!fechamento._ler(); },
+
+  _nomeDe(mod, doc) {
+    if (!doc) return '';
+    return String((doc.paciente && doc.paciente.nome) || doc.paciente_nome || doc.paciente || doc.nome || '').trim();
+  },
+  /* O QUE JÁ FOI FEITO SE CONFERE NO REGISTRO, não na lembrança de ter
+     clicado: um clique pode ter aberto a tela e a pessoa ter desistido. Onde
+     não há como conferir (impressão não deixa rastro), vale o clique — e aí o
+     item diz "aberto", não "feito". */
+  _itens(mod, doc, feitos) {
+    const nome = fechamento._nomeDe(mod, doc);
+    const marcado = k => !!(feitos && feitos[k]);
+    const existe = (m) => { try { return !!linker.ultimoPorNome(m, nome, {}); } catch (e) { return false; } };
+    const itens = [];
+
+    const decisao = (() => { try { return fin.finalizacao.decisaoDe(doc); } catch (e) { return null; } })();
+    itens.push({
+      chave: 'financeiro', icone: '💰', rotulo: 'Lançamento financeiro',
+      feito: decisao !== null,
+      estado: decisao === true ? 'lançamento gerado' : decisao === false ? 'decidido: não gerar' : '',
+      acao: () => { try { fin.finalizacao.abrir(mod, doc, () => fechamento.marcar('financeiro')); } catch (e) {} }
+    });
+
+    itens.push({
+      chave: 'impressao', icone: '🖨️', rotulo: 'Visualizar / imprimir',
+      feito: marcado('impressao'), estado: marcado('impressao') ? 'aberto' : '',
+      acao: () => { fechamento.marcar('impressao'); try { printPreview.abrir(); } catch (e) {} }
+    });
+
+    if (mod === 'pre' || mod === 'consulta') {
+      itens.push({
+        chave: 'termo', icone: '📝', rotulo: 'Termo de consentimento (TCLE)',
+        feito: existe('termo'), estado: existe('termo') ? 'já existe um para este paciente' : '',
+        acao: () => { fechamento.marcar('termo'); try { pre._iniciarTermo(doc._id); } catch (e) {} }
+      });
+    }
+    if (mod === 'pre') {
+      itens.push({
+        chave: 'ficha', icone: '➡️', rotulo: 'Abrir a ficha de anestesia',
+        feito: existe('anestesia'), estado: existe('anestesia') ? 'já existe uma para este paciente' : '',
+        acao: () => { fechamento.marcar('ficha'); try { pre.irParaFicha(); } catch (e) {} }
+      });
+    }
+    if (mod === 'anestesia') {
+      itens.push({
+        chave: 'termo', icone: '📝', rotulo: 'Termo de consentimento (TCLE)',
+        feito: existe('termo'), estado: existe('termo') ? 'já existe um para este paciente' : '',
+        acao: () => { fechamento.marcar('termo'); try { ui.navegar('termo'); } catch (e) {} }
+      });
+      itens.push({
+        chave: 'srpa', icone: '🛏️', rotulo: 'Recuperação pós-anestésica (SRPA)',
+        feito: existe('recuperacao'), estado: existe('recuperacao') ? 'já registrada' : '',
+        acao: () => { fechamento.marcar('srpa'); try { anestesia._perguntarSRPA(doc); } catch (e) {} }
+      });
+    }
+    return itens;
+  },
+
+  abrir(mod, id) {
+    const doc = store.getById(mod, id);
+    if (!doc) return;
+    const anterior = fechamento._ler();
+    const feitos = (anterior && anterior.mod === mod && anterior.id === id) ? (anterior.feitos || {}) : {};
+    fechamento._gravar({ mod, id, nome: fechamento._nomeDe(mod, doc), feitos, em: new Date().toISOString() });
+    /* ESPERA A VEZ, E É O ÚNICO QUE ESPERA.
+       A cobrança abre sozinha ao finalizar, e tem de continuar abrindo: foi ela
+       que o automático existe para não deixar esquecida. O painel entra depois.
+       O defeito antigo era DUAS janelas disputando o mesmo lugar, cada uma com
+       seu laço — sem ordem definida, ganhava quem acordasse primeiro. Com um só
+       esperando, a ordem é sempre a mesma e não há corrida.
+       Nunca ficando livre, a faixa do rodapé permanece: o fechamento não se
+       perde, é retomado por lá. */
+    fechamento._renderQuandoLivre();
+  },
+  _renderQuandoLivre(tentativa) {
+    let ocupado = false;
+    try {
+      const bd = document.getElementById('modal-backdrop');
+      const pp = document.getElementById('print-preview-overlay');
+      ocupado = (bd && bd.classList.contains('show')) ||
+                (pp && pp.classList.contains('show')) || !!document.querySelector('.bloq-janela');
+    } catch (e) {}
+    if (ocupado) {
+      if ((tentativa || 0) < 150) { setTimeout(() => fechamento._renderQuandoLivre((tentativa || 0) + 1), 700); }
+      return;
+    }
+    fechamento._render();
+  },
+  reabrir() { const st = fechamento._ler(); if (st) fechamento._render(); },
+  marcar(chave) {
+    const st = fechamento._ler(); if (!st) return;
+    st.feitos = st.feitos || {};
+    st.feitos[chave] = true;
+    fechamento._gravar(st);
+  },
+  concluir() {
+    fechamento._gravar(null);
+    try { modal.close(); } catch (e) {}
+    toast('✅ Atendimento fechado.');
+  },
+
+  _render() {
+    const st = fechamento._ler(); if (!st) return;
+    const doc = store.getById(st.mod, st.id);
+    if (!doc) { fechamento._gravar(null); return; }
+    const itens = fechamento._itens(st.mod, doc, st.feitos);
+    const prontos = itens.filter(i => i.feito).length;
+    const esc = utils.escapeHTML;
+    const html =
+      '<p style="font-size:.88rem;margin:0 0 4px"><b>' + esc(st.nome || 'Atendimento') + '</b> — ' +
+      esc(printPreview._infoLabel ? (printPreview._infoLabel(st.mod) || st.mod) : st.mod) + ' finalizada.</p>' +
+      '<p style="font-size:.8rem;color:var(--text-soft);margin:0 0 12px">' + prontos + ' de ' + itens.length +
+      ' concluído(s). Faça quantos precisar — esta lista continua aqui até você dizer que acabou.</p>' +
+      itens.map((i, k) =>
+        '<button type="button" class="btn" style="display:flex;width:100%;align-items:center;gap:10px;text-align:left;margin:0 0 7px;padding:11px 13px' +
+        (i.feito ? ';opacity:.72' : '') + '" onclick="fechamento._executar(' + k + ')">' +
+        '<span style="font-size:1.15rem">' + (i.feito ? '✅' : i.icone) + '</span>' +
+        '<span style="flex:1;min-width:0"><b>' + esc(i.rotulo) + '</b>' +
+        (i.estado ? '<br><small style="color:var(--text-mute)">' + esc(i.estado) + '</small>' : '') + '</span>' +
+        '<span style="color:var(--text-mute);font-size:.8rem">' + (i.feito ? 'refazer' : 'fazer') + '</span></button>').join('');
+    fechamento._itensAtuais = itens;
+    modal.open('🏁 Fechamento do atendimento', html,
+      '<button class="btn btn-primary" onclick="fechamento.concluir()">Concluído</button>' +
+      '<button class="btn btn-ghost" onclick="modal.close()">Agora não</button>');
+  },
+  _itensAtuais: [],
+  _executar(k) {
+    const item = (fechamento._itensAtuais || [])[k];
+    if (!item) return;
+    try { modal.close(); } catch (e) {}
+    try { item.acao(); } catch (e) { console.warn('fechamento', e); }
+  },
+
+  /* A faixa existe para ninguém esquecer um atendimento pela metade: fechar o
+     painel esconde, não cancela. */
+  _pintarFaixa() {
+    try {
+      const antiga = document.getElementById('fechamento-faixa');
+      if (antiga) antiga.remove();
+      const st = fechamento._ler(); if (!st) return;
+      const doc = store.getById(st.mod, st.id); if (!doc) return;
+      const itens = fechamento._itens(st.mod, doc, st.feitos);
+      const prontos = itens.filter(i => i.feito).length;
+      const div = document.createElement('div');
+      div.id = 'fechamento-faixa';
+      div.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:14px;z-index:900;' +
+        'display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--primary);' +
+        'border-radius:999px;box-shadow:0 6px 20px -6px rgba(0,0,0,.3);padding:7px 9px 7px 15px;font-size:.84rem';
+      div.innerHTML = '<span>🏁 Fechando <b>' + utils.escapeHTML(st.nome || 'atendimento') + '</b> · ' +
+        prontos + '/' + itens.length + '</span>' +
+        '<button type="button" class="btn btn-xs btn-primary" onclick="fechamento.reabrir()">Retomar</button>' +
+        '<button type="button" class="btn btn-xs" onclick="fechamento.concluir()">Concluído</button>';
+      document.body.appendChild(div);
+    } catch (e) {}
+  }
+};
+
 const pdfBackup = {
   /* ---------- Configuração (Ajustes → Backup de PDFs) ---------- */
   CFG_KEY: 'medsys.v7.pdfbackup.cfg',
@@ -28063,6 +28569,61 @@ const acompanhantes = {
     campo.value = atual ? atual.replace(/[;\s]+$/, '') + '; ' + texto : texto;
     try { markDirty(); } catch (e) {}
     toast('👥 ' + faltando.length + ' acompanhante(s) do cadastro adicionado(s)');
+  },
+
+  /* O MESMO CADASTRO, NO TERMO.
+     Quem representa um menor ou um paciente sem autonomia é, quase sempre, a
+     mãe, o pai ou o responsável legal — exatamente os três campos que o
+     cadastro já guarda. Redigitar o nome aqui é como ele acabava escrito de um
+     jeito na pré e de outro no termo; e é o nome que vai para o documento que
+     a pessoa ASSINA, onde grafia divergente não é detalhe.
+     Havendo um só candidato, preenche. Havendo mais de um, PERGUNTA: o sistema
+     não sabe quem veio, e escolher por conta própria seria pôr no termo um
+     nome que ninguém indicou. O vínculo (mãe/pai/tutor) vem junto, porque o
+     campo ao lado pede exatamente isso. */
+  responsavelDoCadastro() {
+    const elNome = document.querySelector('#form-termo [name=nome]');
+    const nome = (elNome && elNome.value) || '';
+    if (!nome.trim()) { toast('Preencha o nome do paciente primeiro — o responsável vem do cadastro dele.', 'warn'); return; }
+    const possiveis = identificacaoPaciente.acompanhantesPossiveis(nome);
+    if (!possiveis.length) {
+      toast('O cadastro deste paciente ainda não tem mãe, pai ou responsável legal. Preencha em Pacientes e volte aqui.', 'warn');
+      return;
+    }
+    if (possiveis.length === 1) { acompanhantes._porResponsavel(possiveis[0]); return; }
+    acompanhantes._candidatos = possiveis;
+    modal.open('👪 Quem representa o paciente?',
+      '<p style="font-size:.86rem;margin:0 0 10px">O cadastro de <b>' + utils.escapeHTML(nome.trim()) +
+      '</b> conhece mais de uma pessoa. Escolha quem assina o termo — o sistema não presume.</p>' +
+      possiveis.map((x, i) =>
+        '<button type="button" class="btn" style="display:block;width:100%;text-align:left;margin:0 0 7px" ' +
+        'onclick="acompanhantes._escolherResponsavel(' + i + ')">' + utils.escapeHTML(x.nome) +
+        ' <span style="color:var(--text-mute)">· ' + utils.escapeHTML(x.papel) + '</span></button>').join(''),
+      '<button class="btn" onclick="modal.close()">Cancelar</button>');
+  },
+  _candidatos: [],
+  _escolherResponsavel(i) {
+    const escolhido = (acompanhantes._candidatos || [])[i];
+    modal.close();
+    if (escolhido) acompanhantes._porResponsavel(escolhido);
+  },
+  _porResponsavel(x) {
+    const campo = document.querySelector('#form-termo [name=resp_nome]');
+    const vinculo = document.querySelector('#form-termo [name=resp_vinculo]');
+    if (!campo) return;
+    /* O que foi digitado à mão não é descartado sem aviso: quem está com o
+       termo aberto pode saber mais do que o cadastro. */
+    const atual = String(campo.value || '').trim();
+    if (atual && atual.toLowerCase() !== x.nome.toLowerCase() &&
+        !confirm('Substituir "' + atual + '" por "' + x.nome + '"?')) return;
+    campo.value = x.nome;
+    if (vinculo && !String(vinculo.value || '').trim()) vinculo.value = x.papel;
+    /* Representação só vale se estiver marcada; marcar junto evita o termo sair
+       com o responsável preenchido e os campos escondidos. */
+    const chk = document.querySelector('#form-termo [name=tem_responsavel]');
+    if (chk && !chk.checked) { chk.checked = true; try { termo.toggleResponsavel(chk); } catch (e) {} }
+    try { markDirty(); } catch (e) {}
+    toast('👪 Responsável preenchido do cadastro: ' + x.nome + ' (' + x.papel + ')');
   }
 };
 
@@ -37233,7 +37794,11 @@ const anestesia = {
       if (!jaTem && fin.finalizacao.deveAbrir('anestesia', saved)) {
         setTimeout(() => {
           try {
-            fin.finalizacao.abrirQuandoLivre('anestesia', saved);
+            /* O fechamento entra QUANDO A COBRANÇA SAI, e não por espera: o
+               encadeamento é determinístico, que é o contrário do defeito que
+               estamos consertando. */
+            fin.finalizacao.abrirQuandoLivre('anestesia', saved,
+              () => { try { fechamento.abrir('anestesia', saved._id); } catch (e) {} });
           } catch (e) {}
         }, 320);
       } else {
@@ -37263,7 +37828,7 @@ const anestesia = {
        nunca via a pergunta) */
     const jaTemSrpa = docCompleto && docCompleto._links && docCompleto._links.recuperacao_id;
     if (finalizar && !jaTemSrpa) {
-      setTimeout(() => anestesia._perguntarSRPA(docCompleto), 300);
+      try { fechamento.abrir('anestesia', docCompleto._id); } catch (e) {}
     }
   },
   /* Confere itens clínicos importantes antes de finalizar; retorna avisos. */
@@ -38502,6 +39067,14 @@ const fin = {
        das duas sumir sem aviso — e a que sumiria é justamente a da cobrança.
        Espera a vez. */
     abrirQuandoLivre(mod, doc, aoFechar, tentativa) {
+      /* ESTA JANELA CONTINUA ABRINDO SOZINHA, E É DE PROPÓSITO.
+         A primeira versão deste conserto a transformou em item do fechamento, e
+         com isso o lançamento financeiro deixou de nascer: finalizar passou a
+         não cobrar nada até alguém lembrar de clicar. A cobrança esquecida é
+         justamente o prejuízo que o automático existe para evitar.
+         A corrida que causava o "às vezes não vai" era entre DUAS janelas
+         disputando um lugar. Agora há uma ordem: a cobrança abre, e o painel de
+         fechamento espera a vez — um só esperando não é corrida. */
       let ocupado = false;
       try {
         const bd = document.getElementById('modal-backdrop');
@@ -41245,9 +41818,8 @@ const pacientes = {
 
   editar(id, onSaveCb = null) {
     try {
-      const card = document.getElementById(pacientes.cardId);
+      const card = ui.painel.abrir(pacientes.cardId, () => pacientes.cancelar());
       if (!card) { toast('Erro: card de paciente não encontrado', 'error'); return; }
-      card.style.display = 'block';
       utils.clearForm(pacientes.formId);
       pacientes._onSaveCallback = onSaveCb;
       if (id) {
@@ -41268,7 +41840,6 @@ const pacientes = {
           if (inp) inp.focus();
         }, 100);
       }
-      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (e) {
       console.error('Erro ao abrir editor de paciente:', e);
       toast('Erro ao abrir: ' + (e.message || ''), 'error');
@@ -41562,6 +42133,22 @@ const pacientes = {
               : cloudRel._quando(r.item) > cloudRel._quando(loc);
           const pendente = cloudRel._temPendente('pacientes', loc._id) || (!vl && !loc._relUpdatedAt);
           if (remotoMaisNovo && pendente) {
+            /* CONFLITO PRESSUPÕE DIVERGÊNCIA — a mesma regra do pull dos
+               registros, que PACIENTES e AGENDA não seguiam por irem por rota
+               própria, escrita aqui.
+               E aqui era pior: `pendente` inclui `!vl && !loc._relUpdatedAt`,
+               isto é, um cadastro local SEM carimbo de versão. Registrar o
+               conflito não adotava a versão remota, então o carimbo nunca
+               chegava — e na sincronização seguinte tudo se repetia. Cada ciclo
+               produzia os mesmos conflitos, para sempre, sem ninguém digitar
+               nada. Não havendo campo divergente, fica a versão da nuvem, que é
+               justamente a que traz o carimbo que faltava e encerra o ciclo. */
+            if (!cloudRel._camposDivergentes(loc, r.item).length) {
+              const idLocal = loc._id;
+              Object.keys(loc).forEach(k => { delete loc[k]; });
+              Object.assign(loc, r.item, { _id: idLocal || r.item._id });
+              enriquecidos++; return;
+            }
             cloudRel.registrarConflito('pacientes', loc, r.item, { motivo: 'pull_com_edicao_local' });
             adiados++; return;
           }
@@ -42722,12 +43309,40 @@ const financeiro = {
     MAX_BYTES: 2 * 1024 * 1024,   // 2 MB por arquivo (após redimensionar)
     MAX_DIM: 1600,                // maior dimensão após redimensionar
 
+    MAX_PDF: 8 * 1024 * 1024,     // PDF não se recomprime: o limite é maior
+
+    /* COMPROVANTE CHEGA EM PDF. Guia de convênio, demonstrativo de pagamento,
+       relatório de glosa — quase tudo o que o plano manda vem em PDF, e aqui só
+       entrava imagem. Quem tinha o PDF precisava imprimir e fotografar para
+       anexar a prova da própria cobrança. */
     adicionarArquivos(fileList) {
-      const files = Array.from(fileList || []);
-      files.forEach(file => {
-        if (!file.type.startsWith('image/')) { toast('Apenas imagens são aceitas', 'warn'); return; }
-        financeiro.anexos._processar(file);
+      Array.from(fileList || []).forEach(file => {
+        const tipo = String(file.type || '').toLowerCase();
+        if (tipo === 'application/pdf' || /\.pdf$/i.test(file.name || '')) { financeiro.anexos._processarPdf(file); return; }
+        if (tipo.startsWith('image/')) { financeiro.anexos._processar(file); return; }
+        toast('Só entram imagens e PDF.', 'warn');
       });
+    },
+    _processarPdf(file) {
+      if (file.size > financeiro.anexos.MAX_PDF) {
+        toast('PDF muito grande (máximo 8 MB). Reduza o arquivo e anexe de novo.', 'error');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = e => {
+        const dataurl = String(e.target.result || '');
+        financeiro.anexos._lista.push({
+          attachment_id: prontuario._novoId(),
+          nome: file.name || ('documento_' + Date.now() + '.pdf'),
+          tipo: 'pdf', mime_type: 'application/pdf', categoria: 'Comprovante',
+          data: utils.hojeISO(), dataurl, tamanho: file.size
+        });
+        financeiro.anexos.render();
+        markDirty();
+        toast('📎 PDF anexado');
+      };
+      reader.onerror = () => toast('Erro ao ler o PDF', 'error');
+      reader.readAsDataURL(file);
     },
 
     _processar(file) {
@@ -42787,8 +43402,14 @@ const financeiro = {
         src = await prontuario._signedUrl(a.storage_path);
       }
       if (!src) { toast('Anexo indisponível neste aparelho — verifique a conexão', 'warn'); return; }
+      const ehPdf = String(a.mime_type || '').toLowerCase() === 'application/pdf' || a.tipo === 'pdf';
       modal.open('📎 ' + utils.escapeHTML(a.nome),
-        `<img src="${utils.escapeAttr(src)}" style="max-width:100%;height:auto;border-radius:8px">`,
+        ehPdf
+          /* Um PDF de guia tem páginas; mostrá-lo numa caixinha não serve. Em
+             tela cheia dentro da janela, e com saída para abrir à parte. */
+          ? `<iframe src="${utils.escapeAttr(src)}" style="width:100%;height:68vh;border:1px solid var(--border);border-radius:8px"></iframe>`
+          : `<img src="${utils.escapeAttr(src)}" style="max-width:100%;height:auto;border-radius:8px">`,
+        (ehPdf ? `<a class="btn" href="${utils.escapeAttr(src)}" target="_blank" rel="noopener">Abrir em outra aba</a>` : '') +
         `<button class="btn" onclick="modal.close()">Fechar</button>`);
     },
 
@@ -42797,10 +43418,14 @@ const financeiro = {
       if (!host) return;
       if (!financeiro.anexos._lista.length) { host.innerHTML = ''; return; }
       host.innerHTML = financeiro.anexos._lista.map((a, i) => {
-        const previa = a.thumb || a.dataurl || '';
-        const imagem = previa
-          ? `<img src="${utils.escapeAttr(previa)}" onclick="financeiro.anexos.ver(${i})" title="Ver ampliado">`
-          : `<button type="button" class="btn btn-xs" onclick="financeiro.anexos.ver(${i})" title="Abrir da nuvem">☁️ Ver</button>`;
+        /* PDF não entra num <img>: a prévia sairia quebrada. */
+        const ehPdf = String(a.mime_type || '').toLowerCase() === 'application/pdf' || a.tipo === 'pdf';
+        const previa = ehPdf ? '' : (a.thumb || a.dataurl || '');
+        const imagem = ehPdf
+          ? `<button type="button" class="btn btn-xs" onclick="financeiro.anexos.ver(${i})" title="Abrir o PDF">📄 PDF</button>`
+          : previa
+            ? `<img src="${utils.escapeAttr(previa)}" onclick="financeiro.anexos.ver(${i})" title="Ver ampliado">`
+            : `<button type="button" class="btn btn-xs" onclick="financeiro.anexos.ver(${i})" title="Abrir da nuvem">☁️ Ver</button>`;
         return `
         <div class="fin-anexo-item">
           ${imagem}
@@ -43452,6 +44077,8 @@ const financeiro = {
     };
     if (codigos.length) data.codigos = codigos;
     const saved = store.save('financeiro', data);
+    /* a lista de baixo passa a mostrar o que ESTE lançamento criou */
+    try { financeiro.marcarContexto('avulso', 'lançados agora por \u201cLançamento rápido\u201d', saved && saved._id); } catch (e) {}
     modal.close();
     try { financeiro.render(); } catch (e) {}
     store.notificarNuvem(saved, 'Lançamento de ' + data.paciente +
@@ -43473,11 +44100,10 @@ const financeiro = {
     financeiro.editar(id);
   },
   editar(id) {
-    const card = document.getElementById(financeiro.cardId);
-    card.style.display = 'block';
-    /* o formulário fica ACIMA da lista: aberto sem rolar, ele some da vista e
-       parece que o toque não fez nada */
-    setTimeout(() => { try { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {} }, 30);
+    /* Painel de ação: moldura própria, ✕ no cabeçalho e exclusividade — não é
+       mais um cartão a mais no meio do histórico. */
+    const card = ui.painel.abrir(financeiro.cardId, () => financeiro.cancelar());
+    if (!card) return;
     utils.clearForm(financeiro.formId);
     /* Limpa tabela de códigos */
     const tbody = document.getElementById('fin-codigos-body');
@@ -43523,7 +44149,6 @@ const financeiro = {
       try { prontuario.limpar('fintroca'); } catch (e) {}
       document.getElementById('financeiro-form-titulo').textContent = 'Novo registro financeiro';
     }
-    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
   },
   cancelar() {
     document.getElementById(financeiro.cardId).style.display = 'none';
@@ -43582,6 +44207,8 @@ const financeiro = {
     }
     const saved = store.save('financeiro', data);
     store.notificarNuvem(saved, 'Registro financeiro');
+    /* mesma regra do lançamento rápido: a lista mostra o que esta ação tocou */
+    try { financeiro.marcarContexto('form', 'criados ou editados agora', saved && saved._id); } catch (e) {}
     financeiro.cancelar();
     financeiro.render();
   },
@@ -43854,10 +44481,120 @@ const financeiro = {
             <strong>📊 Análise por código TUSS</strong><br>
             <small style="color:var(--text-soft)">Quais códigos sofrem mais glosas</small>
           </button>
+          <button class="btn" onclick="modal.close(); financeiro.relatorioProducao()" style="text-align:left;padding:14px;border-left:3px solid var(--accent)">
+            <strong>🩺 Produção do mês</strong><br>
+            <small style="color:var(--text-soft)">Quanto foi produzido num mês — da clínica inteira ou de um médico específico</small>
+          </button>
         </div>
       </div>
     `;
     modal.open('📊 Relatórios de conciliação', html, '');
+  },
+
+  /* ==========================================================================
+     PRODUÇÃO DO MÊS — DA CLÍNICA OU DE UM MÉDICO
+     --------------------------------------------------------------------------
+     "Relatório de produção, e o usuário seleciona o mês que quer. Lembrando que
+      pode ser do médico (ex.: Marcelo) ou da clínica, pois num ambiente pode
+      haver mais de um médico."
+
+     A quem pertence um caso é a parte difícil, e ela já estava resolvida no
+     Dashboard: o profissional vem antes de quem digitou (a secretária prepara,
+     o médico atende); quem conferiu o pré-lançamento é dono; e o mesmo nome
+     aparece como "Marcelo Pandolfi Caliman", "Marcelo Caliman" e "Dr. Marcelo
+     P. Caliman". Escrever essa regra de novo aqui seria garantir que o
+     Dashboard e o relatório dessem números diferentes para a mesma pergunta —
+     e aí nenhum dos dois serve. O relatório CHAMA a regra de lá.
+  ========================================================================== */
+  _medicosConhecidos() {
+    const nomes = new Map();
+    const por = v => {
+      const t = String(v == null ? '' : v).trim();
+      if (t.length < 3) return;
+      const k = t.toLowerCase();
+      if (!nomes.has(k)) nomes.set(k, t);
+    };
+    (store.list('cad_profissionais') || []).forEach(p => { if (p && p.nome) por(p.nome); });
+    (store.list('cad_anestesistas') || []).forEach(p => { if (p && p.nome) por(p.nome); });
+    ['financeiro', 'anestesia'].forEach(m => (store.list(m) || []).forEach(it => {
+      if (!it) return;
+      [it.anestesista, it.anestesiologista, it.profissional, it.responsavel].forEach(por);
+    }));
+    return Array.from(nomes.values()).sort((a, b) => a.localeCompare(b));
+  },
+  relatorioProducao() {
+    const hoje = new Date();
+    const mesAtual = hoje.getFullYear() + '-' + String(hoje.getMonth() + 1).padStart(2, '0');
+    const medicos = financeiro._medicosConhecidos();
+    modal.open('🩺 Produção do mês',
+      '<div class="grid" style="margin:0">' +
+      '<div class="field col-6"><label>Mês</label><input type="month" id="prod-mes" value="' + mesAtual + '"></div>' +
+      '<div class="field col-6"><label>De quem</label><select id="prod-quem">' +
+      '<option value="">🏥 Toda a clínica</option>' +
+      medicos.map(n => '<option value="' + utils.escapeHTML(n) + '">🩺 ' + utils.escapeHTML(n) + '</option>').join('') +
+      '</select></div></div>' +
+      '<p style="font-size:.79rem;color:var(--text-soft);margin:6px 0 0">Conta pela <b>data do procedimento</b> — produção é quando o ato aconteceu. ' +
+      'Um caso sem profissional registrado entra na clínica, e não é atribuído a ninguém por palpite.</p>' +
+      '<div id="prod-saida" style="margin-top:12px"></div>',
+      '<button class="btn btn-primary" onclick="financeiro._producaoCalcular()">Calcular</button>' +
+      '<button class="btn" onclick="financeiro._producaoCsv()">📊 Baixar CSV</button>' +
+      '<button class="btn btn-ghost" onclick="modal.close()">Fechar</button>');
+    financeiro._producaoCalcular();
+  },
+  _producaoLista() {
+    const mes = (document.getElementById('prod-mes') || {}).value || '';
+    const quem = (document.getElementById('prod-quem') || {}).value || '';
+    if (!mes) return { mes, quem, lista: [] };
+    const de = mes + '-01';
+    const [a, m] = mes.split('-').map(Number);
+    const ultimo = new Date(a, m, 0).getDate();
+    const ate = mes + '-' + String(ultimo).padStart(2, '0');
+    let lista = financeiro.lancamentosDoPeriodo(de, ate, 'proc');
+    if (quem) { try { lista = dashboard._filtrarDeAlguem(lista, quem); } catch (e) {} }
+    return { mes, quem, de, ate, lista };
+  },
+  _producaoCalcular() {
+    const host = document.getElementById('prod-saida'); if (!host) return;
+    const { lista, quem } = financeiro._producaoLista();
+    if (!lista.length) {
+      host.innerHTML = '<p style="font-size:.86rem;color:var(--danger)">Nenhum procedimento neste mês' +
+        (quem ? ' para ' + utils.escapeHTML(quem) : '') + '.</p>';
+      return;
+    }
+    const n = v => parseFloat(v) || 0;
+    const fmt = v => 'R$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    let prev = 0, rec = 0, glo = 0;
+    const porConv = new Map();
+    lista.forEach(x => {
+      const p = n(x.valor_previsto), r = n(x.valor_recebido), g = n(x.glosa);
+      prev += p; rec += r; glo += g;
+      const c = String(x.convenio || x.plano || 'Sem convênio').trim() || 'Sem convênio';
+      const atual = porConv.get(c) || { n: 0, prev: 0, rec: 0, glo: 0 };
+      atual.n++; atual.prev += p; atual.rec += r; atual.glo += g;
+      porConv.set(c, atual);
+    });
+    const cartao = (rot, val, cor) =>
+      '<div style="flex:1;min-width:120px;background:var(--surface-alt);border:1px solid var(--border);border-radius:8px;padding:9px 11px">' +
+      '<div style="font-size:.7rem;color:var(--text-mute);text-transform:uppercase;letter-spacing:.4px">' + rot + '</div>' +
+      '<div style="font-size:1.02rem;font-weight:700' + (cor ? ';color:' + cor : '') + '">' + val + '</div></div>';
+    host.innerHTML =
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">' +
+      cartao('Procedimentos', lista.length) + cartao('Previsto', fmt(prev)) +
+      cartao('Recebido', fmt(rec), 'var(--accent)') + cartao('Glosa', fmt(glo), 'var(--danger)') +
+      cartao('A receber', fmt(prev - rec - glo)) + '</div>' +
+      '<table class="dash-detail-table" style="margin:0"><thead><tr><th>Convênio</th>' +
+      '<th style="text-align:right">Proc.</th><th style="text-align:right">Previsto</th>' +
+      '<th style="text-align:right">Recebido</th><th style="text-align:right">Glosa</th></tr></thead><tbody>' +
+      Array.from(porConv.entries()).sort((x, y) => y[1].prev - x[1].prev).map(([c, v]) =>
+        '<tr><td>' + utils.escapeHTML(c) + '</td><td style="text-align:right">' + v.n +
+        '</td><td style="text-align:right">' + fmt(v.prev) + '</td><td style="text-align:right">' + fmt(v.rec) +
+        '</td><td style="text-align:right">' + fmt(v.glo) + '</td></tr>').join('') +
+      '</tbody></table>';
+  },
+  _producaoCsv() {
+    const { lista, de, ate, quem } = financeiro._producaoLista();
+    if (!lista.length) { toast('Nenhum procedimento neste mês' + (quem ? ' para ' + quem : '') + '.', 'warn'); return; }
+    financeiro.csvAuditoria(lista, de, ate, 'proc');
   },
 
   /* Gera relatório expandido — "explode" cada registro em suas linhas de códigos */
@@ -44125,7 +44862,16 @@ const financeiro = {
     const planosSel = financeiro.planos._selecao;   /* null = todos */
     const fProc = getVal('fin-f-procedimento').toLowerCase();
     const fForma = getVal('fin-f-forma');
+    const ctx = financeiro._contexto;
     return list.filter(x => {
+      /* CONTEXTO DA AÇÃO. "Ao clicar em lançamento, esses registros abaixo
+         devem ser o lançamento que fiz, para eu saber o que fiz e até usar
+         como conferência."
+         A lista de baixo era sempre a geral, independentemente do que a pessoa
+         tivesse acabado de fazer na barra de cima — então o trabalho recém-
+         feito se dissolvia no meio de tudo, e não havia como conferir. Com um
+         contexto ativo, a lista mostra o que AQUELA ação tocou. */
+      if (ctx && ctx.ids && ctx.ids.length && ctx.ids.indexOf(x._id) < 0) return false;
       if (fStatus && x.status !== fStatus) return false;
       if (fPago === 'sim' && !x.pago) return false;
       if (fPago === 'nao' && x.pago) return false;
@@ -44265,8 +45011,37 @@ const financeiro = {
     }
   },
 
+  /* ---------- O QUE VOCÊ ACABOU DE FAZER ----------
+     Não é um filtro inventado por mim: é o conjunto de registros que a ação
+     aberta na barra criou ou alterou AGORA. Fica anunciado em cima da lista,
+     com a contagem e um botão para voltar à lista geral — contexto que não se
+     anuncia e não se desfaz é pior do que contexto nenhum, porque a pessoa
+     passa a achar que perdeu registro. */
+  _contexto: null,
+  marcarContexto(chave, rotulo, id) {
+    const c = financeiro._contexto;
+    if (c && c.chave === chave) {
+      if (id && c.ids.indexOf(id) < 0) c.ids.push(id);
+    } else {
+      financeiro._contexto = { chave, rotulo, ids: id ? [id] : [] };
+    }
+    financeiro.render();
+  },
+  limparContexto() { financeiro._contexto = null; financeiro.render(); },
+  _pintarContexto() {
+    const host = document.getElementById('fin-contexto');
+    if (!host) return;
+    const c = financeiro._contexto;
+    if (!c || !c.ids.length) { host.style.display = 'none'; host.innerHTML = ''; return; }
+    host.style.display = '';
+    host.innerHTML = '<span><b>Mostrando ' + c.ids.length + ' registro(s) ' + utils.escapeHTML(c.rotulo) +
+      '</b> — e não a lista inteira.</span>' +
+      '<button type="button" class="btn btn-xs" onclick="financeiro.limparContexto()">Ver todos os registros</button>';
+  },
+
   render() {
     const list = financeiro.filtrar();
+    try { financeiro._pintarContexto(); } catch (e) {}
     /* O botão de planos e a contagem seguem o que a lista está mostrando —
        inclusive quando a tela é redesenhada por outro caminho (registro novo,
        sincronização), e não só quando alguém aperta Filtrar. */
@@ -44472,28 +45247,178 @@ const financeiro = {
     toast('JSON exportado');
   },
   /* Relatório mensal consolidado em PDF (via jsPDF) */
-  relatorioMensal() {
+  /* ==========================================================================
+     RELATÓRIO DE PERÍODO — PARA MANDAR À AUDITORIA
+     --------------------------------------------------------------------------
+     "Se eu quiser emitir relatório do que foi REGISTRADO no último mês eu não
+      consigo. Quero emitir um para enviar à auditoria independente."
+
+     Faltavam três coisas, e cada uma sozinha já impedia:
+
+     • PERÍODO. Só dava para pedir um mês do calendário, por um `prompt` de
+       MM/AAAA. "Últimos 30 dias", "do dia 15 ao dia 15", um trimestre — nada
+       disso cabia. Auditoria pede intervalo, não mês fechado.
+
+     • O QUE É "DO MÊS". O filtro olhava a DATA DO PROCEDIMENTO. Mas o pedido é
+       pelo que foi REGISTRADO no período — coisa diferente, e a diferença é
+       justamente o que uma auditoria procura: o lançamento feito em outubro de
+       uma cirurgia de agosto. As duas leituras são legítimas e servem a
+       perguntas distintas, então agora se escolhe qual.
+
+     • FORMATO. Saía só PDF. Auditor confere em planilha: ele soma, ordena,
+       cruza. Mandar PDF é obrigá-lo a redigitar — e redigitação é erro. Sai
+       CSV também, uma linha por lançamento, com os códigos e os valores.
+  ========================================================================== */
+  _periodoPadraoAuditoria() {
     const hoje = new Date();
-    const mesAtual = String(hoje.getMonth() + 1).padStart(2, '0');
-    const anoAtual = hoje.getFullYear();
-    const ref = prompt('Relatório de qual mês/ano? (formato MM/AAAA)', mesAtual + '/' + anoAtual);
-    if (!ref) return;
-    const m = ref.match(/^(\d{1,2})\s*\/\s*(\d{4})$/);
-    if (!m) { toast('Formato inválido — use MM/AAAA', 'warn'); return; }
-    const mes = parseInt(m[1], 10), ano = parseInt(m[2], 10);
-    if (mes < 1 || mes > 12) { toast('Mês inválido', 'warn'); return; }
+    const primeiroDesteMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+    const fimMesPassado = new Date(primeiroDesteMes.getTime() - 86400000);
+    const inicioMesPassado = new Date(fimMesPassado.getFullYear(), fimMesPassado.getMonth(), 1);
+    const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    return { de: iso(inicioMesPassado), ate: iso(fimMesPassado) };
+  },
+  /* A data que vale, conforme a base escolhida. `data_proc` é quando o ato
+     aconteceu; `_createdAt` é quando entrou no sistema. */
+  _dataDoLancamento(x, base) {
+    if (base === 'registro') {
+      const c = x._createdAt || x._updatedAt || '';
+      return c ? String(c).slice(0, 10) : '';
+    }
+    const d = x.data_proc || x.data || (x._createdAt ? String(x._createdAt).slice(0, 10) : '');
+    return d ? String(d).slice(0, 10) : '';
+  },
+  lancamentosDoPeriodo(de, ate, base) {
+    const d0 = String(de || ''), d1 = String(ate || '');
+    return (store.list('financeiro') || []).filter(x => {
+      const d = financeiro._dataDoLancamento(x, base);
+      if (!d) return false;
+      if (d0 && d < d0) return false;
+      if (d1 && d > d1) return false;
+      return true;
+    }).sort((a, b) => financeiro._dataDoLancamento(a, base).localeCompare(financeiro._dataDoLancamento(b, base)));
+  },
+  relatorioAuditoria() {
+    const p = financeiro._periodoPadraoAuditoria();
+    modal.open('📤 Relatório de período — para auditoria',
+      '<div class="grid" style="margin:0">' +
+      '<div class="field col-6"><label>De</label><input type="date" id="aud-de" value="' + p.de + '"></div>' +
+      '<div class="field col-6"><label>Até</label><input type="date" id="aud-ate" value="' + p.ate + '"></div>' +
+      '<div class="field col-12"><label>Contar pelo quê</label>' +
+      '<select id="aud-base">' +
+      '<option value="registro">Data em que foi REGISTRADO no sistema</option>' +
+      '<option value="proc">Data do procedimento</option>' +
+      '</select></div></div>' +
+      '<p style="font-size:.8rem;color:var(--text-soft);margin:6px 0 0">' +
+      'As duas leituras são legítimas e respondem a perguntas diferentes: um ato de agosto lançado em outubro ' +
+      'entra em outubro pela primeira e em agosto pela segunda. O relatório diz qual foi usada.</p>' +
+      '<div id="aud-previa" style="font-size:.84rem;margin-top:10px"></div>',
+      '<button class="btn btn-primary" onclick="financeiro._auditoria(\'csv\')">📊 Planilha (CSV)</button>' +
+      '<button class="btn" onclick="financeiro._auditoria(\'pdf\')">📄 PDF</button>' +
+      '<button class="btn btn-ghost" onclick="modal.close()">Cancelar</button>');
+    const atualizar = () => {
+      const n = financeiro.lancamentosDoPeriodo(
+        (document.getElementById('aud-de') || {}).value,
+        (document.getElementById('aud-ate') || {}).value,
+        (document.getElementById('aud-base') || {}).value).length;
+      const el = document.getElementById('aud-previa');
+      if (el) el.innerHTML = n
+        ? '<b>' + n + '</b> lançamento(s) no período.'
+        : '<span style="color:var(--danger)">Nenhum lançamento neste período.</span>';
+    };
+    ['aud-de', 'aud-ate', 'aud-base'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.addEventListener('change', atualizar);
+    });
+    atualizar();
+  },
+  _auditoria(formato) {
+    const de = (document.getElementById('aud-de') || {}).value || '';
+    const ate = (document.getElementById('aud-ate') || {}).value || '';
+    const base = (document.getElementById('aud-base') || {}).value || 'registro';
+    if (de && ate && de > ate) { toast('A data inicial é posterior à final.', 'warn'); return; }
+    const lista = financeiro.lancamentosDoPeriodo(de, ate, base);
+    if (!lista.length) { toast('Nenhum lançamento no período escolhido.', 'warn'); return; }
+    modal.close();
+    if (formato === 'csv') financeiro.csvAuditoria(lista, de, ate, base);
+    else financeiro.relatorioMensal({ de, ate, base, lista });
+  },
+  csvAuditoria(lista, de, ate, base) {
+    const num = v => parseFloat(v) || 0;
+    const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+    const linhas = [[
+      'Data do registro', 'Data do procedimento', 'Paciente', 'Convênio', 'Senha',
+      'Procedimento', 'Códigos TUSS', 'Cirurgião', 'Hospital',
+      'Previsto', 'Recebido', 'Glosa', 'A receber', 'Status', 'Pago', 'Data do pagamento'
+    ].map(q).join(';')];
+    let tp = 0, tr = 0, tg = 0;
+    lista.forEach(x => {
+      const prev = num(x.valor_previsto), rec = num(x.valor_recebido), glo = num(x.glosa);
+      tp += prev; tr += rec; tg += glo;
+      const codigos = Array.isArray(x.codigos)
+        ? x.codigos.map(c => [c.codigo, c.descricao].filter(Boolean).join(' ')).filter(Boolean).join(' | ') : '';
+      linhas.push([
+        financeiro._dataDoLancamento(x, 'registro'), financeiro._dataDoLancamento(x, 'proc'),
+        x.paciente || '', x.convenio || x.plano || '', x.senha || '',
+        x.procedimento || '', codigos, x.cirurgiao || '', x.hospital || '',
+        /* Vírgula decimal: a planilha brasileira soma a coluna sem conversão. */
+        prev.toFixed(2).replace('.', ','), rec.toFixed(2).replace('.', ','), glo.toFixed(2).replace('.', ','),
+        (prev - rec - glo).toFixed(2).replace('.', ','),
+        x.status || '', x.pago ? 'Sim' : 'Não', x.data_pagamento || ''
+      ].map(q).join(';'));
+    });
+    linhas.push('');
+    linhas.push([q('TOTAIS'), q(''), q(''), q(''), q(''), q(''), q(''), q(''), q(''),
+      q(tp.toFixed(2).replace('.', ',')), q(tr.toFixed(2).replace('.', ',')),
+      q(tg.toFixed(2).replace('.', ',')), q((tp - tr - tg).toFixed(2).replace('.', ','))].join(';'));
+    linhas.push('');
+    linhas.push(q('Período: ' + (de || 'início') + ' a ' + (ate || 'hoje') +
+      ' · contado pela data ' + (base === 'registro' ? 'de registro no sistema' : 'do procedimento') +
+      ' · emitido em ' + new Date().toLocaleString('pt-BR')));
+    /* BOM na frente: sem ele o Excel abre os acentos errados, e um relatório de
+       auditoria com "convênio" ilegível volta como pendência. */
+    const blob = new Blob(['﻿' + linhas.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'financeiro_' + (de || 'inicio') + '_a_' + (ate || 'hoje') + '.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast('📊 ' + lista.length + ' lançamento(s) exportados em CSV');
+  },
+
+  relatorioMensal(opts) {
+    let mes, ano, ref, doMes, rotuloPeriodo, sufixoArquivo;
+    const porPeriodo = !!(opts && (opts.de || opts.ate));
+    if (porPeriodo) {
+      doMes = opts.lista || financeiro.lancamentosDoPeriodo(opts.de, opts.ate, opts.base);
+      const br = s => s ? String(s).split('-').reverse().join('/') : '';
+      rotuloPeriodo = 'PERÍODO ' + (br(opts.de) || 'início') + ' A ' + (br(opts.ate) || 'hoje') +
+        ' — POR DATA ' + (opts.base === 'registro' ? 'DE REGISTRO' : 'DO PROCEDIMENTO');
+      sufixoArquivo = (opts.de || 'inicio') + '_a_' + (opts.ate || 'hoje');
+      ref = rotuloPeriodo;
+    } else {
+      const hoje = new Date();
+      const mesAtual = String(hoje.getMonth() + 1).padStart(2, '0');
+      const anoAtual = hoje.getFullYear();
+      ref = prompt('Relatório de qual mês/ano? (formato MM/AAAA)', mesAtual + '/' + anoAtual);
+      if (!ref) return;
+      const m = ref.match(/^(\d{1,2})\s*\/\s*(\d{4})$/);
+      if (!m) { toast('Formato inválido — use MM/AAAA', 'warn'); return; }
+      mes = parseInt(m[1], 10); ano = parseInt(m[2], 10);
+      if (mes < 1 || mes > 12) { toast('Mês inválido', 'warn'); return; }
+      const todos = store.list('financeiro');
+      doMes = todos.filter(x => {
+        const dstr = x.data_proc || x.data || (x._createdAt ? x._createdAt.slice(0, 10) : '');
+        if (!dstr) return false;
+        const d = new Date(dstr.length > 10 ? dstr : dstr + 'T12:00:00');
+        return d.getMonth() + 1 === mes && d.getFullYear() === ano;
+      });
+      const meses = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+      rotuloPeriodo = meses[mes - 1].toUpperCase() + ' / ' + ano;
+      sufixoArquivo = ano + '-' + String(mes).padStart(2, '0');
+    }
 
     const J = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
     if (!J) { toast('Biblioteca de PDF não carregada', 'error'); return; }
-
-    /* Filtra lançamentos do mês pela data_proc (fallback _createdAt) */
-    const todos = store.list('financeiro');
-    const doMes = todos.filter(x => {
-      const dstr = x.data_proc || x.data || (x._createdAt ? x._createdAt.slice(0, 10) : '');
-      if (!dstr) return false;
-      const d = new Date(dstr.length > 10 ? dstr : dstr + 'T12:00:00');
-      return d.getMonth() + 1 === mes && d.getFullYear() === ano;
-    });
     if (!doMes.length) { toast('Nenhum lançamento encontrado em ' + ref, 'warn'); return; }
 
     const num = v => parseFloat(v) || 0;
@@ -44520,9 +45445,8 @@ const financeiro = {
     doc.setTextColor(0);
     y += 1; doc.setDrawColor(180); doc.line(M, y, W - M, y); y += 7;
 
-    const meses = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
     doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
-    doc.text('RELATÓRIO FINANCEIRO — ' + meses[mes - 1].toUpperCase() + ' / ' + ano, W / 2, y, { align: 'center' }); y += 8;
+    doc.text('RELATÓRIO FINANCEIRO — ' + rotuloPeriodo, W / 2, y, { align: 'center' }); y += 8;
 
     /* Bloco de totais */
     doc.setFontSize(9.5);
@@ -44587,7 +45511,7 @@ const financeiro = {
     doc.text('Gerado por Soft Anestesia em ' + new Date().toLocaleDateString('pt-BR') + ' — documento de uso interno.', M, y);
     doc.setTextColor(0);
 
-    const nomeArq = 'relatorio_financeiro_' + ano + '-' + String(mes).padStart(2, '0') + '.pdf';
+    const nomeArq = 'relatorio_financeiro_' + sufixoArquivo + '.pdf';
     doc.save(nomeArq);
     toast('Relatório de ' + ref + ' gerado');
   },
@@ -45346,6 +46270,95 @@ const doses = {
 
   /* Puxa peso/altura/idade/sexo do paciente da Ficha de Anestesia ativa,
      evitando redigitar. soSeVazio=true só preenche campos ainda em branco. */
+  /* ---- ESCOLHER O PACIENTE, EM VEZ DE DEPENDER DA FICHA ABERTA ----
+     "Puxar da ficha" só servia com a Ficha de Anestesia DAQUELE paciente
+     aberta na outra tela. Mas a calculadora é consultada antes de abrir ficha
+     nenhuma — na visita, no corredor, no telefone — e aí ela ficava vazia, com
+     o peso sendo digitado de novo (ou chutado, que é pior numa conta de dose).
+
+     Agora se escolhe a pessoa. E o que entra não é o que está numa ficha
+     específica: é, CAMPO A CAMPO, o valor mais recente que exista em qualquer
+     registro dela — `linker._dadosMaisRecentes`, o mesmo motor que preenche os
+     formulários. Peso da ficha de setembro e altura do cadastro convivem sem
+     problema, porque cada campo carrega a sua procedência, e a tela mostra de
+     onde veio cada um. Numa conta de dose, saber que o peso é de três meses
+     atrás é parte da informação. */
+  escolherPaciente() {
+    const vistos = new Map();
+    const push = (nome, quando) => {
+      const n = String(nome || '').trim();
+      if (n.length < 2) return;
+      const chave = n.toLowerCase();
+      const ts = new Date(quando || 0).getTime() || 0;
+      const atual = vistos.get(chave);
+      if (!atual || ts > atual.ts) vistos.set(chave, { nome: n, ts });
+    };
+    (store.list('pacientes') || []).forEach(p => push(p && p.nome, p && (p._updatedAt || p._createdAt)));
+    ['pre', 'consulta', 'anestesia', 'recuperacao'].forEach(m => {
+      (store.list(m) || []).forEach(it => {
+        if (!it) return;
+        push((it.paciente && it.paciente.nome) || it.paciente_nome || it.nome, it._updatedAt || it._createdAt);
+      });
+    });
+    const lista = Array.from(vistos.values()).sort((a, b) => b.ts - a.ts);
+    if (!lista.length) { toast('Nenhum paciente registrado ainda neste ambiente.', 'warn'); return; }
+    doses._pacientes = lista;
+    modal.open('👤 Qual paciente?',
+      '<input type="text" id="dose-pac-busca" class="input" placeholder="Digite parte do nome…" ' +
+      'oninput="doses._filtrarPacientes()" style="width:100%;margin:0 0 9px" autocomplete="off">' +
+      '<div id="dose-pac-lista" style="max-height:52vh;overflow:auto"></div>',
+      '<button class="btn" onclick="modal.close()">Cancelar</button>');
+    doses._filtrarPacientes();
+    try { const b = document.getElementById('dose-pac-busca'); if (b) b.focus(); } catch (e) {}
+  },
+  _pacientes: [],
+  _filtrarPacientes() {
+    const host = document.getElementById('dose-pac-lista'); if (!host) return;
+    const termo = String((document.getElementById('dose-pac-busca') || {}).value || '').trim().toLowerCase();
+    const achados = (doses._pacientes || [])
+      .filter(p => !termo || p.nome.toLowerCase().indexOf(termo) >= 0)
+      .slice(0, 60);
+    if (!achados.length) { host.innerHTML = '<p style="font-size:.84rem;color:var(--text-mute)">Nenhum paciente com esse nome.</p>'; return; }
+    host.innerHTML = achados.map(p =>
+      '<button type="button" class="btn" style="display:flex;width:100%;justify-content:space-between;margin:4px 0;text-align:left" ' +
+      'onclick="doses._usarPaciente(' + utils.jsArg(p.nome) + ')"><span>' + utils.escapeHTML(p.nome) + '</span>' +
+      '<small style="color:var(--text-mute)">' + (p.ts ? utils.escapeHTML(new Date(p.ts).toLocaleDateString('pt-BR')) : '') + '</small></button>').join('');
+  },
+  _usarPaciente(nome) {
+    const r = linker._dadosMaisRecentes(nome, null, {}) || {};
+    const d = r.dados || {}, f = r.fontes || {};
+    modal.close();
+    if (r.ambiguous) {
+      toast('⚠️ Há mais de uma pessoa com esse nome e os registros não permitem distinguir. Abra a ficha do paciente certo e use "Da ficha aberta".', 'warn');
+      return;
+    }
+    const num = v => { const m = String(v == null ? '' : v).replace(',', '.').match(/[\d.]+/); return m ? m[0] : ''; };
+    const idade = num(d.idade);
+    const sexo = /^m/i.test(String(d.sexo || '')) ? 'M' : (/^f/i.test(String(d.sexo || '')) ? 'F' : '');
+    const set = (id, val) => { const el = document.getElementById(id); if (el && val !== '' && val != null) el.value = val; };
+    set('dose-peso', num(d.peso));
+    set('dose-altura', num(d.altura));
+    if (idade) { const un = document.getElementById('dose-idade-un'); if (un) un.value = 'anos'; set('dose-idade', idade); }
+    set('dose-sexo', sexo);
+    doses.recalcular();
+    /* A PROCEDÊNCIA VAI JUNTO. Peso de hoje e peso de três meses atrás pesam
+       diferente numa conta de dose, e quem calcula tem de poder ver a diferença
+       sem sair da tela. */
+    const proc = ['peso', 'altura', 'idade'].filter(k => d[k] && f[k]).map(k => k + ': ' + f[k]);
+    const faltando = ['peso', 'altura'].filter(k => !num(d[k]));
+    const host = document.getElementById('dose-paciente-fonte');
+    if (host) {
+      host.innerHTML = proc.length
+        ? '<b>' + utils.escapeHTML(nome) + '</b> — ' + utils.escapeHTML(proc.join(' · ')) +
+          (faltando.length ? ' · <span style="color:var(--danger)">sem ' + faltando.join(' e ') + ' registrado</span>' : '')
+        : '<b>' + utils.escapeHTML(nome) + '</b> — nenhum peso, altura ou idade registrado em ficha nenhuma.';
+      host.style.display = '';
+    }
+    toast(faltando.length
+      ? '👤 ' + nome + ' — falta ' + faltando.join(' e ') + ' no cadastro e nas fichas'
+      : '👤 Dados mais recentes de ' + nome + ' carregados');
+  },
+
   puxarPaciente(soSeVazio) {
     const fa = document.getElementById('form-anestesia');
     if (!fa) return;
@@ -46706,8 +47719,8 @@ const agenda = {
   cal: agendaView.cal,
 
   editar(id, dataPre) {
-    const card = document.getElementById(agenda.cardId);
-    card.style.display = 'block';
+    const card = ui.painel.abrir(agenda.cardId, () => agenda.cancelar());
+    if (!card) return;
     utils.clearForm(agenda.formId);
     if (id) {
       const item = store.getById('agenda', id);
@@ -46721,7 +47734,6 @@ const agenda = {
       document.querySelector(`#${agenda.formId} [name="status"]`).value = 'agendado';
       document.getElementById('agenda-form-titulo').textContent = 'Novo compromisso';
     }
-    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
   },
   cancelar() {
     document.getElementById(agenda.cardId).style.display = 'none';
@@ -46848,6 +47860,15 @@ const agenda = {
           : (!!r._relUpdatedAt && (!loc._relUpdatedAt || r._relUpdatedAt > loc._relUpdatedAt));
       const pendente = cloudRel._temPendente('agenda', loc._id) || (!vl && !loc._relUpdatedAt);
       if (maisNovo && pendente) {
+        /* Mesma regra, mesma razão: ver o comentário no pull de pacientes. Sem
+           campo divergente não há o que decidir, e adotar a versão da nuvem é o
+           que traz o carimbo que faltava — sem ele, o ciclo se repetia a cada
+           sincronização. */
+        if (!cloudRel._camposDivergentes(loc, r).length) {
+          const i = locais.indexOf(loc);
+          if (i >= 0) { locais[i] = Object.assign({}, loc, r); atualizados++; }
+          return;
+        }
         cloudRel.registrarConflito('agenda', loc, r, { motivo: 'pull_com_edicao_local' });
         adiados++; return;
       }

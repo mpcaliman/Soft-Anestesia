@@ -539,19 +539,55 @@ ${TAG_CLOSE_HTML}`;
       doc.setTextColor(0);
     };
     const linha = () => { novaPaginaSePreciso(4); doc.setDrawColor(200); doc.line(M, y, W - M, y); y += 4; };
+    const semDoisPontos = t => String(t == null ? '' : t).trim().replace(/\s*:+\s*$/, '');
 
     /* Cabeçalho do documento — logomarca primeiro (como na pré-visualização) */
     y = printPreview._logoPDF(doc, M, y, 58, 20);
-    escreve(printPreview._infoLabel(state.currentModule) || 'Documento', { size: 14, style: 'bold', gap: 7 });
+    /* O TÍTULO SAÍA TRÊS VEZES. Esta linha repetia o que o próprio documento já
+       traz em `.pp-doc-title`; junto com a emissão duplicada consertada abaixo,
+       o PDF abria com "Avaliação pré-anestésica" e mais duas vezes
+       "AVALIAÇÃO PRÉ-ANESTÉSICA". Havendo título no documento, ele basta. */
+    const temTituloProprio = !!ppp.querySelector('.pp-doc-title, h1');
+    if (!temTituloProprio) escreve(printPreview._infoLabel(state.currentModule) || 'Documento', { size: 14, style: 'bold', gap: 7 });
     escreve('Gerado em ' + utils.formatarDataHora(new Date().toISOString()), { size: 8, cor: 120, gap: 5 });
     linha();
 
+    /* Exames em grade, como na folha: um por linha fazia o PDF ter o dobro de
+       páginas e perdia a comparação lado a lado, que é para o que a grade
+       existe. Os itens consecutivos são acumulados e saem em colunas. */
+    let bufferLab = [];
+    const despejarLab = () => {
+      if (!bufferLab.length) return;
+      const col = 4, larg = contentW / col;
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8.6); doc.setTextColor(0);
+      for (let i = 0; i < bufferLab.length; i += col) {
+        novaPaginaSePreciso(5);
+        bufferLab.slice(i, i + col).forEach((t, k) => {
+          doc.text(doc.splitTextToSize(t, larg - 3)[0] || '', M + k * larg, y);
+        });
+        y += 4.4;
+      }
+      y += 1;
+      bufferLab = [];
+    };
+
     /* Percorre os nós relevantes do preview em ordem */
     const nodes = ppp.querySelectorAll('h1, h2, h3, .pp-doc-title, .pp-field, .pp-block, .pp-lab-item, .pp-check, .pp-table, p, .pp-prof-nome, .pp-prof-reg, .pp-quebra, .pp-capitulo, img.pp-grafico-img');
+    /* CADA TEXTO UMA VEZ SÓ.
+       `querySelectorAll` devolve ancestral E descendente quando os dois batem
+       com a lista — e `.pp-doc-title` É uma div que contém um h1, `.pp-block`
+       contém um p. Como cada nó era impresso pelo seu `innerText`, o texto do
+       filho saía junto com o do pai e depois de novo sozinho. Era a causa
+       principal do PDF "completamente desconfigurado": blocos inteiros em
+       duplicata. Emitido o ancestral, os descendentes dele não se repetem. */
+    const emitidos = [];
     nodes.forEach(node => {
+      if (emitidos.some(a => a !== node && a.contains(node))) return;
       const cls = node.className || '';
       const tag = node.tagName;
       const txt = (node.innerText || node.textContent || '').trim();
+      if (!cls.includes('pp-lab-item')) despejarLab();
+      emitidos.push(node);
       /* Quebra de capítulo (arquivo único ficha + SRPA): página nova SEMPRE */
       if (cls.includes('pp-quebra')) { doc.addPage(); y = M; return; }
       /* Gráfico de sinais vitais (imagem do canvas) — entra como figura no PDF */
@@ -580,15 +616,20 @@ ${TAG_CLOSE_HTML}`;
       } else if (tag === 'H2' || tag === 'H3') {
         y += 2; escreve(txt.toUpperCase(), { size: 9.5, style: 'bold', cor: [40, 52, 65], gap: 5 });
       } else if (cls.includes('pp-field')) {
-        const label = (node.querySelector('.pp-label')?.innerText || '').trim();
+        /* "Nome:: JAILDETE" — o rótulo já vem com os dois-pontos do HTML e o
+           código acrescentava outros. Um documento de paciente não pode sair
+           com pontuação dobrada em toda linha da identificação. */
+        const label = semDoisPontos(node.querySelector('.pp-label')?.innerText);
         const value = (node.querySelector('.pp-value')?.innerText || '').trim();
         if (label || value) escreve((label ? label + ': ' : '') + value, { size: 9.5, gap: 4.6 });
       } else if (cls.includes('pp-block')) {
-        const label = (node.querySelector('.pp-label')?.innerText || '').trim();
+        const label = semDoisPontos(node.querySelector('.pp-label')?.innerText);
         const value = (node.querySelector('.pp-value')?.innerText || '').trim();
         if (label) escreve(label + ':', { size: 8, style: 'bold', cor: 120, gap: 4.2 });
         if (value) escreve(value, { size: 9.5, gap: 4.6, indent: 2 });
-      } else if (cls.includes('pp-lab-item') || cls.includes('pp-check')) {
+      } else if (cls.includes('pp-lab-item')) {
+        bufferLab.push(txt);
+      } else if (cls.includes('pp-check')) {
         escreve('• ' + txt, { size: 9, gap: 4.4, indent: 2 });
       } else if (tag === 'TABLE') {
         /* tabela simples: cada linha vira texto separado por " | " */
@@ -601,6 +642,7 @@ ${TAG_CLOSE_HTML}`;
         escreve(txt, { size: 9.5, gap: 4.6 });
       }
     });
+    despejarLab();
     return doc;
   },
   /* Captura a imagem de um gráfico (canvas) mesmo com o módulo OCULTO.
@@ -896,10 +938,11 @@ ${TAG_CLOSE_HTML}`;
     try {
       /* Documento de paciente leva a marca da CLÍNICA, nunca a do sistema. */
       const src = (typeof logoUsuario !== 'undefined' && logoUsuario.daClinica()) || '';
-      let w = 0, h = 0;
+      let w = 0, h = 0, alturaConhecida = false;
       if (src && src.indexOf('data:image') === 0) {
         let prop = null;
         try { prop = doc.getImageProperties ? doc.getImageProperties(src) : null; } catch (e) { prop = null; }
+        alturaConhecida = !!(prop && prop.width && prop.height);
         const nw = (prop && prop.width) || 3, nh = (prop && prop.height) || 1;
         w = maxW; h = w * nh / nw;
         if (h > maxH) { h = maxH; w = h * nw / nh; }
@@ -910,7 +953,13 @@ ${TAG_CLOSE_HTML}`;
          de chegar aqui quando não havia imagem — e uma clínica que preencheu
          nome, endereço e telefone imprimia o PDF sem nada disso. */
       const altTexto = printPreview._clinicaPDF(doc, w ? (x + w + 4) : x, y + (w ? 3 : 0));
-      const usado = Math.max(h, altTexto);
+      /* O TÍTULO SAÍA POR CIMA DA LOGOMARCA. Sem `getImageProperties`, a altura
+         era estimada por uma proporção 3:1 inventada; logomarca mais alta que
+         isso ficava por baixo do texto seguinte. Quando não se sabe a altura
+         real, reserva-se a caixa inteira: sobrar espaço é defeito de estética,
+         escrever em cima da marca da clínica é defeito de documento. */
+      const alturaImagem = (w && !alturaConhecida) ? maxH : h;
+      const usado = Math.max(alturaImagem, altTexto);
       return usado ? y + usado + 3 : y;
     } catch (e) { return y; }
   },
@@ -1206,7 +1255,7 @@ ${TAG_CLOSE_HTML}`;
   _footer(label) {
     return `<div class="pp-footer">
       <span>${utils.escapeHTML(label)} · Impresso em ${new Date().toLocaleString('pt-BR')}${printPreview._versaoStamp()}</span>
-      <span class="pp-footer-credit">Soft Anestesia · desenvolvido por Marcelo Pandolfi Caliman</span>
+      <span class="pp-footer-credit">Soft Anestesia · Desenvolvido por Marcelo Pandolfi Caliman</span>
     </div>`;
   },
   /* Carimbo de versão do documento no rodapé (rastreabilidade médico-legal).

@@ -486,9 +486,16 @@ const cofre = {
   legadoRegistros() {
     let n = 0;
     try {
+      /* Módulos diferentes podem apontar para a MESMA chave (`orcamento` e
+         `orcamentos` são apelidos um do outro). Contar por módulo contava o
+         mesmo acervo duas vezes e inflava o número que a pessoa vê antes de
+         decidir. Conta-se por chave. */
+      const vistas = new Set();
       Object.keys(STORAGE || {}).forEach(mod => {
         const kr = STORAGE[mod];
-        if (!kr || cofre._real.getItem(kr) == null) return;
+        if (!kr || vistas.has(kr)) return;
+        vistas.add(kr);
+        if (cofre._real.getItem(kr) == null) return;
         try { const v = JSON.parse(cofre._real.getItem(kr)); if (Array.isArray(v)) n += v.length; } catch (e) {}
       });
     } catch (e) {}
@@ -549,6 +556,153 @@ const cofre = {
   /* Compatibilidade nominal: o usuário comum também não pode esconder a
      quarentena permanentemente. */
   dispensarLegado() { return false; },
+
+  /* ---------- a exceção que a quarentena sempre prometeu tratar ----------
+     A janela de quarentena diz, com todas as letras: "Se este lote existir
+     apenas neste aparelho, ele continuará em quarentena e o aparelho não deve
+     ser limpo até o programador tratar essa exceção separadamente."
+
+     Essa exceção nunca teve tratamento. O fluxo auditado do programador
+     (migração 0024) inventaria a ORIGEM CONGELADA NA NUVEM; um lote que só
+     existe neste navegador jamais aparece lá, e portanto nunca podia ser
+     classificado por lugar nenhum. Ficava preso para sempre — invisível,
+     ocupando o armazenamento do aparelho e impedindo a gaveta nova de encher.
+
+     O que faltava NÃO era adivinhação. O motivo de o sistema recusar-se a
+     mover era não saber de quem é, e isso continua verdade: o registro não
+     diz. Quem sabe é o PROPRIETÁRIO, e o que faltava era o lugar onde ele
+     declara, assina e fica registrado tendo declarado.
+
+     Por isso aqui nada acontece sozinho. Exige, simultaneamente:
+       • a conta do programador (quem opera o fluxo auditado);
+       • um ambiente aberto, que é a clínica declarada;
+       • `confirmado: true`, que vem de uma caixa marcada à mão;
+       • justificativa escrita.
+     Sem os quatro, devolve o motivo e não toca em nada. `reivindicar()`
+     continua sendo a sentinela que recusa a adoção pelo usuário comum.
+
+     E MOVE, não copia. O princípio "a origem nunca é apagada" vale para a
+     origem congelada no servidor, que permanece intocada; aqui a origem é o
+     próprio navegador, com ~5 MB de teto, e o acervo já ocupa quase tudo.
+     Copiar não caberia — e não há o que preservar, porque o conteúdo não é
+     alterado: só passa a ser arquivado sob a clínica que o declarou seu. O
+     recibo guarda chave a chave a contagem, o tamanho e o hash do que foi
+     movido, para a conferência ser possível depois. */
+  DECLARACAO_KEY: 'medsys.v7.legado.declaracao',
+
+  _registrosDe(bruto) {
+    if (bruto == null) return 0;
+    try { const v = JSON.parse(bruto); return Array.isArray(v) ? v.length : 1; }
+    catch (e) { return 1; }
+  },
+  /* O que está em quarentena, chave a chave — é isto que se põe na tela antes
+     de pedir a declaração. Quem vai declarar precisa ver o que está
+     declarando. */
+  legadoPorChave() {
+    return cofre.legado().map(k => {
+      const bruto = cofre._real.getItem(k);
+      return { chave: k, registros: cofre._registrosDe(bruto), bytes: bruto ? bruto.length * 2 : 0 };
+    }).sort((a, b) => b.registros - a.registros || a.chave.localeCompare(b.chave));
+  },
+  /* Quantas clínicas já abriram gaveta NESTE navegador. Uma declaração de
+     "tudo isto é da clínica X" é segura quando só a X passou por aqui, e é
+     exatamente o que merece um aviso quando não é o caso. */
+  gavetasNoAparelho() {
+    const out = new Set();
+    try {
+      for (let i = 0; i < cofre._real.length; i++) {
+        const kr = cofre._real.key(i);
+        if (!kr || String(kr).indexOf('medsys.') !== 0) continue;
+        const at = kr.lastIndexOf('@');
+        if (at < 0) continue;
+        /* O sufixo é `'@' + org.slice(0,8)`, e `org` é um identificador da
+           clínica — não necessariamente hexadecimal. Exigir hex deixava de ver
+           gavetas reais, que é justamente o erro perigoso aqui: não ver uma
+           clínica vizinha é não avisar quem vai declarar o acervo como seu. */
+        const suf = kr.slice(at + 1);
+        if (suf && suf.length <= 8 && /^[A-Za-z0-9_-]+$/.test(suf)) out.add(suf);
+      }
+    } catch (e) {}
+    return Array.from(out);
+  },
+
+  async _hash(texto) {
+    try {
+      const subtle = (typeof crypto !== 'undefined' && crypto && crypto.subtle) || null;
+      if (subtle && typeof TextEncoder !== 'undefined') {
+        const buf = await subtle.digest('SHA-256', new TextEncoder().encode(String(texto)));
+        return 'sha256:' + Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      }
+    } catch (e) {}
+    /* Sem SHA-256 disponível, uma impressão determinística — declarada como
+       tal no próprio valor, para ninguém a confundir com hash criptográfico. */
+    let a = 0x811c9dc5, b = 0x01000193;
+    const s = String(texto);
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charCodeAt(i);
+      a = Math.imul(a ^ c, 16777619) >>> 0;
+      b = Math.imul(b + c + i, 2654435761) >>> 0;
+    }
+    return 'fnv:' + a.toString(16).padStart(8, '0') + b.toString(16).padStart(8, '0');
+  },
+
+  async adotarLegadoDeclarado(opts = {}) {
+    const org = cofre.org();
+    if (!org) return { ok: false, motivo: 'sem_clinica' };
+    if (opts.confirmado !== true) return { ok: false, motivo: 'sem_declaracao' };
+    const justificativa = String(opts.justificativa || '').trim();
+    if (justificativa.length < 10) return { ok: false, motivo: 'sem_justificativa' };
+    const chaves = cofre.legado();
+    if (!chaves.length) return { ok: false, motivo: 'nada_em_quarentena' };
+
+    const suf = cofre.sufixo(org);
+    const movidas = [], falhas = [];
+    for (const chave of chaves) {
+      const bruto = cofre._real.getItem(chave);
+      if (bruto == null) continue;
+      const destino = chave + suf;
+      const registros = cofre._registrosDe(bruto);
+      const hash = await cofre._hash(bruto);
+      /* O que já está na gaveta MANDA: `_juntar` acrescenta por `_id` e nunca
+         sobrescreve. Declarar a origem não autoriza apagar o que a clínica já
+         tem — só autoriza somar o que faltava. */
+      const juntos = cofre._juntar(cofre._real.getItem(destino), bruto);
+      try { cofre._real.setItem(destino, juntos); }
+      catch (e) { falhas.push({ chave, registros, erro: 'sem_espaco' }); continue; }
+      /* Só então a chave antiga sai — e só se a nova puder ser lida de volta
+         inteira. Enquanto a leitura não confere, o acervo fica onde está. */
+      if (cofre._real.getItem(destino) !== juntos) { falhas.push({ chave, registros, erro: 'gravacao_nao_confere' }); continue; }
+      try { cofre._real.removeItem(chave); } catch (e) { falhas.push({ chave, registros, erro: 'origem_presa' }); continue; }
+      movidas.push({ chave, registros, bytes: bruto.length * 2, hash });
+    }
+
+    const recibo = {
+      em: new Date().toISOString(),
+      org: String(org),
+      orgNome: String(opts.orgNome || ''),
+      porEmail: String(opts.porEmail || ''),
+      porUid: String(opts.porUid || ''),
+      justificativa,
+      registros: movidas.reduce((n, m) => n + m.registros, 0),
+      bytes: movidas.reduce((n, m) => n + m.bytes, 0),
+      chaves: movidas,
+      falhas
+    };
+    try {
+      const antes = JSON.parse(cofre._real.getItem(cofre.DECLARACAO_KEY + suf) || '[]');
+      const lista = Array.isArray(antes) ? antes : [];
+      lista.push(recibo);
+      cofre._real.setItem(cofre.DECLARACAO_KEY + suf, JSON.stringify(lista));
+    } catch (e) { /* o recibo não cabe: a adoção já aconteceu e é dita na tela */ }
+    return { ok: true, movidas, falhas, registros: recibo.registros, bytes: recibo.bytes, recibo };
+  },
+  /* Os recibos desta clínica neste aparelho. */
+  declaracoesLegado() {
+    try {
+      const v = JSON.parse(cofre._real.getItem(cofre.DECLARACAO_KEY + cofre.sufixo()) || '[]');
+      return Array.isArray(v) ? v : [];
+    } catch (e) { return []; }
+  },
 
   /* Apaga a gaveta INTEIRA de um ambiente (computador compartilhado). */
   esvaziar(org) {
