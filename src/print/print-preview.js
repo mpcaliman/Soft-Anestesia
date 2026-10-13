@@ -1206,7 +1206,7 @@ ${TAG_CLOSE_HTML}`;
   _footer(label) {
     return `<div class="pp-footer">
       <span>${utils.escapeHTML(label)} · Impresso em ${new Date().toLocaleString('pt-BR')}${printPreview._versaoStamp()}</span>
-      <span class="pp-footer-credit">Soft Anestesia · desenvolvido por Marcelo Pandolfi Caliman</span>
+      <span class="pp-footer-credit">Soft Anestesia · Desenvolvido por MPCaliman</span>
     </div>`;
   },
   /* Carimbo de versão do documento no rodapé (rastreabilidade médico-legal).

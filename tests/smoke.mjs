@@ -19755,6 +19755,107 @@ await test('Entrar: o que foi digitado sobrevive ao clique, e o erro não culpa 
   await page.close();
 });
 
+/* 266) O acervo preso só neste aparelho ganha a saída que a quarentena prometia
+
+   A janela de quarentena sempre disse: "Se este lote existir apenas neste
+   aparelho... o programador tratar essa exceção separadamente." O fluxo
+   auditado do programador lê a origem congelada NA NUVEM, então um lote que
+   nunca subiu não aparecia lá — e não havia tela nenhuma onde tratá-lo. Ficava
+   presa, invisível, ocupando o aparelho, sem saída possível.
+
+   O que faltava não era adivinhação, e este teste exige exatamente isso: sem
+   declaração escrita e marcada, NADA se move; com ela, o acervo é arquivado
+   sob a clínica declarada sem sobrescrever o que a clínica já tinha, e fica
+   recibo com contagem e hash. */
+await test('Acervo preso só neste aparelho: declaração move, ausência dela não', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const R = cofre._real;
+    const limpar = () => {
+      const fora = [];
+      for (let i = 0; i < R.length; i++) { const k = R.key(i); if (k && k.indexOf('medsys.') === 0) fora.push(k); }
+      fora.forEach(k => R.removeItem(k));
+    };
+    limpar();
+    __smokeBindOrg('org-minha');
+
+    /* Acervo de antes da separação: sem gaveta, sem dono declarado. */
+    R.setItem('medsys.v3.anestesia', JSON.stringify([
+      { _id: 'g1', paciente: { nome: 'Paciente antigo 1' } },
+      { _id: 'g2', paciente: { nome: 'Paciente antigo 2' } }
+    ]));
+    R.setItem('medsys.v5.pacientes', JSON.stringify([{ _id: 'p1', nome: 'Cadastro antigo' }]));
+    out.quarentenaAberta = ambiente.temLegadoPendente() === true && cofre.legadoRegistros() === 3;
+
+    /* A tela mostra o que será declarado, chave a chave. */
+    let host = document.getElementById('prog-legado-local');
+    if (!host) { host = document.createElement('div'); host.id = 'prog-legado-local'; document.body.appendChild(host); }
+    programador.pintarLegadoLocal();
+    out.telaLista = /medsys\.v3\.anestesia/.test(host.textContent) && /medsys\.v5\.pacientes/.test(host.textContent);
+    out.telaSemAvisoDeDuas = !/clínicas já usaram este navegador/i.test(host.textContent);
+    /* Duas gavetas no mesmo navegador: o aviso tem de ser impossível de não ver. */
+    R.setItem('medsys.v3.anestesia@aabbccdd', '[]');
+    programador.pintarLegadoLocal();
+    out.avisoDeDuasGavetas = /clínicas já usaram este navegador/i.test(host.textContent);
+    R.removeItem('medsys.v3.anestesia@aabbccdd');
+
+    /* SEM declaração, nada se move — em nenhuma das portas. */
+    const intacto = () => R.getItem('medsys.v3.anestesia') !== null && R.getItem('medsys.v5.pacientes') !== null;
+    const semNada = await cofre.adotarLegadoDeclarado({});
+    out.recusaSemDeclaracao = semNada.ok === false && semNada.motivo === 'sem_declaracao' && intacto();
+    const semTexto = await cofre.adotarLegadoDeclarado({ confirmado: true, justificativa: 'curta' });
+    out.recusaSemJustificativa = semTexto.ok === false && semTexto.motivo === 'sem_justificativa' && intacto();
+    /* E a porta da interface exige a conta do programador, que aqui não é a ativa. */
+    document.body.insertAdjacentHTML('beforeend',
+      '<input id="prog-legado-local-motivo" value="declaração escrita do proprietário do acervo">' +
+      '<input type="checkbox" id="prog-legado-local-conf" checked><div id="prog-legado-local-resultado"></div>');
+    await programador.adotarLegadoLocal();
+    out.recusaSemProgramador = intacto() &&
+      /conta do programador/i.test((document.getElementById('prog-legado-local-resultado') || {}).textContent || '');
+
+    /* O que a clínica JÁ tem não pode ser sobrescrito pela declaração. */
+    R.setItem('medsys.v3.anestesia@org-minh', JSON.stringify([{ _id: 'g1', paciente: { nome: 'Versão da clínica' } }]));
+
+    const feito = await cofre.adotarLegadoDeclarado({
+      confirmado: true,
+      justificativa: 'acervo deste consultório, produzido integralmente por esta clínica antes da separação',
+      orgNome: 'Minha Clínica de Anestesia', porEmail: 'dono@teste.local'
+    });
+    out.moveu = feito.ok === true && feito.registros >= 3;
+    out.origemSaiu = R.getItem('medsys.v3.anestesia') === null && R.getItem('medsys.v5.pacientes') === null;
+    const naGaveta = JSON.parse(R.getItem('medsys.v3.anestesia@org-minh') || '[]');
+    out.naoSobrescreveu = (naGaveta.find(x => x._id === 'g1') || {}).paciente.nome === 'Versão da clínica';
+    out.somouOQueFaltava = !!naGaveta.find(x => x._id === 'g2');
+    out.visivelAgora = (store.list('anestesia') || []).some(x => x._id === 'g2') &&
+                       (store.list('pacientes') || []).some(x => x._id === 'p1');
+    out.quarentenaEncerrada = ambiente.temLegadoPendente() === false;
+
+    const recibos = cofre.declaracoesLegado();
+    const ult = recibos[recibos.length - 1] || {};
+    out.recibo = recibos.length === 1 && ult.orgNome === 'Minha Clínica de Anestesia' &&
+      ult.porEmail === 'dono@teste.local' && /consultório/.test(ult.justificativa || '') &&
+      (ult.chaves || []).length >= 2 && (ult.chaves || []).every(c => /^(sha256|fnv):/.test(c.hash || ''));
+
+    limpar();
+    return out;
+  });
+  assert(r.quarentenaAberta, 'o cenário exige acervo de verdade em quarentena');
+  assert(r.telaLista, 'quem vai declarar precisa ver, chave a chave, o que está declarando');
+  assert(r.telaSemAvisoDeDuas && r.avisoDeDuasGavetas,
+    'o aviso de várias clínicas no mesmo navegador só aparece quando é o caso — e aparece');
+  assert(r.recusaSemDeclaracao, 'sem a declaração marcada, nada pode ser movido');
+  assert(r.recusaSemJustificativa, 'sem a declaração escrita, nada pode ser movido');
+  assert(r.recusaSemProgramador, 'a interface exige a conta do programador, como a quarentena sempre disse');
+  assert(r.moveu && r.origemSaiu, 'com a declaração completa, o acervo passa a ser arquivado sob a clínica');
+  assert(r.naoSobrescreveu, 'declarar a origem não autoriza apagar o que a clínica já tinha');
+  assert(r.somouOQueFaltava, 'o que faltava na clínica é somado');
+  assert(r.visivelAgora, 'e o acervo volta a ser visível para quem o produziu');
+  assert(r.quarentenaEncerrada, 'resolvida a atribuição, a quarentena se encerra');
+  assert(r.recibo, 'fica recibo com quem declarou, o que declarou e o hash de cada chave');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

@@ -4773,7 +4773,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-13f</b><br>
+    v7.1 · build <b id="build-tag">2026-10-13g</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -4863,7 +4863,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <div class="print-only print-header">
       <div>
         <h1>RELATÓRIO — DASHBOARD</h1>
-        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · desenvolvido por Marcelo Pandolfi Caliman</div>
+        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · Desenvolvido por MPCaliman</div>
       </div>
       <div class="print-meta" id="print-meta-dashboard"></div>
     </div>
@@ -4990,6 +4990,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <div class="action-divider"></div>
     <button class="btn" onclick="printPreview.abrir()"><span class="icon">🖨️</span> Visualizar / Imprimir</button>
     <button class="btn" onclick="printPreview.abrirPreTermo()" title="Imprime a avaliação pré-anestésica e o termo de consentimento num arquivo único"><span class="icon">📑</span> Pré + Termo juntos</button>
+    <button class="btn btn-primary" onclick="pre.irParaFicha()" title="Abre a ficha de anestesia já preenchida com este paciente e esta cirurgia"><span class="icon">➡️</span> Ir para a ficha</button>
     <button class="btn" onclick="pre.exportar()"><span class="icon">⬇️</span> Exportar</button>
     <button class="btn btn-ghost" onclick="actions.importarJSONPara('pre')"><span class="icon">⬆️</span> Importar</button>
     <div class="action-divider"></div>
@@ -5000,7 +5001,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <div class="print-only print-header">
       <div>
         <h1>AVALIAÇÃO PRÉ-ANESTÉSICA</h1>
-        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · desenvolvido por Marcelo Pandolfi Caliman</div>
+        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · Desenvolvido por MPCaliman</div>
       </div>
       <div class="print-meta" id="print-meta-pre"></div>
     </div>
@@ -5483,7 +5484,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <div class="print-only print-header">
       <div>
         <h1>CONSULTA / AVALIAÇÃO DE DOR</h1>
-        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · desenvolvido por Marcelo Pandolfi Caliman</div>
+        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · Desenvolvido por MPCaliman</div>
       </div>
       <div class="print-meta" id="print-meta-consulta"></div>
     </div>
@@ -5817,7 +5818,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <div class="print-only print-header">
       <div>
         <h1>FICHA DE ANESTESIA</h1>
-        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · desenvolvido por Marcelo Pandolfi Caliman</div>
+        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · Desenvolvido por MPCaliman</div>
       </div>
       <div class="print-meta" id="print-meta-anestesia"></div>
     </div>
@@ -7352,7 +7353,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <div class="print-only print-header">
       <div>
         <h1>RECUPERAÇÃO PÓS-ANESTÉSICA</h1>
-        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · desenvolvido por Marcelo Pandolfi Caliman</div>
+        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · Desenvolvido por MPCaliman</div>
       </div>
       <div class="print-meta" id="print-meta-recuperacao"></div>
     </div>
@@ -7824,7 +7825,11 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
           <div class="field col-12">
             <label class="check-inline"><input type="checkbox" name="tem_responsavel" onchange="termo.toggleResponsavel(this)"> Paciente representado por responsável legal</label>
           </div>
-          <div class="field col-6" data-resp style="display:none"><label>Nome do responsável</label><input type="text" name="resp_nome"></div>
+          <div class="field col-6" data-resp style="display:none"><label>Nome do responsável
+            <button type="button" class="btn btn-xs" style="margin-left:6px;padding:1px 7px;font-weight:600"
+              title="Preencher com a mãe, o pai ou o responsável legal do cadastro deste paciente"
+              onclick="acompanhantes.responsavelDoCadastro()">👪 Do cadastro</button></label>
+            <input type="text" name="resp_nome"></div>
           <div class="field col-3" data-resp style="display:none"><label>Documento</label><input type="text" name="resp_documento"></div>
           <div class="field col-3" data-resp style="display:none"><label>Grau de parentesco / vínculo</label><input type="text" name="resp_vinculo" placeholder="Pai, mãe, filho(a), tutor..."></div>
           <div class="field col-6" data-resp style="display:none"><label>Motivo da representação</label>
@@ -8527,7 +8532,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <div class="print-only print-header">
       <div>
         <h1>RELATÓRIO FINANCEIRO</h1>
-        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · desenvolvido por Marcelo Pandolfi Caliman</div>
+        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · Desenvolvido por MPCaliman</div>
       </div>
       <div class="print-meta" id="print-meta-financeiro"></div>
     </div>
@@ -9265,7 +9270,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <div class="print-only print-header">
       <div>
         <h1>AGENDA</h1>
-        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · desenvolvido por Marcelo Pandolfi Caliman</div>
+        <div style="font-size:6.5pt;color:#b0b6bf;margin-top:2px;letter-spacing:.2px">Soft Anestesia · Desenvolvido por MPCaliman</div>
       </div>
       <div class="print-meta" id="print-meta-agenda"></div>
     </div>
@@ -15892,6 +15897,31 @@ const pre = {
       toast('📝 Termo pré-preenchido com os dados do paciente');
     }, 200);
   },
+  /* AVANÇAR PARA A FICHA DE ANESTESIA.
+     A pré e a ficha são o mesmo paciente no mesmo dia, e até aqui ir de uma
+     para a outra era: abrir o menu, criar ficha nova, redigitar o nome e
+     esperar o preenchimento automático. O caminho já existia — é exatamente o
+     que acontece ao digitar o nome e sair do campo (`autoPreencherDadosPaciente`
+     mais `importarPreParaAnestesia`). O botão só percorre esse caminho pela
+     pessoa, para não haver uma segunda cópia da regra de importação que possa
+     divergir da primeira. */
+  irParaFicha() {
+    const f = document.getElementById(pre.formId);
+    const nome = String(((f && f.querySelector('[name="nome"]')) || {}).value || '').trim();
+    if (!nome) { toast('Preencha o nome do paciente antes de avançar para a ficha.', 'warn'); return; }
+    ui.navegar('anestesia');
+    setTimeout(() => {
+      try { anestesia.novo(); } catch (e) {}
+      const fa = document.getElementById('form-anestesia');
+      const campo = fa && fa.querySelector('[name="paciente_nome"]');
+      if (!campo) return;
+      campo.value = nome;
+      try { linker.autoPreencherDadosPaciente(nome, 'anestesia'); } catch (e) {}
+      try { linker.importarPreParaAnestesia(nome); } catch (e) {}
+      try { rascunhos.renomearAba('anestesia'); } catch (e) {}
+      toast('➡️ Ficha de anestesia aberta para ' + nome);
+    }, 200);
+  },
   salvarComoNovo() {
     /* Remove _id para forçar criação */
     const f = document.getElementById(pre.formId);
@@ -19588,9 +19618,13 @@ const ambiente = {
       'A associação a uma clínica só pode ser feita na área <b>Programador → Migração segura do legado</b>, ' +
       'com seleção explícita, justificativa, hash, validação e trilha de auditoria.</p>' +
       '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">Essa área inventaria somente registros que já chegaram à origem congelada na nuvem. ' +
-      'Se este lote existir apenas neste aparelho, ele continuará em quarentena e o aparelho não deve ser limpo até o programador tratar essa exceção separadamente.</p>' +
+      'Se este lote existir apenas neste aparelho, ele continuará em quarentena e o aparelho não deve ser limpo até o programador tratar essa exceção separadamente — ' +
+      'no bloco <b>📦 Acervo que existe só neste aparelho</b>, da mesma área, mediante declaração escrita de quem é dono do acervo.</p>' +
       '<p style="font-size:.8rem;color:var(--text-mute);margin:0">Ocupação atual: <b>' +
       armazenamento._fmt(cofre.legadoBytes()) + '</b>. Nada será movido ou apagado por esta tela.</p>',
+      (programador.souProgramador()
+        ? '<a class="btn btn-primary" href="#programador" onclick="modal.close()">Abrir a área do programador</a>'
+        : '') +
       '<button class="btn" onclick="ambiente._decidirLegado()">Fechar e manter em quarentena</button>');
   },
   _decidirLegado() {
@@ -20010,11 +20044,128 @@ const programador = {
             <button type="button" class="btn btn-sm btn-danger" onclick="programador.reverterLegado()">↩ Reverter na janela</button>
           </div>
           <div id="prog-legado-resultado" style="margin-top:10px"></div>
+
+          <div style="margin-top:16px;border-top:2px solid var(--border);padding-top:13px">
+            <h3 style="font-size:.95rem;margin:0 0 6px">📦 Acervo que existe só neste aparelho</h3>
+            <p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">
+              O inventário acima lê a <b>origem congelada na nuvem</b>. Um lote gravado antes da separação por
+              clínica e que nunca subiu não aparece lá — é a exceção que a janela de quarentena diz caber ao
+              programador tratar separadamente. É esta tela.
+              <b>Nada é adivinhado:</b> a clínica vem da declaração de quem é dono do acervo, por escrito, e o
+              recibo fica guardado. O conteúdo não é alterado — passa a ser arquivado sob a clínica declarada,
+              e o que a clínica já tem nunca é sobrescrito.
+            </p>
+            <div id="prog-legado-local"></div>
+            <div class="grid" style="margin-top:10px">
+              <div class="field col-12">
+                <label>Declaração do proprietário <small style="color:var(--text-mute);font-weight:400">(não escreva informação clínica)</small></label>
+                <input type="text" id="prog-legado-local-motivo" maxlength="500" placeholder="Ex.: acervo deste consultório, produzido integralmente por esta clínica antes da separação">
+              </div>
+            </div>
+            <label style="display:flex;gap:8px;align-items:flex-start;font-size:.82rem;margin:4px 0 10px">
+              <input type="checkbox" id="prog-legado-local-conf" style="margin-top:3px">
+              <span id="prog-legado-local-frase">Declaro, como proprietário, que este acervo é da clínica aberta.</span>
+            </label>
+            <button type="button" class="btn btn-sm btn-primary" onclick="programador.adotarLegadoLocal()">📥 Arquivar sob a clínica declarada</button>
+            <div id="prog-legado-local-resultado" style="margin-top:10px"></div>
+          </div>
         </div>
       </section>`;
     if (typeof window !== 'undefined' && window.SoftLegacyProvenance) window.SoftLegacyProvenance.mount({
       programador, cloud, contextoAba, document, confirm: message => confirm(message)
     });
+    try { programador.pintarLegadoLocal(); } catch (e) {}
+  },
+
+  /* ---------- o lote que só existe neste aparelho ----------
+     Ver antes de declarar: chave a chave, quantos registros, quanto ocupa — e,
+     acima de tudo, QUANTAS CLÍNICAS já abriram gaveta neste navegador. Uma
+     declaração de "tudo isto é da clínica X" vale quando só a X passou por
+     aqui; quando passou mais de uma, o aviso precisa ser impossível de não
+     ver, porque é exatamente aí que se carimba o prontuário de uma como sendo
+     de outra. */
+  pintarLegadoLocal() {
+    const host = document.getElementById('prog-legado-local'); if (!host) return;
+    const esc = utils.escapeHTML;
+    const itens = cofre.legadoPorChave();
+    const frase = document.getElementById('prog-legado-local-frase');
+    const nome = ambiente.nome() || '';
+    const aberta = ambiente.id();
+    if (frase) {
+      frase.innerHTML = aberta
+        ? 'Declaro, como proprietário do acervo, que os registros em quarentena neste aparelho pertencem integralmente a <b>' +
+          esc(nome || ambiente.curto(aberta)) + '</b>, e autorizo que sejam arquivados sob essa clínica.'
+        : 'Nenhuma clínica está aberta nesta aba — abra o ambiente da clínica dona do acervo antes de declarar.';
+    }
+    const recibos = cofre.declaracoesLegado();
+    const historico = recibos.length
+      ? '<p style="font-size:.78rem;color:var(--text-mute);margin:8px 0 0">Recibos já registrados nesta clínica: ' +
+        recibos.map(r => esc(String(r.em || '').slice(0, 10)) + ' · ' + Number(r.registros || 0) + ' registro(s)').join(' · ') + '</p>'
+      : '';
+    if (!itens.length) {
+      host.innerHTML = '<p style="font-size:.82rem;color:var(--text-mute);margin:0">Não há acervo em quarentena neste aparelho.</p>' + historico;
+      return;
+    }
+    const gavetas = cofre.gavetasNoAparelho();
+    const totR = itens.reduce((n, i) => n + i.registros, 0);
+    const totB = itens.reduce((n, i) => n + i.bytes, 0);
+    const alerta = gavetas.length > 1
+      ? '<div style="background:#fdecea;border:1px solid #e9a69e;color:#7b241c;border-radius:8px;padding:9px 11px;font-size:.82rem;margin:0 0 9px">' +
+        '<b>⚠️ ' + gavetas.length + ' clínicas já usaram este navegador.</b> O acervo em quarentena é anterior à separação e ' +
+        'não diz de qual delas é. Declarar que é todo de uma só vai arquivar, sob ela, o que porventura seja da outra. ' +
+        'Só prossiga se souber que este aparelho atendeu uma clínica apenas.</div>'
+      : '';
+    host.innerHTML = alerta +
+      '<div style="max-height:220px;overflow:auto"><table class="dash-detail-table" style="margin:0"><thead><tr>' +
+      '<th>Chave guardada</th><th style="text-align:right">Registros</th><th style="text-align:right">Tamanho</th>' +
+      '</tr></thead><tbody>' +
+      itens.map(i => '<tr><td><code style="font-size:.74rem">' + esc(i.chave) + '</code></td><td style="text-align:right">' +
+        i.registros + '</td><td style="text-align:right">' + armazenamento._fmt(i.bytes) + '</td></tr>').join('') +
+      '</tbody><tfoot><tr><th>Total</th><th style="text-align:right">' + totR + '</th><th style="text-align:right">' +
+      armazenamento._fmt(totB) + '</th></tr></tfoot></table></div>' + historico;
+  },
+
+  async adotarLegadoLocal() {
+    const alvo = document.getElementById('prog-legado-local-resultado');
+    const dizer = (html, erro) => { if (alvo) alvo.innerHTML = '<div class="diag-linha ' + (erro ? 'diag-erro' : 'diag-ok') + '">' + html + '</div>'; };
+    if (!programador.souProgramador()) { dizer('❌ Esta operação é da conta do programador.', true); return; }
+    const org = ambiente.id();
+    if (!org) { dizer('❌ Abra o ambiente da clínica dona do acervo antes de declarar.', true); return; }
+    const motivo = String((document.getElementById('prog-legado-local-motivo') || {}).value || '').trim();
+    if (motivo.length < 10) { dizer('❌ Escreva a declaração do proprietário (mínimo 10 caracteres).', true); return; }
+    const conf = document.getElementById('prog-legado-local-conf');
+    if (!conf || !conf.checked) { dizer('❌ Marque a declaração. Sem ela nada é movido.', true); return; }
+    const itens = cofre.legadoPorChave();
+    if (!itens.length) { dizer('Não há acervo em quarentena neste aparelho.', true); return; }
+    const totR = itens.reduce((n, i) => n + i.registros, 0);
+    const nome = ambiente.nome() || ambiente.curto(org);
+    if (!confirm('Arquivar ' + totR + ' registro(s) em quarentena sob ' + nome + '?\n\n' +
+      'O conteúdo não é alterado e o que a clínica já tem não é sobrescrito. Fica um recibo com contagem e hash de cada chave.')) return;
+    const s = cloud.session() || {};
+    const u = (s && s.user) || {};
+    const r = await cofre.adotarLegadoDeclarado({
+      confirmado: true, justificativa: motivo, orgNome: nome,
+      porEmail: String(u.email || ''), porUid: String(u.id || '')
+    });
+    if (!r || !r.ok) {
+      const porque = {
+        sem_clinica: 'nenhuma clínica aberta nesta aba',
+        sem_declaracao: 'a declaração não foi marcada',
+        sem_justificativa: 'falta a declaração escrita',
+        nada_em_quarentena: 'não há acervo em quarentena'
+      }[(r && r.motivo) || ''] || 'operação recusada';
+      dizer('❌ Nada foi movido — ' + utils.escapeHTML(porque) + '.', true);
+      return;
+    }
+    conf.checked = false;
+    const falhou = (r.falhas || []).length;
+    dizer('✅ ' + r.registros + ' registro(s) de ' + r.movidas.length + ' chave(s) arquivados sob ' +
+      utils.escapeHTML(nome) + ' (' + armazenamento._fmt(r.bytes) + ').' +
+      (falhou ? ' <b>' + falhou + ' chave(s) ficaram onde estavam</b> — veja o recibo.' : ''), false);
+    toast('📦 ' + r.registros + ' registro(s) arquivados sob ' + nome, falhou ? 'warn' : 'success');
+    try { programador.pintarLegadoLocal(); } catch (e) {}
+    try { cloud._repintarTelaAtual(); } catch (e) {}
+    try { ambiente.pintar(); } catch (e) {}
   },
 
   _legacyStatus: {
@@ -28063,6 +28214,61 @@ const acompanhantes = {
     campo.value = atual ? atual.replace(/[;\s]+$/, '') + '; ' + texto : texto;
     try { markDirty(); } catch (e) {}
     toast('👥 ' + faltando.length + ' acompanhante(s) do cadastro adicionado(s)');
+  },
+
+  /* O MESMO CADASTRO, NO TERMO.
+     Quem representa um menor ou um paciente sem autonomia é, quase sempre, a
+     mãe, o pai ou o responsável legal — exatamente os três campos que o
+     cadastro já guarda. Redigitar o nome aqui é como ele acabava escrito de um
+     jeito na pré e de outro no termo; e é o nome que vai para o documento que
+     a pessoa ASSINA, onde grafia divergente não é detalhe.
+     Havendo um só candidato, preenche. Havendo mais de um, PERGUNTA: o sistema
+     não sabe quem veio, e escolher por conta própria seria pôr no termo um
+     nome que ninguém indicou. O vínculo (mãe/pai/tutor) vem junto, porque o
+     campo ao lado pede exatamente isso. */
+  responsavelDoCadastro() {
+    const elNome = document.querySelector('#form-termo [name=nome]');
+    const nome = (elNome && elNome.value) || '';
+    if (!nome.trim()) { toast('Preencha o nome do paciente primeiro — o responsável vem do cadastro dele.', 'warn'); return; }
+    const possiveis = identificacaoPaciente.acompanhantesPossiveis(nome);
+    if (!possiveis.length) {
+      toast('O cadastro deste paciente ainda não tem mãe, pai ou responsável legal. Preencha em Pacientes e volte aqui.', 'warn');
+      return;
+    }
+    if (possiveis.length === 1) { acompanhantes._porResponsavel(possiveis[0]); return; }
+    acompanhantes._candidatos = possiveis;
+    modal.open('👪 Quem representa o paciente?',
+      '<p style="font-size:.86rem;margin:0 0 10px">O cadastro de <b>' + utils.escapeHTML(nome.trim()) +
+      '</b> conhece mais de uma pessoa. Escolha quem assina o termo — o sistema não presume.</p>' +
+      possiveis.map((x, i) =>
+        '<button type="button" class="btn" style="display:block;width:100%;text-align:left;margin:0 0 7px" ' +
+        'onclick="acompanhantes._escolherResponsavel(' + i + ')">' + utils.escapeHTML(x.nome) +
+        ' <span style="color:var(--text-mute)">· ' + utils.escapeHTML(x.papel) + '</span></button>').join(''),
+      '<button class="btn" onclick="modal.close()">Cancelar</button>');
+  },
+  _candidatos: [],
+  _escolherResponsavel(i) {
+    const escolhido = (acompanhantes._candidatos || [])[i];
+    modal.close();
+    if (escolhido) acompanhantes._porResponsavel(escolhido);
+  },
+  _porResponsavel(x) {
+    const campo = document.querySelector('#form-termo [name=resp_nome]');
+    const vinculo = document.querySelector('#form-termo [name=resp_vinculo]');
+    if (!campo) return;
+    /* O que foi digitado à mão não é descartado sem aviso: quem está com o
+       termo aberto pode saber mais do que o cadastro. */
+    const atual = String(campo.value || '').trim();
+    if (atual && atual.toLowerCase() !== x.nome.toLowerCase() &&
+        !confirm('Substituir "' + atual + '" por "' + x.nome + '"?')) return;
+    campo.value = x.nome;
+    if (vinculo && !String(vinculo.value || '').trim()) vinculo.value = x.papel;
+    /* Representação só vale se estiver marcada; marcar junto evita o termo sair
+       com o responsável preenchido e os campos escondidos. */
+    const chk = document.querySelector('#form-termo [name=tem_responsavel]');
+    if (chk && !chk.checked) { chk.checked = true; try { termo.toggleResponsavel(chk); } catch (e) {} }
+    try { markDirty(); } catch (e) {}
+    toast('👪 Responsável preenchido do cadastro: ' + x.nome + ' (' + x.papel + ')');
   }
 };
 
