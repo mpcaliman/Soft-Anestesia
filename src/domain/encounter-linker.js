@@ -89,6 +89,23 @@ const rascunhosSync = {
     ['_draftVersion','_draftUpdatedAt','_draftUpdatedBy','_draftOrg','_draftSyncedLocalAt'].forEach(k => { delete x[k]; });
     return x;
   },
+  /* O CONTEÚDO, sem nenhum carimbo de tempo.
+     `_limpo` tira as marcas `_draft*` e mantém `updatedAt` — e faz bem, porque
+     em outros lugares essa hora é parte do recibo. Mas para decidir se existe
+     CONFLITO ela atrapalha: dois aparelhos com exatamente o mesmo rascunho têm
+     horas diferentes, e comparar incluindo a hora declarava divergência onde
+     não havia. Era o que preservava cópia atrás de cópia e fazia o contador de
+     conflitos subir sozinho — 167, depois 304, sem ninguém digitar nada.
+     Conflito se decide pelo que está escrito: o rótulo e os dados. */
+  _mesmoConteudo(a, b) {
+    const corpo = r => {
+      try {
+        return JSON.stringify({ label: (r && r.label) || '', dados: (r && r.dados) || {} });
+      } catch (e) { return null; }
+    };
+    const x = corpo(a), y = corpo(b);
+    return x !== null && x === y;
+  },
   _daLinha(l, org) {
     const r = cloudRel._clone((l && l.data) || {});
     if (!r.id && l && l.doc_id) r.id = l.doc_id;
@@ -154,6 +171,16 @@ const rascunhosSync = {
        retrato, com o sufixo empilhado no nome, e cada geração fabricando a
        seguinte. Chegando aqui, a cadeia para. */
     if (local._draftConflictOf) return null;
+    /* CONTEÚDO IGUAL NÃO É CONFLITO, venha de onde vier.
+       A trava está AQUI, e não só em quem chama, porque são dois caminhos — o
+       envio e a descida — e o segundo também preservava sem olhar. Não há o
+       que a pessoa decidir entre uma versão e ela mesma; a da nuvem fica, com
+       o carimbo que faltava, e o ciclo encerra. */
+    if (rascunhosSync._mesmoConteudo(local, remoto)) {
+      const i0 = lista.indexOf(atual);
+      if (i0 >= 0) { lista[i0] = remoto; rascunhos.setList(mod, lista); }
+      return null;
+    }
     const marca = [local.id, local._draftVersion || '', remoto._draftVersion || '', cloudRel._hashConflito(local)].join('|');
     let copia = lista.find(x => x && x._draftConflictFingerprint === marca);
     if (!copia) {
@@ -277,9 +304,22 @@ const rascunhosSync = {
           return;
         }
         const vr = Number(r._draftVersion) || 0, vl = Number(local._draftVersion) || 0;
-        const sujo = vl > 0
+        /* PRESERVAR PRESSUPÕE DIVERGÊNCIA — a mesma lição do conflito de
+           registro, que aqui faltava.
+           `sujo` olhava só a HORA: `updatedAt` diferente de
+           `_draftSyncedLocalAt` significa "mexeram aqui depois do último
+           envio". Só que a hora é tocada por muita coisa que não muda
+           conteúdo, e aí todo pull com versão remota maior preservava uma
+           cópia — de um rascunho idêntico ao que já estava na nuvem. A cópia
+           subia, voltava, preservava outra, e o contador de conflitos subia
+           sozinho: 167, depois 304, sem ninguém digitar nada.
+           Conteúdo igual não é conflito: não há o que a pessoa decidir entre
+           uma coisa e ela mesma. Fica a versão da nuvem, que traz o carimbo
+           que faltava e encerra o ciclo. Havendo UMA diferença real, preserva
+           como sempre preservou. */
+        const sujo = !rascunhosSync._mesmoConteudo(local, r) && (vl > 0
           ? String(local.updatedAt || '') !== String(local._draftSyncedLocalAt || '')
-          : !rascunhosSync._iguais(local, r);
+          : true);
         if (vr > vl && sujo) {
           rascunhosSync._preservarConflito(mod, local, r, { organizationId: org, lista: locais }); conflitos++;
           rascunhosSync._chegaram.push({ id: r.id, label: r.label || '', updatedAt: r.updatedAt || '' });

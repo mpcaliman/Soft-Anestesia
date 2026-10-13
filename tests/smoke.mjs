@@ -17363,6 +17363,30 @@ await test('Cópia preservada não gera outra cópia: o laço das abas infinitas
     out.recusouACopia = r2 === null;
     out.naoCresceu = lista.length === 2;
 
+    /* E A RAIZ: conteúdo igual não é conflito.
+       A comparação incluía `updatedAt` — carimbo de tempo, não conteúdo — e
+       dois aparelhos com exatamente o mesmo rascunho têm horas diferentes.
+       Toda descida com versão remota maior preservava uma cópia de algo
+       idêntico ao que já estava na nuvem, e o contador subia sozinho. */
+    rascunhos.setList(mod, [{ id: 'r9', label: 'CELINA', dados: { paciente_nome: 'CELINA' },
+      _draftVersion: 1, updatedAt: '2026-10-13T10:00:00Z', _draftSyncedLocalAt: '2026-10-13T09:00:00Z' }]);
+    const base = rascunhos.list(mod)[0];
+    const soAHoraMudou = Object.assign({}, base, { _draftVersion: 2, updatedAt: '2026-10-13T11:00:00Z' });
+    const semConflito = rascunhosSync._preservarConflito(mod, base, soAHoraMudou);
+    out.horaNaoEhConflito = semConflito === null &&
+      !rascunhos.list(mod).some(x => x && x._draftConflictOf);
+    out.adotouACloud = (rascunhos.list(mod)[0] || {})._draftVersion === 2;
+
+    /* uma diferença REAL continua preservando os dois lados */
+    rascunhos.setList(mod, [{ id: 'r8', label: 'CELINA', dados: { paciente_nome: 'CELINA' },
+      _draftVersion: 1, updatedAt: '2026-10-13T10:00:00Z', _draftSyncedLocalAt: '2026-10-13T09:00:00Z' }]);
+    const base2 = rascunhos.list(mod)[0];
+    rascunhosSync._preservarConflito(mod, base2,
+      Object.assign({}, base2, { _draftVersion: 2, dados: { paciente_nome: 'OUTRO NOME' } }));
+    out.divergenciaRealPreserva = rascunhos.list(mod).some(x => x && x._draftConflictOf);
+
+    rascunhos.setList(mod, [{ id: 'r1', label: 'CELINA ALVES DOS SANTOS',
+      dados: { paciente_nome: 'CELINA' }, _draftVersion: 1 }]);
     /* a cópia é local: não entra na fila de envio, senão volta pelo pull */
     out.copiaNaoSobe = (() => {
       const enviaveis = (rascunhos.list(mod) || [])
@@ -17376,6 +17400,9 @@ await test('Cópia preservada não gera outra cópia: o laço das abas infinitas
   assert(r.rotuloComUmSufixo, 'o rótulo leva o sufixo UMA vez, não um por geração');
   assert(r.recusouACopia && r.naoCresceu, 'preservar uma cópia não pode criar outra — era isso que enchia a tela de abas');
   assert(r.copiaNaoSobe, 'a cópia é local e não sobe: subindo, ela voltava pelo pull e reiniciava o ciclo');
+  assert(r.horaNaoEhConflito && r.adotouACloud,
+    'hora diferente com o MESMO conteúdo não é conflito: era a raiz do contador subindo sozinho');
+  assert(r.divergenciaRealPreserva, 'e uma diferença de verdade continua preservando os dois lados');
   await page.close();
 });
 
