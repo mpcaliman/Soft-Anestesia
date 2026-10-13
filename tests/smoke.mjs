@@ -20053,8 +20053,11 @@ await test('PDF do backup: cada texto uma vez, rótulo sem dois-pontos dobrados,
     ppp.innerHTML = guardado;
 
     /* Lê o texto de volta do PDF gerado, que é o que o paciente recebe. */
+    /* O conteúdo do PDF é binário: decodificar como UTF-8 estoura em
+       "URI malformed". Lê-se byte a byte, que é o bastante para procurar os
+       trechos de texto que interessam. */
     const bruto = doc.output('datauristring');
-    const texto = decodeURIComponent(escape(atob(bruto.split(',')[1] || '')));
+    const texto = atob(bruto.split(',')[1] || '');
     out.paginas = doc.getNumberOfPages();
 
     const conta = (alvo) => {
