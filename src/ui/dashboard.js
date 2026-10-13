@@ -450,12 +450,30 @@ const dashboard = {
     try { por(((orcamento.cfg() || {}).cabecalho || {}).profissional); } catch (e) {}
     return meus;
   },
-  _filtrarEscopo(list, escopo) {
+  /* O MESMO CRITÉRIO, PARA OUTRA PESSOA.
+     A clínica pode ter mais de um médico, e o relatório de produção precisa
+     dizer "a produção do Fulano" — não só "a minha". A regra de a quem pertence
+     o caso é difícil e está toda aqui (profissional antes de quem digitou,
+     anestesista único, nome escrito de três jeitos); duplicá-la num relatório
+     seria garantir que as duas contas divergissem. Então o escopo passa a
+     aceitar um nome, e o resto é o mesmo caminho. */
+  _filtrarDeAlguem(list, nome) {
+    const alvo = new Set();
+    const t = dashboard._normAutor(nome);
+    if (!t) return list;
+    alvo.add(t);
+    return dashboard._filtrarEscopo(list, 'pessoal', alvo);
+  },
+  _filtrarEscopo(list, escopo, alvoExplicito) {
     if (escopo !== 'pessoal') return list;
-    const meus = dashboard._souEu();
+    const meus = alvoExplicito || dashboard._souEu();
     if (!meus.size) return list;
     const bate = (v) => dashboard._mesmaPessoa(v, meus);
-    const sozinho = dashboard._souOUnicoAnestesista();
+    /* A regra do "anestesista único" é sobre MIM: ela existe para não tirar do
+       meu painel a produção que é minha quando ninguém a assinou. Pedindo a
+       produção de outra pessoa, ela não vale — aí "sem profissional registrado"
+       não pode virar "é dele". */
+    const sozinho = alvoExplicito ? false : dashboard._souOUnicoAnestesista();
     return list.filter(it => {
       /* QUEM CONFERIU É O DONO DO CASO. No pré-lançamento a secretária digita
          e o médico confere e finaliza: se "meu" fosse só "quem digitou", o

@@ -4809,7 +4809,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-13h</b><br>
+    v7.1 · build <b id="build-tag">2026-10-13i</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -8728,9 +8728,13 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <small style="color:var(--text-mute);font-weight:400;margin-left:8px">— fotos de guias, senhas, comprovantes (auxiliam a conciliação)</small>
           </h3>
           <div>
-            <input type="file" id="fin-anexo-input" accept="image/*" multiple style="display:none" onchange="financeiro.anexos.adicionarArquivos(this.files); this.value=''">
-            <button type="button" class="btn btn-sm" onclick="document.getElementById('fin-anexo-input').click()">📷 Adicionar foto / arquivo</button>
-            <span style="font-size:.76rem;color:var(--text-mute);margin-left:8px">Imagens até 2 MB cada (redimensionadas automaticamente)</span>
+            <input type="file" id="fin-anexo-input" accept="image/*,application/pdf" multiple style="display:none" onchange="financeiro.anexos.adicionarArquivos(this.files); this.value=''">
+            <!-- Entrada separada só para a câmera: `capture` num input único
+                 FORÇARIA a câmera e tiraria a opção de escolher arquivo. -->
+            <input type="file" id="fin-anexo-camera" accept="image/*" capture="environment" style="display:none" onchange="financeiro.anexos.adicionarArquivos(this.files); this.value=''">
+            <button type="button" class="btn btn-sm" onclick="document.getElementById('fin-anexo-input').click()">📎 Anexar arquivo (PDF ou imagem)</button>
+            <button type="button" class="btn btn-sm" onclick="document.getElementById('fin-anexo-camera').click()">📷 Tirar foto</button>
+            <span style="font-size:.76rem;color:var(--text-mute);margin-left:8px">Imagens até 2 MB (redimensionadas) · PDF até 8 MB</span>
             <div id="fin-anexos-lista" class="fin-anexos-lista"></div>
             <div id="fin-docs-origem"></div>
           </div>
@@ -14041,6 +14045,47 @@ const ui = {
     estaAberto(cardId) { return ui.painel._aberto === cardId; }
   },
 
+  /* ---------- ESPERAR A TELA EXISTIR, EM VEZ DE APOSTAR UM TEMPO ----------
+     "O fluxo Consulta → finalizar que encaminha para financeiro e/ou
+      impressão, assim como o da ficha de anestesia para gerar financeiro,
+      imprimir, encaminhar para TCLE, está ruim... ÀS VEZES NÃO VAI."
+
+     O "às vezes" é a assinatura do defeito. Esses encaminhamentos trocam de
+     módulo e, logo depois, preenchem o formulário de destino — mas a troca de
+     módulo não é instantânea, e o código esperava um tempo FIXO (150 ms, 200
+     ms) na esperança de que a tela já estivesse montada. Quando o aparelho está
+     mais lento, quando o módulo cresceu, quando a sincronização disputa o
+     processador, o prazo vence antes: o formulário ainda não existe, o
+     preenchimento não encontra onde escrever e NÃO ACONTECE NADA. Sem erro, sem
+     aviso — exatamente "às vezes não vai".
+
+     Prazo fixo é aposta. Aqui se espera o elemento APARECER, verificando a cada
+     quadro, com teto de tempo. Aparecendo, segue na hora (mais rápido do que os
+     200 ms de antes, no caso normal). Não aparecendo, DIZ que não foi, em vez
+     de deixar a pessoa achando que foi. */
+  quandoPronto(seletor, acao, opts = {}) {
+    const limite = opts.limiteMs || 4000;
+    const inicio = Date.now();
+    const tentar = () => {
+      let el = null;
+      try { el = document.querySelector(seletor); } catch (e) { el = null; }
+      if (el) { try { acao(el); } catch (e) { console.warn('quandoPronto', e); } return; }
+      if (Date.now() - inicio >= limite) {
+        /* Silêncio aqui é o defeito que estamos consertando. */
+        try { toast('A tela de destino não abriu a tempo — nada foi preenchido. Tente de novo.', 'warn'); } catch (e) {}
+        return;
+      }
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(tentar);
+      else setTimeout(tentar, 30);
+    };
+    tentar();
+  },
+  /* Navegar e, assim que o destino existir de verdade, agir. */
+  irEEntao(modulo, seletor, acao, opts = {}) {
+    ui.navegar(modulo);
+    ui.quandoPronto(seletor, acao, opts);
+  },
+
   toggleCard(headerEl) {
     headerEl.parentElement.classList.toggle('collapsed');
     /* card recolhido é display:none, e aí a caixa de texto não tem como ser
@@ -15828,7 +15873,7 @@ const pre = {
     store.notificarNuvem(saved, finalizar ? 'Avaliação finalizada' : 'Avaliação', { silencioso: !!opts.auto });
     /* A pergunta do Termo espera a impressão sair da frente (ela já sabe
        esperar janela aberta, ver _perguntarTermo). */
-    if (finalizar) setTimeout(() => pre._perguntarTermo(saved), 700);
+    if (finalizar) { try { fechamento.abrir('pre', saved._id); } catch (e) {} }
   },
   /* ---------- Navegação por seções + status de completude ---------- */
   nav: {
@@ -15976,11 +16021,12 @@ const pre = {
   /* Inicia o Termo pré-preenchido com dados da Pré-anestésica */
   _iniciarTermo(preId) {
     const docPre = store.getById('pre', preId);
-    ui.navegar('termo');
-    setTimeout(() => {
+    if (!docPre) { toast('Não encontrei a pré-anestésica para levar ao termo.', 'warn'); return; }
+    /* Esperar o formulário existir, em vez de apostar 200 ms — ver ui.quandoPronto. */
+    ui.irEEntao('termo', '#form-termo', () => {
       termo.novo();
       const f = document.getElementById('form-termo');
-      if (!f || !docPre) return;
+      if (!f) return;
       const set = (name, val) => { const el = f.querySelector(`[name="${name}"]`); if (el && val) el.value = val; };
       set('nome', docPre.nome);
       set('nascimento', docPre.nascimento);
@@ -15991,7 +16037,7 @@ const pre = {
       /* Marca vínculo Pré → Termo */
       termo._linkPendente = { mod: 'pre', id: preId };
       toast('📝 Termo pré-preenchido com os dados do paciente');
-    }, 200);
+    });
   },
   /* AVANÇAR PARA A FICHA DE ANESTESIA.
      A pré e a ficha são o mesmo paciente no mesmo dia, e até aqui ir de uma
@@ -16005,18 +16051,16 @@ const pre = {
     const f = document.getElementById(pre.formId);
     const nome = String(((f && f.querySelector('[name="nome"]')) || {}).value || '').trim();
     if (!nome) { toast('Preencha o nome do paciente antes de avançar para a ficha.', 'warn'); return; }
-    ui.navegar('anestesia');
-    setTimeout(() => {
+    ui.irEEntao('anestesia', '#form-anestesia [name="paciente_nome"]', (campo) => {
       try { anestesia.novo(); } catch (e) {}
-      const fa = document.getElementById('form-anestesia');
-      const campo = fa && fa.querySelector('[name="paciente_nome"]');
-      if (!campo) return;
-      campo.value = nome;
+      const campo2 = document.querySelector('#form-anestesia [name="paciente_nome"]') || campo;
+      if (!campo2) return;
+      campo2.value = nome;
       try { linker.autoPreencherDadosPaciente(nome, 'anestesia'); } catch (e) {}
       try { linker.importarPreParaAnestesia(nome); } catch (e) {}
       try { rascunhos.renomearAba('anestesia'); } catch (e) {}
       toast('➡️ Ficha de anestesia aberta para ' + nome);
-    }, 200);
+    });
   },
   salvarComoNovo() {
     /* Remove _id para forçar criação */
@@ -27222,6 +27266,189 @@ try { window.pdfFila = pdfFila; } catch (e) {}
    Ambos são "best-effort" na geração — nunca bloqueiam a impressão. Mas o que
    falha agora ESPERA na fila (pdfFila) em vez de sumir.
 ============================================================================ */
+/* ============================================================================
+   FECHAMENTO DO ATENDIMENTO — UMA LINHA, ATÉ ACABAR
+   ----------------------------------------------------------------------------
+   "O fluxo Consulta → finalizar que encaminha para financeiro e/ou impressão,
+    assim como o da ficha de anestesia para gerar financeiro, imprimir,
+    encaminhar para TCLE, está ruim... às vezes não vai."
+   "Tem que seguir uma linha até finalizar tudo, pois para um paciente pode ser
+    necessário fazer mais de um item da lista."
+
+   A CAUSA, que não era de desenho e sim de disputa:
+
+   Ao finalizar, o app disparava DUAS janelas ao mesmo tempo — a da cobrança
+   (`fin.finalizacao.abrirQuandoLivre`) e a do próximo passo clínico (termo na
+   pré, SRPA na ficha). Só existe UM espaço de janela no app, então cada uma
+   ficava num laço perguntando "já está livre?": a da cobrança tentava 120 vezes
+   a cada 800 ms, a do termo 40 vezes a cada 1500 ms. Quem perdesse a corrida ou
+   esperava um minuto e meio, ou desistia. E, pior, a ORDEM dependia de qual
+   laço acordasse primeiro — por isso "às vezes" ia e às vezes não.
+
+   Duas janelas competindo por um lugar não se conserta com mais espera. Se são
+   dois passos do mesmo fechamento, eles não são duas janelas: são dois itens de
+   uma lista.
+
+   O QUE ESTA TELA É
+
+   Um painel único por atendimento, que fica ATÉ ACABAR. Lista o que falta
+   fazer naquele caso, mostra o que já foi feito (conferindo no registro, não na
+   lembrança de ter clicado), e sobrevive à navegação: fazer um item leva a
+   outra tela, e ao voltar o painel continua lá, com o item anterior marcado.
+   Enquanto houver fechamento aberto, uma faixa discreta no rodapé diz de quem é
+   e quanto falta — para ninguém esquecer um atendimento pela metade.
+
+   Fechar o painel não cancela nada: só o esconde. "Concluído" é uma decisão
+   explícita, e é a única coisa que encerra.
+============================================================================ */
+const fechamento = {
+  KEY: 'medsys.v7.fechamento.atual',
+
+  _ler() {
+    try { const v = JSON.parse(localStorage.getItem(fechamento.KEY) || 'null'); return v && v.mod && v.id ? v : null; }
+    catch (e) { return null; }
+  },
+  _gravar(st) {
+    try { st ? localStorage.setItem(fechamento.KEY, JSON.stringify(st)) : localStorage.removeItem(fechamento.KEY); }
+    catch (e) {}
+    fechamento._pintarFaixa();
+  },
+  ativo() { return !!fechamento._ler(); },
+
+  _nomeDe(mod, doc) {
+    if (!doc) return '';
+    return String((doc.paciente && doc.paciente.nome) || doc.paciente_nome || doc.paciente || doc.nome || '').trim();
+  },
+  /* O QUE JÁ FOI FEITO SE CONFERE NO REGISTRO, não na lembrança de ter
+     clicado: um clique pode ter aberto a tela e a pessoa ter desistido. Onde
+     não há como conferir (impressão não deixa rastro), vale o clique — e aí o
+     item diz "aberto", não "feito". */
+  _itens(mod, doc, feitos) {
+    const nome = fechamento._nomeDe(mod, doc);
+    const marcado = k => !!(feitos && feitos[k]);
+    const existe = (m) => { try { return !!linker.ultimoPorNome(m, nome, {}); } catch (e) { return false; } };
+    const itens = [];
+
+    const decisao = (() => { try { return fin.finalizacao.decisaoDe(doc); } catch (e) { return null; } })();
+    itens.push({
+      chave: 'financeiro', icone: '💰', rotulo: 'Lançamento financeiro',
+      feito: decisao !== null,
+      estado: decisao === true ? 'lançamento gerado' : decisao === false ? 'decidido: não gerar' : '',
+      acao: () => { try { fin.finalizacao.abrir(mod, doc, () => fechamento.marcar('financeiro')); } catch (e) {} }
+    });
+
+    itens.push({
+      chave: 'impressao', icone: '🖨️', rotulo: 'Visualizar / imprimir',
+      feito: marcado('impressao'), estado: marcado('impressao') ? 'aberto' : '',
+      acao: () => { fechamento.marcar('impressao'); try { printPreview.abrir(); } catch (e) {} }
+    });
+
+    if (mod === 'pre' || mod === 'consulta') {
+      itens.push({
+        chave: 'termo', icone: '📝', rotulo: 'Termo de consentimento (TCLE)',
+        feito: existe('termo'), estado: existe('termo') ? 'já existe um para este paciente' : '',
+        acao: () => { fechamento.marcar('termo'); try { pre._iniciarTermo(doc._id); } catch (e) {} }
+      });
+    }
+    if (mod === 'pre') {
+      itens.push({
+        chave: 'ficha', icone: '➡️', rotulo: 'Abrir a ficha de anestesia',
+        feito: existe('anestesia'), estado: existe('anestesia') ? 'já existe uma para este paciente' : '',
+        acao: () => { fechamento.marcar('ficha'); try { pre.irParaFicha(); } catch (e) {} }
+      });
+    }
+    if (mod === 'anestesia') {
+      itens.push({
+        chave: 'termo', icone: '📝', rotulo: 'Termo de consentimento (TCLE)',
+        feito: existe('termo'), estado: existe('termo') ? 'já existe um para este paciente' : '',
+        acao: () => { fechamento.marcar('termo'); try { ui.navegar('termo'); } catch (e) {} }
+      });
+      itens.push({
+        chave: 'srpa', icone: '🛏️', rotulo: 'Recuperação pós-anestésica (SRPA)',
+        feito: existe('recuperacao'), estado: existe('recuperacao') ? 'já registrada' : '',
+        acao: () => { fechamento.marcar('srpa'); try { anestesia._perguntarSRPA(doc); } catch (e) {} }
+      });
+    }
+    return itens;
+  },
+
+  abrir(mod, id) {
+    const doc = store.getById(mod, id);
+    if (!doc) return;
+    const anterior = fechamento._ler();
+    const feitos = (anterior && anterior.mod === mod && anterior.id === id) ? (anterior.feitos || {}) : {};
+    fechamento._gravar({ mod, id, nome: fechamento._nomeDe(mod, doc), feitos, em: new Date().toISOString() });
+    fechamento._render();
+  },
+  reabrir() { const st = fechamento._ler(); if (st) fechamento._render(); },
+  marcar(chave) {
+    const st = fechamento._ler(); if (!st) return;
+    st.feitos = st.feitos || {};
+    st.feitos[chave] = true;
+    fechamento._gravar(st);
+  },
+  concluir() {
+    fechamento._gravar(null);
+    try { modal.close(); } catch (e) {}
+    toast('✅ Atendimento fechado.');
+  },
+
+  _render() {
+    const st = fechamento._ler(); if (!st) return;
+    const doc = store.getById(st.mod, st.id);
+    if (!doc) { fechamento._gravar(null); return; }
+    const itens = fechamento._itens(st.mod, doc, st.feitos);
+    const prontos = itens.filter(i => i.feito).length;
+    const esc = utils.escapeHTML;
+    const html =
+      '<p style="font-size:.88rem;margin:0 0 4px"><b>' + esc(st.nome || 'Atendimento') + '</b> — ' +
+      esc(printPreview._infoLabel ? (printPreview._infoLabel(st.mod) || st.mod) : st.mod) + ' finalizada.</p>' +
+      '<p style="font-size:.8rem;color:var(--text-soft);margin:0 0 12px">' + prontos + ' de ' + itens.length +
+      ' concluído(s). Faça quantos precisar — esta lista continua aqui até você dizer que acabou.</p>' +
+      itens.map((i, k) =>
+        '<button type="button" class="btn" style="display:flex;width:100%;align-items:center;gap:10px;text-align:left;margin:0 0 7px;padding:11px 13px' +
+        (i.feito ? ';opacity:.72' : '') + '" onclick="fechamento._executar(' + k + ')">' +
+        '<span style="font-size:1.15rem">' + (i.feito ? '✅' : i.icone) + '</span>' +
+        '<span style="flex:1;min-width:0"><b>' + esc(i.rotulo) + '</b>' +
+        (i.estado ? '<br><small style="color:var(--text-mute)">' + esc(i.estado) + '</small>' : '') + '</span>' +
+        '<span style="color:var(--text-mute);font-size:.8rem">' + (i.feito ? 'refazer' : 'fazer') + '</span></button>').join('');
+    fechamento._itensAtuais = itens;
+    modal.open('🏁 Fechamento do atendimento', html,
+      '<button class="btn btn-primary" onclick="fechamento.concluir()">Concluído</button>' +
+      '<button class="btn btn-ghost" onclick="modal.close()">Agora não</button>');
+  },
+  _itensAtuais: [],
+  _executar(k) {
+    const item = (fechamento._itensAtuais || [])[k];
+    if (!item) return;
+    try { modal.close(); } catch (e) {}
+    try { item.acao(); } catch (e) { console.warn('fechamento', e); }
+  },
+
+  /* A faixa existe para ninguém esquecer um atendimento pela metade: fechar o
+     painel esconde, não cancela. */
+  _pintarFaixa() {
+    try {
+      const antiga = document.getElementById('fechamento-faixa');
+      if (antiga) antiga.remove();
+      const st = fechamento._ler(); if (!st) return;
+      const doc = store.getById(st.mod, st.id); if (!doc) return;
+      const itens = fechamento._itens(st.mod, doc, st.feitos);
+      const prontos = itens.filter(i => i.feito).length;
+      const div = document.createElement('div');
+      div.id = 'fechamento-faixa';
+      div.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:14px;z-index:900;' +
+        'display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--primary);' +
+        'border-radius:999px;box-shadow:0 6px 20px -6px rgba(0,0,0,.3);padding:7px 9px 7px 15px;font-size:.84rem';
+      div.innerHTML = '<span>🏁 Fechando <b>' + utils.escapeHTML(st.nome || 'atendimento') + '</b> · ' +
+        prontos + '/' + itens.length + '</span>' +
+        '<button type="button" class="btn btn-xs btn-primary" onclick="fechamento.reabrir()">Retomar</button>' +
+        '<button type="button" class="btn btn-xs" onclick="fechamento.concluir()">Concluído</button>';
+      document.body.appendChild(div);
+    } catch (e) {}
+  }
+};
+
 const pdfBackup = {
   /* ---------- Configuração (Ajustes → Backup de PDFs) ---------- */
   CFG_KEY: 'medsys.v7.pdfbackup.cfg',
@@ -37565,7 +37792,7 @@ const anestesia = {
        nunca via a pergunta) */
     const jaTemSrpa = docCompleto && docCompleto._links && docCompleto._links.recuperacao_id;
     if (finalizar && !jaTemSrpa) {
-      setTimeout(() => anestesia._perguntarSRPA(docCompleto), 300);
+      try { fechamento.abrir('anestesia', docCompleto._id); } catch (e) {}
     }
   },
   /* Confere itens clínicos importantes antes de finalizar; retorna avisos. */
@@ -38804,6 +39031,12 @@ const fin = {
        das duas sumir sem aviso — e a que sumiria é justamente a da cobrança.
        Espera a vez. */
     abrirQuandoLivre(mod, doc, aoFechar, tentativa) {
+      /* NÃO SE DISPUTA MAIS A JANELA. Enquanto houver um fechamento aberto para
+         este atendimento, a cobrança é um ITEM dele — e quem decide a ordem é a
+         pessoa, não qual laço de espera acordar primeiro. Era essa corrida
+         entre duas janelas (esta, 120 tentativas de 800 ms; a do termo/SRPA, 40
+         de 1500 ms) que fazia o encaminhamento "às vezes não ir". */
+      try { if (fechamento.ativo()) return; } catch (e) {}
       let ocupado = false;
       try {
         const bd = document.getElementById('modal-backdrop');
@@ -43038,12 +43271,40 @@ const financeiro = {
     MAX_BYTES: 2 * 1024 * 1024,   // 2 MB por arquivo (após redimensionar)
     MAX_DIM: 1600,                // maior dimensão após redimensionar
 
+    MAX_PDF: 8 * 1024 * 1024,     // PDF não se recomprime: o limite é maior
+
+    /* COMPROVANTE CHEGA EM PDF. Guia de convênio, demonstrativo de pagamento,
+       relatório de glosa — quase tudo o que o plano manda vem em PDF, e aqui só
+       entrava imagem. Quem tinha o PDF precisava imprimir e fotografar para
+       anexar a prova da própria cobrança. */
     adicionarArquivos(fileList) {
-      const files = Array.from(fileList || []);
-      files.forEach(file => {
-        if (!file.type.startsWith('image/')) { toast('Apenas imagens são aceitas', 'warn'); return; }
-        financeiro.anexos._processar(file);
+      Array.from(fileList || []).forEach(file => {
+        const tipo = String(file.type || '').toLowerCase();
+        if (tipo === 'application/pdf' || /\.pdf$/i.test(file.name || '')) { financeiro.anexos._processarPdf(file); return; }
+        if (tipo.startsWith('image/')) { financeiro.anexos._processar(file); return; }
+        toast('Só entram imagens e PDF.', 'warn');
       });
+    },
+    _processarPdf(file) {
+      if (file.size > financeiro.anexos.MAX_PDF) {
+        toast('PDF muito grande (máximo 8 MB). Reduza o arquivo e anexe de novo.', 'error');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = e => {
+        const dataurl = String(e.target.result || '');
+        financeiro.anexos._lista.push({
+          attachment_id: prontuario._novoId(),
+          nome: file.name || ('documento_' + Date.now() + '.pdf'),
+          tipo: 'pdf', mime_type: 'application/pdf', categoria: 'Comprovante',
+          data: utils.hojeISO(), dataurl, tamanho: file.size
+        });
+        financeiro.anexos.render();
+        markDirty();
+        toast('📎 PDF anexado');
+      };
+      reader.onerror = () => toast('Erro ao ler o PDF', 'error');
+      reader.readAsDataURL(file);
     },
 
     _processar(file) {
@@ -43103,8 +43364,14 @@ const financeiro = {
         src = await prontuario._signedUrl(a.storage_path);
       }
       if (!src) { toast('Anexo indisponível neste aparelho — verifique a conexão', 'warn'); return; }
+      const ehPdf = String(a.mime_type || '').toLowerCase() === 'application/pdf' || a.tipo === 'pdf';
       modal.open('📎 ' + utils.escapeHTML(a.nome),
-        `<img src="${utils.escapeAttr(src)}" style="max-width:100%;height:auto;border-radius:8px">`,
+        ehPdf
+          /* Um PDF de guia tem páginas; mostrá-lo numa caixinha não serve. Em
+             tela cheia dentro da janela, e com saída para abrir à parte. */
+          ? `<iframe src="${utils.escapeAttr(src)}" style="width:100%;height:68vh;border:1px solid var(--border);border-radius:8px"></iframe>`
+          : `<img src="${utils.escapeAttr(src)}" style="max-width:100%;height:auto;border-radius:8px">`,
+        (ehPdf ? `<a class="btn" href="${utils.escapeAttr(src)}" target="_blank" rel="noopener">Abrir em outra aba</a>` : '') +
         `<button class="btn" onclick="modal.close()">Fechar</button>`);
     },
 
@@ -43113,10 +43380,14 @@ const financeiro = {
       if (!host) return;
       if (!financeiro.anexos._lista.length) { host.innerHTML = ''; return; }
       host.innerHTML = financeiro.anexos._lista.map((a, i) => {
-        const previa = a.thumb || a.dataurl || '';
-        const imagem = previa
-          ? `<img src="${utils.escapeAttr(previa)}" onclick="financeiro.anexos.ver(${i})" title="Ver ampliado">`
-          : `<button type="button" class="btn btn-xs" onclick="financeiro.anexos.ver(${i})" title="Abrir da nuvem">☁️ Ver</button>`;
+        /* PDF não entra num <img>: a prévia sairia quebrada. */
+        const ehPdf = String(a.mime_type || '').toLowerCase() === 'application/pdf' || a.tipo === 'pdf';
+        const previa = ehPdf ? '' : (a.thumb || a.dataurl || '');
+        const imagem = ehPdf
+          ? `<button type="button" class="btn btn-xs" onclick="financeiro.anexos.ver(${i})" title="Abrir o PDF">📄 PDF</button>`
+          : previa
+            ? `<img src="${utils.escapeAttr(previa)}" onclick="financeiro.anexos.ver(${i})" title="Ver ampliado">`
+            : `<button type="button" class="btn btn-xs" onclick="financeiro.anexos.ver(${i})" title="Abrir da nuvem">☁️ Ver</button>`;
         return `
         <div class="fin-anexo-item">
           ${imagem}
@@ -44172,10 +44443,120 @@ const financeiro = {
             <strong>📊 Análise por código TUSS</strong><br>
             <small style="color:var(--text-soft)">Quais códigos sofrem mais glosas</small>
           </button>
+          <button class="btn" onclick="modal.close(); financeiro.relatorioProducao()" style="text-align:left;padding:14px;border-left:3px solid var(--accent)">
+            <strong>🩺 Produção do mês</strong><br>
+            <small style="color:var(--text-soft)">Quanto foi produzido num mês — da clínica inteira ou de um médico específico</small>
+          </button>
         </div>
       </div>
     `;
     modal.open('📊 Relatórios de conciliação', html, '');
+  },
+
+  /* ==========================================================================
+     PRODUÇÃO DO MÊS — DA CLÍNICA OU DE UM MÉDICO
+     --------------------------------------------------------------------------
+     "Relatório de produção, e o usuário seleciona o mês que quer. Lembrando que
+      pode ser do médico (ex.: Marcelo) ou da clínica, pois num ambiente pode
+      haver mais de um médico."
+
+     A quem pertence um caso é a parte difícil, e ela já estava resolvida no
+     Dashboard: o profissional vem antes de quem digitou (a secretária prepara,
+     o médico atende); quem conferiu o pré-lançamento é dono; e o mesmo nome
+     aparece como "Marcelo Pandolfi Caliman", "Marcelo Caliman" e "Dr. Marcelo
+     P. Caliman". Escrever essa regra de novo aqui seria garantir que o
+     Dashboard e o relatório dessem números diferentes para a mesma pergunta —
+     e aí nenhum dos dois serve. O relatório CHAMA a regra de lá.
+  ========================================================================== */
+  _medicosConhecidos() {
+    const nomes = new Map();
+    const por = v => {
+      const t = String(v == null ? '' : v).trim();
+      if (t.length < 3) return;
+      const k = t.toLowerCase();
+      if (!nomes.has(k)) nomes.set(k, t);
+    };
+    (store.list('cad_profissionais') || []).forEach(p => { if (p && p.nome) por(p.nome); });
+    (store.list('cad_anestesistas') || []).forEach(p => { if (p && p.nome) por(p.nome); });
+    ['financeiro', 'anestesia'].forEach(m => (store.list(m) || []).forEach(it => {
+      if (!it) return;
+      [it.anestesista, it.anestesiologista, it.profissional, it.responsavel].forEach(por);
+    }));
+    return Array.from(nomes.values()).sort((a, b) => a.localeCompare(b));
+  },
+  relatorioProducao() {
+    const hoje = new Date();
+    const mesAtual = hoje.getFullYear() + '-' + String(hoje.getMonth() + 1).padStart(2, '0');
+    const medicos = financeiro._medicosConhecidos();
+    modal.open('🩺 Produção do mês',
+      '<div class="grid" style="margin:0">' +
+      '<div class="field col-6"><label>Mês</label><input type="month" id="prod-mes" value="' + mesAtual + '"></div>' +
+      '<div class="field col-6"><label>De quem</label><select id="prod-quem">' +
+      '<option value="">🏥 Toda a clínica</option>' +
+      medicos.map(n => '<option value="' + utils.escapeHTML(n) + '">🩺 ' + utils.escapeHTML(n) + '</option>').join('') +
+      '</select></div></div>' +
+      '<p style="font-size:.79rem;color:var(--text-soft);margin:6px 0 0">Conta pela <b>data do procedimento</b> — produção é quando o ato aconteceu. ' +
+      'Um caso sem profissional registrado entra na clínica, e não é atribuído a ninguém por palpite.</p>' +
+      '<div id="prod-saida" style="margin-top:12px"></div>',
+      '<button class="btn btn-primary" onclick="financeiro._producaoCalcular()">Calcular</button>' +
+      '<button class="btn" onclick="financeiro._producaoCsv()">📊 Baixar CSV</button>' +
+      '<button class="btn btn-ghost" onclick="modal.close()">Fechar</button>');
+    financeiro._producaoCalcular();
+  },
+  _producaoLista() {
+    const mes = (document.getElementById('prod-mes') || {}).value || '';
+    const quem = (document.getElementById('prod-quem') || {}).value || '';
+    if (!mes) return { mes, quem, lista: [] };
+    const de = mes + '-01';
+    const [a, m] = mes.split('-').map(Number);
+    const ultimo = new Date(a, m, 0).getDate();
+    const ate = mes + '-' + String(ultimo).padStart(2, '0');
+    let lista = financeiro.lancamentosDoPeriodo(de, ate, 'proc');
+    if (quem) { try { lista = dashboard._filtrarDeAlguem(lista, quem); } catch (e) {} }
+    return { mes, quem, de, ate, lista };
+  },
+  _producaoCalcular() {
+    const host = document.getElementById('prod-saida'); if (!host) return;
+    const { lista, quem } = financeiro._producaoLista();
+    if (!lista.length) {
+      host.innerHTML = '<p style="font-size:.86rem;color:var(--danger)">Nenhum procedimento neste mês' +
+        (quem ? ' para ' + utils.escapeHTML(quem) : '') + '.</p>';
+      return;
+    }
+    const n = v => parseFloat(v) || 0;
+    const fmt = v => 'R$ ' + Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    let prev = 0, rec = 0, glo = 0;
+    const porConv = new Map();
+    lista.forEach(x => {
+      const p = n(x.valor_previsto), r = n(x.valor_recebido), g = n(x.glosa);
+      prev += p; rec += r; glo += g;
+      const c = String(x.convenio || x.plano || 'Sem convênio').trim() || 'Sem convênio';
+      const atual = porConv.get(c) || { n: 0, prev: 0, rec: 0, glo: 0 };
+      atual.n++; atual.prev += p; atual.rec += r; atual.glo += g;
+      porConv.set(c, atual);
+    });
+    const cartao = (rot, val, cor) =>
+      '<div style="flex:1;min-width:120px;background:var(--surface-alt);border:1px solid var(--border);border-radius:8px;padding:9px 11px">' +
+      '<div style="font-size:.7rem;color:var(--text-mute);text-transform:uppercase;letter-spacing:.4px">' + rot + '</div>' +
+      '<div style="font-size:1.02rem;font-weight:700' + (cor ? ';color:' + cor : '') + '">' + val + '</div></div>';
+    host.innerHTML =
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">' +
+      cartao('Procedimentos', lista.length) + cartao('Previsto', fmt(prev)) +
+      cartao('Recebido', fmt(rec), 'var(--accent)') + cartao('Glosa', fmt(glo), 'var(--danger)') +
+      cartao('A receber', fmt(prev - rec - glo)) + '</div>' +
+      '<table class="dash-detail-table" style="margin:0"><thead><tr><th>Convênio</th>' +
+      '<th style="text-align:right">Proc.</th><th style="text-align:right">Previsto</th>' +
+      '<th style="text-align:right">Recebido</th><th style="text-align:right">Glosa</th></tr></thead><tbody>' +
+      Array.from(porConv.entries()).sort((x, y) => y[1].prev - x[1].prev).map(([c, v]) =>
+        '<tr><td>' + utils.escapeHTML(c) + '</td><td style="text-align:right">' + v.n +
+        '</td><td style="text-align:right">' + fmt(v.prev) + '</td><td style="text-align:right">' + fmt(v.rec) +
+        '</td><td style="text-align:right">' + fmt(v.glo) + '</td></tr>').join('') +
+      '</tbody></table>';
+  },
+  _producaoCsv() {
+    const { lista, de, ate, quem } = financeiro._producaoLista();
+    if (!lista.length) { toast('Nenhum procedimento neste mês' + (quem ? ' para ' + quem : '') + '.', 'warn'); return; }
+    financeiro.csvAuditoria(lista, de, ate, 'proc');
   },
 
   /* Gera relatório expandido — "explode" cada registro em suas linhas de códigos */
