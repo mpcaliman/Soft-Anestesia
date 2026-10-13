@@ -1,19 +1,30 @@
 name: Publicar no GitHub Pages
-run-name: Publicar ${{ inputs.source_sha }} — ${{ inputs.authorization }}
+run-name: Publicar ${{ inputs.source_sha || 'main' }}${{ inputs.authorization && format(' — {0}', inputs.authorization) || '' }}
 
-# Publica somente o pacote público por autorização G5 explícita. O commit deve
-# estar em main e ter uma execução push da CI concluída com sucesso.
-
+# Publica somente o pacote público, e somente por decisão de Marcelo. O commit
+# tem de estar em main e ter uma execução push da CI concluída com sucesso.
+#
+# POR QUE OS CAMPOS DEIXARAM DE SER OBRIGATÓRIOS
+# Publicar exigia colar à mão um SHA de 40 caracteres e inventar um código
+# "G5-...". Na prática isso não decidia nada — a decisão é apertar o botão —,
+# mas custava uma ida ao histórico de commits a cada correção, e um SHA
+# desatualizado fazia a execução ser recusada depois de 14 segundos, parecendo
+# falha. Agora, em branco, publica o HEAD atual de main.
+#
+# O QUE NÃO MUDOU, E É O QUE IMPORTA: continua sendo disparo manual, só da
+# conta de Marcelo, só a partir de main, e só de um commit cuja CI passou —
+# CI que agora inclui os 260 testes clínicos. Quem quiser publicar um commit
+# específico (voltar a uma versão anterior, por exemplo) preenche source_sha.
 on:
   workflow_dispatch:
     inputs:
       source_sha:
-        description: "SHA completo (40 caracteres) já aprovado pela CI em main"
-        required: true
+        description: "Opcional — SHA completo a publicar. Em branco, publica o topo de main."
+        required: false
         type: string
       authorization:
-        description: "Referência da autorização de Marcelo (formato G5-cartao)"
-        required: true
+        description: "Opcional — referência da sua autorização, para o registro (formato G5-...)"
+        required: false
         type: string
 
 permissions:
@@ -35,23 +46,35 @@ jobs:
       SOURCE_SHA: ${{ inputs.source_sha }}
       AUTHORIZATION: ${{ inputs.authorization }}
     steps:
-      - name: Baixar exatamente o commit autorizado
+      - name: Baixar o commit a publicar
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # actions/checkout@v4
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ inputs.source_sha || 'main' }}
           fetch-depth: 0
-      - name: Confirmar autorização, main e CI aprovada
+      - name: Confirmar main e CI aprovada
         shell: bash
         run: |
+          git fetch --no-tags origin main
+          # Em branco significa "publique o que está pronto em main". A conferência
+          # seguinte continua valendo para os dois caminhos: o commit TEM de ser o
+          # topo de main e TEM de ter CI aprovada.
+          if [[ -z "$SOURCE_SHA" ]]; then
+            SOURCE_SHA="$(git rev-parse origin/main)"
+            echo "Publicando o topo de main: $SOURCE_SHA"
+          fi
+          # exportado porque o bloco Node e a chamada ao gh abaixo leem do ambiente
+          export SOURCE_SHA
           if [[ ! "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
             echo "source_sha deve ser um SHA completo em minúsculas" >&2
             exit 1
           fi
-          if [[ ! "$AUTHORIZATION" =~ ^G5-[A-Za-z0-9._/-]+$ ]]; then
-            echo "authorization deve seguir o formato G5-cartao" >&2
+          # A referência é registro, não tranca: a decisão é o disparo manual
+          # desta execução, pela conta do proprietário. Se vier, tem de ser bem
+          # formada; se não vier, a execução fica registrada do mesmo jeito.
+          if [[ -n "$AUTHORIZATION" && ! "$AUTHORIZATION" =~ ^G5-[A-Za-z0-9._/-]+$ ]]; then
+            echo "authorization, quando informada, segue o formato G5-cartao" >&2
             exit 1
           fi
-          git fetch --no-tags origin main
           test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
           node --input-type=module <<'JS'
           import { readFileSync } from 'node:fs';

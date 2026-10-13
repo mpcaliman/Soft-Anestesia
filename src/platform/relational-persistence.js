@@ -613,6 +613,21 @@ const cloudRel = {
          será tratada como conflito; C2 a preserva também no servidor. */
       const localSemBase = !vl && !local._relUpdatedAt;
       if (cloudRel._abertoNaTela(item._id, mod) || cloudRel._temPendente(mod, item._id) || localSemBase) {
+        /* CONFLITO PRESSUPÕE DIVERGÊNCIA.
+           Isto preservava os dois lados sempre que a versão remota chegava mais
+           nova com o registro aberto na tela — sem olhar se havia o que decidir.
+           Retificar uma pré três vezes seguidas produzia três "conflitos
+           preservados" cujo `changedFields` era `[]`: a nuvem e o aparelho
+           tinham exatamente o mesmo conteúdo, e a janela pedia que se
+           escolhesse entre uma coisa e ela mesma.
+           Quando nada diverge não há escolha a fazer: fica a versão da nuvem,
+           que é a que traz o carimbo de versão e o recibo. A proteção continua
+           inteira para o caso que importa — havendo UM campo diferente, os dois
+           lados são preservados como antes. */
+        if (!cloudRel._camposDivergentes(local, item).length) {
+          locais[i] = item; entraram.push(item._id); res.atualizados++;
+          return;
+        }
         cloudRel.registrarConflito(mod, local, item, { motivo: 'pull_com_edicao_local' });
         res.adiados++;
         return;
@@ -1202,6 +1217,17 @@ const cloudRel = {
     for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
     return (h >>> 0).toString(36) + ':' + s.length;
   },
+  /* Os campos que de fato divergem entre duas versões do mesmo registro.
+     Os técnicos (`_*`) ficam de fora de propósito: são carimbos de transporte
+     — versão, recibo, hora do servidor —, e duas cópias do mesmo conteúdo
+     clínico diferem neles o tempo todo sem que nada tenha mudado.
+     Esta é a MESMA conta que descreve o conflito (`changedFields`) e que decide
+     se existe conflito; serem a mesma função é o que impede uma janela pedindo
+     escolha entre duas versões idênticas. */
+  _camposDivergentes(a, b) {
+    return Array.from(new Set(Object.keys(a || {}).concat(Object.keys(b || {}))))
+      .filter(k => k[0] !== '_' && JSON.stringify(a && a[k]) !== JSON.stringify(b && b[k]));
+  },
   registrarConflito(mod, local, nuvem, opts = {}) {
     try {
       const tabela = opts.tabela || cloudRel.tabelaDoModulo(mod) || 'drafts';
@@ -1215,8 +1241,7 @@ const cloudRel = {
         cloudRel._hashConflito(local), cloudRel._hashConflito(nuvem)].join('|');
       const existente = cloudRel._conflitosLer().find(x => x.status === 'pending' && x.fingerprint === fingerprint);
       if (existente) { cloudRel._enviarConflito(existente); return existente; }
-      const changedFields = Array.from(new Set(Object.keys(local || {}).concat(Object.keys(nuvem || {}))))
-        .filter(k => k[0] !== '_' && JSON.stringify(local && local[k]) !== JSON.stringify(nuvem && nuvem[k]));
+      const changedFields = cloudRel._camposDivergentes(local, nuvem);
       const entry = {
         clientId: utils.uid(), ownerId,
         organizationId: opts.organizationId || (local && local._relOrg) || (nuvem && nuvem._relOrg) || cloudRel._org() || null,

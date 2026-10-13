@@ -34,6 +34,18 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Validar, construir e testar o pacote público
         run: npm run test:ci
+      # A SUÍTE CLÍNICA PRECISA RODAR AQUI, E ELA NÃO RODAVA.
+      # Em 12/10/2026 o app foi para produção com o login quebrado para TODO
+      # MUNDO — ninguém conseguia entrar — e esta CI passou verde. O motivo:
+      # `test:ci` cobre segurança, estrutura e fronteiras, mas os testes de
+      # COMPORTAMENTO CLÍNICO (pré, ficha, financeiro, impressão, retificação,
+      # isolamento entre clínicas, e a própria tela de entrada) vivem em
+      # tests/smoke.mjs e ficaram de fora quando a suíte foi reorganizada.
+      # "CI verde" passou a significar menos do que parecia, e foi assim que o
+      # defeito atravessou. Roda contra dist/ — o pacote que de fato se publica,
+      # não a árvore de desenvolvimento.
+      - name: Testes clínicos (suíte completa, contra o pacote publicável)
+        run: node tests/smoke.mjs --app-root=dist
       - name: Guardar pacote validado
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # actions/upload-artifact@v4
         with:
