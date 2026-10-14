@@ -19529,9 +19529,20 @@ await test('Em máquina compartilhada, fechar a aba e reabrir não deixa o atend
     out.abriuLimpo = depois.indexOf('subiu') < 0;
     out.naoPerdeuOQueNaoSubiu = depois.indexOf('naoSubiu') >= 0;
 
-    /* ---- FECHAR A ABA (pagehide) limpa também ---- */
+    /* ---- SAIR DE VISTA: O QUE DECIDE É O TEMPO FORA ----
+       Trocar de aplicativo por instantes NÃO é abandonar o computador — e no
+       celular `visibilitychange` dispara a cada troca. Limpar ali fazia 261
+       lançamentos sumirem da tela por olhar outro app dez segundos. O propósito
+       é o computador ABANDONADO, onde outra pessoa vai sentar. */
     store.setList('pre', [{ _id: 'novo', nome: 'Feito agora', _updatedAt: agora, _relUpdatedAt: agora }]);
     window.dispatchEvent(new Event('pagehide'));
+    window.dispatchEvent(new Event('pageshow'));
+    out.trocaDeAppNaoLimpa = (store.list('pre') || []).some(x => x._id === 'novo');
+
+    /* O mesmo caminho, fora de vista por mais tempo que o limite do aparelho. */
+    window.dispatchEvent(new Event('pagehide'));
+    sessionStorage.setItem(conexao.OCULTO_KEY, String(Date.now() - (auth._timeoutMs() + 60000)));
+    window.dispatchEvent(new Event('pageshow'));
     out.fecharAbaLimpa = !(store.list('pre') || []).some(x => x._id === 'novo');
 
     /* ---- tentar declarar o aparelho como pessoal não desliga a proteção ---- */
@@ -19540,6 +19551,8 @@ await test('Em máquina compartilhada, fechar a aba e reabrir não deixa o atend
     await __smokePrepareQueue('org-aaaa');
     store.setList('pre', [{ _id: 'meu', nome: 'Registro confirmado', _updatedAt: agora, _relUpdatedAt: agora }]);
     window.dispatchEvent(new Event('pagehide'));
+    sessionStorage.setItem(conexao.OCULTO_KEY, String(Date.now() - (auth._timeoutMs() + 60000)));
+    window.dispatchEvent(new Event('pageshow'));
     out.tentativaPessoalTambemLimpa = !(store.list('pre') || []).some(x => x._id === 'meu');
 
     modoNuvem.podeLigar = origPode;
@@ -19548,6 +19561,8 @@ await test('Em máquina compartilhada, fechar a aba e reabrir não deixa o atend
   });
   assert(r.abriuLimpo, 'na ABERTURA de uma máquina compartilhada, o que já está na nuvem sai antes de aparecer na tela');
   assert(r.naoPerdeuOQueNaoSubiu, 'e o que ainda não subiu continua ali — é a única cópia que existe, apagá-la seria perder atendimento');
+  assert(r.trocaDeAppNaoLimpa,
+    'trocar de aplicativo por instantes NÃO pode esvaziar a lista — no celular isso acontece o tempo todo');
   assert(r.fecharAbaLimpa, 'fechar a aba limpa também: num computador de hospital ninguém clica em Sair');
   assert(r.naoDesativou && r.tentativaPessoalTambemLimpa,
     'declarar o aparelho como pessoal não pode desativar a proteção multiusuário');

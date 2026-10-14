@@ -4830,7 +4830,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-14f</b><br>
+    v7.1 · build <b id="build-tag">2026-10-14g</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -12470,27 +12470,50 @@ const conexao = {
      • a limpeza NA ABERTURA cobre o resto — queda de energia, navegador
        morto, aba restaurada dias depois. Antes de mostrar qualquer coisa, o
        que já está na nuvem sai da máquina. */
+  OCULTO_KEY: 'medsys.v7.compart.oculto_em',
   blindarCompartilhado() {
     try {
       if (!ambiente.compartilhado()) return 0;
       /* na abertura: nada do atendimento anterior fica à vista */
       const n = modoNuvem.manutencao({ silent: true, dias: 0 });
-      const sair = () => {
+      /* QUEM MANDA É O TEMPO FORA, NÃO O EVENTO — a mesma lição do bloqueio.
+         A limpeza aqui tira do aparelho o que já subiu para a nuvem, e passou a
+         alcançar também o cache em memória (sem isso ela não limpava nada de
+         fato). Só que ela era disparada a CADA `visibilitychange`, e no celular
+         esse evento acontece toda vez que se troca de aplicativo: 261
+         lançamentos sumiam da tela por olhar o WhatsApp dez segundos. Foi
+         exatamente o defeito que consertei no bloqueio, repetido na linha de
+         baixo — e desta vez quem relatou foi o usuário, não um teste.
+
+         O propósito da limpeza é o computador ABANDONADO, onde outra pessoa vai
+         sentar. Dez segundos fora não é abandono. Então anota-se quando a tela
+         sumiu e, ao voltar, mede-se: passou do tempo de inatividade configurado
+         NESTE aparelho, limpa; não passou, não houve abandono nenhum.
+
+         Fechar de verdade continua coberto, e por outro caminho: a limpeza NA
+         ABERTURA roda antes de mostrar qualquer coisa. Era ela, aliás, a rede
+         principal — a de saída é a segunda. */
+      const limpar = () => {
         try { if (!ambiente.compartilhado()) return; } catch (e) { return; }
         try { modoNuvem.manutencao({ silent: true, dias: 0 }); } catch (e) {}
-        /* A LIMPEZA TEM DE ALCANÇAR A MEMÓRIA, E NÃO SÓ A GAVETA.
-           `manutencao` tira do armazenamento o que já subiu para a nuvem, mas o
-           app serve as listas de um cache em memória — que continuava com o
-           atendimento anterior inteiro. Enquanto a sessão caía junto no
-           `pagehide`, esse cache morria por tabela; ao parar de derrubar a
-           sessão a cada troca de aplicativo (o conserto do celular), ficou à
-           mostra que a limpeza dependia de um efeito colateral do logout.
-           Numa máquina de hospital é precisamente o que não pode sobrar: a aba
-           restaurada traria o paciente de quem usou antes. */
         try { store._memoria.clear(); } catch (e) {}
+        try { cloud._repintarTelaAtual(); } catch (e) {}
       };
-      window.addEventListener('pagehide', sair);
-      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') sair(); });
+      const marcar = () => { try { sessionStorage.setItem(conexao.OCULTO_KEY, String(Date.now())); } catch (e) {} };
+      const aoVoltar = () => {
+        let desde = 0;
+        try { desde = parseInt(sessionStorage.getItem(conexao.OCULTO_KEY), 10) || 0; } catch (e) {}
+        try { sessionStorage.removeItem(conexao.OCULTO_KEY); } catch (e) {}
+        if (!desde) return;
+        let limite = 5 * 60 * 1000;
+        try { limite = auth._timeoutMs() || limite; } catch (e) {}
+        if (Date.now() - desde >= limite) limpar();
+      };
+      window.addEventListener('pagehide', marcar);
+      window.addEventListener('pageshow', aoVoltar);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') marcar(); else aoVoltar();
+      });
       return n;
     } catch (e) { return 0; }
   },
