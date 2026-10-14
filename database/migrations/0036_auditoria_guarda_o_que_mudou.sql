@@ -111,8 +111,15 @@ begin
     v_new  := app.audit_diff(jo, jn, 'novo');
     v_prev := app.audit_diff(jo, jn, 'anterior');
     /* Gravação que não mudou campo nenhum não vira linha de auditoria: ela não
-       registra ato nenhum, e o auto-save produz várias assim. */
-    if v_new is null or v_new = '{}'::jsonb then return null; end if;
+       registra ato nenhum, e o auto-save produz várias assim. Também não vira
+       linha a gravação em que só mexeu o maquinário — `updated_at` e `version`
+       mudam a cada toque do auto-save e a cada CAS, sem que nada do prontuário
+       tenha mudado. Uma auditoria com centenas de "update" cujo conteúdo é um
+       carimbo de hora é uma auditoria mais difícil de ler, não mais completa.
+       Quando o conteúdo muda de verdade, os dois carimbos continuam na linha,
+       porque aí eles situam o ato no tempo. */
+    if v_new is null
+       or (v_new - 'updated_at' - 'version') = '{}'::jsonb then return null; end if;
   else
     /* insert, finalize, delete, restore: o estado inteiro, que é o que vale
        como prova nesses quatro. */

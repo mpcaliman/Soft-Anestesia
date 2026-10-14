@@ -19986,6 +19986,68 @@ await test('Conflito vazio não nasce em pacientes/agenda, e o que já nasceu sa
   assert(r.limpouUm, 'a limpeza em massa resolve o que nunca foi conflito');
   assert(r.sobrouOReal, 'e nunca encosta no que tem campo divergente — esse continua esperando decisão');
   assert(r.nadaMaisALimpar, 'rodar de novo não faz nada: a limpeza não é um varredor de lista');
+
+  /* ---- A LIMPEZA NÃO PODE DERRUBAR O SERVIDOR ----
+     A versão anterior disparava uma requisição por conflito dentro de um
+     forEach sem espera. Com as 774 sobras reais isso virava 774 PATCH no mesmo
+     instante — e o projeto Supabase foi ao chão por CPU, em produção, no meio
+     do atendimento. O teste mede a CONCORRÊNCIA observada, não o total: o
+     número de recibos continua o mesmo, o que não pode é todos juntos. */
+  const rajada = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-rajada');
+    try { cofre._real.removeItem(cloudRel.CONFLITOS_KEY + '@org-rajada'); } catch (e) {}
+    try { cloudRel._limparConflitosMemoria(); } catch (e) {}
+
+    for (let i = 0; i < 40; i++) {
+      const base = { _id: 'pac-r' + i, nome: 'Igual ' + i, nascimento: '1980-01-01' };
+      cloudRel.registrarConflito('pacientes',
+        Object.assign({}, base, { _relUpdatedAt: '2026-10-13T10:00:00.000Z' }),
+        Object.assign({}, base, { _relUpdatedAt: '2026-10-13T10:05:00.000Z', _relVersion: 2 }),
+        { motivo: 'pull_com_edicao_local' });
+    }
+    out.nasceram = cloudRel.conflitosSemDivergencia().length;
+
+    /* Marca como já conhecidos do servidor, que é o caso das sobras dele, e
+       troca o envio por um medidor. */
+    const todos = cloudRel._conflitosLer();
+    todos.forEach(x => { x.synced = true; cloudRel._conflitoSalvar(x); });
+    let emVoo = 0, pico = 0, recibos = 0;
+    /* O portão de contexto (organização da aba) não é o que este teste mede:
+       sem nuvem configurada ele barraria o envio antes da medição. */
+    cloudRel._capturarContexto = () => ({ organizationId: 'org-rajada' });
+    cloudRel._enviandoDecisoes = false;
+    cloudRel._contextoValido = () => true;
+    cloudRel._resolverConflitoServidor = async () => {
+      emVoo++; pico = Math.max(pico, emVoo);
+      await new Promise(r => setTimeout(r, 5));
+      emVoo--; recibos++;
+      return true;
+    };
+    cloudRel._enviarConflito = cloudRel._resolverConflitoServidor;
+
+    const n = cloudRel.limparConflitosSemDivergencia();
+    out.decidiuTodos = n;
+    /* O que o usuário vê já está resolvido ANTES de qualquer resposta de rede:
+       a decisão é local, o recibo é consequência. */
+    out.listaLimpaNaHora = cloudRel.conflitosSemDivergencia().length;
+    out.emVooAoRetornar = emVoo;
+
+    await new Promise(r => setTimeout(r, 1200));
+    out.pico = pico;
+    out.recibos = recibos;
+
+    try { cofre._real.removeItem(cloudRel.CONFLITOS_KEY + '@org-rajada'); } catch (e) {}
+    try { cloudRel._limparConflitosMemoria(); } catch (e) {}
+    return out;
+  });
+  assert(rajada.nasceram === 40, 'o cenário exige as 40 sobras sem divergência');
+  assert(rajada.decidiuTodos === 40, 'a limpeza decide todas de uma vez — isso é o que ela promete');
+  assert(rajada.listaLimpaNaHora === 0, 'e a lista fica limpa na hora, sem esperar a nuvem responder');
+  assert(rajada.emVooAoRetornar <= 1,
+    'ao devolver o controle para a tela, no máximo UM recibo está em voo (estavam ' + rajada.emVooAoRetornar + ')');
+  assert(rajada.recibos === 40, 'todos os recibos sobem — adiar não é descartar (subiram ' + rajada.recibos + ')');
+  assert(rajada.pico <= 1, 'os recibos sobem UM DE CADA VEZ; pico observado: ' + rajada.pico);
   await page.close();
 });
 
