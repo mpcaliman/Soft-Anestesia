@@ -20141,7 +20141,7 @@ await test('Produção do mês: o vazio diz em que meses estão os lançamentos'
     store.setList('financeiro', [
       { _id: 'f1', paciente: 'A', data_proc: '2026-08-10', valor_previsto: 100 },
       { _id: 'f2', paciente: 'B', data_proc: '2026-08-22', valor_previsto: 200 },
-      { _id: 'f3', paciente: 'C', data_proc: '2026-10-02', valor_previsto: 300 }
+      { _id: 'f3', paciente: 'C', data_proc: '2026-10-02', valor_previsto: 777 }
     ]);
     financeiro.relatorioProducao();
     document.getElementById('prod-mes').value = '09';
@@ -20154,7 +20154,11 @@ await test('Produção do mês: o vazio diz em que meses estão os lançamentos'
     document.getElementById('prod-mes').value = '08';
     financeiro._producaoCalcular();
     const txt2 = (document.getElementById('prod-saida') || {}).textContent || '';
-    out.calculaCerto = /Procedimentos/.test(txt2) && /\b2\b/.test(txt2) && /300,00/.test(txt2) === false;
+    /* O valor do mês de OUTUBRO (777) não pode aparecer na conta de AGOSTO.
+       A primeira versão deste teste procurava por "300,00" como marca do que
+       não devia entrar — e 300 é justamente a soma de agosto (100 + 200). A
+       asserção reprovava o acerto. Valores distintos resolvem a ambiguidade. */
+    out.calculaCerto = /Procedimentos/.test(txt2) && /300,00/.test(txt2) && !/777/.test(txt2);
 
     /* O seletor é de listas, não um campo que cada aparelho desenha à sua
        maneira. */
@@ -20166,7 +20170,7 @@ await test('Produção do mês: o vazio diz em que meses estão os lançamentos'
   });
   assert(r.vazioTotal, 'sem lançamento nenhum, a tela aponta a quarentena como causa provável');
   assert(r.dizQueMeses, 'havendo lançamentos em outros meses, ela DIZ quais são e quantos');
-  assert(r.calculaCerto, 'e o mês que tem lançamento calcula normalmente, sem incluir os de outro mês');
+  assert(r.calculaCerto, 'agosto soma os seus dois lançamentos (300,00) e não traz o de outubro (777)');
   assert(r.selects, 'mês e ano são listas — não um campo que cada aparelho desenha de um jeito');
   await page.close();
 });
