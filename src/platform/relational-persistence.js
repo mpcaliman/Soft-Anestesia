@@ -1402,7 +1402,7 @@ const cloudRel = {
       return false;
     }
   },
-  resolverConflito(clientId, escolha, dados) {
+  resolverConflito(clientId, escolha, dados, opts) {
     const entry = cloudRel._conflitosLer().find(x => x && x.clientId === clientId);
     const org = contextoAba.organizationId();
     if (!entry || !org || entry.organizationId !== org) return false;
@@ -1412,6 +1412,12 @@ const cloudRel = {
       resolution: { escolha: escolha || 'merged', dados: cloudRel._clone(dados || {}), em: new Date().toISOString() }
     };
     cloudRel._conflitoSalvar(entry);
+    /* A decisão já está gravada aqui. `adiarEnvio` serve à resolução em massa:
+       mandar o recibo de cada uma no mesmo instante é o que produz a rajada
+       (uma requisição por conflito, centenas ao mesmo tempo). Quem adia fica
+       responsável por chamar `enviarDecisoes`, e, se a aba fechar antes, a
+       drenagem normal do sync envia — a decisão não se perde. */
+    if (opts && opts.adiarEnvio) return true;
     if (entry.synced) cloudRel._resolverConflitoServidor(entry);
     else cloudRel._enviarConflito(entry);
     return true;
@@ -1436,9 +1442,55 @@ const cloudRel = {
   limparConflitosSemDivergencia() {
     const alvo = cloudRel.conflitosSemDivergencia();
     let n = 0;
-    alvo.forEach(x => { if (cloudRel.resolverConflito(x.clientId, 'remote')) n++; });
+    /* Grava TODAS as decisões primeiro, sem rede. 774 sobras viram 774
+       gravações locais instantâneas — e nenhuma requisição ainda. */
+    alvo.forEach(x => { if (cloudRel.resolverConflito(x.clientId, 'remote', null, { adiarEnvio: true })) n++; });
+    if (n) cloudRel.enviarDecisoes();
     return n;
   },
+  /* OS RECIBOS, UM DE CADA VEZ.
+     A versão anterior disparava uma requisição por conflito dentro de um
+     forEach sem espera: centenas de PATCH simultâneos no mesmo segundo. Num
+     banco pequeno isso é um pico de CPU que derruba o projeto inteiro — e
+     derrubou. Aqui vai em série, com uma pausa curta entre lotes, porque esta
+     limpeza não tem urgência nenhuma: o resultado que o usuário vê já está
+     gravado no aparelho. Chamada concorrente não acontece: a segunda sai. */
+  async enviarDecisoes(opts = {}) {
+    if (cloudRel._enviandoDecisoes) return 0;
+    const limite = Math.max(1, Number(opts.limite) || 400);
+    const pausa = Math.max(0, opts.pausaMs == null ? 120 : Number(opts.pausaMs));
+    const espera = Math.max(1000, opts.esperaMs == null ? 20000 : Number(opts.esperaMs));
+    /* Requisição que nunca responde não pode travar a fila para sempre. Sem
+       este teto, uma conexão pendurada deixaria `_enviandoDecisoes` em true
+       pelo resto da sessão e nenhum recibo subiria mais — e a decisão, que é o
+       que importa, já está gravada no aparelho. Ela segue viva em segundo
+       plano; nós só paramos de esperar. */
+    const comTeto = (p) => Promise.race([
+      Promise.resolve(p).catch(() => false),
+      new Promise(r => setTimeout(() => r(false), espera))
+    ]);
+    cloudRel._enviandoDecisoes = true;
+    let enviados = 0;
+    try {
+      const contexto = cloudRel._capturarContexto();
+      if (!contexto) return 0;
+      const pendentes = cloudRel._conflitosLer()
+        .filter(x => x && x.status === 'pending' && x.resolutionRequested)
+        .slice(0, limite);
+      for (let i = 0; i < pendentes.length; i++) {
+        if (!cloudRel._contextoValido(contexto, contexto.organizationId)) break;
+        const entry = pendentes[i];
+        const ok = await comTeto(entry.synced
+          ? cloudRel._resolverConflitoServidor(entry)
+          : cloudRel._enviarConflito(entry));
+        if (ok) enviados++;
+        if (pausa && i % 5 === 4) await new Promise(r => setTimeout(r, pausa));
+      }
+    } catch (e) {
+    } finally { cloudRel._enviandoDecisoes = false; }
+    return enviados;
+  },
+  _enviandoDecisoes: false,
 
   _conflitoDaLinha(row) {
     if (!row || !row.client_conflict_id) return null;
@@ -1520,14 +1572,30 @@ const cloudRel = {
     return { enviados, recebidos, pendentes: cloudRel.conflitosPendentes() };
   },
   abrirConflitosPendentes() {
-    const lista = cloudRel._conflitosLer().filter(x => x.status === 'pending');
-    if (!lista.length) { toast('Não há conflitos pendentes.'); return; }
+    const todos = cloudRel._conflitosLer().filter(x => x.status === 'pending');
+    /* O que JÁ FOI DECIDIDO não volta para a fila de decisão. A decisão está
+       gravada; falta só o recibo da nuvem. Mostrá-los junto com os outros era
+       pedir a mesma escolha duas vezes e fazer a limpeza parecer que não
+       funcionou. */
+    const lista = todos.filter(x => !x.resolutionRequested);
+    const decididos = todos.length - lista.length;
+    const notaDecididos = decididos
+      ? '<div style="background:#eef6ee;border:1px solid #bcd9bc;color:#2f5130;border-radius:8px;padding:9px 11px;font-size:.82rem;margin:0 0 10px">' +
+        '<b>' + decididos + ' já decidido(s).</b> A escolha está gravada neste aparelho e sobe aos poucos, para não sobrecarregar o servidor. ' +
+        'Não precisa decidir de novo nem ficar nesta tela.</div>' : '';
+    if (!lista.length) {
+      if (decididos) modal.open('Conflitos', notaDecididos +
+        '<p style="font-size:.86rem;color:var(--text-soft)">Nada mais aguarda decisão sua.</p>',
+        '<button class="btn" onclick="modal.close()">Fechar</button>');
+      else toast('Não há conflitos pendentes.');
+      return;
+    }
     const vazios = cloudRel.conflitosSemDivergencia().length;
     const aviso = vazios ? '<div style="background:#fff4e5;border:1px solid #f0c890;color:#6f4617;border-radius:8px;padding:9px 11px;font-size:.82rem;margin:0 0 10px">' +
       '<b>' + vazios + ' destes ' + lista.length + ' não têm nenhum campo divergente.</b> São sobra dos laços já consertados: ' +
       'a nuvem e este aparelho têm o mesmo conteúdo, e não há o que escolher. Limpá-los deixa à vista o que de fato precisa de decisão.' +
       '<div style="margin-top:7px"><button class="btn btn-sm btn-primary" onclick="cloudRel._limparVaziosEReabrir()">🧹 Limpar os ' + vazios + ' sem divergência</button></div></div>' : '';
-    const corpo = aviso +
+    const corpo = notaDecididos + aviso +
       '<p style="font-size:.86rem;color:var(--text-soft)">As duas versões estão preservadas. Abra cada item e escolha com calma.</p>' +
       '<div style="max-height:55vh;overflow:auto">' + lista.map(x =>
         '<button class="btn" style="display:flex;width:100%;justify-content:space-between;margin:5px 0" onclick="cloudRel._abrirConflito(' + utils.jsArg(x.clientId) + ')">' +
@@ -1537,7 +1605,7 @@ const cloudRel = {
   },
   _limparVaziosEReabrir() {
     const n = cloudRel.limparConflitosSemDivergencia();
-    toast(n ? '🧹 ' + n + ' conflito(s) sem divergência resolvidos pela versão da nuvem' : 'Nada a limpar.', n ? 'success' : 'info');
+    toast(n ? '🧹 ' + n + ' conflito(s) sem divergência resolvidos pela versão da nuvem — a confirmação sobe aos poucos' : 'Nada a limpar.', n ? 'success' : 'info');
     try { modal.close(); } catch (e) {}
     try { cloudRel.abrirConflitosPendentes(); } catch (e) {}
   },

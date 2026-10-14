@@ -19986,6 +19986,68 @@ await test('Conflito vazio não nasce em pacientes/agenda, e o que já nasceu sa
   assert(r.limpouUm, 'a limpeza em massa resolve o que nunca foi conflito');
   assert(r.sobrouOReal, 'e nunca encosta no que tem campo divergente — esse continua esperando decisão');
   assert(r.nadaMaisALimpar, 'rodar de novo não faz nada: a limpeza não é um varredor de lista');
+
+  /* ---- A LIMPEZA NÃO PODE DERRUBAR O SERVIDOR ----
+     A versão anterior disparava uma requisição por conflito dentro de um
+     forEach sem espera. Com as 774 sobras reais isso virava 774 PATCH no mesmo
+     instante — e o projeto Supabase foi ao chão por CPU, em produção, no meio
+     do atendimento. O teste mede a CONCORRÊNCIA observada, não o total: o
+     número de recibos continua o mesmo, o que não pode é todos juntos. */
+  const rajada = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-rajada');
+    try { cofre._real.removeItem(cloudRel.CONFLITOS_KEY + '@org-rajada'); } catch (e) {}
+    try { cloudRel._limparConflitosMemoria(); } catch (e) {}
+
+    for (let i = 0; i < 40; i++) {
+      const base = { _id: 'pac-r' + i, nome: 'Igual ' + i, nascimento: '1980-01-01' };
+      cloudRel.registrarConflito('pacientes',
+        Object.assign({}, base, { _relUpdatedAt: '2026-10-13T10:00:00.000Z' }),
+        Object.assign({}, base, { _relUpdatedAt: '2026-10-13T10:05:00.000Z', _relVersion: 2 }),
+        { motivo: 'pull_com_edicao_local' });
+    }
+    out.nasceram = cloudRel.conflitosSemDivergencia().length;
+
+    /* Marca como já conhecidos do servidor, que é o caso das sobras dele, e
+       troca o envio por um medidor. */
+    const todos = cloudRel._conflitosLer();
+    todos.forEach(x => { x.synced = true; cloudRel._conflitoSalvar(x); });
+    let emVoo = 0, pico = 0, recibos = 0;
+    /* O portão de contexto (organização da aba) não é o que este teste mede:
+       sem nuvem configurada ele barraria o envio antes da medição. */
+    cloudRel._capturarContexto = () => ({ organizationId: 'org-rajada' });
+    cloudRel._enviandoDecisoes = false;
+    cloudRel._contextoValido = () => true;
+    cloudRel._resolverConflitoServidor = async () => {
+      emVoo++; pico = Math.max(pico, emVoo);
+      await new Promise(r => setTimeout(r, 5));
+      emVoo--; recibos++;
+      return true;
+    };
+    cloudRel._enviarConflito = cloudRel._resolverConflitoServidor;
+
+    const n = cloudRel.limparConflitosSemDivergencia();
+    out.decidiuTodos = n;
+    /* O que o usuário vê já está resolvido ANTES de qualquer resposta de rede:
+       a decisão é local, o recibo é consequência. */
+    out.listaLimpaNaHora = cloudRel.conflitosSemDivergencia().length;
+    out.emVooAoRetornar = emVoo;
+
+    await new Promise(r => setTimeout(r, 1200));
+    out.pico = pico;
+    out.recibos = recibos;
+
+    try { cofre._real.removeItem(cloudRel.CONFLITOS_KEY + '@org-rajada'); } catch (e) {}
+    try { cloudRel._limparConflitosMemoria(); } catch (e) {}
+    return out;
+  });
+  assert(rajada.nasceram === 40, 'o cenário exige as 40 sobras sem divergência');
+  assert(rajada.decidiuTodos === 40, 'a limpeza decide todas de uma vez — isso é o que ela promete');
+  assert(rajada.listaLimpaNaHora === 0, 'e a lista fica limpa na hora, sem esperar a nuvem responder');
+  assert(rajada.emVooAoRetornar <= 1,
+    'ao devolver o controle para a tela, no máximo UM recibo está em voo (estavam ' + rajada.emVooAoRetornar + ')');
+  assert(rajada.recibos === 40, 'todos os recibos sobem — adiar não é descartar (subiram ' + rajada.recibos + ')');
+  assert(rajada.pico <= 1, 'os recibos sobem UM DE CADA VEZ; pico observado: ' + rajada.pico);
   await page.close();
 });
 
@@ -20487,6 +20549,74 @@ await test('Busca clínica: acha dentro da ficha, mostra o trecho e diz em que c
   assert(r.semFalsoPositivo, 'quem não tem a palavra não aparece');
   assert(r.achouNaLista && r.campoDaLista, 'a lista de medicações administradas também é pesquisável');
   assert(r.vazioHonesto, 'sem achado, diz que não achou');
+  await page.close();
+});
+
+/* 275) Marcar etapa de faturamento numa ficha FINALIZADA tem de funcionar
+
+   "Nessa janela de pendência, ao determinar a ação não acontece nada."
+
+   E não acontecia mesmo. A trava central que protege ficha finalizada desvia
+   QUALQUER gravação para o caminho do adendo clínico — inclusive a marcação da
+   etapa de faturamento, que não é conteúdo clínico nenhum. Como a janela de
+   Pendências de convênio só lista fichas FINALIZADAS (é a condição para
+   entrarem nela), nenhuma marcação pegava. E falhava calado: a tela se
+   redesenhava igual, e a pessoa escolhia de novo achando que errara o clique.
+
+   O que este teste fixa, nas duas direções:
+   • o andamento da cobrança passa (não é o documento: não sai na impressão nem
+     entra na allowlist clínica da retificação);
+   • qualquer alteração CLÍNICA junto continua caindo no adendo — a defesa não
+     foi afrouxada, foi delimitada. */
+await test('Pendência de convênio: a etapa marca em ficha finalizada, e o clínico segue imutável', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-pend');
+    const hoje = new Date().toISOString().slice(0, 10);
+    store.setList('financeiro', []);
+    store.setList('anestesia', [{
+      _id: 'pf1', _finalizado: true, _finalizadoEm: new Date().toISOString(),
+      paciente: { nome: 'Fabiano Finalizado', convenio: 'Bradesco Saúde', senha: 'K3EK7V7' },
+      procedimento: { data: hoje, descricao: 'Colecistectomia' }
+    }]);
+
+    out.entraNaLista = pendencias.listar().some(p => p.id === 'pf1');
+
+    pendencias.marcarStatus('anestesia', 'pf1', 'faturado', true);
+    const d = store.getById('anestesia', 'pf1') || {};
+    out.marcou = !!(d._faturamento && d._faturamento.faturado);
+    out.deuBaixa = !!d._pendResolvida;
+    out.saiuDaLista = !pendencias.listar().some(p => p.id === 'pf1');
+    /* O documento clínico não pode ter mudado. */
+    out.clinicoIntacto = (d.procedimento || {}).descricao === 'Colecistectomia' &&
+      (d.paciente || {}).nome === 'Fabiano Finalizado' && d._finalizado === true;
+
+    /* A defesa continua de pé: alteração CLÍNICA numa ficha finalizada não
+       passa por esta porta. */
+    const tentativa = JSON.parse(JSON.stringify(store.getById('anestesia', 'pf1')));
+    tentativa.procedimento.descricao = 'OUTRA CIRURGIA';
+    tentativa._faturamento = Object.assign({}, tentativa._faturamento, { cobrado: new Date().toISOString() });
+    store.save('anestesia', tentativa);
+    const d2 = store.getById('anestesia', 'pf1') || {};
+    out.clinicoNaoPassou = (d2.procedimento || {}).descricao === 'Colecistectomia';
+
+    /* E em registro NÃO finalizado continua como sempre foi. */
+    store.setList('anestesia', [{ _id: 'pf2', paciente: { nome: 'Aberto', convenio: 'Amil' }, procedimento: { data: hoje } }]);
+    pendencias.marcarStatus('anestesia', 'pf2', 'cobrado', true);
+    const d3 = store.getById('anestesia', 'pf2') || {};
+    out.naoFinalizadoOk = !!(d3._faturamento && d3._faturamento.cobrado);
+
+    store.setList('anestesia', []); store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.entraNaLista, 'o cenário exige exatamente o caso real: ficha finalizada na lista de pendências');
+  assert(r.marcou, 'marcar a etapa de faturamento tem de gravar — era isto que não acontecia');
+  assert(r.deuBaixa && r.saiuDaLista, 'e a pendência sai da lista, que é o ponto de marcar');
+  assert(r.clinicoIntacto, 'sem tocar no documento clínico');
+  assert(r.clinicoNaoPassou,
+    'alteração clínica numa ficha finalizada continua recusada — a defesa foi delimitada, não afrouxada');
+  assert(r.naoFinalizadoOk, 'em ficha aberta, nada muda em relação a antes');
   await page.close();
 });
 

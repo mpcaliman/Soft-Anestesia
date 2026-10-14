@@ -4830,7 +4830,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-14g</b><br>
+    v7.1 · build <b id="build-tag">2026-10-14i</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -21047,6 +21047,16 @@ const pendencias = {
   marcarStatusSel(mod, id, statusKey) {
     if (!statusKey) return;
     pendencias.marcarStatus(mod, id, statusKey, true);
+    /* CONFERE QUE PEGOU. Este caminho falhou em silêncio por semanas: a
+       gravação era recusada por ser ficha finalizada, a tela se redesenhava
+       igual e a pessoa escolhia a etapa de novo, achando que não tinha clicado
+       direito. Recusa que não se anuncia é pior que erro — não dá nem para
+       relatar. */
+    const r = store.getById(mod, id);
+    const pegou = !!(r && r._faturamento && r._faturamento[statusKey]);
+    const rotulo = (pendencias.STATUS.find(([k]) => k === statusKey) || [, statusKey])[1];
+    if (pegou) toast('✔ ' + rotulo);
+    else toast('Não consegui marcar "' + rotulo + '" neste registro. Me avise — não é para acontecer.', 'error');
     pendencias.abrir(false);
   },
   /* O faturamento de um atendimento é UM só, esteja a pessoa olhando o
