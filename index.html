@@ -4826,7 +4826,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-14d</b><br>
+    v7.1 · build <b id="build-tag">2026-10-14e</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -5043,6 +5043,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <div class="action-divider"></div>
     <button class="btn" onclick="printPreview.abrir()"><span class="icon">🖨️</span> Visualizar / Imprimir</button>
     <button class="btn" onclick="printPreview.abrirPreTermo()" title="Imprime a avaliação pré-anestésica e o termo de consentimento num arquivo único"><span class="icon">📑</span> Pré + Termo juntos</button>
+    <button class="btn" onclick="dossie.abrirDoFormulario('form-pre','nome')" title="Tudo o que já existe deste paciente — atendimentos, comorbidades, alergias e exames — numa leitura só"><span class="icon">🩺</span> Dossiê do paciente</button>
     <button class="btn btn-primary" onclick="pre.irParaFicha()" title="Abre a ficha de anestesia já preenchida com este paciente e esta cirurgia"><span class="icon">➡️</span> Ir para a ficha</button>
     <button class="btn" onclick="pre.exportar()"><span class="icon">⬇️</span> Exportar</button>
     <button class="btn btn-ghost" onclick="actions.importarJSONPara('pre')"><span class="icon">⬆️</span> Importar</button>
@@ -5879,6 +5880,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
       <div class="dropdown-menu" id="dd-anestesia-menu"></div>
     </div>
     <button class="btn" onclick="historico.abrir('anestesia')"><span class="icon">🔍</span> Buscar / Histórico</button>
+    <button class="btn" onclick="dossie.abrirDoFormulario('form-anestesia','paciente_nome')" title="Tudo o que já existe deste paciente — atendimentos anteriores, comorbidades, alergias e evolução dos exames"><span class="icon">🩺</span> Dossiê do paciente</button>
     <div class="action-divider"></div>
     <button class="btn" onclick="printPreview.abrir()" title="Visualizar e imprimir (Ctrl+P)"><span class="icon">🖨️</span> Imprimir</button>
     <button class="btn" onclick="anestesia.imprimirComSrpa()" title="Imprime a ficha de anestesia e a SRPA vinculada num único arquivo/PDF"><span class="icon">🖨️</span> + SRPA</button>
@@ -27534,6 +27536,222 @@ const fechamento = {
         '<button type="button" class="btn btn-xs" onclick="fechamento.concluir()">Concluído</button>';
       document.body.appendChild(div);
     } catch (e) {}
+  }
+};
+
+/* ============================================================================
+   DOSSIÊ DO PACIENTE — A HISTÓRIA INTEIRA NUMA LEITURA SÓ
+   ----------------------------------------------------------------------------
+   O sistema tinha histórico POR MÓDULO: o da Consulta olhava consultas, o da
+   pré olhava prés. Ninguém juntava. Para saber o que já aconteceu com um
+   paciente antes de anestesiá-lo era preciso abrir quatro telas e comparar de
+   cabeça — exatamente no momento em que se tem menos tempo.
+
+   DUAS REGRAS QUE GOVERNAM TUDO AQUI
+
+   1. CADA LINHA DIZ DE ONDE VEIO E DE QUANDO.
+      Um resumo clínico sem procedência não é resumo, é boato. "Alergia a
+      dipirona" vale uma coisa se está na pré de ontem e outra se está numa
+      consulta de 2019 que nunca foi confirmada. Nada aparece aqui sem a ficha
+      de origem e a data ao lado.
+
+   2. NADA É INFERIDO.
+      Esta tela reúne e ordena o que está escrito. Não conclui, não resume com
+      palavras próprias, não preenche lacuna. Onde não há dado, diz que não há.
+
+   É também a base da etapa seguinte: se um dia a IA entrar, é ISTO que se
+   manda a ela — organizado, datado e com procedência —, e é por isto que se
+   confere a resposta dela. Modelo nenhum resume bem o que ninguém soube reunir.
+============================================================================ */
+const dossie = {
+  MODS: [
+    ['anestesia', 'Ficha de anestesia'], ['pre', 'Pré-anestésica'],
+    ['consulta', 'Consulta'], ['recuperacao', 'SRPA'],
+    ['termo', 'Termo de consentimento'], ['risco', 'Risco cirúrgico']
+  ],
+
+  _nomeDoDoc(it) {
+    return String((it && it.paciente && it.paciente.nome) || (it && it.paciente_nome) ||
+      (it && typeof it.paciente === 'string' ? it.paciente : '') || (it && it.nome) || '').trim();
+  },
+  _dataDoDoc(mod, it) {
+    const d = it.data_anestesia || it.data || it.data_avaliacao || it.data_proc ||
+      (it._createdAt ? String(it._createdAt).slice(0, 10) : '');
+    return String(d || '').slice(0, 10);
+  },
+  /* Todos os registros daquela pessoa, de todos os módulos, do mais novo para
+     o mais antigo. A identidade é a mesma que o resto do sistema usa. */
+  registrosDe(nome) {
+    const alvo = (() => { try { return linker._normNome(nome); } catch (e) { return ''; } })();
+    if (!alvo || alvo.length < 3) return [];
+    const out = [];
+    dossie.MODS.forEach(([mod, rotulo]) => {
+      (store.list(mod) || []).forEach(it => {
+        if (!it || !it._id) return;
+        let n = '';
+        try { n = linker._normNome(dossie._nomeDoDoc(it)); } catch (e) {}
+        if (n !== alvo) return;
+        out.push({ mod, rotulo, doc: it, data: dossie._dataDoDoc(mod, it) });
+      });
+    });
+    return out.sort((a, b) => String(b.data).localeCompare(String(a.data)));
+  },
+
+  /* ---- COMORBIDADES, ALERGIAS E MEDICAÇÕES, COM PROCEDÊNCIA ----
+     O mesmo item costuma repetir-se em várias fichas. Interessa quando foi
+     dito pela ÚLTIMA vez (é o estado atual) e desde quando consta (há quanto
+     tempo se sabe) — as duas coisas, porque "alergia registrada desde 2019 e
+     reconfirmada ontem" é diferente de "escrito uma vez, há seis anos". */
+  consolidado(regs) {
+    const campos = [
+      ['comorbidades', 'Comorbidades'], ['alergias', 'Alergias'],
+      ['medicacoes', 'Medicações em uso'], ['cirurgias_previas', 'Cirurgias prévias']
+    ];
+    const out = {};
+    campos.forEach(([campo, rotulo]) => {
+      const itens = new Map();
+      regs.forEach(r => {
+        const bruto = String(r.doc[campo] || '').trim();
+        if (!bruto) return;
+        bruto.split(/[;\n]+|,(?![^(]*\))/).map(x => x.trim()).filter(x => x.length > 1).forEach(txt => {
+          const k = txt.toLowerCase();
+          const atual = itens.get(k);
+          if (!atual) { itens.set(k, { texto: txt, ultima: r, primeira: r }); return; }
+          /* regs vem do mais novo para o mais antigo */
+          atual.primeira = r;
+        });
+      });
+      out[campo] = { rotulo, itens: Array.from(itens.values()) };
+    });
+    return out;
+  },
+
+  /* ---- EXAMES: TODAS AS COLETAS, LADO A LADO ----
+     "O que diz alguma coisa não é a creatinina de hoje, é a creatinina de hoje
+     ao lado da de dois meses atrás." As coletas vêm do bloco principal de cada
+     pré e das séries datadas; viram colunas, uma por data. */
+  coletas(regs) {
+    const out = [];
+    regs.filter(r => r.mod === 'pre').forEach(r => {
+      const d = r.doc;
+      const principal = {};
+      labSerie.CAMPOS.forEach(([k]) => {
+        const v = String(d['lab_' + k] == null ? '' : d['lab_' + k]).trim();
+        if (v) principal[k] = v;
+      });
+      if (Object.keys(principal).length) {
+        out.push({ data: String(d.data_exames || r.data || '').slice(0, 10), valores: principal, fonte: r });
+      }
+      (d._labSeries || []).forEach(s => {
+        const vals = {};
+        labSerie.CAMPOS.forEach(([k]) => {
+          const v = String(s[k] == null ? '' : s[k]).trim();
+          if (v) vals[k] = v;
+        });
+        if (Object.keys(vals).length) out.push({ data: String(s.data || '').slice(0, 10), valores: vals, fonte: r });
+      });
+    });
+    return out.sort((a, b) => String(a.data).localeCompare(String(b.data)));
+  },
+  /* Fora da faixa de referência — triagem, não laudo. Reusa a tabela do campo
+     principal para não existirem duas noções de "alterado" no sistema. */
+  _foraDaFaixa(campo, valor, sexo) {
+    try {
+      const ref = pre.labs.REF['lab_' + campo];
+      if (!ref) return false;
+      const n = parseFloat(String(valor).replace(/\./g, '').replace(',', '.'));
+      if (!isFinite(n)) return false;
+      const s = String(sexo || '').trim().toLowerCase()[0];
+      const faixa = ref.faixa || (s === 'f' ? ref.f : ref.m) || ref.m || ref.f;
+      if (!faixa) return false;
+      return n < faixa[0] || n > faixa[1];
+    } catch (e) { return false; }
+  },
+
+  abrir(nome) {
+    const alvo = String(nome || '').trim();
+    if (!alvo) { toast('Escolha o paciente primeiro.', 'warn'); return; }
+    const regs = dossie.registrosDe(alvo);
+    const esc = utils.escapeHTML;
+    if (!regs.length) {
+      modal.open('🩺 ' + esc(alvo),
+        '<p style="font-size:.88rem;margin:0">Nenhum atendimento registrado para este paciente neste ambiente.</p>',
+        '<button class="btn" onclick="modal.close()">Fechar</button>');
+      return;
+    }
+    const dados = (() => { try { return (linker._dadosMaisRecentes(alvo, null, {}) || {}).dados || {}; } catch (e) { return {}; } })();
+    const quando = d => d ? utils.formatarData(d) : 's/ data';
+
+    /* 1. Linha do tempo */
+    const linha = regs.map(r => {
+      const detalhe = [];
+      if (r.mod === 'pre' || r.mod === 'anestesia') {
+        try {
+          const cir = r.mod === 'pre' ? cirurgia.textoLista(cirurgia.daPreDoc(r.doc))
+            : cirurgia.texto({ codigo: (r.doc.procedimento || {}).codigo, descricao: (r.doc.procedimento || {}).descricao, lateralidade: (r.doc.procedimento || {}).lateralidade });
+          if (cir) detalhe.push(cir);
+        } catch (e) {}
+      }
+      if (r.doc.asa) detalhe.push('ASA ' + r.doc.asa);
+      if (r.doc.queixa) detalhe.push(String(r.doc.queixa).slice(0, 80));
+      if (r.doc.hipotese) detalhe.push(String(r.doc.hipotese).slice(0, 80));
+      return '<div style="display:flex;gap:9px;padding:7px 0;border-bottom:1px solid var(--border)">' +
+        '<div style="flex:0 0 88px;font-size:.78rem;color:var(--text-mute)">' + esc(quando(r.data)) + '</div>' +
+        '<div style="flex:1;min-width:0"><b style="font-size:.82rem">' + esc(r.rotulo) + '</b>' +
+        (r.doc._finalizado ? '' : ' <span style="font-size:.7rem;color:var(--warning,#8a4b1c)">(não finalizada)</span>') +
+        (detalhe.length ? '<br><span style="font-size:.8rem;color:var(--text-soft)">' + esc(detalhe.join(' · ')) + '</span>' : '') +
+        '</div></div>';
+    }).join('');
+
+    /* 2. Consolidado com procedência */
+    const cons = dossie.consolidado(regs);
+    const blocos = Object.keys(cons).map(k => {
+      const c = cons[k];
+      if (!c.itens.length) return '';
+      return '<div style="margin:0 0 10px"><div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.4px;color:var(--text-mute);margin-bottom:3px">' +
+        esc(c.rotulo) + '</div>' +
+        c.itens.map(i =>
+          '<div style="font-size:.84rem;padding:2px 0">• ' + esc(i.texto) +
+          ' <span style="font-size:.72rem;color:var(--text-mute)">— ' + esc(i.ultima.rotulo) + ' de ' + esc(quando(i.ultima.data)) +
+          (i.primeira !== i.ultima ? ', consta desde ' + esc(quando(i.primeira.data)) : '') + '</span></div>').join('') +
+        '</div>';
+    }).join('');
+
+    /* 3. Exames lado a lado */
+    const col = dossie.coletas(regs);
+    let tabela = '<p style="font-size:.84rem;color:var(--text-mute);margin:0">Nenhum exame laboratorial registrado.</p>';
+    if (col.length) {
+      const usados = labSerie.CAMPOS.filter(([k]) => col.some(c => c.valores[k]));
+      tabela = '<div style="overflow:auto"><table class="dash-detail-table" style="margin:0;font-size:.8rem"><thead><tr><th>Exame</th>' +
+        col.map(c => '<th style="text-align:right">' + esc(quando(c.data)) + '</th>').join('') + '</tr></thead><tbody>' +
+        usados.map(([k, rot]) => '<tr><td>' + esc(rot) + '</td>' +
+          col.map(c => {
+            const v = c.valores[k] || '';
+            const fora = v && dossie._foraDaFaixa(k, v, dados.sexo);
+            return '<td style="text-align:right' + (fora ? ';color:var(--danger);font-weight:700' : '') + '">' +
+              esc(v || '—') + '</td>';
+          }).join('') + '</tr>').join('') +
+        '</tbody></table></div>' +
+        '<p style="font-size:.74rem;color:var(--text-mute);margin:6px 0 0">Em vermelho, fora da faixa de referência de adulto — é triagem, não laudo.</p>';
+    }
+
+    const cab = [dados.idade ? dados.idade + ' anos' : '', dados.sexo || '',
+      dados.convenio || ''].filter(Boolean).join(' · ');
+    modal.open('🩺 ' + esc(alvo),
+      (cab ? '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">' + esc(cab) + '</p>' : '') +
+      '<div style="max-height:62vh;overflow:auto">' +
+      '<h3 style="font-size:.9rem;margin:0 0 4px">Atendimentos</h3>' + linha +
+      '<h3 style="font-size:.9rem;margin:14px 0 6px">O que consta, e de onde</h3>' +
+      (blocos || '<p style="font-size:.84rem;color:var(--text-mute);margin:0">Nada registrado em comorbidades, alergias ou medicações.</p>') +
+      '<h3 style="font-size:.9rem;margin:14px 0 6px">Exames, coleta a coleta</h3>' + tabela +
+      '</div>',
+      '<button class="btn" onclick="modal.close()">Fechar</button>');
+  },
+
+  /* Abre pelo nome que estiver no formulário da tela atual. */
+  abrirDoFormulario(formId, campo) {
+    const el = document.querySelector('#' + formId + ' [name="' + (campo || 'nome') + '"]');
+    dossie.abrir((el && el.value) || '');
   }
 };
 

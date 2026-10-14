@@ -20325,6 +20325,89 @@ await test('Cirurgia proposta: código, quantidade e lado atravessam pré, ficha
   await page.close();
 });
 
+/* 273) Dossiê do paciente: reúne, ordena, diz de onde veio — e não conclui nada
+
+   O histórico era POR MÓDULO: o da Consulta olhava consultas, o da pré olhava
+   prés. Para saber o que já aconteceu com um paciente antes de anestesiá-lo era
+   preciso abrir quatro telas e comparar de cabeça, no momento em que se tem
+   menos tempo.
+
+   As duas regras que este teste cobra, porque são o que separa um resumo
+   clínico de um boato:
+   • cada item traz a ficha de origem e a data — "alergia a dipirona" vale uma
+     coisa na pré de ontem e outra numa consulta de 2019;
+   • os exames saem coleta a coleta, lado a lado, que é o que permite comparar;
+     e nada é inferido onde não há dado. */
+await test('Dossiê: junta os módulos, mostra a procedência de cada item e compara as coletas', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-dossie');
+    ['pre', 'anestesia', 'consulta', 'recuperacao', 'termo', 'risco'].forEach(m => store.setList(m, []));
+
+    store.setList('consulta', [{
+      _id: 'c1', nome: 'Celina Dossiê', data: '2026-03-10', _finalizado: true,
+      queixa: 'Dor lombar', comorbidades: 'HAS (Hipertensão arterial)',
+      alergias: 'Dipirona'
+    }]);
+    store.setList('pre', [{
+      _id: 'p1', nome: 'Celina Dossiê', data: '2026-08-15', _finalizado: true,
+      cirurgia: 'Colecistectomia videolaparoscópica', cirurgia_cbhpm: '31003010',
+      comorbidades: 'HAS (Hipertensão arterial); Diabetes', alergias: 'Dipirona',
+      medicacoes: 'Losartana 50mg', asa: 'II',
+      data_exames: '2026-08-10', lab_hb: '13,2', lab_creat: '0,9',
+      _labSeries: [{ data: '2026-10-01', hb: '9,1', creat: '1,8' }]
+    }]);
+    store.setList('anestesia', [{
+      _id: 'a1', paciente: { nome: 'Celina Dossiê' }, data_anestesia: '2026-08-20', _finalizado: true,
+      procedimento: { descricao: 'Colecistectomia videolaparoscópica', codigo: '31003010' }
+    }]);
+
+    const regs = dossie.registrosDe('Celina Dossiê');
+    out.juntouTudo = regs.length === 3;
+    out.ordemDesc = regs[0].data === '2026-08-20' && regs[2].data === '2026-03-10';
+    out.ignoraOutros = dossie.registrosDe('Outra Pessoa').length === 0;
+
+    const cons = dossie.consolidado(regs);
+    const alergia = cons.alergias.itens[0];
+    /* Dipirona aparece na consulta de março E na pré de agosto: a mais recente
+       governa, e o "consta desde" preserva a primeira vez. */
+    out.procedencia = alergia && alergia.ultima.data === '2026-08-15' && alergia.primeira.data === '2026-03-10';
+    out.separouItens = cons.comorbidades.itens.length === 2;
+
+    const col = dossie.coletas(regs);
+    out.duasColetas = col.length === 2 && col[0].data === '2026-08-10' && col[1].data === '2026-10-01';
+    out.valoresCertos = col[0].valores.hb === '13,2' && col[1].valores.hb === '9,1';
+    /* Hb 9,1 numa mulher está fora da faixa; 13,2 não. É triagem, não laudo. */
+    out.marcaForaDaFaixa = dossie._foraDaFaixa('hb', '9,1', 'Feminino') === true &&
+                           dossie._foraDaFaixa('hb', '13,2', 'Feminino') === false;
+
+    dossie.abrir('Celina Dossiê');
+    const corpo = (document.getElementById('modal-body') || {}).textContent || '';
+    out.mostraOrigem = /Pré-anestésica de 15\/08\/2026/.test(corpo) && /consta desde 10\/03\/2026/.test(corpo);
+    out.mostraExames = /9,1/.test(corpo) && /13,2/.test(corpo);
+    out.mostraCirurgia = /31003010/.test(corpo);
+    try { modal.close(); } catch (e) {}
+
+    /* Paciente sem registro: diz que não há, em vez de inventar. */
+    dossie.abrir('Ninguém Aqui');
+    out.vazioHonesto = /Nenhum atendimento registrado/.test((document.getElementById('modal-body') || {}).textContent || '');
+    try { modal.close(); } catch (e) {}
+
+    ['pre', 'anestesia', 'consulta', 'recuperacao', 'termo', 'risco'].forEach(m => store.setList(m, []));
+    return out;
+  });
+  assert(r.juntouTudo && r.ordemDesc, 'reúne os módulos do mesmo paciente, do mais novo para o mais antigo');
+  assert(r.ignoraOutros, 'e não traz o de outra pessoa');
+  assert(r.procedencia, 'cada item diz de qual ficha veio e desde quando consta — sem isso é boato');
+  assert(r.separouItens, 'comorbidades escritas numa linha só viram itens');
+  assert(r.duasColetas && r.valoresCertos, 'as coletas saem lado a lado, em ordem de data');
+  assert(r.marcaForaDaFaixa, 'o fora da faixa usa a mesma tabela de referência do campo principal');
+  assert(r.mostraOrigem && r.mostraExames && r.mostraCirurgia, 'a tela mostra origem, exames e a cirurgia com código');
+  assert(r.vazioHonesto, 'sem registro, diz que não há — não preenche lacuna');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
