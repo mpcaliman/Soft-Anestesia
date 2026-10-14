@@ -17581,6 +17581,355 @@ await test('Rascunhos: cópia preservada não desce da nuvem, e as abas param de
   await page.close();
 });
 
+/* 272b) A FILA QUE "ESTÁ ENVIANDO" HÁ HORAS
+
+   Foto do celular: "⏳ Enviando para a nuvem… 271 atendimento(s) aguardam
+   recibo na fila cifrada". Relato: "após bom tempo não evolui, parece estar
+   parado".
+
+   DOIS DEFEITOS, E O SEGUNDO É O QUE ENGANA
+
+   1) O RITMO. Cada rodada envia no máximo 15 registros e a sincronização
+      periódica roda de 10 em 10 minutos: 271 atendimentos dariam umas três
+      HORAS de relógio, no melhor caso, sem nenhuma falha. Não estava travado —
+      estava lento por construção. Agora as rodadas se encadeiam ENQUANTO
+      houver progresso, em série, uma requisição por vez (o contrário da rajada
+      que derrubou o servidor de manhã), e param no primeiro sinal de que não
+      adianta insistir: rodada sem envio, qualquer falha, ou troca de usuário.
+
+   2) O AVISO. A faixa dizia exatamente a mesma frase estivesse a fila andando,
+      parada por falha, ou apenas lenta. Se tivesse travado de verdade, a tela
+      diria a mesma coisa — e foi por isso que ele não conseguiu distinguir.
+      Aviso que não separa "trabalhando" de "emperrado" não informa nada. */
+await test('Fila cifrada: as rodadas se encadeiam enquanto andam, e a faixa diz se andou', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-fila');
+
+    /* ---- 1) ENCADEAMENTO ---- */
+    let restantes = 271, rodadas = 0;
+    cloudRel._empurrando = false;
+    cloudRel.empurrarPendentes = async () => {
+      rodadas++;
+      const n = Math.min(15, restantes);
+      restantes -= n;
+      return { enviados: n, falhas: 0, restantes };
+    };
+    const r1 = await cloudRel.empurrarAteParar({ silent: true, pausaMs: 0, rodadas: 40 });
+    out.rodadasAteEsvaziar = rodadas;
+    out.enviadosTotal = r1 && r1.enviados;
+    out.esvaziou = restantes === 0;
+
+    /* FALHA PARA A FILA: insistir numa rodada que falhou é gastar bateria e
+       servidor sem adiantar — e foi uma rajada dessas que derrubou o projeto. */
+    rodadas = 0;
+    cloudRel._empurrando = false;
+    cloudRel.empurrarPendentes = async () => { rodadas++; return { enviados: 0, falhas: 5, restantes: 100 }; };
+    await cloudRel.empurrarAteParar({ silent: true, pausaMs: 0, rodadas: 40 });
+    out.rodadasQuandoFalha = rodadas;
+
+    /* rodada sem nenhum envio também para: não há o que encadear */
+    rodadas = 0;
+    cloudRel._empurrando = false;
+    cloudRel.empurrarPendentes = async () => { rodadas++; return { enviados: 0, falhas: 0, restantes: 0 }; };
+    await cloudRel.empurrarAteParar({ silent: true, pausaMs: 0, rodadas: 40 });
+    out.rodadasQuandoNadaSai = rodadas;
+
+    /* ---- 2) A FAIXA DIZ SE ANDOU ---- */
+    conexao._ultimaMedida = null;
+    cloudRel._ultimoEmpurrao = { enviados: 15, falhas: 0 };
+    conexao._andamento(271);                       /* primeira medição */
+    out.andou = conexao._andamento(256);           /* 15 saíram */
+
+    conexao._ultimaMedida = { pend: 271, em: Date.now() - 200000 };
+    cloudRel._ultimoEmpurrao = { enviados: 0, falhas: 0 };
+    out.parada = conexao._andamento(271);          /* mesmo número, minutos depois */
+
+    cloudRel._ultimoEmpurrao = { enviados: 0, falhas: 3 };
+    conexao._ultimaMedida = null;
+    out.falhou = conexao._andamento(271);
+    return out;
+  });
+  /* 271 a 15 por rodada: 18 rodadas cheias (270) + 1 com o último + 1 que
+     descobre a fila vazia. A última é necessária — não há como saber que
+     acabou sem perguntar —, e o que importa é que as 20 aconteçam NUMA
+     passagem, e não em vinte ciclos de dez minutos. */
+  assert(r.esvaziou && r.rodadasAteEsvaziar === 20,
+    '271 registros a 15 por rodada esvaziam numa passagem encadeada; vieram ' + r.rodadasAteEsvaziar + ' rodadas');
+  assert(r.enviadosTotal === 271, 'o total enviado tem de bater com a fila; veio ' + r.enviadosTotal);
+  assert(r.rodadasQuandoFalha === 1,
+    'rodada que falhou não se repete em sequência — insistir é gastar bateria e servidor sem adiantar');
+  assert(r.rodadasQuandoNadaSai === 1, 'rodada sem nenhum envio também para: não há o que encadear');
+  assert(/Já subiram <b>15<\/b>/.test(r.andou || ''),
+    'a faixa tem de dizer QUANTOS subiram desde a última conferência; veio: ' + r.andou);
+  assert(/não andou nos últimos minutos/i.test(r.parada || ''),
+    'ficar no mesmo número por minutos tem de ser dito, e não escondido atrás de "Enviando…"; veio: ' + r.parada);
+  assert(/não passou/i.test(r.falhou || ''),
+    'falha de envio é diferente de lentidão, e a tela tem de separar as duas; veio: ' + r.falhou);
+  await page.close();
+});
+
+/* 271b) "GERAR FINANCEIRO" QUE NÃO GRAVA, E A RECUSA QUE NÃO SE EXPLICA
+
+   Relato: "tô com impressão que os gerar financeiro não está ficando gravado".
+
+   A CAUSA: DOIS FORMATOS DE FICHA, E O FINANCEIRO SÓ ENXERGAVA UM
+
+   A ficha preenchida pelo formulário guarda o paciente em bloco
+   (`paciente.nome`). Mas há fichas com os mesmos dados em campos PLANOS
+   (`paciente_nome`): as do acervo recuperado da quarentena, as de versões
+   anteriores, as de importação. Para essas, o cabeçalho saía sem nome — e
+   `fromDoc` tem uma linha que diz "não cria se nem nome do paciente existe" e
+   devolve null SEM DIZER NADA. O lançamento não nascia e nada explicava.
+
+   É a mesma forma de defeito do dia inteiro: a recusa silenciosa. E a tela
+   piorava, porque o único aviso que existia — "verifique se o auto-financeiro
+   está ligado" — era um palpite apresentado como diagnóstico, e mandava mexer
+   justamente no lugar errado.
+
+   Agora cada saída em branco carrega o seu motivo, e quem pede a geração lê
+   qual foi. */
+await test('Gerar financeiro: a ficha de formato antigo também gera, e a recusa diz o motivo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    __smokeBindOrg('org-fin2');
+    store.setList('financeiro', []);
+    store.setList('anestesia', []);
+
+    /* 1) FICHA EM CAMPOS PLANOS — a do acervo recuperado */
+    const plana = store.save('anestesia', {
+      paciente_nome: 'PACIENTE RECUPERADO', data_anestesia: '2026-10-14',
+      procedimento: 'Colecistectomia videolaparoscópica', convenio: 'Particular',
+      cirurgiao: 'Dr. Cirurgião', hospital: 'Hospital Teste'
+    });
+    const cabPlana = fin._cabecalho('anestesia', store.getById('anestesia', plana._id));
+    out.planaTemNome = cabPlana.paciente === 'PACIENTE RECUPERADO';
+    out.planaTemProc = /Colecistectomia/.test(cabPlana.procedimento || '');
+    out.planaTemConvenio = cabPlana.convenio === 'Particular';
+    const rp = fin.fromDoc('anestesia', store.getById('anestesia', plana._id));
+    out.planaGerou = !!(rp && rp.item);
+    out.planaGravou = (store.list('financeiro') || []).some(f => f.paciente === 'PACIENTE RECUPERADO');
+
+    /* 2) FICHA EM BLOCO — a do formulário — continua funcionando */
+    const bloco = store.save('anestesia', {
+      paciente: { nome: 'PACIENTE DO FORMULARIO', convenio: 'Unimed' },
+      procedimento: { descricao: 'Herniorrafia', data: '2026-10-14', cirurgiao: 'Dr. B' }
+    });
+    const rb = fin.fromDoc('anestesia', store.getById('anestesia', bloco._id));
+    out.blocoGerou = !!(rb && rb.item);
+    out.blocoNome = rb && rb.item && rb.item.paciente;
+
+    /* 3) A RECUSA DIZ O MOTIVO, e cada motivo é o seu */
+    const semNome = store.save('anestesia', { data_anestesia: '2026-10-14' });
+    out.semNomeGerou = !!fin.fromDoc('anestesia', store.getById('anestesia', semNome._id));
+    out.motivoSemNome = fin._motivo;
+
+    const original = fin.isAutoEnabled;
+    fin.isAutoEnabled = () => false;
+    fin.fromDoc('anestesia', store.getById('anestesia', plana._id));
+    out.motivoDesligado = fin._motivo;
+    fin.isAutoEnabled = original;
+
+    /* motivo é zerado a cada chamada: não pode sobrar o da anterior */
+    fin.fromDoc('anestesia', store.getById('anestesia', plana._id));
+    out.motivoLimpoNoSucesso = fin._motivo === '';
+    return out;
+  });
+  assert(r.planaTemNome, 'o nome do paciente é o nome do paciente, esteja em bloco ou em campo plano');
+  assert(r.planaTemProc && r.planaTemConvenio, 'procedimento e convênio também: a cobrança nasce sem pagador se isso falhar');
+  assert(r.planaGerou && r.planaGravou, 'a ficha de formato antigo tem de gerar lançamento — era ela que não gravava');
+  assert(r.blocoGerou && r.blocoNome === 'PACIENTE DO FORMULARIO',
+    'e a ficha do formulário continua gerando: o conserto não pode trocar um defeito por outro');
+  assert(!r.semNomeGerou && /sem nome de paciente/i.test(r.motivoSemNome || ''),
+    'sem nome não gera, mas DIZ que foi por isso; veio: ' + r.motivoSemNome);
+  assert(/desligado/i.test(r.motivoDesligado || ''),
+    'auto-financeiro desligado é outro motivo, e tem de ser dito como tal; veio: ' + r.motivoDesligado);
+  assert(r.motivoLimpoNoSucesso, 'motivo de uma recusa anterior não pode sobrar grudado numa geração que deu certo');
+  await page.close();
+});
+
+/* 270b) UMA PESSOA, UMA LINHA — e o carimbo que vem junto
+
+   Foto da tela: o menu de "Profissional responsável" oferecendo "Marcelo
+   Pandolfi Caliman · Anestesiologia · CRM 30601 · ✓ carimbo" e, logo abaixo,
+   "Marcelo Pandolfi Caliman · Meu perfil · Anestesiologia · CRM 30601 ·
+   ✓ carimbo". Mesma pessoa, mesmo registro, mesmo carimbo.
+
+   A rede de segurança existia e estava presa na chave errada: deduplicava por
+   `_id`, e o problema é exatamente DOIS CADASTROS com ids diferentes para a
+   mesma pessoa, herdados da unificação das três listas antigas. Por id são
+   distintos; na tela são a mesma linha repetida.
+
+   Escolher entre duas linhas idênticas não é escolha — e ainda deixa o carimbo
+   dependendo de qual das duas a pessoa acertou, porque uma pode ter a imagem e
+   a outra não.
+
+   A identidade de um profissional é o nome (sem acento, sem caixa) mais o
+   registro. Havendo repetição, fica a ficha mais completa: primeiro quem tem
+   carimbo, depois "meu perfil", depois quem tem CRM — é dela que sai a
+   assinatura que vai para o papel. */
+await test('Profissional: uma pessoa, uma linha — e fica a ficha que tem o carimbo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-prof');
+    const CARIMBO = 'data:image/png;base64,' + 'A'.repeat(9000);
+
+    /* o cadastro dele: a mesma pessoa duas vezes, só uma marcada como perfil */
+    store.setList('cad_profissionais', [
+      { _id: 'p1', nome: 'Marcelo Pandolfi Caliman', crm: '30601', especialidade: 'Anestesiologia' },
+      { _id: 'p2', nome: 'Marcelo Pandolfi Caliman', crm: '30601', especialidade: 'Anestesiologia',
+        carimbo: CARIMBO, responsavel: true },
+      { _id: 'p3', nome: 'Outra Pessoa', crm: '11111', especialidade: 'Cirurgia' }
+    ]);
+
+    location.hash = '#anestesia';
+    await new Promise(r => setTimeout(r, 700));
+    const f = document.getElementById('form-anestesia');
+    const prev = f && f.querySelector('[id$="-prev-carimbo"]');
+    const bloco = prev && prev.closest('.grid');
+    const nomeEl = bloco && bloco.querySelector('input[type="text"]');
+    out.achouBloco = !!nomeEl;
+    if (!nomeEl) return out;
+
+    autocomplete.ligarProfissionalEm(nomeEl);
+    nomeEl.value = 'Marcelo';
+    nomeEl.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(r => setTimeout(r, 250));
+    const caixa = document.querySelector('[class*="ac-"]');
+    const itens = caixa ? [...caixa.querySelectorAll('[class*="item"]')] : [];
+    out.linhasDoMenu = itens.length;
+    out.textos = itens.map(x => (x.textContent || '').replace(/\s+/g, ' ').trim());
+
+    /* a linha que sobra é a que tem o carimbo — senão a desduplicação teria
+       escolhido justamente a ficha que não assina nada */
+    if (itens[0]) { itens[0].dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); itens[0].click(); }
+    await new Promise(r => setTimeout(r, 300));
+    const dataEl = f.querySelector('[name="assinatura_dataurl"]');
+    out.carimboAplicado = !!(dataEl && String(dataEl.value || '').startsWith('data:'));
+    out.previewTemImagem = !!(prev && prev.querySelector('img'));
+
+    /* A IMAGEM TEM DE IR INTEIRA PARA A NUVEM.
+       No aparelho ela é guardada uma vez e referenciada (`blob:`) para o
+       navegador não encher. Se essa referência vazasse para o registro lido, a
+       ficha aberta noutro aparelho mostraria uma assinatura quebrada — e ao
+       finalizar o sistema diria que não foi carimbada. A leitura tem de
+       devolver sempre o data-URI inteiro. */
+    const doc = store.save('anestesia', { paciente_nome: 'Teste Carimbo',
+      anestesiologista: 'Marcelo Pandolfi Caliman',
+      assinatura_dataurl: CARIMBO, assinatura_tipo: 'carimbo' });
+    const lido = store.getById('anestesia', doc._id);
+    out.leituraInteira = !!(lido && String(lido.assinatura_dataurl || '').startsWith('data:'));
+    out.leituraSemRef = JSON.stringify(lido || {}).indexOf('blob:') < 0;
+    out.leituraTamanho = lido ? String(lido.assinatura_dataurl || '').length : 0;
+
+    /* e o cadastro do profissional viaja pela prateleira da clínica, que é o
+       que faz o carimbo existir em qualquer aparelho */
+    out.cadastroVaiParaNuvem = Object.keys(clinicaSync.CHAVES)
+      .indexOf(STORAGE.cad_profissionais) >= 0;
+    return out;
+  });
+  assert(r.achouBloco, 'o bloco de assinatura da ficha precisa existir para o teste valer');
+  assert(r.linhasDoMenu === 1,
+    'a mesma pessoa não pode aparecer duas vezes; veio ' + r.linhasDoMenu + ': ' + JSON.stringify(r.textos));
+  assert(/carimbo/.test((r.textos || [])[0] || ''),
+    'a linha que sobra tem de ser a que tem carimbo — senão a desduplicação escolhe justamente a ficha que não assina');
+  assert(r.carimboAplicado && r.previewTemImagem,
+    'escolher o profissional tem de trazer o carimbo para o campo E para a pré-visualização');
+  assert(r.leituraInteira && r.leituraSemRef,
+    'a leitura tem de devolver a imagem inteira: referência local na nuvem vira assinatura quebrada no outro aparelho');
+  assert(r.leituraTamanho > 9000, 'a imagem inteira, não um pedaço: veio ' + r.leituraTamanho);
+  assert(r.cadastroVaiParaNuvem,
+    'o cadastro de profissionais (onde mora o carimbo) tem de viajar pela prateleira da clínica');
+  await page.close();
+});
+
+/* 269c) O LAÇO DAS ABAS É LOCAL — uma decisão pendente por ficha, não uma por
+   sincronização
+
+   A contagem no servidor veio ZERO: `select count(*) from public.drafts where
+   doc_id like 'rasc_conflito_%'` → 0. As trinta abas da foto nunca estiveram
+   na nuvem. Elas nascem e ficam aqui.
+
+   O mecanismo: enquanto a ficha fica aberta no computador e mexem nela no
+   celular, CADA descida divergente fabrica mais uma cópia. A impressão digital
+   que deveria deduplicá-las inclui o conteúdo local — que muda a cada vez —,
+   então nunca batia. Oito descidas, nove abas, todas com o mesmo nome.
+
+   Trinta abas iguais não são trinta decisões: são nenhuma, porque ninguém
+   escolhe entre coisas que não consegue distinguir.
+
+   E o conserto não pode ser só "não cria a segunda": parar de criar e CONTINUAR
+   adotando a versão da nuvem apagaria da tela o que foi digitado depois da
+   primeira preservação. Por isso, havendo decisão pendente, a adoção também
+   para — o que está na tela fica, e o conflito que já existe é que precisa ser
+   resolvido. */
+await test('Abas: uma decisão pendente por ficha, e o digitado depois não é sobreposto', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const mod = 'anestesia';
+    __smokeBindOrg('org-laco');
+    rascunhos.setList(mod, [{ id: 'r-asafe', label: 'ASAFE JANUARIO LOPES',
+      dados: { paciente_nome: 'ASAFE JANUARIO LOPES', procedimento: 'Colecistectomia' },
+      updatedAt: '2026-10-14T10:00:00Z', _draftSyncedLocalAt: '2026-10-14T09:00:00Z',
+      _draftVersion: 1 }]);
+
+    /* oito descidas divergentes, com digitação dos dois lados entre elas */
+    for (let i = 0; i < 8; i++) {
+      const lista = rascunhos.list(mod);
+      const local = lista.find(x => x.id === 'r-asafe');
+      if (!local) break;
+      local.dados = Object.assign({}, local.dados, { tecnica: 'digitado aqui ' + i });
+      local.updatedAt = '2026-10-14T1' + i + ':30:00Z';
+      rascunhos.setList(mod, lista);
+      rascunhosSync._preservarConflito(mod, local, Object.assign({}, local, {
+        _draftVersion: (Number(local._draftVersion) || 1) + 1,
+        dados: Object.assign({}, local.dados, { observacoes: 'do celular ' + i }),
+        updatedAt: '2026-10-14T1' + i + ':45:00Z'
+      }), { organizationId: cofre.org() });
+    }
+    const lista = rascunhos.list(mod) || [];
+    out.abas = lista.length;
+    out.copias = lista.filter(x => x && x._draftConflictOf).length;
+    out.rotulos = lista.map(x => String(x.label || '').slice(0, 45));
+    /* o que foi digitado DEPOIS da primeira preservação continua na tela: a
+       adoção da versão da nuvem para junto com a preservação */
+    const aberta = lista.find(x => x && x.id === 'r-asafe');
+    out.digitadoDepoisSobrevive = !!aberta && aberta.dados && aberta.dados.tecnica === 'digitado aqui 7';
+    /* A PRIMEIRA adoção é legítima e tem de acontecer: ali ainda não havia
+       decisão pendente, e a nuvem traz o carimbo que faltava. O que não pode é
+       continuar adotando DEPOIS — seria sobrepor, a cada descida, o que foi
+       digitado aqui enquanto a decisão espera. Por isso o campo vindo da nuvem
+       fica congelado no da primeira rodada. */
+    out.naoAdotouDepois = !!aberta && (aberta.dados || {}).observacoes === 'do celular 0';
+
+    /* resolvida a pendência (cópia fechada), a próxima divergência volta a
+       preservar — a trava é "uma por vez", não "uma para sempre" */
+    rascunhos.setList(mod, lista.filter(x => x && !x._draftConflictOf));
+    const base = rascunhos.list(mod)[0];
+    base._draftSyncedLocalAt = '2026-10-14T00:00:00Z';
+    base.updatedAt = '2026-10-14T23:00:00Z';
+    rascunhos.setList(mod, [base]);
+    rascunhosSync._preservarConflito(mod, base, Object.assign({}, base, {
+      _draftVersion: 99, dados: { paciente_nome: 'ASAFE JANUARIO LOPES', tecnica: 'OUTRA COISA' }
+    }), { organizationId: cofre.org() });
+    out.voltaAPreservar = (rascunhos.list(mod) || []).some(x => x && x._draftConflictOf);
+    return out;
+  });
+  assert(r.abas === 2,
+    'oito descidas divergentes não podem virar ' + r.abas + ' abas: ' + JSON.stringify(r.rotulos));
+  assert(r.copias === 1, 'uma decisão pendente por ficha — trinta cópias iguais não são trinta decisões');
+  assert(r.digitadoDepoisSobrevive,
+    'o que foi digitado aqui depois da preservação tem de continuar na tela');
+  assert(r.naoAdotouDepois,
+    'com decisão pendente, as descidas seguintes não podem continuar sobrepondo a tela — senão o conserto vira perda');
+  assert(r.voltaAPreservar, 'resolvida a pendência, a próxima divergência preserva de novo: a trava é "uma por vez"');
+  await page.close();
+});
+
 /* A CÓPIA PRESERVADA NÃO PODE FABRICAR A PRÓXIMA.
    ---------------------------------------------------------------------------
    Foto da tela, num computador em uso: centenas de abas "CELINA ALVES DOS

@@ -863,7 +863,7 @@ const cloud = {
       if (!contextoValido()) return;
       try { await cloudRel.drenarConflitos(); } catch (e) {}
       if (!contextoValido()) return;
-      try { await cloudRel.empurrarPendentes({ silent: true }); } catch (e) {}
+      try { await cloudRel.empurrarAteParar({ silent: true }); } catch (e) {}
       if (!contextoValido()) return;
       try { await adendos.enviarPendentes(); } catch (e) {}
       if (!contextoValido()) return;
@@ -1210,7 +1210,7 @@ const cloud = {
       }, 1600);
       /* O que foi salvo enquanto a clínica não era conhecida sobe agora — sem
          isso, o registro de um usuário nunca chegava aos outros do consultório */
-      agendar(() => cloudRel.empurrarPendentes({ silent: true }), 2600);
+      agendar(() => cloudRel.empurrarAteParar({ silent: true }), 2600);
       /* O APARELHO SE ESVAZIA SOZINHO. A nuvem é a dona: depois que o que
          estava pendente subiu, o que já tem espelho confirmado e saiu da
          janela de trabalho não precisa mais ocupar lugar aqui. Sem este passo

@@ -562,7 +562,7 @@ const sincronia = {
       try { await pdfBackup.drenarFila(); } catch (e) {}
       if (!contextoValido()) return;
       /* 2) o resto do que foi feito aqui e ainda não subiu */
-      try { await cloudRel.empurrarPendentes({ silent: true, limite: 15 }); } catch (e) {}
+      try { await cloudRel.empurrarAteParar({ silent: true, limite: 15 }); } catch (e) {}
       if (!contextoValido()) return;
       /* 3) o que os outros aparelhos fizeram desde a última passada */
       const marcas = sincronia._marcas();
@@ -786,7 +786,7 @@ const nuvemEstado = {
     dizer('⏳ enviando o que falta…');
     try { await cloud.sincronizar({ silent: true }); } catch (e) {}
     if (!valido()) return;
-    try { await cloudRel.empurrarPendentes({ silent: true }); } catch (e) {}
+    try { await cloudRel.empurrarAteParar({ silent: true }); } catch (e) {}
     if (!valido()) return;
     try { await cloudRel.drenarConflitos(); } catch (e) {}
     if (!valido()) return;

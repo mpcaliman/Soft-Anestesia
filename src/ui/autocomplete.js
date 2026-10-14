@@ -426,7 +426,9 @@ const autocomplete = {
             meta: 'Cirurgião' + (x.especialidade ? ' · ' + x.especialidade : '') + (x.crm ? ' · CRM ' + x.crm : '') + (x.carimbo ? ' · ✓ carimbo' : ''),
             data: x
           }));
-          return [...an, ...ci];
+          /* A mesma pessoa pode estar nas duas vistas (anestesista e
+             cirurgião). Repetida, vira duas linhas iguais na tela. */
+          return autocomplete._umaPessoaUmaLinha([...an, ...ci]);
         },
         (it) => aplicarProfissional(el, it.data)
       );
@@ -435,11 +437,11 @@ const autocomplete = {
     document.querySelectorAll('[name="responsavel"]').forEach(el => {
       autocomplete.attach(
         el,
-        () => ajustes.list('cad_anestesistas').map(x => ({
+        () => autocomplete._umaPessoaUmaLinha(ajustes.list('cad_anestesistas').map(x => ({
           value: x._id, label: x.nome,
           meta: (x.crm ? 'CRM ' + x.crm : '') + (x.carimbo ? ' · ✓ carimbo' : ''),
           data: x
-        })),
+        }))),
         (it) => aplicarProfissional(el, it.data)
       );
     });
@@ -449,6 +451,34 @@ const autocomplete = {
     document.querySelectorAll('[name="convenio"]').forEach(el => {
       if (el.tagName === 'INPUT') autocomplete.attachSimples(el, 'cad_convenios');
     });
+  },
+
+  /* UMA PESSOA, UMA LINHA — por quem a pessoa é, não por qual cadastro é.
+     Nome normalizado + registro definem a pessoa. Entre repetições fica a
+     ficha mais completa, porque é dela que sai o carimbo: primeiro quem tem
+     carimbo, depois quem está marcado como "meu perfil", depois quem tem CRM.
+     Usada por todos os seletores de profissional, para que a mesma pessoa não
+     apareça duas vezes num lugar e uma noutro. */
+  _umaPessoaUmaLinha(itens) {
+    const norm = s => {
+      try { return linker._normNome(s); }
+      catch (e) { return String(s || '').trim().toLowerCase(); }
+    };
+    const peso = (x) => {
+      const d = (x && x.data) || {};
+      return (d.carimbo ? 4 : 0) +
+        ((d.responsavel === true || d.responsavel === 'true') ? 2 : 0) +
+        (d.crm ? 1 : 0);
+    };
+    const porPessoa = new Map();
+    (itens || []).forEach(x => {
+      if (!x || !x.label) return;
+      const d = x.data || {};
+      const chave = norm(x.label) + '|' + String(d.crm || '').replace(/\D+/g, '');
+      const anterior = porPessoa.get(chave);
+      if (!anterior || peso(x) > peso(anterior)) porPessoa.set(chave, x);
+    });
+    return [...porPessoa.values()];
   },
 
   /* Liga autocomplete de profissional a UM input específico (usado nos blocos de
@@ -499,15 +529,18 @@ const autocomplete = {
             ajustes.list('cad_anestesistas').map(daLista),
             ajustes.list('cad_cirurgioes').map(daLista));
         }
-        /* rede de segurança: mesma pessoa nunca duas vezes */
-        const vistos = new Set();
-        return itens.filter(x => {
-          if (!x.label) return false;
-          const k = x.value || String(x.label).toLowerCase();
-          if (vistos.has(k)) return false;
-          vistos.add(k);
-          return true;
-        });
+        /* A REDE DE SEGURANÇA ESTAVA PRESA NA CHAVE ERRADA.
+           Ela deduplicava por `_id` — e o problema é exatamente dois CADASTROS
+           com ids diferentes para a MESMA pessoa, herdados da unificação das
+           três listas antigas. Por id, os dois são distintos; para quem olha a
+           tela, são a mesma linha repetida: mesmo nome, mesmo CRM, mesmo
+           carimbo. Escolher entre eles não é escolha nenhuma, e ainda deixa o
+           carimbo dependendo de qual dos dois a pessoa acertou.
+           A identidade de um profissional é o nome (sem acento e sem caixa)
+           mais o registro. Havendo repetição, fica a ficha mais completa: a
+           que tem carimbo, e entre essas a marcada como "meu perfil" — é a que
+           carrega a assinatura que vai sair no papel. */
+        return autocomplete._umaPessoaUmaLinha(itens);
       },
       (it) => aplicar(el, it.data)
     );

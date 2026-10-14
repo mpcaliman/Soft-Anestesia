@@ -985,8 +985,51 @@ const cloudRel = {
       }
     }
     if (enviados && !opts.silent) toast('☁️ ' + enviados + ' registro(s) que faltavam foram para a clínica');
+    cloudRel._ultimoEmpurrao = { enviados, falhas, restantes, em: Date.now() };
     return { enviados, falhas, restantes };
   },
+  _ultimoEmpurrao: null,
+
+  /* ENQUANTO ANDA, CONTINUA — EM SÉRIE.
+     Cada rodada envia no máximo 15 ou 25 registros, e a sincronização
+     periódica roda de 10 em 10 minutos. Com 271 atendimentos na fila isso dava
+     umas três HORAS de relógio, no melhor caso, com a faixa dizendo "Enviando
+     para a nuvem…" o tempo todo. Quem olha por cinco minutos conclui, com
+     razão, que travou.
+
+     Aqui as rodadas se encadeiam ENQUANTO houver progresso: continua em série,
+     uma requisição por vez — o contrário da rajada que derrubou o servidor de
+     manhã —, com uma pausa curta entre rodadas. Para no primeiro sinal de que
+     não está mais adiantando: rodada sem nenhum envio, qualquer falha, troca de
+     usuário, ou o teto de rodadas. Falha não é motivo para insistir: é motivo
+     para parar e dizer. */
+  async empurrarAteParar(opts = {}) {
+    if (cloudRel._empurrando) return null;
+    cloudRel._empurrando = true;
+    const teto = Math.max(1, Number(opts.rodadas) || 20);
+    const pausa = Math.max(0, opts.pausaMs == null ? 400 : Number(opts.pausaMs));
+    let enviados = 0, falhas = 0, rodadas = 0;
+    try {
+      const contexto = cloudRel._capturarContexto();
+      if (!contexto) return null;
+      for (let i = 0; i < teto; i++) {
+        if (!cloudRel._contextoValido(contexto, contexto.organizationId)) break;
+        const r = await cloudRel.empurrarPendentes(Object.assign({}, opts, { silent: true }));
+        rodadas++;
+        if (!r) break;
+        enviados += r.enviados || 0;
+        falhas += r.falhas || 0;
+        if (!r.enviados || r.falhas) break;
+        if (pausa) await new Promise(res => setTimeout(res, pausa));
+      }
+    } catch (e) {
+    } finally { cloudRel._empurrando = false; }
+    const resumo = { enviados, falhas, rodadas };
+    cloudRel._ultimoEmpurrao = Object.assign({}, cloudRel._ultimoEmpurrao || {}, resumo, { em: Date.now() });
+    if (enviados && !opts.silent) toast('☁️ ' + enviados + ' registro(s) que faltavam foram para a clínica');
+    return resumo;
+  },
+  _empurrando: false,
 
   /* ---- TRANSFERIR TUDO PARA A CLÍNICA (organização) ----
      Envia todos os registros carregados nesta sessão para a organização atual, em

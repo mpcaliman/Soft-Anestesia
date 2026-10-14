@@ -4830,7 +4830,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-14k</b><br>
+    v7.1 · build <b id="build-tag">2026-10-14o</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -12440,6 +12440,31 @@ const conexao = {
     } catch (e) {}
     return n;
   },
+  /* "ENVIANDO…" TEM DE SIGNIFICAR QUE ESTÁ ANDANDO.
+     A faixa dizia a mesma frase estivesse a fila andando, parada por falha, ou
+     apenas lenta — e com 271 atendimentos ela ficava horas idêntica na tela.
+     Quem olha por cinco minutos conclui, com razão, que travou; e se tivesse
+     travado de verdade, a tela diria exatamente a mesma coisa. Aviso que não
+     distingue "trabalhando" de "emperrado" não informa nada.
+     Agora ela compara com a última medição: quantos saíram, ou que a última
+     tentativa falhou, ou que ninguém tentou ainda. */
+  _ultimaMedida: null,
+  _andamento(pend) {
+    const agora = Date.now();
+    const antes = conexao._ultimaMedida;
+    conexao._ultimaMedida = { pend, em: agora };
+    const ultimo = (() => { try { return cloudRel._ultimoEmpurrao; } catch (e) { return null; } })();
+    if (ultimo && ultimo.falhas && !ultimo.enviados) {
+      return ' <b>A última tentativa de envio não passou</b> — o aviso continua até conseguir, e nada se perde até lá.';
+    }
+    if (antes && antes.pend > pend) {
+      return ' Já subiram <b>' + (antes.pend - pend) + '</b> desde a última conferência. O aviso some após a confirmação do último.';
+    }
+    if (antes && antes.pend === pend && agora - antes.em > 90000) {
+      return ' <b>A fila não andou nos últimos minutos.</b> Com o aplicativo aberto e internet, ela retoma sozinha; se ficar assim, me avise.';
+    }
+    return ' O aviso some após a confirmação.';
+  },
   pintar() {
     try {
       const fora = conexao.offline();
@@ -12455,7 +12480,7 @@ const conexao = {
       div.innerHTML = fora
         ? '<span>📴 <b>SEM INTERNET</b> — pode continuar trabalhando, nada se perde aqui. ' + quanto +
           ' O envio recomeça sozinho quando a internet voltar.</span>'
-        : '<span>⏳ <b>Enviando para a nuvem…</b> ' + quanto + ' O aviso some após a confirmação.</span>';
+        : '<span>⏳ <b>Enviando para a nuvem…</b> ' + quanto + conexao._andamento(pend) + '</span>';
       if (!el) document.body.appendChild(div);
     } catch (e) {}
   },
@@ -39032,14 +39057,28 @@ const fin = {
       patientKey: linker._chavePaciente(doc) || '', patientRef: doc._patientRef || '',
       caseId: doc._caseId || '', caseKey: doc._caseKey || '' };
     if (modOrigem === 'anestesia') {
-      c.paciente  = (doc.paciente && doc.paciente.nome) || '';
-      c.procedimento = (doc.procedimento && doc.procedimento.descricao) || '';
-      c.codigo    = (doc.procedimento && doc.procedimento.codigo) || '';
-      c.cirurgiao = (doc.procedimento && doc.procedimento.cirurgiao) || '';
-      c.hospital  = (doc.procedimento && doc.procedimento.hospital) || '';
-      c.convenio  = (doc.paciente && doc.paciente.convenio) || '';
-      c.dataProc  = (doc.procedimento && doc.procedimento.data) || '';
-      c.senha     = (doc.paciente && doc.paciente.senha) || '';
+      /* DOIS FORMATOS DE FICHA, E O FINANCEIRO SÓ ENXERGAVA UM.
+         A ficha preenchida pelo formulário guarda o paciente em bloco
+         (`paciente.nome`). Mas há fichas com os mesmos dados em campos
+         planos (`paciente_nome`): as do acervo recuperado da quarentena, as
+         que vieram de versões anteriores, as criadas por importação. Para
+         essas, `cab.paciente` saía VAZIO — e `fromDoc` tem uma linha que diz
+         "não cria se nem nome do paciente existe" e devolve null sem dizer
+         nada. O lançamento simplesmente não nascia, e nada na tela explicava.
+         O nome do paciente é o nome do paciente, esteja em bloco ou plano.
+         O bloco continua tendo preferência: é o formato de quem acabou de
+         preencher a ficha. */
+      const p = doc.paciente && typeof doc.paciente === 'object' ? doc.paciente : {};
+      const pr = doc.procedimento && typeof doc.procedimento === 'object' ? doc.procedimento : {};
+      const procTexto = typeof doc.procedimento === 'string' ? doc.procedimento : '';
+      c.paciente  = p.nome || doc.paciente_nome || (typeof doc.paciente === 'string' ? doc.paciente : '') || '';
+      c.procedimento = pr.descricao || procTexto || doc.cirurgia || '';
+      c.codigo    = pr.codigo || doc.procedimento_codigo || doc.cirurgia_cbhpm || '';
+      c.cirurgiao = pr.cirurgiao || doc.cirurgiao || '';
+      c.hospital  = pr.hospital || doc.hospital || doc.local || '';
+      c.convenio  = p.convenio || doc.convenio || '';
+      c.dataProc  = pr.data || doc.data_anestesia || doc.data || '';
+      c.senha     = p.senha || doc.senha || '';
     } else if (modOrigem === 'pre') {
       c.paciente  = doc.nome || '';
       /* AQUI ESTAVA O ERRO. O Financeiro recebia `doc.cirurgia` — a cirurgia
@@ -40061,19 +40100,30 @@ const fin = {
      editar o registro ATUALIZA a linha vinculada, nunca duplica. Linha que
      deixou de existir é apagada (se nasceu automática e ninguém mexeu) ou
      cancelada com o motivo (se já tinha sido trabalhada) — nunca fica órfã. */
+  /* POR QUE NÃO GEROU. Cada saída em branco de `fromDoc` tem um motivo
+     diferente, e eles pedem reações opostas: ligar o auto-financeiro, respeitar
+     uma decisão de "não cobrar", ou consertar um registro sem nome de paciente.
+     A tela dizia "verifique se o auto-financeiro está ligado" para todos — um
+     palpite apresentado como diagnóstico. Quem pede a geração explicitamente
+     lê este motivo. */
+  _motivo: '',
+  _recusar(motivo) { fin._motivo = motivo; return null; },
   fromDoc(modOrigem, doc) {
-    if (!fin.isAutoEnabled()) return null;
-    if (!doc || !doc._id) return null;
-    if (doc._relOrg && doc._relOrg !== cloudRel._org()) return null;
+    fin._motivo = '';
+    if (!fin.isAutoEnabled()) return fin._recusar('o lançamento automático está desligado em Ajustes');
+    if (!doc || !doc._id) return fin._recusar('o atendimento não foi encontrado');
+    if (doc._relOrg && doc._relOrg !== cloudRel._org()) return fin._recusar('o atendimento é de outra clínica');
     /* "Não gerar" foi uma decisão dele na finalização: uma gravação posterior
        não pode ressuscitar a cobrança por conta própria. */
     const atual = store.getById(modOrigem, doc._id) || doc;
     if (fin.finalizacao.decisaoDe(atual) === false &&
-        !store.list('financeiro').some(f => f._origemId === doc._id)) return null;
+        !store.list('financeiro').some(f => f._origemId === doc._id)) {
+      return fin._recusar('ao finalizar, foi decidido NÃO cobrar este atendimento');
+    }
 
     const cab = fin._cabecalho(modOrigem, doc);
     /* Não cria se nem nome do paciente existe */
-    if (!cab.paciente) return null;
+    if (!cab.paciente) return fin._recusar('o atendimento está sem nome de paciente');
 
     const existentes = store.list('financeiro').filter(f => f._origemId === doc._id);
     /* registros de antes desta versão não têm linha: são a linha principal */
@@ -40187,7 +40237,7 @@ const fin = {
       }
     });
 
-    if (!principal) return null;
+    if (!principal) return fin._recusar('o atendimento não tem procedimento principal para cobrar');
     return { item: principal, isNew, linhas: linhas.length, criadas, atualizadas, canceladas, removidas };
   }
 };
@@ -44960,18 +45010,20 @@ const financeiro = {
     if (!confirm('Gerar ' + marcados.length + ' lançamento(s) financeiro(s)?\n\n' +
       'Eles entram como PENDENTES, com os dados do atendimento. Nada é cobrado automaticamente e os valores podem ser ajustados depois.')) return;
     let feitos = 0, falhas = 0;
+    const motivos = new Set();
     marcados.forEach(x => {
       try {
         const doc = store.getById(x.mod, x.id);
         const r = doc ? fin.fromDoc(x.mod, doc) : null;
-        if (r) feitos++; else falhas++;
-      } catch (e) { falhas++; }
+        if (r) feitos++; else { falhas++; if (fin._motivo) motivos.add(fin._motivo); }
+      } catch (e) { falhas++; motivos.add(e && e.message ? e.message : 'erro inesperado'); }
     });
     modal.close();
     financeiro.render();
+    const porQue = motivos.size ? ' — ' + [...motivos].join('; ') : '';
     toast(feitos
-      ? '💰 ' + feitos + ' lançamento(s) gerado(s)' + (falhas ? ' · ' + falhas + ' não foi/foram possível(is)' : '')
-      : 'Nenhum lançamento foi gerado — verifique se o auto-financeiro está ligado.', feitos ? 'success' : 'warn');
+      ? '💰 ' + feitos + ' lançamento(s) gerado(s)' + (falhas ? ' · ' + falhas + ' não deu' + porQue : '')
+      : 'Nenhum lançamento foi gerado' + (porQue || ' — motivo não identificado, me avise'), feitos ? 'success' : 'warn');
   },
 
   _medicosConhecidos() {
