@@ -20108,6 +20108,69 @@ await test('PDF do backup: cada texto uma vez, rótulo sem dois-pontos dobrados,
   await page.close();
 });
 
+/* 270) "Nenhum procedimento neste mês" tem de dizer onde eles estão
+
+   Foto da tela, num celular: Produção do mês em setembro, "Nenhum procedimento
+   neste mês" — e nada além disso. Enquanto isso, a faixa do topo anunciava
+   "2 atendimento(s) aguardam recibo", ou seja, há lançamentos no sistema.
+
+   Lista vazia sem explicação faz a pessoa tentar mês a mês até desistir, e não
+   dá para distinguir três coisas muito diferentes: o mês está vazio; os
+   lançamentos existem mas sem data de procedimento; ou não há lançamento
+   nenhum porque o acervo ainda está em quarentena.
+
+   De quebra, o seletor de mês era um `input[type=month]`, que cada aparelho
+   desenha de um jeito — no celular saía como uma barra cinza sem indicação de
+   que era clicável. Vira mês + ano em listas, iguais em todo lugar. */
+await test('Produção do mês: o vazio diz em que meses estão os lançamentos', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-prod');
+    store.setList('financeiro', []);
+    ui.navegar('financeiro');
+    await new Promise(r => setTimeout(r, 200));
+
+    /* Caso 1: nada em lugar nenhum — manda conferir a quarentena. */
+    financeiro.relatorioProducao();
+    out.vazioTotal = /nenhum<\/b> lançamento financeiro|quarentena/i
+      .test((document.getElementById('prod-saida') || {}).textContent || '');
+    try { modal.close(); } catch (e) {}
+
+    /* Caso 2: há lançamentos, mas em OUTROS meses. */
+    store.setList('financeiro', [
+      { _id: 'f1', paciente: 'A', data_proc: '2026-08-10', valor_previsto: 100 },
+      { _id: 'f2', paciente: 'B', data_proc: '2026-08-22', valor_previsto: 200 },
+      { _id: 'f3', paciente: 'C', data_proc: '2026-10-02', valor_previsto: 300 }
+    ]);
+    financeiro.relatorioProducao();
+    document.getElementById('prod-mes').value = '09';
+    document.getElementById('prod-ano').value = '2026';
+    financeiro._producaoCalcular();
+    const txt = (document.getElementById('prod-saida') || {}).textContent || '';
+    out.dizQueMeses = /agosto\/2026/.test(txt) && /outubro\/2026/.test(txt) && /\(2\)/.test(txt);
+
+    /* Caso 3: escolhido um mês que TEM, a conta sai. */
+    document.getElementById('prod-mes').value = '08';
+    financeiro._producaoCalcular();
+    const txt2 = (document.getElementById('prod-saida') || {}).textContent || '';
+    out.calculaCerto = /Procedimentos/.test(txt2) && /\b2\b/.test(txt2) && /300,00/.test(txt2) === false;
+
+    /* O seletor é de listas, não um campo que cada aparelho desenha à sua
+       maneira. */
+    out.selects = document.getElementById('prod-mes').tagName === 'SELECT' &&
+                  document.getElementById('prod-ano').tagName === 'SELECT';
+    try { modal.close(); } catch (e) {}
+    store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.vazioTotal, 'sem lançamento nenhum, a tela aponta a quarentena como causa provável');
+  assert(r.dizQueMeses, 'havendo lançamentos em outros meses, ela DIZ quais são e quantos');
+  assert(r.calculaCerto, 'e o mês que tem lançamento calcula normalmente, sem incluir os de outro mês');
+  assert(r.selects, 'mês e ano são listas — não um campo que cada aparelho desenha de um jeito');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

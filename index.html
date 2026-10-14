@@ -4233,10 +4233,17 @@ body.dash-auxiliar #module-dashboard #pendencias-card[data-detail] { display: bl
 @media print{ .acoes-cab, .acoes-rodape{ display:none !important; } }
 
 /* Faixa de armazenamento cheio — avisa sem tomar a tela */
+/* A faixa colava no TOPO ABSOLUTO da tela e, no celular, caía por baixo do
+   relógio e dos ícones do sistema: o texto dela e a hora do aparelho ficavam
+   escritos um sobre o outro, e nenhum dos dois dava para ler. Num aviso que
+   diz "2 atendimentos aguardam recibo", ilegível é o mesmo que ausente.
+   `env(safe-area-inset-top)` é a altura que o próprio aparelho reserva para a
+   sua barra; onde não existe, vale 0 e nada muda. */
 .faixa-sem-net{
   position: fixed; left: 0; right: 0; top: 0; z-index: 9998;
   background: #8a1c1c; color: #fff; font-size: .82rem; line-height: 1.45;
-  padding: 9px 14px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,.22);
+  padding: calc(9px + env(safe-area-inset-top, 0px)) 14px 9px;
+  text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,.22);
 }
 .faixa-sem-net-subindo{ background: #7a4b12; }
 @media print{ .faixa-sem-net{ display: none !important; } }
@@ -4809,7 +4816,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-13i</b><br>
+    v7.1 · build <b id="build-tag">2026-10-14a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -44524,11 +44531,31 @@ const financeiro = {
   },
   relatorioProducao() {
     const hoje = new Date();
-    const mesAtual = hoje.getFullYear() + '-' + String(hoje.getMonth() + 1).padStart(2, '0');
     const medicos = financeiro._medicosConhecidos();
+    /* MÊS E ANO COMO LISTAS, não como `input[type=month]`.
+       Aquele campo é renderizado de um jeito em cada aparelho — no celular ele
+       aparecia como uma barra cinza sem nada que indicasse ser clicável — e o
+       formato do valor depende do navegador. Duas listas funcionam igual em
+       todo lugar, mostram de cara que há escolha a fazer, e os anos oferecidos
+       são os que REALMENTE têm lançamento, mais o corrente. */
+    const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+      'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+    const anos = new Set([hoje.getFullYear()]);
+    (store.list('financeiro') || []).forEach(x => {
+      const d = financeiro._dataDoLancamento(x, 'proc') || financeiro._dataDoLancamento(x, 'registro');
+      const a = Number(String(d).slice(0, 4));
+      if (a > 1900) anos.add(a);
+    });
+    const listaAnos = Array.from(anos).sort((a, b) => b - a);
     modal.open('🩺 Produção do mês',
       '<div class="grid" style="margin:0">' +
-      '<div class="field col-6"><label>Mês</label><input type="month" id="prod-mes" value="' + mesAtual + '"></div>' +
+      '<div class="field col-3"><label>Mês</label><select id="prod-mes">' +
+      MESES.map((m, i) => '<option value="' + String(i + 1).padStart(2, '0') + '"' +
+        (i === hoje.getMonth() ? ' selected' : '') + '>' + m + '</option>').join('') +
+      '</select></div>' +
+      '<div class="field col-3"><label>Ano</label><select id="prod-ano">' +
+      listaAnos.map(a => '<option' + (a === hoje.getFullYear() ? ' selected' : '') + '>' + a + '</option>').join('') +
+      '</select></div>' +
       '<div class="field col-6"><label>De quem</label><select id="prod-quem">' +
       '<option value="">🏥 Toda a clínica</option>' +
       medicos.map(n => '<option value="' + utils.escapeHTML(n) + '">🩺 ' + utils.escapeHTML(n) + '</option>').join('') +
@@ -44539,26 +44566,68 @@ const financeiro = {
       '<button class="btn btn-primary" onclick="financeiro._producaoCalcular()">Calcular</button>' +
       '<button class="btn" onclick="financeiro._producaoCsv()">📊 Baixar CSV</button>' +
       '<button class="btn btn-ghost" onclick="modal.close()">Fechar</button>');
+    /* Mudou mês, ano ou médico: recalcula na hora. Ter de apertar "Calcular"
+       para ver o efeito de uma escolha faz a pessoa concluir que não há nada
+       quando só esqueceu o botão. */
+    ['prod-mes', 'prod-ano', 'prod-quem'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('change', () => financeiro._producaoCalcular());
+    });
     financeiro._producaoCalcular();
   },
   _producaoLista() {
-    const mes = (document.getElementById('prod-mes') || {}).value || '';
+    const mm = (document.getElementById('prod-mes') || {}).value || '';
+    const aa = (document.getElementById('prod-ano') || {}).value || '';
     const quem = (document.getElementById('prod-quem') || {}).value || '';
-    if (!mes) return { mes, quem, lista: [] };
+    if (!mm || !aa) return { mes: '', quem, lista: [] };
+    const mes = aa + '-' + mm;
     const de = mes + '-01';
-    const [a, m] = mes.split('-').map(Number);
-    const ultimo = new Date(a, m, 0).getDate();
+    const ultimo = new Date(Number(aa), Number(mm), 0).getDate();
     const ate = mes + '-' + String(ultimo).padStart(2, '0');
     let lista = financeiro.lancamentosDoPeriodo(de, ate, 'proc');
     if (quem) { try { lista = dashboard._filtrarDeAlguem(lista, quem); } catch (e) {} }
     return { mes, quem, de, ate, lista };
   },
+  /* ONDE ESTÃO OS LANÇAMENTOS, por mês. "Nenhum procedimento neste mês" sem
+     mais nada deixa a pessoa sem saber se o mês está vazio, se o filtro está
+     errado ou se o sistema não enxerga os dados — e ela tenta mês a mês até
+     desistir. A tela diz em quais meses há o quê. */
+  _mesesComLancamento() {
+    const por = new Map();
+    (store.list('financeiro') || []).forEach(x => {
+      const d = financeiro._dataDoLancamento(x, 'proc');
+      const k = String(d).slice(0, 7);
+      if (!/^\d{4}-\d{2}$/.test(k)) return;
+      por.set(k, (por.get(k) || 0) + 1);
+    });
+    return Array.from(por.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+  },
   _producaoCalcular() {
     const host = document.getElementById('prod-saida'); if (!host) return;
     const { lista, quem } = financeiro._producaoLista();
     if (!lista.length) {
-      host.innerHTML = '<p style="font-size:.86rem;color:var(--danger)">Nenhum procedimento neste mês' +
-        (quem ? ' para ' + utils.escapeHTML(quem) : '') + '.</p>';
+      const total = (store.list('financeiro') || []).length;
+      const meses = financeiro._mesesComLancamento();
+      const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+        'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+      const rotulo = k => { const [a, m] = k.split('-'); return MESES[Number(m) - 1] + '/' + a; };
+      let ajuda;
+      if (!total) {
+        ajuda = 'Não há <b>nenhum</b> lançamento financeiro neste ambiente ainda. ' +
+          'Se você esperava encontrar os antigos, confira se o acervo em quarentena já foi arquivado ' +
+          '(Programador → Migração segura do legado).';
+      } else if (!meses.length) {
+        ajuda = 'Há <b>' + total + '</b> lançamento(s), mas nenhum deles tem data de procedimento preenchida — ' +
+          'por isso não entram num relatório de produção. Dá para vê-los pelo <b>📤 Relatório do período</b>, ' +
+          'contando pela data de registro.';
+      } else {
+        ajuda = 'Há <b>' + total + '</b> lançamento(s) no total. Com procedimento em: ' +
+          meses.slice(0, 8).map(([k, n]) => '<b>' + utils.escapeHTML(rotulo(k)) + '</b> (' + n + ')').join(' · ') +
+          (meses.length > 8 ? ' e outros' : '') + '.';
+      }
+      host.innerHTML = '<p style="font-size:.86rem;color:var(--danger);margin:0 0 6px">Nenhum procedimento neste mês' +
+        (quem ? ' para ' + utils.escapeHTML(quem) : '') + '.</p>' +
+        '<p style="font-size:.82rem;color:var(--text-soft);margin:0">' + ajuda + '</p>';
       return;
     }
     const n = v => parseFloat(v) || 0;
