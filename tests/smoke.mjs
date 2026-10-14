@@ -17581,6 +17581,90 @@ await test('Rascunhos: cópia preservada não desce da nuvem, e as abas param de
   await page.close();
 });
 
+/* 269c) O LAÇO DAS ABAS É LOCAL — uma decisão pendente por ficha, não uma por
+   sincronização
+
+   A contagem no servidor veio ZERO: `select count(*) from public.drafts where
+   doc_id like 'rasc_conflito_%'` → 0. As trinta abas da foto nunca estiveram
+   na nuvem. Elas nascem e ficam aqui.
+
+   O mecanismo: enquanto a ficha fica aberta no computador e mexem nela no
+   celular, CADA descida divergente fabrica mais uma cópia. A impressão digital
+   que deveria deduplicá-las inclui o conteúdo local — que muda a cada vez —,
+   então nunca batia. Oito descidas, nove abas, todas com o mesmo nome.
+
+   Trinta abas iguais não são trinta decisões: são nenhuma, porque ninguém
+   escolhe entre coisas que não consegue distinguir.
+
+   E o conserto não pode ser só "não cria a segunda": parar de criar e CONTINUAR
+   adotando a versão da nuvem apagaria da tela o que foi digitado depois da
+   primeira preservação. Por isso, havendo decisão pendente, a adoção também
+   para — o que está na tela fica, e o conflito que já existe é que precisa ser
+   resolvido. */
+await test('Abas: uma decisão pendente por ficha, e o digitado depois não é sobreposto', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const mod = 'anestesia';
+    __smokeBindOrg('org-laco');
+    rascunhos.setList(mod, [{ id: 'r-asafe', label: 'ASAFE JANUARIO LOPES',
+      dados: { paciente_nome: 'ASAFE JANUARIO LOPES', procedimento: 'Colecistectomia' },
+      updatedAt: '2026-10-14T10:00:00Z', _draftSyncedLocalAt: '2026-10-14T09:00:00Z',
+      _draftVersion: 1 }]);
+
+    /* oito descidas divergentes, com digitação dos dois lados entre elas */
+    for (let i = 0; i < 8; i++) {
+      const lista = rascunhos.list(mod);
+      const local = lista.find(x => x.id === 'r-asafe');
+      if (!local) break;
+      local.dados = Object.assign({}, local.dados, { tecnica: 'digitado aqui ' + i });
+      local.updatedAt = '2026-10-14T1' + i + ':30:00Z';
+      rascunhos.setList(mod, lista);
+      rascunhosSync._preservarConflito(mod, local, Object.assign({}, local, {
+        _draftVersion: (Number(local._draftVersion) || 1) + 1,
+        dados: Object.assign({}, local.dados, { observacoes: 'do celular ' + i }),
+        updatedAt: '2026-10-14T1' + i + ':45:00Z'
+      }), { organizationId: cofre.org() });
+    }
+    const lista = rascunhos.list(mod) || [];
+    out.abas = lista.length;
+    out.copias = lista.filter(x => x && x._draftConflictOf).length;
+    out.rotulos = lista.map(x => String(x.label || '').slice(0, 45));
+    /* o que foi digitado DEPOIS da primeira preservação continua na tela: a
+       adoção da versão da nuvem para junto com a preservação */
+    const aberta = lista.find(x => x && x.id === 'r-asafe');
+    out.digitadoDepoisSobrevive = !!aberta && aberta.dados && aberta.dados.tecnica === 'digitado aqui 7';
+    /* A PRIMEIRA adoção é legítima e tem de acontecer: ali ainda não havia
+       decisão pendente, e a nuvem traz o carimbo que faltava. O que não pode é
+       continuar adotando DEPOIS — seria sobrepor, a cada descida, o que foi
+       digitado aqui enquanto a decisão espera. Por isso o campo vindo da nuvem
+       fica congelado no da primeira rodada. */
+    out.naoAdotouDepois = !!aberta && (aberta.dados || {}).observacoes === 'do celular 0';
+
+    /* resolvida a pendência (cópia fechada), a próxima divergência volta a
+       preservar — a trava é "uma por vez", não "uma para sempre" */
+    rascunhos.setList(mod, lista.filter(x => x && !x._draftConflictOf));
+    const base = rascunhos.list(mod)[0];
+    base._draftSyncedLocalAt = '2026-10-14T00:00:00Z';
+    base.updatedAt = '2026-10-14T23:00:00Z';
+    rascunhos.setList(mod, [base]);
+    rascunhosSync._preservarConflito(mod, base, Object.assign({}, base, {
+      _draftVersion: 99, dados: { paciente_nome: 'ASAFE JANUARIO LOPES', tecnica: 'OUTRA COISA' }
+    }), { organizationId: cofre.org() });
+    out.voltaAPreservar = (rascunhos.list(mod) || []).some(x => x && x._draftConflictOf);
+    return out;
+  });
+  assert(r.abas === 2,
+    'oito descidas divergentes não podem virar ' + r.abas + ' abas: ' + JSON.stringify(r.rotulos));
+  assert(r.copias === 1, 'uma decisão pendente por ficha — trinta cópias iguais não são trinta decisões');
+  assert(r.digitadoDepoisSobrevive,
+    'o que foi digitado aqui depois da preservação tem de continuar na tela');
+  assert(r.naoAdotouDepois,
+    'com decisão pendente, as descidas seguintes não podem continuar sobrepondo a tela — senão o conserto vira perda');
+  assert(r.voltaAPreservar, 'resolvida a pendência, a próxima divergência preserva de novo: a trava é "uma por vez"');
+  await page.close();
+});
+
 /* A CÓPIA PRESERVADA NÃO PODE FABRICAR A PRÓXIMA.
    ---------------------------------------------------------------------------
    Foto da tela, num computador em uso: centenas de abas "CELINA ALVES DOS

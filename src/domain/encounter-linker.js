@@ -171,6 +171,22 @@ const rascunhosSync = {
        retrato, com o sufixo empilhado no nome, e cada geração fabricando a
        seguinte. Chegando aqui, a cadeia para. */
     if (local._draftConflictOf) return null;
+    /* UMA DECISÃO PENDENTE POR RASCUNHO, E NÃO UMA POR SINCRONIZAÇÃO.
+       Este era o laço de verdade — e ele é inteiramente local: o servidor não
+       guarda cópia nenhuma. Enquanto a ficha fica aberta aqui e mexem nela no
+       celular, CADA descida divergente fabricava mais uma cópia, porque a
+       impressão digital que deveria deduplicá-las inclui o conteúdo local, que
+       muda a cada vez — nunca batia. Oito descidas, nove abas, todas com o
+       mesmo nome. Trinta abas iguais não são trinta decisões: são nenhuma,
+       porque ninguém escolhe entre coisas que não consegue distinguir.
+       Havendo cópia desta ficha ainda sem decisão, a divergência nova NÃO
+       vira outra aba — e, principalmente, a versão da nuvem NÃO sobrepõe o que
+       está na tela. Parar de adotar é o que impede a perda: o que foi digitado
+       aqui depois da primeira preservação continua onde está, e o conflito que
+       já existe é que precisa ser resolvido. Resolvida ou fechada a cópia, a
+       próxima divergência volta a preservar normalmente. */
+    const jaPreservada = lista.some(x => x && x._draftConflictOf === local.id);
+    if (jaPreservada) return null;
     /* CONTEÚDO IGUAL NÃO É CONFLITO, venha de onde vier.
        A trava está AQUI, e não só em quem chama, porque são dois caminhos — o
        envio e a descida — e o segundo também preservava sem olhar. Não há o
