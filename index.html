@@ -969,6 +969,13 @@ body.ficha-finalizada .lab-item input.lab-fora {
 
 /* === PROCEDIMENTOS EXTRAS NA PRÉ === */
 .pre-procs-lista { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+/* O principal usa a MESMA régua dos adicionais: lidos em sequência, campos de
+   larguras diferentes para a mesma coisa fazem a vista procurar duas vezes. */
+.pre-proc-principal { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+.pre-proc-principal .pre-proc-cod { flex: 0 0 130px; width: 130px; font-size: .84rem; }
+.pre-proc-principal .pre-proc-qtd { flex: 0 0 62px; width: 62px; font-size: .84rem; }
+.pre-proc-principal .pre-proc-lado { flex: 0 0 112px; width: 112px; font-size: .84rem; }
+@media (max-width: 640px) { .pre-proc-principal { flex-wrap: wrap; } }
 .pre-proc-row { display: flex; gap: 6px; align-items: center; }
 /* A regra base `input[type="text"] { width:100% }` tem especificidade MAIOR
    que uma classe sozinha: os 130px do código eram ignorados, o campo pedia a
@@ -4819,7 +4826,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-14c</b><br>
+    v7.1 · build <b id="build-tag">2026-10-14d</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -5110,6 +5117,27 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
               <textarea name="cirurgia" class="cbhpm-autocomplete campo-cirurgia" rows="2"
                 placeholder="Digite parte do procedimento ou o código TUSS..." style="flex:1"></textarea>
               <button type="button" class="btn btn-primary btn-sm" style="flex-shrink:0;padding:0 12px" onclick="pre.procs.add()" title="Adicionar mais um procedimento">+</button>
+            </div>
+            <!-- O PROCEDIMENTO PRINCIPAL TAMBÉM É CÓDIGO, QUANTIDADE E LADO.
+                 Os procedimentos ADICIONAIS (o ➕ acima) já tinham os quatro
+                 campos; o principal — o que quase toda ficha tem, e muitas vezes
+                 o único — era só um texto. Resultado: o que mais aparece na guia
+                 era justamente o que ia sem código e sem lado, e lado faltando em
+                 guia vira glosa.
+                 O modelo já esperava estes campos (`cirurgia.daPreDoc` lê
+                 `procedimento_codigo` e `lateralidade`); eles só não existiam na
+                 tela. Digitando o código, a descrição vem; digitando a descrição,
+                 o código vem. -->
+            <div class="pre-proc-principal">
+              <!-- O NOME É `cirurgia_cbhpm` DE PROPÓSITO: é exatamente o campo
+                   que o autocomplete já criava ESCONDIDO para guardar o código
+                   escolhido (`cbhpm._campoCodigo` procura por `<nome>_cbhpm`).
+                   Tornando-o visível, escolher pela descrição continua
+                   preenchendo o código como sempre fez — e agora dá para
+                   digitar o código direto. Um mecanismo, não dois. -->
+              <input type="text" name="cirurgia_cbhpm" class="pre-proc-cod" placeholder="Código TUSS" title="Código TUSS/CBHPM — digite o código, ou escolha pela descrição acima e ele vem sozinho">
+              <input type="number" name="procedimento_quantidade" class="pre-proc-qtd" min="1" step="1" value="1" title="Quantidade" oninput="markDirty()">
+              <select name="lateralidade" class="pre-proc-lado" title="Lateralidade — deixe em branco quando não se aplica" onchange="markDirty()"></select>
             </div>
             <div id="pre-procs-lista" class="pre-procs-lista"></div>
           </div>
@@ -28491,15 +28519,26 @@ const cirurgia = {
      dado de quem preencheu só ele. */
   daPreDoc(doc) {
     if (!doc) return [];
-    const lista = cirurgia.lista(doc._procsExtra);
-    if (lista.length) return lista;
-    const solto = cirurgia.normalizar({
-      codigo: doc.procedimento_codigo || '',
+    /* O PRINCIPAL ENTRA PRIMEIRO, E NÃO SÓ QUANDO NÃO HÁ OUTROS.
+       Antes, havendo procedimentos adicionais, o principal era DESCARTADO —
+       quem preenchia a cirurgia e depois acrescentava mais uma perdia a
+       primeira no caminho para a ficha, para o termo e para a cobrança. Ele é
+       o procedimento do ato; os outros são os demais. */
+    const principal = cirurgia.normalizar({
+      /* `cirurgia_cbhpm` é o campo do código, visível desde que o principal
+         deixou de ser só texto; os outros nomes são formatos anteriores. */
+      codigo: doc.cirurgia_cbhpm || doc.procedimento_codigo || '',
       descricao: doc.cirurgia || doc.procedimento_proposto || '',
-      quantidade: 1,
+      quantidade: doc.procedimento_quantidade || 1,
       lateralidade: doc.lateralidade || ''
     });
-    return solto ? [solto] : [];
+    const demais = cirurgia.lista(doc._procsExtra);
+    if (!principal) return demais;
+    /* Sem duplicar quando o mesmo procedimento está nos dois lugares. */
+    const mesma = (a, b) => (a.codigo && b.codigo)
+      ? a.codigo === b.codigo
+      : a.descricao.toLowerCase() === b.descricao.toLowerCase();
+    return [principal].concat(demais.filter(d => !mesma(principal, d)));
   },
   /* Os <option> de lateralidade, para qualquer tela que precise do campo. */
   opcoesLado(sel) {
@@ -29334,6 +29373,35 @@ const cbhpm = {
       if (!input._cbhpmLigado) cbhpm.ligar(input);
       cbhpm._garantirMais(input);
     });
+    cbhpm._ligarProcPrincipal(root);
+  },
+  /* O CÓDIGO DO PROCEDIMENTO PRINCIPAL DA PRÉ, NOS DOIS SENTIDOS.
+     Escolher pela descrição já preenchia o código — é o mesmo campo que o
+     autocomplete usava escondido. Faltava o caminho inverso: digitar o código
+     e a descrição vir sozinha, que é como se trabalha quando a guia já traz o
+     TUSS. E o seletor de lado precisa das opções do modelo único, para não
+     haver duas listas de lateralidade no sistema. */
+  _ligarProcPrincipal(root = document) {
+    try {
+      const form = (root.getElementById ? root : document).getElementById('form-pre');
+      if (!form) return;
+      const lado = form.querySelector('[name="lateralidade"]');
+      if (lado && !lado.options.length) lado.innerHTML = cirurgia.opcoesLado('');
+      const cod = form.querySelector('[name="cirurgia_cbhpm"]');
+      if (!cod || cod._cbhpmCodLigado) return;
+      cod._cbhpmCodLigado = true;
+      const desc = form.querySelector('[name="cirurgia"]');
+      cbhpm.ligarCodigo(cod, {
+        onMatch: (match) => {
+          /* Não sobrescreve o que a pessoa escreveu: o nome do procedimento na
+             guia às vezes é mais específico que o da tabela. */
+          if (desc && !String(desc.value || '').trim()) {
+            desc.value = match[1];
+            desc.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        }
+      });
+    } catch (e) {}
   },
 
   /* Botão ➕ ao lado de TODO campo CBHPM: acrescenta ' + ' para digitar mais um

@@ -20246,6 +20246,85 @@ await test('Atendimentos sem lançamento: a lista acha, e abrir a tela não cobr
   await page.close();
 });
 
+/* 272) O procedimento principal da pré também é código, quantidade e lado
+
+   "O campo cirurgia proposta deve ter também o código numérico TUSS. Na
+    sequência: código numérico, descrição (ser possível digitar pelo numérico ou
+    pelo descritivo), quantidade, lateralidade. Esse campo deve ser
+    correspondente ao campo Cirurgia da ficha, TCLE, financeiro, orçamento."
+
+   O modelo compartilhado (`cirurgia`) já existia, e os procedimentos
+   ADICIONAIS da pré já tinham os quatro campos. Faltava justamente no
+   PRINCIPAL — o que quase toda ficha tem, e muitas vezes o único. Ou seja: o
+   que mais aparece na guia era o que ia sem código e sem lado, e lado faltando
+   em guia vira glosa.
+
+   De quebra, `daPreDoc` DESCARTAVA o principal quando havia adicionais: quem
+   preenchia a cirurgia e depois acrescentava outra perdia a primeira no
+   caminho para a ficha, o termo e a cobrança. */
+await test('Cirurgia proposta: código, quantidade e lado atravessam pré, ficha, termo e cobrança', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-tuss');
+    ['pre', 'anestesia', 'termo'].forEach(m => store.setList(m, []));
+    ui.navegar('pre');
+    await new Promise(r => setTimeout(r, 350));
+
+    const f = document.getElementById('form-pre');
+    out.temCampos = !!f.querySelector('[name="cirurgia_cbhpm"]') &&
+                    !!f.querySelector('[name="procedimento_quantidade"]') &&
+                    !!f.querySelector('[name="lateralidade"]');
+    /* O seletor de lado usa a lista do modelo único, não uma cópia. */
+    const lado = f.querySelector('[name="lateralidade"]');
+    out.ladosDoModelo = Array.from(lado.options).map(o => o.value).join(',') ===
+      cirurgia.LATERALIDADES.map(([k]) => k).join(',');
+
+    f.querySelector('[name="nome"]').value = 'Paciente TUSS';
+    f.querySelector('[name="cirurgia"]').value = 'Colecistectomia videolaparoscópica';
+    f.querySelector('[name="cirurgia_cbhpm"]').value = '31003010';
+    f.querySelector('[name="procedimento_quantidade"]').value = '2';
+    lado.value = 'bilateral';
+
+    const doc = utils.formData('form-pre');
+    const lista = cirurgia.daPreDoc(doc);
+    out.principalSai = lista.length === 1 && lista[0].codigo === '31003010' &&
+      lista[0].quantidade === 2 && lista[0].lateralidade === 'bilateral';
+    out.textoCompleto = /31003010/.test(cirurgia.texto(lista[0])) &&
+      /2×/.test(cirurgia.texto(lista[0])) && /Bilateral/.test(cirurgia.texto(lista[0]));
+
+    /* Com procedimentos ADICIONAIS, o principal não pode mais ser descartado. */
+    const comExtras = Object.assign({}, doc, {
+      _procsExtra: [{ codigo: '31003011', descricao: 'Hérnia inguinal', quantidade: 1, lateralidade: 'direita' }]
+    });
+    const lista2 = cirurgia.daPreDoc(comExtras);
+    out.principalSobrevive = lista2.length === 2 && lista2[0].codigo === '31003010';
+    out.extraJunto = lista2[1].codigo === '31003011';
+
+    /* E o mesmo procedimento nos dois lugares não sai duplicado. */
+    const duplicado = Object.assign({}, doc, {
+      _procsExtra: [{ codigo: '31003010', descricao: 'Colecistectomia videolaparoscópica' }]
+    });
+    out.naoDuplica = cirurgia.daPreDoc(duplicado).length === 1;
+
+    /* Na folha impressa sai o conjunto, não só a descrição. */
+    const html = printPreview._cirurgiaDaPre(doc);
+    out.naFolha = /31003010/.test(html) && /Bilateral/.test(html);
+
+    ['pre', 'anestesia', 'termo'].forEach(m => store.setList(m, []));
+    return out;
+  });
+  assert(r.temCampos, 'o principal precisa ter código TUSS, quantidade e lateralidade');
+  assert(r.ladosDoModelo, 'a lateralidade vem do modelo único — duas listas divergiriam');
+  assert(r.principalSai && r.textoCompleto,
+    'código, quantidade e lado têm de sair no modelo compartilhado e no texto do papel');
+  assert(r.principalSobrevive && r.extraJunto,
+    'havendo procedimentos adicionais, o principal NÃO pode ser descartado');
+  assert(r.naoDuplica, 'o mesmo procedimento nos dois lugares sai uma vez só');
+  assert(r.naFolha, 'a folha impressa mostra o código e o lado, que é o que a guia confere');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
