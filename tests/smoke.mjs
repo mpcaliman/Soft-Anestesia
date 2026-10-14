@@ -20490,6 +20490,74 @@ await test('Busca clínica: acha dentro da ficha, mostra o trecho e diz em que c
   await page.close();
 });
 
+/* 275) Marcar etapa de faturamento numa ficha FINALIZADA tem de funcionar
+
+   "Nessa janela de pendência, ao determinar a ação não acontece nada."
+
+   E não acontecia mesmo. A trava central que protege ficha finalizada desvia
+   QUALQUER gravação para o caminho do adendo clínico — inclusive a marcação da
+   etapa de faturamento, que não é conteúdo clínico nenhum. Como a janela de
+   Pendências de convênio só lista fichas FINALIZADAS (é a condição para
+   entrarem nela), nenhuma marcação pegava. E falhava calado: a tela se
+   redesenhava igual, e a pessoa escolhia de novo achando que errara o clique.
+
+   O que este teste fixa, nas duas direções:
+   • o andamento da cobrança passa (não é o documento: não sai na impressão nem
+     entra na allowlist clínica da retificação);
+   • qualquer alteração CLÍNICA junto continua caindo no adendo — a defesa não
+     foi afrouxada, foi delimitada. */
+await test('Pendência de convênio: a etapa marca em ficha finalizada, e o clínico segue imutável', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-pend');
+    const hoje = new Date().toISOString().slice(0, 10);
+    store.setList('financeiro', []);
+    store.setList('anestesia', [{
+      _id: 'pf1', _finalizado: true, _finalizadoEm: new Date().toISOString(),
+      paciente: { nome: 'Fabiano Finalizado', convenio: 'Bradesco Saúde', senha: 'K3EK7V7' },
+      procedimento: { data: hoje, descricao: 'Colecistectomia' }
+    }]);
+
+    out.entraNaLista = pendencias.listar().some(p => p.id === 'pf1');
+
+    pendencias.marcarStatus('anestesia', 'pf1', 'faturado', true);
+    const d = store.getById('anestesia', 'pf1') || {};
+    out.marcou = !!(d._faturamento && d._faturamento.faturado);
+    out.deuBaixa = !!d._pendResolvida;
+    out.saiuDaLista = !pendencias.listar().some(p => p.id === 'pf1');
+    /* O documento clínico não pode ter mudado. */
+    out.clinicoIntacto = (d.procedimento || {}).descricao === 'Colecistectomia' &&
+      (d.paciente || {}).nome === 'Fabiano Finalizado' && d._finalizado === true;
+
+    /* A defesa continua de pé: alteração CLÍNICA numa ficha finalizada não
+       passa por esta porta. */
+    const tentativa = JSON.parse(JSON.stringify(store.getById('anestesia', 'pf1')));
+    tentativa.procedimento.descricao = 'OUTRA CIRURGIA';
+    tentativa._faturamento = Object.assign({}, tentativa._faturamento, { cobrado: new Date().toISOString() });
+    store.save('anestesia', tentativa);
+    const d2 = store.getById('anestesia', 'pf1') || {};
+    out.clinicoNaoPassou = (d2.procedimento || {}).descricao === 'Colecistectomia';
+
+    /* E em registro NÃO finalizado continua como sempre foi. */
+    store.setList('anestesia', [{ _id: 'pf2', paciente: { nome: 'Aberto', convenio: 'Amil' }, procedimento: { data: hoje } }]);
+    pendencias.marcarStatus('anestesia', 'pf2', 'cobrado', true);
+    const d3 = store.getById('anestesia', 'pf2') || {};
+    out.naoFinalizadoOk = !!(d3._faturamento && d3._faturamento.cobrado);
+
+    store.setList('anestesia', []); store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.entraNaLista, 'o cenário exige exatamente o caso real: ficha finalizada na lista de pendências');
+  assert(r.marcou, 'marcar a etapa de faturamento tem de gravar — era isto que não acontecia');
+  assert(r.deuBaixa && r.saiuDaLista, 'e a pendência sai da lista, que é o ponto de marcar');
+  assert(r.clinicoIntacto, 'sem tocar no documento clínico');
+  assert(r.clinicoNaoPassou,
+    'alteração clínica numa ficha finalizada continua recusada — a defesa foi delimitada, não afrouxada');
+  assert(r.naoFinalizadoOk, 'em ficha aberta, nada muda em relação a antes');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

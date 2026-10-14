@@ -519,6 +519,30 @@ const store = {
     }
     return list;
   },
+  /* Campos que seguem mudando DEPOIS de o documento estar assinado, porque não
+     são o documento: o andamento da cobrança e a baixa da pendência. Qualquer
+     outro campo continua exigindo adendo. */
+  ADMIN_POS_FINALIZACAO: ['_faturamento', '_pendResolvida'],
+  _mudancaSoAdministrativa(prev, item) {
+    try {
+      const ignorar = new Set(['_updatedAt', '_rev', '_updatedBy']);
+      const admin = new Set(store.ADMIN_POS_FINALIZACAO);
+      const chaves = new Set(Object.keys(prev || {}).concat(Object.keys(item || {})));
+      const mudou = {};
+      let algum = false;
+      for (const k of chaves) {
+        if (ignorar.has(k)) continue;
+        const a = JSON.stringify(prev ? prev[k] : undefined);
+        const b = JSON.stringify(item ? item[k] : undefined);
+        if (a === b) continue;
+        if (!admin.has(k)) return null;      /* mudou algo clínico: não é só administrativo */
+        mudou[k] = item[k];
+        algum = true;
+      }
+      return algum ? mudou : null;
+    } catch (e) { return null; }
+  },
+
   /* Salva um item; se data._id existir, atualiza, senão adiciona */
   save(modKey, item) {
     const list = store.list(modKey);
@@ -526,6 +550,32 @@ const store = {
     const prevExistente = isNew ? null : list.find(x => x._id === item._id);
     const finalizaveis = ['pre','consulta','anestesia','recuperacao','risco','termo','prescricao','documentos'];
     if (prevExistente && prevExistente._finalizado && finalizaveis.indexOf(modKey) >= 0) {
+      /* O FLUXO DE FATURAMENTO NÃO É CONTEÚDO DO PRONTUÁRIO.
+         Marcar "faturado", "cobrado" ou "glosa" numa ficha finalizada caía
+         aqui e virava tentativa de CORREÇÃO CLÍNICA — que é recusada, e em
+         silêncio. Na tela de Pendências de convênio, escolher a etapa não
+         fazia nada: todas as fichas da lista estão finalizadas, que é
+         justamente a condição para entrarem nela.
+
+         Esses dois campos não são o documento: não saem na impressão, não
+         entram na allowlist clínica da retificação e não dizem nada sobre o
+         paciente. São o andamento da cobrança, que continua depois de o ato
+         estar assinado — e o ato continua imutável.
+
+         A defesa central fica inteira: só passa quando NADA ALÉM deles muda, e
+         o que é gravado é o registro anterior com esses campos aplicados por
+         cima. Vindo qualquer alteração clínica junto, cai no caminho de sempre,
+         o do adendo. */
+      const administrativo = store._mudancaSoAdministrativa(prevExistente, item);
+      if (administrativo) {
+        const alvo = list.find(x => x._id === item._id);
+        if (alvo) {
+          Object.assign(alvo, administrativo);
+          alvo._updatedAt = new Date().toISOString();
+          store.setList(modKey, list);
+          return alvo;
+        }
+      }
       /* Defesa central: mesmo um módulo que esqueça a checagem na própria tela
          não consegue substituir uma ficha finalizada no cache offline. */
       try {
