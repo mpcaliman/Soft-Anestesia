@@ -12444,6 +12444,16 @@ const conexao = {
       const sair = () => {
         try { if (!ambiente.compartilhado()) return; } catch (e) { return; }
         try { modoNuvem.manutencao({ silent: true, dias: 0 }); } catch (e) {}
+        /* A LIMPEZA TEM DE ALCANÇAR A MEMÓRIA, E NÃO SÓ A GAVETA.
+           `manutencao` tira do armazenamento o que já subiu para a nuvem, mas o
+           app serve as listas de um cache em memória — que continuava com o
+           atendimento anterior inteiro. Enquanto a sessão caía junto no
+           `pagehide`, esse cache morria por tabela; ao parar de derrubar a
+           sessão a cada troca de aplicativo (o conserto do celular), ficou à
+           mostra que a limpeza dependia de um efeito colateral do logout.
+           Numa máquina de hospital é precisamente o que não pode sobrar: a aba
+           restaurada traria o paciente de quem usou antes. */
+        try { store._memoria.clear(); } catch (e) {}
       };
       window.addEventListener('pagehide', sair);
       document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') sair(); });
