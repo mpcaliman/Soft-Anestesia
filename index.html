@@ -4440,6 +4440,10 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
 }
 .gs-item .gs-nome { font-size: .88rem; font-weight: 700; color: var(--text); }
 .gs-item .gs-det { font-size: .72rem; color: var(--text-soft); font-weight: 600; }
+/* O trecho clínico é uma frase, não um rótulo: precisa quebrar linha e deixar
+   o achado visível sem abrir a ficha. */
+.gs-item .gs-det { white-space: normal; line-height: 1.45; }
+.gs-item .gs-det mark { background: #ffe9a8; color: inherit; padding: 0 2px; border-radius: 3px; }
 .gs-item .gs-ic { font-size: 1rem; width: 26px; text-align: center; flex: 0 0 auto; }
 .gs-vazio { padding: 18px 14px; font-size: .84rem; color: var(--text-mute); font-weight: 600; }
 @media print { .gs-overlay, .gs-trigger { display: none !important; } }
@@ -4826,7 +4830,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-14e</b><br>
+    v7.1 · build <b id="build-tag">2026-10-14f</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>

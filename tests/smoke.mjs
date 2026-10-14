@@ -20408,6 +20408,73 @@ await test('Dossiê: junta os módulos, mostra a procedência de cada item e com
   await page.close();
 });
 
+/* 274) A busca entra DENTRO das fichas, e diz em que campo achou
+
+   "Buscar algum dado clínico" — a busca achava paciente, procedimento,
+   cirurgião e convênio: a ficha por fora, o conteúdo por dentro não. "Quem tem
+   alergia a dipirona", "quem já teve via aérea difícil", "quem usou
+   noradrenalina" não tinham resposta possível, embora a resposta estivesse
+   escrita em dezenas de fichas.
+
+   O que este teste cobra, e é o ponto da funcionalidade: o resultado DIZ EM QUE
+   CAMPO achou. "Dipirona" em alergias e "dipirona" em medicações em uso são
+   coisas opostas — uma busca que não distingue as duas é pior do que nenhuma. */
+await test('Busca clínica: acha dentro da ficha, mostra o trecho e diz em que campo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-busca');
+    ['pre', 'consulta', 'anestesia', 'recuperacao', 'risco'].forEach(m => store.setList(m, []));
+
+    store.setList('pre', [
+      { _id: 'b1', nome: 'Alérgica Silva', data: '2026-09-01',
+        alergias: 'Alergia a dipirona e a frutos do mar', comorbidades: 'HAS' },
+      { _id: 'b2', nome: 'Em Uso Souza', data: '2026-09-02',
+        medicacoes: 'Dipirona 500mg se dor', alergias: 'Nega alergias' }
+    ]);
+    store.setList('anestesia', [
+      { _id: 'b3', paciente: { nome: 'Grave Pereira' }, data_anestesia: '2026-09-03',
+        intercorrencias: 'Hipotensão refratária — iniciada noradrenalina em bomba',
+        _medsLista: [{ nome: 'Noradrenalina', dose: '0,1 mcg/kg/min' }] }
+    ]);
+
+    buscaGlobal.abrir();
+    document.getElementById('gs-input').value = 'dipirona';
+    buscaGlobal.buscar();
+    const h1 = document.getElementById('gs-results').innerHTML;
+    out.achouOsDois = /Alérgica Silva/.test(h1) && /Em Uso Souza/.test(h1);
+    /* A distinção que importa: o campo aparece em cada resultado. */
+    out.dizOCampo = /Alergias:/.test(h1) && /Medicações em uso:/.test(h1);
+    out.destacaTermo = /<mark>[Dd]ipirona<\/mark>/.test(h1);
+    out.mostraTrecho = /frutos do mar/.test(h1);
+    /* E não inventa: quem não tem a palavra não entra. */
+    out.semFalsoPositivo = !/Grave Pereira/.test(h1);
+
+    /* Lista de medicações administradas também é conteúdo pesquisável. */
+    document.getElementById('gs-input').value = 'noradrenalina';
+    buscaGlobal.buscar();
+    const h2 = document.getElementById('gs-results').innerHTML;
+    out.achouNaLista = /Grave Pereira/.test(h2);
+    out.campoDaLista = /Intercorrências:|Medicações administradas:/.test(h2);
+
+    document.getElementById('gs-input').value = 'palavraquenaoexiste';
+    buscaGlobal.buscar();
+    out.vazioHonesto = /Nenhum registro para/.test(document.getElementById('gs-results').innerHTML);
+    buscaGlobal.fechar();
+
+    ['pre', 'consulta', 'anestesia', 'recuperacao', 'risco'].forEach(m => store.setList(m, []));
+    return out;
+  });
+  assert(r.achouOsDois, 'a busca precisa entrar no conteúdo das fichas, não só no cabeçalho');
+  assert(r.dizOCampo,
+    'o resultado diz em QUE CAMPO achou — alergia a dipirona e dipirona em uso são opostos');
+  assert(r.destacaTermo && r.mostraTrecho, 'mostra a frase com o termo destacado, para decidir sem abrir a ficha');
+  assert(r.semFalsoPositivo, 'quem não tem a palavra não aparece');
+  assert(r.achouNaLista && r.campoDaLista, 'a lista de medicações administradas também é pesquisável');
+  assert(r.vazioHonesto, 'sem achado, diz que não achou');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
