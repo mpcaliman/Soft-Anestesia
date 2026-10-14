@@ -17463,6 +17463,124 @@ await test('Programador exclui ambiente e conta pela tela, com a contagem à vis
   await page.close();
 });
 
+/* 269b) ABAS QUE SE MULTIPLICAM SOZINHAS — a guarda que existia de um lado só
+
+   Foto da tela: cerca de trinta abas, TODAS com o mesmo nome de paciente, e
+   "59 conflitos preservados" no topo. Ninguém criou nenhuma.
+
+   A cópia preservada é a fotografia LOCAL do que esta aba tinha antes de a
+   nuvem trazer outra versão. Ela não sobe — isso já estava travado, e há teste
+   para isso. Mas a DESCIDA aceitava qualquer linha. Uma cópia que chegue ao
+   servidor por qualquer caminho (uma versão antiga do app ainda em cache no
+   celular, uma linha anterior ao conserto da subida) voltava aqui como
+   rascunho NOVO, com id próprio e o rótulo do paciente — e cada pull trazia
+   mais uma.
+
+   Guarda de um lado só não é guarda. É a mesma lição que `_preservarConflito`
+   já tinha aprendido ("a trava está AQUI, e não só em quem chama, porque são
+   dois caminhos") e que faltava no pull.
+
+   O teste roda o ciclo de verdade — enviar e puxar, oito rodadas — contra uma
+   tabela `drafts` em memória, e conta as abas. É assim que se distingue "não
+   cresce" de "não testei". */
+await test('Rascunhos: cópia preservada não desce da nuvem, e as abas param de se multiplicar', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const org = 'org-abas', uid = 'u-abas', mod = 'anestesia';
+    __smokeBindOrg(org, uid);
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud.sessaoExpirada = () => false;
+    cloud._garantirToken = async () => true;
+    cloud.config = () => ({ url: 'https://falso.supabase.co', anonKey: 'k' });
+
+    const tabela = new Map();
+    let seq = 1;
+    const resposta = (corpo, status = 200) => ({
+      ok: status >= 200 && status < 300, status,
+      json: async () => corpo, text: async () => JSON.stringify(corpo),
+      headers: { get: () => 'application/json' }
+    });
+    window.fetch = async (url, opts = {}) => {
+      const u = String(url);
+      if (!u.includes('/rest/v1/drafts')) return resposta([], 200);
+      const q = new URL(u).searchParams;
+      const docId = (q.get('doc_id') || '').replace(/^eq\./, '');
+      const metodo = (opts.method || 'GET').toUpperCase();
+      if (metodo === 'GET') {
+        return resposta([...tabela.values()]
+          .filter(l => !docId || l.doc_id === docId)
+          .map(l => JSON.parse(JSON.stringify(l))), 200);
+      }
+      if (metodo === 'POST') {
+        const corpo = JSON.parse(opts.body);
+        const linhas = (Array.isArray(corpo) ? corpo : [corpo]).map(row => {
+          const existente = tabela.get(row.doc_id);
+          if (existente) return existente;
+          const nova = { id: 'srv-' + (seq++), organization_id: row.organization_id,
+            user_id: row.user_id, module: row.module, doc_id: row.doc_id, data: row.data,
+            version: 1, updated_by: row.user_id, updated_at: new Date().toISOString() };
+          tabela.set(row.doc_id, nova);
+          return nova;
+        });
+        return resposta(linhas.map(l => JSON.parse(JSON.stringify(l))), 201);
+      }
+      if (metodo === 'PATCH') {
+        const linha = tabela.get(docId);
+        if (!linha) return resposta([], 200);
+        linha.data = JSON.parse(opts.body).data;
+        linha.version += 1; linha.updated_at = new Date().toISOString();
+        return resposta([JSON.parse(JSON.stringify(linha))], 200);
+      }
+      if (metodo === 'DELETE') { tabela.delete(docId); return resposta([], 200); }
+      return resposta([], 200);
+    };
+
+    rascunhos.setList(mod, [{ id: 'r-asafe', label: 'ASAFE JANUARIO LOPES',
+      dados: { paciente_nome: 'ASAFE JANUARIO LOPES', procedimento: 'Colecistectomia' },
+      updatedAt: new Date().toISOString() }]);
+
+    /* O APARELHO ANTIGO: um celular com versão em cache anterior ao conserto
+       da subida continua depositando cópias preservadas no servidor. */
+    const depositarCopiaDoCelular = (n) => {
+      const docId = 'rasc_conflito_' + n;
+      tabela.set(docId, { id: 'srv-c' + n, organization_id: org, user_id: uid, module: mod,
+        doc_id: docId, version: 1, updated_by: uid, updated_at: new Date().toISOString(),
+        data: { id: docId, label: 'ASAFE JANUARIO LOPES — edição preservada',
+          dados: { paciente_nome: 'ASAFE JANUARIO LOPES', tecnica: 'celular ' + n },
+          updatedAt: new Date().toISOString(), _draftConflictOf: 'r-asafe' } });
+    };
+
+    for (let i = 0; i < 8; i++) {
+      depositarCopiaDoCelular(i);
+      await rascunhosSync.enviar(mod);
+      await rascunhosSync.puxar(mod);
+    }
+    const lista = rascunhos.list(mod) || [];
+    out.abas = lista.length;
+    out.rotulos = lista.map(x => String(x.label || ''));
+    out.nenhumaCopiaVirouAba = !lista.some(x => x && (x._draftConflictOf ||
+      String(x.id).startsWith('rasc_conflito_')));
+    out.ignoradas = rascunhosSync._copiasIgnoradas || 0;
+    /* as linhas continuam no servidor: podem ser a única cópia do que alguém
+       preservou noutro aparelho, e apagá-las seria perder trabalho alheio */
+    out.linhasPreservadasNoServidor = [...tabela.keys()]
+      .filter(k => k.startsWith('rasc_conflito_')).length;
+    /* a ficha de verdade continua subindo e descendo normalmente */
+    out.aFichaRealContinua = lista.some(x => x && x.id === 'r-asafe');
+    return out;
+  });
+  assert(r.abas === 1,
+    'oito rodadas não podem virar ' + r.abas + ' abas: ' + JSON.stringify(r.rotulos));
+  assert(r.nenhumaCopiaVirouAba, 'cópia preservada da nuvem não pode virar aba aqui');
+  assert(r.ignoradas >= 1, 'o pull deveria ter recusado as cópias, e recusou ' + r.ignoradas);
+  assert(r.linhasPreservadasNoServidor === 8,
+    'ignorar não é apagar: a linha pode ser a única cópia do que alguém preservou noutro aparelho');
+  assert(r.aFichaRealContinua, 'e o rascunho de verdade continua funcionando');
+  await page.close();
+});
+
 /* A CÓPIA PRESERVADA NÃO PODE FABRICAR A PRÓXIMA.
    ---------------------------------------------------------------------------
    Foto da tela, num computador em uso: centenas de abas "CELINA ALVES DOS
