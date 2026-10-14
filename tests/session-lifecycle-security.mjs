@@ -209,14 +209,36 @@ r.timers.get(r.auth._timer)();
 r.assertClosed();
 await Promise.all(r.pendingSnapshots);
 
-/* Uma página mantida no BFCache também precisa voltar bloqueada. */
+/* BFCACHE: O QUE DECIDE É O TEMPO FORA, NÃO O EVENTO.
+   Antes, qualquer `pagehide` derrubava a sessão na hora. No iOS esse evento
+   dispara ao trocar de aplicativo, atender ligação ou bloquear a tela do
+   telefone — e o relato de campo foi exatamente esse: "no celular, mesmo
+   ajustando 30 minutos, bloqueia em pouquíssimo tempo".
+   A proteção que importa continua inteira e passa a ser medida: voltar depois
+   do tempo de inatividade exige senha; voltar em seguida, não. */
 await r.login();
 const broadcasts = channels[0].messages.length;
 r.sandbox.dispatchEvent({ type: 'pagehide', persisted: true });
+r.sandbox.dispatchEvent({ type: 'pageshow', persisted: true });
+assert.equal(r.auth.estaLogado(), true,
+  'trocar de app por instantes não pode bloquear — era o defeito relatado no celular');
+
+/* O mesmo caminho, com a página fora de vista por mais tempo que o limite. */
+r.sandbox.dispatchEvent({ type: 'pagehide', persisted: true });
+r.sandbox.sessionStorage.setItem(r.auth.OCULTO_KEY,
+  String(Date.now() - (r.auth._timeoutMs() + 60000)));
+r.sandbox.dispatchEvent({ type: 'pageshow', persisted: true });
 r.assertClosed();
 await Promise.all(r.pendingSnapshots);
 assert.equal(channels[0].messages.length, broadcasts, 'fechar uma aba preserva o acesso das demais abas da conta');
 assert.deepEqual(r.operations.get('wal-pendente'), before);
+
+/* E o tempo é escolhido POR APARELHO: a chave não viaja entre máquinas, e 1h e
+   2h existem para o caso longo sem afrouxar o computador compartilhado. */
+assert.ok(r.auth.TEMPOS.includes(60) && r.auth.TEMPOS.includes(120),
+  '1h e 2h precisam ser escolhíveis');
+assert.ok(!r.auth.TEMPOS.includes(0) && !r.auth.TEMPOS.includes(-1),
+  'desligar o bloqueio não é opção: a tela do consultório mostra prontuário de paciente');
 
 /* Resposta tardia de permissões não pode reabrir a conta após sair. */
 await r.login();

@@ -1082,9 +1082,17 @@ const auth = {
      usuários no mesmo computador e passam a ser normalizados para 5 minutos. */
   TIMEOUT_KEY: 'medsys.v7.auth.timeout_min',
   DIA_KEY: 'medsys.v7.auth.sessao_dia',
+  OCULTO_KEY: 'medsys.v7.auth.oculto_em',
+  /* 1 e 2 horas entraram a pedido de quem usa: num caso longo, 30 minutos é
+     interrupção no meio do trabalho. A escolha é DE CADA APARELHO — a chave
+     está na lista do que não se sincroniza —, então o celular do médico pode
+     ter 2 horas sem afrouxar o computador da recepção. O desligar continua
+     fora: tela de consultório sem trava mostra prontuário de paciente a quem
+     passar, e isso não é dado de quem escolhe. */
+  TEMPOS: [2, 5, 10, 15, 30, 60, 120],
   _timeoutMin() {
     const v = parseInt(localStorage.getItem(auth.TIMEOUT_KEY), 10);
-    return [2, 5, 10, 15, 30].indexOf(v) >= 0 ? v : 5;
+    return auth.TEMPOS.indexOf(v) >= 0 ? v : 5;
   },
   _timeoutMs() { return auth._timeoutMin() * 60 * 1000; },
   _modoDiario() {
@@ -1102,11 +1110,11 @@ const auth = {
     return false;
   },
   definirTimeout(min) {
-    const seguro = [2, 5, 10, 15, 30].indexOf(Number(min)) >= 0 ? Number(min) : 5;
+    const seguro = auth.TEMPOS.indexOf(Number(min)) >= 0 ? Number(min) : 5;
     localStorage.setItem(auth.TIMEOUT_KEY, String(seguro));
     try { localStorage.removeItem(auth.DIA_KEY); } catch (e) {}
     const seletor = document.getElementById('seg-timeout'); if (seletor) seletor.value = String(seguro);
-    toast('🔒 Bloqueio automático: ' + seguro + ' min');
+    toast('🔒 Bloqueio automático neste aparelho: ' + (seguro >= 60 ? (seguro / 60) + ' h' : seguro + ' min'));
     if (auth.estaLogado()) auth._resetTimer();
   },
   bloquearAgora() { if (auth.estaLogado()) auth.logout(); },
@@ -1189,10 +1197,50 @@ const auth = {
           if (!/^(lock|logout)$/.test(tipo || '')) return;
           auth.logout({ broadcast: false });
         });
-        /* pagehide também cobre BFCache: voltar à página exige autenticação,
-           enquanto a fila cifrada já persistida continua na gaveta do dono.
-           Fechar uma aba não encerra o trabalho das outras abas da conta. */
-        window.addEventListener('pagehide', () => auth.logout({ broadcast: false }));
+        /* NO CELULAR, `pagehide` NÃO QUER DIZER "FECHOU".
+           Esta linha derrubava a sessão a cada `pagehide`, e no iOS esse evento
+           dispara toda vez que a pessoa troca de aplicativo, atende uma ligação
+           ou bloqueia a tela do telefone. Resultado relatado em campo: "no meu
+           celular, mesmo ajustando 30 minutos, ele bloqueia em pouquíssimo
+           tempo" — bastava olhar o WhatsApp por dez segundos e voltar.
+
+           A intenção original está certa e fica de pé: uma página restaurada
+           depois de MUITO tempo (BFCache, botão voltar, aba recuperada) tem de
+           pedir a senha de novo. O que estava errado era usar "sumiu da tela"
+           como prova de "foi embora".
+
+           Agora anota-se QUANDO a página saiu de vista, e ao voltar mede-se
+           quanto tempo passou: passou do tempo de inatividade configurado,
+           bloqueia; não passou, continua. Isso também conserta o cronômetro em
+           si, que o navegador congela com a aba em segundo plano — a conta
+           passa a ser feita pelo relógio, não pelo temporizador.
+
+           Fechar a aba continua encerrando a sessão: ela vive no
+           `sessionStorage`, que morre com a aba. Esta linha era redundante para
+           esse caso e nociva no celular. */
+        const marcarOculto = () => {
+          try { sessionStorage.setItem(auth.OCULTO_KEY, String(Date.now())); } catch (e) {}
+        };
+        const conferirAoVoltar = () => {
+          let desde = 0;
+          try { desde = parseInt(sessionStorage.getItem(auth.OCULTO_KEY), 10) || 0; } catch (e) {}
+          try { sessionStorage.removeItem(auth.OCULTO_KEY); } catch (e) {}
+          if (!desde || !auth.estaLogado()) return;
+          const fora = Date.now() - desde;
+          const limite = auth._timeoutMs();
+          if (limite && fora >= limite) {
+            try { toast('Sessão bloqueada por inatividade'); } catch (e) {}
+            auth.logout({ broadcast: false });
+            return;
+          }
+          auth._resetTimer();
+        };
+        window.addEventListener('pagehide', marcarOculto);
+        window.addEventListener('pageshow', conferirAoVoltar);
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'hidden') marcarOculto();
+          else conferirAoVoltar();
+        });
         contextoAba.aoMudar((atual, anterior) => {
           if (anterior && anterior.userId &&
               (atual.userId !== anterior.userId || atual.organizationId !== anterior.organizationId)) auth._limparDadosDaTela();
