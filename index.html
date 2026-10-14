@@ -4819,7 +4819,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-14b</b><br>
+    v7.1 · build <b id="build-tag">2026-10-14c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -9897,7 +9897,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:14px;padding:11px 12px;background:var(--surface-alt);border-radius:8px">
           <div style="flex:1;min-width:180px">
             <label for="seg-timeout" style="font-size:.8rem;font-weight:600;display:block;margin-bottom:3px">🔒 Bloqueio automático por inatividade</label>
-            <small style="font-size:.72rem;color:var(--text-mute)">Após esse tempo sem uso, pede a senha de novo. O bloqueio não pode ser desativado porque este sistema deve permanecer seguro quando várias pessoas usam o mesmo computador.</small>
+            <small style="font-size:.72rem;color:var(--text-mute)">Após esse tempo sem uso, pede a senha de novo. <b>Vale só neste aparelho</b> — o seu celular pode ter 2 horas sem afrouxar o computador da recepção. O bloqueio não pode ser desativado: tela de consultório sem trava mostra prontuário a quem passar, e esse dado é do paciente.</small>
           </div>
           <select id="seg-timeout" onchange="auth.definirTimeout(parseInt(this.value,10))" style="font-size:.85rem;padding:6px 8px">
             <option value="2">2 minutos</option>
@@ -9905,6 +9905,8 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <option value="10">10 minutos</option>
             <option value="15">15 minutos</option>
             <option value="30">30 minutos</option>
+            <option value="60">1 hora</option>
+            <option value="120">2 horas</option>
           </select>
           <button type="button" class="btn btn-sm" onclick="auth.bloquearAgora()" title="Sair e pedir a senha imediatamente">🔒 Bloquear agora</button>
         </div>
