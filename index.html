@@ -4830,7 +4830,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-14n</b><br>
+    v7.1 · build <b id="build-tag">2026-10-14o</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -12440,6 +12440,31 @@ const conexao = {
     } catch (e) {}
     return n;
   },
+  /* "ENVIANDO…" TEM DE SIGNIFICAR QUE ESTÁ ANDANDO.
+     A faixa dizia a mesma frase estivesse a fila andando, parada por falha, ou
+     apenas lenta — e com 271 atendimentos ela ficava horas idêntica na tela.
+     Quem olha por cinco minutos conclui, com razão, que travou; e se tivesse
+     travado de verdade, a tela diria exatamente a mesma coisa. Aviso que não
+     distingue "trabalhando" de "emperrado" não informa nada.
+     Agora ela compara com a última medição: quantos saíram, ou que a última
+     tentativa falhou, ou que ninguém tentou ainda. */
+  _ultimaMedida: null,
+  _andamento(pend) {
+    const agora = Date.now();
+    const antes = conexao._ultimaMedida;
+    conexao._ultimaMedida = { pend, em: agora };
+    const ultimo = (() => { try { return cloudRel._ultimoEmpurrao; } catch (e) { return null; } })();
+    if (ultimo && ultimo.falhas && !ultimo.enviados) {
+      return ' <b>A última tentativa de envio não passou</b> — o aviso continua até conseguir, e nada se perde até lá.';
+    }
+    if (antes && antes.pend > pend) {
+      return ' Já subiram <b>' + (antes.pend - pend) + '</b> desde a última conferência. O aviso some após a confirmação do último.';
+    }
+    if (antes && antes.pend === pend && agora - antes.em > 90000) {
+      return ' <b>A fila não andou nos últimos minutos.</b> Com o aplicativo aberto e internet, ela retoma sozinha; se ficar assim, me avise.';
+    }
+    return ' O aviso some após a confirmação.';
+  },
   pintar() {
     try {
       const fora = conexao.offline();
@@ -12455,7 +12480,7 @@ const conexao = {
       div.innerHTML = fora
         ? '<span>📴 <b>SEM INTERNET</b> — pode continuar trabalhando, nada se perde aqui. ' + quanto +
           ' O envio recomeça sozinho quando a internet voltar.</span>'
-        : '<span>⏳ <b>Enviando para a nuvem…</b> ' + quanto + ' O aviso some após a confirmação.</span>';
+        : '<span>⏳ <b>Enviando para a nuvem…</b> ' + quanto + conexao._andamento(pend) + '</span>';
       if (!el) document.body.appendChild(div);
     } catch (e) {}
   },

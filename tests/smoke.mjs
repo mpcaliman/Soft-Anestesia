@@ -17581,6 +17581,95 @@ await test('Rascunhos: cópia preservada não desce da nuvem, e as abas param de
   await page.close();
 });
 
+/* 272b) A FILA QUE "ESTÁ ENVIANDO" HÁ HORAS
+
+   Foto do celular: "⏳ Enviando para a nuvem… 271 atendimento(s) aguardam
+   recibo na fila cifrada". Relato: "após bom tempo não evolui, parece estar
+   parado".
+
+   DOIS DEFEITOS, E O SEGUNDO É O QUE ENGANA
+
+   1) O RITMO. Cada rodada envia no máximo 15 registros e a sincronização
+      periódica roda de 10 em 10 minutos: 271 atendimentos dariam umas três
+      HORAS de relógio, no melhor caso, sem nenhuma falha. Não estava travado —
+      estava lento por construção. Agora as rodadas se encadeiam ENQUANTO
+      houver progresso, em série, uma requisição por vez (o contrário da rajada
+      que derrubou o servidor de manhã), e param no primeiro sinal de que não
+      adianta insistir: rodada sem envio, qualquer falha, ou troca de usuário.
+
+   2) O AVISO. A faixa dizia exatamente a mesma frase estivesse a fila andando,
+      parada por falha, ou apenas lenta. Se tivesse travado de verdade, a tela
+      diria a mesma coisa — e foi por isso que ele não conseguiu distinguir.
+      Aviso que não separa "trabalhando" de "emperrado" não informa nada. */
+await test('Fila cifrada: as rodadas se encadeiam enquanto andam, e a faixa diz se andou', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-fila');
+
+    /* ---- 1) ENCADEAMENTO ---- */
+    let restantes = 271, rodadas = 0;
+    cloudRel._empurrando = false;
+    cloudRel.empurrarPendentes = async () => {
+      rodadas++;
+      const n = Math.min(15, restantes);
+      restantes -= n;
+      return { enviados: n, falhas: 0, restantes };
+    };
+    const r1 = await cloudRel.empurrarAteParar({ silent: true, pausaMs: 0, rodadas: 40 });
+    out.rodadasAteEsvaziar = rodadas;
+    out.enviadosTotal = r1 && r1.enviados;
+    out.esvaziou = restantes === 0;
+
+    /* FALHA PARA A FILA: insistir numa rodada que falhou é gastar bateria e
+       servidor sem adiantar — e foi uma rajada dessas que derrubou o projeto. */
+    rodadas = 0;
+    cloudRel._empurrando = false;
+    cloudRel.empurrarPendentes = async () => { rodadas++; return { enviados: 0, falhas: 5, restantes: 100 }; };
+    await cloudRel.empurrarAteParar({ silent: true, pausaMs: 0, rodadas: 40 });
+    out.rodadasQuandoFalha = rodadas;
+
+    /* rodada sem nenhum envio também para: não há o que encadear */
+    rodadas = 0;
+    cloudRel._empurrando = false;
+    cloudRel.empurrarPendentes = async () => { rodadas++; return { enviados: 0, falhas: 0, restantes: 0 }; };
+    await cloudRel.empurrarAteParar({ silent: true, pausaMs: 0, rodadas: 40 });
+    out.rodadasQuandoNadaSai = rodadas;
+
+    /* ---- 2) A FAIXA DIZ SE ANDOU ---- */
+    conexao._ultimaMedida = null;
+    cloudRel._ultimoEmpurrao = { enviados: 15, falhas: 0 };
+    conexao._andamento(271);                       /* primeira medição */
+    out.andou = conexao._andamento(256);           /* 15 saíram */
+
+    conexao._ultimaMedida = { pend: 271, em: Date.now() - 200000 };
+    cloudRel._ultimoEmpurrao = { enviados: 0, falhas: 0 };
+    out.parada = conexao._andamento(271);          /* mesmo número, minutos depois */
+
+    cloudRel._ultimoEmpurrao = { enviados: 0, falhas: 3 };
+    conexao._ultimaMedida = null;
+    out.falhou = conexao._andamento(271);
+    return out;
+  });
+  /* 271 a 15 por rodada: 18 rodadas cheias (270) + 1 com o último + 1 que
+     descobre a fila vazia. A última é necessária — não há como saber que
+     acabou sem perguntar —, e o que importa é que as 20 aconteçam NUMA
+     passagem, e não em vinte ciclos de dez minutos. */
+  assert(r.esvaziou && r.rodadasAteEsvaziar === 20,
+    '271 registros a 15 por rodada esvaziam numa passagem encadeada; vieram ' + r.rodadasAteEsvaziar + ' rodadas');
+  assert(r.enviadosTotal === 271, 'o total enviado tem de bater com a fila; veio ' + r.enviadosTotal);
+  assert(r.rodadasQuandoFalha === 1,
+    'rodada que falhou não se repete em sequência — insistir é gastar bateria e servidor sem adiantar');
+  assert(r.rodadasQuandoNadaSai === 1, 'rodada sem nenhum envio também para: não há o que encadear');
+  assert(/Já subiram <b>15<\/b>/.test(r.andou || ''),
+    'a faixa tem de dizer QUANTOS subiram desde a última conferência; veio: ' + r.andou);
+  assert(/não andou nos últimos minutos/i.test(r.parada || ''),
+    'ficar no mesmo número por minutos tem de ser dito, e não escondido atrás de "Enviando…"; veio: ' + r.parada);
+  assert(/não passou/i.test(r.falhou || ''),
+    'falha de envio é diferente de lentidão, e a tela tem de separar as duas; veio: ' + r.falhou);
+  await page.close();
+});
+
 /* 271b) "GERAR FINANCEIRO" QUE NÃO GRAVA, E A RECUSA QUE NÃO SE EXPLICA
 
    Relato: "tô com impressão que os gerar financeiro não está ficando gravado".
