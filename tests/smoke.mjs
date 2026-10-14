@@ -17581,6 +17581,102 @@ await test('Rascunhos: cópia preservada não desce da nuvem, e as abas param de
   await page.close();
 });
 
+/* 270b) UMA PESSOA, UMA LINHA — e o carimbo que vem junto
+
+   Foto da tela: o menu de "Profissional responsável" oferecendo "Marcelo
+   Pandolfi Caliman · Anestesiologia · CRM 30601 · ✓ carimbo" e, logo abaixo,
+   "Marcelo Pandolfi Caliman · Meu perfil · Anestesiologia · CRM 30601 ·
+   ✓ carimbo". Mesma pessoa, mesmo registro, mesmo carimbo.
+
+   A rede de segurança existia e estava presa na chave errada: deduplicava por
+   `_id`, e o problema é exatamente DOIS CADASTROS com ids diferentes para a
+   mesma pessoa, herdados da unificação das três listas antigas. Por id são
+   distintos; na tela são a mesma linha repetida.
+
+   Escolher entre duas linhas idênticas não é escolha — e ainda deixa o carimbo
+   dependendo de qual das duas a pessoa acertou, porque uma pode ter a imagem e
+   a outra não.
+
+   A identidade de um profissional é o nome (sem acento, sem caixa) mais o
+   registro. Havendo repetição, fica a ficha mais completa: primeiro quem tem
+   carimbo, depois "meu perfil", depois quem tem CRM — é dela que sai a
+   assinatura que vai para o papel. */
+await test('Profissional: uma pessoa, uma linha — e fica a ficha que tem o carimbo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-prof');
+    const CARIMBO = 'data:image/png;base64,' + 'A'.repeat(9000);
+
+    /* o cadastro dele: a mesma pessoa duas vezes, só uma marcada como perfil */
+    store.setList('cad_profissionais', [
+      { _id: 'p1', nome: 'Marcelo Pandolfi Caliman', crm: '30601', especialidade: 'Anestesiologia' },
+      { _id: 'p2', nome: 'Marcelo Pandolfi Caliman', crm: '30601', especialidade: 'Anestesiologia',
+        carimbo: CARIMBO, responsavel: true },
+      { _id: 'p3', nome: 'Outra Pessoa', crm: '11111', especialidade: 'Cirurgia' }
+    ]);
+
+    location.hash = '#anestesia';
+    await new Promise(r => setTimeout(r, 700));
+    const f = document.getElementById('form-anestesia');
+    const prev = f && f.querySelector('[id$="-prev-carimbo"]');
+    const bloco = prev && prev.closest('.grid');
+    const nomeEl = bloco && bloco.querySelector('input[type="text"]');
+    out.achouBloco = !!nomeEl;
+    if (!nomeEl) return out;
+
+    autocomplete.ligarProfissionalEm(nomeEl);
+    nomeEl.value = 'Marcelo';
+    nomeEl.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(r => setTimeout(r, 250));
+    const caixa = document.querySelector('[class*="ac-"]');
+    const itens = caixa ? [...caixa.querySelectorAll('[class*="item"]')] : [];
+    out.linhasDoMenu = itens.length;
+    out.textos = itens.map(x => (x.textContent || '').replace(/\s+/g, ' ').trim());
+
+    /* a linha que sobra é a que tem o carimbo — senão a desduplicação teria
+       escolhido justamente a ficha que não assina nada */
+    if (itens[0]) { itens[0].dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); itens[0].click(); }
+    await new Promise(r => setTimeout(r, 300));
+    const dataEl = f.querySelector('[name="assinatura_dataurl"]');
+    out.carimboAplicado = !!(dataEl && String(dataEl.value || '').startsWith('data:'));
+    out.previewTemImagem = !!(prev && prev.querySelector('img'));
+
+    /* A IMAGEM TEM DE IR INTEIRA PARA A NUVEM.
+       No aparelho ela é guardada uma vez e referenciada (`blob:`) para o
+       navegador não encher. Se essa referência vazasse para o registro lido, a
+       ficha aberta noutro aparelho mostraria uma assinatura quebrada — e ao
+       finalizar o sistema diria que não foi carimbada. A leitura tem de
+       devolver sempre o data-URI inteiro. */
+    const doc = store.save('anestesia', { paciente_nome: 'Teste Carimbo',
+      anestesiologista: 'Marcelo Pandolfi Caliman',
+      assinatura_dataurl: CARIMBO, assinatura_tipo: 'carimbo' });
+    const lido = store.getById('anestesia', doc._id);
+    out.leituraInteira = !!(lido && String(lido.assinatura_dataurl || '').startsWith('data:'));
+    out.leituraSemRef = JSON.stringify(lido || {}).indexOf('blob:') < 0;
+    out.leituraTamanho = lido ? String(lido.assinatura_dataurl || '').length : 0;
+
+    /* e o cadastro do profissional viaja pela prateleira da clínica, que é o
+       que faz o carimbo existir em qualquer aparelho */
+    out.cadastroVaiParaNuvem = Object.keys(clinicaSync.CHAVES)
+      .indexOf(STORAGE.cad_profissionais) >= 0;
+    return out;
+  });
+  assert(r.achouBloco, 'o bloco de assinatura da ficha precisa existir para o teste valer');
+  assert(r.linhasDoMenu === 1,
+    'a mesma pessoa não pode aparecer duas vezes; veio ' + r.linhasDoMenu + ': ' + JSON.stringify(r.textos));
+  assert(/carimbo/.test((r.textos || [])[0] || ''),
+    'a linha que sobra tem de ser a que tem carimbo — senão a desduplicação escolhe justamente a ficha que não assina');
+  assert(r.carimboAplicado && r.previewTemImagem,
+    'escolher o profissional tem de trazer o carimbo para o campo E para a pré-visualização');
+  assert(r.leituraInteira && r.leituraSemRef,
+    'a leitura tem de devolver a imagem inteira: referência local na nuvem vira assinatura quebrada no outro aparelho');
+  assert(r.leituraTamanho > 9000, 'a imagem inteira, não um pedaço: veio ' + r.leituraTamanho);
+  assert(r.cadastroVaiParaNuvem,
+    'o cadastro de profissionais (onde mora o carimbo) tem de viajar pela prateleira da clínica');
+  await page.close();
+});
+
 /* 269c) O LAÇO DAS ABAS É LOCAL — uma decisão pendente por ficha, não uma por
    sincronização
 
