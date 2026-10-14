@@ -716,6 +716,118 @@ await test('Meu dia: casos de hoje cruzados por paciente com estados de cada eta
   await page.close();
 });
 
+/* 18b) IMPRESSÃO DE VERDADE — e o motivo quando ela não vai
+
+   Relato com foto da tela: a visualização montada, o botão apertado, e dois
+   avisos ao mesmo tempo — "Diálogo de impressão sendo aberto" e "O documento
+   não carregou. Tente imprimir novamente."
+
+   POR QUE NENHUM TESTE TINHA VISTO ISSO
+
+   A suíte inteira roda em file://, e ali `location.origin` é a string 'null'.
+   O caminho de impressão recusa esse caso logo na primeira linha — de
+   propósito, porque sem origem não há como falar com a janela filha em
+   segurança. Ou seja: 275 testes passando e a impressão NUNCA tinha sido
+   exercida de ponta a ponta. Este teste serve o pacote por HTTP, que é como o
+   aplicativo de fato roda, e percorre o aperto de mão inteiro.
+
+   E COBRA QUE A FALHA FALE
+
+   A mensagem única apagava a causa. Pop-up bloqueado, conexão lenta, troca de
+   usuário no meio e prazo estourado viravam a mesma frase, e "tentar de novo"
+   só resolve uma delas. O teste força um cancelamento e exige que o motivo
+   específico chegue à tela. */
+await test('Impressão: o aperto de mão com a janela completa, e a falha diz o motivo', async () => {
+  const raiz = APP_ROOT;
+  const TIPOS = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+    '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
+  const server = createServer(async (req, res) => {
+    const p = req.url.split('?')[0];
+    const arquivo = p === '/' ? '/index.html' : p;
+    try {
+      const data = await readFile(resolve(raiz, '.' + arquivo));
+      const ext = arquivo.slice(arquivo.lastIndexOf('.'));
+      res.writeHead(200, { 'Content-Type': TIPOS[ext] || 'application/octet-stream' });
+      res.end(data);
+    } catch { res.writeHead(404); res.end(); }
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const porta = server.address().port;
+  const ctx = await browser.newContext();
+  try {
+    const page = await ctx.newPage();
+    await isolarWebSocketsDaNuvem(page);
+    await page.route('**://*.supabase.co/**', route => route.abort());
+    page.on('pageerror', e => currentErrors.push('PAGEERROR: ' + e.message));
+    page.on('dialog', d => d.accept());
+    await page.goto('http://127.0.0.1:' + porta + '/index.html', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1500);
+
+    const r = await page.evaluate(async () => {
+      const out = { avisos: [] };
+      const uid = 'u-imp';
+      sessionStorage.setItem(cloud.SESSION_KEY, JSON.stringify({ access_token: 't', refresh_token: 'r',
+        expires_at: Date.now() + 3600000, user: { id: uid, email: 'imp@teste.local' } }));
+      sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: uid, uid, usuario: 'imp@teste.local',
+        nome: 'Teste', perfil: 'admin', role: 'gestor',
+        modulos: (auth.PERFIS.admin.modulos || []).slice(), organization_id: 'org-imp' }));
+      contextoAba.prepararUsuario(uid, { forcar: true });
+      contextoAba.vincular({ uid, organization_id: 'org-imp', role: 'gestor', orgs: 1 }, 'Clínica');
+      out.origemReal = location.origin !== 'null';
+
+      const docHTML = '<!DOCTYPE html><html><head><title>Ficha</title>'
+        + '<style>body{font-family:sans-serif}</style></head>'
+        + '<body><h1>Ficha de Anestesia</h1><p>Propofol 120mg; Atracúrio 30mg EV.</p></body></html>';
+
+      /* 1) o caminho feliz: a janela recebe o documento e confirma a montagem */
+      const win = window.open('', '_blank');
+      out.abriu = !!win;
+      if (!win) return out;
+      const t0 = Date.now();
+      try { await SoftActions.writeDocument(win, docHTML); out.montou = true; }
+      catch (e) { out.montou = false; out.erroMontagem = String(e && e.message); }
+      out.msMontagem = Date.now() - t0;
+      out.textoNaJanela = (() => {
+        try { return (win.document.body.textContent || '').includes('Propofol 120mg'); }
+        catch (e) { return 'sem acesso: ' + e.message; }
+      })();
+      try { win.close(); } catch (e) {}
+
+      /* 2) a falha: cancelada no meio, a tela precisa dizer POR QUÊ */
+      const toastOrig = window.toast;
+      window.toast = (msg, tipo) => { out.avisos.push(String(tipo || 'info') + '|' + String(msg)); };
+      const win2 = window.open('', '_blank');
+      if (win2) {
+        const promessa = SoftActions.writeDocument(win2, docHTML);
+        promessa.catch(() => {});
+        /* trocar o contexto é uma das causas reais, e revoga a sessão */
+        contextoAba.vincular({ uid, organization_id: 'org-OUTRA', role: 'gestor', orgs: 2 }, 'Outra');
+        try { await promessa; out.falhouComMotivo = 'NAO FALHOU'; }
+        catch (e) { printPreview._falhouImpressao(e); out.falhouComMotivo = String(e && e.message); }
+        try { win2.close(); } catch (e) {}
+      }
+      window.toast = toastOrig;
+      return out;
+    });
+
+    assert(r.origemReal, 'o teste precisa servir o app por HTTP — em file:// a impressão nem começa');
+    assert(r.abriu, 'o pop-up de impressão deveria abrir no harness');
+    assert(r.montou === true, 'o aperto de mão com a janela de impressão deveria completar; veio: ' + r.erroMontagem);
+    assert(r.textoNaJanela === true, 'o documento deveria estar DENTRO da janela de impressão, não só prometido');
+    assert(r.msMontagem < 15000, 'a montagem levou ' + r.msMontagem + 'ms — o prazo curto a cancelaria');
+    assert(/mudaram durante a impressão/i.test(r.falhouComMotivo || ''),
+      'a falha deveria trazer a causa específica, e veio: ' + r.falhouComMotivo);
+    const aviso = (r.avisos || []).find(a => a.startsWith('error|')) || '';
+    assert(/Não consegui imprimir: .*mudaram durante a impressão/i.test(aviso),
+      'a TELA deveria repetir o motivo, não "o documento não carregou"; veio: ' + aviso);
+    assert(/Salvar PDF na nuvem/i.test(aviso),
+      'e deveria apontar o caminho que funciona sem a janela de impressão');
+  } finally {
+    await ctx.close();
+    await new Promise(r => server.close(r));
+  }
+});
+
 /* 18) Service worker — o app abre OFFLINE depois da primeira visita (http) */
 await test('Offline: service worker cacheia o app e o reload sem rede funciona', async () => {
   /* servidor estático mínimo do repositório (index.html + sw.js) */

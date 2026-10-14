@@ -312,6 +312,22 @@ const printPreview = {
       toast('Erro ao montar ficha + SRPA: ' + (e.message || ''), 'error');
     }
   },
+  /* A RECUSA TEM DE DIZER O MOTIVO.
+     Antes, toda falha de impressão virava a mesma frase: "O documento não
+     carregou. Tente imprimir novamente." Por trás dela havia causas
+     completamente diferentes — pop-up bloqueado, conexão lenta, troca de
+     usuário no meio, arquivos de versões diferentes, prazo estourado — e cada
+     uma pede uma reação diferente de quem está na frente da tela. Tentar de
+     novo só resolve uma delas. Pior: a mensagem única também apagava a pista
+     para quem fosse consertar, e foi exatamente o que aconteceu aqui.
+     Agora a tela repete o motivo que o mecanismo deu, aponta o caminho que
+     funciona sem pop-up (o PDF na nuvem) e deixa o erro inteiro no console. */
+  _falhouImpressao(erro) {
+    try { console.error('Impressão não concluída', erro); } catch (e) {}
+    const motivo = (erro && erro.message) ? String(erro.message).trim() : '';
+    toast('Não consegui imprimir' + (motivo ? ': ' + motivo : '.') +
+      ' Enquanto isso, use ☁️ Salvar PDF na nuvem — esse caminho não depende da janela de impressão.', 'error');
+  },
   imprimir() {
     try {
       const overlay = document.getElementById('print-preview-overlay');
@@ -438,7 +454,7 @@ ${TAG_CLOSE_HTML}`;
         win.document.title = titulo;
         Promise.resolve(documentReady).then(() => {
           setTimeout(() => { if (!win.closed) { win.focus(); win.print(); } }, 300);
-        }).catch(() => toast('O documento não carregou. Tente imprimir novamente.', 'error'));
+        }).catch(erro => printPreview._falhouImpressao(erro));
         toast('Diálogo de impressão sendo aberto — escolha a impressora ou "Salvar em PDF".', 'success');
         return;
       }

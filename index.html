@@ -4830,7 +4830,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-14i</b><br>
+    v7.1 · build <b id="build-tag">2026-10-14j</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -48170,7 +48170,7 @@ const orcamento = {
     w.addEventListener('afterprint', () => setTimeout(() => w.close(), 400), { once: true });
     const documentReady = w.document.write(html); w.document.close();
     Promise.resolve(documentReady).then(() => setTimeout(() => w.print(), 250))
-      .catch(() => toast('O documento não carregou. Tente imprimir novamente.', 'error'));
+      .catch(erro => printPreview._falhouImpressao(erro));
   }
 };
 
