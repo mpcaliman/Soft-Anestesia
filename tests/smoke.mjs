@@ -17581,6 +17581,86 @@ await test('Rascunhos: cópia preservada não desce da nuvem, e as abas param de
   await page.close();
 });
 
+/* 271b) "GERAR FINANCEIRO" QUE NÃO GRAVA, E A RECUSA QUE NÃO SE EXPLICA
+
+   Relato: "tô com impressão que os gerar financeiro não está ficando gravado".
+
+   A CAUSA: DOIS FORMATOS DE FICHA, E O FINANCEIRO SÓ ENXERGAVA UM
+
+   A ficha preenchida pelo formulário guarda o paciente em bloco
+   (`paciente.nome`). Mas há fichas com os mesmos dados em campos PLANOS
+   (`paciente_nome`): as do acervo recuperado da quarentena, as de versões
+   anteriores, as de importação. Para essas, o cabeçalho saía sem nome — e
+   `fromDoc` tem uma linha que diz "não cria se nem nome do paciente existe" e
+   devolve null SEM DIZER NADA. O lançamento não nascia e nada explicava.
+
+   É a mesma forma de defeito do dia inteiro: a recusa silenciosa. E a tela
+   piorava, porque o único aviso que existia — "verifique se o auto-financeiro
+   está ligado" — era um palpite apresentado como diagnóstico, e mandava mexer
+   justamente no lugar errado.
+
+   Agora cada saída em branco carrega o seu motivo, e quem pede a geração lê
+   qual foi. */
+await test('Gerar financeiro: a ficha de formato antigo também gera, e a recusa diz o motivo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    __smokeBindOrg('org-fin2');
+    store.setList('financeiro', []);
+    store.setList('anestesia', []);
+
+    /* 1) FICHA EM CAMPOS PLANOS — a do acervo recuperado */
+    const plana = store.save('anestesia', {
+      paciente_nome: 'PACIENTE RECUPERADO', data_anestesia: '2026-10-14',
+      procedimento: 'Colecistectomia videolaparoscópica', convenio: 'Particular',
+      cirurgiao: 'Dr. Cirurgião', hospital: 'Hospital Teste'
+    });
+    const cabPlana = fin._cabecalho('anestesia', store.getById('anestesia', plana._id));
+    out.planaTemNome = cabPlana.paciente === 'PACIENTE RECUPERADO';
+    out.planaTemProc = /Colecistectomia/.test(cabPlana.procedimento || '');
+    out.planaTemConvenio = cabPlana.convenio === 'Particular';
+    const rp = fin.fromDoc('anestesia', store.getById('anestesia', plana._id));
+    out.planaGerou = !!(rp && rp.item);
+    out.planaGravou = (store.list('financeiro') || []).some(f => f.paciente === 'PACIENTE RECUPERADO');
+
+    /* 2) FICHA EM BLOCO — a do formulário — continua funcionando */
+    const bloco = store.save('anestesia', {
+      paciente: { nome: 'PACIENTE DO FORMULARIO', convenio: 'Unimed' },
+      procedimento: { descricao: 'Herniorrafia', data: '2026-10-14', cirurgiao: 'Dr. B' }
+    });
+    const rb = fin.fromDoc('anestesia', store.getById('anestesia', bloco._id));
+    out.blocoGerou = !!(rb && rb.item);
+    out.blocoNome = rb && rb.item && rb.item.paciente;
+
+    /* 3) A RECUSA DIZ O MOTIVO, e cada motivo é o seu */
+    const semNome = store.save('anestesia', { data_anestesia: '2026-10-14' });
+    out.semNomeGerou = !!fin.fromDoc('anestesia', store.getById('anestesia', semNome._id));
+    out.motivoSemNome = fin._motivo;
+
+    const original = fin.isAutoEnabled;
+    fin.isAutoEnabled = () => false;
+    fin.fromDoc('anestesia', store.getById('anestesia', plana._id));
+    out.motivoDesligado = fin._motivo;
+    fin.isAutoEnabled = original;
+
+    /* motivo é zerado a cada chamada: não pode sobrar o da anterior */
+    fin.fromDoc('anestesia', store.getById('anestesia', plana._id));
+    out.motivoLimpoNoSucesso = fin._motivo === '';
+    return out;
+  });
+  assert(r.planaTemNome, 'o nome do paciente é o nome do paciente, esteja em bloco ou em campo plano');
+  assert(r.planaTemProc && r.planaTemConvenio, 'procedimento e convênio também: a cobrança nasce sem pagador se isso falhar');
+  assert(r.planaGerou && r.planaGravou, 'a ficha de formato antigo tem de gerar lançamento — era ela que não gravava');
+  assert(r.blocoGerou && r.blocoNome === 'PACIENTE DO FORMULARIO',
+    'e a ficha do formulário continua gerando: o conserto não pode trocar um defeito por outro');
+  assert(!r.semNomeGerou && /sem nome de paciente/i.test(r.motivoSemNome || ''),
+    'sem nome não gera, mas DIZ que foi por isso; veio: ' + r.motivoSemNome);
+  assert(/desligado/i.test(r.motivoDesligado || ''),
+    'auto-financeiro desligado é outro motivo, e tem de ser dito como tal; veio: ' + r.motivoDesligado);
+  assert(r.motivoLimpoNoSucesso, 'motivo de uma recusa anterior não pode sobrar grudado numa geração que deu certo');
+  await page.close();
+});
+
 /* 270b) UMA PESSOA, UMA LINHA — e o carimbo que vem junto
 
    Foto da tela: o menu de "Profissional responsável" oferecendo "Marcelo
