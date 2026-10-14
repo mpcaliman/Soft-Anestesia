@@ -1170,6 +1170,20 @@ ${TAG_CLOSE_HTML}`;
      muito. Cada coleta sai na mesma grade da principal, com a data em cima —
      é a comparação que a folha precisa permitir, e ela só existe se as duas
      estiverem na mesma página, no mesmo formato. */
+  /* A CIRURGIA NO PAPEL, COM O QUE A GUIA PEDE.
+     A folha mostrava só a descrição. Código TUSS, quantidade e lado existem no
+     registro e são exatamente o que o convênio confere — e lado ausente em guia
+     vira glosa. `cirurgia.textoLista` é a mesma formatação usada na ficha e no
+     termo, para o papel não descrever o mesmo ato de três maneiras. */
+  _cirurgiaDaPre(d) {
+    try {
+      const lista = cirurgia.daPreDoc(d);
+      const txt = cirurgia.textoLista(lista);
+      if (txt) return txt;
+    } catch (e) {}
+    return d.cirurgia || '';
+  },
+
   _labSeriesGrid(d) {
     const series = (d && d._labSeries) || [];
     if (!series.length || typeof labSerie === 'undefined') return '';
@@ -1309,7 +1323,7 @@ ${TAG_CLOSE_HTML}`;
           ${printPreview._field('Senha / Autorização', d.senha)}
         </div>
         <div class="pp-grid">
-          ${printPreview._field('Cirurgia', d.cirurgia)}
+          ${printPreview._field('Cirurgia', printPreview._cirurgiaDaPre(d))}
           ${printPreview._field('Cirurgião', d.cirurgiao)}
           ${printPreview._field('Hospital', d.hospital)}
         </div>

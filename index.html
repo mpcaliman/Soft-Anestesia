@@ -969,6 +969,13 @@ body.ficha-finalizada .lab-item input.lab-fora {
 
 /* === PROCEDIMENTOS EXTRAS NA PRÉ === */
 .pre-procs-lista { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+/* O principal usa a MESMA régua dos adicionais: lidos em sequência, campos de
+   larguras diferentes para a mesma coisa fazem a vista procurar duas vezes. */
+.pre-proc-principal { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+.pre-proc-principal .pre-proc-cod { flex: 0 0 130px; width: 130px; font-size: .84rem; }
+.pre-proc-principal .pre-proc-qtd { flex: 0 0 62px; width: 62px; font-size: .84rem; }
+.pre-proc-principal .pre-proc-lado { flex: 0 0 112px; width: 112px; font-size: .84rem; }
+@media (max-width: 640px) { .pre-proc-principal { flex-wrap: wrap; } }
 .pre-proc-row { display: flex; gap: 6px; align-items: center; }
 /* A regra base `input[type="text"] { width:100% }` tem especificidade MAIOR
    que uma classe sozinha: os 130px do código eram ignorados, o campo pedia a
@@ -4433,6 +4440,10 @@ body[data-mod="anestesia"] .dose-quickbar { display: flex; }
 }
 .gs-item .gs-nome { font-size: .88rem; font-weight: 700; color: var(--text); }
 .gs-item .gs-det { font-size: .72rem; color: var(--text-soft); font-weight: 600; }
+/* O trecho clínico é uma frase, não um rótulo: precisa quebrar linha e deixar
+   o achado visível sem abrir a ficha. */
+.gs-item .gs-det { white-space: normal; line-height: 1.45; }
+.gs-item .gs-det mark { background: #ffe9a8; color: inherit; padding: 0 2px; border-radius: 3px; }
 .gs-item .gs-ic { font-size: 1rem; width: 26px; text-align: center; flex: 0 0 auto; }
 .gs-vazio { padding: 18px 14px; font-size: .84rem; color: var(--text-mute); font-weight: 600; }
 @media print { .gs-overlay, .gs-trigger { display: none !important; } }
@@ -4819,7 +4830,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-14c</b><br>
+    v7.1 · build <b id="build-tag">2026-10-14g</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -5036,6 +5047,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <div class="action-divider"></div>
     <button class="btn" onclick="printPreview.abrir()"><span class="icon">🖨️</span> Visualizar / Imprimir</button>
     <button class="btn" onclick="printPreview.abrirPreTermo()" title="Imprime a avaliação pré-anestésica e o termo de consentimento num arquivo único"><span class="icon">📑</span> Pré + Termo juntos</button>
+    <button class="btn" onclick="dossie.abrirDoFormulario('form-pre','nome')" title="Tudo o que já existe deste paciente — atendimentos, comorbidades, alergias e exames — numa leitura só"><span class="icon">🩺</span> Dossiê do paciente</button>
     <button class="btn btn-primary" onclick="pre.irParaFicha()" title="Abre a ficha de anestesia já preenchida com este paciente e esta cirurgia"><span class="icon">➡️</span> Ir para a ficha</button>
     <button class="btn" onclick="pre.exportar()"><span class="icon">⬇️</span> Exportar</button>
     <button class="btn btn-ghost" onclick="actions.importarJSONPara('pre')"><span class="icon">⬆️</span> Importar</button>
@@ -5110,6 +5122,27 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
               <textarea name="cirurgia" class="cbhpm-autocomplete campo-cirurgia" rows="2"
                 placeholder="Digite parte do procedimento ou o código TUSS..." style="flex:1"></textarea>
               <button type="button" class="btn btn-primary btn-sm" style="flex-shrink:0;padding:0 12px" onclick="pre.procs.add()" title="Adicionar mais um procedimento">+</button>
+            </div>
+            <!-- O PROCEDIMENTO PRINCIPAL TAMBÉM É CÓDIGO, QUANTIDADE E LADO.
+                 Os procedimentos ADICIONAIS (o ➕ acima) já tinham os quatro
+                 campos; o principal — o que quase toda ficha tem, e muitas vezes
+                 o único — era só um texto. Resultado: o que mais aparece na guia
+                 era justamente o que ia sem código e sem lado, e lado faltando em
+                 guia vira glosa.
+                 O modelo já esperava estes campos (`cirurgia.daPreDoc` lê
+                 `procedimento_codigo` e `lateralidade`); eles só não existiam na
+                 tela. Digitando o código, a descrição vem; digitando a descrição,
+                 o código vem. -->
+            <div class="pre-proc-principal">
+              <!-- O NOME É `cirurgia_cbhpm` DE PROPÓSITO: é exatamente o campo
+                   que o autocomplete já criava ESCONDIDO para guardar o código
+                   escolhido (`cbhpm._campoCodigo` procura por `<nome>_cbhpm`).
+                   Tornando-o visível, escolher pela descrição continua
+                   preenchendo o código como sempre fez — e agora dá para
+                   digitar o código direto. Um mecanismo, não dois. -->
+              <input type="text" name="cirurgia_cbhpm" class="pre-proc-cod" placeholder="Código TUSS" title="Código TUSS/CBHPM — digite o código, ou escolha pela descrição acima e ele vem sozinho">
+              <input type="number" name="procedimento_quantidade" class="pre-proc-qtd" min="1" step="1" value="1" title="Quantidade" oninput="markDirty()">
+              <select name="lateralidade" class="pre-proc-lado" title="Lateralidade — deixe em branco quando não se aplica" onchange="markDirty()"></select>
             </div>
             <div id="pre-procs-lista" class="pre-procs-lista"></div>
           </div>
@@ -5851,6 +5884,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
       <div class="dropdown-menu" id="dd-anestesia-menu"></div>
     </div>
     <button class="btn" onclick="historico.abrir('anestesia')"><span class="icon">🔍</span> Buscar / Histórico</button>
+    <button class="btn" onclick="dossie.abrirDoFormulario('form-anestesia','paciente_nome')" title="Tudo o que já existe deste paciente — atendimentos anteriores, comorbidades, alergias e evolução dos exames"><span class="icon">🩺</span> Dossiê do paciente</button>
     <div class="action-divider"></div>
     <button class="btn" onclick="printPreview.abrir()" title="Visualizar e imprimir (Ctrl+P)"><span class="icon">🖨️</span> Imprimir</button>
     <button class="btn" onclick="anestesia.imprimirComSrpa()" title="Imprime a ficha de anestesia e a SRPA vinculada num único arquivo/PDF"><span class="icon">🖨️</span> + SRPA</button>
@@ -12436,27 +12470,50 @@ const conexao = {
      • a limpeza NA ABERTURA cobre o resto — queda de energia, navegador
        morto, aba restaurada dias depois. Antes de mostrar qualquer coisa, o
        que já está na nuvem sai da máquina. */
+  OCULTO_KEY: 'medsys.v7.compart.oculto_em',
   blindarCompartilhado() {
     try {
       if (!ambiente.compartilhado()) return 0;
       /* na abertura: nada do atendimento anterior fica à vista */
       const n = modoNuvem.manutencao({ silent: true, dias: 0 });
-      const sair = () => {
+      /* QUEM MANDA É O TEMPO FORA, NÃO O EVENTO — a mesma lição do bloqueio.
+         A limpeza aqui tira do aparelho o que já subiu para a nuvem, e passou a
+         alcançar também o cache em memória (sem isso ela não limpava nada de
+         fato). Só que ela era disparada a CADA `visibilitychange`, e no celular
+         esse evento acontece toda vez que se troca de aplicativo: 261
+         lançamentos sumiam da tela por olhar o WhatsApp dez segundos. Foi
+         exatamente o defeito que consertei no bloqueio, repetido na linha de
+         baixo — e desta vez quem relatou foi o usuário, não um teste.
+
+         O propósito da limpeza é o computador ABANDONADO, onde outra pessoa vai
+         sentar. Dez segundos fora não é abandono. Então anota-se quando a tela
+         sumiu e, ao voltar, mede-se: passou do tempo de inatividade configurado
+         NESTE aparelho, limpa; não passou, não houve abandono nenhum.
+
+         Fechar de verdade continua coberto, e por outro caminho: a limpeza NA
+         ABERTURA roda antes de mostrar qualquer coisa. Era ela, aliás, a rede
+         principal — a de saída é a segunda. */
+      const limpar = () => {
         try { if (!ambiente.compartilhado()) return; } catch (e) { return; }
         try { modoNuvem.manutencao({ silent: true, dias: 0 }); } catch (e) {}
-        /* A LIMPEZA TEM DE ALCANÇAR A MEMÓRIA, E NÃO SÓ A GAVETA.
-           `manutencao` tira do armazenamento o que já subiu para a nuvem, mas o
-           app serve as listas de um cache em memória — que continuava com o
-           atendimento anterior inteiro. Enquanto a sessão caía junto no
-           `pagehide`, esse cache morria por tabela; ao parar de derrubar a
-           sessão a cada troca de aplicativo (o conserto do celular), ficou à
-           mostra que a limpeza dependia de um efeito colateral do logout.
-           Numa máquina de hospital é precisamente o que não pode sobrar: a aba
-           restaurada traria o paciente de quem usou antes. */
         try { store._memoria.clear(); } catch (e) {}
+        try { cloud._repintarTelaAtual(); } catch (e) {}
       };
-      window.addEventListener('pagehide', sair);
-      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') sair(); });
+      const marcar = () => { try { sessionStorage.setItem(conexao.OCULTO_KEY, String(Date.now())); } catch (e) {} };
+      const aoVoltar = () => {
+        let desde = 0;
+        try { desde = parseInt(sessionStorage.getItem(conexao.OCULTO_KEY), 10) || 0; } catch (e) {}
+        try { sessionStorage.removeItem(conexao.OCULTO_KEY); } catch (e) {}
+        if (!desde) return;
+        let limite = 5 * 60 * 1000;
+        try { limite = auth._timeoutMs() || limite; } catch (e) {}
+        if (Date.now() - desde >= limite) limpar();
+      };
+      window.addEventListener('pagehide', marcar);
+      window.addEventListener('pageshow', aoVoltar);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') marcar(); else aoVoltar();
+      });
       return n;
     } catch (e) { return 0; }
   },
@@ -27509,6 +27566,222 @@ const fechamento = {
   }
 };
 
+/* ============================================================================
+   DOSSIÊ DO PACIENTE — A HISTÓRIA INTEIRA NUMA LEITURA SÓ
+   ----------------------------------------------------------------------------
+   O sistema tinha histórico POR MÓDULO: o da Consulta olhava consultas, o da
+   pré olhava prés. Ninguém juntava. Para saber o que já aconteceu com um
+   paciente antes de anestesiá-lo era preciso abrir quatro telas e comparar de
+   cabeça — exatamente no momento em que se tem menos tempo.
+
+   DUAS REGRAS QUE GOVERNAM TUDO AQUI
+
+   1. CADA LINHA DIZ DE ONDE VEIO E DE QUANDO.
+      Um resumo clínico sem procedência não é resumo, é boato. "Alergia a
+      dipirona" vale uma coisa se está na pré de ontem e outra se está numa
+      consulta de 2019 que nunca foi confirmada. Nada aparece aqui sem a ficha
+      de origem e a data ao lado.
+
+   2. NADA É INFERIDO.
+      Esta tela reúne e ordena o que está escrito. Não conclui, não resume com
+      palavras próprias, não preenche lacuna. Onde não há dado, diz que não há.
+
+   É também a base da etapa seguinte: se um dia a IA entrar, é ISTO que se
+   manda a ela — organizado, datado e com procedência —, e é por isto que se
+   confere a resposta dela. Modelo nenhum resume bem o que ninguém soube reunir.
+============================================================================ */
+const dossie = {
+  MODS: [
+    ['anestesia', 'Ficha de anestesia'], ['pre', 'Pré-anestésica'],
+    ['consulta', 'Consulta'], ['recuperacao', 'SRPA'],
+    ['termo', 'Termo de consentimento'], ['risco', 'Risco cirúrgico']
+  ],
+
+  _nomeDoDoc(it) {
+    return String((it && it.paciente && it.paciente.nome) || (it && it.paciente_nome) ||
+      (it && typeof it.paciente === 'string' ? it.paciente : '') || (it && it.nome) || '').trim();
+  },
+  _dataDoDoc(mod, it) {
+    const d = it.data_anestesia || it.data || it.data_avaliacao || it.data_proc ||
+      (it._createdAt ? String(it._createdAt).slice(0, 10) : '');
+    return String(d || '').slice(0, 10);
+  },
+  /* Todos os registros daquela pessoa, de todos os módulos, do mais novo para
+     o mais antigo. A identidade é a mesma que o resto do sistema usa. */
+  registrosDe(nome) {
+    const alvo = (() => { try { return linker._normNome(nome); } catch (e) { return ''; } })();
+    if (!alvo || alvo.length < 3) return [];
+    const out = [];
+    dossie.MODS.forEach(([mod, rotulo]) => {
+      (store.list(mod) || []).forEach(it => {
+        if (!it || !it._id) return;
+        let n = '';
+        try { n = linker._normNome(dossie._nomeDoDoc(it)); } catch (e) {}
+        if (n !== alvo) return;
+        out.push({ mod, rotulo, doc: it, data: dossie._dataDoDoc(mod, it) });
+      });
+    });
+    return out.sort((a, b) => String(b.data).localeCompare(String(a.data)));
+  },
+
+  /* ---- COMORBIDADES, ALERGIAS E MEDICAÇÕES, COM PROCEDÊNCIA ----
+     O mesmo item costuma repetir-se em várias fichas. Interessa quando foi
+     dito pela ÚLTIMA vez (é o estado atual) e desde quando consta (há quanto
+     tempo se sabe) — as duas coisas, porque "alergia registrada desde 2019 e
+     reconfirmada ontem" é diferente de "escrito uma vez, há seis anos". */
+  consolidado(regs) {
+    const campos = [
+      ['comorbidades', 'Comorbidades'], ['alergias', 'Alergias'],
+      ['medicacoes', 'Medicações em uso'], ['cirurgias_previas', 'Cirurgias prévias']
+    ];
+    const out = {};
+    campos.forEach(([campo, rotulo]) => {
+      const itens = new Map();
+      regs.forEach(r => {
+        const bruto = String(r.doc[campo] || '').trim();
+        if (!bruto) return;
+        bruto.split(/[;\n]+|,(?![^(]*\))/).map(x => x.trim()).filter(x => x.length > 1).forEach(txt => {
+          const k = txt.toLowerCase();
+          const atual = itens.get(k);
+          if (!atual) { itens.set(k, { texto: txt, ultima: r, primeira: r }); return; }
+          /* regs vem do mais novo para o mais antigo */
+          atual.primeira = r;
+        });
+      });
+      out[campo] = { rotulo, itens: Array.from(itens.values()) };
+    });
+    return out;
+  },
+
+  /* ---- EXAMES: TODAS AS COLETAS, LADO A LADO ----
+     "O que diz alguma coisa não é a creatinina de hoje, é a creatinina de hoje
+     ao lado da de dois meses atrás." As coletas vêm do bloco principal de cada
+     pré e das séries datadas; viram colunas, uma por data. */
+  coletas(regs) {
+    const out = [];
+    regs.filter(r => r.mod === 'pre').forEach(r => {
+      const d = r.doc;
+      const principal = {};
+      labSerie.CAMPOS.forEach(([k]) => {
+        const v = String(d['lab_' + k] == null ? '' : d['lab_' + k]).trim();
+        if (v) principal[k] = v;
+      });
+      if (Object.keys(principal).length) {
+        out.push({ data: String(d.data_exames || r.data || '').slice(0, 10), valores: principal, fonte: r });
+      }
+      (d._labSeries || []).forEach(s => {
+        const vals = {};
+        labSerie.CAMPOS.forEach(([k]) => {
+          const v = String(s[k] == null ? '' : s[k]).trim();
+          if (v) vals[k] = v;
+        });
+        if (Object.keys(vals).length) out.push({ data: String(s.data || '').slice(0, 10), valores: vals, fonte: r });
+      });
+    });
+    return out.sort((a, b) => String(a.data).localeCompare(String(b.data)));
+  },
+  /* Fora da faixa de referência — triagem, não laudo. Reusa a tabela do campo
+     principal para não existirem duas noções de "alterado" no sistema. */
+  _foraDaFaixa(campo, valor, sexo) {
+    try {
+      const ref = pre.labs.REF['lab_' + campo];
+      if (!ref) return false;
+      const n = parseFloat(String(valor).replace(/\./g, '').replace(',', '.'));
+      if (!isFinite(n)) return false;
+      const s = String(sexo || '').trim().toLowerCase()[0];
+      const faixa = ref.faixa || (s === 'f' ? ref.f : ref.m) || ref.m || ref.f;
+      if (!faixa) return false;
+      return n < faixa[0] || n > faixa[1];
+    } catch (e) { return false; }
+  },
+
+  abrir(nome) {
+    const alvo = String(nome || '').trim();
+    if (!alvo) { toast('Escolha o paciente primeiro.', 'warn'); return; }
+    const regs = dossie.registrosDe(alvo);
+    const esc = utils.escapeHTML;
+    if (!regs.length) {
+      modal.open('🩺 ' + esc(alvo),
+        '<p style="font-size:.88rem;margin:0">Nenhum atendimento registrado para este paciente neste ambiente.</p>',
+        '<button class="btn" onclick="modal.close()">Fechar</button>');
+      return;
+    }
+    const dados = (() => { try { return (linker._dadosMaisRecentes(alvo, null, {}) || {}).dados || {}; } catch (e) { return {}; } })();
+    const quando = d => d ? utils.formatarData(d) : 's/ data';
+
+    /* 1. Linha do tempo */
+    const linha = regs.map(r => {
+      const detalhe = [];
+      if (r.mod === 'pre' || r.mod === 'anestesia') {
+        try {
+          const cir = r.mod === 'pre' ? cirurgia.textoLista(cirurgia.daPreDoc(r.doc))
+            : cirurgia.texto({ codigo: (r.doc.procedimento || {}).codigo, descricao: (r.doc.procedimento || {}).descricao, lateralidade: (r.doc.procedimento || {}).lateralidade });
+          if (cir) detalhe.push(cir);
+        } catch (e) {}
+      }
+      if (r.doc.asa) detalhe.push('ASA ' + r.doc.asa);
+      if (r.doc.queixa) detalhe.push(String(r.doc.queixa).slice(0, 80));
+      if (r.doc.hipotese) detalhe.push(String(r.doc.hipotese).slice(0, 80));
+      return '<div style="display:flex;gap:9px;padding:7px 0;border-bottom:1px solid var(--border)">' +
+        '<div style="flex:0 0 88px;font-size:.78rem;color:var(--text-mute)">' + esc(quando(r.data)) + '</div>' +
+        '<div style="flex:1;min-width:0"><b style="font-size:.82rem">' + esc(r.rotulo) + '</b>' +
+        (r.doc._finalizado ? '' : ' <span style="font-size:.7rem;color:var(--warning,#8a4b1c)">(não finalizada)</span>') +
+        (detalhe.length ? '<br><span style="font-size:.8rem;color:var(--text-soft)">' + esc(detalhe.join(' · ')) + '</span>' : '') +
+        '</div></div>';
+    }).join('');
+
+    /* 2. Consolidado com procedência */
+    const cons = dossie.consolidado(regs);
+    const blocos = Object.keys(cons).map(k => {
+      const c = cons[k];
+      if (!c.itens.length) return '';
+      return '<div style="margin:0 0 10px"><div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.4px;color:var(--text-mute);margin-bottom:3px">' +
+        esc(c.rotulo) + '</div>' +
+        c.itens.map(i =>
+          '<div style="font-size:.84rem;padding:2px 0">• ' + esc(i.texto) +
+          ' <span style="font-size:.72rem;color:var(--text-mute)">— ' + esc(i.ultima.rotulo) + ' de ' + esc(quando(i.ultima.data)) +
+          (i.primeira !== i.ultima ? ', consta desde ' + esc(quando(i.primeira.data)) : '') + '</span></div>').join('') +
+        '</div>';
+    }).join('');
+
+    /* 3. Exames lado a lado */
+    const col = dossie.coletas(regs);
+    let tabela = '<p style="font-size:.84rem;color:var(--text-mute);margin:0">Nenhum exame laboratorial registrado.</p>';
+    if (col.length) {
+      const usados = labSerie.CAMPOS.filter(([k]) => col.some(c => c.valores[k]));
+      tabela = '<div style="overflow:auto"><table class="dash-detail-table" style="margin:0;font-size:.8rem"><thead><tr><th>Exame</th>' +
+        col.map(c => '<th style="text-align:right">' + esc(quando(c.data)) + '</th>').join('') + '</tr></thead><tbody>' +
+        usados.map(([k, rot]) => '<tr><td>' + esc(rot) + '</td>' +
+          col.map(c => {
+            const v = c.valores[k] || '';
+            const fora = v && dossie._foraDaFaixa(k, v, dados.sexo);
+            return '<td style="text-align:right' + (fora ? ';color:var(--danger);font-weight:700' : '') + '">' +
+              esc(v || '—') + '</td>';
+          }).join('') + '</tr>').join('') +
+        '</tbody></table></div>' +
+        '<p style="font-size:.74rem;color:var(--text-mute);margin:6px 0 0">Em vermelho, fora da faixa de referência de adulto — é triagem, não laudo.</p>';
+    }
+
+    const cab = [dados.idade ? dados.idade + ' anos' : '', dados.sexo || '',
+      dados.convenio || ''].filter(Boolean).join(' · ');
+    modal.open('🩺 ' + esc(alvo),
+      (cab ? '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">' + esc(cab) + '</p>' : '') +
+      '<div style="max-height:62vh;overflow:auto">' +
+      '<h3 style="font-size:.9rem;margin:0 0 4px">Atendimentos</h3>' + linha +
+      '<h3 style="font-size:.9rem;margin:14px 0 6px">O que consta, e de onde</h3>' +
+      (blocos || '<p style="font-size:.84rem;color:var(--text-mute);margin:0">Nada registrado em comorbidades, alergias ou medicações.</p>') +
+      '<h3 style="font-size:.9rem;margin:14px 0 6px">Exames, coleta a coleta</h3>' + tabela +
+      '</div>',
+      '<button class="btn" onclick="modal.close()">Fechar</button>');
+  },
+
+  /* Abre pelo nome que estiver no formulário da tela atual. */
+  abrirDoFormulario(formId, campo) {
+    const el = document.querySelector('#' + formId + ' [name="' + (campo || 'nome') + '"]');
+    dossie.abrir((el && el.value) || '');
+  }
+};
+
 const pdfBackup = {
   /* ---------- Configuração (Ajustes → Backup de PDFs) ---------- */
   CFG_KEY: 'medsys.v7.pdfbackup.cfg',
@@ -28491,15 +28764,26 @@ const cirurgia = {
      dado de quem preencheu só ele. */
   daPreDoc(doc) {
     if (!doc) return [];
-    const lista = cirurgia.lista(doc._procsExtra);
-    if (lista.length) return lista;
-    const solto = cirurgia.normalizar({
-      codigo: doc.procedimento_codigo || '',
+    /* O PRINCIPAL ENTRA PRIMEIRO, E NÃO SÓ QUANDO NÃO HÁ OUTROS.
+       Antes, havendo procedimentos adicionais, o principal era DESCARTADO —
+       quem preenchia a cirurgia e depois acrescentava mais uma perdia a
+       primeira no caminho para a ficha, para o termo e para a cobrança. Ele é
+       o procedimento do ato; os outros são os demais. */
+    const principal = cirurgia.normalizar({
+      /* `cirurgia_cbhpm` é o campo do código, visível desde que o principal
+         deixou de ser só texto; os outros nomes são formatos anteriores. */
+      codigo: doc.cirurgia_cbhpm || doc.procedimento_codigo || '',
       descricao: doc.cirurgia || doc.procedimento_proposto || '',
-      quantidade: 1,
+      quantidade: doc.procedimento_quantidade || 1,
       lateralidade: doc.lateralidade || ''
     });
-    return solto ? [solto] : [];
+    const demais = cirurgia.lista(doc._procsExtra);
+    if (!principal) return demais;
+    /* Sem duplicar quando o mesmo procedimento está nos dois lugares. */
+    const mesma = (a, b) => (a.codigo && b.codigo)
+      ? a.codigo === b.codigo
+      : a.descricao.toLowerCase() === b.descricao.toLowerCase();
+    return [principal].concat(demais.filter(d => !mesma(principal, d)));
   },
   /* Os <option> de lateralidade, para qualquer tela que precise do campo. */
   opcoesLado(sel) {
@@ -29334,6 +29618,35 @@ const cbhpm = {
       if (!input._cbhpmLigado) cbhpm.ligar(input);
       cbhpm._garantirMais(input);
     });
+    cbhpm._ligarProcPrincipal(root);
+  },
+  /* O CÓDIGO DO PROCEDIMENTO PRINCIPAL DA PRÉ, NOS DOIS SENTIDOS.
+     Escolher pela descrição já preenchia o código — é o mesmo campo que o
+     autocomplete usava escondido. Faltava o caminho inverso: digitar o código
+     e a descrição vir sozinha, que é como se trabalha quando a guia já traz o
+     TUSS. E o seletor de lado precisa das opções do modelo único, para não
+     haver duas listas de lateralidade no sistema. */
+  _ligarProcPrincipal(root = document) {
+    try {
+      const form = (root.getElementById ? root : document).getElementById('form-pre');
+      if (!form) return;
+      const lado = form.querySelector('[name="lateralidade"]');
+      if (lado && !lado.options.length) lado.innerHTML = cirurgia.opcoesLado('');
+      const cod = form.querySelector('[name="cirurgia_cbhpm"]');
+      if (!cod || cod._cbhpmCodLigado) return;
+      cod._cbhpmCodLigado = true;
+      const desc = form.querySelector('[name="cirurgia"]');
+      cbhpm.ligarCodigo(cod, {
+        onMatch: (match) => {
+          /* Não sobrescreve o que a pessoa escreveu: o nome do procedimento na
+             guia às vezes é mais específico que o da tabela. */
+          if (desc && !String(desc.value || '').trim()) {
+            desc.value = match[1];
+            desc.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        }
+      });
+    } catch (e) {}
   },
 
   /* Botão ➕ ao lado de TODO campo CBHPM: acrescenta ' + ' para digitar mais um

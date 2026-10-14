@@ -19529,9 +19529,20 @@ await test('Em máquina compartilhada, fechar a aba e reabrir não deixa o atend
     out.abriuLimpo = depois.indexOf('subiu') < 0;
     out.naoPerdeuOQueNaoSubiu = depois.indexOf('naoSubiu') >= 0;
 
-    /* ---- FECHAR A ABA (pagehide) limpa também ---- */
+    /* ---- SAIR DE VISTA: O QUE DECIDE É O TEMPO FORA ----
+       Trocar de aplicativo por instantes NÃO é abandonar o computador — e no
+       celular `visibilitychange` dispara a cada troca. Limpar ali fazia 261
+       lançamentos sumirem da tela por olhar outro app dez segundos. O propósito
+       é o computador ABANDONADO, onde outra pessoa vai sentar. */
     store.setList('pre', [{ _id: 'novo', nome: 'Feito agora', _updatedAt: agora, _relUpdatedAt: agora }]);
     window.dispatchEvent(new Event('pagehide'));
+    window.dispatchEvent(new Event('pageshow'));
+    out.trocaDeAppNaoLimpa = (store.list('pre') || []).some(x => x._id === 'novo');
+
+    /* O mesmo caminho, fora de vista por mais tempo que o limite do aparelho. */
+    window.dispatchEvent(new Event('pagehide'));
+    sessionStorage.setItem(conexao.OCULTO_KEY, String(Date.now() - (auth._timeoutMs() + 60000)));
+    window.dispatchEvent(new Event('pageshow'));
     out.fecharAbaLimpa = !(store.list('pre') || []).some(x => x._id === 'novo');
 
     /* ---- tentar declarar o aparelho como pessoal não desliga a proteção ---- */
@@ -19540,6 +19551,8 @@ await test('Em máquina compartilhada, fechar a aba e reabrir não deixa o atend
     await __smokePrepareQueue('org-aaaa');
     store.setList('pre', [{ _id: 'meu', nome: 'Registro confirmado', _updatedAt: agora, _relUpdatedAt: agora }]);
     window.dispatchEvent(new Event('pagehide'));
+    sessionStorage.setItem(conexao.OCULTO_KEY, String(Date.now() - (auth._timeoutMs() + 60000)));
+    window.dispatchEvent(new Event('pageshow'));
     out.tentativaPessoalTambemLimpa = !(store.list('pre') || []).some(x => x._id === 'meu');
 
     modoNuvem.podeLigar = origPode;
@@ -19548,6 +19561,8 @@ await test('Em máquina compartilhada, fechar a aba e reabrir não deixa o atend
   });
   assert(r.abriuLimpo, 'na ABERTURA de uma máquina compartilhada, o que já está na nuvem sai antes de aparecer na tela');
   assert(r.naoPerdeuOQueNaoSubiu, 'e o que ainda não subiu continua ali — é a única cópia que existe, apagá-la seria perder atendimento');
+  assert(r.trocaDeAppNaoLimpa,
+    'trocar de aplicativo por instantes NÃO pode esvaziar a lista — no celular isso acontece o tempo todo');
   assert(r.fecharAbaLimpa, 'fechar a aba limpa também: num computador de hospital ninguém clica em Sair');
   assert(r.naoDesativou && r.tentativaPessoalTambemLimpa,
     'declarar o aparelho como pessoal não pode desativar a proteção multiusuário');
@@ -20243,6 +20258,235 @@ await test('Atendimentos sem lançamento: a lista acha, e abrir a tela não cobr
     'abrir a tela e marcar itens NÃO pode gerar cobrança — dinheiro não se movimenta por efeito colateral');
   assert(r.mostraNaTela, 'a lista mostra quem está pendente, com nome');
   assert(r.respeitaRecusa, 'quem teve "não cobrar" registrado fica fora: foi decisão, não esquecimento');
+  await page.close();
+});
+
+/* 272) O procedimento principal da pré também é código, quantidade e lado
+
+   "O campo cirurgia proposta deve ter também o código numérico TUSS. Na
+    sequência: código numérico, descrição (ser possível digitar pelo numérico ou
+    pelo descritivo), quantidade, lateralidade. Esse campo deve ser
+    correspondente ao campo Cirurgia da ficha, TCLE, financeiro, orçamento."
+
+   O modelo compartilhado (`cirurgia`) já existia, e os procedimentos
+   ADICIONAIS da pré já tinham os quatro campos. Faltava justamente no
+   PRINCIPAL — o que quase toda ficha tem, e muitas vezes o único. Ou seja: o
+   que mais aparece na guia era o que ia sem código e sem lado, e lado faltando
+   em guia vira glosa.
+
+   De quebra, `daPreDoc` DESCARTAVA o principal quando havia adicionais: quem
+   preenchia a cirurgia e depois acrescentava outra perdia a primeira no
+   caminho para a ficha, o termo e a cobrança. */
+await test('Cirurgia proposta: código, quantidade e lado atravessam pré, ficha, termo e cobrança', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-tuss');
+    ['pre', 'anestesia', 'termo'].forEach(m => store.setList(m, []));
+    ui.navegar('pre');
+    await new Promise(r => setTimeout(r, 350));
+
+    const f = document.getElementById('form-pre');
+    out.temCampos = !!f.querySelector('[name="cirurgia_cbhpm"]') &&
+                    !!f.querySelector('[name="procedimento_quantidade"]') &&
+                    !!f.querySelector('[name="lateralidade"]');
+    /* O seletor de lado usa a lista do modelo único, não uma cópia. */
+    const lado = f.querySelector('[name="lateralidade"]');
+    out.ladosDoModelo = Array.from(lado.options).map(o => o.value).join(',') ===
+      cirurgia.LATERALIDADES.map(([k]) => k).join(',');
+
+    f.querySelector('[name="nome"]').value = 'Paciente TUSS';
+    f.querySelector('[name="cirurgia"]').value = 'Colecistectomia videolaparoscópica';
+    f.querySelector('[name="cirurgia_cbhpm"]').value = '31003010';
+    f.querySelector('[name="procedimento_quantidade"]').value = '2';
+    lado.value = 'bilateral';
+
+    const doc = utils.formData('form-pre');
+    const lista = cirurgia.daPreDoc(doc);
+    out.principalSai = lista.length === 1 && lista[0].codigo === '31003010' &&
+      lista[0].quantidade === 2 && lista[0].lateralidade === 'bilateral';
+    out.textoCompleto = /31003010/.test(cirurgia.texto(lista[0])) &&
+      /2×/.test(cirurgia.texto(lista[0])) && /Bilateral/.test(cirurgia.texto(lista[0]));
+
+    /* Com procedimentos ADICIONAIS, o principal não pode mais ser descartado. */
+    const comExtras = Object.assign({}, doc, {
+      _procsExtra: [{ codigo: '31003011', descricao: 'Hérnia inguinal', quantidade: 1, lateralidade: 'direita' }]
+    });
+    const lista2 = cirurgia.daPreDoc(comExtras);
+    out.principalSobrevive = lista2.length === 2 && lista2[0].codigo === '31003010';
+    out.extraJunto = lista2[1].codigo === '31003011';
+
+    /* E o mesmo procedimento nos dois lugares não sai duplicado. */
+    const duplicado = Object.assign({}, doc, {
+      _procsExtra: [{ codigo: '31003010', descricao: 'Colecistectomia videolaparoscópica' }]
+    });
+    out.naoDuplica = cirurgia.daPreDoc(duplicado).length === 1;
+
+    /* Na folha impressa sai o conjunto, não só a descrição. */
+    const html = printPreview._cirurgiaDaPre(doc);
+    out.naFolha = /31003010/.test(html) && /Bilateral/.test(html);
+
+    ['pre', 'anestesia', 'termo'].forEach(m => store.setList(m, []));
+    return out;
+  });
+  assert(r.temCampos, 'o principal precisa ter código TUSS, quantidade e lateralidade');
+  assert(r.ladosDoModelo, 'a lateralidade vem do modelo único — duas listas divergiriam');
+  assert(r.principalSai && r.textoCompleto,
+    'código, quantidade e lado têm de sair no modelo compartilhado e no texto do papel');
+  assert(r.principalSobrevive && r.extraJunto,
+    'havendo procedimentos adicionais, o principal NÃO pode ser descartado');
+  assert(r.naoDuplica, 'o mesmo procedimento nos dois lugares sai uma vez só');
+  assert(r.naFolha, 'a folha impressa mostra o código e o lado, que é o que a guia confere');
+  await page.close();
+});
+
+/* 273) Dossiê do paciente: reúne, ordena, diz de onde veio — e não conclui nada
+
+   O histórico era POR MÓDULO: o da Consulta olhava consultas, o da pré olhava
+   prés. Para saber o que já aconteceu com um paciente antes de anestesiá-lo era
+   preciso abrir quatro telas e comparar de cabeça, no momento em que se tem
+   menos tempo.
+
+   As duas regras que este teste cobra, porque são o que separa um resumo
+   clínico de um boato:
+   • cada item traz a ficha de origem e a data — "alergia a dipirona" vale uma
+     coisa na pré de ontem e outra numa consulta de 2019;
+   • os exames saem coleta a coleta, lado a lado, que é o que permite comparar;
+     e nada é inferido onde não há dado. */
+await test('Dossiê: junta os módulos, mostra a procedência de cada item e compara as coletas', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-dossie');
+    ['pre', 'anestesia', 'consulta', 'recuperacao', 'termo', 'risco'].forEach(m => store.setList(m, []));
+
+    store.setList('consulta', [{
+      _id: 'c1', nome: 'Celina Dossiê', data: '2026-03-10', _finalizado: true,
+      queixa: 'Dor lombar', comorbidades: 'HAS (Hipertensão arterial)',
+      alergias: 'Dipirona'
+    }]);
+    store.setList('pre', [{
+      _id: 'p1', nome: 'Celina Dossiê', data: '2026-08-15', _finalizado: true,
+      cirurgia: 'Colecistectomia videolaparoscópica', cirurgia_cbhpm: '31003010',
+      comorbidades: 'HAS (Hipertensão arterial); Diabetes', alergias: 'Dipirona',
+      medicacoes: 'Losartana 50mg', asa: 'II',
+      data_exames: '2026-08-10', lab_hb: '13,2', lab_creat: '0,9',
+      _labSeries: [{ data: '2026-10-01', hb: '9,1', creat: '1,8' }]
+    }]);
+    store.setList('anestesia', [{
+      _id: 'a1', paciente: { nome: 'Celina Dossiê' }, data_anestesia: '2026-08-20', _finalizado: true,
+      procedimento: { descricao: 'Colecistectomia videolaparoscópica', codigo: '31003010' }
+    }]);
+
+    const regs = dossie.registrosDe('Celina Dossiê');
+    out.juntouTudo = regs.length === 3;
+    out.ordemDesc = regs[0].data === '2026-08-20' && regs[2].data === '2026-03-10';
+    out.ignoraOutros = dossie.registrosDe('Outra Pessoa').length === 0;
+
+    const cons = dossie.consolidado(regs);
+    const alergia = cons.alergias.itens[0];
+    /* Dipirona aparece na consulta de março E na pré de agosto: a mais recente
+       governa, e o "consta desde" preserva a primeira vez. */
+    out.procedencia = alergia && alergia.ultima.data === '2026-08-15' && alergia.primeira.data === '2026-03-10';
+    out.separouItens = cons.comorbidades.itens.length === 2;
+
+    const col = dossie.coletas(regs);
+    out.duasColetas = col.length === 2 && col[0].data === '2026-08-10' && col[1].data === '2026-10-01';
+    out.valoresCertos = col[0].valores.hb === '13,2' && col[1].valores.hb === '9,1';
+    /* Hb 9,1 numa mulher está fora da faixa; 13,2 não. É triagem, não laudo. */
+    out.marcaForaDaFaixa = dossie._foraDaFaixa('hb', '9,1', 'Feminino') === true &&
+                           dossie._foraDaFaixa('hb', '13,2', 'Feminino') === false;
+
+    dossie.abrir('Celina Dossiê');
+    const corpo = (document.getElementById('modal-body') || {}).textContent || '';
+    out.mostraOrigem = /Pré-anestésica de 15\/08\/2026/.test(corpo) && /consta desde 10\/03\/2026/.test(corpo);
+    out.mostraExames = /9,1/.test(corpo) && /13,2/.test(corpo);
+    out.mostraCirurgia = /31003010/.test(corpo);
+    try { modal.close(); } catch (e) {}
+
+    /* Paciente sem registro: diz que não há, em vez de inventar. */
+    dossie.abrir('Ninguém Aqui');
+    out.vazioHonesto = /Nenhum atendimento registrado/.test((document.getElementById('modal-body') || {}).textContent || '');
+    try { modal.close(); } catch (e) {}
+
+    ['pre', 'anestesia', 'consulta', 'recuperacao', 'termo', 'risco'].forEach(m => store.setList(m, []));
+    return out;
+  });
+  assert(r.juntouTudo && r.ordemDesc, 'reúne os módulos do mesmo paciente, do mais novo para o mais antigo');
+  assert(r.ignoraOutros, 'e não traz o de outra pessoa');
+  assert(r.procedencia, 'cada item diz de qual ficha veio e desde quando consta — sem isso é boato');
+  assert(r.separouItens, 'comorbidades escritas numa linha só viram itens');
+  assert(r.duasColetas && r.valoresCertos, 'as coletas saem lado a lado, em ordem de data');
+  assert(r.marcaForaDaFaixa, 'o fora da faixa usa a mesma tabela de referência do campo principal');
+  assert(r.mostraOrigem && r.mostraExames && r.mostraCirurgia, 'a tela mostra origem, exames e a cirurgia com código');
+  assert(r.vazioHonesto, 'sem registro, diz que não há — não preenche lacuna');
+  await page.close();
+});
+
+/* 274) A busca entra DENTRO das fichas, e diz em que campo achou
+
+   "Buscar algum dado clínico" — a busca achava paciente, procedimento,
+   cirurgião e convênio: a ficha por fora, o conteúdo por dentro não. "Quem tem
+   alergia a dipirona", "quem já teve via aérea difícil", "quem usou
+   noradrenalina" não tinham resposta possível, embora a resposta estivesse
+   escrita em dezenas de fichas.
+
+   O que este teste cobra, e é o ponto da funcionalidade: o resultado DIZ EM QUE
+   CAMPO achou. "Dipirona" em alergias e "dipirona" em medicações em uso são
+   coisas opostas — uma busca que não distingue as duas é pior do que nenhuma. */
+await test('Busca clínica: acha dentro da ficha, mostra o trecho e diz em que campo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-busca');
+    ['pre', 'consulta', 'anestesia', 'recuperacao', 'risco'].forEach(m => store.setList(m, []));
+
+    store.setList('pre', [
+      { _id: 'b1', nome: 'Alérgica Silva', data: '2026-09-01',
+        alergias: 'Alergia a dipirona e a frutos do mar', comorbidades: 'HAS' },
+      { _id: 'b2', nome: 'Em Uso Souza', data: '2026-09-02',
+        medicacoes: 'Dipirona 500mg se dor', alergias: 'Nega alergias' }
+    ]);
+    store.setList('anestesia', [
+      { _id: 'b3', paciente: { nome: 'Grave Pereira' }, data_anestesia: '2026-09-03',
+        intercorrencias: 'Hipotensão refratária — iniciada noradrenalina em bomba',
+        _medsLista: [{ nome: 'Noradrenalina', dose: '0,1 mcg/kg/min' }] }
+    ]);
+
+    buscaGlobal.abrir();
+    document.getElementById('gs-input').value = 'dipirona';
+    buscaGlobal.buscar();
+    const h1 = document.getElementById('gs-results').innerHTML;
+    out.achouOsDois = /Alérgica Silva/.test(h1) && /Em Uso Souza/.test(h1);
+    /* A distinção que importa: o campo aparece em cada resultado. */
+    out.dizOCampo = /Alergias:/.test(h1) && /Medicações em uso:/.test(h1);
+    out.destacaTermo = /<mark>[Dd]ipirona<\/mark>/.test(h1);
+    out.mostraTrecho = /frutos do mar/.test(h1);
+    /* E não inventa: quem não tem a palavra não entra. */
+    out.semFalsoPositivo = !/Grave Pereira/.test(h1);
+
+    /* Lista de medicações administradas também é conteúdo pesquisável. */
+    document.getElementById('gs-input').value = 'noradrenalina';
+    buscaGlobal.buscar();
+    const h2 = document.getElementById('gs-results').innerHTML;
+    out.achouNaLista = /Grave Pereira/.test(h2);
+    out.campoDaLista = /Intercorrências:|Medicações administradas:/.test(h2);
+
+    document.getElementById('gs-input').value = 'palavraquenaoexiste';
+    buscaGlobal.buscar();
+    out.vazioHonesto = /Nenhum registro para/.test(document.getElementById('gs-results').innerHTML);
+    buscaGlobal.fechar();
+
+    ['pre', 'consulta', 'anestesia', 'recuperacao', 'risco'].forEach(m => store.setList(m, []));
+    return out;
+  });
+  assert(r.achouOsDois, 'a busca precisa entrar no conteúdo das fichas, não só no cabeçalho');
+  assert(r.dizOCampo,
+    'o resultado diz em QUE CAMPO achou — alergia a dipirona e dipirona em uso são opostos');
+  assert(r.destacaTermo && r.mostraTrecho, 'mostra a frase com o termo destacado, para decidir sem abrir a ficha');
+  assert(r.semFalsoPositivo, 'quem não tem a palavra não aparece');
+  assert(r.achouNaLista && r.campoDaLista, 'a lista de medicações administradas também é pesquisável');
+  assert(r.vazioHonesto, 'sem achado, diz que não achou');
   await page.close();
 });
 

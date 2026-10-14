@@ -10,6 +10,66 @@
     { t:'Financeiro', ic:'💰', go:function(){ location.hash='#financeiro'; } },
     { t:'Ajustes', ic:'⚙️', go:function(){ location.hash='#ajustes'; } }
   ];
+  /* ---- BUSCA POR CONTEÚDO CLÍNICO ----
+     A busca achava paciente, procedimento, cirurgião e convênio — a ficha de
+     fora, o conteúdo de dentro não. "Quem tem alergia a dipirona", "quem já
+     teve via aérea difícil", "quem usou noradrenalina" não tinham resposta
+     possível, embora a resposta estivesse escrita em dezenas de fichas.
+
+     Os campos abaixo são os que guardam texto clínico. A lista é explícita, e
+     não "todos os campos", por duas razões: varrer tudo traria carimbos
+     técnicos e identificadores como se fossem achado clínico; e o resultado
+     precisa dizer EM QUE CAMPO achou — "dipirona" em alergias e "dipirona" em
+     medicações em uso são coisas opostas, e uma busca que não distingue as
+     duas é pior do que nenhuma. */
+  var CLINICOS = {
+    pre: [
+      ['comorbidades','Comorbidades'], ['alergias','Alergias'], ['medicacoes','Medicações em uso'],
+      ['descricao_clinica','Descrição clínica'], ['cirurgias_previas','Cirurgias prévias'],
+      ['via_aerea','Via aérea'], ['ecg','ECG'], ['outros_exames','Outros exames'],
+      ['pareceres','Pareceres'], ['conclusao','Conclusão'], ['orientacoes','Orientações'],
+      ['asa','ASA'], ['jejum','Jejum'], ['acompanhantes','Acompanhantes']
+    ],
+    consulta: [
+      ['queixa','Queixa'], ['hda','História da doença atual'], ['exame_fisico','Exame físico'],
+      ['hipotese','Hipótese'], ['conduta','Conduta'], ['prescricao','Receituário'],
+      ['comorbidades','Comorbidades'], ['alergias','Alergias'], ['medicacoes','Medicações']
+    ],
+    anestesia: [
+      ['tecnica_descricao','Técnica'], ['via_aerea_detalhe','Via aérea'],
+      ['intercorrencias','Intercorrências'], ['observacoes','Observações'],
+      ['_medsLista','Medicações administradas']
+    ],
+    recuperacao: [['observacoes','Observações'], ['intercorrencias','Intercorrências']],
+    risco: [['conclusao','Conclusão'], ['observacoes','Observações']]
+  };
+  /* Campo pode ser texto ou lista (as medicações da ficha são objetos). */
+  function textoDoCampo(v){
+    if (v == null) return '';
+    if (Array.isArray(v)) {
+      return v.map(function(x){
+        if (!x) return '';
+        if (typeof x === 'string') return x;
+        return [x.nome, x.droga, x.medicamento, x.dose, x.via].filter(Boolean).join(' ');
+      }).join(' · ');
+    }
+    if (typeof v === 'object') return '';
+    return String(v);
+  }
+  /* O pedaço do texto em volta do achado, com o termo destacado. Mostrar a
+     frase é o que permite decidir sem abrir a ficha. */
+  function trecho(texto, termo){
+    var i = texto.toLowerCase().indexOf(termo);
+    if (i < 0) return '';
+    var ini = Math.max(0, i - 45), fim = Math.min(texto.length, i + termo.length + 45);
+    var s = (ini > 0 ? '…' : '') + texto.slice(ini, fim) + (fim < texto.length ? '…' : '');
+    var e = esc(s);
+    var alvo = esc(texto.substr(i, termo.length));
+    var pos = e.toLowerCase().indexOf(alvo.toLowerCase());
+    if (pos < 0) return e;
+    return e.slice(0, pos) + '<mark>' + e.slice(pos, pos + alvo.length) + '</mark>' + e.slice(pos + alvo.length);
+  }
+
   var acaoAtual = [];
   window.buscaGlobal = {
     abrir: function(){
@@ -63,11 +123,49 @@
               + '<span><div class="gs-nome">'+esc(r.nome)+'</div>'
               + (r.det?'<div class="gs-det">'+esc(r.det)+'</div>':'') + '</span></div>';
           }).join('');
-        } else {
+        }
+
+        /* ---- conteúdo clínico ---- */
+        var clin = [];
+        Object.keys(CLINICOS).forEach(function(m){
+          var lista = [];
+          try { lista = store.list(m) || []; } catch(e){}
+          lista.forEach(function(it){
+            if (!it || !it._id) return;
+            var achados = [];
+            CLINICOS[m].forEach(function(par){
+              var txt = textoDoCampo(it[par[0]]);
+              if (txt && txt.toLowerCase().indexOf(termo) >= 0) achados.push({ rot: par[1], txt: txt });
+            });
+            if (!achados.length) return;
+            var nome = it.paciente_nome || it.nome || (it.paciente && it.paciente.nome) || '';
+            var data = it.data_anestesia || it.data || (it._createdAt ? String(it._createdAt).slice(0,10) : '');
+            clin.push({
+              mod: m, id: it._id, nome: nome || '(sem nome)', data: data,
+              campo: achados[0].rot, trecho: trecho(achados[0].txt, termo),
+              outros: achados.length - 1
+            });
+          });
+        });
+        clin.sort(function(a,b){ return String(b.data||'').localeCompare(String(a.data||'')); });
+        if (clin.length) {
+          html += '<div class="gs-h">CONTEÚDO CLÍNICO · '+clin.length+'</div>' + clin.slice(0,40).map(function(c){
+            var quando = '';
+            try { quando = c.data ? utils.formatarData(c.data) : ''; } catch(e){ quando = c.data || ''; }
+            return '<div class="gs-item" onclick="buscaGlobal.abrirReg('+utils.jsArg(c.mod)+','+utils.jsArg(c.id)+')">'
+              + '<span class="gs-mod">'+esc(LABELS[c.mod]||c.mod)+'</span>'
+              + '<span><div class="gs-nome">'+esc(c.nome)+(quando?' <span style="font-weight:400;opacity:.6">· '+esc(quando)+'</span>':'')+'</div>'
+              + '<div class="gs-det"><b>'+esc(c.campo)+':</b> '+c.trecho
+              + (c.outros ? ' <span style="opacity:.6">(+'+c.outros+' campo'+(c.outros>1?'s':'')+')</span>' : '')
+              + '</div></span></div>';
+          }).join('');
+        }
+
+        if (!res.length && !clin.length) {
           html += '<div class="gs-vazio">Nenhum registro para "'+esc(termo)+'".</div>';
         }
       } else if (!termo) {
-        html += '<div class="gs-vazio">Digite 2+ letras para buscar em todos os módulos — pacientes, procedimentos, convênios, agenda.</div>';
+        html += '<div class="gs-vazio">Digite 2+ letras. Busca pacientes, procedimentos, convênios e agenda — e também dentro das fichas: alergias, comorbidades, medicações, técnica, intercorrências, conduta.</div>';
       }
       out.innerHTML = html;
     }
