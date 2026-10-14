@@ -569,6 +569,9 @@ html[data-theme="dark"] .theme-toggle:hover {
 .cap-field input { padding: 8px; border: 1px solid var(--border); border-radius: 6px; }
 .cap-field.cap-found input { border-color: #0f7b4f; background: #f0fdf4; }
 .cap-field.cap-found span::after { content: ' ✓'; color: #0f7b4f; }
+/* Pendência não é erro nem ação primária: é algo que espera decisão. */
+.btn-warning { background: #fff8ec; color: #7a4b12; border-color: #e2bc7d; }
+.btn-warning:hover { background: #f6e6c8; border-color: #c89a46; color: #5e380b; }
 .btn-danger { background: #fff; color: var(--danger); border-color: #e6b8b3; }
 .btn-danger:hover { background: var(--danger-soft); color: var(--danger); border-color: var(--danger); }
 .btn-ghost { background: transparent; border-color: transparent; color: var(--text-soft); }
@@ -4816,7 +4819,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-14a</b><br>
+    v7.1 · build <b id="build-tag">2026-10-14b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -8561,6 +8564,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <button class="btn btn-sm" id="btn-expandir-financeiro" onclick="ui.alternarTodos('financeiro')" title="Expandir ou recolher todos os campos">⊕ Expandir tudo</button>
     <button class="btn btn-primary" onclick="financeiro.lancamentoRapido()" title="Lançar um procedimento feito SEM consulta/ficha no sistema — entra direto no controle de cobrança"><span class="icon">⚡</span> Lançamento rápido</button>
     <button class="btn btn-primary" onclick="financeiro.editar(null)"><span class="icon">+</span> Novo registro</button>
+    <button class="btn btn-warning" onclick="financeiro.semLancamentoAbrir()" title="Atendimentos finalizados que não têm cobrança gerada — produção que não virou lançamento"><span class="icon">⏳</span> Sem lançamento</button>
     <button class="btn btn-primary" onclick="financeiro.conciliar()" title="Buscar evento por paciente, conferir previsto × recebido × glosa e classificar"><span class="icon">🔄</span> Conciliação</button>
     <button class="btn btn-success" onclick="financeiro.relatorios()" title="Relatórios de conciliação detalhada por código TUSS"><span class="icon">📊</span> Relatórios</button>
     <button class="btn" onclick="financeiro.caixa.abrir()" title="Fechamento de caixa do dia: recebido, realizado e a receber, por convênio e forma de pagamento"><span class="icon">🧾</span> Fechar caixa</button>
@@ -8580,9 +8584,14 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
       </div>
       <div class="print-meta" id="print-meta-financeiro"></div>
     </div>
+    <!-- O MÓDULO É FINANCEIRO; CONCILIAÇÃO É UMA DAS COISAS QUE SE FAZ NELE.
+         A tela abria chamando-se "Conciliação financeira", que é só a conferência
+         de pagamentos e glosas — uma atividade entre lançar, cobrar, conciliar,
+         fechar caixa e relatar. Quem entrava para lançar achava que estava no
+         lugar errado. -->
     <div class="page-title">
-      <h1>Conciliação financeira</h1>
-      <span class="subtitle">Conferência de pagamentos e glosas</span>
+      <h1>Financeiro</h1>
+      <span class="subtitle">Lançamentos, cobrança, conciliação e fechamento de caixa</span>
     </div>
 
     <!-- Form de edição -->
@@ -8885,7 +8894,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
       </div>
     </div>
 
-    <div class="print-only print-footer">Soft Anestesia · Conciliação financeira</div>
+    <div class="print-only print-footer">Soft Anestesia · Financeiro</div>
   </div>
 </div>
 
@@ -14359,7 +14368,7 @@ const ui = {
         prescricao: 'Receituário',
         documentos: 'Documentos (atestados, declarações e laudos)',
         risco: 'Risco perioperatório',
-        financeiro: 'Conciliação financeira', agenda: 'Agenda',
+        financeiro: 'Financeiro', agenda: 'Agenda',
         orcamento: 'Orçamentos',
         doses: 'Doses & Infusões',
         pacientes: 'Pacientes', ajustes: 'Ajustes',
@@ -44513,6 +44522,123 @@ const financeiro = {
      Dashboard e o relatório dessem números diferentes para a mesma pergunta —
      e aí nenhum dos dois serve. O relatório CHAMA a regra de lá.
   ========================================================================== */
+  /* ==========================================================================
+     ATENDIMENTOS SEM LANÇAMENTO — PRODUÇÃO QUE NÃO VIROU COBRANÇA
+     --------------------------------------------------------------------------
+     Depois de arquivar o acervo que estava em quarentena, o Dashboard voltou a
+     mostrar os atendimentos e o Financeiro continuou zerado. Não era defeito de
+     exibição: atendimento e cobrança são registros SEPARADOS, e a cobrança
+     daqueles atendimentos nunca chegou a existir — são anteriores ao
+     lançamento automático.
+
+     Não havia como gerá-la. Pior: quando a janela da cobrança não consegue
+     abrir, o sistema manda "gerar o lançamento no Dashboard, no botão 'gerar
+     financeiro' da linha do paciente" — e esse botão não existe em lugar
+     nenhum. Mais uma promessa que a tela faz e o código não cumpre.
+
+     O QUE ESTA TELA NÃO FAZ
+
+     Não gera nada sozinha, nem ao abrir, nem ao marcar. Dinheiro não se
+     movimenta por efeito colateral: a lista mostra, a pessoa escolhe, confirma,
+     e só então os lançamentos nascem.
+
+     E não ressuscita o que foi recusado: atendimento com decisão registrada de
+     "não cobrar" fica fora da lista, porque aquilo foi uma decisão e não um
+     esquecimento. Quem quiser voltar atrás abre o atendimento.
+  ========================================================================== */
+  MODS_ORIGEM: [['anestesia', 'Ficha de anestesia'], ['pre', 'Pré-anestésica'], ['consulta', 'Consulta']],
+
+  semLancamento() {
+    const comLancamento = new Set();
+    (store.list('financeiro') || []).forEach(f => { if (f && f._origemId) comLancamento.add(f._origemId); });
+    const out = [];
+    financeiro.MODS_ORIGEM.forEach(([mod, rotulo]) => {
+      (store.list(mod) || []).forEach(doc => {
+        if (!doc || !doc._id || !doc._finalizado) return;
+        if (comLancamento.has(doc._id)) return;
+        /* decisão explícita de não cobrar é decisão, não esquecimento */
+        try { if (fin.finalizacao.decisaoDe(doc) === false) return; } catch (e) {}
+        let cab = {};
+        try { cab = fin._cabecalho(mod, doc) || {}; } catch (e) { cab = {}; }
+        if (!cab.paciente) return;
+        out.push({
+          mod, rotulo, id: doc._id,
+          paciente: cab.paciente,
+          data: cab.dataProc || '',
+          procedimento: cab.procedimento || '',
+          convenio: cab.convenio || ''
+        });
+      });
+    });
+    return out.sort((a, b) => String(b.data).localeCompare(String(a.data)));
+  },
+
+  semLancamentoAbrir() {
+    const lista = financeiro.semLancamento();
+    financeiro._semLanc = lista;
+    const esc = utils.escapeHTML;
+    if (!lista.length) {
+      modal.open('⏳ Atendimentos sem lançamento',
+        '<p style="font-size:.88rem;margin:0">Todo atendimento finalizado já tem cobrança gerada, ou teve a decisão de <b>não cobrar</b> registrada. Nada pendente.</p>',
+        '<button class="btn" onclick="modal.close()">Fechar</button>');
+      return;
+    }
+    const auto = (() => { try { return fin.isAutoEnabled(); } catch (e) { return true; } })();
+    const corpo =
+      '<p style="font-size:.86rem;margin:0 0 10px"><b>' + lista.length + '</b> atendimento(s) finalizado(s) sem cobrança gerada. ' +
+      'Marque os que devem virar lançamento. <b>Nada é gerado sem você confirmar.</b></p>' +
+      (auto ? '' : '<div style="background:#fdecea;border:1px solid #e9a69e;color:#7b241c;border-radius:8px;padding:9px 11px;font-size:.82rem;margin:0 0 10px">' +
+        '⚠️ O <b>auto-financeiro está desligado</b> (caixa no alto da tela). Com ele desligado nenhum lançamento é criado. Ligue antes de gerar.</div>') +
+      '<div style="margin:0 0 8px"><label class="check-inline"><input type="checkbox" id="sl-todos" onchange="financeiro._semLancTodos(this.checked)"> <b>Marcar todos</b></label>' +
+      ' <span id="sl-conta" style="color:var(--text-mute);font-size:.82rem"></span></div>' +
+      '<div style="max-height:46vh;overflow:auto;border:1px solid var(--border);border-radius:8px">' +
+      '<table class="dash-detail-table" style="margin:0"><thead><tr><th style="width:34px"></th><th>Paciente</th><th>Data</th><th>Origem</th><th>Procedimento</th></tr></thead><tbody>' +
+      lista.map((x, i) =>
+        '<tr><td><input type="checkbox" class="sl-item" data-i="' + i + '" onchange="financeiro._semLancConta()"></td>' +
+        '<td>' + esc(x.paciente) + '</td>' +
+        '<td>' + esc(x.data ? utils.formatarData(x.data) : '—') + '</td>' +
+        '<td><small>' + esc(x.rotulo) + '</small></td>' +
+        '<td><small>' + esc(x.procedimento || '—') + '</small></td></tr>').join('') +
+      '</tbody></table></div>' +
+      '<p style="font-size:.79rem;color:var(--text-soft);margin:9px 0 0">O lançamento nasce com o que o atendimento tem: paciente, data, convênio e os códigos já registrados. ' +
+      'Valores e senha podem ser completados depois, na conciliação.</p>';
+    modal.open('⏳ Atendimentos sem lançamento', corpo,
+      '<button class="btn btn-primary" onclick="financeiro._semLancGerar()">Gerar os marcados</button>' +
+      '<button class="btn btn-ghost" onclick="modal.close()">Fechar</button>');
+    financeiro._semLancConta();
+  },
+  _semLanc: [],
+  _semLancTodos(lig) {
+    document.querySelectorAll('.sl-item').forEach(c => { c.checked = !!lig; });
+    financeiro._semLancConta();
+  },
+  _semLancConta() {
+    const n = document.querySelectorAll('.sl-item:checked').length;
+    const el = document.getElementById('sl-conta');
+    if (el) el.textContent = n ? '— ' + n + ' marcado(s)' : '— nenhum marcado';
+  },
+  _semLancGerar() {
+    const marcados = Array.from(document.querySelectorAll('.sl-item:checked'))
+      .map(c => (financeiro._semLanc || [])[Number(c.getAttribute('data-i'))])
+      .filter(Boolean);
+    if (!marcados.length) { toast('Marque pelo menos um atendimento.', 'warn'); return; }
+    if (!confirm('Gerar ' + marcados.length + ' lançamento(s) financeiro(s)?\n\n' +
+      'Eles entram como PENDENTES, com os dados do atendimento. Nada é cobrado automaticamente e os valores podem ser ajustados depois.')) return;
+    let feitos = 0, falhas = 0;
+    marcados.forEach(x => {
+      try {
+        const doc = store.getById(x.mod, x.id);
+        const r = doc ? fin.fromDoc(x.mod, doc) : null;
+        if (r) feitos++; else falhas++;
+      } catch (e) { falhas++; }
+    });
+    modal.close();
+    financeiro.render();
+    toast(feitos
+      ? '💰 ' + feitos + ' lançamento(s) gerado(s)' + (falhas ? ' · ' + falhas + ' não foi/foram possível(is)' : '')
+      : 'Nenhum lançamento foi gerado — verifique se o auto-financeiro está ligado.', feitos ? 'success' : 'warn');
+  },
+
   _medicosConhecidos() {
     const nomes = new Map();
     const por = v => {

@@ -20175,6 +20175,77 @@ await test('Produção do mês: o vazio diz em que meses estão os lançamentos'
   await page.close();
 });
 
+/* 271) Produção que não virou cobrança tem onde ser vista — e nada nasce sozinho
+
+   Arquivado o acervo que estava em quarentena, o Dashboard voltou a mostrar os
+   atendimentos e o Financeiro continuou zerado. Não era defeito de exibição:
+   atendimento e cobrança são registros SEPARADOS, e a cobrança daqueles
+   atendimentos nunca existiu — são anteriores ao lançamento automático.
+
+   Não havia como gerá-la. E o sistema ainda mandava "gerar o lançamento no
+   Dashboard, no botão da linha do paciente" — botão que não existe em lugar
+   nenhum.
+
+   O teste cobra as duas metades: que a lista encontre o que está pendente e
+   deixe de fora o que não deve entrar; e que ABRIR a tela não gere nada —
+   dinheiro não se movimenta por efeito colateral. */
+await test('Atendimentos sem lançamento: a lista acha, e abrir a tela não cobra nada', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-semlanc');
+    ['financeiro', 'anestesia', 'pre', 'consulta'].forEach(m => store.setList(m, []));
+    ui.navegar('financeiro');
+    await new Promise(r => setTimeout(r, 200));
+
+    store.setList('anestesia', [
+      { _id: 'a1', _finalizado: true, paciente: { nome: 'Ana Pendente' },
+        data_anestesia: '2026-09-10', procedimento: { descricao: 'Colecistectomia' } },
+      { _id: 'a2', _finalizado: true, paciente: { nome: 'Bruno Já Cobrado' },
+        data_anestesia: '2026-09-11', procedimento: { descricao: 'Hérnia' } },
+      { _id: 'a3', paciente: { nome: 'Carla Rascunho' }, data_anestesia: '2026-09-12' }
+    ]);
+    /* Bruno já tem lançamento; Carla não está finalizada. */
+    store.setList('financeiro', [{ _id: 'f1', _origemId: 'a2', paciente: 'Bruno Já Cobrado' }]);
+
+    const lista = financeiro.semLancamento();
+    out.achouPendente = lista.some(x => x.paciente === 'Ana Pendente');
+    out.ignoraJaCobrado = !lista.some(x => x.paciente === 'Bruno Já Cobrado');
+    out.ignoraRascunho = !lista.some(x => x.paciente === 'Carla Rascunho');
+
+    /* ABRIR NÃO COBRA. É a garantia que importa nesta tela. */
+    const antes = (store.list('financeiro') || []).length;
+    financeiro.semLancamentoAbrir();
+    out.abriuSemGerar = (store.list('financeiro') || []).length === antes;
+    out.mostraNaTela = /Ana Pendente/.test((document.getElementById('modal-body') || {}).textContent || '');
+    /* Marcar também não cobra: só o botão de confirmar cobra. */
+    financeiro._semLancTodos(true);
+    out.marcarSemGerar = (store.list('financeiro') || []).length === antes;
+    try { modal.close(); } catch (e) {}
+
+    /* Quem teve decisão registrada de NÃO cobrar fica fora: aquilo foi decisão,
+       não esquecimento. */
+    store.setList('anestesia', [{
+      _id: 'a4', _finalizado: true, paciente: { nome: 'Dalva Recusada' },
+      data_anestesia: '2026-09-13',
+      _adendos: [{ motivo: 'decisao_financeira', texto: fin.finalizacao.DECISAO_NAO, data: '2026-09-13T10:00:00.000Z' }]
+    }]);
+    store.setList('financeiro', []);
+    out.respeitaRecusa = !financeiro.semLancamento().some(x => x.paciente === 'Dalva Recusada');
+
+    ['financeiro', 'anestesia', 'pre', 'consulta'].forEach(m => store.setList(m, []));
+    return out;
+  });
+  assert(r.achouPendente, 'atendimento finalizado sem cobrança tem de aparecer');
+  assert(r.ignoraJaCobrado, 'o que já tem lançamento não entra de novo');
+  assert(r.ignoraRascunho, 'rascunho não é produção: só entra o que foi finalizado');
+  assert(r.abriuSemGerar && r.marcarSemGerar,
+    'abrir a tela e marcar itens NÃO pode gerar cobrança — dinheiro não se movimenta por efeito colateral');
+  assert(r.mostraNaTela, 'a lista mostra quem está pendente, com nome');
+  assert(r.respeitaRecusa, 'quem teve "não cobrar" registrado fica fora: foi decisão, não esquecimento');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
