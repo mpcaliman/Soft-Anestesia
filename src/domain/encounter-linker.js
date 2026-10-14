@@ -287,7 +287,7 @@ const rascunhosSync = {
       if (!Array.isArray(linhas) || !linhas.length) return 0;
       const locais = rascunhos.list(mod) || [];
       const porId = new Map(locais.map(r => [r.id, r]));
-      let novos = 0, atualizados = 0, conflitos = 0;
+      let novos = 0, atualizados = 0, conflitos = 0, ignoradasCopias = 0;
       /* guarda o que chegou, para a tela poder ABRIR o rascunho trazido —
          antes ele entrava na lista em silêncio e o usuário não via */
       rascunhosSync._chegaram = [];
@@ -295,6 +295,22 @@ const rascunhosSync = {
       linhas.filter(l => l && l.organization_id === org && l.user_id === contexto.userId).forEach(l => {
         const r = rascunhosSync._daLinha(l, org);
         if (!r || !r.id || !r.dados) return;
+        /* CÓPIA PRESERVADA NÃO DESCE, PELO MESMO MOTIVO QUE NÃO SOBE.
+           A trava existia só na subida. Uma cópia preservada é a fotografia
+           LOCAL do que esta aba tinha antes de a nuvem trazer outra versão:
+           ela não tem contrapartida no servidor e não deve ter. Mas o pull
+           aceitava qualquer linha, e uma cópia que tenha chegado ao servidor
+           por qualquer caminho — uma versão antiga do app ainda em cache no
+           celular, uma linha anterior ao conserto da subida — volta aqui como
+           rascunho novo, com id próprio, rótulo igual ao do paciente e nenhuma
+           relação com o que esta aba está fazendo. Daí a tela encher de abas
+           do MESMO nome sem ninguém ter criado nenhuma.
+           Guarda de um lado só não é guarda: é a mesma lição que o próprio
+           `_preservarConflito` já tinha aprendido, e que faltava aqui.
+           Só ignoramos: a linha fica no servidor, intacta, porque pode ser a
+           única cópia do que alguém preservou noutro aparelho. Deixar de
+           importá-la basta para o laço parar. */
+        if (r._draftConflictOf || String(r.id).startsWith('rasc_conflito_')) { ignoradasCopias++; return; }
         if (fechados.has(r.id)) return;          /* fechado aqui: não volta */
         if (!rascunhos.temConteudo(mod, r)) return;   /* aba vazia de outro aparelho não vira aba aqui */
         const local = porId.get(r.id);
@@ -332,6 +348,7 @@ const rascunhosSync = {
       });
       if (!cloudRel._contextoValido(contexto, org)) return 0;
       rascunhosSync._chegaram.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+      rascunhosSync._copiasIgnoradas = ignoradasCopias;
       if (novos || atualizados || conflitos) {
         rascunhos.setList(mod, locais);
         try { rascunhos.renderAbas(mod); } catch (e) {}

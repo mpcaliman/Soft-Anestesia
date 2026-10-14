@@ -716,6 +716,118 @@ await test('Meu dia: casos de hoje cruzados por paciente com estados de cada eta
   await page.close();
 });
 
+/* 18b) IMPRESSÃO DE VERDADE — e o motivo quando ela não vai
+
+   Relato com foto da tela: a visualização montada, o botão apertado, e dois
+   avisos ao mesmo tempo — "Diálogo de impressão sendo aberto" e "O documento
+   não carregou. Tente imprimir novamente."
+
+   POR QUE NENHUM TESTE TINHA VISTO ISSO
+
+   A suíte inteira roda em file://, e ali `location.origin` é a string 'null'.
+   O caminho de impressão recusa esse caso logo na primeira linha — de
+   propósito, porque sem origem não há como falar com a janela filha em
+   segurança. Ou seja: 275 testes passando e a impressão NUNCA tinha sido
+   exercida de ponta a ponta. Este teste serve o pacote por HTTP, que é como o
+   aplicativo de fato roda, e percorre o aperto de mão inteiro.
+
+   E COBRA QUE A FALHA FALE
+
+   A mensagem única apagava a causa. Pop-up bloqueado, conexão lenta, troca de
+   usuário no meio e prazo estourado viravam a mesma frase, e "tentar de novo"
+   só resolve uma delas. O teste força um cancelamento e exige que o motivo
+   específico chegue à tela. */
+await test('Impressão: o aperto de mão com a janela completa, e a falha diz o motivo', async () => {
+  const raiz = APP_ROOT;
+  const TIPOS = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
+    '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8' };
+  const server = createServer(async (req, res) => {
+    const p = req.url.split('?')[0];
+    const arquivo = p === '/' ? '/index.html' : p;
+    try {
+      const data = await readFile(resolve(raiz, '.' + arquivo));
+      const ext = arquivo.slice(arquivo.lastIndexOf('.'));
+      res.writeHead(200, { 'Content-Type': TIPOS[ext] || 'application/octet-stream' });
+      res.end(data);
+    } catch { res.writeHead(404); res.end(); }
+  });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const porta = server.address().port;
+  const ctx = await browser.newContext();
+  try {
+    const page = await ctx.newPage();
+    await isolarWebSocketsDaNuvem(page);
+    await page.route('**://*.supabase.co/**', route => route.abort());
+    page.on('pageerror', e => currentErrors.push('PAGEERROR: ' + e.message));
+    page.on('dialog', d => d.accept());
+    await page.goto('http://127.0.0.1:' + porta + '/index.html', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1500);
+
+    const r = await page.evaluate(async () => {
+      const out = { avisos: [] };
+      const uid = 'u-imp';
+      sessionStorage.setItem(cloud.SESSION_KEY, JSON.stringify({ access_token: 't', refresh_token: 'r',
+        expires_at: Date.now() + 3600000, user: { id: uid, email: 'imp@teste.local' } }));
+      sessionStorage.setItem(auth.SESSION_KEY, JSON.stringify({ id: uid, uid, usuario: 'imp@teste.local',
+        nome: 'Teste', perfil: 'admin', role: 'gestor',
+        modulos: (auth.PERFIS.admin.modulos || []).slice(), organization_id: 'org-imp' }));
+      contextoAba.prepararUsuario(uid, { forcar: true });
+      contextoAba.vincular({ uid, organization_id: 'org-imp', role: 'gestor', orgs: 1 }, 'Clínica');
+      out.origemReal = location.origin !== 'null';
+
+      const docHTML = '<!DOCTYPE html><html><head><title>Ficha</title>'
+        + '<style>body{font-family:sans-serif}</style></head>'
+        + '<body><h1>Ficha de Anestesia</h1><p>Propofol 120mg; Atracúrio 30mg EV.</p></body></html>';
+
+      /* 1) o caminho feliz: a janela recebe o documento e confirma a montagem */
+      const win = window.open('', '_blank');
+      out.abriu = !!win;
+      if (!win) return out;
+      const t0 = Date.now();
+      try { await SoftActions.writeDocument(win, docHTML); out.montou = true; }
+      catch (e) { out.montou = false; out.erroMontagem = String(e && e.message); }
+      out.msMontagem = Date.now() - t0;
+      out.textoNaJanela = (() => {
+        try { return (win.document.body.textContent || '').includes('Propofol 120mg'); }
+        catch (e) { return 'sem acesso: ' + e.message; }
+      })();
+      try { win.close(); } catch (e) {}
+
+      /* 2) a falha: cancelada no meio, a tela precisa dizer POR QUÊ */
+      const toastOrig = window.toast;
+      window.toast = (msg, tipo) => { out.avisos.push(String(tipo || 'info') + '|' + String(msg)); };
+      const win2 = window.open('', '_blank');
+      if (win2) {
+        const promessa = SoftActions.writeDocument(win2, docHTML);
+        promessa.catch(() => {});
+        /* trocar o contexto é uma das causas reais, e revoga a sessão */
+        contextoAba.vincular({ uid, organization_id: 'org-OUTRA', role: 'gestor', orgs: 2 }, 'Outra');
+        try { await promessa; out.falhouComMotivo = 'NAO FALHOU'; }
+        catch (e) { printPreview._falhouImpressao(e); out.falhouComMotivo = String(e && e.message); }
+        try { win2.close(); } catch (e) {}
+      }
+      window.toast = toastOrig;
+      return out;
+    });
+
+    assert(r.origemReal, 'o teste precisa servir o app por HTTP — em file:// a impressão nem começa');
+    assert(r.abriu, 'o pop-up de impressão deveria abrir no harness');
+    assert(r.montou === true, 'o aperto de mão com a janela de impressão deveria completar; veio: ' + r.erroMontagem);
+    assert(r.textoNaJanela === true, 'o documento deveria estar DENTRO da janela de impressão, não só prometido');
+    assert(r.msMontagem < 15000, 'a montagem levou ' + r.msMontagem + 'ms — o prazo curto a cancelaria');
+    assert(/mudaram durante a impressão/i.test(r.falhouComMotivo || ''),
+      'a falha deveria trazer a causa específica, e veio: ' + r.falhouComMotivo);
+    const aviso = (r.avisos || []).find(a => a.startsWith('error|')) || '';
+    assert(/Não consegui imprimir: .*mudaram durante a impressão/i.test(aviso),
+      'a TELA deveria repetir o motivo, não "o documento não carregou"; veio: ' + aviso);
+    assert(/Salvar PDF na nuvem/i.test(aviso),
+      'e deveria apontar o caminho que funciona sem a janela de impressão');
+  } finally {
+    await ctx.close();
+    await new Promise(r => server.close(r));
+  }
+});
+
 /* 18) Service worker — o app abre OFFLINE depois da primeira visita (http) */
 await test('Offline: service worker cacheia o app e o reload sem rede funciona', async () => {
   /* servidor estático mínimo do repositório (index.html + sw.js) */
@@ -17348,6 +17460,124 @@ await test('Programador exclui ambiente e conta pela tela, com a contagem à vis
   assert(r.confirmouOsRegistros, 'e passa a confirmação explícita de que sabe dos registros — o servidor recusa sem ela');
   assert(r.removeuVinculo, 'tirar alguém do ambiente é uma ação própria: desfaz o vínculo, não a conta');
   assert(r.excluiuConta, 'e excluir a conta é outra, separada');
+  await page.close();
+});
+
+/* 269b) ABAS QUE SE MULTIPLICAM SOZINHAS — a guarda que existia de um lado só
+
+   Foto da tela: cerca de trinta abas, TODAS com o mesmo nome de paciente, e
+   "59 conflitos preservados" no topo. Ninguém criou nenhuma.
+
+   A cópia preservada é a fotografia LOCAL do que esta aba tinha antes de a
+   nuvem trazer outra versão. Ela não sobe — isso já estava travado, e há teste
+   para isso. Mas a DESCIDA aceitava qualquer linha. Uma cópia que chegue ao
+   servidor por qualquer caminho (uma versão antiga do app ainda em cache no
+   celular, uma linha anterior ao conserto da subida) voltava aqui como
+   rascunho NOVO, com id próprio e o rótulo do paciente — e cada pull trazia
+   mais uma.
+
+   Guarda de um lado só não é guarda. É a mesma lição que `_preservarConflito`
+   já tinha aprendido ("a trava está AQUI, e não só em quem chama, porque são
+   dois caminhos") e que faltava no pull.
+
+   O teste roda o ciclo de verdade — enviar e puxar, oito rodadas — contra uma
+   tabela `drafts` em memória, e conta as abas. É assim que se distingue "não
+   cresce" de "não testei". */
+await test('Rascunhos: cópia preservada não desce da nuvem, e as abas param de se multiplicar', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const org = 'org-abas', uid = 'u-abas', mod = 'anestesia';
+    __smokeBindOrg(org, uid);
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud.sessaoExpirada = () => false;
+    cloud._garantirToken = async () => true;
+    cloud.config = () => ({ url: 'https://falso.supabase.co', anonKey: 'k' });
+
+    const tabela = new Map();
+    let seq = 1;
+    const resposta = (corpo, status = 200) => ({
+      ok: status >= 200 && status < 300, status,
+      json: async () => corpo, text: async () => JSON.stringify(corpo),
+      headers: { get: () => 'application/json' }
+    });
+    window.fetch = async (url, opts = {}) => {
+      const u = String(url);
+      if (!u.includes('/rest/v1/drafts')) return resposta([], 200);
+      const q = new URL(u).searchParams;
+      const docId = (q.get('doc_id') || '').replace(/^eq\./, '');
+      const metodo = (opts.method || 'GET').toUpperCase();
+      if (metodo === 'GET') {
+        return resposta([...tabela.values()]
+          .filter(l => !docId || l.doc_id === docId)
+          .map(l => JSON.parse(JSON.stringify(l))), 200);
+      }
+      if (metodo === 'POST') {
+        const corpo = JSON.parse(opts.body);
+        const linhas = (Array.isArray(corpo) ? corpo : [corpo]).map(row => {
+          const existente = tabela.get(row.doc_id);
+          if (existente) return existente;
+          const nova = { id: 'srv-' + (seq++), organization_id: row.organization_id,
+            user_id: row.user_id, module: row.module, doc_id: row.doc_id, data: row.data,
+            version: 1, updated_by: row.user_id, updated_at: new Date().toISOString() };
+          tabela.set(row.doc_id, nova);
+          return nova;
+        });
+        return resposta(linhas.map(l => JSON.parse(JSON.stringify(l))), 201);
+      }
+      if (metodo === 'PATCH') {
+        const linha = tabela.get(docId);
+        if (!linha) return resposta([], 200);
+        linha.data = JSON.parse(opts.body).data;
+        linha.version += 1; linha.updated_at = new Date().toISOString();
+        return resposta([JSON.parse(JSON.stringify(linha))], 200);
+      }
+      if (metodo === 'DELETE') { tabela.delete(docId); return resposta([], 200); }
+      return resposta([], 200);
+    };
+
+    rascunhos.setList(mod, [{ id: 'r-asafe', label: 'ASAFE JANUARIO LOPES',
+      dados: { paciente_nome: 'ASAFE JANUARIO LOPES', procedimento: 'Colecistectomia' },
+      updatedAt: new Date().toISOString() }]);
+
+    /* O APARELHO ANTIGO: um celular com versão em cache anterior ao conserto
+       da subida continua depositando cópias preservadas no servidor. */
+    const depositarCopiaDoCelular = (n) => {
+      const docId = 'rasc_conflito_' + n;
+      tabela.set(docId, { id: 'srv-c' + n, organization_id: org, user_id: uid, module: mod,
+        doc_id: docId, version: 1, updated_by: uid, updated_at: new Date().toISOString(),
+        data: { id: docId, label: 'ASAFE JANUARIO LOPES — edição preservada',
+          dados: { paciente_nome: 'ASAFE JANUARIO LOPES', tecnica: 'celular ' + n },
+          updatedAt: new Date().toISOString(), _draftConflictOf: 'r-asafe' } });
+    };
+
+    for (let i = 0; i < 8; i++) {
+      depositarCopiaDoCelular(i);
+      await rascunhosSync.enviar(mod);
+      await rascunhosSync.puxar(mod);
+    }
+    const lista = rascunhos.list(mod) || [];
+    out.abas = lista.length;
+    out.rotulos = lista.map(x => String(x.label || ''));
+    out.nenhumaCopiaVirouAba = !lista.some(x => x && (x._draftConflictOf ||
+      String(x.id).startsWith('rasc_conflito_')));
+    out.ignoradas = rascunhosSync._copiasIgnoradas || 0;
+    /* as linhas continuam no servidor: podem ser a única cópia do que alguém
+       preservou noutro aparelho, e apagá-las seria perder trabalho alheio */
+    out.linhasPreservadasNoServidor = [...tabela.keys()]
+      .filter(k => k.startsWith('rasc_conflito_')).length;
+    /* a ficha de verdade continua subindo e descendo normalmente */
+    out.aFichaRealContinua = lista.some(x => x && x.id === 'r-asafe');
+    return out;
+  });
+  assert(r.abas === 1,
+    'oito rodadas não podem virar ' + r.abas + ' abas: ' + JSON.stringify(r.rotulos));
+  assert(r.nenhumaCopiaVirouAba, 'cópia preservada da nuvem não pode virar aba aqui');
+  assert(r.ignoradas >= 1, 'o pull deveria ter recusado as cópias, e recusou ' + r.ignoradas);
+  assert(r.linhasPreservadasNoServidor === 8,
+    'ignorar não é apagar: a linha pode ser a única cópia do que alguém preservou noutro aparelho');
+  assert(r.aFichaRealContinua, 'e o rascunho de verdade continua funcionando');
   await page.close();
 });
 

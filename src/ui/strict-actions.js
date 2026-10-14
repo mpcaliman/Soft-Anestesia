@@ -70,45 +70,60 @@ window.SoftActions = (() => {
       printTracking = true;
       contextoAba.aoMudar(() => {
         for (const entry of printWindows.values())
-          if (!contextoAba.corresponde(entry.context)) entry.invalidate();
+          if (!contextoAba.corresponde(entry.context)) entry.invalidate('O usuário ou a clínica mudaram durante a impressão');
       });
       window.addEventListener('pagehide', () => {
-        for (const entry of printWindows.values()) entry.invalidate();
+        for (const entry of printWindows.values()) entry.invalidate('O aplicativo foi fechado durante a impressão');
       });
     }
+    /* DOIS PRAZOS, PORQUE SÃO DUAS ESPERAS DIFERENTES.
+       Havia um único limite de 15s cobrindo da abertura do pop-up até o
+       documento montado. A primeira metade é REDE: a janela de impressão baixa
+       o registro de ações compilado, que passa de meio megabyte, e só depois
+       consegue dizer que está pronta. Numa internet de consultório isso sozinho
+       pode levar mais de 15 segundos — e aí a impressão era cancelada por um
+       relógio, não por defeito, com a tela dizendo apenas "o documento não
+       carregou".
+       Agora a abertura tem prazo de rede (60s) e a montagem, que é só trabalho
+       local depois de tudo baixado, tem prazo curto (15s) contado a partir do
+       momento em que a janela avisa que está pronta. E cada prazo diz qual
+       expirou, porque "não imprimiu" não é diagnóstico. */
+    const PRAZO_ABERTURA = 60000, PRAZO_MONTAGEM = 15000;
     const ready = new Promise((resolve, reject) => {
-      let sent = false, settled = false;
+      let sent = false, settled = false, timer;
       const cleanup = () => { clearTimeout(timer); window.removeEventListener('message', receive); };
       const finish = error => {
         if (settled) return;
         settled = true; cleanup();
         if (error) { printWindows.delete(win); reject(error); } else resolve();
       };
-      const invalidate = () => {
+      const invalidate = (motivo) => {
         try { win.postMessage({type:'soft-print-invalidate',nonce}, targetOrigin); } catch (e) {}
         try { win.document.body?.replaceChildren(); win.document.adoptedStyleSheets = []; win.document.title = 'Impressão encerrada'; } catch (e) {}
         try { win.close(); } catch (e) {}
         printWindows.delete(win);
-        finish(new Error('A sessão de impressão foi encerrada'));
+        finish(new Error(motivo || 'A sessão de impressão foi encerrada'));
       };
+      const prazo = (ms, motivo) => { clearTimeout(timer); timer = setTimeout(() => invalidate(motivo), ms); };
       const receive = event => {
         const data = event.data;
         if (event.source !== win || event.origin !== origin || !data || data.nonce !== nonce) return;
-        if (!contextoAba.corresponde(context)) { invalidate(); return; }
+        if (!contextoAba.corresponde(context)) { invalidate('O usuário ou a clínica mudaram durante a impressão'); return; }
         if (data.type === 'soft-print-ready' && !sent) {
           sent = true;
+          prazo(PRAZO_MONTAGEM, 'A janela de impressão não montou o documento a tempo');
           win.postMessage({type:'soft-print-document',nonce,html:sanitizeHTML(value),build:buildToken}, targetOrigin);
         } else if (data.type === 'soft-print-rendered' && sent) finish();
         else if (data.type === 'soft-print-failed') finish(new Error('Falha ao montar o documento de impressão'));
       };
-      const timer = setTimeout(() => { invalidate(); }, 15000);
+      prazo(PRAZO_ABERTURA, 'A janela de impressão não abriu a tempo (conexão lenta ou pop-up bloqueado)');
       printWindows.set(win, {context,nonce,invalidate});
       window.addEventListener('message', receive);
       try { win.location.replace(shell.href); }
-      catch (error) { invalidate(); }
+      catch (error) { invalidate('Não foi possível abrir a janela de impressão'); }
     });
     if (!printSweep) printSweep = setInterval(() => {
-      for (const [popup, entry] of printWindows) if (popup.closed) entry.invalidate();
+      for (const [popup, entry] of printWindows) if (popup.closed) entry.invalidate('A janela de impressão foi fechada antes de terminar');
       if (!printWindows.size) { clearInterval(printSweep); printSweep = null; }
     }, 1000);
     // This promise lives in the opener: navigation replaces the popup's global.
