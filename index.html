@@ -4847,7 +4847,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-15k</b><br>
+    v7.1 · build <b id="build-tag">2026-10-15l</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -19253,6 +19253,40 @@ const clinicaSync = {
     } catch (e) { return null; }
   },
 
+  _temRefSolta(v) {
+    if (typeof v === 'string') return v.slice(0, 5) === 'blob:';
+    if (Array.isArray(v)) return v.some(clinicaSync._temRefSolta);
+    if (v && typeof v === 'object') return Object.keys(v).some(k => clinicaSync._temRefSolta(v[k]));
+    return false;
+  },
+  /* Para cada campo que ficou só com o apontador, usa o valor que a nuvem já
+     tem para o mesmo item (_id). Sem valor na nuvem, o campo sobe vazio — um
+     apontador para lugar nenhum não serve a aparelho algum. */
+  async _completarDaNuvem(chave, dados, org) {
+    let nuvem = null;
+    try {
+      const c = cloud.config();
+      const r = await fetch(c.url + '/rest/v1/org_configs?organization_id=eq.' + encodeURIComponent(org) +
+        '&chave=eq.' + encodeURIComponent(chave) + '&select=dados', { headers: cloud._headers(true) });
+      if (r.ok) { const l = await r.json(); nuvem = l && l[0] && l[0].dados ? l[0].dados.valor : null; }
+    } catch (e) {}
+    const porId = new Map();
+    if (Array.isArray(nuvem)) nuvem.forEach(x => { if (x && x._id) porId.set(x._id, x); });
+    const trocar = (o, ref) => {
+      if (Array.isArray(o)) { o.forEach(x => trocar(x, x && x._id ? porId.get(x._id) : null)); return; }
+      if (!o || typeof o !== 'object') return;
+      Object.keys(o).forEach(k => {
+        const v = o[k];
+        if (typeof v === 'string' && v.slice(0, 5) === 'blob:') {
+          const daNuvem = ref && typeof ref[k] === 'string' && ref[k].slice(0, 5) === 'data:' ? ref[k] : '';
+          o[k] = daNuvem;
+        } else if (v && typeof v === 'object') trocar(v, ref && ref[k]);
+      });
+    };
+    trocar(dados, Array.isArray(dados) ? null : (nuvem && typeof nuvem === 'object' ? nuvem : null));
+    return dados;
+  },
+
   /* Sobe as chaves que mudaram desde a última subida */
   async enviar(opts = {}) {
     const contexto = cloudRel._capturarContexto(); if (!contexto) return 0;
@@ -19261,18 +19295,36 @@ const clinicaSync = {
     const c = cloud.config(); const s = cloud.session();
     const meta = clinicaSync._meta();
     const linhas = [];
-    Object.keys(clinicaSync.CHAVES).forEach(local => {
+    const chaves = Object.keys(clinicaSync.CHAVES);
+    for (const local of chaves) {
       const bruto = localStorage.getItem(local);
-      if (bruto == null) return;
-      const h = clinicaSync._hash(bruto);
-      if (!opts.tudo && meta[local] && meta[local].hash === h) return;   /* nada mudou */
+      if (bruto == null) continue;
       let dados; try { dados = JSON.parse(bruto); } catch (e) { dados = bruto; }
+      /* A IMAGEM SOBE, NÃO A REFERÊNCIA.
+         Neste aparelho o carimbo fica num depósito à parte e o cadastro guarda
+         só um apontador ("blob:…") — economia de espaço local. Subia o
+         apontador: o aparelho que gravou mostrava o carimbo, todos os outros
+         recebiam um endereço para um depósito que não têm. Antes de subir,
+         o apontador vira a imagem. O hash é do que SOBE, então o que já estava
+         na nuvem errado é reenviado na primeira passada. */
+      if (dados && typeof dados === 'object') {
+        try { dados = store._hidratar(JSON.parse(JSON.stringify(dados))); } catch (e) {}
+        if (clinicaSync._temRefSolta(dados)) {
+          /* apontador sem a imagem neste aparelho: não pode apagar a imagem
+             que a nuvem tem — fica a da nuvem para esse campo */
+          try { dados = await clinicaSync._completarDaNuvem(clinicaSync.CHAVES[local], dados, org); } catch (e) {}
+          if (!cloudRel._contextoValido(contexto, org)) return 0;
+        }
+      }
+      const texto = typeof dados === 'string' ? dados : JSON.stringify(dados);
+      const h = clinicaSync._hash(texto);
+      if (!opts.tudo && meta[local] && meta[local].hash === h) continue;   /* nada mudou */
       linhas.push({ local, row: {
         organization_id: org, chave: clinicaSync.CHAVES[local],
         dados: { valor: dados }, updated_at: new Date().toISOString(),
         updated_by: (s && s.user && s.user.id) || null
       }, hash: h });
-    });
+    }
     if (!linhas.length) return 0;
     try {
       const r = await fetch(c.url + '/rest/v1/org_configs?on_conflict=organization_id,chave', {
@@ -19346,8 +19398,26 @@ const clinicaSync = {
       const m = meta[local] || {};
       /* só aplica o que é MAIS NOVO do que a última versão vista aqui */
       if (m.at && String(l.updated_at) <= String(m.at)) return;
-      const valor = l.dados && Object.prototype.hasOwnProperty.call(l.dados, 'valor') ? l.dados.valor : l.dados;
+      let valor = l.dados && Object.prototype.hasOwnProperty.call(l.dados, 'valor') ? l.dados.valor : l.dados;
       if (valor === undefined || valor === null) return;
+      /* chegou um apontador sem a imagem (gravado por versão antiga noutro
+         aparelho): se ESTE aparelho tem a imagem do mesmo item, ela fica */
+      if (valor && typeof valor === 'object' && clinicaSync._temRefSolta(valor)) {
+        try {
+          let atual = JSON.parse(localStorage.getItem(local) || 'null');
+          atual = store._hidratar(atual);
+          const porId = new Map();
+          if (Array.isArray(atual)) atual.forEach(x => { if (x && x._id) porId.set(x._id, x); });
+          (Array.isArray(valor) ? valor : []).forEach(x => {
+            const meu = x && x._id && porId.get(x._id);
+            if (!meu) return;
+            Object.keys(x).forEach(k => {
+              if (typeof x[k] === 'string' && x[k].slice(0, 5) === 'blob:' &&
+                  typeof meu[k] === 'string' && meu[k].slice(0, 5) === 'data:') x[k] = meu[k];
+            });
+          });
+        } catch (e) {}
+      }
       try {
         localStorage.setItem(local, typeof valor === 'string' ? valor : JSON.stringify(valor));
         meta[local] = { hash: clinicaSync._hash(localStorage.getItem(local)), at: l.updated_at };
