@@ -971,11 +971,12 @@ body.ficha-finalizada .lab-item input.lab-fora {
 .pre-procs-lista { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
 /* O principal usa a MESMA régua dos adicionais: lidos em sequência, campos de
    larguras diferentes para a mesma coisa fazem a vista procurar duas vezes. */
-.pre-proc-principal { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+.pre-proc-principal { display: flex; gap: 6px; align-items: center; }
+.pre-proc-principal > .autocomplete-wrap, .pre-proc-principal > .cbhpm-linha { flex: 1; min-width: 0; }
 .pre-proc-principal .pre-proc-cod { flex: 0 0 130px; width: 130px; font-size: .84rem; }
 .pre-proc-principal .pre-proc-qtd { flex: 0 0 62px; width: 62px; font-size: .84rem; }
 .pre-proc-principal .pre-proc-lado { flex: 0 0 112px; width: 112px; font-size: .84rem; }
-@media (max-width: 640px) { .pre-proc-principal { flex-wrap: wrap; } }
+@media (max-width: 640px) { .pre-proc-principal { flex-wrap: wrap; } .pre-proc-principal > .autocomplete-wrap, .pre-proc-principal > .cbhpm-linha { flex: 1 1 100%; order: -1; } }
 .pre-proc-row { display: flex; gap: 6px; align-items: center; }
 /* A regra base `input[type="text"] { width:100% }` tem especificidade MAIOR
    que uma classe sozinha: os 130px do código eram ignorados, o campo pedia a
@@ -4846,7 +4847,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-15h</b><br>
+    v7.1 · build <b id="build-tag">2026-10-15i</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -5135,39 +5136,22 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
                linha obrigava a ler por partes: fica com a linha inteira. -->
           <div class="field col-12">
             <label>Cirurgia proposta <small style="color:var(--text-mute);font-weight:400">(autocompleta da CBHPM)</small></label>
-            <!-- align-items:center e não stretch: o ➕ da CBHPM entra centrado
-                 no textarea alto e o botão ao lado esticava até 62px, ficando
-                 uma pílula desproporcional ao lado de um botão pequeno. -->
-            <div style="display:flex;gap:6px;align-items:center">
-              <!-- Nome de procedimento é longo e frequentemente vem em série
-                   ("... + ... + ..."). Numa linha só, o começo saía da vista
-                   assim que passava do meio do campo: para conferir o que
-                   estava escrito era preciso rolar dentro do campo. Textarea
-                   que cresce com o conteúdo mostra tudo de uma vez. -->
-              <textarea name="cirurgia" class="cbhpm-autocomplete campo-cirurgia" rows="2"
-                placeholder="Digite parte do procedimento ou o código TUSS..." style="flex:1"></textarea>
-              <button type="button" class="btn btn-primary btn-sm" style="flex-shrink:0;padding:0 12px" onclick="pre.procs.add()" title="Adicionar mais um procedimento">+</button>
-            </div>
-            <!-- O PROCEDIMENTO PRINCIPAL TAMBÉM É CÓDIGO, QUANTIDADE E LADO.
-                 Os procedimentos ADICIONAIS (o ➕ acima) já tinham os quatro
-                 campos; o principal — o que quase toda ficha tem, e muitas vezes
-                 o único — era só um texto. Resultado: o que mais aparece na guia
-                 era justamente o que ia sem código e sem lado, e lado faltando em
-                 guia vira glosa.
-                 O modelo já esperava estes campos (`cirurgia.daPreDoc` lê
-                 `procedimento_codigo` e `lateralidade`); eles só não existiam na
-                 tela. Digitando o código, a descrição vem; digitando a descrição,
-                 o código vem. -->
+            <!-- UMA LINHA POR PROCEDIMENTO: código, descrição, quantidade, lado.
+                 O código ficava numa linha embaixo da descrição, e havia dois
+                 "+" lado a lado: o ➕ da CBHPM (que emendava " + outro" no MESMO
+                 texto) e o "+" que cria uma linha nova com código e lado
+                 próprios. Dois botões parecidos para coisas diferentes — e só o
+                 segundo dá a cada procedimento o seu código e o seu lado, que é
+                 o que a guia cobra. Fica só ele, no fim da linha.
+                 `cirurgia_cbhpm` mantém o nome: é o campo que o autocomplete
+                 preenche ao escolher pela descrição (`<nome>_cbhpm`). -->
             <div class="pre-proc-principal">
-              <!-- O NOME É `cirurgia_cbhpm` DE PROPÓSITO: é exatamente o campo
-                   que o autocomplete já criava ESCONDIDO para guardar o código
-                   escolhido (`cbhpm._campoCodigo` procura por `<nome>_cbhpm`).
-                   Tornando-o visível, escolher pela descrição continua
-                   preenchendo o código como sempre fez — e agora dá para
-                   digitar o código direto. Um mecanismo, não dois. -->
-              <input type="text" name="cirurgia_cbhpm" class="pre-proc-cod" placeholder="Código TUSS" title="Código TUSS/CBHPM — digite o código, ou escolha pela descrição acima e ele vem sozinho">
+              <input type="text" name="cirurgia_cbhpm" class="pre-proc-cod" placeholder="Código TUSS" title="Código TUSS/CBHPM — digite o código, ou escolha pela descrição e ele vem sozinho">
+              <textarea name="cirurgia" class="cbhpm-autocomplete campo-cirurgia" rows="2" data-sem-mais="1"
+                placeholder="Digite parte do procedimento ou o código TUSS..." style="flex:1;min-width:0"></textarea>
               <input type="number" name="procedimento_quantidade" class="pre-proc-qtd" min="1" step="1" value="1" title="Quantidade" oninput="markDirty()">
               <select name="lateralidade" class="pre-proc-lado" title="Lateralidade — deixe em branco quando não se aplica" onchange="markDirty()"></select>
+              <button type="button" class="btn btn-primary btn-sm" style="flex-shrink:0;padding:0 12px" onclick="pre.procs.add()" title="Adicionar outro procedimento (com código e lado próprios)">+</button>
             </div>
             <div id="pre-procs-lista" class="pre-procs-lista"></div>
           </div>
@@ -15632,6 +15616,7 @@ const pre = {
           if (codEl) codEl.value = match[0];
           if (descEl) descEl.value = match[1];
         };
+        if (descEl) descEl.dataset.semMais = '1';   /* cada procedimento tem a sua linha */
         cbhpm.ligar(descEl, { row: row, onMatch: casar });
         cbhpm.ligarCodigo(codEl, { row: row, onMatch: casar });
       } catch (e) {}
@@ -25245,7 +25230,7 @@ const histAutocomplete = {
    (label + valor). Reutilizado na Pré e na Consulta.
 ============================================================================ */
 const labExtra = {
-  add(containerId, label, valor) {
+  add(containerId, label, valor, opts) {
     const cont = document.getElementById(containerId);
     if (!cont) return;
     const row = document.createElement('div');
@@ -25258,6 +25243,7 @@ const labExtra = {
       </div>`;
     cont.appendChild(row);
     const first = row.querySelector('.lab-extra-label');
+    if (opts && opts.silencioso) return;     /* restaurar não é editar */
     if (first && !label) first.focus();
     try { markDirty(); } catch (e) {}
   },
@@ -25266,16 +25252,29 @@ const labExtra = {
     const cont = document.getElementById(containerId);
     if (!cont) return [];
     return Array.from(cont.querySelectorAll('.lab-extra')).map(r => ({
-      label: (r.querySelector('.lab-extra-label') || {}).value || '',
-      valor: (r.querySelector('.lab-extra-val') || {}).value || ''
+      label: String((r.querySelector('.lab-extra-label') || {}).value || '').trim(),
+      valor: String((r.querySelector('.lab-extra-val') || {}).value || '').trim()
     })).filter(x => x.label || x.valor);
   },
-  /* Restaura os extras a partir de um array salvo */
+  /* LINHA EM BRANCO NÃO SE RESTAURA.
+     Registros antigos guardavam o exame com outros nomes (`nome`/`exame`,
+     `resultado`/`value`) ou linhas vazias; restaurados como vinham, viravam
+     uma fileira de "Exame / Valor" em branco em toda ficha aberta. Lê os
+     nomes antigos e descarta o que não tem nada: na tela fica só o que tem
+     conteúdo, e o ➕ para acrescentar. */
+  _normalizar(x) {
+    if (!x) return null;
+    if (typeof x === 'string') { const t = x.trim(); return t ? { label: t, valor: '' } : null; }
+    const label = String(x.label || x.nome || x.exame || x.rotulo || '').trim();
+    const valor = String(x.valor != null ? x.valor : (x.resultado != null ? x.resultado : (x.value != null ? x.value : ''))).trim();
+    return (label || valor) ? { label, valor } : null;
+  },
   restaurar(containerId, arr) {
     const cont = document.getElementById(containerId);
     if (!cont) return;
     cont.innerHTML = '';
-    (arr || []).forEach(x => labExtra.add(containerId, x.label, x.valor));
+    (Array.isArray(arr) ? arr : []).map(labExtra._normalizar).filter(Boolean)
+      .forEach(x => labExtra.add(containerId, x.label, x.valor, { silencioso: true }));
   }
 };
 
