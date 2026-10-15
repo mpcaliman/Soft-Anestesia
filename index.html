@@ -5658,6 +5658,18 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
       </div>
       <div class="card-body">
         <div class="grid">
+          <!-- QUEM VEIO COM O PACIENTE. Mesmo campo da pré, mesma razão: é quem
+               ouviu a orientação, e em menor de idade ou paciente sem autonomia
+               é quem assina o consentimento. Vem do cadastro com um toque, para
+               o nome não sair escrito de dois jeitos em dois documentos. -->
+          <div class="field col-12"><label>Acompanhantes presentes na consulta</label>
+            <textarea name="acompanhantes" rows="2" placeholder="Ex.: Maria da Silva (mãe); João da Silva (pai)"></textarea>
+            <div class="field-templates">
+              <button type="button" class="btn btn-xs tpl-btn"
+                onclick="acompanhantes.doCadastro('#form-consulta [name=acompanhantes]', '#form-consulta [name=nome]')"
+                title="Traz mãe, pai e responsável legal do cadastro do paciente">👪 Buscar do cadastro</button>
+            </div>
+          </div>
           <div class="field col-12"><label>Queixa principal</label><textarea name="queixa" rows="2"></textarea></div>
           <div class="field col-12"><label>História da doença atual (HDA)</label><textarea name="hda" rows="4"></textarea></div>
           <div class="field col-6"><label>Antecedentes</label><textarea name="antecedentes" rows="3"></textarea>
@@ -7321,7 +7333,13 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
           <div class="field col-2"><label>Hemod. estável?</label><select name="estavel"><option value="">—</option><option>Sim</option><option>Não</option></select></div>
           <div class="field col-2"><label>Em oxigênio?</label><select name="oxigenio"><option value="">—</option><option>Sim</option><option>Não</option></select></div>
           <div class="field col-2"><label>Com dor?</label><select name="dor"><option value="">—</option><option>Sim</option><option>Não</option></select></div>
-          <div class="field col-6"><label>Acompanhado por</label><input type="text" name="acompanhante"></div>
+          <div class="field col-6"><label>Acompanhado por</label><input type="text" name="acompanhante">
+            <div class="field-templates">
+              <button type="button" class="btn btn-xs tpl-btn"
+                onclick="acompanhantes.doCadastro('#form-anestesia [name=acompanhante]', '#form-anestesia [name=paciente_nome]')"
+                title="Traz mãe, pai e responsável legal do cadastro do paciente">👪 Buscar do cadastro</button>
+            </div>
+          </div>
           <div class="field col-6"><label>Observações da transferência</label><input type="text" name="transferencia_obs"></div>
         </div>
       </div>
@@ -9580,7 +9598,20 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
                  quem assina o consentimento. -->
             <div class="field col-6"><label>Nome da mãe</label><input type="text" name="nome_mae" autocomplete="off"></div>
             <div class="field col-6"><label>Nome do pai</label><input type="text" name="nome_pai" autocomplete="off"></div>
-            <div class="field col-8"><label>Responsável legal <small style="color:var(--text-mute)">(menor de idade ou paciente sem autonomia)</small></label><input type="text" name="responsavel_legal" autocomplete="off"></div>
+            <!-- QUANDO QUEM RESPONDE SÃO OS PRÓPRIOS PAIS.
+                 É o caso da maioria dos menores, e obrigava a redigitar no
+                 campo de responsável um nome que já está duas linhas acima —
+                 com o risco de sair com outra grafia justamente no documento
+                 que a pessoa assina. Marcado, mãe e pai passam a valer como
+                 representantes legais no termo, sem cópia nenhuma. -->
+            <div class="field col-12">
+              <label class="check-inline" style="display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border:1px solid var(--border);border-radius:8px;cursor:pointer;font-size:.9rem">
+                <input type="checkbox" name="responsavel_sao_os_pais" value="1" style="width:16px;height:16px">
+                👪 O responsável legal são os próprios pais
+              </label>
+              <small style="display:block;color:var(--text-mute);margin-top:4px">Marque em menor de idade representado pela mãe e/ou pelo pai — o termo passa a oferecê-los para assinar, sem precisar repetir o nome abaixo.</small>
+            </div>
+            <div class="field col-8"><label>Responsável legal <small style="color:var(--text-mute)">(quando não forem os pais)</small></label><input type="text" name="responsavel_legal" autocomplete="off"></div>
             <div class="field col-4"><label>Parentesco do responsável</label><input type="text" name="responsavel_parentesco" placeholder="Mãe, pai, filho(a), cônjuge…" autocomplete="off"></div>
             <div class="field col-12">
               <label>Acomodação (faturamento)</label>
@@ -28941,8 +28972,15 @@ const identificacaoPaciente = {
       if (t && !out.some(x => x.nome.toLowerCase() === t.toLowerCase())) out.push({ nome: t, papel });
     };
     add(d.responsavel_legal, String(d.responsavel_parentesco || 'responsável legal').trim() || 'responsável legal');
-    add(d.nome_mae, 'mãe');
-    add(d.nome_pai, 'pai');
+    /* Marcado no cadastro que quem responde são os próprios pais, eles entram
+       COMO representantes legais — e por isso vêm primeiro, antes de qualquer
+       outro acompanhante. Sem a marca, continuam sendo mãe e pai: acompanham,
+       mas não autorizam. A diferença é jurídica, e é do cadastro, não de um
+       palpite da tela. */
+    const paisRespondem = d.responsavel_sao_os_pais === true || d.responsavel_sao_os_pais === '1' ||
+      d.responsavel_sao_os_pais === 1 || d.responsavel_sao_os_pais === 'true';
+    add(d.nome_mae, paisRespondem ? 'mãe (responsável legal)' : 'mãe');
+    add(d.nome_pai, paisRespondem ? 'pai (responsável legal)' : 'pai');
     return out;
   },
   /* "Maria da Silva (mãe); João da Silva (pai)" */
@@ -36355,20 +36393,70 @@ const anestesia = {
       const detTxt = (meses == null)
         ? 'Idade não informada — confirme o <b>perfil</b> abaixo.'
         : 'Perfil detectado pela idade: <b>' + anestesia.vitais._PERFIS_VITAIS[catDet].rot + '</b> (ajuste se precisar).';
+      const tBase = (anestesia.vitais._baseParaPaciente(catDet).temp || {});
+      const intercorrencias = anestesia.vitais.INTERCORRENCIAS
+        .map(x => '<option value="' + x.k + '">' + utils.escapeHTML(x.rot) + '</option>').join('');
       modal.open('🧪 Preencher sinais vitais',
         '<p style="font-size:.86rem;color:var(--text-soft);margin:0 0 6px">Gera valores <b>normais para o perfil do paciente</b> entre a <b>entrada</b> e a <b>saída de sala</b>, com <b>leve variação em PA e FC</b> (o resto quase não muda).</p>' +
         '<p style="font-size:.82rem;color:var(--text-mute);margin:0 0 8px">Os registros que você já lançou são <b>mantidos</b> e usados como base; o sistema só preenche os horários vazios.</p>' +
         '<div class="field" style="margin:0 0 8px"><label>Perfil do paciente (faixa normal)</label><select id="vp-perfil">' + opts + '</select><div style="font-size:.74rem;color:var(--text-mute);margin-top:3px">' + detTxt + '</div></div>' +
+        /* TEMPERATURA: DOIS PONTOS, NÃO UMA CURVA INVENTADA.
+           O normal é cair devagar do começo ao fim do ato, e quem sabe de
+           quanto foi a queda é quem esteve lá. Pedindo a inicial e a final, o
+           resto é interpolação — e o papel passa a dizer o que aconteceu, em
+           vez de um declínio padrão igual para todo paciente. */
+        '<div class="grid" style="margin:0 0 8px">' +
+          '<div class="field col-6"><label>Temperatura inicial (°C)</label>' +
+          '<input type="number" step="0.1" id="vp-temp-ini" value="' + (tBase.base != null ? tBase.base : 36.5) + '"></div>' +
+          '<div class="field col-6"><label>Temperatura final (°C)</label>' +
+          '<input type="number" step="0.1" id="vp-temp-fim" value="' + (tBase.base != null ? (Math.round((tBase.base - 0.6) * 10) / 10) : 35.9) + '"></div>' +
+        '</div>' +
+        '<div class="field" style="margin:0 0 8px"><label>Intercorrência a representar</label>' +
+          '<select id="vp-evento">' + intercorrencias + '</select>' +
+          '<div style="font-size:.74rem;color:var(--text-mute);margin-top:3px">O sistema gera os valores do episódio e marca o evento na linha do tempo. Deixe em "nenhuma" para um ato sem intercorrência.</div></div>' +
+        '<div class="grid" style="margin:0 0 8px">' +
+          '<div class="field col-6"><label>Início do episódio (opcional)</label><input type="time" id="vp-evt-ini"></div>' +
+          '<div class="field col-6"><label>Fim do episódio (opcional)</label><input type="time" id="vp-evt-fim"></div>' +
+        '</div>' +
+        '<p style="font-size:.74rem;color:var(--text-mute);margin:0 0 6px">Sem horário, o episódio é posto no meio do ato e dura cerca de 15 minutos.</p>' +
         '<p style="font-weight:600;margin:6px 0 0">Intervalo entre as medidas:</p>',
         '<button class="btn btn-primary" onclick="anestesia.vitais._gerarPadrao(5)">A cada 5 min</button>' +
         '<button class="btn btn-primary" onclick="anestesia.vitais._gerarPadrao(10)">A cada 10 min</button>' +
         '<button class="btn" onclick="modal.close()">Cancelar</button>');
     },
 
+    /* INTERCORRÊNCIAS QUE O PREENCHIMENTO SABE REPRESENTAR.
+       Cada uma diz o que muda, de quanto, e qual evento vai para a linha do
+       tempo — porque um episódio sem o evento correspondente é um número solto
+       no gráfico, e o papel não explica o que houve. O tratamento continua
+       sendo escolha de quem esteve lá: o sistema representa o ocorrido, não
+       prescreve a conduta. */
+    INTERCORRENCIAS: [
+      { k: '', rot: 'Nenhuma — ato sem intercorrência' },
+      { k: 'hipo10', rot: 'Hipotensão leve (queda de 10% na PA)', evento: 'Hipotensão importante', campos: { pas: -0.10, pad: -0.10 } },
+      { k: 'hipo20', rot: 'Hipotensão importante (queda de 20% na PA)', evento: 'Hipotensão importante', campos: { pas: -0.20, pad: -0.20 } },
+      { k: 'hiper20', rot: 'Hipertensão (elevação de 20% na PA)', evento: 'Hipertensão importante', campos: { pas: 0.20, pad: 0.20 } },
+      { k: 'hipoxia', rot: 'Hipóxia / dessaturação (SpO₂ até 88%)', evento: 'Dessaturação', alvo: { spo2: 88 } },
+      { k: 'bradi', rot: 'Bradicardia (FC até 45)', evento: 'Bradicardia', alvo: { fc: 45 } },
+      { k: 'taqui', rot: 'Taquicardia (FC até 130)', evento: 'Taquicardia', alvo: { fc: 130 } },
+      { k: 'hipoglic', rot: 'Hipoglicemia (glicemia até 55)', evento: 'Outro', alvo: { glic: 55 } }
+    ],
+    _intercorrencia(k) {
+      return anestesia.vitais.INTERCORRENCIAS.find(x => x.k === k) || null;
+    },
+
     _gerarPadrao(passo) {
       /* Lê o perfil escolhido ANTES de fechar o diálogo */
       const selEl = document.getElementById('vp-perfil');
       const catKey = (selEl && selEl.value) || anestesia.vitais._categoriaIdade(anestesia.vitais._idadeMesesDoForm()) || 'adulto';
+      const num = (id) => { const el = document.getElementById(id); const v = el ? parseFloat(el.value) : NaN; return isNaN(v) ? null : v; };
+      const txt = (id) => { const el = document.getElementById(id); return el ? String(el.value || '').trim() : ''; };
+      const tempIni = num('vp-temp-ini');
+      const tempFim = num('vp-temp-fim');
+      const evKey = txt('vp-evento');
+      const ev = anestesia.vitais._intercorrencia(evKey);
+      const evIniTxt = txt('vp-evt-ini');
+      const evFimTxt = txt('vp-evt-fim');
       const TAB = anestesia.vitais._baseParaPaciente(catKey);
       const rotPerfil = (anestesia.vitais._PERFIS_VITAIS[catKey] || {}).rot || 'Adulto';
       try { modal.close(); } catch (e) {}
@@ -36415,6 +36503,16 @@ const anestesia = {
         .sort((a, b) => a.min - b.min);
       ordenadas.forEach(o => minutosOcupados.push(o.min));
 
+      /* Janela do episódio: a informada, ou cerca de 15 min no meio do ato. */
+      let evIni = null, evFim = null;
+      if (ev && ev.k) {
+        if (okHora(evIniTxt)) { evIni = toMin(evIniTxt); if (evIni < ini) evIni += 24 * 60; }
+        if (okHora(evFimTxt)) { evFim = toMin(evFimTxt); if (evFim < ini) evFim += 24 * 60; }
+        if (evIni == null) evIni = ini + Math.round(dur / 2) - 7;
+        if (evFim == null || evFim <= evIni) evFim = evIni + 15;
+        evIni = Math.max(ini, evIni); evFim = Math.min(fim, Math.max(evIni + passo, evFim));
+      }
+
       /* Janela da via aérea (capnografia/gases) e FR do ventilador */
       const janela = anestesia.vitais._janelaViaAerea();
       const frVent = anestesia.vitais._frDoVentilador();
@@ -36457,9 +36555,53 @@ const anestesia = {
             dados.fr = String(Math.max(1, Math.round(jitter)));
             return;
           }
+          /* GLICEMIA FICA EM BRANCO, DE PROPÓSITO.
+             São poucas medidas por ato e todas feitas à mão; gerar uma série
+             inteira seria escrever no prontuário exame que ninguém colheu.
+             Só aparece quando o episódio escolhido é de glicemia. */
+          if (p === 'glic' && !(ev && ev.alvo && ev.alvo.glic != null)) return;
+          /* TEMPERATURA: INTERPOLADA ENTRE O QUE ELE INFORMOU.
+             Do primeiro ao último registro, em queda (ou subida) lenta e
+             paulatina, que é o que de fato acontece. Sem os dois pontos
+             informados, cai na curva padrão do perfil, como antes. */
+          if (p === 'temp' && tempIni != null && tempFim != null) {
+            const t2 = tempIni + (tempFim - tempIni) * prog;
+            const jitter = (Math.random() * 2 - 1) * 0.05;
+            dados.temp = (Math.round((t2 + jitter) * 10) / 10).toFixed(1);
+            return;
+          }
           const v = anestesia.vitais._valorPadrao(p, prog, base[p], TAB);
           if (v != null) dados[p] = v;
         });
+        /* O EPISÓDIO: dentro da janela, os valores viram os do evento.
+           A forma é de sino — entra, chega ao pico no meio e volta —, porque
+           uma queda em degrau que some de repente não é o que se vê no monitor
+           nem o que se defende numa glosa. */
+        if (ev && ev.k && t >= evIni && t <= evFim) {
+          const meio = (evIni + evFim) / 2;
+          const meiaLargura = Math.max(1, (evFim - evIni) / 2);
+          const intensidade = Math.max(0, 1 - Math.abs(t - meio) / meiaLargura);
+          if (ev.campos) {
+            Object.keys(ev.campos).forEach(campo => {
+              const atual = parseFloat(dados[campo]);
+              if (isNaN(atual)) return;
+              dados[campo] = String(Math.round(atual * (1 + ev.campos[campo] * intensidade)));
+            });
+            const pas = parseFloat(dados.pas), pad = parseFloat(dados.pad);
+            if (!isNaN(pas) && !isNaN(pad) && ativos.has('pam')) {
+              dados.pam = String(Math.round((pas + 2 * pad) / 3));
+            }
+          }
+          if (ev.alvo) {
+            Object.keys(ev.alvo).forEach(campo => {
+              if (!ativos.has(campo) && campo !== 'glic') return;
+              const partida = parseFloat(dados[campo]);
+              const destino = ev.alvo[campo];
+              const de = isNaN(partida) ? (base[campo] != null ? base[campo] : destino) : partida;
+              dados[campo] = String(Math.round(de + (destino - de) * intensidade));
+            });
+          }
+        }
         /* No preenchimento padrão, o ritmo é sempre SINUSAL (perfil normal) */
         if (ativos.has('ritmo')) dados.ritmo = 'Sinusal';
         /* Diurese normal por peso/idade (só se já registrada e peso conhecido) */
@@ -36472,9 +36614,19 @@ const anestesia = {
         criadas++;
       }
       anestesia.vitais._ordenarPorHora(bodyId);
+      /* O NÚMERO SEM O EVENTO É UM NÚMERO SOLTO.
+         Representado o episódio no gráfico, ele também entra na linha do tempo
+         — senão a folha mostra a queda e não diz o que foi. */
+      if (ev && ev.k && ev.evento) {
+        try {
+          anestesia.eventos.sincronizarHorario(ev.evento,
+            anestesia.graficoUI.tToHora(evIni % (24 * 60)));
+        } catch (e) {}
+      }
       markDirty();
       try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
-      toast('🧪 ' + criadas + ' medida(s) a cada ' + passo + ' min · ' + rotPerfil + ' (' + entrada + '–' + saida + ')');
+      toast('🧪 ' + criadas + ' medida(s) a cada ' + passo + ' min · ' + rotPerfil + ' (' + entrada + '–' + saida + ')' +
+        (ev && ev.k ? ' · ' + ev.rot.split('(')[0].trim() : ''));
     },
 
     duplicarEAjustar() {

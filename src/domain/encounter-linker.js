@@ -1522,7 +1522,8 @@ const linker = {
   _CAMPOS_PACIENTE: ['nome', 'nascimento', 'idade', 'sexo', 'peso', 'altura', 'imc',
     'cpf', 'rg', 'prontuario', 'convenio', 'plano', 'matricula', 'carteirinha',
     'telefone', 'email', 'endereco', 'acomodacao',
-    'nome_mae', 'nome_pai', 'responsavel_legal', 'responsavel_parentesco'],
+    'nome_mae', 'nome_pai', 'responsavel_legal', 'responsavel_parentesco',
+    'responsavel_sao_os_pais'],
 
   /* === PER-CAMPO MAIS RECENTE ===
      Reúne TODOS os registros do paciente (todos os módulos + cadastro),
@@ -1681,6 +1682,10 @@ const linker = {
          o mesmo nome acaba com duas grafias em dois documentos do mesmo dia. */
       nome_mae: p.nome_mae, nome_pai: p.nome_pai,
       responsavel_legal: p.responsavel_legal, responsavel_parentesco: p.responsavel_parentesco,
+      /* "quem responde são os próprios pais": sem passar por aqui, a marca
+         ficaria gravada no cadastro e nunca chegaria ao termo — exatamente o
+         que já aconteceu com filiação e responsável. */
+      responsavel_sao_os_pais: p.responsavel_sao_os_pais,
       /* No cadastro a acomodação são duas caixas (apartamento / enfermaria);
          aqui vira um dado só, do jeito que os formulários esperam. */
       acomodacao: linker._acomodacaoDoCadastro(p)

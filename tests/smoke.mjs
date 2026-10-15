@@ -17581,6 +17581,187 @@ await test('Rascunhos: cópia preservada não desce da nuvem, e as abas param de
   await page.close();
 });
 
+/* 281b) PREENCHER PADRÃO: TEMPERATURA DE PONTA A PONTA, GLICEMIA EM BRANCO,
+   E A INTERCORRÊNCIA REPRESENTADA
+
+   Três pedidos sobre a mesma janela:
+
+   • TEMPERATURA — "perguntar inicial e final; o mais comum é uma queda lenta e
+     paulatina". Quem sabe de quanto foi a queda é quem esteve lá; o resto é
+     interpolação. Antes havia um declínio padrão igual para todo paciente.
+   • GLICEMIA — "deixar em branco, pois são poucas medidas e a anotação sempre
+     será manual". Gerar a série inteira é escrever no prontuário exame que
+     ninguém colheu.
+   • INTERCORRÊNCIAS — hipotensão 10%, 20%, hipertensão, hipóxia, bradicardia,
+     taquicardia: escolher e o sistema gerar os dados.
+
+   O episódio tem forma de sino: entra, chega ao pico no meio e volta. Queda em
+   degrau que some de repente não é o que se vê no monitor nem o que se defende
+   numa glosa. E ele entra na LINHA DO TEMPO: número sem evento é número
+   solto — a folha mostraria a queda sem dizer o que foi. */
+await test('Preencher padrão: temperatura informada, glicemia em branco e a intercorrência no gráfico e na linha do tempo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-vit');
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 700));
+    try { modal.close(); } catch (e) {}
+    const f = document.getElementById('form-anestesia');
+    f.querySelector('[name="hora_sala_entrada"]').value = '08:00';
+    f.querySelector('[name="hora_sala_saida"]').value = '10:00';
+    document.getElementById('vitais-body').innerHTML = '';
+    document.getElementById('eventos-body').innerHTML = '';
+    /* monitores do caso: sem marcar Temperatura e Glicemia, esses parâmetros
+       nem existem na tabela — e o teste não estaria testando nada */
+    ['PNI', 'ECG', 'Oximetria', 'Temperatura', 'Glicemia'].forEach(m => {
+      const el = f.querySelector('[name="monitores[]"][value="' + m + '"]');
+      if (el) { el.checked = true; }
+    });
+    try { anestesia.vitais.aplicarMonitores(); } catch (e) {}
+    out.monitoresMarcados = Array.from(f.querySelectorAll('[name="monitores[]"]:checked')).map(x => x.value);
+
+    /* a janela, como o usuário a vê */
+    anestesia.vitais.preencherPadrao();
+    await new Promise(res => setTimeout(res, 200));
+    out.temCampoTempIni = !!document.getElementById('vp-temp-ini');
+    out.temCampoTempFim = !!document.getElementById('vp-temp-fim');
+    out.temSeletorEvento = !!document.getElementById('vp-evento');
+    const opcoes = Array.from(document.querySelectorAll('#vp-evento option')).map(o => o.value);
+    out.opcoes = opcoes;
+
+    document.getElementById('vp-temp-ini').value = '36.8';
+    document.getElementById('vp-temp-fim').value = '35.4';
+    document.getElementById('vp-evento').value = 'hipo20';
+    document.getElementById('vp-evt-ini').value = '09:00';
+    document.getElementById('vp-evt-fim').value = '09:20';
+    anestesia.vitais._gerarPadrao(5);
+    await new Promise(res => setTimeout(res, 400));
+
+    const linhas = Array.from(document.querySelectorAll('#vitais-body tr'));
+    const leia = (tr, n) => (tr.querySelector('[name="vit_' + n + '[]"]') || {}).value || '';
+    out.quantas = linhas.length;
+    const temps = linhas.map(tr => parseFloat(leia(tr, 'temp'))).filter(x => !isNaN(x));
+    out.primeiraTemp = temps[0];
+    out.ultimaTemp = temps[temps.length - 1];
+    out.tempCaiu = temps.length > 3 && temps[0] > temps[temps.length - 1];
+    /* queda paulatina: nenhum salto grande entre medidas vizinhas */
+    out.maiorSalto = temps.slice(1).reduce((mx, v, i) => Math.max(mx, Math.abs(v - temps[i])), 0);
+
+    out.glicemias = linhas.map(tr => leia(tr, 'glic')).filter(Boolean).length;
+
+    /* a PA no meio do episódio é menor que fora dele */
+    const pasPorHora = {};
+    linhas.forEach(tr => { pasPorHora[leia(tr, 'hora')] = parseFloat(leia(tr, 'pas')); });
+    out.pasForaDoEpisodio = pasPorHora['08:30'];
+    out.pasNoPico = pasPorHora['09:10'];
+    out.caiuNoEpisodio = (out.pasNoPico && out.pasForaDoEpisodio)
+      ? out.pasNoPico < out.pasForaDoEpisodio * 0.92 : false;
+    out.voltouDepois = (pasPorHora['09:45'] && out.pasNoPico)
+      ? pasPorHora['09:45'] > out.pasNoPico : false;
+
+    const tipos = Array.from(document.querySelectorAll('#eventos-body [name="evt_tipo[]"]')).map(x => x.value);
+    out.eventos = tipos;
+    return out;
+  });
+  assert(r.temCampoTempIni && r.temCampoTempFim, 'a janela tem de pedir a temperatura inicial e a final');
+  assert(r.temSeletorEvento && r.opcoes.indexOf('hipo10') >= 0 && r.opcoes.indexOf('hipo20') >= 0 &&
+    r.opcoes.indexOf('hiper20') >= 0 && r.opcoes.indexOf('hipoxia') >= 0 &&
+    r.opcoes.indexOf('bradi') >= 0 && r.opcoes.indexOf('taqui') >= 0,
+    'e oferecer as intercorrências que ele listou; veio ' + JSON.stringify(r.opcoes));
+  assert(r.quantas > 10, 'o preenchimento tem de gerar as medidas; gerou ' + r.quantas);
+  assert(Math.abs(r.primeiraTemp - 36.8) <= 0.15,
+    'a primeira temperatura é a que ele informou; veio ' + r.primeiraTemp);
+  assert(Math.abs(r.ultimaTemp - 35.4) <= 0.15,
+    'e a última também; veio ' + r.ultimaTemp);
+  assert(r.tempCaiu, 'com queda do começo ao fim');
+  assert(r.maiorSalto <= 0.35,
+    'lenta e paulatina: sem salto entre medidas vizinhas; maior salto ' + r.maiorSalto);
+  assert(r.glicemias === 0,
+    'glicemia fica em branco — são poucas medidas e a anotação é manual; vieram ' + r.glicemias);
+  assert(r.caiuNoEpisodio,
+    'a PA tem de cair no episódio (fora ' + r.pasForaDoEpisodio + ', pico ' + r.pasNoPico + ')');
+  assert(r.voltouDepois, 'e voltar depois: o episódio tem forma de sino, não de degrau');
+  assert(r.eventos.some(t => /Hipotens/i.test(t)),
+    'e o episódio entra na linha do tempo, senão a folha mostra a queda sem dizer o que foi; eventos: ' +
+    JSON.stringify(r.eventos));
+  await page.close();
+});
+
+/* 280b) QUANDO QUEM RESPONDE SÃO OS PRÓPRIOS PAIS
+
+   Dois pedidos que são o mesmo assunto:
+   • no cadastro, poder marcar que o responsável legal são os próprios pais,
+     para autorizar o fluxo do termo;
+   • na pré, na ficha e na consulta, um botão que traga o nome dos pais do
+     cadastro.
+
+   A diferença entre "mãe" e "mãe (responsável legal)" é JURÍDICA, não de
+   rótulo: a primeira acompanha, a segunda autoriza. Por isso ela vem do
+   cadastro e não de um palpite da tela — o sistema não pode decidir sozinho
+   que a mãe que veio na consulta é quem assina o consentimento.
+
+   E o campo novo tem de atravessar as DUAS listas brancas do caminho. O
+   próprio código avisa: campo que falte em qualquer uma é descartado em
+   silêncio, por mais que esteja gravado. Foi o que já aconteceu com filiação e
+   responsável. */
+await test('Responsável legal são os pais: marca no cadastro, e o botão traz os nomes em pré, ficha e consulta', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-pais');
+    const base = { _id: 'pac-menor', nome: 'PEDRO LUCAS RIPARDO',
+      nascimento: '2015-04-02', nome_mae: 'ANA RIPARDO', nome_pai: 'CARLOS RIPARDO' };
+
+    /* 1) SEM a marca: mãe e pai acompanham, mas não autorizam */
+    store.setList('pacientes', [Object.assign({}, base)]);
+    const semMarca = identificacaoPaciente.acompanhantesPossiveis('PEDRO LUCAS RIPARDO');
+    out.semMarca = semMarca.map(x => x.papel);
+
+    /* 2) COM a marca: viram representantes legais */
+    store.setList('pacientes', [Object.assign({}, base, { responsavel_sao_os_pais: '1' })]);
+    const comMarca = identificacaoPaciente.acompanhantesPossiveis('PEDRO LUCAS RIPARDO');
+    out.comMarca = comMarca.map(x => x.papel);
+
+    /* 3) a marca atravessa as duas listas brancas */
+    const vindo = linker._dadosMaisRecentes('PEDRO LUCAS RIPARDO', 'termo');
+    out.atravessou = (vindo.dados || {}).responsavel_sao_os_pais;
+
+    /* 4) o botão existe e funciona nos três módulos */
+    out.botoes = {};
+    for (const [mod, campo, nomeCampo] of [
+      ['pre', 'acompanhantes', 'nome'],
+      ['consulta', 'acompanhantes', 'nome'],
+      ['anestesia', 'acompanhante', 'paciente_nome']
+    ]) {
+      ui.navegar(mod);
+      await new Promise(res => setTimeout(res, 450));
+      const f = document.getElementById('form-' + mod);
+      const alvo = f && f.querySelector('[name="' + campo + '"]');
+      if (!alvo) { out.botoes[mod] = 'sem campo'; continue; }
+      const nomeEl = f.querySelector('[name="' + nomeCampo + '"]');
+      if (nomeEl) nomeEl.value = 'PEDRO LUCAS RIPARDO';
+      alvo.value = '';
+      acompanhantes.doCadastro('#form-' + mod + ' [name=' + campo + ']', '#form-' + mod + ' [name=' + nomeCampo + ']');
+      await new Promise(res => setTimeout(res, 120));
+      out.botoes[mod] = alvo.value;
+    }
+    return out;
+  });
+  assert(JSON.stringify(r.semMarca) === JSON.stringify(['mãe', 'pai']),
+    'sem a marca, mãe e pai acompanham mas não autorizam; veio ' + JSON.stringify(r.semMarca));
+  assert(r.comMarca.join('|') === 'mãe (responsável legal)|pai (responsável legal)',
+    'com a marca, os dois passam a valer como representantes legais; veio ' + JSON.stringify(r.comMarca));
+  assert(r.atravessou === '1' || r.atravessou === true,
+    'a marca tem de atravessar as duas listas brancas até o termo; veio ' + JSON.stringify(r.atravessou));
+  ['pre', 'consulta', 'anestesia'].forEach(mod => {
+    const v = r.botoes[mod];
+    assert(typeof v === 'string' && /ANA RIPARDO/.test(v) && /CARLOS RIPARDO/.test(v),
+      'no módulo ' + mod + ' o botão tem de trazer mãe e pai do cadastro; veio "' + v + '"');
+  });
+  await page.close();
+});
+
 /* 279b) ABRIR O PACIENTE E VIR SÓ UM TERÇO DELE
 
    "Ao abrir paciente em qualquer módulo, não está puxando todas as
