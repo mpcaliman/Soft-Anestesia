@@ -4611,6 +4611,85 @@ await test('Cadastros da clínica sobem e descem por org_configs, valendo entre 
 
 
 
+/* O carimbo gravado num aparelho aparece nos outros: sobe a IMAGEM, não o
+   apontador para o depósito local. */
+await test('Carimbo salvo num aparelho chega aos outros: sobe a imagem, não a referência local', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    cloud.estaConfigurado = () => true;
+    cloud.estaLogado = () => true;
+    cloud._garantirToken = async () => true;
+    cloud.divergencia = () => null;
+    cloud.session = () => ({ user: { id: 'u1', email: 'medico@ex.com' }, access_token: 't' });
+    __smokeBindOrg('org-1');
+    localStorage.removeItem(clinicaSync.META_KEY);
+    cloud.config = () => ({ url: 'https://nuvem-teste.supabase.co', anonKey: 'k' });
+    let tabela = [];
+    const fetchOrig = window.fetch;
+    window.fetch = async (url, opts) => {
+      const u = String(url);
+      if (u.indexOf('/org_configs') < 0) return fetchOrig(url, opts);
+      if (opts && opts.method === 'POST') {
+        JSON.parse(opts.body).forEach(row => { tabela = tabela.filter(x => x.chave !== row.chave); tabela.push(row); });
+        return { ok: true, json: async () => [] };
+      }
+      return { ok: true, json: async () => tabela.map(x => ({ chave: x.chave, dados: x.dados, updated_at: x.updated_at })) };
+    };
+    const blobsOrig = store._blobs;
+    try {
+      /* ---- celular: o carimbo está no depósito local, o cadastro tem só o apontador ---- */
+      const imagem = 'data:image/png;base64,' + 'A'.repeat(6000);
+      const ref = store._refDe(imagem);
+      store._blobs = () => ({ [ref]: imagem });
+      const chave = 'medsys.v7.cad.profissionais';
+      localStorage.setItem(chave, JSON.stringify([{ _id: 'p1', nome: 'Dr. Carimbo', crm: '30601', carimbo: ref }]));
+      await clinicaSync.enviar({ tudo: true });
+      const linha = tabela.find(x => x.chave === 'cad_profissionais');
+      const subiu = linha && linha.dados.valor[0].carimbo;
+      out.subiuImagem = subiu === imagem;
+
+      /* o que já estava na nuvem errado é reenviado sozinho (hash do que sobe) */
+      tabela = []; localStorage.removeItem(clinicaSync.META_KEY);
+      const meta = {}; meta[chave] = { hash: clinicaSync._hash(localStorage.getItem(chave)), at: '2026-10-01T00:00:00Z' };
+      clinicaSync._salvarMeta(meta);
+      await clinicaSync.enviar();
+      out.reenviaOQueEstavaErrado = !!tabela.find(x => x.chave === 'cad_profissionais'
+        && x.dados.valor[0].carimbo === imagem);
+
+      /* ---- outro aparelho: tem a imagem e recebe um apontador de versão antiga ---- */
+      store._blobs = () => ({});
+      localStorage.setItem(chave, JSON.stringify([{ _id: 'p1', nome: 'Dr. Carimbo', crm: '30601', carimbo: imagem }]));
+      localStorage.removeItem(clinicaSync.META_KEY);
+      tabela = [{ chave: 'cad_profissionais', dados: { valor: [{ _id: 'p1', nome: 'Dr. Carimbo', crm: '30601', carimbo: ref }] },
+        updated_at: '2030-01-01T00:00:00.000Z' }];
+      await clinicaSync.puxarAplicar({ silent: true });
+      out.naoApagaAImagemDeQuemTem = (JSON.parse(localStorage.getItem(chave))[0] || {}).carimbo === imagem;
+
+      /* apontador sem imagem em lugar nenhum não apaga a imagem da nuvem */
+      localStorage.setItem(chave, JSON.stringify([{ _id: 'p1', nome: 'Dr. Carimbo', crm: '30601', telefone: '27999', carimbo: ref }]));
+      tabela = [{ chave: 'cad_profissionais', dados: { valor: [{ _id: 'p1', nome: 'Dr. Carimbo', carimbo: imagem }] }, updated_at: '2030-01-02T00:00:00.000Z' }];
+      localStorage.removeItem(clinicaSync.META_KEY);
+      await clinicaSync.enviar({ tudo: true });
+      const l2 = tabela.find(x => x.chave === 'cad_profissionais');
+      out.preservaDaNuvem = !!l2 && l2.dados.valor[0].carimbo === imagem && l2.dados.valor[0].telefone === '27999';
+    } finally {
+      store._blobs = blobsOrig;
+      window.fetch = fetchOrig;
+      localStorage.removeItem('medsys.v7.cad.profissionais');
+      localStorage.removeItem(clinicaSync.META_KEY);
+    }
+    return out;
+  });
+  assert(r.subiuImagem, 'o carimbo sobe como imagem, não como apontador do depósito local');
+  assert(r.reenviaOQueEstavaErrado, 'o cadastro que tinha subido só com o apontador é reenviado sozinho');
+  assert(r.naoApagaAImagemDeQuemTem, 'apontador antigo vindo da nuvem não apaga a imagem de quem a tem');
+  assert(r.preservaDaNuvem, 'apontador sem imagem neste aparelho não apaga a imagem que a nuvem tem');
+  await page.close();
+});
+
+
+
 /* 69) Acesso da secretária conferido e editado pelo médico DE QUALQUER APARELHO.
    Antes só dava para mexer em "Usuários e segurança" — lista local: no
    computador novo do médico a secretária nem aparecia. */
