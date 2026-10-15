@@ -3658,6 +3658,78 @@ await test('Pré: datas dos exames são digitáveis, salvam e saem na impressão
   await page.close();
 });
 
+/* A folha impressa é o documento: o que foi acrescentado entra no seu campo,
+   o que não tem campo entra no corpo, e cobrança não sai. */
+await test('Impressão: acréscimos no campo certo, dentro do corpo, e nada de cobrança na folha', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const hoje = utils.hojeISO();
+    const ad = (id, texto, extra) => Object.assign({ id, autor: 'Dr. Teste', data: hoje + 'T12:00:00Z', texto, _pushed: true }, extra || {});
+    const pre1 = { _id: 'pre-folha', nome: 'Paciente Da Folha', data: hoje, lab_hb: '13,2', parecer_cardio: '',
+      cirurgia: 'Colecistectomia', _finalizado: true,
+      _adendos: [
+        ad('a1', 'CORREÇÃO (exames):\n• lab hb: "13,2" → "14,6"'),
+        ad('a2', 'Parecer cardiologista: liberado para o procedimento'),
+        ad('a3', 'Paciente trouxe ressonância de coluna sem alterações'),
+        ad('a4', 'DECISÃO FINANCEIRA: GERAR', { motivo: 'decisao_financeira' })
+      ] };
+    store.setList('pre', [pre1]);
+    ui.navegar('pre');
+    await new Promise(res => setTimeout(res, 300));
+    pre.carregar(store.getById('pre', 'pre-folha'));
+    printPreview.abrir();
+    await new Promise(res => setTimeout(res, 400));
+    const folha = printPreview._htmlDaFolha(document.getElementById('ppp'));
+    const div = document.createElement('div'); div.innerHTML = folha; const txt = div.textContent;
+    out.exameNoCampo = /14,6/.test(txt) && !/13,2/.test(txt);
+    const iParecer = txt.indexOf('Cardiológico / risco cardíaco');
+    out.parecerNoCampo = iParecer >= 0 && txt.indexOf('liberado para o procedimento') > iParecer
+      && txt.indexOf('liberado para o procedimento') - iParecer < 120;
+    const iComp = txt.indexOf('Informações complementares');
+    out.semCampoNoCorpo = iComp >= 0 && txt.indexOf('ressonância de coluna') > iComp;
+    /* antes da assinatura, não depois do documento */
+    const iRodape = txt.lastIndexOf('Avaliação pré-anestésica');
+    out.antesDaAssinatura = iComp >= 0 && iComp < iRodape;
+    out.semAnexo = !/INFORMAÇÕES ACRESCENTADAS/.test(txt) && !/DECISÃO FINANCEIRA/.test(txt);
+    printPreview.fechar();
+
+    /* ficha: acomodação e grau são cobrança */
+    const fichaApto = { _id: 'ficha-folha', _finalizado: true,
+      paciente: { nome: 'Paciente Ficha Folha', acomodacao: 'apartamento' },
+      procedimento: { data: hoje, descricao: 'Artroplastia', codigo: '3.07.15.05-0',
+        cirurgias_extra: [{ procedimento: 'Retirada de material', codigo: '3.07.15.15-8', grau: 50, lateralidade: 'direita' }] } };
+    store.setList('anestesia', [fichaApto]);
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 300));
+    anestesia.carregar(store.getById('anestesia', 'ficha-folha'));
+    printPreview.abrir();
+    await new Promise(res => setTimeout(res, 500));
+    const f2 = printPreview._htmlDaFolha(document.getElementById('ppp'));
+    const d2 = document.createElement('div'); d2.innerHTML = f2; const t2 = d2.textContent;
+    out.semAcomodacao = !/apartamento/i.test(t2);
+    out.semGrau = !/50\s*%/.test(t2);
+    out.mantemCodigoELado = /3\.07\.15\.15-8/.test(t2) && /Direita/.test(t2);
+    printPreview.fechar();
+    fichaApto.paciente.acomodacao = 'UTI';
+    store.setList('anestesia', [fichaApto]);
+    anestesia.carregar(store.getById('anestesia', 'ficha-folha'));
+    printPreview.abrir();
+    await new Promise(res => setTimeout(res, 500));
+    out.procedenciaClinicaFica = /UTI/.test(printPreview._htmlDaFolha(document.getElementById('ppp')));
+    printPreview.fechar();
+    return out;
+  });
+  assert(r.exameNoCampo, 'o exame corrigido sai no seu lugar, com o valor novo');
+  assert(r.parecerNoCampo, 'o parecer acrescentado sai no campo do parecer');
+  assert(r.semCampoNoCorpo && r.antesDaAssinatura, 'o que não tem campo sai em "Informações complementares", dentro do corpo, antes da assinatura');
+  assert(r.semAnexo, 'sem quadro de anexos e sem decisão financeira na folha');
+  assert(r.semAcomodacao && r.semGrau, 'acomodação (apartamento) e grau % são cobrança: não saem');
+  assert(r.mantemCodigoELado, 'código e lateralidade continuam');
+  assert(r.procedenciaClinicaFica, 'procedência clínica (UTI) continua');
+  await page.close();
+});
+
 /* Pré: código e descrição na mesma linha, um "+" só; exames extras sem linha em branco */
 await test('Pré: código, descrição, qtd e lado numa linha com um "+" só, e exames extras sem linhas em branco', async () => {
   const page = await novaPagina();

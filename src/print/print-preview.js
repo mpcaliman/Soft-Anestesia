@@ -34,7 +34,10 @@ const printPreview = {
      ainda editável na tela não é uma nova versão assinada. */
   _dadosDoFormulario(mod, coletar) {
     const registro = printPreview._registroFinalizado(mod);
-    if (registro) return adendos.vigente(mod, registro);
+    if (registro) {
+      const vig = adendos.vigente(mod, registro);
+      try { return adendos.paraImpressao ? adendos.paraImpressao(mod, vig) : vig; } catch (e) { return vig; }
+    }
     return typeof coletar === 'function' ? coletar() : utils.formData(printPreview._formularioPorModulo[mod]);
   },
   _nomePacienteDoFormulario(mod) {
@@ -1343,6 +1346,20 @@ ${TAG_CLOSE_HTML}`;
     return `<div style="margin-top:4px;font-size:7.5pt;color:#1c6b3f;border:1px solid #b9e0c6;background:#eaf7ef;border-radius:4px;padding:4px 6px;line-height:1.35;text-align:left;display:flex;gap:8px;align-items:flex-start">` +
       qrCol + info + `</div>`;
   },
+  /* o que foi acrescentado depois e não tem campo próprio: parte do corpo */
+  /* Enfermaria / apartamento / ambulatorial é dado de COBRANÇA (o plano paga
+     diferente): não sai na folha. UTI, emergência, centro cirúrgico são
+     procedência clínica e continuam. */
+  _procedenciaClinica(v) {
+    const t = String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+    if (!t || /^(enfermaria|apartamento|apto|ambulator)/.test(t)) return '';
+    return v;
+  },
+  _complementos(d) {
+    const t = d && d._complementos;
+    if (!t || !String(t).trim()) return '';
+    return printPreview._section('Informações complementares', printPreview._field('', t, true));
+  },
   _footer(label) {
     return `<div class="pp-footer">
       <span>${utils.escapeHTML(label)} · Impresso em ${new Date().toLocaleString('pt-BR')}${printPreview._versaoStamp()}</span>
@@ -1448,6 +1465,7 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._field('Orientações', d.orientacoes, true)}
         ${printPreview._field('Conclusão', d.conclusao, true)}
       `) +
+      printPreview._complementos(d) +
       printPreview._signature(d.anestesiologista, d.crm ? 'CRM ' + d.crm : '', d) +
       printPreview._footer('Avaliação pré-anestésica') +
       printPreview._buildProtocoloJejumAnexo(d) +
@@ -1638,6 +1656,7 @@ ${TAG_CLOSE_HTML}`;
       `) +
       procHtml +
       segHtml +
+      printPreview._complementos(d) +
       printPreview._signature(d.profissional, d.crm ? 'CRM ' + d.crm : '', d) +
       printPreview._footer('Consulta');
   },
@@ -1675,7 +1694,7 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._field('Carteirinha', p.carteirinha)}
         ${printPreview._field('CPF', p.cpf)}
         ${printPreview._field('Senha / Autorização', p.senha)}
-        ${printPreview._field('Procedência / acomodação', p.acomodacao)}
+        ${printPreview._field('Procedência', printPreview._procedenciaClinica(p.acomodacao))}
       </div>
     `);
     /* O procedimento começa quando o paciente ENTRA na sala e termina quando
@@ -1747,12 +1766,11 @@ ${TAG_CLOSE_HTML}`;
     const cirsExtras = (pr.cirurgias_extra || []).filter(c => c.procedimento || c.cirurgiao);
     if (cirsExtras.length > 0) {
       html += printPreview._section('Cirurgias combinadas / procedimentos adicionais',
-        '<table class="pp-table"><thead><tr><th>Procedimento</th><th>Cirurgião</th><th>Grau</th><th>Início</th><th>Fim</th><th>Observação</th></tr></thead><tbody>' +
+        '<table class="pp-table"><thead><tr><th>Procedimento</th><th>Cirurgião</th><th>Início</th><th>Fim</th><th>Observação</th></tr></thead><tbody>' +
         cirsExtras.map(c => `
           <tr>
             <td>${utils.escapeHTML(c.procedimento || '')}</td>
             <td>${utils.escapeHTML(c.cirurgiao || pr.cirurgiao || '')}${(!c.cirurgiao && pr.cirurgiao) ? ' <small>(mesma equipe)</small>' : ''}</td>
-            <td>${utils.escapeHTML((c.grau || '') ? c.grau + '%' : '')}</td>
             <td>${utils.escapeHTML(c.inicio || '')}</td>
             <td>${utils.escapeHTML(c.fim || '')}</td>
             <td>${utils.escapeHTML(c.obs || '')}</td>
@@ -2236,6 +2254,7 @@ ${TAG_CLOSE_HTML}`;
     if (d.conclusao.conclusao) html += printPreview._section('Conclusão', printPreview._field('', d.conclusao.conclusao, true));
     if (d.conclusao.observacoes_finais) html += printPreview._section('Observações finais', printPreview._field('', d.conclusao.observacoes_finais, true));
 
+    html += printPreview._complementos(d);
     /* === ASSINATURA NOVA (com carimbo / desenho) === */
     html += printPreview._signatureAnestesia(d.assinatura);
     html += printPreview._footer('Ficha de anestesia');
@@ -2349,6 +2368,7 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._field('Observações', d.observacoes, true)}
       `) +
       printPreview._buildGraficoSRPA(printPreview._registroFinalizado('recuperacao') ? d.grafico || { vitais: [], eventos: [], medicacoes: [] } : null) +
+      printPreview._complementos(d) +
       printPreview._signature(d.responsavel, d.registro || '', d) +
       printPreview._footer('Recuperação pós-anestésica');
   },

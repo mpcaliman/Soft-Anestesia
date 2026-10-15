@@ -4847,7 +4847,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-15l</b><br>
+    v7.1 · build <b id="build-tag">2026-10-15m</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -22899,6 +22899,85 @@ const adendos = (() => {
       juntar(bruto.replace(/\s+/g, '_'), m[3]);
     });
     return { campos, texto: linhasTexto.join('\n').trim() };
+  },
+  /* O QUE FOI ACRESCENTADO ENTRA NO CORPO, NO SEU CAMPO.
+     A folha impressa é o documento — não o documento seguido de uma lista de
+     anexos. Retificação estruturada já chega aos campos por `vigente`; aqui
+     entram os outros dois formatos:
+     • correções antigas em texto (`• rótulo: "antes" → "depois"`): o depois
+       vai para o campo;
+     • texto livre do card de adendos: cada linha "Rótulo: valor" procura o
+       campo cujo rótulo na tela corresponde (ex.: "Parecer cardiologista:
+       liberado" → "Parecer / risco cardiológico"). Campo vazio recebe; campo
+       com texto recebe o acréscimo na linha seguinte.
+     O que não encontra campo vira `_complementos`, impresso como seção do
+     corpo, antes da assinatura. Decisão de cobrança nunca entra. */
+  _normRotulo(t) {
+    return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+      .replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  },
+  _camposPorRotulo(mod) {
+    const out = [];
+    try {
+      const form = document.getElementById(mod === 'anestesia' ? 'form-anestesia' : 'form-' + mod);
+      if (!form) return out;
+      form.querySelectorAll('.field').forEach(f => {
+        const lab = f.querySelector('label'); const el = f.querySelector('[name]');
+        if (!lab || !el || !el.name || /\[\]$/.test(el.name)) return;
+        const raiz = lab.cloneNode(true); raiz.querySelectorAll('small').forEach(x => x.remove());
+        const toks = adendos._normRotulo(raiz.textContent).split(' ').filter(x => x.length > 2).map(x => x.slice(0, 6));
+        if (toks.length) out.push({ name: el.name, toks });
+      });
+    } catch (e) {}
+    return out;
+  },
+  _campoDoRotulo(rotulo, campos) {
+    const toks = adendos._normRotulo(rotulo).split(' ').filter(x => x.length > 2).map(x => x.slice(0, 6));
+    if (!toks.length) return '';
+    const bons = campos.filter(c => toks.every(t => c.toks.indexOf(t) >= 0));
+    if (bons.length === 1) return bons[0].name;
+    const exatos = bons.filter(c => c.toks.length === toks.length);
+    return exatos.length === 1 ? exatos[0].name : '';
+  },
+  _aplicarNoCampo(d, chave, valor, acrescentar) {
+    const pôr = (o, k) => {
+      const atual = o[k];
+      o[k] = acrescentar && atual && String(atual).trim() && String(atual).indexOf(valor) < 0
+        ? String(atual) + '\n' + valor : valor;
+      return true;
+    };
+    if (Object.prototype.hasOwnProperty.call(d, chave) && (d[chave] == null || typeof d[chave] !== 'object')) return pôr(d, chave);
+    /* ficha estruturada: o campo mora numa seção (paciente, procedimento…) */
+    const donos = Object.keys(d).filter(k => d[k] && typeof d[k] === 'object' && !Array.isArray(d[k]) &&
+      Object.prototype.hasOwnProperty.call(d[k], chave) && (d[k][chave] == null || typeof d[k][chave] !== 'object'));
+    if (donos.length === 1) return pôr(d[donos[0]], chave);
+    return false;
+  },
+  paraImpressao(mod, rec) {
+    if (!rec || typeof rec !== 'object') return rec;
+    const d = JSON.parse(JSON.stringify(rec));
+    const lista = ((rec && rec._adendos) || []).filter(ad => ad && !ad._retificacao && !ad._retificacaoInvalida &&
+      ad.motivo !== 'decisao_financeira' && !/^DECIS[AÃ]O FINANCEIRA/i.test(String(ad.texto || '')))
+      .slice().sort((a, b) => String(a._serverCreatedAt || a.data || '').localeCompare(String(b._serverCreatedAt || b.data || '')));
+    if (!lista.length) return d;
+    const campos = adendos._camposPorRotulo(mod);
+    const sobras = [];
+    lista.forEach(ad => {
+      const { campos: mud, texto } = adendos.mudancasDoAdendo(ad);
+      mud.forEach(c => {
+        if (!adendos._aplicarNoCampo(d, c.chave, c.valor, false)) {
+          const alvo = adendos._campoDoRotulo(c.rotulo, campos);
+          if (!alvo || !adendos._aplicarNoCampo(d, alvo, c.valor, false)) sobras.push(c.rotulo + ': ' + c.valor);
+        }
+      });
+      String(texto || '').split('\n').map(l => l.trim()).filter(Boolean).forEach(l => {
+        const m = l.match(/^([^:]{2,60}):\s*(.+)$/);
+        const alvo = m ? adendos._campoDoRotulo(m[1], campos) : '';
+        if (!alvo || !adendos._aplicarNoCampo(d, alvo, m[2].trim(), true)) sobras.push(l);
+      });
+    });
+    if (sobras.length) d._complementos = sobras.join('\n');
+    return d;
   },
   htmlParaImpressao(rec) {
     const lista = ((rec && rec._adendos) || []).filter(ad => ad && !ad._retificacao && !ad._retificacaoInvalida);
