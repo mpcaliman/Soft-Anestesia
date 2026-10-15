@@ -4846,7 +4846,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-15e</b><br>
+    v7.1 · build <b id="build-tag">2026-10-15f</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -10271,6 +10271,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </label>
     <span id="ppt-filename" style="font-size:.72rem;color:#cbd5e0;background:rgba(255,255,255,.08);padding:4px 10px;border-radius:4px;white-space:nowrap"></span>
     <button class="btn btn-success" onclick="printPreview.imprimir()" title="Abre a janela de impressão do aparelho — escolha a impressora (AirPrint) para papel ou 'Salvar em PDF'"><span class="icon">🖨️</span> Imprimir / PDF</button>
+    <button class="btn" onclick="spdata.abrir()" title="Levar este documento ao SP Data do hospital: a evolução em texto para colar e o PDF para a área de anexos"><span class="icon">🏥</span> SP Data</button>
     <button class="btn" id="ppt-cloud-btn" onclick="printPreview.salvarPDFnaNuvem()" title="Gera o PDF e envia para o backup na nuvem (Supabase/Drive)"><span class="icon">☁️</span> Salvar PDF na nuvem</button>
     <button class="btn" onclick="printPreview.fechar()">✕ Fechar</button>
   </div>
@@ -26766,6 +26767,97 @@ const captura = {
    aparelho (Web Share API), permitindo enviar direto ao SafeID/gov.br/etc.
    Tudo offline; o jsPDF está embutido no próprio arquivo.
 ============================================================================ */
+/* ============================================================================
+   SP DATA — levar o documento ao prontuário do hospital.
+   O SP Data não tem integração aberta: entra-se com usuário e senha, e o Soft
+   NÃO guarda nem digita essa senha por ele. O que dá para fazer com segurança
+   é deixar pronto o que ele leva:
+     • Evolução — o SP Data só aceita TEXTO ali. Sai um texto limpo, sem
+       símbolos que sistemas antigos estragam (SpO₂ vira "SpO2", travessão vira
+       hífen, emoji some), pronto para colar.
+     • Anexos — área própria do SP Data. Sai o PDF do documento, com nome que
+       diz de quem é e de quando, para achar na pasta de downloads.
+============================================================================ */
+const spdata = {
+  _limpar(txt, semAcento) {
+    const sub = { '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9',
+      '⁰': '0', '¹': '1', '²': '2', '³': '3', '“': '"', '”': '"', '‘': "'", '’': "'", '–': '-', '—': '-',
+      '•': '-', '·': '-', '…': '...', '≥': '>=', '≤': '<=', '±': '+/-', '×': 'x', 'µ': 'mc', '→': '->', '\u00a0': ' ' };
+    let t = String(txt || '').replace(/[\u2080-\u2089\u2070\u00b9\u00b2\u00b3\u201c\u201d\u2018\u2019\u2013\u2014\u2022\u00b7\u2026\u2265\u2264\u00b1\u00d7\u00b5\u2192\u00a0]/g, c => sub[c] || c);
+    /* emoji e pictogramas: o campo de evolução não os mostra, vira "?" */
+    t = t.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, '');
+    if (semAcento) t = t.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return t.split('\n').map(l => l.replace(/[ \t]+/g, ' ').trim()).join('\n')
+      .replace(/\n{3,}/g, '\n\n').trim();
+  },
+  /* O texto da evolução. Na ficha é o resumo narrativo (gerado na hora se
+     estiver vazio); nos outros documentos, o próprio conteúdo da folha. */
+  texto(mod) {
+    mod = mod || state.currentModule;
+    let corpo = '';
+    if (mod === 'anestesia') {
+      const campo = document.querySelector('#form-anestesia [name="resumo_narrativo"]');
+      if (campo && !String(campo.value || '').trim()) { try { anestesia.resumo.gerar(); } catch (e) {} }
+      corpo = campo ? campo.value : '';
+    }
+    if (!String(corpo || '').trim()) {
+      const ppp = document.getElementById('ppp');
+      corpo = ppp ? (ppp.innerText || ppp.textContent || '') : '';
+    }
+    let assinatura = '';
+    try {
+      const p = ajustes.perfilAtivo && ajustes.perfilAtivo();
+      if (p && p.nome) assinatura = p.nome + (p.crm ? ' - CRM ' + p.crm : '');
+    } catch (e) {}
+    const partes = [corpo];
+    if (assinatura && corpo.indexOf(assinatura) < 0) partes.push(assinatura);
+    return partes.filter(Boolean).join('\n\n');
+  },
+  abrir() {
+    const mod = state.currentModule;
+    modal.open('🏥 Levar ao SP Data',
+      '<p style="font-size:.84rem;color:var(--text-soft);margin:0 0 10px">Entre no SP Data como sempre (usuário e senha são seus — o Soft não os guarda). Depois:</p>' +
+      '<div style="font-size:.86rem;font-weight:600;margin:6px 0">1. Evolução <small style="font-weight:400;color:var(--text-mute)">— só texto: copie e cole no campo</small></div>' +
+      '<textarea id="spd-texto" rows="9" style="width:100%;font-family:inherit;font-size:.84rem" oninput="spdata._contar()"></textarea>' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin:4px 0 12px">' +
+      '<label class="check" style="font-size:.8rem"><input type="checkbox" id="spd-sem-acento" onchange="spdata._refazer()"> <span>Sem acentos (se o SP Data trocar letras por símbolos)</span></label>' +
+      '<small id="spd-contagem" style="color:var(--text-mute)"></small></div>' +
+      '<button type="button" class="btn btn-primary" onclick="spdata.copiar()">📋 Copiar evolução</button>' +
+      '<div style="font-size:.86rem;font-weight:600;margin:16px 0 6px;border-top:1px solid var(--border);padding-top:12px">2. Anexos <small style="font-weight:400;color:var(--text-mute)">— na área de anexos do SP Data</small></div>' +
+      '<p style="font-size:.8rem;color:var(--text-soft);margin:0 0 8px">Na janela que abrir, escolha <b>Salvar como PDF</b>. O arquivo sai com o nome <b id="spd-nome"></b> — é ele que você anexa.</p>' +
+      '<button type="button" class="btn" onclick="spdata.pdf()">📄 Salvar PDF para anexar</button>',
+      '<button class="btn" onclick="modal.close()">Fechar</button>');
+    spdata._mod = mod;
+    spdata._refazer();
+    try { const n = document.getElementById('spd-nome'); if (n) n.textContent = printPreview._gerarNomeArquivo() + '.pdf'; } catch (e) {}
+  },
+  _refazer() {
+    const ta = document.getElementById('spd-texto');
+    if (!ta) return;
+    const sem = !!(document.getElementById('spd-sem-acento') || {}).checked;
+    ta.value = spdata._limpar(spdata.texto(spdata._mod), sem);
+    spdata._contar();
+  },
+  _contar() {
+    const ta = document.getElementById('spd-texto'), c = document.getElementById('spd-contagem');
+    if (ta && c) c.textContent = ta.value.length + ' caracteres';
+  },
+  copiar() {
+    const ta = document.getElementById('spd-texto');
+    const txt = ta ? ta.value : '';
+    if (!txt) { toast('Nada para copiar ainda.', 'warn'); return; }
+    const fallback = () => { try { ta.select(); document.execCommand('copy'); toast('📋 Evolução copiada — cole no SP Data'); } catch (e) { toast('Selecione o texto e copie manualmente.', 'warn'); } };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(() => toast('📋 Evolução copiada — cole no SP Data', 'success'), fallback);
+    } else fallback();
+  },
+  pdf() {
+    modal.close();
+    setTimeout(() => { try { printPreview.imprimir(); } catch (e) { toast('Não consegui abrir a impressão: ' + (e.message || ''), 'error'); } }, 150);
+  }
+};
+window.spdata = spdata;
+
 const pdfGen = {
   _jsPDF() {
     /* jsPDF é exposto como window.jspdf.jsPDF pelo bundle UMD */

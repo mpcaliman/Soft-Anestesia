@@ -3658,6 +3658,47 @@ await test('Pré: datas dos exames são digitáveis, salvam e saem na impressão
   await page.close();
 });
 
+/* Item 9: SP Data — evolução em texto limpo e PDF para a área de anexos */
+await test('SP Data: evolução sai em texto limpo para colar, e o PDF com nome claro para anexar', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 300));
+    try { anestesia.novo && anestesia.novo(); } catch (e) {}
+    const f = document.getElementById('form-anestesia');
+    const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el) el.value = v; };
+    set('paciente_nome', 'Paciente SPData'); set('data_anestesia', utils.hojeISO());
+    set('procedimento', 'Colecistectomia videolaparoscópica');
+    f.querySelector('[name="resumo_narrativo"]').value = 'Monitorização com SpO₂ e EtCO₂ — PA ≥ 90 mmHg • sem intercorrências 😀';
+    printPreview.abrir();
+    await new Promise(res => setTimeout(res, 600));
+    out.temBotao = Array.from(document.querySelectorAll('.print-preview-toolbar button')).some(b => /SP Data/.test(b.textContent));
+    spdata.abrir();
+    await new Promise(res => setTimeout(res, 150));
+    const t = document.getElementById('spd-texto').value;
+    out.texto = t;
+    out.limpo = /SpO2/.test(t) && /EtCO2/.test(t) && /PA >= 90/.test(t) && !/[₂≥•—😀]/u.test(t);
+    out.temAcento = /intercorrências/.test(t);
+    document.getElementById('spd-sem-acento').checked = true;
+    spdata._refazer();
+    out.semAcento = /intercorrencias/.test(document.getElementById('spd-texto').value);
+    out.nomePdf = /\.pdf$/.test(document.getElementById('spd-nome').textContent);
+    /* sem resumo, usa a própria folha */
+    f.querySelector('[name="resumo_narrativo"]').value = '';
+    out.semResumoGera = spdata.texto('anestesia').length > 20;
+    modal.close();
+    try { printPreview.fechar(); } catch (e) {}
+    return out;
+  });
+  assert(r.temBotao, 'a pré-visualização tem o botão SP Data');
+  assert(r.limpo, 'a evolução sai sem símbolos que o SP Data estraga (veio ' + JSON.stringify(r.texto) + ')');
+  assert(r.temAcento && r.semAcento, 'acentos ficam, e podem ser tirados com uma marca');
+  assert(r.nomePdf, 'o PDF para anexar mostra o nome do arquivo');
+  assert(r.semResumoGera, 'sem resumo escrito, a evolução sai do próprio documento');
+  await page.close();
+});
+
 /* Item 14: escolher o paciente no próprio módulo traz plano, CPF e nascimento */
 await test('Escolher o paciente na pré e na ficha traz plano, CPF e nascimento — mesmo fora da lista e em data brasileira', async () => {
   const page = await novaPagina();
