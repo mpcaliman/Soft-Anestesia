@@ -402,20 +402,39 @@ const printPreview = {
         h2 { font-size: calc(10pt * var(--pp-esc, 1)); font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: #2a3441; margin: 9px 0 4px; padding: 0 0 2px 0; background: none; border: none; border-bottom: 1px solid #b5bcc6; page-break-after: avoid; }
         .pp-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 3px 16px; margin-bottom: 6px; font-size: calc(10.5pt * var(--pp-esc, 1)); }
         .pp-grid > .pp-field:only-child, .pp-grid > .pp-block:only-child { grid-column: 1 / -1; }
-        .pp-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+        /* Em três colunas iguais, o NOME e o HOSPITAL quebravam em duas linhas
+           enquanto sobrava espaço à direita. A primeira coluna é a que carrega
+           os textos longos — nome do paciente, nome do hospital, procedimento
+           — e ganha a folga. */
+        .pp-grid.cols-3 { grid-template-columns: 1.7fr 1fr 1fr; }
         .pp-grid.cols-1 { grid-template-columns: 1fr; }
         .pp-field { display: flex; gap: 5px; align-items: baseline; padding: 0; }
         .pp-field .pp-label { font-weight: 600; color: #8a93a0; text-transform: uppercase; font-size: calc(8pt * var(--pp-esc, 1)); letter-spacing: .3px; white-space: nowrap; }
         .pp-field .pp-value { flex: 1; font-size: calc(10.5pt * var(--pp-esc, 1)); color: #1a2332; }
         .pp-block { margin-bottom: 6px; padding: 1px 0; font-size: calc(10.5pt * var(--pp-esc, 1)); }
         .pp-block .pp-label { font-weight: 600; color: #8a93a0; text-transform: uppercase; font-size: calc(8pt * var(--pp-esc, 1)); letter-spacing: .3px; display: block; margin-bottom: 2px; }
-        .pp-block .pp-value { white-space: pre-wrap; color: #1a2332; line-height: 1.35; }
+        .pp-block .pp-value { white-space: pre-wrap; color: #1a2332; line-height: 1.35; orphans: 3; widows: 3; }
+        /* Parágrafo não começa com uma linha solta no pé da folha nem termina
+           com uma linha solta no alto da seguinte — era o que acontecia com o
+           resumo da anestesia, que começava no fim de uma página e cortava no
+           meio de uma frase. */
+        p, .pp-block { orphans: 3; widows: 3; }
         .pp-lab-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 2px 6px; border: 1px solid #d0d5db; border-radius: 4px; padding: 4px 6px; }
         .pp-lab-item { font-size: calc(9.5pt * var(--pp-esc, 1)); white-space: nowrap; }
         .pp-lab-k { color: #8a93a0; font-weight: 600; }
         .pp-lab-v { color: #1a2332; font-weight: 600; }
         .pp-table { width: 100%; border-collapse: collapse; font-size: calc(10pt * var(--pp-esc, 1)); margin-bottom: 6px; page-break-inside: auto; }
         .pp-table tr { page-break-inside: avoid; }
+        /* O CABEÇALHO TEM DE SE REPETIR A CADA FOLHA.
+           A tabela de sinais vitais atravessa a quebra de página, e a folha
+           seguinte começava com números soltos: 135 | 83 | 100 | 76 — sem
+           saber qual coluna é PAS, PAD ou FC. É o pior tipo de quebra, porque
+           atrapalha a leitura clínica, não só a estética. Repetir o cabeçalho
+           é o comportamento padrão do thead, mas ele se perde quando algo no
+           caminho muda o display; declarar os três grupos garante. */
+        .pp-table thead { display: table-header-group; }
+        .pp-table tfoot { display: table-footer-group; }
+        .pp-table tbody { display: table-row-group; }
         .pp-table th, .pp-table td { border: 1px solid #c5cad2; padding: 2px 4px; text-align: left; }
         .pp-table th { background: #f2f4f7; font-size: 8.5pt; text-transform: uppercase; letter-spacing: .4px; color: #5a6472; }
         .pp-checks { display: flex; flex-wrap: wrap; gap: 3px 8px; font-size: 10pt; margin-bottom: 5px; }
@@ -2055,9 +2074,36 @@ ${TAG_CLOSE_HTML}`;
       if (has('cam'))   colsOpcionais.push({ k: 'cam',   label: 'CAM' });
       if (has('diurese')) colsOpcionais.push({ k: 'diurese', label: 'Diurese mL' });
 
-      const cabec = '<table class="pp-table"><thead><tr><th>Hora</th><th>PAS</th><th>PAD</th><th>PAM</th><th>FC</th><th>SpO₂</th><th>EtCO₂</th><th>FR</th>' +
+      /* COLUNA VAZIA NÃO INFORMA NADA, E CUSTA LARGURA.
+         As colunas fixas eram impressas sempre, mesmo sem um único valor em
+         trinta linhas: numa ficha de raqui com ventilação espontânea, EtCO₂ e
+         Obs saíam em branco de ponta a ponta, estreitando as colunas que de
+         fato têm número e empurrando a tabela para uma folha a mais. As
+         opcionais já eram escolhidas assim; as fixas, não.
+         Hora, PAS, PAD e FC ficam sempre — são o esqueleto da leitura, e a
+         ausência delas numa linha é informação. */
+      const temValor = (campo) => d.sinais_vitais.some(v => {
+        if (!v || !v.hora) return false;
+        const x = v[campo];
+        return x !== undefined && x !== null && String(x).trim() !== '';
+      });
+      const pamDerivavel = d.sinais_vitais.some(v => v && v.hora &&
+        String(v.pam || '').trim() === '' && String(v.pas || '').trim() !== '' && String(v.pad || '').trim() !== '');
+      const colsFixas = [
+        { k: 'hora', label: 'Hora', sempre: true },
+        { k: 'pas',  label: 'PAS',  sempre: true },
+        { k: 'pad',  label: 'PAD',  sempre: true },
+        { k: 'pam',  label: 'PAM',  sempre: temValor('pam') || pamDerivavel },
+        { k: 'fc',   label: 'FC',   sempre: true },
+        { k: 'spo2', label: 'SpO₂', sempre: temValor('spo2') },
+        { k: 'etco2', label: 'EtCO₂', sempre: temValor('etco2') },
+        { k: 'fr',   label: 'FR',   sempre: temValor('fr') }
+      ].filter(c => c.sempre);
+      const temObs = temValor('observacao');
+      const cabec = '<table class="pp-table"><thead><tr>' +
+        colsFixas.map(c => '<th>' + c.label + '</th>').join('') +
         colsOpcionais.map(c => '<th>' + c.label + '</th>').join('') +
-        '<th>Obs</th></tr></thead><tbody>';
+        (temObs ? '<th>Obs</th>' : '') + '</tr></thead><tbody>';
 
       html += printPreview._section('Sinais vitais',
         graficoHTML +
@@ -2073,20 +2119,13 @@ ${TAG_CLOSE_HTML}`;
           if (!pam && pas && pad) {
             pam = Math.round((parseFloat(pas) + 2 * parseFloat(pad)) / 3);
           }
-          return `
-          <tr>
-            <td>${utils.escapeHTML(v.hora)}</td>
-            <td>${utils.escapeHTML(pas)}</td>
-            <td>${utils.escapeHTML(pad)}</td>
-            <td>${utils.escapeHTML(pam)}</td>
-            <td>${utils.escapeHTML(v.fc || '')}</td>
-            <td>${utils.escapeHTML(v.spo2 || '')}</td>
-            <td>${utils.escapeHTML(v.etco2 || '')}</td>
-            <td>${utils.escapeHTML(v.fr || '')}</td>
-            ${colsOpcionais.map(c => '<td>' + utils.escapeHTML(v[c.k] || '') + '</td>').join('')}
-            <td>${utils.escapeHTML(v.observacao || '')}</td>
-          </tr>
-        `;
+          const valor = { hora: v.hora, pas: pas, pad: pad, pam: pam,
+            fc: v.fc || '', spo2: v.spo2 || '', etco2: v.etco2 || '', fr: v.fr || '' };
+          return '<tr>' +
+            colsFixas.map(c => '<td>' + utils.escapeHTML(valor[c.k] || '') + '</td>').join('') +
+            colsOpcionais.map(c => '<td>' + utils.escapeHTML(v[c.k] || '') + '</td>').join('') +
+            (temObs ? '<td>' + utils.escapeHTML(v.observacao || '') + '</td>' : '') +
+            '</tr>';
         }).join('') + '</tbody></table>'
       );
     }

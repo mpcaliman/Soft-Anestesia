@@ -17581,6 +17581,78 @@ await test('Rascunhos: cópia preservada não desce da nuvem, e as abas param de
   await page.close();
 });
 
+/* 276b) A FOLHA: CABEÇALHO QUE SE REPETE E COLUNA QUE NÃO INFORMA
+
+   Do PDF que ele mandou, quatro páginas de uma ficha:
+
+   • a tabela de sinais vitais atravessa a quebra e a página 3 começa com
+     "12:25 | 135 | 83 | 100 | 76 | 99" — números soltos, sem saber qual coluna
+     é PAS, PAD ou FC. É o pior tipo de quebra: atrapalha a leitura clínica,
+     não só a estética;
+   • EtCO₂ e Obs saíam em branco nas trinta e duas linhas, estreitando as
+     colunas que de fato têm número;
+   • o resumo da anestesia começava no pé da página 3 e cortava no meio de uma
+     frase.
+
+   Coluna vazia não informa nada e custa largura. Hora, PAS, PAD e FC ficam
+   sempre — são o esqueleto da leitura, e a ausência de um valor NELAS é
+   informação. */
+await test('Folha impressa: cabeçalho repete na quebra, e coluna vazia de ponta a ponta não sai', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    __smokeBindOrg('org-folha');
+    /* uma ficha de raqui com ventilação espontânea: sem EtCO₂, sem Obs */
+    const vitais = [];
+    for (let i = 0; i < 32; i++) {
+      const m = 20 + i * 5;
+      vitais.push({ hora: String(12 + Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'),
+        pas: String(110 + (i % 20)), pad: String(70 + (i % 10)), fc: String(65 + (i % 12)), spo2: '99' });
+    }
+    const doc = {
+      paciente: { nome: 'JAIME ROLANDO PEIXOTO' },
+      procedimento: { descricao: 'Gastrostomia', data: '2026-08-05' },
+      sinais_vitais: vitais
+    };
+    const html = printPreview._buildDe ? printPreview._buildDe('anestesia', doc) : null;
+    /* o construtor real da ficha lê o formulário; aqui basta a tabela */
+    ui.navegar('anestesia');
+    anestesia.carregar(store.save('anestesia', doc));
+    const folha = printPreview._buildAnestesia();
+    out.tamanho = folha.length;
+
+    const bloco = folha.slice(folha.indexOf('Sinais vitais'));
+    const cabecalho = (bloco.match(/<thead>[\s\S]*?<\/thead>/) || [''])[0];
+    out.cabecalho = cabecalho.replace(/<[^>]+>/g, '|').replace(/\|+/g, '|');
+    out.temEtco2 = /EtCO/.test(cabecalho);
+    out.temObs = /Obs/.test(cabecalho);
+    out.temPas = /PAS/.test(cabecalho);
+    out.temFc = /FC/.test(cabecalho);
+    out.temHora = /Hora/.test(cabecalho);
+
+    /* com valor, a coluna volta */
+    const doc2 = JSON.parse(JSON.stringify(doc));
+    doc2.sinais_vitais[3].etco2 = '34';
+    doc2.sinais_vitais[5].observacao = 'extubado';
+    anestesia.carregar(store.save('anestesia', doc2));
+    const folha2 = printPreview._buildAnestesia();
+    const cab2 = (folha2.slice(folha2.indexOf('Sinais vitais')).match(/<thead>[\s\S]*?<\/thead>/) || [''])[0];
+    out.etco2VoltaComValor = /EtCO/.test(cab2);
+    out.obsVoltaComValor = /Obs/.test(cab2);
+
+    /* e as regras de folha estão na folha de estilo da impressão */
+    const css = printPreview._cssImpressao ? printPreview._cssImpressao() : '';
+    return out;
+  });
+  assert(r.temHora && r.temPas && r.temFc,
+    'Hora, PAS e FC são o esqueleto da leitura e ficam sempre; veio: ' + r.cabecalho);
+  assert(!r.temEtco2, 'EtCO₂ vazio nas 32 linhas não pode ocupar coluna; veio: ' + r.cabecalho);
+  assert(!r.temObs, 'Obs vazio nas 32 linhas não pode ocupar coluna; veio: ' + r.cabecalho);
+  assert(r.etco2VoltaComValor, 'bastando UM valor, a coluna volta — senão o conserto esconderia dado');
+  assert(r.obsVoltaComValor, 'o mesmo para Obs: um registro em trinta linhas já justifica a coluna');
+  await page.close();
+});
+
 /* 275b) PROCURAR PACIENTE SEM TER DE PEDIR À NUVEM
 
    "Ao buscar por paciente em cada módulo, tornar de forma que não precise
