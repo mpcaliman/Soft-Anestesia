@@ -704,7 +704,7 @@ const persistenciaCloudFirst = {
     const contexto = persistenciaCloudFirst._contexto();
     if (!contexto || !cloudRel.disponivel()) return null;
     persistenciaCloudFirst._drenando = true;
-    let enviados = 0, conflitos = 0, bloqueados = 0, indisponivel = false;
+    let enviados = 0, conflitos = 0, bloqueados = 0, liberadas = 0, indisponivel = false;
     const confirmados = new Map();
     try {
       const ops = await filaCifrada.listar();
@@ -725,6 +725,16 @@ const persistenciaCloudFirst = {
           continue;
         }
         if (op.queue && op.queue.state === 'conflict') {
+          let saida = null;
+          try { saida = await persistenciaCloudFirst._conflitoJaResolvido(op, contexto); } catch (e) {}
+          if (!contextoAba.corresponde(contexto)) break;
+          if (saida === 'liberada') { liberadas++; continue; }
+          if (saida === 'reenviar') {
+            /* sem evidência do conflito no servidor: a gravação volta a ser
+               tentada — nada se apaga sem prova; havendo divergência, vira um
+               conflito novo, com a evidência guardada, e se decide uma vez */
+            try { await filaCifrada.marcarEstado(op.operationId, 'staged', 'conflito_sem_evidencia_reenviado'); } catch (e) {}
+          }
           conflitos++; entidadesFalhas.add(entidade);
           tokensProduzidos.forEach(x => dependenciasFalhas.add(x));
           continue;
@@ -793,9 +803,64 @@ const persistenciaCloudFirst = {
         } catch (e) {}
       });
       try { syncStatus.cloudState(persistenciaCloudFirst._pendentes.size ? 'queued' : 'synced'); } catch (e) {}
-      return { enviados, conflitos, bloqueados, indisponivel,
+      return { enviados, conflitos, bloqueados, liberadas, indisponivel,
         confirmados: Array.from(confirmados.values()), restantes: persistenciaCloudFirst._pendentes.size };
     } finally { persistenciaCloudFirst._drenando = false; }
+  },
+  /* A GRAVAÇÃO QUE ESPERAVA UM CONFLITO QUE JÁ FOI DECIDIDO.
+     Quando o envio esbarra numa versão mais nova, a gravação fica na fila
+     marcada "conflito" e a sua cópia vai, como evidência, para o conflito
+     preservado (sync_conflicts). Decidir o conflito — escolher a nuvem, ou
+     escolher este aparelho, que regrava como uma operação NOVA — nunca
+     retirava a operação antiga da fila. Ela ficava ali para sempre: segurava
+     o aviso "aguardam recibo" e bloqueava as gravações seguintes do mesmo
+     atendimento, que na drenagem vêm depois dela.
+     A fila só apaga com prova do servidor, e continua assim. A prova aqui é o
+     próprio servidor dizendo que os conflitos deste registro existem e estão
+     todos resolvidos: a evidência está lá, e a decisão também. Enquanto houver
+     conflito pendente (aqui ou lá), a operação espera. Sem nenhum registro do
+     conflito no servidor, ela não é apagada: volta a ser enviada.
+     Consulta no máximo uma vez a cada 10 minutos por operação. */
+  _consultasConflito: new Map(),
+  async _conflitoJaResolvido(op, contexto) {
+    /* a chave com que o conflito foi registrado (paciente usa a identidade) */
+    let id = '';
+    try { id = String(cloudRel.chaveLegada(op.module, op.payload && op.payload.item) || ''); } catch (e) {}
+    if (!id) id = String(op.entityId || '');
+    if (!id) return null;
+    const ultima = persistenciaCloudFirst._consultasConflito.get(op.operationId) || 0;
+    if (Date.now() - ultima < 600000) return null;
+    persistenciaCloudFirst._consultasConflito.set(op.operationId, Date.now());
+    /* decisão ainda não confirmada no servidor: espera */
+    const local = (cloudRel._conflitosLer() || []).some(x => x && x.status === 'pending' &&
+      String(x.legacyId) === id);
+    if (local) return null;
+    if (!(await cloud._garantirToken())) return null;
+    const org = contexto.organizationId;
+    if (!contextoAba.corresponde(contexto)) return null;
+    const c = cloud.config();
+    const r = await fetch(c.url + '/rest/v1/sync_conflicts?organization_id=eq.' + encodeURIComponent(org) +
+      '&record_legacy_id=eq.' + encodeURIComponent(id) + '&select=status', { headers: cloud._headers(true) });
+    if (!r.ok || !contextoAba.corresponde(contexto)) return null;
+    const rows = await r.json().catch(() => null);
+    if (!Array.isArray(rows)) return null;
+    if (!rows.length) return 'reenviar';
+    if (rows.some(x => x && x.status === 'pending')) return null;
+    const ok = await filaCifrada.confirmar(op.operationId, { remoteConfirmed: true, checksum: op.checksum });
+    return ok ? 'liberada' : null;
+  },
+  async listarFila() {
+    try {
+      const ops = await filaCifrada.listar();
+      return ops.filter(persistenciaCloudFirst._transporta).map(op => ({
+        mod: op.module, id: op.entityId,
+        acao: (op.payload && (op.payload.transport === persistenciaCloudFirst.TRANSPORTE_ADENDO ? 'adendo' : op.payload.action)) || 'gravação',
+        estado: (op.queue && op.queue.state) || 'staged',
+        tentativas: (op.queue && op.queue.attempts) || 0,
+        erro: (op.queue && op.queue.lastError) || '',
+        quando: op.createdAt || ''
+      }));
+    } catch (e) { return []; }
   },
   _tempoDesde(iso) {
     const ms = Date.now() - Date.parse(iso || '');
