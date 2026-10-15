@@ -1646,67 +1646,88 @@ await test('Endo/colono: medicações padrão com O₂ e SF, sem capnografia; pa
   await page.close();
 });
 
-/* 32) Financeiro — lançamento rápido avulso (caso sem consulta/ficha no sistema) */
-await test('Financeiro: lançamento rápido cria registro pendente sem precisar de ficha', async () => {
+/* 32) Financeiro — Novo registro é a MESMA janela do fechamento (avulso) */
+await test('Financeiro: Novo registro abre a janela do fechamento, sem campos repetidos, e lança sem ficha', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
     store.setList('financeiro', []);
     location.hash = '#financeiro';
     await new Promise(r => setTimeout(r, 400));
+    const barra = document.querySelector('#module-financeiro .action-bar').textContent;
+    out.semRapido = !barra.includes('Lançamento rápido') && barra.includes('Novo registro');
 
-    // botão na barra do módulo
-    out.temBotao = document.querySelector('#module-financeiro .action-bar').textContent.includes('Lançamento rápido');
+    fin.finalizacao.abrirAvulso();
+    await new Promise(r => setTimeout(r, 150));
+    const corpo = document.getElementById('modal-body');
+    out.mesmaJanela = !!document.getElementById('form-fin-final') && !!document.getElementById('fz-codigos-body')
+      && !!document.getElementById('fz-paciente') && !document.querySelector('[name="fz_gerar"]');
+    out.dataHoje = corpo.querySelector('[name="fz_data_av"]').value === utils.hojeISO();
+    /* uma pergunta, um campo */
+    out.semRepetidos = !corpo.querySelector('[name="fz_fator_acom"]')
+      && !corpo.querySelector('#fz-adicionais [value="apartamento"]')
+      && !corpo.querySelector('#fz-adicionais [value="fim_semana"]')
+      && !corpo.querySelector('#fz-adicionais [value="urgencia"]')
+      && !corpo.querySelector('#fz-adicionais [value="periodo_noturno"]')
+      && corpo.querySelectorAll('[name="fz_feriado"]').length <= 1;
+    out.temAmbulatorial = !!corpo.querySelector('[name="fz_acomodacao"] option[value="ambulatorial"]');
 
-    // modal com os campos essenciais (procedimentos agora são linhas múltiplas)
-    financeiro.lancamentoRapido();
-    await new Promise(r => setTimeout(r, 100));
-    out.camposOk = ['fin-rap-paciente', 'fin-rap-data', 'fin-rap-conv', 'fin-rap-valor', 'fin-rap-senha']
-      .every(id => !!document.getElementById(id)) && !!document.querySelector('#fin-rap-procs .fin-rap-proc');
-    out.dataHoje = document.getElementById('fin-rap-data').value === utils.hojeISO();
+    /* sem paciente não lança, e a janela fica */
+    fin.finalizacao.confirmar();
+    out.validaPaciente = store.list('financeiro').length === 0
+      && document.getElementById('modal-backdrop').classList.contains('show');
 
-    // preencher (2 procedimentos: 1º 100%, 2º com grau 50%) e lançar
-    document.getElementById('fin-rap-paciente').value = 'Paciente Avulso';
-    document.querySelector('#fin-rap-procs .fin-rap-proc').value = 'Colonoscopia';
-    financeiro._rapAddProc();
-    const linhas2 = document.querySelectorAll('#fin-rap-procs > div');
-    linhas2[1].querySelector('.fin-rap-proc').value = 'Endoscopia digestiva alta';
-    linhas2[1].querySelector('.fin-rap-grau').value = '50';
-    document.getElementById('fin-rap-conv').value = 'Unimed';
-    document.getElementById('fin-rap-valor').value = '800';
-    document.getElementById('fin-rap-senha').value = 'AUT123';
-    financeiro._salvarRapido();
-    await new Promise(r => setTimeout(r, 200));
+    corpo.querySelector('[name="fz_paciente"]').value = 'Paciente Avulso';
+    corpo.querySelector('[name="fz_senha"]').value = 'AUT123';
+    corpo.querySelector('[name="fz_convenio"]').value = 'Unimed';
+    fin.finalizacao.aoTrocarPlano();
+    const tr1 = document.querySelector('#fz-codigos-body tr');
+    tr1.querySelector('[name="fz_desc[]"]').value = 'Colonoscopia';
+    tr1.querySelector('[name="fz_unit[]"]').value = '500';
+    fin.finalizacao._recalcularLinha(tr1.querySelector('[name="fz_unit[]"]'));
+    const tr2 = fin.finalizacao.addLinha({ descricao: 'Endoscopia digestiva alta', unit: 300 });
+    fin.finalizacao._recalcularLinha(tr2.querySelector('[name="fz_unit[]"]'));
+    out.segundaNasce50 = tr2.querySelector('[name="fz_grau[]"]').value === '50';
+    /* ambulatorial: paga como enfermaria, ×1 */
+    corpo.querySelector('[name="fz_acomodacao"]').value = 'ambulatorial';
+    fin.finalizacao._aoTrocarAcomodacao();
+    out.ambulatorialX1 = fin.finalizacao._fatorAcomodacao() === 1;
+    corpo.querySelector('[name="fz_acomodacao"]').value = 'apartamento';
+    fin.finalizacao._aoTrocarAcomodacao();
+    out.apartamentoX2 = fin.finalizacao._fatorAcomodacao() === 2;
+    corpo.querySelector('[name="fz_urgencia"]').checked = true;
+    fin.finalizacao._somar();
+    fin.finalizacao.confirmar();
+    await new Promise(r => setTimeout(r, 250));
 
     const reg = store.list('financeiro')[0];
     out.criou = !!(reg && reg.paciente === 'Paciente Avulso' && reg.status === 'pendente'
-      && reg._origemTipo === 'avulso' && /Colonoscopia/i.test(reg.procedimento)
-      && reg.valor_previsto === '800' && reg.senha === 'AUT123' && reg.senha_data === utils.hojeISO());
-    /* a hierarquia automática escolhe o 100% pelo MAIOR PORTE — o que importa
-       é sair exatamente um código 100% e um 50% */
-    out.codigosComGrau = !!(reg && Array.isArray(reg.codigos) && reg.codigos.length === 2
-      && reg.codigos.filter(c => c.grau === 100).length === 1
-      && reg.codigos.filter(c => c.grau === 50).length === 1);
+      && reg._origemTipo === 'avulso' && /Colonoscopia/.test(reg.procedimento)
+      && reg.senha === 'AUT123' && reg.senha_data === utils.hojeISO() && reg.convenio === 'Unimed'
+      && reg.data_proc === utils.hojeISO());
+    out.codigosComGrau = !!(reg && reg.codigos.length === 2 && reg.codigos[0].grau === '100' && reg.codigos[1].grau === '50');
+    /* 500 + 150 = 650; ×2 apartamento; +30% urgência */
+    out.contaCerta = !!reg && Math.abs(Number(reg.valor_previsto) - 650 * 2 * 1.3) < 0.05
+      && Number(reg.fator_acomodacao) === 2 && reg.acomodacao === 'apartamento';
+    out.adicionaisDeduzidos = !!(reg && reg._adicionais && ['apartamento', 'urgencia', 'multiplos_proc']
+      .every(k => reg._adicionais.itens.indexOf(k) >= 0));
     out.fechouModal = !document.getElementById('modal-backdrop').classList.contains('show');
-
-    // sem paciente → não lança (avisa)
-    financeiro.lancamentoRapido();
-    await new Promise(r => setTimeout(r, 100));
-    document.getElementById('fin-rap-paciente').value = '';
-    financeiro._salvarRapido();
-    out.validaPaciente = store.list('financeiro').length === 1;
-    modal.close();
-
     store.setList('financeiro', []);
     return out;
   });
-  assert(r.temBotao, 'a barra do Financeiro deveria ter o botão Lançamento rápido');
-  assert(r.camposOk, 'o modal deveria ter paciente, data, procedimento, convênio, valor e senha');
-  assert(r.dataHoje, 'a data deveria vir pré-preenchida com hoje');
-  assert(r.criou, 'o lançamento deveria criar registro pendente/avulso com os dados informados');
-  assert(r.codigosComGrau, 'os 2 procedimentos deveriam virar códigos com grau 100% e 50%');
-  assert(r.fechouModal, 'lançar deveria fechar o modal');
-  assert(r.validaPaciente, 'sem paciente não deveria lançar');
+  assert(r.semRapido, 'a barra do Financeiro não tem mais o Lançamento rápido; tem o Novo registro');
+  assert(r.mesmaJanela, 'Novo registro abre a janela de faturamento do fechamento, com paciente, sem a pergunta Sim/Não');
+  assert(r.dataHoje, 'a data já vem com hoje');
+  assert(r.semRepetidos, 'apartamento, feriado, urgência e noturno não são perguntados duas vezes');
+  assert(r.temAmbulatorial, 'a acomodação tem ambulatorial');
+  assert(r.validaPaciente, 'sem paciente não lança e a janela continua aberta');
+  assert(r.segundaNasce50, 'o segundo código nasce 50%');
+  assert(r.ambulatorialX1 && r.apartamentoX2, 'ambulatorial cobra ×1 e apartamento ×2');
+  assert(r.criou, 'o lançamento avulso nasce pendente com paciente, procedimento, plano, data e senha');
+  assert(r.codigosComGrau, 'os códigos saem com o grau de cada linha');
+  assert(r.contaCerta, 'o valor previsto é a conta da janela: códigos × acomodação + urgência');
+  assert(r.adicionaisDeduzidos, 'os adicionais que são consequência de outro campo entram sozinhos');
+  assert(r.fechouModal, 'lançar fecha a janela');
   await page.close();
 });
 
@@ -2183,21 +2204,22 @@ await test('CBHPM: vários códigos no mesmo campo (➕/x2) em todo o app e auxi
     anestesia.equipeAux.restaurar([]);
     out.auxLimpa = anestesia.equipeAux.coletar().length === 0;
 
-    /* — lançamento rápido entende "código + código x2" no mesmo campo — */
+    /* — a janela de lançamento entende "código + código x2" no mesmo campo — */
     store.setList('financeiro', []);
-    financeiro.lancamentoRapido();
+    fin.finalizacao.abrirAvulso({ paciente: 'Paciente Mult', data_proc: '2026-07-30' });
     await new Promise(r => setTimeout(r, 150));
-    document.getElementById('fin-rap-paciente').value = 'Paciente Mult';
-    document.getElementById('fin-rap-data').value = '2026-07-30';
-    document.querySelector('#fin-rap-procs .fin-rap-proc').value = '3.01.01.97-2 + 3.01.01.01-8 x2';
-    financeiro._salvarRapido();
+    const desc = document.querySelector('#fz-codigos-body [name="fz_desc[]"]');
+    desc.value = '3.01.01.97-2';
+    desc.dispatchEvent(new Event('input', { bubbles: true }));
+    desc.dispatchEvent(new Event('change', { bubbles: true }));
+    const tr2m = fin.finalizacao.addLinha({ codigo: '3.01.01.01-8', qtd: 2 });
+    fin.finalizacao.confirmar();
     await new Promise(r => setTimeout(r, 150));
-    const fin = store.list('financeiro')[0] || {};
-    const cods = fin.codigos || [];
-    const c97 = cods.find(c => c.codigo === '3.01.01.97-2');
-    const c01 = cods.find(c => c.codigo === '3.01.01.01-8');
-    out.multQtd = cods.length === 2 && !!c97 && !!c01 && c01.qtd === 2
-      && c97.grau === 100 && c01.grau === 50;   /* maior porte (10A) principal */
+    const fin1 = store.list('financeiro')[0] || {};
+    const cods = fin1.codigos || [];
+    out.multQtd = cods.length === 2 && cods[1].codigo === '3.01.01.01-8' && cods[1].qtd === 2
+      && cods[0].grau === '100' && cods[1].grau === '50' && fin1.data_proc === '2026-07-30';
+    void tr2m;
     store.setList('financeiro', []);
     modal.close();
     return out;
@@ -2212,7 +2234,7 @@ await test('CBHPM: vários códigos no mesmo campo (➕/x2) em todo o app e auxi
   assert(r.auxColeta, 'os auxiliares deveriam ser coletados com a ficha');
   assert(r.auxImpressao, 'os auxiliares deveriam sair na impressão da ficha');
   assert(r.auxLimpa, 'restaurar([]) deveria limpar os auxiliares');
-  assert(r.multQtd, 'lançamento rápido deveria virar 2 códigos, com x2 → Qtd 2 e hierarquia de grau');
+  assert(r.multQtd, 'a janela de lançamento deveria gravar 2 códigos, com Qtd 2 e grau 100/50');
   await page.close();
 });
 
@@ -15667,8 +15689,12 @@ await test('Finalizar: uma janela só — gerar ou não, com plano, tabela do pl
       procedimento: { data: hoje, descricao: 'Artroplastia', codigo: '3.07.15.05-0' }, _finalizado: true });
     fin.finalizacao.abrir('anestesia', an);
     await new Promise(res => setTimeout(res, 300));
-    out.temAdicionais = document.querySelectorAll('#fz-adicionais [name="fz_adic"]').length >= 5;
-    const ck = document.querySelector('#fz-adicionais [name="fz_adic"][value="urgencia"]');
+    /* só os adicionais que não têm outro campo na janela; urgência é o campo
+       Urgência, e vira adicional sozinha */
+    out.temAdicionais = document.querySelectorAll('#fz-adicionais [name="fz_adic"]').length >= 3
+      && !document.querySelector('#fz-adicionais [name="fz_adic"][value="urgencia"]')
+      && !document.querySelector('#fz-adicionais [name="fz_adic"][value="apartamento"]');
+    const ck = document.querySelector('[name="fz_urgencia"]');
     if (ck) ck.checked = true;
     fin.finalizacao.confirmar();
     await new Promise(res => setTimeout(res, 300));
@@ -16041,7 +16067,7 @@ await test('Geração do financeiro puxa cadastro e ficha — e o que faltar dá
     out.mostraACarteirinha = /0286777/.test(corpo) && /111\.222\.333-44/.test(corpo);
     const f = document.getElementById('form-fin-final');
     out.puxouAAcomodacao = f.querySelector('[name="fz_acomodacao"]').value === 'apartamento'
-      && Number(f.querySelector('[name="fz_fator_acom"]').value) === 2;
+      && fin.finalizacao._fatorAcomodacao() === 2;
 
     /* 3) acomodação e horário são multiplicadores DIFERENTES e se somam */
     const base = [...document.querySelectorAll('#fz-codigos-body [name="fz_prev[]"]')]
@@ -16072,9 +16098,11 @@ await test('Geração do financeiro puxa cadastro e ficha — e o que faltar dá
     out.temOsDoisFatores = !!ff.querySelector('[name="fator_acomodacao"]')
       && !!ff.querySelector('[name="fator_majoracao"]')
       && Number(ff.querySelector('[name="fator_majoracao"]').value) === 3;
-    out.temOsAdicionais = document.querySelectorAll('#fin-adicionais [name="fin_adic"]').length >= 5;
-    /* marcar um adicional aqui e salvar — a janela não é a única chance */
-    const ck = document.querySelector('#fin-adicionais [name="fin_adic"][value="urgencia"]');
+    out.temOsAdicionais = document.querySelectorAll('#fin-adicionais [name="fin_adic"]').length >= 3
+      && !document.querySelector('#fin-adicionais [name="fin_adic"][value="urgencia"]');
+    /* marcar urgência aqui e salvar — a janela não é a única chance; o
+       adicional sai do próprio campo, sem segunda caixinha */
+    const ck = ff.querySelector('[name="urgencia"]');
     ck.checked = true;
     financeiro.salvar();
     await new Promise(res => setTimeout(res, 400));

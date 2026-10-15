@@ -133,7 +133,7 @@ assert.doesNotMatch(historicoDoc, /<img src="' \+ (?:url|d\.dataurl) \+ '"/,
 const financeiroOrigem = between(source, '  renderDocsOrigem(item)', '\n  async verDocOrigem(i)');
 assert.match(financeiroOrigem, /utils\.escapeAttr\(d\.thumb \|\| d\.dataurl\)/,
   'miniatura herdada precisa ser segura ao compor o HTML');
-const financeiroVerOrigem = between(source, '  async verDocOrigem(i)', '\n\n  \/\* ---------- LANÇAMENTO RÁPIDO');
+const financeiroVerOrigem = between(source, '  async verDocOrigem(i)', '\n\n  /* A linha inteira abre o lançamento.');
 assert.doesNotMatch(financeiroVerOrigem, /<img src="' \+ (?:url|d\.dataurl) \+ '"/,
   'visualização financeira também precisa escapar a origem de imagens');
 

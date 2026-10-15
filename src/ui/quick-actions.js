@@ -81,8 +81,7 @@ const quickActions = {
     } else if (mod === 'financeiro') {
       window.location.hash = 'financeiro';
       setTimeout(() => {
-        financeiro.editar(null);
-        autocomplete._aplicarPaciente('form-financeiro', p);
+        fin.finalizacao.abrirAvulso({ paciente: p.nome || '', convenio: p.plano || '' });
       }, 250);
     } else if (mod === 'agenda') {
       window.location.hash = 'agenda';
