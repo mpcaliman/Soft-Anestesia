@@ -1376,6 +1376,8 @@ ${TAG_CLOSE_HTML}`;
           ${printPreview._field('Sexo', d.sexo)}
           ${printPreview._field('Data avaliação', utils.formatarData(d.data))}
           ${printPreview._field('Senha / Autorização', d.senha)}
+          ${printPreview._field('CPF', d.cpf)}
+          ${printPreview._field('Convênio', d.convenio)}
         </div>
         <div class="pp-grid">
           ${printPreview._field('Cirurgia', printPreview._cirurgiaDaPre(d))}
@@ -1649,6 +1651,7 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._field('Prontuário', p.prontuario)}
         ${printPreview._field('Convênio', p.convenio)}
         ${printPreview._field('Carteirinha', p.carteirinha)}
+        ${printPreview._field('CPF', p.cpf)}
         ${printPreview._field('Senha / Autorização', p.senha)}
         ${printPreview._field('Procedência / acomodação', p.acomodacao)}
       </div>

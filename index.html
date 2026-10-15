@@ -4846,7 +4846,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-15d</b><br>
+    v7.1 · build <b id="build-tag">2026-10-15e</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -5126,6 +5126,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
           <div class="field col-3 required"><label>Data da avaliação <span class="req">*</span></label><input type="date" name="data" data-required></div>
           <div class="field col-3"><label>Senha / Autorização do plano</label><input type="text" name="senha" placeholder="Senha do convênio"></div>
           <div class="field col-3"><label>Data de nascimento</label><input type="date" name="nasc" oninput="pre.calcIdade()"></div>
+          <div class="field col-3"><label>CPF</label><input type="text" name="cpf" inputmode="numeric" autocomplete="off"></div>
           <div class="field col-2"><label>Idade</label><input type="text" name="idade"></div>
           <div class="field col-2"><label>Sexo</label>
             <select name="sexo" onchange="pre._calcIMC()"><option value="">—</option><option>Masculino</option><option>Feminino</option><option>Outro</option></select>
@@ -5176,11 +5177,9 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
                nascia sem pagador: não dava para saber se era plano, particular
                ou SUS, e a pendência de convênio não tinha como se resolver. -->
           <div class="field col-3"><label>Convênio / plano</label>
-            <select name="convenio">
-              <option value="">—</option><option>Particular</option><option>SUS</option><option>Unimed</option>
-              <option>Bradesco Saúde</option><option>Amil</option><option>SulAmérica</option>
-              <option>Notredame Intermédica</option><option>Hapvida</option><option>Outro</option>
-            </select>
+            <!-- texto, não lista fechada: o plano do cadastro ("Unimed Vitória",
+                 "Cassi"…) era recusado calado por um select sem essa opção -->
+            <input type="text" name="convenio" autocomplete="off" placeholder="Particular, Unimed…">
           </div>
         </div>
       </div>
@@ -5631,11 +5630,9 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <select name="sexo"><option value="">—</option><option>Masculino</option><option>Feminino</option><option>Outro</option></select>
           </div>
           <div class="field col-3"><label>Convênio</label>
-            <select name="convenio">
-              <option value="">—</option><option>Particular</option><option>SUS</option><option>Unimed</option>
-              <option>Bradesco Saúde</option><option>Amil</option><option>SulAmérica</option>
-              <option>Notredame Intermédica</option><option>Hapvida</option><option>Outro</option>
-            </select>
+            <!-- texto, não lista fechada: o plano do cadastro ("Unimed Vitória",
+                 "Cassi"…) era recusado calado por um select sem essa opção -->
+            <input type="text" name="convenio" autocomplete="off" placeholder="Particular, Unimed…">
           </div>
           <!-- Consulta geral e consulta de dor cobram o MESMO código CBHPM. O que
                separa uma da outra no relatório é este campo — e ele precisa ser
@@ -5990,9 +5987,10 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
           <div class="field col-3"><label>Prontuário / Registro</label><input type="text" name="paciente_prontuario"></div>
           <div class="field col-3"><label>Nome da mãe</label><input type="text" name="paciente_mae"></div>
           <div class="field col-3"><label>Convênio</label>
-            <select name="paciente_convenio"><option value="">—</option><option>Particular</option><option>SUS</option><option>Unimed</option><option>Bradesco Saúde</option><option>Amil</option><option>SulAmérica</option><option>Notredame Intermédica</option><option>Hapvida</option><option>Outro</option></select>
+            <input type="text" name="paciente_convenio" autocomplete="off" placeholder="Particular, Unimed…">
           </div>
           <div class="field col-3"><label>Carteirinha</label><input type="text" name="paciente_carteirinha"></div>
+          <div class="field col-3"><label>CPF</label><input type="text" name="paciente_cpf" inputmode="numeric" autocomplete="off"></div>
           <div class="field col-3"><label>Hospital / clínica</label><input type="text" name="local_hospital"></div>
           <div class="field col-3"><label>Procedência / origem</label><select name="origem"><option value="">—</option><option>Enfermaria</option><option>Apartamento</option><option>UTI</option><option>Emergência</option><option>Centro cirúrgico</option><option>Outro</option></select></div>
           <div class="field col-4"><label>Cirurgião</label>
@@ -9466,7 +9464,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <div class="field col-6"><label>Cirurgião / profissional</label><input type="text" name="cirurgiao"></div>
             <div class="field col-6"><label>Local</label><input type="text" name="local"></div>
             <div class="field col-6"><label>Convênio</label>
-              <select name="convenio"><option value="">—</option><option>Particular</option><option>SUS</option><option>Unimed</option><option>Bradesco Saúde</option><option>Amil</option><option>SulAmérica</option><option>Notredame Intermédica</option><option>Hapvida</option><option>Outro</option></select>
+              <input type="text" name="convenio" autocomplete="off" placeholder="Particular, Unimed…">
             </div>
             <div class="field col-12"><label>Observações</label><textarea name="observacoes" rows="2"></textarea></div>
           </div>
@@ -38274,6 +38272,7 @@ const anestesia = {
         imc: v('paciente_imc'), prontuario: v('paciente_prontuario'),
         nome_mae: v('paciente_mae'), convenio: v('paciente_convenio'),
         carteirinha: v('paciente_carteirinha'), senha: v('paciente_senha'),
+        cpf: v('paciente_cpf'),
         /* Procedência/acomodação (apartamento, enfermaria, UTI...): estava no
            formulário mas não era salva — saía da tela a cada recarga e não
            chegava ao financeiro nem à impressão. */
@@ -38456,6 +38455,7 @@ const anestesia = {
     set('paciente_altura', p.altura); set('paciente_prontuario', p.prontuario);
     set('paciente_mae', p.nome_mae); set('paciente_convenio', p.convenio);
     set('paciente_carteirinha', p.carteirinha); set('paciente_senha', p.senha);
+    set('paciente_cpf', p.cpf);
     set('origem', p.acomodacao || p.origem);
 
     const pr = d.procedimento || {};

@@ -272,12 +272,38 @@ const autocomplete = {
         const el = f.querySelector('[name="' + nome + '"]');
         if (!el) continue;
         if (el.value) return;            /* o que está na tela é dele */
-        el.value = v; n++;
-        try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+        if (!autocomplete._definirValor(el, v)) continue;
+        n++;
         return;
       }
     });
     return n;
+  },
+  /* O CAMPO RECUSAVA CALADO.
+     Campo de data só aceita aaaa-mm-dd: um nascimento guardado "15/03/1980"
+     virava campo vazio, sem erro. Lista fechada só aceita uma das opções: um
+     plano "Unimed Vitória" virava "—". Aqui o valor é convertido para o que o
+     campo entende, e na lista fechada que não tem a opção ela é acrescentada.
+     Devolve se o valor de fato ficou no campo. */
+  _definirValor(el, v) {
+    let val = String(v == null ? '' : v).trim();
+    if (!val) return false;
+    if (el.type === 'date') {
+      const br = val.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+      if (br) val = br[3] + '-' + br[2].padStart(2, '0') + '-' + br[1].padStart(2, '0');
+      else if (/^\d{4}-\d{2}-\d{2}/.test(val)) val = val.slice(0, 10);
+    }
+    if (el.tagName === 'SELECT') {
+      const norm = x => String(x || '').trim().toLowerCase();
+      const op = Array.from(el.options).find(o => norm(o.value) === norm(val) || norm(o.text) === norm(val));
+      if (op) val = op.value;
+      else { const o = document.createElement('option'); o.value = val; o.textContent = val; el.appendChild(o); }
+    }
+    el.value = val;
+    if (String(el.value) !== val) return false;
+    try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+    try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {}
+    return true;
   },
   _aplicarPaciente(formId, p) {
     if (!p) return;
@@ -384,7 +410,13 @@ const autocomplete = {
               .map(v => ({ value: v, label: v, meta: 'usado antes' }));
           }
         } catch (e) {}
-        return [...cadastros, ...hist];
+        /* convênio: os planos de sempre continuam sugeridos, como na lista antiga */
+        const padrao = catKey === 'cad_convenios'
+          ? ['Particular', 'SUS', 'Unimed', 'Bradesco Saúde', 'Amil', 'SulAmérica', 'Notredame Intermédica', 'Hapvida']
+            .filter(v => !cadastros.concat(hist).some(c => (c.label || '').toLowerCase().trim() === v.toLowerCase()))
+            .map(v => ({ value: v, label: v, meta: '' }))
+          : [];
+        return [...cadastros, ...hist, ...padrao];
       },
       (it) => { input.value = it.label; }
     );
@@ -500,7 +532,7 @@ const autocomplete = {
     /* Procedimento */
     document.querySelectorAll('[name="procedimento"], [name="cirurgia"]').forEach(el => autocomplete.attachSimples(el, 'cad_procedimentos'));
     /* Convênio (textbox livre em alguns lugares) */
-    document.querySelectorAll('[name="convenio"]').forEach(el => {
+    document.querySelectorAll('[name="convenio"], [name="paciente_convenio"]').forEach(el => {
       if (el.tagName === 'INPUT') autocomplete.attachSimples(el, 'cad_convenios');
     });
   },

@@ -1654,8 +1654,14 @@ const linker = {
       el.value = opt.value;
       return true;
     }
+    /* campo de data só aceita aaaa-mm-dd: "15/03/1980" virava vazio, calado */
+    if (el.type === 'date') {
+      const br = valor.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+      if (br) valor = br[3] + '-' + br[2].padStart(2, '0') + '-' + br[1].padStart(2, '0');
+      else if (/^\d{4}-\d{2}-\d{2}/.test(valor.trim())) valor = valor.trim().slice(0, 10);
+    }
     el.value = valor;
-    return true;
+    return String(el.value) === valor;
   },
 
   _LABEL_MOD: {
@@ -1724,7 +1730,9 @@ const linker = {
         nome: 'paciente_nome', nascimento: 'paciente_nasc', idade: 'paciente_idade',
         sexo: 'paciente_sexo', peso: 'paciente_peso', altura: 'paciente_altura',
         cpf: 'paciente_cpf', prontuario: 'paciente_prontuario',
-        convenio: 'paciente_convenio', plano: 'paciente_plano', matricula: 'paciente_matricula',
+        /* o cadastro chama de `plano`; a ficha, de `paciente_convenio` — e
+           `paciente_plano` nunca existiu no formulário */
+        convenio: 'paciente_convenio', plano: ['paciente_convenio', 'paciente_plano'], matricula: 'paciente_matricula',
         /* a carteirinha estava fora do mapa: existe no cadastro e no formulário,
            mas nunca era trazida — e é ela que vai na guia */
         carteirinha: ['paciente_carteirinha', 'carteirinha'],
@@ -1755,7 +1763,7 @@ const linker = {
          `consulta` chamam de `cpf`. Aceitar os dois apelidos é o que faz o
          dado do cadastro chegar nos três. */
       cpf: ['cpf', 'documento'], prontuario: 'prontuario',
-      convenio: 'convenio', plano: 'plano', matricula: 'matricula',
+      convenio: 'convenio', plano: ['convenio', 'plano'], matricula: 'matricula',
       carteirinha: 'carteirinha',
       acomodacao: ['acomodacao', 'origem'],
       telefone: 'telefone', email: 'email', endereco: 'endereco'

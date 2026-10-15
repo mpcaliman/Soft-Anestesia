@@ -3658,6 +3658,50 @@ await test('Pré: datas dos exames são digitáveis, salvam e saem na impressão
   await page.close();
 });
 
+/* Item 14: escolher o paciente no próprio módulo traz plano, CPF e nascimento */
+await test('Escolher o paciente na pré e na ficha traz plano, CPF e nascimento — mesmo fora da lista e em data brasileira', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('pacientes', []);
+    const pac = store.save('pacientes', { nome: 'Marta Cadastro Completo', plano: 'Unimed Vitória',
+      cpf: '123.456.789-00', nascimento: '15/03/1980', carteirinha: '0099' });
+    const item = autocomplete.listaPacientes().find(x => x.label === 'Marta Cadastro Completo');
+    out.naLista = !!item;
+
+    ui.navegar('pre');
+    await new Promise(res => setTimeout(res, 300));
+    try { pre.novo && pre.novo(); } catch (e) {}
+    autocomplete._aplicarPaciente('form-pre', item ? item.data : pac);
+    await new Promise(res => setTimeout(res, 150));
+    const fp = document.getElementById('form-pre');
+    const vp = n => (fp.querySelector('[name="' + n + '"]') || {}).value || '';
+    out.pre = { convenio: vp('convenio'), cpf: vp('cpf'), nasc: vp('nasc') };
+
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 300));
+    try { anestesia.novo && anestesia.novo(); } catch (e) {}
+    autocomplete._aplicarPaciente('form-anestesia', item ? item.data : pac);
+    await new Promise(res => setTimeout(res, 150));
+    const fa = document.getElementById('form-anestesia');
+    const va = n => (fa.querySelector('[name="' + n + '"]') || {}).value || '';
+    out.ficha = { convenio: va('paciente_convenio'), cpf: va('paciente_cpf'), nasc: va('paciente_nasc') };
+    const estr = anestesia.coletarEstruturado();
+    out.cpfGravado = estr.paciente.cpf === '123.456.789-00';
+    out.cpfImpresso = printPreview._buildAnestesia().includes('123.456.789-00');
+    return out;
+  });
+  assert(r.naLista, 'o paciente do cadastro aparece na busca');
+  assert(r.pre.convenio === 'Unimed Vitória', 'pré: o plano do cadastro entra mesmo fora da lista antiga (veio ' + JSON.stringify(r.pre.convenio) + ')');
+  assert(r.pre.cpf === '123.456.789-00', 'pré: o CPF entra (veio ' + JSON.stringify(r.pre.cpf) + ')');
+  assert(r.pre.nasc === '1980-03-15', 'pré: nascimento em dd/mm/aaaa entra no campo de data (veio ' + JSON.stringify(r.pre.nasc) + ')');
+  assert(r.ficha.convenio === 'Unimed Vitória', 'ficha: o plano entra (veio ' + JSON.stringify(r.ficha.convenio) + ')');
+  assert(r.ficha.cpf === '123.456.789-00', 'ficha: o CPF entra (veio ' + JSON.stringify(r.ficha.cpf) + ')');
+  assert(r.ficha.nasc === '1980-03-15', 'ficha: o nascimento entra (veio ' + JSON.stringify(r.ficha.nasc) + ')');
+  assert(r.cpfGravado && r.cpfImpresso, 'o CPF é gravado na ficha e sai na impressão');
+  await page.close();
+});
+
 /* 59) Ficha de anestesia aparece no Meu dia e no prontuário (não só a SRPA) */
 await test('Dashboard e prontuário mostram a ficha de anestesia junto da SRPA', async () => {
   const page = await novaPagina();
