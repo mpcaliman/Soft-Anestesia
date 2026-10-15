@@ -1154,8 +1154,9 @@ for (const [mod, { method, builder }] of realPrintBuilders) {
   renderingCurrentVersion = true;
   try { actualPrint.abrir(); actualPrint.imprimir(); } finally { renderingCurrentVersion = false; }
   if (mod !== 'documentos') assert(printedDocument.includes(escaped(nome)), mod + ': identificação deve vir da versão aceita');
-  assert(printedDocument.includes('VERSÃO ATUAL — RETIFICADA') && printedDocument.includes('autor-sintetico'),
-    mod + ': documento precisa identificar a retificação aceita e sua autoria');
+  /* uma linha no rodapé: retificado e quando; as correções estão no corpo */
+  assert(printedDocument.includes('Documento retificado em') && !printedDocument.includes('VERSÃO ATUAL — RETIFICADA'),
+    mod + ': documento precisa dizer que foi retificado, sem inventário de versões');
   assert(!printedDocument.includes('RÓTULO DE AUTOR FORJADO'), mod + ': carimbo retificado deve usar autoria canônica do servidor');
   assert(printedDocument.includes('retificação(ões) em conflito') && printedDocument.includes('pendente(s) de confirmação'),
     mod + ': conflito e pendência devem ser explícitos');
@@ -1177,10 +1178,10 @@ assert.equal(plottedPoints.length, 2, 'ficha e SRPA desenham somente o ponto vig
 for (const point of plottedPoints) assert.equal(point.y, 138, 'FC 80 confirmada deve alimentar o gráfico, sem coleta do formulário');
 actualPrint.abrirPreTermo(); actualPrint.imprimir();
 assert(printedDocument.includes('Texto aceito termo') && printedDocument.includes('Alergia aceita pre'));
-assert.equal((printedDocument.match(/VERSÃO ATUAL — RETIFICADA/g) || []).length, 2, 'cada parte do conjunto identifica sua própria revisão aceita');
+assert.equal((printedDocument.match(/Documento retificado em/g) || []).length, 2, 'cada parte do conjunto identifica sua própria revisão aceita');
 actualPrint.abrirConjunto(); actualPrint.imprimir();
 assert(printedDocument.includes('Paciente sintético vigente anestesia') && printedDocument.includes('Paciente sintético vigente recuperacao'));
-assert.equal((printedDocument.match(/VERSÃO ATUAL — RETIFICADA/g) || []).length, 2);
+assert.equal((printedDocument.match(/Documento retificado em/g) || []).length, 2);
 
 /* Fichas finalizadas antigas guardavam somente as seções preenchidas. A
    impressão conjunta real deve preservar esses campos/adendos e deixar as
@@ -1210,7 +1211,7 @@ for (const complemento of [{}, { pre_anestesico: null, tecnica: null, monitoriza
   assert(printedDocument.includes('Autor sintético da ficha') && printedDocument.includes('Autor sintético da SRPA'));
   assert(printedDocument.includes('Observação sintética original da SRPA') && printedDocument.includes('2ª parte — Recuperação pós-anestésica'));
   assert.equal((printedDocument.match(/INFORMAÇÕES ACRESCENTADAS APÓS A FINALIZAÇÃO/g) || []).length, 2);
-  assert(!printedDocument.includes('Paciente A') && !printedDocument.includes('VERSÃO ATUAL — RETIFICADA'),
+  assert(!printedDocument.includes('Paciente A') && !printedDocument.includes('Documento retificado'),
     'seções ausentes não podem herdar paciente do formulário nem retificações de outro registro');
   assert.equal(JSON.stringify([ficha, srpa]), antes, 'normalização de apresentação preserva os originais esparsos');
 }
@@ -1235,7 +1236,7 @@ assert.equal(JSON.stringify(legacyFicha), legacyBeforePrinting, 'migração de a
 printForms.get('pre')._id.value = '';
 actualPrintSandbox.utils.formData = () => ({ nome: 'Paciente sintético ainda não salvo' });
 actualPrintSandbox.state.currentModule = 'pre'; actualPrint.abrir(); actualPrint.imprimir();
-assert(printedDocument.includes('Paciente sintético ainda não salvo') && !printedDocument.includes('VERSÃO ATUAL — RETIFICADA'),
+assert(printedDocument.includes('Paciente sintético ainda não salvo') && !printedDocument.includes('Documento retificado'),
   'documento novo lê seu formulário sem herdar a projeção do paciente anterior');
 
 /* O nome do PDF também contém dado clínico. As reservas só existem na memória

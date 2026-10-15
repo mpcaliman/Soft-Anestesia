@@ -1646,67 +1646,88 @@ await test('Endo/colono: medicações padrão com O₂ e SF, sem capnografia; pa
   await page.close();
 });
 
-/* 32) Financeiro — lançamento rápido avulso (caso sem consulta/ficha no sistema) */
-await test('Financeiro: lançamento rápido cria registro pendente sem precisar de ficha', async () => {
+/* 32) Financeiro — Novo registro é a MESMA janela do fechamento (avulso) */
+await test('Financeiro: Novo registro abre a janela do fechamento, sem campos repetidos, e lança sem ficha', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     const out = {};
     store.setList('financeiro', []);
     location.hash = '#financeiro';
     await new Promise(r => setTimeout(r, 400));
+    const barra = document.querySelector('#module-financeiro .action-bar').textContent;
+    out.semRapido = !barra.includes('Lançamento rápido') && barra.includes('Novo registro');
 
-    // botão na barra do módulo
-    out.temBotao = document.querySelector('#module-financeiro .action-bar').textContent.includes('Lançamento rápido');
+    fin.finalizacao.abrirAvulso();
+    await new Promise(r => setTimeout(r, 150));
+    const corpo = document.getElementById('modal-body');
+    out.mesmaJanela = !!document.getElementById('form-fin-final') && !!document.getElementById('fz-codigos-body')
+      && !!document.getElementById('fz-paciente') && !document.querySelector('[name="fz_gerar"]');
+    out.dataHoje = corpo.querySelector('[name="fz_data_av"]').value === utils.hojeISO();
+    /* uma pergunta, um campo */
+    out.semRepetidos = !corpo.querySelector('[name="fz_fator_acom"]')
+      && !corpo.querySelector('#fz-adicionais [value="apartamento"]')
+      && !corpo.querySelector('#fz-adicionais [value="fim_semana"]')
+      && !corpo.querySelector('#fz-adicionais [value="urgencia"]')
+      && !corpo.querySelector('#fz-adicionais [value="periodo_noturno"]')
+      && corpo.querySelectorAll('[name="fz_feriado"]').length <= 1;
+    out.temAmbulatorial = !!corpo.querySelector('[name="fz_acomodacao"] option[value="ambulatorial"]');
 
-    // modal com os campos essenciais (procedimentos agora são linhas múltiplas)
-    financeiro.lancamentoRapido();
-    await new Promise(r => setTimeout(r, 100));
-    out.camposOk = ['fin-rap-paciente', 'fin-rap-data', 'fin-rap-conv', 'fin-rap-valor', 'fin-rap-senha']
-      .every(id => !!document.getElementById(id)) && !!document.querySelector('#fin-rap-procs .fin-rap-proc');
-    out.dataHoje = document.getElementById('fin-rap-data').value === utils.hojeISO();
+    /* sem paciente não lança, e a janela fica */
+    fin.finalizacao.confirmar();
+    out.validaPaciente = store.list('financeiro').length === 0
+      && document.getElementById('modal-backdrop').classList.contains('show');
 
-    // preencher (2 procedimentos: 1º 100%, 2º com grau 50%) e lançar
-    document.getElementById('fin-rap-paciente').value = 'Paciente Avulso';
-    document.querySelector('#fin-rap-procs .fin-rap-proc').value = 'Colonoscopia';
-    financeiro._rapAddProc();
-    const linhas2 = document.querySelectorAll('#fin-rap-procs > div');
-    linhas2[1].querySelector('.fin-rap-proc').value = 'Endoscopia digestiva alta';
-    linhas2[1].querySelector('.fin-rap-grau').value = '50';
-    document.getElementById('fin-rap-conv').value = 'Unimed';
-    document.getElementById('fin-rap-valor').value = '800';
-    document.getElementById('fin-rap-senha').value = 'AUT123';
-    financeiro._salvarRapido();
-    await new Promise(r => setTimeout(r, 200));
+    corpo.querySelector('[name="fz_paciente"]').value = 'Paciente Avulso';
+    corpo.querySelector('[name="fz_senha"]').value = 'AUT123';
+    corpo.querySelector('[name="fz_convenio"]').value = 'Unimed';
+    fin.finalizacao.aoTrocarPlano();
+    const tr1 = document.querySelector('#fz-codigos-body tr');
+    tr1.querySelector('[name="fz_desc[]"]').value = 'Colonoscopia';
+    tr1.querySelector('[name="fz_unit[]"]').value = '500';
+    fin.finalizacao._recalcularLinha(tr1.querySelector('[name="fz_unit[]"]'));
+    const tr2 = fin.finalizacao.addLinha({ descricao: 'Endoscopia digestiva alta', unit: 300 });
+    fin.finalizacao._recalcularLinha(tr2.querySelector('[name="fz_unit[]"]'));
+    out.segundaNasce50 = tr2.querySelector('[name="fz_grau[]"]').value === '50';
+    /* ambulatorial: paga como enfermaria, ×1 */
+    corpo.querySelector('[name="fz_acomodacao"]').value = 'ambulatorial';
+    fin.finalizacao._aoTrocarAcomodacao();
+    out.ambulatorialX1 = fin.finalizacao._fatorAcomodacao() === 1;
+    corpo.querySelector('[name="fz_acomodacao"]').value = 'apartamento';
+    fin.finalizacao._aoTrocarAcomodacao();
+    out.apartamentoX2 = fin.finalizacao._fatorAcomodacao() === 2;
+    corpo.querySelector('[name="fz_urgencia"]').checked = true;
+    fin.finalizacao._somar();
+    fin.finalizacao.confirmar();
+    await new Promise(r => setTimeout(r, 250));
 
     const reg = store.list('financeiro')[0];
     out.criou = !!(reg && reg.paciente === 'Paciente Avulso' && reg.status === 'pendente'
-      && reg._origemTipo === 'avulso' && /Colonoscopia/i.test(reg.procedimento)
-      && reg.valor_previsto === '800' && reg.senha === 'AUT123' && reg.senha_data === utils.hojeISO());
-    /* a hierarquia automática escolhe o 100% pelo MAIOR PORTE — o que importa
-       é sair exatamente um código 100% e um 50% */
-    out.codigosComGrau = !!(reg && Array.isArray(reg.codigos) && reg.codigos.length === 2
-      && reg.codigos.filter(c => c.grau === 100).length === 1
-      && reg.codigos.filter(c => c.grau === 50).length === 1);
+      && reg._origemTipo === 'avulso' && /Colonoscopia/.test(reg.procedimento)
+      && reg.senha === 'AUT123' && reg.senha_data === utils.hojeISO() && reg.convenio === 'Unimed'
+      && reg.data_proc === utils.hojeISO());
+    out.codigosComGrau = !!(reg && reg.codigos.length === 2 && reg.codigos[0].grau === '100' && reg.codigos[1].grau === '50');
+    /* 500 + 150 = 650; ×2 apartamento; +30% urgência */
+    out.contaCerta = !!reg && Math.abs(Number(reg.valor_previsto) - 650 * 2 * 1.3) < 0.05
+      && Number(reg.fator_acomodacao) === 2 && reg.acomodacao === 'apartamento';
+    out.adicionaisDeduzidos = !!(reg && reg._adicionais && ['apartamento', 'urgencia', 'multiplos_proc']
+      .every(k => reg._adicionais.itens.indexOf(k) >= 0));
     out.fechouModal = !document.getElementById('modal-backdrop').classList.contains('show');
-
-    // sem paciente → não lança (avisa)
-    financeiro.lancamentoRapido();
-    await new Promise(r => setTimeout(r, 100));
-    document.getElementById('fin-rap-paciente').value = '';
-    financeiro._salvarRapido();
-    out.validaPaciente = store.list('financeiro').length === 1;
-    modal.close();
-
     store.setList('financeiro', []);
     return out;
   });
-  assert(r.temBotao, 'a barra do Financeiro deveria ter o botão Lançamento rápido');
-  assert(r.camposOk, 'o modal deveria ter paciente, data, procedimento, convênio, valor e senha');
-  assert(r.dataHoje, 'a data deveria vir pré-preenchida com hoje');
-  assert(r.criou, 'o lançamento deveria criar registro pendente/avulso com os dados informados');
-  assert(r.codigosComGrau, 'os 2 procedimentos deveriam virar códigos com grau 100% e 50%');
-  assert(r.fechouModal, 'lançar deveria fechar o modal');
-  assert(r.validaPaciente, 'sem paciente não deveria lançar');
+  assert(r.semRapido, 'a barra do Financeiro não tem mais o Lançamento rápido; tem o Novo registro');
+  assert(r.mesmaJanela, 'Novo registro abre a janela de faturamento do fechamento, com paciente, sem a pergunta Sim/Não');
+  assert(r.dataHoje, 'a data já vem com hoje');
+  assert(r.semRepetidos, 'apartamento, feriado, urgência e noturno não são perguntados duas vezes');
+  assert(r.temAmbulatorial, 'a acomodação tem ambulatorial');
+  assert(r.validaPaciente, 'sem paciente não lança e a janela continua aberta');
+  assert(r.segundaNasce50, 'o segundo código nasce 50%');
+  assert(r.ambulatorialX1 && r.apartamentoX2, 'ambulatorial cobra ×1 e apartamento ×2');
+  assert(r.criou, 'o lançamento avulso nasce pendente com paciente, procedimento, plano, data e senha');
+  assert(r.codigosComGrau, 'os códigos saem com o grau de cada linha');
+  assert(r.contaCerta, 'o valor previsto é a conta da janela: códigos × acomodação + urgência');
+  assert(r.adicionaisDeduzidos, 'os adicionais que são consequência de outro campo entram sozinhos');
+  assert(r.fechouModal, 'lançar fecha a janela');
   await page.close();
 });
 
@@ -2183,21 +2204,22 @@ await test('CBHPM: vários códigos no mesmo campo (➕/x2) em todo o app e auxi
     anestesia.equipeAux.restaurar([]);
     out.auxLimpa = anestesia.equipeAux.coletar().length === 0;
 
-    /* — lançamento rápido entende "código + código x2" no mesmo campo — */
+    /* — a janela de lançamento entende "código + código x2" no mesmo campo — */
     store.setList('financeiro', []);
-    financeiro.lancamentoRapido();
+    fin.finalizacao.abrirAvulso({ paciente: 'Paciente Mult', data_proc: '2026-07-30' });
     await new Promise(r => setTimeout(r, 150));
-    document.getElementById('fin-rap-paciente').value = 'Paciente Mult';
-    document.getElementById('fin-rap-data').value = '2026-07-30';
-    document.querySelector('#fin-rap-procs .fin-rap-proc').value = '3.01.01.97-2 + 3.01.01.01-8 x2';
-    financeiro._salvarRapido();
+    const desc = document.querySelector('#fz-codigos-body [name="fz_desc[]"]');
+    desc.value = '3.01.01.97-2';
+    desc.dispatchEvent(new Event('input', { bubbles: true }));
+    desc.dispatchEvent(new Event('change', { bubbles: true }));
+    const tr2m = fin.finalizacao.addLinha({ codigo: '3.01.01.01-8', qtd: 2 });
+    fin.finalizacao.confirmar();
     await new Promise(r => setTimeout(r, 150));
-    const fin = store.list('financeiro')[0] || {};
-    const cods = fin.codigos || [];
-    const c97 = cods.find(c => c.codigo === '3.01.01.97-2');
-    const c01 = cods.find(c => c.codigo === '3.01.01.01-8');
-    out.multQtd = cods.length === 2 && !!c97 && !!c01 && c01.qtd === 2
-      && c97.grau === 100 && c01.grau === 50;   /* maior porte (10A) principal */
+    const fin1 = store.list('financeiro')[0] || {};
+    const cods = fin1.codigos || [];
+    out.multQtd = cods.length === 2 && cods[1].codigo === '3.01.01.01-8' && cods[1].qtd === 2
+      && cods[0].grau === '100' && cods[1].grau === '50' && fin1.data_proc === '2026-07-30';
+    void tr2m;
     store.setList('financeiro', []);
     modal.close();
     return out;
@@ -2212,7 +2234,7 @@ await test('CBHPM: vários códigos no mesmo campo (➕/x2) em todo o app e auxi
   assert(r.auxColeta, 'os auxiliares deveriam ser coletados com a ficha');
   assert(r.auxImpressao, 'os auxiliares deveriam sair na impressão da ficha');
   assert(r.auxLimpa, 'restaurar([]) deveria limpar os auxiliares');
-  assert(r.multQtd, 'lançamento rápido deveria virar 2 códigos, com x2 → Qtd 2 e hierarquia de grau');
+  assert(r.multQtd, 'a janela de lançamento deveria gravar 2 códigos, com Qtd 2 e grau 100/50');
   await page.close();
 });
 
@@ -3633,6 +3655,165 @@ await test('Pré: datas dos exames são digitáveis, salvam e saem na impressão
   assert(r.imprimeEcg, 'o ECG deveria sair com o resultado e a data');
   assert(r.imprimeEco && r.imprimeOutros, 'ECO e outros exames deveriam sair com a data');
   assert(r.soTexto && r.soData && r.vazio, 'o helper deveria lidar com resultado sem data e data sem resultado');
+  await page.close();
+});
+
+/* Consulta/dor: o histórico do paciente também no topo */
+await test('Consulta: "Histórico do paciente" no topo abre o mesmo histórico do card de Seguimento', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    ui.navegar('consulta');
+    await new Promise(res => setTimeout(res, 300));
+    const btn = document.getElementById('btn-consulta-hist-paciente');
+    out.noTopo = !!btn && !!btn.closest('#module-consulta .action-bar');
+    document.querySelector('#form-consulta [name="nome"]').value = 'Paciente Do Retorno';
+    btn.click();
+    await new Promise(res => setTimeout(res, 200));
+    out.abriu = document.getElementById('modal-backdrop').classList.contains('show')
+      && /Histórico — Paciente Do Retorno/.test(document.getElementById('modal-title') ? document.getElementById('modal-title').textContent : document.body.textContent);
+    modal.close();
+    return out;
+  });
+  assert(r.noTopo, 'o botão fica na barra do topo da consulta');
+  assert(r.abriu, 'e abre o histórico do paciente');
+  await page.close();
+});
+
+/* Confirmar a cobrança logo depois de finalizar não é retificar o documento */
+await test('Gerar financeiro após finalizar a pré não vira "versão retificada" na impressão', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('pre', []); store.setList('financeiro', []);
+    const hoje = utils.hojeISO();
+    const doc = store.save('pre', { nome: 'Paciente Sem Retificar', data: hoje, cirurgia: 'Histeroscopia',
+      conclusao_status: 'liberado', _finalizado: true });
+    const adendosAntes = (store.getById('pre', doc._id)._adendos || []).filter(a => a && a._retificacao).length;
+    fin.finalizacao.abrir('pre', doc);
+    await new Promise(res => setTimeout(res, 300));
+    const conv = document.querySelector('[name="fz_convenio"]');
+    conv.value = 'Unimed'; fin.finalizacao.aoTrocarPlano();
+    fin.finalizacao.confirmar();
+    await new Promise(res => setTimeout(res, 400));
+    const depois = store.getById('pre', doc._id);
+    out.semRetificacao = ((depois._adendos || []).filter(a => a && (a._retificacao || /CORREÇÃO|RETIFICA/i.test(a.texto || ''))).length) === adendosAntes;
+    out.documentoIntacto = !depois.convenio && depois.conclusao_status === 'liberado';
+    const lanc = store.list('financeiro').filter(x => x._origemId === doc._id);
+    out.cobrancaComPlano = lanc.length >= 1 && lanc.every(x => x.convenio === 'Unimed');
+    ui.navegar('pre');
+    await new Promise(res => setTimeout(res, 300));
+    pre.carregar(depois);
+    printPreview.abrir();
+    await new Promise(res => setTimeout(res, 400));
+    const folha = printPreview._htmlDaFolha(document.getElementById('ppp'));
+    out.folhaLimpa = !/retificad/i.test(folha) && !/DECISÃO FINANCEIRA/.test(folha)
+      && !/INFORMAÇÕES ACRESCENTADAS/.test(folha) && folha.includes('Paciente Sem Retificar');
+    printPreview.fechar();
+    /* mudar o desfecho na janela, sim, é corrigir o documento */
+    const doc2 = store.save('pre', { nome: 'Paciente Desfecho Mudou', data: hoje, conclusao_status: 'liberado', _finalizado: true });
+    fin.finalizacao.abrir('pre', doc2);
+    await new Promise(res => setTimeout(res, 300));
+    const sel = document.querySelector('[name="fz_desfecho"]');
+    const outra = Array.from(sel.options).map(o => o.value).find(v => v && v !== 'liberado');
+    sel.value = outra;
+    fin.finalizacao.confirmar();
+    await new Promise(res => setTimeout(res, 400));
+    const d2 = store.getById('pre', doc2._id);
+    out.desfechoMudouRegistra = adendos.vigente('pre', d2).conclusao_status === outra
+      || (d2._adendos || []).some(a => a && (a._retificacao || /CORREÇÃO/i.test(a.texto || '')))
+      || d2.conclusao_status === outra;
+    return out;
+  });
+  assert(r.semRetificacao && r.documentoIntacto, 'confirmar a cobrança sem mudar nada não regrava nem retifica a pré finalizada');
+  assert(r.cobrancaComPlano, 'o plano escolhido na janela vai para todas as linhas da cobrança');
+  assert(r.folhaLimpa, 'a folha impressa não diz "retificada", nem traz a decisão financeira ou as informações acrescentadas');
+  assert(r.desfechoMudouRegistra, 'mudar o desfecho na janela continua sendo registrado no documento');
+  await page.close();
+});
+
+/* Item 9: SP Data — evolução em texto limpo e PDF para a área de anexos */
+await test('SP Data: evolução sai em texto limpo para colar, e o PDF com nome claro para anexar', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 300));
+    try { anestesia.novo && anestesia.novo(); } catch (e) {}
+    const f = document.getElementById('form-anestesia');
+    const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el) el.value = v; };
+    set('paciente_nome', 'Paciente SPData'); set('data_anestesia', utils.hojeISO());
+    set('procedimento', 'Colecistectomia videolaparoscópica');
+    f.querySelector('[name="resumo_narrativo"]').value = 'Monitorização com SpO₂ e EtCO₂ — PA ≥ 90 mmHg • sem intercorrências 😀';
+    printPreview.abrir();
+    await new Promise(res => setTimeout(res, 600));
+    out.temBotao = Array.from(document.querySelectorAll('.print-preview-toolbar button')).some(b => /SP Data/.test(b.textContent));
+    spdata.abrir();
+    await new Promise(res => setTimeout(res, 150));
+    const t = document.getElementById('spd-texto').value;
+    out.texto = t;
+    out.limpo = /SpO2/.test(t) && /EtCO2/.test(t) && /PA >= 90/.test(t) && !/[₂≥•—😀]/u.test(t);
+    out.temAcento = /intercorrências/.test(t);
+    document.getElementById('spd-sem-acento').checked = true;
+    spdata._refazer();
+    out.semAcento = /intercorrencias/.test(document.getElementById('spd-texto').value);
+    out.nomePdf = /\.pdf$/.test(document.getElementById('spd-nome').textContent);
+    /* sem resumo, usa a própria folha */
+    f.querySelector('[name="resumo_narrativo"]').value = '';
+    out.semResumoGera = spdata.texto('anestesia').length > 20;
+    modal.close();
+    try { printPreview.fechar(); } catch (e) {}
+    return out;
+  });
+  assert(r.temBotao, 'a pré-visualização tem o botão SP Data');
+  assert(r.limpo, 'a evolução sai sem símbolos que o SP Data estraga (veio ' + JSON.stringify(r.texto) + ')');
+  assert(r.temAcento && r.semAcento, 'acentos ficam, e podem ser tirados com uma marca');
+  assert(r.nomePdf, 'o PDF para anexar mostra o nome do arquivo');
+  assert(r.semResumoGera, 'sem resumo escrito, a evolução sai do próprio documento');
+  await page.close();
+});
+
+/* Item 14: escolher o paciente no próprio módulo traz plano, CPF e nascimento */
+await test('Escolher o paciente na pré e na ficha traz plano, CPF e nascimento — mesmo fora da lista e em data brasileira', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('pacientes', []);
+    const pac = store.save('pacientes', { nome: 'Marta Cadastro Completo', plano: 'Unimed Vitória',
+      cpf: '123.456.789-00', nascimento: '15/03/1980', carteirinha: '0099' });
+    const item = autocomplete.listaPacientes().find(x => x.label === 'Marta Cadastro Completo');
+    out.naLista = !!item;
+
+    ui.navegar('pre');
+    await new Promise(res => setTimeout(res, 300));
+    try { pre.novo && pre.novo(); } catch (e) {}
+    autocomplete._aplicarPaciente('form-pre', item ? item.data : pac);
+    await new Promise(res => setTimeout(res, 150));
+    const fp = document.getElementById('form-pre');
+    const vp = n => (fp.querySelector('[name="' + n + '"]') || {}).value || '';
+    out.pre = { convenio: vp('convenio'), cpf: vp('cpf'), nasc: vp('nasc') };
+
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 300));
+    try { anestesia.novo && anestesia.novo(); } catch (e) {}
+    autocomplete._aplicarPaciente('form-anestesia', item ? item.data : pac);
+    await new Promise(res => setTimeout(res, 150));
+    const fa = document.getElementById('form-anestesia');
+    const va = n => (fa.querySelector('[name="' + n + '"]') || {}).value || '';
+    out.ficha = { convenio: va('paciente_convenio'), cpf: va('paciente_cpf'), nasc: va('paciente_nasc') };
+    const estr = anestesia.coletarEstruturado();
+    out.cpfGravado = estr.paciente.cpf === '123.456.789-00';
+    out.cpfImpresso = printPreview._buildAnestesia().includes('123.456.789-00');
+    return out;
+  });
+  assert(r.naLista, 'o paciente do cadastro aparece na busca');
+  assert(r.pre.convenio === 'Unimed Vitória', 'pré: o plano do cadastro entra mesmo fora da lista antiga (veio ' + JSON.stringify(r.pre.convenio) + ')');
+  assert(r.pre.cpf === '123.456.789-00', 'pré: o CPF entra (veio ' + JSON.stringify(r.pre.cpf) + ')');
+  assert(r.pre.nasc === '1980-03-15', 'pré: nascimento em dd/mm/aaaa entra no campo de data (veio ' + JSON.stringify(r.pre.nasc) + ')');
+  assert(r.ficha.convenio === 'Unimed Vitória', 'ficha: o plano entra (veio ' + JSON.stringify(r.ficha.convenio) + ')');
+  assert(r.ficha.cpf === '123.456.789-00', 'ficha: o CPF entra (veio ' + JSON.stringify(r.ficha.cpf) + ')');
+  assert(r.ficha.nasc === '1980-03-15', 'ficha: o nascimento entra (veio ' + JSON.stringify(r.ficha.nasc) + ')');
+  assert(r.cpfGravado && r.cpfImpresso, 'o CPF é gravado na ficha e sai na impressão');
   await page.close();
 });
 
@@ -15667,8 +15848,12 @@ await test('Finalizar: uma janela só — gerar ou não, com plano, tabela do pl
       procedimento: { data: hoje, descricao: 'Artroplastia', codigo: '3.07.15.05-0' }, _finalizado: true });
     fin.finalizacao.abrir('anestesia', an);
     await new Promise(res => setTimeout(res, 300));
-    out.temAdicionais = document.querySelectorAll('#fz-adicionais [name="fz_adic"]').length >= 5;
-    const ck = document.querySelector('#fz-adicionais [name="fz_adic"][value="urgencia"]');
+    /* só os adicionais que não têm outro campo na janela; urgência é o campo
+       Urgência, e vira adicional sozinha */
+    out.temAdicionais = document.querySelectorAll('#fz-adicionais [name="fz_adic"]').length >= 3
+      && !document.querySelector('#fz-adicionais [name="fz_adic"][value="urgencia"]')
+      && !document.querySelector('#fz-adicionais [name="fz_adic"][value="apartamento"]');
+    const ck = document.querySelector('[name="fz_urgencia"]');
     if (ck) ck.checked = true;
     fin.finalizacao.confirmar();
     await new Promise(res => setTimeout(res, 300));
@@ -16041,7 +16226,7 @@ await test('Geração do financeiro puxa cadastro e ficha — e o que faltar dá
     out.mostraACarteirinha = /0286777/.test(corpo) && /111\.222\.333-44/.test(corpo);
     const f = document.getElementById('form-fin-final');
     out.puxouAAcomodacao = f.querySelector('[name="fz_acomodacao"]').value === 'apartamento'
-      && Number(f.querySelector('[name="fz_fator_acom"]').value) === 2;
+      && fin.finalizacao._fatorAcomodacao() === 2;
 
     /* 3) acomodação e horário são multiplicadores DIFERENTES e se somam */
     const base = [...document.querySelectorAll('#fz-codigos-body [name="fz_prev[]"]')]
@@ -16072,9 +16257,11 @@ await test('Geração do financeiro puxa cadastro e ficha — e o que faltar dá
     out.temOsDoisFatores = !!ff.querySelector('[name="fator_acomodacao"]')
       && !!ff.querySelector('[name="fator_majoracao"]')
       && Number(ff.querySelector('[name="fator_majoracao"]').value) === 3;
-    out.temOsAdicionais = document.querySelectorAll('#fin-adicionais [name="fin_adic"]').length >= 5;
-    /* marcar um adicional aqui e salvar — a janela não é a única chance */
-    const ck = document.querySelector('#fin-adicionais [name="fin_adic"][value="urgencia"]');
+    out.temOsAdicionais = document.querySelectorAll('#fin-adicionais [name="fin_adic"]').length >= 3
+      && !document.querySelector('#fin-adicionais [name="fin_adic"][value="urgencia"]');
+    /* marcar urgência aqui e salvar — a janela não é a única chance; o
+       adicional sai do próprio campo, sem segunda caixinha */
+    const ck = ff.querySelector('[name="urgencia"]');
     ck.checked = true;
     financeiro.salvar();
     await new Promise(res => setTimeout(res, 400));
@@ -17578,6 +17765,1084 @@ await test('Rascunhos: cópia preservada não desce da nuvem, e as abas param de
   assert(r.linhasPreservadasNoServidor === 8,
     'ignorar não é apagar: a linha pode ser a única cópia do que alguém preservou noutro aparelho');
   assert(r.aFichaRealContinua, 'e o rascunho de verdade continua funcionando');
+  await page.close();
+});
+
+/* 285b) O FLUXO DE FINALIZAÇÃO, CAMINHO POR CAMINHO
+
+   "Conferir o fluxo de finalização do pré, consulta e ficha de anestesia. O
+   menu de fluxo e contrafluxo (financeiro, impressão, SRPA etc.) há caminho
+   que não está funcionando bem."
+
+   "Há caminho que não funciona" não é diagnóstico — é o que se sente quando um
+   entre oito falha e não dá para saber qual. Então o teste percorre TODOS os
+   itens do painel de fechamento nos três módulos e nomeia o que falhar.
+
+   O primeiro que ele achou: a partir da FICHA, o item do termo só NAVEGAVA até
+   o módulo. O termo abria em branco, e quem acabara de finalizar a ficha tinha
+   de redigitar o nome que estava na tela um segundo antes — no documento que o
+   paciente assina. Da pré, o mesmo item já nascia preenchido. */
+await test('Painel de fechamento: todos os caminhos levam a algum lugar, nos três módulos', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = { itens: {}, falhas: [] };
+    __smokeBindOrg('org-fluxo');
+    ['pre', 'consulta', 'anestesia', 'termo', 'recuperacao', 'financeiro'].forEach(m => store.setList(m, []));
+
+    const docs = {
+      pre: store.save('pre', { nome: 'IRACEMA DOS SANTOS', data: '2026-10-15',
+        convenio: 'Unimed', cirurgia: 'Colecistectomia', nascimento: '1970-02-01', sexo: 'Feminino' }),
+      consulta: store.save('consulta', { nome: 'IRACEMA DOS SANTOS', data: '2026-10-15',
+        convenio: 'Unimed', nascimento: '1970-02-01' }),
+      anestesia: store.save('anestesia', { paciente: { nome: 'IRACEMA DOS SANTOS',
+        convenio: 'Unimed', nascimento: '1970-02-01', sexo: 'Feminino' },
+        procedimento: { descricao: 'Colecistectomia', data: '2026-10-15' } })
+    };
+
+    for (const mod of ['pre', 'consulta', 'anestesia']) {
+      const doc = store.getById(mod, docs[mod]._id);
+      const itens = fechamento._itens(mod, doc, {});
+      out.itens[mod] = itens.map(i => i.chave);
+      /* cada item tem rótulo, ícone e ação de verdade */
+      itens.forEach(i => {
+        if (!i.chave || !i.rotulo || typeof i.acao !== 'function') {
+          out.falhas.push(mod + '.' + (i.chave || '?') + ': item incompleto');
+        }
+      });
+    }
+
+    /* O CAMINHO DO TERMO, A PARTIR DA FICHA: tem de abrir PREENCHIDO */
+    store.setList('termo', []);
+    const itensFicha = fechamento._itens('anestesia', store.getById('anestesia', docs.anestesia._id), {});
+    const itemTermo = itensFicha.find(i => i.chave === 'termo');
+    out.fichaTemItemTermo = !!itemTermo;
+    if (itemTermo) {
+      itemTermo.acao();
+      await new Promise(res => setTimeout(res, 900));
+      const f = document.getElementById('form-termo');
+      out.termoDaFicha = {
+        nome: ((f && f.querySelector('[name="nome"]')) || {}).value || '',
+        convenio: ((f && f.querySelector('[name="convenio"]')) || {}).value || '',
+        procedimento: ((f && f.querySelector('[name="procedimento"]')) || {}).value || ''
+      };
+    }
+
+    /* e a partir da PRÉ continua funcionando como antes */
+    store.setList('termo', []);
+    utils.clearForm('form-termo');
+    pre.iniciarTermoDe('pre', docs.pre._id);
+    await new Promise(res => setTimeout(res, 900));
+    const f2 = document.getElementById('form-termo');
+    out.termoDaPre = {
+      nome: ((f2 && f2.querySelector('[name="nome"]')) || {}).value || '',
+      procedimento: ((f2 && f2.querySelector('[name="procedimento"]')) || {}).value || ''
+    };
+    return out;
+  });
+  assert(r.falhas.length === 0, 'itens incompletos no painel: ' + JSON.stringify(r.falhas));
+  assert((r.itens.pre || []).join(',') === 'financeiro,impressao,termo,ficha',
+    'a pré oferece cobrança, impressão, termo e a ficha; veio ' + JSON.stringify(r.itens.pre));
+  assert((r.itens.anestesia || []).join(',') === 'financeiro,impressao,termo,srpa',
+    'a ficha oferece cobrança, impressão, termo e SRPA; veio ' + JSON.stringify(r.itens.anestesia));
+  assert(r.fichaTemItemTermo, 'a ficha tem de oferecer o termo');
+  assert((r.termoDaFicha || {}).nome === 'IRACEMA DOS SANTOS',
+    'da FICHA o termo tem de abrir com o paciente, e não em branco; veio ' + JSON.stringify(r.termoDaFicha));
+  assert(/Colecistectomia/.test((r.termoDaFicha || {}).procedimento || ''),
+    'com o procedimento também; veio ' + JSON.stringify(r.termoDaFicha));
+  assert((r.termoDaPre || {}).nome === 'IRACEMA DOS SANTOS',
+    'e da PRÉ continua como era: o conserto não pode trocar um caminho por outro');
+  await page.close();
+});
+
+/* 284b) O SEGUNDO ANESTESISTA ASSINA IGUAL AO PRIMEIRO
+
+   "Há ficha de anestesia em que será necessário adicionar um 2º anestesista. E
+   aí terá que na ficha, nas assinaturas, desse segundo anestesista também.
+   Igual ao que temos para o perfil profissional atualmente."
+
+   Dois médicos no mesmo ato assinam os dois. Se o segundo tiver de digitar o
+   nome e desenhar a assinatura à mão enquanto o primeiro recebe o carimbo
+   cadastrado, a folha sai com dois padrões diferentes de assinatura no mesmo
+   documento — e é o documento que vale como prova de quem conduziu o caso. */
+await test('Segundo anestesista: bloco completo, com carimbo do cadastro igual ao do primeiro', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-a2');
+    const CARIMBO = 'data:image/png;base64,' + 'A'.repeat(400);
+    store.setList('cad_profissionais', [
+      { _id: 'p1', nome: 'Marcelo Pandolfi Caliman', crm: '30601',
+        especialidade: 'Anestesiologia', carimbo: CARIMBO, responsavel: true },
+      { _id: 'p2', nome: 'Renata Vilela Nunes', crm: '55123',
+        especialidade: 'Anestesiologia', carimbo: CARIMBO }
+    ]);
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 700));
+    try { modal.close(); } catch (e) {}
+
+    anestesia._toggle2Anestesista(true);
+    await new Promise(res => setTimeout(res, 250));
+    const f = document.getElementById('form-anestesia');
+    out.blocoApareceu = (document.getElementById('sig-anest2-wrapper') || {}).style.display === 'block';
+    out.temCampoNome = !!f.querySelector('[name="anestesiologista2"]');
+    out.temCampoCrm = !!f.querySelector('[name="crm2"]');
+    out.temDataUrl = !!f.querySelector('[name="assinatura_dataurl2"]');
+    out.temPreview = !!document.getElementById('sig-anest2-prev-carimbo');
+    /* as mesmas três abas do primeiro: carimbo, desenho e certificado */
+    out.abas = Array.from(document.querySelectorAll('#sig-anest2-wrapper .sig-tab')).map(b => b.dataset.tab);
+
+    /* o carimbo do cadastro chega pelo mesmo caminho do primeiro */
+    const nomeEl = f.querySelector('[name="anestesiologista2"]');
+    nomeEl.value = 'Renata Vilela Nunes';
+    assinatura.aplicarCarimboPorNome('sig-anest2', nomeEl.value, 'form-anestesia');
+    await new Promise(res => setTimeout(res, 150));
+    out.carimbo2 = ((f.querySelector('[name="assinatura_dataurl2"]') || {}).value || '').slice(0, 30);
+    out.preview2TemImagem = !!(document.getElementById('sig-anest2-prev-carimbo') || {}).querySelector;
+    out.preview2Img = !!document.querySelector('#sig-anest2-prev-carimbo img');
+    out.crmPreenchido = (f.querySelector('[name="crm2"]') || {}).value;
+
+    /* e o do PRIMEIRO não é afetado: são dois campos, dois médicos */
+    const nome1 = f.querySelector('[name="anestesiologista"]');
+    if (nome1) {
+      nome1.value = 'Marcelo Pandolfi Caliman';
+      assinatura.aplicarCarimboPorNome('sig-anest', nome1.value, 'form-anestesia');
+    }
+    await new Promise(res => setTimeout(res, 150));
+    out.carimbo1 = ((f.querySelector('[name="assinatura_dataurl"]') || {}).value || '').slice(0, 30);
+    out.doisSeparados = !!out.carimbo1 && !!out.carimbo2;
+
+    /* e os dois saem na folha */
+    const html = printPreview._buildAnestesia();
+    out.folhaTemOsDois = /Marcelo Pandolfi Caliman/.test(html) && /Renata Vilela Nunes/.test(html);
+    return out;
+  });
+  assert(r.blocoApareceu, 'o bloco do 2º anestesista tem de aparecer ao ser adicionado');
+  assert(r.temCampoNome && r.temCampoCrm && r.temDataUrl && r.temPreview,
+    'com os mesmos campos do primeiro: nome, registro, assinatura e pré-visualização');
+  assert(r.abas.join(',') === 'carimbo,desenho,cert',
+    'e as mesmas três formas de assinar; veio ' + JSON.stringify(r.abas));
+  assert(r.carimbo2.indexOf('data:image') === 0,
+    'o carimbo do cadastro tem de chegar ao 2º anestesista; veio "' + r.carimbo2 + '"');
+  assert(r.preview2Img, 'e aparecer na pré-visualização dele');
+  assert(r.crmPreenchido === '55123', 'com o registro dele, não o do primeiro; veio ' + r.crmPreenchido);
+  assert(r.doisSeparados,
+    'os dois carimbos coexistem: são dois médicos no mesmo ato, e a folha é prova de quem conduziu');
+  assert(r.folhaTemOsDois, 'e os dois nomes saem na folha impressa');
+  await page.close();
+});
+
+/* 283b) UM MÉDICO, UM CADASTRO
+
+   Foto de Ajustes: dois cartões "Marcelo Pandolfi Caliman", mesmo CRM, os dois
+   "✓ com carimbo" — e só o segundo com telefone, endereço e a marca de "sou
+   eu, profissional responsável".
+
+   É a sobra da unificação das três listas antigas ("Meu perfil profissional",
+   "Anestesistas", "Cirurgiões"). Na tela ficam dois cartões idênticos; no
+   seletor de profissional ficavam duas linhas iguais; e QUAL DAS DUAS ASSINA
+   passava a depender de qual o sistema alcançou primeiro. Num documento que a
+   pessoa assina, isso não é detalhe de arrumação.
+
+   Duas frentes: salvar um profissional que já existe passa a ATUALIZAR aquele
+   em vez de criar o segundo; e os que já estão repetidos se juntam por um
+   botão. Nos dois casos, nada se perde — o que existe numa ficha e não na
+   outra é copiado antes. */
+await test('Profissionais: salvar o mesmo médico não cria o segundo, e os repetidos se juntam sem perder nada', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    __smokeBindOrg('org-prof2');
+    const CARIMBO = 'data:image/png;base64,' + 'A'.repeat(300);
+
+    /* o cadastro dele, como está na foto */
+    store.setList('cad_profissionais', [
+      { _id: 'p1', nome: 'Marcelo Pandolfi Caliman', crm: '30601', rqe: '14630',
+        especialidade: 'Anestesiologia', carimbo: CARIMBO },
+      { _id: 'p2', nome: 'Marcelo Pandolfi Caliman', crm: '30601', rqe: '14630',
+        especialidade: 'Anestesiologia', carimbo: CARIMBO, responsavel: true,
+        telefone: '73 99976-9179', email: 'mpc@teste.local',
+        cidade: 'Eunápolis-BA', endereco: 'Rua Rui Barbosa, 62 - Centro' },
+      { _id: 'p3', nome: 'Outro Medico', crm: '11111', especialidade: 'Cirurgia' }
+    ]);
+
+    const n = ajustes.juntarProfissionaisDuplicados({ silent: true });
+    const lista = store.list('cad_profissionais') || [];
+    out.juntou = n;
+    out.quantos = lista.length;
+    const dele = lista.filter(x => /Marcelo/i.test(x.nome || ''));
+    out.umSoDele = dele.length === 1;
+    const fica = dele[0] || {};
+    out.manteveCarimbo = !!fica.carimbo;
+    out.manteveResponsavel = fica.responsavel === true || fica.responsavel === 'true';
+    out.manteveTelefone = fica.telefone === '73 99976-9179';
+    out.manteveEndereco = /Rui Barbosa/.test(fica.endereco || '');
+    out.naoMexeuNoOutro = lista.some(x => x._id === 'p3');
+
+    /* rodar de novo não faz nada */
+    out.segundaVez = ajustes.juntarProfissionaisDuplicados({ silent: true });
+
+    /* e salvar o mesmo médico outra vez não cria um terceiro */
+    const gemeo = ajustes._profissionalIgual({ nome: 'MARCELO PANDOLFI CALIMAN', crm: '30601' });
+    out.reconheceOMesmo = !!gemeo && /Marcelo/i.test(gemeo.nome || '');
+    out.naoConfundeOutro = !ajustes._profissionalIgual({ nome: 'Fulano de Tal', crm: '99999' });
+    return out;
+  });
+  assert(r.juntou === 1, 'os dois cartões do mesmo médico viram um; juntou ' + r.juntou);
+  assert(r.umSoDele && r.quantos === 2, 'fica um cadastro dele e o outro médico intacto');
+  assert(r.manteveCarimbo, 'o carimbo tem de sobreviver — é o que assina a folha');
+  assert(r.manteveResponsavel, 'e a marca de "sou eu", que decide o cabeçalho dos documentos');
+  assert(r.manteveTelefone && r.manteveEndereco,
+    'o que existia só na outra ficha é copiado antes: ninguém perde o endereço por juntar cadastros');
+  assert(r.naoMexeuNoOutro, 'e quem não é duplicado não é tocado');
+  assert(r.segundaVez === 0, 'rodar de novo não faz nada: não é um varredor de lista');
+  assert(r.reconheceOMesmo, 'salvar o mesmo nome e CRM reconhece o cadastro que já existe');
+  assert(r.naoConfundeOutro, 'e não confunde pessoas diferentes');
+  await page.close();
+});
+
+/* 282b) ADICIONAR INTERVENÇÃO: O QUE FOI FEITO, NO MESMO HORÁRIO DO QUE HOUVE
+
+   "No gráfico e no tabulado dos sinais vitais, criar opção de clicar com o
+   botão direito, ou pressionar e segurar no tablet e no smartphone, 'adicionar
+   intervenção' — abrir um evento e/ou linha para colocar medição ou evento
+   para tratar o ocorrido. Ex.: hipoglicemia → medição de glicose; hipotensão →
+   vasopressor."
+
+   É o par do preenchimento de intercorrência: aquele REPRESENTA o que
+   aconteceu, este registra o que foi FEITO a respeito. Os dois têm de cair no
+   mesmo horário, senão a folha conta a história fora de ordem — caiu às 09:05
+   e o vasopressor aparece às 09:20 porque foi quando alguém lembrou de anotar.
+
+   O sistema NÃO escolhe a conduta. Abre os três caminhos (medir, marcar
+   evento, lançar medicação) já no horário tocado, e quem decide é quem está
+   com o paciente. */
+await test('Adicionar intervenção: abre no horário do ponto, pelo gráfico e pela tabela', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-itv');
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 700));
+    try { modal.close(); } catch (e) {}
+    const f = document.getElementById('form-anestesia');
+    f.querySelector('[name="hora_sala_entrada"]').value = '08:00';
+    f.querySelector('[name="hora_sala_saida"]').value = '10:00';
+    document.getElementById('vitais-body').innerHTML = '';
+    document.getElementById('eventos-body').innerHTML = '';
+    document.getElementById('medicacoes-body').innerHTML = '';
+
+    /* a porta existe nos dois lugares */
+    const canvas = document.getElementById('vitals-chart');
+    out.temGrafico = !!canvas;
+    out.tabelaTemPorta = typeof anestesia.intervencao.doToqueNaTabela === 'function';
+
+    /* pela TABELA: a linha de 09:05 */
+    anestesia.vitais.add(false, { hora: '09:05', pas: '80', pad: '45', fc: '58' });
+    await new Promise(res => setTimeout(res, 150));
+    const tr = document.querySelector('#vitais-body tr');
+    anestesia.intervencao.abrirDaLinha(tr);
+    await new Promise(res => setTimeout(res, 150));
+    const campoHora = document.getElementById('itv-hora');
+    out.abriuNoHorarioDaLinha = campoHora ? campoHora.value : null;
+
+    /* medição: nova linha naquele horário */
+    const antesLinhas = document.querySelectorAll('#vitais-body tr').length;
+    anestesia.intervencao._medir();
+    await new Promise(res => setTimeout(res, 250));
+    const horas = Array.from(document.querySelectorAll('#vitais-body [name="vit_hora[]"]')).map(x => x.value);
+    out.criouMedicao = document.querySelectorAll('#vitais-body tr').length > antesLinhas;
+    out.medicaoNoHorario = horas.filter(h => h === '09:05').length >= 2;
+
+    /* evento no mesmo horário */
+    anestesia.intervencao.abrirDaLinha(tr);
+    await new Promise(res => setTimeout(res, 120));
+    anestesia.intervencao._evento();
+    await new Promise(res => setTimeout(res, 250));
+    const horasEvt = Array.from(document.querySelectorAll('#eventos-body [name="evt_hora[]"]')).map(x => x.value);
+    out.eventoNoHorario = horasEvt.indexOf('09:05') >= 0;
+
+    /* medicação no mesmo horário */
+    anestesia.intervencao.abrirDaLinha(tr);
+    await new Promise(res => setTimeout(res, 120));
+    anestesia.intervencao._medicacao();
+    await new Promise(res => setTimeout(res, 250));
+    const horasMed = Array.from(document.querySelectorAll('#medicacoes-body [name="med_hora[]"]')).map(x => x.value);
+    out.medicacaoNoHorario = horasMed.indexOf('09:05') >= 0;
+
+    /* e nada foi prescrito por conta própria */
+    const drogas = Array.from(document.querySelectorAll('#medicacoes-body [name="med_nome[]"]')).map(x => x.value).filter(Boolean);
+    out.nenhumaDrogaEscolhida = drogas.length === 0;
+    return out;
+  });
+  assert(r.temGrafico, 'o gráfico precisa existir para a porta do clique direito fazer sentido');
+  assert(r.tabelaTemPorta, 'a tabela também tem de ter a porta — ele pediu os dois lugares');
+  assert(r.abriuNoHorarioDaLinha === '09:05',
+    'a janela abre no horário do ponto tocado; veio ' + r.abriuNoHorarioDaLinha);
+  assert(r.criouMedicao && r.medicaoNoHorario,
+    'a nova medição entra NAQUELE horário: é o "medir de novo para ver se resolveu"');
+  assert(r.eventoNoHorario, 'o evento também, senão a folha conta a história fora de ordem');
+  assert(r.medicacaoNoHorario, 'e a medicação também');
+  assert(r.nenhumaDrogaEscolhida,
+    'o sistema abre a linha e PARA: escolher a droga é conduta, e conduta é de quem está com o paciente');
+  await page.close();
+});
+
+/* 281b) PREENCHER PADRÃO: TEMPERATURA DE PONTA A PONTA, GLICEMIA EM BRANCO,
+   E A INTERCORRÊNCIA REPRESENTADA
+
+   Três pedidos sobre a mesma janela:
+
+   • TEMPERATURA — "perguntar inicial e final; o mais comum é uma queda lenta e
+     paulatina". Quem sabe de quanto foi a queda é quem esteve lá; o resto é
+     interpolação. Antes havia um declínio padrão igual para todo paciente.
+   • GLICEMIA — "deixar em branco, pois são poucas medidas e a anotação sempre
+     será manual". Gerar a série inteira é escrever no prontuário exame que
+     ninguém colheu.
+   • INTERCORRÊNCIAS — hipotensão 10%, 20%, hipertensão, hipóxia, bradicardia,
+     taquicardia: escolher e o sistema gerar os dados.
+
+   O episódio tem forma de sino: entra, chega ao pico no meio e volta. Queda em
+   degrau que some de repente não é o que se vê no monitor nem o que se defende
+   numa glosa. E ele entra na LINHA DO TEMPO: número sem evento é número
+   solto — a folha mostraria a queda sem dizer o que foi. */
+await test('Preencher padrão: temperatura informada, glicemia em branco e a intercorrência no gráfico e na linha do tempo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-vit');
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 700));
+    try { modal.close(); } catch (e) {}
+    const f = document.getElementById('form-anestesia');
+    f.querySelector('[name="hora_sala_entrada"]').value = '08:00';
+    f.querySelector('[name="hora_sala_saida"]').value = '10:00';
+    document.getElementById('vitais-body').innerHTML = '';
+    document.getElementById('eventos-body').innerHTML = '';
+    /* monitores do caso: sem marcar Temperatura e Glicemia, esses parâmetros
+       nem existem na tabela — e o teste não estaria testando nada */
+    ['PNI', 'ECG', 'Oximetria', 'Temperatura', 'Glicemia'].forEach(m => {
+      const el = f.querySelector('[name="monitores[]"][value="' + m + '"]');
+      if (el) { el.checked = true; }
+    });
+    try { anestesia.vitais.aplicarMonitores(); } catch (e) {}
+    out.monitoresMarcados = Array.from(f.querySelectorAll('[name="monitores[]"]:checked')).map(x => x.value);
+
+    /* a janela, como o usuário a vê */
+    anestesia.vitais.preencherPadrao();
+    await new Promise(res => setTimeout(res, 200));
+    out.temCampoTempIni = !!document.getElementById('vp-temp-ini');
+    out.temCampoTempFim = !!document.getElementById('vp-temp-fim');
+    out.temSeletorEvento = !!document.getElementById('vp-evento');
+    const opcoes = Array.from(document.querySelectorAll('#vp-evento option')).map(o => o.value);
+    out.opcoes = opcoes;
+
+    document.getElementById('vp-temp-ini').value = '36.8';
+    document.getElementById('vp-temp-fim').value = '35.4';
+    document.getElementById('vp-evento').value = 'hipo20';
+    document.getElementById('vp-evt-ini').value = '09:00';
+    document.getElementById('vp-evt-fim').value = '09:20';
+    anestesia.vitais._gerarPadrao(5);
+    await new Promise(res => setTimeout(res, 400));
+
+    const linhas = Array.from(document.querySelectorAll('#vitais-body tr'));
+    const leia = (tr, n) => (tr.querySelector('[name="vit_' + n + '[]"]') || {}).value || '';
+    out.quantas = linhas.length;
+    const temps = linhas.map(tr => parseFloat(leia(tr, 'temp'))).filter(x => !isNaN(x));
+    out.primeiraTemp = temps[0];
+    out.ultimaTemp = temps[temps.length - 1];
+    out.tempCaiu = temps.length > 3 && temps[0] > temps[temps.length - 1];
+    /* queda paulatina: nenhum salto grande entre medidas vizinhas */
+    out.maiorSalto = temps.slice(1).reduce((mx, v, i) => Math.max(mx, Math.abs(v - temps[i])), 0);
+
+    out.glicemias = linhas.map(tr => leia(tr, 'glic')).filter(Boolean).length;
+
+    /* a PA no meio do episódio é menor que fora dele */
+    const pasPorHora = {};
+    linhas.forEach(tr => { pasPorHora[leia(tr, 'hora')] = parseFloat(leia(tr, 'pas')); });
+    out.pasForaDoEpisodio = pasPorHora['08:30'];
+    out.pasNoPico = pasPorHora['09:10'];
+    out.caiuNoEpisodio = (out.pasNoPico && out.pasForaDoEpisodio)
+      ? out.pasNoPico < out.pasForaDoEpisodio * 0.92 : false;
+    out.voltouDepois = (pasPorHora['09:45'] && out.pasNoPico)
+      ? pasPorHora['09:45'] > out.pasNoPico : false;
+
+    const tipos = Array.from(document.querySelectorAll('#eventos-body [name="evt_tipo[]"]')).map(x => x.value);
+    out.eventos = tipos;
+    return out;
+  });
+  assert(r.temCampoTempIni && r.temCampoTempFim, 'a janela tem de pedir a temperatura inicial e a final');
+  assert(r.temSeletorEvento && r.opcoes.indexOf('hipo10') >= 0 && r.opcoes.indexOf('hipo20') >= 0 &&
+    r.opcoes.indexOf('hiper20') >= 0 && r.opcoes.indexOf('hipoxia') >= 0 &&
+    r.opcoes.indexOf('bradi') >= 0 && r.opcoes.indexOf('taqui') >= 0,
+    'e oferecer as intercorrências que ele listou; veio ' + JSON.stringify(r.opcoes));
+  assert(r.quantas > 10, 'o preenchimento tem de gerar as medidas; gerou ' + r.quantas);
+  assert(Math.abs(r.primeiraTemp - 36.8) <= 0.15,
+    'a primeira temperatura é a que ele informou; veio ' + r.primeiraTemp);
+  assert(Math.abs(r.ultimaTemp - 35.4) <= 0.15,
+    'e a última também; veio ' + r.ultimaTemp);
+  assert(r.tempCaiu, 'com queda do começo ao fim');
+  assert(r.maiorSalto <= 0.35,
+    'lenta e paulatina: sem salto entre medidas vizinhas; maior salto ' + r.maiorSalto);
+  assert(r.glicemias === 0,
+    'glicemia fica em branco — são poucas medidas e a anotação é manual; vieram ' + r.glicemias);
+  assert(r.caiuNoEpisodio,
+    'a PA tem de cair no episódio (fora ' + r.pasForaDoEpisodio + ', pico ' + r.pasNoPico + ')');
+  assert(r.voltouDepois, 'e voltar depois: o episódio tem forma de sino, não de degrau');
+  assert(r.eventos.some(t => /Hipotens/i.test(t)),
+    'e o episódio entra na linha do tempo, senão a folha mostra a queda sem dizer o que foi; eventos: ' +
+    JSON.stringify(r.eventos));
+  await page.close();
+});
+
+/* 280b) QUANDO QUEM RESPONDE SÃO OS PRÓPRIOS PAIS
+
+   Dois pedidos que são o mesmo assunto:
+   • no cadastro, poder marcar que o responsável legal são os próprios pais,
+     para autorizar o fluxo do termo;
+   • na pré, na ficha e na consulta, um botão que traga o nome dos pais do
+     cadastro.
+
+   A diferença entre "mãe" e "mãe (responsável legal)" é JURÍDICA, não de
+   rótulo: a primeira acompanha, a segunda autoriza. Por isso ela vem do
+   cadastro e não de um palpite da tela — o sistema não pode decidir sozinho
+   que a mãe que veio na consulta é quem assina o consentimento.
+
+   E o campo novo tem de atravessar as DUAS listas brancas do caminho. O
+   próprio código avisa: campo que falte em qualquer uma é descartado em
+   silêncio, por mais que esteja gravado. Foi o que já aconteceu com filiação e
+   responsável. */
+await test('Responsável legal são os pais: marca no cadastro, e o botão traz os nomes em pré, ficha e consulta', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-pais');
+    const base = { _id: 'pac-menor', nome: 'PEDRO LUCAS RIPARDO',
+      nascimento: '2015-04-02', nome_mae: 'ANA RIPARDO', nome_pai: 'CARLOS RIPARDO' };
+
+    /* 1) SEM a marca: mãe e pai acompanham, mas não autorizam */
+    store.setList('pacientes', [Object.assign({}, base)]);
+    const semMarca = identificacaoPaciente.acompanhantesPossiveis('PEDRO LUCAS RIPARDO');
+    out.semMarca = semMarca.map(x => x.papel);
+
+    /* 2) COM a marca: viram representantes legais */
+    store.setList('pacientes', [Object.assign({}, base, { responsavel_sao_os_pais: '1' })]);
+    const comMarca = identificacaoPaciente.acompanhantesPossiveis('PEDRO LUCAS RIPARDO');
+    out.comMarca = comMarca.map(x => x.papel);
+
+    /* 3) a marca atravessa as duas listas brancas */
+    const vindo = linker._dadosMaisRecentes('PEDRO LUCAS RIPARDO', 'termo');
+    out.atravessou = (vindo.dados || {}).responsavel_sao_os_pais;
+
+    /* 4) o botão existe e funciona nos três módulos */
+    out.botoes = {};
+    for (const [mod, campo, nomeCampo] of [
+      ['pre', 'acompanhantes', 'nome'],
+      ['consulta', 'acompanhantes', 'nome'],
+      ['anestesia', 'acompanhante', 'paciente_nome']
+    ]) {
+      ui.navegar(mod);
+      await new Promise(res => setTimeout(res, 450));
+      const f = document.getElementById('form-' + mod);
+      const alvo = f && f.querySelector('[name="' + campo + '"]');
+      if (!alvo) { out.botoes[mod] = 'sem campo'; continue; }
+      const nomeEl = f.querySelector('[name="' + nomeCampo + '"]');
+      if (nomeEl) nomeEl.value = 'PEDRO LUCAS RIPARDO';
+      alvo.value = '';
+      acompanhantes.doCadastro('#form-' + mod + ' [name=' + campo + ']', '#form-' + mod + ' [name=' + nomeCampo + ']');
+      await new Promise(res => setTimeout(res, 120));
+      out.botoes[mod] = alvo.value;
+    }
+    return out;
+  });
+  assert(JSON.stringify(r.semMarca) === JSON.stringify(['mãe', 'pai']),
+    'sem a marca, mãe e pai acompanham mas não autorizam; veio ' + JSON.stringify(r.semMarca));
+  assert(r.comMarca.join('|') === 'mãe (responsável legal)|pai (responsável legal)',
+    'com a marca, os dois passam a valer como representantes legais; veio ' + JSON.stringify(r.comMarca));
+  assert(r.atravessou === '1' || r.atravessou === true,
+    'a marca tem de atravessar as duas listas brancas até o termo; veio ' + JSON.stringify(r.atravessou));
+  ['pre', 'consulta', 'anestesia'].forEach(mod => {
+    const v = r.botoes[mod];
+    assert(typeof v === 'string' && /ANA RIPARDO/.test(v) && /CARLOS RIPARDO/.test(v),
+      'no módulo ' + mod + ' o botão tem de trazer mãe e pai do cadastro; veio "' + v + '"');
+  });
+  await page.close();
+});
+
+/* 279b) ABRIR O PACIENTE E VIR SÓ UM TERÇO DELE
+
+   "Ao abrir paciente em qualquer módulo, não está puxando todas as
+   informações. Tipo plano, responsável, data de nascimento etc."
+
+   Escolher o paciente preenchia uma lista CURTA e escrita à mão, diferente em
+   cada módulo: a ficha de anestesia levava seis campos; todos os outros
+   levavam três (nome, sexo e convênio). Nascimento, CPF, telefone, endereço,
+   carteirinha, filiação, responsável legal e acomodação ficavam para trás —
+   gravados no cadastro e redigitados a cada documento. É assim que o mesmo
+   paciente acaba com dois endereços e duas datas de nascimento no mesmo dia.
+
+   A regra passa a ser uma só para todos os módulos, e o teste percorre os
+   módulos de verdade. Campo já preenchido nunca é sobrescrito: o que está na
+   tela é do usuário. */
+await test('Escolher o paciente traz tudo que o cadastro tem — em todos os módulos', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = { porModulo: {} };
+    __smokeBindOrg('org-pac');
+    const pac = {
+      _id: 'pac-completo', nome: 'ROSANGELA DE SOUZA LIMA', nascimento: '1958-03-12',
+      sexo: 'Feminino', cpf: '123.456.789-00', prontuario: '44821', plano: 'Unimed',
+      carteirinha: '0099887766', telefone: '(27) 99999-0000', email: 'r@teste.local',
+      endereco: 'Rua das Flores, 100', nome_mae: 'MARIA DE SOUZA', nome_pai: 'JOAO LIMA',
+      responsavel_legal: 'CARLA LIMA', responsavel_parentesco: 'Filha', apartamento: true
+    };
+    store.setList('pacientes', [pac]);
+
+    const esperado = {
+      pre: [['nome', 'ROSANGELA DE SOUZA LIMA'], ['convenio', 'Unimed'], ['nasc', '1958-03-12']],
+      anestesia: [['paciente_nome', 'ROSANGELA DE SOUZA LIMA'], ['paciente_nasc', '1958-03-12'],
+        ['paciente_convenio', 'Unimed'], ['paciente_carteirinha', '0099887766'],
+        ['paciente_mae', 'MARIA DE SOUZA'], ['paciente_prontuario', '44821']],
+      consulta: [['nome', 'ROSANGELA DE SOUZA LIMA'], ['convenio', 'Unimed']],
+      termo: [['nome', 'ROSANGELA DE SOUZA LIMA'], ['nascimento', '1958-03-12']]
+    };
+
+    for (const mod of ['pre', 'anestesia', 'consulta', 'termo']) {
+      ui.navegar(mod);
+      await new Promise(res => setTimeout(res, 450));
+      const formId = 'form-' + mod;
+      const f = document.getElementById(formId);
+      if (!f) { out.porModulo[mod] = 'sem formulário'; continue; }
+      utils.clearForm(formId);
+      autocomplete._aplicarPaciente(formId, pac);
+      await new Promise(res => setTimeout(res, 120));
+      const leu = (n) => ((f.querySelector('[name="' + n + '"]') || {}).value || '');
+      const faltando = [];
+      (esperado[mod] || []).forEach(([campo, valor]) => {
+        if (leu(campo) !== valor) faltando.push(campo + '="' + leu(campo) + '" (esperado "' + valor + '")');
+      });
+      /* o que o módulo TEM e o cadastro preencheu */
+      const extras = {};
+      ['nasc', 'nascimento', 'cpf', 'telefone', 'endereco', 'carteirinha', 'responsavel_legal',
+       'paciente_nasc', 'paciente_carteirinha', 'paciente_telefone', 'paciente_cpf'].forEach(n => {
+        if (f.querySelector('[name="' + n + '"]')) extras[n] = leu(n);
+      });
+      out.porModulo[mod] = { faltando: faltando, campos: extras };
+    }
+
+    /* o que já está na tela NÃO é sobrescrito */
+    ui.navegar('pre');
+    await new Promise(res => setTimeout(res, 400));
+    const fp = document.getElementById('form-pre');
+    utils.clearForm('form-pre');
+    const conv = fp.querySelector('[name="convenio"]');
+    if (conv) conv.value = 'Particular';
+    autocomplete._aplicarPaciente('form-pre', pac);
+    out.naoSobrescreve = conv ? conv.value === 'Particular' : null;
+    return out;
+  });
+  Object.keys(r.porModulo).forEach(mod => {
+    const m = r.porModulo[mod];
+    if (typeof m === 'string') return;
+    assert(m.faltando.length === 0,
+      'no módulo ' + mod + ' o cadastro não chegou: ' + JSON.stringify(m.faltando));
+  });
+  const ane = r.porModulo.anestesia || {};
+  assert((ane.campos || {}).paciente_nasc === '1958-03-12',
+    'a data de nascimento é a queixa dele por nome, e tem de chegar; veio ' + JSON.stringify(ane.campos));
+  /* os campos que ANTES ficavam para trás, módulo a módulo */
+  const sobraram = [];
+  Object.keys(r.porModulo).forEach(mod => {
+    const m = r.porModulo[mod];
+    if (typeof m === 'string') return;
+    Object.keys(m.campos || {}).forEach(campo => {
+      if (m.campos[campo] === '') sobraram.push(mod + '.' + campo);
+    });
+  });
+  assert(sobraram.length === 0,
+    'campo que o módulo TEM e o cadastro preencheu não pode chegar vazio: ' + JSON.stringify(sobraram));
+  assert(r.naoSobrescreve === true,
+    'convênio já digitado não pode ser trocado pelo do cadastro: o que está na tela é dele');
+  await page.close();
+});
+
+/* 278b) ACOMODAÇÃO: ENFERMARIA, APARTAMENTO E A REGRA DO AMBULATORIAL
+
+   "Quando for por plano de saúde, pode ser acomodação enfermaria, apartamento
+   ou ambulatorial — ambulatorial o valor é igual ao de enfermaria, mesmo
+   quando o plano do paciente for apartamento."
+
+   A última parte é a que importa, e é contraintuitiva: a acomodação que vale
+   para o PREÇO é onde o ato foi feito, não a que o paciente tem direito. Cobrar
+   apartamento por um procedimento de ambulatório é cobrar errado — e é o que
+   aconteceria se o sistema olhasse só o cadastro do paciente.
+
+   A escolha de tabela por acomodação é ADITIVA: só vale quando ele cadastrou
+   uma tabela para aquele plano naquela acomodação. Não havendo, cai na tabela
+   do plano, que é exatamente como era — nenhuma configuração existente muda de
+   comportamento. */
+await test('Faturamento por acomodação: ambulatorial paga como enfermaria, mesmo em plano de apartamento', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    __smokeBindOrg('org-acom');
+
+    /* a regra, sozinha */
+    out.ambulatorialViraEnfermaria = precos.acomodacaoDeCobranca('Ambulatorial') === 'enfermaria';
+    out.ambulatorioTambem = precos.acomodacaoDeCobranca('ambulatório') === 'enfermaria';
+    out.apartamentoFica = precos.acomodacaoDeCobranca('Apartamento') === 'apartamento';
+    out.aptoFica = precos.acomodacaoDeCobranca('apto') === 'apartamento';
+    out.enfermariaFica = precos.acomodacaoDeCobranca('Enfermaria') === 'enfermaria';
+    out.vazioFicaVazio = precos.acomodacaoDeCobranca('') === '';
+
+    /* duas tabelas do MESMO plano, com valores diferentes por acomodação */
+    const cfg = { tabelasAnest: {
+      'tab-enf': { nome: 'Amil enfermaria', tipo: 'anest', valores: { 3: 400 } },
+      'tab-apt': { nome: 'Amil apartamento', tipo: 'anest', valores: { 3: 700 } }
+    } };
+    orcamento.tabelasAnest = () => cfg.tabelasAnest;
+    const mapa = {};
+    orcamento.cfg = () => ({ tabelaPorConvenio: mapa, tabelaAtiva: 'tab-enf' });
+    orcamento.salvarCfg = (o) => { Object.assign(mapa, (o && o.tabelaPorConvenio) || {}); };
+    precos.definirTabelaDoConvenio('Amil', 'tab-enf', 'anest', 'enfermaria');
+    precos.definirTabelaDoConvenio('Amil', 'tab-apt', 'anest', 'apartamento');
+    out.mapa = Object.keys(mapa);
+
+    const tabDe = (acom) => {
+      const t = precos._tabela('anestesia', 'Amil', acom);
+      return t ? t.chave : null;
+    };
+    out.enfermariaUsaEnf = tabDe('enfermaria') === 'tab-enf';
+    out.apartamentoUsaApt = tabDe('apartamento') === 'tab-apt';
+    out.ambulatorialUsaEnf = tabDe('ambulatorial') === 'tab-enf';
+    /* e sem acomodação informada, continua caindo na tabela do plano */
+    precos.definirTabelaDoConvenio('Amil', 'tab-enf', 'anest');
+    out.semAcomodacaoCaiNoPlano = tabDe('') === 'tab-enf';
+    return out;
+  });
+  assert(r.ambulatorialViraEnfermaria && r.ambulatorioTambem,
+    'ambulatorial paga como enfermaria — é a regra que ele descreveu, e a que o sistema não tinha');
+  assert(r.apartamentoFica && r.aptoFica && r.enfermariaFica && r.vazioFicaVazio,
+    'as demais acomodações não mudam, e "não informada" continua não informada');
+  assert(r.enfermariaUsaEnf, 'enfermaria usa a tabela de enfermaria');
+  assert(r.apartamentoUsaApt, 'apartamento usa a de apartamento: era o ponto de ter duas');
+  assert(r.ambulatorialUsaEnf,
+    'e AMBULATORIAL usa a de enfermaria mesmo com a de apartamento cadastrada para o mesmo plano');
+  assert(r.semAcomodacaoCaiNoPlano,
+    'sem acomodação informada, nada muda do que já era — o recurso é aditivo, não uma troca de regra');
+  await page.close();
+});
+
+/* 277b) O MÓDULO QUE ABRE ZERADO E NUNCA MAIS ENCHE
+
+   Foto do celular: Financeiro com "REGISTROS 0" e, ao lado, a tela de
+   "Atendimentos sem lançamento" dizendo 262 — enquanto a clínica tem os
+   lançamentos. Relato: "gerei financeiro corretamente e continua aparecendo
+   sem lançamento".
+
+   A sincronização incremental guarda uma MARCA por módulo: "já tenho tudo até
+   esta data", e daí em diante só pede o que mudou depois. Só que o aparelho
+   PODA o que já está confirmado na nuvem, para não encher — e a marca
+   continuava avançada. O módulo ficava vazio na tela e a sincronização,
+   obediente, não trazia nada: pela marca, não havia nada novo.
+
+   Daí as duas queixas de uma vez: o Financeiro zerado, e a tela de "sem
+   lançamento" listando todo mundo — porque ela decide pelo que enxerga, e não
+   enxergava cobrança nenhuma.
+
+   Lista vazia com marca cheia é uma contradição: a marca é descartada e a
+   descida é completa. */
+await test('Sincronização: módulo vazio com marca avançada desiste da marca e baixa tudo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = { pedidos: [] };
+    __smokeBindOrg('org-marca');
+    store.setList('financeiro', []);        /* podado deste aparelho */
+    store.setList('anestesia', [{ _id: 'a1', paciente: { nome: 'Quem ficou' },
+      _relUpdatedAt: '2026-10-01T10:00:00Z' }]);
+
+    /* a marca diz que já baixamos tudo até outubro */
+    const marcas = { financeiro: '2026-10-10T00:00:00Z', anestesia: '2026-10-10T00:00:00Z' };
+    localStorage.setItem(sincronia.MARCAS_KEY, JSON.stringify(marcas));
+
+    cloudRel.puxarModulo = async (mod, opts) => {
+      out.pedidos.push({ mod: mod, desde: (opts && opts.desde) || '' });
+      if (mod === 'financeiro') {
+        return [{ _id: 'f1', paciente: 'PACIENTE COBRADO', valor_previsto: 500,
+          _relUpdatedAt: '2026-10-05T10:00:00Z' }];
+      }
+      return [];
+    };
+    /* o resto da rodada não interessa a este teste */
+    const mesclouOriginal = cloudRel.mesclarLocal;
+    out.mesclados = 0;
+    cloudRel.mesclarLocal = (mod, remotos) => {
+      if (mod === 'financeiro') out.mesclados += (remotos || []).length;
+      return mesclouOriginal.call(cloudRel, mod, remotos);
+    };
+    cloudRel.empurrarAteParar = async () => ({ enviados: 0, falhas: 0 });
+    cloudRel.drenarFila = async () => 0; cloudRel.drenarFilaDel = async () => 0;
+    cloudRel.drenarConflitos = async () => null;
+    persistenciaCloudFirst.drenar = async () => 0;
+    adendos.enviarPendentes = async () => 0;
+    rascunhosSync.enviarTodos = async () => 0;
+    pdfBackup.drenarFila = async () => 0;
+    cloud.sincronizar = async () => null;
+
+    await sincronia.ciclo();
+    await new Promise(res => setTimeout(res, 300));
+
+    const fin = out.pedidos.find(p => p.mod === 'financeiro') || {};
+    const ane = out.pedidos.find(p => p.mod === 'anestesia') || {};
+    out.financeiroPediuTudo = fin.desde === '';
+    out.anestesiaUsouAMarca = ane.desde === '2026-10-10T00:00:00Z';
+    out.financeiroEncheu = (store.list('financeiro') || []).length;
+    cloudRel.mesclarLocal = mesclouOriginal;
+    return out;
+  });
+  assert(r.financeiroPediuTudo,
+    'módulo vazio com marca avançada tem de pedir TUDO, não o que mudou desde a marca; pedidos: ' +
+    JSON.stringify(r.pedidos));
+  assert(r.anestesiaUsouAMarca,
+    'e o módulo que AINDA TEM registro continua incremental — senão toda passagem rebaixaria o acervo inteiro');
+  assert(r.mesclados >= 1,
+    'e os lançamentos que a clínica devolveu entram na mesclagem deste aparelho; vieram ' + r.mesclados);
+  await page.close();
+});
+
+/* 276b) A FOLHA: CABEÇALHO QUE SE REPETE E COLUNA QUE NÃO INFORMA
+
+   Do PDF que ele mandou, quatro páginas de uma ficha:
+
+   • a tabela de sinais vitais atravessa a quebra e a página 3 começa com
+     "12:25 | 135 | 83 | 100 | 76 | 99" — números soltos, sem saber qual coluna
+     é PAS, PAD ou FC. É o pior tipo de quebra: atrapalha a leitura clínica,
+     não só a estética;
+   • EtCO₂ e Obs saíam em branco nas trinta e duas linhas, estreitando as
+     colunas que de fato têm número;
+   • o resumo da anestesia começava no pé da página 3 e cortava no meio de uma
+     frase.
+
+   Coluna vazia não informa nada e custa largura. Hora, PAS, PAD e FC ficam
+   sempre — são o esqueleto da leitura, e a ausência de um valor NELAS é
+   informação. */
+await test('Folha impressa: cabeçalho repete na quebra, e coluna vazia de ponta a ponta não sai', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    __smokeBindOrg('org-folha');
+    /* uma ficha de raqui com ventilação espontânea: sem EtCO₂, sem Obs */
+    const vitais = [];
+    for (let i = 0; i < 32; i++) {
+      const m = 20 + i * 5;
+      vitais.push({ hora: String(12 + Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'),
+        pas: String(110 + (i % 20)), pad: String(70 + (i % 10)), fc: String(65 + (i % 12)), spo2: '99' });
+    }
+    const doc = {
+      paciente: { nome: 'JAIME ROLANDO PEIXOTO' },
+      procedimento: { descricao: 'Gastrostomia', data: '2026-08-05' },
+      sinais_vitais: vitais
+    };
+    const html = printPreview._buildDe ? printPreview._buildDe('anestesia', doc) : null;
+    /* o construtor real da ficha lê o formulário; aqui basta a tabela */
+    ui.navegar('anestesia');
+    anestesia.carregar(store.save('anestesia', doc));
+    const folha = printPreview._buildAnestesia();
+    out.tamanho = folha.length;
+
+    const bloco = folha.slice(folha.indexOf('Sinais vitais'));
+    const cabecalho = (bloco.match(/<thead>[\s\S]*?<\/thead>/) || [''])[0];
+    out.cabecalho = cabecalho.replace(/<[^>]+>/g, '|').replace(/\|+/g, '|');
+    out.temEtco2 = /EtCO/.test(cabecalho);
+    out.temObs = /Obs/.test(cabecalho);
+    out.temPas = /PAS/.test(cabecalho);
+    out.temFc = /FC/.test(cabecalho);
+    out.temHora = /Hora/.test(cabecalho);
+
+    /* com valor, a coluna volta */
+    const doc2 = JSON.parse(JSON.stringify(doc));
+    doc2.sinais_vitais[3].etco2 = '34';
+    doc2.sinais_vitais[5].observacao = 'extubado';
+    anestesia.carregar(store.save('anestesia', doc2));
+    const folha2 = printPreview._buildAnestesia();
+    const cab2 = (folha2.slice(folha2.indexOf('Sinais vitais')).match(/<thead>[\s\S]*?<\/thead>/) || [''])[0];
+    out.etco2VoltaComValor = /EtCO/.test(cab2);
+    out.obsVoltaComValor = /Obs/.test(cab2);
+
+    /* e as regras de folha estão na folha de estilo da impressão */
+    const css = printPreview._cssImpressao ? printPreview._cssImpressao() : '';
+    return out;
+  });
+  assert(r.temHora && r.temPas && r.temFc,
+    'Hora, PAS e FC são o esqueleto da leitura e ficam sempre; veio: ' + r.cabecalho);
+  assert(!r.temEtco2, 'EtCO₂ vazio nas 32 linhas não pode ocupar coluna; veio: ' + r.cabecalho);
+  assert(!r.temObs, 'Obs vazio nas 32 linhas não pode ocupar coluna; veio: ' + r.cabecalho);
+  assert(r.etco2VoltaComValor, 'bastando UM valor, a coluna volta — senão o conserto esconderia dado');
+  assert(r.obsVoltaComValor, 'o mesmo para Obs: um registro em trinta linhas já justifica a coluna');
+  await page.close();
+});
+
+/* 275b) PROCURAR PACIENTE SEM TER DE PEDIR À NUVEM
+
+   "Ao buscar por paciente em cada módulo, tornar de forma que não precise
+   ficar clicando em buscar na nuvem."
+
+   A busca de cada módulo olhava só o que estava NESTE aparelho. A ficha feita
+   no celular, a de três meses atrás, a do acervo — nada disso aparecia, e para
+   achá-la era preciso reparar num botão e apertá-lo. Quem procura um paciente
+   não deveria precisar saber em qual das duas gavetas ele está.
+
+   O princípio já estava escrito no próprio código, no caminho que ABRE um
+   registro: "Buscar é trabalho do app, não do usuário". Só não valia para
+   procurar. */
+await test('Buscar paciente no módulo acha também o que só está na nuvem, sem pedir', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-busca');
+    store.setList('anestesia', []);
+
+    /* Um paciente que só existe na nuvem desta clínica */
+    const naNuvem = { _id: 'id-nuvem-1', paciente: { nome: 'ROSANGELA DE SOUZA' },
+      procedimento: { descricao: 'Histerectomia', data: '2026-07-10' },
+      data_anestesia: '2026-07-10' };
+    let pedidos = 0;
+    cloudRel.disponivel = () => true;
+    arquivo.procurarNaNuvem = async (termo) => {
+      pedidos++;
+      return String(termo || '').toLowerCase().includes('rosangela')
+        ? [{ mod: 'anestesia', item: naNuvem, nome: 'ROSANGELA DE SOUZA', data: '2026-07-10', aqui: false }]
+        : [];
+    };
+    arquivo._removerDoIndice = () => {};
+
+    historico.abrir('anestesia');
+    await new Promise(res => setTimeout(res, 200));
+    const input = document.getElementById('hist-search-input');
+    out.abriu = !!input;
+    if (!input) return out;
+
+    /* ninguém aperta botão nenhum: só digita */
+    input.value = 'rosangela';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    out.logoDepois = (document.getElementById('hist-tbody') || {}).innerHTML || '';
+    await new Promise(res => setTimeout(res, 1400));
+
+    const tbody = document.getElementById('hist-tbody');
+    out.html = tbody ? tbody.innerHTML : '';
+    out.achou = out.html.includes('ROSANGELA DE SOUZA');
+    out.entrouNaLista = (store.list('anestesia') || []).some(x => x && x._id === 'id-nuvem-1');
+    out.pedidos = pedidos;
+
+    /* digitar de novo o MESMO termo não repete a consulta */
+    input.value = 'rosangela';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(res => setTimeout(res, 1200));
+    out.pedidosDepois = pedidos;
+
+    /* termo curto não consulta nada: 2 letras é tudo e nada */
+    input.value = 'ro';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(res => setTimeout(res, 1200));
+    out.pedidosComTermoCurto = pedidos;
+    try { modal.close(); } catch (e) {}
+    return out;
+  });
+  assert(r.abriu, 'a busca do módulo precisa abrir para o teste valer');
+  assert(r.achou, 'o paciente que só está na nuvem tem de aparecer na busca do módulo, sem clique nenhum');
+  assert(r.entrouNaLista, 'e passa a estar carregado nesta sessão, para abrir sem nova viagem');
+  assert(r.pedidos === 1, 'uma consulta por termo, não uma por tecla; foram ' + r.pedidos);
+  assert(r.pedidosDepois === 1, 'repetir o mesmo termo não repete a consulta; foram ' + r.pedidosDepois);
+  assert(r.pedidosComTermoCurto === 1, 'termo de 2 letras não vai à nuvem; foram ' + r.pedidosComTermoCurto);
+  await page.close();
+});
+
+/* 274b) HORÁRIO DIGITADO NO CARD QUE NÃO CHEGA À LINHA DO TEMPO
+
+   "Ao preencher horários (ventilação, acesso etc, verificar todos os campos)
+   na ficha de anestesia, os mesmos não estão indo automaticamente para a
+   tabulação e o gráfico."
+
+   A fiação existe — cada campo de hora tem o seu `sincronizar` —, então o
+   teste pergunta a coisa certa: percorre TODOS os campos de horário da ficha,
+   digita neles, e cobra que cada um apareça na linha do tempo. Campo que não
+   aparecer é nomeado na falha, em vez de "não funciona bem". */
+await test('Horários dos cards chegam à linha do tempo e ao gráfico — campo a campo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = { faltaram: [], chegaram: [] };
+    __smokeBindOrg('org-horas');
+    store.setList('anestesia', []);
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 700));
+    try { modal.close(); } catch (e) {}
+    document.querySelectorAll('#module-anestesia .card.collapsed').forEach(c => c.classList.remove('collapsed'));
+    const f = document.getElementById('form-anestesia');
+
+    /* a janela da ficha, senão o horário é ajustado para os limites dela */
+    const ent = f.querySelector('[name="hora_sala_entrada"]');
+    if (ent) { ent.value = '08:00'; ent.dispatchEvent(new Event('change', { bubbles: true })); }
+    const sai = f.querySelector('[name="hora_sala_saida"]');
+    if (sai) { sai.value = '12:00'; sai.dispatchEvent(new Event('change', { bubbles: true })); }
+    await new Promise(res => setTimeout(res, 200));
+
+    const horasNaLinha = () => Array.from(
+      document.querySelectorAll('#eventos-body [name="evt_hora[]"]')).map(x => x.value);
+    const tiposNaLinha = () => Array.from(
+      document.querySelectorAll('#eventos-body [name="evt_tipo[]"]')).map(x => x.value);
+
+    /* cada campo de hora da ficha, com o que ele precisa estar preenchido
+       junto (o tipo do bloqueio, o uso da via aérea, o modo da ventilação) */
+    const casos = [
+      { campo: 'hora_cir_inicio', hora: '08:30' },
+      { campo: 'bloqueio_hora', hora: '08:40', antes: () => {
+          const t = f.querySelector('[name="bloqueio_tipo"]'); if (t) t.value = 'Raquianestesia'; } },
+      { campo: 'via_aerea_hora', hora: '08:50', antes: () => {
+          const u = f.querySelector('[name="via_aerea_uso"]'); if (u) u.value = 'Intubação orotraqueal'; } },
+      { campo: 'vent_hora_ini', hora: '09:00', antes: () => {
+          const m = f.querySelector('[name="vent_modo_uso"]'); if (m) m.value = 'mecanica'; } }
+    ];
+    for (const c of casos) {
+      const el = f.querySelector('[name="' + c.campo + '"]');
+      if (!el) { out.faltaram.push(c.campo + ' (campo não existe)'); continue; }
+      if (c.antes) { try { c.antes(); } catch (e) {} }
+      const antes = horasNaLinha().length;
+      el.value = c.hora;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(res => setTimeout(res, 250));
+      const depois = horasNaLinha();
+      if (depois.length > antes || depois.includes(c.hora)) out.chegaram.push(c.campo);
+      else out.faltaram.push(c.campo + ' → ' + c.hora);
+    }
+    out.tipos = tiposNaLinha();
+    out.horas = horasNaLinha();
+
+    /* A REDE: horário digitado SEM o evento `change` disparar — que é o que
+       acontece no celular quando se preenche e vai direto em Salvar. */
+    document.getElementById('eventos-body').innerHTML = '';
+    const semDisparo = [['hora_cir_fim', '11:30'], ['vent_hora_fim', '11:00']];
+    semDisparo.forEach(([campo, hora]) => {
+      const el = f.querySelector('[name="' + campo + '"]');
+      if (el) el.value = hora;                 /* nenhum evento disparado */
+    });
+    out.linhaVaziaAntesDeSalvar = horasNaLinha().length;
+    anestesia.coletarEstruturado();            /* é o que Salvar chama */
+    await new Promise(res => setTimeout(res, 250));
+    out.horasDepoisDeSalvar = horasNaLinha();
+    out.tiposDepoisDeSalvar = tiposNaLinha();
+    /* e o gráfico tem de enxergar os mesmos eventos */
+    let marcasNoGrafico = 0;
+    try {
+      const dados = anestesia.vitais._dadosGrafico ? anestesia.vitais._dadosGrafico() : null;
+      marcasNoGrafico = dados && dados.eventos ? dados.eventos.length : -1;
+    } catch (e) { marcasNoGrafico = -1; }
+    out.marcasNoGrafico = marcasNoGrafico;
+    return out;
+  });
+  assert(r.faltaram.length === 0,
+    'estes horários não chegaram à linha do tempo: ' + JSON.stringify(r.faltaram) +
+    ' (chegaram: ' + JSON.stringify(r.chegaram) + ')');
+  assert(r.horas.length >= 4, 'a linha do tempo deveria ter uma entrada por horário digitado; tem ' +
+    r.horas.length + ': ' + JSON.stringify(r.tipos));
+  assert(r.linhaVaziaAntesDeSalvar === 0, 'o cenário exige a linha do tempo vazia antes de salvar');
+  assert(r.horasDepoisDeSalvar.length >= 2,
+    'horário preenchido sem o campo disparar evento tem de ser recolhido ao salvar — no celular é a regra, não a exceção; ' +
+    'veio ' + JSON.stringify(r.tiposDepoisDeSalvar));
+  assert(r.horasDepoisDeSalvar.includes('11:30') && r.horasDepoisDeSalvar.includes('11:00'),
+    'e com as horas que ele digitou: ' + JSON.stringify(r.horasDepoisDeSalvar));
+  await page.close();
+});
+
+/* 273b) "IMPRIMIR SRPA + FICHA" SAINDO EM BRANCO NO MÓDULO DA SRPA
+
+   Relato: "Botão impressão da SRPA + ficha, no módulo da SRPA, está em branco
+   a página."
+
+   A montagem do arquivo conjunto lê os DOIS FORMULÁRIOS da tela — o da ficha e
+   o da SRPA. Quem está no módulo da SRPA não abriu a ficha nesta sessão: o
+   formulário dela está vazio, e o que sai é a metade de baixo com um espaço em
+   branco por cima.
+
+   O caminho tentava resolver isso carregando a ficha vinculada antes de
+   montar, mas de um jeito que não se sustenta: `try { carregar } catch {}` —
+   que engole qualquer falha — seguido de um `setTimeout` de 250 ms, torcendo
+   para o formulário estar pronto. Se carregar falha, ninguém fica sabendo; se
+   demora, monta vazio do mesmo jeito. Nos dois casos a folha sai branca e a
+   tela não diz nada.
+
+   Agora: confere se a ficha ENTROU no formulário antes de montar, e recusa com
+   motivo se não entrou. */
+await test('Imprimir SRPA + ficha a partir da SRPA: a ficha entra, e a folha não sai em branco', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = { toasts: [] };
+    __smokeBindOrg('org-conj');
+    store.setList('anestesia', []); store.setList('recuperacao', []);
+
+    /* A FICHA É DO ACERVO RECUPERADO: campos PLANOS, não em bloco. É a forma
+       em que estão as 187 que voltaram da quarentena. */
+    location.hash = '#anestesia';
+    await new Promise(r => setTimeout(r, 600));
+    const ficha = store.save('anestesia', {
+      paciente_nome: 'JAIME ROLANDO PEIXOTO', data_anestesia: '2026-10-15',
+      procedimento: 'Gastrostomia', cirurgiao: 'Dr. Jadir', hospital: 'Hospital Teste'
+    });
+    const fichaId = ficha._id;
+    out.fichaCriada = !!fichaId;
+    /* abrir uma ficha dessas tem de preencher o formulário, não só o _id */
+    anestesia.carregar(store.getById('anestesia', fichaId));
+    await new Promise(r => setTimeout(r, 300));
+    const faChk = document.getElementById('form-anestesia');
+    out.abriuNoFormulario = ((faChk.querySelector('[name="paciente_nome"]') || {}).value || '') === 'JAIME ROLANDO PEIXOTO';
+    out.procNoFormulario = ((faChk.querySelector('[name="procedimento"]') || {}).value || '');
+    const srpa = store.save('recuperacao', {
+      paciente_nome: 'JAIME ROLANDO PEIXOTO', data: '2026-10-15', entrada: '14:52'
+    });
+    linker.link('anestesia', ficha._id, 'recuperacao', srpa._id);
+    out.vinculou = !!((store.getById('recuperacao', srpa._id) || {})._links || {}).anestesia_id;
+
+    /* o estado real de quem está na SRPA: a SRPA carregada, a ficha NÃO */
+    location.hash = '#recuperacao';
+    await new Promise(r => setTimeout(r, 600));
+    recuperacao.carregar(store.getById('recuperacao', srpa._id));
+    await new Promise(r => setTimeout(r, 300));
+    utils.clearForm('form-anestesia');
+    out.fichaVaziaAntes = !((document.querySelector('#form-anestesia [name="paciente_nome"]') || {}).value || '');
+
+    const toastOrig = window.toast;
+    window.toast = (m, t) => out.toasts.push(String(t || 'info') + '|' + String(m));
+    try { recuperacao.imprimirComFicha(); } catch (e) { out.lancou = String(e && e.message); }
+    await new Promise(r => setTimeout(r, 2500));
+    window.toast = toastOrig;
+
+    const ppp = document.getElementById('ppp');
+    const html = ppp ? ppp.innerHTML : '';
+    out.tamanho = html.length;
+    out.vezesComONome = (html.match(/JAIME ROLANDO PEIXOTO/g) || []).length;
+    /* AS DUAS METADES TÊM DE TER CONTEÚDO. É isso que "não sai em branco"
+       quer dizer: a faixa de capítulo divide o arquivo, e nenhum dos dois
+       lados pode ser só espaço. */
+    const corte = html.indexOf('2ª parte');
+    out.metadeDeCima = corte > 0 ? corte : 0;
+    out.metadeDeBaixo = corte > 0 ? html.length - corte : 0;
+    out.temCapitulo = html.includes('2ª parte');
+    out.temProcedimento = /Gastrostomia/.test(html);
+    out.overlayAberto = !!document.getElementById('print-preview-overlay').classList.contains('show');
+    out.idNoFormDepois = ((document.querySelector('#form-anestesia [name="_id"]') || {}).value || '');
+    out.idEsperado = fichaId;
+    return out;
+  });
+  assert(r.abriuNoFormulario && /Gastrostomia/.test(r.procNoFormulario || ''),
+    'abrir uma ficha do acervo recuperado tem de preencher o formulário, e não só o _id; veio nome=' +
+    r.abriuNoFormulario + ' proc="' + r.procNoFormulario + '"');
+  assert(r.fichaVaziaAntes, 'o cenário exige o formulário da ficha vazio — é o estado de quem está na SRPA');
+  assert(r.overlayAberto, 'a pré-visualização tem de abrir; avisos: ' + JSON.stringify(r.toasts));
+  assert(r.tamanho > 500, 'a folha não pode sair em branco; veio com ' + r.tamanho + ' caracteres');
+  assert(r.temProcedimento, 'a METADE DE CIMA é a ficha: sem o procedimento dela, saiu só a SRPA ');
+  assert(r.metadeDeCima > 400,
+    'a metade de cima (a ficha) saiu com ' + r.metadeDeCima + ' caracteres — era ela que vinha em branco');
+  assert(r.metadeDeBaixo > 300,
+    'a metade de baixo (a SRPA) saiu com ' + r.metadeDeBaixo + ' caracteres');
+  assert(r.temCapitulo, 'e a faixa que separa as duas partes tem de estar lá');
   await page.close();
 });
 
@@ -20150,7 +21415,7 @@ await test('Em máquina compartilhada, fechar a aba e reabrir não deixa o atend
 
 /* 255) Adendos/correções devem chegar à impressão do registro aberto,
    inclusive ao arquivo único ficha + SRPA, sem modificar o original assinado. */
-await test('Adendos e correções saem na impressão, e a folha avisa que existem', async () => {
+await test('Adendos aparecem na tela do operador e não saem na folha impressa', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     await __smokePrepareQueue('org-impressao-adendos', 'medico-impressao-adendos');
@@ -20204,6 +21469,10 @@ await test('Adendos e correções saem na impressão, e a folha avisa que existe
     out.tamanhoDeLeitura = !!linhaAdendo && parseFloat(getComputedStyle(linhaAdendo).fontSize) >= 11.9;
     out.originalNaFolha = ppp.textContent.includes(registroPre.exames_compl) && ppp.textContent.includes(nome);
     out.somentePacienteAberto = !ppp.textContent.includes(outroPre._adendos[0].texto);
+    /* o operador vê; a folha impressa não leva */
+    const folha = printPreview._htmlDaFolha(ppp);
+    out.foraDaFolha = !folha.includes('print-adendos') && !folha.includes('INFORMAÇÕES ACRESCENTADAS')
+      && folha.includes(nome);
     printPreview.fechar();
 
     /* O mesmo conteúdo deve seguir as duas partes do arquivo único real. */
@@ -20237,6 +21506,7 @@ await test('Adendos e correções saem na impressão, e a folha avisa que existe
     return out;
   });
   assert(r.achouORegistro, 'a impressão acha o registro aberto pelo id do formulário');
+  assert(r.foraDaFolha, 'as informações acrescentadas aparecem na tela, mas não saem na impressão');
   assert(r.temBloco && r.temOConteudo, 'abrir impressão inclui a seção de adendos e o conteúdo da correção');
   assert(r.temAutorEData, 'a correção impressa conserva data e autoria');
   assert(r.dizQueOOriginalEhODeCima && r.contaQuantos, 'a folha distingue o original preservado e informa o número de correções');
@@ -20291,13 +21561,13 @@ await test('Retificação: valores confirmados entram nos campos e na impressão
     printPreview.abrir();
     const texto = document.getElementById('ppp').textContent;
     out.impressaoAtual = texto.includes('14,6') && !texto.includes('VALOR NÃO CONFIRMADO')
-      && texto.includes('VERSÃO ATUAL — RETIFICADA') && texto.includes(contexto.userId)
+      && texto.includes('Documento retificado em') && !texto.includes('VERSÃO ATUAL')
       && !texto.includes('RÓTULO FORJADO NÃO CONFIÁVEL');
     /* O SELO FECHA A FOLHA, NÃO A ABRE. Ele saía em cima, e a primeira coisa
        que a equipe lia — antes do nome do paciente — era um UUID e uma nota de
        versionamento. Procedência se assina no rodapé. Vale para todo documento:
        a ordem é montada num lugar só (printPreview._comporDocumento). */
-    out.seloNoFim = texto.indexOf('VERSÃO ATUAL — RETIFICADA') > texto.indexOf('Paciente Sintético Atual');
+    out.seloNoFim = texto.indexOf('Documento retificado em') > texto.indexOf('Paciente Sintético Atual');
     printPreview.fechar();
     const falso = JSON.parse(JSON.stringify(salvo));
     falso._adendos = [{ ...falso._adendos[0], id: 'evento-forjado-sintetico',

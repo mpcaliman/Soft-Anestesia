@@ -52,18 +52,26 @@ const printPreview = {
     const estado = adendos.estadoRetificacoes(registro, mod);
     const aplicadas = estado.aplicadas || [], conflitos = estado.conflitos || [], pendentes = estado.pendentes || [];
     if (!aplicadas.length && !conflitos.length && !pendentes.length) return '';
-    const head = (registro._adendos || []).find(ad => ad && ad.id === estado.headId);
+    const head = aplicadas[aplicadas.length - 1];
     const data = head && (head._serverCreatedAt || head.data);
-    const autoria = head ? [head._authorId || head.autor || '', data ? adendos._fmtData(data) : ''].filter(Boolean).join(' · ') : '';
-    const titulo = aplicadas.length ? 'VERSÃO ATUAL — RETIFICADA' : 'VERSÃO ORIGINAL — RETIFICAÇÃO NÃO APLICADA';
     const aviso = [conflitos.length ? conflitos.length + ' retificação(ões) em conflito' : '',
       pendentes.length ? pendentes.length + ' retificação(ões) pendente(s) de confirmação' : ''].filter(Boolean).join('; ');
-    /* margem em cima, não embaixo: agora ele fecha a folha em vez de abri-la */
-    return '<div class="pp-retificacao' + (aviso ? ' pp-retificacao-alerta' : '') + '" style="border:1px solid #64748b;padding:6px 8px;margin:10px 0 0;font-size:9pt;line-height:1.4;break-inside:avoid">' +
-      '<strong>' + utils.escapeHTML(titulo) + '</strong>' +
-      (autoria ? '<div>' + utils.escapeHTML(autoria) + '</div>' : '') +
-      '<div>O registro original e o histórico de adendos permanecem preservados.</div>' +
-      (aviso ? '<div><strong>' + utils.escapeHTML(aviso) + '.</strong> Esses campos não foram incorporados ao documento.</div>' : '') + '</div>';
+    /* UMA LINHA, SEM INVENTÁRIO.
+       As correções já estão no corpo, cada uma no seu campo — é a versão
+       vigente que se imprime. Na folha basta dizer que o documento foi
+       retificado e quando; listar cada correção, com UUID, era ruído. O aviso
+       de retificação não aplicada é para quem opera: fica só na tela. */
+    const selo = aplicadas.length
+      ? '<div class="pp-retificacao" style="border-top:1px solid #94a3b8;padding:4px 0 0;margin:10px 0 0;font-size:8pt;line-height:1.35;color:#475569;break-inside:avoid">' +
+        'Documento retificado' + (data ? ' em ' + utils.escapeHTML(adendos._fmtData(data)) : '') +
+        '. As correções constam nos campos acima; o registro original permanece preservado no histórico.</div>'
+      : '';
+    const alerta = aviso
+      ? '<div class="pp-retificacao-alerta so-tela" style="border:1px solid #b45309;background:#fff7ed;padding:6px 8px;margin:10px 0 0;font-size:9pt;line-height:1.4">' +
+        '<strong>Só na tela — não sai na impressão:</strong> ' + utils.escapeHTML(aviso) +
+        '. Esses campos não foram incorporados ao documento.</div>'
+      : '';
+    return selo + alerta;
   },
   _comporDocumento(mod, builder) {
     const anterior = printPreview._verCtx;
@@ -250,6 +258,26 @@ const printPreview = {
     }
   },
 
+  /* ESPERAR O FORMULÁRIO ESTAR CARREGADO, EM VEZ DE TORCER POR 250 ms.
+     O arquivo conjunto é montado a partir dos DOIS formulários da tela. Quem
+     está no módulo da SRPA não abriu a ficha nesta sessão, então ela precisa
+     ser carregada antes — e os dois caminhos faziam isso com
+     `try { carregar } catch {}` seguido de um `setTimeout` fixo: se carregar
+     falhava ninguém ficava sabendo, e se demorava montava vazio do mesmo
+     jeito. Nos dois casos saía meia folha, e a tela não dizia nada.
+     Aqui se CONFERE que o registro certo entrou no formulário, com prazo e
+     recusa falada. */
+  _quandoCarregado(formId, idEsperado, aoPronto, aoFalhar) {
+    const inicio = Date.now();
+    const tentar = () => {
+      const f = document.getElementById(formId);
+      const atual = f ? ((f.querySelector('[name="_id"]') || {}).value || '') : '';
+      if (atual && atual === idEsperado) { aoPronto(); return; }
+      if (Date.now() - inicio > 3000) { aoFalhar(); return; }
+      setTimeout(tentar, 80);
+    };
+    tentar();
+  },
   abrirConjunto() {
     try {
       const fAna = document.getElementById('form-anestesia');
@@ -339,7 +367,7 @@ const printPreview = {
       if (!ppp) { toast('Conteúdo de preview não encontrado', 'error'); return; }
 
       const titulo = printPreview._gerarNomeArquivo();
-      const contentHTML = ppp.innerHTML;
+      const contentHTML = printPreview._htmlDaFolha(ppp);
 
       const css = `
         /* margem vertical = 0 remove o cabeçalho/rodapé automático do navegador
@@ -382,20 +410,39 @@ const printPreview = {
         h2 { font-size: calc(10pt * var(--pp-esc, 1)); font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: #2a3441; margin: 9px 0 4px; padding: 0 0 2px 0; background: none; border: none; border-bottom: 1px solid #b5bcc6; page-break-after: avoid; }
         .pp-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 3px 16px; margin-bottom: 6px; font-size: calc(10.5pt * var(--pp-esc, 1)); }
         .pp-grid > .pp-field:only-child, .pp-grid > .pp-block:only-child { grid-column: 1 / -1; }
-        .pp-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+        /* Em três colunas iguais, o NOME e o HOSPITAL quebravam em duas linhas
+           enquanto sobrava espaço à direita. A primeira coluna é a que carrega
+           os textos longos — nome do paciente, nome do hospital, procedimento
+           — e ganha a folga. */
+        .pp-grid.cols-3 { grid-template-columns: 1.7fr 1fr 1fr; }
         .pp-grid.cols-1 { grid-template-columns: 1fr; }
         .pp-field { display: flex; gap: 5px; align-items: baseline; padding: 0; }
         .pp-field .pp-label { font-weight: 600; color: #8a93a0; text-transform: uppercase; font-size: calc(8pt * var(--pp-esc, 1)); letter-spacing: .3px; white-space: nowrap; }
         .pp-field .pp-value { flex: 1; font-size: calc(10.5pt * var(--pp-esc, 1)); color: #1a2332; }
         .pp-block { margin-bottom: 6px; padding: 1px 0; font-size: calc(10.5pt * var(--pp-esc, 1)); }
         .pp-block .pp-label { font-weight: 600; color: #8a93a0; text-transform: uppercase; font-size: calc(8pt * var(--pp-esc, 1)); letter-spacing: .3px; display: block; margin-bottom: 2px; }
-        .pp-block .pp-value { white-space: pre-wrap; color: #1a2332; line-height: 1.35; }
+        .pp-block .pp-value { white-space: pre-wrap; color: #1a2332; line-height: 1.35; orphans: 3; widows: 3; }
+        /* Parágrafo não começa com uma linha solta no pé da folha nem termina
+           com uma linha solta no alto da seguinte — era o que acontecia com o
+           resumo da anestesia, que começava no fim de uma página e cortava no
+           meio de uma frase. */
+        p, .pp-block { orphans: 3; widows: 3; }
         .pp-lab-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 2px 6px; border: 1px solid #d0d5db; border-radius: 4px; padding: 4px 6px; }
         .pp-lab-item { font-size: calc(9.5pt * var(--pp-esc, 1)); white-space: nowrap; }
         .pp-lab-k { color: #8a93a0; font-weight: 600; }
         .pp-lab-v { color: #1a2332; font-weight: 600; }
         .pp-table { width: 100%; border-collapse: collapse; font-size: calc(10pt * var(--pp-esc, 1)); margin-bottom: 6px; page-break-inside: auto; }
         .pp-table tr { page-break-inside: avoid; }
+        /* O CABEÇALHO TEM DE SE REPETIR A CADA FOLHA.
+           A tabela de sinais vitais atravessa a quebra de página, e a folha
+           seguinte começava com números soltos: 135 | 83 | 100 | 76 — sem
+           saber qual coluna é PAS, PAD ou FC. É o pior tipo de quebra, porque
+           atrapalha a leitura clínica, não só a estética. Repetir o cabeçalho
+           é o comportamento padrão do thead, mas ele se perde quando algo no
+           caminho muda o display; declarar os três grupos garante. */
+        .pp-table thead { display: table-header-group; }
+        .pp-table tfoot { display: table-footer-group; }
+        .pp-table tbody { display: table-row-group; }
         .pp-table th, .pp-table td { border: 1px solid #c5cad2; padding: 2px 4px; text-align: left; }
         .pp-table th { background: #f2f4f7; font-size: 8.5pt; text-transform: uppercase; letter-spacing: .4px; color: #5a6472; }
         .pp-checks { display: flex; flex-wrap: wrap; gap: 3px 8px; font-size: 10pt; margin-bottom: 5px; }
@@ -530,7 +577,21 @@ ${TAG_CLOSE_HTML}`;
 
   /* Percorre o preview e monta um PDF de texto estruturado com jsPDF nativo.
      Reconhece cabeçalhos (h1/h2), campos (label+valor) e blocos de texto. */
-  _gerarDocDeTexto(J, ppp) {
+  /* O QUE É DA TELA NÃO VAI PARA A FOLHA.
+     A pré-visualização é também a tela de trabalho de quem opera: nela aparecem
+     os adendos acrescentados depois da finalização e os avisos de retificação
+     pendente. Isso é para o operador — o paciente e o hospital recebem o
+     documento, com as correções já no corpo. Tudo marcado `.so-tela` sai da
+     impressão, do PDF e do texto do SP Data. */
+  _folhaSemTela(ppp) {
+    if (!ppp || typeof ppp.cloneNode !== 'function') return ppp;
+    const c = ppp.cloneNode(true);
+    c.querySelectorAll('.so-tela').forEach(el => el.remove());
+    return c;
+  },
+  _htmlDaFolha(ppp) { return printPreview._folhaSemTela(ppp).innerHTML; },
+  _gerarDocDeTexto(J, pppTela) {
+    const ppp = printPreview._folhaSemTela(pppTela);
     const doc = new J({ unit: 'mm', format: 'a4' });
     const W = 210, H = 297, M = 16;
     const contentW = W - M * 2;
@@ -1337,6 +1398,8 @@ ${TAG_CLOSE_HTML}`;
           ${printPreview._field('Sexo', d.sexo)}
           ${printPreview._field('Data avaliação', utils.formatarData(d.data))}
           ${printPreview._field('Senha / Autorização', d.senha)}
+          ${printPreview._field('CPF', d.cpf)}
+          ${printPreview._field('Convênio', d.convenio)}
         </div>
         <div class="pp-grid">
           ${printPreview._field('Cirurgia', printPreview._cirurgiaDaPre(d))}
@@ -1610,6 +1673,7 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._field('Prontuário', p.prontuario)}
         ${printPreview._field('Convênio', p.convenio)}
         ${printPreview._field('Carteirinha', p.carteirinha)}
+        ${printPreview._field('CPF', p.cpf)}
         ${printPreview._field('Senha / Autorização', p.senha)}
         ${printPreview._field('Procedência / acomodação', p.acomodacao)}
       </div>
@@ -2035,9 +2099,36 @@ ${TAG_CLOSE_HTML}`;
       if (has('cam'))   colsOpcionais.push({ k: 'cam',   label: 'CAM' });
       if (has('diurese')) colsOpcionais.push({ k: 'diurese', label: 'Diurese mL' });
 
-      const cabec = '<table class="pp-table"><thead><tr><th>Hora</th><th>PAS</th><th>PAD</th><th>PAM</th><th>FC</th><th>SpO₂</th><th>EtCO₂</th><th>FR</th>' +
+      /* COLUNA VAZIA NÃO INFORMA NADA, E CUSTA LARGURA.
+         As colunas fixas eram impressas sempre, mesmo sem um único valor em
+         trinta linhas: numa ficha de raqui com ventilação espontânea, EtCO₂ e
+         Obs saíam em branco de ponta a ponta, estreitando as colunas que de
+         fato têm número e empurrando a tabela para uma folha a mais. As
+         opcionais já eram escolhidas assim; as fixas, não.
+         Hora, PAS, PAD e FC ficam sempre — são o esqueleto da leitura, e a
+         ausência delas numa linha é informação. */
+      const temValor = (campo) => d.sinais_vitais.some(v => {
+        if (!v || !v.hora) return false;
+        const x = v[campo];
+        return x !== undefined && x !== null && String(x).trim() !== '';
+      });
+      const pamDerivavel = d.sinais_vitais.some(v => v && v.hora &&
+        String(v.pam || '').trim() === '' && String(v.pas || '').trim() !== '' && String(v.pad || '').trim() !== '');
+      const colsFixas = [
+        { k: 'hora', label: 'Hora', sempre: true },
+        { k: 'pas',  label: 'PAS',  sempre: true },
+        { k: 'pad',  label: 'PAD',  sempre: true },
+        { k: 'pam',  label: 'PAM',  sempre: temValor('pam') || pamDerivavel },
+        { k: 'fc',   label: 'FC',   sempre: true },
+        { k: 'spo2', label: 'SpO₂', sempre: temValor('spo2') },
+        { k: 'etco2', label: 'EtCO₂', sempre: temValor('etco2') },
+        { k: 'fr',   label: 'FR',   sempre: temValor('fr') }
+      ].filter(c => c.sempre);
+      const temObs = temValor('observacao');
+      const cabec = '<table class="pp-table"><thead><tr>' +
+        colsFixas.map(c => '<th>' + c.label + '</th>').join('') +
         colsOpcionais.map(c => '<th>' + c.label + '</th>').join('') +
-        '<th>Obs</th></tr></thead><tbody>';
+        (temObs ? '<th>Obs</th>' : '') + '</tr></thead><tbody>';
 
       html += printPreview._section('Sinais vitais',
         graficoHTML +
@@ -2053,20 +2144,13 @@ ${TAG_CLOSE_HTML}`;
           if (!pam && pas && pad) {
             pam = Math.round((parseFloat(pas) + 2 * parseFloat(pad)) / 3);
           }
-          return `
-          <tr>
-            <td>${utils.escapeHTML(v.hora)}</td>
-            <td>${utils.escapeHTML(pas)}</td>
-            <td>${utils.escapeHTML(pad)}</td>
-            <td>${utils.escapeHTML(pam)}</td>
-            <td>${utils.escapeHTML(v.fc || '')}</td>
-            <td>${utils.escapeHTML(v.spo2 || '')}</td>
-            <td>${utils.escapeHTML(v.etco2 || '')}</td>
-            <td>${utils.escapeHTML(v.fr || '')}</td>
-            ${colsOpcionais.map(c => '<td>' + utils.escapeHTML(v[c.k] || '') + '</td>').join('')}
-            <td>${utils.escapeHTML(v.observacao || '')}</td>
-          </tr>
-        `;
+          const valor = { hora: v.hora, pas: pas, pad: pad, pam: pam,
+            fc: v.fc || '', spo2: v.spo2 || '', etco2: v.etco2 || '', fr: v.fr || '' };
+          return '<tr>' +
+            colsFixas.map(c => '<td>' + utils.escapeHTML(valor[c.k] || '') + '</td>').join('') +
+            colsOpcionais.map(c => '<td>' + utils.escapeHTML(v[c.k] || '') + '</td>').join('') +
+            (temObs ? '<td>' + utils.escapeHTML(v.observacao || '') + '</td>' : '') +
+            '</tr>';
         }).join('') + '</tbody></table>'
       );
     }
