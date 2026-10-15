@@ -17581,6 +17581,100 @@ await test('Rascunhos: cópia preservada não desce da nuvem, e as abas param de
   await page.close();
 });
 
+/* 273b) "IMPRIMIR SRPA + FICHA" SAINDO EM BRANCO NO MÓDULO DA SRPA
+
+   Relato: "Botão impressão da SRPA + ficha, no módulo da SRPA, está em branco
+   a página."
+
+   A montagem do arquivo conjunto lê os DOIS FORMULÁRIOS da tela — o da ficha e
+   o da SRPA. Quem está no módulo da SRPA não abriu a ficha nesta sessão: o
+   formulário dela está vazio, e o que sai é a metade de baixo com um espaço em
+   branco por cima.
+
+   O caminho tentava resolver isso carregando a ficha vinculada antes de
+   montar, mas de um jeito que não se sustenta: `try { carregar } catch {}` —
+   que engole qualquer falha — seguido de um `setTimeout` de 250 ms, torcendo
+   para o formulário estar pronto. Se carregar falha, ninguém fica sabendo; se
+   demora, monta vazio do mesmo jeito. Nos dois casos a folha sai branca e a
+   tela não diz nada.
+
+   Agora: confere se a ficha ENTROU no formulário antes de montar, e recusa com
+   motivo se não entrou. */
+await test('Imprimir SRPA + ficha a partir da SRPA: a ficha entra, e a folha não sai em branco', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = { toasts: [] };
+    __smokeBindOrg('org-conj');
+    store.setList('anestesia', []); store.setList('recuperacao', []);
+
+    /* A FICHA É DO ACERVO RECUPERADO: campos PLANOS, não em bloco. É a forma
+       em que estão as 187 que voltaram da quarentena. */
+    location.hash = '#anestesia';
+    await new Promise(r => setTimeout(r, 600));
+    const ficha = store.save('anestesia', {
+      paciente_nome: 'JAIME ROLANDO PEIXOTO', data_anestesia: '2026-10-15',
+      procedimento: 'Gastrostomia', cirurgiao: 'Dr. Jadir', hospital: 'Hospital Teste'
+    });
+    const fichaId = ficha._id;
+    out.fichaCriada = !!fichaId;
+    /* abrir uma ficha dessas tem de preencher o formulário, não só o _id */
+    anestesia.carregar(store.getById('anestesia', fichaId));
+    await new Promise(r => setTimeout(r, 300));
+    const faChk = document.getElementById('form-anestesia');
+    out.abriuNoFormulario = ((faChk.querySelector('[name="paciente_nome"]') || {}).value || '') === 'JAIME ROLANDO PEIXOTO';
+    out.procNoFormulario = ((faChk.querySelector('[name="procedimento"]') || {}).value || '');
+    const srpa = store.save('recuperacao', {
+      paciente_nome: 'JAIME ROLANDO PEIXOTO', data: '2026-10-15', entrada: '14:52'
+    });
+    linker.link('anestesia', ficha._id, 'recuperacao', srpa._id);
+    out.vinculou = !!((store.getById('recuperacao', srpa._id) || {})._links || {}).anestesia_id;
+
+    /* o estado real de quem está na SRPA: a SRPA carregada, a ficha NÃO */
+    location.hash = '#recuperacao';
+    await new Promise(r => setTimeout(r, 600));
+    recuperacao.carregar(store.getById('recuperacao', srpa._id));
+    await new Promise(r => setTimeout(r, 300));
+    utils.clearForm('form-anestesia');
+    out.fichaVaziaAntes = !((document.querySelector('#form-anestesia [name="paciente_nome"]') || {}).value || '');
+
+    const toastOrig = window.toast;
+    window.toast = (m, t) => out.toasts.push(String(t || 'info') + '|' + String(m));
+    try { recuperacao.imprimirComFicha(); } catch (e) { out.lancou = String(e && e.message); }
+    await new Promise(r => setTimeout(r, 2500));
+    window.toast = toastOrig;
+
+    const ppp = document.getElementById('ppp');
+    const html = ppp ? ppp.innerHTML : '';
+    out.tamanho = html.length;
+    out.vezesComONome = (html.match(/JAIME ROLANDO PEIXOTO/g) || []).length;
+    /* AS DUAS METADES TÊM DE TER CONTEÚDO. É isso que "não sai em branco"
+       quer dizer: a faixa de capítulo divide o arquivo, e nenhum dos dois
+       lados pode ser só espaço. */
+    const corte = html.indexOf('2ª parte');
+    out.metadeDeCima = corte > 0 ? corte : 0;
+    out.metadeDeBaixo = corte > 0 ? html.length - corte : 0;
+    out.temCapitulo = html.includes('2ª parte');
+    out.temProcedimento = /Gastrostomia/.test(html);
+    out.overlayAberto = !!document.getElementById('print-preview-overlay').classList.contains('show');
+    out.idNoFormDepois = ((document.querySelector('#form-anestesia [name="_id"]') || {}).value || '');
+    out.idEsperado = fichaId;
+    return out;
+  });
+  assert(r.abriuNoFormulario && /Gastrostomia/.test(r.procNoFormulario || ''),
+    'abrir uma ficha do acervo recuperado tem de preencher o formulário, e não só o _id; veio nome=' +
+    r.abriuNoFormulario + ' proc="' + r.procNoFormulario + '"');
+  assert(r.fichaVaziaAntes, 'o cenário exige o formulário da ficha vazio — é o estado de quem está na SRPA');
+  assert(r.overlayAberto, 'a pré-visualização tem de abrir; avisos: ' + JSON.stringify(r.toasts));
+  assert(r.tamanho > 500, 'a folha não pode sair em branco; veio com ' + r.tamanho + ' caracteres');
+  assert(r.temProcedimento, 'a METADE DE CIMA é a ficha: sem o procedimento dela, saiu só a SRPA ');
+  assert(r.metadeDeCima > 400,
+    'a metade de cima (a ficha) saiu com ' + r.metadeDeCima + ' caracteres — era ela que vinha em branco');
+  assert(r.metadeDeBaixo > 300,
+    'a metade de baixo (a SRPA) saiu com ' + r.metadeDeBaixo + ' caracteres');
+  assert(r.temCapitulo, 'e a faixa que separa as duas partes tem de estar lá');
+  await page.close();
+});
+
 /* 272b) A FILA QUE "ESTÁ ENVIANDO" HÁ HORAS
 
    Foto do celular: "⏳ Enviando para a nuvem… 271 atendimento(s) aguardam

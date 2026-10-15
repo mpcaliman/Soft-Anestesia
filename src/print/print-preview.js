@@ -250,6 +250,26 @@ const printPreview = {
     }
   },
 
+  /* ESPERAR O FORMULÁRIO ESTAR CARREGADO, EM VEZ DE TORCER POR 250 ms.
+     O arquivo conjunto é montado a partir dos DOIS formulários da tela. Quem
+     está no módulo da SRPA não abriu a ficha nesta sessão, então ela precisa
+     ser carregada antes — e os dois caminhos faziam isso com
+     `try { carregar } catch {}` seguido de um `setTimeout` fixo: se carregar
+     falhava ninguém ficava sabendo, e se demorava montava vazio do mesmo
+     jeito. Nos dois casos saía meia folha, e a tela não dizia nada.
+     Aqui se CONFERE que o registro certo entrou no formulário, com prazo e
+     recusa falada. */
+  _quandoCarregado(formId, idEsperado, aoPronto, aoFalhar) {
+    const inicio = Date.now();
+    const tentar = () => {
+      const f = document.getElementById(formId);
+      const atual = f ? ((f.querySelector('[name="_id"]') || {}).value || '') : '';
+      if (atual && atual === idEsperado) { aoPronto(); return; }
+      if (Date.now() - inicio > 3000) { aoFalhar(); return; }
+      setTimeout(tentar, 80);
+    };
+    tentar();
+  },
   abrirConjunto() {
     try {
       const fAna = document.getElementById('form-anestesia');

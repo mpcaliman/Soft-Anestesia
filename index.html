@@ -4256,7 +4256,19 @@ body.dash-auxiliar #module-dashboard #pendencias-card[data-detail] { display: bl
   text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,.22);
 }
 .faixa-sem-net-subindo{ background: #7a4b12; }
-@media print{ .faixa-sem-net{ display: none !important; } }
+/* A FAIXA AVISA, MAS NÃO PODE TOMAR O LUGAR DE NINGUÉM.
+   Ela é `fixed` no topo com z-index altíssimo e NADA reservava o espaço dela.
+   O cabeçalho é `sticky; top: 0` — ou seja, estaciona exatamente embaixo da
+   faixa, coberto. No celular, onde o aviso ocupa duas ou três linhas, o que
+   sumia era a linha inteira do cabeçalho, com o ☰ junto: o aviso de que tudo
+   está sendo salvo tapava o botão de navegar.
+   Agora o corpo reserva a altura REAL da faixa (medida, porque ela cresce
+   conforme o texto) e os dois elementos grudentos — cabeçalho e menu lateral —
+   passam a estacionar abaixo dela, em vez de atrás. */
+body.com-faixa-net{ padding-top: var(--faixa-net-h, 0px); }
+body.com-faixa-net .app-header{ top: var(--faixa-net-h, 0px); }
+body.com-faixa-net .sidebar{ top: var(--faixa-net-h, 0px); height: calc(100vh - var(--faixa-net-h, 0px)); max-height: calc(100vh - var(--faixa-net-h, 0px)); }
+@media print{ .faixa-sem-net{ display: none !important; } body.com-faixa-net{ padding-top: 0 !important; } }
 .espaco-faixa{
   position: fixed; left: 10px; right: 10px; bottom: 84px; z-index: 950;
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -4288,8 +4300,12 @@ body.dash-auxiliar #module-dashboard #pendencias-card[data-detail] { display: bl
     justify-content: space-between;
     box-shadow: 0 8px 24px rgba(15,37,64,.4);
   }
-  .bottom-nav a {
+  .bottom-nav a, .bottom-nav button {
     flex: 1;
+    background: transparent;
+    border: 0;
+    font-family: inherit;
+    cursor: pointer;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -4303,7 +4319,7 @@ body.dash-auxiliar #module-dashboard #pendencias-card[data-detail] { display: bl
     min-height: 48px;
     justify-content: center;
   }
-  .bottom-nav a .bn-icon { font-size: 1.15rem; line-height: 1.1; }
+  .bottom-nav a .bn-icon, .bottom-nav button .bn-icon { font-size: 1.15rem; line-height: 1.1; }
   .bottom-nav a.active { background: var(--primary); color: #fff; }
   .bottom-nav .bn-menu { flex: 0 0 52px; }
   .main { padding-bottom: 84px !important; }
@@ -4830,7 +4846,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-14o</b><br>
+    v7.1 · build <b id="build-tag">2026-10-15a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -4840,7 +4856,15 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
   <a href="#agenda" data-bn="agenda"><span class="bn-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="3"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="16" y1="2" x2="16" y2="6"></line></svg></span>Agenda</a>
   <a href="#anestesia" data-bn="anestesia"><span class="bn-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 2l4 4"></path><path d="M17 7l-1.5-1.5"></path><path d="M19 5L8 16l-4 1 1-4L16 2"></path><path d="M8 16l-3 3"></path></svg></span>Ficha</a>
   <a href="#financeiro" data-bn="financeiro"><span class="bn-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"></rect><path d="M3 10h18"></path><path d="M7 15h4"></path></svg></span>Financeiro</a>
-  <a href="javascript:ui.toggleSidebar()" class="bn-menu"><span class="bn-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="17" x2="20" y2="17"></line></svg></span>Menu</a>
+  <!-- BOTÃO MORTO POR CONSTRUÇÃO, E ERA O ÚNICO MENU DO CELULAR.
+       Este item era `href="javascript:ui.toggleSidebar()"`. A política de
+       segurança do pacote publicado proíbe código dentro de atributo, e a
+       compilação troca QUALQUER href "javascript:" por um `href="#"` inerte —
+       de propósito, para que nada executável atravesse. Só que os handlers
+       `onclick` ela COMPILA, e os `javascript:` ela apenas descarta: o botão
+       continuava desenhado, clicável e sem fazer absolutamente nada.
+       Vira botão de verdade com onclick, que é o caminho compilado. -->
+  <button type="button" class="bn-menu" onclick="ui.toggleSidebar()" aria-label="Abrir menu"><span class="bn-icon"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="17" x2="20" y2="17"></line></svg></span>Menu</button>
 </nav>
 <script>
 (function(){
@@ -12470,7 +12494,7 @@ const conexao = {
       const fora = conexao.offline();
       const pend = conexao.pendentes();
       const el = document.getElementById(conexao.ID);
-      if (!fora && !pend) { if (el) el.remove(); return; }
+      if (!fora && !pend) { if (el) el.remove(); conexao._reservarEspaco(null); return; }
       const div = el || document.createElement('div');
       div.id = conexao.ID;
       div.className = 'faixa-sem-net' + (fora ? '' : ' faixa-sem-net-subindo');
@@ -12482,8 +12506,42 @@ const conexao = {
           ' O envio recomeça sozinho quando a internet voltar.</span>'
         : '<span>⏳ <b>Enviando para a nuvem…</b> ' + quanto + conexao._andamento(pend) + '</span>';
       if (!el) document.body.appendChild(div);
+      conexao._reservarEspaco(div);
     } catch (e) {}
   },
+  /* A altura é MEDIDA, não chutada: a faixa tem uma, duas ou três linhas
+     conforme o texto e a largura da tela, e um valor fixo ou sobraria espaço
+     em branco ou continuaria cobrindo o cabeçalho. */
+  _reservarEspaco(div) {
+    try {
+      const corpo = document.body;
+      if (!div) {
+        corpo.classList.remove('com-faixa-net');
+        corpo.style.removeProperty('--faixa-net-h');
+        return;
+      }
+      const medir = () => {
+        try {
+          const h = Math.ceil(div.getBoundingClientRect().height);
+          if (h > 0) {
+            corpo.style.setProperty('--faixa-net-h', h + 'px');
+            corpo.classList.add('com-faixa-net');
+          }
+        } catch (e) {}
+      };
+      medir();
+      /* o texto pode reflow depois da fonte carregar ou ao girar a tela */
+      requestAnimationFrame(medir);
+      if (!conexao._medidorLigado) {
+        conexao._medidorLigado = true;
+        window.addEventListener('resize', () => {
+          const atual = document.getElementById(conexao.ID);
+          if (atual) conexao._reservarEspaco(atual);
+        });
+      }
+    } catch (e) {}
+  },
+  _medidorLigado: false,
   /* NINGUÉM CLICA EM "SAIR" NUM COMPUTADOR DE HOSPITAL. A pessoa fecha a aba,
      desliga o monitor, ou simplesmente levanta. Toda a limpeza que dependia
      do botão Sair nunca acontecia justamente na máquina em que ela mais
@@ -17223,8 +17281,17 @@ const recuperacao = {
     const fichaId = doc && doc._links && doc._links.anestesia_id;
     const ficha = fichaId ? store.getById('anestesia', fichaId) : null;
     if (!ficha) { toast('Esta SRPA não tem ficha de anestesia vinculada.', 'warn'); return; }
-    try { anestesia.carregar(ficha); } catch (e) {}
-    setTimeout(() => printPreview.abrirConjunto(), 250);
+    try { anestesia.carregar(ficha); }
+    catch (e) {
+      console.error('Ficha vinculada não abriu', e);
+      toast('Não consegui abrir a ficha vinculada' + (e && e.message ? ': ' + e.message : '') +
+        '. Abra a ficha e imprima por lá.', 'error');
+      return;
+    }
+    printPreview._quandoCarregado('form-anestesia', ficha._id,
+      () => printPreview.abrirConjunto(),
+      () => toast('A ficha vinculada não terminou de abrir, e sem ela o arquivo sairia pela metade. ' +
+        'Tente de novo, ou abra a ficha e use "Imprimir com SRPA" por lá.', 'error'));
   },
   salvarComoNovo() {
     const f = document.getElementById(recuperacao.formId);
@@ -38680,8 +38747,17 @@ const anestesia = {
     const srpaId = doc && doc._links && doc._links.recuperacao_id;
     const srpa = srpaId ? store.getById('recuperacao', srpaId) : null;
     if (!srpa) { toast('Esta ficha ainda não tem SRPA vinculada — finalize a ficha e escolha uma das opções de SRPA, ou use ⚡ SRPA automática.', 'warn'); return; }
-    try { recuperacao.carregar(srpa); } catch (e) {}
-    setTimeout(() => printPreview.abrirConjunto(), 250);
+    try { recuperacao.carregar(srpa); }
+    catch (e) {
+      console.error('SRPA vinculada não abriu', e);
+      toast('Não consegui abrir a SRPA vinculada' + (e && e.message ? ': ' + e.message : '') +
+        '. Abra a SRPA e imprima por lá.', 'error');
+      return;
+    }
+    printPreview._quandoCarregado('form-recuperacao', srpa._id,
+      () => printPreview.abrirConjunto(),
+      () => toast('A SRPA vinculada não terminou de abrir, e sem ela o arquivo sairia pela metade. ' +
+        'Tente de novo, ou abra a SRPA e use "Imprimir com a ficha" por lá.', 'error'));
   },
   salvarComoNovo() {
     const f = document.getElementById('form-anestesia');
@@ -38695,6 +38771,19 @@ const anestesia = {
     item = adendos.vigente('anestesia', item);
     anestesia.limparSilencioso();
     anestesia.restaurarEstruturado(item);
+    /* DOIS FORMATOS DE FICHA, E `carregar` SÓ ENXERGAVA UM.
+       `restaurarEstruturado` lê o documento em blocos (`paciente.nome`,
+       `procedimento.descricao`), que é o que o formulário produz. As fichas do
+       acervo recuperado da quarentena, as de versões antigas e as importadas
+       guardam os mesmos dados em campos PLANOS (`paciente_nome`) — e para
+       essas o formulário abria vazio. Daí vinham a ficha em branco ao abrir, a
+       meia folha ao imprimir ficha + SRPA, e a cobrança que não achava o nome.
+       Isto COMPLETA o que ficou em branco, em vez de escolher um formato: uma
+       ficha nova passa exatamente pelo mesmo caminho de antes, e só os campos
+       que sobraram vazios olham para o formato plano. Escolher pelo formato
+       era frágil — um mesmo registro pode ter o paciente em bloco e o
+       pré-anestésico plano. */
+    try { anestesia._completarDoFormatoPlano(item); } catch (e) {}
     try { prontuario.restaurar('anestesia', item._docs); } catch (e) {}
     /* Recalcula derivados após carregar (caso não venham salvos) */
     try { anestesia.calc.imc(); } catch (e) {}
@@ -38795,6 +38884,25 @@ const anestesia = {
     }
     markClean();
   },
+  /* Preenche SOMENTE o que ficou vazio, a partir dos campos planos do
+     registro. Nunca sobrescreve o que o caminho estruturado já colocou: o
+     documento em blocos é a forma de hoje e continua mandando. */
+  _completarDoFormatoPlano(d) {
+    if (!d || typeof d !== 'object') return;
+    const f = document.getElementById('form-anestesia');
+    if (!f) return;
+    f.querySelectorAll('input, select, textarea').forEach(el => {
+      const name = el.name;
+      if (!name || name.endsWith('[]')) return;
+      if (el.type === 'checkbox' || el.type === 'radio') return;
+      if (el.value) return;                       /* já veio do estruturado */
+      const v = d[name];
+      if (v === undefined || v === null || typeof v === 'object') return;
+      el.value = v;
+    });
+    try { anestesia.calc.idade(); anestesia.calc.imc(); } catch (e) {}
+    try { anestesia.calc.duracao(); anestesia.calc.balanco(); } catch (e) {}
+  },
   _restaurarFlat(d) {
     /* compat. com v1 flat */
     const f = document.getElementById('form-anestesia');
@@ -38820,6 +38928,16 @@ const anestesia = {
       if (Array.isArray(d.hidratacao)) d.hidratacao.forEach(h => anestesia.hidra.add(h));
     }
     if (d.assinatura) anestesia.signature.setDataURL(d.assinatura);
+    /* QUAL FICHA ESTÁ ABERTA.
+       O caminho estruturado cria este campo escondido; este aqui não criava, e
+       por isso uma ficha de formato antigo abria com os dados na tela e o
+       sistema sem saber QUAL registro era. Daí em diante tudo o que depende de
+       "a ficha aberta é esta" falhava em silêncio: salvar criaria uma segunda
+       ficha em vez de atualizar, imprimir ficha+SRPA não encontrava o par, e a
+       cobrança não achava a origem. O campo é o mesmo, e a regra também. */
+    let h = f.querySelector('[name="_id"]');
+    if (!h) { h = document.createElement('input'); h.type = 'hidden'; h.name = '_id'; f.appendChild(h); }
+    h.value = (d && d._id) || '';
     anestesia.calc.idade(); anestesia.calc.imc();
     anestesia.calc.duracao(); anestesia.calc.balanco();
     anestesia.vitais.atualizarGrafico();
