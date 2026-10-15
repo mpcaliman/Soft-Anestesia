@@ -10796,6 +10796,58 @@ const page = await novaPagina();
 });
 
 
+/* Edição ao vivo: o eco do próprio salvamento automático não vira conflito,
+   e a lista de conflitos fica com um por documento. */
+await test('Edição ao vivo: eco do próprio salvamento não é conflito, e a lista fica com um conflito por documento', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const ctx = await __smokePrepareQueue('org-eco', 'u-eco');
+    const out = {};
+    cloudRel._limparConflitosMemoria && cloudRel._limparConflitosMemoria();
+    const antes = cloudRel._conflitosLer().filter(x => x.status === 'pending').length;
+    edicaoViva._garantirContexto();
+    /* esta aba enviou {texto, campo}; enquanto isso já se digitou mais */
+    const enviado = { consentimento: 'Paciente ciente dos riscos', procedimento: 'Hernioplastia' };
+    edicaoViva._marcarEnviado('termo', enviado);
+    edicaoViva._mem.set('termo', { id: 'live_termo', mod: 'termo', uid: 'u-eco',
+      dados: { consentimento: 'Paciente ciente dos riscos e benefícios', procedimento: 'Hernioplastia' },
+      _draftVersion: 3, _draftOrg: 'org-eco', remoteConfirmed: false, em: new Date().toISOString() });
+    /* o banco devolve o mesmo conteúdo com as chaves em outra ordem */
+    const eco = { id: 'srv-live', organization_id: 'org-eco', user_id: 'u-eco', module: 'live:termo',
+      doc_id: 'live_termo', version: 4, updated_at: new Date().toISOString(), updated_by: 'u-eco',
+      data: { id: 'live_termo', dados: { procedimento: 'Hernioplastia', consentimento: 'Paciente ciente dos riscos' } } };
+    const tratou = edicaoViva.receberLinha(eco, ctx);
+    out.ecoIgnorado = tratou === false
+      && cloudRel._conflitosLer().filter(x => x.status === 'pending').length === antes;
+    out.versaoAvancou = Number(edicaoViva._mem.get('termo')._draftVersion) === 4;
+    /* conteúdo que esta aba NÃO enviou continua sendo tratado como antes */
+    const outro = Object.assign({}, eco, { version: 5, data: { id: 'live_termo', dados: { consentimento: 'Texto de outro aparelho' } } });
+    edicaoViva.receberLinha(outro, ctx);
+    out.outroAindaConflita = cloudRel._conflitosLer().filter(x => x.status === 'pending').length === antes + 1;
+
+    /* lista: 6 conflitos do mesmo documento + 1 de outro → sobra um de cada */
+    cloudRel.enviarDecisoes = async () => 0;
+    const base = (t) => ({ _id: 'pre-cons', nome: 'Paciente Repetido', obs: t });
+    for (let i = 0; i < 6; i++) {
+      const e = cloudRel.registrarConflito('pre', base('local ' + i), base('nuvem ' + i), { motivo: 'teste' });
+      if (e) e.createdAt = '2026-10-15T17:0' + i + ':00Z';
+    }
+    cloudRel.registrarConflito('pre', { _id: 'pre-outro', obs: 'a' }, { _id: 'pre-outro', obs: 'b' }, { motivo: 'teste' });
+    cloudRel.abrirConflitosPendentes();
+    const restam = cloudRel._conflitosLer().filter(x => x.status === 'pending' && !x.resolutionRequested && x.mod === 'pre');
+    out.restam = restam.map(x => x.legacyId + ':' + (x.proposed && x.proposed.obs));
+    out.umPorDocumento = restam.length === 2 && restam.some(x => x.legacyId === 'pre-cons' && x.proposed.obs === 'local 5')
+      && restam.some(x => x.legacyId === 'pre-outro');
+    try { modal.close(); } catch (e) {}
+    return out;
+  });
+  assert(r.ecoIgnorado, 'o eco do próprio salvamento (mesmo conteúdo, chaves em outra ordem) não abre conflito');
+  assert(r.versaoAvancou, 'e só atualiza o número da versão');
+  assert(r.outroAindaConflita, 'conteúdo que esta aba não enviou continua sendo preservado como conflito');
+  assert(r.umPorDocumento, 'a lista fica com o conflito mais recente de cada documento (veio ' + JSON.stringify(r.restam) + ')');
+  await page.close();
+});
+
 /* Gravação parada em "conflito" na fila cifrada sai quando o servidor prova que
    o conflito foi decidido — e o painel "o que falta?" mostra a fila cifrada. */
 await test('Sync: gravação em conflito sai da fila cifrada quando o servidor confirma a decisão', async () => {

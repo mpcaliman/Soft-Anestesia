@@ -4847,7 +4847,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-15j</b><br>
+    v7.1 · build <b id="build-tag">2026-10-15k</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -12918,8 +12918,23 @@ const edicaoViva = {
     }
     const payload = Object.assign({}, r, { id: 'live_' + mod, updatedAt: r.em });
     delete payload.remoteConfirmed;
+    edicaoViva._marcarEnviado(mod, payload.dados);
     const res = await rascunhosSync.gravarUnico('live:' + mod, payload, contexto);
-    if (!contextoAba.corresponde(contexto) || edicaoViva._mem.get(mod) !== r) return false;
+    if (!contextoAba.corresponde(contexto)) return false;
+    if (edicaoViva._mem.get(mod) !== r) {
+      /* DIGITOU DURANTE O ENVIO. O texto novo ainda não subiu, mas a versão
+         que a nuvem acabou de confirmar é a base dele. Sem levar o número
+         adiante, o próximo envio partia da versão velha, a nuvem recusava como
+         "versão divergente" e nascia um conflito a cada pausa na digitação. */
+      const atual = edicaoViva._mem.get(mod);
+      if (res.remoteConfirmed && atual && res.linha) {
+        const metaAtual = rascunhosSync._daLinha(res.linha, contexto.organizationId);
+        if (Number(metaAtual._draftVersion) > Number(atual._draftVersion || 0)) {
+          atual._draftVersion = metaAtual._draftVersion; atual._draftOrg = contexto.organizationId;
+        }
+      }
+      return false;
+    }
     if (res.remoteConfirmed) {
       const meta = rascunhosSync._daLinha(res.linha, contexto.organizationId);
       Object.assign(r, { _draftVersion: meta._draftVersion, _draftOrg: contexto.organizationId,
@@ -12928,6 +12943,14 @@ const edicaoViva = {
       return true;
     }
     if (res.indisponivel) await edicaoViva._persistirCifrado(mod, r, { indisponivel: true });
+    else if (res.linha && edicaoViva._foiEnviadoAqui(mod, rascunhosSync._daLinha(res.linha, contexto.organizationId).dados)) {
+      /* a versão "divergente" é o nosso próprio envio anterior, que chegou
+         antes da resposta: não é conflito, é só a base atrasada */
+      r._draftVersion = rascunhosSync._daLinha(res.linha, contexto.organizationId)._draftVersion;
+      r._draftOrg = contexto.organizationId;
+      edicaoViva._agendarEnvio(mod);
+      return false;
+    }
     else if (res.linha) {
       cloudRel.registrarConflito(mod, payload, rascunhosSync._daLinha(res.linha, contexto.organizationId),
         { tabela: 'drafts', legacyId: payload.id, operation: 'draft_upsert', organizationId: contexto.organizationId });
@@ -12967,6 +12990,30 @@ const edicaoViva = {
     }
     return { ok: true, adopted: true };
   },
+  /* O QUE ESTA ABA MANDOU — para reconhecer o próprio eco.
+     Cada salvamento automático volta pelo realtime. Se chega enquanto se
+     digita, a tela já tem mais texto do que o que foi enviado, e a comparação
+     com a tela via "outra versão": um conflito por pausa na digitação (foram
+     dezenas no mesmo termo, de 10 em 10 segundos). O que volta igual a algo
+     que esta aba enviou é eco: atualiza o número da versão e mais nada.
+     A comparação é canônica (chaves ordenadas), porque o banco reordena as
+     chaves do JSON e o mesmo conteúdo viria com outra grafia. */
+  _enviadosAqui: new Map(),
+  _canon(v) {
+    if (Array.isArray(v)) return '[' + v.map(edicaoViva._canon).join(',') + ']';
+    if (v && typeof v === 'object') return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + edicaoViva._canon(v[k])).join(',') + '}';
+    return JSON.stringify(v === undefined ? null : v);
+  },
+  _marcarEnviado(mod, dados) {
+    const lista = edicaoViva._enviadosAqui.get(mod) || [];
+    lista.push(edicaoViva._canon(dados || {}));
+    while (lista.length > 8) lista.shift();
+    edicaoViva._enviadosAqui.set(mod, lista);
+  },
+  _foiEnviadoAqui(mod, dados) {
+    const lista = edicaoViva._enviadosAqui.get(mod) || [];
+    return lista.indexOf(edicaoViva._canon(dados || {})) >= 0;
+  },
   receberLinha(linha, contexto) {
     const modulo = String(linha && linha.module || '');
     const mod = modulo.startsWith('live:') ? modulo.slice(5) : '';
@@ -12977,6 +13024,12 @@ const edicaoViva = {
     const local = edicaoViva._mem.get(mod);
     if (local && Number(local._draftVersion) >= Number(linha.version)) return false;
     const remoto = rascunhosSync._daLinha(linha, contexto.organizationId);
+    if (edicaoViva._foiEnviadoAqui(mod, remoto.dados)) {
+      if (local && Number(local._draftVersion || 0) < Number(linha.version)) {
+        local._draftVersion = Number(linha.version); local._draftOrg = contexto.organizationId;
+      }
+      return false;
+    }
     const form = edicaoViva._form(mod);
     const ativo = typeof state !== 'undefined' && state.currentModule === mod;
     const digitado = ativo && form ? edicaoViva._ler(form) : null;
@@ -13130,6 +13183,7 @@ const edicaoViva = {
        em voo conservam a chave capturada do dono anterior; aqui apenas se
        esvazia a visão para a próxima pessoa. */
     edicaoViva._ownerKey = '';
+    edicaoViva._enviadosAqui.clear();
     edicaoViva._garantirContexto();
   },
 
