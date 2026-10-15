@@ -4846,7 +4846,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-15g</b><br>
+    v7.1 · build <b id="build-tag">2026-10-15h</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -5574,6 +5574,9 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
       <div class="dropdown-menu" id="dd-consulta-menu"></div>
     </div>
     <button class="btn" onclick="historico.abrir('consulta')"><span class="icon">🔍</span> Buscar / Histórico</button>
+    <!-- o mesmo botão do card de Seguimento, à mão no topo: no retorno é a
+         primeira coisa que se olha, antes de rolar a ficha inteira -->
+    <button class="btn" id="btn-consulta-hist-paciente" onclick="consulta.seguimento.verHistorico()" title="Consultas anteriores deste paciente"><span class="icon">📋</span> Histórico do paciente</button>
     <div class="action-divider"></div>
     <button class="btn" onclick="printPreview.abrir()"><span class="icon">🖨️</span> Visualizar / Imprimir</button>
     <button class="btn" onclick="consulta.exportar()"><span class="icon">⬇️</span> Exportar</button>

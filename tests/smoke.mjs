@@ -3658,6 +3658,28 @@ await test('Pré: datas dos exames são digitáveis, salvam e saem na impressão
   await page.close();
 });
 
+/* Consulta/dor: o histórico do paciente também no topo */
+await test('Consulta: "Histórico do paciente" no topo abre o mesmo histórico do card de Seguimento', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    ui.navegar('consulta');
+    await new Promise(res => setTimeout(res, 300));
+    const btn = document.getElementById('btn-consulta-hist-paciente');
+    out.noTopo = !!btn && !!btn.closest('#module-consulta .action-bar');
+    document.querySelector('#form-consulta [name="nome"]').value = 'Paciente Do Retorno';
+    btn.click();
+    await new Promise(res => setTimeout(res, 200));
+    out.abriu = document.getElementById('modal-backdrop').classList.contains('show')
+      && /Histórico — Paciente Do Retorno/.test(document.getElementById('modal-title') ? document.getElementById('modal-title').textContent : document.body.textContent);
+    modal.close();
+    return out;
+  });
+  assert(r.noTopo, 'o botão fica na barra do topo da consulta');
+  assert(r.abriu, 'e abre o histórico do paciente');
+  await page.close();
+});
+
 /* Confirmar a cobrança logo depois de finalizar não é retificar o documento */
 await test('Gerar financeiro após finalizar a pré não vira "versão retificada" na impressão', async () => {
   const page = await novaPagina();
