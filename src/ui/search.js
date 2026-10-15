@@ -30,9 +30,67 @@ const historico = {
         input.addEventListener('input', () => {
           const tbody = document.getElementById('hist-tbody');
           if (tbody) tbody.innerHTML = historico._renderLinhas(mod, input.value);
+          historico._procurarNaNuvemSozinho(mod, input.value);
         });
       }
     }, 80);
+  },
+
+  /* PROCURAR NA NUVEM É TRABALHO DO APP, NÃO DELE.
+     A busca de cada módulo olhava só o que já estava NESTE aparelho. O que
+     estivesse apenas na nuvem — a ficha feita no celular, a de três meses
+     atrás, a do acervo — não aparecia, e para achá-la era preciso notar um
+     botão "🔎 Procurar na nuvem" e apertá-lo. Quem está procurando um paciente
+     não deveria precisar saber em qual das duas gavetas ele está: o princípio
+     já estava escrito no próprio código ("Buscar é trabalho do app, não do
+     usuário") e só valia para abrir um registro, não para procurá-lo.
+
+     Dispara sozinho quando a busca local não acha nada — que é exatamente
+     quando o botão fazia falta —, depois de uma pausa na digitação, e nunca
+     mais de uma vez pelo mesmo termo. Sem nuvem disponível não faz nada e não
+     reclama: o botão continua ali para quem quiser insistir. */
+  _nuvemTimer: null,
+  _nuvemBuscados: null,
+  _procurarNaNuvemSozinho(mod, filtro) {
+    const q = String(filtro || '').trim();
+    clearTimeout(historico._nuvemTimer);
+    if (q.length < 3) return;
+    historico._nuvemTimer = setTimeout(async () => {
+      try {
+        const input = document.getElementById('hist-search-input');
+        if (!input || String(input.value || '').trim() !== q) return;   /* ele continuou digitando */
+        /* o que importa é se há REGISTRO, e não se há HTML: o estado vazio
+           também é uma linha de tabela, e conferir o HTML nunca disparava. */
+        const achouAqui = (store.list(mod) || []).some(it =>
+          historico._textoLinha(mod, it).toLowerCase().includes(q.toLowerCase()));
+        if (achouAqui) return;
+        if (!historico._nuvemBuscados) historico._nuvemBuscados = new Set();
+        const chave = mod + '|' + q.toLowerCase();
+        if (historico._nuvemBuscados.has(chave)) return;
+        historico._nuvemBuscados.add(chave);
+        let disponivel = false;
+        try { disponivel = cloudRel.disponivel(); } catch (e) {}
+        if (!disponivel) return;
+        const tbody = document.getElementById('hist-tbody');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="padding:14px;text-align:center;color:var(--text-soft);font-size:.84rem">☁️ procurando na nuvem…</td></tr>';
+        let achados = [];
+        try { achados = await arquivo.procurarNaNuvem(q); } catch (e) { achados = []; }
+        const doModulo = (achados || []).filter(a => a && a.mod === mod && a.item && a.item._id);
+        doModulo.forEach(a => {
+          try {
+            const lst = store.list(mod);
+            if (!lst.some(x => x && x._id === a.item._id)) { lst.push(a.item); store.setList(mod, lst); }
+            arquivo._removerDoIndice(mod, a.item._id);
+          } catch (e) {}
+        });
+        const atual = document.getElementById('hist-search-input');
+        if (!atual || String(atual.value || '').trim() !== q) return;
+        const corpo = document.getElementById('hist-tbody');
+        if (corpo) {
+          corpo.innerHTML = historico._renderLinhas(mod, q);
+        }
+      } catch (e) {}
+    }, 650);
   },
 
   /* Estado de ordenação da tabela de histórico (data | paciente | senha) */

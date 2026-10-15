@@ -37826,7 +37826,45 @@ const anestesia = {
   },
 
   /* ---- COLETAR / RESTAURAR ESTRUTURADO ---- */
+  /* REDE PARA OS HORÁRIOS QUE NÃO DISPARARAM.
+     Cada campo de hora da ficha tem o seu espelhamento para a linha do tempo,
+     e todos funcionam — quando o evento `change` acontece. No celular isso é
+     frágil: o seletor nativo de hora nem sempre o dispara antes de a pessoa
+     tocar em Salvar, e horário preenchido que não vira evento não aparece nem
+     na tabela nem no gráfico. O trabalho fica na tela e some do documento.
+     Esta passagem roda ANTES de coletar e reconcilia tudo de uma vez. É
+     idempotente: `sincronizarHorario` acerta o evento que já existe em vez de
+     criar outro, e campo vazio não gera nada. */
+  sincronizarHorariosDosCards() {
+    const f = document.getElementById('form-anestesia');
+    if (!f) return 0;
+    const v = n => ((f.querySelector('[name="' + n + '"]') || {}).value || '').trim();
+    let n = 0;
+    const porEvento = [
+      ['Entrada em sala', 'hora_sala_entrada'],
+      ['Saída de sala', 'hora_sala_saida'],
+      ['Incisão cirúrgica', 'hora_cir_inicio'],
+      ['Fim da cirurgia', 'hora_cir_fim'],
+      ['Início da anestesia', 'hora_inicio'],
+      ['Fim da anestesia', 'hora_fim'],
+      ['Início da ventilação mecânica', 'vent_hora_ini'],
+      ['Fim da ventilação mecânica', 'vent_hora_fim']
+    ];
+    porEvento.forEach(([tipo, campo]) => {
+      const hora = v(campo);
+      if (!hora) return;
+      try { anestesia.eventos.sincronizarHorario(tipo, hora); n++; } catch (e) {}
+    });
+    /* Bloqueio e via aérea dependem do tipo escolhido no card: sem ele não há
+       evento que faça sentido, e forçar um genérico seria inventar. */
+    try { if (v('bloqueio_hora')) { anestesia.eventos.sincronizarDoBloqueio(); n++; } } catch (e) {}
+    try { if (v('via_aerea_hora')) { anestesia.eventos.sincronizarDaViaAerea(); n++; } } catch (e) {}
+    try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
+    return n;
+  },
   coletarEstruturado() {
+    /* antes de ler o formulário, o que foi digitado nos cards vira evento */
+    try { anestesia.sincronizarHorariosDosCards(); } catch (e) {}
     const f = document.getElementById('form-anestesia');
     const v = name => (f.querySelector(`[name="${name}"]`) || {}).value || '';
     const arr = name => Array.from(f.querySelectorAll(`[name="${name}[]"]:checked`)).map(el => el.value);

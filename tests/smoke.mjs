@@ -17581,6 +17581,177 @@ await test('Rascunhos: cópia preservada não desce da nuvem, e as abas param de
   await page.close();
 });
 
+/* 275b) PROCURAR PACIENTE SEM TER DE PEDIR À NUVEM
+
+   "Ao buscar por paciente em cada módulo, tornar de forma que não precise
+   ficar clicando em buscar na nuvem."
+
+   A busca de cada módulo olhava só o que estava NESTE aparelho. A ficha feita
+   no celular, a de três meses atrás, a do acervo — nada disso aparecia, e para
+   achá-la era preciso reparar num botão e apertá-lo. Quem procura um paciente
+   não deveria precisar saber em qual das duas gavetas ele está.
+
+   O princípio já estava escrito no próprio código, no caminho que ABRE um
+   registro: "Buscar é trabalho do app, não do usuário". Só não valia para
+   procurar. */
+await test('Buscar paciente no módulo acha também o que só está na nuvem, sem pedir', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-busca');
+    store.setList('anestesia', []);
+
+    /* Um paciente que só existe na nuvem desta clínica */
+    const naNuvem = { _id: 'id-nuvem-1', paciente: { nome: 'ROSANGELA DE SOUZA' },
+      procedimento: { descricao: 'Histerectomia', data: '2026-07-10' },
+      data_anestesia: '2026-07-10' };
+    let pedidos = 0;
+    cloudRel.disponivel = () => true;
+    arquivo.procurarNaNuvem = async (termo) => {
+      pedidos++;
+      return String(termo || '').toLowerCase().includes('rosangela')
+        ? [{ mod: 'anestesia', item: naNuvem, nome: 'ROSANGELA DE SOUZA', data: '2026-07-10', aqui: false }]
+        : [];
+    };
+    arquivo._removerDoIndice = () => {};
+
+    historico.abrir('anestesia');
+    await new Promise(res => setTimeout(res, 200));
+    const input = document.getElementById('hist-search-input');
+    out.abriu = !!input;
+    if (!input) return out;
+
+    /* ninguém aperta botão nenhum: só digita */
+    input.value = 'rosangela';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    out.logoDepois = (document.getElementById('hist-tbody') || {}).innerHTML || '';
+    await new Promise(res => setTimeout(res, 1400));
+
+    const tbody = document.getElementById('hist-tbody');
+    out.html = tbody ? tbody.innerHTML : '';
+    out.achou = out.html.includes('ROSANGELA DE SOUZA');
+    out.entrouNaLista = (store.list('anestesia') || []).some(x => x && x._id === 'id-nuvem-1');
+    out.pedidos = pedidos;
+
+    /* digitar de novo o MESMO termo não repete a consulta */
+    input.value = 'rosangela';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(res => setTimeout(res, 1200));
+    out.pedidosDepois = pedidos;
+
+    /* termo curto não consulta nada: 2 letras é tudo e nada */
+    input.value = 'ro';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(res => setTimeout(res, 1200));
+    out.pedidosComTermoCurto = pedidos;
+    try { modal.close(); } catch (e) {}
+    return out;
+  });
+  assert(r.abriu, 'a busca do módulo precisa abrir para o teste valer');
+  assert(r.achou, 'o paciente que só está na nuvem tem de aparecer na busca do módulo, sem clique nenhum');
+  assert(r.entrouNaLista, 'e passa a estar carregado nesta sessão, para abrir sem nova viagem');
+  assert(r.pedidos === 1, 'uma consulta por termo, não uma por tecla; foram ' + r.pedidos);
+  assert(r.pedidosDepois === 1, 'repetir o mesmo termo não repete a consulta; foram ' + r.pedidosDepois);
+  assert(r.pedidosComTermoCurto === 1, 'termo de 2 letras não vai à nuvem; foram ' + r.pedidosComTermoCurto);
+  await page.close();
+});
+
+/* 274b) HORÁRIO DIGITADO NO CARD QUE NÃO CHEGA À LINHA DO TEMPO
+
+   "Ao preencher horários (ventilação, acesso etc, verificar todos os campos)
+   na ficha de anestesia, os mesmos não estão indo automaticamente para a
+   tabulação e o gráfico."
+
+   A fiação existe — cada campo de hora tem o seu `sincronizar` —, então o
+   teste pergunta a coisa certa: percorre TODOS os campos de horário da ficha,
+   digita neles, e cobra que cada um apareça na linha do tempo. Campo que não
+   aparecer é nomeado na falha, em vez de "não funciona bem". */
+await test('Horários dos cards chegam à linha do tempo e ao gráfico — campo a campo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = { faltaram: [], chegaram: [] };
+    __smokeBindOrg('org-horas');
+    store.setList('anestesia', []);
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 700));
+    try { modal.close(); } catch (e) {}
+    document.querySelectorAll('#module-anestesia .card.collapsed').forEach(c => c.classList.remove('collapsed'));
+    const f = document.getElementById('form-anestesia');
+
+    /* a janela da ficha, senão o horário é ajustado para os limites dela */
+    const ent = f.querySelector('[name="hora_sala_entrada"]');
+    if (ent) { ent.value = '08:00'; ent.dispatchEvent(new Event('change', { bubbles: true })); }
+    const sai = f.querySelector('[name="hora_sala_saida"]');
+    if (sai) { sai.value = '12:00'; sai.dispatchEvent(new Event('change', { bubbles: true })); }
+    await new Promise(res => setTimeout(res, 200));
+
+    const horasNaLinha = () => Array.from(
+      document.querySelectorAll('#eventos-body [name="evt_hora[]"]')).map(x => x.value);
+    const tiposNaLinha = () => Array.from(
+      document.querySelectorAll('#eventos-body [name="evt_tipo[]"]')).map(x => x.value);
+
+    /* cada campo de hora da ficha, com o que ele precisa estar preenchido
+       junto (o tipo do bloqueio, o uso da via aérea, o modo da ventilação) */
+    const casos = [
+      { campo: 'hora_cir_inicio', hora: '08:30' },
+      { campo: 'bloqueio_hora', hora: '08:40', antes: () => {
+          const t = f.querySelector('[name="bloqueio_tipo"]'); if (t) t.value = 'Raquianestesia'; } },
+      { campo: 'via_aerea_hora', hora: '08:50', antes: () => {
+          const u = f.querySelector('[name="via_aerea_uso"]'); if (u) u.value = 'Intubação orotraqueal'; } },
+      { campo: 'vent_hora_ini', hora: '09:00', antes: () => {
+          const m = f.querySelector('[name="vent_modo_uso"]'); if (m) m.value = 'mecanica'; } }
+    ];
+    for (const c of casos) {
+      const el = f.querySelector('[name="' + c.campo + '"]');
+      if (!el) { out.faltaram.push(c.campo + ' (campo não existe)'); continue; }
+      if (c.antes) { try { c.antes(); } catch (e) {} }
+      const antes = horasNaLinha().length;
+      el.value = c.hora;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(res => setTimeout(res, 250));
+      const depois = horasNaLinha();
+      if (depois.length > antes || depois.includes(c.hora)) out.chegaram.push(c.campo);
+      else out.faltaram.push(c.campo + ' → ' + c.hora);
+    }
+    out.tipos = tiposNaLinha();
+    out.horas = horasNaLinha();
+
+    /* A REDE: horário digitado SEM o evento `change` disparar — que é o que
+       acontece no celular quando se preenche e vai direto em Salvar. */
+    document.getElementById('eventos-body').innerHTML = '';
+    const semDisparo = [['hora_cir_fim', '11:30'], ['vent_hora_fim', '11:00']];
+    semDisparo.forEach(([campo, hora]) => {
+      const el = f.querySelector('[name="' + campo + '"]');
+      if (el) el.value = hora;                 /* nenhum evento disparado */
+    });
+    out.linhaVaziaAntesDeSalvar = horasNaLinha().length;
+    anestesia.coletarEstruturado();            /* é o que Salvar chama */
+    await new Promise(res => setTimeout(res, 250));
+    out.horasDepoisDeSalvar = horasNaLinha();
+    out.tiposDepoisDeSalvar = tiposNaLinha();
+    /* e o gráfico tem de enxergar os mesmos eventos */
+    let marcasNoGrafico = 0;
+    try {
+      const dados = anestesia.vitais._dadosGrafico ? anestesia.vitais._dadosGrafico() : null;
+      marcasNoGrafico = dados && dados.eventos ? dados.eventos.length : -1;
+    } catch (e) { marcasNoGrafico = -1; }
+    out.marcasNoGrafico = marcasNoGrafico;
+    return out;
+  });
+  assert(r.faltaram.length === 0,
+    'estes horários não chegaram à linha do tempo: ' + JSON.stringify(r.faltaram) +
+    ' (chegaram: ' + JSON.stringify(r.chegaram) + ')');
+  assert(r.horas.length >= 4, 'a linha do tempo deveria ter uma entrada por horário digitado; tem ' +
+    r.horas.length + ': ' + JSON.stringify(r.tipos));
+  assert(r.linhaVaziaAntesDeSalvar === 0, 'o cenário exige a linha do tempo vazia antes de salvar');
+  assert(r.horasDepoisDeSalvar.length >= 2,
+    'horário preenchido sem o campo disparar evento tem de ser recolhido ao salvar — no celular é a regra, não a exceção; ' +
+    'veio ' + JSON.stringify(r.tiposDepoisDeSalvar));
+  assert(r.horasDepoisDeSalvar.includes('11:30') && r.horasDepoisDeSalvar.includes('11:00'),
+    'e com as horas que ele digitou: ' + JSON.stringify(r.horasDepoisDeSalvar));
+  await page.close();
+});
+
 /* 273b) "IMPRIMIR SRPA + FICHA" SAINDO EM BRANCO NO MÓDULO DA SRPA
 
    Relato: "Botão impressão da SRPA + ficha, no módulo da SRPA, está em branco
