@@ -4846,7 +4846,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-15b</b><br>
+    v7.1 · build <b id="build-tag">2026-10-15c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -12532,10 +12532,11 @@ const conexao = {
       const quanto = pend
         ? '<b>' + pend + '</b> atendimento(s) aguardam recibo na <b>fila cifrada</b> deste usuário e clínica.'
         : 'O que você fizer agora será protegido na <b>fila cifrada</b> deste usuário e clínica.';
-      div.innerHTML = fora
+      div.innerHTML = (fora
         ? '<span>📴 <b>SEM INTERNET</b> — pode continuar trabalhando, nada se perde aqui. ' + quanto +
           ' O envio recomeça sozinho quando a internet voltar.</span>'
-        : '<span>⏳ <b>Enviando para a nuvem…</b> ' + quanto + conexao._andamento(pend) + '</span>';
+        : '<span>⏳ <b>Enviando para a nuvem…</b> ' + quanto + conexao._andamento(pend) + '</span>') +
+        (pend ? ' <button type="button" class="btn btn-xs" style="margin-left:6px;background:rgba(255,255,255,.18);color:#fff;border:1px solid rgba(255,255,255,.35)" onclick="conexao.verPendentes()">o que falta?</button>' : '');
       if (!el) document.body.appendChild(div);
       conexao._reservarEspaco(div);
     } catch (e) {}
@@ -12573,6 +12574,77 @@ const conexao = {
     } catch (e) {}
   },
   _medidorLigado: false,
+
+  /* QUAIS SÃO, E POR QUE NÃO FORAM.
+     O número sozinho não distingue "está subindo devagar" de "estes nunca vão
+     subir". A fila GRAVA o motivo de cada falha desde a primeira tentativa, e
+     ninguém mostrava: o aviso dizia "7" e a pessoa só podia esperar. Sete que
+     não andam há horas quase sempre são sete que não vão andar — e aí a
+     resposta é olhar o motivo, não esperar mais. */
+  verPendentes() {
+    const linhas = [];
+    const esc = (v) => utils.escapeHTML(String(v == null ? '' : v));
+    try {
+      (cloudRel._filaLer() || []).forEach(x => {
+        linhas.push({ mod: x.mod, id: x.id, motivo: x.motivo || 'sem motivo registrado',
+          tentativas: x.tentativas || 1, quando: x.ts ? new Date(x.ts).toLocaleString('pt-BR') : '' });
+      });
+    } catch (e) {}
+    let semCarimbo = 0;
+    const exemplos = [];
+    try {
+      Object.keys(arquivo.PRAZOS || {}).forEach(mod => {
+        (store.list(mod) || []).forEach(it => {
+          if (it && it._id && !it._relUpdatedAt) {
+            semCarimbo++;
+            if (exemplos.length < 8) {
+              exemplos.push({ mod: mod, nome: (it.paciente && it.paciente.nome) || it.paciente_nome || it.nome || '(sem nome)',
+                data: it.data_anestesia || it.data || (it._createdAt ? String(it._createdAt).slice(0, 10) : '') });
+            }
+          }
+        });
+      });
+    } catch (e) {}
+    const ultimo = (() => { try { return cloudRel._ultimoEmpurrao; } catch (e) { return null; } })();
+    let corpo = '';
+    if (ultimo) {
+      corpo += '<p style="font-size:.84rem;margin:0 0 10px">Última tentativa de envio: <b>' +
+        (ultimo.enviados || 0) + '</b> subiram, <b>' + (ultimo.falhas || 0) + '</b> falharam' +
+        (ultimo.em ? ' · ' + new Date(ultimo.em).toLocaleTimeString('pt-BR') : '') + '.</p>';
+    }
+    if (linhas.length) {
+      corpo += '<p style="font-weight:600;margin:0 0 6px">Com falha registrada</p>' +
+        '<div style="max-height:30vh;overflow:auto;margin:0 0 12px">' + linhas.map(l =>
+          '<div style="border-bottom:1px solid var(--border);padding:6px 0;font-size:.82rem">' +
+          '<b>' + esc(lixeira.LABELS[l.mod] || l.mod) + '</b> · ' + esc(l.motivo) +
+          '<div style="color:var(--text-mute);font-size:.76rem">' + l.tentativas + ' tentativa(s)' +
+          (l.quando ? ' · desde ' + esc(l.quando) : '') + '</div></div>').join('') + '</div>';
+    }
+    if (semCarimbo) {
+      corpo += '<p style="font-weight:600;margin:0 0 6px">Ainda sem recibo da nuvem (' + semCarimbo + ')</p>' +
+        '<div style="max-height:26vh;overflow:auto;margin:0 0 10px">' + exemplos.map(e =>
+          '<div style="border-bottom:1px solid var(--border);padding:5px 0;font-size:.82rem">' +
+          esc(e.nome) + ' <span style="color:var(--text-mute)">· ' +
+          esc(lixeira.LABELS[e.mod] || e.mod) + (e.data ? ' · ' + esc(e.data) : '') + '</span></div>').join('') +
+        (semCarimbo > exemplos.length ? '<div style="color:var(--text-mute);font-size:.78rem;padding:6px 0">… e mais ' + (semCarimbo - exemplos.length) + '</div>' : '') +
+        '</div>';
+    }
+    if (!corpo) {
+      corpo = '<p style="font-size:.86rem">Nada identificado em falha. Se o número não baixa, toque em <b>Tentar agora</b>.</p>';
+    }
+    corpo += '<p style="font-size:.78rem;color:var(--text-mute);margin:10px 0 0">' +
+      'Nada disso se perde: o que está aqui está guardado neste aparelho, cifrado, e sobe assim que o caminho abrir.</p>';
+    modal.open('⏳ O que ainda não subiu', corpo,
+      '<button class="btn btn-primary" onclick="conexao.tentarAgora()">☁️ Tentar agora</button>' +
+      '<button class="btn" onclick="modal.close()">Fechar</button>');
+  },
+  async tentarAgora() {
+    toast('☁️ Tentando enviar…');
+    try { modal.close(); } catch (e) {}
+    try { await cloudRel.empurrarAteParar({ silent: false }); } catch (e) {}
+    try { await cloudRel.drenarFila(); } catch (e) {}
+    try { conexao.pintar(); } catch (e) {}
+  },
   /* NINGUÉM CLICA EM "SAIR" NUM COMPUTADOR DE HOSPITAL. A pessoa fecha a aba,
      desliga o monitor, ou simplesmente levanta. Toda a limpeza que dependia
      do botão Sair nunca acontecia justamente na máquina em que ela mais
@@ -16224,23 +16296,37 @@ const pre = {
     modal.open('📝 Avaliação finalizada — e o Termo de Consentimento?', html, '');
   },
   /* Inicia o Termo pré-preenchido com dados da Pré-anestésica */
-  _iniciarTermo(preId) {
-    const docPre = store.getById('pre', preId);
-    if (!docPre) { toast('Não encontrei a pré-anestésica para levar ao termo.', 'warn'); return; }
+  _iniciarTermo(preId) { return pre.iniciarTermoDe('pre', preId); },
+  /* O TERMO VEM PREENCHIDO VENHA DE ONDE VIER.
+     Da pré ele nascia com o paciente, o procedimento e o convênio. Da FICHA DE
+     ANESTESIA, o mesmo item do painel de fechamento apenas NAVEGAVA até o
+     módulo: o termo abria em branco, e quem acabara de finalizar a ficha tinha
+     de digitar de novo o nome que estava na tela um segundo antes — no
+     documento que o paciente assina, onde grafia divergente não é detalhe.
+     Um caminho só, que lê os dois formatos de documento. */
+  iniciarTermoDe(mod, id) {
+    const doc = store.getById(mod, id);
+    if (!doc) { toast('Não encontrei o atendimento para levar ao termo.', 'warn'); return; }
+    const p = (doc.paciente && typeof doc.paciente === 'object') ? doc.paciente : {};
+    const pr = (doc.procedimento && typeof doc.procedimento === 'object') ? doc.procedimento : {};
+    const dados = {
+      nome: p.nome || doc.paciente_nome || doc.nome || '',
+      nascimento: p.nascimento || doc.paciente_nasc || doc.nascimento || doc.nasc || '',
+      sexo: p.sexo || doc.paciente_sexo || doc.sexo || '',
+      convenio: p.convenio || doc.paciente_convenio || doc.convenio || doc.plano || '',
+      procedimento: pr.descricao || doc.cirurgia ||
+        (typeof doc.procedimento === 'string' ? doc.procedimento : '') || ''
+    };
     /* Esperar o formulário existir, em vez de apostar 200 ms — ver ui.quandoPronto. */
     ui.irEEntao('termo', '#form-termo', () => {
       termo.novo();
       const f = document.getElementById('form-termo');
       if (!f) return;
       const set = (name, val) => { const el = f.querySelector(`[name="${name}"]`); if (el && val) el.value = val; };
-      set('nome', docPre.nome);
-      set('nascimento', docPre.nascimento);
-      set('sexo', docPre.sexo);
-      set('convenio', docPre.convenio || docPre.plano);
-      set('procedimento', docPre.cirurgia || docPre.procedimento);
+      Object.keys(dados).forEach(k => set(k, dados[k]));
       termo.calcIdade();
-      /* Marca vínculo Pré → Termo */
-      termo._linkPendente = { mod: 'pre', id: preId };
+      /* Marca o vínculo com o documento de origem, seja ele qual for */
+      termo._linkPendente = { mod: mod, id: id };
       toast('📝 Termo pré-preenchido com os dados do paciente');
     });
   },
@@ -27589,7 +27675,9 @@ const fechamento = {
       itens.push({
         chave: 'termo', icone: '📝', rotulo: 'Termo de consentimento (TCLE)',
         feito: existe('termo'), estado: existe('termo') ? 'já existe um para este paciente' : '',
-        acao: () => { fechamento.marcar('termo'); try { ui.navegar('termo'); } catch (e) {} }
+        /* Daqui o termo também nasce preenchido: antes este item só NAVEGAVA
+           até o módulo, e o termo abria em branco. */
+        acao: () => { fechamento.marcar('termo'); try { pre.iniciarTermoDe('anestesia', doc._id); } catch (e) {} }
       });
       itens.push({
         chave: 'srpa', icone: '🛏️', rotulo: 'Recuperação pós-anestésica (SRPA)',

@@ -183,9 +183,46 @@ event('anesthesia_timeline_events', { id: 'event-a', organization_id: organizati
   encounter_id: 'encounter-a', anesthesia_record_id: 'server-ficha-a',
   type: 'event', ts: '2026-10-03T12:00:00Z', updated_at: '2026-10-03T12:00:00Z', payload: { texto: "<img onerror='roubo()'>" } });
 assert.equal(realtime.relacionados('anesthesia_timeline_events').length, 1);
-assert.ok(form.children.some(x => x.children.some(c => c.tagName === 'pre' && c.textContent.includes('<img onerror='))));
+/* O painel descreve em português, sem JSON cru, e nunca interpreta HTML. */
+assert.ok(form.children.some(x => x.children.some(c => c.tagName === 'p' && /Hora: \d{2}:\d{2}/.test(c.textContent || ''))));
+assert.ok(!form.children.some(x => x.children.some(c => c.tagName === 'pre')), 'sem JSON cru na tela');
+assert.ok(!form.children.some(x => x.children.some(c => c.innerHTML)), 'texto, nunca HTML');
 assert.equal(lists.get('anestesia')[0].procedimento, 'versão aberta');
 assert.equal(dispatched.filter(x => x.type === 'soft:clinical-related-change').length, 2);
+/* O ECO DO PRÓPRIO SALVAMENTO NÃO É "OUTRA PESSOA".
+   A secretária salvava a pré, o banco atualizava o atendimento por gatilho, e
+   o realtime devolvia a linha com updated_by = ela mesma: aparecia "atualizado
+   na clínica" com um JSON na tela, sem ninguém ter mexido. */
+const paineisAntes = form.children.length;
+form.children.forEach(x => x.remove && x.remove());
+event('encounters', { id: 'encounter-a', organization_id: organizationId, legacy_id: 'caso-a',
+  version: 3, procedimento: 'Procedimento que eu mesma salvei', updated_at: '2026-10-03T13:00:00Z', updated_by: userId });
+assert.ok(!form.children.some(x => String(x.attrs['data-clinical-update'] || '').startsWith('encounters:')),
+  'o próprio salvamento não abre aviso de atualização');
+/* Mesma linha, só versão/carimbo novos: nada visível mudou, nada a avisar. */
+event('encounters', { id: 'encounter-a', organization_id: organizationId, legacy_id: 'caso-a',
+  version: 4, procedimento: 'Procedimento que eu mesma salvei', updated_at: '2026-10-03T13:05:00Z', updated_by: 'user-b' });
+assert.ok(!form.children.some(x => String(x.attrs['data-clinical-update'] || '').startsWith('encounters:')),
+  'versão nova sem mudança visível não é aviso');
+/* Outra pessoa muda o procedimento: aí sim. */
+event('encounters', { id: 'encounter-a', organization_id: organizationId, legacy_id: 'caso-a',
+  version: 5, procedimento: 'Colega trocou', updated_at: '2026-10-03T13:10:00Z', updated_by: 'user-b' });
+const painelEnc = form.children.find(x => String(x.attrs['data-clinical-update'] || '').startsWith('encounters:'));
+assert.ok(painelEnc, 'mudança real de outra pessoa continua avisada');
+assert.ok(painelEnc.children.some(c => /Procedimento: Colega trocou/.test(c.textContent || '')));
+void paineisAntes;
+
+/* Ficha aberta: o eco com o MESMO conteúdo não é conflito. */
+const conflitosAntesEco = cloudRel._conflitosLer().length;
+const salvoDigitado = sandbox.rascunhos._coletar;
+sandbox.rascunhos._coletar = () => ({ _id: 'ficha-a', procedimento: 'versão aberta', obs: '' });
+event('anesthesia_records', { id: 'server-ficha-a', organization_id: organizationId,
+  encounter_id: 'encounter-a', legacy_id: 'ficha-a', version: 9, updated_at: '2026-10-04', updated_by: userId,
+  data: { _id: 'ficha-a', procedimento: 'versão aberta', obs: null, tags: [] } });
+assert.equal(cloudRel._conflitosLer().length, conflitosAntesEco, 'eco idêntico (vazio = vazio) não vira conflito');
+assert.equal(lists.get('anestesia')[0]._relVersion, 9, 'a versão da nuvem entra, com o recibo');
+sandbox.rascunhos._coletar = salvoDigitado;
+
 const count = realtime._recebidos;
 event('encounters', { id: 'outro', organization_id: 'org-b', legacy_id: 'caso-b', version: 8 });
 assert.equal(realtime._recebidos, count);

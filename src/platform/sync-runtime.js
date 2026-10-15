@@ -303,6 +303,11 @@ const realtime = {
       _id: local._id, _relOrg: contexto.organizationId,
       _relVersion: local._relVersion, _relUpdatedAt: local._relUpdatedAt
     });
+    /* Sem nada diferente não há conflito: é o eco do próprio salvamento (ou
+       de outro aparelho que gravou a mesma coisa). Quem decide é mesclarLocal. */
+    const soDoRemoto = {};
+    Object.keys(remoto).forEach(k => { soDoRemoto[k] = proposto[k]; });
+    if (!cloudRel._camposDivergentes(soDoRemoto, remoto).length) return false;
     const conflito = cloudRel.registrarConflito(mod, proposto, remoto, { motivo: 'realtime_com_edicao_aberta' });
     realtime._avisarConflito(mod, conflito, contexto);
     return true;
@@ -379,18 +384,32 @@ const realtime = {
       const corresponde = tabela === 'encounters'
         ? casos.includes(String(linha.id)) || (casoKey && casoKey === String(linha.legacy_id || ''))
         : mod === 'anestesia' && item && String(item._relId || '') === String(linha.anesthesia_record_id || '');
-      if (corresponde) {
+      /* Só avisa o que outra pessoa mudou de verdade. O próprio salvamento
+         volta pelo realtime (o banco atualiza o atendimento por gatilho), e
+         isso aparecia como "atualizado na clínica" para quem acabou de salvar. */
+      const excluido = tipo === 'DELETE' || !!linha.deleted_at;
+      const fui = linha.updated_by && String(linha.updated_by) === String(contexto.userId || '');
+      const visivel = l => tabela === 'encounters'
+        ? [l.procedimento, l.data_prevista, l.hora_prevista, l.status, l.convenio].map(v => String(v == null ? '' : v)).join('|')
+        : [l.ts, l.type, l.subtype, JSON.stringify(l.payload || null)].join('|');
+      const mudouAlgo = excluido || !anterior || visivel(anterior.linha) !== visivel(linha);
+      if (corresponde && !fui && mudouAlgo) {
         const painel = realtime._painel(chave, mod, tabela === 'encounters'
-          ? '🔄 O atendimento foi atualizado na clínica. Confira a atualização antes de continuar.'
-          : '🔄 A linha do tempo foi atualizada na clínica. Sua ficha em edição foi preservada.', contexto);
+          ? '🔄 Outra pessoa atualizou este atendimento. Confira antes de continuar.'
+          : '🔄 A linha do tempo foi atualizada por outra pessoa. Sua ficha em edição foi preservada.', contexto);
         if (painel) {
-          const detalhe = document.createElement('pre'); detalhe.style.whiteSpace = 'pre-wrap';
-          detalhe.textContent = JSON.stringify(tabela === 'encounters'
-            ? { procedimento: linha.procedimento, data: linha.data_prevista, horario: linha.hora_prevista,
-                status: linha.status, convenio: linha.convenio, versao: linha.version,
-                atualizadoPor: linha.updated_by, atualizadoEm: linha.updated_at, excluido: tipo === 'DELETE' || !!linha.deleted_at }
-            : { hora: linha.ts, tipo: linha.type, subtipo: linha.subtype, valores: linha.payload,
-                atualizadoEm: linha.updated_at, excluido: tipo === 'DELETE' || !!linha.deleted_at }, null, 2);
+          const br = v => { const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? m[3] + '/' + m[2] + '/' + m[1] : String(v || ''); };
+          const hh = v => { const m = String(v || '').match(/(\d{2}:\d{2})/); return m ? m[1] : ''; };
+          const partes = excluido ? ['Este registro foi excluído na clínica.'] : tabela === 'encounters'
+            ? [['Procedimento', linha.procedimento], ['Data', br(linha.data_prevista)], ['Horário', hh(linha.hora_prevista)],
+               ['Situação', linha.status], ['Convênio', linha.convenio]].filter(p => p[1]).map(p => p[0] + ': ' + p[1])
+            : [['Hora', hh(linha.ts)], ['Registro', [linha.type, linha.subtype].filter(Boolean).join(' · ')]]
+              .filter(p => p[1]).map(p => p[0] + ': ' + p[1]);
+          if (linha.updated_at && hh(new Date(linha.updated_at).toTimeString())) {
+            partes.push('Alterado às ' + hh(new Date(linha.updated_at).toTimeString()));
+          }
+          const detalhe = document.createElement('p'); detalhe.style.margin = '6px 0 0';
+          detalhe.textContent = partes.join(' · ');
           painel.appendChild(detalhe);
         }
       }

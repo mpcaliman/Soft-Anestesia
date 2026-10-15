@@ -17581,6 +17581,92 @@ await test('Rascunhos: cópia preservada não desce da nuvem, e as abas param de
   await page.close();
 });
 
+/* 285b) O FLUXO DE FINALIZAÇÃO, CAMINHO POR CAMINHO
+
+   "Conferir o fluxo de finalização do pré, consulta e ficha de anestesia. O
+   menu de fluxo e contrafluxo (financeiro, impressão, SRPA etc.) há caminho
+   que não está funcionando bem."
+
+   "Há caminho que não funciona" não é diagnóstico — é o que se sente quando um
+   entre oito falha e não dá para saber qual. Então o teste percorre TODOS os
+   itens do painel de fechamento nos três módulos e nomeia o que falhar.
+
+   O primeiro que ele achou: a partir da FICHA, o item do termo só NAVEGAVA até
+   o módulo. O termo abria em branco, e quem acabara de finalizar a ficha tinha
+   de redigitar o nome que estava na tela um segundo antes — no documento que o
+   paciente assina. Da pré, o mesmo item já nascia preenchido. */
+await test('Painel de fechamento: todos os caminhos levam a algum lugar, nos três módulos', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = { itens: {}, falhas: [] };
+    __smokeBindOrg('org-fluxo');
+    ['pre', 'consulta', 'anestesia', 'termo', 'recuperacao', 'financeiro'].forEach(m => store.setList(m, []));
+
+    const docs = {
+      pre: store.save('pre', { nome: 'IRACEMA DOS SANTOS', data: '2026-10-15',
+        convenio: 'Unimed', cirurgia: 'Colecistectomia', nascimento: '1970-02-01', sexo: 'Feminino' }),
+      consulta: store.save('consulta', { nome: 'IRACEMA DOS SANTOS', data: '2026-10-15',
+        convenio: 'Unimed', nascimento: '1970-02-01' }),
+      anestesia: store.save('anestesia', { paciente: { nome: 'IRACEMA DOS SANTOS',
+        convenio: 'Unimed', nascimento: '1970-02-01', sexo: 'Feminino' },
+        procedimento: { descricao: 'Colecistectomia', data: '2026-10-15' } })
+    };
+
+    for (const mod of ['pre', 'consulta', 'anestesia']) {
+      const doc = store.getById(mod, docs[mod]._id);
+      const itens = fechamento._itens(mod, doc, {});
+      out.itens[mod] = itens.map(i => i.chave);
+      /* cada item tem rótulo, ícone e ação de verdade */
+      itens.forEach(i => {
+        if (!i.chave || !i.rotulo || typeof i.acao !== 'function') {
+          out.falhas.push(mod + '.' + (i.chave || '?') + ': item incompleto');
+        }
+      });
+    }
+
+    /* O CAMINHO DO TERMO, A PARTIR DA FICHA: tem de abrir PREENCHIDO */
+    store.setList('termo', []);
+    const itensFicha = fechamento._itens('anestesia', store.getById('anestesia', docs.anestesia._id), {});
+    const itemTermo = itensFicha.find(i => i.chave === 'termo');
+    out.fichaTemItemTermo = !!itemTermo;
+    if (itemTermo) {
+      itemTermo.acao();
+      await new Promise(res => setTimeout(res, 900));
+      const f = document.getElementById('form-termo');
+      out.termoDaFicha = {
+        nome: ((f && f.querySelector('[name="nome"]')) || {}).value || '',
+        convenio: ((f && f.querySelector('[name="convenio"]')) || {}).value || '',
+        procedimento: ((f && f.querySelector('[name="procedimento"]')) || {}).value || ''
+      };
+    }
+
+    /* e a partir da PRÉ continua funcionando como antes */
+    store.setList('termo', []);
+    utils.clearForm('form-termo');
+    pre.iniciarTermoDe('pre', docs.pre._id);
+    await new Promise(res => setTimeout(res, 900));
+    const f2 = document.getElementById('form-termo');
+    out.termoDaPre = {
+      nome: ((f2 && f2.querySelector('[name="nome"]')) || {}).value || '',
+      procedimento: ((f2 && f2.querySelector('[name="procedimento"]')) || {}).value || ''
+    };
+    return out;
+  });
+  assert(r.falhas.length === 0, 'itens incompletos no painel: ' + JSON.stringify(r.falhas));
+  assert((r.itens.pre || []).join(',') === 'financeiro,impressao,termo,ficha',
+    'a pré oferece cobrança, impressão, termo e a ficha; veio ' + JSON.stringify(r.itens.pre));
+  assert((r.itens.anestesia || []).join(',') === 'financeiro,impressao,termo,srpa',
+    'a ficha oferece cobrança, impressão, termo e SRPA; veio ' + JSON.stringify(r.itens.anestesia));
+  assert(r.fichaTemItemTermo, 'a ficha tem de oferecer o termo');
+  assert((r.termoDaFicha || {}).nome === 'IRACEMA DOS SANTOS',
+    'da FICHA o termo tem de abrir com o paciente, e não em branco; veio ' + JSON.stringify(r.termoDaFicha));
+  assert(/Colecistectomia/.test((r.termoDaFicha || {}).procedimento || ''),
+    'com o procedimento também; veio ' + JSON.stringify(r.termoDaFicha));
+  assert((r.termoDaPre || {}).nome === 'IRACEMA DOS SANTOS',
+    'e da PRÉ continua como era: o conserto não pode trocar um caminho por outro');
+  await page.close();
+});
+
 /* 284b) O SEGUNDO ANESTESISTA ASSINA IGUAL AO PRIMEIRO
 
    "Há ficha de anestesia em que será necessário adicionar um 2º anestesista. E

@@ -1281,8 +1281,19 @@ const cloudRel = {
      se existe conflito; serem a mesma função é o que impede uma janela pedindo
      escolha entre duas versões idênticas. */
   _camposDivergentes(a, b) {
+    /* Vazio é vazio: campo ausente, null, '' , [] e {} não são uma "versão
+       diferente". A linha que volta da nuvem traz colunas que o aparelho nunca
+       escreveu (vazias) e números onde o formulário guardou texto — sem esta
+       régua, o eco do próprio salvamento virava "outra pessoa alterou". */
+    const norm = v => {
+      if (v == null || v === '') return '';
+      if (Array.isArray(v)) return v.length ? JSON.stringify(v) : '';
+      if (typeof v === 'object') return Object.keys(v).length ? JSON.stringify(v) : '';
+      if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+      return String(v);
+    };
     return Array.from(new Set(Object.keys(a || {}).concat(Object.keys(b || {}))))
-      .filter(k => k[0] !== '_' && JSON.stringify(a && a[k]) !== JSON.stringify(b && b[k]));
+      .filter(k => k[0] !== '_' && norm(a && a[k]) !== norm(b && b[k]));
   },
   registrarConflito(mod, local, nuvem, opts = {}) {
     try {
@@ -1615,6 +1626,8 @@ const cloudRel = {
     return { enviados, recebidos, pendentes: cloudRel.conflitosPendentes() };
   },
   abrirConflitosPendentes() {
+    /* Sobra sem divergência não pede escolha de ninguém: sai antes da lista. */
+    try { cloudRel.limparConflitosSemDivergencia(); } catch (e) {}
     const todos = cloudRel._conflitosLer().filter(x => x.status === 'pending');
     /* O que JÁ FOI DECIDIDO não volta para a fila de decisão. A decisão está
        gravada; falta só o recibo da nuvem. Mostrá-los junto com os outros era
