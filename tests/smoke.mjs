@@ -3658,6 +3658,55 @@ await test('Pré: datas dos exames são digitáveis, salvam e saem na impressão
   await page.close();
 });
 
+/* Pré: código e descrição na mesma linha, um "+" só; exames extras sem linha em branco */
+await test('Pré: código, descrição, qtd e lado numa linha com um "+" só, e exames extras sem linhas em branco', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    ui.navegar('pre');
+    await new Promise(res => setTimeout(res, 400));
+    const f = document.getElementById('form-pre');
+    const linha = f.querySelector('.pre-proc-principal');
+    out.mesmaLinha = !!linha && ['cirurgia_cbhpm', 'cirurgia', 'procedimento_quantidade', 'lateralidade']
+      .every(n => linha.querySelector('[name="' + n + '"]'));
+    /* mesma linha: a fileira é flex sem quebra (no computador) e o código vem antes */
+    const cs = getComputedStyle(linha);
+    const filhos = Array.from(linha.children).map(c => c.getAttribute('name') || c.tagName);
+    out.rects = [cs.display, cs.flexWrap, filhos];
+    out.ladoALado = cs.display === 'flex' && cs.flexWrap === 'nowrap'
+      && filhos.indexOf('cirurgia_cbhpm') === 0
+      && linha.children[1].contains(linha.querySelector('[name="cirurgia"]'))
+      && getComputedStyle(linha.children[1]).flexGrow === '1';
+    const campo = f.querySelector('[name="cirurgia"]').closest('.field');
+    out.umMais = campo.querySelectorAll('.cbhpm-mais').length === 0
+      && Array.from(campo.querySelectorAll('button')).filter(b => b.textContent.trim() === '+').length === 1;
+    pre.procs.add();
+    const extra = document.querySelector('#pre-procs-lista .pre-proc-row');
+    out.linhaExtraSemMais = !!extra && extra.querySelectorAll('.cbhpm-mais').length === 0;
+    if (extra) extra.remove();
+
+    /* registro antigo com exames em formato velho e linhas vazias */
+    pre.carregar({ _id: 'pre-lab-velho', nome: 'Paciente Labs', data: utils.hojeISO(),
+      _labExtras: [{ label: '', valor: '' }, {}, { nome: 'PCR', resultado: '3,2' }, '  ', { label: 'Vit D', valor: '30' }, null] });
+    await new Promise(res => setTimeout(res, 150));
+    const linhas = Array.from(document.querySelectorAll('#pre-lab-extras .lab-extra')).map(r =>
+      [r.querySelector('.lab-extra-label').value, r.querySelector('.lab-extra-val').value]);
+    out.linhas = linhas;
+    out.semBranco = linhas.length === 2 && linhas.every(([l, v]) => l || v)
+      && JSON.stringify(linhas) === JSON.stringify([['PCR', '3,2'], ['Vit D', '30']]);
+    pre.carregar({ _id: 'pre-sem-labs', nome: 'Paciente Sem Labs', data: utils.hojeISO() });
+    await new Promise(res => setTimeout(res, 100));
+    out.vazioSoBotao = document.querySelectorAll('#pre-lab-extras .lab-extra').length === 0;
+    return out;
+  });
+  assert(r.mesmaLinha && r.ladoALado, 'código, descrição, quantidade e lado ficam na mesma linha, código antes da descrição ' + JSON.stringify([r.mesmaLinha, r.rects]));
+  assert(r.umMais, 'um único "+" no campo da cirurgia');
+  assert(r.linhaExtraSemMais, 'as linhas extras também sem o ➕ que emendava texto');
+  assert(r.semBranco, 'exames extras: só os que têm conteúdo, lendo o formato antigo (veio ' + JSON.stringify(r.linhas) + ')');
+  assert(r.vazioSoBotao, 'sem exames extras, fica só o botão de acrescentar');
+  await page.close();
+});
+
 /* Consulta/dor: o histórico do paciente também no topo */
 await test('Consulta: "Histórico do paciente" no topo abre o mesmo histórico do card de Seguimento', async () => {
   const page = await novaPagina();
