@@ -570,6 +570,24 @@ const sincronia = {
       for (const mod of sincronia.MODS) {
         if (!contextoValido()) break;
         if (!cloudRel.MODOS[mod]) continue;
+        /* A MARCA SÓ VALE ENQUANTO O QUE ELA PROMETE AINDA ESTIVER AQUI.
+           A marca diz "já tenho tudo até esta data", e a partir dela só se
+           pede o que mudou depois. Só que o aparelho PODA o que já está
+           confirmado na nuvem para não encher — e a marca continuava
+           avançada. Resultado: o módulo ficava vazio na tela e a
+           sincronização, obediente, não trazia nada de volta, porque pela
+           marca não havia nada novo. Era o Financeiro abrindo zerado no
+           celular enquanto a clínica tinha 262 lançamentos, e a tela de
+           "atendimentos sem lançamento" listando todos, porque não enxergava
+           cobrança nenhuma.
+           Lista vazia com marca cheia é contradição: a marca é descartada e a
+           descida é completa. Custa uma passagem maior, uma vez. */
+        let listaLocal = 0;
+        try { listaLocal = (store.list(mod) || []).length; } catch (e) { listaLocal = 0; }
+        if (!listaLocal && marcas[mod]) {
+          delete marcas[mod];
+          sincronia._salvarMarcas(marcas);
+        }
         const desde = marcas[mod] || '';
         const remotos = await cloudRel.puxarModulo(mod, desde ? { desde } : {});
         if (!contextoValido()) break;

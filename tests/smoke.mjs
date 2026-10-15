@@ -17581,6 +17581,150 @@ await test('Rascunhos: cópia preservada não desce da nuvem, e as abas param de
   await page.close();
 });
 
+/* 278b) ACOMODAÇÃO: ENFERMARIA, APARTAMENTO E A REGRA DO AMBULATORIAL
+
+   "Quando for por plano de saúde, pode ser acomodação enfermaria, apartamento
+   ou ambulatorial — ambulatorial o valor é igual ao de enfermaria, mesmo
+   quando o plano do paciente for apartamento."
+
+   A última parte é a que importa, e é contraintuitiva: a acomodação que vale
+   para o PREÇO é onde o ato foi feito, não a que o paciente tem direito. Cobrar
+   apartamento por um procedimento de ambulatório é cobrar errado — e é o que
+   aconteceria se o sistema olhasse só o cadastro do paciente.
+
+   A escolha de tabela por acomodação é ADITIVA: só vale quando ele cadastrou
+   uma tabela para aquele plano naquela acomodação. Não havendo, cai na tabela
+   do plano, que é exatamente como era — nenhuma configuração existente muda de
+   comportamento. */
+await test('Faturamento por acomodação: ambulatorial paga como enfermaria, mesmo em plano de apartamento', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    __smokeBindOrg('org-acom');
+
+    /* a regra, sozinha */
+    out.ambulatorialViraEnfermaria = precos.acomodacaoDeCobranca('Ambulatorial') === 'enfermaria';
+    out.ambulatorioTambem = precos.acomodacaoDeCobranca('ambulatório') === 'enfermaria';
+    out.apartamentoFica = precos.acomodacaoDeCobranca('Apartamento') === 'apartamento';
+    out.aptoFica = precos.acomodacaoDeCobranca('apto') === 'apartamento';
+    out.enfermariaFica = precos.acomodacaoDeCobranca('Enfermaria') === 'enfermaria';
+    out.vazioFicaVazio = precos.acomodacaoDeCobranca('') === '';
+
+    /* duas tabelas do MESMO plano, com valores diferentes por acomodação */
+    const cfg = { tabelasAnest: {
+      'tab-enf': { nome: 'Amil enfermaria', tipo: 'anest', valores: { 3: 400 } },
+      'tab-apt': { nome: 'Amil apartamento', tipo: 'anest', valores: { 3: 700 } }
+    } };
+    orcamento.tabelasAnest = () => cfg.tabelasAnest;
+    const mapa = {};
+    orcamento.cfg = () => ({ tabelaPorConvenio: mapa, tabelaAtiva: 'tab-enf' });
+    orcamento.salvarCfg = (o) => { Object.assign(mapa, (o && o.tabelaPorConvenio) || {}); };
+    precos.definirTabelaDoConvenio('Amil', 'tab-enf', 'anest', 'enfermaria');
+    precos.definirTabelaDoConvenio('Amil', 'tab-apt', 'anest', 'apartamento');
+    out.mapa = Object.keys(mapa);
+
+    const tabDe = (acom) => {
+      const t = precos._tabela('anestesia', 'Amil', acom);
+      return t ? t.chave : null;
+    };
+    out.enfermariaUsaEnf = tabDe('enfermaria') === 'tab-enf';
+    out.apartamentoUsaApt = tabDe('apartamento') === 'tab-apt';
+    out.ambulatorialUsaEnf = tabDe('ambulatorial') === 'tab-enf';
+    /* e sem acomodação informada, continua caindo na tabela do plano */
+    precos.definirTabelaDoConvenio('Amil', 'tab-enf', 'anest');
+    out.semAcomodacaoCaiNoPlano = tabDe('') === 'tab-enf';
+    return out;
+  });
+  assert(r.ambulatorialViraEnfermaria && r.ambulatorioTambem,
+    'ambulatorial paga como enfermaria — é a regra que ele descreveu, e a que o sistema não tinha');
+  assert(r.apartamentoFica && r.aptoFica && r.enfermariaFica && r.vazioFicaVazio,
+    'as demais acomodações não mudam, e "não informada" continua não informada');
+  assert(r.enfermariaUsaEnf, 'enfermaria usa a tabela de enfermaria');
+  assert(r.apartamentoUsaApt, 'apartamento usa a de apartamento: era o ponto de ter duas');
+  assert(r.ambulatorialUsaEnf,
+    'e AMBULATORIAL usa a de enfermaria mesmo com a de apartamento cadastrada para o mesmo plano');
+  assert(r.semAcomodacaoCaiNoPlano,
+    'sem acomodação informada, nada muda do que já era — o recurso é aditivo, não uma troca de regra');
+  await page.close();
+});
+
+/* 277b) O MÓDULO QUE ABRE ZERADO E NUNCA MAIS ENCHE
+
+   Foto do celular: Financeiro com "REGISTROS 0" e, ao lado, a tela de
+   "Atendimentos sem lançamento" dizendo 262 — enquanto a clínica tem os
+   lançamentos. Relato: "gerei financeiro corretamente e continua aparecendo
+   sem lançamento".
+
+   A sincronização incremental guarda uma MARCA por módulo: "já tenho tudo até
+   esta data", e daí em diante só pede o que mudou depois. Só que o aparelho
+   PODA o que já está confirmado na nuvem, para não encher — e a marca
+   continuava avançada. O módulo ficava vazio na tela e a sincronização,
+   obediente, não trazia nada: pela marca, não havia nada novo.
+
+   Daí as duas queixas de uma vez: o Financeiro zerado, e a tela de "sem
+   lançamento" listando todo mundo — porque ela decide pelo que enxerga, e não
+   enxergava cobrança nenhuma.
+
+   Lista vazia com marca cheia é uma contradição: a marca é descartada e a
+   descida é completa. */
+await test('Sincronização: módulo vazio com marca avançada desiste da marca e baixa tudo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = { pedidos: [] };
+    __smokeBindOrg('org-marca');
+    store.setList('financeiro', []);        /* podado deste aparelho */
+    store.setList('anestesia', [{ _id: 'a1', paciente: { nome: 'Quem ficou' },
+      _relUpdatedAt: '2026-10-01T10:00:00Z' }]);
+
+    /* a marca diz que já baixamos tudo até outubro */
+    const marcas = { financeiro: '2026-10-10T00:00:00Z', anestesia: '2026-10-10T00:00:00Z' };
+    localStorage.setItem(sincronia.MARCAS_KEY, JSON.stringify(marcas));
+
+    cloudRel.puxarModulo = async (mod, opts) => {
+      out.pedidos.push({ mod: mod, desde: (opts && opts.desde) || '' });
+      if (mod === 'financeiro') {
+        return [{ _id: 'f1', paciente: 'PACIENTE COBRADO', valor_previsto: 500,
+          _relUpdatedAt: '2026-10-05T10:00:00Z' }];
+      }
+      return [];
+    };
+    /* o resto da rodada não interessa a este teste */
+    const mesclouOriginal = cloudRel.mesclarLocal;
+    out.mesclados = 0;
+    cloudRel.mesclarLocal = (mod, remotos) => {
+      if (mod === 'financeiro') out.mesclados += (remotos || []).length;
+      return mesclouOriginal.call(cloudRel, mod, remotos);
+    };
+    cloudRel.empurrarAteParar = async () => ({ enviados: 0, falhas: 0 });
+    cloudRel.drenarFila = async () => 0; cloudRel.drenarFilaDel = async () => 0;
+    cloudRel.drenarConflitos = async () => null;
+    persistenciaCloudFirst.drenar = async () => 0;
+    adendos.enviarPendentes = async () => 0;
+    rascunhosSync.enviarTodos = async () => 0;
+    pdfBackup.drenarFila = async () => 0;
+    cloud.sincronizar = async () => null;
+
+    await sincronia.ciclo();
+    await new Promise(res => setTimeout(res, 300));
+
+    const fin = out.pedidos.find(p => p.mod === 'financeiro') || {};
+    const ane = out.pedidos.find(p => p.mod === 'anestesia') || {};
+    out.financeiroPediuTudo = fin.desde === '';
+    out.anestesiaUsouAMarca = ane.desde === '2026-10-10T00:00:00Z';
+    out.financeiroEncheu = (store.list('financeiro') || []).length;
+    cloudRel.mesclarLocal = mesclouOriginal;
+    return out;
+  });
+  assert(r.financeiroPediuTudo,
+    'módulo vazio com marca avançada tem de pedir TUDO, não o que mudou desde a marca; pedidos: ' +
+    JSON.stringify(r.pedidos));
+  assert(r.anestesiaUsouAMarca,
+    'e o módulo que AINDA TEM registro continua incremental — senão toda passagem rebaixaria o acervo inteiro');
+  assert(r.mesclados >= 1,
+    'e os lançamentos que a clínica devolveu entram na mesclagem deste aparelho; vieram ' + r.mesclados);
+  await page.close();
+});
+
 /* 276b) A FOLHA: CABEÇALHO QUE SE REPETE E COLUNA QUE NÃO INFORMA
 
    Do PDF que ele mandou, quatro páginas de uma ficha:
