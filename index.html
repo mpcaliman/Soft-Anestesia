@@ -4846,7 +4846,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-15a</b><br>
+    v7.1 · build <b id="build-tag">2026-10-15b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -6898,7 +6898,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
               <th style="width:85px" title="Volume urinário aferido neste horário">Diurese mL</th>
               <th>Observações</th><th class="col-rm">×</th>
             </tr></thead>
-            <tbody id="vitais-body"></tbody>
+            <tbody id="vitais-body" oncontextmenu="return anestesia.intervencao.doToqueNaTabela(event)"></tbody>
           </table>
         </div>
         </div>
@@ -34314,6 +34314,25 @@ const anestesia = {
       canvas.addEventListener('pointerup', wrapCtx(anestesia.graficoUI._onPointerUp));
       canvas.addEventListener('pointercancel', wrapCtx(anestesia.graficoUI._onPointerUp));
       canvas.addEventListener('pointerleave', anestesia.graficoUI._onPointerLeave);
+      /* ADICIONAR INTERVENÇÃO: clique direito no computador, toque longo no
+         tablet e no celular. O gesto é o mesmo que todo mundo já usa para
+         "mais opções", e evita mais um botão numa tela que já tem muitos. */
+      canvas.addEventListener('contextmenu', (ev) => {
+        ev.preventDefault();
+        anestesia.graficoUI._contexto = ctx;
+        anestesia.intervencao.abrirDoGrafico(ev, canvas);
+      });
+      let toqueLongo = null;
+      canvas.addEventListener('pointerdown', (ev) => {
+        if (ev.pointerType === 'mouse') return;
+        clearTimeout(toqueLongo);
+        toqueLongo = setTimeout(() => {
+          anestesia.graficoUI._contexto = ctx;
+          anestesia.intervencao.abrirDoGrafico(ev, canvas);
+        }, 600);
+      });
+      ['pointerup', 'pointercancel', 'pointermove', 'pointerleave'].forEach(e =>
+        canvas.addEventListener(e, () => clearTimeout(toqueLongo)));
       /* ESC sai do modo ampliado */
       document.addEventListener('keydown', (ev) => {
         if (ev.key === 'Escape' && anestesia.graficoUI.ampliado) {
@@ -35609,6 +35628,107 @@ const anestesia = {
   },
 
   /* ---- SINAIS VITAIS + GRÁFICO ---- */
+  /* ============================================================================
+     ADICIONAR INTERVENÇÃO
+     ----------------------------------------------------------------------------
+     "Clicar com o botão direito, ou pressionar e segurar no tablet e no
+     celular: adicionar intervenção — abrir um evento e/ou linha para colocar
+     medição ou evento para tratar o ocorrido. Ex.: hipoglicemia → medição de
+     glicose; hipotensão → vasopressor."
+
+     É o par do que falta no preenchimento padrão. Aquele REPRESENTA o que
+     aconteceu; este registra o que foi FEITO a respeito, e os dois precisam
+     ficar no mesmo horário para a folha contar a história na ordem certa:
+     caiu às 09:05, tratou às 09:05.
+
+     O sistema não escolhe a conduta. Ele abre os três caminhos — medir de
+     novo, marcar o evento, lançar a medicação — já no horário do ponto que
+     foi tocado, e quem decide o que fazer é quem está com o paciente.
+  ============================================================================ */
+  intervencao: {
+    /* Horário do ponto tocado no gráfico. Fora da área de dados, cai na hora
+       atual: é melhor abrir no lugar aproximado do que não abrir. */
+    _horaDoEvento(ev, canvas) {
+      try {
+        /* `canvasToData` é o mesmo conversor que o gráfico usa para registrar
+           um ponto arrastado: reusá-lo garante que a intervenção caia no
+           horário que ele VIU, e não num cálculo paralelo que pode divergir. */
+        const d = anestesia.graficoUI.canvasToData(ev.clientX, ev.clientY);
+        if (d && d.t != null && !isNaN(d.t)) {
+          return anestesia.graficoUI.tToHora(Math.round(d.t) % (24 * 60));
+        }
+      } catch (e) {}
+      return utils.horaAtual();
+    },
+    abrirDoGrafico(ev, canvas) {
+      anestesia.intervencao.abrir(anestesia.intervencao._horaDoEvento(ev, canvas));
+    },
+    /* Mesma porta na TABELA: ele pediu os dois lugares, e quem está digitando
+       números não quer ter de procurar o gráfico para registrar o que fez. */
+    doToqueNaTabela(ev) {
+      try {
+        const tr = ev.target && ev.target.closest ? ev.target.closest('tr') : null;
+        ev.preventDefault();
+        anestesia.intervencao.abrirDaLinha(tr);
+      } catch (e) {}
+      return false;
+    },
+    abrirDaLinha(tr) {
+      const hora = tr ? ((tr.querySelector('[name="vit_hora[]"]') || {}).value || '') : '';
+      anestesia.intervencao.abrir(hora || utils.horaAtual());
+    },
+    abrir(hora) {
+      const h = utils.escapeAttr(hora || utils.horaAtual());
+      modal.open('⚕️ Adicionar intervenção — ' + utils.escapeHTML(hora || ''),
+        '<p style="font-size:.86rem;color:var(--text-soft);margin:0 0 10px">' +
+        'Tudo entra no horário <b>' + utils.escapeHTML(hora || '') + '</b>, para a folha contar a história na ordem: ' +
+        'o que aconteceu e o que foi feito, no mesmo instante.</p>' +
+        '<div class="field" style="margin:0 0 10px"><label>Horário</label>' +
+        '<input type="time" id="itv-hora" value="' + h + '"></div>' +
+        '<p style="font-weight:600;margin:0 0 6px">O que você quer registrar?</p>',
+        '<button class="btn btn-primary" onclick="anestesia.intervencao._medir()">📈 Nova medição</button>' +
+        '<button class="btn btn-primary" onclick="anestesia.intervencao._evento()">⚡ Evento</button>' +
+        '<button class="btn btn-primary" onclick="anestesia.intervencao._medicacao()">💉 Medicação</button>' +
+        '<button class="btn" onclick="modal.close()">Cancelar</button>');
+    },
+    _hora() {
+      const el = document.getElementById('itv-hora');
+      const v = el ? String(el.value || '').trim() : '';
+      return /^\d{1,2}:\d{2}$/.test(v) ? v : utils.horaAtual();
+    },
+    /* Uma linha nova de sinais vitais naquele horário, já aberta para ajuste:
+       é o "medir de novo para ver se resolveu". */
+    _medir() {
+      const hora = anestesia.intervencao._hora();
+      try { modal.close(); } catch (e) {}
+      const tr = anestesia.vitais.add(false, { hora });
+      try { anestesia.vitais._ordenarPorHora(anestesia.graficoUI._ctxIds().vitaisBody); } catch (e) {}
+      try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
+      markDirty();
+      if (tr) {
+        anestesia.vitais._linhaAjuste = tr;
+        try { anestesia.vitais.ajustarLinha(tr.querySelector('.btn-rm') || { closest: () => tr }); } catch (e) {}
+      }
+      toast('📈 Medição em ' + hora + ' — preencha os valores');
+    },
+    _evento() {
+      const hora = anestesia.intervencao._hora();
+      try { modal.close(); } catch (e) {}
+      anestesia.graficoUI._contexto = 'anestesia';
+      try { anestesia.eventos.add({ hora }); } catch (e) {}
+      try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
+      markDirty();
+      toast('⚡ Evento em ' + hora + ' — escolha o tipo na linha do tempo');
+    },
+    _medicacao() {
+      const hora = anestesia.intervencao._hora();
+      try { modal.close(); } catch (e) {}
+      try { anestesia.meds.add({ hora }); } catch (e) {}
+      markDirty();
+      toast('💉 Medicação em ' + hora + ' — escolha a droga e a dose');
+    }
+  },
+
   vitais: {
     /* ---------- Auto-avanço na digitação ----------
        Quando o valor digitado não pode receber mais um dígito e continuar
@@ -42096,11 +42216,21 @@ const assinatura = {
     if (!prof) return;
     const form = document.getElementById(formId);
     if (!form) return;
+    /* CADA MÉDICO NO SEU CAMPO.
+       Os campos do 2º anestesista levam sufixo ("crm2", "_profissional_id2"),
+       mas estas duas linhas procuravam sempre o campo SEM sufixo: aplicar o
+       carimbo do segundo escrevia o CRM dele no campo do PRIMEIRO, e vinculava
+       o id dele ao primeiro também. Dois médicos no mesmo ato, e a folha
+       dizendo que o primeiro tem o registro do segundo — numa ficha que é
+       prova de quem conduziu o caso. */
+    const sfx = (prefixo === 'sig-anest2') ? '2' : '';
     /* Preenche CRM se vazio */
-    const crmEl = form.querySelector('[name="crm"]') || form.querySelector('[name="registro"]');
+    const crmEl = form.querySelector('[name="crm' + sfx + '"]') ||
+                  form.querySelector('[name="registro' + sfx + '"]') ||
+                  (sfx ? null : form.querySelector('[name="registro"]'));
     if (crmEl && !crmEl.value && prof.crm) crmEl.value = prof.crm;
     /* Vincula _profissional_id se houver */
-    const profIdEl = form.querySelector('[name="_profissional_id"]');
+    const profIdEl = form.querySelector('[name="_profissional_id' + sfx + '"]');
     if (profIdEl && prof._id) profIdEl.value = prof._id;
     /* Aplica carimbo se houver */
     if (prof.carimbo) {
@@ -43347,7 +43477,7 @@ const ajustes = {
     cont.innerHTML = `
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px">
         <h2 style="font-size:1rem; color:var(--primary-darker)">${cat.icon} ${cat.label}</h2>
-        <button class="btn btn-primary btn-sm" onclick="ajustes.editar(${utils.jsArg(cat.key)}, null)">+ Adicionar ${utils.escapeHTML(cat.singular.toLowerCase())}</button>
+        ${cat.key === 'cad_profissionais' ? `<button class="btn btn-sm" onclick="ajustes.juntarProfissionaisDuplicados()" title="A unificação das listas antigas deixou a mesma pessoa cadastrada duas vezes — junta os repetidos num só, sem perder nada">🧩 Juntar repetidos</button> ` : ''}<button class="btn btn-primary btn-sm" onclick="ajustes.editar(${utils.jsArg(cat.key)}, null)">+ Adicionar ${utils.escapeHTML(cat.singular.toLowerCase())}</button>
       </div>
       ${cat.hasCarimbo ? '<div class="section-note" style="margin-bottom:10px">💡 Profissionais podem ter um <strong>carimbo/assinatura PNG</strong> associado, que será automaticamente aplicado em impressões quando esse profissional for o responsável.</div>' : ''}
       <div id="ajustes-form-area"></div>
@@ -43474,6 +43604,79 @@ const ajustes = {
     const hidden = form ? form.querySelector('[name="carimbo"]') : null;
     if (hidden) hidden.value = '';
   },
+  /* A mesma pessoa é o mesmo nome (sem acento e sem caixa) com o mesmo
+     registro. Sem CRM dos dois lados, só o nome decide — é o que se tem. */
+  _profissionalIgual(data) {
+    const norm = v => {
+      try { return linker._normNome(v); }
+      catch (e) { return String(v || '').trim().toLowerCase(); }
+    };
+    const soDigitos = v => String(v || '').replace(/\D+/g, '');
+    const nome = norm(data.nome || data.nomeProfissional);
+    if (!nome) return null;
+    const crm = soDigitos(data.crm);
+    let lista = [];
+    try { lista = store.list('cad_profissionais') || []; } catch (e) { return null; }
+    return lista.find(x => {
+      if (!x || x._id === data._id) return false;
+      if (norm(x.nome || x.nomeProfissional) !== nome) return false;
+      const c = soDigitos(x.crm);
+      return (!crm || !c) ? true : crm === c;
+    }) || null;
+  },
+
+  /* JUNTAR OS QUE JÁ ESTÃO DUPLICADOS.
+     O conserto acima impede novos; este resolve os que a unificação deixou.
+     Fica a ficha mais completa — a que tem carimbo, depois a marcada como
+     "sou eu" —, e ela recebe o que faltava da outra. Nada se perde: o que
+     existe numa e não na outra é copiado antes de a segunda sair. */
+  juntarProfissionaisDuplicados(opts = {}) {
+    const norm = v => {
+      try { return linker._normNome(v); }
+      catch (e) { return String(v || '').trim().toLowerCase(); }
+    };
+    const peso = x => (x && x.carimbo ? 4 : 0) +
+      ((x && (x.responsavel === true || x.responsavel === 'true')) ? 2 : 0) + (x && x.crm ? 1 : 0);
+    let lista = [];
+    try { lista = (store.list('cad_profissionais') || []).slice(); } catch (e) { return 0; }
+    const grupos = new Map();
+    lista.forEach(x => {
+      const k = norm(x && (x.nome || x.nomeProfissional)) + '|' + String((x && x.crm) || '').replace(/\D+/g, '');
+      if (!k.replace('|', '')) return;
+      if (!grupos.has(k)) grupos.set(k, []);
+      grupos.get(k).push(x);
+    });
+    let juntados = 0;
+    const sobreviventes = [];
+    const removidos = new Set();
+    grupos.forEach(grupo => {
+      if (grupo.length < 2) { sobreviventes.push(grupo[0]); return; }
+      const ordenado = grupo.slice().sort((a, b) => peso(b) - peso(a));
+      const fica = ordenado[0];
+      ordenado.slice(1).forEach(outro => {
+        Object.keys(outro).forEach(k => {
+          if (k === '_id') return;
+          const v = fica[k];
+          if (v === undefined || v === null || v === '' || v === false) {
+            if (outro[k] !== undefined && outro[k] !== null && outro[k] !== '') fica[k] = outro[k];
+          }
+        });
+        removidos.add(outro._id);
+        juntados++;
+      });
+      sobreviventes.push(fica);
+    });
+    if (!juntados) { if (!opts.silent) toast('Nenhum profissional duplicado.', 'info'); return 0; }
+    const nova = lista.filter(x => !removidos.has(x._id))
+      .map(x => sobreviventes.find(y => y._id === x._id) || x);
+    store.setList('cad_profissionais', nova);
+    if (!opts.silent) {
+      toast('👨‍⚕️ ' + juntados + ' cadastro(s) repetido(s) juntado(s) — nada foi perdido.', 'success');
+      try { ajustes.render(); } catch (e) {}
+    }
+    return juntados;
+  },
+
   _salvar(catKey, formId) {
     if (!utils.validar(formId)) { toast('Preencha os campos obrigatórios', 'warn'); return; }
     const f = document.getElementById(formId);
@@ -43485,6 +43688,32 @@ const ajustes = {
         data[el.name] = (el.type === 'checkbox') ? el.checked : el.value;
       }
     });
+    /* UM MÉDICO, UM CADASTRO.
+       A unificação das três listas antigas deixou a mesma pessoa duas vezes no
+       cadastro — mesmo nome, mesmo CRM, as duas "com carimbo", e uma delas com
+       o telefone, o endereço e a marca de "sou eu". Na tela de Ajustes ficam
+       dois cartões idênticos; no seletor de profissional ficavam duas linhas
+       iguais; e qual das duas assina passa a depender de qual delas o sistema
+       alcançou primeiro.
+       Salvar um profissional que já existe (mesmo nome e mesmo registro) passa
+       a ATUALIZAR aquele, juntando o que cada ficha tinha, em vez de criar o
+       segundo. O que está sendo digitado agora ganha, campo a campo; o que
+       estiver em branco aqui e preenchido lá é preservado — ninguém perde o
+       carimbo por ter editado o telefone. */
+    if (catKey === 'cad_profissionais' && !data._id) {
+      const gemeo = ajustes._profissionalIgual(data);
+      if (gemeo) {
+        data._id = gemeo._id;
+        Object.keys(gemeo).forEach(k => {
+          if (k === '_id') return;
+          const atual = data[k];
+          if (atual === undefined || atual === null || atual === '' || atual === false) {
+            if (gemeo[k] !== undefined && gemeo[k] !== null && gemeo[k] !== '') data[k] = gemeo[k];
+          }
+        });
+        toast('👨‍⚕️ Já havia um cadastro deste profissional — os dois foram juntados em um só.', 'info');
+      }
+    }
     /* Só UM responsável: marcar um novo desmarca o anterior, senão o carimbo
        e o cabeçalho passam a ter duas respostas e o sistema escolhe sozinho. */
     if (catKey === 'cad_profissionais' && data.responsavel === true) {

@@ -17581,6 +17581,239 @@ await test('Rascunhos: cópia preservada não desce da nuvem, e as abas param de
   await page.close();
 });
 
+/* 284b) O SEGUNDO ANESTESISTA ASSINA IGUAL AO PRIMEIRO
+
+   "Há ficha de anestesia em que será necessário adicionar um 2º anestesista. E
+   aí terá que na ficha, nas assinaturas, desse segundo anestesista também.
+   Igual ao que temos para o perfil profissional atualmente."
+
+   Dois médicos no mesmo ato assinam os dois. Se o segundo tiver de digitar o
+   nome e desenhar a assinatura à mão enquanto o primeiro recebe o carimbo
+   cadastrado, a folha sai com dois padrões diferentes de assinatura no mesmo
+   documento — e é o documento que vale como prova de quem conduziu o caso. */
+await test('Segundo anestesista: bloco completo, com carimbo do cadastro igual ao do primeiro', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-a2');
+    const CARIMBO = 'data:image/png;base64,' + 'A'.repeat(400);
+    store.setList('cad_profissionais', [
+      { _id: 'p1', nome: 'Marcelo Pandolfi Caliman', crm: '30601',
+        especialidade: 'Anestesiologia', carimbo: CARIMBO, responsavel: true },
+      { _id: 'p2', nome: 'Renata Vilela Nunes', crm: '55123',
+        especialidade: 'Anestesiologia', carimbo: CARIMBO }
+    ]);
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 700));
+    try { modal.close(); } catch (e) {}
+
+    anestesia._toggle2Anestesista(true);
+    await new Promise(res => setTimeout(res, 250));
+    const f = document.getElementById('form-anestesia');
+    out.blocoApareceu = (document.getElementById('sig-anest2-wrapper') || {}).style.display === 'block';
+    out.temCampoNome = !!f.querySelector('[name="anestesiologista2"]');
+    out.temCampoCrm = !!f.querySelector('[name="crm2"]');
+    out.temDataUrl = !!f.querySelector('[name="assinatura_dataurl2"]');
+    out.temPreview = !!document.getElementById('sig-anest2-prev-carimbo');
+    /* as mesmas três abas do primeiro: carimbo, desenho e certificado */
+    out.abas = Array.from(document.querySelectorAll('#sig-anest2-wrapper .sig-tab')).map(b => b.dataset.tab);
+
+    /* o carimbo do cadastro chega pelo mesmo caminho do primeiro */
+    const nomeEl = f.querySelector('[name="anestesiologista2"]');
+    nomeEl.value = 'Renata Vilela Nunes';
+    assinatura.aplicarCarimboPorNome('sig-anest2', nomeEl.value, 'form-anestesia');
+    await new Promise(res => setTimeout(res, 150));
+    out.carimbo2 = ((f.querySelector('[name="assinatura_dataurl2"]') || {}).value || '').slice(0, 30);
+    out.preview2TemImagem = !!(document.getElementById('sig-anest2-prev-carimbo') || {}).querySelector;
+    out.preview2Img = !!document.querySelector('#sig-anest2-prev-carimbo img');
+    out.crmPreenchido = (f.querySelector('[name="crm2"]') || {}).value;
+
+    /* e o do PRIMEIRO não é afetado: são dois campos, dois médicos */
+    const nome1 = f.querySelector('[name="anestesiologista"]');
+    if (nome1) {
+      nome1.value = 'Marcelo Pandolfi Caliman';
+      assinatura.aplicarCarimboPorNome('sig-anest', nome1.value, 'form-anestesia');
+    }
+    await new Promise(res => setTimeout(res, 150));
+    out.carimbo1 = ((f.querySelector('[name="assinatura_dataurl"]') || {}).value || '').slice(0, 30);
+    out.doisSeparados = !!out.carimbo1 && !!out.carimbo2;
+
+    /* e os dois saem na folha */
+    const html = printPreview._buildAnestesia();
+    out.folhaTemOsDois = /Marcelo Pandolfi Caliman/.test(html) && /Renata Vilela Nunes/.test(html);
+    return out;
+  });
+  assert(r.blocoApareceu, 'o bloco do 2º anestesista tem de aparecer ao ser adicionado');
+  assert(r.temCampoNome && r.temCampoCrm && r.temDataUrl && r.temPreview,
+    'com os mesmos campos do primeiro: nome, registro, assinatura e pré-visualização');
+  assert(r.abas.join(',') === 'carimbo,desenho,cert',
+    'e as mesmas três formas de assinar; veio ' + JSON.stringify(r.abas));
+  assert(r.carimbo2.indexOf('data:image') === 0,
+    'o carimbo do cadastro tem de chegar ao 2º anestesista; veio "' + r.carimbo2 + '"');
+  assert(r.preview2Img, 'e aparecer na pré-visualização dele');
+  assert(r.crmPreenchido === '55123', 'com o registro dele, não o do primeiro; veio ' + r.crmPreenchido);
+  assert(r.doisSeparados,
+    'os dois carimbos coexistem: são dois médicos no mesmo ato, e a folha é prova de quem conduziu');
+  assert(r.folhaTemOsDois, 'e os dois nomes saem na folha impressa');
+  await page.close();
+});
+
+/* 283b) UM MÉDICO, UM CADASTRO
+
+   Foto de Ajustes: dois cartões "Marcelo Pandolfi Caliman", mesmo CRM, os dois
+   "✓ com carimbo" — e só o segundo com telefone, endereço e a marca de "sou
+   eu, profissional responsável".
+
+   É a sobra da unificação das três listas antigas ("Meu perfil profissional",
+   "Anestesistas", "Cirurgiões"). Na tela ficam dois cartões idênticos; no
+   seletor de profissional ficavam duas linhas iguais; e QUAL DAS DUAS ASSINA
+   passava a depender de qual o sistema alcançou primeiro. Num documento que a
+   pessoa assina, isso não é detalhe de arrumação.
+
+   Duas frentes: salvar um profissional que já existe passa a ATUALIZAR aquele
+   em vez de criar o segundo; e os que já estão repetidos se juntam por um
+   botão. Nos dois casos, nada se perde — o que existe numa ficha e não na
+   outra é copiado antes. */
+await test('Profissionais: salvar o mesmo médico não cria o segundo, e os repetidos se juntam sem perder nada', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    __smokeBindOrg('org-prof2');
+    const CARIMBO = 'data:image/png;base64,' + 'A'.repeat(300);
+
+    /* o cadastro dele, como está na foto */
+    store.setList('cad_profissionais', [
+      { _id: 'p1', nome: 'Marcelo Pandolfi Caliman', crm: '30601', rqe: '14630',
+        especialidade: 'Anestesiologia', carimbo: CARIMBO },
+      { _id: 'p2', nome: 'Marcelo Pandolfi Caliman', crm: '30601', rqe: '14630',
+        especialidade: 'Anestesiologia', carimbo: CARIMBO, responsavel: true,
+        telefone: '73 99976-9179', email: 'mpc@teste.local',
+        cidade: 'Eunápolis-BA', endereco: 'Rua Rui Barbosa, 62 - Centro' },
+      { _id: 'p3', nome: 'Outro Medico', crm: '11111', especialidade: 'Cirurgia' }
+    ]);
+
+    const n = ajustes.juntarProfissionaisDuplicados({ silent: true });
+    const lista = store.list('cad_profissionais') || [];
+    out.juntou = n;
+    out.quantos = lista.length;
+    const dele = lista.filter(x => /Marcelo/i.test(x.nome || ''));
+    out.umSoDele = dele.length === 1;
+    const fica = dele[0] || {};
+    out.manteveCarimbo = !!fica.carimbo;
+    out.manteveResponsavel = fica.responsavel === true || fica.responsavel === 'true';
+    out.manteveTelefone = fica.telefone === '73 99976-9179';
+    out.manteveEndereco = /Rui Barbosa/.test(fica.endereco || '');
+    out.naoMexeuNoOutro = lista.some(x => x._id === 'p3');
+
+    /* rodar de novo não faz nada */
+    out.segundaVez = ajustes.juntarProfissionaisDuplicados({ silent: true });
+
+    /* e salvar o mesmo médico outra vez não cria um terceiro */
+    const gemeo = ajustes._profissionalIgual({ nome: 'MARCELO PANDOLFI CALIMAN', crm: '30601' });
+    out.reconheceOMesmo = !!gemeo && /Marcelo/i.test(gemeo.nome || '');
+    out.naoConfundeOutro = !ajustes._profissionalIgual({ nome: 'Fulano de Tal', crm: '99999' });
+    return out;
+  });
+  assert(r.juntou === 1, 'os dois cartões do mesmo médico viram um; juntou ' + r.juntou);
+  assert(r.umSoDele && r.quantos === 2, 'fica um cadastro dele e o outro médico intacto');
+  assert(r.manteveCarimbo, 'o carimbo tem de sobreviver — é o que assina a folha');
+  assert(r.manteveResponsavel, 'e a marca de "sou eu", que decide o cabeçalho dos documentos');
+  assert(r.manteveTelefone && r.manteveEndereco,
+    'o que existia só na outra ficha é copiado antes: ninguém perde o endereço por juntar cadastros');
+  assert(r.naoMexeuNoOutro, 'e quem não é duplicado não é tocado');
+  assert(r.segundaVez === 0, 'rodar de novo não faz nada: não é um varredor de lista');
+  assert(r.reconheceOMesmo, 'salvar o mesmo nome e CRM reconhece o cadastro que já existe');
+  assert(r.naoConfundeOutro, 'e não confunde pessoas diferentes');
+  await page.close();
+});
+
+/* 282b) ADICIONAR INTERVENÇÃO: O QUE FOI FEITO, NO MESMO HORÁRIO DO QUE HOUVE
+
+   "No gráfico e no tabulado dos sinais vitais, criar opção de clicar com o
+   botão direito, ou pressionar e segurar no tablet e no smartphone, 'adicionar
+   intervenção' — abrir um evento e/ou linha para colocar medição ou evento
+   para tratar o ocorrido. Ex.: hipoglicemia → medição de glicose; hipotensão →
+   vasopressor."
+
+   É o par do preenchimento de intercorrência: aquele REPRESENTA o que
+   aconteceu, este registra o que foi FEITO a respeito. Os dois têm de cair no
+   mesmo horário, senão a folha conta a história fora de ordem — caiu às 09:05
+   e o vasopressor aparece às 09:20 porque foi quando alguém lembrou de anotar.
+
+   O sistema NÃO escolhe a conduta. Abre os três caminhos (medir, marcar
+   evento, lançar medicação) já no horário tocado, e quem decide é quem está
+   com o paciente. */
+await test('Adicionar intervenção: abre no horário do ponto, pelo gráfico e pela tabela', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-itv');
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 700));
+    try { modal.close(); } catch (e) {}
+    const f = document.getElementById('form-anestesia');
+    f.querySelector('[name="hora_sala_entrada"]').value = '08:00';
+    f.querySelector('[name="hora_sala_saida"]').value = '10:00';
+    document.getElementById('vitais-body').innerHTML = '';
+    document.getElementById('eventos-body').innerHTML = '';
+    document.getElementById('medicacoes-body').innerHTML = '';
+
+    /* a porta existe nos dois lugares */
+    const canvas = document.getElementById('vitals-chart');
+    out.temGrafico = !!canvas;
+    out.tabelaTemPorta = typeof anestesia.intervencao.doToqueNaTabela === 'function';
+
+    /* pela TABELA: a linha de 09:05 */
+    anestesia.vitais.add(false, { hora: '09:05', pas: '80', pad: '45', fc: '58' });
+    await new Promise(res => setTimeout(res, 150));
+    const tr = document.querySelector('#vitais-body tr');
+    anestesia.intervencao.abrirDaLinha(tr);
+    await new Promise(res => setTimeout(res, 150));
+    const campoHora = document.getElementById('itv-hora');
+    out.abriuNoHorarioDaLinha = campoHora ? campoHora.value : null;
+
+    /* medição: nova linha naquele horário */
+    const antesLinhas = document.querySelectorAll('#vitais-body tr').length;
+    anestesia.intervencao._medir();
+    await new Promise(res => setTimeout(res, 250));
+    const horas = Array.from(document.querySelectorAll('#vitais-body [name="vit_hora[]"]')).map(x => x.value);
+    out.criouMedicao = document.querySelectorAll('#vitais-body tr').length > antesLinhas;
+    out.medicaoNoHorario = horas.filter(h => h === '09:05').length >= 2;
+
+    /* evento no mesmo horário */
+    anestesia.intervencao.abrirDaLinha(tr);
+    await new Promise(res => setTimeout(res, 120));
+    anestesia.intervencao._evento();
+    await new Promise(res => setTimeout(res, 250));
+    const horasEvt = Array.from(document.querySelectorAll('#eventos-body [name="evt_hora[]"]')).map(x => x.value);
+    out.eventoNoHorario = horasEvt.indexOf('09:05') >= 0;
+
+    /* medicação no mesmo horário */
+    anestesia.intervencao.abrirDaLinha(tr);
+    await new Promise(res => setTimeout(res, 120));
+    anestesia.intervencao._medicacao();
+    await new Promise(res => setTimeout(res, 250));
+    const horasMed = Array.from(document.querySelectorAll('#medicacoes-body [name="med_hora[]"]')).map(x => x.value);
+    out.medicacaoNoHorario = horasMed.indexOf('09:05') >= 0;
+
+    /* e nada foi prescrito por conta própria */
+    const drogas = Array.from(document.querySelectorAll('#medicacoes-body [name="med_nome[]"]')).map(x => x.value).filter(Boolean);
+    out.nenhumaDrogaEscolhida = drogas.length === 0;
+    return out;
+  });
+  assert(r.temGrafico, 'o gráfico precisa existir para a porta do clique direito fazer sentido');
+  assert(r.tabelaTemPorta, 'a tabela também tem de ter a porta — ele pediu os dois lugares');
+  assert(r.abriuNoHorarioDaLinha === '09:05',
+    'a janela abre no horário do ponto tocado; veio ' + r.abriuNoHorarioDaLinha);
+  assert(r.criouMedicao && r.medicaoNoHorario,
+    'a nova medição entra NAQUELE horário: é o "medir de novo para ver se resolveu"');
+  assert(r.eventoNoHorario, 'o evento também, senão a folha conta a história fora de ordem');
+  assert(r.medicacaoNoHorario, 'e a medicação também');
+  assert(r.nenhumaDrogaEscolhida,
+    'o sistema abre a linha e PARA: escolher a droga é conduta, e conduta é de quem está com o paciente');
+  await page.close();
+});
+
 /* 281b) PREENCHER PADRÃO: TEMPERATURA DE PONTA A PONTA, GLICEMIA EM BRANCO,
    E A INTERCORRÊNCIA REPRESENTADA
 
