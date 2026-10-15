@@ -3658,6 +3658,58 @@ await test('Pré: datas dos exames são digitáveis, salvam e saem na impressão
   await page.close();
 });
 
+/* Confirmar a cobrança logo depois de finalizar não é retificar o documento */
+await test('Gerar financeiro após finalizar a pré não vira "versão retificada" na impressão', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('pre', []); store.setList('financeiro', []);
+    const hoje = utils.hojeISO();
+    const doc = store.save('pre', { nome: 'Paciente Sem Retificar', data: hoje, cirurgia: 'Histeroscopia',
+      conclusao_status: 'liberado', _finalizado: true });
+    const adendosAntes = (store.getById('pre', doc._id)._adendos || []).filter(a => a && a._retificacao).length;
+    fin.finalizacao.abrir('pre', doc);
+    await new Promise(res => setTimeout(res, 300));
+    const conv = document.querySelector('[name="fz_convenio"]');
+    conv.value = 'Unimed'; fin.finalizacao.aoTrocarPlano();
+    fin.finalizacao.confirmar();
+    await new Promise(res => setTimeout(res, 400));
+    const depois = store.getById('pre', doc._id);
+    out.semRetificacao = ((depois._adendos || []).filter(a => a && (a._retificacao || /CORREÇÃO|RETIFICA/i.test(a.texto || ''))).length) === adendosAntes;
+    out.documentoIntacto = !depois.convenio && depois.conclusao_status === 'liberado';
+    const lanc = store.list('financeiro').filter(x => x._origemId === doc._id);
+    out.cobrancaComPlano = lanc.length >= 1 && lanc.every(x => x.convenio === 'Unimed');
+    ui.navegar('pre');
+    await new Promise(res => setTimeout(res, 300));
+    pre.carregar(depois);
+    printPreview.abrir();
+    await new Promise(res => setTimeout(res, 400));
+    const folha = printPreview._htmlDaFolha(document.getElementById('ppp'));
+    out.folhaLimpa = !/retificad/i.test(folha) && !/DECISÃO FINANCEIRA/.test(folha)
+      && !/INFORMAÇÕES ACRESCENTADAS/.test(folha) && folha.includes('Paciente Sem Retificar');
+    printPreview.fechar();
+    /* mudar o desfecho na janela, sim, é corrigir o documento */
+    const doc2 = store.save('pre', { nome: 'Paciente Desfecho Mudou', data: hoje, conclusao_status: 'liberado', _finalizado: true });
+    fin.finalizacao.abrir('pre', doc2);
+    await new Promise(res => setTimeout(res, 300));
+    const sel = document.querySelector('[name="fz_desfecho"]');
+    const outra = Array.from(sel.options).map(o => o.value).find(v => v && v !== 'liberado');
+    sel.value = outra;
+    fin.finalizacao.confirmar();
+    await new Promise(res => setTimeout(res, 400));
+    const d2 = store.getById('pre', doc2._id);
+    out.desfechoMudouRegistra = adendos.vigente('pre', d2).conclusao_status === outra
+      || (d2._adendos || []).some(a => a && (a._retificacao || /CORREÇÃO/i.test(a.texto || '')))
+      || d2.conclusao_status === outra;
+    return out;
+  });
+  assert(r.semRetificacao && r.documentoIntacto, 'confirmar a cobrança sem mudar nada não regrava nem retifica a pré finalizada');
+  assert(r.cobrancaComPlano, 'o plano escolhido na janela vai para todas as linhas da cobrança');
+  assert(r.folhaLimpa, 'a folha impressa não diz "retificada", nem traz a decisão financeira ou as informações acrescentadas');
+  assert(r.desfechoMudouRegistra, 'mudar o desfecho na janela continua sendo registrado no documento');
+  await page.close();
+});
+
 /* Item 9: SP Data — evolução em texto limpo e PDF para a área de anexos */
 await test('SP Data: evolução sai em texto limpo para colar, e o PDF com nome claro para anexar', async () => {
   const page = await novaPagina();
@@ -21341,7 +21393,7 @@ await test('Em máquina compartilhada, fechar a aba e reabrir não deixa o atend
 
 /* 255) Adendos/correções devem chegar à impressão do registro aberto,
    inclusive ao arquivo único ficha + SRPA, sem modificar o original assinado. */
-await test('Adendos e correções saem na impressão, e a folha avisa que existem', async () => {
+await test('Adendos aparecem na tela do operador e não saem na folha impressa', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     await __smokePrepareQueue('org-impressao-adendos', 'medico-impressao-adendos');
@@ -21395,6 +21447,10 @@ await test('Adendos e correções saem na impressão, e a folha avisa que existe
     out.tamanhoDeLeitura = !!linhaAdendo && parseFloat(getComputedStyle(linhaAdendo).fontSize) >= 11.9;
     out.originalNaFolha = ppp.textContent.includes(registroPre.exames_compl) && ppp.textContent.includes(nome);
     out.somentePacienteAberto = !ppp.textContent.includes(outroPre._adendos[0].texto);
+    /* o operador vê; a folha impressa não leva */
+    const folha = printPreview._htmlDaFolha(ppp);
+    out.foraDaFolha = !folha.includes('print-adendos') && !folha.includes('INFORMAÇÕES ACRESCENTADAS')
+      && folha.includes(nome);
     printPreview.fechar();
 
     /* O mesmo conteúdo deve seguir as duas partes do arquivo único real. */
@@ -21428,6 +21484,7 @@ await test('Adendos e correções saem na impressão, e a folha avisa que existe
     return out;
   });
   assert(r.achouORegistro, 'a impressão acha o registro aberto pelo id do formulário');
+  assert(r.foraDaFolha, 'as informações acrescentadas aparecem na tela, mas não saem na impressão');
   assert(r.temBloco && r.temOConteudo, 'abrir impressão inclui a seção de adendos e o conteúdo da correção');
   assert(r.temAutorEData, 'a correção impressa conserva data e autoria');
   assert(r.dizQueOOriginalEhODeCima && r.contaQuantos, 'a folha distingue o original preservado e informa o número de correções');
@@ -21482,13 +21539,13 @@ await test('Retificação: valores confirmados entram nos campos e na impressão
     printPreview.abrir();
     const texto = document.getElementById('ppp').textContent;
     out.impressaoAtual = texto.includes('14,6') && !texto.includes('VALOR NÃO CONFIRMADO')
-      && texto.includes('VERSÃO ATUAL — RETIFICADA') && texto.includes(contexto.userId)
+      && texto.includes('Documento retificado em') && !texto.includes('VERSÃO ATUAL')
       && !texto.includes('RÓTULO FORJADO NÃO CONFIÁVEL');
     /* O SELO FECHA A FOLHA, NÃO A ABRE. Ele saía em cima, e a primeira coisa
        que a equipe lia — antes do nome do paciente — era um UUID e uma nota de
        versionamento. Procedência se assina no rodapé. Vale para todo documento:
        a ordem é montada num lugar só (printPreview._comporDocumento). */
-    out.seloNoFim = texto.indexOf('VERSÃO ATUAL — RETIFICADA') > texto.indexOf('Paciente Sintético Atual');
+    out.seloNoFim = texto.indexOf('Documento retificado em') > texto.indexOf('Paciente Sintético Atual');
     printPreview.fechar();
     const falso = JSON.parse(JSON.stringify(salvo));
     falso._adendos = [{ ...falso._adendos[0], id: 'evento-forjado-sintetico',

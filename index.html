@@ -4846,7 +4846,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-15f</b><br>
+    v7.1 · build <b id="build-tag">2026-10-15g</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -22806,8 +22806,10 @@ const adendos = (() => {
         '<div style="font-size:8pt;color:#555;margin:0 0 3px">' +
         E(adendos._fmtData(ad.data)) + (ad.autor ? ' — ' + E(ad.autor) : '') + '</div>' + corpo + '</div>';
     };
-    return '<div class="print-adendos" style="margin-top:14px;border:1px solid #8a1c1c;border-radius:6px;padding:8px 10px">' +
-      '<h3 style="font-size:10pt;margin:0 0 2px;color:#8a1c1c">INFORMAÇÕES ACRESCENTADAS APÓS A FINALIZAÇÃO — ' + lista.length + '</h3>' +
+    /* `so-tela`: o operador vê; a folha impressa, o PDF e o SP Data não. */
+    return '<div class="print-adendos so-tela" style="margin-top:14px;border:1px solid #8a1c1c;border-radius:6px;padding:8px 10px">' +
+      '<h3 style="font-size:10pt;margin:0 0 2px;color:#8a1c1c">INFORMAÇÕES ACRESCENTADAS APÓS A FINALIZAÇÃO — ' + lista.length +
+      ' <small style="font-weight:400;color:#555">(só na tela — não sai na impressão)</small></h3>' +
       '<div style="font-size:8pt;color:#555;margin:0 0 4px">' +
       'Chegaram depois que o documento foi finalizado e fazem parte desta avaliação. ' +
       'O registro original permanece preservado no histórico.</div>' +
@@ -26802,7 +26804,13 @@ const spdata = {
     }
     if (!String(corpo || '').trim()) {
       const ppp = document.getElementById('ppp');
-      corpo = ppp ? (ppp.innerText || ppp.textContent || '') : '';
+      if (ppp) {
+        const folha = printPreview._folhaSemTela(ppp);
+        folha.style.cssText = 'position:absolute;left:-10000px;top:0;width:800px';
+        document.body.appendChild(folha);
+        corpo = folha.innerText || folha.textContent || '';
+        folha.remove();
+      }
     }
     let assinatura = '';
     try {
@@ -40813,26 +40821,49 @@ const fin = {
       let doc = store.getById(ctx.mod, ctx.docId);
       try {
         if (doc) {
-          if (conv) {
+          /* NÃO RETIFICAR O QUE NÃO MUDOU.
+             Esta janela abre logo DEPOIS de finalizar. Regravar o documento
+             aqui — com o mesmo desfecho, ou com o convênio que só a cobrança
+             precisa — transformava a confirmação de cobrança numa "retificação"
+             do documento recém-finalizado, e a folha impressa saía dizendo
+             "versão retificada" de uma pré que ninguém corrigiu.
+             O convênio é dado da COBRANÇA: vai no lançamento. O documento só é
+             regravado quando ainda não foi finalizado, ou quando o desfecho
+             confirmado aqui é de fato diferente do que está nele — aí, sim, é
+             uma retificação, e é certo que fique registrada. */
+          const finalizado = !!doc._finalizado;
+          let mudou = false;
+          if (conv && !finalizado) {
             if (ctx.mod === 'anestesia') { doc.paciente = Object.assign({}, doc.paciente, { convenio: conv }); }
             else doc.convenio = conv;
+            mudou = true;
           }
-          /* o desfecho confirmado aqui volta para a avaliação: é o mesmo campo
-             do card 6, e ter dois valores diferentes para a mesma pergunta é
-             como começam as divergências */
           if (desfecho && (ctx.mod === 'pre' || ctx.mod === 'consulta')) {
-            doc.conclusao_status = desfecho;
-            if (desfObs) doc.conclusao_obs = desfObs;
+            /* compara com o que a janela MOSTRAVA: sem desfecho gravado, ela
+               mostra "liberado" — deixar como veio não é mudar nada */
+            const atual = ctx.mod === 'pre' ? (pre.desfechoDe(doc) || 'liberado') : String(doc.conclusao_status || '');
+            if (desfecho !== atual) { doc.conclusao_status = desfecho; mudou = true; }
+            if (desfObs && String(desfObs).trim() !== String(doc.conclusao_obs || '').trim()) { doc.conclusao_obs = desfObs; mudou = true; }
           }
-          delete doc._semFinanceiro;
-          doc = store.save(ctx.mod, doc);
+          if (doc._semFinanceiro && !finalizado) { delete doc._semFinanceiro; mudou = true; }
+          if (mudou) doc = store.save(ctx.mod, doc);
         }
       } catch (e) {}
 
       /* Uma escolha explícita de gerar revoga uma decisão anterior de não
          cobrar, também por evento; não reabre nem regrava o prontuário. */
       doc = fin.finalizacao.registrarDecisao(ctx.mod, ctx.docId, true) || doc;
-      const fr = fin.fromDoc(ctx.mod, doc);
+      /* o plano escolhido aqui vale para TODAS as linhas da cobrança, sem
+         precisar regravar o documento finalizado */
+      let docCobranca = doc;
+      try {
+        if (doc && conv) {
+          docCobranca = JSON.parse(JSON.stringify(doc));
+          if (ctx.mod === 'anestesia') docCobranca.paciente = Object.assign({}, docCobranca.paciente, { convenio: conv });
+          else docCobranca.convenio = conv;
+        }
+      } catch (e) { docCobranca = doc; }
+      const fr = fin.fromDoc(ctx.mod, docCobranca);
       if (!fr || !fr.item) { if (ctx.aoFechar) ctx.aoFechar(null, opts); return; }
 
       item = store.getById('financeiro', fr.item._id) || fr.item;
@@ -40980,7 +41011,8 @@ const fin = {
            campo nascia vazio e o <select> caía na primeira opção — todo
            lançamento de consulta aparecia como "Procedimento / Cirurgia". */
         tipo_atendimento: l.tipo_atendimento || item.tipo_atendimento || 'procedimento',
-        cirurgiao: cab.cirurgiao, hospital: cab.hospital, convenio: cab.convenio,
+        /* documento sem convênio não apaga o que a cobrança já sabe */
+        cirurgiao: cab.cirurgiao, hospital: cab.hospital, convenio: cab.convenio || item.convenio || '',
         /* Senha/autorização do plano: o registro clínico é a fonte da verdade.
            Se o clínico tiver senha, ela reflete no Financeiro; senão preserva a
            que o usuário eventualmente digitou aqui. */

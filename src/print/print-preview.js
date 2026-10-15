@@ -52,18 +52,26 @@ const printPreview = {
     const estado = adendos.estadoRetificacoes(registro, mod);
     const aplicadas = estado.aplicadas || [], conflitos = estado.conflitos || [], pendentes = estado.pendentes || [];
     if (!aplicadas.length && !conflitos.length && !pendentes.length) return '';
-    const head = (registro._adendos || []).find(ad => ad && ad.id === estado.headId);
+    const head = aplicadas[aplicadas.length - 1];
     const data = head && (head._serverCreatedAt || head.data);
-    const autoria = head ? [head._authorId || head.autor || '', data ? adendos._fmtData(data) : ''].filter(Boolean).join(' · ') : '';
-    const titulo = aplicadas.length ? 'VERSÃO ATUAL — RETIFICADA' : 'VERSÃO ORIGINAL — RETIFICAÇÃO NÃO APLICADA';
     const aviso = [conflitos.length ? conflitos.length + ' retificação(ões) em conflito' : '',
       pendentes.length ? pendentes.length + ' retificação(ões) pendente(s) de confirmação' : ''].filter(Boolean).join('; ');
-    /* margem em cima, não embaixo: agora ele fecha a folha em vez de abri-la */
-    return '<div class="pp-retificacao' + (aviso ? ' pp-retificacao-alerta' : '') + '" style="border:1px solid #64748b;padding:6px 8px;margin:10px 0 0;font-size:9pt;line-height:1.4;break-inside:avoid">' +
-      '<strong>' + utils.escapeHTML(titulo) + '</strong>' +
-      (autoria ? '<div>' + utils.escapeHTML(autoria) + '</div>' : '') +
-      '<div>O registro original e o histórico de adendos permanecem preservados.</div>' +
-      (aviso ? '<div><strong>' + utils.escapeHTML(aviso) + '.</strong> Esses campos não foram incorporados ao documento.</div>' : '') + '</div>';
+    /* UMA LINHA, SEM INVENTÁRIO.
+       As correções já estão no corpo, cada uma no seu campo — é a versão
+       vigente que se imprime. Na folha basta dizer que o documento foi
+       retificado e quando; listar cada correção, com UUID, era ruído. O aviso
+       de retificação não aplicada é para quem opera: fica só na tela. */
+    const selo = aplicadas.length
+      ? '<div class="pp-retificacao" style="border-top:1px solid #94a3b8;padding:4px 0 0;margin:10px 0 0;font-size:8pt;line-height:1.35;color:#475569;break-inside:avoid">' +
+        'Documento retificado' + (data ? ' em ' + utils.escapeHTML(adendos._fmtData(data)) : '') +
+        '. As correções constam nos campos acima; o registro original permanece preservado no histórico.</div>'
+      : '';
+    const alerta = aviso
+      ? '<div class="pp-retificacao-alerta so-tela" style="border:1px solid #b45309;background:#fff7ed;padding:6px 8px;margin:10px 0 0;font-size:9pt;line-height:1.4">' +
+        '<strong>Só na tela — não sai na impressão:</strong> ' + utils.escapeHTML(aviso) +
+        '. Esses campos não foram incorporados ao documento.</div>'
+      : '';
+    return selo + alerta;
   },
   _comporDocumento(mod, builder) {
     const anterior = printPreview._verCtx;
@@ -359,7 +367,7 @@ const printPreview = {
       if (!ppp) { toast('Conteúdo de preview não encontrado', 'error'); return; }
 
       const titulo = printPreview._gerarNomeArquivo();
-      const contentHTML = ppp.innerHTML;
+      const contentHTML = printPreview._htmlDaFolha(ppp);
 
       const css = `
         /* margem vertical = 0 remove o cabeçalho/rodapé automático do navegador
@@ -569,7 +577,21 @@ ${TAG_CLOSE_HTML}`;
 
   /* Percorre o preview e monta um PDF de texto estruturado com jsPDF nativo.
      Reconhece cabeçalhos (h1/h2), campos (label+valor) e blocos de texto. */
-  _gerarDocDeTexto(J, ppp) {
+  /* O QUE É DA TELA NÃO VAI PARA A FOLHA.
+     A pré-visualização é também a tela de trabalho de quem opera: nela aparecem
+     os adendos acrescentados depois da finalização e os avisos de retificação
+     pendente. Isso é para o operador — o paciente e o hospital recebem o
+     documento, com as correções já no corpo. Tudo marcado `.so-tela` sai da
+     impressão, do PDF e do texto do SP Data. */
+  _folhaSemTela(ppp) {
+    if (!ppp || typeof ppp.cloneNode !== 'function') return ppp;
+    const c = ppp.cloneNode(true);
+    c.querySelectorAll('.so-tela').forEach(el => el.remove());
+    return c;
+  },
+  _htmlDaFolha(ppp) { return printPreview._folhaSemTela(ppp).innerHTML; },
+  _gerarDocDeTexto(J, pppTela) {
+    const ppp = printPreview._folhaSemTela(pppTela);
     const doc = new J({ unit: 'mm', format: 'a4' });
     const W = 210, H = 297, M = 16;
     const contentW = W - M * 2;
