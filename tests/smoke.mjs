@@ -10796,6 +10796,144 @@ const page = await novaPagina();
 });
 
 
+/* Edição ao vivo: o eco do próprio salvamento automático não vira conflito,
+   e a lista de conflitos fica com um por documento. */
+await test('Edição ao vivo: eco do próprio salvamento não é conflito, e a lista fica com um conflito por documento', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const ctx = await __smokePrepareQueue('org-eco', 'u-eco');
+    const out = {};
+    cloudRel._limparConflitosMemoria && cloudRel._limparConflitosMemoria();
+    const antes = cloudRel._conflitosLer().filter(x => x.status === 'pending').length;
+    edicaoViva._garantirContexto();
+    /* esta aba enviou {texto, campo}; enquanto isso já se digitou mais */
+    const enviado = { consentimento: 'Paciente ciente dos riscos', procedimento: 'Hernioplastia' };
+    edicaoViva._marcarEnviado('termo', enviado);
+    edicaoViva._mem.set('termo', { id: 'live_termo', mod: 'termo', uid: 'u-eco',
+      dados: { consentimento: 'Paciente ciente dos riscos e benefícios', procedimento: 'Hernioplastia' },
+      _draftVersion: 3, _draftOrg: 'org-eco', remoteConfirmed: false, em: new Date().toISOString() });
+    /* o banco devolve o mesmo conteúdo com as chaves em outra ordem */
+    const eco = { id: 'srv-live', organization_id: 'org-eco', user_id: 'u-eco', module: 'live:termo',
+      doc_id: 'live_termo', version: 4, updated_at: new Date().toISOString(), updated_by: 'u-eco',
+      data: { id: 'live_termo', dados: { procedimento: 'Hernioplastia', consentimento: 'Paciente ciente dos riscos' } } };
+    const tratou = edicaoViva.receberLinha(eco, ctx);
+    out.ecoIgnorado = tratou === false
+      && cloudRel._conflitosLer().filter(x => x.status === 'pending').length === antes;
+    out.versaoAvancou = Number(edicaoViva._mem.get('termo')._draftVersion) === 4;
+    /* conteúdo que esta aba NÃO enviou continua sendo tratado como antes */
+    const outro = Object.assign({}, eco, { version: 5, data: { id: 'live_termo', dados: { consentimento: 'Texto de outro aparelho' } } });
+    edicaoViva.receberLinha(outro, ctx);
+    out.outroAindaConflita = cloudRel._conflitosLer().filter(x => x.status === 'pending').length === antes + 1;
+
+    /* lista: 6 conflitos do mesmo documento + 1 de outro → sobra um de cada */
+    cloudRel.enviarDecisoes = async () => 0;
+    const base = (t) => ({ _id: 'pre-cons', nome: 'Paciente Repetido', obs: t });
+    for (let i = 0; i < 6; i++) {
+      const e = cloudRel.registrarConflito('pre', base('local ' + i), base('nuvem ' + i), { motivo: 'teste' });
+      if (e) e.createdAt = '2026-10-15T17:0' + i + ':00Z';
+    }
+    cloudRel.registrarConflito('pre', { _id: 'pre-outro', obs: 'a' }, { _id: 'pre-outro', obs: 'b' }, { motivo: 'teste' });
+    cloudRel.abrirConflitosPendentes();
+    const restam = cloudRel._conflitosLer().filter(x => x.status === 'pending' && !x.resolutionRequested && x.mod === 'pre');
+    out.restam = restam.map(x => x.legacyId + ':' + (x.proposed && x.proposed.obs));
+    out.umPorDocumento = restam.length === 2 && restam.some(x => x.legacyId === 'pre-cons' && x.proposed.obs === 'local 5')
+      && restam.some(x => x.legacyId === 'pre-outro');
+    try { modal.close(); } catch (e) {}
+    return out;
+  });
+  assert(r.ecoIgnorado, 'o eco do próprio salvamento (mesmo conteúdo, chaves em outra ordem) não abre conflito');
+  assert(r.versaoAvancou, 'e só atualiza o número da versão');
+  assert(r.outroAindaConflita, 'conteúdo que esta aba não enviou continua sendo preservado como conflito');
+  assert(r.umPorDocumento, 'a lista fica com o conflito mais recente de cada documento (veio ' + JSON.stringify(r.restam) + ')');
+  await page.close();
+});
+
+/* Gravação parada em "conflito" na fila cifrada sai quando o servidor prova que
+   o conflito foi decidido — e o painel "o que falta?" mostra a fila cifrada. */
+await test('Sync: gravação em conflito sai da fila cifrada quando o servidor confirma a decisão', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    await __smokePrepareQueue();
+    cloudRel.disponivel = () => true;
+    sincronia.agora = () => {};
+    rascunhos._agendarEnvio = () => {};
+    cloudRel.registrarAnexos = () => {};
+    cloudRel._resolverConflitoRegistro = () => {};
+    const out = {};
+    cloudRel.enviarRegistro = async () => ({ ok: false, motivo: 'rede' });
+    const rec = store.save('pre', { nome: 'Paciente Conflito Parado', data: utils.hojeISO() });
+    await store.aguardarNuvem(rec);
+    cloudRel.enviarRegistro = async () => ({ ok: false, conflict: true, motivo: 'versao_divergente',
+      cloud: { _id: rec._id, nome: 'Versão remota', _relVersion: 2 } });
+    await persistenciaCloudFirst.drenar();
+    const op = () => filaCifrada.listar().then(l => l.find(x => x.entityId === rec._id));
+    out.parouEmConflito = ((await op()) || {}).queue.state === 'conflict';
+
+    /* o painel mostra a fila cifrada, com o motivo */
+    await conexao.verPendentes();
+    const painel = document.getElementById('modal-body').textContent;
+    out.painelMostra = /Na fila cifrada/.test(painel) && /esperando decisão de conflito/.test(painel)
+      && /Paciente Conflito Parado/.test(painel);
+    modal.close();
+
+    let respostaServidor = [{ status: 'pending' }];
+    const consultas = [];
+    const fetchOriginal = window.fetch;
+    cloud._garantirToken = async () => true;
+    window.fetch = async (url, opts) => {
+      if (String(url).includes('/rest/v1/sync_conflicts') && (!opts || !opts.method || opts.method === 'GET')) {
+        consultas.push(String(url));
+        return { ok: true, status: 200, json: async () => respostaServidor };
+      }
+      return fetchOriginal(url, opts);
+    };
+    try {
+      /* conflito ainda pendente no servidor: espera */
+      persistenciaCloudFirst._consultasConflito.clear();
+      await persistenciaCloudFirst.drenar();
+      out.pendenteEspera = !!(await op()) && consultas.length === 1
+        && consultas[0].includes('record_legacy_id=eq.' + encodeURIComponent(rec._id));
+      /* decidido no servidor: sai, com prova */
+      respostaServidor = [{ status: 'resolved_remote' }];
+      persistenciaCloudFirst._consultasConflito.clear();
+      const d = await persistenciaCloudFirst.drenar();
+      out.saiComProva = !(await op()) && d.liberadas === 1;
+      /* e a próxima gravação do mesmo atendimento deixa de ficar bloqueada */
+      cloudRel.enviarRegistro = async (mod, item, o) => __smokeCloudReceipt(mod, item, o);
+      store.save('pre', Object.assign({}, store.getById('pre', rec._id), { idade: '40 anos' }));
+      await store.aguardarNuvem({ _id: rec._id });
+      await persistenciaCloudFirst.drenar();
+      out.filaVazia = (await filaCifrada.listar()).length === 0;
+
+      /* sem registro do conflito no servidor: não apaga, volta a tentar */
+      cloudRel.enviarRegistro = async () => ({ ok: false, motivo: 'rede' });
+      const rec2 = store.save('pre', { nome: 'Sem Evidencia', data: utils.hojeISO() });
+      await store.aguardarNuvem(rec2);
+      cloudRel.enviarRegistro = async () => ({ ok: false, conflict: true, motivo: 'versao_divergente',
+        cloud: { _id: rec2._id, nome: 'Outra', _relVersion: 2 } });
+      await persistenciaCloudFirst.drenar();
+      respostaServidor = [];
+      persistenciaCloudFirst._consultasConflito.clear();
+      await persistenciaCloudFirst.drenar();
+      const op2 = (await filaCifrada.listar()).find(x => x.entityId === rec2._id);
+      out.semEvidenciaNaoApaga = !!op2 && op2.queue.state === 'staged';
+      const enviados = [];
+      cloudRel.enviarRegistro = async (mod, item, o) => { enviados.push(item._id); return __smokeCloudReceipt(mod, item, o); };
+      await persistenciaCloudFirst.drenar();
+      out.reenviou = enviados.includes(rec2._id) && !(await filaCifrada.listar()).some(x => x.entityId === rec2._id);
+    } finally { window.fetch = fetchOriginal; }
+    return out;
+  });
+  assert(r.parouEmConflito, 'o cenário exige a gravação parada em conflito');
+  assert(r.painelMostra, '"o que falta?" mostra a fila cifrada, com o paciente e o motivo');
+  assert(r.pendenteEspera, 'com o conflito pendente no servidor, a gravação espera');
+  assert(r.saiComProva, 'com o conflito decidido no servidor, a gravação sai da fila');
+  assert(r.filaVazia, 'e as gravações seguintes do atendimento deixam de ficar presas');
+  assert(r.semEvidenciaNaoApaga && r.reenviou, 'sem evidência no servidor nada se apaga: a gravação volta a ser enviada');
+  await page.close();
+});
+
+
 /* 156) A janela "Entrar na nuvem" exigia a senha e a única saída era "Agora
    não" — que deixa o aparelho fora da sincronização. Para o gestor havia o
    painel do Supabase; para a secretária, caminho nenhum. */

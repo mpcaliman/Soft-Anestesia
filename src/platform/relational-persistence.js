@@ -1493,6 +1493,32 @@ const cloudRel = {
       x.operation !== 'delete' && x.operation !== 'draft_delete' &&
       !cloudRel._camposDivergentes(x.proposed, x.canonical).length);
   },
+  /* UM CONFLITO POR REGISTRO.
+     Os laços de salvamento automático deixaram dezenas de conflitos para o
+     MESMO documento, um por pausa na digitação — cada um uma fotografia
+     intermediária do mesmo texto. Só a mais recente importa: ela contém tudo
+     o que veio antes. As anteriores recebem a decisão "fica a da nuvem", que
+     não altera dado nenhum (é só o registro da decisão; as duas versões seguem
+     preservadas no servidor). A mais recente de cada registro continua na
+     lista para ele decidir. Exclusões nunca entram aqui. */
+  consolidarPorRegistro() {
+    const pend = cloudRel._conflitosLer().filter(x => x && x.status === 'pending' && !x.resolutionRequested &&
+      x.operation !== 'delete' && x.operation !== 'draft_delete');
+    const grupos = new Map();
+    pend.forEach(x => {
+      const k = [x.mod, x.tabela, x.legacyId].join('|');
+      if (!grupos.has(k)) grupos.set(k, []);
+      grupos.get(k).push(x);
+    });
+    let n = 0;
+    grupos.forEach(lista => {
+      if (lista.length < 2) return;
+      lista.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+      lista.slice(1).forEach(x => { if (cloudRel.resolverConflito(x.clientId, 'remote', null, { adiarEnvio: true })) n++; });
+    });
+    if (n) cloudRel.enviarDecisoes();
+    return n;
+  },
   limparConflitosSemDivergencia() {
     const alvo = cloudRel.conflitosSemDivergencia();
     let n = 0;
@@ -1628,6 +1654,9 @@ const cloudRel = {
   abrirConflitosPendentes() {
     /* Sobra sem divergência não pede escolha de ninguém: sai antes da lista. */
     try { cloudRel.limparConflitosSemDivergencia(); } catch (e) {}
+    let consolidados = 0;
+    try { consolidados = cloudRel.consolidarPorRegistro(); } catch (e) {}
+    if (consolidados) { try { toast('🧹 ' + consolidados + ' versões intermediárias do mesmo documento arquivadas — fica a mais recente de cada um para você decidir', 'info'); } catch (e) {} }
     const todos = cloudRel._conflitosLer().filter(x => x.status === 'pending');
     /* O que JÁ FOI DECIDIDO não volta para a fila de decisão. A decisão está
        gravada; falta só o recibo da nuvem. Mostrá-los junto com os outros era

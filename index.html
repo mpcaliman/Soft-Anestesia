@@ -4847,7 +4847,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-15i</b><br>
+    v7.1 · build <b id="build-tag">2026-10-15k</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -12567,8 +12567,12 @@ const conexao = {
      ninguém mostrava: o aviso dizia "7" e a pessoa só podia esperar. Sete que
      não andam há horas quase sempre são sete que não vão andar — e aí a
      resposta é olhar o motivo, não esperar mais. */
-  verPendentes() {
+  async verPendentes() {
     const linhas = [];
+    /* a fila cifrada (gravações e adendos à espera de recibo): é ela que a
+       faixa conta, e era a única que este painel não mostrava */
+    let diario = [];
+    try { diario = await persistenciaCloudFirst.listarFila(); } catch (e) {}
     const esc = (v) => utils.escapeHTML(String(v == null ? '' : v));
     try {
       (cloudRel._filaLer() || []).forEach(x => {
@@ -12606,6 +12610,22 @@ const conexao = {
           '<div style="color:var(--text-mute);font-size:.76rem">' + l.tentativas + ' tentativa(s)' +
           (l.quando ? ' · desde ' + esc(l.quando) : '') + '</div></div>').join('') + '</div>';
     }
+    if (diario.length) {
+      const ESTADO = { staged: 'na fila', sending: 'enviando', offline: 'esperando conexão',
+        blocked: 'esperando outra gravação', conflict: 'esperando decisão de conflito' };
+      corpo += '<p style="font-weight:600;margin:0 0 6px">Na fila cifrada (' + diario.length + ')</p>' +
+        '<div style="max-height:30vh;overflow:auto;margin:0 0 12px">' + diario.slice(0, 20).map(d => {
+          const rec = (() => { try { return store.getById(d.mod, d.id); } catch (e) { return null; } })();
+          const nome = rec ? ((rec.paciente && rec.paciente.nome) || rec.paciente_nome || rec.nome || rec.paciente || '') : '';
+          return '<div style="border-bottom:1px solid var(--border);padding:6px 0;font-size:.82rem">' +
+            '<b>' + esc(lixeira.LABELS[d.mod] || d.mod) + '</b>' + (nome ? ' · ' + esc(nome) : '') + ' · ' + esc(d.acao) +
+            '<div style="color:var(--text-mute);font-size:.76rem">' + esc(ESTADO[d.estado] || d.estado) +
+            ' · ' + d.tentativas + ' tentativa(s)' + (d.erro ? ' · ' + esc(d.erro) : '') +
+            (d.quando ? ' · desde ' + esc(new Date(d.quando).toLocaleString('pt-BR')) : '') + '</div></div>';
+        }).join('') + '</div>' +
+        (diario.some(d => d.estado === 'conflict')
+          ? '<p style="font-size:.8rem;margin:0 0 10px">Os que esperam <b>decisão de conflito</b> saem sozinhos assim que o conflito for decidido (menu ⚠️ Conflitos).</p>' : '');
+    }
     if (semCarimbo) {
       corpo += '<p style="font-weight:600;margin:0 0 6px">Ainda sem recibo da nuvem (' + semCarimbo + ')</p>' +
         '<div style="max-height:26vh;overflow:auto;margin:0 0 10px">' + exemplos.map(e =>
@@ -12629,6 +12649,7 @@ const conexao = {
     try { modal.close(); } catch (e) {}
     try { await cloudRel.empurrarAteParar({ silent: false }); } catch (e) {}
     try { await cloudRel.drenarFila(); } catch (e) {}
+    try { persistenciaCloudFirst._consultasConflito.clear(); await persistenciaCloudFirst.drenar(); } catch (e) {}
     try { conexao.pintar(); } catch (e) {}
   },
   /* NINGUÉM CLICA EM "SAIR" NUM COMPUTADOR DE HOSPITAL. A pessoa fecha a aba,
@@ -12897,8 +12918,23 @@ const edicaoViva = {
     }
     const payload = Object.assign({}, r, { id: 'live_' + mod, updatedAt: r.em });
     delete payload.remoteConfirmed;
+    edicaoViva._marcarEnviado(mod, payload.dados);
     const res = await rascunhosSync.gravarUnico('live:' + mod, payload, contexto);
-    if (!contextoAba.corresponde(contexto) || edicaoViva._mem.get(mod) !== r) return false;
+    if (!contextoAba.corresponde(contexto)) return false;
+    if (edicaoViva._mem.get(mod) !== r) {
+      /* DIGITOU DURANTE O ENVIO. O texto novo ainda não subiu, mas a versão
+         que a nuvem acabou de confirmar é a base dele. Sem levar o número
+         adiante, o próximo envio partia da versão velha, a nuvem recusava como
+         "versão divergente" e nascia um conflito a cada pausa na digitação. */
+      const atual = edicaoViva._mem.get(mod);
+      if (res.remoteConfirmed && atual && res.linha) {
+        const metaAtual = rascunhosSync._daLinha(res.linha, contexto.organizationId);
+        if (Number(metaAtual._draftVersion) > Number(atual._draftVersion || 0)) {
+          atual._draftVersion = metaAtual._draftVersion; atual._draftOrg = contexto.organizationId;
+        }
+      }
+      return false;
+    }
     if (res.remoteConfirmed) {
       const meta = rascunhosSync._daLinha(res.linha, contexto.organizationId);
       Object.assign(r, { _draftVersion: meta._draftVersion, _draftOrg: contexto.organizationId,
@@ -12907,6 +12943,14 @@ const edicaoViva = {
       return true;
     }
     if (res.indisponivel) await edicaoViva._persistirCifrado(mod, r, { indisponivel: true });
+    else if (res.linha && edicaoViva._foiEnviadoAqui(mod, rascunhosSync._daLinha(res.linha, contexto.organizationId).dados)) {
+      /* a versão "divergente" é o nosso próprio envio anterior, que chegou
+         antes da resposta: não é conflito, é só a base atrasada */
+      r._draftVersion = rascunhosSync._daLinha(res.linha, contexto.organizationId)._draftVersion;
+      r._draftOrg = contexto.organizationId;
+      edicaoViva._agendarEnvio(mod);
+      return false;
+    }
     else if (res.linha) {
       cloudRel.registrarConflito(mod, payload, rascunhosSync._daLinha(res.linha, contexto.organizationId),
         { tabela: 'drafts', legacyId: payload.id, operation: 'draft_upsert', organizationId: contexto.organizationId });
@@ -12946,6 +12990,30 @@ const edicaoViva = {
     }
     return { ok: true, adopted: true };
   },
+  /* O QUE ESTA ABA MANDOU — para reconhecer o próprio eco.
+     Cada salvamento automático volta pelo realtime. Se chega enquanto se
+     digita, a tela já tem mais texto do que o que foi enviado, e a comparação
+     com a tela via "outra versão": um conflito por pausa na digitação (foram
+     dezenas no mesmo termo, de 10 em 10 segundos). O que volta igual a algo
+     que esta aba enviou é eco: atualiza o número da versão e mais nada.
+     A comparação é canônica (chaves ordenadas), porque o banco reordena as
+     chaves do JSON e o mesmo conteúdo viria com outra grafia. */
+  _enviadosAqui: new Map(),
+  _canon(v) {
+    if (Array.isArray(v)) return '[' + v.map(edicaoViva._canon).join(',') + ']';
+    if (v && typeof v === 'object') return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + edicaoViva._canon(v[k])).join(',') + '}';
+    return JSON.stringify(v === undefined ? null : v);
+  },
+  _marcarEnviado(mod, dados) {
+    const lista = edicaoViva._enviadosAqui.get(mod) || [];
+    lista.push(edicaoViva._canon(dados || {}));
+    while (lista.length > 8) lista.shift();
+    edicaoViva._enviadosAqui.set(mod, lista);
+  },
+  _foiEnviadoAqui(mod, dados) {
+    const lista = edicaoViva._enviadosAqui.get(mod) || [];
+    return lista.indexOf(edicaoViva._canon(dados || {})) >= 0;
+  },
   receberLinha(linha, contexto) {
     const modulo = String(linha && linha.module || '');
     const mod = modulo.startsWith('live:') ? modulo.slice(5) : '';
@@ -12956,6 +13024,12 @@ const edicaoViva = {
     const local = edicaoViva._mem.get(mod);
     if (local && Number(local._draftVersion) >= Number(linha.version)) return false;
     const remoto = rascunhosSync._daLinha(linha, contexto.organizationId);
+    if (edicaoViva._foiEnviadoAqui(mod, remoto.dados)) {
+      if (local && Number(local._draftVersion || 0) < Number(linha.version)) {
+        local._draftVersion = Number(linha.version); local._draftOrg = contexto.organizationId;
+      }
+      return false;
+    }
     const form = edicaoViva._form(mod);
     const ativo = typeof state !== 'undefined' && state.currentModule === mod;
     const digitado = ativo && form ? edicaoViva._ler(form) : null;
@@ -13109,6 +13183,7 @@ const edicaoViva = {
        em voo conservam a chave capturada do dono anterior; aqui apenas se
        esvazia a visão para a próxima pessoa. */
     edicaoViva._ownerKey = '';
+    edicaoViva._enviadosAqui.clear();
     edicaoViva._garantirContexto();
   },
 
