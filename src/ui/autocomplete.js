@@ -220,6 +220,65 @@ const autocomplete = {
     );
   },
   /* Aplica paciente selecionado em um form */
+  /* O QUE O CADASTRO TEM E O FORMULÁRIO PEDE.
+     Escolher o paciente preenchia uma lista CURTA e escrita à mão, diferente
+     em cada módulo: a ficha levava seis campos, todos os outros levavam três.
+     Nascimento, CPF, telefone, endereço, carteirinha, filiação, responsável
+     legal e acomodação ficavam para trás — gravados no cadastro e redigitados
+     a cada documento, que é como o mesmo paciente acaba com dois endereços e
+     duas datas de nascimento.
+     Aqui a regra é uma só, para todos os módulos: para cada dado do cadastro,
+     procura-se no formulário o campo que o recebe, pelos nomes que os módulos
+     de fato usam. Campo que o módulo não tem é ignorado; campo já preenchido
+     NUNCA é sobrescrito — o que está na tela é do usuário. */
+  _CAMPOS_DO_CADASTRO: [
+    ['nascimento', ['nascimento', 'paciente_nasc', 'data_nascimento', 'nasc']],
+    ['sexo', ['sexo', 'paciente_sexo']],
+    ['peso', ['peso', 'paciente_peso']],
+    ['altura', ['altura', 'paciente_altura']],
+    ['cpf', ['cpf', 'paciente_cpf']],
+    ['rg', ['rg', 'paciente_rg']],
+    ['prontuario', ['prontuario', 'paciente_prontuario']],
+    ['convenio', ['convenio', 'paciente_convenio', 'plano']],
+    ['carteirinha', ['carteirinha', 'paciente_carteirinha', 'matricula']],
+    ['telefone', ['telefone', 'paciente_telefone', 'celular']],
+    ['email', ['email', 'paciente_email']],
+    ['endereco', ['endereco', 'paciente_endereco']],
+    ['nome_mae', ['nome_mae', 'paciente_mae', 'mae']],
+    ['nome_pai', ['nome_pai', 'paciente_pai', 'pai']],
+    ['responsavel_legal', ['responsavel_legal', 'responsavel_nome']],
+    ['responsavel_parentesco', ['responsavel_parentesco', 'parentesco']],
+    ['acomodacao', ['acomodacao', 'paciente_acomodacao']]
+  ],
+  _valorDoPaciente(p, campo) {
+    if (!p) return '';
+    if (campo === 'convenio') return p.plano || p.convenio || '';
+    if (campo === 'carteirinha') return p.carteirinha || p.matricula || '';
+    if (campo === 'nascimento') return p.nascimento || p.nasc || '';
+    if (campo === 'acomodacao') {
+      try { return linker._acomodacaoDoCadastro(p) || p.acomodacao || ''; }
+      catch (e) { return p.acomodacao || ''; }
+    }
+    const v = p[campo];
+    return (v === undefined || v === null) ? '' : v;
+  },
+  _preencherDoPaciente(f, p) {
+    if (!f || !p) return 0;
+    let n = 0;
+    autocomplete._CAMPOS_DO_CADASTRO.forEach(([campo, nomes]) => {
+      const v = autocomplete._valorDoPaciente(p, campo);
+      if (v === '' || v == null) return;
+      for (const nome of nomes) {
+        const el = f.querySelector('[name="' + nome + '"]');
+        if (!el) continue;
+        if (el.value) return;            /* o que está na tela é dele */
+        el.value = v; n++;
+        try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+        return;
+      }
+    });
+    return n;
+  },
   _aplicarPaciente(formId, p) {
     if (!p) return;
     const f = document.getElementById(formId);
@@ -257,14 +316,8 @@ const autocomplete = {
       return;
     }
     if (formId === 'form-anestesia') {
-      const setIfEmpty = (n, v) => { const el = f.querySelector(`[name="${n}"]`); if (el && !el.value && v) el.value = v; };
       f.querySelector('[name="paciente_nome"]').value = p.nome || '';
-      setIfEmpty('paciente_nasc', p.nascimento || p.nasc);
-      setIfEmpty('paciente_sexo', p.sexo);
-      setIfEmpty('paciente_prontuario', p.prontuario);
-      setIfEmpty('paciente_mae', p.nome_mae);
-      setIfEmpty('paciente_convenio', p.plano || p.convenio);
-      setIfEmpty('paciente_carteirinha', p.carteirinha);
+      autocomplete._preencherDoPaciente(f, p);
       anestesia.calc.idade();
       /* Guarda _id do paciente para vínculo futuro */
       guardarCadastro();
@@ -276,7 +329,7 @@ const autocomplete = {
       const setIfEmpty = (n, v) => { const el = f.querySelector(`[name="${n}"]`); if (el && !el.value && v) el.value = v; };
       if (!campoNome) return;
       campoNome.value = p.nome || '';
-      setIfEmpty('sexo', p.sexo);
+      autocomplete._preencherDoPaciente(f, p);
       const nascimento = p.nascimento || p.nasc;
       if (nascimento && f.querySelector('[name="idade"]')) {
         const d = new Date(nascimento);
@@ -288,7 +341,6 @@ const autocomplete = {
           if (anos >= 0) setIfEmpty('idade', anos + ' anos');
         }
       }
-      setIfEmpty('convenio', p.plano || p.convenio);
       /* Paciente conhecido só por um registro clínico não tem id de cadastro:
          gravar o id do DOCUMENTO aqui criaria um vínculo para a coisa errada. */
       guardarCadastro();

@@ -17581,6 +17581,103 @@ await test('Rascunhos: cópia preservada não desce da nuvem, e as abas param de
   await page.close();
 });
 
+/* 279b) ABRIR O PACIENTE E VIR SÓ UM TERÇO DELE
+
+   "Ao abrir paciente em qualquer módulo, não está puxando todas as
+   informações. Tipo plano, responsável, data de nascimento etc."
+
+   Escolher o paciente preenchia uma lista CURTA e escrita à mão, diferente em
+   cada módulo: a ficha de anestesia levava seis campos; todos os outros
+   levavam três (nome, sexo e convênio). Nascimento, CPF, telefone, endereço,
+   carteirinha, filiação, responsável legal e acomodação ficavam para trás —
+   gravados no cadastro e redigitados a cada documento. É assim que o mesmo
+   paciente acaba com dois endereços e duas datas de nascimento no mesmo dia.
+
+   A regra passa a ser uma só para todos os módulos, e o teste percorre os
+   módulos de verdade. Campo já preenchido nunca é sobrescrito: o que está na
+   tela é do usuário. */
+await test('Escolher o paciente traz tudo que o cadastro tem — em todos os módulos', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = { porModulo: {} };
+    __smokeBindOrg('org-pac');
+    const pac = {
+      _id: 'pac-completo', nome: 'ROSANGELA DE SOUZA LIMA', nascimento: '1958-03-12',
+      sexo: 'Feminino', cpf: '123.456.789-00', prontuario: '44821', plano: 'Unimed',
+      carteirinha: '0099887766', telefone: '(27) 99999-0000', email: 'r@teste.local',
+      endereco: 'Rua das Flores, 100', nome_mae: 'MARIA DE SOUZA', nome_pai: 'JOAO LIMA',
+      responsavel_legal: 'CARLA LIMA', responsavel_parentesco: 'Filha', apartamento: true
+    };
+    store.setList('pacientes', [pac]);
+
+    const esperado = {
+      pre: [['nome', 'ROSANGELA DE SOUZA LIMA'], ['convenio', 'Unimed'], ['nasc', '1958-03-12']],
+      anestesia: [['paciente_nome', 'ROSANGELA DE SOUZA LIMA'], ['paciente_nasc', '1958-03-12'],
+        ['paciente_convenio', 'Unimed'], ['paciente_carteirinha', '0099887766'],
+        ['paciente_mae', 'MARIA DE SOUZA'], ['paciente_prontuario', '44821']],
+      consulta: [['nome', 'ROSANGELA DE SOUZA LIMA'], ['convenio', 'Unimed']],
+      termo: [['nome', 'ROSANGELA DE SOUZA LIMA'], ['nascimento', '1958-03-12']]
+    };
+
+    for (const mod of ['pre', 'anestesia', 'consulta', 'termo']) {
+      ui.navegar(mod);
+      await new Promise(res => setTimeout(res, 450));
+      const formId = 'form-' + mod;
+      const f = document.getElementById(formId);
+      if (!f) { out.porModulo[mod] = 'sem formulário'; continue; }
+      utils.clearForm(formId);
+      autocomplete._aplicarPaciente(formId, pac);
+      await new Promise(res => setTimeout(res, 120));
+      const leu = (n) => ((f.querySelector('[name="' + n + '"]') || {}).value || '');
+      const faltando = [];
+      (esperado[mod] || []).forEach(([campo, valor]) => {
+        if (leu(campo) !== valor) faltando.push(campo + '="' + leu(campo) + '" (esperado "' + valor + '")');
+      });
+      /* o que o módulo TEM e o cadastro preencheu */
+      const extras = {};
+      ['nasc', 'nascimento', 'cpf', 'telefone', 'endereco', 'carteirinha', 'responsavel_legal',
+       'paciente_nasc', 'paciente_carteirinha', 'paciente_telefone', 'paciente_cpf'].forEach(n => {
+        if (f.querySelector('[name="' + n + '"]')) extras[n] = leu(n);
+      });
+      out.porModulo[mod] = { faltando: faltando, campos: extras };
+    }
+
+    /* o que já está na tela NÃO é sobrescrito */
+    ui.navegar('pre');
+    await new Promise(res => setTimeout(res, 400));
+    const fp = document.getElementById('form-pre');
+    utils.clearForm('form-pre');
+    const conv = fp.querySelector('[name="convenio"]');
+    if (conv) conv.value = 'Particular';
+    autocomplete._aplicarPaciente('form-pre', pac);
+    out.naoSobrescreve = conv ? conv.value === 'Particular' : null;
+    return out;
+  });
+  Object.keys(r.porModulo).forEach(mod => {
+    const m = r.porModulo[mod];
+    if (typeof m === 'string') return;
+    assert(m.faltando.length === 0,
+      'no módulo ' + mod + ' o cadastro não chegou: ' + JSON.stringify(m.faltando));
+  });
+  const ane = r.porModulo.anestesia || {};
+  assert((ane.campos || {}).paciente_nasc === '1958-03-12',
+    'a data de nascimento é a queixa dele por nome, e tem de chegar; veio ' + JSON.stringify(ane.campos));
+  /* os campos que ANTES ficavam para trás, módulo a módulo */
+  const sobraram = [];
+  Object.keys(r.porModulo).forEach(mod => {
+    const m = r.porModulo[mod];
+    if (typeof m === 'string') return;
+    Object.keys(m.campos || {}).forEach(campo => {
+      if (m.campos[campo] === '') sobraram.push(mod + '.' + campo);
+    });
+  });
+  assert(sobraram.length === 0,
+    'campo que o módulo TEM e o cadastro preencheu não pode chegar vazio: ' + JSON.stringify(sobraram));
+  assert(r.naoSobrescreve === true,
+    'convênio já digitado não pode ser trocado pelo do cadastro: o que está na tela é dele');
+  await page.close();
+});
+
 /* 278b) ACOMODAÇÃO: ENFERMARIA, APARTAMENTO E A REGRA DO AMBULATORIAL
 
    "Quando for por plano de saúde, pode ser acomodação enfermaria, apartamento
