@@ -4847,7 +4847,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-15l</b><br>
+    v7.1 · build <b id="build-tag">2026-10-16a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -5987,11 +5987,19 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             </div>
             <div id="equipe-aux-lista"></div>
           </div>
-          <div class="field col-6"><label>Procedimento cirúrgico <small style="color:var(--text-mute);font-weight:400">(CBHPM — principal, entra 100%; mais códigos logo abaixo)</small>
+          <!-- A MESMA LINHA DA PRÉ: código, descrição, lado e um "+" só.
+               O código ficava escondido (só o autocomplete o via) e o ➕ morava
+               colado na descrição; na pré já era uma linha só. Uma linha igual
+               nas duas telas é o que faz a cirurgia atravessar sem ser
+               redigitada. O "+" abre outro código da mesma equipe (com grau). -->
+          <div class="field col-12"><label>Procedimento cirúrgico <small style="color:var(--text-mute);font-weight:400">(CBHPM — principal; mais códigos no "+")</small>
             <button type="button" class="btn btn-xs" style="float:right" onclick="anestesia.puxarDaPre()" title="Traz a cirurgia definida na avaliação pré-anestésica deste paciente">📥 Puxar da pré</button></label>
-            <input type="text" name="procedimento" class="cbhpm-autocomplete" data-mais-acao="ficha" placeholder="Digite parte do procedimento ou o código TUSS..."></div>
-          <div class="field col-2"><label>Lado <small style="color:var(--text-mute);font-weight:400">(em branco = não se aplica)</small></label>
-            <select name="lateralidade"><option value="">—</option><option value="direita">Direita</option><option value="esquerda">Esquerda</option><option value="bilateral">Bilateral</option></select></div>
+            <div class="pre-proc-principal">
+              <input type="text" name="procedimento_cbhpm" class="pre-proc-cod" placeholder="Código TUSS" title="Código TUSS/CBHPM — digite o código, ou escolha pela descrição e ele vem sozinho">
+              <input type="text" name="procedimento" class="cbhpm-autocomplete" data-sem-mais="1" placeholder="Digite parte do procedimento ou o código TUSS..." style="flex:1;min-width:0">
+              <select name="lateralidade" class="pre-proc-lado" title="Lado — em branco quando não se aplica"><option value="">—</option><option value="direita">Direita</option><option value="esquerda">Esquerda</option><option value="bilateral">Bilateral</option></select>
+              <button type="button" class="btn btn-primary btn-sm" style="flex-shrink:0;padding:0 12px" onclick="cbhpm.maisCodigoFicha()" title="Mais um código da mesma equipe (com grau)">+</button>
+            </div></div>
           <div class="field col-2"><label>Sala</label><input type="text" name="sala"></div>
         </div>
 
@@ -12588,7 +12596,7 @@ const conexao = {
           if (it && it._id && !it._relUpdatedAt) {
             semCarimbo++;
             if (exemplos.length < 8) {
-              exemplos.push({ mod: mod, nome: (it.paciente && it.paciente.nome) || it.paciente_nome || it.nome || '(sem nome)',
+              exemplos.push({ mod: mod, nome: (it.paciente && typeof it.paciente === 'object' ? it.paciente.nome : it.paciente) || it.paciente_nome || it.nome || '(sem nome)',
                 data: it.data_anestesia || it.data || (it._createdAt ? String(it._createdAt).slice(0, 10) : '') });
             }
           }
@@ -12626,6 +12634,15 @@ const conexao = {
         (diario.some(d => d.estado === 'conflict')
           ? '<p style="font-size:.8rem;margin:0 0 10px">Os que esperam <b>decisão de conflito</b> saem sozinhos assim que o conflito for decidido (menu ⚠️ Conflitos).</p>' : '');
     }
+    /* o MOTIVO de cada recusa — sem ele, a lista só dizia que não subiu */
+    try {
+      const motivos = cloudRel.resumoFalhas();
+      if (motivos.length) {
+        corpo += '<p style="font-weight:600;margin:0 0 6px">Recusados pela nuvem — motivo</p>' +
+          '<div style="margin:0 0 12px;font-size:.82rem">' + motivos.slice(0, 6).map(m =>
+            '<div style="border-bottom:1px solid var(--border);padding:5px 0"><b>' + m.n + '</b> × ' + esc(m.motivo) + '</div>').join('') + '</div>';
+      }
+    } catch (e) {}
     if (semCarimbo) {
       corpo += '<p style="font-weight:600;margin:0 0 6px">Ainda sem recibo da nuvem (' + semCarimbo + ')</p>' +
         '<div style="max-height:26vh;overflow:auto;margin:0 0 10px">' + exemplos.map(e =>
@@ -12647,6 +12664,7 @@ const conexao = {
   async tentarAgora() {
     toast('☁️ Tentando enviar…');
     try { modal.close(); } catch (e) {}
+    try { cloudRel._falhas.clear(); } catch (e) {}   /* "tentar agora" tenta todos */
     try { await cloudRel.empurrarAteParar({ silent: false }); } catch (e) {}
     try { await cloudRel.drenarFila(); } catch (e) {}
     try { persistenciaCloudFirst._consultasConflito.clear(); await persistenciaCloudFirst.drenar(); } catch (e) {}
@@ -21633,15 +21651,26 @@ const pendProntuario = {
     const doEscopo = (l) => { try { return dashboard._filtrarEscopo(l, escopo); } catch (e) { return l; } };
     const out = [];
 
-    /* 1) rascunho de dia que já passou */
+    /* 1) rascunho de dia que já passou
+       JÁ EXISTE O FINALIZADO? Rascunho do mesmo paciente, no mesmo dia e no
+       mesmo módulo de um documento JÁ finalizado quase sempre é uma cópia que
+       sobrou (aba duplicada, laço de sincronização). A linha diz isso, e as
+       cópias podem ser dispensadas de uma vez — sem apagar nada. */
+    const norm = (n) => String(n || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
     pendProntuario.MODS.forEach(mod => {
       if (!auth.podeAcessar(mod)) return;
-      doEscopo(store.list(mod) || []).forEach(r => {
+      const todos = doEscopo(store.list(mod) || []);
+      const finalizados = new Set(todos.filter(x => x && x._finalizado)
+        .map(x => norm(pendProntuario._nome(x)) + '|' + pendProntuario._data(x)));
+      todos.forEach(r => {
         if (!r || !r._id || r._finalizado || r[pendProntuario.IGNORADA]) return;
         const d = pendProntuario._data(r);
         if (!d || d >= hoje || d < corte) return;      /* hoje é trabalho em curso */
-        out.push({ tipo: 'rascunho', mod, id: r._id, nome: pendProntuario._nome(r), data: d,
-                   motivo: 'Em rascunho — falta finalizar' });
+        const nome = pendProntuario._nome(r);
+        const copia = !!nome && finalizados.has(norm(nome) + '|' + d);
+        out.push({ tipo: 'rascunho', mod, id: r._id, nome, data: d, copia,
+                   motivo: copia ? 'Já existe documento FINALIZADO deste paciente nesta data — este rascunho é cópia'
+                                 : 'Em rascunho — falta finalizar' });
       });
     });
 
@@ -21685,6 +21714,16 @@ const pendProntuario = {
 
   /* Rascunho que não vai ser terminado tem que poder sair da lista, senão a
      lista vira ruído permanente e ninguém olha mais. Não apaga nada. */
+  dispensarCopias() {
+    const copias = pendProntuario.listar().filter(p => p.copia);
+    copias.forEach(p => {
+      const r = store.getById(p.mod, p.id);
+      if (r) { r[pendProntuario.IGNORADA] = new Date().toISOString(); store.save(p.mod, r); }
+    });
+    toast(copias.length + ' cópia(s) dispensada(s) — os documentos continuam salvos');
+    pendProntuario.abrir();
+    try { pendProntuario.renderDashboard(); } catch (e) {}
+  },
   dispensar(mod, id) {
     const r = store.getById(mod, id);
     if (!r) return;
@@ -21702,7 +21741,7 @@ const pendProntuario = {
       '<td style="white-space:nowrap">' + utils.formatarData(p.data) + '</td>' +
       '<td><b>' + utils.escapeHTML(p.nome || '—') + '</b><br><small style="color:var(--text-mute)">' +
         utils.escapeHTML(pendProntuario.ROT[p.mod] || p.mod) + '</small></td>' +
-      '<td style="color:' + (p.tipo === 'sem_ficha' ? '#b3261e' : 'var(--text-soft)') + ';font-size:.82rem">' +
+      '<td style="color:' + (p.tipo === 'sem_ficha' ? '#b3261e' : p.copia ? '#7a4b12' : 'var(--text-soft)') + ';font-size:.82rem">' +
         utils.escapeHTML(p.motivo) + '</td>' +
       '<td style="white-space:nowrap">' +
         (p.tipo === 'sem_ficha'
@@ -21714,6 +21753,11 @@ const pendProntuario = {
       ? '<p style="color:var(--text-mute)">🎉 Nenhum documento pendente. Rascunho de hoje não conta — é trabalho em curso.</p>'
       : '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">Documentos de dias anteriores que ficaram <b>em rascunho</b>, e cirurgias agendadas <b>sem ficha</b>. ' +
         'Rascunho de hoje não entra. <b>Dispensar</b> tira da lista sem apagar nada.</p>' +
+        (lista.some(p => p.copia)
+          ? '<div style="background:#fff4e5;border:1px solid #f0c890;border-radius:8px;padding:8px 10px;font-size:.82rem;margin:0 0 10px"><b>' +
+            lista.filter(p => p.copia).length + '</b> destes rascunhos já têm documento <b>finalizado</b> do mesmo paciente na mesma data. ' +
+            '<button class="btn btn-xs btn-primary" style="margin-left:6px" onclick="pendProntuario.dispensarCopias()">Dispensar as cópias</button></div>'
+          : '') +
         '<div style="max-height:52vh;overflow:auto"><table class="dash-detail-table" style="margin:0"><thead><tr><th>Data</th><th>Paciente</th><th>O que falta</th><th>Ação</th></tr></thead><tbody>' +
         linhas + '</tbody></table></div>';
     modal.open('📋 Pendências de prontuário (' + lista.length + ')', corpo,
@@ -22899,6 +22943,85 @@ const adendos = (() => {
       juntar(bruto.replace(/\s+/g, '_'), m[3]);
     });
     return { campos, texto: linhasTexto.join('\n').trim() };
+  },
+  /* O QUE FOI ACRESCENTADO ENTRA NO CORPO, NO SEU CAMPO.
+     A folha impressa é o documento — não o documento seguido de uma lista de
+     anexos. Retificação estruturada já chega aos campos por `vigente`; aqui
+     entram os outros dois formatos:
+     • correções antigas em texto (`• rótulo: "antes" → "depois"`): o depois
+       vai para o campo;
+     • texto livre do card de adendos: cada linha "Rótulo: valor" procura o
+       campo cujo rótulo na tela corresponde (ex.: "Parecer cardiologista:
+       liberado" → "Parecer / risco cardiológico"). Campo vazio recebe; campo
+       com texto recebe o acréscimo na linha seguinte.
+     O que não encontra campo vira `_complementos`, impresso como seção do
+     corpo, antes da assinatura. Decisão de cobrança nunca entra. */
+  _normRotulo(t) {
+    return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+      .replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  },
+  _camposPorRotulo(mod) {
+    const out = [];
+    try {
+      const form = document.getElementById(mod === 'anestesia' ? 'form-anestesia' : 'form-' + mod);
+      if (!form) return out;
+      form.querySelectorAll('.field').forEach(f => {
+        const lab = f.querySelector('label'); const el = f.querySelector('[name]');
+        if (!lab || !el || !el.name || /\[\]$/.test(el.name)) return;
+        const raiz = lab.cloneNode(true); raiz.querySelectorAll('small').forEach(x => x.remove());
+        const toks = adendos._normRotulo(raiz.textContent).split(' ').filter(x => x.length > 2).map(x => x.slice(0, 6));
+        if (toks.length) out.push({ name: el.name, toks });
+      });
+    } catch (e) {}
+    return out;
+  },
+  _campoDoRotulo(rotulo, campos) {
+    const toks = adendos._normRotulo(rotulo).split(' ').filter(x => x.length > 2).map(x => x.slice(0, 6));
+    if (!toks.length) return '';
+    const bons = campos.filter(c => toks.every(t => c.toks.indexOf(t) >= 0));
+    if (bons.length === 1) return bons[0].name;
+    const exatos = bons.filter(c => c.toks.length === toks.length);
+    return exatos.length === 1 ? exatos[0].name : '';
+  },
+  _aplicarNoCampo(d, chave, valor, acrescentar) {
+    const pôr = (o, k) => {
+      const atual = o[k];
+      o[k] = acrescentar && atual && String(atual).trim() && String(atual).indexOf(valor) < 0
+        ? String(atual) + '\n' + valor : valor;
+      return true;
+    };
+    if (Object.prototype.hasOwnProperty.call(d, chave) && (d[chave] == null || typeof d[chave] !== 'object')) return pôr(d, chave);
+    /* ficha estruturada: o campo mora numa seção (paciente, procedimento…) */
+    const donos = Object.keys(d).filter(k => d[k] && typeof d[k] === 'object' && !Array.isArray(d[k]) &&
+      Object.prototype.hasOwnProperty.call(d[k], chave) && (d[k][chave] == null || typeof d[k][chave] !== 'object'));
+    if (donos.length === 1) return pôr(d[donos[0]], chave);
+    return false;
+  },
+  paraImpressao(mod, rec) {
+    if (!rec || typeof rec !== 'object') return rec;
+    const d = JSON.parse(JSON.stringify(rec));
+    const lista = ((rec && rec._adendos) || []).filter(ad => ad && !ad._retificacao && !ad._retificacaoInvalida &&
+      ad.motivo !== 'decisao_financeira' && !/^DECIS[AÃ]O FINANCEIRA/i.test(String(ad.texto || '')))
+      .slice().sort((a, b) => String(a._serverCreatedAt || a.data || '').localeCompare(String(b._serverCreatedAt || b.data || '')));
+    if (!lista.length) return d;
+    const campos = adendos._camposPorRotulo(mod);
+    const sobras = [];
+    lista.forEach(ad => {
+      const { campos: mud, texto } = adendos.mudancasDoAdendo(ad);
+      mud.forEach(c => {
+        if (!adendos._aplicarNoCampo(d, c.chave, c.valor, false)) {
+          const alvo = adendos._campoDoRotulo(c.rotulo, campos);
+          if (!alvo || !adendos._aplicarNoCampo(d, alvo, c.valor, false)) sobras.push(c.rotulo + ': ' + c.valor);
+        }
+      });
+      String(texto || '').split('\n').map(l => l.trim()).filter(Boolean).forEach(l => {
+        const m = l.match(/^([^:]{2,60}):\s*(.+)$/);
+        const alvo = m ? adendos._campoDoRotulo(m[1], campos) : '';
+        if (!alvo || !adendos._aplicarNoCampo(d, alvo, m[2].trim(), true)) sobras.push(l);
+      });
+    });
+    if (sobras.length) d._complementos = sobras.join('\n');
+    return d;
   },
   htmlParaImpressao(rec) {
     const lista = ((rec && rec._adendos) || []).filter(ad => ad && !ad._retificacao && !ad._retificacaoInvalida);
@@ -30100,6 +30223,7 @@ const cbhpm = {
      TUSS. E o seletor de lado precisa das opções do modelo único, para não
      haver duas listas de lateralidade no sistema. */
   _ligarProcPrincipal(root = document) {
+    try { cbhpm._ligarCodigoNaFicha(); } catch (e) {}
     try {
       const form = (root.getElementById ? root : document).getElementById('form-pre');
       if (!form) return;
@@ -30122,6 +30246,27 @@ const cbhpm = {
     } catch (e) {}
   },
 
+  maisCodigoFicha() {
+    const linha = anestesia.cirurgias.add({}, { mesmaEquipe: true });
+    if (linha) { const i2 = linha.querySelector('[name="cir_extra_proc[]"]'); if (i2) i2.focus(); }
+  },
+  /* o mesmo par código ⇄ descrição, na linha principal da ficha */
+  _ligarCodigoNaFicha() {
+    const form = document.getElementById('form-anestesia');
+    if (!form) return;
+    const cod = form.querySelector('[name="procedimento_cbhpm"]');
+    if (!cod || cod._cbhpmCodLigado) return;
+    cod._cbhpmCodLigado = true;
+    const desc = form.querySelector('[name="procedimento"]');
+    cbhpm.ligarCodigo(cod, {
+      onMatch: (match) => {
+        if (desc && !String(desc.value || '').trim()) {
+          desc.value = match[1];
+          desc.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      }
+    });
+  },
   /* Botão ➕ ao lado de TODO campo CBHPM: acrescenta ' + ' para digitar mais um
      código no mesmo campo (cirurgias com vários códigos). Na ficha, o campo
      principal usa data-mais-acao="ficha" → o ➕ cria uma linha no bloco de
@@ -38707,6 +38852,7 @@ const anestesia = {
 
     const pr = d.procedimento || {};
     set('procedimento', pr.descricao); set('cirurgiao', pr.cirurgiao);
+    set('procedimento_cbhpm', pr.codigo);
     try { anestesia.equipeAux.restaurar(pr.auxiliares); } catch (e) {}
     set('local_hospital', pr.hospital); set('sala', pr.sala);
     set('data_anestesia', pr.data);
@@ -40389,6 +40535,9 @@ const fin = {
         '<div class="field" style="margin-top:10px"><label>Observação deste lançamento <small style="color:var(--text-mute);font-weight:400">— o que precisa ser dito na conciliação</small></label>' +
         '<textarea class="campo-desc" rows="2" name="fz_obs" placeholder="Ex.: guia autorizada por telefone, procedimento trocado no intra-operatório, paciente em apartamento…"></textarea></div>' +
         '<div id="fz-particular" style="display:none;margin-top:12px;border-top:1px solid var(--border);padding-top:12px"></div>' +
+        /* os documentos de suporte (autorização, guia, comprovante) à vista na
+           hora de cobrar — e vão junto para o lançamento, consultáveis no Financeiro */
+        '<div id="fz-docs" style="margin-top:12px"></div>' +
         '<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px">' +
         '<div style="font-size:.84rem;font-weight:600;color:var(--primary-darker);margin-bottom:6px">💰 Adicionais de faturamento <small style="font-weight:400;color:var(--text-mute)">— entram no lançamento para a conciliação</small></div>' +
         '<div class="adic-grid" id="fz-adicionais"></div></div>' +
@@ -40420,11 +40569,34 @@ const fin = {
           }));
           if (!linhas.length) fin.finalizacao.addLinha();
           fin.finalizacao._montarAdicionais(mod);
+          fin.finalizacao._montarDocs(doc);
           if (!avulso) fin.finalizacao._montarDesfecho(mod, doc);
           fin.finalizacao.aoTrocarPlano();
           fin.finalizacao._aoTrocarAcomodacao(true);
         } catch (x) {}
       }, 30);
+    },
+
+    _montarDocs(doc) {
+      const box = document.getElementById('fz-docs');
+      if (!box) return;
+      const docs = (doc && Array.isArray(doc._docs)) ? doc._docs : [];
+      if (!docs.length) {
+        box.innerHTML = '<div style="font-size:.78rem;color:var(--text-mute)">📎 Sem documentos de suporte neste atendimento.</div>';
+        return;
+      }
+      box.innerHTML = '<div style="font-size:.84rem;font-weight:600;color:var(--primary-darker);margin-bottom:6px;border-top:1px solid var(--border);padding-top:10px">📎 Documentos de suporte (' + docs.length + ') <small style="font-weight:400;color:var(--text-mute)">— vão junto para o lançamento</small></div>' +
+        docs.map((d, i) => '<div style="display:flex;gap:8px;align-items:center;padding:6px 8px;border:1px solid var(--border);border-radius:8px;margin-top:6px;background:var(--surface-alt)">' +
+          '<span>' + (d.tipo === 'pdf' ? '📄' : '🖼️') + '</span>' +
+          '<span style="flex:1;min-width:0;font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + utils.escapeHTML(d.nome || 'Documento') +
+          ' <small style="color:var(--text-mute)">· ' + utils.escapeHTML(d.categoria || 'Documento') + '</small></span>' +
+          '<button type="button" class="btn btn-xs" onclick="fin.finalizacao._verDoc(' + i + ')">👁 Ver</button></div>').join('');
+    },
+    _verDoc(i) {
+      const ctx = fin.finalizacao._ctx;
+      const d = ctx && ctx.doc && Array.isArray(ctx.doc._docs) ? ctx.doc._docs[i] : null;
+      if (!d) { toast('Documento não encontrado', 'warn'); return; }
+      financeiro._abrirDoc(d, { emAba: true });
     },
 
     /* NOVO REGISTRO NO FINANCEIRO = A MESMA JANELA DO FECHAMENTO.
@@ -42799,7 +42971,44 @@ const assinatura = {
       if (tipoEl) tipoEl.value = 'carimbo';
     }
     assinatura.carimbarDataHora(prefixo);
+    if (form) { try { assinatura._registrarHashCarimbo(form, sfx, dataUrl); } catch (e) {} }
     markDirty();
+  },
+  /* CARIMBOU, REGISTROU A IMPRESSÃO DIGITAL DO DOCUMENTO.
+     O carimbo é a imagem; o hash é o que prova O QUE foi carimbado. Na hora de
+     aplicar, calcula-se o SHA-256 do conteúdo do documento (todos os campos,
+     em ordem canônica, sem os da própria assinatura) junto com o da imagem do
+     carimbo, e guarda-se em `assinatura_meta`, que viaja com o documento e
+     sai impresso junto da assinatura. Uma vírgula diferente depois disso dá
+     outro hash. */
+  async _hashCarimbo(form, sfx, dataUrl) {
+    const dados = {};
+    form.querySelectorAll('input, select, textarea').forEach(el => {
+      const n = el.name;
+      if (!n || el.type === 'file' || el.type === 'password') return;
+      if (/^(assinatura_|data_assinatura|_profissional_id)/.test(n)) return;
+      const v = el.type === 'checkbox' || el.type === 'radio' ? (el.checked ? el.value || true : null) : el.value;
+      if (v === null || v === '' || v === undefined) return;
+      (dados[n] = dados[n] || []).push(v);
+    });
+    const canon = JSON.stringify(Object.keys(dados).sort().map(k => [k, dados[k]]));
+    const sub = window.crypto && window.crypto.subtle;
+    if (!sub) return null;
+    const hex = buf => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    const enc = new TextEncoder();
+    const hImg = hex(await sub.digest('SHA-256', enc.encode(String(dataUrl || ''))));
+    return hex(await sub.digest('SHA-256', enc.encode(canon + '|carimbo:' + hImg)));
+  },
+  async _registrarHashCarimbo(form, sfx, dataUrl) {
+    const hash = await assinatura._hashCarimbo(form, sfx, dataUrl);
+    if (!hash) return null;
+    const v = n => ((form.querySelector('[name="' + n + '"]') || {}).value || '').trim();
+    const meta = { tipo: 'carimbo', hash, ts: new Date().toISOString(),
+      profissional: v(sfx ? 'anestesiologista2' : (form.id === 'form-anestesia' ? 'anestesiologista' : (v('profissional') ? 'profissional' : 'anestesiologista'))),
+      crm: v('crm' + sfx) };
+    const el = form.querySelector('[name="assinatura_meta' + sfx + '"]');
+    if (el) el.value = JSON.stringify(meta);
+    return meta;
   },
 
   carimbarDataHora(prefixo) {
@@ -45482,6 +45691,22 @@ const financeiro = {
     const item = id ? store.getById('financeiro', id) : null;
     const d = item && item._docsOrigem && item._docsOrigem[i];
     if (!d) { toast('Anexo não encontrado', 'warn'); return; }
+    return financeiro._abrirDoc(d);
+  },
+  /* Abre um anexo (nuvem ou local). `emAba`: abre em outra aba em vez da
+     janela do app — usado de dentro de outra janela, que não pode ser trocada. */
+  async _abrirDoc(d, opts) {
+    opts = opts || {};
+    if (!d) return;
+    if (opts.emAba && d.tipo === 'imagem') {
+      try {
+        const url = d.storage_path ? await prontuario._signedUrl(d.storage_path)
+          : URL.createObjectURL(prontuario._dataurlParaBlob(d.dataurl, 'image/jpeg'));
+        if (!url) { toast('Não consegui gerar o link — verifique login na nuvem', 'warn'); return; }
+        const w = window.open(url, '_blank'); if (!w) toast('Permita pop-ups para visualizar', 'warn');
+      } catch (e) { toast('Não consegui abrir: ' + e.message, 'error'); }
+      return;
+    }
     if (d.storage_path) {
       toast('☁️ Abrindo…');
       const url = await prontuario._signedUrl(d.storage_path);
