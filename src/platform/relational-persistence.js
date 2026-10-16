@@ -957,10 +957,12 @@ const cloudRel = {
       if (enviados + falhas >= limite) { restantes++; continue; }
       if (cloudRel._envioAtivo('pacientes', p._id)) { restantes++; continue; }
       try {
-        const r = await cloudRel.enviarPaciente(p);
+        if (cloudRel._esperandoNovaTentativa('pacientes', p._id)) { restantes++; continue; }
+        let r = await cloudRel.enviarPaciente(p);
         if (!cloudRel._contextoValido(contexto, org)) return { enviados, falhas, restantes, interrompido: true };
-        if (r && r.ok) { cloudRel._filaTirar('pacientes', p._id); enviados++; }
-        else { cloudRel._filaPor('pacientes', p._id, (r && r.motivo) || 'rede'); falhas++; }
+        if (r && !r.ok && r.conflict && r.cloud) r = await cloudRel._reconciliarJaExistente('pacientes', p, r, org);
+        if (r && r.ok) { cloudRel._filaTirar('pacientes', p._id); cloudRel._semFalha('pacientes', p._id); enviados++; }
+        else { cloudRel._filaPor('pacientes', p._id, (r && r.motivo) || 'rede'); cloudRel._anotarFalha('pacientes', p._id, r); falhas++; }
       }
       catch (e) { falhas++; }
     }
@@ -969,10 +971,12 @@ const cloudRel = {
       if (enviados + falhas >= limite) { restantes++; continue; }
       if (cloudRel._envioAtivo('agenda', a._id)) { restantes++; continue; }
       try {
-        const r = await cloudRel.enviarAgenda(a);
+        if (cloudRel._esperandoNovaTentativa('agenda', a._id)) { restantes++; continue; }
+        let r = await cloudRel.enviarAgenda(a);
         if (!cloudRel._contextoValido(contexto, org)) return { enviados, falhas, restantes, interrompido: true };
-        if (r && r.ok) { cloudRel._filaTirar('agenda', a._id); enviados++; }
-        else { cloudRel._filaPor('agenda', a._id, (r && r.motivo) || 'rede'); falhas++; }
+        if (r && !r.ok && r.conflict && r.cloud) r = await cloudRel._reconciliarJaExistente('agenda', a, r, org);
+        if (r && r.ok) { cloudRel._filaTirar('agenda', a._id); cloudRel._semFalha('agenda', a._id); enviados++; }
+        else { cloudRel._filaPor('agenda', a._id, (r && r.motivo) || 'rede'); cloudRel._anotarFalha('agenda', a._id, r); falhas++; }
       } catch (e) { falhas++; }
     }
     for (const mod of Object.keys(cloudRel.MODOS)) {
@@ -980,8 +984,15 @@ const cloudRel = {
         if (!cloudRel._contextoValido(contexto, org)) return { enviados, falhas, restantes, interrompido: true };
         if (enviados + falhas >= limite) { restantes++; continue; }
         if (cloudRel._envioAtivo(mod, it._id)) { restantes++; continue; }
-        try { const r = await cloudRel.enviarRegistro(mod, it); (r && r.ok) ? enviados++ : falhas++; }
-        catch (e) { falhas++; }
+        if (cloudRel._esperandoNovaTentativa(mod, it._id)) { restantes++; continue; }
+        try {
+          let r = await cloudRel.enviarRegistro(mod, it);
+          if (!cloudRel._contextoValido(contexto, org)) return { enviados, falhas, restantes, interrompido: true };
+          if (r && !r.ok && r.conflict && r.cloud) r = await cloudRel._reconciliarJaExistente(mod, it, r, org);
+          if (r && r.ok) { cloudRel._semFalha(mod, it._id); enviados++; }
+          else { cloudRel._anotarFalha(mod, it._id, r); falhas++; }
+        }
+        catch (e) { cloudRel._anotarFalha(mod, it._id, { motivo: (e && e.message) || 'erro' }); falhas++; }
       }
     }
     if (enviados && !opts.silent) toast('☁️ ' + enviados + ' registro(s) que faltavam foram para a clínica');
@@ -989,6 +1000,77 @@ const cloudRel = {
     return { enviados, falhas, restantes };
   },
   _ultimoEmpurrao: null,
+
+  /* UM ITEM RECUSADO NÃO TRAVA A FILA INTEIRA.
+     A rodada parava depois de 25 tentativas, contando as falhas — e tentava
+     sempre os mesmos primeiros. Vinte e cinco recusados de forma permanente
+     bastavam para que os outros 248 nunca fossem nem tentados: a faixa ficava
+     dias em "273 aguardam recibo". Quem falhou espera 10 minutos fora da
+     rodada, e o motivo fica anotado para "o que falta?" mostrar. */
+  _falhas: new Map(),
+  _chaveFalha(mod, id) { return String(mod) + ':' + String(id); },
+  _anotarFalha(mod, id, r) {
+    cloudRel._falhas.set(cloudRel._chaveFalha(mod, id), {
+      mod, id, em: Date.now(), motivo: (r && (r.motivo || r.erro)) || 'recusado sem motivo', status: (r && r.status) || 0
+    });
+  },
+  _semFalha(mod, id) { cloudRel._falhas.delete(cloudRel._chaveFalha(mod, id)); },
+  _esperandoNovaTentativa(mod, id) {
+    const f = cloudRel._falhas.get(cloudRel._chaveFalha(mod, id));
+    return !!f && Date.now() - f.em < 600000;
+  },
+  resumoFalhas() {
+    const por = {};
+    cloudRel._falhas.forEach(f => { por[f.motivo] = (por[f.motivo] || 0) + 1; });
+    return Object.keys(por).map(m => ({ motivo: m, n: por[m] })).sort((a, b) => b.n - a.n);
+  },
+
+  /* "JÁ EXISTE NA NUVEM" NÃO É FALHA.
+     O registro subiu um dia, mas o recibo não ficou neste aparelho (a recusa de
+     então, a quarentena, a troca de versão). Sem número de versão, o envio
+     tenta CRIAR — e a nuvem responde que já existe. Era contado como falha,
+     para sempre, e era exatamente o que segurava os 273 do Financeiro.
+     • Mesmo conteúdo: é o recibo que faltava. Grava o carimbo e pronto.
+     • Conteúdo diferente: as duas versões vão para o conflito preservado
+       (evidência no servidor) e vale a MAIS RECENTE — a do aparelho, se foi
+       editada depois, gravada por cima com a versão certa; senão a da nuvem.
+       Documento finalizado na nuvem é o documento oficial: vale sempre ele. */
+  async _reconciliarJaExistente(mod, item, r, org) {
+    try {
+      const nuvem = r.cloud;
+      if (!nuvem || !cloudRel._contextoValido(cloudRel._capturarContexto(), org)) return r;
+      const meta = { _relVersion: Number(r.cloudVersion || nuvem._relVersion) || nuvem._relVersion,
+        _relUpdatedAt: r.cloudUpdatedAt || nuvem._relUpdatedAt, _relOrg: org };
+      if (nuvem._relId) meta._relId = nuvem._relId;
+      if (nuvem._relEncounterId) meta._relEncounterId = nuvem._relEncounterId;
+      const gravarLocal = (obj) => {
+        const lista = store.list(mod) || [];
+        const ix = lista.findIndex(x => x && x._id === item._id);
+        if (ix < 0) return false;
+        lista[ix] = obj; store.setList(mod, lista); return true;
+      };
+      if (!cloudRel._camposDivergentes(item, nuvem).length) {
+        gravarLocal(Object.assign({}, item, meta));
+        return { ok: true, adotado: true };
+      }
+      const quandoLocal = String(item._updatedAt || item._createdAt || '');
+      const quandoNuvem = String(meta._relUpdatedAt || '');
+      const nuvemOficial = !!nuvem._finalizado;
+      const venceLocal = !nuvemOficial && quandoLocal && quandoLocal > quandoNuvem;
+      const conflito = cloudRel.registrarConflito(mod, item, nuvem, { motivo: 'reconciliacao_ja_existente' });
+      if (conflito) cloudRel.resolverConflito(conflito.clientId, venceLocal ? 'local' : 'remote', null, { adiarEnvio: true });
+      try { cloudRel.enviarDecisoes(); } catch (e) {}
+      if (venceLocal) {
+        const comBase = Object.assign({}, item, meta);
+        gravarLocal(comBase);
+        if (mod === 'pacientes') return await cloudRel.enviarPaciente(comBase);
+        if (mod === 'agenda') return await cloudRel.enviarAgenda(comBase);
+        return await cloudRel.enviarRegistro(mod, comBase);
+      }
+      gravarLocal(Object.assign({}, nuvem, { _id: item._id }, meta));
+      return { ok: true, adotado: true, venceu: 'nuvem' };
+    } catch (e) { return r; }
+  },
 
   /* ENQUANTO ANDA, CONTINUA — EM SÉRIE.
      Cada rodada envia no máximo 15 ou 25 registros, e a sincronização
@@ -1008,7 +1090,7 @@ const cloudRel = {
     cloudRel._empurrando = true;
     const teto = Math.max(1, Number(opts.rodadas) || 20);
     const pausa = Math.max(0, opts.pausaMs == null ? 400 : Number(opts.pausaMs));
-    let enviados = 0, falhas = 0, rodadas = 0;
+    let enviados = 0, falhas = 0, rodadas = 0, semEnvioAntes = false;
     try {
       const contexto = cloudRel._capturarContexto();
       if (!contexto) return null;
@@ -1019,7 +1101,15 @@ const cloudRel = {
         if (!r) break;
         enviados += r.enviados || 0;
         falhas += r.falhas || 0;
-        if (!r.enviados || r.falhas) break;
+        /* quem falhou já fica fora das próximas rodadas por 10 min; enquanto
+           os outros estiverem subindo, continua. Uma rodada só de recusas
+           ganha UMA segunda chance — os recusados ficam de fora, então ela
+           tenta os seguintes; duas seguidas sem nada subir, para. */
+        if (!r.enviados) {
+          if (r.falhas && r.restantes && !semEnvioAntes) { semEnvioAntes = true; continue; }
+          break;
+        }
+        semEnvioAntes = false;
         if (pausa) await new Promise(res => setTimeout(res, pausa));
       }
     } catch (e) {

@@ -2185,8 +2185,10 @@ await test('CBHPM: vários códigos no mesmo campo (➕/x2) em todo o app e auxi
     location.hash = '#anestesia';
     await new Promise(r => setTimeout(r, 400));
     document.getElementById('cir-combo-body').innerHTML = '';
-    const inpFicha = document.querySelector('#form-anestesia [name="procedimento"]');
-    const btnFicha = inpFicha.closest('.cbhpm-linha').querySelector('.cbhpm-mais');
+    /* a ficha tem a mesma linha da pré: o "+" no fim abre o código da mesma equipe */
+    const linhaFicha = document.querySelector('#form-anestesia .pre-proc-principal');
+    const btnFicha = Array.from(linhaFicha.querySelectorAll('button')).find(b => b.textContent.trim() === '+');
+    out.fichaUmMais = !linhaFicha.querySelector('.cbhpm-mais') && !!linhaFicha.querySelector('[name="procedimento_cbhpm"]');
     btnFicha.click();
     out.fichaCriaLinha = document.querySelectorAll('#cir-combo-body [name="cir_extra_proc[]"]').length === 1;
     document.getElementById('cir-combo-body').innerHTML = '';
@@ -2230,6 +2232,7 @@ await test('CBHPM: vários códigos no mesmo campo (➕/x2) em todo o app e auxi
   assert(r.buscaSegmento, 'a busca deveria valer só para o segmento sendo digitado');
   assert(r.escolhaPreserva, 'escolher uma sugestão deveria preservar os procedimentos anteriores');
   assert(r.maisAcrescenta, 'o ➕ deveria acrescentar " + " e focar o campo');
+  assert(r.fichaUmMais, 'a ficha tem a linha da pré: código visível e um "+" só');
   assert(r.fichaCriaLinha, 'na ficha, o ➕ do principal deveria criar linha no bloco de códigos');
   assert(r.auxColeta, 'os auxiliares deveriam ser coletados com a ficha');
   assert(r.auxImpressao, 'os auxiliares deveriam sair na impressão da ficha');
@@ -3387,7 +3390,8 @@ await test('Ficha: procedimento começa na entrada e termina na saída de sala; 
     document.getElementById('cir-combo-body').innerHTML = '';
     anestesia.cirurgias.add({ procedimento: 'Apendicectomia', grau: '50' }, { mesmaEquipe: true });
     const html2 = printPreview._buildAnestesia();
-    out.imprimeMesmaEquipe = /mesma equipe/i.test(html2) && html2.indexOf('Dr. Fulano') >= 0 && html2.indexOf('50%') >= 0;
+    /* grau % é cobrança: não sai na folha (regra do Marcelo, 15/10) */
+    out.imprimeMesmaEquipe = /mesma equipe/i.test(html2) && html2.indexOf('Dr. Fulano') >= 0 && html2.indexOf('50%') < 0;
 
     /* campo CBHPM não deixa o navegador abrir a lista dele por cima */
     const inp = f.querySelector('[name="procedimento"]');
@@ -3413,7 +3417,7 @@ await test('Ficha: procedimento começa na entrada e termina na saída de sala; 
   assert(r.avisoMesmaEquipe, 'a linha deveria avisar que é da mesma equipe');
   assert(r.abriuDetalhes, 'deveria dar para abrir os detalhes de outra equipe');
   assert(r.comCirurgiaoCompleta, 'linha restaurada com cirurgião deve vir completa');
-  assert(r.imprimeMesmaEquipe, 'na impressão, a linha sem cirurgião sai com a equipe principal e o grau');
+  assert(r.imprimeMesmaEquipe, 'na impressão, a linha sem cirurgião sai com a equipe principal, sem o grau (cobrança)');
   assert(r.semAutofill, 'o campo CBHPM não pode aceitar a lista do navegador por cima');
   await page.close();
 });
@@ -9217,7 +9221,9 @@ await test('Ficha: pré importada ao escolher o paciente, acomodação vinda do 
     const el = f.querySelector('[name="origem"]'); if (el) el.value = '';
     anestesia.restaurarEstruturado(d);
     out.restaura = v('origem').toLowerCase() === 'apartamento';
-    out.imprime = printPreview._buildAnestesia().indexOf('Procedência / acomodação') >= 0;
+    /* apartamento/enfermaria é cobrança: grava, mas não sai na folha */
+    out.imprime = !/apartamento/i.test(printPreview._buildAnestesia());
+    out.trecho = (printPreview._buildAnestesia().match(/.{0,120}apartamento.{0,60}/i) || [''])[0];
 
     out.doCadastro = linker._acomodacaoDoCadastro({ enfermaria: '1' }) === 'enfermaria'
       && linker._acomodacaoDoCadastro({ apartamento: 1 }) === 'apartamento'
@@ -9252,7 +9258,7 @@ await test('Ficha: pré importada ao escolher o paciente, acomodação vinda do 
   assert(r.acomodacao, 'apartamento/enfermaria do cadastro precisa cair na procedência da ficha');
   assert(r.grava, 'a acomodação precisa ser gravada no registro da ficha');
   assert(r.restaura, 'e voltar ao reabrir a ficha');
-  assert(r.imprime, 'a acomodação precisa sair na impressão da ficha');
+  assert(r.imprime, 'a acomodação (cobrança) não sai na impressão da ficha: ' + r.trecho);
   assert(r.doCadastro, 'as duas caixas do cadastro viram um dado só de acomodação');
   assert(r.modelosMesmo, 'importar "desta pré" tem de trazer os mesmos campos, não uma cópia mais pobre');
   assert(r.modelosAcomodacao, 'e a acomodação do cadastro também por esse caminho');
@@ -19204,6 +19210,163 @@ await test('Imprimir SRPA + ficha a partir da SRPA: a ficha entra, e a folha nã
       parada por falha, ou apenas lenta. Se tivesse travado de verdade, a tela
       diria a mesma coisa — e foi por isso que ele não conseguiu distinguir.
       Aviso que não separa "trabalhando" de "emperrado" não informa nada. */
+/* Pedidos de 16/10: linha da ficha igual à da pré, documentos de suporte na
+   janela de cobrança, hash ao carimbar e cópias nas pendências. */
+await test('Ficha com a linha da pré, documentos na cobrança, hash do carimbo e cópias nas pendências', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 400));
+    try { anestesia.novo && anestesia.novo(); } catch (e) {}
+    const f = document.getElementById('form-anestesia');
+    const linha = f.querySelector('.pre-proc-principal');
+    const filhos = linha ? Array.from(linha.children) : [];
+    out.linhaFicha = !!linha && !!linha.querySelector('[name="procedimento_cbhpm"]') && !!linha.querySelector('[name="procedimento"]')
+      && !!linha.querySelector('[name="lateralidade"]') && !linha.querySelector('.cbhpm-mais')
+      && filhos.filter(c => c.tagName === 'BUTTON' && c.textContent.trim() === '+').length === 1;
+    /* o código gravado volta ao reabrir */
+    anestesia.carregar({ _id: 'ficha-cod', paciente: { nome: 'Paciente Cod' },
+      procedimento: { data: utils.hojeISO(), descricao: 'Colecistectomia', codigo: '3.10.09.04-0' } });
+    await new Promise(res => setTimeout(res, 150));
+    out.codigoVolta = f.querySelector('[name="procedimento_cbhpm"]').value === '3.10.09.04-0';
+    out.codigoGrava = anestesia.coletarEstruturado().procedimento.codigo === '3.10.09.04-0';
+
+    /* hash ao carimbar */
+    f.querySelector('[name="anestesiologista"]').value = 'Dr. Hash';
+    f.querySelector('[name="crm"]').value = '123';
+    assinatura._aplicarCarimbo('sig-anest', 'data:image/png;base64,' + 'B'.repeat(200), 'form-anestesia');
+    await new Promise(res => setTimeout(res, 300));
+    let meta = null; try { meta = JSON.parse(f.querySelector('[name="assinatura_meta"]').value || 'null'); } catch (e) {}
+    out.temHash = !!meta && meta.tipo === 'carimbo' && /^[0-9a-f]{64}$/.test(meta.hash || '');
+    out.semCrypto = !(window.crypto && window.crypto.subtle);
+    out.hashImpresso = !!meta && printPreview._icpSelo(JSON.stringify(meta)).indexOf(meta.hash) >= 0;
+
+    /* documentos de suporte na janela de cobrança */
+    const doc = store.save('anestesia', { paciente: { nome: 'Paciente Docs', convenio: 'Unimed' },
+      procedimento: { data: utils.hojeISO(), descricao: 'Artroplastia', codigo: '3.07.15.05-0' }, _finalizado: true,
+      _docs: [{ nome: 'guia-autorizacao.pdf', tipo: 'pdf', categoria: 'Autorização', dataurl: 'data:application/pdf;base64,JVBERi0=' }] });
+    fin.finalizacao.abrir('anestesia', doc);
+    await new Promise(res => setTimeout(res, 300));
+    const box = document.getElementById('fz-docs');
+    out.docsNaJanela = !!box && /guia-autorizacao\.pdf/.test(box.textContent) && !!box.querySelector('button');
+    fin.finalizacao.confirmar();
+    await new Promise(res => setTimeout(res, 300));
+    const lanc = store.list('financeiro').find(x => x._origemId === doc._id && !x._origemLinhaId);
+    out.docsNoLancamento = !!lanc && Array.isArray(lanc._docsOrigem) && lanc._docsOrigem.some(d => d.nome === 'guia-autorizacao.pdf');
+
+    /* pendências: rascunho de dia passado com finalizado igual = cópia */
+    const ontem = new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10);
+    const podeOrig = auth.podeAcessar; auth.podeAcessar = () => true;
+    const sel = document.getElementById('dash-escopo'); if (sel) sel.value = 'clinica';
+    store.setList('pre', [
+      { _id: 'pre-fin', nome: 'MARIA COPIA', data: ontem, _finalizado: true },
+      { _id: 'pre-rasc', nome: 'Maria Cópia', data: ontem },
+      { _id: 'pre-outro', nome: 'JOAO SEM FINAL', data: ontem }
+    ]);
+    const l = pendProntuario.listar().filter(p => p.mod === 'pre');
+    const copia = l.find(p => p.id === 'pre-rasc'), outro = l.find(p => p.id === 'pre-outro');
+    out.lista = JSON.stringify(pendProntuario.listar().map(p => [p.id, p.copia, p.nome, p.data]));
+    out.marcaCopia = !!copia && copia.copia === true && /FINALIZADO/.test(copia.motivo) && !!outro && !outro.copia;
+    pendProntuario.dispensarCopias();
+    out.dispensouSoCopia = !pendProntuario.listar().some(p => p.id === 'pre-rasc')
+      && pendProntuario.listar().some(p => p.id === 'pre-outro') && !!store.getById('pre', 'pre-rasc');
+    try { modal.close(); } catch (e) {}
+    auth.podeAcessar = podeOrig;
+    return out;
+  });
+  assert(r.linhaFicha, 'a ficha tem a mesma linha da pré: código, descrição, lado e um "+"');
+  assert(r.codigoVolta && r.codigoGrava, 'o código do procedimento grava e volta ao reabrir');
+  assert(r.temHash || r.semCrypto, 'carimbar registra o hash SHA-256 do documento');
+  assert(r.hashImpresso || r.semCrypto, 'e o hash sai junto da assinatura');
+  assert(r.docsNaJanela, 'os documentos de suporte aparecem na janela de gerar financeiro');
+  assert(r.docsNoLancamento, 'e vão junto para o lançamento, consultáveis no Financeiro');
+  assert(r.marcaCopia, 'rascunho com documento finalizado do mesmo paciente e data aparece como cópia ' + r.lista);
+  assert(r.dispensouSoCopia, '"Dispensar as cópias" tira só as cópias, sem apagar nada');
+  await page.close();
+});
+
+/* Os 273 do Financeiro: já estavam na nuvem, sem recibo no aparelho. "Já existe"
+   não é falha; e quem é recusado de verdade não trava os outros. */
+await test('Fila: "já existe na nuvem" vira recibo, e item recusado não trava os outros', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-fin');
+    cloud._garantirToken = async () => true;
+    cloudRel._enviarConflito = async () => false;
+    cloudRel.enviarDecisoes = async () => 0;
+    cloudRel._falhas.clear();
+    cloudRel._empurrando = false;
+    const hoje = utils.hojeISO();
+    const lanc = (i, extra) => Object.assign({ _id: 'fin-' + i, paciente: 'Paciente ' + i, data_proc: hoje,
+      procedimento: 'Consulta', status: 'pendente', _updatedAt: '2026-10-10T10:00:00Z' }, extra || {});
+    /* 30 que já estão na nuvem iguais; 25 recusados de verdade; 10 novos bons */
+    const lista = [];
+    for (let i = 0; i < 25; i++) lista.push(lanc('ruim' + i));
+    for (let i = 0; i < 30; i++) lista.push(lanc('igual' + i));
+    for (let i = 0; i < 10; i++) lista.push(lanc('novo' + i));
+    store.setList('financeiro', lista);
+    const chamadas = [];
+    cloudRel.enviarRegistro = async (mod, item) => {
+      chamadas.push(item._id);
+      if (mod !== 'financeiro') return { ok: true, row: {} };
+      if (/ruim/.test(item._id)) return { ok: false, motivo: 'http 400 — violates check constraint', status: 400 };
+      if (/igual/.test(item._id)) {
+        const nuvem = Object.assign({}, item, { _relVersion: 2, _relUpdatedAt: '2026-10-12T00:00:00Z', _relOrg: 'org-fin' });
+        return { ok: false, conflict: true, cloud: nuvem, cloudVersion: 2, cloudUpdatedAt: '2026-10-12T00:00:00Z', motivo: 'versao_base_ausente' };
+      }
+      const l = store.list('financeiro'); const ix = l.findIndex(x => x._id === item._id);
+      l[ix]._relUpdatedAt = '2026-10-15T00:00:00Z'; l[ix]._relVersion = 1; store.setList('financeiro', l);
+      return { ok: true, row: {} };
+    };
+    await cloudRel.empurrarAteParar({ silent: true, pausaMs: 0, rodadas: 20 });
+    const fin = store.list('financeiro');
+    out.iguaisComRecibo = fin.filter(x => /igual/.test(x._id) && x._relUpdatedAt && x._relVersion === 2).length;
+    out.novosSubiram = fin.filter(x => /novo/.test(x._id) && x._relUpdatedAt).length;
+    out.ruinsEsperam = fin.filter(x => /ruim/.test(x._id) && !x._relUpdatedAt).length;
+    const m = cloudRel.resumoFalhas();
+    out.motivo = m[0] && m[0].motivo;
+    out.motivoVisivel = !!m[0] && m[0].n === 25 && /check constraint/.test(m[0].motivo);
+    /* os ruins não são retentados na rodada seguinte (esperam 10 min) */
+    chamadas.length = 0; cloudRel._empurrando = false;
+    await cloudRel.empurrarAteParar({ silent: true, pausaMs: 0, rodadas: 5 });
+    out.naoMarteladosDeNovo = !chamadas.some(id => /ruim/.test(id));
+    /* o painel mostra o motivo e o nome do paciente */
+    await conexao.verPendentes();
+    const painel = document.getElementById('modal-body').textContent;
+    out.painel = /Recusados pela nuvem/.test(painel) && /check constraint/.test(painel) && /Paciente ruim0/.test(painel);
+    modal.close();
+
+    /* conteúdo diferente: vale o mais recente */
+    cloudRel._falhas.clear(); cloudRel._empurrando = false;
+    store.setList('financeiro', [
+      lanc('localnovo', { valor_previsto: '900', _updatedAt: '2026-10-14T10:00:00Z' }),
+      lanc('nuvemnova', { valor_previsto: '100', _updatedAt: '2026-10-01T10:00:00Z' })
+    ]);
+    const bases = {};
+    cloudRel.enviarRegistro = async (mod, item) => {
+      if (item._relVersion) { bases[item._id] = item._relVersion; return { ok: true, row: {} }; }
+      const nuvem = Object.assign({}, item, { valor_previsto: '500', _relVersion: 4, _relUpdatedAt: '2026-10-05T00:00:00Z' });
+      return { ok: false, conflict: true, cloud: nuvem, cloudVersion: 4, cloudUpdatedAt: '2026-10-05T00:00:00Z', motivo: 'versao_base_ausente' };
+    };
+    await cloudRel.empurrarPendentes({ silent: true });
+    out.localMaisNovoSobeComBase = bases['fin-localnovo'] === 4;
+    const nn = store.getById('financeiro', 'fin-nuvemnova');
+    out.nuvemMaisNovaFica = nn && nn.valor_previsto === '500' && nn._relVersion === 4;
+    store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.iguaisComRecibo === 30, '"já existe na nuvem" com o mesmo conteúdo vira recibo (veio ' + r.iguaisComRecibo + ')');
+  assert(r.novosSubiram === 10, 'os recusados não travam os outros: os novos sobem (veio ' + r.novosSubiram + ')');
+  assert(r.ruinsEsperam === 25 && r.motivoVisivel, 'os recusados de verdade ficam, com o motivo anotado (' + r.motivo + ')');
+  assert(r.naoMarteladosDeNovo, 'quem foi recusado espera, em vez de travar a próxima rodada');
+  assert(r.painel, '"o que falta?" mostra o motivo e o nome do paciente do Financeiro');
+  assert(r.localMaisNovoSobeComBase, 'versão do aparelho mais recente sobe por cima, com a versão certa');
+  assert(r.nuvemMaisNovaFica, 'versão da nuvem mais recente fica no aparelho');
+  await page.close();
+});
+
 await test('Fila cifrada: as rodadas se encadeiam enquanto andam, e a faixa diz se andou', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
@@ -19261,8 +19424,10 @@ await test('Fila cifrada: as rodadas se encadeiam enquanto andam, e a faixa diz 
   assert(r.esvaziou && r.rodadasAteEsvaziar === 20,
     '271 registros a 15 por rodada esvaziam numa passagem encadeada; vieram ' + r.rodadasAteEsvaziar + ' rodadas');
   assert(r.enviadosTotal === 271, 'o total enviado tem de bater com a fila; veio ' + r.enviadosTotal);
-  assert(r.rodadasQuandoFalha === 1,
-    'rodada que falhou não se repete em sequência — insistir é gastar bateria e servidor sem adiantar');
+  /* uma segunda rodada é permitida (os recusados ficam de fora e ela tenta os
+     seguintes); mais que isso seria insistir sem adiantar */
+  assert(r.rodadasQuandoFalha === 2,
+    'rodada que falhou ganha no máximo uma segunda chance — insistir mais é gastar bateria e servidor sem adiantar');
   assert(r.rodadasQuandoNadaSai === 1, 'rodada sem nenhum envio também para: não há o que encadear');
   assert(/Já subiram <b>15<\/b>/.test(r.andou || ''),
     'a faixa tem de dizer QUANTOS subiram desde a última conferência; veio: ' + r.andou);

@@ -1328,6 +1328,11 @@ ${TAG_CLOSE_HTML}`;
   _icpSelo(metaRaw) {
     let m = metaRaw;
     try { if (typeof metaRaw === 'string') m = metaRaw ? JSON.parse(metaRaw) : null; } catch (e) { m = null; }
+    if (m && m.tipo === 'carimbo' && m.hash) {
+      const quando = (() => { try { return new Date(m.ts).toLocaleString('pt-BR'); } catch (e) { return ''; } })();
+      return `<div class="pp-hash-carimbo" style="margin-top:3px;font-size:6.5pt;color:#555;line-height:1.3;text-align:center;word-break:break-all">` +
+        `Carimbo cadastrado${quando ? ' · ' + utils.escapeHTML(quando) : ''}<br>SHA-256: <span style="font-family:monospace">${utils.escapeHTML(String(m.hash))}</span></div>`;
+    }
     if (!m || (m.tipo !== 'icp' && m.tipo !== 'pdf_anexado')) return '';
     const dt = String(m.ts || '').replace('T', ' ').slice(0, 16);
     let qr = '';
@@ -2236,7 +2241,7 @@ ${TAG_CLOSE_HTML}`;
     if (t.origem || t.destino || t.condicao_saida) {
       html += printPreview._section('Origem e destino', `
         <div class="pp-grid">
-          ${printPreview._field('Origem', t.origem)}
+          ${printPreview._field('Origem', printPreview._procedenciaClinica(t.origem))}
           ${printPreview._field('Destino', t.destino)}
           ${printPreview._field('Condição de saída', t.condicao_saida)}
           ${printPreview._field('Hemodinamicamente estável', t.estavel)}
