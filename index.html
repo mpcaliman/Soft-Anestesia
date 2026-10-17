@@ -8636,6 +8636,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <button class="btn btn-primary" onclick="financeiro.conciliar()" title="Buscar evento por paciente, conferir previsto × recebido × glosa e classificar"><span class="icon">🔄</span> Conciliação</button>
     <button class="btn btn-success" onclick="financeiro.relatorios()" title="Relatórios de conciliação detalhada por código TUSS"><span class="icon">📊</span> Relatórios</button>
     <button class="btn" onclick="financeiro.caixa.abrir()" title="Fechamento de caixa do dia: recebido, realizado e a receber, por convênio e forma de pagamento"><span class="icon">🧾</span> Fechar caixa</button>
+    <button class="btn" onclick="importFin.abrir()" title="Importar a aba Consolidado da conciliação (CSV) como lançamentos do Financeiro"><span class="icon">📥</span> Importar planilha</button>
     <button class="btn btn-success" onclick="financeiro.relatorioAuditoria()" title="Relatório de um período qualquer, por data de registro ou de procedimento, em planilha (CSV) ou PDF — para enviar à auditoria"><span class="icon">📤</span> Relatório do período</button>
     <button class="btn" onclick="financeiro.relatorioMensal()" title="Relatório de um mês fechado, pela data do procedimento, em PDF"><span class="icon">📄</span> Relatório mensal (PDF)</button>
     <button class="btn" onclick="historico.abrir('financeiro')"><span class="icon">🔍</span> Buscar / Histórico</button>
@@ -8901,10 +8902,10 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
         </select>
       </div>
       <div class="field" style="grid-column:auto"><label>De</label>
-        <input type="date" id="fin-f-de" onchange="financeiro.render()">
+        <input type="date" id="fin-f-de" onchange="financeiro.aoMudarPeriodo()">
       </div>
       <div class="field" style="grid-column:auto"><label>Até</label>
-        <input type="date" id="fin-f-ate" onchange="financeiro.render()">
+        <input type="date" id="fin-f-ate" onchange="financeiro.aoMudarPeriodo()">
       </div>
       <div class="field" style="grid-column:auto"><label>Hospital</label>
         <input type="text" id="fin-f-hospital" placeholder="Filtrar por hospital" oninput="financeiro.render()">
@@ -11819,6 +11820,342 @@ const arquivo = {
                      (recuperáveis por 30 dias, nada é perdido de verdade)
      • GRAVAR NOVA — é um procedimento a mais no mesmo dia; convive com o outro
 ============================================================================ */
+/* ============================================================================
+   IMPORTAÇÃO DA CONCILIAÇÃO (planilha → Financeiro)
+   Lê o CSV da aba "Consolidado" da conciliação Unimed e cria os lançamentos
+   do Financeiro, com os pacientes que faltarem. Regras combinadas com o
+   Marcelo:
+     • tudo entra, inclusive o que só aparece no extrato da Unimed;
+     • vínculo "a conferir": entra só com os dados da produção, sem os valores
+       do extrato, e com o aviso para conferir;
+     • linhas de recurso não entram (já estão na produção);
+     • procedimento a partir de 01/01/2026: recebido → finalizado, senão
+       pendente; antes disso, tudo finalizado, mesmo com valor zero;
+     • valor que não existe fica vazio (nada é calculado por tabela).
+   O ID da linha da planilha vira o identificador do lançamento: importar de
+   novo não duplica. Sobe em lotes, com pausa, e o que é anterior a 2026 fica
+   só na nuvem (ver cloudRel.JANELA).
+============================================================================ */
+const importFin = {
+  CORTE: '2026-01-01',
+  LOTE: 200,
+  PAUSA_MS: 600,
+  /* CSV com aspas, vírgulas e quebras de linha dentro de células */
+  lerCsv(texto) {
+    const t = String(texto || '').replace(/^﻿/, '');
+    const sep = (() => {
+      const linha1 = t.split(/\r?\n/, 1)[0] || '';
+      return (linha1.split(';').length > linha1.split(',').length) ? ';' : ',';
+    })();
+    const linhas = []; let campo = '', linha = [], aspas = false;
+    for (let i = 0; i < t.length; i++) {
+      const c = t[i];
+      if (aspas) {
+        if (c === '"') { if (t[i + 1] === '"') { campo += '"'; i++; } else aspas = false; }
+        else campo += c;
+      } else if (c === '"') aspas = true;
+      else if (c === sep) { linha.push(campo); campo = ''; }
+      else if (c === '\n' || c === '\r') {
+        if (c === '\r' && t[i + 1] === '\n') i++;
+        linha.push(campo); campo = ''; linhas.push(linha); linha = [];
+      } else campo += c;
+    }
+    if (campo || linha.length) { linha.push(campo); linhas.push(linha); }
+    return linhas;
+  },
+  _num(v) {
+    const s = String(v == null ? '' : v).replace(/[^\d,.-]/g, '');
+    if (!s) return null;
+    const n = parseFloat(s.indexOf(',') >= 0 ? s.replace(/\./g, '').replace(',', '.') : s);
+    return Number.isFinite(n) ? n : null;
+  },
+  _data(v) {
+    const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})/.exec(String(v || '').trim());
+    if (m) return m[3] + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0');
+    const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v || '').trim());
+    return iso ? iso[0] : '';
+  },
+  _sim(v) { return /^(sim|true|verdadeiro|x|1)$/i.test(String(v || '').trim()); },
+  /* cabeçalho → índice, tolerante a acento, caixa e espaço */
+  _colunas(cab) {
+    const idx = {};
+    cab.forEach((h, i) => { idx[utils.semAcento(h).replace(/\s*\(r\$\)\s*/, '').trim()] = i; });
+    const col = (...nomes) => { for (const n of nomes) { const k = utils.semAcento(n); if (idx[k] != null) return idx[k]; } return -1; };
+    return {
+      data: col('Data atendimento'), nome: col('Nome'), carteirinha: col('Carteirinha'), senhas: col('Senha(s)', 'Senha'),
+      codigos: col('Código(s) procedimento', 'Codigo(s) procedimento'), descricao: col('Descrição procedimento'),
+      pago: col('Pago nos extratos'), glosa: col('Glosas/débitos lançados'), processado: col('Processado nos extratos'),
+      competencias: col('Competências'), pagPrevisto: col('Pagamento(s) previsto(s)'), criterio: col('Critério do vínculo'),
+      situacao: col('Situação'), apartamento: col('Apartamento'), origem: col('Origem'),
+      convenio: col('Convênio original'), local: col('Local original'), cirurgiao: col('Cirurgião original'),
+      valorPlanilha: col('Valor na planilha'), recebidoOrig: col('Recebido original'), apOrig: col('AP original'),
+      procOrig: col('Procedimento original'), senhaOrig: col('Senha original'), carteirinhaOrig: col('Carteirinha original'),
+      abaLinha: col('Aba e linha original'), idsExtrato: col('IDs dos itens do extrato'),
+      candidatos: col('Candidatos a conferir'), obs: col('Observações'), id: col('ID da linha'),
+      carteirinhaSugerida: col('Carteirinha sugerida por nome')
+    };
+  },
+  _aConferir(situacao) { return /conferir|ambig|candidat/i.test(utils.semAcento(situacao)); },
+  /* uma linha do Consolidado → um lançamento do Financeiro (ou o motivo de não entrar) */
+  _lancamento(cel, C) {
+    const v = k => (C[k] >= 0 ? String(cel[C[k]] == null ? '' : cel[C[k]]).trim() : '');
+    const aba = v('abaLinha');
+    if (/^recurso/i.test(utils.semAcento(aba))) return { pular: 'recurso' };
+    const data = importFin._data(v('data'));
+    const nome = utils.nomeProprio(v('nome'));
+    if (!nome || !data) return { pular: 'sem nome ou data' };
+    const idLinha = v('id') || ('L-' + utils.semAcento(nome) + '-' + data + '-' + v('codigos'));
+    const conferir = importFin._aConferir(v('situacao'));
+    const daPlanilha = /planilha/i.test(v('origem'));
+    /* vínculo a conferir: nada do extrato — senha, carteirinha, código e valor
+       ficam os da produção */
+    const ext = conferir ? () => '' : v;
+    const convenio = (v('convenio') || (daPlanilha ? '' : 'Unimed')).replace(/\s+/g, ' ').trim();
+    const pago = importFin._num(ext('pago')), glosa = importFin._num(ext('glosa')), proc = importFin._num(ext('processado'));
+    const recebido = (pago != null && pago > 0) || importFin._sim(v('recebidoOrig'));
+    const cortesia = /cortesia/i.test(convenio);
+    let status;
+    if (data < importFin.CORTE) status = 'finalizado';
+    else if (cortesia) status = 'cortesia';
+    else status = recebido ? 'finalizado' : 'pendente';
+    const senhas = (ext('senhas') || v('senhaOrig')).split(/\s*[|/;]\s*/).map(x => x.trim()).filter(Boolean);
+    const codigos = (ext('codigos') || '').split(/\s*[|;]\s*/).map(x => x.trim()).filter(Boolean);
+    const descricao = ext('descricao') || v('procOrig') || v('descricao');
+    const carteirinha = ext('carteirinha') || v('carteirinhaOrig');
+    const ap = /^sim$/i.test(v('apartamento')) || importFin._sim(v('apOrig'));
+    const tipoPag = /particular/i.test(convenio) ? 'Particular' : /^sus$/i.test(convenio) ? 'SUS' : cortesia ? 'Cortesia' : 'Convênio';
+    const consulta = codigos.length && codigos.every(c => /^1010/.test(c.replace(/\D/g, '')));
+    const obs = [];
+    obs.push('Importado da conciliação Unimed — ' + idLinha + (daPlanilha ? '' : ' (veio só do extrato da Unimed)'));
+    if (conferir) obs.push('⚠️ CONFERIR VÍNCULO: a conciliação não confirmou o pagamento desta linha' +
+      (v('candidatos') ? ' — candidatos: ' + v('candidatos') : '') + '.');
+    if (v('situacao')) obs.push('Situação na conciliação: ' + v('situacao'));
+    if (!conferir && v('competencias')) obs.push('Competência(s): ' + v('competencias'));
+    if (senhas.length > 1) obs.push('Senhas: ' + senhas.join(' / '));
+    if (codigos.length > 1) obs.push('Códigos: ' + codigos.join(' / '));
+    if (carteirinha) obs.push('Carteirinha: ' + carteirinha);
+    if (v('obs')) obs.push(v('obs'));
+    const it = {
+      _id: 'imp_' + idLinha.replace(/[^A-Za-z0-9_-]+/g, '_'),
+      _importId: idLinha, _origemTipo: 'importacao',
+      paciente: nome, data_proc: data,
+      tipo_atendimento: consulta ? 'consulta_geral' : 'procedimento',
+      tipo_pagamento: tipoPag, convenio,
+      hospital: v('local').replace(/\s+/g, ' ').trim(),
+      cirurgiao: utils.nomeProprio(v('cirurgiao')),
+      procedimento: (codigos[0] ? codigos[0] + ' - ' : '') + descricao,
+      codigos: codigos.map((c, i) => ({ codigo: c, descricao: i === 0 ? descricao : '', qtd: 1, grau: 100,
+        valor_unit: 0, valor_previsto: 0, valor_recebido: 0, glosa: 0, status: 'aguardando' })),
+      senha: senhas[0] || '',
+      acomodacao: ap ? 'apartamento' : (daPlanilha ? 'enfermaria' : ''),
+      valor_previsto: proc != null ? proc : '',
+      valor_recebido: pago != null ? pago : '',
+      glosa: glosa != null ? glosa : '',
+      data_recebimento: importFin._data(ext('pagPrevisto')) || '',
+      status, pago: financeiro.ehQuitado(status),
+      observacoes: obs.join('\n'),
+      _carteirinha: carteirinha, _conferirVinculo: conferir,
+      _createdAt: new Date().toISOString(), _updatedAt: new Date().toISOString()
+    };
+    return { it };
+  },
+  analisar(texto) {
+    const linhas = importFin.lerCsv(texto);
+    const iCab = linhas.findIndex(l => l.some(c => /data atendimento/i.test(c)) && l.some(c => /^\s*nome\s*$/i.test(c)));
+    if (iCab < 0) return { erro: 'Não achei o cabeçalho da aba Consolidado (coluna "Data atendimento" e "Nome"). Baixe a aba Consolidado como CSV.' };
+    const C = importFin._colunas(linhas[iCab]);
+    const r = { lancamentos: [], pulados: {}, porAno: {}, porStatus: {}, conferir: 0, soExtrato: 0, repetidos: 0, jaExistem: [] };
+    const vistos = new Set();
+    /* o que já está no sistema (lançado pela ficha, pela consulta…) não é duplicado */
+    const existentes = new Map();
+    (store.list('financeiro') || []).forEach(x => {
+      if (!x || x._origemTipo === 'importacao') return;
+      existentes.set(utils.semAcento(x.paciente) + '|' + (x.data_proc || ''), x);
+    });
+    linhas.slice(iCab + 1).forEach(cel => {
+      if (!cel || cel.every(c => !String(c || '').trim())) return;
+      const x = importFin._lancamento(cel, C);
+      if (x.pular) { r.pulados[x.pular] = (r.pulados[x.pular] || 0) + 1; return; }
+      const it = x.it;
+      if (vistos.has(it._id)) { r.repetidos++; return; }
+      vistos.add(it._id);
+      const ex = existentes.get(utils.semAcento(it.paciente) + '|' + it.data_proc);
+      if (ex) { r.jaExistem.push({ existente: ex, importado: it }); return; }
+      r.lancamentos.push(it);
+      const ano = it.data_proc.slice(0, 4);
+      r.porAno[ano] = (r.porAno[ano] || 0) + 1;
+      r.porStatus[it.status] = (r.porStatus[it.status] || 0) + 1;
+      if (it._conferirVinculo) r.conferir++;
+      if (/só do extrato/.test(it.observacoes)) r.soExtrato++;
+    });
+    return r;
+  },
+  /* pacientes que faltam: nome, carteirinha e convênio — o que a planilha tem */
+  _pacientesNovos(lancs) {
+    const ja = new Set((store.list('pacientes') || []).map(p => utils.semAcento(p.nome)));
+    const novos = new Map();
+    lancs.forEach(it => {
+      const k = utils.semAcento(it.paciente);
+      if (!k || ja.has(k)) return;
+      const p = novos.get(k) || { _id: 'pac_imp_' + k.replace(/[^a-z0-9]+/g, '_'), nome: it.paciente, plano: '', carteirinha: '',
+        _origemTipo: 'importacao', _createdAt: new Date().toISOString() };
+      if (!p.plano && it.convenio) p.plano = it.convenio;
+      if (!p.carteirinha && it._carteirinha) p.carteirinha = it._carteirinha;
+      novos.set(k, p);
+    });
+    return Array.from(novos.values());
+  },
+  abrir() {
+    modal.open('📥 Importar planilha da conciliação',
+      '<p style="font-size:.86rem;line-height:1.6">No Google Planilhas, abra a aba <b>Consolidado</b> e use ' +
+      '<b>Arquivo → Fazer download → Valores separados por vírgula (.csv)</b>. Depois escolha o arquivo aqui.</p>' +
+      '<input type="file" id="imp-fin-arquivo" accept=".csv,text/csv" style="margin:6px 0 10px">' +
+      '<div id="imp-fin-previa" style="font-size:.86rem"></div>',
+      '<button class="btn btn-primary" id="imp-fin-confirmar" disabled onclick="importFin.confirmar()">📥 Importar</button>' +
+      '<button class="btn" onclick="modal.close()">Fechar</button>');
+    const inp = document.getElementById('imp-fin-arquivo');
+    if (inp) inp.addEventListener('change', () => {
+      const f = inp.files && inp.files[0]; if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => importFin.mostrarPrevia(String(rd.result || ''));
+      rd.readAsText(f, 'utf-8');
+    });
+  },
+  mostrarPrevia(texto) {
+    const host = document.getElementById('imp-fin-previa');
+    const r = importFin.analisar(texto);
+    importFin._analise = r;
+    const btn = document.getElementById('imp-fin-confirmar');
+    if (!host) return r;
+    if (r.erro) { host.innerHTML = '<p style="color:#b42318">' + utils.escapeHTML(r.erro) + '</p>'; if (btn) btn.disabled = true; return r; }
+    const esc = utils.escapeHTML;
+    const lista = o => Object.keys(o).sort().map(k => '<li>' + esc(k) + ': <b>' + o[k] + '</b></li>').join('');
+    const pacs = importFin._pacientesNovos(r.lancamentos);
+    const pul = Object.keys(r.pulados).map(k => esc(k) + ': ' + r.pulados[k]).join(' · ');
+    host.innerHTML =
+      '<p><b>' + r.lancamentos.length + '</b> lançamentos para importar.</p>' +
+      '<ul style="margin:0 0 6px 18px">' + lista(r.porAno) + '</ul>' +
+      '<p style="margin:6px 0 2px">Por status:</p><ul style="margin:0 0 6px 18px">' + lista(r.porStatus) + '</ul>' +
+      '<p>⚠️ Vínculo a conferir (sem os valores do extrato): <b>' + r.conferir + '</b><br>' +
+      '🧾 Só no extrato da Unimed: <b>' + r.soExtrato + '</b><br>' +
+      '👤 Pacientes novos no cadastro: <b>' + pacs.length + '</b><br>' +
+      '🔁 Já existem no sistema (mesmo paciente e data — não duplica): <b>' + r.jaExistem.length + '</b>' +
+      (r.repetidos ? '<br>Linhas repetidas na planilha: <b>' + r.repetidos + '</b>' : '') +
+      (pul ? '<br>Fora da importação: ' + pul : '') + '</p>' +
+      '<p style="font-size:.8rem;color:var(--text-mute)">Os anteriores a 2026 ficam guardados na nuvem e aparecem quando você ' +
+      'filtrar o período ou buscar o paciente. O envio é em lotes e pode levar alguns minutos — deixe esta aba aberta.</p>' +
+      '<div id="imp-fin-progresso" style="font-weight:600"></div>';
+    if (btn) btn.disabled = !r.lancamentos.length;
+    return r;
+  },
+  async confirmar() {
+    const r = importFin._analise;
+    if (!r || !r.lancamentos || importFin._rodando) return null;
+    const btn = document.getElementById('imp-fin-confirmar'); if (btn) btn.disabled = true;
+    const prog = m => { const el = document.getElementById('imp-fin-progresso'); if (el) el.textContent = m; };
+    importFin._rodando = true;
+    try {
+      const res = await importFin.enviar(r.lancamentos, prog);
+      if (res.ok && r.jaExistem.length) res.enriquecidos = await importFin.enriquecer(r.jaExistem, prog);
+      prog(res.ok ? '✅ ' + res.lancamentos + ' lançamentos e ' + res.pacientes + ' pacientes importados' +
+          (res.enriquecidos ? '; ' + res.enriquecidos + ' lançamento(s) que já existiam foram completados' : '') + '.'
+        : '⚠️ Parou em ' + res.lancamentos + ' lançamentos: ' + res.erro + '. Importe de novo o mesmo arquivo — o que já subiu não duplica.');
+      if (res.ok) { try { toast('📥 Importação concluída', 'success'); } catch (e) {} }
+      try { if (state.currentModule === 'financeiro') financeiro.render(); } catch (e) {}
+      return res;
+    } finally { importFin._rodando = false; }
+  },
+  async _pausa() { return new Promise(res => setTimeout(res, importFin.PAUSA_MS)); },
+  /* O lançamento que já existia (gerado pela ficha, pela consulta…) não é
+     duplicado: recebe da planilha só o que ainda não tinha — senha, valores,
+     data do pagamento — e o status, se ainda estava pendente. Um por vez. */
+  async enriquecer(pares, prog) {
+    let n = 0;
+    for (const par of pares) {
+      const ex = store.getById('financeiro', par.existente._id);
+      if (!ex) continue;
+      const imp = par.importado, novo = Object.assign({}, ex);
+      let mudou = false;
+      ['senha', 'valor_previsto', 'valor_recebido', 'glosa', 'data_recebimento', 'acomodacao', 'hospital', 'cirurgiao', 'convenio']
+        .forEach(k => { if ((novo[k] === undefined || novo[k] === null || novo[k] === '') && imp[k] !== '' && imp[k] != null) { novo[k] = imp[k]; mudou = true; } });
+      if ((!novo.status || novo.status === 'pendente') && imp.status !== 'pendente') { novo.status = imp.status; novo.pago = imp.pago; mudou = true; }
+      if (!String(novo.observacoes || '').includes(imp._importId)) {
+        novo.observacoes = (novo.observacoes ? novo.observacoes + '\n' : '') + imp.observacoes; mudou = true;
+      }
+      if (!mudou) continue;
+      const salvo = store.save('financeiro', novo);
+      try { await store.aguardarNuvem(salvo || novo); } catch (e) {}
+      n++;
+      if (prog) prog('Completando lançamentos que já existiam: ' + n + ' de ' + pares.length + '…');
+      await importFin._pausa();
+    }
+    return n;
+  },
+  /* Sobe em lotes: primeiro os pacientes que faltam, depois os lançamentos.
+     O servidor ignora o que já existe (mesmo identificador): repetir não duplica. */
+  async enviar(lancs, prog) {
+    prog = prog || (() => {});
+    const contexto = cloudRel._capturarContexto();
+    if (!contexto) return { ok: false, erro: 'entre na clínica antes de importar', lancamentos: 0, pacientes: 0 };
+    if (!(await cloud._garantirToken())) return { ok: false, erro: 'sessão da nuvem vencida — entre de novo', lancamentos: 0, pacientes: 0 };
+    const org = contexto.organizationId;
+    const idn = window.SoftEncounterIdentity;
+    const chavePac = nome => idn.legacyPatientKey(idn.fromRecord({ nome }));
+    let feitosPac = 0, feitos = 0;
+    try {
+      /* 1) pacientes que faltam */
+      const pacs = importFin._pacientesNovos(lancs);
+      for (const lote of migracaoFase4._chunk(pacs, importFin.LOTE)) {
+        if (!cloudRel._contextoValido(contexto, org)) throw new Error('a clínica mudou nesta aba');
+        await migracaoFase4._upsert('patients', lote.map(p => ({
+          organization_id: org, legacy_id: chavePac(p.nome), nome: p.nome, convenio: p.plano || null,
+          data: Object.assign({}, p, { origem: 'importacao' })
+        })).filter(x => x.legacy_id), false);
+        feitosPac += lote.length;
+        prog('Pacientes: ' + feitosPac + ' de ' + pacs.length + '…');
+        await importFin._pausa();
+      }
+      if (pacs.length) {
+        const lst = store.list('pacientes') || [];
+        const ja = new Set(lst.map(p => utils.semAcento(p.nome)));
+        pacs.forEach(p => { if (!ja.has(utils.semAcento(p.nome))) lst.push(Object.assign({}, p, { _relOrg: org })); });
+        store.setList('pacientes', lst);
+      }
+      /* 2) os ids dos pacientes, para ligar cada lançamento */
+      const chaves = Array.from(new Set(lancs.map(it => chavePac(it.paciente)).filter(Boolean)));
+      const idPorChave = new Map();
+      for (const lote of migracaoFase4._chunk(chaves, 100)) {
+        (await migracaoFase4._idsPorLegacy('patients', org, lote)).forEach(x => idPorChave.set(x.legacy_id, x.id));
+      }
+      /* 3) os lançamentos */
+      const locais = [];
+      for (const lote of migracaoFase4._chunk(lancs, importFin.LOTE)) {
+        if (!cloudRel._contextoValido(contexto, org)) throw new Error('a clínica mudou nesta aba');
+        await migracaoFase4._upsert('finance_entries', lote.map(it => {
+          const dados = Object.assign({}, it); delete dados._carteirinha;
+          return { organization_id: org, legacy_id: it._id, patient_id: idPorChave.get(chavePac(it.paciente)) || null,
+            encounter_id: null, data: dados };
+        }), false);
+        feitos += lote.length;
+        lote.forEach(it => { if (cloudRel.dentroDaJanela('financeiro', it)) locais.push(it); });
+        prog('Lançamentos: ' + feitos + ' de ' + lancs.length + '…');
+        await importFin._pausa();
+      }
+      /* 4) o que é de 2026 em diante aparece já, sem esperar a próxima leitura */
+      if (locais.length) {
+        const lst = store.list('financeiro') || [];
+        const ja = new Set(lst.map(x => x && x._id));
+        locais.forEach(it => { if (!ja.has(it._id)) { const c = Object.assign({}, it, { _relOrg: org }); delete c._carteirinha; lst.push(c); } });
+        store.setList('financeiro', lst);
+      }
+      try { cloudRel._puxados.financeiro = false; } catch (e) {}
+      return { ok: true, lancamentos: feitos, pacientes: feitosPac };
+    } catch (e) {
+      return { ok: false, erro: String(e && e.message || e), lancamentos: feitos, pacientes: feitosPac };
+    }
+  }
+};
+
 /* ============================================================================
    PADRONIZAÇÃO DOS DADOS JÁ GRAVADOS
    O formato padrão (utils.padronizarRegistro) vale para o que se digita. Isto
@@ -45666,6 +46003,48 @@ const financeiro = {
      não dava baixa na pendência: a janela continuava cobrando. E havia código
      somando `pago || status==='recebido'` para se defender disso.
      Agora o STATUS manda: "pago" é derivado dele e o fluxo é marcado junto. */
+  /* PERÍODO ANTERIOR À JANELA DO APARELHO.
+     Os anos fechados ficam só na nuvem (cloudRel.JANELA). Filtrar um período
+     que começa antes do corte traz da nuvem os lançamentos daquele trecho —
+     uma vez por período nesta sessão — e eles passam a aparecer na lista. */
+  _periodosTrazidos: new Set(),
+  aoMudarPeriodo() {
+    financeiro.render();
+    const de = (document.getElementById('fin-f-de') || {}).value || '';
+    const corte = (cloudRel.JANELA || {}).financeiro;
+    if (de && corte && de < corte) financeiro.buscarNaNuvem(de, (document.getElementById('fin-f-ate') || {}).value || '');
+  },
+  async buscarNaNuvem(de, ate) {
+    const corte = (cloudRel.JANELA || {}).financeiro;
+    if (!corte || !de || de >= corte || !cloudRel.disponivel()) return 0;
+    const fim = (!ate || ate >= corte) ? '' : ate;
+    const chave = de + '|' + fim;
+    if (financeiro._periodosTrazidos.has(chave)) return 0;
+    const contexto = cloudRel._capturarContexto(); if (!contexto) return 0;
+    if (!(await cloud._garantirToken())) return 0;
+    const org = contexto.organizationId, c = cloud.config();
+    const aviso = m => { try { toast(m, 'info'); } catch (e) {} };
+    aviso('☁️ Trazendo da nuvem os lançamentos do período…');
+    const regs = [];
+    try {
+      for (let off = 0; ; off += 1000) {
+        const r = await fetch(c.url + '/rest/v1/finance_entries?organization_id=eq.' + encodeURIComponent(org) +
+          '&deleted_at=is.null&data->>data_proc=gte.' + encodeURIComponent(de) +
+          (fim ? '&data->>data_proc=lte.' + encodeURIComponent(fim) : '&data->>data_proc=lt.' + encodeURIComponent(corte)) +
+          '&select=' + cloudRel._regSelect('finance_entries') + '&order=updated_at.desc&limit=1000&offset=' + off,
+          { headers: cloud._headers(true) });
+        if (!r.ok || !cloudRel._contextoValido(contexto, org)) return 0;
+        const rows = await r.json().catch(() => []);
+        rows.forEach(row => { const x = cloudRel._rowParaRegistro(row, org); if (x && x._id) regs.push(x); });
+        if (rows.length < 1000 || off > 50000) break;
+      }
+    } catch (e) { return 0; }
+    financeiro._periodosTrazidos.add(chave);
+    const m = cloudRel.mesclarLocal('financeiro', regs);
+    try { if (state.currentModule === 'financeiro') financeiro.render(); } catch (e) {}
+    aviso('☁️ ' + regs.length + ' lançamento(s) do período trazidos da nuvem');
+    return m.novos + m.atualizados;
+  },
   STATUS_QUITADO: ['recebido', 'finalizado', 'cortesia'],
   ehQuitado(status) {
     return financeiro.STATUS_QUITADO.indexOf(String(status || '').toLowerCase()) >= 0;
@@ -47374,7 +47753,10 @@ const financeiro = {
         (porque ? '<div style="font-size:.8rem;color:var(--warning,#8a4b1c);margin-top:6px;font-weight:600">⚠️ ' +
                   utils.escapeHTML(porque) + '</div>' : '') + '</td></tr>';
     } else {
-      tbody.innerHTML = list.map(x => {
+      /* com anos de histórico na tela, desenhar tudo trava o celular: mostra os
+         400 primeiros (os totais abaixo continuam somando a lista inteira) */
+      const LIMITE_FIN = 400;
+      tbody.innerHTML = list.slice(0, LIMITE_FIN).map(x => {
         const prev = parseFloat(x.valor_previsto) || 0;
         const rec  = parseFloat(x.valor_recebido) || 0;
         const glo  = parseFloat(x.glosa) || 0;
@@ -47412,7 +47794,9 @@ const financeiro = {
             </td>
           </tr>
         `;
-      }).join('');
+      }).join('') + (list.length > LIMITE_FIN
+        ? '<tr class="empty-row"><td colspan="15">Mostrando ' + LIMITE_FIN + ' de ' + list.length +
+          ' — use os filtros (período, hospital, cirurgião, plano) para ver os demais.</td></tr>' : '');
     }
 
     /* Totalizadores expandidos */
