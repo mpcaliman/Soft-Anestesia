@@ -19286,6 +19286,62 @@ await test('Ficha com a linha da pré, documentos na cobrança, hash do carimbo 
   await page.close();
 });
 
+/* A janela de conflito da edição ao vivo: os botões fazem alguma coisa, ou dizem por quê. */
+await test('Conflito da edição ao vivo: os botões resolvem, mesmo sem versão e com a nuvem mudando', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const ctx = await __smokePrepareQueue('org-cv', 'u-cv');
+    cloudRel._enviarConflito = async () => false;
+    cloudRel._resolverConflitoServidor = async () => true;
+    const mk = () => {
+      const e = cloudRel.registrarConflito('agenda', { id: 'live_agenda', dados: { paciente: 'MARIANA', tipo: 'Consulta' } },
+        { id: 'live_agenda', dados: { paciente: 'MARIANA', tipo: '' } },
+        { tabela: 'drafts', legacyId: 'live_agenda', draftModule: 'live:agenda', operation: 'draft_upsert' });
+      e.serverVersion = null; e.ownerId = 'u-cv';
+      return e;
+    };
+    /* "usar a da nuvem" sem versão no conflito: lê da nuvem e resolve */
+    let e1 = mk();
+    rascunhosSync._lerAtual = async () => ({ id: 's1', organization_id: 'org-cv', user_id: 'u-cv', module: 'live:agenda',
+      doc_id: 'live_agenda', version: 5, data: { id: 'live_agenda', dados: { paciente: 'MARIANA', tipo: '' } }, updated_at: '2026-10-16T00:00:00Z' });
+    out.remoteOk = await cloudRel._resolverConflitoEdicaoViva(e1.clientId, 'remote', ctx);
+    out.remoteMotivo = cloudRel._motivoResolucao;
+    /* "minha edição" com a nuvem mudando no meio: tenta de novo com a versão atual */
+    let e2 = mk();
+    let tentativas = 0;
+    rascunhosSync.gravarUnico = async (mod, payload) => {
+      tentativas++;
+      const linha = { id: 's1', organization_id: 'org-cv', user_id: 'u-cv', module: 'live:agenda', doc_id: 'live_agenda',
+        version: tentativas === 1 ? 6 : 7, data: payload, updated_at: '2026-10-16T00:00:00Z' };
+      return tentativas === 1 ? { remoteConfirmed: false, linha } : { remoteConfirmed: true, linha };
+    };
+    out.localOk = await cloudRel._resolverConflitoEdicaoViva(e2.clientId, 'local', ctx);
+    out.tentativas = tentativas;
+    out.localMotivo = cloudRel._motivoResolucao;
+    /* sem internet: não resolve, mas DIZ por quê */
+    let e3 = mk();
+    rascunhosSync._lerAtual = async () => null;
+    rascunhosSync.gravarUnico = async () => ({ remoteConfirmed: false, indisponivel: true });
+    e3.serverVersion = 3;
+    out.semRedeFalha = (await cloudRel._resolverConflitoEdicaoViva(e3.clientId, 'local', ctx)) === false
+      && /conexão/.test(cloudRel._motivoResolucao);
+    /* a janela tem a saída que nunca falha */
+    cloudRel._abrirConflitoEdicaoViva(e3);
+    out.temSaida = Array.from(document.querySelectorAll('#live-draft-conflict-review button'))
+      .some(b => /Fechar este aviso/.test(b.textContent));
+    out.semJson = !document.querySelector('#live-draft-conflict-review pre')
+      && /Tipo|tipo/.test(document.getElementById('live-draft-conflict-review').textContent);
+    try { modal.close(); } catch (e) {}
+    return out;
+  });
+  assert(r.remoteOk, '"usar a da nuvem" resolve mesmo sem a versão no conflito (' + r.remoteMotivo + ')');
+  assert(r.localOk && r.tentativas === 2, '"minha edição" grava por cima com a versão atual (' + r.localMotivo + ', ' + r.tentativas + ')');
+  assert(r.semRedeFalha, 'sem internet, o botão diz por que não resolveu');
+  assert(r.temSaida && r.semJson, 'a janela mostra só o que difere e tem a saída "fechar este aviso"');
+  await page.close();
+});
+
 /* A causa real dos 273: o envio pedia de volta `finalized_at`, que a tabela do
    Financeiro não tem — e o servidor recusava a gravação inteira. */
 await test('Financeiro sobe: não pede colunas que a tabela não tem (finalized_at)', async () => {
