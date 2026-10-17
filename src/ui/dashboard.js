@@ -732,8 +732,7 @@ const dashboard = {
         const cir = (it.procedimento && it.procedimento.cirurgiao) || '';
         const proc = (it.procedimento && it.procedimento.descricao) || it.descricao || '';
         const conv = (it.paciente && it.paciente.convenio) || it.convenio || '';
-        const blob = [nome, cir, proc, conv, it.hospital, (it.procedimento && it.procedimento.hospital)].join(' ').toLowerCase();
-        if (blob.includes(termo)) {
+        if (utils.contem([nome, cir, proc, conv, it.hospital, (it.procedimento && it.procedimento.hospital)].join(' '), termo)) {
           resultados.push({ mod: m, item: it, nome: nome || '(sem nome)', cir, proc, conv, data: it._updatedAt });
         }
       });

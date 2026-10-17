@@ -58,14 +58,17 @@
   }
   /* O pedaço do texto em volta do achado, com o termo destacado. Mostrar a
      frase é o que permite decidir sem abrir a ficha. */
+  /* sem acento e sem ç, com o MESMO comprimento: o índice achado vale no original */
+  function plano(t){ return String(t || '').normalize('NFC').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); }
   function trecho(texto, termo){
-    var i = texto.toLowerCase().indexOf(termo);
+    texto = String(texto || '').normalize('NFC');
+    var i = plano(texto).indexOf(termo);
     if (i < 0) return '';
     var ini = Math.max(0, i - 45), fim = Math.min(texto.length, i + termo.length + 45);
     var s = (ini > 0 ? '…' : '') + texto.slice(ini, fim) + (fim < texto.length ? '…' : '');
     var e = esc(s);
     var alvo = esc(texto.substr(i, termo.length));
-    var pos = e.toLowerCase().indexOf(alvo.toLowerCase());
+    var pos = plano(e).indexOf(plano(alvo));
     if (pos < 0) return e;
     return e.slice(0, pos) + '<mark>' + e.slice(pos, pos + alvo.length) + '</mark>' + e.slice(pos + alvo.length);
   }
@@ -85,11 +88,11 @@
       try { dashboard._abrirRegistro(mod, id); } catch(e){ location.hash = '#'+mod; }
     },
     buscar: function(){
-      var termo = document.getElementById('gs-input').value.toLowerCase().trim();
+      var termo = plano(document.getElementById('gs-input').value).replace(/\s+/g, ' ').trim();
       var out = document.getElementById('gs-results');
       var html = '';
       /* ações */
-      acaoAtual = termo ? ACOES.filter(function(a){ return a.t.toLowerCase().includes(termo); }) : ACOES.slice(0,4);
+      acaoAtual = termo ? ACOES.filter(function(a){ return plano(a.t).includes(termo); }) : ACOES.slice(0,4);
       if (acaoAtual.length) {
         html += '<div class="gs-h">AÇÕES</div>' + acaoAtual.map(function(a,i){
           return '<div class="gs-item" onclick="buscaGlobal.acao('+i+')"><span class="gs-ic">'+a.ic+'</span><span class="gs-nome">'+esc(a.t)+'</span></div>';
@@ -105,13 +108,13 @@
             var proc = (it.procedimento && it.procedimento.descricao) || it.descricao || '';
             var cir = (it.procedimento && it.procedimento.cirurgiao) || '';
             var conv = (it.paciente && it.paciente.convenio) || it.convenio || '';
-            var blob = [nome, proc, cir, conv].join(' ').toLowerCase();
+            var blob = plano([nome, proc, cir, conv].join(' '));
             if (blob.includes(termo)) res.push({ mod:m, id:it._id, nome:nome||'(sem nome)', det:[proc,cir,conv].filter(Boolean).join(' · '), data:it._updatedAt });
           });
         });
         try {
           (store.list('agenda')||[]).forEach(function(a){
-            var blob = [a.paciente,a.procedimento,a.cirurgiao,a.convenio,a.local].join(' ').toLowerCase();
+            var blob = plano([a.paciente,a.procedimento,a.cirurgiao,a.convenio,a.local].join(' '));
             if (blob.includes(termo)) res.push({ mod:'agenda', id:a._id, nome:a.paciente||a.tipo||'Compromisso', det:[a.data,a.hora,a.procedimento].filter(Boolean).join(' · '), data:a.data });
           });
         } catch(e){}
@@ -135,7 +138,7 @@
             var achados = [];
             CLINICOS[m].forEach(function(par){
               var txt = textoDoCampo(it[par[0]]);
-              if (txt && txt.toLowerCase().indexOf(termo) >= 0) achados.push({ rot: par[1], txt: txt });
+              if (txt && plano(txt).indexOf(termo) >= 0) achados.push({ rot: par[1], txt: txt });
             });
             if (!achados.length) return;
             var nome = it.paciente_nome || it.nome || (it.paciente && it.paciente.nome) || '';

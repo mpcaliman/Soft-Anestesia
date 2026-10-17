@@ -62,7 +62,7 @@ const historico = {
         /* o que importa é se há REGISTRO, e não se há HTML: o estado vazio
            também é uma linha de tabela, e conferir o HTML nunca disparava. */
         const achouAqui = (store.list(mod) || []).some(it =>
-          historico._textoLinha(mod, it).toLowerCase().includes(q.toLowerCase()));
+          utils.contem(historico._textoLinha(mod, it), q));
         if (achouAqui) return;
         if (!historico._nuvemBuscados) historico._nuvemBuscados = new Set();
         const chave = mod + '|' + q.toLowerCase();
@@ -146,7 +146,7 @@ const historico = {
     const list = store.list(mod);
     const q = (filtro || '').toLowerCase().trim();
     const filtradas = (q
-      ? list.filter(it => historico._textoLinha(mod, it).toLowerCase().includes(q))
+      ? list.filter(it => utils.contem(historico._textoLinha(mod, it), q))
       : list).slice();
     /* Ordenação clicável por data, paciente ou senha */
     const s = historico._sort;
@@ -215,7 +215,7 @@ const historico = {
     try { itens = (arquivo._indice()[mod] || []); } catch (e) { return ''; }
     if (!itens.length) return '';
     const filtradas = q
-      ? itens.filter(e => ((e.nome || '') + ' ' + (e.data || '')).toLowerCase().includes(q))
+      ? itens.filter(e => utils.contem((e.nome || '') + ' ' + (e.data || ''), q))
       : itens;
     if (!filtradas.length) return '';
     return filtradas
@@ -298,7 +298,7 @@ const historico = {
     const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})/);
     return m ? m[3] + '/' + m[2] + '/' + m[1] : d;
   },
-  _fmtRS(v) { return 'R$ ' + (parseFloat(v) || 0).toFixed(2).replace('.', ','); },
+  _fmtRS(v) { return utils.formatarMoeda(parseFloat(v) || 0); },
 
   /* ---- COMO CADA STATUS FINANCEIRO SE LÊ --------------------------------
      O status é o que o anestesista marcou; o "em aberto" é conta, e é ela que
@@ -848,7 +848,7 @@ const historico = {
 const globalSearch = {
   query(q) {
     if (!q || q.length < 2) return [];
-    q = q.toLowerCase();
+    q = utils.semAcento(q);
     const out = [];
     const push = (mod, item, nome, extra) => {
       if (!nome) return;
@@ -858,36 +858,36 @@ const globalSearch = {
       const n = it.paciente && it.paciente.nome;
       const p = it.procedimento && it.procedimento.descricao;
       const c = it.procedimento && it.procedimento.cirurgiao;
-      const blob = ((n || '') + ' ' + (p || '') + ' ' + (c || '')).toLowerCase();
+      const blob = utils.semAcento((n || '') + ' ' + (p || '') + ' ' + (c || ''));
       if (blob.includes(q)) push('anestesia', it, n, p);
     });
     store.list('pre').forEach(it => {
-      const blob = ((it.nome || '') + ' ' + (it.cirurgia || '') + ' ' + (it.cirurgiao || '')).toLowerCase();
+      const blob = utils.semAcento((it.nome || '') + ' ' + (it.cirurgia || '') + ' ' + (it.cirurgiao || ''));
       if (blob.includes(q)) push('pre', it, it.nome, it.cirurgia);
     });
     store.list('consulta').forEach(it => {
-      const blob = ((it.nome || '') + ' ' + (it.queixa || '') + ' ' + (it.profissional || '')).toLowerCase();
+      const blob = utils.semAcento((it.nome || '') + ' ' + (it.queixa || '') + ' ' + (it.profissional || ''));
       if (blob.includes(q)) push('consulta', it, it.nome, it.queixa);
     });
     store.list('recuperacao').forEach(it => {
-      const blob = ((it.nome || '') + ' ' + (it.procedimento || '')).toLowerCase();
+      const blob = utils.semAcento((it.nome || '') + ' ' + (it.procedimento || ''));
       if (blob.includes(q)) push('recuperacao', it, it.nome, it.procedimento);
     });
     store.list('financeiro').forEach(it => {
-      const blob = ((it.paciente || '') + ' ' + (it.procedimento || '') + ' ' + (it.cirurgiao || '')).toLowerCase();
+      const blob = utils.semAcento((it.paciente || '') + ' ' + (it.procedimento || '') + ' ' + (it.cirurgiao || ''));
       if (blob.includes(q)) push('financeiro', it, it.paciente, it.procedimento);
     });
     store.list('termo').forEach(it => {
-      const blob = ((it.nome || '') + ' ' + (it.procedimento || '')).toLowerCase();
+      const blob = utils.semAcento((it.nome || '') + ' ' + (it.procedimento || ''));
       if (blob.includes(q)) push('termo', it, it.nome, it.procedimento);
     });
     store.list('prescricao').forEach(it => {
       const meds = (it.itens || []).map(x => x.nome).join(' ');
-      const blob = ((it.nome || '') + ' ' + meds).toLowerCase();
+      const blob = utils.semAcento((it.nome || '') + ' ' + meds);
       if (blob.includes(q)) push('prescricao', it, it.nome, (it.itens || []).length + ' medicamento(s)');
     });
     store.list('risco').forEach(it => {
-      const blob = ((it.nome || '') + ' ' + (it.procBusca || '')).toLowerCase();
+      const blob = utils.semAcento((it.nome || '') + ' ' + (it.procBusca || ''));
       if (blob.includes(q)) push('risco', it, it.nome, (it._resumo ? 'Risco global ≈' + it._resumo.global.toFixed(1) + '%' : 'Cálculo de risco'));
     });
     return out.slice(0, 20);

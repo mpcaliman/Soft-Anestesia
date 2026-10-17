@@ -13,7 +13,7 @@ const quickActions = {
     const html = `
       <p style="margin-bottom:14px;color:var(--text-soft);font-size:.88rem">
         Paciente: <strong>${utils.escapeHTML(p.nome)}</strong>
-        ${p.cpf ? '· CPF: ' + utils.escapeHTML(p.cpf) : ''}
+        ${p.cpf ? '· CPF: ' + utils.escapeHTML(utils.formatarCpf(p.cpf)) : ''}
       </p>
       <div class="quick-action-grid">
         <div class="quick-action-card" onclick="quickActions.criar(${utils.jsArg(p._id)},'consulta'); modal.close();">

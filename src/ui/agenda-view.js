@@ -163,8 +163,7 @@ const agendaView = {
       if (fTipo && x.tipo !== fTipo) return false;
       if (fStatus && x.status !== fStatus) return false;
       if (fBusca) {
-        const blob = ((x.paciente || '') + ' ' + (x.cirurgiao || '') + ' ' + (x.procedimento || '')).toLowerCase();
-        if (!blob.includes(fBusca)) return false;
+        if (!utils.contem((x.paciente || '') + ' ' + (x.cirurgiao || '') + ' ' + (x.procedimento || ''), fBusca)) return false;
       }
       return true;
     }).sort((a, b) => {

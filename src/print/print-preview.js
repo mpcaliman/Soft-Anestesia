@@ -1125,7 +1125,7 @@ ${TAG_CLOSE_HTML}`;
     const nomeProf = opts.semProfissional ? '' : (prof.nomeProfissional || '');
     const linhaReg = [];
     if (prof.especialidade) linhaReg.push(prof.especialidade);
-    if (prof.crm) linhaReg.push('CRM ' + prof.crm);
+    if (prof.crm) linhaReg.push(utils.rotuloCrm(prof.crm));
     if (prof.rqe) linhaReg.push('RQE ' + prof.rqe);
     /* Lado esquerdo: a CLÍNICA (logo + nome + contato). Lado direito: o
        PROFISSIONAL. São coisas diferentes e o papel precisa das duas. */
@@ -1150,12 +1150,26 @@ ${TAG_CLOSE_HTML}`;
       </div>
     `;
   },
+  /* O formato padrão na impressão, também para o que foi gravado antes dele
+     (o registro guardado não muda: só o que sai no papel). */
+  _padrao(label, value) {
+    if (typeof value !== 'string' || !value.trim() || typeof utils === 'undefined' || !utils.formatarCpf) return value;
+    const l = String(label || '').toLowerCase();
+    try {
+      if (/^cpf/.test(l)) return /^[\d.\-\s]+$/.test(value) ? utils.formatarCpf(value) : value;
+      if (/telefone|celular/.test(l)) return utils.formatarTelefone(value);
+      if (/^crm/.test(l)) return utils.formatarCrm(value);
+      if (/^(paciente|nome|cirurgi[aã]o|anestesiologista|anestesista|respons[aá]vel|solicitante)$/.test(l)) return utils.nomeProprio(value);
+    } catch (e) {}
+    return value;
+  },
   _field(label, value, blockMode = false, sempre = false) {
     /* Por padrão, OMITE o campo se valor for vazio.
        Passe sempre=true para forçar mostrar com "—". */
     if (!sempre && (value === null || value === undefined || String(value).trim() === '' || value === '—')) {
       return '';
     }
+    value = printPreview._padrao(label, value);
     const v = value || '—';
     if (blockMode) {
       return `<div class="pp-block"><span class="pp-label">${utils.escapeHTML(label)}</span><span class="pp-value">${utils.escapeHTML(v)}</span></div>`;
@@ -1471,7 +1485,7 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._field('Conclusão', d.conclusao, true)}
       `) +
       printPreview._complementos(d) +
-      printPreview._signature(d.anestesiologista, d.crm ? 'CRM ' + d.crm : '', d) +
+      printPreview._signature(d.anestesiologista, d.crm ? utils.rotuloCrm(d.crm) : '', d) +
       printPreview._footer('Avaliação pré-anestésica') +
       printPreview._buildProtocoloJejumAnexo(d) +
       '</div>';
@@ -1662,7 +1676,7 @@ ${TAG_CLOSE_HTML}`;
       procHtml +
       segHtml +
       printPreview._complementos(d) +
-      printPreview._signature(d.profissional, d.crm ? 'CRM ' + d.crm : '', d) +
+      printPreview._signature(d.profissional, d.crm ? utils.rotuloCrm(d.crm) : '', d) +
       printPreview._footer('Consulta');
   },
 
@@ -2279,7 +2293,7 @@ ${TAG_CLOSE_HTML}`;
         if (p && p.carimbo) imgHTML = `<img src="${p.carimbo}" alt="">`;
       }
       const linhaNome = nome || '_____________________________';
-      const linhaCrm = crm ? ('CRM ' + crm) : '';
+      const linhaCrm = crm ? utils.rotuloCrm(crm) : '';
       return `
         <div class="pp-signature">
           <div class="pp-signature-img-slot">${imgHTML}</div>
@@ -2447,6 +2461,7 @@ ${TAG_CLOSE_HTML}`;
   _assinaturaDesenhada(dataUrl, linhaNome, linhaRegistro, papel) {
     const img = dataUrl ? `<img src="${dataUrl}" alt="" style="display:block;max-width:200px;max-height:60px;width:auto;height:auto;margin:0 auto 2px">` : '';
     const nome = linhaNome || '_____________________________';
+    if (papel === 'prof' && linhaRegistro) { try { linhaRegistro = utils.rotuloCrm(linhaRegistro); } catch (e) {} }
     const classePapel = papel === 'prof' ? ' pp-signature-prof' : (papel === 'pac' ? ' pp-signature-pac' : '');
     return `
       <div class="pp-signature${classePapel}" style="text-align:center">
@@ -2498,7 +2513,7 @@ ${TAG_CLOSE_HTML}`;
       : (d.nome || 'Paciente');
     const assinaturas = `
       <div class="pp-signature-area" style="display:flex;gap:30px;justify-content:space-between;margin-top:40px">
-        ${printPreview._assinaturaDesenhada(d.sig_paciente_dataurl, labelPac, d.documento ? 'Doc: ' + d.documento : '', 'pac')}
+        ${printPreview._assinaturaDesenhada(d.sig_paciente_dataurl, labelPac, d.documento ? 'Doc: ' + printPreview._padrao('CPF', d.documento) : '', 'pac')}
         ${printPreview._assinaturaDesenhada(d.assinatura_dataurl || d.sig_profissional_dataurl, d.profissional || 'Profissional', d.crm, 'prof')}
       </div>`;
 

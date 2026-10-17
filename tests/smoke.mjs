@@ -11097,6 +11097,90 @@ await test('Sync: gravação em conflito sai da fila cifrada quando o servidor c
 
 /* Adendos presos na fila cifrada (250 tentativas, "rejected") e conflitos que
    pediam decisão: a última edição vale, e a fila só solta com prova. */
+/* Uniformidade dos dados: CPF, telefone, CRM e nomes num formato só; busca
+   que ignora acento, ç e maiúscula; e a padronização do que já foi gravado. */
+await test('Dados: formatos padrão, busca sem acento e padronização do que já foi gravado', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    await __smokePrepareQueue('org-1', 'u1');
+    cloudRel.disponivel = () => true;
+    sincronia.agora = () => {};
+    cloudRel.enviarRegistro = async (mod, item, o) => __smokeCloudReceipt(mod, item, o);
+    cloudRel.enviarPaciente = async (item, o) => __smokeCloudReceipt('pacientes', item, o);
+    const out = {};
+    out.cpf = utils.formatarCpf('12345678909') === '123.456.789-09' && utils.formatarCpf(' 123.456.789-09 ') === '123.456.789-09';
+    out.cpfValido = utils.cpfValido('529.982.247-25') && !utils.cpfValido('123.456.789-00');
+    out.nome = utils.nomeProprio('  MARIA DA silva   conceição ') === 'Maria da Silva Conceição' &&
+      utils.nomeProprio("joão d'ávila dos santos II") === "João D'Ávila dos Santos II";
+    out.tel = utils.formatarTelefone('27999998888') === '(27) 99999-8888' && utils.formatarTelefone('2733334444') === '(27) 3333-4444';
+    out.crm = utils.formatarCrm('CREMEB 30601') === 'CRM-BA 30601' && utils.formatarCrm('crm/es 1234') === 'CRM-ES 1234' &&
+      utils.formatarCrm('30601-BA') === 'CRM-BA 30601' && utils.rotuloCrm('CREMEB 30601') === 'CRM-BA 30601';
+    out.moeda = utils.formatarMoeda(1234.5).replace(/\s/g, ' ') === 'R$ 1.234,50';
+    out.altura = utils.alturaCm('1,70') === 170 && utils.alturaCm('170') === 170;
+    out.contem = utils.contem('João Conceição', 'joao conceicao') && utils.contem('JOÃO', 'joão') && !utils.contem('Maria', 'joao');
+    out.grafias = JSON.stringify(utils.grafiasUnicas(['Unimed', 'UNIMED', 'Unimed ', 'Unimed', 'Amil'])) === JSON.stringify(['Unimed', 'Amil']);
+
+    /* digitação: os campos se formatam ao sair */
+    ui.navegar('pacientes');
+    const f = document.getElementById('form-pacientes');
+    const cpf = f.querySelector('[name="cpf"]'), nome = f.querySelector('[name="nome"]'), tel = f.querySelector('[name="telefone"]');
+    const sair = el => el.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+    cpf.value = '12345678909'; cpf.dispatchEvent(new Event('input', { bubbles: true })); sair(cpf);
+    nome.value = 'maria DA silva'; sair(nome);
+    if (tel) { tel.value = '27999998888'; tel.dispatchEvent(new Event('input', { bubbles: true })); sair(tel); }
+    out.mascaras = cpf.value === '123.456.789-09' && nome.value === 'Maria da Silva' && (!tel || tel.value === '(27) 99999-8888');
+    /* "nome" de convênio num cadastro não vira "Hc Ufes" */
+    const fc = document.createElement('form'); fc.id = 'form-ajustes-cad_convenios';
+    const inC = document.createElement('input'); inC.name = 'nome'; inC.type = 'text'; fc.appendChild(inC); document.body.appendChild(fc);
+    inC.value = 'HC UFES'; sair(inC);
+    out.convenioIntacto = inC.value === 'HC UFES';
+    fc.remove();
+
+    /* busca de pacientes: sem acento e pelo CPF com ou sem pontuação */
+    store.setList('pacientes', [
+      { _id: 'p1', nome: 'João Conceição', cpf: '12345678909', plano: 'Unimed' },
+      { _id: 'p2', nome: 'Maria Souza', cpf: '', plano: 'UNIMED ' }
+    ]);
+    const busca = document.getElementById('pac-f-busca');
+    busca.value = 'joao conceicao'; out.buscaNome = pacientes.filtrar().map(x => x._id).join() === 'p1';
+    busca.value = '123.456.789'; out.buscaCpf = pacientes.filtrar().map(x => x._id).join() === 'p1';
+    busca.value = '';
+    out.planos = JSON.stringify(pacientes._planosNoCadastro()) === JSON.stringify(['Unimed']);
+
+    /* o que já foi gravado: padroniza em série, sem tocar no finalizado */
+    store.setList('financeiro', [
+      { _id: 'f1', paciente: 'ANA LIMA', convenio: 'UNIMED', cirurgiao: 'Marcelo Martins', status: 'pendente' },
+      { _id: 'f2', paciente: 'Bia', convenio: 'Unimed', cirurgiao: 'Marcelo Martins', status: 'pendente' },
+      { _id: 'f3', paciente: 'Caio', convenio: 'Unimed', cirurgiao: 'Marcelo Matins', status: 'pendente' },
+      { _id: 'f4', paciente: 'DORA FINAL', convenio: 'UNIMED', status: 'finalizado' },
+      { _id: 'f5', paciente: 'Eva', convenio: 'Unimed', status: 'pendente' }
+    ]);
+    store.setList('pre', [{ _id: 'pre-fin', nome: 'JOSE FINALIZADO', cpf: '98765432100', _finalizado: true }]);
+    store.aguardarNuvem = async () => ({ ok: true });
+    padronizacao.PAUSA_MS = 0;
+    const an = padronizacao.analisar();
+    out.parecido = an.parecidos.some(x => x.grupo === 'cirurgiao' && x.de === 'Marcelo Matins' && x.para === 'Marcelo Martins');
+    await padronizacao.aplicar();
+    const g = id => store.getById('financeiro', id);
+    out.aplicou = g('f1').paciente === 'Ana Lima' && g('f1').convenio === 'Unimed' &&
+      store.getById('pacientes', 'p1').cpf === '123.456.789-09' && store.getById('pacientes', 'p2').plano === 'UNIMED';
+    out.finalizadoIntacto = g('f4').paciente === 'DORA FINAL' && g('f4').convenio === 'UNIMED' &&
+      store.getById('pre', 'pre-fin').nome === 'JOSE FINALIZADO' && store.getById('pre', 'pre-fin').cpf === '98765432100';
+    window.confirm = () => true;
+    padronizacao._parecidos = padronizacao.parecidos();
+    await padronizacao.unificar(padronizacao._parecidos.findIndex(x => x.de === 'Marcelo Matins'));
+    out.juntou = g('f3').cirurgiao === 'Marcelo Martins';
+    /* impressão: o documento antigo sai no formato padrão, sem mudar o gravado */
+    out.impressao = printPreview._padrao('CPF', '98765432100') === '987.654.321-00' &&
+      printPreview._padrao('Paciente', 'JOSE FINALIZADO') === 'Jose Finalizado';
+    try { modal.close(); } catch (e) {}
+    return out;
+  });
+  for (const [k, v] of Object.entries(r)) assert(v, 'falhou: ' + k + ' → ' + JSON.stringify(r));
+
+  await page.close();
+});
+
 await test('Sync: adendo preso sai com a prova da nuvem, e conflitos seguem a última edição', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
