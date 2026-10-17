@@ -1869,7 +1869,10 @@ const cloudRel = {
         btn.disabled = true;
         try {
           const ok = await cloudRel._resolverConflitoEdicaoViva(entry.clientId, escolha, contexto);
-          if (ok && contextoAba.corresponde(contexto)) modal.close();
+          if (ok && contextoAba.corresponde(contexto)) { modal.close(); toast('✅ Conflito resolvido', 'success'); }
+          else if (contextoAba.corresponde(contexto)) {
+            toast('Não resolvido: ' + (cloudRel._motivoResolucao || 'a nuvem não confirmou') + '. As duas versões continuam guardadas.', 'warn');
+          }
         } catch (e) {
           if (contextoAba.corresponde(contexto)) {
             toast('A nuvem não confirmou a escolha; as versões continuam preservadas.', 'warn');
@@ -1878,40 +1881,85 @@ const cloudRel = {
       });
       corpo.appendChild(btn);
     }
+    /* saída que nunca falha: o aviso some, as duas versões ficam guardadas */
+    const sair = document.createElement('button'); sair.type = 'button'; sair.className = 'btn';
+    sair.textContent = 'Fechar este aviso (as duas versões ficam guardadas)';
+    sair.addEventListener('click', () => {
+      if (!contextoAba.corresponde(contexto)) return;
+      cloudRel.resolverConflito(entry.clientId, 'merged', { arquivado: true });
+      modal.close(); toast('Aviso fechado — as duas versões continuam guardadas na nuvem.');
+    });
+    corpo.appendChild(sair);
   },
+  /* O BOTÃO TEM DE FAZER ALGUMA COISA — OU DIZER POR QUE NÃO.
+     Esta resolução desistia em silêncio em vários pontos: conflito trazido da
+     nuvem sem o número de versão, versão que mudou de novo no meio da escolha.
+     Na tela, era um botão morto. Agora a versão que falta é lida da nuvem, a
+     escolha "minha edição" grava por cima com a versão atual (é o que foi
+     escolhido), e toda desistência devolve o motivo para a janela mostrar. */
+  _motivoResolucao: '',
   async _resolverConflitoEdicaoViva(clientId, escolha, contextoEsperado) {
+    cloudRel._motivoResolucao = '';
+    const falha = (m) => { cloudRel._motivoResolucao = m; return false; };
     const contexto = contextoEsperado || cloudRel._capturarContexto();
     const entry = cloudRel._conflitosLer().find(x => x.clientId === clientId && x.status === 'pending');
-    if (!entry || !contexto || !cloudRel._contextoValido(contexto, entry.organizationId) ||
-        entry.ownerId !== contexto.userId || !entry.metadata ||
-        entry.metadata.draftModule !== 'live:' + entry.mod ||
-        !Number.isInteger(Number(entry.serverVersion)) || Number(entry.serverVersion) < 1) return false;
-    if (escolha !== 'local' && escolha !== 'remote') return false;
+    if (!entry) return falha('este conflito já foi resolvido');
+    if (!contexto || !cloudRel._contextoValido(contexto, entry.organizationId)) return falha('a clínica ou o usuário mudou nesta aba');
+    if (entry.ownerId && entry.ownerId !== contexto.userId) return falha('este rascunho é de outro usuário');
+    if (!entry.metadata || entry.metadata.draftModule !== 'live:' + entry.mod) return falha('conflito sem o módulo do rascunho');
+    if (escolha !== 'local' && escolha !== 'remote') return falha('escolha inválida');
+    if (!Number.isInteger(Number(entry.serverVersion)) || Number(entry.serverVersion) < 1) {
+      try {
+        const atual = await rascunhosSync._lerAtual(entry.metadata.draftModule, entry.legacyId,
+          contexto.organizationId, contexto.userId, contexto);
+        if (atual && Number(atual.version) >= 1) entry.serverVersion = Number(atual.version);
+      } catch (e) {}
+      if (!Number.isInteger(Number(entry.serverVersion)) || Number(entry.serverVersion) < 1) {
+        return falha('não consegui ler a versão da nuvem — confira a internet e tente de novo');
+      }
+    }
     let escolhida;
     if (escolha === 'local') {
-      const payload = Object.assign({}, cloudRel._clone(entry.proposed), {
+      let payload = Object.assign({}, cloudRel._clone(entry.proposed), {
         id: entry.legacyId, _draftVersion: Number(entry.serverVersion), _draftOrg: contexto.organizationId
       });
-      const res = await rascunhosSync.gravarUnico(entry.metadata.draftModule, payload, contexto);
-      if (!cloudRel._contextoValido(contexto, entry.organizationId)) return false;
+      let res = await rascunhosSync.gravarUnico(entry.metadata.draftModule, payload, contexto);
+      if (!cloudRel._contextoValido(contexto, entry.organizationId)) return falha('a clínica ou o usuário mudou nesta aba');
+      /* a versão andou enquanto se escolhia: quem escolheu "minha edição"
+         quer a sua por cima — uma nova tentativa com a versão atual */
+      if (res && !res.remoteConfirmed && res.linha && Number(res.linha.version) >= 1) {
+        payload = Object.assign({}, payload, { _draftVersion: Number(res.linha.version) });
+        res = await rascunhosSync.gravarUnico(entry.metadata.draftModule, payload, contexto);
+        if (!cloudRel._contextoValido(contexto, entry.organizationId)) return falha('a clínica ou o usuário mudou nesta aba');
+      }
       if (!res || !res.remoteConfirmed) {
+        if (res && res.indisponivel) return falha('sem conexão com a nuvem agora');
         if (res && res.linha) {
           const novo = cloudRel.registrarConflito(entry.mod, payload, rascunhosSync._daLinha(res.linha, contexto.organizationId),
             { tabela: 'drafts', legacyId: entry.legacyId, draftModule: entry.metadata.draftModule,
               operation: 'draft_upsert', motivo: 'rascunho_mudou_durante_resolucao' });
           try { realtime._avisarConflito(entry.mod, novo, contexto); } catch (e) {}
         }
-        return false;
+        return falha('a nuvem mudou de novo durante a escolha');
       }
       escolhida = rascunhosSync._daLinha(res.linha, contexto.organizationId);
     } else {
       const linha = await rascunhosSync._lerAtual(entry.metadata.draftModule, entry.legacyId,
         contexto.organizationId, contexto.userId, contexto);
-      if (!cloudRel._contextoValido(contexto, entry.organizationId) || !linha) return false;
+      if (!cloudRel._contextoValido(contexto, entry.organizationId)) return falha('a clínica ou o usuário mudou nesta aba');
+      if (!linha) {
+        /* a versão da nuvem já não existe (rascunho fechado): ficar com a
+           nuvem é não ter nada a aplicar — só registrar a decisão */
+        return cloudRel.resolverConflito(clientId, 'remote', { semVersaoNaNuvem: true });
+      }
       escolhida = rascunhosSync._daLinha(linha, contexto.organizationId);
     }
     const adotada = await edicaoViva.adotarVersaoConflito(entry.mod, escolhida, contexto, { proposto: entry.proposed });
-    if (!cloudRel._contextoValido(contexto, entry.organizationId) || !adotada || !adotada.ok) return false;
+    if (!cloudRel._contextoValido(contexto, entry.organizationId)) return falha('a clínica ou o usuário mudou nesta aba');
+    if (!adotada || !adotada.ok) {
+      /* fora do formulário: a escolha vale na nuvem e o registro da decisão basta */
+      return cloudRel.resolverConflito(clientId, escolha, { version: escolhida._draftVersion });
+    }
     if (!adotada.laterEditingPreserved) {
       await edicaoViva.aguardarPersistencia(entry.mod);
       if (!cloudRel._contextoValido(contexto, entry.organizationId)) return false;
