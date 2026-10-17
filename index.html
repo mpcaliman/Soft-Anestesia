@@ -9876,7 +9876,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
 
     <section class="card collapsed">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-icon">🧹</span><h2>Padronizar dados<small>CPF, telefone, CRM, nomes, convênio, hospital e cirurgião num formato só</small></h2></div>
+        <div class="card-title-wrap"><span class="card-icon">🧹</span><h2>Padronizar dados<small>CPF, telefone, CRM, nomes, convênio, hospital, cirurgião e procedimento num formato só</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">▾</span></div>
       </div>
       <div class="card-body">
@@ -11832,17 +11832,26 @@ const arquivo = {
 const padronizacao = {
   MODS: ['pacientes', 'agenda', 'pre', 'consulta', 'anestesia', 'recuperacao', 'termo', 'prescricao',
     'documentos', 'risco', 'financeiro', 'orcamento'],
-  GRUPOS: { convenio: 'Convênio', hospital: 'Hospital / local', local: 'Hospital / local', cirurgiao: 'Cirurgião' },
+  GRUPOS: { convenio: 'Convênio', hospital: 'Hospital / local', local: 'Hospital / local', cirurgiao: 'Cirurgião',
+    procedimento: 'Procedimento', cirurgia: 'Procedimento', descricao: 'Procedimento' },
   _editavel(mod, it) {
     return !!it && !it._finalizado && !it._deletedAt && !(mod === 'financeiro' && it.status === 'finalizado');
   },
-  _grupoDe(campo) { return campo === 'local' ? 'hospital' : campo; },
+  _grupoDe(campo) {
+    if (campo === 'local') return 'hospital';
+    if (campo === 'cirurgia' || campo === 'descricao') return 'procedimento';
+    return campo;
+  },
   /* cada valor de convênio/hospital/cirurgião, onde estiver (registro e sub-objeto) */
   _valores(it, fn) {
     if (!it || typeof it !== 'object') return;
     [it, it.paciente, it.procedimento].forEach(o => {
       if (!o || typeof o !== 'object') return;
-      Object.keys(padronizacao.GRUPOS).forEach(k => { if (typeof o[k] === 'string' && o[k].trim()) fn(o, k); });
+      Object.keys(padronizacao.GRUPOS).forEach(k => {
+        /* "descricao" só é procedimento dentro de procedimento: {descricao} */
+        if (k === 'descricao' && o !== it.procedimento) return;
+        if (typeof o[k] === 'string' && o[k].trim()) fn(o, k);
+      });
     });
   },
   _canonicos() {

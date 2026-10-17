@@ -11153,7 +11153,9 @@ await test('Dados: formatos padrão, busca sem acento e padronização do que j�
       { _id: 'f2', paciente: 'Bia', convenio: 'Unimed', cirurgiao: 'Marcelo Martins', status: 'pendente' },
       { _id: 'f3', paciente: 'Caio', convenio: 'Unimed', cirurgiao: 'Marcelo Matins', status: 'pendente' },
       { _id: 'f4', paciente: 'DORA FINAL', convenio: 'UNIMED', status: 'finalizado' },
-      { _id: 'f5', paciente: 'Eva', convenio: 'Unimed', status: 'pendente' }
+      { _id: 'f5', paciente: 'Eva', convenio: 'Unimed', status: 'pendente', procedimento: 'Colecistectomia videolaparoscópica' },
+      { _id: 'f6', paciente: 'Fabio', convenio: 'Unimed', status: 'pendente', procedimento: 'COLECISTECTOMIA VIDEOLAPAROSCOPICA' },
+      { _id: 'f7', paciente: 'Gil', convenio: 'Unimed', status: 'pendente', procedimento: 'Colecistectomia videolaparoscópica' }
     ]);
     store.setList('pre', [{ _id: 'pre-fin', nome: 'JOSE FINALIZADO', cpf: '98765432100', _finalizado: true }]);
     store.aguardarNuvem = async () => ({ ok: true });
@@ -11164,6 +11166,7 @@ await test('Dados: formatos padrão, busca sem acento e padronização do que j�
     const g = id => store.getById('financeiro', id);
     out.aplicou = g('f1').paciente === 'Ana Lima' && g('f1').convenio === 'Unimed' &&
       store.getById('pacientes', 'p1').cpf === '123.456.789-09' && store.getById('pacientes', 'p2').plano === 'UNIMED';
+    out.procedimento = g('f6').procedimento === 'Colecistectomia videolaparoscópica';
     out.finalizadoIntacto = g('f4').paciente === 'DORA FINAL' && g('f4').convenio === 'UNIMED' &&
       store.getById('pre', 'pre-fin').nome === 'JOSE FINALIZADO' && store.getById('pre', 'pre-fin').cpf === '98765432100';
     window.confirm = () => true;
