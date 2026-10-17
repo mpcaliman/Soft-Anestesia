@@ -3,6 +3,17 @@
 /* Apresentação da Agenda. Lê compromissos e delega ações explícitas ao
    módulo agenda; não salva, exclui, sincroniza ou inicia atendimentos. */
 const agendaView = {
+  /* formatos padrão (utils). Numa tela isolada (teste de fronteira) sem
+     utils, busca segue sem acento e o resto passa como veio. */
+  _fmt(nome, ...a) {
+    if (typeof utils !== 'undefined' && typeof utils[nome] === 'function') return utils[nome](...a);
+    const plano = x => String(x == null ? '' : x).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+    if (nome === 'semAcento') return plano(a[0]);
+    if (nome === 'contem') return !plano(a[1]) || plano(a[0]).indexOf(plano(a[1])) >= 0;
+    if (nome === 'soDigitos') return String(a[0] == null ? '' : a[0]).replace(/\D+/g, '');
+    if (nome === 'grafiasUnicas') return Array.from(new Set((a[0] || []).map(v => String(v == null ? '' : v).trim()).filter(Boolean)));
+    return a[0];
+  },
   /* ===== CALENDÁRIO MENSAL ===== */
   cal: {
     _ref: null,   /* Date do mês exibido */
@@ -163,7 +174,7 @@ const agendaView = {
       if (fTipo && x.tipo !== fTipo) return false;
       if (fStatus && x.status !== fStatus) return false;
       if (fBusca) {
-        if (!utils.contem((x.paciente || '') + ' ' + (x.cirurgiao || '') + ' ' + (x.procedimento || ''), fBusca)) return false;
+        if (!agendaView._fmt('contem', (x.paciente || '') + ' ' + (x.cirurgiao || '') + ' ' + (x.procedimento || ''), fBusca)) return false;
       }
       return true;
     }).sort((a, b) => {
