@@ -4380,12 +4380,13 @@ await test('Pré impressa: sem nome duplicado, nome inteiro numa linha e via aé
     const html = printPreview._buildPre();
 
     /* o nome aparece UMA vez (na identificação), não no topo */
-    const vezes = (html.match(new RegExp(nome, 'g')) || []).length;
+    /* a impressão usa o formato padrão do nome ("Pollyanna Magalhaes de Souza Fernandes") */
+    const vezes = (html.match(new RegExp(nome, 'gi')) || []).length;
     out.nomeUmaVez = vezes === 1;
     out.semMetaNoTopo = html.indexOf('pp-doc-meta') < 0 && html.indexOf('<strong>Paciente:</strong>') < 0;
-    out.temIdentificacao = html.indexOf('Identificação') >= 0 && html.indexOf(nome) >= 0;
+    out.temIdentificacao = html.indexOf('Identificação') >= 0 && html.toUpperCase().indexOf(nome) >= 0;
     /* nome ocupa a linha inteira (grid de 1 coluna) */
-    out.nomeLinhaInteira = /pp-grid cols-1[\s\S]{0,200}POLLYANNA/.test(html);
+    out.nomeLinhaInteira = /pp-grid cols-1[\s\S]{0,200}POLLYANNA/i.test(html);
     /* o timbre do profissional continua (a pré sai sozinha para o paciente) */
     out.mantemTimbre = html.indexOf('Dr. Marcelo Caliman') >= 0;
 
@@ -5830,7 +5831,8 @@ await test('Resgate encontra o paciente no banco da clínica, preserva a quarent
       const u = String(url);
       chamadas.push(u);
       if (/\/patients\?/.test(u)) {
-        return { ok: true, json: async () => (/abra/i.test(decodeURIComponent(u)) ? [{ id: 'pac-1', nome: 'Abraão Santiago' }] : []) };
+        /* acento não decide: no servidor, letra que pode ter acento vira "_" */
+        return { ok: true, json: async () => (/abra|_br__/i.test(decodeURIComponent(u)) ? [{ id: 'pac-1', nome: 'Abraão Santiago' }] : []) };
       }
       if (/anesthesia_records/.test(u) && /patient_id=in/.test(u)) {
         return { ok: true, json: async () => [{ id: 'x', organization_id: 'org-1', legacy_id: 'd21', data: daClinica, updated_at: '2026-07-21' }] };
@@ -15377,8 +15379,9 @@ await test('Histórico do paciente: cadastro, documentos com data e o financeiro
 
     /* 4) financeiro cobrança a cobrança, com totais */
     out.temSecaoFinanceira = /Financeiro \(3\)/.test(html);
-    out.somaOsTotais = /R\$ 1500,00/.test(html)   /* previsto 1000+300+200 */
-                    && /R\$ 1100,00/.test(html);  /* recebido 1000+100 */
+    /* valores no formato padrão: R$ 1.500,00 */
+    out.somaOsTotais = /R\$ 1\.500,00/.test(html)   /* previsto 1000+300+200 */
+                    && /R\$ 1\.100,00/.test(html);  /* recebido 1000+100 */
     /* em aberto = previsto − recebido − glosa: 0 + 150 + 200 = 350 */
     out.apontaOEmAberto = /R\$ 350,00/.test(html) && /2 cobran/.test(html) && /em aberto/.test(html);
     out.mostraStatus = /Recebido/.test(html) && /Parcial/.test(html) && /Pendente/.test(html);
@@ -16697,7 +16700,7 @@ await test('Depois da janela: "Gerar e imprimir" fecha o caminho, e a folha não
     out.gerou = store.list('financeiro').some(x => x._origemId === c1._id);
     out.imprimiu = imprimiu === 1;
     /* A FOLHA NÃO PODE SAIR EM BRANCO — era o risco de imprimir depois */
-    out.folhaComConteudo = /JOANA IMPRIME/.test(conteudo);
+    out.folhaComConteudo = /JOANA IMPRIME/i.test(conteudo);
 
     /* 3) "Gerar lançamento" (sem imprimir) não abre a impressão */
     const c2 = store.save('consulta', { nome: 'SEM IMPRIMIR', data: hoje, convenio: 'Unimed', _finalizado: true });
@@ -16718,7 +16721,7 @@ await test('Depois da janela: "Gerar e imprimir" fecha o caminho, e a folha não
     fin.finalizacao.confirmar({ imprimir: true });
     await new Promise(res => setTimeout(res, 800));
     out.naoGeraMasImprime = !store.list('financeiro').some(x => x._origemId === c3._id)
-      && imprimiu === 1 && /CORTESIA IMPRIME/.test(conteudo);
+      && imprimiu === 1 && /CORTESIA IMPRIME/i.test(conteudo);
 
     printPreview.abrir = orig;
 
