@@ -10990,7 +10990,11 @@ await test('Edição ao vivo: eco do próprio salvamento não é conflito, e a l
       if (e) e.createdAt = '2026-10-15T17:0' + i + ':00Z';
     }
     cloudRel.registrarConflito('pre', { _id: 'pre-outro', obs: 'a' }, { _id: 'pre-outro', obs: 'b' }, { motivo: 'teste' });
-    cloudRel.abrirConflitosPendentes();
+    /* aqui só a consolidação; a regra da última edição tem teste próprio */
+    const regra = cloudRel.resolverPelaUltimaEdicao;
+    cloudRel.resolverPelaUltimaEdicao = async () => 0;
+    await cloudRel.abrirConflitosPendentes();
+    cloudRel.resolverPelaUltimaEdicao = regra;
     const restam = cloudRel._conflitosLer().filter(x => x.status === 'pending' && !x.resolutionRequested && x.mod === 'pre');
     out.restam = restam.map(x => x.legacyId + ':' + (x.proposed && x.proposed.obs));
     out.umPorDocumento = restam.length === 2 && restam.some(x => x.legacyId === 'pre-cons' && x.proposed.obs === 'local 5')
@@ -11087,6 +11091,125 @@ await test('Sync: gravação em conflito sai da fila cifrada quando o servidor c
   assert(r.saiComProva, 'com o conflito decidido no servidor, a gravação sai da fila');
   assert(r.filaVazia, 'e as gravações seguintes do atendimento deixam de ficar presas');
   assert(r.semEvidenciaNaoApaga && r.reenviou, 'sem evidência no servidor nada se apaga: a gravação volta a ser enviada');
+  await page.close();
+});
+
+
+/* Adendos presos na fila cifrada (250 tentativas, "rejected") e conflitos que
+   pediam decisão: a última edição vale, e a fila só solta com prova. */
+await test('Sync: adendo preso sai com a prova da nuvem, e conflitos seguem a última edição', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const ctx = await __smokePrepareQueue('org-1', 'u1');
+    cloudRel.disponivel = () => true;
+    sincronia.agora = () => {};
+    rascunhos._agendarEnvio = () => {};
+    cloudRel.registrarAnexos = () => {};
+    cloudRel._enviarConflito = async () => false;
+    cloudRel.enviarDecisoes = async () => 0;
+    const out = {};
+    const enviadosReg = [];
+    cloudRel.enviarRegistro = async (mod, item, o) => { enviadosReg.push(store._clone(item)); return __smokeCloudReceipt(mod, item, o); };
+
+    /* A) retificação gravada antes do carimbo de versão: a linha da nuvem
+          volta sem status, o recibo nunca batia */
+    const pai = { _id: 'pre-fin', nome: 'Paciente Finalizado', obs: 'antigo', _finalizado: true,
+      _relOrg: 'org-1', _relId: 'srv-pai', _updatedAt: '2026-09-17T10:00:00Z' };
+    store.setList('pre', [pai]);
+    const linhas = [];
+    adendos.enviarOperacao = async (op) => {
+      if (!linhas.length) return { ok: false, motivo: 'rede' };
+      return { ok: true, row: linhas[0] };
+    };
+    const ad = adendos.registrarTexto('pre', 'pre-fin', 'CORREÇÃO: obs', 'correcao',
+      { schema: 1, baseAdendoId: '', campos: { obs: 'corrigido' } });
+    await store.aguardarNuvem(ad);
+    const naFila = () => filaCifrada.listar().then(l => l.filter(x => x.module === '__addenda__'));
+    out.presa = (await naFila()).length === 1;
+    linhas.push({ id: 'srv-ad', organization_id: 'org-1', legacy_id: ad.id, reason: 'correcao', texto: ad.texto,
+      data: { retificacao: { schema: 1, baseAdendoId: '', campos: { obs: 'corrigido' } } },
+      author_id: 'u1', created_at: '2026-09-17T17:42:03Z', parent_table: 'preanesthetic_assessments',
+      parent_id: 'srv-pai', parent_legacy_id: 'pre-fin', retification_revision: null });
+    const fetchOriginal = window.fetch;
+    window.fetch = async (url, opts) => {
+      if (String(url).includes('/rest/v1/addenda?') && String(url).includes('legacy_id=eq.')) {
+        const id = decodeURIComponent(String(url).split('legacy_id=eq.')[1].split('&')[0]);
+        return { ok: true, status: 200, json: async () => linhas.filter(x => x.legacy_id === id) };
+      }
+      return fetchOriginal(url, opts);
+    };
+    const reenvios = [];
+    try {
+      persistenciaCloudFirst._consultasAdendo.clear();
+      adendos.enviarOperacao = async (op) => {
+        if (op.payload.adendo.id !== ad.id) { reenvios.push(op.payload.adendo); return { ok: false, motivo: 'rede' }; }
+        return { ok: true, row: linhas[0] };
+      };
+      const d = await persistenciaCloudFirst.drenar();
+      const resto = await naFila();
+      out.saiu = !resto.some(x => x.entityId === ad.id) && d.liberadas >= 1;
+      const rec = store.getById('pre', 'pre-fin');
+      out.adotada = (rec._adendos || []).some(x => x.id === ad.id && x._pushed);
+      const nova = (rec._adendos || []).find(x => /^RESOLUÇÃO DE CONFLITO: proposta /.test(x.texto || ''));
+      out.reaplicada = !!nova && nova._retificacao && nova._retificacao.campos.obs === 'corrigido' &&
+        nova._retificacao.baseAdendoId === '';
+
+      /* B) pai que não está finalizado (pré-lançamento): a correção entra no
+            próprio registro, sem adendo, e só sai da fila com o recibo dela */
+      const pai2 = { _id: 'pre-aberto', nome: 'Pré-lançamento', obs: 'velho', _finalizado: true, _relOrg: 'org-1' };
+      store.setList('pre', store.list('pre').concat([pai2]));
+      adendos.enviarOperacao = async () => ({ ok: false, motivo: 'rede' });
+      const ad2 = adendos.registrarTexto('pre', 'pre-aberto', 'CORREÇÃO: obs', 'correcao',
+        { schema: 1, baseAdendoId: '', campos: { obs: 'novo' } });
+      await store.aguardarNuvem(ad2);
+      const lst = store.list('pre'); const i2 = lst.findIndex(x => x._id === 'pre-aberto');
+      lst[i2] = Object.assign({}, lst[i2], { _finalizado: false }); store.setList('pre', lst);
+      adendos.enviarOperacao = async () => ({ ok: false, motivo: 'registro_pai_nao_finalizado' });
+      cloudRel._lerAtualTab = async () => ({ id: 'srv-aberto', finalized_at: null });
+      persistenciaCloudFirst._consultasAdendo.clear();
+      await persistenciaCloudFirst.drenar();
+      const r2 = store.getById('pre', 'pre-aberto');
+      out.virouEdicao = r2.obs === 'novo' && !(r2._adendos || []).some(x => x.id === ad2.id) &&
+        enviadosReg.some(x => x._id === 'pre-aberto' && x.obs === 'novo');
+      out.saiuB = !(await naFila()).some(x => x.entityId === ad2.id);
+    } finally { window.fetch = fetchOriginal; }
+
+    /* C) conflitos: vence a última edição, sem pergunta */
+    const lst = store.list('pre');
+    lst.push({ _id: 'c-meu', obs: 'meu', _relOrg: 'org-1', _updatedAt: '2026-10-16T12:00:00Z' });
+    lst.push({ _id: 'c-nuvem', obs: 'velho daqui', _relOrg: 'org-1', _updatedAt: '2026-10-16T08:00:00Z' });
+    store.setList('pre', lst);
+    const e1 = cloudRel.registrarConflito('pre', store.getById('pre', 'c-meu'),
+      { _id: 'c-meu', obs: 'da nuvem', _relVersion: 3, _relOrg: 'org-1', _relUpdatedAt: '2026-10-16T10:00:00Z' });
+    const e2 = cloudRel.registrarConflito('pre', store.getById('pre', 'c-nuvem'),
+      { _id: 'c-nuvem', obs: 'novo da nuvem', _relVersion: 5, _relOrg: 'org-1', _relUpdatedAt: '2026-10-16T11:00:00Z' });
+    const e3 = cloudRel.registrarConflito('termo', { id: 'live_termo', dados: { procedimento: 'COLECISTECTOMIA' } },
+      { id: 'live_termo', dados: {} }, { tabela: 'drafts', legacyId: 'live_termo', draftModule: 'live:termo', operation: 'draft_upsert' });
+    /* o gestor vê, pela RLS, os conflitos da clínica inteira */
+    const quem = auth.usuarioAtual.bind(auth);
+    auth.usuarioAtual = () => Object.assign({}, quem() || {}, { role: 'gestor' });
+    e3.ownerId = 'u-secretaria'; e3.serverVisible = true; cloudRel._conflitoSalvar(e3);
+    const e4 = cloudRel.registrarConflito('pre', { _id: 'c-del' }, { _id: 'c-del', obs: 'x', _relVersion: 2 }, { operation: 'delete' });
+    const n = await cloudRel.resolverPelaUltimaEdicao();
+    const st = id => { const x = cloudRel._conflitosLer().find(c => c.clientId === id);
+      return x && x.resolutionRequested ? x.resolutionRequested.status : (x && x.status); };
+    out.n = n;
+    out.meuSobe = st(e1.clientId) === 'resolved_local' && enviadosReg.some(x => x._id === 'c-meu' && x.obs === 'meu' && x._relVersion === 3);
+    out.nuvemAdotada = st(e2.clientId) === 'resolved_remote' && store.getById('pre', 'c-nuvem').obs === 'novo da nuvem';
+    out.rascunhoArquivado = st(e3.clientId) === 'resolved_merged';
+    out.exclusaoPergunta = st(e4.clientId) === 'pending';
+    return out;
+  });
+  assert(r.presa, 'o cenário exige o adendo parado na fila');
+  assert(r.saiu, 'a linha da nuvem com o mesmo identificador é a prova: o adendo sai da fila');
+  assert(r.adotada, 'e a versão da nuvem é adotada no registro');
+  assert(r.reaplicada, 'a proposta sem carimbo de versão, sendo a última edição, volta sobre a vigente');
+  assert(r.virouEdicao, 'pai não finalizado: a correção entra no próprio registro, sem adendo');
+  assert(r.saiuB, 'e sai da fila com o recibo da edição');
+  assert(r.meuSobe, 'conflito com a edição daqui mais nova: ela sobe por cima da versão da nuvem');
+  assert(r.nuvemAdotada, 'conflito com a nuvem mais nova: ela é adotada aqui');
+  assert(r.rascunhoArquivado, 'rascunho de edição ao vivo de outro usuário: o aviso é arquivado');
+  assert(r.exclusaoPergunta, 'exclusão continua pedindo confirmação');
   await page.close();
 });
 

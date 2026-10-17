@@ -1752,9 +1752,89 @@ const cloudRel = {
     if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return null;
     const recebidos = await cloudRel.puxarConflitos();
     if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return null;
-    return { enviados, recebidos, pendentes: cloudRel.conflitosPendentes() };
+    let automaticos = 0;
+    try { automaticos = await cloudRel.resolverPelaUltimaEdicao(); } catch (e) {}
+    if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return null;
+    return { enviados, recebidos, automaticos, pendentes: cloudRel.conflitosPendentes() };
   },
-  abrirConflitosPendentes() {
+  /* A ÚLTIMA EDIÇÃO VALE — SEM PERGUNTAR.
+     Regra do consultório: entre duas versões do mesmo registro, fica a
+     editada por último. Os conflitos deixam de esperar por uma escolha:
+       • registro: a mais recente vence. Se é a deste aparelho, ela sobe por
+         cima da versão atual da nuvem; se é a da nuvem, ela é adotada aqui
+         (a menos que o aparelho tenha algo ainda mais novo, que então sobe).
+         Registro FINALIZADO na nuvem não é sobrescrito: o documento assinado
+         fica, e mudanças nele só entram por retificação;
+       • rascunho de edição ao vivo (inclusive de outro usuário): é digitação
+         em andamento, não o documento — o aviso é arquivado;
+       • exclusão continua pedindo confirmação: apagar não se decide sozinho.
+     Nada é apagado: as duas versões seguem preservadas no servidor. */
+  _quando(o) {
+    return Date.parse(o && (o._updatedAt || o._relUpdatedAt || o._createdAt) || '') || 0;
+  },
+  async resolverPelaUltimaEdicao(opts = {}) {
+    if (cloudRel._resolvendoUltima) return 0;
+    const contexto = cloudRel._capturarContexto();
+    if (!contexto) return 0;
+    cloudRel._resolvendoUltima = true;
+    let n = 0;
+    try {
+      const pend = cloudRel._conflitosLer().filter(x => x && x.status === 'pending' && !x.resolutionRequested &&
+        x.organizationId === contexto.organizationId).slice(0, Number(opts.limite) || 60);
+      for (const e of pend) {
+        if (!cloudRel._contextoValido(contexto, contexto.organizationId)) break;
+        try { if (await cloudRel._decidirPelaUltima(e, contexto)) n++; } catch (er) {}
+      }
+      if (n) { try { cloudRel.enviarDecisoes(); } catch (e) {} }
+    } finally { cloudRel._resolvendoUltima = false; }
+    return n;
+  },
+  async _decidirPelaUltima(e, contexto) {
+    if (!e || e.operation === 'delete' || e.operation === 'draft_delete') return false;
+    const auto = { automatico: 'ultima_edicao' };
+    if (e.tabela === 'drafts') {
+      return cloudRel.resolverConflito(e.clientId, 'merged', Object.assign({ arquivado: true }, auto), { adiarEnvio: true });
+    }
+    const mod = e.mod, local = e.proposed, nuvem = e.canonical;
+    if (!mod || !local || !nuvem || typeof store === 'undefined') return false;
+    const lista = store.list(mod) || [];
+    const ix = lista.findIndex(x => x && x._id === local._id);
+    const atual = ix >= 0 ? lista[ix] : null;
+    const tNuvem = Date.parse((e.metadata && e.metadata.cloudUpdatedAt) || nuvem._relUpdatedAt || '') ||
+      cloudRel._quando(nuvem);
+    const tAqui = Math.max(cloudRel._quando(local), cloudRel._quando(atual));
+    if (nuvem._finalizado || tNuvem >= tAqui) {
+      if (!atual || cloudRel._quando(atual) <= tNuvem || nuvem._finalizado) {
+        const item = Object.assign({}, nuvem, { _id: local._id });
+        if (ix >= 0) lista[ix] = item; else lista.unshift(item);
+        store.setList(mod, lista);
+      }
+      return cloudRel.resolverConflito(e.clientId, 'remote',
+        Object.assign({ version: nuvem._relVersion }, auto), { adiarEnvio: true });
+    }
+    const base = atual && cloudRel._quando(atual) >= cloudRel._quando(local) ? atual : local;
+    const envio = Object.assign({}, base, {
+      _relVersion: nuvem._relVersion, _relUpdatedAt: nuvem._relUpdatedAt || (e.metadata && e.metadata.cloudUpdatedAt) || '',
+      _relUpdatedBy: nuvem._relUpdatedBy || '', _relOrg: nuvem._relOrg || base._relOrg
+    });
+    if (ix >= 0) { lista[ix] = envio; store.setList(mod, lista); }
+    const r = await persistenciaCloudFirst.salvar(mod, envio);
+    if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return false;
+    if (r && (r.ok || r.remoteConfirmed || r.queued)) {
+      return cloudRel.resolverConflito(e.clientId, 'local',
+        Object.assign({ version: r.row && r.row.version }, auto), { adiarEnvio: true });
+    }
+    if (r && r.conflict && r.conflictClientId && r.conflictClientId !== e.clientId) {
+      /* a nuvem andou de novo: este fica decidido, o novo segue a mesma regra */
+      return cloudRel.resolverConflito(e.clientId, 'local', Object.assign({ novoConflito: r.conflictClientId }, auto), { adiarEnvio: true });
+    }
+    return false;
+  },
+  async abrirConflitosPendentes() {
+    /* A última edição vale: o que a regra decide não chega a virar pergunta. */
+    let auto = 0;
+    try { auto = await cloudRel.resolverPelaUltimaEdicao(); } catch (e) {}
+    if (auto) { try { toast('✅ ' + auto + ' conflito(s) resolvido(s) pela última edição', 'success'); } catch (e) {} }
     /* Sobra sem divergência não pede escolha de ninguém: sai antes da lista. */
     try { cloudRel.limparConflitosSemDivergencia(); } catch (e) {}
     let consolidados = 0;

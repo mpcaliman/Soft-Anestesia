@@ -4847,7 +4847,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-17b</b><br>
+    v7.1 · build <b id="build-tag">2026-10-17c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -22638,6 +22638,88 @@ const adendos = (() => {
     if (!novo) return false;
     modal.close(); store.notificarNuvem(novo, 'Decisão sobre a retificação'); return true;
   },
+  /* A ÚLTIMA EDIÇÃO VALE.
+     Duas retificações sobre a mesma versão: a nuvem aceita a primeira e
+     guarda a outra como "conflito". Se a guardada é a MAIS NOVA, ela é a
+     última edição — e é ela que vale: volta sozinha como proposta sobre a
+     versão vigente, sem pedir revisão a ninguém. Uma proposta mais velha que
+     a vigente fica só no histórico. Só as do próprio usuário: reapresentar a
+     de outra pessoa poria o nome errado na retificação.
+     `extras` traz propostas guardadas antes do carimbo de versão da nuvem
+     (não entram na cadeia, mas o conteúdo é da pessoa e é a última edição). */
+  _reaplicadas: new Set(),
+  autoResolverConflitos(mod, id, extras = []) {
+    const rec = store.getById(mod, id);
+    if (!rec || !rec._finalizado || !adendos.MODS[mod]) return 0;
+    let eu = '';
+    try { const ctx = contextoAba.capturar(); eu = ctx && ctx.userId || ''; } catch (e) {}
+    if (!eu) return 0;
+    const estado = adendos.estadoRetificacoes(rec, mod);
+    if (estado.pendentes.length) return 0;
+    const head = estado.aplicadas[estado.aplicadas.length - 1];
+    const tHead = Date.parse(head ? (head._serverCreatedAt || head.data) : '') || 0;
+    const jaFeitas = new Set();
+    (rec._adendos || []).forEach(a => {
+      const m = a && /^RESOLUÇÃO DE CONFLITO: proposta (\S+)/.exec(String(a.texto || ''));
+      if (m) jaFeitas.add(m[1]);
+    });
+    const candidatas = estado.conflitos
+      .filter(a => a && a._retificacao && a._retificacao.campos && a._authorId === eu &&
+        !estado.naoComprovadas.includes(a))
+      .map(a => ({ id: String(a.id), campos: a._retificacao.campos, em: a._serverCreatedAt || a.data, texto: a.texto }))
+      .concat((extras || []).filter(x => x && x.id && x.campos))
+      .filter(x => (Date.parse(x.em) || 0) > tHead && !jaFeitas.has(x.id) && !adendos._reaplicadas.has(x.id))
+      .sort((a, b) => (Date.parse(a.em) || 0) - (Date.parse(b.em) || 0));
+    if (!candidatas.length) return 0;
+    let campos = {};
+    candidatas.forEach(x => { campos = adendos._fundirCampos(campos, x.campos); adendos._reaplicadas.add(x.id); });
+    const ultima = candidatas[candidatas.length - 1];
+    const novo = adendos.registrarTexto(mod, id,
+      'RESOLUÇÃO DE CONFLITO: proposta ' + ultima.id + ' (a última edição vale) reaplicada sobre a versão ' +
+        (estado.headId || 'original') + '.\n' + String(ultima.texto || ''),
+      'correcao', { schema: 1, baseAdendoId: estado.headId, campos });
+    if (novo) store.notificarNuvem(novo, 'Retificação mais recente reaplicada', { silencioso: true });
+    return novo ? 1 : 0;
+  },
+  /* A linha da nuvem com o identificador desta operação é a prova de que o
+     adendo está lá (ver persistenciaCloudFirst._adendoPreso). */
+  adotarDaNuvem(op, row) {
+    const p = op && op.payload, ctx = op && op.contexto;
+    if (!p || !p.adendo || !row || !ctx || !contextoAba.corresponde(ctx)) return false;
+    const mod = p.parentModule;
+    registrarProva(mod, row, ctx);
+    adendos._pendentesCofre.delete(String(p.adendo.id));
+    const lista = store.list(mod); const rec = lista.find(x => x && x._id === p.parentLegacyId);
+    if (!rec) return true;
+    rec._adendos = rec._adendos || [];
+    const ad = adendos._daLinha(row); const i = rec._adendos.findIndex(x => x && x.id === ad.id);
+    if (i >= 0) rec._adendos[i] = Object.assign({}, rec._adendos[i], ad); else rec._adendos.push(ad);
+    store.setList(mod, lista);
+    try { store.confirmarRemoto(mod, p.parentLegacyId); } catch (e) {}
+    const semCarimbo = ad._retificacaoInvalida && p.adendo._retificacao
+      ? [{ id: String(ad.id), campos: p.adendo._retificacao.campos, em: row.created_at || p.adendo.data, texto: p.adendo.texto }] : [];
+    try { adendos.autoResolverConflitos(mod, p.parentLegacyId, semCarimbo); } catch (e) {}
+    try { if (state.currentModule === mod) adendos.renderInline(mod); } catch (e) {}
+    return true;
+  },
+  /* Registro que não está finalizado não recebe adendo: a correção entra nele
+     como edição comum. Devolve o registro já corrigido, para subir. */
+  converterEmEdicao(op) {
+    const p = op && op.payload;
+    if (!p || !p.adendo) return null;
+    const campos = p.adendo._retificacao && p.adendo._retificacao.campos;
+    if (!campos || !Object.keys(campos).length) return null;
+    const lista = store.list(p.parentModule);
+    const i = lista.findIndex(x => x && x._id === p.parentLegacyId);
+    if (i < 0 || lista[i]._finalizado) return null;
+    const novo = adendos._fundirCampos(lista[i], campos);
+    novo._adendos = (lista[i]._adendos || []).filter(a => a && a.id !== p.adendo.id);
+    if (!novo._adendos.length) delete novo._adendos;
+    novo._updatedAt = new Date().toISOString();
+    lista[i] = novo; store.setList(p.parentModule, lista);
+    adendos._pendentesCofre.delete(String(p.adendo.id));
+    return novo;
+  },
   async _push(mod, rec, ad) {
     const tabela = adendos.MODS[mod];
     if (!tabela || !rec || !ad) return Promise.resolve({ ok: false, motivo: 'operacao_invalida', durable: false });
@@ -22724,6 +22806,9 @@ const adendos = (() => {
       }
     }
     store.setList(p.parentModule, lst);
+    if (a._retificacao && a._retificacao.status === 'conflict') {
+      try { adendos.autoResolverConflitos(p.parentModule, p.parentLegacyId); } catch (e) {}
+    }
     try { if (state.currentModule === p.parentModule) adendos.renderInline(p.parentModule); } catch (e) {}
     return true;
   },
@@ -22821,6 +22906,10 @@ const adendos = (() => {
       });
       if (novos || rows.length) store.setList(mod, lista);
       try { adendos._aplicarPendentes(mod); } catch (e) {}
+      new Set(rows.filter(row => row && row.data && row.data.retificacao && row.data.retificacao.status === 'conflict')
+        .map(row => row.parent_legacy_id)).forEach(pid => {
+        try { adendos.autoResolverConflitos(mod, pid); } catch (e) {}
+      });
       try { if (state.currentModule === mod) adendos.renderInline(mod); } catch (e) {}
       return novos;
     } catch (e) { return 0; }
