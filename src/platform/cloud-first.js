@@ -774,6 +774,13 @@ const persistenciaCloudFirst = {
           continue;
         }
         const classe = persistenciaCloudFirst._classeFalha(res, falha);
+        if (op.payload && op.payload.transport === persistenciaCloudFirst.TRANSPORTE_ADENDO &&
+            ['outage', 'auth', 'context'].indexOf(classe) < 0) {
+          let saida = null;
+          try { saida = await persistenciaCloudFirst._adendoPreso(op, contexto); } catch (e) {}
+          if (!contextoAba.corresponde(contexto)) break;
+          if (saida) { liberadas++; continue; }
+        }
         entidadesFalhas.add(entidade);
         tokensProduzidos.forEach(x => dependenciasFalhas.add(x));
         if (classe === 'conflict' && res) {
@@ -782,9 +789,9 @@ const persistenciaCloudFirst = {
         } else bloqueados++;
         try { await filaCifrada.marcarEstado(op.operationId,
           classe === 'conflict' ? 'conflict' : classe === 'outage' ? 'offline' : 'blocked',
-          (res && res.motivo) || (falha && falha.message) || classe); } catch (e) {}
+          (res && res.motivo) || (falha && falha.message) || (res && res.ok ? 'recibo_divergente' : classe)); } catch (e) {}
         try { await filaCifrada.registrarFalha(op.operationId,
-          (res && res.motivo) || falha || classe); } catch (e) {}
+          (res && res.motivo) || falha || (res && res.ok ? 'recibo_divergente' : classe)); } catch (e) {}
         if (classe === 'outage') { indisponivel = true; break; }
       }
       if (!contextoAba.corresponde(contexto)) {
@@ -848,6 +855,63 @@ const persistenciaCloudFirst = {
     if (rows.some(x => x && x.status === 'pending')) return null;
     const ok = await filaCifrada.confirmar(op.operationId, { remoteConfirmed: true, checksum: op.checksum });
     return ok ? 'liberada' : null;
+  },
+  /* O ADENDO QUE NUNCA SAÍA DA FILA.
+     Retificações gravadas antes de a nuvem carimbar a versão (status/revisão)
+     voltam sem esse carimbo: o recibo nunca bate e a operação era reenviada
+     para sempre — 250 tentativas, "esperando outra gravação". A nuvem não
+     deixa o mesmo identificador guardar outra proposta, então a linha com o
+     identificador, o pai e o autor desta operação É a prova de que ela está
+     lá: a operação sai e a linha da nuvem é adotada.
+     Sem linha na nuvem, olha o pai. Pai finalizado: a falha é outra e fica à
+     vista. Pai ainda não finalizado (ou ausente) na nuvem:
+       • finalizado aqui → a finalização deste aparelho sobe primeiro e o
+         adendo vai na rodada seguinte;
+       • não finalizado aqui (pré-lançamento, ficha aberta) → não é caso de
+         adendo: a correção entra no próprio registro, como edição comum, e a
+         operação só sai depois do recibo dessa edição.
+     Consulta no máximo uma vez a cada 10 minutos por operação. */
+  _consultasAdendo: new Map(),
+  async _adendoPreso(op, contexto) {
+    const p = op && op.payload;
+    if (!p || p.transport !== persistenciaCloudFirst.TRANSPORTE_ADENDO || !p.adendo || !p.adendo.id ||
+        typeof adendos === 'undefined' || !adendos.MODS[p.parentModule]) return null;
+    const ultima = persistenciaCloudFirst._consultasAdendo.get(op.operationId) || 0;
+    if (Date.now() - ultima < 600000) return null;
+    persistenciaCloudFirst._consultasAdendo.set(op.operationId, Date.now());
+    if (!(await cloud._garantirToken()) || !contextoAba.corresponde(contexto)) return null;
+    const org = contexto.organizationId, c = cloud.config();
+    const sel = 'id,organization_id,legacy_id,reason,texto,data,author_id,created_at,parent_table,parent_id,parent_legacy_id,retification_revision';
+    const r = await fetch(c.url + '/rest/v1/addenda?organization_id=eq.' + encodeURIComponent(org) +
+      '&legacy_id=eq.' + encodeURIComponent(p.adendo.id) + '&select=' + sel, { headers: cloud._headers(true) });
+    if (!r.ok || !contextoAba.corresponde(contexto)) return null;
+    const rows = await r.json().catch(() => null);
+    if (!Array.isArray(rows)) return null;
+    const comContexto = Object.assign({}, op, { contexto });
+    const row = rows[0];
+    if (row) {
+      if (row.organization_id !== org || row.parent_table !== p.parentTable ||
+          String(row.parent_legacy_id || '') !== String(p.parentLegacyId) ||
+          String(row.author_id || '') !== String(contexto.userId)) return null;
+      const ok = await filaCifrada.confirmar(op.operationId, { remoteConfirmed: true, checksum: op.checksum });
+      if (!ok || !contextoAba.corresponde(contexto)) return ok ? 'liberada' : null;
+      try { adendos.adotarDaNuvem(comContexto, row); } catch (e) {}
+      return 'liberada';
+    }
+    const pai = await cloudRel._lerAtualTab(p.parentTable, org, p.parentLegacyId, 'id,finalized_at');
+    if (!contextoAba.corresponde(contexto) || (pai && pai.finalized_at)) return null;
+    const rec = store.getById(p.parentModule, p.parentLegacyId);
+    if (!rec) return null;
+    if (rec._finalizado) {
+      try { await persistenciaCloudFirst.salvar(p.parentModule, rec); } catch (e) {}
+      return null;
+    }
+    const novo = adendos.converterEmEdicao(comContexto);
+    if (!novo) return null;
+    const res = await persistenciaCloudFirst.salvar(p.parentModule, novo);
+    if (!contextoAba.corresponde(contexto) || !res || res.remoteConfirmed !== true) return null;
+    const ok = await filaCifrada.confirmar(op.operationId, { remoteConfirmed: true, checksum: op.checksum });
+    return ok ? 'convertida' : null;
   },
   async listarFila() {
     try {

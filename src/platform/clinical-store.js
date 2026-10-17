@@ -254,7 +254,7 @@ const store = {
       if (res && (res.remoteConfirmed === true || res.ok === true)) {
         if (res.row && res.row.data && res.row.data.retificacao && res.row.data.retificacao.status === 'conflict') {
           try { if (typeof setSavedStatus === 'function') setSavedStatus('Conflito preservado na nuvem'); } catch (e) {}
-          if (!opts.silencioso) { try { toast('⚠️ Outra retificação foi confirmada primeiro. Sua proposta foi preservada na nuvem; revise as versões antes de aplicar.', 'warn'); } catch (e) {} }
+          if (!opts.silencioso) { try { toast('⚠️ Outra retificação chegou primeiro. A sua, mais recente, está sendo reaplicada por cima — a última edição vale.', 'warn'); } catch (e) {} }
           return res;
         }
         try { if (typeof setSavedStatus === 'function') setSavedStatus('Confirmado na nuvem às ' + hora()); } catch (e) {}
