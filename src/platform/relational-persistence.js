@@ -496,6 +496,19 @@ const cloudRel = {
     return item._id || '';
   },
   _REG_SELECT: 'id,organization_id,legacy_id,encounter_id,status,finalized_at,finalized_by,data,version,updated_by,updated_at,deleted_at,last_operation_id,last_operation_checksum',
+  /* AS COLUNAS QUE A TABELA TEM.
+     Lançamento financeiro e orçamento não se finalizam: `finance_entries` e
+     `quotes` não têm `finalized_at`/`finalized_by`. Pedir essas colunas de
+     volta fazia o servidor recusar a gravação INTEIRA ("column
+     finance_entries.finalized_at does not exist", http 400) — e foi assim
+     que 273 lançamentos ficaram dias sem subir, e o Financeiro também não
+     descia de outros aparelhos. */
+  _SEM_FINALIZACAO: ['finance_entries', 'quotes'],
+  _regSelect(tabela) {
+    return cloudRel._SEM_FINALIZACAO.indexOf(tabela) >= 0
+      ? cloudRel._REG_SELECT.replace(',finalized_at,finalized_by', '')
+      : cloudRel._REG_SELECT;
+  },
   /* O MESMO registro SEM o campo `data` — que é o registro inteiro, com as
      imagens em base64 dentro. Ler só isto custa ~60 bytes por linha em vez de
      alguns KB, e é o que permite descobrir o que mudou sem baixar nada. */
@@ -659,7 +672,7 @@ const cloudRel = {
          minuto em minuto, sem pesar na rede nem no aparelho. */
       const filtroData = opts.desde ? '&updated_at=gt.' + encodeURIComponent(opts.desde) : '';
       const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
-        '&deleted_at=is.null' + filtroData + '&select=' + cloudRel._REG_SELECT + '&order=updated_at.desc',
+        '&deleted_at=is.null' + filtroData + '&select=' + cloudRel._regSelect(cfg.tabela) + '&order=updated_at.desc',
         { headers: cloud._headers(true) });
       if (!r.ok) return null;
       const rows = await r.json();
@@ -896,7 +909,7 @@ const cloudRel = {
       try {
         const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
           '&deleted_at=is.null&legacy_id=in.(' + lote.map(encodeURIComponent).join(',') + ')' +
-          '&select=' + cloudRel._REG_SELECT,
+          '&select=' + cloudRel._regSelect(cfg.tabela),
           { headers: cloud._headers(true) });
         if (!r.ok) return null;
         const rows = await r.json();
@@ -922,7 +935,7 @@ const cloudRel = {
       try {
         const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
           '&deleted_at=is.null&id=in.(' + lote.map(encodeURIComponent).join(',') + ')' +
-          '&select=' + cloudRel._REG_SELECT,
+          '&select=' + cloudRel._regSelect(cfg.tabela),
           { headers: cloud._headers(true) });
         if (!r.ok) return null;
         const rows = await r.json();
@@ -1212,7 +1225,7 @@ const cloudRel = {
       if (item._finalizado) row.finalized_at = item._finalizadoEm || new Date().toISOString();
     }
     const res = await cloudRel._gravarAtomico(cfg.tabela, org, legacy, row,
-      cloudRel._versao(item), cloudRel._REG_SELECT, r => cloudRel._rowParaRegistro(r, org), opts.operation);
+      cloudRel._versao(item), cloudRel._regSelect(cfg.tabela), r => cloudRel._rowParaRegistro(r, org), opts.operation);
     if (!cloudRel._contextoValido(contexto, org)) {
       return { ok: false, motivo: 'contexto_trocado_apos_confirmacao', remotoConfirmado: !!(res && res.ok) };
     }
@@ -1822,10 +1835,32 @@ const cloudRel = {
     const texto = document.createElement('p');
     texto.textContent = 'Escolha a versão de recuperação. A digitação posterior continua protegida, e a decisão só termina após confirmação da nuvem.';
     corpo.appendChild(texto);
-    for (const [titulo, dados] of [['Sua edição', entry.proposed], ['Versão da nuvem', entry.canonical]]) {
-      const label = document.createElement('strong'); label.textContent = titulo; corpo.appendChild(label);
-      const detalhe = document.createElement('pre'); detalhe.style.whiteSpace = 'pre-wrap';
-      detalhe.textContent = JSON.stringify((dados && dados.dados) || {}, null, 2); corpo.appendChild(detalhe);
+    /* SÓ O QUE DIFERE, EM PORTUGUÊS. Mostrar as duas versões como JSON cru
+       obrigava a caçar, entre dezenas de linhas técnicas, os dois ou três
+       campos que mudaram. A tabela mostra só esses, com o nome do campo. */
+    const a = (entry.proposed && entry.proposed.dados) || {}, b = (entry.canonical && entry.canonical.dados) || {};
+    const vazio = v => v == null || v === '' || (Array.isArray(v) && !v.length);
+    const txt = v => vazio(v) ? '—' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+    const chaves = Array.from(new Set(Object.keys(a).concat(Object.keys(b))))
+      .filter(k => k[0] !== '_' && k !== 'id' && txt(a[k]) !== txt(b[k]));
+    const rotulo = k => { try { return adendos._rotuloCampo(k); } catch (e) { return k; } };
+    if (!chaves.length) {
+      const p = document.createElement('p'); p.textContent = 'As duas versões têm o mesmo conteúdo — pode escolher qualquer uma.'; corpo.appendChild(p);
+    } else {
+      const tab = document.createElement('table'); tab.className = 'dash-detail-table'; tab.style.margin = '6px 0 12px';
+      const cab = document.createElement('tr');
+      ['Campo', 'Sua edição', 'Versão da nuvem'].forEach(t => { const th = document.createElement('th'); th.textContent = t; cab.appendChild(th); });
+      tab.appendChild(cab);
+      chaves.forEach(k => {
+        const tr = document.createElement('tr');
+        [rotulo(k), txt(a[k]), txt(b[k])].forEach((t, i) => {
+          const td = document.createElement('td'); td.textContent = t;
+          if (i === 0) td.style.fontWeight = '600';
+          tr.appendChild(td);
+        });
+        tab.appendChild(tr);
+      });
+      corpo.appendChild(tab);
     }
     for (const [escolha, titulo] of [['local', 'Preservar minha edição na nuvem'], ['remote', 'Usar a versão da nuvem']]) {
       const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn'; btn.textContent = titulo;
@@ -2153,7 +2188,7 @@ const cloudRel = {
   _selectConflito(mod) {
     if (mod === 'pacientes') return cloudRel._SELECT;
     if (mod === 'agenda') return cloudRel._AG_SELECT;
-    if (cloudRel.MODOS[mod]) return cloudRel._REG_SELECT;
+    if (cloudRel.MODOS[mod]) return cloudRel._regSelect(cloudRel.MODOS[mod].tabela);
     return 'id,organization_id,legacy_id,data,version,updated_by,updated_at,deleted_at,last_operation_id,last_operation_checksum';
   },
   _itemDaLinha(mod, row, org) {

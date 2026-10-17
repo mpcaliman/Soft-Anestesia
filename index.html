@@ -4847,7 +4847,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-16a</b><br>
+    v7.1 · build <b id="build-tag">2026-10-17a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -11353,7 +11353,7 @@ const arquivo = {
       const cfg = cloudRel.MODOS[mod];
       const org = contexto.organizationId;
       if (cfg && org) {
-        const row = await cloudRel._lerAtualTab(cfg.tabela, org, id, cloudRel._REG_SELECT);
+        const row = await cloudRel._lerAtualTab(cfg.tabela, org, id, cloudRel._regSelect(cfg.tabela));
         if (!cloudRel._contextoValido(contexto, org)) return false;
         if (row && row.organization_id === org) item = cloudRel._rowParaRegistro(row);
       }
@@ -11429,7 +11429,7 @@ const arquivo = {
             try {
               const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
                 '&patient_id=in.' + encodeURIComponent(inIds) +
-                '&select=' + encodeURIComponent(cloudRel._REG_SELECT) + '&limit=200',
+                '&select=' + encodeURIComponent(cloudRel._regSelect(cfg.tabela)) + '&limit=200',
                 { headers: cloud._headers(true) });
               if (!cloudRel._contextoValido(contexto, org)) return [];
               if (!r.ok) continue;
