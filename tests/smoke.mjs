@@ -19286,6 +19286,51 @@ await test('Ficha com a linha da pré, documentos na cobrança, hash do carimbo 
   await page.close();
 });
 
+/* A causa real dos 273: o envio pedia de volta `finalized_at`, que a tabela do
+   Financeiro não tem — e o servidor recusava a gravação inteira. */
+await test('Financeiro sobe: não pede colunas que a tabela não tem (finalized_at)', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-fe');
+    cloud._garantirToken = async () => true;
+    cloud.config = () => ({ url: 'https://nuvem-teste.supabase.co', anonKey: 'k' });
+    out.selFin = cloudRel._regSelect('finance_entries');
+    out.semColunaNoFin = !/finalized_at|finalized_by/.test(out.selFin) && /last_operation_checksum/.test(out.selFin);
+    out.fichaMantem = /finalized_at/.test(cloudRel._regSelect('anesthesia_records'));
+    cloudRel._garantirPaciente = async () => 'pac-1';
+    cloudRel._garantirEncounter = async () => 'enc-1';
+    const fetchOrig = window.fetch;
+    const urls = [];
+    window.fetch = async (url, opts) => {
+      const u = String(url);
+      if (u.indexOf('nuvem-teste') < 0) return fetchOrig(url, opts);
+      urls.push(u);
+      /* como o servidor real: coluna inexistente derruba o pedido */
+      if (/finance_entries/.test(u) && /finalized_at/.test(decodeURIComponent(u))) {
+        return new Response(JSON.stringify({ code: '42703', message: 'column finance_entries.finalized_at does not exist' }), { status: 400 });
+      }
+      if (/finance_entries/.test(u) && opts && opts.method === 'POST') {
+        const row = JSON.parse(opts.body)[0];
+        return new Response(JSON.stringify([Object.assign({ id: 'fe-1', version: 1, updated_at: '2026-10-17T00:00:00Z' }, row)]), { status: 201 });
+      }
+      return new Response('[]', { status: 200 });
+    };
+    try {
+      const item = store.save('financeiro', { paciente: 'Paciente Fin Sobe', data_proc: utils.hojeISO(), status: 'pendente' });
+      const res = await cloudRel.enviarRegistro('financeiro', store.getById('financeiro', item._id));
+      out.motivo = res && res.motivo;
+      out.subiu = !!(res && res.ok);
+      out.recibo = !!store.getById('financeiro', item._id)._relUpdatedAt;
+    } finally { window.fetch = fetchOrig; store.setList('financeiro', []); }
+    return out;
+  });
+  assert(r.semColunaNoFin, 'o Financeiro não pede finalized_at/finalized_by (' + r.selFin + ')');
+  assert(r.fichaMantem, 'tabelas que finalizam continuam com a coluna');
+  assert(r.subiu && r.recibo, 'o lançamento sobe e recebe o recibo (veio ' + r.motivo + ')');
+  await page.close();
+});
+
 /* Os 273 do Financeiro: já estavam na nuvem, sem recibo no aparelho. "Já existe"
    não é falha; e quem é recusado de verdade não trava os outros. */
 await test('Fila: "já existe na nuvem" vira recibo, e item recusado não trava os outros', async () => {
