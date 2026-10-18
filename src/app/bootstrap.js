@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
        em qualquer navegador, mesmo quando const não é global. */
   window.utils = utils; window.store = store; window.ui = ui;
   window.backupCompleto = backupCompleto;
-  window.lixeira = lixeira; window.duplicados = duplicados; window.padronizacao = padronizacao; window.importFin = importFin; window.espaco = espaco; window.modoNuvem = modoNuvem; window.preLanc = preLanc;
+  window.lixeira = lixeira; window.duplicados = duplicados; window.padronizacao = padronizacao; window.importFin = importFin; window.importAcervo = importAcervo; window.espaco = espaco; window.modoNuvem = modoNuvem; window.preLanc = preLanc;
   /* O rodapé é montado no boot, quando ninguém está logado ainda — por isso o
      botão de enviar pré-lançamento nunca aparecia. Recalcula a cada
      salvar/carregar/novo, que é quando registro e usuário já são conhecidos. */
@@ -26,6 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
       ui.atualizarDocStatus = function (mod) {
         const r = _ads.apply(ui, arguments);
         try { preLanc.renderBotao(mod); } catch (e) {}
+        try { importAcervo.mostrarFaixa(mod, arguments[1]); } catch (e) {}
         return r;
       };
     }
