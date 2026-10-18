@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
        em qualquer navegador, mesmo quando const não é global. */
   window.utils = utils; window.store = store; window.ui = ui;
   window.backupCompleto = backupCompleto;
-  window.lixeira = lixeira; window.duplicados = duplicados; window.espaco = espaco; window.modoNuvem = modoNuvem; window.preLanc = preLanc;
+  window.lixeira = lixeira; window.duplicados = duplicados; window.padronizacao = padronizacao; window.espaco = espaco; window.modoNuvem = modoNuvem; window.preLanc = preLanc;
   /* O rodapé é montado no boot, quando ninguém está logado ainda — por isso o
      botão de enviar pré-lançamento nunca aparecia. Recalcula a cada
      salvar/carregar/novo, que é quando registro e usuário já são conhecidos. */
@@ -280,6 +280,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   /* 13b. Liga autocomplete em todos os campos relevantes */
   setTimeout(() => autocomplete.ligarTudo(), 100);
+
+  /* 13b1. CPF, telefone, CRM e nomes se formatam sozinhos ao digitar/sair do campo */
+  try { utils.ligarMascaras(); } catch (e) { console.error('Erro ligarMascaras:', e); }
 
   /* 13b2. Caixas de texto acompanham o conteúdo. Um ouvinte só, na captura:
      vale para o que se digita E para o que os seletores (alergias,

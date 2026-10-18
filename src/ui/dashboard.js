@@ -7,6 +7,17 @@
 ============================================================================ */
 
 const dashboard = {
+  /* formatos padrão (utils). Numa tela isolada (teste de fronteira) sem
+     utils, busca segue sem acento e o resto passa como veio. */
+  _fmt(nome, ...a) {
+    if (typeof utils !== 'undefined' && typeof utils[nome] === 'function') return utils[nome](...a);
+    const plano = x => String(x == null ? '' : x).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+    if (nome === 'semAcento') return plano(a[0]);
+    if (nome === 'contem') return !plano(a[1]) || plano(a[0]).indexOf(plano(a[1])) >= 0;
+    if (nome === 'soDigitos') return String(a[0] == null ? '' : a[0]).replace(/\D+/g, '');
+    if (nome === 'grafiasUnicas') return Array.from(new Set((a[0] || []).map(v => String(v == null ? '' : v).trim()).filter(Boolean)));
+    return a[0];
+  },
   /* Os módulos de que o painel vive. Estava escrito à mão em outro lugar — e
      lá faltava `consulta`, que é um dos cartões daqui: as consultas nunca
      eram buscadas na clínica ao entrar, então só apareciam as do aparelho.
@@ -732,8 +743,7 @@ const dashboard = {
         const cir = (it.procedimento && it.procedimento.cirurgiao) || '';
         const proc = (it.procedimento && it.procedimento.descricao) || it.descricao || '';
         const conv = (it.paciente && it.paciente.convenio) || it.convenio || '';
-        const blob = [nome, cir, proc, conv, it.hospital, (it.procedimento && it.procedimento.hospital)].join(' ').toLowerCase();
-        if (blob.includes(termo)) {
+        if (dashboard._fmt('contem', [nome, cir, proc, conv, it.hospital, (it.procedimento && it.procedimento.hospital)].join(' '), termo)) {
           resultados.push({ mod: m, item: it, nome: nome || '(sem nome)', cir, proc, conv, data: it._updatedAt });
         }
       });

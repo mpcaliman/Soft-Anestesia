@@ -3,6 +3,17 @@
 /* Apresentação da lista de pacientes. Este componente lê o store e delega
    ações pelo ID; não salva, exclui ou sincroniza registros diretamente. */
 const patientsView = {
+  /* formatos padrão (utils). Numa tela isolada (teste de fronteira) sem
+     utils, busca segue sem acento e o resto passa como veio. */
+  _fmt(nome, ...a) {
+    if (typeof utils !== 'undefined' && typeof utils[nome] === 'function') return utils[nome](...a);
+    const plano = x => String(x == null ? '' : x).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+    if (nome === 'semAcento') return plano(a[0]);
+    if (nome === 'contem') return !plano(a[1]) || plano(a[0]).indexOf(plano(a[1])) >= 0;
+    if (nome === 'soDigitos') return String(a[0] == null ? '' : a[0]).replace(/\D+/g, '');
+    if (nome === 'grafiasUnicas') return Array.from(new Set((a[0] || []).map(v => String(v == null ? '' : v).trim()).filter(Boolean)));
+    return a[0];
+  },
   _wireActions(tbody) {
     if (!tbody || tbody.dataset.pacActionsWired === '1') return;
     tbody.dataset.pacActionsWired = '1';
@@ -28,9 +39,9 @@ const patientsView = {
   /* Preenche o filtro de planos com os que EXISTEM no cadastro — oferecer um
      plano que ninguém tem é oferecer uma lista vazia. */
   _planosNoCadastro() {
-    const set = new Set();
-    pacientes.list().forEach(p => { const v = String(p.plano || '').trim(); if (v) set.add(v); });
-    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    /* "Unimed", "UNIMED" e "Unimed " são o mesmo plano: fica a grafia mais usada */
+    return patientsView._fmt('grafiasUnicas', pacientes.list().map(p => p.plano))
+      .sort((a, b) => a.localeCompare(b, 'pt-BR'));
   },
   _encherPlanos() {
     const sel = document.getElementById('pac-f-plano');
@@ -80,10 +91,12 @@ const patientsView = {
     const plano = (document.getElementById('pac-f-plano')?.value || '').trim();
     const ordem = (document.getElementById('pac-f-ordem')?.value || 'nome');
     let list = pacientes.list();
-    if (plano) list = list.filter(p => String(p.plano || '').trim() === plano);
+    if (plano) list = list.filter(p => patientsView._fmt('semAcento', p.plano) === patientsView._fmt('semAcento', plano));
+    const qDig = patientsView._fmt('soDigitos', q);
     if (q) list = list.filter(p => {
-      const blob = ((p.nome || '') + ' ' + (p.cpf || '') + ' ' + (p.plano || '') + ' ' + (p.carteirinha || '')).toLowerCase();
-      return blob.includes(q);
+      const blob = (p.nome || '') + ' ' + (p.cpf || '') + ' ' + (p.plano || '') + ' ' + (p.carteirinha || '');
+      /* CPF com ou sem ponto e traço: 12345678909 acha 123.456.789-09 */
+      return patientsView._fmt('contem', blob, q) || (qDig.length >= 4 && patientsView._fmt('soDigitos', p.cpf).indexOf(qDig) >= 0);
     });
     const cmp = pacientes.ORDENS[ordem] || pacientes.ORDENS.nome;
     /* cópia: ordenar a lista do store trocaria a ordem de gravação */
@@ -114,7 +127,7 @@ const patientsView = {
     tbody.innerHTML = list.map(p => `
       <tr>
         <td data-label="Nome"><strong>${utils.escapeHTML(p.nome || '')}</strong>${(p.apartamento === true || p.apartamento === '1' || p.apartamento === 1) ? ' <span style="font-size:.66rem;background:#e8f1fa;color:#1c64a9;padding:2px 7px;border-radius:10px;font-weight:600;white-space:nowrap">🏨 Apto</span>' : ''}</td>
-        <td data-label="CPF">${utils.escapeHTML(p.cpf || '')}</td>
+        <td data-label="CPF">${utils.escapeHTML(patientsView._fmt('formatarCpf', p.cpf || ''))}</td>
         <td data-label="Nascimento">${utils.formatarData(p.nascimento)}</td>
         <td data-label="Plano">${utils.escapeHTML(p.plano || '')}</td>
         <td data-label="Carteirinha">${utils.escapeHTML(p.carteirinha || '')}</td>

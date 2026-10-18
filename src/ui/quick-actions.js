@@ -6,6 +6,17 @@
    QUICK ACTIONS — ações rápidas por procedimento/paciente
 ============================================================================ */
 const quickActions = {
+  /* formatos padrão (utils). Numa tela isolada (teste de fronteira) sem
+     utils, busca segue sem acento e o resto passa como veio. */
+  _fmt(nome, ...a) {
+    if (typeof utils !== 'undefined' && typeof utils[nome] === 'function') return utils[nome](...a);
+    const plano = x => String(x == null ? '' : x).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+    if (nome === 'semAcento') return plano(a[0]);
+    if (nome === 'contem') return !plano(a[1]) || plano(a[0]).indexOf(plano(a[1])) >= 0;
+    if (nome === 'soDigitos') return String(a[0] == null ? '' : a[0]).replace(/\D+/g, '');
+    if (nome === 'grafiasUnicas') return Array.from(new Set((a[0] || []).map(v => String(v == null ? '' : v).trim()).filter(Boolean)));
+    return a[0];
+  },
   /* Abre menu para criar/abrir documentos vinculados a um paciente */
   abrir(pacienteId) {
     const p = store.getById('pacientes', pacienteId);
@@ -13,7 +24,7 @@ const quickActions = {
     const html = `
       <p style="margin-bottom:14px;color:var(--text-soft);font-size:.88rem">
         Paciente: <strong>${utils.escapeHTML(p.nome)}</strong>
-        ${p.cpf ? '· CPF: ' + utils.escapeHTML(p.cpf) : ''}
+        ${p.cpf ? '· CPF: ' + utils.escapeHTML(quickActions._fmt('formatarCpf', p.cpf)) : ''}
       </p>
       <div class="quick-action-grid">
         <div class="quick-action-card" onclick="quickActions.criar(${utils.jsArg(p._id)},'consulta'); modal.close();">

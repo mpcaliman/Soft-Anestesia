@@ -4847,7 +4847,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-17c</b><br>
+    v7.1 · build <b id="build-tag">2026-10-17d</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -8470,7 +8470,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
           <div class="grid">
             <div class="field col-6"><label>Nome</label><input type="text" name="nome" id="risco-nome" onblur="linker.autoPreencherDadosPaciente(this.value, 'risco')"></div>
             <div class="field col-3"><label>Idade</label><input type="number" name="idade" id="risco-idade" inputmode="numeric"></div>
-            <div class="field col-3"><label>Sexo</label><select name="sexo" id="risco-sexo"><option value="M">Masculino</option><option value="F">Feminino</option></select></div>
+            <div class="field col-3"><label>Sexo</label><select name="sexo" id="risco-sexo"><option value="Masculino">Masculino</option><option value="Feminino">Feminino</option></select></div>
             <div class="field col-3"><label>Peso (kg)</label><input type="number" step="0.1" name="peso" id="risco-peso" inputmode="decimal"></div>
             <div class="field col-3"><label>Altura (cm)</label><input type="number" name="altura" id="risco-altura" inputmode="numeric"></div>
             <div class="field col-3"><label>Creatinina</label><input type="number" step="0.01" name="creat" id="risco-creat" inputmode="decimal"></div>
@@ -9874,6 +9874,21 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
       </div>
     </section>
 
+    <section class="card collapsed">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-icon">🧹</span><h2>Padronizar dados<small>CPF, telefone, CRM, nomes, convênio, hospital, cirurgião e procedimento num formato só</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <p style="font-size:.84rem;color:var(--text-soft);margin:0 0 10px;line-height:1.6">
+          O que se digita daqui para frente já sai no formato padrão. Isto converte <strong>o que já estava gravado</strong>:
+          cadastros de pacientes e de profissionais, agenda, financeiro e fichas ainda abertas.
+          <strong>Documento finalizado não é reescrito</strong> — nele, o formato padrão aparece só na tela e na impressão.
+        </p>
+        <button type="button" class="btn btn-sm btn-primary" onclick="padronizacao.abrir()">🧹 Ver o que muda</button>
+      </div>
+    </section>
+
     <!-- 🧮 MUTIRÃO — as duas correções do que ficou para trás -->
     <section class="card" id="mutirao-card">
       <div class="card-header" onclick="ui.toggleCard(this)">
@@ -10469,6 +10484,196 @@ const utils = {
   formatarBR(v) {
     const n = parseFloat(v) || 0;
     return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  },
+  /* ---- UNIFORMIDADE DOS DADOS ----
+     Um jeito só de escrever cada coisa. Na digitação, os campos se formatam
+     sozinhos (ver utils.ligarMascaras); na tela e na impressão, o que já foi
+     gravado de outro jeito aparece no formato padrão. Documento finalizado
+     nunca é reescrito: só a exibição é padronizada. */
+  semAcento(s) {
+    return String(s == null ? '' : s).normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase().replace(/\s+/g, ' ').trim();
+  },
+  /* "joao" acha "João", "conceicao" acha "Conceição", maiúscula não importa */
+  contem(texto, busca) {
+    const b = utils.semAcento(busca);
+    return !b || utils.semAcento(texto).indexOf(b) >= 0;
+  },
+  soDigitos(v) { return String(v == null ? '' : v).replace(/\D+/g, ''); },
+  /* Variações que só diferem em maiúscula, acento ou espaço viram um nome só;
+     fica a grafia mais usada (empate: a que aparece primeiro). */
+  grafiasUnicas(valores) {
+    const grupos = new Map();
+    (valores || []).forEach(v => {
+      const t = String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+      if (!t) return;
+      const k = utils.semAcento(t);
+      if (!grupos.has(k)) grupos.set(k, new Map());
+      const g = grupos.get(k); g.set(t, (g.get(t) || 0) + 1);
+    });
+    return Array.from(grupos.values()).map(g =>
+      Array.from(g.entries()).sort((a, b) => b[1] - a[1])[0][0]);
+  },
+  formatarCpf(v) {
+    const d = utils.soDigitos(v);
+    if (d.length !== 11) return String(v == null ? '' : v).trim();
+    return d.slice(0, 3) + '.' + d.slice(3, 6) + '.' + d.slice(6, 9) + '-' + d.slice(9);
+  },
+  /* formato parcial enquanto se digita: 123.456.7 */
+  _cpfParcial(v) {
+    const d = utils.soDigitos(v).slice(0, 11);
+    let out = d.slice(0, 3);
+    if (d.length > 3) out += '.' + d.slice(3, 6);
+    if (d.length > 6) out += '.' + d.slice(6, 9);
+    if (d.length > 9) out += '-' + d.slice(9);
+    return out;
+  },
+  cpfValido(v) {
+    try { return window.SoftEncounterIdentity.validCpf(v); } catch (e) { return false; }
+  },
+  formatarTelefone(v) {
+    let d = utils.soDigitos(v);
+    if (d.length > 11 && d.startsWith('55')) d = d.slice(2);
+    if (d.length === 11) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 7) + '-' + d.slice(7);
+    if (d.length === 10) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6);
+    return String(v == null ? '' : v).trim();
+  },
+  _telefoneParcial(v) {
+    const d = utils.soDigitos(v).slice(0, 11);
+    if (!d) return '';
+    if (d.length <= 2) return '(' + d;
+    const meio = d.length === 11 ? 5 : 4;
+    const corpo = d.slice(2);
+    return '(' + d.slice(0, 2) + ') ' + (corpo.length > meio ? corpo.slice(0, meio) + '-' + corpo.slice(meio) : corpo);
+  },
+  /* "MARIA DA SILVA conceição" → "Maria da Silva Conceição" */
+  _PARTICULAS: ['da', 'de', 'do', 'das', 'dos', 'e', 'di', 'du'],
+  nomeProprio(v) {
+    const s = String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+    if (!s) return '';
+    return s.split(' ').map((p, i) => {
+      const low = p.toLocaleLowerCase('pt-BR');
+      if (i > 0 && utils._PARTICULAS.indexOf(low) >= 0) return low;
+      if (/^(ii|iii|iv|vi|vii|viii|ix|xi|xii)$/i.test(p)) return p.toUpperCase();
+      return low.split(/([-'’])/).map(t => t && !/[-'’]/.test(t)
+        ? t.charAt(0).toLocaleUpperCase('pt-BR') + t.slice(1) : t).join('');
+    }).join(' ');
+  },
+  /* "CREMEB 30601", "CRM/BA 30601", "crm ba 30601", "30601-BA" → "CRM-BA 30601" */
+  _UFS: ['AC','AL','AM','AP','BA','CE','DF','ES','GO','MA','MG','MS','MT','PA','PB','PE','PI','PR','RJ','RN','RO','RR','RS','SC','SE','SP','TO'],
+  formatarCrm(v) {
+    const orig = String(v == null ? '' : v).trim();
+    const t = orig.toUpperCase().replace(/\s+/g, ' ');
+    const num = (t.match(/\d[\d.]*/) || [''])[0].replace(/\./g, '');
+    if (!num) return orig;
+    const letras = t.replace(/[\d.]/g, ' ').replace(/[^A-Z]+/g, ' ').trim().split(' ').filter(Boolean);
+    let uf = '';
+    for (const w of letras) {
+      if (utils._UFS.indexOf(w) >= 0) { uf = w; break; }
+      const m = /^CREM(?:E)?([A-Z]{1,2})$/.exec(w);
+      if (m) { uf = m[1] === 'B' ? 'BA' : m[1]; if (utils._UFS.indexOf(uf) < 0) uf = ''; if (uf) break; }
+      const m2 = /^CRM([A-Z]{2})$/.exec(w);
+      if (m2 && utils._UFS.indexOf(m2[1]) >= 0) { uf = m2[1]; break; }
+    }
+    return uf ? 'CRM-' + uf + ' ' + num : orig;
+  },
+  /* rótulo de CRM para tela e papel: "CRM-BA 30601" (sem "CRM CRM-BA") */
+  rotuloCrm(v) {
+    const t = utils.formatarCrm(v);
+    if (!t) return '';
+    return /^(CRM|CRE)/i.test(t) ? t : 'CRM ' + t;
+  },
+  formatarMoeda(v) {
+    const n = typeof v === 'number' ? v : parseFloat(String(v == null ? '' : v).replace(/[^\d,.-]/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.'));
+    return 'R$ ' + (Number.isFinite(n) ? n : 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  },
+  /* 1,70 ou 1.70 é metro; 170 é centímetro — os dois viram 170 */
+  alturaCm(v) {
+    const n = parseFloat(String(v == null ? '' : v).replace(',', '.'));
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return n < 3 ? Math.round(n * 100) : Math.round(n);
+  },
+  /* Aplica o formato padrão aos campos de um registro (não finalizado).
+     Devolve quantos campos mudaram. Nunca chamado em documento finalizado. */
+  padronizarRegistro(obj) {
+    if (!obj || typeof obj !== 'object' || obj._finalizado) return 0;
+    let n = 0;
+    const troca = (k, v) => { if (typeof obj[k] === 'string' && obj[k] && v !== obj[k]) { obj[k] = v; n++; } };
+    Object.keys(obj).forEach(k => {
+      if (k[0] === '_' || typeof obj[k] !== 'string' || !obj[k]) return;
+      if (utils._CAMPO_CPF.test(k)) troca(k, utils.formatarCpf(obj[k]));
+      else if (/^documento$/i.test(k) && /^[\d.\-\s]+$/.test(obj[k]) && utils.soDigitos(obj[k]).length === 11) troca(k, utils.formatarCpf(obj[k]));
+      else if (utils._CAMPO_TEL.test(k)) troca(k, utils.formatarTelefone(obj[k]));
+      else if (utils._CAMPO_CRM.test(k)) troca(k, utils.formatarCrm(obj[k]));
+      else if (utils._CAMPO_NOME.test(k)) troca(k, utils.nomeProprio(obj[k]));
+      else if (/^(convenio|convênio|plano|hospital|local)$/i.test(k)) troca(k, obj[k].replace(/\s+/g, ' ').trim());
+    });
+    return n;
+  },
+  /* campos de nome de PESSOA (não de convênio, hospital ou procedimento) */
+  _CAMPO_NOME: /^(nome|paciente|paciente_nome|cirurgiao|cirurgião|anestesiologista|anestesista|profissional|responsavel|responsável|acompanhante|medico|médico|solicitante|auxiliar|instrumentador)$/i,
+  /* "nome" também nomeia convênio, hospital e modelo nos cadastros —
+     "HC UFES" não pode virar "Hc Ufes". Só formulários de pessoa. */
+  _FORM_PESSOA: /^form-(pacientes|novo-pac|pre|consulta|termo|prescricao|recuperacao|risco|documentos|anestesia|financeiro|agenda|orcamento|ajustes-cad_profissionais|ajustes-cad_anestesistas|ajustes-cad_cirurgioes|ajustes-cad_assinaturas)/,
+  _ehNomeDePessoa(el, n) {
+    if (!/^nome$/i.test(n)) return true;
+    const f = el && el.closest ? el.closest('form') : null;
+    /* getAttribute: um campo chamado "id" dentro do form esconde f.id */
+    return !!(f && utils._FORM_PESSOA.test(f.getAttribute('id') || ''));
+  },
+  _CAMPO_CPF: /cpf/i,
+  _CAMPO_TEL: /telefone|celular|whatsapp|^fone/i,
+  _CAMPO_CRM: /^crm/i,
+  _mudou(el, valor) {
+    if (el.value === valor) return;
+    el.value = valor;
+    try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {}
+  },
+  /* Um ouvinte para o documento todo: vale também para o campo criado depois */
+  ligarMascaras(raiz) {
+    const doc = raiz || document;
+    if (doc.__mascarasLigadas) return;
+    doc.__mascarasLigadas = true;
+    const nomeDe = el => String(el.getAttribute('name') || el.getAttribute('data-campo') || '');
+    const editavel = el => el && el.tagName === 'INPUT' && !el.readOnly && !el.disabled &&
+      ['text', 'search', 'tel', ''].indexOf((el.getAttribute('type') || '').toLowerCase()) >= 0;
+    doc.addEventListener('input', e => {
+      const el = e.target; if (!editavel(el)) return;
+      const n = nomeDe(el);
+      if (utils._CAMPO_CPF.test(n) && /^[\d.\-\s]*$/.test(el.value)) {
+        const novo = utils._cpfParcial(el.value);
+        if (novo !== el.value) el.value = novo;
+      } else if (utils._CAMPO_TEL.test(n) && /^[\d()\-\s+]*$/.test(el.value)) {
+        const apagando = e.inputType && e.inputType.indexOf('delete') === 0;
+        if (!apagando) { const novo = utils._telefoneParcial(el.value); if (novo !== el.value) el.value = novo; }
+      }
+    }, true);
+    doc.addEventListener('focusout', e => {
+      const el = e.target; if (!editavel(el) || !String(el.value || '').trim()) return;
+      const n = nomeDe(el);
+      if (utils._CAMPO_CPF.test(n) || (/^documento$/i.test(n) && /^[\d.\-\s]+$/.test(el.value) && utils.soDigitos(el.value).length === 11)) {
+        utils._mudou(el, utils.formatarCpf(el.value));
+        if (utils.soDigitos(el.value).length === 11 && !utils.cpfValido(el.value)) {
+          try { toast('CPF inválido — confira os números (dá para salvar assim mesmo).', 'warn'); } catch (er) {}
+        }
+      } else if (utils._CAMPO_TEL.test(n)) {
+        utils._mudou(el, utils.formatarTelefone(el.value));
+      } else if (utils._CAMPO_CRM.test(n)) {
+        utils._mudou(el, utils.formatarCrm(el.value));
+      } else if (utils._CAMPO_NOME.test(n) && utils._ehNomeDePessoa(el, n)) {
+        utils._mudou(el, utils.nomeProprio(el.value));
+      }
+    }, true);
+    /* altura em metro vira centímetro (o campo é numérico, por isso à parte) */
+    doc.addEventListener('focusout', e => {
+      const el = e.target;
+      if (!el || el.tagName !== 'INPUT' || el.readOnly || el.disabled || !/altura/i.test(nomeDe(el))) return;
+      const n = parseFloat(String(el.value || '').replace(',', '.'));
+      if (Number.isFinite(n) && n > 0 && n < 3) {
+        utils._mudou(el, String(utils.alturaCm(el.value)));
+        try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (er) {}
+      }
+    }, true);
   },
   somaMin(hhmm, minAdicionar) {
     if (!hhmm) return '';
@@ -11389,8 +11594,7 @@ const arquivo = {
     const guardar = (mod, item) => {
       if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return;
       if (!item || !item._id || vistos.has(mod + ':' + item._id)) return;
-      const n = (arquivo._nomeDe(item) || '').toLowerCase();
-      if (!n.includes(alvo)) return;
+      if (!utils.contem(arquivo._nomeDe(item), alvo)) return;
       vistos.add(mod + ':' + item._id);
       achados.push({ mod, item,
         nome: arquivo._nomeDe(item),
@@ -11412,12 +11616,16 @@ const arquivo = {
     try {
       const org = contexto.organizationId;
       if (org) {
-        const like = '*' + String(nome).trim().replace(/[*,()]/g, ' ') + '*';
+        /* acento e ç não podem decidir a busca: no servidor, cada letra que
+           pode ter acento vira "_" (um caractere qualquer) — "joao" pede
+           "j___" e acha "João"; aqui o nome é conferido de verdade */
+        const solto = utils.semAcento(nome).replace(/[*,()]/g, ' ').replace(/[aeiouycn]/g, '_');
+        const like = '*' + solto + '*';
         const rp = await fetch(c.url + '/rest/v1/patients?organization_id=eq.' + org +
-          '&deleted_at=is.null&nome=ilike.' + encodeURIComponent(like) + '&select=id,nome&limit=50',
+          '&deleted_at=is.null&nome=ilike.' + encodeURIComponent(like) + '&select=id,nome&limit=200',
           { headers: cloud._headers(true) });
         if (!cloudRel._contextoValido(contexto, org)) return [];
-        const pacs = rp.ok ? await rp.json() : [];
+        const pacs = (rp.ok ? await rp.json() : []).filter(x => x && utils.contem(x.nome, nome)).slice(0, 50);
         if (!cloudRel._contextoValido(contexto, org)) return [];
         const ids = pacs.map(x => x.id).filter(Boolean);
         if (ids.length) {
@@ -11611,6 +11819,196 @@ const arquivo = {
                      (recuperáveis por 30 dias, nada é perdido de verdade)
      • GRAVAR NOVA — é um procedimento a mais no mesmo dia; convive com o outro
 ============================================================================ */
+/* ============================================================================
+   PADRONIZAÇÃO DOS DADOS JÁ GRAVADOS
+   O formato padrão (utils.padronizarRegistro) vale para o que se digita. Isto
+   leva o mesmo formato ao que já estava gravado, num lote que sobe EM SÉRIE —
+   um registro por vez, com pausa — e nunca toca em documento finalizado.
+   Convênio, hospital e cirurgião escritos de jeitos que só diferem em
+   maiúscula, acento ou espaço viram a grafia mais usada. Nomes PARECIDOS
+   ("Matins"/"Martins") não se juntam sozinhos: a lista mostra e quem decide é
+   a pessoa.
+============================================================================ */
+const padronizacao = {
+  MODS: ['pacientes', 'agenda', 'pre', 'consulta', 'anestesia', 'recuperacao', 'termo', 'prescricao',
+    'documentos', 'risco', 'financeiro', 'orcamento'],
+  GRUPOS: { convenio: 'Convênio', hospital: 'Hospital / local', local: 'Hospital / local', cirurgiao: 'Cirurgião',
+    procedimento: 'Procedimento', cirurgia: 'Procedimento', descricao: 'Procedimento' },
+  _editavel(mod, it) {
+    return !!it && !it._finalizado && !it._deletedAt && !(mod === 'financeiro' && it.status === 'finalizado');
+  },
+  _grupoDe(campo) {
+    if (campo === 'local') return 'hospital';
+    if (campo === 'cirurgia' || campo === 'descricao') return 'procedimento';
+    return campo;
+  },
+  /* cada valor de convênio/hospital/cirurgião, onde estiver (registro e sub-objeto) */
+  _valores(it, fn) {
+    if (!it || typeof it !== 'object') return;
+    [it, it.paciente, it.procedimento].forEach(o => {
+      if (!o || typeof o !== 'object') return;
+      Object.keys(padronizacao.GRUPOS).forEach(k => {
+        /* "descricao" só é procedimento dentro de procedimento: {descricao} */
+        if (k === 'descricao' && o !== it.procedimento) return;
+        if (typeof o[k] === 'string' && o[k].trim()) fn(o, k);
+      });
+    });
+  },
+  _canonicos() {
+    const porGrupo = {};
+    padronizacao.MODS.forEach(mod => (store.list(mod) || []).forEach(it =>
+      padronizacao._valores(it, (o, k) => {
+        const g = padronizacao._grupoDe(k);
+        (porGrupo[g] = porGrupo[g] || []).push(o[k]);
+      })));
+    const mapas = {};
+    Object.keys(porGrupo).forEach(g => {
+      const m = new Map();
+      utils.grafiasUnicas(porGrupo[g]).forEach(v => m.set(utils.semAcento(v), v));
+      mapas[g] = { mapa: m, valores: porGrupo[g] };
+    });
+    return mapas;
+  },
+  /* a versão padronizada de um registro (cópia), ou null se nada muda */
+  _padronizado(mod, it, mapas) {
+    if (!padronizacao._editavel(mod, it)) return null;
+    const novo = JSON.parse(JSON.stringify(it));
+    let n = utils.padronizarRegistro(novo);
+    ['paciente', 'procedimento'].forEach(k => {
+      if (novo[k] && typeof novo[k] === 'object' && !Array.isArray(novo[k])) n += utils.padronizarRegistro(novo[k]);
+    });
+    padronizacao._valores(novo, (o, k) => {
+      const m = mapas[padronizacao._grupoDe(k)];
+      const alvo = m && m.mapa.get(utils.semAcento(o[k]));
+      if (alvo && alvo !== o[k]) { o[k] = alvo; n++; }
+    });
+    return n ? novo : null;
+  },
+  _profissionais() {
+    const lista = store.list('cad_profissionais') || [];
+    let n = 0;
+    const nova = lista.map(p => { const c = Object.assign({}, p); n += utils.padronizarRegistro(c) ? 1 : 0; return c; });
+    return { n, nova };
+  },
+  _distancia(a, b) {
+    if (Math.abs(a.length - b.length) > 2) return 9;
+    const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+    for (let j = 1; j <= b.length; j++) d[0][j] = j;
+    for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) {
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    return d[a.length][b.length];
+  },
+  /* nomes que diferem por uma ou duas letras: a pessoa decide */
+  parecidos(mapas) {
+    mapas = mapas || padronizacao._canonicos();
+    const out = [];
+    Object.keys(mapas).forEach(g => {
+      const conta = new Map();
+      mapas[g].valores.forEach(v => { const k = utils.semAcento(v); conta.set(k, (conta.get(k) || 0) + 1); });
+      const chaves = Array.from(mapas[g].mapa.keys()).filter(k => k.length >= 5);
+      for (let i = 0; i < chaves.length; i++) for (let j = i + 1; j < chaves.length; j++) {
+        if (padronizacao._distancia(chaves[i], chaves[j]) <= 2) {
+          const [a, b] = (conta.get(chaves[i]) || 0) >= (conta.get(chaves[j]) || 0) ? [chaves[i], chaves[j]] : [chaves[j], chaves[i]];
+          out.push({ grupo: g, para: mapas[g].mapa.get(a), qPara: conta.get(a) || 0, de: mapas[g].mapa.get(b), qDe: conta.get(b) || 0 });
+        }
+      }
+    });
+    return out.slice(0, 60);
+  },
+  analisar() {
+    const mapas = padronizacao._canonicos();
+    const alvos = [];
+    padronizacao.MODS.forEach(mod => (store.list(mod) || []).forEach(it => {
+      if (padronizacao._padronizado(mod, it, mapas)) alvos.push({ mod, id: it._id });
+    }));
+    return { alvos, profissionais: padronizacao._profissionais().n, parecidos: padronizacao.parecidos(mapas) };
+  },
+  abrir() {
+    const r = padronizacao.analisar();
+    const porMod = {};
+    r.alvos.forEach(a => { porMod[a.mod] = (porMod[a.mod] || 0) + 1; });
+    const rot = m => (lixeira.LABELS && lixeira.LABELS[m]) || m;
+    const linhas = Object.keys(porMod).map(m => '<li>' + utils.escapeHTML(rot(m)) + ': <b>' + porMod[m] + '</b></li>').join('');
+    const parecidos = r.parecidos.length
+      ? '<p style="font-weight:600;margin:14px 0 6px">Nomes parecidos — junte só se forem a mesma coisa</p>' +
+        '<div style="max-height:34vh;overflow:auto">' + r.parecidos.map((x, i) =>
+          '<div style="display:flex;gap:8px;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);padding:6px 0;font-size:.84rem">' +
+          '<span><small style="color:var(--text-mute)">' + utils.escapeHTML(padronizacao.GRUPOS[x.grupo] || x.grupo) + '</small><br>' +
+          '"' + utils.escapeHTML(x.de) + '" (' + x.qDe + ') → "' + utils.escapeHTML(x.para) + '" (' + x.qPara + ')</span>' +
+          '<button type="button" class="btn btn-sm" onclick="padronizacao.unificar(' + i + ')">Juntar</button></div>').join('') + '</div>'
+      : '';
+    padronizacao._parecidos = r.parecidos;
+    const total = r.alvos.length + (r.profissionais ? 1 : 0);
+    modal.open('🧹 Padronizar dados',
+      '<p style="font-size:.86rem">' + (total
+        ? 'Registros que mudam de formato (os finalizados não entram):</p><ul style="font-size:.86rem;margin:0 0 6px 18px">' + linhas +
+          (r.profissionais ? '<li>Cadastro de profissionais: <b>' + r.profissionais + '</b></li>' : '') + '</ul>' +
+          '<p style="font-size:.8rem;color:var(--text-mute)">Sobem para a nuvem um por vez, sem pressa. Pode continuar usando o sistema; deixe esta aba aberta até terminar.</p>'
+        : 'Tudo o que pode ser padronizado já está no formato padrão.</p>') +
+      '<div id="padr-progresso" style="font-size:.84rem;margin:8px 0"></div>' + parecidos,
+      (total ? '<button class="btn btn-primary" id="padr-aplicar" onclick="padronizacao.aplicar()">🧹 Padronizar ' + total + '</button>' : '') +
+      '<button class="btn" onclick="modal.close()">Fechar</button>');
+  },
+  _salvarEmSerie: async function (alvos, transformar, rotulo) {
+    const contexto = (() => { try { return contextoAba.capturar(); } catch (e) { return null; } })();
+    const prog = () => document.getElementById('padr-progresso');
+    let feitos = 0;
+    for (const a of alvos) {
+      if (contexto && !contextoAba.corresponde(contexto)) break;
+      const atual = store.getById(a.mod, a.id);
+      const novo = atual && transformar(a.mod, atual);
+      if (novo) {
+        const salvo = store.save(a.mod, novo);
+        try { await store.aguardarNuvem(salvo || novo); } catch (e) {}
+        feitos++;
+      }
+      const el = prog(); if (el) el.textContent = rotulo + ': ' + feitos + ' de ' + alvos.length + '…';
+      await new Promise(r => setTimeout(r, padronizacao.PAUSA_MS));
+    }
+    return feitos;
+  },
+  PAUSA_MS: 250,
+  async aplicar() {
+    if (padronizacao._rodando) return 0;
+    padronizacao._rodando = true;
+    const btn = document.getElementById('padr-aplicar'); if (btn) btn.disabled = true;
+    try {
+      const prof = padronizacao._profissionais();
+      if (prof.n) { store.setList('cad_profissionais', prof.nova); try { clinicaSync.enviar(); } catch (e) {} }
+      const mapas = padronizacao._canonicos();
+      const r = padronizacao.analisar();
+      const feitos = await padronizacao._salvarEmSerie(r.alvos, (mod, it) => padronizacao._padronizado(mod, it, mapas), 'Padronizando');
+      const el = document.getElementById('padr-progresso');
+      if (el) el.textContent = '✅ ' + feitos + ' registro(s)' + (prof.n ? ' e ' + prof.n + ' profissional(is)' : '') + ' padronizados.';
+      try { toast('🧹 Dados padronizados', 'success'); } catch (e) {}
+      return feitos + prof.n;
+    } finally { padronizacao._rodando = false; }
+  },
+  async unificar(i) {
+    const x = (padronizacao._parecidos || [])[i];
+    if (!x || padronizacao._rodando) return 0;
+    if (!confirm('Trocar "' + x.de + '" por "' + x.para + '" nos registros ainda abertos?')) return 0;
+    padronizacao._rodando = true;
+    try {
+      const chave = utils.semAcento(x.de);
+      const troca = (mod, it) => {
+        if (!padronizacao._editavel(mod, it)) return null;
+        const novo = JSON.parse(JSON.stringify(it)); let n = 0;
+        padronizacao._valores(novo, (o, k) => {
+          if (padronizacao._grupoDe(k) === x.grupo && utils.semAcento(o[k]) === chave) { o[k] = x.para; n++; }
+        });
+        return n ? novo : null;
+      };
+      const alvos = [];
+      padronizacao.MODS.forEach(mod => (store.list(mod) || []).forEach(it => { if (troca(mod, it)) alvos.push({ mod, id: it._id }); }));
+      const feitos = await padronizacao._salvarEmSerie(alvos, troca, 'Juntando');
+      try { toast('✅ "' + x.de + '" → "' + x.para + '" em ' + feitos + ' registro(s)', 'success'); } catch (e) {}
+      return feitos;
+    } finally { padronizacao._rodando = false; }
+  }
+};
+
 const duplicados = {
   _norm(s) {
     try { if (typeof linker !== 'undefined' && linker._normNome) return linker._normNome(s || ''); } catch (e) {}
@@ -16104,7 +16502,7 @@ const pre = {
     /* Idade em anos (o campo do Pré pode ter texto tipo "54 anos") */
     const idadeNum = (gv('idade').match(/\d+/) || [''])[0];
     /* Sexo: Pré usa "Masculino/Feminino"; Risco usa M/F */
-    const sexoTxt = gv('sexo'); const sexo = /^m/i.test(sexoTxt) ? 'M' : (/^f/i.test(sexoTxt) ? 'F' : '');
+    const sexoTxt = gv('sexo'); const sexo = /^m/i.test(sexoTxt) ? 'Masculino' : (/^f/i.test(sexoTxt) ? 'Feminino' : '');
     /* ASA: Pré usa "ASA III(-E)"; Risco usa 1–5 */
     const asaMap = { i: '1', ii: '2', iii: '3', iv: '4', v: '5', vi: '5' };
     const asaM = gv('asa').match(/ASA\s+(IV|III|II|VI|V|I)\b/i);
@@ -18249,9 +18647,7 @@ const prescricao = {
     const todas = prescricao._todasOpcoes();
     const res = [];
     todas.forEach(m => {
-      const alvoP = (m.p || '').toLowerCase();
-      const alvoN = (m.n || []).join(' ').toLowerCase();
-      if (alvoP.includes(q) || alvoN.includes(q)) res.push(m);
+      if (utils.contem(m.p, q) || utils.contem((m.n || []).join(' '), q)) res.push(m);
     });
     return res.slice(0, 12);
   },
@@ -25541,16 +25937,17 @@ const histAutocomplete = {
 
   /* Reúne valores únicos já usados naquele campo, em todos os registros salvos */
   _coletar(name) {
-    const set = new Set();
+    /* cada uso conta: entre "Unimed" e "UNIMED", sugere-se a grafia mais usada */
+    const todos = [];
     histAutocomplete._MODULOS.forEach(m => {
       try {
         store.list(m).forEach(reg => {
           const v = reg[name];
-          if (typeof v === 'string' && v.trim()) set.add(v.trim());
+          if (typeof v === 'string' && v.trim()) todos.push(v);
         });
       } catch (e) {}
     });
-    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    return utils.grafiasUnicas(todos).sort((a, b) => a.localeCompare(b, 'pt-BR'));
   },
 
   /* Liga o autocomplete genérico a um input, usando o histórico do campo */
@@ -25791,9 +26188,9 @@ const comorbidades = {
   },
 
   _filtrar(txt) {
-    const q = (txt || '').toLowerCase().trim();
+    const q = utils.semAcento(txt);
     document.querySelectorAll('#comorb-lista .comorb-chip').forEach(chip => {
-      const t = chip.textContent.toLowerCase();
+      const t = utils.semAcento(chip.textContent);
       chip.style.display = (!q || t.includes(q)) ? '' : 'none';
     });
     document.querySelectorAll('#comorb-lista .comorb-grupo').forEach(g => {
@@ -25972,9 +26369,9 @@ const alergias = {
   },
 
   _filtrar(txt) {
-    const q = (txt || '').toLowerCase().trim();
+    const q = utils.semAcento(txt);
     document.querySelectorAll('#alerg-lista .comorb-chip').forEach(chip => {
-      const t = chip.textContent.toLowerCase();
+      const t = utils.semAcento(chip.textContent);
       chip.style.display = (!q || t.includes(q)) ? '' : 'none';
     });
     document.querySelectorAll('#alerg-lista .comorb-grupo').forEach(g => {
@@ -26064,9 +26461,9 @@ const medicacoes = {
   },
 
   _filtrar(txt) {
-    const q = (txt || '').toLowerCase().trim();
+    const q = utils.semAcento(txt);
     document.querySelectorAll('#med-lista .med-chip').forEach(chip => {
-      const t = chip.textContent.toLowerCase();
+      const t = utils.semAcento(chip.textContent);
       chip.style.display = (!q || t.includes(q)) ? '' : 'none';
     });
     document.querySelectorAll('#med-lista .med-grupo').forEach(g => {
@@ -26669,7 +27066,7 @@ const risco = {
   _airwayRisk(n) { return n === 0 ? ['Baixo', 1] : n === 1 ? ['Atenção', 5] : n <= 3 ? ['Difícil prevista', 15] : ['Muito difícil', 30]; },
 
   _bmi() {
-    const p = parseFloat(risco._val('peso')), a = parseFloat(risco._val('altura'));
+    const p = parseFloat(risco._val('peso')), a = utils.alturaCm(risco._val('altura'));
     const info = risco._$('bmiInfo');
     if (p && a) { const b = p / ((a / 100) ** 2); if (info) info.textContent = 'IMC: ' + b.toFixed(1); const b35 = risco._$('bmi35'); if (b35) b35.checked = b > 35; return b; }
     if (info) info.textContent = 'IMC: —'; return null;
@@ -26677,10 +27074,11 @@ const risco = {
   _ageSex() {
     const age = parseInt(risco._val('idade') || 0);
     const a50 = risco._$('age50'); if (a50) a50.checked = !!age && age > 50;
-    const male = risco._$('male'); if (male) male.checked = risco._val('sexo') === 'M';
+    /* cálculos antigos guardaram "M"/"F"; os novos, Masculino/Feminino */
+    const male = risco._$('male'); if (male) male.checked = /^m/i.test(risco._val('sexo') || '');
   },
   _eGFR() {
-    const age = parseFloat(risco._val('idade')), cr = parseFloat(risco._val('creat')), fem = risco._val('sexo') === 'F';
+    const age = parseFloat(risco._val('idade')), cr = parseFloat(risco._val('creat')), fem = /^f/i.test(risco._val('sexo') || '');
     if (!age || !cr) return null;
     const k = fem ? 0.7 : 0.9, a = fem ? -0.241 : -0.302, min = Math.min(cr / k, 1), max = Math.max(cr / k, 1);
     return 142 * Math.pow(min, a) * Math.pow(max, -1.2) * Math.pow(0.9938, age) * (fem ? 1.012 : 1);
@@ -26858,6 +27256,7 @@ const risco = {
     if (!item) { toast('Nenhum cálculo salvo', 'warn'); return; }
     item = adendos.vigente('risco', item);
     utils.clearForm(risco.formId);
+    if (item && (item.sexo === 'M' || item.sexo === 'F')) item = Object.assign({}, item, { sexo: item.sexo === 'M' ? 'Masculino' : 'Feminino' });
     utils.fillForm(risco.formId, item);
     let f = document.getElementById(risco.formId);
     let h = f.querySelector('[name="_id"]');
@@ -27270,7 +27669,7 @@ const pdfGen = {
       doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(90);
       if (clinica.especialidade) { doc.text(clinica.especialidade, M, y); y += 4.3; }
       const reg = [];
-      if (clinica.crm || d.crm) reg.push('CRM ' + (clinica.crm || d.crm));
+      if (clinica.crm || d.crm) reg.push(utils.rotuloCrm(clinica.crm || d.crm));
       if (clinica.rqe) reg.push('RQE ' + clinica.rqe);
       if (reg.length) { doc.text(reg.join('  ·  '), M, y); y += 4.3; }
       if (clinica.endereco) { doc.text(clinica.endereco, M, y); y += 4.3; }
@@ -27353,7 +27752,7 @@ const pdfGen = {
       doc.text(clinica.nomeProfissional || d.profissional || '', W / 2, y, { align: 'center' }); y += 5;
       doc.setFontSize(9); doc.setTextColor(90);
       const regAss = [];
-      if (clinica.crm || d.crm) regAss.push('CRM ' + (clinica.crm || d.crm));
+      if (clinica.crm || d.crm) regAss.push(utils.rotuloCrm(clinica.crm || d.crm));
       if (clinica.rqe) regAss.push('RQE ' + clinica.rqe);
       if (regAss.length) doc.text(regAss.join(' · '), W / 2, y, { align: 'center' });
       doc.setTextColor(0);
@@ -30985,7 +31384,8 @@ const anestesia = {
     imc() {
       const f = document.getElementById('form-anestesia');
       const peso = parseFloat(f.querySelector('[name="paciente_peso"]').value);
-      const alt = parseFloat(f.querySelector('[name="paciente_altura"]').value);
+      /* 1,70 (metro) ou 170 (centímetro): os dois são 170 cm */
+      const alt = utils.alturaCm(f.querySelector('[name="paciente_altura"]').value);
       const out = f.querySelector('[name="paciente_imc"]');
       if (!peso || !alt) { out.value = ''; return; }
       const m = alt / 100;
@@ -32710,7 +33110,7 @@ const anestesia = {
           '<div class="cat-evt-grupo"><div style="font-size:.74rem;font-weight:700;color:var(--primary-darker);text-transform:uppercase;letter-spacing:.3px;margin:10px 0 4px">' + utils.escapeHTML(g.grupo) + '</div>' +
           '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
           g.itens.map((t, ti) =>
-            '<label class="cat-evt-item" data-nome="' + utils.escapeAttr(t.toLowerCase()) + '" style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:16px;padding:6px 12px;font-size:.84rem;cursor:pointer;background:var(--surface-alt)">' +
+            '<label class="cat-evt-item" data-nome="' + utils.escapeAttr(utils.semAcento(t)) + '" style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:16px;padding:6px 12px;font-size:.84rem;cursor:pointer;background:var(--surface-alt)">' +
             '<input type="checkbox" data-g="' + gi + '" data-i="' + ti + '" style="width:16px;height:16px">' + utils.escapeHTML(t) +
             (anestesia.eventos.DESCRICOES[t] ? ' <small title="Tem descrição técnica — entra nos detalhes automaticamente">📝</small>' : '') +
             '</label>').join('') +
@@ -32721,7 +33121,7 @@ const anestesia = {
         '<button class="btn" onclick="modal.close()">Cancelar</button>');
     },
     _catalogoFiltrar(txt) {
-      const q = (txt || '').toLowerCase().trim();
+      const q = utils.semAcento(txt);
       document.querySelectorAll('#cat-evt-lista .cat-evt-item').forEach(el => {
         el.style.display = (!q || (el.dataset.nome || '').includes(q)) ? '' : 'none';
       });
@@ -34352,7 +34752,7 @@ const anestesia = {
           '<div class="cat-med-grupo"><div style="font-size:.74rem;font-weight:700;color:var(--primary-darker);text-transform:uppercase;letter-spacing:.3px;margin:10px 0 4px">' + utils.escapeHTML(g.grupo) + '</div>' +
           '<div style="display:flex;flex-wrap:wrap;gap:6px">' +
           g.itens.map((m, mi) =>
-            '<label class="cat-med-item" data-nome="' + utils.escapeAttr(m.nome.toLowerCase()) + '" style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:16px;padding:6px 12px;font-size:.84rem;cursor:pointer;background:var(--surface-alt)">' +
+            '<label class="cat-med-item" data-nome="' + utils.escapeAttr(utils.semAcento(m.nome)) + '" style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:16px;padding:6px 12px;font-size:.84rem;cursor:pointer;background:var(--surface-alt)">' +
             '<input type="checkbox" data-g="' + gi + '" data-m="' + mi + '" style="width:16px;height:16px">' + utils.escapeHTML(m.nome) +
             (m.dose ? ' <small style="color:var(--text-mute)">' + m.dose + ' ' + (m.unidade || '') + '</small>' : '') +
             '</label>').join('') +
@@ -34363,7 +34763,7 @@ const anestesia = {
         '<button class="btn" onclick="modal.close()">Cancelar</button>');
     },
     _catalogoFiltrar(txt) {
-      const q = (txt || '').toLowerCase().trim();
+      const q = utils.semAcento(txt);
       document.querySelectorAll('#cat-med-lista .cat-med-item').forEach(el => {
         el.style.display = (!q || (el.dataset.nome || '').includes(q)) ? '' : 'none';
       });
@@ -42443,10 +42843,7 @@ const modelos = {
     const out = document.getElementById('modal-busca-results');
     if (!q) { out.innerHTML = ''; return; }
     const pool = modelos._buscaPool || [];
-    const matches = pool.filter(r =>
-      (r.nome || '').toLowerCase().includes(q) ||
-      (r.procedimento || '').toLowerCase().includes(q)
-    ).slice(0, 30);
+    const matches = pool.filter(r => utils.contem(r.nome, q) || utils.contem(r.procedimento, q)).slice(0, 30);
     if (matches.length === 0) {
       out.innerHTML = '<div class="empty-state">Nenhum resultado</div>';
       return;
@@ -43617,11 +44014,13 @@ const pacientes = {
       /* Limpa state de invalid */
       form.querySelectorAll('.field.invalid').forEach(fi => fi.classList.remove('invalid'));
 
-      /* CPF — verifica duplicidade (somente se for novo) */
-      if (data.cpf && data.cpf.trim()) {
-        const cpfLimpo = data.cpf.trim();
+      utils.padronizarRegistro(data);
+
+      /* CPF — verifica duplicidade pelos NÚMEROS: com ou sem ponto e traço é o mesmo */
+      if (utils.soDigitos(data.cpf)) {
+        const cpfLimpo = utils.soDigitos(data.cpf);
         const existente = store.list('pacientes').find(p =>
-          p.cpf && p.cpf.trim() === cpfLimpo && p._id !== data._id
+          utils.soDigitos(p.cpf) === cpfLimpo && p._id !== data._id
         );
         if (existente) {
           if (!confirm(`Já existe um paciente com este CPF: "${existente.nome}". Salvar mesmo assim como novo cadastro?`)) {
@@ -44019,8 +44418,9 @@ const pacientes = {
       });
       const nome = (data.nome || '').trim();
       if (!nome) { toast('Informe o nome do paciente', 'warn'); return; }
-      if (data.cpf && data.cpf.trim()) {
-        const existente = store.list('pacientes').find(p => p.cpf && p.cpf.trim() === data.cpf.trim());
+      utils.padronizarRegistro(data);
+      if (utils.soDigitos(data.cpf)) {
+        const existente = store.list('pacientes').find(p => utils.soDigitos(p.cpf) === utils.soDigitos(data.cpf));
         if (existente) {
           if (!confirm(`Já existe paciente com este CPF: "${existente.nome}". Salvar mesmo assim?`)) return;
         }
@@ -44555,6 +44955,7 @@ const ajustes = {
         if (mudou) store.setList('cad_profissionais', todos);
       } catch (er) {}
     }
+    if (/^cad_(profissionais|anestesistas|cirurgioes|assinaturas)$/.test(catKey)) utils.padronizarRegistro(data);
     store.save(catKey, data);
     try { clinicaSync.enviar(); } catch (e) {}
     /* O responsável recém-salvo passa a ser a assinatura ativa. */
@@ -44892,7 +45293,7 @@ const financeiro = {
     cortesia: '🎁 Cortesia', finalizado: '🏁 Concluído'
   },
   _num(v) { return parseFloat(v) || 0; },
-  _rs(v) { return 'R$ ' + (financeiro._num(v)).toFixed(2).replace('.', ','); },
+  _rs(v) { return utils.formatarMoeda(financeiro._num(v)); },
 
   /* Sugere a classe pelo confronto dos valores */
   _sugerirStatus(it) {
@@ -45572,7 +45973,7 @@ const financeiro = {
       setV('valor_previsto', prevFinal);
       const resumoEl = form.querySelector('[name="fatores_resumo"]');
       if (resumoEl) {
-        const fmt = v => 'R$ ' + (v || 0).toFixed(2).replace('.', ',');
+        const fmt = v => utils.formatarMoeda(v || 0);
         let txt = 'Códigos: ' + fmt(totalPrev);
         if (fatorAcom !== 1) txt += ' × ' + fatorAcom + ' (acomodação)';
         if (fatorMaj !== 1) txt += ' × ' + fatorMaj + ' (horário)';
@@ -46794,8 +47195,8 @@ const financeiro = {
       if (fPago === 'sim' && !x.pago) return false;
       if (fPago === 'nao' && x.pago) return false;
       if (fForma && x.tipo_pagamento !== fForma) return false;
-      if (fHosp && !(x.hospital || '').toLowerCase().includes(fHosp)) return false;
-      if (fCir && !(x.cirurgiao || '').toLowerCase().includes(fCir)) return false;
+      if (fHosp && !utils.contem(x.hospital, fHosp)) return false;
+      if (fCir && !utils.contem(x.cirurgiao, fCir)) return false;
       /* Nenhum plano marcado = nenhum registro passa. É o que o usuário
          pediu ao desmarcar tudo, e dizer isso na tela é melhor do que
          ignorar a escolha e mostrar tudo como se nada tivesse acontecido. */
@@ -46803,7 +47204,7 @@ const financeiro = {
         const plano = financeiro.planos._chave(x);
         if (!planosSel[plano]) return false;
       }
-      if (fProc && !(x.procedimento || '').toLowerCase().includes(fProc)) return false;
+      if (fProc && !utils.contem(x.procedimento, fProc)) return false;
       if (fDe && (!x.data_proc || x.data_proc < fDe)) return false;
       if (fAte && (!x.data_proc || x.data_proc > fAte)) return false;
       return true;
@@ -47050,7 +47451,19 @@ const financeiro = {
     /* Lançamento sem convênio ainda é alguma coisa — particular, SUS — e
        precisa de um lugar na lista, senão some do filtro sem explicação. */
     _chave(x) {
-      return String((x && (x.convenio || x.tipo_pagamento)) || '').trim() || '(sem convênio)';
+      const bruto = String((x && (x.convenio || x.tipo_pagamento)) || '').replace(/\s+/g, ' ').trim();
+      if (!bruto) return '(sem convênio)';
+      /* "Unimed", "UNIMED" e "Unimed " são o mesmo plano: a grafia mais usada */
+      /* store.list devolve uma cópia: ler a lista a cada linha seria caro.
+         O mapa das grafias vale por 2 s — o tempo de uma tela se desenhar. */
+      const memo = financeiro.planos._grafias;
+      if (!memo || Date.now() - memo.em > 2000) {
+        const mapa = new Map();
+        utils.grafiasUnicas((store.list('financeiro') || []).map(r => r && (r.convenio || r.tipo_pagamento)))
+          .forEach(g => mapa.set(utils.semAcento(g), g));
+        financeiro.planos._grafias = { em: Date.now(), mapa };
+      }
+      return financeiro.planos._grafias.mapa.get(utils.semAcento(bruto)) || bruto;
     },
 
     /* Todos os planos já lançados, com quantos registros cada um tem */
@@ -47357,7 +47770,7 @@ const financeiro = {
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(90);
     if (cab.especialidade) { doc.text(cab.especialidade, M, y); y += 4; }
     const reg = [];
-    if (cab.crm) reg.push(/^(CRE|CRM)/i.test(cab.crm) ? cab.crm : ('CRM ' + cab.crm));
+    if (cab.crm) reg.push(utils.rotuloCrm(cab.crm));
     if (cab.rqe) reg.push('RQE ' + cab.rqe);
     if (reg.length) { doc.text(reg.join('   ·   '), M, y); y += 4; }
     doc.setTextColor(0);
@@ -47719,7 +48132,7 @@ const ORC_CFG_PADRAO = {
   cabecalho: {
     profissional: 'Dr. Marcelo Pandolfi Caliman',
     especialidade: 'Anestesiologista',
-    crm: 'CREMEB 30601',
+    crm: 'CRM-BA 30601',
     rqe: '14630',
     whatsapp: '(73) 99976-9179',
     endereco: 'Rua Rui Barbosa 62, Centro, Eunápolis – BA',
@@ -48234,7 +48647,7 @@ const doses = {
     const host = document.getElementById('dose-pac-lista'); if (!host) return;
     const termo = String((document.getElementById('dose-pac-busca') || {}).value || '').trim().toLowerCase();
     const achados = (doses._pacientes || [])
-      .filter(p => !termo || p.nome.toLowerCase().indexOf(termo) >= 0)
+      .filter(p => !termo || utils.contem(p.nome, termo))
       .slice(0, 60);
     if (!achados.length) { host.innerHTML = '<p style="font-size:.84rem;color:var(--text-mute)">Nenhum paciente com esse nome.</p>'; return; }
     host.innerHTML = achados.map(p =>
@@ -49418,7 +49831,7 @@ const orcamento = {
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(90);
     if (cab.especialidade) { doc.text(cab.especialidade, M, y); y += 4.4; }
     const reg = [];
-    if (cab.crm) reg.push(/^(CRE|CRM)/i.test(cab.crm) ? cab.crm : ('CRM ' + cab.crm));
+    if (cab.crm) reg.push(utils.rotuloCrm(cab.crm));
     if (cab.rqe) reg.push('RQE ' + cab.rqe);
     if (reg.length) { doc.text(reg.join('   ·   '), M, y); y += 4.4; }
     doc.setTextColor(0);
@@ -49514,7 +49927,7 @@ const orcamento = {
       ? '<p><strong>Procedimento:</strong> ' + esc(info.procTexto) + '</p>'
       : '<p><strong>Procedimentos:</strong></p><ul>' + info.procs.map(p => '<li>' + esc(p) + '</li>').join('') + '</ul>';
     const reg = [];
-    if (cab.crm) reg.push(esc(/^(CRE|CRM)/i.test(cab.crm) ? cab.crm : ('CRM ' + cab.crm)));
+    if (cab.crm) reg.push(esc(utils.rotuloCrm(cab.crm)));
     if (cab.rqe) reg.push('RQE ' + esc(cab.rqe));
     const html = '<!doctype html><html><head><meta charset="utf-8"><title>Orçamento — ' + esc(d.paciente || '') + '</title>' +
       '<style>@page{size:A4;margin:0 18mm;}body{font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;font-size:10.5pt;line-height:1.45;padding:16mm 0;margin:0;}' +

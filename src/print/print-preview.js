@@ -6,6 +6,17 @@
    PRINT PREVIEW — pré-visualização de impressão
 ============================================================================ */
 const printPreview = {
+  /* formatos padrão (utils). Numa tela isolada (teste de fronteira) sem
+     utils, busca segue sem acento e o resto passa como veio. */
+  _fmt(nome, ...a) {
+    if (typeof utils !== 'undefined' && typeof utils[nome] === 'function') return utils[nome](...a);
+    const plano = x => String(x == null ? '' : x).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+    if (nome === 'semAcento') return plano(a[0]);
+    if (nome === 'contem') return !plano(a[1]) || plano(a[0]).indexOf(plano(a[1])) >= 0;
+    if (nome === 'soDigitos') return String(a[0] == null ? '' : a[0]).replace(/\D+/g, '');
+    if (nome === 'grafiasUnicas') return Array.from(new Set((a[0] || []).map(v => String(v == null ? '' : v).trim()).filter(Boolean)));
+    return a[0];
+  },
   _formularioPorModulo: { pre: 'form-pre', consulta: 'form-consulta', anestesia: 'form-anestesia',
     recuperacao: 'form-recuperacao', risco: 'form-risco', termo: 'form-termo',
     prescricao: 'form-prescricao', documentos: 'form-documentos' },
@@ -1125,7 +1136,7 @@ ${TAG_CLOSE_HTML}`;
     const nomeProf = opts.semProfissional ? '' : (prof.nomeProfissional || '');
     const linhaReg = [];
     if (prof.especialidade) linhaReg.push(prof.especialidade);
-    if (prof.crm) linhaReg.push('CRM ' + prof.crm);
+    if (prof.crm) linhaReg.push(printPreview._fmt('rotuloCrm', prof.crm));
     if (prof.rqe) linhaReg.push('RQE ' + prof.rqe);
     /* Lado esquerdo: a CLÍNICA (logo + nome + contato). Lado direito: o
        PROFISSIONAL. São coisas diferentes e o papel precisa das duas. */
@@ -1150,12 +1161,26 @@ ${TAG_CLOSE_HTML}`;
       </div>
     `;
   },
+  /* O formato padrão na impressão, também para o que foi gravado antes dele
+     (o registro guardado não muda: só o que sai no papel). */
+  _padrao(label, value) {
+    if (typeof value !== 'string' || !value.trim() || typeof utils === 'undefined' || !utils.formatarCpf) return value;
+    const l = String(label || '').toLowerCase();
+    try {
+      if (/^cpf/.test(l)) return /^[\d.\-\s]+$/.test(value) ? printPreview._fmt('formatarCpf', value) : value;
+      if (/telefone|celular/.test(l)) return printPreview._fmt('formatarTelefone', value);
+      if (/^crm/.test(l)) return printPreview._fmt('formatarCrm', value);
+      if (/^(paciente|nome|cirurgi[aã]o|anestesiologista|anestesista|respons[aá]vel|solicitante)$/.test(l)) return printPreview._fmt('nomeProprio', value);
+    } catch (e) {}
+    return value;
+  },
   _field(label, value, blockMode = false, sempre = false) {
     /* Por padrão, OMITE o campo se valor for vazio.
        Passe sempre=true para forçar mostrar com "—". */
     if (!sempre && (value === null || value === undefined || String(value).trim() === '' || value === '—')) {
       return '';
     }
+    value = printPreview._padrao(label, value);
     const v = value || '—';
     if (blockMode) {
       return `<div class="pp-block"><span class="pp-label">${utils.escapeHTML(label)}</span><span class="pp-value">${utils.escapeHTML(v)}</span></div>`;
@@ -1471,7 +1496,7 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._field('Conclusão', d.conclusao, true)}
       `) +
       printPreview._complementos(d) +
-      printPreview._signature(d.anestesiologista, d.crm ? 'CRM ' + d.crm : '', d) +
+      printPreview._signature(d.anestesiologista, d.crm ? printPreview._fmt('rotuloCrm', d.crm) : '', d) +
       printPreview._footer('Avaliação pré-anestésica') +
       printPreview._buildProtocoloJejumAnexo(d) +
       '</div>';
@@ -1662,7 +1687,7 @@ ${TAG_CLOSE_HTML}`;
       procHtml +
       segHtml +
       printPreview._complementos(d) +
-      printPreview._signature(d.profissional, d.crm ? 'CRM ' + d.crm : '', d) +
+      printPreview._signature(d.profissional, d.crm ? printPreview._fmt('rotuloCrm', d.crm) : '', d) +
       printPreview._footer('Consulta');
   },
 
@@ -2279,7 +2304,7 @@ ${TAG_CLOSE_HTML}`;
         if (p && p.carimbo) imgHTML = `<img src="${p.carimbo}" alt="">`;
       }
       const linhaNome = nome || '_____________________________';
-      const linhaCrm = crm ? ('CRM ' + crm) : '';
+      const linhaCrm = crm ? printPreview._fmt('rotuloCrm', crm) : '';
       return `
         <div class="pp-signature">
           <div class="pp-signature-img-slot">${imgHTML}</div>
@@ -2447,6 +2472,7 @@ ${TAG_CLOSE_HTML}`;
   _assinaturaDesenhada(dataUrl, linhaNome, linhaRegistro, papel) {
     const img = dataUrl ? `<img src="${dataUrl}" alt="" style="display:block;max-width:200px;max-height:60px;width:auto;height:auto;margin:0 auto 2px">` : '';
     const nome = linhaNome || '_____________________________';
+    if (papel === 'prof' && linhaRegistro) { try { linhaRegistro = printPreview._fmt('rotuloCrm', linhaRegistro); } catch (e) {} }
     const classePapel = papel === 'prof' ? ' pp-signature-prof' : (papel === 'pac' ? ' pp-signature-pac' : '');
     return `
       <div class="pp-signature${classePapel}" style="text-align:center">
@@ -2498,7 +2524,7 @@ ${TAG_CLOSE_HTML}`;
       : (d.nome || 'Paciente');
     const assinaturas = `
       <div class="pp-signature-area" style="display:flex;gap:30px;justify-content:space-between;margin-top:40px">
-        ${printPreview._assinaturaDesenhada(d.sig_paciente_dataurl, labelPac, d.documento ? 'Doc: ' + d.documento : '', 'pac')}
+        ${printPreview._assinaturaDesenhada(d.sig_paciente_dataurl, labelPac, d.documento ? 'Doc: ' + printPreview._padrao('CPF', d.documento) : '', 'pac')}
         ${printPreview._assinaturaDesenhada(d.assinatura_dataurl || d.sig_profissional_dataurl, d.profissional || 'Profissional', d.crm, 'prof')}
       </div>`;
 

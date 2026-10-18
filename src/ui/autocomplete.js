@@ -6,6 +6,17 @@
    AUTOCOMPLETE — anexa autocomplete genérico a um input
 ============================================================================ */
 const autocomplete = {
+  /* formatos padrão (utils). Numa tela isolada (teste de fronteira) sem
+     utils, busca segue sem acento e o resto passa como veio. */
+  _fmt(nome, ...a) {
+    if (typeof utils !== 'undefined' && typeof utils[nome] === 'function') return utils[nome](...a);
+    const plano = x => String(x == null ? '' : x).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+    if (nome === 'semAcento') return plano(a[0]);
+    if (nome === 'contem') return !plano(a[1]) || plano(a[0]).indexOf(plano(a[1])) >= 0;
+    if (nome === 'soDigitos') return String(a[0] == null ? '' : a[0]).replace(/\D+/g, '');
+    if (nome === 'grafiasUnicas') return Array.from(new Set((a[0] || []).map(v => String(v == null ? '' : v).trim()).filter(Boolean)));
+    return a[0];
+  },
   /* attach(input, getList, onPick, onCreateNew?)
      - getList: função que retorna array de itens {value, label, meta?}
      - onPick: callback quando item é escolhido
@@ -37,10 +48,8 @@ const autocomplete = {
     const renderList = () => {
       const q = (input.value || '').toLowerCase();
       const all = getList() || [];
-      items = all.filter(it => {
-        const blob = (it.label + ' ' + (it.meta || '')).toLowerCase();
-        return q.length === 0 || blob.includes(q);
-      }).slice(0, 10);
+      /* sem acento, sem ç, sem maiúscula: "joao" acha "João" */
+      items = all.filter(it => q.length === 0 || autocomplete._fmt('contem', it.label + ' ' + (it.meta || ''), q)).slice(0, 10);
       let html = items.map((it, i) => `
         <div class="autocomplete-item ${i === activeIdx ? 'active' : ''}" data-idx="${i}">
           <span>${utils.escapeHTML(it.label)}</span>
@@ -404,16 +413,17 @@ const autocomplete = {
         let hist = [];
         try {
           if (fieldName && typeof histAutocomplete !== 'undefined') {
-            const jaTem = new Set(cadastros.map(c => (c.label || '').toLowerCase().trim()));
-            hist = histAutocomplete._coletar(fieldName)
-              .filter(v => !jaTem.has(v.toLowerCase().trim()))
+            /* "Unimed", "UNIMED" e "Unimed " são um nome só: fica a grafia mais usada */
+            const jaTem = new Set(cadastros.map(c => autocomplete._fmt('semAcento', c.label)));
+            hist = autocomplete._fmt('grafiasUnicas', histAutocomplete._coletar(fieldName))
+              .filter(v => !jaTem.has(autocomplete._fmt('semAcento', v)))
               .map(v => ({ value: v, label: v, meta: 'usado antes' }));
           }
         } catch (e) {}
         /* convênio: os planos de sempre continuam sugeridos, como na lista antiga */
         const padrao = catKey === 'cad_convenios'
           ? ['Particular', 'SUS', 'Unimed', 'Bradesco Saúde', 'Amil', 'SulAmérica', 'Notredame Intermédica', 'Hapvida']
-            .filter(v => !cadastros.concat(hist).some(c => (c.label || '').toLowerCase().trim() === v.toLowerCase()))
+            .filter(v => !cadastros.concat(hist).some(c => autocomplete._fmt('semAcento', c.label) === autocomplete._fmt('semAcento', v)))
             .map(v => ({ value: v, label: v, meta: '' }))
           : [];
         return [...cadastros, ...hist, ...padrao];
@@ -489,7 +499,7 @@ const autocomplete = {
         el,
         () => ajustes.list('cad_anestesistas').map(x => ({
           value: x._id, label: x.nome,
-          meta: (x.crm ? 'CRM ' + x.crm : '') + (x.rqe ? ' · RQE ' + x.rqe : '') + (x.carimbo ? ' · ✓ carimbo' : ''),
+          meta: (x.crm ? autocomplete._fmt('rotuloCrm', x.crm) : '') + (x.rqe ? ' · RQE ' + x.rqe : '') + (x.carimbo ? ' · ✓ carimbo' : ''),
           data: x
         })),
         (it) => aplicarProfissional(el, it.data)
@@ -523,7 +533,7 @@ const autocomplete = {
         el,
         () => autocomplete._umaPessoaUmaLinha(ajustes.list('cad_anestesistas').map(x => ({
           value: x._id, label: x.nome,
-          meta: (x.crm ? 'CRM ' + x.crm : '') + (x.carimbo ? ' · ✓ carimbo' : ''),
+          meta: (x.crm ? autocomplete._fmt('rotuloCrm', x.crm) : '') + (x.carimbo ? ' · ✓ carimbo' : ''),
           data: x
         }))),
         (it) => aplicarProfissional(el, it.data)
@@ -600,7 +610,7 @@ const autocomplete = {
           const partes = [];
           if (x.responsavel === true || x.responsavel === 'true') partes.push('Meu perfil');
           if (x.especialidade) partes.push(x.especialidade);
-          if (x.crm) partes.push('CRM ' + x.crm);
+          if (x.crm) partes.push(autocomplete._fmt('rotuloCrm', x.crm));
           if (x.carimbo) partes.push('✓ carimbo');
           return { value: x._id, label: nome, meta: partes.join(' · '), data: Object.assign({}, x, { nome }) };
         };
