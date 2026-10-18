@@ -11187,6 +11187,117 @@ await test('Dados: formatos padrão, busca sem acento e padronização do que j�
   await page.close();
 });
 
+/* Importação da conciliação Unimed: regras combinadas, envio em lote sem
+   duplicar e o histórico anterior a 2026 só na nuvem. */
+await test('Financeiro: importa a conciliação com as regras combinadas, em lote, e anos fechados ficam na nuvem', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const ctx = await __smokePrepareQueue('org-1', 'u1');
+    cloudRel.disponivel = () => true;
+    sincronia.agora = () => {};
+    importFin.PAUSA_MS = 0;
+    const out = {};
+    const cab = ['Data atendimento','Nome','Carteirinha','Senha(s)','Código(s) procedimento','Descrição procedimento',
+      'Pago nos extratos (R$)','Glosas/débitos lançados (R$)','Processado nos extratos (R$)','Competências','Pagamento(s) previsto(s)',
+      'Critério do vínculo','Situação','Apartamento','Origem','Convênio original','Local original','Cirurgião original',
+      'Valor na planilha (R$)','Recebido original','AP original','Procedimento original','Senha original','Carteirinha original',
+      'Aba e linha original','IDs dos itens do extrato','Candidatos a conferir','Observações','ID da linha','Carteirinha sugerida por nome'];
+    const linha = o => cab.map(h => { const v = o[h] == null ? '' : String(o[h]); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(',');
+    const base = { 'Origem': 'Planilha', 'Convênio original': 'Unimed', 'Local original': 'Hospital Ramos', 'Cirurgião original': 'HUGO SERRANO',
+      'Recebido original': 'Não', 'AP original': 'Não', 'Apartamento': 'Não informado' };
+    const rows = [
+      Object.assign({}, base, { 'Data atendimento': '02/01/2024', 'Nome': 'ALINE ALMEIDA', 'Carteirinha': '0803315001273011', 'Senha(s)': '6658404',
+        'Código(s) procedimento': '30717108 | 40803066', 'Descrição procedimento': 'Fraturas e luxações', 'Pago nos extratos (R$)': 'R$ 307,13',
+        'Glosas/débitos lançados (R$)': 'R$ 1,68', 'Processado nos extratos (R$)': 'R$ 308,81', 'Competências': '2024-02', 'Pagamento(s) previsto(s)': '2024-03-08',
+        'Situação': 'Vinculado: valor liberado', 'ID da linha': 'PLAN-2024-4', 'Aba e linha original': '2024!4' }),
+      Object.assign({}, base, { 'Data atendimento': '10/02/2026', 'Nome': 'Bruno Pago', 'Senha(s)': '7801', 'Código(s) procedimento': '31602231',
+        'Descrição procedimento': 'Anestesia para endoscopia', 'Pago nos extratos (R$)': 'R$ 208,67', 'Processado nos extratos (R$)': 'R$ 208,67',
+        'Pagamento(s) previsto(s)': '2026-03-06', 'Situação': 'Vinculado: valor liberado', 'ID da linha': 'PLAN-2026-10', 'AP original': 'Sim' }),
+      Object.assign({}, base, { 'Data atendimento': '11/02/2026', 'Nome': 'Carla Pendente', 'Situação': 'Sem vínculo confirmado no período',
+        'Procedimento original': 'Colecistectomia', 'ID da linha': 'PLAN-2026-11' }),
+      Object.assign({}, base, { 'Data atendimento': '12/02/2026', 'Nome': 'Davi Conferir', 'Senha(s)': '9999', 'Pago nos extratos (R$)': 'R$ 500,00',
+        'Situação': 'Vínculo a conferir', 'Candidatos a conferir': 'UNI-1 | UNI-2', 'Senha original': '1234', 'Procedimento original': 'Hernioplastia',
+        'ID da linha': 'PLAN-2026-12' }),
+      Object.assign({}, base, { 'Data atendimento': '03/03/2025', 'Nome': 'Eva Recurso', 'ID da linha': 'PLAN-REC-1', 'Aba e linha original': 'Recurso Unimed!3' }),
+      Object.assign({}, base, { 'Data atendimento': '04/12/2023', 'Nome': 'SEBASTIAO CAMILO COSTA', 'Origem': 'Extrato', 'Convênio original': '',
+        'Pago nos extratos (R$)': 'R$ 208,67', 'Situação': 'Sem correspondência', 'ID da linha': 'UNI-202401-00001-001', 'Local original': '', 'Cirurgião original': '' }),
+      Object.assign({}, base, { 'Data atendimento': '11/02/2026', 'Nome': 'Carla Pendente', 'ID da linha': 'PLAN-2026-11' }),
+      Object.assign({}, base, { 'Data atendimento': '15/02/2026', 'Nome': 'Fabio Existente', 'Senha(s)': '5555', 'Pago nos extratos (R$)': 'R$ 100,00',
+        'Situação': 'Vinculado: valor liberado', 'ID da linha': 'PLAN-2026-15' })
+    ];
+    const csv = '﻿' + cab.join(',') + '\r\n' + rows.map(linha).join('\r\n') + '\r\n';
+    store.setList('financeiro', [{ _id: 'fin-ex', paciente: 'Fabio Existente', data_proc: '2026-02-15', status: 'pendente', convenio: 'Unimed', _relOrg: 'org-1' }]);
+    store.setList('pacientes', [{ _id: 'pac-x', nome: 'Bruno Pago' }]);
+    const a = importFin.analisar(csv);
+    const L = id => a.lancamentos.find(x => x._importId === id);
+    out.contagem = a.lancamentos.length === 5 && a.pulados.recurso === 1 && a.repetidos === 1 && a.jaExistem.length === 1;
+    const l24 = L('PLAN-2024-4'), lp = L('PLAN-2026-10'), lpend = L('PLAN-2026-11'), lconf = L('PLAN-2026-12'), lext = L('UNI-202401-00001-001');
+    out.antigoFinalizado = l24.status === 'finalizado' && l24.valor_recebido === 307.13 && l24.glosa === 1.68 && l24.valor_previsto === 308.81 &&
+      l24.paciente === 'Aline Almeida' && l24.senha === '6658404' && l24.procedimento === '30717108 - Fraturas e luxações' &&
+      l24.codigos.length === 2 && l24.data_recebimento === '2024-03-08' && l24.acomodacao === 'enfermaria' && l24.cirurgiao === 'Hugo Serrano';
+    out.recebido2026 = lp.status === 'finalizado' && lp.acomodacao === 'apartamento' && lp.valor_recebido === 208.67;
+    out.pendente2026 = lpend.status === 'pendente' && lpend.valor_recebido === '' && lpend.procedimento === 'Colecistectomia';
+    out.conferir = lconf.status === 'pendente' && lconf.valor_recebido === '' && lconf.senha === '1234' && /CONFERIR VÍNCULO/.test(lconf.observacoes);
+    out.soExtrato = lext.status === 'finalizado' && lext.convenio === 'Unimed' && /só do extrato/.test(lext.observacoes) && a.soExtrato === 1;
+    out.pacNovos = importFin._pacientesNovos(a.lancamentos).map(p => p.nome).sort().join('|') ===
+      ['Aline Almeida', 'Carla Pendente', 'Davi Conferir', 'Sebastiao Camilo Costa'].sort().join('|');
+
+    /* envio em lote: cada POST leva várias linhas; nada é enviado um a um */
+    const posts = [];
+    const fetchOriginal = window.fetch;
+    window.fetch = async (url, opts) => {
+      const u = String(url);
+      if (opts && opts.method === 'POST' && /\/rest\/v1\/(patients|finance_entries)\?/.test(u)) {
+        posts.push({ tabela: /patients/.test(u) ? 'patients' : 'finance_entries', linhas: JSON.parse(opts.body), prefer: opts.headers.Prefer });
+        return { ok: true, status: 201, json: async () => [], text: async () => '' };
+      }
+      if (/\/rest\/v1\/patients\?/.test(u) && /legacy_id=in/.test(u)) {
+        return { ok: true, status: 200, json: async () => [{ id: 'p-uuid-1', legacy_id: 'nome:aline almeida' }] };
+      }
+      return fetchOriginal(url, opts);
+    };
+    cloudRel.enviarRegistro = async (mod, item, o) => __smokeCloudReceipt(mod, item, o);
+    let res;
+    try { res = await importFin.enviar(a.lancamentos); } finally { window.fetch = fetchOriginal; }
+    const fin = posts.filter(p => p.tabela === 'finance_entries');
+    out.lote = res.ok && fin.length === 1 && fin[0].linhas.length === 5 && /ignore-duplicates/.test(fin[0].prefer) &&
+      fin[0].linhas.every(x => x.organization_id === 'org-1' && /^imp_/.test(x.legacy_id)) &&
+      fin[0].linhas.find(x => x.legacy_id === 'imp_PLAN-2024-4').patient_id === 'p-uuid-1' &&
+      posts.filter(p => p.tabela === 'patients').reduce((n, p) => n + p.linhas.length, 0) === 4;
+    const ids = store.list('financeiro').map(x => x._id);
+    out.soJanelaNoAparelho = ids.includes('imp_PLAN-2026-10') && ids.includes('imp_PLAN-2026-11') &&
+      !ids.includes('imp_PLAN-2024-4') && !ids.includes('imp_UNI-202401-00001-001');
+    out.pacientesLocais = store.list('pacientes').some(p => p.nome === 'Aline Almeida' && p.carteirinha === '0803315001273011');
+    /* o que já existia é completado, não duplicado */
+    store.aguardarNuvem = async () => ({ ok: true });
+    await importFin.enriquecer(a.jaExistem);
+    const ex = store.getById('financeiro', 'fin-ex');
+    out.enriquecido = ex.senha === '5555' && ex.valor_recebido === 100 && ex.status === 'finalizado' && /PLAN-2026-15/.test(ex.observacoes);
+
+    /* janela: anos fechados ficam na nuvem; pendência antiga continua aqui */
+    out.janela = !cloudRel.dentroDaJanela('financeiro', { data_proc: '2025-05-01', status: 'finalizado' }) &&
+      cloudRel.dentroDaJanela('financeiro', { data_proc: '2025-05-01', status: 'pendente' }) &&
+      cloudRel.dentroDaJanela('financeiro', { data_proc: '2026-01-01', status: 'finalizado' }) &&
+      decodeURIComponent(cloudRel._filtroJanela('financeiro')).includes('data->>data_proc.gte.2026-01-01') &&
+      cloudRel._filtroJanela('pre') === '';
+    /* filtrar um período antigo traz da nuvem */
+    window.fetch = async (url) => {
+      const u = decodeURIComponent(String(url));
+      if (/finance_entries/.test(u) && /data->>data_proc=gte\.2024-01-01/.test(u)) {
+        return { ok: true, status: 200, json: async () => [{ id: 'r1', organization_id: 'org-1', legacy_id: 'imp_PLAN-2024-4',
+          data: { _id: 'imp_PLAN-2024-4', paciente: 'Aline Almeida', data_proc: '2024-01-02', status: 'finalizado' }, updated_at: '2026-10-17T00:00:00Z', version: 1 }] };
+      }
+      return { ok: true, status: 200, json: async () => [] };
+    };
+    try { await financeiro.buscarNaNuvem('2024-01-01', '2024-12-31'); } finally { window.fetch = fetchOriginal; }
+    out.trouxeDaNuvem = store.list('financeiro').some(x => x._id === 'imp_PLAN-2024-4');
+    try { modal.close(); } catch (e) {}
+    return out;
+  });
+  for (const [k, v] of Object.entries(r)) assert(v, 'falhou: ' + k + ' → ' + JSON.stringify(r));
+  await page.close();
+});
+
 await test('Sync: adendo preso sai com a prova da nuvem, e conflitos seguem a última edição', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {

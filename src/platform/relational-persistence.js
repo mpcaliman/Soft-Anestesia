@@ -659,6 +659,25 @@ const cloudRel = {
     return res;
   },
 
+  /* A JANELA DO APARELHO.
+     O Financeiro tem anos de histórico na nuvem (a importação da conciliação
+     traz ~10 mil lançamentos). O aparelho carrega só o que está em uso: o que
+     é a partir do corte, e o que ainda não foi finalizado — qualquer que seja
+     a data. O resto continua inteiro na nuvem e aparece quando se pede o
+     período (financeiro.buscarNaNuvem). */
+  JANELA: { financeiro: '2026-01-01' },
+  dentroDaJanela(mod, it) {
+    const corte = cloudRel.JANELA[mod];
+    if (!corte || !it) return true;
+    const d = String(it.data_proc || '').slice(0, 10);
+    return !d || d >= corte || String(it.status || '') !== 'finalizado';
+  },
+  _filtroJanela(mod) {
+    const corte = cloudRel.JANELA[mod];
+    if (!corte) return '';
+    return '&or=' + encodeURIComponent('(data->>data_proc.gte.' + corte + ',data->>data_proc.is.null,' +
+      'data->>status.neq.finalizado,data->>status.is.null)');
+  },
   async puxarModulo(mod, opts = {}) {
     const cfg = cloudRel.MODOS[mod]; if (!cfg) return null;
     const contexto = cloudRel._capturarContexto(); if (!contexto) return null;
@@ -672,7 +691,7 @@ const cloudRel = {
          minuto em minuto, sem pesar na rede nem no aparelho. */
       const filtroData = opts.desde ? '&updated_at=gt.' + encodeURIComponent(opts.desde) : '';
       const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
-        '&deleted_at=is.null' + filtroData + '&select=' + cloudRel._regSelect(cfg.tabela) + '&order=updated_at.desc',
+        '&deleted_at=is.null' + filtroData + cloudRel._filtroJanela(mod) + '&select=' + cloudRel._regSelect(cfg.tabela) + '&order=updated_at.desc',
         { headers: cloud._headers(true) });
       if (!r.ok) return null;
       const rows = await r.json();
@@ -869,7 +888,7 @@ const cloudRel = {
     try {
       for (let de = 0; ; de += PASSO) {
         const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
-          '&deleted_at=is.null&select=' + cloudRel._REG_SELECT_LEVE +
+          '&deleted_at=is.null' + cloudRel._filtroJanela(mod) + '&select=' + cloudRel._REG_SELECT_LEVE +
           '&order=updated_at.desc&limit=' + PASSO + '&offset=' + de,
           { headers: cloud._headers(true) });
         if (!r.ok) return null;
@@ -2802,7 +2821,9 @@ const cloudRel = {
            aqui apagaria do aparelho todo registro que continuou igual. */
         for (let i = locais.length - 1; i >= 0; i--) {
           const x = locais[i];
-          if (x && x._relUpdatedAt && x._id && !idsRemotos.has(x._id) && !cloudRel._temPendente(mod, x._id)) {
+          /* fora da janela do aparelho não aparece no índice, e não é por ser de outra clínica */
+          if (x && x._relUpdatedAt && x._id && !idsRemotos.has(x._id) && !cloudRel._temPendente(mod, x._id) &&
+              cloudRel.dentroDaJanela(mod, x)) {
             locais.splice(i, 1); removidos++;
           }
         }

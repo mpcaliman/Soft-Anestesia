@@ -272,6 +272,10 @@ const realtime = {
           ? cloudRel._rowParaAgenda(linha, contexto.organizationId)
           : cloudRel._rowParaRegistro(linha, contexto.organizationId);
       if (!reg || !reg._id) return;
+      /* fora da janela do aparelho (Financeiro antigo): fica só na nuvem — a
+         não ser que já esteja aqui, aberto por quem pediu aquele período */
+      if (typeof cloudRel.dentroDaJanela === 'function' && !cloudRel.dentroDaJanela(mod, reg) &&
+          !realtime._idsLocais(mod).has(reg._id)) { realtime._marcarMudanca(); return; }
       if (realtime._preservarEdicaoAberta(mod, reg, contexto)) {
         realtime._marcarMudanca(); return;
       }
@@ -421,7 +425,31 @@ const realtime = {
     realtime._repintar(tabela === 'encounters' ? 'agenda' : 'anestesia');
   },
 
+  /* ids que este aparelho tem — lidos uma vez por rajada, não por evento */
+  _idsLocais(mod) {
+    const memo = realtime._memoIds || (realtime._memoIds = {});
+    const m = memo[mod];
+    if (m && Date.now() - m.em < 2000) return m.ids;
+    let ids = new Set();
+    try { ids = new Set((store.list(mod) || []).map(x => x && x._id).filter(Boolean)); } catch (e) {}
+    memo[mod] = { em: Date.now(), ids };
+    return ids;
+  },
+  /* Numa rajada (importação, sincronização grande), redesenhar a cada linha
+     que chega trava o aparelho: o primeiro evento redesenha na hora e os
+     seguintes, dentro de 400 ms, viram um redesenho só no fim. */
   _repintar(mod) {
+    const agora = Date.now();
+    const ult = (realtime._ultRepinte || (realtime._ultRepinte = {}))[mod] || 0;
+    realtime._ultRepinte[mod] = agora;
+    if (agora - ult < 400) {
+      const fila = realtime._repinteAdiado || (realtime._repinteAdiado = {});
+      if (!fila[mod]) fila[mod] = setTimeout(() => { fila[mod] = null; realtime._repintarAgora(mod); }, 400);
+      return;
+    }
+    realtime._repintarAgora(mod);
+  },
+  _repintarAgora(mod) {
     try { if (typeof preLanc !== 'undefined') preLanc.renderFila(); } catch (e) {}
     try { if (typeof ui !== 'undefined') ui.repintarNuvemAtual(); } catch (e) {}
     try {
