@@ -4847,7 +4847,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-18a</b><br>
+    v7.1 · build <b id="build-tag">2026-10-18b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -9890,6 +9890,20 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
       </div>
     </section>
 
+    <section class="card collapsed">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-icon">📁</span><h2>Importar acervo de atendimentos<small>Pré-anestésicos e fichas antigos, com o link do PDF original</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <p style="font-size:.84rem;color:var(--text-soft);margin:0 0 10px;line-height:1.6">
+          Lê o <strong>casos_conciliacao.csv</strong> da conciliação do catálogo. Cada atendimento vira um registro só leitura,
+          sem cobrança (o Financeiro já foi importado) e sem tocar no que já existe no sistema.
+        </p>
+        <button type="button" class="btn btn-sm btn-primary" onclick="importAcervo.abrir()">📁 Escolher arquivo</button>
+      </div>
+    </section>
+
     <!-- 🧮 MUTIRÃO — as duas correções do que ficou para trás -->
     <section class="card" id="mutirao-card">
       <div class="card-header" onclick="ui.toggleCard(this)">
@@ -12153,6 +12167,229 @@ const importFin = {
     } catch (e) {
       return { ok: false, erro: String(e && e.message || e), lancamentos: feitos, pacientes: feitosPac };
     }
+  }
+};
+
+/* ============================================================================
+   IMPORTAÇÃO DO ACERVO (atos realizados: pré-anestésicos e fichas)
+   Lê casos_conciliacao.csv da conciliação catálogo × Unimed. Cada caso é um
+   atendimento — com todas as versões do documento — e vira UM registro na
+   Pré-anestésica ou na Ficha de anestesia, marcado como acervo:
+     • só leitura (finalizado), com o link de cada PDF original;
+     • não gera cobrança nem pendência — o Financeiro já veio da conciliação
+       (importFin); aqui fica só a referência ao caso e aos itens da Unimed;
+     • o que já existe no sistema (mesmo tipo, paciente e data) não é tocado:
+       documento existente nunca é sobrescrito nem completado;
+     • importar de novo não duplica (o ID do caso é o identificador).
+============================================================================ */
+const importAcervo = {
+  ehAcervo(r) { return !!(r && r._acervo); },
+  _json(v) { try { const x = JSON.parse(String(v || '')); return Array.isArray(x) ? x : []; } catch (e) { return []; } },
+  _mod(tipo) { return /ficha|anestesia/i.test(tipo) ? 'anestesia' : /pre/i.test(tipo) ? 'pre' : ''; },
+  _chave(mod, nome, data) { return mod + '|' + utils.semAcento(nome) + '|' + (data || ''); },
+  _existentes() {
+    const set = new Set();
+    ['pre', 'anestesia'].forEach(mod => {
+      (store.list(mod) || []).forEach(r => {
+        if (!r) return;
+        const nome = mod === 'anestesia' ? (r.paciente_nome || (r.paciente && r.paciente.nome) || '') : (r.nome || '');
+        const data = mod === 'anestesia' ? (r.data_anestesia || r.data || '') : (r.data || '');
+        set.add(importAcervo._chave(mod, nome, String(data).slice(0, 10)));
+        set.add('id|' + r._id);
+      });
+      /* o que este aparelho arquivou continua existindo */
+      try { (arquivo._indice()[mod] || []).forEach(e => set.add(importAcervo._chave(mod, e.nome, String(e.data || '').slice(0, 10)))); } catch (e) {}
+    });
+    return set;
+  },
+  _registro(row) {
+    const v = k => String(row[k] == null ? '' : row[k]).replace(/^'(?=[=+@-])/, '').trim();
+    const mod = importAcervo._mod(v('tipo_registro'));
+    if (!mod) return { pular: 'tipo desconhecido' };
+    const data = importFin._data(v('data_catalogo'));
+    const nome = utils.nomeProprio(v('paciente_nome'));
+    if (!nome) return { pular: 'sem nome' };
+    if (!data) return { pular: 'sem data' };
+    const caso = v('caso_id');
+    if (!caso) return { pular: 'sem identificador do caso' };
+    const fontes = importAcervo._json(row.fontes).filter(u => /^https:\/\/(drive|docs)\.google\.com\//.test(String(u)));
+    const acervo = {
+      caso: caso, fontes, documentos: importAcervo._json(row.registros), itensUnimed: importAcervo._json(row.itens),
+      situacao: v('situacao'), criterio: v('criterio'), evento: v('evento_id'), competencias: v('competencias'),
+      observacoes: v('observacoes'), importadoEm: new Date().toISOString()
+    };
+    const agora = new Date().toISOString();
+    const base = { _id: 'acv_' + caso.replace(/[^A-Za-z0-9_-]+/g, '_'), _acervo: acervo, _origemTipo: 'acervo',
+      _finalizado: true, _finalizadoEm: agora, _createdAt: agora, _updatedAt: agora };
+    const cir = utils.nomeProprio(v('cirurgiao').replace(/^dr\.?\s+|^dra\.?\s+/i, ''));
+    const conv = v('convenio_catalogo').replace(/\s+/g, ' ').trim();
+    const it = mod === 'pre'
+      ? Object.assign(base, { nome, data, cirurgia: v('procedimento_catalogo'), cirurgiao: cir, hospital: v('hospital_local'),
+          convenio: conv, senha: v('senha_catalogo'), carteirinha: v('carteirinha_catalogo') })
+      : Object.assign(base, { paciente_nome: nome, data_anestesia: data, procedimento: v('procedimento_catalogo'), cirurgiao: cir,
+          local_hospital: v('hospital_local'), paciente_convenio: conv, paciente_senha: v('senha_catalogo'),
+          paciente_carteirinha: v('carteirinha_catalogo') });
+    return { mod, it, nome, data };
+  },
+  analisar(texto) {
+    const linhas = importFin.lerCsv(texto);
+    if (!linhas.length) return { erro: 'Arquivo vazio.' };
+    const cab = linhas[0].map(h => String(h || '').replace(/^﻿/, '').trim());
+    if (cab.indexOf('caso_id') < 0 || cab.indexOf('tipo_registro') < 0 || cab.indexOf('fontes') < 0) {
+      return { erro: 'Este não é o casos_conciliacao.csv (faltam as colunas caso_id, tipo_registro e fontes).' };
+    }
+    const r = { novos: [], jaExistem: 0, pulados: {}, porTipo: {}, porAno: {}, repetidos: 0 };
+    const existentes = importAcervo._existentes();
+    const vistos = new Set();
+    linhas.slice(1).forEach(cel => {
+      if (!cel || cel.every(c => !String(c || '').trim())) return;
+      const row = {}; cab.forEach((h, i) => { row[h] = cel[i]; });
+      const x = importAcervo._registro(row);
+      if (x.pular) { r.pulados[x.pular] = (r.pulados[x.pular] || 0) + 1; return; }
+      const k = importAcervo._chave(x.mod, x.nome, x.data);
+      if (vistos.has(x.it._id) || vistos.has(k)) { r.repetidos++; return; }
+      vistos.add(x.it._id); vistos.add(k);
+      if (existentes.has('id|' + x.it._id) || existentes.has(k)) { r.jaExistem++; return; }
+      r.novos.push(x);
+      const rot = x.mod === 'pre' ? 'Pré-anestésicos' : 'Fichas de anestesia';
+      r.porTipo[rot] = (r.porTipo[rot] || 0) + 1;
+      r.porAno[x.data.slice(0, 4)] = (r.porAno[x.data.slice(0, 4)] || 0) + 1;
+    });
+    return r;
+  },
+  abrir() {
+    modal.open('📁 Importar acervo de atendimentos',
+      '<p style="font-size:.86rem;line-height:1.6">Escolha o arquivo <b>casos_conciliacao.csv</b> da conciliação do catálogo. ' +
+      'Cada atendimento vira um registro de <b>Pré-anestésica</b> ou <b>Ficha de anestesia</b>, só leitura, com o link do PDF original. ' +
+      'Não gera cobrança (o Financeiro já foi importado) e não mexe no que já existe.</p>' +
+      '<input type="file" id="imp-acv-arquivo" accept=".csv,text/csv" style="margin:6px 0 10px">' +
+      '<div id="imp-acv-previa" style="font-size:.86rem"></div>',
+      '<button class="btn btn-primary" id="imp-acv-confirmar" disabled onclick="importAcervo.confirmar()">📁 Importar</button>' +
+      '<button class="btn" onclick="modal.close()">Fechar</button>');
+    const inp = document.getElementById('imp-acv-arquivo');
+    if (inp) inp.addEventListener('change', () => {
+      const f = inp.files && inp.files[0]; if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => importAcervo.mostrarPrevia(String(rd.result || ''));
+      rd.readAsText(f, 'utf-8');
+    });
+  },
+  mostrarPrevia(texto) {
+    const r = importAcervo.analisar(texto);
+    importAcervo._analise = r;
+    const host = document.getElementById('imp-acv-previa');
+    const btn = document.getElementById('imp-acv-confirmar');
+    if (!host) return r;
+    const esc = utils.escapeHTML;
+    if (r.erro) { host.innerHTML = '<p style="color:#b42318">' + esc(r.erro) + '</p>'; if (btn) btn.disabled = true; return r; }
+    const lista = o => Object.keys(o).sort().map(k => '<li>' + esc(k) + ': <b>' + o[k] + '</b></li>').join('');
+    const pul = Object.keys(r.pulados).map(k => esc(k) + ': ' + r.pulados[k]).join(' · ');
+    const pacs = importFin._pacientesNovos(r.novos.map(x => ({ paciente: x.nome, convenio: x.it.convenio || x.it.paciente_convenio || '',
+      _carteirinha: x.it.carteirinha || x.it.paciente_carteirinha || '' })));
+    host.innerHTML = '<p><b>' + r.novos.length + '</b> atendimentos para importar.</p>' +
+      '<ul style="margin:0 0 6px 18px">' + lista(r.porTipo) + '</ul><ul style="margin:0 0 6px 18px">' + lista(r.porAno) + '</ul>' +
+      '<p>🔁 Já existem no sistema (mesmo tipo, paciente e data — não são tocados): <b>' + r.jaExistem + '</b><br>' +
+      '👤 Pacientes novos no cadastro: <b>' + pacs.length + '</b>' +
+      (r.repetidos ? '<br>Repetidos no arquivo: <b>' + r.repetidos + '</b>' : '') +
+      (pul ? '<br>Fora da importação: ' + pul : '') + '</p>' +
+      '<p style="font-size:.8rem;color:var(--text-mute)">Nenhum lançamento financeiro é criado. O envio é em lotes — deixe esta aba aberta.</p>' +
+      '<div id="imp-acv-progresso" style="font-weight:600"></div>';
+    if (btn) btn.disabled = !r.novos.length;
+    return r;
+  },
+  async confirmar() {
+    const r = importAcervo._analise;
+    if (!r || !r.novos || importAcervo._rodando) return null;
+    const btn = document.getElementById('imp-acv-confirmar'); if (btn) btn.disabled = true;
+    const prog = m => { const el = document.getElementById('imp-acv-progresso'); if (el) el.textContent = m; };
+    importAcervo._rodando = true;
+    try {
+      const res = await importAcervo.enviar(r.novos, prog);
+      prog(res.ok ? '✅ ' + res.registros + ' atendimentos e ' + res.pacientes + ' pacientes importados.'
+        : '⚠️ Parou em ' + res.registros + ': ' + res.erro + '. Importe de novo o mesmo arquivo — o que já subiu não duplica.');
+      return res;
+    } finally { importAcervo._rodando = false; }
+  },
+  async enviar(novos, prog) {
+    prog = prog || (() => {});
+    const contexto = cloudRel._capturarContexto();
+    if (!contexto) return { ok: false, erro: 'entre na clínica antes de importar', registros: 0, pacientes: 0 };
+    if (!(await cloud._garantirToken())) return { ok: false, erro: 'sessão da nuvem vencida — entre de novo', registros: 0, pacientes: 0 };
+    const org = contexto.organizationId;
+    const idn = window.SoftEncounterIdentity;
+    const chavePac = nome => idn.legacyPatientKey(idn.fromRecord({ nome }));
+    let feitosPac = 0, feitos = 0;
+    try {
+      const pacs = importFin._pacientesNovos(novos.map(x => ({ paciente: x.nome, convenio: x.it.convenio || x.it.paciente_convenio || '',
+        _carteirinha: x.it.carteirinha || x.it.paciente_carteirinha || '' })));
+      for (const lote of migracaoFase4._chunk(pacs, importFin.LOTE)) {
+        if (!cloudRel._contextoValido(contexto, org)) throw new Error('a clínica mudou nesta aba');
+        await migracaoFase4._upsert('patients', lote.map(p => ({
+          organization_id: org, legacy_id: chavePac(p.nome), nome: p.nome, convenio: p.plano || null,
+          data: Object.assign({}, p, { origem: 'acervo' })
+        })).filter(x => x.legacy_id), false);
+        feitosPac += lote.length; prog('Pacientes: ' + feitosPac + ' de ' + pacs.length + '…');
+        await importFin._pausa();
+      }
+      if (pacs.length) {
+        const lst = store.list('pacientes') || [];
+        const ja = new Set(lst.map(p => utils.semAcento(p.nome)));
+        pacs.forEach(p => { if (!ja.has(utils.semAcento(p.nome))) lst.push(Object.assign({}, p, { _relOrg: org })); });
+        store.setList('pacientes', lst);
+      }
+      const idPorChave = new Map();
+      const chaves = Array.from(new Set(novos.map(x => chavePac(x.nome)).filter(Boolean)));
+      for (const lote of migracaoFase4._chunk(chaves, 100)) {
+        (await migracaoFase4._idsPorLegacy('patients', org, lote)).forEach(x => idPorChave.set(x.legacy_id, x.id));
+      }
+      for (const mod of ['pre', 'anestesia']) {
+        const doMod = novos.filter(x => x.mod === mod);
+        const tabela = cloudRel.MODOS[mod].tabela;
+        for (const lote of migracaoFase4._chunk(doMod, importFin.LOTE)) {
+          if (!cloudRel._contextoValido(contexto, org)) throw new Error('a clínica mudou nesta aba');
+          await migracaoFase4._upsert(tabela, lote.map(x => ({
+            organization_id: org, legacy_id: x.it._id, patient_id: idPorChave.get(chavePac(x.nome)) || null,
+            encounter_id: null, status: 'finalized', finalized_at: x.it._finalizadoEm, data: x.it
+          })), false);
+          feitos += lote.length;
+          const lst = store.list(mod) || [];
+          const ja = new Set(lst.map(r => r && r._id));
+          lote.forEach(x => { if (!ja.has(x.it._id)) lst.push(Object.assign({}, x.it, { _relOrg: org })); });
+          store.setList(mod, lst);
+          prog('Atendimentos: ' + feitos + ' de ' + novos.length + '…');
+          await importFin._pausa();
+        }
+      }
+      return { ok: true, registros: feitos, pacientes: feitosPac };
+    } catch (e) {
+      return { ok: false, erro: String(e && e.message || e), registros: feitos, pacientes: feitosPac };
+    }
+  },
+  /* Ao abrir um registro do acervo: a faixa diz o que ele é e leva aos PDFs */
+  mostrarFaixa(mod, item) {
+    if (mod !== 'pre' && mod !== 'anestesia') return;
+    const form = document.getElementById('form-' + mod);
+    if (!form) return;
+    let faixa = form.querySelector('.acervo-faixa');
+    if (!importAcervo.ehAcervo(item)) { if (faixa) faixa.remove(); return; }
+    if (!faixa) {
+      faixa = document.createElement('div'); faixa.className = 'acervo-faixa';
+      faixa.style.cssText = 'background:#eef4fb;border:1px solid #b9d0ea;color:#1d3f66;border-radius:8px;padding:10px 12px;margin:0 0 12px;font-size:.86rem;line-height:1.5';
+      form.insertBefore(faixa, form.firstChild);
+    }
+    const a = item._acervo || {};
+    const links = (a.fontes || []).filter(u => /^https:\/\/(drive|docs)\.google\.com\//.test(String(u)));
+    faixa.textContent = '';
+    const t = document.createElement('b'); t.textContent = '📁 Acervo importado — só leitura. ';
+    faixa.appendChild(t);
+    faixa.appendChild(document.createTextNode('O documento original é o PDF' + (links.length > 1 ? 's' : '') +
+      ' abaixo; aqui ficam só a identificação e o vínculo da conciliação (' + (a.situacao || 'sem situação') + ').'));
+    links.forEach((u, i) => {
+      const br = document.createElement('br'); faixa.appendChild(br);
+      const l = document.createElement('a'); l.href = u; l.target = '_blank'; l.rel = 'noopener noreferrer';
+      l.textContent = '📄 Abrir documento original' + (links.length > 1 ? ' (versão ' + (i + 1) + ')' : '');
+      faixa.appendChild(l);
+    });
   }
 };
 
@@ -17040,6 +17277,7 @@ const pre = {
     return (v && pre.DESFECHOS[v]) ? v : 'liberado';
   },
   ehPendente(rec) {
+    if (rec && rec._acervo) return false;   /* acervo importado: o desfecho está no PDF original */
     const d = pre.DESFECHOS[pre.desfechoDe(rec)];
     return !!(d && d.pend);
   },
@@ -47057,6 +47295,8 @@ const financeiro = {
       (store.list(mod) || []).forEach(doc => {
         if (!doc || !doc._id || !doc._finalizado) return;
         if (comLancamento.has(doc._id)) return;
+        /* acervo importado: a cobrança já veio da conciliação */
+        if (doc._acervo) return;
         /* decisão explícita de não cobrar é decisão, não esquecimento */
         try { if (fin.finalizacao.decisaoDe(doc) === false) return; } catch (e) {}
         let cab = {};

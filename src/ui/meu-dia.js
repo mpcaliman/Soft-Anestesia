@@ -248,9 +248,11 @@ const meuDia = {
          da cobrança pode não ter chegado a abrir (havia outra janela por cima)
          ou ter sido fechada sem escolha — e aí o atendimento fica sem cobrança
          sem ninguém ficar sabendo. Agora o chip diz isso e GERA num clique. */
-      const fonte = (c.ficha && c.ficha._finalizado) ? ['anestesia', c.ficha]
-                  : (c.pre && c.pre._finalizado) ? ['pre', c.pre]
-                  : (c.consulta && c.consulta._finalizado) ? ['consulta', c.consulta] : null;
+      /* acervo importado não pede cobrança: ela já veio da conciliação */
+      const fin_ = x => x && x._finalizado && !x._acervo;
+      const fonte = fin_(c.ficha) ? ['anestesia', c.ficha]
+                  : fin_(c.pre) ? ['pre', c.pre]
+                  : fin_(c.consulta) ? ['consulta', c.consulta] : null;
       if (fonte) {
         return '<button type="button" class="md-chip md-falta" onclick="meuDia.gerarFinanceiro(' + utils.jsArg(fonte[0]) + ',' + utils.jsArg(fonte[1]._id) + ')" ' +
           'title="Finalizado, mas sem lançamento financeiro. Clique para abrir a janela da cobrança deste atendimento.">💰 gerar financeiro</button>';

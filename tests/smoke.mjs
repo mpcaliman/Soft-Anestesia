@@ -11298,6 +11298,80 @@ await test('Financeiro: importa a conciliação com as regras combinadas, em lot
   await page.close();
 });
 
+/* Acervo de atendimentos (pré e ficha antigos): um registro por caso, só
+   leitura, sem cobrança, sem tocar no que existe, sem duplicar. */
+await test('Acervo: importa atendimentos antigos sem duplicar, sem cobrança e com o PDF original', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    await __smokePrepareQueue('org-1', 'u1');
+    cloudRel.disponivel = () => true;
+    sincronia.agora = () => {};
+    importFin.PAUSA_MS = 0;
+    const out = {};
+    const cab = ['caso_id','paciente_nome','tipo_registro','data_catalogo','datas_catalogo','procedimento_catalogo','cirurgiao',
+      'convenio_catalogo','senha_catalogo','carteirinha_catalogo','hospital_local','quantidade_documentos','registros','situacao',
+      'criterio','evento_id','itens','data_unimed','nome_unimed','senha_unimed','carteirinha_unimed','codigos_unimed','descricao_unimed',
+      'competencias','pagamentos_previstos','pago','processado','glosa','motivos_glosa','observacoes','candidatos','fontes'];
+    const q = v => { v = v == null ? '' : String(v); return /[";\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    const linha = o => cab.map(h => q(o[h])).join(';');
+    const rows = [
+      { caso_id: 'CASO_A', paciente_nome: 'ANA PRE ANTIGA', tipo_registro: 'pre_anestesico', data_catalogo: '2025-12-18',
+        procedimento_catalogo: 'Postectomia', cirurgiao: 'Dr Leonardo Salim', convenio_catalogo: 'Unimed', hospital_local: 'Hospital Ramos',
+        quantidade_documentos: '2', registros: '["DOC_1","DOC_2"]', situacao: 'Vínculo confirmado', itens: '["UNI-202601-00243-001"]',
+        fontes: '["https://drive.google.com/file/d/1/view","https://drive.google.com/file/d/2/view","javascript:alert(1)"]' },
+      { caso_id: 'CASO_B', paciente_nome: 'Bruno Ficha', tipo_registro: 'ficha_anestesia', data_catalogo: '2026-03-02',
+        procedimento_catalogo: 'Colecistectomia', cirurgiao: 'Dr Marcelo Martins', convenio_catalogo: 'Unimed', senha_catalogo: '0071234',
+        situacao: 'Vínculo a conferir', fontes: '["https://drive.google.com/file/d/3/view"]' },
+      { caso_id: 'CASO_C', paciente_nome: 'Carla Existente', tipo_registro: 'pre_anestesico', data_catalogo: '2026-02-10',
+        fontes: '["https://drive.google.com/file/d/4/view"]' },
+      { caso_id: 'CASO_D', paciente_nome: 'Davi Sem Data', tipo_registro: 'pre_anestesico', data_catalogo: '' },
+      { caso_id: 'CASO_A', paciente_nome: 'ANA PRE ANTIGA', tipo_registro: 'pre_anestesico', data_catalogo: '2025-12-18' }
+    ];
+    const csv = '﻿' + cab.join(';') + '\r\n' + rows.map(linha).join('\r\n') + '\r\n';
+    store.setList('pre', [{ _id: 'pre-sis', nome: 'Carla Existente', data: '2026-02-10', _finalizado: true, cirurgia: 'Original' }]);
+    store.setList('anestesia', []);
+    store.setList('financeiro', []);
+    const a = importAcervo.analisar(csv);
+    out.contagem = a.novos.length === 2 && a.jaExistem === 1 && a.pulados['sem data'] === 1 && a.repetidos === 1;
+    const pa = a.novos.find(x => x.mod === 'pre'), fa = a.novos.find(x => x.mod === 'anestesia');
+    out.mapeou = pa.it.nome === 'Ana Pre Antiga' && pa.it.data === '2025-12-18' && pa.it.cirurgia === 'Postectomia' &&
+      pa.it.cirurgiao === 'Leonardo Salim' && pa.it._finalizado === true && pa.it._acervo.fontes.length === 2 &&
+      fa.it.paciente_nome === 'Bruno Ficha' && fa.it.data_anestesia === '2026-03-02' && fa.it.paciente_senha === '0071234';
+    const posts = [];
+    const fetchOriginal = window.fetch;
+    window.fetch = async (url, opts) => {
+      const u = String(url);
+      if (opts && opts.method === 'POST' && /\/rest\/v1\/\w+\?on_conflict/.test(u)) {
+        posts.push({ tabela: u.split('/rest/v1/')[1].split('?')[0], linhas: JSON.parse(opts.body) });
+        return { ok: true, status: 201, json: async () => [], text: async () => '' };
+      }
+      if (/\/rest\/v1\/patients\?/.test(u)) return { ok: true, status: 200, json: async () => [] };
+      return fetchOriginal(url, opts);
+    };
+    let res;
+    try { res = await importAcervo.enviar(a.novos); } finally { window.fetch = fetchOriginal; }
+    const t = n => posts.filter(p => p.tabela === n).reduce((k, p) => k + p.linhas.length, 0);
+    out.subiu = res.ok && t('preanesthetic_assessments') === 1 && t('anesthesia_records') === 1 && t('finance_entries') === 0 &&
+      posts.find(p => p.tabela === 'preanesthetic_assessments').linhas[0].status === 'finalized';
+    out.existenteIntacto = store.getById('pre', 'pre-sis').cirurgia === 'Original' && store.list('pre').length === 2;
+    out.semCobranca = !financeiro.semLancamento().some(x => /^acv_/.test(x.id)) && store.list('financeiro').length === 0;
+    out.semPendencia = pre.ehPendente(store.getById('pre', pa.it._id)) === false;
+    /* de novo: nada duplica */
+    const b = importAcervo.analisar(csv);
+    out.idempotente = b.novos.length === 0 && b.jaExistem === 3;
+    /* abrir mostra a faixa com os PDFs (só links do Google) */
+    ui.atualizarDocStatus('pre', store.getById('pre', pa.it._id));
+    const faixa = document.querySelector('#form-pre .acervo-faixa');
+    const hrefs = faixa ? Array.from(faixa.querySelectorAll('a')).map(x => x.getAttribute('href')) : [];
+    out.faixa = !!faixa && hrefs.length === 2 && hrefs.every(h => /^https:\/\/drive\.google\.com\//.test(h));
+    ui.atualizarDocStatus('pre', null);
+    out.faixaSome = !document.querySelector('#form-pre .acervo-faixa');
+    return out;
+  });
+  for (const [k, v] of Object.entries(r)) assert(v, 'falhou: ' + k + ' → ' + JSON.stringify(r));
+  await page.close();
+});
+
 await test('Sync: adendo preso sai com a prova da nuvem, e conflitos seguem a última edição', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
