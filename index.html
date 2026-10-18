@@ -4847,7 +4847,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-18b</b><br>
+    v7.1 · build <b id="build-tag">2026-10-18c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -44502,9 +44502,47 @@ const pacientes = {
     return { grupos: grupos.length, removidos };
   },
 
+  /* UM PACIENTE, UM CADASTRO.
+     Ao digitar o nome de um paciente NOVO, aparecem os já cadastrados com
+     nome parecido (sem acento, ç ou maiúscula fazer diferença). Escolher um
+     abre o cadastro existente em vez de criar o segundo. */
+  _parecidos(nome, exceto) {
+    const q = utils.semAcento(nome);
+    if (q.length < 2) return [];
+    return (pacientes.list() || []).filter(p => p && p._id !== exceto && p.nome && utils.contem(p.nome, q));
+  },
+  _mesmoNome(nome, exceto) {
+    const q = utils.semAcento(nome);
+    return q ? (pacientes.list() || []).find(p => p && p._id !== exceto && utils.semAcento(p.nome) === q) || null : null;
+  },
+  _detalhe(p) {
+    const meta = [];
+    if (p.nasc || p.nascimento) meta.push('nasc. ' + utils.formatarData(p.nasc || p.nascimento));
+    if (utils.soDigitos(p.cpf).length === 11) meta.push('CPF •••' + utils.soDigitos(p.cpf).slice(-4));
+    if (p.plano || p.convenio) meta.push(p.plano || p.convenio);
+    return meta.join(' · ');
+  },
+  ligarSugestaoNome(input, aoEscolher) {
+    if (!input || input.dataset.sugestaoPaciente) return;
+    input.dataset.sugestaoPaciente = '1';
+    autocomplete.attach(input, () => {
+      const form = input.closest('form');
+      const idAtual = form ? ((form.querySelector('[name="id"]') || {}).value || '') : '';
+      if (idAtual) return [];               /* editando um cadastro: não sugere outro */
+      return pacientes._parecidos(input.value).slice(0, 10).map(p => ({
+        value: p._id, label: p.nome, meta: '✓ já cadastrado' + (pacientes._detalhe(p) ? ' · ' + pacientes._detalhe(p) : ''), data: p
+      }));
+    }, it => aoEscolher(it.data), null);
+  },
   editar(id, onSaveCb = null) {
     try {
       const card = ui.painel.abrir(pacientes.cardId, () => pacientes.cancelar());
+      try {
+        pacientes.ligarSugestaoNome(document.querySelector('#' + pacientes.formId + ' [name="nome"]'), p => {
+          toast('👤 Este paciente já está cadastrado — abri o cadastro existente.', 'info');
+          pacientes.editar(p._id, pacientes._onSaveCallback);
+        });
+      } catch (e) {}
       if (!card) { toast('Erro: card de paciente não encontrado', 'error'); return; }
       utils.clearForm(pacientes.formId);
       pacientes._onSaveCallback = onSaveCb;
@@ -44590,6 +44628,17 @@ const pacientes = {
       form.querySelectorAll('.field.invalid').forEach(fi => fi.classList.remove('invalid'));
 
       utils.padronizarRegistro(data);
+
+      /* mesmo nome já cadastrado: abrir o existente, ou criar mesmo assim (homônimo) */
+      if (!data._id) {
+        const igual = pacientes._mesmoNome(data.nome);
+        if (igual && confirm('Já existe um paciente cadastrado com este nome: "' + igual.nome + '"' +
+            (pacientes._detalhe(igual) ? ' (' + pacientes._detalhe(igual) + ')' : '') +
+            '.\n\nOK = abrir o cadastro existente\nCancelar = criar outro mesmo assim (homônimo)')) {
+          pacientes.editar(igual._id, pacientes._onSaveCallback);
+          return;
+        }
+      }
 
       /* CPF — verifica duplicidade pelos NÚMEROS: com ou sem ponto e traço é o mesmo */
       if (utils.soDigitos(data.cpf)) {
@@ -44978,10 +45027,21 @@ const pacientes = {
     `;
     pacientes._modalCallback = onSave;
     modal.open('+ Novo paciente (rápido)', html, footer);
+    try {
+      const f0 = document.getElementById('form-novo-pac-modal');
+      pacientes.ligarSugestaoNome(f0 && f0.querySelector('[name="nome"]'), p => pacientes._usarExistenteNoModal(p));
+    } catch (e) {}
     setTimeout(() => {
       const f = document.getElementById('form-novo-pac-modal');
       if (f) f.querySelector('[name="nome"]').focus();
     }, 100);
+  },
+  /* no cadastro rápido, escolher o existente é usá-lo — nada novo é criado */
+  _usarExistenteNoModal(p) {
+    try { modal.close(); } catch (e) {}
+    toast('👤 Usando o cadastro existente de ' + p.nome, 'info');
+    const cb = pacientes._modalCallback; pacientes._modalCallback = null;
+    if (cb) { try { cb(p); } catch (e) { console.error('Erro no callback modal:', e); } }
   },
   _salvarFromModal() {
     try {
@@ -44994,6 +45054,13 @@ const pacientes = {
       const nome = (data.nome || '').trim();
       if (!nome) { toast('Informe o nome do paciente', 'warn'); return; }
       utils.padronizarRegistro(data);
+      const igual = pacientes._mesmoNome(data.nome);
+      if (igual && confirm('Já existe um paciente cadastrado com este nome: "' + igual.nome + '"' +
+          (pacientes._detalhe(igual) ? ' (' + pacientes._detalhe(igual) + ')' : '') +
+          '.\n\nOK = usar o cadastro existente\nCancelar = criar outro mesmo assim (homônimo)')) {
+        pacientes._usarExistenteNoModal(igual);
+        return;
+      }
       if (utils.soDigitos(data.cpf)) {
         const existente = store.list('pacientes').find(p => utils.soDigitos(p.cpf) === utils.soDigitos(data.cpf));
         if (existente) {

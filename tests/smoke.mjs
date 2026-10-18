@@ -11372,6 +11372,56 @@ await test('Acervo: importa atendimentos antigos sem duplicar, sem cobrança e c
   await page.close();
 });
 
+/* Cadastro de paciente: digitar o nome sugere quem já existe, e salvar um
+   nome repetido pergunta antes de criar o segundo cadastro. */
+await test('Pacientes: o nome sugere quem já está cadastrado e não cria o segundo cadastro', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('pacientes', [{ _id: 'p1', nome: 'João da Conceição', nasc: '1980-01-02', plano: 'Unimed', cpf: '52998224725' }]);
+    ui.navegar('pacientes');
+    pacientes.editar(null);
+    const form = document.getElementById(pacientes.formId);
+    const nome = form.querySelector('[name="nome"]');
+    nome.value = 'joao conc';
+    nome.dispatchEvent(new Event('input', { bubbles: true }));
+    const item = nome.closest('.autocomplete-wrap').querySelector('.autocomplete-item');
+    out.sugere = !!item && /João da Conceição/.test(item.textContent) && /já cadastrado/.test(item.textContent) && /•••4725/.test(item.textContent);
+    item.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    out.abriuExistente = form.querySelector('[name="id"]').value === 'p1' && form.querySelector('[name="nome"]').value === 'João da Conceição';
+    /* editando um cadastro, não sugere outro */
+    nome.value = 'joao'; nome.dispatchEvent(new Event('input', { bubbles: true }));
+    out.naoSugereEditando = !nome.closest('.autocomplete-wrap').querySelector('.autocomplete-item:not(.create-new)');
+    /* salvar o mesmo nome num cadastro NOVO pergunta; OK abre o existente */
+    pacientes.editar(null);
+    form.querySelector('[name="nome"]').value = 'JOAO DA CONCEICAO';
+    let perguntou = '';
+    window.confirm = m => { perguntou = m; return true; };
+    pacientes.salvar();
+    out.perguntaEAbre = /Já existe um paciente/.test(perguntou) && store.list('pacientes').length === 1 &&
+      form.querySelector('[name="id"]').value === 'p1';
+    /* Cancelar = homônimo de verdade: cria */
+    pacientes.editar(null);
+    form.querySelector('[name="nome"]').value = 'João da Conceição';
+    window.confirm = () => false;
+    pacientes.salvar();
+    out.homonimoCria = store.list('pacientes').length === 2;
+    /* cadastro rápido: escolher o existente usa o existente */
+    store.setList('pacientes', [{ _id: 'p1', nome: 'João da Conceição' }]);
+    let recebido = null;
+    pacientes.modalNovoPaciente({ nome: '' }, p => { recebido = p; });
+    const inp = document.querySelector('#form-novo-pac-modal [name="nome"]');
+    inp.value = 'conceicao'; inp.dispatchEvent(new Event('input', { bubbles: true }));
+    const it2 = inp.closest('.autocomplete-wrap').querySelector('.autocomplete-item');
+    it2.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    out.modalUsaExistente = !!recebido && recebido._id === 'p1' && store.list('pacientes').length === 1;
+    try { modal.close(); } catch (e) {}
+    return out;
+  });
+  for (const [k, v] of Object.entries(r)) assert(v, 'falhou: ' + k + ' → ' + JSON.stringify(r));
+  await page.close();
+});
+
 await test('Sync: adendo preso sai com a prova da nuvem, e conflitos seguem a última edição', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
