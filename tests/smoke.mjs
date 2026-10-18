@@ -1706,8 +1706,9 @@ await test('Financeiro: Novo registro abre a janela do fechamento, sem campos re
       && reg.senha === 'AUT123' && reg.senha_data === utils.hojeISO() && reg.convenio === 'Unimed'
       && reg.data_proc === utils.hojeISO());
     out.codigosComGrau = !!(reg && reg.codigos.length === 2 && reg.codigos[0].grau === '100' && reg.codigos[1].grau === '50');
-    /* 500 + 150 = 650; ×2 apartamento; +30% urgência */
-    out.contaCerta = !!reg && Math.abs(Number(reg.valor_previsto) - 650 * 2 * 1.3) < 0.05
+    /* 500 + 150 = 650; ×2 apartamento; +30% urgência — × a majoração do dia:
+       a data da janela é hoje, e sábado, domingo ou feriado têm a sua */
+    out.contaCerta = !!reg && Math.abs(Number(reg.valor_previsto) - 650 * 2 * 1.3 * (Number(reg.fator_majoracao) || 1)) < 0.05
       && Number(reg.fator_acomodacao) === 2 && reg.acomodacao === 'apartamento';
     out.adicionaisDeduzidos = !!(reg && reg._adicionais && ['apartamento', 'urgencia', 'multiplos_proc']
       .every(k => reg._adicionais.itens.indexOf(k) >= 0));
