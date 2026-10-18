@@ -10512,7 +10512,10 @@ const utils = {
   /* "joao" acha "João", "conceicao" acha "Conceição", maiúscula não importa */
   contem(texto, busca) {
     const b = utils.semAcento(busca);
-    return !b || utils.semAcento(texto).indexOf(b) >= 0;
+    if (!b) return true;
+    const t = utils.semAcento(texto);
+    /* cada palavra vale em qualquer parte: "joao conc" acha "João da Conceição" */
+    return t.indexOf(b) >= 0 || b.split(' ').every(w => t.indexOf(w) >= 0);
   },
   soDigitos(v) { return String(v == null ? '' : v).replace(/\D+/g, ''); },
   /* Variações que só diferem em maiúscula, acento ou espaço viram um nome só;
@@ -44509,7 +44512,13 @@ const pacientes = {
   _parecidos(nome, exceto) {
     const q = utils.semAcento(nome);
     if (q.length < 2) return [];
-    return (pacientes.list() || []).filter(p => p && p._id !== exceto && p.nome && utils.contem(p.nome, q));
+    /* cada palavra digitada vale em qualquer parte do nome: "joao conc" acha "João da Conceição" */
+    const partes = q.split(' ').filter(Boolean);
+    return (pacientes.list() || []).filter(p => {
+      if (!p || p._id === exceto || !p.nome) return false;
+      const n = utils.semAcento(p.nome);
+      return partes.every(w => n.indexOf(w) >= 0);
+    });
   },
   _mesmoNome(nome, exceto) {
     const q = utils.semAcento(nome);

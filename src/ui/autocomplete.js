@@ -12,7 +12,8 @@ const autocomplete = {
     if (typeof utils !== 'undefined' && typeof utils[nome] === 'function') return utils[nome](...a);
     const plano = x => String(x == null ? '' : x).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
     if (nome === 'semAcento') return plano(a[0]);
-    if (nome === 'contem') return !plano(a[1]) || plano(a[0]).indexOf(plano(a[1])) >= 0;
+    if (nome === 'contem') return !plano(a[1]) || plano(a[0]).indexOf(plano(a[1])) >= 0 ||
+      plano(a[1]).split(' ').every(w => plano(a[0]).indexOf(w) >= 0);
     if (nome === 'soDigitos') return String(a[0] == null ? '' : a[0]).replace(/\D+/g, '');
     if (nome === 'grafiasUnicas') return Array.from(new Set((a[0] || []).map(v => String(v == null ? '' : v).trim()).filter(Boolean)));
     return a[0];
