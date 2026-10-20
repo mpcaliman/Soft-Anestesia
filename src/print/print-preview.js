@@ -98,6 +98,82 @@ const printPreview = {
       : '';
     return selo + alerta;
   },
+  /* A IMAGEM DA ASSINATURA SEMPRE SAI.
+     O registro pode trazer só a referência local da imagem ("blob:…", de
+     outro aparelho ou já limpa daqui) ou um quadro em branco gravado antes
+     do carimbo carregar. Nesses casos vale o carimbo cadastrado de quem assinou. */
+  _srcAssinatura(url, nome) {
+    let u = typeof url === 'string' ? url : '';
+    if (u.indexOf('blob:') === 0) {
+      try { u = (store._blobs() || {})[u] || ''; } catch (e) { u = ''; }
+    }
+    const valida = /^data:image\//.test(u) && u.length > 3000;
+    if (valida) return u;
+    let carimbo = '';
+    if (nome) { try { const p = utils.getCarimboDoProfissional(nome); carimbo = (p && p.carimbo) || ''; } catch (e) {} }
+    return carimbo || (/^data:image\//.test(u) ? u : '');
+  },
+  /* SHA-256 DA CONFERÊNCIA NA IMPRESSÃO.
+     Documento sem a impressão digital gravada no carimbo (assinado antes do
+     recurso, ou cuja imagem se perdeu) sai com um SHA-256 calculado agora,
+     do conteúdo impresso e da imagem do carimbo. O rótulo diz que é da
+     impressão: não se apresenta como prova do momento da assinatura. */
+  _seloImpressao(d, img) {
+    try {
+      const canon = printPreview._canonImpressao(d);
+      const hash = printPreview._sha256Hex(canon + '|carimbo:' + printPreview._sha256Hex(String(img || '')));
+      const quando = new Date().toLocaleString('pt-BR');
+      return `<div class="pp-hash-carimbo" style="margin-top:3px;font-size:6.5pt;color:#555;line-height:1.3;text-align:center;word-break:break-all">` +
+        `Carimbo cadastrado · conferência na impressão · ${utils.escapeHTML(quando)}<br>SHA-256: <span style="font-family:monospace">${hash}</span></div>`;
+    } catch (e) { return ''; }
+  },
+  _canonImpressao(d) {
+    const limpo = v => {
+      if (Array.isArray(v)) return v.map(limpo);
+      if (v && typeof v === 'object') {
+        const o = {};
+        Object.keys(v).sort().forEach(k => {
+          if (k.charAt(0) === '_' || /^(assinatura|signature|data_assinatura)/i.test(k)) return;
+          o[k] = limpo(v[k]);
+        });
+        return o;
+      }
+      return v;
+    };
+    return JSON.stringify(limpo(d || {}));
+  },
+  _sha256Hex(str) {
+    const bytes = unescape(encodeURIComponent(String(str)));
+    const K = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+      0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+      0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+      0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+    const H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+    const n = bytes.length, total = ((n + 9 + 63) >> 6) << 6;
+    const m = new Uint8Array(total);
+    for (let i = 0; i < n; i++) m[i] = bytes.charCodeAt(i);
+    m[n] = 0x80;
+    const bits = n * 8;
+    m[total - 4] = (bits >>> 24) & 255; m[total - 3] = (bits >>> 16) & 255; m[total - 2] = (bits >>> 8) & 255; m[total - 1] = bits & 255;
+    m[total - 5] = Math.floor(bits / 4294967296) & 255;
+    const w = new Uint32Array(64), r = (x, y) => (x >>> y) | (x << (32 - y));
+    for (let o = 0; o < total; o += 64) {
+      for (let i = 0; i < 16; i++) w[i] = (m[o + i * 4] << 24) | (m[o + i * 4 + 1] << 16) | (m[o + i * 4 + 2] << 8) | m[o + i * 4 + 3];
+      for (let i = 16; i < 64; i++) {
+        const s0 = r(w[i - 15], 7) ^ r(w[i - 15], 18) ^ (w[i - 15] >>> 3), s1 = r(w[i - 2], 17) ^ r(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+        w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+      }
+      let [a, b, c, d, e, f, g, h] = H;
+      for (let i = 0; i < 64; i++) {
+        const t1 = (h + (r(e, 6) ^ r(e, 11) ^ r(e, 25)) + ((e & f) ^ (~e & g)) + K[i] + w[i]) | 0;
+        const t2 = ((r(a, 2) ^ r(a, 13) ^ r(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+        h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+      }
+      H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+      H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+    }
+    return H.map(x => (x >>> 0).toString(16).padStart(8, '0')).join('');
+  },
   _desfechoPre(v) {
     if (!v) return '';
     try { const x = (pre.DESFECHOS || {})[v]; return (x && x.rot) || String(v); } catch (e) { return String(v); }
@@ -1357,15 +1433,12 @@ ${TAG_CLOSE_HTML}`;
        Caso contrário, faz fallback para busca do carimbo pelo nome do profissional. */
     let imgHTML = '';
     let dataAssin = '';
-    if (dadosForm && dadosForm.assinatura_dataurl) {
-      imgHTML = `<img src="${dadosForm.assinatura_dataurl}" alt="">`;
-      dataAssin = dadosForm.data_assinatura || '';
-    } else if (nomeProf) {
-      const p = utils.getCarimboDoProfissional(nomeProf);
-      if (p && p.carimbo) imgHTML = `<img src="${p.carimbo}" alt="">`;
-    }
+    const src = printPreview._srcAssinatura(dadosForm && dadosForm.assinatura_dataurl, nomeProf);
+    if (src) imgHTML = `<img src="${src}" alt="">`;
+    if (dadosForm && dadosForm.assinatura_dataurl) dataAssin = dadosForm.data_assinatura || '';
+    let selo = dadosForm ? printPreview._icpSelo(dadosForm.assinatura_meta) : '';
+    if (!selo && dadosForm && dadosForm._finalizado && src) selo = printPreview._seloImpressao(dadosForm, src);
     const linha = (nomeProf || '_____________________________') + (registro ? '\n' + registro : '');
-    const selo = dadosForm ? printPreview._icpSelo(dadosForm.assinatura_meta) : '';
     return `
       <div class="pp-signature-area">
         <div class="pp-signature pp-signature-prof">
@@ -2326,13 +2399,8 @@ ${TAG_CLOSE_HTML}`;
     if (!a) return '';
     const renderUm = (nome, crm, dataHora, dataurl, meta) => {
       /* Se não tem dataurl, busca carimbo cadastrado pelo nome */
-      let imgHTML = '';
-      if (dataurl) {
-        imgHTML = `<img src="${dataurl}" alt="">`;
-      } else if (nome) {
-        const p = utils.getCarimboDoProfissional(nome);
-        if (p && p.carimbo) imgHTML = `<img src="${p.carimbo}" alt="">`;
-      }
+      const src = printPreview._srcAssinatura(dataurl, nome);
+      const imgHTML = src ? `<img src="${src}" alt="">` : '';
       const linhaNome = nome || '_____________________________';
       const linhaCrm = crm ? printPreview._fmt('rotuloCrm', crm) : '';
       return `
@@ -2500,6 +2568,7 @@ ${TAG_CLOSE_HTML}`;
 
   /* Assinatura desenhada (canvas) para Termo/Prescrição */
   _assinaturaDesenhada(dataUrl, linhaNome, linhaRegistro, papel) {
+    dataUrl = papel === 'prof' ? printPreview._srcAssinatura(dataUrl, linhaNome) : printPreview._srcAssinatura(dataUrl, '');
     const img = dataUrl ? `<img src="${dataUrl}" alt="" style="display:block;max-width:200px;max-height:60px;width:auto;height:auto;margin:0 auto 2px">` : '';
     const nome = linhaNome || '_____________________________';
     if (papel === 'prof' && linhaRegistro) { try { linhaRegistro = printPreview._fmt('rotuloCrm', linhaRegistro); } catch (e) {} }
