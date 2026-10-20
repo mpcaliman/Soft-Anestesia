@@ -4847,7 +4847,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-18c</b><br>
+    v7.1 · build <b id="build-tag">2026-10-20a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -23378,6 +23378,27 @@ const adendos = (() => {
   },
   vigente(mod, rec) {
     return rec && rec._finalizado && adendos.MODS[mod] ? adendos.estadoRetificacoes(rec, mod).vigente : rec;
+  },
+  /* O QUE SAI NO PAPEL É A ÚLTIMA EDIÇÃO.
+     A versão vigente só incorpora as retificações que a nuvem já confirmou.
+     Uma correção ainda sem recibo, ou que ficou "em conflito" por ter chegado
+     depois de outra, deixava o documento impresso com o valor antigo — e um
+     aviso "só na tela" no lugar do dado. A regra da clínica é que vale a
+     última edição: aqui as propostas posteriores à vigente entram, em ordem
+     de tempo, cada uma no seu campo. Nada disso altera o que está gravado. */
+  vigenteParaImpressao(mod, rec) {
+    if (!rec || !rec._finalizado || !adendos.MODS[mod]) return rec;
+    const estado = adendos.estadoRetificacoes(rec, mod);
+    const head = estado.aplicadas[estado.aplicadas.length - 1];
+    const tHead = Date.parse(head ? (head._serverCreatedAt || head.data) : '') || 0;
+    const quando = a => Date.parse(a._serverCreatedAt || a.data || '') || 0;
+    const vistos = new Set();
+    const extras = estado.conflitos.concat(estado.pendentes)
+      .filter(a => a && a._retificacao && a._retificacao.campos && !vistos.has(a.id) && vistos.add(a.id) && quando(a) > tHead)
+      .sort((a, b) => quando(a) - quando(b));
+    let v = estado.vigente;
+    extras.forEach(a => { v = adendos._fundirCampos(v, a._retificacao.campos); });
+    return v;
   },
   _marcarBaseFormulario(mod, rec, form) {
     if (!form || !form.dataset) return;
