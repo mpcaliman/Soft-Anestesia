@@ -4847,7 +4847,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-20c</b><br>
+    v7.1 · build <b id="build-tag">2026-10-20d</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -23731,6 +23731,25 @@ const adendos = (() => {
     try { adendos.autoResolverConflitos(mod, p.parentLegacyId, semCarimbo); } catch (e) {}
     try { if (state.currentModule === mod) adendos.renderInline(mod); } catch (e) {}
     return true;
+  },
+  _mesmoConteudoAdendo(local, row) {
+    if (!local || !row) return false;
+    const txt = v => String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+    const camposLocal = (local._retificacao && local._retificacao.campos) || null;
+    const camposNuvem = (row.data && row.data.retificacao && row.data.retificacao.campos) || null;
+    return txt(local.texto) === txt(row.texto) && adendos._igualJson(camposLocal || {}, camposNuvem || {});
+  },
+  /* O conteúdo daqui volta como adendo NOVO deste usuário, sobre a versão
+     vigente — mesmo texto, mesmos campos, outro id. */
+  reemitirComoNovo(op) {
+    const p = op && op.payload;
+    if (!p || !p.adendo) return null;
+    const rec = store.getById(p.parentModule, p.parentLegacyId);
+    if (!rec || !rec._finalizado) return null;
+    const campos = p.adendo._retificacao && p.adendo._retificacao.campos;
+    const ret = campos && Object.keys(campos).length
+      ? { schema: 1, baseAdendoId: adendos.estadoRetificacoes(rec, p.parentModule).headId || '', campos } : null;
+    return adendos.registrarTexto(p.parentModule, p.parentLegacyId, p.adendo.texto || 'CORREÇÃO', p.adendo.motivo || 'correcao', ret);
   },
   /* Registro que não está finalizado não recebe adendo: a correção entra nele
      como edição comum. Devolve o registro já corrigido, para subir. */

@@ -901,7 +901,22 @@ const persistenciaCloudFirst = {
       if (row.parent_table !== p.parentTable || String(row.parent_legacy_id || '') !== String(p.parentLegacyId)) {
         return preso('a linha da nuvem pertence a outro documento');
       }
-      if (String(row.author_id || '') !== String(contexto.userId)) return preso('a linha da nuvem foi gravada por outro usuário');
+      /* O MESMO ADENDO JÁ ESTÁ NA NUVEM, gravado por outra conta da clínica
+         (o mesmo documento, o mesmo id). Com este id não há mais o que subir —
+         a nuvem não troca linha de adendo. A linha da nuvem é adotada; se o
+         conteúdo daqui é outro, ele sobe como um adendo novo deste usuário,
+         por cima: a última edição não se perde e nada fica preso. */
+      if (String(row.author_id || '') !== String(contexto.userId)) {
+        /* linha sem carimbo de versão: a própria adoção já reaplica a proposta daqui */
+        const valida = !!adendos._normalizarRetificacao(row.data && row.data.retificacao, row);
+        const reemitir = valida && !adendos._mesmoConteudoAdendo(p.adendo, row);
+        try { adendos.adotarDaNuvem(comContexto, row); } catch (e) {}
+        if (reemitir && !adendos.reemitirComoNovo(comContexto)) {
+          return preso('a nuvem já tem este adendo (outro usuário) com conteúdo diferente, e não foi possível reenviá-lo como novo');
+        }
+        const ok = await filaCifrada.confirmar(op.operationId, { remoteConfirmed: true, checksum: op.checksum });
+        return ok ? 'liberada' : null;
+      }
       const ok = await filaCifrada.confirmar(op.operationId, { remoteConfirmed: true, checksum: op.checksum });
       if (!ok || !contextoAba.corresponde(contexto)) return ok ? 'liberada' : null;
       try { adendos.adotarDaNuvem(comContexto, row); } catch (e) {}
@@ -909,7 +924,7 @@ const persistenciaCloudFirst = {
     }
     const pai = await cloudRel._lerAtualTab(p.parentTable, org, p.parentLegacyId, 'id,finalized_at');
     if (!contextoAba.corresponde(contexto)) return null;
-    if (pai && pai.finalized_at) return preso('documento finalizado na nuvem, mas a nuvem recusa o adendo (' + String(op.queue && op.queue.lastError || 'sem motivo') + ')');
+    if (pai && pai.finalized_at) return preso('documento finalizado na nuvem, mas a nuvem recusa o adendo (' + persistenciaCloudFirst._motivoOriginal(op) + ')');
     const rec = store.getById(p.parentModule, p.parentLegacyId);
     if (!rec) return preso('o documento deste adendo não está neste aparelho');
     if (rec._finalizado) {
@@ -923,6 +938,12 @@ const persistenciaCloudFirst = {
     if (!res || res.remoteConfirmed !== true) return preso('a correção virou edição comum, mas a nuvem ainda não confirmou (' + String(res && res.motivo || '') + ')');
     const ok = await filaCifrada.confirmar(op.operationId, { remoteConfirmed: true, checksum: op.checksum });
     return ok ? 'convertida' : null;
+  },
+  /* o erro de envio sem o "adendo preso: …" de consultas anteriores */
+  _motivoOriginal(op) {
+    let m = String(op && op.queue && op.queue.lastError || '');
+    for (let i = 0; i < 20 && /^adendo preso: .*\((.*)\)$/.test(m); i++) m = m.replace(/^adendo preso: .*?\((.*)\)$/, '$1');
+    return m || 'sem motivo';
   },
   async listarFila() {
     try {

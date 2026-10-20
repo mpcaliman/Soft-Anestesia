@@ -11510,6 +11510,33 @@ await test('Sync: adendo preso sai com a prova da nuvem, e conflitos seguem a ú
       await persistenciaCloudFirst.drenar();
       const op3 = (await naFila()).find(x => x.entityId === ad3.id);
       out.motivoNoPainel = !!op3 && /adendo preso: documento finalizado na nuvem/.test(op3.queue.lastError || '');
+
+      /* D) a nuvem já tem o mesmo adendo, gravado por OUTRA conta da clínica:
+            mesmo conteúdo → só sai da fila; conteúdo diferente → sai da
+            fila e o conteúdo daqui sobe como adendo novo deste usuário */
+      const pai4 = { _id: 'pre-fin4', nome: 'Quarto Finalizado', obs: 'o', _finalizado: true, _relOrg: 'org-1', _relId: 'srv-fin4' };
+      store.setList('pre', store.list('pre').concat([pai4]));
+      adendos.enviarOperacao = async () => ({ ok: false, motivo: 'rede' });
+      const ad4 = adendos.registrarTexto('pre', 'pre-fin4', 'CORREÇÃO: igual', 'correcao', { schema: 1, baseAdendoId: '', campos: { obs: 'igual' } });
+      const ad5 = adendos.registrarTexto('pre', 'pre-fin4', 'CORREÇÃO: minha', 'correcao', { schema: 1, baseAdendoId: '', campos: { obs: 'minha' } });
+      await store.aguardarNuvem(ad4); await store.aguardarNuvem(ad5);
+      const linhaOutro = (a, campos, texto) => ({ id: 'srv-' + a.id, organization_id: 'org-1', legacy_id: a.id, reason: 'correcao', texto,
+        data: { retificacao: { schema: 1, baseAdendoId: '', campos, status: 'accepted', revisao: 1, baseAtualId: '' } },
+        author_id: 'u-outra-conta', created_at: '2026-10-06T14:18:40Z', parent_table: 'preanesthetic_assessments',
+        parent_id: 'srv-fin4', parent_legacy_id: 'pre-fin4', retification_revision: 1 });
+      linhas.push(linhaOutro(ad4, { obs: 'igual' }, ad4.texto), linhaOutro(ad5, { obs: 'antiga' }, 'CORREÇÃO: antiga'));
+      const subiram4 = [];
+      adendos.enviarOperacao = async (op) => { subiram4.push(op.payload.adendo); return { ok: false, motivo: 'http 409' }; };
+      cloudRel._lerAtualTab = async () => ({ id: 'srv-fin4', finalized_at: '2026-10-01T00:00:00Z' });
+      persistenciaCloudFirst._consultasAdendo.clear();
+      await persistenciaCloudFirst.drenar();
+      const fila4 = await naFila();
+      out.outraContaSai = !fila4.some(x => x.entityId === ad4.id) && !fila4.some(x => x.entityId === ad5.id);
+      const r4 = store.getById('pre', 'pre-fin4');
+      const reemitido = (r4._adendos || []).find(x => x.id !== ad5.id && x._retificacao && x._retificacao.campos.obs === 'minha');
+      await new Promise(ok => setTimeout(ok, 200));
+      out.ultimaEdicaoSobe = !!reemitido && subiram4.some(x => x.id === reemitido.id && x._retificacao.campos.obs === 'minha');
+      out.semDuplicarIgual = !(r4._adendos || []).some(x => x.id !== ad4.id && x._retificacao && x._retificacao.campos.obs === 'igual');
     } finally { window.fetch = fetchOriginal; }
 
     /* C) conflitos: vence a última edição, sem pergunta */
@@ -11544,6 +11571,9 @@ await test('Sync: adendo preso sai com a prova da nuvem, e conflitos seguem a ú
   assert(r.reaplicada, 'a proposta sem carimbo de versão, sendo a última edição, volta sobre a vigente');
   assert(r.virouEdicao, 'pai não finalizado: a correção entra no próprio registro, sem adendo');
   assert(r.saiuB, 'e sai da fila com o recibo da edição');
+  assert(r.outraContaSai, 'adendo que a nuvem já tem, gravado por outra conta, sai da fila');
+  assert(r.ultimaEdicaoSobe, 'e o conteúdo diferente daqui sobe como adendo novo — a última edição não se perde');
+  assert(r.semDuplicarIgual, 'conteúdo igual não gera adendo duplicado');
   assert(r.meuSobe, 'conflito com a edição daqui mais nova: ela sobe por cima da versão da nuvem');
   assert(r.nuvemAdotada, 'conflito com a nuvem mais nova: ela é adotada aqui');
   assert(r.rascunhoArquivado, 'rascunho de edição ao vivo de outro usuário: o aviso é arquivado');
