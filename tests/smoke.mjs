@@ -10882,9 +10882,12 @@ await test('Pré-lançamento: enviar fecha a aba do paciente, não só o formul�
     try { rascunhos.renomearAba('pre'); } catch (e) {}
     out.abaAntes = rascunhos.list('pre').length === 1 && !!rascunhos.ativo('pre');
 
+    const abaPaciente = rascunhos.ativo('pre');
     preLanc.enviar('pre');
 
-    out.abaFechou = rascunhos.list('pre').length === 0 && !rascunhos.ativo('pre');
+    /* a aba do paciente sai; a que fica aberta é uma ficha nova, em branco */
+    const sobra = rascunhos.list('pre');
+    out.abaFechou = !sobra.some(x => x.id === abaPaciente) && sobra.every(x => !rascunhos.temConteudo('pre', x));
     out.formLimpo = (f.querySelector('[name="nome"]') || {}).value === '';
     /* e o essencial: a ficha NÃO se perde ao fechar a aba */
     const rec = store.list('pre')[0] || {};
@@ -10894,7 +10897,7 @@ await test('Pré-lançamento: enviar fecha a aba do paciente, não só o formul�
   });
 
   assert(r.abaAntes, 'a aba do paciente existe antes de enviar');
-  assert(r.abaFechou, 'e some ao enviar — aba com nome e formulário vazio parece ficha perdida');
+  assert(r.abaFechou, 'e some ao enviar (a que sobra é uma ficha nova em branco) — aba com nome e formulário vazio parece ficha perdida');
   assert(r.formLimpo, 'o formulário fica limpo para o próximo paciente');
   assert(r.registroIntacto, 'e a ficha enviada continua salva, com o nome');
   assert(r.marcadoEnviado, 'marcada como enviada para o médico');
@@ -22572,6 +22575,90 @@ await test('Impressão: a última retificação entra no campo, mesmo em conflit
 
 /* Uma retificação salva com o formulário incompleto não apaga orientações,
    conclusão nem quem assinou; e a assinatura da pré sai com nome e CRM. */
+/* Finalizou: a aba fecha e a tela volta a uma ficha nova, do zero — nenhum
+   campo, linha, assinatura ou faixa do paciente anterior sobra. Vale também
+   para a ficha aberta pelo histórico (sem aba), e para termo e prescrição. */
+await test('Finalizar fecha a aba e zera a ficha, sem resto do paciente anterior', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    auth._desbloquear && auth._desbloquear();
+    const out = {};
+    const espera = ms => new Promise(ok => setTimeout(ok, ms));
+    const estado = (mod) => {
+      const m = document.getElementById('module-' + mod);
+      const campos = {};
+      m.querySelectorAll('input, select, textarea').forEach((el, i) => {
+        if (el.type === 'file' || el.type === 'button' || el.closest('.autocomplete-list')) return;
+        campos[(el.name || el.id || 'x') + '#' + i] = (el.type === 'checkbox' || el.type === 'radio') ? String(el.checked) : String(el.value);
+      });
+      const texto = Array.from(m.querySelectorAll('*')).filter(e => !e.closest('.autocomplete-list') && e.children.length === 0)
+        .map(e => e.textContent).join('\n');
+      return { campos, texto, imgs: m.querySelectorAll('[id$="-prev-carimbo"] img').length };
+    };
+    const preencher = (mod) => {
+      const f = document.getElementById('form-' + mod);
+      f.querySelectorAll('input, select, textarea').forEach(el => {
+        if (el.type === 'file' || el.type === 'hidden' || el.type === 'button') return;
+        try {
+          if (el.type === 'checkbox' || el.type === 'radio') el.checked = true;
+          else if (el.tagName === 'SELECT') { if (el.options.length) el.selectedIndex = el.options.length - 1; }
+          else if (el.type === 'number') el.value = '7';
+          else if (el.type === 'date') el.value = '2026-01-02';
+          else if (el.type === 'time') el.value = '10:11';
+          else el.value = 'RESTOXYZ';
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        } catch (e) {}
+      });
+      const PNG = 'data:image/png;base64,' + 'B'.repeat(4000);
+      const pref = { pre: 'sig-pre', consulta: 'sig-consulta', recuperacao: 'sig-recuperacao', anestesia: 'sig-anest', termo: 'sig-termo', prescricao: 'sig-prescricao' }[mod];
+      try { assinatura._aplicarCarimbo(pref, PNG, 'form-' + mod); } catch (e) {}
+      if (mod === 'pre') { try { labExtra.add('pre-lab-extras', { nome: 'RESTOXYZ', valor: '1' }); } catch (e) {} }
+      if (mod === 'anestesia') { try { anestesia.cirurgias.add({ procedimento: 'RESTOXYZ' }, { mesmaEquipe: true }); } catch (e) {} }
+    };
+    const comparar = (mod, base) => {
+      const d = estado(mod);
+      const dif = Object.keys(d.campos).filter(k => d.campos[k] !== base.campos[k]);
+      const onde = Array.from(document.getElementById('module-' + mod).querySelectorAll('*')).filter(e => !e.closest('.autocomplete-list') && e.children.length === 0 && /RESTOXYZ/.test(e.textContent))
+        .map(e => (e.parentElement && (e.parentElement.id || e.parentElement.className)) + '>' + e.tagName + '.' + e.className).slice(0, 5);
+      return { dif: dif.slice(0, 8).map(k => k + '=' + d.campos[k]), resto: /RESTOXYZ/.test(d.texto) || Object.values(d.campos).some(v => /RESTOXYZ/.test(v)), imgs: d.imgs, onde };
+    };
+    for (const mod of ['pre', 'consulta', 'anestesia', 'recuperacao']) {
+      ui.navegar(mod); await espera(250);
+      rascunhos.setList(mod, []); rascunhos.setAtivo(mod, null);
+      rascunhos.novo(mod); await espera(150);
+      const base = estado(mod);
+      /* com aba: finalizou, a aba sai e a tela é uma ficha nova */
+      preencher(mod); await espera(150);
+      rascunhos.salvarAtual(mod);
+      const idVelho = rascunhos.ativo(mod);
+      rascunhos.removerAtivo(mod); await espera(150);
+      const c1 = comparar(mod, base);
+      const abas = rascunhos.list(mod);
+      out[mod + '_comAba'] = !c1.dif.length && !c1.resto && !c1.imgs && !abas.some(x => x.id === idVelho) &&
+        !!rascunhos.ativo(mod) || JSON.stringify(c1);
+      /* sem aba (aberta pelo histórico): também zera */
+      rascunhos.setAtivo(mod, null);
+      preencher(mod); await espera(150);
+      rascunhos.removerAtivo(mod); await espera(150);
+      const c2 = comparar(mod, base);
+      out[mod + '_semAba'] = !c2.dif.length && !c2.resto && !c2.imgs || JSON.stringify(c2);
+    }
+    for (const mod of ['termo', 'prescricao']) {
+      ui.navegar(mod); await espera(250);
+      window[mod] && window[mod]._zerar ? window[mod]._zerar() : rascunhos._zerar(mod);
+      const base = estado(mod);
+      preencher(mod); await espera(150);
+      rascunhos.removerAtivo(mod); await espera(150);
+      const c = comparar(mod, base);
+      out[mod] = !c.resto && !c.imgs || JSON.stringify(c);
+    }
+    return out;
+  });
+  for (const [k, v] of Object.entries(r)) assert(v === true, 'sobrou resto em ' + k + ': ' + v);
+  await page.close();
+});
+
 await test('Impressão da pré: orientações, conclusão e assinatura não somem por retificação em branco', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {

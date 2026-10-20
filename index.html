@@ -4847,7 +4847,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-20e</b><br>
+    v7.1 · build <b id="build-tag">2026-10-20f</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -17109,8 +17109,8 @@ const pre = {
       } catch (e) {}
     }, 150);
   },
-  novo() {
-    if (state.dirty && !confirm('Descartar alterações não salvas?')) return;
+  /* a ficha volta como na primeira abertura — sem nada do paciente anterior */
+  _zerar() {
     utils.clearForm(pre.formId);
     try { pre.meds.limpar(); } catch (e) {}
     try { pre.procs.limpar(); } catch (e) {}
@@ -17129,6 +17129,10 @@ const pre = {
     ui.fecharBanner('banner-pre');
     markClean();
     try { pre.nav._wire(); pre.nav.render(); } catch (e) {}
+  },
+  novo() {
+    if (state.dirty && !confirm('Descartar alterações não salvas?')) return;
+    pre._zerar();
     toast('Nova avaliação iniciada');
   },
   /* salvar(): por padrão grava os dados (segurança contra perda), SEM gerar
@@ -17985,8 +17989,8 @@ const consulta = {
   /* Stubs vazios (obsoletos — carimbo agora vem do cadastro do profissional) */
   _popularAssinaturas() {},
   _previewAssinatura() {},
-  novo() {
-    if (state.dirty && !confirm('Descartar alterações?')) return;
+  /* a ficha volta como na primeira abertura — sem nada do paciente anterior */
+  _zerar() {
     utils.clearForm(consulta.formId);
     document.querySelector(`#${consulta.formId} [name="data"]`).value = utils.hojeISO();
     try { const c = document.getElementById('consulta-lab-extras'); if (c) c.innerHTML = ''; } catch (e) {}
@@ -17997,6 +18001,10 @@ const consulta = {
     ui.atualizarDocStatus('consulta', null);
     ui.fecharBanner('banner-consulta');
     markClean();
+  },
+  novo() {
+    if (state.dirty && !confirm('Descartar alterações?')) return;
+    consulta._zerar();
     toast('Nova consulta iniciada');
   },
   salvar(opts = {}) {
@@ -18338,8 +18346,8 @@ const recuperacao = {
   },
   preencherPadrao() { recuperacao.gerarPadraoNormal({}); },
 
-  novo() {
-    if (state.dirty && !confirm('Descartar alterações?')) return;
+  /* a ficha volta como na primeira abertura — sem nada do paciente anterior */
+  _zerar() {
     utils.clearForm(recuperacao.formId);
     document.querySelector(`#${recuperacao.formId} [name="data"]`).value = utils.hojeISO();
     recuperacao._linkPendente = null;
@@ -18349,6 +18357,10 @@ const recuperacao = {
     ui.atualizarDocStatus('recuperacao', null);
     ui.fecharBanner('banner-recuperacao');
     markClean();
+  },
+  novo() {
+    if (state.dirty && !confirm('Descartar alterações?')) return;
+    recuperacao._zerar();
     toast('Nova ficha de recuperação iniciada');
   },
   salvar(opts = {}) {
@@ -18923,8 +18935,8 @@ const termo = {
   _linkPendente: null,
   sigCtx: {},
 
-  novo() {
-    if (state.dirty && !confirm('Descartar alterações?')) return;
+  /* a ficha volta como na primeira abertura — sem nada do paciente anterior */
+  _zerar() {
     utils.clearForm(termo.formId);
     const hoje = document.querySelector(`#${termo.formId} [name="data"]`);
     if (hoje) hoje.value = utils.hojeISO();
@@ -18933,6 +18945,10 @@ const termo = {
     ui.atualizarDocStatus('termo', null);
     ui.fecharBanner('banner-termo');
     markClean();
+  },
+  novo() {
+    if (state.dirty && !confirm('Descartar alterações?')) return;
+    termo._zerar();
     toast('Novo termo iniciado');
   },
   calcIdade() {
@@ -19232,8 +19248,8 @@ const prescricao = {
     });
     return res.slice(0, 12);
   },
-  novo() {
-    if (state.dirty && !confirm('Descartar alterações?')) return;
+  /* a ficha volta como na primeira abertura — sem nada do paciente anterior */
+  _zerar() {
     utils.clearForm(prescricao.formId);
     document.getElementById('prescricao-body').innerHTML = '';
     const hoje = document.querySelector('#form-prescricao [name="data"]');
@@ -19250,6 +19266,10 @@ const prescricao = {
     ui.atualizarDocStatus('prescricao', null);
     ui.fecharBanner('banner-prescricao');
     markClean();
+  },
+  novo() {
+    if (state.dirty && !confirm('Descartar alterações?')) return;
+    prescricao._zerar();
     toast('Nova prescrição iniciada');
   },
   /* Nome mantido por compatibilidade com chamadas existentes; agora reage ao
@@ -19762,8 +19782,9 @@ const prescricao = {
     ui.atualizarDocStatus('prescricao', saved);
     setSavedStatus('Protegendo alteração…');
     markClean();
-    if (finalizar) { try { rascunhos.removerAtivo('prescricao'); } catch (e) {} }
+    /* o PDF é montado do formulário: vai antes do descarte, que zera a tela */
     if (finalizar) { try { pdfBackup.autoAoFinalizar('prescricao'); } catch (e) {} }
+    if (finalizar) { try { rascunhos.removerAtivo('prescricao'); } catch (e) {} }
     /* Gravação automática não anuncia: um aviso a cada pausa de digitação
        vira ruído e a pessoa para de ler todos os avisos, inclusive os que
        importam. O selo da ficha já mostra o estado. */

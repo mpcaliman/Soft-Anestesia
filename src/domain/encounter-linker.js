@@ -797,7 +797,7 @@ const rascunhos = {
     return rascunhos._contarPreenchidos(r.dados) > 2;
   },
   /* Cria novo rascunho vazio e o torna ativo */
-  novo(mod) {
+  novo(mod, opts = {}) {
     /* Salva o ativo antes de criar novo (se houver) */
     if (rascunhos.ativo(mod)) {
       rascunhos.salvarAtual(mod);
@@ -821,7 +821,7 @@ const rascunhos = {
     rascunhos.setAtivo(mod, id);
     rascunhos._limpar(mod);
     rascunhos.renderAbas(mod);
-    toast('Novo rascunho criado');
+    if (!opts.silencioso) toast('Novo rascunho criado');
     return id;
   },
 
@@ -998,24 +998,30 @@ const rascunhos = {
     }
   },
 
-  /* Remove rascunho ativo (chamado quando a ficha é salva definitivamente) */
+  /* FINALIZOU, FECHOU.
+     A aba do atendimento finalizado sai, e a tela volta a uma ficha nova, do
+     zero — não pula para a aba de outro paciente, nem fica com restos deste.
+     Vale também quando a ficha foi aberta pelo histórico, sem aba: antes
+     nada era limpo nesse caminho, e o próximo paciente era digitado por cima. */
   removerAtivo(mod) {
     const id = rascunhos.ativo(mod);
-    if (!id) return;
-    const antes = rascunhos.list(mod);
-    const removido = antes.find(x => x.id === id);
-    const list = antes.filter(x => x.id !== id);
-    rascunhos.setList(mod, list);
-    rascunhos.marcarFechado(mod, id, removido);
-    rascunhos._apagarNaNuvem(mod, id);
-    /* IMPORTANTE: limpa o ativo antes de chamar ativar() */
+    if (id) {
+      const antes = rascunhos.list(mod);
+      const removido = antes.find(x => x.id === id);
+      rascunhos.setList(mod, antes.filter(x => x.id !== id));
+      rascunhos.marcarFechado(mod, id, removido);
+      rascunhos._apagarNaNuvem(mod, id);
+    }
+    /* IMPORTANTE: limpa o ativo antes de abrir outra */
     rascunhos.setAtivo(mod, null);
-    if (list.length > 0) {
-      rascunhos.ativar(mod, list[0].id);
-    } else {
-      rascunhos._limpar(mod);
+    rascunhos._zerar(mod);
+    if (rascunhos.FORMS[mod]) {
+      const vazia = rascunhos.list(mod).find(r => !rascunhos.temConteudo(mod, r));
+      if (vazia) rascunhos.setAtivo(mod, vazia.id);
+      else rascunhos.novo(mod, { silencioso: true });
     }
     rascunhos.renderAbas(mod);
+    try { markClean(); } catch (e) {}
   },
 
   /* Buscar rascunhos de outro aparelho, sob demanda (botão da barra).
@@ -1256,13 +1262,50 @@ const rascunhos = {
     });
   },
 
-  _limpar(mod) {
+  _limpar(mod) { rascunhos._zerar(mod); },
+
+  /* ZERAR É ZERAR.
+     Limpar só os campos do formulário deixava para trás o que mora fora
+     deles — linhas de exames e medicações, anexos, a imagem da assinatura,
+     a faixa do paciente no topo, o vínculo de retificação — e a ficha nova
+     nascia com pedaços do paciente anterior. Aqui vale a mesma rotina do
+     botão "Novo" de cada módulo, mais o que é comum a todos. */
+  _SIGS: { pre: ['sig-pre'], consulta: ['sig-consulta'], recuperacao: ['sig-recuperacao'],
+    anestesia: ['sig-anest', 'sig-anest2'], termo: ['sig-termo', 'sig-termo-pac'], prescricao: ['sig-prescricao'] },
+  _moduloDe(mod) {
+    try {
+      return ({
+        pre: typeof pre !== 'undefined' ? pre : null,
+        consulta: typeof consulta !== 'undefined' ? consulta : null,
+        recuperacao: typeof recuperacao !== 'undefined' ? recuperacao : null,
+        termo: typeof termo !== 'undefined' ? termo : null,
+        prescricao: typeof prescricao !== 'undefined' ? prescricao : null
+      })[mod] || null;
+    } catch (e) { return null; }
+  },
+  _zerar(mod) {
+    const formId = rascunhos.FORMS[mod] || ('form-' + mod);
     if (mod === 'anestesia') {
       try { if (anestesia.limparSilencioso) anestesia.limparSilencioso(); } catch (e) {}
-      return;
+    } else {
+      const alvo = rascunhos._moduloDe(mod);
+      if (alvo && typeof alvo._zerar === 'function') { try { alvo._zerar(); } catch (e) { utils.clearForm(formId); } }
+      else utils.clearForm(formId);
     }
-    const formId = rascunhos.FORMS[mod];
-    if (formId) utils.clearForm(formId);
+    const f = document.getElementById(formId);
+    if (f) {
+      const h = f.querySelector('[name="_id"]'); if (h) h.value = '';
+      if (f.dataset) { delete f.dataset.retificacaoRegistro; delete f.dataset.retificacaoBaseId; }
+    }
+    (rascunhos._SIGS[mod] || []).forEach(p => { try { assinatura.limpar(p); } catch (e) {} });
+    try { prontuario.limpar(mod); } catch (e) {}
+    try { ui.atualizarDocStatus(mod, null); } catch (e) {}
+    if (mod === 'anestesia' && f) {
+      try { anestesia.calc.resumoTopo(); } catch (e) {}
+      /* a faixa do paciente no topo se redesenha pelo evento do campo */
+      try { const n = f.querySelector('[name="paciente_nome"]'); if (n) n.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+    }
+    try { markClean(); } catch (e) {}
   }
 };
 
