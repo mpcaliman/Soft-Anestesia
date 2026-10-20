@@ -22514,6 +22514,42 @@ await test('Impressão: a última retificação entra no campo, mesmo em conflit
   await page.close();
 });
 
+/* Uma retificação salva com o formulário incompleto não apaga orientações,
+   conclusão nem quem assinou; e a assinatura da pré sai com nome e CRM. */
+await test('Impressão da pré: orientações, conclusão e assinatura não somem por retificação em branco', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    await __smokePrepareQueue('org-imp-pre-sig', 'medico-imp-pre-sig');
+    auth._desbloquear();
+    const ctx = contextoAba.capturar();
+    const rec = { _id: 'pre-sig', _relOrg: ctx.organizationId, _relId: 'pai-sig', _finalizado: true, nome: 'Paciente Assinatura',
+      data: '2026-10-15', lab_hb: '12,0', orientacoes: 'Suspender AAS 7 dias antes', conclusao: 'Apto ao procedimento proposto',
+      conclusao_status: 'liberado', profissional: 'Fulano de Tal', crm: '12345', _adendos: [] };
+    store.setList('pre', [rec]);
+    adendos.receberLinha({ organization_id: ctx.organizationId, parent_table: 'preanesthetic_assessments',
+      parent_id: 'pai-sig', parent_legacy_id: 'pre-sig', legacy_id: 'rs1', reason: 'correcao', texto: 'CORREÇÃO', author_id: ctx.userId,
+      created_at: '2026-10-17T10:00:00Z', retification_revision: 1,
+      data: { retificacao: { schema: 1, baseAdendoId: '', status: 'accepted', revisao: 1, baseAtualId: '',
+        campos: { lab_hb: '13,1', orientacoes: '', conclusao: '', profissional: '', crm: '' } } } });
+    const out = {};
+    ui.navegar('pre'); pre.carregar(store.getById('pre', 'pre-sig'));
+    printPreview.abrir();
+    const t = document.getElementById('ppp').textContent;
+    out.alteracaoEntra = t.includes('13,1');
+    out.orientacoes = t.includes('Suspender AAS 7 dias antes');
+    out.conclusao = t.includes('Apto ao procedimento proposto');
+    out.desfecho = t.includes('Liberado para a cirurgia');
+    out.assinante = /Fulano de Tal/i.test(t) && t.includes('12345');
+    printPreview.fechar();
+    /* e uma nova retificação não grava o campo em branco nem troca o assinante */
+    const c = adendos._camposRetificacao({ orientacoes: 'x', profissional: 'A' }, { orientacoes: '', profissional: 'B', conclusao: 'nova' });
+    out.camposLimpos = !('orientacoes' in c) && !('profissional' in c) && 'conclusao' in c;
+    return out;
+  });
+  for (const [k, v] of Object.entries(r)) assert(v, 'falhou: ' + k + ' → ' + JSON.stringify(r));
+  await page.close();
+});
+
 await test('Adendos entram no corpo do documento impresso, sem quadro à parte', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
