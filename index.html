@@ -4847,7 +4847,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-20d</b><br>
+    v7.1 · build <b id="build-tag">2026-10-20e</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -5999,7 +5999,17 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
               <input type="text" name="procedimento" class="cbhpm-autocomplete" data-sem-mais="1" placeholder="Digite parte do procedimento ou o código TUSS..." style="flex:1;min-width:0">
               <select name="lateralidade" class="pre-proc-lado" title="Lado — em branco quando não se aplica"><option value="">—</option><option value="direita">Direita</option><option value="esquerda">Esquerda</option><option value="bilateral">Bilateral</option></select>
               <button type="button" class="btn btn-primary btn-sm" style="flex-shrink:0;padding:0 12px" onclick="cbhpm.maisCodigoFicha()" title="Mais um código da mesma equipe (com grau)">+</button>
-            </div></div>
+            </div>
+            <!-- CÓDIGOS DO MESMO ATO, MESMA EQUIPE — logo abaixo do 1º código, na
+                 mesma tabela da janela "Gerar financeiro" (código, procedimento,
+                 qtd, lado, grau). Outra equipe cirúrgica usa a lista lá embaixo. -->
+            <div id="cir-mesma-wrap" style="display:none;margin-top:8px">
+              <div class="dyn-table-wrap"><table class="dyn" id="cir-mesma-tabela"><thead><tr>
+                <th style="width:130px">Código</th><th>Procedimento</th><th style="width:54px">Qtd</th>
+                <th style="width:92px">Lado</th><th style="width:76px">Grau</th><th class="col-rm">×</th>
+              </tr></thead><tbody id="cir-mesma-body"></tbody></table></div>
+            </div>
+          </div>
           <div class="field col-2"><label>Sala</label><input type="text" name="sala"></div>
         </div>
 
@@ -6029,13 +6039,6 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
           <div class="field col-4"><label>Saída de sala</label>
             <div class="input-group"><input type="time" name="hora_sala_saida" onchange="anestesia.eventos.sincronizarHorario('Saída de sala', this.value)"><button type="button" class="btn-now" onclick="ui.setNow('form-anestesia','hora_sala_saida'); anestesia.eventos.sincronizarHorario('Saída de sala', this.previousElementSibling.value);">agora</button></div>
           </div>
-        </div>
-        <!-- Códigos do MESMO ato, mesma equipe — aqui em cima, junto do procedimento
-             principal, que é onde o anestesista pensa neles. A lista de baixo
-             (depois dos horários) continua servindo para OUTRA equipe cirúrgica. -->
-        <div id="cir-mesma-wrap" style="margin:-2px 0 12px">
-          <div id="cir-mesma-body"></div>
-          <button type="button" class="btn btn-sm" onclick="anestesia.cirurgias.add({}, { mesmaEquipe: true, alvo: 'cir-mesma-body' })" title="Mais um código CBHPM deste mesmo ato, com a mesma equipe — escolha 100%, 70% ou 50%">+ Adicionar código deste mesmo ato (100/70/50%)</button>
         </div>
 
         <div class="grid">
@@ -31389,7 +31392,7 @@ const cbhpm = {
 
   maisCodigoFicha() {
     const linha = anestesia.cirurgias.add({}, { mesmaEquipe: true });
-    if (linha) { const i2 = linha.querySelector('[name="cir_extra_proc[]"]'); if (i2) i2.focus(); }
+    if (linha) { const i2 = linha.querySelector('[name="cir_extra_cod[]"]'); if (i2) i2.focus(); }
   },
   /* o mesmo par código ⇄ descrição, na linha principal da ficha */
   _ligarCodigoNaFicha() {
@@ -31439,7 +31442,7 @@ const cbhpm = {
           /* MESMA equipe: a linha nasce enxuta (só código + grau). Quem for de
              OUTRA equipe usa "➕ Cirurgia combinada", que já pede o cirurgião. */
           const linha = anestesia.cirurgias.add({}, { mesmaEquipe: true });
-          if (linha) { const i2 = linha.querySelector('[name="cir_extra_proc[]"]'); if (i2) i2.focus(); }
+          if (linha) { const i2 = linha.querySelector('[name="cir_extra_cod[]"]'); if (i2) i2.focus(); }
           toast('Mais um código para a mesma equipe — preencha na linha abaixo');
         } catch (e) {}
         return;
@@ -34237,17 +34240,18 @@ const anestesia = {
        impressão dependem deles), mas ficam recolhidos atrás de "outra equipe /
        mais detalhes" para a linha não parecer uma segunda cirurgia. */
     add(dados = {}, opts = {}) {
-      const body = document.getElementById(opts.alvo || 'cir-combo-body');
+      const enxuta = !!opts.mesmaEquipe && !dados.cirurgiao && !dados.inicio && !dados.fim && !dados.obs;
+      if (enxuta) return anestesia.cirurgias._addMesma(dados);
+      const body = document.getElementById(opts.alvo && opts.alvo !== 'cir-mesma-body' ? opts.alvo : 'cir-combo-body');
       if (!body) return null;
       const div = document.createElement('div');
       div.className = 'grid';
-      const enxuta = !!opts.mesmaEquipe && !dados.cirurgiao && !dados.inicio && !dados.fim && !dados.obs;
       if (enxuta) div.classList.add('cir-mesma-equipe');
       div.style.cssText = 'background:var(--surface-alt);border:1px solid var(--border);border-radius:var(--radius);padding:10px;margin-bottom:8px';
       const grauSel = String(dados.grau || '50');
       div.innerHTML = `
         ${enxuta ? '<div class="field col-12" style="margin-bottom:-4px"><small style="color:var(--text-mute)">👥 Mesma equipe cirúrgica — só mais um código deste mesmo ato</small></div>' : ''}
-        <div class="field col-4"><label>Procedimento adicional <small style="color:var(--text-mute);font-weight:400">(CBHPM)</small></label><input type="text" name="cir_extra_proc[]" class="cbhpm-autocomplete" data-sem-mais="1" placeholder="Digite parte do procedimento..." value="${utils.escapeAttr(dados.procedimento || '')}"></div>
+        <div class="field col-4"><label>Procedimento adicional <small style="color:var(--text-mute);font-weight:400">(CBHPM)</small></label><input type="text" name="cir_extra_proc[]" class="cbhpm-autocomplete" data-sem-mais="1" placeholder="Digite parte do procedimento..." value="${utils.escapeAttr(dados.procedimento || '')}"><input type="hidden" name="cir_extra_cod[]" value="${utils.escapeAttr(dados.codigo || '')}"></div>
         <div class="field col-3 cir-extra-detalhe"><label>Cirurgião <small style="color:var(--text-mute);font-weight:400">(vazio = mesma equipe)</small></label><input type="text" name="cir_extra_cir[]" value="${utils.escapeAttr(dados.cirurgiao || '')}"></div>
         <div class="field col-2"><label>Grau <small style="color:var(--text-mute);font-weight:400" title="Hierarquia de cobrança: o procedimento de MAIOR PORTE é o principal (100%); os demais da MESMA VIA entram 50%; VIA DIFERENTE entra 70% (ajuste manual)">%</small></label>
           <select name="cir_extra_grau[]">${['100', '70', '50'].map(g => `<option value="${g}" ${g === grauSel ? 'selected' : ''}>${g}%</option>`).join('')}</select></div>
@@ -34266,6 +34270,45 @@ const anestesia = {
       markDirty();
       return div;
     },
+    /* Linha da tabela "mesma equipe", logo abaixo do 1º código. Leva os
+       mesmos campos (os de equipe/horário vazios e escondidos) para a coleta
+       continuar casando linha a linha. */
+    _addMesma(dados = {}) {
+      const tb = document.getElementById('cir-mesma-body');
+      if (!tb) return null;
+      const ea = utils.escapeAttr;
+      const grauSel = String(dados.grau || '50');
+      const tr = document.createElement('tr');
+      tr.className = 'cir-mesma-equipe';
+      tr.innerHTML =
+        '<td data-label="Código"><input type="text" name="cir_extra_cod[]" value="' + ea(dados.codigo || '') + '" placeholder="ex.: 3.10.09.11-5"></td>' +
+        '<td data-label="Procedimento"><input type="text" name="cir_extra_proc[]" value="' + ea(dados.procedimento || '') + '" placeholder="digite para buscar na CBHPM">' +
+          '<input type="hidden" name="cir_extra_cir[]" value=""><input type="hidden" name="cir_extra_inicio[]" value="">' +
+          '<input type="hidden" name="cir_extra_fim[]" value=""><input type="hidden" name="cir_extra_obs[]" value=""></td>' +
+        '<td data-label="Qtd"><input type="number" min="1" step="1" name="cir_extra_qtd[]" value="' + ea(String(dados.quantidade || 1)) + '" style="width:48px"></td>' +
+        '<td data-label="Lado"><select name="cir_extra_lado[]">' + cirurgia.opcoesLado(dados.lateralidade) + '</select></td>' +
+        '<td data-label="Grau"><select name="cir_extra_grau[]">' + ['100', '70', '50'].map(g => '<option value="' + g + '"' + (g === grauSel ? ' selected' : '') + '>' + g + '%</option>').join('') + '</select></td>' +
+        '<td class="col-rm"><button type="button" class="btn-rm" title="Remover este código" onclick="anestesia.cirurgias._removerMesma(this)">✕</button></td>';
+      tb.appendChild(tr);
+      const wrap = document.getElementById('cir-mesma-wrap'); if (wrap) wrap.style.display = '';
+      try {
+        const desc = tr.querySelector('[name="cir_extra_proc[]"]');
+        const cod = tr.querySelector('[name="cir_extra_cod[]"]');
+        const casar = (m) => { if (cod) cod.value = m[0]; if (desc) desc.value = m[1]; markDirty(); };
+        if (desc) { desc.dataset.semMais = '1'; cbhpm.ligar(desc, { row: tr, qtdFieldName: 'cir_extra_qtd[]', onMatch: casar }); }
+        if (cod) cbhpm.ligarCodigo(cod, { row: tr, onMatch: casar });
+      } catch (e) {}
+      if (!dados.procedimento) { try { tr.querySelector('[name="cir_extra_cod[]"]').focus(); } catch (e) {} }
+      markDirty();
+      return tr;
+    },
+    _removerMesma(btn) {
+      const tr = btn && btn.closest('tr'); if (tr) tr.remove();
+      const tb = document.getElementById('cir-mesma-body');
+      const wrap = document.getElementById('cir-mesma-wrap');
+      if (wrap && tb && !tb.children.length) wrap.style.display = 'none';
+      markDirty();
+    },
     /* Abre os campos escondidos de uma linha "mesma equipe" */
     abrirDetalhes(btn) {
       const div = btn && btn.closest('.grid');
@@ -34282,7 +34325,8 @@ const anestesia = {
       procs.forEach((el, i) => {
         const $ = sel => document.querySelectorAll(`[name="${sel}[]"]`)[i]?.value || '';
         if (el.value || $('cir_extra_cir')) {
-          linhas.push({
+          const codigo = $('cir_extra_cod');
+          linhas.push(Object.assign({
             procedimento: el.value,
             cirurgiao: $('cir_extra_cir'),
             grau: $('cir_extra_grau') || '50',
@@ -34291,7 +34335,7 @@ const anestesia = {
             inicio: $('cir_extra_inicio'),
             fim: $('cir_extra_fim'),
             obs: $('cir_extra_obs')
-          });
+          }, codigo ? { codigo } : {}));
         }
       });
       return linhas;
@@ -34300,6 +34344,7 @@ const anestesia = {
       ['cir-mesma-body', 'cir-combo-body'].forEach(id => {
         const b = document.getElementById(id); if (b) b.innerHTML = '';
       });
+      const wrapMesma = document.getElementById('cir-mesma-wrap'); if (wrapMesma) wrapMesma.style.display = 'none';
       if (!Array.isArray(arr)) return;
       arr.forEach(d => {
         /* linha sem equipe/horário própria é código do mesmo ato → lista de cima */
@@ -40813,6 +40858,10 @@ const anestesia = {
     if (eb) eb.innerHTML = '';
     const cco = document.getElementById('cir-combo-body');
     if (cco) cco.innerHTML = '';
+    const cme = document.getElementById('cir-mesma-body');
+    if (cme) cme.innerHTML = '';
+    const cmw = document.getElementById('cir-mesma-wrap');
+    if (cmw) cmw.style.display = 'none';
     const eax = document.getElementById('equipe-aux-lista');
     if (eax) eax.innerHTML = '';
     const dd = document.getElementById('disp-detalhes-body');

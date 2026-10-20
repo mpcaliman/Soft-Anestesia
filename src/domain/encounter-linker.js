@@ -283,7 +283,11 @@ const rascunhosSync = {
       return enviados;
     } catch (e) { return 0; }
   },
-  async puxar(mod, contextoEsperado) {
+  /* opts.trazerNovos: só o botão "Buscar de outro aparelho" abre aba nova.
+     Os puxões automáticos (abrir o app, entrar, realtime) só atualizam as
+     abas que já estão abertas aqui — ficha começada no computador não vira
+     aba no celular sem ninguém pedir. */
+  async puxar(mod, contextoEsperado, opts = {}) {
     try {
       const contexto = contextoEsperado || cloudRel._capturarContexto();
       if (!contexto) return 0;
@@ -331,6 +335,10 @@ const rascunhosSync = {
         if (!rascunhos.temConteudo(mod, r)) return;   /* aba vazia de outro aparelho não vira aba aqui */
         const local = porId.get(r.id);
         if (!local) {
+          if (!opts.trazerNovos) return;
+          /* ficha já finalizada não vira aba; nem o mesmo paciente duas vezes */
+          if (rascunhosSync._fichaFinalizada(mod, r)) return;
+          if (rascunhosSync._pacienteJaAberto(locais, r)) return;
           locais.push(r); porId.set(r.id, r); novos++;
           rascunhosSync._chegaram.push({ id: r.id, label: r.label || '', updatedAt: r.updatedAt || '' });
           return;
@@ -457,6 +465,19 @@ const rascunhosSync = {
       n += await rascunhosSync.enviar(mod, contexto);
     }
     return n;
+  },
+  _fichaFinalizada(mod, r) {
+    try {
+      const id = r && r.dados && (r.dados._id || r.dados.id);
+      const rec = id ? store.getById(mod, id) : null;
+      return !!(rec && rec._finalizado);
+    } catch (e) { return false; }
+  },
+  _pacienteJaAberto(locais, r) {
+    const norm = v => { try { return utils.semAcento(String(v || '')).toLowerCase().replace(/\s+/g, ' ').trim(); } catch (e) { return String(v || '').toLowerCase().trim(); } };
+    const nome = norm(r && r.label);
+    if (!nome || /^rascunho\b/.test(nome)) return false;
+    return (locais || []).some(x => x && x.id !== r.id && norm(x.label) === nome);
   },
   async puxarTodos(opts = {}) {
     const contexto = cloudRel._capturarContexto();
@@ -1006,7 +1027,7 @@ const rascunhos = {
     try { rascunhos.salvarAtual(mod); } catch (e) {}
     await rascunhosSync.enviar(mod, contexto);       /* leva o daqui antes */
     if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return;
-    const n = await rascunhosSync.puxar(mod, contexto); /* e traz o de lá */
+    const n = await rascunhosSync.puxar(mod, contexto, { trazerNovos: true }); /* e traz o de lá */
     if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return;
     if (!n) { toast('Nenhum rascunho novo em outro aparelho'); return; }
     rascunhos.renderAbas(mod);
