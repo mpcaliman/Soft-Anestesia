@@ -23392,9 +23392,16 @@ const adendos = (() => {
     const head = estado.aplicadas[estado.aplicadas.length - 1];
     const tHead = Date.parse(head ? (head._serverCreatedAt || head.data) : '') || 0;
     const quando = a => Date.parse(a._serverCreatedAt || a.data || '') || 0;
+    /* só as do PRÓPRIO usuário: as que ainda estão neste aparelho (sem
+       recibo) e as dele que a nuvem marcou em conflito. A proposta de outra
+       pessoa que perdeu a corrida não vira documento sem passar pela nuvem. */
+    let eu = '';
+    try { const ctx = contextoAba.capturar(); eu = ctx && ctx.userId || ''; } catch (e) {}
     const vistos = new Set();
+    const minha = a => estado.pendentes.indexOf(a) >= 0 || (!!eu && a._authorId === eu);
     const extras = estado.conflitos.concat(estado.pendentes)
-      .filter(a => a && a._retificacao && a._retificacao.campos && !vistos.has(a.id) && vistos.add(a.id) && quando(a) > tHead)
+      .filter(a => a && a._retificacao && a._retificacao.campos && !vistos.has(a.id) && vistos.add(a.id) &&
+        minha(a) && quando(a) > tHead)
       .sort((a, b) => quando(a) - quando(b));
     let v = estado.vigente;
     extras.forEach(a => { v = adendos._fundirCampos(v, a._retificacao.campos); });

@@ -98,6 +98,7 @@ const printPreview = {
       : '';
     return selo + alerta;
   },
+  _SEM_COMPLEMENTOS: ['termo', 'prescricao', 'documentos', 'risco'],
   _comporDocumento(mod, builder) {
     const anterior = printPreview._verCtx;
     printPreview._verCtx = printPreview._formularioPorModulo[mod]
@@ -111,7 +112,16 @@ const printPreview = {
     /* A FOLHA É SÓ O DOCUMENTO. Adendos e retificações já estão nos campos
        (paraImpressao / vigenteParaImpressao); nenhum quadro "só na tela", nem
        nota de retificação, entra na pré-visualização ou na impressão. */
-    try { return builder(); }
+    try {
+      let html = builder();
+      /* termo, receituário, documento e risco não têm "Informações
+         complementares" no corpo: o que chegou depois por adendo entra aqui,
+         no fim do documento, como parte dele */
+      if (printPreview._SEM_COMPLEMENTOS.indexOf(mod) >= 0 && printPreview._registroFinalizado(mod)) {
+        try { html += printPreview._complementos(printPreview._dadosDoFormulario(mod)); } catch (e) {}
+      }
+      return html;
+    }
     finally { printPreview._verCtx = anterior; }
   },
   abrir() {

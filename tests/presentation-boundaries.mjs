@@ -1048,19 +1048,22 @@ const realPrintBuilders = new Map([['pre', '_buildPre'], ['consulta', '_buildCon
 actualPrint._gerarNomeArquivo = () => 'Documento'; actualPrint._infoLabel = mod => mod;
 actualPrint._sanitizarPaciente = () => 'Paciente'; actualPrint._dataCriacao = () => '2026-10-09';
 actualPrint.refreshSignature = () => {};
+/* O conteúdo dos adendos entra no CORPO, pelos dados que o construtor de
+   cada documento recebe (_dadosDoFormulario → paraImpressao). O construtor de
+   teste imprime o que chegou em "complementos", como o real faz na seção
+   "Informações complementares". */
 for (const [mod, { method }] of realPrintBuilders) {
-  actualPrint[method] = () => '<section>Original ' + mod + '</section>';
+  actualPrint[method] = () => '<section>Original ' + mod + '</section><p>' +
+    escaped(String((() => { try { return (actualPrint._dadosDoFormulario(mod) || {})._complementos || ''; } catch (e) { return ''; } })())) + '</p>';
 }
 for (const mod of realPrintBuilders.keys()) {
   actualPrintSandbox.state.currentModule = mod;
   actualPrint.abrir(); actualPrint.imprimir();
   assert(printedDocument.includes('Original ' + mod));
   assert(printedDocument.includes(escaped(mod + ': ' + hostileAddendum)), mod + ': adendo deve chegar à impressão real');
-  assert(printedDocument.includes(escaped(hostileAuthor)), mod + ': autoria precisa estar escapada');
-  /* O bloco deixou de ser um log ("ADENDOS / CORREÇÕES") e passou a trazer o
-     conteúdo traduzido em campos. O que este teste garante continua igual: o
-     adendo CHEGA à impressão, datado. */
-  assert(printedDocument.includes('2026') && /INFORMAÇÕES ACRESCENTADAS APÓS A FINALIZAÇÃO/.test(printedDocument));
+  assert(!printedDocument.includes(hostileAuthor), mod + ': autoria nunca entra crua na folha');
+  /* A folha é só o documento: o adendo chega no corpo, sem quadro à parte. */
+  assert.doesNotMatch(printedDocument, /INFORMAÇÕES ACRESCENTADAS|Só na tela/, mod + ': nenhum quadro de adendo na folha');
   assert.doesNotMatch(printedDocument, /<(?:img|svg)\b/, 'adendos não podem introduzir HTML executável');
   assert(!printedDocument.includes('consulta: ' + escaped(hostileAddendum)) || mod === 'consulta',
     'somente os adendos do módulo/registro aberto são impressos');
@@ -1147,27 +1150,30 @@ for (const [mod, { method, builder }] of realPrintBuilders) {
   original._adendos.push(
   { id: mod + '-pendente', autor: 'Autor offline', data: '2026-10-09T13:01:00Z', _pushed: false,
     texto: 'Diff ainda pendente', _retificacao: { schema: 1, baseAdendoId: mod + '-retificacao',
-      campos: { nome: 'PENDENTE NÃO APLICADO', texto: 'PENDENTE NÃO APLICADO' }, status: 'pending' } });
+      campos: { nome: 'Pendente proprio ' + mod, paciente: { nome: 'Pendente proprio ' + mod }, texto: 'Pendente proprio ' + mod }, status: 'pending' } });
   freezePrintRecord(original);
   const before = JSON.stringify(original);
   actualPrintSandbox.state.currentModule = mod;
   renderingCurrentVersion = true;
   try { actualPrint.abrir(); actualPrint.imprimir(); } finally { renderingCurrentVersion = false; }
-  if (mod !== 'documentos') assert(printedDocument.includes(escaped(nome)), mod + ': identificação deve vir da versão aceita');
-  /* uma linha no rodapé: retificado e quando; as correções estão no corpo */
-  assert(printedDocument.includes('Documento retificado em') && !printedDocument.includes('VERSÃO ATUAL — RETIFICADA'),
-    mod + ': documento precisa dizer que foi retificado, sem inventário de versões');
+  /* vale a última edição do próprio usuário: a correção ainda sem recibo
+     deste aparelho entra no campo, por cima da versão aceita */
+  if (mod !== 'documentos') assert(printedDocument.includes(escaped('Pendente proprio ' + mod)), mod + ': a última edição do próprio usuário sai no campo');
+  /* a folha é só o documento: nenhuma nota de retificação */
+  assert(!printedDocument.includes('Documento retificado') && !printedDocument.includes('VERSÃO ATUAL — RETIFICADA'),
+    mod + ': nenhuma nota de retificação na folha');
   assert(!printedDocument.includes('RÓTULO DE AUTOR FORJADO'), mod + ': carimbo retificado deve usar autoria canônica do servidor');
-  assert(printedDocument.includes('retificação(ões) em conflito') && printedDocument.includes('pendente(s) de confirmação'),
-    mod + ': conflito e pendência devem ser explícitos');
-  assert(!printedDocument.includes('CONFLITO NÃO APLICADO') && !printedDocument.includes('PENDENTE NÃO APLICADO'),
-    mod + ': campos não aceitos jamais entram no documento');
+  assert(!printedDocument.includes('em conflito') && !printedDocument.includes('pendente(s) de confirmação'),
+    mod + ': nenhum aviso de conflito ou pendência na folha');
+  assert(!printedDocument.includes('CONFLITO NÃO APLICADO'),
+    mod + ': proposta de OUTRO usuário que ficou em conflito jamais entra no documento');
   assert(printedDocument.includes(escaped(mod + ': ' + hostileAddendum)), mod + ': adendos de texto continuam legíveis');
   if (mod === 'pre' || mod === 'consulta') {
     assert(printedDocument.includes('Alergia aceita ' + mod) && printedDocument.includes('Resultado aceito ' + mod));
   }
   if (mod === 'consulta') assert(printedDocument.includes('Seguimento aceito consulta') && printedDocument.includes('Procedimento aceito consulta'));
-  if (mod === 'termo') assert(printedDocument.includes('Texto aceito termo'));
+  /* o texto do termo tem a última edição do próprio usuário por cima da aceita */
+  if (mod === 'termo') assert(printedDocument.includes('Pendente proprio termo') && !printedDocument.includes('Texto aceito termo'));
   if (mod === 'prescricao') assert(printedDocument.includes('Medicamento aceito prescricao') && printedDocument.includes('Posologia aceita'));
   if (mod === 'documentos') assert(printedDocument.includes('Atestado aceito documentos'));
   if (mod === 'risco') assert(printedDocument.includes('Estimativa aceita risco'));
@@ -1177,11 +1183,11 @@ for (const [mod, { method, builder }] of realPrintBuilders) {
 assert.equal(plottedPoints.length, 2, 'ficha e SRPA desenham somente o ponto vigente confirmado');
 for (const point of plottedPoints) assert.equal(point.y, 138, 'FC 80 confirmada deve alimentar o gráfico, sem coleta do formulário');
 actualPrint.abrirPreTermo(); actualPrint.imprimir();
-assert(printedDocument.includes('Texto aceito termo') && printedDocument.includes('Alergia aceita pre'));
-assert.equal((printedDocument.match(/Documento retificado em/g) || []).length, 2, 'cada parte do conjunto identifica sua própria revisão aceita');
+assert(printedDocument.includes('Pendente proprio termo') && printedDocument.includes('Alergia aceita pre'));
+assert.equal((printedDocument.match(/Documento retificado/g) || []).length, 0, 'o conjunto também sai sem nota de retificação');
 actualPrint.abrirConjunto(); actualPrint.imprimir();
-assert(printedDocument.includes('Paciente sintético vigente anestesia') && printedDocument.includes('Paciente sintético vigente recuperacao'));
-assert.equal((printedDocument.match(/Documento retificado em/g) || []).length, 2);
+assert(printedDocument.includes('Pendente proprio anestesia') && printedDocument.includes('Pendente proprio recuperacao'));
+assert.equal((printedDocument.match(/Documento retificado/g) || []).length, 0);
 
 /* Fichas finalizadas antigas guardavam somente as seções preenchidas. A
    impressão conjunta real deve preservar esses campos/adendos e deixar as
@@ -1208,9 +1214,9 @@ for (const complemento of [{}, { pre_anestesico: null, tecnica: null, monitoriza
     'conjunto deve imprimir dados efetivamente presentes na ficha finalizada esparsa');
   assert(printedDocument.includes('Complementação sintética da ficha antiga') && printedDocument.includes('Complementação sintética da SRPA antiga'),
     'ficha esparsa não pode impedir a composição dos dois adendos corretos');
-  assert(printedDocument.includes('Autor sintético da ficha') && printedDocument.includes('Autor sintético da SRPA'));
+  /* o conteúdo entra no corpo; o quadro com autor e data não vai para a folha */
   assert(printedDocument.includes('Observação sintética original da SRPA') && printedDocument.includes('2ª parte — Recuperação pós-anestésica'));
-  assert.equal((printedDocument.match(/INFORMAÇÕES ACRESCENTADAS APÓS A FINALIZAÇÃO/g) || []).length, 2);
+  assert.equal((printedDocument.match(/INFORMAÇÕES ACRESCENTADAS APÓS A FINALIZAÇÃO/g) || []).length, 0);
   assert(!printedDocument.includes('Paciente A') && !printedDocument.includes('Documento retificado'),
     'seções ausentes não podem herdar paciente do formulário nem retificações de outro registro');
   assert.equal(JSON.stringify([ficha, srpa]), antes, 'normalização de apresentação preserva os originais esparsos');
