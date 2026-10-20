@@ -98,6 +98,10 @@ const printPreview = {
       : '';
     return selo + alerta;
   },
+  _desfechoPre(v) {
+    if (!v) return '';
+    try { const x = (pre.DESFECHOS || {})[v]; return (x && x.rot) || String(v); } catch (e) { return String(v); }
+  },
   _SEM_COMPLEMENTOS: ['termo', 'prescricao', 'documentos', 'risco'],
   _comporDocumento(mod, builder) {
     const anterior = printPreview._verCtx;
@@ -1517,10 +1521,12 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._field('Orientação de jejum ao paciente', d.jejum_orientacao, true)}
         ${printPreview._field('Prescrição pré-anestésica (pré-medicação)', d.medicacao_pre, true)}
         ${printPreview._field('Orientações', d.orientacoes, true)}
+        ${printPreview._field('Desfecho', printPreview._desfechoPre(d.conclusao_status))}
         ${printPreview._field('Conclusão', d.conclusao, true)}
       `) +
       printPreview._complementos(d) +
-      printPreview._signature(d.anestesiologista, d.crm ? printPreview._fmt('rotuloCrm', d.crm) : '', d) +
+      /* o bloco de assinatura da pré grava o nome em "profissional" */
+      printPreview._signature(d.profissional || d.anestesiologista, d.crm ? printPreview._fmt('rotuloCrm', d.crm) : '', d) +
       printPreview._footer('Avaliação pré-anestésica') +
       printPreview._buildProtocoloJejumAnexo(d) +
       '</div>';

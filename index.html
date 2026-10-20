@@ -4847,7 +4847,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-20a</b><br>
+    v7.1 · build <b id="build-tag">2026-10-20b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -23403,9 +23403,32 @@ const adendos = (() => {
       .filter(a => a && a._retificacao && a._retificacao.campos && !vistos.has(a.id) && vistos.add(a.id) &&
         minha(a) && quando(a) > tHead)
       .sort((a, b) => quando(a) - quando(b));
-    let v = estado.vigente;
-    extras.forEach(a => { v = adendos._fundirCampos(v, a._retificacao.campos); });
+    /* NADA SOME DO PAPEL POR UMA CORREÇÃO EM BRANCO.
+       Retificação feita com o formulário incompleto gravava campos vazios
+       (orientações, conclusão, assinante) e o documento impresso perdia o que
+       estava escrito. Aqui as retificações aceitas e as do próprio usuário
+       são reaplicadas sobre o original, e um valor vazio não apaga o que havia. */
+    const base = JSON.parse(JSON.stringify(rec));
+    delete base._retificadoEm; delete base._retificadoPor; delete base._retificacoes;
+    let v = base;
+    estado.aplicadas.concat(extras).forEach(a => {
+      v = adendos._fundirSemApagar(v, a._retificacao.campos);
+    });
     return v;
+  },
+  _vazio(x) {
+    return x == null || (typeof x === 'string' && !x.trim()) || (Array.isArray(x) && !x.length) ||
+      (typeof x === 'object' && !Array.isArray(x) && !Object.keys(x).length);
+  },
+  _fundirSemApagar(atual, campos) {
+    const r = Object.assign({}, atual);
+    Object.keys(campos || {}).forEach(k => {
+      const v = campos[k], ant = atual && atual[k];
+      if (adendos._vazio(v) && !adendos._vazio(ant)) return;
+      r[k] = v && ant && typeof v === 'object' && typeof ant === 'object' && !Array.isArray(v) && !Array.isArray(ant)
+        ? adendos._fundirSemApagar(ant, v) : JSON.parse(JSON.stringify(v));
+    });
+    return r;
   },
   _marcarBaseFormulario(mod, rec, form) {
     if (!form || !form.dataset) return;
@@ -23444,10 +23467,15 @@ const adendos = (() => {
     const vazio = v => v === '' || typeof v === 'object' && !Object.keys(v).length;
     return !(vazio(a) && vazio(b)) && !adendos._igualJson(a, b);
   },
+  _ASSINANTE: ['profissional', 'anestesiologista', 'responsavel', 'crm', 'rqe', 'registro'],
   _camposRetificacao(vigente, novo) {
     const campos = {};
     for (const k of Object.keys(novo || {})) {
       if (adendos._campoProtegido(k)) continue;
+      /* quem assinou não muda por retificação; e campo preenchido não é
+         apagado por um formulário que abriu incompleto */
+      if (adendos._ASSINANTE.indexOf(String(k).toLowerCase()) >= 0) continue;
+      if (adendos._vazio(novo[k]) && !adendos._vazio(vigente && vigente[k])) continue;
       try {
         const valor = adendos._jsonClinico(novo[k], 1);
         if (adendos._mudouCampoClinico(k, vigente[k], valor)) campos[k] = valor;
