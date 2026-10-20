@@ -98,6 +98,21 @@ const printPreview = {
       : '';
     return selo + alerta;
   },
+  /* A IMAGEM DA ASSINATURA SEMPRE SAI.
+     O registro pode trazer só a referência local da imagem ("blob:…", de
+     outro aparelho ou já limpa daqui) ou um quadro em branco gravado antes
+     do carimbo carregar. Nesses casos vale o carimbo cadastrado de quem assinou. */
+  _srcAssinatura(url, nome) {
+    let u = typeof url === 'string' ? url : '';
+    if (u.indexOf('blob:') === 0) {
+      try { u = (store._blobs() || {})[u] || ''; } catch (e) { u = ''; }
+    }
+    const valida = /^data:image\//.test(u) && u.length > 3000;
+    if (valida) return u;
+    let carimbo = '';
+    if (nome) { try { const p = utils.getCarimboDoProfissional(nome); carimbo = (p && p.carimbo) || ''; } catch (e) {} }
+    return carimbo || (/^data:image\//.test(u) ? u : '');
+  },
   _desfechoPre(v) {
     if (!v) return '';
     try { const x = (pre.DESFECHOS || {})[v]; return (x && x.rot) || String(v); } catch (e) { return String(v); }
@@ -1357,13 +1372,9 @@ ${TAG_CLOSE_HTML}`;
        Caso contrário, faz fallback para busca do carimbo pelo nome do profissional. */
     let imgHTML = '';
     let dataAssin = '';
-    if (dadosForm && dadosForm.assinatura_dataurl) {
-      imgHTML = `<img src="${dadosForm.assinatura_dataurl}" alt="">`;
-      dataAssin = dadosForm.data_assinatura || '';
-    } else if (nomeProf) {
-      const p = utils.getCarimboDoProfissional(nomeProf);
-      if (p && p.carimbo) imgHTML = `<img src="${p.carimbo}" alt="">`;
-    }
+    const src = printPreview._srcAssinatura(dadosForm && dadosForm.assinatura_dataurl, nomeProf);
+    if (src) imgHTML = `<img src="${src}" alt="">`;
+    if (dadosForm && dadosForm.assinatura_dataurl) dataAssin = dadosForm.data_assinatura || '';
     const linha = (nomeProf || '_____________________________') + (registro ? '\n' + registro : '');
     const selo = dadosForm ? printPreview._icpSelo(dadosForm.assinatura_meta) : '';
     return `
@@ -2326,13 +2337,8 @@ ${TAG_CLOSE_HTML}`;
     if (!a) return '';
     const renderUm = (nome, crm, dataHora, dataurl, meta) => {
       /* Se não tem dataurl, busca carimbo cadastrado pelo nome */
-      let imgHTML = '';
-      if (dataurl) {
-        imgHTML = `<img src="${dataurl}" alt="">`;
-      } else if (nome) {
-        const p = utils.getCarimboDoProfissional(nome);
-        if (p && p.carimbo) imgHTML = `<img src="${p.carimbo}" alt="">`;
-      }
+      const src = printPreview._srcAssinatura(dataurl, nome);
+      const imgHTML = src ? `<img src="${src}" alt="">` : '';
       const linhaNome = nome || '_____________________________';
       const linhaCrm = crm ? printPreview._fmt('rotuloCrm', crm) : '';
       return `
@@ -2500,6 +2506,7 @@ ${TAG_CLOSE_HTML}`;
 
   /* Assinatura desenhada (canvas) para Termo/Prescrição */
   _assinaturaDesenhada(dataUrl, linhaNome, linhaRegistro, papel) {
+    dataUrl = papel === 'prof' ? printPreview._srcAssinatura(dataUrl, linhaNome) : printPreview._srcAssinatura(dataUrl, '');
     const img = dataUrl ? `<img src="${dataUrl}" alt="" style="display:block;max-width:200px;max-height:60px;width:auto;height:auto;margin:0 auto 2px">` : '';
     const nome = linhaNome || '_____________________________';
     if (papel === 'prof' && linhaRegistro) { try { linhaRegistro = printPreview._fmt('rotuloCrm', linhaRegistro); } catch (e) {} }

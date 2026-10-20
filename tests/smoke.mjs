@@ -22541,6 +22541,16 @@ await test('Impressão da pré: orientações, conclusão e assinatura não some
     out.desfecho = t.includes('Liberado para a cirurgia');
     out.assinante = /Fulano de Tal/i.test(t) && t.includes('12345');
     printPreview.fechar();
+    /* imagem gravada só como referência local (outro aparelho): sai o carimbo cadastrado */
+    const CARIMBO = 'data:image/png;base64,' + 'A'.repeat(4000);
+    store.setList('cad_assinaturas', [{ _id: 'perfil-sig', nomeProfissional: 'Fulano de Tal', crm: '12345', carimbo: CARIMBO }]);
+    const r2 = Object.assign({}, store.getById('pre', 'pre-sig'), { assinatura_dataurl: 'blob:naoexiste.9999', data_assinatura: '15/10/2026 15:14' });
+    store.setList('pre', [r2]);
+    pre.carregar(store.getById('pre', 'pre-sig'));
+    printPreview.abrir();
+    const img = document.querySelector('#ppp .pp-signature-prof img');
+    out.carimboNoLugar = !!img && img.getAttribute('src') === CARIMBO;
+    printPreview.fechar();
     /* e uma nova retificação não grava o campo em branco nem troca o assinante */
     const c = adendos._camposRetificacao({ orientacoes: 'x', profissional: 'A' }, { orientacoes: '', profissional: 'B', conclusao: 'nova' });
     out.camposLimpos = !('orientacoes' in c) && !('profissional' in c) && 'conclusao' in c;
