@@ -44093,6 +44093,14 @@ const assinatura = {
     assinatura.carimbarDataHora(prefixo);
     if (form) { try { assinatura._registrarHashCarimbo(form, sfx, dataUrl); } catch (e) {} }
     markDirty();
+    /* documento finalizado: a assinatura gravada não muda por edição — avisa
+       em vez de deixar parecer que o carimbo novo valeu */
+    try {
+      const mod = String(form && form.id || '').replace(/^form-/, '');
+      const id = form && (form.querySelector('[name="_id"]') || {}).value;
+      const rec = id ? store.getById(mod, id) : null;
+      if (rec && rec._finalizado) toast('Documento finalizado: a assinatura gravada não muda. Na impressão sai o carimbo cadastrado com SHA-256 da conferência.', 'info');
+    } catch (e) {}
   },
   /* CARIMBOU, REGISTROU A IMPRESSÃO DIGITAL DO DOCUMENTO.
      O carimbo é a imagem; o hash é o que prova O QUE foi carimbado. Na hora de

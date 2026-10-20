@@ -22550,6 +22550,8 @@ await test('Impressão da pré: orientações, conclusão e assinatura não some
     printPreview.abrir();
     const img = document.querySelector('#ppp .pp-signature-prof img');
     out.carimboNoLugar = !!img && img.getAttribute('src') === CARIMBO;
+    const t2 = document.getElementById('ppp').textContent;
+    out.shaNaImpressao = /conferência na impressão/.test(t2) && /SHA-256: [0-9a-f]{64}/.test(t2);
     printPreview.fechar();
     /* e uma nova retificação não grava o campo em branco nem troca o assinante */
     const c = adendos._camposRetificacao({ orientacoes: 'x', profissional: 'A' }, { orientacoes: '', profissional: 'B', conclusao: 'nova' });
