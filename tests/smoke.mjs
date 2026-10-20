@@ -11497,6 +11497,19 @@ await test('Sync: adendo preso sai com a prova da nuvem, e conflitos seguem a ú
       out.virouEdicao = r2.obs === 'novo' && !(r2._adendos || []).some(x => x.id === ad2.id) &&
         enviadosReg.some(x => x._id === 'pre-aberto' && x.obs === 'novo');
       out.saiuB = !(await naFila()).some(x => x.entityId === ad2.id);
+
+      /* C) continua presa: o painel diz exatamente por quê */
+      const pai3 = { _id: 'pre-fin3', nome: 'Outro Finalizado', _finalizado: true, _relOrg: 'org-1' };
+      store.setList('pre', store.list('pre').concat([pai3]));
+      adendos.enviarOperacao = async () => ({ ok: false, motivo: 'rede' });
+      const ad3 = adendos.registrarTexto('pre', 'pre-fin3', 'CORREÇÃO: x', 'correcao', { schema: 1, baseAdendoId: '', campos: { obs: 'y' } });
+      await store.aguardarNuvem(ad3);
+      adendos.enviarOperacao = async () => ({ ok: false, motivo: 'http 400' });
+      cloudRel._lerAtualTab = async () => ({ id: 'srv-fin3', finalized_at: '2026-10-01T00:00:00Z' });
+      persistenciaCloudFirst._consultasAdendo.clear();
+      await persistenciaCloudFirst.drenar();
+      const op3 = (await naFila()).find(x => x.entityId === ad3.id);
+      out.motivoNoPainel = !!op3 && /adendo preso: documento finalizado na nuvem/.test(op3.queue.lastError || '');
     } finally { window.fetch = fetchOriginal; }
 
     /* C) conflitos: vence a última edição, sem pergunta */
@@ -22468,7 +22481,40 @@ await test('Em máquina compartilhada, fechar a aba e reabrir não deixa o atend
 
 /* 255) Adendos/correções devem chegar à impressão do registro aberto,
    inclusive ao arquivo único ficha + SRPA, sem modificar o original assinado. */
-await test('Adendos aparecem na tela do operador e não saem na folha impressa', async () => {
+/* A folha sai com a ÚLTIMA edição: retificação em conflito ou ainda sem
+   recibo entra no seu campo; nenhum aviso "só na tela" na pré-visualização. */
+await test('Impressão: a última retificação entra no campo, mesmo em conflito, e não há aviso na folha', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    await __smokePrepareQueue('org-imp-ultima', 'medico-imp-ultima');
+    auth._desbloquear();
+    const ctx = contextoAba.capturar();
+    const rec = { _id: 'pre-ult', _relOrg: ctx.organizationId, _relId: 'pai-ult', _finalizado: true, nome: 'Paciente Ultima',
+      data: '2026-10-15', lab_hb: '12,0', altura: '0.90', peso: '11.5', _adendos: [] };
+    store.setList('pre', [rec]);
+    const linha = (id, criado, campos, status, rev) => ({ organization_id: ctx.organizationId, parent_table: 'preanesthetic_assessments',
+      parent_id: 'pai-ult', parent_legacy_id: 'pre-ult', legacy_id: id, reason: 'correcao', texto: 'CORREÇÃO', author_id: ctx.userId,
+      created_at: criado, retification_revision: status === 'accepted' ? rev : null,
+      data: { retificacao: { schema: 1, baseAdendoId: '', campos, status, revisao: rev, baseAtualId: '' } } });
+    adendos.receberLinha(linha('r1', '2026-10-16T10:00:00Z', { lab_hb: '12,5' }, 'accepted', 1));
+    /* chegou depois e ficou em conflito: é a última edição */
+    adendos.receberLinha(linha('r2', '2026-10-17T11:33:12Z', { lab_hb: '12,2' }, 'conflict', 1));
+    const out = {};
+    ui.navegar('pre'); pre.carregar(store.getById('pre', 'pre-ult'));
+    printPreview.abrir();
+    const t = document.getElementById('ppp').textContent;
+    out.ultimaNoCampo = t.includes('12,2') && !t.includes('12,5');
+    out.semAvisos = !/Só na tela/.test(t) && !/em conflito/.test(t) && !/retificad/i.test(t) && !/INFORMAÇÕES ACRESCENTADAS/.test(t);
+    out.altura = /90 cm/.test(t) && !/0\.90 cm/.test(t);
+    out.gravadoIntacto = store.getById('pre', 'pre-ult').lab_hb === '12,0';
+    printPreview.fechar();
+    return out;
+  });
+  for (const [k, v] of Object.entries(r)) assert(v, 'falhou: ' + k + ' → ' + JSON.stringify(r));
+  await page.close();
+});
+
+await test('Adendos entram no corpo do documento impresso, sem quadro à parte', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
     await __smokePrepareQueue('org-impressao-adendos', 'medico-impressao-adendos');
@@ -22506,26 +22552,15 @@ await test('Adendos aparecem na tela do operador e não saem na folha impressa',
     out.achouORegistro = printPreview._registroDoFormulario('pre')._id === registroPre._id;
     printPreview.abrir();
     const ppp = document.getElementById('ppp');
-    const bloco = ppp.querySelector('.print-adendos');
-    const texto = bloco ? bloco.textContent : '';
-    /* O título mudou com o formato: o bloco deixou de ser um log de
-       "ADENDOS / CORREÇÕES" e passou a ser o que o leitor precisa entender —
-       informação que chegou depois e faz parte da avaliação. */
-    out.temBloco = ppp.querySelectorAll('.print-adendos').length === 1
-      && /INFORMAÇÕES ACRESCENTADAS APÓS A FINALIZAÇÃO/.test(texto);
-    out.temOConteudo = texto.includes('Hb 13,2') && texto.includes('ECG sem alterações');
-    const dataExibida = adendos._fmtData(dataAdendo);
-    out.temAutorEData = !!dataExibida && texto.includes(dataExibida) && texto.includes(autor);
-    out.dizQueOOriginalEhODeCima = /original permanece preservado/i.test(texto);
-    out.contaQuantos = /FINALIZAÇÃO — 1/.test(texto);
-    const linhaAdendo = bloco && bloco.querySelector('div:last-child');
-    out.tamanhoDeLeitura = !!linhaAdendo && parseFloat(getComputedStyle(linhaAdendo).fontSize) >= 11.9;
-    out.originalNaFolha = ppp.textContent.includes(registroPre.exames_compl) && ppp.textContent.includes(nome);
-    out.somentePacienteAberto = !ppp.textContent.includes(outroPre._adendos[0].texto);
-    /* o operador vê; a folha impressa não leva */
+    /* A FOLHA É SÓ O DOCUMENTO: nenhum quadro "informações acrescentadas",
+       nenhum aviso "só na tela" — o conteúdo do adendo entra no corpo. */
+    const tela = ppp.textContent;
+    out.semQuadro = !ppp.querySelector('.print-adendos') && !/INFORMAÇÕES ACRESCENTADAS/.test(tela) && !/Só na tela/.test(tela);
+    out.conteudoNoCorpo = tela.includes('Hb 13,2') && tela.includes('ECG sem alterações');
+    out.originalNaFolha = tela.includes(registroPre.exames_compl) && tela.includes(nome);
+    out.somentePacienteAberto = !tela.includes(outroPre._adendos[0].texto) && !tela.includes('Conteúdo reservado');
     const folha = printPreview._htmlDaFolha(ppp);
-    out.foraDaFolha = !folha.includes('print-adendos') && !folha.includes('INFORMAÇÕES ACRESCENTADAS')
-      && folha.includes(nome);
+    out.folhaIgualTela = !folha.includes('print-adendos') && !folha.includes('INFORMAÇÕES ACRESCENTADAS') && folha.includes('Hb 13,2');
     printPreview.fechar();
 
     /* O mesmo conteúdo deve seguir as duas partes do arquivo único real. */
@@ -22536,13 +22571,9 @@ await test('Adendos aparecem na tela do operador e não saem na folha impressa',
     linker.aplicarContextoCaso('anestesia', registroAnestesia);
     linker.aplicarContextoCaso('recuperacao', registroSrpa);
     printPreview.abrirConjunto();
-    const blocosConjunto = Array.from(ppp.querySelectorAll('.print-adendos'));
-    out.conjuntoTemAmbos = blocosConjunto.length === 2
-      && blocosConjunto[0].textContent.includes(registroAnestesia._adendos[0].texto)
-      && blocosConjunto[1].textContent.includes(registroSrpa._adendos[0].texto)
-      && blocosConjunto.every(b => b.textContent.includes(autor) && b.textContent.includes(dataExibida)
-        && /original permanece preservado/i.test(b.textContent)
-        && parseFloat(getComputedStyle(b.querySelector('div:last-child')).fontSize) >= 11.9)
+    out.conjuntoTemAmbos = !ppp.querySelector('.print-adendos')
+      && ppp.textContent.includes('registro sintético intraoperatório conferido')
+      && ppp.textContent.includes('observação sintética de recuperação complementada')
       && ppp.textContent.includes(nome) && ppp.textContent.includes('2ª parte — Recuperação pós-anestésica');
     out.conjuntoSemOutroPaciente = !ppp.textContent.includes(outroPre._adendos[0].texto)
       && !ppp.textContent.includes(registroPre._adendos[0].texto);
@@ -22559,13 +22590,10 @@ await test('Adendos aparecem na tela do operador e não saem na folha impressa',
     return out;
   });
   assert(r.achouORegistro, 'a impressão acha o registro aberto pelo id do formulário');
-  assert(r.foraDaFolha, 'as informações acrescentadas aparecem na tela, mas não saem na impressão');
-  assert(r.temBloco && r.temOConteudo, 'abrir impressão inclui a seção de adendos e o conteúdo da correção');
-  assert(r.temAutorEData, 'a correção impressa conserva data e autoria');
-  assert(r.dizQueOOriginalEhODeCima && r.contaQuantos, 'a folha distingue o original preservado e informa o número de correções');
-  assert(r.tamanhoDeLeitura, 'o conteúdo do adendo renderiza com pelo menos 9pt, também no pacote CSP');
+  assert(r.semQuadro, 'a pré-visualização não traz quadro de informações acrescentadas nem aviso só na tela');
+  assert(r.conteudoNoCorpo && r.folhaIgualTela, 'o conteúdo do adendo sai no corpo do documento, igual na tela e na folha');
   assert(r.originalNaFolha && r.somentePacienteAberto, 'a folha traz o original e somente as correções do paciente aberto');
-  assert(r.conjuntoTemAmbos && r.conjuntoSemOutroPaciente, 'o arquivo único inclui os adendos da ficha e da SRPA corretas');
+  assert(r.conjuntoTemAmbos && r.conjuntoSemOutroPaciente, 'o arquivo único inclui o conteúdo dos adendos da ficha e da SRPA, no corpo');
   assert(r.originaisPreservados, 'imprimir não modifica os registros assinados nem seus adendos');
   assert(r.semAdendoNaoPoluiu && r.semRegistroNaoQuebra, 'sem adendo ou registro aberto nenhum bloco é acrescentado');
   await page.close();
@@ -22614,13 +22642,14 @@ await test('Retificação: valores confirmados entram nos campos e na impressão
     printPreview.abrir();
     const texto = document.getElementById('ppp').textContent;
     out.impressaoAtual = texto.includes('14,6') && !texto.includes('VALOR NÃO CONFIRMADO')
-      && texto.includes('Documento retificado em') && !texto.includes('VERSÃO ATUAL')
+      && !texto.includes('Documento retificado') && !texto.includes('VERSÃO ATUAL')
       && !texto.includes('RÓTULO FORJADO NÃO CONFIÁVEL');
     /* O SELO FECHA A FOLHA, NÃO A ABRE. Ele saía em cima, e a primeira coisa
        que a equipe lia — antes do nome do paciente — era um UUID e uma nota de
        versionamento. Procedência se assina no rodapé. Vale para todo documento:
        a ordem é montada num lugar só (printPreview._comporDocumento). */
-    out.seloNoFim = texto.indexOf('Documento retificado em') > texto.indexOf('Paciente Sintético Atual');
+    /* sem nota de retificação na folha: as correções já estão nos campos */
+    out.seloNoFim = !/retificad/i.test(texto) && texto.includes('Paciente Sintético Atual');
     printPreview.fechar();
     const falso = JSON.parse(JSON.stringify(salvo));
     falso._adendos = [{ ...falso._adendos[0], id: 'evento-forjado-sintetico',
@@ -22643,7 +22672,7 @@ await test('Retificação: valores confirmados entram nos campos e na impressão
   assert(r.vinculosPreservados && r.outroPacienteIntacto, 'novos nome/CPF não mudam UUIDs, caso ou outro cadastro');
   assert(r.baseAbertaNaoFoiTrocada && r.formularioAtual, 'cada edição conserva sua base e reabrir carrega a revisão vigente');
   assert(r.impressaoAtual, 'a folha traz os valores confirmados e autoria canônica, mesmo com edição pendente no formulário');
-  assert(r.seloNoFim, 'o selo de retificação sai DEPOIS do conteúdo: quem lê a pré quer o paciente primeiro, não o UUID da versão');
+  assert(r.seloNoFim, 'nenhuma nota de retificação na folha: as correções saem nos próprios campos');
   assert(r.jsonNaoAutoriza && r.reciboValido && r.reciboProtegeAutorEPai && r.contextoNaoHerdeProva,
     'JSON pai, autor/pai inválido e troca de contexto não conferem recibo de retificação');
   await page.close();

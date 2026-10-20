@@ -38,6 +38,16 @@ const printPreview = {
     if (!registro) return '';
     try { return adendos.htmlParaImpressao(registro._finalizado ? adendos.vigente(mod, registro) : registro) || ''; } catch (e) { return ''; }
   },
+  /* 0,90 é metro: sai 90 cm, não "0.90 cm" */
+  _alturaCm(v) {
+    const n = parseFloat(String(v == null ? '' : v).replace(',', '.'));
+    if (!Number.isFinite(n) || n <= 0) return String(v || '');
+    return String(n < 3 ? Math.round(n * 100) : Math.round(n));
+  },
+  _vig(mod, registro) {
+    try { return adendos.vigenteParaImpressao ? adendos.vigenteParaImpressao(mod, registro) : adendos.vigente(mod, registro); }
+    catch (e) { return adendos.vigente(mod, registro); }
+  },
   _registroFinalizado(mod) {
     const registro = printPreview._registroDoFormulario(mod);
     return registro && registro._finalizado ? registro : null;
@@ -47,7 +57,7 @@ const printPreview = {
   _dadosDoFormulario(mod, coletar) {
     const registro = printPreview._registroFinalizado(mod);
     if (registro) {
-      const vig = adendos.vigente(mod, registro);
+      const vig = printPreview._vig(mod, registro);
       try { return adendos.paraImpressao ? adendos.paraImpressao(mod, vig) : vig; } catch (e) { return vig; }
     }
     return typeof coletar === 'function' ? coletar() : utils.formData(printPreview._formularioPorModulo[mod]);
@@ -55,7 +65,7 @@ const printPreview = {
   _nomePacienteDoFormulario(mod) {
     const finalizado = printPreview._registroFinalizado(mod);
     if (finalizado) {
-      const vigente = adendos.vigente(mod, finalizado);
+      const vigente = printPreview._vig(mod, finalizado);
       return mod === 'anestesia' ? (vigente.paciente || {}).nome || '' : vigente.nome || vigente.paciente_nome || '';
     }
     const form = document.getElementById(printPreview._formularioPorModulo[mod] || 'form-' + mod);
@@ -88,6 +98,7 @@ const printPreview = {
       : '';
     return selo + alerta;
   },
+  _SEM_COMPLEMENTOS: ['termo', 'prescricao', 'documentos', 'risco'],
   _comporDocumento(mod, builder) {
     const anterior = printPreview._verCtx;
     printPreview._verCtx = printPreview._formularioPorModulo[mod]
@@ -98,7 +109,19 @@ const printPreview = {
        Quem pega uma pré-anestésica quer o paciente, a cirurgia e os exames;
        de onde aquela versão veio é informação de procedência, e procedência
        se assina no rodapé. A ordem é: conteúdo, adendos, e então o selo. */
-    try { return builder() + printPreview._adendosDoFormulario(mod) + printPreview._versaoAtualDoFormulario(mod); }
+    /* A FOLHA É SÓ O DOCUMENTO. Adendos e retificações já estão nos campos
+       (paraImpressao / vigenteParaImpressao); nenhum quadro "só na tela", nem
+       nota de retificação, entra na pré-visualização ou na impressão. */
+    try {
+      let html = builder();
+      /* termo, receituário, documento e risco não têm "Informações
+         complementares" no corpo: o que chegou depois por adendo entra aqui,
+         no fim do documento, como parte dele */
+      if (printPreview._SEM_COMPLEMENTOS.indexOf(mod) >= 0 && printPreview._registroFinalizado(mod)) {
+        try { html += printPreview._complementos(printPreview._dadosDoFormulario(mod)); } catch (e) {}
+      }
+      return html;
+    }
     finally { printPreview._verCtx = anterior; }
   },
   abrir() {
@@ -854,7 +877,7 @@ ${TAG_CLOSE_HTML}`;
   _tipoDoDocumento(mod) {
     if (mod === 'prescricao') {
       const finalizado = printPreview._registroFinalizado(mod);
-      if (finalizado) return printPreview.TIPOS_PRESCRICAO[adendos.vigente(mod, finalizado).modelo || 'simples'] || 'Receita';
+      if (finalizado) return printPreview.TIPOS_PRESCRICAO[printPreview._vig(mod, finalizado).modelo || 'simples'] || 'Receita';
       const r = document.querySelector('#form-prescricao [name="modelo"]:checked');
       return printPreview.TIPOS_PRESCRICAO[(r && r.value) || 'simples'] || 'Receita';
     }
@@ -1220,7 +1243,7 @@ ${TAG_CLOSE_HTML}`;
   /* Sinais vitais e medidas (peso, altura, IMC, PA, FC, FR, SpO2, Temp, Dor) — só preenchidos */
   _vitaisPre(d) {
     const vitais = [
-      ['Peso', d.peso ? d.peso + ' kg' : ''], ['Altura', d.altura ? d.altura + ' cm' : ''], ['IMC', d.imc],
+      ['Peso', d.peso ? d.peso + ' kg' : ''], ['Altura', d.altura ? printPreview._alturaCm(d.altura) + ' cm' : ''], ['IMC', d.imc],
       ['Peso ideal / corrigido', d.peso_ideal],
       ['PA', d.pa], ['FC', d.fc ? d.fc + ' bpm' : ''], ['FR', d.fr ? d.fr + ' irpm' : ''],
       ['SpO₂', d.spo2 ? d.spo2 + '%' : ''], ['Temp', d.temp ? d.temp + '°C' : ''], ['Dor', d.dor]
@@ -1595,7 +1618,7 @@ ${TAG_CLOSE_HTML}`;
               : [];
         if (candidatos.length === 1) alvo = candidatos[0];
       }
-      if (alvo && alvo._finalizado) alvo = adendos.vigente('risco', alvo);
+      if (alvo && alvo._finalizado) alvo = printPreview._vig('risco', alvo);
       if (!alvo || !alvo.incluir_impressao || !alvo._resumo) return '';
       const tabela = risco.resumoCompactoHTML({ _resumo: alvo._resumo });
       if (!tabela) return '';
@@ -1718,7 +1741,7 @@ ${TAG_CLOSE_HTML}`;
         ${printPreview._field('Sexo', p.sexo)}
         ${printPreview._field('Nome da mãe', p.nome_mae)}
         ${printPreview._field('Peso', p.peso ? p.peso + ' kg' : '')}
-        ${printPreview._field('Altura', p.altura ? p.altura + ' cm' : '')}
+        ${printPreview._field('Altura', p.altura ? printPreview._alturaCm(p.altura) + ' cm' : '')}
         ${printPreview._field('IMC', p.imc)}
         ${printPreview._field('Prontuário', p.prontuario)}
         ${printPreview._field('Convênio', p.convenio)}
