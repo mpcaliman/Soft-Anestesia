@@ -22666,6 +22666,53 @@ await test('Finalizar fecha a aba e zera a ficha, sem resto do paciente anterior
   await page.close();
 });
 
+/* Evento que desce sozinho dos cards (técnica, bloqueio, ventilação) pode ser
+   apagado e editado: apagado, a próxima gravação não o recria. E a linha do
+   tempo fica em ordem de horário. */
+await test('Ficha: evento automático apagado não volta, e os eventos ficam em ordem de horário', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    ui.navegar('anestesia'); await new Promise(ok => setTimeout(ok, 300));
+    anestesia.limparSilencioso();
+    const f = document.getElementById('form-anestesia');
+    const tipos = () => Array.from(document.querySelectorAll('#eventos-body [name="evt_tipo[]"]')).map(x => x.value);
+    const horas = () => Array.from(document.querySelectorAll('#eventos-body [name="evt_hora[]"]')).map(x => x.value);
+    anestesia.eventos.add({ tipo: 'Venoclise', hora: '15:32' });
+    anestesia.eventos.add({ tipo: 'Fim da cirurgia', hora: '16:43' });
+    /* o bloqueio do card desce para a linha do tempo, no lugar certo */
+    const sel = f.querySelector('[name="bloqueio_tipo"]');
+    const opRaqui = Array.from(sel.options).find(o => /raqui/i.test(o.value || o.textContent));
+    sel.value = opRaqui.value;
+    f.querySelector('[name="bloqueio_hora"]').value = '15:41';
+    anestesia.eventos.sincronizarDoBloqueio();
+    out.desceuEmOrdem = JSON.stringify(tipos()) === JSON.stringify(['Venoclise', 'Raquianestesia', 'Fim da cirurgia']) &&
+      JSON.stringify(horas()) === JSON.stringify(['15:32', '15:41', '16:43']);
+    /* editar a hora reordena */
+    const linhaRaqui = Array.from(document.querySelectorAll('#eventos-body tr')).find(tr => tr.querySelector('[name="evt_tipo[]"]').value === 'Raquianestesia');
+    const h = linhaRaqui.querySelector('[name="evt_hora[]"]'); h.value = '17:00'; h.dispatchEvent(new Event('change'));
+    out.editarReordena = tipos()[2] === 'Raquianestesia';
+    /* apagar: não volta com a gravação (que relê os cards) nem ao reabrir */
+    anestesia.eventos.remover(linhaRaqui.querySelector('.col-rm button'));
+    const d = anestesia.coletarEstruturado();
+    out.naoVoltaAoGravar = tipos().indexOf('Raquianestesia') < 0 && !d.eventos.some(e => e.tipo === 'Raquianestesia');
+    anestesia.limparSilencioso();
+    anestesia.restaurarEstruturado(d);
+    anestesia.coletarEstruturado();
+    out.naoVoltaAoReabrir = tipos().indexOf('Raquianestesia') < 0;
+    /* incluir de novo, à mão, vale */
+    anestesia.eventos.add({ tipo: 'Raquianestesia', hora: '15:41' });
+    anestesia.coletarEstruturado();
+    out.voltaAMao = tipos().filter(t => t === 'Raquianestesia').length === 1;
+    /* ficha nova não herda a lista de apagados */
+    anestesia.limparSilencioso();
+    out.fichaNovaLimpa = anestesia.eventos._removidos.size === 0;
+    return out;
+  });
+  for (const [k, v] of Object.entries(r)) assert(v, 'falhou: ' + k + ' → ' + JSON.stringify(r));
+  await page.close();
+});
+
 await test('Impressão da pré: orientações, conclusão e assinatura não somem por retificação em branco', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
