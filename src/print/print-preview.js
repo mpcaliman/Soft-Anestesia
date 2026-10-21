@@ -2389,13 +2389,13 @@ ${TAG_CLOSE_HTML}`;
 
     html += printPreview._complementos(d);
     /* === ASSINATURA NOVA (com carimbo / desenho) === */
-    html += printPreview._signatureAnestesia(d.assinatura);
+    html += printPreview._signatureAnestesia(d.assinatura, d);
     html += printPreview._footer('Ficha de anestesia');
     return html;
   },
 
   /* Bloco específico de assinatura para a Anestesia (suporta 1 ou 2 anestesistas) */
-  _signatureAnestesia(a) {
+  _signatureAnestesia(a, doc = null) {
     if (!a) return '';
     const renderUm = (nome, crm, dataHora, dataurl, meta) => {
       /* Se não tem dataurl, busca carimbo cadastrado pelo nome */
@@ -2408,7 +2408,7 @@ ${TAG_CLOSE_HTML}`;
           <div class="pp-signature-img-slot">${imgHTML}</div>
           <div style="white-space:pre-line">${utils.escapeHTML(linhaNome)}${linhaCrm ? '\n' + utils.escapeHTML(linhaCrm) : ''}</div>
           ${dataHora ? `<div style="font-size:8pt;color:#666;margin-top:2px">${utils.escapeHTML(dataHora)}</div>` : ''}
-          ${printPreview._icpSelo(meta)}
+          ${printPreview._icpSelo(meta) || (doc && doc._finalizado && src ? printPreview._seloImpressao(doc, src) : '')}
         </div>
       `;
     };
@@ -2567,8 +2567,11 @@ ${TAG_CLOSE_HTML}`;
   },
 
   /* Assinatura desenhada (canvas) para Termo/Prescrição */
-  _assinaturaDesenhada(dataUrl, linhaNome, linhaRegistro, papel) {
+  _assinaturaDesenhada(dataUrl, linhaNome, linhaRegistro, papel, doc = null) {
     dataUrl = papel === 'prof' ? printPreview._srcAssinatura(dataUrl, linhaNome) : printPreview._srcAssinatura(dataUrl, '');
+    const selo = papel === 'prof' && doc
+      ? (printPreview._icpSelo(doc.assinatura_meta) || (doc._finalizado && dataUrl ? printPreview._seloImpressao(doc, dataUrl) : ''))
+      : '';
     const img = dataUrl ? `<img src="${dataUrl}" alt="" style="display:block;max-width:200px;max-height:60px;width:auto;height:auto;margin:0 auto 2px">` : '';
     const nome = linhaNome || '_____________________________';
     if (papel === 'prof' && linhaRegistro) { try { linhaRegistro = printPreview._fmt('rotuloCrm', linhaRegistro); } catch (e) {} }
@@ -2577,6 +2580,7 @@ ${TAG_CLOSE_HTML}`;
       <div class="pp-signature${classePapel}" style="text-align:center">
         <div class="pp-signature-img-slot" style="min-height:60px;display:flex;align-items:flex-end;justify-content:center">${img}</div>
         <div style="white-space:pre-line;border-top:1px solid #333;padding-top:3px;margin-top:2px">${utils.escapeHTML(nome)}${linhaRegistro ? '\n' + utils.escapeHTML(linhaRegistro) : ''}</div>
+        ${selo}
       </div>`;
   },
 
@@ -2624,7 +2628,7 @@ ${TAG_CLOSE_HTML}`;
     const assinaturas = `
       <div class="pp-signature-area" style="display:flex;gap:30px;justify-content:space-between;margin-top:40px">
         ${printPreview._assinaturaDesenhada(d.sig_paciente_dataurl, labelPac, d.documento ? 'Doc: ' + printPreview._padrao('CPF', d.documento) : '', 'pac')}
-        ${printPreview._assinaturaDesenhada(d.assinatura_dataurl || d.sig_profissional_dataurl, d.profissional || 'Profissional', d.crm, 'prof')}
+        ${printPreview._assinaturaDesenhada(d.assinatura_dataurl || d.sig_profissional_dataurl, d.profissional || 'Profissional', d.crm, 'prof', d)}
       </div>`;
 
     /* pp-compacto: mesma redução da pré (ver CSS) */
@@ -2727,7 +2731,7 @@ ${TAG_CLOSE_HTML}`;
 
     const assinatura = `
       <div class="pp-signature-area" style="margin-top:36px">
-        ${printPreview._assinaturaDesenhada(d.assinatura_dataurl || d.sig_dataurl, d.profissional || 'Profissional', d.crm, 'prof')}
+        ${printPreview._assinaturaDesenhada(d.assinatura_dataurl || d.sig_dataurl, d.profissional || 'Profissional', d.crm, 'prof', d)}
       </div>`;
 
     const orient = d.orientacoes ? printPreview._section('Orientações', `<p class="pp-orient">${utils.escapeHTML(d.orientacoes)}</p>`) : '';
@@ -2796,7 +2800,7 @@ ${TAG_CLOSE_HTML}`;
     const localData = `<div style="margin-top:30px;font-size:10.5pt;text-align:right">${utils.escapeHTML(d.local || '')}${d.local ? ', ' : ''}${utils.formatarData(d.data) || new Date().toLocaleDateString('pt-BR')}</div>`;
     const assinatura = `
       <div class="pp-signature-area" style="margin-top:44px">
-        ${printPreview._assinaturaDesenhada(d.assinatura_dataurl || d.sig_dataurl, d.profissional || 'Profissional', d.crm, 'prof')}
+        ${printPreview._assinaturaDesenhada(d.assinatura_dataurl || d.sig_dataurl, d.profissional || 'Profissional', d.crm, 'prof', d)}
       </div>`;
     return printPreview._header(titulo, meta) + corpo + localData + assinatura + printPreview._footer(rodape);
   },

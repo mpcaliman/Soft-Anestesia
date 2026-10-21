@@ -2190,9 +2190,13 @@ await test('CBHPM: vários códigos no mesmo campo (➕/x2) em todo o app e auxi
     const linhaFicha = document.querySelector('#form-anestesia .pre-proc-principal');
     const btnFicha = Array.from(linhaFicha.querySelectorAll('button')).find(b => b.textContent.trim() === '+');
     out.fichaUmMais = !linhaFicha.querySelector('.cbhpm-mais') && !!linhaFicha.querySelector('[name="procedimento_cbhpm"]');
+    document.getElementById('cir-mesma-body').innerHTML = '';
     btnFicha.click();
-    out.fichaCriaLinha = document.querySelectorAll('#cir-combo-body [name="cir_extra_proc[]"]').length === 1;
-    document.getElementById('cir-combo-body').innerHTML = '';
+    /* a linha nasce logo abaixo do 1º código, não na lista de outra equipe */
+    out.fichaCriaLinha = document.querySelectorAll('#cir-mesma-body [name="cir_extra_proc[]"]').length === 1 &&
+      !document.querySelector('#cir-combo-body [name="cir_extra_proc[]"]') &&
+      !!linhaFicha.parentElement.querySelector('#cir-mesma-body');
+    document.getElementById('cir-mesma-body').innerHTML = '';
 
     /* — auxiliares do cirurgião: ➕ ao lado do campo, coleta, impressão — */
     const f = document.getElementById('form-anestesia');
@@ -3372,15 +3376,16 @@ await test('Ficha: procedimento começa na entrada e termina na saída de sala; 
     const linha = anestesia.cirurgias.add({}, { mesmaEquipe: true });
     out.linhaCriada = !!linha && linha.classList.contains('cir-mesma-equipe');
     out.temCodigo = !!linha.querySelector('[name="cir_extra_proc[]"]') && !!linha.querySelector('[name="cir_extra_grau[]"]');
-    /* os campos de outra equipe existem (o financeiro depende deles) mas ficam escondidos */
+    /* os campos de outra equipe existem (a coleta casa linha a linha) mas
+       vão escondidos; a linha é da tabela de códigos, igual à do financeiro */
     const cir = linha.querySelector('[name="cir_extra_cir[]"]');
     out.cirurgiaoExiste = !!cir;
-    out.cirurgiaoOculto = !!cir && !!cir.closest('.cir-extra-detalhe');
-    out.avisoMesmaEquipe = /Mesma equipe/i.test(linha.textContent);
-
-    /* dá para abrir os detalhes quando for outra equipe mesmo */
-    anestesia.cirurgias.abrirDetalhes(linha.querySelector('.cir-abrir-detalhe'));
-    out.abriuDetalhes = !linha.classList.contains('cir-mesma-equipe');
+    out.cirurgiaoOculto = !!cir && cir.type === 'hidden';
+    out.avisoMesmaEquipe = linha.tagName === 'TR' && !!linha.closest('#cir-mesma-tabela') && !!linha.querySelector('[name="cir_extra_cod[]"]');
+    /* outra equipe é na lista de baixo, que pede o cirurgião */
+    document.getElementById('cir-mesma-body').innerHTML = '';
+    const outra = anestesia.cirurgias.add({});
+    out.abriuDetalhes = !!outra && !!outra.closest('#cir-combo-body') && !outra.classList.contains('cir-mesma-equipe');
 
     /* linha vinda de registro salvo com cirurgião continua completa */
     document.getElementById('cir-combo-body').innerHTML = '';
@@ -4474,9 +4479,13 @@ await test('Rascunhos viajam entre aparelhos, juntando pelo mais recente', async
     const enviados = await rascunhosSync.enviar('anestesia');
     out.subiu = enviados === 1 && naNuvem.length === 1;
 
-    /* ---- "computador": não tem nada, puxa e recebe ---- */
+    /* ---- "computador": não tem nada. O puxão automático NÃO abre aba
+       nova (só atualiza as que já estão abertas); o botão "Buscar de outro
+       aparelho" é que traz ---- */
     rascunhos.setList('anestesia', []);
-    const veio = await rascunhosSync.puxar('anestesia');
+    const sozinho = await rascunhosSync.puxar('anestesia');
+    out.automaticoNaoAbre = sozinho === 0 && rascunhos.list('anestesia').length === 0;
+    const veio = await rascunhosSync.puxar('anestesia', null, { trazerNovos: true });
     const lista = rascunhos.list('anestesia');
     out.desceu = veio === 1 && lista.length === 1 && lista[0].dados.paciente.nome === 'Maria';
 
@@ -4517,6 +4526,18 @@ await test('Rascunhos viajam entre aparelhos, juntando pelo mais recente', async
     const barra = document.getElementById('rasc-tabs-anestesia');
     out.abaVisivel = !!barra && barra.textContent.indexOf('Ana Vinda do Celular') >= 0;
 
+    /* mesmo pelo botão: ficha já finalizada não vira aba, nem o mesmo paciente duas vezes */
+    store.setList('anestesia', [{ _id: 'fich-fin', _finalizado: true, paciente: { nome: 'Finalizado' } }]);
+    naNuvem = [
+      { organization_id: 'org-1', user_id: 'u1', module: 'anestesia', version: 1, doc_id: 'rasc_f', data: { id: 'rasc_f', label: 'Finalizado', updatedAt: '2026-08-07T21:00:00Z',
+        dados: { _id: 'fich-fin', paciente: { nome: 'Finalizado' }, procedimento: { descricao: 'X' } } } },
+      { organization_id: 'org-1', user_id: 'u1', module: 'anestesia', version: 1, doc_id: 'rasc_dup', data: { id: 'rasc_dup', label: 'ANA VINDA DO CELULAR', updatedAt: '2026-08-07T21:00:00Z',
+        dados: { paciente: { nome: 'Ana Vinda do Celular' }, procedimento: { descricao: 'Y' } } } }];
+    await rascunhosSync.puxar('anestesia', null, { trazerNovos: true });
+    const ids = rascunhos.list('anestesia').map(x => x.id);
+    out.semFinalizadaNemRepetida = ids.indexOf('rasc_f') < 0 && ids.indexOf('rasc_dup') < 0;
+    store.setList('anestesia', []);
+
     /* contas diferentes travam o envio */
     cloud.divergencia = () => ({ app: 'a@x.com', nuvem: 'b@x.com' });
     out.divergenciaBloqueia = (await rascunhosSync.enviar('anestesia')) === 0;
@@ -4528,6 +4549,7 @@ await test('Rascunhos viajam entre aparelhos, juntando pelo mais recente', async
     return out;
   });
   assert(r.subiu, 'o rascunho do celular deveria subir para a nuvem');
+  assert(r.automaticoNaoAbre, 'puxão automático não abre aba nova: só o botão "Buscar de outro aparelho" traz');
   assert(r.desceu, 'e descer no outro aparelho, com os dados preenchidos');
   assert(r.naoRegride, 'versão antiga da nuvem não pode sobrescrever a mais nova daqui');
   assert(r.aceitaMaisNovo, 'versão mais nova do outro aparelho deveria entrar');
@@ -4538,6 +4560,7 @@ await test('Rascunhos viajam entre aparelhos, juntando pelo mais recente', async
   assert(r.abaVisivel, 'a aba do rascunho trazido deveria aparecer na barra');
   assert(r.abriuNaTela, 'o rascunho trazido deveria ser ABERTO, não só listado');
   assert(r.formPreenchido, 'e o formulário deveria vir preenchido com os dados dele');
+  assert(r.semFinalizadaNemRepetida, 'ficha finalizada não vira aba, e o mesmo paciente não abre duas vezes');
   assert(r.divergenciaBloqueia, 'com contas diferentes, nada sobe');
   await page.close();
 });
@@ -5698,15 +5721,16 @@ await test('Ficha: códigos do mesmo ato (100/70/50%) entram junto do procedimen
     const cima = document.getElementById('cir-mesma-body');
     const baixo = document.getElementById('cir-combo-body');
     out.existemOsDois = !!cima && !!baixo;
-    /* o de cima fica ANTES dos horários/duração; o de baixo, depois */
+    /* o de cima fica logo abaixo do 1º código, ANTES da sala e dos horários; o de baixo, depois */
     const proc = document.querySelector('#form-anestesia [name="procedimento"]');
     const dur = document.querySelector('#form-anestesia [name="duracao"]');
     const pos = (a, b) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING;
-    out.ordemCerta = !!pos(proc, cima) && !!pos(cima, dur) && !!pos(dur, baixo);
+    const sala = document.querySelector('#form-anestesia [name="sala"]');
+    out.ordemCerta = !!pos(proc, cima) && !!pos(cima, sala) && !!pos(cima, dur) && !!pos(dur, baixo);
 
     /* linha de cima: mesma equipe, com o grau 100/70/50 */
     anestesia.cirurgias.add({}, { mesmaEquipe: true, alvo: 'cir-mesma-body' });
-    const l1 = cima.querySelector('.grid');
+    const l1 = cima.querySelector('tr');
     const sel = l1.querySelector('[name="cir_extra_grau[]"]');
     out.temProporcao = !!sel && Array.from(sel.options).map(o => o.value).join(',') === '100,70,50';
     out.ehMesmaEquipe = l1.classList.contains('cir-mesma-equipe');
@@ -5719,16 +5743,18 @@ await test('Ficha: códigos do mesmo ato (100/70/50%) entram junto do procedimen
 
     /* os dois grupos são coletados juntos, na ordem da tela */
     cima.querySelector('[name="cir_extra_proc[]"]').value = 'Biópsia';
+    cima.querySelector('[name="cir_extra_cod[]"]').value = '3.01.01.01-0';
     cima.querySelector('[name="cir_extra_grau[]"]').value = '70';
     const col = anestesia.cirurgias.coletar();
     out.coletaOsDois = col.length === 2
-      && col[0].procedimento === 'Biópsia' && col[0].grau === '70' && !col[0].cirurgiao
+      && col[0].procedimento === 'Biópsia' && col[0].grau === '70' && !col[0].cirurgiao && col[0].codigo === '3.01.01.01-0'
       && col[1].procedimento === 'Colecistectomia' && col[1].cirurgiao === 'Dr. Outro';
 
     /* ao reabrir a ficha, cada linha volta para a lista certa */
     anestesia.cirurgias.restaurar(col);
     out.restauraSeparado = cima.children.length === 1 && baixo.children.length === 1
       && cima.querySelector('[name="cir_extra_proc[]"]').value === 'Biópsia'
+      && cima.querySelector('[name="cir_extra_cod[]"]').value === '3.01.01.01-0'
       && baixo.querySelector('[name="cir_extra_proc[]"]').value === 'Colecistectomia';
 
     ['cir-mesma-body', 'cir-combo-body'].forEach(id => { document.getElementById(id).innerHTML = ''; });
@@ -8677,7 +8703,7 @@ await test('Rascunhos: fechar não deixa a aba voltar, e aba em branco não se m
     out.retentouApagar = apagados.some(u => u.indexOf('a1') >= 0) && apagados.some(u => u.indexOf('a2') >= 0);
 
     /* e o pull não ressuscita o que foi fechado nem traz aba em branco */
-    await rascunhosSync.puxar(M);
+    await rascunhosSync.puxar(M, null, { trazerNovos: true });
     const depois = rascunhos.list(M).map(x => x.id);
     out.naoRessuscita = depois.indexOf('a1') < 0;
     out.naoTrazVazioDeFora = depois.indexOf('b9') < 0;
@@ -10856,9 +10882,12 @@ await test('Pré-lançamento: enviar fecha a aba do paciente, não só o formul�
     try { rascunhos.renomearAba('pre'); } catch (e) {}
     out.abaAntes = rascunhos.list('pre').length === 1 && !!rascunhos.ativo('pre');
 
+    const abaPaciente = rascunhos.ativo('pre');
     preLanc.enviar('pre');
 
-    out.abaFechou = rascunhos.list('pre').length === 0 && !rascunhos.ativo('pre');
+    /* a aba do paciente sai; a que fica aberta é uma ficha nova, em branco */
+    const sobra = rascunhos.list('pre');
+    out.abaFechou = !sobra.some(x => x.id === abaPaciente) && sobra.every(x => !rascunhos.temConteudo('pre', x));
     out.formLimpo = (f.querySelector('[name="nome"]') || {}).value === '';
     /* e o essencial: a ficha NÃO se perde ao fechar a aba */
     const rec = store.list('pre')[0] || {};
@@ -10868,7 +10897,7 @@ await test('Pré-lançamento: enviar fecha a aba do paciente, não só o formul�
   });
 
   assert(r.abaAntes, 'a aba do paciente existe antes de enviar');
-  assert(r.abaFechou, 'e some ao enviar — aba com nome e formulário vazio parece ficha perdida');
+  assert(r.abaFechou, 'e some ao enviar (a que sobra é uma ficha nova em branco) — aba com nome e formulário vazio parece ficha perdida');
   assert(r.formLimpo, 'o formulário fica limpo para o próximo paciente');
   assert(r.registroIntacto, 'e a ficha enviada continua salva, com o nome');
   assert(r.marcadoEnviado, 'marcada como enviada para o médico');
@@ -18578,7 +18607,7 @@ await test('Rascunhos: cópia preservada não desce da nuvem, e as abas param de
     for (let i = 0; i < 8; i++) {
       depositarCopiaDoCelular(i);
       await rascunhosSync.enviar(mod);
-      await rascunhosSync.puxar(mod);
+      await rascunhosSync.puxar(mod, null, { trazerNovos: true });
     }
     const lista = rascunhos.list(mod) || [];
     out.abas = lista.length;
@@ -22546,6 +22575,90 @@ await test('Impressão: a última retificação entra no campo, mesmo em conflit
 
 /* Uma retificação salva com o formulário incompleto não apaga orientações,
    conclusão nem quem assinou; e a assinatura da pré sai com nome e CRM. */
+/* Finalizou: a aba fecha e a tela volta a uma ficha nova, do zero — nenhum
+   campo, linha, assinatura ou faixa do paciente anterior sobra. Vale também
+   para a ficha aberta pelo histórico (sem aba), e para termo e prescrição. */
+await test('Finalizar fecha a aba e zera a ficha, sem resto do paciente anterior', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    auth._desbloquear && auth._desbloquear();
+    const out = {};
+    const espera = ms => new Promise(ok => setTimeout(ok, ms));
+    const estado = (mod) => {
+      const m = document.getElementById('module-' + mod);
+      const campos = {};
+      m.querySelectorAll('input, select, textarea').forEach((el, i) => {
+        if (el.type === 'file' || el.type === 'button' || el.closest('.autocomplete-list')) return;
+        campos[(el.name || el.id || 'x') + '#' + i] = (el.type === 'checkbox' || el.type === 'radio') ? String(el.checked) : String(el.value);
+      });
+      const texto = Array.from(m.querySelectorAll('*')).filter(e => !e.closest('.autocomplete-list') && e.children.length === 0)
+        .map(e => e.textContent).join('\n');
+      return { campos, texto, imgs: m.querySelectorAll('[id$="-prev-carimbo"] img').length };
+    };
+    const preencher = (mod) => {
+      const f = document.getElementById('form-' + mod);
+      f.querySelectorAll('input, select, textarea').forEach(el => {
+        if (el.type === 'file' || el.type === 'hidden' || el.type === 'button') return;
+        try {
+          if (el.type === 'checkbox' || el.type === 'radio') el.checked = true;
+          else if (el.tagName === 'SELECT') { if (el.options.length) el.selectedIndex = el.options.length - 1; }
+          else if (el.type === 'number') el.value = '7';
+          else if (el.type === 'date') el.value = '2026-01-02';
+          else if (el.type === 'time') el.value = '10:11';
+          else el.value = 'RESTOXYZ';
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        } catch (e) {}
+      });
+      const PNG = 'data:image/png;base64,' + 'B'.repeat(4000);
+      const pref = { pre: 'sig-pre', consulta: 'sig-consulta', recuperacao: 'sig-recuperacao', anestesia: 'sig-anest', termo: 'sig-termo', prescricao: 'sig-prescricao' }[mod];
+      try { assinatura._aplicarCarimbo(pref, PNG, 'form-' + mod); } catch (e) {}
+      if (mod === 'pre') { try { labExtra.add('pre-lab-extras', { nome: 'RESTOXYZ', valor: '1' }); } catch (e) {} }
+      if (mod === 'anestesia') { try { anestesia.cirurgias.add({ procedimento: 'RESTOXYZ' }, { mesmaEquipe: true }); } catch (e) {} }
+    };
+    const comparar = (mod, base) => {
+      const d = estado(mod);
+      const dif = Object.keys(d.campos).filter(k => d.campos[k] !== base.campos[k]);
+      const onde = Array.from(document.getElementById('module-' + mod).querySelectorAll('*')).filter(e => !e.closest('.autocomplete-list') && e.children.length === 0 && /RESTOXYZ/.test(e.textContent))
+        .map(e => (e.parentElement && (e.parentElement.id || e.parentElement.className)) + '>' + e.tagName + '.' + e.className).slice(0, 5);
+      return { dif: dif.slice(0, 8).map(k => k + '=' + d.campos[k]), resto: /RESTOXYZ/.test(d.texto) || Object.values(d.campos).some(v => /RESTOXYZ/.test(v)), imgs: d.imgs, onde };
+    };
+    for (const mod of ['pre', 'consulta', 'anestesia', 'recuperacao']) {
+      ui.navegar(mod); await espera(250);
+      rascunhos.setList(mod, []); rascunhos.setAtivo(mod, null);
+      rascunhos.novo(mod); await espera(150);
+      const base = estado(mod);
+      /* com aba: finalizou, a aba sai e a tela é uma ficha nova */
+      preencher(mod); await espera(150);
+      rascunhos.salvarAtual(mod);
+      const idVelho = rascunhos.ativo(mod);
+      rascunhos.removerAtivo(mod); await espera(150);
+      const c1 = comparar(mod, base);
+      const abas = rascunhos.list(mod);
+      out[mod + '_comAba'] = !c1.dif.length && !c1.resto && !c1.imgs && !abas.some(x => x.id === idVelho) &&
+        !!rascunhos.ativo(mod) || JSON.stringify(c1);
+      /* sem aba (aberta pelo histórico): também zera */
+      rascunhos.setAtivo(mod, null);
+      preencher(mod); await espera(150);
+      rascunhos.removerAtivo(mod); await espera(150);
+      const c2 = comparar(mod, base);
+      out[mod + '_semAba'] = !c2.dif.length && !c2.resto && !c2.imgs || JSON.stringify(c2);
+    }
+    for (const mod of ['termo', 'prescricao']) {
+      ui.navegar(mod); await espera(250);
+      window[mod] && window[mod]._zerar ? window[mod]._zerar() : rascunhos._zerar(mod);
+      const base = estado(mod);
+      preencher(mod); await espera(150);
+      rascunhos.removerAtivo(mod); await espera(150);
+      const c = comparar(mod, base);
+      out[mod] = !c.resto && !c.imgs || JSON.stringify(c);
+    }
+    return out;
+  });
+  for (const [k, v] of Object.entries(r)) assert(v === true, 'sobrou resto em ' + k + ': ' + v);
+  await page.close();
+});
+
 await test('Impressão da pré: orientações, conclusão e assinatura não somem por retificação em branco', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
@@ -22582,6 +22695,10 @@ await test('Impressão da pré: orientações, conclusão e assinatura não some
     out.carimboNoLugar = !!img && img.getAttribute('src') === CARIMBO;
     const t2 = document.getElementById('ppp').textContent;
     out.shaNaImpressao = /conferência na impressão/.test(t2) && /SHA-256: [0-9a-f]{64}/.test(t2);
+    /* o mesmo na ficha de anestesia e nos documentos de assinatura desenhada (termo, prescrição, documentos) */
+    const fichaSig = printPreview._signatureAnestesia({ anestesiologista: 'Fulano de Tal', crm: '12345', dataurl: 'blob:sumiu.1' }, { _finalizado: true, x: 1 });
+    const termoSig = printPreview._assinaturaDesenhada('blob:sumiu.2', 'Fulano de Tal', '12345', 'prof', { _finalizado: true, x: 1 });
+    out.shaEmTodos = [fichaSig, termoSig].every(h => h.indexOf(CARIMBO) >= 0 && /conferência na impressão/.test(h) && /SHA-256: <span[^>]*>[0-9a-f]{64}/.test(h));
     printPreview.fechar();
     /* e uma nova retificação não grava o campo em branco nem troca o assinante */
     const c = adendos._camposRetificacao({ orientacoes: 'x', profissional: 'A' }, { orientacoes: '', profissional: 'B', conclusao: 'nova' });

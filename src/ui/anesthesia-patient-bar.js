@@ -19,7 +19,10 @@
     var v = function(n){ var el = f.querySelector('[name="'+n+'"]'); return el ? el.value.trim() : ''; };
     var nome = v('paciente_nome');
     var mod = (location.hash||'').replace('#','').split('/')[0];
-    if (!nome || mod !== 'anestesia') { b.classList.remove('on'); return; }
+    /* sem paciente na ficha, a faixa fica vazia — escondida não basta: o
+       nome do anterior continuava ali e voltava à tela */
+    if (!nome) { b.classList.remove('on'); b.innerHTML = ''; return; }
+    if (mod !== 'anestesia') { b.classList.remove('on'); return; }
     var idade = v('paciente_idade'), peso = v('paciente_peso'), imc = v('paciente_imc');
     var asa = v('pre_asa') || v('asa'), alerg = v('pre_alergias');
     var nega = /^\s*(nega|não|nao|sem|nda|-|—)/i.test(alerg);
