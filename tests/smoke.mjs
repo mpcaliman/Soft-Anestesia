@@ -22713,6 +22713,39 @@ await test('Ficha: evento automático apagado não volta, e os eventos ficam em 
   await page.close();
 });
 
+/* Medicação do bloqueio nasce com o horário da punção e acompanha a mudança
+   dele; a editada à mão fica como está, e dá para apagar. */
+await test('Bloqueio: medicações seguem o horário da punção, editáveis e apagáveis', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    ui.navegar('anestesia'); await new Promise(ok => setTimeout(ok, 300));
+    anestesia.limparSilencioso();
+    const f = document.getElementById('form-anestesia');
+    const sel = f.querySelector('[name="bloqueio_tipo"]'); sel.value = 'Raquianestesia';
+    const hp = f.querySelector('[name="bloqueio_hora"]'); hp.value = '08:33';
+    anestesia.eventos.sincronizarDoBloqueio();
+    const a = anestesia.bloqueio.addMed({ nome: 'Bupivacaína 0,5% hiperbárica', dose: '10', unidade: 'mg', via: 'Subaracnóideo' });
+    const b = anestesia.bloqueio.addMed({ nome: 'Morfina', dose: '50', unidade: 'mcg', via: 'Subaracnóideo' });
+    const h = tr => tr.querySelector('[name="bloq_med_hora[]"]').value;
+    const espelhos = () => Array.from(document.querySelectorAll('#medicacoes-body tr[data-origem-bloqueio] [name="med_hora[]"]')).map(x => x.value);
+    out.nascemNaPuncao = h(a) === '08:33' && h(b) === '08:33';
+    /* editar a hora de uma: ela fica; mudar a punção leva só a outra */
+    const hb = b.querySelector('[name="bloq_med_hora[]"]'); hb.value = '08:40'; hb.dispatchEvent(new Event('input'));
+    hp.value = '08:50'; anestesia.eventos.sincronizarDoBloqueio();
+    out.acompanhaAPuncao = h(a) === '08:50';
+    out.editadaFica = h(b) === '08:40';
+    out.espelhoNaParte6 = JSON.stringify(espelhos()) === JSON.stringify(['08:50', '08:40']);
+    /* apagar */
+    anestesia.bloqueio._removeMed(a.querySelector('.col-rm button'));
+    out.apaga = document.querySelectorAll('#bloq-meds-body tr').length === 1 && espelhos().length === 1;
+    anestesia.limparSilencioso();
+    return out;
+  });
+  for (const [k, v] of Object.entries(r)) assert(v, 'falhou: ' + k + ' → ' + JSON.stringify(r));
+  await page.close();
+});
+
 await test('Impressão da pré: orientações, conclusão e assinatura não somem por retificação em branco', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {

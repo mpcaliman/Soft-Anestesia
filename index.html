@@ -32968,9 +32968,12 @@ const anestesia = {
          depositam ao redor do nervo, e sim no plano entre fáscias — chamar isso
          de perineural descreveria errado o que foi feito. */
       const viasBloq = ['Subaracnóideo', 'Peridural', 'Perineural', 'Interfascial', 'Caudal', 'IV regional', 'EV', 'IM'];
-      const hora = dados.hora || utils.horaAtual();
+      /* A medicação do bloqueio é dada na punção: sem hora própria, nasce com
+         o horário da punção (e acompanha se ele mudar), até a pessoa editar. */
+      const horaPuncao = ((document.querySelector('#form-anestesia [name="bloqueio_hora"]') || {}).value || '').trim();
+      const hora = dados.hora || horaPuncao || utils.horaAtual();
       tr.innerHTML = `
-        <td data-label="Hora"><input type="time" name="bloq_med_hora[]" value="${hora}" oninput="anestesia.bloqueio._syncMed(this)"></td>
+        <td data-label="Hora"><input type="time" name="bloq_med_hora[]" value="${hora}" oninput="delete this.closest('tr').dataset.horaAuto; anestesia.bloqueio._syncMed(this)"></td>
         <td data-label="Medicação">
           <input type="text" name="bloq_med_nome[]" list="bloq-meds-datalist"
                  value="${utils.escapeAttr(dados.nome || '')}"
@@ -32983,6 +32986,7 @@ const anestesia = {
         <td data-label="Obs"><input type="text" name="bloq_med_obs[]" value="${utils.escapeAttr(dados.obs || '')}" placeholder="ex.: hiperbárica" oninput="anestesia.bloqueio._syncMed(this)"></td>
         <td class="col-rm"><button type="button" class="btn-rm" onclick="anestesia.bloqueio._removeMed(this); markDirty();">✕</button></td>
       `;
+      if (!dados.hora) tr.dataset.horaAuto = '1';
       tbody.appendChild(tr);
       /* Cria espelho na Parte 6 automaticamente */
       const espelho = anestesia.meds.add({
@@ -32999,6 +33003,20 @@ const anestesia = {
       return tr;
     },
 
+    /* Horário da punção mudou: as medicações que ainda seguem o automático
+       vão junto (e o espelho na Parte 6 também). As editadas à mão ficam. */
+    aplicarHoraPuncao(hora) {
+      if (!hora) return 0;
+      let n = 0;
+      document.querySelectorAll('#bloq-meds-body tr').forEach(tr => {
+        const h = tr.querySelector('[name="bloq_med_hora[]"]');
+        if (!h || (tr.dataset.horaAuto !== '1' && h.value)) return;
+        if (h.value === hora) return;
+        h.value = hora; tr.dataset.horaAuto = '1';
+        anestesia.bloqueio._syncMed(h); n++;
+      });
+      return n;
+    },
     /* Sincroniza dados da linha de bloqueio com seu espelho na Parte 6 */
     _syncMed(input) {
       const tr = input.closest('tr');
@@ -33534,6 +33552,7 @@ const anestesia = {
         : /raqui/i.test(d.tipo) ? 'Raquianestesia'
         : d.tipo ? 'Bloqueio periférico' : '';
       if (tipoEvt && hora) anestesia.eventos.sincronizarHorario(tipoEvt, hora);
+      try { anestesia.bloqueio.aplicarHoraPuncao(hora); } catch (e) {}
       anestesia.eventos.atualizarDescricoes();
     },
     sincronizarDaViaAerea() {
