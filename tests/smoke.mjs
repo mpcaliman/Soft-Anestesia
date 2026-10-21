@@ -1664,7 +1664,9 @@ await test('Financeiro: Novo registro abre a janela do fechamento, sem campos re
       && !!document.getElementById('fz-paciente') && !document.querySelector('[name="fz_gerar"]');
     out.dataHoje = corpo.querySelector('[name="fz_data_av"]').value === utils.hojeISO();
     /* uma pergunta, um campo */
-    out.semRepetidos = !corpo.querySelector('[name="fz_fator_acom"]')
+    /* o fator da acomodação é a mesma pergunta: mora junto da acomodação, não num campo à parte */
+    const fatorAcom = corpo.querySelectorAll('[name="fz_fator_acom"]');
+    out.semRepetidos = fatorAcom.length === 1 && fatorAcom[0].closest('.field') === corpo.querySelector('[name="fz_acomodacao"]').closest('.field')
       && !corpo.querySelector('#fz-adicionais [value="apartamento"]')
       && !corpo.querySelector('#fz-adicionais [value="fim_semana"]')
       && !corpo.querySelector('#fz-adicionais [value="urgencia"]')
