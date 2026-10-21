@@ -11583,7 +11583,12 @@ await test('Sync: adendo preso sai com a prova da nuvem, e conflitos seguem a ú
     const quem = auth.usuarioAtual.bind(auth);
     auth.usuarioAtual = () => Object.assign({}, quem() || {}, { role: 'gestor' });
     e3.ownerId = 'u-secretaria'; e3.serverVisible = true; cloudRel._conflitoSalvar(e3);
-    const e4 = cloudRel.registrarConflito('pre', { _id: 'c-del' }, { _id: 'c-del', obs: 'x', _relVersion: 2 }, { operation: 'delete' });
+    /* exclusão: a nuvem mudou DEPOIS do pedido → fica a nuvem, sem pergunta */
+    const e4 = cloudRel.registrarConflito('pre', { _id: 'c-del' }, { _id: 'c-del', obs: 'x', _relVersion: 2,
+      _relUpdatedAt: new Date(Date.now() + 60000).toISOString() }, { operation: 'delete' });
+    /* exclusão mais nova que a última mudança da nuvem → apagar não se desfaz: pergunta */
+    const e5 = cloudRel.registrarConflito('pre', { _id: 'c-del2' }, { _id: 'c-del2', obs: 'y', _relVersion: 2,
+      _relUpdatedAt: '2026-10-01T08:00:00Z' }, { operation: 'delete' });
     const n = await cloudRel.resolverPelaUltimaEdicao();
     const st = id => { const x = cloudRel._conflitosLer().find(c => c.clientId === id);
       return x && x.resolutionRequested ? x.resolutionRequested.status : (x && x.status); };
@@ -11591,7 +11596,8 @@ await test('Sync: adendo preso sai com a prova da nuvem, e conflitos seguem a ú
     out.meuSobe = st(e1.clientId) === 'resolved_local' && enviadosReg.some(x => x._id === 'c-meu' && x.obs === 'meu' && x._relVersion === 3);
     out.nuvemAdotada = st(e2.clientId) === 'resolved_remote' && store.getById('pre', 'c-nuvem').obs === 'novo da nuvem';
     out.rascunhoArquivado = st(e3.clientId) === 'resolved_merged';
-    out.exclusaoPergunta = st(e4.clientId) === 'pending';
+    out.exclusaoSegueANuvem = st(e4.clientId) === 'resolved_remote' && (store.getById('pre', 'c-del') || {}).obs === 'x';
+    out.exclusaoPergunta = st(e5.clientId) === 'pending';
     return out;
   });
   assert(r.presa, 'o cenário exige o adendo parado na fila');
@@ -11606,7 +11612,8 @@ await test('Sync: adendo preso sai com a prova da nuvem, e conflitos seguem a ú
   assert(r.meuSobe, 'conflito com a edição daqui mais nova: ela sobe por cima da versão da nuvem');
   assert(r.nuvemAdotada, 'conflito com a nuvem mais nova: ela é adotada aqui');
   assert(r.rascunhoArquivado, 'rascunho de edição ao vivo de outro usuário: o aviso é arquivado');
-  assert(r.exclusaoPergunta, 'exclusão continua pedindo confirmação');
+  assert(r.exclusaoSegueANuvem, 'exclusão com a nuvem mais nova: fica a versão da nuvem, sem pergunta');
+  assert(r.exclusaoPergunta, 'exclusão mais nova que a nuvem continua pedindo confirmação (apagar não se desfaz)');
   await page.close();
 });
 
