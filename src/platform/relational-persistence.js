@@ -1809,8 +1809,26 @@ const cloudRel = {
     return n;
   },
   async _decidirPelaUltima(e, contexto) {
-    if (!e || e.operation === 'delete' || e.operation === 'draft_delete') return false;
+    if (!e) return false;
     const auto = { automatico: 'ultima_edicao' };
+    /* EXCLUSÃO TAMBÉM SEGUE A ÚLTIMA MODIFICAÇÃO.
+       O item mudou na nuvem depois do pedido de exclusão deste aparelho: a
+       mudança da nuvem é a mais recente, e ela fica — sem pergunta. Documento
+       finalizado nem pode ser excluído. Só pergunta quando a exclusão é que é
+       a mais nova: apagar não se desfaz, então isso nunca é automático. */
+    if (e.operation === 'delete' || e.operation === 'draft_delete') {
+      const tPedido = Date.parse(e.createdAt || '') || 0;
+      const tNuvem = Date.parse((e.metadata && e.metadata.cloudUpdatedAt) || (e.canonical && e.canonical._relUpdatedAt) || '') || 0;
+      const permanente = e.operation === 'delete' && e.canonical && e.canonical._finalizado;
+      if (!permanente && tPedido && tNuvem && tPedido > tNuvem) return false;
+      if (e.tabela !== 'drafts' && e.canonical && e.mod && typeof store !== 'undefined') {
+        const lista = store.list(e.mod) || [];
+        const i = lista.findIndex(x => x && x._id === e.canonical._id);
+        if (i >= 0) lista[i] = e.canonical; else lista.unshift(e.canonical);
+        store.setList(e.mod, lista);
+      }
+      return cloudRel.resolverConflito(e.clientId, 'remote', auto, { adiarEnvio: true });
+    }
     if (e.tabela === 'drafts') {
       return cloudRel.resolverConflito(e.clientId, 'merged', Object.assign({ arquivado: true }, auto), { adiarEnvio: true });
     }
@@ -1896,17 +1914,34 @@ const cloudRel = {
     try { modal.close(); } catch (e) {}
     try { cloudRel.abrirConflitosPendentes(); } catch (e) {}
   },
-  _abrirConflito(clientId) {
-    const e = cloudRel._conflitosLer().find(x => x.clientId === clientId && x.status === 'pending');
-    if (!e) { cloudRel.abrirConflitosPendentes(); return; }
+  _abrirConflito(clientId, perguntar = false) {
+    const achado = cloudRel._conflitosLer().find(x => x.clientId === clientId && x.status === 'pending');
+    if (!achado) { cloudRel.abrirConflitosPendentes(); return; }
+    const e = perguntar ? Object.assign({}, achado, { _perguntar: true }) : achado;
+    if ((e.operation === 'delete' || e.operation === 'draft_delete') && !e._perguntar) {
+      /* a regra da última modificação decide primeiro; só sobra pergunta
+         quando a exclusão daqui é a mais nova */
+      const contexto = cloudRel._capturarContexto();
+      Promise.resolve(contexto ? cloudRel._decidirPelaUltima(e, contexto) : false).then(ok => {
+        if (ok) {
+          try { modal.close(); } catch (er) {}
+          try { toast('✅ Mantida a versão da nuvem — é a modificação mais recente', 'success'); } catch (er) {}
+          try { cloudRel.enviarDecisoes(); } catch (er) {}
+        } else cloudRel._abrirConflito(e.clientId, true);
+      }).catch(() => cloudRel._abrirConflito(clientId, true));
+      return;
+    }
     if (e.operation === 'delete' || e.operation === 'draft_delete') {
       const permanente = e.operation === 'delete' && e.canonical && e.canonical._finalizado;
-      modal.open('⚠️ Conflito de exclusão',
-        '<p>' + (permanente
-          ? 'A versão da nuvem foi finalizada e agora é permanente. Ela não pode ser excluída; correções devem ser feitas por adendo.'
-          : 'O item mudou na nuvem depois que este aparelho pediu a exclusão. A versão atual foi preservada.') + '</p>',
-        (permanente ? '' : '<button class="btn btn-danger" onclick="cloudRel._conflitoConfirmarExclusao(' + utils.jsArg(e.clientId) + ')">Excluir a versão atual</button>') +
-        '<button class="btn" onclick="cloudRel._conflitoCancelarExclusao(' + utils.jsArg(e.clientId) + ')">Manter a versão da nuvem</button>' +
+      /* o que é, de quem, e duas saídas que não se confundem */
+      const c = e.canonical || {};
+      const quem = utils.escapeHTML(String(c.nome || c.paciente_nome || (c.paciente && c.paciente.nome) || c.label || e.legacyId || 'item'));
+      modal.open('⚠️ Excluir ou manter?',
+        '<p><b>' + quem + '</b> · ' + utils.escapeHTML(String(e.mod || '')) + '</p><p>' + (permanente
+          ? 'Este documento foi finalizado e é permanente: não pode ser excluído. Correções são feitas por adendo.'
+          : 'Este aparelho pediu para excluir este item depois da última mudança feita nele na nuvem. Excluir não tem volta — confirme:') + '</p>',
+        (permanente ? '' : '<button class="btn btn-danger" onclick="cloudRel._conflitoConfirmarExclusao(' + utils.jsArg(e.clientId) + ')">🗑️ Excluir mesmo assim</button>') +
+        '<button class="btn" onclick="cloudRel._conflitoCancelarExclusao(' + utils.jsArg(e.clientId) + ')">✅ Manter (não excluir)</button>' +
         '<button class="btn btn-ghost" onclick="modal.close()">Decidir depois</button>');
       return;
     }

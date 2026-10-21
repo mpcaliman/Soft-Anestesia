@@ -1664,7 +1664,9 @@ await test('Financeiro: Novo registro abre a janela do fechamento, sem campos re
       && !!document.getElementById('fz-paciente') && !document.querySelector('[name="fz_gerar"]');
     out.dataHoje = corpo.querySelector('[name="fz_data_av"]').value === utils.hojeISO();
     /* uma pergunta, um campo */
-    out.semRepetidos = !corpo.querySelector('[name="fz_fator_acom"]')
+    /* o fator da acomodação é a mesma pergunta: mora junto da acomodação, não num campo à parte */
+    const fatorAcom = corpo.querySelectorAll('[name="fz_fator_acom"]');
+    out.semRepetidos = fatorAcom.length === 1 && fatorAcom[0].closest('.field') === corpo.querySelector('[name="fz_acomodacao"]').closest('.field')
       && !corpo.querySelector('#fz-adicionais [value="apartamento"]')
       && !corpo.querySelector('#fz-adicionais [value="fim_semana"]')
       && !corpo.querySelector('#fz-adicionais [value="urgencia"]')
@@ -1695,6 +1697,15 @@ await test('Financeiro: Novo registro abre a janela do fechamento, sem campos re
     corpo.querySelector('[name="fz_acomodacao"]').value = 'apartamento';
     fin.finalizacao._aoTrocarAcomodacao();
     out.apartamentoX2 = fin.finalizacao._fatorAcomodacao() === 2;
+    /* o fator aparece num campo e pode ser ajustado à mão */
+    const campoFator = corpo.querySelector('[name="fz_fator_acom"]');
+    out.fatorVisivel = !!campoFator && campoFator.value === '2';
+    campoFator.value = '1,5'.replace(',', '.'); campoFator.dispatchEvent(new Event('input'));
+    out.fatorAjustavel = fin.finalizacao._fatorAcomodacao() === 1.5 && /ajustado/.test(document.getElementById('fz-acom-nota').textContent);
+    /* trocar a acomodação devolve o calculado; e volta a ×2 para o resto do teste */
+    corpo.querySelector('[name="fz_acomodacao"]').value = 'apartamento';
+    fin.finalizacao._aoTrocarAcomodacao();
+    out.voltaAoCalculado = fin.finalizacao._fatorAcomodacao() === 2 && campoFator.value === '2';
     corpo.querySelector('[name="fz_urgencia"]').checked = true;
     fin.finalizacao._somar();
     fin.finalizacao.confirmar();
@@ -1724,6 +1735,7 @@ await test('Financeiro: Novo registro abre a janela do fechamento, sem campos re
   assert(r.validaPaciente, 'sem paciente não lança e a janela continua aberta');
   assert(r.segundaNasce50, 'o segundo código nasce 50%');
   assert(r.ambulatorialX1 && r.apartamentoX2, 'ambulatorial cobra ×1 e apartamento ×2');
+  assert(r.fatorVisivel && r.fatorAjustavel && r.voltaAoCalculado, 'o fator da acomodação aparece, é ajustável à mão e volta ao calculado ao trocar a acomodação');
   assert(r.criou, 'o lançamento avulso nasce pendente com paciente, procedimento, plano, data e senha');
   assert(r.codigosComGrau, 'os códigos saem com o grau de cada linha');
   assert(r.contaCerta, 'o valor previsto é a conta da janela: códigos × acomodação + urgência');
@@ -11583,7 +11595,12 @@ await test('Sync: adendo preso sai com a prova da nuvem, e conflitos seguem a ú
     const quem = auth.usuarioAtual.bind(auth);
     auth.usuarioAtual = () => Object.assign({}, quem() || {}, { role: 'gestor' });
     e3.ownerId = 'u-secretaria'; e3.serverVisible = true; cloudRel._conflitoSalvar(e3);
-    const e4 = cloudRel.registrarConflito('pre', { _id: 'c-del' }, { _id: 'c-del', obs: 'x', _relVersion: 2 }, { operation: 'delete' });
+    /* exclusão: a nuvem mudou DEPOIS do pedido → fica a nuvem, sem pergunta */
+    const e4 = cloudRel.registrarConflito('pre', { _id: 'c-del' }, { _id: 'c-del', obs: 'x', _relVersion: 2,
+      _relUpdatedAt: new Date(Date.now() + 60000).toISOString() }, { operation: 'delete' });
+    /* exclusão mais nova que a última mudança da nuvem → apagar não se desfaz: pergunta */
+    const e5 = cloudRel.registrarConflito('pre', { _id: 'c-del2' }, { _id: 'c-del2', obs: 'y', _relVersion: 2,
+      _relUpdatedAt: '2026-10-01T08:00:00Z' }, { operation: 'delete' });
     const n = await cloudRel.resolverPelaUltimaEdicao();
     const st = id => { const x = cloudRel._conflitosLer().find(c => c.clientId === id);
       return x && x.resolutionRequested ? x.resolutionRequested.status : (x && x.status); };
@@ -11591,7 +11608,8 @@ await test('Sync: adendo preso sai com a prova da nuvem, e conflitos seguem a ú
     out.meuSobe = st(e1.clientId) === 'resolved_local' && enviadosReg.some(x => x._id === 'c-meu' && x.obs === 'meu' && x._relVersion === 3);
     out.nuvemAdotada = st(e2.clientId) === 'resolved_remote' && store.getById('pre', 'c-nuvem').obs === 'novo da nuvem';
     out.rascunhoArquivado = st(e3.clientId) === 'resolved_merged';
-    out.exclusaoPergunta = st(e4.clientId) === 'pending';
+    out.exclusaoSegueANuvem = st(e4.clientId) === 'resolved_remote' && (store.getById('pre', 'c-del') || {}).obs === 'x';
+    out.exclusaoPergunta = st(e5.clientId) === 'pending';
     return out;
   });
   assert(r.presa, 'o cenário exige o adendo parado na fila');
@@ -11606,7 +11624,8 @@ await test('Sync: adendo preso sai com a prova da nuvem, e conflitos seguem a ú
   assert(r.meuSobe, 'conflito com a edição daqui mais nova: ela sobe por cima da versão da nuvem');
   assert(r.nuvemAdotada, 'conflito com a nuvem mais nova: ela é adotada aqui');
   assert(r.rascunhoArquivado, 'rascunho de edição ao vivo de outro usuário: o aviso é arquivado');
-  assert(r.exclusaoPergunta, 'exclusão continua pedindo confirmação');
+  assert(r.exclusaoSegueANuvem, 'exclusão com a nuvem mais nova: fica a versão da nuvem, sem pergunta');
+  assert(r.exclusaoPergunta, 'exclusão mais nova que a nuvem continua pedindo confirmação (apagar não se desfaz)');
   await page.close();
 });
 
@@ -22656,6 +22675,86 @@ await test('Finalizar fecha a aba e zera a ficha, sem resto do paciente anterior
     return out;
   });
   for (const [k, v] of Object.entries(r)) assert(v === true, 'sobrou resto em ' + k + ': ' + v);
+  await page.close();
+});
+
+/* Evento que desce sozinho dos cards (técnica, bloqueio, ventilação) pode ser
+   apagado e editado: apagado, a próxima gravação não o recria. E a linha do
+   tempo fica em ordem de horário. */
+await test('Ficha: evento automático apagado não volta, e os eventos ficam em ordem de horário', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    ui.navegar('anestesia'); await new Promise(ok => setTimeout(ok, 300));
+    anestesia.limparSilencioso();
+    const f = document.getElementById('form-anestesia');
+    const tipos = () => Array.from(document.querySelectorAll('#eventos-body [name="evt_tipo[]"]')).map(x => x.value);
+    const horas = () => Array.from(document.querySelectorAll('#eventos-body [name="evt_hora[]"]')).map(x => x.value);
+    anestesia.eventos.add({ tipo: 'Venoclise', hora: '15:32' });
+    anestesia.eventos.add({ tipo: 'Fim da cirurgia', hora: '16:43' });
+    /* o bloqueio do card desce para a linha do tempo, no lugar certo */
+    const sel = f.querySelector('[name="bloqueio_tipo"]');
+    const opRaqui = Array.from(sel.options).find(o => /raqui/i.test(o.value || o.textContent));
+    sel.value = opRaqui.value;
+    f.querySelector('[name="bloqueio_hora"]').value = '15:41';
+    anestesia.eventos.sincronizarDoBloqueio();
+    out.desceuEmOrdem = JSON.stringify(tipos()) === JSON.stringify(['Venoclise', 'Raquianestesia', 'Fim da cirurgia']) &&
+      JSON.stringify(horas()) === JSON.stringify(['15:32', '15:41', '16:43']);
+    /* editar a hora reordena */
+    const linhaRaqui = Array.from(document.querySelectorAll('#eventos-body tr')).find(tr => tr.querySelector('[name="evt_tipo[]"]').value === 'Raquianestesia');
+    const h = linhaRaqui.querySelector('[name="evt_hora[]"]'); h.value = '17:00'; h.dispatchEvent(new Event('change'));
+    out.editarReordena = tipos()[2] === 'Raquianestesia';
+    /* apagar: não volta com a gravação (que relê os cards) nem ao reabrir */
+    anestesia.eventos.remover(linhaRaqui.querySelector('.col-rm button'));
+    const d = anestesia.coletarEstruturado();
+    out.naoVoltaAoGravar = tipos().indexOf('Raquianestesia') < 0 && !d.eventos.some(e => e.tipo === 'Raquianestesia');
+    anestesia.limparSilencioso();
+    anestesia.restaurarEstruturado(d);
+    anestesia.coletarEstruturado();
+    out.naoVoltaAoReabrir = tipos().indexOf('Raquianestesia') < 0;
+    /* incluir de novo, à mão, vale */
+    anestesia.eventos.add({ tipo: 'Raquianestesia', hora: '15:41' });
+    anestesia.coletarEstruturado();
+    out.voltaAMao = tipos().filter(t => t === 'Raquianestesia').length === 1;
+    /* ficha nova não herda a lista de apagados */
+    anestesia.limparSilencioso();
+    out.fichaNovaLimpa = anestesia.eventos._removidos.size === 0;
+    return out;
+  });
+  for (const [k, v] of Object.entries(r)) assert(v, 'falhou: ' + k + ' → ' + JSON.stringify(r));
+  await page.close();
+});
+
+/* Medicação do bloqueio nasce com o horário da punção e acompanha a mudança
+   dele; a editada à mão fica como está, e dá para apagar. */
+await test('Bloqueio: medicações seguem o horário da punção, editáveis e apagáveis', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    ui.navegar('anestesia'); await new Promise(ok => setTimeout(ok, 300));
+    anestesia.limparSilencioso();
+    const f = document.getElementById('form-anestesia');
+    const sel = f.querySelector('[name="bloqueio_tipo"]'); sel.value = 'Raquianestesia';
+    const hp = f.querySelector('[name="bloqueio_hora"]'); hp.value = '08:33';
+    anestesia.eventos.sincronizarDoBloqueio();
+    const a = anestesia.bloqueio.addMed({ nome: 'Bupivacaína 0,5% hiperbárica', dose: '10', unidade: 'mg', via: 'Subaracnóideo' });
+    const b = anestesia.bloqueio.addMed({ nome: 'Morfina', dose: '50', unidade: 'mcg', via: 'Subaracnóideo' });
+    const h = tr => tr.querySelector('[name="bloq_med_hora[]"]').value;
+    const espelhos = () => Array.from(document.querySelectorAll('#medicacoes-body tr[data-origem-bloqueio] [name="med_hora[]"]')).map(x => x.value);
+    out.nascemNaPuncao = h(a) === '08:33' && h(b) === '08:33';
+    /* editar a hora de uma: ela fica; mudar a punção leva só a outra */
+    const hb = b.querySelector('[name="bloq_med_hora[]"]'); hb.value = '08:40'; hb.dispatchEvent(new Event('input'));
+    hp.value = '08:50'; anestesia.eventos.sincronizarDoBloqueio();
+    out.acompanhaAPuncao = h(a) === '08:50';
+    out.editadaFica = h(b) === '08:40';
+    out.espelhoNaParte6 = JSON.stringify(espelhos()) === JSON.stringify(['08:50', '08:40']);
+    /* apagar */
+    anestesia.bloqueio._removeMed(a.querySelector('.col-rm button'));
+    out.apaga = document.querySelectorAll('#bloq-meds-body tr').length === 1 && espelhos().length === 1;
+    anestesia.limparSilencioso();
+    return out;
+  });
+  for (const [k, v] of Object.entries(r)) assert(v, 'falhou: ' + k + ' → ' + JSON.stringify(r));
   await page.close();
 });
 

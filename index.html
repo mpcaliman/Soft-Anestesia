@@ -4847,7 +4847,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-20f</b><br>
+    v7.1 · build <b id="build-tag">2026-10-21d</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -32968,9 +32968,12 @@ const anestesia = {
          depositam ao redor do nervo, e sim no plano entre fáscias — chamar isso
          de perineural descreveria errado o que foi feito. */
       const viasBloq = ['Subaracnóideo', 'Peridural', 'Perineural', 'Interfascial', 'Caudal', 'IV regional', 'EV', 'IM'];
-      const hora = dados.hora || utils.horaAtual();
+      /* A medicação do bloqueio é dada na punção: sem hora própria, nasce com
+         o horário da punção (e acompanha se ele mudar), até a pessoa editar. */
+      const horaPuncao = ((document.querySelector('#form-anestesia [name="bloqueio_hora"]') || {}).value || '').trim();
+      const hora = dados.hora || horaPuncao || utils.horaAtual();
       tr.innerHTML = `
-        <td data-label="Hora"><input type="time" name="bloq_med_hora[]" value="${hora}" oninput="anestesia.bloqueio._syncMed(this)"></td>
+        <td data-label="Hora"><input type="time" name="bloq_med_hora[]" value="${hora}" oninput="delete this.closest('tr').dataset.horaAuto; anestesia.bloqueio._syncMed(this)"></td>
         <td data-label="Medicação">
           <input type="text" name="bloq_med_nome[]" list="bloq-meds-datalist"
                  value="${utils.escapeAttr(dados.nome || '')}"
@@ -32983,6 +32986,7 @@ const anestesia = {
         <td data-label="Obs"><input type="text" name="bloq_med_obs[]" value="${utils.escapeAttr(dados.obs || '')}" placeholder="ex.: hiperbárica" oninput="anestesia.bloqueio._syncMed(this)"></td>
         <td class="col-rm"><button type="button" class="btn-rm" onclick="anestesia.bloqueio._removeMed(this); markDirty();">✕</button></td>
       `;
+      if (!dados.hora) tr.dataset.horaAuto = '1';
       tbody.appendChild(tr);
       /* Cria espelho na Parte 6 automaticamente */
       const espelho = anestesia.meds.add({
@@ -32999,6 +33003,20 @@ const anestesia = {
       return tr;
     },
 
+    /* Horário da punção mudou: as medicações que ainda seguem o automático
+       vão junto (e o espelho na Parte 6 também). As editadas à mão ficam. */
+    aplicarHoraPuncao(hora) {
+      if (!hora) return 0;
+      let n = 0;
+      document.querySelectorAll('#bloq-meds-body tr').forEach(tr => {
+        const h = tr.querySelector('[name="bloq_med_hora[]"]');
+        if (!h || (tr.dataset.horaAuto !== '1' && h.value)) return;
+        if (h.value === hora) return;
+        h.value = hora; tr.dataset.horaAuto = '1';
+        anestesia.bloqueio._syncMed(h); n++;
+      });
+      return n;
+    },
     /* Sincroniza dados da linha de bloqueio com seu espelho na Parte 6 */
     _syncMed(input) {
       const tr = input.closest('tr');
@@ -33534,6 +33552,7 @@ const anestesia = {
         : /raqui/i.test(d.tipo) ? 'Raquianestesia'
         : d.tipo ? 'Bloqueio periférico' : '';
       if (tipoEvt && hora) anestesia.eventos.sincronizarHorario(tipoEvt, hora);
+      try { anestesia.bloqueio.aplicarHoraPuncao(hora); } catch (e) {}
       anestesia.eventos.atualizarDescricoes();
     },
     sincronizarDaViaAerea() {
@@ -33596,11 +33615,38 @@ const anestesia = {
       });
       if (alvo) {
         const h = alvo.querySelector('[name="evt_hora[]"]');
-        if (h && h.value !== hora) { h.value = hora; try { anestesia.vitais.atualizarGrafico(); } catch (e) {} }
+        if (h && h.value !== hora) {
+          h.value = hora;
+          anestesia.eventos._ordenar(body);
+          try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
+        }
       } else {
+        /* APAGOU, FICA APAGADO. O evento que desce sozinho dos cards podia ser
+           apagado, mas a próxima gravação o recriava a partir do horário do
+           card — parecia que não apagava. */
+        if (anestesia.eventos._removidos.has(tipoEvt)) return;
         anestesia.eventos.add({ tipo: tipoEvt, hora });
       }
       try { markDirty(); } catch (e) {}
+    },
+    /* tipos que a pessoa apagou nesta ficha: a sincronização não os recria */
+    _removidos: new Set(),
+    remover(btn) {
+      const tr = btn && btn.closest('tr');
+      if (!tr) return;
+      const tipo = (tr.querySelector('[name="evt_tipo[]"]') || {}).value || '';
+      if (tipo && tr.closest('#eventos-body')) anestesia.eventos._removidos.add(tipo);
+      tr.remove();
+      try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
+      try { markDirty(); } catch (e) {}
+    },
+    /* a linha do tempo fica sempre em ordem de horário; sem horário vai ao fim */
+    _ordenar(tbody) {
+      if (!tbody) return;
+      const horaDe = tr => { const el = tr.querySelector('[name="evt_hora[]"]'); return (el && el.value) ? el.value : '99:99'; };
+      const linhas = Array.from(tbody.children);
+      const ordenadas = linhas.slice().sort((a, b) => horaDe(a).localeCompare(horaDe(b)));
+      if (ordenadas.some((tr, i) => tr !== linhas[i])) ordenadas.forEach(tr => tbody.appendChild(tr));
     },
     /* Existe evento desse tipo na tabela? */
     existeEvento(tipo) {
@@ -33830,9 +33876,11 @@ const anestesia = {
         <td data-label="Horário"><input type="time" name="evt_hora[]" value="${hora}" onchange="anestesia.graficoUI.validarHoraInput(this)"></td>
         <td data-label="Evento"><select name="evt_tipo[]"><option value="">— selecione —</option>${opt(anestesia.eventos.TIPOS, dados.tipo)}</select></td>
         <td data-label="Detalhes"><div style="display:flex;gap:4px;align-items:center"><input type="text" name="evt_obs[]" value="${utils.escapeAttr(dados.obs || '')}" placeholder="Opcional" style="flex:1;min-width:0" oninput="anestesia.eventos._marcarManual(this)"><input type="hidden" name="evt_val[]" value="${utils.escapeAttr(dados.valores && Object.keys(dados.valores).length ? JSON.stringify(dados.valores) : '')}"><button type="button" class="btn-rm" onclick="anestesia.eventos.detalhar(this)">📝</button></div></td>
-        <td class="col-rm"><button type="button" class="btn-rm" onclick="this.closest('tr').remove(); anestesia.vitais.atualizarGrafico(); markDirty();">✕</button></td>
+        <td class="col-rm"><button type="button" class="btn-rm" title="Apagar este evento" onclick="anestesia.eventos.remover(this)">✕</button></td>
       `;
       tbody.appendChild(tr);
+      if (dados.tipo) anestesia.eventos._removidos.delete(dados.tipo);
+      anestesia.eventos._ordenar(tbody);
       /* "auto" = o texto de detalhes veio do padrão do sistema, então pode ser
          reescrito quando os cards 3/4/5 mudarem. Assim que a pessoa digita ali,
          a marca cai e nada mais mexe no que ela escreveu. */
@@ -33841,7 +33889,10 @@ const anestesia = {
         el.addEventListener('change', () => anestesia.vitais.atualizarGrafico());
       });
       const selTipo = tr.querySelector('[name="evt_tipo[]"]');
+      const horaEl = tr.querySelector('[name="evt_hora[]"]');
+      if (horaEl) horaEl.addEventListener('change', () => anestesia.eventos._ordenar(tr.parentElement));
       if (selTipo) selTipo.addEventListener('change', () => {
+        if (selTipo.value) anestesia.eventos._removidos.delete(selTipo.value);
         try { anestesia.eventos.atualizarDescricoes(); } catch (e) {}
         try { anestesia.eventos._ajustarBotao(tr); } catch (e) {}
       });
@@ -39941,6 +39992,7 @@ const anestesia = {
         observacoes: v('posicao_obs')
       },
       eventos: anestesia.eventos.coletar(),
+      eventos_removidos: Array.from(anestesia.eventos._removidos),
       medicacoes: anestesia.meds.coletar(),
       fluidos: {
         /* Entradas */
@@ -40140,6 +40192,7 @@ const anestesia = {
     anestesia.eventos.restaurar(
       (Array.isArray(d.eventos) ? d.eventos : []).concat(anestesia.exames._migrarAntigos(d))
     );
+    anestesia.eventos._removidos = new Set(Array.isArray(d.eventos_removidos) ? d.eventos_removidos : []);
 
     document.getElementById('medicacoes-body').innerHTML = '';
     if (Array.isArray(d.medicacoes)) {
@@ -40877,6 +40930,7 @@ const anestesia = {
     if (cb) cb.innerHTML = '';
     const eb = document.getElementById('eventos-body');
     if (eb) eb.innerHTML = '';
+    anestesia.eventos._removidos = new Set();
     const cco = document.getElementById('cir-combo-body');
     if (cco) cco.innerHTML = '';
     const cme = document.getElementById('cir-mesma-body');
@@ -41731,7 +41785,11 @@ const fin = {
         '<div class="field ' + (avulso ? 'col-4' : 'col-12') + '"><label>Acomodação <small style="color:var(--text-mute);font-weight:400">— do cadastro; ambulatorial paga como enfermaria</small></label>' +
         '<select name="fz_acomodacao" onchange="fin.finalizacao._aoTrocarAcomodacao()">' +
         precos.ACOMODACOES.map(o => '<option value="' + o.v + '"' + (o.v === acom ? ' selected' : '') + '>' + e(o.rot) + '</option>').join('') +
-        '</select><small id="fz-acom-nota" style="display:block;color:var(--text-mute);margin-top:3px"></small></div>' +
+        '</select>' +
+        /* o fator da acomodação à vista e editável: o automático nem sempre
+           acerta (tabela própria do plano, regra do convênio, acordo do dia) */
+        '<span style="display:inline-flex;align-items:center;gap:4px;margin-left:8px" title="Fator da acomodação — vem calculado; pode ajustar">× <input type="number" name="fz_fator_acom" step="0.1" min="0" style="width:66px" oninput="this.dataset.manual=\'1\'; fin.finalizacao._notaAcomodacao(); fin.finalizacao._somar()"></span>' +
+        '<small id="fz-acom-nota" style="display:block;color:var(--text-mute);margin-top:3px"></small></div>' +
         '<div class="field col-12" id="fz-majoracao"></div>' +
         '</div></form>' +
         '<h3 style="font-size:.86rem;color:var(--primary-darker);margin:14px 0 6px;border-top:1px solid var(--border);padding-top:12px">' +
@@ -41859,6 +41917,15 @@ const fin = {
        apartamento. Se ele cadastrou uma TABELA própria do plano para aquela
        acomodação, o valor já vem dela, e dobrar de novo seria cobrar duas vezes. */
     _fatorAcomodacao() {
+      const f = fin.finalizacao._f();
+      const campo = f && f.querySelector('[name="fz_fator_acom"]');
+      if (campo && campo.dataset.manual === '1') {
+        const n = parseFloat(String(campo.value || '').replace(',', '.'));
+        if (Number.isFinite(n) && n > 0) return n;
+      }
+      return fin.finalizacao._fatorCalculado();
+    },
+    _fatorCalculado() {
       const acom = precos.acomodacaoDeCobranca(fin.finalizacao._v('fz_acomodacao'));
       if (acom !== 'apartamento') return 1;
       const conv = fin.finalizacao._v('fz_convenio');
@@ -41878,15 +41945,24 @@ const fin = {
       const f = fin.finalizacao._f();
       const sel = f && f.querySelector('[name="fz_acomodacao"]');
       if (sel && !automatico) sel.dataset.manual = '1';
-      const nota = document.getElementById('fz-acom-nota');
-      if (nota) {
-        const v = fin.finalizacao._v('fz_acomodacao');
-        const fa = fin.finalizacao._fatorAcomodacao();
-        nota.textContent = !v ? '' : v === 'ambulatorial' ? 'Cobrado como enfermaria (×1).'
-          : v === 'apartamento' ? (fa === 2 ? 'Apartamento: ×2 sobre os códigos.' : 'Apartamento: valores da tabela própria do plano para apartamento.')
-          : 'Enfermaria (×1).';
-      }
+      /* trocou a acomodação: o fator volta ao calculado para ela */
+      const campo = f && f.querySelector('[name="fz_fator_acom"]');
+      if (campo) { delete campo.dataset.manual; campo.value = String(fin.finalizacao._fatorCalculado()); }
+      fin.finalizacao._notaAcomodacao();
       fin.finalizacao._recalcularTudo();
+    },
+    _notaAcomodacao() {
+      const nota = document.getElementById('fz-acom-nota');
+      if (!nota) return;
+      const f = fin.finalizacao._f();
+      const campo = f && f.querySelector('[name="fz_fator_acom"]');
+      const v = fin.finalizacao._v('fz_acomodacao');
+      const fa = fin.finalizacao._fatorAcomodacao();
+      const calc = fin.finalizacao._fatorCalculado();
+      if (campo && campo.dataset.manual === '1' && fa !== calc) { nota.textContent = 'Fator ajustado à mão: ×' + fa + ' sobre os códigos.'; return; }
+      nota.textContent = !v ? '' : v === 'ambulatorial' ? 'Cobrado como enfermaria (×1).'
+        : v === 'apartamento' ? (fa !== 1 ? 'Apartamento: ×' + fa + ' sobre os códigos.' : 'Apartamento ×1: o plano tem tabela própria de apartamento ou regra ×1 — ajuste o fator ao lado se não for o caso.')
+        : 'Enfermaria (×1).';
     },
 
     /* Acomodação: a da FICHA vale mais que a do cadastro (é a desta
@@ -42221,6 +42297,15 @@ const fin = {
     _somar() {
       const el = document.getElementById('fz-total');
       if (!el) return;
+      /* fator não ajustado à mão acompanha o calculado (ex.: trocou o plano) */
+      try {
+        const f = fin.finalizacao._f();
+        const campo = f && f.querySelector('[name="fz_fator_acom"]');
+        if (campo && campo.dataset.manual !== '1') {
+          const calc = String(fin.finalizacao._fatorCalculado());
+          if (campo.value !== calc) { campo.value = calc; fin.finalizacao._notaAcomodacao(); }
+        }
+      } catch (e) {}
       const base = fin.finalizacao._somaLinhas();
       const fa = fin.finalizacao._fatores();
       const total = fin.finalizacao._total();
