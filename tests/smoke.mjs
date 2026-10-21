@@ -1695,6 +1695,15 @@ await test('Financeiro: Novo registro abre a janela do fechamento, sem campos re
     corpo.querySelector('[name="fz_acomodacao"]').value = 'apartamento';
     fin.finalizacao._aoTrocarAcomodacao();
     out.apartamentoX2 = fin.finalizacao._fatorAcomodacao() === 2;
+    /* o fator aparece num campo e pode ser ajustado à mão */
+    const campoFator = corpo.querySelector('[name="fz_fator_acom"]');
+    out.fatorVisivel = !!campoFator && campoFator.value === '2';
+    campoFator.value = '1,5'.replace(',', '.'); campoFator.dispatchEvent(new Event('input'));
+    out.fatorAjustavel = fin.finalizacao._fatorAcomodacao() === 1.5 && /ajustado/.test(document.getElementById('fz-acom-nota').textContent);
+    /* trocar a acomodação devolve o calculado; e volta a ×2 para o resto do teste */
+    corpo.querySelector('[name="fz_acomodacao"]').value = 'apartamento';
+    fin.finalizacao._aoTrocarAcomodacao();
+    out.voltaAoCalculado = fin.finalizacao._fatorAcomodacao() === 2 && campoFator.value === '2';
     corpo.querySelector('[name="fz_urgencia"]').checked = true;
     fin.finalizacao._somar();
     fin.finalizacao.confirmar();
@@ -1724,6 +1733,7 @@ await test('Financeiro: Novo registro abre a janela do fechamento, sem campos re
   assert(r.validaPaciente, 'sem paciente não lança e a janela continua aberta');
   assert(r.segundaNasce50, 'o segundo código nasce 50%');
   assert(r.ambulatorialX1 && r.apartamentoX2, 'ambulatorial cobra ×1 e apartamento ×2');
+  assert(r.fatorVisivel && r.fatorAjustavel && r.voltaAoCalculado, 'o fator da acomodação aparece, é ajustável à mão e volta ao calculado ao trocar a acomodação');
   assert(r.criou, 'o lançamento avulso nasce pendente com paciente, procedimento, plano, data e senha');
   assert(r.codigosComGrau, 'os códigos saem com o grau de cada linha');
   assert(r.contaCerta, 'o valor previsto é a conta da janela: códigos × acomodação + urgência');

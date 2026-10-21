@@ -41785,7 +41785,11 @@ const fin = {
         '<div class="field ' + (avulso ? 'col-4' : 'col-12') + '"><label>Acomodação <small style="color:var(--text-mute);font-weight:400">— do cadastro; ambulatorial paga como enfermaria</small></label>' +
         '<select name="fz_acomodacao" onchange="fin.finalizacao._aoTrocarAcomodacao()">' +
         precos.ACOMODACOES.map(o => '<option value="' + o.v + '"' + (o.v === acom ? ' selected' : '') + '>' + e(o.rot) + '</option>').join('') +
-        '</select><small id="fz-acom-nota" style="display:block;color:var(--text-mute);margin-top:3px"></small></div>' +
+        '</select>' +
+        /* o fator da acomodação à vista e editável: o automático nem sempre
+           acerta (tabela própria do plano, regra do convênio, acordo do dia) */
+        '<span style="display:inline-flex;align-items:center;gap:4px;margin-left:8px" title="Fator da acomodação — vem calculado; pode ajustar">× <input type="number" name="fz_fator_acom" step="0.1" min="0" style="width:66px" oninput="this.dataset.manual=\'1\'; fin.finalizacao._notaAcomodacao(); fin.finalizacao._somar()"></span>' +
+        '<small id="fz-acom-nota" style="display:block;color:var(--text-mute);margin-top:3px"></small></div>' +
         '<div class="field col-12" id="fz-majoracao"></div>' +
         '</div></form>' +
         '<h3 style="font-size:.86rem;color:var(--primary-darker);margin:14px 0 6px;border-top:1px solid var(--border);padding-top:12px">' +
@@ -41913,6 +41917,15 @@ const fin = {
        apartamento. Se ele cadastrou uma TABELA própria do plano para aquela
        acomodação, o valor já vem dela, e dobrar de novo seria cobrar duas vezes. */
     _fatorAcomodacao() {
+      const f = fin.finalizacao._f();
+      const campo = f && f.querySelector('[name="fz_fator_acom"]');
+      if (campo && campo.dataset.manual === '1') {
+        const n = parseFloat(String(campo.value || '').replace(',', '.'));
+        if (Number.isFinite(n) && n > 0) return n;
+      }
+      return fin.finalizacao._fatorCalculado();
+    },
+    _fatorCalculado() {
       const acom = precos.acomodacaoDeCobranca(fin.finalizacao._v('fz_acomodacao'));
       if (acom !== 'apartamento') return 1;
       const conv = fin.finalizacao._v('fz_convenio');
@@ -41932,15 +41945,24 @@ const fin = {
       const f = fin.finalizacao._f();
       const sel = f && f.querySelector('[name="fz_acomodacao"]');
       if (sel && !automatico) sel.dataset.manual = '1';
-      const nota = document.getElementById('fz-acom-nota');
-      if (nota) {
-        const v = fin.finalizacao._v('fz_acomodacao');
-        const fa = fin.finalizacao._fatorAcomodacao();
-        nota.textContent = !v ? '' : v === 'ambulatorial' ? 'Cobrado como enfermaria (×1).'
-          : v === 'apartamento' ? (fa === 2 ? 'Apartamento: ×2 sobre os códigos.' : 'Apartamento: valores da tabela própria do plano para apartamento.')
-          : 'Enfermaria (×1).';
-      }
+      /* trocou a acomodação: o fator volta ao calculado para ela */
+      const campo = f && f.querySelector('[name="fz_fator_acom"]');
+      if (campo) { delete campo.dataset.manual; campo.value = String(fin.finalizacao._fatorCalculado()); }
+      fin.finalizacao._notaAcomodacao();
       fin.finalizacao._recalcularTudo();
+    },
+    _notaAcomodacao() {
+      const nota = document.getElementById('fz-acom-nota');
+      if (!nota) return;
+      const f = fin.finalizacao._f();
+      const campo = f && f.querySelector('[name="fz_fator_acom"]');
+      const v = fin.finalizacao._v('fz_acomodacao');
+      const fa = fin.finalizacao._fatorAcomodacao();
+      const calc = fin.finalizacao._fatorCalculado();
+      if (campo && campo.dataset.manual === '1' && fa !== calc) { nota.textContent = 'Fator ajustado à mão: ×' + fa + ' sobre os códigos.'; return; }
+      nota.textContent = !v ? '' : v === 'ambulatorial' ? 'Cobrado como enfermaria (×1).'
+        : v === 'apartamento' ? (fa !== 1 ? 'Apartamento: ×' + fa + ' sobre os códigos.' : 'Apartamento ×1: o plano tem tabela própria de apartamento ou regra ×1 — ajuste o fator ao lado se não for o caso.')
+        : 'Enfermaria (×1).';
     },
 
     /* Acomodação: a da FICHA vale mais que a do cadastro (é a desta
@@ -42275,6 +42297,15 @@ const fin = {
     _somar() {
       const el = document.getElementById('fz-total');
       if (!el) return;
+      /* fator não ajustado à mão acompanha o calculado (ex.: trocou o plano) */
+      try {
+        const f = fin.finalizacao._f();
+        const campo = f && f.querySelector('[name="fz_fator_acom"]');
+        if (campo && campo.dataset.manual !== '1') {
+          const calc = String(fin.finalizacao._fatorCalculado());
+          if (campo.value !== calc) { campo.value = calc; fin.finalizacao._notaAcomodacao(); }
+        }
+      } catch (e) {}
       const base = fin.finalizacao._somaLinhas();
       const fa = fin.finalizacao._fatores();
       const total = fin.finalizacao._total();
