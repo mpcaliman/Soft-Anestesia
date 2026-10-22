@@ -1832,15 +1832,33 @@ const cloudRel = {
     if (e.tabela === 'drafts') {
       return cloudRel.resolverConflito(e.clientId, 'merged', Object.assign({ arquivado: true }, auto), { adiarEnvio: true });
     }
-    const mod = e.mod, local = e.proposed, nuvem = e.canonical;
-    if (!mod || !local || !nuvem || typeof store === 'undefined') return false;
+    const mod = e.mod, local = e.proposed;
+    const nuvem = e.canonical || {};
+    if (!mod || !local || typeof store === 'undefined') return false;
     const lista = store.list(mod) || [];
     const ix = lista.findIndex(x => x && x._id === local._id);
     const atual = ix >= 0 ? lista[ix] : null;
-    const tNuvem = Date.parse((e.metadata && e.metadata.cloudUpdatedAt) || nuvem._relUpdatedAt || '') ||
-      cloudRel._quando(nuvem);
+    /* A nuvem às vezes devolve o conflito sem o conteúdo do registro. Sem
+       nada do lado de lá, não há o que comparar: vale o que está aqui. */
+    const nuvemVazia = cloudRel._semConteudo(nuvem);
+    const tNuvem = nuvemVazia ? 0 : (Date.parse((e.metadata && e.metadata.cloudUpdatedAt) || nuvem._relUpdatedAt || '') ||
+      cloudRel._quando(nuvem));
     const tAqui = Math.max(cloudRel._quando(local), cloudRel._quando(atual));
-    if (nuvem._finalizado || tNuvem >= tAqui) {
+    /* finalizado na nuvem e a edição daqui é a mais nova: vira retificação
+       (o original assinado não se reescreve), sem pergunta */
+    if (nuvem._finalizado && !nuvemVazia && tAqui > tNuvem && cloudRel._temDiferenca(local, nuvem)) {
+      try {
+        const original = Object.assign({}, nuvem, { _id: local._id });
+        const porAdendo = new Map();
+        (nuvem._adendos || []).concat(local._adendos || []).forEach(a => { if (a && a.id) porAdendo.set(a.id, a); });
+        if (porAdendo.size) original._adendos = Array.from(porAdendo.values());
+        if (ix >= 0) lista[ix] = original; else lista.unshift(original);
+        store.setList(mod, lista);
+        adendos.salvarComoCorrecao(mod, original, local);
+        return cloudRel.resolverConflito(e.clientId, 'merged', Object.assign({ como: 'adendo' }, auto), { adiarEnvio: true });
+      } catch (er) { return false; }
+    }
+    if (!nuvemVazia && (nuvem._finalizado || tNuvem >= tAqui)) {
       if (!atual || cloudRel._quando(atual) <= tNuvem || nuvem._finalizado) {
         const item = Object.assign({}, nuvem, { _id: local._id });
         if (ix >= 0) lista[ix] = item; else lista.unshift(item);
@@ -1850,8 +1868,12 @@ const cloudRel = {
         Object.assign({ version: nuvem._relVersion }, auto), { adiarEnvio: true });
     }
     const base = atual && cloudRel._quando(atual) >= cloudRel._quando(local) ? atual : local;
+    /* sobe por cima da versão ATUAL da nuvem — sem ela a gravação é recusada
+       e o mesmo conflito voltava a cada tentativa */
+    const versao = await cloudRel._versaoNaNuvem(mod, base, contexto, nuvem._relVersion || e.serverVersion);
+    if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return false;
     const envio = Object.assign({}, base, {
-      _relVersion: nuvem._relVersion, _relUpdatedAt: nuvem._relUpdatedAt || (e.metadata && e.metadata.cloudUpdatedAt) || '',
+      _relVersion: versao || undefined, _relUpdatedAt: nuvem._relUpdatedAt || (e.metadata && e.metadata.cloudUpdatedAt) || '',
       _relUpdatedBy: nuvem._relUpdatedBy || '', _relOrg: nuvem._relOrg || base._relOrg
     });
     if (ix >= 0) { lista[ix] = envio; store.setList(mod, lista); }
@@ -1866,6 +1888,42 @@ const cloudRel = {
       return cloudRel.resolverConflito(e.clientId, 'local', Object.assign({ novoConflito: r.conflictClientId }, auto), { adiarEnvio: true });
     }
     return false;
+  },
+  /* registro sem nenhum campo clínico (só os técnicos, "_…") */
+  _semConteudo(o) {
+    return !o || !Object.keys(o).some(k => k[0] !== '_' && o[k] != null && o[k] !== '' &&
+      !(typeof o[k] === 'object' && !Object.keys(o[k]).length));
+  },
+  _temDiferenca(a, b) {
+    const val = v => (v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v));
+    const ks = new Set(Object.keys(a || {}).concat(Object.keys(b || {})).filter(k => k[0] !== '_'));
+    return Array.from(ks).some(k => val(a && a[k]) !== val(b && b[k]));
+  },
+  /* versão atual da linha na nuvem: a que veio no conflito, ou relida agora */
+  async _versaoNaNuvem(mod, item, contexto, conhecida) {
+    const v = Number(conhecida);
+    if (Number.isInteger(v) && v > 0) return v;
+    try {
+      const tab = cloudRel.tabelaDoModulo(mod);
+      const legacy = cloudRel.chaveLegada(mod, item);
+      if (!tab || !legacy || !contexto) return null;
+      const atual = await cloudRel._lerAtualTab(tab, contexto.organizationId, legacy, 'id,version,updated_at');
+      const n = Number(atual && atual.version);
+      return Number.isInteger(n) && n > 0 ? n : null;
+    } catch (e) { return null; }
+  },
+  /* Conflito que aparece durante o trabalho não abre janela: entra na regra
+     da última edição em segundo plano; o que ela não decidir fica na lista
+     ("N conflitos preservados"), para ver quando quiser. */
+  _agendarResolucao() {
+    if (cloudRel._resolucaoAgendada) return;
+    cloudRel._resolucaoAgendada = setTimeout(async () => {
+      cloudRel._resolucaoAgendada = null;
+      let n = 0;
+      try { n = await cloudRel.resolverPelaUltimaEdicao(); } catch (e) {}
+      if (n) { try { toast('✅ ' + n + ' conflito(s) resolvido(s) pela última edição', 'success'); } catch (e) {} }
+      try { syncStatus.refresh(); nuvemEstado.renderMenu(); } catch (e) {}
+    }, 1500);
   },
   async abrirConflitosPendentes() {
     /* A última edição vale: o que a regra decide não chega a virar pergunta. */
@@ -1955,9 +2013,9 @@ const cloudRel = {
       return;
     }
     modal.close();
-    if (e.mod === 'pacientes') pacientes._resolverConflito(e.proposed, e.canonical, e.metadata.cloudUpdatedAt, e.clientId);
-    else if (e.mod === 'agenda') agenda._resolverConflito(e.proposed, e.canonical, e.metadata.cloudUpdatedAt, e.clientId);
-    else cloudRel._resolverConflitoRegistro(e.mod, e.proposed, e.canonical, e.metadata.cloudUpdatedAt, e.clientId);
+    if (e.mod === 'pacientes') pacientes._resolverConflito(e.proposed, e.canonical, e.metadata.cloudUpdatedAt, e.clientId, { interativo: true });
+    else if (e.mod === 'agenda') agenda._resolverConflito(e.proposed, e.canonical, e.metadata.cloudUpdatedAt, e.clientId, { interativo: true });
+    else cloudRel._resolverConflitoRegistro(e.mod, e.proposed, e.canonical, e.metadata.cloudUpdatedAt, e.clientId, { interativo: true });
   },
   _abrirConflitoEdicaoViva(entry) {
     const contexto = contextoAba.capturar();
@@ -2889,7 +2947,12 @@ const cloudRel = {
       if (state.currentModule === mod) ui.navegar(mod);
     } catch (e) {}
   },
-  _resolverConflitoRegistro(mod, local, nuvem, cloudUpdatedAt, conflictClientId) {
+  _resolverConflitoRegistro(mod, local, nuvem, cloudUpdatedAt, conflictClientId, opts = {}) {
+    if (!opts.interativo) {
+      try { if (!conflictClientId) cloudRel.registrarConflito(mod, local, nuvem, { cloudUpdatedAt }); } catch (e) {}
+      cloudRel._agendarResolucao();
+      return;
+    }
     const simples = (o) => Object.keys(o || {}).filter(k => k[0] !== '_' && (o[k] == null || typeof o[k] !== 'object'));
     const chaves = Array.from(new Set(simples(local).concat(simples(nuvem))));
     const val = (o, k) => (o && o[k] != null ? String(o[k]) : '');
@@ -2935,10 +2998,16 @@ const cloudRel = {
       cloudRel._conflito = null;
       return;
     }
-    cf.local._relVersion = cf.nuvem._relVersion;
-    cf.local._relUpdatedAt = cf.nuvem._relUpdatedAt || cf.cloudUpdatedAt;
-    cf.local._relUpdatedBy = cf.nuvem._relUpdatedBy || '';
-    cf.local._relOrg = cf.nuvem._relOrg || cf.local._relOrg;
+    const nv = cf.nuvem || {};
+    /* escolher "manter o meu" é a última modificação: se a nuvem andar de
+       novo no meio do caminho, a regra automática continua do lado dela */
+    cf.local._updatedAt = new Date().toISOString();
+    cloudRel._versaoNaNuvem(cf.mod, cf.local, contexto, nv._relVersion).then(versao => {
+    if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return null;
+    cf.local._relVersion = versao || undefined;
+    cf.local._relUpdatedAt = nv._relUpdatedAt || cf.cloudUpdatedAt;
+    cf.local._relUpdatedBy = nv._relUpdatedBy || '';
+    cf.local._relOrg = nv._relOrg || cf.local._relOrg;
     const lst = store.list(cf.mod); const ix = lst.findIndex(x => x._id === cf.local._id);
     if (ix >= 0) {
       Object.assign(lst[ix], {
@@ -2947,15 +3016,20 @@ const cloudRel = {
       });
       store.setList(cf.mod, lst);
     }
-    persistenciaCloudFirst.salvar(cf.mod, cf.local).then(r => {
+    return persistenciaCloudFirst.salvar(cf.mod, cf.local);
+    }).then(r => {
+      if (!r) return;
       if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return;
       if (r && r.ok) {
         if (cf.conflictClientId) cloudRel.resolverConflito(cf.conflictClientId, 'local', { version: r.row && r.row.version });
         toast('✅ Sua versão foi mantida na nuvem');
       }
       else if (r && r.conflict && !r.conflictPreserved) {
+        /* a nuvem andou de novo: este fica decidido; o novo segue a regra da
+           última edição em segundo plano, sem reabrir a janela */
         if (cf.conflictClientId) cloudRel.resolverConflito(cf.conflictClientId, 'local', { novoConflito: true });
         cloudRel._resolverConflitoRegistro(cf.mod, cf.local, r.cloud, r.cloudUpdatedAt);
+        toast('✅ Sua versão vale — a nuvem mudou de novo e ela está sendo regravada por cima', 'success');
       }
       else if (r && r.queued) toast('Sem conexão — sua escolha ficou protegida e será enviada automaticamente.', 'warn');
       else toast('A escolha ficou preservada, mas exige revisão antes de chegar à nuvem.', 'warn');

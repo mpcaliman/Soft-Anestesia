@@ -22758,6 +22758,49 @@ await test('Bloqueio: medicações seguem o horário da punção, editáveis e a
   await page.close();
 });
 
+/* Conflito que chega durante o trabalho não abre janela: a regra da última
+   edição resolve sozinha. E quando a nuvem devolve o conflito sem conteúdo
+   nem versão, vale o daqui — relendo a versão atual para a gravação passar
+   (antes "Manter o meu" regravava sem versão e o mesmo aviso voltava). */
+await test('Conflitos: sem janela no meio do trabalho, e "Manter o meu" resolve mesmo com a nuvem vazia', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const ctx = await __smokePrepareQueue('org-1', 'u1');
+    auth._desbloquear && auth._desbloquear();
+    cloudRel.disponivel = () => true;
+    cloudRel.enviarDecisoes = async () => 0;
+    cloudRel._enviarConflito = async () => false;
+    const out = {};
+    const gravados = [];
+    cloudRel._lerAtualTab = async () => ({ id: 'srv', version: 7, updated_at: '2026-10-22T10:00:00Z' });
+    persistenciaCloudFirst.salvar = async (mod, item) => { gravados.push(Object.assign({}, item)); return { ok: true, row: { version: 8 } }; };
+    const local = { _id: 'pre-jov', nome: 'Jovelina Teste', cpf: '003.814.635-59', peso: '39.7', _relOrg: 'org-1', _updatedAt: '2026-10-22T14:00:00Z' };
+    store.setList('pre', [Object.assign({}, local)]);
+    const st = id => { const x = cloudRel._conflitosLer().find(c => c.clientId === id); return x && (x.resolutionRequested ? x.resolutionRequested.status : x.status); };
+
+    /* 1) chegou durante o trabalho: nenhuma janela, e a regra resolve sozinha */
+    const antes = cloudRel._conflitosLer().length;
+    cloudRel._resolverConflitoRegistro('pre', local, { _id: 'pre-jov' }, '2026-10-22T10:00:00Z');
+    out.semJanela = !document.getElementById('modal-backdrop').classList.contains('show');
+    await new Promise(ok => setTimeout(ok, 2200));
+    const novo = cloudRel._conflitosLer().slice(antes)[0];
+    out.resolveuSozinho = !!novo && st(novo.clientId) === 'resolved_local' &&
+      gravados.some(g => g._id === 'pre-jov' && g._relVersion === 7 && g.nome === 'Jovelina Teste');
+
+    /* 2) aberto pela lista: "Manter o meu" relê a versão e resolve */
+    gravados.length = 0;
+    const e2 = cloudRel.registrarConflito('pre', Object.assign({}, local, { peso: '40' }), { _id: 'pre-jov' }, { cloudUpdatedAt: '2026-10-22T11:00:00Z' });
+    cloudRel._resolverConflitoRegistro('pre', Object.assign({}, local, { peso: '40' }), { _id: 'pre-jov' }, '2026-10-22T11:00:00Z', e2.clientId, { interativo: true });
+    out.janelaQuandoPede = document.getElementById('modal-backdrop').classList.contains('show');
+    cloudRel._conflitoManter();
+    await new Promise(ok => setTimeout(ok, 300));
+    out.manterResolve = gravados.some(g => g._relVersion === 7 && g.peso === '40') && st(e2.clientId) === 'resolved_local';
+    return out;
+  });
+  for (const [k, v] of Object.entries(r)) assert(v, 'falhou: ' + k + ' → ' + JSON.stringify(r));
+  await page.close();
+});
+
 await test('Impressão da pré: orientações, conclusão e assinatura não somem por retificação em branco', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
