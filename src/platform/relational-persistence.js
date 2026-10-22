@@ -1370,11 +1370,13 @@ const cloudRel = {
     try { gestor = (auth.usuarioAtual() || {}).role === 'gestor'; } catch (e) {}
     return cloudRel._conflitosTodos().filter(x => x && (x.ownerId === dono || (gestor && x.serverVisible)));
   },
-  /* O CONTADOR CONTA O QUE ESPERA DECISÃO. O que a regra da última edição já
-     decidiu fica "pending" só até o recibo da nuvem (sobe aos poucos) — e
-     contá-lo fazia o número CRESCER justamente enquanto os conflitos eram
-     resolvidos: 29, depois 98. */
-  conflitosPendentes() { return cloudRel._conflitosLer().filter(x => x.status === 'pending' && !x.resolutionRequested).length; },
+  conflitosPendentes() { return cloudRel._conflitosLer().filter(x => x.status === 'pending').length; },
+  /* O QUE A TELA MOSTRA É O QUE ESPERA DECISÃO. Para a segurança, a decisão
+     só vale com o recibo da nuvem (conflitosPendentes continua contando-a);
+     mas mostrar na tela o que a regra da última edição já decidiu fazia o
+     número CRESCER justamente enquanto os conflitos eram resolvidos: 29,
+     depois 98. */
+  conflitosAguardandoDecisao() { return cloudRel._conflitosLer().filter(x => x.status === 'pending' && !x.resolutionRequested).length; },
   _conflitoSalvar(entry) {
     const a = cloudRel._conflitosTodos();
     const i = a.findIndex(x => x && x.clientId === entry.clientId);

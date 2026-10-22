@@ -695,7 +695,7 @@ const nuvemEstado = {
       const filaRel = (() => { try { return cloudRel.filaPendentes(); } catch (e) { return 0; } })();
       const filaDel = (() => { try { return cloudRel._filaDelLer().length; } catch (e) { return 0; } })();
       const filaCifradaN = (() => { try { return persistenciaCloudFirst.pendentesConhecidos(); } catch (e) { return 0; } })();
-      const conflitos = (() => { try { return cloudRel.conflitosPendentes(); } catch (e) { return 0; } })();
+      const conflitos = (() => { try { return cloudRel.conflitosAguardandoDecisao(); } catch (e) { return 0; } })();
       if (conflitos) return { estado: 'conflito', conflitos,
         msg: conflitos + (conflitos === 1 ? ' conflito preservado — toque para decidir' : ' conflitos preservados — toque para decidir') };
       const fila = filaBackup + filaRel + filaDel + filaCifradaN;
@@ -764,7 +764,7 @@ const nuvemEstado = {
         persistenciaCloudFirst.pendentesConhecidos(); }
       catch (e) { return 0; }
     })();
-    const conflitos = (() => { try { return cloudRel.conflitosPendentes(); } catch (e) { return 0; } })();
+    const conflitos = (() => { try { return cloudRel.conflitosAguardandoDecisao(); } catch (e) { return 0; } })();
     const ultimo = localStorage.getItem('medsys.v7.cloud.ultimo_sync');
     partes.push('☁️ <b>Tudo na nuvem</b> — registros, cadastros da clínica, modelos e rascunhos');
     if (fila) { ok = false; partes.push('⏳ <b>' + fila + '</b> aguardando envio (sobem sozinhos)'); }
@@ -821,7 +821,7 @@ const nuvemEstado = {
     nuvemEstado._ocupado = true;
     if (btn) btn.disabled = true;
     try {
-      if (cloudRel.conflitosPendentes()) {
+      if (cloudRel.conflitosAguardandoDecisao()) {
         try { await cloudRel.drenarConflitos(); } catch (e) {}
         if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return;
         cloudRel.abrirConflitosPendentes();

@@ -165,8 +165,10 @@ assert.equal(conflito.metadata.canonicalBy, 'user-b');
 assert.ok(conflito.metadata.changedFields.includes('procedimento'));
 assert.equal(lists.get('anestesia')[0].procedimento, 'versão aberta');
 assert.equal(lists.get('anestesia')[0]._relVersion, 1);
-assert.ok(form.children.some(x => x.attrs.role === 'status'));
-assert.ok(form.children.some(x => x.children.some(c => c.textContent === 'Comparar versões')));
+/* nada por cima do formulário: os dois lados ficam preservados (acima) e a
+   regra da última edição decide em segundo plano; o que sobrar aparece no
+   menu lateral, não num painel sobre o trabalho */
+assert.ok(!form.children.some(x => x.attrs.role === 'status'), 'conflito em tempo real não abre painel sobre o formulário');
 assert.equal(snapshots.size, 0, 'online, a evidência clínica pertence à memória ou servidor');
 release(); gate = null;
 await new Promise(resolveTick => setImmediate(resolveTick));
@@ -339,7 +341,7 @@ assert.equal(liveConflict.serverVersion, 2);
 assert.equal(liveConflict.metadata.draftModule, 'live:termo');
 assert.equal(liveConflict.proposed.dados.consentimento, 'Minha edição');
 assert.equal(consentField.value, 'Minha edição');
-assert.ok(consentForm.children.some(x => x.attrs.role === 'status'));
+assert.ok(!consentForm.children.some(x => x.attrs.role === 'status'), 'conflito de edição ao vivo também não abre painel sobre o formulário');
 await new Promise(resolveTick => setImmediate(resolveTick));
 assert.equal(await cloudRel._resolverConflitoEdicaoViva(liveConflict.clientId, 'local', contexto()), true);
 assert.equal(draftRow.version, 3, 'escolher local usa a revisão remota como base do CAS');
