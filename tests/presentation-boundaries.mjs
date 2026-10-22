@@ -625,10 +625,11 @@ testedSyncStatus.refresh();
 assert.equal(syncVisual.textContent, 'Fila cifrada · 4 aguardando envio');
 assert.equal(syncBadge.state, 'queued');
 
+/* conflitos não aparecem no selo do topo: ficam no menu lateral */
 syncFixture.conflicts = 2;
 testedSyncStatus.cloudState('syncing');
-assert.equal(syncVisual.textContent, '2 conflitos preservados');
-assert.equal(syncBadge.state, 'error');
+assert.equal(syncVisual.textContent, 'Sincronizando…');
+assert.equal(syncBadge.state, 'syncing');
 
 syncFixture.conflicts = 0;
 syncFixture.legacy = 0;

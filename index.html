@@ -4839,6 +4839,14 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
          chega estava atrás de uma porta fechada justamente para quem mais
          precisa dela. Aqui ela fica ao lado do indicador, que é o caminho de
          quem não tem Ajustes. -->
+    <!-- PENDÊNCIAS NO MENU, NÃO NA TELA. O aviso de "aguardando recibo" ficava
+         flutuando por cima do trabalho; aqui ele mora junto do "Atualizar tudo"
+         e só aparece quando há o que mostrar. -->
+    <button type="button" class="sidebar-nuvem-btn" id="sidebar-pend-btn" style="display:none"
+            onclick="conexao.verPendentes()" title="O que ainda aguarda o recibo da nuvem, e por quê">
+      <span class="sn-ico">⏳</span>
+      <span class="sn-txt"><b>Pendências</b><small id="sidebar-pend-msg"></small></span>
+    </button>
     <button type="button" class="sidebar-nuvem-btn" id="sidebar-diag-btn"
             onclick="cloudDiag.abrirJanela()"
             title="Compara o que existe na clínica com o que está carregado nesta sessão, módulo a módulo">
@@ -4847,7 +4855,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-22a</b><br>
+    v7.1 · build <b id="build-tag">2026-10-22e</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -10466,6 +10474,20 @@ const utils = {
       const alt = candidatos.find(p => norm(p.nome) === norm(found.nome) && p.carimbo);
       if (alt) found = alt;
     }
+    /* CARIMBO QUE É SÓ UM APONTADOR. Cadastro salvo por uma versão antiga
+       subiu para a clínica com a referência ao depósito local do aparelho
+       ("blob:…"), não com a imagem. Onde a imagem existe, ela é lida daqui;
+       num aparelho novo não existe — e em vez de um quadro vazio sem
+       explicação, avisa como resolver. */
+    if (found.carimbo && String(found.carimbo).indexOf('blob:') === 0) {
+      let img = '';
+      try { img = (store._blobs() || {})[found.carimbo] || ''; } catch (e) { img = ''; }
+      found = Object.assign({}, found, { carimbo: img, _carimboAusente: !img });
+      if (!img && !utils._avisouCarimbo) {
+        utils._avisouCarimbo = true;
+        try { toast('🖋️ O carimbo de ' + (found.nome || 'profissional') + ' não chegou a este aparelho. Abra Ajustes → Profissionais e envie a imagem do carimbo de novo: ela passa a valer em todos os aparelhos.', 'warn'); } catch (e) {}
+      }
+    }
     return found;
   },
   escapeHTML(s) {
@@ -13497,7 +13519,15 @@ const conexao = {
       const fora = conexao.offline();
       const pend = conexao.pendentes();
       const el = document.getElementById(conexao.ID);
-      if (!fora && !pend) { if (el) el.remove(); conexao._reservarEspaco(null); return; }
+      if (!fora && !pend) { if (el) el.remove(); conexao._reservarEspaco(null); conexao._menuPendencias(0); return; }
+      conexao._menuPendencias(pend);
+      if (!fora) {
+        /* com internet: nada por cima da tela — as pendências ficam no menu
+           lateral, junto do "Atualizar tudo" */
+        if (el) el.remove();
+        conexao._reservarEspaco(null);
+        return;
+      }
       const div = el || document.createElement('div');
       div.id = conexao.ID;
       div.className = 'faixa-sem-net' + (fora ? '' : ' faixa-sem-net-subindo');
@@ -13511,6 +13541,15 @@ const conexao = {
         (pend ? ' <button type="button" class="btn btn-xs" style="margin-left:6px;background:rgba(255,255,255,.18);color:#fff;border:1px solid rgba(255,255,255,.35)" onclick="conexao.verPendentes()">o que falta?</button>' : '');
       if (!el) document.body.appendChild(div);
       conexao._reservarEspaco(div);
+    } catch (e) {}
+  },
+  _menuPendencias(pend) {
+    try {
+      const b = document.getElementById('sidebar-pend-btn');
+      const m = document.getElementById('sidebar-pend-msg');
+      if (!b) return;
+      b.style.display = pend ? '' : 'none';
+      if (m) m.textContent = pend + ' aguardando recibo — ver o que falta';
     } catch (e) {}
   },
   /* A altura é MEDIDA, não chutada: a faixa tem uma, duas ou três linhas

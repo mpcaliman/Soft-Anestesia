@@ -48,15 +48,12 @@ const syncStatus = {
         return cloud._fila().length + cloudRel.filaPendentes() + cloudRel._filaDelLer().length + cifradas;
       } catch (e) { return 0; }
     })();
-    const conflitosN = (() => { try { return cloudRel.conflitosPendentes(); } catch (e) { return 0; } })();
 
     if (!this._cloudDisponivel()) {
       txt = (this._localTxt && this._localTxt !== 'Pronto')
         ? this._localTxt + ' · nuvem indisponível'
         : 'Nuvem indisponível — nenhuma confirmação';
       state = 'local';
-    } else if (conflitosN > 0) {
-      txt = conflitosN + (conflitosN === 1 ? ' conflito preservado' : ' conflitos preservados'); state = 'error';
     } else if (this._cloud === 'syncing') {
       txt = 'Sincronizando…'; state = 'syncing';
     } else if (this._cloud === 'error') {

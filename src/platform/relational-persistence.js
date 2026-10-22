@@ -1371,6 +1371,12 @@ const cloudRel = {
     return cloudRel._conflitosTodos().filter(x => x && (x.ownerId === dono || (gestor && x.serverVisible)));
   },
   conflitosPendentes() { return cloudRel._conflitosLer().filter(x => x.status === 'pending').length; },
+  /* O QUE A TELA MOSTRA É O QUE ESPERA DECISÃO. Para a segurança, a decisão
+     só vale com o recibo da nuvem (conflitosPendentes continua contando-a);
+     mas mostrar na tela o que a regra da última edição já decidiu fazia o
+     número CRESCER justamente enquanto os conflitos eram resolvidos: 29,
+     depois 98. */
+  conflitosAguardandoDecisao() { return cloudRel._conflitosLer().filter(x => x.status === 'pending' && !x.resolutionRequested).length; },
   _conflitoSalvar(entry) {
     const a = cloudRel._conflitosTodos();
     const i = a.findIndex(x => x && x.clientId === entry.clientId);
@@ -1921,7 +1927,6 @@ const cloudRel = {
       cloudRel._resolucaoAgendada = null;
       let n = 0;
       try { n = await cloudRel.resolverPelaUltimaEdicao(); } catch (e) {}
-      if (n) { try { toast('✅ ' + n + ' conflito(s) resolvido(s) pela última edição', 'success'); } catch (e) {} }
       try { syncStatus.refresh(); nuvemEstado.renderMenu(); } catch (e) {}
     }, 1500);
   },

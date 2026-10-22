@@ -22195,13 +22195,15 @@ await test('Tarja de sem internet, e o que foi digitado sobrevive em qualquer m�
     conexao.offline = () => false; conexao.pendentes = () => 2;
     conexao.pintar();
     const t2 = document.getElementById(conexao.ID);
-    out.continuaEnquantoNaoSobe = !!t2 && /Enviando para a nuvem/i.test(t2.textContent)
-      && /após a confirmação/i.test(t2.textContent);
+    /* com internet, o aviso continua — mas no menu lateral, nada por cima da tela */
+    const bPend = document.getElementById('sidebar-pend-btn');
+    out.continuaEnquantoNaoSobe = !t2 && !document.body.classList.contains('com-faixa-net') &&
+      !!bPend && bPend.style.display !== 'none' && /2 aguardando/i.test(bPend.textContent);
 
     /* ---- subiu tudo: some sozinha ---- */
     conexao.pendentes = () => 0;
     conexao.pintar();
-    out.someQuandoAcaba = !document.getElementById(conexao.ID);
+    out.someQuandoAcaba = !document.getElementById(conexao.ID) && document.getElementById('sidebar-pend-btn').style.display === 'none';
     conexao.offline = origOffline; conexao.pendentes = origPend;
 
     /* ---- EDIÇÃO VIVA nos módulos que não tinham nada ---- */
@@ -22247,7 +22249,7 @@ await test('Tarja de sem internet, e o que foi digitado sobrevive em qualquer m�
   assert(r.dizQuantos && r.dizFilaCifrada && r.dizEscopo,
     'deve dizer quantos aguardam e que o cofre pertence ao usuário e à clínica corretos');
   assert(r.dizQueRecomeçaSozinho, 'deve explicar que o envio reinicia automaticamente no reconnect');
-  assert(r.continuaEnquantoNaoSobe, 'internet de volta não basta: enquanto um registro estiver preso aqui, o aviso continua');
+  assert(r.continuaEnquantoNaoSobe, 'internet de volta não basta: enquanto um registro estiver preso aqui, o aviso continua (no menu lateral)');
   assert(r.someQuandoAcaba, 'e some sozinha quando o último chega à nuvem');
   assert(r.cobreOsQueFaltavam, 'a edição viva cobre justamente os módulos que não tinham auto-save nenhum');
   assert(r.temOFormulario && r.guardouODigitado, 'o que foi digitado e não salvo fica guardado');
@@ -22795,6 +22797,31 @@ await test('Conflitos: sem janela no meio do trabalho, e "Manter o meu" resolve 
     cloudRel._conflitoManter();
     await new Promise(ok => setTimeout(ok, 300));
     out.manterResolve = gravados.some(g => g._relVersion === 7 && g.peso === '40') && st(e2.clientId) === 'resolved_local';
+    return out;
+  });
+  for (const [k, v] of Object.entries(r)) assert(v, 'falhou: ' + k + ' → ' + JSON.stringify(r));
+  await page.close();
+});
+
+/* Carimbo que subiu como apontador ("blob:…") de outro aparelho: lido do
+   depósito local quando existe; num aparelho novo, vazio e com aviso. */
+await test('Carimbo: apontador local resolvido quando existe, e aviso quando o aparelho é novo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const img = 'data:image/png;base64,' + 'C'.repeat(5000);
+    const ref = store._refDe(img);
+    store.setList('cad_profissionais', [{ _id: 'pz', nome: 'Doutor Apontador', crm: '1', responsavel: true, carimbo: ref }]);
+    const orig = store._blobs;
+    store._blobs = () => ({ [ref]: img });
+    out.resolve = (utils.getCarimboDoProfissional('Doutor Apontador') || {}).carimbo === img;
+    store._blobs = () => ({});
+    utils._avisouCarimbo = false;
+    const p = utils.getCarimboDoProfissional('Doutor Apontador') || {};
+    out.novoVazio = p.carimbo === '' && p._carimboAusente === true;
+    out.avisou = utils._avisouCarimbo === true;
+    store._blobs = orig;
+    store.setList('cad_profissionais', []);
     return out;
   });
   for (const [k, v] of Object.entries(r)) assert(v, 'falhou: ' + k + ' → ' + JSON.stringify(r));

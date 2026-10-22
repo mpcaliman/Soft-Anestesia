@@ -320,20 +320,8 @@ const realtime = {
   _avisarConflito(mod, conflito, contexto) {
     if (!contextoAba.corresponde(contexto)) return;
     try { syncStatus.refresh(); nuvemEstado.renderMenu(); } catch (e) {}
-    const chave = 'conflito:' + mod;
-    const aviso = realtime._painel(chave, mod,
-      '⚠️ Outra pessoa alterou este registro. Sua digitação e a versão da nuvem foram preservadas.', contexto);
-    if (aviso) {
-      const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn btn-primary';
-      btn.textContent = 'Comparar versões';
-      btn.addEventListener('click', () => {
-        if (!contextoAba.corresponde(contexto)) return;
-        if (conflito && conflito.clientId) cloudRel._abrirConflito(conflito.clientId);
-        else cloudRel.abrirConflitosPendentes();
-      });
-      aviso.appendChild(btn);
-    }
-    /* a regra da última edição tenta resolver sozinha, sem parar o trabalho */
+    /* nada por cima do trabalho: a regra da última edição resolve em segundo
+       plano, e o que sobrar aparece no menu lateral ("Atualizar tudo") */
     try { cloudRel._agendarResolucao(); } catch (e) {}
   },
 
@@ -707,7 +695,7 @@ const nuvemEstado = {
       const filaRel = (() => { try { return cloudRel.filaPendentes(); } catch (e) { return 0; } })();
       const filaDel = (() => { try { return cloudRel._filaDelLer().length; } catch (e) { return 0; } })();
       const filaCifradaN = (() => { try { return persistenciaCloudFirst.pendentesConhecidos(); } catch (e) { return 0; } })();
-      const conflitos = (() => { try { return cloudRel.conflitosPendentes(); } catch (e) { return 0; } })();
+      const conflitos = (() => { try { return cloudRel.conflitosAguardandoDecisao(); } catch (e) { return 0; } })();
       if (conflitos) return { estado: 'conflito', conflitos,
         msg: conflitos + (conflitos === 1 ? ' conflito preservado — toque para decidir' : ' conflitos preservados — toque para decidir') };
       const fila = filaBackup + filaRel + filaDel + filaCifradaN;
@@ -776,7 +764,7 @@ const nuvemEstado = {
         persistenciaCloudFirst.pendentesConhecidos(); }
       catch (e) { return 0; }
     })();
-    const conflitos = (() => { try { return cloudRel.conflitosPendentes(); } catch (e) { return 0; } })();
+    const conflitos = (() => { try { return cloudRel.conflitosAguardandoDecisao(); } catch (e) { return 0; } })();
     const ultimo = localStorage.getItem('medsys.v7.cloud.ultimo_sync');
     partes.push('☁️ <b>Tudo na nuvem</b> — registros, cadastros da clínica, modelos e rascunhos');
     if (fila) { ok = false; partes.push('⏳ <b>' + fila + '</b> aguardando envio (sobem sozinhos)'); }
@@ -833,7 +821,7 @@ const nuvemEstado = {
     nuvemEstado._ocupado = true;
     if (btn) btn.disabled = true;
     try {
-      if (cloudRel.conflitosPendentes()) {
+      if (cloudRel.conflitosAguardandoDecisao()) {
         try { await cloudRel.drenarConflitos(); } catch (e) {}
         if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return;
         cloudRel.abrirConflitosPendentes();
