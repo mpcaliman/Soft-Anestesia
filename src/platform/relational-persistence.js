@@ -1889,6 +1889,10 @@ const cloudRel = {
       return cloudRel.resolverConflito(e.clientId, 'local',
         Object.assign({ version: r.row && r.row.version }, auto), { adiarEnvio: true });
     }
+    if (r && r.conflict && nuvemVazia) {
+      const novo = cloudRel._salvarComoNovo(mod, base);
+      if (novo) return cloudRel.resolverConflito(e.clientId, 'local', Object.assign({ comoNovo: novo._id }, auto), { adiarEnvio: true });
+    }
     if (r && r.conflict && r.conflictClientId && r.conflictClientId !== e.clientId) {
       /* a nuvem andou de novo: este fica decidido, o novo segue a mesma regra */
       return cloudRel.resolverConflito(e.clientId, 'local', Object.assign({ novoConflito: r.conflictClientId }, auto), { adiarEnvio: true });
@@ -1904,6 +1908,21 @@ const cloudRel = {
     const val = v => (v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v));
     const ks = new Set(Object.keys(a || {}).concat(Object.keys(b || {})).filter(k => k[0] !== '_'));
     return Array.from(ks).some(k => val(a && a[k]) !== val(b && b[k]));
+  },
+  /* A NUVEM TEM SÓ A CASCA. A linha existe, sem conteúdo clínico, e recusa
+     a gravação por cima; usar "o da nuvem" apagaria o atendimento. O que está
+     aqui sobe como registro NOVO, com tudo, e a casca fica para trás. */
+  _salvarComoNovo(mod, local) {
+    try {
+      const novo = JSON.parse(JSON.stringify(local || {}));
+      Object.keys(novo).forEach(k => { if (k === '_id' || k.indexOf('_rel') === 0) delete novo[k]; });
+      novo._updatedAt = new Date().toISOString();
+      const salvo = store.save(mod, novo);
+      if (salvo && salvo._id && local && local._id && salvo._id !== local._id) {
+        store.setList(mod, (store.list(mod) || []).filter(x => x && x._id !== local._id));
+      }
+      return salvo || null;
+    } catch (e) { return null; }
   },
   /* versão atual da linha na nuvem: a que veio no conflito, ou relida agora */
   async _versaoNaNuvem(mod, item, contexto, conhecida) {
@@ -3028,6 +3047,13 @@ const cloudRel = {
       if (r && r.ok) {
         if (cf.conflictClientId) cloudRel.resolverConflito(cf.conflictClientId, 'local', { version: r.row && r.row.version });
         toast('✅ Sua versão foi mantida na nuvem');
+      }
+      else if (r && r.conflict && cloudRel._semConteudo(nv)) {
+        const novo = cloudRel._salvarComoNovo(cf.mod, cf.local);
+        if (novo) {
+          if (cf.conflictClientId) cloudRel.resolverConflito(cf.conflictClientId, 'local', { comoNovo: novo._id });
+          toast('✅ Sua versão foi guardada na nuvem como registro novo — a nuvem só tinha uma linha vazia', 'success');
+        } else toast('Não consegui gravar sua versão agora; ela continua guardada neste aparelho.', 'warn');
       }
       else if (r && r.conflict && !r.conflictPreserved) {
         /* a nuvem andou de novo: este fica decidido; o novo segue a regra da

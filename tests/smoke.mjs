@@ -22797,6 +22797,18 @@ await test('Conflitos: sem janela no meio do trabalho, e "Manter o meu" resolve 
     cloudRel._conflitoManter();
     await new Promise(ok => setTimeout(ok, 300));
     out.manterResolve = gravados.some(g => g._relVersion === 7 && g.peso === '40') && st(e2.clientId) === 'resolved_local';
+
+    /* 3) a nuvem só tem a casca e RECUSA a gravação: a versão daqui sobe como
+          registro novo, com tudo, e o conflito se encerra — nada se perde */
+    persistenciaCloudFirst.salvar = async (mod, item) => ({ ok: false, conflict: true, cloud: { _id: item._id }, cloudUpdatedAt: '2026-10-22T12:00:00Z' });
+    store.setList('pre', [Object.assign({}, local, { peso: '41' })]);
+    const e3 = cloudRel.registrarConflito('pre', Object.assign({}, local, { peso: '41' }), { _id: 'pre-jov' }, { cloudUpdatedAt: '2026-10-22T12:00:00Z' });
+    cloudRel._resolverConflitoRegistro('pre', Object.assign({}, local, { peso: '41' }), { _id: 'pre-jov' }, '2026-10-22T12:00:00Z', e3.clientId, { interativo: true });
+    cloudRel._conflitoManter();
+    await new Promise(ok => setTimeout(ok, 300));
+    const lista = store.list('pre');
+    out.cascaViraNovo = st(e3.clientId) === 'resolved_local' && !lista.some(x => x._id === 'pre-jov') &&
+      lista.some(x => x.nome === 'Jovelina Teste' && x.peso === '41' && x._id !== 'pre-jov');
     return out;
   });
   for (const [k, v] of Object.entries(r)) assert(v, 'falhou: ' + k + ' → ' + JSON.stringify(r));
