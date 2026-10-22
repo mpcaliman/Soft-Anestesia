@@ -333,7 +333,8 @@ const realtime = {
       });
       aviso.appendChild(btn);
     }
-    try { toast('⚠️ Alteração recebida: compare as versões preservadas.', 'warn'); } catch (e) {}
+    /* a regra da última edição tenta resolver sozinha, sem parar o trabalho */
+    try { cloudRel._agendarResolucao(); } catch (e) {}
   },
 
   _painel(chave, mod, texto, contexto) {

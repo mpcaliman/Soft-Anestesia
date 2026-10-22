@@ -4847,7 +4847,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-21d</b><br>
+    v7.1 · build <b id="build-tag">2026-10-22a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -44948,7 +44948,14 @@ const pacientes = {
   /* Fase 5: resolução de conflito — a nuvem foi alterada por outra pessoa
      desde que este paciente foi carregado. Mostra os dois lados e deixa
      escolher, sem sobrescrever cegamente. */
-  _resolverConflito(local, nuvem, cloudUpdatedAt, conflictClientId) {
+  _resolverConflito(local, nuvem, cloudUpdatedAt, conflictClientId, opts = {}) {
+    /* conflito no meio do trabalho não abre janela: a regra da última edição
+       decide em segundo plano; o que sobrar fica na lista de conflitos */
+    if (!opts.interativo) {
+      try { if (!conflictClientId) cloudRel.registrarConflito('pacientes', local, nuvem, { cloudUpdatedAt }); } catch (e) {}
+      try { cloudRel._agendarResolucao(); } catch (e) {}
+      return;
+    }
     const campos = [
       ['nome', 'Nome'], ['cpf', 'CPF'], ['nascimento', 'Nascimento'],
       ['telefone', 'Telefone'], ['plano', 'Plano'], ['convenio', 'Convênio'],
@@ -51057,7 +51064,14 @@ const agenda = {
       } catch (er) {}
     }
   },
-  _resolverConflito(local, nuvem, cloudUpdatedAt, conflictClientId) {
+  _resolverConflito(local, nuvem, cloudUpdatedAt, conflictClientId, opts = {}) {
+    /* conflito no meio do trabalho não abre janela: a regra da última edição
+       decide em segundo plano; o que sobrar fica na lista de conflitos */
+    if (!opts.interativo) {
+      try { if (!conflictClientId) cloudRel.registrarConflito('agenda', local, nuvem, { cloudUpdatedAt }); } catch (e) {}
+      try { cloudRel._agendarResolucao(); } catch (e) {}
+      return;
+    }
     const salvo = conflictClientId ? { clientId: conflictClientId }
       : cloudRel.registrarConflito('agenda', local, nuvem, { cloudUpdatedAt });
     const cid = salvo && salvo.clientId;
