@@ -4847,7 +4847,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-22a</b><br>
+    v7.1 · build <b id="build-tag">2026-10-22b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -10465,6 +10465,20 @@ const utils = {
     if (!found.carimbo) {
       const alt = candidatos.find(p => norm(p.nome) === norm(found.nome) && p.carimbo);
       if (alt) found = alt;
+    }
+    /* CARIMBO QUE É SÓ UM APONTADOR. Cadastro salvo por uma versão antiga
+       subiu para a clínica com a referência ao depósito local do aparelho
+       ("blob:…"), não com a imagem. Onde a imagem existe, ela é lida daqui;
+       num aparelho novo não existe — e em vez de um quadro vazio sem
+       explicação, avisa como resolver. */
+    if (found.carimbo && String(found.carimbo).indexOf('blob:') === 0) {
+      let img = '';
+      try { img = (store._blobs() || {})[found.carimbo] || ''; } catch (e) { img = ''; }
+      found = Object.assign({}, found, { carimbo: img, _carimboAusente: !img });
+      if (!img && !utils._avisouCarimbo) {
+        utils._avisouCarimbo = true;
+        try { toast('🖋️ O carimbo de ' + (found.nome || 'profissional') + ' não chegou a este aparelho. Abra Ajustes → Profissionais e envie a imagem do carimbo de novo: ela passa a valer em todos os aparelhos.', 'warn'); } catch (e) {}
+      }
     }
     return found;
   },

@@ -22801,6 +22801,31 @@ await test('Conflitos: sem janela no meio do trabalho, e "Manter o meu" resolve 
   await page.close();
 });
 
+/* Carimbo que subiu como apontador ("blob:…") de outro aparelho: lido do
+   depósito local quando existe; num aparelho novo, vazio e com aviso. */
+await test('Carimbo: apontador local resolvido quando existe, e aviso quando o aparelho é novo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(() => {
+    const out = {};
+    const img = 'data:image/png;base64,' + 'C'.repeat(5000);
+    const ref = store._refDe(img);
+    store.setList('cad_profissionais', [{ _id: 'pz', nome: 'Doutor Apontador', crm: '1', responsavel: true, carimbo: ref }]);
+    const orig = store._blobs;
+    store._blobs = () => ({ [ref]: img });
+    out.resolve = (utils.getCarimboDoProfissional('Doutor Apontador') || {}).carimbo === img;
+    store._blobs = () => ({});
+    utils._avisouCarimbo = false;
+    const p = utils.getCarimboDoProfissional('Doutor Apontador') || {};
+    out.novoVazio = p.carimbo === '' && p._carimboAusente === true;
+    out.avisou = utils._avisouCarimbo === true;
+    store._blobs = orig;
+    store.setList('cad_profissionais', []);
+    return out;
+  });
+  for (const [k, v] of Object.entries(r)) assert(v, 'falhou: ' + k + ' → ' + JSON.stringify(r));
+  await page.close();
+});
+
 await test('Impressão da pré: orientações, conclusão e assinatura não somem por retificação em branco', async () => {
   const page = await novaPagina();
   const r = await page.evaluate(async () => {
