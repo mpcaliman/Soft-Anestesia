@@ -195,6 +195,20 @@ const store = {
         const raw = localStorage.getItem(STORAGE[modKey]);
         if (raw) { try { visitar(JSON.parse(raw)); } catch (e) {} }
       });
+      /* CADASTROS NÃO SÃO PRONTUÁRIO, E O CARIMBO MORA NELES.
+         A varredura só olhava os módulos clínicos: a imagem do carimbo, que o
+         cadastro do profissional guardava como referência, parecia órfã e era
+         apagada — e com ela a única cópia, antes de subir para a clínica. Toda
+         referência fora dos módulos clínicos (cadastros, logomarca, modelos)
+         também conta como em uso. */
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (!k || k.indexOf('medsys.') !== 0 || k === store.BLOBS_KEY) continue;
+          const raw = localStorage.getItem(k);
+          if (raw && raw.indexOf('blob:') >= 0) { try { visitar(JSON.parse(raw)); } catch (e) {} }
+        }
+      } catch (e) {}
       if (typeof disco !== 'undefined') {
         const blobs = JSON.parse(disco.get(store.BLOBS_KEY) || '{}');
         const manter = {};

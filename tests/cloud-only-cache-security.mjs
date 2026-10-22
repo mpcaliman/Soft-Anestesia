@@ -18,6 +18,8 @@ class MemoryStorage {
   getItem(key) { return this.values.has(String(key)) ? this.values.get(String(key)) : null; }
   setItem(key, value) { this.writes.push(String(key)); this.values.set(String(key), String(value)); }
   removeItem(key) { this.values.delete(String(key)); }
+  get length() { return this.values.size; }
+  key(i) { return Array.from(this.values.keys())[i] ?? null; }
 }
 
 let generation = 1;
@@ -163,8 +165,11 @@ localStorage.setItem('medsys.v7.arquivo.indice', '{"pre":[{"nome":"Paciente"}]}'
 localStorage.setItem('medsys.v7.arquivo.auto', '1');
 localStorage.setItem('records.pre', JSON.stringify([{ _id: 'legado-pendente', foto: 'blob:manter' }]));
 diskValues.set('medsys.v7.versions', '{"pre:x":[{"snapshot":{"nome":"Paciente"}}]}');
+/* o carimbo do cadastro também é referência em uso: não pode sair */
+localStorage.setItem('medsys.v7.cad.profissionais', JSON.stringify([{ _id: 'p1', nome: 'Dr', carimbo: 'blob:carimbo' }]));
 diskValues.set('medsys.v7.blobs', JSON.stringify({
   'blob:manter': 'data:image/png;base64,pendente',
+  'blob:carimbo': 'data:image/png;base64,carimbo',
   'blob:remover': 'data:image/png;base64,confirmado'
 }));
 store.purgarArtefatosConfirmadosDuraveis();
@@ -172,7 +177,9 @@ assert.equal(localStorage.getItem('medsys.v7.audit'), null);
 assert.equal(localStorage.getItem('medsys.v7.arquivo.indice'), null);
 assert.equal(localStorage.getItem('medsys.v7.arquivo.auto'), null);
 assert.equal(diskValues.has('medsys.v7.versions'), false);
-assert.deepEqual(Object.keys(JSON.parse(diskValues.get('medsys.v7.blobs'))), ['blob:manter']);
+assert.deepEqual(Object.keys(JSON.parse(diskValues.get('medsys.v7.blobs'))).sort(), ['blob:carimbo', 'blob:manter'],
+  'a imagem do carimbo referenciada pelo cadastro não é apagada como órfã');
+localStorage.removeItem('medsys.v7.cad.profissionais');
 
 /* A limpeza do legado nunca pode transformar um blob transitório em arquivo
    clínico durável. Mesmo se uma referência histórica tiver o mesmo hash, só
