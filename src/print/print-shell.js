@@ -53,7 +53,11 @@
       if (!current()) { clear(); return; }
       window.softPrintRendered = true;
       send('soft-print-rendered');
-    } catch (error) { clear(); send('soft-print-failed'); }
+    } catch (error) {
+      /* o motivo volta para a tela: "falha ao montar" sozinho não é diagnóstico */
+      try { owner.postMessage({type:'soft-print-failed',nonce,motivo:String((error && error.message) || '').slice(0, 160)}, targetOrigin); } catch (e) {}
+      clear();
+    }
   });
   // Não devolver um documento clínico antigo por restauração do BFCache.
   window.addEventListener('pagehide', clear);

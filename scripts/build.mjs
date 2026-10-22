@@ -44,6 +44,24 @@ for (const relativePath of publicAssets) {
   assets[relativePath] = createHash('sha256').update(bytes).digest('hex');
 }
 
+/* A JANELA DE IMPRESSÃO NUNCA MISTURA VERSÕES.
+   Logo depois de publicar, o navegador ainda guarda por alguns minutos os
+   scripts da versão anterior; a janela de impressão os reaproveitava, a
+   conferência de versão recusava montar o documento e a impressão falhava.
+   Cada script do shell leva a impressão digital do próprio conteúdo na URL:
+   versão nova é URL nova, e o cache antigo simplesmente não serve. */
+{
+  const shellPath = 'print-shell.html';
+  const destination = resolve(distDir, shellPath);
+  const original = await readFile(destination, 'utf8');
+  const versionado = original.replace(/(<script\b[^>]*\bsrc=")([^"?#]+)(")/gi, (all, a, src, b) =>
+    assets[src] ? a + src + '?v=' + assets[src].slice(0, 16) + b : all);
+  if (versionado !== original) {
+    await writeFile(destination, versionado, 'utf8');
+    assets[shellPath] = createHash('sha256').update(Buffer.from(versionado, 'utf8')).digest('hex');
+  }
+}
+
 const packageJson = JSON.parse(await readFile(resolve(rootDir, 'package.json'), 'utf8'));
 let sourceCommit = 'unknown';
 try {

@@ -63,7 +63,8 @@ window.SoftActions = (() => {
     if (origin === 'null') return Promise.reject(new Error('Abra o aplicativo pelo seu endereço para imprimir'));
     const targetOrigin = origin;
     const nonce = crypto.randomUUID();
-    const shell = new URL('print-shell.html', document.baseURI);
+    /* a versão na URL: o shell em cache de uma publicação anterior não serve */
+    const shell = new URL('print-shell.html' + (buildToken ? '?v=' + encodeURIComponent(String(buildToken).slice(0, 32)) : ''), document.baseURI);
     if (shell.origin !== origin) return Promise.reject(new Error('Origem de impressão inválida'));
     shell.hash = nonce;
     if (!printTracking) {
@@ -114,7 +115,8 @@ window.SoftActions = (() => {
           prazo(PRAZO_MONTAGEM, 'A janela de impressão não montou o documento a tempo');
           win.postMessage({type:'soft-print-document',nonce,html:sanitizeHTML(value),build:buildToken}, targetOrigin);
         } else if (data.type === 'soft-print-rendered' && sent) finish();
-        else if (data.type === 'soft-print-failed') finish(new Error('Falha ao montar o documento de impressão'));
+        else if (data.type === 'soft-print-failed') finish(new Error('Falha ao montar o documento de impressão' +
+          (typeof data.motivo === 'string' && data.motivo ? ' (' + data.motivo + ')' : '')));
       };
       prazo(PRAZO_ABERTURA, 'A janela de impressão não abriu a tempo (conexão lenta ou pop-up bloqueado)');
       printWindows.set(win, {context,nonce,invalidate});

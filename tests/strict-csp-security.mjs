@@ -262,7 +262,8 @@ const parentContext=vm.createContext({window:parentWindow,document:{nodeType:9,b
 vm.runInContext(runtime,parentContext);parentContext.SoftActions=parentWindow.SoftActions;
 vm.runInContext(compiled.sources.get('src/ui/strict-actions.generated.js'),parentContext);
 const popupReady=parentWindow.SoftActions.writeDocument(popup,clinicalMarkup);let ready=false;
-popupReady.then(()=>{ready=true;});assert(popup.location.href.includes('print-shell.html#'+printNonce));
+popupReady.then(()=>{ready=true;});assert(/print-shell\.html(?:\?v=[^#]+)?#/.test(popup.location.href) && popup.location.href.endsWith('#'+printNonce),
+  'o shell é aberto pela própria origem, com a versão na URL e o nonce no fragmento');
 assert.equal(parentWindow.SoftActions.isPrintCurrent(popup,printNonce),true,'the active print lease binds its window, nonce and authenticated context');
 assert.equal(parentWindow.SoftActions.isPrintCurrent({},printNonce),false);
 assert.equal(parentWindow.SoftActions.isPrintCurrent(popup,'wrong-nonce'),false);
