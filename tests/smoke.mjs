@@ -22195,14 +22195,15 @@ await test('Tarja de sem internet, e o que foi digitado sobrevive em qualquer m�
     conexao.offline = () => false; conexao.pendentes = () => 2;
     conexao.pintar();
     const t2 = document.getElementById(conexao.ID);
-    /* com internet, o aviso continua — mas como selo pequeno, sem faixa no topo */
-    out.continuaEnquantoNaoSobe = !!t2 && /2 enviando/i.test(t2.textContent) && t2.classList.contains('chip-envio')
-      && !document.body.classList.contains('com-faixa-net') && /o que falta/i.test(t2.textContent);
+    /* com internet, o aviso continua — mas no menu lateral, nada por cima da tela */
+    const bPend = document.getElementById('sidebar-pend-btn');
+    out.continuaEnquantoNaoSobe = !t2 && !document.body.classList.contains('com-faixa-net') &&
+      !!bPend && bPend.style.display !== 'none' && /2 aguardando/i.test(bPend.textContent);
 
     /* ---- subiu tudo: some sozinha ---- */
     conexao.pendentes = () => 0;
     conexao.pintar();
-    out.someQuandoAcaba = !document.getElementById(conexao.ID);
+    out.someQuandoAcaba = !document.getElementById(conexao.ID) && document.getElementById('sidebar-pend-btn').style.display === 'none';
     conexao.offline = origOffline; conexao.pendentes = origPend;
 
     /* ---- EDIÇÃO VIVA nos módulos que não tinham nada ---- */
@@ -22248,7 +22249,7 @@ await test('Tarja de sem internet, e o que foi digitado sobrevive em qualquer m�
   assert(r.dizQuantos && r.dizFilaCifrada && r.dizEscopo,
     'deve dizer quantos aguardam e que o cofre pertence ao usuário e à clínica corretos');
   assert(r.dizQueRecomeçaSozinho, 'deve explicar que o envio reinicia automaticamente no reconnect');
-  assert(r.continuaEnquantoNaoSobe, 'internet de volta não basta: enquanto um registro estiver preso aqui, o aviso continua');
+  assert(r.continuaEnquantoNaoSobe, 'internet de volta não basta: enquanto um registro estiver preso aqui, o aviso continua (no menu lateral)');
   assert(r.someQuandoAcaba, 'e some sozinha quando o último chega à nuvem');
   assert(r.cobreOsQueFaltavam, 'a edição viva cobre justamente os módulos que não tinham auto-save nenhum');
   assert(r.temOFormulario && r.guardouODigitado, 'o que foi digitado e não salvo fica guardado');

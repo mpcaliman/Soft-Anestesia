@@ -320,20 +320,8 @@ const realtime = {
   _avisarConflito(mod, conflito, contexto) {
     if (!contextoAba.corresponde(contexto)) return;
     try { syncStatus.refresh(); nuvemEstado.renderMenu(); } catch (e) {}
-    const chave = 'conflito:' + mod;
-    const aviso = realtime._painel(chave, mod,
-      '⚠️ Outra pessoa alterou este registro. Sua digitação e a versão da nuvem foram preservadas.', contexto);
-    if (aviso) {
-      const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'btn btn-primary';
-      btn.textContent = 'Comparar versões';
-      btn.addEventListener('click', () => {
-        if (!contextoAba.corresponde(contexto)) return;
-        if (conflito && conflito.clientId) cloudRel._abrirConflito(conflito.clientId);
-        else cloudRel.abrirConflitosPendentes();
-      });
-      aviso.appendChild(btn);
-    }
-    /* a regra da última edição tenta resolver sozinha, sem parar o trabalho */
+    /* nada por cima do trabalho: a regra da última edição resolve em segundo
+       plano, e o que sobrar aparece no menu lateral ("Atualizar tudo") */
     try { cloudRel._agendarResolucao(); } catch (e) {}
   },
 

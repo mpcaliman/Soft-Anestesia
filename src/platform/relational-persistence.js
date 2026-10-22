@@ -1925,7 +1925,6 @@ const cloudRel = {
       cloudRel._resolucaoAgendada = null;
       let n = 0;
       try { n = await cloudRel.resolverPelaUltimaEdicao(); } catch (e) {}
-      if (n) { try { toast('✅ ' + n + ' conflito(s) resolvido(s) pela última edição', 'success'); } catch (e) {} }
       try { syncStatus.refresh(); nuvemEstado.renderMenu(); } catch (e) {}
     }, 1500);
   },
