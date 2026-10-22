@@ -4269,7 +4269,19 @@ body.dash-auxiliar #module-dashboard #pendencias-card[data-detail] { display: bl
 body.com-faixa-net{ padding-top: var(--faixa-net-h, 0px); }
 body.com-faixa-net .app-header{ top: var(--faixa-net-h, 0px); }
 body.com-faixa-net .sidebar{ top: var(--faixa-net-h, 0px); height: calc(100vh - var(--faixa-net-h, 0px)); max-height: calc(100vh - var(--faixa-net-h, 0px)); }
-@media print{ .faixa-sem-net{ display: none !important; } body.com-faixa-net{ padding-top: 0 !important; } }
+@media print{ .faixa-sem-net, .chip-envio{ display: none !important; } body.com-faixa-net{ padding-top: 0 !important; } }
+/* COM INTERNET, O ENVIO NÃO TOMA A TELA.
+   A faixa no topo é para quando falta internet — aí ela tem de ser vista.
+   Com internet, "ainda subindo" vira um selo pequeno no canto de baixo, que
+   não empurra o cabeçalho nem cobre o formulário; o "o que falta?" continua
+   a um toque. */
+.chip-envio{
+  position: fixed; left: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 9000;
+  background: #7a4b12; color: #fff; font-size: .74rem; line-height: 1.3;
+  padding: 5px 6px 5px 10px; border-radius: 999px; box-shadow: 0 2px 8px rgba(0,0,0,.22);
+  display: inline-flex; align-items: center; gap: 6px; max-width: calc(100vw - 24px);
+}
+.chip-envio .btn{ padding: 2px 8px; font-size: .72rem; }
 .espaco-faixa{
   position: fixed; left: 10px; right: 10px; bottom: 84px; z-index: 950;
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -4847,7 +4859,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-22c</b><br>
+    v7.1 · build <b id="build-tag">2026-10-22d</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -13512,6 +13524,18 @@ const conexao = {
       const pend = conexao.pendentes();
       const el = document.getElementById(conexao.ID);
       if (!fora && !pend) { if (el) el.remove(); conexao._reservarEspaco(null); return; }
+      if (!fora) {
+        /* com internet: só o selo pequeno, sem faixa no topo */
+        const chip = el || document.createElement('div');
+        chip.id = conexao.ID;
+        chip.className = 'chip-envio';
+        chip.title = 'Atendimentos aguardando o recibo da nuvem. Pode continuar trabalhando: nada se perde.';
+        chip.innerHTML = '<span>⏳ ' + pend + ' enviando</span>' +
+          '<button type="button" class="btn btn-xs" style="background:rgba(255,255,255,.18);color:#fff;border:1px solid rgba(255,255,255,.35)" onclick="conexao.verPendentes()">o que falta?</button>';
+        if (!el) document.body.appendChild(chip);
+        conexao._reservarEspaco(null);
+        return;
+      }
       const div = el || document.createElement('div');
       div.id = conexao.ID;
       div.className = 'faixa-sem-net' + (fora ? '' : ' faixa-sem-net-subindo');

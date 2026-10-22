@@ -22195,8 +22195,9 @@ await test('Tarja de sem internet, e o que foi digitado sobrevive em qualquer m�
     conexao.offline = () => false; conexao.pendentes = () => 2;
     conexao.pintar();
     const t2 = document.getElementById(conexao.ID);
-    out.continuaEnquantoNaoSobe = !!t2 && /Enviando para a nuvem/i.test(t2.textContent)
-      && /após a confirmação/i.test(t2.textContent);
+    /* com internet, o aviso continua — mas como selo pequeno, sem faixa no topo */
+    out.continuaEnquantoNaoSobe = !!t2 && /2 enviando/i.test(t2.textContent) && t2.classList.contains('chip-envio')
+      && !document.body.classList.contains('com-faixa-net') && /o que falta/i.test(t2.textContent);
 
     /* ---- subiu tudo: some sozinha ---- */
     conexao.pendentes = () => 0;
