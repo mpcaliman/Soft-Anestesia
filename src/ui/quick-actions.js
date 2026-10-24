@@ -93,7 +93,7 @@ const quickActions = {
     } else if (mod === 'financeiro') {
       window.location.hash = 'financeiro';
       setTimeout(() => {
-        fin.finalizacao.abrirAvulso({ paciente: p.nome || '', convenio: p.plano || '' });
+        financeiro.novoRegistro({ paciente: p.nome || '', convenio: p.plano || '' });
       }, 250);
     } else if (mod === 'agenda') {
       window.location.hash = 'agenda';

@@ -338,6 +338,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try { cloud.init(); } catch (e) { console.error('Erro cloud.init:', e); }
     try { cloudRealtime.init(); } catch (e) { console.error('Erro cloudRealtime.init:', e); }
     try { textosPadrao.init(); } catch (e) { console.error('Erro textosPadrao.init:', e); }
+    try { clinicaIdentidade.vigiarTema(); clinicaIdentidade.aplicarCor(); } catch (e) { console.error('Erro clinicaIdentidade.aplicarCor:', e); }
     try { pacienteAutocomplete.init(); } catch (e) { console.error('Erro pacienteAutocomplete.init:', e); }
     try { backupCompleto.migrarOrcamentosPresos(); } catch (e) {}
     try { lixeira.purgarExpirados(); } catch (e) {}
