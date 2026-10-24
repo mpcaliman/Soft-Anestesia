@@ -583,6 +583,14 @@ html[data-theme="dark"] .theme-toggle:hover {
 
 /* === TEXTOS PADRÃO POR CAMPO === */
 .tp-field-wrap { position: relative; }
+.ci-cores { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ci-cor-opcao { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--border);
+  border-radius: 999px; background: var(--surface); color: var(--text); font-size: .8rem; cursor: pointer; }
+.ci-cor-opcao.ativa { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-light); font-weight: 600; }
+.ci-cor-opcao:disabled { opacity: .55; cursor: not-allowed; }
+.ci-cor-amostra { width: 14px; height: 14px; border-radius: 50%; display: inline-block; }
+.ci-cor-livre { display: inline-flex; align-items: center; gap: 6px; font-size: .8rem; color: var(--text-soft); margin: 0; }
+.ci-cor-livre input[type="color"] { width: 36px; height: 28px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: none; }
 .tp-btn {
   position: absolute; top: 4px; right: 4px;
   border: 1px solid var(--border); background: var(--surface);
@@ -1505,6 +1513,37 @@ table.data .empty-row td {
   }
   #pacientes-table tbody tr:hover td.actions-cell { background: var(--surface-alt, var(--surface)); }
 }
+/* FINANCEIRO — a tabela tem mais colunas do que cabem na tela, e a barra de
+   rolagem lateral só aparecia no FIM da lista (300 linhas abaixo): o que
+   passava de "Pago" parecia cortado. A rolagem agora mora numa caixa de
+   altura limitada — as duas barras ficam à vista —, o cabeçalho e o paciente
+   ficam presos, as ações presas à direita, e as colunas de texto encolhem. */
+@media (min-width: 769px) {
+  .fin-rolagem { overflow: auto; max-height: calc(100vh - 230px); min-height: 260px; }
+  #financeiro-table { font-size: .8rem; }
+  #financeiro-table th, #financeiro-table td { padding-left: 8px; padding-right: 8px; }
+  #financeiro-table thead th { position: sticky; top: 0; z-index: 2; white-space: nowrap; }
+  #financeiro-table th:first-child, #financeiro-table td:first-child {
+    position: sticky; left: 0; z-index: 1; background: var(--surface);
+    min-width: 150px; max-width: 200px; box-shadow: 6px 0 6px -6px rgba(0,0,0,.18);
+  }
+  #financeiro-table thead th:first-child { z-index: 3; background: var(--surface-alt); }
+  #financeiro-table td:nth-child(3) { min-width: 170px; max-width: 230px; }
+  #financeiro-table td:nth-child(5), #financeiro-table td:nth-child(6) { max-width: 140px; }
+  #financeiro-table th:last-child, #financeiro-table td.actions-cell {
+    position: sticky; right: 0; z-index: 1; background: var(--surface);
+    box-shadow: -6px 0 6px -6px rgba(0,0,0,.18);
+  }
+  #financeiro-table thead th:last-child { z-index: 3; background: var(--surface-alt); }
+  #financeiro-table tbody tr:hover td:first-child,
+  #financeiro-table tbody tr:hover td.actions-cell { background: var(--primary-soft); }
+}
+@media print {
+  .fin-rolagem { max-height: none !important; overflow: visible !important; }
+  #financeiro-table th, #financeiro-table td { position: static !important; box-shadow: none !important; }
+}
+.fin-falta-hora { display: inline-block; font-size: .62rem; background: var(--warning-soft); color: var(--warning);
+  padding: 1px 6px; border-radius: 8px; margin-top: 2px; white-space: nowrap; }
 /* cabeçalho clicável para ordenar */
 #pacientes-table th[data-ord] { cursor: pointer; user-select: none; }
 #pacientes-table th[data-ord]:hover { color: var(--primary); }
@@ -4855,7 +4894,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-22g</b><br>
+    v7.1 · build <b id="build-tag">2026-10-24a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -8642,12 +8681,13 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
 <div class="module" id="module-financeiro" data-module="financeiro">
   <div class="action-bar">
     <button class="btn btn-sm" id="btn-expandir-financeiro" onclick="ui.alternarTodos('financeiro')" title="Expandir ou recolher todos os campos">⊕ Expandir tudo</button>
-    <button class="btn btn-primary" onclick="fin.finalizacao.abrirAvulso()" title="Lançar um atendimento na cobrança — a mesma janela do fechamento da consulta, da pré e da ficha"><span class="icon">+</span> Novo registro</button>
+    <button class="btn btn-primary" onclick="financeiro.novoRegistro()" title="Lançar um atendimento na cobrança — a mesma janela usada para editar um lançamento"><span class="icon">+</span> Novo registro</button>
     <button class="btn btn-warning" onclick="financeiro.semLancamentoAbrir()" title="Atendimentos finalizados que não têm cobrança gerada — produção que não virou lançamento"><span class="icon">⏳</span> Sem lançamento</button>
     <button class="btn btn-primary" onclick="financeiro.conciliar()" title="Buscar evento por paciente, conferir previsto × recebido × glosa e classificar"><span class="icon">🔄</span> Conciliação</button>
     <button class="btn btn-success" onclick="financeiro.relatorios()" title="Relatórios de conciliação detalhada por código TUSS"><span class="icon">📊</span> Relatórios</button>
     <button class="btn" onclick="financeiro.caixa.abrir()" title="Fechamento de caixa do dia: recebido, realizado e a receber, por convênio e forma de pagamento"><span class="icon">🧾</span> Fechar caixa</button>
     <button class="btn" onclick="importFin.abrir()" title="Importar a aba Consolidado da conciliação (CSV) como lançamentos do Financeiro"><span class="icon">📥</span> Importar planilha</button>
+    <button class="btn" onclick="importUnimed.abrir()" title="Importar o pacote da conciliação catálogo × Unimed (.zip) e revisar os vínculos"><span class="icon">🧾</span> Conciliação Unimed</button>
     <button class="btn btn-success" onclick="financeiro.relatorioAuditoria()" title="Relatório de um período qualquer, por data de registro ou de procedimento, em planilha (CSV) ou PDF — para enviar à auditoria"><span class="icon">📤</span> Relatório do período</button>
     <button class="btn" onclick="financeiro.relatorioMensal()" title="Relatório de um mês fechado, pela data do procedimento, em PDF"><span class="icon">📄</span> Relatório mensal (PDF)</button>
     <button class="btn" onclick="historico.abrir('financeiro')"><span class="icon">🔍</span> Buscar / Histórico</button>
@@ -8685,7 +8725,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
           <input type="hidden" name="_origemId">
           <input type="hidden" name="_origemTipo">
           <div class="grid">
-            <div class="field col-6 required"><label>Paciente <span class="req">*</span></label><input type="text" name="paciente" data-required onchange="linker.importarAnestesiaParaFinanceiro(this.value)" onblur="linker.importarAnestesiaParaFinanceiro(this.value)"></div>
+            <div class="field col-6 required"><label>Paciente <span class="req">*</span></label><input type="text" name="paciente" data-required onchange="linker.importarAnestesiaParaFinanceiro(this.value); financeiro._completarDoCadastro()" onblur="linker.importarAnestesiaParaFinanceiro(this.value)"></div>
             <div class="field col-3"><label>Tipo de atendimento</label>
               <select name="tipo_atendimento">
                 <option value="procedimento">Procedimento / Cirurgia</option>
@@ -8696,6 +8736,12 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
               </select>
             </div>
             <div class="field col-3"><label>Data do procedimento</label><input type="date" name="data_proc" onchange="financeiro.renderMajoracao()"></div>
+            <!-- A fatura da cooperativa pede início e fim do procedimento.
+                 Só registro: o valor continua saindo do porte. -->
+            <div class="field col-2"><label>Hora de início</label><input type="time" name="hora_inicio" oninput="financeiro.pintarDuracao()"></div>
+            <div class="field col-2"><label>Hora do fim</label><input type="time" name="hora_fim" oninput="financeiro.pintarDuracao()"></div>
+            <div class="field col-2"><label>Duração</label><input type="text" name="duracao_rotulo" readonly tabindex="-1" style="background:var(--surface-alt)"></div>
+            <div class="field col-3"><label>Carteirinha</label><input type="text" name="carteirinha" inputmode="numeric" autocomplete="off"></div>
             <div class="field col-3"><label>Tipo de pagamento</label>
               <select name="tipo_pagamento"><option value="">—</option><option>Particular</option><option>Convênio</option><option>SUS</option><option>Cortesia</option></select>
             </div>
@@ -8961,7 +9007,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
       <div class="card-header"><div class="card-title-wrap"><h2>Registros</h2></div></div>
       <div id="fin-contexto" style="display:none;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:9px 18px;background:var(--primary-soft);border-bottom:1px solid var(--primary);font-size:.84rem;color:var(--primary-darker)"></div>
       <div class="card-body" style="padding:0">
-        <div style="overflow-x:auto">
+        <div class="fin-rolagem" id="fin-rolagem">
           <table class="data" id="financeiro-table">
             <thead><tr>
               <th>Paciente</th><th>Senha</th><th>Procedimento</th><th>Tipo</th><th>Cirurgião</th><th>Hospital</th>
@@ -12418,6 +12464,649 @@ const importAcervo = {
       l.textContent = '📄 Abrir documento original' + (links.length > 1 ? ' (versão ' + (i + 1) + ')' : '');
       faixa.appendChild(l);
     });
+  }
+};
+
+/* ============================================================================
+   CONCILIAÇÃO CATÁLOGO × UNIMED (pacote de 18/10/2026)
+   Lê o .zip (ou o conciliacao.json de dentro dele) e leva para o sistema:
+     • o EXTRATO INTEIRO da Unimed — cada evento (paciente + data + guia) vira
+       um lançamento com pago, glosa, competência e guia;
+     • os PACIENTES que ainda não existem (nome, carteirinha, Unimed);
+     • a TABELA UNIMED observada de abril de 2026 em diante, por código.
+   Regras combinadas com o Marcelo:
+     • o banco atual é o certo: paciente que já existe não é alterado, e
+       lançamento que já existe não é duplicado — recebe do extrato o que
+       ainda não tinha;
+     • o vínculo só é automático quando é inequívoco (mesmo paciente, mesma
+       data e mesma senha ou mesmo código). O resto vai para a REVISÃO, com
+       Aceitar / Rejeitar, e nada é ligado sozinho;
+     • importar de novo não duplica: o evento da Unimed é o identificador.
+   Os arquivos têm dados de pacientes: eles nunca vão para o repositório —
+   são lidos aqui, no aparelho, e o que entra vai direto para a nuvem.
+============================================================================ */
+const importUnimed = {
+  LOTE_TAG: 'unimed-2026-10-18',
+  TABELA_DESDE: '2026-04-01',
+  LOTE: 200,
+  PAUSA_MS: 400,
+  PAUSA_UPD_MS: 120,
+
+  /* ---- .zip sem biblioteca: diretório central + DecompressionStream ---- */
+  async lerZip(buf) {
+    const dv = new DataView(buf), u8 = new Uint8Array(buf);
+    let fim = -1;
+    for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) {
+      if (dv.getUint32(i, true) === 0x06054b50) { fim = i; break; }
+    }
+    if (fim < 0) throw new Error('arquivo .zip inválido');
+    const total = dv.getUint16(fim + 10, true);
+    let p = dv.getUint32(fim + 16, true);
+    const dec = new TextDecoder('utf-8');
+    const arquivos = {};
+    for (let n = 0; n < total; n++) {
+      if (dv.getUint32(p, true) !== 0x02014b50) break;
+      const metodo = dv.getUint16(p + 10, true);
+      const tamComp = dv.getUint32(p + 20, true);
+      const lenNome = dv.getUint16(p + 28, true), lenExtra = dv.getUint16(p + 30, true), lenCom = dv.getUint16(p + 32, true);
+      const local = dv.getUint32(p + 42, true);
+      const nome = dec.decode(u8.subarray(p + 46, p + 46 + lenNome));
+      p += 46 + lenNome + lenExtra + lenCom;
+      const ini = local + 30 + dv.getUint16(local + 26, true) + dv.getUint16(local + 28, true);
+      const dados = u8.subarray(ini, ini + tamComp);
+      arquivos[nome.split('/').pop()] = { metodo, dados };
+    }
+    return arquivos;
+  },
+  async _descomprimir(ent) {
+    if (ent.metodo === 0) return new TextDecoder('utf-8').decode(ent.dados);
+    if (ent.metodo !== 8) throw new Error('compressão do .zip não suportada');
+    if (typeof DecompressionStream === 'undefined') throw new Error('este navegador não abre .zip — escolha o conciliacao.json');
+    const st = new Blob([ent.dados]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    return await new Response(st).text();
+  },
+  async lerArquivo(file) {
+    const nome = String(file && file.name || '').toLowerCase();
+    if (/\.zip$/.test(nome)) {
+      const arqs = await importUnimed.lerZip(await file.arrayBuffer());
+      const ent = arqs['conciliacao.json'];
+      if (!ent) throw new Error('o .zip não tem o conciliacao.json');
+      return JSON.parse(await importUnimed._descomprimir(ent));
+    }
+    return JSON.parse(String(await file.text()).replace(/^﻿/, ''));
+  },
+  validar(d) {
+    if (!d || !Array.isArray(d.itens_unimed) || !Array.isArray(d.eventos_unimed) || !Array.isArray(d.casos)) {
+      return 'Este não é o pacote da conciliação Unimed (faltam itens_unimed, eventos_unimed e casos).';
+    }
+    return '';
+  },
+
+  /* ---- utilitários ---- */
+  _norm(s) { return utils.semAcento(String(s || '')).replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim(); },
+  _dig(s) { return String(s == null ? '' : s).replace(/\D/g, ''); },
+  _txt(s) { return String(s == null ? '' : s).replace(/^'(?=[=+@-])/, '').trim(); },
+  _n(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; },
+  _r2(v) { return Math.round(v * 100) / 100; },
+  _codigosDe(x) {
+    const set = new Set();
+    if (x.cbhpm_codigo) set.add(importUnimed._dig(x.cbhpm_codigo));
+    (Array.isArray(x.codigos) ? x.codigos : []).forEach(c => { const d = importUnimed._dig(c && c.codigo); if (d) set.add(d); });
+    String(x.procedimento || '').replace(/\d[\d.\-]{6,}\d/g, m => { set.add(importUnimed._dig(m)); return m; });
+    set.delete('');
+    return set;
+  },
+  _nomeDoLancamento(x) { return importUnimed._norm(x && (x.paciente || x.nome)); },
+
+  /* ---- o que já existe no sistema ---- */
+  _indiceFinanceiro() {
+    const porNomeData = new Map();
+    (store.list('financeiro') || []).forEach(x => {
+      if (!x || !x._id || x._importUnimed || x.status === 'cancelado') return;
+      const k = importUnimed._nomeDoLancamento(x) + '|' + String(x.data_proc || '').slice(0, 10);
+      if (!porNomeData.has(k)) porNomeData.set(k, []);
+      porNomeData.get(k).push(x);
+    });
+    return porNomeData;
+  },
+  _indicePacientes() {
+    const porNome = new Map(), porCart = new Map();
+    (store.list('pacientes') || []).forEach(p => {
+      if (!p) return;
+      const n = importUnimed._norm(p.nome);
+      if (n && !porNome.has(n)) porNome.set(n, p);
+      const c = importUnimed._dig(p.carteirinha);
+      if (c && !porCart.has(c)) porCart.set(c, p);
+    });
+    return { porNome, porCart };
+  },
+  _indiceClinico() {
+    const m = new Map();
+    [['pre', r => r.nome, r => r.data], ['anestesia', r => r.paciente_nome || (r.paciente && r.paciente.nome),
+      r => r.data_anestesia || (r.procedimento && r.procedimento.data) || r.data]].forEach(([mod, nome, data]) => {
+      (store.list(mod) || []).forEach(r => {
+        if (!r || !r._id) return;
+        const k = mod + '|' + importUnimed._norm(nome(r)) + '|' + String(data(r) || '').slice(0, 10);
+        if (!m.has(k)) m.set(k, { mod, id: r._id });
+      });
+    });
+    return m;
+  },
+
+  /* Um evento da Unimed é forte para um lançamento existente quando, além de
+     paciente e data, a senha OU um código coincidem (consulta pré conta
+     como código: 1.01.01.01-2 contra lançamento de consulta). */
+  _forte(x, ev) {
+    const senhas = new Set(ev.senhas.map(importUnimed._dig).filter(Boolean));
+    if (senhas.size && senhas.has(importUnimed._dig(x.senha))) return true;
+    const cods = importUnimed._codigosDe(x);
+    if (ev.codigos.some(c => cods.has(c))) return true;
+    const consulta = ev.codigos.length && ev.codigos.every(c => /^1010/.test(c));
+    return consulta && /consulta/.test(String(x.tipo_atendimento || ''));
+  },
+
+  _status(pago, glosa, processado) {
+    if (pago > 0 && glosa > 0.005) return 'parcial';
+    if (pago > 0) return 'recebido';
+    if (glosa > 0.005) return 'glosado';
+    return processado > 0 ? 'faturado' : 'pendente';
+  },
+
+  /* ---- análise ---- */
+  analisar(d) {
+    const U = importUnimed;
+    const itensPorId = new Map(d.itens_unimed.map(i => [i.item_id, i]));
+    const casosPorId = new Map(d.casos.map(c => [c.caso_id, c]));
+    const docsPorId = new Map((d.documentos || []).map(x => [x.registro_id, x]));
+    const fin = U._indiceFinanceiro();
+    const pacs = U._indicePacientes();
+    const clin = U._indiceClinico();
+    const r = { criar: [], atualizar: [], revisar: 0, pacientesNovos: [], avisosPacientes: [],
+      totais: { eventos: 0, itens: 0, pago: 0, glosa: 0 }, porAno: {}, tabela: [] };
+
+    /* candidatos documento × evento, para a revisão */
+    const candPorEvento = new Map();
+    (d.candidatos_revisar || []).forEach(c => {
+      if (!c || !c.evento_id) return;
+      const doc = docsPorId.get(c.registro_id) || {};
+      if (!candPorEvento.has(c.evento_id)) candPorEvento.set(c.evento_id, []);
+      candPorEvento.get(c.evento_id).push({
+        tipo: 'candidato', chave: 'cand|' + c.registro_id, registro_id: c.registro_id, caso_id: c.caso_id || doc.caso_id || '',
+        paciente: U._txt(doc.paciente_nome), data: doc.data_referencia || '', tipo_registro: doc.tipo_registro || '',
+        procedimento: U._txt(doc.procedimento), url: /^https:\/\/(drive|docs)\.google\.com\//.test(doc.fonte_url || '') ? doc.fonte_url : '',
+        motivo: U._txt(c.motivo), relacao: U._txt(c.relacao), decisao: ''
+      });
+    });
+
+    /* pacientes: nome normalizado → carteirinhas vistas (a mais recente primeiro) */
+    const cartPorNome = new Map(), nomesPorCart = new Map(), nomeBonito = new Map();
+    (d.documentos || []).forEach(x => { const n = U._norm(x.paciente_nome); if (n && !nomeBonito.has(n)) nomeBonito.set(n, utils.nomeProprio(U._txt(x.paciente_nome))); });
+    d.itens_unimed.slice().sort((a, b) => String(b.data_atendimento).localeCompare(String(a.data_atendimento))).forEach(i => {
+      const n = U._norm(i.paciente_nome), c = U._dig(i.carteirinha);
+      if (!n) return;
+      if (!cartPorNome.has(n)) cartPorNome.set(n, []);
+      if (c && cartPorNome.get(n).indexOf(c) < 0) cartPorNome.get(n).push(c);
+      if (c) { if (!nomesPorCart.has(c)) nomesPorCart.set(c, new Set()); nomesPorCart.get(c).add(n); }
+    });
+
+    d.eventos_unimed.forEach(evRaw => {
+      const itens = (evRaw.itens || []).map(id => itensPorId.get(id)).filter(Boolean);
+      if (!itens.length) return;
+      const nomeN = U._norm((evRaw.nomes || [])[0] || itens[0].paciente_nome);
+      const data = String(evRaw.data || itens[0].data_atendimento || '').slice(0, 10);
+      if (!nomeN || !data) return;
+      const ev = {
+        id: evRaw.evento_id, data, nomeN,
+        senhas: (evRaw.senhas || []).map(U._txt).filter(Boolean),
+        carteirinhas: (evRaw.carteirinhas || []).map(U._dig).filter(Boolean),
+        codigos: (evRaw.codigos || []).map(U._dig).filter(Boolean),
+        itens
+      };
+      const pago = U._r2(itens.reduce((s, i) => s + U._n(i.pago), 0));
+      const glosa = U._r2(itens.reduce((s, i) => s + U._n(i.glosa), 0));
+      const proc = U._r2(itens.reduce((s, i) => s + U._n(i.processado), 0));
+      r.totais.eventos++; r.totais.itens += itens.length; r.totais.pago += pago; r.totais.glosa += glosa;
+      r.porAno[data.slice(0, 4)] = (r.porAno[data.slice(0, 4)] || 0) + 1;
+
+      /* paciente do sistema: carteirinha primeiro, depois o nome */
+      const pacSis = ev.carteirinhas.map(c => pacs.porCart.get(c)).find(Boolean) || pacs.porNome.get(nomeN) || null;
+      const nomeSis = pacSis ? U._norm(pacSis.nome) : nomeN;
+      const consulta = ev.codigos.length && ev.codigos.every(c => /^1010/.test(c));
+      const casoId = (itens.find(i => i.caso_id) || {}).caso_id || '';
+      const caso = casoId ? casosPorId.get(casoId) : null;
+
+      const extrato = {
+        evento: ev.id, itens: itens.map(i => i.item_id), caso: casoId,
+        competencias: Array.from(new Set(itens.map(i => i.competencia).filter(Boolean))).sort(),
+        guiaOperadora: Array.from(new Set(itens.map(i => U._txt(i.guia_operadora)).filter(Boolean))).join(' / '),
+        guiaPrestador: Array.from(new Set(itens.map(i => U._txt(i.guia_prestador)).filter(Boolean))).join(' / '),
+        lote: Array.from(new Set(itens.map(i => U._txt(i.lote)).filter(Boolean))).join(' / '),
+        protocolo: Array.from(new Set(itens.map(i => U._txt(i.protocolo)).filter(Boolean))).join(' / '),
+        motivosGlosa: Array.from(new Set(itens.map(i => U._txt(i.motivos_glosa)).filter(Boolean))).join(' | '),
+        pago, glosa, processado: proc, importadoEm: new Date().toISOString(), lote_importacao: U.LOTE_TAG
+      };
+      const pagamento = itens.map(i => i.pagamento_previsto).filter(Boolean).sort().pop() || '';
+      const revisao = (candPorEvento.get(ev.id) || []).slice();
+
+      /* lançamento que já existe: mesmo paciente e data; forte = senha ou código */
+      const mesmos = []
+        .concat(fin.get(nomeSis + '|' + data) || [])
+        .concat(nomeSis !== nomeN ? (fin.get(nomeN + '|' + data) || []) : []);
+      const fortes = mesmos.filter(x => U._forte(x, ev));
+      if (fortes.length === 1) {
+        r.atualizar.push({ existente: fortes[0], extrato, pagamento, revisao, pago, glosa, proc,
+          carteirinha: ev.carteirinhas[0] || '', senha: ev.senhas[0] || '' });
+        r.revisar += revisao.length;
+        return;
+      }
+      if (fortes.length > 1 || mesmos.length) {
+        revisao.push({ tipo: 'possivel_existente', chave: 'exist|' + ev.id,
+          ids: (fortes.length ? fortes : mesmos).map(x => x._id), decisao: '' });
+      }
+
+      /* vínculo clínico: o caso confirmado pela conciliação, ou o registro do
+         mesmo paciente e dia no sistema */
+      let vinculo = null;
+      if (caso && caso.situacao === 'Vínculo confirmado') {
+        const mod = /ficha/.test(caso.tipo_registro) ? 'anestesia' : 'pre';
+        const acv = 'acv_' + String(casoId).replace(/[^A-Za-z0-9_-]+/g, '_');
+        const existe = (() => { try { return !!store.getById(mod, acv); } catch (e) { return false; } })();
+        vinculo = { mod, id: existe ? acv : '', caso: casoId, confirmado: true,
+          fontes: (caso.fontes || []).filter(u => /^https:\/\/(drive|docs)\.google\.com\//.test(String(u))) };
+      }
+      if (!vinculo || !vinculo.id) {
+        const k = (consulta ? 'pre' : 'anestesia') + '|' + nomeSis + '|' + data;
+        const achado = clin.get(k);
+        if (achado) vinculo = Object.assign({}, vinculo || {}, achado, { confirmado: true });
+      }
+
+      const descricoes = Array.from(new Set(itens.map(i => U._txt(i.descricao)).filter(Boolean)));
+      const codigos = itens.map(i => {
+        const q = U._n(i.quantidade) || 1, perc = U._n(i.percentual) || 1;
+        const proc_i = U._n(i.processado);
+        return {
+          codigo: (() => { try { const inf = cbhpm.info(i.codigo); return inf ? inf.codigo : U._txt(i.codigo); } catch (e) { return U._txt(i.codigo); } })(),
+          descricao: U._txt(i.descricao), qtd: q, grau: String(Math.round(perc * 100)),
+          valor_unit: U._r2(proc_i / q / perc), valor_previsto: U._r2(proc_i),
+          valor_recebido: U._r2(U._n(i.pago)), glosa: U._r2(U._n(i.glosa)),
+          status: U._n(i.glosa) > 0.005 ? (U._n(i.pago) > 0 ? 'parcial' : 'glosado') : (U._n(i.pago) > 0 ? 'pago' : 'aguardando'),
+          obs: U._txt(i.motivos_glosa)
+        };
+      });
+      const status = U._status(pago, glosa, proc);
+      const nomeExibir = pacSis ? pacSis.nome : (nomeBonito.get(nomeN) || utils.nomeProprio(U._txt(itens[0].paciente_nome)));
+      const it = {
+        _id: 'uni_' + String(ev.id).replace(/[^A-Za-z0-9_-]+/g, '_'),
+        _origemTipo: 'importacao', _importUnimed: extrato,
+        paciente: nomeExibir, data_proc: data,
+        tipo_atendimento: consulta ? 'consulta_pre' : 'procedimento',
+        tipo_pagamento: 'Convênio', convenio: (pacSis && pacSis.plano) || 'Unimed',
+        procedimento: (codigos[0] && codigos[0].codigo ? codigos[0].codigo + ' - ' : '') + descricoes.join(' + '),
+        cbhpm_codigo: (codigos[0] || {}).codigo || '',
+        codigos, senha: ev.senhas[0] || '', carteirinha: ev.carteirinhas[0] || '',
+        acomodacao: itens.some(i => /apartamento/i.test(String(i.apartamento || ''))) ? 'apartamento' : '',
+        valor_previsto: proc, valor_recebido: pago, glosa,
+        data_recebimento: pago > 0 ? pagamento : '', data_pagamento: pago > 0 ? pagamento : '',
+        status, pago: financeiro.ehQuitado(status),
+        observacoes: ['Extrato Unimed — evento ' + ev.id + (extrato.competencias.length ? ' · competência ' + extrato.competencias.join(', ') : ''),
+          extrato.motivosGlosa ? 'Glosa: ' + extrato.motivosGlosa : ''].filter(Boolean).join('\n'),
+        _createdAt: new Date().toISOString(), _updatedAt: new Date().toISOString()
+      };
+      if (pacSis && pacSis._id) it._patientRef = pacSis._patientRef || pacSis._id;
+      if (vinculo) it._vinculoClinico = vinculo;
+      if (revisao.length) { it._revisaoUnimed = revisao; r.revisar += revisao.length; }
+      r.criar.push(it);
+    });
+
+    /* pacientes que faltam no cadastro */
+    const jaCriado = new Set();
+    r.criar.forEach(it => {
+      if (it._patientRef) return;
+      const n = U._norm(it.paciente);
+      if (!n || jaCriado.has(n) || pacs.porNome.has(n)) return;
+      jaCriado.add(n);
+      const carts = cartPorNome.get(n) || [];
+      let cart = carts[0] || '';
+      const donoOutro = cart && ((nomesPorCart.get(cart) && nomesPorCart.get(cart).size > 1) ||
+        (pacs.porCart.get(cart) && U._norm(pacs.porCart.get(cart).nome) !== n));
+      if (donoOutro) {
+        r.avisosPacientes.push({ nome: it.paciente, motivo: 'a carteirinha ' + cart + ' aparece com outro nome — cadastrado sem carteirinha, confira' });
+        cart = '';
+      } else if (carts.length > 1) {
+        r.avisosPacientes.push({ nome: it.paciente, motivo: 'tem ' + carts.length + ' carteirinhas no extrato — ficou a mais recente; as outras vão no histórico do cadastro' });
+      }
+      r.pacientesNovos.push({ _id: 'pac_uni_' + n.replace(/[^a-z0-9]+/g, '_'), nome: it.paciente, plano: 'Unimed',
+        carteirinha: cart, _carteirinhasAnteriores: carts.slice(1), _origemTipo: 'importacao',
+        _importUnimed: { lote_importacao: U.LOTE_TAG }, _createdAt: new Date().toISOString() });
+    });
+    /* existente com dado diferente: vale o sistema, só avisa */
+    pacs.porNome.forEach((p, n) => {
+      const carts = cartPorNome.get(n);
+      const c = U._dig(p.carteirinha);
+      if (carts && carts.length && c && carts.indexOf(c) < 0) {
+        r.avisosPacientes.push({ nome: p.nome, motivo: 'no sistema a carteirinha é ' + c + '; o extrato traz ' + carts[0] + ' — vale a do sistema' });
+      }
+    });
+
+    r.tabela = U.tabelaObservada(d.itens_unimed);
+    r.totais.pago = U._r2(r.totais.pago); r.totais.glosa = U._r2(r.totais.glosa);
+    return r;
+  },
+
+  /* ---- TABELA: o valor que a Unimed pagou por código, de abril/2026 em diante.
+     Unidade = processado ÷ quantidade ÷ percentual (÷ 2 quando há indício de
+     apartamento). Fica o valor mais frequente; só entra o que diverge do que
+     o sistema sugere hoje. Nada é trocado sem ele marcar. */
+  tabelaObservada(itens) {
+    const U = importUnimed;
+    const por = new Map();
+    itens.forEach(i => {
+      if (String(i.data_atendimento || '') < U.TABELA_DESDE) return;
+      const q = U._n(i.quantidade) || 1, perc = U._n(i.percentual) || 1, v = U._n(i.processado);
+      if (v <= 0) return;
+      let u = v / q / perc;
+      if (/apartamento/i.test(String(i.apartamento || ''))) u = u / 2;
+      u = U._r2(u);
+      const c = U._dig(i.codigo);
+      if (!por.has(c)) por.set(c, { codigo: c, descricao: U._txt(i.descricao), valores: new Map(), n: 0 });
+      const e = por.get(c); e.n++; e.valores.set(u, (e.valores.get(u) || 0) + 1);
+    });
+    const out = [];
+    por.forEach(e => {
+      const [valor, vezes] = Array.from(e.valores.entries()).sort((a, b) => b[1] - a[1])[0];
+      if (vezes < 2) return;
+      const tipo = /^1010/.test(e.codigo) ? 'medico' : 'anestesia';
+      let sist = null;
+      try { sist = precos.base(e.codigo, tipo, 'Unimed').valor; } catch (er) {}
+      if (sist != null && Math.abs(Number(sist) - valor) < 0.05) return;
+      out.push({ codigo: e.codigo, descricao: e.descricao, valor, vezes, n: e.n, sistema: sist });
+    });
+    return out.sort((a, b) => b.n - a.n);
+  },
+
+  /* ---- tela ---- */
+  abrir() {
+    const pend = importUnimed.pendentesRevisao().length;
+    modal.open('🧾 Conciliação Unimed',
+      '<p style="font-size:.86rem;line-height:1.6">Escolha o <b>Dados_Conciliacao_Catalogo_Unimed.zip</b> (ou o <b>conciliacao.json</b> de dentro dele). ' +
+      'Nada é gravado antes da prévia: você vê o que será criado, completado e revisado, e só então confirma.</p>' +
+      '<input type="file" id="imp-uni-arquivo" accept=".zip,.json,application/zip,application/json" style="margin:6px 0 10px">' +
+      '<div id="imp-uni-previa" style="font-size:.86rem"></div>',
+      '<button class="btn btn-primary" id="imp-uni-confirmar" disabled onclick="importUnimed.confirmar()">📥 Importar</button>' +
+      '<button class="btn" onclick="importUnimed.revisar()">🔎 Revisar vínculos' + (pend ? ' (' + pend + ')' : '') + '</button>' +
+      '<button class="btn" onclick="modal.close()">Fechar</button>');
+    const inp = document.getElementById('imp-uni-arquivo');
+    if (inp) inp.addEventListener('change', async () => {
+      const f = inp.files && inp.files[0]; if (!f) return;
+      const host = document.getElementById('imp-uni-previa');
+      if (host) host.innerHTML = '<p>Lendo o arquivo e trazendo da nuvem os lançamentos antigos para cruzar…</p>';
+      try {
+        const d = await importUnimed.lerArquivo(f);
+        const erro = importUnimed.validar(d);
+        if (erro) { if (host) host.innerHTML = '<p style="color:#b42318">' + utils.escapeHTML(erro) + '</p>'; return; }
+        /* lançamentos anteriores a 2026 moram só na nuvem: sem trazê-los, o
+           cruzamento não os veria e tudo viraria duplicata */
+        try { await financeiro.buscarNaNuvem('2023-01-01', ''); } catch (e) {}
+        importUnimed.mostrarPrevia(d);
+      } catch (e) {
+        if (host) host.innerHTML = '<p style="color:#b42318">Não consegui ler: ' + utils.escapeHTML(e.message || String(e)) + '</p>';
+      }
+    });
+  },
+  mostrarPrevia(d) {
+    const r = importUnimed.analisar(d);
+    importUnimed._analise = r;
+    const host = document.getElementById('imp-uni-previa');
+    const btn = document.getElementById('imp-uni-confirmar');
+    if (!host) return r;
+    const esc = utils.escapeHTML, rs = v => 'R$ ' + utils.formatarBR(v || 0);
+    const anos = Object.keys(r.porAno).sort().map(a => a + ': <b>' + r.porAno[a] + '</b>').join(' · ');
+    const tab = r.tabela.length
+      ? '<details open style="margin-top:8px"><summary><b>Tabela Unimed — ' + r.tabela.length + ' código(s) pagos diferente do que o sistema sugere</b> (abr/2026 em diante)</summary>' +
+        '<p style="font-size:.78rem;color:var(--text-mute);margin:4px 0">Marque os que devem passar a usar o valor pago pela Unimed (os pagos menos de 3 vezes vêm desmarcados). Vale para lançamentos novos; os existentes não mudam.</p>' +
+        '<div style="max-height:30vh;overflow:auto"><table class="data" style="font-size:.78rem"><thead><tr><th></th><th>Código</th><th>Descrição</th><th style="text-align:right">Sistema</th><th style="text-align:right">Unimed pagou</th><th>Vezes</th></tr></thead><tbody>' +
+        r.tabela.map((t, k) => '<tr><td><input type="checkbox" class="imp-uni-tab" data-k="' + k + '"' + (t.vezes >= 3 ? ' checked' : '') + ' title="' + (t.vezes >= 3 ? '' : 'pouca evidência — confira antes de marcar') + '"></td><td>' + esc(t.codigo) + '</td><td>' + esc(t.descricao) +
+          '</td><td style="text-align:right">' + (t.sistema == null ? '—' : rs(t.sistema)) + '</td><td style="text-align:right"><b>' + rs(t.valor) + '</b></td><td>' + t.vezes + '/' + t.n + '</td></tr>').join('') +
+        '</tbody></table></div></details>' : '';
+    const avisos = r.avisosPacientes.length
+      ? '<details style="margin-top:8px"><summary>👤 ' + r.avisosPacientes.length + ' aviso(s) de cadastro — só para conferir; nada é trocado</summary><ul style="margin:4px 0 0 18px;font-size:.78rem">' +
+        r.avisosPacientes.slice(0, 200).map(a => '<li>' + esc(a.nome) + ': ' + esc(a.motivo) + '</li>').join('') + '</ul></details>' : '';
+    host.innerHTML =
+      '<p><b>' + r.totais.eventos + '</b> atendimentos no extrato (' + r.totais.itens + ' itens) · pago ' + rs(r.totais.pago) + ' · glosa ' + rs(r.totais.glosa) + '<br>' +
+      '<span style="font-size:.8rem;color:var(--text-mute)">' + anos + '</span></p>' +
+      '<p>➕ Lançamentos novos: <b>' + r.criar.length + '</b><br>' +
+      '🔁 Já existiam (mesmo paciente, data e senha/código) — recebem pago, glosa e guia: <b>' + r.atualizar.length + '</b><br>' +
+      '🔎 Para revisar (Aceitar / Rejeitar): <b>' + r.revisar + '</b><br>' +
+      '👤 Pacientes novos no cadastro: <b>' + r.pacientesNovos.length + '</b> <small style="color:var(--text-mute)">— quem já existe não é alterado</small></p>' +
+      tab + avisos +
+      '<p style="font-size:.8rem;color:var(--text-mute)">O envio é em lotes e pode levar alguns minutos — deixe esta aba aberta. Importar de novo o mesmo arquivo não duplica.</p>' +
+      '<div id="imp-uni-progresso" style="font-weight:600"></div>';
+    if (btn) btn.disabled = !(r.criar.length || r.atualizar.length || r.pacientesNovos.length || r.tabela.length);
+    return r;
+  },
+  async confirmar() {
+    const r = importUnimed._analise;
+    if (!r || importUnimed._rodando) return null;
+    const btn = document.getElementById('imp-uni-confirmar'); if (btn) btn.disabled = true;
+    const prog = m => { const el = document.getElementById('imp-uni-progresso'); if (el) el.textContent = m; };
+    importUnimed._rodando = true;
+    try {
+      /* tabela primeiro: é configuração, e não depende da nuvem responder */
+      const marcados = Array.from(document.querySelectorAll('.imp-uni-tab:checked')).map(el => r.tabela[Number(el.dataset.k)]).filter(Boolean);
+      marcados.forEach(t => { try { precos.definirPorCodigoDoConvenio('Unimed', t.codigo, t.valor); } catch (e) {} });
+      const res = await importUnimed.enviar(r, prog);
+      prog(res.ok
+        ? '✅ ' + res.criados + ' lançamento(s) novos, ' + res.atualizados + ' completados, ' + res.pacientes + ' paciente(s) cadastrados' +
+          (marcados.length ? ', ' + marcados.length + ' valor(es) de código na tabela Unimed' : '') + '.' +
+          (r.revisar ? ' Há ' + r.revisar + ' vínculo(s) para revisar — botão "Revisar vínculos".' : '')
+        : '⚠️ Parou: ' + res.erro + '. Importe de novo o mesmo arquivo — o que já subiu não duplica.');
+      try { if (state.currentModule === 'financeiro') financeiro.render(); } catch (e) {}
+      return res;
+    } finally { importUnimed._rodando = false; }
+  },
+  async _pausa(ms) { return new Promise(res => setTimeout(res, ms)); },
+  async enviar(r, prog) {
+    prog = prog || (() => {});
+    const U = importUnimed;
+    const contexto = cloudRel._capturarContexto();
+    if (!contexto) return { ok: false, erro: 'entre na clínica antes de importar', criados: 0, atualizados: 0, pacientes: 0 };
+    if (!(await cloud._garantirToken())) return { ok: false, erro: 'sessão da nuvem vencida — entre de novo', criados: 0, atualizados: 0, pacientes: 0 };
+    const org = contexto.organizationId;
+    const idn = window.SoftEncounterIdentity;
+    const chavePac = nome => idn.legacyPatientKey(idn.fromRecord({ nome }));
+    let criados = 0, atualizados = 0, pacientes = 0;
+    try {
+      /* 1) pacientes que faltam */
+      for (const lote of migracaoFase4._chunk(r.pacientesNovos, U.LOTE)) {
+        if (!cloudRel._contextoValido(contexto, org)) throw new Error('a clínica mudou nesta aba');
+        await migracaoFase4._upsert('patients', lote.map(p => ({
+          organization_id: org, legacy_id: chavePac(p.nome), nome: p.nome, convenio: p.plano || null,
+          data: Object.assign({}, p, { origem: 'importacao_unimed' })
+        })).filter(x => x.legacy_id), false);
+        pacientes += lote.length;
+        prog('Pacientes: ' + pacientes + ' de ' + r.pacientesNovos.length + '…');
+        await U._pausa(U.PAUSA_MS);
+      }
+      if (r.pacientesNovos.length) {
+        const lst = store.list('pacientes') || [];
+        const ja = new Set(lst.map(p => U._norm(p.nome)));
+        r.pacientesNovos.forEach(p => { if (!ja.has(U._norm(p.nome))) lst.push(Object.assign({}, p, { _relOrg: org })); });
+        store.setList('pacientes', lst);
+      }
+      /* 2) lançamentos novos, ligados ao paciente da nuvem */
+      const chaves = Array.from(new Set(r.criar.map(it => chavePac(it.paciente)).filter(Boolean)));
+      const idPorChave = new Map();
+      for (const lote of migracaoFase4._chunk(chaves, 100)) {
+        (await migracaoFase4._idsPorLegacy('patients', org, lote)).forEach(x => idPorChave.set(x.legacy_id, x.id));
+      }
+      const locais = [];
+      for (const lote of migracaoFase4._chunk(r.criar, U.LOTE)) {
+        if (!cloudRel._contextoValido(contexto, org)) throw new Error('a clínica mudou nesta aba');
+        await migracaoFase4._upsert('finance_entries', lote.map(it => ({
+          organization_id: org, legacy_id: it._id, patient_id: idPorChave.get(chavePac(it.paciente)) || null,
+          encounter_id: null, data: it
+        })), false);
+        criados += lote.length;
+        lote.forEach(it => { if (cloudRel.dentroDaJanela('financeiro', it)) locais.push(it); });
+        prog('Lançamentos novos: ' + criados + ' de ' + r.criar.length + '…');
+        await U._pausa(U.PAUSA_MS);
+      }
+      if (locais.length) {
+        const lst = store.list('financeiro') || [];
+        const ja = new Set(lst.map(x => x && x._id));
+        locais.forEach(it => { if (!ja.has(it._id)) lst.push(Object.assign({}, it, { _relOrg: org })); });
+        store.setList('financeiro', lst);
+      }
+      /* 3) os que já existiam: recebem do extrato o que não tinham. Valor que
+         o sistema já tem e é diferente NÃO é trocado — vai para a revisão. */
+      for (const up of r.atualizar) {
+        if (!cloudRel._contextoValido(contexto, org)) throw new Error('a clínica mudou nesta aba');
+        const ex = store.getById('financeiro', up.existente._id);
+        if (!ex) continue;
+        const novo = U._completar(ex, up);
+        if (!novo) continue;
+        const salvo = store.save('financeiro', novo);
+        try { await store.aguardarNuvem(salvo || novo); } catch (e) {}
+        atualizados++;
+        prog('Completando lançamentos que já existiam: ' + atualizados + '…');
+        await U._pausa(U.PAUSA_UPD_MS);
+      }
+      try { cloudRel._puxados.financeiro = false; } catch (e) {}
+      return { ok: true, criados, atualizados, pacientes };
+    } catch (e) {
+      return { ok: false, erro: String(e && e.message || e), criados, atualizados, pacientes };
+    }
+  },
+  _vazio(v) { return v === undefined || v === null || v === '' || (typeof v === 'number' && v === 0); },
+  _completar(ex, up) {
+    const U = importUnimed;
+    const novo = Object.assign({}, ex);
+    let mudou = false;
+    const set = (k, v) => { if (U._vazio(novo[k]) && !U._vazio(v)) { novo[k] = v; mudou = true; } };
+    set('valor_recebido', up.pago); set('glosa', up.glosa); set('valor_previsto', up.proc);
+    set('carteirinha', up.carteirinha);
+    if (up.pago > 0) { set('data_recebimento', up.pagamento); set('data_pagamento', up.pagamento); }
+    set('senha', up.senha);
+    /* status só anda quando o sistema ainda dizia "pendente" */
+    const st = U._status(up.pago, up.glosa, up.proc);
+    if ((!novo.status || novo.status === 'pendente' || novo.status === 'faturado') && st !== 'pendente' && st !== novo.status) {
+      novo.status = st; novo.pago = financeiro.ehQuitado(st); mudou = true;
+    }
+    const revisao = (Array.isArray(novo._revisaoUnimed) ? novo._revisaoUnimed : []).slice();
+    const tem = new Set(revisao.map(x => x.chave));
+    const divergeRec = !U._vazio(ex.valor_recebido) && Math.abs(U._n(ex.valor_recebido) - up.pago) > 0.009;
+    const divergeGlo = !U._vazio(ex.glosa) && Math.abs(U._n(ex.glosa) - up.glosa) > 0.009;
+    if ((divergeRec || divergeGlo) && !tem.has('valor|' + up.extrato.evento)) {
+      revisao.push({ tipo: 'valor_diverge', chave: 'valor|' + up.extrato.evento, pago: up.pago, glosa: up.glosa,
+        sistema: { recebido: U._n(ex.valor_recebido), glosa: U._n(ex.glosa) }, decisao: '' });
+    }
+    (up.revisao || []).forEach(x => { if (!tem.has(x.chave)) revisao.push(x); });
+    if (revisao.length !== (Array.isArray(ex._revisaoUnimed) ? ex._revisaoUnimed.length : 0)) { novo._revisaoUnimed = revisao; mudou = true; }
+    const ja = ex._conciliacaoUnimed || {};
+    if (ja.evento !== up.extrato.evento) { novo._conciliacaoUnimed = up.extrato; mudou = true; }
+    return mudou ? novo : null;
+  },
+
+  /* ---- REVISÃO: cada sugestão lado a lado, com Aceitar / Rejeitar ---- */
+  pendentesRevisao() {
+    const out = [];
+    (store.list('financeiro') || []).forEach(x => {
+      (Array.isArray(x && x._revisaoUnimed) ? x._revisaoUnimed : []).forEach((rv, k) => {
+        if (rv && !rv.decisao) out.push({ fin: x, rv, k });
+      });
+    });
+    return out.sort((a, b) => String(b.fin.data_proc || '').localeCompare(String(a.fin.data_proc || '')));
+  },
+  revisar(pagina) {
+    const esc = utils.escapeHTML, rs = v => 'R$ ' + utils.formatarBR(v || 0);
+    const todos = importUnimed.pendentesRevisao();
+    const POR = 15, pg = Math.max(0, Math.min(Number(pagina) || 0, Math.floor(Math.max(0, todos.length - 1) / POR)));
+    importUnimed._pagina = todos.slice(pg * POR, pg * POR + POR);
+    const lado = (titulo, linhas) => '<div style="flex:1;min-width:200px;background:var(--surface-alt);border:1px solid var(--border);border-radius:8px;padding:8px 10px">' +
+      '<div style="font-size:.72rem;color:var(--text-mute);text-transform:uppercase;letter-spacing:.4px">' + titulo + '</div>' + linhas + '</div>';
+    const unimed = x => lado('Extrato Unimed', '<b>' + esc(x.paciente || '') + '</b><br>' + esc(utils.formatarData(x.data_proc)) +
+      (x.senha ? ' · senha ' + esc(x.senha) : '') + '<br><small>' + esc(x.procedimento || '') + '</small><br>pago ' + rs(x.valor_recebido) +
+      (Number(x.glosa) ? ' · glosa ' + rs(x.glosa) : ''));
+    const cards = importUnimed._pagina.map((p, i) => {
+      const x = p.fin, rv = p.rv;
+      let outro = '', pergunta = '', sim = 'Aceitar', nao = 'Rejeitar';
+      if (rv.tipo === 'candidato') {
+        pergunta = (rv.relacao || 'Mesmo atendimento?') + (rv.motivo ? ' — ' + rv.motivo : '');
+        outro = lado('Seu documento (catálogo)', '<b>' + esc(rv.paciente) + '</b><br>' + esc(utils.formatarData(rv.data)) + ' · ' +
+          esc(/ficha/.test(rv.tipo_registro) ? 'Ficha de anestesia' : 'Pré-anestésico') + '<br><small>' + esc(rv.procedimento) + '</small>' +
+          (rv.url ? '<br><a href="' + utils.escapeAttr(rv.url) + '" target="_blank" rel="noopener noreferrer">abrir o PDF</a>' : ''));
+        sim = 'É o mesmo — ligar'; nao = 'Não é';
+      } else if (rv.tipo === 'possivel_existente') {
+        const ex = (rv.ids || []).map(id => store.getById('financeiro', id)).filter(Boolean);
+        pergunta = 'Já havia lançamento deste paciente neste dia, mas sem a mesma senha ou código. É o mesmo atendimento?';
+        outro = lado('Já no sistema', ex.map(e => '<b>' + esc(e.paciente || '') + '</b> · ' + esc(utils.formatarData(e.data_proc)) +
+          (e.senha ? ' · senha ' + esc(e.senha) : '') + '<br><small>' + esc(e.procedimento || '') + ' · ' + esc(e.status || '') + '</small>').join('<hr style="margin:4px 0">') || '<i>não encontrado</i>');
+        sim = 'É o mesmo — juntar'; nao = 'São diferentes';
+      } else if (rv.tipo === 'valor_diverge') {
+        pergunta = 'O sistema já tinha outros valores para este lançamento.';
+        outro = lado('No sistema', 'recebido ' + rs(rv.sistema && rv.sistema.recebido) + '<br>glosa ' + rs(rv.sistema && rv.sistema.glosa) +
+          '<hr style="margin:4px 0">extrato: pago ' + rs(rv.pago) + ' · glosa ' + rs(rv.glosa));
+        sim = 'Usar o do extrato'; nao = 'Manter o do sistema';
+      }
+      return '<div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin:0 0 10px">' +
+        '<div style="font-size:.82rem;margin:0 0 6px">' + esc(pergunta) + '</div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap">' + unimed(x) + outro + '</div>' +
+        '<div style="display:flex;gap:6px;justify-content:flex-end;margin-top:8px">' +
+        '<button type="button" class="btn btn-sm" onclick="importUnimed.decidir(' + i + ', false)">' + esc(nao) + '</button>' +
+        '<button type="button" class="btn btn-sm btn-primary" onclick="importUnimed.decidir(' + i + ', true)">' + esc(sim) + '</button></div></div>';
+    }).join('');
+    const nav = todos.length > POR
+      ? '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:.8rem">' +
+        '<button type="button" class="btn btn-xs"' + (pg ? '' : ' disabled') + ' onclick="importUnimed.revisar(' + (pg - 1) + ')">‹ anteriores</button>' +
+        '<span>' + (pg * POR + 1) + '–' + Math.min(todos.length, pg * POR + POR) + ' de ' + todos.length + '</span>' +
+        '<button type="button" class="btn btn-xs"' + ((pg + 1) * POR < todos.length ? '' : ' disabled') + ' onclick="importUnimed.revisar(' + (pg + 1) + ')">próximos ›</button></div>' : '';
+    importUnimed._paginaAtual = pg;
+    modal.open('🔎 Revisar vínculos Unimed (' + todos.length + ')',
+      todos.length ? cards + nav : '<p style="font-size:.88rem">Nada para revisar. ✅</p>',
+      '<button class="btn" onclick="modal.close()">Fechar</button>');
+  },
+  decidir(i, aceitar) {
+    const p = (importUnimed._pagina || [])[i];
+    if (!p) return;
+    const x = store.getById('financeiro', p.fin._id);
+    if (!x || !Array.isArray(x._revisaoUnimed)) { importUnimed.revisar(importUnimed._paginaAtual); return; }
+    const novo = JSON.parse(JSON.stringify(x));
+    const rv = novo._revisaoUnimed.find(r => r.chave === p.rv.chave);
+    if (!rv) { importUnimed.revisar(importUnimed._paginaAtual); return; }
+    let por = '';
+    try { por = (cloud.session().user || {}).email || ''; } catch (e) {}
+    rv.decisao = aceitar ? 'aceito' : 'rejeitado'; rv.decididoEm = new Date().toISOString(); rv.decididoPor = por;
+    if (aceitar && rv.tipo === 'candidato') {
+      const mod = /ficha/.test(rv.tipo_registro) ? 'anestesia' : 'pre';
+      const acv = rv.caso_id ? 'acv_' + String(rv.caso_id).replace(/[^A-Za-z0-9_-]+/g, '_') : '';
+      const existe = acv && (() => { try { return !!store.getById(mod, acv); } catch (e) { return false; } })();
+      novo._vinculoClinico = { mod, id: existe ? acv : '', caso: rv.caso_id || '', registro: rv.registro_id,
+        fontes: rv.url ? [rv.url] : [], confirmado: true, por, em: rv.decididoEm };
+      /* uma sugestão aceita encerra as outras do mesmo lançamento */
+      novo._revisaoUnimed.forEach(o => { if (o !== rv && o.tipo === 'candidato' && !o.decisao) { o.decisao = 'rejeitado'; o.decididoEm = rv.decididoEm; o.decididoPor = por; o.automatico = 'outra aceita'; } });
+    }
+    if (aceitar && rv.tipo === 'valor_diverge') {
+      novo.valor_recebido = rv.pago; novo.glosa = rv.glosa;
+      const st = importUnimed._status(rv.pago, rv.glosa, Number(novo.valor_previsto) || 0);
+      if (st !== 'pendente') { novo.status = st; novo.pago = financeiro.ehQuitado(st); }
+    }
+    if (aceitar && rv.tipo === 'possivel_existente') {
+      /* juntar: o lançamento que já existia recebe o pagamento; o do extrato sai */
+      const alvo = (rv.ids || []).map(id => store.getById('financeiro', id)).find(Boolean);
+      if (alvo) {
+        const up = { existente: alvo, extrato: novo._importUnimed || {}, pagamento: novo.data_recebimento || '',
+          pago: Number(novo.valor_recebido) || 0, glosa: Number(novo.glosa) || 0, proc: Number(novo.valor_previsto) || 0,
+          carteirinha: novo.carteirinha || '', senha: novo.senha || '', revisao: novo._revisaoUnimed.filter(o => o.tipo === 'candidato' && !o.decisao) };
+        const completo = importUnimed._completar(alvo, up) || Object.assign({}, alvo, { _conciliacaoUnimed: up.extrato });
+        store.notificarNuvem(store.save('financeiro', completo), 'Conciliação Unimed');
+        if (store.delete('financeiro', novo._id) !== false) store.notificarNuvem(novo, 'Lançamento do extrato juntado ao existente');
+        toast('✅ Juntado ao lançamento que já existia');
+        importUnimed.revisar(importUnimed._paginaAtual);
+        return;
+      }
+    }
+    store.notificarNuvem(store.save('financeiro', novo), 'Revisão da conciliação Unimed');
+    importUnimed.revisar(importUnimed._paginaAtual);
   }
 };
 
@@ -17249,9 +17938,9 @@ const pre = {
        vira ruído e a pessoa para de ler todos os avisos, inclusive os que
        importam. O selo da ficha já mostra o estado. */
     store.notificarNuvem(saved, finalizar ? 'Avaliação finalizada' : 'Avaliação', { silencioso: !!opts.auto });
-    /* A pergunta do Termo espera a impressão sair da frente (ela já sabe
-       esperar janela aberta, ver _perguntarTermo). */
-    if (finalizar) { try { fechamento.abrir('pre', saved._id); } catch (e) {} }
+    /* O painel de fechamento já foi pedido acima — depois da cobrança, ou
+       direto quando não há cobrança a abrir. Pedir de novo aqui abria o
+       mesmo painel duas vezes. */
   },
   /* ---------- Navegação por seções + status de completude ---------- */
   nav: {
@@ -18086,6 +18775,9 @@ const consulta = {
       } else {
         const fr = fin.fromDoc('consulta', saved);
         if (fr && fr.isNew) ui.mostrarBanner('banner-consulta', '💰 Lançamento financeiro criado automaticamente.', 'success');
+        /* sem janela de cobrança, o fechamento abre direto (antes só abria
+           quando a cobrança aparecia antes) */
+        try { fechamento.abrir('consulta', saved._id); } catch (e) {}
       }
     }
     if (!idEl) {
@@ -18434,6 +19126,7 @@ const recuperacao = {
     markClean();
     if (finalizar) { try { pdfBackup.autoAoFinalizar('recuperacao'); } catch (e) {} }
     if (finalizar) { try { rascunhos.removerAtivo('recuperacao'); } catch (e) {} }
+    if (finalizar) { try { fechamento.aoFinalizarFilho('recuperacao', store.getById('recuperacao', saved._id) || saved); } catch (e) {} }
     /* Gravação automática não anuncia: um aviso a cada pausa de digitação
        vira ruído e a pessoa para de ler todos os avisos, inclusive os que
        importam. O selo da ficha já mostra o estado. */
@@ -19178,9 +19871,13 @@ const termo = {
     /* Mesma ordem da pré: backup do PDF primeiro (ele desiste se a
        pré-visualização estiver aberta), impressão depois, e ambos antes do
        descarte do rascunho — os dois leem o formulário. */
+    /* Veio do fechamento da pré: a impressão sai de lá, junta ou separada —
+       abrir a do termo sozinho aqui gastaria folha à toa. */
+    const voltaAoFechamento = finalizar && (() => { try { return fechamento.esperando('termo'); } catch (e) { return false; } })();
     if (finalizar) { try { pdfBackup.autoAoFinalizar('termo'); } catch (e) {} }
-    if (finalizar) { try { printPreview.abrir(); } catch (e) {} }
+    if (finalizar && !voltaAoFechamento) { try { printPreview.abrir(); } catch (e) {} }
     if (finalizar) { try { rascunhos.removerAtivo('termo'); } catch (e) {} }
+    if (voltaAoFechamento) { try { fechamento.aoFinalizarFilho('termo', store.getById('termo', saved._id) || saved); } catch (e) {} }
     /* Gravação automática não anuncia: um aviso a cada pausa de digitação
        vira ruído e a pessoa para de ler todos os avisos, inclusive os que
        importam. O selo da ficha já mostra o estado. */
@@ -20490,6 +21187,7 @@ const clinicaSync = {
   /* Faz a tela refletir o que acabou de descer */
   _reaplicar() {
     try { if (typeof logoUsuario !== 'undefined' && logoUsuario.aplicar) logoUsuario.aplicar(); } catch (e) {}
+    try { if (typeof clinicaIdentidade !== 'undefined') { clinicaIdentidade.aplicarCor(); clinicaIdentidade.renderAjustes(); } } catch (e) {}
     try { if (typeof ajustes !== 'undefined' && ajustes.render) ajustes.render(); } catch (e) {}
     try { if (typeof cbhpm !== 'undefined') cbhpm._cache = null; } catch (e) {}
     try { if (typeof autocomplete !== 'undefined' && autocomplete.recarregar) autocomplete.recarregar(); } catch (e) {}
@@ -20761,7 +21459,7 @@ const configSync = {
     try { ui._aplicarTemaSalvo(); } catch (e) {}
     try { logoUsuario.carregar(); } catch (e) {}
     try { if (typeof termoPadrao !== 'undefined' && termoPadrao.render) termoPadrao.render(); } catch (e) {}
-    try { if (typeof textosPadrao !== 'undefined' && textosPadrao.render) textosPadrao.render(); } catch (e) {}
+    try { if (typeof textosPadrao !== 'undefined' && textosPadrao.renderAjustes) textosPadrao.renderAjustes(); } catch (e) {}
     try { if (typeof pdfBackup !== 'undefined' && pdfBackup.renderCard) pdfBackup.renderCard(); } catch (e) {}
   }
 };
@@ -21337,9 +22035,10 @@ const ambiente = {
          gestor, e os demais veem de quem é. */
       const ident = document.querySelector('#clinica-identidade-card .card-body');
       if (ident && !semClinica) ambiente._avisoDono(ident, daClinica + trancado);
-      clinicaIdentidade.CAMPOS.forEach(([k]) => {
+      clinicaIdentidade.CAMPOS.concat([['cor']]).forEach(([k]) => {
         const el = document.getElementById('ci-' + k); if (el) el.disabled = !gestor;
       });
+      document.querySelectorAll('.ci-cor-opcao').forEach(b => { b.disabled = !gestor; });
       const btnIdent = document.getElementById('clinica-identidade-salvar');
       if (btnIdent) { btnIdent.disabled = !gestor; btnIdent.style.opacity = gestor ? '' : '.5'; }
 
@@ -21986,6 +22685,13 @@ const programador = {
     } catch (e) {
       detalhe = e.message || '';
       estado = /not exist|não existe|schema cache|Could not find/i.test(detalhe) ? 'sem_migracao' : 'erro';
+    }
+    /* A tabela pode estar fechada para leitura direta (as migrações de
+       endurecimento revogaram o acesso), e o PostgREST responde como se ela
+       não existisse. Quem decide é o banco: se uma RPC exclusiva do
+       programador responde, a 0009 rodou e a conta é reconhecida. */
+    if (estado !== 'ok') {
+      try { await programador._rpc('prog_list_org_shares', {}); estado = 'ok'; } catch (e) {}
     }
     if (estado === 'ok') { host.innerHTML = ''; return; }
     const email = (function () { try { return (cloud.session().user || {}).email || ''; } catch (e) { return ''; } })();
@@ -26201,44 +26907,61 @@ const textosPadrao = {
   CAMPOS: {
     pre: {
       _label: 'Pré-anestésica',
+      descricao_clinica: 'Descrição clínica',
+      acompanhantes: 'Acompanhantes presentes na consulta',
       comorbidades: 'Comorbidades',
       alergias: 'Alergias',
       cirurgias_previas: 'Cirurgias prévias',
       antecedentes: 'Antecedentes',
       exame_fisico: 'Exame físico',
       exames_compl: 'Exames complementares',
+      parecer_cardio: 'Parecer / risco cardiológico',
+      parecer_pneumo: 'Parecer pneumológico',
+      parecer_outros: 'Outros pareceres',
+      medicacao_pre: 'Prescrição pré-anestésica (pré-medicação)',
       orientacoes: 'Orientações',
       conclusao: 'Conclusão'
     },
     consulta: {
       _label: 'Consulta / Dor',
+      acompanhantes: 'Acompanhantes presentes na consulta',
       queixa: 'Queixa principal',
       hda: 'História da doença atual',
       antecedentes: 'Antecedentes',
+      medicacoes: 'Medicações em uso',
       exame_fisico: 'Exame físico',
+      exames_compl: 'Outros exames / observações',
       hipotese: 'Hipótese diagnóstica',
       conduta: 'Conduta',
       prescricao: 'Receituário'
     },
     anestesia: {
       _label: 'Ficha de anestesia',
+      pre_diagnostico: 'Diagnóstico',
+      pre_via_aerea_obs: 'Observações da via aérea',
+      pre_exames: 'Exames relevantes',
+      pre_medicacoes: 'Medicações em uso',
+      pre_medicacao: 'Medicação pré-anestésica (pré-med)',
       pre_observacoes: 'Observações pré',
       tecnica_descricao: 'Descrição da técnica',
       bloqueio_obs: 'Observações do bloqueio',
       dispositivos_obs: 'Observações de dispositivos',
       posicao_obs: 'Observações de posicionamento',
+      cec_eventos_obs: 'CEC — descrição dos eventos e condutas',
+      cec_saida_obs: 'CEC — observações da saída',
       fluidos_obs: 'Observações de fluidos',
       intercorrencias_desc: 'Intercorrências',
       condutas: 'Condutas',
       resumo_narrativo: 'Resumo narrativo',
+      descricao_livre: 'Descrição livre da anestesia',
       evolucao: 'Evolução',
-      conclusao: 'Conclusão',
-      obs_finais: 'Observações finais'
+      conclusao: 'Conclusão'
     },
     recuperacao: {
       _label: 'Recuperação (SRPA)',
       complicacoes: 'Complicações',
       conduta: 'Conduta',
+      resumo_alta: 'Resumo de alta',
       observacoes: 'Observações'
     },
     termo: {
@@ -26248,11 +26971,48 @@ const textosPadrao = {
     },
     prescricao: {
       _label: 'Receituário',
+      atestado_texto: 'Texto do atestado',
+      decl_texto: 'Texto da declaração',
+      laudo_quadro: 'Laudo — quadro clínico / justificativa',
+      laudo_texto: 'Texto do laudo',
       orientacoes: 'Orientações ao paciente'
     },
-    recuperacao_alta: {
-      _label: 'SRPA — alta'
+    documentos: {
+      _label: 'Documentos',
+      atestado_texto: 'Texto do atestado',
+      decl_texto: 'Texto da declaração',
+      laudo_quadro: 'Laudo — quadro clínico / justificativa',
+      laudo_texto: 'Texto do laudo'
     }
+  },
+
+  /* Campo de texto livre que entrar num formulário depois deste catálogo
+     também aparece em Ajustes — o rótulo vem da própria tela. Ficam de fora
+     os resumos montados pelo sistema e os campos que não são texto do médico. */
+  NAO_EDITAVEIS: {
+    pre: ['cirurgia', 'via_aerea_resumo', 'risco_resumo'],
+    termo: ['texto']
+  },
+  _rotuloDaTela(ta) {
+    const campo = ta.closest('.field, .form-group') || ta.parentElement;
+    const lab = campo && campo.querySelector('label');
+    const txt = lab ? Array.from(lab.childNodes).filter(n => n.nodeType === 3 || n.tagName === 'B' || n.tagName === 'STRONG')
+      .map(n => n.textContent).join(' ') : '';
+    const limpo = txt.replace(/[\u{1F300}-\u{1FAFF}\u2600-\u27BF\uFE0F]/gu, '').replace(/\s+/g, ' ').replace(/[—:]\s*$/, '').trim();
+    return limpo || (ta.getAttribute('name') || '').replace(/_/g, ' ');
+  },
+  _descobrir() {
+    Object.keys(textosPadrao.CAMPOS).forEach(mod => {
+      const form = document.getElementById('form-' + mod);
+      if (!form) return;
+      const campos = textosPadrao.CAMPOS[mod];
+      const fora = (textosPadrao.NAO_EDITAVEIS[mod] || []).concat(textosPadrao.CAMPOS_COM_SELETOR_PROPRIO[mod] || []);
+      form.querySelectorAll('textarea[name]').forEach(ta => {
+        const campo = ta.getAttribute('name');
+        if (!campo || campos[campo] || fora.includes(campo) || ta.readOnly) return;
+        campos[campo] = textosPadrao._rotuloDaTela(ta);
+      });
+    });
   },
 
   _store() {
@@ -26291,12 +27051,14 @@ const textosPadrao = {
   /* Campos que JÁ possuem um seletor dedicado (comorbidades/alergias/medicações)
      e portanto não devem receber o botão de lápis 📝, para evitar duplicação. */
   CAMPOS_COM_SELETOR_PROPRIO: {
-    pre: ['comorbidades', 'alergias'],
-    consulta: ['antecedentes', 'alergias']
+    pre: ['comorbidades', 'alergias', 'medicacoes'],
+    consulta: ['antecedentes', 'alergias'],
+    anestesia: ['pre_alergias', 'pre_comorbidades']
   },
 
   /* Liga os botões a todos os textareas mapeados (chamado no load) */
   init() {
+    try { textosPadrao._descobrir(); } catch (e) {}
     Object.keys(textosPadrao.CAMPOS).forEach(mod => {
       const campos = textosPadrao.CAMPOS[mod];
       const excluidos = textosPadrao.CAMPOS_COM_SELETOR_PROPRIO[mod] || [];
@@ -26340,6 +27102,7 @@ const textosPadrao = {
   renderAjustes() {
     const host = document.getElementById('textos-padrao-editor');
     if (!host) return;
+    try { textosPadrao._descobrir(); } catch (e) {}
     const s = textosPadrao._store();
     let html = '';
     Object.keys(textosPadrao.CAMPOS).forEach(mod => {
@@ -29229,11 +29992,26 @@ const fechamento = {
       acao: () => { fechamento.marcar('impressao'); try { printPreview.abrir(); } catch (e) {} }
     });
 
+    const termoLigado = fechamento._ligado(doc, 'termo');
     if (mod === 'pre' || mod === 'consulta') {
       itens.push({
-        chave: 'termo', icone: '📝', rotulo: 'Termo de consentimento (TCLE)',
-        feito: existe('termo'), estado: existe('termo') ? 'já existe um para este paciente' : '',
-        acao: () => { fechamento.marcar('termo'); try { pre._iniciarTermo(doc._id); } catch (e) {} }
+        chave: 'termo', icone: '📝', rotulo: 'Preencher o termo (TCLE)',
+        feito: !!termoLigado || existe('termo'),
+        estado: termoLigado ? 'finalizado — dá para imprimir junto abaixo'
+          : existe('termo') ? 'já existe um para este paciente' : 'ao finalizar o termo, esta janela volta',
+        acao: () => { fechamento.aguardar('termo'); try { pre.iniciarTermoDe(mod, doc._id); } catch (e) {} }
+      });
+    }
+    if (mod === 'pre' && termoLigado) {
+      itens.push({
+        chave: 'imp_juntos', icone: '📑', rotulo: 'Imprimir pré + TCLE juntos',
+        feito: marcado('imp_juntos'), estado: marcado('imp_juntos') ? 'aberto' : 'um arquivo só — poupa folhas',
+        acao: () => { fechamento.marcar('imp_juntos'); fechamento.imprimirJuntos(); }
+      });
+      itens.push({
+        chave: 'imp_separados', icone: '🗂️', rotulo: 'Imprimir separados',
+        feito: marcado('imp_separados'), estado: marcado('imp_separados') ? 'aberto' : 'primeiro a pré, depois o termo',
+        acao: () => { fechamento.marcar('imp_separados'); fechamento.imprimirSeparados(); }
       });
     }
     if (mod === 'pre') {
@@ -29251,13 +30029,123 @@ const fechamento = {
            até o módulo, e o termo abria em branco. */
         acao: () => { fechamento.marcar('termo'); try { pre.iniciarTermoDe('anestesia', doc._id); } catch (e) {} }
       });
+      const srpaLigada = fechamento._ligado(doc, 'recuperacao');
       itens.push({
         chave: 'srpa', icone: '🛏️', rotulo: 'Recuperação pós-anestésica (SRPA)',
-        feito: existe('recuperacao'), estado: existe('recuperacao') ? 'já registrada' : '',
-        acao: () => { fechamento.marcar('srpa'); try { anestesia._perguntarSRPA(doc); } catch (e) {} }
+        feito: !!srpaLigada || existe('recuperacao'),
+        estado: srpaLigada ? 'finalizada — dá para imprimir junto abaixo'
+          : existe('recuperacao') ? 'já registrada' : 'ao finalizar a SRPA, esta janela volta',
+        acao: () => { fechamento.aguardar('recuperacao'); try { anestesia._perguntarSRPA(doc); } catch (e) {} }
       });
+      if (srpaLigada) {
+        itens.push({
+          chave: 'imp_juntos', icone: '📑', rotulo: 'Imprimir ficha + SRPA juntas',
+          feito: marcado('imp_juntos'), estado: marcado('imp_juntos') ? 'aberto' : 'um arquivo só — poupa folhas',
+          acao: () => { fechamento.marcar('imp_juntos'); fechamento.imprimirJuntos(); }
+        });
+        itens.push({
+          chave: 'imp_separados', icone: '🗂️', rotulo: 'Imprimir separadas',
+          feito: marcado('imp_separados'), estado: marcado('imp_separados') ? 'aberto' : 'primeiro a ficha, depois a SRPA',
+          acao: () => { fechamento.marcar('imp_separados'); fechamento.imprimirSeparados(); }
+        });
+      }
     }
     return itens;
+  },
+
+  /* O documento-filho (termo da pré, SRPA da ficha) que está LIGADO a este
+     atendimento e finalizado. Ligação pelo vínculo gravado, nunca pelo nome. */
+  _ligado(doc, modFilho) {
+    const id = doc && doc._links && doc._links[modFilho + '_id'];
+    const filho = id ? store.getById(modFilho, id) : null;
+    return filho && filho._finalizado ? filho : null;
+  },
+  /* Saiu para preencher o termo / a SRPA: ao finalizar lá, volta para cá. */
+  aguardar(modFilho) {
+    const st = fechamento._ler(); if (!st) return;
+    st.aguardando = modFilho;
+    st.feitos = st.feitos || {};
+    st.feitos[modFilho === 'termo' ? 'termo' : 'srpa'] = true;
+    fechamento._gravar(st);
+  },
+  esperando(modFilho) {
+    const st = fechamento._ler();
+    return !!(st && st.aguardando === modFilho);
+  },
+  /* Chamado quando o termo / a SRPA é finalizado. Se este fechamento estava
+     esperando por ele, liga ao atendimento (se ainda não estiver) e reabre a
+     janela — agora com as opções de imprimir junto ou separado. */
+  aoFinalizarFilho(modFilho, salvo) {
+    const st = fechamento._ler();
+    if (!st || st.aguardando !== modFilho || !salvo || !salvo._id) return false;
+    const pai = store.getById(st.mod, st.id);
+    if (!pai) return false;
+    /* termo/SRPA de OUTRO paciente não fecha este atendimento */
+    const nomePai = utils.semAcento(fechamento._nomeDe(st.mod, pai));
+    const nomeFilho = utils.semAcento(fechamento._nomeDe(modFilho, salvo));
+    if (nomePai && nomeFilho && nomePai !== nomeFilho) return false;
+    if (!(pai._links && pai._links[modFilho + '_id'])) {
+      try { linker.link(modFilho, salvo._id, st.mod, st.id); } catch (e) {}
+    }
+    delete st.aguardando;
+    fechamento._gravar(st);
+    fechamento._renderQuandoLivre();
+    return true;
+  },
+  _carregar(mod, doc) {
+    if (mod === 'pre') pre.carregar(doc);
+    else if (mod === 'termo') termo.carregar(doc);
+    else if (mod === 'anestesia') anestesia.carregar(doc);
+    else if (mod === 'recuperacao') recuperacao.carregar(doc);
+  },
+  _par() {
+    const st = fechamento._ler(); if (!st) return null;
+    const doc = store.getById(st.mod, st.id); if (!doc) return null;
+    const modFilho = st.mod === 'anestesia' ? 'recuperacao' : 'termo';
+    const filho = fechamento._ligado(doc, modFilho);
+    if (!filho) { toast('Não achei o ' + (modFilho === 'termo' ? 'termo' : 'SRPA') + ' ligado a este atendimento.', 'warn'); return null; }
+    return { st, doc, modFilho, filho };
+  },
+  /* Os formulários foram zerados ao finalizar: os dois registros são
+     recarregados só para montar a impressão, e zerados de novo quando a
+     pré-visualização fecha — nada do paciente fica na tela. */
+  imprimirJuntos() {
+    const par = fechamento._par(); if (!par) return;
+    try { fechamento._carregar(par.st.mod, par.doc); fechamento._carregar(par.modFilho, par.filho); }
+    catch (e) { toast('Não consegui abrir os registros para imprimir' + (e && e.message ? ': ' + e.message : ''), 'error'); return; }
+    const formPai = 'form-' + par.st.mod, formFilho = 'form-' + par.modFilho;
+    const falhou = () => toast('Os registros não terminaram de abrir; tente de novo.', 'error');
+    printPreview._quandoCarregado(formPai, par.doc._id, () =>
+      printPreview._quandoCarregado(formFilho, par.filho._id, () => {
+        printPreview._zerarAoFechar = [par.st.mod, par.modFilho];
+        if (par.st.mod === 'anestesia') printPreview.abrirConjunto({ vinculados: true });
+        else printPreview.abrirPreTermo({ vinculados: true });
+        fechamento._voltarAoFecharImpressao();
+      }, falhou), falhou);
+  },
+  /* Separados: um depois do outro — fechou a primeira impressão, abre a
+     segunda. */
+  imprimirSeparados() {
+    const par = fechamento._par(); if (!par) return;
+    const fila = [[par.st.mod, par.doc], [par.modFilho, par.filho]];
+    const proximo = () => {
+      const item = fila.shift();
+      if (!item) { fechamento._renderQuandoLivre(); return; }
+      const [mod, doc] = item;
+      ui.irEEntao(mod, '#form-' + mod, () => {
+        try { fechamento._carregar(mod, doc); }
+        catch (e) { toast('Não consegui abrir o registro para imprimir.', 'error'); return; }
+        printPreview._quandoCarregado('form-' + mod, doc._id, () => {
+          printPreview._zerarAoFechar = [mod];
+          printPreview._aoFechar = proximo;
+          printPreview.abrir();
+        }, () => toast('O registro não terminou de abrir; tente de novo.', 'error'));
+      });
+    };
+    proximo();
+  },
+  _voltarAoFecharImpressao() {
+    printPreview._aoFechar = () => { try { fechamento._renderQuandoLivre(); } catch (e) {} };
   },
 
   abrir(mod, id) {
@@ -29277,6 +30165,11 @@ const fechamento = {
     fechamento._renderQuandoLivre();
   },
   _renderQuandoLivre(tentativa) {
+    /* um laço de espera só: dois pedidos seguidos não abrem a janela duas vezes */
+    if (!tentativa) {
+      if (fechamento._esperandoVez) return;
+      fechamento._esperandoVez = true;
+    }
     let ocupado = false;
     try {
       const bd = document.getElementById('modal-backdrop');
@@ -29286,8 +30179,10 @@ const fechamento = {
     } catch (e) {}
     if (ocupado) {
       if ((tentativa || 0) < 150) { setTimeout(() => fechamento._renderQuandoLivre((tentativa || 0) + 1), 700); }
+      else fechamento._esperandoVez = false;
       return;
     }
+    fechamento._esperandoVez = false;
     fechamento._render();
   },
   reabrir() { const st = fechamento._ler(); if (st) fechamento._render(); },
@@ -30459,16 +31354,89 @@ const clinicaIdentidade = {
       '</div>';
   },
 
+  /* ---- COR DO SISTEMA ----
+     O gestor escolhe o tom do ambiente dele; vale para todos os aparelhos e
+     pessoas da clínica (viaja em clinica_identidade). Uma cor só gera a
+     família inteira (--primary e tons), no claro e no escuro. Documento de
+     paciente não muda: a impressão tem as cores dela. */
+  COR_PADRAO: '#1c64a9',
+  CORES: [
+    ['#1c64a9', 'Azul (padrão)'], ['#0f766e', 'Verde-petróleo'], ['#2e7d32', 'Verde'],
+    ['#5b3f9e', 'Roxo'], ['#9b2c4c', 'Vinho'], ['#b45309', 'Terracota'], ['#37474f', 'Grafite']
+  ],
+  _corValida(v) {
+    const t = String(v || '').trim().toLowerCase();
+    return /^#[0-9a-f]{6}$/.test(t) ? t : '';
+  },
+  cor() { return clinicaIdentidade._corValida(clinicaIdentidade.ler().cor) || clinicaIdentidade.COR_PADRAO; },
+  _rgb(h) { return [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)); },
+  _hex(rgb) { return '#' + rgb.map(x => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, '0')).join(''); },
+  _misturar(h, alvo, t) {
+    const a = clinicaIdentidade._rgb(h), b = clinicaIdentidade._rgb(alvo);
+    return clinicaIdentidade._hex(a.map((x, i) => x + (b[i] - x) * t));
+  },
+  /* família de tons: claro escurece para os "dark", escuro clareia */
+  tons(cor, escuro) {
+    const c = clinicaIdentidade._corValida(cor) || clinicaIdentidade.COR_PADRAO;
+    const m = clinicaIdentidade._misturar, rgb = clinicaIdentidade._rgb(c);
+    if (escuro) {
+      const base = m(c, '#ffffff', .3);
+      return { '--primary': base, '--primary-dark': m(c, '#ffffff', .42), '--primary-darker': m(c, '#ffffff', .56),
+        '--primary-light': m(c, '#0f1722', .72), '--primary-soft': m(c, '#0f1722', .84),
+        '--sidebar-active-bg': 'rgba(' + clinicaIdentidade._rgb(base).join(', ') + ', .25)' };
+    }
+    return { '--primary': c, '--primary-dark': m(c, '#000000', .31), '--primary-darker': m(c, '#000000', .53),
+      '--primary-light': m(c, '#ffffff', .89), '--primary-soft': m(c, '#ffffff', .95),
+      '--sidebar-active-bg': 'rgba(' + rgb.join(', ') + ', .25)' };
+  },
+  aplicarCor() {
+    const raiz = document.documentElement;
+    const cor = clinicaIdentidade.cor();
+    const props = Object.keys(clinicaIdentidade.tons(cor, false));
+    /* cor padrão = sem sobrescrever: o CSS do tema volta a mandar */
+    if (cor === clinicaIdentidade.COR_PADRAO) { props.forEach(p => raiz.style.removeProperty(p)); return; }
+    const tons = clinicaIdentidade.tons(cor, raiz.getAttribute('data-theme') === 'dark');
+    props.forEach(p => raiz.style.setProperty(p, tons[p]));
+  },
+  vigiarTema() {
+    if (clinicaIdentidade._obs || typeof MutationObserver === 'undefined') return;
+    clinicaIdentidade._obs = new MutationObserver(() => { try { clinicaIdentidade.aplicarCor(); } catch (e) {} });
+    clinicaIdentidade._obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  },
+  previaCor(v) {
+    const cor = clinicaIdentidade._corValida(v);
+    if (!cor) return;
+    const el = document.getElementById('ci-cor'); if (el) el.value = cor;
+    const raiz = document.documentElement;
+    const tons = clinicaIdentidade.tons(cor, raiz.getAttribute('data-theme') === 'dark');
+    Object.keys(tons).forEach(p => raiz.style.setProperty(p, tons[p]));
+    document.querySelectorAll('.ci-cor-opcao').forEach(b => b.classList.toggle('ativa', b.dataset.cor === cor));
+  },
+
   /* ---- Ajustes ---- */
   renderAjustes() {
     const host = document.getElementById('clinica-identidade-campos');
     if (!host) return;
     const d = clinicaIdentidade.ler();
     const A = utils.escapeAttr, E = utils.escapeHTML;
+    const cor = clinicaIdentidade.cor();
     host.innerHTML = '<div class="grid">' + clinicaIdentidade.CAMPOS.map(([k, rot, dica]) =>
       '<div class="field col-6"><label>' + E(rot) + '</label>' +
       '<input type="text" id="ci-' + k + '" value="' + A(d[k] || '') + '" placeholder="' + A(dica) + '"></div>'
-    ).join('') + '</div>';
+    ).join('') +
+      '<div class="field col-12"><label>🎨 Cor do sistema <small style="color:var(--text-mute);font-weight:400">— o tom do ambiente desta clínica, em todos os aparelhos</small></label>' +
+      '<div class="ci-cores">' + clinicaIdentidade.CORES.map(([c, rot]) =>
+        '<button type="button" class="ci-cor-opcao' + (c === cor ? ' ativa' : '') + '" data-cor="' + A(c) + '" title="' + A(rot) + '" ' +
+        'data-action="clinicaIdentidade.previaCor" data-args="' + A(JSON.stringify([c])) + '"><span class="ci-cor-amostra" data-cor-amostra="' + A(c) + '"></span>' + E(rot) + '</button>'
+      ).join('') +
+      '<label class="ci-cor-livre">Outra: <input type="color" id="ci-cor" value="' + A(cor) + '"></label>' +
+      '</div></div>' +
+      '</div>';
+    host.querySelectorAll('[data-cor-amostra]').forEach(sp => { sp.style.background = sp.dataset.corAmostra; });
+    const inp = document.getElementById('ci-cor');
+    if (inp) inp.addEventListener('input', () => clinicaIdentidade.previaCor(inp.value));
+    host.querySelectorAll('.ci-cor-opcao').forEach(b => b.addEventListener('click', () => clinicaIdentidade.previaCor(b.dataset.cor)));
+    try { if (typeof ambiente !== 'undefined' && ambiente.aplicarPermissoesAjustes) ambiente.aplicarPermissoesAjustes(); } catch (e) {}
   },
   salvarDoFormulario() {
     const d = {};
@@ -30476,7 +31444,10 @@ const clinicaIdentidade = {
       const el = document.getElementById('ci-' + k);
       d[k] = el ? String(el.value || '').trim() : '';
     });
+    const cor = clinicaIdentidade._corValida((document.getElementById('ci-cor') || {}).value);
+    if (cor && cor !== clinicaIdentidade.COR_PADRAO) d.cor = cor;
     clinicaIdentidade.salvar(d);
+    clinicaIdentidade.aplicarCor();
     toast('🏥 Identidade da clínica salva — já vale nas impressões');
     try { clinicaIdentidade.renderAjustes(); } catch (e) {}
   }
@@ -31735,6 +32706,28 @@ const precos = {
     try { orcamento.salvarCfg({ precoPorCodigo: mapa }); } catch (e) {}
     return mapa;
   },
+  /* Valor por código PRÓPRIO DE UM CONVÊNIO ("unimed" vale para "Unimed",
+     "Unimed Sul Bahia"…). Vem antes do preço geral do código. */
+  porCodigoDoConvenio(convenio) {
+    let mapa = {};
+    try { mapa = orcamento.cfg().precoPorCodigoConvenio || {}; } catch (e) { return {}; }
+    const n = precos._normPlano(convenio);
+    if (!n) return {};
+    if (mapa[n]) return mapa[n];
+    const k = Object.keys(mapa).sort((a, b) => b.length - a.length)
+      .find(x => x && (n.indexOf(x + ' ') === 0 || n.indexOf(x + '-') === 0));
+    return k ? mapa[k] : {};
+  },
+  definirPorCodigoDoConvenio(convenio, codigo, valor) {
+    const n = precos._normPlano(convenio), cod = String(codigo || '').replace(/\D/g, '');
+    if (!n || !cod) return null;
+    const todos = Object.assign({}, orcamento.cfg().precoPorCodigoConvenio || {});
+    const mapa = Object.assign({}, todos[n] || {});
+    if (valor === '' || valor == null) delete mapa[cod]; else mapa[cod] = Number(valor);
+    todos[n] = mapa;
+    try { orcamento.salvarCfg({ precoPorCodigoConvenio: todos }); } catch (e) {}
+    return mapa;
+  },
   /* ---- QUAL TABELA VALE PARA ESTE PLANO ---------------------------------
      Cada convênio paga pela sua tabela. Havia uma só, global ("tabela ativa"),
      e o valor saía igual para todos — o que está certo para um convênio e
@@ -31827,6 +32820,11 @@ const precos = {
     const info = cbhpm.info(codigo);
     const cod = info ? info.codigo : String(codigo || '').trim();
     if (!cod) return vazio;
+    const doConvenio = precos.porCodigoDoConvenio(convenio)[String(cod).replace(/\D/g, '')];
+    if (doConvenio != null && doConvenio !== '' && !isNaN(Number(doConvenio))) {
+      return { valor: Number(doConvenio), origem: 'codigo_convenio', chave: cod,
+               tabela: 'valor do convênio para o código', doConvenio: true };
+    }
     const especifico = precos.porCodigo()[cod];
     if (especifico != null && !isNaN(Number(especifico))) {
       return { valor: Number(especifico), origem: 'codigo', chave: cod, tabela: 'preço próprio do código' };
@@ -40779,7 +41777,7 @@ const anestesia = {
       '<div class="grid">' +
       '<div class="field col-6"><label>🚪 Entrada na SRPA</label><input type="time" id="srpa-auto-entrada" value="' + saidaSala + '"></div>' +
       '<div class="field col-6"><label>🚶 Saída / alta da SRPA</label><input type="time" id="srpa-auto-alta" value="' + somar(saidaSala, 60) + '"></div>' +
-      '<div class="field col-12"><label class="check"><input type="checkbox" id="srpa-auto-imprimir" checked><span>🖨️ Ao concluir, abrir a impressão da <b>ficha + SRPA num único arquivo</b></span></label></div>' +
+      '<div class="field col-12"><label class="check"><input type="checkbox" id="srpa-auto-imprimir"' + ((() => { try { return fechamento.esperando('recuperacao'); } catch (e) { return false; } })() ? '' : ' checked') + '><span>🖨️ Ao concluir, abrir a impressão da <b>ficha + SRPA num único arquivo</b></span></label></div>' +
       '</div>',
       '<button class="btn" onclick="modal.close()">Cancelar</button>' +
       '<button class="btn btn-primary" onclick="anestesia._gerarSrpaAutomatica(' + utils.jsArg(anestesiaId) + ')">⚡ Gerar SRPA</button>');
@@ -41819,7 +42817,8 @@ const fin = {
            sozinhos no lançamento. A data, num avulso, é a do cabeçalho. */
         (avulso ? '<input type="hidden" name="fz_data" value="' + ea(cab.dataProc || utils.hojeISO()) + '">'
           : '<div class="field col-4"><label>Data do atendimento</label><input type="date" name="fz_data" value="' + ea(cab.dataProc || utils.hojeISO()) + '" onchange="fin.finalizacao.aoTrocarHorario()"></div>') +
-        '<div class="field ' + (avulso ? 'col-4' : 'col-4') + '"><label>Hora <small style="color:var(--text-mute);font-weight:400">— define a faixa</small></label><input type="time" name="fz_hora" value="' + ea(avulso ? '' : fin.finalizacao._horaDe(mod, doc)) + '" onchange="fin.finalizacao.aoTrocarHorario()"></div>' +
+        '<div class="field col-2"><label>Início <small style="color:var(--text-mute);font-weight:400">— define a faixa</small></label><input type="time" name="fz_hora" value="' + ea(avulso ? '' : fin.finalizacao._horaDe(mod, doc)) + '" onchange="fin.finalizacao.aoTrocarHorario()"></div>' +
+        '<div class="field col-2"><label>Fim</label><input type="time" name="fz_hora_fim" value="' + ea(avulso ? '' : fin.finalizacao._horaFimDe(mod, doc)) + '"></div>' +
         '<div class="field col-4"><label>Urgência / emergência</label><div style="padding-top:6px"><label class="check" style="display:inline-flex"><input type="checkbox" name="fz_urgencia" onchange="fin.finalizacao._somar()"> <span>+<input type="number" name="fz_perc_urg" value="30" min="0" step="1" style="width:52px;margin:0 3px" oninput="fin.finalizacao._somar()">%</span></label></div></div>' +
         '<div class="field ' + (avulso ? 'col-4' : 'col-12') + '"><label>Acomodação <small style="color:var(--text-mute);font-weight:400">— do cadastro; ambulatorial paga como enfermaria</small></label>' +
         '<select name="fz_acomodacao" onchange="fin.finalizacao._aoTrocarAcomodacao()">' +
@@ -42030,6 +43029,25 @@ const fin = {
 
     /* A hora que define a faixa: na ficha é o início da anestesia; na pré e na
        consulta não há campo de hora, então vale a de agora — editável. */
+    /* só o que está registrado — sem cair na hora de agora */
+    _horaInicioRegistrada(mod, doc) {
+      try {
+        if (mod === 'anestesia') {
+          const p = doc.procedimento || {};
+          return p.hora_inicio || p.hora_sala_entrada || p.hora_cir_inicio || '';
+        }
+        return doc.hora || '';
+      } catch (e) { return ''; }
+    },
+    _horaFimDe(mod, doc) {
+      try {
+        if (mod === 'anestesia') {
+          const p = doc.procedimento || {};
+          return p.hora_fim || p.hora_sala_saida || p.hora_cir_fim || '';
+        }
+        return doc.hora_fim || '';
+      } catch (e) { return ''; }
+    },
     _horaDe(mod, doc) {
       try {
         if (mod === 'anestesia') {
@@ -42541,6 +43559,8 @@ const fin = {
         item.majoracao_motivo = fa.calc.motivo;
       }
       item.hora_proc = fin.finalizacao._v('fz_hora');
+      item.hora_inicio = item.hora_proc || item.hora_inicio || '';
+      item.hora_fim = fin.finalizacao._v('fz_hora_fim') || item.hora_fim || '';
       /* carteirinha do cadastro no lançamento: é o que o faturamento precisa
          e o que faltava para a guia sair completa */
       try {
@@ -42712,6 +43732,10 @@ const fin = {
         _autoCriado: true
       });
       if (l.observacao && !novo.observacoes) novo.observacoes = l.observacao;
+      /* início e fim do procedimento para a fatura: vêm da ficha enquanto o
+         lançamento não tiver os dele */
+      if (!novo.hora_inicio) { const hi = fin.finalizacao._horaInicioRegistrada(modOrigem, doc); if (hi) novo.hora_inicio = hi; }
+      if (!novo.hora_fim) { const hf = fin.finalizacao._horaFimDe(modOrigem, doc); if (hf) novo.hora_fim = hf; }
       /* ---- A TABELA DE CÓDIGOS NASCE PREENCHIDA -------------------------
          Ela é a FONTE do valor previsto: financeiro.codigos.recalcular() soma
          as linhas e escreve o total no campo. Nascendo vazia, o lançamento
@@ -45049,12 +46073,14 @@ const pacientes = {
         if (cf.conflictClientId) cloudRel.resolverConflito(cf.conflictClientId, 'local', { version: r.row && r.row.version });
         toast('✅ Sua versão foi mantida na nuvem');
       }
-      else if (r && r.conflict && !r.conflictPreserved) {
+      else if (r && r.conflict) {
+        /* este conflito está decidido; a nova divergência segue a última edição */
         if (cf.conflictClientId) cloudRel.resolverConflito(cf.conflictClientId, 'local', { novoConflito: true });
-        pacientes._resolverConflito(cf.local, r.cloud, r.cloudUpdatedAt);
+        if (!r.conflictPreserved) pacientes._resolverConflito(cf.local, r.cloud, r.cloudUpdatedAt);
       }
       else if (r && r.queued) toast('Sem conexão — sua escolha ficou protegida e será enviada automaticamente.', 'warn');
-      else toast('A escolha ficou preservada, mas exige revisão antes de chegar à nuvem.', 'warn');
+      else toast('A nuvem recusou a gravação de ' + cloudRel._rotuloConflito({ mod: 'pacientes', local: cf.local }) + ' (' +
+        cloudRel._motivoLegivel(r) + '). Sua versão continua guardada neste aparelho e o conflito segue na lista.', 'warn');
     });
     pacientes._conflito = null;
   },
@@ -47249,6 +48275,12 @@ const financeiro = {
         /* Restaura códigos TUSS */
         if (Array.isArray(item.codigos)) financeiro.codigos.restaurar(item.codigos);
         try { financeiro._pintarPago(document.getElementById(financeiro.formId), item.status); } catch (e) {}
+        /* lançamentos antigos guardavam só a hora da faixa (hora_proc) */
+        if (!item.hora_inicio && item.hora_proc) {
+          const hi = document.querySelector(`#${financeiro.formId} [name="hora_inicio"]`);
+          if (hi) hi.value = item.hora_proc;
+        }
+        try { financeiro.pintarDuracao(); } catch (e) {}
         try { financeiro.renderMajoracao(); } catch (e) {}
         try { financeiro.renderAdicionais(item); } catch (e) {}
         /* Restaura anexos */
@@ -47274,6 +48306,59 @@ const financeiro = {
       try { prontuario.limpar('fintroca'); } catch (e) {}
       document.getElementById('financeiro-form-titulo').textContent = 'Novo registro financeiro';
     }
+  },
+  /* NOVO E EDITAR SÃO A MESMA JANELA.
+     "Novo registro" abria uma janela diferente da de edição (a do fechamento),
+     com outros campos e outra ordem: o lançamento nascia de um jeito e era
+     corrigido de outro. Agora todo lançamento nasce na janela de edição, em
+     branco — com anexos, senha, fatores, horas e status no mesmo lugar. */
+  novoRegistro(pre) {
+    pre = pre || {};
+    financeiro.editar(null);
+    const f = document.getElementById(financeiro.formId);
+    if (!f) return;
+    const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el && v) el.value = v; };
+    set('paciente', pre.paciente); set('convenio', pre.convenio); set('data_proc', pre.data_proc);
+    set('hospital', pre.hospital); set('senha', pre.senha); set('acomodacao', pre.acomodacao);
+    if (pre.paciente) financeiro._completarDoCadastro();
+    try { financeiro.renderMajoracao(); } catch (e) {}
+    setTimeout(() => { try { f.querySelector('[name="paciente"]').focus(); } catch (e) {} }, 80);
+  },
+  /* carteirinha e plano do cadastro, quando o lançamento ainda não tem */
+  _completarDoCadastro() {
+    const f = document.getElementById(financeiro.formId);
+    if (!f) return;
+    const nome = (f.querySelector('[name="paciente"]') || {}).value || '';
+    let pac = null;
+    try {
+      pac = linker._pacienteDoCadastro ? linker._pacienteDoCadastro(nome)
+        : (store.list('pacientes') || []).find(x => x && linker._normNome(x.nome) === linker._normNome(nome));
+    } catch (e) {}
+    if (!pac || !String(nome).trim()) return;
+    const vazio = n => { const el = f.querySelector('[name="' + n + '"]'); return el && !String(el.value || '').trim() ? el : null; };
+    const c = vazio('carteirinha'); if (c && pac.carteirinha) c.value = pac.carteirinha;
+    const p = vazio('convenio'); if (p && pac.plano) p.value = pac.plano;
+  },
+  duracao(ini, fim) {
+    const m = h => { const r = /^(\d{1,2}):(\d{2})/.exec(h || ''); return r ? (+r[1]) * 60 + (+r[2]) : null; };
+    const a = m(ini), b = m(fim);
+    if (a == null || b == null) return '';
+    let d = b - a; if (d < 0) d += 1440;
+    return Math.floor(d / 60) + 'h' + String(d % 60).padStart(2, '0');
+  },
+  pintarDuracao() {
+    const f = document.getElementById(financeiro.formId);
+    if (!f) return;
+    const g = n => (f.querySelector('[name="' + n + '"]') || {}).value || '';
+    const el = f.querySelector('[name="duracao_rotulo"]');
+    if (el) el.value = financeiro.duracao(g('hora_inicio'), g('hora_fim'));
+  },
+  /* convênio cobra por fatura, e a fatura pede início e fim */
+  faltaHora(x) {
+    if (!x || financeiro.ehQuitado(x.status) || x.status === 'cancelado') return false;
+    const t = String(x.tipo_pagamento || x.convenio || '').toLowerCase();
+    if (!t || /particular|cortesia|sus/.test(t)) return false;
+    return !(x.hora_inicio || x.hora_proc) || !x.hora_fim;
   },
   cancelar() {
     document.getElementById(financeiro.cardId).style.display = 'none';
@@ -47303,6 +48388,9 @@ const financeiro = {
        registro porque meia dúzia de telas e relatórios o leem. */
     data.pago = financeiro.ehQuitado(data.status);
     delete data.pago_rotulo;
+    delete data.duracao_rotulo;
+    /* a hora de início também é a da faixa de horário (hora_proc) */
+    if (data.hora_inicio) data.hora_proc = data.hora_inicio;
     /* adicionais marcados aqui valem tanto quanto os da finalização */
     const adic = financeiro.coletarAdicionais();
     if (adic) data._adicionais = adic; else delete data._adicionais;
@@ -47402,15 +48490,17 @@ const financeiro = {
         origemMod: o.mod || '',
         paciente: primeiro(x.paciente, pac.nome, doc.nome),
         plano: primeiro(x.convenio, pac.convenio, pac.plano, cad.plano, cad.convenio, doc.convenio),
-        carteirinha: primeiro(pac.carteirinha, pac.matricula, cad.carteirinha, cad.matricula, doc.carteirinha, doc.matricula),
+        carteirinha: primeiro(x.carteirinha, pac.carteirinha, pac.matricula, cad.carteirinha, cad.matricula, doc.carteirinha, doc.matricula),
         guia: primeiro(x.senha, pac.senha, doc.senha),
         tipoPagamento: primeiro(x.tipo_pagamento),
         dataProc, diaSemana, fimDeSemana,
         salaEntrada: primeiro(pr.hora_sala_entrada, doc.hora_sala_entrada),
         salaSaida: primeiro(pr.hora_sala_saida, doc.hora_sala_saida),
-        anestIni: primeiro(pr.hora_inicio, doc.hora_inicio),
-        anestFim: primeiro(pr.hora_fim, doc.hora_fim),
-        duracao: primeiro(pr.duracao, doc.duracao),
+        /* o que está no lançamento vale primeiro: é onde se corrige para a fatura */
+        anestIni: primeiro(x.hora_inicio, pr.hora_inicio, doc.hora_inicio, x.hora_proc),
+        anestFim: primeiro(x.hora_fim, pr.hora_fim, doc.hora_fim),
+        duracao: primeiro(pr.duracao, doc.duracao,
+          financeiro.duracao(primeiro(x.hora_inicio, pr.hora_inicio, x.hora_proc), primeiro(x.hora_fim, pr.hora_fim))),
         cirIni: primeiro(pr.hora_cir_inicio), cirFim: primeiro(pr.hora_cir_fim),
         acomodacao: acom,
         fatorAcom: primeiro(x.fator_acomodacao),
@@ -47437,6 +48527,8 @@ const financeiro = {
       if (!d.codigos.length && !d.codigoUnico) f.push('Código a cobrar — nenhum código TUSS/CBHPM neste lançamento');
       if (!d.dataProc) f.push('Data da execução');
       if (d.origemMod === 'anestesia' && !d.salaEntrada && !d.anestIni) f.push('Horários de sala — a ficha de anestesia não tem entrada nem início preenchidos');
+      else if (!/particular|cortesia|sus/i.test(d.tipoPagamento || d.plano || '') && (!d.anestIni || !d.anestFim))
+        f.push('Hora de início e do fim do procedimento — a fatura da cooperativa pede as duas (edite o lançamento)');
       if (!d.acomodacao) f.push('Acomodação (apartamento / enfermaria)');
       return f;
     },
@@ -48390,7 +49482,9 @@ const financeiro = {
             <td data-label="Cirurgião">${utils.escapeHTML(x.cirurgiao || '')}</td>
             <td data-label="Hospital">${utils.escapeHTML(x.hospital || '')}</td>
             <td data-label="Convênio">${utils.escapeHTML(x.convenio || x.tipo_pagamento || '')}</td>
-            <td data-label="Data">${utils.formatarData(x.data_proc)}</td>
+            <td data-label="Data">${utils.formatarData(x.data_proc)}${(x.hora_inicio || x.hora_proc) && x.hora_fim
+              ? `<br><small style="color:var(--text-mute)">${utils.escapeHTML(x.hora_inicio || x.hora_proc)}–${utils.escapeHTML(x.hora_fim)}</small>`
+              : (financeiro.faltaHora(x) ? '<br><span class="fin-falta-hora" title="A fatura da cooperativa pede a hora de início e do fim do procedimento">falta hora</span>' : '')}</td>
             <td data-label="Previsto" style="text-align:right">R$ ${utils.formatarBR(prev)}</td>
             <td data-label="Recebido" style="text-align:right">R$ ${utils.formatarBR(rec)}</td>
             <td data-label="Diferença" style="text-align:right; color:${dif > 0 ? 'var(--warning)' : (dif < 0 ? 'var(--danger)' : 'var(--accent)')}">R$ ${utils.formatarBR(dif)}</td>
@@ -48670,7 +49764,7 @@ const financeiro = {
     const num = v => parseFloat(v) || 0;
     const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
     const linhas = [[
-      'Data do registro', 'Data do procedimento', 'Paciente', 'Convênio', 'Senha',
+      'Data do registro', 'Data do procedimento', 'Hora início', 'Hora fim', 'Paciente', 'Convênio', 'Carteirinha', 'Senha',
       'Procedimento', 'Códigos TUSS', 'Cirurgião', 'Hospital',
       'Previsto', 'Recebido', 'Glosa', 'A receber', 'Status', 'Pago', 'Data do pagamento'
     ].map(q).join(';')];
@@ -48682,7 +49776,8 @@ const financeiro = {
         ? x.codigos.map(c => [c.codigo, c.descricao].filter(Boolean).join(' ')).filter(Boolean).join(' | ') : '';
       linhas.push([
         financeiro._dataDoLancamento(x, 'registro'), financeiro._dataDoLancamento(x, 'proc'),
-        x.paciente || '', x.convenio || x.plano || '', x.senha || '',
+        x.hora_inicio || x.hora_proc || '', x.hora_fim || '',
+        x.paciente || '', x.convenio || x.plano || '', x.carteirinha || '', x.senha || '',
         x.procedimento || '', codigos, x.cirurgiao || '', x.hospital || '',
         /* Vírgula decimal: a planilha brasileira soma a coluna sem conversão. */
         prev.toFixed(2).replace('.', ','), rec.toFixed(2).replace('.', ','), glo.toFixed(2).replace('.', ','),
@@ -48691,7 +49786,7 @@ const financeiro = {
       ].map(q).join(';'));
     });
     linhas.push('');
-    linhas.push([q('TOTAIS'), q(''), q(''), q(''), q(''), q(''), q(''), q(''), q(''),
+    linhas.push([q('TOTAIS'), q(''), q(''), q(''), q(''), q(''), q(''), q(''), q(''), q(''), q(''), q(''),
       q(tp.toFixed(2).replace('.', ',')), q(tr.toFixed(2).replace('.', ',')),
       q(tg.toFixed(2).replace('.', ',')), q((tp - tr - tg).toFixed(2).replace('.', ','))].join(';'));
     linhas.push('');
@@ -48951,7 +50046,9 @@ function orcDerivarAnestCBHPM2022(tabCir) {
 }
 
 const ORC_PORTE_ANEST_PADRAO = {
-  unimed:    { nome: 'Unimed (CBHPM 2015 + 7%) — porte anest.', tipo: 'anest', valores: { 0: 0, 1: 145.28, 2: 212.64, 3: 312.98, 4: 462.74, 5: 715.80, 6: 998.85, 7: 1421.12, 8: 1874.88 } },
+  /* Conferida no extrato Unimed de 2026: de abril em diante o porte 2 passou
+     de 212,64 para 217,04; os demais portes seguem os mesmos valores. */
+  unimed:    { nome: 'Unimed 2026 (extrato abr/2026+) — porte anest.', tipo: 'anest', valores: { 0: 0, 1: 145.28, 2: 217.04, 3: 312.98, 4: 462.74, 5: 715.80, 6: 998.85, 7: 1421.12, 8: 1874.88 } },
   cbhpm2015: { nome: 'CBHPM 2015 (0%) — porte anest.',          tipo: 'anest', valores: { 0: 0, 1: 135.78, 2: 198.73, 3: 292.50, 4: 432.47, 5: 668.97, 6: 933.50, 7: 1328.15, 8: 1752.22 } },
   /* Derivadas pela conversão CLÁSSICA do sistema (1→3A, 2→3C, 3→5B, 4→7B,
      5→9A, 6→9B, 7→11C, 8→13C). São as que sustentam os orçamentos já
@@ -49139,7 +50236,11 @@ const ORC_CFG_PADRAO = {
      prometer o que não foi cobrado — e é o paciente quem cobra depois. */
   obsPadrao: 'O valor informado refere-se à assistência anestesiológica relacionada ao procedimento descrito, incluindo avaliação, planejamento e acompanhamento anestésico intra-operatório, conforme necessidade clínica do paciente e características do ato cirúrgico.',
   obsSemPre: 'O valor informado refere-se à assistência anestesiológica relacionada ao procedimento descrito, incluindo planejamento e acompanhamento anestésico intra-operatório, conforme necessidade clínica do paciente e características do ato cirúrgico. A consulta de avaliação pré-anestésica não está incluída neste valor e é cobrada à parte.',
-  regra: { mesma: 0.5, diferente: 0.7 }
+  regra: { mesma: 0.5, diferente: 0.7 },
+  /* Valor que um convênio paga por um código, quando não sai do porte.
+     A consulta pré-anestésica (1.01.01.01-2) a Unimed paga 122,00 — o porte
+     cirúrgico 2B daria 104,64, que é o que o Financeiro vinha sugerindo. */
+  precoPorCodigoConvenio: { unimed: { '10101012': 122.00 } }
 };
 
 /* ============================================================================
@@ -50239,6 +51340,19 @@ const orcamento = {
       const c = Object.assign({}, ORC_CFG_PADRAO, stored);
       c.cabecalho = Object.assign({}, ORC_CFG_PADRAO.cabecalho, stored.cabecalho || {});
       c.regra = Object.assign({}, ORC_CFG_PADRAO.regra, stored.regra || {});
+      c.precoPorCodigoConvenio = Object.assign({}, ORC_CFG_PADRAO.precoPorCodigoConvenio);
+      Object.keys(stored.precoPorCodigoConvenio || {}).forEach(k => {
+        c.precoPorCodigoConvenio[k] = Object.assign({}, ORC_CFG_PADRAO.precoPorCodigoConvenio[k] || {},
+          stored.precoPorCodigoConvenio[k] || {});
+      });
+      /* cópia salva da Unimed antiga (porte 2 a 212,64) passa para 2026 —
+         uma tabela que ele editou com outros valores fica como ele deixou */
+      const un = c.tabelasAnest && c.tabelasAnest.unimed;
+      if (un && un.valores && Number(un.valores[2]) === 212.64) {
+        c.tabelasAnest = Object.assign({}, c.tabelasAnest, {
+          unimed: Object.assign({}, un, { nome: ORC_PORTE_ANEST_PADRAO.unimed.nome,
+            valores: Object.assign({}, un.valores, { 2: 217.04 }) }) });
+      }
       return c;
     } catch { return JSON.parse(JSON.stringify(ORC_CFG_PADRAO)); }
   },
@@ -51155,12 +52269,14 @@ const agenda = {
         if (cid) cloudRel.resolverConflito(cid, 'local', { version: r.row && r.row.version });
         toast('✅ Sua versão foi mantida na nuvem');
       }
-      else if (r && r.conflict && !r.conflictPreserved) {
+      else if (r && r.conflict) {
+        /* este conflito está decidido; a nova divergência segue a última edição */
         if (cid) cloudRel.resolverConflito(cid, 'local', { novoConflito: true });
-        agenda._resolverConflito(local, r.cloud, r.cloudUpdatedAt);
+        if (!r.conflictPreserved) agenda._resolverConflito(local, r.cloud, r.cloudUpdatedAt);
       }
       else if (r && r.queued) toast('Sem conexão — sua escolha ficou protegida e será enviada automaticamente.', 'warn');
-      else toast('A escolha ficou preservada, mas exige revisão antes de chegar à nuvem.', 'warn');
+      else toast('A nuvem recusou a gravação de ' + cloudRel._rotuloConflito({ mod: 'agenda', local: local }) + ' (' +
+        cloudRel._motivoLegivel(r) + '). Sua versão continua guardada neste aparelho e o conflito segue na lista.', 'warn');
     });
     agenda._conflito = null;
   },

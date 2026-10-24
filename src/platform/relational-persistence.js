@@ -2999,6 +2999,24 @@ const cloudRel = {
       '<button class="btn" onclick="cloudRel._conflitoUsarNuvem()">Usar o da nuvem</button>' +
       '<button class="btn btn-ghost" onclick="modal.close()">Decidir depois</button>');
   },
+  _recusaPorFinalizado(r) {
+    const m = String((r && (r.motivo || r.message || r.erro)) || '').toLowerCase();
+    return /finalizad|imut[aá]vel|immutable|assinado|use um adendo/.test(m);
+  },
+  _motivoLegivel(r) {
+    const m = String((r && (r.motivo || r.message || r.erro)) || '').trim();
+    if (!m) return 'sem motivo informado';
+    if (/^http 40[13]|permiss|forbidden|unauthori|row-level/i.test(m)) return 'sem permissão para alterar este registro';
+    if (/operacao_anterior_pendente/.test(m)) return 'há uma gravação anterior deste registro ainda sem recibo';
+    if (/contexto_trocado/.test(m)) return 'a conta ou a clínica ativa mudou no meio da gravação';
+    if (/token/.test(m)) return 'a sessão da nuvem expirou — entre de novo';
+    return m.slice(0, 120);
+  },
+  _rotuloConflito(cf) {
+    const l = (cf && cf.local) || {};
+    const nome = String(l.nome || l.paciente || l.paciente_nome || '').trim();
+    return (cf && cf.mod ? cf.mod : 'registro') + (nome ? ' de ' + nome : '');
+  },
   _conflitoManter() {
     const cf = cloudRel._conflito; if (!cf) { modal.close(); return; } modal.close();
     const contexto = cloudRel._capturarContexto();
@@ -3055,15 +3073,31 @@ const cloudRel = {
           toast('✅ Sua versão foi guardada na nuvem como registro novo — a nuvem só tinha uma linha vazia', 'success');
         } else toast('Não consegui gravar sua versão agora; ela continua guardada neste aparelho.', 'warn');
       }
-      else if (r && r.conflict && !r.conflictPreserved) {
-        /* a nuvem andou de novo: este fica decidido; o novo segue a regra da
-           última edição em segundo plano, sem reabrir a janela */
+      else if (r && r.conflict) {
+        /* a nuvem andou de novo: ESTE conflito está decidido (a escolha dele é
+           a última edição); a nova divergência segue a mesma regra em segundo
+           plano, sem reabrir a janela. Antes, quando o cofre já tinha
+           preservado a nova divergência, o conflito antigo ficava pendurado
+           na lista — o contador não descia por mais que se tocasse nele. */
         if (cf.conflictClientId) cloudRel.resolverConflito(cf.conflictClientId, 'local', { novoConflito: true });
-        cloudRel._resolverConflitoRegistro(cf.mod, cf.local, r.cloud, r.cloudUpdatedAt);
+        if (!r.conflictPreserved) cloudRel._resolverConflitoRegistro(cf.mod, cf.local, r.cloud, r.cloudUpdatedAt);
         toast('✅ Sua versão vale — a nuvem mudou de novo e ela está sendo regravada por cima', 'success');
       }
       else if (r && r.queued) toast('Sem conexão — sua escolha ficou protegida e será enviada automaticamente.', 'warn');
-      else toast('A escolha ficou preservada, mas exige revisão antes de chegar à nuvem.', 'warn');
+      else if (r && cloudRel._recusaPorFinalizado(r)) {
+        /* a nuvem diz que o registro já é definitivo: a versão dele vira
+           retificação (adendo), que é o caminho que o servidor aceita */
+        const original = Object.assign({}, nv, { _id: cf.local._id, _finalizado: true });
+        try {
+          adendos.salvarComoCorrecao(cf.mod, original, cf.local);
+          if (cf.conflictClientId) cloudRel.resolverConflito(cf.conflictClientId, 'merged', { como: 'adendo' });
+          toast('✅ O registro já estava finalizado na nuvem — sua versão foi salva como retificação', 'success');
+        } catch (e) {
+          toast('O registro está finalizado na nuvem e a retificação não pôde ser criada agora; sua versão continua neste aparelho.', 'warn');
+        }
+      }
+      else toast('A nuvem recusou a gravação de ' + cloudRel._rotuloConflito(cf) + ' (' +
+        cloudRel._motivoLegivel(r) + '). Sua versão continua guardada neste aparelho e o conflito segue na lista.', 'warn');
     });
     cloudRel._repintarAposConflito(cf.mod);
     cloudRel._conflito = null;

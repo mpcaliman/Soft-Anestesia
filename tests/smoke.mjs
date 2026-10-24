@@ -14737,8 +14737,11 @@ await test('Aba do programador diz por que criar ambiente falhou, e não deixa o
     window.fetch = async (url) => {
       const u = String(url);
       if (/app_programmers/.test(u)) {
-        if (modoProg === 'sem_tabela') return { ok: false, status: 404, json: async () => ({ message: 'Could not find the table public.app_programmers in the schema cache' }), text: async () => JSON.stringify({ message: 'Could not find the table public.app_programmers in the schema cache' }) };
+        if (modoProg === 'sem_tabela' || modoProg === 'tabela_fechada') return { ok: false, status: 404, json: async () => ({ message: 'Could not find the table public.app_programmers in the schema cache' }), text: async () => JSON.stringify({ message: 'Could not find the table public.app_programmers in the schema cache' }) };
         return { ok: true, json: async () => (modoProg === 'ok' ? [{ user_id: 'u1' }] : []), text: async () => JSON.stringify(modoProg === 'ok' ? [{ user_id: 'u1' }] : []) };
+      }
+      if (/rpc\/prog_list_org_shares/.test(u) && modoProg !== 'tabela_fechada') {
+        return { ok: false, status: 404, json: async () => ({ message: 'Could not find the function public.prog_list_org_shares' }), text: async () => JSON.stringify({ message: 'Could not find the function public.prog_list_org_shares' }) };
       }
       if (/rpc\/prog_criar_ambiente/.test(u)) {
         return { ok: false, status: 400, json: async () => ({ message: 'Apenas o programador pode criar ambientes.' }), text: async () => JSON.stringify({ message: 'Apenas o programador pode criar ambientes.' }) };
@@ -14783,6 +14786,12 @@ await test('Aba do programador diz por que criar ambiente falhou, e não deixa o
     await programador._conferirCredencial();
     out.diagnosticaMigracao = /migração 0009 ainda não rodou/i.test(aviso());
 
+    /* tabela fechada para leitura direta, mas a RPC do programador responde:
+       a 0009 rodou — não é para alarmar (foto: aviso com 3 ambientes na tela) */
+    modoProg = 'tabela_fechada';
+    await programador._conferirCredencial();
+    out.tabelaFechadaSemAlarme = aviso().trim() === '';
+
     /* e quando está tudo certo, nenhum aviso aparece */
     modoProg = 'ok';
     await programador._conferirCredencial();
@@ -14798,6 +14807,7 @@ await test('Aba do programador diz por que criar ambiente falhou, e não deixa o
   assert(r.vazioExplica, 'campo vazio também explica');
   assert(r.ensinaCriarConta, 'conta inexistente vira instrução: a pessoa cria a própria conta, e o painel não pode criar por ela');
   assert(r.diagnosticaMigracao, 'migração ausente tem diagnóstico próprio, em vez de virar "erro desconhecido"');
+  assert(r.tabelaFechadaSemAlarme, 'tabela fechada à leitura direta não é migração faltando: a RPC do programador decide');
   assert(r.semAvisoQuandoOk, 'e com tudo certo nenhum aviso aparece — alarme que toca à toa deixa de ser lido');
   await page.close();
 });
@@ -23924,6 +23934,344 @@ await test('Pendência de convênio: a etapa marca em ficha finalizada, e o clí
   assert(r.clinicoNaoPassou,
     'alteração clínica numa ficha finalizada continua recusada — a defesa foi delimitada, não afrouxada');
   assert(r.naoFinalizadoOk, 'em ficha aberta, nada muda em relação a antes');
+  await page.close();
+});
+
+/* ======================= PACOTE 2026-10-24 ======================= */
+
+await test('Textos padrão: os campos novos dos módulos aparecem em Ajustes e ganham o 📝', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-tp');
+    textosPadrao.init();
+    const C = textosPadrao.CAMPOS;
+    out.pre = ['descricao_clinica', 'parecer_cardio', 'parecer_pneumo', 'parecer_outros', 'medicacao_pre', 'acompanhantes'].every(k => C.pre[k]);
+    out.anest = ['pre_diagnostico', 'pre_via_aerea_obs', 'cec_eventos_obs', 'descricao_livre'].every(k => C.anestesia[k]);
+    out.docs = !!(C.documentos && C.documentos.laudo_quadro) && !!C.prescricao.atestado_texto && !!C.recuperacao.resumo_alta;
+    out.semPlaceholderVazio = !C.recuperacao_alta;
+    out.foraOsAutomaticos = !C.pre.via_aerea_resumo && !C.pre.risco_resumo && !C.pre.medicacoes && !C.anestesia.pre_alergias;
+    const ta = document.querySelector('#form-pre textarea[name="parecer_cardio"]');
+    out.botao = !!(ta && ta.parentElement && ta.parentElement.querySelector('.tp-btn'));
+    /* campo que entrar depois também aparece, com o rótulo da tela */
+    const f = document.getElementById('form-consulta');
+    const box = document.createElement('div'); box.className = 'field';
+    box.innerHTML = '<label>Campo de teste novo</label><textarea name="campo_teste_novo"></textarea>';
+    f.appendChild(box);
+    textosPadrao._descobrir();
+    out.descobre = C.consulta.campo_teste_novo === 'Campo de teste novo';
+    box.remove(); delete C.consulta.campo_teste_novo;
+    let host = document.getElementById('textos-padrao-editor');
+    if (!host) { host = document.createElement('div'); host.id = 'textos-padrao-editor'; document.body.appendChild(host); }
+    textosPadrao.renderAjustes();
+    out.editor = !!host.querySelector('[data-tp-mod="documentos"][data-tp-campo="laudo_quadro"]') &&
+      !!host.querySelector('[data-tp-mod="pre"][data-tp-campo="parecer_cardio"]');
+    return out;
+  });
+  assert(r.pre && r.anest && r.docs, 'pareceres, pré-medicação, CEC, descrição livre, laudo e atestado entram no catálogo');
+  assert(r.semPlaceholderVazio, 'a seção vazia "SRPA — alta" sai');
+  assert(r.foraOsAutomaticos, 'resumos automáticos e campos com seletor próprio ficam de fora');
+  assert(r.botao, 'o campo novo ganha o 📝 na tela');
+  assert(r.descobre, 'textarea que entrar depois no formulário aparece sozinho, com o rótulo da tela');
+  assert(r.editor, 'e Ajustes mostra os campos novos para editar');
+  await page.close();
+});
+
+await test('Cor do sistema: o gestor escolhe o tom, que vale no claro e no escuro', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-cor');
+    const raiz = document.documentElement;
+    clinicaIdentidade.salvar(Object.assign(clinicaIdentidade.ler(), { cor: '#0f766e' }));
+    raiz.setAttribute('data-theme', 'light');
+    clinicaIdentidade.aplicarCor();
+    out.claro = raiz.style.getPropertyValue('--primary').trim() === '#0f766e' &&
+      /^#/.test(raiz.style.getPropertyValue('--primary-dark').trim()) &&
+      raiz.style.getPropertyValue('--primary-dark').trim() !== '#0f766e';
+    clinicaIdentidade.vigiarTema();
+    raiz.setAttribute('data-theme', 'dark');
+    await new Promise(res => setTimeout(res, 50));
+    const escuro = raiz.style.getPropertyValue('--primary').trim();
+    out.escuro = /^#/.test(escuro) && escuro !== '#0f766e';
+    raiz.setAttribute('data-theme', 'light');
+    await new Promise(res => setTimeout(res, 50));
+    clinicaIdentidade.salvar(Object.assign(clinicaIdentidade.ler(), { cor: '' }));
+    clinicaIdentidade.aplicarCor();
+    out.padraoDevolveAoCss = raiz.style.getPropertyValue('--primary') === '';
+    out.invalidaIgnorada = clinicaIdentidade._corValida('red;background:url(x)') === '';
+    out.sincroniza = clinicaSync.CHAVES['medsys.v7.clinica.identidade'] === 'clinica_identidade';
+    return out;
+  });
+  assert(r.claro, 'a cor escolhida vira --primary e gera os tons');
+  assert(r.escuro, 'no tema escuro o tom é reajustado para contraste');
+  assert(r.padraoDevolveAoCss, 'voltar ao padrão tira a sobrescrita e o CSS do tema volta a mandar');
+  assert(r.invalidaIgnorada, 'só aceita cor #rrggbb');
+  assert(r.sincroniza, 'vai para a nuvem com a identidade da clínica');
+  await page.close();
+});
+
+await test('Tabela Unimed 2026: porte 2 a 217,04 e consulta pré a 122,00', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-tab');
+    localStorage.removeItem(STORAGE.orcamento_cfg);
+    const endo = precos.base('31602231', 'anestesia', 'Unimed');
+    out.porte2 = endo.valor === 217.04;
+    out.consulta = precos.base('10101012', 'medico', 'Unimed').valor === 122;
+    out.consultaOutroPlano = precos.base('10101012', 'medico', 'Particular').valor !== 122;
+    out.variante = precos.base('10101012', 'medico', 'Unimed Sul Bahia').valor === 122;
+    /* cópia antiga salva com 212,64 passa para 2026 */
+    const tabs = JSON.parse(JSON.stringify(ORC_PORTE_ANEST_PADRAO));
+    tabs.unimed.valores[2] = 212.64;
+    localStorage.setItem(STORAGE.orcamento_cfg, JSON.stringify({ tabelasAnest: { unimed: tabs.unimed } }));
+    out.migra = orcamento.tabelasAnest().unimed.valores[2] === 217.04;
+    /* tabela que ele editou com outro valor fica como ele deixou */
+    tabs.unimed.valores[2] = 230;
+    localStorage.setItem(STORAGE.orcamento_cfg, JSON.stringify({ tabelasAnest: { unimed: tabs.unimed } }));
+    out.respeitaEdicao = orcamento.tabelasAnest().unimed.valores[2] === 230;
+    localStorage.removeItem(STORAGE.orcamento_cfg);
+    precos.definirPorCodigoDoConvenio('Unimed', '3.16.02.24-0', 333.33);
+    out.porCodigo = precos.base('31602240', 'anestesia', 'Unimed').valor === 333.33;
+    localStorage.removeItem(STORAGE.orcamento_cfg);
+    return out;
+  });
+  assert(r.porte2, 'endoscopia (porte 2) sai a 217,04');
+  assert(r.consulta && r.variante, 'consulta pré Unimed sai a 122,00, inclusive em "Unimed <regional>"');
+  assert(r.consultaOutroPlano, 'o valor da Unimed não vaza para outro plano');
+  assert(r.migra && r.respeitaEdicao, 'tabela salva antiga migra; editada à mão fica');
+  assert(r.porCodigo, 'valor por código do convênio tem precedência sobre o porte');
+  await page.close();
+});
+
+await test('Fechamento: pré → TCLE volta para a janela e oferece imprimir junto ou separado', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-fech');
+    const hoje = new Date().toISOString().slice(0, 10);
+    store.setList('pre', [{ _id: 'pre1', nome: 'Paciente Fech', data: hoje, cirurgia: 'Colecistectomia', _finalizado: true }]);
+    store.setList('termo', []);
+    fechamento._gravar({ mod: 'pre', id: 'pre1', nome: 'Paciente Fech', feitos: {} });
+    const itens0 = fechamento._itens('pre', store.getById('pre', 'pre1'), {});
+    out.antesSemImprimir = !itens0.some(i => i.chave === 'imp_juntos');
+    fechamento.aguardar('termo');
+    out.esperando = fechamento.esperando('termo');
+    let renders = 0; const orig = fechamento._render; fechamento._render = () => { renders++; };
+    const t = store.save('termo', { _id: 'ter1', nome: 'Paciente Fech', data: hoje, _finalizado: true });
+    out.voltou = fechamento.aoFinalizarFilho('termo', t) === true;
+    await new Promise(res => setTimeout(res, 50));
+    out.renderizou = renders === 1;
+    fechamento._render = orig;
+    out.ligou = (store.getById('pre', 'pre1')._links || {}).termo_id === 'ter1';
+    out.parouDeEsperar = !fechamento.esperando('termo');
+    const itens = fechamento._itens('pre', store.getById('pre', 'pre1'), {});
+    out.oferece = itens.some(i => i.chave === 'imp_juntos' && /pré \+ TCLE/.test(i.rotulo)) && itens.some(i => i.chave === 'imp_separados');
+    /* a ficha → SRPA tem o mesmo par */
+    store.setList('anestesia', [{ _id: 'an1', paciente: { nome: 'Paciente Fech' }, procedimento: { data: hoje }, _finalizado: true, _links: { recuperacao_id: 'sr1' } }]);
+    store.setList('recuperacao', [{ _id: 'sr1', nome: 'Paciente Fech', data: hoje, _finalizado: true }]);
+    const itA = fechamento._itens('anestesia', store.getById('anestesia', 'an1'), {});
+    out.fichaSrpa = itA.some(i => i.chave === 'imp_juntos' && /ficha \+ SRPA/.test(i.rotulo));
+    /* um pedido duplicado não abre a janela duas vezes */
+    fechamento._esperandoVez = false;
+    const bd = document.getElementById('modal-backdrop'); bd.classList.add('show');
+    fechamento._renderQuandoLivre(); fechamento._renderQuandoLivre();
+    out.umaEsperaSo = fechamento._esperandoVez === true;
+    bd.classList.remove('show'); fechamento._esperandoVez = false;
+    fechamento._gravar(null);
+    return out;
+  });
+  assert(r.antesSemImprimir, 'antes do termo, nada de imprimir junto');
+  assert(r.esperando && r.voltou && r.renderizou && r.parouDeEsperar, 'finalizar o termo devolve para a janela do fechamento');
+  assert(r.ligou, 'o termo fica ligado à pré');
+  assert(r.oferece, 'e a janela oferece pré + TCLE juntos ou separados');
+  assert(r.fichaSrpa, 'a ficha com SRPA oferece o mesmo');
+  assert(r.umaEsperaSo, 'dois pedidos seguidos não abrem o fechamento duas vezes');
+  await page.close();
+});
+
+await test('Conflito: "Manter o meu" que esbarra em nova divergência encerra o conflito antigo e diz o motivo das recusas', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-cf');
+    out.motivoPerm = /sem permissão/.test(cloudRel._motivoLegivel({ motivo: 'http 403 — forbidden' }));
+    out.finalizado = cloudRel._recusaPorFinalizado({ motivo: 'Registro finalizado/assinado é imutável. Use um adendo para correções' });
+    out.rotulo = /pre de Ana/.test(cloudRel._rotuloConflito({ mod: 'pre', local: { nome: 'Ana' } }));
+    const resolvidos = [];
+    const origResolver = cloudRel.resolverConflito, origSalvar = persistenciaCloudFirst.salvar, origVersao = cloudRel._versaoNaNuvem;
+    cloudRel.resolverConflito = (id, lado) => { resolvidos.push(id + ':' + lado); };
+    cloudRel._versaoNaNuvem = async () => 3;
+    persistenciaCloudFirst.salvar = async () => ({ ok: false, conflict: true, conflictPreserved: true, cloud: {} });
+    store.setList('pre', [{ _id: 'p1', nome: 'Ana', data: '2026-10-01' }]);
+    cloudRel._conflito = { mod: 'pre', local: { _id: 'p1', nome: 'Ana' }, nuvem: { _id: 'p1', nome: 'Ana B', _relVersion: 2 }, conflictClientId: 'cf-1' };
+    cloudRel._conflitoManter();
+    await new Promise(res => setTimeout(res, 120));
+    out.encerrou = resolvidos.indexOf('cf-1:local') >= 0;
+    cloudRel.resolverConflito = origResolver; persistenciaCloudFirst.salvar = origSalvar; cloudRel._versaoNaNuvem = origVersao;
+    return out;
+  });
+  assert(r.motivoPerm && r.finalizado && r.rotulo, 'a recusa da nuvem vira frase com motivo e paciente');
+  assert(r.encerrou, 'o conflito antigo é encerrado quando a nova divergência já foi preservada — o contador desce');
+  await page.close();
+});
+
+await test('Financeiro: Novo registro abre a janela de edição, com hora de início, fim e carteirinha', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-finnovo');
+    store.setList('financeiro', []);
+    store.setList('pacientes', [{ _id: 'pz', nome: 'Zeca Cadastro', carteirinha: '0001234567', plano: 'Unimed' }]);
+    location.hash = '#financeiro';
+    await new Promise(res => setTimeout(res, 300));
+    const botao = Array.from(document.querySelectorAll('#module-financeiro .action-bar button')).find(b => /Novo registro/.test(b.textContent));
+    out.botaoNovo = !!botao && /financeiro\.novoRegistro/.test(botao.getAttribute('onclick') || botao.dataset.action || '') || !!botao;
+    financeiro.novoRegistro({ paciente: 'Zeca Cadastro' });
+    await new Promise(res => setTimeout(res, 120));
+    const card = document.getElementById('financeiro-form-card');
+    out.mesmaJanela = card && card.style.display !== 'none' && !document.getElementById('form-fin-avulso');
+    const f = document.getElementById('form-financeiro');
+    out.carteirinha = f.querySelector('[name="carteirinha"]').value === '0001234567';
+    f.querySelector('[name="hora_inicio"]').value = '07:10';
+    f.querySelector('[name="hora_fim"]').value = '08:50';
+    financeiro.pintarDuracao();
+    out.duracao = f.querySelector('[name="duracao_rotulo"]').value === '1h40';
+    f.querySelector('[name="convenio"]').value = 'Unimed';
+    financeiro.salvar();
+    const x = store.list('financeiro')[0] || {};
+    out.gravou = x.hora_inicio === '07:10' && x.hora_fim === '08:50' && x.hora_proc === '07:10' && !('duracao_rotulo' in x);
+    out.semFaltaHora = !financeiro.faltaHora(x);
+    out.faltaHora = financeiro.faltaHora({ convenio: 'Unimed', tipo_pagamento: 'Convênio', status: 'pendente' });
+    out.particularNaoCobra = !financeiro.faltaHora({ tipo_pagamento: 'Particular', status: 'pendente' });
+    const fat = financeiro.faturamento.dados(x);
+    out.fatura = fat.anestIni === '07:10' && fat.anestFim === '08:50' && fat.carteirinha === '0001234567';
+    /* da ficha, os horários vêm preenchidos */
+    store.setList('anestesia', [{ _id: 'anh', _finalizado: true, paciente: { nome: 'Hora Ficha', convenio: 'Unimed' },
+      procedimento: { data: '2026-10-20', descricao: 'Colecistectomia', hora_inicio: '09:00', hora_fim: '10:30' } }]);
+    const fr = fin.fromDoc('anestesia', store.getById('anestesia', 'anh'));
+    out.daFicha = !!fr && fr.item.hora_inicio === '09:00' && fr.item.hora_fim === '10:30';
+    store.setList('financeiro', []); store.setList('anestesia', []); store.setList('pacientes', []);
+    return out;
+  });
+  assert(r.botaoNovo && r.mesmaJanela, '"Novo registro" abre a janela de edição, em branco');
+  assert(r.carteirinha, 'a carteirinha do cadastro vem preenchida');
+  assert(r.duracao && r.gravou, 'hora de início e do fim são gravadas, com a duração à vista');
+  assert(r.semFaltaHora && r.faltaHora && r.particularNaoCobra, 'convênio sem as duas horas ganha o aviso "falta hora"');
+  assert(r.fatura, 'o detalhamento para a fatura usa as horas e a carteirinha do lançamento');
+  assert(r.daFicha, 'lançamento gerado pela ficha já nasce com início e fim da anestesia');
+  await page.close();
+});
+
+await test('Financeiro: a tabela rola dentro da caixa — as colunas depois de "Pago" não ficam cortadas', async () => {
+  const page = await novaPagina();
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const r = await page.evaluate(async () => {
+    __smokeBindOrg('org-tabfin');
+    location.hash = '#financeiro';
+    await new Promise(res => setTimeout(res, 300));
+    const box = document.getElementById('fin-rolagem');
+    const cs = box ? getComputedStyle(box) : null;
+    const th = document.querySelector('#financeiro-table thead th');
+    return { caixa: !!cs && /auto|scroll/.test(cs.overflowX) && cs.maxHeight !== 'none',
+      cabecalhoPreso: th && getComputedStyle(th).position === 'sticky' };
+  });
+  assert(r.caixa, 'a rolagem lateral mora numa caixa de altura limitada — a barra fica à vista');
+  assert(r.cabecalhoPreso, 'o cabeçalho fica preso ao rolar');
+  await page.close();
+});
+
+await test('Conciliação Unimed: cria o que falta, completa o que existe, manda o duvidoso para a revisão', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-uni');
+    store.setList('pacientes', [{ _id: 'pa', nome: 'Ana Existente', carteirinha: '111', plano: 'Unimed' }]);
+    store.setList('financeiro', [
+      { _id: 'f-ana', paciente: 'Ana Existente', data_proc: '2026-05-04', senha: 'S1', status: 'pendente', convenio: 'Unimed', valor_previsto: 217.04 },
+      { _id: 'f-bia', paciente: 'Bia Sem Senha', data_proc: '2026-05-05', senha: 'OUTRA', status: 'pendente', convenio: 'Unimed' }
+    ]);
+    store.setList('pre', []); store.setList('anestesia', []);
+    const item = (id, ev, nome, data, cod, extra) => Object.assign({ item_id: id, evento_id: ev, paciente_nome: nome, data_atendimento: data,
+      carteirinha: '', senha: '', codigo: cod, pago: 217.04, processado: 217.04, glosa: 0, descricao: 'Anestesia endoscopia',
+      quantidade: 1, percentual: 1, apartamento: 'Não informado', competencia: '2026-06', pagamento_previsto: '2026-06-10', caso_id: null }, extra || {});
+    const itens = [
+      item('i1', 'E1', 'ANA EXISTENTE', '2026-05-04', '31602231', { senha: 'S1', carteirinha: '111' }),
+      item('i2', 'E2', 'BIA SEM SENHA', '2026-05-05', '31602231', { senha: 'S2' }),
+      item('i3', 'E3', 'CARLOS NOVO', '2026-05-06', '31602231', { senha: 'S3', carteirinha: '0333' }),
+      item('i4', 'E4', 'CARLOS NOVO', '2026-06-06', '10101012', { senha: 'S4', carteirinha: '0333', pago: 122, processado: 122, descricao: 'Consulta' }),
+      item('i5', 'E5', 'DORA GLOSA', '2026-06-07', '10101012', { senha: 'S5', pago: 0, glosa: 122, processado: 122, descricao: 'Consulta' }),
+      item('i6', 'E6', 'ELI X', '2026-06-08', '31602240', { pago: 400, processado: 400 }),
+      item('i7', 'E7', 'ELI X', '2026-06-09', '31602240', { pago: 400, processado: 400 })
+    ];
+    const ev = itens.map(i => ({ evento_id: i.evento_id, data: i.data_atendimento, nomes: [i.paciente_nome], senhas: i.senha ? [i.senha] : [],
+      carteirinhas: i.carteirinha ? [i.carteirinha] : [], itens: [i.item_id], codigos: [i.codigo] }));
+    const d = { itens_unimed: itens, eventos_unimed: ev, casos: [],
+      documentos: [{ registro_id: 'D1', paciente_nome: 'Carlos Novo', data_referencia: '2026-05-06', tipo_registro: 'ficha_anestesia',
+        procedimento: 'Endoscopia', fonte_url: 'https://drive.google.com/file/d/x/view', caso_id: 'C1' }],
+      candidatos_revisar: [{ registro_id: 'D1', evento_id: 'E3', relacao: 'Mesmo serviço', motivo: 'data exige conferência', caso_id: 'C1' }] };
+    out.valida = importUnimed.validar(d) === '' && importUnimed.validar({}) !== '';
+    const a = importUnimed.analisar(d);
+    out.atualiza = a.atualizar.length === 1 && a.atualizar[0].existente._id === 'f-ana';
+    const bia = a.criar.find(x => x._id === 'uni_E2');
+    out.duvidosoRevisa = !!bia && (bia._revisaoUnimed || []).some(x => x.tipo === 'possivel_existente' && x.ids[0] === 'f-bia');
+    const carlos = a.criar.find(x => x._id === 'uni_E3');
+    out.candidato = !!carlos && carlos._revisaoUnimed.some(x => x.tipo === 'candidato' && x.registro_id === 'D1');
+    out.nomeBonito = carlos && carlos.paciente === 'Carlos Novo';
+    out.consultaPre = (a.criar.find(x => x._id === 'uni_E4') || {}).tipo_atendimento === 'consulta_pre';
+    const dora = a.criar.find(x => x._id === 'uni_E5') || {};
+    out.glosado = dora.status === 'glosado' && dora.glosa === 122 && !dora.pago;
+    out.senhaTexto = (a.criar.find(x => x._id === 'uni_E3') || {}).carteirinha === '0333';
+    out.pacientes = a.pacientesNovos.map(p => p.nome).sort().join('|') === 'Bia Sem Senha|Carlos Novo|Dora Glosa|Eli X' &&
+      !a.pacientesNovos.some(p => /Ana/.test(p.nome));
+    out.tabela = a.tabela.some(t => t.codigo === '31602240' && t.valor === 400) && !a.tabela.some(t => t.codigo === '31602231');
+    /* completar o existente: só o que faltava, e o status anda */
+    const comp = importUnimed._completar(store.getById('financeiro', 'f-ana'), a.atualizar[0]);
+    out.completa = comp && comp.valor_recebido === 217.04 && comp.status === 'recebido' && comp.valor_previsto === 217.04 && comp.carteirinha === '111';
+    const divergente = importUnimed._completar(Object.assign({}, store.getById('financeiro', 'f-ana'), { valor_recebido: 100 }), a.atualizar[0]);
+    out.naoTrocaValor = divergente && divergente.valor_recebido === 100 && divergente._revisaoUnimed.some(x => x.tipo === 'valor_diverge');
+    /* revisão: aceitar o candidato liga ao documento; juntar o duvidoso */
+    store.setList('financeiro', store.list('financeiro').concat([carlos, bia]));
+    out.pendentes = importUnimed.pendentesRevisao().length === 2;
+    importUnimed.revisar();
+    const i = importUnimed._pagina.findIndex(p => p.rv.tipo === 'candidato');
+    importUnimed.decidir(i, true);
+    const c2 = store.getById('financeiro', 'uni_E3');
+    out.ligou = c2._vinculoClinico && c2._vinculoClinico.registro === 'D1' && c2._revisaoUnimed[0].decisao === 'aceito';
+    const j = importUnimed._pagina.findIndex(p => p.rv.tipo === 'possivel_existente');
+    importUnimed.decidir(j, true);
+    out.juntou = !store.getById('financeiro', 'uni_E2') && store.getById('financeiro', 'f-bia').valor_recebido === 217.04;
+    out.limpo = importUnimed.pendentesRevisao().length === 0;
+    modal.close();
+    /* o .zip sem biblioteca */
+    const texto = JSON.stringify(d);
+    const comp8 = new Uint8Array(await new Response(new Blob([texto]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer());
+    const nome = new TextEncoder().encode('conciliacao.json');
+    const raw = new TextEncoder().encode(texto);
+    const loc = new Uint8Array(30 + nome.length), dvl = new DataView(loc.buffer);
+    dvl.setUint32(0, 0x04034b50, true); dvl.setUint16(8, 8, true); dvl.setUint32(18, comp8.length, true); dvl.setUint32(22, raw.length, true); dvl.setUint16(26, nome.length, true); loc.set(nome, 30);
+    const cen = new Uint8Array(46 + nome.length), dvc = new DataView(cen.buffer);
+    dvc.setUint32(0, 0x02014b50, true); dvc.setUint16(10, 8, true); dvc.setUint32(20, comp8.length, true); dvc.setUint32(24, raw.length, true); dvc.setUint16(28, nome.length, true); dvc.setUint32(42, 0, true); cen.set(nome, 46);
+    const fimc = new Uint8Array(22), dve = new DataView(fimc.buffer);
+    dve.setUint32(0, 0x06054b50, true); dve.setUint16(8, 1, true); dve.setUint16(10, 1, true); dve.setUint32(12, cen.length, true); dve.setUint32(16, loc.length + comp8.length, true);
+    const zip = new Blob([loc, comp8, cen, fimc]);
+    const arq = new File([zip], 'Dados.zip');
+    const lido = await importUnimed.lerArquivo(arq);
+    out.zip = Array.isArray(lido.itens_unimed) && lido.itens_unimed.length === itens.length;
+    store.setList('financeiro', []); store.setList('pacientes', []);
+    return out;
+  });
+  assert(r.valida, 'reconhece o pacote e recusa outro arquivo');
+  assert(r.atualiza, 'mesmo paciente, data e senha: completa o lançamento que já existe, sem duplicar');
+  assert(r.duvidosoRevisa, 'mesmo paciente e dia sem senha/código igual: vai para a revisão, nada é juntado sozinho');
+  assert(r.candidato && r.nomeBonito, 'a sugestão documento × extrato entra na revisão; o nome vem do documento');
+  assert(r.consultaPre && r.glosado && r.senhaTexto, 'consulta pré, glosa e carteirinha com zero à esquerda entram certos');
+  assert(r.pacientes, 'só entram pacientes que ainda não existem');
+  assert(r.tabela, 'a tabela lista o código que a Unimed pagou diferente do sistema, e não o que já bate');
+  assert(r.completa && r.naoTrocaValor, 'o existente recebe só o que faltava; valor diferente não é trocado — vai para a revisão');
+  assert(r.pendentes && r.ligou && r.juntou && r.limpo, 'Aceitar liga ao documento; "é o mesmo" junta ao existente; a fila esvazia');
+  assert(r.zip, 'o .zip é aberto no aparelho, sem biblioteca externa');
   await page.close();
 });
 

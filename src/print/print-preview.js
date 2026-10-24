@@ -293,6 +293,24 @@ const printPreview = {
       try { markClean(); } catch (e) {}
       try { rascunhos.renderAbas('anestesia'); } catch (e) {}
     }
+    /* Mesma regra para o que o painel de fechamento recarregou só para
+       imprimir (pré + termo, ficha + SRPA, juntos ou separados). */
+    const zerar = printPreview._zerarAoFechar;
+    printPreview._zerarAoFechar = null;
+    if (Array.isArray(zerar) && zerar.length) {
+      zerar.forEach(mod => {
+        try {
+          if (mod === 'pre') pre._zerar();
+          else if (mod === 'termo') termo._zerar();
+          else if (mod === 'anestesia') anestesia.limparSilencioso();
+          else if (mod === 'recuperacao') recuperacao._zerar();
+        } catch (e) {}
+      });
+      try { markClean(); } catch (e) {}
+    }
+    const depois = printPreview._aoFechar;
+    printPreview._aoFechar = null;
+    if (typeof depois === 'function') setTimeout(() => { try { depois(); } catch (e) {} }, 60);
   },
 
   /* ARQUIVO ÚNICO: ficha de anestesia + SRPA (quebra de página entre elas).
@@ -302,7 +320,7 @@ const printPreview = {
      documento e a secretária imprime uma vez. O termo começa em página nova.
      Vale a partir da PRÉ ou do TERMO: o que não estiver no formulário aberto
      é buscado no mesmo paciente/caso, nunca apenas pelo nome. */
-  abrirPreTermo() {
+  abrirPreTermo(opts = {}) {
     try {
       const ppp = document.getElementById('ppp');
       if (!ppp) { toast('Erro: container de preview não encontrado', 'error'); return; }
@@ -326,7 +344,9 @@ const printPreview = {
         (casoPre.caseKey && casoPre.caseKey === casoTermo.caseKey) ||
         (ctxPre.identityKey && ctxPre.identityKey === ctxTermo.identityKey) ||
         (ctxPre.patientRef && ctxPre.patientRef === ctxTermo.patientRef);
-      if (nomeDe(fPre) && nomeDe(fTermo) && !mesmoVinculo) {
+      /* `vinculados`: quem chama já conferiu o vínculo gravado entre os dois
+         registros (o termo nasceu desta pré) — não é junção pelo nome. */
+      if (nomeDe(fPre) && nomeDe(fTermo) && !mesmoVinculo && !opts.vinculados) {
         toast('Não é seguro juntar pré e termo apenas pelo nome. Abra o registro vinculado ou selecione o paciente.', 'warn'); return;
       }
       const contexto = Object.assign({},
@@ -396,7 +416,7 @@ const printPreview = {
     };
     tentar();
   },
-  abrirConjunto() {
+  abrirConjunto(opts = {}) {
     try {
       const fAna = document.getElementById('form-anestesia');
       const fSrpa = document.getElementById('form-recuperacao');
@@ -414,7 +434,7 @@ const printPreview = {
           (casoAna.caseKey && casoSrpa.caseKey && casoAna.caseKey !== casoSrpa.caseKey);
         const mesmoVinculo = (casoAna.caseId && casoAna.caseId === casoSrpa.caseId) ||
           (casoAna.caseKey && casoAna.caseKey === casoSrpa.caseKey);
-        if (conflita || !mesmoVinculo) {
+        if (conflita || (!mesmoVinculo && !opts.vinculados)) {
           toast('Não é seguro juntar ficha e SRPA sem o mesmo atendimento vinculado. Importe a SRPA a partir da ficha correta.', 'warn');
           return;
         }
@@ -1062,6 +1082,8 @@ ${TAG_CLOSE_HTML}`;
     printPreview._nomeArquivoOverride = null;
     printPreview._verCtx = null;
     printPreview._zerarFichaAoFechar = false;
+    printPreview._zerarAoFechar = null;
+    printPreview._aoFechar = null;
     try {
       for (const id of ['ppp', 'ppt-signature-select']) {
         const el = document.getElementById(id); if (el) el.innerHTML = '';
