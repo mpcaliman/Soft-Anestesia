@@ -4894,7 +4894,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-24a</b><br>
+    v7.1 · build <b id="build-tag">2026-10-24b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -12855,6 +12855,9 @@ const importUnimed = {
   },
   mostrarPrevia(d) {
     const r = importUnimed.analisar(d);
+    /* a prévia vale só para o ambiente em que foi feita: o cruzamento usou os
+       lançamentos e pacientes DESTE ambiente */
+    r._org = ((() => { try { return cloudRel._capturarContexto(); } catch (e) { return null; } })() || {}).organizationId || '';
     importUnimed._analise = r;
     const host = document.getElementById('imp-uni-previa');
     const btn = document.getElementById('imp-uni-confirmar');
@@ -12889,6 +12892,12 @@ const importUnimed = {
     if (!r || importUnimed._rodando) return null;
     const btn = document.getElementById('imp-uni-confirmar'); if (btn) btn.disabled = true;
     const prog = m => { const el = document.getElementById('imp-uni-progresso'); if (el) el.textContent = m; };
+    const ctx = (() => { try { return cloudRel._capturarContexto(); } catch (e) { return null; } })();
+    if (!ctx || !r._org || ctx.organizationId !== r._org) {
+      importUnimed._analise = null;
+      prog('⚠️ O ambiente mudou desde a prévia. Nada foi gravado — escolha o arquivo de novo neste ambiente.');
+      return { ok: false, erro: 'ambiente_trocado' };
+    }
     importUnimed._rodando = true;
     try {
       /* tabela primeiro: é configuração, e não depende da nuvem responder */
@@ -15935,6 +15944,16 @@ const lixeira = {
   }
 };
 try { contextoAba.aoMudar(() => lixeira._garantirContexto()); } catch (e) {}
+/* Trocou de ambiente nesta aba: prévia de importação feita no anterior não
+   pode ser confirmada aqui, e a cor do sistema passa a ser a do novo. */
+try {
+  contextoAba.aoMudar(() => {
+    try { importUnimed._analise = null; importUnimed._pagina = []; } catch (e) {}
+    try { importFin._analise = null; } catch (e) {}
+    try { importAcervo._analise = null; } catch (e) {}
+    try { clinicaIdentidade.aplicarCor(); } catch (e) {}
+  });
+} catch (e) {}
 
 /* ============================================================================
    UI — interface, navegação, modais

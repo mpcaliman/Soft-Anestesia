@@ -24275,6 +24275,40 @@ await test('Conciliação Unimed: cria o que falta, completa o que existe, manda
   await page.close();
 });
 
+await test('Ambientes: trocar de ambiente descarta a prévia da importação e troca a cor do sistema', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-A', 'u-amb');
+    const raiz = document.documentElement;
+    clinicaIdentidade.salvar({ nome: 'A', cor: '#9b2c4c' });
+    clinicaIdentidade.aplicarCor();
+    out.corA = raiz.style.getPropertyValue('--primary').trim() === '#9b2c4c';
+    const d = { itens_unimed: [], eventos_unimed: [], casos: [], documentos: [], candidatos_revisar: [] };
+    const host = document.createElement('div'); host.id = 'imp-uni-previa'; document.body.appendChild(host);
+    importUnimed.mostrarPrevia(d);
+    out.prevValeParaA = importUnimed._analise && importUnimed._analise._org === 'org-A';
+    /* prévia feita em A, confirmação tentada em B: recusa sem gravar */
+    const guard = importUnimed._analise;
+    __smokeBindOrg('org-B', 'u-amb');
+    await new Promise(res => setTimeout(res, 50));
+    out.descartou = importUnimed._analise === null;
+    out.corB = raiz.style.getPropertyValue('--primary') === '';
+    importUnimed._analise = guard;
+    let enviou = false; const orig = importUnimed.enviar; importUnimed.enviar = async () => { enviou = true; return { ok: true }; };
+    const res = await importUnimed.confirmar();
+    importUnimed.enviar = orig;
+    out.recusou = !enviou && res && res.erro === 'ambiente_trocado' && importUnimed._analise === null;
+    host.remove();
+    return out;
+  });
+  assert(r.corA, 'a cor do ambiente A vale em A');
+  assert(r.prevValeParaA, 'a prévia guarda o ambiente em que foi feita');
+  assert(r.descartou && r.corB, 'trocar de ambiente descarta a prévia e tira a cor de A da tela');
+  assert(r.recusou, 'prévia de A nunca é gravada em B');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
