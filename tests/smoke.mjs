@@ -11306,9 +11306,11 @@ await test('Financeiro: importa a conciliação com as regras combinadas, em lot
       fin[0].linhas.find(x => x.legacy_id === 'imp_PLAN-2024-4').patient_id === 'p-uuid-1' &&
       posts.filter(p => p.tabela === 'patients').reduce((n, p) => n + p.linhas.length, 0) === 4;
     const ids = store.list('financeiro').map(x => x._id);
-    out.soJanelaNoAparelho = ids.includes('imp_PLAN-2026-10') && ids.includes('imp_PLAN-2026-11') &&
-      !ids.includes('imp_PLAN-2024-4') && !ids.includes('imp_UNI-202401-00001-001');
-    out.pacientesLocais = store.list('pacientes').some(p => p.nome === 'Aline Almeida' && p.carteirinha === '0803315001273011');
+    /* nada fica no aparelho sem o recibo da nuvem — a cópia sem recibo era
+       tomada por "nunca enviada" e voltava como conflito; o que subiu chega
+       pela leitura normal da nuvem */
+    out.soJanelaNoAparelho = !ids.some(id => /^imp_/.test(id));
+    out.pacientesLocais = !store.list('pacientes').some(p => p.nome === 'Aline Almeida' && !p._relUpdatedAt);
     /* o que já existia é completado, não duplicado */
     store.aguardarNuvem = async () => ({ ok: true });
     await importFin.enriquecer(a.jaExistem);
@@ -11394,7 +11396,9 @@ await test('Acervo: importa atendimentos antigos sem duplicar, sem cobrança e c
     const t = n => posts.filter(p => p.tabela === n).reduce((k, p) => k + p.linhas.length, 0);
     out.subiu = res.ok && t('preanesthetic_assessments') === 1 && t('anesthesia_records') === 1 && t('finance_entries') === 0 &&
       posts.find(p => p.tabela === 'preanesthetic_assessments').linhas[0].status === 'finalized';
-    out.existenteIntacto = store.getById('pre', 'pre-sis').cirurgia === 'Original' && store.list('pre').length === 2;
+    out.existenteIntacto = store.getById('pre', 'pre-sis').cirurgia === 'Original' && store.list('pre').length === 1;
+    /* o importado chega pela leitura da nuvem, já com o recibo */
+    a.novos.forEach(x => { const l = store.list(x.mod); l.push(Object.assign({}, x.it, { _relUpdatedAt: new Date().toISOString(), _relVersion: 1 })); store.setList(x.mod, l); });
     out.semCobranca = !financeiro.semLancamento().some(x => /^acv_/.test(x.id)) && store.list('financeiro').length === 0;
     out.semPendencia = pre.ehPendente(store.getById('pre', pa.it._id)) === false;
     /* de novo: nada duplica */
@@ -17978,10 +17982,10 @@ await test('Tabela de valores própria: entra no seletor, e incompleta é recusa
     const out = {};
     orcamento.salvarCfg({ tabelasAnest: {} });
 
-    /* o seletor de porte cirúrgico hoje não tem a de 2015 — é a queixa */
-    const cirAntes = Object.keys(orcamento.tabelasAnest())
-      .filter(k => orcamento.tabelasAnest()[k].tipo === 'cir');
-    out.naoTinha2015 = !cirAntes.some(k => /2015/.test(orcamento.tabelasAnest()[k].nome));
+    /* a 2015 de porte cirúrgico, que faltava, hoje vem embutida — com os
+       valores do rol oficial da Unimed Costa do Descobrimento */
+    const embutidas = orcamento.tabelasAnest();
+    out.naoTinha2015 = !!embutidas.cir2015 && embutidas.cir2015.tipo === 'cir' && embutidas.cir2015.valores['2B'] === 83.97;
 
     /* leitura do texto colado: tab, ponto-e-vírgula, espaço, vírgula decimal */
     const lido = tabelasValores._ler('1A\t19,84\n1B;39.68\n2A 79,38\n3A\tR$ 202,37\nlixo\n4A\t');
@@ -18029,7 +18033,7 @@ await test('Tabela de valores própria: entra no seletor, e incompleta é recusa
     try { modal.close(); } catch (e) {}
     return out;
   });
-  assert(r.naoTinha2015, 'o sistema realmente não traz a 2015 de porte cirúrgico — é o que falta');
+  assert(r.naoTinha2015, 'a 2015 de porte cirúrgico agora vem embutida, com os valores oficiais');
   assert(r.leuFormatos, 'aceita colar de planilha: tab, ponto-e-vírgula, espaço, vírgula decimal e R$');
   assert(r.ignorouLixo, 'linha sem valor ou sem sentido é ignorada, não vira zero');
   assert(r.recusouIncompleta && r.naoSalvouIncompleta, 'tabela com porte faltando é RECUSADA — porte sem valor sairia zerado na guia');
