@@ -24309,6 +24309,48 @@ await test('Ambientes: trocar de ambiente descarta a prévia da importação e t
   await page.close();
 });
 
+await test('Conflito: "Manter o meu" desfaz o nó com a gravação antiga presa em conflito na fila', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    await __smokePrepareQueue();
+    cloudRel.disponivel = () => true;
+    sincronia.agora = () => {};
+    rascunhos._agendarEnvio = () => {};
+    cloudRel.registrarAnexos = () => {};
+    cloudRel._resolverConflitoRegistro = () => {};
+    const out = {};
+    cloudRel.enviarRegistro = async () => ({ ok: false, motivo: 'rede' });
+    const rec = store.save('pre', { nome: 'Jovelina Teste', data: utils.hojeISO() });
+    await store.aguardarNuvem(rec);
+    cloudRel.enviarRegistro = async () => ({ ok: false, conflict: true, motivo: 'versao_divergente',
+      cloud: { _id: rec._id, nome: 'Versão remota', _relVersion: 2 } });
+    await persistenciaCloudFirst.drenar();
+    const ops = () => filaCifrada.listar().then(l => l.filter(x => x.entityId === rec._id));
+    out.presa = (await ops()).length === 1 && (await ops())[0].queue.state === 'conflict';
+    /* o servidor ainda tem o conflito pendente: a antiga não sai sozinha */
+    const fetchOriginal = window.fetch;
+    window.fetch = async (url, o) => String(url).includes('/rest/v1/sync_conflicts') && (!o || !o.method || o.method === 'GET')
+      ? { ok: true, status: 200, json: async () => [{ status: 'pending' }] } : fetchOriginal(url, o);
+    try {
+      cloudRel.enviarRegistro = async (mod, item, o) => __smokeCloudReceipt(mod, item, o);
+      const item = Object.assign({}, store.getById('pre', rec._id), { obs: 'minha versão' });
+      persistenciaCloudFirst._consultasConflito.clear();
+      const comum = await persistenciaCloudFirst.salvar('pre', item);
+      out.semDecisaoContinuaBloqueada = comum && comum.blocked && comum.motivo === 'operacao_anterior_pendente';
+      persistenciaCloudFirst._consultasConflito.clear();
+      const decisao = await persistenciaCloudFirst.salvar('pre', item, { decisaoDeConflito: true });
+      out.decisaoPassa = !!(decisao && decisao.ok);
+      out.filaLimpa = (await ops()).length === 0;
+    } finally { window.fetch = fetchOriginal; }
+    return out;
+  });
+  assert(r.presa, 'o cenário exige a gravação antiga parada em "conflito" na fila');
+  assert(r.semDecisaoContinuaBloqueada, 'gravação comum continua esperando a antiga — a ordem da fila não é furada à toa');
+  assert(r.decisaoPassa, '"Manter o meu" passa na frente: é a decisão do conflito que a antiga esperava');
+  assert(r.filaLimpa, 'e a antiga sai da fila só depois do recibo da nova');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

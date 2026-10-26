@@ -4894,7 +4894,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-24b</b><br>
+    v7.1 · build <b id="build-tag">2026-10-26a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -46086,7 +46086,7 @@ const pacientes = {
       });
       store.setList('pacientes', lst);
     }
-    persistenciaCloudFirst.salvar('pacientes', cf.local).then(r => {
+    persistenciaCloudFirst.salvar('pacientes', cf.local, { decisaoDeConflito: true }).then(r => {
       if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return;
       if (r && r.ok) {
         if (cf.conflictClientId) cloudRel.resolverConflito(cf.conflictClientId, 'local', { version: r.row && r.row.version });
@@ -52282,7 +52282,7 @@ const agenda = {
     const lst = store.list('agenda');
     const ix = lst.findIndex(x => x._id === local._id);
     if (ix >= 0) { Object.assign(lst[ix], local); store.setList('agenda', lst); }
-    persistenciaCloudFirst.salvar('agenda', local).then(r => {
+    persistenciaCloudFirst.salvar('agenda', local, { decisaoDeConflito: true }).then(r => {
       if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return;
       if (r && r.ok) {
         if (cid) cloudRel.resolverConflito(cid, 'local', { version: r.row && r.row.version });

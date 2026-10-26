@@ -1883,7 +1883,7 @@ const cloudRel = {
       _relUpdatedBy: nuvem._relUpdatedBy || '', _relOrg: nuvem._relOrg || base._relOrg
     });
     if (ix >= 0) { lista[ix] = envio; store.setList(mod, lista); }
-    const r = await persistenciaCloudFirst.salvar(mod, envio);
+    const r = await persistenciaCloudFirst.salvar(mod, envio, { decisaoDeConflito: true });
     if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return false;
     if (r && (r.ok || r.remoteConfirmed || r.queued)) {
       return cloudRel.resolverConflito(e.clientId, 'local',
@@ -3058,7 +3058,7 @@ const cloudRel = {
       });
       store.setList(cf.mod, lst);
     }
-    return persistenciaCloudFirst.salvar(cf.mod, cf.local);
+    return persistenciaCloudFirst.salvar(cf.mod, cf.local, { decisaoDeConflito: true });
     }).then(r => {
       if (!r) return;
       if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return;
