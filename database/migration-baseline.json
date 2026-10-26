@@ -14,7 +14,8 @@
     "0034 exige proveniência explícita por dono/coorte/clínica e vínculos manuais de paciente/caso; preserva fonte e recibos históricos, rejeita importações anteriores sem retrofit revisado e depende de replay real descartável antes da aplicação.",
     "2026-10-12: G3 registra homologação técnica executada no projeto yqqrfgbvoexricjdxpis, com evidência sanitizada e hashes em docs/engineering/G3-STAGING-VERIFIED-2026-10-12.json. CI local/efêmera e testes hospedados são separados; diferenças ACL, defaults do fornecedor e portões de produção/G4/G5 permanecem explícitos. Nenhuma fonte SQL ou produção foi alterada por esse registro.",
     "0035 acrescenta _labSeries e _exameSeries à allowlist clínica da 0031, para que exames que chegam DEPOIS da finalização possam ser retificados nos campos. Redefine uma função; não toca em dado, tabela ou permissão. Fonte revisável; aplicação remota segue o mesmo portão das demais.",
-    "0036 faz o gatilho de auditoria guardar, no UPDATE, somente os campos que mudaram — descendo DENTRO do documento, porque o prontuário inteiro mora na coluna `dados` e comparar só no nível da linha guardaria o documento duas vezes. insert, finalize, delete e restore seguem guardando o estado inteiro, que é o que vale como prova. Gravação que não muda campo nenhum — ou em que só mexeu o maquinário, `updated_at` e `version` — deixa de virar linha. Medido num PostgreSQL real: um auto-save que altera uma observação caiu de 2.086 para 69 bytes. Redefine funções; não toca em dado, tabela nem permissão, e nada do que já está gravado muda."
+    "0036 faz o gatilho de auditoria guardar, no UPDATE, somente os campos que mudaram — descendo DENTRO do documento, porque o prontuário inteiro mora na coluna `dados` e comparar só no nível da linha guardaria o documento duas vezes. insert, finalize, delete e restore seguem guardando o estado inteiro, que é o que vale como prova. Gravação que não muda campo nenhum — ou em que só mexeu o maquinário, `updated_at` e `version` — deixa de virar linha. Medido num PostgreSQL real: um auto-save que altera uma observação caiu de 2.086 para 69 bytes. Redefine funções; não toca em dado, tabela nem permissão, e nada do que já está gravado muda.",
+    "0037 cria prog_uso_usuarios(p_dias): só o programador chama (app.eh_programador()) e recebe, por usuário, último login (auth.users), dias com uso, registros por módulo e o último registro — tirados de audit_logs. Devolve só números e datas, sem dado de paciente nem conteúdo. Cria uma função; não toca em dado, tabela nem permissão de tabela."
   ],
   "files": {
     "database/apply_all.sql": "c60001d4b2fe2514620060c9b5219fa3be5646e848c3ffe5993d6a56804ba811",
@@ -58,7 +59,8 @@
     "database/migrations/0033_reconciled_permissions.sql": "9d5604084d832b6e958c83286d7bc282d183b5e57eb111d61bfb263427bba9e5",
     "database/migrations/0034_legacy_provenance_scope_and_import_receipts.sql": "a56cc04e73a1a4892100d20eb04d735958e9fb13ece5d1349dae09fca15553d8",
     "database/migrations/0035_retificacao_exames_em_serie.sql": "418e468f60fc3fbf70576c81e3d7f7863cdc2d3c33af587e243e00d6d6b06258",
-    "database/migrations/0036_auditoria_guarda_o_que_mudou.sql": "471fc08875ec31128f969f3c82922810566db63a4cdd617e6660f3133f72d23c"
+    "database/migrations/0036_auditoria_guarda_o_que_mudou.sql": "471fc08875ec31128f969f3c82922810566db63a4cdd617e6660f3133f72d23c",
+    "database/migrations/0037_programador_uso_usuarios.sql": "2073fc8788af8f59de03ab189230db40d62a931f54213b4daf24eef6a64546f2"
   },
   "implementationAuthorization": "2026-10-09: Implemente modificações para obedecer ao planejamento",
   "stagingEvidence": {

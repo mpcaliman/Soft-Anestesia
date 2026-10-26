@@ -104,7 +104,7 @@ export async function loadMigrationPlan(repoDir = rootDir) {
   assertMigrationBaselineState(manifest, { purpose: 'local-sql' });
   const files = (await readdir(join(repoDir, 'database/migrations')))
     .filter(name => /^\d{4}_.+\.sql$/.test(name)).sort();
-  assert.equal(files.length, 36, 'executor exige exatamente a baseline 0001–0036');
+  assert.equal(files.length, 37, 'executor exige exatamente a baseline 0001–0037');
   files.forEach((file, i) => assert.equal(file.slice(0, 4), String(i + 1).padStart(4, '0')));
   const paths = ['supabase/migrations/0001_assinaturas.sql',
     ...files.slice(0, 33).map(file => `database/migrations/${file}`),

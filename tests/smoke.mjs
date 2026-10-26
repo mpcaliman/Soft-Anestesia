@@ -24351,6 +24351,148 @@ await test('Conflito: "Manter o meu" desfaz o nó com a gravação antiga presa 
   await page.close();
 });
 
+await test('Unimed: tabela 2015 + 7% só para os planos Unimed, e a carteirinha 0286 identifica a Costa do Descobrimento', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-unimed');
+    localStorage.removeItem(STORAGE.orcamento_cfg);
+    out.cir3C = ORC_PORTE_CIR_UNIMED['3C'] === 212.64 && ORC_PORTE_CIR_UNIMED['4C'] === 312.98 && ORC_PORTE_CIR_2015['2B'] === 83.97;
+    const t = precos._tabela('medico', 'Unimed');
+    out.unimedUsaCir = t && t.chave === 'unimed_cir';
+    out.cdUsaCir = precos._tabela('medico', 'Unimed Costa do Descobrimento').chave === 'unimed_cir';
+    out.anest = precos._tabela('anestesia', 'Unimed').chave === 'unimed';
+    /* outro plano não pega a tabela Unimed por ser Unimed */
+    orcamento.salvarCfg({ tabelaAtiva: 'cbhpm2015' });
+    out.outroPlano = precos._tabela('anestesia', 'Bradesco Saúde').chave === 'cbhpm2015';
+    out.unimedIgnoraGeral = precos._tabela('anestesia', 'Unimed').chave === 'unimed';
+    out.consulta = precos.base('10101012', 'medico', 'Unimed').valor === 122;
+    out.id0286 = precos.identificarPlano('Unimed', '0286.1234.567890') === 'Unimed Costa do Descobrimento';
+    out.idOutra = precos.identificarPlano('Unimed', '0035000123') === 'Unimed';
+    out.naoMexeOutro = precos.identificarPlano('Bradesco', '0286999') === 'Bradesco';
+    /* valor por código: aparece na janela e sai com "Remover" */
+    precos.definirPorCodigoDoConvenio('Unimed', '30719100', 312.98);
+    precos.abrirTabelasPorConvenio();
+    out.lista = /30719100/.test(document.getElementById('modal-body').textContent);
+    precos.removerPorCodigoDoConvenio('unimed', '30719100');
+    out.removido = precos.porCodigoDoConvenio('Unimed')['30719100'] === undefined;
+    precos.removerPorCodigoDoConvenio('unimed', '10101012');
+    out.padraoRemovido = precos.base('10101012', 'medico', 'Unimed').valor !== 122;
+    modal.close();
+    localStorage.removeItem(STORAGE.orcamento_cfg);
+    return out;
+  });
+  assert(r.cir3C, 'portes cirúrgicos 2015 da tabela oficial, e Unimed = 2015 × 1,07');
+  assert(r.unimedUsaCir && r.cdUsaCir && r.anest, 'Unimed e Unimed Costa do Descobrimento usam a tabela Unimed');
+  assert(r.outroPlano && r.unimedIgnoraGeral, 'os demais planos seguem a tabela geral; a Unimed não');
+  assert(r.consulta, 'consulta pré Unimed a 122,00');
+  assert(r.id0286 && r.idOutra && r.naoMexeOutro, 'carteirinha 0286 identifica a Unimed Costa do Descobrimento, só em plano Unimed');
+  assert(r.lista && r.removido && r.padraoRemovido, 'valor próprio por código aparece na janela e pode ser removido');
+  await page.close();
+});
+
+await test('Importação: nada fica no aparelho sem recibo, e a limpeza tira as cópias e resolve os conflitos pela nuvem', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-limpa', 'u-limpa');
+    cloudRel.disponivel = () => true;
+    cloud._garantirToken = async () => true;
+    store.setList('financeiro', [
+      { _id: 'uni_E1', paciente: 'Ana', data_proc: '2024-01-01', valor_recebido: 100, _createdAt: 'x', _updatedAt: 'x' },
+      { _id: 'uni_E2', paciente: 'Bia', data_proc: '2024-01-02', _createdAt: 'x', _updatedAt: 'x' },
+      { _id: 'f-meu', paciente: 'Caio', data_proc: '2024-01-03' },
+      { _id: 'uni_E3', paciente: 'Dani', _relUpdatedAt: '2026-10-26T00:00:00Z', _relVersion: 1 }
+    ]);
+    store.setList('pacientes', [{ _id: 'pac_uni_ana', nome: 'Ana' }, { _id: 'p-meu', nome: 'Caio' }]);
+    const chaveAna = (() => { const idn = window.SoftEncounterIdentity; return idn.legacyPatientKey(idn.fromRecord({ nome: 'Ana' })); })();
+    const origIds = migracaoFase4._idsPorLegacy;
+    migracaoFase4._idsPorLegacy = async (tabela, org, keys) => keys.filter(k => k === 'uni_E1' || k === chaveAna).map(k => ({ id: 'x', legacy_id: k }));
+    const resolvidos = [];
+    const origRes = cloudRel.resolverConflito, origEnv = cloudRel.enviarDecisoes;
+    cloudRel.resolverConflito = (id, lado) => { resolvidos.push(id + ':' + lado); return true; };
+    cloudRel.enviarDecisoes = async () => 0;
+    const origLer = cloudRel._conflitosLer;
+    cloudRel._conflitosLer = () => [
+      { clientId: 'c1', status: 'pending', organizationId: 'org-limpa', mod: 'financeiro', legacyId: 'uni_E1',
+        proposed: { _id: 'uni_E1', paciente: 'Ana', _createdAt: 'x', _updatedAt: 'x' }, canonical: { _id: 'uni_E1', paciente: 'Ana', _relVersion: 2 } },
+      { clientId: 'c2', status: 'pending', organizationId: 'org-limpa', mod: 'financeiro', legacyId: 'f-meu',
+        proposed: { _id: 'f-meu', paciente: 'Caio' }, canonical: { _id: 'f-meu', paciente: 'Caio' } },
+      { clientId: 'c3', status: 'pending', organizationId: 'org-limpa', mod: 'financeiro', legacyId: 'uni_E9',
+        proposed: { _id: 'uni_E9', paciente: 'Editado', _createdAt: 'a', _updatedAt: 'b' }, canonical: { _id: 'uni_E9', paciente: 'Outro' } }
+    ];
+    try {
+      precos.definirPorCodigoDoConvenio('Unimed', '30719100', 312.98);
+    precos.definirPorCodigoDoConvenio('Unimed', '30721199', 250);
+    precos.definirPorCodigoDoConvenio('Unimed', '31103472', 217.04);
+    const res = await limpezaImportacao.rodar({ forcar: true });
+    const pc = precos.porCodigoDoConvenio('Unimed');
+    out.codigos = pc['30719100'] === undefined && pc['30721199'] === 250 && pc['31103472'] === 217.04;
+    localStorage.removeItem(STORAGE.orcamento_cfg);
+      const ids = store.list('financeiro').map(x => x._id).sort().join(',');
+      out.copiaSai = ids === 'f-meu,uni_E2,uni_E3';
+      out.pacienteSai = store.list('pacientes').map(p => p._id).join(',') === 'p-meu';
+      out.conflitos = resolvidos.join(',') === 'c1:remote' && res.conflitos === 1;
+    } finally {
+      migracaoFase4._idsPorLegacy = origIds; cloudRel.resolverConflito = origRes; cloudRel.enviarDecisoes = origEnv; cloudRel._conflitosLer = origLer;
+    }
+    /* o importador não deixa cópia local */
+    const origUp = migracaoFase4._upsert;
+    migracaoFase4._upsert = async () => [];
+    migracaoFase4._idsPorLegacy = async () => [];
+    store.setList('financeiro', []); store.setList('pacientes', []);
+    try {
+      const res = await importUnimed.enviar({ pacientesNovos: [{ _id: 'pac_uni_z', nome: 'Zeca' }],
+        criar: [{ _id: 'uni_EZ', paciente: 'Zeca', data_proc: '2026-05-01' }], atualizar: [] }, () => {});
+      out.semCopia = res.ok && store.list('financeiro').length === 0 && store.list('pacientes').length === 0;
+    } finally { migracaoFase4._upsert = origUp; migracaoFase4._idsPorLegacy = origIds; }
+    return out;
+  });
+  assert(r.copiaSai, 'cópia importada sem recibo, que existe na nuvem, sai; a sem prova e a com recibo ficam; o lançamento dele nem é tocado');
+  assert(r.pacienteSai, 'paciente importado repetido sai do aparelho; o cadastro dele fica');
+  assert(r.conflitos, 'conflito de importação igual à nuvem é resolvido por ela; o dele e o editado depois ficam para decidir');
+  assert(r.semCopia, 'o importador não escreve cópia local sem recibo');
+  assert(r.codigos, 'os valores por código gravados por engano saem; o que ele mudou e o duplo J ficam');
+  await page.close();
+});
+
+await test('Paciente com CPF já cadastrado na nuvem: o registro usa o cadastro existente em vez de travar a fila', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    __smokeBindOrg('org-cpf', 'u-cpf');
+    cloud._garantirToken = async () => true;
+    cloud.config = () => ({ url: 'https://fake.supabase.co', anonKey: 'k' });
+    cloud._headers = () => ({});
+    cloudRel._cachePac = {};
+    const origLer = cloudRel._lerAtualTab, origIns = cloudRel._inserirSemSobrescrever, origFetch = window.fetch;
+    cloudRel._lerAtualTab = async () => null;
+    cloudRel._inserirSemSobrescrever = async () => ({ ok: false, motivo: 'http 409 — {"code":"23505","message":"patient_identity_already_registered"}' });
+    let consulta = '';
+    window.fetch = async (u) => { consulta = String(u); return { ok: true, json: async () => [{ id: 'pid-existente' }] }; };
+    try {
+      const pid = await cloudRel._garantirPaciente('org-cpf', { nome: 'Jovelina Teste', cpf: '123.456.789-09' });
+      return { usou: pid === 'pid-existente', porCpf: /patients\?/.test(consulta) && /12345678909/.test(decodeURIComponent(consulta)) };
+    } finally { cloudRel._lerAtualTab = origLer; cloudRel._inserirSemSobrescrever = origIns; window.fetch = origFetch; }
+  });
+  assert(r.usou && r.porCpf, 'achou o cadastro pelo CPF e seguiu');
+  await page.close();
+});
+
+await test('Programador: cada pessoa mostra último acesso, dias com uso e o que gravou', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    programador._uso = new Map([['u1', { user_id: 'u1', ultimo_login: new Date().toISOString(), dias_ativos: 12, registros: 340,
+      por_modulo: { anesthesia_records: 200, finance_entries: 140 }, ultimo_registro: new Date().toISOString(), ultimo_modulo: 'anesthesia_records' }]]);
+    const h = programador._usoHTML('u1');
+    programador._uso = { erro: 'Could not find the function public.prog_uso_usuarios' };
+    const semMig = programador._usoHTML('u1');
+    return { mostra: /12 dia/.test(h) && /340/.test(h) && /200 fichas/.test(h) && /hoje/.test(h), semMig: /falta a migração 0037/.test(semMig) };
+  });
+  assert(r.mostra, 'uso aparece por pessoa');
+  assert(r.semMig, 'sem a migração, a coluna diz o que falta e o resto da aba segue');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

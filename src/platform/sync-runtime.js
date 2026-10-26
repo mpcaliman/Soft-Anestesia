@@ -565,6 +565,12 @@ const sincronia = {
     sincronia._ultimo = Date.now();
     let deuCerto = false;
     try {
+      /* 0) cópias que importações deixaram aqui sem recibo saem ANTES do
+            empurrão — senão ele as sobe de novo e cada uma vira conflito */
+      try {
+        if (typeof limpezaImportacao !== 'undefined') await limpezaImportacao.rodar();
+      } catch (e) {}
+      if (!contextoValido()) return;
       /* 1) o que foi ENVIADO aqui e ainda não chegou na clínica tem prioridade:
             é trabalho que alguém já deu por concluído e que o médico não vê.
             Vai antes da fila geral, que é limitada por lote. */
