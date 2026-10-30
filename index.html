@@ -4894,7 +4894,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-24b</b><br>
+    v7.1 · build <b id="build-tag">2026-10-30a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -12203,12 +12203,10 @@ const importFin = {
         prog('Pacientes: ' + feitosPac + ' de ' + pacs.length + '…');
         await importFin._pausa();
       }
-      if (pacs.length) {
-        const lst = store.list('pacientes') || [];
-        const ja = new Set(lst.map(p => utils.semAcento(p.nome)));
-        pacs.forEach(p => { if (!ja.has(utils.semAcento(p.nome))) lst.push(Object.assign({}, p, { _relOrg: org })); });
-        store.setList('pacientes', lst);
-      }
+      /* A cópia local NÃO é escrita aqui: sem o recibo da nuvem (versão e data),
+         o aparelho a tomaria por "nunca enviada" e tentaria subi-la de novo —
+         foi assim que uma importação virou milhares de conflitos. O que subiu
+         volta pela leitura normal da nuvem, já com o recibo. */
       /* 2) os ids dos pacientes, para ligar cada lançamento */
       const chaves = Array.from(new Set(lancs.map(it => chavePac(it.paciente)).filter(Boolean)));
       const idPorChave = new Map();
@@ -12229,14 +12227,12 @@ const importFin = {
         prog('Lançamentos: ' + feitos + ' de ' + lancs.length + '…');
         await importFin._pausa();
       }
-      /* 4) o que é de 2026 em diante aparece já, sem esperar a próxima leitura */
-      if (locais.length) {
-        const lst = store.list('financeiro') || [];
-        const ja = new Set(lst.map(x => x && x._id));
-        locais.forEach(it => { if (!ja.has(it._id)) { const c = Object.assign({}, it, { _relOrg: org }); delete c._carteirinha; lst.push(c); } });
-        store.setList('financeiro', lst);
-      }
-      try { cloudRel._puxados.financeiro = false; } catch (e) {}
+      /* A cópia local NÃO é escrita aqui: sem o recibo da nuvem (versão e data),
+         o aparelho a tomaria por "nunca enviada" e tentaria subi-la de novo —
+         foi assim que uma importação virou milhares de conflitos. O que subiu
+         volta pela leitura normal da nuvem, já com o recibo. */
+      void locais;
+      try { cloudRel._puxados.financeiro = false; cloudRel._puxados.pacientes = false; } catch (e) {}
       return { ok: true, lancamentos: feitos, pacientes: feitosPac };
     } catch (e) {
       return { ok: false, erro: String(e && e.message || e), lancamentos: feitos, pacientes: feitosPac };
@@ -12405,12 +12401,10 @@ const importAcervo = {
         feitosPac += lote.length; prog('Pacientes: ' + feitosPac + ' de ' + pacs.length + '…');
         await importFin._pausa();
       }
-      if (pacs.length) {
-        const lst = store.list('pacientes') || [];
-        const ja = new Set(lst.map(p => utils.semAcento(p.nome)));
-        pacs.forEach(p => { if (!ja.has(utils.semAcento(p.nome))) lst.push(Object.assign({}, p, { _relOrg: org })); });
-        store.setList('pacientes', lst);
-      }
+      /* A cópia local NÃO é escrita aqui: sem o recibo da nuvem (versão e data),
+         o aparelho a tomaria por "nunca enviada" e tentaria subi-la de novo —
+         foi assim que uma importação virou milhares de conflitos. O que subiu
+         volta pela leitura normal da nuvem, já com o recibo. */
       const idPorChave = new Map();
       const chaves = Array.from(new Set(novos.map(x => chavePac(x.nome)).filter(Boolean)));
       for (const lote of migracaoFase4._chunk(chaves, 100)) {
@@ -12426,14 +12420,11 @@ const importAcervo = {
             encounter_id: null, status: 'finalized', finalized_at: x.it._finalizadoEm, data: x.it
           })), false);
           feitos += lote.length;
-          const lst = store.list(mod) || [];
-          const ja = new Set(lst.map(r => r && r._id));
-          lote.forEach(x => { if (!ja.has(x.it._id)) lst.push(Object.assign({}, x.it, { _relOrg: org })); });
-          store.setList(mod, lst);
           prog('Atendimentos: ' + feitos + ' de ' + novos.length + '…');
           await importFin._pausa();
         }
       }
+      try { cloudRel._puxados.pre = false; cloudRel._puxados.anestesia = false; cloudRel._puxados.pacientes = false; } catch (e) {}
       return { ok: true, registros: feitos, pacientes: feitosPac };
     } catch (e) {
       return { ok: false, erro: String(e && e.message || e), registros: feitos, pacientes: feitosPac };
@@ -12740,7 +12731,7 @@ const importUnimed = {
         _origemTipo: 'importacao', _importUnimed: extrato,
         paciente: nomeExibir, data_proc: data,
         tipo_atendimento: consulta ? 'consulta_pre' : 'procedimento',
-        tipo_pagamento: 'Convênio', convenio: (pacSis && pacSis.plano) || 'Unimed',
+        tipo_pagamento: 'Convênio', convenio: precos.identificarPlano((pacSis && pacSis.plano) || 'Unimed', ev.carteirinhas[0] || ''),
         procedimento: (codigos[0] && codigos[0].codigo ? codigos[0].codigo + ' - ' : '') + descricoes.join(' + '),
         cbhpm_codigo: (codigos[0] || {}).codigo || '',
         codigos, senha: ev.senhas[0] || '', carteirinha: ev.carteirinhas[0] || '',
@@ -12775,7 +12766,7 @@ const importUnimed = {
       } else if (carts.length > 1) {
         r.avisosPacientes.push({ nome: it.paciente, motivo: 'tem ' + carts.length + ' carteirinhas no extrato — ficou a mais recente; as outras vão no histórico do cadastro' });
       }
-      r.pacientesNovos.push({ _id: 'pac_uni_' + n.replace(/[^a-z0-9]+/g, '_'), nome: it.paciente, plano: 'Unimed',
+      r.pacientesNovos.push({ _id: 'pac_uni_' + n.replace(/[^a-z0-9]+/g, '_'), nome: it.paciente, plano: precos.identificarPlano('Unimed', cart),
         carteirinha: cart, _carteirinhasAnteriores: carts.slice(1), _origemTipo: 'importacao',
         _importUnimed: { lote_importacao: U.LOTE_TAG }, _createdAt: new Date().toISOString() });
     });
@@ -12936,12 +12927,10 @@ const importUnimed = {
         prog('Pacientes: ' + pacientes + ' de ' + r.pacientesNovos.length + '…');
         await U._pausa(U.PAUSA_MS);
       }
-      if (r.pacientesNovos.length) {
-        const lst = store.list('pacientes') || [];
-        const ja = new Set(lst.map(p => U._norm(p.nome)));
-        r.pacientesNovos.forEach(p => { if (!ja.has(U._norm(p.nome))) lst.push(Object.assign({}, p, { _relOrg: org })); });
-        store.setList('pacientes', lst);
-      }
+      /* A cópia local NÃO é escrita aqui: sem o recibo da nuvem (versão e data),
+         o aparelho a tomaria por "nunca enviada" e tentaria subi-la de novo —
+         foi assim que uma importação virou milhares de conflitos. O que subiu
+         volta pela leitura normal da nuvem, já com o recibo. */
       /* 2) lançamentos novos, ligados ao paciente da nuvem */
       const chaves = Array.from(new Set(r.criar.map(it => chavePac(it.paciente)).filter(Boolean)));
       const idPorChave = new Map();
@@ -12960,12 +12949,7 @@ const importUnimed = {
         prog('Lançamentos novos: ' + criados + ' de ' + r.criar.length + '…');
         await U._pausa(U.PAUSA_MS);
       }
-      if (locais.length) {
-        const lst = store.list('financeiro') || [];
-        const ja = new Set(lst.map(x => x && x._id));
-        locais.forEach(it => { if (!ja.has(it._id)) lst.push(Object.assign({}, it, { _relOrg: org })); });
-        store.setList('financeiro', lst);
-      }
+      void locais;
       /* 3) os que já existiam: recebem do extrato o que não tinham. Valor que
          o sistema já tem e é diferente NÃO é trocado — vai para a revisão. */
       for (const up of r.atualizar) {
@@ -12980,7 +12964,7 @@ const importUnimed = {
         prog('Completando lançamentos que já existiam: ' + atualizados + '…');
         await U._pausa(U.PAUSA_UPD_MS);
       }
-      try { cloudRel._puxados.financeiro = false; } catch (e) {}
+      try { cloudRel._puxados.financeiro = false; cloudRel._puxados.pacientes = false; } catch (e) {}
       return { ok: true, criados, atualizados, pacientes };
     } catch (e) {
       return { ok: false, erro: String(e && e.message || e), criados, atualizados, pacientes };
@@ -15941,6 +15925,109 @@ const lixeira = {
     modal.open('🗑️ Lixeira (' + arr.length + ')', corpo,
       (arr.length ? '<button class="btn btn-danger" onclick="lixeira.esvaziar()">Esvaziar lixeira</button>' : '') +
       '<button class="btn" onclick="modal.close()">Fechar</button>');
+  }
+};
+/* ============================================================================
+   LIMPEZA DO QUE AS IMPORTAÇÕES DEIXARAM NO APARELHO
+   As importações gravavam direto na nuvem e deixavam AQUI uma cópia sem o
+   recibo (versão e data da nuvem). O aparelho tomava essas cópias por "nunca
+   enviadas" e tentava subi-las de novo: a nuvem respondia "já existe", e uma
+   importação de 5.600 lançamentos e 3.300 pacientes virou milhares de
+   conflitos e pendências — todos de dado igual dos dois lados.
+   Uma vez por sessão, por ambiente:
+     • cópia local SEM recibo de um registro importado cuja linha EXISTE na
+       nuvem sai do aparelho (volta pela leitura normal, com o recibo);
+     • o conflito desse registro é decidido pela nuvem quando o conteúdo é o
+       mesmo, ou quando a cópia daqui nunca foi editada depois da importação;
+     • a gravação desse registro presa na fila sai, com a linha da nuvem como
+       prova.
+   Nada da nuvem é apagado; o que não tiver prova fica como está.
+============================================================================ */
+const limpezaImportacao = {
+  PREFIXOS: { financeiro: ['uni_', 'imp_'], pacientes: ['pac_uni_', 'pac_imp_'], pre: ['acv_'], anestesia: ['acv_'] },
+  _feito: new Set(),
+  _importado(mod, id) { return (limpezaImportacao.PREFIXOS[mod] || []).some(p => String(id || '').indexOf(p) === 0); },
+  _tabela(mod) {
+    if (mod === 'pacientes') return 'patients';
+    if (mod === 'financeiro') return 'finance_entries';
+    try { return cloudRel.MODOS[mod].tabela; } catch (e) { return ''; }
+  },
+  _chaveNuvem(mod, x) {
+    if (mod !== 'pacientes') return x._id;
+    const idn = window.SoftEncounterIdentity;
+    try { return idn.legacyPatientKey(idn.fromRecord({ nome: x.nome })); } catch (e) { return ''; }
+  },
+  async rodar(opts = {}) {
+    const contexto = cloudRel._capturarContexto();
+    if (!contexto || !cloudRel.disponivel || !cloudRel.disponivel()) return null;
+    const org = contexto.organizationId;
+    if (!opts.forcar && limpezaImportacao._feito.has(org)) return null;
+    if (!(await cloud._garantirToken())) return null;
+    limpezaImportacao._feito.add(org);
+    const res = { copias: 0, conflitos: 0, fila: 0 };
+    const naNuvem = new Set();   /* mod|id local cuja linha existe na nuvem */
+    for (const mod of Object.keys(limpezaImportacao.PREFIXOS)) {
+      if (!cloudRel._contextoValido(contexto, org)) return res;
+      const tabela = limpezaImportacao._tabela(mod); if (!tabela) continue;
+      const candidatos = (store.list(mod) || []).filter(x => x && !x._relUpdatedAt && limpezaImportacao._importado(mod, x._id));
+      if (!candidatos.length) continue;
+      const porChave = new Map();
+      candidatos.forEach(x => { const k = limpezaImportacao._chaveNuvem(mod, x); if (k) porChave.set(k, x); });
+      const existe = new Set();
+      for (const lote of migracaoFase4._chunk(Array.from(porChave.keys()), 100)) {
+        const rows = await migracaoFase4._idsPorLegacy(tabela, org, lote);
+        if (!cloudRel._contextoValido(contexto, org)) return res;
+        (rows || []).forEach(r => existe.add(r.legacy_id));
+      }
+      const sair = new Set();
+      porChave.forEach((x, k) => { if (existe.has(k)) { sair.add(x._id); naNuvem.add(mod + '|' + x._id); } });
+      if (sair.size) {
+        store.setList(mod, (store.list(mod) || []).filter(x => !(x && sair.has(x._id))));
+        res.copias += sair.size;
+      }
+    }
+    /* conflitos desses registros: a nuvem tem a versão importada */
+    try {
+      (cloudRel._conflitosLer() || []).forEach(e => {
+        if (!e || e.status !== 'pending' || e.resolutionRequested || e.organizationId !== org) return;
+        const local = e.proposed || {}, nuvem = e.canonical || {};
+        const id = local._id || e.legacyId;
+        if (!limpezaImportacao._importado(e.mod, id)) return;
+        const igual = !cloudRel._temDiferenca(local, nuvem);
+        const intocada = !local._updatedAt || local._updatedAt === local._createdAt;
+        if (!igual && !intocada) return;
+        if (cloudRel.resolverConflito(e.clientId, 'remote', { limpezaImportacao: true }, { adiarEnvio: true })) res.conflitos++;
+      });
+      if (res.conflitos) cloudRel.enviarDecisoes();
+    } catch (e) {}
+    /* gravações presas na fila: a linha da nuvem é a prova */
+    try {
+      const ops = await filaCifrada.listar();
+      for (const op of ops) {
+        if (!cloudRel._contextoValido(contexto, org)) break;
+        if (!op || !op.payload || op.payload.action === 'delete' || op.payload.transport === persistenciaCloudFirst.TRANSPORTE_ADENDO) continue;
+        if (!naNuvem.has(op.module + '|' + op.entityId)) continue;
+        try { if (await filaCifrada.confirmar(op.operationId, { remoteConfirmed: true, checksum: op.checksum })) res.fila++; } catch (e) {}
+      }
+      if (res.fila) await persistenciaCloudFirst._reindexar();
+    } catch (e) {}
+    /* os 5 valores por código que a conciliação gravou sem ele querer (a
+       diferença era apartamento, fim de semana ou guia com mais de um código)
+       saem — só se ainda forem exatamente os gravados; o que ele mudou, fica */
+    try {
+      const ERRADOS = { '31004091': 145.28, '30729238': 462.74, '30721199': 217.04, '30731186': 145.28, '30719100': 312.98 };
+      const todos = Object.assign({}, (orcamento.cfg() || {}).precoPorCodigoConvenio || {});
+      const un = Object.assign({}, todos.unimed || {});
+      let tirou = 0;
+      Object.keys(ERRADOS).forEach(cod => { if (Number(un[cod]) === ERRADOS[cod]) { delete un[cod]; tirou++; } });
+      if (tirou) { todos.unimed = un; orcamento.salvarCfg({ precoPorCodigoConvenio: todos }); res.codigos = tirou; }
+    } catch (e) {}
+    try { cloudRel._puxados.financeiro = false; } catch (e) {}
+    try { syncStatus.refresh(); } catch (e) {}
+    if (res.copias || res.conflitos) {
+      try { toast('🧹 Importação arrumada: ' + res.copias + ' cópia(s) repetida(s) saíram deste aparelho e ' + res.conflitos + ' conflito(s) foram resolvidos pela nuvem.', 'success'); } catch (e) {}
+    }
+    return res;
   }
 };
 try { contextoAba.aoMudar(() => lixeira._garantirContexto()); } catch (e) {}
@@ -22205,7 +22292,36 @@ const programador = {
     });
   },
 
-  _orgs: [], _membros: [], _perfis: [], _shares: [],
+  _orgs: [], _membros: [], _perfis: [], _shares: [], _uso: null,
+  ROTULO_MODULO: { anesthesia_records: 'fichas', preanesthetic_assessments: 'pré', consultations: 'consultas',
+    recovery_records: 'SRPA', consents: 'termos', prescriptions: 'receitas', documents: 'documentos',
+    finance_entries: 'financeiro', patients: 'pacientes', appointments: 'agenda', quotes: 'orçamentos',
+    risk_assessments: 'risco', addenda: 'adendos', drafts: 'rascunhos' },
+  _quando(iso) {
+    const t = Date.parse(iso || ''); if (!Number.isFinite(t)) return '';
+    const dias = Math.floor((Date.now() - t) / 86400000);
+    const data = new Date(t).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+    return data + (dias <= 0 ? ' (hoje)' : dias === 1 ? ' (ontem)' : ' (há ' + dias + ' dias)');
+  },
+  _usoHTML(uid) {
+    const esc = utils.escapeHTML, u = programador._uso;
+    if (!u) return '<span style="color:var(--text-mute);font-size:.74rem">—</span>';
+    if (!(u instanceof Map)) {
+      return '<span style="color:var(--text-mute);font-size:.72rem" title="' + utils.escapeAttr(u.erro || '') + '">' +
+        (/Could not find|schema cache|does not exist/i.test(u.erro || '') ? 'falta a migração 0037' : 'indisponível') + '</span>';
+    }
+    const x = u.get(uid);
+    if (!x) return '<span style="color:var(--text-mute);font-size:.74rem">sem dados</span>';
+    const mods = Object.entries(x.por_modulo || {}).sort((a, b) => b[1] - a[1])
+      .map(([k, n]) => n + ' ' + (programador.ROTULO_MODULO[k] || k)).join(' · ');
+    return '<div style="font-size:.74rem;line-height:1.45">' +
+      '<div>🔑 último acesso: <b>' + esc(programador._quando(x.ultimo_login) || 'nunca') + '</b></div>' +
+      '<div>📅 ' + (x.dias_ativos || 0) + ' dia(s) com uso · ' + (x.registros || 0) + ' gravação(ões)</div>' +
+      (mods ? '<div style="color:var(--text-mute)">' + esc(mods) + '</div>' : '') +
+      (x.ultimo_registro ? '<div style="color:var(--text-mute)">✏️ última: ' + esc(programador._quando(x.ultimo_registro)) +
+        (x.ultimo_modulo ? ' — ' + esc(programador.ROTULO_MODULO[x.ultimo_modulo] || x.ultimo_modulo) : '') + '</div>' : '') +
+      '</div>';
+  },
   _legacySummary: [], _legacyItems: [], _legacyOffset: 0,
   _nomeOrg(id) { const o = programador._orgs.find(x => x.id === id); return o ? o.nome : (id || '').slice(0, 8); },
   _emailDe(uid) { const p = programador._perfis.find(x => x.id === uid); return p ? (p.email || p.nome || uid.slice(0, 8)) : uid.slice(0, 8); },
@@ -22222,6 +22338,13 @@ const programador = {
         programador._req('profiles?select=id,nome,email').catch(() => []),
         programador._rpc('prog_list_org_shares', {}).catch(() => [])
       ]);
+      /* uso por pessoa: a função só existe depois da migração 0037 — sem ela,
+         a coluna diz isso, e o resto da aba funciona igual */
+      programador._uso = null;
+      try {
+        const uso = await programador._rpc('prog_uso_usuarios', { p_dias: 30 });
+        programador._uso = new Map((Array.isArray(uso) ? uso : []).map(u => [u.user_id, u]));
+      } catch (e) { programador._uso = { erro: e && e.message || '' }; }
       programador._orgs = orgs || []; programador._membros = membros || [];
       programador._perfis = perfis || []; programador._shares = shares || [];
       programador._renderConteudo(box);
@@ -22272,6 +22395,7 @@ const programador = {
       (m.ativo ? '' : ' <span class="ui-badge" style="background:#fdeaea;color:#8a1c1c">bloqueado</span>') + '</td>' +
       '<td>' + esc(programador._nomeOrg(m.organization_id)) + '</td>' +
       '<td>' + esc(m.role || '—') + '</td>' +
+      '<td>' + programador._usoHTML(m.user_id) + '</td>' +
       '<td style="text-align:right;white-space:nowrap">' +
       '<button class="btn btn-xs" onclick="programador.definirAcesso(' + utils.jsArg(m.user_id) + ',' + utils.jsArg(m.organization_id) + ',' + (m.ativo ? 'false' : 'true') + ')" title="' +
         (m.ativo ? 'Tira o acesso sem apagar nada — o que ela assinou continua dela' : 'Devolve o acesso a esta pessoa') + '">' +
@@ -22338,7 +22462,7 @@ const programador = {
             <div class="field col-2"><label>Papel</label><select id="prog-mem-role">${programador.PAPEIS.map(([v, r]) => '<option value="' + v + '">' + r + '</option>').join('')}</select></div>
             <div class="field col-2" style="align-self:end"><button class="btn btn-primary btn-sm" onclick="programador.addMembro()">➕ Adicionar</button></div>
           </div>
-          <table class="dash-detail-table" style="margin:14px 0 0"><thead><tr><th>Pessoa</th><th>Ambiente</th><th>Papel</th><th></th></tr></thead>
+          <table class="dash-detail-table" style="margin:14px 0 0"><thead><tr><th>Pessoa</th><th>Ambiente</th><th>Papel</th><th title="Últimos 30 dias, pela auditoria do servidor">Uso (30 dias)</th><th></th></tr></thead>
           <tbody>${linhasMembros || '<tr><td colspan="4" style="color:var(--text-mute)">Ninguém vinculado ainda.</td></tr>'}</tbody></table>
           <p style="font-size:.74rem;color:var(--text-mute);margin:8px 0 0"><b>Tirar do ambiente</b> desfaz só o vínculo — a conta continua existindo e pode ser posta em outra clínica. <b>Excluir a conta</b> apaga a conta da nuvem, e só funciona depois que ela não pertence a ambiente nenhum.</p>
         </div>
@@ -32804,6 +32928,24 @@ const precos = {
     { v: 'apartamento', rot: 'Apartamento' },
     { v: 'ambulatorial', rot: 'Ambulatorial (paga como enfermaria)' }
   ],
+  /* ---- UNIMED ----
+     Os planos Unimed pagam pela tabela Unimed (CBHPM 2015 + 7%), seja qual
+     for a tabela geral. Há duas Unimed: a local, Unimed Costa do Descobrimento
+     — carteirinha começa sempre com 0286 — e as demais (intercâmbio). As duas
+     usam a mesma tabela; o nome distingue para a cobrança e os relatórios. */
+  UNIMED_CD: 'Unimed Costa do Descobrimento',
+  ehUnimed(convenio) { return /^unimed\b/.test(precos._normPlano(convenio)); },
+  ehUnimedCD(convenio, carteirinha) {
+    if (/^0286/.test(String(carteirinha || '').replace(/\D/g, ''))) return true;
+    return /^unimed\s+(costa\s+do\s+descobrimento|cd)\b/.test(precos._normPlano(convenio));
+  },
+  /* nome do plano como deve ficar gravado: a carteirinha 0286 diz que é a
+     Unimed Costa do Descobrimento mesmo quando se escreveu só "Unimed" */
+  identificarPlano(convenio, carteirinha) {
+    const c = String(convenio || '').trim();
+    if (precos.ehUnimedCD(c, carteirinha) && (!c || precos.ehUnimed(c))) return precos.UNIMED_CD;
+    return c;
+  },
   /* Tabela de referência para o tipo de honorário pedido */
   _tabela(tipo, convenio, acomodacao) {
     let tabs = {};
@@ -32825,6 +32967,11 @@ const precos = {
     const doPlano = (querido === 'cir') ? par.cir : par.anest;
     if (doPlano && tabs[doPlano] && (tabs[doPlano].tipo || 'anest') === querido) {
       return { chave: doPlano, tab: tabs[doPlano], doConvenio: true };
+    }
+    /* plano Unimed sem escolha própria: tabela Unimed, não a geral */
+    if (precos.ehUnimed(convenio)) {
+      const ku = querido === 'cir' ? 'unimed_cir' : 'unimed';
+      if (tabs[ku]) return { chave: ku, tab: tabs[ku], doConvenio: true };
     }
     let ativa = '';
     try { ativa = orcamento.cfg().tabelaAtiva || ''; } catch (e) {}
@@ -32911,9 +33058,39 @@ const precos = {
             '</div>';
         }).join('') + '</div>'
       : '<p style="font-size:.85rem;color:var(--text-mute)">Nenhum convênio encontrado ainda — eles aparecem aqui conforme os pacientes e lançamentos vão sendo cadastrados.</p>';
-    modal.open('🏷️ Tabela de valores por convênio', corpo,
+    /* valores por código que um convênio paga fora do porte — à vista e
+       removíveis (eram gravados pela conciliação e não havia onde desfazer) */
+    const porCod = (() => { try { return orcamento.cfg().precoPorCodigoConvenio || {}; } catch (e) { return {}; } })();
+    const linhasCod = [];
+    Object.keys(porCod).forEach(conv => Object.keys(porCod[conv] || {}).forEach(cod => {
+      if (porCod[conv][cod] == null) return;
+      let desc = '';
+      try { const inf = cbhpm.info(cod); desc = inf ? inf.descricao : ''; } catch (e) {}
+      linhasCod.push('<tr><td>' + utils.escapeHTML(conv) + '</td><td>' + utils.escapeHTML(cod) + '</td><td>' + utils.escapeHTML(desc) +
+        '</td><td style="text-align:right">R$ ' + utils.formatarBR(porCod[conv][cod]) + '</td>' +
+        '<td><button type="button" class="btn btn-xs btn-danger" onclick="precos.removerPorCodigoDoConvenio(' +
+        utils.jsArg(conv) + ',' + utils.jsArg(cod) + ')">Remover</button></td></tr>');
+    }));
+    const secaoCod = '<h3 style="font-size:.88rem;margin:14px 0 6px;border-top:1px solid var(--border);padding-top:10px">💲 Valor próprio por código</h3>' +
+      (linhasCod.length
+        ? '<p style="font-size:.78rem;color:var(--text-mute);margin:0 0 6px">Vêm antes do porte. Remover volta o código para o valor da tabela do plano.</p>' +
+          '<table class="data" style="font-size:.8rem"><thead><tr><th>Convênio</th><th>Código</th><th>Procedimento</th><th style="text-align:right">Valor</th><th></th></tr></thead><tbody>' +
+          linhasCod.join('') + '</tbody></table>'
+        : '<p style="font-size:.8rem;color:var(--text-mute)">Nenhum.</p>');
+    modal.open('🏷️ Tabela de valores por convênio', corpo + secaoCod,
       (convs.length ? '<button class="btn btn-primary" onclick="precos._salvarTabelasPorConvenio()">Salvar</button>' : '') +
       '<button class="btn" onclick="modal.close()">Fechar</button>');
+  },
+  removerPorCodigoDoConvenio(conv, cod) {
+    const todos = Object.assign({}, orcamento.cfg().precoPorCodigoConvenio || {});
+    const mapa = Object.assign({}, todos[conv] || {});
+    delete mapa[cod];
+    /* um padrão do sistema removido fica anotado como removido, senão voltaria na próxima leitura */
+    if (ORC_CFG_PADRAO.precoPorCodigoConvenio[conv] && ORC_CFG_PADRAO.precoPorCodigoConvenio[conv][cod] != null) mapa[cod] = null;
+    todos[conv] = mapa;
+    try { orcamento.salvarCfg({ precoPorCodigoConvenio: todos }); } catch (e) {}
+    toast('Valor próprio do código ' + cod + ' removido — volta a valer o porte');
+    precos.abrirTabelasPorConvenio();
   },
   _salvarTabelasPorConvenio() {
     const comEscolha = new Set();
@@ -33782,9 +33959,17 @@ const anestesia = {
         ? '<div class="field col-3"><label>Horário <small style="color:var(--text-mute);font-weight:400">— vai para o evento</small></label>' +
           '<input type="time" name="td_hora" value="' + utils.escapeAttr(horaEvt) + '"></div>'
         : '';
+      /* o texto que está HOJE no evento, editável aqui também — o que for
+         escrito na tabela aparece aqui, e vice-versa */
+      const linhaEvt = evtTipo ? anestesia.eventos._linhaDoTipo(evtTipo) : null;
+      const textoEvt = d.evento_texto || (linhaEvt ? ((linhaEvt.querySelector('[name="evt_obs[]"]') || {}).value || '') : '');
+      const campoTexto = evtTipo
+        ? '<div class="field col-12"><label>Texto na linha do tempo <small style="color:var(--text-mute);font-weight:400">— o mesmo da tabela de eventos; em branco, o sistema monta a partir dos campos</small></label>' +
+          '<textarea name="td_evento_texto" rows="2">' + utils.escapeHTML(textoEvt) + '</textarea></div>'
+        : '';
       const corpo =
         '<p style="font-size:.82rem;color:var(--text-mute);margin:0 0 10px">O que você preencher aqui fica gravado na ficha e vira a descrição desta técnica — no texto da técnica realizada e no evento da linha do tempo. Tudo é opcional.</p>' +
-        '<form id="form-tecdet" onsubmit="return false"><div class="grid">' + campoHora + esp.campos.map(campo).join('') + '</div></form>';
+        '<form id="form-tecdet" onsubmit="return false"><div class="grid">' + campoHora + esp.campos.map(campo).join('') + campoTexto + '</div></form>';
       modal.open(esp.titulo, corpo,
         '<button class="btn" onclick="modal.close()">Cancelar</button>' +
         '<button class="btn btn-primary" onclick="anestesia.tecnicaDet.salvar(' + utils.jsArg(tipo) + ')">Salvar detalhes</button>');
@@ -33911,15 +34096,34 @@ const anestesia = {
       const hEl = f.querySelector('[name="td_hora"]');
       const hora = hEl ? String(hEl.value || '').trim() : '';
       if (hora) d.hora = hora;
+      /* TEXTO DO EVENTO — vale a última edição. Mudou os campos e deixou o
+         texto como estava: o texto volta a ser montado dos campos. Mudou o
+         texto: é ele que vai para a tabela. */
+      const anterior = anestesia.tecnicaDet.de(tipo);
+      const tEl = f.querySelector('[name="td_evento_texto"]');
+      const textoEvt = tEl ? String(tEl.value || '').trim() : '';
+      const evtTipo = anestesia.eventos.TIPO_EVENTO[tipo];
+      const linhaEvt = evtTipo ? anestesia.eventos._linhaDoTipo(evtTipo) : null;
+      const textoAntes = anterior.evento_texto || (linhaEvt ? String((linhaEvt.querySelector('[name="evt_obs[]"]') || {}).value || '').trim() : '');
+      const camposMudaram = esp.campos.some(c => (anterior[c.n] || '') !== (d[c.n] || ''));
+      const textoMudou = textoEvt !== textoAntes;
+      if (textoEvt && (textoMudou || (!camposMudaram && anterior.evento_texto))) d.evento_texto = textoEvt;
       if (Object.keys(d).length) anestesia.tecnicaDet._dados[tipo] = d;
       else delete anestesia.tecnicaDet._dados[tipo];
       modal.close();
       anestesia.tecnicaDet.aplicar(tipo);
       /* o horário digitado manda no evento — era isto que não saía do card */
-      const evtTipo = anestesia.eventos.TIPO_EVENTO[tipo];
       if (hora && evtTipo) {
         try { anestesia.eventos.sincronizarHorario(evtTipo, hora); } catch (e) {}
       }
+      try {
+        const linha = evtTipo ? anestesia.eventos._linhaDoTipo(evtTipo) : null;
+        const obs = linha && linha.querySelector('[name="evt_obs[]"]');
+        if (obs) {
+          if (d.evento_texto) { obs.value = d.evento_texto; delete linha.dataset.auto; }
+          else if (textoMudou || camposMudaram) { linha.dataset.auto = '1'; obs.value = ''; anestesia.eventos.atualizarDescricoes(); }
+        }
+      } catch (e) {}
       try { markDirty(); } catch (e) {}
       try { toast('Detalhes de "' + tipo + '" gravados na ficha.'); } catch (e) {}
     },
@@ -34619,6 +34823,49 @@ const anestesia = {
       anestesia.eventos.atualizarDescricoes();
     },
 
+    /* O CAMINHO DE VOLTA. A janela da técnica (sedação, geral…), o quadro do
+       bloqueio e o da via aérea mandam horário e texto para o evento; agora o
+       evento editado na tabela também volta para eles. Vale a última edição,
+       de qualquer um dos lados. */
+    _horaParaOrigem(tr) {
+      if (!tr || !tr.closest('#eventos-body')) return;
+      const tipo = (tr.querySelector('[name="evt_tipo[]"]') || {}).value || '';
+      const hora = (tr.querySelector('[name="evt_hora[]"]') || {}).value || '';
+      if (!tipo || !hora) return;
+      const tec = anestesia.eventos.EVENTO_TIPO[tipo];
+      if (tec) {
+        const d = Object.assign({}, anestesia.tecnicaDet.de(tec), { hora });
+        anestesia.tecnicaDet._dados[tec] = d;
+      }
+      const f = anestesia.eventos._f();
+      const set = (n, v) => { const el = f && f.querySelector('[name="' + n + '"]'); if (el && el.value !== v) { el.value = v; return true; } return false; };
+      const b = anestesia.eventos._bloq();
+      const evtBloq = /peridural|combinada/i.test(b.tipo || '') ? 'Peridural'
+        : /raqui/i.test(b.tipo || '') ? 'Raquianestesia' : b.tipo ? 'Bloqueio periférico' : '';
+      if (evtBloq && evtBloq === tipo && set('bloqueio_hora', hora)) {
+        try { anestesia.bloqueio.aplicarHoraPuncao(hora); } catch (e) {}
+      }
+      const via = anestesia.eventos._v('via_aerea_uso');
+      if (via && anestesia.eventos.VIA_AEREA_EVENTO[via] === tipo) set('via_aerea_hora', hora);
+      try { markDirty(); } catch (e) {}
+    },
+    _textoParaOrigem(tr) {
+      if (!tr || !tr.closest('#eventos-body') || tr.dataset.auto === '1') return;
+      const tipo = (tr.querySelector('[name="evt_tipo[]"]') || {}).value || '';
+      const tec = anestesia.eventos.EVENTO_TIPO[tipo];
+      if (!tec) return;
+      const texto = String((tr.querySelector('[name="evt_obs[]"]') || {}).value || '').trim();
+      const d = Object.assign({}, anestesia.tecnicaDet.de(tec));
+      if (texto) d.evento_texto = texto; else delete d.evento_texto;
+      anestesia.tecnicaDet._dados[tec] = d;
+      try { markDirty(); } catch (e) {}
+    },
+    _linhaDoTipo(tipoEvt) {
+      const body = document.getElementById('eventos-body');
+      if (!body) return null;
+      return Array.from(body.querySelectorAll('tr')).find(r => (r.querySelector('[name="evt_tipo[]"]') || {}).value === tipoEvt) || null;
+    },
+
     /* Insere a descrição técnica do tipo selecionado no campo de detalhes */
     inserirDescricao(btn) {
       const tr = btn.closest('tr');
@@ -34699,6 +34946,25 @@ const anestesia = {
     /* a linha do tempo fica sempre em ordem de horário; sem horário vai ao fim */
     _ordenar(tbody) {
       if (!tbody) return;
+      /* NÃO MEXE NA LINHA ENQUANTO ALGUÉM DIGITA NELA. Num campo de hora que já
+         tem valor, cada dígito forma um horário válido e dispara a mudança;
+         reordenar ali movia a linha, o cursor saía do campo e não dava para
+         digitar os quatro dígitos. A ordem é refeita quando o foco sai da
+         tabela. */
+      const ativo = document.activeElement;
+      if (ativo && tbody.contains(ativo)) {
+        if (!tbody._ordenarAoSair) {
+          tbody._ordenarAoSair = true;
+          const aoSair = (ev) => {
+            if (ev && ev.relatedTarget && tbody.contains(ev.relatedTarget)) return;
+            tbody.removeEventListener('focusout', aoSair);
+            tbody._ordenarAoSair = false;
+            setTimeout(() => anestesia.eventos._ordenar(tbody), 0);
+          };
+          tbody.addEventListener('focusout', aoSair);
+        }
+        return;
+      }
       const horaDe = tr => { const el = tr.querySelector('[name="evt_hora[]"]'); return (el && el.value) ? el.value : '99:99'; };
       const linhas = Array.from(tbody.children);
       const ordenadas = linhas.slice().sort((a, b) => horaDe(a).localeCompare(horaDe(b)));
@@ -34946,7 +35212,12 @@ const anestesia = {
       });
       const selTipo = tr.querySelector('[name="evt_tipo[]"]');
       const horaEl = tr.querySelector('[name="evt_hora[]"]');
-      if (horaEl) horaEl.addEventListener('change', () => anestesia.eventos._ordenar(tr.parentElement));
+      if (horaEl) horaEl.addEventListener('change', () => {
+        anestesia.eventos._ordenar(tr.parentElement);
+        try { anestesia.eventos._horaParaOrigem(tr); } catch (e) {}
+      });
+      const obsEl = tr.querySelector('[name="evt_obs[]"]');
+      if (obsEl) obsEl.addEventListener('change', () => { try { anestesia.eventos._textoParaOrigem(tr); } catch (e) {} });
       if (selTipo) selTipo.addEventListener('change', () => {
         if (selTipo.value) anestesia.eventos._removidos.delete(selTipo.value);
         try { anestesia.eventos.atualizarDescricoes(); } catch (e) {}
@@ -43586,6 +43857,7 @@ const fin = {
         const cad = fin.finalizacao._cadastroDe(item.paciente, item);
         if (cad.carteirinha && !item.carteirinha) item.carteirinha = cad.carteirinha;
       } catch (e) {}
+      try { item.convenio = precos.identificarPlano(item.convenio, item.carteirinha); } catch (e) {}
       if (obs) item.observacoes = [item.observacoes, obs].filter(Boolean).join(' · ');
       if (desfecho && pre.DESFECHOS[desfecho]) {
         item.observacoes = [item.observacoes, 'Desfecho: ' + pre.DESFECHOS[desfecho].rot +
@@ -45967,6 +46239,8 @@ const pacientes = {
       form.querySelectorAll('.field.invalid').forEach(fi => fi.classList.remove('invalid'));
 
       utils.padronizarRegistro(data);
+      /* carteirinha 0286 = Unimed Costa do Descobrimento */
+      try { data.plano = precos.identificarPlano(data.plano, data.carteirinha); } catch (e) {}
 
       /* mesmo nome já cadastrado: abrir o existente, ou criar mesmo assim (homônimo) */
       if (!data._id) {
@@ -46086,7 +46360,7 @@ const pacientes = {
       });
       store.setList('pacientes', lst);
     }
-    persistenciaCloudFirst.salvar('pacientes', cf.local).then(r => {
+    persistenciaCloudFirst.salvar('pacientes', cf.local, { decisaoDeConflito: true }).then(r => {
       if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return;
       if (r && r.ok) {
         if (cf.conflictClientId) cloudRel.resolverConflito(cf.conflictClientId, 'local', { version: r.row && r.row.version });
@@ -48408,6 +48682,7 @@ const financeiro = {
     data.pago = financeiro.ehQuitado(data.status);
     delete data.pago_rotulo;
     delete data.duracao_rotulo;
+    try { data.convenio = precos.identificarPlano(data.convenio, data.carteirinha); } catch (e) {}
     /* a hora de início também é a da faixa de horário (hora_proc) */
     if (data.hora_inicio) data.hora_proc = data.hora_inicio;
     /* adicionais marcados aqui valem tanto quanto os da finalização */
@@ -49982,6 +50257,31 @@ const financeiro = {
 /* Valores de PORTE ANESTÉSICO (AN0..AN8) por tabela de referência.
    Fonte: CBHPM 2015 e Unimed (CBHPM 2015 + 7%). Editáveis em Ajustes. */
 /* Valores de PORTE CIRÚRGICO (1A–14C) por edição CBHPM. */
+/* CBHPM 2015 (0%) — porte cirúrgico. Fonte: Rol de Procedimentos Médicos
+   Unimed Costa do Descobrimento 2023 (coluna "Tab atual"). */
+const ORC_PORTE_CIR_2015 = {
+  '1A': 15.92, '1B': 31.84, '1C': 47.77, '2A': 63.70, '2B': 83.97, '2C': 99.37,
+  '3A': 135.78, '3B': 173.50, '3C': 198.73, '4A': 236.52, '4B': 258.92, '4C': 292.50,
+  '5A': 314.89, '5B': 340.09, '5C': 361.07, '6A': 393.27, '6B': 432.47, '6C': 473.04,
+  '7A': 510.83, '7B': 565.41, '7C': 668.97, '8A': 722.16, '8B': 757.15, '8C': 803.33,
+  '9A': 853.72, '9B': 933.50, '9C': 1028.64, '10A': 1104.23, '10B': 1196.60, '10C': 1328.15,
+  '11A': 1405.13, '11B': 1540.89, '11C': 1690.65, '12A': 1752.22, '12B': 1883.78, '12C': 2307.82,
+  '13A': 2540.15, '13B': 2786.47, '13C': 3081.77, '14A': 3434.45, '14B': 3736.76, '14C': 4121.62
+};
+/* UNIMED — CBHPM 2015 + 7%. É o que a Unimed paga em 2026 (conferido no
+   extrato: 3C 198,73 × 1,07 = 212,64; 4C = 312,98; 7C = 715,80). Vale SÓ para
+   os planos Unimed (Unimed e Unimed Costa do Descobrimento); os demais planos
+   seguem a tabela que tiverem escolhido. */
+const ORC_PORTE_CIR_UNIMED = {
+  '1A': 17.03, '1B': 34.07, '1C': 51.11, '2A': 68.16, '2B': 89.85, '2C': 106.33,
+  '3A': 145.28, '3B': 185.65, '3C': 212.64, '4A': 253.08, '4B': 277.04, '4C': 312.98,
+  '5A': 336.93, '5B': 363.90, '5C': 386.34, '6A': 420.80, '6B': 462.74, '6C': 506.15,
+  '7A': 546.59, '7B': 604.99, '7C': 715.80, '8A': 772.71, '8B': 810.15, '8C': 859.56,
+  '9A': 913.48, '9B': 998.85, '9C': 1100.64, '10A': 1181.53, '10B': 1280.36, '10C': 1421.12,
+  '11A': 1503.49, '11B': 1648.75, '11C': 1809.00, '12A': 1874.88, '12B': 2015.64, '12C': 2469.37,
+  '13A': 2717.96, '13B': 2981.52, '13C': 3297.49, '14A': 3674.86, '14B': 3998.33, '14C': 4410.13
+};
+
 const ORC_PORTE_CIR_2018 = {
   '1A': 19.84, '1B': 39.68, '1C': 59.53, '2A': 79.38, '2B': 104.64, '2C': 143.81,
   '3A': 202.37, '3B': 262.10, '3C': 310.38, '4A': 370.21, '4B': 415.83, '4C': 471.79,
@@ -50067,7 +50367,7 @@ function orcDerivarAnestCBHPM2022(tabCir) {
 const ORC_PORTE_ANEST_PADRAO = {
   /* Conferida no extrato Unimed de 2026: de abril em diante o porte 2 passou
      de 212,64 para 217,04; os demais portes seguem os mesmos valores. */
-  unimed:    { nome: 'Unimed 2026 (extrato abr/2026+) — porte anest.', tipo: 'anest', valores: { 0: 0, 1: 145.28, 2: 217.04, 3: 312.98, 4: 462.74, 5: 715.80, 6: 998.85, 7: 1421.12, 8: 1874.88 } },
+  unimed:    { nome: 'Unimed — CBHPM 2015 + 7% (AN2 217,04 desde abr/2026) — porte anest.', tipo: 'anest', valores: { 0: 0, 1: 145.28, 2: 217.04, 3: 312.98, 4: 462.74, 5: 715.80, 6: 998.85, 7: 1421.12, 8: 1874.88 } },
   cbhpm2015: { nome: 'CBHPM 2015 (0%) — porte anest.',          tipo: 'anest', valores: { 0: 0, 1: 135.78, 2: 198.73, 3: 292.50, 4: 432.47, 5: 668.97, 6: 933.50, 7: 1328.15, 8: 1752.22 } },
   /* Derivadas pela conversão CLÁSSICA do sistema (1→3A, 2→3C, 3→5B, 4→7B,
      5→9A, 6→9B, 7→11C, 8→13C). São as que sustentam os orçamentos já
@@ -50085,6 +50385,8 @@ const ORC_PORTE_ANEST_PADRAO = {
   anest2024_f1_conv22:   { nome: 'CBHPM 2024/25 Faixa I → porte anest. (conversão CBHPM 2022)',  tipo: 'anest', valores: orcDerivarAnestCBHPM2022(ORC_PORTE_CIR_2024_F1) },
   anest2024_f2_conv22:   { nome: 'CBHPM 2024/25 Faixa II → porte anest. (conversão CBHPM 2022)', tipo: 'anest', valores: orcDerivarAnestCBHPM2022(ORC_PORTE_CIR_2024_F2) },
   anest2024_f3_conv22:   { nome: 'CBHPM 2024/25 Faixa III → porte anest. (conversão CBHPM 2022)', tipo: 'anest', valores: orcDerivarAnestCBHPM2022(ORC_PORTE_CIR_2024_F3) },
+  unimed_cir:   { nome: 'Unimed — CBHPM 2015 + 7% (porte cir.)',       tipo: 'cir', valores: ORC_PORTE_CIR_UNIMED },
+  cir2015:      { nome: 'CBHPM 2015 (0%) — porte cirúrgico',           tipo: 'cir', valores: ORC_PORTE_CIR_2015 },
   cir2018:      { nome: 'CBHPM 2018 — porte cirúrgico',                tipo: 'cir', valores: ORC_PORTE_CIR_2018 },
   cir2024_orig: { nome: 'CBHPM 2024/2025 — Original (porte cir.)',     tipo: 'cir', valores: ORC_PORTE_CIR_2024_ORIG },
   cir2024_f1:   { nome: 'CBHPM 2024/2025 — Faixa I (porte cir.)',      tipo: 'cir', valores: ORC_PORTE_CIR_2024_F1 },
@@ -52282,7 +52584,7 @@ const agenda = {
     const lst = store.list('agenda');
     const ix = lst.findIndex(x => x._id === local._id);
     if (ix >= 0) { Object.assign(lst[ix], local); store.setList('agenda', lst); }
-    persistenciaCloudFirst.salvar('agenda', local).then(r => {
+    persistenciaCloudFirst.salvar('agenda', local, { decisaoDeConflito: true }).then(r => {
       if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return;
       if (r && r.ok) {
         if (cid) cloudRel.resolverConflito(cid, 'local', { version: r.row && r.row.version });

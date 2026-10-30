@@ -448,8 +448,24 @@ const persistenciaCloudFirst = {
         if (drenagem && drenagem.indisponivel === true) {
           return persistenciaCloudFirst._protegerOffline(op, 'rede');
         }
-        return { ok: false, blocked: true, durable: false, motivo: 'operacao_anterior_pendente',
-          operationId: op.operationId };
+        /* O NÓ DO CONFLITO. A gravação antiga ficou na fila marcada
+           "conflito" e só sai quando o conflito estiver decidido; a decisão
+           ("manter o meu" ou a regra da última edição) é esta gravação nova —
+           que esperava a antiga sair. Uma esperava a outra para sempre.
+           Quando a gravação nova É a decisão do conflito deste registro, ela
+           passa na frente; as antigas presas em conflito só saem da fila
+           DEPOIS do recibo do servidor para a nova, que as substitui (a
+           evidência continua preservada no conflito). */
+        exec = Object.assign({}, exec, {
+          substituidas: exec.substituiConflito ? await persistenciaCloudFirst._presasEmConflito(op) : []
+        });
+        if (!exec.substituidas.length) {
+          return { ok: false, blocked: true, durable: false, motivo: 'operacao_anterior_pendente',
+            operationId: op.operationId };
+        }
+        if (!contextoAba.corresponde(op.contexto)) {
+          return { ok: false, motivo: 'contexto_trocado', durable: false };
+        }
       }
       const anterior = drenagem && drenagem.confirmados && drenagem.confirmados.find(x =>
         x.mod === op.module && x.id === op.entityId);
@@ -467,6 +483,12 @@ const persistenciaCloudFirst = {
           motivo: 'contexto_trocado', operationId: op.operationId });
       }
       persistenciaCloudFirst._intencoesMemoria.delete(chave);
+      if (exec.substituidas && exec.substituidas.length) {
+        for (const velha of exec.substituidas) {
+          try { await filaCifrada.confirmar(velha.operationId, { remoteConfirmed: true, checksum: velha.checksum }); } catch (e) {}
+        }
+        try { await persistenciaCloudFirst._reindexar(); } catch (e) {}
+      }
       try {
         if (op.payload.transport === persistenciaCloudFirst.TRANSPORTE_ADENDO) {
           if (typeof adendos !== 'undefined') adendos.confirmarOperacao(op, res.row);
@@ -493,11 +515,26 @@ const persistenciaCloudFirst = {
       motivo: (res && res.motivo) || (falha && falha.message) || 'recibo_invalido',
       operationId: op.operationId, checksum: op.payload.requestChecksum });
   },
-  async salvar(mod, item) {
+  async salvar(mod, item, opts = {}) {
     let op;
     try { op = await persistenciaCloudFirst._montar(mod, item); }
     catch (e) { return { ok: false, motivo: e.code || e.message || 'operacao_invalida', durable: false }; }
-    return persistenciaCloudFirst._executar(op, item);
+    return persistenciaCloudFirst._executar(op, item, { substituiConflito: opts.decisaoDeConflito === true });
+  },
+  /* gravações antigas DESTE registro, deste aparelho, que só estão na fila
+     porque esbarraram num conflito (ou ficaram bloqueadas atrás dele) — nunca
+     adendo, nunca exclusão, nunca de outro registro */
+  async _presasEmConflito(op) {
+    let todas = [];
+    try { todas = await filaCifrada.listar(); } catch (e) { return []; }
+    const chave = persistenciaCloudFirst._chave(op.module, op.entityId);
+    const mesmas = todas.filter(o => o && o.operationId !== op.operationId &&
+      persistenciaCloudFirst._chave(o.module, o.entityId) === chave);
+    if (!mesmas.length) return [];
+    const substituivel = o => o.payload && o.payload.action !== 'delete' &&
+      o.payload.transport !== persistenciaCloudFirst.TRANSPORTE_ADENDO &&
+      o.queue && (o.queue.state === 'conflict' || o.queue.state === 'blocked');
+    return mesmas.every(substituivel) && mesmas.some(o => o.queue.state === 'conflict') ? mesmas : [];
   },
   async salvarAdendo(mod, rec, ad, tabela) {
     let op;

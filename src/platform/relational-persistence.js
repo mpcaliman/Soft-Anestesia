@@ -371,10 +371,34 @@ const cloudRel = {
     const row = { organization_id: org, legacy_id: key, nome: id.nome || 'Sem nome',
       cpf: id.cpf || null, convenio: id.convenio || item.convenio || null, data: { origem: 'auto' } };
     const ret = await cloudRel._inserirSemSobrescrever('patients', org, key, row, 'id,legacy_id,version');
-    const pid = ret && ret.ok && ret.row ? ret.row.id : null;
+    let pid = ret && ret.ok && ret.row ? ret.row.id : null;
+    /* O CPF JÁ TEM CADASTRO. A nuvem recusa um segundo paciente com o mesmo
+       CPF (patient_identity_already_registered) — e com razão: é a mesma
+       pessoa, cadastrada com outra grafia do nome. O registro passa a apontar
+       para o cadastro que já existe, em vez de ficar preso para sempre na
+       fila esperando um paciente que nunca vai ser criado. */
+    if (!pid && id.cpf && /patient_identity_already_registered/.test(String((ret && (ret.motivo || ret.message)) || ''))) {
+      pid = await cloudRel._pacientePorCpf(org, id.cpf);
+    }
     if (!pid) throw cloudRel._erroDependencia(ret, 'paciente');
     if (org === cloudRel._org()) cloudRel._cachePac[cacheKey] = pid;
     return pid;
+  },
+
+  async _pacientePorCpf(org, cpf) {
+    const d = String(cpf || '').replace(/\D/g, '');
+    if (d.length !== 11) return null;
+    const fmt = d.slice(0, 3) + '.' + d.slice(3, 6) + '.' + d.slice(6, 9) + '-' + d.slice(9);
+    try {
+      const c = cloud.config();
+      const r = await fetch(c.url + '/rest/v1/patients?organization_id=eq.' + encodeURIComponent(org) +
+        '&deleted_at=is.null&cpf=in.(' + encodeURIComponent('"' + d + '","' + fmt + '"') + ')&select=id&limit=2',
+        { headers: cloud._headers(true) });
+      if (!r.ok) return null;
+      const rows = await r.json().catch(() => []);
+      /* um só: dois cadastros com o mesmo CPF não se resolvem no escuro */
+      return Array.isArray(rows) && rows.length === 1 ? rows[0].id : null;
+    } catch (e) { return null; }
   },
 
   /* Grava paciente com compare-and-swap por version. */
@@ -1883,7 +1907,7 @@ const cloudRel = {
       _relUpdatedBy: nuvem._relUpdatedBy || '', _relOrg: nuvem._relOrg || base._relOrg
     });
     if (ix >= 0) { lista[ix] = envio; store.setList(mod, lista); }
-    const r = await persistenciaCloudFirst.salvar(mod, envio);
+    const r = await persistenciaCloudFirst.salvar(mod, envio, { decisaoDeConflito: true });
     if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return false;
     if (r && (r.ok || r.remoteConfirmed || r.queued)) {
       return cloudRel.resolverConflito(e.clientId, 'local',
@@ -3058,7 +3082,7 @@ const cloudRel = {
       });
       store.setList(cf.mod, lst);
     }
-    return persistenciaCloudFirst.salvar(cf.mod, cf.local);
+    return persistenciaCloudFirst.salvar(cf.mod, cf.local, { decisaoDeConflito: true });
     }).then(r => {
       if (!r) return;
       if (!cloudRel._contextoValido(contexto, contexto.organizationId)) return;
