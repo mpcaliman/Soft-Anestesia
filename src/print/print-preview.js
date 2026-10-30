@@ -918,7 +918,7 @@ ${TAG_CLOSE_HTML}`;
       const ativas = Object.keys(PADRAO).map(serieDe).filter(s => pontos.some(p => Number.isFinite(valor(p, s.k))));
       if (!pontos.length || !ativas.length) return '';
       const canvas = document.createElement('canvas');
-      canvas.width = 960; canvas.height = 280;
+      canvas.width = 960; canvas.height = 260;
       const ctx = canvas.getContext('2d');
       if (!ctx) return '';
       const inicio = pontos[0].t, fim = Math.max(inicio + 5, pontos[pontos.length - 1].t);
@@ -926,7 +926,8 @@ ${TAG_CLOSE_HTML}`;
         .map(s => valor(p, s.k))).filter(Number.isFinite);
       const min = Math.min(0, ...valoresPrincipais), max = Math.max(200, Math.ceil((Math.max(0, ...valoresPrincipais) + 10) / 20) * 20);
       const x = t => 42 + (t - inicio) * 900 / (fim - inicio);
-      const topo = 46, base = 230;
+      /* mesma geometria de sempre: 0–200 entre y=210 e y=30 */
+      const topo = 30, base = 210;
       const yPrincipal = v => base - (v - min) * (base - topo) / (max - min);
       const yDe = (k, v) => {
         const f = FAIXA[k];
@@ -934,7 +935,7 @@ ${TAG_CLOSE_HTML}`;
         const r = Math.max(0, Math.min(1, (v - f[0]) / (f[1] - f[0])));
         return base - r * (base - topo);
       };
-      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 960, 280);
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 960, 260);
       ctx.font = '12px sans-serif'; ctx.lineWidth = 1;
       for (let i = 0; i <= 4; i++) {
         const v = min + (max - min) * i / 4;
@@ -945,10 +946,10 @@ ${TAG_CLOSE_HTML}`;
       let lx = 42, ly = 16;
       ativas.forEach(s => {
         const rot = s.label + (FAIXA[s.k] ? ' (' + FAIXA[s.k][0] + '–' + FAIXA[s.k][1] + ')' : '');
-        const w = ctx.measureText(rot).width + 30;
+        const w = (typeof ctx.measureText === 'function' ? ctx.measureText(rot).width : rot.length * 7) + 30;
         if (lx + w > 942) { lx = 42; ly += 16; }
-        if (s.marca && ui && ui.desenharMarca) { try { ui.desenharMarca(ctx, s.marca, lx + 5, ly - 4, s.cor, 1); } catch (e) {} }
-        else { ctx.fillStyle = s.cor; ctx.beginPath(); ctx.arc(lx + 5, ly - 4, 3, 0, Math.PI * 2); ctx.fill(); }
+        /* amostra da cor em quadradinho: círculos ficam só para os pontos */
+        ctx.fillStyle = s.cor; ctx.fillRect(lx + 2, ly - 8, 7, 7);
         ctx.fillStyle = s.cor; ctx.fillText(rot, lx + 13, ly);
         lx += w;
       });
@@ -970,7 +971,7 @@ ${TAG_CLOSE_HTML}`;
       });
       ctx.fillStyle = '#334155';
       const passo = Math.max(1, Math.ceil(pontos.length / 10));
-      pontos.forEach((p, i) => { if (i % passo === 0 || i === pontos.length - 1) ctx.fillText(p.hora, x(p.t) - 16, 254); });
+      pontos.forEach((p, i) => { if (i % passo === 0 || i === pontos.length - 1) ctx.fillText(p.hora, x(p.t) - 16, 234); });
       const dataUrl = canvas.toDataURL('image/png');
       return '<div style="text-align:center;margin:8px 0"><img class="pp-grafico-img" src="' + dataUrl + '" style="max-width:100%;border:1px solid #ccc" alt="Gráfico dos sinais vitais da versão vigente" data-series="' +
         ativas.map(s => s.k).join(',') + '"></div>';
