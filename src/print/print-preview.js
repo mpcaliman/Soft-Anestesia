@@ -882,9 +882,24 @@ ${TAG_CLOSE_HTML}`;
      memória, com as mesmas séries da versão vigente usada pelas tabelas. */
   _graficoDaVersao(vitais) {
     try {
-      const series = [['pas', 'PAS', '#2563eb'], ['pad', 'PAD', '#7c3aed'],
-        ['pam', 'PAM', '#0891b2'], ['fc', 'FC', '#dc2626'],
-        ['spo2', 'SpO₂', '#16a34a'], ['etco2', 'EtCO₂', '#d97706']];
+      /* TODOS OS SINAIS REGISTRADOS — não só os seis de sempre. FR, temperatura,
+         BIS, TOF, glicemia, PVC, PIC, DC, ScvO₂ e CAM eram selecionados e
+         preenchidos na ficha e sumiam do papel. Cores e marcas são as mesmas
+         da tela (anestesia.graficoUI.SERIES), para o papel ler igual. */
+      const PADRAO = { pas: ['PAS', '#C0392B'], pad: ['PAD', '#E67E22'], pam: ['PAM', '#8E44AD'], fc: ['FC', '#1C64A9'],
+        spo2: ['SpO₂', '#0E9F6E'], etco2: ['EtCO₂', '#00838F'], fr: ['FR', '#5E35B1'], temp: ['Temp °C', '#D81B60'],
+        bis: ['BIS', '#B7791F'], tof: ['TOF %', '#546E7A'], glic: ['Glic', '#6D4C41'], pvc: ['PVC', '#7CB342'],
+        pic: ['PIC', '#3949AB'], dc: ['DC', '#00ACC1'], scvo2: ['ScvO₂', '#558B2F'], cam: ['CAM', '#FF7043'] };
+      const ui = (typeof anestesia !== 'undefined' && anestesia.graficoUI) || null;
+      const serieDe = k => {
+        const s = ui && ui.SERIES && ui.SERIES[k];
+        return { k, label: (s && s.label) || PADRAO[k][0], cor: (s && s.cor) || PADRAO[k][1], marca: s && s.marca };
+      };
+      /* na escala principal (0–200) só o que cabe nela; o resto é desenhado na
+         própria faixa, com a faixa escrita na legenda — temperatura a 37 colada
+         no zero não se lê */
+      const PRINCIPAL = ['pas', 'pad', 'pam', 'fc', 'spo2', 'etco2', 'fr', 'bis', 'tof', 'scvo2'];
+      const FAIXA = { temp: [32, 42], glic: [20, 400], pvc: [0, 30], pic: [0, 50], dc: [0, 15], cam: [0, 3] };
       let dia = 0, ultimo = -1;
       const pontos = (vitais || []).filter(v => /^\d{2}:\d{2}$/.test(v.hora || '')).map(v => {
         const partes = v.hora.split(':').map(Number);
@@ -899,46 +914,66 @@ ${TAG_CLOSE_HTML}`;
         if (!ponto.pam && ponto.pas && ponto.pad) ponto.pam = Math.round((Number(ponto.pas) + 2 * Number(ponto.pad)) / 3);
         return ponto;
       });
-      const valor = (p, key) => p[key] === '' || p[key] == null ? NaN : Number(p[key]);
-      const ativas = series.filter(s => pontos.some(p => Number.isFinite(valor(p, s[0]))));
+      const valor = (p, key) => p[key] === '' || p[key] == null ? NaN : Number(String(p[key]).replace(',', '.'));
+      const ativas = Object.keys(PADRAO).map(serieDe).filter(s => pontos.some(p => Number.isFinite(valor(p, s.k))));
       if (!pontos.length || !ativas.length) return '';
       const canvas = document.createElement('canvas');
-      canvas.width = 960; canvas.height = 260;
+      canvas.width = 960; canvas.height = 280;
       const ctx = canvas.getContext('2d');
       if (!ctx) return '';
       const inicio = pontos[0].t, fim = Math.max(inicio + 5, pontos[pontos.length - 1].t);
-      const valores = pontos.flatMap(p => ativas.map(s => valor(p, s[0]))).filter(Number.isFinite);
-      const min = Math.min(0, ...valores), max = Math.max(200, Math.ceil((Math.max(...valores) + 10) / 20) * 20);
+      const valoresPrincipais = pontos.flatMap(p => ativas.filter(s => PRINCIPAL.indexOf(s.k) >= 0)
+        .map(s => valor(p, s.k))).filter(Number.isFinite);
+      const min = Math.min(0, ...valoresPrincipais), max = Math.max(200, Math.ceil((Math.max(0, ...valoresPrincipais) + 10) / 20) * 20);
       const x = t => 42 + (t - inicio) * 900 / (fim - inicio);
-      const y = v => 210 - (v - min) * 180 / (max - min);
-      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 960, 260);
+      const topo = 46, base = 230;
+      const yPrincipal = v => base - (v - min) * (base - topo) / (max - min);
+      const yDe = (k, v) => {
+        const f = FAIXA[k];
+        if (!f) return yPrincipal(v);
+        const r = Math.max(0, Math.min(1, (v - f[0]) / (f[1] - f[0])));
+        return base - r * (base - topo);
+      };
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 960, 280);
       ctx.font = '12px sans-serif'; ctx.lineWidth = 1;
       for (let i = 0; i <= 4; i++) {
         const v = min + (max - min) * i / 4;
-        ctx.strokeStyle = '#dbe2ea'; ctx.beginPath(); ctx.moveTo(42, y(v)); ctx.lineTo(942, y(v)); ctx.stroke();
-        ctx.fillStyle = '#334155'; ctx.fillText(String(Math.round(v)), 4, y(v) + 4);
+        ctx.strokeStyle = '#dbe2ea'; ctx.beginPath(); ctx.moveTo(42, yPrincipal(v)); ctx.lineTo(942, yPrincipal(v)); ctx.stroke();
+        ctx.fillStyle = '#334155'; ctx.fillText(String(Math.round(v)), 4, yPrincipal(v) + 4);
       }
-      ativas.forEach((s, i) => {
-        ctx.strokeStyle = s[2]; ctx.fillStyle = s[2]; ctx.lineWidth = 2;
-        ctx.fillText(s[1], 42 + i * 100, 17);
+      /* legenda em até duas linhas: cada sinal com a sua cor e marca */
+      let lx = 42, ly = 16;
+      ativas.forEach(s => {
+        const rot = s.label + (FAIXA[s.k] ? ' (' + FAIXA[s.k][0] + '–' + FAIXA[s.k][1] + ')' : '');
+        const w = ctx.measureText(rot).width + 30;
+        if (lx + w > 942) { lx = 42; ly += 16; }
+        if (s.marca && ui && ui.desenharMarca) { try { ui.desenharMarca(ctx, s.marca, lx + 5, ly - 4, s.cor, 1); } catch (e) {} }
+        else { ctx.fillStyle = s.cor; ctx.beginPath(); ctx.arc(lx + 5, ly - 4, 3, 0, Math.PI * 2); ctx.fill(); }
+        ctx.fillStyle = s.cor; ctx.fillText(rot, lx + 13, ly);
+        lx += w;
+      });
+      ativas.forEach(s => {
+        ctx.strokeStyle = s.cor; ctx.fillStyle = s.cor; ctx.lineWidth = 2;
         ctx.beginPath(); let conectado = false;
         pontos.forEach(p => {
-          const v = valor(p, s[0]);
+          const v = valor(p, s.k);
           if (!Number.isFinite(v)) { conectado = false; return; }
-          if (conectado) ctx.lineTo(x(p.t), y(v)); else ctx.moveTo(x(p.t), y(v));
+          if (conectado) ctx.lineTo(x(p.t), yDe(s.k, v)); else ctx.moveTo(x(p.t), yDe(s.k, v));
           conectado = true;
         });
         ctx.stroke();
         pontos.forEach(p => {
-          const v = valor(p, s[0]); if (!Number.isFinite(v)) return;
-          ctx.beginPath(); ctx.arc(x(p.t), y(v), 2.5, 0, Math.PI * 2); ctx.fill();
+          const v = valor(p, s.k); if (!Number.isFinite(v)) return;
+          if (s.marca && ui && ui.desenharMarca) { try { ui.desenharMarca(ctx, s.marca, x(p.t), yDe(s.k, v), s.cor, 1); return; } catch (e) {} }
+          ctx.fillStyle = s.cor; ctx.beginPath(); ctx.arc(x(p.t), yDe(s.k, v), 2.5, 0, Math.PI * 2); ctx.fill();
         });
       });
       ctx.fillStyle = '#334155';
       const passo = Math.max(1, Math.ceil(pontos.length / 10));
-      pontos.forEach((p, i) => { if (i % passo === 0 || i === pontos.length - 1) ctx.fillText(p.hora, x(p.t) - 16, 234); });
+      pontos.forEach((p, i) => { if (i % passo === 0 || i === pontos.length - 1) ctx.fillText(p.hora, x(p.t) - 16, 254); });
       const dataUrl = canvas.toDataURL('image/png');
-      return '<div style="text-align:center;margin:8px 0"><img class="pp-grafico-img" src="' + dataUrl + '" style="max-width:100%;border:1px solid #ccc" alt="Gráfico dos sinais vitais da versão vigente"></div>';
+      return '<div style="text-align:center;margin:8px 0"><img class="pp-grafico-img" src="' + dataUrl + '" style="max-width:100%;border:1px solid #ccc" alt="Gráfico dos sinais vitais da versão vigente" data-series="' +
+        ativas.map(s => s.k).join(',') + '"></div>';
     } catch (e) { return ''; }
   },
 
@@ -2610,8 +2645,14 @@ ${TAG_CLOSE_HTML}`;
     const d = printPreview._dadosDoFormulario('termo');
     const meta = `${utils.formatarData(d.data) || new Date().toLocaleDateString('pt-BR')}`;
     /* Texto do termo em parágrafos */
+    const estiloParagrafo = 'margin:0 0 8px;text-align:justify;font-size:calc(10pt * var(--pp-esc, 1));line-height:1.5';
     const textoHtml = (d.texto || '').split('\n').filter(l => l.trim())
-      .map(l => `<p style="margin:0 0 8px;text-align:justify;font-size:calc(10pt * var(--pp-esc, 1));line-height:1.5">${utils.escapeHTML(l)}</p>`).join('');
+      .map(l => `<p style="${estiloParagrafo}">${utils.escapeHTML(l)}</p>`).join('');
+    /* Riscos e observações saem como o resto do termo — justificados, mesma
+       letra e entrelinha —; antes tinham estilo próprio e destoavam na folha.
+       O título em negrito abre o primeiro parágrafo. */
+    const paragrafosComTitulo = (titulo, texto) => String(texto || '').split('\n').filter(l => l.trim())
+      .map((l, i) => `<p style="${estiloParagrafo}">${i === 0 ? '<strong>' + utils.escapeHTML(titulo) + '</strong> ' : ''}${utils.escapeHTML(l)}</p>`).join('');
 
     /* QUEM ACOMPANHOU A CONSULTA ENTRA NO TERMO.
        Quem estava na sala ouviu a orientação e, em menor de idade ou paciente
@@ -2672,8 +2713,8 @@ ${TAG_CLOSE_HTML}`;
       acompHtml +
       respHtml +
       printPreview._section('Termo', textoHtml +
-        (d.riscos ? `<p style="margin:10px 0 0;font-size:calc(10pt * var(--pp-esc, 1))"><strong>Riscos específicos discutidos:</strong> ${utils.escapeHTML(d.riscos)}</p>` : '') +
-        (d.observacoes ? `<p style="margin:8px 0 0;font-size:calc(10pt * var(--pp-esc, 1))"><strong>Observações:</strong> ${utils.escapeHTML(d.observacoes)}</p>` : '')) +
+        paragrafosComTitulo('Riscos específicos discutidos:', d.riscos) +
+        paragrafosComTitulo('Observações:', d.observacoes)) +
       printPreview._section('Local e data', `
         <div class="pp-grid cols-3">
           ${printPreview._field('Local', d.local)}

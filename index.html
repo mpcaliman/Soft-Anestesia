@@ -4894,7 +4894,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-26b</b><br>
+    v7.1 · build <b id="build-tag">2026-10-30a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -33959,9 +33959,17 @@ const anestesia = {
         ? '<div class="field col-3"><label>Horário <small style="color:var(--text-mute);font-weight:400">— vai para o evento</small></label>' +
           '<input type="time" name="td_hora" value="' + utils.escapeAttr(horaEvt) + '"></div>'
         : '';
+      /* o texto que está HOJE no evento, editável aqui também — o que for
+         escrito na tabela aparece aqui, e vice-versa */
+      const linhaEvt = evtTipo ? anestesia.eventos._linhaDoTipo(evtTipo) : null;
+      const textoEvt = d.evento_texto || (linhaEvt ? ((linhaEvt.querySelector('[name="evt_obs[]"]') || {}).value || '') : '');
+      const campoTexto = evtTipo
+        ? '<div class="field col-12"><label>Texto na linha do tempo <small style="color:var(--text-mute);font-weight:400">— o mesmo da tabela de eventos; em branco, o sistema monta a partir dos campos</small></label>' +
+          '<textarea name="td_evento_texto" rows="2">' + utils.escapeHTML(textoEvt) + '</textarea></div>'
+        : '';
       const corpo =
         '<p style="font-size:.82rem;color:var(--text-mute);margin:0 0 10px">O que você preencher aqui fica gravado na ficha e vira a descrição desta técnica — no texto da técnica realizada e no evento da linha do tempo. Tudo é opcional.</p>' +
-        '<form id="form-tecdet" onsubmit="return false"><div class="grid">' + campoHora + esp.campos.map(campo).join('') + '</div></form>';
+        '<form id="form-tecdet" onsubmit="return false"><div class="grid">' + campoHora + esp.campos.map(campo).join('') + campoTexto + '</div></form>';
       modal.open(esp.titulo, corpo,
         '<button class="btn" onclick="modal.close()">Cancelar</button>' +
         '<button class="btn btn-primary" onclick="anestesia.tecnicaDet.salvar(' + utils.jsArg(tipo) + ')">Salvar detalhes</button>');
@@ -34088,15 +34096,34 @@ const anestesia = {
       const hEl = f.querySelector('[name="td_hora"]');
       const hora = hEl ? String(hEl.value || '').trim() : '';
       if (hora) d.hora = hora;
+      /* TEXTO DO EVENTO — vale a última edição. Mudou os campos e deixou o
+         texto como estava: o texto volta a ser montado dos campos. Mudou o
+         texto: é ele que vai para a tabela. */
+      const anterior = anestesia.tecnicaDet.de(tipo);
+      const tEl = f.querySelector('[name="td_evento_texto"]');
+      const textoEvt = tEl ? String(tEl.value || '').trim() : '';
+      const evtTipo = anestesia.eventos.TIPO_EVENTO[tipo];
+      const linhaEvt = evtTipo ? anestesia.eventos._linhaDoTipo(evtTipo) : null;
+      const textoAntes = anterior.evento_texto || (linhaEvt ? String((linhaEvt.querySelector('[name="evt_obs[]"]') || {}).value || '').trim() : '');
+      const camposMudaram = esp.campos.some(c => (anterior[c.n] || '') !== (d[c.n] || ''));
+      const textoMudou = textoEvt !== textoAntes;
+      if (textoEvt && (textoMudou || (!camposMudaram && anterior.evento_texto))) d.evento_texto = textoEvt;
       if (Object.keys(d).length) anestesia.tecnicaDet._dados[tipo] = d;
       else delete anestesia.tecnicaDet._dados[tipo];
       modal.close();
       anestesia.tecnicaDet.aplicar(tipo);
       /* o horário digitado manda no evento — era isto que não saía do card */
-      const evtTipo = anestesia.eventos.TIPO_EVENTO[tipo];
       if (hora && evtTipo) {
         try { anestesia.eventos.sincronizarHorario(evtTipo, hora); } catch (e) {}
       }
+      try {
+        const linha = evtTipo ? anestesia.eventos._linhaDoTipo(evtTipo) : null;
+        const obs = linha && linha.querySelector('[name="evt_obs[]"]');
+        if (obs) {
+          if (d.evento_texto) { obs.value = d.evento_texto; delete linha.dataset.auto; }
+          else if (textoMudou || camposMudaram) { linha.dataset.auto = '1'; obs.value = ''; anestesia.eventos.atualizarDescricoes(); }
+        }
+      } catch (e) {}
       try { markDirty(); } catch (e) {}
       try { toast('Detalhes de "' + tipo + '" gravados na ficha.'); } catch (e) {}
     },
@@ -34796,6 +34823,49 @@ const anestesia = {
       anestesia.eventos.atualizarDescricoes();
     },
 
+    /* O CAMINHO DE VOLTA. A janela da técnica (sedação, geral…), o quadro do
+       bloqueio e o da via aérea mandam horário e texto para o evento; agora o
+       evento editado na tabela também volta para eles. Vale a última edição,
+       de qualquer um dos lados. */
+    _horaParaOrigem(tr) {
+      if (!tr || !tr.closest('#eventos-body')) return;
+      const tipo = (tr.querySelector('[name="evt_tipo[]"]') || {}).value || '';
+      const hora = (tr.querySelector('[name="evt_hora[]"]') || {}).value || '';
+      if (!tipo || !hora) return;
+      const tec = anestesia.eventos.EVENTO_TIPO[tipo];
+      if (tec) {
+        const d = Object.assign({}, anestesia.tecnicaDet.de(tec), { hora });
+        anestesia.tecnicaDet._dados[tec] = d;
+      }
+      const f = anestesia.eventos._f();
+      const set = (n, v) => { const el = f && f.querySelector('[name="' + n + '"]'); if (el && el.value !== v) { el.value = v; return true; } return false; };
+      const b = anestesia.eventos._bloq();
+      const evtBloq = /peridural|combinada/i.test(b.tipo || '') ? 'Peridural'
+        : /raqui/i.test(b.tipo || '') ? 'Raquianestesia' : b.tipo ? 'Bloqueio periférico' : '';
+      if (evtBloq && evtBloq === tipo && set('bloqueio_hora', hora)) {
+        try { anestesia.bloqueio.aplicarHoraPuncao(hora); } catch (e) {}
+      }
+      const via = anestesia.eventos._v('via_aerea_uso');
+      if (via && anestesia.eventos.VIA_AEREA_EVENTO[via] === tipo) set('via_aerea_hora', hora);
+      try { markDirty(); } catch (e) {}
+    },
+    _textoParaOrigem(tr) {
+      if (!tr || !tr.closest('#eventos-body') || tr.dataset.auto === '1') return;
+      const tipo = (tr.querySelector('[name="evt_tipo[]"]') || {}).value || '';
+      const tec = anestesia.eventos.EVENTO_TIPO[tipo];
+      if (!tec) return;
+      const texto = String((tr.querySelector('[name="evt_obs[]"]') || {}).value || '').trim();
+      const d = Object.assign({}, anestesia.tecnicaDet.de(tec));
+      if (texto) d.evento_texto = texto; else delete d.evento_texto;
+      anestesia.tecnicaDet._dados[tec] = d;
+      try { markDirty(); } catch (e) {}
+    },
+    _linhaDoTipo(tipoEvt) {
+      const body = document.getElementById('eventos-body');
+      if (!body) return null;
+      return Array.from(body.querySelectorAll('tr')).find(r => (r.querySelector('[name="evt_tipo[]"]') || {}).value === tipoEvt) || null;
+    },
+
     /* Insere a descrição técnica do tipo selecionado no campo de detalhes */
     inserirDescricao(btn) {
       const tr = btn.closest('tr');
@@ -34876,6 +34946,25 @@ const anestesia = {
     /* a linha do tempo fica sempre em ordem de horário; sem horário vai ao fim */
     _ordenar(tbody) {
       if (!tbody) return;
+      /* NÃO MEXE NA LINHA ENQUANTO ALGUÉM DIGITA NELA. Num campo de hora que já
+         tem valor, cada dígito forma um horário válido e dispara a mudança;
+         reordenar ali movia a linha, o cursor saía do campo e não dava para
+         digitar os quatro dígitos. A ordem é refeita quando o foco sai da
+         tabela. */
+      const ativo = document.activeElement;
+      if (ativo && tbody.contains(ativo)) {
+        if (!tbody._ordenarAoSair) {
+          tbody._ordenarAoSair = true;
+          const aoSair = (ev) => {
+            if (ev && ev.relatedTarget && tbody.contains(ev.relatedTarget)) return;
+            tbody.removeEventListener('focusout', aoSair);
+            tbody._ordenarAoSair = false;
+            setTimeout(() => anestesia.eventos._ordenar(tbody), 0);
+          };
+          tbody.addEventListener('focusout', aoSair);
+        }
+        return;
+      }
       const horaDe = tr => { const el = tr.querySelector('[name="evt_hora[]"]'); return (el && el.value) ? el.value : '99:99'; };
       const linhas = Array.from(tbody.children);
       const ordenadas = linhas.slice().sort((a, b) => horaDe(a).localeCompare(horaDe(b)));
@@ -35123,7 +35212,12 @@ const anestesia = {
       });
       const selTipo = tr.querySelector('[name="evt_tipo[]"]');
       const horaEl = tr.querySelector('[name="evt_hora[]"]');
-      if (horaEl) horaEl.addEventListener('change', () => anestesia.eventos._ordenar(tr.parentElement));
+      if (horaEl) horaEl.addEventListener('change', () => {
+        anestesia.eventos._ordenar(tr.parentElement);
+        try { anestesia.eventos._horaParaOrigem(tr); } catch (e) {}
+      });
+      const obsEl = tr.querySelector('[name="evt_obs[]"]');
+      if (obsEl) obsEl.addEventListener('change', () => { try { anestesia.eventos._textoParaOrigem(tr); } catch (e) {} });
       if (selTipo) selTipo.addEventListener('change', () => {
         if (selTipo.value) anestesia.eventos._removidos.delete(selTipo.value);
         try { anestesia.eventos.atualizarDescricoes(); } catch (e) {}

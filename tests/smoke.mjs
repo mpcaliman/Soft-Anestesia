@@ -24497,6 +24497,105 @@ await test('Programador: cada pessoa mostra último acesso, dias com uso e o que
   await page.close();
 });
 
+await test('Eventos: o horário aceita os quatro dígitos e a janela da técnica conversa com a tabela nos dois sentidos', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    store.setList('anestesia', []);
+    ui.navegar('anestesia');
+    await new Promise(res => setTimeout(res, 400));
+    try { modal.close(); } catch (e) {}
+    document.querySelectorAll('#module-anestesia .card.collapsed').forEach(c => c.classList.remove('collapsed'));
+    anestesia.graficoUI._contexto = 'anestesia';
+    const abrirJanela = async () => {
+      for (let i = 0; i < 30; i++) {
+        try { modal.close(); } catch (e) {}
+        anestesia.tecnicaDet.abrir('Sedação');
+        await new Promise(res => setTimeout(res, 200));
+        const f = document.getElementById('form-tecdet');
+        if (f) return f;
+      }
+      return null;
+    };
+    const body = document.getElementById('eventos-body');
+    body.innerHTML = '';
+    anestesia.eventos.add({ tipo: 'Entrada em sala', hora: '08:00' });
+    anestesia.eventos.add({ tipo: 'Sedação', hora: '08:10' });
+    anestesia.eventos.add({ tipo: 'Saída de sala', hora: '09:00' });
+    /* digitando na linha da sedação: a linha não pode fugir do cursor */
+    const linhaSed = anestesia.eventos._linhaDoTipo('Sedação');
+    const h = linhaSed.querySelector('[name="evt_hora[]"]');
+    h.focus();
+    h.value = '09:30'; h.dispatchEvent(new Event('change', { bubbles: true }));
+    out.naoMoveuDigitando = body.children[1] === linhaSed && document.activeElement === h;
+    h.blur();
+    await new Promise(res => setTimeout(res, 30));
+    out.ordenouAoSair = body.lastElementChild === linhaSed;
+    /* tabela → janela: o horário editado na tabela vai para a técnica */
+    out.horaVoltou = anestesia.tecnicaDet.de('Sedação').hora === '09:30';
+    const obs = linhaSed.querySelector('[name="evt_obs[]"]');
+    delete linhaSed.dataset.auto;
+    obs.value = 'Sedação leve com propofol, sem intercorrências.';
+    obs.dispatchEvent(new Event('change', { bubbles: true }));
+    out.textoVoltou = anestesia.tecnicaDet.de('Sedação').evento_texto === 'Sedação leve com propofol, sem intercorrências.';
+    /* a janela abre com o horário e o texto da tabela */
+    const ft = await abrirJanela();
+    out.janelaMostra = ft.querySelector('[name="td_hora"]').value === '09:30' &&
+      ft.querySelector('[name="td_evento_texto"]').value === 'Sedação leve com propofol, sem intercorrências.';
+    /* janela → tabela: texto novo na janela vai para a linha */
+    ft.querySelector('[name="td_evento_texto"]').value = 'Sedação moderada.';
+    ft.querySelector('[name="td_hora"]').value = '08:20';
+    anestesia.tecnicaDet.salvar('Sedação');
+    await new Promise(res => setTimeout(res, 50));
+    const l2 = anestesia.eventos._linhaDoTipo('Sedação');
+    out.janelaManda = l2.querySelector('[name="evt_obs[]"]').value === 'Sedação moderada.' &&
+      l2.querySelector('[name="evt_hora[]"]').value === '08:20';
+    /* mudou só os campos: o texto volta a ser montado deles (última edição) */
+    const ft2 = await abrirJanela();
+    const ag = ft2.querySelector('[name^="td_"]:not([name="td_hora"]):not([name="td_evento_texto"])');
+    if (ag) { ag.value = ag.tagName === 'SELECT' ? (ag.options[1] || {}).value || '' : 'Midazolam'; }
+    anestesia.tecnicaDet.salvar('Sedação');
+    await new Promise(res => setTimeout(res, 50));
+    out.camposMandam = !anestesia.tecnicaDet.de('Sedação').evento_texto &&
+      anestesia.eventos._linhaDoTipo('Sedação').querySelector('[name="evt_obs[]"]').value !== 'Sedação moderada.';
+    try { modal.close(); } catch (e) {}
+    return out;
+  });
+  assert(r.naoMoveuDigitando, 'enquanto digita a hora, a linha fica parada e o cursor continua no campo');
+  assert(r.ordenouAoSair, 'ao sair do campo, a tabela volta a ficar em ordem de horário');
+  assert(r.horaVoltou && r.textoVoltou, 'horário e texto editados na tabela voltam para a técnica');
+  assert(r.janelaMostra, 'a janela abre com o horário e o texto da tabela');
+  assert(r.janelaManda, 'o que se muda na janela vai para a linha do evento');
+  assert(r.camposMandam, 'mudar só os campos remonta o texto a partir deles — vale a última edição');
+  await page.close();
+});
+
+await test('Impressão: gráfico mostra todos os sinais registrados, e o TCLE imprime riscos como o resto do texto', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const vit = [
+      { hora: '08:00', pas: 120, pad: 70, fc: 80, spo2: 98, fr: 14, temp: 36.4, bis: 45 },
+      { hora: '08:15', pas: 110, pad: 65, fc: 76, spo2: 99, fr: 12, temp: 36.1, bis: 50 }
+    ];
+    const html = printPreview._graficoDaVersao(vit);
+    const series = (html.match(/data-series="([^"]+)"/) || [])[1] || '';
+    const ft = document.getElementById('form-termo');
+    const pos = (n, v) => { const el = ft.querySelector('[name="' + n + '"]'); if (el) el.value = v; };
+    pos('nome', 'Paciente Termo'); pos('texto', 'Linha um do termo.'); pos('riscos', 'Risco A.\nRisco B.'); pos('observacoes', 'Obs X.');
+    const termo = printPreview._buildTermo();
+    /* o pacote publicado troca style= por data-soft-style= (CSP estrita) */
+    const pRiscos = (termo.match(/<p (?:data-soft-)?style="([^"]+)"><strong>Riscos específicos discutidos:<\/strong>/) || [])[1] || '';
+    const pTexto = (termo.match(/<p (?:data-soft-)?style="([^"]+)">Linha um do termo\.<\/p>/) || [])[1] || '';
+    return { todos: ['pas', 'pad', 'pam', 'fc', 'spo2', 'fr', 'temp', 'bis'].every(k => series.split(',').indexOf(k) >= 0),
+      mesmoEstilo: !!pRiscos && pRiscos === pTexto && /justify/.test(pRiscos),
+      doisParagrafos: /Risco B\.<\/p>/.test(termo) };
+  });
+  assert(r.todos, 'FR, temperatura e BIS registrados entram no gráfico impresso, além dos seis de sempre');
+  assert(r.mesmoEstilo && r.doisParagrafos, 'riscos específicos saem justificados, com a mesma letra e entrelinha do termo');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
