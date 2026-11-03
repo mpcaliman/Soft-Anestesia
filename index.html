@@ -2800,10 +2800,18 @@ span.md-chip.md-nada { cursor: default; opacity: .6; font-weight: 500; }
   .print-preview-paper .pp-grid { gap: 3px 8px !important; }
   .print-preview-paper .pp-grid.cols-3 { grid-template-columns: 1fr 1fr !important; }
   /* Cabeçalho do paper em mobile */
+  /* NO CELULAR O CABEÇALHO QUEBRA EM LINHAS, NÃO CORTA.
+     O logo tinha largura fixa e não encolhia; o nome da clínica, o endereço,
+     a cidade e o telefone ficavam espremidos no que sobrava — e sumiam. */
   .print-preview-paper .pp-header-top {
     gap: 8px !important;
+    flex-wrap: wrap;
+    align-items: flex-start;
   }
-  .print-preview-paper .pp-logo { height: 90px !important; max-width: 375px !important; }
+  .print-preview-paper .pp-header-top > .pp-ident { flex: 1 1 100%; flex-wrap: wrap; }
+  .print-preview-paper .pp-logo { height: auto !important; max-height: 72px; max-width: 100% !important; flex-shrink: 1; }
+  .print-preview-paper .pp-clinica { flex: 1 1 180px; overflow-wrap: anywhere; }
+  .print-preview-paper .pp-prof { flex: 1 1 100%; text-align: left; overflow-wrap: anywhere; }
   .print-preview-paper .pp-prof-nome { font-size: 10.5pt !important; }
   .print-preview-paper .pp-prof-reg, .print-preview-paper .pp-prof-end { font-size: 8pt !important; }
   .print-preview-paper .pp-doc-title h1 {
@@ -4894,7 +4902,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-10-30a</b><br>
+    v7.1 · build <b id="build-tag">2026-11-03a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -8240,7 +8248,11 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
           <div class="field col-4"><label>Data do comparecimento</label><input type="date" name="decl_data" onchange="prescricao._syncDeclTexto()"></div>
           <div class="field col-4"><label>Entrada</label><input type="time" name="decl_hora_ini" onchange="prescricao._syncDeclTexto()"></div>
           <div class="field col-4"><label>Saída</label><input type="time" name="decl_hora_fim" onchange="prescricao._syncDeclTexto()"></div>
-          <div class="field col-12"><label>Acompanhante <small style="color:var(--text-mute)">(opcional)</small></label><input type="text" name="decl_acompanhante" placeholder="Nome do acompanhante, se houver" oninput="prescricao._syncDeclTexto()"></div>
+          <div class="field col-6"><label>Local do atendimento <small style="color:var(--text-mute)">(opcional)</small></label><input type="text" name="decl_local_atendimento" placeholder="Clínica, hospital ou consultório" oninput="prescricao._syncDeclTexto()"></div>
+          <div class="field col-6"><label>Finalidade <small style="color:var(--text-mute)">(opcional)</small></label><input type="text" name="decl_finalidade" list="decl-finalidades" placeholder="Ex.: apresentação no trabalho" oninput="prescricao._syncDeclTexto()"></div>
+          <div class="field col-6"><label>Acompanhante <small style="color:var(--text-mute)">(opcional)</small></label><input type="text" name="decl_acompanhante" placeholder="Nome do acompanhante, se houver" oninput="prescricao._syncDeclTexto()"></div>
+          <div class="field col-6"><label>Documento do acompanhante <small style="color:var(--text-mute)">(opcional)</small></label><input type="text" name="decl_acompanhante_doc" placeholder="RG ou CPF do acompanhante" oninput="prescricao._syncDeclTexto()"></div>
+          <datalist id="decl-finalidades"><option value="apresentação no trabalho"><option value="apresentação na escola/faculdade"><option value="justificativa de ausência"><option value="comprovação junto ao plano de saúde"></datalist>
           <div class="field col-12"><label>Texto da declaração <small style="color:var(--text-mute)">(gerado automaticamente — pode editar)</small></label>
             <textarea name="decl_texto" rows="4" placeholder="Preencha os campos acima para gerar o texto…" oninput="this.dataset.auto=''"></textarea></div>
         </div>
@@ -8405,7 +8417,10 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
           <div class="field col-4"><label>Data do comparecimento</label><input type="date" name="decl_data" onchange="documentos._syncDeclTexto()"></div>
           <div class="field col-4"><label>Entrada</label><input type="time" name="decl_hora_ini" onchange="documentos._syncDeclTexto()"></div>
           <div class="field col-4"><label>Saída</label><input type="time" name="decl_hora_fim" onchange="documentos._syncDeclTexto()"></div>
-          <div class="field col-12"><label>Acompanhante <small style="color:var(--text-mute)">(opcional)</small></label><input type="text" name="decl_acompanhante" placeholder="Nome do acompanhante, se houver" oninput="documentos._syncDeclTexto()"></div>
+          <div class="field col-6"><label>Local do atendimento <small style="color:var(--text-mute)">(opcional)</small></label><input type="text" name="decl_local_atendimento" placeholder="Clínica, hospital ou consultório" oninput="documentos._syncDeclTexto()"></div>
+          <div class="field col-6"><label>Finalidade <small style="color:var(--text-mute)">(opcional)</small></label><input type="text" name="decl_finalidade" list="decl-finalidades" placeholder="Ex.: apresentação no trabalho" oninput="documentos._syncDeclTexto()"></div>
+          <div class="field col-6"><label>Acompanhante <small style="color:var(--text-mute)">(opcional)</small></label><input type="text" name="decl_acompanhante" placeholder="Nome do acompanhante, se houver" oninput="documentos._syncDeclTexto()"></div>
+          <div class="field col-6"><label>Documento do acompanhante <small style="color:var(--text-mute)">(opcional)</small></label><input type="text" name="decl_acompanhante_doc" placeholder="RG ou CPF do acompanhante" oninput="documentos._syncDeclTexto()"></div>
           <div class="field col-12"><label>Texto da declaração <small style="color:var(--text-mute)">(gerado automaticamente — pode editar)</small></label>
             <textarea name="decl_texto" rows="4" placeholder="Preencha os campos acima para gerar o texto…" oninput="this.dataset.auto=''"></textarea></div>
         </div>
@@ -8689,6 +8704,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <button class="btn" onclick="importFin.abrir()" title="Importar a aba Consolidado da conciliação (CSV) como lançamentos do Financeiro"><span class="icon">📥</span> Importar planilha</button>
     <button class="btn" onclick="importUnimed.abrir()" title="Importar o pacote da conciliação catálogo × Unimed (.zip) e revisar os vínculos"><span class="icon">🧾</span> Conciliação Unimed</button>
     <button class="btn btn-success" onclick="financeiro.relatorioAuditoria()" title="Relatório de um período qualquer, por data de registro ou de procedimento, em planilha (CSV) ou PDF — para enviar à auditoria"><span class="icon">📤</span> Relatório do período</button>
+    <button class="btn btn-success" onclick="financeiro.rel.abrir()" title="Você escolhe período, filtros (plano, hospital, cirurgião, status) e as colunas — sai em PDF ou planilha, com totais por plano; os recortes podem ser salvos como modelo"><span class="icon">🧮</span> Relatório personalizado</button>
     <button class="btn" onclick="financeiro.relatorioMensal()" title="Relatório de um mês fechado, pela data do procedimento, em PDF"><span class="icon">📄</span> Relatório mensal (PDF)</button>
     <button class="btn" onclick="historico.abrir('financeiro')"><span class="icon">🔍</span> Buscar / Histórico</button>
     <button class="btn" onclick="printPreview.abrir()"><span class="icon">🖨️</span> Visualizar / Imprimir</button>
@@ -20231,12 +20247,47 @@ const prescricao = {
     let s = 'Declaro, para os devidos fins, que o(a) Sr(a). ' + nome;
     if (d.documento) s += ', portador(a) do documento ' + d.documento + ',';
     s += ' compareceu a atendimento médico';
+    const localAt = String(d.decl_local_atendimento || '').trim();
+    if (localAt) s += ' em ' + localAt;
     if (data) s += ' no dia ' + data;
     if (d.decl_hora_ini && d.decl_hora_fim) s += ', no período das ' + d.decl_hora_ini + ' às ' + d.decl_hora_fim;
     else if (d.decl_hora_ini) s += ', com entrada às ' + d.decl_hora_ini;
+    else if (d.decl_hora_fim) s += ', com saída às ' + d.decl_hora_fim;
     s += '.';
-    if (d.decl_acompanhante) s += ' Acompanhado(a) por ' + d.decl_acompanhante + '.';
+    const acomp = String(d.decl_acompanhante || '').trim(), acompDoc = String(d.decl_acompanhante_doc || '').trim();
+    if (acomp) s += ' Acompanhado(a) por ' + acomp + (acompDoc ? ', portador(a) do documento ' + acompDoc : '') + '.';
+    const fin = String(d.decl_finalidade || '').trim().replace(/\.+$/, '');
+    if (fin) s += ' Declaração emitida para fins de ' + fin + '.';
     return s;
+  },
+  /* Os mesmos campos nos dois formulários (Prescrição e Documentos). Ler num
+     lugar só: antes cada um listava os seus e o texto saía sem o que faltava. */
+  CAMPOS_DECL: ['nome', 'documento', 'data', 'decl_data', 'decl_hora_ini', 'decl_hora_fim',
+    'decl_acompanhante', 'decl_acompanhante_doc', 'decl_local_atendimento', 'decl_finalidade'],
+  _lerDecl(f) {
+    const d = {};
+    prescricao.CAMPOS_DECL.forEach(n => { d[n] = (f.querySelector('[name="' + n + '"]') || {}).value || ''; });
+    return d;
+  },
+  _syncDeclDe(formId) {
+    const f = document.getElementById(formId); if (!f) return;
+    const txt = f.querySelector('[name="decl_texto"]'); if (!txt) return;
+    if (txt.value.trim() && txt.dataset.auto !== '1') return; /* preserva edição manual */
+    txt.value = prescricao._gerarTextoDeclaracao(prescricao._lerDecl(f));
+    txt.dataset.auto = '1';
+  },
+  /* Nome e documento chegam DEPOIS (busca do cadastro, digitação): o texto
+     automático acompanha qualquer campo que ele usa, não só os da declaração. */
+  _vigiarDecl(formId, sync) {
+    const f = document.getElementById(formId); if (!f || f.dataset.vigiaDecl) return;
+    f.dataset.vigiaDecl = '1';
+    const ouvir = e => {
+      const n = e.target && e.target.name;
+      if (!n || !prescricao.CAMPOS_DECL.includes(n)) return;
+      const modelo = (f.querySelector('[name="modelo"]:checked') || {}).value;
+      if (modelo === 'declaracao') sync();
+    };
+    f.addEventListener('input', ouvir); f.addEventListener('change', ouvir);
   },
   _syncAtestadoTexto() {
     const f = document.getElementById('form-prescricao'); if (!f) return;
@@ -20251,15 +20302,8 @@ const prescricao = {
     txt.dataset.auto = '1';
   },
   _syncDeclTexto() {
-    const f = document.getElementById('form-prescricao'); if (!f) return;
-    const txt = f.querySelector('[name="decl_texto"]'); if (!txt) return;
-    if (txt.value.trim() && txt.dataset.auto !== '1') return;
-    const g = n => (f.querySelector('[name="' + n + '"]') || {}).value || '';
-    txt.value = prescricao._gerarTextoDeclaracao({
-      nome: g('nome'), documento: g('documento'), data: g('data'), decl_data: g('decl_data'),
-      decl_hora_ini: g('decl_hora_ini'), decl_hora_fim: g('decl_hora_fim'), decl_acompanhante: g('decl_acompanhante')
-    });
-    txt.dataset.auto = '1';
+    prescricao._vigiarDecl('form-prescricao', prescricao._syncDeclTexto);
+    prescricao._syncDeclDe('form-prescricao');
   },
   _toggleLaudoCID() {
     const on = document.querySelector('#form-prescricao [name="laudo_cid_incluir"]')?.checked;
@@ -28453,15 +28497,8 @@ const documentos = {
     txt.dataset.auto = '1';
   },
   _syncDeclTexto() {
-    const f = document.getElementById('form-documentos'); if (!f) return;
-    const txt = f.querySelector('[name="decl_texto"]'); if (!txt) return;
-    if (txt.value.trim() && txt.dataset.auto !== '1') return;
-    const g = n => (f.querySelector('[name="' + n + '"]') || {}).value || '';
-    txt.value = prescricao._gerarTextoDeclaracao({
-      nome: g('nome'), documento: g('documento'), data: g('data'), decl_data: g('decl_data'),
-      decl_hora_ini: g('decl_hora_ini'), decl_hora_fim: g('decl_hora_fim'), decl_acompanhante: g('decl_acompanhante')
-    });
-    txt.dataset.auto = '1';
+    prescricao._vigiarDecl('form-documentos', documentos._syncDeclTexto);
+    prescricao._syncDeclDe('form-documentos');
   },
   _syncLaudoTexto() {
     const f = document.getElementById('form-documentos'); if (!f) return;
@@ -28588,6 +28625,15 @@ const documentos = {
         const r = f.querySelector('[name="modelo"][value="' + modelo + '"]'); if (r) r.checked = true;
         const nomeEl = f.querySelector('[name="nome"]'); if (nomeEl && nome) nomeEl.value = nome;
         const dataEl = f.querySelector('[name="data"]'); if (dataEl && !dataEl.value) dataEl.value = utils.hojeISO();
+        /* Declaração aberta do atendimento já vem com o dia dele e o local
+           (a clínica): o que estava faltando no papel. Tudo segue editável. */
+        if (modelo === 'declaracao') {
+          const put = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); if (el && !el.value && v) el.value = v; };
+          const dOrig = fo ? ((fo.querySelector('[name="data"]') || fo.querySelector('[name="data_proc"]') || {}).value || '') : '';
+          put('decl_data', /^\d{4}-\d{2}-\d{2}$/.test(dOrig) ? dOrig : utils.hojeISO());
+          try { put('decl_local_atendimento', clinicaIdentidade.nome()); } catch (e) {}
+          try { put('documento', fo && (fo.querySelector('[name="documento"]') || fo.querySelector('[name="cpf"]') || {}).value); } catch (e) {}
+        }
         try { if (nome) linker.autoPreencherDadosPaciente(nome, 'documentos'); } catch (e) {}
         documentos.atualizarTipo();
         documentos._linkPendente = origemId ? { mod: origemMod, id: origemId } : null;
@@ -50135,99 +50181,480 @@ const financeiro = {
     if (!J) { toast('Biblioteca de PDF não carregada', 'error'); return; }
     if (!doMes.length) { toast('Nenhum lançamento encontrado em ' + ref, 'warn'); return; }
 
-    const num = v => parseFloat(v) || 0;
-    const totPrev = doMes.reduce((s, x) => s + num(x.valor_previsto), 0);
-    const totRec = doMes.reduce((s, x) => s + num(x.valor_recebido), 0);
-    const totGlo = doMes.reduce((s, x) => s + num(x.glosa), 0);
-    const aReceber = totPrev - totRec - totGlo;
-    const fmt = n => 'R$ ' + Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-    /* Cabeçalho profissional */
-    const cab = (typeof clinica !== 'undefined' && clinica) ? clinica : {};
-    const doc = new J({ unit: 'mm', format: 'a4' });
-    const W = 210, H = 297, M = 16, cw = W - M * 2;
-    let y = 20;
-
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(12.5);
-    doc.text(cab.nomeProfissional || 'Relatório financeiro', M, y); y += 5.2;
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(90);
-    if (cab.especialidade) { doc.text(cab.especialidade, M, y); y += 4; }
-    const reg = [];
-    if (cab.crm) reg.push(utils.rotuloCrm(cab.crm));
-    if (cab.rqe) reg.push('RQE ' + cab.rqe);
-    if (reg.length) { doc.text(reg.join('   ·   '), M, y); y += 4; }
-    doc.setTextColor(0);
-    y += 1; doc.setDrawColor(180); doc.line(M, y, W - M, y); y += 7;
-
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
-    doc.text('RELATÓRIO FINANCEIRO — ' + rotuloPeriodo, W / 2, y, { align: 'center' }); y += 8;
-
-    /* Bloco de totais */
-    doc.setFontSize(9.5);
-    const bloco = (rot, val, cor) => {
-      doc.setFont('helvetica', 'normal'); doc.setTextColor(70);
-      doc.text(rot, M, y);
-      doc.setFont('helvetica', 'bold');
-      if (cor) doc.setTextColor(cor[0], cor[1], cor[2]); else doc.setTextColor(0);
-      doc.text(fmt(val), W - M, y, { align: 'right' });
-      doc.setTextColor(0);
-      y += 5.6;
-    };
-    bloco('Total previsto', totPrev);
-    bloco('Total recebido', totRec, [20, 110, 60]);
-    if (totGlo > 0) bloco('Total glosado', totGlo, [170, 40, 40]);
-    bloco('Saldo a receber', aReceber, aReceber > 0 ? [180, 110, 20] : [20, 110, 60]);
-    y += 1;
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(110);
-    doc.text(doMes.length + ' lançamento(s) no período', M, y); y += 6;
-    doc.setTextColor(0);
-
-    /* Tabela de lançamentos */
-    doc.setDrawColor(200); doc.line(M, y, W - M, y); y += 4;
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(8);
-    const cols = [
-      { t: 'Data', x: M, w: 18 },
-      { t: 'Paciente', x: M + 18, w: 46 },
-      { t: 'Procedimento', x: M + 64, w: 50 },
-      { t: 'Previsto', x: M + 114, w: 30, r: true },
-      { t: 'Recebido', x: M + 144, w: 30, r: true },
-      { t: 'Status', x: M + 158, w: 20 }
-    ];
-    doc.text('Data', M, y);
-    doc.text('Paciente', M + 18, y);
-    doc.text('Procedimento', M + 64, y);
-    doc.text('Previsto', M + 144, y, { align: 'right' });
-    doc.text('Recebido', M + 178, y, { align: 'right' });
-    y += 2; doc.setDrawColor(200); doc.line(M, y, W - M, y); y += 4;
-
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(7.8);
-    const abrev = (s, n) => { s = String(s || ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
-    doMes.sort((a, b) => {
-      const da = a.data_proc || a.data || '', db = b.data_proc || b.data || '';
-      return String(da).localeCompare(String(db));
+    /* O mensal saía sem o PLANO — justamente o que se confere na fatura.
+       Agora usa o mesmo motor do relatório personalizado, com as colunas de
+       sempre mais Plano e Status, e os totais por plano no fim. */
+    financeiro.rel.pdf(doMes, {
+      colunas: financeiro.rel.COLUNAS_MENSAL, porPlano: true,
+      titulo: 'RELATÓRIO FINANCEIRO — ' + rotuloPeriodo,
+      arquivo: 'relatorio_financeiro_' + sufixoArquivo + '.pdf',
+      base: (opts && opts.base) || 'proc'
     });
-    doMes.forEach(x => {
-      if (y > H - 24) { doc.addPage(); y = 20; }
-      const dstr = x.data_proc || x.data || '';
-      const dfmt = dstr ? (typeof utils !== 'undefined' && utils.formatarData ? utils.formatarData(dstr) : dstr) : '—';
-      doc.text(String(dfmt), M, y);
-      doc.text(abrev(x.paciente, 28), M + 18, y);
-      doc.text(abrev(x.procedimento, 30), M + 64, y);
-      doc.text(fmt(num(x.valor_previsto)).replace('R$ ', ''), M + 144, y, { align: 'right' });
-      doc.text(fmt(num(x.valor_recebido)).replace('R$ ', ''), M + 178, y, { align: 'right' });
-      y += 4.6;
-    });
-
-    /* Rodapé */
-    y = Math.max(y + 4, H - 18);
-    doc.setDrawColor(200); doc.line(M, y, W - M, y); y += 4;
-    doc.setFont('helvetica', 'italic'); doc.setFontSize(7); doc.setTextColor(130);
-    doc.text('Gerado por Soft Anestesia em ' + new Date().toLocaleDateString('pt-BR') + ' — documento de uso interno.', M, y);
-    doc.setTextColor(0);
-
-    const nomeArq = 'relatorio_financeiro_' + sufixoArquivo + '.pdf';
-    doc.save(nomeArq);
     toast('Relatório de ' + ref + ' gerado');
+  },
+  /* ==========================================================================
+     RELATÓRIO PERSONALIZADO — quem emite escolhe o que sai.
+     O relatório mensal tinha seis colunas fixas e nenhuma era o plano de
+     saúde. Cada destinatário pede um recorte diferente (a cooperativa quer
+     carteirinha, senha e horário; a contabilidade quer pago e conta; a
+     auditoria quer glosa e motivo), então aqui todos os campos do lançamento
+     estão à disposição e se escolhe período, filtros e colunas.
+       • O MESMO recorte sai em PDF e em CSV.
+       • A última escolha fica lembrada, e um recorte pode ganhar nome
+         ("Fatura Unimed") para ser repetido sem remontar.
+       • Muitas colunas → folha deitada; texto longo quebra em linhas em vez
+         de ser cortado.
+     Só configuração fica guardada neste aparelho (quais colunas, quais
+     filtros): nenhum dado de paciente sai do lançamento para o modelo.
+     ========================================================================== */
+  rel: {
+    KEY: 'soft_rel_financeiro_v1',
+    COLUNAS_MENSAL: ['data_proc', 'paciente', 'plano', 'procedimento', 'valor_previsto', 'valor_recebido', 'status'],
+    PADRAO: ['data_proc', 'paciente', 'carteirinha', 'plano', 'procedimento', 'valor_previsto', 'valor_recebido', 'glosa', 'status'],
+    _num(v) { return parseFloat(v) || 0; },
+    _br(iso) { const s = String(iso || '').slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s.split('-').reverse().join('/') : s; },
+    _moeda(n) { return Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); },
+    _sn(v) { return v === true || /^(sim|s|true|1)$/i.test(String(v == null ? '' : v).trim()) ? 'Sim' : (v === false || /^(n[aã]o|n|false|0)$/i.test(String(v == null ? '' : v).trim()) ? 'Não' : ''); },
+    _codigos(x) { return Array.isArray(x.codigos) ? x.codigos.filter(c => c && (c.codigo || c.descricao)) : []; },
+    _plano(x) { return String(x.convenio || x.plano || '').trim(); },
+    _imp(x) { return x._importUnimed || {}; },
+    ROTULO_TIPO: { procedimento: 'Procedimento / Cirurgia', consulta_geral: 'Consulta geral', consulta_dor: 'Consulta de dor', consulta_pre: 'Consulta pré-anestésica', outro: 'Outro' },
+    /* [chave, rótulo, grupo, tipo, largura relativa, leitura] */
+    _defs() {
+      const R = financeiro.rel, n = R._num;
+      const porte = x => {
+        const v = R._codigos(x).map(c => {
+          try {
+            const inf = cbhpm.info(c.codigo); if (!inf) return '';
+            return [inf.porte, inf.porte_anest ? 'AN ' + inf.porte_anest : ''].filter(Boolean).join(' / ');
+          } catch (e) { return ''; }
+        }).filter(Boolean);
+        return Array.from(new Set(v)).join(' · ');
+      };
+      return [
+        ['paciente', 'Paciente', 'Atendimento', 't', 34, x => x.paciente || ''],
+        ['carteirinha', 'Carteirinha', 'Atendimento', 't', 24, x => x.carteirinha || ''],
+        ['plano', 'Plano / convênio', 'Atendimento', 't', 26, x => R._plano(x)],
+        ['tipo_pagamento', 'Tipo de pagamento', 'Atendimento', 't', 18, x => x.tipo_pagamento || ''],
+        ['tipo_atendimento', 'Tipo de atendimento', 'Atendimento', 't', 20, x => R.ROTULO_TIPO[x.tipo_atendimento] || x.tipo_atendimento || ''],
+        ['data_proc', 'Data do procedimento', 'Atendimento', 'd', 16, x => financeiro._dataDoLancamento(x, 'proc')],
+        ['hora_inicio', 'Hora início', 'Atendimento', 't', 11, x => x.hora_inicio || x.hora_proc || ''],
+        ['hora_fim', 'Hora fim', 'Atendimento', 't', 11, x => x.hora_fim || ''],
+        ['duracao', 'Duração', 'Atendimento', 't', 11, x => financeiro.duracao(x.hora_inicio || x.hora_proc, x.hora_fim)],
+        ['procedimento', 'Procedimento', 'Atendimento', 't', 44, x => x.procedimento || ''],
+        ['codigos', 'Códigos TUSS', 'Atendimento', 't', 24, x => R._codigos(x).map(c => c.codigo).filter(Boolean).join(', ')],
+        ['codigos_det', 'Códigos (qtd · grau)', 'Atendimento', 't', 34, x => R._codigos(x).map(c => [c.codigo, (n(c.qtd) > 1 ? n(c.qtd) + '×' : ''), (c.grau && String(c.grau) !== '100' ? c.grau + '%' : '')].filter(Boolean).join(' ')).join(', ')],
+        ['porte', 'Porte', 'Atendimento', 't', 14, porte],
+        ['cirurgiao', 'Cirurgião', 'Atendimento', 't', 26, x => x.cirurgiao || ''],
+        ['hospital', 'Hospital / clínica', 'Atendimento', 't', 26, x => x.hospital || x.local || ''],
+        ['acomodacao', 'Acomodação', 'Atendimento', 't', 16, x => x.acomodacao || ''],
+        ['urgencia', 'Urgência / horário', 'Atendimento', 't', 16, x => x.urgencia || ''],
+        ['senha', 'Senha', 'Autorização e guia', 't', 18, x => x.senha || ''],
+        ['guia_operadora', 'Guia operadora', 'Autorização e guia', 't', 18, x => R._imp(x).guiaOperadora || x.guia_operadora || ''],
+        ['guia_prestador', 'Guia prestador', 'Autorização e guia', 't', 18, x => R._imp(x).guiaPrestador || x.guia_prestador || ''],
+        ['lote', 'Lote', 'Autorização e guia', 't', 14, x => R._imp(x).lote || x.lote || ''],
+        ['protocolo', 'Protocolo', 'Autorização e guia', 't', 16, x => R._imp(x).protocolo || x.protocolo || ''],
+        ['competencia', 'Competência', 'Autorização e guia', 't', 14, x => (R._imp(x).competencias || []).join(', ') || x.competencia || ''],
+        ['valor_previsto', 'Previsto', 'Valores', 'm', 18, x => n(x.valor_previsto)],
+        ['valor_recebido', 'Recebido', 'Valores', 'm', 18, x => n(x.valor_recebido)],
+        ['glosa', 'Glosa', 'Valores', 'm', 16, x => n(x.glosa)],
+        ['a_receber', 'A receber', 'Valores', 'm', 18, x => (String(x.status || '').toLowerCase() === 'cortesia') ? 0 : n(x.valor_previsto) - n(x.valor_recebido) - n(x.glosa)],
+        ['motivo_glosa', 'Motivo da glosa', 'Valores', 't', 34, x => R._imp(x).motivosGlosa || R._codigos(x).map(c => c.obs).filter(Boolean).join(' | ') || ''],
+        ['status', 'Status', 'Valores', 't', 16, x => x.status || ''],
+        ['pago', 'Pago', 'Valores', 't', 9, x => (financeiro.ehQuitado(x.status) || x.pago === true) ? 'Sim' : 'Não'],
+        ['data_pagamento', 'Data do pagamento', 'Valores', 'd', 16, x => x.data_pagamento || x.data_recebimento || ''],
+        ['forma_pagamento', 'Meio de pagamento', 'Valores', 't', 18, x => x.forma_pagamento || ''],
+        ['conta_recebeu', 'Conta que recebeu', 'Valores', 't', 20, x => x.conta_recebeu || ''],
+        ['periciado', 'Periciado', 'Valores', 't', 11, x => R._sn(x.periciado)],
+        ['conferido', 'Conferido', 'Valores', 't', 11, x => R._sn(x.conferido)],
+        ['data_registro', 'Data do registro', 'Outros', 'd', 16, x => financeiro._dataDoLancamento(x, 'registro')],
+        ['observacoes', 'Observações', 'Outros', 't', 40, x => x.observacoes || '']
+      ].map(([k, rotulo, grupo, tipo, w, get]) => ({ k, rotulo, grupo, tipo, w, get }));
+    },
+    _def(k) { return financeiro.rel._defs().find(c => c.k === k) || null; },
+    /* Filtros: os valores saem dos próprios lançamentos (não há lista a manter) */
+    FILTROS: [['plano', 'Plano / convênio'], ['hospital', 'Hospital'], ['cirurgiao', 'Cirurgião'], ['status', 'Status'], ['tipo_pagamento', 'Tipo de pagamento'], ['tipo_atendimento', 'Tipo de atendimento']],
+    _valorFiltro(x, k) {
+      const R = financeiro.rel;
+      if (k === 'plano') return R._plano(x);
+      if (k === 'hospital') return String(x.hospital || x.local || '').trim();
+      if (k === 'tipo_atendimento') return R.ROTULO_TIPO[x.tipo_atendimento] || String(x.tipo_atendimento || '').trim();
+      return String(x[k] || '').trim();
+    },
+    _ler() {
+      try { const v = JSON.parse(localStorage.getItem(financeiro.rel.KEY) || '{}'); return (v && typeof v === 'object') ? v : {}; }
+      catch (e) { return {}; }
+    },
+    _gravar(v) { try { localStorage.setItem(financeiro.rel.KEY, JSON.stringify(v || {})); } catch (e) {} },
+    /* Só o que é configuração passa daqui para o aparelho */
+    _limparCfg(c) {
+      const R = financeiro.rel, chaves = R._defs().map(d => d.k);
+      c = c || {};
+      const filtros = {};
+      R.FILTROS.forEach(([k]) => { const v = c.filtros && c.filtros[k]; if (typeof v === 'string' && v.length <= 120) filtros[k] = v; });
+      return {
+        base: c.base === 'registro' ? 'registro' : 'proc',
+        periodo: ['mes', 'mes_passado', 'ano', 'livre'].indexOf(c.periodo) >= 0 ? c.periodo : 'mes_passado',
+        de: /^\d{4}-\d{2}-\d{2}$/.test(c.de || '') ? c.de : '', ate: /^\d{4}-\d{2}-\d{2}$/.test(c.ate || '') ? c.ate : '',
+        colunas: (Array.isArray(c.colunas) ? c.colunas : R.PADRAO).filter(k => chaves.indexOf(k) >= 0),
+        filtros, porPlano: c.porPlano !== false, ordem: ['data', 'paciente', 'plano'].indexOf(c.ordem) >= 0 ? c.ordem : 'data'
+      };
+    },
+    _periodo(cfg) {
+      const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      const h = new Date();
+      if (cfg.periodo === 'mes') return { de: iso(new Date(h.getFullYear(), h.getMonth(), 1)), ate: iso(new Date(h.getFullYear(), h.getMonth() + 1, 0)) };
+      if (cfg.periodo === 'ano') return { de: h.getFullYear() + '-01-01', ate: h.getFullYear() + '-12-31' };
+      if (cfg.periodo === 'livre') return { de: cfg.de, ate: cfg.ate };
+      return financeiro._periodoPadraoAuditoria();
+    },
+    filtrar(cfg) {
+      const R = financeiro.rel;
+      const p = R._periodo(cfg);
+      const lista = financeiro.lancamentosDoPeriodo(p.de, p.ate, cfg.base).filter(x =>
+        R.FILTROS.every(([k]) => !cfg.filtros[k] || R._valorFiltro(x, k) === cfg.filtros[k]));
+      const chave = x => cfg.ordem === 'paciente' ? String(x.paciente || '').toLowerCase()
+        : cfg.ordem === 'plano' ? R._plano(x).toLowerCase() + '|' + financeiro._dataDoLancamento(x, cfg.base)
+        : financeiro._dataDoLancamento(x, cfg.base);
+      return lista.sort((a, b) => chave(a).localeCompare(chave(b)));
+    },
+    _totais(lista) {
+      const R = financeiro.rel, t = { n: lista.length, prev: 0, rec: 0, glo: 0, arec: 0 };
+      const aRec = R._def('a_receber').get;
+      lista.forEach(x => { t.prev += R._num(x.valor_previsto); t.rec += R._num(x.valor_recebido); t.glo += R._num(x.glosa); t.arec += aRec(x); });
+      return t;
+    },
+    _porPlano(lista) {
+      const R = financeiro.rel, m = new Map();
+      lista.forEach(x => { const p = R._plano(x) || '(sem plano)'; if (!m.has(p)) m.set(p, []); m.get(p).push(x); });
+      return Array.from(m.entries()).sort((a, b) => a[0].localeCompare(b[0])).map(([plano, itens]) => ({ plano, itens, t: R._totais(itens) }));
+    },
+    _texto(def, x) {
+      const v = def.get(x);
+      if (def.tipo === 'm') return financeiro.rel._moeda(v);
+      if (def.tipo === 'd') return financeiro.rel._br(v);
+      return String(v == null ? '' : v);
+    },
+
+    /* ---------------- janela ---------------- */
+    abrir() {
+      const R = financeiro.rel, E = utils.escapeHTML;
+      const salvo = R._ler();
+      const cfg = R._limparCfg(salvo.ultimo);
+      const modelos = Object.keys(salvo.modelos || {}).sort();
+      const grupos = [];
+      R._defs().forEach(d => { let g = grupos.find(x => x.nome === d.grupo); if (!g) grupos.push(g = { nome: d.grupo, cols: [] }); g.cols.push(d); });
+      const p = R._periodo(cfg);
+      const html =
+        '<div class="relfin">' +
+        '<div class="grid" style="margin:0">' +
+        '<div class="field col-6"><label>Modelo salvo</label><select id="relfin-modelo"><option value="">— última escolha —</option>' +
+          modelos.map(m => '<option value="' + E(m) + '">' + E(m) + '</option>').join('') + '</select></div>' +
+        '<div class="field col-6"><label>Contar pela data</label><select id="relfin-base">' +
+          '<option value="proc">do procedimento</option><option value="registro">de registro no sistema</option></select></div>' +
+        '<div class="field col-4"><label>Período</label><select id="relfin-periodo">' +
+          '<option value="mes_passado">Mês passado</option><option value="mes">Este mês</option><option value="ano">Este ano</option><option value="livre">Escolher datas</option></select></div>' +
+        '<div class="field col-4"><label>De</label><input type="date" id="relfin-de" value="' + E(p.de || '') + '"></div>' +
+        '<div class="field col-4"><label>Até</label><input type="date" id="relfin-ate" value="' + E(p.ate || '') + '"></div>' +
+        R.FILTROS.map(([k, rot]) => '<div class="field col-4"><label>' + E(rot) + '</label><select data-relfin-filtro="' + k + '"><option value="">Todos</option></select></div>').join('') +
+        '<div class="field col-6"><label>Ordenar por</label><select id="relfin-ordem"><option value="data">Data</option><option value="paciente">Paciente</option><option value="plano">Plano</option></select></div>' +
+        '<div class="field col-6"><label>&nbsp;</label><label class="relfin-chk"><input type="checkbox" id="relfin-porplano"> Totais por plano</label></div>' +
+        '</div>' +
+        '<div class="relfin-colhead"><b>Colunas</b> <span id="relfin-ncol"></span>' +
+          '<button type="button" class="btn btn-sm btn-ghost" id="relfin-todas">Todas</button>' +
+          '<button type="button" class="btn btn-sm btn-ghost" id="relfin-nenhuma">Nenhuma</button>' +
+          '<button type="button" class="btn btn-sm btn-ghost" id="relfin-padrao">Padrão</button></div>' +
+        grupos.map(g => '<fieldset class="relfin-grupo"><legend>' + E(g.nome) + '</legend>' +
+          g.cols.map(d => '<label class="relfin-chk"><input type="checkbox" data-relfin-col="' + d.k + '"> ' + E(d.rotulo) + '</label>').join('') +
+          '</fieldset>').join('') +
+        '<div id="relfin-previa" class="relfin-previa"></div>' +
+        '<div class="relfin-modelos">' +
+          '<button type="button" class="btn btn-sm" id="relfin-salvar-modelo">💾 Salvar como modelo…</button>' +
+          '<button type="button" class="btn btn-sm btn-ghost" id="relfin-apagar-modelo">🗑 Apagar modelo</button></div>' +
+        '</div>';
+      modal.open('🧮 Relatório financeiro — escolha o que sai', html,
+        '<button class="btn btn-primary" onclick="financeiro.rel.emitir(\'pdf\')">📄 PDF</button>' +
+        '<button class="btn" onclick="financeiro.rel.emitir(\'csv\')">📊 Planilha (CSV)</button>' +
+        '<button class="btn btn-ghost" onclick="modal.close()">Cancelar</button>');
+      R._estilizar();
+      R._aplicarNaTela(cfg);
+      const raiz = document.querySelector('.relfin'); if (!raiz) return;
+      raiz.addEventListener('change', e => {
+        const t = e.target;
+        if (t.id === 'relfin-modelo') {
+          const s = R._ler();
+          R._aplicarNaTela(R._limparCfg(t.value ? (s.modelos || {})[t.value] : s.ultimo));
+          return;
+        }
+        if (t.id === 'relfin-periodo' && t.value !== 'livre') {
+          const pp = R._periodo({ periodo: t.value });
+          document.getElementById('relfin-de').value = pp.de; document.getElementById('relfin-ate').value = pp.ate;
+        }
+        if (t.id === 'relfin-de' || t.id === 'relfin-ate') document.getElementById('relfin-periodo').value = 'livre';
+        R._atualizarPrevia();
+      });
+      const marcar = ks => { raiz.querySelectorAll('[data-relfin-col]').forEach(c => { c.checked = ks.indexOf(c.dataset.relfinCol) >= 0; }); R._atualizarPrevia(); };
+      document.getElementById('relfin-todas').addEventListener('click', () => marcar(R._defs().map(d => d.k)));
+      document.getElementById('relfin-nenhuma').addEventListener('click', () => marcar([]));
+      document.getElementById('relfin-padrao').addEventListener('click', () => marcar(R.PADRAO));
+      document.getElementById('relfin-salvar-modelo').addEventListener('click', () => R._salvarModelo());
+      document.getElementById('relfin-apagar-modelo').addEventListener('click', () => R._apagarModelo());
+    },
+    _estilizar() {
+      /* CSP estrita: estilo por CSSOM, uma vez */
+      if (financeiro.rel._cssOk) return;
+      try {
+        const sh = new CSSStyleSheet();
+        sh.replaceSync(
+          '.relfin .relfin-colhead{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:12px 0 4px}' +
+          '.relfin .relfin-colhead #relfin-ncol{color:var(--text-soft);font-size:.8rem;margin-right:auto}' +
+          '.relfin .relfin-grupo{border:1px solid var(--border);border-radius:8px;padding:6px 10px 8px;margin:6px 0;display:flex;flex-wrap:wrap;gap:4px 14px}' +
+          '.relfin .relfin-grupo legend{font-size:.78rem;font-weight:700;color:var(--text-soft);padding:0 4px}' +
+          '.relfin .relfin-chk{display:inline-flex;align-items:center;gap:6px;font-size:.84rem;font-weight:400;cursor:pointer;min-height:28px}' +
+          '.relfin .relfin-chk input{width:auto;flex:none;margin:0}' +
+          '.relfin .relfin-previa{font-size:.84rem;margin-top:10px;padding:8px 10px;border-radius:8px;background:var(--surface-alt)}' +
+          '.relfin .relfin-modelos{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}');
+        document.adoptedStyleSheets = document.adoptedStyleSheets.concat([sh]);
+        financeiro.rel._cssOk = true;
+      } catch (e) {}
+    },
+    _aplicarNaTela(cfg) {
+      const R = financeiro.rel, raiz = document.querySelector('.relfin'); if (!raiz) return;
+      const v = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+      v('relfin-base', cfg.base); v('relfin-periodo', cfg.periodo); v('relfin-ordem', cfg.ordem);
+      const p = R._periodo(cfg); v('relfin-de', p.de || ''); v('relfin-ate', p.ate || '');
+      const pp = document.getElementById('relfin-porplano'); if (pp) pp.checked = !!cfg.porPlano;
+      raiz.querySelectorAll('[data-relfin-col]').forEach(c => { c.checked = cfg.colunas.indexOf(c.dataset.relfinCol) >= 0; });
+      R._opcoesFiltros(cfg.filtros);
+      R._atualizarPrevia();
+    },
+    /* As opções de cada filtro vêm de todos os lançamentos (não só do período),
+       para o modelo salvo não perder o valor escolhido quando o mês muda. */
+    _opcoesFiltros(escolhidos) {
+      const R = financeiro.rel, todos = store.list('financeiro') || [];
+      document.querySelectorAll('.relfin [data-relfin-filtro]').forEach(sel => {
+        const k = sel.dataset.relfinFiltro;
+        const vals = Array.from(new Set(todos.map(x => R._valorFiltro(x, k)).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+        const atual = (escolhidos && escolhidos[k]) || '';
+        if (atual && vals.indexOf(atual) < 0) vals.push(atual);
+        sel.replaceChildren();
+        const op = (val, txt) => { const o = document.createElement('option'); o.value = val; o.textContent = txt; sel.appendChild(o); };
+        op('', 'Todos'); vals.forEach(val => op(val, val));
+        sel.value = atual;
+      });
+    },
+    _daTela() {
+      const R = financeiro.rel, g = id => (document.getElementById(id) || {}).value || '';
+      const filtros = {};
+      document.querySelectorAll('.relfin [data-relfin-filtro]').forEach(s => { if (s.value) filtros[s.dataset.relfinFiltro] = s.value; });
+      return R._limparCfg({
+        base: g('relfin-base'), periodo: g('relfin-periodo'), de: g('relfin-de'), ate: g('relfin-ate'), ordem: g('relfin-ordem'),
+        porPlano: !!(document.getElementById('relfin-porplano') || {}).checked,
+        colunas: Array.from(document.querySelectorAll('.relfin [data-relfin-col]')).filter(c => c.checked).map(c => c.dataset.relfinCol),
+        filtros
+      });
+    },
+    _atualizarPrevia() {
+      const R = financeiro.rel, el = document.getElementById('relfin-previa'); if (!el) return;
+      const cfg = R._daTela(), lista = R.filtrar(cfg), t = R._totais(lista);
+      const nc = document.getElementById('relfin-ncol');
+      if (nc) nc.textContent = cfg.colunas.length + ' escolhida(s)' + (R._largo(cfg.colunas) ? ' — sai com a folha deitada' : '');
+      el.replaceChildren();
+      const linha = txt => { const d = document.createElement('div'); d.textContent = txt; el.appendChild(d); };
+      if (!lista.length) { linha('Nenhum lançamento com este período e filtros.'); return; }
+      linha(t.n + ' lançamento(s) · previsto R$ ' + R._moeda(t.prev) + ' · recebido R$ ' + R._moeda(t.rec) +
+        (t.glo ? ' · glosa R$ ' + R._moeda(t.glo) : '') + ' · a receber R$ ' + R._moeda(t.arec));
+      if (cfg.porPlano) R._porPlano(lista).slice(0, 8).forEach(g => linha('— ' + g.plano + ': ' + g.t.n + ' · R$ ' + R._moeda(g.t.prev)));
+    },
+    _salvarModelo() {
+      const R = financeiro.rel, sel = document.getElementById('relfin-modelo');
+      const nome = String(prompt('Nome do modelo (ex.: Fatura Unimed)', (sel && sel.value) || '') || '').trim().slice(0, 60);
+      if (!nome) return;
+      const s = R._ler(); s.modelos = s.modelos || {};
+      s.modelos[nome] = R._daTela(); R._gravar(s);
+      if (sel && !Array.from(sel.options).some(o => o.value === nome)) {
+        const o = document.createElement('option'); o.value = nome; o.textContent = nome; sel.appendChild(o);
+      }
+      if (sel) sel.value = nome;
+      toast('💾 Modelo "' + nome + '" salvo neste aparelho');
+    },
+    _apagarModelo() {
+      const R = financeiro.rel, sel = document.getElementById('relfin-modelo');
+      const nome = sel && sel.value; if (!nome) { toast('Escolha um modelo salvo para apagar', 'warn'); return; }
+      if (!confirm('Apagar o modelo "' + nome + '"?')) return;
+      const s = R._ler(); if (s.modelos) delete s.modelos[nome]; R._gravar(s);
+      const o = Array.from(sel.options).find(op => op.value === nome); if (o) o.remove();
+      sel.value = '';
+      toast('Modelo apagado');
+    },
+    emitir(formato) {
+      const R = financeiro.rel, cfg = R._daTela();
+      if (cfg.de && cfg.ate && cfg.de > cfg.ate) { toast('A data inicial é posterior à final.', 'warn'); return; }
+      if (!cfg.colunas.length) { toast('Escolha ao menos uma coluna.', 'warn'); return; }
+      const lista = R.filtrar(cfg);
+      if (!lista.length) { toast('Nenhum lançamento com este período e filtros.', 'warn'); return; }
+      const s = R._ler(); s.ultimo = cfg; R._gravar(s);
+      const p = R._periodo(cfg);
+      const filtrosTxt = R.FILTROS.filter(([k]) => cfg.filtros[k]).map(([k, rot]) => rot + ': ' + cfg.filtros[k]).join(' · ');
+      const modelo = (document.getElementById('relfin-modelo') || {}).value || '';
+      const opts = {
+        colunas: cfg.colunas, porPlano: cfg.porPlano, base: cfg.base, filtrosTxt,
+        titulo: 'RELATÓRIO FINANCEIRO' + (modelo ? ' — ' + modelo.toUpperCase() : '') + ' — ' + (R._br(p.de) || 'início') + ' A ' + (R._br(p.ate) || 'hoje'),
+        arquivo: 'financeiro_' + (modelo ? modelo.replace(/[^A-Za-z0-9]+/g, '_').toLowerCase() + '_' : '') + (p.de || 'inicio') + '_a_' + (p.ate || 'hoje') + '.' + (formato === 'csv' ? 'csv' : 'pdf'),
+        de: p.de, ate: p.ate
+      };
+      modal.close();
+      if (formato === 'csv') R.csv(lista, opts); else R.pdf(lista, opts);
+    },
+
+    /* ---------------- saídas ---------------- */
+    _largo(colunas) {
+      const R = financeiro.rel;
+      return colunas.reduce((s, k) => s + ((R._def(k) || {}).w || 0), 0) > 190;
+    },
+    csv(lista, opts) {
+      const R = financeiro.rel, q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+      const defs = opts.colunas.map(k => R._def(k)).filter(Boolean);
+      const linhas = [defs.map(d => q(d.rotulo)).join(';')];
+      lista.forEach(x => linhas.push(defs.map(d => q(R._texto(d, x))).join(';')));
+      const linhaTotais = (rot, t) => defs.map((d, i) => {
+        if (i === 0) return q(rot);
+        const m = { valor_previsto: t.prev, valor_recebido: t.rec, glosa: t.glo, a_receber: t.arec }[d.k];
+        return q(m != null ? R._moeda(m) : '');
+      }).join(';');
+      linhas.push('');
+      linhas.push(linhaTotais('TOTAL (' + lista.length + ')', R._totais(lista)));
+      if (opts.porPlano) {
+        linhas.push('');
+        linhas.push([q('Plano'), q('Lançamentos'), q('Previsto'), q('Recebido'), q('Glosa'), q('A receber')].join(';'));
+        R._porPlano(lista).forEach(g => linhas.push([q(g.plano), q(g.t.n), q(R._moeda(g.t.prev)), q(R._moeda(g.t.rec)), q(R._moeda(g.t.glo)), q(R._moeda(g.t.arec))].join(';')));
+      }
+      linhas.push('');
+      linhas.push(q('Período: ' + (R._br(opts.de) || 'início') + ' a ' + (R._br(opts.ate) || 'hoje') + ' · contado pela data ' +
+        (opts.base === 'registro' ? 'de registro no sistema' : 'do procedimento') + (opts.filtrosTxt ? ' · ' + opts.filtrosTxt : '') +
+        ' · emitido em ' + new Date().toLocaleString('pt-BR')));
+      const blob = new Blob(['﻿' + linhas.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob), a = document.createElement('a');
+      a.href = url; a.download = opts.arquivo || 'financeiro.csv';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast('📊 ' + lista.length + ' lançamento(s) exportados em CSV');
+    },
+    pdf(lista, opts) {
+      const R = financeiro.rel;
+      const J = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+      if (!J) { toast('Biblioteca de PDF não carregada', 'error'); return; }
+      const defs = (opts.colunas || R.PADRAO).map(k => R._def(k)).filter(Boolean);
+      const deitado = R._largo(defs.map(d => d.k));
+      const doc = new J({ unit: 'mm', format: 'a4', orientation: deitado ? 'landscape' : 'portrait' });
+      const W = deitado ? 297 : 210, H = deitado ? 210 : 297, M = 12, cw = W - M * 2;
+      const soma = defs.reduce((s, d) => s + d.w, 0) || 1;
+      let x0 = M;
+      const cols = defs.map(d => { const w = cw * d.w / soma; const c = { d, x: x0, w }; x0 += w; return c; });
+      const cab = (typeof clinica !== 'undefined' && clinica) ? clinica : {};
+      let y = 16;
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+      doc.text(cab.nomeProfissional || 'Relatório financeiro', M, y); y += 5;
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(90);
+      const reg = [];
+      if (cab.especialidade) reg.push(cab.especialidade);
+      try { if (cab.crm) reg.push(utils.rotuloCrm(cab.crm)); } catch (e) {}
+      if (cab.rqe) reg.push('RQE ' + cab.rqe);
+      if (reg.length) { doc.text(reg.join('   ·   '), M, y); y += 4; }
+      doc.setTextColor(0); doc.setDrawColor(180); doc.line(M, y, W - M, y); y += 6;
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5);
+      doc.splitTextToSize(opts.titulo || 'RELATÓRIO FINANCEIRO', cw).forEach(l => { doc.text(l, W / 2, y, { align: 'center' }); y += 5; });
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(100);
+      const sub = ['Contado pela data ' + (opts.base === 'registro' ? 'de registro no sistema' : 'do procedimento'), opts.filtrosTxt || ''].filter(Boolean).join(' · ');
+      doc.splitTextToSize(sub, cw).forEach(l => { doc.text(l, W / 2, y, { align: 'center' }); y += 3.8; });
+      doc.setTextColor(0); y += 2;
+
+      /* totais no alto: é o que se lê primeiro */
+      const t = R._totais(lista);
+      doc.setFontSize(9);
+      const bloco = (rot, val, cor) => {
+        doc.setFont('helvetica', 'normal'); doc.setTextColor(70); doc.text(rot, M, y);
+        doc.setFont('helvetica', 'bold'); if (cor) doc.setTextColor(cor[0], cor[1], cor[2]); else doc.setTextColor(0);
+        doc.text('R$ ' + R._moeda(val), M + 70, y, { align: 'right' }); doc.setTextColor(0); y += 4.8;
+      };
+      bloco('Total previsto', t.prev);
+      bloco('Total recebido', t.rec, [20, 110, 60]);
+      if (t.glo > 0) bloco('Total glosado', t.glo, [170, 40, 40]);
+      bloco('Saldo a receber', t.arec, t.arec > 0 ? [180, 110, 20] : [20, 110, 60]);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(110);
+      doc.text(t.n + ' lançamento(s)', M, y); doc.setTextColor(0); y += 5;
+
+      const FS = defs.length > 12 ? 6.4 : (defs.length > 8 ? 7 : 7.6), LH = FS * 0.42;
+      const cabecalho = () => {
+        doc.setDrawColor(200); doc.line(M, y, W - M, y); y += 3.4;
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(FS);
+        const alturas = cols.map(c => doc.splitTextToSize(c.d.rotulo, c.w - 1.2));
+        const nl = Math.max.apply(null, alturas.map(a => a.length));
+        cols.forEach((c, i) => alturas[i].forEach((l, j) => {
+          if (c.d.tipo === 'm') doc.text(l, c.x + c.w - 0.6, y + j * LH, { align: 'right' }); else doc.text(l, c.x + 0.3, y + j * LH);
+        }));
+        y += (nl - 1) * LH + 1.6; doc.line(M, y, W - M, y); y += 3.2;
+        doc.setFont('helvetica', 'normal');
+      };
+      const novaPagina = () => { doc.addPage(); y = 14; cabecalho(); };
+      const linha = (valores, negrito) => {
+        doc.setFont('helvetica', negrito ? 'bold' : 'normal'); doc.setFontSize(FS);
+        const partes = cols.map((c, i) => doc.splitTextToSize(String(valores[i] == null ? '' : valores[i]), c.w - 1.2));
+        const nl = Math.max(1, Math.max.apply(null, partes.map(p => p.length)));
+        if (y + nl * LH > H - 16) novaPagina();
+        cols.forEach((c, i) => partes[i].forEach((l, j) => {
+          if (c.d.tipo === 'm') doc.text(l, c.x + c.w - 0.6, y + j * LH, { align: 'right' }); else doc.text(l, c.x + 0.3, y + j * LH);
+        }));
+        y += nl * LH + 1.3;
+      };
+      const linhaTotal = (rot, tt) => {
+        doc.setDrawColor(220); doc.line(M, y - 2.2, W - M, y - 2.2);
+        linha(cols.map((c, i) => {
+          const m = { valor_previsto: tt.prev, valor_recebido: tt.rec, glosa: tt.glo, a_receber: tt.arec }[c.d.k];
+          if (m != null) return R._moeda(m);
+          return i === 0 ? rot : '';
+        }), true);
+        y += 1.5;
+      };
+      cabecalho();
+      if (opts.porPlano) {
+        R._porPlano(lista).forEach(g => {
+          if (y + 12 > H - 16) novaPagina();
+          doc.setFont('helvetica', 'bold'); doc.setFontSize(FS + 0.8); doc.setTextColor(40, 70, 110);
+          doc.text(g.plano + ' — ' + g.t.n + ' lançamento(s)', M, y); doc.setTextColor(0); y += LH + 2;
+          g.itens.forEach(x => linha(cols.map(c => R._texto(c.d, x))));
+          linhaTotal('Subtotal ' + g.plano, g.t);
+        });
+      } else {
+        lista.forEach(x => linha(cols.map(c => R._texto(c.d, x))));
+      }
+      linhaTotal('TOTAL', t);
+
+      if (opts.porPlano) {
+        if (y + 20 > H - 16) { doc.addPage(); y = 16; }
+        y += 3; doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.text('Resumo por plano', M, y); y += 4.5;
+        doc.setFontSize(8);
+        const xs = [M, M + cw * 0.45, M + cw * 0.58, M + cw * 0.72, M + cw * 0.86, W - M];
+        ['Plano', 'Qtd', 'Previsto', 'Recebido', 'Glosa', 'A receber'].forEach((h, i) => i === 0 ? doc.text(h, xs[0], y) : doc.text(h, xs[i], y, { align: 'right' }));
+        y += 1.5; doc.setDrawColor(200); doc.line(M, y, W - M, y); y += 3.5; doc.setFont('helvetica', 'normal');
+        R._porPlano(lista).forEach(g => {
+          if (y > H - 18) { doc.addPage(); y = 16; }
+          doc.text(doc.splitTextToSize(g.plano, cw * 0.4)[0], xs[0], y);
+          [String(g.t.n), R._moeda(g.t.prev), R._moeda(g.t.rec), R._moeda(g.t.glo), R._moeda(g.t.arec)].forEach((v, i) => doc.text(v, xs[i + 1], y, { align: 'right' }));
+          y += 4.2;
+        });
+      }
+
+      const paginas = doc.getNumberOfPages();
+      for (let i = 1; i <= paginas; i++) {
+        doc.setPage(i);
+        doc.setFont('helvetica', 'italic'); doc.setFontSize(6.8); doc.setTextColor(130);
+        doc.text('Gerado por Soft Anestesia em ' + new Date().toLocaleDateString('pt-BR') + ' — documento de uso interno.', M, H - 8);
+        doc.text('Página ' + i + ' de ' + paginas, W - M, H - 8, { align: 'right' });
+        doc.setTextColor(0);
+      }
+      doc.save(opts.arquivo || 'relatorio_financeiro.pdf');
+    }
   },
   importar(d) {
     if (!Array.isArray(d)) { toast('Formato inválido (esperado array)', 'error'); return; }

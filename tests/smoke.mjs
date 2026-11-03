@@ -24596,6 +24596,146 @@ await test('Impressão: gráfico mostra todos os sinais registrados, e o TCLE im
   await page.close();
 });
 
+await test('Financeiro: relatório personalizado — colunas, filtros, totais por plano, PDF/CSV e modelos salvos; o mensal traz o plano', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-relfin');
+    localStorage.removeItem(financeiro.rel.KEY);
+    store.setList('financeiro', [
+      { _id: 'r1', paciente: 'Ana Rel', carteirinha: '0286000111', convenio: 'Unimed Costa do Descobrimento', data_proc: '2026-09-03', hora_inicio: '07:00', hora_fim: '08:30',
+        procedimento: '31009336 - Colecistectomia', codigos: [{ codigo: '31009336', qtd: 1, grau: '100' }], hospital: 'Hosp A', cirurgiao: 'Dr. X',
+        senha: 'S1', valor_previsto: 1000, valor_recebido: 800, glosa: 200, status: 'parcial', _importUnimed: { guiaOperadora: 'G9', lote: 'L7', competencias: ['2026-09'], motivosGlosa: 'Glosa técnica' },
+        _createdAt: '2026-10-10T10:00:00Z' },
+      { _id: 'r2', paciente: 'Bia Rel', convenio: 'Bradesco', data_proc: '2026-09-10', procedimento: 'Consulta', hospital: 'Hosp B',
+        valor_previsto: 300, valor_recebido: 300, status: 'recebido', data_pagamento: '2026-09-20', _createdAt: '2026-09-10T10:00:00Z' },
+      { _id: 'r3', paciente: 'Cid Fora', convenio: 'Unimed', data_proc: '2026-08-01', valor_previsto: 50, status: 'pendente', _createdAt: '2026-08-01T10:00:00Z' }
+    ]);
+    const R = financeiro.rel;
+    const ks = R._defs().map(d => d.k);
+    out.campos = ['paciente', 'carteirinha', 'plano', 'tipo_pagamento', 'data_proc', 'hora_inicio', 'hora_fim', 'duracao', 'procedimento', 'codigos', 'porte',
+      'cirurgiao', 'hospital', 'acomodacao', 'urgencia', 'senha', 'guia_operadora', 'guia_prestador', 'lote', 'protocolo', 'competencia',
+      'valor_previsto', 'valor_recebido', 'glosa', 'a_receber', 'motivo_glosa', 'status', 'pago', 'data_pagamento', 'forma_pagamento',
+      'conta_recebeu', 'periciado', 'conferido', 'data_registro', 'observacoes'].every(k => ks.indexOf(k) >= 0);
+    const base = { periodo: 'livre', de: '2026-09-01', ate: '2026-09-30', base: 'proc', colunas: ['paciente', 'carteirinha', 'plano', 'guia_operadora', 'motivo_glosa', 'duracao', 'valor_previsto'], filtros: {} };
+    out.periodo = R.filtrar(R._limparCfg(base)).map(x => x._id).join() === 'r1,r2';
+    out.filtroPlano = R.filtrar(R._limparCfg(Object.assign({}, base, { filtros: { plano: 'Bradesco' } }))).map(x => x._id).join() === 'r2';
+    out.pelaDataDeRegistro = R.filtrar(R._limparCfg(Object.assign({}, base, { base: 'registro' }))).map(x => x._id).join() === 'r2';
+    const t = R._totais(R.filtrar(R._limparCfg(base)));
+    out.totais = t.n === 2 && t.prev === 1300 && t.rec === 1100 && t.glo === 200 && t.arec === 0;
+    const r1 = store.list('financeiro')[0];
+    out.leitura = R._texto(R._def('guia_operadora'), r1) === 'G9' && R._texto(R._def('duracao'), r1) === '1h30' &&
+      R._texto(R._def('competencia'), r1) === '2026-09' && R._texto(R._def('data_proc'), r1) === '03/09/2026' && R._texto(R._def('pago'), r1) === 'Não';
+    /* modelo guarda só configuração */
+    out.cfgLimpa = JSON.stringify(R._limparCfg(Object.assign({}, base, { paciente: 'Ana Rel', lista: [r1] }))).indexOf('Ana Rel') < 0;
+
+    /* janela: abre, lembra a última escolha, salva modelo nomeado */
+    R.abrir();
+    await new Promise(res => setTimeout(res, 60));
+    out.janela = !!document.querySelector('.relfin [data-relfin-col="carteirinha"]') && document.querySelectorAll('.relfin [data-relfin-filtro]').length === 6;
+    out.opcoesPlano = Array.from(document.querySelectorAll('.relfin [data-relfin-filtro="plano"] option')).map(o => o.value).indexOf('Bradesco') >= 0;
+    R._aplicarNaTela(R._limparCfg(base));
+    const promptOrig = window.prompt; window.prompt = () => 'Fatura Unimed';
+    R._salvarModelo(); window.prompt = promptOrig;
+    out.modelo = !!(R._ler().modelos || {})['Fatura Unimed'] && R._ler().modelos['Fatura Unimed'].colunas.indexOf('carteirinha') >= 0;
+
+    /* PDF e CSV com as mesmas colunas */
+    const textos = []; let orient = '', nomeArq = '';
+    const Fake = function (o) { orient = (o && o.orientation) || 'portrait'; this.p = 1; };
+    Object.assign(Fake.prototype, { setFont() {}, setFontSize() {}, setTextColor() {}, setDrawColor() {}, line() {}, addPage() { this.p++; }, setPage() {},
+      getNumberOfPages() { return this.p; }, splitTextToSize(s) { return [String(s)]; }, text(s) { textos.push(String(s)); }, save(n) { nomeArq = n; } });
+    const jsOrig = window.jspdf; window.jspdf = { jsPDF: Fake };
+    let csvTxt = '';
+    const blobOrig = window.Blob;
+    window.Blob = function (partes, o) { csvTxt = partes.join(''); return new blobOrig(partes, o); };
+    try {
+      document.getElementById('relfin-porplano').checked = true;
+      R.emitir('pdf');
+      out.pdfColunas = ['Carteirinha', 'Plano / convênio', 'Guia operadora', 'Motivo da glosa'].every(c => textos.indexOf(c) >= 0) &&
+        textos.indexOf('0286000111') >= 0 && textos.indexOf('Glosa técnica') >= 0 && textos.some(x => /Resumo por plano/.test(x)) && /\.pdf$/.test(nomeArq);
+      out.retrato = orient === 'portrait';
+      R.pdf(store.list('financeiro'), { colunas: R._defs().map(d => d.k), titulo: 'X' });
+      out.deitado = orient === 'landscape';
+      R.csv(R.filtrar(R._limparCfg(base)), { colunas: base.colunas, porPlano: true, de: base.de, ate: base.ate });
+      const cab = csvTxt.replace(/^﻿/, '').split('\r\n')[0];
+      out.csv = cab === '"Paciente";"Carteirinha";"Plano / convênio";"Guia operadora";"Motivo da glosa";"Duração";"Previsto"' &&
+        /"Bradesco";"1";"300,00"/.test(csvTxt) && /"TOTAL \(2\)"/.test(csvTxt);
+      /* o mensal traz o plano */
+      textos.length = 0;
+      financeiro.relatorioMensal({ de: '2026-09-01', ate: '2026-09-30', base: 'proc' });
+      out.mensalPlano = textos.indexOf('Plano / convênio') >= 0 && textos.indexOf('Bradesco') >= 0 && textos.indexOf('Status') >= 0;
+    } finally { window.jspdf = jsOrig; window.Blob = blobOrig; }
+    out.lembra = R._ler().ultimo && R._ler().ultimo.colunas.indexOf('guia_operadora') >= 0;
+    try { modal.close(); } catch (e) {}
+    store.setList('financeiro', []); localStorage.removeItem(R.KEY);
+    return out;
+  });
+  assert(r.campos, 'todos os campos do lançamento estão disponíveis como coluna');
+  assert(r.periodo && r.filtroPlano && r.pelaDataDeRegistro, 'período, filtro por plano e data de registro');
+  assert(r.totais, 'totais previsto/recebido/glosa/a receber');
+  assert(r.leitura, 'guia, duração, competência, data e pago saem legíveis');
+  assert(r.cfgLimpa, 'o modelo guarda só configuração, nenhum dado de paciente');
+  assert(r.janela && r.opcoesPlano, 'janela com colunas e seis filtros, opções tiradas dos lançamentos');
+  assert(r.modelo, 'recorte salvo com nome');
+  assert(r.pdfColunas && r.retrato, 'PDF sai com as colunas escolhidas e o resumo por plano');
+  assert(r.deitado, 'muitas colunas: folha deitada');
+  assert(r.csv, 'CSV com as mesmas colunas e o total por plano');
+  assert(r.mensalPlano, 'o relatório mensal traz o plano e o status');
+  assert(r.lembra, 'a última escolha fica lembrada');
+  await page.close();
+});
+
+await test('Declaração de comparecimento: texto completo nos dois formulários, campos opcionais e cabeçalho que não corta no celular', async () => {
+  const page = await novaPagina();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const t = prescricao._gerarTextoDeclaracao({ nome: 'Maria Decl', documento: '123', decl_data: '2026-11-03', decl_hora_ini: '08:00', decl_hora_fim: '09:00',
+      decl_local_atendimento: 'Clínica Soft', decl_acompanhante: 'José', decl_acompanhante_doc: '456', decl_finalidade: 'apresentação no trabalho' });
+    out.texto = /Maria Decl, portador\(a\) do documento 123/.test(t) && /em Clínica Soft no dia 03\/11\/2026, no período das 08:00 às 09:00\./.test(t) &&
+      /Acompanhado\(a\) por José, portador\(a\) do documento 456\./.test(t) && /para fins de apresentação no trabalho\./.test(t);
+    const vazio = prescricao._gerarTextoDeclaracao({ nome: 'Só Nome' });
+    out.opcionais = !/ em |Acompanhado|para fins de/.test(vazio);
+    for (const [fid, mod] of [['form-documentos', documentos], ['form-prescricao', prescricao]]) {
+      const f = document.getElementById(fid);
+      const set = (n, v) => { const el = f.querySelector('[name="' + n + '"]'); el.value = v; };
+      const r0 = f.querySelector('[name="modelo"][value="declaracao"]'); r0.checked = true;
+      const txt = f.querySelector('[name="decl_texto"]'); txt.value = ''; txt.dataset.auto = '1';
+      set('nome', 'Paciente ' + fid); mod._syncDeclTexto();
+      set('decl_finalidade', 'justificativa de ausência'); f.querySelector('[name="decl_finalidade"]').dispatchEvent(new Event('input', { bubbles: true }));
+      /* o documento chega depois (cadastro): o texto acompanha */
+      set('documento', '999'); f.querySelector('[name="documento"]').dispatchEvent(new Event('input', { bubbles: true }));
+      out[fid] = /Paciente form-/.test(txt.value) && /documento 999/.test(txt.value) && /justificativa de ausência/.test(txt.value);
+      txt.value = 'Editado à mão.'; txt.dataset.auto = '';
+      set('documento', '111'); f.querySelector('[name="documento"]').dispatchEvent(new Event('input', { bubbles: true }));
+      out[fid + '_manual'] = txt.value === 'Editado à mão.';
+      txt.value = ''; txt.dataset.auto = '1';
+    }
+    /* impressão refaz o texto automático com o que o formulário tem agora */
+    const fd = document.getElementById('form-documentos');
+    fd.querySelector('[name="documento"]').value = '777';
+    out.imprimeAtual = /documento 777/.test(printPreview._buildDocumento());
+    const paper = document.createElement('div'); paper.className = 'print-preview-paper';
+    paper.innerHTML = '<div class="pp-header"><div class="pp-header-top"><div class="pp-ident"></div><div class="pp-prof"></div></div></div>';
+    document.body.appendChild(paper);
+    out.cssCelular = getComputedStyle(paper.querySelector('.pp-header-top')).flexWrap === 'wrap';
+    paper.remove();
+    return out;
+  });
+  const shell = await readFile(resolve(APP_ROOT, 'src/print/print-shell.js'), 'utf8');
+  const ppSrc = await readFile(resolve(APP_ROOT, 'src/print/print-preview.js'), 'utf8');
+  r.cssCelular = r.cssCelular && /@media screen and \(max-width: 700px\)[\s\S]{0,200}\.pp-header-top \{ flex-wrap: wrap/.test(ppSrc);
+  r.shell = /beforeprint/.test(shell) && /Compartilhar/.test(shell) && /\.pp-print-btn/.test(shell) && /1500/.test(shell);
+  assert(r.texto, 'texto com local, horário, acompanhante com documento e finalidade');
+  assert(r.opcionais, 'campos opcionais vazios não aparecem');
+  assert(r['form-documentos'] && r['form-prescricao'], 'nos dois formulários o texto acompanha nome, documento e finalidade');
+  assert(r['form-documentos_manual'] && r['form-prescricao_manual'], 'texto editado à mão fica');
+  assert(r.imprimeAtual, 'a impressão usa os dados atuais');
+  assert(r.cssCelular, 'no celular o cabeçalho quebra em linhas');
+  assert(r.shell, 'janela de impressão trata o botão e avisa Compartilhar → Imprimir');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
