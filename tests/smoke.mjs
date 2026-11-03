@@ -24792,6 +24792,39 @@ await test('Cobrança ao finalizar: clique fora/Esc não somem com a janela, out
   await page.close();
 });
 
+await test('Financeiro: clicar no título da coluna ordena a tabela (crescente, decrescente, volta ao normal)', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-ordem');
+    localStorage.removeItem(financeiro.ordem.KEY);
+    store.setList('financeiro', [
+      { _id: 'o1', paciente: 'Bruno', convenio: 'Unimed', data_proc: '2026-10-02', valor_previsto: 300, status: 'pendente' },
+      { _id: 'o2', paciente: 'Ana', convenio: 'Bradesco', data_proc: '2026-10-05', valor_previsto: 100, senha: '9', status: 'recebido' },
+      { _id: 'o3', paciente: 'Carla', convenio: 'Amil', data_proc: '2026-10-01', valor_previsto: 200, senha: '1', status: 'glosado' }
+    ]);
+    location.hash = '#financeiro';
+    await new Promise(res => setTimeout(res, 300));
+    financeiro.render();
+    const nomes = () => Array.from(document.querySelectorAll('#financeiro-tbody tr')).map(tr => (tr.cells[0] || {}).textContent || '').map(t => (t.match(/Ana|Bruno|Carla/) || [''])[0]).join(',');
+    const th = i => document.querySelectorAll('#financeiro-table thead th')[i];
+    th(0).click(); out.pacAsc = nomes() === 'Ana,Bruno,Carla' && /▲/.test(th(0).textContent);
+    th(0).click(); out.pacDesc = nomes() === 'Carla,Bruno,Ana' && /▼/.test(th(0).textContent);
+    th(0).click(); out.volta = !/[▲▼]/.test(th(0).textContent) && !financeiro.ordem.atual();
+    th(8).click(); out.previsto = nomes() === 'Ana,Carla,Bruno';
+    th(1).click(); out.senhaVaziaNoFim = nomes() === 'Carla,Ana,Bruno';
+    th(1).click(); out.senhaDescVaziaNoFim = nomes() === 'Ana,Carla,Bruno';
+    out.lembra = financeiro.ordem.atual() && financeiro.ordem.atual().col === 'senha';
+    localStorage.removeItem(financeiro.ordem.KEY); store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.pacAsc && r.pacDesc && r.volta, 'paciente: crescente, decrescente e volta');
+  assert(r.previsto, 'valores ordenam como número');
+  assert(r.senhaVaziaNoFim && r.senhaDescVaziaNoFim, 'vazios ficam no fim nos dois sentidos');
+  assert(r.lembra, 'a ordem escolhida fica lembrada');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
