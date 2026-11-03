@@ -24862,6 +24862,53 @@ await test('Ficha de anestesia: escolher o paciente traz carteirinha, CPF e acom
   await page.close();
 });
 
+await test('Nuvem: Financeiro, pacientes e agenda vêm inteiros, em páginas — não param nos mil primeiros', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-pag');
+    const orig = { fetch: window.fetch, cfg: cloud.config, tok: cloud._garantirToken, hdr: cloud._headers };
+    cloud.config = () => ({ url: 'https://nuvem-teste.supabase.co', anonKey: 'k' });
+    cloud._garantirToken = async () => true;
+    cloud._headers = () => ({});
+    const TOTAL = 2350, pedidos = [];
+    window.fetch = async (url) => {
+      url = String(url); pedidos.push(url);
+      const lim = Number((url.match(/[?&]limit=(\d+)/) || [])[1] || 1000000);
+      const off = Number((url.match(/[?&]offset=(\d+)/) || [])[1] || 0);
+      /* o servidor real corta em mil, peça o quanto pedir */
+      const n = Math.max(0, Math.min(TOTAL - off, Math.min(lim, 1000)));
+      const rows = Array.from({ length: n }, (_, i) => {
+        const k = off + i;
+        return { id: 'id-' + k, organization_id: cloudRel._org(), legacy_id: 'L' + k, nome: 'P' + k, status: 'pendente',
+          scheduled_at: '2026-10-01T10:00:00Z', updated_at: '2026-10-01T00:00:00Z', version: 1,
+          data: { _id: 'L' + k, paciente: 'P' + k, nome: 'P' + k, data_proc: '2026-10-01' } };
+      });
+      return { ok: true, status: 200, json: async () => rows };
+    };
+    try {
+      const fin = await cloudRel.puxarModulo('financeiro');
+      out.fin = fin ? fin.length : -1;
+      out.finUnicos = fin ? new Set(fin.map(x => x._id)).size : -1;
+      const pac = await cloudRel.puxarPacientes();
+      out.pac = pac ? pac.length : -1;
+      const ag = await cloudRel.puxarAgenda();
+      out.ag = ag ? ag.length : -1;
+      out.paginou = pedidos.some(u => /offset=2000/.test(u));
+      /* página que falha: nada pela metade */
+      window.fetch = async (url) => /offset=1000/.test(String(url)) ? { ok: false, status: 500, json: async () => ({}) }
+        : { ok: true, status: 200, json: async () => Array.from({ length: 1000 }, (_, i) => ({ id: 'x' + i, legacy_id: 'x' + i, data: { _id: 'x' + i } })) };
+      out.falhaInteira = (await cloudRel.puxarModulo('financeiro')) === null;
+    } finally { window.fetch = orig.fetch; cloud.config = orig.cfg; cloud._garantirToken = orig.tok; cloud._headers = orig.hdr; }
+    return out;
+  });
+  assert(r.fin === 2350 && r.finUnicos === 2350, 'financeiro inteiro: ' + JSON.stringify(r));
+  assert(r.pac === 2350 && r.ag === 2350, 'pacientes e agenda inteiros: ' + JSON.stringify(r));
+  assert(r.paginou, 'lê em páginas');
+  assert(r.falhaInteira, 'se uma página falha, não devolve meia lista');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

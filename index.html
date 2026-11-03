@@ -8705,9 +8705,10 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <button class="btn" onclick="financeiro.caixa.abrir()" title="Fechamento de caixa do dia: recebido, realizado e a receber, por convênio e forma de pagamento"><span class="icon">🧾</span> Fechar caixa</button>
     <button class="btn" onclick="importFin.abrir()" title="Importar a aba Consolidado da conciliação (CSV) como lançamentos do Financeiro"><span class="icon">📥</span> Importar planilha</button>
     <button class="btn" onclick="importUnimed.abrir()" title="Importar o pacote da conciliação catálogo × Unimed (.zip) e revisar os vínculos"><span class="icon">🧾</span> Conciliação Unimed</button>
-    <button class="btn btn-success" onclick="financeiro.relatorioAuditoria()" title="Relatório de um período qualquer, por data de registro ou de procedimento, em planilha (CSV) ou PDF — para enviar à auditoria"><span class="icon">📤</span> Relatório do período</button>
-    <button class="btn btn-success" onclick="financeiro.rel.abrir()" title="Você escolhe período, filtros (plano, hospital, cirurgião, status) e as colunas — sai em PDF ou planilha, com totais por plano; os recortes podem ser salvos como modelo"><span class="icon">🧮</span> Relatório personalizado</button>
-    <button class="btn" onclick="financeiro.relatorioMensal()" title="Relatório de um mês fechado, pela data do procedimento, em PDF"><span class="icon">📄</span> Relatório mensal (PDF)</button>
+    <!-- UM RELATÓRIO SÓ. "Relatório do período" e "Relatório mensal" faziam a
+         mesma coisa com menos opções (e o mensal sem o plano). O relatório
+         abaixo cobre os dois: período ou mês, filtros, colunas e totais por plano. -->
+    <button class="btn btn-success" onclick="financeiro.rel.abrir()" title="Relatório do período ou do mês: você escolhe filtros (plano, hospital, cirurgião, status) e as colunas — sai em PDF ou planilha, com totais por plano; os recortes podem ser salvos como modelo"><span class="icon">🧮</span> Relatório</button>
     <button class="btn" onclick="historico.abrir('financeiro')"><span class="icon">🔍</span> Buscar / Histórico</button>
     <button class="btn" onclick="printPreview.abrir()"><span class="icon">🖨️</span> Visualizar / Imprimir</button>
     <button class="btn" onclick="financeiro.exportar()"><span class="icon">⬇️</span> Exportar JSON</button>
@@ -49260,6 +49261,7 @@ const financeiro = {
       'Um caso sem profissional registrado entra na clínica, e não é atribuído a ninguém por palpite.</p>' +
       '<div id="prod-saida" style="margin-top:12px"></div>',
       '<button class="btn btn-primary" onclick="financeiro._producaoCalcular()">Calcular</button>' +
+      '<button class="btn" onclick="financeiro._producaoPdf()">📄 PDF detalhado</button>' +
       '<button class="btn" onclick="financeiro._producaoCsv()">📊 Baixar CSV</button>' +
       '<button class="btn btn-ghost" onclick="modal.close()">Fechar</button>');
     /* Mudou mês, ano ou médico: recalcula na hora. Ter de apertar "Calcular"
@@ -49314,7 +49316,7 @@ const financeiro = {
           '(Programador → Migração segura do legado).';
       } else if (!meses.length) {
         ajuda = 'Há <b>' + total + '</b> lançamento(s), mas nenhum deles tem data de procedimento preenchida — ' +
-          'por isso não entram num relatório de produção. Dá para vê-los pelo <b>📤 Relatório do período</b>, ' +
+          'por isso não entram num relatório de produção. Dá para vê-los pelo <b>🧮 Relatório</b>, ' +
           'contando pela data de registro.';
       } else {
         ajuda = 'Há <b>' + total + '</b> lançamento(s) no total. Com procedimento em: ' +
@@ -49355,6 +49357,20 @@ const financeiro = {
         '</td><td style="text-align:right">' + fmt(v.prev) + '</td><td style="text-align:right">' + fmt(v.rec) +
         '</td><td style="text-align:right">' + fmt(v.glo) + '</td></tr>').join('') +
       '</tbody></table>';
+  },
+  /* Produção DETALHADA: um procedimento por linha, com o plano, agrupado por
+     plano com subtotal. O resumo da tela é por convênio; quem confere a
+     produção precisa ver cada atendimento. */
+  _producaoPdf() {
+    const { lista, de, ate, quem } = financeiro._producaoLista();
+    if (!lista.length) { toast('Nenhum procedimento neste mês' + (quem ? ' para ' + quem : '') + '.', 'warn'); return; }
+    const R = financeiro.rel;
+    financeiro.rel.pdf(lista, {
+      colunas: ['data_proc', 'paciente', 'carteirinha', 'plano', 'procedimento', 'codigos', 'cirurgiao', 'hospital', 'senha', 'valor_previsto', 'valor_recebido', 'glosa', 'status'],
+      porPlano: true, base: 'proc', filtrosTxt: quem ? 'Profissional: ' + quem : '',
+      titulo: 'PRODUÇÃO — ' + (R._br(de) || '') + ' A ' + (R._br(ate) || '') + (quem ? ' — ' + quem.toUpperCase() : ''),
+      arquivo: 'producao_' + String(de || '').slice(0, 7) + (quem ? '_' + quem.replace(/[^A-Za-z0-9]+/g, '_').toLowerCase() : '') + '.pdf'
+    });
   },
   _producaoCsv() {
     const { lista, de, ate, quem } = financeiro._producaoLista();
@@ -50391,11 +50407,21 @@ const financeiro = {
       R.FILTROS.forEach(([k]) => { const v = c.filtros && c.filtros[k]; if (typeof v === 'string' && v.length <= 120) filtros[k] = v; });
       return {
         base: c.base === 'registro' ? 'registro' : 'proc',
-        periodo: ['mes', 'mes_passado', 'ano', 'livre'].indexOf(c.periodo) >= 0 ? c.periodo : 'mes_passado',
+        periodo: (['mes', 'mes_passado', 'ano', 'livre'].indexOf(c.periodo) >= 0 || /^m:\d{4}-\d{2}$/.test(c.periodo || '')) ? c.periodo : 'mes_passado',
         de: /^\d{4}-\d{2}-\d{2}$/.test(c.de || '') ? c.de : '', ate: /^\d{4}-\d{2}-\d{2}$/.test(c.ate || '') ? c.ate : '',
         colunas: (Array.isArray(c.colunas) ? c.colunas : R.PADRAO).filter(k => chaves.indexOf(k) >= 0),
         filtros, porPlano: c.porPlano !== false, ordem: ['data', 'paciente', 'plano'].indexOf(c.ordem) >= 0 ? c.ordem : 'data'
       };
+    },
+    /* os últimos 24 meses como escolha direta: "outubro/2026" é como se pede */
+    _mesesRecentes() {
+      const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+      const h = new Date(), out = [];
+      for (let i = 0; i < 24; i++) {
+        const d = new Date(h.getFullYear(), h.getMonth() - i, 1);
+        out.push(['m:' + d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'), MESES[d.getMonth()] + '/' + d.getFullYear()]);
+      }
+      return out;
     },
     _periodo(cfg) {
       const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -50403,6 +50429,8 @@ const financeiro = {
       if (cfg.periodo === 'mes') return { de: iso(new Date(h.getFullYear(), h.getMonth(), 1)), ate: iso(new Date(h.getFullYear(), h.getMonth() + 1, 0)) };
       if (cfg.periodo === 'ano') return { de: h.getFullYear() + '-01-01', ate: h.getFullYear() + '-12-31' };
       if (cfg.periodo === 'livre') return { de: cfg.de, ate: cfg.ate };
+      const m = /^m:(\d{4})-(\d{2})$/.exec(cfg.periodo || '');
+      if (m) return { de: m[1] + '-' + m[2] + '-01', ate: iso(new Date(Number(m[1]), Number(m[2]), 0)) };
       return financeiro._periodoPadraoAuditoria();
     },
     filtrar(cfg) {
@@ -50450,7 +50478,9 @@ const financeiro = {
         '<div class="field col-6"><label>Contar pela data</label><select id="relfin-base">' +
           '<option value="proc">do procedimento</option><option value="registro">de registro no sistema</option></select></div>' +
         '<div class="field col-4"><label>Período</label><select id="relfin-periodo">' +
-          '<option value="mes_passado">Mês passado</option><option value="mes">Este mês</option><option value="ano">Este ano</option><option value="livre">Escolher datas</option></select></div>' +
+          '<option value="mes_passado">Mês passado</option><option value="mes">Este mês</option><option value="ano">Este ano</option>' +
+          R._mesesRecentes().map(([v, rot]) => '<option value="' + v + '">' + E(rot) + '</option>').join('') +
+          '<option value="livre">Escolher datas</option></select></div>' +
         '<div class="field col-4"><label>De</label><input type="date" id="relfin-de" value="' + E(p.de || '') + '"></div>' +
         '<div class="field col-4"><label>Até</label><input type="date" id="relfin-ate" value="' + E(p.ate || '') + '"></div>' +
         R.FILTROS.map(([k, rot]) => '<div class="field col-4"><label>' + E(rot) + '</label><select data-relfin-filtro="' + k + '"><option value="">Todos</option></select></div>').join('') +
