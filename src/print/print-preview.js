@@ -597,6 +597,21 @@ const printPreview = {
           .pp-check { background: #444 !important; color: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           .pp-voltar-bar { display: none !important; }
         }
+        /* Na tela do celular (antes de imprimir): margem nas laterais e o
+           cabeçalho quebra em linhas em vez de esconder endereço e telefone.
+           No papel vale o @page acima. */
+        @media screen and (max-width: 700px) {
+          body { padding: 10px 14px 24px; }
+          .pp-header-top { flex-wrap: wrap; align-items: flex-start; }
+          .pp-header-top > .pp-ident { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; flex: 1 1 100%; min-width: 0; }
+          .pp-logo { height: auto; max-height: 72px; max-width: 100%; flex-shrink: 1; }
+          .pp-clinica { flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; }
+          .pp-prof { flex: 1 1 100%; text-align: left; overflow-wrap: anywhere; }
+          .pp-signature { min-width: 100%; max-width: 100%; }
+        }
+        .pp-clinica { line-height: 1.22; min-width: 0; }
+        .pp-clinica-nome { font-size: calc(11pt * var(--pp-esc, 1)); font-weight: 700; color: #1a2332; letter-spacing: .2px; }
+        .pp-clinica-linha { font-size: calc(8.5pt * var(--pp-esc, 1)); color: #5a6472; margin-top: 1px; }
         .pp-voltar-bar { position: sticky; top: 0; z-index: 9999; background: #1a2332; padding: 10px 12px; display: flex; gap: 10px; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
         .pp-voltar-bar button { font-size: 15px; padding: 10px 16px; border-radius: 8px; border: 0; cursor: pointer; font-family: inherit; }
         .pp-voltar-btn { background: #fff; color: #1a2332; font-weight: 700; }
@@ -2832,6 +2847,13 @@ ${TAG_CLOSE_HTML}`;
     return printPreview._docDeclaratorio('ATESTADO MÉDICO', meta, texto, d, 'Atestado médico');
   },
   _buildDeclaracao(d) {
+    try {
+      if (!printPreview._registroFinalizado('prescricao')) {
+        prescricao._syncDeclTexto();
+        const atual = (document.querySelector('#form-prescricao [name="decl_texto"]') || {}).value;
+        if (atual) d = Object.assign({}, d, { decl_texto: atual });
+      }
+    } catch (e) {}
     const meta = `${utils.formatarData(d.data) || new Date().toLocaleDateString('pt-BR')}`;
     let texto = (d.decl_texto || '').trim();
     if (!texto) texto = prescricao._gerarTextoDeclaracao(d);
@@ -2845,6 +2867,10 @@ ${TAG_CLOSE_HTML}`;
   },
   /* Módulo Documentos (atestado/declaração/laudo) — usa os mesmos geradores */
   _buildDocumento() {
+    /* O texto automático é refeito agora com o que o formulário tem — nome e
+       documento podem ter chegado do cadastro depois de o texto ser montado.
+       Texto editado à mão fica como está. */
+    try { if (!printPreview._registroFinalizado('documentos')) documentos._syncDeclTexto(); } catch (e) {}
     const d = printPreview._dadosDoFormulario('documentos');
     const modelo = d.modelo || 'atestado';
     const meta = `${utils.formatarData(d.data) || new Date().toLocaleDateString('pt-BR')}`;

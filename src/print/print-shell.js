@@ -16,6 +16,32 @@
     document.title = 'Impressão encerrada'; window.softPrintRendered = false;
     window.close();
   };
+  /* O BOTÃO IMPRIMIR É DESTA JANELA. No iPhone a impressão pedida pela aba
+     de trás é bloqueada sem aviso, e o botão parecia morto. Aqui o toque chama
+     a impressão desta própria janela; se o navegador não abrir o diálogo,
+     a tela diz o caminho que sempre funciona: Compartilhar → Imprimir. */
+  let abriuImpressao = false;
+  window.addEventListener('beforeprint', () => { abriuImpressao = true; });
+  const avisarCompartilhar = () => {
+    if (document.getElementById('pp-aviso-imprimir')) return;
+    const aviso = document.createElement('div');
+    aviso.id = 'pp-aviso-imprimir';
+    aviso.textContent = 'Seu navegador não abriu a impressão. Toque em Compartilhar (□↑) e escolha Imprimir — dali dá para a impressora ou para "Salvar em PDF".';
+    Object.assign(aviso.style, { background: '#fff4e5', color: '#7a4b12', border: '1px solid #f0c890', borderRadius: '8px',
+      padding: '10px 12px', margin: '10px 12px', fontSize: '15px', lineHeight: '1.4' });
+    const barra = document.querySelector('.pp-voltar-bar');
+    if (barra && barra.parentNode) barra.parentNode.insertBefore(aviso, barra.nextSibling);
+    else document.body.insertBefore(aviso, document.body.firstChild);
+  };
+  const imprimirAqui = event => {
+    if (event) { event.preventDefault(); event.stopImmediatePropagation(); }
+    abriuImpressao = false;
+    try { window.focus(); window.print(); } catch (error) { avisarCompartilhar(); return; }
+    setTimeout(() => { if (!abriuImpressao) avisarCompartilhar(); }, 1500);
+  };
+  const ligarBotaoImprimir = () => {
+    document.querySelectorAll('.pp-print-btn').forEach(btn => btn.addEventListener('click', imprimirAqui, true));
+  };
   const current = () => {
     try { return !owner.closed && !!owner.SoftActions?.isPrintCurrent(window, nonce); }
     catch (error) { return false; }
@@ -49,6 +75,7 @@
       }
       document.body.replaceWith(document.importNode(parsed.body, true));
       SoftActions.scan(document);
+      ligarBotaoImprimir();
       await Promise.all(styles);
       if (!current()) { clear(); return; }
       window.softPrintRendered = true;
