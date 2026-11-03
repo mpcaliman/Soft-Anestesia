@@ -4902,7 +4902,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-11-03a</b><br>
+    v7.1 · build <b id="build-tag">2026-11-03b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -43196,6 +43196,29 @@ const fin = {
         : '<button class="btn" onclick="fin.finalizacao.cancelar()">Não gerar</button>' +
           '<button class="btn" onclick="fin.finalizacao.confirmar()">Gerar lançamento</button>' +
           '<button class="btn btn-primary" onclick="fin.finalizacao.confirmar({ imprimir: true })">Gerar e imprimir 🖨️</button>');
+      /* A COBRANÇA NÃO PODE SUMIR SEM RESPOSTA. Era por aqui que atendimentos
+         finalizados ficavam sem lançamento: um clique fora da janela, um Esc,
+         ou outra janela (conflito, pendências) abrindo por cima, e ela fechava
+         sem gerar e sem registrar "não gerar". Agora clique fora e Esc só
+         lembram a pergunta; se outra janela tomar o lugar, esta volta assim
+         que o lugar vagar. */
+      if (!avulso) {
+        modal.proteger({
+          aoDispensar: () => toast('💰 Responda "Gerar lançamento" ou "Não gerar" — a cobrança deste atendimento depende desta resposta.', 'warn'),
+          aoSubstituir: () => {
+            const c = fin.finalizacao._ctx;
+            fin.finalizacao._ctx = null;
+            if (!c) return;
+            setTimeout(() => {
+              try {
+                const atual = store.getById(c.mod, c.docId) || c.doc;
+                if ((store.list('financeiro') || []).some(x => x._origemId === c.docId)) return;
+                fin.finalizacao.abrirQuandoLivre(c.mod, atual, c.aoFechar);
+              } catch (x) {}
+            }, 800);
+          }
+        });
+      }
       if (avulso) {
         try { pacienteAutocomplete.attach(document.getElementById('fz-paciente'), 'financeiro'); } catch (x) {}
         try { autocomplete.attachSimples(document.getElementById('fz-hospital'), 'cad_clinicas'); } catch (x) {}

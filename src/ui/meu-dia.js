@@ -122,6 +122,29 @@ const meuDia = {
       if (!c.fin || (x._origemLinhaId === '' && c.fin._origemLinhaId !== '')) c.fin = x;
       if (!c.procedimento) c.procedimento = x.procedimento || '';
     });
+    /* O LANÇAMENTO DO ATENDIMENTO, MESMO COM OUTRA DATA. Acima só entram os
+       lançamentos com data de procedimento = hoje. Um lançamento gerado deste
+       atendimento mas gravado com outra data (ou sem data) ficava invisível, e
+       o caso aparecia como "gerar financeiro" — parecendo que a cobrança não
+       existia. A origem (_origemId) é o vínculo forte; a data é só filtro. */
+    const porOrigem = new Map();
+    store.list('financeiro').forEach(f => {
+      if (!f || !f._origemId || f.status === 'cancelado') return;
+      if (!porOrigem.has(f._origemId)) porOrigem.set(f._origemId, []);
+      porOrigem.get(f._origemId).push(f);
+    });
+    Object.values(casos).forEach(c => {
+      if (c.fin) return;
+      for (const d of [c.ficha, c.pre, c.consulta]) {
+        const l = d && d._id ? porOrigem.get(d._id) : null;
+        if (l && l.length) {
+          c.fins = l.slice();
+          c.fin = l.find(x => !x._origemLinhaId) || l[0];
+          c.finOutraData = c.fin.data_proc || '(sem data)';
+          break;
+        }
+      }
+    });
     return Object.values(casos).sort((a, b) => (a.hora || '99:99').localeCompare(b.hora || '99:99'));
   },
 
@@ -253,6 +276,13 @@ const meuDia = {
       const fonte = fin_(c.ficha) ? ['anestesia', c.ficha]
                   : fin_(c.pre) ? ['pre', c.pre]
                   : fin_(c.consulta) ? ['consulta', c.consulta] : null;
+      /* "Não gerar" respondido na finalização é decisão, não falta */
+      let decidiuNao = false;
+      try { decidiuNao = !!fonte && fin.finalizacao.decisaoDe(fonte[1]) === false; } catch (e) {}
+      if (decidiuNao) {
+        return '<button type="button" class="md-chip md-nada" onclick="meuDia.gerarFinanceiro(' + utils.jsArg(fonte[0]) + ',' + utils.jsArg(fonte[1]._id) + ')" ' +
+          'title="Na finalização foi escolhido NÃO gerar cobrança. Clique se quiser gerar agora.">— sem cobrança (decidido)</button>';
+      }
       if (fonte) {
         return '<button type="button" class="md-chip md-falta" onclick="meuDia.gerarFinanceiro(' + utils.jsArg(fonte[0]) + ',' + utils.jsArg(fonte[1]._id) + ')" ' +
           'title="Finalizado, mas sem lançamento financeiro. Clique para abrir a janela da cobrança deste atendimento.">💰 gerar financeiro</button>';
@@ -260,7 +290,8 @@ const meuDia = {
       return '<span class="md-chip md-nada" title="Nenhum lançamento financeiro hoje — o Finalizar do documento cria automaticamente">— financeiro</span>';
     }
     const ok = !!c.fin.pago || c.fin.status === 'recebido' || c.fin.status === 'finalizado';
-    return '<button type="button" class="md-chip ' + (ok ? 'md-ok' : 'md-meio') + '" onclick="dashboard._abrirFicha(\'financeiro\',' + utils.jsArg(c.fin._id) + ')" title="' + (ok ? 'Financeiro ok — abrir' : 'Financeiro pendente — abrir') + '">💰 ' + (ok ? 'Fin ✓' : 'Fin…') + '</button>';
+    const outra = c.finOutraData ? ' — lançado com data ' + (/^\d{4}-\d{2}-\d{2}/.test(c.finOutraData) ? c.finOutraData.slice(0, 10).split('-').reverse().join('/') : c.finOutraData) + '; confira a data do procedimento' : '';
+    return '<button type="button" class="md-chip ' + (ok ? 'md-ok' : 'md-meio') + '" onclick="dashboard._abrirFicha(\'financeiro\',' + utils.jsArg(c.fin._id) + ')" title="' + utils.escapeAttr((ok ? 'Financeiro ok — abrir' : 'Financeiro pendente — abrir') + outra) + '">💰 ' + (ok ? 'Fin ✓' : 'Fin…') + (c.finOutraData ? ' ⚠ data' : '') + '</button>';
   },
 
   /* Abre a MESMA janela de finalização, depois do fato. O caminho normal é no
@@ -269,9 +300,14 @@ const meuDia = {
     let doc = null;
     try { doc = store.getById(mod, id); } catch (e) {}
     if (!doc) { toast('Não achei o documento deste atendimento', 'error'); return; }
-    let jaTem = false;
-    try { jaTem = (store.list('financeiro') || []).some(x => x._origemId === id); } catch (e) {}
-    if (jaTem) { toast('Este atendimento já tem lançamento financeiro'); try { meuDia.render(); } catch (e) {} return; }
+    let jaTem = null;
+    try { jaTem = (store.list('financeiro') || []).find(x => x._origemId === id && x.status !== 'cancelado') || null; } catch (e) {}
+    if (jaTem) {
+      /* já existe: abre o lançamento em vez de só avisar */
+      toast('Este atendimento já tem lançamento financeiro' + (jaTem.data_proc ? ' (data ' + String(jaTem.data_proc).split('-').reverse().join('/') + ')' : ' (sem data)') + ' — abrindo.');
+      try { dashboard._abrirFicha('financeiro', jaTem._id); } catch (e) { try { meuDia.render(); } catch (e2) {} }
+      return;
+    }
     try {
       fin.finalizacao.abrirQuandoLivre(mod, doc, () => { try { meuDia.render(); } catch (e) {} });
     } catch (e) { toast('Não consegui abrir a janela do financeiro: ' + e.message, 'error'); }
@@ -354,7 +390,8 @@ const meuDia = {
       const clinicosAbertos = clinicos.filter(c =>
         (c.consulta && !c.consulta._finalizado) || (c.pre && !c.pre._finalizado)).length;
       const finPend = casos.filter(c => c.fin && !(c.fin.pago || c.fin.status === 'recebido' || c.fin.status === 'finalizado')).length;
-      const semFin = casos.filter(c => c.ficha && c.ficha._finalizado && !c.fin).length;
+      const semFin = casos.filter(c => c.ficha && c.ficha._finalizado && !c.fin &&
+        (() => { try { return fin.finalizacao.decisaoDe(c.ficha) !== false; } catch (e) { return true; } })()).length;
       const chips = [
         { i: '🗓', l: 'Casos hoje', v: casos.length },
         { i: '✅', l: 'Fichas finalizadas', v: fichasOk },

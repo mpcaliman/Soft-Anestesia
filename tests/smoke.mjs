@@ -24736,6 +24736,62 @@ await test('Declaração de comparecimento: texto completo nos dois formulários
   await page.close();
 });
 
+await test('Cobrança ao finalizar: clique fora/Esc não somem com a janela, outra janela por cima faz ela voltar, e o Meu dia acha o lançamento mesmo com outra data', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-cobranca');
+    const hoje = utils.hojeISO();
+    store.setList('financeiro', []); store.setList('anestesia', []); store.setList('recuperacao', []);
+    const ficha = store.save('anestesia', { paciente: { nome: 'Paciente Cobrança', convenio: 'Unimed' },
+      procedimento: { data: hoje, descricao: 'Herniorrafia', cirurgiao: 'Dr. B' }, _finalizado: true });
+    const aberta = () => document.getElementById('modal-backdrop').classList.contains('show') && /Gerar financeiro/.test(document.getElementById('modal-title').textContent);
+    fin.finalizacao.abrir('anestesia', ficha, () => {});
+    await new Promise(res => setTimeout(res, 60));
+    /* clique fora e Esc */
+    document.getElementById('modal-backdrop').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    out.naoSome = aberta() && !!fin.finalizacao._ctx;
+    /* outra janela por cima: ao fechar, a cobrança volta */
+    modal.open('Pendências', '<p>x</p>', '');
+    out.substituida = !aberta();
+    modal.close();
+    await new Promise(res => setTimeout(res, 1100));
+    out.voltou = aberta();
+    /* os botões continuam fechando de verdade */
+    fin.finalizacao.confirmar();
+    await new Promise(res => setTimeout(res, 50));
+    out.gerou = (store.list('financeiro') || []).some(x => x._origemId === ficha._id);
+    out.fechou = !document.getElementById('modal-backdrop').classList.contains('show');
+    /* modal comum segue fechando com clique fora */
+    modal.open('Comum', '<p>y</p>', '');
+    document.getElementById('modal-backdrop').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    out.comumFecha = !document.getElementById('modal-backdrop').classList.contains('show');
+
+    /* lançamento com OUTRA data: o caso não aparece como "gerar financeiro" */
+    const f2 = store.save('anestesia', { paciente: { nome: 'Paciente Data' }, procedimento: { data: hoje, descricao: 'Postectomia' }, _finalizado: true });
+    store.save('financeiro', { paciente: 'Paciente Data', data_proc: '', _origemId: f2._id, _origemTipo: 'anestesia', _origemLinhaId: '', status: 'pendente' });
+    const c2 = meuDia.coletar().find(c => c.ficha && c.ficha._id === f2._id);
+    out.achouPorOrigem = !!(c2 && c2.fin);
+    out.chipData = c2 && /Fin…/.test(meuDia._chipFin(c2)) && /⚠ data/.test(meuDia._chipFin(c2));
+    /* decidido "não gerar": não acusa falta */
+    const f3 = store.save('anestesia', { paciente: { nome: 'Paciente Nao' }, procedimento: { data: hoje, descricao: 'X' }, _finalizado: true });
+    fin.finalizacao.registrarDecisao('anestesia', f3._id, false);
+    const c3 = meuDia.coletar().find(c => c.ficha && c.ficha._id === f3._id);
+    out.decidido = c3 && /sem cobrança \(decidido\)/.test(meuDia._chipFin(c3));
+    try { modal.close(); } catch (e) {}
+    store.setList('financeiro', []); store.setList('anestesia', []);
+    return out;
+  });
+  assert(r.naoSome, 'clique fora e Esc não fecham a janela da cobrança');
+  assert(r.substituida && r.voltou, 'se outra janela ocupa o lugar, a cobrança volta quando ela fecha');
+  assert(r.gerou && r.fechou, 'Gerar lançamento grava e fecha');
+  assert(r.comumFecha, 'janelas comuns continuam fechando com clique fora');
+  assert(r.achouPorOrigem && r.chipData, 'Meu dia acha o lançamento pela origem e avisa a data diferente');
+  assert(r.decidido, '"Não gerar" aparece como decisão, não como falta');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
