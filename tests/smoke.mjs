@@ -24825,6 +24825,43 @@ await test('Financeiro: clicar no título da coluna ordena a tabela (crescente, 
   await page.close();
 });
 
+await test('Ficha de anestesia: escolher o paciente traz carteirinha, CPF e acomodação também dos registros ligados ao cadastro', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-fichapac');
+    ['pacientes', 'anestesia', 'pre', 'financeiro'].forEach(m => store.setList(m, []));
+    location.hash = '#anestesia'; await new Promise(res => setTimeout(res, 400));
+    const f = document.getElementById('form-anestesia');
+    const limpar = () => f.querySelectorAll('[name^="paciente_"],[name="origem"]').forEach(el => { if (el.type !== 'hidden') el.value = ''; });
+    const ler = () => { const o = {}; ['paciente_nome', 'paciente_cpf', 'paciente_carteirinha', 'paciente_convenio', 'paciente_nasc', 'origem']
+      .forEach(n => { o[n] = (f.querySelector('[name="' + n + '"]') || {}).value || ''; }); return o; };
+    const escolher = async p => { limpar(); autocomplete._aplicarPaciente('form-anestesia', store.getById('pacientes', p._id)); await new Promise(res => setTimeout(res, 500)); return ler(); };
+
+    /* 1) cadastro COM CPF; carteirinha e acomodação só no lançamento importado (ligado, sem CPF) */
+    const a = store.save('pacientes', { nome: 'Ana Ligada', cpf: '529.982.247-25', nascimento: '1980-03-15' });
+    store.save('financeiro', { paciente: 'Ana Ligada', _patientRef: a._id, carteirinha: '02860001234', convenio: 'Unimed Costa do Descobrimento', acomodacao: 'apartamento', data_proc: '2026-09-01' });
+    out.caso1 = await escolher(a);
+
+    /* 2) cadastro SEM CPF; CPF anotado na pré ligada ao cadastro */
+    const b = store.save('pacientes', { nome: 'Bia Ligada', carteirinha: '0286999', plano: 'Unimed' });
+    store.save('pre', { nome: 'Bia Ligada', _patientRef: b._id, cpf: '111.444.777-35', data_avaliacao: '2026-09-02' });
+    out.caso2 = await escolher(b);
+
+    /* 3) registro ligado mas com OUTRO CPF não mistura pessoas */
+    const c = store.save('pacientes', { nome: 'Cid Ligado', cpf: '529.982.247-25' });
+    store.save('pre', { nome: 'Cid Ligado', _patientRef: c._id, cpf: '111.444.777-35', peso: '99', convenio: 'Bradesco' });
+    out.caso3 = await escolher(c);
+    ['pacientes', 'pre', 'financeiro'].forEach(m => store.setList(m, []));
+    return out;
+  });
+  assert(r.caso1.paciente_cpf && r.caso1.paciente_carteirinha === '02860001234' && /descobrimento/i.test(r.caso1.paciente_convenio) && /apartamento/i.test(r.caso1.origem),
+    'carteirinha, plano e acomodação vêm do lançamento ligado ao cadastro: ' + JSON.stringify(r.caso1));
+  assert(r.caso2.paciente_cpf === '111.444.777-35' && r.caso2.paciente_carteirinha === '0286999', 'CPF vem da pré ligada ao cadastro: ' + JSON.stringify(r.caso2));
+  assert(!/bradesco/i.test(r.caso3.paciente_convenio), 'registro com outro CPF não é misturado: ' + JSON.stringify(r.caso3));
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
