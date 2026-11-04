@@ -1602,9 +1602,12 @@ const linker = {
     /* 1. Reúne fontes: cada registro vira { ts, label, dados } */
     const fontesList = [];
 
+    /* Vínculo explícito com o cadastro escolhido: o registro que aponta para
+       ele (_patientRef) é do mesmo paciente mesmo com o nome grafado diferente. */
+    const refEscolhido = String(opts.patientRef || '');
     /* Cadastro central de pacientes */
     store.list('pacientes').forEach(p => {
-      if (linker._normNome(p.nome) !== alvo) return;
+      if (linker._normNome(p.nome) !== alvo && !(refEscolhido && p._id === refEscolhido)) return;
       fontesList.push({
         ts: new Date(p._updatedAt || p._createdAt || 0).getTime(),
         label: 'cadastro de pacientes',
@@ -1618,7 +1621,7 @@ const linker = {
     linker._MODS_PACIENTE.forEach(m => {
       store.list(m).forEach(it => {
         const pacNome = (it.paciente && it.paciente.nome) || it.paciente_nome || it.nome || it.paciente || '';
-        if (linker._normNome(pacNome) !== alvo) return;
+        if (linker._normNome(pacNome) !== alvo && !(refEscolhido && it._patientRef === refEscolhido)) return;
         fontesList.push({
           ts: new Date(it._updatedAt || it._createdAt || 0).getTime(),
           label: linker._LABEL_MOD[m] || m,
@@ -1636,8 +1639,20 @@ const linker = {
     const selectedKey = String(opts.identityKey || '');
     const selectedRef = String(opts.patientRef || '');
     let fontesSeguras = fontesList;
-    if (selectedKey) fontesSeguras = fontesList.filter(x => x.identityKey === selectedKey);
-    else if (selectedRef) fontesSeguras = fontesList.filter(x => x.patientRef === selectedRef);
+    /* PACIENTE ESCOLHIDO NA LISTA: valem os registros com a mesma chave forte
+       E os ligados ao mesmo cadastro. Antes, com chave escolhida, só a chave
+       contava — e a carteirinha que veio no lançamento da importação, o CPF
+       anotado na pré e a acomodação da ficha anterior (todos ligados ao
+       cadastro, mas sem CPF no registro, ou com CPF num cadastro que não o
+       tinha) ficavam de fora, e a ficha nova chegava sem eles.
+       Dois CPFs DIFERENTES continuam separando pessoas, mesmo com vínculo. */
+    const cpfDe = k => /^cpf:/.test(String(k || '')) ? String(k) : '';
+    const conflita = x => !!(cpfDe(x.identityKey) && cpfDe(selectedKey) && x.identityKey !== selectedKey);
+    if (selectedKey || selectedRef) {
+      fontesSeguras = fontesList.filter(x =>
+        (selectedKey && x.identityKey === selectedKey) ||
+        (selectedRef && x.patientRef === selectedRef && !conflita(x)));
+    }
     else if (strongKeys.length > 1) {
       return { dados, fontes, ambiguous: true, identityKeys: strongKeys };
     } else if (strongKeys.length === 1) {

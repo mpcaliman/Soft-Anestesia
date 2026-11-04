@@ -24736,6 +24736,179 @@ await test('Declaração de comparecimento: texto completo nos dois formulários
   await page.close();
 });
 
+await test('Cobrança ao finalizar: clique fora/Esc não somem com a janela, outra janela por cima faz ela voltar, e o Meu dia acha o lançamento mesmo com outra data', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-cobranca');
+    const hoje = utils.hojeISO();
+    store.setList('financeiro', []); store.setList('anestesia', []); store.setList('recuperacao', []);
+    const ficha = store.save('anestesia', { paciente: { nome: 'Paciente Cobrança', convenio: 'Unimed' },
+      procedimento: { data: hoje, descricao: 'Herniorrafia', cirurgiao: 'Dr. B' }, _finalizado: true });
+    const aberta = () => document.getElementById('modal-backdrop').classList.contains('show') && /Gerar financeiro/.test(document.getElementById('modal-title').textContent);
+    fin.finalizacao.abrir('anestesia', ficha, () => {});
+    await new Promise(res => setTimeout(res, 60));
+    /* clique fora e Esc */
+    document.getElementById('modal-backdrop').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    out.naoSome = aberta() && !!fin.finalizacao._ctx;
+    /* outra janela por cima: ao fechar, a cobrança volta */
+    modal.open('Pendências', '<p>x</p>', '');
+    out.substituida = !aberta();
+    modal.close();
+    await new Promise(res => setTimeout(res, 1100));
+    out.voltou = aberta();
+    /* os botões continuam fechando de verdade */
+    fin.finalizacao.confirmar();
+    await new Promise(res => setTimeout(res, 50));
+    out.gerou = (store.list('financeiro') || []).some(x => x._origemId === ficha._id);
+    out.fechou = !document.getElementById('modal-backdrop').classList.contains('show');
+    /* modal comum segue fechando com clique fora */
+    modal.open('Comum', '<p>y</p>', '');
+    document.getElementById('modal-backdrop').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    out.comumFecha = !document.getElementById('modal-backdrop').classList.contains('show');
+
+    /* lançamento com OUTRA data: o caso não aparece como "gerar financeiro" */
+    const f2 = store.save('anestesia', { paciente: { nome: 'Paciente Data' }, procedimento: { data: hoje, descricao: 'Postectomia' }, _finalizado: true });
+    store.save('financeiro', { paciente: 'Paciente Data', data_proc: '', _origemId: f2._id, _origemTipo: 'anestesia', _origemLinhaId: '', status: 'pendente' });
+    const c2 = meuDia.coletar().find(c => c.ficha && c.ficha._id === f2._id);
+    out.achouPorOrigem = !!(c2 && c2.fin);
+    out.chipData = c2 && /Fin…/.test(meuDia._chipFin(c2)) && /⚠ data/.test(meuDia._chipFin(c2));
+    /* decidido "não gerar": não acusa falta */
+    const f3 = store.save('anestesia', { paciente: { nome: 'Paciente Nao' }, procedimento: { data: hoje, descricao: 'X' }, _finalizado: true });
+    fin.finalizacao.registrarDecisao('anestesia', f3._id, false);
+    const c3 = meuDia.coletar().find(c => c.ficha && c.ficha._id === f3._id);
+    out.decidido = c3 && /sem cobrança \(decidido\)/.test(meuDia._chipFin(c3));
+    try { modal.close(); } catch (e) {}
+    store.setList('financeiro', []); store.setList('anestesia', []);
+    return out;
+  });
+  assert(r.naoSome, 'clique fora e Esc não fecham a janela da cobrança');
+  assert(r.substituida && r.voltou, 'se outra janela ocupa o lugar, a cobrança volta quando ela fecha');
+  assert(r.gerou && r.fechou, 'Gerar lançamento grava e fecha');
+  assert(r.comumFecha, 'janelas comuns continuam fechando com clique fora');
+  assert(r.achouPorOrigem && r.chipData, 'Meu dia acha o lançamento pela origem e avisa a data diferente');
+  assert(r.decidido, '"Não gerar" aparece como decisão, não como falta');
+  await page.close();
+});
+
+await test('Financeiro: clicar no título da coluna ordena a tabela (crescente, decrescente, volta ao normal)', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-ordem');
+    localStorage.removeItem(financeiro.ordem.KEY);
+    store.setList('financeiro', [
+      { _id: 'o1', paciente: 'Bruno', convenio: 'Unimed', data_proc: '2026-10-02', valor_previsto: 300, status: 'pendente' },
+      { _id: 'o2', paciente: 'Ana', convenio: 'Bradesco', data_proc: '2026-10-05', valor_previsto: 100, senha: '9', status: 'recebido' },
+      { _id: 'o3', paciente: 'Carla', convenio: 'Amil', data_proc: '2026-10-01', valor_previsto: 200, senha: '1', status: 'glosado' }
+    ]);
+    location.hash = '#financeiro';
+    await new Promise(res => setTimeout(res, 300));
+    financeiro.render();
+    const nomes = () => Array.from(document.querySelectorAll('#financeiro-tbody tr')).map(tr => (tr.cells[0] || {}).textContent || '').map(t => (t.match(/Ana|Bruno|Carla/) || [''])[0]).join(',');
+    const th = i => document.querySelectorAll('#financeiro-table thead th')[i];
+    th(0).click(); out.pacAsc = nomes() === 'Ana,Bruno,Carla' && /▲/.test(th(0).textContent);
+    th(0).click(); out.pacDesc = nomes() === 'Carla,Bruno,Ana' && /▼/.test(th(0).textContent);
+    th(0).click(); out.volta = !/[▲▼]/.test(th(0).textContent) && !financeiro.ordem.atual();
+    th(8).click(); out.previsto = nomes() === 'Ana,Carla,Bruno';
+    th(1).click(); out.senhaVaziaNoFim = nomes() === 'Carla,Ana,Bruno';
+    th(1).click(); out.senhaDescVaziaNoFim = nomes() === 'Ana,Carla,Bruno';
+    out.lembra = financeiro.ordem.atual() && financeiro.ordem.atual().col === 'senha';
+    localStorage.removeItem(financeiro.ordem.KEY); store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.pacAsc && r.pacDesc && r.volta, 'paciente: crescente, decrescente e volta');
+  assert(r.previsto, 'valores ordenam como número');
+  assert(r.senhaVaziaNoFim && r.senhaDescVaziaNoFim, 'vazios ficam no fim nos dois sentidos');
+  assert(r.lembra, 'a ordem escolhida fica lembrada');
+  await page.close();
+});
+
+await test('Ficha de anestesia: escolher o paciente traz carteirinha, CPF e acomodação também dos registros ligados ao cadastro', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-fichapac');
+    ['pacientes', 'anestesia', 'pre', 'financeiro'].forEach(m => store.setList(m, []));
+    location.hash = '#anestesia'; await new Promise(res => setTimeout(res, 400));
+    const f = document.getElementById('form-anestesia');
+    const limpar = () => f.querySelectorAll('[name^="paciente_"],[name="origem"]').forEach(el => { if (el.type !== 'hidden') el.value = ''; });
+    const ler = () => { const o = {}; ['paciente_nome', 'paciente_cpf', 'paciente_carteirinha', 'paciente_convenio', 'paciente_nasc', 'origem']
+      .forEach(n => { o[n] = (f.querySelector('[name="' + n + '"]') || {}).value || ''; }); return o; };
+    const escolher = async p => { limpar(); autocomplete._aplicarPaciente('form-anestesia', store.getById('pacientes', p._id)); await new Promise(res => setTimeout(res, 500)); return ler(); };
+
+    /* 1) cadastro COM CPF; carteirinha e acomodação só no lançamento importado (ligado, sem CPF) */
+    const a = store.save('pacientes', { nome: 'Ana Ligada', cpf: '529.982.247-25', nascimento: '1980-03-15' });
+    store.save('financeiro', { paciente: 'Ana Ligada', _patientRef: a._id, carteirinha: '02860001234', convenio: 'Unimed Costa do Descobrimento', acomodacao: 'apartamento', data_proc: '2026-09-01' });
+    out.caso1 = await escolher(a);
+
+    /* 2) cadastro SEM CPF; CPF anotado na pré ligada ao cadastro */
+    const b = store.save('pacientes', { nome: 'Bia Ligada', carteirinha: '0286999', plano: 'Unimed' });
+    store.save('pre', { nome: 'Bia Ligada', _patientRef: b._id, cpf: '111.444.777-35', data_avaliacao: '2026-09-02' });
+    out.caso2 = await escolher(b);
+
+    /* 3) registro ligado mas com OUTRO CPF não mistura pessoas */
+    const c = store.save('pacientes', { nome: 'Cid Ligado', cpf: '529.982.247-25' });
+    store.save('pre', { nome: 'Cid Ligado', _patientRef: c._id, cpf: '111.444.777-35', peso: '99', convenio: 'Bradesco' });
+    out.caso3 = await escolher(c);
+    ['pacientes', 'pre', 'financeiro'].forEach(m => store.setList(m, []));
+    return out;
+  });
+  assert(r.caso1.paciente_cpf && r.caso1.paciente_carteirinha === '02860001234' && /descobrimento/i.test(r.caso1.paciente_convenio) && /apartamento/i.test(r.caso1.origem),
+    'carteirinha, plano e acomodação vêm do lançamento ligado ao cadastro: ' + JSON.stringify(r.caso1));
+  assert(r.caso2.paciente_cpf === '111.444.777-35' && r.caso2.paciente_carteirinha === '0286999', 'CPF vem da pré ligada ao cadastro: ' + JSON.stringify(r.caso2));
+  assert(!/bradesco/i.test(r.caso3.paciente_convenio), 'registro com outro CPF não é misturado: ' + JSON.stringify(r.caso3));
+  await page.close();
+});
+
+await test('Nuvem: Financeiro, pacientes e agenda vêm inteiros, em páginas — não param nos mil primeiros', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-pag');
+    const orig = { fetch: window.fetch, cfg: cloud.config, tok: cloud._garantirToken, hdr: cloud._headers };
+    cloud.config = () => ({ url: 'https://nuvem-teste.supabase.co', anonKey: 'k' });
+    cloud._garantirToken = async () => true;
+    cloud._headers = () => ({});
+    const TOTAL = 2350, pedidos = [];
+    window.fetch = async (url) => {
+      url = String(url); pedidos.push(url);
+      const lim = Number((url.match(/[?&]limit=(\d+)/) || [])[1] || 1000000);
+      const off = Number((url.match(/[?&]offset=(\d+)/) || [])[1] || 0);
+      /* o servidor real corta em mil, peça o quanto pedir */
+      const n = Math.max(0, Math.min(TOTAL - off, Math.min(lim, 1000)));
+      const rows = Array.from({ length: n }, (_, i) => {
+        const k = off + i;
+        return { id: 'id-' + k, organization_id: cloudRel._org(), legacy_id: 'L' + k, nome: 'P' + k, status: 'pendente',
+          scheduled_at: '2026-10-01T10:00:00Z', updated_at: '2026-10-01T00:00:00Z', version: 1,
+          data: { _id: 'L' + k, paciente: 'P' + k, nome: 'P' + k, data_proc: '2026-10-01' } };
+      });
+      return { ok: true, status: 200, json: async () => rows };
+    };
+    try {
+      const fin = await cloudRel.puxarModulo('financeiro');
+      out.fin = fin ? fin.length : -1;
+      out.finUnicos = fin ? new Set(fin.map(x => x._id)).size : -1;
+      const pac = await cloudRel.puxarPacientes();
+      out.pac = pac ? pac.length : -1;
+      const ag = await cloudRel.puxarAgenda();
+      out.ag = ag ? ag.length : -1;
+      out.paginou = pedidos.some(u => /offset=2000/.test(u));
+      /* página que falha: nada pela metade */
+      window.fetch = async (url) => /offset=1000/.test(String(url)) ? { ok: false, status: 500, json: async () => ({}) }
+        : { ok: true, status: 200, json: async () => Array.from({ length: 1000 }, (_, i) => ({ id: 'x' + i, legacy_id: 'x' + i, data: { _id: 'x' + i } })) };
+      out.falhaInteira = (await cloudRel.puxarModulo('financeiro')) === null;
+    } finally { window.fetch = orig.fetch; cloud.config = orig.cfg; cloud._garantirToken = orig.tok; cloud._headers = orig.hdr; }
+    return out;
+  });
+  assert(r.fin === 2350 && r.finUnicos === 2350, 'financeiro inteiro: ' + JSON.stringify(r));
+  assert(r.pac === 2350 && r.ag === 2350, 'pacientes e agenda inteiros: ' + JSON.stringify(r));
+  assert(r.paginou, 'lê em páginas');
+  assert(r.falhaInteira, 'se uma página falha, não devolve meia lista');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

@@ -107,6 +107,29 @@ const cloudRel = {
   },
   _SELECT: 'id,organization_id,nome,cpf,nascimento,prontuario,convenio,telefone,email,sexo,data,legacy_id,version,updated_by,updated_at,deleted_at,last_operation_id,last_operation_checksum',
 
+  /* Lê TODAS as páginas de uma consulta. O PostgREST corta cada resposta em
+     `max-rows` (mil por padrão) sem avisar; quem lê uma página só fica com
+     parte do acervo achando que tem tudo. Devolve null se qualquer página
+     falhar ou o contexto mudar no meio. */
+  async _lerPaginado(urlBase, contexto, org, passo = 1000) {
+    const out = [], vistos = new Set();
+    for (let de = 0; ; de += passo) {
+      const r = await fetch(urlBase + '&limit=' + passo + '&offset=' + de, { headers: cloud._headers(true) });
+      if (!r.ok) return null;
+      const rows = await r.json();
+      if (!cloudRel._contextoValido(contexto, org)) return null;
+      if (!Array.isArray(rows)) return null;
+      rows.forEach(row => {
+        const k = row && row.id != null ? String(row.id) : '';
+        if (k && vistos.has(k)) return;
+        if (k) vistos.add(k);
+        out.push(row);
+      });
+      if (rows.length < passo) break;
+      if (de > 200000) return null;
+    }
+    return out;
+  },
   /* Puxa os pacientes da org (tabela relacional). Retorna [{_patKey,item}] ou null. */
   async puxarPacientes() {
     const contexto = cloudRel._capturarContexto(); if (!contexto) return null;
@@ -115,12 +138,9 @@ const cloudRel = {
     if (!cloudRel._contextoValido(contexto, org)) return null;
     const c = cloud.config();
     try {
-      const r = await fetch(c.url + '/rest/v1/patients?organization_id=eq.' + org +
-        '&deleted_at=is.null&select=' + cloudRel._SELECT + '&order=nome.asc',
-        { headers: cloud._headers(true) });
-      if (!r.ok) return null;
-      const rows = await r.json();
-      if (!cloudRel._contextoValido(contexto, org)) return null;
+      const rows = await cloudRel._lerPaginado(c.url + '/rest/v1/patients?organization_id=eq.' + org +
+        '&deleted_at=is.null&select=' + cloudRel._SELECT + '&order=nome.asc,id.asc', contexto, org);
+      if (!rows) return null;
       return rows.map(row => {
         const item = cloudRel._rowParaItem(row, org);
         return { _patKey: migracaoFase4._patKey(migracaoFase4._ident(item)), item };
@@ -452,12 +472,9 @@ const cloudRel = {
     if (!cloudRel._contextoValido(contexto, org)) return null;
     const c = cloud.config();
     try {
-      const r = await fetch(c.url + '/rest/v1/appointments?organization_id=eq.' + org +
-        '&deleted_at=is.null&select=' + cloudRel._AG_SELECT + '&order=scheduled_at.desc.nullslast',
-        { headers: cloud._headers(true) });
-      if (!r.ok) return null;
-      const rows = await r.json();
-      if (!cloudRel._contextoValido(contexto, org)) return null;
+      const rows = await cloudRel._lerPaginado(c.url + '/rest/v1/appointments?organization_id=eq.' + org +
+        '&deleted_at=is.null&select=' + cloudRel._AG_SELECT + '&order=scheduled_at.desc.nullslast,id.asc', contexto, org);
+      if (!rows) return null;
       return rows.map(row => cloudRel._rowParaAgenda(row, org));
     } catch (e) { return null; }
   },
@@ -714,13 +731,36 @@ const cloudRel = {
          depois da última passada. É o que permite sincronizar sozinho, de
          minuto em minuto, sem pesar na rede nem no aparelho. */
       const filtroData = opts.desde ? '&updated_at=gt.' + encodeURIComponent(opts.desde) : '';
-      const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
-        '&deleted_at=is.null' + filtroData + cloudRel._filtroJanela(mod) + '&select=' + cloudRel._regSelect(cfg.tabela) + '&order=updated_at.desc',
-        { headers: cloud._headers(true) });
-      if (!r.ok) return null;
-      const rows = await r.json();
-      if (!cloudRel._contextoValido(contexto, org)) return null;
-      return rows.map(row => cloudRel._rowParaRegistro(row, org));
+      /* PAGINADO, COMO O ÍNDICE. Sem isto o PostgREST corta a resposta em
+         `max-rows` (mil) e o resto some calado: com o acervo importado o
+         Financeiro passou de mil lançamentos, e o aparelho ficava só com os
+         mil alterados por último — o relatório de outubro saía faltando
+         procedimentos e a tela dizia "de 1000 lançamentos". Ou vem tudo, ou
+         devolve null: meia lista parece sincronização bem-sucedida.
+         O desempate por id deixa a ordem estável entre as páginas, e o
+         conjunto de ids descarta a linha repetida se algo mudar no meio. */
+      const PASSO = 1000;
+      const vistos = new Set();
+      const out = [];
+      for (let de = 0; ; de += PASSO) {
+        const r = await fetch(c.url + '/rest/v1/' + cfg.tabela + '?organization_id=eq.' + org +
+          '&deleted_at=is.null' + filtroData + cloudRel._filtroJanela(mod) + '&select=' + cloudRel._regSelect(cfg.tabela) +
+          '&order=updated_at.desc,id.asc&limit=' + PASSO + '&offset=' + de,
+          { headers: cloud._headers(true) });
+        if (!r.ok) return null;
+        const rows = await r.json();
+        if (!cloudRel._contextoValido(contexto, org)) return null;
+        if (!Array.isArray(rows)) return null;
+        rows.forEach(row => {
+          const k = row && row.id != null ? String(row.id) : '';
+          if (k && vistos.has(k)) return;
+          if (k) vistos.add(k);
+          out.push(cloudRel._rowParaRegistro(row, org));
+        });
+        if (rows.length < PASSO) break;
+        if (de > 200000) return null;   /* trava de segurança */
+      }
+      return out;
     } catch (e) { return null; }
   },
 
