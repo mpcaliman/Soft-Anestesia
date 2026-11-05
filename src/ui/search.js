@@ -26,8 +26,22 @@ const historico = {
     recuperacao: 'Recuperação SRPA',
     termo: 'Termo (TCLE)',
     prescricao: 'Receituário',
+    documentos: 'Documentos (atestado, declaração, laudo)',
     risco: 'Risco perioperatório',
-    financeiro: 'Financeiro'
+    financeiro: 'Financeiro',
+    /* não é um módulo: é a gaveta de tudo o que foi EMITIDO para o paciente.
+       Atestado e declaração podem ter sido feitos no módulo Documentos ou no
+       Receituário; o termo mora noutro. Procurar um papel para reimprimir não
+       pode exigir saber em qual dos três ele foi feito. */
+    emitidos: 'Documentos emitidos'
+  },
+  MODS_EMITIDOS: ['documentos', 'prescricao', 'termo'],
+  /* pares [módulo, registro] que a lista mostra */
+  _paresDe(mod) {
+    const mods = mod === 'emitidos' ? historico.MODS_EMITIDOS : [mod];
+    const out = [];
+    mods.forEach(m => { try { (store.list(m) || []).forEach(it => { if (it) out.push([m, it]); }); } catch (e) {} });
+    return out;
   },
 
   abrir(mod) {
@@ -73,8 +87,8 @@ const historico = {
         if (!input || String(input.value || '').trim() !== q) return;   /* ele continuou digitando */
         /* o que importa é se há REGISTRO, e não se há HTML: o estado vazio
            também é uma linha de tabela, e conferir o HTML nunca disparava. */
-        const achouAqui = (store.list(mod) || []).some(it =>
-          historico._fmt('contem', historico._textoLinha(mod, it), q));
+        const achouAqui = historico._paresDe(mod).some(([m, it]) =>
+          historico._fmt('contem', historico._textoLinha(m, it), q));
         if (achouAqui) return;
         if (!historico._nuvemBuscados) historico._nuvemBuscados = new Set();
         const chave = mod + '|' + q.toLowerCase();
@@ -87,12 +101,13 @@ const historico = {
         if (tbody) tbody.innerHTML = '<tr><td colspan="6" style="padding:14px;text-align:center;color:var(--text-soft);font-size:.84rem">☁️ procurando na nuvem…</td></tr>';
         let achados = [];
         try { achados = await arquivo.procurarNaNuvem(q); } catch (e) { achados = []; }
-        const doModulo = (achados || []).filter(a => a && a.mod === mod && a.item && a.item._id);
+        const mods = mod === 'emitidos' ? historico.MODS_EMITIDOS : [mod];
+        const doModulo = (achados || []).filter(a => a && mods.indexOf(a.mod) >= 0 && a.item && a.item._id);
         doModulo.forEach(a => {
           try {
-            const lst = store.list(mod);
-            if (!lst.some(x => x && x._id === a.item._id)) { lst.push(a.item); store.setList(mod, lst); }
-            arquivo._removerDoIndice(mod, a.item._id);
+            const lst = store.list(a.mod);
+            if (!lst.some(x => x && x._id === a.item._id)) { lst.push(a.item); store.setList(a.mod, lst); }
+            arquivo._removerDoIndice(a.mod, a.item._id);
           } catch (e) {}
         });
         const atual = document.getElementById('hist-search-input');
@@ -123,8 +138,8 @@ const historico = {
   },
 
   _render(mod, filtro) {
-    const total = store.list(mod).length;
-    const naNuvem = (() => { try { return (arquivo._indice()[mod] || []).length; } catch (e) { return 0; } })();
+    const total = historico._paresDe(mod).length;
+    const naNuvem = (() => { try { const ix = arquivo._indice(); return (mod === 'emitidos' ? historico.MODS_EMITIDOS : [mod]).reduce((n, m) => n + (ix[m] || []).length, 0); } catch (e) { return 0; } })();
     return `
       <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <input id="hist-search-input" type="text" class="hist-search" value="${utils.escapeAttr(filtro)}"
@@ -155,17 +170,18 @@ const historico = {
   },
 
   _renderLinhas(mod, filtro) {
-    const list = store.list(mod);
+    const _modLista = mod;
+    const pares = historico._paresDe(mod);
     const q = (filtro || '').toLowerCase().trim();
     const filtradas = (q
-      ? list.filter(it => historico._fmt('contem', historico._textoLinha(mod, it), q))
-      : list).slice();
+      ? pares.filter(([m, it]) => historico._fmt('contem', historico._textoLinha(m, it), q))
+      : pares).slice();
     /* Ordenação clicável por data, paciente ou senha */
     const s = historico._sort;
-    filtradas.sort((a, b) => {
+    filtradas.sort(([ma, a], [mb, b]) => {
       let va, vb;
-      if (s.campo === 'paciente') { va = historico._nomeDe(mod, a).toLowerCase(); vb = historico._nomeDe(mod, b).toLowerCase(); }
-      else if (s.campo === 'senha') { va = (historico._senhaDe(mod, a) || '').toLowerCase(); vb = (historico._senhaDe(mod, b) || '').toLowerCase(); }
+      if (s.campo === 'paciente') { va = historico._nomeDe(ma, a).toLowerCase(); vb = historico._nomeDe(mb, b).toLowerCase(); }
+      else if (s.campo === 'senha') { va = (historico._senhaDe(ma, a) || '').toLowerCase(); vb = (historico._senhaDe(mb, b) || '').toLowerCase(); }
       else { va = historico._dataItem(a) || (a._updatedAt || ''); vb = historico._dataItem(b) || (b._updatedAt || ''); }
       if (va < vb) return -1 * s.dir;
       if (va > vb) return 1 * s.dir;
@@ -178,7 +194,7 @@ const historico = {
          caso de quem procura uma ficha antiga, que o socorro de espaço mandou
          para a nuvem), a tela dizia "nenhum registro" com a ficha inteira
          guardada e localizável. */
-      const arq = historico._linhasArquivadas(mod, q);
+      const arq = historico._linhasArquivadasDe(mod, q);
       if (arq) return arq;
       return `<tr><td colspan="6" style="text-align:center;color:var(--text-mute);padding:20px">` +
         `Nenhum registro ${q ? 'corresponde ao filtro' : 'carregado'} nesta sessão.` +
@@ -189,7 +205,7 @@ const historico = {
            : '') +
         `</td></tr>`;
     }
-    return filtradas.map(it => {
+    return filtradas.map(([mod, it]) => {
       const dt = historico._fmtData(historico._dataItem(it)) || (it._updatedAt ? new Date(it._updatedAt).toLocaleDateString('pt-BR') : '—');
       const nome = utils.escapeHTML(historico._nomeDe(mod, it));
       const senha = historico._senhaDe(mod, it);
@@ -216,7 +232,12 @@ const historico = {
           <button class="btn btn-xs btn-danger" onclick="historico.excluirItem(${utils.jsArg(mod)},${utils.jsArg(it._id)})" title="Apagar">🗑</button>
         </td>
       </tr>`;
-    }).join('') + historico._linhasArquivadas(mod, q);
+    }).join('') + historico._linhasArquivadasDe(_modLista, q);
+  },
+  /* uma linha arquivada por módulo de verdade, também na gaveta de emitidos */
+  _linhasArquivadasDe(mod, q) {
+    if (mod !== 'emitidos') return historico._linhasArquivadas(mod, q);
+    return historico.MODS_EMITIDOS.map(m => historico._linhasArquivadas(m, q)).join('');
   },
 
   /* Registros que estão NA NUVEM e ainda não foram carregados nesta sessão.
@@ -255,6 +276,8 @@ const historico = {
       return { rot: s || '', cls: s };
     }
     if (it._finalizado) return { rot: 'Finalizado', cls: 'pago' };
+    /* documento não tem etapa de finalizar: salvo já é emitido */
+    if (mod === 'documentos') return { rot: 'Emitido', cls: 'pago' };
     return { rot: 'Rascunho', cls: 'pendente' };
   },
 
@@ -280,7 +303,20 @@ const historico = {
     if (mod === 'consulta') return [it.queixa, it.profissional].filter(Boolean).join(' · ');
     if (mod === 'recuperacao') return [it.procedimento, it.tipo_anestesia].filter(Boolean).join(' · ');
     if (mod === 'financeiro') return [it.procedimento, it.convenio, it.status].filter(Boolean).join(' · ');
-    if (mod === 'documentos') { const t = { atestado: 'Atestado', declaracao: 'Declaração', laudo: 'Laudo' }[it.modelo] || 'Documento'; return t; }
+    if (mod === 'documentos') {
+      const t = { atestado: '📝 Atestado', declaracao: '🕐 Declaração de comparecimento', laudo: '🧾 Laudo' }[it.modelo] || '📄 Documento';
+      const extra = it.modelo === 'atestado' ? (it.atestado_dias ? it.atestado_dias + ' dia(s)' : '')
+        : it.modelo === 'declaracao' ? [it.decl_data ? historico._fmtData(it.decl_data) : '', it.decl_hora_ini && it.decl_hora_fim ? it.decl_hora_ini + '–' + it.decl_hora_fim : ''].filter(Boolean).join(' ')
+        : (it.laudo_destinatario || '');
+      return [t, extra].filter(Boolean).join(' · ');
+    }
+    if (mod === 'prescricao') {
+      const t = { simples: '💊 Receita', especial: '💊 Receita de controle especial', antimicrobiano: '💊 Receita de antimicrobiano',
+        atestado: '📝 Atestado', declaracao: '🕐 Declaração de comparecimento', laudo: '🧾 Laudo' }[it.modelo || 'simples'] || '💊 Receita';
+      const itens = Array.isArray(it.itens) ? it.itens.map(x => x && x.nome).filter(Boolean) : [];
+      return [t + ' (receituário)', itens.slice(0, 3).join(', ')].filter(Boolean).join(' · ');
+    }
+    if (mod === 'termo') return ['✍️ Termo de consentimento', it.procedimento || it.cirurgia || ''].filter(Boolean).join(' · ');
     return '';
   },
 

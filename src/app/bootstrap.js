@@ -37,6 +37,9 @@ document.addEventListener('DOMContentLoaded', () => {
   window.anestesia = anestesia; window.recuperacao = recuperacao;
   window.termo = termo; window.prescricao = prescricao; window.MED_BASE = MED_BASE;
   window.risco = risco;
+  /* a busca abre o registro por window[mod]: sem esta linha, abrir e
+     reimprimir um atestado ou declaração pela busca não fazia nada */
+  if (typeof documentos !== 'undefined') window.documentos = documentos;
   window.captura = captura;
   window.pdfGen = pdfGen;
   window.pdfBackup = pdfBackup;

@@ -24909,6 +24909,50 @@ await test('Nuvem: Financeiro, pacientes e agenda vêm inteiros, em páginas —
   await page.close();
 });
 
+await test('Documentos: buscar e reimprimir atestado, declaração, laudo, receita e termo numa busca só', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-emitidos');
+    ['documentos', 'prescricao', 'termo'].forEach(m => store.setList(m, []));
+    store.save('documentos', { nome: 'Ana Emitida', data: '2026-11-01', modelo: 'atestado', atestado_dias: '3', atestado_texto: 'Atesto 3 dias.' });
+    store.save('documentos', { nome: 'Bia Emitida', data: '2026-11-02', modelo: 'declaracao', decl_data: '2026-11-02', decl_hora_ini: '08:00', decl_hora_fim: '09:00' });
+    store.save('prescricao', { nome: 'Ana Emitida', data: '2026-10-20', modelo: 'declaracao', decl_texto: 'Declaro.' });
+    store.save('termo', { nome: 'Ana Emitida', data: '2026-10-19', procedimento: 'Colecistectomia' });
+    /* o botão do módulo Documentos abria "Módulo inválido" */
+    location.hash = '#documentos'; await new Promise(res => setTimeout(res, 300));
+    const botao = Array.from(document.querySelectorAll('#module-documentos .action-bar button')).find(b => /Buscar/.test(b.textContent));
+    botao.click();
+    await new Promise(res => setTimeout(res, 150));
+    out.abriu = document.getElementById('modal-backdrop').classList.contains('show') && /Documentos emitidos/.test(document.getElementById('modal-title').textContent);
+    const linhas = () => Array.from(document.querySelectorAll('#hist-tbody tr')).map(tr => tr.textContent.replace(/\s+/g, ' '));
+    out.todos = linhas().length === 4;
+    out.tipos = /Atestado/.test(linhas().join('|')) && /Declaração de comparecimento/.test(linhas().join('|')) && /Termo de consentimento/.test(linhas().join('|')) && /receituário/.test(linhas().join('|'));
+    const inp = document.getElementById('hist-search-input');
+    inp.value = 'Ana'; inp.dispatchEvent(new Event('input', { bubbles: true }));
+    out.filtra = linhas().length === 3;
+    inp.value = 'declaração'; inp.dispatchEvent(new Event('input', { bubbles: true }));
+    out.porTipo = linhas().length === 2;
+    /* reimprimir: abre o documento no módulo certo e a visualização */
+    inp.value = 'Bia'; inp.dispatchEvent(new Event('input', { bubbles: true }));
+    const imprimir = document.querySelector('#hist-tbody button[title="Imprimir"]');
+    imprimir.click();
+    await new Promise(res => setTimeout(res, 1200));
+    const f = document.getElementById('form-documentos');
+    out.carregou = f.querySelector('[name="nome"]').value === 'Bia Emitida' && (f.querySelector('[name="modelo"]:checked') || {}).value === 'declaracao';
+    out.preview = document.getElementById('print-preview-overlay').classList.contains('show') && /DECLARAÇÃO DE COMPARECIMENTO/.test(document.getElementById('ppp').textContent);
+    out.dbg = { nome: f.querySelector('[name="nome"]').value, modelo: (f.querySelector('[name="modelo"]:checked') || {}).value, ov: document.getElementById('print-preview-overlay').classList.contains('show'), txt: (document.getElementById('ppp') || {}).textContent ? document.getElementById('ppp').textContent.slice(0, 200) : '', mod: state.currentModule };
+    try { printPreview.fechar(); } catch (e) {}
+    ['documentos', 'prescricao', 'termo'].forEach(m => store.setList(m, []));
+    return out;
+  });
+  assert(r.abriu, 'o botão Buscar do módulo Documentos abre a busca');
+  assert(r.todos && r.tipos, 'lista documentos, receituário e termo com o tipo de cada um');
+  assert(r.filtra && r.porTipo, 'filtra por paciente e por tipo');
+  assert(r.carregou && r.preview, 'reimprimir abre o documento e a visualização de impressão: ' + JSON.stringify(r.dbg).slice(0, 300));
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
