@@ -24953,6 +24953,31 @@ await test('Documentos: buscar e reimprimir atestado, declaração, laudo, recei
   await page.close();
 });
 
+await test('Doses & Infusões: nitroprussiato, vasopressina, azul de metileno e dantrolene, com orientação e cálculo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    location.hash = '#doses'; await new Promise(res => setTimeout(res, 300));
+    const peso = document.getElementById('dose-peso'); if (peso) { peso.value = '70'; peso.dispatchEvent(new Event('input', { bubbles: true })); }
+    const host = document.getElementById('dose-inf-edit'); if (host) host._built = false;
+    doses._renderInfEdit();
+    const txt = k => ((document.getElementById('inf-' + k + '-out') || {}).textContent || '').replace(/\s+/g, ' ');
+    out.nipride = txt('nipride'); out.vaso = txt('vaso'); out.azul = txt('azul'); out.dantro = txt('dantro');
+    const h = (host || {}).textContent || '';
+    out.orient = /Proteger da luz/.test(h) && /Dose FIXA/.test(h) && /G6PD/.test(h) && /ÁGUA PARA INJEÇÃO/.test(h);
+    const ref = DOSES_DB.map(x => x.n).join('|');
+    out.ref = /Nitroprussiato/.test(ref) && /Vasopressina/.test(ref) && /Azul de metileno/.test(ref) && /Dantrolene/.test(ref);
+    return out;
+  });
+  assert(/10[,.]5 mL\/h/.test(r.nipride), 'nipride 0,5 mcg/kg/min, 70 kg, 200 mcg/mL = 10,5 mL/h: ' + r.nipride);
+  assert(/\b9 mL\/h/.test(r.vaso), 'vasopressina 0,03 UI/min, 0,2 UI/mL = 9 mL/h: ' + r.vaso);
+  assert(/35 mL\/h/.test(r.azul), 'azul 0,5 mg/kg/h, 70 kg, 1 mg/mL = 35 mL/h: ' + r.azul);
+  assert(/175 mg/.test(r.dantro) && /9 frasco/.test(r.dantro) && /525 mL/.test(r.dantro), 'dantrolene 2,5 mg/kg, 70 kg = 175 mg, 9 frascos, 525 mL: ' + r.dantro);
+  assert(r.orient, 'cada uma traz a orientação de diluição e cuidados');
+  assert(r.ref, 'as quatro também na tabela de referência');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

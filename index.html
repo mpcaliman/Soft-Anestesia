@@ -4904,7 +4904,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-11-05a</b><br>
+    v7.1 · build <b id="build-tag">2026-11-05b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -51158,7 +51158,8 @@ const DOSES_DB = [
   { c:'vas', n:'Dopamina', a:'50 mg/10 mL', d:'250 mg em 250 mL = 1.000 mcg/mL', conc:1000, t:'i', un:'mcg/kg/min', faixa:[2,20], tip:5, o:'' },
   { c:'vas', n:'Vasopressina', a:'20 UI/mL (amp 1 mL)', d:'20 UI em 100 mL = 0,2 UI/mL', conc:0.2, t:'i', un:'UI/min', faixa:[0.01,0.04], tip:0.03, o:'Dose fixa (não por kg) no choque vasoplégico adulto.' },
   { c:'vas', n:'Nitroglicerina', a:'50 mg/10 mL', d:'50 mg em 250 mL = 200 mcg/mL', conc:200, t:'i', un:'mcg/kg/min', faixa:[0.25,5], tip:0.5, o:'Frasco/equipo próprios (adsorção em PVC).' },
-  { c:'vas', n:'Nitroprussiato', a:'Fr 50 mg', d:'50 mg em 250 mL SG5% = 200 mcg/mL', conc:200, t:'i', un:'mcg/kg/min', faixa:[0.3,3], tip:0.5, o:'Fotossensível (proteger da luz). Toxicidade por cianeto em doses altas/prolongadas.' },
+  { c:'vas', n:'Nitroprussiato (Nipride)', a:'Fr 50 mg', d:'50 mg em 250 mL SG5% = 200 mcg/mL', conc:200, t:'i', un:'mcg/kg/min', faixa:[0.3,10], tip:0.5, o:'Só SG 5%. Proteger da luz (frasco e equipo). Iniciar 0,3-0,5 e titular a cada 3-5 min; 10 mcg/kg/min no máx. por 10 min. Cianeto em dose alta/prolongada.' },
+  { c:'vas', n:'Azul de metileno (vasoplegia)', a:'1% = 10 mg/mL (confira: há 2% e 4%)', d:'100 mg em 100 mL SG5% = 1 mg/mL', conc:1000, t:'i', un:'mg/kg/h', faixa:[0.25,2], tip:0.5, o:'Ataque 1-2 mg/kg em 20-60 min. Contraindicado na deficiência de G6PD; síndrome serotoninérgica com ISRS; falsa queda da SpO2.' },
   { c:'vas', n:'Milrinona', a:'1 mg/mL (amp 20 mL)', d:'20 mg em 100 mL = 200 mcg/mL', conc:200, t:'i', un:'mcg/kg/min', faixa:[0.25,0.75], tip:0.375, o:'Ataque opcional 25-50 mcg/kg em 10 min. Ajustar na disfunção renal.' },
   { c:'vas', n:'Esmolol', a:'10 mg/mL (fr 10 mL)', d:'Puro (10 mg/mL) = 10.000 mcg/mL', conc:10000, t:'i', un:'mcg/kg/min', faixa:[50,300], tip:100, o:'Ataque 0,5 mg/kg em 1 min. Meia-vida ~9 min.' },
   { c:'vas', n:'Fenilefrina (infusão)', a:'10 mg/mL (amp 1 mL)', d:'10 mg em 250 mL = 40 mcg/mL', conc:40, t:'i', un:'mcg/kg/min', faixa:[0.1,0.5], tip:0.15, o:'Bolus adulto: 50-100 mcg. Bradicardia reflexa.' },
@@ -51196,6 +51197,7 @@ const DOSES_DB = [
 
   { c:'eme', n:'Adrenalina - PCR', a:'1 mg/mL (amp 1 mL)', d:'Ped: 1:10.000 (1 mg + 9 mL SF) = 0,1 mg/mL', conc:0.1, t:'b', ped:[0.01,0.01,'mg/kg'], adu:[1,1,'mg'], max:{v:1,u:'mg'}, via:'EV/IO', perigo:true, o:'Ped: 0,1 mL/kg de 1:10.000, a cada 3-5 min. Adulto: 1 mg a cada 3-5 min.' },
   { c:'eme', n:'Adrenalina - anafilaxia IM', a:'1 mg/mL', d:'Sem diluir (IM, vasto lateral)', conc:1, t:'b', ped:[0.01,0.01,'mg/kg'], adu:[0.3,0.5,'mg'], max:{v:0.5,u:'mg'}, via:'IM', perigo:true, o:'Repetir em 5-15 min se necessário.' },
+  { c:'eme', n:'Dantrolene - hipertermia maligna', a:'Fr 20 mg (pó + 3 g de manitol)', d:'20 mg + 60 mL de ÁGUA para injeção = 0,33 mg/mL (sem SF/SG)', conc:0.333, t:'b', ped:[2.5,2.5,'mg/kg'], adu:[2.5,2.5,'mg/kg'], via:'EV', perigo:true, o:'Bolus rápido; repetir a cada 5-10 min até controle. >10 mg/kg: reavaliar diagnóstico. Manutenção 1 mg/kg a cada 4-6 h por 24-48 h.' },
   { c:'eme', n:'Atropina', a:'0,25 mg/mL (amp 1 mL)', d:'Puro', conc:0.25, t:'b', ped:[0.02,0.02,'mg/kg'], adu:[0.5,1,'mg'], max:{v:1,u:'mg'}, via:'EV', o:'Ped: dose mínima 0,1 mg. Bradicardia sintomática.' },
   { c:'eme', n:'Amiodarona (PCR FV/TVSP)', a:'50 mg/mL (amp 3 mL)', d:'Diluir em SG5%', conc:50, t:'b', ped:[5,5,'mg/kg'], adu:[300,300,'mg'], max:{v:300,u:'mg'}, via:'EV/IO', o:'2ª dose: ped 5 mg/kg / adulto 150 mg. Fora de PCR: infundir lento.' },
   { c:'eme', n:'Adenosina', a:'3 mg/mL (amp 2 mL)', d:'Bolus rápido + flush 10-20 mL', conc:3, t:'b', ped:[0.1,0.1,'mg/kg'], adu:[6,6,'mg'], max:{v:6,u:'mg'}, via:'EV', o:'2ª dose: ped 0,2 mg/kg (máx 12 mg) / adulto 12 mg. Via proximal.' },
@@ -51982,7 +51984,22 @@ const doses = {
     { key:'dexme',   n:'Dexmedetomidina',  qtd:200, un:'mcg', vol:50,  doseUn:'mcg/kg/h',   faixa:[0.2,1.4],  tip:0.5,  a:'Ampola 100 mcg/mL (2 mL) ou 200 mcg/2 mL' },
     { key:'ceta',    n:'Cetamina',         qtd:250, un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[2,10],     tip:5,    a:'Frasco 50 mg/mL (10 mL) e 100 mg/mL' },
     { key:'lido',    n:'Lidocaína',        qtd:1000,un:'mg',  vol:250, doseUn:'mcg/kg/min', faixa:[10,50],    tip:20,   a:'Frasco 1% (10 mg/mL) e 2% (20 mg/mL) sem vasoconstritor' },
-    { key:'insu',    n:'Insulina regular', qtd:50,  un:'UI',  vol:50,  doseUn:'UI/h',       faixa:[0.5,10],   tip:2, semKg:true, a:'Frasco 100 UI/mL (10 mL)' }
+    { key:'insu',    n:'Insulina regular', qtd:50,  un:'UI',  vol:50,  doseUn:'UI/h',       faixa:[0.5,10],   tip:2, semKg:true, a:'Frasco 100 UI/mL (10 mL)' },
+    /* As quatro abaixo pedem orientação junto do número: preparo, proteção
+       e o que vigiar. Valores de referência da literatura — confira sempre
+       com o protocolo da instituição. */
+    { key:'nipride', n:'Nitroprussiato de sódio (Nipride)', qtd:50, un:'mg', vol:250, doseUn:'mcg/kg/min', faixa:[0.3,10], tip:0.5,
+      a:'Frasco-ampola 50 mg (pó liofilizado, reconstituir com 2 mL do diluente próprio ou SG 5%)',
+      o:'Diluir SÓ em SG 5% (50 mg em 250 mL = 200 mcg/mL). Proteger da luz: frasco e equipo fotoprotetores; solução marrom/azul = descartar. Bomba de infusão obrigatória, de preferência em via exclusiva, com PA invasiva. Iniciar 0,3–0,5 mcg/kg/min e titular a cada 3–5 min; usual até 3 mcg/kg/min; 10 mcg/kg/min no máximo por 10 min. Toxicidade por cianeto/tiocianato em dose alta ou prolongada (acidose metabólica, taquifilaxia, lactato alto) — ter hidroxocobalamina/tiossulfato disponíveis.' },
+    { key:'vaso',    n:'Vasopressina',     qtd:20,  un:'UI',  vol:100, doseUn:'UI/min',     faixa:[0.01,0.04], tip:0.03, semKg:true,
+      a:'Ampola 20 UI/mL (1 mL)',
+      o:'Diluir 20 UI em 100 mL de SF 0,9% ou SG 5% (0,2 UI/mL); em restrição de volume, 20 UI em 50 mL (0,4 UI/mL). Dose FIXA, não por kg: choque vasoplégico/séptico 0,01–0,04 UI/min (usual 0,03), associada à noradrenalina; vasoplegia pós-CEC até 0,06 UI/min conforme protocolo. Não titular como catecolamina: fixar a dose e ajustar a noradrenalina. Desmame lento (0,01 UI/min a cada 30–60 min). Vigiar isquemia mesentérica/digital e hiponatremia. Bolus de resgate (0,5–1 UI) só em situações específicas.' },
+    { key:'azul',    n:'Azul de metileno', qtd:100, un:'mg',  vol:100, doseUn:'mg/kg/h',    faixa:[0.25,2],   tip:0.5,
+      a:'Ampola 1% (10 mg/mL) — há apresentações a 2% e 4%: confira a concentração da sua ampola',
+      o:'Diluir em SG 5% (100 mg em 100 mL = 1 mg/mL). Vasoplegia refratária: ataque 1–2 mg/kg em 20–60 min, depois manutenção 0,25–1 mg/kg/h (até 2 mg/kg/h) por 6–12 h. Metemoglobinemia: 1–2 mg/kg em 5 min, repetir em 1 h se necessário (máx. 7 mg/kg). CONTRAINDICADO na deficiência de G6PD. Risco de síndrome serotoninérgica com ISRS/IMAO/IRSN. Interfere na oximetria (queda falsa da SpO₂ e do BIS); urina e pele azuladas.' },
+    { key:'dantro',  n:'Dantrolene (hipertermia maligna)', tipo:'bolus', frascoMg:20, frascoMl:60, doseUn:'mg/kg', faixa:[2.5,10], tip:2.5,
+      a:'Frasco 20 mg (pó liofilizado; contém 3 g de manitol)',
+      o:'Reconstituir cada frasco de 20 mg com 60 mL de ÁGUA PARA INJEÇÃO (sem conservante) — não usar SF nem SG; agitar até ficar límpido (0,33 mg/mL). Dose: 2,5 mg/kg EV em bolus rápido, repetida a cada 5–10 min até controle (taquicardia, EtCO₂, rigidez, temperatura); acima de 10 mg/kg reavaliar o diagnóstico. Após a crise: 1 mg/kg a cada 4–6 h (ou 0,25 mg/kg/h) por 24–48 h. Equipe dedicada só para reconstituir; acesso calibroso; flebite. Junto: suspender gatilho, hiperventilar com O₂ 100% e alto fluxo, resfriar, tratar hipercalemia e acidose.' }
   ],
   _num(id) { const el = document.getElementById(id); const v = el ? parseFloat(el.value) : NaN; return isNaN(v) ? null : v; },
   _concInf(qtd, un, vol) {
@@ -51995,7 +52012,9 @@ const doses = {
     if (conc == null || dose == null) return null;
     const perKg = doseUn.indexOf('/kg') >= 0;
     if (perKg && !peso) return null;
-    const base = perKg ? dose * peso : dose;   /* dose por minuto/hora, já no total */
+    let base = perKg ? dose * peso : dose;   /* dose por minuto/hora, já no total */
+    /* dose em mg (azul de metileno): a concentração está em mcg/mL */
+    if (!ui && doseUn.indexOf('mg') === 0) base *= 1000;
     if (doseUn.indexOf('/min') >= 0) return base / conc * 60;   /* mcg|UI por min → mL/h */
     return base / conc;                                          /* por hora → mL/h */
   },
@@ -52005,6 +52024,19 @@ const doses = {
     if (!host._built) {
       host.innerHTML = doses.INF.map(d => {
         const b = 'inf-' + d.key;
+        const obs = d.o ? '<div class="dc-obs">' + utils.escapeHTML(d.o) + '</div>' : '';
+        if (d.tipo === 'bolus') {
+          return '<div class="dose-card perigo"><div class="dc-head"><span class="dc-nome">' + utils.escapeHTML(d.n) + '</span></div>' +
+            (d.a ? '<div class="dc-linha"><b>Apresentação:</b> ' + utils.escapeHTML(d.a) + '</div>' : '') +
+            '<div class="dc-linha" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">Frasco: ' +
+              '<input type="number" id="' + utils.escapeAttr(b) + '-fmg" value="' + utils.escapeAttr(d.frascoMg) + '" step="1" min="1" style="width:80px" oninput="doses._calcInf(' + utils.jsArg(d.key) + ')"> mg em ' +
+              '<input type="number" id="' + utils.escapeAttr(b) + '-fml" value="' + utils.escapeAttr(d.frascoMl) + '" step="1" min="1" style="width:80px" oninput="doses._calcInf(' + utils.jsArg(d.key) + ')"> mL</div>' +
+            '<div class="dc-inf-controle">Dose: <input type="number" id="' + utils.escapeAttr(b) + '-dose" value="' + utils.escapeAttr(d.tip) + '" step="0.5" min="0" oninput="doses._calcInf(' + utils.jsArg(d.key) + ')"> ' +
+              '<span style="font-size:.78rem;color:var(--text-mute)">' + d.doseUn + ' (bolus)</span> ' +
+              '<span style="font-size:.72rem;color:var(--text-mute)">(inicial ' + doses._fmt(d.faixa[0]) + '; reavaliar acima de ' + doses._fmt(d.faixa[1]) + ' acumulado)</span></div>' +
+            '<div class="dc-linha" id="' + b + '-out" style="margin-top:4px;font-weight:600"></div>' + obs +
+          '</div>';
+        }
         return '<div class="dose-card"><div class="dc-head"><span class="dc-nome">' + utils.escapeHTML(d.n) + '</span>' +
           '<span style="display:flex;gap:4px">' +
             '<button type="button" class="btn btn-xs" onclick="doses._infPreset(' + utils.jsArg(d.key) + ',50)">Seringa 50 mL</button>' +
@@ -52018,12 +52050,25 @@ const doses = {
           '<div class="dc-inf-controle">Dose: <input type="number" id="' + utils.escapeAttr(b) + '-dose" value="' + utils.escapeAttr(d.tip) + '" step="0.01" min="0" oninput="doses._calcInf(' + utils.jsArg(d.key) + ')"> ' +
             '<span style="font-size:.78rem;color:var(--text-mute)">' + d.doseUn + '</span> ' +
             '<span style="font-size:.72rem;color:var(--text-mute)">(usual ' + doses._fmt(d.faixa[0]) + '–' + doses._fmt(d.faixa[1]) + ')</span></div>' +
-          '<div class="dc-linha" id="' + b + '-out" style="margin-top:4px;font-weight:600"></div>' +
+          '<div class="dc-linha" id="' + b + '-out" style="margin-top:4px;font-weight:600"></div>' + obs +
         '</div>';
       }).join('');
       host._built = true;
     }
     doses.INF.forEach(d => doses._calcInf(d.key));
+  },
+  /* Bolus calculado por frasco (dantrolene): quanto, quantos frascos e
+     quanto volume depois de reconstituído. */
+  _calcBolusInf(d) {
+    const b = 'inf-' + d.key;
+    const outEl = document.getElementById(b + '-out'); if (!outEl) return;
+    const fmg = doses._num(b + '-fmg'), fml = doses._num(b + '-fml'), dose = doses._num(b + '-dose');
+    const peso = doses._peso();
+    if (!peso) { outEl.innerHTML = '<span style="color:var(--text-mute);font-weight:400">→ informe o peso do paciente</span>'; return; }
+    if (!fmg || !fml || dose == null) { outEl.innerHTML = '<span style="color:var(--text-mute);font-weight:400">→ preencha frasco e dose</span>'; return; }
+    const mg = dose * peso, frascos = Math.ceil(mg / fmg - 1e-9), ml = mg / (fmg / fml);
+    const aviso = dose > d.faixa[1] ? ' <span style="color:#b3261e;font-weight:400">(acima de ' + doses._fmt(d.faixa[1]) + ' mg/kg — reavaliar o diagnóstico)</span>' : '';
+    outEl.innerHTML = '→ Dose: <b>' + doses._fmt(mg) + ' mg</b> · <b>' + frascos + ' frasco(s)</b> · <b>' + doses._fmt(ml) + ' mL</b> da solução (' + doses._fmt(fmg / fml) + ' mg/mL)' + aviso;
   },
   _infPreset(key, vol) {
     const el = document.getElementById('inf-' + key + '-vol');
@@ -52033,6 +52078,7 @@ const doses = {
     const d = doses.INF.find(x => x.key === key);
     if (!d) return;
     const b = 'inf-' + key;
+    if (d.tipo === 'bolus') { doses._calcBolusInf(d); return; }
     const qtd = doses._num(b + '-qtd'), vol = doses._num(b + '-vol'), dose = doses._num(b + '-dose');
     const peso = doses._peso();
     const c = doses._concInf(qtd, d.un, vol);
