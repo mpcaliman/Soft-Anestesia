@@ -24978,6 +24978,35 @@ await test('Doses & Infusões: nitroprussiato, vasopressina, azul de metileno e 
   await page.close();
 });
 
+await test('Solução polarizante é a da hipercalemia (glicose + insulina, sem KCl), com preparo pelo peso; KCl só na reposição', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    location.hash = '#doses'; await new Promise(res => setTimeout(res, 300));
+    const set = (id, v) => { const el = document.getElementById(id); if (el) { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); } };
+    const idade = document.getElementById('dose-idade'); if (idade) idade.value = '';
+    set('dose-peso', '70');
+    const txt = () => (document.getElementById('gik-out') || {}).textContent || '';
+    out.adulto = txt();
+    const card = (document.getElementById('dose-gik') || {}).textContent || '';
+    const polar = card.split('Reposição de potássio')[0];
+    out.semKclNaPolarizante = !/KCl/.test(polar) && /Gluconato de cálcio/.test(polar);
+    out.reposicao = /KCl 19,1%/.test(card) && /10 mEq\/h/.test(card) && /Nunca em bolus/.test(card);
+    set('gik-glic', '300'); out.hiper = txt();
+    set('gik-glic', '');
+    const drc = document.getElementById('gik-drc'); drc.checked = true; drc.dispatchEvent(new Event('change', { bubbles: true })); out.drc = txt(); drc.checked = false;
+    set('dose-peso', '20'); doses._calcGIK(); out.ped = txt();
+    return out;
+  });
+  assert(/10 UI/.test(r.adulto) && /SG 50%/.test(r.adulto) && /200 mL\/h/.test(r.adulto) && /SG 10%/.test(r.adulto), 'adulto: 10 UI + 50 g, preparo A e B: ' + r.adulto);
+  assert(r.semKclNaPolarizante, 'a polarizante não leva KCl e traz o gluconato de cálcio');
+  assert(r.reposicao, 'reposição de KCl separada, com diluição e velocidade máxima');
+  assert(/SEM glicose/.test(r.hiper), 'glicemia ≥ 250: insulina sem glicose');
+  assert(/5 UI/.test(r.drc) && /50 mL\/h/.test(r.drc), 'doença renal: dose menor e glicose de manutenção');
+  assert(/\b2 UI/.test(r.ped) && /\b10 g/.test(r.ped) && /100 mL/.test(r.ped) && /200 mL\/h/.test(r.ped), 'criança 20 kg: 2 UI + 10 g, SG 10% 100 mL em 30 min: ' + r.ped);
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

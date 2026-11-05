@@ -9309,7 +9309,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
 
     <section class="card">
       <div class="card-header" onclick="ui.toggleCard(this)">
-        <div class="card-title-wrap"><span class="card-icon">&#129482;</span><h2>Solu&ccedil;&atilde;o polarizante (GIK) e reposi&ccedil;&atilde;o de s&oacute;dio<small>Receita de refer&ecirc;ncia e c&aacute;lculo de d&eacute;ficit de Na&#8314;</small></h2></div>
+        <div class="card-title-wrap"><span class="card-icon">&#129482;</span><h2>Pot&aacute;ssio (solu&ccedil;&atilde;o polarizante e reposi&ccedil;&atilde;o) e s&oacute;dio<small>Hipercalemia: glicose + insulina com preparo; hipocalemia: KCl; d&eacute;ficit de Na&#8314;</small></h2></div>
         <div class="card-actions"><span class="toggle-icon">&#9662;</span></div>
       </div>
       <div class="card-body">
@@ -52097,15 +52097,71 @@ const doses = {
     outEl.innerHTML = '→ Bomba: <b>' + doses._fmt(mlh) + ' mL/h</b> · Equipo: <b>' + doses._fmt(gtt) + ' gtt/min</b>' + aviso;
   },
 
-  /* Solução polarizante (GIK) — receita de referência */
+  /* SOLUÇÃO POLARIZANTE PARA BAIXAR O POTÁSSIO (hipercalemia).
+     O card anterior trazia a GIK cardíaca — glicose + insulina + KCl —, que
+     ACRESCENTA potássio: o contrário do que se procura quando se fala em
+     corrigir o potássio. Aqui é a solução de glicose + insulina que desloca
+     o K⁺ para dentro da célula, com o preparo passo a passo, a dose pelo peso
+     e o que vigiar. Separado, no fim, o preparo da reposição de KCl
+     (hipocalemia), que é outra situação. Valores de referência — confira
+     sempre com o protocolo da instituição. */
   _renderGIK() {
     const host = document.getElementById('dose-gik');
     if (!host) return;
-    host.innerHTML =
-      '<div class="dose-card"><div class="dc-head"><span class="dc-nome">Solução polarizante (GIK) — referência</span></div>' +
-      '<div class="dc-linha"><b>Preparo usual (adulto):</b> SG 10% 500 mL + Insulina regular 10 UI + KCl 19,1% 10 mL (≈ 25 mEq de K⁺).</div>' +
-      '<div class="dc-linha"><b>Infusão:</b> tipicamente 1,5 mL/kg/h (ajustar conforme glicemia e potássio).</div>' +
-      '<div class="dc-obs">Monitorar glicemia e K⁺ seriados. Variações do protocolo existem (SG 5%/insulina/KCl) — siga o protocolo institucional.</div></div>';
+    if (!host._built) {
+      host.innerHTML =
+        '<div class="dose-card perigo"><div class="dc-head"><span class="dc-nome">Solução polarizante — hipercalemia (glicose + insulina)</span></div>' +
+        '<div class="dc-linha" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">Glicemia atual: ' +
+          '<input type="number" id="gik-glic" step="1" min="0" style="width:90px" placeholder="mg/dL" oninput="doses._calcGIK()"> mg/dL ' +
+          '<label style="display:inline-flex;align-items:center;gap:4px;font-size:.82rem;margin-left:8px"><input type="checkbox" id="gik-drc" style="width:auto" onchange="doses._calcGIK()"> doença renal / dialítico</label></div>' +
+        '<div id="gik-out"></div>' +
+        '<div class="dc-obs"><b>Efeito:</b> começa em 10–20 min, pico em 30–60 min, dura 4–6 h; baixa o K⁺ cerca de 0,6–1 mEq/L. ' +
+          'É TEMPORÁRIO — o potássio volta para fora da célula: tratar a causa e retirar K⁺ do corpo (furosemida se houver diurese, resina, diálise). ' +
+          '<b>Vigiar:</b> glicemia capilar em 30 min, 1 h e depois de hora em hora até 6 h (hipoglicemia tardia, sobretudo na doença renal); K⁺ em 1–2 h.</div>' +
+        '<div class="dc-linha" style="margin-top:6px"><b>Junto, conforme o caso:</b></div>' +
+        '<div class="dc-linha">• <b>Gluconato de cálcio 10%</b> 10–30 mL EV em 2–5 min (criança 0,5–1 mL/kg, máx 20 mL) se houver alteração no ECG ou K⁺ ≥ 6,5 — protege o coração, NÃO baixa o K⁺; repetir em 5–10 min se o ECG não melhorar. Não misturar com bicarbonato na mesma via.</div>' +
+        '<div class="dc-linha">• <b>Salbutamol</b> inalatório 10–20 mg (nebulização) — soma efeito à insulina.</div>' +
+        '<div class="dc-linha">• <b>Bicarbonato de sódio 8,4%</b> 50 mEq (50 mL) EV em 5–10 min só se houver acidose metabólica.</div>' +
+        '</div>' +
+        '<div class="dose-card"><div class="dc-head"><span class="dc-nome">Reposição de potássio — hipocalemia (KCl)</span></div>' +
+        '<div class="dc-linha"><b>KCl 19,1%</b> = 2,5 mEq/mL (ampola de 10 mL = 25 mEq).</div>' +
+        '<div class="dc-linha"><b>Veia periférica:</b> 10 mL de KCl 19,1% (25 mEq) em 500 mL de SF 0,9% (≈ 50 mEq/L); correr no máximo 10 mEq/h (≈ 200 mL/h).</div>' +
+        '<div class="dc-linha"><b>Acesso central, com monitor cardíaco:</b> 25 mEq em 100 mL de SF 0,9%; até 20 mEq/h (80 mL/h).</div>' +
+        '<div class="dc-obs">Nunca em bolus nem sem diluir. Diluir em SF, não em SG (a glicose estimula insulina e piora a hipocalemia). Bomba de infusão. Corrigir o magnésio junto; dosar K⁺ após cada 40–60 mEq.</div></div>';
+      host._built = true;
+    }
+    doses._calcGIK();
+  },
+  _calcGIK() {
+    const out = document.getElementById('gik-out'); if (!out) return;
+    const peso = doses._peso();
+    const glic = doses._num('gik-glic');
+    const drc = !!(document.getElementById('gik-drc') || {}).checked;
+    const L = t => '<div class="dc-linha">' + t + '</div>';
+    if (!peso) { out.innerHTML = L('<span style="color:var(--text-mute)">→ informe o peso do paciente para a dose</span>'); return; }
+    /* criança pela idade informada; sem idade, pelo peso */
+    const adulto = !doses._ehCrianca() && peso >= 40;
+    const semGlicose = glic != null && glic >= 250;
+    let h = '';
+    if (adulto) {
+      const ui = drc ? 5 : 10;
+      h += L('<b>Insulina regular:</b> ' + ui + ' UI' + (drc ? ' (dose reduzida na doença renal)' : '') + ' — da ampola de 100 UI/mL são ' + doses._fmt(ui / 100) + ' mL; use seringa de insulina.');
+      if (semGlicose) {
+        h += L('<b>Glicemia ≥ 250 mg/dL:</b> dar a insulina SEM glicose — ' + ui + ' UI EV em bolus ou em 100 mL de SF 0,9% em 15–30 min — e vigiar a glicemia de hora em hora.');
+      } else {
+        h += L('<b>Preparo A (mais usado):</b> ' + ui + ' UI de insulina regular em 100 mL de <b>SG 50%</b> (50 g de glicose) → infundir em 30 min = <b>200 mL/h</b>. SG 50% é irritante: veia calibrosa.');
+        h += L('<b>Preparo B (sem SG 50%):</b> ' + ui + ' UI em 500 mL de <b>SG 10%</b> (50 g) → em 60 min = <b>500 mL/h</b> (atenção ao volume).');
+        if (drc) h += L('<b>Doença renal:</b> depois, manter SG 10% a 50 mL/h por 5 h para evitar a hipoglicemia tardia.');
+      }
+    } else {
+      const ui = Math.min(0.1 * peso, 10), g = Math.min(0.5 * peso, 50);
+      const volSg10 = g / 0.1, mlh = volSg10 * 2;
+      h += L('<b>Criança (' + doses._fmt(peso) + ' kg):</b> insulina regular 0,1 UI/kg = <b>' + doses._fmt(ui) + ' UI</b> + glicose 0,5 g/kg = <b>' + doses._fmt(g) + ' g</b>.');
+      h += L('<b>Preparo da insulina:</b> 0,1 mL de insulina regular (10 UI) + 9,9 mL de SF 0,9% = 1 UI/mL → aspirar <b>' + doses._fmt(ui) + ' mL</b>.');
+      if (semGlicose) h += L('<b>Glicemia ≥ 250 mg/dL:</b> dar a insulina sem glicose e vigiar a glicemia de hora em hora.');
+      else h += L('<b>Glicose:</b> SG 10% 5 mL/kg = <b>' + doses._fmt(volSg10) + ' mL</b> com a insulina → infundir em 30 min = <b>' + doses._fmt(mlh) + ' mL/h</b>.');
+    }
+    out.innerHTML = h;
   },
 
   /* Reposição de sódio (déficit) na hiponatremia */
