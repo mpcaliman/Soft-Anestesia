@@ -25085,6 +25085,82 @@ await test('Ficha retificada: imprime a assinatura de cada retificação com o r
   await page.close();
 });
 
+await test('"Gerar e imprimir" fora do módulo: vai à ficha, espera o registro carregar e a folha sai com conteúdo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['anestesia', 'financeiro'].forEach(m => store.setList(m, []));
+    const hoje = utils.hojeISO();
+    const ficha = store.save('anestesia', { paciente: { nome: 'FICHA FORA DA TELA', convenio: 'Unimed' },
+      procedimento: { data: hoje, descricao: 'Colecistectomia', cirurgiao: 'Dr. X' }, _finalizado: true });
+    ui.navegar('dashboard');
+    await new Promise(res => setTimeout(res, 400));
+    let conteudo = '', modulo = '';
+    const orig = printPreview.abrir;
+    printPreview.abrir = function () {
+      const r2 = orig.apply(printPreview, arguments);
+      try { conteudo = (document.getElementById('ppp') || {}).textContent || ''; modulo = state.currentModule; } catch (e) {}
+      return r2;
+    };
+    fin.finalizacao.abrir('anestesia', ficha, () => {});
+    await new Promise(res => setTimeout(res, 300));
+    fin.finalizacao.confirmar({ imprimir: true });
+    await new Promise(res => setTimeout(res, 1800));
+    printPreview.abrir = orig;
+    out.modulo = modulo;
+    out.conteudo = /FICHA FORA DA TELA/i.test(conteudo) && /Colecistectomia/.test(conteudo);
+    try { printPreview.fechar(); } catch (e) {}
+    await new Promise(res => setTimeout(res, 150));
+    out.zerou = !(document.querySelector('#form-anestesia [name="paciente_nome"]') || {}).value;
+    store.setList('anestesia', []); store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.modulo === 'anestesia' && r.conteudo, 'a impressão sai da ficha, com conteúdo: ' + JSON.stringify(r));
+  assert(r.zerou, 'ao fechar, a ficha recarregada só para imprimir é zerada');
+  await page.close();
+});
+
+await test('Débito urinário: "Informar minutos" mostra o campo, intervalo de início e fim editável, e dá para limpar e trocar de forma', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    location.hash = '#anestesia'; await new Promise(res => setTimeout(res, 300));
+    const f = document.getElementById('form-anestesia');
+    f.querySelector('[name="paciente_peso"]').value = '60';
+    f.querySelector('[name="data_anestesia"]').value = '2026-11-01';
+    f.querySelector('[name="hora_inicio"]').value = '13:30';
+    document.getElementById('diurese-painel').style.display = 'block';
+    const set = (id, v, ev) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event(ev || 'change', { bubbles: true })); };
+    const vis = id => document.getElementById(id).style.display !== 'none';
+    set('diurese-modo', 'total'); set('diurese-total', '600', 'input');
+    out.semAgoraEmOutroDia = !/agora/.test(document.getElementById('diurese-resultado').value);
+    set('diurese-base', 'manual');
+    out.minAparece = vis('diurese-min-wrap') && !vis('diurese-ini-wrap');
+    set('diurese-min', '120', 'input');
+    out.porMinutos = /5,00 mL\/kg\/h/.test(document.getElementById('diurese-resultado').value);
+    set('diurese-base', 'intervalo');
+    out.intervaloAparece = vis('diurese-ini-wrap') && vis('diurese-fim-wrap') && !vis('diurese-min-wrap') && document.getElementById('diurese-ini').value === '13:30';
+    set('diurese-fim', '15:30');
+    out.porIntervalo = /5,00 mL\/kg\/h/.test(document.getElementById('diurese-resultado').value) && document.getElementById('diurese-janela').value === '13:30 → 15:30';
+    const di = anestesia.diurese.coletar();
+    out.salva = di.ini === '13:30' && di.fim === '15:30' && di.base === 'intervalo';
+    const conf = window.confirm; window.confirm = () => true;
+    anestesia.diurese.limpar(); window.confirm = conf;
+    out.limpou = !document.getElementById('diurese-total').value && document.getElementById('diurese-base').value === 'auto' && !vis('diurese-ini-wrap');
+    set('diurese-modo', 'parcial');
+    out.trocou = document.getElementById('diurese-parciais-wrap').style.display !== 'none' && !!document.querySelector('#diurese-body tr');
+    anestesia.diurese.restaurar(di);
+    out.restaura = document.getElementById('diurese-fim').value === '15:30' && vis('diurese-fim-wrap');
+    return out;
+  });
+  assert(r.semAgoraEmOutroDia, 'ficha de outro dia não conta "até agora"');
+  assert(r.minAparece && r.porMinutos, '"Informar minutos" mostra o campo e calcula: ' + JSON.stringify(r));
+  assert(r.intervaloAparece && r.porIntervalo && r.salva && r.restaura, 'início e fim da medida editáveis, salvos e restaurados');
+  assert(r.limpou && r.trocou, 'limpar e trocar de forma funciona');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

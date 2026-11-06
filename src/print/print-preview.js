@@ -375,6 +375,7 @@ const printPreview = {
           else if (mod === 'termo') termo._zerar();
           else if (mod === 'anestesia') anestesia.limparSilencioso();
           else if (mod === 'recuperacao') recuperacao._zerar();
+          else if (mod === 'consulta') consulta._zerar();
         } catch (e) {}
       });
       try { markClean(); } catch (e) {}

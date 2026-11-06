@@ -7271,6 +7271,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <span class="qa-label" style="color:#1f5fa6">💧 DÉBITO URINÁRIO</span>
             <button type="button" class="btn btn-sm" onclick="anestesia.diurese.addParcial(true)">+ Registrar volume (hora atual)</button>
             <button type="button" class="btn btn-sm" onclick="anestesia.diurese.recalcular()">↻ Recalcular</button>
+            <button type="button" class="btn btn-sm btn-ghost" onclick="anestesia.diurese.limpar()" title="Apaga o volume, os registros e o tempo da diurese para lançar de outra forma">🗑 Limpar diurese</button>
           </div>
           <div class="grid" style="align-items:end">
             <div class="field col-4"><label>Modo de lançamento</label>
@@ -7285,11 +7286,18 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <div class="field col-4"><label>Base de tempo</label>
               <select id="diurese-base" onchange="anestesia.diurese.recalcular()">
                 <option value="auto">Automática (início → fim, ou → agora)</option>
+                <option value="intervalo">Informar início e fim da medida</option>
                 <option value="manual">Informar minutos</option>
               </select>
             </div>
             <div class="field col-4" id="diurese-min-wrap" style="display:none"><label>Tempo (min)</label>
               <input type="number" id="diurese-min" min="1" step="1" inputmode="numeric" placeholder="ex.: 120" oninput="anestesia.diurese.recalcular()">
+            </div>
+            <div class="field col-2" id="diurese-ini-wrap" style="display:none"><label>Início da medida</label>
+              <input type="time" id="diurese-ini" onchange="anestesia.diurese.recalcular()" oninput="anestesia.diurese.recalcular()">
+            </div>
+            <div class="field col-2" id="diurese-fim-wrap" style="display:none"><label>Fim da medida</label>
+              <input type="time" id="diurese-fim" onchange="anestesia.diurese.recalcular()" oninput="anestesia.diurese.recalcular()">
             </div>
           </div>
 
@@ -36252,6 +36260,10 @@ const anestesia = {
       if (di.base === 'manual' && String(di.min || '').trim()) {
         out.min = parseInt(di.min, 10) || null;
         out.fonte = 'tempo informado';
+      } else if (di.base === 'intervalo' && di.ini && di.fim) {
+        out.ini = di.ini; out.fim = di.fim;
+        out.min = dif(out.ini, out.fim);
+        out.fonte = 'intervalo informado';
       } else {
         const comHora = parciais.filter(p => p.hora);
         if (modo !== 'total' && comHora.length) {
@@ -36401,9 +36413,13 @@ const anestesia = {
     },
     recalcular() {
       if (!anestesia.diurese._painel()) return;
+      anestesia.diurese._visibilidade();
       const peso = parseFloat((document.querySelector('#form-anestesia [name="paciente_peso"]') || {}).value);
       const di = anestesia.diurese.coletar();
-      const agora = (() => { const d = new Date();
+      /* "→ agora" só vale para a ficha de HOJE: numa ficha de outro dia, a
+         hora atual não tem nada a ver com a medida */
+      const dataFicha = (document.querySelector('#form-anestesia [name="data_anestesia"]') || {}).value || '';
+      const agora = (dataFicha && dataFicha !== utils.hojeISO()) ? '' : (() => { const d = new Date();
         return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); })();
       const c = anestesia.diurese.calcular(di, peso,
         anestesia.diurese._horaIniAto(), anestesia.diurese._horaFimAto(), agora);
@@ -36490,8 +36506,35 @@ const anestesia = {
         total: (document.getElementById('diurese-total') || {}).value || '',
         base: (document.getElementById('diurese-base') || {}).value || 'auto',
         min: (document.getElementById('diurese-min') || {}).value || '',
+        ini: (document.getElementById('diurese-ini') || {}).value || '',
+        fim: (document.getElementById('diurese-fim') || {}).value || '',
         parciais: parciais
       };
+    },
+    /* Os campos que dependem da base de tempo aparecem conforme ela. "Informar
+       minutos" não mostrava o campo de minutos — a escolha ficava presa, e a
+       conta seguia "início → agora" (13:30 → 11:44 do dia seguinte = 22h14). */
+    _visibilidade() {
+      const base = (document.getElementById('diurese-base') || {}).value || 'auto';
+      const mostra = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? 'block' : 'none'; };
+      mostra('diurese-min-wrap', base === 'manual');
+      mostra('diurese-ini-wrap', base === 'intervalo');
+      mostra('diurese-fim-wrap', base === 'intervalo');
+      if (base === 'intervalo') {
+        const ini = document.getElementById('diurese-ini'), fim = document.getElementById('diurese-fim');
+        if (ini && !ini.value) ini.value = anestesia.diurese._horaIniAto() || '';
+        if (fim && !fim.value) fim.value = anestesia.diurese._horaFimAto() || '';
+      }
+    },
+    /* Apagar tudo para lançar de outra forma: sem isto, o que já estava
+       escrito numa forma continuava valendo e travava a troca. */
+    limpar() {
+      if (!confirm('Apagar o volume, os registros e o tempo da diurese?')) return;
+      ['diurese-total', 'diurese-min', 'diurese-ini', 'diurese-fim'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+      const base = document.getElementById('diurese-base'); if (base) base.value = 'auto';
+      const tb = document.getElementById('diurese-body'); if (tb) tb.innerHTML = '';
+      anestesia.diurese.setModo();
+      try { markDirty(); } catch (e) {}
     },
     restaurar(d) {
       if (!d) return;
@@ -36500,6 +36543,8 @@ const anestesia = {
       const totEl = document.getElementById('diurese-total'); if (totEl) totEl.value = d.total || '';
       const baseEl = document.getElementById('diurese-base'); if (baseEl) baseEl.value = d.base || 'auto';
       const minEl = document.getElementById('diurese-min'); if (minEl) minEl.value = d.min || '';
+      const iniEl = document.getElementById('diurese-ini'); if (iniEl) iniEl.value = d.ini || '';
+      const fimEl = document.getElementById('diurese-fim'); if (fimEl) fimEl.value = d.fim || '';
       const tb = document.getElementById('diurese-body');
       if (tb) {
         tb.innerHTML = '';
@@ -43855,16 +43900,24 @@ const fin = {
        descartado — a tela fica limpa e a folha sai em branco. Por isso aqui o
        registro é recarregado antes de imprimir. De quebra, sai com o desfecho
        e o convênio que ele acabou de confirmar. */
+    /* SAÍA EM BRANCO: recarregava o registro sem garantir que a tela era a
+       do módulo dele e abria a impressão depois de um tempo fixo — se o
+       formulário ainda não tinha terminado de carregar (ou a tela era outra),
+       a folha ia vazia. Agora é o mesmo caminho do painel de fechamento: vai
+       ao módulo, espera o registro estar de fato no formulário e só então
+       abre; ao fechar a prévia, o formulário é zerado de novo. */
     _imprimir(mod, id) {
-      try {
-        const doc = store.getById(mod, id);
-        if (doc && window[mod] && typeof window[mod].carregar === 'function') {
-          window[mod].carregar(doc);
-          setTimeout(() => { try { printPreview.abrir(); } catch (e) {} }, 260);
-          return;
-        }
-      } catch (e) {}
-      try { printPreview.abrir(); } catch (e) {}
+      const doc = store.getById(mod, id);
+      const carregador = doc && window[mod] && typeof window[mod].carregar === 'function' ? window[mod] : null;
+      if (!carregador) { toast('Não achei o registro para imprimir. Abra-o pela busca e imprima de lá.', 'warn'); return; }
+      const abrir = () => {
+        try { carregador.carregar(doc); } catch (e) { toast('Não consegui abrir o registro para imprimir.', 'error'); return; }
+        printPreview._quandoCarregado('form-' + mod, id, () => {
+          printPreview._zerarAoFechar = [mod];
+          printPreview.abrir();
+        }, () => toast('O registro não terminou de abrir; imprima pela busca (🔍).', 'error'));
+      };
+      try { ui.irEEntao(mod, '#form-' + mod, abrir); } catch (e) { abrir(); }
     },
 
     cancelar(opts) {
