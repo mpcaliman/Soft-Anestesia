@@ -24953,6 +24953,60 @@ await test('Documentos: buscar e reimprimir atestado, declaração, laudo, recei
   await page.close();
 });
 
+await test('Doses & Infusões: nitroprussiato, vasopressina, azul de metileno e dantrolene, com orientação e cálculo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    location.hash = '#doses'; await new Promise(res => setTimeout(res, 300));
+    const peso = document.getElementById('dose-peso'); if (peso) { peso.value = '70'; peso.dispatchEvent(new Event('input', { bubbles: true })); }
+    const host = document.getElementById('dose-inf-edit'); if (host) host._built = false;
+    doses._renderInfEdit();
+    const txt = k => ((document.getElementById('inf-' + k + '-out') || {}).textContent || '').replace(/\s+/g, ' ');
+    out.nipride = txt('nipride'); out.vaso = txt('vaso'); out.azul = txt('azul'); out.dantro = txt('dantro');
+    const h = (host || {}).textContent || '';
+    out.orient = /Proteger da luz/.test(h) && /Dose FIXA/.test(h) && /G6PD/.test(h) && /ÁGUA PARA INJEÇÃO/.test(h);
+    const ref = DOSES_DB.map(x => x.n).join('|');
+    out.ref = /Nitroprussiato/.test(ref) && /Vasopressina/.test(ref) && /Azul de metileno/.test(ref) && /Dantrolene/.test(ref);
+    return out;
+  });
+  assert(/10[,.]5 mL\/h/.test(r.nipride), 'nipride 0,5 mcg/kg/min, 70 kg, 200 mcg/mL = 10,5 mL/h: ' + r.nipride);
+  assert(/\b9 mL\/h/.test(r.vaso), 'vasopressina 0,03 UI/min, 0,2 UI/mL = 9 mL/h: ' + r.vaso);
+  assert(/35 mL\/h/.test(r.azul), 'azul 0,5 mg/kg/h, 70 kg, 1 mg/mL = 35 mL/h: ' + r.azul);
+  assert(/175 mg/.test(r.dantro) && /9 frasco/.test(r.dantro) && /525 mL/.test(r.dantro), 'dantrolene 2,5 mg/kg, 70 kg = 175 mg, 9 frascos, 525 mL: ' + r.dantro);
+  assert(r.orient, 'cada uma traz a orientação de diluição e cuidados');
+  assert(r.ref, 'as quatro também na tabela de referência');
+  await page.close();
+});
+
+await test('Solução polarizante é a da hipercalemia (glicose + insulina, sem KCl), com preparo pelo peso; KCl só na reposição', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    location.hash = '#doses'; await new Promise(res => setTimeout(res, 300));
+    const set = (id, v) => { const el = document.getElementById(id); if (el) { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); } };
+    const idade = document.getElementById('dose-idade'); if (idade) idade.value = '';
+    set('dose-peso', '70');
+    const txt = () => (document.getElementById('gik-out') || {}).textContent || '';
+    out.adulto = txt();
+    const card = (document.getElementById('dose-gik') || {}).textContent || '';
+    const polar = card.split('Reposição de potássio')[0];
+    out.semKclNaPolarizante = !/KCl/.test(polar) && /Gluconato de cálcio/.test(polar);
+    out.reposicao = /KCl 19,1%/.test(card) && /10 mEq\/h/.test(card) && /Nunca em bolus/.test(card);
+    set('gik-glic', '300'); out.hiper = txt();
+    set('gik-glic', '');
+    const drc = document.getElementById('gik-drc'); drc.checked = true; drc.dispatchEvent(new Event('change', { bubbles: true })); out.drc = txt(); drc.checked = false;
+    set('dose-peso', '20'); doses._calcGIK(); out.ped = txt();
+    return out;
+  });
+  assert(/10 UI/.test(r.adulto) && /SG 50%/.test(r.adulto) && /200 mL\/h/.test(r.adulto) && /SG 10%/.test(r.adulto), 'adulto: 10 UI + 50 g, preparo A e B: ' + r.adulto);
+  assert(r.semKclNaPolarizante, 'a polarizante não leva KCl e traz o gluconato de cálcio');
+  assert(r.reposicao, 'reposição de KCl separada, com diluição e velocidade máxima');
+  assert(/SEM glicose/.test(r.hiper), 'glicemia ≥ 250: insulina sem glicose');
+  assert(/5 UI/.test(r.drc) && /50 mL\/h/.test(r.drc), 'doença renal: dose menor e glicose de manutenção');
+  assert(/\b2 UI/.test(r.ped) && /\b10 g/.test(r.ped) && /100 mL/.test(r.ped) && /200 mL\/h/.test(r.ped), 'criança 20 kg: 2 UI + 10 g, SG 10% 100 mL em 30 min: ' + r.ped);
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
