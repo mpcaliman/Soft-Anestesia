@@ -50,7 +50,9 @@ const autocomplete = {
       const q = (input.value || '').toLowerCase();
       const all = getList() || [];
       /* sem acento, sem ç, sem maiúscula: "joao" acha "João" */
-      items = all.filter(it => q.length === 0 || autocomplete._fmt('contem', it.label + ' ' + (it.meta || ''), q)).slice(0, 10);
+      /* `semFiltro`: a lista já veio filtrada por quem a montou (ex.: nomes
+         PARECIDOS de paciente, que não contêm as letras exatas digitadas) */
+      items = all.filter(it => it.semFiltro || q.length === 0 || autocomplete._fmt('contem', it.label + ' ' + (it.meta || ''), q)).slice(0, 10);
       let html = items.map((it, i) => `
         <div class="autocomplete-item ${i === activeIdx ? 'active' : ''}" data-idx="${i}">
           <span>${utils.escapeHTML(it.label)}</span>

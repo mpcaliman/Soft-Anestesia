@@ -34863,9 +34863,11 @@ const anestesia = {
           '; 4) Refluxo sanguíneo; 5) Fixação e teste de fluxo.';
       },
       'Acesso venoso central'() {
-        const det = anestesia.eventos._dispDet('Acesso venoso central');
-        return '1) Assepsia, antissepsia e campos estéreis; 2) Punção guiada por ultrassom' + (det ? ' — ' + det : '') +
-          '; 3) Técnica de Seldinger; 4) Checagem de refluxo em todas as vias; 5) Fixação e curativo; 6) Controle radiológico, se indicado.';
+        const tec = anestesia.disp._sel('Acesso venoso central', 'tecnica');
+        const det = anestesia.eventos._dispDet('Acesso venoso central').replace(/\s*— técnica: [^(]+/, ' ').replace(/\s+/g, ' ').trim();
+        const usg = !tec || /ultrass/i.test(tec);
+        return '1) Assepsia, antissepsia e campos estéreis; 2) Punção ' + (usg ? 'guiada por ultrassom' : 'por reparo anatômico') + (det ? ' — ' + det : '') +
+          '; 3) ' + (tec ? 'Técnica: ' + tec : 'Técnica de Seldinger') + '; 4) Checagem de refluxo em todas as vias; 5) Fixação e curativo; 6) Controle radiológico, se indicado.';
       },
       'Punção arterial'() {
         const det = anestesia.eventos._dispDet('Acesso arterial');
@@ -34993,6 +34995,7 @@ const anestesia = {
       }
       const via = anestesia.eventos._v('via_aerea_uso');
       if (via && anestesia.eventos.VIA_AEREA_EVENTO[via] === tipo) set('via_aerea_hora', hora);
+      try { anestesia.disp.horaDoEvento(tipo, hora); } catch (e) {}
       try { markDirty(); } catch (e) {}
     },
     _textoParaOrigem(tr) {
@@ -35956,14 +35959,58 @@ const anestesia = {
         rotTipo: 'tipo de cateter',
         tipos: ['Duplo lúmen', 'Triplo lúmen', 'Introdutor', 'PICC', 'Cateter de diálise'],
         calibres: ['5F', '7F', '8,5F', '9F', '12F'],
-        locais: ['jugular interna D', 'jugular interna E', 'subclávia D', 'subclávia E', 'femoral D', 'femoral E', 'basílica D', 'basílica E']
+        locais: ['jugular interna D', 'jugular interna E', 'subclávia D', 'subclávia E', 'femoral D', 'femoral E', 'basílica D', 'basílica E'],
+        tecnicas: ['Seldinger guiado por ultrassom', 'Seldinger por reparo anatômico', 'Seldinger modificado (micropunção)']
       },
       'Acesso arterial': {
         rotTipo: 'tipo de cateter',
         tipos: ['Cateter sobre agulha (Jelco)', 'Cateter arterial com fio-guia'],
         calibres: ['18G', '20G', '22G'],
-        locais: ['radial D', 'radial E', 'femoral D', 'femoral E', 'braquial D', 'braquial E', 'pediosa']
+        locais: ['radial D', 'radial E', 'femoral D', 'femoral E', 'braquial D', 'braquial E', 'pediosa'],
+        tecnicas: ['Punção direta', 'Seldinger guiado por ultrassom', 'Seldinger por palpação', 'Transfixação']
       }
+    },
+    /* O HORÁRIO DE CADA PUNÇÃO. O evento da linha do tempo e o campo aqui
+       são o mesmo dado: mexeu num, o outro acompanha (vale a última edição). */
+    _tipoEvento(disp) {
+      try { return anestesia.eventos.DISP_EVENTO[disp] || ''; } catch (e) { return ''; }
+    },
+    _horaEl(disp) { return document.querySelector('[data-campo="hora"][data-disp="' + disp + '"]'); },
+    aoMudarHora(disp) {
+      const el = anestesia.disp._horaEl(disp);
+      const hora = el ? String(el.value || '').trim() : '';
+      const tipoEvt = anestesia.disp._tipoEvento(disp);
+      if (!hora || !tipoEvt) return;
+      /* a variante já registrada (alívio, nasogástrica) é o evento deste dispositivo */
+      const tipos = (anestesia.eventos._tiposDe ? anestesia.eventos._tiposDe(disp) : [tipoEvt]);
+      const existente = tipos.find(t => anestesia.eventos._linhaDoTipo(t)) || tipoEvt;
+      if (anestesia.disp.ehPrevio(disp)) return;
+      anestesia.eventos.sincronizarHorario(existente, hora);
+      try { markDirty(); } catch (e) {}
+    },
+    /* do evento para o campo (tabela → aqui) */
+    horaDoEvento(tipoEvt, hora) {
+      Object.keys(anestesia.eventos.DISP_EVENTO || {}).forEach(disp => {
+        const tipos = anestesia.eventos._tiposDe ? anestesia.eventos._tiposDe(disp) : [anestesia.eventos.DISP_EVENTO[disp]];
+        if (tipos.indexOf(tipoEvt) < 0) return;
+        const el = anestesia.disp._horaEl(disp);
+        if (el && el.value !== hora) el.value = hora;
+      });
+    },
+    /* ao abrir o detalhe, o campo mostra o horário que o evento já tem */
+    _preencherHora(disp) {
+      const el = anestesia.disp._horaEl(disp); if (!el || el.value) return;
+      const tipos = anestesia.eventos._tiposDe ? anestesia.eventos._tiposDe(disp) : [];
+      for (const t of tipos) {
+        const tr = anestesia.eventos._linhaDoTipo(t);
+        const h = tr && (tr.querySelector('[name="evt_hora[]"]') || {}).value;
+        if (h) { el.value = h; return; }
+      }
+    },
+    _horaHTML(valor) {
+      if (!anestesia.disp._tipoEvento(valor)) return '';
+      return `<label style="display:inline-flex;align-items:center;gap:6px;margin-top:6px;font-size:.82rem;font-weight:400">⏱ Horário
+        <input type="time" data-campo="hora" data-disp="${utils.escapeAttr(valor)}" style="width:auto" onchange="anestesia.disp.aoMudarHora(${utils.jsArg(valor)})" oninput="anestesia.disp.aoMudarHora(${utils.jsArg(valor)})"></label>`;
     },
     _sel(disp, campo) {
       const el = document.querySelector('[data-campo="' + campo + '"][data-disp="' + disp + '"]');
@@ -35977,7 +36024,9 @@ const anestesia = {
       const tipo = anestesia.disp._sel(disp, 'tipo');
       const cal = anestesia.disp._sel(disp, 'calibre');
       const local = anestesia.disp._sel(disp, 'local');
+      const tec = anestesia.disp._sel(disp, 'tecnica');
       const txt = [ [tipo, cal].filter(Boolean).join(' '), local ? 'em ' + local : '',
+                    tec ? '— técnica: ' + tec : '',
                     anestesia.disp.ehPrevio(disp) ? '(prévio ao ato)' : '' ]
         .filter(Boolean).join(' ');
       if (alvo.dataset.manual !== '1' && (txt || !alvo.value)) alvo.value = txt;
@@ -36017,13 +36066,18 @@ const anestesia = {
                 <select data-campo="local" data-disp="${utils.escapeAttr(valor)}" style="flex:2;min-width:120px" onchange="anestesia.disp.montarDet(${utils.jsArg(valor)})">
                   <option value="">local</option>${op.locais.map(l => '<option>' + l + '</option>').join('')}
                 </select>
+                ${op.tecnicas ? `<select data-campo="tecnica" data-disp="${utils.escapeAttr(valor)}" style="flex:2;min-width:150px" onchange="anestesia.disp.montarDet(${utils.jsArg(valor)})">
+                  <option value="">técnica</option>${op.tecnicas.map(t => '<option>' + t + '</option>').join('')}
+                </select>` : ''}
               </div>
               <input type="text" name="disp_det[]" data-disp="${valor}" placeholder="montado do que você marcou" style="margin-top:6px"
                 oninput="this.dataset.manual='1'; anestesia.eventos.atualizarDescricoes()">
+              ${anestesia.disp._horaHTML(valor)}
               ${anestesia.disp._previoHTML(valor)}`;
           } else {
             div.innerHTML = `<label>${valor} <small style="color:var(--text-mute);font-weight:400">— detalhes</small></label>
               <input type="text" name="disp_det[]" data-disp="${valor}" placeholder="Ex.: tamanho, local, calibre" oninput="anestesia.eventos.atualizarDescricoes()">
+              ${anestesia.disp._horaHTML(valor)}
               ${anestesia.disp._previoHTML(valor)}`;
           }
           cont.appendChild(div);
@@ -36054,6 +36108,7 @@ const anestesia = {
           }
         } catch (e) {}
       }
+      if (checkbox.checked) { try { anestesia.disp._preencherHora(valor); } catch (e) {} }
       markDirty();
     },
 
@@ -36122,11 +36177,11 @@ const anestesia = {
         if (!k) return;
         const sel = c => anestesia.disp._sel(k, c);
         const partes = { texto: el.value || '' };
-        ['tipo', 'calibre', 'local'].forEach(c => { const v = sel(c); if (v) partes[c] = v; });
+        ['tipo', 'calibre', 'local', 'tecnica'].forEach(c => { const v = sel(c); if (v) partes[c] = v; });
         if (anestesia.disp.ehPrevio(k)) partes.previo = true;
         /* formato antigo (só texto) continua válido na leitura; aqui gravamos
            o objeto só quando há seleção, para não inchar registro sem motivo */
-        det[k] = (partes.tipo || partes.calibre || partes.local || partes.previo) ? partes : partes.texto;
+        det[k] = (partes.tipo || partes.calibre || partes.local || partes.tecnica || partes.previo) ? partes : partes.texto;
       });
       return det;
     },
@@ -36139,7 +36194,7 @@ const anestesia = {
         const el = document.querySelector(`[name="disp_det[]"][data-disp="${k}"]`);
         if (el) el.value = texto;
         if (v && typeof v === 'object') {
-          ['tipo', 'calibre', 'local'].forEach(c => {
+          ['tipo', 'calibre', 'local', 'tecnica'].forEach(c => {
             const sel = document.querySelector('[data-campo="' + c + '"][data-disp="' + k + '"]');
             if (sel && v[c]) sel.value = v[c];
           });
@@ -36150,6 +36205,8 @@ const anestesia = {
              seleção posterior sobrescrever o que está gravado */
           el.dataset.manual = '1';
         }
+        /* o horário vem do evento gravado: é o mesmo dado */
+        try { anestesia.disp._preencherHora(k); } catch (e) {}
       });
     }
   },
@@ -46330,11 +46387,27 @@ const pacientes = {
     if (q.length < 2) return [];
     /* cada palavra digitada vale em qualquer parte do nome: "joao conc" acha "João da Conceição" */
     const partes = q.split(' ').filter(Boolean);
-    return (pacientes.list() || []).filter(p => {
-      if (!p || p._id === exceto || !p.nome) return false;
-      const n = utils.semAcento(p.nome);
-      return partes.every(w => n.indexOf(w) >= 0);
+    /* E O PARECIDO TAMBÉM: "Jaciline" acha "Jacilene", "Soza" acha "Souza".
+       Palavra de 4+ letras aceita uma letra trocada/faltando (8+ letras,
+       duas); os de grafia exata vêm primeiro. */
+    const dist = (a, b, max) => {
+      try { return medicamentos._distancia(a, b, max); } catch (e) { return a === b ? 0 : max + 1; }
+    };
+    const proxima = (w, palavras) => palavras.some(n => {
+      if (n.indexOf(w) >= 0) return true;
+      if (w.length < 4) return false;
+      const max = w.length >= 8 ? 2 : 1;
+      return dist(n.slice(0, Math.max(w.length, Math.min(n.length, w.length + max))), w, max) <= max || dist(n, w, max) <= max;
     });
+    const exatos = [], aprox = [];
+    (pacientes.list() || []).forEach(p => {
+      if (!p || p._id === exceto || !p.nome) return;
+      const n = utils.semAcento(p.nome);
+      if (partes.every(w => n.indexOf(w) >= 0)) { exatos.push(p); return; }
+      const palavras = n.split(' ').filter(Boolean);
+      if (partes.every(w => proxima(w, palavras))) aprox.push(p);
+    });
+    return exatos.concat(aprox);
   },
   _mesmoNome(nome, exceto) {
     const q = utils.semAcento(nome);
@@ -46354,10 +46427,18 @@ const pacientes = {
       const form = input.closest('form');
       const idAtual = form ? ((form.querySelector('[name="id"]') || {}).value || '') : '';
       if (idAtual) return [];               /* editando um cadastro: não sugere outro */
+      const q = utils.semAcento(input.value);
       return pacientes._parecidos(input.value).slice(0, 10).map(p => ({
-        value: p._id, label: p.nome, meta: '✓ já cadastrado' + (pacientes._detalhe(p) ? ' · ' + pacientes._detalhe(p) : ''), data: p
+        value: p._id, label: p.nome,
+        meta: (utils.semAcento(p.nome).indexOf(q) >= 0 || q.split(' ').every(w => utils.semAcento(p.nome).indexOf(w) >= 0)
+          ? '✓ já cadastrado' : '≈ nome parecido já cadastrado') + (pacientes._detalhe(p) ? ' · ' + pacientes._detalhe(p) : ''), data: p, semFiltro: true
       }));
     }, it => aoEscolher(it.data), null);
+    /* nome que já chega preenchido (cadastro rápido vindo de outra tela):
+       a lista aparece sem precisar mexer no campo */
+    if (String(input.value || '').trim().length >= 2) {
+      setTimeout(() => { try { if (document.activeElement !== input) input.focus(); input.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {} }, 180);
+    }
   },
   editar(id, onSaveCb = null) {
     try {
