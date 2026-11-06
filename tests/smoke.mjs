@@ -25085,6 +25085,183 @@ await test('Ficha retificada: imprime a assinatura de cada retificação com o r
   await page.close();
 });
 
+await test('"Gerar e imprimir" fora do módulo: vai à ficha, espera o registro carregar e a folha sai com conteúdo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    try { modal.close(); } catch (e) {}
+    ['anestesia', 'financeiro'].forEach(m => store.setList(m, []));
+    const hoje = utils.hojeISO();
+    const ficha = store.save('anestesia', { paciente: { nome: 'FICHA FORA DA TELA', convenio: 'Unimed' },
+      procedimento: { data: hoje, descricao: 'Colecistectomia', cirurgiao: 'Dr. X' }, _finalizado: true });
+    ui.navegar('dashboard');
+    await new Promise(res => setTimeout(res, 400));
+    let conteudo = '', modulo = '';
+    const orig = printPreview.abrir;
+    printPreview.abrir = function () {
+      const r2 = orig.apply(printPreview, arguments);
+      try { conteudo = (document.getElementById('ppp') || {}).textContent || ''; modulo = state.currentModule; } catch (e) {}
+      return r2;
+    };
+    fin.finalizacao.abrir('anestesia', ficha, () => {});
+    await new Promise(res => setTimeout(res, 300));
+    fin.finalizacao.confirmar({ imprimir: true });
+    await new Promise(res => setTimeout(res, 1800));
+    printPreview.abrir = orig;
+    out.modulo = modulo;
+    out.conteudo = /FICHA FORA DA TELA/i.test(conteudo) && /Colecistectomia/.test(conteudo);
+    try { printPreview.fechar(); } catch (e) {}
+    await new Promise(res => setTimeout(res, 150));
+    out.zerou = !(document.querySelector('#form-anestesia [name="paciente_nome"]') || {}).value;
+    store.setList('anestesia', []); store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.modulo === 'anestesia' && r.conteudo, 'a impressão sai da ficha, com conteúdo: ' + JSON.stringify(r));
+  assert(r.zerou, 'ao fechar, a ficha recarregada só para imprimir é zerada');
+  await page.close();
+});
+
+await test('Débito urinário: "Informar minutos" mostra o campo, intervalo de início e fim editável, e dá para limpar e trocar de forma', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    location.hash = '#anestesia'; await new Promise(res => setTimeout(res, 300));
+    const f = document.getElementById('form-anestesia');
+    f.querySelector('[name="paciente_peso"]').value = '60';
+    f.querySelector('[name="data_anestesia"]').value = '2026-11-01';
+    f.querySelector('[name="hora_inicio"]').value = '13:30';
+    document.getElementById('diurese-painel').style.display = 'block';
+    const set = (id, v, ev) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event(ev || 'change', { bubbles: true })); };
+    const vis = id => document.getElementById(id).style.display !== 'none';
+    set('diurese-modo', 'total'); set('diurese-total', '600', 'input');
+    out.semAgoraEmOutroDia = !/agora/.test(document.getElementById('diurese-resultado').value);
+    set('diurese-base', 'manual');
+    out.minAparece = vis('diurese-min-wrap') && !vis('diurese-ini-wrap');
+    set('diurese-min', '120', 'input');
+    out.porMinutos = /5,00 mL\/kg\/h/.test(document.getElementById('diurese-resultado').value);
+    set('diurese-base', 'intervalo');
+    out.intervaloAparece = vis('diurese-ini-wrap') && vis('diurese-fim-wrap') && !vis('diurese-min-wrap') && document.getElementById('diurese-ini').value === '13:30';
+    set('diurese-fim', '15:30');
+    out.porIntervalo = /5,00 mL\/kg\/h/.test(document.getElementById('diurese-resultado').value) && document.getElementById('diurese-janela').value === '13:30 → 15:30';
+    const di = anestesia.diurese.coletar();
+    out.salva = di.ini === '13:30' && di.fim === '15:30' && di.base === 'intervalo';
+    const conf = window.confirm; window.confirm = () => true;
+    anestesia.diurese.limpar(); window.confirm = conf;
+    out.limpou = !document.getElementById('diurese-total').value && document.getElementById('diurese-base').value === 'auto' && !vis('diurese-ini-wrap');
+    set('diurese-modo', 'parcial');
+    out.trocou = document.getElementById('diurese-parciais-wrap').style.display !== 'none' && !!document.querySelector('#diurese-body tr');
+    anestesia.diurese.restaurar(di);
+    out.restaura = document.getElementById('diurese-fim').value === '15:30' && vis('diurese-fim-wrap');
+    return out;
+  });
+  assert(r.semAgoraEmOutroDia, 'ficha de outro dia não conta "até agora"');
+  assert(r.minAparece && r.porMinutos, '"Informar minutos" mostra o campo e calcula: ' + JSON.stringify(r));
+  assert(r.intervaloAparece && r.porIntervalo && r.salva && r.restaura, 'início e fim da medida editáveis, salvos e restaurados');
+  assert(r.limpou && r.trocou, 'limpar e trocar de forma funciona');
+  await page.close();
+});
+
+await test('Acessos: Seldinger no central e na PAM, e o horário de cada punção conversa com a tabela de eventos nos dois sentidos', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    location.hash = '#anestesia'; await new Promise(res => setTimeout(res, 300));
+    try { anestesia.limparSilencioso(); } catch (e) {}
+    const marcar = v => { const cb = Array.from(document.querySelectorAll('[name="dispositivos[]"]')).find(x => x.value === v); cb.checked = true; anestesia.disp.alternar(cb); };
+    marcar('Acesso venoso central'); marcar('Acesso arterial');
+    await new Promise(res => setTimeout(res, 400)); try { modal.close(); } catch (e) {}
+    const sel = (d, c) => document.querySelector('[data-campo="' + c + '"][data-disp="' + d + '"]');
+    out.temTecnica = !!sel('Acesso venoso central', 'tecnica') && !!sel('Acesso arterial', 'tecnica') &&
+      Array.from(sel('Acesso venoso central', 'tecnica').options).some(o => /Seldinger/.test(o.value)) &&
+      Array.from(sel('Acesso arterial', 'tecnica').options).some(o => /Seldinger/.test(o.value));
+    const sv = (d, c, v) => { const el = sel(d, c); el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); };
+    sv('Acesso venoso central', 'tipo', 'Triplo lúmen'); sv('Acesso venoso central', 'local', 'jugular interna D'); sv('Acesso venoso central', 'tecnica', 'Seldinger guiado por ultrassom');
+    sv('Acesso arterial', 'tecnica', 'Seldinger por palpação');
+    const linha = t => anestesia.eventos._linhaDoTipo(t);
+    out.descricao = /Seldinger guiado por ultrassom/.test((linha('Acesso venoso central').querySelector('[name="evt_obs[]"]') || {}).value);
+    out.detPam = /Seldinger por palpação/.test((document.querySelector('[name="disp_det[]"][data-disp="Acesso arterial"]') || {}).value);
+    /* horário: campo → evento */
+    const hc = sel('Acesso venoso central', 'hora');
+    out.temHora = !!hc && !!hc.value;
+    hc.value = '07:15'; hc.dispatchEvent(new Event('change', { bubbles: true }));
+    out.campoParaEvento = linha('Acesso venoso central').querySelector('[name="evt_hora[]"]').value === '07:15';
+    /* evento → campo */
+    const tr = linha('Punção arterial'); const h = tr.querySelector('[name="evt_hora[]"]');
+    h.value = '07:40'; anestesia.eventos._horaParaOrigem(tr);
+    out.eventoParaCampo = sel('Acesso arterial', 'hora').value === '07:40';
+    /* salvar e reabrir mantém a técnica e o horário */
+    const det = anestesia.disp.coletarDetalhes();
+    out.salvaTecnica = det['Acesso venoso central'].tecnica === 'Seldinger guiado por ultrassom';
+    return out;
+  });
+  assert(r.temTecnica, 'central e PAM têm a técnica, com Seldinger');
+  assert(r.descricao && r.detPam, 'a técnica entra na descrição do evento e no detalhe');
+  assert(r.temHora && r.campoParaEvento && r.eventoParaCampo, 'horário da punção: campo ↔ tabela de eventos');
+  assert(r.salvaTecnica, 'a técnica é salva');
+  await page.close();
+});
+
+await test('Paciente novo: nome igual ou PARECIDO aparece em lista para escolher, inclusive quando o nome já chega preenchido', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('pacientes', [{ _id: 'pj', nome: 'Jacilene Silva Oliveira', nasc: '1975-03-02' }, { _id: 'pm', nome: 'Marcos Souza' }]);
+    out.typo = pacientes._parecidos('Jaciline Silva').map(p => p._id).join() === 'pj';
+    out.typo2 = pacientes._parecidos('marcos soza').map(p => p._id).join() === 'pm';
+    out.naoAcheTudo = pacientes._parecidos('Pedro').length === 0;
+    let usado = null;
+    pacientes.modalNovoPaciente({ nome: 'Jaciline Oliveira' }, p => { usado = p; });
+    await new Promise(res => setTimeout(res, 400));
+    const nome = document.querySelector('#form-novo-pac-modal [name="nome"]');
+    const item = nome.closest('.autocomplete-wrap') && nome.closest('.autocomplete-wrap').querySelector('.autocomplete-item:not(.create-new)');
+    out.lista = !!item && /Jacilene Silva Oliveira/.test(item.textContent) && /parecido/.test(item.textContent);
+    if (item) item.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    await new Promise(res => setTimeout(res, 100));
+    out.escolheu = usado && usado._id === 'pj';
+    try { modal.close(); } catch (e) {}
+    store.setList('pacientes', []);
+    return out;
+  });
+  assert(r.typo && r.typo2 && r.naoAcheTudo, 'acha nome com letra trocada/faltando, sem achar qualquer um');
+  assert(r.lista && r.escolheu, 'no cadastro rápido com nome já preenchido a lista aparece e escolher usa o existente: ' + JSON.stringify(r));
+  await page.close();
+});
+
+await test('CEC: cada execução vira Início/Fim CEC na linha do tempo, faixa no gráfico e na legenda; editar num lado atualiza o outro', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    location.hash = '#anestesia'; await new Promise(res => setTimeout(res, 300));
+    try { anestesia.limparSilencioso(); } catch (e) {}
+    const tr = anestesia.cec.addTerapia({ tipo: anestesia.cec.TIPOS_TERAPIA[0] });
+    const ini = tr.querySelector('[name="cec_ter_ini[]"]'), fim = tr.querySelector('[name="cec_ter_fim[]"]');
+    ini.value = '09:10'; ini.dispatchEvent(new Event('input', { bubbles: true }));
+    fim.value = '10:25'; fim.dispatchEvent(new Event('input', { bubbles: true }));
+    const evIni = anestesia.eventos._linhaDoTipo('Início CEC'), evFim = anestesia.eventos._linhaDoTipo('Fim CEC');
+    out.eventos = !!evIni && !!evFim && evIni.querySelector('[name="evt_hora[]"]').value === '09:10' && evFim.querySelector('[name="evt_hora[]"]').value === '10:25';
+    out.descricao = /CEC/.test(evIni.querySelector('[name="evt_obs[]"]').value);
+    /* evento → execução */
+    const h = evFim.querySelector('[name="evt_hora[]"]'); h.value = '10:40'; anestesia.eventos._horaParaOrigem(evFim);
+    out.volta = fim.value === '10:40' && /1h 30min/.test(tr.querySelector('[name="cec_ter_dur[]"]').value);
+    /* execução → evento de novo, sem duplicar */
+    ini.value = '09:05'; ini.dispatchEvent(new Event('input', { bubbles: true }));
+    out.semDuplicar = anestesia.cec._linhasEvento('Início CEC').length === 1 && anestesia.eventos._linhaDoTipo('Início CEC').querySelector('[name="evt_hora[]"]').value === '09:05';
+    out.faixa = anestesia.graficoUI.PERIODOS.some(p => p.ini === 'Início CEC' && p.fim === 'Fim CEC');
+    /* gráfico impresso da versão finalizada desenha sem erro com os eventos */
+    const vit = [{ hora: '09:00', pas: 120, pad: 70, fc: 80 }, { hora: '10:30', pas: 110, pad: 60, fc: 75 }];
+    out.graficoPapel = /pp-grafico-img/.test(printPreview._graficoDaVersao(vit, [{ hora: '09:05', tipo: 'Início CEC' }, { hora: '10:40', tipo: 'Fim CEC' }]));
+    /* apagar a execução tira os eventos automáticos */
+    tr.remove(); anestesia.cec._calcTotal();
+    out.apagou = !anestesia.eventos._linhaDoTipo('Início CEC') && !anestesia.eventos._linhaDoTipo('Fim CEC');
+    return out;
+  });
+  assert(r.eventos && r.descricao, 'a execução cria os eventos Início/Fim CEC com descrição');
+  assert(r.volta && r.semDuplicar, 'editar num lado atualiza o outro, sem duplicar');
+  assert(r.faixa && r.graficoPapel, 'a CEC é faixa no gráfico da tela e do papel');
+  assert(r.apagou, 'apagar a execução tira os eventos automáticos');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

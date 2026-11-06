@@ -4904,7 +4904,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-11-06a</b><br>
+    v7.1 · build <b id="build-tag">2026-11-06b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -7271,6 +7271,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <span class="qa-label" style="color:#1f5fa6">💧 DÉBITO URINÁRIO</span>
             <button type="button" class="btn btn-sm" onclick="anestesia.diurese.addParcial(true)">+ Registrar volume (hora atual)</button>
             <button type="button" class="btn btn-sm" onclick="anestesia.diurese.recalcular()">↻ Recalcular</button>
+            <button type="button" class="btn btn-sm btn-ghost" onclick="anestesia.diurese.limpar()" title="Apaga o volume, os registros e o tempo da diurese para lançar de outra forma">🗑 Limpar diurese</button>
           </div>
           <div class="grid" style="align-items:end">
             <div class="field col-4"><label>Modo de lançamento</label>
@@ -7285,11 +7286,18 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <div class="field col-4"><label>Base de tempo</label>
               <select id="diurese-base" onchange="anestesia.diurese.recalcular()">
                 <option value="auto">Automática (início → fim, ou → agora)</option>
+                <option value="intervalo">Informar início e fim da medida</option>
                 <option value="manual">Informar minutos</option>
               </select>
             </div>
             <div class="field col-4" id="diurese-min-wrap" style="display:none"><label>Tempo (min)</label>
               <input type="number" id="diurese-min" min="1" step="1" inputmode="numeric" placeholder="ex.: 120" oninput="anestesia.diurese.recalcular()">
+            </div>
+            <div class="field col-2" id="diurese-ini-wrap" style="display:none"><label>Início da medida</label>
+              <input type="time" id="diurese-ini" onchange="anestesia.diurese.recalcular()" oninput="anestesia.diurese.recalcular()">
+            </div>
+            <div class="field col-2" id="diurese-fim-wrap" style="display:none"><label>Fim da medida</label>
+              <input type="time" id="diurese-fim" onchange="anestesia.diurese.recalcular()" oninput="anestesia.diurese.recalcular()">
             </div>
           </div>
 
@@ -34855,9 +34863,11 @@ const anestesia = {
           '; 4) Refluxo sanguíneo; 5) Fixação e teste de fluxo.';
       },
       'Acesso venoso central'() {
-        const det = anestesia.eventos._dispDet('Acesso venoso central');
-        return '1) Assepsia, antissepsia e campos estéreis; 2) Punção guiada por ultrassom' + (det ? ' — ' + det : '') +
-          '; 3) Técnica de Seldinger; 4) Checagem de refluxo em todas as vias; 5) Fixação e curativo; 6) Controle radiológico, se indicado.';
+        const tec = anestesia.disp._sel('Acesso venoso central', 'tecnica');
+        const det = anestesia.eventos._dispDet('Acesso venoso central').replace(/\s*— técnica: [^(]+/, ' ').replace(/\s+/g, ' ').trim();
+        const usg = !tec || /ultrass/i.test(tec);
+        return '1) Assepsia, antissepsia e campos estéreis; 2) Punção ' + (usg ? 'guiada por ultrassom' : 'por reparo anatômico') + (det ? ' — ' + det : '') +
+          '; 3) ' + (tec ? 'Técnica: ' + tec : 'Técnica de Seldinger') + '; 4) Checagem de refluxo em todas as vias; 5) Fixação e curativo; 6) Controle radiológico, se indicado.';
       },
       'Punção arterial'() {
         const det = anestesia.eventos._dispDet('Acesso arterial');
@@ -34985,6 +34995,8 @@ const anestesia = {
       }
       const via = anestesia.eventos._v('via_aerea_uso');
       if (via && anestesia.eventos.VIA_AEREA_EVENTO[via] === tipo) set('via_aerea_hora', hora);
+      try { anestesia.disp.horaDoEvento(tipo, hora); } catch (e) {}
+      try { anestesia.cec.horaDoEvento(tr); } catch (e) {}
       try { markDirty(); } catch (e) {}
     },
     _textoParaOrigem(tr) {
@@ -35948,14 +35960,58 @@ const anestesia = {
         rotTipo: 'tipo de cateter',
         tipos: ['Duplo lúmen', 'Triplo lúmen', 'Introdutor', 'PICC', 'Cateter de diálise'],
         calibres: ['5F', '7F', '8,5F', '9F', '12F'],
-        locais: ['jugular interna D', 'jugular interna E', 'subclávia D', 'subclávia E', 'femoral D', 'femoral E', 'basílica D', 'basílica E']
+        locais: ['jugular interna D', 'jugular interna E', 'subclávia D', 'subclávia E', 'femoral D', 'femoral E', 'basílica D', 'basílica E'],
+        tecnicas: ['Seldinger guiado por ultrassom', 'Seldinger por reparo anatômico', 'Seldinger modificado (micropunção)']
       },
       'Acesso arterial': {
         rotTipo: 'tipo de cateter',
         tipos: ['Cateter sobre agulha (Jelco)', 'Cateter arterial com fio-guia'],
         calibres: ['18G', '20G', '22G'],
-        locais: ['radial D', 'radial E', 'femoral D', 'femoral E', 'braquial D', 'braquial E', 'pediosa']
+        locais: ['radial D', 'radial E', 'femoral D', 'femoral E', 'braquial D', 'braquial E', 'pediosa'],
+        tecnicas: ['Punção direta', 'Seldinger guiado por ultrassom', 'Seldinger por palpação', 'Transfixação']
       }
+    },
+    /* O HORÁRIO DE CADA PUNÇÃO. O evento da linha do tempo e o campo aqui
+       são o mesmo dado: mexeu num, o outro acompanha (vale a última edição). */
+    _tipoEvento(disp) {
+      try { return anestesia.eventos.DISP_EVENTO[disp] || ''; } catch (e) { return ''; }
+    },
+    _horaEl(disp) { return document.querySelector('[data-campo="hora"][data-disp="' + disp + '"]'); },
+    aoMudarHora(disp) {
+      const el = anestesia.disp._horaEl(disp);
+      const hora = el ? String(el.value || '').trim() : '';
+      const tipoEvt = anestesia.disp._tipoEvento(disp);
+      if (!hora || !tipoEvt) return;
+      /* a variante já registrada (alívio, nasogástrica) é o evento deste dispositivo */
+      const tipos = (anestesia.eventos._tiposDe ? anestesia.eventos._tiposDe(disp) : [tipoEvt]);
+      const existente = tipos.find(t => anestesia.eventos._linhaDoTipo(t)) || tipoEvt;
+      if (anestesia.disp.ehPrevio(disp)) return;
+      anestesia.eventos.sincronizarHorario(existente, hora);
+      try { markDirty(); } catch (e) {}
+    },
+    /* do evento para o campo (tabela → aqui) */
+    horaDoEvento(tipoEvt, hora) {
+      Object.keys(anestesia.eventos.DISP_EVENTO || {}).forEach(disp => {
+        const tipos = anestesia.eventos._tiposDe ? anestesia.eventos._tiposDe(disp) : [anestesia.eventos.DISP_EVENTO[disp]];
+        if (tipos.indexOf(tipoEvt) < 0) return;
+        const el = anestesia.disp._horaEl(disp);
+        if (el && el.value !== hora) el.value = hora;
+      });
+    },
+    /* ao abrir o detalhe, o campo mostra o horário que o evento já tem */
+    _preencherHora(disp) {
+      const el = anestesia.disp._horaEl(disp); if (!el || el.value) return;
+      const tipos = anestesia.eventos._tiposDe ? anestesia.eventos._tiposDe(disp) : [];
+      for (const t of tipos) {
+        const tr = anestesia.eventos._linhaDoTipo(t);
+        const h = tr && (tr.querySelector('[name="evt_hora[]"]') || {}).value;
+        if (h) { el.value = h; return; }
+      }
+    },
+    _horaHTML(valor) {
+      if (!anestesia.disp._tipoEvento(valor)) return '';
+      return `<label style="display:inline-flex;align-items:center;gap:6px;margin-top:6px;font-size:.82rem;font-weight:400">⏱ Horário
+        <input type="time" data-campo="hora" data-disp="${utils.escapeAttr(valor)}" style="width:auto" onchange="anestesia.disp.aoMudarHora(${utils.jsArg(valor)})" oninput="anestesia.disp.aoMudarHora(${utils.jsArg(valor)})"></label>`;
     },
     _sel(disp, campo) {
       const el = document.querySelector('[data-campo="' + campo + '"][data-disp="' + disp + '"]');
@@ -35969,7 +36025,9 @@ const anestesia = {
       const tipo = anestesia.disp._sel(disp, 'tipo');
       const cal = anestesia.disp._sel(disp, 'calibre');
       const local = anestesia.disp._sel(disp, 'local');
+      const tec = anestesia.disp._sel(disp, 'tecnica');
       const txt = [ [tipo, cal].filter(Boolean).join(' '), local ? 'em ' + local : '',
+                    tec ? '— técnica: ' + tec : '',
                     anestesia.disp.ehPrevio(disp) ? '(prévio ao ato)' : '' ]
         .filter(Boolean).join(' ');
       if (alvo.dataset.manual !== '1' && (txt || !alvo.value)) alvo.value = txt;
@@ -36009,13 +36067,18 @@ const anestesia = {
                 <select data-campo="local" data-disp="${utils.escapeAttr(valor)}" style="flex:2;min-width:120px" onchange="anestesia.disp.montarDet(${utils.jsArg(valor)})">
                   <option value="">local</option>${op.locais.map(l => '<option>' + l + '</option>').join('')}
                 </select>
+                ${op.tecnicas ? `<select data-campo="tecnica" data-disp="${utils.escapeAttr(valor)}" style="flex:2;min-width:150px" onchange="anestesia.disp.montarDet(${utils.jsArg(valor)})">
+                  <option value="">técnica</option>${op.tecnicas.map(t => '<option>' + t + '</option>').join('')}
+                </select>` : ''}
               </div>
               <input type="text" name="disp_det[]" data-disp="${valor}" placeholder="montado do que você marcou" style="margin-top:6px"
                 oninput="this.dataset.manual='1'; anestesia.eventos.atualizarDescricoes()">
+              ${anestesia.disp._horaHTML(valor)}
               ${anestesia.disp._previoHTML(valor)}`;
           } else {
             div.innerHTML = `<label>${valor} <small style="color:var(--text-mute);font-weight:400">— detalhes</small></label>
               <input type="text" name="disp_det[]" data-disp="${valor}" placeholder="Ex.: tamanho, local, calibre" oninput="anestesia.eventos.atualizarDescricoes()">
+              ${anestesia.disp._horaHTML(valor)}
               ${anestesia.disp._previoHTML(valor)}`;
           }
           cont.appendChild(div);
@@ -36046,6 +36109,7 @@ const anestesia = {
           }
         } catch (e) {}
       }
+      if (checkbox.checked) { try { anestesia.disp._preencherHora(valor); } catch (e) {} }
       markDirty();
     },
 
@@ -36114,11 +36178,11 @@ const anestesia = {
         if (!k) return;
         const sel = c => anestesia.disp._sel(k, c);
         const partes = { texto: el.value || '' };
-        ['tipo', 'calibre', 'local'].forEach(c => { const v = sel(c); if (v) partes[c] = v; });
+        ['tipo', 'calibre', 'local', 'tecnica'].forEach(c => { const v = sel(c); if (v) partes[c] = v; });
         if (anestesia.disp.ehPrevio(k)) partes.previo = true;
         /* formato antigo (só texto) continua válido na leitura; aqui gravamos
            o objeto só quando há seleção, para não inchar registro sem motivo */
-        det[k] = (partes.tipo || partes.calibre || partes.local || partes.previo) ? partes : partes.texto;
+        det[k] = (partes.tipo || partes.calibre || partes.local || partes.tecnica || partes.previo) ? partes : partes.texto;
       });
       return det;
     },
@@ -36131,7 +36195,7 @@ const anestesia = {
         const el = document.querySelector(`[name="disp_det[]"][data-disp="${k}"]`);
         if (el) el.value = texto;
         if (v && typeof v === 'object') {
-          ['tipo', 'calibre', 'local'].forEach(c => {
+          ['tipo', 'calibre', 'local', 'tecnica'].forEach(c => {
             const sel = document.querySelector('[data-campo="' + c + '"][data-disp="' + k + '"]');
             if (sel && v[c]) sel.value = v[c];
           });
@@ -36142,6 +36206,8 @@ const anestesia = {
              seleção posterior sobrescrever o que está gravado */
           el.dataset.manual = '1';
         }
+        /* o horário vem do evento gravado: é o mesmo dado */
+        try { anestesia.disp._preencherHora(k); } catch (e) {}
       });
     }
   },
@@ -36252,6 +36318,10 @@ const anestesia = {
       if (di.base === 'manual' && String(di.min || '').trim()) {
         out.min = parseInt(di.min, 10) || null;
         out.fonte = 'tempo informado';
+      } else if (di.base === 'intervalo' && di.ini && di.fim) {
+        out.ini = di.ini; out.fim = di.fim;
+        out.min = dif(out.ini, out.fim);
+        out.fonte = 'intervalo informado';
       } else {
         const comHora = parciais.filter(p => p.hora);
         if (modo !== 'total' && comHora.length) {
@@ -36401,9 +36471,13 @@ const anestesia = {
     },
     recalcular() {
       if (!anestesia.diurese._painel()) return;
+      anestesia.diurese._visibilidade();
       const peso = parseFloat((document.querySelector('#form-anestesia [name="paciente_peso"]') || {}).value);
       const di = anestesia.diurese.coletar();
-      const agora = (() => { const d = new Date();
+      /* "→ agora" só vale para a ficha de HOJE: numa ficha de outro dia, a
+         hora atual não tem nada a ver com a medida */
+      const dataFicha = (document.querySelector('#form-anestesia [name="data_anestesia"]') || {}).value || '';
+      const agora = (dataFicha && dataFicha !== utils.hojeISO()) ? '' : (() => { const d = new Date();
         return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); })();
       const c = anestesia.diurese.calcular(di, peso,
         anestesia.diurese._horaIniAto(), anestesia.diurese._horaFimAto(), agora);
@@ -36490,8 +36564,35 @@ const anestesia = {
         total: (document.getElementById('diurese-total') || {}).value || '',
         base: (document.getElementById('diurese-base') || {}).value || 'auto',
         min: (document.getElementById('diurese-min') || {}).value || '',
+        ini: (document.getElementById('diurese-ini') || {}).value || '',
+        fim: (document.getElementById('diurese-fim') || {}).value || '',
         parciais: parciais
       };
+    },
+    /* Os campos que dependem da base de tempo aparecem conforme ela. "Informar
+       minutos" não mostrava o campo de minutos — a escolha ficava presa, e a
+       conta seguia "início → agora" (13:30 → 11:44 do dia seguinte = 22h14). */
+    _visibilidade() {
+      const base = (document.getElementById('diurese-base') || {}).value || 'auto';
+      const mostra = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? 'block' : 'none'; };
+      mostra('diurese-min-wrap', base === 'manual');
+      mostra('diurese-ini-wrap', base === 'intervalo');
+      mostra('diurese-fim-wrap', base === 'intervalo');
+      if (base === 'intervalo') {
+        const ini = document.getElementById('diurese-ini'), fim = document.getElementById('diurese-fim');
+        if (ini && !ini.value) ini.value = anestesia.diurese._horaIniAto() || '';
+        if (fim && !fim.value) fim.value = anestesia.diurese._horaFimAto() || '';
+      }
+    },
+    /* Apagar tudo para lançar de outra forma: sem isto, o que já estava
+       escrito numa forma continuava valendo e travava a troca. */
+    limpar() {
+      if (!confirm('Apagar o volume, os registros e o tempo da diurese?')) return;
+      ['diurese-total', 'diurese-min', 'diurese-ini', 'diurese-fim'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+      const base = document.getElementById('diurese-base'); if (base) base.value = 'auto';
+      const tb = document.getElementById('diurese-body'); if (tb) tb.innerHTML = '';
+      anestesia.diurese.setModo();
+      try { markDirty(); } catch (e) {}
     },
     restaurar(d) {
       if (!d) return;
@@ -36500,6 +36601,8 @@ const anestesia = {
       const totEl = document.getElementById('diurese-total'); if (totEl) totEl.value = d.total || '';
       const baseEl = document.getElementById('diurese-base'); if (baseEl) baseEl.value = d.base || 'auto';
       const minEl = document.getElementById('diurese-min'); if (minEl) minEl.value = d.min || '';
+      const iniEl = document.getElementById('diurese-ini'); if (iniEl) iniEl.value = d.ini || '';
+      const fimEl = document.getElementById('diurese-fim'); if (fimEl) fimEl.value = d.fim || '';
       const tb = document.getElementById('diurese-body');
       if (tb) {
         tb.innerHTML = '';
@@ -36586,7 +36689,7 @@ const anestesia = {
       const opt = (arr, sel) => arr.map(v => `<option ${v === sel ? 'selected' : ''}>${v}</option>`).join('');
       tr.innerHTML = `
         <td data-label="Tipo de terapia">
-          <select name="cec_ter_tipo[]"><option value="">— selecione —</option>${opt(anestesia.cec.TIPOS_TERAPIA, dados.tipo)}</select>
+          <select name="cec_ter_tipo[]" onchange="anestesia.cec.sincronizarEventos()"><option value="">— selecione —</option>${opt(anestesia.cec.TIPOS_TERAPIA, dados.tipo)}</select>
         </td>
         <td data-label="Início">
           <div class="input-group" style="gap:2px">
@@ -36625,7 +36728,65 @@ const anestesia = {
       out.value = (h ? h + 'h ' : '') + String(m).padStart(2, '0') + 'min';
       out.dataset.minutos = mins;
     },
+    /* AS EXECUÇÕES DE CEC VIRAM EVENTOS: "Início CEC" e "Fim CEC" na linha do
+       tempo — e, com eles, a faixa no gráfico, a legenda e a descrição. A
+       primeira execução é o 1º par de eventos, a segunda o 2º, e assim por
+       diante. Editar a hora num lado atualiza o outro. */
+    _execucoes() {
+      return Array.from(document.querySelectorAll('#cec-exec-body tr')).map(tr => ({
+        tr, tipo: (tr.querySelector('[name="cec_ter_tipo[]"]') || {}).value || '',
+        ini: tr.querySelector('[name="cec_ter_ini[]"]'), fim: tr.querySelector('[name="cec_ter_fim[]"]')
+      })).filter(x => x.ini && (x.ini.value || (x.fim && x.fim.value)));
+    },
+    _linhasEvento(tipo) {
+      const body = document.getElementById('eventos-body'); if (!body) return [];
+      return Array.from(body.querySelectorAll('tr')).filter(r => (r.querySelector('[name="evt_tipo[]"]') || {}).value === tipo)
+        .sort((a, b) => String((a.querySelector('[name="evt_hora[]"]') || {}).value).localeCompare(String((b.querySelector('[name="evt_hora[]"]') || {}).value)));
+    },
+    sincronizarEventos() {
+      const body = document.getElementById('eventos-body'); if (!body) return;
+      const execs = anestesia.cec._execucoes();
+      let mudou = false;
+      [['Início CEC', 'ini'], ['Fim CEC', 'fim']].forEach(([tipo, campo]) => {
+        const linhas = anestesia.cec._linhasEvento(tipo);
+        execs.forEach((x, i) => {
+          const hora = x[campo] && x[campo].value;
+          if (!hora) return;
+          const obs = 'CEC' + (execs.length > 1 ? ' — execução ' + (i + 1) : '') + (x.tipo ? ' (' + x.tipo + ')' : '');
+          const tr = linhas[i];
+          if (tr) {
+            const h = tr.querySelector('[name="evt_hora[]"]');
+            if (h && h.value !== hora) { h.value = hora; mudou = true; }
+            const o = tr.querySelector('[name="evt_obs[]"]');
+            if (o && tr.dataset.auto === '1' && o.value !== obs) { o.value = obs; mudou = true; }
+          } else {
+            const novo = anestesia.eventos.add({ tipo, hora, obs, auto: true });
+            if (novo) { novo.dataset.cec = '1'; mudou = true; }
+          }
+        });
+        /* execução apagada: o evento automático dela sai também */
+        linhas.slice(execs.filter(x => x[campo] && x[campo].value).length).forEach(tr => {
+          if (tr.dataset.cec === '1' && tr.dataset.auto === '1') { tr.remove(); mudou = true; }
+        });
+      });
+      if (mudou) {
+        try { anestesia.eventos._ordenar(body); } catch (e) {}
+        try { anestesia.vitais.atualizarGrafico(); } catch (e) {}
+        try { markDirty(); } catch (e) {}
+      }
+    },
+    /* da tabela de eventos para a execução */
+    horaDoEvento(tr) {
+      const tipo = (tr.querySelector('[name="evt_tipo[]"]') || {}).value || '';
+      if (tipo !== 'Início CEC' && tipo !== 'Fim CEC') return;
+      const i = anestesia.cec._linhasEvento(tipo).indexOf(tr);
+      const x = anestesia.cec._execucoes()[i];
+      const hora = (tr.querySelector('[name="evt_hora[]"]') || {}).value || '';
+      const el = x && (tipo === 'Início CEC' ? x.ini : x.fim);
+      if (el && hora && el.value !== hora) { el.value = hora; anestesia.cec._calcLinhaDur(el); }
+    },
     _calcTotal() {
+      try { anestesia.cec.sincronizarEventos(); } catch (e) {}
       let totalMin = 0;
       document.querySelectorAll('#cec-exec-body tr').forEach(tr => {
         const dur = tr.querySelector('[name="cec_ter_dur[]"]');
@@ -38390,6 +38551,14 @@ const anestesia = {
         default: ctx.arc(x, y, 2.8 * s, 0, Math.PI * 2); ctx.fill();
       }
     },
+    /* Períodos com começo e fim que viram faixa no gráfico (tela e papel) */
+    PERIODOS: [
+      { ini: 'Início CEC', fim: 'Fim CEC', rot: 'CEC', cor: '#b3261e', sombra: true },
+      { ini: 'Clampeamento aórtico', fim: 'Desclampeamento', rot: 'Clampeamento aórtico', cor: '#6d1b1b' },
+      { ini: 'Início da ventilação mecânica', fim: 'Fim da ventilação mecânica', rot: 'Ventilação mecânica', cor: '#2e7d92' },
+      { ini: 'Início do pneumoperitônio', fim: 'Fim do pneumoperitônio', rot: 'Pneumoperitônio', cor: '#8a6d1f' },
+      { ini: 'Início halogenado', fim: 'Fim halogenado', rot: 'Halogenado', cor: '#7a4b9c' }
+    ],
     /* Legenda: mesma marca do gráfico, desenhada num mini-canvas */
     _swatch(campo) {
       const S = anestesia.graficoUI.SERIES[campo]; if (!S) return '';
@@ -40343,31 +40512,35 @@ const anestesia = {
            têm começo e fim, e o que interessa clinicamente é o INTERVALO: ler
            dois marcadores soltos no eixo e calcular de cabeça é trabalho que o
            gráfico pode fazer. Cada par vira uma barra fina no alto da área. */
-        const PERIODOS = [
-          { ini: 'Início da ventilação mecânica', fim: 'Fim da ventilação mecânica', rot: 'Ventilação mecânica', cor: '#2e7d92' },
-          { ini: 'Início do pneumoperitônio', fim: 'Fim do pneumoperitônio', rot: 'Pneumoperitônio', cor: '#8a6d1f' },
-          { ini: 'Início halogenado', fim: 'Fim halogenado', rot: 'Halogenado', cor: '#7a4b9c' }
-        ];
+        const PERIODOS = anestesia.graficoUI.PERIODOS;
         let faixaY = padT + 4;
         PERIODOS.forEach(per => {
-          const a0 = eventos.find(e => e.tipo === per.ini);
-          if (!a0) return;
-          const b0 = eventos.find(e => e.tipo === per.fim);
-          const x0 = xOf(a0.t);
-          /* sem fim marcado, a faixa vai até o fim do eixo: está em curso */
-          const x1 = b0 ? xOf(b0.t) : padL + w;
-          if (!(x1 > x0)) return;
-          ctx.save();
-          ctx.globalAlpha = 0.5;
-          ctx.fillStyle = per.cor;
-          ctx.fillRect(x0, faixaY, Math.max(2, x1 - x0), 7);
-          ctx.globalAlpha = 1;
-          ctx.fillStyle = per.cor;
-          ctx.font = 'bold 8px -apple-system, "Segoe UI", sans-serif';
-          ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
-          ctx.fillText(per.rot + (b0 ? '' : ' (em curso)'), x0 + 2, faixaY + 7 + 9);
-          ctx.restore();
-          faixaY += 18;
+          /* vários pares (re-entrada em CEC): o 1º início com o 1º fim, e assim por diante */
+          const inis = eventos.filter(e => e.tipo === per.ini).sort((a, b) => a.t - b.t);
+          if (!inis.length) return;
+          const fins = eventos.filter(e => e.tipo === per.fim).sort((a, b) => a.t - b.t);
+          let desenhou = false;
+          inis.forEach((a0, i) => {
+            const b0 = fins.find(f => f.t >= a0.t && fins.indexOf(f) >= i) || null;
+            const x0 = xOf(a0.t);
+            /* sem fim marcado, a faixa vai até o fim do eixo: está em curso */
+            const x1 = b0 ? xOf(b0.t) : padL + w;
+            if (!(x1 > x0)) return;
+            ctx.save();
+            /* CEC: além da barra, o período inteiro fica sombreado no gráfico */
+            if (per.sombra) { ctx.globalAlpha = 0.08; ctx.fillStyle = per.cor; ctx.fillRect(x0, padT, Math.max(2, x1 - x0), h); }
+            ctx.globalAlpha = 0.5;
+            ctx.fillStyle = per.cor;
+            ctx.fillRect(x0, faixaY, Math.max(2, x1 - x0), 7);
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = per.cor;
+            ctx.font = 'bold 8px -apple-system, "Segoe UI", sans-serif';
+            ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+            ctx.fillText(per.rot + (inis.length > 1 ? ' ' + (i + 1) : '') + (b0 ? '' : ' (em curso)'), x0 + 2, faixaY + 7 + 9);
+            ctx.restore();
+            desenhou = true;
+          });
+          if (desenhou) faixaY += 18;
         });
         ctx.font = 'bold 9px -apple-system, "Segoe UI", sans-serif';
         ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
@@ -43855,16 +44028,24 @@ const fin = {
        descartado — a tela fica limpa e a folha sai em branco. Por isso aqui o
        registro é recarregado antes de imprimir. De quebra, sai com o desfecho
        e o convênio que ele acabou de confirmar. */
+    /* SAÍA EM BRANCO: recarregava o registro sem garantir que a tela era a
+       do módulo dele e abria a impressão depois de um tempo fixo — se o
+       formulário ainda não tinha terminado de carregar (ou a tela era outra),
+       a folha ia vazia. Agora é o mesmo caminho do painel de fechamento: vai
+       ao módulo, espera o registro estar de fato no formulário e só então
+       abre; ao fechar a prévia, o formulário é zerado de novo. */
     _imprimir(mod, id) {
-      try {
-        const doc = store.getById(mod, id);
-        if (doc && window[mod] && typeof window[mod].carregar === 'function') {
-          window[mod].carregar(doc);
-          setTimeout(() => { try { printPreview.abrir(); } catch (e) {} }, 260);
-          return;
-        }
-      } catch (e) {}
-      try { printPreview.abrir(); } catch (e) {}
+      const doc = store.getById(mod, id);
+      const carregador = doc && window[mod] && typeof window[mod].carregar === 'function' ? window[mod] : null;
+      if (!carregador) { toast('Não achei o registro para imprimir. Abra-o pela busca e imprima de lá.', 'warn'); return; }
+      const abrir = () => {
+        try { carregador.carregar(doc); } catch (e) { toast('Não consegui abrir o registro para imprimir.', 'error'); return; }
+        printPreview._quandoCarregado('form-' + mod, id, () => {
+          printPreview._zerarAoFechar = [mod];
+          printPreview.abrir();
+        }, () => toast('O registro não terminou de abrir; imprima pela busca (🔍).', 'error'));
+      };
+      try { ui.irEEntao(mod, '#form-' + mod, abrir); } catch (e) { abrir(); }
     },
 
     cancelar(opts) {
@@ -46277,11 +46458,27 @@ const pacientes = {
     if (q.length < 2) return [];
     /* cada palavra digitada vale em qualquer parte do nome: "joao conc" acha "João da Conceição" */
     const partes = q.split(' ').filter(Boolean);
-    return (pacientes.list() || []).filter(p => {
-      if (!p || p._id === exceto || !p.nome) return false;
-      const n = utils.semAcento(p.nome);
-      return partes.every(w => n.indexOf(w) >= 0);
+    /* E O PARECIDO TAMBÉM: "Jaciline" acha "Jacilene", "Soza" acha "Souza".
+       Palavra de 4+ letras aceita uma letra trocada/faltando (8+ letras,
+       duas); os de grafia exata vêm primeiro. */
+    const dist = (a, b, max) => {
+      try { return medicamentos._distancia(a, b, max); } catch (e) { return a === b ? 0 : max + 1; }
+    };
+    const proxima = (w, palavras) => palavras.some(n => {
+      if (n.indexOf(w) >= 0) return true;
+      if (w.length < 4) return false;
+      const max = w.length >= 8 ? 2 : 1;
+      return dist(n.slice(0, Math.max(w.length, Math.min(n.length, w.length + max))), w, max) <= max || dist(n, w, max) <= max;
     });
+    const exatos = [], aprox = [];
+    (pacientes.list() || []).forEach(p => {
+      if (!p || p._id === exceto || !p.nome) return;
+      const n = utils.semAcento(p.nome);
+      if (partes.every(w => n.indexOf(w) >= 0)) { exatos.push(p); return; }
+      const palavras = n.split(' ').filter(Boolean);
+      if (partes.every(w => proxima(w, palavras))) aprox.push(p);
+    });
+    return exatos.concat(aprox);
   },
   _mesmoNome(nome, exceto) {
     const q = utils.semAcento(nome);
@@ -46301,10 +46498,18 @@ const pacientes = {
       const form = input.closest('form');
       const idAtual = form ? ((form.querySelector('[name="id"]') || {}).value || '') : '';
       if (idAtual) return [];               /* editando um cadastro: não sugere outro */
+      const q = utils.semAcento(input.value);
       return pacientes._parecidos(input.value).slice(0, 10).map(p => ({
-        value: p._id, label: p.nome, meta: '✓ já cadastrado' + (pacientes._detalhe(p) ? ' · ' + pacientes._detalhe(p) : ''), data: p
+        value: p._id, label: p.nome,
+        meta: (utils.semAcento(p.nome).indexOf(q) >= 0 || q.split(' ').every(w => utils.semAcento(p.nome).indexOf(w) >= 0)
+          ? '✓ já cadastrado' : '≈ nome parecido já cadastrado') + (pacientes._detalhe(p) ? ' · ' + pacientes._detalhe(p) : ''), data: p, semFiltro: true
       }));
     }, it => aoEscolher(it.data), null);
+    /* nome que já chega preenchido (cadastro rápido vindo de outra tela):
+       a lista aparece sem precisar mexer no campo */
+    if (String(input.value || '').trim().length >= 2) {
+      setTimeout(() => { try { if (document.activeElement !== input) input.focus(); input.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {} }, 180);
+    }
   },
   editar(id, onSaveCb = null) {
     try {

@@ -375,6 +375,7 @@ const printPreview = {
           else if (mod === 'termo') termo._zerar();
           else if (mod === 'anestesia') anestesia.limparSilencioso();
           else if (mod === 'recuperacao') recuperacao._zerar();
+          else if (mod === 'consulta') consulta._zerar();
         } catch (e) {}
       });
       try { markClean(); } catch (e) {}
@@ -1006,7 +1007,7 @@ ${TAG_CLOSE_HTML}`;
   },
   /* Gráfico de documento finalizado: desenha em um canvas separado, em
      memória, com as mesmas séries da versão vigente usada pelas tabelas. */
-  _graficoDaVersao(vitais) {
+  _graficoDaVersao(vitais, eventos) {
     try {
       /* TODOS OS SINAIS REGISTRADOS — não só os seis de sempre. FR, temperatura,
          BIS, TOF, glicemia, PVC, PIC, DC, ScvO₂ e CAM eram selecionados e
@@ -1068,6 +1069,29 @@ ${TAG_CLOSE_HTML}`;
         ctx.strokeStyle = '#dbe2ea'; ctx.beginPath(); ctx.moveTo(42, yPrincipal(v)); ctx.lineTo(942, yPrincipal(v)); ctx.stroke();
         ctx.fillStyle = '#334155'; ctx.fillText(String(Math.round(v)), 4, yPrincipal(v) + 4);
       }
+      /* PERÍODOS (CEC, clampeamento, ventilação…): a mesma faixa da tela */
+      try {
+        const PER = (ui && ui.PERIODOS) || [];
+        const minDe = hh => { const m = /^(\d{2}):(\d{2})/.exec(hh || ''); if (!m) return null; let t = +m[1] * 60 + +m[2]; if (t < inicio - 720) t += 1440; return t; };
+        const evs = (eventos || []).filter(e => e && e.tipo && e.hora).map(e => ({ tipo: e.tipo, t: minDe(e.hora) })).filter(e => e.t != null);
+        let fy = topo + 2;
+        PER.forEach(per => {
+          const inis = evs.filter(e => e.tipo === per.ini).sort((a, b) => a.t - b.t);
+          if (!inis.length) return;
+          const fins = evs.filter(e => e.tipo === per.fim).sort((a, b) => a.t - b.t);
+          inis.forEach((a0, i) => {
+            const b0 = fins[i] && fins[i].t >= a0.t ? fins[i] : null;
+            const t0 = Math.max(inicio, a0.t), t1 = Math.min(fim, b0 ? b0.t : fim);
+            if (!(t1 > t0)) return;
+            if (per.sombra) { ctx.globalAlpha = 0.08; ctx.fillStyle = per.cor; ctx.fillRect(x(t0), topo, x(t1) - x(t0), base - topo); }
+            ctx.globalAlpha = 0.5; ctx.fillStyle = per.cor; ctx.fillRect(x(t0), fy, Math.max(2, x(t1) - x(t0)), 6);
+            ctx.globalAlpha = 1; ctx.fillStyle = per.cor; ctx.font = 'bold 10px sans-serif';
+            ctx.fillText(per.rot + (inis.length > 1 ? ' ' + (i + 1) : '') + (b0 ? '' : ' (em curso)'), x(t0) + 2, fy + 16);
+          });
+          fy += 18;
+        });
+        ctx.globalAlpha = 1; ctx.font = '12px sans-serif';
+      } catch (e) { ctx.globalAlpha = 1; }
       /* legenda em até duas linhas: cada sinal com a sua cor e marca */
       let lx = 42, ly = 16;
       ativas.forEach(s => {
@@ -2382,7 +2406,7 @@ ${TAG_CLOSE_HTML}`;
          redesenho forçado no contexto da ficha (funciona mesmo com o módulo
          oculto, ex.: impressão conjunta ficha+SRPA a partir da SRPA) */
       let graficoHTML = printPreview._registroFinalizado('anestesia')
-        ? printPreview._graficoDaVersao(d.sinais_vitais) : '';
+        ? printPreview._graficoDaVersao(d.sinais_vitais, d.eventos) : '';
       if (!printPreview._registroFinalizado('anestesia')) try {
         const ctxAnterior = anestesia.graficoUI._contexto;
         anestesia.graficoUI._contexto = 'anestesia';
