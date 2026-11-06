@@ -25040,6 +25040,12 @@ await test('Ficha retificada: imprime a assinatura de cada retificação com o r
     out.semValorAntigo = !/0,5 g/.test(vig);
     const posAssin = vig.indexOf('RETIFICAÇÃO 1');
     out.depoisDoCorpo = posAssin > vig.indexOf('Herniorrafia');
+    /* PDF de texto (☁️ Salvar PDF na nuvem): o bloco vem junto */
+    {
+      const J = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+      const pdf = printPreview._gerarDocDeTexto(J, document.getElementById('ppp')).output();
+      out.pdf = /RETIFICA/.test(pdf) && /Cefazolina: corrigida para 1 g EV/.test(pdf) && /Dr\. Corretor/.test(pdf);
+    }
     printPreview.fechar();
     /* versão original */
     printPreview._versaoOriginal = rec._id;
@@ -25047,6 +25053,11 @@ await test('Ficha retificada: imprime a assinatura de cada retificação com o r
     await new Promise(res => setTimeout(res, 300));
     const org = (document.getElementById('ppp') || {}).textContent || '';
     out.original = /VERSÃO ORIGINAL/.test(org) && !/RETIFICAÇÃO 1/.test(org);
+    {
+      const J = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+      const pdf = printPreview._gerarDocDeTexto(J, document.getElementById('ppp')).output();
+      out.pdfOriginal = /VERS.O ORIGINAL/.test(pdf) && !/RETIFICA..O 1/.test(pdf);
+    }
     out.nomeOriginal = /Versao-Original/.test(printPreview._gerarNomeArquivo());
     printPreview.fechar();
     out.limpou = printPreview._versaoOriginal === null;
@@ -25069,6 +25080,7 @@ await test('Ficha retificada: imprime a assinatura de cada retificação com o r
   assert(r.busca, 'a busca mostra "Retificada (2 versões)" e o botão da original');
   assert(r.vigente && r.depoisDoCorpo && r.semValorAntigo, 'a impressão traz a retificação, quem corrigiu e o resumo, depois do corpo, sem o valor substituído');
   assert(r.original && r.nomeOriginal && r.limpou, 'a versão original imprime com aviso e nome próprio, e não fica presa');
+  assert(r.pdf && r.pdfOriginal, 'no PDF da nuvem também: retificação com resumo e quem corrigiu; a original com o aviso');
   assert(r.semHttp && r.aviso, 'erro de versões diferentes vira aviso com Recarregar');
   await page.close();
 });

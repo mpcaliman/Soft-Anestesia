@@ -259,17 +259,17 @@ const printPreview = {
       const quem = autorDe(r.ad);
       const autor = quem.nome;
       return '<div class="pp-retificacao-bloco" style="margin-top:14px;padding-top:6px;border-top:1px solid #94a3b8;break-inside:avoid;page-break-inside:avoid">' +
-        '<div style="font-size:9.5pt;font-weight:700;color:#1a2332">RETIFICAÇÃO ' + (i + 1) + ' — ' + E(quando(r.ad)) +
+        '<div class="pp-retif-titulo" style="font-size:9.5pt;font-weight:700;color:#1a2332">RETIFICAÇÃO ' + (i + 1) + ' — ' + E(quando(r.ad)) +
           (r.confirmada ? '' : ' <span style="font-weight:400;color:#8a5a10">(aguardando confirmação da nuvem)</span>') + '</div>' +
         (linhas.length
           ? '<ul style="margin:4px 0 6px 18px;padding:0;font-size:9pt;line-height:1.4">' + linhas.map(l => '<li>' + E(l) + '</li>').join('') + '</ul>'
-          : '<div style="font-size:9pt;color:#555;margin:4px 0 6px">Conteúdo clínico atualizado.</div>') +
+          : '<div class="pp-retif-sem-lista" style="font-size:9pt;color:#555;margin:4px 0 6px">Conteúdo clínico atualizado.</div>') +
         '<div class="pp-signature-area" style="margin-top:6px">' + (quem.proprio
           ? printPreview._assinaturaDesenhada('', autor, crmDe(autor), 'prof', null)
           : '<div class="pp-signature" style="text-align:center"><div style="border-top:1px solid #333;padding-top:3px">' + E(autor) + '</div></div>') + '</div>' +
       '</div>';
     }).join('');
-    const nota = '<div style="font-size:8pt;color:#555;margin-top:6px">O registro original, como assinado, permanece preservado e pode ser impresso.</div>';
+    const nota = '<div class="pp-retificacao-nota" style="font-size:8pt;color:#555;margin-top:6px">O registro original, como assinado, permanece preservado e pode ser impresso.</div>';
     const marca = '<div class="pp-footer"';
     const pos = html.lastIndexOf(marca);
     return pos >= 0 ? html.slice(0, pos) + blocos + nota + html.slice(pos) : html + blocos + nota;
@@ -880,7 +880,7 @@ ${TAG_CLOSE_HTML}`;
     };
 
     /* Percorre os nós relevantes do preview em ordem */
-    const nodes = ppp.querySelectorAll('h1, h2, h3, .pp-doc-title, .pp-field, .pp-block, .pp-lab-item, .pp-check, .pp-table, p, .pp-prof-nome, .pp-prof-reg, .pp-quebra, .pp-capitulo, img.pp-grafico-img');
+    const nodes = ppp.querySelectorAll('.pp-versao-original, h1, h2, h3, .pp-doc-title, .pp-field, .pp-block, .pp-lab-item, .pp-check, .pp-table, p, .pp-prof-nome, .pp-prof-reg, .pp-quebra, .pp-capitulo, img.pp-grafico-img, .pp-retificacao-bloco, .pp-retificacao-nota');
     /* CADA TEXTO UMA VEZ SÓ.
        `querySelectorAll` devolve ancestral E descendente quando os dois batem
        com a lista — e `.pp-doc-title` É uma div que contém um h1, `.pp-block`
@@ -914,6 +914,39 @@ ${TAG_CLOSE_HTML}`;
         return;
       }
       if (!txt) return;
+      /* RETIFICAÇÃO NO PDF TAMBÉM: título, resumo, assinatura (imagem do
+         carimbo quando houver) e nome de quem corrigiu */
+      if (cls.includes('pp-versao-original')) {
+        escreve(txt, { size: 9.5, style: 'bold', cor: [138, 28, 28], gap: 5 });
+        y += 1; return;
+      }
+      if (cls.includes('pp-retificacao-nota')) { escreve(txt, { size: 8, cor: 110, gap: 4 }); return; }
+      if (cls.includes('pp-retificacao-bloco')) {
+        y += 3; linha();
+        const tit = (node.querySelector('.pp-retif-titulo') || {}).innerText || '';
+        if (tit.trim()) escreve(tit.trim(), { size: 9.5, style: 'bold', gap: 5 });
+        node.querySelectorAll('li').forEach(li => { const t = (li.innerText || '').trim(); if (t) escreve('• ' + t, { size: 9, gap: 4.4, indent: 2 }); });
+        const semLista = node.querySelector('.pp-retif-sem-lista');
+        if (semLista && semLista.innerText.trim()) escreve(semLista.innerText.trim(), { size: 9, gap: 4.4, indent: 2 });
+        try {
+          const img = node.querySelector('.pp-signature img');
+          const src = img ? img.getAttribute('src') || '' : '';
+          if (src.startsWith('data:image')) {
+            const nw = img.naturalWidth || 400, nh = img.naturalHeight || 120;
+            const h = 16, w = Math.min(60, h * nw / Math.max(1, nh));
+            novaPaginaSePreciso(h + 12);
+            doc.addImage(src, src.indexOf('image/jpeg') > 0 ? 'JPEG' : 'PNG', (W - w) / 2, y + 1, w, h);
+            y += h + 2;
+          }
+        } catch (e) {}
+        const ass = (node.querySelector('.pp-signature') || {}).innerText || '';
+        String(ass).split('\n').map(l => l.trim()).filter(Boolean).forEach(l => {
+          novaPaginaSePreciso(6);
+          doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(30);
+          doc.text(l, W / 2, y + 3, { align: 'center' }); y += 4.4;
+        });
+        y += 2; return;
+      }
       if (cls.includes('pp-capitulo')) {
         escreve(txt, { size: 13, style: 'bold', cor: [34, 56, 79], gap: 7 });
         linha();
