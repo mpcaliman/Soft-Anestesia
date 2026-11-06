@@ -44,7 +44,12 @@ const printPreview = {
     if (!Number.isFinite(n) || n <= 0) return String(v || '');
     return String(n < 3 ? Math.round(n * 100) : Math.round(n));
   },
+  /* VERSÃO ORIGINAL: o documento exatamente como foi assinado, sem as
+     retificações. Vale só para o registro pedido e só até fechar a prévia. */
+  _versaoOriginal: null,
+  _ehOriginal(registro) { return !!(registro && printPreview._versaoOriginal && printPreview._versaoOriginal === registro._id); },
   _vig(mod, registro) {
+    if (printPreview._ehOriginal(registro)) { try { return adendos._semMarcasDeVersao(registro); } catch (e) { return registro; } }
     try { return adendos.vigenteParaImpressao ? adendos.vigenteParaImpressao(mod, registro) : adendos.vigente(mod, registro); }
     catch (e) { return adendos.vigente(mod, registro); }
   },
@@ -58,6 +63,7 @@ const printPreview = {
     const registro = printPreview._registroFinalizado(mod);
     if (registro) {
       const vig = printPreview._vig(mod, registro);
+      if (printPreview._ehOriginal(registro)) return vig;
       try { return adendos.paraImpressao ? adendos.paraImpressao(mod, vig) : vig; } catch (e) { return vig; }
     }
     return typeof coletar === 'function' ? coletar() : utils.formData(printPreview._formularioPorModulo[mod]);
@@ -194,6 +200,7 @@ const printPreview = {
        nota de retificação, entra na pré-visualização ou na impressão. */
     try {
       let html = builder();
+      try { html = printPreview._comVersoes(mod, html); } catch (e) {}
       /* termo, receituário, documento e risco não têm "Informações
          complementares" no corpo: o que chegou depois por adendo entra aqui,
          no fim do documento, como parte dele */
@@ -203,6 +210,69 @@ const printPreview = {
       return html;
     }
     finally { printPreview._verCtx = anterior; }
+  },
+  /* DEPOIS DA ASSINATURA ORIGINAL, A DE CADA RETIFICAÇÃO.
+     Quem corrigiu, quando, e um resumo do que mudou ("Medicação: Cefazolina
+     0,5 g → 1 g"). O corpo já traz os valores corrigidos; este bloco diz que
+     houve correção, por quem e em quê — o original segue preservado e pode
+     ser impresso pela busca ("📜 Original"). Na versão original, um aviso no
+     alto diz que ela foi substituída. */
+  _retificacoesDe(mod) {
+    const registro = printPreview._registroFinalizado(mod);
+    if (!registro || typeof adendos.retificacoesParaImpressao !== 'function') return { registro, lista: [] };
+    return { registro, lista: adendos.retificacoesParaImpressao(mod, registro) };
+  },
+  _comVersoes(mod, html) {
+    const { registro, lista } = printPreview._retificacoesDe(mod);
+    if (!registro || !lista.length) return html;
+    const E = utils.escapeHTML;
+    const quando = a => adendos._fmtData(a._serverCreatedAt || a.data);
+    if (printPreview._ehOriginal(registro)) {
+      const ult = lista[lista.length - 1].ad;
+      const aviso = '<div class="pp-versao-original" style="border:1.5px solid #8a1c1c;color:#8a1c1c;padding:6px 10px;margin:0 0 10px;font-size:9.5pt;font-weight:600;break-inside:avoid">' +
+        'VERSÃO ORIGINAL — como foi assinada. Substituída por ' + lista.length + ' retificação(ões); a última em ' + E(quando(ult)) +
+        '. Para uso clínico vale a versão vigente.</div>';
+      return aviso + html;
+    }
+    const crmDe = nome => {
+      try {
+        const n = String(nome || '').trim().toLowerCase();
+        const p = ajustes.list('cad_anestesistas').concat(ajustes.list('cad_cirurgioes') || [])
+          .find(x => String(x.nome || '').trim().toLowerCase() === n);
+        return (p && p.crm) || '';
+      } catch (e) { return ''; }
+    };
+    /* QUEM CORRIGIU: o nome que viaja com a retificação é só um rótulo do
+       aparelho e pode ser forjado. Vale o autor que o servidor registrou: se
+       foi quem está usando o app agora, sai o nome e o carimbo dele; se foi
+       outra pessoa, sai como profissional da equipe, sem carimbo de ninguém. */
+    let eu = '', euNome = '';
+    try { const ctx = contextoAba.capturar(); eu = (ctx && ctx.userId) || ''; } catch (e) {}
+    try { const u = auth.usuarioAtual(); euNome = (u && (u.nome || u.usuario)) || ''; } catch (e) {}
+    const autorDe = ad => {
+      if (!ad._pushed) return { nome: ad.autor || euNome || 'Profissional', proprio: true };
+      if (eu && ad._authorId === eu) return { nome: euNome || ad.autor || 'Profissional', proprio: true };
+      return { nome: 'Profissional da equipe' + (ad._authorId ? ' (ID ' + String(ad._authorId).slice(0, 8) + ')' : ''), proprio: false };
+    };
+    const blocos = lista.map((r, i) => {
+      const linhas = adendos.resumoMudancas(r.antes, r.depois, 10, lista[lista.length - 1].depois);
+      const quem = autorDe(r.ad);
+      const autor = quem.nome;
+      return '<div class="pp-retificacao-bloco" style="margin-top:14px;padding-top:6px;border-top:1px solid #94a3b8;break-inside:avoid;page-break-inside:avoid">' +
+        '<div style="font-size:9.5pt;font-weight:700;color:#1a2332">RETIFICAÇÃO ' + (i + 1) + ' — ' + E(quando(r.ad)) +
+          (r.confirmada ? '' : ' <span style="font-weight:400;color:#8a5a10">(aguardando confirmação da nuvem)</span>') + '</div>' +
+        (linhas.length
+          ? '<ul style="margin:4px 0 6px 18px;padding:0;font-size:9pt;line-height:1.4">' + linhas.map(l => '<li>' + E(l) + '</li>').join('') + '</ul>'
+          : '<div style="font-size:9pt;color:#555;margin:4px 0 6px">Conteúdo clínico atualizado.</div>') +
+        '<div class="pp-signature-area" style="margin-top:6px">' + (quem.proprio
+          ? printPreview._assinaturaDesenhada('', autor, crmDe(autor), 'prof', null)
+          : '<div class="pp-signature" style="text-align:center"><div style="border-top:1px solid #333;padding-top:3px">' + E(autor) + '</div></div>') + '</div>' +
+      '</div>';
+    }).join('');
+    const nota = '<div style="font-size:8pt;color:#555;margin-top:6px">O registro original, como assinado, permanece preservado e pode ser impresso.</div>';
+    const marca = '<div class="pp-footer"';
+    const pos = html.lastIndexOf(marca);
+    return pos >= 0 ? html.slice(0, pos) + blocos + nota + html.slice(pos) : html + blocos + nota;
   },
   abrir() {
     try {
@@ -276,6 +346,7 @@ const printPreview = {
     }
   },
   fechar() {
+    printPreview._versaoOriginal = null;
     document.getElementById('print-preview-overlay').classList.remove('show');
     document.body.classList.remove('printing-preview');
     /* Impressão pós-finalização: a ficha foi RECARREGADA no formulário só para
@@ -489,8 +560,15 @@ const printPreview = {
      Agora a tela repete o motivo que o mecanismo deu, aponta o caminho que
      funciona sem pop-up (o PDF na nuvem) e deixa o erro inteiro no console. */
   _falhouImpressao(erro) {
-    try { console.error('Impressão não concluída', erro); } catch (e) {}
     const motivo = (erro && erro.message) ? String(erro.message).trim() : '';
+    if (!/vers(õ|o)es diferentes/i.test(motivo)) { try { console.error('Impressão não concluída', erro); } catch (e) {} }
+    /* versões diferentes = o app aberto ficou na versão anterior à publicada:
+       não adianta tentar de novo, adianta recarregar */
+    if (/vers(õ|o)es diferentes/i.test(motivo)) {
+      try { console.warn('Impressão: app aberto em versão anterior à publicada'); } catch (e) {}
+      try { window.softVersao.avisar('O sistema foi atualizado enquanto este app estava aberto, por isso a impressão não abriu. Toque em Recarregar e imprima de novo — a ficha está salva.'); } catch (e) {}
+      return;
+    }
     toast('Não consegui imprimir' + (motivo ? ': ' + motivo : '.') +
       ' Enquanto isso, use ☁️ Salvar PDF na nuvem — esse caminho não depende da janela de impressão.', 'error');
   },
@@ -1169,8 +1247,9 @@ ${TAG_CLOSE_HTML}`;
       const paciente = printPreview._nomePacienteDoFormulario(mod);
       /* Ordem fixa: Paciente_Tipo_Data — a data é SEMPRE a de criação do
          arquivo (hoje), porque é ela que ordena a pasta. */
-      base = printPreview._sanitizarPaciente(paciente) + '_' + tipo + '_' + printPreview._dataCriacao();
-      chave = printPreview._chaveDocumento(mod);
+      base = printPreview._sanitizarPaciente(paciente) + '_' + tipo +
+        (printPreview._ehOriginal(printPreview._registroFinalizado(mod)) ? '-Versao-Original' : '') + '_' + printPreview._dataCriacao();
+      chave = printPreview._chaveDocumento(mod) + (printPreview._ehOriginal(printPreview._registroFinalizado(mod)) ? ':original' : '');
     }
     return printPreview._nomeUnico(base, chave);
   },

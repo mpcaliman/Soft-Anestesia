@@ -228,6 +228,7 @@ const historico = {
           <button class="btn btn-xs btn-primary" onclick="historico.abrirItem(${utils.jsArg(mod)},${utils.jsArg(it._id)})" title="Editar">✏️</button>
           <button class="btn btn-xs" onclick="historico.imprimirItem(${utils.jsArg(mod)},${utils.jsArg(it._id)})" title="Imprimir">🖨️</button>
           <button class="btn btn-xs" onclick="historico.pdfItem(${utils.jsArg(mod)},${utils.jsArg(it._id)})" title="Exportar PDF">📄</button>
+          ${historico._nRetificacoes(mod, it) ? `<button class="btn btn-xs" onclick="historico.imprimirOriginal(${utils.jsArg(mod)},${utils.jsArg(it._id)})" title="Versão original, como foi assinada (antes das retificações)">📜 Original</button>` : ''}
           ${anexoBtn}
           <button class="btn btn-xs btn-danger" onclick="historico.excluirItem(${utils.jsArg(mod)},${utils.jsArg(it._id)})" title="Apagar">🗑</button>
         </td>
@@ -275,12 +276,19 @@ const historico = {
       const s = it.status || '';
       return { rot: s || '', cls: s };
     }
-    if (it._finalizado) return { rot: 'Finalizado', cls: 'pago' };
+    if (it._finalizado) {
+      const n = historico._nRetificacoes(mod, it);
+      if (n) return { rot: 'Retificada (' + (n + 1) + ' versões)', cls: 'parcial' };
+      return { rot: 'Finalizado', cls: 'pago' };
+    }
     /* documento não tem etapa de finalizar: salvo já é emitido */
     if (mod === 'documentos') return { rot: 'Emitido', cls: 'pago' };
     return { rot: 'Rascunho', cls: 'pendente' };
   },
 
+  _nRetificacoes(mod, it) {
+    try { return (adendos.retificacoesParaImpressao(mod, it) || []).length; } catch (e) { return 0; }
+  },
   _contaAnexos(it) {
     return (Array.isArray(it._docs) ? it._docs.length : 0) +
            (Array.isArray(it.anexos) ? it.anexos.length : 0) +
@@ -867,6 +875,12 @@ const historico = {
     historico._carregarEEntao(mod, id, () => { try { printPreview.abrir(); } catch (e) {} });
   },
 
+  /* a versão ORIGINAL, como foi assinada — a vigente segue sendo a corrigida */
+  imprimirOriginal(mod, id) {
+    historico._carregarEEntao(mod, id, () => {
+      try { printPreview._versaoOriginal = id; printPreview.abrir(); } catch (e) {}
+    });
+  },
   pdfItem(mod, id) {
     if (mod === 'financeiro') { historico.abrirItem(mod, id); return; }
     historico._carregarEEntao(mod, id, () => {

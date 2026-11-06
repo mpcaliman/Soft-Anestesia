@@ -4904,7 +4904,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-11-05b</b><br>
+    v7.1 · build <b id="build-tag">2026-11-06a</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -24347,13 +24347,43 @@ const adendos = (() => {
      de tempo, cada uma no seu campo. Nada disso altera o que está gravado. */
   vigenteParaImpressao(mod, rec) {
     if (!rec || !rec._finalizado || !adendos.MODS[mod]) return rec;
+    /* só as do PRÓPRIO usuário entram além das confirmadas: as que ainda
+       estão neste aparelho (sem recibo) e as dele que a nuvem marcou em
+       conflito. A proposta de outra pessoa que perdeu a corrida não vira
+       documento sem passar pela nuvem. Vazio não apaga o que havia. */
+    const { estado, extras } = adendos._extrasParaImpressao(mod, rec);
+    const lista = adendos.retificacoesParaImpressao(mod, rec, estado, extras);
+    return lista.length ? lista[lista.length - 1].depois : adendos._semMarcasDeVersao(rec);
+  },
+  _semMarcasDeVersao(rec) {
+    const base = JSON.parse(JSON.stringify(rec));
+    delete base._retificadoEm; delete base._retificadoPor; delete base._retificacoes;
+    return base;
+  },
+  /* CADA RETIFICAÇÃO, COM O ANTES E O DEPOIS.
+     A folha impressa passou a mostrar, depois da assinatura original, uma
+     assinatura por retificação — de quem corrigiu e quando — com o resumo do
+     que mudou. Para isso cada correção precisa do estado de antes e de depois
+     dela, na mesma ordem e com a mesma regra (vazio não apaga) usada para
+     montar a versão impressa. */
+  retificacoesParaImpressao(mod, rec, estado, extras) {
+    if (!rec || !rec._finalizado || !adendos.MODS[mod]) return [];
+    if (!estado || !extras) {
+      const ve = adendos._extrasParaImpressao(mod, rec);
+      estado = ve.estado; extras = ve.extras;
+    }
+    let v = adendos._semMarcasDeVersao(rec);
+    return estado.aplicadas.concat(extras).map(a => {
+      const antes = v;
+      v = adendos._fundirSemApagar(v, a._retificacao.campos);
+      return { ad: a, antes, depois: v, confirmada: estado.aplicadas.indexOf(a) >= 0 };
+    });
+  },
+  _extrasParaImpressao(mod, rec) {
     const estado = adendos.estadoRetificacoes(rec, mod);
     const head = estado.aplicadas[estado.aplicadas.length - 1];
     const tHead = Date.parse(head ? (head._serverCreatedAt || head.data) : '') || 0;
     const quando = a => Date.parse(a._serverCreatedAt || a.data || '') || 0;
-    /* só as do PRÓPRIO usuário: as que ainda estão neste aparelho (sem
-       recibo) e as dele que a nuvem marcou em conflito. A proposta de outra
-       pessoa que perdeu a corrida não vira documento sem passar pela nuvem. */
     let eu = '';
     try { const ctx = contextoAba.capturar(); eu = ctx && ctx.userId || ''; } catch (e) {}
     const vistos = new Set();
@@ -24362,18 +24392,77 @@ const adendos = (() => {
       .filter(a => a && a._retificacao && a._retificacao.campos && !vistos.has(a.id) && vistos.add(a.id) &&
         minha(a) && quando(a) > tHead)
       .sort((a, b) => quando(a) - quando(b));
-    /* NADA SOME DO PAPEL POR UMA CORREÇÃO EM BRANCO.
-       Retificação feita com o formulário incompleto gravava campos vazios
-       (orientações, conclusão, assinante) e o documento impresso perdia o que
-       estava escrito. Aqui as retificações aceitas e as do próprio usuário
-       são reaplicadas sobre o original, e um valor vazio não apaga o que havia. */
-    const base = JSON.parse(JSON.stringify(rec));
-    delete base._retificadoEm; delete base._retificadoPor; delete base._retificacoes;
-    let v = base;
-    estado.aplicadas.concat(extras).forEach(a => {
-      v = adendos._fundirSemApagar(v, a._retificacao.campos);
-    });
-    return v;
+    return { estado, extras };
+  },
+  /* O RESUMO DO QUE MUDOU, EM PALAVRAS DE GENTE.
+     "Medicação Cefazolina: corrigida para 1 g EV", "Acesso venoso: corrigido
+     para 20G". Diz O QUE foi corrigido e o valor que vale — o valor antigo
+     não volta ao papel (a folha impressa nunca mostra o que foi substituído;
+     ele segue preservado no histórico e na versão original). Lista de
+     medicações é casada por nome; outras listas viram contagem; texto longo
+     vira "texto revisado". Curto de propósito: é um resumo ao lado da
+     assinatura, não o histórico inteiro. */
+  ROTULOS_LISTAS: { medicacoes: 'Medicação', sinais_vitais: 'Sinais vitais', eventos: 'Eventos', fluidos: 'Fluidos',
+    intercorrencias: 'Intercorrências', cirurgias_extra: 'Procedimentos', acessos: 'Acessos', _medsLista: 'Medicações em uso',
+    _procsExtra: 'Procedimentos', _procsRealizados: 'Procedimentos realizados', _labExtras: 'Exames', _seguimentos: 'Seguimento' },
+  GRUPOS_RESUMO: { tecnica: 'Técnica', ventilacao: 'Ventilação', monitorizacao: 'Monitorização', via_aerea: 'Via aérea',
+    transferencia: 'Transferência', cec: 'CEC', posicionamento: 'Posicionamento' },
+  resumoMudancas(antes, depois, max = 10, final = null) {
+    const out = [];
+    /* valor que VALE no documento: se uma retificação posterior trocou de
+       novo o mesmo campo, este resumo não repete o valor intermediário */
+    const noFinal = caminho => { let o = final || depois; for (const k of caminho) { if (!o || typeof o !== 'object') return undefined; o = o[k]; } return o; };
+    const curto = x => { const t = String(x == null ? '' : x).replace(/\s+/g, ' ').trim(); return !t ? '—' : (t.length > 48 ? t.slice(0, 47) + '…' : t); };
+    const med = m => [m.nome, [m.dose, m.unidade].filter(Boolean).join(' '), m.via].filter(Boolean).join(' ');
+    const norm = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+    const ehObj = x => x && typeof x === 'object' && !Array.isArray(x);
+    const visitar = (a, b, caminho) => {
+      const chaves = Array.from(new Set(Object.keys(ehObj(a) ? a : {}).concat(Object.keys(ehObj(b) ? b : {}))));
+      chaves.forEach(k => {
+        if (adendos._campoProtegido(k, caminho.length) || /^(assinatura|carimbo|dataurl)/i.test(k) || k === 'fluidos_calc') return;
+        const va = ehObj(a) ? a[k] : undefined, vb = ehObj(b) ? b[k] : undefined;
+        if (JSON.stringify(va == null ? '' : va) === JSON.stringify(vb == null ? '' : vb)) return;
+        if (Array.isArray(va) || Array.isArray(vb)) {
+          const la = (Array.isArray(va) ? va : []).filter(x => x && (typeof x !== 'object' || Object.values(x).some(v => String(v == null ? '' : v).trim())));
+          const lb = (Array.isArray(vb) ? vb : []).filter(x => x && (typeof x !== 'object' || Object.values(x).some(v => String(v == null ? '' : v).trim())));
+          const rot = adendos.ROTULOS_LISTAS[k] || adendos._rotuloCampo(k);
+          if (k === 'medicacoes' || k === '_medsLista') {
+            const usados = new Set();
+            const fin = (Array.isArray(noFinal(caminho.concat(k))) ? noFinal(caminho.concat(k)) : []);
+            const vale = m => !final || fin.some(f => f && norm(f.nome) === norm(m.nome) && med(f) === med(m) && (f.hora || '') === (m.hora || ''));
+            lb.forEach(m => {
+              const i = la.findIndex((x, j) => !usados.has(j) && norm(x.nome) === norm(m.nome) && (x.hora || '') === (m.hora || ''));
+              const j = i >= 0 ? i : la.findIndex((x, jj) => !usados.has(jj) && norm(x.nome) === norm(m.nome));
+              if (j < 0) { out.push(rot + ' incluída: ' + (vale(m) ? curto(med(m)) + (m.hora ? ' (' + m.hora + ')' : '') : curto(m.nome) + ' (ajustada depois)')); return; }
+              usados.add(j);
+              const x = la[j];
+              const semNome = y => [[y.dose, y.unidade].filter(Boolean).join(' '), y.via].filter(Boolean).join(' ');
+              if (med(x) !== med(m)) out.push(rot + ' ' + curto(m.nome) + (vale(m) ? ': corrigida para ' + curto(norm(x.nome) === norm(m.nome) ? semNome(m) : med(m)) : ': corrigida (ajustada de novo depois)'));
+              else if ((x.hora || '') !== (m.hora || '')) out.push(rot + ' ' + curto(m.nome) + (vale(m) ? ': horário corrigido para ' + curto(m.hora) : ': horário corrigido (ajustado de novo depois)'));
+              else if (JSON.stringify(x) !== JSON.stringify(m)) out.push(rot + ' ' + curto(m.nome) + ': detalhes ajustados');
+            });
+            la.forEach((x, j) => { if (!usados.has(j)) out.push(rot + ' retirada: ' + curto(x.nome)); });
+          } else if (la.length !== lb.length) {
+            out.push(rot + ': ' + (lb.length > la.length ? (lb.length - la.length) + ' registro(s) incluído(s)' : (la.length - lb.length) + ' registro(s) retirado(s)'));
+          } else {
+            out.push(rot + ': registros corrigidos');
+          }
+          return;
+        }
+        if (ehObj(va) || ehObj(vb)) { visitar(va, vb, caminho.concat(k)); return; }
+        const grupo = caminho.length ? (adendos.GRUPOS_RESUMO[caminho[0]] || '') : '';
+        const rotulo = (grupo && norm(grupo) !== norm(adendos._rotuloCampo(k)) ? grupo + ' · ' : '') + adendos._rotuloCampo(k);
+        const novo = String(vb == null ? '' : vb).trim();
+        const vigente = noFinal(caminho.concat(k));
+        if (final && String(vigente == null ? '' : vigente).trim() !== novo) out.push(rotulo + ': corrigido (ajustado de novo depois)');
+        else if (!novo) out.push(rotulo + ': removido');
+        else if (novo.length > 48 || String(va == null ? '' : va).length > 48) out.push(rotulo + ': texto revisado');
+        else out.push(rotulo + ': corrigido para ' + curto(novo));
+      });
+    };
+    try { visitar(antes || {}, depois || {}, []); } catch (e) {}
+    if (out.length > max) return out.slice(0, max).concat(['… e mais ' + (out.length - max) + ' alteração(ões)']);
+    return out;
   },
   _vazio(x) {
     return x == null || (typeof x === 'string' && !x.trim()) || (Array.isArray(x) && !x.length) ||
