@@ -25227,6 +25227,41 @@ await test('Paciente novo: nome igual ou PARECIDO aparece em lista para escolher
   await page.close();
 });
 
+await test('CEC: cada execução vira Início/Fim CEC na linha do tempo, faixa no gráfico e na legenda; editar num lado atualiza o outro', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    location.hash = '#anestesia'; await new Promise(res => setTimeout(res, 300));
+    try { anestesia.limparSilencioso(); } catch (e) {}
+    const tr = anestesia.cec.addTerapia({ tipo: anestesia.cec.TIPOS_TERAPIA[0] });
+    const ini = tr.querySelector('[name="cec_ter_ini[]"]'), fim = tr.querySelector('[name="cec_ter_fim[]"]');
+    ini.value = '09:10'; ini.dispatchEvent(new Event('input', { bubbles: true }));
+    fim.value = '10:25'; fim.dispatchEvent(new Event('input', { bubbles: true }));
+    const evIni = anestesia.eventos._linhaDoTipo('Início CEC'), evFim = anestesia.eventos._linhaDoTipo('Fim CEC');
+    out.eventos = !!evIni && !!evFim && evIni.querySelector('[name="evt_hora[]"]').value === '09:10' && evFim.querySelector('[name="evt_hora[]"]').value === '10:25';
+    out.descricao = /CEC/.test(evIni.querySelector('[name="evt_obs[]"]').value);
+    /* evento → execução */
+    const h = evFim.querySelector('[name="evt_hora[]"]'); h.value = '10:40'; anestesia.eventos._horaParaOrigem(evFim);
+    out.volta = fim.value === '10:40' && /1h 30min/.test(tr.querySelector('[name="cec_ter_dur[]"]').value);
+    /* execução → evento de novo, sem duplicar */
+    ini.value = '09:05'; ini.dispatchEvent(new Event('input', { bubbles: true }));
+    out.semDuplicar = anestesia.cec._linhasEvento('Início CEC').length === 1 && anestesia.eventos._linhaDoTipo('Início CEC').querySelector('[name="evt_hora[]"]').value === '09:05';
+    out.faixa = anestesia.graficoUI.PERIODOS.some(p => p.ini === 'Início CEC' && p.fim === 'Fim CEC');
+    /* gráfico impresso da versão finalizada desenha sem erro com os eventos */
+    const vit = [{ hora: '09:00', pas: 120, pad: 70, fc: 80 }, { hora: '10:30', pas: 110, pad: 60, fc: 75 }];
+    out.graficoPapel = /pp-grafico-img/.test(printPreview._graficoDaVersao(vit, [{ hora: '09:05', tipo: 'Início CEC' }, { hora: '10:40', tipo: 'Fim CEC' }]));
+    /* apagar a execução tira os eventos automáticos */
+    tr.remove(); anestesia.cec._calcTotal();
+    out.apagou = !anestesia.eventos._linhaDoTipo('Início CEC') && !anestesia.eventos._linhaDoTipo('Fim CEC');
+    return out;
+  });
+  assert(r.eventos && r.descricao, 'a execução cria os eventos Início/Fim CEC com descrição');
+  assert(r.volta && r.semDuplicar, 'editar num lado atualiza o outro, sem duplicar');
+  assert(r.faixa && r.graficoPapel, 'a CEC é faixa no gráfico da tela e do papel');
+  assert(r.apagou, 'apagar a execução tira os eventos automáticos');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
