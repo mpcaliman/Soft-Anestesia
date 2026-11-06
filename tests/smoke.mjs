@@ -25007,6 +25007,84 @@ await test('Solução polarizante é a da hipercalemia (glicose + insulina, sem 
   await page.close();
 });
 
+await test('Ficha retificada: imprime a assinatura de cada retificação com o resumo do que mudou, e a versão original continua imprimível', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    __smokeBindOrg('org-retif');
+    store.setList('anestesia', []);
+    const hoje = utils.hojeISO();
+    const meds = dose => [{ hora: '08:55', nome: 'Cefazolina', dose, unidade: 'g', via: 'EV', tipo: '', diluicao: '', velocidade: '', horaFim: '', observacao: '' }];
+    out.resumo = adendos.resumoMudancas({ medicacoes: meds('0,5'), procedimento: { hora_sala_saida: '10:42' } },
+      { medicacoes: meds('1').concat([{ hora: '09:10', nome: 'Ondansetrona', dose: '4', unidade: 'mg', via: 'EV' }]), procedimento: { hora_sala_saida: '10:50' } });
+    const rec = store.save('anestesia', {
+      paciente: { nome: 'Paciente Retificado' }, procedimento: { data: hoje, descricao: 'Herniorrafia', hora_sala_saida: '10:42' },
+      medicacoes: meds('0,5'), _finalizado: true,
+      _adendos: [{ id: 'ad-r1', texto: 'CORREÇÃO / RETIFICAÇÃO:\n• dose', motivo: 'correcao', autor: 'Dr. Corretor', data: '2026-11-06T13:00:00Z', _pushed: false,
+        _retificacao: { schema: 1, baseAdendoId: '', campos: { medicacoes: meds('1') } } }]
+    });
+    /* busca: marca e botão da original */
+    historico.abrir('anestesia');
+    await new Promise(res => setTimeout(res, 150));
+    const linha = (document.querySelector('#hist-tbody tr') || {}).textContent || '';
+    out.busca = /Retificada \(2 versões\)/.test(linha) && !!document.querySelector('#hist-tbody button[title^="Versão original"]');
+    modal.close();
+    /* impressão da versão vigente */
+    location.hash = '#anestesia'; await new Promise(res => setTimeout(res, 300));
+    anestesia.carregar(store.getById('anestesia', rec._id));
+    await new Promise(res => setTimeout(res, 300));
+    printPreview.abrir();
+    await new Promise(res => setTimeout(res, 300));
+    const vig = (document.getElementById('ppp') || {}).textContent || '';
+    out.vigente = /RETIFICAÇÃO 1/.test(vig) && /Dr\. Corretor/.test(vig) && /Medicação Cefazolina: corrigida para 1 g EV/.test(vig) && !/VERSÃO ORIGINAL/.test(vig);
+    out.semValorAntigo = !/0,5 g/.test(vig);
+    const posAssin = vig.indexOf('RETIFICAÇÃO 1');
+    out.depoisDoCorpo = posAssin > vig.indexOf('Herniorrafia');
+    /* PDF de texto (☁️ Salvar PDF na nuvem): o bloco vem junto */
+    {
+      const J = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+      const pdf = printPreview._gerarDocDeTexto(J, document.getElementById('ppp')).output();
+      out.pdf = /RETIFICA/.test(pdf) && /Cefazolina: corrigida para 1 g EV/.test(pdf) && /Dr\. Corretor/.test(pdf);
+    }
+    printPreview.fechar();
+    /* versão original */
+    printPreview._versaoOriginal = rec._id;
+    printPreview.abrir();
+    await new Promise(res => setTimeout(res, 300));
+    const org = (document.getElementById('ppp') || {}).textContent || '';
+    out.original = /VERSÃO ORIGINAL/.test(org) && !/RETIFICAÇÃO 1/.test(org);
+    {
+      const J = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+      const pdf = printPreview._gerarDocDeTexto(J, document.getElementById('ppp')).output();
+      out.pdfOriginal = /VERS.O ORIGINAL/.test(pdf) && !/RETIFICA..O 1/.test(pdf);
+    }
+    out.nomeOriginal = /Versao-Original/.test(printPreview._gerarNomeArquivo());
+    printPreview.fechar();
+    out.limpou = printPreview._versaoOriginal === null;
+    /* versão nova publicada com o app aberto */
+    const fOrig = window.fetch;
+    window.fetch = async () => ({ ok: true, json: async () => ({ csp: { buildToken: 'outra-versao' } }) });
+    const proto = location.protocol;
+    try {
+      out.semHttp = (await window.softVersao.conferir()) === false;   /* file:// nos testes: não confere */
+    } finally { window.fetch = fOrig; }
+    printPreview._falhouImpressao(new Error('Falha ao montar o documento de impressão (Arquivos de impressão de versões diferentes)'));
+    const aviso = document.getElementById('aviso-versao-nova');
+    out.aviso = !!aviso && /Recarregar/.test(aviso.textContent) && /atualizado/.test(aviso.textContent);
+    if (aviso) aviso.remove();
+    store.setList('anestesia', []);
+    return out;
+  });
+  assert(r.resumo.some(l => l === 'Medicação Cefazolina: corrigida para 1 g EV') && r.resumo.some(l => /Medicação incluída: Ondansetrona 4 mg EV/.test(l)) &&
+    r.resumo.some(l => /Hora sala saida: corrigido para 10:50/i.test(l)) && !r.resumo.some(l => /10:42|0,5/.test(l)), 'resumo em palavras, sem o valor antigo: ' + JSON.stringify(r.resumo));
+  assert(r.busca, 'a busca mostra "Retificada (2 versões)" e o botão da original');
+  assert(r.vigente && r.depoisDoCorpo && r.semValorAntigo, 'a impressão traz a retificação, quem corrigiu e o resumo, depois do corpo, sem o valor substituído');
+  assert(r.original && r.nomeOriginal && r.limpou, 'a versão original imprime com aviso e nome próprio, e não fica presa');
+  assert(r.pdf && r.pdfOriginal, 'no PDF da nuvem também: retificação com resumo e quem corrigiu; a original com o aviso');
+  assert(r.semHttp && r.aviso, 'erro de versões diferentes vira aviso com Recarregar');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

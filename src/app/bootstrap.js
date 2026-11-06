@@ -160,6 +160,53 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  /* VERSÃO NOVA PUBLICADA COM O APP ABERTO.
+     O app que ficou aberto (no celular, às vezes por dias) continua na versão
+     antiga, e a janela de impressão já vem da nova: o sistema recusa juntar
+     as duas ("arquivos de versões diferentes") e a impressão falha. Ao voltar
+     para o app, ele confere a versão publicada e, se mudou, oferece recarregar
+     — tudo o que foi salvo continua salvo. */
+  window.softVersao = {
+    _avisado: '',
+    async publicada() {
+      if (!/^https?:$/.test(location.protocol)) return '';
+      try {
+        const r = await fetch('build-info.json?t=' + Date.now(), { cache: 'no-store' });
+        if (!r.ok) return '';
+        const j = await r.json();
+        return (j && j.csp && j.csp.buildToken) || '';
+      } catch (e) { return ''; }
+    },
+    async conferir() {
+      const t = await window.softVersao.publicada();
+      if (!t || !window.SoftActions || window.SoftActions.isBuild(t)) return false;
+      if (window.softVersao._avisado !== t) { window.softVersao._avisado = t; window.softVersao.avisar(); }
+      return true;
+    },
+    recarregar() {
+      try { if (typeof state !== 'undefined' && state.dirty && !confirm('Há alterações não salvas nesta tela. Recarregar mesmo assim?')) return; } catch (e) {}
+      location.reload();
+    },
+    avisar(motivo) {
+      let el = document.getElementById('aviso-versao-nova');
+      if (!el) {
+        el = document.createElement('div'); el.id = 'aviso-versao-nova'; el.setAttribute('role', 'alert');
+        Object.assign(el.style, { position: 'fixed', left: '12px', right: '12px', bottom: '14px', zIndex: '100000',
+          background: '#1a2332', color: '#fff', borderRadius: '10px', padding: '12px 14px', display: 'flex', gap: '10px',
+          alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 4px 16px rgba(0,0,0,.35)', fontSize: '14px' });
+        const txt = document.createElement('span'); txt.id = 'aviso-versao-nova-txt';
+        const bt = document.createElement('button'); bt.type = 'button'; bt.textContent = '↻ Recarregar';
+        Object.assign(bt.style, { background: '#2e7d52', color: '#fff', border: '0', borderRadius: '8px', padding: '8px 12px', fontWeight: '700', flexShrink: '0' });
+        bt.addEventListener('click', () => window.softVersao.recarregar());
+        el.appendChild(txt); el.appendChild(bt); document.body.appendChild(el);
+      }
+      document.getElementById('aviso-versao-nova-txt').textContent = motivo ||
+        'O sistema foi atualizado. Recarregue para usar a versão nova — o que está salvo continua salvo.';
+    }
+  };
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) window.softVersao.conferir(); });
+  window.addEventListener('load', () => setTimeout(() => window.softVersao.conferir(), 4000));
+
   /* 3. Inicializa Anestesia (assinatura, linhas iniciais, data) */
   anestesia.signature.init();
   document.querySelector('#form-anestesia [name="data_anestesia"]').value = utils.hojeISO();
