@@ -1167,6 +1167,13 @@ ${TAG_CLOSE_HTML}`;
       const r = document.querySelector('#form-prescricao [name="modelo"]:checked');
       return printPreview.TIPOS_PRESCRICAO[(r && r.value) || 'simples'] || 'Receita';
     }
+    if (mod === 'documentos') {
+      /* a solicitação de exames não é "Documento" genérico na pasta */
+      const finalizado = printPreview._registroFinalizado(mod);
+      const r = document.querySelector('#form-documentos [name="modelo"]:checked');
+      const modelo = finalizado ? printPreview._vig(mod, finalizado).modelo : (r && r.value);
+      if (modelo === 'exames') return 'Solicitacao-Exames';
+    }
     return printPreview.TIPOS_ARQUIVO[mod] || 'Documento';
   },
 
@@ -3007,9 +3014,10 @@ ${TAG_CLOSE_HTML}`;
        documento podem ter chegado do cadastro depois de o texto ser montado.
        Texto editado à mão fica como está. */
     try { if (!printPreview._registroFinalizado('documentos')) documentos._syncDeclTexto(); } catch (e) {}
-    const d = printPreview._dadosDoFormulario('documentos');
+    const d = printPreview._dadosDoFormulario('documentos', () => documentos._dados());
     const modelo = d.modelo || 'atestado';
     const meta = `${utils.formatarData(d.data) || new Date().toLocaleDateString('pt-BR')}`;
+    if (modelo === 'exames') return printPreview._buildExames(d, meta);
     if (modelo === 'declaracao') {
       const texto = (d.decl_texto || '').trim() || prescricao._gerarTextoDeclaracao(d);
       return printPreview._docDeclaratorio('DECLARAÇÃO DE COMPARECIMENTO', meta, texto, d, 'Declaração de comparecimento');
@@ -3020,6 +3028,40 @@ ${TAG_CLOSE_HTML}`;
     }
     const texto = (d.atestado_texto || '').trim() || prescricao._gerarTextoAtestado(d);
     return printPreview._docDeclaratorio('ATESTADO MÉDICO', meta, texto, d, 'Atestado médico');
+  },
+  /* Solicitação de exames: identificação, convênio, a lista com o código
+     TUSS de cada exame, a indicação clínica e a assinatura. O CID só sai
+     com a autorização marcada (art. 76 do CEM). */
+  _buildExames(d, meta) {
+    const e = utils.escapeHTML;
+    const itens = (Array.isArray(d.exames_itens) ? d.exames_itens : []).filter(it => it && (it.codigo || it.nome));
+    const ident = `
+      <div class="pp-grid cols-3 pp-ident">
+        ${printPreview._fieldSempre('Paciente', d.nome)}
+        ${printPreview._field('Idade', d.idade)}
+        ${printPreview._field('CPF/RG', d.documento)}
+        ${printPreview._field('Convênio', d.convenio)}
+        ${printPreview._field('Carteirinha', d.carteirinha)}
+        ${printPreview._field('Caráter', d.exames_carater)}
+      </div>`;
+    const tabela = itens.length
+      ? '<table class="pp-table"><thead><tr><th style="width:24px">#</th><th style="width:96px">Código TUSS</th><th>Exame</th><th style="width:44px">Qtd</th></tr></thead><tbody>' +
+        itens.map((it, i) => `<tr><td>${i + 1}</td><td>${e(it.codigo || '—')}</td><td>${e(it.nome || '')}</td><td>${e(String(it.qtd || 1))}</td></tr>`).join('') +
+        '</tbody></table>'
+      : '<p class="pp-med-vazio">Nenhum exame.</p>';
+    const cid = d.exames_cid_incluir && d.exames_cid ? printPreview._field('CID-10', d.exames_cid) : '';
+    const indicacao = (d.exames_indicacao || '').trim()
+      ? `<p class="pp-orient">${e(d.exames_indicacao)}</p>` : '';
+    const localData = `<div style="margin-top:22px;font-size:10.5pt;text-align:right">${e(d.local || '')}${d.local ? ', ' : ''}${utils.formatarData(d.data) || new Date().toLocaleDateString('pt-BR')}</div>`;
+    const assinatura = `
+      <div class="pp-signature-area" style="margin-top:36px">
+        ${printPreview._assinaturaDesenhada(d.assinatura_dataurl || d.sig_dataurl, d.profissional || 'Profissional', d.crm, 'prof', d)}
+      </div>`;
+    return printPreview._header('SOLICITAÇÃO DE EXAMES', meta) +
+      printPreview._section('Identificação', ident) +
+      printPreview._section('Exames solicitados', tabela) +
+      printPreview._section('Indicação clínica', indicacao + cid) +
+      localData + assinatura + printPreview._footer('Solicitação de exames');
   },
   _docDeclaratorio(titulo, meta, texto, d, rodape) {
     const corpo = `<div style="font-size:11.5pt;line-height:1.9;text-align:justify;margin:26px 4px 0;white-space:pre-wrap">${utils.escapeHTML(texto)}</div>`;

@@ -1421,6 +1421,9 @@ input.orc-ro {
   font-size: .82rem; text-align: center; width: 100%; cursor: default;
 }
 .field.orc-col-ref { border-radius: 6px; padding: 6px 8px; }
+/* Financeiro: porte da linha com o tipo (Cir/AN) ao lado */
+.fin-porte-cel { display: inline-flex; gap: 4px; align-items: center; }
+.fin-porte-cel select { width: 54px; padding-left: 4px; padding-right: 2px; font-size: .8rem; }
 /* Toggle porte anestésico ↔ cirúrgico no orçamento (controle segmentado) */
 .orc-toggle-porte {
   display: inline-flex; border: 1px solid var(--border); border-radius: 10px;
@@ -4904,7 +4907,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-11-06b</b><br>
+    v7.1 · build <b id="build-tag">2026-11-12b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -5567,6 +5570,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
               <button type="button" class="btn btn-sm" onclick="documentos.abrir('atestado','pre')">📝 Atestado</button>
               <button type="button" class="btn btn-sm" onclick="documentos.abrir('declaracao','pre')">🕐 Declaração de comparecimento</button>
               <button type="button" class="btn btn-sm" onclick="documentos.abrir('laudo','pre')">🧾 Laudo (INSS/empresa/plano)</button>
+              <button type="button" class="btn btn-sm" onclick="documentos.abrir('exames','pre')">🧪 Solicitação de exames</button>
             </div>
           </div>
         </div>
@@ -5840,6 +5844,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
               <button type="button" class="btn btn-sm" onclick="documentos.abrir('atestado','consulta')">📝 Atestado</button>
               <button type="button" class="btn btn-sm" onclick="documentos.abrir('declaracao','consulta')">🕐 Declaração de comparecimento</button>
               <button type="button" class="btn btn-sm" onclick="documentos.abrir('laudo','consulta')">🧾 Laudo (INSS/empresa/plano)</button>
+              <button type="button" class="btn btn-sm" onclick="documentos.abrir('exames','consulta')">🧪 Solicitação de exames</button>
             </div>
           </div>
         </div>
@@ -8341,7 +8346,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
   <form id="form-documentos" class="container" autocomplete="off" onsubmit="event.preventDefault(); documentos.salvar();">
     <div class="page-title">
       <h1>Documentos</h1>
-      <span class="subtitle">Atestados, declarações de comparecimento e laudos médicos</span>
+      <span class="subtitle">Atestados, declarações de comparecimento, laudos médicos e solicitação de exames</span>
     </div>
 
     <div class="doc-status" id="docstatus-documentos">
@@ -8368,6 +8373,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
               <label class="radio-chip"><input type="radio" name="modelo" value="atestado" checked onchange="documentos.atualizarTipo()"> 📝 Atestado médico</label>
               <label class="radio-chip"><input type="radio" name="modelo" value="declaracao" onchange="documentos.atualizarTipo()"> 🕐 Declaração de comparecimento</label>
               <label class="radio-chip"><input type="radio" name="modelo" value="laudo" onchange="documentos.atualizarTipo()"> 🧾 Laudo médico</label>
+              <label class="radio-chip"><input type="radio" name="modelo" value="exames" onchange="documentos.atualizarTipo()"> 🧪 Solicitação de exames</label>
             </div>
           </div>
           <div class="field col-6 required"><label>Nome do paciente <span class="req">*</span></label>
@@ -8469,6 +8475,53 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
             <textarea name="laudo_quadro" rows="3" placeholder="Descreva o quadro clínico, tratamento e a repercussão funcional que justifica o laudo…" oninput="documentos._syncLaudoTexto()"></textarea></div>
           <div class="field col-12"><label>Texto do laudo <small style="color:var(--text-mute)">(gerado automaticamente — pode editar)</small></label>
             <textarea name="laudo_texto" rows="5" placeholder="Preencha os campos acima para gerar o texto…" oninput="this.dataset.auto=''"></textarea></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SOLICITAÇÃO DE EXAMES (códigos TUSS) -->
+    <section class="card" id="card-doc-exames" style="display:none">
+      <div class="card-header" onclick="ui.toggleCard(this)">
+        <div class="card-title-wrap"><span class="card-num">2</span><h2>Solicitação de exames<small>Códigos da Terminologia TUSS (Tabela 22 da ANS) — confira a cobertura no plano do paciente</small></h2></div>
+        <div class="card-actions"><span class="toggle-icon">▾</span></div>
+      </div>
+      <div class="card-body">
+        <div class="grid">
+          <div class="field col-4"><label>Convênio / plano</label><input type="text" name="convenio" placeholder="Particular, Unimed…"></div>
+          <div class="field col-4"><label>Carteirinha <small style="color:var(--text-mute)">(opcional)</small></label><input type="text" name="carteirinha"></div>
+          <div class="field col-4"><label>Caráter</label>
+            <select name="exames_carater"><option value="Eletivo">Eletivo</option><option value="Urgência">Urgência</option></select>
+          </div>
+        </div>
+        <div class="dyn-table-wrap" style="margin-top:8px">
+          <table class="dyn" id="tab-doc-exames">
+            <thead><tr>
+              <th style="width:130px">Código TUSS</th>
+              <th style="min-width:240px">Exame</th>
+              <th style="width:64px">Qtd</th>
+              <th class="col-rm">×</th>
+            </tr></thead>
+            <tbody id="doc-exames-body"></tbody>
+          </table>
+        </div>
+        <div class="table-actions">
+          <button type="button" class="btn btn-primary btn-sm" onclick="documentos.exames.add()">+ Adicionar exame</button>
+          <button type="button" class="btn btn-sm" onclick="documentos.exames.pacote('preop')" title="Hemograma, TAP, TTPA, glicose, ureia, creatinina, sódio, potássio, ECG e RX de tórax">🩺 Pacote pré-operatório</button>
+          <button type="button" class="btn btn-sm" onclick="documentos.exames.limparLista()">🗑️ Limpar lista</button>
+        </div>
+        <p style="font-size:.78rem;color:var(--text-mute);margin:6px 0 0">Digite o nome ou o código do exame. Exame que não estiver na lista pode ser digitado à mão (código e nome) — fica guardado para a próxima vez.</p>
+        <div class="grid" style="margin-top:10px">
+          <div class="field col-12"><label>Indicação clínica</label>
+            <textarea name="exames_indicacao" rows="2" placeholder="Ex.: avaliação pré-operatória para colecistectomia videolaparoscópica"></textarea></div>
+          <div class="field col-12">
+            <label class="radio-chip" style="display:inline-flex"><input type="checkbox" name="exames_cid_incluir" onchange="documentos._toggleCID('exames')"> Incluir CID-10 (com autorização do paciente)</label>
+          </div>
+          <div class="field col-6" id="doc-exames-cid-group" style="display:none"><label>CID-10 <small style="color:var(--text-mute)">(digite código ou doença)</small></label>
+            <div class="cid-wrap">
+              <input type="text" name="exames_cid" autocomplete="off" placeholder="Ex.: K80.2 ou colelitíase" oninput="documentos._cidBuscar(this,'exames_cid')" onfocus="documentos._cidBuscar(this,'exames_cid')" onblur="documentos._cidBlur('exames_cid')">
+              <div class="cid-suggest" id="cid-sug-exames_cid" style="display:none"></div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -8791,7 +8844,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
               <thead><tr>
                 <th style="width:130px">Código TUSS</th>
                 <th style="min-width:240px">Procedimento (CBHPM)</th>
-                <th style="width:60px">Porte</th>
+                <th style="width:118px" title="Cir = porte cirúrgico (1A–14C); AN = porte anestésico (AN 1–8). Trocar refaz o valor unitário pela tabela daquele tipo.">Porte</th>
                 <th style="width:58px" title="Número de vezes que o código foi executado">Qtd ×</th>
                 <th style="width:98px" title="Lado operado. Em branco quando não se aplica — o convênio glosa procedimento lateral sem o lado declarado">Lado</th>
                 <th style="width:70px" title="Hierarquia: o código de MAIOR PORTE é o principal (100%); os demais da MESMA VIA entram 50%; VIA DIFERENTE entra 70% (ajuste manual). Use ⚖️ Classificar graus para aplicar automaticamente.">Grau</th>
@@ -28553,6 +28606,43 @@ const CID10 = [
   ['N40','Hiperplasia da próstata'],['C50.9','Neoplasia maligna da mama'],['D25.9','Leiomioma do útero']
 ];
 
+/* ============================================================================
+   EXAMES — Terminologia TUSS (Tabela 22 da ANS), recorte do dia a dia do
+   anestesiologista. Cada código foi conferido em mais de uma tabela publicada
+   (operadoras e catálogos TUSS) antes de entrar aqui: código errado numa guia
+   é glosa certa. O que não estiver na lista ele digita — e o sistema guarda
+   para a próxima vez (sem dado de paciente: só código e nome do exame).
+============================================================================ */
+const EXAMES_TUSS = [
+  ['40304361', 'Hemograma com contagem de plaquetas ou frações', 'hemograma completo hmg plaquetas'],
+  ['40304590', 'Tempo de protrombina (TAP) — determinação', 'tp tap inr rni coagulograma'],
+  ['40304639', 'Tempo de tromboplastina parcial ativada (TTPA) — determinação', 'ttpa ttpa kptt coagulograma'],
+  ['40304264', 'Fibrinogênio, teste funcional — dosagem', 'fibrinogenio coagulacao'],
+  ['40304299', 'Grupo sanguíneo ABO e fator Rh (inclui Du) — determinação', 'tipagem sanguinea abo rh'],
+  ['40302040', 'Glicose — pesquisa e/ou dosagem', 'glicemia jejum'],
+  ['40302733', 'Hemoglobina glicada (fração A1c)', 'hba1c a1c diabetes'],
+  ['40302580', 'Ureia — pesquisa e/ou dosagem', 'ureia funcao renal'],
+  ['40301630', 'Creatinina — pesquisa e/ou dosagem', 'creatinina funcao renal'],
+  ['40302423', 'Sódio — pesquisa e/ou dosagem', 'sodio na eletrolitos'],
+  ['40302318', 'Potássio — pesquisa e/ou dosagem', 'potassio k eletrolitos'],
+  ['40302237', 'Magnésio — pesquisa e/ou dosagem', 'magnesio mg eletrolitos'],
+  ['40301400', 'Cálcio — pesquisa e/ou dosagem', 'calcio eletrolitos'],
+  ['40302504', 'Transaminase oxalacética (TGO/AST) — pesquisa e/ou dosagem', 'tgo ast funcao hepatica'],
+  ['40302512', 'Transaminase pirúvica (TGP/ALT) — pesquisa e/ou dosagem', 'tgp alt funcao hepatica'],
+  ['40301222', 'Albumina — pesquisa e/ou dosagem', 'albumina nutricional'],
+  ['40316521', 'Hormônio tireoestimulante (TSH) — pesquisa e/ou dosagem', 'tsh tireoide'],
+  ['40316491', 'T4 livre — pesquisa e/ou dosagem', 't4 livre tireoide'],
+  ['40311210', 'Urina — rotina (caracteres físicos, elementos anormais e sedimentoscopia)', 'eas urina tipo 1 sumario'],
+  ['40302016', 'Gasometria (pH, pCO2, SaO2, pO2, excesso de base)', 'gasometria arterial'],
+  ['40101010', 'ECG convencional de até 12 derivações', 'eletrocardiograma ecg'],
+  ['40805026', 'RX — tórax, 2 incidências (PA e perfil)', 'raio x torax radiografia'],
+  ['40901106', 'Ecodopplercardiograma transtorácico', 'ecocardiograma eco tt']
+];
+/* Pacotes de um clique. Só códigos do catálogo acima. */
+const EXAMES_PACOTES = {
+  preop: ['40304361', '40304590', '40304639', '40302040', '40302580', '40301630', '40302423', '40302318', '40101010', '40805026']
+};
+
 const documentos = {
   formId: 'form-documentos',
   _linkPendente: null,
@@ -28566,6 +28656,7 @@ const documentos = {
     show('card-doc-atestado', modelo === 'atestado');
     show('card-doc-declaracao', modelo === 'declaracao');
     show('card-doc-laudo', modelo === 'laudo');
+    show('card-doc-exames', modelo === 'exames');
     let banner = '';
     if (modelo === 'atestado') {
       banner = '📝 Atestado médico: informe o período de afastamento. O CID-10 só pode constar com autorização expressa do paciente (art. 76 do Código de Ética Médica).';
@@ -28576,6 +28667,10 @@ const documentos = {
     } else if (modelo === 'laudo') {
       banner = '🧾 Laudo médico: descreva o quadro clínico e a finalidade (INSS, empresa, plano de saúde). O CID-10 só pode constar com autorização do paciente.';
       documentos._toggleCID('laudo'); documentos._syncLaudoTexto();
+    } else if (modelo === 'exames') {
+      banner = '🧪 Solicitação de exames: escolha os exames pelo nome ou pelo código TUSS. O CID-10 só pode constar com autorização do paciente.';
+      documentos._toggleCID('exames');
+      if (!document.querySelector('#doc-exames-body tr')) documentos.exames.add();
     }
     if (banner) ui.mostrarBanner('banner-documentos', banner, 'info'); else ui.fecharBanner('banner-documentos');
   },
@@ -28629,7 +28724,8 @@ const documentos = {
     const el = f && f.querySelector('[name="' + campo + '"]');
     if (el && c) el.value = c[0] + ' — ' + c[1];
     const box = document.getElementById('cid-sug-' + campo); if (box) { box.style.display = 'none'; box.innerHTML = ''; }
-    if (campo === 'atestado_cid') documentos._syncAtestadoTexto(); else documentos._syncLaudoTexto();
+    if (campo === 'atestado_cid') documentos._syncAtestadoTexto();
+    else if (campo === 'laudo_cid') documentos._syncLaudoTexto();
     try { markDirty(); } catch (e) {}
   },
   _cidBlur(campo) {
@@ -28639,6 +28735,7 @@ const documentos = {
   novo() {
     if (state.dirty && !confirm('Descartar alterações?')) return;
     utils.clearForm('form-documentos');
+    documentos.exames.restaurar([]);
     const d = document.querySelector('#form-documentos [name="data"]'); if (d) d.value = utils.hojeISO();
     const r = document.querySelector('#form-documentos [name="modelo"][value="atestado"]'); if (r) r.checked = true;
     documentos._linkPendente = null; documentos._origemVolta = null;
@@ -28652,7 +28749,11 @@ const documentos = {
   salvar(opts = {}) {
     const f = document.getElementById('form-documentos');
     if (!utils.validar('form-documentos')) { toast('Informe o nome do paciente', 'warn'); return; }
-    const data = utils.formData('form-documentos');
+    const data = documentos._dados();
+    if (data.modelo === 'exames') {
+      if (!data.exames_itens.length) { toast('Inclua pelo menos um exame na solicitação.', 'warn'); return; }
+      documentos.exames.lembrarExtras(data.exames_itens);
+    }
     /* Documento não tem etapa de "finalizar": salvar já é o ato final. */
     if (!opts._dupOk &&
         duplicados.perguntar('documentos', data, () => documentos.salvar(Object.assign({}, opts, { _dupOk: true })))) return;
@@ -28679,6 +28780,7 @@ const documentos = {
     if (!h) { h = document.createElement('input'); h.type = 'hidden'; h.name = '_id'; f.appendChild(h); }
     h.value = item._id || '';
     documentos._restaurarModelo(item);
+    documentos.exames.restaurar(item.exames_itens);
     documentos.atualizarTipo();
     setTimeout(() => { try { assinatura.restaurar('sig-documentos', 'form-documentos'); } catch (e) {} }, 60);
     try { ui.atualizarDocStatus('documentos', item); } catch (e) {}
@@ -28698,11 +28800,12 @@ const documentos = {
   limpar() {
     if (!confirm('Limpar todos os campos?')) return;
     utils.clearForm('form-documentos');
+    documentos.exames.restaurar([]);
     try { ui.atualizarDocStatus('documentos', null); } catch (e) {}
     documentos.atualizarTipo();
   },
   exportar() {
-    const data = utils.formData('form-documentos');
+    const data = documentos._dados();
     const nome = (data.nome || 'paciente').replace(/[^\w\s-]/g, '').replace(/\s+/g, '_').slice(0, 30);
     utils.download('documento_' + nome + '_' + utils.hojeISO() + '.json', JSON.stringify(data, null, 2));
     toast('JSON exportado');
@@ -28718,6 +28821,7 @@ const documentos = {
       try {
         const f = document.getElementById('form-documentos'); if (!f) return;
         utils.clearForm('form-documentos');
+        documentos.exames.restaurar([]);
         try { assinatura.limpar('sig-documentos'); } catch (e) {}
         ['atestado_texto', 'decl_texto', 'laudo_texto'].forEach(n => {
           const el = f.querySelector('[name="' + n + '"]'); if (el) { el.value = ''; el.dataset.auto = '1'; }
@@ -28748,6 +28852,126 @@ const documentos = {
       } catch (e) { console.error(e); }
     }, 260);
   },
+  /* Formulário + a lista de exames (as linhas da tabela não entram no
+     formData: são campos repetidos, coletados aqui). */
+  _dados() {
+    const data = utils.formData('form-documentos');
+    data.exames_itens = documentos.exames.coletar();
+    return data;
+  },
+
+  /* ===== SOLICITAÇÃO DE EXAMES ===== */
+  exames: {
+    CHAVE_EXTRAS: 'soft_exames_extras_v1',
+    _so(c) { return String(c || '').replace(/\D/g, ''); },
+    _extras() {
+      try { const v = JSON.parse(localStorage.getItem(documentos.exames.CHAVE_EXTRAS) || '[]'); return Array.isArray(v) ? v : []; }
+      catch (e) { return []; }
+    },
+    catalogo() {
+      const base = EXAMES_TUSS.map(e => ({ codigo: e[0], nome: e[1], alias: e[2] || '', proprio: false }));
+      const ja = new Set(base.map(e => e.codigo));
+      documentos.exames._extras().forEach(e => {
+        const c = documentos.exames._so(e.codigo);
+        if (c && e.nome && !ja.has(c)) { ja.add(c); base.push({ codigo: c, nome: String(e.nome), alias: '', proprio: true }); }
+      });
+      return base;
+    },
+    achar(codigo) {
+      const c = documentos.exames._so(codigo);
+      return c ? documentos.exames.catalogo().find(e => e.codigo === c) || null : null;
+    },
+    /* Exame digitado à mão (código + nome) vira opção da próxima vez. Só o
+       catálogo, nunca dado do paciente. */
+    lembrarExtras(itens) {
+      try {
+        const base = new Set(EXAMES_TUSS.map(e => e[0]));
+        const extras = documentos.exames._extras();
+        let mudou = false;
+        (itens || []).forEach(it => {
+          const c = documentos.exames._so(it.codigo);
+          if (!c || !it.nome || base.has(c)) return;
+          const i = extras.findIndex(e => documentos.exames._so(e.codigo) === c);
+          if (i < 0) { extras.push({ codigo: c, nome: it.nome }); mudou = true; }
+          else if (extras[i].nome !== it.nome) { extras[i].nome = it.nome; mudou = true; }
+        });
+        if (mudou) localStorage.setItem(documentos.exames.CHAVE_EXTRAS, JSON.stringify(extras.slice(-300)));
+      } catch (e) {}
+    },
+    add(dados = {}) {
+      const tbody = document.getElementById('doc-exames-body');
+      if (!tbody) return null;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td data-label="Código TUSS"><input type="text" name="exm_codigo[]" inputmode="numeric" value="${utils.escapeAttr(dados.codigo || '')}" placeholder="ex.: 40304361" oninput="documentos.exames._onCodigo(this)"></td>
+        <td data-label="Exame"><input type="text" name="exm_nome[]" value="${utils.escapeAttr(dados.nome || '')}" placeholder="Digite o nome do exame" oninput="markDirty()"></td>
+        <td data-label="Qtd"><input type="number" name="exm_qtd[]" min="1" step="1" value="${utils.escapeAttr(dados.qtd || 1)}" style="width:52px" oninput="markDirty()"></td>
+        <td class="col-rm"><button type="button" class="btn-rm" onclick="this.closest('tr').remove(); markDirty();" title="Remover">✕</button></td>`;
+      tbody.appendChild(tr);
+      try {
+        const nomeEl = tr.querySelector('[name="exm_nome[]"]');
+        autocomplete.attach(nomeEl,
+          () => documentos.exames.catalogo().map(e => ({ value: e.codigo, label: e.nome, meta: e.codigo + ' ' + e.alias + (e.proprio ? ' · digitado antes' : '') })),
+          it => {
+            const e = documentos.exames.achar(it.value);
+            if (!e) return;
+            tr.querySelector('[name="exm_codigo[]"]').value = e.codigo;
+            nomeEl.value = e.nome;
+            markDirty();
+          });
+      } catch (e) {}
+      try { markDirty(); } catch (e) {}
+      return tr;
+    },
+    _onCodigo(input) {
+      const tr = input.closest('tr');
+      const e = documentos.exames.achar(input.value);
+      const nomeEl = tr && tr.querySelector('[name="exm_nome[]"]');
+      if (e && nomeEl && !nomeEl.value.trim()) nomeEl.value = e.nome;
+      markDirty();
+    },
+    pacote(qual) {
+      const codigos = EXAMES_PACOTES[qual] || [];
+      const tbody = document.getElementById('doc-exames-body');
+      if (!tbody) return;
+      const presentes = new Set(Array.from(tbody.querySelectorAll('[name="exm_codigo[]"]')).map(el => documentos.exames._so(el.value)));
+      /* linha em branco deixada pelo "adicionar" não fica no meio da lista */
+      Array.from(tbody.querySelectorAll('tr')).forEach(tr => {
+        const c = tr.querySelector('[name="exm_codigo[]"]').value.trim(), n = tr.querySelector('[name="exm_nome[]"]').value.trim();
+        if (!c && !n) tr.remove();
+      });
+      let n = 0;
+      codigos.forEach(c => {
+        if (presentes.has(c)) return;
+        const e = documentos.exames.achar(c);
+        if (e) { documentos.exames.add({ codigo: e.codigo, nome: e.nome }); n++; }
+      });
+      toast(n ? '🩺 ' + n + ' exame(s) do pacote pré-operatório incluído(s) — retire o que não precisar.' : 'Os exames do pacote já estão na lista.');
+    },
+    limparLista() {
+      const tbody = document.getElementById('doc-exames-body');
+      if (!tbody || !tbody.querySelector('tr')) return;
+      if (!confirm('Retirar todos os exames da lista?')) return;
+      tbody.innerHTML = '';
+      documentos.exames.add();
+    },
+    coletar() {
+      const out = [];
+      document.querySelectorAll('#doc-exames-body tr').forEach(tr => {
+        const q = n => ((tr.querySelector('[name="' + n + '[]"]') || {}).value || '').trim();
+        const codigo = documentos.exames._so(q('exm_codigo')), nome = q('exm_nome');
+        if (!codigo && !nome) return;
+        out.push({ codigo, nome, qtd: Math.max(1, parseInt(q('exm_qtd'), 10) || 1) });
+      });
+      return out;
+    },
+    restaurar(itens) {
+      const tbody = document.getElementById('doc-exames-body');
+      if (tbody) tbody.innerHTML = '';
+      (Array.isArray(itens) ? itens : []).forEach(it => documentos.exames.add(it));
+    }
+  },
+
   voltar() {
     const destino = documentos._origemVolta || (documentos._linkPendente && documentos._linkPendente.mod) || 'consulta';
     const b = document.getElementById('btn-voltar-documentos'); if (b) b.style.display = 'none';
@@ -32107,7 +32331,7 @@ const logoUsuario = {
   }
 };
 
-const MEDICAMENTOS_ANEST = [["Azul de metileno", "4% solução injetável 1 ml", "Agente diagnóstico"], ["Dexmedetomidina", "100 mcg/ml solução injetável 2 ml", "Agonista alfa-2 adrenérgico"], ["Clonidina", "0,150 mg comprimido", "Agonista alfa-2 adrenérgico"], ["Clonidina", "0,150 mg/ml solução injetável 1 ml", "Agonista alfa-2 adrenérgico"], ["Dipirona sódica", "500 mg comprimido", "Analgésico, antipirético"], ["Dipirona sódica", "500 mg/ml solução injetável 2 ml", "Analgésico, antipirético"], ["Dipirona sódica", "500 mg/ml solução injetável 5 ml", "Analgésico, antipirético"], ["Dipirona sódica", "500 mg/ml solução oral", "Analgésico, antipirético"], ["Paracetamol", "500 mg comprimido", "Analgésico, antipirético"], ["Paracetamol", "200 mg/ml solução oral", "Analgésico, antipirético"], ["Paracetamol + Codeína (C1)", "500 mg + 30 mg comprimido", "Analgésico narcótico"], ["Fentanila (A1)", "0,05 mg/ml solução injetável 10 ml", "Analgésico narcótico"], ["Fentanila (A1)", "0,05 mg/ml solução injetável 2 ml", "Analgésico narcótico"], ["Morfina (A1)", "10 mg comprimido", "Analgésico narcótico"], ["Morfina (A1)", "1 mg/ml solução injetável 2 ml", "Analgésico narcótico"], ["Morfina (A1)", "0,2 mg/ml solução injetável 1 ml", "Analgésico narcótico"], ["Nalbufina (C1)", "10 mg/ml solução injetável 1 ml", "Analgésico narcótico"], ["Petidina (A1)", "50 mg/ml solução injetável 2 ml", "Analgésico narcótico"], ["Remifentanila (A1)", "2 mg pó liofilizado/injetável", "Analgésico narcótico"], ["Sufentanila (A1)", "5 mcg/ml solução injetável 2 ml", "Analgésico narcótico"], ["Tramadol (C1)", "100 mg/ml solução oral 10 ml", "Analgésico narcótico"], ["Tramadol (C1)", "50 mg/ml solução injetável 1 ml", "Analgésico narcótico"], ["Cetamina (C1)", "50 mg/ml solução injetável 10 ml", "Anestésico geral"], ["Cetamina (C1)", "50 mg/ml solução injetável 2 ml", "Anestésico geral"], ["Etomidato (C1)", "2 mg/ml solução injetável 10 ml", "Anestésico geral"], ["Propofol (C1)", "10 mg/ml emulsão injetável 20 ml", "Anestésico geral"], ["Propofol (C1)", "10 mg/ml emulsão injetável 50 ml", "Anestésico geral"], ["Sevoflurano (C1)", "solução inalatória 100 ml", "Anestésico geral"], ["Tiopental sódico (B1)", "500 mg pó liofilizado/injetável", "Anestésico geral"], ["Bupivacaína", "0,5% solução injetável 20 ml", "Anestésico local"], ["Bupivacaína isobárica", "0,5% solução injetável 4 ml", "Anestésico local"], ["Bupivacaína hiperbárica + glicose", "0,5% + 8% solução injetável 4 ml", "Anestésico local"], ["Levobupivacaína", "0,5% solução injetável 20 ml", "Anestésico local"], ["Lidocaína", "2% solução injetável 5 ml", "Anestésico local"], ["Lidocaína", "2% solução injetável 20 ml", "Anestésico local"], ["Lidocaína + Epinefrina", "2% + 1:200.000 solução injetável 20 ml", "Anestésico local"], ["Ropivacaína", "1% solução injetável 20 ml", "Anestésico local"], ["Lidocaína geleia", "2% geleia 30 g", "Anestésico tópico"], ["Lidocaína spray", "10% spray 50 ml", "Anestésico tópico"], ["Proximetacaína (C1)", "0,5% solução oftálmica 5 ml", "Anestésico ocular"], ["Clonazepam (B1)", "2 mg comprimido", "Ansiolítico/sedativo"], ["Clonazepam (B1)", "2,5 mg/ml solução oral 20 ml", "Ansiolítico/sedativo"], ["Diazepam (B1)", "5 mg comprimido", "Ansiolítico/sedativo"], ["Diazepam (B1)", "5 mg/ml solução injetável 2 ml", "Ansiolítico/sedativo"], ["Lorazepam (B1)", "2 mg comprimido", "Ansiolítico/sedativo"], ["Midazolam (B1)", "15 mg comprimido", "Hipnótico"], ["Midazolam (B1)", "1 mg/ml solução injetável 5 ml", "Hipnótico"], ["Midazolam (B1)", "5 mg/ml solução injetável 3 ml", "Hipnótico"], ["Midazolam (B1)", "2 mg/ml suspensão oral 10 ml", "Hipnótico"], ["Losartana", "50 mg comprimido", "Antagonista da angiotensina II"], ["Captopril", "12,5 mg comprimido", "Anti-hipertensivo / IECA"], ["Captopril", "25 mg comprimido", "Anti-hipertensivo / IECA"], ["Enalapril", "10 mg comprimido", "IECA"], ["Nitroprussiato de sódio", "50 mg pó liofilizado/injetável", "Anti-hipertensivo"], ["Isossorbida mononitrato", "10 mg/ml solução injetável 1 ml", "Antianginoso"], ["Nitroglicerina", "5 mg/ml solução injetável 10 ml", "Antianginoso / vasodilatador"], ["Verapamil", "2,5 mg/ml solução injetável 2 ml", "Antianginoso / BCC"], ["Adenosina", "3 mg/ml solução injetável 2 ml", "Antiarrítmico"], ["Amiodarona", "50 mg/ml solução injetável 3 ml", "Antiarrítmico"], ["Esmolol", "10 mg/ml solução injetável 10 ml", "Antiarrítmico / betabloqueador"], ["Esmolol", "250 mg/ml solução injetável 10 ml", "Antiarrítmico / betabloqueador"], ["Metoprolol", "1 mg/ml solução injetável 5 ml", "Antiarrítmico / betabloqueador"], ["Enoxaparina", "20 mg/0,2 ml seringa preenchida", "Anticoagulante"], ["Enoxaparina", "40 mg/0,4 ml seringa preenchida", "Anticoagulante"], ["Heparina sódica", "5000 UI/ml solução injetável 0,25 ml", "Anticoagulante"], ["Heparina sódica", "5000 UI/ml solução injetável 5 ml", "Anticoagulante"], ["Atropina", "0,25 mg/ml solução injetável 1 ml", "Anticolinérgico, antissecretor"], ["Neostigmina", "0,5 mg/ml solução injetável 1 ml", "Anticolinesterásico"], ["Flumazenil (C1)", "0,1 mg/ml solução injetável 5 ml", "Antídoto"], ["Naloxona (C1)", "0,4 mg/ml solução injetável 1 ml", "Antídoto"], ["Protamina", "5000 UI solução injetável 5 ml", "Antídoto"], ["Dimenidrato + Vitamina B6 + Glicose", "solução injetável 10 ml", "Antiemético, antivertiginoso"], ["Bromoprida", "5 mg/ml solução injetável 2 ml", "Antiemético, procinético"], ["Metoclopramida", "5 mg/ml solução injetável 2 ml", "Antiemético, procinético"], ["Ondansetrona", "2 mg/ml solução injetável 4 ml", "Antiemético, procinético"], ["Hioscina (Escopolamina butilbrometo)", "20 mg/ml solução injetável 1 ml", "Antiespasmódico"], ["Prometazina", "25 mg/ml solução injetável 2 ml", "Antihistamínico"], ["Dexametasona", "4 mg/ml solução injetável 2,5 ml", "Anti-inflamatório (corticoide)"], ["Hidrocortisona", "100 mg pó liofilizado/injetável", "Anti-inflamatório (corticoide)"], ["Hidrocortisona", "500 mg pó liofilizado/injetável", "Anti-inflamatório (corticoide)"], ["Metilprednisolona", "125 mg pó liofilizado/injetável", "Anti-inflamatório (corticoide)"], ["Metilprednisolona", "500 mg pó liofilizado/injetável", "Anti-inflamatório (corticoide)"], ["Triancinolona", "20 mg/ml solução injetável 5 ml", "Anti-inflamatório (corticoide)"], ["Cetoprofeno", "100 mg pó liofilizado/injetável", "AINE"], ["Diclofenaco sódico", "25 mg/ml solução injetável 3 ml", "AINE"], ["Clorpromazina (C1)", "5 mg/ml solução injetável 5 ml", "Antipsicótico"], ["Haloperidol (C1)", "5 mg/ml solução injetável 1 ml", "Antipsicótico"], ["Haloperidol decanoato (C1)", "50 mg/ml solução injetável 1 ml", "Antipsicótico"], ["Omeprazol", "40 mg pó liofilizado/solução injetável", "Antiulceroso"], ["Ranitidina", "25 mg/ml solução injetável 2 ml", "Antiulceroso"], ["Atracúrio", "10 mg/ml solução injetável 2,5 ml", "Bloqueador neuromuscular"], ["Cisatracúrio", "2 mg/ml solução injetável 5 ml", "Bloqueador neuromuscular"], ["Pancurônio", "2 mg/ml solução injetável 2 ml", "Bloqueador neuromuscular"], ["Rocurônio", "10 mg/ml solução injetável 5 ml", "Bloqueador neuromuscular"], ["Suxametônio (Succinilcolina)", "100 mg pó liofilizado/injetável", "Bloqueador neuromuscular"], ["Aminofilina", "24 mg/ml solução injetável 10 ml", "Broncodilatador"], ["Ipratrópio", "20 mcg/dose aerossol 10 ml", "Broncodilatador"], ["Salbutamol", "100 mcg/dose aerossol 200 doses", "Broncodilatador"], ["Deslanosídeo", "0,2 mg/ml solução injetável 2 ml", "Cardiotônico"], ["Furosemida", "10 mg/ml solução injetável 2 ml", "Diurético"], ["Manitol", "20% solução injetável 250 ml", "Diurético"], ["Água destilada", "10 ml injetável", "Eletrólito, diluente"], ["Bicarbonato de sódio", "8,4% solução injetável 10 ml", "Eletrólito, diluente"], ["Bicarbonato de sódio", "8,4% solução injetável 250 ml", "Eletrólito, diluente"], ["Cloreto de potássio", "19,1% solução injetável 10 ml", "Eletrólito, diluente"], ["Cloreto de sódio", "20% solução injetável 10 ml", "Eletrólito, diluente"], ["Cloreto de sódio", "0,9% solução injetável 10 ml", "Eletrólito, diluente"], ["Cloreto de sódio", "0,9% sistema fechado 100 ml", "Eletrólito, diluente"], ["Cloreto de sódio", "0,9% sistema fechado 250 ml", "Eletrólito, diluente"], ["Cloreto de sódio", "0,9% sistema fechado 500 ml", "Eletrólito, diluente"], ["Cloreto de sódio", "0,9% sistema fechado 1000 ml", "Eletrólito, diluente"], ["Glicose", "50% solução injetável 10 ml", "Eletrólito, diluente"], ["Glicose", "50% solução injetável 20 ml", "Eletrólito, diluente"], ["Glicose", "5% sistema fechado 500 ml", "Eletrólito, diluente"], ["Glicose", "5% sistema fechado 1000 ml", "Eletrólito, diluente"], ["Gluconato de cálcio", "10% solução injetável 10 ml", "Eletrólito, diluente"], ["Ringer + Lactato de sódio", "sistema fechado 500 ml", "Eletrólito, diluente"], ["Sulfato de magnésio", "10% solução injetável 10 ml", "Eletrólito, diluente"], ["Dobutamina", "12,5 mg/ml solução injetável 20 ml", "Estimulante adrenérgico"], ["Dopamina", "5 mg/ml solução injetável 10 ml", "Estimulante adrenérgico"], ["Efedrina (D1)", "50 mg/ml solução injetável 1 ml", "Estimulante adrenérgico"], ["Epinefrina (Adrenalina)", "1 mg/ml solução injetável 1 ml", "Estimulante adrenérgico"], ["Fenilefrina", "10 mg/ml solução injetável 1 ml", "Estimulante adrenérgico"], ["Norepinefrina", "2 mg/ml solução injetável 4 ml", "Estimulante adrenérgico"], ["Albumina humana", "20% solução injetável 50 ml", "Expansor plasmático"], ["Hidroxietilamido + NaCl", "130/0,4 + 6% sistema fechado 500 ml", "Expansor plasmático"], ["Ácido tranexâmico", "50 mg/ml solução injetável 5 ml", "Hemostático"], ["Vitamina K (Fitomenadiona)", "10 mg/ml solução injetável 1 ml IM", "Hemostático"], ["Insulina humana regular", "100 UI/ml solução injetável 10 ml", "Hipoglicemiante"], ["Alteplase", "10 mg pó liofilizado/injetável", "Trombolítico"], ["Alteplase", "50 mg pó liofilizado/injetável", "Trombolítico"], ["Hialuronidase", "2000 UTR pó liofilizado", "Trombolítico"]];
+const MEDICAMENTOS_ANEST = [["Azul de metileno", "4% solução injetável 1 ml", "Agente diagnóstico"], ["Azul patente V", "2,5% (25 mg/ml) solução injetável 2 ml", "Corante — linfonodo sentinela"], ["Dexmedetomidina", "100 mcg/ml solução injetável 2 ml", "Agonista alfa-2 adrenérgico"], ["Clonidina", "0,150 mg comprimido", "Agonista alfa-2 adrenérgico"], ["Clonidina", "0,150 mg/ml solução injetável 1 ml", "Agonista alfa-2 adrenérgico"], ["Dipirona sódica", "500 mg comprimido", "Analgésico, antipirético"], ["Dipirona sódica", "500 mg/ml solução injetável 2 ml", "Analgésico, antipirético"], ["Dipirona sódica", "500 mg/ml solução injetável 5 ml", "Analgésico, antipirético"], ["Dipirona sódica", "500 mg/ml solução oral", "Analgésico, antipirético"], ["Paracetamol", "500 mg comprimido", "Analgésico, antipirético"], ["Paracetamol", "200 mg/ml solução oral", "Analgésico, antipirético"], ["Paracetamol + Codeína (C1)", "500 mg + 30 mg comprimido", "Analgésico narcótico"], ["Fentanila (A1)", "0,05 mg/ml solução injetável 10 ml", "Analgésico narcótico"], ["Fentanila (A1)", "0,05 mg/ml solução injetável 2 ml", "Analgésico narcótico"], ["Morfina (A1)", "10 mg comprimido", "Analgésico narcótico"], ["Morfina (A1)", "1 mg/ml solução injetável 2 ml", "Analgésico narcótico"], ["Morfina (A1)", "0,2 mg/ml solução injetável 1 ml", "Analgésico narcótico"], ["Nalbufina (C1)", "10 mg/ml solução injetável 1 ml", "Analgésico narcótico"], ["Petidina (A1)", "50 mg/ml solução injetável 2 ml", "Analgésico narcótico"], ["Remifentanila (A1)", "2 mg pó liofilizado/injetável", "Analgésico narcótico"], ["Sufentanila (A1)", "5 mcg/ml solução injetável 2 ml", "Analgésico narcótico"], ["Tramadol (C1)", "100 mg/ml solução oral 10 ml", "Analgésico narcótico"], ["Tramadol (C1)", "50 mg/ml solução injetável 1 ml", "Analgésico narcótico"], ["Cetamina (C1)", "50 mg/ml solução injetável 10 ml", "Anestésico geral"], ["Cetamina (C1)", "50 mg/ml solução injetável 2 ml", "Anestésico geral"], ["Etomidato (C1)", "2 mg/ml solução injetável 10 ml", "Anestésico geral"], ["Propofol (C1)", "10 mg/ml emulsão injetável 20 ml", "Anestésico geral"], ["Propofol (C1)", "10 mg/ml emulsão injetável 50 ml", "Anestésico geral"], ["Sevoflurano (C1)", "solução inalatória 100 ml", "Anestésico geral"], ["Tiopental sódico (B1)", "500 mg pó liofilizado/injetável", "Anestésico geral"], ["Bupivacaína", "0,5% solução injetável 20 ml", "Anestésico local"], ["Bupivacaína isobárica", "0,5% solução injetável 4 ml", "Anestésico local"], ["Bupivacaína hiperbárica + glicose", "0,5% + 8% solução injetável 4 ml", "Anestésico local"], ["Levobupivacaína", "0,5% solução injetável 20 ml", "Anestésico local"], ["Lidocaína", "2% solução injetável 5 ml", "Anestésico local"], ["Lidocaína", "2% solução injetável 20 ml", "Anestésico local"], ["Lidocaína + Epinefrina", "2% + 1:200.000 solução injetável 20 ml", "Anestésico local"], ["Ropivacaína", "1% solução injetável 20 ml", "Anestésico local"], ["Lidocaína geleia", "2% geleia 30 g", "Anestésico tópico"], ["Lidocaína spray", "10% spray 50 ml", "Anestésico tópico"], ["Proximetacaína (C1)", "0,5% solução oftálmica 5 ml", "Anestésico ocular"], ["Clonazepam (B1)", "2 mg comprimido", "Ansiolítico/sedativo"], ["Clonazepam (B1)", "2,5 mg/ml solução oral 20 ml", "Ansiolítico/sedativo"], ["Diazepam (B1)", "5 mg comprimido", "Ansiolítico/sedativo"], ["Diazepam (B1)", "5 mg/ml solução injetável 2 ml", "Ansiolítico/sedativo"], ["Lorazepam (B1)", "2 mg comprimido", "Ansiolítico/sedativo"], ["Midazolam (B1)", "15 mg comprimido", "Hipnótico"], ["Midazolam (B1)", "1 mg/ml solução injetável 5 ml", "Hipnótico"], ["Midazolam (B1)", "5 mg/ml solução injetável 3 ml", "Hipnótico"], ["Midazolam (B1)", "2 mg/ml suspensão oral 10 ml", "Hipnótico"], ["Losartana", "50 mg comprimido", "Antagonista da angiotensina II"], ["Captopril", "12,5 mg comprimido", "Anti-hipertensivo / IECA"], ["Captopril", "25 mg comprimido", "Anti-hipertensivo / IECA"], ["Enalapril", "10 mg comprimido", "IECA"], ["Nitroprussiato de sódio", "50 mg pó liofilizado/injetável", "Anti-hipertensivo"], ["Isossorbida mononitrato", "10 mg/ml solução injetável 1 ml", "Antianginoso"], ["Nitroglicerina", "5 mg/ml solução injetável 10 ml", "Antianginoso / vasodilatador"], ["Verapamil", "2,5 mg/ml solução injetável 2 ml", "Antianginoso / BCC"], ["Adenosina", "3 mg/ml solução injetável 2 ml", "Antiarrítmico"], ["Amiodarona", "50 mg/ml solução injetável 3 ml", "Antiarrítmico"], ["Esmolol", "10 mg/ml solução injetável 10 ml", "Antiarrítmico / betabloqueador"], ["Esmolol", "250 mg/ml solução injetável 10 ml", "Antiarrítmico / betabloqueador"], ["Metoprolol", "1 mg/ml solução injetável 5 ml", "Antiarrítmico / betabloqueador"], ["Enoxaparina", "20 mg/0,2 ml seringa preenchida", "Anticoagulante"], ["Enoxaparina", "40 mg/0,4 ml seringa preenchida", "Anticoagulante"], ["Heparina sódica", "5000 UI/ml solução injetável 0,25 ml", "Anticoagulante"], ["Heparina sódica", "5000 UI/ml solução injetável 5 ml", "Anticoagulante"], ["Atropina", "0,25 mg/ml solução injetável 1 ml", "Anticolinérgico, antissecretor"], ["Neostigmina", "0,5 mg/ml solução injetável 1 ml", "Anticolinesterásico"], ["Flumazenil (C1)", "0,1 mg/ml solução injetável 5 ml", "Antídoto"], ["Naloxona (C1)", "0,4 mg/ml solução injetável 1 ml", "Antídoto"], ["Protamina", "5000 UI solução injetável 5 ml", "Antídoto"], ["Dimenidrato + Vitamina B6 + Glicose", "solução injetável 10 ml", "Antiemético, antivertiginoso"], ["Bromoprida", "5 mg/ml solução injetável 2 ml", "Antiemético, procinético"], ["Metoclopramida", "5 mg/ml solução injetável 2 ml", "Antiemético, procinético"], ["Ondansetrona", "2 mg/ml solução injetável 4 ml", "Antiemético, procinético"], ["Hioscina (Escopolamina butilbrometo)", "20 mg/ml solução injetável 1 ml", "Antiespasmódico"], ["Prometazina", "25 mg/ml solução injetável 2 ml", "Antihistamínico"], ["Dexametasona", "4 mg/ml solução injetável 2,5 ml", "Anti-inflamatório (corticoide)"], ["Hidrocortisona", "100 mg pó liofilizado/injetável", "Anti-inflamatório (corticoide)"], ["Hidrocortisona", "500 mg pó liofilizado/injetável", "Anti-inflamatório (corticoide)"], ["Metilprednisolona", "125 mg pó liofilizado/injetável", "Anti-inflamatório (corticoide)"], ["Metilprednisolona", "500 mg pó liofilizado/injetável", "Anti-inflamatório (corticoide)"], ["Triancinolona", "20 mg/ml solução injetável 5 ml", "Anti-inflamatório (corticoide)"], ["Cetoprofeno", "100 mg pó liofilizado/injetável", "AINE"], ["Diclofenaco sódico", "25 mg/ml solução injetável 3 ml", "AINE"], ["Clorpromazina (C1)", "5 mg/ml solução injetável 5 ml", "Antipsicótico"], ["Haloperidol (C1)", "5 mg/ml solução injetável 1 ml", "Antipsicótico"], ["Haloperidol decanoato (C1)", "50 mg/ml solução injetável 1 ml", "Antipsicótico"], ["Omeprazol", "40 mg pó liofilizado/solução injetável", "Antiulceroso"], ["Ranitidina", "25 mg/ml solução injetável 2 ml", "Antiulceroso"], ["Atracúrio", "10 mg/ml solução injetável 2,5 ml", "Bloqueador neuromuscular"], ["Cisatracúrio", "2 mg/ml solução injetável 5 ml", "Bloqueador neuromuscular"], ["Pancurônio", "2 mg/ml solução injetável 2 ml", "Bloqueador neuromuscular"], ["Rocurônio", "10 mg/ml solução injetável 5 ml", "Bloqueador neuromuscular"], ["Suxametônio (Succinilcolina)", "100 mg pó liofilizado/injetável", "Bloqueador neuromuscular"], ["Aminofilina", "24 mg/ml solução injetável 10 ml", "Broncodilatador"], ["Ipratrópio", "20 mcg/dose aerossol 10 ml", "Broncodilatador"], ["Salbutamol", "100 mcg/dose aerossol 200 doses", "Broncodilatador"], ["Deslanosídeo", "0,2 mg/ml solução injetável 2 ml", "Cardiotônico"], ["Furosemida", "10 mg/ml solução injetável 2 ml", "Diurético"], ["Manitol", "20% solução injetável 250 ml", "Diurético"], ["Água destilada", "10 ml injetável", "Eletrólito, diluente"], ["Bicarbonato de sódio", "8,4% solução injetável 10 ml", "Eletrólito, diluente"], ["Bicarbonato de sódio", "8,4% solução injetável 250 ml", "Eletrólito, diluente"], ["Cloreto de potássio", "19,1% solução injetável 10 ml", "Eletrólito, diluente"], ["Cloreto de sódio", "20% solução injetável 10 ml", "Eletrólito, diluente"], ["Cloreto de sódio", "0,9% solução injetável 10 ml", "Eletrólito, diluente"], ["Cloreto de sódio", "0,9% sistema fechado 100 ml", "Eletrólito, diluente"], ["Cloreto de sódio", "0,9% sistema fechado 250 ml", "Eletrólito, diluente"], ["Cloreto de sódio", "0,9% sistema fechado 500 ml", "Eletrólito, diluente"], ["Cloreto de sódio", "0,9% sistema fechado 1000 ml", "Eletrólito, diluente"], ["Glicose", "50% solução injetável 10 ml", "Eletrólito, diluente"], ["Glicose", "50% solução injetável 20 ml", "Eletrólito, diluente"], ["Glicose", "5% sistema fechado 500 ml", "Eletrólito, diluente"], ["Glicose", "5% sistema fechado 1000 ml", "Eletrólito, diluente"], ["Gluconato de cálcio", "10% solução injetável 10 ml", "Eletrólito, diluente"], ["Ringer + Lactato de sódio", "sistema fechado 500 ml", "Eletrólito, diluente"], ["Sulfato de magnésio", "10% solução injetável 10 ml", "Eletrólito, diluente"], ["Dobutamina", "12,5 mg/ml solução injetável 20 ml", "Estimulante adrenérgico"], ["Dopamina", "5 mg/ml solução injetável 10 ml", "Estimulante adrenérgico"], ["Efedrina (D1)", "50 mg/ml solução injetável 1 ml", "Estimulante adrenérgico"], ["Epinefrina (Adrenalina)", "1 mg/ml solução injetável 1 ml", "Estimulante adrenérgico"], ["Fenilefrina", "10 mg/ml solução injetável 1 ml", "Estimulante adrenérgico"], ["Norepinefrina", "2 mg/ml solução injetável 4 ml", "Estimulante adrenérgico"], ["Albumina humana", "20% solução injetável 50 ml", "Expansor plasmático"], ["Hidroxietilamido + NaCl", "130/0,4 + 6% sistema fechado 500 ml", "Expansor plasmático"], ["Ácido tranexâmico", "50 mg/ml solução injetável 5 ml", "Hemostático"], ["Vitamina K (Fitomenadiona)", "10 mg/ml solução injetável 1 ml IM", "Hemostático"], ["Insulina humana regular", "100 UI/ml solução injetável 10 ml", "Hipoglicemiante"], ["Alteplase", "10 mg pó liofilizado/injetável", "Trombolítico"], ["Alteplase", "50 mg pó liofilizado/injetável", "Trombolítico"], ["Hialuronidase", "2000 UTR pó liofilizado", "Trombolítico"]];
 /* ----------------------------------------------------------------------
    CBHPM 2022 (versão agosto/2023) — fonte única de códigos e descrições
    oficiais de procedimento em todo o sistema. Só entram aqui os registros
@@ -33407,7 +33631,10 @@ const CATALOGO_MED = [
     { nome: 'Omeprazol', dose: '40', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
     { nome: 'Pantoprazol', dose: '40', unidade: 'mg', via: 'EV', tipo: 'Bolus' },
     { nome: 'Gluconato de cálcio', dose: '1', unidade: 'g', via: 'EV', tipo: 'Bolus' },
-    { nome: 'Insulina regular', unidade: 'UI', via: 'EV', tipo: 'Bolus' }
+    { nome: 'Insulina regular', unidade: 'UI', via: 'EV', tipo: 'Bolus' },
+    /* corante do linfonodo sentinela — quem injeta é o cirurgião, mas entra
+       na ficha: explica a SpO2 que "cai" e uma reação alérgica tardia */
+    { nome: 'Azul patente V 2,5%', dose: '2', unidade: 'mL', via: 'SC', tipo: 'Bolus' }
   ]}
 ];
 const UNIDADES = ['mg', 'mcg', 'g', 'mL', 'L', 'L/min', 'UI', '%', 'cp', 'mg/kg', 'mcg/kg', 'ng/dL', 'mcg/kg/min', 'mcg/min', 'mg/h', 'mcg/kg/h', 'mL/h', 'ng/mL', 'CAM'];
@@ -41955,9 +42182,11 @@ const anestesia = {
     /* Financeiro SÓ na finalização, e perguntando antes: uma janela só, igual
        nos três módulos (ver fin.finalizacao). O lançamento não nasce mais
        calado — ele é conferido antes de virar cobrança. */
+    let cobrancaVaiAbrir = false;
     if (finalizar) {
       const jaTem = store.list('financeiro').some(x => x._origemId === saved._id);
       if (!jaTem && fin.finalizacao.deveAbrir('anestesia', saved)) {
+        cobrancaVaiAbrir = true;
         setTimeout(() => {
           try {
             /* O fechamento entra QUANDO A COBRANÇA SAI, e não por espera: o
@@ -41992,8 +42221,13 @@ const anestesia = {
     /* Pergunta sobre SRPA — em TODA finalização sem SRPA vinculada
        (antes só em ficha nova; quem salvava rascunho e finalizava depois
        nunca via a pergunta) */
+    /* A COBRANÇA PRIMEIRO. Com a cobrança a caminho, o painel de fechamento
+       (que traz a pergunta da SRPA) entra quando ela sai — é o aoFechar dela.
+       Abrir o painel aqui também o punha na frente: a cobrança ficava
+       esperando a vez, ele gerava o lançamento pelo item do painel, e a
+       cobrança que esperava abria em seguida como se nada tivesse sido feito. */
     const jaTemSrpa = docCompleto && docCompleto._links && docCompleto._links.recuperacao_id;
-    if (finalizar && !jaTemSrpa) {
+    if (finalizar && !jaTemSrpa && !cobrancaVaiAbrir) {
       try { fechamento.abrir('anestesia', docCompleto._id); } catch (e) {}
     }
   },
@@ -43349,7 +43583,21 @@ const fin = {
         } catch (e) {}
         return;
       }
+      /* RESPONDIDA ENQUANTO ESPERAVA A VEZ — pelo painel de fechamento, pelo
+         Meu dia, noutra aba. Abrir agora é perguntar de novo o que já foi
+         respondido, e a janela reaparece "como se não tivesse gerado". */
+      if (doc && doc._id && fin.finalizacao._jaRespondida(mod, doc._id)) {
+        if (aoFechar) { try { aoFechar(null, {}); } catch (e) {} }
+        return;
+      }
       fin.finalizacao.abrir(mod, doc, aoFechar);
+    },
+    _jaRespondida(mod, id) {
+      try {
+        if ((store.list('financeiro') || []).some(x => x._origemId === id)) return true;
+        const atual = store.getById(mod, id);
+        return !!atual && fin.finalizacao.decisaoDe(atual) !== null;
+      } catch (e) { return false; }
     },
 
     abrir(mod, doc, aoFechar) {
@@ -48445,14 +48693,80 @@ const financeiro = {
       const f = document.getElementById('form-financeiro');
       return f ? ((f.querySelector('[name="convenio"]') || {}).value || '') : '';
     },
-    valorSugerido(codigo) {
+    /* ---------- PORTE CIRÚRGICO × ANESTÉSICO ----------
+       O valor da linha sai de uma de duas tabelas: a do porte cirúrgico
+       (1A–14C) ou a do porte anestésico (AN 1–8). A coluna Porte mostra QUAL
+       foi usada e deixa trocar. A escolha mora no próprio texto do porte
+       ("AN 5" × "11C") — é a mesma convenção da finalização e do mutirão, e
+       assim nenhum registro antigo precisa de campo novo. */
+    _temAN(codigo) {
+      try { const an = cbhpm.anestesiaDe(codigo); return !!(an && an.porte_anest); } catch (e) { return false; }
+    },
+    /* o código tem porte anestésico? então o honorário é anestésico */
+    _tipoPadrao(codigo) { return financeiro.codigos._temAN(codigo) ? 'an' : 'cir'; },
+    _tipoDoTexto(porte) { return /^\s*AN\b/i.test(String(porte || '')) ? 'an' : 'cir'; },
+    _porteTexto(codigo, tipo) {
+      try {
+        if (tipo === 'an') {
+          const an = cbhpm.anestesiaDe(codigo);
+          return an && an.porte_anest ? 'AN ' + an.porte_anest : '';
+        }
+        const info = cbhpm.info(codigo);
+        return info ? (info.porte || '') : '';
+      } catch (e) { return ''; }
+    },
+    _tipoDe(tr) {
+      const sel = tr && tr.querySelector('[name="fin_cod_porte_tipo[]"]');
+      return sel ? (sel.value === 'an' ? 'an' : 'cir') : '';
+    },
+    /* Porte cirúrgico da linha, para a hierarquia dos graus: mesmo com a linha
+       cobrada pelo AN, quem diz qual é o procedimento principal é o porte
+       cirúrgico da CBHPM. */
+    _porteCirDe(tr) {
+      const cod = ((tr.querySelector('[name="fin_cod_codigo[]"]') || {}).value || '').trim();
+      const txt = (tr.querySelector('[name="fin_cod_porte[]"]') || {}).value || '';
+      const daTabela = cod ? financeiro.codigos._porteTexto(cod, 'cir') : '';
+      if (daTabela) return daTabela;
+      return financeiro.codigos._tipoDoTexto(txt) === 'an' ? '' : txt;
+    },
+    /* Trocou Cir ↔ AN: o porte exibido muda e o valor é refeito pela tabela
+       daquele tipo. Código sem porte anestésico não vira AN — avisar é melhor
+       que zerar o valor de uma linha que já estava certa. */
+    _onTipoPorte(sel) {
+      const tr = sel.closest('tr');
+      if (!tr) return;
+      const tipo = sel.value === 'an' ? 'an' : 'cir';
+      const porteEl = tr.querySelector('[name="fin_cod_porte[]"]');
+      const cod = ((tr.querySelector('[name="fin_cod_codigo[]"]') || {}).value || '').trim();
+      const anterior = tipo === 'an' ? 'cir' : 'an';
+      if (!cod) {
+        if (porteEl && financeiro.codigos._tipoDoTexto(porteEl.value) !== tipo) porteEl.value = '';
+        markDirty();
+        return;
+      }
+      const novoPorte = financeiro.codigos._porteTexto(cod, tipo);
+      if (!novoPorte) {
+        sel.value = anterior;
+        toast(tipo === 'an'
+          ? 'Este código não tem porte anestésico na CBHPM (AN 0 ou sem AN) — a linha continua pelo porte cirúrgico.'
+          : 'Este código não tem porte cirúrgico na CBHPM — a linha continua pelo porte anestésico.', 'warn');
+        return;
+      }
+      if (porteEl) porteEl.value = novoPorte;
+      const p = financeiro.codigos.sugerirValor(tr, cod, { forcar: true, tipo });
+      financeiro.codigos.recalcular();
+      markDirty();
+      if (p) toast('Porte ' + novoPorte + ': valor unitário ' + utils.formatarMoeda(p.valor) + ' (' + (p.tabela || 'tabela') + ') — pode editar.');
+      else toast('Porte ' + novoPorte + ': não há valor na tabela para ele — mantive o valor da linha. Confira.', 'warn');
+    },
+    valorSugerido(codigo, tipoPorte) {
       if (!codigo) return null;
       const conv = financeiro.codigos._convenioDoRegistro();
-      let info = null;
-      try { info = cbhpm.info(codigo); } catch (e) {}
-      /* o código tem porte anestésico próprio? então o honorário é anestésico */
-      const temAN = info && (info.porte_anest || (info.anestesico && info.anestesico.porte_anest));
-      const tentar = temAN ? ['anestesia', 'medico'] : ['medico', 'anestesia'];
+      /* tipo escolhido na linha manda; sem escolha, o código decide */
+      const temAN = financeiro.codigos._temAN(codigo);
+      const tentar = tipoPorte === 'an' ? ['anestesia']
+        : tipoPorte === 'cir' ? ['medico']
+        : (temAN ? ['anestesia', 'medico'] : ['medico', 'anestesia']);
       for (const tipo of tentar) {
         const p = precos.base(codigo, tipo, conv);
         if (p && p.valor != null) return p;
@@ -48467,7 +48781,7 @@ const financeiro = {
       /* o que ele digitou é dele: só preenche o que está em branco, salvo
          quando ele pede explicitamente para refazer (botão Sugerir valores) */
       if (!opts.forcar && String(unitEl.value).trim()) return null;
-      const p = financeiro.codigos.valorSugerido(codigo);
+      const p = financeiro.codigos.valorSugerido(codigo, opts.tipo || financeiro.codigos._tipoDe(tr));
       if (!p || p.valor == null) return null;
       unitEl.value = Number(p.valor).toFixed(2);
       unitEl.title = 'Sugerido por ' + (p.tabela || 'tabela de referência') +
@@ -48522,7 +48836,7 @@ const financeiro = {
                  placeholder="Digite ou cole o nome do procedimento"
                  oninput="financeiro.codigos._onDesc(this)">
         </td>
-        <td data-label="Porte"><input type="text" name="fin_cod_porte[]" value="${utils.escapeAttr(dados.porte || '')}" placeholder="—" style="width:50px"></td>
+        <td data-label="Porte"><span class="fin-porte-cel"><select name="fin_cod_porte_tipo[]" title="Cir = porte cirúrgico; AN = porte anestésico. Trocar refaz o valor unitário pela tabela daquele tipo." onchange="financeiro.codigos._onTipoPorte(this)"><option value="cir" ${financeiro.codigos._tipoDoTexto(dados.porte) === 'cir' ? 'selected' : ''}>Cir</option><option value="an" ${financeiro.codigos._tipoDoTexto(dados.porte) === 'an' ? 'selected' : ''}>AN</option></select><input type="text" name="fin_cod_porte[]" value="${utils.escapeAttr(dados.porte || '')}" placeholder="—" style="width:50px"></span></td>
         <td data-label="Qtd ×"><input type="number" name="fin_cod_qtd[]" step="1" min="1" value="${utils.escapeAttr(dados.qtd || 1)}" style="width:48px" oninput="financeiro.codigos._onQtdUnit(this)"></td>
         <td data-label="Lado"><select name="fin_cod_lado[]" onchange="markDirty()">${cirurgia.opcoesLado(dados.lateralidade)}</select></td>
         <td data-label="Grau"><select name="fin_cod_grau[]" title="Maior porte 100%; mesma via 50%; via diferente 70% (manual)" onchange="financeiro.codigos._onQtdUnit(this)">${['100', '70', '50'].map(g => `<option value="${g}" ${g === String(dados.grau || '100') ? 'selected' : ''}>${g}%</option>`).join('')}</select></td>
@@ -48545,9 +48859,13 @@ const financeiro = {
         if (descEl) descEl.dataset.semMais = '1';   /* cada código tem a sua linha */
         const casar = (match) => {
           const porteEl = tr.querySelector('[name="fin_cod_porte[]"]');
+          const tipoSel = tr.querySelector('[name="fin_cod_porte_tipo[]"]');
           if (codEl) codEl.value = match[0];
           if (descEl) descEl.value = match[1];
-          if (porteEl) porteEl.value = match[2];
+          /* o porte exibido é o da tabela que vai dar o valor */
+          const tipo = financeiro.codigos._tipoPadrao(match[0]);
+          if (tipoSel) tipoSel.value = tipo;
+          if (porteEl) porteEl.value = financeiro.codigos._porteTexto(match[0], tipo) || match[2] || '';
           /* SUGESTÃO DO VALOR: escolher o código traz o valor da tabela daquele
              convênio. É sugestão e não imposição — o campo continua editável, e
              o que ele já tiver digitado não é sobrescrito. */
@@ -48574,8 +48892,13 @@ const financeiro = {
       if (match) {
         const descEl = tr.querySelector('[name="fin_cod_desc[]"]');
         const porteEl = tr.querySelector('[name="fin_cod_porte[]"]');
+        const tipoSel = tr.querySelector('[name="fin_cod_porte_tipo[]"]');
         if (descEl && !descEl.value) descEl.value = match[1];
-        if (porteEl && !porteEl.value) porteEl.value = match[2];
+        if (porteEl && !porteEl.value) {
+          const tipo = financeiro.codigos._tipoPadrao(match[0]);
+          if (tipoSel) tipoSel.value = tipo;
+          porteEl.value = financeiro.codigos._porteTexto(match[0], tipo) || match[2] || '';
+        }
       }
       markDirty();
     },
@@ -48592,7 +48915,12 @@ const financeiro = {
         /* Match único — preenche tudo */
         if (codEl && !codEl.value) codEl.value = matches[0].codigo;
         const porteEl = tr.querySelector('[name="fin_cod_porte[]"]');
-        if (porteEl && !porteEl.value) porteEl.value = matches[0].porte;
+        const tipoSel = tr.querySelector('[name="fin_cod_porte_tipo[]"]');
+        if (porteEl && !porteEl.value) {
+          const tipo = financeiro.codigos._tipoPadrao(matches[0].codigo);
+          if (tipoSel) tipoSel.value = tipo;
+          porteEl.value = financeiro.codigos._porteTexto(matches[0].codigo, tipo) || matches[0].porte || '';
+        }
       }
       markDirty();
     },
@@ -48697,7 +49025,7 @@ const financeiro = {
          porte dele não foi reconhecido é mexer em dinheiro por falta de dado.
          Ela fica com o grau que já tinha. */
       const comPorte = rows.filter(tr => {
-        const [n] = financeiro.codigos._parsePorte(tr.querySelector('[name="fin_cod_porte[]"]')?.value);
+        const [n] = financeiro.codigos._parsePorte(financeiro.codigos._porteCirDe(tr));
         return n > 0;
       });
       if (comPorte.length < 2) {
@@ -48706,7 +49034,7 @@ const financeiro = {
       }
       let best = null, bv = [-1, ''];
       comPorte.forEach(tr => {
-        const [n, l] = financeiro.codigos._parsePorte(tr.querySelector('[name="fin_cod_porte[]"]')?.value);
+        const [n, l] = financeiro.codigos._parsePorte(financeiro.codigos._porteCirDe(tr));
         if (n > bv[0] || (n === bv[0] && l > bv[1])) { best = tr; bv = [n, l]; }
       });
       comPorte.forEach(tr => {
@@ -49033,7 +49361,7 @@ const financeiro = {
     /* Coleta anexos (fotos) */
     data.anexos = financeiro.anexos.coletar();
     /* Limpa campos array que vieram do formData mas vivem em data.codigos */
-    delete data.fin_cod_codigo;  delete data.fin_cod_desc;  delete data.fin_cod_porte;
+    delete data.fin_cod_codigo;  delete data.fin_cod_desc;  delete data.fin_cod_porte;  delete data.fin_cod_porte_tipo;
     delete data.fin_cod_qtd;     delete data.fin_cod_unit;  delete data.fin_cod_lado;
     delete data.fin_cod_previsto; delete data.fin_cod_recebido; delete data.fin_cod_glosa;
     delete data.fin_cod_status;  delete data.fin_cod_obs;
@@ -51420,7 +51748,8 @@ const ORC_CFG_PADRAO = {
 const DOSES_CATS = {
   ind: 'Indução', opi: 'Opioides', bnm: 'Bloq. NM', rev: 'Reversão',
   vas: 'Vasoativos', inf: 'Infusão contínua', atb: 'Antibióticos',
-  ele: 'Eletrólitos', ana: 'Analgesia/Antiemético', eme: 'Emergência'
+  ele: 'Eletrólitos', ana: 'Analgesia/Antiemético', eme: 'Emergência',
+  dia: 'Corantes/diagnóstico'
 };
 /* t:'b' bolus | 'i' infusão. ped/adu = [min,max,'unid']; '/kg' multiplica pelo peso.
    conc: bolus em mg/mL (p/ volume); infusão em mcg/mL ou UI/mL (unidade da dose). */
@@ -51497,6 +51826,11 @@ const DOSES_DB = [
   { c:'eme', n:'Adenosina', a:'3 mg/mL (amp 2 mL)', d:'Bolus rápido + flush 10-20 mL', conc:3, t:'b', ped:[0.1,0.1,'mg/kg'], adu:[6,6,'mg'], max:{v:6,u:'mg'}, via:'EV', o:'2ª dose: ped 0,2 mg/kg (máx 12 mg) / adulto 12 mg. Via proximal.' },
   { c:'eme', n:'Intralipid 20% (intox. AL)', a:'Emulsão lipídica 20%', d:'Pronta', conc:null, t:'b', ped:[1.5,1.5,'mL/kg'], adu:[1.5,1.5,'mL/kg'], via:'EV', o:'Bolus 1,5 mL/kg em 1 min (repetir até 2x) + infusão 0,25 mL/kg/min. Teto ~10-12 mL/kg.' },
   { c:'eme', n:'Cristaloide (expansão ped)', a:'SF 0,9% / Ringer lactato', d:'-', conc:null, t:'b', ped:[10,20,'mL/kg'], adu:[500,1000,'mL'], via:'EV', o:'Reavaliar após cada alíquota.' },
+  /* Corante do linfonodo sentinela: quem injeta é o cirurgião, mas as duas
+     consequências caem no colo do anestesiologista — a anafilaxia tardia e a
+     SpO2 que "cai" sem hipoxemia. Sem dose pediátrica de referência aqui:
+     é o protocolo do cirurgião que manda. */
+  { c:'dia', n:'Azul patente V 2,5% (linfonodo sentinela)', a:'25 mg/mL (amp 2 mL)', d:'Puro, sem diluir', conc:null, t:'b', adu:[1,2,'mL'], via:'SC/intradérmica (peritumoral ou periareolar)', perigo:true, o:'Injetado pelo cirurgião; volume conforme o protocolo dele (às vezes até 4-5 mL). ANAFILAXIA: ~1% de reações, ~0,1% graves; pode surgir 15-30 min depois, às vezes só como hipotensão refratária ou urticária azulada — tratar com adrenalina. Queda FALSA da SpO2 (2-4%) por horas, sem hipoxemia: confira com gasometria se houver dúvida. Pele, mucosas e urina azuladas/esverdeadas por 24-48 h — avisar a equipe e o paciente. Criança: dose pelo protocolo do cirurgião.' },
   { c:'eme', n:'Concentrado de hemácias (ped)', a:'-', d:'-', conc:null, t:'b', ped:[10,15,'mL/kg'], adu:[300,600,'mL'], via:'EV', o:'1 CH ~250-300 mL. 10 mL/kg eleva Hb ~2-3 g/dL.' }
 ];
 
