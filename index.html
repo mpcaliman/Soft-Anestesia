@@ -4907,7 +4907,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-11-12a</b><br>
+    v7.1 · build <b id="build-tag">2026-11-12b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -42182,9 +42182,11 @@ const anestesia = {
     /* Financeiro SÓ na finalização, e perguntando antes: uma janela só, igual
        nos três módulos (ver fin.finalizacao). O lançamento não nasce mais
        calado — ele é conferido antes de virar cobrança. */
+    let cobrancaVaiAbrir = false;
     if (finalizar) {
       const jaTem = store.list('financeiro').some(x => x._origemId === saved._id);
       if (!jaTem && fin.finalizacao.deveAbrir('anestesia', saved)) {
+        cobrancaVaiAbrir = true;
         setTimeout(() => {
           try {
             /* O fechamento entra QUANDO A COBRANÇA SAI, e não por espera: o
@@ -42219,8 +42221,13 @@ const anestesia = {
     /* Pergunta sobre SRPA — em TODA finalização sem SRPA vinculada
        (antes só em ficha nova; quem salvava rascunho e finalizava depois
        nunca via a pergunta) */
+    /* A COBRANÇA PRIMEIRO. Com a cobrança a caminho, o painel de fechamento
+       (que traz a pergunta da SRPA) entra quando ela sai — é o aoFechar dela.
+       Abrir o painel aqui também o punha na frente: a cobrança ficava
+       esperando a vez, ele gerava o lançamento pelo item do painel, e a
+       cobrança que esperava abria em seguida como se nada tivesse sido feito. */
     const jaTemSrpa = docCompleto && docCompleto._links && docCompleto._links.recuperacao_id;
-    if (finalizar && !jaTemSrpa) {
+    if (finalizar && !jaTemSrpa && !cobrancaVaiAbrir) {
       try { fechamento.abrir('anestesia', docCompleto._id); } catch (e) {}
     }
   },
@@ -43576,7 +43583,21 @@ const fin = {
         } catch (e) {}
         return;
       }
+      /* RESPONDIDA ENQUANTO ESPERAVA A VEZ — pelo painel de fechamento, pelo
+         Meu dia, noutra aba. Abrir agora é perguntar de novo o que já foi
+         respondido, e a janela reaparece "como se não tivesse gerado". */
+      if (doc && doc._id && fin.finalizacao._jaRespondida(mod, doc._id)) {
+        if (aoFechar) { try { aoFechar(null, {}); } catch (e) {} }
+        return;
+      }
       fin.finalizacao.abrir(mod, doc, aoFechar);
+    },
+    _jaRespondida(mod, id) {
+      try {
+        if ((store.list('financeiro') || []).some(x => x._origemId === id)) return true;
+        const atual = store.getById(mod, id);
+        return !!atual && fin.finalizacao.decisaoDe(atual) !== null;
+      } catch (e) { return false; }
     },
 
     abrir(mod, doc, aoFechar) {

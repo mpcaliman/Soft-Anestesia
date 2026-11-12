@@ -25380,6 +25380,39 @@ await test('Azul patente: no cadastro, na lista da ficha e em Doses com os alert
   await page.close();
 });
 
+await test('Cobrança respondida enquanto esperava a vez não reabre "como se não tivesse gerado"', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const espera = ms => new Promise(res => setTimeout(res, ms));
+    store.setList('financeiro', []);
+    const doc = store.save('anestesia', { paciente: { nome: 'Cobranca Espera Teste' }, procedimento: { descricao: 'Colecistectomia sem colangiografia', data: utils.hojeISO() }, _finalizado: true });
+    /* outra janela ocupando o lugar (o painel de fechamento) */
+    modal.open('Painel', '<p>ocupado</p>', '');
+    let fechou = 0;
+    fin.finalizacao.abrirQuandoLivre('anestesia', doc, () => { fechou++; });
+    await espera(300);
+    /* respondida por outro caminho enquanto esperava: o lançamento existe */
+    store.save('financeiro', { _origemId: doc._id, paciente: 'Cobranca Espera Teste', valor_previsto: 100, status: 'pendente' });
+    modal.close();
+    await espera(1300);
+    const aberta = document.getElementById('modal-backdrop').classList.contains('show');
+    out.naoReabriu = !aberta || !/Gerar financeiro/.test(document.getElementById('modal-title').textContent);
+    out.seguiuOFluxo = fechou === 1;
+    /* sem resposta, ela continua abrindo sozinha (é o que evita cobrança esquecida) */
+    const doc2 = store.save('anestesia', { paciente: { nome: 'Cobranca Sem Resposta' }, procedimento: { descricao: 'Colecistectomia sem colangiografia', data: utils.hojeISO() }, _finalizado: true });
+    fin.finalizacao.abrirQuandoLivre('anestesia', doc2, null);
+    await espera(200);
+    out.abreSemResposta = document.getElementById('modal-backdrop').classList.contains('show') && /financeiro/i.test(document.getElementById('modal-title').textContent);
+    try { modal.close(); } catch (e) {}
+    store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.naoReabriu && r.seguiuOFluxo, 'respondida no caminho, a cobrança não volta e o fechamento segue: ' + JSON.stringify(r));
+  assert(r.abreSemResposta, 'sem resposta, a cobrança continua abrindo sozinha');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */
