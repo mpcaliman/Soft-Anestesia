@@ -25262,6 +25262,121 @@ await test('CEC: cada execução vira Início/Fim CEC na linha do tempo, faixa n
   await page.close();
 });
 
+await test('Financeiro: porte de cada código troca entre cirúrgico e anestésico, refazendo o valor pela tabela do tipo', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    location.hash = '#financeiro'; await new Promise(res => setTimeout(res, 300));
+    financeiro.editar(null);
+    const tab = cbhpm.tabela();
+    const comAN = tab.find(c => c[2] && c[3] > 0 && !(cbhpm.info(c) || {}).anestesico);
+    const semAN = tab.find(c => c[2] && !c[3] && !(cbhpm.info(c) || {}).anestesico);
+    out.temDados = !!comAN && !!semAN;
+    document.getElementById('fin-codigos-body').innerHTML = '';
+    const tr = financeiro.codigos.add({ codigo: comAN[0], descricao: comAN[1], porte: comAN[2] });
+    const sel = tr.querySelector('[name="fin_cod_porte_tipo[]"]');
+    const porte = tr.querySelector('[name="fin_cod_porte[]"]');
+    out.comecaCir = sel.value === 'cir' && porte.value === comAN[2];
+    sel.value = 'an'; financeiro.codigos._onTipoPorte(sel);
+    out.virouAN = porte.value === 'AN ' + comAN[3];
+    const pAN = financeiro.codigos.valorSugerido(comAN[0], 'an');
+    out.valorDoAN = !pAN || pAN.origem !== 'porte_cir';
+    sel.value = 'cir'; financeiro.codigos._onTipoPorte(sel);
+    out.voltouCir = porte.value === comAN[2];
+    /* salvo como "AN n": a linha volta com AN marcado */
+    sel.value = 'an'; financeiro.codigos._onTipoPorte(sel);
+    const salvo = financeiro.codigos.coletar()[0];
+    financeiro.codigos.restaurar([salvo]);
+    const tr2 = document.querySelector('#fin-codigos-body tr');
+    out.restaura = tr2.querySelector('[name="fin_cod_porte_tipo[]"]').value === 'an' && /^AN /.test(salvo.porte);
+    /* código sem porte anestésico não vira AN e não perde o valor */
+    document.getElementById('fin-codigos-body').innerHTML = '';
+    const tr3 = financeiro.codigos.add({ codigo: semAN[0], descricao: semAN[1], porte: semAN[2], valor_unit: '123.45' });
+    const sel3 = tr3.querySelector('[name="fin_cod_porte_tipo[]"]');
+    sel3.value = 'an'; financeiro.codigos._onTipoPorte(sel3);
+    out.semANavisa = sel3.value === 'cir' && tr3.querySelector('[name="fin_cod_porte[]"]').value === semAN[2] && tr3.querySelector('[name="fin_cod_unit[]"]').value === '123.45';
+    /* grau: linha cobrada pelo AN ainda conta pelo porte cirúrgico */
+    document.getElementById('fin-codigos-body').innerHTML = '';
+    const a = financeiro.codigos.add({ codigo: comAN[0], descricao: comAN[1], porte: 'AN ' + comAN[3] });
+    financeiro.codigos.add({ descricao: 'Menor', porte: '1A' });
+    financeiro.codigos.classificarGrau({ silent: true });
+    out.grauPeloCir = a.querySelector('[name="fin_cod_grau[]"]').value === '100';
+    return out;
+  });
+  assert(r.temDados, 'a tabela CBHPM tem códigos com e sem porte anestésico');
+  assert(r.comecaCir && r.virouAN && r.voltouCir && r.valorDoAN, 'Cir ↔ AN troca o porte exibido e a tabela do valor: ' + JSON.stringify(r));
+  assert(r.restaura, 'a escolha volta ao reabrir o lançamento');
+  assert(r.semANavisa, 'código sem porte anestésico não vira AN nem perde o valor');
+  assert(r.grauPeloCir, 'a hierarquia dos graus segue o porte cirúrgico mesmo com a linha em AN');
+  await page.close();
+});
+
+await test('Documentos: solicitação de exames com códigos TUSS, pacote pré-operatório, impressão e busca', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    location.hash = '#documentos'; await new Promise(res => setTimeout(res, 300));
+    documentos.novo();
+    document.querySelector('#form-documentos [name="modelo"][value="exames"]').checked = true;
+    documentos.atualizarTipo();
+    out.cardVisivel = document.getElementById('card-doc-exames').style.display === '' && document.getElementById('card-doc-atestado').style.display === 'none';
+    document.querySelector('#form-documentos [name="nome"]').value = 'Paciente Exames Teste';
+    documentos.exames.pacote('preop');
+    let itens = documentos.exames.coletar();
+    out.pacote = itens.length === 10 && itens[0].codigo === '40304361' && itens.some(i => i.codigo === '40101010');
+    documentos.exames.pacote('preop');
+    out.semDuplicar = documentos.exames.coletar().length === 10;
+    /* código digitado preenche o nome */
+    const tr = documentos.exames.add();
+    const cod = tr.querySelector('[name="exm_codigo[]"]'); cod.value = '40302733'; documentos.exames._onCodigo(cod);
+    out.porCodigo = /glicada/i.test(tr.querySelector('[name="exm_nome[]"]').value);
+    /* exame fora da lista: digitado à mão e lembrado na próxima */
+    const tr2 = documentos.exames.add({ codigo: '40399999', nome: 'Exame próprio teste' });
+    void tr2;
+    document.querySelector('#form-documentos [name="exames_indicacao"]').value = 'Avaliação pré-operatória';
+    const salvo = documentos.salvar();
+    out.salvou = !!salvo && salvo.modelo === 'exames' && salvo.exames_itens.length === 12;
+    out.lembrou = !!documentos.exames.achar('40399999');
+    out.semPacienteNoCatalogo = !/Paciente Exames/.test(localStorage.getItem('soft_exames_extras_v1') || '');
+    const html = printPreview._buildDocumento();
+    out.impressao = /SOLICITAÇÃO DE EXAMES/.test(html) && /40304361/.test(html) && /Avaliação pré-operatória/.test(html) && /pp-table/.test(html);
+    out.semCID = !/CID-10/.test(html);
+    out.arquivo = printPreview._tipoDoDocumento('documentos') === 'Solicitacao-Exames';
+    /* recarregar devolve a lista */
+    documentos.carregar(store.getById('documentos', salvo._id));
+    out.recarregou = documentos.exames.coletar().length === 12;
+    out.busca = /Solicitação de exames/.test(historico._detalheDe('documentos', salvo)) && /12 exame/.test(historico._detalheDe('documentos', salvo));
+    return out;
+  });
+  assert(r.cardVisivel, 'a aba de exames aparece no lugar do atestado');
+  assert(r.pacote && r.semDuplicar, 'o pacote pré-operatório entra uma vez só: ' + JSON.stringify(r));
+  assert(r.porCodigo, 'o código TUSS preenche o nome do exame');
+  assert(r.salvou && r.lembrou && r.semPacienteNoCatalogo, 'salva a lista e lembra o exame digitado, sem dado do paciente');
+  assert(r.impressao && r.semCID && r.arquivo, 'a impressão traz título, códigos, indicação e nome de arquivo próprio');
+  assert(r.recarregou && r.busca, 'reabrir o documento devolve a lista');
+  await page.close();
+});
+
+await test('Azul patente: no cadastro, na lista da ficha e em Doses com os alertas', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    out.cadastro = MEDICAMENTOS_ANEST.some(m => /Azul patente/.test(m[0]));
+    const d = DOSES_DB.find(x => /Azul patente/.test(x.n));
+    out.doses = !!d && d.perigo && /ANAFILAXIA/.test(d.o) && /SpO2/.test(d.o) && DOSES_CATS[d.c] === 'Corantes/diagnóstico';
+    location.hash = '#doses'; await new Promise(res => setTimeout(res, 300));
+    const b = document.getElementById('dose-busca');
+    if (b) { b.value = 'patente'; b.dispatchEvent(new Event('input', { bubbles: true })); }
+    try { doses.render && doses.render(); } catch (e) {}
+    await new Promise(res => setTimeout(res, 100));
+    out.lista = /Azul patente/.test((document.getElementById('dose-lista') || {}).textContent || '');
+    return out;
+  });
+  assert(r.cadastro && r.doses, 'azul patente cadastrado com os alertas: ' + JSON.stringify(r));
+  assert(r.lista, 'aparece na busca de Doses');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

@@ -312,8 +312,10 @@ const historico = {
     if (mod === 'recuperacao') return [it.procedimento, it.tipo_anestesia].filter(Boolean).join(' · ');
     if (mod === 'financeiro') return [it.procedimento, it.convenio, it.status].filter(Boolean).join(' · ');
     if (mod === 'documentos') {
-      const t = { atestado: '📝 Atestado', declaracao: '🕐 Declaração de comparecimento', laudo: '🧾 Laudo' }[it.modelo] || '📄 Documento';
-      const extra = it.modelo === 'atestado' ? (it.atestado_dias ? it.atestado_dias + ' dia(s)' : '')
+      const t = { atestado: '📝 Atestado', declaracao: '🕐 Declaração de comparecimento', laudo: '🧾 Laudo', exames: '🧪 Solicitação de exames' }[it.modelo] || '📄 Documento';
+      const extra = it.modelo === 'exames' ? (Array.isArray(it.exames_itens) && it.exames_itens.length
+          ? it.exames_itens.length + ' exame(s): ' + it.exames_itens.slice(0, 3).map(x => x.nome || x.codigo).join(', ') + (it.exames_itens.length > 3 ? '…' : '') : '')
+        : it.modelo === 'atestado' ? (it.atestado_dias ? it.atestado_dias + ' dia(s)' : '')
         : it.modelo === 'declaracao' ? [it.decl_data ? historico._fmtData(it.decl_data) : '', it.decl_hora_ini && it.decl_hora_fim ? it.decl_hora_ini + '–' + it.decl_hora_fim : ''].filter(Boolean).join(' ')
         : (it.laudo_destinatario || '');
       return [t, extra].filter(Boolean).join(' · ');
