@@ -4907,7 +4907,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-11-12b</b><br>
+    v7.1 · build <b id="build-tag">2026-11-12c</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -8123,6 +8123,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <button class="btn" onclick="printPreview.abrir()"><span class="icon">🖨️</span> Visualizar / Imprimir</button>
     <button class="btn" style="background:#1c64a9;color:#fff;border-color:#1c64a9" onclick="pdfGen.assinarReceita()" title="Passo a passo para assinar com validade legal (ICP-Brasil / CFM / gov.br)"><span class="icon">✍️</span> Assinar (validade legal)</button>
     <button class="btn" onclick="pdfGen.baixarReceitaPDF()" title="Gerar o PDF da receita"><span class="icon">📄</span> Gerar PDF</button>
+    <button class="btn memed-btn" style="display:none" onclick="memedRx.abrir('prescricao')" title="Abre a prescrição da Memed com este paciente: receita (inclusive controle especial), exames, atestado, declaração, laudo — assinados com o seu certificado. Os dados do paciente vão para a Memed."><span class="icon">💊</span> Emitir pela Memed</button>
     <button class="btn" onclick="prescricao.exportar()"><span class="icon">⬇️</span> Exportar</button>
     <button class="btn btn-ghost" onclick="actions.importarJSONPara('prescricao')"><span class="icon">⬆️</span> Importar</button>
     <div class="action-divider"></div>
@@ -8338,6 +8339,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <button class="btn" onclick="historico.abrir('emitidos')" title="Atestados, declarações, laudos, receitas e termos já emitidos — de qualquer paciente: ver, reimprimir, gerar PDF ou abrir para editar"><span class="icon">🔍</span> Buscar / Reimprimir</button>
     <div class="action-divider"></div>
     <button class="btn" onclick="printPreview.abrir()"><span class="icon">🖨️</span> Visualizar / Imprimir</button>
+    <button class="btn memed-btn" style="display:none" onclick="memedRx.abrir('documentos')" title="Abre a prescrição da Memed com este paciente: receita, exames, atestado, declaração, laudo — assinados com o seu certificado. Os dados do paciente vão para a Memed."><span class="icon">💊</span> Emitir pela Memed</button>
     <button class="btn" onclick="documentos.exportar()"><span class="icon">⬇️</span> Exportar</button>
     <div class="action-divider"></div>
     <button class="btn btn-danger" onclick="documentos.limpar()"><span class="icon">🗑️</span> Limpar</button>
@@ -28772,6 +28774,14 @@ const documentos = {
   carregar(item) {
     if (!item) item = store.last('documentos');
     if (!item) { toast('Nenhum documento salvo', 'warn'); return; }
+    /* emitido pela Memed: o original assinado está lá, não neste formulário */
+    if (item.modelo === 'memed') {
+      modal.open('💊 Emitido pela Memed', memedRx.resumoHTML(item),
+        '<button class="btn" id="memed-ver-fechar">Fechar</button><button class="btn btn-primary" id="memed-ver-abrir">Abrir na Memed</button>');
+      document.getElementById('memed-ver-fechar').addEventListener('click', () => modal.close());
+      document.getElementById('memed-ver-abrir').addEventListener('click', () => { modal.close(); memedRx.ver(item); });
+      return;
+    }
     item = adendos.vigente('documentos', item);
     utils.clearForm('form-documentos');
     utils.fillForm('form-documentos', item);
@@ -54166,6 +54176,7 @@ const agenda = {
       ocorre no gov.br/app do provedor; o app nunca guarda PIN/chave.
 ============================================================================ -->
 <script src="src/integrations/signature-digital.js"></script>
+<script src="src/integrations/memed.js"></script>
 
 <!-- (a barra Vitais/Dose rápida foi absorvida pelo speed dial ⚡) -->
 <div class="dose-overlay" id="dose-overlay" onclick="doseRapida.fechar()"></div>

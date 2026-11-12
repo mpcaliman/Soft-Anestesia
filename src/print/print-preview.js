@@ -3018,6 +3018,12 @@ ${TAG_CLOSE_HTML}`;
     const modelo = d.modelo || 'atestado';
     const meta = `${utils.formatarData(d.data) || new Date().toLocaleDateString('pt-BR')}`;
     if (modelo === 'exames') return printPreview._buildExames(d, meta);
+    /* emitido pela Memed: o original assinado está lá; aqui sai só o registro */
+    if (modelo === 'memed') {
+      const itens = (Array.isArray(d.memed_itens) ? d.memed_itens : []).map(it => it.nome + (it.tuss ? ' (TUSS ' + it.tuss + ')' : '')).join('\n');
+      return printPreview._docDeclaratorio('REGISTRO DE DOCUMENTO EMITIDO PELA MEMED', meta,
+        'Paciente: ' + (d.nome || '') + '\n\n' + (itens || 'Documento emitido pela Memed.') + '\n\nO documento original, assinado digitalmente, está na Memed (identificador ' + (d.memed_id || '—') + ').', d, 'Registro Memed');
+    }
     if (modelo === 'declaracao') {
       const texto = (d.decl_texto || '').trim() || prescricao._gerarTextoDeclaracao(d);
       return printPreview._docDeclaratorio('DECLARAÇÃO DE COMPARECIMENTO', meta, texto, d, 'Declaração de comparecimento');

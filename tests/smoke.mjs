@@ -25413,6 +25413,51 @@ await test('Cobrança respondida enquanto esperava a vez não reabre "como se n�
   await page.close();
 });
 
+await test('Memed: abre com o paciente da tela, o emitido vira registro em Documentos emitidos e reabre na Memed', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const enviados = [];
+    /* a Memed de verdade não carrega no teste: o módulo dela é simulado */
+    window.MdHub = { command: { send: async (mod, cmd, arg) => { enviados.push([mod, cmd, arg]); } }, module: { show: (m) => enviados.push(['show', m]) }, event: { add() {} } };
+    out.escondidoSemFuncao = Array.from(document.querySelectorAll('.memed-btn')).every(b => b.style.display === 'none');
+    memedRx._token = 'tok-teste'; memedRx._pronto = true; memedRx._ambiente = 'homologacao';
+    store.setList('pacientes', [{ _id: 'pac-memed-1', nome: 'Maria Memed Teste', cpf: '529.982.247-25', nascimento: '1980-03-15', telefone: '(73) 99999-0000', sexo: 'Feminino', peso: '62,5' }]);
+    location.hash = '#documentos'; await new Promise(res => setTimeout(res, 300));
+    documentos.novo();
+    document.querySelector('#form-documentos [name="nome"]').value = 'Maria Memed Teste';
+    out.abriu = await memedRx.abrir('documentos');
+    const pac = (enviados.find(e => e[1] === 'setPaciente') || [])[2] || {};
+    out.paciente = pac.nome === 'Maria Memed Teste' && pac.cpf === '52998224725' && pac.data_nascimento === '15/03/1980' && pac.telefone === '73999990000' && pac.peso === 63 && pac.sexo === 'Feminino' && pac.idExterno === 'pac-memed-1';
+    out.mostrou = enviados.some(e => e[0] === 'show' && e[1] === 'plataforma.prescricao');
+    /* sem nome não abre nem manda nada */
+    document.querySelector('#form-documentos [name="nome"]').value = '';
+    const antes = enviados.length;
+    out.semNomeNaoAbre = (await memedRx.abrir('documentos')) === false && enviados.length === antes;
+    /* a Memed avisa que emitiu */
+    const salvo = memedRx._aoEmitir({ prescricao: { id: 987654, medicamentos: [
+      { nome: 'Dipirona sódica 500mg', tipo: 'alopático', receituario: 'Simples' },
+      { nome: 'Hemograma completo', tipo: 'exame', exames_tuss_codigo: '40304361' },
+      { nome: 'Atestado de afastamento', tipo: 'custom', custom_categoria: 'atestado' }] } });
+    out.registro = !!salvo && salvo.modelo === 'memed' && salvo.memed_id === '987654' && salvo.memed_itens.length === 3 && salvo.nome === 'Maria Memed Teste';
+    out.busca = /Emitido pela Memed/.test(historico._detalheDe('documentos', salvo)) && /Dipirona/.test(historico._detalheDe('documentos', salvo));
+    documentos.carregar(store.getById('documentos', salvo._id));
+    out.modal = /Emitido pela Memed/.test(document.getElementById('modal-title').textContent) && /TUSS 40304361/.test(document.getElementById('modal-body').innerHTML);
+    document.getElementById('memed-ver-abrir').click();
+    await new Promise(res => setTimeout(res, 50));
+    out.reabre = enviados.some(e => e[1] === 'viewPrescription' && e[2] === '987654');
+    try { modal.close(); } catch (e) {}
+    store.setList('pacientes', []);
+    return out;
+  });
+  assert(r.abriu && r.paciente && r.mostrou, 'abre a Memed com os dados que a receita precisa: ' + JSON.stringify(r));
+  assert(r.escondidoSemFuncao, 'sem a função publicada, o botão da Memed não aparece');
+  assert(r.semNomeNaoAbre, 'sem paciente não abre nem envia nada');
+  assert(r.registro && r.busca, 'o emitido vira registro em Documentos emitidos');
+  assert(r.modal && r.reabre, 'o registro mostra os itens e reabre na Memed');
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

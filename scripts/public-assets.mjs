@@ -39,6 +39,7 @@ export const publicAssets = Object.freeze([
   'src/ui/action-feedback.js',
   'src/shared/soft-qr.js',
   'src/integrations/signature-digital.js',
+  'src/integrations/memed.js',
   'src/domain/anesthesia-quick-commands.js',
   'src/ui/anesthesia-patient-bar.js',
   'src/ui/anesthesia-dose-panel.js',
