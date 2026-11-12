@@ -7325,15 +7325,18 @@ await test('Cortesia é uma das ações da pendência de convênio e chega ao fi
   const r = await page.evaluate(() => {
     const out = {};
     store.setList('pre', []); store.setList('financeiro', []);
+    /* data RELATIVA: a pendência só olha os últimos 90 dias, e uma data fixa
+       envelhece até sair da janela (foi o que aconteceu com 2026-08-13) */
+    const DIA = new Date(Date.now() - 10 * 86400000).toISOString().slice(0, 10);
     out.estaNasOpcoes = pendencias.STATUS.some(([k, rot]) => k === 'cortesia' && /cortesia/i.test(rot));
 
     /* uma pré de plano, com o lançamento financeiro que ela gerou */
     const pre1 = store.save('pre', {
-      nome: 'Ana Souza', data: '2026-08-13', convenio: 'Bradesco Saúde', cirurgia: 'Colecistectomia'
+      nome: 'Ana Souza', data: DIA, convenio: 'Bradesco Saúde', cirurgia: 'Colecistectomia'
     });
     const lanc = store.save('financeiro', {
       _origemId: pre1._id, paciente: 'Ana Souza', convenio: 'Bradesco Saúde',
-      data_proc: '2026-08-13', valor_previsto: 1200, status: 'pendente', pago: false
+      data_proc: DIA, valor_previsto: 1200, status: 'pendente', pago: false
     });
     /* o caso entra UMA vez, pela linha do financeiro — é nela que o
        faturamento acontece; a pré cede a vez ao lançamento que nasceu dela */
@@ -7355,7 +7358,7 @@ await test('Cortesia é uma das ações da pendência de convênio e chega ao fi
 
     /* marcada direto no próprio lançamento financeiro, funciona igual */
     const solto = store.save('financeiro', {
-      paciente: 'Bia', convenio: 'Amil', data_proc: '2026-08-13',
+      paciente: 'Bia', convenio: 'Amil', data_proc: DIA,
       valor_previsto: 800, status: 'pendente', pago: false
     });
     pendencias.marcarStatus('financeiro', solto._id, 'cortesia', true);
