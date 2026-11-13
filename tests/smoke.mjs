@@ -25641,6 +25641,31 @@ await test('Textos padrão da pré: campos de uma linha e listas entram em Ajust
   await page.close();
 });
 
+await test('Acesso venoso: a janela abre com o horário da punção em destaque, já com o horário do evento', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    location.hash = '#anestesia'; await new Promise(res => setTimeout(res, 400));
+    try { anestesia.limparSilencioso(); } catch (e) {}
+    const cb = document.querySelector('#form-anestesia input[type="checkbox"][value="Acesso venoso periférico"]');
+    cb.click();
+    await new Promise(res => setTimeout(res, 900));
+    const jan = document.querySelector('.bloq-janela');
+    const hora = jan && jan.querySelector('input[type="time"][data-campo="hora"]');
+    out.temHora = !!hora && /Horário da punção/.test(jan.innerText);
+    const ordem = jan ? Array.from(jan.querySelectorAll('input[type="time"], select[data-campo="tipo"]')) : [];
+    out.primeiro = ordem[0] === hora;
+    const evt = anestesia.eventos._linhaDoTipo('Venoclise');
+    out.preenchida = !!hora && !!hora.value && hora.value === (evt.querySelector('[name="evt_hora[]"]') || {}).value;
+    hora.value = '07:42'; hora.dispatchEvent(new Event('change', { bubbles: true }));
+    out.sincroniza = (anestesia.eventos._linhaDoTipo('Venoclise').querySelector('[name="evt_hora[]"]') || {}).value === '07:42';
+    try { anestesia.tecnicaDet.fecharJanela(); } catch (e) {}
+    return out;
+  });
+  assert(r.temHora && r.primeiro && r.preenchida && r.sincroniza, 'horário do acesso venoso visível, preenchido e sincronizado: ' + JSON.stringify(r));
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

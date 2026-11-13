@@ -4910,7 +4910,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-11-13a</b><br>
+    v7.1 · build <b id="build-tag">2026-11-13b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -36365,10 +36365,13 @@ const anestesia = {
         if (h) { el.value = h; return; }
       }
     },
+    /* O HORÁRIO VEM PRIMEIRO E À VISTA. Ficava no pé da janela, pequeno e
+       vazio, e passava por "não tem onde pôr o horário". Agora abre a janela,
+       com rótulo claro e já com o horário do evento da linha do tempo. */
     _horaHTML(valor) {
       if (!anestesia.disp._tipoEvento(valor)) return '';
-      return `<label style="display:inline-flex;align-items:center;gap:6px;margin-top:6px;font-size:.82rem;font-weight:400">⏱ Horário
-        <input type="time" data-campo="hora" data-disp="${utils.escapeAttr(valor)}" style="width:auto" onchange="anestesia.disp.aoMudarHora(${utils.jsArg(valor)})" oninput="anestesia.disp.aoMudarHora(${utils.jsArg(valor)})"></label>`;
+      return `<div style="display:flex;align-items:center;gap:8px;margin:0 0 8px;padding:6px 10px;background:var(--primary-soft);border-radius:8px;font-size:.88rem;font-weight:600;color:var(--primary-darker)">⏱ Horário da punção
+        <input type="time" data-campo="hora" data-disp="${utils.escapeAttr(valor)}" style="width:auto;font-weight:400" title="Mesmo horário do evento na linha do tempo: mudou aqui, muda lá" onchange="anestesia.disp.aoMudarHora(${utils.jsArg(valor)})" oninput="anestesia.disp.aoMudarHora(${utils.jsArg(valor)})"></div>`;
     },
     _sel(disp, campo) {
       const el = document.querySelector('[data-campo="' + campo + '"][data-disp="' + disp + '"]');
@@ -36414,6 +36417,7 @@ const anestesia = {
           const op = anestesia.disp.OPCOES[valor];
           if (op) {
             div.innerHTML = `<label>${valor} <small style="color:var(--text-mute);font-weight:400">— tipo e calibre</small></label>
+              ${anestesia.disp._horaHTML(valor)}
               <div style="display:flex;gap:6px;flex-wrap:wrap">
                 <select data-campo="tipo" data-disp="${utils.escapeAttr(valor)}" style="flex:2;min-width:120px" onchange="anestesia.disp.montarDet(${utils.jsArg(valor)})">
                   <option value="">${op.rotTipo}</option>${op.tipos.map(t => '<option>' + t + '</option>').join('')}
@@ -36430,12 +36434,11 @@ const anestesia = {
               </div>
               <input type="text" name="disp_det[]" data-disp="${valor}" placeholder="montado do que você marcou" style="margin-top:6px"
                 oninput="this.dataset.manual='1'; anestesia.eventos.atualizarDescricoes()">
-              ${anestesia.disp._horaHTML(valor)}
               ${anestesia.disp._previoHTML(valor)}`;
           } else {
             div.innerHTML = `<label>${valor} <small style="color:var(--text-mute);font-weight:400">— detalhes</small></label>
-              <input type="text" name="disp_det[]" data-disp="${valor}" placeholder="Ex.: tamanho, local, calibre" oninput="anestesia.eventos.atualizarDescricoes()">
               ${anestesia.disp._horaHTML(valor)}
+              <input type="text" name="disp_det[]" data-disp="${valor}" placeholder="Ex.: tamanho, local, calibre" oninput="anestesia.eventos.atualizarDescricoes()">
               ${anestesia.disp._previoHTML(valor)}`;
           }
           cont.appendChild(div);
