@@ -3599,8 +3599,8 @@ await test('Pré finalizada oferece o Termo; pré + termo saem num arquivo únic
     out.semNomeNaoAbre = !document.getElementById('print-preview-overlay').classList.contains('show');
 
     /* o botão está nas duas barras de ação */
-    out.botaoPre = !!document.querySelector('#module-pre [data-soft-name-click="printPreview.abrirPreTermo"], [onclick="printPreview.abrirPreTermo()"]');
-    out.botaoTermo = !!document.querySelector('#module-termo [data-soft-name-click="printPreview.abrirPreTermo"], [onclick="printPreview.abrirPreTermo()"]');
+    out.botaoPre = !!document.querySelector('#module-pre [data-soft-name-click="printPreview.preTermoDaTela"], [onclick="printPreview.preTermoDaTela()"]');
+    out.botaoTermo = !!document.querySelector('#module-termo [data-soft-name-click="printPreview.preTermoDaTela"], [onclick="printPreview.preTermoDaTela()"]');
 
     store.setList('pre', []); store.setList('termo', []);
     return out;
@@ -11708,7 +11708,6 @@ await test('Nuvem: o link do e-mail abre a definição de nova senha e não vira
   const page = await browser.newPage();
   await isolarWebSocketsDaNuvem(page);
   await page.route('**://*.supabase.co/**', route => route.abort());
-  page.on('dialog', d => d.dismiss());
   await page.goto(APP_URL + '#access_token=TOK123&expires_in=3600&type=recovery');
   await page.waitForFunction(() => typeof cloud !== 'undefined');
   const r = await page.evaluate(async () => {
@@ -25455,6 +25454,215 @@ await test('Memed: abre com o paciente da tela, o emitido vira registro em Docum
   assert(r.semNomeNaoAbre, 'sem paciente não abre nem envia nada');
   assert(r.registro && r.busca, 'o emitido vira registro em Documentos emitidos');
   assert(r.modal && r.reabre, 'o registro mostra os itens e reabre na Memed');
+  await page.close();
+});
+
+await test('Pré + termo juntos: os três botões montam a folha com o conteúdo de cada um, carregado na própria tela', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const espera = ms => new Promise(res => setTimeout(res, ms));
+    __smokeBindOrg('org-junto');
+    const hoje = new Date().toISOString().slice(0, 10);
+    const reset = () => {
+      store.setList('pre', [{ _id: 'preJ', nome: 'Paciente Junto Conteudo', data: hoje, cirurgia: 'Colecistectomia', comorbidades: 'Hipertensão arterial controlada', alergias: 'Dipirona', _finalizado: true, _links: { termo_id: 'terJ' } }]);
+      store.setList('termo', [{ _id: 'terJ', nome: 'Paciente Junto Conteudo', data: hoje, procedimento: 'Colecistectomia videolaparoscópica', riscos: 'Risco específico de teste', _finalizado: true, _links: { pre_id: 'preJ' } }]);
+      try { printPreview.fechar(); } catch (e) {}
+      try { pre._zerar(); termo._zerar(); } catch (e) {}
+    };
+    const folha = () => document.getElementById('ppp').textContent || '';
+    const conferir = () => /Hipertensão arterial controlada/.test(folha()) && /Dipirona/.test(folha()) && /2ª parte — Termo/.test(folha()) && /Colecistectomia videolaparoscópica/.test(folha());
+    /* 1) painel de fechamento */
+    reset(); location.hash = '#dashboard'; await espera(200);
+    fechamento._gravar({ mod: 'pre', id: 'preJ', nome: 'Paciente Junto Conteudo', feitos: {} });
+    fechamento.imprimirJuntos(); await espera(1500);
+    out.fechamento = conferir();
+    /* 2) janela ao finalizar a pré */
+    reset(); location.hash = '#dashboard'; await espera(200);
+    pre._imprimirJuntoDe('preJ'); await espera(1500);
+    out.aoFinalizar = conferir();
+    out.zeraAoFechar = Array.isArray(printPreview._zerarAoFechar) && printPreview._zerarAoFechar.includes('pre');
+    /* 3) barra de cima, com a pré salva na tela */
+    reset(); location.hash = '#pre'; await espera(200);
+    pre.carregar(store.getById('pre', 'preJ')); await espera(200);
+    printPreview.preTermoDaTela(); await espera(1500);
+    out.barra = conferir();
+    out.barraNaoZera = !printPreview._zerarAoFechar;
+    /* sem termo ligado: sai a pré, e avisa */
+    reset(); store.setList('pre', [Object.assign({}, store.getById('pre', 'preJ'), { _links: {} })]);
+    pre._imprimirJuntoDe('preJ'); await espera(1500);
+    out.soPre = /Hipertensão arterial controlada/.test(folha()) && !/2ª parte/.test(folha());
+    try { printPreview.fechar(); } catch (e) {}
+    fechamento._gravar(null);
+    return out;
+  });
+  assert(r.fechamento, 'painel de fechamento: pré e termo com o conteúdo: ' + JSON.stringify(r));
+  assert(r.aoFinalizar && r.zeraAoFechar, 'janela ao finalizar: pré e termo com o conteúdo, e a tela volta vazia');
+  assert(r.barra && r.barraNaoZera, 'barra: pré e termo com o conteúdo, sem apagar o que está na tela');
+  assert(r.soPre, 'sem termo ligado, sai a pré sozinha');
+  await page.close();
+});
+
+await test('Pendências de convênio: cada coluna ordena (crescente, decrescente, original) e a escolha fica guardada', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const d = n => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
+    store.setList('pre', []);
+    store.setList('financeiro', [
+      { _id: 'pA', paciente: 'Bruno', convenio: 'Bradesco Saúde', data_proc: d(5), status: 'pendente', pago: false },
+      { _id: 'pB', paciente: 'Ana', convenio: 'Amil', data_proc: d(2), status: 'pendente', pago: false },
+      { _id: 'pC', paciente: 'Carla', convenio: 'SulAmérica', data_proc: d(9), status: 'pendente', pago: false }]);
+    try { localStorage.removeItem(pendencias.ORDEM_KEY); } catch (e) {}
+    const nomes = () => Array.from(document.querySelectorAll('#modal-body tbody tr td:nth-child(2) b')).map(b => b.textContent);
+    pendencias.abrir(false);
+    out.original = nomes().join(',') === 'Carla,Bruno,Ana';
+    pendencias.ordenarPor('paciente');
+    out.asc = nomes().join(',') === 'Ana,Bruno,Carla' && /Paciente ▲/.test(document.getElementById('modal-body').innerHTML);
+    pendencias.ordenarPor('paciente');
+    out.desc = nomes().join(',') === 'Carla,Bruno,Ana' && /Paciente ▼/.test(document.getElementById('modal-body').innerHTML);
+    pendencias.ordenarPor('plano');
+    out.plano = nomes().join(',') === 'Ana,Bruno,Carla';
+    out.guardou = JSON.parse(localStorage.getItem(pendencias.ORDEM_KEY)).col === 'plano';
+    pendencias.ordenarPor('plano'); pendencias.ordenarPor('plano');
+    out.volta = nomes().join(',') === 'Carla,Bruno,Ana' && !localStorage.getItem(pendencias.ORDEM_KEY);
+    modal.close(); store.setList('financeiro', []);
+    return out;
+  });
+  assert(r.original && r.asc && r.desc && r.plano && r.guardou && r.volta, 'ordenação das pendências: ' + JSON.stringify(r));
+  await page.close();
+});
+
+await test('Tabelas de códigos: código no padrão da CBHPM, descrição oficial que não corta e Cir/AN também na cobrança', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const c = cbhpm.tabela().find(x => x[2] && x[3] > 0 && !(cbhpm.info(x) || {}).anestesico);
+    const digitos = c[0].replace(/\D/g, '');
+    location.hash = '#financeiro'; await new Promise(res => setTimeout(res, 300));
+    financeiro.editar(null);
+    document.getElementById('fin-codigos-body').innerHTML = '';
+    const tr = financeiro.codigos.add({ codigo: digitos, descricao: 'descrição digitada de outro jeito' });
+    out.finNormaliza = tr.querySelector('[name="fin_cod_codigo[]"]').value === c[0] && tr.querySelector('[name="fin_cod_desc[]"]').value === c[1];
+    out.finTextarea = tr.querySelector('[name="fin_cod_desc[]"]').tagName === 'TEXTAREA';
+    const tr2 = financeiro.codigos.add({});
+    const cod2 = tr2.querySelector('[name="fin_cod_codigo[]"]'); cod2.value = digitos; codigosUI.aoMudarCodigo(cod2, 'fin');
+    out.finAoDigitar = cod2.value === c[0] && tr2.querySelector('[name="fin_cod_desc[]"]').value === c[1];
+    /* janela da cobrança */
+    document.body.insertAdjacentHTML('beforeend', '<table id="fz-codigos-teste"><tbody id="fz-codigos-body"></tbody></table>');
+    const fz = fin.finalizacao.addLinha({ codigo: digitos, descricao: 'outro texto', porte: c[2] });
+    out.fzNormaliza = fz.querySelector('[name="fz_cod[]"]').value === c[0] && fz.querySelector('[name="fz_desc[]"]').value === c[1];
+    out.fzMesmoDesenho = fz.querySelector('[name="fz_desc[]"]').tagName === 'TEXTAREA' && !!fz.querySelector('[name="fz_porte_tipo[]"]') && !!fz.querySelector('.fin-porte-cel');
+    const sel = fz.querySelector('[name="fz_porte_tipo[]"]'); sel.value = 'an'; fin.finalizacao._onTipoPorte(sel);
+    out.fzAN = fz.querySelector('[name="fz_porte[]"]').value === 'AN ' + c[3];
+    document.getElementById('fz-codigos-teste').remove();
+    /* código que a CBHPM não conhece fica como foi digitado */
+    const tr3 = financeiro.codigos.add({ codigo: '99999999', descricao: 'Procedimento próprio' });
+    out.desconhecido = tr3.querySelector('[name="fin_cod_codigo[]"]').value === '99999999' && tr3.querySelector('[name="fin_cod_desc[]"]').value === 'Procedimento próprio';
+    return out;
+  });
+  assert(r.finNormaliza && r.finTextarea && r.finAoDigitar, 'Financeiro: código e descrição no padrão: ' + JSON.stringify(r));
+  assert(r.fzNormaliza && r.fzMesmoDesenho && r.fzAN, 'cobrança: mesmo padrão e mesmo desenho, com Cir/AN');
+  assert(r.desconhecido, 'código fora da CBHPM não é alterado');
+  await page.close();
+});
+
+await test('Atender da agenda: oferece o pré-lançamento e os registros anteriores; fonte só preenche campos equivalentes', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    const espera = ms => new Promise(res => setTimeout(res, ms));
+    const hoje = new Date().toISOString().slice(0, 10);
+    store.setList('anestesia', []); store.setList('recuperacao', []);
+    store.setList('pre', [{ _id: 'preAberta', nome: 'Maria D Ajuda Teste', data: hoje, comorbidades: 'DM2 lançado pela secretária', cirurgia: '' }]);
+    store.setList('consulta', [{ _id: 'consAnt', nome: 'Maria D Ajuda Teste', data: '2026-01-10', alergias: 'Penicilina', antecedentes: 'Sem intercorrências', conclusao: 'não copiar', _finalizado: true }]);
+    store.setList('agenda', [{ _id: 'ag1', paciente: 'Maria D Ajuda Teste', tipo: 'Pré-anestésico', data: hoje, procedimento: 'Herniorrafia', convenio: 'Bradesco Saúde', status: 'confirmado' }]);
+    agenda._iniciarAtendimento('ag1', 'pre');
+    await espera(100);
+    const corpo = document.getElementById('modal-body').innerHTML;
+    out.janela = /Já existem registros/.test(document.getElementById('modal-title').textContent) && /Continuar este/.test(corpo) && /Usar como fonte/.test(corpo);
+    out.destaquePrimeiro = (agenda._antAtual[0] || {}).doc && agenda._antAtual[0].doc._id === 'preAberta';
+    /* continuar o pré-lançamento */
+    modal.close(); agenda._continuar('ag1', 0); await espera(800);
+    const f = document.getElementById('form-pre');
+    out.continuou = f.querySelector('[name="_id"]').value === 'preAberta' && /secretária/.test(f.querySelector('[name="comorbidades"]').value);
+    out.completouAgenda = f.querySelector('[name="cirurgia"]').value === 'Herniorrafia';
+    /* usar a consulta como fonte, num atendimento novo */
+    agenda._iniciarAtendimento('ag1', 'pre');
+    const iCons = agenda._antAtual.findIndex(a => a.doc._id === 'consAnt');
+    modal.close(); agenda._usarFonte('ag1', 'pre', iCons); await espera(1200);
+    out.novo = !f.querySelector('[name="_id"]') || f.querySelector('[name="_id"]').value !== 'preAberta';
+    out.fonte = f.querySelector('[name="alergias"]').value === 'Penicilina' && f.querySelector('[name="antecedentes"]').value === 'Sem intercorrências';
+    out.naoCopiaProprio = !/não copiar/.test(f.querySelector('[name="conclusao"]') ? f.querySelector('[name="conclusao"]').value : '');
+    /* sem nada anterior, abre direto */
+    store.setList('agenda', [{ _id: 'ag2', paciente: 'Paciente Sem Historico', tipo: 'Pré-anestésico', data: hoje }]);
+    modal.close(); agenda._iniciarAtendimento('ag2', 'pre'); await espera(500);
+    out.direto = !document.getElementById('modal-backdrop').classList.contains('show') && f.querySelector('[name="nome"]').value === 'Paciente Sem Historico';
+    store.setList('pre', []); store.setList('consulta', []); store.setList('agenda', []);
+    return out;
+  });
+  assert(r.janela && r.destaquePrimeiro, 'Atender mostra o que já existe, com o pré-lançamento em destaque: ' + JSON.stringify(r));
+  assert(r.continuou && r.completouAgenda, 'continuar abre o pré-lançamento e completa o vazio com a agenda');
+  assert(r.novo && r.fonte && r.naoCopiaProprio, 'fonte: atendimento novo com os campos equivalentes, sem o que é próprio do registro antigo');
+  assert(r.direto, 'sem registros anteriores, começa direto');
+  await page.close();
+});
+
+await test('Textos padrão da pré: campos de uma linha e listas entram em Ajustes; "Padrões" só preenche o vazio', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    location.hash = '#pre'; await new Promise(res => setTimeout(res, 300));
+    pre._zerar();
+    textosPadrao._descobrir();
+    const f = document.getElementById('form-pre');
+    const sel = Array.from(f.querySelectorAll('select[name]')).find(s => textosPadrao.tipoDe('pre', s.name) === 'select' && s.options.length > 2);
+    out.temLista = !!sel;
+    out.temUmaLinha = textosPadrao.tipoDe('pre', 'lab_ecg') === 'text';
+    out.semIdentificacao = !textosPadrao.CAMPOS.pre.nome && !textosPadrao.CAMPOS.pre.cpf && !textosPadrao.CAMPOS.pre.convenio;
+    const opc = Array.from(sel.options).find(o => o.value)?.value;
+    textosPadrao.set('pre', sel.name, opc);
+    textosPadrao.set('pre', 'lab_ecg', 'Ritmo sinusal, sem alterações');
+    textosPadrao.set('pre', 'alergias', 'Nega alergias');
+    textosPadrao.set('pre', 'comorbidades', 'Nega comorbidades');
+    f.querySelector('[name="comorbidades"]').value = 'HAS';
+    const n = textosPadrao.preencherVazios('pre');
+    out.preencheu = sel.value === opc && f.querySelector('[name="lab_ecg"]').value === 'Ritmo sinusal, sem alterações' && f.querySelector('[name="alergias"]').value === 'Nega alergias';
+    out.naoSobrescreve = f.querySelector('[name="comorbidades"]').value === 'HAS' && n === 3;
+    textosPadrao.renderAjustes();
+    const host = document.getElementById('textos-padrao-editor');
+    out.ajustes = !!(host && host.querySelector('select[data-tp-campo="' + sel.name + '"]') && host.querySelector('input[data-tp-campo="lab_ecg"]'));
+    textosPadrao._salvarStore({});
+    return out;
+  });
+  assert(r.temLista && r.temUmaLinha && r.semIdentificacao, 'campos de lista e de uma linha entram, identificação não: ' + JSON.stringify(r));
+  assert(r.preencheu && r.naoSobrescreve, '"Padrões" preenche só o que está vazio');
+  assert(r.ajustes, 'Ajustes mostra lista e campo de uma linha');
+  await page.close();
+});
+
+await test('Acesso venoso: a janela abre com o horário da punção em destaque, já com o horário do evento', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    location.hash = '#anestesia'; await new Promise(res => setTimeout(res, 400));
+    try { anestesia.limparSilencioso(); } catch (e) {}
+    const cb = document.querySelector('#form-anestesia input[type="checkbox"][value="Acesso venoso periférico"]');
+    cb.click();
+    await new Promise(res => setTimeout(res, 900));
+    const jan = document.querySelector('.bloq-janela');
+    const hora = jan && jan.querySelector('input[type="time"][data-campo="hora"]');
+    out.temHora = !!hora && /Horário da punção/.test(jan.innerText);
+    const ordem = jan ? Array.from(jan.querySelectorAll('input[type="time"], select[data-campo="tipo"]')) : [];
+    out.primeiro = ordem[0] === hora;
+    const evt = anestesia.eventos._linhaDoTipo('Venoclise');
+    out.preenchida = !!hora && !!hora.value && hora.value === (evt.querySelector('[name="evt_hora[]"]') || {}).value;
+    hora.value = '07:42'; hora.dispatchEvent(new Event('change', { bubbles: true }));
+    out.sincroniza = (anestesia.eventos._linhaDoTipo('Venoclise').querySelector('[name="evt_hora[]"]') || {}).value === '07:42';
+    try { anestesia.tecnicaDet.fecharJanela(); } catch (e) {}
+    return out;
+  });
+  assert(r.temHora && r.primeiro && r.preenchida && r.sincroniza, 'horário do acesso venoso visível, preenchido e sincronizado: ' + JSON.stringify(r));
   await page.close();
 });
 

@@ -72,6 +72,11 @@ let n = 0; const ok = (m) => { n++; console.log('  ✓ ' + m); };
   assert.ok(!validarPrescritor(prescritor).erro);
   ok('validação do prescritor: UF e data no formato da Memed'); }
 
+{ const { h } = montar({ respostas: [{ status: 503, body: {} }] });
+  const r = await h(req('token')); const d = await r.json();
+  assert.equal(d.foraDoAr, true); assert.match(d.erro, /fora do ar/); assert.doesNotMatch(d.erro, /HTTP/);
+  ok('Memed fora do ar (5xx): mensagem clara, sem código técnico'); }
+
 { const { h } = montar({ env: { MEMED_API_URL: 'https://api.memed.com.br/v1' } });
   const d = await (await h(req('health', { metodo: 'GET', jwt: '' }))).json(); assert.equal(d.ambiente, 'producao');
   ok('produção só com a URL de produção configurada'); }

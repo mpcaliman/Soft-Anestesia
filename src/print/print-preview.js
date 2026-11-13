@@ -392,6 +392,80 @@ const printPreview = {
      documento e a secretária imprime uma vez. O termo começa em página nova.
      Vale a partir da PRÉ ou do TERMO: o que não estiver no formulário aberto
      é buscado no mesmo paciente/caso, nunca apenas pelo nome. */
+  /* JUNTAR É IMPRIMIR CADA UM PELO SEU CAMINHO, E SÓ ENTÃO EMENDAR.
+     A junção montava os dois documentos sem abrir a tela de nenhum deles; na
+     prática a folha saía com cabeçalho e assinatura (que vêm do cadastro) e
+     os campos vazios. A impressão isolada sempre funcionou — então a junção
+     passa a fazer exatamente o que ela faz: abre o registro na tela do
+     próprio módulo, monta a folha ali, e só então emenda a segunda. */
+  _BUILDERS_PAR: { pre: '_buildPre', termo: '_buildTermo', anestesia: '_buildAnestesia', recuperacao: '_buildRecuperacao' },
+  _CAPITULO_PAR: { termo: '2ª parte — Termo de consentimento (TCLE)', recuperacao: '2ª parte — Recuperação pós-anestésica (SRPA)' },
+  _carregarNaTela(mod, doc, aoPronto, aoFalhar) {
+    ui.irEEntao(mod, '#form-' + mod, () => {
+      try {
+        if (mod === 'pre') pre.carregar(doc);
+        else if (mod === 'termo') termo.carregar(doc);
+        else if (mod === 'anestesia') anestesia.carregar(doc);
+        else if (mod === 'recuperacao') recuperacao.carregar(doc);
+      } catch (e) { aoFalhar(e); return; }
+      printPreview._quandoCarregado('form-' + mod, doc._id, () => setTimeout(aoPronto, 120), () => aoFalhar(new Error('O registro não terminou de abrir')));
+    });
+  },
+  imprimirPar(paiMod, paiDoc, filhoMod, filhoDoc, opts = {}) {
+    if (!paiDoc || !paiDoc._id) { toast('Não encontrei o registro para imprimir.', 'warn'); return; }
+    const falhou = (e) => toast('Não consegui montar a impressão conjunta' + (e && e.message ? ': ' + e.message : '') + '. Imprima cada um pelo seu módulo.', 'error');
+    const compor = (mod) => printPreview._comporDocumento(mod, printPreview[printPreview._BUILDERS_PAR[mod]]);
+    printPreview._carregarNaTela(paiMod, paiDoc, () => {
+      let htmlPai;
+      try { htmlPai = compor(paiMod); } catch (e) { falhou(e); return; }
+      const terminar = (htmlFilho) => {
+        try {
+          const ppp = document.getElementById('ppp');
+          if (!ppp) { toast('Erro: container de preview não encontrado', 'error'); return; }
+          const capitulo = '<div class="pp-capitulo" style="margin:14px 0 12px;padding:9px 14px;background:#eef2f7;border-left:5px solid #3b5b7e;font-weight:700;font-size:13pt;color:#22384f;break-inside:avoid;page-break-inside:avoid;page-break-after:avoid;break-after:avoid">' + utils.escapeHTML(printPreview._CAPITULO_PAR[filhoMod] || '2ª parte') + '</div>';
+          const quebra = filhoMod === 'termo' ? '<div class="pp-quebra" style="page-break-before:always;break-before:page"></div>' : '';
+          ppp.innerHTML = htmlPai + (htmlFilho ? quebra + capitulo + htmlFilho : '');
+          printPreview._verCtx = { mod: paiMod, formId: 'form-' + paiMod };
+          const paciente = printPreview._nomePacienteDoFormulario(paiMod);
+          const rot = paiMod === 'pre' ? (htmlFilho ? 'APA+TCLE' : 'APA') : (htmlFilho ? 'Ficha-Anestesia+SRPA' : 'Ficha-Anestesia');
+          printPreview._nomeArquivoOverride = printPreview._sanitizarPaciente(paciente) + '_' + rot + '_' + printPreview._dataCriacao();
+          const info = document.getElementById('ppt-info');
+          if (info) info.textContent = htmlFilho ? (paiMod === 'pre' ? 'Pré-anestésica + Termo (arquivo único)' : 'Ficha de anestesia + SRPA (arquivo único)') : printPreview._infoLabel(paiMod);
+          const filenameEl = document.getElementById('ppt-filename');
+          if (filenameEl) filenameEl.textContent = '📁 ' + printPreview._gerarNomeArquivo();
+          /* depois de finalizar as telas voltam vazias; quem abriu da barra, com o
+             registro na tela de propósito, continua com ele */
+          if (opts.zerar !== false) printPreview._zerarAoFechar = htmlFilho ? [paiMod, filhoMod] : [paiMod];
+          document.getElementById('print-preview-overlay').classList.add('show');
+          try { printPreview.refreshSignature(); } catch (e) {}
+          if (!htmlFilho && filhoMod) toast(filhoMod === 'termo' ? 'Ainda não há termo finalizado ligado a esta pré: saiu só a pré.' : 'Ainda não há SRPA finalizada ligada a esta ficha: saiu só a ficha.', 'warn');
+          if (typeof opts.aoAbrir === 'function') opts.aoAbrir();
+        } catch (e) { falhou(e); }
+      };
+      if (!filhoDoc || !filhoDoc._id) { terminar(''); return; }
+      printPreview._carregarNaTela(filhoMod, filhoDoc, () => {
+        let htmlFilho;
+        try { htmlFilho = compor(filhoMod); } catch (e) { falhou(e); return; }
+        terminar(htmlFilho);
+      }, falhou);
+    }, falhou);
+  },
+  /* Botão "Pré + Termo juntos" das barras: com um registro SALVO na tela,
+     usa o par gravado (a pré e o termo ligado a ela). Sem registro salvo —
+     uma avaliação ainda sendo digitada — vale o caminho antigo, pela tela. */
+  preTermoDaTela() {
+    const idDe = (mod) => ((document.querySelector('#form-' + mod + ' [name="_id"]') || {}).value || '');
+    let preDoc = idDe('pre') ? store.getById('pre', idDe('pre')) : null;
+    const termoTela = idDe('termo') ? store.getById('termo', idDe('termo')) : null;
+    if (!preDoc && termoTela && termoTela._links && termoTela._links.pre_id) preDoc = store.getById('pre', termoTela._links.pre_id);
+    if (preDoc && preDoc._finalizado) {
+      const ligado = (preDoc._links && preDoc._links.termo_id) ? store.getById('termo', preDoc._links.termo_id) : null;
+      const termoDoc = ligado || (termoTela && termoTela._links && termoTela._links.pre_id === preDoc._id ? termoTela : null);
+      printPreview.imprimirPar('pre', preDoc, 'termo', termoDoc, { zerar: false });
+      return;
+    }
+    printPreview.abrirPreTermo();
+  },
   abrirPreTermo(opts = {}) {
     try {
       const ppp = document.getElementById('ppp');

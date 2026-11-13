@@ -1421,6 +1421,9 @@ input.orc-ro {
   font-size: .82rem; text-align: center; width: 100%; cursor: default;
 }
 .field.orc-col-ref { border-radius: 6px; padding: 6px 8px; }
+/* Tabelas de códigos (cobrança e Financeiro): a descrição quebra a linha
+   em vez de cortar, com a mesma caixa, fonte e altura dos outros campos */
+table.dyn textarea.cod-desc { width: 100%; min-width: 220px; resize: none; overflow: hidden; line-height: 1.35; min-height: 36px; font: inherit; }
 /* Financeiro: porte da linha com o tipo (Cir/AN) ao lado */
 .fin-porte-cel { display: inline-flex; gap: 4px; align-items: center; }
 .fin-porte-cel select { width: 54px; padding-left: 4px; padding-right: 2px; font-size: .8rem; }
@@ -4907,7 +4910,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-11-12c</b><br>
+    v7.1 · build <b id="build-tag">2026-11-13b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -5124,6 +5127,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <button class="btn btn-success" onclick="pre.salvar()" title="Salvar dados sem finalizar"><span class="icon">💾</span> Salvar</button>
     <button class="btn btn-finalizar" onclick="pre.finalizar()" title="Fecha a avaliação e abre a janela de cobrança — de lá você gera o lançamento (ou não) e vai para a impressão"><span class="icon">✅</span> Finalizar</button>
     <button class="btn" onclick="pre.salvarComoNovo()" title="Salvar como novo registro"><span class="icon">📋</span> Salvar como novo</button>
+    <button class="btn" onclick="textosPadrao.preencherVazios('pre')" title="Preenche só os campos VAZIOS com os padrões definidos em Ajustes → Textos padrão (textos, listas de escolha, comorbidades, alergias). Confira antes de finalizar."><span class="icon">📝</span> Padrões</button>
     <div class="dropdown" id="dd-pre">
       <button class="btn" onclick="ui.toggleDropdown('dd-pre')"><span class="icon">📂</span> Carregar ▾</button>
       <div class="dropdown-menu" id="dd-pre-menu"></div>
@@ -5131,7 +5135,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <button class="btn" onclick="historico.abrir('pre')"><span class="icon">🔍</span> Buscar / Histórico</button>
     <div class="action-divider"></div>
     <button class="btn" onclick="printPreview.abrir()"><span class="icon">🖨️</span> Visualizar / Imprimir</button>
-    <button class="btn" onclick="printPreview.abrirPreTermo()" title="Imprime a avaliação pré-anestésica e o termo de consentimento num arquivo único"><span class="icon">📑</span> Pré + Termo juntos</button>
+    <button class="btn" onclick="printPreview.preTermoDaTela()" title="Imprime a avaliação pré-anestésica e o termo de consentimento num arquivo único"><span class="icon">📑</span> Pré + Termo juntos</button>
     <button class="btn" onclick="dossie.abrirDoFormulario('form-pre','nome')" title="Tudo o que já existe deste paciente — atendimentos, comorbidades, alergias e exames — numa leitura só"><span class="icon">🩺</span> Dossiê do paciente</button>
     <button class="btn btn-primary" onclick="pre.irParaFicha()" title="Abre a ficha de anestesia já preenchida com este paciente e esta cirurgia"><span class="icon">➡️</span> Ir para a ficha</button>
     <button class="btn" onclick="pre.exportar()"><span class="icon">⬇️</span> Exportar</button>
@@ -7949,7 +7953,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     <button class="btn" onclick="historico.abrir('termo')"><span class="icon">🔍</span> Buscar / Histórico</button>
     <div class="action-divider"></div>
     <button class="btn" onclick="printPreview.abrir()"><span class="icon">🖨️</span> Visualizar / Imprimir</button>
-    <button class="btn" onclick="printPreview.abrirPreTermo()" title="Imprime a avaliação pré-anestésica e o termo num arquivo único"><span class="icon">📑</span> Pré + Termo juntos</button>
+    <button class="btn" onclick="printPreview.preTermoDaTela()" title="Imprime a avaliação pré-anestésica e o termo num arquivo único"><span class="icon">📑</span> Pré + Termo juntos</button>
     <button class="btn" onclick="termo.exportar()"><span class="icon">⬇️</span> Exportar</button>
     <button class="btn btn-ghost" onclick="actions.importarJSONPara('termo')"><span class="icon">⬆️</span> Importar</button>
     <div class="action-divider"></div>
@@ -18261,7 +18265,7 @@ const pre = {
           <div class="qa-label">Avançar para o Termo (TCLE)</div>
           <div class="qa-desc">Abre o termo já com nome, nascimento e procedimento</div>
         </div>
-        <div class="quick-action-card" onclick="modal.close(); printPreview.abrirPreTermo()">
+        <div class="quick-action-card" onclick="modal.close(); pre._imprimirJuntoDe(${utils.jsArg(docPre._id)})">
           <span class="qa-icon">📑</span>
           <div class="qa-label">Imprimir pré + termo juntos</div>
           <div class="qa-desc">Um arquivo só, com o termo em página nova</div>
@@ -18273,6 +18277,14 @@ const pre = {
         </div>
       </div>`;
     modal.open('📝 Avaliação finalizada — e o Termo de Consentimento?', html, '');
+  },
+  /* "Imprimir pré + termo juntos" logo depois de finalizar: o par é o da
+     pré recém-finalizada e o termo ligado a ela (se já houver) */
+  _imprimirJuntoDe(preId) {
+    const doc = store.getById('pre', preId);
+    if (!doc) { toast('Não encontrei a avaliação para imprimir.', 'warn'); return; }
+    const termoDoc = (doc._links && doc._links.termo_id) ? store.getById('termo', doc._links.termo_id) : null;
+    printPreview.imprimirPar('pre', doc, 'termo', termoDoc);
   },
   /* Inicia o Termo pré-preenchido com dados da Pré-anestésica */
   _iniciarTermo(preId) { return pre.iniciarTermoDe('pre', preId); },
@@ -23363,8 +23375,39 @@ const pendencias = {
   },
 
   /* ---- Janela de alerta ---- */
+  /* ORDENAR POR QUALQUER COLUNA, como no Financeiro: 1º clique crescente,
+     2º decrescente, 3º volta à ordem de chegada. A escolha fica guardada. */
+  ORDEM_KEY: 'soft_pend_ordem_v1',
+  _ordemAtual() {
+    try { const o = JSON.parse(localStorage.getItem(pendencias.ORDEM_KEY) || 'null'); return o && o.col ? o : null; } catch (e) { return null; }
+  },
+  _CHAVES_ORDEM: {
+    data: p => String(p.data || ''),
+    paciente: p => utils.semAcento(p.nome || ''),
+    plano: p => utils.semAcento(p.convenio || ''),
+    guia: p => (p.guia ? '1' + utils.semAcento(p.guia) : '0')
+  },
+  ordenarPor(col) {
+    const o = pendencias._ordemAtual();
+    let prox = { col, dir: 'asc' };
+    if (o && o.col === col) prox = o.dir === 'asc' ? { col, dir: 'desc' } : null;
+    try { if (prox) localStorage.setItem(pendencias.ORDEM_KEY, JSON.stringify(prox)); else localStorage.removeItem(pendencias.ORDEM_KEY); } catch (e) {}
+    pendencias.abrir(false);
+  },
+  _ordenar(lista) {
+    const o = pendencias._ordemAtual();
+    const k = o && pendencias._CHAVES_ORDEM[o.col];
+    if (!k) return lista;
+    const s = o.dir === 'desc' ? -1 : 1;
+    return lista.slice().sort((a, b) => s * k(a).localeCompare(k(b), 'pt-BR', { numeric: true }));
+  },
+  _th(col, rot) {
+    const o = pendencias._ordemAtual();
+    const seta = o && o.col === col ? (o.dir === 'asc' ? ' ▲' : ' ▼') : '';
+    return '<th style="cursor:pointer;user-select:none" title="Ordenar por ' + rot.toLowerCase() + '" onclick="pendencias.ordenarPor(' + utils.jsArg(col) + ')">' + rot + seta + '</th>';
+  },
   abrir(auto) {
-    const lista = pendencias.listar();
+    const lista = pendencias._ordenar(pendencias.listar());
     if (auto && !lista.length) return false;
     const linhas = lista.map(p =>
       '<tr>' +
@@ -23384,7 +23427,7 @@ const pendencias = {
     const corpo = !lista.length
       ? '<p style="color:var(--text-mute)">🎉 Nenhuma pendência de convênio.</p>'
       : '<p style="font-size:.82rem;color:var(--text-soft);margin:0 0 10px">Guias de <b>planos de saúde (exceto Unimed)</b> aguardando processamento. Marque uma etapa do fluxo, <b>Cortesia</b> (quando não haverá cobrança) ou ✔ Resolver para dar baixa. Esta janela aparece <b>uma vez, ao entrar</b>; depois disso a lista fica no cartão do Dashboard.</p>' +
-        '<div style="max-height:52vh;overflow:auto"><table class="dash-detail-table" style="margin:0"><thead><tr><th>Data</th><th>Paciente</th><th>Plano</th><th>Guia</th><th>Ação</th></tr></thead><tbody>' + linhas + '</tbody></table></div>';
+        '<div style="max-height:52vh;overflow:auto"><table class="dash-detail-table" style="margin:0"><thead><tr>' + pendencias._th('data', 'Data') + pendencias._th('paciente', 'Paciente') + pendencias._th('plano', 'Plano') + pendencias._th('guia', 'Guia') + '<th>Ação</th></tr></thead><tbody>' + linhas + '</tbody></table></div>';
     modal.open('🔔 Pendências de convênio (' + lista.length + ')', corpo,
       '<button class="btn" onclick="modal.close()">Fechar</button>');
     return true;
@@ -27242,6 +27285,34 @@ const termoPadrao = {
    texto livre de cada módulo. Definidos em Ajustes; ao focar um campo vazio,
    um botão "Usar texto padrão" insere o texto (que pode ser editado livremente).
 ============================================================================ */
+/* ============================================================================
+   CÓDIGO E DESCRIÇÃO NO MESMO FORMATO, nas duas tabelas de códigos (janela
+   da cobrança e Financeiro). Código reconhecido na CBHPM sai sempre no padrão
+   da tabela (3.12.03.04-3, mesmo se digitado 31203043) e a descrição sempre
+   a da tabela. Código que a CBHPM não conhece fica como foi digitado.
+============================================================================ */
+const codigosUI = {
+  NOMES: { fz: ['fz_cod[]', 'fz_desc[]'], fin: ['fin_cod_codigo[]', 'fin_cod_desc[]'] },
+  oficial(codigo) {
+    try { const i = cbhpm.info(String(codigo || '').trim()); return i ? { codigo: i.codigo, descricao: i.descricao } : null; } catch (e) { return null; }
+  },
+  aoMudarCodigo(el, tabela) {
+    const tr = el && el.closest('tr'); if (!tr) return;
+    const [nc, nd] = codigosUI.NOMES[tabela] || [];
+    const of = codigosUI.oficial(el.value);
+    if (!of) return;
+    el.value = of.codigo;
+    const d = tr.querySelector('[name="' + nd + '"]');
+    if (d && d.value !== of.descricao) { d.value = of.descricao; try { d._cbhpmCrescer && d._cbhpmCrescer(); } catch (e) {} }
+    try { markDirty(); } catch (e) {}
+  },
+  /* linha que chega pronta (ficha, importação, registro salvo) */
+  normalizarDados(dados) {
+    const of = dados && codigosUI.oficial(dados.codigo);
+    return of ? Object.assign({}, dados, { codigo: of.codigo, descricao: of.descricao }) : dados;
+  }
+};
+
 const textosPadrao = {
   KEY: 'medsys.v7.textos_padrao',
 
@@ -27343,18 +27414,66 @@ const textosPadrao = {
     const limpo = txt.replace(/[\u{1F300}-\u{1FAFF}\u2600-\u27BF\uFE0F]/gu, '').replace(/\s+/g, ' ').replace(/[—:]\s*$/, '').trim();
     return limpo || (ta.getAttribute('name') || '').replace(/_/g, ' ');
   },
+  /* NA PRÉ, TODO CAMPO QUE O MÉDICO PREENCHE ACEITA UM PADRÃO — também os
+     de uma linha (ECG, ECO, exames) e as listas de escolha (Mallampati,
+     jejum...). Ficam de fora a identificação do paciente, datas e o que o
+     próprio sistema calcula: padrão ali seria dado errado de outro paciente. */
+  CAMPOS_TODOS: ['pre'],
+  FORA_DO_PADRAO: /^(nome|cpf|rg|documento|idade|sexo|nascimento|nasc|peso|altura|imc|telefone|celular|email|endereco|cidade|convenio|plano|carteirinha|matricula|senha|prontuario|hospital|local|cirurgia|cirurgiao|data|hora|data_.*|hora_.*|.*_data|.*_hora|_.*|profissional|crm|rqe|assinatura.*|sig_.*|risco_resumo|via_aerea_resumo|status|modelo|conclusao_status)$/,
+  _tipos: {},
+  tipoDe(mod, campo) { return (textosPadrao._tipos[mod] && textosPadrao._tipos[mod][campo]) || 'textarea'; },
   _descobrir() {
     Object.keys(textosPadrao.CAMPOS).forEach(mod => {
       const form = document.getElementById('form-' + mod);
       if (!form) return;
       const campos = textosPadrao.CAMPOS[mod];
+      const tipos = textosPadrao._tipos[mod] = textosPadrao._tipos[mod] || {};
       const fora = (textosPadrao.NAO_EDITAVEIS[mod] || []).concat(textosPadrao.CAMPOS_COM_SELETOR_PROPRIO[mod] || []);
       form.querySelectorAll('textarea[name]').forEach(ta => {
         const campo = ta.getAttribute('name');
         if (!campo || campos[campo] || fora.includes(campo) || ta.readOnly) return;
         campos[campo] = textosPadrao._rotuloDaTela(ta);
       });
+      if (textosPadrao.CAMPOS_TODOS.indexOf(mod) < 0) return;
+      form.querySelectorAll('input[type="text"][name], input:not([type])[name], select[name]').forEach(el => {
+        const campo = el.getAttribute('name');
+        if (!campo || campo.endsWith('[]') || campos[campo] || el.readOnly || el.disabled) return;
+        if (textosPadrao.FORA_DO_PADRAO.test(campo) || (textosPadrao.NAO_EDITAVEIS[mod] || []).includes(campo)) return;
+        if (el.tagName === 'SELECT' && el.options.length < 2) return;
+        campos[campo] = textosPadrao._rotuloDaTela(el);
+        tipos[campo] = el.tagName === 'SELECT' ? 'select' : 'text';
+      });
     });
+  },
+  /* Um clique preenche, com os padrões, só os campos que estão VAZIOS. Não é
+     automático de propósito: um padrão clínico (Mallampati, "nega alergias")
+     posto sozinho viraria dado não examinado no documento do paciente. */
+  preencherVazios(mod) {
+    try { textosPadrao._descobrir(); } catch (e) {}
+    const form = document.getElementById('form-' + mod);
+    const s = textosPadrao._store()[mod] || {};
+    if (!form) return 0;
+    let n = 0;
+    Object.keys(s).forEach(campo => {
+      const v = s[campo];
+      if (v == null || String(v).trim() === '') return;
+      const el = form.querySelector('[name="' + campo + '"]');
+      if (!el || el.readOnly || el.disabled) return;
+      if (el.tagName === 'SELECT') {
+        if (el.value) return;
+        if (!Array.from(el.options).some(o => o.value === v)) return;
+        el.value = v;
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      } else {
+        if (String(el.value || '').trim()) return;
+        el.value = v;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      n++;
+    });
+    if (n) { try { markDirty(); } catch (e) {} }
+    toast(n ? '📝 ' + n + ' campo(s) vazio(s) preenchido(s) com o padrão — confira antes de finalizar.' : 'Nenhum campo vazio com padrão definido (defina em Ajustes → Textos padrão).', n ? 'success' : 'warn');
+    return n;
   },
 
   _store() {
@@ -27454,10 +27573,19 @@ const textosPadrao = {
       html += `<details class="tp-mod"><summary>${utils.escapeHTML(campos._label)}</summary><div class="tp-mod-body">`;
       chaves.forEach(campo => {
         const val = (s[mod] && s[mod][campo]) || '';
-        html += `<div class="tp-campo">
-          <label>${utils.escapeHTML(campos[campo])}</label>
-          <textarea rows="3" data-tp-mod="${mod}" data-tp-campo="${campo}" placeholder="Texto padrão para ${utils.escapeHTML(campos[campo])}...">${utils.escapeHTML(val)}</textarea>
-        </div>`;
+        const tipo = textosPadrao.tipoDe(mod, campo);
+        let ctl;
+        if (tipo === 'select') {
+          const orig = document.querySelector('#form-' + mod + ' select[name="' + campo + '"]');
+          const ops = orig ? Array.from(orig.options).filter(o => o.value !== '') : [];
+          ctl = `<select data-tp-mod="${mod}" data-tp-campo="${campo}"><option value="">— sem padrão —</option>` +
+            ops.map(o => `<option value="${utils.escapeAttr(o.value)}"${o.value === val ? ' selected' : ''}>${utils.escapeHTML(o.textContent)}</option>`).join('') + `</select>`;
+        } else if (tipo === 'text') {
+          ctl = `<input type="text" data-tp-mod="${mod}" data-tp-campo="${campo}" value="${utils.escapeAttr(val)}" placeholder="Padrão para ${utils.escapeHTML(campos[campo])}...">`;
+        } else {
+          ctl = `<textarea rows="3" data-tp-mod="${mod}" data-tp-campo="${campo}" placeholder="Texto padrão para ${utils.escapeHTML(campos[campo])}...">${utils.escapeHTML(val)}</textarea>`;
+        }
+        html += `<div class="tp-campo"><label>${utils.escapeHTML(campos[campo])}</label>${ctl}</div>`;
       });
       html += `</div></details>`;
     });
@@ -27467,7 +27595,7 @@ const textosPadrao = {
     const host = document.getElementById('textos-padrao-editor');
     if (!host) return;
     const s = {};
-    host.querySelectorAll('textarea[data-tp-mod]').forEach(ta => {
+    host.querySelectorAll('[data-tp-mod]').forEach(ta => {
       const mod = ta.dataset.tpMod, campo = ta.dataset.tpCampo;
       if (ta.value && ta.value.trim()) {
         if (!s[mod]) s[mod] = {};
@@ -30634,17 +30762,9 @@ const fechamento = {
      pré-visualização fecha — nada do paciente fica na tela. */
   imprimirJuntos() {
     const par = fechamento._par(); if (!par) return;
-    try { fechamento._carregar(par.st.mod, par.doc); fechamento._carregar(par.modFilho, par.filho); }
-    catch (e) { toast('Não consegui abrir os registros para imprimir' + (e && e.message ? ': ' + e.message : ''), 'error'); return; }
-    const formPai = 'form-' + par.st.mod, formFilho = 'form-' + par.modFilho;
-    const falhou = () => toast('Os registros não terminaram de abrir; tente de novo.', 'error');
-    printPreview._quandoCarregado(formPai, par.doc._id, () =>
-      printPreview._quandoCarregado(formFilho, par.filho._id, () => {
-        printPreview._zerarAoFechar = [par.st.mod, par.modFilho];
-        if (par.st.mod === 'anestesia') printPreview.abrirConjunto({ vinculados: true });
-        else printPreview.abrirPreTermo({ vinculados: true });
-        fechamento._voltarAoFecharImpressao();
-      }, falhou), falhou);
+    /* o mesmo caminho da impressão isolada, um documento de cada vez */
+    printPreview.imprimirPar(par.st.mod, par.doc, par.modFilho, par.filho,
+      { aoAbrir: () => fechamento._voltarAoFecharImpressao() });
   },
   /* Separados: um depois do outro — fechou a primeira impressão, abre a
      segunda. */
@@ -36245,10 +36365,13 @@ const anestesia = {
         if (h) { el.value = h; return; }
       }
     },
+    /* O HORÁRIO VEM PRIMEIRO E À VISTA. Ficava no pé da janela, pequeno e
+       vazio, e passava por "não tem onde pôr o horário". Agora abre a janela,
+       com rótulo claro e já com o horário do evento da linha do tempo. */
     _horaHTML(valor) {
       if (!anestesia.disp._tipoEvento(valor)) return '';
-      return `<label style="display:inline-flex;align-items:center;gap:6px;margin-top:6px;font-size:.82rem;font-weight:400">⏱ Horário
-        <input type="time" data-campo="hora" data-disp="${utils.escapeAttr(valor)}" style="width:auto" onchange="anestesia.disp.aoMudarHora(${utils.jsArg(valor)})" oninput="anestesia.disp.aoMudarHora(${utils.jsArg(valor)})"></label>`;
+      return `<div style="display:flex;align-items:center;gap:8px;margin:0 0 8px;padding:6px 10px;background:var(--primary-soft);border-radius:8px;font-size:.88rem;font-weight:600;color:var(--primary-darker)">⏱ Horário da punção
+        <input type="time" data-campo="hora" data-disp="${utils.escapeAttr(valor)}" style="width:auto;font-weight:400" title="Mesmo horário do evento na linha do tempo: mudou aqui, muda lá" onchange="anestesia.disp.aoMudarHora(${utils.jsArg(valor)})" oninput="anestesia.disp.aoMudarHora(${utils.jsArg(valor)})"></div>`;
     },
     _sel(disp, campo) {
       const el = document.querySelector('[data-campo="' + campo + '"][data-disp="' + disp + '"]');
@@ -36294,6 +36417,7 @@ const anestesia = {
           const op = anestesia.disp.OPCOES[valor];
           if (op) {
             div.innerHTML = `<label>${valor} <small style="color:var(--text-mute);font-weight:400">— tipo e calibre</small></label>
+              ${anestesia.disp._horaHTML(valor)}
               <div style="display:flex;gap:6px;flex-wrap:wrap">
                 <select data-campo="tipo" data-disp="${utils.escapeAttr(valor)}" style="flex:2;min-width:120px" onchange="anestesia.disp.montarDet(${utils.jsArg(valor)})">
                   <option value="">${op.rotTipo}</option>${op.tipos.map(t => '<option>' + t + '</option>').join('')}
@@ -36310,12 +36434,11 @@ const anestesia = {
               </div>
               <input type="text" name="disp_det[]" data-disp="${valor}" placeholder="montado do que você marcou" style="margin-top:6px"
                 oninput="this.dataset.manual='1'; anestesia.eventos.atualizarDescricoes()">
-              ${anestesia.disp._horaHTML(valor)}
               ${anestesia.disp._previoHTML(valor)}`;
           } else {
             div.innerHTML = `<label>${valor} <small style="color:var(--text-mute);font-weight:400">— detalhes</small></label>
-              <input type="text" name="disp_det[]" data-disp="${valor}" placeholder="Ex.: tamanho, local, calibre" oninput="anestesia.eventos.atualizarDescricoes()">
               ${anestesia.disp._horaHTML(valor)}
+              <input type="text" name="disp_det[]" data-disp="${valor}" placeholder="Ex.: tamanho, local, calibre" oninput="anestesia.eventos.atualizarDescricoes()">
               ${anestesia.disp._previoHTML(valor)}`;
           }
           cont.appendChild(div);
@@ -43692,9 +43815,9 @@ const fin = {
         '<h3 style="font-size:.86rem;color:var(--primary-darker);margin:14px 0 6px;border-top:1px solid var(--border);padding-top:12px">' +
         '📋 Códigos e valores <small style="font-weight:400;color:var(--text-mute)">— confira antes de virar cobrança; tudo é editável</small></h3>' +
         '<div class="dyn-table-wrap"><table class="dyn" id="fz-codigos"><thead><tr>' +
-        '<th style="width:130px">Código</th><th>Procedimento</th><th style="width:60px">Porte</th>' +
-        '<th style="width:54px">Qtd</th><th style="width:92px" title="Lado operado — em branco quando não se aplica">Lado</th><th style="width:76px">Grau</th>' +
-        '<th style="width:110px">Vlr unit. (R$)</th><th style="width:110px">Previsto (R$)</th>' +
+        '<th style="width:130px">Código TUSS</th><th style="min-width:240px">Procedimento (CBHPM)</th><th style="width:118px" title="Cir = porte cirúrgico; AN = porte anestésico. Trocar refaz o valor unitário pela tabela daquele tipo.">Porte</th>' +
+        '<th style="width:58px">Qtd ×</th><th style="width:98px" title="Lado operado — em branco quando não se aplica">Lado</th><th style="width:70px">Grau</th>' +
+        '<th style="width:105px">Vlr unit. (R$)</th><th style="width:110px">Previsto (R$)</th>' +
         '<th class="col-rm">×</th></tr></thead><tbody id="fz-codigos-body"></tbody></table></div>' +
         '<div class="table-actions"><button type="button" class="btn btn-sm btn-primary" onclick="fin.finalizacao.addLinha()">+ Adicionar código</button></div>' +
         '<div id="fz-total" style="text-align:right;font-weight:700;font-size:.95rem;margin-top:6px"></div>' +
@@ -44135,16 +44258,16 @@ const fin = {
     },
 
     addLinha(d) {
-      d = d || {};
+      d = codigosUI.normalizarDados(d || {}) || {};
       const tb = document.getElementById('fz-codigos-body');
       if (!tb) return null;
       const ea = utils.escapeAttr;
       const tr = document.createElement('tr');
       tr.innerHTML =
-        '<td data-label="Código"><input type="text" name="fz_cod[]" value="' + ea(d.codigo || '') + '" placeholder="ex.: 3.09.12.24-5"></td>' +
-        '<td data-label="Procedimento"><input type="text" name="fz_desc[]" value="' + ea(d.descricao || '') + '" placeholder="digite para buscar na CBHPM"></td>' +
-        '<td data-label="Porte"><input type="text" name="fz_porte[]" value="' + ea(d.porte || '') + '" style="width:52px"></td>' +
-        '<td data-label="Qtd"><input type="number" min="1" step="1" name="fz_qtd[]" value="' + ea(d.qtd || 1) + '" style="width:48px" oninput="fin.finalizacao._recalcularLinha(this)"></td>' +
+        '<td data-label="Código TUSS"><input type="text" name="fz_cod[]" value="' + ea(d.codigo || '') + '" placeholder="ex.: 3.09.12.24-5" onchange="codigosUI.aoMudarCodigo(this, \'fz\')"></td>' +
+        '<td data-label="Procedimento"><textarea rows="1" class="cod-desc" name="fz_desc[]" placeholder="digite para buscar na CBHPM">' + utils.escapeHTML(d.descricao || '') + '</textarea></td>' +
+        '<td data-label="Porte"><span class="fin-porte-cel"><select name="fz_porte_tipo[]" title="Cir = porte cirúrgico; AN = porte anestésico. Trocar refaz o valor unitário pela tabela daquele tipo." onchange="fin.finalizacao._onTipoPorte(this)"><option value="cir"' + (financeiro.codigos._tipoDoTexto(d.porte) === 'cir' ? ' selected' : '') + '>Cir</option><option value="an"' + (financeiro.codigos._tipoDoTexto(d.porte) === 'an' ? ' selected' : '') + '>AN</option></select><input type="text" name="fz_porte[]" value="' + ea(d.porte || '') + '" style="width:50px"></span></td>' +
+        '<td data-label="Qtd ×"><input type="number" min="1" step="1" name="fz_qtd[]" value="' + ea(d.qtd || 1) + '" style="width:48px" oninput="fin.finalizacao._recalcularLinha(this)"></td>' +
         '<td data-label="Lado"><select name="fz_lado[]">' + cirurgia.opcoesLado(d.lateralidade) + '</select></td>' +
         '<td data-label="Grau"><select name="fz_grau[]" onchange="fin.finalizacao._recalcularLinha(this)">' +
         ['100', '70', '50'].map(g => '<option value="' + g + '"' + (g === String(d.grau || (tb.children.length ? '50' : '100')) ? ' selected' : '') + '>' + g + '%</option>').join('') +
@@ -44159,9 +44282,12 @@ const fin = {
         const cod = tr.querySelector('[name="fz_cod[]"]');
         const casar = (m) => {
           if (cod) cod.value = m[0];
-          if (desc) desc.value = m[1];
+          if (desc) { desc.value = m[1]; try { desc._cbhpmCrescer && desc._cbhpmCrescer(); } catch (x) {} }
           const pe = tr.querySelector('[name="fz_porte[]"]');
-          if (pe) pe.value = m[2] || '';
+          const ts = tr.querySelector('[name="fz_porte_tipo[]"]');
+          const tipo = financeiro.codigos._tipoPadrao(m[0]);
+          if (ts) ts.value = tipo;
+          if (pe) pe.value = financeiro.codigos._porteTexto(m[0], tipo) || m[2] || '';
           fin.finalizacao._sugerirLinha(tr);
         };
         if (desc) { desc.dataset.semMais = '1'; cbhpm.ligar(desc, { row: tr, qtdFieldName: 'fz_qtd[]', onMatch: casar }); }
@@ -44182,7 +44308,9 @@ const fin = {
       let info = null;
       try { info = cbhpm.info(cod); } catch (e) {}
       const temAN = info && (info.porte_anest || (info.anestesico && info.anestesico.porte_anest));
-      const ordem = temAN ? ['anestesia', 'medico'] : ['medico', 'anestesia'];
+      /* o tipo de porte escolhido na linha manda; sem escolha, o código decide */
+      const ts = tr.querySelector('[name="fz_porte_tipo[]"]');
+      const ordem = ts ? [ts.value === 'an' ? 'anestesia' : 'medico'] : (temAN ? ['anestesia', 'medico'] : ['medico', 'anestesia']);
       for (const tipo of ordem) {
         const p = precos.base(cod, tipo, conv, fin.finalizacao._v('fz_acomodacao'));
         if (p && p.valor != null) {
@@ -44193,6 +44321,23 @@ const fin = {
         }
       }
       return null;
+    },
+    /* Cir ↔ AN na janela da cobrança: mesmo comportamento do Financeiro */
+    _onTipoPorte(sel) {
+      const tr = sel.closest('tr'); if (!tr) return;
+      const tipo = sel.value === 'an' ? 'an' : 'cir';
+      const cod = ((tr.querySelector('[name="fz_cod[]"]') || {}).value || '').trim();
+      const pe = tr.querySelector('[name="fz_porte[]"]');
+      if (!cod) return;
+      const novo = financeiro.codigos._porteTexto(cod, tipo);
+      if (!novo) {
+        sel.value = tipo === 'an' ? 'cir' : 'an';
+        toast(tipo === 'an' ? 'Este código não tem porte anestésico na CBHPM — a linha continua pelo porte cirúrgico.' : 'Este código não tem porte cirúrgico na CBHPM.', 'warn');
+        return;
+      }
+      if (pe) pe.value = novo;
+      const p = fin.finalizacao._sugerirLinha(tr, true);
+      if (!p) toast('Porte ' + novo + ': não há valor na tabela para ele — mantive o valor da linha.', 'warn');
     },
     _recalcularLinha(el) {
       const tr = el && el.closest('tr');
@@ -48830,6 +48975,7 @@ const financeiro = {
     add(dados = {}) {
       const tbody = document.getElementById('fin-codigos-body');
       if (!tbody) return null;
+      dados = codigosUI.normalizarDados(dados) || {};
       const tr = document.createElement('tr');
       const opt = (arr, sel) => arr.map(v => `<option ${v === sel ? 'selected' : ''}>${v}</option>`).join('');
 
@@ -48838,13 +48984,13 @@ const financeiro = {
           <input type="text" name="fin_cod_codigo[]"
                  value="${utils.escapeAttr(dados.codigo || '')}"
                  placeholder="ex.: 3.09.12.24-5"
-                 oninput="financeiro.codigos._onCodigo(this)">
+                 oninput="financeiro.codigos._onCodigo(this)"
+                 onchange="codigosUI.aoMudarCodigo(this, 'fin')">
         </td>
         <td data-label="Procedimento">
-          <input type="text" name="fin_cod_desc[]"
-                 value="${utils.escapeAttr(dados.descricao || '')}"
-                 placeholder="Digite ou cole o nome do procedimento"
-                 oninput="financeiro.codigos._onDesc(this)">
+          <textarea rows="1" class="cod-desc" name="fin_cod_desc[]"
+                 placeholder="digite para buscar na CBHPM"
+                 oninput="financeiro.codigos._onDesc(this)">${utils.escapeHTML(dados.descricao || '')}</textarea>
         </td>
         <td data-label="Porte"><span class="fin-porte-cel"><select name="fin_cod_porte_tipo[]" title="Cir = porte cirúrgico; AN = porte anestésico. Trocar refaz o valor unitário pela tabela daquele tipo." onchange="financeiro.codigos._onTipoPorte(this)"><option value="cir" ${financeiro.codigos._tipoDoTexto(dados.porte) === 'cir' ? 'selected' : ''}>Cir</option><option value="an" ${financeiro.codigos._tipoDoTexto(dados.porte) === 'an' ? 'selected' : ''}>AN</option></select><input type="text" name="fin_cod_porte[]" value="${utils.escapeAttr(dados.porte || '')}" placeholder="—" style="width:50px"></span></td>
         <td data-label="Qtd ×"><input type="number" name="fin_cod_qtd[]" step="1" min="1" value="${utils.escapeAttr(dados.qtd || 1)}" style="width:48px" oninput="financeiro.codigos._onQtdUnit(this)"></td>
@@ -54033,10 +54179,137 @@ const agenda = {
     agenda._iniciarAtendimento(id, destino);
   },
 
-  /* Executa o atendimento: navega, cria registro novo pré-preenchido */
+  /* ATENDER OLHA ANTES O QUE JÁ EXISTE DO PACIENTE.
+     Antes, Atender sempre limpava a tela e começava do zero: a pré que a
+     secretária tinha deixado pré-lançada ficava salva e escondida. Agora o
+     que existe do mesmo paciente aparece numa janela — o pré-lançamento do
+     mesmo tipo em destaque, para continuar; os outros como fonte de dados
+     para os campos equivalentes. Sem nada anterior, começa do zero. */
+  _ROT_MOD: { pre: 'Pré-anestésica', consulta: 'Consulta', anestesia: 'Ficha de anestesia', recuperacao: 'Recuperação SRPA' },
+  _nomeDoc(mod, d) { return String((d && d.paciente && typeof d.paciente === 'object' ? d.paciente.nome : (d && (d.nome || d.paciente_nome || d.paciente))) || ''); },
+  _dataDoc(mod, d) { return String((d && d.procedimento && typeof d.procedimento === 'object' ? d.procedimento.data : '') || (d && (d.data || d.data_anestesia)) || (d && d._createdAt) || '').slice(0, 10); },
+  _anteriores(ag, destino) {
+    const nomeAg = utils.semAcento(ag.paciente || '');
+    if (!nomeAg) return [];
+    const out = [];
+    ['pre', 'consulta', 'anestesia', 'recuperacao'].forEach(mod => {
+      (store.list(mod) || []).forEach(d => {
+        if (!d || !d._id) return;
+        if (d._relOrg && typeof cloudRel !== 'undefined' && cloudRel._org && d._relOrg !== cloudRel._org()) return;
+        const mesmaRef = ag._patientRef && d._patientRef && ag._patientRef === d._patientRef;
+        const mesmaChave = ag._patientKey && d._patientKey && ag._patientKey === d._patientKey;
+        if (!mesmaRef && !mesmaChave && utils.semAcento(agenda._nomeDoc(mod, d)) !== nomeAg) return;
+        out.push({ mod, doc: d, data: agenda._dataDoc(mod, d), aberto: !d._finalizado });
+      });
+    });
+    /* o pré-lançamento do mesmo tipo vem primeiro; depois do mais recente */
+    out.sort((a, b) => ((b.mod === destino && b.aberto) - (a.mod === destino && a.aberto)) || String(b.data).localeCompare(String(a.data)));
+    return out.slice(0, 8);
+  },
   _iniciarAtendimento(idAgenda, destino) {
     const ag = store.getById('agenda', idAgenda);
     if (!ag) { toast('Agendamento não encontrado', 'warn'); return; }
+    const ant = agenda._anteriores(ag, destino);
+    if (!ant.length) { agenda._abrirNovo(idAgenda, destino); return; }
+    agenda._antAtual = ant;
+    const e = utils.escapeHTML;
+    const linhas = ant.map((a, i) => {
+      const destaque = a.mod === destino && a.aberto;
+      const quando = a.data ? utils.formatarData(a.data) : 'sem data';
+      const estado = a.aberto ? 'em aberto (pré-lançamento)' : 'finalizada';
+      const botao = destaque
+        ? '<button class="btn btn-primary btn-sm" onclick="modal.close(); agenda._continuar(' + utils.jsArg(idAgenda) + ',' + utils.jsArg(i) + ')">▶ Continuar este</button>'
+        : '<button class="btn btn-sm" onclick="modal.close(); agenda._usarFonte(' + utils.jsArg(idAgenda) + ',' + utils.jsArg(destino) + ',' + utils.jsArg(i) + ')">📋 Usar como fonte</button>';
+      return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 10px;border:1px solid ' + (destaque ? 'var(--primary)' : 'var(--border)') + ';border-radius:8px;margin-bottom:6px;background:' + (destaque ? 'var(--primary-soft)' : 'transparent') + '">' +
+        '<div style="font-size:.86rem">' + (destaque ? '⭐ ' : '') + '<b>' + e(agenda._ROT_MOD[a.mod] || a.mod) + '</b> — ' + e(quando) + ' · <span style="color:var(--text-mute)">' + e(estado) + '</span></div>' + botao + '</div>';
+    }).join('');
+    modal.open('⚠️ Já existem registros de ' + (ag.paciente || 'este paciente'),
+      '<p style="font-size:.86rem;margin:0 0 10px">Antes de começar, veja o que já existe deste paciente. <b>Continuar</b> abre o pré-lançamento como foi deixado; <b>Usar como fonte</b> começa um atendimento novo já com os campos equivalentes (cadastro, comorbidades, alergias, medicações, exames) — o registro antigo não é alterado.</p>' + linhas,
+      '<button class="btn" onclick="modal.close(); agenda._abrirNovo(' + utils.jsArg(idAgenda) + ',' + utils.jsArg(destino) + ')">Começar do zero</button>');
+  },
+  _usarFonte(idAgenda, destino, i) { agenda._abrirNovo(idAgenda, destino, { fonte: Number(i) }); },
+  /* Continua o pré-lançamento: abre como está e completa só o que estiver em
+     branco com os dados da agenda */
+  _continuar(idAgenda, i) {
+    const ag = store.getById('agenda', idAgenda);
+    const a = (agenda._antAtual || [])[Number(i)];
+    if (!ag || !a) return;
+    const mod = a.mod;
+    ui.irEEntao(mod, '#form-' + mod, () => {
+      try {
+        const alvo = { pre, consulta, anestesia, recuperacao }[mod];
+        alvo.carregar(store.getById(mod, a.doc._id) || a.doc);
+        const f = document.getElementById('form-' + mod);
+        const se = (n, v) => { const el = f && f.querySelector('[name="' + n + '"]'); if (el && !el.value && v) { try { linker._setCampo(el, v); } catch (x) { el.value = v; } } };
+        if (mod === 'anestesia') { se('paciente_convenio', ag.convenio); se('cirurgiao', ag.cirurgiao); se('procedimento', ag.procedimento); se('local_hospital', ag.local); se('data_anestesia', ag.data); }
+        else if (mod === 'pre') { se('convenio', ag.convenio); se('cirurgia', ag.procedimento); se('cirurgiao', ag.cirurgiao); se('local', ag.local); se('data', ag.data); }
+        else if (mod === 'consulta') { se('convenio', ag.convenio); se('profissional', ag.cirurgiao); se('data', ag.data); }
+        else { se('procedimento', ag.procedimento); se('responsavel', ag.cirurgiao); se('data', ag.data); }
+        agenda._marcarRealizado(ag);
+        toast('▶ Continuando o pré-lançamento de ' + (agenda._ROT_MOD[mod] || mod));
+      } catch (e) { console.error(e); toast('Não consegui abrir o pré-lançamento — veja o console', 'error'); }
+    });
+  },
+  _marcarRealizado(ag) {
+    if (ag.status !== 'realizado' && ag.status !== 'cancelado') {
+      if (confirm(`Marcar agendamento de "${ag.paciente}" como REALIZADO?\n\n(Você pode reverter editando o status no compromisso depois.)`)) {
+        ag.status = 'realizado';
+        store.save('agenda', ag);
+      }
+    }
+  },
+  /* Campos equivalentes de um registro anterior: cadastro e clínica do
+     paciente, nunca o que é próprio daquele atendimento (data, conclusão,
+     assinatura). Só preenche o que está vazio. */
+  _CAMPOS_FONTE: ['cpf', 'rg', 'nascimento', 'nasc', 'sexo', 'peso', 'altura', 'telefone', 'endereco', 'convenio', 'plano',
+    'carteirinha', 'matricula', 'prontuario', 'comorbidades', 'alergias', 'medicacoes', 'cirurgias_previas',
+    'antecedentes', 'exames_compl', 'acompanhantes'],
+  _planoDaFonte(mod, d) {
+    const p = Object.assign({}, d);
+    if (d.paciente && typeof d.paciente === 'object') Object.assign(p, d.paciente);
+    const pa = d.pre_anestesico || {};
+    if (pa.comorbidades && !p.comorbidades) p.comorbidades = pa.comorbidades;
+    if (pa.alergias && !p.alergias) p.alergias = pa.alergias;
+    if (pa.medicacoes_uso && !p.medicacoes) p.medicacoes = pa.medicacoes_uso;
+    if (pa.exames && !p.exames_compl) p.exames_compl = pa.exames;
+    if (!p.nascimento && p.nasc) p.nascimento = p.nasc;
+    return p;
+  },
+  _aplicarFonte(destino, fonteMod, fonteDoc, ctx) {
+    const f = document.getElementById('form-' + destino);
+    if (!f || !fonteDoc) return 0;
+    if (destino === 'anestesia' && fonteMod === 'pre') {
+      try { linker.importarPreParaAnestesia(agenda._nomeDoc('pre', fonteDoc), Object.assign({}, ctx, { registro: fonteDoc })); } catch (e) {}
+      return 1;
+    }
+    const src = agenda._planoDaFonte(fonteMod, fonteDoc);
+    const alias = destino === 'anestesia'
+      ? { paciente_nasc: 'nascimento', paciente_sexo: 'sexo', paciente_peso: 'peso', paciente_altura: 'altura', paciente_convenio: 'convenio',
+          paciente_prontuario: 'prontuario', pre_comorbidades: 'comorbidades', pre_alergias: 'alergias', pre_medicacoes: 'medicacoes', pre_exames: 'exames_compl' }
+      : null;
+    let n = 0;
+    const por = (nomeCampo, valor) => {
+      if (valor == null || valor === '' || typeof valor === 'object') return;
+      const el = f.querySelector('[name="' + nomeCampo + '"]');
+      if (!el || el.value) return;
+      try { linker._setCampo(el, valor); } catch (e) { el.value = valor; }
+      n++;
+    };
+    if (alias) Object.keys(alias).forEach(k => por(k, src[alias[k]]));
+    else {
+      agenda._CAMPOS_FONTE.forEach(k => por(k, src[k]));
+      Object.keys(src).forEach(k => { if (/^lab_/.test(k)) por(k, src[k]); });
+      if (destino === 'pre' && Array.isArray(fonteDoc._medsLista) && fonteDoc._medsLista.length) {
+        try { if (!(pre.meds._lista || []).length) pre.meds.restaurar(fonteDoc); n++; } catch (e) {}
+      }
+    }
+    return n;
+  },
+  /* Executa o atendimento: navega, cria registro novo pré-preenchido */
+  _abrirNovo(idAgenda, destino, opts = {}) {
+    const ag = store.getById('agenda', idAgenda);
+    if (!ag) { toast('Agendamento não encontrado', 'warn'); return; }
+    const fonte = opts.fonte != null ? (agenda._antAtual || [])[opts.fonte] : null;
     const contextoPaciente = {
       patient: ag,
       identityKey: ag._patientKey || linker._chavePaciente(ag) || '',
@@ -54114,13 +54387,16 @@ const agenda = {
           }
         }
 
-        /* Marca agendamento como "realizado" — pede confirmação leve */
-        if (ag.status !== 'realizado' && ag.status !== 'cancelado') {
-          if (confirm(`Marcar agendamento de "${ag.paciente}" como REALIZADO?\n\n(Você pode reverter editando o status no compromisso depois.)`)) {
-            ag.status = 'realizado';
-            store.save('agenda', ag);
-          }
+        /* Usar como fonte: depois do auto-preenchimento do cadastro, os campos
+           equivalentes do registro escolhido completam o que ficou vazio */
+        if (fonte) {
+          setTimeout(() => {
+            const n = agenda._aplicarFonte(destino, fonte.mod, store.getById(fonte.mod, fonte.doc._id) || fonte.doc, contextoPaciente);
+            toast('📋 Campos trazidos de ' + (agenda._ROT_MOD[fonte.mod] || fonte.mod) + (fonte.data ? ' de ' + utils.formatarData(fonte.data) : '') + (n ? '' : ' (nada a completar)'));
+          }, 400);
         }
+        /* Marca agendamento como "realizado" — pede confirmação leve */
+        agenda._marcarRealizado(ag);
 
         const labels = { anestesia: 'Ficha de Anestesia', pre: 'Pré-anestésica', consulta: 'Consulta', recuperacao: 'Recuperação SRPA' };
         toast(`▶ Atendimento iniciado em ${labels[destino] || destino}`);
