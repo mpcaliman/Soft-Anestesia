@@ -40,6 +40,8 @@ const HEADERS = {
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
 };
+/* 5xx da Memed é a Memed fora do ar, não defeito daqui: dizer isso, e o que fazer */
+const FORA_DO_AR = 'A Memed está fora do ar neste momento. Não é problema do Soft nem dos seus dados — tente de novo em alguns minutos.';
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: HEADERS });
 const digitos = (v) => String(v == null ? '' : v).replace(/\D+/g, '');
 const texto = (v, max = 255) => String(v == null ? '' : v).trim().slice(0, max);
@@ -126,6 +128,7 @@ export function createMemedHandler({ env, fetchImpl, getUser }) {
         if (atual.status === 200 && tokenDe(atual.dados)) {
           return json({ ok: true, token: tokenDe(atual.dados), script_url: c.scriptUrl, ambiente: c.ambiente });
         }
+        if (atual.status >= 500) return json({ ok: false, foraDoAr: true, erro: FORA_DO_AR }, 503);
         if (atual.status !== 404) {
           return json({ ok: false, erro: 'A Memed não respondeu como esperado: ' + (detalhe(atual.dados) || 'HTTP ' + atual.status) }, 502);
         }
@@ -139,6 +142,7 @@ export function createMemedHandler({ env, fetchImpl, getUser }) {
             relationships: { especialidade: { data: { type: 'especialidades', id: ESPECIALIDADE_ANESTESIOLOGIA } } },
           },
         });
+        if (novo.status >= 500) return json({ ok: false, foraDoAr: true, erro: FORA_DO_AR }, 503);
         if ((novo.status === 200 || novo.status === 201) && tokenDe(novo.dados)) {
           return json({ ok: true, token: tokenDe(novo.dados), script_url: c.scriptUrl, ambiente: c.ambiente, cadastrado: true });
         }
