@@ -25700,6 +25700,88 @@ await test('Acesso venoso: a janela abre com o horário da punção em destaque,
   await page.close();
 });
 
+await test('Cadastro: nome corrigido continua achável (nome anterior + Nº de cadastro) e sobe para a mesma linha da nuvem', async () => {
+  const page = await novaPagina();
+  const r = await page.evaluate(async () => {
+    const out = {};
+    store.setList('pacientes', []); store.setList('pre', []);
+    const pac = store.save('pacientes', { nome: 'Josimaria Sant', nascimento: '1970-05-04' });
+    store.save('pre', { nome: 'Josimaria Sant', _patientRef: pac._id, data: utils.hojeISO() });
+    const reg = pacientes.registroDe(pac);
+    out.formato = /^P-[2-9A-HJ-NP-Z]{6}$/.test(reg);
+    out.estavel = reg === pacientes.registroDe(store.getById('pacientes', pac._id));
+
+    /* corrige o nome pelo formulário de cadastro */
+    location.hash = '#pacientes'; await new Promise(res => setTimeout(res, 300));
+    pacientes.editar(pac._id);
+    const f = document.getElementById(pacientes.formId);
+    out.campoNumero = f.querySelector('[name="registro"]').value === reg;
+    f.querySelector('[name="nome"]').value = 'Josimaria Santana dos Santos';
+    pacientes.salvar();
+    const salvo = store.getById('pacientes', pac._id);
+    out.nomeNovo = salvo.nome === 'Josimaria Santana dos Santos';
+    out.mesmoNumero = salvo.registro === reg;
+    out.nomeAnterior = (salvo.nomesAnteriores || []).indexOf('Josimaria Sant') >= 0;
+    out.registroRenomeado = store.list('pre')[0].nome === 'Josimaria Santana dos Santos';
+    out.semDuplicar = store.list('pacientes').length === 1;
+
+    /* busca na tela de Pacientes: nome antigo e número */
+    const busca = document.getElementById('pac-f-busca');
+    busca.value = 'josimaria sant'; out.achaAntigo = patientsView.filtrar().length === 1;
+    busca.value = reg.toLowerCase(); out.achaNumero = patientsView.filtrar().length === 1;
+    busca.value = ''; 
+    out.porRegistro = (pacientes.porRegistro(reg.replace('-', '')) || {})._id === pac._id;
+
+    /* busca global (Ctrl K) */
+    buscaGlobal.abrir();
+    const gi = document.getElementById('gs-input');
+    gi.value = 'Josimaria Sant'; buscaGlobal.buscar();
+    out.globalAntigo = /PACIENTES/.test(document.getElementById('gs-results').innerText);
+    gi.value = reg; buscaGlobal.buscar();
+    out.globalNumero = document.getElementById('gs-results').innerText.indexOf('Josimaria Santana dos Santos') >= 0;
+    buscaGlobal.fechar();
+
+    /* nuvem: a correção usa a chave com que a linha nasceu */
+    const urls = [];
+    const salvos = { ctx: cloudRel._capturarContexto, val: cloudRel._contextoValido, tok: cloud._garantirToken,
+      cfg: cloud.config, hdr: cloud._headers, fetch: window.fetch };
+    cloudRel._capturarContexto = () => ({ organizationId: 'org-teste' });
+    cloudRel._contextoValido = () => true;
+    cloud._garantirToken = async () => true;
+    cloud.config = () => ({ url: 'https://nuvem.invalid' });
+    cloud._headers = () => ({});
+    window.fetch = async (u, o) => { urls.push(String(u) + ' ' + ((o && o.method) || 'GET'));
+      return new Response(JSON.stringify([{ id: 'uuid-1', legacy_id: 'nome:josimaria sant', version: 3, nome: 'x', data: {} }]), { status: 200 }); };
+    try {
+      const item = Object.assign({}, store.getById('pacientes', pac._id), { _relVersion: 2, _relLegacy: 'nome:josimaria sant' });
+      await cloudRel.enviarPaciente(item);
+      out.patchNaChaveAntiga = urls.some(u => /PATCH$/.test(u) && u.indexOf('legacy_id=eq.' + encodeURIComponent('nome:josimaria sant')) >= 0);
+      urls.length = 0;
+      /* cadastro antigo sem a chave guardada: descobre a linha pelo documento */
+      const semChave = Object.assign({}, store.getById('pacientes', pac._id), { _relVersion: 2 });
+      delete semChave._relLegacy; delete semChave._relId;
+      await cloudRel.enviarPaciente(semChave);
+      out.descobreLinha = urls.some(u => u.indexOf('data-%3E%3E_id=eq.') >= 0 || u.indexOf('data->>_id=eq.') >= 0) &&
+        urls.some(u => /PATCH$/.test(u) && u.indexOf(encodeURIComponent('nome:josimaria sant')) >= 0);
+      /* registro do paciente renomeado aponta para a linha já existente */
+      const p2 = store.getById('pacientes', pac._id); p2._relId = 'uuid-1'; p2._relOrg = 'org-teste';
+      store.setList('pacientes', [p2]);
+      out.registroUsaLinha = (await cloudRel._garantirPaciente('org-teste', store.list('pre')[0])) === 'uuid-1';
+    } finally {
+      cloudRel._capturarContexto = salvos.ctx; cloudRel._contextoValido = salvos.val; cloud._garantirToken = salvos.tok;
+      cloud.config = salvos.cfg; cloud._headers = salvos.hdr; window.fetch = salvos.fetch;
+    }
+    store.setList('pacientes', []); store.setList('pre', []);
+    return out;
+  });
+  assert(r.formato && r.estavel && r.campoNumero, 'número de cadastro P-XXXXXX estável e no formulário: ' + JSON.stringify(r));
+  assert(r.nomeNovo && r.mesmoNumero && r.nomeAnterior && r.registroRenomeado && r.semDuplicar, 'correção do nome guarda o anterior, mantém o número e vale nos registros: ' + JSON.stringify(r));
+  assert(r.achaAntigo && r.achaNumero && r.porRegistro, 'lista de pacientes acha pelo nome anterior e pelo número: ' + JSON.stringify(r));
+  assert(r.globalAntigo && r.globalNumero, 'busca global acha pelo nome anterior e pelo número: ' + JSON.stringify(r));
+  assert(r.patchNaChaveAntiga && r.descobreLinha && r.registroUsaLinha, 'nuvem: correção sobe para a mesma linha: ' + JSON.stringify(r));
+  await page.close();
+});
+
 await browser.close();
 
 /* Resumo */

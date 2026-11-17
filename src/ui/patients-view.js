@@ -95,7 +95,10 @@ const patientsView = {
     if (plano) list = list.filter(p => patientsView._fmt('semAcento', p.plano) === patientsView._fmt('semAcento', plano));
     const qDig = patientsView._fmt('soDigitos', q);
     if (q) list = list.filter(p => {
-      const blob = (p.nome || '') + ' ' + (p.cpf || '') + ' ' + (p.plano || '') + ' ' + (p.carteirinha || '');
+      /* nomes anteriores e número de cadastro também acham o paciente */
+      const nomes = (typeof pacientes.todosOsNomes === 'function') ? pacientes.todosOsNomes(p) : [p.nome || ''];
+      const reg = (typeof pacientes.registroDe === 'function') ? pacientes.registroDe(p) : '';
+      const blob = nomes.join(' ') + ' ' + (p.cpf || '') + ' ' + (p.plano || '') + ' ' + (p.carteirinha || '') + ' ' + reg + ' ' + reg.replace('-', '');
       /* CPF com ou sem ponto e traço: 12345678909 acha 123.456.789-09 */
       return patientsView._fmt('contem', blob, q) || (qDig.length >= 4 && patientsView._fmt('soDigitos', p.cpf).indexOf(qDig) >= 0);
     });
@@ -127,7 +130,7 @@ const patientsView = {
     const excedente = listaCompleta.length - list.length;
     tbody.innerHTML = list.map(p => `
       <tr>
-        <td data-label="Nome"><strong>${utils.escapeHTML(p.nome || '')}</strong>${(p.apartamento === true || p.apartamento === '1' || p.apartamento === 1) ? ' <span style="font-size:.66rem;background:#e8f1fa;color:#1c64a9;padding:2px 7px;border-radius:10px;font-weight:600;white-space:nowrap">🏨 Apto</span>' : ''}</td>
+        <td data-label="Nome"><strong>${utils.escapeHTML(p.nome || '')}</strong>${(typeof pacientes.registroDe === 'function' && pacientes.registroDe(p)) ? ' <small class="pac-registro" style="font-family:ui-monospace,monospace;color:var(--text-mute);white-space:nowrap">' + utils.escapeHTML(pacientes.registroDe(p)) + '</small>' : ''}${(Array.isArray(p.nomesAnteriores) && p.nomesAnteriores.length) ? '<br><small style="color:var(--text-mute)">antes: ' + utils.escapeHTML(p.nomesAnteriores.join('; ')) + '</small>' : ''}${(p.apartamento === true || p.apartamento === '1' || p.apartamento === 1) ? ' <span style="font-size:.66rem;background:#e8f1fa;color:#1c64a9;padding:2px 7px;border-radius:10px;font-weight:600;white-space:nowrap">🏨 Apto</span>' : ''}</td>
         <td data-label="CPF">${utils.escapeHTML(patientsView._fmt('formatarCpf', p.cpf || ''))}</td>
         <td data-label="Nascimento">${utils.formatarData(p.nascimento)}</td>
         <td data-label="Plano">${utils.escapeHTML(p.plano || '')}</td>

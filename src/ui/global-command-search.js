@@ -83,6 +83,11 @@
     },
     fechar: function(){ document.getElementById('gs-overlay').classList.remove('on'); },
     acao: function(i){ buscaGlobal.fechar(); acaoAtual[i].go(); },
+    abrirPac: function(id){
+      buscaGlobal.fechar();
+      try { ui.navegar('pacientes'); setTimeout(function(){ try { pacientes.editar(id); } catch(e){} }, 150); }
+      catch(e){ location.hash = '#pacientes'; }
+    },
     abrirReg: function(mod, id){
       buscaGlobal.fechar();
       try { dashboard._abrirRegistro(mod, id); } catch(e){ location.hash = '#'+mod; }
@@ -99,6 +104,27 @@
         }).join('');
       }
       if (termo && termo.length >= 2) {
+        /* CADASTRO: pelo nome atual, por um nome anterior (correção) ou
+           pelo número de cadastro P-XXXXXX */
+        try {
+          var termoReg = termo.replace(/[^0-9a-z]/g, '');
+          var pacs = (pacientes.list() || []).filter(function(p){
+            var nomes = pacientes.todosOsNomes(p);
+            var reg = plano(pacientes.registroDe(p));
+            return plano(nomes.join(' | ')).includes(termo) ||
+              (termoReg.length >= 4 && reg.replace(/[^0-9a-z]/g, '').includes(termoReg));
+          }).slice(0, 8);
+          if (pacs.length) {
+            html += '<div class="gs-h">PACIENTES · '+pacs.length+'</div>' + pacs.map(function(p){
+              var ant = (p.nomesAnteriores || []).filter(Boolean);
+              return '<div class="gs-item" onclick="buscaGlobal.abrirPac('+utils.jsArg(p._id || '')+')">'
+                + '<span class="gs-ic">👤</span><span><div class="gs-nome">'+esc(p.nome || '(sem nome)')
+                + ' <span style="font-weight:400;opacity:.6;font-family:ui-monospace,monospace">· '+esc(pacientes.registroDe(p))+'</span></div>'
+                + (ant.length ? '<div class="gs-det">antes: '+esc(ant.join('; '))+'</div>' : '')
+                + '</span></div>';
+            }).join('');
+          }
+        } catch(e){}
         var res = [];
         MODS.forEach(function(m){
           var lista = [];

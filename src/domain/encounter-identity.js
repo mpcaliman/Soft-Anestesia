@@ -104,7 +104,34 @@ window.SoftEncounterIdentity = (function () {
     return organization && key ? organization + '|' + key : null;
   }
 
+  /* NÚMERO DE CADASTRO DO PACIENTE.
+     Código curto e estável (P-7K3Q9P) calculado do identificador interno do
+     cadastro: o mesmo em todos os aparelhos, sem depender de sequência no
+     banco. Alfabeto sem 0/O e 1/I para não haver confusão ao ditar. */
+  const REGISTRY_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  function patientRegistryCode(seed) {
+    const text = String(seed == null ? '' : seed);
+    if (!text) return '';
+    let h1 = 0x811c9dc5, h2 = 0x9e3779b9;
+    for (let i = 0; i < text.length; i++) {
+      const c = text.charCodeAt(i);
+      h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
+      h2 = Math.imul(h2 ^ c, 0x85ebca6b) >>> 0;
+      h2 = (h2 ^ (h2 >>> 13)) >>> 0;
+    }
+    const n = (h1 ^ Math.imul(h2, 0xc2b2ae35)) >>> 0;
+    let out = '';
+    let v = n;
+    for (let i = 0; i < 6; i++) { out += REGISTRY_ALPHABET[v & 31]; v = Math.floor(v / 32); }
+    return 'P-' + out;
+  }
+  function isRegistryCode(value) {
+    return /^P-[2-9A-HJ-NP-Z]{6}$/.test(String(value || ''));
+  }
+
   return Object.freeze({
+    patientRegistryCode,
+    isRegistryCode,
     normalizeName,
     digits,
     isoDate,
