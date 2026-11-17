@@ -889,15 +889,31 @@ ${TAG_CLOSE_HTML}`;
      pendente. Isso é para o operador — o paciente e o hospital recebem o
      documento, com as correções já no corpo. Tudo marcado `.so-tela` sai da
      impressão, do PDF e do texto do SP Data. */
-  _folhaSemTela(ppp) {
+  /* A VIA DO PACIENTE SAI COMO O ORIGINAL. As correções já estão nos
+     campos; os quadros de retificação (quem, quando, o que mudou) e o selo
+     "documento retificado" são da via de prontuário. Na impressão e no PDF
+     eles só saem com "Incluir retificações (uso interno)" ligado. O backup
+     automático e o texto para o SP Data são prontuário: levam sempre. */
+  incluirRetificacoes: false,
+  RETIF_SELETOR: '.pp-retificacao-bloco, .pp-retificacao-nota, .pp-retificacao',
+  alternarRetificacoes(on) {
+    printPreview.incluirRetificacoes = !!on;
+    const ppp = document.getElementById('ppp');
+    if (ppp) ppp.classList.toggle('pp-sem-retif', !printPreview.incluirRetificacoes);
+    const cb = document.getElementById('ppt-retif');
+    if (cb) cb.checked = printPreview.incluirRetificacoes;
+  },
+  _folhaSemTela(ppp, interno) {
     if (!ppp || typeof ppp.cloneNode !== 'function') return ppp;
     const c = ppp.cloneNode(true);
     c.querySelectorAll('.so-tela').forEach(el => el.remove());
+    if (!interno && !printPreview.incluirRetificacoes) c.querySelectorAll(printPreview.RETIF_SELETOR).forEach(el => el.remove());
+    c.classList.remove('pp-sem-retif');
     return c;
   },
   _htmlDaFolha(ppp) { return printPreview._folhaSemTela(ppp).innerHTML; },
-  _gerarDocDeTexto(J, pppTela) {
-    const ppp = printPreview._folhaSemTela(pppTela);
+  _gerarDocDeTexto(J, pppTela, interno) {
+    const ppp = printPreview._folhaSemTela(pppTela, interno);
     const doc = new J({ unit: 'mm', format: 'a4' });
     const W = 210, H = 297, M = 16;
     const contentW = W - M * 2;

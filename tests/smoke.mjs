@@ -25045,8 +25045,21 @@ await test('Ficha retificada: imprime a assinatura de cada retificação com o r
     /* PDF de texto (☁️ Salvar PDF na nuvem): o bloco vem junto */
     {
       const J = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
-      const pdf = printPreview._gerarDocDeTexto(J, document.getElementById('ppp')).output();
+      /* via interna (prontuário/backup): com as retificações */
+      const pdf = printPreview._gerarDocDeTexto(J, document.getElementById('ppp'), true).output();
       out.pdf = /RETIFICA/.test(pdf) && /Cefazolina: corrigida para 1 g EV/.test(pdf) && /Dr\. Corretor/.test(pdf);
+      /* via do paciente (padrão): sai como o original, já com o valor corrigido */
+      const pac = printPreview._gerarDocDeTexto(J, document.getElementById('ppp')).output();
+      out.pdfPaciente = !/RETIFICA..O 1/.test(pac) && !/Dr\. Corretor/.test(pac) && /Herniorrafia/.test(pac);
+    }
+    {
+      const folha = printPreview._htmlDaFolha(document.getElementById('ppp'));
+      out.folhaPaciente = !/RETIFICAÇÃO 1/.test(folha) && !/Documento retificado/.test(folha) && !/0,5 g/.test(folha);
+      printPreview.alternarRetificacoes(true);
+      out.folhaInterna = /RETIFICAÇÃO 1/.test(printPreview._htmlDaFolha(document.getElementById('ppp')));
+      out.telaMostra = !document.getElementById('ppp').classList.contains('pp-sem-retif');
+      printPreview.alternarRetificacoes(false);
+      out.telaEsconde = document.getElementById('ppp').classList.contains('pp-sem-retif');
     }
     printPreview.fechar();
     /* versão original */
@@ -25083,6 +25096,8 @@ await test('Ficha retificada: imprime a assinatura de cada retificação com o r
   assert(r.vigente && r.depoisDoCorpo && r.semValorAntigo, 'a impressão traz a retificação, quem corrigiu e o resumo, depois do corpo, sem o valor substituído');
   assert(r.original && r.nomeOriginal && r.limpou, 'a versão original imprime com aviso e nome próprio, e não fica presa');
   assert(r.pdf && r.pdfOriginal, 'no PDF da nuvem também: retificação com resumo e quem corrigiu; a original com o aviso');
+  assert(r.pdfPaciente && r.folhaPaciente, 'via do paciente (padrão): sem os quadros de retificação, já com o valor corrigido: ' + JSON.stringify(r));
+  assert(r.folhaInterna && r.telaMostra && r.telaEsconde, '"Incluir retificações (uso interno)" traz os quadros de volta, na tela e na folha');
   assert(r.semHttp && r.aviso, 'erro de versões diferentes vira aviso com Recarregar');
   await page.close();
 });
