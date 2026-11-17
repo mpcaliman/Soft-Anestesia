@@ -98,7 +98,16 @@ const cloudRel = {
     if (!base.telefone && row.telefone) base.telefone = row.telefone;
     if (!base.email && row.email) base.email = row.email;
     if (!base.sexo && row.sexo) base.sexo = row.sexo;
+    /* Cadastro criado sem documento (origem automática): o número de
+       cadastro vem do id da nuvem, igual em todos os aparelhos. */
+    if (!base._id && !base.registro && row.id) {
+      try { base.registro = window.SoftEncounterIdentity.patientRegistryCode(String(row.id)); } catch (e) {}
+    }
     if (!base._id) base._id = 'rel_' + (row.id || '').toString().slice(0, 8) + utils.uid().slice(-4);
+    /* A linha da nuvem é endereçada pela chave com que nasceu. Guardá-la
+       permite corrigir o nome sem "perder" o cadastro na nuvem. */
+    if (row.id) base._relId = row.id;
+    if (row.legacy_id) base._relLegacy = row.legacy_id;
     if (row.updated_at) base._relUpdatedAt = row.updated_at;
     if (row.version != null) base._relVersion = Number(row.version);
     if (row.updated_by) base._relUpdatedBy = row.updated_by;
@@ -208,7 +217,7 @@ const cloudRel = {
        a última barreira defensiva; enviarRegistro faz o upload obrigatório
        antes de chegar aqui. */
     try { if (typeof prontuario !== 'undefined') dados = prontuario.sanitizarParaNuvem(dados); } catch (e) {}
-    ['_relVersion','_relUpdatedAt','_relUpdatedBy','_relOrg','_relId','_relEncounterId',
+    ['_relVersion','_relUpdatedAt','_relUpdatedBy','_relOrg','_relId','_relEncounterId','_relLegacy',
       'last_operation_id','last_operation_checksum'].forEach(k => { delete dados[k]; });
     return dados;
   },
@@ -353,6 +362,7 @@ const cloudRel = {
     if (row.updated_at) meta._relUpdatedAt = row.updated_at;
     if (row.updated_by) meta._relUpdatedBy = row.updated_by;
     if (org || row.organization_id) meta._relOrg = org || row.organization_id;
+    if (mod === 'pacientes' && row.legacy_id) meta._relLegacy = row.legacy_id;
     Object.assign(item, meta);
     try {
       const lista = store.list(mod);
@@ -378,10 +388,32 @@ const cloudRel = {
 
   /* id (uuid) de um paciente na nuvem pela chave de nome; cria minimamente se
      ainda não existir (para o agendamento/registro poder referenciá-lo). */
+  /* O cadastro local já conhece a sua linha na nuvem? Um registro preso ao
+     cadastro (por vínculo explícito) usa essa linha mesmo depois de o nome
+     ser corrigido — a chave antiga de nome deixaria de achá-la e criaria um
+     segundo paciente. Por nome só vale quando há UM cadastro com a chave. */
+  _pacienteLocalNaNuvem(org, item, key) {
+    try {
+      const lista = store.list('pacientes') || [];
+      const daOrg = p => p && p._relId && (!p._relOrg || p._relOrg === org);
+      const ref = item && (item._patientRef || item._paciente_id);
+      if (ref) {
+        const p = lista.find(x => x && (x._id === ref || x._patientRef === ref));
+        if (daOrg(p)) return p._relId;
+      }
+      if (!key) return null;
+      const iguais = lista.filter(p => daOrg(p) &&
+        (p._relLegacy === key || migracaoFase4._patKey(migracaoFase4._ident(p)) === key));
+      return iguais.length === 1 ? iguais[0]._relId : null;
+    } catch (e) { return null; }
+  },
+
   async _garantirPaciente(org, item) {
     const id = migracaoFase4._ident(item);
     const key = migracaoFase4._patKey(id);
     if (!key) return null;
+    const local = cloudRel._pacienteLocalNaNuvem(org, item, key);
+    if (local) return local;
     const cacheKey = org + ':' + key;
     if (cloudRel._cachePac[cacheKey]) return cloudRel._cachePac[cacheKey];
     const existente = await cloudRel._lerAtualTab('patients', org, key, 'id,legacy_id,version');
@@ -421,6 +453,19 @@ const cloudRel = {
     } catch (e) { return null; }
   },
 
+  /* Chave (legacy_id) da linha que já guarda este cadastro na nuvem — só
+     quando há exatamente uma; na dúvida devolve vazio e nada é desviado. */
+  async _chaveDaLinha(org, filtro) {
+    try {
+      const c = cloud.config();
+      const r = await fetch(c.url + '/rest/v1/patients?organization_id=eq.' + encodeURIComponent(org) +
+        '&deleted_at=is.null&' + filtro + '&select=legacy_id&limit=2', { headers: cloud._headers(true) });
+      if (!r.ok) return '';
+      const rows = await r.json().catch(() => []);
+      return Array.isArray(rows) && rows.length === 1 && rows[0] && rows[0].legacy_id ? String(rows[0].legacy_id) : '';
+    } catch (e) { return ''; }
+  },
+
   /* Grava paciente com compare-and-swap por version. */
   async enviarPaciente(item, opts = {}) {
     const contexto = cloudRel._capturarContexto();
@@ -430,7 +475,16 @@ const cloudRel = {
     if (!cloudRel._contextoValido(contexto, org)) return { ok: false, motivo: 'contexto_trocado' };
     if (item._relOrg && item._relOrg !== org) return { ok: false, motivo: 'outra_clinica', outraClinica: item._relOrg };
     const id = migracaoFase4._ident(item);
-    const key = migracaoFase4._patKey(id);
+    /* NOME CORRIGIDO NÃO É OUTRO PACIENTE.
+       A linha da nuvem continua endereçada pela chave com que nasceu. Usar a
+       chave do nome NOVO não achava linha nenhuma: a correção nunca subia e
+       os outros aparelhos seguiam vendo o nome antigo. */
+    let key = item._relLegacy || '';
+    if (!key && cloudRel._versao(item)) {
+      if (item._relId) key = await cloudRel._chaveDaLinha(org, 'id=eq.' + encodeURIComponent(item._relId));
+      if (!key && item._id) key = await cloudRel._chaveDaLinha(org, 'data->>_id=eq.' + encodeURIComponent(item._id));
+    }
+    if (!key) key = migracaoFase4._patKey(id);
     if (!key) return { ok: false, motivo: 'sem_nome' };
 
     const row = {

@@ -132,6 +132,8 @@ declare global {
       isoDate(value: unknown): SoftAnesthesia.ISODate | null;
       validCpf(value: unknown): boolean;
       fromRecord(value: object): SoftAnesthesia.PatientIdentity;
+      patientRegistryCode(seed: string): string;
+      isRegistryCode(value: string): boolean;
       legacyPatientKey(value: SoftAnesthesia.PatientIdentity): string | null;
       strongPatientKey(value: SoftAnesthesia.PatientIdentity): string | null;
       procedureText(value: object): string;

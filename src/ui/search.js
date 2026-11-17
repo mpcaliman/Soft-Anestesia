@@ -405,6 +405,8 @@ const historico = {
     const quando = (d) => { try { return d ? new Date(d).toLocaleString('pt-BR') : ''; } catch (x) { return ''; } };
     const par = (rot, val) => val ? '<span style="margin-right:14px"><small style="color:var(--text-mute)">' + rot + '</small> ' + e(val) + '</span>' : '';
     return '<div style="font-size:.78rem;margin-top:8px;line-height:1.9">' +
+      par('Nº de cadastro', (typeof pacientes.registroDe === 'function') ? pacientes.registroDe(p) : '') +
+      par('Nomes anteriores', Array.isArray(p.nomesAnteriores) ? p.nomesAnteriores.join('; ') : '') +
       par('CPF', p.cpf) + par('Nascimento', utils.formatarData(p.nascimento)) +
       par('Plano', p.plano) + par('Carteirinha', p.carteirinha) + par('Telefone', p.telefone) +
       par('Cadastrado em', quando(p._createdAt)) + par('Atualizado em', quando(p._updatedAt)) +
@@ -569,7 +571,11 @@ const historico = {
     };
     if (!contexto) {
       (store.list('pacientes') || []).forEach(p => {
-        if (norm(p.nome || '').includes(nq)) registrar(p, p.nome || '', 'cadastro', p._id || p._patientRef || '');
+        /* nome atual, nome anterior (correção) ou número de cadastro */
+        let nomes = [p.nome || ''], reg = '';
+        try { nomes = pacientes.todosOsNomes(p); reg = norm(pacientes.registroDe(p)); } catch (e) {}
+        if (nomes.some(n => norm(n).includes(nq)) || (reg && nq.length >= 4 && reg.replace(/[^0-9a-z]/g, '').includes(nq.replace(/[^0-9a-z]/g, ''))))
+          registrar(p, p.nome || '', 'cadastro', p._id || p._patientRef || '');
       });
       Object.keys(historico.MODS_PRONT).forEach(mod => {
         (store.list(mod) || []).forEach(it => {

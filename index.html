@@ -4912,7 +4912,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
     </button>
   </div>
   <div class="sidebar-footer">
-    v7.1 · build <b id="build-tag">2026-11-17a</b><br>
+    v7.1 · build <b id="build-tag">2026-11-17b</b><br>
     <span style="opacity:.6">Anestesiologia</span>
   </div>
 </aside>
@@ -9714,6 +9714,7 @@ html[data-theme="dark"] .fin-tipo.consulta_pre   { background: #2b2545; color: #
           <input type="hidden" name="id">
           <div class="grid">
             <div class="field col-6 required"><label>Nome completo <span class="req">*</span></label><input type="text" name="nome" data-required></div>
+            <div class="field col-3"><label>Nº de cadastro</label><input type="text" name="registro" readonly tabindex="-1" placeholder="gerado ao salvar" title="Número fixo do paciente — não muda quando o nome é corrigido" style="font-family:ui-monospace,monospace;letter-spacing:.04em;background:var(--surface-alt)"></div>
             <div class="field col-3"><label>Data de nascimento</label><input type="date" name="nascimento"></div>
             <div class="field col-3"><label>Sexo</label>
               <select name="sexo"><option value="">—</option><option>Masculino</option><option>Feminino</option><option>Outro</option></select>
@@ -46695,6 +46696,34 @@ const pacientes = {
     if (typeof item.paciente === 'string') return item.paciente;
     return item.nome || '';
   },
+  /* NÚMERO DE CADASTRO — P-XXXXXX. Fica gravado no cadastro; os antigos
+     sem número recebem o calculado do próprio id, igual em todo aparelho. */
+  registroDe(p) {
+    if (!p) return '';
+    const I = window.SoftEncounterIdentity;
+    if (I.isRegistryCode(p.registro)) return p.registro;
+    return p._id ? I.patientRegistryCode(String(p._id)) : '';
+  },
+  /* Nome atual + nomes que o cadastro já teve (correções) */
+  todosOsNomes(p) {
+    const lst = [p && p.nome].concat(Array.isArray(p && p.nomesAnteriores) ? p.nomesAnteriores : []);
+    return lst.filter(n => typeof n === 'string' && n.trim());
+  },
+  _guardarNomeAnterior(p, antigo) {
+    const a = String(antigo || '').trim();
+    if (!p || !a) return;
+    const norm = s => utils.semAcento(s || '');
+    const lst = Array.isArray(p.nomesAnteriores) ? p.nomesAnteriores.slice() : [];
+    if (norm(a) === norm(p.nome) || lst.some(n => norm(n) === norm(a))) return;
+    lst.push(a);
+    p.nomesAnteriores = lst.slice(-10);
+  },
+  /* Acha o cadastro pelo número (com ou sem "P-", maiúscula ou não) */
+  porRegistro(texto) {
+    const q = String(texto || '').toUpperCase().replace(/[^0-9A-Z]/g, '').replace(/^P(?=[2-9A-Z]{6}$)/, '');
+    if (q.length !== 6) return null;
+    return (pacientes.list() || []).find(p => pacientes.registroDe(p) === 'P-' + q) || null;
+  },
   renomear(antigo, novo, opts = {}) {
     const norm = (s) => (typeof linker !== 'undefined' && linker._normNome) ? linker._normNome(s || '') : String(s || '').toLowerCase().trim();
     const patientRef = opts.patientRef || '';
@@ -46714,6 +46743,8 @@ const pacientes = {
     const pacs = store.list('pacientes') || [];
     pacs.forEach(p => {
       if (!corresponde(p)) return;
+      pacientes._guardarNomeAnterior(p, p.nome && norm(p.nome) !== norm(novo) ? p.nome : antigo);
+      if (!window.SoftEncounterIdentity.isRegistryCode(p.registro)) p.registro = pacientes.registroDe(p);
       p.nome = novo;
       p._patientKey = novaChave;
       if (patientRef) p._patientRef = patientRef;
@@ -46935,6 +46966,13 @@ const pacientes = {
         const item = store.getById('pacientes', id);
         if (item) {
           utils.fillForm(pacientes.formId, item);
+          const regEl = document.querySelector(`#${pacientes.formId} [name="registro"]`);
+          if (regEl) {
+            regEl.value = pacientes.registroDe(item);
+            const ant = Array.isArray(item.nomesAnteriores) ? item.nomesAnteriores : [];
+            regEl.title = 'Número fixo do paciente — não muda quando o nome é corrigido' +
+              (ant.length ? '\nNomes anteriores: ' + ant.join('; ') : '');
+          }
           const idEl = document.querySelector(`#${pacientes.formId} [name="id"]`);
           if (idEl) idEl.value = item._id;
           const tit = document.getElementById('pacientes-form-titulo');
@@ -47009,6 +47047,23 @@ const pacientes = {
       }
       delete data.id;
 
+      /* Número de cadastro e nomes anteriores não estão no formulário como
+         campos editáveis: vêm do cadastro gravado. Nome corrigido vira nome
+         anterior — a busca continua achando o paciente pelos dois. */
+      const anterior = data._id ? store.getById('pacientes', data._id) : null;
+      let nomeAntigo = '';
+      if (anterior) {
+        data.registro = pacientes.registroDe(anterior);
+        if (Array.isArray(anterior.nomesAnteriores)) data.nomesAnteriores = anterior.nomesAnteriores.slice();
+        if (anterior.nome && utils.semAcento(anterior.nome) !== utils.semAcento(nome)) {
+          nomeAntigo = anterior.nome;
+          pacientes._guardarNomeAnterior(data, nomeAntigo);
+        }
+      } else {
+        data.registro = window.SoftEncounterIdentity.patientRegistryCode(utils.uid() + Date.now());
+      }
+      const chaveAntiga = anterior ? (linker._chavePaciente(anterior) || '') : '';
+
       /* Limpa state de invalid */
       form.querySelectorAll('.field.invalid').forEach(fi => fi.classList.remove('invalid'));
 
@@ -47048,6 +47103,16 @@ const pacientes = {
       }
 
       store.notificarNuvem(saved, 'Paciente "' + nome + '"');
+
+      /* nome corrigido no cadastro vale também nos registros dele */
+      if (nomeAntigo) {
+        try {
+          const r = pacientes.renomear(nomeAntigo, nome, {
+            patient: saved, patientRef: saved._id, patientKey: chaveAntiga
+          });
+          if (r.registros) toast('✅ Nome atualizado no cadastro e em ' + r.registros + ' registro(s). O nome anterior continua valendo na busca.');
+        } catch (e) {}
+      }
 
       /* Fecha o card e re-renderiza */
       const card = document.getElementById(pacientes.cardId);
@@ -47264,6 +47329,9 @@ const pacientes = {
           const remotoMaisNovo = vr && vl ? vr > vl
             : vr && !vl ? true
               : cloudRel._quando(r.item) > cloudRel._quando(loc);
+          /* endereço da linha na nuvem: sempre vale o da nuvem — é o que
+             permite à correção de nome pendente encontrar a linha certa */
+          ['_relId','_relLegacy'].forEach(k => { if (r.item[k]) loc[k] = r.item[k]; });
           const pendente = cloudRel._temPendente('pacientes', loc._id) || (!vl && !loc._relUpdatedAt);
           if (remotoMaisNovo && pendente) {
             /* CONFLITO PRESSUPÕE DIVERGÊNCIA — a mesma regra do pull dos

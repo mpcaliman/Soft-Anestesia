@@ -610,7 +610,7 @@ const store = {
            devem sobreviver ao save. O compare-and-swap depende da versão, do
            ambiente e do autor confirmados pelo banco — preservar só o horário
            faria uma ficha voltar a parecer "sem versão" a cada edição. */
-        ['_relVersion','_relUpdatedAt','_relUpdatedBy','_relOrg'].forEach(k => {
+        ['_relVersion','_relUpdatedAt','_relUpdatedBy','_relOrg','_relId','_relLegacy'].forEach(k => {
           if (prev[k] != null && (item[k] == null || item[k] === '')) item[k] = prev[k];
         });
         /* Identidade e caso vazios podem ser uma limpeza intencional após a
